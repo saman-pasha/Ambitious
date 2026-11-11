@@ -1,0 +1,16 @@
+# tests/encoding/pages.txt -- written by tests/encoding/pages.py: a name, and the page tests/integ/encoding.sh loads
+enc-windows-1252 tests/pages/enc-windows-1252.html
+enc-windows-1251 tests/pages/enc-windows-1251.html
+enc-shift_jis tests/pages/enc-shift_jis.html
+enc-euc-jp tests/pages/enc-euc-jp.html
+enc-iso-2022-jp tests/pages/enc-iso-2022-jp.html
+enc-euc-kr tests/pages/enc-euc-kr.html
+enc-gb18030 tests/pages/enc-gb18030.html
+enc-gbk tests/pages/enc-gbk.html
+enc-big5 tests/pages/enc-big5.html
+enc-utf-16le tests/pages/enc-utf-16le.html
+enc-utf-16be tests/pages/enc-utf-16be.html
+enc-utf-8-undeclared tests/pages/enc-utf-8-undeclared.html
+enc-replacement tests/pages/enc-replacement.html
+enc-utf-8-errors tests/pages/enc-utf-8-errors.html
+enc-http-koi8-r data:text/html;charset=KOI8-R,%3C%21DOCTYPE%20html%3E%3Ctitle%3E%EB%EF%E98-%F2%3C%2Ftitle%3E%3Cp%3E%FB%C9%D2%CF%CB%C1%D1%20%DC%CC%C5%CB%D4%D2%C9%C6%C9%CB%C1%C3%C9%D1%20%C0%D6%CE%D9%C8%20%C7%D5%C2%C5%D2%CE%C9%CA%20%C4%C1%D3%D4%20%CD%CF%DD%CE%D9%CA%20%D4%CF%CC%DE%CF%CB%20%D0%CF%C4%DF%A3%CD%D5%20%D3%C5%CC%D8%D3%CB%CF%C7%CF%20%C8%CF%DA%D1%CA%D3%D4%D7%C1.%3C%2Fp%3E

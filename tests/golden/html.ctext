@@ -1,14 +1,17 @@
-/* Ambitious: the interface of module html, generated from contracts/html.pl (fnv1a32:f359078d:3536). Do not edit. */
+/* Ambitious: the interface of module html, generated from contracts/html.pl (fnv1a32:ad2301ee:3921). Do not edit. */
 typedef enum html_status { HTML_OK, HTML_STALE_HANDLE, HTML_WRONG_KIND, HTML_DOM_REFUSED, HTML_BAD_REQUEST, HTML_NOT_REQUESTABLE, HTML_STALE_REVISION } html_status;
 typedef enum html_token_kind { HTML_TOKEN_KIND_DOCTYPE, HTML_TOKEN_KIND_START_TAG, HTML_TOKEN_KIND_END_TAG, HTML_TOKEN_KIND_COMMENT, HTML_TOKEN_KIND_CHARACTERS, HTML_TOKEN_KIND_EOF } html_token_kind;
 typedef enum html_error_code { HTML_ERROR_CODE_UNEXPECTED_NULL_CHARACTER, HTML_ERROR_CODE_UNEXPECTED_QUESTION_MARK_INSTEAD_OF_TAG_NAME, HTML_ERROR_CODE_EOF_IN_TAG, HTML_ERROR_CODE_EOF_BEFORE_TAG_NAME, HTML_ERROR_CODE_INVALID_FIRST_CHARACTER_OF_TAG_NAME, HTML_ERROR_CODE_MISSING_END_TAG_NAME, HTML_ERROR_CODE_UNEXPECTED_EQUALS_SIGN_BEFORE_ATTRIBUTE_NAME, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_ATTRIBUTE_NAME, HTML_ERROR_CODE_MISSING_ATTRIBUTE_VALUE, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_UNQUOTED_ATTRIBUTE_VALUE, HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_ATTRIBUTES, HTML_ERROR_CODE_UNEXPECTED_SOLIDUS_IN_TAG, HTML_ERROR_CODE_EOF_IN_COMMENT, HTML_ERROR_CODE_ABRUPT_CLOSING_OF_EMPTY_COMMENT, HTML_ERROR_CODE_NESTED_COMMENT, HTML_ERROR_CODE_INCORRECTLY_CLOSED_COMMENT, HTML_ERROR_CODE_INCORRECTLY_OPENED_COMMENT, HTML_ERROR_CODE_EOF_IN_DOCTYPE, HTML_ERROR_CODE_MISSING_DOCTYPE_NAME, HTML_ERROR_CODE_MISSING_WHITESPACE_BEFORE_DOCTYPE_NAME, HTML_ERROR_CODE_INVALID_CHARACTER_SEQUENCE_AFTER_DOCTYPE_NAME, HTML_ERROR_CODE_MISSING_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_MISSING_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_ABRUPT_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_ABRUPT_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_AFTER_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_PUBLIC_KEYWORD, HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_SYSTEM_KEYWORD, HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS, HTML_ERROR_CODE_CDATA_IN_HTML_CONTENT, HTML_ERROR_CODE_MISSING_SEMICOLON_AFTER_CHARACTER_REFERENCE, HTML_ERROR_CODE_UNKNOWN_NAMED_CHARACTER_REFERENCE, HTML_ERROR_CODE_ABSENCE_OF_DIGITS_IN_NUMERIC_CHARACTER_REFERENCE, HTML_ERROR_CODE_NULL_CHARACTER_REFERENCE, HTML_ERROR_CODE_CHARACTER_REFERENCE_OUTSIDE_UNICODE_RANGE, HTML_ERROR_CODE_SURROGATE_CHARACTER_REFERENCE, HTML_ERROR_CODE_NONCHARACTER_CHARACTER_REFERENCE, HTML_ERROR_CODE_CONTROL_CHARACTER_REFERENCE, HTML_ERROR_CODE_DUPLICATE_ATTRIBUTE, HTML_ERROR_CODE_END_TAG_WITH_ATTRIBUTES, HTML_ERROR_CODE_END_TAG_WITH_TRAILING_SOLIDUS, HTML_ERROR_CODE_EOF_IN_SCRIPT_HTML_COMMENT_LIKE_TEXT, HTML_ERROR_CODE_NON_VOID_HTML_ELEMENT_START_TAG_WITH_TRAILING_SOLIDUS, HTML_ERROR_CODE_TREE_CONSTRUCTION } html_error_code;
+typedef enum html_encoding_source { HTML_ENCODING_SOURCE_BOM, HTML_ENCODING_SOURCE_HTTP, HTML_ENCODING_SOURCE_META, HTML_ENCODING_SOURCE_XML, HTML_ENCODING_SOURCE_DETECTED, HTML_ENCODING_SOURCE_DEFAULT } html_encoding_source;
 typedef enum html_op { HTML_OP_TOKENIZE, HTML_OP_BUILD, HTML_OP_PARSE, HTML_OP_PARSE_FRAGMENT } html_op;
 typedef struct html_token_h { uint32_t doc, index, gen; } html_token_h;
 typedef struct html_tattr_h { uint32_t doc, index, gen; } html_tattr_h;
 typedef struct html_error_h { uint32_t doc, index, gen; } html_error_h;
+typedef struct html_encoding_h { uint32_t doc, index, gen; } html_encoding_h;
 typedef struct html_token { uint32_t gen, live, free_next; html_token_kind kind; amb_span name; amb_span data; uint32_t first_attr; uint32_t last_attr; uint8_t self_closing; uint8_t force_quirks; amb_span public_id; amb_span system_id; uint8_t ids; uint32_t line; uint32_t col; } html_token;
 typedef struct html_tattr { uint32_t gen, live, free_next; uint32_t token; amb_span name; amb_span value; uint32_t next; } html_tattr;
 typedef struct html_error { uint32_t gen, live, free_next; html_error_code code; uint32_t line; uint32_t col; amb_span detail; } html_error;
+typedef struct html_encoding { uint32_t gen, live, free_next; amb_span name; html_encoding_source source; uint8_t ascii; uint32_t errors; } html_encoding;
 typedef struct html_store_tag { char unused; } html_store_tag;
 typedef store<html_store_tag> html_parser;
 extern const char html_fingerprint[];
@@ -16,6 +19,7 @@ const char *html_status_name(html_status x);
 const char *html_op_name(html_op x);
 const char *html_token_kind_name(html_token_kind x);
 const char *html_error_code_name(html_error_code x);
+const char *html_encoding_source_name(html_encoding_source x);
 void html_init(html_parser *d, uint32_t id);
 uint64_t html_revision(const html_parser *d);
 html_status html_tokenize(html_parser *d, const char *src, size_t src_len);
@@ -118,8 +122,19 @@ const char *html_error_code_name(html_error_code x) {
     }
     return "?";
 }
+const char *html_encoding_source_name(html_encoding_source x) {
+    switch (x) {
+    case HTML_ENCODING_SOURCE_BOM: return "bom";
+    case HTML_ENCODING_SOURCE_HTTP: return "http";
+    case HTML_ENCODING_SOURCE_META: return "meta";
+    case HTML_ENCODING_SOURCE_XML: return "xml";
+    case HTML_ENCODING_SOURCE_DETECTED: return "detected";
+    case HTML_ENCODING_SOURCE_DEFAULT: return "default";
+    }
+    return "?";
+}
 
-const char html_fingerprint[] = "fnv1a32:f359078d:3536";
+const char html_fingerprint[] = "fnv1a32:ad2301ee:3921";
 void html_init(html_parser *d, uint32_t id) {
     if (d->token_len != 0) abort();
     d->id = id;
@@ -222,6 +237,11 @@ void html_export(const html_parser *d, FILE *out) {
         if (!d->error[i].live) continue;
         if (1) { fputs("html_error(", out); amb_put_handle(out, "err", d->id, i, d->error[i].gen); fputs(",", out); fputs(html_error_code_name(d->error[i].code), out); fputs(",", out); fprintf(out, "%lld", (long long)d->error[i].line); fputs(",", out); fprintf(out, "%lld", (long long)d->error[i].col); fputs(",", out); bytes_put(d, out, d->error[i].detail); fputs(").\n", out); }
     }
+    for (uint32_t i = 1; i < d->encoding_len; i++) {
+        if (!d->encoding[i].live) continue;
+        if (1) { fputs("html_encoding(", out); bytes_put(d, out, d->encoding[i].name); fputs(",", out); fputs(html_encoding_source_name(d->encoding[i].source), out); fputs(").\n", out); }
+        if (1) { fputs("html_decoding(", out); fputs(d->encoding[i].ascii ? "true" : "false", out); fputs(",", out); fprintf(out, "%lld", (long long)d->encoding[i].errors); fputs(").\n", out); }
+    }
 }
 html_status html_dispatch(html_parser *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
     size_t p = 0;
@@ -257,8 +277,11 @@ typedef struct store_html_store_tag {
     own html_error *error;
     size_t bytes_len, bytes_cap;
     own char *bytes;
+    size_t encoding_len, encoding_cap;
+    uint32_t encoding_free;
+    own html_encoding *encoding;
 } store_html_store_tag;
-void store_html_store_tag_drop(store_html_store_tag *s) { free(s->token); free(s->tattr); free(s->error); free(s->bytes); }
+void store_html_store_tag_drop(store_html_store_tag *s) { free(s->token); free(s->tattr); free(s->error); free(s->bytes); free(s->encoding); }
 static void store_html_store_tag__token_grow(store_html_store_tag *s) {
     size_t c = s->token_cap ? 2 * s->token_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -503,6 +526,73 @@ void store_html_store_tag_bytes_put(const store_html_store_tag *s, FILE *out, am
     amb_put_qatom(out, s->bytes + sp.off, sp.len);
 }
 size_t store_html_store_tag_bytes_size(const store_html_store_tag *s) { return s->bytes_len; }
+static void store_html_store_tag__encoding_grow(store_html_store_tag *s) {
+    size_t c = s->encoding_cap ? 2 * s->encoding_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->encoding = (html_encoding *)realloc(s->encoding, c * sizeof(html_encoding));
+    if (!s->encoding) abort();
+    s->encoding_cap = c;
+}
+html_encoding_h store_html_store_tag_encoding_new(store_html_store_tag *s) {
+    uint32_t i;
+    if (s->encoding_free) {
+        i = s->encoding_free;
+        s->encoding_free = s->encoding[i].free_next;
+    } else {
+        if (s->encoding_len == 0) {
+            if (s->encoding_cap == 0) store_html_store_tag__encoding_grow(s);
+            memset(&s->encoding[0], 0, sizeof(html_encoding));
+            s->encoding_len = 1;
+        }
+        if (s->encoding_len == s->encoding_cap) store_html_store_tag__encoding_grow(s);
+        i = (uint32_t)s->encoding_len;
+        s->encoding_len++;
+        s->encoding[i].gen = 0;
+    }
+    uint32_t g = s->encoding[i].gen;
+    memset(&s->encoding[i], 0, sizeof(html_encoding));
+    s->encoding[i].gen = g;
+    s->encoding[i].live = 1;
+    html_encoding_h h = { s->id, i, g };
+    return h;
+}
+int store_html_store_tag_encoding_live(const store_html_store_tag *s, html_encoding_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->encoding_len && s->encoding[h.index].live && s->encoding[h.index].gen == h.gen;
+}
+html_encoding store_html_store_tag_encoding_get(const store_html_store_tag *s, html_encoding_h h) {
+    if (!store_html_store_tag_encoding_live(s, h)) abort();
+    return s->encoding[h.index];
+}
+html_encoding *store_html_store_tag_encoding_ref(const store_html_store_tag *s, html_encoding_h h) tie s {
+    if (!store_html_store_tag_encoding_live(s, h)) abort();
+    return &s->encoding[h.index];
+}
+html_encoding *store_html_store_tag_encoding_slot(const store_html_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->encoding_len) abort();
+    return &s->encoding[i];
+}
+html_encoding_h store_html_store_tag_encoding_handle(const store_html_store_tag *s, uint32_t i) {
+    html_encoding_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->encoding_len && s->encoding[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->encoding[i].gen;
+    }
+    return h;
+}
+void store_html_store_tag_encoding_free(store_html_store_tag *s, html_encoding_h h) {
+    if (!store_html_store_tag_encoding_live(s, h)) abort();
+    s->encoding[h.index].live = 0;
+    s->encoding[h.index].gen++;
+    s->encoding[h.index].free_next = s->encoding_free;
+    s->encoding_free = h.index;
+}
+size_t store_html_store_tag_encoding_len(const store_html_store_tag *s) { return s->encoding_len; }
+size_t store_html_store_tag_encoding_count(const store_html_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->encoding_len; i++) if (s->encoding[i].live) n++;
+    return n;
+}
 void store_html_store_tag_attributes_append(store_html_store_tag *s, uint32_t o, uint32_t i) {
     if (o == 0 || i == 0 || o >= s->token_len || i >= s->tattr_len) abort();
     uint32_t t = s->token[o].last_attr;

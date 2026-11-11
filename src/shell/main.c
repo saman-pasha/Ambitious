@@ -67,6 +67,7 @@ amb_interface(script);
 #include "../paint/paint.h"
 #include "../js/js.h"
 #include "../script/script.h"
+#include "../html/encoding.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -495,10 +496,13 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     }
     vector<char> src;
     append_range(src, bytes_ptr(nt, nt->resource[pr].body), nt->resource[pr].body.len);
-    html_parse(p, d, data(src), len(src));
-    char final[4200], site[512], answer[700];
-    amb_span fu = nt->resource[pr].final_url;
+    char final[4200], site[512], answer[700], type[300];
+    amb_span fu = nt->resource[pr].final_url, ty = nt->resource[pr].type;
     snprintf(final, sizeof final, "%.*s", (int)fu.len, text_ptr(nt, fu));
+    snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(nt, ty));
+    /* the bytes decoded in the encoding sniffed from them, the type they were served as
+       and whether they are a local file's (src/html/encoding.h) */
+    html_parse_bytes(p, d, data(src), len(src), type, strlen(type), strncmp(final, "file:", 5) == 0);
     site_of(final, site, sizeof site);
     session_path(s, "profile.out", answer, sizeof answer);
     uint32_t denied = 0;
@@ -659,7 +663,11 @@ static int cmd_bench(const char *page, int n) {
         double b = now_ms();
         vector<char> src;
         append_range(src, bytes_ptr(&nt, nt.resource[ph.index].body), nt.resource[ph.index].body.len);
-        html_parse(&p, &d, data(src), len(src));
+        char type[300];
+        amb_span ty = nt.resource[ph.index].type, fu = nt.resource[ph.index].final_url;
+        snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(&nt, ty));
+        int file = fu.len >= 5 && memcmp(text_ptr(&nt, fu), "file:", 5) == 0;
+        html_parse_bytes(&p, &d, data(src), len(src), type, strlen(type), file);
         double c = now_ms();
         net_fetch_subresources(&nt, &d, ph, 0);
         double e = now_ms();

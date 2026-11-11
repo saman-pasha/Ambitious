@@ -66,16 +66,32 @@ html_contract(record(error, [
     field(detail, span(bytes))
 ])).
 
+%% the encoding a document's bytes were decoded with (src/html/encoding.c): its name
+%% as the Encoding standard writes it; where it came from (13.2.3.2): a byte order
+%% mark, the transport layer's charset, a meta element or an XML declaration found by
+%% the prescan, UTF-8 detected in a local file's bytes, or the default; whether every
+%% byte past a byte order mark was ASCII, which all ASCII-compatible encodings read
+%% alike; and how many of the decoder's errors became U+FFFD
+html_contract(enum(encoding_source, [bom, http, meta, xml, detected, default])).
+html_contract(record(encoding, [
+    field(name,   span(bytes)),
+    field(source, enum(encoding_source)),
+    field(ascii,  bool),
+    field(errors, u32)
+])).
+
 html_contract(handle(token, tok)).
 html_contract(handle(tattr, tat)).
 html_contract(handle(error, err)).
+html_contract(handle(encoding, enc)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-html_contract(store(parser, [table(token), table(tattr), table(error), pool(bytes)])).
+html_contract(store(parser, [table(token), table(tattr), table(error), pool(bytes), table(encoding)])).
 html_contract(owns(parser, token, store)).
 html_contract(owns(parser, tattr, store)).
 html_contract(owns(parser, error, store)).
+html_contract(owns(parser, encoding, store)).
 html_contract(owns(token, tattr, list(attributes))).
 html_contract(tie(handle(token), parser)).
 html_contract(list(attributes, token, tattr, [first(first_attr), last(last_attr), next(next), up(token)])).
@@ -101,6 +117,10 @@ html_contract(invariant(live_links, 'Every link names a live record', refs_live)
 %% ---- REASONING --------------------------------------------------------------
 
 html_contract(fact(html_error(handle, field(code), field(line), field(col), field(detail)), table(error), true)).
+%% the document's encoding and where it came from; whether its bytes were all ASCII,
+%% and how many decoder errors became U+FFFD
+html_contract(fact(html_encoding(field(name), field(source)), table(encoding), true)).
+html_contract(fact(html_decoding(field(ascii), field(errors)), table(encoding), true)).
 
 html_contract(rules('rules/html')).
 html_contract(derived(html_error_count/2, 'how many parse errors of a code the page has')).

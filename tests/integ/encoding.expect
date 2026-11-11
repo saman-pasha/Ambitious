@@ -1,0 +1,82 @@
+-- enc-windows-1252
+E = 'windows-1252', S = default, A = false, N = 0
+T = '\nCrème brûlée\n“Smart quotes” — the euro: €12, ‘single’, naïve façade, Œuvre, ½ ¾, ©®™, Ÿ, … ‰ †‡ ŠŽšž.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 104 code points
+-- enc-windows-1251
+E = 'windows-1251', S = meta, A = false, N = 0
+T = '\nСъешь же ещё этих мягких французских булок\n«Да, выпей чаю» — сказал он. №5, €, ‰.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 84 code points
+-- enc-shift_jis
+E = 'Shift_JIS', S = meta, A = false, N = 0
+T = '\n日本語のページ\nひらがな、カタカナ、漢字：「東京は晴れ」。半角ｶﾀｶﾅとＡＢＣ（全角）。記号①②③㈱№℡、髙﨑。円記号ではない \\ と ~。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 73 code points
+-- enc-euc-jp
+E = 'EUC-JP', S = meta, A = false, N = 0
+T = '\n日本語のページ\nひらがな、カタカナ、漢字。半角ｶﾀｶﾅ。補助漢字の丂と丄。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 40 code points
+-- enc-iso-2022-jp
+E = 'ISO-2022-JP', S = meta, A = true, N = 0
+T = '\n日本語のページ\nひらがな、カタカナ、漢字。ASCII も混ざる。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 35 code points
+-- enc-euc-kr
+E = 'EUC-KR', S = meta, A = false, N = 0
+T = '\n한국어 페이지\n다람쥐 헌 쳇바퀴에 타고파. 확장 완성형의 똠방각하와 똥. 한자 韓國語.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 51 code points
+-- enc-gb18030
+E = gb18030, S = meta, A = false, N = 0
+T = '\n中文网页\n简体中文：我能吞下玻璃而不伤身体。四字节：¥ é 😀 𠀀 ㄅ。欧元 €。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 44 code points
+-- enc-gbk
+E = 'GBK', S = xml, A = false, N = 0
+T = '\n中文网页\n汉字与标点：“你好”，世界！\n\n'
+the encoding is Chromium's
+the text is Chromium's: 22 code points
+-- enc-big5
+E = 'Big5', S = meta, A = false, N = 0
+T = '\n繁體中文網頁\n我能吞下玻璃而不傷身體。香港字：𧉧 𤊿 㗎 嘅。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 34 code points
+-- enc-utf-16le
+E = 'UTF-16LE', S = bom, A = false, N = 0
+T = '\nUTF-16, little-endian\nLatin é ß, Greek αβγ, CJK 日本語, outside the BMP 😀 𝄞.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 76 code points
+-- enc-utf-16be
+E = 'UTF-16BE', S = bom, A = false, N = 0
+T = '\nUTF-16, big-endian\nLatin é ß, Greek αβγ, CJK 日本語, outside the BMP 😀 𝄞.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 73 code points
+-- enc-utf-8-undeclared
+E = 'UTF-8', S = detected, A = false, N = 0
+T = '\nUTF-8 with nothing to say so\ncafé, naïve, 日本語, 😀.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 52 code points
+-- enc-replacement
+E = replacement, S = meta, A = true, N = 1
+T = �
+the encoding is Chromium's
+the text is Chromium's: 1 code point
+-- enc-utf-8-errors
+E = 'UTF-8', S = meta, A = false, N = 7
+T = '\na�b, cut �, surrogate ���, overlong ��, fine 😀\n\n'
+the encoding is Chromium's
+the text is Chromium's: 49 code points
+-- enc-http-koi8-r
+E = 'KOI8-R', S = http, A = false, N = 0
+T = 'Широкая электрификация южных губерний даст мощный толчок подъёму сельского хозяйства.'
+the encoding is Chromium's
+the text is Chromium's: 85 code points
+-- the diagnostics: what declares no encoding, what is malformed
+enc-windows-1252: amb_diag(undeclared_encoding, 'windows-1252', 'the page declares no encoding and is not ASCII: it was decoded as windows-1252, the default (<meta charset> declares one)').
+enc-utf-8-undeclared: amb_diag(undeclared_encoding, 'UTF-8', 'the page declares no encoding and is not ASCII: it was decoded as UTF-8, as the file\'s bytes suggest (<meta charset> declares one)').
+enc-utf-8-errors: amb_diag(malformed_bytes, 'UTF-8', '7 byte sequence(s) are not UTF-8: each became U+FFFD').
+enc-replacement: amb_diag(replaced_encoding, replacement, 'the page\'s encoding is one the Encoding standard replaces: its text is a single U+FFFD').
+enc-shift_jis: none of the encoding's
+enc-http-koi8-r: none of the encoding's
