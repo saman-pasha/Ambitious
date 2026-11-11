@@ -2575,7 +2575,9 @@ static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, c
     if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
     if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_attr_of(d, x, "disabled", 8);
     /* the state the page is in: :hover and :active hold of the element and its ancestors,
-       :focus-within of the focused one and its; :visited of none (no history is read) */
+       :focus-within of the focused one and its; :visited of none (no history is read). A
+       page at rest: none of them holds */
+    if (!ms->hover && !ms->active && !ms->focus && !ms->focus_visible && !ms->target) return 0;
     if (css_eq_ci(ps, pn, "hover")) return ms->hover && css_within(d, x, ms->hover);
     if (css_eq_ci(ps, pn, "active")) return ms->active && css_within(d, x, ms->active);
     if (css_eq_ci(ps, pn, "focus")) return ms->focus == x;
@@ -2807,7 +2809,9 @@ enum { CSS_KEY_UNIVERSAL, CSS_KEY_TYPE, CSS_KEY_ID, CSS_KEY_CLASS, CSS_KEY_ATTR 
 typedef struct css_key { uint32_t kind, start, len; } css_key;
 typedef struct css_bucket { uint32_t kind, len, hash, head, tail; } css_bucket;
 typedef struct css_bent { uint32_t rule, next; } css_bent;                    /* a bucket's rule */
-typedef struct css_rx { uint32_t parts, nparts, pseudo; uint64_t anc[4]; } css_rx;   /* a rule as the index holds it */
+/* a rule as the index holds it: its parts (nparts: their count, and its pseudo-element above
+   the low 8 bits), its ancestors' keys */
+typedef struct css_rx { uint32_t parts, nparts; uint64_t anc[4]; } css_rx;
 
 /* the pseudo-element a subject compound ends with (::before, ...; :before, :after,
    :first-line and :first-letter as CSS 2 wrote them): its css_pseudo, and *n made the
@@ -2997,14 +3001,15 @@ static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *pa
         size_t k = css_split(t, sel.len, ps, CSS_MAXPARTS);
         css_rx rx;
         memset(&rx, 0, sizeof rx);
+        uint32_t pseudo = 0;
         if (k > 0) {
             /* a pseudo-element: the rule matches its element, the pseudo-element cut from its subject */
             size_t ln = ps[k - 1].len;
-            rx.pseudo = (uint32_t)css_pseudo_of(t + ps[k - 1].start, &ln);
+            pseudo = (uint32_t)css_pseudo_of(t + ps[k - 1].start, &ln);
             ps[k - 1].len = (uint32_t)ln;
         }
         rx.parts = (uint32_t)len(*parts);
-        rx.nparts = (uint32_t)k;
+        rx.nparts = (uint32_t)k | pseudo << 8;
         for (size_t j = 0; j < k; j++) push_back(parts, ps[j]);
         if (k == 0) { (*rxs)[r] = rx; continue; }        /* not a selector this reads: it matches nothing */
         css_key keys[CSS_MAX_KEYS];
@@ -3068,17 +3073,19 @@ static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom,
     return c;
 }
 
-/* the shared rule r matches x: its ancestors' keys in x's filter am, then the matcher */
-static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, const css_mstate *ms, uint32_t r,
+/* the rule r matches x (its ancestors' keys in x's filter am, then the matcher): 1, or 1
+   and its pseudo-element (shifted 8 up); 0 when it does not */
+static uint32_t css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, const css_mstate *ms, uint32_t r,
                             const vector<css_part> *parts, const vector<css_rx> *rxs, const uint64_t *am) {
     css_rx rx = at(*rxs, r);
-    if (rx.nparts == 0) return 0;
+    uint32_t np = rx.nparts & 0xff;
+    if (np == 0) return 0;
     if ((rx.anc[0] & ~am[0]) | (rx.anc[1] & ~am[1]) | (rx.anc[2] & ~am[2]) | (rx.anc[3] & ~am[3])) return 0;
     css_part ps[CSS_MAXPARTS];
-    for (uint32_t j = 0; j < rx.nparts; j++) ps[j] = at(*parts, rx.parts + j);
+    for (uint32_t j = 0; j < np; j++) ps[j] = at(*parts, rx.parts + j);
     int budget = CSS_MATCH_BUDGET;
     amb_span sel = s->rule[r].selector;
-    return css_parts_match(d, x, ms, text_ptr(s, sel), ps, rx.nparts, 0, &budget);
+    return css_parts_match(d, x, ms, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
 }
 
 /* ---- the cascade ---- */
@@ -4262,9 +4269,10 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             /* more keys than the index keeps: every rule is tried, and the filter is full */
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
             for (uint32_t r = 1; r < shared; r++)
-                if (css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am)) {
-                    uint32_t pk = at(rxs, r).pseudo;
-                    if (pk) push_back(pmatched, pk << 24 | r); else push_back(matched, r);
+                {
+                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
+                    if (mk == 1) push_back(matched, r);
+                    else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
                 }
         } else {
             for (int q = 0; q < nk; q++) css_bloom_add(om, kh[q]);
@@ -4292,9 +4300,10 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 heads[bi] = at(be, heads[bi]).next;
                 if (r == last) continue;
                 last = r;
-                if (css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am)) {
-                    uint32_t pk = at(rxs, r).pseudo;
-                    if (pk) push_back(pmatched, pk << 24 | r); else push_back(matched, r);
+                {
+                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
+                    if (mk == 1) push_back(matched, r);
+                    else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
                 }
             }
         }

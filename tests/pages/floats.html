@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><title>Floats</title>
+<style>
+/* tests/pages/floats.html -- floats left and right, lines beside them, clearance, a
+   formatting context beside a float, floats that wrap, a float met in a line; the boxes
+   held to Chromium's (tests/pages/floats.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.wrap { width: 500px; }
+.l { float: left; width: 100px; height: 60px; background: #fcc; margin: 0 10px 5px 0; }
+.r { float: right; width: 80px; height: 40px; background: #ccf; }
+.clear { clear: both; }
+.bfc { overflow: hidden; background: #efe; }
+.fr { display: flow-root; background: #f8f8f8; }
+.inl { float: left; background: #eee; padding: 4px; }
+</style></head>
+<body>
+<div class=wrap id=w1>
+  <div class=l id=f1></div>
+  <div class=r id=f2></div>
+  <p id=p1>Text that flows beside two floats, one on each side, until it is below them and then takes the whole width of its block again.</p>
+  <p class=clear id=c1>Cleared.</p>
+</div>
+<div class=wrap id=w2>
+  <div class=l id=f3></div>
+  <div class=bfc id=b1>A formatting context of its own beside the float.</div>
+</div>
+<div class="wrap fr" id=w3>
+  <div class=l id=f4></div>
+  <div class=l id=f5></div>
+  <div class=l id=f6></div>
+  <div class=l id=f7></div>
+  <div class=l id=f8></div>
+</div>
+<p class=wrap id=p2><span class=inl id=i1>Inline float</span>Text after an inline float that wraps around it over more than one line of this paragraph.</p>
+<div class=wrap id=w4><div class=r id=f9></div><div class=r id=f10></div>Two right floats.</div>
+</body></html>

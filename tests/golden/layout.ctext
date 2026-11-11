@@ -1,13 +1,15 @@
-/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:f3ae804f:4480). Do not edit. */
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:839ec59b:5440). Do not edit. */
 typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
-typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL } layout_box_kind;
-typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH } layout_width_how;
+typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL, LAYOUT_BOX_KIND_FLEX, LAYOUT_BOX_KIND_GRID } layout_box_kind;
+typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH, LAYOUT_WIDTH_HOW_MIN_WIDTH, LAYOUT_WIDTH_HOW_FLEX, LAYOUT_WIDTH_HOW_GRID, LAYOUT_WIDTH_HOW_POSITIONED } layout_width_how;
+typedef enum layout_position { LAYOUT_POSITION_STATIC, LAYOUT_POSITION_RELATIVE, LAYOUT_POSITION_ABSOLUTE, LAYOUT_POSITION_FIXED, LAYOUT_POSITION_STICKY } layout_position;
+typedef enum layout_float_side { LAYOUT_FLOAT_SIDE_UNFLOATED, LAYOUT_FLOAT_SIDE_LEFT, LAYOUT_FLOAT_SIDE_RIGHT } layout_float_side;
 typedef enum layout_frag_kind { LAYOUT_FRAG_KIND_TEXT, LAYOUT_FRAG_KIND_ATOMIC, LAYOUT_FRAG_KIND_MARKER, LAYOUT_FRAG_KIND_INLINE, LAYOUT_FRAG_KIND_GENERATED } layout_frag_kind;
 typedef enum layout_op { LAYOUT_OP_RUN } layout_op;
 typedef struct layout_box_h { uint32_t doc, index, gen; } layout_box_h;
 typedef struct layout_line_h { uint32_t doc, index, gen; } layout_line_h;
 typedef struct layout_frag_h { uint32_t doc, index, gen; } layout_frag_h;
-typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t bct; uint32_t bcr; uint32_t bcb; uint32_t bcl; uint8_t bst; uint8_t bsr; uint8_t bsb; uint8_t bsl; uint8_t pseudo; } layout_box;
+typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t bct; uint32_t bcr; uint32_t bcb; uint32_t bcl; uint8_t bst; uint8_t bsr; uint8_t bsb; uint8_t bsl; uint8_t pseudo; layout_position position; uint32_t cb; layout_float_side float_side; int32_t z; uint8_t z_auto; uint8_t clip; double dx; double dy; } layout_box;
 typedef struct layout_line { uint32_t gen, live, free_next; uint32_t box; uint32_t next; uint32_t first_frag; uint32_t last_frag; double x; double y; double w; double h; double baseline; } layout_line;
 typedef struct layout_frag { uint32_t gen, live, free_next; uint32_t line; uint32_t next; layout_frag_kind kind; dom_node_h node; uint32_t atomic; amb_span text; double x; double y; double w; double h; double baseline; uint8_t face; net_resource_h font; double size; double spacing; double word_spacing; uint8_t italic; uint32_t color; uint32_t background; uint8_t decoration; } layout_frag;
 typedef struct layout_store_tag { char unused; } layout_store_tag;
@@ -17,6 +19,8 @@ const char *layout_status_name(layout_status x);
 const char *layout_op_name(layout_op x);
 const char *layout_box_kind_name(layout_box_kind x);
 const char *layout_width_how_name(layout_width_how x);
+const char *layout_position_name(layout_position x);
+const char *layout_float_side_name(layout_float_side x);
 const char *layout_frag_kind_name(layout_frag_kind x);
 void layout_init(layout_tree *d, uint32_t id);
 uint64_t layout_revision(const layout_tree *d);
@@ -70,6 +74,8 @@ const char *layout_box_kind_name(layout_box_kind x) {
     case LAYOUT_BOX_KIND_TABLE: return "table";
     case LAYOUT_BOX_KIND_ROW: return "row";
     case LAYOUT_BOX_KIND_CELL: return "cell";
+    case LAYOUT_BOX_KIND_FLEX: return "flex";
+    case LAYOUT_BOX_KIND_GRID: return "grid";
     }
     return "?";
 }
@@ -83,6 +89,28 @@ const char *layout_width_how_name(layout_width_how x) {
     case LAYOUT_WIDTH_HOW_COLUMN: return "column";
     case LAYOUT_WIDTH_HOW_INTRINSIC: return "intrinsic";
     case LAYOUT_WIDTH_HOW_MAX_WIDTH: return "max_width";
+    case LAYOUT_WIDTH_HOW_MIN_WIDTH: return "min_width";
+    case LAYOUT_WIDTH_HOW_FLEX: return "flex";
+    case LAYOUT_WIDTH_HOW_GRID: return "grid";
+    case LAYOUT_WIDTH_HOW_POSITIONED: return "positioned";
+    }
+    return "?";
+}
+const char *layout_position_name(layout_position x) {
+    switch (x) {
+    case LAYOUT_POSITION_STATIC: return "static";
+    case LAYOUT_POSITION_RELATIVE: return "relative";
+    case LAYOUT_POSITION_ABSOLUTE: return "absolute";
+    case LAYOUT_POSITION_FIXED: return "fixed";
+    case LAYOUT_POSITION_STICKY: return "sticky";
+    }
+    return "?";
+}
+const char *layout_float_side_name(layout_float_side x) {
+    switch (x) {
+    case LAYOUT_FLOAT_SIDE_UNFLOATED: return "unfloated";
+    case LAYOUT_FLOAT_SIDE_LEFT: return "left";
+    case LAYOUT_FLOAT_SIDE_RIGHT: return "right";
     }
     return "?";
 }
@@ -97,7 +125,7 @@ const char *layout_frag_kind_name(layout_frag_kind x) {
     return "?";
 }
 
-const char layout_fingerprint[] = "fnv1a32:f3ae804f:4480";
+const char layout_fingerprint[] = "fnv1a32:839ec59b:5440";
 void layout_init(layout_tree *d, uint32_t id) {
     if (d->box_len != 0) abort();
     d->id = id;
@@ -270,6 +298,10 @@ int layout_check_invariants(const layout_tree *d, FILE *report) {
             uint32_t r = d->box[i].last_line;
             if (d->box[i].live && r && (r >= d->line_len || !d->line[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].cb;
+            if (d->box[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
         for (uint32_t i = 1; i < d->line_len; i++) {
             uint32_t r = d->line[i].box;
             if (d->line[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
@@ -308,6 +340,10 @@ void layout_export(const layout_tree *d, FILE *out) {
         if (1) { fputs("layout_box(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_ref(out, "n", d->box[i].node.doc, d->box[i].node.index, d->box[i].node.gen); fputs(",", out); fputs(layout_box_kind_name(d->box[i].kind), out); fputs(",", out); amb_put_f64(out, d->box[i].x); fputs(",", out); amb_put_f64(out, d->box[i].y); fputs(",", out); amb_put_f64(out, d->box[i].w); fputs(",", out); amb_put_f64(out, d->box[i].h); fputs(").\n", out); }
         if (d->box[i].parent != 0) { fputs("layout_parent(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); { uint32_t r = d->box[i].parent; amb_put_ref(out, "bx", d->id, r, r && r < d->box_len ? d->box[r].gen : 0); } fputs(").\n", out); }
         if (d->box[i].pseudo != 0) { fputs("layout_pseudo(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->box[i].pseudo); fputs(").\n", out); }
+        if (d->box[i].position != LAYOUT_POSITION_STATIC) { fputs("layout_positioned(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); fputs(layout_position_name(d->box[i].position), out); fputs(",", out); { uint32_t r = d->box[i].cb; amb_put_ref(out, "bx", d->id, r, r && r < d->box_len ? d->box[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->box[i].dx); fputs(",", out); amb_put_f64(out, d->box[i].dy); fputs(").\n", out); }
+        if (d->box[i].z_auto == 0) { fputs("layout_stacking(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->box[i].z); fputs(").\n", out); }
+        if (d->box[i].float_side != LAYOUT_FLOAT_SIDE_UNFLOATED) { fputs("layout_float(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); fputs(layout_float_side_name(d->box[i].float_side), out); fputs(").\n", out); }
+        if (d->box[i].clip != 0) { fputs("layout_clips(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(").\n", out); }
         if (1) { fputs("layout_margin(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].mt); fputs(",", out); amb_put_f64(out, d->box[i].mr); fputs(",", out); amb_put_f64(out, d->box[i].mb); fputs(",", out); amb_put_f64(out, d->box[i].ml); fputs(").\n", out); }
         if (1) { fputs("layout_border(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].bt); fputs(",", out); amb_put_f64(out, d->box[i].br); fputs(",", out); amb_put_f64(out, d->box[i].bb); fputs(",", out); amb_put_f64(out, d->box[i].bl); fputs(").\n", out); }
         if (1) { fputs("layout_padding(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].pt); fputs(",", out); amb_put_f64(out, d->box[i].pr); fputs(",", out); amb_put_f64(out, d->box[i].pb); fputs(",", out); amb_put_f64(out, d->box[i].pl); fputs(").\n", out); }

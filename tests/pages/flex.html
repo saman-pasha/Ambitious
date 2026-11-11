@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><title>Flexbox</title>
+<style>
+/* tests/pages/flex.html -- flex containers: rows that grow, shrink and wrap, gaps,
+   justify-content, align-items and align-self, auto margins, order, a column with a
+   definite height, flex-basis, min-width, an inline-flex; the boxes held to Chromium's
+   (tests/pages/flex.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.f { display: flex; width: 500px; background: #f4f4f4; margin-bottom: 10px; }
+.f > div { background: #cde; }
+.grow > div { flex: 1; }
+.grow > .two { flex: 2; }
+.shrink > div { width: 200px; }
+.wrap { flex-wrap: wrap; gap: 8px 12px; }
+.wrap > div { width: 150px; height: 30px; }
+.jc { justify-content: space-between; align-items: center; height: 60px; }
+.jc > div { width: 80px; }
+.tall { height: 40px; }
+.around { justify-content: space-around; }
+.around > div { width: 100px; }
+.endc { justify-content: flex-end; align-items: flex-end; height: 50px; }
+.auto > .push { margin-left: auto; }
+.col { flex-direction: column; height: 200px; width: 300px; }
+.col > .g { flex-grow: 1; }
+.col > .c { align-self: center; }
+.basis > div { flex: 0 0 120px; }
+.ord > .last { order: 2; }
+.ord > .first { order: -1; }
+.inl { display: inline-flex; gap: 4px; background: #eee; }
+.inl > span { background: #dce; padding: 2px 6px; }
+.minw > div { flex: 1 1 0; }
+</style></head>
+<body>
+<div class="f grow" id=g><div id=g1>One</div><div class=two id=g2>Two, twice</div><div id=g3>Three</div></div>
+<div class="f shrink" id=s><div id=s1>200 wide</div><div id=s2>200 wide</div><div id=s3>200 wide too</div></div>
+<div class="f wrap" id=w><div id=w1>1</div><div id=w2>2</div><div id=w3>3</div><div id=w4>4</div></div>
+<div class="f jc" id=j><div id=j1>A</div><div class=tall id=j2>B</div><div id=j3>C</div></div>
+<div class="f around" id=a><div id=a1>a</div><div id=a2>b</div></div>
+<div class="f endc" id=e><div id=e1>end</div><div id=e2 style="align-self: flex-start">start</div></div>
+<div class="f auto" id=m><div id=m1>left</div><div class=push id=m2>pushed right</div></div>
+<div class="f col" id=c><div id=c1>top</div><div class=g id=c2>grows</div><div class=c id=c3>centred</div></div>
+<div class="f basis" id=b><div id=b1>120</div><div id=b2>120</div></div>
+<div class="f ord" id=o><div class=last id=o1>last</div><div id=o2>middle</div><div class=first id=o3>first</div></div>
+<div class="f minw" id=n><div id=n1>Averyveryverylongwordthatwillnotshrink</div><div id=n2>short</div></div>
+<p id=p>Before <span class=inl id=i><span id=i1>in</span><span id=i2>line</span></span> after.</p>
+</body></html>

@@ -2,9 +2,10 @@
 # tests/integ/boxes.sh -- Ambitious's boxes against Chromium's. Each fixture page whose
 # Chromium boxes are kept (tests/pages/NAME.chromium, written by tools/bench/boxes.js:
 # getBoundingClientRect() of each element with an id) is laid out by Ambitious in the
-# same 800x600 viewport, and each such element's border box, from the layout facts, is
-# held to Chromium's within 1px. The elements that differ are printed, with by how much
-# each edge does; then how many of the page's boxes agree.
+# same 800x600 viewport, and each such element's border box, from the layout facts (an
+# inline element's from its fragments and its text's), is held to Chromium's within
+# 1px. The elements that differ are printed, with by how much each edge does; then how
+# many of the page's boxes agree.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-boxes.XXXXXX")
 export AMB_WORK=$work
@@ -12,7 +13,7 @@ for ref in "$AMB_ROOT"/tests/pages/*.chromium; do
   head -1 "$ref" | grep -q '^# boxes' || continue
   name=$(basename "$ref" .chromium)
   sh "$AMB_ROOT/bin/ambitious" query "$AMB_ROOT/tests/pages/$name.html" \
-    "dom_attr(N, id, I), layout_box_of(N, B), layout_border_box(B, X, Y, W, H)" > "$work/amb.txt" 2>&1
+    "dom_attr(N, id, I), ( layout_box_of(N, B), layout_border_box(B, X, Y, W, H) ; layout_inline_box(N, X, Y, W, H) )" > "$work/amb.txt" 2>&1
   awk -v name="$name" '
     function val(s) { sub(/^[^=]*= */, "", s); gsub(/'"'"'/, "", s); return s }
     FNR == NR {

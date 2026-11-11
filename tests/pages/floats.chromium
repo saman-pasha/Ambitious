@@ -1,0 +1,20 @@
+# boxes of tests/pages/floats.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+w1 div 8 16 500 111
+f1 div 8 16 100 60
+f2 div 428 16 80 40
+p1 p 8 16 500 76
+c1 p 8 108 500 19
+w2 div 8 143 500 19
+f3 div 8 143 100 60
+b1 div 118 143 390 19
+w3 div 118 162 500 130
+f4 div 118 162 100 60
+f5 div 228 162 100 60
+f6 div 338 162 100 60
+f7 div 448 162 100 60
+f8 div 118 227 100 60
+p2 p 8 308 500 38
+i1 span 8 308 92.766 27
+w4 div 8 362 500 19
+f9 div 428 362 80 40
+f10 div 348 362 80 40
