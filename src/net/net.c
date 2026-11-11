@@ -6,12 +6,16 @@
    host parser makes it, a default port dropped -- and a path whose dot segments
    are removed and whose backslashes are slashes; a query; a fragment, which no
    fetch sends. The host: an IPv6 literal in brackets, written back compressed;
-   else percent-decoded, lowercased, refused for a forbidden code point, and an
+   else percent-decoded, made ASCII, refused for a forbidden code point, and an
    IPv4 address in any of its forms (0x hex, 0 octal, fewer than four parts) when
-   its last label is a number. Another scheme's URL is opaque (data:, mailto:). A
-   reference resolves against its base as scheme-relative, path-absolute,
-   query-only, fragment-only or path-relative. No IDNA, no percent-encoding sets
-   beyond what a file: path decodes.
+   its last label is a number. Made ASCII is IDNA in part: UTF-8 decoded, each code
+   point lowercased as UTS #46 maps capitals (Unicode's lowercase mappings,
+   src/net/lower.h), ASCII's fullwidth forms and the ideographic full stops
+   mapped, and each label past ASCII written xn-- and its Punycode (RFC 3492); the
+   rest of the IDNA mapping table, NFC and the bidi and joiner rules are not done.
+   Another scheme's URL is opaque (data:, mailto:). A reference resolves against
+   its base as scheme-relative, path-absolute, query-only, fragment-only or
+   path-relative. No percent-encoding sets beyond what a file: path decodes.
 
    Fetching. file: reads the file (its type from its name); data: decodes its
    body (base64 or percent-encoded); http: and https: are HTTP/1.1 over a socket
@@ -56,6 +60,7 @@
 #include <vector.pl>
 #include <amb.pl>
 #include "url.h"
+#include "lower.h"
 #include "../paint/image.h"
 
 amb_interface(dom);
@@ -559,11 +564,158 @@ static int net_ipv4_parse(const char *s, size_t n, uint32_t *out) {
     return 1;
 }
 
-/* a domain made ASCII: its ASCII letters lowercased (other bytes are kept) */
+/* ---- IDNA: a host's labels made ASCII ---- */
+
+/* a code point's small letter, as UTS #46 maps a capital: Unicode's simple
+   lowercase mapping, by the runs of src/net/lower.h */
+static uint32_t net_lower_cp(uint32_t c) {
+    int lo = 0, hi = (int)(sizeof net_lower_runs / sizeof net_lower_runs[0]) - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (c < net_lower_runs[mid].first) hi = mid - 1;
+        else if (c > net_lower_runs[mid].last) lo = mid + 1;
+        else if (net_lower_runs[mid].alternating && (c - net_lower_runs[mid].first) % 2) return c;
+        else return (uint32_t)((int32_t)c + net_lower_runs[mid].delta);
+    }
+    return c;
+}
+
+/* UTF-8 decoded into code points; 0 for what is ill-formed (an overlong form, a
+   surrogate, past U+10FFFF, a sequence cut short) or past cap code points */
+static int net_utf8(const char *s, size_t n, uint32_t *cps, size_t cap, size_t *count) {
+    size_t i = 0, k = 0;
+    while (i < n) {
+        uint8_t b = (uint8_t)s[i];
+        uint32_t c;
+        int more;
+        if (b < 0x80) { c = b; more = 0; }
+        else if (b >= 0xC2 && b <= 0xDF) { c = b & 0x1F; more = 1; }
+        else if (b >= 0xE0 && b <= 0xEF) { c = b & 0x0F; more = 2; }
+        else if (b >= 0xF0 && b <= 0xF4) { c = b & 0x07; more = 3; }
+        else return 0;
+        for (int j = 1; j <= more; j++) {
+            if (i + (size_t)j >= n) return 0;
+            uint8_t x = (uint8_t)s[i + (size_t)j];
+            if ((x & 0xC0) != 0x80) return 0;
+            c = c << 6 | (x & 0x3F);
+        }
+        if ((more == 2 && c < 0x800) || (more == 3 && (c < 0x10000 || c > 0x10FFFF)) || (c >= 0xD800 && c <= 0xDFFF)) return 0;
+        if (k >= cap) return 0;
+        cps[k++] = c;
+        i += 1 + (size_t)more;
+    }
+    *count = k;
+    return 1;
+}
+
+/* RFC 3492's bias adaptation */
+static uint32_t net_puny_adapt(uint32_t delta, uint32_t points, int first) {
+    delta = first ? delta / 700 : delta / 2;
+    delta += delta / points;
+    uint32_t k = 0;
+    while (delta > ((36 - 1) * 26) / 2) { delta /= 36 - 1; k += 36; }
+    return k + (36 * delta) / (delta + 38);
+}
+
+/* a label's code points in Punycode (RFC 3492): its ASCII ones in order, a "-"
+   when there are any, then the others as deltas in base 36; 0 on an overflow */
+static int net_punycode(const uint32_t *cp, size_t n, char *out, size_t cap) {
+    size_t k = 0, basic = 0;
+    for (size_t i = 0; i < n; i++)
+        if (cp[i] < 0x80) {
+            if (k + 1 >= cap) return 0;
+            out[k++] = (char)cp[i];
+            basic++;
+        }
+    if (basic) {
+        if (k + 1 >= cap) return 0;
+        out[k++] = '-';
+    }
+    uint32_t next = 0x80, delta = 0, bias = 72;
+    size_t h = basic;
+    while (h < n) {
+        uint32_t m = 0xFFFFFFFFu;
+        for (size_t i = 0; i < n; i++) if (cp[i] >= next && cp[i] < m) m = cp[i];
+        if ((uint64_t)(m - next) * (h + 1) + delta > 0xFFFFFFFFu) return 0;
+        delta += (m - next) * (uint32_t)(h + 1);
+        next = m;
+        for (size_t i = 0; i < n; i++) {
+            if (cp[i] < next && ++delta == 0) return 0;
+            if (cp[i] != next) continue;
+            uint32_t q = delta;
+            for (uint32_t t36 = 36;; t36 += 36) {
+                uint32_t t = t36 <= bias ? 1 : t36 >= bias + 26 ? 26 : t36 - bias;
+                if (q < t) break;
+                uint32_t d = t + (q - t) % (36 - t);
+                if (k + 1 >= cap) return 0;
+                out[k++] = (char)(d < 26 ? 'a' + d : '0' + d - 26);
+                q = (q - t) / (36 - t);
+            }
+            if (k + 1 >= cap) return 0;
+            out[k++] = (char)(q < 26 ? 'a' + q : '0' + q - 26);
+            bias = net_puny_adapt(delta, (uint32_t)h + 1, h == basic);
+            delta = 0;
+            h++;
+        }
+        delta++;
+        next++;
+    }
+    out[k] = 0;
+    return 1;
+}
+
+/* a domain made ASCII as UTS #46 makes a URL's host, in part: its UTF-8 decoded;
+   each code point lowercased (U+0130 to i and U+0307, as Unicode lowercases it),
+   ASCII's fullwidth forms made ASCII and the ideographic full stops "."; then
+   each label holding a code point past ASCII written xn-- and its Punycode. Not
+   done: the rest of the IDNA mapping table (compatibility forms, ignored code
+   points), NFC, the bidi and joiner rules, refusing what the table disallows, and
+   checking an xn-- label's Punycode */
 static int net_domain_ascii(const char *s, size_t n, char *out, size_t cap) {
-    if (n >= cap) return 0;
-    for (size_t i = 0; i < n; i++) out[i] = net_lower(s[i]);
-    out[n] = 0;
+    int ascii = 1;
+    for (size_t i = 0; i < n; i++) if ((uint8_t)s[i] >= 0x80) ascii = 0;
+    if (ascii) {
+        if (n >= cap) return 0;
+        for (size_t i = 0; i < n; i++) out[i] = net_lower(s[i]);
+        out[n] = 0;
+        return 1;
+    }
+    uint32_t cps[300], m[320];
+    size_t nc = 0, nm = 0;
+    if (!net_utf8(s, n, cps, 300, &nc)) return 0;
+    for (size_t i = 0; i < nc; i++) {
+        uint32_t c = cps[i];
+        if (nm + 2 > 320) return 0;
+        if (c == 0x3002 || c == 0xFF0E || c == 0xFF61) m[nm++] = '.';
+        else if (c == 0x130) { m[nm++] = 'i'; m[nm++] = 0x307; }
+        else if (c >= 0xFF01 && c <= 0xFF5E) m[nm++] = net_lower_cp(c - 0xFEE0);
+        else m[nm++] = net_lower_cp(c);
+    }
+    size_t k = 0, a = 0;
+    while (a <= nm) {
+        size_t b = a;
+        while (b < nm && m[b] != '.') b++;
+        int wide = 0;
+        for (size_t i = a; i < b; i++) if (m[i] >= 0x80) wide = 1;
+        if (wide) {
+            char p[256];
+            if (!net_punycode(m + a, b - a, p, sizeof p)) return 0;
+            int w = snprintf(out + k, cap - k, "xn--%s", p);
+            if (w < 0 || k + (size_t)w >= cap) return 0;
+            k += (size_t)w;
+        } else {
+            for (size_t i = a; i < b; i++) {
+                if (k + 1 >= cap) return 0;
+                out[k++] = (char)m[i];
+            }
+        }
+        if (b < nm) {
+            if (k + 1 >= cap) return 0;
+            out[k++] = '.';
+        }
+        a = b + 1;
+    }
+    out[k] = 0;
     return 1;
 }
 

@@ -74,6 +74,29 @@ ok   'http://a b/' -> (not a URL)
 ok   'http://a<b/' -> (not a URL)
 ok   'http://a%2Fb/' -> (not a URL)
 ok   'http://h:1:2/' -> (not a URL)
+ok   'http://Bücher.example/' -> http://xn--bcher-kva.example/
+ok   'http://ÄÖÜ.de/' -> http://xn--4ca0bs.de/
+ok   'http://münchen.de/' -> http://xn--mnchen-3ya.de/
+ok   'http://例え.テスト/' -> http://xn--r8jz45g.xn--zckzah/
+ok   'http://ПРИМЕР.рф/' -> http://xn--e1afmkfd.xn--p1ai/
+ok   'http://faß.de/' -> http://xn--fa-hia.de/
+ok   'http://☃.net/' -> http://xn--n3h.net/
+ok   'http://ΕΛΛΆΔΑ.gr/' -> http://xn--hxakic4aa.gr/
+ok   'http://Ελληνικά.δοκιμή/' -> http://xn--hxargifdar.xn--jxalpdlp/
+ok   'http://ÀÉÎÕÜ.fr/' -> http://xn--0casp2a9a.fr/
+ok   'http://ŁÓDŹ.pl/' -> http://xn--d-uga0v4h.pl/
+ok   'http://ĞÜŞİÖÇ.tr/' -> http://xn--i-6fa8bwa8ovo32h.tr/
+ok   'http://Ἀθῆναι.gr/' -> http://xn--mxaneo7006a87a.gr/
+ok   'http://ꙀꙂ.test/' -> http://xn--nw8ae.test/
+ok   'http://𐐀.test/' -> http://xn--hj8c.test/
+ok   'http://中文.example.com/' -> http://xn--fiq228c.example.com/
+ok   'http://मराठी.भारत/' -> http://xn--d2b1ag0dl.xn--h2brj9c/
+ok   'http://a.b.ü/' -> http://a.b.xn--tda/
+ok   'http://例え。テスト/' -> http://xn--r8jz45g.xn--zckzah/
+ok   'http://ＥＸＡＭＰＬＥ.com/' -> http://example.com/
+ok   'http://b%C3%BCcher.example/' -> http://xn--bcher-kva.example/
+ok   'http://xn--bcher-kva.example/' -> http://xn--bcher-kva.example/
+ok   'http://%FF.example/' -> (not a URL)
 ok   origin of http://a/b/c/d;p?q: http://a
 ok   origin of http://Example.com:8080/x: http://example.com:8080
 ok   origin of https://h:443/: https://h
@@ -135,4 +158,4 @@ ok   site of https://Example.COM./: https://example.com
 ok   site of http://co.uk/: http://co.uk
 ok   site of file:///x: null
 ok   site of data:text/plain,x: null
-137 of 137 cases
+160 of 160 cases

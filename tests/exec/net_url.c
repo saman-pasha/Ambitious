@@ -40,6 +40,19 @@ static const char *const hosts[][2] = {
     { "http://foo.09/", "(not a URL)" },
     { "http://ex%41mple.com/", "http://example.com/" }, { "http://a b/", "(not a URL)" }, { "http://a<b/", "(not a URL)" },
     { "http://a%2Fb/", "(not a URL)" }, { "http://h:1:2/", "(not a URL)" },
+    /* IDNA: each label past ASCII lowercased as UTS #46 maps capitals, then xn-- and its Punycode (RFC 3492) */
+    { "http://Bücher.example/", "http://xn--bcher-kva.example/" }, { "http://ÄÖÜ.de/", "http://xn--4ca0bs.de/" },
+    { "http://münchen.de/", "http://xn--mnchen-3ya.de/" }, { "http://例え.テスト/", "http://xn--r8jz45g.xn--zckzah/" },
+    { "http://ПРИМЕР.рф/", "http://xn--e1afmkfd.xn--p1ai/" }, { "http://faß.de/", "http://xn--fa-hia.de/" },
+    { "http://☃.net/", "http://xn--n3h.net/" }, { "http://ΕΛΛΆΔΑ.gr/", "http://xn--hxakic4aa.gr/" },
+    { "http://Ελληνικά.δοκιμή/", "http://xn--hxargifdar.xn--jxalpdlp/" }, { "http://ÀÉÎÕÜ.fr/", "http://xn--0casp2a9a.fr/" },
+    { "http://ŁÓDŹ.pl/", "http://xn--d-uga0v4h.pl/" }, { "http://ĞÜŞİÖÇ.tr/", "http://xn--i-6fa8bwa8ovo32h.tr/" },
+    { "http://Ἀθῆναι.gr/", "http://xn--mxaneo7006a87a.gr/" }, { "http://ꙀꙂ.test/", "http://xn--nw8ae.test/" },
+    { "http://𐐀.test/", "http://xn--hj8c.test/" }, { "http://中文.example.com/", "http://xn--fiq228c.example.com/" },
+    { "http://मराठी.भारत/", "http://xn--d2b1ag0dl.xn--h2brj9c/" }, { "http://a.b.ü/", "http://a.b.xn--tda/" },
+    { "http://例え。テスト/", "http://xn--r8jz45g.xn--zckzah/" }, { "http://ＥＸＡＭＰＬＥ.com/", "http://example.com/" },
+    { "http://b%C3%BCcher.example/", "http://xn--bcher-kva.example/" }, { "http://xn--bcher-kva.example/", "http://xn--bcher-kva.example/" },
+    { "http://%FF.example/", "(not a URL)" },
 };
 
 static const char *const origins[][2] = {
