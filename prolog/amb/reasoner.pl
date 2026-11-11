@@ -23,14 +23,14 @@
 %%
 %% Every predicate here is amb_reason_* (or amb_why/2, amb_snapshot_load/2).
 :- ensure_loaded(library(amb/contract)).
+:- use_module(library(stream)).
 
 amb_reason([check, Snap]) :- !,
-    amb_snapshot_facts(Snap, Sections, Facts),
-    length(Facts, N),
+    amb_snapshot_load(Snap, snap(_, _, _, N)),
+    nb_getval(amb_snapshot, Sections),
     forall(member(snap(M, Doc, Rev, _), Sections), format('ok: ~w snapshot of document ~w at revision ~w~n', [M, Doc, Rev])),
     length(Sections, K),
-    format('ok: ~d section(s), ~d facts~n', [K, N]),
-    amb_snapshot_load(Snap, _).
+    format('ok: ~d section(s), ~d facts~n', [K, N]).
 amb_reason([query, Snap, GoalText]) :- !,
     amb_snapshot_load(Snap, _),
     amb_reason_goal(GoalText, Goal, Vs),
@@ -102,17 +102,68 @@ amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
     Sections = [snap(M, Doc, Rev, _)|_],
     forall(member(snap(SM, _, _, _), Sections),
            ( amb_reason_schema_facts(SM, Decls),
-             forall(member(fact(F/A, _), Decls), ( functor(H, F, A), retractall(H), dynamic(F/A) )) )),
-    forall(member(Fact, Facts), assertz(Fact)),
+             forall(member(fact(F/A, Shapes), Decls), amb_reason_store_decl(F, A, Shapes)) )),
+    forall(member(Fact, Facts), amb_reason_store(Fact)),
     length(Facts, N),
     nb_setval(amb_snapshot, Sections),
     forall(member(snap(SM2, _, _, _), Sections), amb_reason_rules(SM2)).
 
+%% THE FACTS ARE KEPT KEYED BY THEIR HANDLES' INDEXES. cocolog indexes a call by an
+%% argument's own value and keys nothing inside a compound (toolchain/REPORT.md,
+%% finding 13), so a fact whose arguments are handles -- n(Doc, Index, Gen) -- was
+%% found by walking every fact of its predicate. A fact predicate F/A with handles
+%% at positions P1..Pk is therefore stored as '$amb_F'(K1, ..., Kk, A1, ..., An), Ki
+%% the integer index of the handle at Pi (0 for none), and F/A itself is one clause
+%% that works out the keys of the handles it is called with and calls the store. A
+%% rule, a query, a proof and a printed answer see F/A as before.
+amb_reason_store_decl(F, A, Shapes) :-
+    findall(P, ( nth1(P, Shapes, S), amb_reason_keyed_shape(S) ), Ps),
+    functor(H, F, A), retractall(H), dynamic(F/A),
+    (   Ps == [] -> nb_setval(F, plain)
+    ;   length(Ps, K), atom_concat('$amb_', F, SF), SA is K + A,
+        functor(SH, SF, SA), retractall(SH), dynamic(SF/SA),
+        nb_setval(F, keyed(SF, Ps)),
+        H =.. [F|Vs], amb_reason_pick(Ps, Vs, KPs),         % not findall/3: it would copy the head's variables
+        amb_reason_key_goals(KPs, Keys, Goals),
+        append(Keys, Vs, SArgs), Stored =.. [SF|SArgs],
+        amb_reason_conj(Goals, Stored, Body),
+        assertz((H :- Body))
+    ).
+
+amb_reason_keyed_shape(handle(_)).
+amb_reason_keyed_shape(handle_or_none(_)).
+amb_reason_keyed_shape(xhandle(_, _)).
+
+%% the head's variables at the keyed positions, themselves
+amb_reason_pick([], _, []).
+amb_reason_pick([P|Ps], Vs, [V-P|Rest]) :- nth1(P, Vs, V), amb_reason_pick(Ps, Vs, Rest).
+
+amb_reason_key_goals([], [], []).
+amb_reason_key_goals([V-_|Rest], [K|Ks], [amb_reason_key(V, K)|Gs]) :- amb_reason_key_goals(Rest, Ks, Gs).
+
+amb_reason_conj([], G, G).
+amb_reason_conj([A|As], G, (A, B)) :- amb_reason_conj(As, G, B).
+
+%% a handle's key: its index; none's 0; unbound, unbound
+amb_reason_key(V, K) :-
+    (   var(V) -> true
+    ;   V == none -> K = 0
+    ;   compound(V), arg(2, V, I), integer(I) -> K = I
+    ;   K = -1
+    ).
+
+amb_reason_store(T) :-
+    functor(T, F, _),
+    (   nb_getval(F, keyed(SF, Ps))
+    ->  T =.. [_|Args], findall(K, ( member(P, Ps), nth1(P, Args, V), amb_reason_key(V, K) ), Keys),
+        append(Keys, Args, SArgs), S =.. [SF|SArgs], assertz(S)
+    ;   assertz(T)
+    ).
+
 %% the snapshot read and validated: its sections and its facts, in their order
 amb_snapshot_facts(File, Sections, Facts) :-
     (   exists_file(File) -> true ; throw(error(amb_snapshot(no_file(File)), _)) ),
-    read_file_to_codes(File, Codes),
-    split_string(Codes, "\n", "\r", Lines0),
+    amb_reason_lines(File, Lines0),
     exclude(amb_reason_blank, Lines0, Lines),
     (   Lines = [First|_] -> true ; throw(error(amb_snapshot(empty(File)), _)) ),
     amb_reason_term(First, 1, Head),
@@ -143,6 +194,19 @@ amb_reason_sections([L|Ls], No, Cur, Sections, Facts) :-
     ).
 
 amb_reason_blank(S) :- string_length(S, 0).
+
+%% the file's lines, read from a stream a line at a time: cocolog's
+%% read_file_to_codes/2 refuses a file past 16 MiB (toolchain/REPORT.md, finding 12)
+amb_reason_lines(File, Lines) :-
+    open(File, read, S),
+    amb_reason_read_lines(S, Lines),
+    close(S).
+amb_reason_read_lines(S, Lines) :-
+    read_line_to_codes(S, C),
+    (   C == end_of_file -> Lines = []
+    ;   ( append(C0, [0'\r], C) -> true ; C0 = C ),
+        string_codes(L, C0), Lines = [L|Rest], amb_reason_read_lines(S, Rest)
+    ).
 
 amb_reason_term(Line, No, T) :-
     catch(read_term_from_atom(Line, T, []), _,

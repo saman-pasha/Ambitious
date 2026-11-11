@@ -391,6 +391,37 @@ decoding GIF or JPEG pixels (their sizes are read).
 
 **Gate:** a basic interactive page runs, with DOM interoperability tests.
 
+*Design, not yet built.* QuickJS (MIT), pinned in `toolchain/pins` and built
+from its source by `bootstrap.sh`, is linked as a native library, as libc is.
+Everything that touches it is cicilang:
+- **The C interface.** `quickjs.h` is not read as it stands, just as
+  `<netdb.h>`'s `addrinfo` was not (REPORT, finding 11). `src/js/` declares the
+  subset it uses. `JSRuntime` and `JSContext` are opaque `own` pointers whose
+  free functions take them `own`. `JSValue` is the 16-byte struct of a 64-bit
+  build. Reference counts are taken and given through QuickJS's exported
+  functions, not its inline ones.
+- **The module boundary.** A `script` module with a contract: scripts (source,
+  origin, outcome), console messages, errors, event listeners and timers, with
+  facts `js_script/4`, `js_console/3`, `js_error/3` and `js_listener/2`. No
+  JavaScript object ever reaches a snapshot.
+- **The DOM's bindings.** A wrapper holds a node's handle (document, index,
+  generation) packed as an integer, never a pointer. Every DOM call from script
+  is one of the DOM module's operations, so the contract's preconditions,
+  invariants and mutation log hold for script as for the reasoner. A stale
+  handle throws in JavaScript.
+- **The event loop.** Classic scripts run in document order after the parse
+  (no `document.write`, no parser blocking). Then DOMContentLoaded and load.
+  Timers run in virtual time, under a step budget per page.
+  `ambitious click PAGE SELECTOR` dispatches a click.
+- **Reasoning.** The DOM's mutation log says what script changed. The script
+  facts say what ran, what failed and what listens. New rules: a click listener
+  on an element that takes no focus (accessibility), uncaught errors, and
+  timers that never settle.
+- **Gate.** A counter button and a list built by script, both run and
+  re-snapshotted, and interoperability tests for `getElementById`,
+  `querySelector` (over the CSS module's matcher), `textContent`,
+  `setAttribute`, `appendChild`, `classList` and events.
+
 ### Phase 9: Accessibility and developer tools
 
 - `src/a11y/`: an accessibility tree with roles and names (from content,
@@ -442,6 +473,19 @@ into tabs (there are no tabs), and preferences that change rendering.
 
 **Gate:** measured numbers and documented limitations.
 
+*As built:*
+- **Numbers.** `docs/performance.md` has every stage, measured by `ambitious
+  bench` on three pages. For a page of ordinary size the reasoner costs two to
+  four times what loading and drawing it costs, about 40 to 90 ms. At 400,000
+  facts, reading the snapshot is nearly all of it.
+- **Audit.** `docs/security.md` covers the five boundaries (snapshots,
+  requests, network, profile, memory and processes), each with its test, and
+  the four gaps the audit closed.
+- **Limitations.** `docs/limitations.md`, module by module.
+- **Not done.** Incremental snapshots (deltas from the mutation log), rule
+  bucketing in the cascade, and a faster deflate. Each is named in
+  `docs/performance.md` with what it would save.
+
 ---
 
 ## 8. Testing and the gates
@@ -469,7 +513,7 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 
 | Phase | State |
 |---|---|
-| 0 Toolchain | **done**: `toolchain/`; `check.sh` GREEN; report with 11 findings (the 9th: builds name their target, so the code runs under valgrind and on other machines) |
+| 0 Toolchain | **done**: `toolchain/`; `check.sh` GREEN; report with 13 findings (the 9th: builds name their target, so the code runs under valgrind and on other machines) |
 | 1 Contract | **done**: `docs/contract.md`, `contracts/dom.pl`, the validator; contract gate GREEN (32 refusals) |
 | 2 Macro integration | **done**: `include/amb.pl` and `prolog/amb/gen_c.pl` make the DOM's C from its contract; gen gate (goldens) and exec gate GREEN, valgrind clean |
 | 3 DOM vertical slice | **done, the first milestone**: each §6.3 criterion has a passing test (the table in Phase 3); `bin/ambitious loop` runs the whole loop; `make test` GREEN |
@@ -477,10 +521,10 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 | 5 CSS | **done, first slice**: `contracts/css.pl` and `src/css/css.c`. It covers sheets (comments, strings, `@media` against an 800x600 viewport), Selectors 4 (attribute operators, the structural pseudo-classes, `:nth-*()`, `:not`, `:is`, `:where`) with their specificity, and the cascade (origin, importance, the style attribute, specificity, order). It also covers inheritance, the global keywords, presentational hints, and 26 computed properties with the shorthands that set them. Each computed value is a fact with its winning declaration. `css_explain/3` says why, `css_lost/4` names the cascade step at which each loser lost, and contrast and unused rules are diagnostics. `tests/exec/css_cascade` (120 cases, valgrind clean) and `tests/integ/style` |
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
-| 8 JavaScript | planned |
+| 8 JavaScript | **designed, not built**: the container could not fetch QuickJS (apt's mirror does not resolve here), and fetching a third party's source is outside this work's scope. The design, as this work has taught it, is under Phase 8 |
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
-| 11 Hardening | planned |
+| 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
 
 ## 10. Risks
 

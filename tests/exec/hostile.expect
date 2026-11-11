@@ -1,0 +1,4 @@
+3000 nested divs: 33011 bytes, 3006 nodes, depth 513, 3005 boxes, the paragraph not red; invariants: 0 broken
+:is() nested 5000 deep: 25039 bytes, 8 nodes, depth 4, 4 boxes, the paragraph not red; invariants: 0 broken
+30 descendant combinators over 400 divs: 2159 bytes, 408 nodes, depth 404, 404 boxes, the paragraph red; invariants: 0 broken
+:not() four deep, and nth-child over 512 siblings: 5249 bytes, 1033 nodes, depth 4, 517 boxes, the paragraph red; invariants: 0 broken

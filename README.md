@@ -9,7 +9,10 @@ cocolog.
 - [`reasoning_native_browser_plan.md`](reasoning_native_browser_plan.md) is the
   architecture.
 - [`PLAN.md`](PLAN.md) is the implementation plan and its status.
-- [`docs/contract.md`](docs/contract.md) is the module contract.
+- [`docs/contract.md`](docs/contract.md) is the module contract;
+  [`docs/performance.md`](docs/performance.md), [`docs/security.md`](docs/security.md)
+  and [`docs/limitations.md`](docs/limitations.md) are what was measured,
+  audited and left undone.
 - [`toolchain/`](toolchain/) is what it is built with: the pins, the bootstrap
   and the Phase 0 report.
 
@@ -89,6 +92,7 @@ bin/ambitious parse PAGE        # its tree and parse errors
 bin/ambitious style PAGE        # its elements' computed styles
 bin/ambitious render PAGE PNG   # laid out in an 800x600 viewport and drawn
 bin/ambitious inspect PAGE      # its resources, accessibility tree and diagnostics
+bin/ambitious bench PAGE [N]    # each stage's time, and the reasoner's
 bin/ambitious --profile DIR load PAGE   # ... and the visit kept (history, bookmarks, permit, forget)
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
 tools/amb doc css               # a contract's reference
@@ -108,3 +112,4 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
 | `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |
+| `tools/gen-big-page.py` | a large page to measure the engine with |

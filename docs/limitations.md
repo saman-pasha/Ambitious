@@ -1,0 +1,17 @@
+# Limitations, as of Phase 11
+
+What each module does not do, so that a reader knows what an answer can rest
+on. Each module's file says the same at its top.
+
+| module | not done |
+|---|---|
+| HTML (`src/html/`) | foreign content (SVG, MathML) and template contents, which are 327 of html5lib's 347 failures; the 2025 select rules; encodings other than UTF-8; `document.write` |
+| CSS (`src/css/`) | 29 properties, no more (no float, position, flex or grid properties, vertical-align, overflow, z-index, transforms, animations); border-style folded into the border shorthands; one border colour for four sides; `@supports`, `@layer`, `@import`, `@font-face`; pseudo-classes of state and pseudo-elements; `:has()`; custom properties and `calc()`; rem against 16px, not the root's size |
+| Layout (`src/layout/`) | floats, positioning, flex and grid as such (their containers are blocks), vertical-align, min/max-height, a percentage height, rowspan, writing modes and bidirectional text, hyphenation, kerning |
+| Paint (`src/paint/`) | images other than PNG drawn (GIF and JPEG are sized but not decoded); border styles (every border solid); background images; shadows; text set from six DejaVu faces only, slanted for italic |
+| Network (`src/net/`) | https (no TLS), cookies, caching, compression, `@import`, `srcset`, iframes, forms, IDNA and IPv6 literals |
+| Accessibility (`src/a11y/`) | descriptions, states and properties (checked, expanded, ...), live regions, accname's recursion through embedded controls |
+| Profile (`prolog/amb/profile.pl`) | sessions restored into tabs (there are no tabs), and preferences that change rendering |
+| JavaScript | none: Phase 8 is a design (`PLAN.md`), not code |
+| Reasoning | a snapshot costs about 27 µs a fact to read, so pages past some 100,000 facts take seconds (`docs/performance.md`); snapshots are whole, not deltas; the reasoner runs unsandboxed |
+| Toolchain | the findings in `toolchain/REPORT.md`, among them no deep indexing in cocolog (worked around), a 16 MiB file read (worked around), and `struct addrinfo` not lowered from `<netdb.h>` (declared locally) |

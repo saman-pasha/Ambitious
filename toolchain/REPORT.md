@@ -195,3 +195,22 @@ neighbours.
     LP64 layout), `getaddrinfo`, and `freeaddrinfo` with an `own` parameter,
     so the checker sees the list consumed. Name lookup and connections then
     work, and are valgrind clean.
+12. **`read_file_to_codes/2` refuses a file over 16 MiB**, by failing with no
+    error (`lib/files.cicili`: `st_size > 16777216`). A large page's snapshot
+    (21 MB, 408,681 facts) made the reasoner exit 1 with nothing said.
+    `prolog/amb/reasoner.pl` now reads a snapshot a line at a time through
+    `library(stream)`, where `open/3` lives in cocolog. It also says when a
+    command fails.
+13. **cocolog keys nothing inside a compound** (COMPAT.md: no deep index; "the
+    inner key as an argument of its own"). Every snapshot fact is keyed by a
+    handle, `n(Doc, Index, Gen)`, so a lookup by handle walked every fact of
+    its predicate. Over 100,000 facts that was 0.385 ms against 0.014 ms for an
+    integer key, and the reasoning cost grew as the square of the page.
+
+    The reasoner now keeps each fact predicate with handle arguments as
+    `'$amb_F'(K1, ..., Kk, Args...)`, each Ki a handle's integer index. F
+    itself becomes one clause that works out the keys from the handles it is
+    called with. Snapshots, rules, queries, proofs and answers are unchanged.
+    On the 21 MB snapshot, `advise` fell from 77 s to 11.7 s, all of it now the
+    snapshot's reading. One trap on the way: building that clause with
+    `findall/3` copies the head's variables, which unlinks the keys.

@@ -18,6 +18,8 @@
    :where(), :root, :empty, :link, :any-link, :checked, :disabled, :enabled;
    the combinators ' ', >, + and ~. A pseudo-class of state (:hover, :focus,
    :visited, ...) and a pseudo-element never match: a page is laid out at rest.
+   :not(), :is() and :where() nest at most 16 deep, and one match tests at most
+   4096 compounds: past either, the selector matches nothing.
 
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
@@ -45,6 +47,11 @@ amb_implementation(css);
 #define CSS_MAXPARTS 32
 #define CSS_VIEWPORT_W 800.0
 #define CSS_VIEWPORT_H 600.0
+/* a selector's functional pseudo-classes nest at most so deep, and one match of an
+   element against a selector tests at most so many compounds: a selector made to
+   recurse or to backtrack without end matches nothing, and costs no more */
+#define CSS_MAX_NESTING 16
+#define CSS_MATCH_BUDGET 4096
 
 /* ---- the user agent's style sheet: the HTML Standard's rendering section (15.3), abridged ---- */
 static const char css_ua_sheet[] =
@@ -794,10 +801,11 @@ static size_t css_split(const char *s, size_t n, css_part *parts, size_t max) {
     return k;
 }
 
-static uint32_t css_spec_list(const char *s, size_t n);
+static uint32_t css_spec_list(const char *s, size_t n, int depth);
 
-static uint32_t css_spec_compound(const char *s, size_t n) {
+static uint32_t css_spec_compound(const char *s, size_t n, int depth) {
     uint32_t a = 0, b = 0, c = 0, extra = 0;
+    if (depth > CSS_MAX_NESTING) return 0;
     size_t i = 0;
     while (i < n) {
         char ch = s[i];
@@ -822,7 +830,7 @@ static uint32_t css_spec_compound(const char *s, size_t n) {
                 if (e >= n) return a * 65536 + b * 256 + c + extra;
                 if (css_eq_ci(ps, pn, "where")) {}
                 else if (css_eq_ci(ps, pn, "not") || css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "matches") || css_eq_ci(ps, pn, "has"))
-                    extra += css_spec_list(s + i + 1, e - i - 1);
+                    extra += css_spec_list(s + i + 1, e - i - 1, depth + 1);
                 else if (element) c++;
                 else b++;
                 i = e + 1;
@@ -838,21 +846,21 @@ static uint32_t css_spec_compound(const char *s, size_t n) {
     return a * 65536 + b * 256 + c + extra;
 }
 
-static uint32_t css_spec_complex(const char *s, size_t n) {
+static uint32_t css_spec_complex(const char *s, size_t n, int depth) {
     css_part parts[CSS_MAXPARTS];
     size_t k = css_split(s, n, parts, CSS_MAXPARTS);
     uint32_t sum = 0;
-    for (size_t j = 0; j < k; j++) sum += css_spec_compound(s + parts[j].start, parts[j].len);
+    for (size_t j = 0; j < k; j++) sum += css_spec_compound(s + parts[j].start, parts[j].len, depth);
     return sum;
 }
 
 /* a list's specificity: its most specific selector's */
-static uint32_t css_spec_list(const char *s, size_t n) {
+static uint32_t css_spec_list(const char *s, size_t n, int depth) {
     uint32_t best = 0;
     size_t a = 0;
     while (a < n) {
         size_t b = css_comma(s, n, a);
-        uint32_t sp = css_spec_complex(s + a, b - a);
+        uint32_t sp = css_spec_complex(s + a, b - a, depth);
         if (sp > best) best = sp;
         a = b + 1;
     }
@@ -887,7 +895,7 @@ static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t
             amb_span sp = text_add(s, data(sel), len(sel));
             css_rule_h r = rule_new(s);
             s->rule[r.index].selector = sp;
-            s->rule[r.index].spec = css_spec_complex(data(sel), len(sel));
+            s->rule[r.index].spec = css_spec_complex(data(sel), len(sel), 0);
             s->rule[r.index].order = r.index;
             rules_append(s, sheet, r.index);
             css_parse_block(s, r.index, blk, bn);
@@ -1026,14 +1034,14 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
     return k % a == 0 && k / a >= 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n);
+static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget);
 
 /* one of a selector list's complex selectors matches x */
-static int css_list_matches(const dom_document *d, uint32_t x, const char *s, size_t n) {
+static int css_list_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
     size_t a = 0;
     while (a < n) {
         size_t b = css_comma(s, n, a);
-        if (css_complex_matches(d, x, s + a, b - a)) return 1;
+        if (css_complex_matches(d, x, s + a, b - a, depth, budget)) return 1;
         a = b + 1;
     }
     return 0;
@@ -1115,9 +1123,9 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* a compound selector holds of the element x */
-static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t n) {
+static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
     size_t i = 0;
-    if (n == 0) return 0;
+    if (n == 0 || depth > CSS_MAX_NESTING || --*budget < 0) return 0;
     while (i < n) {
         char c = s[i];
         if (c == '*') { i++; continue; }
@@ -1156,8 +1164,8 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
                 const char *as = s + i + 1;
                 size_t an = e - i - 1;
                 int ok;
-                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, as, an);
-                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, as, an);
+                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, as, an, depth + 1, budget) && *budget >= 0;
+                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, as, an, depth + 1, budget);
                 else if (css_eq_ci(ps, pn, "nth-child")) ok = css_nth(d, x, as, an, 0, 0);
                 else if (css_eq_ci(ps, pn, "nth-last-child")) ok = css_nth(d, x, as, an, 1, 0);
                 else if (css_eq_ci(ps, pn, "nth-of-type")) ok = css_nth(d, x, as, an, 0, 1);
@@ -1177,24 +1185,26 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* the compounds parts[0..k) hold, parts[k-1] of x and the rest through their combinators */
-static int css_parts_match(const dom_document *d, uint32_t x, const char *s, const css_part *parts, size_t k) {
-    if (!css_compound(d, x, s + parts[k - 1].start, parts[k - 1].len)) return 0;
+static int css_parts_match(const dom_document *d, uint32_t x, const char *s, const css_part *parts, size_t k, int depth, int *budget) {
+    if (!css_compound(d, x, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
     if (k == 1) return 1;
     char comb = parts[k - 1].comb;
-    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1); }
-    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1); }
+    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
     if (comb == '~') {
-        for (uint32_t y = css_prev_element(d, x); y; y = css_prev_element(d, y)) if (css_parts_match(d, y, s, parts, k - 1)) return 1;
+        for (uint32_t y = css_prev_element(d, x); y && *budget >= 0; y = css_prev_element(d, y))
+            if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
         return 0;
     }
-    for (uint32_t y = css_parent_element(d, x); y; y = css_parent_element(d, y)) if (css_parts_match(d, y, s, parts, k - 1)) return 1;
+    for (uint32_t y = css_parent_element(d, x); y && *budget >= 0; y = css_parent_element(d, y))
+        if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
     return 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n) {
+static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
     css_part parts[CSS_MAXPARTS];
     size_t k = css_split(s, n, parts, CSS_MAXPARTS);
-    return k > 0 && css_parts_match(d, x, s, parts, k);
+    return k > 0 && css_parts_match(d, x, s, parts, k, depth, budget);
 }
 
 /* ---- the cascade ---- */
@@ -1523,7 +1533,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         clear(matched);
         for (uint32_t r = 1; r < shared; r++) {
             amb_span sel = s->rule[r].selector;
-            if (css_complex_matches(doc, x, text_ptr(s, sel), sel.len)) push_back(matched, r);
+            int budget = CSS_MATCH_BUDGET;
+            if (css_complex_matches(doc, x, text_ptr(s, sel), sel.len, 0, &budget)) push_back(matched, r);
         }
         css_element_hints(s, doc, x, &hint_sheet, &matched);
         css_style_attr(s, doc, x, &inline_sheet, &matched);

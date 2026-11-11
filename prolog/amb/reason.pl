@@ -11,4 +11,5 @@
 
 main :-
     current_prolog_flag(argv, [_|Args]),
-    catch(amb_reason(Args), E, ( amb_reason_error(E), halt(2) )).
+    (   catch(amb_reason(Args), E, ( amb_reason_error(E), halt(2) )) -> true
+    ;   format(user_error, 'reason: ~q failed~n', [Args]), halt(1) ).

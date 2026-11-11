@@ -43,7 +43,7 @@ amb_target() {
   esac
 }
 AMB_TARGET=${AMB_TARGET-$(amb_target)}
-AMB_CICILANG_FLAGS="--no-kb${AMB_TARGET:+ --target=$AMB_TARGET} -I $AMB_ROOT/include"
+AMB_CICILANG_FLAGS="--no-kb -O2${AMB_TARGET:+ --target=$AMB_TARGET} -I $AMB_ROOT/include"
 
 # cocolog finds Ambitious's Prolog (prolog/amb/...) and cicilang's library on
 # this path; cicilang puts its own library first when it runs

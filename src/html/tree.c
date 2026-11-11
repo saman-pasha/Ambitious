@@ -232,6 +232,13 @@ static void insertion_place(CTX, dom_node_h target, dom_node_h *parent, dom_node
         if (tp.index) { *parent = tp; *before = table; return; }
         *parent = st_at(open, (size_t)last_table - 1).node;
     }
+    /* past 512 open elements a node goes beside the current one, not into it: the
+       DOM's depth stays bounded, as Blink bounds it (kMaximumHTMLParserDOMTreeDepth),
+       and so does every walk of it that recurses */
+    if (st_len(open) > 512 && !before->index) {
+        dom_node_h up = dom_children_up(d, *parent);
+        if (up.index) *parent = up;
+    }
 }
 
 static void insert_node_at(CTX, dom_node_h parent, dom_node_h before, dom_node_h node) {

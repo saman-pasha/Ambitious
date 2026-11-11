@@ -26,4 +26,4 @@ a11y_schema(derived(a11y_explain_name/2,'why a node has its accessible name')).
 a11y_schema(derived(a11y_outline/2,'the headings in document order, with their levels')).
 a11y_schema(rules('rules/a11y')).
 a11y_schema(operation(build,[store(dom),store(css)],status,[mutates])).
-a11y_schema(query(tree,a11y_node(A,B,C,D,E),[A,C,D,E],'every node of the accessibility tree, its role and name')).
+a11y_schema(query(tree,a11y_node(A,_,B,C,D),[A,B,C,D],'every node of the accessibility tree, its role and name')).

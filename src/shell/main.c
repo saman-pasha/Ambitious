@@ -10,6 +10,8 @@
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
  *   ambitious style PAGE          the page's elements with their computed styles
  *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
+ *   ambitious bench PAGE [N]      each stage's time, over N runs, and the snapshot's
+ *                                 size and the reasoner's time over it
  *   ambitious inspect PAGE [--query GOAL | --why GOAL]
  *                                 the page as a developer sees it: what it loaded, its
  *                                 style and layout, its accessibility tree, and every
@@ -582,6 +584,90 @@ static int cmd_render(const char *page, const char *png) {
     return 0;
 }
 
+/* ---- measures ---- */
+
+static double now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
+
+/* each stage of a page's load, timed over n runs; then its snapshot and the reasoner */
+static int cmd_bench(const char *page, int n) {
+    PAGE_SESSION;
+    char url[4200];
+    page_url(page, url, sizeof url);
+    double t[9];
+    memset(t, 0, sizeof t);
+    static const char *const stage[9] = { "fetch the page", "parse", "fetch its resources", "cascade", "layout", "accessibility tree",
+                                          "paint", "encode the PNG", "export the snapshot" };
+    size_t nodes = 0, boxes = 0, bytes = 0, snap_bytes = 0;
+    char snap[700];
+    session_path(&s, "bench.pl", snap, sizeof snap);
+    for (int r = 0; r < n; r++) {
+        PAGE_STORES;
+        dom_init(&d, 1);
+        html_init(&p, 1);
+        css_init(&st, 1);
+        layout_init(&lt, 1);
+        net_init(&nt, 1);
+        a11y_init(&ax, 1);
+        double a = now_ms();
+        net_resource_h ph = net_fetch(&nt, url, strlen(url), NET_KIND_DOCUMENT);
+        if (nt.resource[ph.index].outcome != NET_OUTCOME_OK) { fprintf(stderr, "ambitious: cannot load %s\n", url); return 2; }
+        double b = now_ms();
+        vector<char> src;
+        append_range(src, bytes_ptr(&nt, nt.resource[ph.index].body), nt.resource[ph.index].body.len);
+        html_parse(&p, &d, data(src), len(src));
+        double c = now_ms();
+        net_fetch_subresources(&nt, &d, ph, 0);
+        double e = now_ms();
+        css_cascade(&st, &d, &nt);
+        double f = now_ms();
+        layout_run(&lt, &d, &st, &nt, VIEW_W, VIEW_H);
+        double g = now_ms();
+        a11y_build(&ax, &d, &st);
+        double h = now_ms();
+        amb_canvas cv = {0};
+        defer(cv) { AMB_CANVAS_DROP(cv); }
+        amb_paint(&lt, &nt, &cv);
+        double i = now_ms();
+        own FILE *nul = fopen("/dev/null", "wb");
+        if (!nul) return 2;
+        defer(nul) { fclose(nul); }
+        amb_png_write(&cv, nul);
+        double j = now_ms();
+        write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap);
+        double k = now_ms();
+        double dt[9] = { b - a, c - b, e - c, f - e, g - f, h - g, i - h, j - i, k - j };
+        for (int q = 0; q < 9; q++) t[q] += dt[q];
+        nodes = node_count(d);
+        boxes = box_count(lt);
+        bytes = len(src);
+    }
+    struct stat sb;
+    if (stat(snap, &sb) == 0) snap_bytes = (size_t)sb.st_size;
+    printf("%s: %zu bytes, %zu nodes, %zu boxes; mean of %d run(s)\n", url, bytes, nodes, boxes, n);
+    double total = 0;
+    for (int q = 0; q < 9; q++) { printf("  %-22s %9.2f ms\n", stage[q], t[q] / n); total += t[q] / n; }
+    printf("  %-22s %9.2f ms\n", "the engine, in all", total);
+    /* the reasoner, a process of its own: loading and checking the snapshot, then advising */
+    char out[700];
+    session_path(&s, "bench.txt", out, sizeof out);
+    double a = now_ms();
+    reason(&s, "check", snap, 0, out);
+    double b = now_ms();
+    reason(&s, "advise", snap, 0, out);
+    double c = now_ms();
+    vector<char> facts;
+    size_t lines = 0;
+    if (read_all(snap, &facts)) for (size_t q = 0; q < len(facts); q++) if (at(facts, q) == '\n') lines++;
+    printf("  the snapshot: %zu bytes, %zu lines\n", snap_bytes, lines);
+    printf("  %-22s %9.2f ms\n", "reasoner: check", b - a);
+    printf("  %-22s %9.2f ms\n", "reasoner: advise", c - b);
+    return 0;
+}
+
 /* the page as a developer sees it, and the reasoner's diagnostics of it */
 static int cmd_inspect(const char *page, const char *mode, const char *goal) {
     PAGE_SESSION;
@@ -681,6 +767,7 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "style") == 0) return cmd_style(argv[2]);
     if (argc >= 4 && strcmp(argv[1], "render") == 0) return cmd_render(argv[2], argv[3]);
+    if (argc >= 3 && strcmp(argv[1], "bench") == 0) return cmd_bench(argv[2], argc >= 4 ? atoi(argv[3]) > 0 ? atoi(argv[3]) : 1 : 5);
     if (argc >= 3 && strcmp(argv[1], "inspect") == 0)
         return cmd_inspect(argv[2], argc >= 5 && (strcmp(argv[3], "--query") == 0 || strcmp(argv[3], "--why") == 0) ? argv[3] : 0,
                            argc >= 5 ? argv[4] : 0);
