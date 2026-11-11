@@ -3,6 +3,7 @@ style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:a
 layout: rendered 800x605: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:abd30e6b81ae1595
 values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:f860a8aab2f8ae18
 atrules: rendered 800x600: 9 boxes, 6 lines, 6 text fragments; pixels fnv1a64:c250b6acdc3d4715
+selectors: rendered 800x726: 38 boxes, 30 lines, 27 text fragments; pixels fnv1a64:c1a3f75db3f48041
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
@@ -16,6 +17,25 @@ X = 150, Y = 240, N = n(1,47,0), E = span
 X = 400, Y = 120, N = n(1,31,0), E = p
 -- the lines the justified paragraph's text is on:
 L = ln(1,3,0), T = 'This', X = 100, W = 32.6953125, Y = 100, H = 25.6
+-- the text the pseudo-elements gave (counters, quotes, attr()), and a ::before's own box:
+N = n(1,33,0), T = '[', E = span
+N = n(1,33,0), T = ']', E = span
+N = n(1,36,0), T = 'Name:', E = span
+N = n(1,40,0), T = '1.', E = li
+N = n(1,42,0), T = '2.', E = li
+N = n(1,46,0), T = '1', E = li
+N = n(1,49,0), T = '1.1', E = li
+N = n(1,52,0), T = '1.2', E = li
+N = n(1,55,0), T = 'Block before', E = div
+N = n(1,60,0), T = «, E = q
+N = n(1,62,0), T = ‹, E = q
+N = n(1,62,0), T = ›, E = q
+N = n(1,60,0), T = », E = q
+N = n(1,73,0), T = 'IV', E = span
+N = n(1,76,0), T = 'IV', E = span
+N = n(1,84,0), T = 'Search the site', E = input
+N = n(1,55,0), P = before, B = bx(1,25,0), X = 18, Y = 321, W = 774, H = 30
+N = n(1,55,0), P = after, B = bx(1,27,0), X = 18, Y = 370, W = 774, H = 12
 -- the reasoner's diagnostics:
 amb_diag(missing_attribute, n(1,3,0), '<html> lacks the lang attribute').
 amb_diag(text_overflow, bx(1,32,0), 'text in <div> runs 142.7px past its 200.0px content box').

@@ -235,8 +235,46 @@ ok   @layer: a dotted name is a sublayer: color rgb(255, 0, 0)
 ok   @layer: the order its statement gives: color rgb(0, 128, 0)
 ok   @layer: anonymous layers in order: color rgb(0, 128, 0)
 ok   a string holding a brace: color rgb(255, 0, 0)
+ok   :has() a child: color rgb(255, 0, 0)
+ok   :has(>) not a grandchild: color rgb(0, 0, 0)
+ok   :has() a descendant: color rgb(255, 0, 0)
+ok   :has(+) the next sibling: color rgb(255, 0, 0)
+ok   :has(+) not a later one: color rgb(0, 0, 0)
+ok   :has(~) a later sibling: color rgb(255, 0, 0)
+ok   :has() complex: color rgb(255, 0, 0)
+ok   :has() a list: color rgb(255, 0, 0)
+ok   :not(:has()): color rgb(255, 0, 0)
+ok   :has() its argument's specificity: color rgb(255, 0, 0)
+ok   :hover: color rgb(255, 0, 0)
+ok   :hover at rest: color rgb(0, 0, 0)
+ok   :hover holds of the hovered's ancestors: color rgb(255, 0, 0)
+ok   :hover not of its descendants: color rgb(0, 0, 0)
+ok   :focus: color rgb(255, 0, 0)
+ok   :focus-visible: color rgb(255, 0, 0)
+ok   :focus not of an ancestor: color rgb(0, 0, 0)
+ok   :focus-within: color rgb(255, 0, 0)
+ok   :active: color rgb(255, 0, 0)
+ok   :visited: no history is read: color rgb(0, 0, 238)
+ok   :target with no URL: color rgb(0, 0, 0)
+ok   a ::before rule is not its element's: color rgb(0, 0, 0)
+ok   ::before's own value: ::before color rgb(0, 128, 0)
+ok   ::before inherits from its element: ::before color rgb(255, 0, 0)
+ok   ::before's content: ::before content 'x' counter(c)
+ok   ::before with no content: none: ::before color (none)
+ok   :before, as CSS 2 wrote it: ::before color rgb(0, 128, 0)
+ok   ::after: ::after color rgb(0, 128, 0)
+ok   ::before of any element: ::before color rgb(0, 128, 0)
+ok   ::before's specificity: ::before color rgb(0, 128, 0)
+ok   ::before's display, not blockified: ::before display inline
+ok   q's quotes (the user agent's): ::before content open-quote
+ok   ::first-line: ::first-line color rgb(0, 128, 0)
+ok   ::first-letter's em: ::first-letter font_size 32px
+ok   ::marker: ::marker color rgb(0, 128, 0)
+ok   ::placeholder (the user agent's): ::placeholder color rgb(117, 117, 117)
+ok   ::placeholder: ::placeholder color rgb(0, 128, 0)
+ok   ::selection: none read: color rgb(0, 0, 0)
 ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-241 of 241 cases
+279 of 279 cases

@@ -1,5 +1,5 @@
 == file://ROOT/tests/pages/a11y.html
-123 nodes, 0 parse errors; 3 resources; 163 rules, 368 declarations; 45 boxes, 26 lines
+123 nodes, 0 parse errors; 3 resources; 167 rules, 372 declarations; 45 boxes, 27 lines
 == resources
   document   ok                 file://ROOT/tests/pages/a11y.html
   image      ok                 file://ROOT/tests/pages/logo.png

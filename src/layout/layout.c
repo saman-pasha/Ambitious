@@ -24,6 +24,17 @@
    pieces' line heights about one baseline; it is aligned left, right, centre or
    justified.
 
+   Pseudo-elements. An element's ::before and ::after are its first and last
+   children, boxes as their display has them (inline ones in the lines), their
+   content's text made in tree order before layout: strings, attr(), counter()
+   and counters() (counter-reset and counter-increment, each counter's scope
+   its element's, its descendants' and its later siblings', CSS 2.1 12.4.1),
+   and the quotes (open-quote, close-quote: the quotes property's, or English's
+   for auto). ::first-letter is its block's first letter (the punctuation before
+   it too) in its own style; ::first-line the first line's pieces in its style
+   where they have their block's, the line broken in it; ::marker the list
+   marker's style; ::placeholder an empty field's placeholder text.
+
    Tables, in the automatic layout. Each column's minimum and maximum widths come
    from its cells' content (colspan shared out), a declared cell width fixing
    them. The table fills its declared width, or shrinks to its columns'
@@ -53,8 +64,8 @@ amb_implementation(layout);
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run */
 #define LCTX layout_tree *t, const dom_document *d, const css_style *st, const net_loader *nt, const amb_fonts *f, const vector<uint32_t> *sx, \
-    const vector<lay_style> *sc
-#define LARGS t, d, st, nt, f, sx, sc
+    const vector<lay_style> *sc, const vector<lay_gen> *gx
+#define LARGS t, d, st, nt, f, sx, sc, gx
 
 #define LAY_SPACING 2.0
 
@@ -84,6 +95,43 @@ typedef struct lay_style {
     lay_len m[4], p[4], width, height, maxw, indent;
     double b[4];
 } lay_style;
+
+/* ---- pseudo-elements, as layout reads them ---- */
+
+/* a pseudo-element of an element (its css_pseudo: ::before 1, ::after 2, ::first-line,
+   ::first-letter, ::marker, ::placeholder), its style, and a ::before's or an ::after's
+   content as text, in the tree's pool */
+typedef struct lay_gen { uint32_t el, pseudo, style; amb_span text; } lay_gen;
+
+/* an item of a run that is no node: a ::before or an ::after (LAY_GEN and its lay_gen's
+   index), or its text, the pseudo-element's one child (LAY_GEN | LAY_GTEXT) */
+#define LAY_GEN 0x80000000u
+#define LAY_GTEXT 0x40000000u
+#define LAY_GIDX 0x3fffffffu
+/* a node's entry in sx: its style, and whether the element has a ::before, an ::after,
+   or another pseudo-element of its own */
+#define LAY_HAS_BEFORE 0x80000000u
+#define LAY_HAS_AFTER 0x40000000u
+#define LAY_HAS_OTHER 0x20000000u
+#define LAY_SMASK 0x1fffffffu
+
+/* the index in gx (sorted by element, then pseudo-element) of el's pseudo-element pk, or -1 */
+static int64_t lay_gen_find(const vector<lay_gen> *gx, uint32_t el, uint32_t pk) {
+    size_t lo = 0, hi = len(*gx);
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        lay_gen g = at(*gx, mid);
+        if (g.el < el || (g.el == el && g.pseudo < pk)) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < len(*gx) && at(*gx, lo).el == el && at(*gx, lo).pseudo == pk) return (int64_t)lo;
+    return -1;
+}
+/* the element a run's item stands for: a pseudo-element's, or the node itself */
+static uint32_t lay_dom(const vector<lay_gen> *gx, uint32_t x) {
+    if (x & LAY_GEN) return at(*gx, x & LAY_GIDX).el;
+    return x;
+}
 
 static int lay_content_sized(lay_len l) { return l.unit == LAY_MINC || l.unit == LAY_MAXC || l.unit == LAY_FITC; }
 static double lay_res(const css_style *st, lay_len l, double base) {
@@ -265,14 +313,24 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
 }
 
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
-    uint32_t si = x < len(*sx) ? at(*sx, x) : 0;
+    if (x & LAY_GEN) { *s = at(*sc, at(*gx, x & LAY_GIDX).style); return; }
+    uint32_t si = x < len(*sx) ? at(*sx, x) & LAY_SMASK : 0;
     *s = at(*sc, si);
+}
+/* the style of el's pseudo-element pk (::first-line, ::first-letter, ::marker,
+   ::placeholder) into s: 1, or 0 when it has none */
+static int lay_pseudo_style(LCTX, uint32_t el, uint32_t pk, lay_style *s) {
+    if ((el & LAY_GEN) || el >= len(*sx) || !(at(*sx, el) & LAY_HAS_OTHER)) return 0;
+    int64_t g = lay_gen_find(gx, el, pk);
+    if (g < 0) return 0;
+    *s = at(*sc, at(*gx, (size_t)g).style);
+    return 1;
 }
 
 /* ---- the DOM, as layout walks it ---- */
 
 static int lay_is_named(const dom_document *d, uint32_t x, const char *name) {
-    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
+    return !(x & LAY_GEN) && d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
 }
 /* an element drawn by its own content rules: an image, a form control, an embedding */
 static int lay_replaced(const dom_document *d, uint32_t x) {
@@ -282,6 +340,7 @@ static int lay_replaced(const dom_document *d, uint32_t x) {
            lay_is_named(d, x, "svg");
 }
 static uint32_t lay_attr(const dom_document *d, uint32_t x, const char *name) {
+    if (x & LAY_GEN) return 0;
     uint32_t a = names_find(d, name, strlen(name));
     if (!a) return 0;
     for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) if (d->attr[at].name == a) return at;
@@ -299,22 +358,27 @@ static long lay_attr_int(const dom_document *d, uint32_t x, const char *name, lo
 }
 
 static int lay_display_of(LCTX, uint32_t x) {
+    if (x & LAY_GTEXT) return D_INLINE;
+    if (x & LAY_GEN) {
+        int gd = at(*sc, at(*gx, x & LAY_GIDX).style).display;
+        return gd == D_CONTENTS ? D_INLINE : gd;
+    }
     if (d->node[x].kind == DOM_NODE_KIND_TEXT) return D_INLINE;
     if (d->node[x].kind != DOM_NODE_KIND_ELEMENT) return D_NONE;
-    lay_style s;
-    lay_style_of(LARGS, x, &s);
-    if (s.display == D_INLINE && lay_replaced(d, x)) return D_INLINE_BLOCK;
+    int dsp = at(*sc, x < len(*sx) ? at(*sx, x) & LAY_SMASK : 0).display;
+    if (dsp == D_INLINE && lay_replaced(d, x)) return D_INLINE_BLOCK;
     if (lay_is_named(d, x, "input")) {
         uint32_t a = lay_attr(d, x, "type");
         if (a && d->attr[a].value.len == 6 && memcmp(text_ptr(d, d->attr[a].value), "hidden", 6) == 0) return D_NONE;
     }
-    return s.display;
+    return dsp;
 }
 static int lay_block_level(int dsp) {
     return dsp == D_BLOCK || dsp == D_LIST_ITEM || dsp == D_TABLE || dsp == D_ROW_GROUP || dsp == D_ROW || dsp == D_CELL || dsp == D_CAPTION;
 }
 /* an inline element with a block-level box inside it */
 static int lay_holds_block(LCTX, uint32_t x) {
+    if (x & LAY_GEN) return 0;                  /* a pseudo-element holds its text alone */
     for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
         int dsp = lay_display_of(LARGS, c);
         if (dsp == D_NONE) continue;
@@ -339,24 +403,42 @@ static void lay_item(vector<lay_seg> *segs, vector<uint32_t> *items, uint32_t no
     push_back(items, node);
     (*segs)[len(*segs) - 1].n++;
 }
+static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uint32_t> *items);
+
+/* an element child (or a pseudo-element) of a container: a block-level box, its children
+   in its place (display: contents, or an inline element that holds a block), or an item */
+static void lay_collect_el(LCTX, uint32_t c, vector<lay_seg> *segs, vector<uint32_t> *items) {
+    int dsp = lay_display_of(LARGS, c);
+    if (dsp == D_NONE) return;
+    if (dsp == D_CONTENTS || (dsp == D_INLINE && lay_holds_block(LARGS, c))) { lay_collect(LARGS, c, segs, items); return; }
+    if (lay_block_level(dsp)) {
+        lay_seg s;
+        s.node = c;
+        s.first = 0;
+        s.n = 0;
+        s.block = 1;
+        push_back(segs, s);
+        return;
+    }
+    lay_item(segs, items, c);
+}
+/* a container's children: its ::before first, its ::after last; a pseudo-element's, its text */
 static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uint32_t> *items) {
+    if (parent & LAY_GEN) { lay_item(segs, items, parent | LAY_GTEXT); return; }
+    uint32_t fl = parent < len(*sx) ? at(*sx, parent) : 0;
+    if (fl & LAY_HAS_BEFORE) {
+        int64_t g = lay_gen_find(gx, parent, 1);
+        if (g >= 0) lay_collect_el(LARGS, LAY_GEN | (uint32_t)g, segs, items);
+    }
     for (uint32_t c = d->node[parent].first_child; c; c = d->node[c].next_sibling) {
         int kind = d->node[c].kind;
         if (kind == DOM_NODE_KIND_TEXT) { lay_item(segs, items, c); continue; }
         if (kind != DOM_NODE_KIND_ELEMENT) continue;
-        int dsp = lay_display_of(LARGS, c);
-        if (dsp == D_NONE) continue;
-        if (dsp == D_CONTENTS || (dsp == D_INLINE && lay_holds_block(LARGS, c))) { lay_collect(LARGS, c, segs, items); continue; }
-        if (lay_block_level(dsp)) {
-            lay_seg s;
-            s.node = c;
-            s.first = 0;
-            s.n = 0;
-            s.block = 1;
-            push_back(segs, s);
-            continue;
-        }
-        lay_item(segs, items, c);
+        lay_collect_el(LARGS, c, segs, items);
+    }
+    if (fl & LAY_HAS_AFTER) {
+        int64_t g = lay_gen_find(gx, parent, 2);
+        if (g >= 0) lay_collect_el(LARGS, LAY_GEN | (uint32_t)g, segs, items);
     }
 }
 
@@ -480,28 +562,25 @@ static size_t lay_cps(const char *s, size_t n) {
     return k;
 }
 
-static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps, int *sp) {
-    uint32_t pe = d->node[node].parent;
-    lay_style s;
-    lay_style_of(LARGS, pe, &s);
-    amb_span span = d->node[node].data;
-    const char *tx = text_ptr(d, span);
-    size_t n = span.len, i = 0;
+/* the pieces of text tx[0, n): a text node's (node), or a pseudo-element's content (node
+   LAY_GEN | LAY_GTEXT and its index), in the style s of its element pe */
+static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, const char *tx, size_t n, int deco, vector<lay_piece> *ps, int *sp) {
+    size_t i = 0;
     lay_piece p;
     memset(&p, 0, sizeof p);
-    lay_piece_style(&p, &s);
+    lay_piece_style(&p, s);
     p.node = node;
     p.elem = pe;
     p.deco = (uint8_t)deco;
     /* a space: its advance, with letter-spacing and word-spacing */
-    double space = amb_advance(f, s.face, ' ', s.fs) + s.ls + s.wsp;
-    int collapse = s.ws == WS_NORMAL || s.ws == WS_NOWRAP || s.ws == WS_PRE_LINE;
+    double space = amb_advance(f, s->face, ' ', s->fs) + s->ls + s->wsp;
+    int collapse = s->ws == WS_NORMAL || s->ws == WS_NOWRAP || s->ws == WS_PRE_LINE;
     while (i < n) {
         char c = tx[i];
         int white = c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\n';
-        if (c == '\n' && s.ws != WS_NORMAL && s.ws != WS_NOWRAP) {
+        if (c == '\n' && s->ws != WS_NORMAL && s->ws != WS_NOWRAP) {
             /* a kept newline: a forced break, and in pre-line the spaces before it go */
-            if (s.ws == WS_PRE_LINE && len(*ps) && back(*ps).kind == P_SPACE && !back(*ps).keep) pop_back(ps);
+            if (s->ws == WS_PRE_LINE && len(*ps) && back(*ps).kind == P_SPACE && !back(*ps).keep) pop_back(ps);
             p.kind = P_BREAK;
             p.w = 0;
             push_back(ps, p);
@@ -513,7 +592,7 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
             if (!*sp) {
                 p.kind = P_SPACE;
                 p.w = space;
-                p.brk = (uint8_t)(s.ws != WS_NOWRAP);
+                p.brk = (uint8_t)(s->ws != WS_NOWRAP);
                 p.keep = 0;
                 p.off = (uint32_t)i;
                 p.len = 1;
@@ -530,7 +609,7 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
             while (j < n && (tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f')) { w += tx[j] == '\t' ? 8 * space : space; j++; }
             p.kind = P_SPACE;
             p.w = w;
-            p.brk = (uint8_t)(s.ws == WS_PRE_WRAP);
+            p.brk = (uint8_t)(s->ws == WS_PRE_WRAP);
             p.keep = 1;
             p.off = (uint32_t)i;
             p.len = (uint32_t)(j - i);
@@ -544,12 +623,12 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
         p.kind = P_WORD;
         p.off = (uint32_t)i;
         p.len = (uint32_t)(j - i);
-        if (s.tt) {
+        if (s->tt) {
             vector<char> tw;
-            lay_transform(tx + i, j - i, s.tt, &tw);
-            p.w = amb_text_width(f, s.face, s.fs, data(tw), len(tw));
-        } else p.w = amb_text_width(f, s.face, s.fs, tx + i, j - i);
-        p.w += s.ls * (double)lay_cps(tx + i, j - i);
+            lay_transform(tx + i, j - i, s->tt, &tw);
+            p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw));
+        } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i);
+        p.w += s->ls * (double)lay_cps(tx + i, j - i);
         p.brk = 0;
         p.keep = 0;
         push_back(ps, p);
@@ -558,11 +637,33 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
     }
 }
 
+static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps, int *sp) {
+    lay_style s;
+    if (node & LAY_GEN) {
+        /* a pseudo-element's content, in its style */
+        uint32_t pe = node & ~LAY_GTEXT;
+        lay_style_of(LARGS, pe, &s);
+        vector<char> gt;
+        amb_span g = at(*gx, node & LAY_GIDX).text;
+        append_range(gt, text_ptr(t, g), g.len);
+        lay_chars(LARGS, &s, node, pe, data(gt), len(gt), deco, ps, sp);
+        return;
+    }
+    /* a text node's, in its parent's style (read in place) */
+    uint32_t pe = d->node[node].parent;
+    uint32_t si = pe < len(*sx) ? at(*sx, pe) & LAY_SMASK : 0;
+    amb_span span = d->node[node].data;
+    lay_chars(LARGS, data(*sc) + si, node, pe, text_ptr(d, span), span.len, deco, ps, sp);
+}
+
 /* the pieces of an inline-level node: text, an inline element (its edges around its
    children's pieces), a forced break, an atomic box */
 static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay_piece> *ps, int *sp) {
-    if (d->node[node].kind == DOM_NODE_KIND_TEXT) { lay_text_pieces(LARGS, node, deco, ps, sp); return; }
-    if (d->node[node].kind != DOM_NODE_KIND_ELEMENT) return;
+    if (node & LAY_GTEXT) { lay_text_pieces(LARGS, node, deco, ps, sp); return; }
+    if (!(node & LAY_GEN)) {
+        if (d->node[node].kind == DOM_NODE_KIND_TEXT) { lay_text_pieces(LARGS, node, deco, ps, sp); return; }
+        if (d->node[node].kind != DOM_NODE_KIND_ELEMENT) return;
+    }
     lay_style s;
     lay_style_of(LARGS, node, &s);
     int dsp = lay_display_of(LARGS, node);
@@ -595,7 +696,20 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     p.bg = s.bg;
     p.w = lay_res(st, s.m[3], cw) + s.b[3] + lay_res(st, s.p[3], cw);
     push_back(ps, p);
-    for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling) lay_node_pieces(LARGS, c, inner, cw, ps, sp);
+    if (node & LAY_GEN) lay_node_pieces(LARGS, node | LAY_GTEXT, inner, cw, ps, sp);
+    else {
+        /* its children, after its ::before and before its ::after */
+        uint32_t fl = node < len(*sx) ? at(*sx, node) : 0;
+        if (fl & LAY_HAS_BEFORE) {
+            int64_t g = lay_gen_find(gx, node, 1);
+            if (g >= 0) lay_node_pieces(LARGS, LAY_GEN | (uint32_t)g, inner, cw, ps, sp);
+        }
+        for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling) lay_node_pieces(LARGS, c, inner, cw, ps, sp);
+        if (fl & LAY_HAS_AFTER) {
+            int64_t g = lay_gen_find(gx, node, 2);
+            if (g >= 0) lay_node_pieces(LARGS, LAY_GEN | (uint32_t)g, inner, cw, ps, sp);
+        }
+    }
     p.kind = P_CLOSE;
     p.w = lay_res(st, s.p[1], cw) + s.b[1] + lay_res(st, s.m[1], cw);
     push_back(ps, p);
@@ -700,7 +814,12 @@ static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) 
 static uint32_t lay_new_box(LCTX, uint32_t parent, uint32_t el, layout_box_kind kind) {
     layout_box_h h = box_new(t);
     t->box[h.index].kind = kind;
-    if (el) t->box[h.index].node = node_handle(d, el);
+    if (el & LAY_GEN) {
+        /* a pseudo-element's box: its element's, and which pseudo-element */
+        lay_gen g = at(*gx, el & LAY_GIDX);
+        t->box[h.index].node = node_handle(d, g.el);
+        t->box[h.index].pseudo = (uint8_t)g.pseudo;
+    } else if (el) t->box[h.index].node = node_handle(d, el);
     if (parent) children_append(t, parent, h.index);
     return h.index;
 }
@@ -793,6 +912,73 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
                           uint32_t style_el, lay_mc *mt, lay_mc *mb, int *empty);
 static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, lay_mc *et, lay_mc *eb, int *empty);
 
+/* an empty text field's placeholder (its attribute's text, on one line, white space
+   collapsed) in its content box, in the style of its ::placeholder: a line of one
+   generated fragment, in the middle of an input, at the top of a textarea */
+static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
+    uint32_t a = lay_attr(d, el, "placeholder");
+    if (!a || d->attr[a].value.len == 0) return;
+    int input = lay_is_named(d, el, "input");
+    if (input) {
+        uint32_t ty = lay_attr(d, el, "type");
+        if (ty) {
+            static const char *const text_types[8] = { "text", "search", "email", "url", "tel", "password", "number", "" };
+            amb_span tv = d->attr[ty].value;
+            int ok = 0;
+            for (int k = 0; k < 8 && !ok; k++)
+                if (tv.len == strlen(text_types[k]) && memcmp(text_ptr(d, tv), text_types[k], tv.len) == 0) ok = 1;
+            if (!ok) return;
+        }
+        uint32_t v = lay_attr(d, el, "value");
+        if (v && d->attr[v].value.len) return;
+    } else if (!lay_is_named(d, el, "textarea") || d->node[el].first_child) return;
+    lay_style ps = *es;
+    lay_pseudo_style(LARGS, el, CSS_PSEUDO_PLACEHOLDER, &ps);
+    vector<char> txt;
+    amb_span v = d->attr[a].value;
+    const char *src = text_ptr(d, v);
+    int sp = 1;
+    for (size_t i = 0; i < v.len; i++) {
+        char c = src[i];
+        int white = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+        if (white) { if (!sp) push_back(txt, ' '); sp = 1; continue; }
+        push_back(txt, c);
+        sp = 0;
+    }
+    while (len(txt) && back(txt) == ' ') pop_back(&txt);
+    if (!len(txt)) return;
+    double tw = amb_text_width(f, ps.face, ps.fs, data(txt), len(txt)) + ps.ls * (double)lay_cps(data(txt), len(txt));
+    double h = t->box[b].h, lh = input ? h : ps.lh;
+    double base = (lh - (ps.asc + ps.desc)) / 2 + ps.asc;
+    layout_line_h lnh = line_new(t);
+    uint32_t ln = lnh.index;
+    t->line[ln].x = 0;
+    t->line[ln].y = 0;
+    t->line[ln].w = t->box[b].w;
+    t->line[ln].h = lh;
+    t->line[ln].baseline = base;
+    lines_append(t, b, ln);
+    amb_span tsp = text_add(t, data(txt), len(txt));
+    layout_frag_h fh = frag_new(t);
+    uint32_t fr = fh.index;
+    t->frag[fr].kind = LAYOUT_FRAG_KIND_GENERATED;
+    t->frag[fr].node = node_handle(d, el);
+    t->frag[fr].text = tsp;
+    t->frag[fr].x = 0;
+    t->frag[fr].y = base - ps.asc;
+    t->frag[fr].w = tw;
+    t->frag[fr].h = ps.asc + ps.desc;
+    t->frag[fr].baseline = base;
+    t->frag[fr].face = (uint8_t)ps.face;
+    if (ps.font) t->frag[fr].font = resource_handle(nt, ps.font);
+    t->frag[fr].size = ps.fs;
+    t->frag[fr].spacing = ps.ls;
+    t->frag[fr].word_spacing = ps.wsp;
+    t->frag[fr].italic = ps.italic;
+    t->frag[fr].color = ps.color;
+    frags_append(t, ln, fr);
+}
+
 /* an atomic inline's box, laid out: a replaced element's content, or an inline-block's
    children as a new formatting context */
 static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw) {
@@ -809,7 +995,11 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     t->box[b].w = p->aw;
     t->box[b].how = replaced || s.width.unit == LAY_AUTO ? (replaced ? LAYOUT_WIDTH_HOW_INTRINSIC : LAYOUT_WIDTH_HOW_SHRINK_TO_FIT)
                                                          : (s.width.unit != LAY_PX ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED);
-    if (replaced) { t->box[b].h = p->ah > 0 ? p->ah : 0; return b; }
+    if (replaced) {
+        t->box[b].h = p->ah > 0 ? p->ah : 0;
+        lay_placeholder(LARGS, b, el, &s);
+        return b;
+    }
     lay_mc et, eb;
     int empty;
     lay_flow_children(LARGS, b, el, 1, s.height.unit == LAY_AUTO, &et, &eb, &empty);
@@ -826,12 +1016,27 @@ static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
     return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
 }
 
-/* the text of pieces [a, b) of one text node, white space as laid out, into out */
-static void lay_piece_text(const dom_document *d, const vector<lay_piece> *ps, size_t a, size_t b, vector<char> *out) {
+/* a word's (or kept spaces') bytes tx[off, off + ln) of its text tx[0, n), as laid out
+   (text-transform tt for a word), into out */
+static void lay_piece_bytes(const char *tx, size_t n, int word, int tt, uint32_t off, uint32_t ln, vector<char> *out) {
+    if (off >= n) return;
+    if (off + ln > n) ln = (uint32_t)(n - off);
+    if (word && tt) { lay_transform(tx + off, ln, tt, out); return; }
+    for (uint32_t i = off; i < off + ln; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);     /* a tab: a space as laid out */
+}
+/* the text of pieces [a, b) of one text node (or a pseudo-element's content), white space
+   as laid out, into out */
+static void lay_piece_text(const layout_tree *t, const dom_document *d, const vector<lay_gen> *gx, const vector<lay_piece> *ps, size_t a, size_t b,
+                           vector<char> *out) {
     for (size_t k = a; k < b; k++) {
         lay_piece p = at(*ps, k);
         if (p.kind == P_SPACE && !p.keep) { push_back(out, ' '); continue; }
         if (p.kind != P_WORD && p.kind != P_SPACE) continue;
+        if (p.node & LAY_GEN) {
+            amb_span g = at(*gx, p.node & LAY_GIDX).text;
+            lay_piece_bytes(text_ptr(t, g), g.len, p.kind == P_WORD, p.tt, p.off, p.len, out);
+            continue;
+        }
         amb_span sp = d->node[p.node].data;
         const char *tx = text_ptr(d, sp);
         if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) { lay_transform(tx + p.off, p.len, p.tt, out); continue; }
@@ -907,7 +1112,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 layout_frag_h fh = frag_new(t);
                 uint32_t fr = fh.index;
                 t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
-                t->frag[fr].node = node_handle(d, elx);
+                t->frag[fr].node = node_handle(d, lay_dom(gx, elx));
                 t->frag[fr].x = x0 + (from < 0 ? 0 : lay_res(st, es.m[3], w));
                 t->frag[fr].w = px + p.w - lay_res(st, es.m[1], w) - t->frag[fr].x;
                 t->frag[fr].y = baseline - es.asc - lay_res(st, es.p[0], w) - es.b[0];
@@ -929,7 +1134,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         layout_frag_h fh = frag_new(t);
         uint32_t fr = fh.index;
         t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
-        t->frag[fr].node = node_handle(d, elx);
+        t->frag[fr].node = node_handle(d, lay_dom(gx, elx));
         t->frag[fr].x = x0;
         t->frag[fr].w = line_w + shift + gap - x0;
         t->frag[fr].y = baseline - es.asc - lay_res(st, es.p[0], w) - es.b[0];
@@ -953,7 +1158,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             layout_frag_h fh = frag_new(t);
             uint32_t fr = fh.index;
             t->frag[fr].kind = LAYOUT_FRAG_KIND_ATOMIC;
-            t->frag[fr].node = node_handle(d, p.node);
+            t->frag[fr].node = node_handle(d, lay_dom(gx, p.node));
             t->frag[fr].atomic = ab;
             t->frag[fr].x = px;
             t->frag[fr].y = baseline - base;
@@ -969,23 +1174,25 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             k++;
             continue;
         }
-        /* a run: this text node's words and spaces that follow, on this line */
+        /* a run: this text node's words and spaces that follow, on this line, in one style */
         size_t r = k + 1;
         double rw = p.w;
         while (r < end && extra == 0) {
             lay_piece q = at(*ps, r);
             if ((q.kind != P_WORD && q.kind != P_SPACE) || q.node != p.node) break;
+            if (q.size != p.size || q.color != p.color || q.face != p.face || q.font != p.font || q.deco != p.deco) break;
             rw += q.w;
             r++;
         }
         while (r > k + 1 && at(*ps, r - 1).kind == P_SPACE && !at(*ps, r - 1).keep) { r--; rw -= at(*ps, r).w; }
         vector<char> txt;
-        lay_piece_text(d, ps, k, r, &txt);
+        lay_piece_text(t, d, gx, ps, k, r, &txt);
         amb_span sp = text_add(t, data(txt), len(txt));
         layout_frag_h fh = frag_new(t);
         uint32_t fr = fh.index;
-        t->frag[fr].kind = LAYOUT_FRAG_KIND_TEXT;
-        t->frag[fr].node = node_handle(d, p.node);
+        /* a pseudo-element's content: generated, its element's */
+        t->frag[fr].kind = (p.node & LAY_GEN) ? LAYOUT_FRAG_KIND_GENERATED : LAYOUT_FRAG_KIND_TEXT;
+        t->frag[fr].node = node_handle(d, lay_dom(gx, p.node));
         t->frag[fr].text = sp;
         t->frag[fr].x = px;
         t->frag[fr].y = baseline - p.asc;
@@ -1006,6 +1213,100 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     return height;
 }
 
+/* the end of the first letter of text s[0, n): the punctuation before it and the letter
+   (a code point of UTF-8); 0 when there is none */
+static size_t lay_letter_end(const char *s, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        unsigned char c = (unsigned char)s[i];
+        int punct = c == '"' || c == '\'' || c == '(' || c == '[' || c == '{' || c == '!' || c == '?' || c == '*' || c == '#' || c == '%' ||
+                    c == '&' || c == '@' || c == '/' || c == '-' || c == '.' || c == ',' || c == ':' || c == ';';
+        /* the quotes and guillemets: U+00AB, U+00BB, U+2018 to U+201F */
+        int upunct = (c == 0xC2 && i + 1 < n && ((unsigned char)s[i + 1] == 0xAB || (unsigned char)s[i + 1] == 0xBB)) ||
+                     (c == 0xE2 && i + 2 < n && (unsigned char)s[i + 1] == 0x80 && (unsigned char)s[i + 2] >= 0x98 && (unsigned char)s[i + 2] <= 0x9F);
+        if (punct) { i++; continue; }
+        if (upunct) { i += c == 0xC2 ? 2 : 3; continue; }
+        size_t e = i + 1;
+        while (e < n && ((unsigned char)s[e] & 0xC0) == 0x80) e++;
+        return e;
+    }
+    return 0;
+}
+
+/* ::first-letter: the run's first letter (with the punctuation before it), a piece of its
+   own in the pseudo-element's style g (the gen index gi), its box's edges about it */
+static void lay_first_letter(LCTX, vector<lay_piece> *ps, uint32_t gi, double cw) {
+    size_t k = 0;
+    while (k < len(*ps) && at(*ps, k).kind != P_WORD) {
+        int kd = at(*ps, k).kind;
+        if (kd == P_ATOMIC || kd == P_BREAK || (kd == P_SPACE && at(*ps, k).keep)) return;
+        k++;
+    }
+    if (k >= len(*ps)) return;
+    lay_style g;
+    lay_style_of(LARGS, LAY_GEN | gi, &g);
+    lay_piece p = at(*ps, k);
+    vector<char> wt;
+    lay_piece_text(t, d, gx, ps, k, k + 1, &wt);
+    size_t cut = lay_letter_end(data(wt), len(wt));
+    if (cut == 0 || cut > p.len) return;
+    lay_piece a = p, r = p;
+    lay_piece_style(&a, &g);
+    a.len = (uint32_t)cut;
+    a.w = amb_text_width(f, a.face, a.size, data(wt), cut) + a.ls * (double)lay_cps(data(wt), cut);
+    r.off = p.off + (uint32_t)cut;
+    r.len = p.len - (uint32_t)cut;
+    r.w = amb_text_width(f, r.face, r.size, data(wt) + cut, len(wt) - cut) + r.ls * (double)lay_cps(data(wt) + cut, len(wt) - cut);
+    vector<lay_piece> out;
+    for (size_t q = 0; q < k; q++) push_back(out, at(*ps, q));
+    lay_piece o;
+    memset(&o, 0, sizeof o);
+    lay_piece_style(&o, &g);
+    o.node = LAY_GEN | gi;
+    o.elem = LAY_GEN | gi;
+    o.kind = P_OPEN;
+    o.bg = g.bg;
+    o.w = lay_res(st, g.m[3], cw) + g.b[3] + lay_res(st, g.p[3], cw);
+    push_back(out, o);
+    push_back(out, a);
+    o.kind = P_CLOSE;
+    o.w = lay_res(st, g.p[1], cw) + g.b[1] + lay_res(st, g.m[1], cw);
+    push_back(out, o);
+    if (r.len > 0) push_back(out, r);
+    for (size_t q = k + 1; q < len(*ps); q++) push_back(out, at(*ps, q));
+    clear(ps);
+    append_range(ps, data(out), len(out));
+}
+
+/* ::first-line: the pieces in the style of the pseudo-element fl where they have their
+   block's (bs) -- what they inherit -- measured again */
+static void lay_first_line_pieces(LCTX, vector<lay_piece> *ps, const lay_style *bs, const lay_style *fl) {
+    for (size_t k = 0; k < len(*ps); k++) {
+        lay_piece p = at(*ps, k);
+        if (p.color == bs->color) p.color = fl->color;
+        if (p.face != bs->face || p.font != bs->font || p.size != bs->fs || p.ls != bs->ls || p.wsp != bs->wsp) { (*ps)[k] = p; continue; }
+        double old_space = amb_advance(f, p.face, ' ', p.size) + p.ls + p.wsp;
+        p.face = (uint8_t)fl->face;
+        p.font = fl->font;
+        p.italic = (uint8_t)fl->italic;
+        p.size = fl->fs;
+        p.lh = fl->lh;
+        p.asc = fl->asc;
+        p.desc = fl->desc;
+        p.ls = fl->ls;
+        p.wsp = fl->wsp;
+        if (fl->tt && p.kind == P_WORD) p.tt = (uint8_t)fl->tt;
+        double space = amb_advance(f, p.face, ' ', p.size) + p.ls + p.wsp;
+        if (p.kind == P_WORD) {
+            vector<char> wt;
+            (*ps)[k] = p;
+            lay_piece_text(t, d, gx, ps, k, k + 1, &wt);
+            p.w = amb_text_width(f, p.face, p.size, data(wt), len(wt)) + p.ls * (double)lay_cps(data(wt), len(wt));
+        } else if (p.kind == P_SPACE) p.w = old_space > 0 ? p.w * space / old_space : space;
+        (*ps)[k] = p;
+    }
+}
+
 /* the lines of the inline run [first, first + n) of items in box b, w wide; returns their height */
 static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint32_t> *items, uint32_t first, uint32_t n, double w) {
     vector<lay_piece> ps;
@@ -1013,6 +1314,23 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
     if (!lay_run_shows(&ps)) return 0;
     lay_style bs;
     lay_style_of(LARGS, container, &bs);
+    /* the block's ::first-letter and ::first-line, in its first run: the first line laid
+       out in the pseudo-element's style (its strut too), the rest as they were */
+    lay_style fl, bs1 = bs;
+    vector<lay_piece> rest;
+    int has_fl = 0;
+    if (first == 0 && !(container & LAY_GEN) && container < len(*sx) && (at(*sx, container) & LAY_HAS_OTHER)) {
+        int64_t gl = lay_gen_find(gx, container, CSS_PSEUDO_FIRST_LETTER);
+        if (gl >= 0) lay_first_letter(LARGS, &ps, (uint32_t)gl, w);
+        if (lay_pseudo_style(LARGS, container, CSS_PSEUDO_FIRST_LINE, &fl)) {
+            has_fl = 1;
+            append_range(rest, data(ps), len(ps));
+            lay_first_line_pieces(LARGS, &ps, &bs, &fl);
+            bs1.lh = fl.lh;
+            bs1.asc = fl.asc;
+            bs1.desc = fl.desc;
+        }
+    }
     vector<uint32_t> open;
     size_t i = 0, np = len(ps);
     double y = 0;
@@ -1048,9 +1366,15 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        y += lay_line(LARGS, b, &bs, &ps, start, end, w, y, !last, indent, &open);
+        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, w, y, !last, indent, &open);
+        else y += lay_line(LARGS, b, &bs, &ps, start, end, w, y, !last, indent, &open);
         indent = 0;
         i = j;
+        if (has_fl) {
+            /* past the first line: the pieces as their own style has them */
+            for (size_t q = i; q < np; q++) ps[q] = at(rest, q);
+            has_fl = 0;
+        }
         if (forced) {
             /* a break: the next line begins after it, its leading spaces kept if pre */
             continue;
@@ -1087,16 +1411,20 @@ static uint32_t lay_first_line(const layout_tree *t, uint32_t b, uint32_t *owner
     return 0;
 }
 
-static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *s) {
-    if (s->list == 0) return;
+static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
+    if (ls->list == 0 || (el & LAY_GEN)) return;
+    /* the marker's style: its ::marker's, or the list item's */
+    lay_style sm = *ls;
+    lay_pseudo_style(LARGS, el, CSS_PSEUDO_MARKER, &sm);
+    sm.list = ls->list;
     uint32_t owner = 0, ln = lay_first_line(t, b, &owner);
     if (!ln) return;
     char txt[32];
     size_t tn;
     uint32_t cp = 0;
-    if (s->list == 1) cp = 0x2022;
-    else if (s->list == 2) cp = 0x25E6;
-    else if (s->list == 3) cp = 0x25AA;
+    if (sm.list == 1) cp = 0x2022;
+    else if (sm.list == 2) cp = 0x25E6;
+    else if (sm.list == 3) cp = 0x25AA;
     if (cp) {
         txt[0] = (char)(0xE0 | cp >> 12);
         txt[1] = (char)(0x80 | (cp >> 6 & 0x3F));
@@ -1111,19 +1439,19 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *s) {
             if (lay_display_of(LARGS, c) == D_LIST_ITEM) ord++;
         ord = lay_attr_int(d, el, "value", ord);
         char num[24];
-        if (s->list == 4) snprintf(num, sizeof num, "%ld", ord);
-        else if (s->list == 5 || s->list == 6) {
+        if (sm.list == 4) snprintf(num, sizeof num, "%ld", ord);
+        else if (sm.list == 5 || sm.list == 6) {
             long v = ord;
             char rev[16];
             size_t k = 0;
-            while (v > 0 && k < sizeof rev) { v--; rev[k++] = (char)((s->list == 5 ? 'a' : 'A') + v % 26); v /= 26; }
+            while (v > 0 && k < sizeof rev) { v--; rev[k++] = (char)((sm.list == 5 ? 'a' : 'A') + v % 26); v /= 26; }
             for (size_t i = 0; i < k; i++) num[i] = rev[k - 1 - i];
             num[k] = 0;
-        } else lay_roman(ord, s->list == 8, num, sizeof num);
+        } else lay_roman(ord, sm.list == 8, num, sizeof num);
         tn = (size_t)snprintf(txt, sizeof txt, "%s.", num);
     }
     /* outside the content, its right end half an em before the list item's content box */
-    double mw = amb_text_width(f, s->face, s->fs, txt, tn);
+    double mw = amb_text_width(f, sm.face, sm.fs, txt, tn);
     double off_x = 0;
     for (uint32_t x = owner; x && x != b; x = t->box[x].parent) off_x += t->box[x].x;
     amb_span sp = text_add(t, txt, tn);
@@ -1133,15 +1461,15 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *s) {
     t->frag[fr].kind = LAYOUT_FRAG_KIND_MARKER;
     t->frag[fr].node = node_handle(d, el);
     t->frag[fr].text = sp;
-    t->frag[fr].x = -off_x - t->line[ln].x - mw - s->fs * 0.5;
-    t->frag[fr].y = base - s->asc;
+    t->frag[fr].x = -off_x - t->line[ln].x - mw - sm.fs * 0.5;
+    t->frag[fr].y = base - sm.asc;
     t->frag[fr].w = mw;
-    t->frag[fr].h = s->asc + s->desc;
+    t->frag[fr].h = sm.asc + sm.desc;
     t->frag[fr].baseline = base;
-    t->frag[fr].face = (uint8_t)s->face;
-    if (s->font) t->frag[fr].font = resource_handle(nt, s->font);
-    t->frag[fr].size = s->fs;
-    t->frag[fr].color = s->color;
+    t->frag[fr].face = (uint8_t)sm.face;
+    if (sm.font) t->frag[fr].font = resource_handle(nt, sm.font);
+    t->frag[fr].size = sm.fs;
+    t->frag[fr].color = sm.color;
     frags_append(t, ln, fr);
 }
 
@@ -1438,7 +1766,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     }
     lay_block_width(t, st, b, &s, cw);
     if (content_sized && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_SHRINK_TO_FIT;
-    int root = d->node[el].parent == 1;
+    int root = !(el & LAY_GEN) && d->node[el].parent == 1;
     int bfc = root || s.bfc || s.display == D_CELL || s.display == D_CAPTION;
     lay_mc et, eb;
     lay_flow_children(LARGS, b, el, bfc, s.height.unit == LAY_AUTO, &et, &eb, empty);
@@ -1452,6 +1780,265 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     *mb = lay_mc_add(lay_mc_of(t->box[b].mb), eb);
     if (s.display == D_LIST_ITEM) lay_marker(LARGS, b, el, &s);
     return b;
+}
+
+/* ---- generated content: ::before's and ::after's text (CSS 2.1, 12) ---- */
+
+/* a counter in scope as the walk has it: its name (hashed) and its value */
+typedef struct lay_ctr { uint64_t name; long v; } lay_ctr;
+
+static uint64_t lay_hash(const char *s, size_t n) {
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 1099511628211ull; }
+    return h;
+}
+static int lay_is_word(const char *s, size_t n, const char *w) { return n == strlen(w) && memcmp(s, w, n) == 0; }
+/* s[0, n) is a call of the function fn: its arguments' text from *a, *an bytes */
+static int lay_call(const char *s, size_t n, const char *fn, size_t *a, size_t *an) {
+    size_t k = strlen(fn);
+    if (n < k + 2 || memcmp(s, fn, k) != 0 || s[k] != '(' || s[n - 1] != ')') return 0;
+    *a = k + 1;
+    *an = n - k - 2;
+    return 1;
+}
+/* the next comma-separated argument of s[*i, n), its white space trimmed */
+static int lay_arg(const char *s, size_t n, size_t *i, size_t *a, size_t *an) {
+    size_t p = *i;
+    while (p < n && (s[p] == ' ' || s[p] == '\t' || s[p] == '\n')) p++;
+    if (p >= n) return 0;
+    size_t b = p;
+    char q = 0;
+    while (p < n && (q || s[p] != ',')) {
+        if (q && s[p] == '\\') p++;
+        else if (q && s[p] == q) q = 0;
+        else if (!q && (s[p] == '"' || s[p] == '\'')) q = s[p];
+        p++;
+    }
+    size_t e = p < n ? p : n;
+    while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n')) e--;
+    *a = b;
+    *an = e - b;
+    *i = p < n ? p + 1 : n;
+    return 1;
+}
+/* a CSS string's text (s[0, n), its quotes included), its escapes made characters, into out */
+static void lay_unquote(const char *s, size_t n, vector<char> *out) {
+    if (n < 2) return;
+    for (size_t i = 1; i + 1 < n; i++) {
+        if (s[i] != '\\') { push_back(out, s[i]); continue; }
+        i++;
+        if (i + 1 >= n) break;
+        if (s[i] == '\n') continue;
+        uint32_t cp = 0;
+        size_t k = 0;
+        while (k < 6 && i + 1 < n) {
+            char c = s[i];
+            int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+            if (v < 0) break;
+            cp = cp * 16 + (uint32_t)v;
+            i++;
+            k++;
+        }
+        if (k == 0) { push_back(out, s[i]); continue; }
+        if (i + 1 < n && s[i] == ' ') i++;
+        i--;
+        if (cp == 0 || cp > 0x10FFFF) cp = 0xFFFD;
+        if (cp < 0x80) push_back(out, (char)cp);
+        else if (cp < 0x800) { push_back(out, (char)(0xC0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3F))); }
+        else if (cp < 0x10000) {
+            push_back(out, (char)(0xE0 | cp >> 12));
+            push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+            push_back(out, (char)(0x80 | (cp & 0x3F)));
+        } else {
+            push_back(out, (char)(0xF0 | cp >> 18));
+            push_back(out, (char)(0x80 | (cp >> 12 & 0x3F)));
+            push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+            push_back(out, (char)(0x80 | (cp & 0x3F)));
+        }
+    }
+}
+/* v as the counter style named s[0, n) writes it (decimal for one not known), into out */
+static void lay_counter_style(long v, const char *s, size_t n, vector<char> *out) {
+    char num[48];
+    size_t k = 0;
+    if (lay_is_word(s, n, "none")) return;
+    if (lay_is_word(s, n, "disc")) { append_range(out, "\xe2\x80\xa2", 3); return; }
+    if (lay_is_word(s, n, "circle")) { append_range(out, "\xe2\x97\xa6", 3); return; }
+    if (lay_is_word(s, n, "square")) { append_range(out, "\xe2\x96\xaa", 3); return; }
+    int upper = lay_is_word(s, n, "upper-roman") || lay_is_word(s, n, "upper-alpha") || lay_is_word(s, n, "upper-latin");
+    if ((lay_is_word(s, n, "lower-roman") || lay_is_word(s, n, "upper-roman")) && v > 0 && v < 4000) k = lay_roman(v, upper, num, sizeof num);
+    else if ((lay_is_word(s, n, "lower-alpha") || lay_is_word(s, n, "lower-latin") || lay_is_word(s, n, "upper-alpha") ||
+              lay_is_word(s, n, "upper-latin")) && v > 0) {
+        char rev[16];
+        size_t r = 0;
+        long x = v;
+        while (x > 0 && r < sizeof rev) { x--; rev[r++] = (char)((upper ? 'A' : 'a') + x % 26); x /= 26; }
+        for (size_t i = 0; i < r; i++) num[i] = rev[r - 1 - i];
+        k = r;
+    } else if (lay_is_word(s, n, "decimal-leading-zero") && v >= 0 && v < 10) k = (size_t)snprintf(num, sizeof num, "0%ld", v);
+    else k = (size_t)snprintf(num, sizeof num, "%ld", v);
+    if (k > sizeof num - 1) k = sizeof num - 1;
+    append_range(out, num, k);
+}
+/* the quote of the quotes property's value qc at depth (an open one, or a close one) into
+   out: auto's are English's, none's none */
+static void lay_quote(const css_style *st, uint32_t qc, int depth, int close, vector<char> *out) {
+    if (st->cval[qc].unit != CSS_UNIT_TEXT) {
+        if (names_is(st, st->cval[qc].word, "none", 4)) return;
+        if (depth == 0 && close) append_range(out, "\xe2\x80\x9d", 3);
+        else if (depth == 0) append_range(out, "\xe2\x80\x9c", 3);
+        else if (close) append_range(out, "\xe2\x80\x99", 3);
+        else append_range(out, "\xe2\x80\x98", 3);
+        return;
+    }
+    vector<char> src;
+    amb_span sp = st->cval[qc].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a, n, k = 0, pa = 0, pn = 0, total = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) total++;
+    size_t pairs = total / 2;
+    if (pairs == 0) return;
+    size_t want = 2 * ((size_t)depth < pairs ? (size_t)depth : pairs - 1) + (close ? 1 : 0);
+    i = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) {
+        if (k == want) { pa = a; pn = n; }
+        k++;
+    }
+    if (pn) lay_unquote(data(src) + pa, pn, out);
+}
+
+/* an element's counter-reset and counter-increment (its values from c0): a reset makes a
+   counter of this level (from mark in ctr), or sets one an earlier sibling made; an
+   increment adds to the innermost counter of its name, or makes one */
+static void lay_counters(const css_style *st, uint32_t c0, vector<lay_ctr> *ctr, size_t mark) {
+    for (int pass = 0; pass < 2; pass++) {
+        uint32_t c = c0 + (pass == 0 ? CSS_PROP_COUNTER_RESET : CSS_PROP_COUNTER_INCREMENT);
+        if (st->cval[c].unit != CSS_UNIT_TEXT) continue;
+        vector<char> src;
+        amb_span sp = st->cval[c].text;
+        append_range(src, text_ptr(st, sp), sp.len);
+        size_t i = 0, a, n;
+        uint64_t name = 0;
+        int have = 0;
+        while (css_next_part(data(src), len(src), &i, &a, &n)) {
+            if (!have) { name = lay_hash(data(src) + a, n); have = 1; continue; }
+            have = 0;
+            long v = 0;
+            int neg = 0;
+            for (size_t q = a; q < a + n; q++) {
+                char ch = data(src)[q];
+                if (ch == '-') neg = 1;
+                else if (ch >= '0' && ch <= '9' && v < 100000000) v = v * 10 + (ch - '0');
+            }
+            if (neg) v = -v;
+            size_t q = len(*ctr), lo = pass == 0 ? mark : 0;
+            int found = 0;
+            while (q > lo && !found) {
+                q--;
+                if (at(*ctr, q).name == name) {
+                    if (pass == 0) (*ctr)[q].v = v;
+                    else (*ctr)[q].v += v;
+                    found = 1;
+                }
+            }
+            if (!found) {
+                lay_ctr nc;
+                nc.name = name;
+                nc.v = v;
+                push_back(ctr, nc);
+            }
+        }
+    }
+}
+
+/* the text content's value (cc) gives element el's pseudo-element (its quotes qc), the
+   counters ctr in scope, the quotes' depth *depth: strings, attr(), counter(), counters(),
+   the quotes; an image's url() gives none */
+static void lay_content(const dom_document *d, const css_style *st, uint32_t el, uint32_t cc, uint32_t qc, const vector<lay_ctr> *ctr, int *depth,
+                        vector<char> *out) {
+    if (st->cval[cc].unit != CSS_UNIT_TEXT) return;
+    vector<char> src;
+    amb_span sp = st->cval[cc].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a, n, fa, fn;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) {
+        const char *p = data(src) + a;
+        if (p[0] == '"' || p[0] == '\'') { lay_unquote(p, n, out); continue; }
+        if (lay_is_word(p, n, "open-quote")) { lay_quote(st, qc, *depth, 0, out); (*depth)++; continue; }
+        if (lay_is_word(p, n, "close-quote")) { if (*depth > 0) { (*depth)--; lay_quote(st, qc, *depth, 1, out); } continue; }
+        if (lay_is_word(p, n, "no-open-quote")) { (*depth)++; continue; }
+        if (lay_is_word(p, n, "no-close-quote")) { if (*depth > 0) (*depth)--; continue; }
+        if (lay_call(p, n, "attr", &fa, &fn)) {
+            size_t j = 0, xa, xn;
+            if (!lay_arg(p + fa, fn, &j, &xa, &xn)) continue;
+            uint32_t nm = names_find(d, p + fa + xa, xn);
+            if (!nm) continue;
+            for (uint32_t r = d->node[el].first_attr; r; r = d->attr[r].next)
+                if (d->attr[r].name == nm) { amb_span v = d->attr[r].value; append_range(out, text_ptr(d, v), v.len); }
+            continue;
+        }
+        int one = lay_call(p, n, "counter", &fa, &fn);
+        int many = !one && lay_call(p, n, "counters", &fa, &fn);
+        if (one || many) {
+            size_t j = 0, na, nn, sa = 0, sn = 0, ya = 0, yn = 0;
+            if (!lay_arg(p + fa, fn, &j, &na, &nn)) continue;
+            if (many && !lay_arg(p + fa, fn, &j, &sa, &sn)) continue;
+            int styled = lay_arg(p + fa, fn, &j, &ya, &yn);
+            uint64_t name = lay_hash(p + fa + na, nn);
+            vector<char> sty;
+            if (styled) append_range(sty, p + fa + ya, yn);
+            else append_range(sty, "decimal", 7);
+            int any = 0;
+            for (size_t q = 0; q < len(*ctr); q++) {
+                if (at(*ctr, q).name != name) continue;
+                if (!many) continue;
+                if (any) lay_unquote(p + fa + sa, sn, out);
+                lay_counter_style(at(*ctr, q).v, data(sty), len(sty), out);
+                any = 1;
+            }
+            if (!many) {
+                long v = 0;
+                for (size_t q = len(*ctr); q > 0; q--) if (at(*ctr, q - 1).name == name) { v = at(*ctr, q - 1).v; break; }
+                lay_counter_style(v, data(sty), len(sty), out);
+            } else if (!any) lay_counter_style(0, data(sty), len(sty), out);
+            continue;
+        }
+    }
+}
+
+/* a pseudo-element's counters and its text, as the walk reaches it */
+static void lay_gen_content(layout_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sf, const vector<lay_style> *sc,
+                            vector<lay_gen> *gx, uint32_t x, uint32_t pk, vector<lay_ctr> *ctr, size_t mark, int *depth) {
+    int64_t g = lay_gen_find(gx, x, pk);
+    if (g < 0) return;
+    uint32_t si = at(*gx, (size_t)g).style;
+    if (at(*sc, si).display == D_NONE) return;
+    uint32_t c0 = at(*sf, si);
+    lay_counters(st, c0, ctr, mark);
+    vector<char> out;
+    lay_content(d, st, x, c0 + CSS_PROP_CONTENT, c0 + CSS_PROP_QUOTES, ctr, depth, &out);
+    amb_span sp = text_add(t, data(out), len(out));
+    (*gx)[(size_t)g].text = sp;
+}
+
+/* the walk that gives each ::before and ::after its text, in tree order, which counters
+   and quotes follow: x's ::before, its children (each displayed one's counters, then its
+   own walk), its ::after; the counters x's children made go out of scope at its end */
+static void lay_gen_walk(layout_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sx, const vector<uint32_t> *sf,
+                         const vector<lay_style> *sc, vector<lay_gen> *gx, uint32_t x, vector<lay_ctr> *ctr, int *depth, int level) {
+    size_t mark = len(*ctr);
+    uint32_t fl = x < len(*sx) ? at(*sx, x) : 0;
+    if (fl & LAY_HAS_BEFORE) lay_gen_content(t, d, st, sf, sc, gx, x, CSS_PSEUDO_BEFORE, ctr, mark, depth);
+    if (level < 1024)
+        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+            if (d->node[c].kind != DOM_NODE_KIND_ELEMENT || c >= len(*sx)) continue;
+            uint32_t si = at(*sx, c) & LAY_SMASK;
+            if (!si || at(*sc, si).display == D_NONE) continue;
+            lay_counters(st, at(*sf, si), ctr, mark);
+            lay_gen_walk(t, d, st, sx, sf, sc, gx, c, ctr, depth, level + 1);
+        }
+    if (fl & LAY_HAS_AFTER) lay_gen_content(t, d, st, sf, sc, gx, x, CSS_PSEUDO_AFTER, ctr, mark, depth);
+    resize(ctr, mark);
 }
 
 /* ---- page coordinates ---- */
@@ -1489,6 +2076,32 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (sid >= len(style_first)) resize(style_first, (size_t)sid + 1);
         style_first[sid] = style->estyle[e].first;
     }
+    /* the pseudo-elements, each element's together (by element, then pseudo-element), and
+       their styles; whether an element has any, in its node_style */
+    vector<lay_gen> gens;
+    if (style->pstyle_len > 1) {
+        vector<uint32_t> head;
+        resize(head, doc->node_len);
+        for (uint32_t q = style->pstyle_len - 1; q >= 1; q--) {
+            uint32_t x = style->pstyle[q].node.index;
+            if (style->pstyle[q].live && x < doc->node_len) head[x] = q;
+        }
+        for (uint32_t x = 1; x < doc->node_len; x++) {
+            for (uint32_t q = at(head, x); q && q < style->pstyle_len && style->pstyle[q].node.index == x; q++) {
+                lay_gen g;
+                memset(&g, 0, sizeof g);
+                g.el = x;
+                g.pseudo = (uint32_t)style->pstyle[q].pseudo;
+                g.style = style->pstyle[q].style;
+                push_back(gens, g);
+                if (g.pseudo == CSS_PSEUDO_BEFORE) node_style[x] |= LAY_HAS_BEFORE;
+                else if (g.pseudo == CSS_PSEUDO_AFTER) node_style[x] |= LAY_HAS_AFTER;
+                else node_style[x] |= LAY_HAS_OTHER;
+                if (g.style >= len(style_first)) resize(style_first, (size_t)g.style + 1);
+                style_first[g.style] = style->pstyle[q].first;
+            }
+        }
+    }
     /* the web fonts @font-face gave, each read once: each face record's face in fonts */
     vector<int32_t> webface;
     resize(webface, style->face_len > 0 ? style->face_len : 1);
@@ -1511,21 +2124,27 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         lay_style_make(style, &fonts, &webface, at(style_first, k), &ls);
         styles[k] = ls;
     }
+    /* the text of each ::before and ::after, in tree order */
+    if (len(gens) && doc->node_len > 1) {
+        vector<lay_ctr> ctr;
+        int depth = 0;
+        lay_gen_walk(t, doc, style, &node_style, &style_first, &styles, &gens, 1, &ctr, &depth, 0);
+    }
     /* the root element: the document's element child */
     uint32_t root = 0;
     for (uint32_t c = doc->node_len > 1 ? doc->node[1].first_child : 0; c; c = doc->node[c].next_sibling)
         if (doc->node[c].kind == DOM_NODE_KIND_ELEMENT) root = c;
-    uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &node_style, &styles, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
+    uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &node_style, &styles, &gens, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
     t->box[vp].w = width;
     t->box[vp].h = height;
     t->box[vp].how = LAYOUT_WIDTH_HOW_VIEWPORT;
     t->box[vp].avail = width;
     t->box[vp].background = 0xffffffff;
     if (!root) { t->revision++; return LAYOUT_NO_ROOT; }
-    if (lay_display_of(t, doc, style, net, &fonts, &node_style, &styles, root) != D_NONE) {
+    if (lay_display_of(t, doc, style, net, &fonts, &node_style, &styles, &gens, root) != D_NONE) {
         lay_mc mt, mb;
         int empty;
-        uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
+        uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, &gens, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
         lay_place(t, rb, t->box[rb].ml, t->box[rb].mt);
         double bottom = t->box[rb].mt + lay_border_height(t, rb) + t->box[rb].mb;
         if (bottom > height) t->box[vp].h = bottom;

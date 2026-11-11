@@ -1,13 +1,13 @@
-/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:efccd66a:4201). Do not edit. */
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:f3ae804f:4480). Do not edit. */
 typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
 typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL } layout_box_kind;
 typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH } layout_width_how;
-typedef enum layout_frag_kind { LAYOUT_FRAG_KIND_TEXT, LAYOUT_FRAG_KIND_ATOMIC, LAYOUT_FRAG_KIND_MARKER, LAYOUT_FRAG_KIND_INLINE } layout_frag_kind;
+typedef enum layout_frag_kind { LAYOUT_FRAG_KIND_TEXT, LAYOUT_FRAG_KIND_ATOMIC, LAYOUT_FRAG_KIND_MARKER, LAYOUT_FRAG_KIND_INLINE, LAYOUT_FRAG_KIND_GENERATED } layout_frag_kind;
 typedef enum layout_op { LAYOUT_OP_RUN } layout_op;
 typedef struct layout_box_h { uint32_t doc, index, gen; } layout_box_h;
 typedef struct layout_line_h { uint32_t doc, index, gen; } layout_line_h;
 typedef struct layout_frag_h { uint32_t doc, index, gen; } layout_frag_h;
-typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t bct; uint32_t bcr; uint32_t bcb; uint32_t bcl; uint8_t bst; uint8_t bsr; uint8_t bsb; uint8_t bsl; } layout_box;
+typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t bct; uint32_t bcr; uint32_t bcb; uint32_t bcl; uint8_t bst; uint8_t bsr; uint8_t bsb; uint8_t bsl; uint8_t pseudo; } layout_box;
 typedef struct layout_line { uint32_t gen, live, free_next; uint32_t box; uint32_t next; uint32_t first_frag; uint32_t last_frag; double x; double y; double w; double h; double baseline; } layout_line;
 typedef struct layout_frag { uint32_t gen, live, free_next; uint32_t line; uint32_t next; layout_frag_kind kind; dom_node_h node; uint32_t atomic; amb_span text; double x; double y; double w; double h; double baseline; uint8_t face; net_resource_h font; double size; double spacing; double word_spacing; uint8_t italic; uint32_t color; uint32_t background; uint8_t decoration; } layout_frag;
 typedef struct layout_store_tag { char unused; } layout_store_tag;
@@ -92,11 +92,12 @@ const char *layout_frag_kind_name(layout_frag_kind x) {
     case LAYOUT_FRAG_KIND_ATOMIC: return "atomic";
     case LAYOUT_FRAG_KIND_MARKER: return "marker";
     case LAYOUT_FRAG_KIND_INLINE: return "inline";
+    case LAYOUT_FRAG_KIND_GENERATED: return "generated";
     }
     return "?";
 }
 
-const char layout_fingerprint[] = "fnv1a32:efccd66a:4201";
+const char layout_fingerprint[] = "fnv1a32:f3ae804f:4480";
 void layout_init(layout_tree *d, uint32_t id) {
     if (d->box_len != 0) abort();
     d->id = id;
@@ -306,6 +307,7 @@ void layout_export(const layout_tree *d, FILE *out) {
         if (!d->box[i].live) continue;
         if (1) { fputs("layout_box(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_ref(out, "n", d->box[i].node.doc, d->box[i].node.index, d->box[i].node.gen); fputs(",", out); fputs(layout_box_kind_name(d->box[i].kind), out); fputs(",", out); amb_put_f64(out, d->box[i].x); fputs(",", out); amb_put_f64(out, d->box[i].y); fputs(",", out); amb_put_f64(out, d->box[i].w); fputs(",", out); amb_put_f64(out, d->box[i].h); fputs(").\n", out); }
         if (d->box[i].parent != 0) { fputs("layout_parent(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); { uint32_t r = d->box[i].parent; amb_put_ref(out, "bx", d->id, r, r && r < d->box_len ? d->box[r].gen : 0); } fputs(").\n", out); }
+        if (d->box[i].pseudo != 0) { fputs("layout_pseudo(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->box[i].pseudo); fputs(").\n", out); }
         if (1) { fputs("layout_margin(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].mt); fputs(",", out); amb_put_f64(out, d->box[i].mr); fputs(",", out); amb_put_f64(out, d->box[i].mb); fputs(",", out); amb_put_f64(out, d->box[i].ml); fputs(").\n", out); }
         if (1) { fputs("layout_border(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].bt); fputs(",", out); amb_put_f64(out, d->box[i].br); fputs(",", out); amb_put_f64(out, d->box[i].bb); fputs(",", out); amb_put_f64(out, d->box[i].bl); fputs(").\n", out); }
         if (1) { fputs("layout_padding(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].pt); fputs(",", out); amb_put_f64(out, d->box[i].pr); fputs(",", out); amb_put_f64(out, d->box[i].pb); fputs(",", out); amb_put_f64(out, d->box[i].pl); fputs(").\n", out); }
@@ -319,6 +321,7 @@ void layout_export(const layout_tree *d, FILE *out) {
         if (!d->frag[i].live) continue;
         if (d->frag[i].kind == LAYOUT_FRAG_KIND_TEXT) { fputs("layout_text(", out); amb_put_handle(out, "fr", d->id, i, d->frag[i].gen); fputs(",", out); { uint32_t r = d->frag[i].line; amb_put_ref(out, "ln", d->id, r, r && r < d->line_len ? d->line[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->frag[i].node.doc, d->frag[i].node.index, d->frag[i].node.gen); fputs(",", out); text_put(d, out, d->frag[i].text); fputs(",", out); amb_put_f64(out, d->frag[i].x); fputs(",", out); amb_put_f64(out, d->frag[i].y); fputs(",", out); amb_put_f64(out, d->frag[i].w); fputs(",", out); amb_put_f64(out, d->frag[i].h); fputs(").\n", out); }
         if (d->frag[i].kind != LAYOUT_FRAG_KIND_TEXT) { fputs("layout_frag(", out); amb_put_handle(out, "fr", d->id, i, d->frag[i].gen); fputs(",", out); { uint32_t r = d->frag[i].line; amb_put_ref(out, "ln", d->id, r, r && r < d->line_len ? d->line[r].gen : 0); } fputs(",", out); fputs(layout_frag_kind_name(d->frag[i].kind), out); fputs(",", out); amb_put_ref(out, "n", d->frag[i].node.doc, d->frag[i].node.index, d->frag[i].node.gen); fputs(",", out); amb_put_f64(out, d->frag[i].x); fputs(",", out); amb_put_f64(out, d->frag[i].y); fputs(",", out); amb_put_f64(out, d->frag[i].w); fputs(",", out); amb_put_f64(out, d->frag[i].h); fputs(").\n", out); }
+        if (d->frag[i].kind == LAYOUT_FRAG_KIND_GENERATED) { fputs("layout_generated(", out); amb_put_handle(out, "fr", d->id, i, d->frag[i].gen); fputs(",", out); amb_put_ref(out, "n", d->frag[i].node.doc, d->frag[i].node.index, d->frag[i].node.gen); fputs(",", out); text_put(d, out, d->frag[i].text); fputs(").\n", out); }
     }
 }
 layout_status layout_dispatch(layout_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {

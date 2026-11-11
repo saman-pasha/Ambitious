@@ -8,7 +8,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-render.XXXXXX")
 export AMB_WORK=$work
 amb() { sh "$AMB_ROOT/bin/ambitious" "$@"; }
-for p in news style layout values atrules; do
+for p in news style layout values atrules selectors; do
   printf '%s: ' "$p"
   amb render "$AMB_ROOT/tests/pages/$p.html" "$work/$p.png"
 done
@@ -19,6 +19,10 @@ echo "-- what is at (150, 240), and at (400, 120):"
 amb query "$page" "member(X-Y, [150-240, 400-120]), layout_at(X, Y, N), dom_element(N, E)"
 echo "-- the lines the justified paragraph's text is on:"
 amb query "$page" "layout_text(_, L, _, T, X, _, W, _), sub_atom(T, 0, _, _, 'This'), layout_line(L, _, _, Y, _, H)"
+echo "-- the text the pseudo-elements gave (counters, quotes, attr()), and a ::before's own box:"
+sel=$AMB_ROOT/tests/pages/selectors.html
+amb query "$sel" "layout_generated(_, N, T), dom_element(N, E)"
+amb query "$sel" "dom_attr(N, id, bg), layout_pseudo_box_of(N, P, B), layout_border_box(B, X, Y, W, H)"
 echo "-- the reasoner's diagnostics:"
 amb advise "$page"
 st=$?

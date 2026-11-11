@@ -23,16 +23,16 @@
           <td> display: table-cell color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 1px
             <font> display: inline (initial) color: rgb(128, 0, 0) background: rgba(0, 0, 0, 0) (initial) font-size: 24px weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
     <div> display: block color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
-181 rules, 400 declarations, 61 matches, 2600 computed values (25 styles)
+185 rules, 404 declarations, 61 matches, 2600 computed values (25 styles)
 -- why each paragraph has its colour:
 N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
 N = n(1,24,0), X = declared('rgb(128, 128, 0)',written(olive),by('the style attribute'),in(inline))
 N = n(1,42,0), X = declared('rgb(200, 200, 200)',written('#c8c8c8'),by('.faint'),in(author))
 -- what lost the intro's colour, and at which step:
-N = n(1,18,0), D = de(1,377,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
-N = n(1,18,0), D = de(1,378,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
-N = n(1,18,0), D = de(1,394,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
+N = n(1,18,0), D = de(1,381,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
+N = n(1,18,0), D = de(1,382,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
+N = n(1,18,0), D = de(1,398,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
 -- the small print's size, proved:
 dom_element(n(1,47,0),small)   [fact]
 css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(user_agent)))   because
@@ -74,13 +74,21 @@ F = ff(1,1,0), Fam = 'Web Oblique', U = 'file://ROOT/tests/pages/fonts/oblique.t
 F = ff(1,2,0), Fam = 'Web Serif', U = 'file://ROOT/tests/pages/fonts/serif-bold.woff', W = 700, I = false
 N = n(1,22,0), X = declared(weboblique,written('\'Web Oblique\', monospace'),by('.mono'),in(author))
 -- what lost a card's properties: a layer under a later one, under the unlayered rules; order within a layer:
-N = n(1,13,0), P = background_color, D = de(1,362,0), Why = layer(lost(base),won(theme))
-N = n(1,13,0), P = color, D = de(1,360,0), Why = order(162,earlier_than(163))
-N = n(1,13,0), P = border_top_color, D = de(1,368,0), Why = layer(lost(base),won(unlayered))
-N = n(1,13,0), P = border_top_color, D = de(1,381,0), Why = layer(lost(theme),won(unlayered))
+N = n(1,13,0), P = background_color, D = de(1,366,0), Why = layer(lost(base),won(theme))
+N = n(1,13,0), P = color, D = de(1,364,0), Why = order(166,earlier_than(167))
+N = n(1,13,0), P = border_top_color, D = de(1,372,0), Why = layer(lost(base),won(unlayered))
+N = n(1,13,0), P = border_top_color, D = de(1,385,0), Why = layer(lost(theme),won(unlayered))
+-- pseudo-elements' styles: a ::before's colour and content, its own or its element's; the drop cap's size:
+N = n(1,36,0), P = content, V = 'attr(data-label) ": "', H = declared
+N = n(1,36,0), P = font_weight, V = '700', H = declared
+N = n(1,36,0), P = color, V = 'rgb(0, 0, 0)', H = inherited
+N = n(1,66,0), V = '40px', H = declared
+-- the page hovered at #d2's span (--hover): the state, and :has() over it:
+K = hover, N = n(1,28,0), E = span
+N = n(1,27,0), X = declared('rgb(255, 255, 221)',written('#ffd'),by('div:has(span:hover)'),in(author))
 -- the reasoner's diagnostics:
 amb_diag(low_contrast, n(1,24,0), '<p> text rgb(128, 128, 0) on rgb(253, 253, 248): contrast 4.11:1, below 4.5:1').
 amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
-amb_diag(unused_rule, ru(1,170,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
-amb_diag(unused_rule, ru(1,173,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,174,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,177,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
 exit 0

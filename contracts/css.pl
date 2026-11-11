@@ -47,6 +47,11 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
 %% transforms, track lists, content); a declared value with var() in it
 css_contract(enum(unit, [keyword, px, em, percent, color, auto, number, rem, calc, expr, text, var])).
 css_contract(enum(how, [declared, inherited, initial])).
+%% what a rule's subject is: the element, or one of its pseudo-elements
+css_contract(enum(pseudo, [element, before, after, first_line, first_letter, marker, placeholder])).
+%% a state of the page the pseudo-classes of state read (:hover, :focus, :focus-visible,
+%% :active, :target): set by a command or a script (css_set_state), :target by the URL's fragment
+css_contract(enum(state_kind, [hover, focus, focus_visible, active, target])).
 
 css_contract(record(sheet, [field(origin, enum(origin)), field(first_rule, ref(rule)), field(last_rule, ref(rule)),
     field(url,    span(text)),          % where it was fetched from: a linked or imported sheet's
@@ -81,8 +86,13 @@ css_contract(record(decl, [
     field(color,     u32),
     field(text,      span(text))       % the value as written (a custom property's name is its word)
 ])).
-%% a rule that matched an element
-css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule))])).
+%% a rule that matched an element (or, pseudo, one of its pseudo-elements)
+css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule)), field(pseudo, enum(pseudo))])).
+%% a pseudo-element's computed style: its element, which one, its style (whose parent is
+%% the element's), the first of its values
+css_contract(record(pstyle, [field(node, xhandle(dom, node)), field(pseudo, enum(pseudo)), field(style, u32), field(first, ref(cval))])).
+%% a state the page is in: an element hovered, focused, active, or the URL's target
+css_contract(record(state, [field(kind, enum(state_kind)), field(node, xhandle(dom, node))])).
 %% A COMPUTED STYLE is a style's values, one record a property, in a run, then its
 %% custom properties (inherited and declared); elements whose matched rules are the
 %% same, under parents of the same style, share one (PLAN.md 11)
@@ -120,12 +130,14 @@ css_contract(handle(cval, cv)).
 css_contract(handle(initval, iv)).
 css_contract(handle(estyle, es)).
 css_contract(handle(layer, ly)).
+css_contract(handle(pstyle, ps)).
+css_contract(handle(state, st)).
 css_contract(handle(face, ff)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), table(layer),
-    table(face), pool(text), atoms(names)])).
+    table(face), table(pstyle), table(state), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
@@ -135,6 +147,8 @@ css_contract(owns(style, initval, store)).
 css_contract(owns(style, estyle, store)).
 css_contract(owns(style, layer, store)).
 css_contract(owns(style, face, store)).
+css_contract(owns(style, pstyle, store)).
+css_contract(owns(style, state, store)).
 css_contract(owns(sheet, rule, list(rules))).
 css_contract(owns(rule, decl, list(decls))).
 css_contract(list(rules, sheet, rule, [first(first_rule), last(last_rule), next(next), up(sheet)])).
@@ -148,6 +162,10 @@ css_contract(operation(parse_sheet, [param(origin, enum(origin)), param(src, tex
 %% loaded (from the network module's loader, when there is one) and its style
 %% attributes, matched and cascaded: every element's computed values
 css_contract(operation(cascade, [param(doc, store(dom)), param(net, store(net))], status, [], [creates(cval)], [mutates])).
+%% a state of the page set before the cascade: the element (by its node's index) that is
+%% hovered, focused, active or the target; the pseudo-classes of state read it
+css_contract(operation(set_state, [param(doc, store(dom)), param(kind, enum(state_kind)), param(node, u32)], status, [], [creates(state)],
+    [mutates])).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 
@@ -166,7 +184,10 @@ css_contract(fact(css_layer(handle, field(name), field(rank)), table(layer), tru
 css_contract(fact(css_font_face(handle, field(family), field(url), field(weight), field(italic)), table(face), true)).
 css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).
 css_contract(fact(css_decl(handle, field(rule), field(prop), field(text), field(important)), table(decl), true)).
-css_contract(fact(css_matched(field(node), field(rule)), table(match), true)).
+css_contract(fact(css_matched(field(node), field(rule)), table(match), field(pseudo) == element)).
+css_contract(fact(css_pseudo_matched(field(node), field(pseudo), field(rule)), table(match), field(pseudo) \== element)).
+css_contract(fact(css_pseudo_style_of(field(node), field(pseudo), field(style)), table(pstyle), true)).
+css_contract(fact(css_state(field(kind), field(node)), table(state), true)).
 %% EACH ELEMENT'S STYLE; OF EACH STYLE, THE VALUES A DECLARATION GAVE; and each
 %% property's initial value. Every other computed value is the parent element's or
 %% the initial one, which the rules derive (css_computed/4, css_rgba/3), so the
@@ -199,6 +220,7 @@ css_contract(derived(css_background_of/3, 'the background an element''s text is 
 css_contract(derived(css_rendered/1, 'an element that is drawn: no display none on it or above it')).
 css_contract(derived(css_contrast/2, 'the WCAG 2 contrast ratio of an element''s text with its background')).
 css_contract(derived(css_custom/3, 'an element''s computed value of a custom property, its own or inherited')).
+css_contract(derived(css_pseudo_computed/5, 'a pseudo-element''s computed value of a property, and how: declared, or its element''s')).
 
 css_contract(query(colours, (dom_element(N, E), css_computed(N, color, C, H)), [E, C, H], 'every element''s colour and where it came from')).
 css_contract(query(overridden, (dom_element(N, E), css_lost(N, P, D, Why)), [E, P, D, Why], 'every declaration that lost, and why')).

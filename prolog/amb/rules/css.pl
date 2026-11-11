@@ -12,7 +12,8 @@
 %% if-then-else says what a cut would.
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
-   css_imported/3, css_font_face/5, css_font_face_font/2.
+   css_imported/3, css_font_face/5, css_font_face_font/2,
+   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -101,6 +102,24 @@ css_custom(N, Name, V) :-
 css_custom(N, Name, V) :-
     dom_parent(N, P), dom_element(P, _), css_custom(P, Name, V),
     \+ ( css_style_of(N, S), css_style_custom(S, Name, _, _, _) ).
+
+%% PSEUDO-ELEMENTS. A pseudo-element's style (css_pseudo_style_of/3: a ::before or an
+%% ::after whose content is something, and the others that rules matched) is a style
+%% like an element's, under its element's: a value a declaration gave, or else its
+%% element's (an inherited property's), the element's own colour (currentcolor's), a
+%% border's width 0 under the style none, or the initial value
+css_pseudo_computed(N, Ps, P, V, How) :-
+    css_pseudo_style_of(N, Ps, S), css_initial(P, _),
+    (   css_style_declared(S, P, V0, How0)
+    ->  V = V0, How = How0
+    ;   css_rules_inherited(P)
+    ->  css_computed(N, P, V, _), How = inherited
+    ;   css_rules_currentcolor(P)
+    ->  css_pseudo_computed(N, Ps, color, V, _), How = initial
+    ;   css_rules_border_style(P, Sp), css_pseudo_computed(N, Ps, Sp, Style, _), ( Style == none ; Style == hidden )
+    ->  V = '0px', How = initial
+    ;   css_initial(P, V), How = initial
+    ).
 
 css_origin_of(D, O) :- css_decl(D, R, _, _, _), css_rule(R, S, _, _, _), css_sheet(S, O).
 
@@ -223,5 +242,6 @@ css_diag(low_contrast, N, Text) :-
     (   From == canvas -> Bg = 'the white canvas' ; css_computed(From, background_color, Bg, _) ),
     format(atom(Text), '<~w> text ~w on ~w: contrast ~2f:1, below ~w:1', [E, Fg, Bg, Ratio, Min]).
 css_diag(unused_rule, R, Text) :-
-    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_matched(_, R),
-    format(atom(Text), 'the rule ~w matches no element (at rest: no hover, focus or other state)', [Selector]).
+    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
+    (   css_state(_, _) -> State = 'in the state the page was put in' ; State = 'at rest: no hover, focus or other state' ),
+    format(atom(Text), 'the rule ~w matches no element (~w)', [Selector, State]).

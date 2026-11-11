@@ -4,8 +4,10 @@
    implementation.
 
    Parsing has CSS Syntax 3's shapes: comments, strings, the top level's <!-- and
-   -->, at-rules (an @media whose query holds for the viewport is read, every
-   other at-rule skipped), style rules, declarations with !important. The 104
+   -->, at-rules (an @media whose query holds for the viewport, an @supports
+   whose condition does, @layer, an @import fetched through the loader, and
+   @font-face are read; every other at-rule skipped), style rules, declarations
+   with !important. The 104
    longhands of css_pdefs are read, each by its grammar: keywords, lengths and
    percentages, colours, numbers, and the values kept as their text (track
    lists, grid lines, images and gradients, shadows, transforms, content,
@@ -30,11 +32,23 @@
    compare without case), :first-child, :last-child,
    :only-child, :first-of-type, :last-of-type, :only-of-type, :nth-child(),
    :nth-last-child(), :nth-of-type(), :nth-last-of-type(), :not(), :is(),
-   :where(), :root, :empty, :link, :any-link, :checked, :disabled, :enabled;
-   the combinators ' ', >, + and ~. A pseudo-class of state (:hover, :focus,
-   :visited, ...) and a pseudo-element never match: a page is laid out at rest.
-   :not(), :is() and :where() nest at most 16 deep, and one match tests at most
-   4096 compounds: past either, the selector matches nothing.
+   :where(), :has() (its relative selectors over the subject's descendants, for
+   ' ' and >, or its later siblings and theirs, for + and ~; at most 20000
+   elements searched a :has()), :root, :empty, :link, :any-link, :checked,
+   :disabled, :enabled; the combinators ' ', >, + and ~. The pseudo-classes of
+   state read the page's state (css_set_state; the command's --hover, --focus and
+   --active): :hover and :active hold of the element in that state and its
+   ancestors, :focus and :focus-visible of the focused element, :focus-within of
+   it and its ancestors, :target of the element the URL's fragment names; a page
+   at rest has none of these, and :visited holds of nothing (no history is read).
+   :not(), :is(), :where() and :has() nest at most 16 deep, and one match tests at
+   most 4096 compounds: past either, the selector matches nothing.
+
+   Pseudo-elements: ::before, ::after, ::first-line and ::first-letter (CSS 2's
+   single colon too), ::marker and ::placeholder. A rule whose subject ends in one
+   is matched as its element is, and makes a style under the element's
+   (css_pseudo_style_of): a ::before's or an ::after's only when its content is
+   something, as only then is it generated.
 
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
@@ -135,7 +149,10 @@ static const char css_ua_sheet[] =
     "details, summary { display: block }\n"
     "button, input, select, textarea { display: inline-block }\n"
     "button { padding: 1px 6px; border: 2px solid #767676; background-color: #efefef }\n"
-    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n";
+    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n"
+    "q::before { content: open-quote }\n"
+    "q::after { content: close-quote }\n"
+    "input::placeholder, textarea::placeholder { color: #757575 }\n";
 
 /* ---- reading text ---- */
 
@@ -2500,14 +2517,18 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
     return k % a == 0 && k / a >= 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget);
+/* the page's state the pseudo-classes of state read: the element hovered, focused (and
+   whether visibly), active, and the URL's target; 0 for none */
+typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target; } css_mstate;
+
+static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
 
 /* one of a selector list's complex selectors matches x */
-static int css_list_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_list_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     size_t a = 0;
     while (a < n) {
         size_t b = css_comma(s, n, a);
-        if (css_complex_matches(d, x, s + a, b - a, depth, budget)) return 1;
+        if (css_complex_matches(d, x, ms, s + a, b - a, depth, budget)) return 1;
         a = b + 1;
     }
     return 0;
@@ -2517,7 +2538,9 @@ static int css_list_matches(const dom_document *d, uint32_t x, const char *s, si
    src/script/script.c), by the matcher the cascade uses: 1 when x matches */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n) {
     int budget = 100000;
-    return css_list_matches(d, x, s, n, 0, &budget) && budget >= 0;
+    css_mstate none;
+    memset(&none, 0, sizeof none);
+    return css_list_matches(d, x, &none, s, n, 0, &budget) && budget >= 0;
 }
 
 static int css_form_control(const dom_document *d, uint32_t x) {
@@ -2526,7 +2549,13 @@ static int css_form_control(const dom_document *d, uint32_t x) {
 }
 
 /* a pseudo-class without arguments holds of x */
-static int css_pseudo(const dom_document *d, uint32_t x, const char *ps, size_t pn) {
+/* y is x or one of x's descendants */
+static int css_within(const dom_document *d, uint32_t x, uint32_t y) {
+    for (int k = 0; y && k < 4096; k++, y = d->node[y].parent) if (y == x) return 1;
+    return 0;
+}
+
+static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, const char *ps, size_t pn) {
     if (css_eq_ci(ps, pn, "first-child")) return css_siblings(d, x, 0, 0) == 0;
     if (css_eq_ci(ps, pn, "last-child")) return css_siblings(d, x, 1, 0) == 0;
     if (css_eq_ci(ps, pn, "only-child")) return css_siblings(d, x, 0, 0) == 0 && css_siblings(d, x, 1, 0) == 0;
@@ -2545,7 +2574,15 @@ static int css_pseudo(const dom_document *d, uint32_t x, const char *ps, size_t 
         return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
     if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
     if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_attr_of(d, x, "disabled", 8);
-    return 0;   /* :hover, :focus, :visited, :target and the rest: a page at rest has no such state */
+    /* the state the page is in: :hover and :active hold of the element and its ancestors,
+       :focus-within of the focused one and its; :visited of none (no history is read) */
+    if (css_eq_ci(ps, pn, "hover")) return ms->hover && css_within(d, x, ms->hover);
+    if (css_eq_ci(ps, pn, "active")) return ms->active && css_within(d, x, ms->active);
+    if (css_eq_ci(ps, pn, "focus")) return ms->focus == x;
+    if (css_eq_ci(ps, pn, "focus-visible")) return ms->focus_visible == x;
+    if (css_eq_ci(ps, pn, "focus-within")) return ms->focus && css_within(d, x, ms->focus);
+    if (css_eq_ci(ps, pn, "target")) return ms->target == x;
+    return 0;   /* :visited and what else: no such state */
 }
 
 /* an attribute selector, [ to ] (e is the ]), holds of x */
@@ -2602,9 +2639,12 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* a compound selector holds of the element x */
-static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_has(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
+
+static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     size_t i = 0;
-    if (n == 0 || depth > CSS_MAX_NESTING || --*budget < 0) return 0;
+    if (depth > CSS_MAX_NESTING || --*budget < 0) return 0;
+    if (n == 0) return 1;                       /* nothing left of it but its pseudo-element: universal */
     while (i < n) {
         char c = s[i];
         if (c == '*') { i++; continue; }
@@ -2643,8 +2683,9 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
                 const char *as = s + i + 1;
                 size_t an = e - i - 1;
                 int ok;
-                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, as, an, depth + 1, budget) && *budget >= 0;
-                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, as, an, depth + 1, budget);
+                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, ms, as, an, depth + 1, budget) && *budget >= 0;
+                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, ms, as, an, depth + 1, budget);
+                else if (css_eq_ci(ps, pn, "has")) ok = css_has(d, x, ms, as, an, depth + 1, budget);
                 else if (css_eq_ci(ps, pn, "nth-child")) ok = css_nth(d, x, as, an, 0, 0);
                 else if (css_eq_ci(ps, pn, "nth-last-child")) ok = css_nth(d, x, as, an, 1, 0);
                 else if (css_eq_ci(ps, pn, "nth-of-type")) ok = css_nth(d, x, as, an, 0, 1);
@@ -2655,7 +2696,7 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
                 continue;
             }
             if (css_eq_ci(ps, pn, "before") || css_eq_ci(ps, pn, "after") || css_eq_ci(ps, pn, "first-line") || css_eq_ci(ps, pn, "first-letter")) return 0;
-            if (!css_pseudo(d, x, ps, pn)) return 0;
+            if (!css_pseudo(d, x, ms, ps, pn)) return 0;
             continue;
         }
         return 0;
@@ -2664,26 +2705,88 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* the compounds parts[0..k) hold, parts[k-1] of x and the rest through their combinators */
-static int css_parts_match(const dom_document *d, uint32_t x, const char *s, const css_part *parts, size_t k, int depth, int *budget) {
-    if (!css_compound(d, x, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
+static int css_parts_match(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, const css_part *parts, size_t k, int depth,
+                           int *budget) {
+    if (!css_compound(d, x, ms, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
     if (k == 1) return 1;
     char comb = parts[k - 1].comb;
-    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
-    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
+    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
     if (comb == '~') {
         for (uint32_t y = css_prev_element(d, x); y && *budget >= 0; y = css_prev_element(d, y))
-            if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
+            if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
         return 0;
     }
     for (uint32_t y = css_parent_element(d, x); y && *budget >= 0; y = css_parent_element(d, y))
-        if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
+        if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
     return 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     css_part parts[CSS_MAXPARTS];
     size_t k = css_split(s, n, parts, CSS_MAXPARTS);
-    return k > 0 && css_parts_match(d, x, s, parts, k, depth, budget);
+    return k > 0 && css_parts_match(d, x, ms, s, parts, k, depth, budget);
+}
+
+/* the relative selector parts[0..k) (after its leading combinator lead) holds of y,
+   anchored at x: parts[k-1] of y, the rest through their combinators, and the first
+   compound in the relation lead names with x */
+static int css_rel_match(const dom_document *d, uint32_t y, uint32_t x, char lead, const css_mstate *ms, const char *s, const css_part *parts,
+                         size_t k, int depth, int *budget) {
+    if (!css_compound(d, y, ms, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
+    if (k == 1) {
+        if (lead == '>') return css_parent_element(d, y) == x;
+        if (lead == '+') return css_prev_element(d, y) == x;
+        if (lead == '~') { for (uint32_t z = css_prev_element(d, y); z; z = css_prev_element(d, z)) if (z == x) return 1; return 0; }
+        for (uint32_t z = css_parent_element(d, y); z; z = css_parent_element(d, z)) if (z == x) return 1;
+        return 0;
+    }
+    char comb = parts[k - 1].comb;
+    if (comb == '>') { uint32_t z = css_parent_element(d, y); return z && css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t z = css_prev_element(d, y); return z && css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '~') {
+        for (uint32_t z = css_prev_element(d, y); z && *budget >= 0; z = css_prev_element(d, z))
+            if (css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget)) return 1;
+        return 0;
+    }
+    for (uint32_t z = css_parent_element(d, y); z && z != x && *budget >= 0; z = css_parent_element(d, z))
+        if (css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget)) return 1;
+    return 0;
+}
+
+/* the next node after y in tree order inside top's subtree (top not counted), or 0 */
+static uint32_t css_next_under(const dom_document *d, uint32_t y, uint32_t top) {
+    if (d->node[y].first_child) return d->node[y].first_child;
+    while (y != top && !d->node[y].next_sibling) y = d->node[y].parent;
+    return y == top ? 0 : d->node[y].next_sibling;
+}
+
+/* :has(): one of its relative selectors holds of an element of its scope -- x's
+   descendants (no combinator, or >), or x's later siblings and their descendants (+, ~).
+   Its search has a budget of its own: past it, it holds of none */
+static int css_has(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
+    size_t a = 0;
+    int hb = 20000;
+    while (a < n) {
+        size_t b = css_comma(s, n, a), i = css_skip_ws(s, b, a);
+        char lead = ' ';
+        if (i < b && (s[i] == '>' || s[i] == '+' || s[i] == '~')) { lead = s[i]; i++; }
+        css_part parts[CSS_MAXPARTS];
+        size_t k = css_split(s + i, b - i, parts, CSS_MAXPARTS);
+        for (size_t q = 0; q < k; q++) parts[q].start += (uint32_t)i;
+        if (k > 0 && (lead == ' ' || lead == '>')) {
+            for (uint32_t y = d->node[x].first_child; y && hb > 0; y = css_next_under(d, y, x))
+                if (d->node[y].kind == DOM_NODE_KIND_ELEMENT && hb-- > 0 && css_rel_match(d, y, x, lead, ms, s, parts, k, depth, budget)) return 1;
+        } else if (k > 0) {
+            for (uint32_t z = css_next_element(d, x); z && hb > 0; z = lead == '+' ? 0 : css_next_element(d, z)) {
+                if (hb-- > 0 && css_rel_match(d, z, x, lead, ms, s, parts, k, depth, budget)) return 1;
+                for (uint32_t y = d->node[z].first_child; y && hb > 0; y = css_next_under(d, y, z))
+                    if (d->node[y].kind == DOM_NODE_KIND_ELEMENT && hb-- > 0 && css_rel_match(d, y, x, lead, ms, s, parts, k, depth, budget)) return 1;
+            }
+        }
+        a = b + 1;
+    }
+    return 0;
 }
 
 /* ---- the rules' index (PLAN.md §11) ----
@@ -2704,7 +2807,38 @@ enum { CSS_KEY_UNIVERSAL, CSS_KEY_TYPE, CSS_KEY_ID, CSS_KEY_CLASS, CSS_KEY_ATTR 
 typedef struct css_key { uint32_t kind, start, len; } css_key;
 typedef struct css_bucket { uint32_t kind, len, hash, head, tail; } css_bucket;
 typedef struct css_bent { uint32_t rule, next; } css_bent;                    /* a bucket's rule */
-typedef struct css_rx { uint32_t parts, nparts; uint64_t anc[4]; } css_rx;   /* a rule as the index holds it */
+typedef struct css_rx { uint32_t parts, nparts, pseudo; uint64_t anc[4]; } css_rx;   /* a rule as the index holds it */
+
+/* the pseudo-element a subject compound ends with (::before, ...; :before, :after,
+   :first-line and :first-letter as CSS 2 wrote them): its css_pseudo, and *n made the
+   compound's length without it; CSS_PSEUDO_ELEMENT when it has none */
+static css_pseudo css_pseudo_of(const char *s, size_t *n) {
+    if (!memchr(s, ':', *n)) return CSS_PSEUDO_ELEMENT;
+    size_t j = 0;
+    while (j < *n) {
+        if (s[j] == '(') { j = css_block_end(s, *n, j, '(', ')'); if (j < *n) j++; continue; }
+        if (s[j] == '[') { j = css_block_end(s, *n, j, '[', ']'); if (j < *n) j++; continue; }
+        if (s[j] != ':') { j++; continue; }
+        size_t c0 = j;
+        int dbl = j + 1 < *n && s[j + 1] == ':';
+        j += dbl ? 2 : 1;
+        size_t b = j;
+        while (j < *n && css_namechar(s[j])) j++;
+        if (j != *n) continue;
+        const char *w = s + b;
+        size_t wn = j - b;
+        css_pseudo k = CSS_PSEUDO_ELEMENT;
+        if (css_eq_ci(w, wn, "before")) k = CSS_PSEUDO_BEFORE;
+        else if (css_eq_ci(w, wn, "after")) k = CSS_PSEUDO_AFTER;
+        else if (css_eq_ci(w, wn, "first-line")) k = CSS_PSEUDO_FIRST_LINE;
+        else if (css_eq_ci(w, wn, "first-letter")) k = CSS_PSEUDO_FIRST_LETTER;
+        else if (dbl && css_eq_ci(w, wn, "marker")) k = CSS_PSEUDO_MARKER;
+        else if (dbl && css_eq_ci(w, wn, "placeholder")) k = CSS_PSEUDO_PLACEHOLDER;
+        if (k != CSS_PSEUDO_ELEMENT) *n = c0;
+        return k;
+    }
+    return CSS_PSEUDO_ELEMENT;
+}
 
 /* a key's hash: its kind, then its bytes (a type's and an attribute name's lowered) */
 static uint32_t css_key_hash(uint32_t kind, const char *s, size_t n) {
@@ -2863,6 +2997,12 @@ static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *pa
         size_t k = css_split(t, sel.len, ps, CSS_MAXPARTS);
         css_rx rx;
         memset(&rx, 0, sizeof rx);
+        if (k > 0) {
+            /* a pseudo-element: the rule matches its element, the pseudo-element cut from its subject */
+            size_t ln = ps[k - 1].len;
+            rx.pseudo = (uint32_t)css_pseudo_of(t + ps[k - 1].start, &ln);
+            ps[k - 1].len = (uint32_t)ln;
+        }
         rx.parts = (uint32_t)len(*parts);
         rx.nparts = (uint32_t)k;
         for (size_t j = 0; j < k; j++) push_back(parts, ps[j]);
@@ -2929,8 +3069,8 @@ static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom,
 }
 
 /* the shared rule r matches x: its ancestors' keys in x's filter am, then the matcher */
-static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, uint32_t r, const vector<css_part> *parts,
-                            const vector<css_rx> *rxs, const uint64_t *am) {
+static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, const css_mstate *ms, uint32_t r,
+                            const vector<css_part> *parts, const vector<css_rx> *rxs, const uint64_t *am) {
     css_rx rx = at(*rxs, r);
     if (rx.nparts == 0) return 0;
     if ((rx.anc[0] & ~am[0]) | (rx.anc[1] & ~am[1]) | (rx.anc[2] & ~am[2]) | (rx.anc[3] & ~am[3])) return 0;
@@ -2938,7 +3078,7 @@ static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t 
     for (uint32_t j = 0; j < rx.nparts; j++) ps[j] = at(*parts, rx.parts + j);
     int budget = CSS_MATCH_BUDGET;
     amb_span sel = s->rule[r].selector;
-    return css_parts_match(d, x, text_ptr(s, sel), ps, rx.nparts, 0, &budget);
+    return css_parts_match(d, x, ms, text_ptr(s, sel), ps, rx.nparts, 0, &budget);
 }
 
 /* ---- the cascade ---- */
@@ -3896,6 +4036,91 @@ static void css_ua_load(css_style *s) {
     s->revision++;
 }
 
+/* the style of an element (or a pseudo-element) whose matched rules are matched, under
+   the parent style ps: the one those rules under ps made before, or a new one, its
+   values recorded once (PLAN.md 11) */
+static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vector<css_skey> *se, vector<uint32_t> *sslots,
+                               vector<uint32_t> *slists, const vector<uint32_t> *matched, uint32_t ps, int is_root, const css_val *initial,
+                               const css_rec *irec, vector<css_cust> *cust, vector<css_vtext> *vc) {
+    uint32_t sh = 2166136261u ^ ps;
+    for (size_t k = 0; k < len(*matched); k++) { sh ^= at(*matched, k); sh *= 16777619u; }
+    sh ^= (uint32_t)len(*matched) * 0x9E3779B9u;
+    uint32_t sid = css_style_find(se, sslots, slists, matched, ps, sh);
+    if (!sid) {
+        css_val out[CSS_NPROPS];
+        css_rec rec[CSS_NPROPS];
+        css_element(s, env, matched, ss, ps, initial, irec, is_root, out, rec, cust, vc);
+        if (is_root) env->rem = out[CSS_PROP_FONT_SIZE].num;      /* the root's size: the rem of the rest */
+        sid = (uint32_t)len(ss->first);
+        push_back(ss->cfirst, (uint32_t)len(ss->cpool));
+        uint32_t nc = 0;
+        for (size_t q = 0; q < len(*cust); q++) {
+            css_cust c = at(*cust, q);
+            if (c.state != 2) continue;                          /* an invalid one is no property of the style's */
+            push_back(ss->cpool, c);
+            nc++;
+        }
+        push_back(ss->ccount, nc);
+        css_style_add(se, sslots, slists, matched, ps, sh, sid);
+        /* the new style's values, recorded once: enum(prop)'s order, then its custom
+           properties (those its own declarations gave, invalid ones too) */
+        uint32_t first = 0;
+        for (int k = 0; k < CSS_NPROPS; k++) {
+            css_cval_h ch = css_put(s, sid, (css_prop)k, &out[k], rec[k]);
+            if (k == 0) first = ch.index;
+        }
+        for (size_t q = 0; q < len(*cust); q++) {
+            css_cust c = at(*cust, q);
+            if (c.state != 2 && !c.winner) continue;
+            css_val cv;
+            memset(&cv, 0, sizeof cv);
+            cv.unit = CSS_UNIT_TEXT;
+            cv.tx = c.value;
+            css_rec cr;
+            cr.word = c.name;
+            cr.text = c.value;
+            cr.how = c.how;
+            cr.winner = c.winner;
+            css_put(s, sid, CSS_PROP_CUSTOM, &cv, cr);
+        }
+        push_back(ss->first, first);
+    }
+    return sid;
+}
+
+/* the element the URL's fragment names: the page's #id (or an a's name), 0 for none */
+static uint32_t css_url_target(const css_style *s, const dom_document *doc, const net_loader *net) {
+    (void)s;
+    for (uint32_t r = 1; r < net->resource_len; r++) {
+        if (!net->resource[r].live || net->resource[r].kind != NET_KIND_DOCUMENT) continue;
+        amb_span u = net->resource[r].url;
+        const char *t = text_ptr(net, u);
+        size_t h = 0;
+        while (h < u.len && t[h] != '#') h++;
+        if (h + 1 >= u.len) return 0;
+        char frag[256];
+        size_t fn = u.len - h - 1 < sizeof frag ? u.len - h - 1 : sizeof frag - 1;
+        memcpy(frag, t + h + 1, fn);
+        for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
+            if (!css_is_element(doc, x)) continue;
+            uint32_t a = css_attr_of(doc, x, "id", 2);
+            if (!a && css_is_named(doc, x, "a")) a = css_attr_of(doc, x, "name", 4);
+            if (a && doc->attr[a].value.len == fn && memcmp(text_ptr(doc, doc->attr[a].value), frag, fn) == 0) return x;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+css_status css_set_state(css_style *s, dom_document *doc, css_state_kind kind, uint32_t node) {
+    if (node == 0 || node >= doc->node_len || !doc->node[node].live || doc->node[node].kind != DOM_NODE_KIND_ELEMENT) return CSS_WRONG_KIND;
+    css_state_h h = state_new(s);
+    s->state[h.index].kind = kind;
+    s->state[h.index].node = node_handle(doc, node);
+    s->revision++;
+    return CSS_OK;
+}
+
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
     css_ua_load(s);
@@ -3993,7 +4218,21 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     while (scap < 2 * (size_t)doc->node_len + 2) scap *= 2;
     resize(sslots, scap);
     vector<uint32_t> matched;
+    vector<uint32_t> pmatched;          /* the pseudo-elements' rules: pseudo << 24 | rule */
     vector<css_cust> cust;
+    /* the page's state: what css_set_state recorded, and the target the URL's fragment names */
+    css_mstate ms;
+    memset(&ms, 0, sizeof ms);
+    for (uint32_t q = 1; q < s->state_len; q++) {
+        uint32_t nx = s->state[q].node.index;
+        css_state_kind k = s->state[q].kind;
+        if (k == CSS_STATE_KIND_HOVER) ms.hover = nx;
+        else if (k == CSS_STATE_KIND_FOCUS) ms.focus = nx;
+        else if (k == CSS_STATE_KIND_FOCUS_VISIBLE) ms.focus_visible = nx;
+        else if (k == CSS_STATE_KIND_ACTIVE) ms.active = nx;
+        else ms.target = nx;
+    }
+    if (!ms.target && net) ms.target = css_url_target(s, doc, net);
     uint32_t hint_sheet = 0, inline_sheet = 0;
     /* the shared rules' index, and each element's filters: its ancestors' keys, its own */
     vector<css_part> parts;
@@ -4011,6 +4250,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         if (!css_is_element(doc, x)) continue;
         clear(matched);
+        clear(pmatched);
         uint32_t px = css_parent_element(doc, x);
         uint64_t am[4], om[4];
         for (int q = 0; q < 4; q++) am[q] = px ? at(anc, (size_t)px * 4 + q) | at(selfk, (size_t)px * 4 + q) : 0;
@@ -4021,7 +4261,11 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         if (nk < 0) {
             /* more keys than the index keeps: every rule is tried, and the filter is full */
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
-            for (uint32_t r = 1; r < shared; r++) if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+            for (uint32_t r = 1; r < shared; r++)
+                if (css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am)) {
+                    uint32_t pk = at(rxs, r).pseudo;
+                    if (pk) push_back(pmatched, pk << 24 | r); else push_back(matched, r);
+                }
         } else {
             for (int q = 0; q < nk; q++) css_bloom_add(om, kh[q]);
             if (univ) { heads[nb] = at(bk, univ - 1).head; seen[nb] = univ; nb++; }
@@ -4048,7 +4292,10 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 heads[bi] = at(be, heads[bi]).next;
                 if (r == last) continue;
                 last = r;
-                if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+                if (css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am)) {
+                    uint32_t pk = at(rxs, r).pseudo;
+                    if (pk) push_back(pmatched, pk << 24 | r); else push_back(matched, r);
+                }
             }
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
@@ -4062,54 +4309,36 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         }
         /* the element's style: the one its matched rules under its parent's style made, or a new one */
         uint32_t ps = px ? at(nstyle, px) : 0;
-        uint32_t sh = 2166136261u ^ ps;
-        for (size_t k = 0; k < len(matched); k++) { sh ^= at(matched, k); sh *= 16777619u; }
-        sh ^= (uint32_t)len(matched) * 0x9E3779B9u;
-        uint32_t sid = css_style_find(&se, &sslots, &slists, &matched, ps, sh);
-        if (!sid) {
-            css_val out[CSS_NPROPS];
-            css_rec rec[CSS_NPROPS];
-            css_element(s, &env, &matched, &ss, ps, initial, irec, px == 0, out, rec, &cust, &vc);
-            if (px == 0) env.rem = out[CSS_PROP_FONT_SIZE].num;      /* the root's size: the rem of the rest */
-            sid = (uint32_t)len(ss.first);
-            push_back(ss.cfirst, (uint32_t)len(ss.cpool));
-            uint32_t nc = 0;
-            for (size_t q = 0; q < len(cust); q++) {
-                css_cust c = at(cust, q);
-                if (c.state != 2) continue;                          /* an invalid one is no property of the style's */
-                push_back(ss.cpool, c);
-                nc++;
-            }
-            push_back(ss.ccount, nc);
-            css_style_add(&se, &sslots, &slists, &matched, ps, sh, sid);
-            /* the new style's values, recorded once: enum(prop)'s order, then its custom
-               properties (those its own declarations gave, invalid ones too) */
-            uint32_t first = 0;
-            for (int k = 0; k < CSS_NPROPS; k++) {
-                css_cval_h ch = css_put(s, sid, (css_prop)k, &out[k], rec[k]);
-                if (k == 0) first = ch.index;
-            }
-            for (size_t q = 0; q < len(cust); q++) {
-                css_cust c = at(cust, q);
-                if (c.state != 2 && !c.winner) continue;
-                css_val cv;
-                memset(&cv, 0, sizeof cv);
-                cv.unit = CSS_UNIT_TEXT;
-                cv.tx = c.value;
-                css_rec cr;
-                cr.word = c.name;
-                cr.text = c.value;
-                cr.how = c.how;
-                cr.winner = c.winner;
-                css_put(s, sid, CSS_PROP_CUSTOM, &cv, cr);
-            }
-            push_back(ss.first, first);
-        }
+        uint32_t sid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, ps, px == 0, initial, irec, &cust, &vc);
         nstyle[x] = sid;
         css_estyle_h eh = estyle_new(s);
         s->estyle[eh.index].node = nh;
         s->estyle[eh.index].style = sid;
         s->estyle[eh.index].first = at(ss.first, sid);
+        /* its pseudo-elements': the rules that matched each, under the element's style */
+        for (uint32_t pk = CSS_PSEUDO_BEFORE; pk <= CSS_PSEUDO_PLACEHOLDER && len(pmatched); pk++) {
+            clear(matched);
+            for (size_t q = 0; q < len(pmatched); q++) if (at(pmatched, q) >> 24 == pk) push_back(matched, at(pmatched, q) & 0xffffff);
+            if (!len(matched)) continue;
+            for (size_t q = 0; q < len(matched); q++) {
+                css_match_h m = match_new(s);
+                s->match[m.index].node = nh;
+                s->match[m.index].rule = at(matched, q);
+                s->match[m.index].pseudo = (css_pseudo)pk;
+            }
+            uint32_t psid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, sid, 0, initial, irec, &cust, &vc);
+            /* a ::before or an ::after whose content is none (or normal) is not generated */
+            if (pk == CSS_PSEUDO_BEFORE || pk == CSS_PSEUDO_AFTER) {
+                uint32_t cc = at(ss.first, psid) + CSS_PROP_CONTENT;
+                if (s->cval[cc].unit == CSS_UNIT_KEYWORD && (names_is(s, s->cval[cc].word, "none", 4) || names_is(s, s->cval[cc].word, "normal", 6)))
+                    continue;
+            }
+            css_pstyle_h ph = pstyle_new(s);
+            s->pstyle[ph.index].node = nh;
+            s->pstyle[ph.index].pseudo = (css_pseudo)pk;
+            s->pstyle[ph.index].style = psid;
+            s->pstyle[ph.index].first = at(ss.first, psid);
+        }
     }
     s->revision++;
     return CSS_OK;

@@ -2,7 +2,11 @@
    whose id is t, a property, and the computed value it must have. Selectors,
    specificity, origin and importance, the style attribute, inheritance and the
    global keywords, units, colours, shorthands, invalid values, media queries,
-   presentational hints and the syntax a sheet may hold. */
+   presentational hints and the syntax a sheet may hold. A case's fifth field, when
+   it has one, names a pseudo-element of t whose value it is ("::before"; "(none)"
+   when t has none), or a state the page is in before the cascade (":hover",
+   ":focus" -- :focus-visible too, as the command's --focus has it -- ":active") at
+   the element whose id is h, or t when there is none. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -13,7 +17,7 @@ amb_interface(html);
 amb_interface(net);
 amb_interface(css);
 
-typedef struct tcase { const char *what; const char *html; css_prop prop; const char *want; } tcase;
+typedef struct tcase { const char *what; const char *html; css_prop prop; const char *want; const char *where; } tcase;
 
 #define RED "rgb(255, 0, 0)"
 #define GREEN "rgb(0, 128, 0)"
@@ -277,6 +281,47 @@ static const tcase cases[] = {
     { "@layer: the order its statement gives", "<style>@layer b, a; @layer a { p { color: green } } @layer b { p { color: red } }</style><p id=t>x", CSS_PROP_COLOR, GREEN },
     { "@layer: anonymous layers in order", "<style>@layer { p { color: red } } @layer { p { color: green } }</style><p id=t>x", CSS_PROP_COLOR, GREEN },
     { "a string holding a brace", "<style>p[title='}'] { color: red }</style><p id=t title='}'>x", CSS_PROP_COLOR, RED },
+    /* :has(): relative selectors, the subject's descendants or later siblings */
+    { ":has() a child", "<style>div:has(> p) { color: red }</style><div id=t><p>x</div>", CSS_PROP_COLOR, RED },
+    { ":has(>) not a grandchild", "<style>div:has(> p) { color: red }</style><div id=t><section><p>x</section></div>", CSS_PROP_COLOR, BLACK },
+    { ":has() a descendant", "<style>div:has(p) { color: red }</style><div id=t><section><p>x</section></div>", CSS_PROP_COLOR, RED },
+    { ":has(+) the next sibling", "<style>h1:has(+ p) { color: red }</style><h1 id=t>a</h1><p>x", CSS_PROP_COLOR, RED },
+    { ":has(+) not a later one", "<style>h1:has(+ p) { color: red }</style><h1 id=t>a</h1><div></div><p>x", CSS_PROP_COLOR, BLACK },
+    { ":has(~) a later sibling", "<style>h1:has(~ p) { color: red }</style><h1 id=t>a</h1><div></div><p>x", CSS_PROP_COLOR, RED },
+    { ":has() complex", "<style>div:has(> section p.k) { color: red }</style><div id=t><section><p class=k>x</section></div>", CSS_PROP_COLOR, RED },
+    { ":has() a list", "<style>div:has(em, i) { color: red }</style><div id=t><i>x</i></div>", CSS_PROP_COLOR, RED },
+    { ":not(:has())", "<style>div:not(:has(p)) { color: red }</style><div id=t><span>x</span></div>", CSS_PROP_COLOR, RED },
+    { ":has() its argument's specificity", "<style>div:has(#x) { color: red } div.a { color: green }</style><div id=t class=a><p id=x>y</div>", CSS_PROP_COLOR, RED },
+    /* the pseudo-classes of state: what the page's state is (a page at rest has none) */
+    { ":hover", "<style>p:hover { color: red }</style><p id=t>x", CSS_PROP_COLOR, RED, ":hover" },
+    { ":hover at rest", "<style>p:hover { color: red }</style><p id=t>x", CSS_PROP_COLOR, BLACK },
+    { ":hover holds of the hovered's ancestors", "<style>div:hover { color: red }</style><div id=t><p id=h>x</div>", CSS_PROP_COLOR, RED, ":hover" },
+    { ":hover not of its descendants", "<style>p:hover { color: red }</style><div id=h><p id=t>x</div>", CSS_PROP_COLOR, BLACK, ":hover" },
+    { ":focus", "<style>input:focus { color: red }</style><input id=t>", CSS_PROP_COLOR, RED, ":focus" },
+    { ":focus-visible", "<style>input:focus-visible { color: red }</style><input id=t>", CSS_PROP_COLOR, RED, ":focus" },
+    { ":focus not of an ancestor", "<style>form:focus { color: red }</style><form id=t><input id=h></form>", CSS_PROP_COLOR, BLACK, ":focus" },
+    { ":focus-within", "<style>form:focus-within { color: red }</style><form id=t><input id=h></form>", CSS_PROP_COLOR, RED, ":focus" },
+    { ":active", "<style>a:active { color: red }</style><a id=t href=#x>x</a>", CSS_PROP_COLOR, RED, ":active" },
+    { ":visited: no history is read", "<style>a:visited { color: red }</style><a id=t href=#x>x</a>", CSS_PROP_COLOR, "rgb(0, 0, 238)" },
+    { ":target with no URL", "<style>p:target { color: red }</style><p id=t>x", CSS_PROP_COLOR, BLACK },
+    /* pseudo-elements: a style under the element's */
+    { "a ::before rule is not its element's", "<style>p::before { content: 'x'; color: red }</style><p id=t>y", CSS_PROP_COLOR, BLACK },
+    { "::before's own value", "<style>p::before { content: 'x'; color: green }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::before" },
+    { "::before inherits from its element", "<style>p { color: red } p::before { content: 'x' }</style><p id=t>y", CSS_PROP_COLOR, RED, "::before" },
+    { "::before's content", "<style>p::before { content: 'x' counter(c) }</style><p id=t>y", CSS_PROP_CONTENT, "'x' counter(c)", "::before" },
+    { "::before with no content: none", "<style>p::before { color: green }</style><p id=t>y", CSS_PROP_COLOR, "(none)", "::before" },
+    { ":before, as CSS 2 wrote it", "<style>p:before { content: 'x'; color: green }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::before" },
+    { "::after", "<style>p::after { content: 'x'; color: green }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::after" },
+    { "::before of any element", "<style>::before { content: ''; color: green }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::before" },
+    { "::before's specificity", "<style>#t::before { content: 'x'; color: green } p::before { color: red }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::before" },
+    { "::before's display, not blockified", "<style>p::before { content: 'x' }</style><p id=t>y", CSS_PROP_DISPLAY, "inline", "::before" },
+    { "q's quotes (the user agent's)", "<q id=t>y</q>", CSS_PROP_CONTENT, "open-quote", "::before" },
+    { "::first-line", "<style>p::first-line { color: green }</style><p id=t>y", CSS_PROP_COLOR, GREEN, "::first-line" },
+    { "::first-letter's em", "<style>p::first-letter { font-size: 2em }</style><p id=t>y", CSS_PROP_FONT_SIZE, "32px", "::first-letter" },
+    { "::marker", "<style>li::marker { color: green }</style><ul><li id=t>y</ul>", CSS_PROP_COLOR, GREEN, "::marker" },
+    { "::placeholder (the user agent's)", "<input id=t placeholder=x>", CSS_PROP_COLOR, "rgb(117, 117, 117)", "::placeholder" },
+    { "::placeholder", "<style>::placeholder { color: green }</style><input id=t placeholder=x>", CSS_PROP_COLOR, GREEN, "::placeholder" },
+    { "::selection: none read", "<style>p::selection { color: red }</style><p id=t>y", CSS_PROP_COLOR, BLACK },
     /* the user agent's display */
     { "[hidden]", "<p id=t hidden>x", CSS_PROP_DISPLAY, "none" },
     { "li", "<ul><li id=t>x</ul>", CSS_PROP_DISPLAY, "list-item" },
@@ -284,15 +329,22 @@ static const tcase cases[] = {
     { "span", "<span id=t>x</span>", CSS_PROP_DISPLAY, "inline" },
 };
 
-/* the element whose id is t */
-static uint32_t find_t(const dom_document *d) {
+/* the element whose id is the letter c */
+static uint32_t find_id(const dom_document *d, char c) {
     uint32_t id = names_find(d, "id", 2);
     for (uint32_t x = 1; x < d->node_len; x++) {
         if (!d->node[x].live) continue;
         for (uint32_t a = d->node[x].first_attr; a; a = d->attr[a].next)
-            if (d->attr[a].name == id && d->attr[a].value.len == 1 && text_ptr(d, d->attr[a].value)[0] == 't') return x;
+            if (d->attr[a].name == id && d->attr[a].value.len == 1 && text_ptr(d, d->attr[a].value)[0] == c) return x;
     }
     return 0;
+}
+
+/* the pseudo-element a case's where names, CSS_PSEUDO_ELEMENT for none */
+static css_pseudo pseudo_of(const char *w) {
+    static const char *const names[7] = { "", "::before", "::after", "::first-line", "::first-letter", "::marker", "::placeholder" };
+    for (int k = 1; k < 7; k++) if (w && strcmp(w, names[k]) == 0) return (css_pseudo)k;
+    return CSS_PSEUDO_ELEMENT;
 }
 
 int main(void) {
@@ -305,12 +357,28 @@ int main(void) {
         html_init(&p, 1);
         css_init(&st, 1);
         html_parse(&p, &d, cases[i].html, strlen(cases[i].html));
+        uint32_t x = find_id(&d, 't'), h = find_id(&d, 'h');
+        if (cases[i].where && cases[i].where[0] == ':' && cases[i].where[1] != ':') {
+            /* the state the case puts the page in, at h (or t) */
+            uint32_t at_el = h ? h : x;
+            if (strcmp(cases[i].where, ":hover") == 0) css_set_state(&st, &d, CSS_STATE_KIND_HOVER, at_el);
+            else if (strcmp(cases[i].where, ":active") == 0) css_set_state(&st, &d, CSS_STATE_KIND_ACTIVE, at_el);
+            else {
+                css_set_state(&st, &d, CSS_STATE_KIND_FOCUS, at_el);
+                css_set_state(&st, &d, CSS_STATE_KIND_FOCUS_VISIBLE, at_el);
+            }
+        }
         css_cascade(&st, &d, 0);
-        uint32_t x = find_t(&d);
         char got[128];
         snprintf(got, sizeof got, "(no element t)");
         uint32_t c0 = 0;                                     /* t's first value: its style's */
-        for (uint32_t e = 1; e < st.estyle_len; e++) if (x && st.estyle[e].node.index == x) c0 = st.estyle[e].first;
+        css_pseudo pk = pseudo_of(cases[i].where);
+        if (pk == CSS_PSEUDO_ELEMENT) {
+            for (uint32_t e = 1; e < st.estyle_len; e++) if (x && st.estyle[e].node.index == x) c0 = st.estyle[e].first;
+        } else {
+            snprintf(got, sizeof got, "(none)");
+            for (uint32_t e = 1; e < st.pstyle_len; e++) if (x && st.pstyle[e].node.index == x && st.pstyle[e].pseudo == pk) c0 = st.pstyle[e].first;
+        }
         for (uint32_t c = c0; c0 && c < st.cval_len && st.cval[c].style == st.cval[c0].style; c++)
             if (st.cval[c].prop == cases[i].prop) {
                 amb_span t = st.cval[c].text;
@@ -319,7 +387,9 @@ int main(void) {
         int ok = strcmp(got, cases[i].want) == 0;
         if (!ok) bad++;
         n++;
-        printf("%s %s: %s %s%s%s\n", ok ? "ok  " : "FAIL", cases[i].what, css_prop_name(cases[i].prop), got, ok ? "" : ", not ", ok ? "" : cases[i].want);
+        printf("%s %s: %s%s%s %s%s%s\n", ok ? "ok  " : "FAIL", cases[i].what, pk ? cases[i].where : "", pk ? " " : "", css_prop_name(cases[i].prop), got,
+               ok ? "" : ", not ",
+               ok ? "" : cases[i].want);
     }
     printf("%d of %d cases\n", n - bad, n);
     return bad ? 1 : 0;

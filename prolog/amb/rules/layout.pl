@@ -6,10 +6,15 @@
 %% declared it (css_explain/3); shrunk to fit its content; its table column's.
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
 :- dynamic layout_box/7, layout_parent/2, layout_margin/5, layout_border/5, layout_padding/5, layout_width/4,
-           layout_line/6, layout_text/8, layout_frag/8.
+           layout_line/6, layout_text/8, layout_frag/8, layout_pseudo/2, layout_generated/3.
 
-%% the box an element generated
-layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport.
+%% the box an element generated (its pseudo-elements' are theirs)
+layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, \+ layout_pseudo(B, _).
+
+%% the box an element's ::before (1) or ::after (2) generated
+layout_pseudo_box_of(N, P, B) :-
+    layout_pseudo(B, K), layout_box(B, N, _, _, _, _, _),
+    (   K =:= 1 -> P = before ; P = after ).
 
 %% a box's border box
 layout_border_box(B, X, Y, W, H) :-

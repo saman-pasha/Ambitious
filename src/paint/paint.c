@@ -221,7 +221,7 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
                 pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
                 continue;
             }
-            if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER) continue;
+            if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
             /* a fragment outside the canvas's window: nothing of it to draw */
             if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
             amb_span sp = t->frag[fr].text;

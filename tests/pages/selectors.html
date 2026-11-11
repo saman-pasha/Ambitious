@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><title>Selectors and pseudo-elements</title>
+<style>
+/* tests/pages/selectors.html -- :has(), ::before and ::after (strings, attr(), counter(),
+   counters(), quotes), ::first-letter, ::first-line, ::marker, ::placeholder; the boxes
+   held to Chromium's (tests/pages/selectors.chromium) */
+body { font-family: 'DejaVu Serif'; font-size: 16px; margin: 8px; }
+.box { width: 220px; }
+.ib { display: inline-block; }
+section:has(> p.wide) { width: 400px; }
+section:has(+ aside) { border-left: 4px solid #333; padding-left: 6px; }
+div:not(:has(span)) { padding-left: 10px; }
+div:has(span:hover) { background-color: #ffd; }
+.tag::before { content: "["; }
+.tag::after { content: "]"; }
+.label::before { content: attr(data-label) ": "; font-weight: bold; }
+ol.sec { counter-reset: item; list-style: none; padding: 0; }
+ol.sec > li { counter-increment: item; }
+ol.sec > li::before { content: counter(item) ". "; }
+ol.nest { counter-reset: n; list-style: none; }
+ol.nest li { counter-increment: n; }
+ol.nest li::before { content: counters(n, ".") " "; }
+.blockgen::before { content: "Block before"; display: block; height: 30px; background: #eee; }
+.blockgen::after { content: ""; display: block; height: 12px; }
+q { quotes: "\00AB" "\00BB" "\2039" "\203A"; }
+p.drop::first-letter { font-size: 40px; color: #a00; }
+p.fl::first-line { font-size: 24px; }
+li.m::marker { color: #070; }
+.roman::before { content: counter(r, upper-roman) " "; counter-increment: r 4; }
+input::placeholder { color: #36c; }
+</style></head>
+<body>
+<section id=s1><p class=wide id=p1>Has a wide paragraph.</p></section>
+<section id=s2><p id=p2>Followed by an aside.</p></section>
+<aside id=a1>Aside</aside>
+<div id=d1>No span here</div>
+<div id=d2><span>span</span> here</div>
+<p><span class="tag ib" id=t1>tag</span> <span class="label ib" id=l1 data-label="Name">value</span></p>
+<ol class=sec id=o1><li id=li1>One</li><li id=li2>Two</li></ol>
+<ol class=nest id=o2><li>A<ol class=nest><li><span class=ib id=li3>B</span></li><li>C</li></ol></li></ol>
+<div class=blockgen id=bg>Inside</div>
+<p><span class=ib id=q1><q>Outer <q>inner</q> text</q></span></p>
+<p class="drop box" id=dr>Drop cap paragraph text that wraps over lines in a narrow box.</p>
+<p class="fl box" id=fl>The first line is larger than the rest of the lines of this paragraph.</p>
+<p><span class="roman ib" id=r1>x</span> <span class="roman ib" id=r2>y</span></p>
+<ul><li class=m id=m1>Marked</li></ul>
+<p><input placeholder="Search the site"></p>
+</body></html>

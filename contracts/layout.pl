@@ -25,7 +25,7 @@ layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_bl
 layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fit, column, intrinsic, max_width])).
 %% what a fragment of a line is: a run of text; an atomic inline's box; a list
 %% item's marker; the part of an inline element on the line (its background)
-layout_contract(enum(frag_kind, [text, atomic, marker, inline])).
+layout_contract(enum(frag_kind, [text, atomic, marker, inline, generated])).
 
 layout_contract(record(box, [
     field(node,         xhandle(dom, node)),    % the element; none for the viewport and an anonymous box
@@ -44,7 +44,8 @@ layout_contract(record(box, [
     field(avail,        f64),                   % the width its width was found from
     field(background,   u32),                   % RGBA, behind its padding box
     field(bct, u32), field(bcr, u32), field(bcb, u32), field(bcl, u32),  % border colours, RGBA, a side each
-    field(bst, u8), field(bsr, u8), field(bsb, u8), field(bsl, u8)       % border styles (src/layout/layout.h)
+    field(bst, u8), field(bsr, u8), field(bsb, u8), field(bsl, u8),      % border styles (src/layout/layout.h)
+    field(pseudo, u8)                           % 1 its element's ::before, 2 ::after; 0 the element's own
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -109,6 +110,7 @@ layout_contract(invariant(live_links, 'Every link names a live record', refs_liv
 
 layout_contract(fact(layout_box(handle, field(node), field(kind), field(x), field(y), field(w), field(h)), table(box), true)).
 layout_contract(fact(layout_parent(handle, field(parent)), table(box), field(parent) \== none)).
+layout_contract(fact(layout_pseudo(handle, field(pseudo)), table(box), field(pseudo) \== 0)).
 layout_contract(fact(layout_margin(handle, field(mt), field(mr), field(mb), field(ml)), table(box), true)).
 layout_contract(fact(layout_border(handle, field(bt), field(br), field(bb), field(bl)), table(box), true)).
 layout_contract(fact(layout_padding(handle, field(pt), field(pr), field(pb), field(pl)), table(box), true)).
@@ -118,9 +120,12 @@ layout_contract(fact(layout_text(handle, field(line), field(node), field(text), 
     field(kind) == text)).
 layout_contract(fact(layout_frag(handle, field(line), field(kind), field(node), field(x), field(y), field(w), field(h)), table(frag),
     field(kind) \== text)).
+%% the text a pseudo-element gave (::before's and ::after's content, a field's placeholder)
+layout_contract(fact(layout_generated(handle, field(node), field(text)), table(frag), field(kind) == generated)).
 
 layout_contract(rules('rules/layout')).
 layout_contract(derived(layout_box_of/2, 'the box an element generated')).
+layout_contract(derived(layout_pseudo_box_of/3, 'the box an element''s ::before or ::after generated')).
 layout_contract(derived(layout_border_box/5, 'a box''s border box: X, Y, W, H')).
 layout_contract(derived(layout_explain_width/2, 'why a box is as wide as it is')).
 layout_contract(derived(layout_at/3, 'the deepest element whose box holds a point')).
