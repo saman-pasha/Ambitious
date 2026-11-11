@@ -32,14 +32,14 @@ enum {
     K_EXPORT, K_EXTENDS, K_FALSE, K_FINALLY, K_FOR, K_FUNCTION, K_IF, K_IMPORT, K_IN, K_INSTANCEOF, K_LET,
     K_NEW, K_NULL, K_OF, K_RETURN, K_STATIC, K_SUPER, K_SWITCH, K_THIS, K_THROW, K_TRUE, K_TRY, K_TYPEOF,
     K_VAR, K_VOID, K_WHILE, K_WITH, K_YIELD, K_ASYNC, K_AWAIT, K_GET, K_SET, K_TARGET, K_CONSTRUCTOR,
-    K_ARGUMENTS, K_SLICE, K_ENUM, KW_N
+    K_ARGUMENTS, K_SLICE, K_ENUM, K_EVAL, KW_N
 };
 static const char *const js_kw_names[KW_N] = {
     "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else",
     "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "let",
     "new", "null", "of", "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof",
     "var", "void", "while", "with", "yield", "async", "await", "get", "set", "target", "constructor",
-    "arguments", "slice", "enum" };
+    "arguments", "slice", "enum", "eval" };
 
 typedef struct jtok { uint32_t type, op, start, end, line, nl, str, aux; double num; } jtok;
 
@@ -53,7 +53,8 @@ enum {
     N_VAR, N_DECL, N_EXPR, N_BLOCK, N_IF, N_FOR, N_FORIN, N_WHILE, N_DO, N_RETURN, N_BREAK, N_CONTINUE,
     N_THROW, N_TRY, N_SWITCH, N_CASE, N_LABEL, N_EMPTY, N_FUNCDECL, N_CLASSDECL,
     N_YIELD,           /* a its operand (0: none), op 1 for yield* */
-    N_AWAIT            /* a its operand */
+    N_AWAIT,           /* a its operand */
+    N_WITH             /* a its object, b its body, s the body's scope (its object's cell there) */
 };
 /* N_PROP's kinds */
 enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
@@ -62,12 +63,21 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
 #define NF_STATIC 4
 #define NF_PREFIX 8
 #define NF_REST 16
+#define NF_EVAL 32         /* a call of eval by its name: a direct eval, s its site's scope */
 
 typedef struct jn { uint16_t k, op; uint32_t a, b, c, d, line, s; double num; } jn;
 
-enum { SC_SCRIPT, SC_FUNC, SC_BLOCK, SC_SELF };
-typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first; } jscope;
-enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS };
+/* SC_EVAL: an eval's top-level lexical scope, its var and function declarations hoisted
+   past it to the scope beneath */
+enum { SC_SCRIPT, SC_FUNC, SC_BLOCK, SC_SELF, SC_EVAL };
+/* dyn: a with's object or a sloppy function's eval vars, the cell's declaration (names
+   passing the scope are looked for there first); synth: a scope of a direct eval's caller,
+   its cells the caller's (the site's bindings) */
+typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth; } jscope;
+/* D_EV: a sloppy function's eval vars object; D_WITH: a with's object; D_EVALVAR: a var or
+   function a sloppy direct eval's code declares in its caller's function (that object's) */
+enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS, D_EV, D_WITH, D_EVALVAR };
+#define JS_SYNTH_FN 0xFFFFFFFFu            /* a synthetic declaration's function: none of this unit's */
 typedef struct jdecl { uint32_t scope, atom, kind, captured, slot, next, fn, param, init, envslot; } jdecl;
 typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
 #define FN_EXPR 0x10000            /* a concise arrow's body: an expression */
@@ -97,6 +107,11 @@ typedef struct js_cc {
     vector<jctx> ctx;
     jtok tok, prev;
     uint32_t pos, line, cur_fn, cur_scope, script, gen_fn, nslots, chain, in_class, in_fields;
+    uint32_t mode;                    /* JS_CC_*: what is read */
+    uint32_t ndyn;                    /* the dynamic scopes' count: names checked against them */
+    uint32_t nsynth;                  /* a direct eval's synthetic scopes: 1..nsynth */
+    uint32_t ev_atom, with_atom;      /* the cells' names, which no source can write */
+    uint32_t completion;              /* an eval's completion value: its slot in function 0, plus one */
     uint32_t kw[KW_N];
     uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
     int err;
@@ -498,7 +513,7 @@ static void list_take(js_cc *cc, size_t mark, uint32_t *off, uint32_t *count) {
 }
 
 static uint32_t scope_new(js_cc *cc, uint32_t kind) {
-    jscope s = { cc->cur_scope, cc->cur_fn, kind, 0, 0, 0 };
+    jscope s = { cc->cur_scope, cc->cur_fn, kind, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s);
     return (uint32_t)(len(cc->scopes) - 1);
 }
@@ -510,7 +525,7 @@ static uint32_t var_scope(js_cc *cc, uint32_t s) {
 }
 
 static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
-    uint32_t sc = kind == D_VAR ? var_scope(cc, cc->cur_scope) : cc->cur_scope;
+    uint32_t sc = kind == D_VAR || (kind == D_FUNC && cc->scopes[cc->cur_scope].kind == SC_EVAL) ? var_scope(cc, cc->cur_scope) : cc->cur_scope;
     for (uint32_t d = cc->scopes[sc].first; d; d = cc->decls[d].next) {
         if (cc->decls[d].atom != atom) continue;
         uint32_t dk = cc->decls[d].kind;
@@ -533,6 +548,9 @@ static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     d.atom = atom;
     d.kind = kind;
     d.fn = cc->scopes[sc].fn;
+    /* a sloppy direct eval's var (or function) its caller has no binding for: its caller's
+       eval vars object's */
+    if (cc->scopes[sc].synth) { d.kind = D_EVALVAR; d.fn = JS_SYNTH_FN; }
     d.next = cc->scopes[sc].first;
     push_back(cc->decls, d);
     uint32_t id = (uint32_t)(len(cc->decls) - 1);
@@ -544,6 +562,29 @@ static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
         while (cc->decls[x].next) x = cc->decls[x].next;
         cc->decls[x].next = id;
     }
+    return id;
+}
+
+/* a dynamic scope's cell, a declaration of its own in the scope, kept in its environment */
+static uint32_t dyn_decl(js_cc *cc, uint32_t sc, uint32_t kind, uint32_t atom) {
+    jdecl d;
+    memset(&d, 0, sizeof d);
+    d.scope = sc;
+    d.atom = atom;
+    d.kind = kind;
+    d.fn = cc->scopes[sc].fn;
+    d.captured = 1;
+    push_back(cc->decls, d);
+    uint32_t id = (uint32_t)(len(cc->decls) - 1);
+    if (!cc->scopes[sc].first) cc->scopes[sc].first = id;
+    else {
+        uint32_t x = cc->scopes[sc].first;
+        while (cc->decls[x].next) x = cc->decls[x].next;
+        cc->decls[x].next = id;
+    }
+    cc->scopes[sc].dyn = id;
+    cc->scopes[sc].has_env = 1;
+    cc->ndyn++;
     return id;
 }
 
@@ -1257,6 +1298,10 @@ static uint32_t p_call(CC) {
         } else if (is_p(cc, P_LPAREN)) {
             uint32_t n = node(cc, N_CALL, line);
             cc->nodes[n].a = e;
+            if (!chain && cc->nodes[e].k == N_IDENT && cc->nodes[e].s == cc->kw[K_EVAL]) {
+                cc->nodes[n].op |= NF_EVAL;
+                cc->nodes[n].s = cc->cur_scope;
+            }
             e = p_args(CCA, n);
         } else if (cc->tok.type == T_TEMPLATE) {
             /* a tagged template: the tag called with the strings (op 1: one frozen array
@@ -1828,7 +1873,23 @@ static uint32_t p_stmt_in(CC) {
             return n;
         }
         if (a == cc->kw[K_DEBUGGER]) { lx(CCA); semi(CCA); return node(cc, N_EMPTY, line); }
-        if (a == cc->kw[K_WITH]) { cc_error(cc, line, "with statements are not supported"); return node(cc, N_EMPTY, line); }
+        if (a == cc->kw[K_WITH]) {
+            if (cc->fns[cc->cur_fn].flags & JF_STRICT) { cc_error(cc, line, "Strict mode code may not include a with statement"); return node(cc, N_EMPTY, line); }
+            lx(CCA);
+            uint32_t n = node(cc, N_WITH, line);
+            expect_p(CCA, P_LPAREN, "'(' after with");
+            cc->nodes[n].a = p_expr(CCA, 0);
+            expect_p(CCA, P_RPAREN, "')'");
+            /* the body's scope holds the object's cell: every name in it looked for there first */
+            uint32_t saved = cc->cur_scope;
+            uint32_t sc = scope_new(cc, SC_BLOCK);
+            cc->cur_scope = sc;
+            dyn_decl(cc, sc, D_WITH, cc->with_atom);
+            cc->nodes[n].b = p_stmt(CCA);
+            cc->nodes[n].s = sc;
+            cc->cur_scope = saved;
+            return n;
+        }
         if (a == cc->kw[K_IMPORT] || a == cc->kw[K_EXPORT]) { cc_error(cc, line, "modules (import and export) are not supported"); return node(cc, N_EMPTY, line); }
         /* a label */
         jtok t0 = cc->tok, p0 = cc->prev;
@@ -1903,6 +1964,32 @@ static void resolve(js_cc *cc) {
             cc->scopes[cc->decls[found].scope].has_env = 1;
         }
     }
+    /* a direct eval's code sees every binding on its site's chain: each kept in an
+       environment; the innermost function that is not an arrow's arguments made; the
+       site's var scope, a sloppy function's, given its eval vars object's cell */
+    for (size_t n = 1; n < len(cc->nodes); n++) {
+        jn e = cc->nodes[n];
+        if (e.k != N_CALL || !(e.op & NF_EVAL)) continue;
+        uint32_t vs = var_scope(cc, e.s);
+        if (cc->scopes[vs].kind == SC_FUNC && !cc->scopes[vs].synth && !cc->scopes[vs].dyn && !(cc->fns[cc->scopes[vs].fn].flags & JF_STRICT))
+            dyn_decl(cc, vs, D_EV, cc->ev_atom);
+        int args_done = 0;
+        for (uint32_t s = e.s;; s = cc->scopes[s].parent) {
+            if (cc->scopes[s].kind == SC_SCRIPT) break;
+            if (!args_done && cc->scopes[s].kind == SC_FUNC && !cc->scopes[s].synth) {
+                uint32_t f = cc->scopes[s].fn;
+                if (!(cc->fns[f].flags & (JF_ARROW | FN_FIELDS))) { args_decl(cc, f); args_done = 1; }
+            }
+            for (uint32_t d = cc->scopes[s].first; d; d = cc->decls[d].next) {
+                jdecl x = cc->decls[d];
+                if (x.kind == D_EVALVAR || x.fn == JS_SYNTH_FN) continue;
+                if (x.kind == D_SELF && !x.captured) cc->decls[d].scope = cc->fns[x.fn].scope;
+                cc->decls[d].captured = 1;
+                cc->scopes[cc->decls[d].scope].has_env = 1;
+            }
+            if (s == 0) break;
+        }
+    }
 }
 
 /* ---- the code ---- */
@@ -1955,8 +2042,87 @@ static uint32_t env_depth(js_cc *cc, uint32_t from, uint32_t to) {
     return depth;
 }
 
+/* the dynamic scopes a name's reference passes on its way to its declaration (or to the
+   global scope): their cells' declarations, innermost first */
+#define JS_DYN_MAX 16
+static uint32_t dyn_path(js_cc *cc, uint32_t scope, uint32_t d, uint32_t *out) {
+    uint32_t n = 0, ds = d ? cc->decls[d].scope : 0xFFFFFFFFu;
+    for (uint32_t s = scope;; s = cc->scopes[s].parent) {
+        if (s == ds) break;
+        if (cc->scopes[s].dyn && n < JS_DYN_MAX) out[n++] = cc->scopes[s].dyn;
+        if (cc->scopes[s].kind == SC_SCRIPT || s == 0) break;
+    }
+    return n;
+}
+
+/* a name looked for in each dynamic scope before its static place: found, its value
+   pushed (or, put, stored) and a jump past the static access; the jumps' chain */
+static uint32_t gen_dyn(js_vm *vm, js_cc *cc, uint32_t op, uint32_t atom, uint32_t scope, const uint32_t *dyn, uint32_t nd, uint32_t flags) {
+    uint32_t chain = 0;
+    for (uint32_t i = 0; i < nd; i++) {
+        jdecl y = cc->decls[dyn[i]];
+        emit(vm, op);
+        emit(vm, env_depth(cc, scope, y.scope));
+        emit16(vm, y.envslot);
+        emit32(vm, atom);
+        emit(vm, flags | (y.kind == D_WITH ? 1u : 0u));
+        uint32_t at = here(vm);
+        emit32(vm, chain);
+        chain = at;
+    }
+    return chain;
+}
+
 /* a name read: its declaration's place, from the scope the reference stands in */
-static void gen_get(CC, uint32_t atom, uint32_t d, uint32_t scope) {
+static void gen_get_static(CC, uint32_t atom, uint32_t d, uint32_t scope);
+static void gen_get_flags(CC, uint32_t atom, uint32_t d, uint32_t scope, uint32_t flags) {
+    if (cc->ndyn) {
+        if (d && cc->decls[d].kind == D_EVALVAR) d = 0;
+        uint32_t dyn[JS_DYN_MAX], nd = dyn_path(cc, scope, d, dyn);
+        if (nd) {
+            uint32_t chain = gen_dyn(vm, cc, OP_DYN_GET, atom, scope, dyn, nd, flags);
+            gen_get_static(CCA, atom, d, scope);
+            chain_end(vm, chain, here(vm));
+            return;
+        }
+    }
+    gen_get_static(CCA, atom, d, scope);
+}
+static void gen_get(CC, uint32_t atom, uint32_t d, uint32_t scope) { gen_get_flags(CCA, atom, d, scope, 0); }
+
+/* a reference passes a with on its way: a call of it takes the with's object as its this */
+static int passes_with(js_cc *cc, uint32_t n) {
+    if (!cc->ndyn || cc->nodes[n].k != N_IDENT) return 0;
+    uint32_t r = cc->nodes[n].a, d = cc->refs[r].decl;
+    if (d && cc->decls[d].kind == D_EVALVAR) d = 0;
+    uint32_t dyn[JS_DYN_MAX], nd = dyn_path(cc, cc->refs[r].scope, d, dyn);
+    for (uint32_t i = 0; i < nd; i++) if (cc->decls[dyn[i]].kind == D_WITH) return 1;
+    return 0;
+}
+
+/* a direct eval's site: every binding on its chain (each kept in an environment), the
+   caller's strictness, whether a function holds the site */
+static uint32_t gen_eval_site(CC, uint32_t site) {
+    js_evalsite es;
+    memset(&es, 0, sizeof es);
+    es.first = (uint32_t)len(vm->eval_binds);
+    if (cc->fns[cc->gen_fn].flags & JF_STRICT) es.flags |= JS_EVAL_STRICT;
+    if (cc->scopes[var_scope(cc, site)].kind != SC_SCRIPT) es.flags |= JS_EVAL_INFN;
+    for (uint32_t s = site;; s = cc->scopes[s].parent) {
+        if (cc->scopes[s].kind == SC_SCRIPT) break;
+        for (uint32_t d = cc->scopes[s].first; d; d = cc->decls[d].next) {
+            jdecl x = cc->decls[d];
+            if (!x.captured || x.kind == D_EVALVAR) continue;
+            js_evalbind b = { x.atom, x.kind, env_depth(cc, site, x.scope), x.envslot };
+            push_back(vm->eval_binds, b);
+            es.n++;
+        }
+        if (s == 0) break;
+    }
+    push_back(vm->eval_sites, es);
+    return (uint32_t)(len(vm->eval_sites) - 1);
+}
+static void gen_get_static(CC, uint32_t atom, uint32_t d, uint32_t scope) {
     if (!d || is_script_decl(cc, d)) { emit_atom_ic(vm, OP_GET_GLOBAL, atom); return; }
     jdecl x = cc->decls[d];
     if (x.kind == D_SELF && !x.captured) { emit(vm, OP_CALLEE); return; }
@@ -1974,7 +2140,21 @@ static void gen_get(CC, uint32_t atom, uint32_t d, uint32_t scope) {
 
 /* the value on top stored in a name: kept (keep) or taken; init: its declaration's
    own initialization, which a const and a let not yet set allow */
+static void gen_put_static(CC, uint32_t atom, uint32_t d, uint32_t scope, int keep, int init);
 static void gen_put(CC, uint32_t atom, uint32_t d, uint32_t scope, int keep, int init) {
+    if (cc->ndyn) {
+        if (d && cc->decls[d].kind == D_EVALVAR) d = 0;
+        uint32_t dyn[JS_DYN_MAX], nd = dyn_path(cc, scope, d, dyn);
+        if (nd) {
+            uint32_t chain = gen_dyn(vm, cc, OP_DYN_PUT, atom, scope, dyn, nd, keep ? 4u : 0u);
+            gen_put_static(CCA, atom, d, scope, keep, init);
+            chain_end(vm, chain, here(vm));
+            return;
+        }
+    }
+    gen_put_static(CCA, atom, d, scope, keep, init);
+}
+static void gen_put_static(CC, uint32_t atom, uint32_t d, uint32_t scope, int keep, int init) {
     if (!d || is_script_decl(cc, d)) {
         if (d && init && is_lexical(cc->decls[d].kind)) {
             if (keep) emit(vm, OP_DUP);
@@ -2330,6 +2510,24 @@ static void gen_call(CC, uint32_t n) {
     jn c = cc->nodes[n];
     uint32_t callee = c.a;
     uint32_t ck = cc->nodes[callee].k;
+    if ((c.op & NF_EVAL) && !has_spread(cc, c.b, c.c) && c.c <= 64) {
+        /* eval(...): a direct eval when the name holds eval itself, its site's scopes the code's */
+        gen_expr(CCA, callee);
+        for (uint32_t i = 0; i < c.c; i++) gen_expr(CCA, cc->lists[c.b + i]);
+        emit(vm, OP_CALL_EVAL);
+        emit16(vm, c.c);
+        emit32(vm, gen_eval_site(CCA, c.s));
+        return;
+    }
+    if (passes_with(cc, callee)) {
+        /* a name a with's object may hold: the call's this that object when it does */
+        emit(vm, OP_UNDEF);
+        uint32_t r = cc->nodes[callee].a;
+        gen_get_flags(CCA, cc->nodes[callee].s, cc->refs[r].decl, cc->refs[r].scope, 2);
+        if (c.op & NF_OPTIONAL) cc->chain = chain_add(vm, OP_JNULLISH2, cc->chain);
+        gen_args_call(CCA, c.b, c.c, OP_CALL, OP_CALL_ARR);
+        return;
+    }
     if (ck == N_MEMBER) gen_member(CCA, callee, 1);
     else if (ck == N_SUPER_MEMBER) {
         emit(vm, OP_THIS);
@@ -2648,6 +2846,22 @@ static void gen_expr(CC, uint32_t n) {
     case N_UNARY: {
         if (e.op == 1000) {
             jn a = cc->nodes[e.a];
+            if (a.k == N_IDENT && cc->ndyn) {
+                /* typeof of a name a dynamic scope may hold: its value's there, else the static one's */
+                uint32_t r = a.a, d = cc->refs[r].decl, sc = cc->refs[r].scope;
+                if (d && cc->decls[d].kind == D_EVALVAR) d = 0;
+                uint32_t dyn[JS_DYN_MAX], nd = dyn_path(cc, sc, d, dyn);
+                if (nd) {
+                    uint32_t chain = gen_dyn(vm, cc, OP_DYN_GET, a.s, sc, dyn, nd, 0);
+                    if (!d || is_script_decl(cc, d)) { emit(vm, OP_TYPEOF_GLOBAL); emit32(vm, a.s); }
+                    else { gen_get_static(CCA, a.s, d, sc); emit(vm, OP_TYPEOF); }
+                    uint32_t end = jump_fwd(vm, OP_JMP);
+                    chain_end(vm, chain, here(vm));
+                    emit(vm, OP_TYPEOF);
+                    patch_to(vm, end, here(vm));
+                    return;
+                }
+            }
             if (a.k == N_IDENT && (!cc->refs[a.a].decl || is_script_decl(cc, cc->refs[a.a].decl))) { emit(vm, OP_TYPEOF_GLOBAL); emit32(vm, a.s); return; }
             gen_expr(CCA, e.a);
             emit(vm, OP_TYPEOF);
@@ -2968,6 +3182,16 @@ static void gen_return_value(CC, uint32_t v) {
 static void gen_stmt(CC, uint32_t n) {
     if (cc->err) return;
     jn s = cc->nodes[n];
+    if (cc->completion && cc->gen_fn == 0) {
+        /* an eval's completion value: each expression statement's; an if's, a loop's,
+           a switch's, a try's and a with's undefined unless their statements give one */
+        if (s.k == N_EXPR) { gen_expr(CCA, s.a); emit(vm, OP_PUT_LOC); emit16(vm, cc->completion - 1); return; }
+        if (s.k == N_IF || s.k == N_FOR || s.k == N_FORIN || s.k == N_WHILE || s.k == N_DO || s.k == N_SWITCH || s.k == N_TRY || s.k == N_WITH) {
+            emit(vm, OP_UNDEF);
+            emit(vm, OP_PUT_LOC);
+            emit16(vm, cc->completion - 1);
+        }
+    }
     switch (s.k) {
     case N_EMPTY: case N_FUNCDECL: return;
     case N_EXPR: gen_void(CCA, s.a); return;
@@ -3103,6 +3327,18 @@ static void gen_stmt(CC, uint32_t n) {
     }
     case N_BREAK: gen_jump(CCA, n, 1); return;
     case N_CONTINUE: gen_jump(CCA, n, 0); return;
+    case N_WITH: {
+        /* the object in its cell, in the body's environment */
+        gen_expr(CCA, s.a);
+        emit(vm, OP_TO_OBJECT);
+        gen_block_enter(CCA, s.s);
+        emit(vm, OP_PUT_ENV);
+        emit(vm, 0);
+        emit16(vm, cc->decls[cc->scopes[s.s].dyn].envslot);
+        gen_stmt(CCA, s.b);
+        gen_block_leave(CCA, s.s);
+        return;
+    }
     case N_THROW: gen_expr(CCA, s.a); emit(vm, OP_THROW); return;
     case N_TRY: gen_try(CCA, n); return;
     case N_LABEL: {
@@ -3164,6 +3400,53 @@ static void assign_slots(js_cc *cc, uint32_t f) {
     }
 }
 
+/* an eval's statements in its lexical scope (the body's), then its completion value
+   returned. A sloppy direct eval's declarations first: in the global scope the script's
+   own, in its caller's function its eval vars object's (or the caller's own binding's
+   when it has one of the name) */
+static void gen_eval_body(CC, jn b) {
+    if (cc->mode == JS_CC_DIRECT) {
+        uint32_t fs = cc->fns[0].scope;
+        for (uint32_t d = cc->scopes[0].first; d; d = cc->decls[d].next) {
+            jdecl x = cc->decls[d];
+            if (x.kind == D_VAR) { emit(vm, OP_DEF_VAR); emit32(vm, x.atom); }
+            else if (x.kind == D_FUNC && x.init) {
+                emit(vm, OP_CLOSURE);
+                emit32(vm, cc->fns[x.init - 1].id);
+                emit(vm, OP_DEF_FUNC);
+                emit32(vm, x.atom);
+            }
+        }
+        for (uint32_t ls = 1; ls <= cc->nsynth; ls++) {
+            for (uint32_t d = cc->scopes[ls].first; d; d = cc->decls[d].next) {
+                jdecl x = cc->decls[d];
+                if (x.kind == D_EVALVAR && cc->scopes[ls].dyn) {
+                    jdecl ev = cc->decls[cc->scopes[ls].dyn];
+                    if (x.init) { emit(vm, OP_CLOSURE); emit32(vm, cc->fns[x.init - 1].id); }
+                    else emit(vm, OP_UNDEF);
+                    emit(vm, OP_EVALVAR_DEF);
+                    emit(vm, env_depth(cc, fs, ls));
+                    emit16(vm, ev.envslot);
+                    emit32(vm, x.atom);
+                    emit(vm, x.init ? 1 : 0);
+                } else if (x.init && x.kind != D_EVALVAR) {
+                    emit(vm, OP_CLOSURE);
+                    emit32(vm, cc->fns[x.init - 1].id);
+                    emit(vm, OP_PUT_ENV);
+                    emit(vm, env_depth(cc, fs, ls));
+                    emit16(vm, x.envslot);
+                }
+            }
+        }
+    }
+    gen_block_enter(CCA, b.c);
+    gen_statements(CCA, b.a, b.b);
+    gen_block_leave(CCA, b.c);
+    emit(vm, OP_GET_LOC);
+    emit16(vm, cc->completion - 1);
+    emit(vm, OP_RETURN);
+}
+
 static void gen_function(CC, uint32_t f) {
     jfn F = cc->fns[f];
     uint32_t id = F.id;
@@ -3172,6 +3455,14 @@ static void gen_function(CC, uint32_t f) {
     clear(cc->ctx);
     assign_slots(cc, f);
     uint32_t fs = F.scope;
+    cc->completion = 0;
+    if (f == 0 && cc->mode >= JS_CC_EVAL) {
+        /* an eval's program: its completion value kept in a slot of its own */
+        cc->completion = new_slot(cc) + 1;
+        emit(vm, OP_UNDEF);
+        emit(vm, OP_PUT_LOC);
+        emit16(vm, cc->completion - 1);
+    }
     if (cc->scopes[fs].kind == SC_SCRIPT) {
         /* a script: its top-level names are the page's globals */
         for (uint32_t d = cc->scopes[fs].first; d; d = cc->decls[d].next) {
@@ -3189,8 +3480,11 @@ static void gen_function(CC, uint32_t f) {
             }
         }
         jn b = cc->nodes[F.body];
-        gen_statements(CCA, b.a, b.b);
-        emit(vm, OP_RETURN_UNDEF);
+        if (cc->completion) gen_eval_body(CCA, b);
+        else {
+            gen_statements(CCA, b.a, b.b);
+            emit(vm, OP_RETURN_UNDEF);
+        }
     } else {
         /* an async function's promise is made before its parameters are (their errors reject it) */
         if ((F.flags & JF_ASYNC) && !(F.flags & JF_GENERATOR)) emit(vm, OP_ASYNC_START);
@@ -3260,7 +3554,8 @@ static void gen_function(CC, uint32_t f) {
                 emit(vm, OP_POP);
             }
             emit(vm, OP_RETURN_UNDEF);
-        } else {
+        } else if (cc->completion) gen_eval_body(CCA, cc->nodes[F.body]);
+        else {
             jn b = cc->nodes[F.body];
             gen_statements(CCA, b.a, b.b);
             emit(vm, OP_RETURN_UNDEF);
@@ -3270,7 +3565,25 @@ static void gen_function(CC, uint32_t f) {
     vm->funcs[id].code_len = here(vm) - vm->funcs[id].code;
 }
 
-int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int as_function_body, uint32_t *func, vector<char> *err) {
+/* an eval's code that begins with a 'use strict' directive (its first token, as written) */
+static int eval_is_strict(const char *src, uint32_t n) {
+    uint32_t i = 0;
+    for (;;) {
+        while (i < n && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) i++;
+        if (i + 1 < n && src[i] == '/' && src[i + 1] == '/') { while (i < n && src[i] != '\n') i++; continue; }
+        if (i + 1 < n && src[i] == '/' && src[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < n && !(src[i] == '*' && src[i + 1] == '/')) i++;
+            i += 2;
+            continue;
+        }
+        break;
+    }
+    if (i + 12 > n || (src[i] != '\'' && src[i] != '"') || src[i + 11] != src[i]) return 0;
+    return memcmp(src + i + 1, "use strict", 10) == 0;
+}
+
+int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, uint32_t *func, vector<char> *err) {
     js_cc ccs;
     memset(&ccs, 0, sizeof ccs);
     defer(ccs) { JS_CC_DROP(ccs); }
@@ -3286,19 +3599,82 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int as_fun
     jref r0 = { 0, 0, 0, 0 };
     push_back(cc->refs, r0);
     for (int k = 0; k < KW_N; k++) cc->kw[k] = js_atom_ascii(vm, js_kw_names[k]);
+    cc->ev_atom = js_atom_ascii(vm, " ev");
+    cc->with_atom = js_atom_ascii(vm, " with");
     cc->script = script;
-    /* the script: function 0 in scope 0 (a handler's body: a function of event) */
-    jscope s0 = { 0, 0, as_function_body ? SC_FUNC : SC_SCRIPT, 0, 0, 0 };
+    cc->mode = (uint32_t)mode;
+    int is_eval = mode >= JS_CC_EVAL;
+    int strict = is_eval && eval_is_strict(src, srcn);
+    if (mode == JS_CC_DIRECT && (vm->eval_sites[vm->eval_site].flags & JS_EVAL_STRICT)) strict = 1;
+    /* the script: function 0 in scope 0 (a handler's body: a function of event; a
+       strict eval's code: a function, its vars its own) */
+    jscope s0 = { 0, 0, (mode == JS_CC_HANDLER || strict) && mode != JS_CC_DIRECT ? SC_FUNC : SC_SCRIPT, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s0);
     jfn f0;
     memset(&f0, 0, sizeof f0);
-    f0.flags = 0;
+    f0.flags = strict ? JF_STRICT : 0;
     push_back(cc->fns, f0);
     cc->cur_fn = 0;
     cc->cur_scope = 0;
+    if (mode == JS_CC_DIRECT) {
+        /* a direct eval: its caller's environments as synthetic scopes above its own,
+           outermost first, each with the bindings the site saw at that depth (the var
+           scope's a function scope, which a sloppy eval's vars go to); the code a
+           function of them, an arrow's (its this, arguments and super its caller's),
+           its own vars its own only when strict */
+        js_evalsite es = vm->eval_sites[vm->eval_site];
+        uint32_t levels = 0;
+        for (uint32_t i = 0; i < es.n; i++) {
+            js_evalbind b = vm->eval_binds[es.first + i];
+            if (b.depth + 1 > levels) levels = b.depth + 1;
+        }
+        uint32_t lv[256];
+        if (levels > 256) levels = 256;
+        for (uint32_t k = levels; k > 0; k--) {
+            jscope ls = { cc->cur_scope, 0, SC_BLOCK, 1, 0, 0, 0, 1 };
+            push_back(cc->scopes, ls);
+            lv[k - 1] = (uint32_t)(len(cc->scopes) - 1);
+            cc->cur_scope = lv[k - 1];
+        }
+        for (uint32_t i = 0; i < es.n; i++) {
+            js_evalbind b = vm->eval_binds[es.first + i];
+            if (b.depth >= levels) continue;
+            uint32_t ls = lv[b.depth];
+            jdecl d;
+            memset(&d, 0, sizeof d);
+            d.scope = ls;
+            d.atom = b.atom;
+            d.kind = b.kind;
+            d.captured = 1;
+            d.envslot = b.slot;
+            d.fn = JS_SYNTH_FN;
+            push_back(cc->decls, d);
+            uint32_t id = (uint32_t)(len(cc->decls) - 1);
+            if (!cc->scopes[ls].first) cc->scopes[ls].first = id;
+            else {
+                uint32_t x = cc->scopes[ls].first;
+                while (cc->decls[x].next) x = cc->decls[x].next;
+                cc->decls[x].next = id;
+            }
+            if (b.kind == D_EV || b.kind == D_WITH) { cc->scopes[ls].dyn = id; cc->ndyn++; }
+            /* the eval vars' level: the caller's function scope */
+            if (b.kind == D_EV) cc->scopes[ls].kind = SC_FUNC;
+        }
+        /* synth marks the caller's function scope that a sloppy eval's vars go to */
+        for (uint32_t k = 0; k < levels; k++) if (cc->scopes[lv[k]].kind != SC_FUNC || strict || !(es.flags & JS_EVAL_INFN)) cc->scopes[lv[k]].synth = 0;
+        cc->nsynth = levels;
+        jscope fsc = { cc->cur_scope, 0, strict ? SC_FUNC : SC_BLOCK, 0, 0, 0, 0, 0 };
+        push_back(cc->scopes, fsc);
+        cc->cur_scope = (uint32_t)(len(cc->scopes) - 1);
+        cc->fns[0].scope = cc->cur_scope;
+        cc->fns[0].flags |= JF_ARROW;
+    }
     cc->line = 1;
     cc->tok.type = T_EOF;
-    if (as_function_body) {
+    /* an eval's let, const and class its own, in a scope above its var scope */
+    uint32_t body_scope = is_eval ? scope_new(cc, SC_EVAL) : 0;
+    if (is_eval) cc->cur_scope = body_scope;
+    if (mode == JS_CC_HANDLER) {
         uint32_t ev = js_atom_ascii(vm, "event");
         uint32_t d = declare(vm, src, srcn, cc, ev, D_PARAM, 1);
         cc->decls[d].param = 1;
@@ -3319,7 +3695,13 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int as_fun
         cc->nodes[body].b = sn;
     }
     cc->fns[0].body = body;
-    cc->nodes[body].c = 0;
+    cc->nodes[body].c = body_scope;
+    if (!cc->err && mode == JS_CC_FUNCTION) {
+        /* the Function constructor's source: one statement, the function expression */
+        jn b = cc->nodes[body];
+        if (b.b != 1 || cc->nodes[cc->lists[b.a]].k != N_EXPR || cc->nodes[cc->nodes[cc->lists[b.a]].a].k != N_FUNC)
+            cc_error(cc, 1, "the Function constructor's parameters or body end the function early");
+    }
     if (!cc->err) {
         resolve(cc);
         /* every function's record, then each one's code */

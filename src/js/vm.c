@@ -1137,6 +1137,11 @@ int js_has(js_vm *vm, uint32_t o, uint32_t atom) {
             if (atom == A_LENGTH) return 1;
             if (js_atom_index(vm, atom, &i) && i < vm->objs[x].b && vm->slots[vm->objs[x].a + i] != JV_HOLE) return 1;
         }
+        if (k == JK_STRING && jv_is_str(vm->objs[x].x)) {
+            /* a String's wrapper: its length and its indexes */
+            if (atom == A_LENGTH) return 1;
+            if (js_atom_index(vm, atom, &i) && i < vm->strs[jv_idx(vm->objs[x].x)].len) return 1;
+        }
         if (k == JK_HOST) {
             int handled = 0;
             jv r = js_host_get(vm, x, atom, &handled);
@@ -3328,6 +3333,106 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             js_throw_msg(vm, vm->type_error_proto, "The iterator does not provide a 'throw' method"); RELOAD();
             break;
         }
+        case OP_CALL_EVAL: {
+            /* eval called by its name: a direct eval when the name holds eval itself, the
+               code compiled for this site and run in this frame's environment, with its
+               this and super; any other function a plain call */
+            uint32_t argc = RD16(pc), site = RD32(pc + 2);
+            pc += 6;
+            uint32_t sp0 = sp - argc - 1;
+            jv callee = stack[sp0];
+            if (jv_is_obj(callee) && jv_idx(callee) == vm->eval_fn) {
+                jv code_v = argc ? stack[sp0 + 1] : JV_UNDEF;
+                sp = sp0;
+                SYNC();
+                uint32_t cl = frames[fi].callee;
+                uint32_t home = cl && objs[cl].kind == JK_CLOSURE ? objs[cl].c : 0;
+                vm->eval_site = site;
+                jv r = js_eval_code(vm, code_v, JS_CC_DIRECT, frames[fi].env, frames[fi].thisv, home); RELOAD();
+                if (vm->throwing) break;
+                stack[sp++] = r;
+                goto next;
+            }
+            jv av[64];
+            for (uint32_t i = 0; i < argc && i < 64; i++) av[i] = stack[sp0 + 1 + i];
+            sp = sp0;
+            SYNC();
+            jv r = js_call(vm, callee, JV_UNDEF, av, argc < 64 ? argc : 64); RELOAD();
+            if (vm->throwing) break;
+            stack[sp++] = r;
+            goto next;
+        }
+        case OP_DYN_GET: case OP_DYN_PUT: {
+            /* a name looked for in a dynamic scope's object: a with's (HasProperty, its
+               unscopables heeded) or a sloppy function's eval vars */
+            uint32_t depth = code[pc], cell = RD16(pc + 1), atom = RD32(pc + 3), fl = code[pc + 7];
+            uint32_t at = pc + 8;
+            int32_t off = (int32_t)RD32(at);
+            pc = at + 4;
+            uint32_t e = frames[fi].env;
+            for (uint32_t k = 0; k < depth; k++) e = objs[e].a;
+            jv o = slots[objs[e].slots + cell];
+            if (!jv_is_obj(o)) goto next;
+            SYNC();
+            int has = js_has(vm, jv_idx(o), atom); RELOAD();
+            if (vm->throwing) break;
+            if (has && (fl & 1)) {
+                jv un = js_get(vm, o, JS_SYM_KEY | JSYM_UNSCOPABLES); RELOAD();
+                if (vm->throwing) break;
+                if (jv_is_obj(un)) {
+                    jv blocked = js_get(vm, un, atom); RELOAD();
+                    if (vm->throwing) break;
+                    if (js_truthy(vm, blocked)) has = 0;
+                    RELOAD();
+                }
+            }
+            if (!has) goto next;
+            if (op == OP_DYN_GET) {
+                jv v = js_get(vm, o, atom); RELOAD();
+                if (vm->throwing) break;
+                if (fl & 2) stack[sp - 1] = o;
+                stack[sp++] = v;
+            } else {
+                js_set(vm, o, atom, stack[sp - 1]); RELOAD();
+                if (vm->throwing) break;
+                if (!(fl & 4)) sp--;
+            }
+            pc = (uint32_t)((int32_t)(at + 4) + off);
+            goto next;
+        }
+        case OP_EVALVAR_DEF: {
+            /* a sloppy eval's var: its caller's eval vars object made at the first one;
+               a var already there kept, a function's value set */
+            uint32_t depth = code[pc], cell = RD16(pc + 1), atom = RD32(pc + 3), isfn = code[pc + 7];
+            pc += 8;
+            jv v = stack[--sp];
+            uint32_t e = frames[fi].env;
+            for (uint32_t k = 0; k < depth; k++) e = objs[e].a;
+            jv o = slots[objs[e].slots + cell];
+            SYNC();
+            if (!jv_is_obj(o)) {
+                uint32_t vo = js_obj_new(vm, JK_PLAIN, 0); RELOAD();
+                o = jv_obj(vo);
+                e = frames[fi].env;
+                for (uint32_t k = 0; k < depth; k++) e = objs[e].a;
+                slots[objs[e].slots + cell] = o;
+            }
+            jv cur;
+            uint32_t cf;
+            int had = js_get_own(vm, jv_idx(o), atom, &cur, &cf); RELOAD();
+            if (isfn || !had) { js_define(vm, jv_idx(o), atom, v, 0); RELOAD(); }
+            goto next;
+        }
+        case OP_TO_OBJECT: {
+            jv v = stack[sp - 1];
+            if (jv_is_obj(v)) goto next;
+            if (jv_is_nullish(v)) { SYNC(); js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object"); RELOAD(); break; }
+            SYNC();
+            jv r = js_to_object(vm, v); RELOAD();
+            if (vm->throwing) break;
+            stack[sp - 1] = r;
+            goto next;
+        }
         case OP_NOP: goto next;
         /* every byte has its case (no default): the switch's jump has no range check */
         OP_UNUSED8(OP_NOPS) OP_UNUSED8(OP_NOPS + 8) OP_UNUSED8(OP_NOPS + 16) OP_UNUSED8(OP_NOPS + 24)
@@ -3466,6 +3571,33 @@ void js_setup(js_vm *vm) {
     vm->heap_cap = 1024ull * 1024 * 1024;
     vm->rng = 0x2545F491u;
     js_builtins_init(vm);
+}
+
+jv js_eval_code(js_vm *vm, jv code, int mode, uint32_t env, jv thisv, uint32_t home) {
+    if (!jv_is_str(code)) return code;
+    uint32_t site = mode == JS_CC_DIRECT ? vm->eval_site : 0, src = jv_idx(code), func = 0;
+    int found = 0;
+    for (size_t i = len(vm->eval_cache); i-- > 0 && !found;) {
+        js_evalcache c = vm->eval_cache[i];
+        if (c.mode == (uint32_t)mode && c.site == site && js_str_eq(vm, c.src, src)) { func = c.func; found = 1; }
+    }
+    if (!found) {
+        vector<char> text;
+        js_str_to_utf8(vm, src, &text);
+        vector<char> err;
+        if (!js_compile(vm, data(text), len(text), vm->script, mode, &func, &err)) {
+            /* the compiler's message, without its own "SyntaxError: " */
+            size_t skip = len(err) > 13 && memcmp(data(err), "SyntaxError: ", 13) == 0 ? 13 : 0;
+            uint32_t m = js_str_utf8(vm, data(err) + skip, len(err) - skip);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->syntax_error_proto, m)));
+        }
+        if (len(vm->eval_cache) >= JS_EVAL_CACHE_MAX) clear(vm->eval_cache);
+        js_evalcache c = { (uint32_t)mode, site, src, func };
+        push_back(vm->eval_cache, c);
+    }
+    uint32_t c = js_closure_new(vm, func, env, thisv);
+    vm->objs[c].c = home;
+    return js_call(vm, jv_obj(c), thisv, 0, 0);
 }
 
 int js_eval(js_vm *vm, const char *src, size_t n, const char *name, uint32_t script) {

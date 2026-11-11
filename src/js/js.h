@@ -177,6 +177,18 @@ typedef struct js_frame {
 
 typedef struct js_handler { uint32_t frame, pc, sp, env; } js_handler;
 
+/* a direct eval's site, written as its caller compiles and read as its code does: the
+   bindings the code sees (first..first+n in vm->eval_binds: each one's atom, kind (the
+   compiler's), environment depth from the site's and cell), whether the caller is strict
+   and whether the site stands in a function (a sloppy eval's vars go to that function) */
+typedef struct js_evalbind { uint32_t atom, kind, depth, slot; } js_evalbind;
+typedef struct js_evalsite { uint32_t first, n, flags; } js_evalsite;
+/* an eval's code compiled: by its mode, its site and its source (a string), the function */
+typedef struct js_evalcache { uint32_t mode, site, src, func; } js_evalcache;
+#define JS_EVAL_CACHE_MAX 256
+#define JS_EVAL_STRICT 1
+#define JS_EVAL_INFN 2
+
 /* a timer, in virtual time */
 /* run: the script that set it (vm->cur_run then), rec its record (src/script/script.c) */
 typedef struct js_timer { uint32_t id; double due, interval; jv fn; uint32_t args, nargs, live, seq, run, rec, fired; } js_timer;
@@ -276,6 +288,11 @@ typedef struct js_vm {
     uint32_t map_proto, set_proto, iterator_proto;
     uint32_t symbol_proto, generator_proto, promise_proto, promise_ctor, aggregate_error_proto;
     uint32_t async_iterator_proto, async_generator_proto;
+    vector<js_evalbind> eval_binds;   /* the direct evals' sites' bindings */
+    vector<js_evalsite> eval_sites;
+    uint32_t eval_site;               /* the site a direct eval's code is compiled for */
+    uint32_t eval_fn;                 /* eval itself: a call of it by its name is a direct eval */
+    vector<js_evalcache> eval_cache;  /* the evals' code compiled, newest last: the same code at the same site compiled once */
     uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
     uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
     uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
@@ -319,7 +336,8 @@ typedef struct js_vm {
     vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected); vector_js_regex_drop(&(v).regexes); \
     vector_uint32_t_drop(&(v).re_code); vector_uint32_t_drop(&(v).re_hash); vector_uint32_t_drop(&(v).re_stack); \
     vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs); vector_uint8_t_drop(&(v).bytes); \
-    vector_js_big_drop(&(v).bigs); vector_uint32_t_drop(&(v).bigl)
+    vector_js_big_drop(&(v).bigs); vector_uint32_t_drop(&(v).bigl); vector_js_evalbind_drop(&(v).eval_binds); \
+    vector_js_evalsite_drop(&(v).eval_sites); vector_js_evalcache_drop(&(v).eval_cache)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -359,6 +377,10 @@ void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr);   /* the own symbol ke
 jv js_gen_resume(js_vm *vm, uint32_t g, jv value, int mode, int *done);
 /* {value, done}: an iterator's result */
 jv js_iter_result(js_vm *vm, jv v, int done);
+/* eval's code compiled (js_compile's mode) and run with the scope env, this and home
+   object given: a string's completion value; any other value as it is; a SyntaxError
+   thrown when it does not compile (src/js/vm.c) */
+jv js_eval_code(js_vm *vm, jv code, int mode, uint32_t env, jv thisv, uint32_t home);
 /* async generators (src/js/builtins.c, ECMA-262 27.6): the first request answered (its
    promise rejected with v, or resolved with {v, done}); the requests left once the body
    is done answered; an async iterator's step as for await and yield* take it: next (kind
@@ -557,7 +579,12 @@ jv js_get_ic(js_vm *vm, jv obj, uint32_t atom, uint32_t ic);
 int js_set_ic(js_vm *vm, jv obj, uint32_t atom, jv v, uint32_t ic);
 
 /* the compiler (src/js/compile.c): a script's text into a function of no parameters */
-int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int as_function_body, uint32_t *func, vector<char> *err);
+/* what js_compile reads (its mode): a script, an event handler's body (a function of
+   event), an eval's code in the global scope (indirect eval: its completion value
+   returned), the Function constructor's source (one function expression, checked to be
+   no more), an eval's code in its caller's scopes (direct eval, the site vm->eval_site) */
+enum { JS_CC_SCRIPT, JS_CC_HANDLER, JS_CC_EVAL, JS_CC_FUNCTION, JS_CC_DIRECT };
+int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, uint32_t *func, vector<char> *err);
 /* the interpreter (src/js/vm.c) */
 jv js_run(js_vm *vm, uint32_t entry_frames);
 
@@ -680,6 +707,17 @@ enum {
     OP_AYS_RETMODE,                               /* rec v m -> rec v mode: the awaited return value (mode 2) or its
                                                      rejection (1) */
     OP_AYS_NOTHROW,                               /* throws yield*'s TypeError: the inner iterator has no throw */
+    /* eval and with: a name's dynamic scopes (a with's object, a sloppy function's eval vars) */
+    OP_CALL_EVAL,                                 /* u16 argc, u32 site: callee args -> r: a direct eval when the callee
+                                                     is eval itself, else a plain call */
+    OP_DYN_GET,                                   /* u8 depth, u16 cell, u32 atom, u8 flags, i32: the cell's object has
+                                                     the name (flags 1: a with's, its unscopables heeded; 2: the call's
+                                                     this below set to it): its value pushed, jump */
+    OP_DYN_PUT,                                   /* u8 depth, u16 cell, u32 atom, u8 flags, i32: v -> (v if flags 4):
+                                                     the cell's object has the name: set, jump; else v left */
+    OP_EVALVAR_DEF,                               /* u8 depth, u16 cell, u32 atom, u8 func: v -> : a sloppy eval's var
+                                                     (or function) declared in its caller's eval vars object */
+    OP_TO_OBJECT,                                 /* v -> ToObject(v): with's object */
     OP_NOP,
     OP_NOPS
 };

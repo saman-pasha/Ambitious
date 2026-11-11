@@ -1288,11 +1288,30 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_IS_NAN: { double d = js_to_number(vm, a0); return jv_bool(d != d); }
     case N_IS_FINITE: { double d = js_to_number(vm, a0); return jv_bool(d == d && d != INFINITY && d != -INFINITY); }
-    case N_EVAL: return js_throw_msg(vm, vm->eval_error_proto, "eval is not supported");
+    /* eval called by any other name than eval itself (indirect): its code in the global scope */
+    case N_EVAL: return js_eval_code(vm, a0, JS_CC_EVAL, 0, jv_obj(vm->global), 0);
     case N_OBJECT:
         if (jv_is_nullish(a0)) return jv_obj(js_obj_new(vm, JK_PLAIN, vm->object_proto));
         return js_to_object(vm, a0);
-    case N_FUNCTION: return js_throw_msg(vm, vm->eval_error_proto, "the Function constructor (code from a string) is not supported");
+    case N_FUNCTION: {
+        /* new Function(p1, ..., body): the parameters' text joined by commas and the body's
+           read as one function expression, in the global scope */
+        uint32_t src = js_str_ascii(vm, "(function anonymous(");
+        for (uint32_t i = 0; i + 1 < argc; i++) {
+            uint32_t ps = js_to_string(vm, arg(vm, args, argc, i));
+            if (!ps) return JV_HOLE;
+            if (i) src = js_str_concat(vm, src, js_str_ascii(vm, ","));
+            src = js_str_concat(vm, src, ps);
+        }
+        src = js_str_concat(vm, src, js_str_ascii(vm, "\n) {\n"));
+        if (argc) {
+            uint32_t bs = js_to_string(vm, arg(vm, args, argc, argc - 1));
+            if (!bs) return JV_HOLE;
+            src = js_str_concat(vm, src, bs);
+        }
+        src = js_str_concat(vm, src, js_str_ascii(vm, "\n})"));
+        return js_eval_code(vm, jv_str(src), JS_CC_FUNCTION, 0, jv_obj(vm->global), 0);
+    }
     case N_ARRAY: {
         if (argc == 1 && jv_is_num(a0)) {
             double d = jv_dbl(a0);
@@ -2692,6 +2711,7 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, g, "isNaN", N_IS_NAN, 1);
     defn(vm, g, "isFinite", N_IS_FINITE, 1);
     defn(vm, g, "eval", N_EVAL, 1);
+    vm->eval_fn = jv_idx(js_get(vm, jv_obj(g), js_atom_ascii(vm, "eval")));
     defn(vm, g, "setTimeout", N_SET_TIMEOUT, 2);
     defn(vm, g, "setInterval", N_SET_INTERVAL, 2);
     defn(vm, g, "clearTimeout", N_CLEAR_TIMEOUT, 1);
@@ -2906,6 +2926,14 @@ void js_builtins_init(js_vm *vm) {
     /* the iterators' protocol: each iterable's Symbol.iterator, and an iterator its own */
     js_define(vm, vm->iterator_proto, JS_KEY_ITERATOR, jv_obj(js_native_new(vm, N_ITP_SELF, js_str_ascii(vm, "[Symbol.iterator]"), 0)), JS_SHAPE_HIDDEN);
     js_define(vm, vm->array_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->array_proto), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
+    {
+        /* the names a with over an array leaves to the scopes outside it (ECMA-262 23.1.3.41) */
+        static const char *const unscopable[] = { "at", "copyWithin", "entries", "fill", "find", "findIndex", "findLast",
+            "findLastIndex", "flat", "flatMap", "includes", "keys", "toReversed", "toSorted", "toSpliced", "values" };
+        uint32_t un = js_obj_new(vm, JK_PLAIN, 0);
+        for (size_t i = 0; i < sizeof unscopable / sizeof unscopable[0]; i++) js_define(vm, un, js_atom_ascii(vm, unscopable[i]), JV_TRUE, 0);
+        js_define(vm, vm->array_proto, JS_SYM_KEY | JSYM_UNSCOPABLES, jv_obj(un), JS_SHAPE_HIDDEN);
+    }
     js_define(vm, vm->map_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->map_proto), js_atom_ascii(vm, "entries")), JS_SHAPE_HIDDEN);
     js_define(vm, vm->set_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->set_proto), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
     js_define(vm, vm->string_proto, JS_KEY_ITERATOR, jv_obj(js_native_new(vm, N_SP_ITER, js_str_ascii(vm, "[Symbol.iterator]"), 0)), JS_SHAPE_HIDDEN);
