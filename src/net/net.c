@@ -2998,8 +2998,9 @@ static void net_srcset_size(net_loader *l, uint32_t r, const net_pick *pk) {
 
 /* ---- what a page asks for ---- */
 
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int net_is(const dom_document *d, uint32_t x, const char *name) {
-    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
 }
 static uint32_t net_attr(const dom_document *d, uint32_t x, const char *name) {
     uint32_t a = names_find(d, name, strlen(name));

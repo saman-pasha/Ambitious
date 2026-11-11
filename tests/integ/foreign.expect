@@ -1,0 +1,36 @@
+-- the page parsed, against Chromium's serialization:
+the same 1792 bytes
+81 nodes, 0 parse errors, invariants: 0 broken
+-- its console, against Chromium's:
+the same 6 lines
+-- the elements of the SVG and MathML namespaces:
+N = n(1,32,0), NS = svg, E = svg
+N = n(1,33,0), NS = svg, E = title
+N = n(1,35,0), NS = svg, E = a
+N = n(1,36,0), NS = svg, E = path
+N = n(1,37,0), NS = svg, E = foreignObject
+N = n(1,41,0), NS = svg, E = style
+N = n(1,46,0), NS = mathml, E = math
+N = n(1,47,0), NS = mathml, E = mi
+N = n(1,49,0), NS = mathml, E = mo
+N = n(1,51,0), NS = mathml, E = mfrac
+N = n(1,52,0), NS = mathml, E = mn
+N = n(1,54,0), NS = mathml, E = mn
+N = n(1,56,0), NS = mathml, E = 'annotation-xml'
+-- the attributes in a namespace, their names with their prefixes:
+N = n(1,35,0), A = 'xlink:href', NS = xlink, V = '#top'
+-- the template's contents, a fragment of its own:
+T = n(1,8,0), F = n(1,9,0), K = fragment, Cs = [n(1,10,0),n(1,12,0),n(1,14,0),n(1,15,0)]
+Inside = 7, B = n(1,25,0), InBody = 56
+-- what the cascade made of the two titles, the SVG link and the foreignObject (Chromium's values):
+N = n(1,18,0), E = title, NS = html, D = none, C = 'rgb(0, 0, 255)'
+N = n(1,33,0), E = title, NS = svg, D = inline, C = 'rgb(0, 0, 255)'
+N = n(1,35,0), E = a, NS = svg, D = inline, C = 'rgb(255, 0, 0)'
+N = n(1,37,0), C = 'rgb(0, 128, 0)'
+-- nothing of the template's contents styled, fetched or listened to:
+no
+R = rs(1,1,0), U = 'file://ROOT/tests/pages/foreign.html', K = document, O = ok
+no
+-- the references that point into the template, broken:
+N = n(1,32,0), A = aria_labelledby, Id = lbl, E = svg
+N = n(1,76,0), A = label_for, Id = lbl, E = label

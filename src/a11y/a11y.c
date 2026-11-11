@@ -196,9 +196,10 @@ static int ax_find_name(const char *const *names, int lo, int hi, const char *p,
     }
     return 0;
 }
-/* an element's kind, by its name's atom; E_NONE for any other node */
+/* an element's kind, by its name's atom; E_NONE for any other node, and for an SVG or
+   MathML element (an HTML name in another namespace names no HTML element) */
 static int ax_kind(ACTX, uint32_t x) {
-    if (d->node[x].kind != DOM_NODE_KIND_ELEMENT) return E_NONE;
+    if (d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML) return E_NONE;
     uint32_t nm = d->node[x].name;
     if (nm >= len(*ek)) return E_NONE;
     int k = at(*ek, nm);
@@ -349,6 +350,11 @@ static int ax_id_is(ACTX, uint32_t y, const char *p, size_t n) {
     if (!a || d->attr[a].value.len != n) return 0;
     return n == 0 || memcmp(text_ptr(d, d->attr[a].value), p, n) == 0;
 }
+/* in the document's tree: not detached, nor in a template's contents (12c) */
+static int ax_connected(const dom_document *d, uint32_t x) {
+    while (x && x != 1) x = d->node[x].parent;
+    return x == 1;
+}
 static void ax_ids_index(ACTX) {
     size_t count = 0;
     for (uint32_t x = 1; x < d->node_len; x++)
@@ -360,7 +366,7 @@ static void ax_ids_index(ACTX) {
     for (uint32_t x = 1; x < d->node_len; x++) {
         if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT || !d->node[x].first_attr) continue;
         uint32_t a = ax_get(AARGS, x, K_ID);
-        if (!a || !d->attr[a].value.len) continue;
+        if (!a || !d->attr[a].value.len || !ax_connected(d, x)) continue;
         amb_span v = d->attr[a].value;
         uint32_t h = ax_id_hash(text_ptr(d, v), v.len) & m;
         int dup = 0;
@@ -955,7 +961,7 @@ static int ax_labels_text(ACTX, uint32_t x, vector<char> *out) {
         if (!len(*labels)) {
             push_back(labels, 0);
             for (uint32_t l = 1; l < d->node_len; l++)
-                if (d->node[l].live && ax_kind(AARGS, l) == E_LABEL && ax_get(AARGS, l, K_FOR)) push_back(labels, l);
+                if (d->node[l].live && ax_kind(AARGS, l) == E_LABEL && ax_get(AARGS, l, K_FOR) && ax_connected(d, l)) push_back(labels, l);
         }
         amb_span idv = d->attr[ida].value;
         for (size_t q = 1; q < len(*labels); q++) {

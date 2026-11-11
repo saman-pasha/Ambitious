@@ -9,11 +9,23 @@
 %% Argument order: the subject first. dom_ancestor(A, D) is "A is an ancestor
 %% of D", dom_descendant(D, A) "D is a descendant of A", dom_inside(N, A) "N is
 %% in A's subtree". Helpers are dom_rules_*.
+%%
+%% An element is HTML's unless dom_namespace/2 names its namespace (svg,
+%% mathml); the rules that know elements by their HTML names ask for HTML
+%% elements. A template's contents are a fragment, a tree of their own: no
+%% child of the template, so neither in the document's subtree nor in the
+%% template's, and dom_in_template/2 says whose contents they are.
 
 :- dynamic dom_node/2, dom_element/2, dom_text/2, dom_comment/2, dom_doctype/2,
-           dom_parent/2, dom_next_sibling/2, dom_first_child/2, dom_attr/3.
+           dom_parent/2, dom_next_sibling/2, dom_first_child/2, dom_attr/3,
+           dom_namespace/2, dom_template_content/2, dom_attr_namespace/3.
 
 dom_root(N) :- dom_node(N, document).
+
+dom_html_element(N, E) :- dom_element(N, E), \+ dom_namespace(N, _).
+
+%% N is in the contents of the template T: under its fragment, at any depth
+dom_in_template(N, T) :- dom_template_content(T, F), dom_ancestor(F, N).
 
 dom_child(P, C) :- dom_parent(C, P).
 
@@ -55,12 +67,12 @@ dom_rules_texts_list([C|Cs], Ts, R) :- dom_rules_texts(C, Ts, R1), dom_rules_tex
 dom_accessible_name(N, Name) :- dom_element(N, _), once(dom_rules_name(N, Name)).
 
 dom_rules_name(N, Name) :- dom_attr(N, 'aria-label', L), dom_rules_squash(L, Name), Name \== ''.
-dom_rules_name(N, Name) :- dom_element(N, img), dom_attr(N, alt, A), dom_rules_squash(A, Name).
+dom_rules_name(N, Name) :- dom_html_element(N, img), dom_attr(N, alt, A), dom_rules_squash(A, Name).
 dom_rules_name(N, Name) :-
-    dom_element(N, input), dom_attr(N, type, T), memberchk(T, [submit, button, reset]),
+    dom_html_element(N, input), dom_attr(N, type, T), memberchk(T, [submit, button, reset]),
     dom_attr(N, value, V), dom_rules_squash(V, Name), Name \== ''.
 dom_rules_name(N, Name) :-
-    dom_element(N, E), dom_rules_named_by_content(E),
+    dom_html_element(N, E), dom_rules_named_by_content(E),
     dom_text_content(N, T), dom_rules_squash(T, Name), Name \== ''.
 dom_rules_name(N, Name) :- dom_attr(N, title, T), dom_rules_squash(T, Name), Name \== ''.
 
@@ -73,9 +85,9 @@ dom_rules_squash(A, S) :-
     exclude(==(""), Parts, Words),
     atomic_list_concat(Words, ' ', S).
 
-%% an element that lacks an attribute it requires
+%% an HTML element that lacks an attribute it requires
 dom_missing_attribute(N, A) :-
-    dom_element(N, E), dom_rules_required(E, A), \+ dom_attr(N, A, _).
+    dom_html_element(N, E), dom_rules_required(E, A), \+ dom_attr(N, A, _).
 
 dom_rules_required(img, alt).
 dom_rules_required(img, src).
@@ -99,12 +111,12 @@ dom_diag(missing_attribute, N, Text) :-
     dom_missing_attribute(N, A), dom_element(N, E),
     format(atom(Text), '<~w> lacks the ~w attribute', [E, A]).
 dom_diag(unnamed_control, N, Text) :-
-    dom_element(N, E), memberchk(E, [button, a]), \+ dom_accessible_name(N, _),
+    dom_html_element(N, E), memberchk(E, [button, a]), \+ dom_accessible_name(N, _),
     format(atom(Text), 'the <~w> has no accessible name', [E]).
 dom_diag(empty_text, N, 'an empty text node') :- dom_text(N, '').
 
 dom_advice(set_attribute(N, alt, Alt), Reason) :-
-    dom_element(N, img), \+ dom_attr(N, alt, _),
+    dom_html_element(N, img), \+ dom_attr(N, alt, _),
     (   dom_attr(N, title, T), T \== ''
     ->  Alt = T, Reason = 'the image has no alt; its title says what it shows'
     ;   Alt = '', Reason = 'the image has no alt and nothing names it: mark it decorative'

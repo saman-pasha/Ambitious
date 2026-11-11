@@ -951,8 +951,12 @@ css_status css_parse_sheet(css_style *s, css_origin origin, const char *src, siz
 /* ---- matching (Selectors 4) ---- */
 
 static int css_is_element(const dom_document *d, uint32_t x) { return x != 0 && d->node[x].kind == DOM_NODE_KIND_ELEMENT; }
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int css_is_named(const dom_document *d, uint32_t x, const char *name) {
-    return css_is_element(d, x) && names_is(d, d->node[x].name, name, strlen(name));
+    return css_is_element(d, x) && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
+}
+static int css_is_svg_named(const dom_document *d, uint32_t x, const char *name) {
+    return css_is_element(d, x) && d->node[x].ns == DOM_NAMESPACE_SVG && names_is(d, d->node[x].name, name, strlen(name));
 }
 static uint32_t css_attr_of(const dom_document *d, uint32_t x, const char *name, size_t nn) {
     uint32_t a = names_find(d, name, nn);
@@ -1075,7 +1079,7 @@ static int css_pseudo(const dom_document *d, uint32_t x, const char *ps, size_t 
         return 1;
     }
     if (css_eq_ci(ps, pn, "link") || css_eq_ci(ps, pn, "any-link"))
-        return (css_is_named(d, x, "a") || css_is_named(d, x, "area")) && css_attr_of(d, x, "href", 4);
+        return (css_is_named(d, x, "a") || css_is_named(d, x, "area") || css_is_svg_named(d, x, "a")) && css_attr_of(d, x, "href", 4);
     if (css_eq_ci(ps, pn, "checked"))
         return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
     if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
@@ -1141,7 +1145,11 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
             char lw[64];
             size_t k = 0;
             while (i < n && css_namechar(s[i])) { if (k == sizeof lw) return 0; lw[k++] = css_lower(s[i]); i++; }
-            if (!names_is(d, d->node[x].name, lw, k)) return 0;
+            /* in an HTML document a type selector names an element of any namespace, its
+               case aside, as Chromium matches it: an SVG element keeps its mixed case */
+            if (!names_is(d, d->node[x].name, lw, k) &&
+                (d->node[x].ns == DOM_NAMESPACE_HTML || names_len(d, d->node[x].name) != k ||
+                 !css_bytes_eq(names_ptr(d, d->node[x].name), lw, k, 1))) return 0;
             continue;
         }
         if (c == '#' || c == '.') {
@@ -1787,6 +1795,7 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
 
 static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
     if (!d->node[x].first_attr) return;             /* no attribute, no hint */
+    if (d->node[x].ns != DOM_NAMESPACE_HTML) return;  /* the hints are HTML elements' */
     for (size_t h = 0; h < sizeof css_hints / sizeof css_hints[0]; h++) {
         uint32_t at = css_attr_of(d, x, css_hints[h].attr, strlen(css_hints[h].attr));
         if (!at) continue;
@@ -1830,9 +1839,11 @@ static uint32_t css_linked_sheet(const net_loader *net, uint32_t x) {
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
     css_parse_sheet(s, CSS_ORIGIN_USER_AGENT, css_ua_sheet, sizeof css_ua_sheet - 1);
+    /* the user agent's rules are the HTML elements' (its sheet is in the HTML namespace) */
+    uint32_t ua_end = (uint32_t)s->rule_len;
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         int link = css_is_named(doc, x, "link");
-        if (!css_is_named(doc, x, "style") && !link) continue;
+        if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
         uint32_t ma = css_attr_of(doc, x, "media", 5);
         if (ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
         if (link) {
@@ -1903,10 +1914,11 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         uint32_t kk[CSS_MAX_KEYS], kl[CSS_MAX_KEYS], kh[CSS_MAX_KEYS], heads[CSS_MAX_KEYS + 1], seen[CSS_MAX_KEYS + 1];
         int nk = css_element_keys(doc, x, id_atom, class_atom, kk, kl, kh, CSS_MAX_KEYS);
         int nb = 0;
+        uint32_t first_rule = doc->node[x].ns == DOM_NAMESPACE_HTML ? 1 : ua_end;
         if (nk < 0) {
             /* more keys than the index keeps: every rule is tried, and the filter is full */
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
-            for (uint32_t r = 1; r < shared; r++) if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+            for (uint32_t r = first_rule; r < shared; r++) if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
         } else {
             for (int q = 0; q < nk; q++) css_bloom_add(om, kh[q]);
             if (univ) { heads[nb] = at(bk, univ - 1).head; seen[nb] = univ; nb++; }
@@ -1933,7 +1945,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 heads[bi] = at(be, heads[bi]).next;
                 if (r == last) continue;
                 last = r;
-                if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+                if (r >= first_rule && css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
             }
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }

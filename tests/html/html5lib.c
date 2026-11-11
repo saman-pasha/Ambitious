@@ -1,9 +1,12 @@
 /* tests/html/html5lib.c -- the html5lib tree-construction tests through the HTML
    module: each case of each .dat file parsed (as a document, or as a fragment in
-   its context), the DOM dumped in the tests' own format and compared with the
-   case's #document. Prints a line a file and the totals; -v prints each failing
-   case. Cases that need what is not done -- scripting on, a context in another
-   namespace -- are skipped and counted. */
+   its context, "svg NAME" and "math NAME" naming a foreign one), the DOM dumped
+   in the tests' own format and compared with the case's #document. An element
+   is written with its namespace's designator ("svg ", "math "), an attribute
+   with its own ("xlink ", "xml ", "xmlns ") before its local name, and a
+   template's contents under "content". Prints a line a file and the totals; -v
+   prints each failing case. Cases that need scripting on, which is not done,
+   are skipped and counted. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,31 +32,62 @@ static void indent(vector<char> *o, int depth) {
     for (int i = 0; i < depth; i++) put(o, "  ");
 }
 
+/* an attribute's name as the tests write it: its namespace's designator and its
+   local name (the qualified name past its prefix), or its name */
+static void attr_name(const dom_document *d, uint32_t a, vector<char> *o) {
+    const char *nm = names_ptr(d, d->attr[a].name);
+    size_t n = names_len(d, d->attr[a].name);
+    dom_attr_namespace ns = d->attr[a].ns;
+    if (ns == DOM_ATTR_NAMESPACE_NULL) { append_range(o, nm, n); return; }
+    put(o, ns == DOM_ATTR_NAMESPACE_XLINK ? "xlink " : ns == DOM_ATTR_NAMESPACE_XML ? "xml " : "xmlns ");
+    size_t k = 0;
+    while (k < n && nm[k] != ':') k++;
+    if (k < n) append_range(o, nm + k + 1, n - k - 1);
+    else append_range(o, nm, n);
+}
+
 /* a node and what is under it, in the tests' format */
 static void dump(const dom_document *d, uint32_t x, int depth, vector<char> *o) {
     dom_node r = d->node[x];
     if (r.kind == DOM_NODE_KIND_ELEMENT) {
         indent(o, depth);
         put(o, "<");
+        if (r.ns == DOM_NAMESPACE_SVG) put(o, "svg ");
+        else if (r.ns == DOM_NAMESPACE_MATHML) put(o, "math ");
         append_range(o, names_ptr(d, r.name), names_len(d, r.name));
         put(o, ">\n");
-        /* the attributes, sorted by name */
+        /* the attributes, sorted by the names the tests write */
         vector<uint32_t> as;
-        for (uint32_t a = r.first_attr; a; a = d->attr[a].next) push_back(as, a);
-        for (size_t i = 1; i < len(as); i++)
+        vector<char> names;
+        vector<size_t> starts;
+        for (uint32_t a = r.first_attr; a; a = d->attr[a].next) {
+            push_back(as, a);
+            push_back(starts, len(names));
+            attr_name(d, a, &names);
+        }
+        push_back(starts, len(names));
+        vector<size_t> order;
+        for (size_t i = 0; i < len(as); i++) push_back(order, i);
+        for (size_t i = 1; i < len(order); i++)
             for (size_t j = i; j > 0; j--) {
-                uint32_t x1 = at(as, j - 1), x2 = at(as, j);
-                size_t l1 = names_len(d, d->attr[x1].name), l2 = names_len(d, d->attr[x2].name);
-                int c = memcmp(names_ptr(d, d->attr[x1].name), names_ptr(d, d->attr[x2].name), l1 < l2 ? l1 : l2);
-                if (c > 0 || (c == 0 && l1 > l2)) { as[j - 1] = x2; as[j] = x1; } else break;
+                size_t k1 = at(order, j - 1), k2 = at(order, j);
+                size_t s1 = at(starts, k1), l1 = at(starts, k1 + 1) - s1, s2 = at(starts, k2), l2 = at(starts, k2 + 1) - s2;
+                int c = memcmp(data(names) + s1, data(names) + s2, l1 < l2 ? l1 : l2);
+                if (c > 0 || (c == 0 && l1 > l2)) { order[j - 1] = k2; order[j] = k1; } else break;
             }
-        for (size_t i = 0; i < len(as); i++) {
-            uint32_t a = at(as, i);
+        for (size_t i = 0; i < len(order); i++) {
+            size_t k = at(order, i);
+            uint32_t a = at(as, k);
             indent(o, depth + 1);
-            append_range(o, names_ptr(d, d->attr[a].name), names_len(d, d->attr[a].name));
+            append_range(o, data(names) + at(starts, k), at(starts, k + 1) - at(starts, k));
             put(o, "=\"");
             append_range(o, text_ptr(d, d->attr[a].value), d->attr[a].value.len);
             put(o, "\"\n");
+        }
+        if (r.content) {
+            indent(o, depth + 1);
+            put(o, "content\n");
+            for (uint32_t ch = d->node[r.content].first_child; ch; ch = d->node[ch].next_sibling) dump(d, ch, depth + 2, o);
         }
     } else if (r.kind == DOM_NODE_KIND_TEXT) {
         indent(o, depth);
@@ -143,8 +177,7 @@ int main(int argc, char **argv) {
                 li++;
             }
             while (len(want) && at(want, len(want) - 1) == '\n') pop_back(want);
-            int ns_ctx = fragment && memchr(data(ctx), ' ', len(ctx)) != 0;
-            if (script_on || ns_ctx) { fskip++; continue; }
+            if (script_on) { fskip++; continue; }
             int r = run_case(data(dat), len(dat), data(ctx), len(ctx), fragment, data(want), len(want), verbose, base, no);
             if (r) fpass++; else ffail++;
         }

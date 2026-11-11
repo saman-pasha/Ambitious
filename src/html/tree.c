@@ -9,9 +9,27 @@
    own parse errors are gathered apart and recorded when the tree is built, so
    no borrow of the store outlives a change to it.
 
-   What is not done yet: foreign content (SVG and MathML elements are HTML
-   elements here) and template contents (a template is an ordinary element);
-   scripting is off. Everything else follows the standard's steps, by its names. */
+   The tree builder drives the tokenizer (src/html/tokenizer.h). A run of the
+   tokenizer stops after the start tag of an element whose text may be raw, and
+   at <![CDATA[; the tree builder builds the tokens up to there and says how the
+   tokenizer goes on: the state it chose for the start tag, and whether the
+   adjusted current node is foreign, which makes a CDATA section.
+
+   Foreign content: SVG and MathML elements are made in their namespaces, by
+   the tree construction dispatcher and the rules for parsing tokens in foreign
+   content (13.2.6.5): the adjusted current node (the fragment's context element
+   where it stands for the stack), the MathML text integration points and the
+   HTML integration points, the breakout start tags, the adjusted SVG tag names,
+   the SVG, MathML and foreign attribute adjustments, self-closing foreign
+   elements, the foreign elements of the special category and of the scopes.
+   Template contents: a template's children go to its contents, the fragment
+   the DOM makes with it, by the appropriate place for inserting a node; the
+   "in template" insertion mode and the stack of template insertion modes. The
+   select element is parsed by the rules of 2025: no "in select" insertion
+   modes, select in the default scope, and the start tags of input, select,
+   option, optgroup and hr closing or keeping what a select holds.
+
+   Scripting is off. Everything else follows the standard's steps, by its names. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -19,8 +37,7 @@
 
 amb_interface(dom);
 amb_implementation(html);
-
-html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, int state, const char *last, size_t last_len);
+#include "tokenizer.h"
 
 /* ---- the tags the algorithm names --------------------------------------------- */
 
@@ -34,7 +51,9 @@ enum html_tag {
     T_P, T_PARAM, T_PLAINTEXT, T_PRE, T_RB, T_RP, T_RT, T_RTC, T_RUBY, T_S, T_SCRIPT, T_SEARCH, T_SECTION,
     T_SELECT, T_SMALL, T_SOURCE, T_SPAN, T_STRIKE, T_STRONG, T_STYLE, T_SUB, T_SUMMARY, T_SUP, T_SVG,
     T_TABLE, T_TBODY, T_TD, T_TEMPLATE, T_TEXTAREA, T_TFOOT, T_TH, T_THEAD, T_TITLE, T_TR, T_TRACK, T_TT,
-    T_U, T_UL, T_WBR, T_XMP, T_MARKER
+    T_U, T_UL, T_VAR, T_WBR, T_XMP,
+    T_MARKER,      /* a marker of the list of active formatting elements */
+    T_FOREIGN      /* an element of the SVG or MathML namespace: no HTML element's tag */
 };
 
 /* sorted, for the binary search; the order of the enum above */
@@ -48,7 +67,7 @@ static const char *html_tag_names[] = {
     "p", "param", "plaintext", "pre", "rb", "rp", "rt", "rtc", "ruby", "s", "script", "search", "section",
     "select", "small", "source", "span", "strike", "strong", "style", "sub", "summary", "sup", "svg",
     "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr", "track", "tt",
-    "u", "ul", "wbr", "xmp"
+    "u", "ul", "var", "wbr", "xmp"
 };
 #define HTML_TAG_COUNT ((int)(sizeof html_tag_names / sizeof html_tag_names[0]))
 
@@ -71,46 +90,172 @@ static int html_in(int t, const int *set, size_t n) {
 }
 #define IN(t, ...) html_in((t), (const int[]){ __VA_ARGS__ }, sizeof((const int[]){ __VA_ARGS__ }) / sizeof(int))
 
-static int html_special(int t) {
-    return IN(t, T_ADDRESS, T_APPLET, T_AREA, T_ARTICLE, T_ASIDE, T_BASE, T_BASEFONT, T_BGSOUND, T_BLOCKQUOTE,
-              T_BODY, T_BR, T_BUTTON, T_CAPTION, T_CENTER, T_COL, T_COLGROUP, T_DD, T_DETAILS, T_DIR, T_DIV, T_DL,
-              T_DT, T_EMBED, T_FIELDSET, T_FIGCAPTION, T_FIGURE, T_FOOTER, T_FORM, T_FRAME, T_FRAMESET, T_H1, T_H2,
-              T_H3, T_H4, T_H5, T_H6, T_HEAD, T_HEADER, T_HGROUP, T_HR, T_HTML, T_IFRAME, T_IMG, T_INPUT,
-              T_KEYGEN, T_LI, T_LINK, T_LISTING, T_MAIN, T_MARQUEE, T_MENU, T_META, T_NAV, T_NOEMBED,
-              T_NOFRAMES, T_NOSCRIPT, T_OBJECT, T_OL, T_P, T_PARAM, T_PLAINTEXT, T_PRE, T_SCRIPT, T_SEARCH,
-              T_SECTION, T_SELECT, T_SOURCE, T_STYLE, T_SUMMARY, T_TABLE, T_TBODY, T_TD, T_TEMPLATE,
-              T_TEXTAREA, T_TFOOT, T_TH, T_THEAD, T_TITLE, T_TR, T_TRACK, T_UL, T_WBR, T_XMP);
+/* the special category's HTML elements (13.2.4.2) */
+static int html_special_tag(int t) {
+    switch (t) {
+    case T_ADDRESS: case T_APPLET: case T_AREA: case T_ARTICLE: case T_ASIDE: case T_BASE: case T_BASEFONT:
+    case T_BGSOUND: case T_BLOCKQUOTE: case T_BODY: case T_BR: case T_BUTTON: case T_CAPTION: case T_CENTER:
+    case T_COL: case T_COLGROUP: case T_DD: case T_DETAILS: case T_DIR: case T_DIV: case T_DL: case T_DT:
+    case T_EMBED: case T_FIELDSET: case T_FIGCAPTION: case T_FIGURE: case T_FOOTER: case T_FORM: case T_FRAME:
+    case T_FRAMESET: case T_H1: case T_H2: case T_H3: case T_H4: case T_H5: case T_H6: case T_HEAD: case T_HEADER:
+    case T_HGROUP: case T_HR: case T_HTML: case T_IFRAME: case T_IMG: case T_INPUT: case T_KEYGEN: case T_LI:
+    case T_LINK: case T_LISTING: case T_MAIN: case T_MARQUEE: case T_MENU: case T_META: case T_NAV: case T_NOEMBED:
+    case T_NOFRAMES: case T_NOSCRIPT: case T_OBJECT: case T_OL: case T_P: case T_PARAM: case T_PLAINTEXT: case T_PRE:
+    case T_SCRIPT: case T_SEARCH: case T_SECTION: case T_SELECT: case T_SOURCE: case T_STYLE: case T_SUMMARY:
+    case T_TABLE: case T_TBODY: case T_TD: case T_TEMPLATE: case T_TEXTAREA: case T_TFOOT: case T_TH: case T_THEAD:
+    case T_TITLE: case T_TR: case T_TRACK: case T_UL: case T_WBR: case T_XMP:
+        return 1;
+    default:
+        return 0;
+    }
+}
+/* the HTML elements that end the default scope (13.2.4.2: has an element in scope) */
+static int html_scope_tag(int t) {
+    switch (t) {
+    case T_APPLET: case T_CAPTION: case T_HTML: case T_TABLE: case T_TD: case T_TH: case T_MARQUEE: case T_OBJECT:
+    case T_SELECT: case T_TEMPLATE:
+        return 1;
+    default:
+        return 0;
+    }
 }
 static int html_formatting(int t) {
     return IN(t, T_A, T_B, T_BIG, T_CODE, T_EM, T_FONT, T_I, T_NOBR, T_S, T_SMALL, T_STRIKE, T_STRONG, T_TT, T_U);
 }
 static int html_heading(int t) { return IN(t, T_H1, T_H2, T_H3, T_H4, T_H5, T_H6); }
 
+/* the start tags that break out of foreign content (13.2.6.5) */
+static int html_breakout(int t) {
+    switch (t) {
+    case T_B: case T_BIG: case T_BLOCKQUOTE: case T_BODY: case T_BR: case T_CENTER: case T_CODE: case T_DD: case T_DIV:
+    case T_DL: case T_DT: case T_EM: case T_EMBED: case T_H1: case T_H2: case T_H3: case T_H4: case T_H5: case T_H6:
+    case T_HEAD: case T_HR: case T_I: case T_IMG: case T_LI: case T_LISTING: case T_MENU: case T_META: case T_NOBR:
+    case T_OL: case T_P: case T_PRE: case T_RUBY: case T_S: case T_SMALL: case T_SPAN: case T_STRONG: case T_STRIKE:
+    case T_SUB: case T_SUP: case T_TABLE: case T_TT: case T_U: case T_UL: case T_VAR:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* ---- the adjustments of foreign elements' names (13.2.6.1, 13.2.6.5) ---- */
+
+/* each pair: the token's name, the SVG element's */
+static const char *const svg_tag_names[] = {
+    "altglyph", "altGlyph", "altglyphdef", "altGlyphDef", "altglyphitem", "altGlyphItem",
+    "animatecolor", "animateColor", "animatemotion", "animateMotion", "animatetransform", "animateTransform",
+    "clippath", "clipPath", "feblend", "feBlend", "fecolormatrix", "feColorMatrix",
+    "fecomponenttransfer", "feComponentTransfer", "fecomposite", "feComposite", "feconvolvematrix", "feConvolveMatrix",
+    "fediffuselighting", "feDiffuseLighting", "fedisplacementmap", "feDisplacementMap", "fedistantlight", "feDistantLight",
+    "fedropshadow", "feDropShadow", "feflood", "feFlood", "fefunca", "feFuncA", "fefuncb", "feFuncB",
+    "fefuncg", "feFuncG", "fefuncr", "feFuncR", "fegaussianblur", "feGaussianBlur", "feimage", "feImage",
+    "femerge", "feMerge", "femergenode", "feMergeNode", "femorphology", "feMorphology", "feoffset", "feOffset",
+    "fepointlight", "fePointLight", "fespecularlighting", "feSpecularLighting", "fespotlight", "feSpotLight",
+    "fetile", "feTile", "feturbulence", "feTurbulence", "foreignobject", "foreignObject", "glyphref", "glyphRef",
+    "lineargradient", "linearGradient", "radialgradient", "radialGradient", "textpath", "textPath"
+};
+/* each pair: the token's attribute name, the SVG element's */
+static const char *const svg_attr_names[] = {
+    "attributename", "attributeName", "attributetype", "attributeType", "basefrequency", "baseFrequency",
+    "baseprofile", "baseProfile", "calcmode", "calcMode", "clippathunits", "clipPathUnits",
+    "diffuseconstant", "diffuseConstant", "edgemode", "edgeMode", "filterunits", "filterUnits",
+    "glyphref", "glyphRef", "gradienttransform", "gradientTransform", "gradientunits", "gradientUnits",
+    "kernelmatrix", "kernelMatrix", "kernelunitlength", "kernelUnitLength", "keypoints", "keyPoints",
+    "keysplines", "keySplines", "keytimes", "keyTimes", "lengthadjust", "lengthAdjust",
+    "limitingconeangle", "limitingConeAngle", "markerheight", "markerHeight", "markerunits", "markerUnits",
+    "markerwidth", "markerWidth", "maskcontentunits", "maskContentUnits", "maskunits", "maskUnits",
+    "numoctaves", "numOctaves", "pathlength", "pathLength", "patterncontentunits", "patternContentUnits",
+    "patterntransform", "patternTransform", "patternunits", "patternUnits", "pointsatx", "pointsAtX",
+    "pointsaty", "pointsAtY", "pointsatz", "pointsAtZ", "preservealpha", "preserveAlpha",
+    "preserveaspectratio", "preserveAspectRatio", "primitiveunits", "primitiveUnits", "refx", "refX",
+    "refy", "refY", "repeatcount", "repeatCount", "repeatdur", "repeatDur",
+    "requiredextensions", "requiredExtensions", "requiredfeatures", "requiredFeatures",
+    "specularconstant", "specularConstant", "specularexponent", "specularExponent", "spreadmethod", "spreadMethod",
+    "startoffset", "startOffset", "stddeviation", "stdDeviation", "stitchtiles", "stitchTiles",
+    "surfacescale", "surfaceScale", "systemlanguage", "systemLanguage", "tablevalues", "tableValues",
+    "targetx", "targetX", "targety", "targetY", "textlength", "textLength", "viewbox", "viewBox",
+    "viewtarget", "viewTarget", "xchannelselector", "xChannelSelector", "ychannelselector", "yChannelSelector",
+    "zoomandpan", "zoomAndPan"
+};
+
+#define SVG_TAG_PAIRS (sizeof svg_tag_names / sizeof svg_tag_names[0])
+#define SVG_ATTR_PAIRS (sizeof svg_attr_names / sizeof svg_attr_names[0])
+
+/* the index of the second of the pair whose first is s[0..n), or 0 */
+static size_t html_adjusted(const char *const *pairs, size_t count, const char *s, size_t n) {
+    for (size_t i = 0; i + 1 < count; i += 2)
+        if (strlen(pairs[i]) == n && memcmp(pairs[i], s, n) == 0) return i + 1;
+    return 0;
+}
+
+/* the namespace of a foreign attribute of this name (adjust foreign attributes),
+   or none: its name is its qualified name, prefix and all */
+static dom_attr_namespace html_foreign_attr_ns(const char *s, size_t n) {
+    static const char *const xlink[] = { "xlink:actuate", "xlink:arcrole", "xlink:href", "xlink:role", "xlink:show",
+                                         "xlink:title", "xlink:type" };
+    for (size_t i = 0; i < sizeof xlink / sizeof xlink[0]; i++)
+        if (strlen(xlink[i]) == n && memcmp(xlink[i], s, n) == 0) return DOM_ATTR_NAMESPACE_XLINK;
+    if ((n == 8 && memcmp(s, "xml:lang", 8) == 0) || (n == 9 && memcmp(s, "xml:space", 9) == 0)) return DOM_ATTR_NAMESPACE_XML;
+    if ((n == 5 && memcmp(s, "xmlns", 5) == 0) || (n == 11 && memcmp(s, "xmlns:xlink", 11) == 0)) return DOM_ATTR_NAMESPACE_XMLNS;
+    return DOM_ATTR_NAMESPACE_NULL;
+}
+
 /* ---- the builder's state -------------------------------------------------------- */
 
 enum html_mode {
     M_INITIAL, M_BEFORE_HTML, M_BEFORE_HEAD, M_IN_HEAD, M_IN_HEAD_NOSCRIPT, M_AFTER_HEAD, M_IN_BODY, M_TEXT,
     M_IN_TABLE, M_IN_TABLE_TEXT, M_IN_CAPTION, M_IN_COLUMN_GROUP, M_IN_TABLE_BODY, M_IN_ROW, M_IN_CELL,
-    M_IN_SELECT, M_IN_SELECT_IN_TABLE, M_AFTER_BODY, M_IN_FRAMESET, M_AFTER_FRAMESET, M_AFTER_AFTER_BODY,
-    M_AFTER_AFTER_FRAMESET
+    M_IN_TEMPLATE, M_AFTER_BODY, M_IN_FRAMESET, M_AFTER_FRAMESET, M_AFTER_AFTER_BODY, M_AFTER_AFTER_FRAMESET
+};
+
+/* what an open element is to the algorithm, found once when it is pushed */
+enum {
+    F_SCOPE = 1,            /* it ends the default scope, and the list item and button scopes */
+    F_TABLE_SCOPE = 2,      /* it ends the table scope: html, table, template */
+    F_SPECIAL = 4,          /* the special category */
+    F_MATHML_TIP = 8,       /* a MathML text integration point: mi, mo, mn, ms, mtext */
+    F_HTML_IP = 16,         /* an HTML integration point: SVG foreignObject, desc, title; MathML annotation-xml of an HTML encoding */
+    F_ANNOTATION_XML = 32   /* MathML annotation-xml */
 };
 
 /* an entry of the stack of open elements or of the list of active formatting
-   elements: the node, its tag, its name's atom in the DOM, the token it was made for */
-typedef struct html_open { dom_node_h node; uint32_t tag; uint32_t atom; uint32_t token; } html_open;
+   elements: the node, its tag (T_FOREIGN for a foreign element), its name's atom in
+   the DOM, the token it was made for, its namespace and what it is to the algorithm */
+typedef struct html_open { dom_node_h node; uint32_t tag; uint32_t atom; uint32_t token; uint8_t ns; uint8_t flags; } html_open;
 
-typedef struct html_ctx {
+/* the tree builder: its scalars and its lists. Its owner drops the lists
+   (HTML_TB_DROP: a struct's vectors are not autodropped) */
+typedef struct html_tb {
     int mode, orig_mode;
-    dom_node_h head, form, ctx_elem;
-    int frameset_ok, foster, quirks, fragment, ctx_tag, skip_lf, stopped;
-    uint32_t tok;                       /* the token being processed */
-} html_ctx;
+    dom_node_h head, form;
+    int frameset_ok, foster, quirks, fragment, skip_lf, stopped;
+    int ctx_tag, ctx_ns, ctx_flags;     /* the fragment's context element: its tag, its namespace, what it is */
+    int tz_state;                       /* the tokenizer's state the start tag just built asks for */
+    uint32_t tok;                       /* the token being processed ... */
+    int tag;                            /* ... and its tag */
+    uint32_t next;                      /* the next token to build */
+    int track_opts;                     /* a selectedcontent has been made: the options are followed */
+    int opt_cut;                        /* an option has left the stack from below its top */
+    vector<html_open> l_open;           /* the stack of open elements */
+    vector<html_open> l_afe;            /* the list of active formatting elements */
+    vector<char> l_pend;                /* the pending table characters */
+    vector<uint32_t> l_errs;            /* the builder's own parse errors: the tokens they are at */
+    vector<int> l_tmodes;               /* the stack of template insertion modes */
+    vector<uint32_t> l_opts;            /* the options pushed and not yet seen popped: pairs of node and stack index */
+} html_tb;
+#define HTML_TB_DROP(b) vector_html_open_drop(&(b).l_open); vector_html_open_drop(&(b).l_afe); vector_char_drop(&(b).l_pend); \
+    vector_uint32_t_drop(&(b).l_errs); vector_int_drop(&(b).l_tmodes); vector_uint32_t_drop(&(b).l_opts)
 
-/* every routine takes the same context: the document, the token table, the
-   builder's scalars, the stack, the active formatting list, the pending table
-   characters and the builder's own parse errors */
-#define CTX dom_document *d, const html_parser *p, html_ctx *c, vector<html_open> *open, vector<html_open> *afe, vector<char> *pend, vector<uint32_t> *errs
-#define ARGS d, p, c, open, afe, pend, errs
+/* every routine takes the same context: the document, the token table and the
+   builder, whose lists it names open, afe, pend, errs, tmodes and opts */
+#define CTX dom_document *d, const html_parser *p, html_tb *c
+#define ARGS d, p, c
+#define open (&c->l_open)
+#define afe (&c->l_afe)
+#define pend (&c->l_pend)
+#define errs (&c->l_errs)
+#define tmodes (&c->l_tmodes)
+#define opts (&c->l_opts)
 
 static void html_terr(CTX) { push_back(errs, c->tok); }
 
@@ -157,22 +302,30 @@ static int st_index_of_node(const vector<html_open> *s, dom_node_h n) {
     return -1;
 }
 
-/* 13.2.4.2: has an element in the specific scope */
-enum { SC_DEFAULT, SC_LIST_ITEM, SC_BUTTON, SC_TABLE, SC_SELECT };
-static int html_scope_boundary(int t, int kind) {
-    if (kind == SC_TABLE) return IN(t, T_HTML, T_TABLE, T_TEMPLATE);
-    if (kind == SC_SELECT) return !IN(t, T_OPTGROUP, T_OPTION);
-    if (IN(t, T_APPLET, T_CAPTION, T_HTML, T_TABLE, T_TD, T_TH, T_MARQUEE, T_OBJECT, T_TEMPLATE)) return 1;
-    if (kind == SC_LIST_ITEM && IN(t, T_OL, T_UL)) return 1;
-    if (kind == SC_BUTTON && t == T_BUTTON) return 1;
+/* 13.2.4.2: has an element in the specific scope. An HTML element is named by
+   its tag; one the algorithm does not name (T_UNKNOWN), by its atom */
+enum { SC_DEFAULT, SC_LIST_ITEM, SC_BUTTON, SC_TABLE };
+static int html_scope_boundary(html_open e, int kind) {
+    if (kind == SC_TABLE) return (e.flags & F_TABLE_SCOPE) != 0;
+    if (e.flags & F_SCOPE) return 1;
+    if (kind == SC_LIST_ITEM && (e.tag == T_OL || e.tag == T_UL)) return 1;
+    if (kind == SC_BUTTON && e.tag == T_BUTTON) return 1;
     return 0;
 }
-/* t in scope; for an unknown tag, the atom names it */
 static int in_scope(const vector<html_open> *s, int t, uint32_t atom, int kind) {
     for (size_t i = len(*s); i-- > 0;) {
         html_open e = at(*s, i);
-        if (t != T_UNKNOWN ? (int)e.tag == t : e.atom == atom) return 1;
-        if (html_scope_boundary((int)e.tag, kind)) return 0;
+        if (t != T_UNKNOWN ? (int)e.tag == t : (e.tag == T_UNKNOWN && e.atom == atom)) return 1;
+        if (html_scope_boundary(e, kind)) return 0;
+    }
+    return 0;
+}
+/* the node itself in the default scope */
+static int node_in_scope(const vector<html_open> *s, dom_node_h n) {
+    for (size_t i = len(*s); i-- > 0;) {
+        html_open e = at(*s, i);
+        if (e.node.index == n.index) return 1;
+        if (html_scope_boundary(e, SC_DEFAULT)) return 0;
     }
     return 0;
 }
@@ -180,7 +333,7 @@ static int heading_in_scope(const vector<html_open> *s) {
     for (size_t i = len(*s); i-- > 0;) {
         html_open e = at(*s, i);
         if (html_heading((int)e.tag)) return 1;
-        if (html_scope_boundary((int)e.tag, SC_DEFAULT)) return 0;
+        if (html_scope_boundary(e, SC_DEFAULT)) return 0;
     }
     return 0;
 }
@@ -215,29 +368,43 @@ static void implied_end_tags_thoroughly(vector<html_open> *s) {
 /* ---- inserting nodes (13.2.6.1) ---- */
 
 /* the appropriate place for inserting a node: a parent, and the node to insert
-   before (none: at the end); foster parenting puts it before the last table */
+   before (none: at the end). Foster parenting puts it before the last table, or
+   into the last template if that is later; a template's place is its contents */
 static void insertion_place(CTX, dom_node_h target, dom_node_h *parent, dom_node_h *before) {
     dom_node_h none = { 0, 0, 0 };
     *before = none;
     *parent = target;
-    int tt = -1;
-    int ti = st_index_of_node(open, target);
-    if (ti >= 0) tt = (int)st_at(open, (size_t)ti).tag;
-    if (c->foster && IN(tt, T_TABLE, T_TBODY, T_TFOOT, T_THEAD, T_TR)) {
-        int last_table = -1;
-        for (size_t i = st_len(open); i-- > 0;) if ((int)st_at(open, i).tag == T_TABLE) { last_table = (int)i; break; }
-        if (last_table < 0) { *parent = st_at(open, 0).node; return; }
-        dom_node_h table = st_at(open, (size_t)last_table).node;
-        dom_node_h tp = dom_children_up(d, table);
-        if (tp.index) { *parent = tp; *before = table; return; }
-        *parent = st_at(open, (size_t)last_table - 1).node;
+    if (c->foster) {
+        int tt = -1;
+        int ti = st_index_of_node(open, target);
+        if (ti >= 0) tt = (int)st_at(open, (size_t)ti).tag;
+        if (IN(tt, T_TABLE, T_TBODY, T_TFOOT, T_THEAD, T_TR)) {
+            int last = -1;
+            for (size_t i = st_len(open); i-- > 0;) {
+                int lt = (int)st_at(open, i).tag;
+                if (lt == T_TABLE || lt == T_TEMPLATE) { last = (int)i; break; }
+            }
+            if (last < 0) { *parent = st_at(open, 0).node; return; }
+            dom_node_h lnode = st_at(open, (size_t)last).node;
+            if ((int)st_at(open, (size_t)last).tag == T_TEMPLATE) *parent = lnode;
+            else {
+                dom_node_h tp = dom_children_up(d, lnode);
+                if (tp.index) { *parent = tp; *before = lnode; }
+                else *parent = st_at(open, (size_t)last - 1).node;
+            }
+        }
     }
-    /* past 512 open elements a node goes beside the current one, not into it: the
-       DOM's depth stays bounded, as Blink bounds it (kMaximumHTMLParserDOMTreeDepth),
-       and so does every walk of it that recurses */
+    uint32_t contents = d->node[parent->index].content;
+    if (contents) { *parent = node_handle(d, contents); *before = none; }
+    /* past 512 open elements a node goes beside the current one, not into it -- a
+       template's contents' beside the template: the DOM's depth stays bounded, as
+       Blink bounds it (kMaximumHTMLParserDOMTreeDepth), and so does every walk of it
+       that recurses */
     if (st_len(open) > 512 && !before->index) {
-        dom_node_h up = dom_children_up(d, *parent);
-        if (up.index) *parent = up;
+        uint32_t x = parent->index;
+        uint32_t up = d->node[x].parent;
+        if (!up && d->node[x].host) up = d->node[d->node[x].host].parent;
+        if (up) *parent = node_handle(d, up);
     }
 }
 
@@ -246,17 +413,67 @@ static void insert_node_at(CTX, dom_node_h parent, dom_node_h before, dom_node_h
     else dom_append_child(d, parent, node);
 }
 
-static dom_node_h current_node(const vector<html_open> *open) { return st_top(open).node; }
+static dom_node_h current_node(const vector<html_open> *s) { return st_top(s).node; }
 
-/* an element for the token: its name and its attributes */
-static dom_node_h create_element(CTX, uint32_t t) {
+/* the adjusted current node: the fragment's context element while the stack
+   holds the root alone, else the current node */
+static html_open adjusted_current(const html_tb *c) {
+    if (c->fragment && st_len(open) == 1) {
+        html_open e;
+        memset(&e, 0, sizeof e);
+        e.tag = (uint32_t)c->ctx_tag;
+        e.ns = (uint8_t)c->ctx_ns;
+        e.flags = (uint8_t)c->ctx_flags;
+        return e;
+    }
+    return st_top(open);
+}
+
+/* an element for the token, in its namespace, with its attributes; a foreign
+   element's name and attributes adjusted (13.2.6.1, 13.2.6.5) */
+static dom_node_h create_element_ns(CTX, uint32_t t, int ns) {
     amb_span n = p->token[t].name;
-    dom_node_h e = dom_create_element(d, bytes_ptr(p, n), n.len);
+    dom_node_h e;
+    if (ns == DOM_NAMESPACE_HTML) e = dom_create_element(d, bytes_ptr(p, n), n.len);
+    else {
+        size_t k = ns == DOM_NAMESPACE_SVG ? html_adjusted(svg_tag_names, SVG_TAG_PAIRS, bytes_ptr(p, n), n.len) : 0;
+        if (k) e = dom_create_element_ns(d, (dom_namespace)ns, svg_tag_names[k], strlen(svg_tag_names[k]));
+        else e = dom_create_element_ns(d, (dom_namespace)ns, bytes_ptr(p, n), n.len);
+    }
     for (uint32_t a = p->token[t].first_attr; a; a = p->tattr[a].next) {
         amb_span an = p->tattr[a].name, av = p->tattr[a].value;
-        dom_set_attribute(d, e, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len);
+        if (ns == DOM_NAMESPACE_HTML) { dom_set_attribute(d, e, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len); continue; }
+        dom_attr_namespace ans = html_foreign_attr_ns(bytes_ptr(p, an), an.len);
+        size_t k = ns == DOM_NAMESPACE_SVG ? html_adjusted(svg_attr_names, SVG_ATTR_PAIRS, bytes_ptr(p, an), an.len) : 0;
+        if (k) dom_set_attribute_ns(d, e, ans, svg_attr_names[k], strlen(svg_attr_names[k]), bytes_ptr(p, av), av.len);
+        else if (ns == DOM_NAMESPACE_MATHML && an.len == 13 && memcmp(bytes_ptr(p, an), "definitionurl", 13) == 0)
+            dom_set_attribute_ns(d, e, ans, "definitionURL", 13, bytes_ptr(p, av), av.len);
+        else dom_set_attribute_ns(d, e, ans, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len);
     }
     return e;
+}
+static dom_node_h create_element(CTX, uint32_t t) { return create_element_ns(ARGS, t, DOM_NAMESPACE_HTML); }
+
+/* what a foreign element of this namespace and (adjusted) name is to the
+   algorithm; html_ip, that its start tag made annotation-xml an HTML integration point */
+static uint8_t foreign_flags(int ns, const char *s, size_t n, int html_ip) {
+#define NAMED(w) (n == sizeof(w) - 1 && memcmp(s, w, n) == 0)
+    if (ns == DOM_NAMESPACE_MATHML) {
+        if (NAMED("mi") || NAMED("mo") || NAMED("mn") || NAMED("ms") || NAMED("mtext")) return F_SCOPE | F_SPECIAL | F_MATHML_TIP;
+        if (NAMED("annotation-xml")) return (uint8_t)(F_SCOPE | F_SPECIAL | F_ANNOTATION_XML | (html_ip ? F_HTML_IP : 0));
+    } else if (ns == DOM_NAMESPACE_SVG) {
+        if (NAMED("foreignObject") || NAMED("desc") || NAMED("title")) return F_SCOPE | F_SPECIAL | F_HTML_IP;
+    }
+    return 0;
+#undef NAMED
+}
+/* what an HTML element of this tag is to the algorithm */
+static uint8_t html_flags(int tag) {
+    uint8_t f = 0;
+    if (html_scope_tag(tag)) f |= F_SCOPE;
+    if (tag == T_HTML || tag == T_TABLE || tag == T_TEMPLATE) f |= F_TABLE_SCOPE;
+    if (html_special_tag(tag)) f |= F_SPECIAL;
+    return f;
 }
 
 static html_open open_entry(const dom_document *d, dom_node_h e, int tag, uint32_t t) {
@@ -265,16 +482,221 @@ static html_open open_entry(const dom_document *d, dom_node_h e, int tag, uint32
     o.tag = (uint32_t)tag;
     o.atom = d->node[e.index].name;
     o.token = t;
+    o.ns = DOM_NAMESPACE_HTML;
+    o.flags = html_flags(tag);
     return o;
+}
+static html_open open_entry_foreign(const dom_document *d, const html_parser *p, dom_node_h e, int ns, uint32_t t) {
+    html_open o;
+    o.node = e;
+    o.tag = T_FOREIGN;
+    o.atom = d->node[e.index].name;
+    o.token = t;
+    o.ns = (uint8_t)ns;
+    int html_ip = 0;
+    if (ns == DOM_NAMESPACE_MATHML) {
+        uint32_t enc = tk_attr(p, t, "encoding");
+        html_ip = enc && (tk_attr_value_is_ci(p, enc, "text/html") || tk_attr_value_is_ci(p, enc, "application/xhtml+xml"));
+    }
+    o.flags = foreign_flags(ns, names_ptr(d, o.atom), names_len(d, o.atom), html_ip);
+    return o;
+}
+
+/* ---- a select's selectedcontent (HTML 4.10.17), as the parser keeps it ----
+   When the parser pops an option off the stack and the option is the one its
+   select shows, each selectedcontent of the select takes a clone of the
+   option's content (4.10.10). An option the parser makes is never dirty, so the
+   one a select shows is the last of its options with the selected attribute,
+   or else, at a display size of 1, the first that is not disabled. */
+
+static int el_is(const dom_document *d, uint32_t x, const char *name) {
+    return x && d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML &&
+           names_is(d, d->node[x].name, name, strlen(name));
+}
+static uint32_t el_attr(const dom_document *d, uint32_t x, const char *name) {
+    uint32_t a = names_find(d, name, strlen(name));
+    if (!a) return 0;
+    for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) if (d->attr[at].name == a) return at;
+    return 0;
+}
+
+/* an option's nearest ancestor select: none past a datalist, an hr, an option or a second optgroup */
+static uint32_t option_select(const dom_document *d, uint32_t o) {
+    int optgroups = 0;
+    for (uint32_t a = d->node[o].parent; a; a = d->node[a].parent) {
+        if (el_is(d, a, "datalist") || el_is(d, a, "hr") || el_is(d, a, "option")) return 0;
+        if (el_is(d, a, "optgroup") && ++optgroups > 1) return 0;
+        if (el_is(d, a, "select")) return a;
+    }
+    return 0;
+}
+
+/* the option a select shows, by its list of options (4.10.7), or 0 */
+static uint32_t select_shown(const dom_document *d, uint32_t sel) {
+    uint32_t last_selected = 0, first_enabled = 0;
+    uint32_t x = d->node[sel].first_child;
+    while (x) {
+        int skip = el_is(d, x, "select") || el_is(d, x, "hr") || el_is(d, x, "datalist");
+        if (el_is(d, x, "option")) {
+            skip = 1;
+            uint32_t up = d->node[x].parent;
+            if (el_attr(d, x, "selected")) last_selected = x;
+            if (!first_enabled && !el_attr(d, x, "disabled") && !(el_is(d, up, "optgroup") && el_attr(d, up, "disabled"))) first_enabled = x;
+        } else if (el_is(d, x, "optgroup")) {
+            for (uint32_t a = d->node[x].parent; a && a != sel; a = d->node[a].parent) if (el_is(d, a, "optgroup")) skip = 1;
+        }
+        /* the next node of the select's subtree in tree order, past x's own when skip */
+        if (!skip && d->node[x].first_child) { x = d->node[x].first_child; continue; }
+        while (x && x != sel && !d->node[x].next_sibling) x = d->node[x].parent;
+        x = x && x != sel ? d->node[x].next_sibling : 0;
+    }
+    if (last_selected) return last_selected;
+    long size = el_attr(d, sel, "multiple") ? 4 : 1;
+    uint32_t sz = el_attr(d, sel, "size");
+    if (sz) {
+        amb_span v = d->attr[sz].value;
+        const char *s = text_ptr(d, v);
+        size_t i = 0;
+        while (i < v.len && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\f' || s[i] == '\r')) i++;
+        if (i < v.len && s[i] == '+') i++;
+        if (i < v.len && s[i] >= '0' && s[i] <= '9') {
+            size = 0;
+            while (i < v.len && s[i] >= '0' && s[i] <= '9' && size < 100000) size = size * 10 + (s[i++] - '0');
+        }
+    }
+    return size == 1 ? first_enabled : 0;
+}
+
+/* a deep clone of x, made in the document, or 0 for what a selectedcontent leaves
+   out (script, SVG script, frame, iframe, embed, object); a template's clone has
+   its contents cloned too */
+static uint32_t clone_node(dom_document *d, uint32_t x) {
+    dom_node_kind k = d->node[x].kind;
+    dom_node_h h = { 0, 0, 0 };
+    if (k == DOM_NODE_KIND_ELEMENT) {
+        dom_namespace ns = d->node[x].ns;
+        if (el_is(d, x, "script") || el_is(d, x, "frame") || el_is(d, x, "iframe") || el_is(d, x, "embed") || el_is(d, x, "object") ||
+            (ns == DOM_NAMESPACE_SVG && names_is(d, d->node[x].name, "script", 6))) return 0;
+        vector<char> nm;
+        append_range(nm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name));
+        h = dom_create_element_ns(d, ns, data(nm), len(nm));
+        if (!h.index) return 0;
+        for (uint32_t a = d->node[x].first_attr; a; a = d->attr[a].next) {
+            vector<char> an, av;
+            append_range(an, names_ptr(d, d->attr[a].name), names_len(d, d->attr[a].name));
+            append_range(av, text_ptr(d, d->attr[a].value), d->attr[a].value.len);
+            dom_set_attribute_ns(d, h, d->attr[a].ns, data(an), len(an), data(av), len(av));
+        }
+        uint32_t from = d->node[x].content, to = d->node[h.index].content;
+        if (from && to)
+            for (uint32_t ch = d->node[from].first_child; ch; ch = d->node[ch].next_sibling) {
+                uint32_t y = clone_node(d, ch);
+                if (y) dom_append_child(d, node_handle(d, to), node_handle(d, y));
+            }
+    } else if (k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT) {
+        vector<char> t;
+        append_range(t, text_ptr(d, d->node[x].data), d->node[x].data.len);
+        h = k == DOM_NODE_KIND_TEXT ? dom_create_text(d, data(t), len(t)) : dom_create_comment(d, data(t), len(t));
+        return h.index;
+    } else return 0;
+    for (uint32_t ch = d->node[x].first_child; ch; ch = d->node[ch].next_sibling) {
+        uint32_t y = clone_node(d, ch);
+        if (y) dom_append_child(d, h, node_handle(d, y));
+    }
+    return h.index;
+}
+
+/* a selectedcontent that shows nothing: inside an option or another
+   selectedcontent, or under a second select */
+static int selectedcontent_disabled(const dom_document *d, uint32_t sc) {
+    int selects = 0;
+    for (uint32_t a = d->node[sc].parent; a; a = d->node[a].parent) {
+        if (el_is(d, a, "select") && ++selects > 1) return 1;
+        if (el_is(d, a, "option") || el_is(d, a, "selectedcontent")) return 1;
+    }
+    return 0;
+}
+
+/* each selectedcontent of the select, its children replaced by clones of the option's */
+static void selectedcontent_update(dom_document *d, uint32_t sel, uint32_t opt) {
+    if (el_attr(d, sel, "multiple")) return;
+    vector<uint32_t> targets;
+    for (uint32_t x = d->node[sel].first_child; x;) {
+        if (el_is(d, x, "selectedcontent") && !selectedcontent_disabled(d, x)) push_back(targets, x);
+        if (d->node[x].first_child) { x = d->node[x].first_child; continue; }
+        while (x && x != sel && !d->node[x].next_sibling) x = d->node[x].parent;
+        x = x && x != sel ? d->node[x].next_sibling : 0;
+    }
+    for (size_t i = 0; i < len(targets); i++) {
+        uint32_t sc = at(targets, i);
+        while (d->node[sc].first_child) {
+            dom_node_h ch = node_handle(d, d->node[sc].first_child);
+            dom_remove_child(d, node_handle(d, sc), ch);
+            dom_destroy(d, ch);
+        }
+        for (uint32_t ch = d->node[opt].first_child; ch; ch = d->node[ch].next_sibling) {
+            uint32_t y = clone_node(d, ch);
+            if (y) dom_append_child(d, node_handle(d, sc), node_handle(d, y));
+        }
+    }
+}
+
+/* the k-th option followed is on the stack still: where it was pushed, or, moved
+   by the adoption agency, wherever it is now */
+static int option_open(CTX, size_t k) {
+    uint32_t o = at(*opts, 2 * k), i0 = at(*opts, 2 * k + 1);
+    if (i0 < st_len(open) && st_at(open, i0).node.index == o) return 1;
+    int i = st_index_of_node(open, node_handle(d, o));
+    if (i < 0) return 0;
+    (*opts)[2 * k + 1] = (uint32_t)i;
+    return 1;
+}
+
+/* each option followed that the stack holds no more: popped since the last look.
+   An option below the newest still open is open too, unless one left from below
+   the stack's top (opt_cut): so the look stops at the first open, and costs
+   nothing while the options stay */
+static void options_popped(CTX) {
+    for (size_t k = len(*opts) / 2; k-- > 0;) {
+        if (option_open(ARGS, k)) { if (!c->opt_cut) break; continue; }
+        uint32_t o = at(*opts, 2 * k);
+        erase(opts, 2 * k + 1);
+        erase(opts, 2 * k);
+        uint32_t sel = option_select(d, o);
+        if (sel && select_shown(d, sel) == o) selectedcontent_update(d, sel, o);
+    }
+    c->opt_cut = 0;
+}
+
+/* the options are followed from the first selectedcontent on: those open then, and
+   each pushed after */
+static void track_options(CTX) {
+    c->track_opts = 1;
+    for (size_t i = 0; i < st_len(open); i++)
+        if (st_at(open, i).tag == T_OPTION) { push_back(opts, st_at(open, i).node.index); push_back(opts, (uint32_t)i); }
 }
 
 /* insert an HTML element for the token, at the appropriate place, and push it */
 static dom_node_h insert_element(CTX, uint32_t t) {
+    if (len(*opts)) options_popped(ARGS);
     dom_node_h parent, before;
     insertion_place(ARGS, current_node(open), &parent, &before);
     dom_node_h e = create_element(ARGS, t);
     insert_node_at(ARGS, parent, before, e);
-    push_back(open, open_entry(d, e, tk_tag(p, t), t));
+    int tag = c->tok == t ? c->tag : tk_tag(p, t);
+    if (!c->track_opts && tag == T_UNKNOWN && tk_name_is(p, t, "selectedcontent")) track_options(ARGS);
+    push_back(open, open_entry(d, e, tag, t));
+    if (c->track_opts && tag == T_OPTION) { push_back(opts, e.index); push_back(opts, (uint32_t)(st_len(open) - 1)); }
+    return e;
+}
+
+/* insert a foreign element for the token, in the namespace, and push it */
+static dom_node_h insert_foreign(CTX, uint32_t t, int ns) {
+    dom_node_h parent, before;
+    insertion_place(ARGS, current_node(open), &parent, &before);
+    dom_node_h e = create_element_ns(ARGS, t, ns);
+    insert_node_at(ARGS, parent, before, e);
+    push_back(open, open_entry_foreign(d, p, e, ns, t));
     return e;
 }
 
@@ -329,13 +751,13 @@ static void insert_comment(CTX, uint32_t t) {
 
 /* ---- the list of active formatting elements (13.2.4.3) ---- */
 
-static void afe_push_marker(vector<html_open> *afe) {
+static void afe_push_marker(vector<html_open> *l) {
     html_open m;
     memset(&m, 0, sizeof m);
     m.tag = T_MARKER;
-    push_back(afe, m);
+    push_back(l, m);
 }
-/* two elements have the same attributes: names and values, in any order */
+/* two elements have the same attributes: names, namespaces and values, in any order */
 static int same_attrs(const dom_document *d, dom_node_h a, dom_node_h b) {
     size_t na = 0, nb = 0;
     for (uint32_t x = d->node[a.index].first_attr; x; x = d->attr[x].next) na++;
@@ -344,7 +766,7 @@ static int same_attrs(const dom_document *d, dom_node_h a, dom_node_h b) {
     for (uint32_t x = d->node[a.index].first_attr; x; x = d->attr[x].next) {
         int found = 0;
         for (uint32_t y = d->node[b.index].first_attr; y; y = d->attr[y].next) {
-            if (d->attr[x].name != d->attr[y].name) continue;
+            if (d->attr[x].name != d->attr[y].name || d->attr[x].ns != d->attr[y].ns) continue;
             amb_span vx = d->attr[x].value, vy = d->attr[y].value;
             if (vx.len == vy.len && memcmp(text_ptr(d, vx), text_ptr(d, vy), vx.len) == 0) found = 1;
             break;
@@ -364,12 +786,12 @@ static void afe_push(CTX, html_open e) {
     if (alike >= 3) erase(afe, (size_t)earliest);
     push_back(afe, e);
 }
-static int afe_index_of_node(const vector<html_open> *afe, dom_node_h n) {
-    for (size_t i = len(*afe); i-- > 0;) if (at(*afe, i).tag != T_MARKER && at(*afe, i).node.index == n.index) return (int)i;
+static int afe_index_of_node(const vector<html_open> *l, dom_node_h n) {
+    for (size_t i = len(*l); i-- > 0;) if (at(*l, i).tag != T_MARKER && at(*l, i).node.index == n.index) return (int)i;
     return -1;
 }
-static void afe_clear_to_marker(vector<html_open> *afe) {
-    while (len(*afe)) { int t = (int)back(*afe).tag; pop_back(afe); if (t == T_MARKER) break; }
+static void afe_clear_to_marker(vector<html_open> *l) {
+    while (len(*l)) { int t = (int)back(*l).tag; pop_back(l); if (t == T_MARKER) break; }
 }
 /* reconstruct the active formatting elements */
 static void reconstruct_afe(CTX) {
@@ -412,10 +834,10 @@ static int adoption_agency(CTX, int tag, uint32_t atom) {
         html_open fe = at(*afe, (size_t)fi);
         int si = st_index_of_node(open, fe.node);
         if (si < 0) { html_terr(ARGS); erase(afe, (size_t)fi); return 1; }
-        if (!in_scope(open, (int)fe.tag, fe.atom, SC_DEFAULT)) { html_terr(ARGS); return 1; }
+        if (!node_in_scope(open, fe.node)) { html_terr(ARGS); return 1; }
         if (st_top(open).node.index != fe.node.index) html_terr(ARGS);
         int fb = -1;
-        for (size_t i = (size_t)si + 1; i < st_len(open); i++) if (html_special((int)st_at(open, i).tag)) { fb = (int)i; break; }
+        for (size_t i = (size_t)si + 1; i < st_len(open); i++) if (st_at(open, i).flags & F_SPECIAL) { fb = (int)i; break; }
         if (fb < 0) {
             while (st_len(open) > (size_t)si) st_pop(open);
             erase(afe, (size_t)fi);
@@ -436,7 +858,11 @@ static int adoption_agency(CTX, int tag, uint32_t atom) {
                 if (ai < bookmark) bookmark--;
                 ai = -1;
             }
-            if (ai < 0) { st_remove_at(open, (size_t)node_i); continue; }
+            if (ai < 0) {
+                if (node_e.tag == T_OPTION) c->opt_cut = 1;
+                st_remove_at(open, (size_t)node_i);
+                continue;
+            }
             /* a new element for the node's token, in the list and the stack */
             dom_node_h ne = create_element(ARGS, node_e.token);
             html_open ne_entry = open_entry(d, ne, (int)node_e.tag, node_e.token);
@@ -477,25 +903,20 @@ static int adoption_agency(CTX, int tag, uint32_t atom) {
 
 /* ---- the insertion modes ---------------------------------------------------------- */
 
+static int current_template_mode(const vector<int> *s) { return len(*s) ? back(*s) : M_IN_BODY; }
+
 static void reset_insertion_mode(CTX) {
     for (size_t i = st_len(open); i-- > 0;) {
         int last = i == 0;
         int t = (int)st_at(open, i).tag;
         if (last && c->fragment) t = c->ctx_tag;
-        if (t == T_SELECT) {
-            if (!last) for (size_t j = i; j-- > 0;) {
-                int a = (int)st_at(open, j).tag;
-                if (a == T_TEMPLATE) break;
-                if (a == T_TABLE) { c->mode = M_IN_SELECT_IN_TABLE; return; }
-            }
-            c->mode = M_IN_SELECT; return;
-        }
         if ((t == T_TD || t == T_TH) && !last) { c->mode = M_IN_CELL; return; }
         if (t == T_TR) { c->mode = M_IN_ROW; return; }
         if (IN(t, T_TBODY, T_THEAD, T_TFOOT)) { c->mode = M_IN_TABLE_BODY; return; }
         if (t == T_CAPTION) { c->mode = M_IN_CAPTION; return; }
         if (t == T_COLGROUP) { c->mode = M_IN_COLUMN_GROUP; return; }
         if (t == T_TABLE) { c->mode = M_IN_TABLE; return; }
+        if (t == T_TEMPLATE) { c->mode = current_template_mode(tmodes); return; }
         if (t == T_HEAD && !last) { c->mode = M_IN_HEAD; return; }
         if (t == T_BODY) { c->mode = M_IN_BODY; return; }
         if (t == T_FRAMESET) { c->mode = M_IN_FRAMESET; return; }
@@ -516,9 +937,11 @@ static void close_p(CTX) {
 
 static int process(CTX, int mode);
 
-/* the generic RCDATA and raw text element parsing algorithm: the element, then text mode */
-static void generic_text_element(CTX, uint32_t t) {
+/* the generic RCDATA and raw text element parsing algorithm: the element, the
+   tokenizer's state, then text mode */
+static void generic_text_element(CTX, uint32_t t, int tz_state) {
     insert_element(ARGS, t);
+    c->tz_state = tz_state;
     c->orig_mode = c->mode;
     c->mode = M_TEXT;
 }
@@ -527,17 +950,24 @@ static void generic_text_element(CTX, uint32_t t) {
 static int in_head(CTX) {
     uint32_t t = c->tok;
     html_token_kind k = tk_kind(p, t);
-    int tag = k == HTML_TOKEN_KIND_START_TAG || k == HTML_TOKEN_KIND_END_TAG ? tk_tag(p, t) : T_UNKNOWN;
+    int tag = c->tag;
     if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment(ARGS, t); return 0; }
     if (k == HTML_TOKEN_KIND_DOCTYPE) { html_terr(ARGS); return 0; }
     if (k == HTML_TOKEN_KIND_START_TAG) {
         if (tag == T_HTML) return process(ARGS, M_IN_BODY);
         if (IN(tag, T_BASE, T_BASEFONT, T_BGSOUND, T_LINK, T_META)) { insert_element(ARGS, t); st_pop(open); return 0; }
-        if (tag == T_TITLE) { generic_text_element(ARGS, t); return 0; }
-        if (IN(tag, T_NOFRAMES, T_STYLE)) { generic_text_element(ARGS, t); return 0; }
+        if (tag == T_TITLE) { generic_text_element(ARGS, t, HTML_TZ_RCDATA); return 0; }
+        if (IN(tag, T_NOFRAMES, T_STYLE)) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
         if (tag == T_NOSCRIPT) { insert_element(ARGS, t); c->mode = M_IN_HEAD_NOSCRIPT; return 0; }
-        if (tag == T_SCRIPT) { generic_text_element(ARGS, t); return 0; }
-        if (tag == T_TEMPLATE) { insert_element(ARGS, t); afe_push_marker(afe); c->frameset_ok = 0; return 0; }
+        if (tag == T_SCRIPT) { generic_text_element(ARGS, t, HTML_TZ_SCRIPT); return 0; }
+        if (tag == T_TEMPLATE) {
+            afe_push_marker(afe);
+            c->frameset_ok = 0;
+            c->mode = M_IN_TEMPLATE;
+            push_back(tmodes, M_IN_TEMPLATE);
+            insert_element(ARGS, t);
+            return 0;
+        }
         if (tag == T_HEAD) { html_terr(ARGS); return 0; }
     }
     if (k == HTML_TOKEN_KIND_END_TAG) {
@@ -545,8 +975,11 @@ static int in_head(CTX) {
         if (tag == T_TEMPLATE) {
             if (!st_has_tag(open, T_TEMPLATE)) { html_terr(ARGS); return 0; }
             implied_end_tags_thoroughly(open);
+            if (cur_tag(open) != T_TEMPLATE) html_terr(ARGS);
             st_pop_until(open, T_TEMPLATE);
             afe_clear_to_marker(afe);
+            if (len(*tmodes)) pop_back(tmodes);
+            reset_insertion_mode(ARGS);
             return 0;
         }
         if (!IN(tag, T_BODY, T_HTML, T_BR)) { html_terr(ARGS); return 0; }
@@ -564,6 +997,7 @@ static int in_table(CTX);
    a mode treats it apart, the rest reprocessed */
 static void characters(CTX, const char *s, size_t n);
 
+/* characters in body: U+0000 dropped, the rest inserted */
 static int in_body_chars(CTX, const char *s, size_t n) {
     vector<char> keep;
     for (size_t i = 0; i < n; i++) if (s[i] != 0) push_back(keep, s[i]);
@@ -579,31 +1013,29 @@ static void characters(CTX, const char *s, size_t n) {
         if (c->skip_lf) { c->skip_lf = 0; if (s[0] == '\n') { s++; n--; continue; } }
         size_t ws = ws_prefix(s, n);
         int m = c->mode;
-        if (m == M_INITIAL || m == M_BEFORE_HTML || m == M_BEFORE_HEAD || m == M_AFTER_AFTER_BODY || m == M_AFTER_AFTER_FRAMESET) {
-            if (ws) {
-                if (m == M_AFTER_AFTER_BODY || m == M_AFTER_AFTER_FRAMESET) { c->mode = M_IN_BODY; in_body_chars(ARGS, s, ws); c->mode = m; }
-                s += ws; n -= ws;
-            } else if (m == M_INITIAL) { html_terr(ARGS); c->quirks = 1; c->mode = M_BEFORE_HTML; }
+        if (m == M_INITIAL || m == M_BEFORE_HTML || m == M_BEFORE_HEAD) {
+            if (ws) { s += ws; n -= ws; }
+            else if (m == M_INITIAL) { html_terr(ARGS); c->quirks = 1; c->mode = M_BEFORE_HTML; }
             else if (m == M_BEFORE_HTML) { insert_html_root(ARGS); c->mode = M_BEFORE_HEAD; }
-            else if (m == M_BEFORE_HEAD) { c->head = insert_implied(ARGS, "head", T_HEAD); c->mode = M_IN_HEAD; }
-            else if (m == M_AFTER_AFTER_FRAMESET) { html_terr(ARGS); n = 0; }
+            else { c->head = insert_implied(ARGS, "head", T_HEAD); c->mode = M_IN_HEAD; }
+        } else if (m == M_AFTER_AFTER_BODY || m == M_AFTER_AFTER_FRAMESET || m == M_AFTER_BODY) {
+            /* white space in body; anything else in body (after body), or ignored (after after frameset) */
+            if (ws) { in_body_chars(ARGS, s, ws); s += ws; n -= ws; }
+            else if (m == M_AFTER_AFTER_FRAMESET) { html_terr(ARGS); s++; n--; }
             else { html_terr(ARGS); c->mode = M_IN_BODY; }
         } else if (m == M_IN_HEAD || m == M_IN_HEAD_NOSCRIPT || m == M_AFTER_HEAD) {
             if (ws) { insert_text(ARGS, s, ws); s += ws; n -= ws; }
-            else {
-                if (m == M_IN_HEAD_NOSCRIPT) { html_terr(ARGS); st_pop(open); c->mode = M_IN_HEAD; }
-                if (c->mode == M_IN_HEAD) { st_pop(open); c->mode = M_AFTER_HEAD; }
-                insert_implied(ARGS, "body", T_BODY);
-                c->mode = M_IN_BODY;
-            }
-        } else if (m == M_IN_BODY || m == M_IN_CAPTION || m == M_IN_CELL) {
+            else if (m == M_IN_HEAD_NOSCRIPT) { html_terr(ARGS); st_pop(open); c->mode = M_IN_HEAD; }
+            else if (m == M_IN_HEAD) { st_pop(open); c->mode = M_AFTER_HEAD; }
+            else { insert_implied(ARGS, "body", T_BODY); c->mode = M_IN_BODY; }
+        } else if (m == M_IN_BODY || m == M_IN_CAPTION || m == M_IN_CELL || m == M_IN_TEMPLATE) {
             in_body_chars(ARGS, s, n);
             n = 0;
         } else if (m == M_TEXT) {
             insert_text(ARGS, s, n);
             n = 0;
         } else if (m == M_IN_TABLE || m == M_IN_TABLE_BODY || m == M_IN_ROW) {
-            if (IN(cur_tag(open), T_TABLE, T_TBODY, T_TFOOT, T_THEAD, T_TR)) {
+            if (IN(cur_tag(open), T_TABLE, T_TBODY, T_TEMPLATE, T_TFOOT, T_THEAD, T_TR)) {
                 clear(pend);
                 c->orig_mode = m;
                 c->mode = M_IN_TABLE_TEXT;
@@ -617,21 +1049,25 @@ static void characters(CTX, const char *s, size_t n) {
             n = 0;
         } else if (m == M_IN_COLUMN_GROUP) {
             if (ws) { insert_text(ARGS, s, ws); s += ws; n -= ws; }
-            else if (cur_tag(open) != T_COLGROUP) { html_terr(ARGS); n = 0; }
+            else if (cur_tag(open) != T_COLGROUP) { html_terr(ARGS); s++; n--; }
             else { st_pop(open); c->mode = M_IN_TABLE; }
-        } else if (m == M_IN_SELECT || m == M_IN_SELECT_IN_TABLE) {
-            vector<char> keep;
-            for (size_t i = 0; i < n; i++) if (s[i] != 0) push_back(keep, s[i]);
-            insert_text(ARGS, data(keep), len(keep));
-            n = 0;
-        } else if (m == M_AFTER_BODY) {
-            if (ws) { c->mode = M_IN_BODY; in_body_chars(ARGS, s, ws); c->mode = m; s += ws; n -= ws; }
-            else { html_terr(ARGS); c->mode = M_IN_BODY; }
         } else if (m == M_IN_FRAMESET || m == M_AFTER_FRAMESET) {
             for (size_t i = 0; i < n; i++) { if (is_ws(s[i])) insert_text(ARGS, s + i, 1); else html_terr(ARGS); }
             n = 0;
         } else n = 0;
     }
+}
+
+/* characters in foreign content: U+0000 as U+FFFD, the rest inserted */
+static void foreign_chars(CTX, const char *s, size_t n) {
+    vector<char> t;
+    int any = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == 0) { html_terr(ARGS); push_back(t, (char)0xEF); push_back(t, (char)0xBF); push_back(t, (char)0xBD); }
+        else { push_back(t, s[i]); if (!is_ws(s[i])) any = 1; }
+    }
+    insert_text(ARGS, data(t), len(t));
+    if (any) c->frameset_ok = 0;
 }
 
 /* in table text, at the token after the characters: the pending text inserted, or
@@ -662,7 +1098,7 @@ static void any_other_end_tag(CTX, int tag, uint32_t atom) {
             while (st_len(open) > i) st_pop(open);
             return;
         }
-        if (html_special((int)e.tag)) { html_terr(ARGS); return; }
+        if (e.flags & F_SPECIAL) { html_terr(ARGS); return; }
     }
 }
 
@@ -671,29 +1107,33 @@ static uint32_t tok_atom(const dom_document *d, const html_parser *p, uint32_t t
     return names_find(d, bytes_ptr(p, s), s.len);
 }
 
+/* the attributes of the token added to an element that lacks them (html, body) */
+static void merge_attrs(CTX, dom_node_h h, uint32_t t) {
+    for (uint32_t a = p->token[t].first_attr; a; a = p->tattr[a].next) {
+        amb_span an = p->tattr[a].name, av = p->tattr[a].value;
+        uint32_t atom = names_find(d, bytes_ptr(p, an), an.len);
+        int has = 0;
+        for (uint32_t x = d->node[h.index].first_attr; x; x = d->attr[x].next) if (atom && d->attr[x].name == atom) has = 1;
+        if (!has) dom_set_attribute(d, h, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len);
+    }
+}
+
 static int in_body(CTX) {
     uint32_t t = c->tok;
     html_token_kind k = tk_kind(p, t);
     if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment(ARGS, t); return 0; }
     if (k == HTML_TOKEN_KIND_DOCTYPE) { html_terr(ARGS); return 0; }
     if (k == HTML_TOKEN_KIND_EOF) {
-        /* stop parsing (template insertion modes are not kept) */
+        if (len(*tmodes)) return process(ARGS, M_IN_TEMPLATE);
         c->stopped = 1;
         return 0;
     }
-    int tag = tk_tag(p, t);
+    int tag = c->tag;
     if (k == HTML_TOKEN_KIND_START_TAG) {
         if (tag == T_HTML) {
             html_terr(ARGS);
             if (st_has_tag(open, T_TEMPLATE)) return 0;
-            dom_node_h h = st_at(open, 0).node;
-            for (uint32_t a = p->token[t].first_attr; a; a = p->tattr[a].next) {
-                amb_span an = p->tattr[a].name, av = p->tattr[a].value;
-                uint32_t atom = names_find(d, bytes_ptr(p, an), an.len);
-                int has = 0;
-                for (uint32_t x = d->node[h.index].first_attr; x; x = d->attr[x].next) if (atom && d->attr[x].name == atom) has = 1;
-                if (!has) dom_set_attribute(d, h, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len);
-            }
+            merge_attrs(ARGS, st_at(open, 0).node, t);
             return 0;
         }
         if (IN(tag, T_BASE, T_BASEFONT, T_BGSOUND, T_LINK, T_META, T_NOFRAMES, T_SCRIPT, T_STYLE, T_TEMPLATE, T_TITLE))
@@ -702,14 +1142,7 @@ static int in_body(CTX) {
             html_terr(ARGS);
             if (st_len(open) < 2 || (int)st_at(open, 1).tag != T_BODY || st_has_tag(open, T_TEMPLATE)) return 0;
             c->frameset_ok = 0;
-            dom_node_h b = st_at(open, 1).node;
-            for (uint32_t a = p->token[t].first_attr; a; a = p->tattr[a].next) {
-                amb_span an = p->tattr[a].name, av = p->tattr[a].value;
-                uint32_t atom = names_find(d, bytes_ptr(p, an), an.len);
-                int has = 0;
-                for (uint32_t x = d->node[b.index].first_attr; x; x = d->attr[x].next) if (atom && d->attr[x].name == atom) has = 1;
-                if (!has) dom_set_attribute(d, b, bytes_ptr(p, an), an.len, bytes_ptr(p, av), av.len);
-            }
+            merge_attrs(ARGS, st_at(open, 1).node, t);
             return 0;
         }
         if (tag == T_FRAMESET) {
@@ -753,14 +1186,15 @@ static int in_body(CTX) {
         if (IN(tag, T_LI, T_DD, T_DT)) {
             c->frameset_ok = 0;
             for (size_t i = st_len(open); i-- > 0;) {
-                int nt = (int)st_at(open, i).tag;
+                html_open e = st_at(open, i);
+                int nt = (int)e.tag;
                 if ((tag == T_LI && nt == T_LI) || (tag != T_LI && (nt == T_DD || nt == T_DT))) {
                     implied_end_tags(open, nt);
                     if (cur_tag(open) != nt) html_terr(ARGS);
                     st_pop_until(open, nt);
                     break;
                 }
-                if (html_special(nt) && !IN(nt, T_ADDRESS, T_DIV, T_P)) break;
+                if ((e.flags & F_SPECIAL) && !IN(nt, T_ADDRESS, T_DIV, T_P)) break;
             }
             if (in_scope(open, T_P, 0, SC_BUTTON)) close_p(ARGS);
             insert_element(ARGS, t);
@@ -769,6 +1203,7 @@ static int in_body(CTX) {
         if (tag == T_PLAINTEXT) {
             if (in_scope(open, T_P, 0, SC_BUTTON)) close_p(ARGS);
             insert_element(ARGS, t);
+            c->tz_state = HTML_TZ_PLAINTEXT;
             return 0;
         }
         if (tag == T_BUTTON) {
@@ -840,6 +1275,8 @@ static int in_body(CTX) {
             return 0;
         }
         if (tag == T_INPUT) {
+            if (c->fragment && c->ctx_tag == T_SELECT) { html_terr(ARGS); return 0; }
+            if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) { html_terr(ARGS); st_pop_until(open, T_SELECT); }
             reconstruct_afe(ARGS);
             insert_element(ARGS, t);
             st_pop(open);
@@ -850,6 +1287,10 @@ static int in_body(CTX) {
         if (IN(tag, T_PARAM, T_SOURCE, T_TRACK)) { insert_element(ARGS, t); st_pop(open); return 0; }
         if (tag == T_HR) {
             if (in_scope(open, T_P, 0, SC_BUTTON)) close_p(ARGS);
+            if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) {
+                implied_end_tags(open, -1);
+                if (in_scope(open, T_OPTION, 0, SC_DEFAULT) || in_scope(open, T_OPTGROUP, 0, SC_DEFAULT)) html_terr(ARGS);
+            }
             insert_element(ARGS, t);
             st_pop(open);
             c->frameset_ok = 0;
@@ -872,6 +1313,7 @@ static int in_body(CTX) {
         if (tag == T_TEXTAREA) {
             insert_element(ARGS, t);
             c->skip_lf = 1;
+            c->tz_state = HTML_TZ_RCDATA;
             c->frameset_ok = 0;
             c->orig_mode = c->mode;
             c->mode = M_TEXT;
@@ -881,20 +1323,33 @@ static int in_body(CTX) {
             if (in_scope(open, T_P, 0, SC_BUTTON)) close_p(ARGS);
             reconstruct_afe(ARGS);
             c->frameset_ok = 0;
-            generic_text_element(ARGS, t);
+            generic_text_element(ARGS, t, HTML_TZ_RAWTEXT);
             return 0;
         }
-        if (tag == T_IFRAME) { c->frameset_ok = 0; generic_text_element(ARGS, t); return 0; }
-        if (tag == T_NOEMBED) { generic_text_element(ARGS, t); return 0; }
+        if (tag == T_IFRAME) { c->frameset_ok = 0; generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
+        if (tag == T_NOEMBED) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
         if (tag == T_SELECT) {
+            if (c->fragment && c->ctx_tag == T_SELECT) { html_terr(ARGS); return 0; }
+            if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) { html_terr(ARGS); st_pop_until(open, T_SELECT); return 0; }
             reconstruct_afe(ARGS);
             insert_element(ARGS, t);
             c->frameset_ok = 0;
-            c->mode = IN(c->mode, M_IN_TABLE, M_IN_CAPTION, M_IN_TABLE_BODY, M_IN_ROW, M_IN_CELL) ? M_IN_SELECT_IN_TABLE : M_IN_SELECT;
             return 0;
         }
-        if (IN(tag, T_OPTGROUP, T_OPTION)) {
-            if (cur_tag(open) == T_OPTION) st_pop(open);
+        if (tag == T_OPTION) {
+            if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) {
+                implied_end_tags(open, T_OPTGROUP);
+                if (in_scope(open, T_OPTION, 0, SC_DEFAULT)) html_terr(ARGS);
+            } else if (cur_tag(open) == T_OPTION) st_pop(open);
+            reconstruct_afe(ARGS);
+            insert_element(ARGS, t);
+            return 0;
+        }
+        if (tag == T_OPTGROUP) {
+            if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) {
+                implied_end_tags(open, -1);
+                if (in_scope(open, T_OPTION, 0, SC_DEFAULT) || in_scope(open, T_OPTGROUP, 0, SC_DEFAULT)) html_terr(ARGS);
+            } else if (cur_tag(open) == T_OPTION) st_pop(open);
             reconstruct_afe(ARGS);
             insert_element(ARGS, t);
             return 0;
@@ -915,6 +1370,12 @@ static int in_body(CTX) {
             insert_element(ARGS, t);
             return 0;
         }
+        if (tag == T_MATH || tag == T_SVG) {
+            reconstruct_afe(ARGS);
+            insert_foreign(ARGS, t, tag == T_MATH ? DOM_NAMESPACE_MATHML : DOM_NAMESPACE_SVG);
+            if (p->token[t].self_closing) st_pop(open);
+            return 0;
+        }
         if (IN(tag, T_CAPTION, T_COL, T_COLGROUP, T_FRAME, T_HEAD, T_TBODY, T_TD, T_TFOOT, T_TH, T_THEAD, T_TR)) {
             html_terr(ARGS);
             return 0;
@@ -922,7 +1383,6 @@ static int in_body(CTX) {
         /* any other start tag */
         reconstruct_afe(ARGS);
         insert_element(ARGS, t);
-        if (p->token[t].self_closing && (tag == T_MATH || tag == T_SVG)) st_pop(open);
         return 0;
     }
     /* end tags */
@@ -934,7 +1394,7 @@ static int in_body(CTX) {
     }
     if (IN(tag, T_ADDRESS, T_ARTICLE, T_ASIDE, T_BLOCKQUOTE, T_BUTTON, T_CENTER, T_DETAILS, T_DIALOG, T_DIR,
            T_DIV, T_DL, T_FIELDSET, T_FIGCAPTION, T_FIGURE, T_FOOTER, T_HEADER, T_HGROUP, T_LISTING, T_MAIN,
-           T_MENU, T_NAV, T_OL, T_PRE, T_SEARCH, T_SECTION, T_SUMMARY, T_UL)) {
+           T_MENU, T_NAV, T_OL, T_PRE, T_SEARCH, T_SECTION, T_SELECT, T_SUMMARY, T_UL)) {
         if (!in_scope(open, tag, 0, SC_DEFAULT)) { html_terr(ARGS); return 0; }
         implied_end_tags(open, -1);
         if (cur_tag(open) != tag) html_terr(ARGS);
@@ -947,7 +1407,7 @@ static int in_body(CTX) {
             dom_node_h none = { 0, 0, 0 };
             c->form = none;
             int fi = f.index ? st_index_of_node(open, f) : -1;
-            if (fi < 0 || !in_scope(open, T_FORM, 0, SC_DEFAULT)) { html_terr(ARGS); return 0; }
+            if (fi < 0 || !node_in_scope(open, f)) { html_terr(ARGS); return 0; }
             implied_end_tags(open, -1);
             if (st_top(open).node.index != f.index) html_terr(ARGS);
             st_remove_at(open, (size_t)fi);
@@ -1009,22 +1469,22 @@ static int in_body(CTX) {
     return 0;
 }
 
-static void clear_to_table_context(vector<html_open> *open, int kind) {
-    for (;;) {
-        int t = cur_tag(open);
-        if (t == T_HTML || t == T_TEMPLATE || t == T_UNKNOWN) return;
+/* clear the stack back to a table (kind 0), table body (1) or table row (2) context */
+static void clear_to_table_context(vector<html_open> *s, int kind) {
+    while (st_len(s) > 1) {
+        int t = cur_tag(s);
+        if (t == T_HTML || t == T_TEMPLATE) return;
         if (kind == 0 && t == T_TABLE) return;
         if (kind == 1 && IN(t, T_TBODY, T_TFOOT, T_THEAD)) return;
         if (kind == 2 && t == T_TR) return;
-        if (st_len(open) <= 1) return;
-        st_pop(open);
+        st_pop(s);
     }
 }
 
 static int in_table(CTX) {
     uint32_t t = c->tok;
     html_token_kind k = tk_kind(p, t);
-    int tag = k == HTML_TOKEN_KIND_START_TAG || k == HTML_TOKEN_KIND_END_TAG ? tk_tag(p, t) : T_UNKNOWN;
+    int tag = c->tag;
     if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment(ARGS, t); return 0; }
     if (k == HTML_TOKEN_KIND_DOCTYPE) { html_terr(ARGS); return 0; }
     if (k == HTML_TOKEN_KIND_START_TAG) {
@@ -1070,6 +1530,14 @@ static int in_table(CTX) {
     int r = process(ARGS, M_IN_BODY);
     c->foster = 0;
     return r;
+}
+
+/* the in template insertion mode's switch to another, for the rest of the template */
+static int template_switch(CTX, int mode) {
+    if (len(*tmodes)) pop_back(tmodes);
+    push_back(tmodes, mode);
+    c->mode = mode;
+    return 1;
 }
 
 /* 13.2.6.4.1: the doctype that puts the document in quirks mode */
@@ -1128,7 +1596,7 @@ static int doctype_quirks(const html_parser *p, uint32_t t) {
 static int process(CTX, int mode) {
     uint32_t t = c->tok;
     html_token_kind k = tk_kind(p, t);
-    int tag = k == HTML_TOKEN_KIND_START_TAG || k == HTML_TOKEN_KIND_END_TAG ? tk_tag(p, t) : T_UNKNOWN;
+    int tag = c->tag;
     int start = k == HTML_TOKEN_KIND_START_TAG, end = k == HTML_TOKEN_KIND_END_TAG;
     switch (mode) {
     case M_INITIAL:
@@ -1312,57 +1780,26 @@ static int process(CTX, int mode) {
             return 1;
         }
         return process(ARGS, M_IN_BODY);
-    case M_IN_SELECT:
-    case M_IN_SELECT_IN_TABLE:
-        if (mode == M_IN_SELECT_IN_TABLE) {
-            if (start && IN(tag, T_CAPTION, T_TABLE, T_TBODY, T_TFOOT, T_THEAD, T_TR, T_TD, T_TH)) {
-                html_terr(ARGS); st_pop_until(open, T_SELECT); reset_insertion_mode(ARGS); return 1;
-            }
-            if (end && IN(tag, T_CAPTION, T_TABLE, T_TBODY, T_TFOOT, T_THEAD, T_TR, T_TD, T_TH)) {
-                html_terr(ARGS);
-                if (!in_scope(open, tag, 0, SC_TABLE)) return 0;
-                st_pop_until(open, T_SELECT); reset_insertion_mode(ARGS); return 1;
-            }
-        }
-        if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment(ARGS, t); return 0; }
-        if (k == HTML_TOKEN_KIND_DOCTYPE) { html_terr(ARGS); return 0; }
-        if (start && tag == T_HTML) return process(ARGS, M_IN_BODY);
-        if (start && tag == T_OPTION) { if (cur_tag(open) == T_OPTION) st_pop(open); insert_element(ARGS, t); return 0; }
-        if (start && tag == T_OPTGROUP) {
-            if (cur_tag(open) == T_OPTION) st_pop(open);
-            if (cur_tag(open) == T_OPTGROUP) st_pop(open);
-            insert_element(ARGS, t);
-            return 0;
-        }
-        if (start && tag == T_HR) {
-            if (cur_tag(open) == T_OPTION) st_pop(open);
-            if (cur_tag(open) == T_OPTGROUP) st_pop(open);
-            insert_element(ARGS, t); st_pop(open);
-            return 0;
-        }
-        if (end && tag == T_OPTGROUP) {
-            if (cur_tag(open) == T_OPTION && st_len(open) >= 2 && (int)st_at(open, st_len(open) - 2).tag == T_OPTGROUP) st_pop(open);
-            if (cur_tag(open) == T_OPTGROUP) st_pop(open); else html_terr(ARGS);
-            return 0;
-        }
-        if (end && tag == T_OPTION) { if (cur_tag(open) == T_OPTION) st_pop(open); else html_terr(ARGS); return 0; }
-        if (end && tag == T_SELECT) {
-            if (!in_scope(open, T_SELECT, 0, SC_SELECT)) { html_terr(ARGS); return 0; }
-            st_pop_until(open, T_SELECT); reset_insertion_mode(ARGS); return 0;
-        }
-        if (start && tag == T_SELECT) {
+    case M_IN_TEMPLATE:
+        if (k == HTML_TOKEN_KIND_COMMENT || k == HTML_TOKEN_KIND_DOCTYPE) return process(ARGS, M_IN_BODY);
+        if ((start && IN(tag, T_BASE, T_BASEFONT, T_BGSOUND, T_LINK, T_META, T_NOFRAMES, T_SCRIPT, T_STYLE, T_TEMPLATE, T_TITLE)) ||
+            (end && tag == T_TEMPLATE))
+            return process(ARGS, M_IN_HEAD);
+        if (start && IN(tag, T_CAPTION, T_COLGROUP, T_TBODY, T_TFOOT, T_THEAD)) return template_switch(ARGS, M_IN_TABLE);
+        if (start && tag == T_COL) return template_switch(ARGS, M_IN_COLUMN_GROUP);
+        if (start && tag == T_TR) return template_switch(ARGS, M_IN_TABLE_BODY);
+        if (start && IN(tag, T_TD, T_TH)) return template_switch(ARGS, M_IN_ROW);
+        if (start) return template_switch(ARGS, M_IN_BODY);
+        if (end) { html_terr(ARGS); return 0; }
+        if (k == HTML_TOKEN_KIND_EOF) {
+            if (!st_has_tag(open, T_TEMPLATE)) { c->stopped = 1; return 0; }
             html_terr(ARGS);
-            if (!in_scope(open, T_SELECT, 0, SC_SELECT)) return 0;
-            st_pop_until(open, T_SELECT); reset_insertion_mode(ARGS); return 0;
+            st_pop_until(open, T_TEMPLATE);
+            afe_clear_to_marker(afe);
+            if (len(*tmodes)) pop_back(tmodes);
+            reset_insertion_mode(ARGS);
+            return 1;
         }
-        if (start && IN(tag, T_INPUT, T_KEYGEN, T_TEXTAREA)) {
-            html_terr(ARGS);
-            if (!in_scope(open, T_SELECT, 0, SC_SELECT)) return 0;
-            st_pop_until(open, T_SELECT); reset_insertion_mode(ARGS); return 1;
-        }
-        if ((start && IN(tag, T_SCRIPT, T_TEMPLATE)) || (end && tag == T_TEMPLATE)) return process(ARGS, M_IN_HEAD);
-        if (k == HTML_TOKEN_KIND_EOF) return process(ARGS, M_IN_BODY);
-        html_terr(ARGS);
         return 0;
     case M_AFTER_BODY:
         if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment_in(ARGS, st_at(open, 0).node, t); return 0; }
@@ -1417,28 +1854,121 @@ static int process(CTX, int mode) {
     }
 }
 
-/* every token of the table, in order, through the modes */
+/* ---- foreign content (13.2.6.5) ---- */
+
+/* the element's name, ASCII-lowercased, is the token's tag name */
+static int open_named_ci(const dom_document *d, const html_parser *p, html_open e, uint32_t t) {
+    amb_span s = p->token[t].name;
+    if (names_len(d, e.atom) != s.len) return 0;
+    const char *a = names_ptr(d, e.atom);
+    const char *b = bytes_ptr(p, s);
+    for (uint32_t i = 0; i < s.len; i++) {
+        char x = a[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+        if (x != b[i]) return 0;
+    }
+    return 1;
+}
+
+static int in_foreign(CTX) {
+    uint32_t t = c->tok;
+    html_token_kind k = tk_kind(p, t);
+    int tag = c->tag;
+    if (k == HTML_TOKEN_KIND_COMMENT) { insert_comment(ARGS, t); return 0; }
+    if (k == HTML_TOKEN_KIND_DOCTYPE) { html_terr(ARGS); return 0; }
+    /* the start tags of HTML's structure, and the end tags br and p, leave foreign content */
+    if ((k == HTML_TOKEN_KIND_START_TAG &&
+         (html_breakout(tag) || (tag == T_FONT && (tk_attr(p, t, "color") || tk_attr(p, t, "face") || tk_attr(p, t, "size"))))) ||
+        (k == HTML_TOKEN_KIND_END_TAG && (tag == T_BR || tag == T_P))) {
+        html_terr(ARGS);
+        while (st_len(open) > 1) {
+            html_open e = st_top(open);
+            if (e.ns == DOM_NAMESPACE_HTML || (e.flags & (F_MATHML_TIP | F_HTML_IP))) break;
+            st_pop(open);
+        }
+        return process(ARGS, c->mode);
+    }
+    if (k == HTML_TOKEN_KIND_START_TAG) {
+        int ns = adjusted_current(c).ns;
+        insert_foreign(ARGS, t, ns);
+        /* self-closing: popped (an SVG script's end tag would pop it too) */
+        if (p->token[t].self_closing) st_pop(open);
+        return 0;
+    }
+    if (k == HTML_TOKEN_KIND_END_TAG) {
+        html_open cur = st_top(open);
+        if (tk_name_is(p, t, "script") && cur.ns == DOM_NAMESPACE_SVG && names_is(d, cur.atom, "script", 6)) { st_pop(open); return 0; }
+        /* any other end tag */
+        size_t i = st_len(open) - 1;
+        html_open e = cur;
+        if (!open_named_ci(d, p, e, t)) html_terr(ARGS);
+        for (;;) {
+            if (i == 0) return 0;
+            if (open_named_ci(d, p, e, t)) { while (st_len(open) > i) st_pop(open); return 0; }
+            i--;
+            e = st_at(open, i);
+            if (e.ns != DOM_NAMESPACE_HTML) continue;
+            return process(ARGS, c->mode);
+        }
+    }
+    return 0;
+}
+
+/* 13.2.6: the tree construction dispatcher -- the token goes to HTML content's
+   rules (its insertion mode's) unless the adjusted current node is foreign and
+   no integration point takes it */
+static int html_content(CTX) {
+    if (st_len(open) == 0) return 1;
+    html_open a = adjusted_current(c);
+    if (a.ns == DOM_NAMESPACE_HTML) return 1;
+    html_token_kind k = tk_kind(p, c->tok);
+    if (k == HTML_TOKEN_KIND_EOF) return 1;
+    int start = k == HTML_TOKEN_KIND_START_TAG, chars = k == HTML_TOKEN_KIND_CHARACTERS;
+    if ((a.flags & F_MATHML_TIP) && (chars || (start && !tk_name_is(p, c->tok, "mglyph") && !tk_name_is(p, c->tok, "malignmark"))))
+        return 1;
+    if ((a.flags & F_ANNOTATION_XML) && start && c->tag == T_SVG) return 1;
+    if ((a.flags & F_HTML_IP) && (start || chars)) return 1;
+    return 0;
+}
+
+static int dispatch(CTX) { return html_content(ARGS) ? process(ARGS, c->mode) : in_foreign(ARGS); }
+
+/* the tokens of the table not yet built, in order, through the dispatcher */
 static void run_tokens(CTX) {
-    for (uint32_t t = 1; t < p->token_len && !c->stopped; t++) {
+    for (uint32_t t = c->next; t < p->token_len && !c->stopped; t++) {
+        c->next = t + 1;
         if (!p->token[t].live) continue;
         c->tok = t;
-        if (tk_kind(p, t) == HTML_TOKEN_KIND_CHARACTERS) {
+        html_token_kind k = tk_kind(p, t);
+        c->tag = k == HTML_TOKEN_KIND_START_TAG || k == HTML_TOKEN_KIND_END_TAG ? tk_tag(p, t) : T_UNKNOWN;
+        if (k == HTML_TOKEN_KIND_CHARACTERS) {
             amb_span s = p->token[t].data;
             vector<char> text;
             append_range(text, bytes_ptr(p, s), s.len);
-            characters(ARGS, data(text), len(text));
+            if (html_content(ARGS)) characters(ARGS, data(text), len(text));
+            else foreign_chars(ARGS, data(text), len(text));
             continue;
         }
         flush_table_text(ARGS);
-        if (tk_kind(p, t) != HTML_TOKEN_KIND_CHARACTERS) c->skip_lf = 0;
-        for (int guard = 0; guard < 64 && process(ARGS, c->mode); guard++) {}
+        c->skip_lf = 0;
+        /* a token is reprocessed a few times, or, at the end of the input in nested
+           templates, once a template popped: past that, a builder's fault ends it */
+        size_t guard = 64 + st_len(open);
+        while (dispatch(ARGS) && guard-- > 0) {}
+        if (len(*opts)) options_popped(ARGS);
     }
 }
 
+/* 13.2.7, the end: every node popped off the stack */
+static void pop_all(CTX) {
+    clear(open);
+    if (len(*opts)) options_popped(ARGS);
+}
+
 /* the builder's parse errors, as records of the store */
-static void record_errors(html_parser *p, const vector<uint32_t> *errs) {
-    for (size_t i = 0; i < len(*errs); i++) {
-        uint32_t t = at(*errs, i);
+static void record_errors(html_parser *p, const vector<uint32_t> *toks) {
+    for (size_t i = 0; i < len(*toks); i++) {
+        uint32_t t = at(*toks, i);
         uint32_t line = t && t < p->token_len ? p->token[t].line : 0, col = t && t < p->token_len ? p->token[t].col : 0;
         html_error_h e = error_new(p);
         p->error[e.index].code = HTML_ERROR_CODE_TREE_CONSTRUCTION;
@@ -1447,58 +1977,112 @@ static void record_errors(html_parser *p, const vector<uint32_t> *errs) {
     }
 }
 
-static void init_ctx(html_ctx *c) {
+static void init_tb(html_tb *c) {
     memset(c, 0, sizeof *c);
     c->mode = M_INITIAL;
     c->frameset_ok = 1;
+    c->next = 1;
+}
+
+/* the document built as the tokenizer reads in[0..n): each run of the tokenizer
+   stops where the tree builder decides what it reads next, the tokens so far
+   are built, and the next run goes on as the tree builder says */
+static void build_driven(html_parser *p, dom_document *d, html_tb *c, const char *in, size_t n, html_tz *z) {
+    for (;;) {
+        html_tokenize_run(p, in, n, z);
+        run_tokens(ARGS);
+        if (z->stop == HTML_TZ_END || c->stopped) break;
+        if (z->stop == HTML_TZ_TAG) {
+            z->state = c->tz_state;
+            c->tz_state = HTML_TZ_DATA;
+        } else z->cdata = st_len(open) > 0 && adjusted_current(c).ns != DOM_NAMESPACE_HTML;
+    }
+    pop_all(ARGS);
+    record_errors(p, errs);
 }
 
 html_status html_build(html_parser *p, dom_document *d) {
-    html_ctx ctx;
-    vector<html_open> open, afe;
-    vector<char> pend;
-    vector<uint32_t> errs;
-    init_ctx(&ctx);
-    run_tokens(d, p, &ctx, &open, &afe, &pend, &errs);
-    record_errors(p, &errs);
+    html_tb tb;
+    init_tb(&tb);
+    defer(tb) { HTML_TB_DROP(tb); }
+    run_tokens(d, p, &tb);
+    pop_all(d, p, &tb);
+    record_errors(p, &tb.l_errs);
     return HTML_OK;
 }
 
+/* the token table of src alone: no tree builder answers, so the tokenizer
+   switches as HTML content would and reads no CDATA section */
 html_status html_tokenize(html_parser *p, const char *src, size_t src_len) {
-    return html_tokenize_in(p, src, src_len, 0, "", 0);
+    vector<char> norm;
+    resize(norm, src_len);
+    size_t n = html_normalize_newlines(src, src_len, data(norm));
+    html_tz z;
+    html_tz_start(&z, HTML_TZ_DATA, 0);
+    return html_tokenize_run(p, data(norm), n, &z);
 }
 
-html_status html_parse(html_parser *p, dom_document *doc, const char *src, size_t src_len) {
-    html_status st = html_tokenize(p, src, src_len);
-    if (st != HTML_OK) return st;
-    return html_build(p, doc);
+/* the input's newlines normalized into norm when it has a CR (1); else there
+   is nothing to normalize (0) */
+static int normalized(const char *src, size_t src_len, vector<char> *norm, size_t *n) {
+    *n = src_len;
+    if (!src_len || !memchr(src, '\r', src_len)) return 0;
+    resize(norm, src_len);
+    *n = html_normalize_newlines(src, src_len, data(*norm));
+    return 1;
 }
 
-/* 13.4: the fragment parsing algorithm, the context an element of that name */
+html_status html_parse(html_parser *p, dom_document *d, const char *src, size_t src_len) {
+    vector<char> norm;
+    size_t n;
+    int copied = normalized(src, src_len, &norm, &n);
+    html_tb tb;
+    init_tb(&tb);
+    defer(tb) { HTML_TB_DROP(tb); }
+    html_tz z;
+    html_tz_start(&z, HTML_TZ_DATA, 1);
+    if (copied) build_driven(p, d, &tb, data(norm), n, &z);
+    else build_driven(p, d, &tb, src, n, &z);
+    return HTML_OK;
+}
+
+/* 13.4: the fragment parsing algorithm. The context element is named by its
+   local name in the HTML namespace, or by "svg NAME" or "math NAME" in SVG's or
+   MathML's (html5lib's notation); it stands for the adjusted current node while
+   the stack holds the root alone */
 html_status html_parse_fragment(html_parser *p, dom_document *d, const char *context, size_t context_len,
                                 const char *src, size_t src_len) {
-    int ctx_tag = html_tag_of(context, context_len);
-    int state = 0;
-    if (ctx_tag == T_TITLE || ctx_tag == T_TEXTAREA) state = 1;
-    else if (IN(ctx_tag, T_STYLE, T_XMP, T_IFRAME, T_NOEMBED, T_NOFRAMES)) state = 2;
-    else if (ctx_tag == T_SCRIPT) state = 3;
-    else if (ctx_tag == T_PLAINTEXT) state = 4;
-    html_status st = html_tokenize_in(p, src, src_len, state, context, context_len);
-    if (st != HTML_OK) return st;
-    html_ctx ctx;
-    vector<html_open> open, afe;
-    vector<char> pend;
-    vector<uint32_t> errs;
-    init_ctx(&ctx);
-    ctx.fragment = 1;
-    ctx.ctx_tag = ctx_tag;
+    int ns = DOM_NAMESPACE_HTML;
+    const char *cn = context;
+    size_t cl = context_len;
+    if (cl > 4 && memcmp(cn, "svg ", 4) == 0) { ns = DOM_NAMESPACE_SVG; cn += 4; cl -= 4; }
+    else if (cl > 5 && memcmp(cn, "math ", 5) == 0) { ns = DOM_NAMESPACE_MATHML; cn += 5; cl -= 5; }
+    int ctx_tag = ns == DOM_NAMESPACE_HTML ? html_tag_of(cn, cl) : T_FOREIGN;
+    int state = HTML_TZ_DATA;
+    if (ctx_tag == T_TITLE || ctx_tag == T_TEXTAREA) state = HTML_TZ_RCDATA;
+    else if (IN(ctx_tag, T_STYLE, T_XMP, T_IFRAME, T_NOEMBED, T_NOFRAMES)) state = HTML_TZ_RAWTEXT;
+    else if (ctx_tag == T_SCRIPT) state = HTML_TZ_SCRIPT;
+    else if (ctx_tag == T_PLAINTEXT) state = HTML_TZ_PLAINTEXT;
+    vector<char> norm;
+    size_t n;
+    int copied = normalized(src, src_len, &norm, &n);
+    html_tb tb;
+    init_tb(&tb);
+    defer(tb) { HTML_TB_DROP(tb); }
+    tb.fragment = 1;
+    tb.ctx_tag = ctx_tag;
+    tb.ctx_ns = ns;
+    tb.ctx_flags = ns == DOM_NAMESPACE_HTML ? html_flags(ctx_tag) : foreign_flags(ns, cn, cl, 0);
     /* the root: an html element, its children the fragment's */
     dom_node_h root = dom_create_element(d, "html", 4);
-    push_back(open, open_entry(d, root, T_HTML, 0));
-    if (ctx_tag == T_FORM) ctx.form = root;
-    reset_insertion_mode(d, p, &ctx, &open, &afe, &pend, &errs);
-    run_tokens(d, p, &ctx, &open, &afe, &pend, &errs);
-    record_errors(p, &errs);
+    push_back(tb.l_open, open_entry(d, root, T_HTML, 0));
+    if (ctx_tag == T_TEMPLATE) push_back(tb.l_tmodes, M_IN_TEMPLATE);
+    if (ctx_tag == T_FORM) tb.form = root;
+    reset_insertion_mode(d, p, &tb);
+    html_tz z;
+    html_tz_start(&z, state, 1);
+    if (copied) build_driven(p, d, &tb, data(norm), n, &z);
+    else build_driven(p, d, &tb, src, n, &z);
     /* the fragment's nodes become the document node's children */
     for (dom_node_h ch = dom_children_first(d, root); ch.index; ch = dom_children_first(d, root)) {
         dom_remove_child(d, root, ch);

@@ -1,0 +1,4 @@
+20000 templates nested in each other's contents: 200011 bytes, 40006 nodes (0 foreign, 20000 fragments), depth 1024, 3 boxes; invariants: 0 broken
+6000 SVG and 6000 MathML elements nested: 54010 bytes, 12006 nodes (12000 foreign, 0 fragments), depth 513, 6 boxes; invariants: 0 broken
+5000 options nested under a selectedcontent: 60061 bytes, 30006 nodes (0 foreign, 0 fragments), depth 514, 4 boxes; invariants: 0 broken
+templates, tables, foreign content and selects, 300 deep: 21300 bytes, 3004 nodes (600 foreign, 300 fragments), depth 578, 4 boxes; invariants: 0 broken

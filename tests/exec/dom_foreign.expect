@@ -1,0 +1,61 @@
+ok   a div in the document: ok
+ok   a title to escape: ok
+ok   an SVG element is in the SVG namespace
+ok   an HTML element in the HTML namespace
+ok   viewBox, in no namespace: ok
+ok   xlink:href in XLink's: ok
+ok   set again by namespace and name: ok
+ok   one attribute of each name
+ok   the second is in the XLink namespace
+ok   the same qualified name in no namespace: ok
+ok   is another attribute
+ok   removed by its qualified name: ok
+ok   the first of the name went: XLink's
+ok   the other by the same name: ok
+ok   XLink's again: ok
+ok   an element in a namespace needs a name: invalid_name
+ok   the invariants hold
+ok   a template is made with its contents
+ok   whose host it is
+ok   an SVG template has none
+ok   a p into the contents: ok
+ok   the template into the div: ok
+ok   the template has no children of its own
+ok   the template into its own contents: has_parent
+ok   detached, into its own contents: would_cycle
+ok   before a child of its own contents: would_cycle
+ok   under a node of its own contents: would_cycle
+ok   the contents themselves into an element: wrong_kind
+ok   destroy the contents alone: wrong_kind
+amb_result('append_child', would_cycle, 38).
+ok   a request to put the template under its contents: would_cycle
+ok   the template back into the div: ok
+ok   the invariants hold
+ok   the div serialized as Chromium serializes it
+ok   the template: its contents
+ok   the contents alone
+-- the facts of namespaces and contents
+dom_namespace(n(1,3,0),svg).
+dom_namespace(n(1,4,0),svg).
+dom_namespace(n(1,7,0),svg).
+dom_namespace(n(1,9,0),svg).
+dom_template_content(n(1,13,0),n(1,14,0)).
+dom_node(n(1,14,0),fragment).
+dom_namespace(n(1,15,0),svg).
+dom_attr_namespace(n(1,3,0),'xlink:href',xlink).
+ok   destroy a template holding a template: ok
+ok   the two, their contents and the text all go
+ok   their handles are stale
+ok   the invariants hold
+-- the parser
+ok   an SVG style holds markup
+ok   not driven, its text is raw text
+ok   an HTML style's text is raw
+ok   CDATA in SVG is text
+ok   not driven, a bogus comment
+ok   CDATA in HTML content is a comment
+ok   an SVG title is no RCDATA, and an HTML integration point
+ok   names adjusted, attributes in their namespaces
+ok   a text integration point and an HTML one
+ok   a template's markup goes to its contents
+GREEN: 0 failure(s)

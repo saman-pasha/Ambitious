@@ -1,11 +1,13 @@
-/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:3c8be02d:6485). Do not edit. */
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:4815fe18:7612). Do not edit. */
 typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
-typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT } dom_node_kind;
-typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_SERIALIZE } dom_op;
+typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT, DOM_NODE_KIND_FRAGMENT } dom_node_kind;
+typedef enum dom_namespace { DOM_NAMESPACE_HTML, DOM_NAMESPACE_SVG, DOM_NAMESPACE_MATHML } dom_namespace;
+typedef enum dom_attr_namespace { DOM_ATTR_NAMESPACE_NULL, DOM_ATTR_NAMESPACE_XLINK, DOM_ATTR_NAMESPACE_XML, DOM_ATTR_NAMESPACE_XMLNS } dom_attr_namespace;
+typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_SERIALIZE } dom_op;
 typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
 typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
-typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; amb_span data; amb_span public_id; amb_span system_id; uint8_t doctype_ids; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; } dom_node;
-typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; amb_span value; uint32_t next; } dom_attr;
+typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; } dom_node;
+typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; dom_attr_namespace ns; amb_span value; uint32_t next; } dom_attr;
 typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint64_t revision; } dom_mutation;
 typedef struct dom_store_tag { char unused; } dom_store_tag;
 typedef store<dom_store_tag> dom_document;
@@ -13,10 +15,13 @@ extern const char dom_fingerprint[];
 const char *dom_status_name(dom_status x);
 const char *dom_op_name(dom_op x);
 const char *dom_node_kind_name(dom_node_kind x);
+const char *dom_namespace_name(dom_namespace x);
+const char *dom_attr_namespace_name(dom_attr_namespace x);
 void dom_init(dom_document *d, uint32_t id);
 uint64_t dom_revision(const dom_document *d);
 dom_node_h dom_root(const dom_document *d);
 dom_node_h dom_create_element(dom_document *d, const char *name, size_t name_len);
+dom_node_h dom_create_element_ns(dom_document *d, dom_namespace ns, const char *name, size_t name_len);
 dom_node_h dom_create_text(dom_document *d, const char *data, size_t data_len);
 dom_node_h dom_create_comment(dom_document *d, const char *data, size_t data_len);
 dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len, const char *public_id, size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids);
@@ -25,10 +30,12 @@ dom_status dom_insert_before(dom_document *d, dom_node_h parent, dom_node_h chil
 dom_status dom_remove_child(dom_document *d, dom_node_h parent, dom_node_h child);
 dom_status dom_destroy(dom_document *d, dom_node_h node);
 dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len);
+dom_status dom_set_attribute_ns(dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_remove_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_set_data(dom_document *d, dom_node_h node, const char *data, size_t data_len);
 dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len);
+dom_status dom_check_create_element_ns(const dom_document *d, dom_namespace ns, const char *name, size_t name_len);
 dom_status dom_check_create_text(const dom_document *d, const char *data, size_t data_len);
 dom_status dom_check_create_comment(const dom_document *d, const char *data, size_t data_len);
 dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len, const char *public_id, size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids);
@@ -37,6 +44,7 @@ dom_status dom_check_insert_before(const dom_document *d, dom_node_h parent, dom
 dom_status dom_check_remove_child(const dom_document *d, dom_node_h parent, dom_node_h child);
 dom_status dom_check_destroy(const dom_document *d, dom_node_h node);
 dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len);
+dom_status dom_check_set_attribute_ns(const dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_check_remove_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char *data, size_t data_len);
 dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out);
@@ -75,6 +83,7 @@ const char *dom_status_name(dom_status x) {
 const char *dom_op_name(dom_op x) {
     switch (x) {
     case DOM_OP_CREATE_ELEMENT: return "create_element";
+    case DOM_OP_CREATE_ELEMENT_NS: return "create_element_ns";
     case DOM_OP_CREATE_TEXT: return "create_text";
     case DOM_OP_CREATE_COMMENT: return "create_comment";
     case DOM_OP_CREATE_DOCTYPE: return "create_doctype";
@@ -83,6 +92,7 @@ const char *dom_op_name(dom_op x) {
     case DOM_OP_REMOVE_CHILD: return "remove_child";
     case DOM_OP_DESTROY: return "destroy";
     case DOM_OP_SET_ATTRIBUTE: return "set_attribute";
+    case DOM_OP_SET_ATTRIBUTE_NS: return "set_attribute_ns";
     case DOM_OP_REMOVE_ATTRIBUTE: return "remove_attribute";
     case DOM_OP_SET_DATA: return "set_data";
     case DOM_OP_SERIALIZE: return "serialize";
@@ -96,11 +106,29 @@ const char *dom_node_kind_name(dom_node_kind x) {
     case DOM_NODE_KIND_ELEMENT: return "element";
     case DOM_NODE_KIND_TEXT: return "text";
     case DOM_NODE_KIND_COMMENT: return "comment";
+    case DOM_NODE_KIND_FRAGMENT: return "fragment";
+    }
+    return "?";
+}
+const char *dom_namespace_name(dom_namespace x) {
+    switch (x) {
+    case DOM_NAMESPACE_HTML: return "html";
+    case DOM_NAMESPACE_SVG: return "svg";
+    case DOM_NAMESPACE_MATHML: return "mathml";
+    }
+    return "?";
+}
+const char *dom_attr_namespace_name(dom_attr_namespace x) {
+    switch (x) {
+    case DOM_ATTR_NAMESPACE_NULL: return "null";
+    case DOM_ATTR_NAMESPACE_XLINK: return "xlink";
+    case DOM_ATTR_NAMESPACE_XML: return "xml";
+    case DOM_ATTR_NAMESPACE_XMLNS: return "xmlns";
     }
     return "?";
 }
 
-const char dom_fingerprint[] = "fnv1a32:3c8be02d:6485";
+const char dom_fingerprint[] = "fnv1a32:4815fe18:7612";
 void dom_init(dom_document *d, uint32_t id) {
     if (d->node_len != 0) abort();
     d->id = id;
@@ -112,6 +140,12 @@ void dom_init(dom_document *d, uint32_t id) {
 uint64_t dom_revision(const dom_document *d) { return d->revision; }
 dom_node_h dom_root(const dom_document *d) { return node_handle(d, 1); }
 dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len)
+{
+    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
+    return DOM_OK;
+}
+
+dom_status dom_check_create_element_ns(const dom_document *d, dom_namespace ns, const char *name, size_t name_len)
 {
     if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
     return DOM_OK;
@@ -136,7 +170,7 @@ dom_status dom_check_append_child(const dom_document *d, dom_node_h parent, dom_
 {
     if (!node_live(d, parent)) return DOM_STALE_HANDLE;
     if (!node_live(d, child)) return DOM_STALE_HANDLE;
-    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_FRAGMENT)) return DOM_WRONG_KIND; }
     { dom_node_kind k = d->node[child.index].kind; if (!(k == DOM_NODE_KIND_DOCTYPE || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
     if (d->node[child.index].parent != 0) return DOM_HAS_PARENT;
     if (children_inclusive_ancestor(d, child.index, parent.index)) return DOM_WOULD_CYCLE;
@@ -148,7 +182,7 @@ dom_status dom_check_insert_before(const dom_document *d, dom_node_h parent, dom
     if (!node_live(d, parent)) return DOM_STALE_HANDLE;
     if (!node_live(d, child)) return DOM_STALE_HANDLE;
     if (!node_live(d, before)) return DOM_STALE_HANDLE;
-    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_FRAGMENT)) return DOM_WRONG_KIND; }
     { dom_node_kind k = d->node[child.index].kind; if (!(k == DOM_NODE_KIND_DOCTYPE || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
     if (d->node[child.index].parent != 0) return DOM_HAS_PARENT;
     if (d->node[before.index].parent != parent.index) return DOM_NOT_A_CHILD;
@@ -173,6 +207,14 @@ dom_status dom_check_destroy(const dom_document *d, dom_node_h node)
 }
 
 dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len)
+{
+    if (!node_live(d, element)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[element.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
+    return DOM_OK;
+}
+
+dom_status dom_check_set_attribute_ns(const dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len)
 {
     if (!node_live(d, element)) return DOM_STALE_HANDLE;
     { dom_node_kind k = d->node[element.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
@@ -291,12 +333,12 @@ int dom_check_invariants(const dom_document *d, FILE *report) {
     for (uint32_t o = 1; o < d->node_len; o++) {
         if (!d->node[o].live || !d->node[o].first_child) continue;
         dom_node_kind k = d->node[o].kind;
-        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "only_containers", o); }
+        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_FRAGMENT)) { bad++; amb_report(report, "dom", "only_containers", o); }
     }
     for (uint32_t i = 1; i < d->node_len; i++) {
         if (!d->node[i].live || !d->node[i].parent || d->node[i].parent >= d->node_len) continue;
         dom_node_kind k = d->node[d->node[i].parent].kind;
-        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "only_containers", i); }
+        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_FRAGMENT)) { bad++; amb_report(report, "dom", "only_containers", i); }
     }
     /* attr_links */
     {
@@ -353,6 +395,14 @@ int dom_check_invariants(const dom_document *d, FILE *report) {
             uint32_t r = d->node[i].first_attr;
             if (d->node[i].live && r && (r >= d->attr_len || !d->attr[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].content;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].host;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
         for (uint32_t i = 1; i < d->attr_len; i++) {
             uint32_t r = d->attr[i].owner;
             if (d->attr[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
@@ -376,10 +426,13 @@ void dom_export(const dom_document *d, FILE *out) {
         if (d->node[i].parent != 0) { fputs("dom_parent(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].parent; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
         if (d->node[i].next_sibling != 0) { fputs("dom_next_sibling(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].next_sibling; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
         if (d->node[i].first_child != 0) { fputs("dom_first_child(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].first_child; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if ((d->node[i].kind == DOM_NODE_KIND_ELEMENT) && (d->node[i].ns != DOM_NAMESPACE_HTML)) { fputs("dom_namespace(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); fputs(dom_namespace_name(d->node[i].ns), out); fputs(").\n", out); }
+        if (d->node[i].content != 0) { fputs("dom_template_content(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].content; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->attr_len; i++) {
         if (!d->attr[i].live) continue;
         if (1) { fputs("dom_attr(", out); { uint32_t r = d->attr[i].owner; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); names_put(d, out, d->attr[i].name); fputs(",", out); text_put(d, out, d->attr[i].value); fputs(").\n", out); }
+        if (d->attr[i].ns != DOM_ATTR_NAMESPACE_NULL) { fputs("dom_attr_namespace(", out); { uint32_t r = d->attr[i].owner; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); names_put(d, out, d->attr[i].name); fputs(",", out); fputs(dom_attr_namespace_name(d->attr[i].ns), out); fputs(").\n", out); }
     }
 }
 dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -484,7 +537,7 @@ dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch
         amb_result(report, name, dom_status_name(st), d->revision);
         return st;
     }
-    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }

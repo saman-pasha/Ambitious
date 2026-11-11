@@ -29,7 +29,7 @@ html_contract(enum(error_code, [
     unexpected_character_after_doctype_system_identifier, missing_quote_before_doctype_public_identifier,
     missing_quote_before_doctype_system_identifier, missing_whitespace_after_doctype_public_keyword,
     missing_whitespace_after_doctype_system_keyword,
-    missing_whitespace_between_doctype_public_and_system_identifiers, cdata_in_html_content,
+    missing_whitespace_between_doctype_public_and_system_identifiers, cdata_in_html_content, eof_in_cdata,
     missing_semicolon_after_character_reference, unknown_named_character_reference,
     absence_of_digits_in_numeric_character_reference, null_character_reference,
     character_reference_outside_unicode_range, surrogate_character_reference,
@@ -104,8 +104,9 @@ html_contract(operation(tokenize, [param(src, text)], status, [], [creates(token
 html_contract(operation(build, [param(doc, store(dom))], status, [], [], [mutates])).
 %% both: the HTML document of src into doc
 html_contract(operation(parse, [param(doc, store(dom)), param(src, text)], status, [], [], [mutates])).
-%% the fragment parsing algorithm (13.4): src parsed as the children of an element
-%% named context; the nodes it makes become the document node's children
+%% the fragment parsing algorithm (13.4): src parsed as the children of the element
+%% context names -- its local name in the HTML namespace, or "svg NAME" or "math
+%% NAME" in SVG's or MathML's; the nodes it makes become the document node's children
 html_contract(operation(parse_fragment, [param(doc, store(dom)), param(context, text), param(src, text)], status,
     [], [], [mutates])).
 
