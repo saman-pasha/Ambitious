@@ -6,15 +6,22 @@
    the script's budget: a pattern that backtracks without end stops its script as an
    endless loop would. A program is compiled once for its source and flags.
 
-   The syntax is ES2024's with Annex B's for patterns without u: alternatives, classes
-   with ranges and escapes, \p{...} with u (the general categories, the scripts and
-   their extensions, the binary properties: src/js/unicode.h), greedy and lazy
-   quantifiers, groups (capturing, named, not capturing), back references by number
-   and name, lookahead and lookbehind (matched backward), and the flags d g i m s u v
-   y. Case-insensitive matching compares the characters' case orbits (the characters
-   whose canonical forms are the same: simple case folding with u, the uppercase of
-   code units without). Not read: v's set operations and nested classes, and the
-   modifiers (?i:...): each a SyntaxError that names it.
+   The syntax is ES2025's with Annex B's for patterns without u or v: alternatives,
+   classes with ranges and escapes, \p{...} with u or v (the general categories, the
+   scripts and their extensions, the binary properties: src/js/unicode.h), greedy and
+   lazy quantifiers, groups (capturing, named, not capturing), the modifiers (?ims-ims:
+   ...), back references by number and name, lookahead and lookbehind (matched
+   backward), and the flags d g i m s u v y. Case-insensitive matching compares the
+   characters' case orbits (the characters whose canonical forms are the same: simple
+   case folding with u or v, the uppercase of code units without).
+
+   With v, a class is a set of characters and strings: nested classes, unions,
+   intersections (&&) and differences (--), strings (\q{...}) and the properties of
+   strings (\p{RGI_Emoji} and its kin). Its strings are matched longest first, as a
+   trie: one switch on each next character, whatever the number of strings.
+
+   A modifier changes i, m or s for the part of the pattern within it: each node of
+   the tree keeps the flags it was read under, and its instruction is compiled with them.
 
    Then the natives: the RegExp constructor and its prototype's methods and getters,
    and String's match, matchAll, replace, replaceAll, search and split over them. */
@@ -94,12 +101,14 @@ static uint32_t re_rep(uint32_t c, int uni) {
 /* ---- the tree ---- */
 
 enum { RN_EMPTY, RN_CHAR, RN_ANY, RN_CLASS, RN_BOL, RN_EOL, RN_WORDB, RN_NWORDB, RN_SEQ, RN_ALT, RN_GROUP,
-       RN_REPEAT, RN_BACKREF, RN_NAMEDREF, RN_LOOK };
-/* CHAR a; CLASS a b (its pairs in ranges), c negated; SEQ and ALT a b (a list); GROUP a its
-   child, b its group (0: none); REPEAT a its child, b min, c max, d greedy, e f the groups
-   within [e, f); BACKREF a; NAMEDREF a its name (in names); LOOK a its child, b its kind
-   (0 ahead, 1 not ahead, 2 behind, 3 not behind) */
-typedef struct re_node { uint32_t kind, a, b, c, d, e, f; } re_node;
+       RN_REPEAT, RN_BACKREF, RN_NAMEDREF, RN_LOOK, RN_STRSET };
+/* CHAR a; CLASS a b (its pairs in ranges), c negated, d its case already in its set (v's);
+   SEQ and ALT a b (a list); GROUP a its child, b its group (0: none); REPEAT a its child, b
+   min, c max, d greedy, e f the groups within [e, f); BACKREF a; NAMEDREF a its name (in
+   names); LOOK a its child, b its kind (0 ahead, 1 not ahead, 2 behind, 3 not behind);
+   STRSET (a v class with strings) a b its strings' ids (in vl), c d its single characters'
+   pairs (in ranges). fl: the flags i, m and s it was read under (the modifiers') */
+typedef struct re_node { uint32_t kind, a, b, c, d, e, f, fl; } re_node;
 
 #define RE_INF 0xFFFFFFFFu
 #define RE_DEPTH_MAX 256u
@@ -108,15 +117,18 @@ typedef struct re_node { uint32_t kind, a, b, c, d, e, f; } re_node;
 enum { RE_OK, RE_E_UNTERMINATED_GROUP, RE_E_UNMATCHED_PAREN, RE_E_NOTHING_TO_REPEAT, RE_E_LONE_QUANT, RE_E_OUT_OF_ORDER,
        RE_E_UNTERMINATED_CLASS, RE_E_RANGE_ORDER, RE_E_ESCAPE, RE_E_UNICODE_ESCAPE, RE_E_TRAILING_BACKSLASH, RE_E_GROUP,
        RE_E_GROUP_NAME, RE_E_DUP_NAME, RE_E_NAMED_REF, RE_E_PROPERTY, RE_E_CLASS_ESCAPE, RE_E_TOO_DEEP, RE_E_DECIMAL,
-       RE_E_SET_OPS, RE_E_MODIFIERS, RE_E_INCOMPLETE_QUANT, RE_E_TOO_LARGE, RE_E_N };
+       RE_E_INCOMPLETE_QUANT, RE_E_TOO_LARGE, RE_E_CLASS, RE_E_CLASS_CHAR, RE_E_SET_OP, RE_E_NEG_STRINGS,
+       RE_E_PROPERTY_CLASS, RE_E_NAMED_REFERENCE, RE_E_FLAG_GROUP, RE_E_REPEATED_FLAG, RE_E_MULTI_DASH, RE_E_N };
 static const char *const re_errors[RE_E_N] = {
     "", "Unterminated group", "Unmatched ')'", "Nothing to repeat", "Lone quantifier brackets",
     "numbers out of order in {} quantifier", "Unterminated character class", "Range out of order in character class",
     "Invalid escape", "Invalid Unicode escape", "\\ at end of pattern", "Invalid group", "Invalid capture group name",
     "Duplicate capture group name", "Invalid named capture referenced", "Invalid property name",
     "Invalid class escape", "the pattern is nested too deeply", "Invalid decimal escape",
-    "class set operations and nested classes (the v flag's) are not supported",
-    "modifiers (?i:...) are not supported", "Incomplete quantifier", "the regular expression is too large" };
+    "Incomplete quantifier", "the regular expression is too large", "Invalid character class",
+    "Invalid character in character class", "Invalid set operation in character class",
+    "Negated character class may contain strings", "Invalid property name in character class", "Invalid named reference",
+    "Invalid flag group", "Repeated flag in flag group", "Multiple dashes in flag group" };
 
 typedef struct re_parser {
     vector<uint32_t> pat;         /* the pattern's characters: code points with u, code units without */
@@ -127,17 +139,29 @@ typedef struct re_parser {
     vector<uint32_t> cls;         /* a class being read: its pairs */
     vector<uint32_t> names;       /* each named group: its group, its name's first character in namech, its length */
     vector<uint32_t> namech;
+    /* the v flag's sets (re_cset): their ranges' pairs, their strings' ids; the strings, two
+       words each (the first code point in vc, the count); the strings of a class being read */
+    vector<uint32_t> vr;
+    vector<uint32_t> vl;
+    vector<uint32_t> vs;
+    vector<uint32_t> vc;
+    vector<uint32_t> stmp;
+    vector<uint32_t> srt;         /* a sort's scratch */
     uint32_t pos, ngroups, flags, depth, total, has_names;
+    uint32_t cur;                 /* the flags i, m and s where the parser is (the modifiers change them) */
     uint32_t err;
 } re_parser;
 #define RE_PARSER_DROP(p) vector_uint32_t_drop(&(p).pat); vector_re_node_drop(&(p).nodes); vector_uint32_t_drop(&(p).lists); \
     vector_uint32_t_drop(&(p).tmp); vector_uint32_t_drop(&(p).ranges); vector_uint32_t_drop(&(p).cls); \
-    vector_uint32_t_drop(&(p).names); vector_uint32_t_drop(&(p).namech)
+    vector_uint32_t_drop(&(p).names); vector_uint32_t_drop(&(p).namech); vector_uint32_t_drop(&(p).vr); \
+    vector_uint32_t_drop(&(p).vl); vector_uint32_t_drop(&(p).vs); vector_uint32_t_drop(&(p).vc); \
+    vector_uint32_t_drop(&(p).stmp); vector_uint32_t_drop(&(p).srt)
 
 static uint32_t rn_new(re_parser *p, uint32_t kind) {
     re_node n;
     memset(&n, 0, sizeof n);
     n.kind = kind;
+    n.fl = p->cur;
     push_back(p->nodes, n);
     return (uint32_t)(len(p->nodes) - 1);
 }
@@ -205,7 +229,7 @@ static void cls_escape(re_parser *p, uint32_t c) {
     uint32_t lc = c | 0x20;
     if (lc == 'd') cls_add_ranges(p, re_digits, 0, 1, neg, top);
     else if (lc == 's') cls_add_ranges(p, re_spaces, 0, 10, neg, top);
-    else if ((p->flags & RF_I) && rp_unicode(p)) cls_add_ranges(p, re_words_iu, 0, 6, neg, top);
+    else if ((p->cur & RF_I) && rp_unicode(p)) cls_add_ranges(p, re_words_iu, 0, 6, neg, top);
     else cls_add_ranges(p, re_words, 0, 4, neg, top);
 }
 
@@ -232,17 +256,19 @@ static void cls_take(re_parser *p, uint32_t *off, uint32_t *n) {
     clear(p->cls);
 }
 
-/* a \p{...}'s text (the characters between the braces) into the class: 0 when it names no property */
-static int cls_property(re_parser *p, uint32_t from, uint32_t to, int negate) {
+/* the property a \p{...}'s text names (the characters between the braces): its place in
+   uni_props; UNI_NPROPS + k for the k-th property of strings, UNI_NPROPS + UNI_NSTRPROPS
+   for RGI_Emoji, their union; -1 for none */
+static int64_t rp_prop_find(re_parser *p, uint32_t from, uint32_t to) {
     char name[96], value[96], want[96];
     uint32_t nn = 0, nv = 0;
     int eq = 0;
     for (uint32_t i = from; i < to; i++) {
         uint32_t c = p->pat[i];
-        if (c > 127) return 0;
-        if (c == '=') { if (eq) return 0; eq = 1; continue; }
-        if (!eq) { if (nn + 1 >= sizeof name) return 0; name[nn++] = (char)c; }
-        else { if (nv + 1 >= sizeof value) return 0; value[nv++] = (char)c; }
+        if (c > 127) return -1;
+        if (c == '=') { if (eq) return -1; eq = 1; continue; }
+        if (!eq) { if (nn + 1 >= sizeof name) return -1; name[nn++] = (char)c; }
+        else { if (nv + 1 >= sizeof value) return -1; value[nv++] = (char)c; }
     }
     name[nn] = 0;
     value[nv] = 0;
@@ -252,11 +278,19 @@ static int cls_property(re_parser *p, uint32_t from, uint32_t to, int negate) {
         if (!strcmp(name, "General_Category") || !strcmp(name, "gc")) kind = 0;
         else if (!strcmp(name, "Script") || !strcmp(name, "sc")) kind = 1;
         else if (!strcmp(name, "Script_Extensions") || !strcmp(name, "scx")) kind = 2;
-        else return 0;
+        else return -1;
         memcpy(want, value, sizeof want);
+    } else {
+        /* a property of strings, by its one name */
+        if (!strcmp(name, "RGI_Emoji")) return UNI_NPROPS + UNI_NSTRPROPS;
+        for (uint32_t s = 0; s < UNI_NSTRPROPS; s++) {
+            uint32_t j = 0;
+            while (j < nn && uni_strprops[s].name[j] == name[j]) j++;
+            if (j == nn && uni_strprops[s].name[j] == 0) return UNI_NPROPS + s;
+        }
     }
     size_t wl = strlen(want);
-    if (wl == 0) return 0;
+    if (wl == 0) return -1;
     for (uint32_t i = 0; i < UNI_NPROPS; i++) {
         uint32_t k = uni_props[i].kind;
         if (eq ? (int)k != kind : (k != 0 && k != 3)) continue;
@@ -267,15 +301,20 @@ static int cls_property(re_parser *p, uint32_t from, uint32_t to, int negate) {
             while (uni_props[i].names[k + l] && uni_props[i].names[k + l] != '|') l++;
             int same = l == wl;
             for (uint32_t j = 0; same && j < l; j++) if (uni_props[i].names[k + j] != want[j]) same = 0;
-            if (same) {
-                cls_add_ranges(p, uni_ranges, uni_props[i].off, uni_props[i].n, negate, 0x10FFFF);
-                return 1;
-            }
+            if (same) return i;
             if (!uni_props[i].names[k + l]) break;
             k += l + 1;
         }
     }
-    return 0;
+    return -1;
+}
+
+/* a \p{...}'s text into the class (u's): 0 when it names no property of characters */
+static int cls_property(re_parser *p, uint32_t from, uint32_t to, int negate) {
+    int64_t i = rp_prop_find(p, from, to);
+    if (i < 0 || i >= UNI_NPROPS) return 0;
+    cls_add_ranges(p, uni_ranges, uni_props[i].off, uni_props[i].n, negate, 0x10FFFF);
+    return 1;
 }
 
 /* ---- escapes ---- */
@@ -323,13 +362,13 @@ static int64_t rp_char_escape(re_parser *p, int in_class) {
         if ((l >= 'a' && l <= 'z') || (l >= 'A' && l <= 'Z')) { p->pos++; return l % 32; }
         /* Annex B: in a class, \c and a digit or _ too */
         if (in_class && !rp_unicode(p) && (re_digit(l) || l == '_')) { p->pos++; return l % 32; }
-        if (rp_unicode(p)) { re_fail(p, RE_E_ESCAPE); return -1; }
+        if (rp_unicode(p)) { re_fail(p, RE_E_UNICODE_ESCAPE); return -1; }
         p->pos--;
         return '\\';    /* \c read as a backslash, then c */
     }
     case '0':
         if (!re_digit(rp_at(p, 0))) return 0;
-        if (rp_unicode(p)) { re_fail(p, RE_E_DECIMAL); return -1; }
+        if (rp_unicode(p)) { re_fail(p, in_class ? RE_E_CLASS_ESCAPE : RE_E_DECIMAL); return -1; }
         break;
     case 'x': {
         int h1 = re_hexval(rp_at(p, 0)), h2 = re_hexval(rp_at(p, 1));
@@ -356,8 +395,12 @@ static int64_t rp_char_escape(re_parser *p, int in_class) {
         return v;
     }
     if (rp_unicode(p)) {
-        /* with u, only the syntax characters are escaped as themselves */
+        /* with u, only the syntax characters are escaped as themselves (in a class, the
+           hyphen, and with v the reserved punctuators too); an octal digit in a class is none */
+        if (in_class && c >= '1' && c <= '7') { re_fail(p, RE_E_CLASS_ESCAPE); return -1; }
         if (re_syntax_char(c) || (c == '-' && in_class)) return c;
+        if (in_class && (p->flags & RF_V) && (c == '&' || c == '!' || c == '#' || c == '%' || c == ',' || c == ':' || c == ';' ||
+                                              c == '<' || c == '=' || c == '>' || c == '@' || c == '`' || c == '~')) return c;
         re_fail(p, RE_E_ESCAPE);
         return -1;
     }
@@ -365,14 +408,25 @@ static int64_t rp_char_escape(re_parser *p, int in_class) {
     return c;
 }
 
-/* \p{...} or \P{...} after the backslash and the p: into the class; 0 with the error set */
-static int rp_property(re_parser *p, int negate) {
-    if (!rp_is(p, 0, '{')) { re_fail(p, RE_E_PROPERTY); return 0; }
-    uint32_t from = p->pos + 1, k = from;
+/* a \p{...}'s braces after the backslash and the p: the property's text [*from, *to), the
+   } read; 0 with the error set (its words in a class or not) */
+static int rp_prop_text(re_parser *p, int in_class, uint32_t *from, uint32_t *to) {
+    uint32_t e = in_class ? RE_E_PROPERTY_CLASS : RE_E_PROPERTY;
+    if (!rp_is(p, 0, '{')) { re_fail(p, e); return 0; }
+    uint32_t k = p->pos + 1;
     while (k < len(p->pat) && p->pat[k] != '}') k++;
-    if (k >= len(p->pat)) { re_fail(p, RE_E_PROPERTY); return 0; }
-    if (!cls_property(p, from, k, negate)) { re_fail(p, RE_E_PROPERTY); return 0; }
+    if (k >= len(p->pat)) { re_fail(p, e); return 0; }
+    *from = p->pos + 1;
+    *to = k;
     p->pos = k + 1;
+    return 1;
+}
+
+/* \p{...} or \P{...} after the backslash and the p: into the class; 0 with the error set */
+static int rp_property(re_parser *p, int negate, int in_class) {
+    uint32_t from = 0, to = 0;
+    if (!rp_prop_text(p, in_class, &from, &to)) return 0;
+    if (!cls_property(p, from, to, negate)) { re_fail(p, in_class ? RE_E_PROPERTY_CLASS : RE_E_PROPERTY); return 0; }
     return 1;
 }
 
@@ -407,12 +461,455 @@ static int re_name_eq(re_parser *p, uint32_t a_off, uint32_t a_n, uint32_t b_off
     return 1;
 }
 
+/* ---- the v flag's classes ----
+   A class with v is a set of characters, its ranges (sorted [lo, hi] pairs), and of
+   strings, their ids (sorted longest first, then by code point, no two alike). Each
+   operand of a class is read into the class being read (cls, stmp); an intersection's
+   or a difference's sets are computed from its operands' (in vr and vl). With i every
+   set is closed under case: each character's whole orbit in it, each string's
+   characters their orbits' least. Unions, intersections, differences and complements
+   of closed sets are closed, so these are ECMA-262's sets (every operand simple-case-
+   folded, a character matched through Canonicalize) seen through the orbits: a
+   character is in the class when it is in its closed set. */
+
+/* a set: its ranges' rn pairs in vr from pair ro, its strings' sn ids in vl from so; may,
+   whether it may contain strings as ECMA-262's MayContainStrings says of its syntax (a
+   negated class may not, whatever its strings turn out to be) */
+typedef struct re_cset { uint32_t ro, rn, so, sn, may; } re_cset;
+
+/* two strings compared: in a set's order (mode 0: the longer first, then by code point), or
+   by their code points read forward (1) or backward (2), a prefix first */
+static int rs_order(re_parser *p, uint32_t a, uint32_t b, int mode) {
+    uint32_t al = p->vs[2 * a + 1], bl = p->vs[2 * b + 1], ao = p->vs[2 * a], bo = p->vs[2 * b];
+    if (mode == 0 && al != bl) return al > bl ? -1 : 1;
+    for (uint32_t i = 0; i < al && i < bl; i++) {
+        uint32_t x = p->vc[ao + i], y = p->vc[bo + i];
+        if (mode == 2) { x = p->vc[ao + al - 1 - i]; y = p->vc[bo + bl - 1 - i]; }
+        if (x != y) return x < y ? -1 : 1;
+    }
+    if (al == bl) return 0;
+    return al < bl ? -1 : 1;
+}
+
+/* the n pairs of cls from word at, sorted by their first word (a merge sort) */
+static void rs_sort_pairs(re_parser *p, uint32_t at, uint32_t n) {
+    if (n < 2) return;
+    resize(p->srt, 2 * n, 0);
+    for (uint32_t w = 1; w < n; w *= 2) {
+        for (uint32_t lo = 0; lo < n; lo += 2 * w) {
+            uint32_t mid = lo + w < n ? lo + w : n, hi = lo + 2 * w < n ? lo + 2 * w : n;
+            uint32_t x = lo, y = mid, k = lo;
+            while (x < mid || y < hi) {
+                uint32_t from = 0;
+                if (y >= hi || (x < mid && p->cls[at + 2 * x] <= p->cls[at + 2 * y])) from = x++;
+                else from = y++;
+                p->srt[2 * k] = p->cls[at + 2 * from];
+                p->srt[2 * k + 1] = p->cls[at + 2 * from + 1];
+                k++;
+            }
+        }
+        for (uint32_t k = 0; k < 2 * n; k++) p->cls[at + k] = p->srt[k];
+    }
+}
+
+/* the n string ids of stmp from at, sorted as rs_order's mode says (a merge sort) */
+static void rs_sort_ids(re_parser *p, uint32_t at, uint32_t n, int mode) {
+    if (n < 2) return;
+    resize(p->srt, n, 0);
+    for (uint32_t w = 1; w < n; w *= 2) {
+        for (uint32_t lo = 0; lo < n; lo += 2 * w) {
+            uint32_t mid = lo + w < n ? lo + w : n, hi = lo + 2 * w < n ? lo + 2 * w : n;
+            uint32_t x = lo, y = mid, k = lo;
+            while (x < mid || y < hi) {
+                if (y >= hi || (x < mid && rs_order(p, p->stmp[at + x], p->stmp[at + y], mode) <= 0)) p->srt[k++] = p->stmp[at + x++];
+                else p->srt[k++] = p->stmp[at + y++];
+            }
+        }
+        for (uint32_t k = 0; k < n; k++) p->stmp[at + k] = p->srt[k];
+    }
+}
+
+/* the class being read from rmark (in cls) and smark (in stmp) made a set, its pieces taken */
+static re_cset cs_make(re_parser *p, uint32_t rmark, uint32_t smark, uint32_t may) {
+    re_cset s = {0};
+    uint32_t n = (uint32_t)(len(p->cls) - rmark) / 2;
+    rs_sort_pairs(p, rmark, n);
+    s.ro = (uint32_t)(len(p->vr) / 2);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t lo = p->cls[rmark + 2 * i], hi = p->cls[rmark + 2 * i + 1];
+        size_t top = len(p->vr);
+        if (s.rn > 0 && lo <= p->vr[top - 1] + 1) { if (hi > p->vr[top - 1]) p->vr[top - 1] = hi; }
+        else { push_back(p->vr, lo); push_back(p->vr, hi); s.rn++; }
+    }
+    resize(p->cls, rmark, 0);
+    uint32_t m = (uint32_t)(len(p->stmp) - smark);
+    rs_sort_ids(p, smark, m, 0);
+    s.so = (uint32_t)len(p->vl);
+    for (uint32_t i = 0; i < m; i++) {
+        uint32_t id = p->stmp[smark + i];
+        if (s.sn > 0 && rs_order(p, p->vl[len(p->vl) - 1], id, 0) == 0) continue;
+        push_back(p->vl, id);
+        s.sn++;
+    }
+    resize(p->stmp, smark, 0);
+    s.may = may;
+    return s;
+}
+
+/* a set's pieces into the class being read */
+static void rv_append(re_parser *p, re_cset s) {
+    for (uint32_t i = 0; i < s.rn; i++) cls_add(p, p->vr[2 * (s.ro + i)], p->vr[2 * (s.ro + i) + 1]);
+    for (uint32_t i = 0; i < s.sn; i++) { uint32_t id = p->vl[s.so + i]; push_back(p->stmp, id); }
+}
+
+/* the strings of a in b too (and), or not in b (else), from the set's own order */
+static void cs_strings(re_parser *p, re_cset a, re_cset b, int and_, re_cset *s) {
+    s->so = (uint32_t)len(p->vl);
+    s->sn = 0;
+    uint32_t i = 0, j = 0;
+    while (i < a.sn) {
+        int c = j < b.sn ? rs_order(p, p->vl[a.so + i], p->vl[b.so + j], 0) : -1;
+        if (c > 0) { j++; continue; }
+        uint32_t id = p->vl[a.so + i];
+        if ((c == 0) == (and_ != 0)) { push_back(p->vl, id); s->sn++; }
+        i++;
+        if (c == 0) j++;
+    }
+}
+
+/* a and b: their intersection */
+static re_cset cs_inter(re_parser *p, re_cset a, re_cset b) {
+    re_cset s = {0};
+    s.ro = (uint32_t)(len(p->vr) / 2);
+    uint32_t i = 0, j = 0;
+    while (i < a.rn && j < b.rn) {
+        uint32_t alo = p->vr[2 * (a.ro + i)], ahi = p->vr[2 * (a.ro + i) + 1];
+        uint32_t blo = p->vr[2 * (b.ro + j)], bhi = p->vr[2 * (b.ro + j) + 1];
+        uint32_t lo = alo > blo ? alo : blo, hi = ahi < bhi ? ahi : bhi;
+        if (lo <= hi) { push_back(p->vr, lo); push_back(p->vr, hi); s.rn++; }
+        if (ahi < bhi) i++;
+        else j++;
+    }
+    cs_strings(p, a, b, 1, &s);
+    s.may = a.may & b.may;
+    return s;
+}
+
+/* a less b */
+static re_cset cs_minus(re_parser *p, re_cset a, re_cset b) {
+    re_cset s = {0};
+    s.ro = (uint32_t)(len(p->vr) / 2);
+    uint32_t j = 0;
+    for (uint32_t i = 0; i < a.rn; i++) {
+        uint32_t lo = p->vr[2 * (a.ro + i)], hi = p->vr[2 * (a.ro + i) + 1];
+        while (j < b.rn && p->vr[2 * (b.ro + j) + 1] < lo) j++;
+        uint32_t cur = lo, k = j;
+        int done = 0;
+        while (k < b.rn && p->vr[2 * (b.ro + k)] <= hi) {
+            uint32_t blo = p->vr[2 * (b.ro + k)], bhi = p->vr[2 * (b.ro + k) + 1];
+            if (blo > cur) { push_back(p->vr, cur); push_back(p->vr, blo - 1); s.rn++; }
+            if (bhi >= hi) { done = 1; break; }
+            if (bhi + 1 > cur) cur = bhi + 1;
+            k++;
+        }
+        if (!done && cur <= hi) { push_back(p->vr, cur); push_back(p->vr, hi); s.rn++; }
+    }
+    cs_strings(p, a, b, 0, &s);
+    s.may = a.may;
+    return s;
+}
+
+/* the characters a does not hold (a holds no string: the syntax sees to it) */
+static re_cset cs_complement(re_parser *p, re_cset a) {
+    re_cset s = {0};
+    s.ro = (uint32_t)(len(p->vr) / 2);
+    uint32_t from = 0;
+    for (uint32_t i = 0; i < a.rn; i++) {
+        uint32_t lo = p->vr[2 * (a.ro + i)], hi = p->vr[2 * (a.ro + i) + 1];
+        if (lo > from) { push_back(p->vr, from); push_back(p->vr, lo - 1); s.rn++; }
+        if (hi + 1 > from) from = hi + 1;
+    }
+    if (from <= 0x10FFFF) { push_back(p->vr, from); push_back(p->vr, 0x10FFFF); s.rn++; }
+    s.so = (uint32_t)len(p->vl);
+    return s;
+}
+
+/* [lo, hi] into the class being read; with i each character's orbit too */
+static void rv_add_range(re_parser *p, uint32_t lo, uint32_t hi) {
+    cls_add(p, lo, hi);
+    if (!(p->cur & RF_I)) return;
+    uint32_t a = 0, b = UNI_ORBIT_U_N;
+    while (a < b) {
+        uint32_t mid = (a + b) / 2;
+        if (uni_orbit_u[2 * mid] < lo) a = mid + 1;
+        else b = mid;
+    }
+    for (uint32_t k = a; k < UNI_ORBIT_U_N && uni_orbit_u[2 * k] <= hi; k++) {
+        uint32_t x = uni_orbit_u[2 * k], y = uni_orbit_u[2 * k + 1];
+        for (int g = 0; g < 8 && y != x; g++) {
+            if (y < lo || y > hi) cls_add(p, y, y);
+            y = re_orbit_next(y, 1);
+        }
+    }
+}
+/* a string's character as its set holds it: with i, its orbit's least */
+static uint32_t rv_canon(re_parser *p, uint32_t c) { return (p->cur & RF_I) ? re_rep(c, 1) : c; }
+
+/* the k-th property of strings (UNI_NSTRPROPS: RGI_Emoji, all of them) into the class being read */
+static void rv_strprop(re_parser *p, uint32_t k) {
+    for (uint32_t t = 0; t < UNI_NSTRPROPS; t++) {
+        if (k != UNI_NSTRPROPS && t != k) continue;
+        for (uint32_t i = 0; i < uni_strprops[t].rn; i++)
+            rv_add_range(p, uni_ranges[2 * (uni_strprops[t].roff + i)], uni_ranges[2 * (uni_strprops[t].roff + i) + 1]);
+        uint32_t w = uni_strprops[t].off, end = w + uni_strprops[t].len;
+        while (w < end) {
+            uint32_t n = uni_seqs[w], off = (uint32_t)len(p->vc);
+            for (uint32_t j = 0; j < n; j++) push_back(p->vc, rv_canon(p, uni_seqs[w + 1 + j]));
+            push_back(p->vs, off);
+            push_back(p->vs, n);
+            push_back(p->stmp, (uint32_t)(len(p->vs) / 2 - 1));
+            w += n + 1;
+        }
+    }
+}
+
+/* a class escape with v, its letter read (\d \D \s \S \w \W, and \p{...} \P{...} at their {):
+   its set's pieces into the class being read, *may when it may contain strings (a
+   property of strings). 0 with the error set */
+static int rv_escape(re_parser *p, uint32_t e, int in_class, uint32_t *may) {
+    uint32_t rmark = (uint32_t)len(p->cls), smark = (uint32_t)len(p->stmp);
+    int neg = e == 'D' || e == 'S' || e == 'W' || e == 'P';
+    *may = 0;
+    if (e == 'p' || e == 'P') {
+        uint32_t from = 0, to = 0;
+        if (!rp_prop_text(p, in_class, &from, &to)) return 0;
+        int64_t k = rp_prop_find(p, from, to);
+        if (k < 0 || (k >= UNI_NPROPS && neg)) { re_fail(p, in_class ? RE_E_PROPERTY_CLASS : RE_E_PROPERTY); return 0; }
+        if (k >= UNI_NPROPS) { rv_strprop(p, (uint32_t)(k - UNI_NPROPS)); *may = 1; return 1; }
+        uint32_t pk = (uint32_t)k;
+        for (uint32_t i = 0; i < uni_props[pk].n; i++)
+            rv_add_range(p, uni_ranges[2 * (uni_props[pk].off + i)], uni_ranges[2 * (uni_props[pk].off + i) + 1]);
+    } else {
+        uint32_t lc = e | 0x20;
+        if (lc == 'd') rv_add_range(p, '0', '9');
+        else if (lc == 's') for (uint32_t i = 0; i < 10; i++) rv_add_range(p, re_spaces[2 * i], re_spaces[2 * i + 1]);
+        else for (uint32_t i = 0; i < 4; i++) rv_add_range(p, re_words[2 * i], re_words[2 * i + 1]);
+    }
+    if (neg) {
+        /* the complement of the closed set: closed too */
+        re_cset s = cs_make(p, rmark, smark, 0);
+        rv_append(p, cs_complement(p, s));
+    }
+    return 1;
+}
+
+/* a ClassSetCharacter: the character, or -1 with the error set */
+static int64_t rv_char(re_parser *p) {
+    int64_t c = rp_at(p, 0);
+    if (c < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return -1; }
+    if (c == '\\') {
+        if (rp_is(p, 1, 'b')) { p->pos += 2; return 8; }
+        if (rp_at(p, 1) < 0) { re_fail(p, RE_E_TRAILING_BACKSLASH); return -1; }
+        p->pos++;
+        return rp_char_escape(p, 1);
+    }
+    if (c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '/' || c == '-' || c == '|') {
+        re_fail(p, RE_E_CLASS_CHAR);
+        return -1;
+    }
+    if (rp_at(p, 1) == c && (c == '&' || c == '!' || c == '#' || c == '$' || c == '%' || c == '*' || c == '+' || c == ',' ||
+                             c == '.' || c == ':' || c == ';' || c == '<' || c == '=' || c == '>' || c == '?' || c == '@' ||
+                             c == '^' || c == '`' || c == '~')) {
+        re_fail(p, RE_E_SET_OP);
+        return -1;
+    }
+    p->pos++;
+    return c;
+}
+
+/* \q{...}, its backslash read: its strings into the class being read (a string of one
+   character a character), *may when one is not one character. 0 with the error set.
+   With i a string of one character is V8's: its simple case folding alone, no orbit (so
+   /[\q{a}]/vi takes a but not A, where /[a]/vi takes both) */
+static int rv_strings(re_parser *p, uint32_t *may) {
+    p->pos++;
+    if (!rp_is(p, 0, '{')) { re_fail(p, RE_E_ESCAPE); return 0; }
+    p->pos++;
+    uint32_t off = (uint32_t)len(p->vc);
+    for (;;) {
+        int64_t c = rp_at(p, 0);
+        if (c < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return 0; }
+        if (c == '|' || c == '}') {
+            uint32_t n = (uint32_t)len(p->vc) - off;
+            if (n == 1) {
+                uint32_t ch = p->vc[off];
+                resize(p->vc, off, 0);
+                if (p->cur & RF_I) ch = ch < 128 ? (ch >= 'A' && ch <= 'Z' ? ch + 32 : ch) : uni_case_map(uni_fold, UNI_FOLD_N, ch);
+                cls_add(p, ch, ch);
+            } else {
+                *may = 1;
+                push_back(p->vs, off);
+                push_back(p->vs, n);
+                push_back(p->stmp, (uint32_t)(len(p->vs) / 2 - 1));
+            }
+            p->pos++;
+            if (c == '}') return 1;
+            off = (uint32_t)len(p->vc);
+            continue;
+        }
+        int64_t x = rv_char(p);
+        if (x < 0) return 0;
+        push_back(p->vc, rv_canon(p, (uint32_t)x));
+    }
+}
+
+/* the kinds of a class's operand: the last one read decides whether a hyphen makes a range */
+enum { RV_CHAR, RV_STRINGS, RV_ESCAPE, RV_NESTED, RV_RANGE };
+
+static int rv_class(re_parser *p, re_cset *out);
+
+/* an operand of a v class (ClassSetOperand): its set's pieces into the class being read;
+   its kind, its character when it is one, *may when it may contain strings. 0 with the
+   error set */
+static int rv_operand(re_parser *p, uint32_t *kind, uint32_t *ch, uint32_t *may) {
+    int64_t c = rp_at(p, 0);
+    *may = 0;
+    if (c == '\\') {
+        int64_t e = rp_at(p, 1);
+        if (e == 'q') { *kind = RV_STRINGS; p->pos++; return rv_strings(p, may); }
+        if (e == 'd' || e == 'D' || e == 's' || e == 'S' || e == 'w' || e == 'W' || e == 'p' || e == 'P') {
+            *kind = RV_ESCAPE;
+            p->pos += 2;
+            return rv_escape(p, (uint32_t)e, 1, may);
+        }
+    }
+    if (c == '[') {
+        *kind = RV_NESTED;
+        p->pos++;
+        re_cset s = {0};
+        if (!rv_class(p, &s)) return 0;
+        rv_append(p, s);
+        *may = s.may;
+        return 1;
+    }
+    *kind = RV_CHAR;
+    int64_t x = rv_char(p);
+    if (x < 0) return 0;
+    *ch = (uint32_t)x;
+    rv_add_range(p, (uint32_t)x, (uint32_t)x);
+    return 1;
+}
+
+/* a v class after its [ (a nested one's too): the set it is, with V8's errors in V8's
+   order. 0 with the error set */
+static int rv_class(re_parser *p, re_cset *out) {
+    if (++p->depth > RE_DEPTH_MAX) { re_fail(p, RE_E_TOO_DEEP); return 0; }
+    int neg = 0;
+    if (rp_is(p, 0, '^')) { neg = 1; p->pos++; }
+    uint32_t rmark = (uint32_t)len(p->cls), smark = (uint32_t)len(p->stmp);
+    re_cset r = {0};
+    if (rp_is(p, 0, ']')) {
+        p->pos++;
+        r = cs_make(p, rmark, smark, 0);
+    } else {
+        uint32_t kind = 0, ch = 0, may = 0;
+        if (!rv_operand(p, &kind, &ch, &may)) return 0;
+        if (rp_is(p, 0, '-') && rp_is(p, 1, '-')) {
+            /* a difference: the first operand's set less each next one's */
+            if (neg && may) { re_fail(p, RE_E_NEG_STRINGS); return 0; }
+            r = cs_make(p, rmark, smark, may);
+            while (rp_at(p, 0) >= 0 && !rp_is(p, 0, ']')) {
+                if (!rp_is(p, 0, '-') || !rp_is(p, 1, '-')) { re_fail(p, RE_E_SET_OP); return 0; }
+                p->pos += 2;
+                uint32_t k2 = 0, c2 = 0, m2 = 0, rm2 = (uint32_t)len(p->cls), sm2 = (uint32_t)len(p->stmp);
+                if (!rv_operand(p, &k2, &c2, &m2)) return 0;
+                re_cset b = cs_make(p, rm2, sm2, m2);
+                r = cs_minus(p, r, b);
+            }
+            if (rp_at(p, 0) < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return 0; }
+            p->pos++;
+        } else if (rp_is(p, 0, '&') && rp_is(p, 1, '&')) {
+            /* an intersection: it may contain strings when every operand may */
+            uint32_t all = may;
+            r = cs_make(p, rmark, smark, may);
+            while (rp_at(p, 0) >= 0 && !rp_is(p, 0, ']')) {
+                if (!rp_is(p, 0, '&') || !rp_is(p, 1, '&')) { re_fail(p, RE_E_SET_OP); return 0; }
+                p->pos += 2;
+                if (rp_is(p, 0, '&')) { re_fail(p, RE_E_CLASS_CHAR); return 0; }
+                uint32_t k2 = 0, c2 = 0, m2 = 0, rm2 = (uint32_t)len(p->cls), sm2 = (uint32_t)len(p->stmp);
+                if (!rv_operand(p, &k2, &c2, &m2)) return 0;
+                re_cset b = cs_make(p, rm2, sm2, m2);
+                r = cs_inter(p, r, b);
+                all &= m2;
+            }
+            if (rp_at(p, 0) < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return 0; }
+            if (neg && all) { re_fail(p, RE_E_NEG_STRINGS); return 0; }
+            p->pos++;
+            r.may = all;
+        } else {
+            /* a union: its operands' pieces gathered, a hyphen between two characters a range */
+            uint32_t any = may;
+            while (rp_at(p, 0) >= 0 && !rp_is(p, 0, ']')) {
+                if (rp_is(p, 0, '-')) {
+                    if (rp_is(p, 1, '-')) { re_fail(p, RE_E_SET_OP); return 0; }
+                    if (kind != RV_CHAR) { re_fail(p, RE_E_CLASS); return 0; }
+                    p->pos++;
+                    uint32_t from = ch, m2 = 0, rm2 = (uint32_t)len(p->cls);
+                    if (!rv_operand(p, &kind, &ch, &m2)) return 0;
+                    if (kind != RV_CHAR) { re_fail(p, RE_E_CLASS); return 0; }
+                    if (from > ch) { re_fail(p, RE_E_RANGE_ORDER); return 0; }
+                    resize(p->cls, rm2, 0);
+                    rv_add_range(p, from, ch);
+                    kind = RV_RANGE;
+                    continue;
+                }
+                if (rp_is(p, 0, '&') && rp_is(p, 1, '&')) { re_fail(p, RE_E_SET_OP); return 0; }
+                uint32_t m2 = 0;
+                if (!rv_operand(p, &kind, &ch, &m2)) return 0;
+                any |= m2;
+            }
+            if (rp_at(p, 0) < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return 0; }
+            p->pos++;
+            if (neg && any) { re_fail(p, RE_E_NEG_STRINGS); return 0; }
+            r = cs_make(p, rmark, smark, any);
+        }
+    }
+    if (neg) r = cs_complement(p, r);
+    p->depth--;
+    *out = r;
+    return 1;
+}
+
+/* a v set as the tree's node: a class when it holds no string, else a STRSET */
+static uint32_t rv_node(re_parser *p, re_cset s) {
+    uint32_t off = (uint32_t)(len(p->ranges) / 2);
+    for (uint32_t i = 0; i < 2 * s.rn; i++) { uint32_t w = p->vr[2 * s.ro + i]; push_back(p->ranges, w); }
+    if (s.sn == 0) {
+        uint32_t n = rn_new(p, RN_CLASS);
+        p->nodes[n].a = off;
+        p->nodes[n].b = s.rn;
+        p->nodes[n].d = 1;
+        return n;
+    }
+    uint32_t n = rn_new(p, RN_STRSET);
+    p->nodes[n].a = s.so;
+    p->nodes[n].b = s.sn;
+    p->nodes[n].c = off;
+    p->nodes[n].d = s.rn;
+    return n;
+}
+
 /* ---- the parser ---- */
 
 static uint32_t rp_disjunction(re_parser *p);
 
 /* a class [...], the [ read */
 static uint32_t rp_class(re_parser *p) {
+    if (p->flags & RF_V) {
+        re_cset s = {0};
+        if (!rv_class(p, &s)) return 0;
+        return rv_node(p, s);
+    }
     int neg = 0;
     if (rp_is(p, 0, '^')) { neg = 1; p->pos++; }
     clear(p->cls);
@@ -420,7 +917,6 @@ static uint32_t rp_class(re_parser *p) {
         int64_t c = rp_at(p, 0);
         if (c < 0) { re_fail(p, RE_E_UNTERMINATED_CLASS); return 0; }
         if (c == ']') { p->pos++; break; }
-        if ((p->flags & RF_V) && (c == '[' || ((c == '&' || c == '-') && rp_at(p, 1) == c))) { re_fail(p, RE_E_SET_OPS); return 0; }
         /* an atom: a character, or a class escape (a set: no range from or to it) */
         int64_t lo = -1;
         int set = 0;
@@ -428,7 +924,7 @@ static uint32_t rp_class(re_parser *p) {
         if (c == '\\') {
             int64_t e = rp_at(p, 0);
             if (e == 'd' || e == 'D' || e == 's' || e == 'S' || e == 'w' || e == 'W') { p->pos++; cls_escape(p, (uint32_t)e); set = 1; }
-            else if ((e == 'p' || e == 'P') && rp_unicode(p)) { p->pos++; if (!rp_property(p, e == 'P')) return 0; set = 1; }
+            else if ((e == 'p' || e == 'P') && rp_unicode(p)) { p->pos++; if (!rp_property(p, e == 'P', 1)) return 0; set = 1; }
             else { lo = rp_char_escape(p, 1); if (lo < 0) return 0; }
         } else lo = c;
         if (rp_is(p, 0, '-') && !rp_is(p, 1, ']') && rp_at(p, 1) >= 0) {
@@ -445,7 +941,7 @@ static uint32_t rp_class(re_parser *p) {
                 else { hi = rp_char_escape(p, 1); if (hi < 0) return 0; }
             } else hi = d;
             if (set || set2) {
-                if (rp_unicode(p)) { re_fail(p, RE_E_CLASS_ESCAPE); return 0; }
+                if (rp_unicode(p)) { re_fail(p, RE_E_CLASS); return 0; }
                 if (!set) cls_add(p, (uint32_t)lo, (uint32_t)lo);
                 cls_add(p, '-', '-');
                 p->pos = save + 1;      /* the hyphen taken; the next atom read on its own */
@@ -491,6 +987,13 @@ static int rp_braces(re_parser *p, uint32_t *min, uint32_t *max) {
 static uint32_t rp_atom_escape(re_parser *p) {
     int64_t c = rp_at(p, 0);
     if (c < 0) { re_fail(p, RE_E_TRAILING_BACKSLASH); return 0; }
+    if ((p->flags & RF_V) && (c == 'd' || c == 'D' || c == 's' || c == 'S' || c == 'w' || c == 'W' || c == 'p' || c == 'P')) {
+        /* with v, a set as a class's are (a property of strings among them) */
+        p->pos++;
+        uint32_t rmark = (uint32_t)len(p->cls), smark = (uint32_t)len(p->stmp), may = 0;
+        if (!rv_escape(p, (uint32_t)c, 0, &may)) return 0;
+        return rv_node(p, cs_make(p, rmark, smark, may));
+    }
     if (c == 'd' || c == 'D' || c == 's' || c == 'S' || c == 'w' || c == 'W') {
         p->pos++;
         clear(p->cls);
@@ -505,7 +1008,7 @@ static uint32_t rp_atom_escape(re_parser *p) {
     if ((c == 'p' || c == 'P') && rp_unicode(p)) {
         p->pos++;
         clear(p->cls);
-        if (!rp_property(p, c == 'P')) return 0;
+        if (!rp_property(p, c == 'P', 0)) return 0;
         uint32_t n = rn_new(p, RN_CLASS);
         uint32_t off = 0, cnt = 0;
         cls_take(p, &off, &cnt);
@@ -529,7 +1032,7 @@ static uint32_t rp_atom_escape(re_parser *p) {
     }
     if (c == 'k' && (rp_unicode(p) || p->has_names)) {
         p->pos++;
-        if (!rp_is(p, 0, '<')) { re_fail(p, RE_E_NAMED_REF); return 0; }
+        if (!rp_is(p, 0, '<')) { re_fail(p, RE_E_NAMED_REFERENCE); return 0; }
         p->pos++;
         uint32_t off = 0, nl = 0;
         if (!rp_group_name(p, &off, &nl)) { re_fail(p, RE_E_GROUP_NAME); return 0; }
@@ -557,7 +1060,7 @@ static uint32_t rp_term(re_parser *p) {
     if (c == '(') {
         if (++p->depth > RE_DEPTH_MAX) { re_fail(p, RE_E_TOO_DEEP); return 0; }
         p->pos++;
-        uint32_t group = 0, look_kind = 0;
+        uint32_t group = 0, look_kind = 0, saved = p->cur;
         int is_look = 0;
         if (rp_is(p, 0, '?')) {
             int64_t d = rp_at(p, 1);
@@ -574,14 +1077,35 @@ static uint32_t rp_term(re_parser *p) {
                 push_back(p->names, group);
                 push_back(p->names, off);
                 push_back(p->names, nl);
-            } else if (d == 'i' || d == 'm' || d == 's' || d == '-') { re_fail(p, RE_E_MODIFIERS); return 0; }
-            else { re_fail(p, RE_E_GROUP); return 0; }
+            } else if (d == 'i' || d == 'm' || d == 's' || d == '-') {
+                /* the modifiers (?ims-ims: ...): the flags they add, then those they take away */
+                uint32_t add = 0, rem = 0, seen = 0, dash = 0;
+                p->pos++;
+                for (;;) {
+                    int64_t m = rp_at(p, 0);
+                    uint32_t bit = m == 'i' ? RF_I : m == 'm' ? RF_M : m == 's' ? RF_S : 0;
+                    if (m == ':') { p->pos++; break; }
+                    if (m == '-') {
+                        if (dash) { re_fail(p, RE_E_MULTI_DASH); return 0; }
+                        dash = 1;
+                    } else if (bit) {
+                        if (seen & bit) { re_fail(p, RE_E_REPEATED_FLAG); return 0; }
+                        seen |= bit;
+                        if (dash) rem |= bit;
+                        else add |= bit;
+                    } else { re_fail(p, RE_E_GROUP); return 0; }
+                    p->pos++;
+                }
+                if (dash && !seen) { re_fail(p, RE_E_FLAG_GROUP); return 0; }
+                p->cur = (p->cur | add) & ~rem;
+            } else { re_fail(p, RE_E_GROUP); return 0; }
         } else group = ++p->ngroups;
         uint32_t child = rp_disjunction(p);
         if (p->err) return 0;
         if (!rp_is(p, 0, ')')) { re_fail(p, RE_E_UNTERMINATED_GROUP); return 0; }
         p->pos++;
         p->depth--;
+        p->cur = saved;
         if (is_look) {
             atom = rn_new(p, RN_LOOK);
             p->nodes[atom].a = child;
@@ -683,6 +1207,8 @@ enum {
     RE_LOOP_NEXT,    /* r, min, off (back to its LOOP) */
     RE_SIMPLE,       /* min, max, greedy, n, lit: the literal that follows (plus 1, 0 none), then a one-character
                         instruction of n words */
+    RE_SWITCH,       /* n, n (c, off) pairs by c: the character read (its orbit's least with RB_ICASE) found
+                        among them, then on at its off; else a failure (a trie's level) */
     RE_MATCH
 };
 #define RB_BACK 0x100u      /* read backward (a lookbehind's) */
@@ -705,17 +1231,110 @@ static int rn_single(re_parser *p, uint32_t n) {
 /* a one-character node's instruction */
 static void rc_one(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
     re_node x = p->nodes[n];
-    int icase = (p->flags & RF_I) != 0, uni = rp_unicode(p);
+    int icase = (x.fl & RF_I) != 0, uni = rp_unicode(p);
     if (x.kind == RN_CHAR) {
         uint32_t ch = x.a;
         if (icase && (re_rep(ch, uni) != ch || re_orbit_next(ch, uni) != ch)) { rc_emit(c, RE_CHAR_I | back); rc_emit(c, re_rep(ch, uni)); }
         else { rc_emit(c, RE_CHAR | back); rc_emit(c, ch); }
         return;
     }
-    if (x.kind == RN_ANY) { rc_emit(c, ((p->flags & RF_S) ? RE_ANY_ALL : RE_ANY) | back); return; }
-    rc_emit(c, RE_CLASS | back | (x.c ? RB_NEG : 0) | (icase ? RB_ICASE : 0));
+    if (x.kind == RN_ANY) { rc_emit(c, ((x.fl & RF_S) ? RE_ANY_ALL : RE_ANY) | back); return; }
+    /* a v class's set holds its case already */
+    rc_emit(c, RE_CLASS | back | (x.c ? RB_NEG : 0) | (icase && !x.d ? RB_ICASE : 0));
     rc_emit(c, x.b);
     for (uint32_t i = 0; i < 2 * x.b; i++) rc_emit(c, p->ranges[2 * x.a + i]);
+}
+
+/* a set with strings (STRSET): its strings as a trie, the longest tried first, each level
+   one switch on the next character (read backward in a lookbehind); then its single
+   characters; then the empty string when it is one of its strings */
+static void rc_strset(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
+    re_node x = p->nodes[n];
+    uint32_t icase = (x.fl & RF_I) ? RB_ICASE : 0;
+    uint32_t at = (uint32_t)len(p->stmp), empty = 0;
+    for (uint32_t i = 0; i < x.b; i++) {
+        uint32_t id = p->vl[x.a + i];
+        if (p->vs[2 * id + 1] == 0) empty = 1;
+        else push_back(p->stmp, id);
+    }
+    uint32_t ns = (uint32_t)len(p->stmp) - at;
+    rs_sort_ids(p, at, ns, back ? 2 : 1);
+    /* the trie, five words a node (its character, its first and last child, its next
+       sibling, whether a string ends there), the root first: the strings in code point
+       order put each new child after its siblings, which stay sorted */
+    vector<uint32_t> t;
+    resize(t, 5, 0);
+    for (uint32_t i = 0; i < ns; i++) {
+        uint32_t id = p->stmp[at + i], off = p->vs[2 * id], l = p->vs[2 * id + 1], cur = 0;
+        for (uint32_t j = 0; j < l; j++) {
+            uint32_t ch = back ? p->vc[off + l - 1 - j] : p->vc[off + j];
+            uint32_t last = t[5 * cur + 2];
+            if (last && t[5 * last] == ch) { cur = last; continue; }
+            uint32_t m = (uint32_t)(len(t) / 5);
+            push_back(t, ch);
+            push_back(t, 0);
+            push_back(t, 0);
+            push_back(t, 0);
+            push_back(t, 0);
+            if (last) t[5 * last + 3] = m;
+            else t[5 * cur + 1] = m;
+            t[5 * cur + 2] = m;
+            cur = m;
+        }
+        t[5 * cur + 4] = 1;
+    }
+    resize(p->stmp, at, 0);
+    uint32_t nt = (uint32_t)(len(t) / 5);
+    /* each node's code: a split to its end when a string ends there and goes on, its
+       switch, its end's jump past the set; its switch's entries patched as each child's
+       code is placed */
+    vector<uint32_t> patch, ends, stack;
+    resize(patch, 2 * nt, 0);
+    uint32_t alt = 0;
+    if (nt > 1 && (x.d || empty)) { rc_emit(c, RE_SPLIT); alt = rc_here(c); rc_emit(c, 0); }
+    if (nt > 1) push_back(stack, 0);
+    while (len(stack)) {
+        uint32_t m = stack[len(stack) - 1];
+        pop_back(stack);
+        if (m) c->code[patch[2 * m]] = rc_here(c) - patch[2 * m + 1];
+        uint32_t nk = 0;
+        for (uint32_t k = t[5 * m + 1]; k; k = t[5 * k + 3]) nk++;
+        uint32_t split = 0;
+        if (nk && t[5 * m + 4]) { rc_emit(c, RE_SPLIT); split = rc_here(c); rc_emit(c, 0); }
+        if (nk) {
+            rc_emit(c, RE_SWITCH | back | icase);
+            rc_emit(c, nk);
+            uint32_t end = rc_here(c) + 2 * nk;
+            for (uint32_t k = t[5 * m + 1]; k; k = t[5 * k + 3]) {
+                rc_emit(c, t[5 * k]);
+                patch[2 * k] = rc_here(c);
+                patch[2 * k + 1] = end;
+                rc_emit(c, 0);
+            }
+        }
+        if (t[5 * m + 4]) {
+            if (split) rc_patch(c, split, split + 1, rc_here(c));
+            rc_emit(c, RE_JMP);
+            push_back(ends, rc_here(c));
+            rc_emit(c, 0);
+        }
+        for (uint32_t k = t[5 * m + 1]; k; k = t[5 * k + 3]) push_back(stack, k);
+    }
+    if (alt) rc_patch(c, alt, alt + 1, rc_here(c));
+    if (x.d) {
+        uint32_t es = 0;
+        if (empty) { rc_emit(c, RE_SPLIT); es = rc_here(c); rc_emit(c, 0); }
+        rc_emit(c, RE_CLASS | back);
+        rc_emit(c, x.d);
+        for (uint32_t i = 0; i < 2 * x.d; i++) rc_emit(c, p->ranges[2 * x.c + i]);
+        if (empty) {
+            rc_emit(c, RE_JMP);
+            push_back(ends, rc_here(c));
+            rc_emit(c, 0);
+            rc_patch(c, es, es + 1, rc_here(c));
+        }
+    }
+    for (size_t i = 0; i < len(ends); i++) rc_patch(c, ends[i], ends[i] + 1, rc_here(c));
 }
 
 static void rc_node(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
@@ -725,20 +1344,22 @@ static void rc_node(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
     switch (x.kind) {
     case RN_EMPTY: return;
     case RN_CHAR: case RN_ANY: case RN_CLASS: rc_one(p, c, n, back); return;
-    case RN_BOL: rc_emit(c, RE_BOL | ((p->flags & RF_M) ? RB_MULTI : 0)); return;
-    case RN_EOL: rc_emit(c, RE_EOL | ((p->flags & RF_M) ? RB_MULTI : 0)); return;
-    case RN_WORDB: rc_emit(c, RE_WORDB | ((p->flags & RF_I) ? RB_ICASE : 0)); return;
-    case RN_NWORDB: rc_emit(c, RE_WORDB | RB_NEG | ((p->flags & RF_I) ? RB_ICASE : 0)); return;
+    case RN_STRSET: rc_strset(p, c, n, back); return;
+    case RN_BOL: rc_emit(c, RE_BOL | ((x.fl & RF_M) ? RB_MULTI : 0)); return;
+    case RN_EOL: rc_emit(c, RE_EOL | ((x.fl & RF_M) ? RB_MULTI : 0)); return;
+    case RN_WORDB: rc_emit(c, RE_WORDB | ((x.fl & RF_I) ? RB_ICASE : 0)); return;
+    case RN_NWORDB: rc_emit(c, RE_WORDB | RB_NEG | ((x.fl & RF_I) ? RB_ICASE : 0)); return;
     case RN_SEQ:
-        /* a lookbehind's terms right to left; a simple loop followed by a literal told of it */
+        /* a lookbehind's terms right to left; a simple loop followed by a literal (matched
+           as it is) told of it */
         for (uint32_t i = 0; i < x.b; i++) {
             uint32_t t = p->lists[x.a + (back ? x.b - 1 - i : i)];
             uint32_t at = rc_here(c);
             rc_node(p, c, t, back);
-            if (back || i + 1 >= x.b || (p->flags & (RF_I | RF_U | RF_V))) continue;
+            if (back || i + 1 >= x.b || (p->flags & (RF_U | RF_V))) continue;
             re_node nx = p->nodes[p->lists[x.a + i + 1]];
             re_node tx = p->nodes[t];
-            if (tx.kind == RN_REPEAT && nx.kind == RN_CHAR && rc_here(c) > at + 5 && (c->code[at] & 0xFF) == RE_SIMPLE)
+            if (tx.kind == RN_REPEAT && nx.kind == RN_CHAR && !(nx.fl & RF_I) && rc_here(c) > at + 5 && (c->code[at] & 0xFF) == RE_SIMPLE)
                 c->code[at + 5] = nx.a + 1;
         }
         return;
@@ -767,7 +1388,7 @@ static void rc_node(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
         rc_emit(c, 2 * x.b + (back ? 0 : 1));
         return;
     case RN_BACKREF: case RN_NAMEDREF:
-        rc_emit(c, RE_BACKREF | back | ((p->flags & RF_I) ? RB_ICASE : 0));
+        rc_emit(c, RE_BACKREF | back | ((x.fl & RF_I) ? RB_ICASE : 0));
         rc_emit(c, x.a);
         return;
     case RN_LOOK: {
@@ -828,7 +1449,7 @@ static void rc_node(re_parser *p, re_comp *c, uint32_t n, uint32_t back) {
 static uint32_t rc_first(re_parser *p, uint32_t n) {
     for (int guard = 0; guard < 64; guard++) {
         re_node x = p->nodes[n];
-        if (x.kind == RN_CHAR) return (p->flags & RF_I) || x.a > 0xFFFF ? 0 : x.a + 1;
+        if (x.kind == RN_CHAR) return (x.fl & RF_I) || x.a > 0xFFFF ? 0 : x.a + 1;
         if (x.kind == RN_GROUP) { n = x.a; continue; }
         if (x.kind == RN_SEQ) {
             if (x.b == 0) return 0;
@@ -844,7 +1465,7 @@ static uint32_t rc_first(re_parser *p, uint32_t n) {
 static int rc_anchored(re_parser *p, uint32_t n) {
     for (int guard = 0; guard < 64; guard++) {
         re_node x = p->nodes[n];
-        if (x.kind == RN_BOL) return !(p->flags & RF_M);
+        if (x.kind == RN_BOL) return !(x.fl & RF_M);
         if (x.kind == RN_GROUP) { n = x.a; continue; }
         if (x.kind == RN_SEQ && x.b > 0) { n = p->lists[x.a]; continue; }
         return 0;
@@ -864,8 +1485,24 @@ static void rf_add(re_first *f, uint32_t c) {
 static int rf_node(re_parser *p, uint32_t n, re_first *f, uint32_t depth) {
     if (depth > 64) { f->any = 1; return 1; }
     re_node x = p->nodes[n];
-    int icase = (p->flags & RF_I) != 0, uni = rp_unicode(p);
+    /* a v class's set holds its case already */
+    int icase = (x.fl & RF_I) != 0 && !(x.kind == RN_CLASS && x.d), uni = rp_unicode(p);
     switch (x.kind) {
+    case RN_STRSET: {
+        int empty = 0;
+        if (icase) { f->any = 1; return 1; }
+        for (uint32_t i = 0; i < x.b; i++) {
+            uint32_t id = p->vl[x.a + i];
+            if (p->vs[2 * id + 1] == 0) empty = 1;
+            else rf_add(f, p->vc[p->vs[2 * id]]);
+        }
+        for (uint32_t i = 0; i < x.d; i++) {
+            uint32_t lo = p->ranges[2 * (x.c + i)], hi = p->ranges[2 * (x.c + i) + 1];
+            if (hi >= 128) f->high = 1;
+            for (uint32_t c = lo; c <= hi && c < 128; c++) rf_add(f, c);
+        }
+        return empty;
+    }
     case RN_CHAR: {
         rf_add(f, x.a);
         if (icase) {
@@ -909,8 +1546,8 @@ static int rf_node(re_parser *p, uint32_t n, re_first *f, uint32_t depth) {
 }
 
 /* the literal every match begins with: the root's leading characters (a group's first
-   among them), as many as 64; with i only ASCII ones, folded, whose orbits are their
-   two cases. 0 for none */
+   among them), as many as 64, each read under the pattern's own i (no modifier's); with
+   i only ASCII ones, folded, whose orbits are their two cases. 0 for none */
 static uint32_t rc_prefix(re_parser *p, uint32_t root, uint32_t *out) {
     uint32_t n = 0;
     re_node x = p->nodes[root];
@@ -925,13 +1562,15 @@ static uint32_t rc_prefix(re_parser *p, uint32_t root, uint32_t *out) {
             uint32_t k = 0;
             for (; k < g.b && n < 64; k++) {
                 re_node c = p->nodes[p->lists[g.a + k]];
-                if (c.kind != RN_CHAR || c.a >= 0xD800 || (icase && (c.a >= 128 || (uni && ((c.a | 0x20) == 'k' || (c.a | 0x20) == 's'))))) break;
+                if (c.kind != RN_CHAR || c.a >= 0xD800 || ((c.fl & RF_I) != 0) != icase ||
+                    (icase && (c.a >= 128 || (uni && ((c.a | 0x20) == 'k' || (c.a | 0x20) == 's'))))) break;
                 out[n++] = icase && c.a >= 'A' && c.a <= 'Z' ? c.a + 32 : c.a;
             }
             if (k < g.b) break;
             continue;
         }
-        if (t.kind != RN_CHAR || t.a >= 0xD800 || (icase && (t.a >= 128 || (uni && ((t.a | 0x20) == 'k' || (t.a | 0x20) == 's'))))) break;
+        if (t.kind != RN_CHAR || t.a >= 0xD800 || ((t.fl & RF_I) != 0) != icase ||
+            (icase && (t.a >= 128 || (uni && ((t.a | 0x20) == 'k' || (t.a | 0x20) == 's'))))) break;
         out[n++] = icase && t.a >= 'A' && t.a <= 'Z' ? t.a + 32 : t.a;
     }
     return n;
@@ -979,28 +1618,42 @@ static void re_flags_text(uint32_t f, char *b) {
     b[k] = 0;
 }
 
-/* a SyntaxError "Invalid regular expression: /src/flags: why" thrown */
-static uint32_t re_syntax_error(js_vm *vm, uint32_t src, uint32_t flags, const char *why) {
-    vector<char> m;
+/* "Invalid regular expression: /src/flags: why" into m: the flags as fs writes them (a
+   literal's, as written), or with fs 0 in the standard's order (the constructor's) */
+static void re_error_text(js_vm *vm, uint32_t src, uint32_t flags, uint32_t fs, const char *why, vector<char> *m) {
     const char *pre = "Invalid regular expression: /";
-    append_range(m, pre, strlen(pre));
-    js_str_to_utf8(vm, src, &m);
-    push_back(m, '/');
-    char fb[12];
-    re_flags_text(flags, fb);
-    append_range(m, fb, strlen(fb));
-    append_range(m, ": ", 2);
-    append_range(m, why, strlen(why));
+    append_range(*m, pre, strlen(pre));
+    js_str_to_utf8(vm, src, m);
+    push_back(*m, '/');
+    if (fs) js_str_to_utf8(vm, fs, m);
+    else {
+        char fb[12];
+        re_flags_text(flags, fb);
+        append_range(*m, fb, strlen(fb));
+    }
+    append_range(*m, ": ", 2);
+    append_range(*m, why, strlen(why));
+}
+
+static uint32_t re_hash_of(uint32_t atom, uint32_t flags) { return (atom * 2654435761u) ^ (flags * 40503u); }
+
+static uint32_t re_compile(js_vm *vm, uint32_t src, uint32_t flags, uint32_t *why);
+
+/* the pattern src (a string) compiled with flags (bits): its regex's index, or 0 with a
+   SyntaxError thrown. A pattern compiled once is found again */
+uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags) {
+    uint32_t why = 0;
+    uint32_t re = re_compile(vm, src, flags, &why);
+    if (re) return re;
+    vector<char> m;
+    re_error_text(vm, src, flags, 0, re_errors[why], &m);
     push_back(m, 0);
     js_throw_msg(vm, vm->syntax_error_proto, data(m));
     return 0;
 }
 
-static uint32_t re_hash_of(uint32_t atom, uint32_t flags) { return (atom * 2654435761u) ^ (flags * 40503u); }
-
-/* the pattern src (a string) compiled with flags (bits): its regex's index, or 0 with a
-   SyntaxError thrown. A pattern compiled once is found again */
-uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags) {
+/* js_re_compile's work: 0 with *why the parser's error when the pattern is not one */
+static uint32_t re_compile(js_vm *vm, uint32_t src, uint32_t flags, uint32_t *why) {
     uint32_t atom = js_atom(vm, src);
     if (len(vm->re_hash) == 0) resize(vm->re_hash, 256, 0);
     {
@@ -1017,6 +1670,7 @@ uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags) {
     defer(ps) { RE_PARSER_DROP(ps); }
     re_parser *p = &ps;
     p->flags = flags;
+    p->cur = flags & (RF_I | RF_M | RF_S);
     js_str_flatten(vm, atom);
     {
         uint32_t n = vm->strs[atom].len, o = vm->strs[atom].off;
@@ -1044,7 +1698,7 @@ uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags) {
         if (!g) { re_fail(p, RE_E_NAMED_REF); break; }
         p->nodes[i].a = g;
     }
-    if (p->err) return re_syntax_error(vm, atom, flags, re_errors[p->err]);
+    if (p->err) { *why = p->err; return 0; }
     re_comp cs;
     memset(&cs, 0, sizeof cs);
     defer(cs) { vector_uint32_t_drop(&cs.code); }
@@ -1055,7 +1709,7 @@ uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags) {
     rc_emit(c, RE_SAVE);
     rc_emit(c, 1);
     rc_emit(c, RE_MATCH);
-    if (c->err) return re_syntax_error(vm, atom, flags, re_errors[c->err]);
+    if (c->err) { *why = c->err; return 0; }
     js_regex r;
     memset(&r, 0, sizeof r);
     r.code = (uint32_t)len(vm->re_code);
@@ -1137,14 +1791,10 @@ int js_re_check(js_vm *vm, uint32_t src, uint32_t flags_str, uint32_t *re, vecto
         append_range(*err, m, strlen(m));
         return 1;
     }
-    *re = js_re_compile(vm, src, flags);
+    uint32_t why = 0;
+    *re = re_compile(vm, src, flags, &why);
     if (*re) return 0;
-    jv e = vm->exception;
-    vm->throwing = 0;
-    vm->exception = JV_UNDEF;
-    jv msg = jv_is_obj(e) ? js_get(vm, e, A_MESSAGE) : JV_UNDEF;
-    if (jv_is_str(msg)) js_str_to_utf8(vm, jv_idx(msg), err);
-    vm->throwing = 0;
+    re_error_text(vm, src, flags, flags_str, re_errors[why], err);
     return 1;
 }
 
@@ -1225,7 +1875,7 @@ static int re_is_word(const uint16_t *s, uint32_t n, int64_t i, int iu) {
    cap holds 2 slots a group (RE_INF unset), regs 2 a loop; *steps counts what ran */
 static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t pos0, uint32_t *cap, uint32_t *regs,
                   vector<uint32_t> *st, uint32_t flags, uint64_t *steps, uint64_t budget) {
-    int uni = (flags & (RF_U | RF_V)) != 0, iu = uni && (flags & RF_I);
+    int uni = (flags & (RF_U | RF_V)) != 0;
     uint32_t pc = 0, pos = pos0;
     uint64_t count = 0;
     clear(*st);
@@ -1252,7 +1902,8 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 if (pos == n || ((w & RB_MULTI) && re_line_term(s[pos]))) { pc++; goto next; }
                 goto fail;
             case RE_WORDB: {
-                int a = re_is_word(s, n, (int64_t)pos - 1, iu && (w & RB_ICASE)), b = re_is_word(s, n, pos, iu && (w & RB_ICASE));
+                int iu = uni && (w & RB_ICASE);
+                int a = re_is_word(s, n, (int64_t)pos - 1, iu), b = re_is_word(s, n, pos, iu);
                 int at_b = a != b;
                 if ((w & RB_NEG) ? at_b : !at_b) goto fail;
                 pc++;
@@ -1412,6 +2063,23 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 pc = after;
                 goto next;
             }
+            case RE_SWITCH: {
+                /* a trie's level: the next character among its children's, by a binary search */
+                uint32_t width, c;
+                if (back) { if (pos == 0) goto fail; c = re_bwd(s, pos, uni, &width); }
+                else { if (pos >= n) goto fail; c = re_fwd(s, n, pos, uni, &width); }
+                if (w & RB_ICASE) c = re_rep(c, uni);
+                uint32_t nk = prog[pc + 1], lo = 0, hi = nk;
+                while (lo < hi) {
+                    uint32_t mid = (lo + hi) / 2;
+                    if (prog[pc + 2 + 2 * mid] < c) lo = mid + 1;
+                    else hi = mid;
+                }
+                if (lo >= nk || prog[pc + 2 + 2 * lo] != c) goto fail;
+                pos = back ? pos - width : pos + width;
+                pc = (uint32_t)((int32_t)(pc + 2 + 2 * nk) + (int32_t)prog[pc + 3 + 2 * lo]);
+                goto next;
+            }
             case RE_MATCH:
                 *steps += count;
                 return 1;
@@ -1552,6 +2220,19 @@ static uint32_t re_this(js_vm *vm, jv thisv, const char *what) {
     snprintf(m, sizeof m, "%s called on an object that is not a RegExp", what);
     js_throw_msg(vm, vm->type_error_proto, m);
     return 0;
+}
+
+/* a TypeError "<what> called on non-object <v>", V8's words */
+static jv re_not_object(js_vm *vm, const char *what, jv v) {
+    vector<char> m;
+    append_range(m, what, strlen(what));
+    const char *mid = " called on non-object ";
+    append_range(m, mid, strlen(mid));
+    uint32_t s = jv_is_sym(v) ? js_sym_text(vm, jv_idx(v)) : js_to_string(vm, v);
+    if (s) js_str_to_utf8(vm, s, &m);
+    vm->throwing = 0;
+    push_back(m, 0);
+    return js_throw_msg(vm, vm->type_error_proto, data(m));
 }
 
 static double re_to_length(js_vm *vm, jv v) {
@@ -1960,19 +2641,34 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         return jv_str(re_source_text(vm, vm->regexes[re].source));
     }
     case JRE_FLAGS: {
-        if (!jv_is_obj(thisv)) return js_throw_msg(vm, vm->type_error_proto, "RegExp.prototype.flags getter called on a value that is not an object");
-        if (vm->objs[jv_idx(thisv)].kind != JK_REGEXP) return jv_str(A_EMPTY);
+        /* each flag's property read, in V8's order (sticky before unicodeSets), and written in the standard's */
+        if (!jv_is_obj(thisv)) return re_not_object(vm, "RegExp.prototype.flags getter", thisv);
+        static const char *const fnames[] = { "hasIndices", "global", "ignoreCase", "multiline", "dotAll", "unicode", "sticky", "unicodeSets" };
+        static const uint32_t fbits[] = { RF_D, RF_G, RF_I, RF_M, RF_S, RF_U, RF_Y, RF_V };
+        uint32_t f = 0;
+        for (uint32_t i = 0; i < 8; i++) {
+            jv v = js_get(vm, thisv, js_atom_ascii(vm, fnames[i]));
+            if (vm->throwing) return JV_HOLE;
+            if (js_truthy(vm, v)) f |= fbits[i];
+        }
         char b[12];
-        re_flags_text(vm->regexes[vm->objs[jv_idx(thisv)].a].flags, b);
+        re_flags_text(f, b);
         return jv_str(js_str_ascii(vm, b));
     }
     case JRE_GLOBAL: case JRE_IGNORECASE: case JRE_MULTILINE: case JRE_DOTALL: case JRE_UNICODE: case JRE_UNICODESETS:
     case JRE_STICKY: case JRE_HASINDICES: {
+        static const char *const gnames[] = { "global", "ignoreCase", "multiline", "dotAll", "unicode", "unicodeSets", "sticky", "hasIndices" };
         if (jv_is_obj(thisv) && jv_idx(thisv) == vm->regexp_proto) return JV_UNDEF;
-        uint32_t re = re_this(vm, thisv, "a RegExp flag's getter");
-        if (!re) return JV_HOLE;
+        char what[64];
+        snprintf(what, sizeof what, "RegExp.prototype.%s getter", gnames[which - JRE_GLOBAL]);
+        if (!jv_is_obj(thisv)) return re_not_object(vm, what, thisv);
+        if (vm->objs[jv_idx(thisv)].kind != JK_REGEXP) {
+            char m[128];
+            snprintf(m, sizeof m, "%s called on non-RegExp object", what);
+            return js_throw_msg(vm, vm->type_error_proto, m);
+        }
         static const uint32_t bit[] = { RF_G, RF_I, RF_M, RF_S, RF_U, RF_V, RF_Y, RF_D };
-        return jv_bool((vm->regexes[re].flags & bit[which - JRE_GLOBAL]) != 0);
+        return jv_bool((vm->regexes[vm->objs[jv_idx(thisv)].a].flags & bit[which - JRE_GLOBAL]) != 0);
     }
     case JRE_MATCH: case JRE_SP_MATCH: {
         /* rx[Symbol.match](s), and s.match(rx) through it */

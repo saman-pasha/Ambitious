@@ -1,0 +1,195 @@
+["abc","ghi"] ["Α","Β"] ["h","ll","w","rld"]
+["ab","cd"] ["12"] ["ab","cd"] ["d","e"]
+["a","d"] ["c","x"] ["0","1","2","7","8","9"] ["a","b","x","y","z"]
+false true false true true false
+["a","b","c","d"] ["x","1"] ["٣","٤"] ["1","\t","2"]
+["abc","ab","a","ab"] ["abc","d","x"] @0 @0 abc@0
+null ["def"] ["ab","ab","cabc"]
+abc@0 abcc@0 xyzxyx@0 !@3
+a|b@0 😀x@0 b@0 ["😀😀","😀"]
+c@5 abcd@1 ["aabab","b"] x-y-
+RGI_Emoji 11111110000
+Basic_Emoji 00000110000
+Emoji_Keycap_Sequence 00100000000
+RGI_Emoji_Flag_Sequence 01000000000
+RGI_Emoji_Tag_Sequence 00010000000
+RGI_Emoji_Modifier_Sequence 00001000000
+RGI_Emoji_ZWJ_Sequence 10000000000
+["1f468 200d 1f469 200d 1f467 200d 1f466","1f1eb 1f1f7","31 fe0f 20e3","1f44d 1f3fd","1f600","263a fe0f"]
+3 ["31 fe0f 20e3","23 fe0f 20e3"]
+😃@2 1️⃣@1 null
+true true x@4
+👨‍👩‍👧@0 7 1f469 1f3fd 200d 1f680
+1111111 true false
+flags 259 ["1f1e6 1f1e9","1f1ea","78","1f1eb"]
+true true true false false true
+false true true false false false
+false false false true false true false
+false false true true false true true
+0100101000100
+1111111111
+111111111
+0000011
+["ÉéÀ"] ["😀","1️⃣"] ["AbxyC","xY"]
+14 true true true
+CD@2 cd@2 CD@2 123@2 1 2@1 😀@0 😀@0
+true true ["😀","😁"] 3 x..
+gv true false /[\q{ab|c}]/gv [\q{ab|c}] 2 4
+[object RegExp] true false /[\p{L}--\p{Lu}]/v
+"[a&&&b]" SyntaxError: Invalid regular expression: /[a&&&b]/v: Invalid character in character class
+"[a&&b&&c]" ok v
+"[a--b--c]" ok v
+"[a--b&&c]" SyntaxError: Invalid regular expression: /[a--b&&c]/v: Invalid set operation in character class
+"[a-z&&b]" SyntaxError: Invalid regular expression: /[a-z&&b]/v: Invalid set operation in character class
+"[ab&&c]" SyntaxError: Invalid regular expression: /[ab&&c]/v: Invalid set operation in character class
+"[&&a]" SyntaxError: Invalid regular expression: /[&&a]/v: Invalid set operation in character class
+"[a&&]" SyntaxError: Invalid regular expression: /[a&&]/v: Invalid character in character class
+"[a--]" SyntaxError: Invalid regular expression: /[a--]/v: Invalid character in character class
+"[--a]" SyntaxError: Invalid regular expression: /[--a]/v: Invalid character in character class
+"[(]" SyntaxError: Invalid regular expression: /[(]/v: Invalid character in character class
+"[)]" SyntaxError: Invalid regular expression: /[)]/v: Invalid character in character class
+"[{]" SyntaxError: Invalid regular expression: /[{]/v: Invalid character in character class
+"[}]" SyntaxError: Invalid regular expression: /[}]/v: Invalid character in character class
+"[/]" SyntaxError: Invalid regular expression: /[/]/v: Invalid character in character class
+"[-]" SyntaxError: Invalid regular expression: /[-]/v: Invalid character in character class
+"[|]" SyntaxError: Invalid regular expression: /[|]/v: Invalid character in character class
+"[a-]" SyntaxError: Invalid regular expression: /[a-]/v: Invalid character in character class
+"[-a]" SyntaxError: Invalid regular expression: /[-a]/v: Invalid character in character class
+"[a-z-]" SyntaxError: Invalid regular expression: /[a-z-]/v: Invalid character class
+"[\\q{ab}]" ok v
+"[^\\q{ab}]" SyntaxError: Invalid regular expression: /[^\q{ab}]/v: Negated character class may contain strings
+"[^\\q{a}]" ok v
+"[^\\q{a|b}]" ok v
+"[^\\q{}]" SyntaxError: Invalid regular expression: /[^\q{}]/v: Negated character class may contain strings
+"\\P{RGI_Emoji}" SyntaxError: Invalid regular expression: /\P{RGI_Emoji}/v: Invalid property name
+"[^\\p{RGI_Emoji}]" SyntaxError: Invalid regular expression: /[^\p{RGI_Emoji}]/v: Negated character class may contain strings
+"[\\P{RGI_Emoji}]" SyntaxError: Invalid regular expression: /[\P{RGI_Emoji}]/v: Invalid property name in character class
+"[\\p{RGI_Emoji}--\\q{x}]" ok v
+"[^[\\p{RGI_Emoji}&&\\q{x}]]" ok v
+"[^[\\p{RGI_Emoji}&&a]]" ok v
+"[^[\\p{RGI_Emoji}--\\p{RGI_Emoji}]]" SyntaxError: Invalid regular expression: /[^[\p{RGI_Emoji}--\p{RGI_Emoji}]]/v: Negated character class may contain strings
+"[^\\p{RGI_Emoji}--a]" SyntaxError: Invalid regular expression: /[^\p{RGI_Emoji}--a]/v: Negated character class may contain strings
+"[^\\q{ab}&&\\q{ab}]" SyntaxError: Invalid regular expression: /[^\q{ab}&&\q{ab}]/v: Negated character class may contain strings
+"[^\\q{ab}&&a]" ok v
+"[[a]&&[b]]" ok v
+"[\\q{ab|c}--\\q{c}]" ok v
+"[a!!b]" SyntaxError: Invalid regular expression: /[a!!b]/v: Invalid set operation in character class
+"[a##]" SyntaxError: Invalid regular expression: /[a##]/v: Invalid set operation in character class
+"[!!]" SyntaxError: Invalid regular expression: /[!!]/v: Invalid set operation in character class
+"[a!b]" ok v
+"[\\!]" ok v
+"[\\&]" ok v
+"[\\-]" ok v
+"[\\q]" SyntaxError: Invalid regular expression: /[\q]/v: Invalid escape
+"[\\q{]" SyntaxError: Invalid regular expression: /[\q{]/v: Invalid character in character class
+"[\\q{a}" SyntaxError: Invalid regular expression: /[\q{a}/v: Unterminated character class
+"\\q{a}" SyntaxError: Invalid regular expression: /\q{a}/v: Invalid escape
+"[a&b]" ok v
+"[a-b--c]" SyntaxError: Invalid regular expression: /[a-b--c]/v: Invalid set operation in character class
+"[\\d--4]" ok v
+"[a[b&&c]]" ok v
+"[z-a]" SyntaxError: Invalid regular expression: /[z-a]/v: Range out of order in character class
+"[\\q{abc}-z]" SyntaxError: Invalid regular expression: /[\q{abc}-z]/v: Invalid character class
+"[a-\\q{b}]" SyntaxError: Invalid regular expression: /[a-\q{b}]/v: Invalid character class
+"[\\d-z]" SyntaxError: Invalid regular expression: /[\d-z]/v: Invalid character class
+"[a-\\d]" SyntaxError: Invalid regular expression: /[a-\d]/v: Invalid character class
+"[[a]-z]" SyntaxError: Invalid regular expression: /[[a]-z]/v: Invalid character class
+"[a-[z]]" SyntaxError: Invalid regular expression: /[a-[z]]/v: Invalid character class
+"[\\]]" ok v
+"[\\[]" ok v
+"[\\B]" SyntaxError: Invalid regular expression: /[\B]/v: Invalid escape
+"[\\c]" SyntaxError: Invalid regular expression: /[\c]/v: Invalid Unicode escape
+"[\\cA]" ok v
+"[\\0]" ok v
+"[\\01]" SyntaxError: Invalid regular expression: /[\01]/v: Invalid class escape
+"[\\1]" SyntaxError: Invalid regular expression: /[\1]/v: Invalid class escape
+"[\\8]" SyntaxError: Invalid regular expression: /[\8]/v: Invalid escape
+"[a-z]{" SyntaxError: Invalid regular expression: /[a-z]{/v: Incomplete quantifier
+"a{" SyntaxError: Invalid regular expression: /a{/v: Incomplete quantifier
+"{" SyntaxError: Invalid regular expression: /{/v: Lone quantifier brackets
+"}" SyntaxError: Invalid regular expression: /}/v: Lone quantifier brackets
+"]" SyntaxError: Invalid regular expression: /]/v: Lone quantifier brackets
+"\\-" SyntaxError: Invalid regular expression: /\-/v: Invalid escape
+"[\\q{\\q}]" SyntaxError: Invalid regular expression: /[\q{\q}]/v: Invalid escape
+"[\\q{a&&b}]" SyntaxError: Invalid regular expression: /[\q{a&&b}]/v: Invalid set operation in character class
+"[\\q{(}]" SyntaxError: Invalid regular expression: /[\q{(}]/v: Invalid character in character class
+"[ab--]" SyntaxError: Invalid regular expression: /[ab--]/v: Invalid set operation in character class
+"[a&&b--c]" SyntaxError: Invalid regular expression: /[a&&b--c]/v: Invalid set operation in character class
+"[a&&&]" SyntaxError: Invalid regular expression: /[a&&&]/v: Invalid character in character class
+"[&&]" SyntaxError: Invalid regular expression: /[&&]/v: Invalid set operation in character class
+"[--]" SyntaxError: Invalid regular expression: /[--]/v: Invalid character in character class
+"[&]" ok v
+"[a&&&&b]" SyntaxError: Invalid regular expression: /[a&&&&b]/v: Invalid character in character class
+"[a----b]" SyntaxError: Invalid regular expression: /[a----b]/v: Invalid character in character class
+"[a-z--]" SyntaxError: Invalid regular expression: /[a-z--]/v: Invalid set operation in character class
+"[a--b-c]" SyntaxError: Invalid regular expression: /[a--b-c]/v: Invalid set operation in character class
+"[\\q{a}-b]" SyntaxError: Invalid regular expression: /[\q{a}-b]/v: Invalid character class
+"[a-]]" SyntaxError: Invalid regular expression: /[a-]]/v: Invalid character in character class
+"[$$]" SyntaxError: Invalid regular expression: /[$$]/v: Invalid set operation in character class
+"[**]" SyntaxError: Invalid regular expression: /[**]/v: Invalid set operation in character class
+"[++]" SyntaxError: Invalid regular expression: /[++]/v: Invalid set operation in character class
+"[,,]" SyntaxError: Invalid regular expression: /[,,]/v: Invalid set operation in character class
+"[..]" SyntaxError: Invalid regular expression: /[..]/v: Invalid set operation in character class
+"[::]" SyntaxError: Invalid regular expression: /[::]/v: Invalid set operation in character class
+"[;;]" SyntaxError: Invalid regular expression: /[;;]/v: Invalid set operation in character class
+"[<<]" SyntaxError: Invalid regular expression: /[<<]/v: Invalid set operation in character class
+"[==]" SyntaxError: Invalid regular expression: /[==]/v: Invalid set operation in character class
+"[>>]" SyntaxError: Invalid regular expression: /[>>]/v: Invalid set operation in character class
+"[??]" SyntaxError: Invalid regular expression: /[??]/v: Invalid set operation in character class
+"[@@]" SyntaxError: Invalid regular expression: /[@@]/v: Invalid set operation in character class
+"[^^]" ok v
+"[``]" SyntaxError: Invalid regular expression: /[``]/v: Invalid set operation in character class
+"[~~]" SyntaxError: Invalid regular expression: /[~~]/v: Invalid set operation in character class
+"[^^^]" SyntaxError: Invalid regular expression: /[^^^]/v: Invalid set operation in character class
+"[a^^]" SyntaxError: Invalid regular expression: /[a^^]/v: Invalid set operation in character class
+"\\p{RGI_Emoji=Yes}" SyntaxError: Invalid regular expression: /\p{RGI_Emoji=Yes}/v: Invalid property name
+"\\p{rgi_emoji}" SyntaxError: Invalid regular expression: /\p{rgi_emoji}/v: Invalid property name
+"\\p{Foo}" SyntaxError: Invalid regular expression: /\p{Foo}/v: Invalid property name
+"[\\p{Foo}]" SyntaxError: Invalid regular expression: /[\p{Foo}]/v: Invalid property name in character class
+"[\\p{Lu" SyntaxError: Invalid regular expression: /[\p{Lu/v: Invalid property name in character class
+"[[[[a]]]]" ok v
+"[[[[a]]]" SyntaxError: Invalid regular expression: /[[[[a]]]/v: Unterminated character class
+"[a" SyntaxError: Invalid regular expression: /[a/v: Unterminated character class
+"[\\" SyntaxError: Invalid regular expression: /[\/v: \ at end of pattern
+"[a\\" SyntaxError: Invalid regular expression: /[a\/v: \ at end of pattern
+SyntaxError: Invalid flags supplied to RegExp constructor 'uv' SyntaxError: Invalid flags supplied to RegExp constructor 'vv' ok dgimsvy SyntaxError: Invalid regular expression: /(/iv: Unterminated group SyntaxError: Invalid regular expression: /[a&&&b]/giv: Invalid character in character class
+"\\p{RGI_Emoji}" SyntaxError: Invalid regular expression: /\p{RGI_Emoji}/u: Invalid property name | ok 
+"\\p{Basic_Emoji}" SyntaxError: Invalid regular expression: /\p{Basic_Emoji}/u: Invalid property name | ok 
+"[\\q{ab}]" SyntaxError: Invalid regular expression: /[\q{ab}]/u: Invalid escape | ok 
+"[a&&b]" ok u | ok 
+"[(]" ok u | ok 
+"[\\&]" SyntaxError: Invalid regular expression: /[\&]/u: Invalid escape | ok 
+"\\01" SyntaxError: Invalid regular expression: /\01/u: Invalid decimal escape | SyntaxError: Invalid regular expression: /\01/v: Invalid decimal escape
+"[\\01]" SyntaxError: Invalid regular expression: /[\01]/u: Invalid class escape | SyntaxError: Invalid regular expression: /[\01]/v: Invalid class escape
+"\\1" SyntaxError: Invalid regular expression: /\1/u: Invalid escape | SyntaxError: Invalid regular expression: /\1/v: Invalid escape
+"[\\1]" SyntaxError: Invalid regular expression: /[\1]/u: Invalid class escape | SyntaxError: Invalid regular expression: /[\1]/v: Invalid class escape
+"\\c" SyntaxError: Invalid regular expression: /\c/u: Invalid Unicode escape | SyntaxError: Invalid regular expression: /\c/v: Invalid Unicode escape
+"[\\c]" SyntaxError: Invalid regular expression: /[\c]/u: Invalid Unicode escape | SyntaxError: Invalid regular expression: /[\c]/v: Invalid Unicode escape
+"\\c1" SyntaxError: Invalid regular expression: /\c1/u: Invalid Unicode escape | SyntaxError: Invalid regular expression: /\c1/v: Invalid Unicode escape
+"[\\c1]" SyntaxError: Invalid regular expression: /[\c1]/u: Invalid Unicode escape | SyntaxError: Invalid regular expression: /[\c1]/v: Invalid Unicode escape
+"\\8" SyntaxError: Invalid regular expression: /\8/u: Invalid escape | SyntaxError: Invalid regular expression: /\8/v: Invalid escape
+"[\\8]" SyntaxError: Invalid regular expression: /[\8]/u: Invalid escape | SyntaxError: Invalid regular expression: /[\8]/v: Invalid escape
+"\\00" SyntaxError: Invalid regular expression: /\00/u: Invalid decimal escape | SyntaxError: Invalid regular expression: /\00/v: Invalid decimal escape
+"\\0" ok u | ok v
+"[\\-]" ok u | ok v
+"\\-" SyntaxError: Invalid regular expression: /\-/u: Invalid escape | SyntaxError: Invalid regular expression: /\-/v: Invalid escape
+"\\k" SyntaxError: Invalid regular expression: /\k/u: Invalid named reference | SyntaxError: Invalid regular expression: /\k/v: Invalid named reference
+"\\k<a>" SyntaxError: Invalid regular expression: /\k<a>/u: Invalid named capture referenced | SyntaxError: Invalid regular expression: /\k<a>/v: Invalid named capture referenced
+"(?<a>x)\\k<b>" SyntaxError: Invalid regular expression: /(?<a>x)\k<b>/u: Invalid named capture referenced | SyntaxError: Invalid regular expression: /(?<a>x)\k<b>/v: Invalid named capture referenced
+"\\p" SyntaxError: Invalid regular expression: /\p/u: Invalid property name | SyntaxError: Invalid regular expression: /\p/v: Invalid property name
+"\\p{" SyntaxError: Invalid regular expression: /\p{/u: Invalid property name | SyntaxError: Invalid regular expression: /\p{/v: Invalid property name
+"\\p{Lu" SyntaxError: Invalid regular expression: /\p{Lu/u: Invalid property name | SyntaxError: Invalid regular expression: /\p{Lu/v: Invalid property name
+"\\pL" SyntaxError: Invalid regular expression: /\pL/u: Invalid property name | SyntaxError: Invalid regular expression: /\pL/v: Invalid property name
+"[\\p{Foo}]" SyntaxError: Invalid regular expression: /[\p{Foo}]/u: Invalid property name in character class | SyntaxError: Invalid regular expression: /[\p{Foo}]/v: Invalid property name in character class
+"[\\pL]" SyntaxError: Invalid regular expression: /[\pL]/u: Invalid property name in character class | SyntaxError: Invalid regular expression: /[\pL]/v: Invalid property name in character class
+"[\\d-a]" SyntaxError: Invalid regular expression: /[\d-a]/u: Invalid character class | SyntaxError: Invalid regular expression: /[\d-a]/v: Invalid character class
+"[a-\\d]" SyntaxError: Invalid regular expression: /[a-\d]/u: Invalid character class | SyntaxError: Invalid regular expression: /[a-\d]/v: Invalid character class
+"\\u{110000}" SyntaxError: Invalid regular expression: /\u{110000}/u: Invalid Unicode escape | SyntaxError: Invalid regular expression: /\u{110000}/v: Invalid Unicode escape
+dgvy  dgimsvy  m
+TypeError RegExp.prototype.flags getter called on non-object 1
+TypeError RegExp.prototype.flags getter called on non-object undefined
+hasIndices,global,ignoreCase,multiline,dotAll,unicode,sticky,unicodeSets
+true false false  false v gv
+ /x/
+TypeError RegExp.prototype.unicodeSets getter called on non-RegExp object
+TypeError RegExp.prototype.global getter called on non-RegExp object
