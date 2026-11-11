@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Names and descriptions</title>
+<style>.gone { display: none } .chip { display: inline-block }</style>
+</head>
+<body>
+<!-- tests/pages/a11y-names.html: accessible names (accname 1.2's recursion: embedded controls, hidden content
+     referenced, what a name from content reads) and descriptions (aria-describedby, aria-description, title, a
+     table's caption), each on an element with an id; tests/integ/a11y-chromium.sh holds Ambitious's tree of it to
+     Chromium's (a11y-names.chromium) -->
+<main>
+<h1 id="title">Names and descriptions</h1>
+
+<h2 id="h-desc">Descriptions</h2>
+<button id="save" aria-describedby="save-hint">Save</button> <span id="save-hint">Writes the file to disk</span>
+<button id="two-hints" aria-describedby="hint-hidden hint-shown">Send</button>
+<span id="hint-hidden" hidden>Hidden, but named</span><span id="hint-shown">Shown <span class="gone">and a hidden part</span> text</span>
+<button id="extra" aria-description="Opens in a new window">Help</button>
+<a href="#top" id="tip-link" title="Back to the top of the page">Top</a>
+<button id="same-title" title="Print">Print</button>
+<img src="logo.png" id="logo" alt="The logo" title="Ambitious, a browser">
+<input type="button" id="go" value="Go" title="Starts the search">
+<table id="named-table" aria-label="Scores"><caption>Last week's scores</caption><tr><td id="score">12</td></tr></table>
+<table id="titled-table" title="Kept for the record"><caption>Results</caption><tr><td id="result">3</td></tr></table>
+<button id="self-desc" aria-describedby="self-desc">Describes itself</button>
+
+<h2 id="h-embedded">Embedded controls</h2>
+<input type="checkbox" id="flash"> <label for="flash">Flash the screen <input id="times" value="3" aria-label="Times"> times</label>
+<div id="vol-label">Volume <input type="range" id="vol" value="30" aria-valuetext="thirty percent"> now</div>
+<button id="vol-button" aria-labelledby="vol-label"></button>
+<div id="spin-label">Copies <div role="spinbutton" id="spin" aria-valuenow="8" aria-label="Copies count" tabindex="0"></div> made</div>
+<button id="spin-button" aria-labelledby="spin-label"></button>
+<div id="pick-label">Pick <div role="listbox" id="pick" aria-label="Choice"><div role="option" id="p-a">Plain</div><div role="option" id="p-b" aria-selected="true">Picked</div></div> now</div>
+<button id="pick-button" aria-labelledby="pick-label"></button>
+<div id="text-label">Text <input id="typed" value="typed in" aria-label="Typed"> end</div>
+<button id="text-button" aria-labelledby="text-label"></button>
+<div id="multi-label">Sizes <select id="multi" multiple aria-label="Multi"><option selected>S</option><option>M</option><option selected>L</option></select> chosen</div>
+<button id="multi-button" aria-labelledby="multi-label"></button>
+<label id="wrap">Ship by <select id="ship"><option>Road</option><option selected>Air</option></select> please</label>
+<button id="with-select">Colour <select aria-label="Colour"><option>Red</option><option selected>Green</option></select></button>
+<div id="slider-label">Level <div role="slider" aria-label="Level" tabindex="0"></div> set</div>
+<button id="slider-button" aria-labelledby="slider-label"></button>
+
+<h2 id="h-hidden">Hidden content</h2>
+<button id="from-hidden" aria-labelledby="hidden-label">x</button>
+<div id="hidden-label" class="gone">All <span>of a hidden</span> label</div>
+<button id="from-visible" aria-labelledby="visible-label">x</button>
+<div id="visible-label">Only <span class="gone">not this</span> the shown part</div>
+<button id="content-hidden">Shown <span aria-hidden="true">icon</span> text</button>
+
+<h2 id="h-content">Names from content</h2>
+<button id="blocks"><div>First</div><div>Second</div></button>
+<button id="inline"><span>Join</span><span>ed</span></button>
+<button id="chips"><span class="chip">One</span><span class="chip">chip</span></button>
+<a href="#top" id="broken">Line<br>break</a>
+<button id="cells"><table><tr><td>A</td><td>B</td></tr></table></button>
+<a href="#top" id="icon-link"><span aria-label="Twitter">t</span></a>
+<button id="ref-inside"><span aria-labelledby="ref-target">ignored</span></button> <span id="ref-target">Referenced text</span>
+<button id="title-inside"><span title="Not read"></span>Read</button>
+<button id="self-ref" aria-labelledby="self-ref ref-file" aria-label="Delete">x</button> <span id="ref-file">the file</span>
+<button id="label-ref" aria-labelledby="labelled-div"></button> <div id="labelled-div" role="note" aria-label="The note's label">Not its text</div>
+<button id="group-inside">Pick<div role="group">grouped</div></button>
+<button id="list-inside">Go<ul><li>first</li><li>second</li></ul></button>
+<div role="menu" id="menu" aria-label="Edit">
+<div role="menuitem" id="mi-paste">Paste<div role="menu"><div role="menuitem" id="mi-plain">Plain text</div></div></div>
+</div>
+<div role="tree" id="tree" aria-label="Places">
+<div role="treeitem" id="ti-home">Home<div role="group"><div role="treeitem" id="ti-docs">Documents</div></div></div>
+</div>
+<div role="grid" id="grid" aria-label="Board"><div role="row" id="grid-row"><div role="gridcell" id="cell-a">a1</div><div role="gridcell">a2</div></div></div>
+
+<h2 id="h-labels">Labels</h2>
+<label for="both">First</label> <label for="both">second</label> <input id="both">
+<label>Only <input id="first-control" aria-describedby="hint-shown"> <input id="second-control"></label>
+<input id="aria-hint" aria-placeholder="Type here">
+<select id="grouped" aria-label="Grouped"><optgroup label="Fruit" id="og-fruit"><option id="o-apple" label="Apple, red">apple</option></optgroup></select>
+<input type="submit" id="submit">
+<input type="reset" id="reset">
+<input type="image" id="image-go" src="logo.png">
+<input type="image" id="image-alt" src="logo.png" alt="Search">
+<fieldset id="where" title="Where to send it"><legend>Address</legend></fieldset>
+<figure id="fig"><img src="logo.png" alt="A logo"><figcaption>The figure's caption</figcaption></figure>
+</main>
+</body>
+</html>

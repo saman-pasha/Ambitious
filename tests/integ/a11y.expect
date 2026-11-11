@@ -13,26 +13,26 @@
         link "News" (content) focusable
         link "About" (content) focusable
     main
-      heading 1 "Accessibility, explained" (content)
+      heading "Accessibility, explained" (content) level=1
       paragraph
       form
-        textbox "Your name" (label) focusable
+        textbox#name "Your name" (label) focusable
         textbox "Email" (label) focusable
-        textbox "Search the site" (placeholder) focusable
+        searchbox "Search the site" (placeholder) placeholder="Search the site" focusable
         textbox focusable
-        checkbox focusable
-        checkbox focusable
+        checkbox#terms checked=false focusable
+        checkbox checked=false focusable
         button "Send" (content) focusable
         button "Close" (aria_label) focusable
         button focusable
         button "Submit" (value) focusable
-      heading 3 "A heading that skips a level" (content)
+      heading "A heading that skips a level" (content) level=3
       link "A button inside a link" (content) focusable
         button "A button inside a link" (content) focusable
       navigation "Elsewhere" (aria_labelledby)
-        heading 2 "Elsewhere" (content)
-      paragraph
-      paragraph
+        heading#secondary-title "Elsewhere" (content) level=2
+      paragraph#dup
+      paragraph#dup
       table "Modules and their sizes" (caption)
         row
           columnheader "Module" (content)
@@ -41,7 +41,7 @@
           cell "dom" (content)
           cell "66" (content)
       group "Delivery" (legend)
-        radio "Fast" (label) focusable
+        radio#fast "Fast" (label) posinset=1 setsize=1 checked=false focusable
     contentinfo
 == diagnostics
   amb_diag(missing_attribute, n(1,17,0), '<img> lacks the alt attribute').
@@ -64,7 +64,7 @@
 -- why the controls have their names:
 A = ax(1,12,0), R = textbox, Why = label(n(1,36,0),'Your name')
 A = ax(1,13,0), R = textbox, Why = label('the label around it','Email')
-A = ax(1,14,0), R = textbox, Why = placeholder('Search the site')
+A = ax(1,14,0), R = searchbox, Why = placeholder('Search the site')
 A = ax(1,15,0), R = textbox, Why = 'nothing names it'
 A = ax(1,16,0), R = checkbox, Why = 'nothing names it'
 A = ax(1,17,0), R = checkbox, Why = 'nothing names it'

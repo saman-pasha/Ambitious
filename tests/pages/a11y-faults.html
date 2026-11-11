@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Faults in states and properties</title>
+<style>.gone { display: none }</style>
+</head>
+<body>
+<!-- tests/pages/a11y-faults.html: one fault of each kind the accessibility rules find in states, properties,
+     ranges, positions and hidden content (tests/integ/a11y-faults.sh); every other element here is sound -->
+<main>
+<h1 id="title">Faults</h1>
+<p>Attributes a role does not support, or that name a role that takes no name:</p>
+<label><input type="checkbox" id="pressed-box" aria-pressed="true"> A checkbox told it is pressed</label>
+<a href="#title" id="selected-link" aria-selected="true">A link told it is selected</a>
+<div id="valued-div" aria-valuenow="5">A plain element with a value</div>
+<div id="labelled-div" aria-label="A name for nothing">A plain element with a name</div>
+<p id="labelled-p" aria-label="A paragraph's name">A paragraph with a name</p>
+<button id="misspelt" aria-labeledby="title">Misspelt aria-labelledby</button>
+
+<p>Values outside an attribute's values:</p>
+<div role="checkbox" id="maybe" aria-checked="maybe" tabindex="0">Maybe</div>
+<div id="loud" aria-live="loud">Loud</div>
+<div role="heading" id="level-zero" aria-level="0">Level zero</div>
+<a href="#title" id="current-bogus" aria-current="yes">Here</a>
+<button id="popup-bogus" aria-haspopup="popover">Popup</button>
+<div role="toolbar" id="diagonal" aria-label="Tools" aria-orientation="diagonal"><button>Cut</button></div>
+
+<p>Ranges:</p>
+<div role="slider" id="no-value" aria-label="Volume" tabindex="0"></div>
+<div role="scrollbar" id="no-scroll" aria-label="Scroll" aria-controls="title"></div>
+<div role="meter" id="no-meter" aria-label="Fuel"></div>
+<div role="slider" id="too-far" aria-label="Brightness" aria-valuenow="150" tabindex="0"></div>
+<div role="slider" id="upside-down" aria-label="Balance" aria-valuenow="5" aria-valuemin="10" aria-valuemax="0" tabindex="0"></div>
+<div role="spinbutton" id="no-spin" aria-label="Count" tabindex="0"></div>
+<input type="range" id="native-range" aria-label="Native range">
+
+<p>Positions:</p>
+<ul id="list">
+<li id="past-end" aria-posinset="5" aria-setsize="3">Fifth of three</li>
+<li id="before-start" aria-posinset="0">Zeroth</li>
+<li id="bad-size" aria-setsize="-2">Of minus two</li>
+<li id="sound">Counted</li>
+</ul>
+
+<p>Hidden content:</p>
+<div id="covered" aria-hidden="true">
+<button id="covered-button">Hidden button</button>
+<a href="#title" id="covered-link">Hidden link</a>
+<div id="covered-minus" tabindex="-1">Out of the tab order</div>
+<div class="gone"><button id="covered-gone">Not drawn</button></div>
+</div>
+<button id="hidden-itself" aria-hidden="true">Hidden itself</button>
+<div id="later" class="gone" aria-live="polite">Shown later</div>
+<div id="tucked" hidden><div role="status" id="tucked-status">Tucked away</div></div>
+<div aria-hidden="true"><div role="alert" id="unheard">Never heard</div></div>
+</main>
+</body>
+</html>

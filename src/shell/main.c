@@ -746,17 +746,7 @@ static int cmd_inspect(const char *page, const char *mode, const char *goal) {
         printf("  %-10s %-18s %.*s\n", net_kind_name(nt.resource[r].kind), net_outcome_name(nt.resource[r].outcome), (int)u.len, text_ptr(&nt, u));
     }
     printf("== accessibility tree\n");
-    for (uint32_t a = 1; a < ax.anode_len; a++) {
-        if (!ax.anode[a].live) continue;
-        int depth = 0;
-        for (uint32_t q = ax.anode[a].parent; q; q = ax.anode[q].parent) depth++;
-        amb_span nm = ax.anode[a].name;
-        printf("  %*s%s", 2 * depth, "", a11y_role_name(ax.anode[a].role));
-        if (ax.anode[a].role == A11Y_ROLE_HEADING) printf(" %u", ax.anode[a].level);
-        if (nm.len) printf(" \"%.*s\" (%s)", (int)nm.len, text_ptr(&ax, nm), a11y_name_from_name(ax.anode[a].name_from));
-        if (ax.anode[a].focusable) printf(" focusable");
-        printf("\n");
-    }
+    a11y_print_tree(&ax, &d, stdout);
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
