@@ -40,7 +40,7 @@
 amb_interface(dom);
 amb_implementation(css);
 
-#define CSS_NPROPS 26
+#define CSS_NPROPS 29
 #define CSS_MAXPARTS 32
 #define CSS_VIEWPORT_W 800.0
 #define CSS_VIEWPORT_H 600.0
@@ -56,6 +56,7 @@ static const char css_ua_sheet[] =
     "blockquote, figure { margin-left: 40px; margin-right: 40px }\n"
     "address { font-style: italic }\n"
     "listing, plaintext, pre, xmp { white-space: pre }\n"
+    "code, kbd, listing, plaintext, pre, samp, tt, xmp { font-family: monospace }\n"
     "center { text-align: center }\n"
     "cite, dfn, em, i, var { font-style: italic }\n"
     "b, strong { font-weight: bolder }\n"
@@ -97,7 +98,9 @@ static const char css_ua_sheet[] =
     "hr { color: gray; border-width: 1px; margin: 0.5em auto }\n"
     "fieldset { margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove }\n"
     "details, summary { display: block }\n"
-    "button, input, select, textarea { display: inline-block }\n";
+    "button, input, select, textarea { display: inline-block }\n"
+    "button { padding: 1px 6px; border: 2px solid #767676; background-color: #efefef }\n"
+    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n";
 
 /* ---- reading text ---- */
 
@@ -429,6 +432,9 @@ static int css_valid(css_prop p, const css_val *v) {
     if (p == CSS_PROP_LIST_STYLE_TYPE)
         return kw && css_word_in(v->word, "none disc circle square decimal decimal-leading-zero lower-roman upper-roman "
                                           "lower-alpha upper-alpha lower-latin upper-latin lower-greek");
+    if (p == CSS_PROP_FONT_FAMILY) return kw && css_word_in(v->word, "serif sans-serif monospace");
+    if (p == CSS_PROP_BOX_SIZING) return kw && css_word_in(v->word, "content-box border-box");
+    if (p == CSS_PROP_MAX_WIDTH) return (length && v->num >= 0) || css_is_word(v, "none");
     return 0;
 }
 
@@ -437,7 +443,37 @@ static int css_valid(css_prop p, const css_val *v) {
 static const char *const css_prop_names[CSS_NPROPS] = { "display", "color", "background-color", "font-size", "font-weight",
     "font-style", "text-align", "line-height", "text-decoration", "white-space", "margin-top", "margin-right", "margin-bottom",
     "margin-left", "padding-top", "padding-right", "padding-bottom", "padding-left", "border-top-width", "border-right-width",
-    "border-bottom-width", "border-left-width", "border-color", "width", "height", "list-style-type" };
+    "border-bottom-width", "border-left-width", "border-color", "width", "height", "list-style-type", "font-family", "box-sizing",
+    "max-width" };
+
+/* font-family's list made the generic family the module draws with: the first
+   generic family of the list, or the first name it knows the kind of */
+static int css_family_of(const char *s, size_t n, css_val *v) {
+    static const char *const serif = "georgia times timesnewroman cambria garamond palatino palatinolinotype bookantiqua "
+        "baskerville didot constantia dejavuserif liberationserif notoserif sourceserifpro charter cursive fantasy";
+    static const char *const sans = "arial helvetica helveticaneue verdana tahoma trebuchetms segoeui roboto opensans lato "
+        "calibri ubuntu cantarell dejavusans liberationsans notosans sourcesanspro inter system-ui -apple-system "
+        "blinkmacsystemfont ui-sans-serif";
+    static const char *const mono = "courier couriernew consolas menlo monaco lucidaconsole sourcecodepro dejavusansmono "
+        "liberationmono notosansmono firacode firamono jetbrainsmono ui-monospace sfmono-regular";
+    size_t a = 0;
+    while (a < n) {
+        size_t b = css_comma(s, n, a);
+        size_t i = css_skip_ws(s, b, a), e = b;
+        while (e > i && css_ws(s[e - 1])) e--;
+        if (e > i && (s[i] == '"' || s[i] == '\'')) { i++; if (e > i && (s[e - 1] == '"' || s[e - 1] == '\'')) e--; }
+        char w[48];
+        size_t k = 0;
+        for (size_t j = i; j < e && k + 1 < sizeof w; j++) if (!css_ws(s[j])) w[k++] = css_lower(s[j]);
+        w[k] = 0;
+        if (strcmp(w, "serif") == 0 || strcmp(w, "sans-serif") == 0 || strcmp(w, "monospace") == 0) { css_word_val(v, w); return 1; }
+        if (css_word_in(w, serif)) { css_word_val(v, "serif"); return 1; }
+        if (css_word_in(w, sans)) { css_word_val(v, "sans-serif"); return 1; }
+        if (css_word_in(w, mono)) { css_word_val(v, "monospace"); return 1; }
+        a = b + 1;
+    }
+    return 0;
+}
 
 static void css_add_decl(css_style *s, uint32_t rule, css_prop prop, const css_val *v, int important, const char *text, size_t tn) {
     amb_span t = text_add(s, text, tn);
@@ -510,9 +546,11 @@ static void css_font(css_style *s, uint32_t rule, const char *val, size_t vn, in
     css_word_val(&weight, "normal");
     css_word_val(&lh, "normal");
     memset(&size, 0, sizeof size);
+    size_t size_j = 0;
     for (size_t j = 0; j < k && !have_size; j++) {
         const char *p = val + st[j];
         size_t pn = ln[j], slash = 0;
+        size_j = j;
         while (slash < pn && p[slash] != '/') slash++;
         if (!css_parse_val(p, slash, &v) || css_is_global(&v)) return;
         if (slash == pn && v.unit == CSS_UNIT_KEYWORD && css_word_in(v.word, "italic oblique")) style = v;
@@ -525,6 +563,11 @@ static void css_font(css_style *s, uint32_t rule, const char *val, size_t vn, in
         } else return;
     }
     if (!have_size) return;     /* caption, menu and the other system fonts: not read */
+    /* the family list follows the size (and its line height) */
+    css_val fam;
+    size_t after = size_j + 1 < k ? st[size_j + 1] : vn;
+    if (after >= vn || !css_family_of(val + after, vn - after, &fam)) css_word_val(&fam, "serif");
+    css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &fam, important, val, vn);
     css_add_decl(s, rule, CSS_PROP_FONT_STYLE, &style, important, val, vn);
     css_add_decl(s, rule, CSS_PROP_FONT_WEIGHT, &weight, important, val, vn);
     css_add_decl(s, rule, CSS_PROP_FONT_SIZE, &size, important, val, vn);
@@ -597,6 +640,12 @@ static void css_declaration(css_style *s, uint32_t rule, const char *name, size_
     }
     if (css_eq_ci(name, nn, "font")) { if (global) css_add_all(s, rule, fonts, 4, &g, important, val, vn); else css_font(s, rule, val, vn, important); return; }
     if (css_eq_ci(name, nn, "background")) { if (global) css_add_decl(s, rule, CSS_PROP_BACKGROUND_COLOR, &g, important, val, vn); else css_pick(s, rule, CSS_PROP_BACKGROUND_COLOR, "", val, vn, important); return; }
+    if (css_eq_ci(name, nn, "font-family")) {
+        css_val f;
+        if (global) css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &g, important, val, vn);
+        else if (css_family_of(val, vn, &f)) css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &f, important, val, vn);
+        return;
+    }
     if (css_eq_ci(name, nn, "list-style")) { if (global) css_add_decl(s, rule, CSS_PROP_LIST_STYLE_TYPE, &g, important, val, vn); else css_pick(s, rule, CSS_PROP_LIST_STYLE_TYPE, "disc", val, vn, important); return; }
     if (css_eq_ci(name, nn, "text-decoration") || css_eq_ci(name, nn, "text-decoration-line")) {
         if (global) css_add_decl(s, rule, CSS_PROP_TEXT_DECORATION, &g, important, val, vn);
@@ -1151,7 +1200,8 @@ static int css_complex_matches(const dom_document *d, uint32_t x, const char *s,
 
 static int css_inherited(css_prop p) {
     return p == CSS_PROP_COLOR || p == CSS_PROP_FONT_SIZE || p == CSS_PROP_FONT_WEIGHT || p == CSS_PROP_FONT_STYLE ||
-           p == CSS_PROP_TEXT_ALIGN || p == CSS_PROP_LINE_HEIGHT || p == CSS_PROP_WHITE_SPACE || p == CSS_PROP_LIST_STYLE_TYPE;
+           p == CSS_PROP_TEXT_ALIGN || p == CSS_PROP_LINE_HEIGHT || p == CSS_PROP_WHITE_SPACE || p == CSS_PROP_LIST_STYLE_TYPE ||
+           p == CSS_PROP_FONT_FAMILY;
 }
 
 /* a property's initial value, as computed */
@@ -1168,6 +1218,9 @@ static void css_initial(css_prop p, css_val *v) {
     else if (p == CSS_PROP_TEXT_DECORATION) css_word_val(v, "none");
     else if (p == CSS_PROP_WIDTH || p == CSS_PROP_HEIGHT) v->unit = CSS_UNIT_AUTO;
     else if (p == CSS_PROP_LIST_STYLE_TYPE) css_word_val(v, "disc");
+    else if (p == CSS_PROP_FONT_FAMILY) css_word_val(v, "serif");     /* as browsers have it */
+    else if (p == CSS_PROP_BOX_SIZING) css_word_val(v, "content-box");
+    else if (p == CSS_PROP_MAX_WIDTH) css_word_val(v, "none");
 }
 /* the initial value at an element: border-color's is currentcolor, the element's colour */
 static void css_initial_at(css_prop p, const css_val *cur, css_val *v) {
@@ -1297,7 +1350,7 @@ static void css_element(css_style *s, dom_node_h nh, const vector<uint32_t> *mat
         }
     }
     /* font-size first, for the em of the others; then color, for their currentcolor */
-    static const int order[CSS_NPROPS] = { 3, 1, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 };
+    static const int order[CSS_NPROPS] = { 3, 1, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
         css_prop p = (css_prop)order[oi];
         uint32_t w = win[p];

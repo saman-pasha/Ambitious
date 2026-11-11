@@ -174,3 +174,16 @@ neighbours.
    host's own triple). `toolchain/env.sh` therefore names this machine
    (`AMB_TARGET`, from `uname`: `x86_64-linux-gnu` here). Every build passes
    `AMB_CICILANG_FLAGS`, which is `--no-kb --target=$AMB_TARGET -I include`.
+10. **`T x = {0};` fails to lower when `T`'s first member is an array of
+    structs.** cicilang emits `sext i32 0 to [6 x %struct.amb_face]`, which
+    LLVM refuses (`invalid cast opcode`). A struct that begins with a scalar
+    or a vector lowers fine. `src/paint/font.h` therefore puts `amb_fonts`'s
+    vectors first.
+
+    Two more things learnt on the way, which are rules rather than bugs:
+    - The ownership qualifier `own` is a keyword, so a parameter or variable
+      named `own` misparses. The checker then reports `a borrow consumed` or a
+      syntax error some lines on.
+    - A struct holding ccllib vectors is not autodropped. Its owner drops each
+      vector by name under `defer`; a function given a pointer to the struct
+      may not consume its fields.

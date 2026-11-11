@@ -8,12 +8,14 @@
  *   ambitious snapshot FILE       the demo document's snapshot, written to FILE
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
  *   ambitious style PAGE          the page's elements with their computed styles
+ *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
  *   ambitious query PAGE GOAL     the reasoner's answers over the page's facts
  *   ambitious why PAGE GOAL       the reasoner's proofs
  *   ambitious advise PAGE [--apply]  the reasoner's advice, applied as one batch
  *
- * A page's snapshot has three sections: the document, its parse and its style
- * (the cascade's sheets, rules, matches and computed values).
+ * A page's snapshot has four sections: the document, its parse, its style (the
+ * cascade's sheets, rules, matches and computed values) and its layout (boxes,
+ * lines and fragments, with how each box's width was found).
  *
  * The reasoner is cocolog over prolog/amb/reason.pl, a process of its own: the
  * engine hands it a snapshot file and reads back text. AMB_ROOT and AMB_COCOLOG
@@ -30,6 +32,13 @@
 amb_interface(dom);
 amb_interface(html);
 amb_interface(css);
+amb_interface(layout);
+
+#include "../paint/paint.h"
+
+/* the viewport a page is laid out in */
+#define VIEW_W 800.0
+#define VIEW_H 600.0
 
 #define S(lit) lit, sizeof(lit) - 1
 
@@ -311,25 +320,28 @@ static int cmd_snapshot(const char *path) {
 
 /* ---- a page: an HTML file parsed into a document, and styled ---- */
 
-static int load_page(const char *path, dom_document *d, html_parser *p, css_style *st) {
+static int load_page(const char *path, dom_document *d, html_parser *p, css_style *st, layout_tree *lt) {
     vector<char> src;
     if (!read_all(path, &src)) { fprintf(stderr, "ambitious: cannot read %s\n", path); return 0; }
     dom_init(d, 1);
     html_init(p, 1);
     css_init(st, 1);
+    layout_init(lt, 1);
     html_parse(p, d, data(src), len(src));
     css_cascade(st, d);
+    layout_run(lt, d, st, VIEW_W, VIEW_H);
     return 1;
 }
 
-/* the page's snapshot: the document's section, the parse's, the style's */
-static int write_page_snapshot(const dom_document *d, const html_parser *p, const css_style *st, const char *path) {
+/* the page's snapshot: the document's section, the parse's, the style's, the layout's */
+static int write_page_snapshot(const dom_document *d, const html_parser *p, const css_style *st, const layout_tree *lt, const char *path) {
     own FILE *f = fopen(path, "w");
     if (!f) return 0;
     defer(f) { fclose(f); }
     dom_export(d, f);
     html_export(p, f);
     css_export(st, f);
+    layout_export(lt, f);
     return 1;
 }
 
@@ -337,7 +349,8 @@ static int cmd_parse(const char *page) {
     dom_document d;
     html_parser p;
     css_style st;
-    if (!load_page(page, &d, &p, &st)) return 2;
+    layout_tree lt;
+    if (!load_page(page, &d, &p, &st, &lt)) return 2;
     dom_serialize(&d, dom_root(&d), stdout);
     printf("\n");
     printf("%zu nodes, %zu parse errors, invariants: %d broken\n", node_count(d), error_count(p), dom_check_invariants(&d, stdout));
@@ -350,7 +363,8 @@ static int cmd_style(const char *page) {
     dom_document d;
     html_parser p;
     css_style st;
-    if (!load_page(page, &d, &p, &st)) return 2;
+    layout_tree lt;
+    if (!load_page(page, &d, &p, &st, &lt)) return 2;
     static const css_prop shown[] = { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE,
                                       CSS_PROP_FONT_WEIGHT, CSS_PROP_MARGIN_TOP, CSS_PROP_PADDING_LEFT };
     static const char *const names[] = { "display", "color", "background", "font-size", "weight", "margin-top", "padding-left" };
@@ -372,6 +386,27 @@ static int cmd_style(const char *page) {
     return 0;
 }
 
+/* the page drawn into a PNG: its size, what it holds, and its pixels' checksum */
+static int cmd_render(const char *page, const char *png) {
+    dom_document d;
+    html_parser p;
+    css_style st;
+    layout_tree lt;
+    if (!load_page(page, &d, &p, &st, &lt)) return 2;
+    amb_canvas c = {0};
+    defer(c) { AMB_CANVAS_DROP(c); }
+    amb_paint(&lt, &c);
+    own FILE *f = fopen(png, "wb");
+    if (!f) { fprintf(stderr, "ambitious: cannot write %s\n", png); return 2; }
+    defer(f) { fclose(f); }
+    if (!amb_png_write(&c, f)) { fprintf(stderr, "ambitious: cannot write %s\n", png); return 2; }
+    size_t texts = 0;
+    for (uint32_t i = 1; i < lt.frag_len; i++) if (lt.frag[i].live && lt.frag[i].kind == LAYOUT_FRAG_KIND_TEXT) texts++;
+    printf("rendered %ux%u: %zu boxes, %zu lines, %zu text fragments; pixels fnv1a64:%016llx\n", c.w, c.h, box_count(lt), line_count(lt),
+           texts, (unsigned long long)amb_canvas_hash(&c));
+    return 0;
+}
+
 /* query, why, advise: the reasoner over the page's snapshot */
 static int cmd_reason(const char *what, const char *page, const char *goal, int apply) {
     session s;
@@ -379,11 +414,12 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     dom_document d;
     html_parser p;
     css_style st;
-    if (!load_page(page, &d, &p, &st)) return 2;
+    layout_tree lt;
+    if (!load_page(page, &d, &p, &st, &lt)) return 2;
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
-    if (!write_page_snapshot(&d, &p, &st, snap)) return 2;
+    if (!write_page_snapshot(&d, &p, &st, &lt, snap)) return 2;
     int rc = reason(&s, what, snap, goal, out);
     print_file(out, "");
     if (rc != 0) return rc;
@@ -402,8 +438,9 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "style") == 0) return cmd_style(argv[2]);
+    if (argc >= 4 && strcmp(argv[1], "render") == 0) return cmd_render(argv[2], argv[3]);
     if (argc >= 4 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "why") == 0)) return cmd_reason(argv[1], argv[2], argv[3], 0);
     if (argc >= 3 && strcmp(argv[1], "advise") == 0) return cmd_reason("advise", argv[2], 0, argc >= 4 && strcmp(argv[3], "--apply") == 0);
-    fprintf(stderr, "usage: ambitious loop | snapshot FILE | parse PAGE | style PAGE | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
+    fprintf(stderr, "usage: ambitious loop | snapshot FILE | parse PAGE | style PAGE | render PAGE PNG | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
     return 2;
 }

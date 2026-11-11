@@ -1,0 +1,773 @@
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:8cdd3599:4079). Do not edit. */
+typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
+typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL } layout_box_kind;
+typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH } layout_width_how;
+typedef enum layout_frag_kind { LAYOUT_FRAG_KIND_TEXT, LAYOUT_FRAG_KIND_ATOMIC, LAYOUT_FRAG_KIND_MARKER, LAYOUT_FRAG_KIND_INLINE } layout_frag_kind;
+typedef enum layout_face { LAYOUT_FACE_SANS, LAYOUT_FACE_SANS_BOLD, LAYOUT_FACE_SERIF, LAYOUT_FACE_SERIF_BOLD, LAYOUT_FACE_MONO, LAYOUT_FACE_MONO_BOLD } layout_face;
+typedef enum layout_op { LAYOUT_OP_RUN } layout_op;
+typedef struct layout_box_h { uint32_t doc, index, gen; } layout_box_h;
+typedef struct layout_line_h { uint32_t doc, index, gen; } layout_line_h;
+typedef struct layout_frag_h { uint32_t doc, index, gen; } layout_frag_h;
+typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t border_color; } layout_box;
+typedef struct layout_line { uint32_t gen, live, free_next; uint32_t box; uint32_t next; uint32_t first_frag; uint32_t last_frag; double x; double y; double w; double h; double baseline; } layout_line;
+typedef struct layout_frag { uint32_t gen, live, free_next; uint32_t line; uint32_t next; layout_frag_kind kind; dom_node_h node; uint32_t atomic; amb_span text; double x; double y; double w; double h; double baseline; layout_face face; double size; uint8_t italic; uint32_t color; uint32_t background; uint8_t decoration; } layout_frag;
+typedef struct layout_store_tag { char unused; } layout_store_tag;
+typedef store<layout_store_tag> layout_tree;
+extern const char layout_fingerprint[];
+const char *layout_status_name(layout_status x);
+const char *layout_op_name(layout_op x);
+const char *layout_box_kind_name(layout_box_kind x);
+const char *layout_width_how_name(layout_width_how x);
+const char *layout_frag_kind_name(layout_frag_kind x);
+const char *layout_face_name(layout_face x);
+void layout_init(layout_tree *d, uint32_t id);
+uint64_t layout_revision(const layout_tree *d);
+layout_status layout_run(layout_tree *d, dom_document *doc, css_style *style, double width, double height);
+layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, double width, double height);
+layout_box_h layout_children_first(const layout_tree *d, layout_box_h h);
+layout_box_h layout_children_next(const layout_tree *d, layout_box_h h);
+layout_box_h layout_children_up(const layout_tree *d, layout_box_h h);
+layout_box_h layout_children_last(const layout_tree *d, layout_box_h h);
+size_t layout_children_count(const layout_tree *d, layout_box_h h);
+layout_line_h layout_lines_first(const layout_tree *d, layout_box_h h);
+layout_line_h layout_lines_next(const layout_tree *d, layout_line_h h);
+layout_box_h layout_lines_up(const layout_tree *d, layout_line_h h);
+layout_line_h layout_lines_last(const layout_tree *d, layout_box_h h);
+size_t layout_lines_count(const layout_tree *d, layout_box_h h);
+layout_frag_h layout_frags_first(const layout_tree *d, layout_line_h h);
+layout_frag_h layout_frags_next(const layout_tree *d, layout_frag_h h);
+layout_line_h layout_frags_up(const layout_tree *d, layout_frag_h h);
+layout_frag_h layout_frags_last(const layout_tree *d, layout_line_h h);
+size_t layout_frags_count(const layout_tree *d, layout_line_h h);
+int layout_check_invariants(const layout_tree *d, FILE *report);
+void layout_export(const layout_tree *d, FILE *out);
+layout_status layout_dispatch(layout_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module layout, generated from contracts/layout.pl. Do not edit. */
+const char *layout_status_name(layout_status x) {
+    switch (x) {
+    case LAYOUT_OK: return "ok";
+    case LAYOUT_STALE_HANDLE: return "stale_handle";
+    case LAYOUT_WRONG_KIND: return "wrong_kind";
+    case LAYOUT_NO_ROOT: return "no_root";
+    case LAYOUT_BAD_REQUEST: return "bad_request";
+    case LAYOUT_NOT_REQUESTABLE: return "not_requestable";
+    case LAYOUT_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *layout_op_name(layout_op x) {
+    switch (x) {
+    case LAYOUT_OP_RUN: return "run";
+    }
+    return "?";
+}
+const char *layout_box_kind_name(layout_box_kind x) {
+    switch (x) {
+    case LAYOUT_BOX_KIND_VIEWPORT: return "viewport";
+    case LAYOUT_BOX_KIND_BLOCK: return "block";
+    case LAYOUT_BOX_KIND_ANONYMOUS: return "anonymous";
+    case LAYOUT_BOX_KIND_LIST_ITEM: return "list_item";
+    case LAYOUT_BOX_KIND_INLINE_BLOCK: return "inline_block";
+    case LAYOUT_BOX_KIND_REPLACED: return "replaced";
+    case LAYOUT_BOX_KIND_TABLE: return "table";
+    case LAYOUT_BOX_KIND_ROW: return "row";
+    case LAYOUT_BOX_KIND_CELL: return "cell";
+    }
+    return "?";
+}
+const char *layout_width_how_name(layout_width_how x) {
+    switch (x) {
+    case LAYOUT_WIDTH_HOW_VIEWPORT: return "viewport";
+    case LAYOUT_WIDTH_HOW_FILL: return "fill";
+    case LAYOUT_WIDTH_HOW_DECLARED: return "declared";
+    case LAYOUT_WIDTH_HOW_PERCENT: return "percent";
+    case LAYOUT_WIDTH_HOW_SHRINK_TO_FIT: return "shrink_to_fit";
+    case LAYOUT_WIDTH_HOW_COLUMN: return "column";
+    case LAYOUT_WIDTH_HOW_INTRINSIC: return "intrinsic";
+    case LAYOUT_WIDTH_HOW_MAX_WIDTH: return "max_width";
+    }
+    return "?";
+}
+const char *layout_frag_kind_name(layout_frag_kind x) {
+    switch (x) {
+    case LAYOUT_FRAG_KIND_TEXT: return "text";
+    case LAYOUT_FRAG_KIND_ATOMIC: return "atomic";
+    case LAYOUT_FRAG_KIND_MARKER: return "marker";
+    case LAYOUT_FRAG_KIND_INLINE: return "inline";
+    }
+    return "?";
+}
+const char *layout_face_name(layout_face x) {
+    switch (x) {
+    case LAYOUT_FACE_SANS: return "sans";
+    case LAYOUT_FACE_SANS_BOLD: return "sans_bold";
+    case LAYOUT_FACE_SERIF: return "serif";
+    case LAYOUT_FACE_SERIF_BOLD: return "serif_bold";
+    case LAYOUT_FACE_MONO: return "mono";
+    case LAYOUT_FACE_MONO_BOLD: return "mono_bold";
+    }
+    return "?";
+}
+
+const char layout_fingerprint[] = "fnv1a32:8cdd3599:4079";
+void layout_init(layout_tree *d, uint32_t id) {
+    if (d->box_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    text_add(d, "", 0);
+}
+uint64_t layout_revision(const layout_tree *d) { return d->revision; }
+layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, double width, double height)
+{
+    return LAYOUT_OK;
+}
+
+layout_box_h layout_children_first(const layout_tree *d, layout_box_h h) {
+    layout_box_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return box_handle(d, d->box[h.index].first_child);
+}
+layout_box_h layout_children_next(const layout_tree *d, layout_box_h h) {
+    layout_box_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return box_handle(d, d->box[h.index].next);
+}
+layout_box_h layout_children_up(const layout_tree *d, layout_box_h h) {
+    layout_box_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return box_handle(d, d->box[h.index].parent);
+}
+layout_box_h layout_children_last(const layout_tree *d, layout_box_h h) {
+    layout_box_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return box_handle(d, d->box[h.index].last_child);
+}
+size_t layout_children_count(const layout_tree *d, layout_box_h h) {
+    if (!box_live(d, h)) return 0;
+    return children_count(d, h.index);
+}
+
+layout_line_h layout_lines_first(const layout_tree *d, layout_box_h h) {
+    layout_line_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return line_handle(d, d->box[h.index].first_line);
+}
+layout_line_h layout_lines_next(const layout_tree *d, layout_line_h h) {
+    layout_line_h none = { 0, 0, 0 };
+    if (!line_live(d, h)) return none;
+    return line_handle(d, d->line[h.index].next);
+}
+layout_box_h layout_lines_up(const layout_tree *d, layout_line_h h) {
+    layout_box_h none = { 0, 0, 0 };
+    if (!line_live(d, h)) return none;
+    return box_handle(d, d->line[h.index].box);
+}
+layout_line_h layout_lines_last(const layout_tree *d, layout_box_h h) {
+    layout_line_h none = { 0, 0, 0 };
+    if (!box_live(d, h)) return none;
+    return line_handle(d, d->box[h.index].last_line);
+}
+size_t layout_lines_count(const layout_tree *d, layout_box_h h) {
+    if (!box_live(d, h)) return 0;
+    return lines_count(d, h.index);
+}
+
+layout_frag_h layout_frags_first(const layout_tree *d, layout_line_h h) {
+    layout_frag_h none = { 0, 0, 0 };
+    if (!line_live(d, h)) return none;
+    return frag_handle(d, d->line[h.index].first_frag);
+}
+layout_frag_h layout_frags_next(const layout_tree *d, layout_frag_h h) {
+    layout_frag_h none = { 0, 0, 0 };
+    if (!frag_live(d, h)) return none;
+    return frag_handle(d, d->frag[h.index].next);
+}
+layout_line_h layout_frags_up(const layout_tree *d, layout_frag_h h) {
+    layout_line_h none = { 0, 0, 0 };
+    if (!frag_live(d, h)) return none;
+    return line_handle(d, d->frag[h.index].line);
+}
+layout_frag_h layout_frags_last(const layout_tree *d, layout_line_h h) {
+    layout_frag_h none = { 0, 0, 0 };
+    if (!line_live(d, h)) return none;
+    return frag_handle(d, d->line[h.index].last_frag);
+}
+size_t layout_frags_count(const layout_tree *d, layout_line_h h) {
+    if (!line_live(d, h)) return 0;
+    return frags_count(d, h.index);
+}
+
+int layout_check_invariants(const layout_tree *d, FILE *report) {
+    int bad = 0;
+    /* child_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->box_len ? d->box_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->box_len; o++) {
+            if (!d->box[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->box[o].first_child; i; i = d->box[i].next) {
+                if (i >= d->box_len || !d->box[i].live || d->box[i].parent != o || ++steps > d->box_len || seen[i]) { bad++; amb_report(report, "layout", "child_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->box[o].last_child != prev) { bad++; amb_report(report, "layout", "child_links", o); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++)
+            if (d->box[i].live && d->box[i].parent && seen[i] != d->box[i].parent) { bad++; amb_report(report, "layout", "child_links", i); }
+        free(seen);
+    }
+    /* line_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->line_len ? d->line_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->box_len; o++) {
+            if (!d->box[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->box[o].first_line; i; i = d->line[i].next) {
+                if (i >= d->line_len || !d->line[i].live || d->line[i].box != o || ++steps > d->line_len || seen[i]) { bad++; amb_report(report, "layout", "line_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->box[o].last_line != prev) { bad++; amb_report(report, "layout", "line_links", o); }
+        }
+        for (uint32_t i = 1; i < d->line_len; i++)
+            if (d->line[i].live && d->line[i].box && seen[i] != d->line[i].box) { bad++; amb_report(report, "layout", "line_links", i); }
+        free(seen);
+    }
+    /* frag_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->frag_len ? d->frag_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->line_len; o++) {
+            if (!d->line[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->line[o].first_frag; i; i = d->frag[i].next) {
+                if (i >= d->frag_len || !d->frag[i].live || d->frag[i].line != o || ++steps > d->frag_len || seen[i]) { bad++; amb_report(report, "layout", "frag_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->line[o].last_frag != prev) { bad++; amb_report(report, "layout", "frag_links", o); }
+        }
+        for (uint32_t i = 1; i < d->frag_len; i++)
+            if (d->frag[i].live && d->frag[i].line && seen[i] != d->frag[i].line) { bad++; amb_report(report, "layout", "frag_links", i); }
+        free(seen);
+    }
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].parent;
+            if (d->box[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].next;
+            if (d->box[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].first_child;
+            if (d->box[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].last_child;
+            if (d->box[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].first_line;
+            if (d->box[i].live && r && (r >= d->line_len || !d->line[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->box_len; i++) {
+            uint32_t r = d->box[i].last_line;
+            if (d->box[i].live && r && (r >= d->line_len || !d->line[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->line_len; i++) {
+            uint32_t r = d->line[i].box;
+            if (d->line[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->line_len; i++) {
+            uint32_t r = d->line[i].next;
+            if (d->line[i].live && r && (r >= d->line_len || !d->line[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->line_len; i++) {
+            uint32_t r = d->line[i].first_frag;
+            if (d->line[i].live && r && (r >= d->frag_len || !d->frag[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->line_len; i++) {
+            uint32_t r = d->line[i].last_frag;
+            if (d->line[i].live && r && (r >= d->frag_len || !d->frag[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->frag_len; i++) {
+            uint32_t r = d->frag[i].line;
+            if (d->frag[i].live && r && (r >= d->line_len || !d->line[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->frag_len; i++) {
+            uint32_t r = d->frag[i].next;
+            if (d->frag[i].live && r && (r >= d->frag_len || !d->frag[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->frag_len; i++) {
+            uint32_t r = d->frag[i].atomic;
+            if (d->frag[i].live && r && (r >= d->box_len || !d->box[r].live)) { bad++; amb_report(report, "layout", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void layout_export(const layout_tree *d, FILE *out) {
+    fprintf(out, "amb_snapshot(layout, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, layout_fingerprint);
+    for (uint32_t i = 1; i < d->box_len; i++) {
+        if (!d->box[i].live) continue;
+        if (1) { fputs("layout_box(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_ref(out, "n", d->box[i].node.doc, d->box[i].node.index, d->box[i].node.gen); fputs(",", out); fputs(layout_box_kind_name(d->box[i].kind), out); fputs(",", out); amb_put_f64(out, d->box[i].x); fputs(",", out); amb_put_f64(out, d->box[i].y); fputs(",", out); amb_put_f64(out, d->box[i].w); fputs(",", out); amb_put_f64(out, d->box[i].h); fputs(").\n", out); }
+        if (d->box[i].parent != 0) { fputs("layout_parent(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); { uint32_t r = d->box[i].parent; amb_put_ref(out, "bx", d->id, r, r && r < d->box_len ? d->box[r].gen : 0); } fputs(").\n", out); }
+        if (1) { fputs("layout_margin(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].mt); fputs(",", out); amb_put_f64(out, d->box[i].mr); fputs(",", out); amb_put_f64(out, d->box[i].mb); fputs(",", out); amb_put_f64(out, d->box[i].ml); fputs(").\n", out); }
+        if (1) { fputs("layout_border(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].bt); fputs(",", out); amb_put_f64(out, d->box[i].br); fputs(",", out); amb_put_f64(out, d->box[i].bb); fputs(",", out); amb_put_f64(out, d->box[i].bl); fputs(").\n", out); }
+        if (1) { fputs("layout_padding(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].pt); fputs(",", out); amb_put_f64(out, d->box[i].pr); fputs(",", out); amb_put_f64(out, d->box[i].pb); fputs(",", out); amb_put_f64(out, d->box[i].pl); fputs(").\n", out); }
+        if (1) { fputs("layout_width(", out); amb_put_handle(out, "bx", d->id, i, d->box[i].gen); fputs(",", out); amb_put_f64(out, d->box[i].w); fputs(",", out); fputs(layout_width_how_name(d->box[i].how), out); fputs(",", out); amb_put_f64(out, d->box[i].avail); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->line_len; i++) {
+        if (!d->line[i].live) continue;
+        if (1) { fputs("layout_line(", out); amb_put_handle(out, "ln", d->id, i, d->line[i].gen); fputs(",", out); { uint32_t r = d->line[i].box; amb_put_ref(out, "bx", d->id, r, r && r < d->box_len ? d->box[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->line[i].x); fputs(",", out); amb_put_f64(out, d->line[i].y); fputs(",", out); amb_put_f64(out, d->line[i].w); fputs(",", out); amb_put_f64(out, d->line[i].h); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->frag_len; i++) {
+        if (!d->frag[i].live) continue;
+        if (d->frag[i].kind == LAYOUT_FRAG_KIND_TEXT) { fputs("layout_text(", out); amb_put_handle(out, "fr", d->id, i, d->frag[i].gen); fputs(",", out); { uint32_t r = d->frag[i].line; amb_put_ref(out, "ln", d->id, r, r && r < d->line_len ? d->line[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->frag[i].node.doc, d->frag[i].node.index, d->frag[i].node.gen); fputs(",", out); text_put(d, out, d->frag[i].text); fputs(",", out); amb_put_f64(out, d->frag[i].x); fputs(",", out); amb_put_f64(out, d->frag[i].y); fputs(",", out); amb_put_f64(out, d->frag[i].w); fputs(",", out); amb_put_f64(out, d->frag[i].h); fputs(").\n", out); }
+        if (d->frag[i].kind != LAYOUT_FRAG_KIND_TEXT) { fputs("layout_frag(", out); amb_put_handle(out, "fr", d->id, i, d->frag[i].gen); fputs(",", out); { uint32_t r = d->frag[i].line; amb_put_ref(out, "ln", d->id, r, r && r < d->line_len ? d->line[r].gen : 0); } fputs(",", out); fputs(layout_frag_kind_name(d->frag[i].kind), out); fputs(",", out); amb_put_ref(out, "n", d->frag[i].node.doc, d->frag[i].node.index, d->frag[i].node.gen); fputs(",", out); amb_put_f64(out, d->frag[i].x); fputs(",", out); amb_put_f64(out, d->frag[i].y); fputs(",", out); amb_put_f64(out, d->frag[i].w); fputs(",", out); amb_put_f64(out, d->frag[i].h); fputs(").\n", out); }
+    }
+}
+layout_status layout_dispatch(layout_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    layout_status st = LAYOUT_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return LAYOUT_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return LAYOUT_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return LAYOUT_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return LAYOUT_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return LAYOUT_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return LAYOUT_STALE_REVISION; }
+
+    if (amb_name_is(name, name_len, "run")) { amb_result(report, name, "not_requestable", d->revision); return LAYOUT_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module layout, an instance of store<layout_store_tag>: one own buffer a part */
+typedef struct store_layout_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t box_len, box_cap;
+    uint32_t box_free;
+    own layout_box *box;
+    size_t line_len, line_cap;
+    uint32_t line_free;
+    own layout_line *line;
+    size_t frag_len, frag_cap;
+    uint32_t frag_free;
+    own layout_frag *frag;
+    size_t text_len, text_cap;
+    own char *text;
+} store_layout_store_tag;
+void store_layout_store_tag_drop(store_layout_store_tag *s) { free(s->box); free(s->line); free(s->frag); free(s->text); }
+static void store_layout_store_tag__box_grow(store_layout_store_tag *s) {
+    size_t c = s->box_cap ? 2 * s->box_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->box = (layout_box *)realloc(s->box, c * sizeof(layout_box));
+    if (!s->box) abort();
+    s->box_cap = c;
+}
+layout_box_h store_layout_store_tag_box_new(store_layout_store_tag *s) {
+    uint32_t i;
+    if (s->box_free) {
+        i = s->box_free;
+        s->box_free = s->box[i].free_next;
+    } else {
+        if (s->box_len == 0) {
+            if (s->box_cap == 0) store_layout_store_tag__box_grow(s);
+            memset(&s->box[0], 0, sizeof(layout_box));
+            s->box_len = 1;
+        }
+        if (s->box_len == s->box_cap) store_layout_store_tag__box_grow(s);
+        i = (uint32_t)s->box_len;
+        s->box_len++;
+        s->box[i].gen = 0;
+    }
+    uint32_t g = s->box[i].gen;
+    memset(&s->box[i], 0, sizeof(layout_box));
+    s->box[i].gen = g;
+    s->box[i].live = 1;
+    layout_box_h h = { s->id, i, g };
+    return h;
+}
+int store_layout_store_tag_box_live(const store_layout_store_tag *s, layout_box_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->box_len && s->box[h.index].live && s->box[h.index].gen == h.gen;
+}
+layout_box store_layout_store_tag_box_get(const store_layout_store_tag *s, layout_box_h h) {
+    if (!store_layout_store_tag_box_live(s, h)) abort();
+    return s->box[h.index];
+}
+layout_box *store_layout_store_tag_box_ref(const store_layout_store_tag *s, layout_box_h h) tie s {
+    if (!store_layout_store_tag_box_live(s, h)) abort();
+    return &s->box[h.index];
+}
+layout_box *store_layout_store_tag_box_slot(const store_layout_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->box_len) abort();
+    return &s->box[i];
+}
+layout_box_h store_layout_store_tag_box_handle(const store_layout_store_tag *s, uint32_t i) {
+    layout_box_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->box_len && s->box[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->box[i].gen;
+    }
+    return h;
+}
+void store_layout_store_tag_box_free(store_layout_store_tag *s, layout_box_h h) {
+    if (!store_layout_store_tag_box_live(s, h)) abort();
+    s->box[h.index].live = 0;
+    s->box[h.index].gen++;
+    s->box[h.index].free_next = s->box_free;
+    s->box_free = h.index;
+}
+size_t store_layout_store_tag_box_len(const store_layout_store_tag *s) { return s->box_len; }
+size_t store_layout_store_tag_box_count(const store_layout_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->box_len; i++) if (s->box[i].live) n++;
+    return n;
+}
+static void store_layout_store_tag__line_grow(store_layout_store_tag *s) {
+    size_t c = s->line_cap ? 2 * s->line_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->line = (layout_line *)realloc(s->line, c * sizeof(layout_line));
+    if (!s->line) abort();
+    s->line_cap = c;
+}
+layout_line_h store_layout_store_tag_line_new(store_layout_store_tag *s) {
+    uint32_t i;
+    if (s->line_free) {
+        i = s->line_free;
+        s->line_free = s->line[i].free_next;
+    } else {
+        if (s->line_len == 0) {
+            if (s->line_cap == 0) store_layout_store_tag__line_grow(s);
+            memset(&s->line[0], 0, sizeof(layout_line));
+            s->line_len = 1;
+        }
+        if (s->line_len == s->line_cap) store_layout_store_tag__line_grow(s);
+        i = (uint32_t)s->line_len;
+        s->line_len++;
+        s->line[i].gen = 0;
+    }
+    uint32_t g = s->line[i].gen;
+    memset(&s->line[i], 0, sizeof(layout_line));
+    s->line[i].gen = g;
+    s->line[i].live = 1;
+    layout_line_h h = { s->id, i, g };
+    return h;
+}
+int store_layout_store_tag_line_live(const store_layout_store_tag *s, layout_line_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->line_len && s->line[h.index].live && s->line[h.index].gen == h.gen;
+}
+layout_line store_layout_store_tag_line_get(const store_layout_store_tag *s, layout_line_h h) {
+    if (!store_layout_store_tag_line_live(s, h)) abort();
+    return s->line[h.index];
+}
+layout_line *store_layout_store_tag_line_ref(const store_layout_store_tag *s, layout_line_h h) tie s {
+    if (!store_layout_store_tag_line_live(s, h)) abort();
+    return &s->line[h.index];
+}
+layout_line *store_layout_store_tag_line_slot(const store_layout_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->line_len) abort();
+    return &s->line[i];
+}
+layout_line_h store_layout_store_tag_line_handle(const store_layout_store_tag *s, uint32_t i) {
+    layout_line_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->line_len && s->line[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->line[i].gen;
+    }
+    return h;
+}
+void store_layout_store_tag_line_free(store_layout_store_tag *s, layout_line_h h) {
+    if (!store_layout_store_tag_line_live(s, h)) abort();
+    s->line[h.index].live = 0;
+    s->line[h.index].gen++;
+    s->line[h.index].free_next = s->line_free;
+    s->line_free = h.index;
+}
+size_t store_layout_store_tag_line_len(const store_layout_store_tag *s) { return s->line_len; }
+size_t store_layout_store_tag_line_count(const store_layout_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->line_len; i++) if (s->line[i].live) n++;
+    return n;
+}
+static void store_layout_store_tag__frag_grow(store_layout_store_tag *s) {
+    size_t c = s->frag_cap ? 2 * s->frag_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->frag = (layout_frag *)realloc(s->frag, c * sizeof(layout_frag));
+    if (!s->frag) abort();
+    s->frag_cap = c;
+}
+layout_frag_h store_layout_store_tag_frag_new(store_layout_store_tag *s) {
+    uint32_t i;
+    if (s->frag_free) {
+        i = s->frag_free;
+        s->frag_free = s->frag[i].free_next;
+    } else {
+        if (s->frag_len == 0) {
+            if (s->frag_cap == 0) store_layout_store_tag__frag_grow(s);
+            memset(&s->frag[0], 0, sizeof(layout_frag));
+            s->frag_len = 1;
+        }
+        if (s->frag_len == s->frag_cap) store_layout_store_tag__frag_grow(s);
+        i = (uint32_t)s->frag_len;
+        s->frag_len++;
+        s->frag[i].gen = 0;
+    }
+    uint32_t g = s->frag[i].gen;
+    memset(&s->frag[i], 0, sizeof(layout_frag));
+    s->frag[i].gen = g;
+    s->frag[i].live = 1;
+    layout_frag_h h = { s->id, i, g };
+    return h;
+}
+int store_layout_store_tag_frag_live(const store_layout_store_tag *s, layout_frag_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->frag_len && s->frag[h.index].live && s->frag[h.index].gen == h.gen;
+}
+layout_frag store_layout_store_tag_frag_get(const store_layout_store_tag *s, layout_frag_h h) {
+    if (!store_layout_store_tag_frag_live(s, h)) abort();
+    return s->frag[h.index];
+}
+layout_frag *store_layout_store_tag_frag_ref(const store_layout_store_tag *s, layout_frag_h h) tie s {
+    if (!store_layout_store_tag_frag_live(s, h)) abort();
+    return &s->frag[h.index];
+}
+layout_frag *store_layout_store_tag_frag_slot(const store_layout_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->frag_len) abort();
+    return &s->frag[i];
+}
+layout_frag_h store_layout_store_tag_frag_handle(const store_layout_store_tag *s, uint32_t i) {
+    layout_frag_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->frag_len && s->frag[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->frag[i].gen;
+    }
+    return h;
+}
+void store_layout_store_tag_frag_free(store_layout_store_tag *s, layout_frag_h h) {
+    if (!store_layout_store_tag_frag_live(s, h)) abort();
+    s->frag[h.index].live = 0;
+    s->frag[h.index].gen++;
+    s->frag[h.index].free_next = s->frag_free;
+    s->frag_free = h.index;
+}
+size_t store_layout_store_tag_frag_len(const store_layout_store_tag *s) { return s->frag_len; }
+size_t store_layout_store_tag_frag_count(const store_layout_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->frag_len; i++) if (s->frag[i].live) n++;
+    return n;
+}
+static void store_layout_store_tag__text_room(store_layout_store_tag *s, size_t n) {
+    if (s->text_len + n <= s->text_cap) return;
+    size_t c = s->text_cap ? s->text_cap : 256;
+    while (c < s->text_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->text = (char *)realloc(s->text, c);
+    if (!s->text) abort();
+    s->text_cap = c;
+}
+amb_span store_layout_store_tag_text_add(store_layout_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->text_len == 0) {
+        store_layout_store_tag__text_room(s, 1);
+        s->text[0] = 0;
+        s->text_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->text && p < s->text + s->text_len;
+    size_t from = inside ? (size_t)(p - s->text) : 0;
+    store_layout_store_tag__text_room(s, n);
+    if (inside) memmove(s->text + s->text_len, s->text + from, n);
+    else memcpy(s->text + s->text_len, p, n);
+    sp.off = (uint32_t)s->text_len;
+    sp.len = (uint32_t)n;
+    s->text_len += n;
+    return sp;
+}
+const char *store_layout_store_tag_text_ptr(const store_layout_store_tag *s, amb_span sp) tie s {
+    if (s->text_len == 0 || (size_t)sp.off + sp.len > s->text_len) abort();
+    return s->text + sp.off;
+}
+int store_layout_store_tag_text_eq(const store_layout_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    return memcmp(s->text + sp.off, p, n) == 0;
+}
+void store_layout_store_tag_text_put(const store_layout_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    amb_put_qatom(out, s->text + sp.off, sp.len);
+}
+size_t store_layout_store_tag_text_size(const store_layout_store_tag *s) { return s->text_len; }
+void store_layout_store_tag_children_append(store_layout_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->box_len || i >= s->box_len) abort();
+    uint32_t t = s->box[o].last_child;
+    s->box[i].parent = o;
+    s->box[i].next = 0;
+    if (t) s->box[t].next = i; else s->box[o].first_child = i;
+    s->box[o].last_child = i;
+}
+
+void store_layout_store_tag_children_insert_before(store_layout_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_layout_store_tag_children_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->box_len || i >= s->box_len || b >= s->box_len || s->box[b].parent != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->box[o].first_child; x && x != b; x = s->box[x].next) p = x;
+    s->box[i].parent = o;
+    s->box[i].next = b;
+    if (p) s->box[p].next = i; else s->box[o].first_child = i;
+}
+
+void store_layout_store_tag_children_unlink(store_layout_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->box_len) abort();
+    uint32_t o = s->box[i].parent;
+    if (o == 0) return;
+    if (o >= s->box_len) abort();
+    uint32_t n = s->box[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->box[o].first_child; x && x != i; x = s->box[x].next) p = x;
+    if (p) s->box[p].next = n; else s->box[o].first_child = n;
+    if (s->box[o].last_child == i) s->box[o].last_child = p;
+    s->box[i].parent = 0;
+    s->box[i].next = 0;
+}
+
+uint32_t store_layout_store_tag_children_first(const store_layout_store_tag *s, uint32_t o) { if (o >= s->box_len) abort(); return s->box[o].first_child; }
+
+uint32_t store_layout_store_tag_children_next(const store_layout_store_tag *s, uint32_t i) { if (i >= s->box_len) abort(); return s->box[i].next; }
+
+uint32_t store_layout_store_tag_children_up(const store_layout_store_tag *s, uint32_t i) { if (i >= s->box_len) abort(); return s->box[i].parent; }
+
+size_t store_layout_store_tag_children_count(const store_layout_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->box_len) abort();
+    for (uint32_t i = s->box[o].first_child; i; i = s->box[i].next) {
+        n++;
+        if (n > s->box_len) abort();
+    }
+    return n;
+}
+
+int store_layout_store_tag_children_inclusive_ancestor(const store_layout_store_tag *s, uint32_t a, uint32_t b) {
+    size_t steps = 0;
+    for (uint32_t x = b; x; x = s->box[x].parent) {
+        if (x >= s->box_len) abort();
+        if (x == a) return 1;
+        if (++steps > s->box_len) return 1;
+    }
+    return 0;
+}
+
+void store_layout_store_tag_lines_append(store_layout_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->box_len || i >= s->line_len) abort();
+    uint32_t t = s->box[o].last_line;
+    s->line[i].box = o;
+    s->line[i].next = 0;
+    if (t) s->line[t].next = i; else s->box[o].first_line = i;
+    s->box[o].last_line = i;
+}
+
+void store_layout_store_tag_lines_insert_before(store_layout_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_layout_store_tag_lines_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->box_len || i >= s->line_len || b >= s->line_len || s->line[b].box != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->box[o].first_line; x && x != b; x = s->line[x].next) p = x;
+    s->line[i].box = o;
+    s->line[i].next = b;
+    if (p) s->line[p].next = i; else s->box[o].first_line = i;
+}
+
+void store_layout_store_tag_lines_unlink(store_layout_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->line_len) abort();
+    uint32_t o = s->line[i].box;
+    if (o == 0) return;
+    if (o >= s->box_len) abort();
+    uint32_t n = s->line[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->box[o].first_line; x && x != i; x = s->line[x].next) p = x;
+    if (p) s->line[p].next = n; else s->box[o].first_line = n;
+    if (s->box[o].last_line == i) s->box[o].last_line = p;
+    s->line[i].box = 0;
+    s->line[i].next = 0;
+}
+
+uint32_t store_layout_store_tag_lines_first(const store_layout_store_tag *s, uint32_t o) { if (o >= s->box_len) abort(); return s->box[o].first_line; }
+
+uint32_t store_layout_store_tag_lines_next(const store_layout_store_tag *s, uint32_t i) { if (i >= s->line_len) abort(); return s->line[i].next; }
+
+uint32_t store_layout_store_tag_lines_up(const store_layout_store_tag *s, uint32_t i) { if (i >= s->line_len) abort(); return s->line[i].box; }
+
+size_t store_layout_store_tag_lines_count(const store_layout_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->box_len) abort();
+    for (uint32_t i = s->box[o].first_line; i; i = s->line[i].next) {
+        n++;
+        if (n > s->line_len) abort();
+    }
+    return n;
+}
+
+void store_layout_store_tag_frags_append(store_layout_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->line_len || i >= s->frag_len) abort();
+    uint32_t t = s->line[o].last_frag;
+    s->frag[i].line = o;
+    s->frag[i].next = 0;
+    if (t) s->frag[t].next = i; else s->line[o].first_frag = i;
+    s->line[o].last_frag = i;
+}
+
+void store_layout_store_tag_frags_insert_before(store_layout_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_layout_store_tag_frags_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->line_len || i >= s->frag_len || b >= s->frag_len || s->frag[b].line != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->line[o].first_frag; x && x != b; x = s->frag[x].next) p = x;
+    s->frag[i].line = o;
+    s->frag[i].next = b;
+    if (p) s->frag[p].next = i; else s->line[o].first_frag = i;
+}
+
+void store_layout_store_tag_frags_unlink(store_layout_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->frag_len) abort();
+    uint32_t o = s->frag[i].line;
+    if (o == 0) return;
+    if (o >= s->line_len) abort();
+    uint32_t n = s->frag[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->line[o].first_frag; x && x != i; x = s->frag[x].next) p = x;
+    if (p) s->frag[p].next = n; else s->line[o].first_frag = n;
+    if (s->line[o].last_frag == i) s->line[o].last_frag = p;
+    s->frag[i].line = 0;
+    s->frag[i].next = 0;
+}
+
+uint32_t store_layout_store_tag_frags_first(const store_layout_store_tag *s, uint32_t o) { if (o >= s->line_len) abort(); return s->line[o].first_frag; }
+
+uint32_t store_layout_store_tag_frags_next(const store_layout_store_tag *s, uint32_t i) { if (i >= s->frag_len) abort(); return s->frag[i].next; }
+
+uint32_t store_layout_store_tag_frags_up(const store_layout_store_tag *s, uint32_t i) { if (i >= s->frag_len) abort(); return s->frag[i].line; }
+
+size_t store_layout_store_tag_frags_count(const store_layout_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->line_len) abort();
+    for (uint32_t i = s->line[o].first_frag; i; i = s->frag[i].next) {
+        n++;
+        if (n > s->frag_len) abort();
+    }
+    return n;
+}
+

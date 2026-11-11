@@ -27,6 +27,12 @@ void amb_put_handle(FILE *out, const char *f, uint32_t doc, uint32_t index, uint
     fprintf(out, "%s(%u,%u,%u)", f, (unsigned)doc, (unsigned)index, (unsigned)gen);
 }
 
+void amb_put_f64(FILE *out, double v) {
+    if (v != v || v > 1e300 || v < -1e300) v = 0;
+    if (v == 0) v = 0;    /* no -0 */
+    fprintf(out, "%.15g", v);
+}
+
 void amb_put_ref(FILE *out, const char *f, uint32_t doc, uint32_t index, uint32_t gen) {
     if (index == 0) fputs("none", out);
     else amb_put_handle(out, f, doc, index, gen);

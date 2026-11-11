@@ -23,26 +23,26 @@
           <td> display: table-cell color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 1px
             <font> display: inline (initial) color: rgb(128, 0, 0) background: rgba(0, 0, 0, 0) (initial) font-size: 24px weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
     <div> display: block color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
-157 rules, 232 declarations, 57 matches, 650 computed values
+169 rules, 281 declarations, 57 matches, 725 computed values
 -- why each paragraph has its colour:
 N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
 N = n(1,24,0), X = declared('rgb(128, 128, 0)',written(olive),by('the style attribute'),in(inline))
 N = n(1,42,0), X = declared('rgb(200, 200, 200)',written('#c8c8c8'),by('.faint'),in(author))
 -- what lost the intro's colour, and at which step:
-N = n(1,18,0), D = de(1,210,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
-N = n(1,18,0), D = de(1,211,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
-N = n(1,18,0), D = de(1,226,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
+N = n(1,18,0), D = de(1,259,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
+N = n(1,18,0), D = de(1,260,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
+N = n(1,18,0), D = de(1,275,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
 -- the small print's size, proved:
 dom_element(n(1,47,0),small)   [fact]
 css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(user_agent)))   because
   css_computed(n(1,47,0),font_size,'12.5px',declared)   [fact]
-  css_won(n(1,47,0),font_size,de(1,73,0))   [fact]
-  css_decl(de(1,73,0),ru(1,61,0),font_size,smaller,false)   [fact]
-  css_rule(ru(1,61,0),sh(1,1,0),small,1,61)   [fact]
-  css_origin_of(de(1,73,0),user_agent)   because
-    css_decl(de(1,73,0),ru(1,61,0),font_size,smaller,false)   [fact]
-    css_rule(ru(1,61,0),sh(1,1,0),small,1,61)   [fact]
+  css_won(n(1,47,0),font_size,de(1,81,0))   [fact]
+  css_decl(de(1,81,0),ru(1,69,0),font_size,smaller,false)   [fact]
+  css_rule(ru(1,69,0),sh(1,1,0),small,1,69)   [fact]
+  css_origin_of(de(1,81,0),user_agent)   because
+    css_decl(de(1,81,0),ru(1,69,0),font_size,smaller,false)   [fact]
+    css_rule(ru(1,69,0),sh(1,1,0),small,1,69)   [fact]
     css_sheet(sh(1,1,0),user_agent)   [fact]
   user_agent=user_agent   [test]
 
@@ -52,6 +52,6 @@ N = n(1,55,0), P = font_size, X = declared('24px',written('size=5'),by('the size
 -- the reasoner's diagnostics:
 amb_diag(low_contrast, n(1,24,0), '<p> text rgb(128, 128, 0) on rgb(253, 253, 248): contrast 4.11:1, below 4.5:1').
 amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
-amb_diag(unused_rule, ru(1,146,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
-amb_diag(unused_rule, ru(1,149,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,158,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,161,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
 exit 0

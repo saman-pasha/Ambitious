@@ -68,6 +68,9 @@ ok   a named colour: color rgb(102, 51, 153)
 ok   transparent: background_color rgba(0, 0, 0, 0)
 ok   currentcolor: border_color rgb(255, 0, 0)
 ok   border-color's initial is the colour: border_color rgb(0, 0, 255)
+ok   box-sizing: box_sizing border-box
+ok   max-width: max_width 50%
+ok   max-width: none: max_width none
 ok   a length for a colour: color rgb(255, 0, 0)
 ok   a negative width: width 10px
 ok   a length without its unit: margin_top 16px
@@ -91,6 +94,10 @@ ok   font: its weight: font_weight 700
 ok   font: its size: font_size 20px
 ok   font: its line height: line_height 2
 ok   font: what it leaves out, reset: font_weight 400
+ok   font: its family: font_family sans-serif
+ok   font-family: a name it knows: font_family serif
+ok   font-family: the UA's monospace: font_family monospace
+ok   font-family: inherited, serif at the root: font_family serif
 ok   font: without a size, dropped: font_weight 700
 ok   background: its colour: background_color rgb(255, 255, 0)
 ok   background: none resets the colour: background_color rgba(0, 0, 0, 0)
@@ -118,4 +125,4 @@ ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-120 of 120 cases
+127 of 127 cases

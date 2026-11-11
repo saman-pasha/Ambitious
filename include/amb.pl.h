@@ -18,6 +18,8 @@ typedef struct amb_span { uint32_t off, len; } amb_span;
 void amb_put_qatom(FILE *out, const char *p, size_t n);
 void amb_put_handle(FILE *out, const char *f, uint32_t doc, uint32_t index, uint32_t gen);
 void amb_put_ref(FILE *out, const char *f, uint32_t doc, uint32_t index, uint32_t gen);
+/* a number as a fact holds it: 15 digits, and 0 for what is no finite number */
+void amb_put_f64(FILE *out, double v);
 /* an invariant broken: invariant(Module, Name, Index). on report, if report */
 void amb_report(FILE *report, const char *module, const char *what, uint32_t index);
 /* a request's outcome: amb_result(Op, Status, Revision). on report, if report */

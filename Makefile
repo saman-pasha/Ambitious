@@ -4,7 +4,7 @@
 #   make                the modules and the ambitious binary, in build/
 #   make check          the toolchain against toolchain/pins
 #   make test           every gate, in order, stopping at the first RED
-#   make golden         write tests/golden/ from the current generator (review the diff)
+#   make golden         write tests/golden/ from the current generator and renderer (review the diff)
 #   make schema doc     the reasoning schemas and the contracts' references, in build/
 #
 # Every C unit is built by cicilang in memory (--no-kb: hermetic, and the user's
@@ -23,14 +23,14 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
-UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css
+UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/layout paint/font paint/paint
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 
 .PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-html test-integ golden schema doc clean
 all: build/ambitious schema
 
-build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl)
+build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl) $(wildcard src/*/*.h)
 	@mkdir -p $(@D)
 	$(AMB_CC) -c $< -o $@ < /dev/null
 
@@ -60,9 +60,10 @@ test-reason: schema
 test-integ: all
 	@sh tests/run.sh integ
 
-golden:
-	@mkdir -p tests/golden
+golden: build/ambitious
+	@mkdir -p tests/golden/render
 	@for m in $(MODULES); do sh tools/amb ctext $$m > tests/golden/$$m.ctext && sh tools/amb schema $$m > tests/golden/$$m.schema && echo "wrote tests/golden/$$m.ctext and $$m.schema"; done
+	@for p in $(basename $(notdir $(wildcard tests/pages/*.html))); do sh bin/ambitious render tests/pages/$$p.html tests/golden/render/$$p.png > /dev/null && echo "wrote tests/golden/render/$$p.png"; done
 
 schema: $(MODULES:%=build/schema/%.pl)
 doc: $(MODULES:%=build/doc/%.md)

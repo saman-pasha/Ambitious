@@ -20,7 +20,9 @@ css_contract(enum(origin, [user_agent, author, inline])).
 css_contract(enum(prop, [display, color, background_color, font_size, font_weight, font_style, text_align,
     line_height, text_decoration, white_space, margin_top, margin_right, margin_bottom, margin_left,
     padding_top, padding_right, padding_bottom, padding_left, border_top_width, border_right_width,
-    border_bottom_width, border_left_width, border_color, width, height, list_style_type])).
+    border_bottom_width, border_left_width, border_color, width, height, list_style_type,
+    font_family,                       % the generic family a font-family list resolves to
+    box_sizing, max_width])).
 %% a value: a keyword, a length in px, a percentage, a colour (RGBA), auto, a number
 css_contract(enum(unit, [keyword, px, em, percent, color, auto, number])).
 %% where a computed value came from

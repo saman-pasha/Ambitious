@@ -775,7 +775,7 @@ ambm_field_put(M, R, F, ref(R2), A) :- !, ambm_handle_f(M, R2, Fn),
 ambm_field_put(_, R, F, xhandle(M2, R2), A) :- !, ambm_handle_f(M2, R2, Fn),
     format(atom(A), 'amb_put_ref(out, "~w", d->~w[i].~w.doc, d->~w[i].~w.index, d->~w[i].~w.gen);', [Fn, R, F, R, F, R, F]).
 ambm_field_put(_, R, F, bool, A) :- !, format(atom(A), 'fputs(d->~w[i].~w ? "true" : "false", out);', [R, F]).
-ambm_field_put(_, R, F, f64, A) :- !, format(atom(A), 'fprintf(out, "%.17g", d->~w[i].~w);', [R, F]).
+ambm_field_put(_, R, F, f64, A) :- !, format(atom(A), 'amb_put_f64(out, d->~w[i].~w);', [R, F]).
 ambm_field_put(_, R, F, _, A) :- format(atom(A), 'fprintf(out, "%lld", (long long)d->~w[i].~w);', [R, F]).
 
 %% ---- the request dispatcher -----------------------------------------------------

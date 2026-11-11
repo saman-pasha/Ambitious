@@ -35,6 +35,9 @@ Three modules, each declared by a contract and generated into C from it:
   style attributes and presentational hints, Selectors 4 and the cascade.
   Each element's computed values are facts that keep their winning
   declaration.
+- **Layout** (`contracts/layout.pl`, `src/layout/`): block, inline, table and
+  list layout. Every box keeps how its width was found. **Paint**
+  (`src/paint/`) draws the boxes and text, set in DejaVu outlines, into a PNG.
 
 The engine exports a snapshot of a page: the document, its parse and its
 style. The reasoner (`prolog/amb/reason.pl`, cocolog, a process of its own)
@@ -55,6 +58,10 @@ N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(aut
 $ bin/ambitious query tests/pages/style.html "dom_attr(N, id, intro), css_lost(N, color, D, Why)"
 N = n(1,18,0), D = de(1,226,0), Why = origin_or_importance(lost('style attribute'),won('important author'))
 ...
+$ bin/ambitious render tests/pages/layout.html layout.png
+rendered 800x601: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:c21c5ac365972c5e
+$ bin/ambitious query tests/pages/layout.html "dom_attr(N, class, wrap), layout_box_of(N, B), layout_explain_width(B, W)"
+N = n(1,26,0), B = bx(1,5,0), W = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
 $ bin/ambitious advise tests/pages/style.html
 amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
 amb_diag(unused_rule, ru(1,149,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
@@ -69,6 +76,7 @@ make test                       # the gates: contract gen exec safe reason html 
 bin/ambitious loop              # the DOM vertical slice end to end
 bin/ambitious parse PAGE        # an HTML file parsed: its tree and parse errors
 bin/ambitious style PAGE        # its elements' computed styles
+bin/ambitious render PAGE PNG   # laid out in an 800x600 viewport and drawn
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
 tools/amb doc css               # a contract's reference
 ```
@@ -83,6 +91,7 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `shell/` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `shell/` |
 | `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/ pages/`, run by `make test` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
+| `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |

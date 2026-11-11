@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><title>Layout, explained</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; background: #f6f6ef }
+.top { background: #ff6600; padding: 2px 8px; color: black }
+.top b { margin-right: 10px }
+.top a { color: black; text-decoration: none }
+.wrap { width: 600px; margin: 20px auto; background: white; border: 1px solid #ccc; padding: 10px 20px }
+h2 { font-size: 20px; border-bottom: 2px solid #ff6600; margin: 0 0 10px; padding-bottom: 4px }
+p { line-height: 1.6; text-align: justify }
+.btn { display: inline-block; padding: 4px 12px; background: #3366cc; color: white; border: 1px solid #224488 }
+code { background: #eee; padding: 0 3px }
+pre { background: #272822; color: #f8f8f2; padding: 8px; font-size: 13px }
+ol li { margin-bottom: 4px }
+.cols td { border: 1px solid #ddd; padding: 4px 8px; vertical-align: top }
+.cols th { background: #ffeedd; padding: 4px }
+</style></head>
+<body>
+<div class="top"><b>Hacker Ambitious</b> <a href="#">new</a> | <a href="#">past</a> | <a href="#">ask</a></div>
+<div class="wrap">
+<h2>Layout, explained</h2>
+<p>This paragraph is <em>justified</em> and has <strong>bold</strong>, <code>inline code</code> with a background, and a link to <a href="https://example.org/">example.org</a>. It is long enough to wrap over several lines, so the justification shows: the spaces between words widen until each line but the last reaches the right edge.</p>
+<p><span class="btn">A button</span> <span class="btn">Another</span> and text after the inline-blocks.</p>
+<ol><li>First item</li><li>Second, which is a much longer item that wraps onto a second line inside the list item's box</li><li>Third</li></ol>
+<pre>for (int i = 0; i &lt; n; i++)
+    printf("%d\n", i);</pre>
+<table class="cols"><tr><th>Name</th><th>What it does</th><th>Size</th></tr>
+<tr><td>dom</td><td>the document tree, its nodes and their attributes</td><td align=right>66</td></tr>
+<tr><td>css</td><td>style sheets, selectors, the cascade</td><td align=right>50</td></tr>
+<tr><td colspan=2>both</td><td align=right>116</td></tr></table>
+<div class="narrow" style="width: 200px; border: 1px dashed #c00"><span style="white-space: nowrap">a line that will not wrap, wider than its box</span></div>
+</div>
+</body></html>
