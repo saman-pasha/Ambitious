@@ -9,16 +9,22 @@ an Expires or Last-Modified written +N or -N is the response's Date plus or less
 seconds, and an ETag written auto is a hash of the body. A request whose
 If-None-Match holds the file's ETag, or else whose If-Modified-Since is not before
 its Last-Modified, is answered 304 with those headers, or with FILE.304.headers'
-when there is one. Besides the files: /old.css moved (301) to /moved/new.css,
-which moved (302, relatively) to /style2.css; /loop.css redirects to itself;
-/chunked.css comes in three chunks.
+when there is one. A Content-Encoding there is done to the body, coding by coding
+in its order, by Python's gzip and zlib: gzip, deflate (zlib's stream), and as
+names of this server's own deflate-raw (deflate data with no zlib header, sent as
+deflate) and gzip-bad (gzip with a wrong CRC-32, sent as gzip); another coding
+(br) is named and not done. Besides the files: /old.css moved (301) to
+/moved/new.css, which moved (302, relatively) to /style2.css; /loop.css redirects
+to itself; /chunked.css comes in three chunks.
 
 --tls serves HTTPS with the certificate chain CERT and its key KEY, offering
 http/1.1 by ALPN; --tls12 holds it to TLS 1.2. --date fixes every response's Date
 (its clock, for the cache's ages). --log appends a line for each request: its host,
-its path, and the Cookie and validators it carried."""
+its path, and the Cookie and validators it carried; --log-accept adds its
+Accept-Encoding."""
 import argparse
 import email.utils
+import gzip
 import hashlib
 import http.server
 import os
@@ -27,6 +33,7 @@ import ssl
 import sys
 import threading
 import time
+import zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--tls", nargs=2, metavar=("CERT", "KEY"))
@@ -34,6 +41,7 @@ ap.add_argument("--tls12", action="store_true")
 ap.add_argument("--sub", action="append", default=[])
 ap.add_argument("--date", type=int)
 ap.add_argument("--log")
+ap.add_argument("--log-accept", action="store_true")
 ap.add_argument("roots", nargs="+")
 args = ap.parse_args()
 ROOTS = [os.path.abspath(r) for r in args.roots]
@@ -50,7 +58,7 @@ def log(handler):
         return
     host = (handler.headers.get("Host") or "").split(":")[0]
     line = "%s %s %s" % (handler.command, host, handler.path)
-    for name in ("Cookie", "If-None-Match", "If-Modified-Since"):
+    for name in ("Cookie", "If-None-Match", "If-Modified-Since") + (("Accept-Encoding",) if args.log_accept else ()):
         v = handler.headers.get(name)
         if v is not None:
             line += " | %s: %s" % (name.lower(), v)
@@ -73,6 +81,32 @@ def sidecar(path, body):
                     v = '"%s"' % hashlib.sha1(body).hexdigest()[:12]
                 out.append((k, v))
     return out
+
+
+def encode(headers, body):
+    """the body in the codings of its Content-Encoding, in their order, and the headers to send"""
+    out = []
+    for k, v in headers:
+        if k.lower() != "content-encoding":
+            out.append((k, v))
+            continue
+        names = []
+        for c in (x.strip() for x in v.split(",")):
+            if c == "gzip":
+                body = gzip.compress(body, mtime=0)
+            elif c == "gzip-bad":
+                body = gzip.compress(body, mtime=0)
+                body = body[:-8] + bytes([body[-8] ^ 0xFF]) + body[-7:]
+                c = "gzip"
+            elif c == "deflate":
+                body = zlib.compress(body)
+            elif c == "deflate-raw":
+                z = zlib.compressobj(wbits=-15)
+                body = z.compress(body) + z.flush()
+                c = "deflate"
+            names.append(c)
+        out.append((k, ", ".join(names)))
+    return out, body
 
 
 def fresh_for(handler, headers):
@@ -150,7 +184,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if fresh_for(self, headers):
             if os.path.isfile(p + ".304.headers"):
                 headers = sidecar(p + ".304.headers", body)
-            return self.plain(304, [(k, v) for k, v in headers if k.lower() != "content-type"])
+            return self.plain(304, [(k, v) for k, v in headers if k.lower() not in ("content-type", "content-encoding")])
+        headers, body = encode(headers, body)
         return self.plain(200, headers, body)
 
 

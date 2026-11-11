@@ -26,6 +26,12 @@
 # header each request carried, as the server logged it, against Chromium's for the
 # same visits (tests/net/reference.sh). A private run leaves the jar as it was.
 #
+# Content codings (tests/net/site/z/), the server's done by Python's gzip and zlib: a
+# page and its parts in gzip, deflate, deflate with no zlib header, gzip then deflate;
+# br, which is not asked for, and a gzip body whose CRC-32 is wrong, each failing with
+# its reason. Each decoded size is its file's; the decoded sheets style the page and
+# the decoded PNG is laid out at its size. Every request asked for gzip and deflate.
+#
 # The HTTP cache (tests/net/site/k/): three runs of a profile 61 s apart, from a server
 # whose Date stays put, a part for each of max-age, no-cache with an ETag, a max-age
 # that runs out and a 304 that lengthens it, no-store, private, Expires, a
@@ -34,7 +40,7 @@
 # over its own cache for the same visits. AMB_CACHE names a cache of its own; a
 # private run neither uses nor changes one.
 #
-# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CACHE.
+# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CODED, CACHE.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-net.XXXXXX")
 # the environment's proxies are not the tests': each test names its own
@@ -146,6 +152,23 @@ echo "-- a private session keeps its cookies to itself: the jar's file is as it 
 before=$(cksum < "$prof/cookies")
 AMB_NOW=1700000400 sh "$AMB_ROOT/bin/ambitious" --profile "$prof" --private load "http://127.0.0.1:$port/c/page.html" > /dev/null 2>&1
 [ "$before" = "$(cksum < "$prof/cookies")" ] && echo "the same" || echo "CHANGED"
+
+echo "== content codings (tests/net/site/z/), done by Python's gzip and zlib:"
+coded=$(serve coded "$AMB_ROOT/tests/net/serve.py" --log-accept --log "$work/coded.log" "$nsite" "$site")
+zurl="http://127.0.0.1:$coded/z/page.html"
+zamb() { sh "$AMB_ROOT/bin/ambitious" "$@" 2>&1 | names | sed "s/:$coded\b/:CODED/g"; }
+zamb load "$zurl"
+echo "-- each coded body, its coding, and its size as sent and as decoded:"
+zamb query "$zurl" "net_coding(R, C, E), net_resource(R, U, _, _, _, _, S)"
+echo "-- the sizes of the files they were made from:"
+for f in page.html gz.css df.css raw.css both.css gz.png; do echo "$f $(wc -c < "$nsite/z/$f" | tr -d ' ')"; done
+echo "-- what did not decode, and why:"
+zamb advise "$zurl" | grep '^amb_diag(failed'
+echo "-- the decoded sheets' colours, and the decoded image's size as laid out:"
+zamb query "$zurl" "member(C, [gz, df, raw, both, br]), dom_attr(N, class, C), css_explain(N, color, X)"
+zamb query "$zurl" "dom_element(N, img), layout_box_of(N, B), layout_box(B, _, _, _, _, W, H)"
+echo "-- the codings each request asked for:"
+sed 's/^.* | accept-encoding: /accept-encoding: /' "$work/coded.log" | sort | uniq -c | sed 's/^ *//'
 
 echo "== the HTTP cache, in the profile's directory:"
 # a server whose clock stays at 1700000000 (its responses' Date); its changed.css from a

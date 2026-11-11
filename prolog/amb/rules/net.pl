@@ -64,6 +64,7 @@ net_says_why(malformed).
 net_says_why(tls_handshake_failed).
 net_says_why(tls_verify_failed).
 net_says_why(proxy_refused).
+net_says_why(decoding_failed).
 
 %% ---- what the reasoner says of what a page loaded --------------------------------
 

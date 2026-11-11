@@ -175,6 +175,42 @@ GET localhost /c/home.html | cookie: lh=lh-5d21
 > GET localhost /c/home.html | cookie: lh=lh-5d21
 -- a private session keeps its cookies to itself: the jar's file is as it was
 the same
+== content codings (tests/net/site/z/), done by Python's gzip and zlib:
+document   ok                 200     605  http://127.0.0.1:CODED/z/page.html  text/html
+stylesheet ok                 200     153  http://127.0.0.1:CODED/z/gz.css  text/css
+stylesheet ok                 200      20  http://127.0.0.1:CODED/z/df.css  text/css
+stylesheet ok                 200      22  http://127.0.0.1:CODED/z/raw.css  text/css
+stylesheet ok                 200      24  http://127.0.0.1:CODED/z/both.css  text/css
+stylesheet decoding_failed    200      19  http://127.0.0.1:CODED/z/br.css  text/css
+stylesheet decoding_failed    200      40  http://127.0.0.1:CODED/z/bad.css  text/css
+image      ok                 200     159  http://127.0.0.1:CODED/z/gz.png  image/png  96x32
+8 resources
+-- each coded body, its coding, and its size as sent and as decoded:
+R = rs(1,1,0), C = gzip, E = 277, U = 'http://127.0.0.1:CODED/z/page.html', S = 605
+R = rs(1,2,0), C = gzip, E = 129, U = 'http://127.0.0.1:CODED/z/gz.css', S = 153
+R = rs(1,3,0), C = deflate, E = 28, U = 'http://127.0.0.1:CODED/z/df.css', S = 20
+R = rs(1,4,0), C = deflate, E = 24, U = 'http://127.0.0.1:CODED/z/raw.css', S = 22
+R = rs(1,5,0), C = 'gzip, deflate', E = 50, U = 'http://127.0.0.1:CODED/z/both.css', S = 24
+R = rs(1,8,0), C = gzip, E = 171, U = 'http://127.0.0.1:CODED/z/gz.png', S = 159
+-- the sizes of the files they were made from:
+page.html 605
+gz.css 153
+df.css 20
+raw.css 22
+both.css 24
+gz.png 159
+-- what did not decode, and why:
+amb_diag(failed, rs(1,6,0), 'the stylesheet http://127.0.0.1:CODED/z/br.css (asked for by <link>) failed: decoding_failed (the content coding br is not one read here)').
+amb_diag(failed, rs(1,7,0), 'the stylesheet http://127.0.0.1:CODED/z/bad.css (asked for by <link>) failed: decoding_failed (the gzip body\'s CRC-32 is not its data\'s)').
+-- the decoded sheets' colours, and the decoded image's size as laid out:
+C = gz, N = n(1,24,0), X = declared('rgb(0, 0, 128)',written(navy),by('.gz'),in(author))
+C = df, N = n(1,27,0), X = declared('rgb(0, 128, 128)',written(teal),by('.df'),in(author))
+C = raw, N = n(1,30,0), X = declared('rgb(128, 128, 0)',written(olive),by('.raw'),in(author))
+C = both, N = n(1,33,0), X = declared('rgb(128, 0, 128)',written(purple),by('.both'),in(author))
+C = br, N = n(1,36,0), X = inherited('rgb(0, 0, 0)',from(n(1,22,0)),'the property is inherited')
+N = n(1,43,0), B = bx(1,11,0), W = 96, H = 32
+-- the codings each request asked for:
+40 accept-encoding: gzip, deflate
 == the HTTP cache, in the profile's directory:
 -- 1. at 1700000000: each part, what the cache did, the age and lifetime it went by, the status
 R = rs(1,1,0), How = not_stored, Age = 0, Life = 0, U = 'http://127.0.0.1:CACHE/k/page.html', S = 200

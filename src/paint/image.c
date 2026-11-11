@@ -92,11 +92,19 @@ static int inf_codes(const uint8_t *in, size_t n, inf_bits *b, const inf_huff *l
 }
 
 /* a zlib stream inflated into out, at most cap bytes; 0 when it is not one */
-static int amb_inflate(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
+int amb_inflate(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
     if (n < 6 || (in[0] & 0x0f) != 8 || ((unsigned)in[0] << 8 | in[1]) % 31 != 0 || (in[1] & 0x20)) return 0;
+    size_t pos = 2;
+    return amb_inflate_raw(in, n, &pos, out, cap);
+}
+
+/* a raw deflate stream from in[*pos] inflated into out, at most cap bytes, *pos then
+   just past its last block (HTTP's content codings read their trailers there); 0
+   when it is not one */
+int amb_inflate_raw(const uint8_t *in, size_t n, size_t *pos, vector<uint8_t> *out, size_t cap) {
     inf_bits b;
     memset(&b, 0, sizeof b);
-    b.pos = 2;
+    b.pos = *pos;
     inf_huff lc, dc;
     uint16_t lengths[320];
     int last;
@@ -151,6 +159,7 @@ static int amb_inflate(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t
             if (!inf_codes(in, n, &b, &lc, &dc, out, cap)) return 0;
         } else return 0;
     } while (!last);
+    *pos = b.pos;
     return 1;
 }
 

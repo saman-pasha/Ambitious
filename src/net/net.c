@@ -53,6 +53,7 @@
 #include <vector.pl>
 #include <amb.pl>
 #include "url.h"
+#include "../paint/image.h"
 
 amb_interface(dom);
 amb_implementation(net);
@@ -1091,7 +1092,7 @@ static net_outcome net_exchange(const net_url *u, net_tls *t, const char *extra,
     if (via && !https) snprintf(whole, sizeof whole, "%s://%s", u->scheme, authority);
     int n = snprintf(line, sizeof line, "GET %s%s%s%s HTTP/1.1\r\nHost: %s\r\n", whole, u->path, u->has_query ? "?" : "", u->query, authority);
     if (n > 0 && (size_t)n < sizeof line) append_range(req, line, (size_t)n);
-    n = snprintf(line, sizeof line, "User-Agent: Ambitious/0.1\r\nAccept: */*\r\n");
+    n = snprintf(line, sizeof line, "User-Agent: Ambitious/0.1\r\nAccept: */*\r\nAccept-Encoding: gzip, deflate\r\n");
     append_range(req, line, (size_t)n);
     if (via && !https && px.auth[0]) {
         n = snprintf(line, sizeof line, "Proxy-Authorization: Basic %s\r\n", px.auth);
@@ -1881,6 +1882,133 @@ static void net_cache_write(const char *path, const char *url, int status, int64
     rename(tmp, path);
 }
 
+/* ---- content codings: gzip and deflate, over the painter's inflate ---- */
+
+static uint32_t net_crc_tab[256];
+
+/* CRC-32 (ISO 3309, gzip's), by a table made at the first call */
+static uint32_t net_crc32(const uint8_t *p, size_t n) {
+    if (!net_crc_tab[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++) c = c & 1 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            net_crc_tab[i] = c;
+        }
+    uint32_t c = 0xffffffffu;
+    for (size_t i = 0; i < n; i++) c = net_crc_tab[(c ^ p[i]) & 0xff] ^ (c >> 8);
+    return c ^ 0xffffffffu;
+}
+
+/* Adler-32 (RFC 1950, zlib's), its sums reduced every 5552 bytes */
+static uint32_t net_adler32(const uint8_t *p, size_t n) {
+    uint32_t a = 1, b = 0;
+    size_t i = 0;
+    while (i < n) {
+        size_t e = n - i > 5552 ? i + 5552 : n;
+        for (; i < e; i++) { a += p[i]; b += a; }
+        a %= 65521;
+        b %= 65521;
+    }
+    return b << 16 | a;
+}
+
+static uint32_t net_le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+static uint32_t net_be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+/* a gzip body (RFC 1952): each member's header passed over, its deflate data
+   inflated, its CRC-32 and size checked; a member may follow another. 0 and why
+   when it does not decode */
+static int net_gunzip(const uint8_t *p, size_t n, vector<uint8_t> *out, char *why, size_t cap) {
+    size_t i = 0;
+    int members = 0;
+    while (i < n) {
+        if (n - i < 18 || p[i] != 0x1f || p[i + 1] != 0x8b || p[i + 2] != 8) {
+            if (members) break;      /* what follows the last member is not read, as zlib's gunzip does not */
+            snprintf(why, cap, "the gzip body does not begin as gzip does");
+            return 0;
+        }
+        uint8_t flg = p[i + 3];
+        size_t k = i + 10;
+        if ((flg & 4) && k + 2 <= n) k += 2 + ((size_t)p[k] | (size_t)p[k + 1] << 8);
+        if (flg & 8) { while (k < n && p[k]) k++; k++; }
+        if (flg & 16) { while (k < n && p[k]) k++; k++; }
+        if (flg & 2) k += 2;
+        if (k >= n) { snprintf(why, cap, "the gzip body ends in its header"); return 0; }
+        size_t start = len(*out);
+        if (!amb_inflate_raw(p, n, &k, out, NET_MAX_BODY)) {
+            snprintf(why, cap, len(*out) >= NET_MAX_BODY ? "the decoded body passed 32 MB" : "the gzip body's deflate data do not inflate");
+            return 0;
+        }
+        if (k + 8 > n) { snprintf(why, cap, "the gzip body ends before its CRC-32 and size"); return 0; }
+        size_t got = len(*out) - start;
+        if (net_crc32(data(*out) + start, got) != net_le32(p + k)) { snprintf(why, cap, "the gzip body's CRC-32 is not its data's"); return 0; }
+        if ((uint32_t)got != net_le32(p + k + 4)) { snprintf(why, cap, "the gzip body's size is not its data's"); return 0; }
+        i = k + 8;
+        members++;
+    }
+    return 1;
+}
+
+/* a deflate body: a zlib stream (RFC 1950), as HTTP's deflate is, its Adler-32
+   checked; or, as browsers take it, raw deflate data with no zlib header */
+static int net_inflate_body(const uint8_t *p, size_t n, vector<uint8_t> *out, char *why, size_t cap) {
+    int zlib = n >= 2 && (p[0] & 0x0f) == 8 && (p[0] >> 4) <= 7 && ((unsigned)p[0] << 8 | p[1]) % 31 == 0 && !(p[1] & 0x20);
+    size_t k = zlib ? 2 : 0;
+    if (!amb_inflate_raw(p, n, &k, out, NET_MAX_BODY)) {
+        snprintf(why, cap, len(*out) >= NET_MAX_BODY ? "the decoded body passed 32 MB" : "the deflate body does not inflate");
+        return 0;
+    }
+    if (zlib) {
+        if (k + 4 > n) { snprintf(why, cap, "the deflate body ends before its Adler-32"); return 0; }
+        if (net_adler32(data(*out), len(*out)) != net_be32(p + k)) { snprintf(why, cap, "the deflate body's Adler-32 is not its data's"); return 0; }
+    }
+    return 1;
+}
+
+/* a body decoded from the codings its Content-Encoding lists, the last applied
+   undone first; identity is none. The codings into coding; decoding_failed and why
+   for one not read here (br, compress, zstd: none of them asked for) or a body
+   that does not decode */
+static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *body, char *coding, size_t ccap, char *why, size_t wcap) {
+    char ce[256], names[8][24];
+    int nn = 0;
+    coding[0] = 0;
+    if (!net_header_all(head, hn, "content-encoding", ce, sizeof ce)) return NET_OUTCOME_OK;
+    size_t n = strlen(ce), a = 0, k = 0;
+    while (a < n && nn < 8) {
+        size_t b = a;
+        while (b < n && ce[b] != ',') b++;
+        size_t x = a, y = b;
+        while (x < y && net_wsp(ce[x])) x++;
+        while (y > x && net_wsp(ce[y - 1])) y--;
+        if (y > x && y - x < sizeof names[0] && !net_ci_is(ce + x, y - x, "identity")) {
+            for (size_t c = 0; c < y - x; c++) names[nn][c] = net_lower(ce[x + c]);
+            names[nn][y - x] = 0;
+            int w = snprintf(coding + k, ccap - k, "%s%s", nn ? ", " : "", names[nn]);
+            if (w > 0 && k + (size_t)w < ccap) k += (size_t)w;
+            nn++;
+        }
+        a = b + 1;
+    }
+    for (int c = nn - 1; c >= 0; c--) {
+        vector<uint8_t> in, out;
+        resize(in, len(*body));
+        if (len(in)) memcpy(data(in), data(*body), len(in));
+        int ok;
+        if (strcmp(names[c], "gzip") == 0 || strcmp(names[c], "x-gzip") == 0) ok = net_gunzip(data(in), len(in), &out, why, wcap);
+        else if (strcmp(names[c], "deflate") == 0) ok = net_inflate_body(data(in), len(in), &out, why, wcap);
+        else {
+            snprintf(why, wcap, "the content coding %s is not one read here", names[c]);
+            return NET_OUTCOME_DECODING_FAILED;
+        }
+        if (!ok) return len(out) >= NET_MAX_BODY ? NET_OUTCOME_TOO_LARGE : NET_OUTCOME_DECODING_FAILED;
+        clear(*body);
+        resize(body, len(out));
+        if (len(out)) memcpy(data(*body), data(out), len(out));
+    }
+    return NET_OUTCOME_OK;
+}
+
 /* ---- the loader's records ---- */
 
 static amb_span net_text(net_loader *l, const char *s) { return text_add(l, s, strlen(s)); }
@@ -1910,6 +2038,10 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
     memset(&rt, 0, sizeof rt);
     net_cache_use cache = NET_CACHE_USE_UNUSED;
     int64_t cache_age = 0, cache_life = 0;
+    char coding[200];
+    int coded = 0;
+    uint32_t encoded = 0;
+    coding[0] = 0;
     for (int hop = 0;; hop++) {
         memset(&rt, 0, sizeof rt);
         /* a page served over the network may not read the machine's files */
@@ -1999,6 +2131,13 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
             u = next;
             continue;
         }
+        /* the body out of its content codings */
+        if (len(body)) {
+            size_t sent = len(body);
+            out = net_decode_body(data(head), len(head), &body, coding, sizeof coding, rt.reason, sizeof rt.reason);
+            if (out != NET_OUTCOME_OK) break;
+            if (coding[0]) { coded = 1; encoded = (uint32_t)sent; }
+        }
         if (status >= 400) out = NET_OUTCOME_HTTP_ERROR;
         /* kept for later when it may be, and when a lifetime or a validator makes it of use */
         if (caching) {
@@ -2038,6 +2177,11 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
     l->resource[r].cache = cache;
     l->resource[r].cache_age = cache_age;
     l->resource[r].cache_lifetime = cache_life;
+    l->resource[r].coded = (uint8_t)coded;
+    if (coded) {
+        l->resource[r].coding = net_text(l, coding);
+        l->resource[r].encoded_size = encoded;
+    }
     if (out == NET_OUTCOME_OK || out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(body), len(body));
     if (kind == NET_KIND_IMAGE && out == NET_OUTCOME_OK) {
         uint32_t w, hh;

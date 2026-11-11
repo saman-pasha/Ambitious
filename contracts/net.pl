@@ -26,9 +26,10 @@ net_contract(enum(kind, [document, stylesheet, image, script, other])).
 net_contract(enum(cache_use, [unused, stored, fresh, revalidated, not_stored])).
 %% how a fetch ended: tls_handshake_failed is a TLS session that could not be set
 %% up, tls_verify_failed a server whose certificate chain or name did not verify,
-%% proxy_refused a proxy that would not open the tunnel
+%% proxy_refused a proxy that would not open the tunnel, decoding_failed a body in a
+%% content coding not read here or that did not decode
 net_contract(enum(outcome, [ok, http_error, no_such_file, refused, unreachable, too_many_redirects, unsupported_scheme,
-    bad_url, blocked, too_large, malformed, tls_handshake_failed, tls_verify_failed, proxy_refused])).
+    bad_url, blocked, too_large, malformed, tls_handshake_failed, tls_verify_failed, proxy_refused, decoding_failed])).
 
 net_contract(record(resource, [
     field(url,       span(text)),            % the absolute URL asked for
@@ -54,7 +55,10 @@ net_contract(record(resource, [
     field(cross_site, bool),                 % asked for by a page of another site (scheme and registrable domain)
     field(cache,     enum(cache_use)),       % what the HTTP cache did for it
     field(cache_age, i64),                   % the cached response's age then, in seconds
-    field(cache_lifetime, i64)               % and its freshness lifetime
+    field(cache_lifetime, i64),              % and its freshness lifetime
+    field(coded,     bool),                  % its body came in a content coding, decoded
+    field(coding,    span(text)),            % that coding, as Content-Encoding named it: gzip, deflate
+    field(encoded_size, u32)                 % the body's bytes as they came
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
@@ -146,6 +150,7 @@ net_contract(fact(net_tls(handle, field(tls_version), field(tls_cipher), field(a
 net_contract(fact(net_proxy(handle, field(proxy)), table(resource), field(proxied) == true)).
 net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == true)).
 net_contract(fact(net_cache(handle, field(cache), field(cache_age), field(cache_lifetime)), table(resource), field(cache) \== unused)).
+net_contract(fact(net_coding(handle, field(coding), field(encoded_size)), table(resource), field(coded) == true)).
 %% the page's cookies, those its responses set or tried to and those sent for it:
 %% names, domains, paths and flags, never a value
 net_contract(fact(net_cookie(handle, field(name), field(domain), field(path), field(state)), table(cookie), field(seen) == true)).
