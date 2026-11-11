@@ -48,7 +48,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
 css_contract(enum(unit, [keyword, px, em, percent, color, auto, number, rem, calc, expr, text, var])).
 css_contract(enum(how, [declared, inherited, initial])).
 
-css_contract(record(sheet, [field(origin, enum(origin)), field(first_rule, ref(rule)), field(last_rule, ref(rule))])).
+css_contract(record(sheet, [field(origin, enum(origin)), field(first_rule, ref(rule)), field(last_rule, ref(rule)),
+    field(url,    span(text)),          % where it was fetched from: a linked or imported sheet's
+    field(parent, ref(sheet))           % the sheet whose @import brought it
+])).
 css_contract(record(rule, [
     field(sheet,      ref(sheet)),
     field(next,       ref(rule)),
@@ -56,8 +59,17 @@ css_contract(record(rule, [
     field(spec,       u32),            % specificity: a * 65536 + b * 256 + c
     field(order,      u32),            % order of appearance, over every sheet
     field(first_decl, ref(decl)),
-    field(last_decl,  ref(decl))
+    field(last_decl,  ref(decl)),
+    field(layer,      ref(layer))       % its cascade layer (@layer); none: unlayered
 ])).
+%% a cascade layer (Cascade 5): its full name (a.b for b in a; an anonymous one's is
+%% written <anonymous N>), the layer it is in, and its place in the layers' order
+%% (each layer's own rules after its sublayers'; the unlayered rules after every layer)
+css_contract(record(layer, [field(name, span(text)), field(parent, ref(layer)), field(rank, u32)])).
+%% a web font a sheet declared (@font-face): its family, the source read, its weight and
+%% style, and the resource the loader fetched for it
+css_contract(record(face, [field(family, span(text)), field(url, span(text)), field(weight, u32), field(italic, bool),
+    field(font, xhandle(net, resource))])).
 css_contract(record(decl, [
     field(rule,      ref(rule)),
     field(next,      ref(decl)),
@@ -107,10 +119,13 @@ css_contract(handle(match, ma)).
 css_contract(handle(cval, cv)).
 css_contract(handle(initval, iv)).
 css_contract(handle(estyle, es)).
+css_contract(handle(layer, ly)).
+css_contract(handle(face, ff)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), pool(text), atoms(names)])).
+css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), table(layer),
+    table(face), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
@@ -118,6 +133,8 @@ css_contract(owns(style, match, store)).
 css_contract(owns(style, cval, store)).
 css_contract(owns(style, initval, store)).
 css_contract(owns(style, estyle, store)).
+css_contract(owns(style, layer, store)).
+css_contract(owns(style, face, store)).
 css_contract(owns(sheet, rule, list(rules))).
 css_contract(owns(rule, decl, list(decls))).
 css_contract(list(rules, sheet, rule, [first(first_rule), last(last_rule), next(next), up(sheet)])).
@@ -141,7 +158,13 @@ css_contract(invariant(live_links, 'Every link names a live record', refs_live))
 %% ---- REASONING --------------------------------------------------------------
 
 css_contract(fact(css_sheet(handle, field(origin)), table(sheet), true)).
+%% a sheet an @import brought, the sheet it is in, and where it was fetched from
+css_contract(fact(css_imported(handle, field(parent), field(url)), table(sheet), field(parent) \== none)).
 css_contract(fact(css_rule(handle, field(sheet), field(selector), field(spec), field(order)), table(rule), true)).
+css_contract(fact(css_rule_layer(handle, field(layer)), table(rule), field(layer) \== none)).
+css_contract(fact(css_layer(handle, field(name), field(rank)), table(layer), true)).
+css_contract(fact(css_font_face(handle, field(family), field(url), field(weight), field(italic)), table(face), true)).
+css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).
 css_contract(fact(css_decl(handle, field(rule), field(prop), field(text), field(important)), table(decl), true)).
 css_contract(fact(css_matched(field(node), field(rule)), table(match), true)).
 %% EACH ELEMENT'S STYLE; OF EACH STYLE, THE VALUES A DECLARATION GAVE; and each
@@ -169,6 +192,7 @@ css_contract(derived(css_computed/4, 'an element''s computed value of a property
 css_contract(derived(css_rgba/3, 'an element''s computed colour of a property as a number, RGBA')).
 css_contract(derived(css_origin_of/2, 'the origin of a declaration')).
 css_contract(derived(css_lost/4, 'a matching declaration that lost the cascade for a property, and at which step')).
+css_contract(derived(css_layer_of/2, 'the cascade layer of a declaration, its name; unlayered when it is in none')).
 css_contract(derived(css_explain/3, 'why an element has its computed value of a property')).
 css_contract(derived(css_specificity/2, 'a specificity as Selectors writes it, spec(A, B, C)')).
 css_contract(derived(css_background_of/3, 'the background an element''s text is drawn on, and whose it is')).

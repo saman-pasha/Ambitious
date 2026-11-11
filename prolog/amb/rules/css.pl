@@ -1,16 +1,18 @@
 %% prolog/amb/rules/css.pl -- what the CSS module's facts mean (contracts/css.pl).
 %%
-%% The cascade's order, as CSS Cascade 4 has it for the origins the module
+%% The cascade's order, as CSS Cascade 5 has it for the origins the module
 %% knows: origin and importance first (normal user agent < normal author <
 %% important author < important user agent), the style attribute's declarations
-%% above the rules' within each (element-attached style), then specificity, then
-%% the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
+%% above the rules' within each (element-attached style), then the cascade layer
+%% (@layer: in the layers' order, the unlayered rules last; for !important the
+%% order reversed), then specificity, then the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
 %% way; css_lost/4 says, of each declaration that lost, at which of these steps.
 %%
 %% No clause here cuts: amb_why/2 proves these rules clause by clause, and an
 %% if-then-else says what a cut would.
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
-   css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2.
+   css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
+   css_imported/3, css_font_face/5, css_font_face_font/2.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -103,9 +105,20 @@ css_custom(N, Name, V) :-
 css_origin_of(D, O) :- css_decl(D, R, _, _, _), css_rule(R, S, _, _, _), css_sheet(S, O).
 
 %% a declaration's place in the cascade: a term that sorts as the cascade does
-css_rules_rank(D, rank(Layer, Spec, Order)) :-
+css_rules_rank(D, rank(Layer, LayerRank, Spec, Order)) :-
     css_decl(D, R, _, _, Imp), css_rule(R, _, _, Spec, Order), css_origin_of(D, O),
-    css_rules_layer(O, Imp, Layer).
+    css_rules_layer(O, Imp, Layer), css_rules_layer_rank(R, Imp, LayerRank).
+
+%% a rule's cascade layer's place: its layer's rank, the unlayered after every layer
+%% (8191, as src/css/css.c has it); for !important, the order reversed
+css_rules_layer_rank(R, Imp, LR) :-
+    (   css_rule_layer(R, L), css_layer(L, _, Rank) -> Base = Rank ; Base = 8191 ),
+    (   Imp == true -> LR is 8191 - Base ; LR = Base ).
+
+%% the cascade layer a declaration is in: its name, or unlayered
+css_layer_of(D, Name) :-
+    css_decl(D, R, _, _, _),
+    (   css_rule_layer(R, L), css_layer(L, N, _) -> Name = N ; Name = unlayered ).
 
 css_rules_layer(user_agent, false, 1).
 css_rules_layer(author, false, 2).
@@ -129,8 +142,9 @@ css_specificity(S, spec(A, B, C)) :- A is S >> 16, B is (S >> 8) /\ 255, C is S 
 css_lost(N, P, D2, Why) :-
     css_won(N, P, D),
     css_matched(N, R2), css_decl(D2, R2, P, _, _), D2 \== D,
-    css_rules_rank(D, rank(L1, S1, O1)), css_rules_rank(D2, rank(L2, S2, O2)),
+    css_rules_rank(D, rank(L1, LR1, S1, O1)), css_rules_rank(D2, rank(L2, LR2, S2, O2)),
     (   L2 < L1 -> css_rules_layer_name(L2, W2), css_rules_layer_name(L1, W1), Why = origin_or_importance(lost(W2), won(W1))
+    ;   LR2 < LR1 -> css_layer_of(D2, N2), css_layer_of(D, N1), Why = layer(lost(N2), won(N1))
     ;   S2 < S1 -> css_specificity(S2, T2), css_specificity(S1, T1), Why = specificity(T2, lower_than(T1))
     ;   O2 < O1 -> Why = order(O2, earlier_than(O1))
     ;   Why = earlier_in_the_same_rule

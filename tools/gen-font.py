@@ -10,6 +10,12 @@ built-in faces as it reads a page's web fonts. Composite glyphs are resolved
 into their components' points; the kerning pairs are the subset's.
 
     python3 tools/gen-font.py [FONTDIR] > src/paint/font_data.h
+    python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.woff FAMILY
+
+The second writes a web font for the fixture pages: the same subset of one
+TrueType file as a font Chromium's sanitizer takes (with OS/2, post, name and a
+version 1.0 maxp), named FAMILY, the fonts' notice in its name table; as WOFF 1
+(its tables stored) when OUT ends in .woff.
 
 FONTDIR defaults to /usr/share/fonts/truetype/dejavu. The output is a copy of
 part of the Font Software, so it carries the fonts' notice (the Bitstream Vera
@@ -253,8 +259,52 @@ def kern_pairs(f):
     return pairs
 
 
+def checksum(body):
+    body = body + b"\0" * (-len(body) % 4)
+    return sum(struct.unpack(">%dI" % (len(body) // 4), body)) & 0xFFFFFFFF
+
+
 def table_record(tag, body, offset):
-    return struct.pack(">4sIII", tag.encode("latin-1"), 0, offset, len(body))
+    return struct.pack(">4sIII", tag.encode("latin-1"), checksum(body), offset, len(body))
+
+
+def bsearch(n, unit):
+    """a binary search's header for n entries of unit bytes: searchRange, entrySelector, rangeShift"""
+    if n == 0:
+        return 0, 0, 0
+    p, e = 1, 0
+    while p * 2 <= n:
+        p, e = p * 2, e + 1
+    return p * unit, e, n * unit - p * unit
+
+
+def name_table(family, style):
+    """a name table: the notice, the family, its style, the full and PostScript names, the license"""
+    lines = NOTICE.split("\n")
+    names = [(0, " ".join(lines[:2])), (1, family), (2, style), (3, family + " " + style), (4, family + " " + style),
+             (6, (family + "-" + style).replace(" ", "")), (13, NOTICE)]
+    recs, strs = bytearray(), bytearray()
+    for nid, text in names:
+        u = text.encode("utf-16-be")
+        recs += struct.pack(">HHHHHH", 3, 1, 0x409, nid, len(u), len(strs))
+        strs += u
+    return struct.pack(">HHH", 0, len(names), 6 + len(recs)) + bytes(recs) + bytes(strs)
+
+
+def woff(sfnt):
+    """an sfnt as WOFF 1, its tables stored as they are"""
+    n = struct.unpack_from(">H", sfnt, 4)[0]
+    recs = [struct.unpack_from(">4sIII", sfnt, 12 + 16 * i) for i in range(n)]
+    head = 44 + 20 * n
+    body, dirs = bytearray(), bytearray()
+    for tag, cs, off, length in recs:
+        dirs += struct.pack(">4sIIII", tag, head + len(body), length, length, cs)
+        body += sfnt[off:off + length]
+        while len(body) % 4:
+            body.append(0)
+    total = head + len(body)
+    out = struct.pack(">4sIIHHIHHIIIII", b"wOFF", 0x00010000, total, n, 0, len(sfnt), 1, 0, 0, 0, 0, 0, 0)
+    return out + bytes(dirs) + bytes(body)
 
 
 def encode_glyph(contours):
@@ -297,8 +347,9 @@ def encode_glyph(contours):
     return bytes(out)
 
 
-def subset(path):
-    """a TrueType font of the code points the script lists: the tables the painter reads"""
+def subset(path, web=None):
+    """a TrueType font of the code points the script lists: the tables the painter reads;
+    for the web (web, its family's name), the tables a sanitizer asks for besides"""
     f = Font(path)
     cps = [c for c in CODEPOINTS if c in f.cmap]
     gids = [0]
@@ -322,6 +373,9 @@ def subset(path):
     hhea = struct.pack(">IhhhHhhhhhhhhhhhH", 0x00010000, f.ascender, f.descender, f.line_gap, max(advances),
                        0, 0, xmax, 1, 0, 0, 0, 0, 0, 0, 0, len(gids))
     maxp = struct.pack(">IH", 0x00005000, len(gids))
+    if web:
+        m = f.tables["maxp"][0]
+        maxp = struct.pack(">IH", 0x00010000, len(gids)) + f.d[m + 6:m + 32]
     hmtx = b"".join(struct.pack(">Hh", a, 0) for a in advances)
     # cmap: format 4, a segment a code point (and the closing one)
     segs = sorted(set(cps)) + [0xFFFF]
@@ -330,16 +384,23 @@ def subset(path):
     starts = ends
     deltas = b"".join(struct.pack(">H", (newid[f.cmap[c]] - c) % 0x10000) for c in segs[:-1]) + struct.pack(">H", 1)
     ros = b"\0\0" * len(segs)
-    sub = struct.pack(">HHHHHHH", 4, 0, 0, segx2, 0, 0, 0) + ends + b"\0\0" + starts + deltas + ros
+    sub = struct.pack(">HHHHHHH", 4, 0, 0, segx2, *bsearch(len(segs), 2)) + ends + b"\0\0" + starts + deltas + ros
     sub = sub[:2] + struct.pack(">H", len(sub)) + sub[4:]
     cmap = struct.pack(">HHHHI", 0, 1, 3, 1, 12) + sub
     # kern: format 0, the pairs of the subset's glyphs, in order
     pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items() if l in newid and r in newid and v)
-    kbody = struct.pack(">HHHH", len(pairs), 0, 0, 0) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
+    kbody = struct.pack(">HHHH", len(pairs), *bsearch(len(pairs), 6)) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
     kern = struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody
     tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
               ("kern", kern), ("loca", bytes(loca)), ("maxp", maxp)]
-    out = bytearray(struct.pack(">IHHHH", 0x00010000, len(tables), 128, 3, 0))
+    if web:
+        o = f.tables["OS/2"]
+        post = struct.pack(">IIhhIIIII", 0x00030000, 0, -100, 50, 0, 0, 0, 0, 0)
+        style = "Bold" if "Bold" in path else "Oblique" if "Oblique" in path else "Regular"
+        tables += [("OS/2", f.d[o[0]:o[0] + o[1]]), ("name", name_table(web, style)), ("post", post)]
+        tables.sort(key=lambda t: t[0])
+    out = bytearray(struct.pack(">IHH", 0x00010000, len(tables), 0) + struct.pack(">HH", *bsearch(len(tables), 16)[1:]))
+    out[6:8] = struct.pack(">H", bsearch(len(tables), 16)[0])
     offset = 12 + 16 * len(tables)
     bodies = bytearray()
     for tag, body in tables:
@@ -352,6 +413,11 @@ def subset(path):
 
 
 def main():
+    if len(sys.argv) == 5 and sys.argv[1] == "--web":
+        blob, _, _, _ = subset(sys.argv[2], sys.argv[4])
+        with open(sys.argv[3], "wb") as out:
+            out.write(woff(blob) if sys.argv[3].endswith(".woff") else blob)
+        return
     fontdir = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
     w = sys.stdout.write
     w("/* src/paint/font_data.h -- generated by tools/gen-font.py from the DejaVu fonts' TrueType\n")

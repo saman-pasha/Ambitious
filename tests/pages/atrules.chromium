@@ -1,0 +1,7 @@
+# boxes of tests/pages/atrules.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+a div 10 10 297.891 40
+b div 10 56 320 40
+c div 10 102 147.547 40
+m div 10 148 260.75 40
+s div 10 194 359.328 40
+x div 10 240 302.063 40

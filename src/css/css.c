@@ -63,6 +63,7 @@ amb_interface(dom);
 amb_interface(net);
 amb_implementation(css);
 #include "css.h"
+#include "../net/url.h"
 
 #define CSS_MAXPARTS 32
 #define CSS_VIEWPORT_W 800.0
@@ -1799,72 +1800,6 @@ static void css_parse_block(css_style *s, uint32_t rule, const char *t, size_t n
 }
 
 
-/* ---- media queries (Media Queries 4, abridged): against the viewport ---- */
-
-static int css_media_feature(const char *s, size_t n) {
-    size_t c = 0;
-    while (c < n && s[c] != ':') c++;
-    size_t a = css_skip_ws(s, c, 0), b = c;
-    while (b > a && css_ws(s[b - 1])) b--;
-    const char *name = s + a;
-    size_t nn = b - a;
-    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer");
-    size_t va = css_skip_ws(s, n, c + 1), vb = n;
-    while (vb > va && css_ws(s[vb - 1])) vb--;
-    css_val v;
-    if (!css_parse_val(s + va, vb - va, &v)) return 0;
-    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * 16 : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
-    if (css_eq_ci(name, nn, "min-width")) return px >= 0 && CSS_VIEWPORT_W >= px;
-    if (css_eq_ci(name, nn, "max-width")) return px >= 0 && CSS_VIEWPORT_W <= px;
-    if (css_eq_ci(name, nn, "width")) return px == CSS_VIEWPORT_W;
-    if (css_eq_ci(name, nn, "min-height")) return px >= 0 && CSS_VIEWPORT_H >= px;
-    if (css_eq_ci(name, nn, "max-height")) return px >= 0 && CSS_VIEWPORT_H <= px;
-    if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
-    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, "light");
-    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, "no-preference");
-    return 0;
-}
-
-/* one query: [not|only]? type? (and (feature))* */
-static int css_media_query(const char *s, size_t n) {
-    size_t i = css_skip_ws(s, n, 0);
-    int neg = 0, ok = 1, first = 1;
-    if (i >= n) return 0;
-    while (i < n) {
-        if (s[i] == '(') {
-            size_t e = css_block_end(s, n, i, '(', ')');
-            if (e >= n) return 0;
-            if (!css_media_feature(s + i + 1, e - i - 1)) ok = 0;
-            i = e + 1;
-        } else {
-            size_t b = i;
-            while (i < n && css_namechar(s[i])) i++;
-            if (i == b) return 0;
-            const char *w = s + b;
-            size_t wn = i - b;
-            if (first && css_eq_ci(w, wn, "not")) neg = 1;
-            else if (first && css_eq_ci(w, wn, "only")) {}
-            else if (css_eq_ci(w, wn, "and") || css_eq_ci(w, wn, "all") || css_eq_ci(w, wn, "screen")) {}
-            else ok = 0;    /* print, speech, an unknown type, or `or' */
-        }
-        first = 0;
-        i = css_skip_ws(s, n, i);
-    }
-    return neg ? !ok : ok;
-}
-
-/* a media query list: empty, or one of its queries holds */
-static int css_media_matches(const char *s, size_t n) {
-    if (css_skip_ws(s, n, 0) >= n) return 1;
-    size_t a = 0;
-    while (a < n) {
-        size_t b = css_comma(s, n, a);
-        if (css_media_query(s + a, b - a)) return 1;
-        a = b + 1;
-    }
-    return 0;
-}
-
 /* ---- specificity (Selectors 4, 17) ---- */
 
 typedef struct css_part { uint32_t start, len; char comb; } css_part;
@@ -1966,10 +1901,77 @@ static uint32_t css_spec_list(const char *s, size_t n, int depth) {
     return best;
 }
 
+/* ---- media queries (Media Queries 4, abridged): against the viewport ---- */
+
+static int css_media_feature(const char *s, size_t n) {
+    size_t c = 0;
+    while (c < n && s[c] != ':') c++;
+    size_t a = css_skip_ws(s, c, 0), b = c;
+    while (b > a && css_ws(s[b - 1])) b--;
+    const char *name = s + a;
+    size_t nn = b - a;
+    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer");
+    size_t va = css_skip_ws(s, n, c + 1), vb = n;
+    while (vb > va && css_ws(s[vb - 1])) vb--;
+    css_val v;
+    if (!css_parse_val(s + va, vb - va, &v)) return 0;
+    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * 16 : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
+    if (css_eq_ci(name, nn, "min-width")) return px >= 0 && CSS_VIEWPORT_W >= px;
+    if (css_eq_ci(name, nn, "max-width")) return px >= 0 && CSS_VIEWPORT_W <= px;
+    if (css_eq_ci(name, nn, "width")) return px == CSS_VIEWPORT_W;
+    if (css_eq_ci(name, nn, "min-height")) return px >= 0 && CSS_VIEWPORT_H >= px;
+    if (css_eq_ci(name, nn, "max-height")) return px >= 0 && CSS_VIEWPORT_H <= px;
+    if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
+    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, "light");
+    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, "no-preference");
+    return 0;
+}
+
+/* one query: [not|only]? type? (and (feature))* */
+static int css_media_query(const char *s, size_t n) {
+    size_t i = css_skip_ws(s, n, 0);
+    int neg = 0, ok = 1, first = 1;
+    if (i >= n) return 0;
+    while (i < n) {
+        if (s[i] == '(') {
+            size_t e = css_block_end(s, n, i, '(', ')');
+            if (e >= n) return 0;
+            if (!css_media_feature(s + i + 1, e - i - 1)) ok = 0;
+            i = e + 1;
+        } else {
+            size_t b = i;
+            while (i < n && css_namechar(s[i])) i++;
+            if (i == b) return 0;
+            const char *w = s + b;
+            size_t wn = i - b;
+            if (first && css_eq_ci(w, wn, "not")) neg = 1;
+            else if (first && css_eq_ci(w, wn, "only")) {}
+            else if (css_eq_ci(w, wn, "and") || css_eq_ci(w, wn, "all") || css_eq_ci(w, wn, "screen")) {}
+            else ok = 0;    /* print, speech, an unknown type, or `or' */
+        }
+        first = 0;
+        i = css_skip_ws(s, n, i);
+    }
+    return neg ? !ok : ok;
+}
+
+/* a media query list: empty, or one of its queries holds */
+static int css_media_matches(const char *s, size_t n) {
+    if (css_skip_ws(s, n, 0) >= n) return 1;
+    size_t a = 0;
+    while (a < n) {
+        size_t b = css_comma(s, n, a);
+        if (css_media_query(s + a, b - a)) return 1;
+        a = b + 1;
+    }
+    return 0;
+}
+
 /* ---- the sheet's rules ---- */
 
-/* a style rule: each selector of its list a rule of its own, with the block's declarations */
-static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t pn, const char *blk, size_t bn) {
+/* a style rule: each selector of its list a rule of its own, in the layer layer, with the
+   block's declarations */
+static void css_style_rule(css_style *s, uint32_t sheet, uint32_t layer, const char *pre, size_t pn, const char *blk, size_t bn) {
     size_t a = 0;
     while (a < pn) {
         size_t b = css_comma(pre, pn, a);
@@ -1996,6 +1998,7 @@ static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t
             s->rule[r.index].selector = sp;
             s->rule[r.index].spec = css_spec_complex(data(sel), len(sel), 0);
             s->rule[r.index].order = r.index;
+            s->rule[r.index].layer = layer;
             rules_append(s, sheet, r.index);
             css_parse_block(s, r.index, blk, bn);
         }
@@ -2003,8 +2006,349 @@ static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t
     }
 }
 
+/* ---- @supports (CSS Conditional 3): its condition, over what the module reads ---- */
+
+static int css_selector_ok(const char *s, size_t n, int depth);
+
+/* a selector's pseudo-class or pseudo-element is one the matcher knows */
+static int css_pseudo_known(const char *p, size_t pn, int element, int fn) {
+    if (element)
+        return !fn && (css_eq_ci(p, pn, "before") || css_eq_ci(p, pn, "after") || css_eq_ci(p, pn, "first-line") ||
+                       css_eq_ci(p, pn, "first-letter") || css_eq_ci(p, pn, "marker") || css_eq_ci(p, pn, "placeholder"));
+    if (fn)
+        return css_eq_ci(p, pn, "not") || css_eq_ci(p, pn, "is") || css_eq_ci(p, pn, "where") || css_eq_ci(p, pn, "matches") ||
+               css_eq_ci(p, pn, "has") || css_eq_ci(p, pn, "nth-child") || css_eq_ci(p, pn, "nth-last-child") ||
+               css_eq_ci(p, pn, "nth-of-type") || css_eq_ci(p, pn, "nth-last-of-type");
+    char w[24];
+    if (pn == 0 || pn >= sizeof w) return 0;
+    for (size_t i = 0; i < pn; i++) w[i] = css_lower(p[i]);
+    w[pn] = 0;
+    return css_word_in(w, "first-child last-child only-child first-of-type last-of-type only-of-type root empty link any-link "
+                          "visited checked disabled enabled hover focus focus-visible focus-within active target before after "
+                          "first-line first-letter");
+}
+
+/* each compound of a selector is one the matcher reads */
+static int css_selector_ok(const char *s, size_t n, int depth) {
+    css_part parts[CSS_MAXPARTS];
+    size_t k = css_split(s, n, parts, CSS_MAXPARTS);
+    if (k == 0 || depth > CSS_MAX_NESTING) return 0;
+    for (size_t j = 0; j < k; j++) {
+        const char *c = s + parts[j].start;
+        size_t cn = parts[j].len, i = 0;
+        while (i < cn) {
+            char ch = c[i];
+            if (ch == '*' || css_namechar(ch)) { i++; continue; }
+            if (ch == '#' || ch == '.') { size_t b = ++i; while (i < cn && css_namechar(c[i])) i++; if (i == b) return 0; continue; }
+            if (ch == '[') { size_t e = css_block_end(c, cn, i, '[', ']'); if (e >= cn) return 0; i = e + 1; continue; }
+            if (ch != ':') return 0;
+            int element = i + 1 < cn && c[i + 1] == ':';
+            i += element ? 2 : 1;
+            size_t b = i;
+            while (i < cn && css_namechar(c[i])) i++;
+            int fn = i < cn && c[i] == '(';
+            if (!css_pseudo_known(c + b, i - b, element, fn)) return 0;
+            if (fn) {
+                size_t e = css_block_end(c, cn, i, '(', ')');
+                if (e >= cn) return 0;
+                if (css_eq_ci(c + b, i - b, "not") || css_eq_ci(c + b, i - b, "is") || css_eq_ci(c + b, i - b, "where")) {
+                    /* a selector list: each of its selectors read */
+                    size_t a = i + 1;
+                    while (a < e) {
+                        size_t z = css_comma(c, e, a);
+                        if (!css_selector_ok(c + a, z - a, depth + 1)) return 0;
+                        a = z + 1;
+                    }
+                }
+                i = e + 1;
+            }
+        }
+    }
+    return 1;
+}
+
+static int css_supports(const char *s, size_t n, int depth);
+
+/* what a test's parentheses hold: a declaration the module reads, or a condition */
+static int css_supports_test(const char *in, size_t inn, int depth) {
+    {
+        size_t colon = 0;
+        while (colon < inn && in[colon] != ':' && in[colon] != '(') colon++;
+        if (colon < inn && in[colon] == ':') {
+            size_t a = css_skip_ws(in, colon, 0), b = colon;
+            while (b > a && css_ws(in[b - 1])) b--;
+            if (b - a > 2 && in[a] == '-' && in[a + 1] == '-') return 1;   /* a custom property takes any value */
+            size_t va = css_skip_ws(in, inn, colon + 1), vb = inn;
+            while (vb > va && css_ws(in[vb - 1])) vb--;
+            if (vb == va) return 0;
+            if (css_has_var(in + va, vb - va)) return css_short_of(in + a, b - a) >= 0 || css_prop_of(in + a, b - a) >= 0;
+            css_items it;
+            return css_expand(in + a, b - a, in + va, vb - va, &it);
+        }
+        return css_supports(in, inn, depth + 1);
+    }
+}
+
+/* one parenthesized test, or selector() */
+static int css_supports_in(const char *s, size_t n, int depth) {
+    if (n >= 2 && s[0] == '(' && s[n - 1] == ')') return css_supports_test(s + 1, n - 2, depth);
+    if (css_is_fn(s, n, "selector")) return css_selector_ok(s + 9, n - 10, 0);
+    return 0;               /* font-tech(), font-format() and what else: not known, false */
+}
+
+static int css_supports(const char *s, size_t n, int depth) {
+    if (depth > 16) return 0;
+    /* its parts: parenthesized tests, functions, and the words not, and, or */
+    size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS], k = 0, i = 0;
+    while (i < n && k < CSS_MAXPARTS) {
+        i = css_skip_ws(s, n, i);
+        if (i >= n) break;
+        size_t b = i;
+        if (s[i] == '(') { size_t e = css_block_end(s, n, i, '(', ')'); if (e >= n) return 0; i = e + 1; }
+        else {
+            while (i < n && css_namechar(s[i])) i++;
+            if (i < n && s[i] == '(') { size_t e = css_block_end(s, n, i, '(', ')'); if (e >= n) return 0; i = e + 1; }
+            if (i == b) return 0;
+        }
+        st[k] = b;
+        ln[k] = i - b;
+        k++;
+    }
+    if (k == 0) return 0;
+    if (css_eq_ci(s + st[0], ln[0], "not")) return k == 2 && !css_supports_in(s + st[1], ln[1], depth);
+    int v = css_supports_in(s + st[0], ln[0], depth), op = 0;
+    for (size_t j = 1; j + 1 < k; j += 2) {
+        int this_op = css_eq_ci(s + st[j], ln[j], "and") ? 1 : css_eq_ci(s + st[j], ln[j], "or") ? 2 : 0;
+        if (!this_op || (op && this_op != op)) return 0;          /* and and or are not mixed without parentheses */
+        op = this_op;
+        int w = css_supports_in(s + st[j + 1], ln[j + 1], depth);
+        v = op == 1 ? v && w : v || w;
+    }
+    return k % 2 == 1 ? v : 0;
+}
+
+/* ---- @layer (CSS Cascade 5) ---- */
+
+/* the layer name (one name of a dotted one) in the layer parent, made if it is new */
+static uint32_t css_layer_named(css_style *s, uint32_t parent, const char *name, size_t nn) {
+    for (uint32_t l = 1; l < s->layer_len; l++) {
+        if (s->layer[l].parent != parent) continue;
+        amb_span sp = s->layer[l].name;
+        const char *t = text_ptr(s, sp);
+        size_t dot = sp.len;
+        while (dot > 0 && t[dot - 1] != '.') dot--;
+        if (sp.len - dot == nn && memcmp(t + dot, name, nn) == 0) return l;
+    }
+    vector<char> full;
+    if (parent) { amb_span pp = s->layer[parent].name; append_range(full, text_ptr(s, pp), pp.len); push_back(full, '.'); }
+    append_range(full, name, nn);
+    amb_span sp = text_add(s, data(full), len(full));
+    css_layer_h h = layer_new(s);
+    s->layer[h.index].name = sp;
+    s->layer[h.index].parent = parent;
+    return h.index;
+}
+
+/* a dotted layer name (a.b.c) in the layer parent: its last layer */
+static uint32_t css_layer_path(css_style *s, uint32_t parent, const char *name, size_t nn) {
+    size_t a = css_skip_ws(name, nn, 0), e = nn;
+    while (e > a && css_ws(name[e - 1])) e--;
+    uint32_t l = parent;
+    while (a < e) {
+        size_t b = a;
+        while (b < e && name[b] != '.') b++;
+        if (b == a) return parent;
+        l = css_layer_named(s, l, name + a, b - a);
+        a = b + 1;
+    }
+    return l;
+}
+
+/* an anonymous layer in parent: a layer of its own, which no rule names */
+static uint32_t css_layer_anon(css_style *s, uint32_t parent) {
+    char nm[40];
+    int k = snprintf(nm, sizeof nm, "<anonymous %u>", (unsigned)s->layer_len);
+    return css_layer_named(s, parent, nm, k > 0 ? (size_t)k : 0);
+}
+
+/* each layer's rank: the order its rules cascade in -- a layer's sublayers before its own
+   rules, siblings in the order they were first named (a walk, children before parents) */
+static uint32_t css_layer_rank(css_style *s, uint32_t parent, uint32_t next) {
+    for (uint32_t l = 1; l < s->layer_len; l++) {
+        if (s->layer[l].parent != parent) continue;
+        next = css_layer_rank(s, l, next);
+        s->layer[l].rank = next++;
+    }
+    return next;
+}
+
+/* ---- @import and @font-face: what the loader fetches for a sheet ---- */
+
+/* where a sheet's rules are read: its sheet, its layer, its base URL, how deep in
+   @imports, and whether a rule other than @import has been met */
+typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; } css_pctx;
+
+static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
+
+/* a url() or a string's text, its quotes and white space gone, into out: 1 when it is one */
+static int css_url_of(const char *s, size_t n, char *out, size_t cap) {
+    size_t a = 0, e = n;
+    if (css_is_fn(s, n, "url")) { a = 4; e = n - 1; }
+    a = css_skip_ws(s, e, a);
+    while (e > a && css_ws(s[e - 1])) e--;
+    if (e > a && (s[a] == '"' || s[a] == '\'')) { if (s[e - 1] != s[a] || e - a < 2) return 0; a++; e--; }
+    else if (!css_is_fn(s, n, "url")) return 0;
+    if (e - a + 1 > cap) return 0;
+    memcpy(out, s + a, e - a);
+    out[e - a] = 0;
+    return 1;
+}
+
+/* a URL a sheet names, made absolute against its base, and fetched -- unless a page not
+   read from a file names a file (the loader's rule, net.c): the resource, or 0 */
+static uint32_t css_fetch(net_loader *net, const css_pctx *cx, const char *ref, net_kind kind, char *abs, size_t cap) {
+    if (!net || !cx->base[0] || !net_url_resolve(cx->base, ref, abs, cap)) return 0;
+    if (strncmp(abs, "file:", 5) == 0 && strncmp(cx->base, "file:", 5) != 0) return 0;
+    net_resource_h h = net_fetch(net, abs, strlen(abs), kind);
+    return net->resource[h.index].outcome == NET_OUTCOME_OK ? h.index : 0;
+}
+
+/* a sheet's text, its comments stripped, read into a new sheet of the store */
+static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin, const char *src, size_t n, const char *url,
+                               uint32_t parent, uint32_t layer, int depth, const char *base) {
+    vector<char> t;
+    css_strip_comments(src, n, &t);
+    css_sheet_h sh = sheet_new(s);
+    s->sheet[sh.index].origin = origin;
+    s->sheet[sh.index].parent = parent;
+    if (url) s->sheet[sh.index].url = text_add(s, url, strlen(url));
+    css_pctx cx;
+    memset(&cx, 0, sizeof cx);
+    cx.sheet = sh.index;
+    cx.layer = layer;
+    cx.depth = depth;
+    cx.origin = origin;
+    snprintf(cx.base, sizeof cx.base, "%s", base ? base : "");
+    css_rules(s, net, &cx, data(t), len(t));
+    s->revision++;
+    return sh.index;
+}
+
+/* @import url [layer | layer(name)] [supports(...)] [media]: the sheet fetched and read
+   where the rule stands, its rules in the layer it names */
+static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *p, size_t n) {
+    size_t i = 0, st, ln;
+    char ref[2048], abs[4096];
+    if (!css_next_part(p, n, &i, &st, &ln) || !css_url_of(p + st, ln, ref, sizeof ref)) return;
+    uint32_t layer = cx->layer;
+    size_t rest = i;
+    while (css_next_part(p, n, &i, &st, &ln)) {
+        if (css_eq_ci(p + st, ln, "layer")) { layer = css_layer_anon(s, cx->layer); rest = i; continue; }
+        if (css_is_fn(p + st, ln, "layer")) { layer = css_layer_path(s, cx->layer, p + st + 6, ln - 7); rest = i; continue; }
+        if (css_is_fn(p + st, ln, "supports")) {
+            if (!css_supports_test(p + st + 9, ln - 10, 0)) return;
+            rest = i;
+            continue;
+        }
+        break;
+    }
+    if (!css_media_matches(p + rest, n - rest) || cx->depth >= 8) return;
+    uint32_t r = css_fetch(net, cx, ref, NET_KIND_STYLESHEET, abs, sizeof abs);
+    if (!r) return;
+    /* an import of a sheet already being read (a cycle) is not read again */
+    for (uint32_t a = cx->sheet; a; a = s->sheet[a].parent) {
+        amb_span u = s->sheet[a].url;
+        if (u.len == strlen(abs) && memcmp(text_ptr(s, u), abs, u.len) == 0) return;
+    }
+    char base[4096];
+    amb_span fu = net->resource[r].final_url;
+    snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
+    vector<char> body;
+    append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
+    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base);
+}
+
+/* the bytes begin as a font the painter reads: TrueType, OpenType, WOFF */
+static int css_font_magic(const char *b, size_t n) {
+    if (n < 4) return 0;
+    return (b[0] == 0 && b[1] == 1 && b[2] == 0 && b[3] == 0) || memcmp(b, "true", 4) == 0 || memcmp(b, "wOFF", 4) == 0;
+}
+
+/* @font-face: its family, the first source whose format the painter reads, its weight
+   and style; the source fetched */
+static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, const char *t, size_t n) {
+    vector<char> family;
+    char ref[2048], abs[4096];
+    ref[0] = 0;
+    uint32_t weight = 400;
+    int italic = 0;
+    size_t d = 0;
+    while (d < n) {
+        size_t e = d;
+        while (e < n && t[e] != ';') {
+            if (t[e] == '(') e = css_block_end(t, n, e, '(', ')');
+            else if (t[e] == '"' || t[e] == '\'') e = css_string_end(t, n, e);
+            if (e < n) e++;
+        }
+        size_t colon = d;
+        while (colon < e && t[colon] != ':') colon++;
+        if (colon < e) {
+            size_t na = css_skip_ws(t, colon, d), nb = colon, va = css_skip_ws(t, e, colon + 1), vb = e;
+            while (nb > na && css_ws(t[nb - 1])) nb--;
+            while (vb > va && css_ws(t[vb - 1])) vb--;
+            const char *v = t + va;
+            size_t vn = vb - va;
+            if (css_eq_ci(t + na, nb - na, "font-family")) {
+                clear(family);
+                if (vn >= 2 && (v[0] == '"' || v[0] == '\'')) append_range(family, v + 1, vn - 2);
+                else append_range(family, v, vn);
+            } else if (css_eq_ci(t + na, nb - na, "src") && !ref[0]) {
+                /* the sources in order: the first url() whose format() is none or one read */
+                size_t a = 0;
+                while (a < vn && !ref[0]) {
+                    size_t b = css_comma(v, vn, a), i = a, st, ln;
+                    int ok = 1;
+                    char u[2048];
+                    u[0] = 0;
+                    while (css_next_part(v, b, &i, &st, &ln)) {
+                        if (css_is_fn(v + st, ln, "url")) { if (!css_url_of(v + st, ln, u, sizeof u)) ok = 0; }
+                        else if (css_is_fn(v + st, ln, "format")) {
+                            char f[64];
+                            if (!css_url_of(v + st + 7, ln - 8, f, sizeof f)) snprintf(f, sizeof f, "%.*s", (int)(ln - 8), v + st + 7);
+                            for (size_t q = 0; f[q]; q++) f[q] = css_lower(f[q]);
+                            if (!css_word_in(f, "truetype opentype woff")) ok = 0;
+                        } else if (css_is_fn(v + st, ln, "tech")) ok = 0;
+                    }
+                    if (ok && u[0]) snprintf(ref, sizeof ref, "%s", u);
+                    a = b + 1;
+                }
+            } else if (css_eq_ci(t + na, nb - na, "font-weight")) {
+                double x;
+                if (css_eq_ci(v, vn, "bold")) weight = 700;
+                else if (css_number(v, vn, &x)) weight = (uint32_t)x;
+            } else if (css_eq_ci(t + na, nb - na, "font-style")) italic = vn >= 6 && (css_eq_ci(v, 6, "italic") || css_eq_ci(v, 7, "oblique"));
+        }
+        d = e + 1;
+    }
+    if (!len(family) || !ref[0]) return;
+    css_face_h h = face_new(s);
+    uint32_t fi = h.index;
+    amb_span fam = text_add(s, data(family), len(family));
+    s->face[fi].family = fam;
+    s->face[fi].weight = weight;
+    s->face[fi].italic = (uint8_t)italic;
+    uint32_t r = css_fetch(net, cx, ref, NET_KIND_OTHER, abs, sizeof abs);
+    /* the URL fetched, or (a fetch that failed) as written; an if, as a ternary between
+       two arrays is not lowered (toolchain finding) */
+    amb_span ua;
+    if (r) ua = text_add(s, abs, strlen(abs));
+    else ua = text_add(s, ref, strlen(ref));
+    s->face[fi].url = ua;
+    if (r && css_font_magic(bytes_ptr(net, net->resource[r].body), net->resource[r].body.len)) s->face[fi].font = resource_handle(net, r);
+}
+
 /* a sheet's text, its comments gone: rules and at-rules */
-static void css_rules(css_style *s, uint32_t sheet, const char *t, size_t n) {
+static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n) {
     size_t i = 0;
     while (i < n) {
         i = css_skip_ws(t, n, i);
@@ -2019,30 +2363,53 @@ static void css_rules(css_style *s, uint32_t sheet, const char *t, size_t n) {
             else if (t[k] == '[') k = css_block_end(t, n, k, '[', ']');
             if (k < n) k++;
         }
-        if (k >= n) break;
-        if (t[k] == ';') { i = k + 1; continue; }    /* @import, @charset, @namespace: not read */
+        size_t j = i + 1;
+        while (at && j < k && css_namechar(t[j])) j++;
+        const char *name = t + i + 1;
+        size_t nn = j - i - 1;
+        if (k >= n || t[k] == ';') {
+            /* a statement: @import (before any other rule), @layer's names; @charset and
+               @namespace read past */
+            size_t stop = k < n ? k : n;
+            if (at && css_eq_ci(name, nn, "import") && !cx->ruled) css_import(s, net, cx, t + j, stop - j);
+            else if (at && css_eq_ci(name, nn, "layer")) {
+                size_t a = j;
+                while (a < stop) {
+                    size_t b = css_comma(t, stop, a);
+                    css_layer_path(s, cx->layer, t + a, b - a);
+                    a = b + 1;
+                }
+            } else if (!(at && (css_eq_ci(name, nn, "charset") || css_eq_ci(name, nn, "namespace")))) cx->ruled = 1;
+            if (k >= n) break;
+            i = k + 1;
+            continue;
+        }
         size_t end = css_block_end(t, n, k, '{', '}');
         size_t inner = end < n ? end - k - 1 : n - k - 1;
-        if (at) {
-            size_t j = i + 1;
-            while (j < k && css_namechar(t[j])) j++;
-            /* @media whose query holds: its rules are the sheet's; @supports, @layer,
-               @font-face, @keyframes, @page and the rest: not read */
-            if (css_eq_ci(t + i + 1, j - i - 1, "media") && css_media_matches(t + j, k - j)) css_rules(s, sheet, t + k + 1, inner);
+        if (at && css_eq_ci(name, nn, "layer")) {
+            /* @layer name { } (or anonymous): its rules in that layer */
+            css_pctx sub = *cx;
+            size_t a = css_skip_ws(t, k, j);
+            sub.layer = a < k ? css_layer_path(s, cx->layer, t + a, k - a) : css_layer_anon(s, cx->layer);
+            css_rules(s, net, &sub, t + k + 1, inner);
+            cx->ruled = 1;
+        } else if (at) {
+            /* @media whose query holds, @supports whose condition does: their rules are the
+               sheet's; @font-face's face is fetched; @keyframes, @page and the rest: not read */
+            if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
+            else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
+            else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
+            cx->ruled = 1;
         } else {
-            css_style_rule(s, sheet, t + i, k - i, t + k + 1, inner);
+            css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
+            cx->ruled = 1;
         }
         i = end + 1;
     }
 }
 
 css_status css_parse_sheet(css_style *s, css_origin origin, const char *src, size_t src_len) {
-    vector<char> t;
-    css_strip_comments(src, src_len, &t);
-    css_sheet_h sh = sheet_new(s);
-    s->sheet[sh.index].origin = origin;
-    css_rules(s, sh.index, data(t), len(t));
-    s->revision++;
+    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0);
     return CSS_OK;
 }
 
@@ -2823,12 +3190,19 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
 
 /* a declaration's place in the cascade, larger winning: origin and importance with
    element-attached style above rules, then specificity, then order of appearance */
+#define CSS_LAYER_LAST 8191
 static uint64_t css_rank(const css_style *s, uint32_t dc) {
     uint32_t r = s->decl[dc].rule;
     css_origin o = s->sheet[s->rule[r].sheet].origin;
     int imp = s->decl[dc].important;
-    uint64_t layer = o == CSS_ORIGIN_USER_AGENT ? (imp ? 6 : 1) : (uint64_t)((imp ? 4 : 2) + (o == CSS_ORIGIN_INLINE));
-    return layer << 56 | (uint64_t)s->rule[r].spec << 24 | s->rule[r].order;
+    uint64_t cls = o == CSS_ORIGIN_USER_AGENT ? (imp ? 6 : 1) : (uint64_t)((imp ? 4 : 2) + (o == CSS_ORIGIN_INLINE));
+    /* the cascade layer: the unlayered rules after every layer; for !important, the order
+       reversed (Cascade 5, 6.4) */
+    uint32_t ly = s->rule[r].layer;
+    uint64_t lr = ly ? s->layer[ly].rank : CSS_LAYER_LAST;
+    if (lr > CSS_LAYER_LAST) lr = CSS_LAYER_LAST;
+    if (imp) lr = CSS_LAYER_LAST - lr;
+    return cls << 61 | lr << 48 | (uint64_t)(s->rule[r].spec & 0xffffff) << 24 | (s->rule[r].order & 0xffffff);
 }
 
 static void css_decl_value(const css_style *s, uint32_t dc, css_val *v) {
@@ -3525,6 +3899,14 @@ static void css_ua_load(css_style *s) {
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
     css_ua_load(s);
+    /* the page's URL: the base its style elements' @imports and fonts resolve against */
+    char page[4096];
+    page[0] = 0;
+    for (uint32_t r = 1; net && r < net->resource_len && !page[0]; r++)
+        if (net->resource[r].live && net->resource[r].kind == NET_KIND_DOCUMENT) {
+            amb_span fu = net->resource[r].final_url;
+            snprintf(page, sizeof page, "%.*s", (int)fu.len, text_ptr(net, fu));
+        }
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         int link = css_is_named(doc, x, "link");
         if (!css_is_named(doc, x, "style") && !link) continue;
@@ -3533,21 +3915,40 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         if (link) {
             uint32_t r = net ? css_linked_sheet(net, x) : 0;
             if (!r) continue;
+            char base[4096];
+            amb_span fu = net->resource[r].final_url;
+            snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
             vector<char> body;
             append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-            css_parse_sheet(s, CSS_ORIGIN_AUTHOR, data(body), len(body));
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base);
             continue;
         }
         vector<char> t;
         for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
             if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
-        css_parse_sheet(s, CSS_ORIGIN_AUTHOR, data(t), len(t));
+        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page);
     }
+    /* the cascade layers' order, now every sheet has named its layers */
+    css_layer_rank(s, 0, 1);
     uint32_t shared = (uint32_t)s->rule_len;
     if (!css_ready) css_order_make();
     css_env env;
     memset(&env, 0, sizeof env);
     env.rem = 16;
+    /* the web fonts' families whose font was fetched: each a word of env.faces, lower case
+       and without its spaces, as font-family's names are matched */
+    for (uint32_t fi = 1; fi < s->face_len; fi++) {
+        if (!s->face[fi].font.index) continue;
+        amb_span fam = s->face[fi].family;
+        size_t k = strlen(env.faces);
+        if (k + fam.len + 2 >= sizeof env.faces) break;
+        if (k) env.faces[k++] = ' ';
+        for (uint32_t q = 0; q < fam.len; q++) {
+            char c = text_ptr(s, fam)[q];
+            if (!css_ws(c)) env.faces[k++] = css_lower(c);
+        }
+        env.faces[k] = 0;
+    }
     /* each property's initial value, computed (currentcolor black, a border's medium 3px:
        made the element's in css_element), and what it records */
     css_val initial[CSS_NPROPS];

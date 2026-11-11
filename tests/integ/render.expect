@@ -2,6 +2,7 @@ news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:f82
 style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
 layout: rendered 800x605: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:abd30e6b81ae1595
 values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:f860a8aab2f8ae18
+atrules: rendered 800x600: 9 boxes, 6 lines, 6 text fragments; pixels fnv1a64:c250b6acdc3d4715
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))

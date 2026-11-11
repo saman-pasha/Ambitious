@@ -1,0 +1,3 @@
+/* imported by tests/pages/atrules.html into the layer base, before the page's theme layer */
+@import url(colors.css);
+.card { background: #fee; color: #333; border-color: #c33; padding: 12px }

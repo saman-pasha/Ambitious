@@ -70,13 +70,18 @@ enum { D_NONE, D_INLINE, D_BLOCK, D_LIST_ITEM, D_INLINE_BLOCK, D_TABLE, D_ROW_GR
 enum { WS_NORMAL, WS_PRE, WS_NOWRAP, WS_PRE_WRAP, WS_PRE_LINE };
 enum { AL_LEFT, AL_RIGHT, AL_CENTER, AL_JUSTIFY };
 
+/* text-transform */
+enum { TT_NONE, TT_UPPER, TT_LOWER, TT_CAPITALIZE };
+
 typedef struct lay_style {
     int display, bfc;
     uint32_t color, bg, bc[4];
     double fs, lh, asc, desc;
-    int face, italic, align, ws, deco, list, border_box;
+    int face, italic, align, ws, deco, list, border_box, tt;
+    uint32_t font;                  /* a web font's resource (the loader's), 0 for a built-in face */
+    double ls, wsp;                 /* letter-spacing, word-spacing: px */
     uint8_t bs[4];
-    lay_len m[4], p[4], width, height, maxw;
+    lay_len m[4], p[4], width, height, maxw, indent;
     double b[4];
 } lay_style;
 
@@ -130,9 +135,41 @@ static int lay_border_style(const char *w) {
     return LAY_BS_NONE;
 }
 
+/* the web font for a family (lower case, no spaces, as the cascade resolved it) at a
+   weight and style: of the faces @font-face gave the family, the one of the style asked
+   for if there is one, then of the nearest weight. webface: each face record's index in
+   f (-1 when it was not read). 0 when the family has none; else its face, its resource */
+static int lay_web_face(const css_style *st, const vector<int32_t> *webface, const char *fam, double weight, int italic, int *face,
+                        uint32_t *res) {
+    int best = 0;
+    double bscore = 1e9;
+    for (uint32_t fi = 1; fi < st->face_len && fi < len(*webface); fi++) {
+        if (at(*webface, fi) < 0) continue;
+        amb_span sp = st->face[fi].family;
+        const char *t = text_ptr(st, sp);
+        size_t k = 0, i = 0;
+        int same = 1;
+        for (; i < sp.len && same; i++) {
+            char c = t[i];
+            if (c == ' ' || c == '\t') continue;
+            if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+            if (fam[k] != c) same = 0;
+            else k++;
+        }
+        if (!same || fam[k]) continue;
+        double score = (st->face[fi].italic != (uint8_t)italic) * 10000.0 + (weight > st->face[fi].weight ? weight - st->face[fi].weight :
+                       st->face[fi].weight - weight);
+        if (score < bscore) { bscore = score; best = (int)fi; }
+    }
+    if (!best) return 0;
+    *face = at(*webface, (uint32_t)best);
+    *res = st->face[best].font.index;
+    return 1;
+}
+
 /* a style as layout reads it, from its computed values: a run from c0 in enum(prop)'s
    order (src/css/css.c) */
-static void lay_style_make(const css_style *st, const amb_fonts *f, uint32_t c0, lay_style *s) {
+static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
     s->fs = 16;
@@ -165,12 +202,19 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, uint32_t c0,
     s->color = st->cval[cv[CSS_PROP_COLOR]].color;
     s->bg = st->cval[cv[CSS_PROP_BACKGROUND_COLOR]].color;
     s->fs = st->cval[cv[CSS_PROP_FONT_SIZE]].num;
-    int bold = st->cval[cv[CSS_PROP_FONT_WEIGHT]].num >= 600;
-    lay_word_of(st, cv[CSS_PROP_FONT_FAMILY], w);
-    int family = lay_w(w, "sans-serif") ? 0 : lay_w(w, "monospace") ? 2 : 1;
-    s->face = amb_face_for(family, bold);
+    double weight = st->cval[cv[CSS_PROP_FONT_WEIGHT]].num;
+    int bold = weight >= 600;
     lay_word_of(st, cv[CSS_PROP_FONT_STYLE], w);
     s->italic = lay_w(w, "italic") || lay_w(w, "oblique");
+    lay_word_of(st, cv[CSS_PROP_FONT_FAMILY], w);
+    int family = lay_w(w, "sans-serif") ? 0 : lay_w(w, "monospace") ? 2 : lay_w(w, "serif") ? 1 : -1;
+    int wf;
+    if (family < 0 && lay_web_face(st, webface, w, weight, s->italic, &wf, &s->font)) {
+        s->face = wf;
+        /* an italic face is slanted already: no slant made for it */
+        for (uint32_t fi = 1; fi < st->face_len && fi < len(*webface); fi++)
+            if (at(*webface, fi) == wf && st->face[fi].italic) s->italic = 0;
+    } else s->face = amb_face_for(family < 0 ? 1 : family, bold);
     double gap;
     amb_face_metrics(f, s->face, s->fs, &s->asc, &s->desc, &gap);
     c = cv[CSS_PROP_LINE_HEIGHT];
@@ -183,6 +227,13 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, uint32_t c0,
     lay_word_of(st, cv[CSS_PROP_WHITE_SPACE], w);
     s->ws = lay_w(w, "pre") ? WS_PRE : lay_w(w, "nowrap") ? WS_NOWRAP : lay_w(w, "pre-wrap") || lay_w(w, "break-spaces") ? WS_PRE_WRAP :
             lay_w(w, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
+    lay_word_of(st, cv[CSS_PROP_TEXT_TRANSFORM], w);
+    s->tt = lay_w(w, "uppercase") ? TT_UPPER : lay_w(w, "lowercase") ? TT_LOWER : lay_w(w, "capitalize") ? TT_CAPITALIZE : TT_NONE;
+    c = cv[CSS_PROP_LETTER_SPACING];
+    s->ls = st->cval[c].unit == CSS_UNIT_PX ? st->cval[c].num : 0;
+    c = cv[CSS_PROP_WORD_SPACING];
+    s->wsp = st->cval[c].unit == CSS_UNIT_PX ? st->cval[c].num : 0;
+    s->indent = lay_len_at(st, cv[CSS_PROP_TEXT_INDENT]);
     lay_word_of(st, cv[CSS_PROP_TEXT_DECORATION], w);
     s->deco = lay_w(w, "underline") ? 1 : lay_w(w, "overline") ? 2 : lay_w(w, "line-through") ? 4 : 0;
     lay_word_of(st, cv[CSS_PROP_LIST_STYLE_TYPE], w);
@@ -314,7 +365,10 @@ static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uin
 enum { P_WORD, P_SPACE, P_BREAK, P_ATOMIC, P_OPEN, P_CLOSE };
 typedef struct lay_piece {
     uint8_t kind, face, italic, deco, brk, keep;   /* brk: a space a line may break at; keep: a kept (pre) space */
+    uint8_t tt;                                    /* text-transform */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
+    uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
+    double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
     double w, size, lh, asc, desc;
     uint32_t color, bg;
@@ -323,6 +377,10 @@ typedef struct lay_piece {
 
 static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->face = (uint8_t)s->face;
+    p->font = s->font;
+    p->ls = s->ls;
+    p->wsp = s->wsp;
+    p->tt = (uint8_t)s->tt;
     p->italic = (uint8_t)s->italic;
     p->size = s->fs;
     p->lh = s->lh;
@@ -386,6 +444,42 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     if (*w < 0) *w = 0;
 }
 
+/* the text-transform tt of s[0, n) into out (a word's: capitalize makes its first letter
+   upper case): ASCII's and Latin-1's letters, each the length it was */
+static void lay_transform(const char *s, size_t n, int tt, vector<char> *out) {
+    int first = 1;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        int up = tt == TT_UPPER || (tt == TT_CAPITALIZE && first);
+        if (c < 0x80) {
+            if (up && c >= 'a' && c <= 'z') c = (unsigned char)(c - 32);
+            else if (tt == TT_LOWER && c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) first = 0;
+            push_back(out, (char)c);
+            continue;
+        }
+        if (c == 0xC3 && i + 1 < n) {
+            unsigned char e = (unsigned char)s[i + 1];
+            if (up && e >= 0xA0 && e <= 0xBE && e != 0xB7) e = (unsigned char)(e - 0x20);
+            else if (tt == TT_LOWER && e >= 0x80 && e <= 0x9E && e != 0x97) e = (unsigned char)(e + 0x20);
+            push_back(out, (char)c);
+            push_back(out, (char)e);
+            i++;
+            first = 0;
+            continue;
+        }
+        push_back(out, (char)c);
+        if ((c & 0xC0) != 0x80) first = 0;
+    }
+}
+
+/* the code points of UTF-8 text: letter-spacing's count */
+static size_t lay_cps(const char *s, size_t n) {
+    size_t k = 0;
+    for (size_t i = 0; i < n; i++) if (((unsigned char)s[i] & 0xC0) != 0x80) k++;
+    return k;
+}
+
 static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps, int *sp) {
     uint32_t pe = d->node[node].parent;
     lay_style s;
@@ -399,7 +493,8 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
     p.node = node;
     p.elem = pe;
     p.deco = (uint8_t)deco;
-    double space = amb_advance(f, s.face, ' ', s.fs);
+    /* a space: its advance, with letter-spacing and word-spacing */
+    double space = amb_advance(f, s.face, ' ', s.fs) + s.ls + s.wsp;
     int collapse = s.ws == WS_NORMAL || s.ws == WS_NOWRAP || s.ws == WS_PRE_LINE;
     while (i < n) {
         char c = tx[i];
@@ -449,7 +544,12 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
         p.kind = P_WORD;
         p.off = (uint32_t)i;
         p.len = (uint32_t)(j - i);
-        p.w = amb_text_width(f, s.face, s.fs, tx + i, j - i);
+        if (s.tt) {
+            vector<char> tw;
+            lay_transform(tx + i, j - i, s.tt, &tw);
+            p.w = amb_text_width(f, s.face, s.fs, data(tw), len(tw));
+        } else p.w = amb_text_width(f, s.face, s.fs, tx + i, j - i);
+        p.w += s.ls * (double)lay_cps(tx + i, j - i);
         p.brk = 0;
         p.keep = 0;
         push_back(ps, p);
@@ -734,6 +834,7 @@ static void lay_piece_text(const dom_document *d, const vector<lay_piece> *ps, s
         if (p.kind != P_WORD && p.kind != P_SPACE) continue;
         amb_span sp = d->node[p.node].data;
         const char *tx = text_ptr(d, sp);
+        if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) { lay_transform(tx + p.off, p.len, p.tt, out); continue; }
         for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);
     }
 }
@@ -741,14 +842,14 @@ static void lay_piece_text(const dom_document *d, const vector<lay_piece> *ps, s
 /* one line of pieces [a, e) in box b at y, w wide; returns its height. open: the inline
    elements open at its start, which it leaves as those open at its end */
 static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t e, double w, double y,
-                       int justify_ok, vector<uint32_t> *open) {
+                       int justify_ok, double indent, vector<uint32_t> *open) {
     /* trailing collapsible spaces hang: they take no width */
     size_t end = e;
     while (end > a && at(*ps, end - 1).kind == P_SPACE && !at(*ps, end - 1).keep) end--;
     /* the pieces' x and the line's vertical extent */
     vector<double> xs;
     vector<uint32_t> atoms;
-    double x = 0, above, below, hl = (bs->lh - (bs->asc + bs->desc)) / 2;
+    double x = indent, above, below, hl = (bs->lh - (bs->asc + bs->desc)) / 2;
     double max_above = bs->asc + hl, max_below = bs->desc + hl;
     int spaces = 0;
     for (size_t k = a; k < end; k++) {
@@ -891,7 +992,10 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].w = rw;
         t->frag[fr].h = p.asc + p.desc;
         t->frag[fr].baseline = baseline;
-        t->frag[fr].face = (layout_face)p.face;
+        t->frag[fr].face = p.face;
+        if (p.font) t->frag[fr].font = resource_handle(nt, p.font);
+        t->frag[fr].spacing = p.ls;
+        t->frag[fr].word_spacing = p.wsp;
         t->frag[fr].size = p.size;
         t->frag[fr].italic = p.italic;
         t->frag[fr].color = p.color;
@@ -912,11 +1016,13 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
     vector<uint32_t> open;
     size_t i = 0, np = len(ps);
     double y = 0;
+    /* text-indent: the first line of the block's first run, from its start edge */
+    double indent = first == 0 ? lay_res(st, bs.indent, w) : 0;
     while (i < np) {
         while (i < np && at(ps, i).kind == P_SPACE && !at(ps, i).keep) i++;
         if (i >= np) break;
         size_t start = i, j = i, end = i;
-        double x = 0;
+        double x = indent;
         int forced = 0;
         while (j < np) {
             if (at(ps, j).kind == P_BREAK) { end = j; j++; forced = 1; break; }
@@ -942,7 +1048,8 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        y += lay_line(LARGS, b, &bs, &ps, start, end, w, y, !last, &open);
+        y += lay_line(LARGS, b, &bs, &ps, start, end, w, y, !last, indent, &open);
+        indent = 0;
         i = j;
         if (forced) {
             /* a break: the next line begins after it, its leading spaces kept if pre */
@@ -1031,7 +1138,8 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *s) {
     t->frag[fr].w = mw;
     t->frag[fr].h = s->asc + s->desc;
     t->frag[fr].baseline = base;
-    t->frag[fr].face = (layout_face)s->face;
+    t->frag[fr].face = (uint8_t)s->face;
+    if (s->font) t->frag[fr].font = resource_handle(nt, s->font);
     t->frag[fr].size = s->fs;
     t->frag[fr].color = s->color;
     frags_append(t, ln, fr);
@@ -1381,11 +1489,26 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (sid >= len(style_first)) resize(style_first, (size_t)sid + 1);
         style_first[sid] = style->estyle[e].first;
     }
+    /* the web fonts @font-face gave, each read once: each face record's face in fonts */
+    vector<int32_t> webface;
+    resize(webface, style->face_len > 0 ? style->face_len : 1);
+    for (uint32_t fi = 1; fi < style->face_len; fi++) {
+        webface[fi] = -1;
+        uint32_t r = style->face[fi].font.index;
+        if (!net || !r || r >= net->resource_len) continue;
+        for (uint32_t q = 1; q < fi && at(webface, fi) < 0; q++)
+            if (style->face[q].font.index == r) webface[fi] = at(webface, q);
+        if (at(webface, fi) >= 0) continue;
+        vector<uint8_t> bytes;
+        amb_span body = net->resource[r].body;
+        append_range(bytes, (const uint8_t *)bytes_ptr(net, body), body.len);
+        webface[fi] = amb_fonts_add(&fonts, data(bytes), len(bytes));
+    }
     vector<lay_style> styles;
     resize(styles, len(style_first));
     for (size_t k = 0; k < len(style_first); k++) {
         lay_style ls;
-        lay_style_make(style, &fonts, at(style_first, k), &ls);
+        lay_style_make(style, &fonts, &webface, at(style_first, k), &ls);
         styles[k] = ls;
     }
     /* the root element: the document's element child */

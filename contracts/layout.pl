@@ -26,7 +26,6 @@ layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fi
 %% what a fragment of a line is: a run of text; an atomic inline's box; a list
 %% item's marker; the part of an inline element on the line (its background)
 layout_contract(enum(frag_kind, [text, atomic, marker, inline])).
-layout_contract(enum(face, [sans, sans_bold, serif, serif_bold, mono, mono_bold])).
 
 layout_contract(record(box, [
     field(node,         xhandle(dom, node)),    % the element; none for the viewport and an anonymous box
@@ -64,8 +63,11 @@ layout_contract(record(frag, [
     field(text,       span(text)),              % a text or marker fragment's text, its white space as laid out
     field(x, f64), field(y, f64), field(w, f64), field(h, f64),          % in page px
     field(baseline,   f64),
-    field(face,       enum(face)),
+    field(face,       u8),                      % its font: one of the six built-in faces (src/paint/font.h), or a web font's
+    field(font,       xhandle(net, resource)),  % the web font's resource (@font-face), the loader's; none for a built-in face
     field(size,       f64),
+    field(spacing,    f64),                     % letter-spacing, px after each character
+    field(word_spacing, f64),                   % word-spacing, px after each space
     field(italic,     bool),
     field(color,      u32),
     field(background, u32),                     % an inline fragment's

@@ -62,7 +62,7 @@ typedef struct pt_glyph { uint64_t key; uint32_t off; int32_t w, h, ox, oy; } pt
 
 static uint64_t pt_key(int face, double size, uint32_t cp, int quarter, int italic) {
     uint64_t sz = (uint64_t)(size * 16 + 0.5) & 0xffff;
-    return (uint64_t)face << 61 | (uint64_t)(italic & 1) << 60 | (uint64_t)(quarter & 3) << 58 | sz << 40 | (uint64_t)(cp & 0x1fffff);
+    return (uint64_t)(face & 31) << 59 | (uint64_t)(italic & 1) << 58 | (uint64_t)(quarter & 3) << 56 | sz << 40 | (uint64_t)(cp & 0x1fffff);
 }
 
 static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
@@ -111,7 +111,7 @@ static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vecto
 
 static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
                     vector<float> *acc, vector<uint8_t> *mask, const char *s, size_t n, double x, double baseline,
-                    int face, double size, int italic, uint32_t rgba) {
+                    int face, double size, int italic, double ls, double wsp, uint32_t rgba) {
     uint32_t ca = rgba & 0xff, r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
     int by = (int)floor(baseline - c->oy + 0.5);
     size_t i = 0;
@@ -139,7 +139,7 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
                 c->px[p + 2] = (uint8_t)((b * a + c->px[p + 2] * (255 - a)) / 255);
             }
         }
-        x += amb_advance(f, face, cp, size);
+        x += amb_advance(f, face, cp, size) + ls + (cp == ' ' ? wsp : 0);
     }
 }
 
@@ -203,7 +203,16 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     if (t->box[b].br > 0) pt_fill(c, bx + bw - t->box[b].br, by, bx + bw, by + bh, t->box[b].bcr);
 }
 
-static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table,
+/* the face a fragment is drawn in: its built-in one, or its web font's as paint read it
+   (webmap: each web font's resource, then its face) */
+static int pt_face_of(const layout_tree *t, uint32_t fr, const vector<uint32_t> *webmap) {
+    uint32_t r = t->frag[fr].font.index;
+    if (!r) return t->frag[fr].face < AMB_NFACES ? t->frag[fr].face : AMB_FACE_SERIF;
+    for (size_t k = 0; k + 1 < len(*webmap); k += 2) if (at(*webmap, k) == r) return (int)at(*webmap, k + 1);
+    return AMB_FACE_SERIF;
+}
+
+static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap, vector<pt_glyph> *entries, vector<uint32_t> *table,
                      vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
     for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next)
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
@@ -219,7 +228,7 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
             double size = t->frag[fr].size, base = t->frag[fr].baseline;
             uint32_t color = t->frag[fr].color;
             pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
-                    (int)t->frag[fr].face, size, t->frag[fr].italic, color);
+                    pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, color);
             uint8_t deco = t->frag[fr].decoration;
             double th = floor(size / 16 + 0.5);
             if (th < 1) th = 1;
@@ -231,10 +240,11 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
 }
 
 static void pt_tree(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, const amb_fonts *f,
+                    const vector<uint32_t> *webmap,
                     vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
     if (t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) pt_box(t, nt, b, c, skip_bg);
-    pt_lines(t, b, c, f, entries, table, masks, acc, mask);
-    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) pt_tree(t, nt, ch, c, skip_bg, f, entries, table, masks, acc, mask);
+    pt_lines(t, b, c, f, webmap, entries, table, masks, acc, mask);
+    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) pt_tree(t, nt, ch, c, skip_bg, f, webmap, entries, table, masks, acc, mask);
 }
 
 /* the page drawn onto c, its window from page y oy down at most maxh px (the page's
@@ -243,6 +253,21 @@ static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, 
     amb_fonts f = {0};
     defer(f) { AMB_FONTS_DROP(f); }
     amb_fonts_load(&f);
+    /* the web fonts the fragments are set in, each read once */
+    vector<uint32_t> webmap;
+    for (uint32_t fr = 1; nt && fr < t->frag_len; fr++) {
+        uint32_t r = t->frag[fr].font.index;
+        if (!t->frag[fr].live || !r || r >= nt->resource_len) continue;
+        int known = 0;
+        for (size_t k = 0; k + 1 < len(webmap) && !known; k += 2) if (at(webmap, k) == r) known = 1;
+        if (known) continue;
+        vector<uint8_t> bytes;
+        amb_span body = nt->resource[r].body;
+        append_range(bytes, (const uint8_t *)bytes_ptr(nt, body), body.len);
+        int face = amb_fonts_add(&f, data(bytes), len(bytes));
+        push_back(webmap, r);
+        push_back(webmap, (uint32_t)(face < 0 ? AMB_FACE_SERIF : face));
+    }
     uint32_t vp = 0;
     for (uint32_t b = 1; b < t->box_len && !vp; b++) if (t->box[b].live && t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) vp = b;
     double w = vp ? t->box[vp].w : 800, h = vp ? t->box[vp].h : 600;
@@ -272,7 +297,7 @@ static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, 
     vector<uint8_t> masks, mask;
     vector<float> acc;
     resize(&table, 1024);
-    if (vp) pt_tree(t, nt, vp, c, skip, &f, &entries, &table, &masks, &acc, &mask);
+    if (vp) pt_tree(t, nt, vp, c, skip, &f, &webmap, &entries, &table, &masks, &acc, &mask);
 }
 
 void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) { pt_paint(t, nt, c, 0, 16384); }
