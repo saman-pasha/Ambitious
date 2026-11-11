@@ -1,0 +1,9 @@
+Set-Cookie: sid=sid-7f3a; Path=/; HttpOnly
+Set-Cookie: pref=pref-7f3a; Max-Age=86400
+Set-Cookie: lang=en-7f3a; Expires=Wed, 01 Jan 2031 00:00:00 GMT; Path=/c
+Set-Cookie: brief=brief-7f3a; Max-Age=60
+Set-Cookie: strict=strict-7f3a; SameSite=Strict; Path=/
+Set-Cookie: secure=secure-7f3a; Secure
+Set-Cookie: wide=wide-7f3a; Domain=example.test
+Set-Cookie: __Host-x=host-7f3a; Path=/
+Set-Cookie: =nameless-7f3a

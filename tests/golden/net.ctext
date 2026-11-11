@@ -1,23 +1,39 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:1d8e9afc:2443). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:b5c96297:6129). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
-typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED } net_outcome;
-typedef enum net_op { NET_OP_FETCH, NET_OP_FETCH_SUBRESOURCES } net_op;
+typedef enum net_cache_use { NET_CACHE_USE_UNUSED, NET_CACHE_USE_STORED, NET_CACHE_USE_FRESH, NET_CACHE_USE_REVALIDATED, NET_CACHE_USE_NOT_STORED } net_cache_use;
+typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED, NET_OUTCOME_TLS_HANDSHAKE_FAILED, NET_OUTCOME_TLS_VERIFY_FAILED, NET_OUTCOME_PROXY_REFUSED, NET_OUTCOME_DECODING_FAILED } net_outcome;
+typedef enum net_same_site { NET_SAME_SITE_UNSET, NET_SAME_SITE_LAX, NET_SAME_SITE_STRICT, NET_SAME_SITE_NO_RESTRICTION } net_same_site;
+typedef enum net_cookie_state { NET_COOKIE_STATE_KEPT, NET_COOKIE_STATE_REPLACED, NET_COOKIE_STATE_EXPIRED, NET_COOKIE_STATE_REFUSED } net_cookie_state;
+typedef enum net_refusal { NET_REFUSAL_ACCEPTED, NET_REFUSAL_MALFORMED, NET_REFUSAL_TOO_LARGE, NET_REFUSAL_SECURE_OVER_HTTP, NET_REFUSAL_DOMAIN_MISMATCH, NET_REFUSAL_PUBLIC_SUFFIX, NET_REFUSAL_PREFIX, NET_REFUSAL_CROSS_SITE, NET_REFUSAL_NONE_INSECURE, NET_REFUSAL_OVERWRITES_SECURE, NET_REFUSAL_TOO_MANY } net_refusal;
+typedef enum net_op { NET_OP_KEEP, NET_OP_FETCH, NET_OP_FETCH_SUBRESOURCES } net_op;
 typedef struct net_resource_h { uint32_t doc, index, gen; } net_resource_h;
 typedef struct net_hop_h { uint32_t doc, index, gen; } net_hop_h;
-typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; } net_resource;
+typedef struct net_cookie_h { uint32_t doc, index, gen; } net_cookie_h;
+typedef struct net_sent_h { uint32_t doc, index, gen; } net_sent_h;
+typedef struct net_keeping_h { uint32_t doc, index, gen; } net_keeping_h;
+typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; amb_span charset; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; amb_span reason; uint8_t tls; amb_span tls_version; amb_span tls_cipher; amb_span alpn; uint8_t proxied; amb_span proxy; uint8_t cross_site; net_cache_use cache; int64_t cache_age; int64_t cache_lifetime; uint8_t coded; amb_span coding; uint32_t encoded_size; uint8_t srcset; amb_span descriptor; double density; double source_size; uint32_t candidates; } net_resource;
 typedef struct net_hop { uint32_t gen, live, free_next; uint32_t resource; amb_span url; uint32_t status; } net_hop;
+typedef struct net_cookie { uint32_t gen, live, free_next; amb_span name; amb_span value; amb_span domain; amb_span path; uint8_t host_only; uint8_t secure; uint8_t http_only; net_same_site same_site; uint8_t persistent; int64_t expires; int64_t created; net_cookie_state state; net_refusal refusal; uint32_t set_by; uint8_t seen; } net_cookie;
+typedef struct net_sent { uint32_t gen, live, free_next; uint32_t resource; uint32_t cookie; } net_sent;
+typedef struct net_keeping { uint32_t gen, live, free_next; amb_span jar; amb_span cache; uint8_t dirty; } net_keeping;
 typedef struct net_store_tag { char unused; } net_store_tag;
 typedef store<net_store_tag> net_loader;
 extern const char net_fingerprint[];
 const char *net_status_name(net_status x);
 const char *net_op_name(net_op x);
 const char *net_kind_name(net_kind x);
+const char *net_cache_use_name(net_cache_use x);
 const char *net_outcome_name(net_outcome x);
+const char *net_same_site_name(net_same_site x);
+const char *net_cookie_state_name(net_cookie_state x);
+const char *net_refusal_name(net_refusal x);
 void net_init(net_loader *d, uint32_t id);
 uint64_t net_revision(const net_loader *d);
+net_status net_keep(net_loader *d, const char *jar, size_t jar_len, const char *cache, size_t cache_len);
 net_resource_h net_fetch(net_loader *d, const char *url, size_t url_len, net_kind kind);
 net_status net_fetch_subresources(net_loader *d, dom_document *doc, net_resource_h page, uint32_t denied);
+net_status net_check_keep(const net_loader *d, const char *jar, size_t jar_len, const char *cache, size_t cache_len);
 net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len, net_kind kind);
 net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page, uint32_t denied);
 int net_check_invariants(const net_loader *d, FILE *report);
@@ -38,6 +54,7 @@ const char *net_status_name(net_status x) {
 }
 const char *net_op_name(net_op x) {
     switch (x) {
+    case NET_OP_KEEP: return "keep";
     case NET_OP_FETCH: return "fetch";
     case NET_OP_FETCH_SUBRESOURCES: return "fetch_subresources";
     }
@@ -50,6 +67,16 @@ const char *net_kind_name(net_kind x) {
     case NET_KIND_IMAGE: return "image";
     case NET_KIND_SCRIPT: return "script";
     case NET_KIND_OTHER: return "other";
+    }
+    return "?";
+}
+const char *net_cache_use_name(net_cache_use x) {
+    switch (x) {
+    case NET_CACHE_USE_UNUSED: return "unused";
+    case NET_CACHE_USE_STORED: return "stored";
+    case NET_CACHE_USE_FRESH: return "fresh";
+    case NET_CACHE_USE_REVALIDATED: return "revalidated";
+    case NET_CACHE_USE_NOT_STORED: return "not_stored";
     }
     return "?";
 }
@@ -66,11 +93,49 @@ const char *net_outcome_name(net_outcome x) {
     case NET_OUTCOME_BLOCKED: return "blocked";
     case NET_OUTCOME_TOO_LARGE: return "too_large";
     case NET_OUTCOME_MALFORMED: return "malformed";
+    case NET_OUTCOME_TLS_HANDSHAKE_FAILED: return "tls_handshake_failed";
+    case NET_OUTCOME_TLS_VERIFY_FAILED: return "tls_verify_failed";
+    case NET_OUTCOME_PROXY_REFUSED: return "proxy_refused";
+    case NET_OUTCOME_DECODING_FAILED: return "decoding_failed";
+    }
+    return "?";
+}
+const char *net_same_site_name(net_same_site x) {
+    switch (x) {
+    case NET_SAME_SITE_UNSET: return "unset";
+    case NET_SAME_SITE_LAX: return "lax";
+    case NET_SAME_SITE_STRICT: return "strict";
+    case NET_SAME_SITE_NO_RESTRICTION: return "no_restriction";
+    }
+    return "?";
+}
+const char *net_cookie_state_name(net_cookie_state x) {
+    switch (x) {
+    case NET_COOKIE_STATE_KEPT: return "kept";
+    case NET_COOKIE_STATE_REPLACED: return "replaced";
+    case NET_COOKIE_STATE_EXPIRED: return "expired";
+    case NET_COOKIE_STATE_REFUSED: return "refused";
+    }
+    return "?";
+}
+const char *net_refusal_name(net_refusal x) {
+    switch (x) {
+    case NET_REFUSAL_ACCEPTED: return "accepted";
+    case NET_REFUSAL_MALFORMED: return "malformed";
+    case NET_REFUSAL_TOO_LARGE: return "too_large";
+    case NET_REFUSAL_SECURE_OVER_HTTP: return "secure_over_http";
+    case NET_REFUSAL_DOMAIN_MISMATCH: return "domain_mismatch";
+    case NET_REFUSAL_PUBLIC_SUFFIX: return "public_suffix";
+    case NET_REFUSAL_PREFIX: return "prefix";
+    case NET_REFUSAL_CROSS_SITE: return "cross_site";
+    case NET_REFUSAL_NONE_INSECURE: return "none_insecure";
+    case NET_REFUSAL_OVERWRITES_SECURE: return "overwrites_secure";
+    case NET_REFUSAL_TOO_MANY: return "too_many";
     }
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:1d8e9afc:2443";
+const char net_fingerprint[] = "fnv1a32:b5c96297:6129";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;
@@ -79,6 +144,11 @@ void net_init(net_loader *d, uint32_t id) {
     bytes_add(d, "", 0);
 }
 uint64_t net_revision(const net_loader *d) { return d->revision; }
+net_status net_check_keep(const net_loader *d, const char *jar, size_t jar_len, const char *cache, size_t cache_len)
+{
+    return NET_OK;
+}
+
 net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len, net_kind kind)
 {
     return NET_OK;
@@ -102,6 +172,18 @@ int net_check_invariants(const net_loader *d, FILE *report) {
             uint32_t r = d->hop[i].resource;
             if (d->hop[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->cookie_len; i++) {
+            uint32_t r = d->cookie[i].set_by;
+            if (d->cookie[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->sent_len; i++) {
+            uint32_t r = d->sent[i].resource;
+            if (d->sent[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->sent_len; i++) {
+            uint32_t r = d->sent[i].cookie;
+            if (d->sent[i].live && r && (r >= d->cookie_len || !d->cookie[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -114,11 +196,31 @@ void net_export(const net_loader *d, FILE *out) {
         if (1) { fputs("net_origin(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].origin); fputs(").\n", out); }
         if (d->resource[i].from != 0) { fputs("net_asked_by(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); { uint32_t r = d->resource[i].from; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->resource[i].elem.doc, d->resource[i].elem.index, d->resource[i].elem.gen); fputs(").\n", out); }
         if (d->resource[i].kind == NET_KIND_IMAGE) { fputs("net_image_size(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].width); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].height); fputs(").\n", out); }
+        if (d->resource[i].outcome != NET_OUTCOME_OK) { fputs("net_failure(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].reason); fputs(").\n", out); }
+        if (d->resource[i].tls == 1) { fputs("net_tls(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].tls_version); fputs(",", out); text_put(d, out, d->resource[i].tls_cipher); fputs(",", out); text_put(d, out, d->resource[i].alpn); fputs(").\n", out); }
+        if (d->resource[i].proxied == 1) { fputs("net_proxy(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].proxy); fputs(").\n", out); }
+        if (d->resource[i].cross_site == 1) { fputs("net_cross_site(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(").\n", out); }
+        if (d->resource[i].cache != NET_CACHE_USE_UNUSED) { fputs("net_cache(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fputs(net_cache_use_name(d->resource[i].cache), out); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].cache_age); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].cache_lifetime); fputs(").\n", out); }
+        if (d->resource[i].coded == 1) { fputs("net_coding(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].coding); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].encoded_size); fputs(").\n", out); }
+        if (d->resource[i].srcset == 1) { fputs("net_srcset(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].descriptor); fputs(",", out); amb_put_f64(out, d->resource[i].density); fputs(",", out); amb_put_f64(out, d->resource[i].source_size); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].candidates); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->hop_len; i++) {
         if (!d->hop[i].live) continue;
         if (1) { fputs("net_hop(", out); { uint32_t r = d->hop[i].resource; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); text_put(d, out, d->hop[i].url); fputs(",", out); fprintf(out, "%lld", (long long)d->hop[i].status); fputs(").\n", out); }
     }
+    for (uint32_t i = 1; i < d->cookie_len; i++) {
+        if (!d->cookie[i].live) continue;
+        if (d->cookie[i].seen == 1) { fputs("net_cookie(", out); amb_put_handle(out, "ck", d->id, i, d->cookie[i].gen); fputs(",", out); text_put(d, out, d->cookie[i].name); fputs(",", out); text_put(d, out, d->cookie[i].domain); fputs(",", out); text_put(d, out, d->cookie[i].path); fputs(",", out); fputs(net_cookie_state_name(d->cookie[i].state), out); fputs(").\n", out); }
+        if (d->cookie[i].seen == 1) { fputs("net_cookie_flags(", out); amb_put_handle(out, "ck", d->id, i, d->cookie[i].gen); fputs(",", out); fputs(d->cookie[i].host_only ? "true" : "false", out); fputs(",", out); fputs(d->cookie[i].secure ? "true" : "false", out); fputs(",", out); fputs(d->cookie[i].http_only ? "true" : "false", out); fputs(",", out); fputs(net_same_site_name(d->cookie[i].same_site), out); fputs(").\n", out); }
+        if ((d->cookie[i].seen == 1) && (d->cookie[i].persistent == 1)) { fputs("net_cookie_expires(", out); amb_put_handle(out, "ck", d->id, i, d->cookie[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->cookie[i].expires); fputs(").\n", out); }
+        if (d->cookie[i].set_by != 0) { fputs("net_cookie_set_by(", out); amb_put_handle(out, "ck", d->id, i, d->cookie[i].gen); fputs(",", out); { uint32_t r = d->cookie[i].set_by; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(").\n", out); }
+        if (d->cookie[i].state == NET_COOKIE_STATE_REFUSED) { fputs("net_cookie_refused(", out); amb_put_handle(out, "ck", d->id, i, d->cookie[i].gen); fputs(",", out); fputs(net_refusal_name(d->cookie[i].refusal), out); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->sent_len; i++) {
+        if (!d->sent[i].live) continue;
+        if (1) { fputs("net_cookie_sent(", out); { uint32_t r = d->sent[i].resource; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); { uint32_t r = d->sent[i].cookie; amb_put_ref(out, "ck", d->id, r, r && r < d->cookie_len ? d->cookie[r].gen : 0); } fputs(").\n", out); }
+    }
+
 }
 net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
     size_t p = 0;
@@ -135,7 +237,7 @@ net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_r
     if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return NET_BAD_REQUEST; }
     if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return NET_STALE_REVISION; }
 
-    if (amb_name_is(name, name_len, "fetch") || amb_name_is(name, name_len, "fetch_subresources")) { amb_result(report, name, "not_requestable", d->revision); return NET_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "keep") || amb_name_is(name, name_len, "fetch") || amb_name_is(name, name_len, "fetch_subresources")) { amb_result(report, name, "not_requestable", d->revision); return NET_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }
@@ -149,12 +251,21 @@ typedef struct store_net_store_tag {
     size_t hop_len, hop_cap;
     uint32_t hop_free;
     own net_hop *hop;
+    size_t cookie_len, cookie_cap;
+    uint32_t cookie_free;
+    own net_cookie *cookie;
+    size_t sent_len, sent_cap;
+    uint32_t sent_free;
+    own net_sent *sent;
+    size_t keeping_len, keeping_cap;
+    uint32_t keeping_free;
+    own net_keeping *keeping;
     size_t text_len, text_cap;
     own char *text;
     size_t bytes_len, bytes_cap;
     own char *bytes;
 } store_net_store_tag;
-void store_net_store_tag_drop(store_net_store_tag *s) { free(s->resource); free(s->hop); free(s->text); free(s->bytes); }
+void store_net_store_tag_drop(store_net_store_tag *s) { free(s->resource); free(s->hop); free(s->cookie); free(s->sent); free(s->keeping); free(s->text); free(s->bytes); }
 static void store_net_store_tag__resource_grow(store_net_store_tag *s) {
     size_t c = s->resource_cap ? 2 * s->resource_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -287,6 +398,207 @@ size_t store_net_store_tag_hop_len(const store_net_store_tag *s) { return s->hop
 size_t store_net_store_tag_hop_count(const store_net_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->hop_len; i++) if (s->hop[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__cookie_grow(store_net_store_tag *s) {
+    size_t c = s->cookie_cap ? 2 * s->cookie_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->cookie = (net_cookie *)realloc(s->cookie, c * sizeof(net_cookie));
+    if (!s->cookie) abort();
+    s->cookie_cap = c;
+}
+net_cookie_h store_net_store_tag_cookie_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->cookie_free) {
+        i = s->cookie_free;
+        s->cookie_free = s->cookie[i].free_next;
+    } else {
+        if (s->cookie_len == 0) {
+            if (s->cookie_cap == 0) store_net_store_tag__cookie_grow(s);
+            memset(&s->cookie[0], 0, sizeof(net_cookie));
+            s->cookie_len = 1;
+        }
+        if (s->cookie_len == s->cookie_cap) store_net_store_tag__cookie_grow(s);
+        i = (uint32_t)s->cookie_len;
+        s->cookie_len++;
+        s->cookie[i].gen = 0;
+    }
+    uint32_t g = s->cookie[i].gen;
+    memset(&s->cookie[i], 0, sizeof(net_cookie));
+    s->cookie[i].gen = g;
+    s->cookie[i].live = 1;
+    net_cookie_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_cookie_live(const store_net_store_tag *s, net_cookie_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->cookie_len && s->cookie[h.index].live && s->cookie[h.index].gen == h.gen;
+}
+net_cookie store_net_store_tag_cookie_get(const store_net_store_tag *s, net_cookie_h h) {
+    if (!store_net_store_tag_cookie_live(s, h)) abort();
+    return s->cookie[h.index];
+}
+net_cookie *store_net_store_tag_cookie_ref(const store_net_store_tag *s, net_cookie_h h) tie s {
+    if (!store_net_store_tag_cookie_live(s, h)) abort();
+    return &s->cookie[h.index];
+}
+net_cookie *store_net_store_tag_cookie_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->cookie_len) abort();
+    return &s->cookie[i];
+}
+net_cookie_h store_net_store_tag_cookie_handle(const store_net_store_tag *s, uint32_t i) {
+    net_cookie_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->cookie_len && s->cookie[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->cookie[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_cookie_free(store_net_store_tag *s, net_cookie_h h) {
+    if (!store_net_store_tag_cookie_live(s, h)) abort();
+    s->cookie[h.index].live = 0;
+    s->cookie[h.index].gen++;
+    s->cookie[h.index].free_next = s->cookie_free;
+    s->cookie_free = h.index;
+}
+size_t store_net_store_tag_cookie_len(const store_net_store_tag *s) { return s->cookie_len; }
+size_t store_net_store_tag_cookie_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->cookie_len; i++) if (s->cookie[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__sent_grow(store_net_store_tag *s) {
+    size_t c = s->sent_cap ? 2 * s->sent_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->sent = (net_sent *)realloc(s->sent, c * sizeof(net_sent));
+    if (!s->sent) abort();
+    s->sent_cap = c;
+}
+net_sent_h store_net_store_tag_sent_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->sent_free) {
+        i = s->sent_free;
+        s->sent_free = s->sent[i].free_next;
+    } else {
+        if (s->sent_len == 0) {
+            if (s->sent_cap == 0) store_net_store_tag__sent_grow(s);
+            memset(&s->sent[0], 0, sizeof(net_sent));
+            s->sent_len = 1;
+        }
+        if (s->sent_len == s->sent_cap) store_net_store_tag__sent_grow(s);
+        i = (uint32_t)s->sent_len;
+        s->sent_len++;
+        s->sent[i].gen = 0;
+    }
+    uint32_t g = s->sent[i].gen;
+    memset(&s->sent[i], 0, sizeof(net_sent));
+    s->sent[i].gen = g;
+    s->sent[i].live = 1;
+    net_sent_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_sent_live(const store_net_store_tag *s, net_sent_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->sent_len && s->sent[h.index].live && s->sent[h.index].gen == h.gen;
+}
+net_sent store_net_store_tag_sent_get(const store_net_store_tag *s, net_sent_h h) {
+    if (!store_net_store_tag_sent_live(s, h)) abort();
+    return s->sent[h.index];
+}
+net_sent *store_net_store_tag_sent_ref(const store_net_store_tag *s, net_sent_h h) tie s {
+    if (!store_net_store_tag_sent_live(s, h)) abort();
+    return &s->sent[h.index];
+}
+net_sent *store_net_store_tag_sent_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->sent_len) abort();
+    return &s->sent[i];
+}
+net_sent_h store_net_store_tag_sent_handle(const store_net_store_tag *s, uint32_t i) {
+    net_sent_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->sent_len && s->sent[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->sent[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_sent_free(store_net_store_tag *s, net_sent_h h) {
+    if (!store_net_store_tag_sent_live(s, h)) abort();
+    s->sent[h.index].live = 0;
+    s->sent[h.index].gen++;
+    s->sent[h.index].free_next = s->sent_free;
+    s->sent_free = h.index;
+}
+size_t store_net_store_tag_sent_len(const store_net_store_tag *s) { return s->sent_len; }
+size_t store_net_store_tag_sent_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->sent_len; i++) if (s->sent[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__keeping_grow(store_net_store_tag *s) {
+    size_t c = s->keeping_cap ? 2 * s->keeping_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->keeping = (net_keeping *)realloc(s->keeping, c * sizeof(net_keeping));
+    if (!s->keeping) abort();
+    s->keeping_cap = c;
+}
+net_keeping_h store_net_store_tag_keeping_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->keeping_free) {
+        i = s->keeping_free;
+        s->keeping_free = s->keeping[i].free_next;
+    } else {
+        if (s->keeping_len == 0) {
+            if (s->keeping_cap == 0) store_net_store_tag__keeping_grow(s);
+            memset(&s->keeping[0], 0, sizeof(net_keeping));
+            s->keeping_len = 1;
+        }
+        if (s->keeping_len == s->keeping_cap) store_net_store_tag__keeping_grow(s);
+        i = (uint32_t)s->keeping_len;
+        s->keeping_len++;
+        s->keeping[i].gen = 0;
+    }
+    uint32_t g = s->keeping[i].gen;
+    memset(&s->keeping[i], 0, sizeof(net_keeping));
+    s->keeping[i].gen = g;
+    s->keeping[i].live = 1;
+    net_keeping_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_keeping_live(const store_net_store_tag *s, net_keeping_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->keeping_len && s->keeping[h.index].live && s->keeping[h.index].gen == h.gen;
+}
+net_keeping store_net_store_tag_keeping_get(const store_net_store_tag *s, net_keeping_h h) {
+    if (!store_net_store_tag_keeping_live(s, h)) abort();
+    return s->keeping[h.index];
+}
+net_keeping *store_net_store_tag_keeping_ref(const store_net_store_tag *s, net_keeping_h h) tie s {
+    if (!store_net_store_tag_keeping_live(s, h)) abort();
+    return &s->keeping[h.index];
+}
+net_keeping *store_net_store_tag_keeping_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->keeping_len) abort();
+    return &s->keeping[i];
+}
+net_keeping_h store_net_store_tag_keeping_handle(const store_net_store_tag *s, uint32_t i) {
+    net_keeping_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->keeping_len && s->keeping[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->keeping[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_keeping_free(store_net_store_tag *s, net_keeping_h h) {
+    if (!store_net_store_tag_keeping_live(s, h)) abort();
+    s->keeping[h.index].live = 0;
+    s->keeping[h.index].gen++;
+    s->keeping[h.index].free_next = s->keeping_free;
+    s->keeping_free = h.index;
+}
+size_t store_net_store_tag_keeping_len(const store_net_store_tag *s) { return s->keeping_len; }
+size_t store_net_store_tag_keeping_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->keeping_len; i++) if (s->keeping[i].live) n++;
     return n;
 }
 static void store_net_store_tag__text_room(store_net_store_tag *s, size_t n) {

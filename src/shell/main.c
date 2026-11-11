@@ -477,6 +477,22 @@ static void page_clicks(const dom_document *d, js_vm *vm) {
     }
 }
 
+/* where the loader keeps cookies and cached responses (net_keep): the profile's
+   directory, the cache in AMB_CACHE when it is set; a private session, or one with
+   no profile, keeps its cookies for the run and caches nothing */
+static void loader_keep(const session *s, net_loader *nt) {
+    char jar[1100], cache[1100];
+    jar[0] = 0;
+    cache[0] = 0;
+    const char *ac = getenv("AMB_CACHE");
+    if (!s->private_mode && s->profile[0]) {
+        snprintf(jar, sizeof jar, "%s/cookies", s->profile);
+        snprintf(cache, sizeof cache, "%s/cache", s->profile);
+    }
+    if (!s->private_mode && ac && *ac) snprintf(cache, sizeof cache, "%s", ac);
+    net_keep(nt, jar, strlen(jar), cache, strlen(cache));
+}
+
 static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
                           a11y_tree *ax, script_runtime *sr, js_vm *vm) {
     char url[4200];
@@ -486,6 +502,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     css_init(st, 1);
     layout_init(lt, 1);
     net_init(nt, 1);
+    loader_keep(s, nt);
     a11y_init(ax, 1);
     script_init(sr, 1);
     net_resource_h ph = net_fetch(nt, url, strlen(url), NET_KIND_DOCUMENT);
@@ -497,9 +514,11 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     vector<char> src;
     append_range(src, bytes_ptr(nt, nt->resource[pr].body), nt->resource[pr].body.len);
     char final[4200], site[512], answer[700], type[300];
-    amb_span fu = nt->resource[pr].final_url, ty = nt->resource[pr].type;
+    amb_span fu = nt->resource[pr].final_url, ty = nt->resource[pr].type, cs = nt->resource[pr].charset;
     snprintf(final, sizeof final, "%.*s", (int)fu.len, text_ptr(nt, fu));
-    snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(nt, ty));
+    /* the type with the charset its server named, as the sniffer reads a Content-Type */
+    if (cs.len) snprintf(type, sizeof type, "%.*s;charset=%.*s", (int)ty.len, text_ptr(nt, ty), (int)cs.len, text_ptr(nt, cs));
+    else snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(nt, ty));
     /* the bytes decoded in the encoding sniffed from them, the type they were served as
        and whether they are a local file's (src/html/encoding.h) */
     html_parse_bytes(p, d, data(src), len(src), type, strlen(type), strncmp(final, "file:", 5) == 0);
@@ -664,8 +683,9 @@ static int cmd_bench(const char *page, int n) {
         vector<char> src;
         append_range(src, bytes_ptr(&nt, nt.resource[ph.index].body), nt.resource[ph.index].body.len);
         char type[300];
-        amb_span ty = nt.resource[ph.index].type, fu = nt.resource[ph.index].final_url;
-        snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(&nt, ty));
+        amb_span ty = nt.resource[ph.index].type, fu = nt.resource[ph.index].final_url, cs = nt.resource[ph.index].charset;
+        if (cs.len) snprintf(type, sizeof type, "%.*s;charset=%.*s", (int)ty.len, text_ptr(&nt, ty), (int)cs.len, text_ptr(&nt, cs));
+        else snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(&nt, ty));
         int file = fu.len >= 5 && memcmp(text_ptr(&nt, fu), "file:", 5) == 0;
         html_parse_bytes(&p, &d, data(src), len(src), type, strlen(type), file);
         double c = now_ms();

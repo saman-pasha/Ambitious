@@ -38,9 +38,124 @@ ok   '  HTTP://Example.COM:80/x\y ' -> http://example.com/x/y
 ok   'http://u:p@h:8080/' -> http://h:8080/
 ok   'file:///tmp/a b.html' -> file:///tmp/a b.html
 ok   'data:text/css,p{}' -> data:text/css,p{}
+ok   'http://[::1]:8080/x' -> http://[::1]:8080/x
+ok   'http://[0:0:0:0:0:0:0:1]/' -> http://[::1]/
+ok   'http://[2001:DB8::1]/' -> http://[2001:db8::1]/
+ok   'http://[2001:db8:0:0:1:0:0:1]/' -> http://[2001:db8::1:0:0:1]/
+ok   'http://[::ffff:192.168.0.1]/' -> http://[::ffff:c0a8:1]/
+ok   'http://[1:0:0:2::3:0]/' -> http://[1::2:0:0:3:0]/
+ok   'http://[::]/' -> http://[::]/
+ok   'http://[1::]/' -> http://[1::]/
+ok   'http://[::1:2:3:4:5:6:7]/' -> http://[0:1:2:3:4:5:6:7]/
+ok   'http://[::127.0.0.1]/' -> http://[::7f00:1]/
+ok   'https://[::1]:443/' -> https://[::1]/
+ok   '//[::1]:81/a' -> http://[::1]:81/a
+ok   'file://[::1]/x' -> file://[::1]/x
+ok   'file://localhost/x' -> file:///x
+ok   'http://[:1]/' -> (not a URL)
+ok   'http://[1:2:3:4:5:6:7:8:9]/' -> (not a URL)
+ok   'http://[::1/' -> (not a URL)
+ok   'http://[::1]x/' -> (not a URL)
+ok   'http://[1::2::3]/' -> (not a URL)
+ok   'http://[::1.2.3]/' -> (not a URL)
+ok   'ws://[fe80::1%25eth0]/' -> (not a URL)
+ok   'http://0x7f.1/' -> http://127.0.0.1/
+ok   'http://127.1/' -> http://127.0.0.1/
+ok   'http://0300.0250.0.1/' -> http://192.168.0.1/
+ok   'http://4294967295/' -> http://255.255.255.255/
+ok   'http://0x/' -> http://0.0.0.0/
+ok   'http://1.2.3.4./' -> http://1.2.3.4/
+ok   'http://4294967296/' -> (not a URL)
+ok   'http://1.2.3.256/' -> (not a URL)
+ok   'http://09.1/' -> (not a URL)
+ok   'http://foo.09/' -> (not a URL)
+ok   'http://ex%41mple.com/' -> http://example.com/
+ok   'http://a b/' -> (not a URL)
+ok   'http://a<b/' -> (not a URL)
+ok   'http://a%2Fb/' -> (not a URL)
+ok   'http://h:1:2/' -> (not a URL)
+ok   'http://Bücher.example/' -> http://xn--bcher-kva.example/
+ok   'http://ÄÖÜ.de/' -> http://xn--4ca0bs.de/
+ok   'http://münchen.de/' -> http://xn--mnchen-3ya.de/
+ok   'http://例え.テスト/' -> http://xn--r8jz45g.xn--zckzah/
+ok   'http://ПРИМЕР.рф/' -> http://xn--e1afmkfd.xn--p1ai/
+ok   'http://faß.de/' -> http://xn--fa-hia.de/
+ok   'http://☃.net/' -> http://xn--n3h.net/
+ok   'http://ΕΛΛΆΔΑ.gr/' -> http://xn--hxakic4aa.gr/
+ok   'http://Ελληνικά.δοκιμή/' -> http://xn--hxargifdar.xn--jxalpdlp/
+ok   'http://ÀÉÎÕÜ.fr/' -> http://xn--0casp2a9a.fr/
+ok   'http://ŁÓDŹ.pl/' -> http://xn--d-uga0v4h.pl/
+ok   'http://ĞÜŞİÖÇ.tr/' -> http://xn--i-6fa8bwa8ovo32h.tr/
+ok   'http://Ἀθῆναι.gr/' -> http://xn--mxaneo7006a87a.gr/
+ok   'http://ꙀꙂ.test/' -> http://xn--nw8ae.test/
+ok   'http://𐐀.test/' -> http://xn--hj8c.test/
+ok   'http://中文.example.com/' -> http://xn--fiq228c.example.com/
+ok   'http://मराठी.भारत/' -> http://xn--d2b1ag0dl.xn--h2brj9c/
+ok   'http://a.b.ü/' -> http://a.b.xn--tda/
+ok   'http://例え。テスト/' -> http://xn--r8jz45g.xn--zckzah/
+ok   'http://ＥＸＡＭＰＬＥ.com/' -> http://example.com/
+ok   'http://b%C3%BCcher.example/' -> http://xn--bcher-kva.example/
+ok   'http://xn--bcher-kva.example/' -> http://xn--bcher-kva.example/
+ok   'http://%FF.example/' -> (not a URL)
 ok   origin of http://a/b/c/d;p?q: http://a
 ok   origin of http://Example.com:8080/x: http://example.com:8080
 ok   origin of https://h:443/: https://h
 ok   origin of file:///tmp/x.html: null
 ok   origin of data:text/plain,hi: null
-45 of 45 cases
+ok   origin of http://[::1]:8080/: http://[::1]:8080
+ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
+ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
+ok   proxy for https://a.test/x with no_proxy '': http://p.test:8080
+ok   proxy for https://a.test/ with no_proxy '': http://proxy.test:8080
+ok   proxy for https://a.test/ with no_proxy '': http://p.test:80
+ok   proxy for https://a.test/ with no_proxy '*': none
+ok   proxy for https://example.test/ with no_proxy 'example.test': none
+ok   proxy for https://www.example.test/ with no_proxy 'example.test': none
+ok   proxy for https://notexample.test/ with no_proxy 'example.test': http://p.test:3128
+ok   proxy for https://example.test/ with no_proxy '.example.test': none
+ok   proxy for https://www.example.test/ with no_proxy '.example.test': none
+ok   proxy for https://a.b.example.test/ with no_proxy '*.example.test': none
+ok   proxy for https://www.Example.TEST/ with no_proxy 'EXAMPLE.test': none
+ok   proxy for https://a.test./ with no_proxy 'a.test': none
+ok   proxy for https://localhost:9/ with no_proxy 'localhost,127.0.0.1': none
+ok   proxy for https://127.1.2.3:9/ with no_proxy '127.0.0.0/8': none
+ok   proxy for https://128.0.0.1:9/ with no_proxy '127.0.0.0/8': http://p.test:3128
+ok   proxy for https://192.168.4.5:8443/ with no_proxy '10.0.0.0/8, 192.168.0.0/16': none
+ok   proxy for https://example.test:8443/ with no_proxy 'example.test:8443': none
+ok   proxy for https://example.test/ with no_proxy 'example.test:8443': http://p.test:3128
+ok   proxy for https://[::1]:9/ with no_proxy '::1': none
+ok   proxy for https://[::1]:9/ with no_proxy '[::1]:9': none
+ok   proxy for https://[fe80::1]:9/ with no_proxy 'fe80::/10': none
+ok   proxy for https://[fec0::1]:9/ with no_proxy 'fe80::/10': http://p.test:3128
+ok   proxy for https://a.test/ with no_proxy '': refused: the proxy socks5://p.test:1080 is not an http: proxy, the only kind spoken here
+ok   proxy for http://a.test/ with no_proxy '': none
+ok   proxy for http://a.test/ with no_proxy '': http://h.test:8080
+ok   proxy for http://a.test/ with no_proxy '': none
+ok   proxy for http://a.test/ with no_proxy 'a.test': none
+ok   proxy for file:///etc/hostname with no_proxy '': none
+ok   date 'Wed, 01 Jan 2031 00:00:00 GMT': 1924992000
+ok   date 'Sun, 06 Nov 1994 08:49:37 GMT': 784111777
+ok   date 'Sunday, 06-Nov-94 08:49:37 GMT': 784111777
+ok   date 'Sun Nov  6 08:49:37 1994': 784111777
+ok   date 'Thu, 01 Jan 1970 00:00:00 GMT': 0
+ok   date 'Thu, 01-Jan-70 00:00:01 GMT': 1
+ok   date '09 Jun 2021 10:18:14': 1623233894
+ok   date 'Thu, 29 Feb 2024 12:00:00 GMT': 1709208000
+ok   date '31-Dec-69 23:59:59': 3155759999
+ok   date '1 jan 1601 0:0:0': -11644473600
+ok   date 'Tue, 29 Feb 2023 12:00:00 GMT': none
+ok   date 'Fri, 31 Feb 2023 00:00:00 GMT': none
+ok   date 'Mon, 01 Jan 1600 00:00:00 GMT': none
+ok   date 'Mon, 01 Jan 2024 25:00:00 GMT': none
+ok   date '2021-06-09T10:18:14Z': none
+ok   date 'tomorrow': none
+ok   site of https://www.example.com/x: https://example.com
+ok   site of http://a.b.example.co.uk/: http://example.co.uk
+ok   site of https://foo.github.io/: https://foo.github.io
+ok   site of http://localhost:8080/: http://localhost
+ok   site of http://127.0.0.1:9/: http://127.0.0.1
+ok   site of https://Example.COM./: https://example.com
+ok   site of http://co.uk/: http://co.uk
+ok   site of file:///x: null
+ok   site of data:text/plain,x: null
+160 of 160 cases

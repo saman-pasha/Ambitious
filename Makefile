@@ -26,7 +26,10 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree html/encoding css/css layout/layout paint/font paint/image paint/paint net/net a11y/a11y \
          js/vm js/compile js/builtins js/regexp js/proxy js/typed script/script
 OBJS := $(UNITS:%=build/obj/%.o)
-export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
+# the system libraries the units link with: OpenSSL's, for https: (src/net/net.c);
+# the tests' links take them after the units
+AMB_LIBS := -lssl -lcrypto
+export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%) $(AMB_LIBS)
 
 .PHONY: all check test test-contract test-gen test-exec test-js test-safe test-reason test-html test-integ golden schema doc clean bench
 all: build/ambitious schema
@@ -36,7 +39,7 @@ build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl) $(wildcard src/*/*.h)
 	$(AMB_CC) -c $< -o $@ < /dev/null
 
 build/ambitious: build/obj/shell/main.o $(OBJS)
-	$(AMB_CC) $^ -o $@ < /dev/null
+	$(AMB_CC) $^ $(AMB_LIBS) -o $@ < /dev/null
 
 check:
 	sh toolchain/check.sh
