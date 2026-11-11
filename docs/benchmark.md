@@ -108,6 +108,33 @@ PLAN.md §11 has the causes, each measured with callgrind before it was changed.
 
 Every gate of `make test` stayed green through each change. The pixels of every page are unchanged, and so is every answer the reasoner gives. The only exceptions are the proofs, which now show the derived values.
 
+### JavaScript: 8 of 8 against QuickJS
+
+`tools/bench/js/suite.js` on the four engines, median ms of 9 runs (`QJS=path/to/qjsrun python3 tools/bench/js/run.py 9`). Ambitious is its own engine (`src/js/`, PLAN.md Phase 8), run by `ambitious js`; QuickJS is the engine Phase 8 had planned to embed.
+
+| workload | V8 (node v22.23.4) | V8 --jitless | QuickJS 2021-03-27 | Ambitious | against QuickJS |
+|---|---:|---:|---:|---:|---|
+| loop | 42.3 | 144.2 | 119.1 | 56.4 | **Ambitious** (2.1x) |
+| fib | 1.8 | 6.6 | 6.5 | 4.4 | **Ambitious** (1.5x) |
+| objects | 41.6 | 71.2 | 128.9 | 53.2 | **Ambitious** (2.4x) |
+| classes | 18.5 | 61.5 | 94.5 | 60.7 | **Ambitious** (1.6x) |
+| closures | 3.1 | 44.2 | 52.3 | 40.9 | **Ambitious** (1.3x) |
+| strings | 89.2 | 87.5 | 330.6 | 206.2 | **Ambitious** (1.6x) |
+| arrays | 10.5 | 14.3 | 24.0 | 19.4 | **Ambitious** (1.2x) |
+| json | 5.0 | 4.9 | 18.7 | 9.9 | **Ambitious** (1.9x) |
+
+Checksums: all engines agree. Ambitious is also faster than V8's own interpreter (`--jitless`) on loop, fib, objects, classes and closures, and slower on strings, arrays and json, whose time is in the builtins. V8's JIT is faster than every interpreter on every row; those rows are reported, not targeted (PLAN.md §11).
+
+The engine's first correct run lost fib (22.5 ms), closures (146), arrays (41.8) and loop (275). Each loss was profiled with callgrind and changed the interpreter:
+
+| lost | measured cause | the engine now |
+|---|---|---|
+| fib, closures | about 480 instructions a call; 9 to 14 of every instruction's dispatch, the exception check after each, and a comparison's jump decoded from operands | A comparison and its jump are one instruction, one per relation, and a local compared with an integer is one more. Arithmetic with an integer or a second local is one instruction. A plain call pushes no `this` (CALL0), and the closure's frame is built in place, by a flag set when the closure was made. `return c ? a : b` returns from each branch. Simple instructions skip the exception check. The switch covers every byte, so its jump has no range check |
+| loop | the remainder through `fmod` and `trunc`, library calls on the generic CPU; the loop's own jump | integers' remainder by integer division, the sign the dividend's; loops test at their foot, one jump an iteration |
+| arrays | a callback from a native took about 330 instructions to enter; `a.push`'s cache never filled for an array; each array growth pushed its slots one at a time | a closure called from a native gets its frame made in `js_call`, read through borrows; an array's named properties are cached like any object's; slots are allocated in one resize |
+
+`tests/js/` holds the engine's own gate: scripts whose every line is checked against V8's output, the slow paths of each fast instruction among them.
+
 ## The first run (before the changes of PLAN.md §11)
 
 Measured by `python3 tools/bench/compare.py 5` on Intel(R) Xeon(R) Processor @ 2.10GHz (4 CPUs), Linux-6.18.44-fc-v378-x86_64-with-glibc2.39.

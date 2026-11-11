@@ -9,6 +9,8 @@
 #            diagnostic NAME.expect names
 #   reason   each tests/reason/NAME.pl run by cocolog, its output against NAME.expect
 #   integ    each tests/integ/NAME.sh run, its output against NAME.expect
+#   js       each tests/js/NAME.js run by the engine (ambitious js), its output
+#            against NAME.expect, which V8 wrote (node NAME.js > NAME.expect)
 #
 # A RED line names what differs; the exit status is 1 on any RED.
 AMB_ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -88,7 +90,14 @@ integ)
     if cmp -s "tests/integ/$n.expect" "$OUT/$n.integ"; then pass "$n prints its .expect"
     else fail "$n differs from its .expect:"; diff "tests/integ/$n.expect" "$OUT/$n.integ" | head -20; fi
   done ;;
-*) echo "usage: tests/run.sh gen|exec|safe|reason|integ" >&2; exit 2 ;;
+js)
+  for t in tests/js/*.js; do [ -e "$t" ] || continue
+    n=$(basename "$t" .js)
+    timeout 120 "$B/ambitious" js "$t" > "$OUT/$n.js.out" 2>&1 < /dev/null
+    if cmp -s "tests/js/$n.expect" "$OUT/$n.js.out"; then pass "$n prints what V8 prints"
+    else fail "$n differs from V8's output:"; diff "tests/js/$n.expect" "$OUT/$n.js.out" | head -20; fi
+  done ;;
+*) echo "usage: tests/run.sh gen|exec|safe|reason|integ|js" >&2; exit 2 ;;
 esac
 if [ "$red" -eq 0 ]; then echo "GREEN: $1"; else echo "RED: $1"; fi
 exit "$red"

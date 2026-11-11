@@ -85,7 +85,7 @@ amb_diag(unused_rule, ru(1,161,0), 'the rule .ghost matches no element (at rest:
 ```sh
 sh toolchain/bootstrap.sh       # the toolchain, once (see toolchain/README.md)
 make                            # the modules and build/ambitious
-make test                       # the gates: contract gen exec safe reason html integ
+make test                       # the gates: contract gen exec js safe reason html integ
 bin/ambitious loop              # the DOM vertical slice end to end
 bin/ambitious load PAGE         # a page (a URL or a path) and what it loaded
 bin/ambitious parse PAGE        # its tree and parse errors
@@ -95,6 +95,7 @@ bin/ambitious inspect PAGE      # its resources, accessibility tree and diagnost
 bin/ambitious bench PAGE [N]    # each stage's time, and the reasoner's
 bin/ambitious --profile DIR load PAGE   # ... and the visit kept (history, bookmarks, permit, forget)
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
+bin/ambitious js FILE           # a script run by the engine, its console printed
 tools/amb doc css               # a contract's reference
 ```
 
@@ -108,8 +109,8 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `a11y/`, `shell/` |
-| `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `a11y/`, `js/` (the JavaScript engine), `shell/` |
+| `tests/` | `contract/ gen/ golden/ exec/ js/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
 | `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |
 | `tools/gen-big-page.py` | a large page to measure the engine with |

@@ -10,6 +10,7 @@
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
  *   ambitious style PAGE          the page's elements with their computed styles
  *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
+ *   ambitious js FILE             a script run by the JavaScript engine with no page
  *   ambitious bench PAGE [N]      each stage's time, over N runs, and the snapshot's
  *                                 size and the reasoner's time over it
  *   ambitious inspect PAGE [--query GOAL | --why GOAL]
@@ -59,6 +60,7 @@ amb_interface(layout);
 amb_interface(a11y);
 
 #include "../paint/paint.h"
+#include "../js/js.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -746,6 +748,29 @@ static int cmd_profile(const char *cmd, const char *a1, const char *a2, const ch
     return st;
 }
 
+
+/* ---- JavaScript, with no page ---- */
+
+/* a script run by the engine alone: its console on stdout, then its timers in virtual
+   time; performance.now() reads the real clock, for the benchmark's suite */
+static int cmd_js(const char *file) {
+    if (strcmp(file, "--help") == 0) { printf("ambitious js FILE: a script run with no page\n"); return 0; }
+    vector<char> src;
+    if (!read_all(file, &src)) { fprintf(stderr, "ambitious: cannot read %s\n", file); return 2; }
+    js_vm vm;
+    js_init(&vm);
+    defer(vm) { JS_VM_DROP(vm); }
+    vm.echo = 1;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    vm.real_clock = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+    int rc = js_eval(&vm, data(src), len(src), file, 1);
+    if (rc == 0) js_run_timers(&vm, 1e15, 1000000);
+    fflush(stdout);
+    if (rc != 0) { fprintf(stderr, "%.*s\n", (int)len(vm.out), data(vm.out)); return 1; }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     /* the options before the command: the profile's store, or a private session */
     while (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') {
@@ -762,6 +787,7 @@ int main(int argc, char **argv) {
     if (argc >= 5 && strcmp(argv[1], "permit") == 0) return cmd_profile("permit", argv[2], argv[3], argv[4]);
     if (argc >= 3 && strcmp(argv[1], "retain") == 0) return cmd_profile("retain", argv[2], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "profile") == 0) return cmd_profile("query", argv[2], 0, 0);
+    if (argc >= 3 && strcmp(argv[1], "js") == 0) return cmd_js(argv[2]);
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "load") == 0) return cmd_load(argv[2]);

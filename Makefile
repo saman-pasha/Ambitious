@@ -23,11 +23,12 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
-UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/layout paint/font paint/image paint/paint net/net a11y/a11y
+UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/layout paint/font paint/image paint/paint net/net a11y/a11y \
+         js/vm js/compile js/builtins js/dom
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 
-.PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-html test-integ golden schema doc clean bench
+.PHONY: all check test test-contract test-gen test-exec test-js test-safe test-reason test-html test-integ golden schema doc clean bench
 all: build/ambitious schema
 
 build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl) $(wildcard src/*/*.h)
@@ -40,7 +41,7 @@ build/ambitious: build/obj/shell/main.o $(OBJS)
 check:
 	sh toolchain/check.sh
 
-test: test-contract test-gen test-exec test-safe test-reason test-html test-integ
+test: test-contract test-gen test-exec test-js test-safe test-reason test-html test-integ
 
 test-contract:
 	@$(ENV) $(CAP) "$$AMB_COCOLOG" -s tests/contract/run.pl < /dev/null
@@ -50,6 +51,9 @@ test-gen:
 
 test-exec: $(OBJS)
 	@sh tests/run.sh exec
+
+test-js: build/ambitious
+	@sh tests/run.sh js
 
 test-safe:
 	@sh tests/run.sh safe

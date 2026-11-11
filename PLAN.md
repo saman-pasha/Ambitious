@@ -450,6 +450,33 @@ start (`src/js/`):
   and events. On the benchmark: `tools/bench/js/suite.js` faster than QuickJS
   on each workload, and the scripted pages faster than Chromium.
 
+*As built, 8a: the engine* (`src/js/`: `vm.c`, `compile.c`, `builtins.c`;
+`ambitious js FILE`):
+- **The language.** ES2020's statements and expressions: classes with fields,
+  accessors, static members and `super`; destructuring, spread and rest;
+  default parameters; template literals, tagged ones included; optional
+  chaining and nullish coalescing; labels; for-in and for-of. Strictness comes
+  from a directive prologue and is inherited by nested functions; class code
+  is strict. Not read, each a SyntaxError that names it: generators, async
+  functions, modules, `with`, BigInt, direct eval. A regular expression
+  literal makes a RegExp whose methods throw.
+- **The interpreter**, shaped by the benchmark (§11, `docs/benchmark.md`):
+  - a comparison and its jump are one instruction, one opcode per relation;
+  - a local's own instructions compare it with an integer and jump, add,
+    subtract, multiply or take the remainder with an integer or a second
+    local, or return it;
+  - a plain call pushes no `this` (CALL0), and a closure's frame is built in
+    place, by a flag set when the closure was made;
+  - simple instructions go straight to the next one, and only an instruction
+    that can throw passes the exception check;
+  - the switch covers every byte, so its jump has no range check;
+  - loops test at their foot;
+  - inline caches cover arrays' named properties.
+- **The gate.** `make test-js` runs `tests/js/*.js`, checking each line
+  against V8's output (`node NAME.js > NAME.expect`), the slow paths of each
+  fast instruction among them. The suite: faster than QuickJS on 8 of 8
+  workloads (§11).
+
 ### Phase 9: Accessibility and developer tools
 
 - `src/a11y/`: an accessibility tree with roles and names (from content,
@@ -554,11 +581,11 @@ won.
 | 5 CSS | **done, first slice**: `contracts/css.pl` and `src/css/css.c`. It covers sheets (comments, strings, `@media` against an 800x600 viewport), Selectors 4 (attribute operators, the structural pseudo-classes, `:nth-*()`, `:not`, `:is`, `:where`) with their specificity, and the cascade (origin, importance, the style attribute, specificity, order). It also covers inheritance, the global keywords, presentational hints, and 26 computed properties with the shorthands that set them. Each computed value is a fact with its winning declaration. `css_explain/3` says why, `css_lost/4` names the cascade step at which each loser lost, and contrast and unused rules are diagnostics. `tests/exec/css_cascade` (120 cases, valgrind clean) and `tests/integ/style` |
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
-| 8 JavaScript | **redesigned by the benchmark (§11), in progress**: an engine of Ambitious's own in cicilang (NaN-boxed values, shapes with inline caches, stack bytecode) in place of embedded QuickJS, which the benchmark put in the same class as V8's interpreter |
+| 8 JavaScript | **redesigned by the benchmark (§11); 8a built, 8b in progress**: an engine of Ambitious's own in cicilang (NaN-boxed values, shapes with inline caches, stack bytecode) in place of embedded QuickJS. `ambitious js` runs a script; `tests/js` checks it line by line against V8; the suite is faster than QuickJS on 8 of 8 workloads. 8b, the page's scripts, DOM bindings and event loop, is next |
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. The JavaScript rows wait for Phase 8 |
+| Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. The JavaScript suite: 8 of 8 against QuickJS (Phase 8a); the scripted pages wait for 8b |
 
 ## 10. Risks
 
@@ -657,3 +684,18 @@ memory that is written and then executed, which the safe part cannot express,
 so those rows are reported, not targeted. The rows Phase 8 must win are
 QuickJS's, the engine it replaces, and Chromium's on scripted pages: a list
 built by script, and a click handled and drawn again.
+
+**The JavaScript rows, Phase 8a** (`docs/benchmark.md`). The engine's first
+correct run lost four of QuickJS's rows: loop 275 ms against 117, fib 22.5
+against 6.4, closures 146 against 51, and arrays 41.8 against 24.2. Callgrind
+put each loss in the interpreter:
+
+| lost | measured cause | the engine now |
+|---|---|---|
+| fib, closures | about 480 instructions a call. Each instruction's dispatch cost 9 to 14 of them, plus the exception check after it, and a comparison's jump was decoded from its operands | a comparison and its jump in one instruction, one per relation; a local's own compare-and-jump, arithmetic and return; calls without `this` (CALL0); a closure's frame built in place; simple instructions skip the exception check; a switch with no range check |
+| loop | the remainder computed by `fmod` and `trunc`, which are library calls on the generic CPU; the loop's own jump | integers' remainder by integer division; loops test at their foot |
+| arrays | a native's callback took about 330 instructions to enter; `a.push`'s cache never filled for an array | callbacks enter through `js_call`'s own frame, read through borrows; arrays' named properties cached |
+
+The latest run is faster than QuickJS on **8 of 8** workloads: 1.2x on arrays
+and 1.3x on closures, up to 2.4x on objects. It is also faster than V8's
+interpreter on loop, fib, objects, classes and closures.
