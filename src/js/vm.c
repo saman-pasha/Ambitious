@@ -377,6 +377,7 @@ static void js_obj_room(js_vm *vm, uint32_t o, uint32_t i) {
 }
 
 int js_get_own(js_vm *vm, uint32_t o, uint32_t atom, jv *v, uint32_t *flags) {
+    if (vm->objs[o].kind == JK_PROXY) return js_proxy_get_own(vm, o, atom, v, flags);
     uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
     if (!e) return 0;
     jv x = vm->slots[vm->objs[o].slots + vm->shapes[e].slot];
@@ -418,6 +419,7 @@ void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv sett
 }
 
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
+    if (vm->objs[o].kind == JK_PROXY) return js_proxy_delete(vm, o, atom);
     if (vm->objs[o].flags & JO_FROZEN) return 0;
     if (vm->objs[o].kind == JK_ARRAY) {
         uint32_t i;
@@ -781,7 +783,7 @@ jv js_to_object(js_vm *vm, jv v) {
 int js_is_callable(js_vm *vm, jv v) {
     if (!jv_is_obj(v)) return 0;
     uint32_t k = vm->objs[jv_idx(v)].kind;
-    return k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND;
+    return k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND || (k == JK_PROXY && vm->objs[jv_idx(v)].c);
 }
 
 uint32_t js_typeof(js_vm *vm, jv v) {
@@ -868,6 +870,8 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
     uint32_t x = o;
     for (int depth = 0; x && depth < 10000; depth++) {
         uint32_t k = vm->objs[x].kind;
+        /* a proxy, here or up the prototypes: its get, never cached (holder left unset) */
+        if (k == JK_PROXY) return js_proxy_get(vm, x, atom, receiver);
         if (k == JK_ARRAY) {
             if (atom == A_LENGTH) return jv_num(vm->objs[x].b);
             uint32_t i;
@@ -983,6 +987,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     }
     uint32_t o = jv_idx(objv);
     uint32_t k = vm->objs[o].kind;
+    if (k == JK_PROXY) return js_proxy_set(vm, o, atom, v, objv);
     if (vm->objs[o].flags & JO_FROZEN) return 1;
     if (k == JK_ARRAY) {
         uint32_t i;
@@ -1014,6 +1019,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     }
     /* a setter up the prototypes, or a host's property there */
     for (uint32_t p = vm->objs[o].proto, depth = 0; p && depth < 10000; p = vm->objs[p].proto, depth++) {
+        if (vm->objs[p].kind == JK_PROXY) return js_proxy_set(vm, p, atom, v, objv);
         if (vm->objs[p].kind == JK_HOST) {
             int handled = 0;
             int ok = js_host_set(vm, p, atom, v, &handled);
@@ -1091,6 +1097,7 @@ int js_set_value(js_vm *vm, jv obj, jv key, jv v) {
 int js_has(js_vm *vm, uint32_t o, uint32_t atom) {
     for (uint32_t x = o, depth = 0; x && depth < 10000; x = vm->objs[x].proto, depth++) {
         uint32_t k = vm->objs[x].kind;
+        if (k == JK_PROXY) return js_proxy_has(vm, x, atom);
         uint32_t i;
         if (k == JK_ARRAY) {
             if (atom == A_LENGTH) return 1;
@@ -1132,6 +1139,7 @@ static void js_sort_u64(vector<uint64_t> *v) {
 
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
     uint32_t k = vm->objs[o].kind;
+    if (k == JK_PROXY) { js_proxy_own_keys(vm, o, 1, 0, enumerable_only, arr); return; }
     if (k == JK_ARRAY) {
         for (uint32_t i = 0; i < vm->objs[o].b; i++)
             if (vm->slots[vm->objs[o].a + i] != JV_HOLE) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
@@ -1167,6 +1175,7 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
 }
 
 void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr) {
+    if (vm->objs[o].kind == JK_PROXY) { js_proxy_own_keys(vm, o, 0, 1, 0, arr); return; }
     vector<uint32_t> es;
     for (uint32_t x = vm->objs[o].shape; x && vm->shapes[x].count; x = vm->shapes[x].parent) push_back(es, x);
     for (size_t q = len(es); q > 0; q--) {
@@ -1195,8 +1204,17 @@ int js_instance_of(js_vm *vm, jv v, jv ctor) {
     if (!jv_is_obj(v)) return 0;
     jv p = js_get(vm, ctor, A_PROTOTYPE);
     if (vm->throwing || !jv_is_obj(p)) return 0;
-    for (uint32_t x = vm->objs[jv_idx(v)].proto, depth = 0; x && depth < 10000; x = vm->objs[x].proto, depth++)
+    /* up the prototypes, a proxy's its getPrototypeOf's */
+    uint32_t x = jv_idx(v);
+    for (uint32_t depth = 0; depth < 10000; depth++) {
+        if (vm->objs[x].kind == JK_PROXY) {
+            jv pp = js_proxy_get_proto(vm, x);
+            if (vm->throwing) return 0;
+            x = jv_is_obj(pp) ? jv_idx(pp) : 0;
+        } else x = vm->objs[x].proto;
+        if (!x) return 0;
         if (x == jv_idx(p)) return 1;
+    }
     return 0;
 }
 
@@ -1692,6 +1710,7 @@ static jv js_call_bound(js_vm *vm, uint32_t b, uint32_t args, uint32_t argc, jv 
 /* a call of a function that is not a closure: a native's, or a bound one's */
 static jv js_call_other(js_vm *vm, jv fn, jv thisv, uint32_t args, uint32_t argc, jv newt) {
     uint32_t o = jv_idx(fn);
+    if (vm->objs[o].kind == JK_PROXY) return js_proxy_call(vm, o, thisv, args, argc, newt);
     if (vm->objs[o].kind == JK_NATIVE) {
         uint32_t id = vm->objs[o].a;
         if (id >= JS_HOST_NATIVES) {
@@ -1818,7 +1837,8 @@ static uint32_t js_rd16(const uint8_t *c, uint32_t p) { uint16_t v; memcpy(&v, c
 static uint32_t js_rd32(const uint8_t *c, uint32_t p) { uint32_t v; memcpy(&v, c + p, 4); return v; }
 #define RD16(p) js_rd16(code, p)
 #define RD32(p) js_rd32(code, p)
-#define CALLABLE(v) (jv_is_obj(v) && (objs[jv_idx(v)].kind == JK_CLOSURE || objs[jv_idx(v)].kind == JK_NATIVE || objs[jv_idx(v)].kind == JK_BOUND))
+#define CALLABLE(v) (jv_is_obj(v) && (objs[jv_idx(v)].kind == JK_CLOSURE || objs[jv_idx(v)].kind == JK_NATIVE || objs[jv_idx(v)].kind == JK_BOUND || \
+                     (objs[jv_idx(v)].kind == JK_PROXY && objs[jv_idx(v)].c)))
 #define RELOAD() (code = data(vm->code), stack = data(vm->stack), objs = data(vm->objs), funcs = data(vm->funcs), frames = data(vm->frames), slots = data(vm->slots))
 #define SYNC() (vm->sp = sp)
 

@@ -80,7 +80,8 @@ enum {
     JK_SYMBOL,       /* a symbol's wrapper: the symbol in x */
     JK_GENERATOR,    /* a generator: a its state (JG_*), b its saved frame (an array), x its function */
     JK_ASYNC,        /* an async function's run: as a generator's, c its promise */
-    JK_PROMISE       /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
+    JK_PROMISE,      /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
+    JK_PROXY         /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
 };
 /* an iterator: a its source, b its place, c its mode; JI_PROTOCOL's source is an
    iterator object whose next (kept in x) is called, JI_GEN's a generator resumed */
@@ -111,6 +112,7 @@ typedef struct js_obj {
 #define JO_FROZEN 8
 #define JO_FASTCALL 16        /* a closure the interpreter calls with a frame of its own: not a class's
                                  constructor, without arguments or a rest parameter */
+#define JO_WEAK 32            /* a WeakMap, a WeakSet or a WeakRef (src/js/proxy.c) */
 
 /* a shape: the key it adds to its parent's, at which slot; its proto, its count */
 typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js_shape;
@@ -251,6 +253,8 @@ typedef struct js_vm {
     uint32_t type_error_proto, range_error_proto, syntax_error_proto, reference_error_proto, date_proto, regexp_proto;
     uint32_t map_proto, set_proto, iterator_proto;
     uint32_t symbol_proto, generator_proto, promise_proto, promise_ctor, aggregate_error_proto;
+    uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
+    uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t host_protos[16];         /* the host's prototypes, by its kinds (src/script/script.c) */
@@ -359,6 +363,28 @@ jv js_re_object(js_vm *vm, uint32_t re);
 int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start);
 jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_re_init(js_vm *vm, uint32_t first);
+/* proxies (src/js/proxy.c): a proxy's internal methods, each its handler's trap or its
+   target's own; Proxy's, Reflect's and the weak collections' natives, after the first's id */
+jv js_proxy_get(js_vm *vm, uint32_t p, uint32_t key, jv receiver);
+int js_proxy_set(js_vm *vm, uint32_t p, uint32_t key, jv v, jv receiver);
+int js_proxy_has(js_vm *vm, uint32_t p, uint32_t key);
+int js_proxy_delete(js_vm *vm, uint32_t p, uint32_t key);
+int js_proxy_get_own(js_vm *vm, uint32_t p, uint32_t key, jv *v, uint32_t *flags);
+void js_proxy_own_keys(js_vm *vm, uint32_t p, int strings, int symbols, int enumerable_only, uint32_t arr);
+jv js_proxy_get_proto(js_vm *vm, uint32_t p);
+jv js_proxy_call(js_vm *vm, uint32_t p, jv thisv, uint32_t args, uint32_t argc, jv newt);
+enum { JPX_PROXY, JPX_REVOCABLE, JPX_REVOKE,
+       JPX_R_APPLY, JPX_R_CONSTRUCT, JPX_R_DEFINE, JPX_R_DELETE, JPX_R_GET, JPX_R_GETOWNDESC, JPX_R_GETPROTO, JPX_R_HAS,
+       JPX_R_ISEXTENSIBLE, JPX_R_OWNKEYS, JPX_R_PREVENTEXT, JPX_R_SET, JPX_R_SETPROTO,
+       JPX_WEAKMAP, JPX_WEAKSET, JPX_WM_GET, JPX_WM_SET, JPX_WM_HAS, JPX_WM_DELETE, JPX_WS_ADD,
+       JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER, JPX_N };
+jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_proxy_init(js_vm *vm, uint32_t first);
+/* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
+enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };
+uint32_t js_coll_new(js_vm *vm, uint32_t kind, uint32_t proto);
+jv js_coll_op(js_vm *vm, uint32_t op, uint32_t c, jv k, jv v);
+
 /* Unicode's simple case mappings, and the full ones of more than one code point (their count, into out) */
 uint32_t js_uni_upper(uint32_t c);
 uint32_t js_uni_lower(uint32_t c);

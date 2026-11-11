@@ -1,0 +1,41 @@
+1 default:missing default:b
+10
+true true false
+
+["c","virtual"] {"c":10,"virtual":"default:virtual"}
+get a; get missing; get b; set c; gopd c; has xyz; has a; has q; delete a; ownKeys; gopd c; gopd virtual; get toJSON; ownKeys; gopd c; gopd virtual; get c; get virtual
+applied:5 function [1,2] applied:9
+true 3 [1,2,3] [2,4,6] [object Array] [1,2,3]
+1
+TypeError true
+hi proxied true true
+1 from-proto:inherited
+true 2 true
+5 true true
+7 true false true true false
+receiver {"value":1,"writable":true,"enumerable":true,"configurable":true}
+true
+one true true false 
+TypeError
+true false true true
+true [object WeakRef] [object WeakMap] function
+false
+true false false true
+{"odd":[1,3],"even":[2,4]} 2
+["a","b"]
+1999000 1000 false true k1000
+1500 true false
+nan zero 2
+57 
+["count=1 double=2","x=10","count=2 double=4","x=11","count=5 double=10"]
+["a","b"] {"a":10,"b":20} {"a":10,"b":20} [["a",10],["b",20]]
+inner symval true 1
+trap threw
+2 2
+function object
+300 true
+named 0
+TypeError
+TypeError
+1 false false
+["1","b","a"] ["0","1"]

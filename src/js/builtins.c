@@ -57,9 +57,12 @@ enum {
     N_PROMISE, N_PR_RESOLVE_FN, N_PR_REJECT_FN, N_PRP_THEN, N_PRP_CATCH, N_PRP_FINALLY, N_PR_FIN_OK, N_PR_FIN_ERR,
     N_PR_THUNK_VALUE, N_PR_THUNK_THROW, N_PR_RESOLVE, N_PR_REJECT, N_PR_ALL, N_PR_ALLSETTLED, N_PR_RACE, N_PR_ANY,
     N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER, N_SP_MATCHALL,
-    /* RegExp's natives (src/js/regexp.c), JRE_N of them */
+    N_OBJ_HASOWN, N_OBJ_ISEXT, N_OBJ_ISSEALED, N_OBJ_GETOWNDESCS, N_OBJ_GROUPBY, N_MAP_GROUPBY,
+    /* RegExp's natives (src/js/regexp.c), JRE_N of them; Proxy's, Reflect's and the weak
+       collections' (src/js/proxy.c), JPX_N */
     N_RE_FIRST,
-    N_LAST = N_RE_FIRST + JRE_N
+    N_PX_FIRST = N_RE_FIRST + JRE_N,
+    N_LAST = N_PX_FIRST + JPX_N
 };
 
 /* ---- helpers ---- */
@@ -136,7 +139,19 @@ static jv elem_of(js_vm *vm, jv o, uint32_t i) {
     if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) return js_array_get(vm, jv_idx(o), i);
     return js_get_value(vm, o, jv_num((double)i));
 }
+/* an array as the engine keeps one (the natives' fast paths) */
 static int is_array(js_vm *vm, jv v) { return jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_ARRAY; }
+/* IsArray: an array, or a proxy whose target is one (through every proxy) */
+static int is_array_spec(js_vm *vm, jv v) {
+    for (int d = 0; d < 10000 && jv_is_obj(v); d++) {
+        uint32_t o = jv_idx(v);
+        if (vm->objs[o].kind == JK_ARRAY) return 1;
+        if (vm->objs[o].kind != JK_PROXY) return 0;
+        if (!vm->objs[o].b) { js_throw_msg(vm, vm->type_error_proto, "Cannot perform 'IsArray' on a proxy that has been revoked"); return 0; }
+        v = jv_obj(vm->objs[o].a);
+    }
+    return 0;
+}
 
 static jv callback(js_vm *vm, jv fn, jv thisv, jv a, jv b, jv c) {
     jv args[3] = { a, b, c };
@@ -360,13 +375,15 @@ static int json_write(js_vm *vm, jv v, vector<uint16_t> *o, uint32_t gap, uint32
     uint32_t ob = jv_idx(v);
     for (size_t i = 0; i < len(*stack); i++) if (at(*stack, i) == ob) { js_throw_msg(vm, vm->type_error_proto, "Converting circular structure to JSON"); return 0; }
     push_back(stack, ob);
-    if (vm->objs[ob].kind == JK_ARRAY) {
+    if (vm->objs[ob].kind == JK_ARRAY || (vm->objs[ob].kind == JK_PROXY && is_array_spec(vm, v))) {
         push_back(o, (uint16_t)'[');
-        uint32_t n = vm->objs[ob].b;
+        uint32_t n = (uint32_t)len_of(vm, v);
         for (uint32_t i = 0; i < n && !vm->throwing; i++) {
             if (i) push_back(o, (uint16_t)',');
             json_indent(o, gap, depth + 1);
-            if (!json_write(vm, js_array_get(vm, ob, i), o, gap, depth + 1, stack)) out_ascii(o, "null");
+            jv ev = elem_of(vm, v, i);
+            if (vm->throwing) break;
+            if (!json_write(vm, ev, o, gap, depth + 1, stack)) out_ascii(o, "null");
         }
         if (n) json_indent(o, gap, depth);
         push_back(o, (uint16_t)']');
@@ -501,23 +518,133 @@ static jv jp_value(js_vm *vm, jp *p, int depth) {
     return JV_UNDEF;
 }
 
-/* ---- maps and sets: entries in an array, keys then values for a map, the dead holes ---- */
+/* ---- maps and sets: entries in an array, keys then values for a map, the dead holes ----
+   Past COLL_LINEAR entries a collection keeps a hash index of its keys (c, an array of
+   entry places plus 1: 0 empty, -1 removed; x the places used, removed ones counted),
+   made at its first need and remade when half full. */
+#define COLL_LINEAR 8u
 
-static int64_t coll_find(js_vm *vm, uint32_t coll, jv key) {
+static uint32_t coll_hash(js_vm *vm, jv k) {
+    uint64_t h;
+    if (jv_is_num(k)) {
+        double d = jv_dbl(k);
+        if (d != d) return 0x9E3779B9u;
+        if (d == 0) d = 0;
+        memcpy(&h, &d, sizeof h);
+    } else if (jv_is_str(k)) return js_str_hash(vm, jv_idx(k));
+    else h = k;
+    h ^= h >> 33;
+    h *= 0xFF51AFD7ED558CCDull;
+    h ^= h >> 33;
+    return (uint32_t)h;
+}
+
+/* the index made for the collection's live entries, its size twice what they fill and more */
+static void coll_index_make(js_vm *vm, uint32_t coll) {
     uint32_t arr = vm->objs[coll].a, step = vm->objs[coll].kind == JK_MAP ? 2 : 1;
-    uint32_t n = vm->objs[arr].b;
+    uint32_t cap = 32;
+    while (cap < 4 * vm->objs[coll].b) cap *= 2;
+    uint32_t ix = js_array_new(vm, cap);
+    for (uint32_t i = 0; i < cap; i++) vm->slots[vm->objs[ix].a + i] = jv_num(0);
+    uint32_t n = vm->objs[arr].b, used = 0;
     for (uint32_t i = 0; i < n; i += step) {
         jv k = vm->slots[vm->objs[arr].a + i];
-        if (k != JV_HOLE && js_same_value_zero(vm, k, key)) return i;
+        if (k == JV_HOLE) continue;
+        uint32_t m = cap - 1;
+        for (uint32_t j = coll_hash(vm, k) & m;; j = (j + 1) & m) {
+            if (jv_dbl(vm->slots[vm->objs[ix].a + j]) == 0) { vm->slots[vm->objs[ix].a + j] = jv_num(i + 1); used++; break; }
+        }
     }
+    vm->objs[coll].c = ix;
+    vm->objs[coll].x = jv_num(used);
+}
+
+/* the key's entry place, or -1; *slot the index's place for it (where it would go when absent) */
+static int64_t coll_lookup(js_vm *vm, uint32_t coll, jv key, int64_t *slot) {
+    uint32_t arr = vm->objs[coll].a;
+    *slot = -1;
+    if (vm->objs[arr].b < COLL_LINEAR * (vm->objs[coll].kind == JK_MAP ? 2u : 1u) && !vm->objs[coll].c) {
+        uint32_t step = vm->objs[coll].kind == JK_MAP ? 2 : 1, n = vm->objs[arr].b;
+        for (uint32_t i = 0; i < n; i += step) {
+            jv k = vm->slots[vm->objs[arr].a + i];
+            if (k != JV_HOLE && js_same_value_zero(vm, k, key)) return i;
+        }
+        return -1;
+    }
+    if (!vm->objs[coll].c) coll_index_make(vm, coll);
+    uint32_t ix = vm->objs[coll].c, cap = vm->objs[ix].b, m = cap - 1;
+    int64_t first_free = -1;
+    for (uint32_t j = coll_hash(vm, key) & m, probes = 0; probes < cap; j = (j + 1) & m, probes++) {
+        double e = jv_dbl(vm->slots[vm->objs[ix].a + j]);
+        if (e == 0) { *slot = first_free >= 0 ? first_free : (int64_t)j; return -1; }
+        if (e < 0) { if (first_free < 0) first_free = j; continue; }
+        jv k = vm->slots[vm->objs[arr].a + (uint32_t)e - 1];
+        if (k != JV_HOLE && js_same_value_zero(vm, k, key)) { *slot = j; return (int64_t)e - 1; }
+    }
+    *slot = first_free;
     return -1;
+}
+
+static int64_t coll_find(js_vm *vm, uint32_t coll, jv key) {
+    int64_t slot;
+    return coll_lookup(vm, coll, key, &slot);
+}
+
+/* a new key (its value with a map's) appended, the index told */
+static void coll_append(js_vm *vm, uint32_t coll, jv key, jv val) {
+    int64_t slot;
+    if (coll_lookup(vm, coll, key, &slot) >= 0) return;
+    uint32_t arr = vm->objs[coll].a;
+    uint32_t at = vm->objs[arr].b;
+    js_array_push(vm, arr, key);
+    if (vm->objs[coll].kind == JK_MAP) js_array_push(vm, arr, val);
+    vm->objs[coll].b++;
+    uint32_t ix = vm->objs[coll].c;
+    if (!ix) return;
+    if (slot < 0 || 2 * (uint32_t)jv_dbl(vm->objs[coll].x) + 2 > vm->objs[ix].b) { coll_index_make(vm, coll); return; }
+    if (jv_dbl(vm->slots[vm->objs[ix].a + (uint32_t)slot]) == 0) vm->objs[coll].x = jv_num(jv_dbl(vm->objs[coll].x) + 1);
+    vm->slots[vm->objs[ix].a + (uint32_t)slot] = jv_num(at + 1);
+}
+
+/* the entry at place i removed: a hole in the entries, a removed mark in the index */
+static void coll_remove(js_vm *vm, uint32_t coll, jv key, uint32_t i) {
+    int64_t slot;
+    coll_lookup(vm, coll, key, &slot);
+    uint32_t arr = vm->objs[coll].a;
+    vm->slots[vm->objs[arr].a + i] = JV_HOLE;
+    if (vm->objs[coll].kind == JK_MAP) vm->slots[vm->objs[arr].a + i + 1] = JV_HOLE;
+    vm->objs[coll].b--;
+    uint32_t ix = vm->objs[coll].c;
+    if (ix && slot >= 0) vm->slots[vm->objs[ix].a + (uint32_t)slot] = jv_num(-1);
 }
 
 static uint32_t coll_new(js_vm *vm, uint32_t kind, uint32_t proto) {
     uint32_t c = js_obj_new(vm, kind, proto);
     vm->objs[c].a = js_array_new(vm, 0);
     vm->objs[c].b = 0;
+    vm->objs[c].c = 0;
+    vm->objs[c].x = jv_num(0);
     return c;
+}
+uint32_t js_coll_new(js_vm *vm, uint32_t kind, uint32_t proto) { return coll_new(vm, kind, proto); }
+
+/* the weak collections' operations over a Map's or a Set's (src/js/proxy.c) */
+jv js_coll_op(js_vm *vm, uint32_t op, uint32_t c, jv k, jv v) {
+    if (jv_is_num(k) && jv_dbl(k) == 0) k = jv_num(0);
+    int64_t at_i = coll_find(vm, c, k);
+    uint32_t arr = vm->objs[c].a;
+    switch (op) {
+    case JCOLL_GET: return at_i >= 0 && vm->objs[c].kind == JK_MAP ? vm->slots[vm->objs[arr].a + at_i + 1] : JV_UNDEF;
+    case JCOLL_HAS: return jv_bool(at_i >= 0);
+    case JCOLL_DELETE:
+        if (at_i < 0) return JV_FALSE;
+        coll_remove(vm, c, k, (uint32_t)at_i);
+        return JV_TRUE;
+    default:
+        if (at_i >= 0 && vm->objs[c].kind == JK_MAP) vm->slots[vm->objs[arr].a + at_i + 1] = v;
+        else if (at_i < 0) coll_append(vm, c, k, v);
+        return JV_UNDEF;
+    }
 }
 
 static uint32_t this_coll(js_vm *vm, jv thisv, uint32_t kind) {
@@ -683,7 +810,7 @@ static void flat_into(js_vm *vm, uint32_t out, jv src, double depth) {
     uint32_t n = (uint32_t)len_of(vm, src);
     for (uint32_t i = 0; i < n && !vm->throwing; i++) {
         jv v = elem_of(vm, src, i);
-        if (depth >= 1 && is_array(vm, v)) flat_into(vm, out, v, depth - 1);
+        if (depth >= 1 && is_array_spec(vm, v)) flat_into(vm, out, v, depth - 1);
         else js_array_push(vm, out, v);
     }
 }
@@ -1279,11 +1406,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
                 jv v = js_array_get(vm, items, i);
                 if (kind == JK_MAP) {
                     jv k = js_get_value(vm, v, jv_num(0)), val = js_get_value(vm, v, jv_num(1));
-                    int64_t at_i = coll_find(vm, c, k);
-                    uint32_t arr = vm->objs[c].a;
-                    if (at_i >= 0) js_array_set(vm, arr, (uint32_t)at_i + 1, val);
-                    else { js_array_push(vm, arr, k); js_array_push(vm, arr, val); vm->objs[c].b++; }
-                } else if (coll_find(vm, c, v) < 0) { js_array_push(vm, vm->objs[c].a, v); vm->objs[c].b++; }
+                    if (vm->throwing) return JV_HOLE;
+                    js_coll_op(vm, JCOLL_SET, c, k, val);
+                } else js_coll_op(vm, JCOLL_ADD, c, v, JV_UNDEF);
             }
         }
         return jv_obj(c);
@@ -1325,17 +1450,30 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_OBJ_GETPROTO: {
         jv o = js_to_object(vm, a0);
         if (vm->throwing) return JV_HOLE;
+        if (vm->objs[jv_idx(o)].kind == JK_PROXY) return js_proxy_get_proto(vm, jv_idx(o));
         uint32_t p = vm->objs[jv_idx(o)].proto;
         return p ? jv_obj(p) : JV_NULL;
     }
     case N_OBJ_SETPROTO: {
         if (!jv_is_obj(a0)) return a0;
         if (!jv_is_obj(a1) && a1 != JV_NULL) return js_throw_msg(vm, vm->type_error_proto, "Object prototype may only be an Object or null");
+        if (vm->objs[jv_idx(a0)].kind == JK_PROXY) {
+            jv r = js_proxy_native(vm, JPX_R_SETPROTO, callee, thisv, args, argc, newt);
+            if (vm->throwing) return JV_HOLE;
+            if (r == JV_FALSE) return js_throw_msg(vm, vm->type_error_proto, "'setPrototypeOf' on proxy: trap returned falsish");
+            return a0;
+        }
         js_set_proto(vm, jv_idx(a0), a1 == JV_NULL ? 0 : jv_idx(a1));
         return a0;
     }
     case N_OBJ_DEFPROP: case N_OBJ_DEFPROPS: {
         if (!jv_is_obj(a0)) return js_throw_msg(vm, vm->type_error_proto, "Object.defineProperty called on non-object");
+        if (id == N_OBJ_DEFPROP && vm->objs[jv_idx(a0)].kind == JK_PROXY) {
+            jv r = js_proxy_native(vm, JPX_R_DEFINE, callee, thisv, args, argc, newt);
+            if (vm->throwing) return JV_HOLE;
+            if (r == JV_FALSE) return js_throw_msg(vm, vm->type_error_proto, "'defineProperty' on proxy: trap returned falsish");
+            return a0;
+        }
         uint32_t o = jv_idx(a0);
         uint32_t keys = js_array_new(vm, 0);
         jv descs = id == N_OBJ_DEFPROPS ? a1 : JV_UNDEF;
@@ -1366,12 +1504,78 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_obj(keys);
     }
     case N_OBJ_FREEZE: case N_OBJ_PREVENTEXT:
+        if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_PROXY) {
+            js_proxy_native(vm, JPX_R_PREVENTEXT, callee, thisv, args, argc, newt);
+            return vm->throwing ? JV_HOLE : a0;
+        }
         if (jv_is_obj(a0)) {
             vm->objs[jv_idx(a0)].flags &= (uint16_t)~JO_EXTENSIBLE;
             if (id == N_OBJ_FREEZE) vm->objs[jv_idx(a0)].flags |= JO_FROZEN;
         }
         return a0;
     case N_OBJ_ISFROZEN: return jv_bool(!jv_is_obj(a0) || (vm->objs[jv_idx(a0)].flags & JO_FROZEN));
+    case N_OBJ_ISEXT: case N_OBJ_ISSEALED: {
+        if (!jv_is_obj(a0)) return jv_bool(id == N_OBJ_ISSEALED);
+        if (vm->objs[jv_idx(a0)].kind == JK_PROXY) {
+            jv r = js_proxy_native(vm, JPX_R_ISEXTENSIBLE, callee, thisv, args, argc, newt);
+            if (vm->throwing) return JV_HOLE;
+            return id == N_OBJ_ISEXT ? r : jv_bool(r == JV_FALSE);
+        }
+        int ext = (vm->objs[jv_idx(a0)].flags & JO_EXTENSIBLE) != 0;
+        return jv_bool(id == N_OBJ_ISEXT ? ext : !ext);
+    }
+    case N_OBJ_HASOWN: {
+        jv o = js_to_object(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        jv a2[1] = { a1 };
+        return js_call(vm, js_get(vm, jv_obj(vm->object_proto), js_atom_ascii(vm, "hasOwnProperty")), o, a2, 1);
+    }
+    case N_OBJ_GETOWNDESCS: {
+        jv o = js_to_object(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t keys = js_array_new(vm, 0);
+        js_own_keys(vm, jv_idx(o), 0, keys);
+        js_own_symbols(vm, jv_idx(o), keys);
+        uint32_t out = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+        jv gd = js_get(vm, jv_obj(vm->global), js_atom_ascii(vm, "Object"));
+        jv gf = js_get(vm, gd, js_atom_ascii(vm, "getOwnPropertyDescriptor"));
+        for (uint32_t i = 0; i < vm->objs[keys].b && !vm->throwing; i++) {
+            jv k = js_array_get(vm, keys, i);
+            jv av[2] = { o, k };
+            jv d = js_call(vm, gf, gd, av, 2);
+            if (vm->throwing) return JV_HOLE;
+            if (d != JV_UNDEF) js_set_value(vm, jv_obj(out), k, d);
+        }
+        return vm->throwing ? JV_HOLE : jv_obj(out);
+    }
+    case N_OBJ_GROUPBY: case N_MAP_GROUPBY: {
+        /* each value of the iterable under the key its callback gives: a null-prototype object's arrays, or a Map's */
+        if (!js_is_callable(vm, a1)) return js_type_error(vm, "is not a function", js_typeof(vm, a1));
+        uint32_t items = js_array_new(vm, 0);
+        if (!iterate_into(vm, a0, items)) return JV_HOLE;
+        uint32_t out = id == N_MAP_GROUPBY ? coll_new(vm, JK_MAP, vm->map_proto) : js_obj_new(vm, JK_PLAIN, 0);
+        for (uint32_t i = 0; i < vm->objs[items].b && !vm->throwing; i++) {
+            jv v = js_array_get(vm, items, i);
+            jv av[2] = { v, jv_num(i) };
+            jv k = js_call(vm, a1, JV_UNDEF, av, 2);
+            if (vm->throwing) return JV_HOLE;
+            jv group;
+            if (id == N_MAP_GROUPBY) {
+                group = js_coll_op(vm, JCOLL_GET, out, k, JV_UNDEF);
+                if (group == JV_UNDEF) { group = jv_obj(js_array_new(vm, 0)); js_coll_op(vm, JCOLL_SET, out, k, group); }
+            } else {
+                int kok = 1;
+                uint32_t key = js_prop_key(vm, k, &kok);
+                if (!kok) return JV_HOLE;
+                jv g;
+                uint32_t f;
+                if (js_get_own(vm, out, key, &g, &f)) group = g;
+                else { group = jv_obj(js_array_new(vm, 0)); js_define(vm, out, key, group, 0); }
+            }
+            js_array_push(vm, jv_idx(group), v);
+        }
+        return vm->throwing ? JV_HOLE : jv_obj(out);
+    }
     case N_OBJ_FROMENTRIES: {
         uint32_t o = js_obj_new(vm, JK_PLAIN, vm->object_proto);
         jv src = a0;
@@ -1451,6 +1655,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         else if (jv_is_bool(thisv)) t = "[object Boolean]";
         else if (jv_is_obj(thisv)) {
             uint32_t k = vm->objs[jv_idx(thisv)].kind;
+            if (k == JK_PROXY) { if (is_array_spec(vm, thisv)) k = JK_ARRAY; else if (vm->throwing) return JV_HOLE; }
             if (k == JK_ARRAY) t = "[object Array]";
             else if (js_is_callable(vm, thisv)) t = "[object Function]";
             else if (k == JK_ERROR) t = "[object Error]";
@@ -1524,7 +1729,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_str(s);
     }
     /* ---- Array ---- */
-    case N_ARR_ISARRAY: return jv_bool(is_array(vm, a0));
+    case N_ARR_ISARRAY: return jv_bool(is_array_spec(vm, a0));
     case N_ARR_FROM: {
         uint32_t out = js_array_new(vm, 0);
         if (jv_is_nullish(a0)) return js_throw_msg(vm, vm->type_error_proto, "Array.from needs an iterable or an array-like object");
@@ -1714,7 +1919,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             if (vm->throwing) return JV_HOLE;
             int t = id == N_AP_MAP || id == N_AP_FOREACH || id == N_AP_FLATMAP ? 0 : js_truthy(vm, r);
             if (id == N_AP_MAP) js_array_push(vm, out, r);
-            else if (id == N_AP_FLATMAP) { if (is_array(vm, r)) flat_into(vm, out, r, 0); else js_array_push(vm, out, r); }
+            else if (id == N_AP_FLATMAP) { if (is_array_spec(vm, r)) flat_into(vm, out, r, 0); else js_array_push(vm, out, r); }
             else if (id == N_AP_FILTER) { if (t) js_array_push(vm, out, v); }
             else if ((id == N_AP_FIND || id == N_AP_FINDLAST) && t) return v;
             else if ((id == N_AP_FINDINDEX || id == N_AP_FINDLASTINDEX) && t) return jv_num(i);
@@ -1850,8 +2055,10 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     default: break;
     }
     /* the rest of String.prototype: this a string */
-    /* RegExp, and String's methods over regular expressions (src/js/regexp.c) */
+    /* RegExp, and String's methods over regular expressions (src/js/regexp.c); Proxy,
+       Reflect and the weak collections (src/js/proxy.c) */
     if (id >= N_RE_FIRST && id < N_RE_FIRST + JRE_N) return js_re_native(vm, id - N_RE_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_PX_FIRST && id < N_PX_FIRST + JPX_N) return js_proxy_native(vm, id - N_PX_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2204,7 +2411,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (!c) return JV_HOLE;
         uint32_t arr = vm->objs[c].a;
         if (id == N_MP_SIZE) return jv_num(vm->objs[c].b);
-        if (id == N_MP_CLEAR) { js_array_set_length(vm, arr, 0); vm->objs[c].b = 0; return JV_UNDEF; }
+        if (id == N_MP_CLEAR) {
+            /* the entries truncated, the index dropped */
+            js_array_set_length(vm, arr, 0);
+            vm->objs[c].b = 0;
+            vm->objs[c].c = 0;
+            vm->objs[c].x = jv_num(0);
+            return JV_UNDEF;
+        }
         if (id == N_MP_KEYS) return iter_of_coll(vm, c, set ? JI_SET : JI_MAP_KEYS);
         if (id == N_MP_VALUES || id == N_SETP_VALUES) return iter_of_coll(vm, c, set ? JI_SET : JI_MAP_VALUES);
         if (id == N_MP_ENTRIES || id == N_SETP_ENTRIES) return iter_of_coll(vm, c, set ? JI_SET : JI_ENTRIES);
@@ -2224,19 +2438,17 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (id == N_MP_GET) return at_i >= 0 && !set ? vm->slots[vm->objs[arr].a + at_i + 1] : JV_UNDEF;
         if (id == N_MP_DELETE) {
             if (at_i < 0) return JV_FALSE;
-            vm->slots[vm->objs[arr].a + at_i] = JV_HOLE;
-            if (!set) vm->slots[vm->objs[arr].a + at_i + 1] = JV_HOLE;
-            vm->objs[c].b--;
+            coll_remove(vm, c, a0, (uint32_t)at_i);
             return JV_TRUE;
         }
         jv key = a0;
         if (jv_is_num(key) && jv_dbl(key) == 0) key = jv_num(0);
         if (id == N_SETP_ADD) {
-            if (at_i < 0) { js_array_push(vm, arr, key); vm->objs[c].b++; }
+            if (at_i < 0) coll_append(vm, c, key, JV_UNDEF);
             return thisv;
         }
         if (at_i >= 0) vm->slots[vm->objs[arr].a + at_i + 1] = a1;
-        else { js_array_push(vm, arr, key); js_array_push(vm, arr, a1); vm->objs[c].b++; }
+        else coll_append(vm, c, key, a1);
         return thisv;
     }
     case N_ITP_NEXT: {
@@ -2310,6 +2522,11 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, o, "isFrozen", N_OBJ_ISFROZEN, 1);
     defn(vm, o, "preventExtensions", N_OBJ_PREVENTEXT, 1);
     defn(vm, o, "seal", N_OBJ_PREVENTEXT, 1);
+    defn(vm, o, "isExtensible", N_OBJ_ISEXT, 1);
+    defn(vm, o, "isSealed", N_OBJ_ISSEALED, 1);
+    defn(vm, o, "hasOwn", N_OBJ_HASOWN, 2);
+    defn(vm, o, "getOwnPropertyDescriptors", N_OBJ_GETOWNDESCS, 1);
+    defn(vm, o, "groupBy", N_OBJ_GROUPBY, 2);
     defn(vm, o, "fromEntries", N_OBJ_FROMENTRIES, 1);
     defn(vm, o, "is", N_OBJ_IS, 2);
     uint32_t op = vm->object_proto;
@@ -2434,7 +2651,8 @@ void js_builtins_init(js_vm *vm) {
     js_re_init(vm, N_RE_FIRST);
     defn(vm, vm->string_proto, "matchAll", N_SP_MATCHALL, 1);
 
-    ctor(vm, "Map", N_MAP, 0, vm->map_proto);
+    uint32_t mapc = ctor(vm, "Map", N_MAP, 0, vm->map_proto);
+    defn(vm, mapc, "groupBy", N_MAP_GROUPBY, 2);
     uint32_t mp = vm->map_proto;
     static const char *const mpn[] = { "get", "set", "has", "delete", "clear" };
     for (uint32_t i = 0; i < 5; i++) defn(vm, mp, mpn[i], N_MP_GET + i, 1);
@@ -2455,6 +2673,7 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, stp, "entries", N_SETP_ENTRIES, 0);
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_MP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
     defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
+    js_proxy_init(vm, N_PX_FIRST);
 
     /* Symbol: the function, its registry, the well-known ones; its prototype */
     uint32_t sy = ctor(vm, "Symbol", N_SYMBOL, 0, vm->symbol_proto);
