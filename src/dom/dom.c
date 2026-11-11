@@ -41,13 +41,20 @@ dom_node_h dom_create_comment(dom_document *d, const char *data, size_t data_len
     return dom_new_data_node(d, DOM_NODE_KIND_COMMENT, DOM_OP_CREATE_COMMENT, data, data_len);
 }
 
-dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len) {
+dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len, const char *public_id,
+                              size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids) {
     dom_node_h none = { 0, 0, 0 };
-    if (dom_check_create_doctype(d, name, name_len) != DOM_OK) return none;
+    if (dom_check_create_doctype(d, name, name_len, public_id, public_id_len, system_id, system_id_len, ids) != DOM_OK)
+        return none;
     uint32_t a = names_intern(d, name, name_len);
+    amb_span pub = text_add(d, public_id, public_id_len);
+    amb_span sys = text_add(d, system_id, system_id_len);
     dom_node_h h = node_new(d);
     d->node[h.index].kind = DOM_NODE_KIND_DOCTYPE;
     d->node[h.index].name = a;
+    d->node[h.index].public_id = pub;
+    d->node[h.index].system_id = sys;
+    d->node[h.index].doctype_ids = ids;
     dom_log_mutation(d, DOM_OP_CREATE_DOCTYPE, h.index, 0);
     return h;
 }

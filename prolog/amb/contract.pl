@@ -345,6 +345,8 @@ ambc_event_type(M, Ds, T) :- ambc_field_type(M, Ds, T).
 
 ambc_param_type(_, _, text) :- !.
 ambc_param_type(_, _, stream) :- !.              % a FILE *: never requestable
+ambc_param_type(M, _, store(M2)) :- !, M2 \== M, % another module's store, by pointer: never requestable
+    catch(( amb_contract_load(M2), amb_c(M2, store(_, _)) ), _, fail).
 ambc_param_type(_, _, T) :- ambc_scalar(T), !.
 ambc_param_type(_, Ds, enum(E)) :- !, memberchk(enum(E, _), Ds).
 ambc_param_type(_, Ds, handle(R)) :- !, memberchk(handle(R, _), Ds).

@@ -25,8 +25,12 @@
 :- ensure_loaded(library(amb/contract)).
 
 amb_reason([check, Snap]) :- !,
-    amb_snapshot_load(Snap, snap(M, Doc, Rev, N)),
-    format('ok: ~w snapshot of document ~w at revision ~w, ~d facts~n', [M, Doc, Rev, N]).
+    amb_snapshot_facts(Snap, Sections, Facts),
+    length(Facts, N),
+    forall(member(snap(M, Doc, Rev, _), Sections), format('ok: ~w snapshot of document ~w at revision ~w~n', [M, Doc, Rev])),
+    length(Sections, K),
+    format('ok: ~d section(s), ~d facts~n', [K, N]),
+    amb_snapshot_load(Snap, _).
 amb_reason([query, Snap, GoalText]) :- !,
     amb_snapshot_load(Snap, _),
     amb_reason_goal(GoalText, Goal, Vs),
@@ -40,22 +44,17 @@ amb_reason([why, Snap, GoalText]) :- !,
     amb_reason_goal(GoalText, Goal, _),
     findall(Goal-P, amb_why(Goal, P), Ps),
     (   Ps == []
-    ->  format('no: ~W cannot be proved from the snapshot~n', [Goal, [quoted(true)]])
+    ->  copy_term(Goal, G2), numbervars(G2, 0, _),
+        format('no: ~W cannot be proved from the snapshot~n', [G2, [quoted(true), numbervars(true)]])
     ;   forall(member(_-P, Ps), ( amb_reason_print_proof(P, 0), format('~n', []) ))
     ).
 amb_reason([advise, Snap]) :- !,
-    amb_snapshot_load(Snap, snap(M, Doc, Rev, _)),
-    atom_concat(M, '_diag', DiagP), atom_concat(M, '_advice', AdvP),
-    DG =.. [DiagP, K, S, T],
-    findall(K-S-T, catch(DG, error(existence_error(_, _), _), fail), Diags),
-    forall(member(K1-S1-T1, Diags), format('amb_diag(~q, ~q, ~q).~n', [K1, S1, T1])),
-    AG =.. [AdvP, Op, Why],
-    findall(Op-Why, catch(AG, error(existence_error(_, _), _), fail), Advice),
-    forall(member(Op1-Why1, Advice),
-           ( format('%% ~w~n', [Why1]), format('amb_request(~w, ~w, ~q).~n', [Doc, Rev, Op1]) )).
+    amb_snapshot_load(Snap, _),
+    nb_getval(amb_snapshot, Sections),
+    forall(member(snap(M, Doc, Rev, _), Sections), amb_reason_advise(M, Doc, Rev)).
 amb_reason([diff, Old, New]) :- !,
-    amb_snapshot_facts(Old, snap(M, Doc, R1, _), F1),
-    amb_snapshot_facts(New, snap(M2, Doc2, R2, _), F2),
+    amb_snapshot_facts(Old, [snap(M, Doc, R1, _)|_], F1),
+    amb_snapshot_facts(New, [snap(M2, Doc2, R2, _)|_], F2),
     (   M == M2, Doc == Doc2 -> true
     ;   throw(error(amb_snapshot(diff_mismatch(M, Doc, M2, Doc2)), _)) ),
     msort(F1, S1), msort(F2, S2),
@@ -66,6 +65,17 @@ amb_reason([diff, Old, New]) :- !,
 amb_reason(Args) :-
     format(user_error, 'reason: unknown command ~q~nusage: check S | query S GOAL | why S GOAL | advise S | diff OLD NEW~n', [Args]),
     halt(2).
+
+%% a section's diagnostics and its requests, at its own document and revision
+amb_reason_advise(M, Doc, Rev) :-
+    atom_concat(M, '_diag', DiagP), atom_concat(M, '_advice', AdvP),
+    DG =.. [DiagP, K, S, T],
+    findall(K-S-T, catch(DG, error(existence_error(_, _), _), fail), Diags),
+    forall(member(K1-S1-T1, Diags), format('amb_diag(~q, ~q, ~q).~n', [K1, S1, T1])),
+    AG =.. [AdvP, Op, Why],
+    findall(Op-Why, catch(AG, error(existence_error(_, _), _), fail), Advice),
+    forall(member(Op1-Why1, Advice),
+           ( format('%% ~w~n', [Why1]), format('amb_request(~w, ~w, ~q).~n', [Doc, Rev, Op1]) )).
 
 amb_reason_goal(Text, Goal, Vs) :-
     catch(read_term_from_atom(Text, Goal, [variable_names(Vs)]), E,
@@ -83,33 +93,54 @@ amb_reason_error(E) :- format(user_error, 'reason: ~q~n', [E]).
 
 %% ---- loading a snapshot -----------------------------------------------------------
 
-%% the snapshot's facts asserted, its module's rules loaded
+%% the snapshot's facts asserted, each section's module's rules loaded. A snapshot
+%% is one or more sections, each a header amb_snapshot(M, Doc, Rev, FP) and M's
+%% facts: a page's DOM and its parse, say. Snap is the first section, its count
+%% the snapshot's whole
 amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
-    amb_snapshot_facts(File, snap(M, Doc, Rev, FP), Facts),
-    amb_reason_schema_facts(M, Decls),
-    forall(member(fact(F/A, _), Decls), ( functor(H, F, A), retractall(H), dynamic(F/A) )),
+    amb_snapshot_facts(File, Sections, Facts),
+    Sections = [snap(M, Doc, Rev, _)|_],
+    forall(member(snap(SM, _, _, _), Sections),
+           ( amb_reason_schema_facts(SM, Decls),
+             forall(member(fact(F/A, _), Decls), ( functor(H, F, A), retractall(H), dynamic(F/A) )) )),
     forall(member(Fact, Facts), assertz(Fact)),
     length(Facts, N),
-    nb_setval(amb_snapshot, snap(M, Doc, Rev, FP)),
-    amb_reason_rules(M).
+    nb_setval(amb_snapshot, Sections),
+    forall(member(snap(SM2, _, _, _), Sections), amb_reason_rules(SM2)).
 
-%% the snapshot read and validated, its facts in their order
-amb_snapshot_facts(File, snap(M, Doc, Rev, FP), Facts) :-
+%% the snapshot read and validated: its sections and its facts, in their order
+amb_snapshot_facts(File, Sections, Facts) :-
     (   exists_file(File) -> true ; throw(error(amb_snapshot(no_file(File)), _)) ),
     read_file_to_codes(File, Codes),
     split_string(Codes, "\n", "\r", Lines0),
     exclude(amb_reason_blank, Lines0, Lines),
-    (   Lines = [First|Rest] -> true ; throw(error(amb_snapshot(empty(File)), _)) ),
+    (   Lines = [First|_] -> true ; throw(error(amb_snapshot(empty(File)), _)) ),
     amb_reason_term(First, 1, Head),
-    (   Head = amb_snapshot(M, Doc, Rev, FP), atom(M), integer(Doc), integer(Rev), atom(FP)
-    ->  true
-    ;   throw(error(amb_snapshot(no_header(Head)), _)) ),
-    amb_reason_schema(M),
-    amb_reason_schema_decl(M, module(M, _, SchemaFP)),
-    (   FP == SchemaFP -> true
-    ;   throw(error(amb_snapshot(fingerprint(M, snapshot(FP), schema(SchemaFP))), _)) ),
-    amb_reason_schema_facts(M, Decls),
-    amb_reason_facts(Rest, 2, M, Doc, Decls, Facts).
+    (   amb_reason_header(Head) -> true ; throw(error(amb_snapshot(no_header(Head)), _)) ),
+    amb_reason_sections(Lines, 1, none, Sections, Facts).
+
+amb_reason_header(amb_snapshot(M, Doc, Rev, FP)) :- atom(M), integer(Doc), integer(Rev), atom(FP).
+
+amb_reason_sections([], _, _, [], []).
+amb_reason_sections([L|Ls], No, Cur, Sections, Facts) :-
+    amb_reason_term(L, No, T),
+    No1 is No + 1,
+    (   T = amb_snapshot(_, _, _, _)
+    ->  (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
+        T = amb_snapshot(M, Doc, Rev, FP),
+        amb_reason_schema(M),
+        amb_reason_schema_decl(M, module(M, _, SchemaFP)),
+        (   FP == SchemaFP -> true
+        ;   throw(error(amb_snapshot(fingerprint(M, snapshot(FP), schema(SchemaFP))), _)) ),
+        amb_reason_schema_facts(M, Decls),
+        Sections = [snap(M, Doc, Rev, FP)|Ss],
+        amb_reason_sections(Ls, No1, sec(M, Doc, Decls), Ss, Facts)
+    ;   Cur = sec(M, Doc, Decls),
+        (   amb_reason_fact_ok(T, Doc, M, Decls) -> true
+        ;   throw(error(amb_snapshot(undeclared_or_malformed(line(No), T)), _)) ),
+        Facts = [T|Fs],
+        amb_reason_sections(Ls, No1, Cur, Sections, Fs)
+    ).
 
 amb_reason_blank(S) :- string_length(S, 0).
 
@@ -117,14 +148,6 @@ amb_reason_term(Line, No, T) :-
     catch(read_term_from_atom(Line, T, []), _,
           throw(error(amb_snapshot(syntax(line(No), Line)), _))),
     (   ground(T) -> true ; throw(error(amb_snapshot(not_ground(line(No), T)), _)) ).
-
-amb_reason_facts([], _, _, _, _, []).
-amb_reason_facts([L|Ls], No, M, Doc, Decls, [T|Ts]) :-
-    amb_reason_term(L, No, T),
-    (   amb_reason_fact_ok(T, Doc, M, Decls) -> true
-    ;   throw(error(amb_snapshot(undeclared_or_malformed(line(No), T)), _)) ),
-    No1 is No + 1,
-    amb_reason_facts(Ls, No1, M, Doc, Decls, Ts).
 
 amb_reason_fact_ok(T, Doc, M, Decls) :-
     compound(T), functor(T, F, A),
@@ -185,12 +208,12 @@ amb_reason_prove(G, by(G, P)) :- amb_reason_is_rule(G), !, clause(G, Body), amb_
 amb_reason_prove(G, builtin(G)) :- call(G).
 
 amb_reason_is_fact(G) :-
-    nb_current(amb_snapshot, snap(M, _, _, _)),
+    nb_current(amb_snapshot, Sections), member(snap(M, _, _, _), Sections),
     functor(G, F, A), amb_reason_schema_decl(M, fact(F/A, _)), !.
 
 %% a predicate of a module's rules: the module's prefix, and clauses to read
 amb_reason_is_rule(G) :-
-    nb_current(amb_snapshot, snap(M, _, _, _)),
+    nb_current(amb_snapshot, Sections), member(snap(M, _, _, _), Sections),
     functor(G, F, _), atom_concat(M, '_', Pre), atom_concat(Pre, _, F),
     catch(clause(G, _), _, fail), !.
 

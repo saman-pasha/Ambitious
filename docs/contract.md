@@ -92,7 +92,7 @@ Each precondition names the status its failure answers:
 | `unset(P, F)` / `set(P, F)` | P's ref field F is none / is not |
 | `child_of(C, P, L)` | C is an item of P's list L |
 | `not_inclusive_ancestor(A, B, L)` | A is neither B nor, over the tree list L, an ancestor of B |
-| `valid_name(T)` | the text parameter T is a valid name (non-empty, no white space, no `<>"'/=`) |
+| `valid_name(T)` | the text parameter T is a name as the HTML tokenizer can make one: non-empty, and no white space, `/`, `>` or NUL |
 
 The generator emits `M_check_Op(store, params…)`, which tests the
 conditions: every handle's `live` first, the rest in order. The hand-written

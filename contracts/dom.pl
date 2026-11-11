@@ -22,6 +22,9 @@ dom_contract(record(node, [
     field(kind,         enum(node_kind)),
     field(name,         atom(names)),      % an element's local name, a doctype's name
     field(data,         span(text)),       % a text or comment node's data
+    field(public_id,    span(text)),       % a doctype's public identifier ...
+    field(system_id,    span(text)),       % ... and its system identifier
+    field(doctype_ids,  u8),               % which of the two the doctype has: 1 public, 2 system
     field(parent,       ref(node)),
     field(first_child,  ref(node)),
     field(last_child,   ref(node)),
@@ -74,8 +77,9 @@ dom_contract(operation(create_text, [param(data, text)], handle(node),
     [], [creates(node)], [mutates])).
 dom_contract(operation(create_comment, [param(data, text)], handle(node),
     [], [creates(node)], [mutates])).
-dom_contract(operation(create_doctype, [param(name, text)], handle(node),
-    [pre(valid_name(name), invalid_name)],
+dom_contract(operation(create_doctype, [param(name, text), param(public_id, text), param(system_id, text),
+                                        param(ids, u8)], handle(node),
+    [],
     [creates(node)], [mutates])).
 dom_contract(operation(append_child, [param(parent, handle(node)), param(child, handle(node))], status,
     [pre(live(parent), stale_handle), pre(live(child), stale_handle),

@@ -16,3 +16,5 @@ LLVM_MAJOR=18
 CLANG_MAJOR=18
 OS="Ubuntu 24.04"
 ARCH=x86_64
+# test data: html5lib's tree-construction tests, at the last commit before they moved to WPT
+HTML5LIB_TESTS_COMMIT=9329e64694e7835d0dcff9811e22856ef6ad16f9

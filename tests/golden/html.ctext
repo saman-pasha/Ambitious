@@ -1,0 +1,554 @@
+/* Ambitious: the interface of module html, generated from contracts/html.pl (fnv1a32:f359078d:3536). Do not edit. */
+typedef enum html_status { HTML_OK, HTML_STALE_HANDLE, HTML_WRONG_KIND, HTML_DOM_REFUSED, HTML_BAD_REQUEST, HTML_NOT_REQUESTABLE, HTML_STALE_REVISION } html_status;
+typedef enum html_token_kind { HTML_TOKEN_KIND_DOCTYPE, HTML_TOKEN_KIND_START_TAG, HTML_TOKEN_KIND_END_TAG, HTML_TOKEN_KIND_COMMENT, HTML_TOKEN_KIND_CHARACTERS, HTML_TOKEN_KIND_EOF } html_token_kind;
+typedef enum html_error_code { HTML_ERROR_CODE_UNEXPECTED_NULL_CHARACTER, HTML_ERROR_CODE_UNEXPECTED_QUESTION_MARK_INSTEAD_OF_TAG_NAME, HTML_ERROR_CODE_EOF_IN_TAG, HTML_ERROR_CODE_EOF_BEFORE_TAG_NAME, HTML_ERROR_CODE_INVALID_FIRST_CHARACTER_OF_TAG_NAME, HTML_ERROR_CODE_MISSING_END_TAG_NAME, HTML_ERROR_CODE_UNEXPECTED_EQUALS_SIGN_BEFORE_ATTRIBUTE_NAME, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_ATTRIBUTE_NAME, HTML_ERROR_CODE_MISSING_ATTRIBUTE_VALUE, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_UNQUOTED_ATTRIBUTE_VALUE, HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_ATTRIBUTES, HTML_ERROR_CODE_UNEXPECTED_SOLIDUS_IN_TAG, HTML_ERROR_CODE_EOF_IN_COMMENT, HTML_ERROR_CODE_ABRUPT_CLOSING_OF_EMPTY_COMMENT, HTML_ERROR_CODE_NESTED_COMMENT, HTML_ERROR_CODE_INCORRECTLY_CLOSED_COMMENT, HTML_ERROR_CODE_INCORRECTLY_OPENED_COMMENT, HTML_ERROR_CODE_EOF_IN_DOCTYPE, HTML_ERROR_CODE_MISSING_DOCTYPE_NAME, HTML_ERROR_CODE_MISSING_WHITESPACE_BEFORE_DOCTYPE_NAME, HTML_ERROR_CODE_INVALID_CHARACTER_SEQUENCE_AFTER_DOCTYPE_NAME, HTML_ERROR_CODE_MISSING_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_MISSING_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_ABRUPT_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_ABRUPT_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_UNEXPECTED_CHARACTER_AFTER_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER, HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER, HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_PUBLIC_KEYWORD, HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_SYSTEM_KEYWORD, HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS, HTML_ERROR_CODE_CDATA_IN_HTML_CONTENT, HTML_ERROR_CODE_MISSING_SEMICOLON_AFTER_CHARACTER_REFERENCE, HTML_ERROR_CODE_UNKNOWN_NAMED_CHARACTER_REFERENCE, HTML_ERROR_CODE_ABSENCE_OF_DIGITS_IN_NUMERIC_CHARACTER_REFERENCE, HTML_ERROR_CODE_NULL_CHARACTER_REFERENCE, HTML_ERROR_CODE_CHARACTER_REFERENCE_OUTSIDE_UNICODE_RANGE, HTML_ERROR_CODE_SURROGATE_CHARACTER_REFERENCE, HTML_ERROR_CODE_NONCHARACTER_CHARACTER_REFERENCE, HTML_ERROR_CODE_CONTROL_CHARACTER_REFERENCE, HTML_ERROR_CODE_DUPLICATE_ATTRIBUTE, HTML_ERROR_CODE_END_TAG_WITH_ATTRIBUTES, HTML_ERROR_CODE_END_TAG_WITH_TRAILING_SOLIDUS, HTML_ERROR_CODE_EOF_IN_SCRIPT_HTML_COMMENT_LIKE_TEXT, HTML_ERROR_CODE_NON_VOID_HTML_ELEMENT_START_TAG_WITH_TRAILING_SOLIDUS, HTML_ERROR_CODE_TREE_CONSTRUCTION } html_error_code;
+typedef enum html_op { HTML_OP_TOKENIZE, HTML_OP_BUILD, HTML_OP_PARSE, HTML_OP_PARSE_FRAGMENT } html_op;
+typedef struct html_token_h { uint32_t doc, index, gen; } html_token_h;
+typedef struct html_tattr_h { uint32_t doc, index, gen; } html_tattr_h;
+typedef struct html_error_h { uint32_t doc, index, gen; } html_error_h;
+typedef struct html_token { uint32_t gen, live, free_next; html_token_kind kind; amb_span name; amb_span data; uint32_t first_attr; uint32_t last_attr; uint8_t self_closing; uint8_t force_quirks; amb_span public_id; amb_span system_id; uint8_t ids; uint32_t line; uint32_t col; } html_token;
+typedef struct html_tattr { uint32_t gen, live, free_next; uint32_t token; amb_span name; amb_span value; uint32_t next; } html_tattr;
+typedef struct html_error { uint32_t gen, live, free_next; html_error_code code; uint32_t line; uint32_t col; amb_span detail; } html_error;
+typedef struct html_store_tag { char unused; } html_store_tag;
+typedef store<html_store_tag> html_parser;
+extern const char html_fingerprint[];
+const char *html_status_name(html_status x);
+const char *html_op_name(html_op x);
+const char *html_token_kind_name(html_token_kind x);
+const char *html_error_code_name(html_error_code x);
+void html_init(html_parser *d, uint32_t id);
+uint64_t html_revision(const html_parser *d);
+html_status html_tokenize(html_parser *d, const char *src, size_t src_len);
+html_status html_build(html_parser *d, dom_document *doc);
+html_status html_parse(html_parser *d, dom_document *doc, const char *src, size_t src_len);
+html_status html_parse_fragment(html_parser *d, dom_document *doc, const char *context, size_t context_len, const char *src, size_t src_len);
+html_status html_check_tokenize(const html_parser *d, const char *src, size_t src_len);
+html_status html_check_build(const html_parser *d, dom_document *doc);
+html_status html_check_parse(const html_parser *d, dom_document *doc, const char *src, size_t src_len);
+html_status html_check_parse_fragment(const html_parser *d, dom_document *doc, const char *context, size_t context_len, const char *src, size_t src_len);
+html_tattr_h html_attributes_first(const html_parser *d, html_token_h h);
+html_tattr_h html_attributes_next(const html_parser *d, html_tattr_h h);
+html_token_h html_attributes_up(const html_parser *d, html_tattr_h h);
+html_tattr_h html_attributes_last(const html_parser *d, html_token_h h);
+size_t html_attributes_count(const html_parser *d, html_token_h h);
+int html_check_invariants(const html_parser *d, FILE *report);
+void html_export(const html_parser *d, FILE *out);
+html_status html_dispatch(html_parser *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module html, generated from contracts/html.pl. Do not edit. */
+const char *html_status_name(html_status x) {
+    switch (x) {
+    case HTML_OK: return "ok";
+    case HTML_STALE_HANDLE: return "stale_handle";
+    case HTML_WRONG_KIND: return "wrong_kind";
+    case HTML_DOM_REFUSED: return "dom_refused";
+    case HTML_BAD_REQUEST: return "bad_request";
+    case HTML_NOT_REQUESTABLE: return "not_requestable";
+    case HTML_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *html_op_name(html_op x) {
+    switch (x) {
+    case HTML_OP_TOKENIZE: return "tokenize";
+    case HTML_OP_BUILD: return "build";
+    case HTML_OP_PARSE: return "parse";
+    case HTML_OP_PARSE_FRAGMENT: return "parse_fragment";
+    }
+    return "?";
+}
+const char *html_token_kind_name(html_token_kind x) {
+    switch (x) {
+    case HTML_TOKEN_KIND_DOCTYPE: return "doctype";
+    case HTML_TOKEN_KIND_START_TAG: return "start_tag";
+    case HTML_TOKEN_KIND_END_TAG: return "end_tag";
+    case HTML_TOKEN_KIND_COMMENT: return "comment";
+    case HTML_TOKEN_KIND_CHARACTERS: return "characters";
+    case HTML_TOKEN_KIND_EOF: return "eof";
+    }
+    return "?";
+}
+const char *html_error_code_name(html_error_code x) {
+    switch (x) {
+    case HTML_ERROR_CODE_UNEXPECTED_NULL_CHARACTER: return "unexpected_null_character";
+    case HTML_ERROR_CODE_UNEXPECTED_QUESTION_MARK_INSTEAD_OF_TAG_NAME: return "unexpected_question_mark_instead_of_tag_name";
+    case HTML_ERROR_CODE_EOF_IN_TAG: return "eof_in_tag";
+    case HTML_ERROR_CODE_EOF_BEFORE_TAG_NAME: return "eof_before_tag_name";
+    case HTML_ERROR_CODE_INVALID_FIRST_CHARACTER_OF_TAG_NAME: return "invalid_first_character_of_tag_name";
+    case HTML_ERROR_CODE_MISSING_END_TAG_NAME: return "missing_end_tag_name";
+    case HTML_ERROR_CODE_UNEXPECTED_EQUALS_SIGN_BEFORE_ATTRIBUTE_NAME: return "unexpected_equals_sign_before_attribute_name";
+    case HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_ATTRIBUTE_NAME: return "unexpected_character_in_attribute_name";
+    case HTML_ERROR_CODE_MISSING_ATTRIBUTE_VALUE: return "missing_attribute_value";
+    case HTML_ERROR_CODE_UNEXPECTED_CHARACTER_IN_UNQUOTED_ATTRIBUTE_VALUE: return "unexpected_character_in_unquoted_attribute_value";
+    case HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_ATTRIBUTES: return "missing_whitespace_between_attributes";
+    case HTML_ERROR_CODE_UNEXPECTED_SOLIDUS_IN_TAG: return "unexpected_solidus_in_tag";
+    case HTML_ERROR_CODE_EOF_IN_COMMENT: return "eof_in_comment";
+    case HTML_ERROR_CODE_ABRUPT_CLOSING_OF_EMPTY_COMMENT: return "abrupt_closing_of_empty_comment";
+    case HTML_ERROR_CODE_NESTED_COMMENT: return "nested_comment";
+    case HTML_ERROR_CODE_INCORRECTLY_CLOSED_COMMENT: return "incorrectly_closed_comment";
+    case HTML_ERROR_CODE_INCORRECTLY_OPENED_COMMENT: return "incorrectly_opened_comment";
+    case HTML_ERROR_CODE_EOF_IN_DOCTYPE: return "eof_in_doctype";
+    case HTML_ERROR_CODE_MISSING_DOCTYPE_NAME: return "missing_doctype_name";
+    case HTML_ERROR_CODE_MISSING_WHITESPACE_BEFORE_DOCTYPE_NAME: return "missing_whitespace_before_doctype_name";
+    case HTML_ERROR_CODE_INVALID_CHARACTER_SEQUENCE_AFTER_DOCTYPE_NAME: return "invalid_character_sequence_after_doctype_name";
+    case HTML_ERROR_CODE_MISSING_DOCTYPE_PUBLIC_IDENTIFIER: return "missing_doctype_public_identifier";
+    case HTML_ERROR_CODE_MISSING_DOCTYPE_SYSTEM_IDENTIFIER: return "missing_doctype_system_identifier";
+    case HTML_ERROR_CODE_ABRUPT_DOCTYPE_PUBLIC_IDENTIFIER: return "abrupt_doctype_public_identifier";
+    case HTML_ERROR_CODE_ABRUPT_DOCTYPE_SYSTEM_IDENTIFIER: return "abrupt_doctype_system_identifier";
+    case HTML_ERROR_CODE_UNEXPECTED_CHARACTER_AFTER_DOCTYPE_SYSTEM_IDENTIFIER: return "unexpected_character_after_doctype_system_identifier";
+    case HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER: return "missing_quote_before_doctype_public_identifier";
+    case HTML_ERROR_CODE_MISSING_QUOTE_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER: return "missing_quote_before_doctype_system_identifier";
+    case HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_PUBLIC_KEYWORD: return "missing_whitespace_after_doctype_public_keyword";
+    case HTML_ERROR_CODE_MISSING_WHITESPACE_AFTER_DOCTYPE_SYSTEM_KEYWORD: return "missing_whitespace_after_doctype_system_keyword";
+    case HTML_ERROR_CODE_MISSING_WHITESPACE_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS: return "missing_whitespace_between_doctype_public_and_system_identifiers";
+    case HTML_ERROR_CODE_CDATA_IN_HTML_CONTENT: return "cdata_in_html_content";
+    case HTML_ERROR_CODE_MISSING_SEMICOLON_AFTER_CHARACTER_REFERENCE: return "missing_semicolon_after_character_reference";
+    case HTML_ERROR_CODE_UNKNOWN_NAMED_CHARACTER_REFERENCE: return "unknown_named_character_reference";
+    case HTML_ERROR_CODE_ABSENCE_OF_DIGITS_IN_NUMERIC_CHARACTER_REFERENCE: return "absence_of_digits_in_numeric_character_reference";
+    case HTML_ERROR_CODE_NULL_CHARACTER_REFERENCE: return "null_character_reference";
+    case HTML_ERROR_CODE_CHARACTER_REFERENCE_OUTSIDE_UNICODE_RANGE: return "character_reference_outside_unicode_range";
+    case HTML_ERROR_CODE_SURROGATE_CHARACTER_REFERENCE: return "surrogate_character_reference";
+    case HTML_ERROR_CODE_NONCHARACTER_CHARACTER_REFERENCE: return "noncharacter_character_reference";
+    case HTML_ERROR_CODE_CONTROL_CHARACTER_REFERENCE: return "control_character_reference";
+    case HTML_ERROR_CODE_DUPLICATE_ATTRIBUTE: return "duplicate_attribute";
+    case HTML_ERROR_CODE_END_TAG_WITH_ATTRIBUTES: return "end_tag_with_attributes";
+    case HTML_ERROR_CODE_END_TAG_WITH_TRAILING_SOLIDUS: return "end_tag_with_trailing_solidus";
+    case HTML_ERROR_CODE_EOF_IN_SCRIPT_HTML_COMMENT_LIKE_TEXT: return "eof_in_script_html_comment_like_text";
+    case HTML_ERROR_CODE_NON_VOID_HTML_ELEMENT_START_TAG_WITH_TRAILING_SOLIDUS: return "non_void_html_element_start_tag_with_trailing_solidus";
+    case HTML_ERROR_CODE_TREE_CONSTRUCTION: return "tree_construction";
+    }
+    return "?";
+}
+
+const char html_fingerprint[] = "fnv1a32:f359078d:3536";
+void html_init(html_parser *d, uint32_t id) {
+    if (d->token_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    bytes_add(d, "", 0);
+}
+uint64_t html_revision(const html_parser *d) { return d->revision; }
+html_status html_check_tokenize(const html_parser *d, const char *src, size_t src_len)
+{
+    return HTML_OK;
+}
+
+html_status html_check_build(const html_parser *d, dom_document *doc)
+{
+    return HTML_OK;
+}
+
+html_status html_check_parse(const html_parser *d, dom_document *doc, const char *src, size_t src_len)
+{
+    return HTML_OK;
+}
+
+html_status html_check_parse_fragment(const html_parser *d, dom_document *doc, const char *context, size_t context_len, const char *src, size_t src_len)
+{
+    return HTML_OK;
+}
+
+html_tattr_h html_attributes_first(const html_parser *d, html_token_h h) {
+    html_tattr_h none = { 0, 0, 0 };
+    if (!token_live(d, h)) return none;
+    return tattr_handle(d, d->token[h.index].first_attr);
+}
+html_tattr_h html_attributes_next(const html_parser *d, html_tattr_h h) {
+    html_tattr_h none = { 0, 0, 0 };
+    if (!tattr_live(d, h)) return none;
+    return tattr_handle(d, d->tattr[h.index].next);
+}
+html_token_h html_attributes_up(const html_parser *d, html_tattr_h h) {
+    html_token_h none = { 0, 0, 0 };
+    if (!tattr_live(d, h)) return none;
+    return token_handle(d, d->tattr[h.index].token);
+}
+html_tattr_h html_attributes_last(const html_parser *d, html_token_h h) {
+    html_tattr_h none = { 0, 0, 0 };
+    if (!token_live(d, h)) return none;
+    return tattr_handle(d, d->token[h.index].last_attr);
+}
+size_t html_attributes_count(const html_parser *d, html_token_h h) {
+    if (!token_live(d, h)) return 0;
+    return attributes_count(d, h.index);
+}
+
+int html_check_invariants(const html_parser *d, FILE *report) {
+    int bad = 0;
+    /* attr_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->tattr_len ? d->tattr_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->token_len; o++) {
+            if (!d->token[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->token[o].first_attr; i; i = d->tattr[i].next) {
+                if (i >= d->tattr_len || !d->tattr[i].live || d->tattr[i].token != o || ++steps > d->tattr_len || seen[i]) { bad++; amb_report(report, "html", "attr_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->token[o].last_attr != prev) { bad++; amb_report(report, "html", "attr_links", o); }
+        }
+        for (uint32_t i = 1; i < d->tattr_len; i++)
+            if (d->tattr[i].live && d->tattr[i].token && seen[i] != d->tattr[i].token) { bad++; amb_report(report, "html", "attr_links", i); }
+        free(seen);
+    }
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->token_len; i++) {
+            uint32_t r = d->token[i].first_attr;
+            if (d->token[i].live && r && (r >= d->tattr_len || !d->tattr[r].live)) { bad++; amb_report(report, "html", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->token_len; i++) {
+            uint32_t r = d->token[i].last_attr;
+            if (d->token[i].live && r && (r >= d->tattr_len || !d->tattr[r].live)) { bad++; amb_report(report, "html", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->tattr_len; i++) {
+            uint32_t r = d->tattr[i].token;
+            if (d->tattr[i].live && r && (r >= d->token_len || !d->token[r].live)) { bad++; amb_report(report, "html", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->tattr_len; i++) {
+            uint32_t r = d->tattr[i].next;
+            if (d->tattr[i].live && r && (r >= d->tattr_len || !d->tattr[r].live)) { bad++; amb_report(report, "html", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void html_export(const html_parser *d, FILE *out) {
+    fprintf(out, "amb_snapshot(html, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, html_fingerprint);
+
+
+    for (uint32_t i = 1; i < d->error_len; i++) {
+        if (!d->error[i].live) continue;
+        if (1) { fputs("html_error(", out); amb_put_handle(out, "err", d->id, i, d->error[i].gen); fputs(",", out); fputs(html_error_code_name(d->error[i].code), out); fputs(",", out); fprintf(out, "%lld", (long long)d->error[i].line); fputs(",", out); fprintf(out, "%lld", (long long)d->error[i].col); fputs(",", out); bytes_put(d, out, d->error[i].detail); fputs(").\n", out); }
+    }
+}
+html_status html_dispatch(html_parser *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    html_status st = HTML_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return HTML_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return HTML_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return HTML_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return HTML_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return HTML_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return HTML_STALE_REVISION; }
+
+    if (amb_name_is(name, name_len, "tokenize") || amb_name_is(name, name_len, "build") || amb_name_is(name, name_len, "parse") || amb_name_is(name, name_len, "parse_fragment")) { amb_result(report, name, "not_requestable", d->revision); return HTML_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module html, an instance of store<html_store_tag>: one own buffer a part */
+typedef struct store_html_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t token_len, token_cap;
+    uint32_t token_free;
+    own html_token *token;
+    size_t tattr_len, tattr_cap;
+    uint32_t tattr_free;
+    own html_tattr *tattr;
+    size_t error_len, error_cap;
+    uint32_t error_free;
+    own html_error *error;
+    size_t bytes_len, bytes_cap;
+    own char *bytes;
+} store_html_store_tag;
+void store_html_store_tag_drop(store_html_store_tag *s) { free(s->token); free(s->tattr); free(s->error); free(s->bytes); }
+static void store_html_store_tag__token_grow(store_html_store_tag *s) {
+    size_t c = s->token_cap ? 2 * s->token_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->token = (html_token *)realloc(s->token, c * sizeof(html_token));
+    if (!s->token) abort();
+    s->token_cap = c;
+}
+html_token_h store_html_store_tag_token_new(store_html_store_tag *s) {
+    uint32_t i;
+    if (s->token_free) {
+        i = s->token_free;
+        s->token_free = s->token[i].free_next;
+    } else {
+        if (s->token_len == 0) {
+            if (s->token_cap == 0) store_html_store_tag__token_grow(s);
+            memset(&s->token[0], 0, sizeof(html_token));
+            s->token_len = 1;
+        }
+        if (s->token_len == s->token_cap) store_html_store_tag__token_grow(s);
+        i = (uint32_t)s->token_len;
+        s->token_len++;
+        s->token[i].gen = 0;
+    }
+    uint32_t g = s->token[i].gen;
+    memset(&s->token[i], 0, sizeof(html_token));
+    s->token[i].gen = g;
+    s->token[i].live = 1;
+    html_token_h h = { s->id, i, g };
+    return h;
+}
+int store_html_store_tag_token_live(const store_html_store_tag *s, html_token_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->token_len && s->token[h.index].live && s->token[h.index].gen == h.gen;
+}
+html_token store_html_store_tag_token_get(const store_html_store_tag *s, html_token_h h) {
+    if (!store_html_store_tag_token_live(s, h)) abort();
+    return s->token[h.index];
+}
+html_token *store_html_store_tag_token_ref(const store_html_store_tag *s, html_token_h h) tie s {
+    if (!store_html_store_tag_token_live(s, h)) abort();
+    return &s->token[h.index];
+}
+html_token *store_html_store_tag_token_slot(const store_html_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->token_len) abort();
+    return &s->token[i];
+}
+html_token_h store_html_store_tag_token_handle(const store_html_store_tag *s, uint32_t i) {
+    html_token_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->token_len && s->token[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->token[i].gen;
+    }
+    return h;
+}
+void store_html_store_tag_token_free(store_html_store_tag *s, html_token_h h) {
+    if (!store_html_store_tag_token_live(s, h)) abort();
+    s->token[h.index].live = 0;
+    s->token[h.index].gen++;
+    s->token[h.index].free_next = s->token_free;
+    s->token_free = h.index;
+}
+size_t store_html_store_tag_token_len(const store_html_store_tag *s) { return s->token_len; }
+size_t store_html_store_tag_token_count(const store_html_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->token_len; i++) if (s->token[i].live) n++;
+    return n;
+}
+static void store_html_store_tag__tattr_grow(store_html_store_tag *s) {
+    size_t c = s->tattr_cap ? 2 * s->tattr_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->tattr = (html_tattr *)realloc(s->tattr, c * sizeof(html_tattr));
+    if (!s->tattr) abort();
+    s->tattr_cap = c;
+}
+html_tattr_h store_html_store_tag_tattr_new(store_html_store_tag *s) {
+    uint32_t i;
+    if (s->tattr_free) {
+        i = s->tattr_free;
+        s->tattr_free = s->tattr[i].free_next;
+    } else {
+        if (s->tattr_len == 0) {
+            if (s->tattr_cap == 0) store_html_store_tag__tattr_grow(s);
+            memset(&s->tattr[0], 0, sizeof(html_tattr));
+            s->tattr_len = 1;
+        }
+        if (s->tattr_len == s->tattr_cap) store_html_store_tag__tattr_grow(s);
+        i = (uint32_t)s->tattr_len;
+        s->tattr_len++;
+        s->tattr[i].gen = 0;
+    }
+    uint32_t g = s->tattr[i].gen;
+    memset(&s->tattr[i], 0, sizeof(html_tattr));
+    s->tattr[i].gen = g;
+    s->tattr[i].live = 1;
+    html_tattr_h h = { s->id, i, g };
+    return h;
+}
+int store_html_store_tag_tattr_live(const store_html_store_tag *s, html_tattr_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->tattr_len && s->tattr[h.index].live && s->tattr[h.index].gen == h.gen;
+}
+html_tattr store_html_store_tag_tattr_get(const store_html_store_tag *s, html_tattr_h h) {
+    if (!store_html_store_tag_tattr_live(s, h)) abort();
+    return s->tattr[h.index];
+}
+html_tattr *store_html_store_tag_tattr_ref(const store_html_store_tag *s, html_tattr_h h) tie s {
+    if (!store_html_store_tag_tattr_live(s, h)) abort();
+    return &s->tattr[h.index];
+}
+html_tattr *store_html_store_tag_tattr_slot(const store_html_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->tattr_len) abort();
+    return &s->tattr[i];
+}
+html_tattr_h store_html_store_tag_tattr_handle(const store_html_store_tag *s, uint32_t i) {
+    html_tattr_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->tattr_len && s->tattr[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->tattr[i].gen;
+    }
+    return h;
+}
+void store_html_store_tag_tattr_free(store_html_store_tag *s, html_tattr_h h) {
+    if (!store_html_store_tag_tattr_live(s, h)) abort();
+    s->tattr[h.index].live = 0;
+    s->tattr[h.index].gen++;
+    s->tattr[h.index].free_next = s->tattr_free;
+    s->tattr_free = h.index;
+}
+size_t store_html_store_tag_tattr_len(const store_html_store_tag *s) { return s->tattr_len; }
+size_t store_html_store_tag_tattr_count(const store_html_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->tattr_len; i++) if (s->tattr[i].live) n++;
+    return n;
+}
+static void store_html_store_tag__error_grow(store_html_store_tag *s) {
+    size_t c = s->error_cap ? 2 * s->error_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->error = (html_error *)realloc(s->error, c * sizeof(html_error));
+    if (!s->error) abort();
+    s->error_cap = c;
+}
+html_error_h store_html_store_tag_error_new(store_html_store_tag *s) {
+    uint32_t i;
+    if (s->error_free) {
+        i = s->error_free;
+        s->error_free = s->error[i].free_next;
+    } else {
+        if (s->error_len == 0) {
+            if (s->error_cap == 0) store_html_store_tag__error_grow(s);
+            memset(&s->error[0], 0, sizeof(html_error));
+            s->error_len = 1;
+        }
+        if (s->error_len == s->error_cap) store_html_store_tag__error_grow(s);
+        i = (uint32_t)s->error_len;
+        s->error_len++;
+        s->error[i].gen = 0;
+    }
+    uint32_t g = s->error[i].gen;
+    memset(&s->error[i], 0, sizeof(html_error));
+    s->error[i].gen = g;
+    s->error[i].live = 1;
+    html_error_h h = { s->id, i, g };
+    return h;
+}
+int store_html_store_tag_error_live(const store_html_store_tag *s, html_error_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->error_len && s->error[h.index].live && s->error[h.index].gen == h.gen;
+}
+html_error store_html_store_tag_error_get(const store_html_store_tag *s, html_error_h h) {
+    if (!store_html_store_tag_error_live(s, h)) abort();
+    return s->error[h.index];
+}
+html_error *store_html_store_tag_error_ref(const store_html_store_tag *s, html_error_h h) tie s {
+    if (!store_html_store_tag_error_live(s, h)) abort();
+    return &s->error[h.index];
+}
+html_error *store_html_store_tag_error_slot(const store_html_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->error_len) abort();
+    return &s->error[i];
+}
+html_error_h store_html_store_tag_error_handle(const store_html_store_tag *s, uint32_t i) {
+    html_error_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->error_len && s->error[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->error[i].gen;
+    }
+    return h;
+}
+void store_html_store_tag_error_free(store_html_store_tag *s, html_error_h h) {
+    if (!store_html_store_tag_error_live(s, h)) abort();
+    s->error[h.index].live = 0;
+    s->error[h.index].gen++;
+    s->error[h.index].free_next = s->error_free;
+    s->error_free = h.index;
+}
+size_t store_html_store_tag_error_len(const store_html_store_tag *s) { return s->error_len; }
+size_t store_html_store_tag_error_count(const store_html_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->error_len; i++) if (s->error[i].live) n++;
+    return n;
+}
+static void store_html_store_tag__bytes_room(store_html_store_tag *s, size_t n) {
+    if (s->bytes_len + n <= s->bytes_cap) return;
+    size_t c = s->bytes_cap ? s->bytes_cap : 256;
+    while (c < s->bytes_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->bytes = (char *)realloc(s->bytes, c);
+    if (!s->bytes) abort();
+    s->bytes_cap = c;
+}
+amb_span store_html_store_tag_bytes_add(store_html_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->bytes_len == 0) {
+        store_html_store_tag__bytes_room(s, 1);
+        s->bytes[0] = 0;
+        s->bytes_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->bytes && p < s->bytes + s->bytes_len;
+    size_t from = inside ? (size_t)(p - s->bytes) : 0;
+    store_html_store_tag__bytes_room(s, n);
+    if (inside) memmove(s->bytes + s->bytes_len, s->bytes + from, n);
+    else memcpy(s->bytes + s->bytes_len, p, n);
+    sp.off = (uint32_t)s->bytes_len;
+    sp.len = (uint32_t)n;
+    s->bytes_len += n;
+    return sp;
+}
+const char *store_html_store_tag_bytes_ptr(const store_html_store_tag *s, amb_span sp) tie s {
+    if (s->bytes_len == 0 || (size_t)sp.off + sp.len > s->bytes_len) abort();
+    return s->bytes + sp.off;
+}
+int store_html_store_tag_bytes_eq(const store_html_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->bytes_len) abort();
+    return memcmp(s->bytes + sp.off, p, n) == 0;
+}
+void store_html_store_tag_bytes_put(const store_html_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->bytes_len) abort();
+    amb_put_qatom(out, s->bytes + sp.off, sp.len);
+}
+size_t store_html_store_tag_bytes_size(const store_html_store_tag *s) { return s->bytes_len; }
+void store_html_store_tag_attributes_append(store_html_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->token_len || i >= s->tattr_len) abort();
+    uint32_t t = s->token[o].last_attr;
+    s->tattr[i].token = o;
+    s->tattr[i].next = 0;
+    if (t) s->tattr[t].next = i; else s->token[o].first_attr = i;
+    s->token[o].last_attr = i;
+}
+
+void store_html_store_tag_attributes_insert_before(store_html_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_html_store_tag_attributes_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->token_len || i >= s->tattr_len || b >= s->tattr_len || s->tattr[b].token != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->token[o].first_attr; x && x != b; x = s->tattr[x].next) p = x;
+    s->tattr[i].token = o;
+    s->tattr[i].next = b;
+    if (p) s->tattr[p].next = i; else s->token[o].first_attr = i;
+}
+
+void store_html_store_tag_attributes_unlink(store_html_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->tattr_len) abort();
+    uint32_t o = s->tattr[i].token;
+    if (o == 0) return;
+    if (o >= s->token_len) abort();
+    uint32_t n = s->tattr[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->token[o].first_attr; x && x != i; x = s->tattr[x].next) p = x;
+    if (p) s->tattr[p].next = n; else s->token[o].first_attr = n;
+    if (s->token[o].last_attr == i) s->token[o].last_attr = p;
+    s->tattr[i].token = 0;
+    s->tattr[i].next = 0;
+}
+
+uint32_t store_html_store_tag_attributes_first(const store_html_store_tag *s, uint32_t o) { if (o >= s->token_len) abort(); return s->token[o].first_attr; }
+
+uint32_t store_html_store_tag_attributes_next(const store_html_store_tag *s, uint32_t i) { if (i >= s->tattr_len) abort(); return s->tattr[i].next; }
+
+uint32_t store_html_store_tag_attributes_up(const store_html_store_tag *s, uint32_t i) { if (i >= s->tattr_len) abort(); return s->tattr[i].token; }
+
+size_t store_html_store_tag_attributes_count(const store_html_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->token_len) abort();
+    for (uint32_t i = s->token[o].first_attr; i; i = s->tattr[i].next) {
+        n++;
+        if (n > s->tattr_len) abort();
+    }
+    return n;
+}
+

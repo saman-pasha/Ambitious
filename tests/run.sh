@@ -66,6 +66,21 @@ reason)
     if cmp -s "tests/reason/$n.expect" "$OUT/$n.reason"; then pass "$n prints its .expect"
     else fail "$n differs from its .expect:"; diff "tests/reason/$n.expect" "$OUT/$n.reason" | head -20; fi
   done ;;
+html)
+  if ! timeout 300 "$AMB_CICILANG" $CICILANG_FLAGS -O2 tests/html/html5lib.c $AMB_OBJS -o "$B/test-html5lib" > "$OUT/html5lib.build" 2>&1 < /dev/null; then
+    fail "the html5lib runner does not build:"; head -5 "$OUT/html5lib.build"
+  else
+    timeout 300 "$B/test-html5lib" tests/html/basic.dat > "$OUT/basic.html" 2>&1 < /dev/null
+    if cmp -s tests/html/basic.expect "$OUT/basic.html"; then pass "the HTML fixtures: $(tail -1 "$OUT/basic.html")"
+    else fail "the HTML fixtures differ from tests/html/basic.expect:"; diff tests/html/basic.expect "$OUT/basic.html" | head -20; fi
+    if [ -d "$AMB_HTML5LIB" ]; then
+      timeout 600 "$B/test-html5lib" "$AMB_HTML5LIB"/*.dat > "$OUT/html5lib.txt" 2>&1 < /dev/null
+      if cmp -s tests/html/html5lib.expect "$OUT/html5lib.txt"; then pass "html5lib: $(tail -1 "$OUT/html5lib.txt")"
+      else fail "html5lib's results differ from tests/html/html5lib.expect (a change, better or worse, is recorded there):"; diff tests/html/html5lib.expect "$OUT/html5lib.txt" | head -20; fi
+    else
+      printf 'SKIP html5lib: no tests at %s (toolchain/bootstrap.sh checks them out; or set AMB_HTML5LIB)\n' "$AMB_HTML5LIB"
+    fi
+  fi ;;
 integ)
   for t in tests/integ/*.sh; do [ -e "$t" ] || continue
     n=$(basename "$t" .sh)

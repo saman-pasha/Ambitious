@@ -1,10 +1,10 @@
-/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:9e7199f0:6383). Do not edit. */
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:3c8be02d:6485). Do not edit. */
 typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
 typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT } dom_node_kind;
 typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_SERIALIZE } dom_op;
 typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
 typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
-typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; amb_span data; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; } dom_node;
+typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; amb_span data; amb_span public_id; amb_span system_id; uint8_t doctype_ids; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; } dom_node;
 typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; amb_span value; uint32_t next; } dom_attr;
 typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint64_t revision; } dom_mutation;
 typedef struct dom_store_tag { char unused; } dom_store_tag;
@@ -19,7 +19,7 @@ dom_node_h dom_root(const dom_document *d);
 dom_node_h dom_create_element(dom_document *d, const char *name, size_t name_len);
 dom_node_h dom_create_text(dom_document *d, const char *data, size_t data_len);
 dom_node_h dom_create_comment(dom_document *d, const char *data, size_t data_len);
-dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len);
+dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len, const char *public_id, size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids);
 dom_status dom_append_child(dom_document *d, dom_node_h parent, dom_node_h child);
 dom_status dom_insert_before(dom_document *d, dom_node_h parent, dom_node_h child, dom_node_h before);
 dom_status dom_remove_child(dom_document *d, dom_node_h parent, dom_node_h child);
@@ -31,7 +31,7 @@ dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len);
 dom_status dom_check_create_text(const dom_document *d, const char *data, size_t data_len);
 dom_status dom_check_create_comment(const dom_document *d, const char *data, size_t data_len);
-dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len);
+dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len, const char *public_id, size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids);
 dom_status dom_check_append_child(const dom_document *d, dom_node_h parent, dom_node_h child);
 dom_status dom_check_insert_before(const dom_document *d, dom_node_h parent, dom_node_h child, dom_node_h before);
 dom_status dom_check_remove_child(const dom_document *d, dom_node_h parent, dom_node_h child);
@@ -100,7 +100,7 @@ const char *dom_node_kind_name(dom_node_kind x) {
     return "?";
 }
 
-const char dom_fingerprint[] = "fnv1a32:9e7199f0:6383";
+const char dom_fingerprint[] = "fnv1a32:3c8be02d:6485";
 void dom_init(dom_document *d, uint32_t id) {
     if (d->node_len != 0) abort();
     d->id = id;
@@ -127,9 +127,8 @@ dom_status dom_check_create_comment(const dom_document *d, const char *data, siz
     return DOM_OK;
 }
 
-dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len)
+dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len, const char *public_id, size_t public_id_len, const char *system_id, size_t system_id_len, uint8_t ids)
 {
-    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
     return DOM_OK;
 }
 

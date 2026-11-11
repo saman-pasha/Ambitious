@@ -1,0 +1,267 @@
+#data
+Hello
+#errors
+#comment implied html, head and body around text
+#document
+| <html>
+|   <head>
+|   <body>
+|     "Hello"
+
+#data
+<p>one<div>two</div>three
+#errors
+#comment a block element closes the open paragraph
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "one"
+|     <div>
+|       "two"
+|     "three"
+
+#data
+<ul><li>a<li>b</ul><ol><li>c</ol>
+#errors
+#comment list items close each other
+#document
+| <html>
+|   <head>
+|   <body>
+|     <ul>
+|       <li>
+|         "a"
+|       <li>
+|         "b"
+|     <ol>
+|       <li>
+|         "c"
+
+#data
+<dl><dt>term<dd>def<dt>term2</dl>
+#errors
+#comment dd and dt close each other
+#document
+| <html>
+|   <head>
+|   <body>
+|     <dl>
+|       <dt>
+|         "term"
+|       <dd>
+|         "def"
+|       <dt>
+|         "term2"
+
+#data
+<b>bold<i>both</b>italic</i>
+#errors
+#comment misnested formatting: the adoption agency
+#document
+| <html>
+|   <head>
+|   <body>
+|     <b>
+|       "bold"
+|       <i>
+|         "both"
+|     <i>
+|       "italic"
+
+#data
+<table>stray<tr><td>cell</td></tr></table>
+#errors
+#comment text in a table is foster-parented before it
+#document
+| <html>
+|   <head>
+|   <body>
+|     "stray"
+|     <table>
+|       <tbody>
+|         <tr>
+|           <td>
+|             "cell"
+
+#data
+<table><tr><td>1<td>2<tr><td>3</table>
+#errors
+#comment rows imply tbody, cells close each other
+#document
+| <html>
+|   <head>
+|   <body>
+|     <table>
+|       <tbody>
+|         <tr>
+|           <td>
+|             "1"
+|           <td>
+|             "2"
+|         <tr>
+|           <td>
+|             "3"
+
+#data
+<p>&amp; &lt; &notin; &copy &#65;&#x42; &#128; &bogus;
+#errors
+#comment named and numeric character references
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "& < ∉ © AB € &bogus;"
+
+#data
+<!DOCTYPE html><!-- before --><p>x<!-- inside -->
+#errors
+#comment doctype and comments
+#document
+| <!DOCTYPE html>
+| <!--  before  -->
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "x"
+|       <!--  inside  -->
+
+#data
+<script>if (a<b && c) {}</script><style>p>q{}</style>
+#errors
+#comment raw text: script and style keep < and &
+#document
+| <html>
+|   <head>
+|     <script>
+|       "if (a<b && c) {}"
+|     <style>
+|       "p>q{}"
+|   <body>
+
+#data
+<title>a &amp; <b>b</b></title><textarea>
+kept</textarea>
+#errors
+#comment RCDATA: title decodes references, keeps tags as text
+#document
+| <html>
+|   <head>
+|     <title>
+|       "a & <b>b</b>"
+|   <body>
+|     <textarea>
+|       "kept"
+
+#data
+<div id=a id=b class="c d">x</div>
+#errors
+#comment a duplicate attribute keeps the first
+#document
+| <html>
+|   <head>
+|   <body>
+|     <div>
+|       class="c d"
+|       id="a"
+|       "x"
+
+#data
+<h1>one<h2>two</h2>
+#errors
+#comment a heading closes an open heading
+#document
+| <html>
+|   <head>
+|   <body>
+|     <h1>
+|       "one"
+|     <h2>
+|       "two"
+
+#data
+<button>a<button>b</button>
+#errors
+#comment a nested button closes the first
+#document
+| <html>
+|   <head>
+|   <body>
+|     <button>
+|       "a"
+|     <button>
+|       "b"
+
+#data
+<pre>
+
+line</pre>
+#errors
+#comment pre drops one leading newline
+#document
+| <html>
+|   <head>
+|   <body>
+|     <pre>
+|       "
+line"
+
+#data
+<p><b>x<p>y</b>
+#errors
+#comment formatting elements are reconstructed in a new paragraph
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       <b>
+|         "x"
+|     <p>
+|       <b>
+|         "y"
+
+#data
+</div><p>a</span>b
+#errors
+#comment an end tag with nothing to close is ignored
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "ab"
+
+#data
+<frameset><frame></frameset>
+#errors
+#comment frameset after a blank body
+#document
+| <html>
+|   <head>
+|   <frameset>
+|     <frame>
+
+#data
+a<td>b
+#errors
+#comment a fragment in a cell's context
+#document-fragment
+td
+#document
+| "ab"
+
+#data
+<option>one<option>two
+#errors
+#comment a fragment in a select's context
+#document-fragment
+select
+#document
+| <option>
+|   "one"
+| <option>
+|   "two"

@@ -49,7 +49,7 @@ int amb_valid_name(const char *p, size_t n) {
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)p[i];
         if (c == 0 || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') return 0;
-        if (c == '<' || c == '>' || c == '"' || c == '\'' || c == '/' || c == '=') return 0;
+        if (c == '/' || c == '>') return 0;
     }
     return 1;
 }

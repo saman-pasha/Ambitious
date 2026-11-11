@@ -21,11 +21,11 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
-UNITS := rt/amb_rt rt/amb_proc dom/dom
+UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 
-.PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-integ golden schema doc clean
+.PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-html test-integ golden schema doc clean
 all: build/ambitious schema
 
 build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl)
@@ -38,7 +38,7 @@ build/ambitious: build/obj/shell/main.o $(OBJS)
 check:
 	sh toolchain/check.sh
 
-test: test-contract test-gen test-exec test-safe test-reason test-integ
+test: test-contract test-gen test-exec test-safe test-reason test-html test-integ
 
 test-contract:
 	@$(ENV) $(CAP) "$$AMB_COCOLOG" -s tests/contract/run.pl < /dev/null
@@ -75,3 +75,6 @@ build/doc/%.md: contracts/%.pl prolog/amb/contract.pl prolog/amb/gen_schema.pl
 
 clean:
 	rm -rf build
+
+test-html: $(OBJS)
+	@sh tests/run.sh html

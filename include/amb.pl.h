@@ -22,7 +22,7 @@ void amb_put_ref(FILE *out, const char *f, uint32_t doc, uint32_t index, uint32_
 void amb_report(FILE *report, const char *module, const char *what, uint32_t index);
 /* a request's outcome: amb_result(Op, Status, Revision). on report, if report */
 void amb_result(FILE *report, const char *op, const char *status, uint64_t revision);
-/* a name: not empty, no white space and none of < > " ' / = and NUL */
+/* a name, as the HTML tokenizer can make one: not empty, and no white space, / > or NUL */
 int amb_valid_name(const char *p, size_t n);
 
 /* reading a request: each skips white space first, answers 1 and moves *pos on

@@ -110,6 +110,7 @@ ambm_handle_f(M, R, F) :- amb_c(M, handle(R, F)), !.
 
 ambm_param_c(_, param(P, text), A) :- !, format(atom(A), 'const char *~w, size_t ~w_len', [P, P]).
 ambm_param_c(_, param(P, stream), A) :- !, format(atom(A), 'FILE *~w', [P]).
+ambm_param_c(_, param(P, store(M2)), A) :- !, ambm_store_type(M2, T), format(atom(A), '~w *~w', [T, P]).
 ambm_param_c(M, param(P, handle(R)), A) :- !, ambm_handle_t(M, R, HT), format(atom(A), '~w ~w', [HT, P]).
 ambm_param_c(M, param(P, T), A) :- ambm_ctype(M, T, CT), format(atom(A), '~w ~w', [CT, P]).
 

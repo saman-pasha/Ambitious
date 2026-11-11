@@ -58,6 +58,7 @@ checkout "$CICILI"    https://github.com/saman-pasha/cicili.git    "$CICILI_COMM
 checkout "$ZIGURATIP" https://github.com/saman-pasha/ZiguratIP.git "$ZIGURATIP_COMMIT"
 checkout "$COCOLOG"   https://github.com/saman-pasha/cocolog.git   "$COCOLOG_COMMIT"
 checkout "$CICILANG"  https://github.com/saman-pasha/cicilang.git  "$CICILANG_COMMIT"
+checkout "$AMB_DEPS/html5lib-tests" https://github.com/html5lib/html5lib-tests.git "$HTML5LIB_TESTS_COMMIT"
 
 step "the Lisp systems Cicili is built from, with no download"
 mkdir -p "$HOME/common-lisp"

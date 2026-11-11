@@ -132,3 +132,33 @@ neighbours.
    - With `-I $PWD/include` the header comes with the macro file, and the
      unit builds.
    - Ambitious's Makefile passes the include directory by its absolute path.
+7. **The README's `FILE *f = fopen(...); if (f == NULL) return -1;` is
+   refused** (`plain pointer not consumed: 'f' in return(...)`). The null test
+   refines an owner but not a plain pointer that holds fresh memory.
+   `own FILE *f = fopen(...)` passes, with `!f` or `f == NULL`, so Ambitious
+   declares its streams as owners.
+8. **`continue` inside a `switch` inside a loop, from blocks of different
+   depths, stops the check with no line named:** `not lowered yet:
+   phase(check) (function file)`. `test/why.sh` shows `ck_merge_frames/3`
+   given frame stacks of different lengths at the loop's join. The 15-line
+   reduction:
+
+   ```c
+   int f(int n) {
+       int s = 0;
+       while (n > 0) {
+           switch (n % 3) {
+           case 0:
+               if (n > 5) { s++; n--; continue; }
+               s += 2; n--;
+               continue;
+           default:
+               n--;
+           }
+       }
+       return s;
+   }
+   ```
+
+   Ambitious's tree builder writes such a dispatch as an `if`/`else if` chain
+   instead.

@@ -22,6 +22,8 @@ COCOLOG=${COCOLOG:-$(amb_dep cocolog)}
 ZIGURATIP=${ZIGURATIP:-$(amb_dep ZiguratIP)}
 CICILANG=${CICILANG:-$(amb_dep cicilang)}
 ZIGURATIP_HOME=${ZIGURATIP_HOME:-$ZIGURATIP/home}
+# html5lib's tree-construction tests (the html gate; toolchain/bootstrap.sh checks them out)
+AMB_HTML5LIB=${AMB_HTML5LIB:-$(amb_dep html5lib-tests)/tree-construction}
 
 # the commands
 AMB_COCOLOG="$COCOLOG/cocolog"
@@ -35,5 +37,5 @@ LD_LIBRARY_PATH="$ZIGURATIP_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # Cicili's build loads its system through ASDF: this checkout's, first
 CL_SOURCE_REGISTRY="$CICILI/:${CL_SOURCE_REGISTRY:-}"
 
-export AMB_ROOT AMB_DEPS CICILI COCOLOG ZIGURATIP CICILANG ZIGURATIP_HOME \
+export AMB_ROOT AMB_DEPS CICILI COCOLOG ZIGURATIP CICILANG ZIGURATIP_HOME AMB_HTML5LIB \
        AMB_COCOLOG AMB_CICILANG COCOLOG_LIBRARY LD_LIBRARY_PATH CL_SOURCE_REGISTRY

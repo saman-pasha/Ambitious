@@ -417,7 +417,7 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 | 1 Contract | **done**: `docs/contract.md`, `contracts/dom.pl`, the validator; contract gate GREEN (32 refusals) |
 | 2 Macro integration | **done**: `include/amb.pl` and `prolog/amb/gen_c.pl` make the DOM's C from its contract; gen gate (goldens) and exec gate GREEN, valgrind clean |
 | 3 DOM vertical slice | **done, the first milestone**: each §6.3 criterion has a passing test (the table in Phase 3); `bin/ambitious loop` runs the whole loop; `make test` GREEN |
-| 4 HTML parsing | planned |
+| 4 HTML parsing | **done, first slice**: the WHATWG tokenizer (every state, the 2,231 named references) and tree builder (the insertion modes, adoption agency, foster parenting, fragments) over `contracts/html.pl`. html5lib tree construction: **1,374 of 1,721 cases run pass (79.8%)**; every failure is foreign content (218), template contents (109) or the 2025 select rules (20). Parse errors are facts |
 | 5 CSS | planned |
 | 6 Layout and rendering | planned |
 | 7 Networking | planned |

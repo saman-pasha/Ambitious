@@ -20,6 +20,7 @@
 #include <amb.pl>
 
 amb_interface(dom);
+amb_interface(html);
 
 #define S(lit) lit, sizeof(lit) - 1
 
@@ -138,7 +139,7 @@ static void build_demo(dom_document *d) {
     dom_node_h empty = dom_create_text(d, S(""));
     dom_node_h go = dom_create_element(d, S("button"));
     dom_node_h link = dom_create_element(d, S("a"));
-    dom_append_child(d, root, dom_create_doctype(d, S("html")));
+    dom_append_child(d, root, dom_create_doctype(d, S("html"), S(""), S(""), 0));
     dom_append_child(d, root, html);
     dom_append_child(d, html, head);
     dom_append_child(d, head, title);
@@ -299,9 +300,67 @@ static int cmd_snapshot(const char *path) {
     return write_snapshot(&d, path) ? 0 : 2;
 }
 
+/* ---- a page: an HTML file parsed into a document ---- */
+
+static int load_page(const char *path, dom_document *d, html_parser *p) {
+    vector<char> src;
+    if (!read_all(path, &src)) { fprintf(stderr, "ambitious: cannot read %s\n", path); return 0; }
+    dom_init(d, 1);
+    html_init(p, 1);
+    html_parse(p, d, data(src), len(src));
+    return 1;
+}
+
+/* the page's snapshot: the document's section, then the parse's */
+static int write_page_snapshot(const dom_document *d, const html_parser *p, const char *path) {
+    own FILE *f = fopen(path, "w");
+    if (!f) return 0;
+    defer(f) { fclose(f); }
+    dom_export(d, f);
+    html_export(p, f);
+    return 1;
+}
+
+static int cmd_parse(const char *page) {
+    dom_document d;
+    html_parser p;
+    if (!load_page(page, &d, &p)) return 2;
+    dom_serialize(&d, dom_root(&d), stdout);
+    printf("\n");
+    printf("%zu nodes, %zu parse errors, invariants: %d broken\n", node_count(d), error_count(p), dom_check_invariants(&d, stdout));
+    return 0;
+}
+
+/* query, why, advise: the reasoner over the page's snapshot */
+static int cmd_reason(const char *what, const char *page, const char *goal, int apply) {
+    session s;
+    if (!session_open(&s)) return 2;
+    dom_document d;
+    html_parser p;
+    if (!load_page(page, &d, &p)) return 2;
+    char snap[700], out[700];
+    session_path(&s, "page.pl", snap, sizeof snap);
+    session_path(&s, "answer.txt", out, sizeof out);
+    if (!write_page_snapshot(&d, &p, snap)) return 2;
+    int st = reason(&s, what, snap, goal, out);
+    print_file(out, "");
+    if (st != 0) return st;
+    if (apply) {
+        int applied = 0, refused = 0;
+        apply_batch(&d, out, &applied, &refused);
+        printf("%d applied, %d refused; revision %llu\n", applied, refused, (unsigned long long)dom_revision(&d));
+        dom_serialize(&d, dom_root(&d), stdout);
+        printf("\n");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
-    fprintf(stderr, "usage: ambitious loop | ambitious snapshot FILE\n");
+    if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
+    if (argc >= 4 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "why") == 0)) return cmd_reason(argv[1], argv[2], argv[3], 0);
+    if (argc >= 3 && strcmp(argv[1], "advise") == 0) return cmd_reason("advise", argv[2], 0, argc >= 4 && strcmp(argv[3], "--apply") == 0);
+    fprintf(stderr, "usage: ambitious loop | snapshot FILE | parse PAGE | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
     return 2;
 }
