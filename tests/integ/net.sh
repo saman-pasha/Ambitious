@@ -40,7 +40,11 @@
 # over its own cache for the same visits. AMB_CACHE names a cache of its own; a
 # private run neither uses nor changes one.
 #
-# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CODED, CACHE.
+# IPv6: an image from an IPv6 literal, written back compressed and dialled through
+# getaddrinfo: loaded from a server on ::1 where the machine has one, else refused for
+# its address family. The line says which held, so either machine prints the same.
+#
+# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CODED, CACHE, V6.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-net.XXXXXX")
 # the environment's proxies are not the tests': each test names its own
@@ -202,6 +206,26 @@ echo "-- a private session caches nothing, and leaves the cache as it was:"
 before=$(cat "$kprof"/cache/* | cksum)
 AMB_NOW=1700000300 kamb --profile "$kprof" --private query "$kurl" "net_cache(R, How, _, _)"
 [ "$before" = "$(cat "$kprof"/cache/* | cksum)" ] && echo "the same" || echo "CHANGED"
+
+echo "== IPv6 literals: an image from http://[0:0:0:0:0:0:0:1]:V6/ (tests/net/site/v6.html)"
+# a server on ::1 where the machine has it; else port 9 of ::1, which the machine cannot dial
+if python3 -c 'import socket; socket.socket(socket.AF_INET6).bind(("::1", 0))' 2> /dev/null; then
+  v6=$(serve v6 "$AMB_ROOT/tests/net/serve.py" --bind ::1 "$site")
+  want=ok
+else
+  v6=9
+  want=refused
+fi
+v6page=$(serve v6page "$AMB_ROOT/tests/net/serve.py" --sub "@V6@=$v6" "$nsite" "$site")
+got=$(sh "$AMB_ROOT/bin/ambitious" query "http://127.0.0.1:$v6page/v6.html" "net_resource(R, U, image, O, _, _, _), (net_failure(R, W) -> true ; W = none)" 2>&1)
+echo "-- its URL written back compressed, as the URL standard writes it:"
+echo "$got" | sed -n "s/.*U = '\([^']*\)'.*/\1/p" | sed "s/:$v6\//:V6\//"
+echo "-- dialled through getaddrinfo: loaded where the machine has ::1, else refused for its address family"
+case "$want:$got" in
+  ok:*"U = 'http://[::1]:$v6/logo.png', O = ok"*) echo "right for this machine" ;;
+  refused:*"U = 'http://[::1]:9/logo.png', O = refused, W = '::1 port 9: "*) echo "right for this machine" ;;
+  *) echo "WRONG for this machine (want $want): $got" ;;
+esac
 
 for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
 wait 2> /dev/null

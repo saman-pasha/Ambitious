@@ -21,9 +21,31 @@ static const char *const refs[][2] = {
     { "file:///tmp/a b.html", "file:///tmp/a b.html" }, { "data:text/css,p{}", "data:text/css,p{}" },
 };
 
+/* hosts as WHATWG URL's host parser makes them, against the same base: IPv6
+   literals compressed, IPv4 in its four forms, percent-decoding and the forbidden
+   code points. Each answer is node's (new URL(ref, base).href, node 22) */
+static const char *const hosts[][2] = {
+    { "http://[::1]:8080/x", "http://[::1]:8080/x" }, { "http://[0:0:0:0:0:0:0:1]/", "http://[::1]/" },
+    { "http://[2001:DB8::1]/", "http://[2001:db8::1]/" }, { "http://[2001:db8:0:0:1:0:0:1]/", "http://[2001:db8::1:0:0:1]/" },
+    { "http://[::ffff:192.168.0.1]/", "http://[::ffff:c0a8:1]/" }, { "http://[1:0:0:2::3:0]/", "http://[1::2:0:0:3:0]/" },
+    { "http://[::]/", "http://[::]/" }, { "http://[1::]/", "http://[1::]/" }, { "http://[::1:2:3:4:5:6:7]/", "http://[0:1:2:3:4:5:6:7]/" },
+    { "http://[::127.0.0.1]/", "http://[::7f00:1]/" }, { "https://[::1]:443/", "https://[::1]/" }, { "//[::1]:81/a", "http://[::1]:81/a" },
+    { "file://[::1]/x", "file://[::1]/x" }, { "file://localhost/x", "file:///x" },
+    { "http://[:1]/", "(not a URL)" }, { "http://[1:2:3:4:5:6:7:8:9]/", "(not a URL)" }, { "http://[::1/", "(not a URL)" },
+    { "http://[::1]x/", "(not a URL)" }, { "http://[1::2::3]/", "(not a URL)" }, { "http://[::1.2.3]/", "(not a URL)" },
+    { "ws://[fe80::1%25eth0]/", "(not a URL)" },
+    { "http://0x7f.1/", "http://127.0.0.1/" }, { "http://127.1/", "http://127.0.0.1/" }, { "http://0300.0250.0.1/", "http://192.168.0.1/" },
+    { "http://4294967295/", "http://255.255.255.255/" }, { "http://0x/", "http://0.0.0.0/" }, { "http://1.2.3.4./", "http://1.2.3.4/" },
+    { "http://4294967296/", "(not a URL)" }, { "http://1.2.3.256/", "(not a URL)" }, { "http://09.1/", "(not a URL)" },
+    { "http://foo.09/", "(not a URL)" },
+    { "http://ex%41mple.com/", "http://example.com/" }, { "http://a b/", "(not a URL)" }, { "http://a<b/", "(not a URL)" },
+    { "http://a%2Fb/", "(not a URL)" }, { "http://h:1:2/", "(not a URL)" },
+};
+
 static const char *const origins[][2] = {
     { "http://a/b/c/d;p?q", "http://a" }, { "http://Example.com:8080/x", "http://example.com:8080" },
     { "https://h:443/", "https://h" }, { "file:///tmp/x.html", "null" }, { "data:text/plain,hi", "null" },
+    { "http://[::1]:8080/", "http://[::1]:8080" },
 };
 
 /* the proxy for a URL: https_proxy, HTTPS_PROXY, http_proxy, HTTP_PROXY and no_proxy as
@@ -51,6 +73,10 @@ static const char *const proxies[][7] = {
     { "http://p.test:3128", 0, 0, 0, "10.0.0.0/8, 192.168.0.0/16", "https://192.168.4.5:8443/", "" },
     { "http://p.test:3128", 0, 0, 0, "example.test:8443", "https://example.test:8443/", "" },
     { "http://p.test:3128", 0, 0, 0, "example.test:8443", "https://example.test/", "http://p.test:3128" },
+    { "http://p.test:3128", 0, 0, 0, "::1", "https://[::1]:9/", "" },
+    { "http://p.test:3128", 0, 0, 0, "[::1]:9", "https://[::1]:9/", "" },
+    { "http://p.test:3128", 0, 0, 0, "fe80::/10", "https://[fe80::1]:9/", "" },
+    { "http://p.test:3128", 0, 0, 0, "fe80::/10", "https://[fec0::1]:9/", "http://p.test:3128" },
     { "socks5://p.test:1080", 0, 0, 0, 0, "https://a.test/", "refused: the proxy socks5://p.test:1080 is not an http: proxy, the only kind spoken here" },
     { "http://p.test:3128", 0, 0, 0, 0, "http://a.test/", "" },
     { 0, 0, "http://h.test:8080", 0, 0, "http://a.test/", "http://h.test:8080" },
@@ -89,6 +115,12 @@ int main(void) {
         int ok = strcmp(out, refs[i][1]) == 0;
         bad += !ok;
         printf("%s '%s' -> %s%s%s\n", ok ? "ok  " : "FAIL", refs[i][0], out, ok ? "" : ", not ", ok ? "" : refs[i][1]);
+    }
+    for (size_t i = 0; i < sizeof hosts / sizeof hosts[0]; i++, n++) {
+        if (!net_url_resolve("http://a/b/c/d;p?q", hosts[i][0], out, sizeof out)) snprintf(out, sizeof out, "(not a URL)");
+        int ok = strcmp(out, hosts[i][1]) == 0;
+        bad += !ok;
+        printf("%s '%s' -> %s%s%s\n", ok ? "ok  " : "FAIL", hosts[i][0], out, ok ? "" : ", not ", ok ? "" : hosts[i][1]);
     }
     for (size_t i = 0; i < sizeof origins / sizeof origins[0]; i++, n++) {
         if (!net_url_origin(origins[i][0], out, sizeof out)) snprintf(out, sizeof out, "(not a URL)");

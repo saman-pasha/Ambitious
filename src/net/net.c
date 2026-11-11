@@ -2,13 +2,16 @@
    page loads; and the module's generated implementation.
 
    URLs (WHATWG URL, a subset). A scheme, then for the special schemes (http,
-   https, file, ws, wss, ftp) an authority -- user info dropped, the host
-   lowercased, a default port dropped -- and a path whose dot segments are
-   removed and whose backslashes are slashes; a query; a fragment, which no fetch
-   sends. Another scheme's URL is opaque (data:, mailto:). A reference resolves
-   against its base as scheme-relative, path-absolute, query-only,
-   fragment-only or path-relative. No IDNA, no IPv6 literals, no
-   percent-encoding sets beyond what a file: path decodes.
+   https, file, ws, wss, ftp) an authority -- user info dropped, the host as the
+   host parser makes it, a default port dropped -- and a path whose dot segments
+   are removed and whose backslashes are slashes; a query; a fragment, which no
+   fetch sends. The host: an IPv6 literal in brackets, written back compressed;
+   else percent-decoded, lowercased, refused for a forbidden code point, and an
+   IPv4 address in any of its forms (0x hex, 0 octal, fewer than four parts) when
+   its last label is a number. Another scheme's URL is opaque (data:, mailto:). A
+   reference resolves against its base as scheme-relative, path-absolute,
+   query-only, fragment-only or path-relative. No IDNA, no percent-encoding sets
+   beyond what a file: path decodes.
 
    Fetching. file: reads the file (its type from its name); data: decodes its
    body (base64 or percent-encoded); http: and https: are HTTP/1.1 over a socket
@@ -188,19 +191,28 @@ static void net_remove_dots(char *path) {
     snprintf(path, 4096, "%s", out);
 }
 
-/* the authority and the rest of a special URL, after its "//" */
+static int net_host_parse(const char *s, size_t n, char *out, size_t cap);
+
+/* the authority and the rest of a special URL, after its "//": user info dropped,
+   the host as the host parser makes it, the port (the scheme's default dropped) */
 static int net_parse_authority(const char *s, net_url *u) {
     size_t e = 0;
     while (s[e] && s[e] != '/' && s[e] != '\\' && s[e] != '?' && s[e] != '#') e++;
     /* user info, dropped */
     size_t a = 0;
     for (size_t i = 0; i < e; i++) if (s[i] == '@') a = i + 1;
+    /* the host ends at the first colon outside an IPv6 literal's brackets */
     size_t colon = e;
-    for (size_t i = a; i < e; i++) if (s[i] == ':') colon = i;
-    size_t hn = colon - a;
-    if (hn >= sizeof u->host) return 0;
-    for (size_t i = 0; i < hn; i++) u->host[i] = net_lower(s[a + i]);
-    u->host[hn] = 0;
+    int inside = 0;
+    for (size_t i = a; i < e && colon == e; i++) {
+        if (s[i] == '[') inside = 1;
+        else if (s[i] == ']') inside = 0;
+        else if (s[i] == ':' && !inside) colon = i;
+    }
+    u->host[0] = 0;
+    if (colon > a && !net_host_parse(s + a, colon - a, u->host, sizeof u->host)) return 0;
+    if (strcmp(u->scheme, "file") == 0 && strcmp(u->host, "localhost") == 0) u->host[0] = 0;
+    size_t hn = strlen(u->host);
     u->port = -1;
     if (colon < e) {
         long p = 0;
@@ -442,6 +454,156 @@ static int net_is_address(const char *h) {
     uint16_t v6[8];
     size_t n = strlen(h);
     return net_ipv4_dotted(h, n, &v4) || (strchr(h, ':') && net_ipv6_parse(h, n, v6));
+}
+
+/* an IPv6 address serialized as WHATWG URL does, in brackets: lowercase hex pieces,
+   the first longest run of two or more zero pieces written "::" */
+static void net_ipv6_text(const uint16_t a[8], char *out, size_t cap) {
+    int best = -1, bestlen = 1;
+    for (int i = 0; i < 8;) {
+        if (a[i] != 0) { i++; continue; }
+        int j = i;
+        while (j < 8 && a[j] == 0) j++;
+        if (j - i > bestlen) { best = i; bestlen = j - i; }
+        i = j;
+    }
+    size_t k = 0;
+    int ignore0 = 0;
+    if (cap < 42) { if (cap) out[0] = 0; return; }
+    out[k++] = '[';
+    for (int i = 0; i < 8; i++) {
+        if (ignore0 && a[i] == 0) continue;
+        ignore0 = 0;
+        if (best == i) {
+            out[k++] = ':';
+            if (i == 0) out[k++] = ':';
+            ignore0 = 1;
+            continue;
+        }
+        k += (size_t)snprintf(out + k, cap - k, "%x", a[i]);
+        if (i != 7) out[k++] = ':';
+    }
+    out[k++] = ']';
+    out[k] = 0;
+}
+
+/* an IPv4 address's part (WHATWG URL): 0x and hex, a leading 0 and octal, else
+   decimal; -1 when it is none, and past 2^32 kept just past it */
+static int64_t net_ipv4_number(const char *s, size_t n) {
+    if (n == 0) return -1;
+    int radix = 10;
+    if (n >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { s += 2; n -= 2; radix = 16; }
+    else if (n >= 2 && s[0] == '0') { s++; n--; radix = 8; }
+    int64_t v = 0;
+    for (size_t i = 0; i < n; i++) {
+        int d = net_hexval(s[i]);
+        if (d < 0 || d >= radix) return -1;
+        v = v * radix + d;
+        if (v > 0x100000000ll) v = 0x100000000ll;
+    }
+    return v;
+}
+
+/* the host's labels, a last empty one dropped: where each begins and ends */
+static int net_labels(const char *s, size_t n, size_t *b, size_t *e, int max) {
+    int k = 0;
+    size_t a = 0;
+    for (;;) {
+        size_t c = a;
+        while (c < n && s[c] != '.') c++;
+        if (k == max) return -1;
+        b[k] = a;
+        e[k] = c;
+        k++;
+        if (c >= n) break;
+        a = c + 1;
+    }
+    if (k > 1 && b[k - 1] == e[k - 1]) k--;
+    return k;
+}
+
+/* WHATWG URL's ends-in-a-number: the last label all digits, or 0x and hex */
+static int net_ends_in_number(const char *s, size_t n) {
+    size_t b[130], e[130];
+    int k = net_labels(s, n, b, e, 130);
+    if (k <= 0) return k < 0;
+    const char *t = s + b[k - 1];
+    size_t tn = e[k - 1] - b[k - 1];
+    if (tn == 0) return 0;
+    int digits = 1;
+    for (size_t i = 0; i < tn; i++) if (t[i] < '0' || t[i] > '9') digits = 0;
+    if (digits) return 1;
+    if (tn >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
+        for (size_t i = 2; i < tn; i++) if (net_hexval(t[i]) < 0) return 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* WHATWG URL's IPv4 parser: one to four parts, each but the last a byte, the last
+   filling what the others leave */
+static int net_ipv4_parse(const char *s, size_t n, uint32_t *out) {
+    size_t b[8], e[8];
+    int k = net_labels(s, n, b, e, 8);
+    if (k <= 0 || k > 4) return 0;
+    int64_t v[4];
+    for (int i = 0; i < k; i++) {
+        v[i] = net_ipv4_number(s + b[i], e[i] - b[i]);
+        if (v[i] < 0) return 0;
+        if (i < k - 1 && v[i] > 255) return 0;
+    }
+    if (v[k - 1] >= (int64_t)1 << (8 * (5 - k))) return 0;
+    uint64_t a = (uint64_t)v[k - 1];
+    for (int i = 0; i < k - 1; i++) a += (uint64_t)v[i] << (8 * (3 - i));
+    *out = (uint32_t)a;
+    return 1;
+}
+
+/* a domain made ASCII: its ASCII letters lowercased (other bytes are kept) */
+static int net_domain_ascii(const char *s, size_t n, char *out, size_t cap) {
+    if (n >= cap) return 0;
+    for (size_t i = 0; i < n; i++) out[i] = net_lower(s[i]);
+    out[n] = 0;
+    return 1;
+}
+
+/* a special URL's host, as WHATWG URL's host parser reads one: an IPv6 literal in
+   brackets, written back compressed; else percent-decoded, made ASCII, holding no
+   forbidden code point, and an IPv4 address in any of its forms when its last label
+   is a number. The host as the URL is serialized with it */
+static int net_host_parse(const char *s, size_t n, char *out, size_t cap) {
+    if (n && s[0] == '[') {
+        uint16_t a[8];
+        if (n < 2 || s[n - 1] != ']' || !net_ipv6_parse(s + 1, n - 2, a)) return 0;
+        net_ipv6_text(a, out, cap);
+        return 1;
+    }
+    char d[1024], ascii[256];
+    size_t k = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (k + 1 >= sizeof d) return 0;
+        if (s[i] == '%' && i + 2 < n && net_hexval(s[i + 1]) >= 0 && net_hexval(s[i + 2]) >= 0) {
+            d[k++] = (char)(net_hexval(s[i + 1]) * 16 + net_hexval(s[i + 2]));
+            i += 2;
+        } else d[k++] = s[i];
+        if (d[k - 1] == 0) return 0;
+    }
+    d[k] = 0;
+    if (!net_domain_ascii(d, k, ascii, sizeof ascii) || !ascii[0]) return 0;
+    for (size_t i = 0; ascii[i]; i++) {
+        unsigned char c = (unsigned char)ascii[i];
+        if (c <= 0x20 || c == 0x7f || strchr("#%/:<>?@[\\]^|", c)) return 0;
+    }
+    size_t an = strlen(ascii);
+    if (net_ends_in_number(ascii, an)) {
+        uint32_t v;
+        if (!net_ipv4_parse(ascii, an, &v)) return 0;
+        snprintf(out, cap, "%u.%u.%u.%u", v >> 24, v >> 16 & 255, v >> 8 & 255, v & 255);
+        return 1;
+    }
+    if (an >= cap) return 0;
+    snprintf(out, cap, "%s", ascii);
+    return 1;
 }
 
 /* ---- proxies ---- */

@@ -281,3 +281,8 @@ the same, request by request
 -- a private session caches nothing, and leaves the cache as it was:
 no
 the same
+== IPv6 literals: an image from http://[0:0:0:0:0:0:0:1]:V6/ (tests/net/site/v6.html)
+-- its URL written back compressed, as the URL standard writes it:
+http://[::1]:V6/logo.png
+-- dialled through getaddrinfo: loaded where the machine has ::1, else refused for its address family
+right for this machine

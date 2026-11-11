@@ -38,11 +38,48 @@ ok   '  HTTP://Example.COM:80/x\y ' -> http://example.com/x/y
 ok   'http://u:p@h:8080/' -> http://h:8080/
 ok   'file:///tmp/a b.html' -> file:///tmp/a b.html
 ok   'data:text/css,p{}' -> data:text/css,p{}
+ok   'http://[::1]:8080/x' -> http://[::1]:8080/x
+ok   'http://[0:0:0:0:0:0:0:1]/' -> http://[::1]/
+ok   'http://[2001:DB8::1]/' -> http://[2001:db8::1]/
+ok   'http://[2001:db8:0:0:1:0:0:1]/' -> http://[2001:db8::1:0:0:1]/
+ok   'http://[::ffff:192.168.0.1]/' -> http://[::ffff:c0a8:1]/
+ok   'http://[1:0:0:2::3:0]/' -> http://[1::2:0:0:3:0]/
+ok   'http://[::]/' -> http://[::]/
+ok   'http://[1::]/' -> http://[1::]/
+ok   'http://[::1:2:3:4:5:6:7]/' -> http://[0:1:2:3:4:5:6:7]/
+ok   'http://[::127.0.0.1]/' -> http://[::7f00:1]/
+ok   'https://[::1]:443/' -> https://[::1]/
+ok   '//[::1]:81/a' -> http://[::1]:81/a
+ok   'file://[::1]/x' -> file://[::1]/x
+ok   'file://localhost/x' -> file:///x
+ok   'http://[:1]/' -> (not a URL)
+ok   'http://[1:2:3:4:5:6:7:8:9]/' -> (not a URL)
+ok   'http://[::1/' -> (not a URL)
+ok   'http://[::1]x/' -> (not a URL)
+ok   'http://[1::2::3]/' -> (not a URL)
+ok   'http://[::1.2.3]/' -> (not a URL)
+ok   'ws://[fe80::1%25eth0]/' -> (not a URL)
+ok   'http://0x7f.1/' -> http://127.0.0.1/
+ok   'http://127.1/' -> http://127.0.0.1/
+ok   'http://0300.0250.0.1/' -> http://192.168.0.1/
+ok   'http://4294967295/' -> http://255.255.255.255/
+ok   'http://0x/' -> http://0.0.0.0/
+ok   'http://1.2.3.4./' -> http://1.2.3.4/
+ok   'http://4294967296/' -> (not a URL)
+ok   'http://1.2.3.256/' -> (not a URL)
+ok   'http://09.1/' -> (not a URL)
+ok   'http://foo.09/' -> (not a URL)
+ok   'http://ex%41mple.com/' -> http://example.com/
+ok   'http://a b/' -> (not a URL)
+ok   'http://a<b/' -> (not a URL)
+ok   'http://a%2Fb/' -> (not a URL)
+ok   'http://h:1:2/' -> (not a URL)
 ok   origin of http://a/b/c/d;p?q: http://a
 ok   origin of http://Example.com:8080/x: http://example.com:8080
 ok   origin of https://h:443/: https://h
 ok   origin of file:///tmp/x.html: null
 ok   origin of data:text/plain,hi: null
+ok   origin of http://[::1]:8080/: http://[::1]:8080
 ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
 ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
 ok   proxy for https://a.test/x with no_proxy '': http://p.test:8080
@@ -63,6 +100,10 @@ ok   proxy for https://128.0.0.1:9/ with no_proxy '127.0.0.0/8': http://p.test:3
 ok   proxy for https://192.168.4.5:8443/ with no_proxy '10.0.0.0/8, 192.168.0.0/16': none
 ok   proxy for https://example.test:8443/ with no_proxy 'example.test:8443': none
 ok   proxy for https://example.test/ with no_proxy 'example.test:8443': http://p.test:3128
+ok   proxy for https://[::1]:9/ with no_proxy '::1': none
+ok   proxy for https://[::1]:9/ with no_proxy '[::1]:9': none
+ok   proxy for https://[fe80::1]:9/ with no_proxy 'fe80::/10': none
+ok   proxy for https://[fec0::1]:9/ with no_proxy 'fe80::/10': http://p.test:3128
 ok   proxy for https://a.test/ with no_proxy '': refused: the proxy socks5://p.test:1080 is not an http: proxy, the only kind spoken here
 ok   proxy for http://a.test/ with no_proxy '': none
 ok   proxy for http://a.test/ with no_proxy '': http://h.test:8080
@@ -94,4 +135,4 @@ ok   site of https://Example.COM./: https://example.com
 ok   site of http://co.uk/: http://co.uk
 ok   site of file:///x: null
 ok   site of data:text/plain,x: null
-96 of 96 cases
+137 of 137 cases

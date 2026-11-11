@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... [--date EPOCH] [--log FILE] ROOT...
--- the test site over HTTP/1.1 on 127.0.0.1, on a free port, which it prints first.
+"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... [--date EPOCH] [--bind ADDRESS]
+[--log FILE [--log-accept]] ROOT... -- the test site over HTTP/1.1 on 127.0.0.1, on a
+free port, which it prints first.
 
 Each ROOT's files, the first that has the path; in an .html file each NAME of --sub
 is replaced by its VALUE, then PORT by the server's port. A file's FILE.headers, if
@@ -19,15 +20,16 @@ to itself; /chunked.css comes in three chunks.
 
 --tls serves HTTPS with the certificate chain CERT and its key KEY, offering
 http/1.1 by ALPN; --tls12 holds it to TLS 1.2. --date fixes every response's Date
-(its clock, for the cache's ages). --log appends a line for each request: its host,
-its path, and the Cookie and validators it carried; --log-accept adds its
-Accept-Encoding."""
+(its clock, for the cache's ages). --bind names the address it listens on, ::1
+for IPv6. --log appends a line for each request: its host, its path, and the
+Cookie and validators it carried; --log-accept adds its Accept-Encoding."""
 import argparse
 import email.utils
 import gzip
 import hashlib
 import http.server
 import os
+import socket
 import socketserver
 import ssl
 import sys
@@ -42,6 +44,7 @@ ap.add_argument("--sub", action="append", default=[])
 ap.add_argument("--date", type=int)
 ap.add_argument("--log")
 ap.add_argument("--log-accept", action="store_true")
+ap.add_argument("--bind", default="127.0.0.1")
 ap.add_argument("roots", nargs="+")
 args = ap.parse_args()
 ROOTS = [os.path.abspath(r) for r in args.roots]
@@ -220,6 +223,8 @@ if args.tls:
     if args.tls12:
         TLS.maximum_version = ssl.TLSVersion.TLSv1_2
 
-with Server(("127.0.0.1", 0), Handler) as srv:
+if ":" in args.bind:
+    Server.address_family = socket.AF_INET6
+with Server((args.bind, 0), Handler) as srv:
     print(srv.server_address[1], flush=True)
     srv.serve_forever()
