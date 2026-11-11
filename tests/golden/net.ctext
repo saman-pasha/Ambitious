@@ -1,11 +1,11 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:1d8e9afc:2443). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:98b6a9b8:3106). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
-typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED } net_outcome;
+typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED, NET_OUTCOME_TLS_HANDSHAKE_FAILED, NET_OUTCOME_TLS_VERIFY_FAILED, NET_OUTCOME_PROXY_REFUSED } net_outcome;
 typedef enum net_op { NET_OP_FETCH, NET_OP_FETCH_SUBRESOURCES } net_op;
 typedef struct net_resource_h { uint32_t doc, index, gen; } net_resource_h;
 typedef struct net_hop_h { uint32_t doc, index, gen; } net_hop_h;
-typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; } net_resource;
+typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; amb_span reason; uint8_t tls; amb_span tls_version; amb_span tls_cipher; amb_span alpn; uint8_t proxied; amb_span proxy; } net_resource;
 typedef struct net_hop { uint32_t gen, live, free_next; uint32_t resource; amb_span url; uint32_t status; } net_hop;
 typedef struct net_store_tag { char unused; } net_store_tag;
 typedef store<net_store_tag> net_loader;
@@ -66,11 +66,14 @@ const char *net_outcome_name(net_outcome x) {
     case NET_OUTCOME_BLOCKED: return "blocked";
     case NET_OUTCOME_TOO_LARGE: return "too_large";
     case NET_OUTCOME_MALFORMED: return "malformed";
+    case NET_OUTCOME_TLS_HANDSHAKE_FAILED: return "tls_handshake_failed";
+    case NET_OUTCOME_TLS_VERIFY_FAILED: return "tls_verify_failed";
+    case NET_OUTCOME_PROXY_REFUSED: return "proxy_refused";
     }
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:1d8e9afc:2443";
+const char net_fingerprint[] = "fnv1a32:98b6a9b8:3106";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;
@@ -114,6 +117,9 @@ void net_export(const net_loader *d, FILE *out) {
         if (1) { fputs("net_origin(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].origin); fputs(").\n", out); }
         if (d->resource[i].from != 0) { fputs("net_asked_by(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); { uint32_t r = d->resource[i].from; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->resource[i].elem.doc, d->resource[i].elem.index, d->resource[i].elem.gen); fputs(").\n", out); }
         if (d->resource[i].kind == NET_KIND_IMAGE) { fputs("net_image_size(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].width); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].height); fputs(").\n", out); }
+        if (d->resource[i].outcome != NET_OUTCOME_OK) { fputs("net_failure(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].reason); fputs(").\n", out); }
+        if (d->resource[i].tls == 1) { fputs("net_tls(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].tls_version); fputs(",", out); text_put(d, out, d->resource[i].tls_cipher); fputs(",", out); text_put(d, out, d->resource[i].alpn); fputs(").\n", out); }
+        if (d->resource[i].proxied == 1) { fputs("net_proxy(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].proxy); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->hop_len; i++) {
         if (!d->hop[i].live) continue;

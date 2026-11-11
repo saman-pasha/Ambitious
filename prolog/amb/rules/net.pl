@@ -4,7 +4,8 @@
 %% elements asked for, and theirs in turn. An origin is a scheme, a host and a
 %% port; an opaque one (a file: or data: URL's) is null, and same as nothing.
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
-:- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3.
+:- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3,
+           net_failure/2, net_tls/4, net_proxy/2.
 
 net_page(R) :- net_resource(R, _, document, _, _, _, _), \+ net_asked_by(R, _, _).
 
@@ -26,15 +27,34 @@ net_failed(R, Why) :-
 %% the URLs a resource was redirected through
 net_redirects(R, Urls) :- net_resource(R, _, _, _, _, _, _), findall(U-S, net_hop(R, U, S), Urls), Urls \== [].
 
+%% a resource got over TLS, its server verified, and the TLS version
+net_secure(R, V) :- net_tls(R, V, _, _).
+
+%% a part a page served over TLS got over http: instead, mixed content
+net_mixed_content(P, R) :-
+    net_asked_by(R, P, _), net_tls(P, _, _, _), net_final_url(R, U), sub_atom(U, 0, _, _, 'http:').
+
+%% the outcomes that do not say why by themselves: their diagnostic adds the reason
+%% (net_failure/2 has every failure's)
+net_says_why(malformed).
+net_says_why(tls_handshake_failed).
+net_says_why(tls_verify_failed).
+net_says_why(proxy_refused).
+
 %% ---- what the reasoner says of what a page loaded --------------------------------
 
 net_diag(failed, R, Text) :-
-    net_failed(R, Why), net_resource(R, U, K, _, _, _, _),
+    net_failed(R, Why), net_resource(R, U, K, O, _, _, _),
     (   net_asked_by(R, _, E), E \== none, dom_element(E, Name) -> true ; Name = page ),
-    format(atom(Text), 'the ~w ~w (asked for by <~w>) failed: ~w', [K, U, Name, Why]).
+    (   net_says_why(O), net_failure(R, Reason), Reason \== '' -> format(atom(Text), 'the ~w ~w (asked for by <~w>) failed: ~w (~w)', [K, U, Name, Why, Reason])
+    ;   format(atom(Text), 'the ~w ~w (asked for by <~w>) failed: ~w', [K, U, Name, Why])
+    ).
 net_diag(cross_origin, R, Text) :-
     net_cross_origin(P, R), net_resource(R, U, K, ok, _, _, _), net_origin(R, O), net_origin(P, OP),
     format(atom(Text), 'the ~w ~w comes from ~w, not the page''s ~w', [K, U, O, OP]).
 net_diag(redirected, R, Text) :-
     net_redirects(R, Hops), net_resource(R, U, _, _, _, _, _), net_final_url(R, F), length(Hops, N),
     format(atom(Text), '~w was redirected ~d time(s), to ~w', [U, N, F]).
+net_diag(mixed_content, R, Text) :-
+    net_mixed_content(P, R), net_resource(R, U, K, _, _, _, _), net_final_url(P, PU),
+    format(atom(Text), 'the ~w ~w came over http: to a page served over TLS (~w)', [K, U, PU]).

@@ -1,3 +1,4 @@
+== http:
 document   ok                 200     891  http://127.0.0.1:PORT/index.html  text/html
 stylesheet ok                 200     104  http://127.0.0.1:PORT/style.css  text/css
 stylesheet ok                 200      39  http://127.0.0.1:PORT/old.css  text/css
@@ -32,6 +33,10 @@ P = rs(1,1,0), R = rs(1,11,0), U = 'file:///etc/hostname', K = image, O = blocke
 R = rs(1,9,0), U = 'http://localhost:PORT/logo.png', O = 'http://localhost:PORT'
 -- the stylesheet that moved, and where to:
 R = rs(1,3,0), Hops = ['http://127.0.0.1:PORT/moved/new.css'-301,'http://127.0.0.1:PORT/style2.css'-302], U = 'http://127.0.0.1:PORT/old.css', F = 'http://127.0.0.1:PORT/style2.css'
+-- why each failure failed, in words:
+R = rs(1,4,0), Why = '404 Not Found', U = 'http://127.0.0.1:PORT/gone.css', O = http_error
+R = rs(1,6,0), Why = 'more than 5 redirects', U = 'http://127.0.0.1:PORT/loop.css', O = too_many_redirects
+R = rs(1,11,0), Why = 'a page served over http: may not read a file: URL', U = 'file:///etc/hostname', O = blocked
 -- why the lead is navy, and its span green and bold:
 C = lead, N = n(1,27,0), P = color, X = declared('rgb(0, 0, 128)',written(navy),by('.lead'),in(author))
 C = lead, N = n(1,27,0), P = font_weight, X = inherited('400',from(n(1,22,0)),'the property is inherited')
@@ -51,3 +56,56 @@ amb_diag(redirected, rs(1,3,0), 'http://127.0.0.1:PORT/old.css was redirected 2 
 amb_diag(redirected, rs(1,6,0), 'http://127.0.0.1:PORT/loop.css was redirected 5 time(s), to http://127.0.0.1:PORT/loop.css').
 -- drawn:
 rendered 800x600: 11 boxes, 4 lines, 7 text fragments; pixels fnv1a64:4ffa43b5a4dd0ddc
+== https:
+document   ok                 200     623  https://localhost:TLS/tls.html  text/html
+stylesheet ok                 200      29  https://localhost:TLS/secure.css  text/css
+image      ok                 200     159  https://localhost:TLS/logo.png  image/png  96x32
+image      ok                 200     159  https://localhost:TLS12/logo.png  image/png  96x32
+image      tls_verify_failed    0       0  https://127.0.0.1:TLS/logo.png  
+image      tls_handshake_failed   0       0  https://localhost:PORT/logo.png  
+image      ok                 200     159  http://localhost:PORT/logo.png  image/png  96x32
+7 resources
+-- each TLS session: its version, and the protocol ALPN chose:
+R = rs(1,1,0), V = 'TLSv1.3', A = 'http/1.1', U = 'https://localhost:TLS/tls.html'
+R = rs(1,2,0), V = 'TLSv1.3', A = 'http/1.1', U = 'https://localhost:TLS/secure.css'
+R = rs(1,3,0), V = 'TLSv1.3', A = 'http/1.1', U = 'https://localhost:TLS/logo.png'
+R = rs(1,4,0), V = 'TLSv1.2', A = 'http/1.1', U = 'https://localhost:TLS12/logo.png'
+-- why the others failed:
+R = rs(1,5,0), Why = 'IP address mismatch', U = 'https://127.0.0.1:TLS/logo.png', O = tls_verify_failed
+R = rs(1,6,0), Why = 'wrong version number', U = 'https://localhost:PORT/logo.png', O = tls_handshake_failed
+-- the heading's colour, from the stylesheet over TLS:
+N = n(1,14,0), X = declared('rgb(0, 100, 0)',written(darkgreen),by('.secure'),in(author))
+-- the reasoner's diagnostics:
+amb_diag(failed, rs(1,5,0), 'the image https://127.0.0.1:TLS/logo.png (asked for by <img>) failed: tls_verify_failed (IP address mismatch)').
+amb_diag(failed, rs(1,6,0), 'the image https://localhost:PORT/logo.png (asked for by <img>) failed: tls_handshake_failed (wrong version number)').
+amb_diag(cross_origin, rs(1,4,0), 'the image https://localhost:TLS12/logo.png comes from https://localhost:TLS12, not the page\'s https://localhost:TLS').
+amb_diag(cross_origin, rs(1,7,0), 'the image http://localhost:PORT/logo.png comes from http://localhost:PORT, not the page\'s https://localhost:TLS').
+amb_diag(mixed_content, rs(1,7,0), 'the image http://localhost:PORT/logo.png came over http: to a page served over TLS (https://localhost:TLS/tls.html)').
+-- a store that lacks the test's authority (the system's):
+ambitious: cannot load https://localhost:TLS/tls.html: tls_verify_failed (status 0)
+R = rs(1,2,0), Why = 'unable to get local issuer certificate', U = 'https://localhost:TLS/logo.png', O = tls_verify_failed
+R = rs(1,3,0), Why = 'blocked.test: Name or service not known', U = 'https://blocked.test/logo.png', O = unreachable
+== proxies:
+-- https_proxy: every https: fetch through a tunnel
+R = rs(1,1,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS/tls.html', O = ok
+R = rs(1,2,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS/secure.css', O = ok
+R = rs(1,3,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS/logo.png', O = ok
+R = rs(1,4,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS12/logo.png', O = ok
+R = rs(1,5,0), P = 'http://127.0.0.1:PROXY', U = 'https://127.0.0.1:TLS/logo.png', O = tls_verify_failed
+R = rs(1,6,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:PORT/logo.png', O = tls_handshake_failed
+-- what the proxy was asked:
+CONNECT localhost:TLS
+CONNECT localhost:TLS
+CONNECT localhost:TLS
+CONNECT localhost:TLS12
+CONNECT 127.0.0.1:TLS
+CONNECT localhost:PORT
+-- no_proxy=localhost: localhost reached directly, the address through the proxy
+CONNECT 127.0.0.1:TLS
+-- a tunnel the proxy refuses:
+R = rs(1,3,0), Why = 'the proxy answered HTTP/1.1 403 Forbidden', U = 'https://blocked.test/logo.png', O = proxy_refused
+CONNECT localhost:TLS
+CONNECT blocked.test:443
+-- http_proxy: the page asked for in absolute form, with the proxy's credentials
+R = rs(1,1,0), P = 'http://127.0.0.1:PROXY', U = 'http://localhost:HTTP2/elsewhere.html', O = ok
+GET http://localhost:HTTP2/elsewhere.html as amb:s@fe

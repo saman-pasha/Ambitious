@@ -43,4 +43,30 @@ ok   origin of http://Example.com:8080/x: http://example.com:8080
 ok   origin of https://h:443/: https://h
 ok   origin of file:///tmp/x.html: null
 ok   origin of data:text/plain,hi: null
-45 of 45 cases
+ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
+ok   proxy for https://a.test/ with no_proxy '': http://127.0.0.1:3128
+ok   proxy for https://a.test/x with no_proxy '': http://p.test:8080
+ok   proxy for https://a.test/ with no_proxy '': http://proxy.test:8080
+ok   proxy for https://a.test/ with no_proxy '': http://p.test:80
+ok   proxy for https://a.test/ with no_proxy '*': none
+ok   proxy for https://example.test/ with no_proxy 'example.test': none
+ok   proxy for https://www.example.test/ with no_proxy 'example.test': none
+ok   proxy for https://notexample.test/ with no_proxy 'example.test': http://p.test:3128
+ok   proxy for https://example.test/ with no_proxy '.example.test': none
+ok   proxy for https://www.example.test/ with no_proxy '.example.test': none
+ok   proxy for https://a.b.example.test/ with no_proxy '*.example.test': none
+ok   proxy for https://www.Example.TEST/ with no_proxy 'EXAMPLE.test': none
+ok   proxy for https://a.test./ with no_proxy 'a.test': none
+ok   proxy for https://localhost:9/ with no_proxy 'localhost,127.0.0.1': none
+ok   proxy for https://127.1.2.3:9/ with no_proxy '127.0.0.0/8': none
+ok   proxy for https://128.0.0.1:9/ with no_proxy '127.0.0.0/8': http://p.test:3128
+ok   proxy for https://192.168.4.5:8443/ with no_proxy '10.0.0.0/8, 192.168.0.0/16': none
+ok   proxy for https://example.test:8443/ with no_proxy 'example.test:8443': none
+ok   proxy for https://example.test/ with no_proxy 'example.test:8443': http://p.test:3128
+ok   proxy for https://a.test/ with no_proxy '': refused: the proxy socks5://p.test:1080 is not an http: proxy, the only kind spoken here
+ok   proxy for http://a.test/ with no_proxy '': none
+ok   proxy for http://a.test/ with no_proxy '': http://h.test:8080
+ok   proxy for http://a.test/ with no_proxy '': none
+ok   proxy for http://a.test/ with no_proxy 'a.test': none
+ok   proxy for file:///etc/hostname with no_proxy '': none
+71 of 71 cases

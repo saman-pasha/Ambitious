@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A page over TLS</title>
+<link rel="stylesheet" href="secure.css">
+</head>
+<body>
+<h1 class="secure">Over TLS</h1>
+<p><img src="logo.png" alt="The logo, over TLS 1.3">
+<img src="https://localhost:@TLS12@/logo.png" alt="The logo, from a server held to TLS 1.2">
+<img src="https://127.0.0.1:PORT/logo.png" alt="The logo, from an address the certificate does not name">
+<img src="https://localhost:@HTTP@/logo.png" alt="The logo, over TLS from a server that speaks none">
+<img src="http://localhost:@HTTP@/logo.png" alt="The logo, over http: to a page over TLS"></p>
+</body>
+</html>
