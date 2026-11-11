@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Images: JPEG and GIF</title>
+<style>
+body { font-family: sans-serif; margin: 12px; background: #f4f1ea }
+h1 { font-size: 20px; margin: 0 0 8px }
+p { margin: 8px 0 4px; font-size: 13px }
+img { margin-right: 6px }
+.swatch { background: #2a8a5a; padding: 6px; display: inline-block }
+</style>
+</head>
+<body>
+<h1>JPEG and GIF, decoded and drawn</h1>
+<p>Baseline 4:2:0 at its own size; progressive, enlarged; grey; Adobe's CMYK; YCCK sampled 4:2:0, enlarged:</p>
+<div><img src="../images/j_photo.jpg" alt="baseline"><img src="../images/j_prog_420.jpg" style="width: 154px" alt="progressive"><img src="../images/j_grey.jpg" alt="grey"><img src="../images/j_cmyk.jpg" alt="CMYK"><img src="../images/jo_ycck.jpg" style="width: 66px" alt="YCCK"></div>
+<p>4:1:1 and 4:4:0, enlarged; a restart after every MCU; EXIF's half turn (3); its quarter turn (6), the turned size declared:</p>
+<div><img src="../images/jo_411.jpg" style="width: 90px" alt="4:1:1"><img src="../images/jo_440.jpg" style="width: 62px" alt="4:4:0"><img src="../images/j_restart_blocks.jpg" alt="restarts"><img src="../images/j_exif3.jpg" style="width: 74px" alt="half turn"><img src="../images/j_exif6.jpg" style="width: 46px; height: 74px" alt="quarter turn"></div>
+<p>GIF: transparent over green, and a first frame offset on its canvas; interlaced; an animation's first frame; a photograph in 256 colours:</p>
+<div><span class="swatch"><img src="../images/g_pil_trans.gif" alt="transparent"><img src="../images/g_local_first.gif" style="width: 60px" alt="offset frame"></span> <img src="../images/g_interlace_17.gif" style="width: 42px" alt="interlaced"><img src="../images/g_pil_animated.gif" style="width: 90px" alt="animated"><img src="../images/g_pil_photo.gif" alt="photograph"></div>
+</body>
+</html>

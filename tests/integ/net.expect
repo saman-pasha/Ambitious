@@ -50,4 +50,4 @@ amb_diag(cross_origin, rs(1,9,0), 'the image http://localhost:PORT/logo.png come
 amb_diag(redirected, rs(1,3,0), 'http://127.0.0.1:PORT/old.css was redirected 2 time(s), to http://127.0.0.1:PORT/style2.css').
 amb_diag(redirected, rs(1,6,0), 'http://127.0.0.1:PORT/loop.css was redirected 5 time(s), to http://127.0.0.1:PORT/loop.css').
 -- drawn:
-rendered 800x600: 11 boxes, 4 lines, 7 text fragments; pixels fnv1a64:4ffa43b5a4dd0ddc
+rendered 800x600: 11 boxes, 4 lines, 7 text fragments; pixels fnv1a64:07add509d8691eb1

@@ -1,0 +1,41 @@
+g_local_first 20x15, 1 frame, b4336cbec0a223e3
+g_offset_opaque 16x12, 1 frame, 91127d66e4d3455b
+g_interlace_1 7x1, 1 frame, 5dd5b44f6cf18c3f
+g_interlace_2 7x2, 1 frame, 6e2d7164bdc65f80
+g_interlace_3 7x3, 1 frame, c1bbf12c261b88f5
+g_interlace_5 7x5, 1 frame, eb87e20579f2ae19
+g_interlace_9 7x9, 1 frame, 7f5f2e6094348e0d
+g_interlace_17 7x17, 1 frame, d06865506dcf8021
+g_mcs2 13x11, 1 frame, 3e3118fa8e28a4ac
+g_mcs3 13x11, 1 frame, dd14b9faa2c7a12b
+g_mcs4 13x11, 1 frame, 7065d17e1ffdf974
+g_mcs5 13x11, 1 frame, 52ecb77ab0b12778
+g_mcs6 13x11, 1 frame, 006c2bf552cc13cd
+g_mcs7 13x11, 1 frame, 58c3d5c807f24501
+g_mcs8 13x11, 1 frame, ae6dae4297ca59db
+g_full_kept 128x96, 1 frame, 761054ddd37eccc3
+g_full_cleared 128x96, 1 frame, 761054ddd37eccc3
+g_clears 40x30, 1 frame, ffebe6bea568f6a8
+g_no_first_clear 25x9, 1 frame, d9a5dd9ad0c06f8b
+g_no_table 6x5, 1 frame, 3b5061c442c857da
+g_past_table 9x4, 1 frame, ba86d1cd369621c9
+g_clipped 10x8, 1 frame, 782408448017c644
+g_one_pixel 1x1, 1 frame, d6e387b7571b8d6b
+g_87a 12x7, 1 frame, a3a6bfdff260fb23
+g_animated 18x14, 3 frames, 1041d6abb0c129a3
+g_pil 40x30, 1 frame, c43beae71146c2d8
+g_pil_trans 40x30, 1 frame, d7496b790184cef4
+g_pil_flat 40x30, 1 frame, c43beae71146c2d8
+g_pil_animated 30x20, 4 frames, 9e09e94682dc14fb
+g_pil_photo 50x40, 1 frame, 5cbd2d627303e61b
+bad_gif_cut_header: refused
+bad_gif_cut_table: refused
+bad_gif_cut_lzw: a prefix 13x11
+bad_gif_huge_screen: refused
+bad_gif_huge_frame: refused
+bad_gif_code_size: refused
+bad_gif_code_range: a prefix 4x4
+bad_gif_no_image: refused
+bad_gif_zero_screen: refused
+bad_gif_cut_extension: refused
+mutations of the fixtures: each decoded or refused

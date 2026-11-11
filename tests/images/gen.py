@@ -1,19 +1,49 @@
 #!/usr/bin/env python3
-"""tests/images/gen.py -- the PNG decoder's fixtures, and what each decodes to.
+"""tests/images/gen.py -- the image decoders' fixtures, and what each decodes to.
 
-Each fixture is written by this script's own encoder (over Python's zlib), from
-pixels it computes, so what the C decoder (src/paint/image.c) must give back is
-known without it: each colour type and bit depth, all five filters, Adam7,
+PNG. Each fixture is written by this script's own encoder (over Python's zlib),
+from pixels it computes, so what the C decoder (src/paint/image.c) must give back
+is known without it: each colour type and bit depth, all five filters, Adam7,
 stored and compressed streams, IDAT split in two, tRNS. Two more are written by
-Pillow, a third party's encoder, and checked against Pillow's own decoding.
-Writes tests/images/*.png and prints the expectation: name, size, FNV-1a 64 of
-the RGBA8 pixels, as tests/exec/png_decode.c prints them."""
+Pillow, a third party's encoder, and checked against Pillow's own decoding. The
+expectation (name, size, FNV-1a 64 of the RGBA8 pixels, as tests/exec/png_decode.c
+prints them) goes to expected.txt.
+
+GIF. Written by Pillow's encoder and by this script's own: a first frame with a
+local table and offset on its canvas, interlacing at heights 1 to 17, each code
+size, a full LZW table kept without a clear and one cleared, clear codes
+mid-stream, none to begin, no colour table at all, indices past the table,
+animation. Each is checked against Pillow's decoding of the same file, exactly:
+its size, its frames and the FNV-1a 64 of its RGBA8 pixels, in
+tests/exec/gif_decode.expect. A browser composes the first frame onto a
+transparent canvas the logical screen's size, where Pillow fills what the frame
+leaves with an index and grows the canvas to a frame past it: so outside the
+frame the expectation is transparent, and the canvas is the screen's. A fully
+transparent pixel is (0, 0, 0, 0) on both sides.
+
+JPEG. Written by Pillow (libjpeg-turbo) -- each subsampling it writes,
+progressive, restart intervals, grey, CMYK, Adobe's RGB, optimized tables, the
+qualities' extremes, every EXIF orientation, no Huffman tables at all -- and by
+this script's own baseline encoder for what Pillow cannot write: 4:1:1, 4:4:0,
+3:1, chroma 2x1 under 2x2, non-interleaved scans, YCCK, subsampled CMYK, 16-bit
+quantization, ids that name no colour space, a lone component sampled 2x2.
+Pillow's decoding of each (EXIF's orientation applied by ImageOps.exif_transpose,
+CMYK made RGB by its convert) is written beside it as NAME.pil.png, which
+tests/exec/jpeg_decode.c compares with its own: every channel within 4, the mean
+error under 1. tests/exec/jpeg_decode.expect names each with Pillow's size.
+
+The hostile files (bad_*): truncated, wrong lengths, sizes past the cap, bad
+Huffman tables, LZW codes out of range, each refused or decoded to a prefix as
+the .expect files say; the tests add mutations of their own.
+
+Run from anywhere: python3 tests/images/gen.py"""
 import os
 import struct
 import sys
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+EXEC = os.path.join(os.path.dirname(HERE), "exec")
 
 
 def chunk(t, d):
@@ -145,7 +175,7 @@ CASES = [
 ]
 
 
-def main():
+def png_fixtures():
     lines = []
     for name, w, h, depth, ctype, px, opts in CASES:
         enc = dict(opts)
@@ -165,7 +195,654 @@ def main():
     for name in ("pillow_rgba", "pillow_pal"):
         got = Image.open(os.path.join(HERE, name + ".png")).convert("RGBA")
         lines.append("%s %dx%d %016x" % (name, got.width, got.height, fnv(got.tobytes())))
-    sys.stdout.write("\n".join(lines) + "\n")
+    return lines
+
+
+# ---- the pictures the GIF and JPEG fixtures hold ----
+
+class Lcg:
+    """a reproducible stream of numbers, the same on every Python"""
+
+    def __init__(self, seed):
+        self.s = seed
+
+    def next(self):
+        self.s = (self.s * 1103515245 + 12345) & 0x7FFFFFFF
+        return self.s >> 8
+
+
+def photo(w, h, seed=1):
+    """RGB rows with what a photograph has: gradients, a disc, hard edges, noise"""
+    rng = Lcg(seed)
+    rows = []
+    for y in range(h):
+        row = []
+        for x in range(w):
+            r = x * 255 // max(1, w - 1)
+            g = y * 255 // max(1, h - 1)
+            b = 28 + ((x + 2 * y) * 9) % 200
+            if 9 * ((3 * x - w) ** 2) + 9 * ((2 * y - h) ** 2) < 4 * min(w, h) ** 2:
+                r, g, b = 250 - g // 2, 40 + r // 3, 60
+            if (x // 6 + y // 6) % 5 == 0:
+                r, g, b = 255 - r, 255 - g, 255 - b
+            n = rng.next() % 41 - 20
+            row.append(tuple(max(0, min(255, c + n)) for c in (r, g, b)))
+        rows.append(row)
+    return rows
+
+
+def checker(w, h):
+    """hard 1-pixel detail with full contrast: the coefficients' extremes"""
+    return [[(255, 255, 255) if (x + y) % 2 else (0, 0, 0) if (x // 3) % 2 else (255, 0, 0) for x in range(w)] for y in range(h)]
+
+
+def pil_rgb(rows):
+    from PIL import Image
+    im = Image.new("RGB", (len(rows[0]), len(rows)))
+    im.frombytes(bytes(c for row in rows for px in row for c in px))
+    return im
+
+
+# ---- GIF: this script's own encoder ----
+
+def lzw(indices, mcs, clear_first=True, reset_full=True, clear_every=0):
+    """indices as GIF's LZW codes, least significant bit first: each code as wide as the
+    decoder's table then needs; when the table fills, a clear (reset_full) or the table
+    kept as it is; a clear after every clear_every codes"""
+    clr, eoi = 1 << mcs, (1 << mcs) + 1
+    out = bytearray()
+    state = {"acc": 0, "nb": 0}
+    table, nxt = {}, clr + 2
+
+    def put(code):
+        size = max(mcs + 1, min(12, (nxt - 1).bit_length()))
+        state["acc"] |= code << state["nb"]
+        state["nb"] += size
+        while state["nb"] >= 8:
+            out.append(state["acc"] & 0xFF)
+            state["acc"] >>= 8
+            state["nb"] -= 8
+
+    if clear_first:
+        put(clr)
+    cur, emitted = None, 0
+    for c in indices:
+        if cur is None:
+            cur = c
+            continue
+        if (cur, c) in table:
+            cur = table[(cur, c)]
+            continue
+        put(cur)
+        emitted += 1
+        if nxt < 4096:
+            table[(cur, c)] = nxt
+            nxt += 1
+        elif reset_full:
+            put(clr)
+            table, nxt = {}, clr + 2
+        if clear_every and emitted % clear_every == 0:
+            put(clr)
+            table, nxt = {}, clr + 2
+        cur = c
+    if cur is not None:
+        put(cur)
+    put(eoi)
+    if state["nb"]:
+        out.append(state["acc"] & 0xFF)
+    return bytes(out)
+
+
+def colour_table(colours):
+    """a GIF colour table: its size's field and its bytes, padded to a power of two"""
+    bits = max(1, (len(colours) - 1).bit_length())
+    return bits - 1, bytes(c for rgb in colours for c in rgb) + bytes(3 * ((1 << bits) - len(colours)))
+
+
+def interlaced(rows):
+    return [rows[y] for y in list(range(0, len(rows), 8)) + list(range(4, len(rows), 8)) + list(range(2, len(rows), 4)) + list(range(1, len(rows), 2))]
+
+
+def gif(w, h, frames, gct=None, version=b"89a"):
+    """a GIF of the frames: each (x, y, rows of indices, options): lct, trans, interlace,
+    mcs, and the LZW encoder's options"""
+    out = bytearray(b"GIF" + version)
+    flags = 0
+    table = b""
+    if gct is not None:
+        sz, table = colour_table(gct)
+        flags = 0x80 | 0x70 | sz
+    out += struct.pack("<HHBBB", w, h, flags, 0, 0)
+    out += table
+    for (x, y, rows, opt) in frames:
+        trans = opt.get("trans")
+        if trans is not None or opt.get("delay"):
+            out += bytes([0x21, 0xF9, 4, 1 if trans is not None else 0]) + struct.pack("<H", opt.get("delay", 0)) + bytes([trans or 0, 0])
+        fl, lct = 0, b""
+        if opt.get("lct") is not None:
+            sz, lct = colour_table(opt["lct"])
+            fl = 0x80 | sz
+        if opt.get("interlace"):
+            fl |= 0x40
+        out += bytes([0x2C]) + struct.pack("<HHHHB", x, y, len(rows[0]) if rows else 0, len(rows), fl) + lct
+        coded = interlaced(rows) if opt.get("interlace") else rows
+        mcs = opt.get("mcs", 8)
+        d = lzw([v for row in coded for v in row], mcs, opt.get("clear_first", True), opt.get("reset_full", True), opt.get("clear_every", 0))
+        out.append(mcs)
+        for i in range(0, len(d), 255):
+            out.append(len(d[i:i + 255]))
+            out += d[i:i + 255]
+        out.append(0)
+    out.append(0x3B)
+    return bytes(out)
+
+
+def ramp(n, seed):
+    return [((i * 37 + seed * 11) % 256, (i * 91 + seed * 53) % 256, (255 - i * 29 - seed) % 256) for i in range(n)]
+
+
+def indices(w, h, n, seed=0):
+    rng = Lcg(seed + 7)
+    return [[(x * 3 + y * 5 + (rng.next() % 3 if seed else 0)) % n for x in range(w)] for y in range(h)]
+
+
+def noise_indices(w, h, n, seed):
+    rng = Lcg(seed)
+    return [[rng.next() % n for _ in range(w)] for _ in range(h)]
+
+
+def gif_cases():
+    """(name, bytes, the first frame's box or None for the whole canvas)"""
+    cases = []
+    # a first frame of its own table, offset on a canvas with no global one, a transparent index
+    cases.append(("g_local_first", gif(20, 15, [(3, 2, indices(11, 9, 8), {"lct": ramp(8, 1), "trans": 5, "mcs": 3})]), (3, 2, 11, 9)))
+    # a frame smaller than its canvas, opaque: outside it, transparent
+    cases.append(("g_offset_opaque", gif(16, 12, [(2, 3, indices(9, 5, 4), {"mcs": 2})], gct=ramp(4, 2)), (2, 3, 9, 5)))
+    for hh in (1, 2, 3, 5, 9, 17):
+        cases.append(("g_interlace_%d" % hh, gif(7, hh, [(0, 0, indices(7, hh, 16, 1), {"interlace": True, "mcs": 4})], gct=ramp(16, 3)), None))
+    for mcs in range(2, 9):
+        n = 1 << mcs
+        cases.append(("g_mcs%d" % mcs, gif(13, 11, [(0, 0, indices(13, 11, n, mcs), {"mcs": mcs})], gct=ramp(n, mcs)), None))
+    big = noise_indices(128, 96, 256, 5)
+    cases.append(("g_full_kept", gif(128, 96, [(0, 0, big, {"reset_full": False})], gct=ramp(256, 4)), None))
+    cases.append(("g_full_cleared", gif(128, 96, [(0, 0, big, {"reset_full": True})], gct=ramp(256, 4)), None))
+    cases.append(("g_clears", gif(40, 30, [(0, 0, indices(40, 30, 32, 2), {"mcs": 5, "clear_every": 37})], gct=ramp(32, 5)), None))
+    cases.append(("g_no_first_clear", gif(25, 9, [(0, 0, indices(25, 9, 16, 3), {"mcs": 4, "clear_first": False})], gct=ramp(16, 6)), None))
+    cases.append(("g_no_table", gif(6, 5, [(0, 0, indices(6, 5, 8), {"mcs": 3})]), None))
+    cases.append(("g_past_table", gif(9, 4, [(0, 0, indices(9, 4, 8), {"mcs": 3})], gct=ramp(4, 7)), None))
+    cases.append(("g_clipped", gif(10, 8, [(6, 5, indices(8, 6, 4), {"mcs": 2, "trans": 1})], gct=ramp(4, 8)), (6, 5, 8, 6)))
+    cases.append(("g_one_pixel", gif(1, 1, [(0, 0, [[1]], {"mcs": 2})], gct=ramp(2, 9)), None))
+    cases.append(("g_87a", gif(12, 7, [(0, 0, indices(12, 7, 4), {"mcs": 2})], gct=ramp(4, 10), version=b"87a"), None))
+    frames = [(0, 0, indices(18, 14, 16, 4), {"trans": 2, "delay": 10, "mcs": 4, "lct": ramp(16, 11)}),
+              (4, 4, indices(6, 6, 16, 5), {"lct": ramp(16, 12), "mcs": 4}),
+              (0, 0, indices(18, 14, 16, 6), {"interlace": True, "mcs": 4})]
+    cases.append(("g_animated", gif(18, 14, frames, gct=ramp(16, 13)), None))
+    # by Pillow's encoder: interlaced as it writes them, a transparent index, an animation whose
+    # frames carry their own tables, a photograph quantized to 256 colours, and one not interlaced
+    from PIL import Image
+    pal = Image.new("P", (40, 30))
+    pal.putpalette([c for rgb in ramp(16, 14) for c in rgb])
+    pal.putdata([v for row in indices(40, 30, 16, 8) for v in row])
+    for name, opts in (("g_pil", {}), ("g_pil_trans", {"transparency": 3}), ("g_pil_flat", {"interlace": False})):
+        path = os.path.join(HERE, name + ".gif")
+        pal.save(path, **opts)
+        cases.append((name, open(path, "rb").read(), None))
+    seq = []
+    for k in range(4):
+        f = Image.new("P", (30, 20))
+        f.putpalette([c for rgb in ramp(32, 20 + k) for c in rgb])
+        f.putdata([v for row in indices(30, 20, 32, 10 + k) for v in row])
+        seq.append(f)
+    path = os.path.join(HERE, "g_pil_animated.gif")
+    seq[0].save(path, save_all=True, append_images=seq[1:], duration=[50, 60, 70, 80], loop=0)
+    cases.append(("g_pil_animated", open(path, "rb").read(), None))
+    path = os.path.join(HERE, "g_pil_photo.gif")
+    pil_rgb(photo(50, 40, 3)).save(path)
+    cases.append(("g_pil_photo", open(path, "rb").read(), None))
+    return cases
+
+
+def gif_expectation(name, b, box):
+    """what Pillow decodes the first frame to, on a transparent canvas the screen's size"""
+    import io
+    from PIL import Image
+    w, h = struct.unpack("<HH", b[6:10])
+    im = Image.open(io.BytesIO(b))
+    frames = im.n_frames
+    im.seek(0)
+    px = im.convert("RGBA")
+    out = bytearray()
+    for y in range(h):
+        for x in range(w):
+            inside = box is None or (box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3])
+            p = px.getpixel((x, y)) if x < px.width and y < px.height else (0, 0, 0, 0)
+            out += bytes(p) if inside and p[3] else bytes(4)
+    return "%s %dx%d, %d frame%s, %016x" % (name, w, h, frames, "" if frames == 1 else "s", fnv(out))
+
+
+def gif_hostile(cases):
+    """(name, bytes, what the decoder must make of them)"""
+    by = dict((n, b) for n, b, _ in cases)
+    good = by["g_mcs8"]
+    out = [("bad_gif_cut_header", good[:11], "refused"),
+           ("bad_gif_cut_table", good[:400], "refused"),
+           ("bad_gif_cut_lzw", good[:len(good) - 60], "a prefix 13x11")]
+    huge = bytearray(good)
+    huge[6:10] = struct.pack("<HH", 65535, 65535)
+    out.append(("bad_gif_huge_screen", bytes(huge), "refused"))
+    # a frame past the cap, on a canvas of 13x11
+    i = good.index(b"\x2c", 13 + 768)
+    frame = bytearray(good)
+    frame[i + 5:i + 9] = struct.pack("<HH", 65535, 65535)
+    out.append(("bad_gif_huge_frame", bytes(frame), "refused"))
+    # the code size 12, which leaves no room for codes
+    mcs = bytearray(good)
+    mcs[i + 10] = 12
+    out.append(("bad_gif_code_size", bytes(mcs), "refused"))
+    # a code past the table: right after the clear, the code 4095
+    clr = 1 << 4
+    d = bytearray()
+    acc, nb = clr, 5
+    for code, size in ((3, 5), (1, 5), (31, 5)):
+        acc |= code << nb
+        nb += size
+    while nb > 0:
+        d.append(acc & 0xFF)
+        acc >>= 8
+        nb -= 8
+    b = bytearray(b"GIF89a" + struct.pack("<HHBBB", 4, 4, 0xF3, 0, 0)) + bytes(48)
+    b += bytes([0x2C]) + struct.pack("<HHHHB", 0, 0, 4, 4, 0) + bytes([4, len(d)]) + d + b"\x00\x3b"
+    out.append(("bad_gif_code_range", bytes(b), "a prefix 4x4"))
+    out.append(("bad_gif_no_image", b"GIF89a" + struct.pack("<HHBBB", 4, 4, 0, 0, 0) + b"\x3b", "refused"))
+    out.append(("bad_gif_zero_screen", b"GIF89a" + struct.pack("<HHBBB", 0, 4, 0, 0, 0) + b"\x3b", "refused"))
+    ext = bytearray(good[:13 + 768]) + b"\x21\xf9\x04\x01\x00"
+    out.append(("bad_gif_cut_extension", bytes(ext), "refused"))
+    return out
+
+
+# ---- JPEG: this script's own baseline encoder ----
+
+ZIGZAG = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+          35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]
+
+# T.81's example quantization (K.1), halved: luminance and chrominance, natural order
+Q_LUMA = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
+          18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99]
+Q_CHROMA = [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99] + [99] * 32
+Q8 = [[max(1, v // 2) for v in Q_LUMA], [max(1, v // 2) for v in Q_CHROMA]]
+# 16-bit steps (steps past 255): coarse at the high frequencies
+Q16 = [[v * (1 + (i // 8 + i % 8) // 3) for i, v in enumerate(Q_LUMA)], [v * 3 for v in Q_CHROMA]]
+
+_COS = None
+
+
+def fdct(b):
+    """the forward DCT of an 8x8 block (row by row), as T.81 A.3.3 defines it"""
+    global _COS
+    import math
+    if _COS is None:
+        _COS = [[math.cos((2 * x + 1) * u * math.pi / 16) * (math.sqrt(0.5) if u == 0 else 1) / 2 for x in range(8)] for u in range(8)]
+    tmp = [sum(b[y * 8 + x] * _COS[u][x] for x in range(8)) for y in range(8) for u in range(8)]
+    return [sum(tmp[y * 8 + u] * _COS[v][y] for y in range(8)) for v in range(8) for u in range(8)]
+
+
+def std_tables():
+    """the standard Huffman tables, as libjpeg writes them for Pillow: (class, slot, counts, symbols)"""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(buf, "JPEG", optimize=False)
+    b, i, tables = buf.getvalue(), 2, []
+    while i < len(b):
+        m, ln = b[i + 1], struct.unpack(">H", b[i + 2:i + 4])[0]
+        if m == 0xC4:
+            d, k = b[i + 4:i + 2 + ln], 0
+            while k < len(d):
+                counts = list(d[k + 1:k + 17])
+                tables.append((d[k] >> 4, d[k] & 15, counts, list(d[k + 17:k + 17 + sum(counts)])))
+                k += 17 + sum(counts)
+        if m == 0xDA:
+            break
+        i += 2 + ln
+    return tables
+
+
+class BitWriter:
+    def __init__(self):
+        self.out, self.acc, self.n = bytearray(), 0, 0
+
+    def put(self, v, ln):
+        for i in range(ln - 1, -1, -1):
+            self.acc = (self.acc << 1) | ((v >> i) & 1)
+            self.n += 1
+            if self.n == 8:
+                self.out.append(self.acc)
+                if self.acc == 0xFF:
+                    self.out.append(0)
+                self.acc, self.n = 0, 0
+
+    def pad(self):
+        while self.n:
+            self.put(1, 1)
+
+
+def codes_of(counts, symbols):
+    codes, code, k = {}, 0, 0
+    for ln in range(1, 17):
+        for _ in range(counts[ln - 1]):
+            codes[symbols[k]] = (code, ln)
+            code += 1
+            k += 1
+        code <<= 1
+    return codes
+
+
+def segment(marker, body):
+    return bytes([0xFF, marker]) + struct.pack(">H", len(body) + 2) + body
+
+
+def jpeg(w, h, planes, comps, q16=False, ri=0, separate=False, jfif=True, adobe=None):
+    """a baseline (or, with 16-bit steps, extended) JPEG of full-size planes (each h rows of
+    w samples, 0..255): comps are (id, h, v, quantization table, Huffman slot); each
+    component downsampled by the mean of its box, padded by repeating its edge"""
+    hmax, vmax = max(c[1] for c in comps), max(c[2] for c in comps)
+    mcux, mcuy = -(-w // (8 * hmax)), -(-h // (8 * vmax))
+    qt = Q16 if q16 else Q8
+    blocks = []   # per component: rows of blocks, each 64 quantized coefficients in zigzag order
+    sizes = []
+    for (cid, ch, cv, tq, slot), plane in zip(comps, planes):
+        rx, ry = hmax // ch, vmax // cv
+        cw, chh = -(-w * ch // hmax), -(-h * cv // vmax)
+        sizes.append((cw, chh))
+        small = [[sum(plane[yy][xx] for yy in range(y * ry, min(h, y * ry + ry)) for xx in range(x * rx, min(w, x * rx + rx))) /
+                  ((min(h, y * ry + ry) - y * ry) * (min(w, x * rx + rx) - x * rx)) for x in range(cw)] for y in range(chh)]
+        bw, bh = mcux * ch, mcuy * cv
+        rows = []
+        for by in range(bh):
+            row = []
+            for bx in range(bw):
+                blk = [small[min(chh - 1, by * 8 + y)][min(cw - 1, bx * 8 + x)] - 128 for y in range(8) for x in range(8)]
+                f = fdct(blk)
+                row.append([int((f[ZIGZAG[k]] / qt[tq][ZIGZAG[k]]) + (0.5 if f[ZIGZAG[k]] >= 0 else -0.5)) for k in range(64)])
+            rows.append(row)
+        blocks.append(rows)
+    tabs = std_tables()
+    codes = {(c, s): codes_of(n, v) for c, s, n, v in tabs}
+    out = bytearray(b"\xff\xd8")
+    if jfif:
+        out += segment(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+    if adobe is not None:
+        out += segment(0xEE, b"Adobe" + struct.pack(">HHHB", 100, 0, 0, adobe))
+    for t in sorted(set(c[3] for c in comps)):
+        if q16:
+            out += segment(0xDB, bytes([0x10 | t]) + b"".join(struct.pack(">H", qt[t][ZIGZAG[k]]) for k in range(64)))
+        else:
+            out += segment(0xDB, bytes([t]) + bytes(qt[t][ZIGZAG[k]] for k in range(64)))
+    out += segment(0xC1 if q16 else 0xC0, struct.pack(">BHHB", 8, h, w, len(comps)) + b"".join(bytes([c[0], c[1] << 4 | c[2], c[3]]) for c in comps))
+    for c, s, n, v in tabs:
+        out += segment(0xC4, bytes([c << 4 | s]) + bytes(n) + bytes(v))
+    if ri:
+        out += segment(0xDD, struct.pack(">H", ri))
+    scans = [[i] for i in range(len(comps))] if separate else [list(range(len(comps)))]
+    for scan in scans:
+        out += segment(0xDA, bytes([len(scan)]) + b"".join(bytes([comps[i][0], comps[i][4] << 4 | comps[i][4]]) for i in scan) + b"\x00\x3f\x00")
+        bits, pred = BitWriter(), [0] * len(comps)
+        if len(scan) == 1:
+            i = scan[0]
+            units = [[(i, bx, by)] for by in range(-(-sizes[i][1] // 8)) for bx in range(-(-sizes[i][0] // 8))]
+        else:
+            units = [[(i, mx * comps[i][1] + u, my * comps[i][2] + v) for i in scan for v in range(comps[i][2]) for u in range(comps[i][1])]
+                     for my in range(mcuy) for mx in range(mcux)]
+        for n, unit in enumerate(units):
+            if ri and n and n % ri == 0:
+                bits.pad()
+                bits.out += bytes([0xFF, 0xD0 + (n // ri - 1) % 8])
+                pred = [0] * len(comps)
+            for (i, bx, by) in unit:
+                coef = blocks[i][by][bx]
+                dc, ac = codes[(0, comps[i][4])], codes[(1, comps[i][4])]
+                diff = coef[0] - pred[i]
+                pred[i] = coef[0]
+                s = abs(diff).bit_length()
+                bits.put(*dc[s])
+                if s:
+                    bits.put(diff if diff >= 0 else diff + (1 << s) - 1, s)
+                run = 0
+                for k in range(1, 64):
+                    v = coef[k]
+                    if v == 0:
+                        run += 1
+                        continue
+                    while run > 15:
+                        bits.put(*ac[0xF0])
+                        run -= 16
+                    s = abs(v).bit_length()
+                    bits.put(*ac[run << 4 | s])
+                    bits.put(v if v >= 0 else v + (1 << s) - 1, s)
+                    run = 0
+                if run:
+                    bits.put(*ac[0x00])
+        bits.pad()
+        out += bits.out
+    out += b"\xff\xd9"
+    return bytes(out)
+
+
+def ycc(rows):
+    """JFIF's YCbCr of RGB rows: three full-size planes"""
+    y = [[0.299 * r + 0.587 * g + 0.114 * b for (r, g, b) in row] for row in rows]
+    cb = [[-0.168736 * r - 0.331264 * g + 0.5 * b + 128 for (r, g, b) in row] for row in rows]
+    cr = [[0.5 * r - 0.418688 * g - 0.081312 * b + 128 for (r, g, b) in row] for row in rows]
+    return [y, cb, cr]
+
+
+def channels(rows):
+    return [[[px[k] for px in row] for row in rows] for k in range(3)]
+
+
+def jpeg_own():
+    """(name, bytes) of this script's encoder: what Pillow cannot write"""
+    out = []
+    P = photo
+    out.append(("jo_411", jpeg(45, 21, ycc(P(45, 21, 11)), [(1, 4, 1, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)])))
+    out.append(("jo_440", jpeg(31, 29, ycc(P(31, 29, 12)), [(1, 1, 2, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)])))
+    out.append(("jo_31", jpeg(37, 19, ycc(P(37, 19, 13)), [(1, 3, 1, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)])))
+    out.append(("jo_c21", jpeg(35, 27, ycc(P(35, 27, 14)), [(1, 2, 2, 0, 0), (2, 2, 1, 1, 1), (3, 2, 1, 1, 1)])))
+    out.append(("jo_scans", jpeg(43, 29, ycc(P(43, 29, 15)), [(1, 2, 2, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)], ri=5, separate=True)))
+    out.append(("jo_restart7", jpeg(53, 31, ycc(P(53, 31, 16)), [(1, 2, 1, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)], ri=7)))
+    out.append(("jo_q16", jpeg(29, 23, ycc(P(29, 23, 17)), [(1, 2, 2, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1)], q16=True)))
+    out.append(("jo_ids0", jpeg(30, 20, ycc(P(30, 20, 18)), [(0, 1, 1, 0, 0), (1, 1, 1, 1, 1), (2, 1, 1, 1, 1)], jfif=False)))
+    out.append(("jo_rgb_ids", jpeg(30, 20, channels(P(30, 20, 19)), [(82, 1, 1, 0, 0), (71, 1, 1, 0, 0), (66, 1, 1, 0, 0)], jfif=False)))
+    out.append(("jo_grey_22", jpeg(27, 21, [ycc(P(27, 21, 20))[0]], [(1, 2, 2, 0, 0)])))
+    rows = P(33, 25, 21)
+    k = [[(x * 7 + y * 5) % 256 for x in range(33)] for y in range(25)]
+    out.append(("jo_ycck", jpeg(33, 25, ycc(rows) + [k], [(1, 2, 2, 0, 0), (2, 1, 1, 1, 1), (3, 1, 1, 1, 1), (4, 2, 2, 0, 0)],
+                                jfif=False, adobe=2)))
+    out.append(("jo_cmyk_sub", jpeg(33, 25, channels(rows) + [k], [(1, 1, 1, 0, 0), (2, 1, 1, 0, 0), (3, 1, 1, 0, 0), (4, 2, 2, 0, 0)],
+                                    jfif=False, adobe=0)))
+    return out
+
+
+def exif(orientation):
+    from PIL import Image
+    e = Image.Exif()
+    e[0x0112] = orientation
+    return e.tobytes()
+
+
+def jpeg_pil():
+    """(name, bytes) of Pillow's encoder (libjpeg-turbo)"""
+    import io
+    from PIL import Image
+    out = []
+
+    def save(name, im, **opts):
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", **opts)
+        out.append((name, buf.getvalue()))
+
+    ph = pil_rgb(photo(61, 43, 1))
+    save("j_444", ph, quality=90, subsampling=0)
+    save("j_422", ph, quality=90, subsampling=1)
+    save("j_420", ph, quality=90, subsampling=2)
+    save("j_420_5x3", pil_rgb(photo(5, 3, 2)), quality=90, subsampling=2)
+    save("j_420_3x3", pil_rgb(photo(3, 3, 3)), quality=90, subsampling=2)
+    save("j_1x1", pil_rgb(photo(1, 1, 4)), quality=90)
+    save("j_q100", pil_rgb(checker(40, 24)), quality=100, subsampling=0)
+    save("j_q100_420", pil_rgb(checker(40, 24)), quality=100, subsampling=2)
+    save("j_q5", ph, quality=5, subsampling=2)
+    save("j_optimized", ph, quality=85, optimize=True)
+    big = pil_rgb(photo(77, 51, 5))
+    save("j_prog_420", big, quality=88, progressive=True, subsampling=2)
+    save("j_prog_444", big, quality=88, progressive=True, subsampling=0)
+    save("j_prog_422", big, quality=70, progressive=True, subsampling=1)
+    save("j_restart_blocks", big, quality=88, restart_marker_blocks=1)
+    save("j_restart_rows", big, quality=88, subsampling=1, restart_marker_rows=1)
+    save("j_prog_restart", big, quality=88, progressive=True, restart_marker_blocks=3)
+    grey = ph.convert("L")
+    save("j_grey", grey, quality=90)
+    save("j_grey_prog", grey, quality=90, progressive=True)
+    cmyk = ph.convert("CMYK")
+    save("j_cmyk", cmyk, quality=90)
+    save("j_cmyk_prog", cmyk, quality=90, progressive=True)
+    save("j_adobe_rgb", ph, quality=90, keep_rgb=True)
+    save("j_photo", pil_rgb(photo(160, 120, 6)), quality=85)
+    o = pil_rgb(photo(37, 23, 7))
+    for k in range(1, 9):
+        save("j_exif%d" % k, o, quality=90, exif=exif(k))
+    # the standard tables, stripped: libjpeg-turbo decodes with its own (Motion JPEG)
+    buf = io.BytesIO()
+    ph.save(buf, "JPEG", quality=90, optimize=False)
+    b, i, kept = buf.getvalue(), 2, bytearray(b"\xff\xd8")
+    while i < len(b):
+        m, ln = b[i + 1], struct.unpack(">H", b[i + 2:i + 4])[0]
+        if m == 0xDA:
+            kept += b[i:]
+            break
+        if m != 0xC4:
+            kept += b[i:i + 2 + ln]
+        i += 2 + ln
+    out.append(("j_no_tables", bytes(kept)))
+    return out
+
+
+def markers(b):
+    """a JPEG's segments to its first scan: (marker, offset, length)"""
+    i, out = 2, []
+    while i + 4 <= len(b) and b[i] == 0xFF:
+        m, ln = b[i + 1], struct.unpack(">H", b[i + 2:i + 4])[0]
+        out.append((m, i, ln))
+        if m == 0xDA:
+            break
+        i += 2 + ln
+    return out
+
+
+def jpeg_hostile(by):
+    """(name, bytes, what the decoder must make of them)"""
+    out = []
+    good = by["j_420"]
+    seg = {m: (i, ln) for m, i, ln in markers(good)}
+    sos = seg[0xDA][0] + 2 + seg[0xDA][1]
+    out.append(("bad_cut_header", good[:seg[0xC4][0] + 10], "refused"))
+    out.append(("bad_cut_scan", good[:sos + (len(good) - sos) // 2], "a prefix 61x43"))
+    out.append(("bad_no_end", good[:-2], "a prefix 61x43"))
+    pg = by["j_prog_420"]
+    out.append(("bad_cut_progressive", pg[:len(pg) * 2 // 3], "a prefix 77x51"))
+    sof = seg[0xC0][0]
+
+    def patched(at, new):
+        b = bytearray(good)
+        b[at:at + len(new)] = new
+        return bytes(b)
+
+    out.append(("bad_sof_length", patched(sof + 2, b"\x7f\xff"), "refused"))
+    out.append(("bad_dqt_length", patched(seg[0xDB][0] + 2, b"\x00\x20"), "refused"))
+    out.append(("bad_huge", patched(sof + 5, struct.pack(">HH", 65535, 65535)), "refused"))
+    out.append(("bad_past_cap", patched(sof + 5, struct.pack(">HH", 4097, 4096)), "refused"))
+    out.append(("bad_no_height", patched(sof + 5, struct.pack(">H", 0)), "refused"))
+    out.append(("bad_12_bit", patched(sof + 4, b"\x0c"), "refused"))
+    out.append(("bad_arithmetic", patched(sof + 1, b"\xc9"), "refused"))
+    out.append(("bad_lossless", patched(sof + 1, b"\xc3"), "refused"))
+    out.append(("bad_sampling", patched(sof + 11, b"\x51"), "refused"))
+    # the Huffman tables (one to a segment, as libjpeg writes them): an AC table's two
+    # codes of length 1 (all its others then past the tree), its counts past its segment,
+    # and a DC table's first symbol past 15
+    dhts = [i for m, i, ln in markers(good) if m == 0xC4]
+    dc = [i for i in dhts if good[i + 4] >> 4 == 0][0]
+    ac = [i for i in dhts if good[i + 4] >> 4 == 1][0]
+    over = bytearray(good)
+    over[ac + 5] = 2
+    over[ac + 20] -= 2
+    out.append(("bad_huffman_oversubscribed", bytes(over), "refused"))
+    out.append(("bad_huffman_count", patched(ac + 20, b"\xff"), "refused"))
+    out.append(("bad_huffman_dc_symbol", patched(dc + 21, b"\x10"), "refused"))
+    out.append(("bad_scan_component", patched(seg[0xDA][0] + 5, b"\x09"), "refused"))
+    # an interleaved scan of 16 blocks an MCU (Y sampled 4x4)
+    out.append(("bad_mcu_blocks", patched(sof + 11, b"\x44"), "refused"))
+    # the restart markers of a file that has them, one taken out
+    rb = by["j_restart_blocks"]
+    rs = {m: (i, ln) for m, i, ln in markers(rb)}
+    start = rs[0xDA][0] + 2 + rs[0xDA][1]
+    k = rb.index(b"\xff\xd3", start)
+    out.append(("bad_restart_missing", rb[:k] + rb[k + 2:], "a prefix 77x51"))
+    # a progressive scan whose approximation does not follow (Ah not Al + 1), its first
+    ps = {m: (i, ln) for m, i, ln in markers(pg)}
+    b = bytearray(pg)
+    i = ps[0xDA][0]
+    b[i + 4 + 1 + 2 * b[i + 4] + 2] = 0x31
+    out.append(("bad_progression", bytes(b), "refused"))
+    out.append(("bad_not_jpeg", b"\xff\xd8\xff", "refused"))
+    out.append(("bad_tables_only", good[:sof], "refused"))
+    return out
+
+
+def jpeg_reference(name, b):
+    """Pillow's decoding of a JPEG, its orientation applied, as RGB; written as NAME.pil.png"""
+    import io
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(b))
+    im.load()
+    im = ImageOps.exif_transpose(im).convert("RGB")
+    im.save(os.path.join(HERE, name + ".pil.png"), optimize=True)
+    return "%s %dx%d, its header %dx%d: within the bound" % (name, im.width, im.height, im.width, im.height)
+
+
+def write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def main():
+    png = png_fixtures()
+    write(os.path.join(HERE, "expected.txt"), "\n".join(png) + "\n")
+    gifs = gif_cases()
+    lines = []
+    for name, b, box in gifs:
+        with open(os.path.join(HERE, name + ".gif"), "wb") as f:
+            f.write(b)
+        lines.append(gif_expectation(name, b, box))
+    for name, b, want in gif_hostile(gifs):
+        with open(os.path.join(HERE, name + ".gif"), "wb") as f:
+            f.write(b)
+        lines.append("%s: %s" % (name, want))
+    lines.append("mutations of the fixtures: each decoded or refused")
+    write(os.path.join(EXEC, "gif_decode.expect"), "\n".join(lines) + "\n")
+    jpegs = jpeg_pil() + jpeg_own()
+    lines = []
+    for name, b in jpegs:
+        with open(os.path.join(HERE, name + ".jpg"), "wb") as f:
+            f.write(b)
+        lines.append(jpeg_reference(name, b))
+    # the decoder's arithmetic is libjpeg's (as Pillow's is): within the bound, and exact
+    lines.append("exact, pixel for pixel: %d of %d" % (len(jpegs), len(jpegs)))
+    for name, b, want in jpeg_hostile(dict(jpegs)):
+        with open(os.path.join(HERE, name + ".jpg"), "wb") as f:
+            f.write(b)
+        lines.append("%s: %s" % (name, want))
+    lines.append("mutations of the fixtures: each decoded or refused")
+    write(os.path.join(EXEC, "jpeg_decode.expect"), "\n".join(lines) + "\n")
+    sys.stdout.write("%d PNG, %d GIF and %d JPEG fixtures\n" % (len(png), len(gifs), len(jpegs)))
 
 
 if __name__ == "__main__":
