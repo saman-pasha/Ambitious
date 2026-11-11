@@ -111,6 +111,10 @@ dom_contract(operation(remove_attribute, [param(element, handle(node)), param(na
 dom_contract(operation(set_data, [param(node, handle(node)), param(data, text)], status,
     [pre(live(node), stale_handle), pre(kind_in(node, [text, comment]), wrong_kind)],
     [sets(node, data)], [mutates, requestable])).
+%% the HTML serialization of a subtree (the document node: the whole document)
+dom_contract(operation(serialize, [param(node, handle(node)), param(out, stream)], status,
+    [pre(live(node), stale_handle)],
+    [], [readonly])).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 %% invariant(Name, Text, Check): Check is one of the generated checks
@@ -134,7 +138,7 @@ dom_contract(invariant(live_links, 'Every link of a live record names a live rec
 %% ---- EVENTS -----------------------------------------------------------------
 %% each successful mutating operation logs one, with the revision it made
 
-dom_contract(event(mutation, [field(op, enum(op)), field(target, ref(node)), field(other, ref(node)),
+dom_contract(event(mutation, [field(op, enum(op)), field(target, ref(node)), field(other, u32),
                               field(revision, u64)])).
 
 %% ---- REASONING --------------------------------------------------------------

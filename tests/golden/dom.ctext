@@ -1,0 +1,908 @@
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:9e7199f0:6383). Do not edit. */
+typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
+typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT } dom_node_kind;
+typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_SERIALIZE } dom_op;
+typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
+typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
+typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; amb_span data; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; } dom_node;
+typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; amb_span value; uint32_t next; } dom_attr;
+typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint64_t revision; } dom_mutation;
+typedef struct dom_store_tag { char unused; } dom_store_tag;
+typedef store<dom_store_tag> dom_document;
+extern const char dom_fingerprint[];
+const char *dom_status_name(dom_status x);
+const char *dom_op_name(dom_op x);
+const char *dom_node_kind_name(dom_node_kind x);
+void dom_init(dom_document *d, uint32_t id);
+uint64_t dom_revision(const dom_document *d);
+dom_node_h dom_root(const dom_document *d);
+dom_node_h dom_create_element(dom_document *d, const char *name, size_t name_len);
+dom_node_h dom_create_text(dom_document *d, const char *data, size_t data_len);
+dom_node_h dom_create_comment(dom_document *d, const char *data, size_t data_len);
+dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len);
+dom_status dom_append_child(dom_document *d, dom_node_h parent, dom_node_h child);
+dom_status dom_insert_before(dom_document *d, dom_node_h parent, dom_node_h child, dom_node_h before);
+dom_status dom_remove_child(dom_document *d, dom_node_h parent, dom_node_h child);
+dom_status dom_destroy(dom_document *d, dom_node_h node);
+dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len);
+dom_status dom_remove_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len);
+dom_status dom_set_data(dom_document *d, dom_node_h node, const char *data, size_t data_len);
+dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
+dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len);
+dom_status dom_check_create_text(const dom_document *d, const char *data, size_t data_len);
+dom_status dom_check_create_comment(const dom_document *d, const char *data, size_t data_len);
+dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len);
+dom_status dom_check_append_child(const dom_document *d, dom_node_h parent, dom_node_h child);
+dom_status dom_check_insert_before(const dom_document *d, dom_node_h parent, dom_node_h child, dom_node_h before);
+dom_status dom_check_remove_child(const dom_document *d, dom_node_h parent, dom_node_h child);
+dom_status dom_check_destroy(const dom_document *d, dom_node_h node);
+dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len);
+dom_status dom_check_remove_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len);
+dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char *data, size_t data_len);
+dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out);
+dom_node_h dom_children_first(const dom_document *d, dom_node_h h);
+dom_node_h dom_children_next(const dom_document *d, dom_node_h h);
+dom_node_h dom_children_up(const dom_document *d, dom_node_h h);
+dom_node_h dom_children_last(const dom_document *d, dom_node_h h);
+dom_node_h dom_children_prev(const dom_document *d, dom_node_h h);
+size_t dom_children_count(const dom_document *d, dom_node_h h);
+dom_attr_h dom_attributes_first(const dom_document *d, dom_node_h h);
+dom_attr_h dom_attributes_next(const dom_document *d, dom_attr_h h);
+dom_node_h dom_attributes_up(const dom_document *d, dom_attr_h h);
+size_t dom_attributes_count(const dom_document *d, dom_node_h h);
+void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other);
+int dom_check_invariants(const dom_document *d, FILE *report);
+void dom_export(const dom_document *d, FILE *out);
+dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module dom, generated from contracts/dom.pl. Do not edit. */
+const char *dom_status_name(dom_status x) {
+    switch (x) {
+    case DOM_OK: return "ok";
+    case DOM_STALE_HANDLE: return "stale_handle";
+    case DOM_WRONG_KIND: return "wrong_kind";
+    case DOM_HAS_PARENT: return "has_parent";
+    case DOM_NOT_A_CHILD: return "not_a_child";
+    case DOM_WOULD_CYCLE: return "would_cycle";
+    case DOM_INVALID_NAME: return "invalid_name";
+    case DOM_NOT_FOUND: return "not_found";
+    case DOM_OUT_OF_MEMORY: return "out_of_memory";
+    case DOM_BAD_REQUEST: return "bad_request";
+    case DOM_NOT_REQUESTABLE: return "not_requestable";
+    case DOM_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *dom_op_name(dom_op x) {
+    switch (x) {
+    case DOM_OP_CREATE_ELEMENT: return "create_element";
+    case DOM_OP_CREATE_TEXT: return "create_text";
+    case DOM_OP_CREATE_COMMENT: return "create_comment";
+    case DOM_OP_CREATE_DOCTYPE: return "create_doctype";
+    case DOM_OP_APPEND_CHILD: return "append_child";
+    case DOM_OP_INSERT_BEFORE: return "insert_before";
+    case DOM_OP_REMOVE_CHILD: return "remove_child";
+    case DOM_OP_DESTROY: return "destroy";
+    case DOM_OP_SET_ATTRIBUTE: return "set_attribute";
+    case DOM_OP_REMOVE_ATTRIBUTE: return "remove_attribute";
+    case DOM_OP_SET_DATA: return "set_data";
+    case DOM_OP_SERIALIZE: return "serialize";
+    }
+    return "?";
+}
+const char *dom_node_kind_name(dom_node_kind x) {
+    switch (x) {
+    case DOM_NODE_KIND_DOCUMENT: return "document";
+    case DOM_NODE_KIND_DOCTYPE: return "doctype";
+    case DOM_NODE_KIND_ELEMENT: return "element";
+    case DOM_NODE_KIND_TEXT: return "text";
+    case DOM_NODE_KIND_COMMENT: return "comment";
+    }
+    return "?";
+}
+
+const char dom_fingerprint[] = "fnv1a32:9e7199f0:6383";
+void dom_init(dom_document *d, uint32_t id) {
+    if (d->node_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    text_add(d, "", 0);
+    dom_node_h r = node_new(d);
+    node_slot(d, r.index)->kind = DOM_NODE_KIND_DOCUMENT;
+}
+uint64_t dom_revision(const dom_document *d) { return d->revision; }
+dom_node_h dom_root(const dom_document *d) { return node_handle(d, 1); }
+dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len)
+{
+    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
+    return DOM_OK;
+}
+
+dom_status dom_check_create_text(const dom_document *d, const char *data, size_t data_len)
+{
+    return DOM_OK;
+}
+
+dom_status dom_check_create_comment(const dom_document *d, const char *data, size_t data_len)
+{
+    return DOM_OK;
+}
+
+dom_status dom_check_create_doctype(const dom_document *d, const char *name, size_t name_len)
+{
+    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
+    return DOM_OK;
+}
+
+dom_status dom_check_append_child(const dom_document *d, dom_node_h parent, dom_node_h child)
+{
+    if (!node_live(d, parent)) return DOM_STALE_HANDLE;
+    if (!node_live(d, child)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    { dom_node_kind k = d->node[child.index].kind; if (!(k == DOM_NODE_KIND_DOCTYPE || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
+    if (d->node[child.index].parent != 0) return DOM_HAS_PARENT;
+    if (children_inclusive_ancestor(d, child.index, parent.index)) return DOM_WOULD_CYCLE;
+    return DOM_OK;
+}
+
+dom_status dom_check_insert_before(const dom_document *d, dom_node_h parent, dom_node_h child, dom_node_h before)
+{
+    if (!node_live(d, parent)) return DOM_STALE_HANDLE;
+    if (!node_live(d, child)) return DOM_STALE_HANDLE;
+    if (!node_live(d, before)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[parent.index].kind; if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    { dom_node_kind k = d->node[child.index].kind; if (!(k == DOM_NODE_KIND_DOCTYPE || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
+    if (d->node[child.index].parent != 0) return DOM_HAS_PARENT;
+    if (d->node[before.index].parent != parent.index) return DOM_NOT_A_CHILD;
+    if (children_inclusive_ancestor(d, child.index, parent.index)) return DOM_WOULD_CYCLE;
+    return DOM_OK;
+}
+
+dom_status dom_check_remove_child(const dom_document *d, dom_node_h parent, dom_node_h child)
+{
+    if (!node_live(d, parent)) return DOM_STALE_HANDLE;
+    if (!node_live(d, child)) return DOM_STALE_HANDLE;
+    if (d->node[child.index].parent != parent.index) return DOM_NOT_A_CHILD;
+    return DOM_OK;
+}
+
+dom_status dom_check_destroy(const dom_document *d, dom_node_h node)
+{
+    if (!node_live(d, node)) return DOM_STALE_HANDLE;
+    if (d->node[node.index].parent != 0) return DOM_HAS_PARENT;
+    { dom_node_kind k = d->node[node.index].kind; if (!(k == DOM_NODE_KIND_DOCTYPE || k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
+    return DOM_OK;
+}
+
+dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len, const char *value, size_t value_len)
+{
+    if (!node_live(d, element)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[element.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    if (!amb_valid_name(name, name_len)) return DOM_INVALID_NAME;
+    return DOM_OK;
+}
+
+dom_status dom_check_remove_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len)
+{
+    if (!node_live(d, element)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[element.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    return DOM_OK;
+}
+
+dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char *data, size_t data_len)
+{
+    if (!node_live(d, node)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[node.index].kind; if (!(k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT)) return DOM_WRONG_KIND; }
+    return DOM_OK;
+}
+
+dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out)
+{
+    if (!node_live(d, node)) return DOM_STALE_HANDLE;
+    return DOM_OK;
+}
+
+dom_node_h dom_children_first(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].first_child);
+}
+dom_node_h dom_children_next(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].next_sibling);
+}
+dom_node_h dom_children_up(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].parent);
+}
+dom_node_h dom_children_last(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].last_child);
+}
+dom_node_h dom_children_prev(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].prev_sibling);
+}
+size_t dom_children_count(const dom_document *d, dom_node_h h) {
+    if (!node_live(d, h)) return 0;
+    return children_count(d, h.index);
+}
+
+dom_attr_h dom_attributes_first(const dom_document *d, dom_node_h h) {
+    dom_attr_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return attr_handle(d, d->node[h.index].first_attr);
+}
+dom_attr_h dom_attributes_next(const dom_document *d, dom_attr_h h) {
+    dom_attr_h none = { 0, 0, 0 };
+    if (!attr_live(d, h)) return none;
+    return attr_handle(d, d->attr[h.index].next);
+}
+dom_node_h dom_attributes_up(const dom_document *d, dom_attr_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!attr_live(d, h)) return none;
+    return node_handle(d, d->attr[h.index].owner);
+}
+size_t dom_attributes_count(const dom_document *d, dom_node_h h) {
+    if (!node_live(d, h)) return 0;
+    return attributes_count(d, h.index);
+}
+
+void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other) {
+    d->revision++;
+    dom_mutation e = { op, target, other, d->revision };
+    mutation_push(d, e);
+}
+int dom_check_invariants(const dom_document *d, FILE *report) {
+    int bad = 0;
+    /* root_document */
+    if (d->node_len < 2 || !d->node[1].live || d->node[1].kind != DOM_NODE_KIND_DOCUMENT || d->node[1].parent != 0) { bad++; amb_report(report, "dom", "root_document", 1); }
+    /* tree_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->node_len ? d->node_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->node_len; o++) {
+            if (!d->node[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->node[o].first_child; i; i = d->node[i].next_sibling) {
+                if (i >= d->node_len || !d->node[i].live || d->node[i].parent != o || ++steps > d->node_len || seen[i]) { bad++; amb_report(report, "dom", "tree_links", o); break; }
+                seen[i] = o;
+            if (d->node[i].prev_sibling != prev) { bad++; amb_report(report, "dom", "tree_links", i); }
+                prev = i;
+            }
+        if (d->node[o].last_child != prev) { bad++; amb_report(report, "dom", "tree_links", o); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++)
+            if (d->node[i].live && d->node[i].parent && seen[i] != d->node[i].parent) { bad++; amb_report(report, "dom", "tree_links", i); }
+        free(seen);
+    }
+    /* acyclic */
+    for (uint32_t i = 1; i < d->node_len; i++) {
+        if (!d->node[i].live) continue;
+        size_t steps = 0;
+        for (uint32_t x = d->node[i].parent; x; x = x < d->node_len ? d->node[x].parent : 0) {
+            if (x == i || ++steps > d->node_len) { bad++; amb_report(report, "dom", "acyclic", i); break; }
+        }
+    }
+    /* only_containers */
+    for (uint32_t o = 1; o < d->node_len; o++) {
+        if (!d->node[o].live || !d->node[o].first_child) continue;
+        dom_node_kind k = d->node[o].kind;
+        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "only_containers", o); }
+    }
+    for (uint32_t i = 1; i < d->node_len; i++) {
+        if (!d->node[i].live || !d->node[i].parent || d->node[i].parent >= d->node_len) continue;
+        dom_node_kind k = d->node[d->node[i].parent].kind;
+        if (!(k == DOM_NODE_KIND_DOCUMENT || k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "only_containers", i); }
+    }
+    /* attr_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->attr_len ? d->attr_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->node_len; o++) {
+            if (!d->node[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->node[o].first_attr; i; i = d->attr[i].next) {
+                if (i >= d->attr_len || !d->attr[i].live || d->attr[i].owner != o || ++steps > d->attr_len || seen[i]) { bad++; amb_report(report, "dom", "attr_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        }
+        for (uint32_t i = 1; i < d->attr_len; i++)
+            if (d->attr[i].live && d->attr[i].owner && seen[i] != d->attr[i].owner) { bad++; amb_report(report, "dom", "attr_links", i); }
+        free(seen);
+    }
+    /* attr_owners */
+    for (uint32_t o = 1; o < d->node_len; o++) {
+        if (!d->node[o].live || !d->node[o].first_attr) continue;
+        dom_node_kind k = d->node[o].kind;
+        if (!(k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "attr_owners", o); }
+    }
+    for (uint32_t i = 1; i < d->attr_len; i++) {
+        if (!d->attr[i].live || !d->attr[i].owner || d->attr[i].owner >= d->node_len) continue;
+        dom_node_kind k = d->node[d->attr[i].owner].kind;
+        if (!(k == DOM_NODE_KIND_ELEMENT)) { bad++; amb_report(report, "dom", "attr_owners", i); }
+    }
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].parent;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].first_child;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].last_child;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].prev_sibling;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].next_sibling;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].first_attr;
+            if (d->node[i].live && r && (r >= d->attr_len || !d->attr[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->attr_len; i++) {
+            uint32_t r = d->attr[i].owner;
+            if (d->attr[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->attr_len; i++) {
+            uint32_t r = d->attr[i].next;
+            if (d->attr[i].live && r && (r >= d->attr_len || !d->attr[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void dom_export(const dom_document *d, FILE *out) {
+    fprintf(out, "amb_snapshot(dom, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, dom_fingerprint);
+    for (uint32_t i = 1; i < d->node_len; i++) {
+        if (!d->node[i].live) continue;
+        if (1) { fputs("dom_node(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); fputs(dom_node_kind_name(d->node[i].kind), out); fputs(").\n", out); }
+        if (d->node[i].kind == DOM_NODE_KIND_ELEMENT) { fputs("dom_element(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); names_put(d, out, d->node[i].name); fputs(").\n", out); }
+        if (d->node[i].kind == DOM_NODE_KIND_TEXT) { fputs("dom_text(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); text_put(d, out, d->node[i].data); fputs(").\n", out); }
+        if (d->node[i].kind == DOM_NODE_KIND_COMMENT) { fputs("dom_comment(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); text_put(d, out, d->node[i].data); fputs(").\n", out); }
+        if (d->node[i].kind == DOM_NODE_KIND_DOCTYPE) { fputs("dom_doctype(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); names_put(d, out, d->node[i].name); fputs(").\n", out); }
+        if (d->node[i].parent != 0) { fputs("dom_parent(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].parent; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].next_sibling != 0) { fputs("dom_next_sibling(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].next_sibling; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].first_child != 0) { fputs("dom_first_child(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].first_child; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->attr_len; i++) {
+        if (!d->attr[i].live) continue;
+        if (1) { fputs("dom_attr(", out); { uint32_t r = d->attr[i].owner; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); names_put(d, out, d->attr[i].name); fputs(",", out); text_put(d, out, d->attr[i].value); fputs(").\n", out); }
+    }
+}
+dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    dom_status st = DOM_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return DOM_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return DOM_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return DOM_STALE_REVISION; }
+    if (amb_name_is(name, name_len, "append_child")) {
+        dom_node_h a_parent = { 0, 0, 0 };
+        dom_node_h a_child = { 0, 0, 0 };
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_parent.doc, &a_parent.index, &a_parent.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_child.doc, &a_child.index, &a_child.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_append_child(d, a_parent, a_child);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "insert_before")) {
+        dom_node_h a_parent = { 0, 0, 0 };
+        dom_node_h a_child = { 0, 0, 0 };
+        dom_node_h a_before = { 0, 0, 0 };
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_parent.doc, &a_parent.index, &a_parent.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_child.doc, &a_child.index, &a_child.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_before.doc, &a_before.index, &a_before.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_insert_before(d, a_parent, a_child, a_before);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "remove_child")) {
+        dom_node_h a_parent = { 0, 0, 0 };
+        dom_node_h a_child = { 0, 0, 0 };
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_parent.doc, &a_parent.index, &a_parent.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_child.doc, &a_child.index, &a_child.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_remove_child(d, a_parent, a_child);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "set_attribute")) {
+        dom_node_h a_element = { 0, 0, 0 };
+        char a_name[4096];
+        size_t a_name_len = 0;
+        char a_value[4096];
+        size_t a_value_len = 0;
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_element.doc, &a_element.index, &a_element.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_atom(t, n, &p, a_name, sizeof a_name, &a_name_len)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_atom(t, n, &p, a_value, sizeof a_value, &a_value_len)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_set_attribute(d, a_element, a_name, a_name_len, a_value, a_value_len);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "remove_attribute")) {
+        dom_node_h a_element = { 0, 0, 0 };
+        char a_name[4096];
+        size_t a_name_len = 0;
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_element.doc, &a_element.index, &a_element.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_atom(t, n, &p, a_name, sizeof a_name, &a_name_len)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_remove_attribute(d, a_element, a_name, a_name_len);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "set_data")) {
+        dom_node_h a_node = { 0, 0, 0 };
+        char a_data[4096];
+        size_t a_data_len = 0;
+        if (!amb_lex_char(t, n, &p, '(')) return DOM_BAD_REQUEST;
+        if (!amb_lex_handle(t, n, &p, "n", &a_node.doc, &a_node.index, &a_node.gen)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ',')) return DOM_BAD_REQUEST;
+        if (!amb_lex_atom(t, n, &p, a_data, sizeof a_data, &a_data_len)) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')')) return DOM_BAD_REQUEST;
+        if (!amb_lex_char(t, n, &p, ')') || !amb_lex_char(t, n, &p, '.') || !amb_lex_end(t, n, &p)) return DOM_BAD_REQUEST;
+        st = dom_set_data(d, a_node, a_data, a_data_len);
+        amb_result(report, name, dom_status_name(st), d->revision);
+        return st;
+    }
+    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module dom, an instance of store<dom_store_tag>: one own buffer a part */
+typedef struct store_dom_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t node_len, node_cap;
+    uint32_t node_free;
+    own dom_node *node;
+    size_t attr_len, attr_cap;
+    uint32_t attr_free;
+    own dom_attr *attr;
+    size_t text_len, text_cap;
+    own char *text;
+    size_t names_len, names_cap, names_n, names_ncap, names_scap;
+    own char *names;
+    own amb_span *names_at;
+    own uint32_t *names_slots;
+    size_t mutation_len, mutation_cap;
+    own dom_mutation *mutation;
+} store_dom_store_tag;
+void store_dom_store_tag_drop(store_dom_store_tag *s) { free(s->node); free(s->attr); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); free(s->mutation); }
+static void store_dom_store_tag__node_grow(store_dom_store_tag *s) {
+    size_t c = s->node_cap ? 2 * s->node_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->node = (dom_node *)realloc(s->node, c * sizeof(dom_node));
+    if (!s->node) abort();
+    s->node_cap = c;
+}
+dom_node_h store_dom_store_tag_node_new(store_dom_store_tag *s) {
+    uint32_t i;
+    if (s->node_free) {
+        i = s->node_free;
+        s->node_free = s->node[i].free_next;
+    } else {
+        if (s->node_len == 0) {
+            if (s->node_cap == 0) store_dom_store_tag__node_grow(s);
+            memset(&s->node[0], 0, sizeof(dom_node));
+            s->node_len = 1;
+        }
+        if (s->node_len == s->node_cap) store_dom_store_tag__node_grow(s);
+        i = (uint32_t)s->node_len;
+        s->node_len++;
+        s->node[i].gen = 0;
+    }
+    uint32_t g = s->node[i].gen;
+    memset(&s->node[i], 0, sizeof(dom_node));
+    s->node[i].gen = g;
+    s->node[i].live = 1;
+    dom_node_h h = { s->id, i, g };
+    return h;
+}
+int store_dom_store_tag_node_live(const store_dom_store_tag *s, dom_node_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->node_len && s->node[h.index].live && s->node[h.index].gen == h.gen;
+}
+dom_node store_dom_store_tag_node_get(const store_dom_store_tag *s, dom_node_h h) {
+    if (!store_dom_store_tag_node_live(s, h)) abort();
+    return s->node[h.index];
+}
+dom_node *store_dom_store_tag_node_ref(const store_dom_store_tag *s, dom_node_h h) tie s {
+    if (!store_dom_store_tag_node_live(s, h)) abort();
+    return &s->node[h.index];
+}
+dom_node *store_dom_store_tag_node_slot(const store_dom_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->node_len) abort();
+    return &s->node[i];
+}
+dom_node_h store_dom_store_tag_node_handle(const store_dom_store_tag *s, uint32_t i) {
+    dom_node_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->node_len && s->node[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->node[i].gen;
+    }
+    return h;
+}
+void store_dom_store_tag_node_free(store_dom_store_tag *s, dom_node_h h) {
+    if (!store_dom_store_tag_node_live(s, h)) abort();
+    s->node[h.index].live = 0;
+    s->node[h.index].gen++;
+    s->node[h.index].free_next = s->node_free;
+    s->node_free = h.index;
+}
+size_t store_dom_store_tag_node_len(const store_dom_store_tag *s) { return s->node_len; }
+size_t store_dom_store_tag_node_count(const store_dom_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->node_len; i++) if (s->node[i].live) n++;
+    return n;
+}
+static void store_dom_store_tag__attr_grow(store_dom_store_tag *s) {
+    size_t c = s->attr_cap ? 2 * s->attr_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->attr = (dom_attr *)realloc(s->attr, c * sizeof(dom_attr));
+    if (!s->attr) abort();
+    s->attr_cap = c;
+}
+dom_attr_h store_dom_store_tag_attr_new(store_dom_store_tag *s) {
+    uint32_t i;
+    if (s->attr_free) {
+        i = s->attr_free;
+        s->attr_free = s->attr[i].free_next;
+    } else {
+        if (s->attr_len == 0) {
+            if (s->attr_cap == 0) store_dom_store_tag__attr_grow(s);
+            memset(&s->attr[0], 0, sizeof(dom_attr));
+            s->attr_len = 1;
+        }
+        if (s->attr_len == s->attr_cap) store_dom_store_tag__attr_grow(s);
+        i = (uint32_t)s->attr_len;
+        s->attr_len++;
+        s->attr[i].gen = 0;
+    }
+    uint32_t g = s->attr[i].gen;
+    memset(&s->attr[i], 0, sizeof(dom_attr));
+    s->attr[i].gen = g;
+    s->attr[i].live = 1;
+    dom_attr_h h = { s->id, i, g };
+    return h;
+}
+int store_dom_store_tag_attr_live(const store_dom_store_tag *s, dom_attr_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->attr_len && s->attr[h.index].live && s->attr[h.index].gen == h.gen;
+}
+dom_attr store_dom_store_tag_attr_get(const store_dom_store_tag *s, dom_attr_h h) {
+    if (!store_dom_store_tag_attr_live(s, h)) abort();
+    return s->attr[h.index];
+}
+dom_attr *store_dom_store_tag_attr_ref(const store_dom_store_tag *s, dom_attr_h h) tie s {
+    if (!store_dom_store_tag_attr_live(s, h)) abort();
+    return &s->attr[h.index];
+}
+dom_attr *store_dom_store_tag_attr_slot(const store_dom_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->attr_len) abort();
+    return &s->attr[i];
+}
+dom_attr_h store_dom_store_tag_attr_handle(const store_dom_store_tag *s, uint32_t i) {
+    dom_attr_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->attr_len && s->attr[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->attr[i].gen;
+    }
+    return h;
+}
+void store_dom_store_tag_attr_free(store_dom_store_tag *s, dom_attr_h h) {
+    if (!store_dom_store_tag_attr_live(s, h)) abort();
+    s->attr[h.index].live = 0;
+    s->attr[h.index].gen++;
+    s->attr[h.index].free_next = s->attr_free;
+    s->attr_free = h.index;
+}
+size_t store_dom_store_tag_attr_len(const store_dom_store_tag *s) { return s->attr_len; }
+size_t store_dom_store_tag_attr_count(const store_dom_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->attr_len; i++) if (s->attr[i].live) n++;
+    return n;
+}
+static void store_dom_store_tag__text_room(store_dom_store_tag *s, size_t n) {
+    if (s->text_len + n <= s->text_cap) return;
+    size_t c = s->text_cap ? s->text_cap : 256;
+    while (c < s->text_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->text = (char *)realloc(s->text, c);
+    if (!s->text) abort();
+    s->text_cap = c;
+}
+amb_span store_dom_store_tag_text_add(store_dom_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->text_len == 0) {
+        store_dom_store_tag__text_room(s, 1);
+        s->text[0] = 0;
+        s->text_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->text && p < s->text + s->text_len;
+    size_t from = inside ? (size_t)(p - s->text) : 0;
+    store_dom_store_tag__text_room(s, n);
+    if (inside) memmove(s->text + s->text_len, s->text + from, n);
+    else memcpy(s->text + s->text_len, p, n);
+    sp.off = (uint32_t)s->text_len;
+    sp.len = (uint32_t)n;
+    s->text_len += n;
+    return sp;
+}
+const char *store_dom_store_tag_text_ptr(const store_dom_store_tag *s, amb_span sp) tie s {
+    if (s->text_len == 0 || (size_t)sp.off + sp.len > s->text_len) abort();
+    return s->text + sp.off;
+}
+int store_dom_store_tag_text_eq(const store_dom_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    return memcmp(s->text + sp.off, p, n) == 0;
+}
+void store_dom_store_tag_text_put(const store_dom_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    amb_put_qatom(out, s->text + sp.off, sp.len);
+}
+size_t store_dom_store_tag_text_size(const store_dom_store_tag *s) { return s->text_len; }
+static uint32_t store_dom_store_tag__names_hash(const char *p, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (unsigned char)p[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+static void store_dom_store_tag__names_rehash(store_dom_store_tag *s, size_t cap) {
+    own uint32_t *slots = (uint32_t *)calloc(cap, sizeof(uint32_t));
+    if (!slots) abort();
+    uint32_t m = (uint32_t)(cap - 1);
+    for (uint32_t id = 1; id < s->names_n; id++) {
+        amb_span sp = s->names_at[id];
+        uint32_t h = store_dom_store_tag__names_hash(s->names + sp.off, sp.len) & m;
+        while (slots[h]) h = (h + 1) & m;
+        slots[h] = id;
+    }
+    free(s->names_slots);
+    s->names_slots = move(slots);
+    s->names_scap = cap;
+}
+uint32_t store_dom_store_tag_names_find(const store_dom_store_tag *s, const char *p, size_t n) {
+    if (s->names_scap == 0) return 0;
+    uint32_t m = (uint32_t)(s->names_scap - 1);
+    uint32_t h = store_dom_store_tag__names_hash(p, n) & m;
+    while (s->names_slots[h]) {
+        uint32_t id = s->names_slots[h];
+        amb_span sp = s->names_at[id];
+        if (sp.len == n && (n == 0 || memcmp(s->names + sp.off, p, n) == 0)) return id;
+        h = (h + 1) & m;
+    }
+    return 0;
+}
+uint32_t store_dom_store_tag_names_intern(store_dom_store_tag *s, const char *p, size_t n) {
+    uint32_t id = store_dom_store_tag_names_find(s, p, n);
+    if (id) return id;
+    if (s->names_n == 0) {
+        s->names_at = (amb_span *)realloc(s->names_at, 16 * sizeof(amb_span));
+        if (!s->names_at) abort();
+        s->names_ncap = 16;
+        s->names_at[0].off = 0;
+        s->names_at[0].len = 0;
+        s->names_n = 1;
+    }
+    if (s->names_n == s->names_ncap) {
+        size_t c = 2 * s->names_ncap;
+        if (c > 0x7FFFFFFF) abort();
+        s->names_at = (amb_span *)realloc(s->names_at, c * sizeof(amb_span));
+        if (!s->names_at) abort();
+        s->names_ncap = c;
+    }
+    if (s->names_len + n + 1 > s->names_cap) {
+        size_t c = s->names_cap ? s->names_cap : 256;
+        while (c < s->names_len + n + 1) c *= 2;
+        if (c > 0x7FFFFFFF) abort();
+        s->names = (char *)realloc(s->names, c);
+        if (!s->names) abort();
+        s->names_cap = c;
+    }
+    if (n) memcpy(s->names + s->names_len, p, n);
+    s->names[s->names_len + n] = 0;
+    id = (uint32_t)s->names_n;
+    s->names_at[id].off = (uint32_t)s->names_len;
+    s->names_at[id].len = (uint32_t)n;
+    s->names_len += n + 1;
+    s->names_n++;
+    if (2 * s->names_n > s->names_scap) {
+        store_dom_store_tag__names_rehash(s, s->names_scap ? 2 * s->names_scap : 64);
+    } else {
+        uint32_t m = (uint32_t)(s->names_scap - 1);
+        uint32_t h = store_dom_store_tag__names_hash(s->names + s->names_at[id].off, n) & m;
+        while (s->names_slots[h]) h = (h + 1) & m;
+        s->names_slots[h] = id;
+    }
+    return id;
+}
+const char *store_dom_store_tag_names_ptr(const store_dom_store_tag *s, uint32_t id) tie s {
+    if (id == 0 || id >= s->names_n) abort();
+    return s->names + s->names_at[id].off;
+}
+size_t store_dom_store_tag_names_len(const store_dom_store_tag *s, uint32_t id) {
+    if (id == 0 || id >= s->names_n) return 0;
+    return s->names_at[id].len;
+}
+int store_dom_store_tag_names_is(const store_dom_store_tag *s, uint32_t id, const char *p, size_t n) {
+    if (id == 0 || id >= s->names_n) return n == 0;
+    amb_span sp = s->names_at[id];
+    return sp.len == n && (n == 0 || memcmp(s->names + sp.off, p, n) == 0);
+}
+void store_dom_store_tag_names_put(const store_dom_store_tag *s, FILE *out, uint32_t id) {
+    if (id == 0 || id >= s->names_n) { amb_put_qatom(out, "", 0); return; }
+    amb_put_qatom(out, s->names + s->names_at[id].off, s->names_at[id].len);
+}
+size_t store_dom_store_tag_names_count(const store_dom_store_tag *s) { return s->names_n ? s->names_n - 1 : 0; }
+void store_dom_store_tag_mutation_push(store_dom_store_tag *s, dom_mutation e) {
+    if (s->mutation_len == s->mutation_cap) {
+        size_t c = s->mutation_cap ? 2 * s->mutation_cap : 64;
+        s->mutation = (dom_mutation *)realloc(s->mutation, c * sizeof(dom_mutation));
+        if (!s->mutation) abort();
+        s->mutation_cap = c;
+    }
+    s->mutation[s->mutation_len] = e;
+    s->mutation_len++;
+}
+size_t store_dom_store_tag_mutation_len(const store_dom_store_tag *s) { return s->mutation_len; }
+dom_mutation store_dom_store_tag_mutation_at(const store_dom_store_tag *s, size_t i) {
+    if (i >= s->mutation_len) abort();
+    return s->mutation[i];
+}
+void store_dom_store_tag_children_append(store_dom_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len) abort();
+    uint32_t t = s->node[o].last_child;
+    s->node[i].parent = o;
+    s->node[i].next_sibling = 0;
+    s->node[i].prev_sibling = t;
+    if (t) s->node[t].next_sibling = i; else s->node[o].first_child = i;
+    s->node[o].last_child = i;
+}
+
+void store_dom_store_tag_children_insert_before(store_dom_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_dom_store_tag_children_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len || b >= s->node_len || s->node[b].parent != o) abort();
+    uint32_t p = s->node[b].prev_sibling;
+    s->node[i].parent = o;
+    s->node[i].next_sibling = b;
+    s->node[i].prev_sibling = p;
+    s->node[b].prev_sibling = i;
+    if (p) s->node[p].next_sibling = i; else s->node[o].first_child = i;
+}
+
+void store_dom_store_tag_children_unlink(store_dom_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->node_len) abort();
+    uint32_t o = s->node[i].parent;
+    if (o == 0) return;
+    if (o >= s->node_len) abort();
+    uint32_t n = s->node[i].next_sibling;
+    uint32_t p = s->node[i].prev_sibling;
+    if (p) s->node[p].next_sibling = n; else s->node[o].first_child = n;
+    if (n) s->node[n].prev_sibling = p;
+    if (s->node[o].last_child == i) s->node[o].last_child = p;
+    s->node[i].parent = 0;
+    s->node[i].next_sibling = 0;
+    s->node[i].prev_sibling = 0;
+}
+
+uint32_t store_dom_store_tag_children_first(const store_dom_store_tag *s, uint32_t o) { if (o >= s->node_len) abort(); return s->node[o].first_child; }
+
+uint32_t store_dom_store_tag_children_next(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].next_sibling; }
+
+uint32_t store_dom_store_tag_children_up(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].parent; }
+
+size_t store_dom_store_tag_children_count(const store_dom_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->node_len) abort();
+    for (uint32_t i = s->node[o].first_child; i; i = s->node[i].next_sibling) {
+        n++;
+        if (n > s->node_len) abort();
+    }
+    return n;
+}
+
+int store_dom_store_tag_children_inclusive_ancestor(const store_dom_store_tag *s, uint32_t a, uint32_t b) {
+    size_t steps = 0;
+    for (uint32_t x = b; x; x = s->node[x].parent) {
+        if (x >= s->node_len) abort();
+        if (x == a) return 1;
+        if (++steps > s->node_len) return 1;
+    }
+    return 0;
+}
+
+void store_dom_store_tag_attributes_append(store_dom_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->attr_len) abort();
+    uint32_t t = s->node[o].first_attr;
+    if (t) while (s->attr[t].next) t = s->attr[t].next;
+    s->attr[i].owner = o;
+    s->attr[i].next = 0;
+    if (t) s->attr[t].next = i; else s->node[o].first_attr = i;
+}
+
+void store_dom_store_tag_attributes_insert_before(store_dom_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_dom_store_tag_attributes_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->attr_len || b >= s->attr_len || s->attr[b].owner != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].first_attr; x && x != b; x = s->attr[x].next) p = x;
+    s->attr[i].owner = o;
+    s->attr[i].next = b;
+    if (p) s->attr[p].next = i; else s->node[o].first_attr = i;
+}
+
+void store_dom_store_tag_attributes_unlink(store_dom_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->attr_len) abort();
+    uint32_t o = s->attr[i].owner;
+    if (o == 0) return;
+    if (o >= s->node_len) abort();
+    uint32_t n = s->attr[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].first_attr; x && x != i; x = s->attr[x].next) p = x;
+    if (p) s->attr[p].next = n; else s->node[o].first_attr = n;
+    s->attr[i].owner = 0;
+    s->attr[i].next = 0;
+}
+
+uint32_t store_dom_store_tag_attributes_first(const store_dom_store_tag *s, uint32_t o) { if (o >= s->node_len) abort(); return s->node[o].first_attr; }
+
+uint32_t store_dom_store_tag_attributes_next(const store_dom_store_tag *s, uint32_t i) { if (i >= s->attr_len) abort(); return s->attr[i].next; }
+
+uint32_t store_dom_store_tag_attributes_up(const store_dom_store_tag *s, uint32_t i) { if (i >= s->attr_len) abort(); return s->attr[i].owner; }
+
+size_t store_dom_store_tag_attributes_count(const store_dom_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->node_len) abort();
+    for (uint32_t i = s->node[o].first_attr; i; i = s->attr[i].next) {
+        n++;
+        if (n > s->attr_len) abort();
+    }
+    return n;
+}
+

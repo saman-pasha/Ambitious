@@ -123,3 +123,12 @@ neighbours.
 5. **Cicili 3.3.0 calls `str:replace-all` with `:regex t`**, a keyword of
    newer cl-str. A box that gets `str` from an old Quicklisp dist fails in
    MVCCS's transpile, the way the shim's first version did.
+6. **A macro file found through a relative `-I` directory brings no
+   `NAME.pl.h`** (cicilang 0.284).
+   - `cicilang -I include -c src/dom/dom.c` loaded `include/amb.pl`, but not
+     `include/amb.pl.h` beside it. The generated text's `free` was then
+     `undeclared(free)`, and with `<stdlib.h>` included by hand,
+     `typedef(amb_span)` was not lowered.
+   - With `-I $PWD/include` the header comes with the macro file, and the
+     unit builds.
+   - Ambitious's Makefile passes the include directory by its absolute path.

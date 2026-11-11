@@ -344,6 +344,7 @@ ambc_event_type(_, _, enum(op)) :- !.        % the operations' own enum, generat
 ambc_event_type(M, Ds, T) :- ambc_field_type(M, Ds, T).
 
 ambc_param_type(_, _, text) :- !.
+ambc_param_type(_, _, stream) :- !.              % a FILE *: never requestable
 ambc_param_type(_, _, T) :- ambc_scalar(T), !.
 ambc_param_type(_, Ds, enum(E)) :- !, memberchk(enum(E, _), Ds).
 ambc_param_type(_, Ds, handle(R)) :- !, memberchk(handle(R, _), Ds).

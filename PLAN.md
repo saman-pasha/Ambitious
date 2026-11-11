@@ -413,10 +413,10 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 
 | Phase | State |
 |---|---|
-| 0 Toolchain | in progress |
-| 1 Contract | planned |
-| 2 Macro integration | planned |
-| 3 DOM vertical slice | planned |
+| 0 Toolchain | **done**: `toolchain/`; `check.sh` GREEN; report with 6 findings |
+| 1 Contract | **done**: `docs/contract.md`, `contracts/dom.pl`, the validator; contract gate GREEN (32 refusals) |
+| 2 Macro integration | **done**: `include/amb.pl` and `prolog/amb/gen_c.pl` make the DOM's C from its contract; gen gate (goldens) and exec gate GREEN, valgrind clean |
+| 3 DOM vertical slice | in progress: the DOM's operations, stale handles, export and dispatch run; the reasoner and the loop next |
 | 4 HTML parsing | planned |
 | 5 CSS | planned |
 | 6 Layout and rendering | planned |

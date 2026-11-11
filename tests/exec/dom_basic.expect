@@ -1,0 +1,103 @@
+ok   a new document holds its root and nothing else
+ok   the invariants hold on an empty document
+ok   append html to the document: ok
+ok   append body to html: ok
+ok   append p to body: ok
+ok   append text to p: ok
+ok   append button to body: ok
+ok   append its text: ok
+ok   set an attribute: ok
+ok   set another: ok
+ok   the revision counts each mutation (6 creates, 6 appends, 2 attributes)
+ok   and the log holds one event a mutation
+ok   the invariants hold
+ok   a node into its own descendant: has_parent
+ok   an ancestor under its descendant: would_cycle
+ok   a child appended twice: has_parent
+ok   a child under a text node: wrong_kind
+ok   the document under an element: wrong_kind
+ok   an attribute on a text node: wrong_kind
+ok   an attribute with no name: invalid_name
+ok   an element named with a space: invalid_name
+ok   insert before a node that is not a child: not_a_child
+ok   remove a node from what is not its parent: not_a_child
+ok   destroy a node still in the tree: has_parent
+ok   remove an attribute that is not there: not_found
+ok   no refusal moved the revision (one create did)
+ok   the invariants hold after the refusals
+ok   insert h1 before p: ok
+ok   give h1 text to escape: ok
+ok   and an attribute to escape: ok
+ok   h1 is body's first child, p its next
+ok   body has three children
+ok   replace an attribute's value: ok
+ok   the button still has one attribute
+ok   remove the class: ok
+ok   p has no attribute
+ok   change a text's data: ok
+ok   the invariants hold
+ok   detach p: ok
+ok   destroy the detached p: ok
+ok   p's handle is stale
+ok   its text's handle is stale too
+ok   an operation on the stale handle: stale_handle
+ok   and on the stale text: stale_handle
+ok   the freed slots are reused
+ok   a reused slot has a new generation
+ok   the old handle is still stale over the reused slot
+ok   append the new section: ok
+ok   the invariants hold after destroy and reuse
+serialized: <html><body><h1 title="say &quot;hi&quot; &amp; 'bye'">Fish &amp; &lt;chips&gt;</h1><button type="button">Send</button><section></section></body></html>
+-- snapshot
+amb_snapshot(dom, 1, 28, 'fnv1a32:9e7199f0:6383').
+dom_node(n(1,1,0),document).
+dom_first_child(n(1,1,0),n(1,2,0)).
+dom_node(n(1,2,0),element).
+dom_element(n(1,2,0),'html').
+dom_parent(n(1,2,0),n(1,1,0)).
+dom_first_child(n(1,2,0),n(1,3,0)).
+dom_node(n(1,3,0),element).
+dom_element(n(1,3,0),'body').
+dom_parent(n(1,3,0),n(1,2,0)).
+dom_first_child(n(1,3,0),n(1,9,0)).
+dom_node(n(1,4,1),element).
+dom_element(n(1,4,1),'section').
+dom_parent(n(1,4,1),n(1,3,0)).
+dom_node(n(1,5,1),element).
+dom_element(n(1,5,1),'aside').
+dom_node(n(1,6,0),element).
+dom_element(n(1,6,0),'button').
+dom_parent(n(1,6,0),n(1,3,0)).
+dom_next_sibling(n(1,6,0),n(1,4,1)).
+dom_first_child(n(1,6,0),n(1,7,0)).
+dom_node(n(1,7,0),text).
+dom_text(n(1,7,0),'Send').
+dom_parent(n(1,7,0),n(1,6,0)).
+dom_node(n(1,8,0),element).
+dom_element(n(1,8,0),'div').
+dom_node(n(1,9,0),element).
+dom_element(n(1,9,0),'h1').
+dom_parent(n(1,9,0),n(1,3,0)).
+dom_next_sibling(n(1,9,0),n(1,6,0)).
+dom_first_child(n(1,9,0),n(1,10,0)).
+dom_node(n(1,10,0),text).
+dom_text(n(1,10,0),'Fish & <chips>').
+dom_parent(n(1,10,0),n(1,9,0)).
+dom_attr(n(1,6,0),'type','button').
+dom_attr(n(1,9,0),'title','say "hi" & \'bye\'').
+-- requests
+amb_result('set_attribute', ok, 29).
+ok   a valid request: ok
+amb_result('set_attribute', stale_revision, 29).
+ok   the same request at the old revision: stale_revision
+amb_result('set_data', stale_handle, 29).
+ok   a request on a stale handle: stale_handle
+amb_result('destroy', not_requestable, 29).
+ok   a request for an operation that is not requestable: not_requestable
+ok   a malformed request: bad_request
+amb_result('launch', bad_request, 29).
+ok   a request for an operation the contract has not: bad_request
+amb_result('set_data', bad_request, 29).
+ok   a request for another document: bad_request
+ok   the invariants hold at the end
+GREEN: 0 failure(s)
