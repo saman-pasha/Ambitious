@@ -69,7 +69,7 @@ N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(i
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
 ...
 $ bin/ambitious query tests/pages/style.html "dom_attr(N, id, intro), css_lost(N, color, D, Why)"
-N = n(1,18,0), D = de(1,226,0), Why = origin_or_importance(lost('style attribute'),won('important author'))
+N = n(1,18,0), D = de(1,275,0), Why = origin_or_importance(lost('style attribute'),won('important author'))
 ...
 $ bin/ambitious render tests/pages/layout.html layout.png
 rendered 800x601: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:c21c5ac365972c5e
@@ -77,7 +77,7 @@ $ bin/ambitious query tests/pages/layout.html "dom_attr(N, class, wrap), layout_
 N = n(1,26,0), B = bx(1,5,0), W = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
 $ bin/ambitious advise tests/pages/style.html
 amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
-amb_diag(unused_rule, ru(1,149,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,161,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
 ```
 
 ## Build and test
