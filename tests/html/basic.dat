@@ -265,3 +265,151 @@ select
 |   "one"
 | <option>
 |   "two"
+
+#data
+<p>icon <svg viewbox="0 0 9 9" xlink:href="#u"><clippath><circle r=2 /></clippath><foreignobject><div>html</div></foreignobject></svg> after
+#errors
+#comment SVG in its namespace: the adjusted names, an XLink attribute, a self-closing element, a foreignObject of HTML (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "icon "
+|       <svg svg>
+|         viewBox="0 0 9 9"
+|         xlink href="#u"
+|         <svg clipPath>
+|           <svg circle>
+|             r="2"
+|         <svg foreignObject>
+|           <div>
+|             "html"
+|       " after"
+
+#data
+<svg><desc><b>bold</b></desc><style>a<b</style><p>breaks out
+#errors
+#comment an HTML integration point; an SVG style, no raw text; p breaks out of foreign content (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <svg svg>
+|       <svg desc>
+|         <b>
+|           "bold"
+|       <svg style>
+|         "a"
+|         <svg b<>
+|           style=""
+|     <p>
+|       "breaks out"
+
+#data
+<math><mi>x</mi><annotation-xml encoding="text/html"><p>p</p></annotation-xml><mtext><i>i</i></mtext><definitionurl definitionurl=u></math>
+#errors
+#comment MathML: text integration points, an annotation-xml of HTML, definitionURL adjusted (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <math math>
+|       <math mi>
+|         "x"
+|       <math annotation-xml>
+|         encoding="text/html"
+|         <p>
+|           "p"
+|       <math mtext>
+|         <i>
+|           "i"
+|       <math definitionurl>
+|         definitionURL="u"
+
+#data
+<svg><![CDATA[a<b & c]]></svg><div><![CDATA[not here]]></div>
+#errors
+#comment a CDATA section in foreign content, a bogus comment in HTML content (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <svg svg>
+|       "a<b & c"
+|     <div>
+|       <!-- [CDATA[not here]] -->
+
+#data
+<table><template><tr><td>cell</td></tr></template><tr><td>outside</td></tr></table>
+#errors
+#comment a template in a table: its rows go to its contents (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <table>
+|       <template>
+|         content
+|           <tr>
+|             <td>
+|               "cell"
+|       <tbody>
+|         <tr>
+|           <td>
+|             "outside"
+
+#data
+<template><template><b>nested</b></template><style>s</style></template><p>body
+#errors
+#comment a template in a template's contents (Chromium's tree)
+#document
+| <html>
+|   <head>
+|     <template>
+|       content
+|         <template>
+|           content
+|             <b>
+|               "nested"
+|         <style>
+|           "s"
+|   <body>
+|     <p>
+|       "body"
+
+#data
+<select><button><selectedcontent></selectedcontent></button><option>One<option selected>Two <i>2</i><hr><div>kept</div></select>
+#errors
+#comment the 2025 select: a button and a div kept, the selectedcontent showing the selected option (Chromium's tree)
+#document
+| <html>
+|   <head>
+|   <body>
+|     <select>
+|       <button>
+|         <selectedcontent>
+|           "Two "
+|           <i>
+|             "2"
+|       <option>
+|         "One"
+|       <option>
+|         selected=""
+|         "Two "
+|         <i>
+|           "2"
+|       <hr>
+|       <div>
+|         "kept"
+
+#data
+<nobr>X</path><g></g>
+#errors
+#comment a fragment in an SVG context: nobr breaks out (Chromium's tree, from innerHTML)
+#document-fragment
+svg path
+#document
+| <nobr>
+|   "X"
+|   <g>

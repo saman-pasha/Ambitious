@@ -35,8 +35,14 @@ amb_implementation(a11y);
 
 /* ---- the DOM and its style, as this module reads them ---- */
 
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int ax_is(const dom_document *d, uint32_t x, const char *name) {
-    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
+}
+/* in the document's tree: not detached, nor in a template's contents */
+static int ax_connected(const dom_document *d, uint32_t x) {
+    while (x && x != 1) x = d->node[x].parent;
+    return x == 1;
 }
 static uint32_t ax_attr(const dom_document *d, uint32_t x, const char *name) {
     uint32_t a = names_find(d, name, strlen(name));
@@ -106,7 +112,8 @@ static uint32_t ax_by_id(const dom_document *d, const char *id, size_t n) {
     for (uint32_t x = 1; x < d->node_len; x++) {
         if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT) continue;
         for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next)
-            if (d->attr[at].name == ida && d->attr[at].value.len == n && memcmp(text_ptr(d, d->attr[at].value), id, n) == 0) return x;
+            if (d->attr[at].name == ida && d->attr[at].value.len == n && memcmp(text_ptr(d, d->attr[at].value), id, n) == 0 &&
+                ax_connected(d, x)) return x;
     }
     return 0;
 }
@@ -261,7 +268,7 @@ static a11y_name_from ax_name_of(ACTX, uint32_t x, a11y_role role, vector<char> 
             uint32_t fora = names_find(d, "for", 3);
             amb_span idv = d->attr[ida].value;
             for (uint32_t l = 1; l < d->node_len && fora; l++) {
-                if (!d->node[l].live || !ax_is(d, l, "label")) continue;
+                if (!d->node[l].live || !ax_is(d, l, "label") || !ax_connected(d, l)) continue;
                 uint32_t f = ax_attr(d, l, "for");
                 if (f && d->attr[f].value.len == idv.len && memcmp(text_ptr(d, d->attr[f].value), text_ptr(d, idv), idv.len) == 0) {
                     ax_text(AARGS, l, out);

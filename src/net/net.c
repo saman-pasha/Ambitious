@@ -565,8 +565,9 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
 
 /* ---- what a page asks for ---- */
 
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int net_is(const dom_document *d, uint32_t x, const char *name) {
-    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
 }
 static uint32_t net_attr(const dom_document *d, uint32_t x, const char *name) {
     uint32_t a = names_find(d, name, strlen(name));

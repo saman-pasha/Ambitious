@@ -439,7 +439,12 @@ static void page_title(const dom_document *d, char *out, size_t cap) {
     size_t k = 0;
     out[0] = 0;
     for (uint32_t x = 1; x < d->node_len; x++) {
-        if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT || !names_is(d, d->node[x].name, "title", 5)) continue;
+        if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML ||
+            !names_is(d, d->node[x].name, "title", 5)) continue;
+        /* in the document: not in a template's contents */
+        uint32_t up = x;
+        while (up && up != 1) up = d->node[up].parent;
+        if (up != 1) continue;
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
             if (d->node[c].kind != DOM_NODE_KIND_TEXT) continue;
             amb_span sp = d->node[c].data;

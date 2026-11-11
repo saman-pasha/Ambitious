@@ -173,8 +173,14 @@ void js_console(js_vm *vm, uint32_t level, uint32_t text) {
 
 static int sh_is_kind(const dom_document *d, uint32_t x, dom_node_kind k) { return x && x < d->node_len && d->node[x].live && d->node[x].kind == k; }
 static int sh_is_elem(const dom_document *d, uint32_t x) { return sh_is_kind(d, x, DOM_NODE_KIND_ELEMENT); }
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int sh_named(const dom_document *d, uint32_t x, const char *name) {
-    return sh_is_elem(d, x) && names_is(d, d->node[x].name, name, strlen(name));
+    return sh_is_elem(d, x) && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
+}
+/* a script element: HTML's, or SVG's, which runs too */
+static int sh_script_elem(const dom_document *d, uint32_t x) {
+    return sh_named(d, x, "script") ||
+           (sh_is_elem(d, x) && d->node[x].ns == DOM_NAMESPACE_SVG && names_is(d, d->node[x].name, "script", 6));
 }
 
 /* the wrapper of node x, made at its first use: null for none */
@@ -308,6 +314,11 @@ static jv sh_upper_name(js_vm *vm, const dom_document *d, uint32_t atom) {
     for (size_t i = 0; i < len(b); i++) if (b[i] >= 'a' && b[i] <= 'z') b[i] = (char)(b[i] - 32);
     return sh_str(vm, data(b), len(b));
 }
+/* an element's tagName: an HTML element's name upper-cased, a foreign element's as it is */
+static jv sh_tag_name(js_vm *vm, const dom_document *d, uint32_t x) {
+    if (d->node[x].ns == DOM_NAMESPACE_HTML) return sh_upper_name(vm, d, d->node[x].name);
+    return sh_str(vm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name));
+}
 
 /* ---- the DOM, written: each change one of its operations ---- */
 
@@ -347,21 +358,29 @@ static void sh_set_text(dom_document *d, uint32_t x, const char *t, size_t n) {
     dom_append_child(d, node_handle(d, x), tn);
 }
 
-/* a copy of node x of the document from, made in to (with its subtree when deep): its index */
+/* a copy of node x of the document from, made in to (with its subtree when deep): its index.
+   An element keeps its namespace and its attributes theirs; a template's copy has a copy of
+   its contents when deep */
 static uint32_t sh_import(dom_document *to, const dom_document *from, uint32_t x, int deep) {
     dom_node_kind k = from->node[x].kind;
     dom_node_h h = { 0, 0, 0 };
     if (k == DOM_NODE_KIND_ELEMENT) {
         vector<char> nm;
         append_range(nm, names_ptr(from, from->node[x].name), names_len(from, from->node[x].name));
-        h = dom_create_element(to, data(nm), len(nm));
+        h = dom_create_element_ns(to, from->node[x].ns, data(nm), len(nm));
         if (!h.index) return 0;
         for (uint32_t at = from->node[x].first_attr; at; at = from->attr[at].next) {
             vector<char> an, av;
             append_range(an, names_ptr(from, from->attr[at].name), names_len(from, from->attr[at].name));
             append_range(av, text_ptr(from, from->attr[at].value), from->attr[at].value.len);
-            dom_set_attribute(to, h, data(an), len(an), data(av), len(av));
+            dom_set_attribute_ns(to, h, from->attr[at].ns, data(an), len(an), data(av), len(av));
         }
+        uint32_t fc = from->node[x].content, tc = to->node[h.index].content;
+        if (deep && fc && tc)
+            for (uint32_t c = from->node[fc].first_child; c; c = from->node[c].next_sibling) {
+                uint32_t y = sh_import(to, from, c, 1);
+                if (y) dom_append_child(to, node_handle(to, tc), node_handle(to, y));
+            }
     } else if (k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT) {
         vector<char> t;
         append_range(t, text_ptr(from, from->node[x].data), from->node[x].data.len);
@@ -443,7 +462,9 @@ static void sh_html_of(const dom_document *d, uint32_t x, vector<char> *out, int
         push_back(*out, '>');
         if (sh_void(d, x)) return;
     }
-    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) sh_html_of(d, c, out, 1);
+    /* a template's markup is its contents' */
+    uint32_t holder = k == DOM_NODE_KIND_ELEMENT && d->node[x].content ? d->node[x].content : x;
+    for (uint32_t c = d->node[holder].first_child; c; c = d->node[c].next_sibling) sh_html_of(d, c, out, 1);
     if (self && k == DOM_NODE_KIND_ELEMENT) {
         append_range(*out, "</", 2);
         append_range(*out, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name));
@@ -806,7 +827,8 @@ static int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
             for (uint32_t y = 1; y < d->node_len && !ctl; y++) {
                 if (!d->node[y].live || !sh_is_elem(d, y)) continue;
                 uint32_t ia = sh_attr_z(d, y, "id");
-                if (ia && d->attr[ia].value.len == len(id) && memcmp(text_ptr(d, d->attr[ia].value), data(id), len(id)) == 0) ctl = y;
+                if (ia && d->attr[ia].value.len == len(id) && memcmp(text_ptr(d, d->attr[ia].value), data(id), len(id)) == 0 &&
+                    sh_connected(d, y)) ctl = y;
             }
         }
         if (ctl && ctl != x) sh_click_at(vm, ctl, trusted);
@@ -900,11 +922,14 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     switch (ha) {
     case HA_NODETYPE: return jv_num(k == DOM_NODE_KIND_ELEMENT ? 1 : k == DOM_NODE_KIND_TEXT ? 3 : k == DOM_NODE_KIND_COMMENT ? 8 : k == DOM_NODE_KIND_DOCUMENT ? 9 : 10);
     case HA_NODENAME:
-        if (el) return sh_upper_name(vm, d, d->node[x].name);
+        if (el) return sh_tag_name(vm, d, x);
         return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" : "html");
-    case HA_TAGNAME: if (el) return sh_upper_name(vm, d, d->node[x].name); break;
+    case HA_TAGNAME: if (el) return sh_tag_name(vm, d, x); break;
     case HA_LOCALNAME: if (el) return sh_str(vm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name)); break;
-    case HA_NAMESPACEURI: if (el) return sh_cstr(vm, "http://www.w3.org/1999/xhtml"); break;
+    case HA_NAMESPACEURI:
+        if (el) return sh_cstr(vm, d->node[x].ns == DOM_NAMESPACE_SVG ? "http://www.w3.org/2000/svg" :
+                                   d->node[x].ns == DOM_NAMESPACE_MATHML ? "http://www.w3.org/1998/Math/MathML" : "http://www.w3.org/1999/xhtml");
+        break;
     case HA_TEXTCONTENT: case HA_INNERTEXT: {
         if (k == DOM_NODE_KIND_DOCUMENT) return JV_NULL;
         vector<char> t;
@@ -1271,11 +1296,16 @@ static jv sh_by(js_vm *vm, uint32_t scope, jv arg, int by_class) {
     if (!sh_utf8(vm, arg, &want)) return JV_HOLE;
     vector<uint32_t> wt, xs;
     sh_tokens(data(want), len(want), &wt);
+    /* an HTML element is named by the name lower-cased, a foreign one by the name as given */
+    vector<char> given;
+    append_range(given, data(want), len(want));
     for (size_t i = 0; i < len(want) && !by_class; i++) if (want[i] >= 'A' && want[i] <= 'Z') want[i] = (char)(want[i] + 32);
     for (uint32_t c = sh_next_in(d, scope, scope); c; c = sh_next_in(d, c, scope)) {
         if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
         if (!by_class) {
-            if ((len(want) == 1 && want[0] == '*') || names_is(d, d->node[c].name, data(want), len(want))) push_back(xs, c);
+            int html = d->node[c].ns == DOM_NAMESPACE_HTML;
+            if ((len(want) == 1 && want[0] == '*') || (html && names_is(d, d->node[c].name, data(want), len(want))) ||
+                (!html && names_is(d, d->node[c].name, data(given), len(given)))) push_back(xs, c);
             continue;
         }
         if (!len(wt)) continue;
@@ -1855,6 +1885,7 @@ static void sh_attr_handlers(js_vm *vm) {
             uint32_t na = d->attr[at].name;
             size_t nl = names_len(d, na);
             if (nl < 3 || names_ptr(d, na)[0] != 'o' || names_ptr(d, na)[1] != 'n') continue;
+            if (!sh_connected(d, x)) break;     /* a template's contents are inert */
             vector<char> type, body;
             append_range(type, names_ptr(d, na) + 2, nl - 2);
             append_range(body, text_ptr(d, d->attr[at].value), d->attr[at].value.len);
@@ -1904,7 +1935,7 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     sh_attr_handlers(vm);
     /* the scripts there were when the parse ended, in document order */
     vector<uint32_t> xs;
-    for (uint32_t x = sh_next_in(d, 1, 1); x; x = sh_next_in(d, x, 1)) if (sh_named(d, x, "script")) push_back(xs, x);
+    for (uint32_t x = sh_next_in(d, 1, 1); x; x = sh_next_in(d, x, 1)) if (sh_script_elem(d, x)) push_back(xs, x);
     uint32_t ran = 0;
     for (size_t i = 0; i < len(xs) && vm->throwing != 2; i++) {
         uint32_t x = xs[i];

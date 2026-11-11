@@ -26,14 +26,16 @@ css_declared_rgba(N, P, C) :- css_style_of(N, S), css_style_rgba(S, P, C).
 %% element's, and any other's the initial value, border-color's being the
 %% element's own colour. So css_computed/4 and css_rgba/3 answer as they did when
 %% every value was a fact, from a snapshot with a sixth as many (PLAN.md 11).
+%% The elements are those the cascade styled (css_style_of/2): a template's
+%% contents are no part of the document's tree, and have no style.
 css_computed(N, P, V, How) :-
     css_declared(N, P, V, How).
 css_computed(N, P, V, How) :-
-    dom_element(N, _), css_initial(P, _), \+ css_declared(N, P, _, _),
+    css_style_of(N, _), css_initial(P, _), \+ css_declared(N, P, _, _),
     css_rules_default(N, P, V, How).
 
 css_rules_default(N, P, V, How) :-
-    (   css_rules_inherited(P), dom_parent(N, Par), dom_element(Par, _)
+    (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
     ->  css_computed(Par, P, V, _), How = inherited
     ;   P == border_color
     ->  css_computed(N, color, V, _), How = initial
@@ -43,11 +45,11 @@ css_rules_default(N, P, V, How) :-
 css_rgba(N, P, C) :-
     css_declared_rgba(N, P, C).
 css_rgba(N, P, C) :-
-    css_rules_colour(P), dom_element(N, _), \+ css_declared(N, P, _, _),
+    css_rules_colour(P), css_style_of(N, _), \+ css_declared(N, P, _, _),
     css_rules_default_rgba(N, P, C).
 
 css_rules_default_rgba(N, P, C) :-
-    (   css_rules_inherited(P), dom_parent(N, Par), dom_element(Par, _)
+    (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
     ->  css_rgba(Par, P, C)
     ;   P == border_color
     ->  css_rgba(N, color, C)

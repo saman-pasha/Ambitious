@@ -206,15 +206,20 @@ static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
 
 /* ---- the DOM, as layout walks it ---- */
 
+/* the HTML element of that name (an SVG or MathML element of the name is none) */
 static int lay_is_named(const dom_document *d, uint32_t x, const char *name) {
-    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && names_is(d, d->node[x].name, name, strlen(name));
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
+}
+/* an SVG document fragment: its svg element, in the SVG namespace */
+static int lay_is_svg(const dom_document *d, uint32_t x) {
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_SVG && names_is(d, d->node[x].name, "svg", 3);
 }
 /* an element drawn by its own content rules: an image, a form control, an embedding */
 static int lay_replaced(const dom_document *d, uint32_t x) {
     return lay_is_named(d, x, "img") || lay_is_named(d, x, "input") || lay_is_named(d, x, "textarea") ||
            lay_is_named(d, x, "select") || lay_is_named(d, x, "iframe") || lay_is_named(d, x, "video") ||
            lay_is_named(d, x, "canvas") || lay_is_named(d, x, "embed") || lay_is_named(d, x, "object") ||
-           lay_is_named(d, x, "svg");
+           lay_is_svg(d, x);
 }
 static uint32_t lay_attr(const dom_document *d, uint32_t x, const char *name) {
     uint32_t a = names_find(d, name, strlen(name));
@@ -350,7 +355,7 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             dh = (double)lay_attr_int(d, el, "rows", 2) * s->lh;
         } else if (lay_is_named(d, el, "select")) { dw = 8 * s->fs; dh = s->lh; }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
-        else if (lay_is_named(d, el, "canvas") || lay_is_named(d, el, "svg")) { dw = 300; dh = 150; }
+        else if (lay_is_named(d, el, "canvas") || lay_is_svg(d, el)) { dw = 300; dh = 150; }
         *w = s->width.unit == LAY_AUTO ? dw : lay_res(s->width, cw);
         *h = s->height.unit == LAY_AUTO ? dh : s->height.v;
         return;

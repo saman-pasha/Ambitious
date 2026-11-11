@@ -1,0 +1,6 @@
+http://www.w3.org/2000/svg svg svg
+foreignObject: 1 foreignObject 1
+http://www.w3.org/1998/Math/MathML mi 3
+Foreign content
+<title>Not the title</title><p id="lbl">Inside a template</p><img src="nowhere.png"><button onclick="nothing()">Inert</button>
+null 0

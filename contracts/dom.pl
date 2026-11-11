@@ -26,22 +26,23 @@ dom_contract(enum(attr_namespace, [null, xlink, xml, xmlns])).
 
 %% a node: one record of the node table. Links are refs within the store,
 %% never pointers; the record's slot, liveness and generation are the table's.
+%% The fields every walk of the tree reads come first, a doctype's last.
 dom_contract(record(node, [
     field(kind,         enum(node_kind)),
     field(name,         atom(names)),      % an element's local name, a doctype's name
     field(ns,           enum(namespace)),  % an element's namespace
-    field(data,         span(text)),       % a text or comment node's data
-    field(public_id,    span(text)),       % a doctype's public identifier ...
-    field(system_id,    span(text)),       % ... and its system identifier
-    field(doctype_ids,  u8),               % which of the two the doctype has: 1 public, 2 system
     field(parent,       ref(node)),
     field(first_child,  ref(node)),
     field(last_child,   ref(node)),
     field(prev_sibling, ref(node)),
     field(next_sibling, ref(node)),
     field(first_attr,   ref(attr)),
+    field(data,         span(text)),       % a text or comment node's data
     field(content,      ref(node)),        % an HTML template's contents, a fragment
-    field(host,         ref(node))         % a fragment's template
+    field(host,         ref(node)),        % a fragment's template
+    field(public_id,    span(text)),       % a doctype's public identifier ...
+    field(system_id,    span(text)),       % ... and its system identifier
+    field(doctype_ids,  u8)                % which of the two the doctype has: 1 public, 2 system
 ])).
 
 %% an attribute's name is its qualified name: an attribute in a namespace keeps

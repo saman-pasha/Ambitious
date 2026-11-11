@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<template id="tpl"><title>Not the title</title><p id="lbl">Inside a template</p><img src="nowhere.png"><button onclick="nothing()">Inert</button></template>
+<title>Foreign content</title>
+<style>
+foreignobject { color: rgb(0, 128, 0) }
+:link { color: rgb(255, 0, 0) }
+title { color: rgb(0, 0, 255) }
+</style>
+</head>
+<body>
+<h1>Foreign content</h1>
+<p>An icon: <svg width="24" height="24" viewbox="0 0 24 24" aria-labelledby="lbl"><title>Close</title><a xlink:href="#top" href="#top"><path d="M0 0L24 24"/></a><foreignObject width="24" height="24"><p>HTML inside</p></foreignObject><![CDATA[x < y]]><style>.c { fill: red }</style></svg></p>
+<p>An equation: <math><mi>x</mi><mo>=</mo><mfrac definitionurl="u"><mn>1</mn><mn>2</mn></mfrac><annotation-xml encoding="text/html"><b>half</b></annotation-xml></math></p>
+<select><button><selectedcontent></selectedcontent></button><option>One</option><option selected>Two <b>2</b></option></select>
+<p title="a<b>">An attribute with angle brackets</p>
+<label for="lbl">A label for nothing in the document</label>
+<script>
+var svg = document.getElementsByTagName('svg')[0];
+console.log(svg.namespaceURI + ' ' + svg.tagName + ' ' + svg.nodeName);
+var fo = document.getElementsByTagName('foreignObject');
+console.log('foreignObject: ' + fo.length + ' ' + fo[0].tagName + ' ' + document.querySelectorAll('foreignobject p').length);
+var mi = document.getElementsByTagName('mi')[0];
+console.log(mi.namespaceURI + ' ' + mi.tagName + ' ' + document.getElementsByTagName('b').length);
+console.log(document.title);
+var t = document.getElementById('tpl');
+console.log(t.innerHTML);
+console.log(document.getElementById('lbl') + ' ' + t.childNodes.length);
+</script>
+</body>
+</html>
