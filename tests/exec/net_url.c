@@ -59,6 +59,28 @@ static const char *const proxies[][7] = {
     { "http://p.test:3128", 0, 0, 0, 0, "file:///etc/hostname", "" },
 };
 
+/* dates as a cookie's Expires is read (RFC 6265bis 5.1.1), HTTP's three forms among
+   them: the seconds since the epoch, as Python's calendar.timegm gives them, or
+   "none" for what is no date (a day the month lacks, a year before 1601, hour 25) */
+static const char *const dates[][2] = {
+    { "Wed, 01 Jan 2031 00:00:00 GMT", "1924992000" }, { "Sun, 06 Nov 1994 08:49:37 GMT", "784111777" },
+    { "Sunday, 06-Nov-94 08:49:37 GMT", "784111777" }, { "Sun Nov  6 08:49:37 1994", "784111777" },
+    { "Thu, 01 Jan 1970 00:00:00 GMT", "0" }, { "Thu, 01-Jan-70 00:00:01 GMT", "1" }, { "09 Jun 2021 10:18:14", "1623233894" },
+    { "Thu, 29 Feb 2024 12:00:00 GMT", "1709208000" }, { "31-Dec-69 23:59:59", "3155759999" }, { "1 jan 1601 0:0:0", "-11644473600" },
+    { "Tue, 29 Feb 2023 12:00:00 GMT", "none" }, { "Fri, 31 Feb 2023 00:00:00 GMT", "none" }, { "Mon, 01 Jan 1600 00:00:00 GMT", "none" },
+    { "Mon, 01 Jan 2024 25:00:00 GMT", "none" }, { "2021-06-09T10:18:14Z", "none" }, { "tomorrow", "none" },
+};
+
+/* sites, as cookies' SameSite compares them: the scheme and the registrable domain,
+   two labels or three under a public suffix of two (co.uk, github.io: the Public
+   Suffix List's) */
+static const char *const sites[][2] = {
+    { "https://www.example.com/x", "https://example.com" }, { "http://a.b.example.co.uk/", "http://example.co.uk" },
+    { "https://foo.github.io/", "https://foo.github.io" }, { "http://localhost:8080/", "http://localhost" },
+    { "http://127.0.0.1:9/", "http://127.0.0.1" }, { "https://Example.COM./", "https://example.com" },
+    { "http://co.uk/", "http://co.uk" }, { "file:///x", "null" }, { "data:text/plain,x", "null" },
+};
+
 int main(void) {
     int bad = 0, n = 0;
     char out[8192];
@@ -86,6 +108,20 @@ int main(void) {
         bad += !ok;
         printf("%s proxy for %s with no_proxy '%s': %s%s%s\n", ok ? "ok  " : "FAIL", proxies[i][5], proxies[i][4] ? proxies[i][4] : "",
                out[0] ? (const char *)out : "none", ok ? "" : ", not ", ok ? "" : proxies[i][6]);
+    }
+    for (size_t i = 0; i < sizeof dates / sizeof dates[0]; i++, n++) {
+        long long t = 0;
+        if (net_url_date(dates[i][0], &t)) snprintf(out, sizeof out, "%lld", t);
+        else snprintf(out, sizeof out, "none");
+        int ok = strcmp(out, dates[i][1]) == 0;
+        bad += !ok;
+        printf("%s date '%s': %s%s%s\n", ok ? "ok  " : "FAIL", dates[i][0], out, ok ? "" : ", not ", ok ? "" : dates[i][1]);
+    }
+    for (size_t i = 0; i < sizeof sites / sizeof sites[0]; i++, n++) {
+        if (!net_url_site(sites[i][0], out, sizeof out)) snprintf(out, sizeof out, "(not a URL)");
+        int ok = strcmp(out, sites[i][1]) == 0;
+        bad += !ok;
+        printf("%s site of %s: %s%s%s\n", ok ? "ok  " : "FAIL", sites[i][0], out, ok ? "" : ", not ", ok ? "" : sites[i][1]);
     }
     printf("%d of %d cases\n", n - bad, n);
     return bad ? 1 : 0;

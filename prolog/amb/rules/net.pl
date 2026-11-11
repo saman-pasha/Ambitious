@@ -5,7 +5,8 @@
 %% port; an opaque one (a file: or data: URL's) is null, and same as nothing.
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
 :- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3,
-           net_failure/2, net_tls/4, net_proxy/2.
+           net_failure/2, net_tls/4, net_proxy/2, net_cross_site/1, net_cookie/5, net_cookie_flags/5,
+           net_cookie_expires/2, net_cookie_set_by/2, net_cookie_refused/2, net_cookie_sent/2.
 
 net_page(R) :- net_resource(R, _, document, _, _, _, _), \+ net_asked_by(R, _, _).
 
@@ -34,6 +35,26 @@ net_secure(R, V) :- net_tls(R, V, _, _).
 net_mixed_content(P, R) :-
     net_asked_by(R, P, _), net_tls(P, _, _, _), net_final_url(R, U), sub_atom(U, 0, _, _, 'http:').
 
+%% the names of the cookies sent for a resource, in the order they were sent
+net_cookies_sent(R, Names) :-
+    net_resource(R, _, _, _, _, _, _),
+    findall(N, ( net_cookie_sent(R, C), net_cookie(C, N, _, _, _) ), Names), Names \== [].
+
+%% a cookie that went with a request for another site than the page's: a third party's
+net_third_party_cookie(C, R) :- net_cookie_sent(R, C), net_cross_site(R).
+
+%% a refusal in words
+net_refusal_words(malformed, 'it is malformed').
+net_refusal_words(too_large, 'its name and value pass 4096 bytes').
+net_refusal_words(secure_over_http, 'it is Secure but came over http:').
+net_refusal_words(domain_mismatch, 'its Domain does not hold the host').
+net_refusal_words(public_suffix, 'its Domain is a public suffix').
+net_refusal_words(prefix, 'its name''s prefix asks for what it lacks').
+net_refusal_words(cross_site, 'it came from another site''s response and is not SameSite=None').
+net_refusal_words(none_insecure, 'it is SameSite=None but not Secure').
+net_refusal_words(overwrites_secure, 'it would take the place of a Secure cookie over http:').
+net_refusal_words(too_many, 'the jar holds 3000 cookies').
+
 %% the outcomes that do not say why by themselves: their diagnostic adds the reason
 %% (net_failure/2 has every failure's)
 net_says_why(malformed).
@@ -58,3 +79,10 @@ net_diag(redirected, R, Text) :-
 net_diag(mixed_content, R, Text) :-
     net_mixed_content(P, R), net_resource(R, U, K, _, _, _, _), net_final_url(P, PU),
     format(atom(Text), 'the ~w ~w came over http: to a page served over TLS (~w)', [K, U, PU]).
+net_diag(cookie_refused, C, Text) :-
+    net_cookie_refused(C, Why), net_cookie(C, N, D, _, _), net_cookie_set_by(C, R), net_resource(R, U, _, _, _, _, _),
+    net_refusal_words(Why, W),
+    format(atom(Text), 'the cookie ~q of ~w, set by ~w, was refused: ~w', [N, D, U, W]).
+net_diag(third_party_cookie, C, Text) :-
+    net_third_party_cookie(C, R), net_cookie(C, N, D, _, _), net_resource(R, U, _, _, _, _, _),
+    format(atom(Text), 'the cookie ~q of ~w went with ~w, another site''s', [N, D, U]).

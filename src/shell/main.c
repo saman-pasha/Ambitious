@@ -476,6 +476,22 @@ static void page_clicks(const dom_document *d, js_vm *vm) {
     }
 }
 
+/* where the loader keeps cookies and cached responses (net_keep): the profile's
+   directory, the cache in AMB_CACHE when it is set; a private session, or one with
+   no profile, keeps its cookies for the run and caches nothing */
+static void loader_keep(const session *s, net_loader *nt) {
+    char jar[1100], cache[1100];
+    jar[0] = 0;
+    cache[0] = 0;
+    const char *ac = getenv("AMB_CACHE");
+    if (!s->private_mode && s->profile[0]) {
+        snprintf(jar, sizeof jar, "%s/cookies", s->profile);
+        snprintf(cache, sizeof cache, "%s/cache", s->profile);
+    }
+    if (!s->private_mode && ac && *ac) snprintf(cache, sizeof cache, "%s", ac);
+    net_keep(nt, jar, strlen(jar), cache, strlen(cache));
+}
+
 static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
                           a11y_tree *ax, script_runtime *sr, js_vm *vm) {
     char url[4200];
@@ -485,6 +501,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     css_init(st, 1);
     layout_init(lt, 1);
     net_init(nt, 1);
+    loader_keep(s, nt);
     a11y_init(ax, 1);
     script_init(sr, 1);
     net_resource_h ph = net_fetch(nt, url, strlen(url), NET_KIND_DOCUMENT);

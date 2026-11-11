@@ -109,3 +109,69 @@ CONNECT blocked.test:443
 -- http_proxy: the page asked for in absolute form, with the proxy's credentials
 R = rs(1,1,0), P = 'http://127.0.0.1:PROXY', U = 'http://localhost:HTTP2/elsewhere.html', O = ok
 GET http://localhost:HTTP2/elsewhere.html as amb:s@fe
+== cookies, kept in the profile's directory from one run to the next:
+-- 1. http://localhost:PORT/c/home.html
+  amb_diag(cookie_refused, ck(1,3,0), 'the cookie lhn of localhost, set by http://localhost:PORT/c/home.html, was refused: it is SameSite=None but not Secure').
+  C = ck(1,1,0), N = lh, D = localhost, P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,2,0), N = lhs, D = localhost, P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,3,0), N = lhn, D = localhost, P = '/c', S = refused, HO = true, Sec = false, Http = false, SS = no_restriction
+-- 2. http://127.0.0.1:PORT/c/page.html
+  amb_diag(cookie_refused, ck(1,7,0), 'the cookie secure of 127.0.0.1, set by http://127.0.0.1:PORT/c/page.html, was refused: it is Secure but came over http:').
+  amb_diag(cookie_refused, ck(1,8,0), 'the cookie wide of 127.0.0.1, set by http://127.0.0.1:PORT/c/page.html, was refused: its Domain does not hold the host').
+  amb_diag(cookie_refused, ck(1,9,0), 'the cookie \'__Host-x\' of 127.0.0.1, set by http://127.0.0.1:PORT/c/page.html, was refused: its name\'s prefix asks for what it lacks').
+  amb_diag(cookie_refused, ck(1,11,0), 'the cookie track of localhost, set by http://localhost:PORT/c/pixel.png, was refused: it came from another site\'s response and is not SameSite=None').
+  C = ck(1,2,0), N = sid, D = '127.0.0.1', P = /, S = kept, HO = true, Sec = false, Http = true, SS = unset
+  C = ck(1,3,0), N = pref, D = '127.0.0.1', P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,4,0), N = lang, D = '127.0.0.1', P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,5,0), N = brief, D = '127.0.0.1', P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,6,0), N = strict, D = '127.0.0.1', P = /, S = kept, HO = true, Sec = false, Http = false, SS = strict
+  C = ck(1,7,0), N = secure, D = '127.0.0.1', P = '/c', S = refused, HO = true, Sec = true, Http = false, SS = unset
+  C = ck(1,8,0), N = wide, D = '127.0.0.1', P = '/c', S = refused, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,9,0), N = '__Host-x', D = '127.0.0.1', P = /, S = refused, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,10,0), N = '', D = '127.0.0.1', P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,11,0), N = track, D = localhost, P = '/c', S = refused, HO = true, Sec = false, Http = false, SS = unset
+-- the page's snapshot holds no cookie's value: 0 lines with one
+-- 3. http://127.0.0.1:PORT/c/again.html
+  C = ck(1,2,0), N = pref, D = '127.0.0.1', P = '/c', S = replaced
+  C = ck(1,3,0), N = lang, D = '127.0.0.1', P = '/c', S = replaced
+  C = ck(1,4,0), N = lang, D = '127.0.0.1', P = '/c', S = kept
+  C = ck(1,5,0), N = pref, D = '127.0.0.1', P = '/c', S = expired
+-- 4. https://localhost:TLS/c/secure.html
+  amb_diag(cookie_refused, ck(1,5,0), 'the cookie \'__Secure-n\' of localhost, set by https://localhost:TLS/c/secure.html, was refused: its name\'s prefix asks for what it lacks').
+  C = ck(1,1,0), N = lh, D = localhost, P = '/c', S = kept, HO = true, Sec = false, Http = false, SS = unset
+  C = ck(1,3,0), N = s, D = localhost, P = '/c', S = kept, HO = true, Sec = true, Http = false, SS = unset
+  C = ck(1,4,0), N = '__Host-id', D = localhost, P = /, S = kept, HO = true, Sec = true, Http = false, SS = unset
+  C = ck(1,5,0), N = '__Secure-n', D = localhost, P = '/c', S = refused, HO = true, Sec = false, Http = false, SS = unset
+-- 5. http://localhost:PORT/c/home.html
+  amb_diag(cookie_refused, ck(1,7,0), 'the cookie lhn of localhost, set by http://localhost:PORT/c/home.html, was refused: it is SameSite=None but not Secure').
+  R = rs(1,1,0), Ns = [lh]
+-- the jar's file in the profile: each persistent cookie's domain, path, expiry and name
+127.0.0.1	/c	1734560100	lang
+localhost	/c	1700086600	s
+localhost	/	1700086600	__Host-id
+localhost	/c	1700086700	lh
+-- what the server was sent, against Chromium's (tests/net/cookies.chromium), which takes loopback http: as secure:
+-- 1 http://localhost:PORT/c/home.html
+GET localhost /c/home.html
+-- 2 http://127.0.0.1:PORT/c/page.html
+GET 127.0.0.1 /c/page.html
+GET 127.0.0.1 /c/style.css | cookie: pref=pref-7f3a; lang=en-7f3a; brief=brief-7f3a; nameless-7f3a; sid=sid-7f3a; strict=strict-7f3a
+GET 127.0.0.1 /top.png | cookie: sid=sid-7f3a; strict=strict-7f3a
+GET localhost /c/pixel.png
+-- 3 http://127.0.0.1:PORT/c/again.html
+GET 127.0.0.1 /c/again.html | cookie: pref=pref-7f3a; lang=en-7f3a
+GET 127.0.0.1 /c/style.css | cookie: lang=fr-7f3a
+-- 4 https://localhost:TLS/c/secure.html
+GET localhost /c/secure.html | cookie: lh=lh-5d21
+-- 5 http://localhost:PORT/c/home.html
+GET localhost /c/home.html | cookie: lh=lh-5d21
+5c5
+< GET 127.0.0.1 /c/style.css | cookie: pref=pref-7f3a; lang=en-7f3a; brief=brief-7f3a; secure=secure-7f3a; nameless-7f3a; sid=sid-7f3a; strict=strict-7f3a
+---
+> GET 127.0.0.1 /c/style.css | cookie: pref=pref-7f3a; lang=en-7f3a; brief=brief-7f3a; nameless-7f3a; sid=sid-7f3a; strict=strict-7f3a
+14c14
+< GET localhost /c/home.html | cookie: lh=lh-5d21; s=s-9c04; __Host-id=id-9c04
+---
+> GET localhost /c/home.html | cookie: lh=lh-5d21
+-- a private session keeps its cookies to itself: the jar's file is as it was
+the same

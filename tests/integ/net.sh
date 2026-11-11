@@ -17,6 +17,15 @@
 # Proxies: https_proxy's CONNECT tunnels, the hosts no_proxy reaches directly, a
 # tunnel the proxy refuses, http_proxy's requests in absolute form with credentials.
 #
+# Cookies (tests/net/site/c/, each response's Set-Cookie lines in FILE.headers): five
+# runs of one profile, the clock set by AMB_NOW, each page's cookies as the reasoner
+# sees them (never a value) and its refusals. Persistent cookies last from one run to
+# the next in the profile's jar file, session cookies end with their run; a Max-Age
+# runs out and another deletes; Path and Domain match; SameSite holds back a cross-
+# site part's cookies, as Lax by default; Secure ones go over TLS alone. The Cookie
+# header each request carried, as the server logged it, against Chromium's for the
+# same visits (tests/net/reference.sh). A private run leaves the jar as it was.
+#
 # The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-net.XXXXXX")
@@ -35,7 +44,7 @@ serve() {
   while [ ! -s "$work/$name.port" ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
   head -1 "$work/$name.port"
 }
-port=$(serve http "$AMB_ROOT/tests/net/serve.py" "$site")
+port=$(serve http "$AMB_ROOT/tests/net/serve.py" --log "$work/req.log" "$site" "$nsite")
 names() { sed -e "s/:$port\b/:PORT/g" -e "s/:${http2:-x}\b/:HTTP2/g" -e "s/:${tls:-x}\b/:TLS/g" -e "s/:${tls12:-x}\b/:TLS12/g" -e "s/:${proxy:-x}\b/:PROXY/g"; }
 amb() { sh "$AMB_ROOT/bin/ambitious" "$@" 2>&1 | names; }
 
@@ -61,14 +70,10 @@ amb render "$url" "$work/page.png"
 
 echo "== https:"
 ca=$work/ca
-mkdir -p "$ca"
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout "$ca/ca.key" -out "$ca/ca.crt" -days 2 \
-  -subj "/CN=Ambitious test authority" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2> /dev/null
-openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout "$ca/srv.key" -out "$ca/srv.csr" -subj "/CN=localhost" 2> /dev/null
-printf 'subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n' > "$ca/srv.ext"
-openssl x509 -req -in "$ca/srv.csr" -CA "$ca/ca.crt" -CAkey "$ca/ca.key" -CAcreateserial -out "$ca/srv.crt" -days 2 -extfile "$ca/srv.ext" 2> /dev/null
+sh "$AMB_ROOT/tests/net/certs.sh" "$ca"
 tls12=$(serve tls12 "$AMB_ROOT/tests/net/serve.py" --tls "$ca/srv.crt" "$ca/srv.key" --tls12 "$nsite" "$site")
-tls=$(serve tls "$AMB_ROOT/tests/net/serve.py" --tls "$ca/srv.crt" "$ca/srv.key" --sub "@TLS12@=$tls12" --sub "@HTTP@=$port" "$nsite" "$site")
+tls=$(serve tls "$AMB_ROOT/tests/net/serve.py" --tls "$ca/srv.crt" "$ca/srv.key" --sub "@TLS12@=$tls12" --sub "@HTTP@=$port" --log "$work/req.log" \
+  "$nsite" "$site")
 http2=$(serve http2 "$AMB_ROOT/tests/net/serve.py" --sub "@TLS@=$tls" "$nsite" "$site")
 export SSL_CERT_FILE=$ca/ca.crt
 turl="https://localhost:$tls/tls.html"
@@ -104,6 +109,35 @@ names < "$work/proxy.log"
 echo "-- http_proxy: the page asked for in absolute form, with the proxy's credentials"
 http_proxy=http://amb:s%40fe@127.0.0.1:$proxy amb query "$eurl" "net_proxy(R, P), net_resource(R, U, _, O, _, _, _)"
 names < "$work/proxy.log"
+
+echo "== cookies, kept in the profile's directory from one run to the next:"
+# visit N TIME URL GOAL: run N of a profile at the clock's TIME, its requests logged
+# under `-- N URL'; what the reasoner says of its cookies, and GOAL's answers
+prof=$work/profile
+: > "$work/req.log"
+visit() {
+  echo "-- $1 $3" >> "$work/req.log"
+  echo "-- $1. $3" | names
+  AMB_NOW=$2 sh "$AMB_ROOT/bin/ambitious" --profile "$prof" inspect "$3" --query "$4" 2>&1 | names |
+    sed -n -e '/^  amb_diag(\(cookie_refused\|third_party_cookie\),/p' -e '/^== query/,$p' | sed '/^== query/d'
+}
+cookie="net_cookie(C, N, D, P, S), net_cookie_flags(C, HO, Sec, Http, SS)"
+visit 1 1700000000 "http://localhost:$port/c/home.html" "$cookie"
+visit 2 1700000010 "http://127.0.0.1:$port/c/page.html" "$cookie"
+echo "-- the page's snapshot holds no cookie's value: $(grep -c -e '-7f3a' -e '-5d21' "$work/page.pl") lines with one"
+visit 3 1700000100 "http://127.0.0.1:$port/c/again.html" "net_cookie(C, N, D, P, S)"
+visit 4 1700000200 "https://localhost:$tls/c/secure.html" "$cookie"
+visit 5 1700000300 "http://localhost:$port/c/home.html" "net_cookies_sent(R, Ns)"
+echo "-- the jar's file in the profile: each persistent cookie's domain, path, expiry and name"
+grep -v '^#' "$prof/cookies" | cut -f 1,3,7,9
+echo "-- what the server was sent, against Chromium's (tests/net/cookies.chromium), which takes loopback http: as secure:"
+names < "$work/req.log" | sh "$AMB_ROOT/tests/net/canon.sh" > "$work/cookies.got"
+cat "$work/cookies.got"
+diff "$AMB_ROOT/tests/net/cookies.chromium" "$work/cookies.got"
+echo "-- a private session keeps its cookies to itself: the jar's file is as it was"
+before=$(cksum < "$prof/cookies")
+AMB_NOW=1700000400 sh "$AMB_ROOT/bin/ambitious" --profile "$prof" --private load "http://127.0.0.1:$port/c/page.html" > /dev/null 2>&1
+[ "$before" = "$(cksum < "$prof/cookies")" ] && echo "the same" || echo "CHANGED"
 
 for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
 wait 2> /dev/null

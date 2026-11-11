@@ -1,0 +1,14 @@
+-- 1 http://localhost:PORT/c/home.html
+GET localhost /c/home.html
+-- 2 http://127.0.0.1:PORT/c/page.html
+GET 127.0.0.1 /c/page.html
+GET 127.0.0.1 /c/style.css | cookie: pref=pref-7f3a; lang=en-7f3a; brief=brief-7f3a; secure=secure-7f3a; nameless-7f3a; sid=sid-7f3a; strict=strict-7f3a
+GET 127.0.0.1 /top.png | cookie: sid=sid-7f3a; strict=strict-7f3a
+GET localhost /c/pixel.png
+-- 3 http://127.0.0.1:PORT/c/again.html
+GET 127.0.0.1 /c/again.html | cookie: pref=pref-7f3a; lang=en-7f3a
+GET 127.0.0.1 /c/style.css | cookie: lang=fr-7f3a
+-- 4 https://localhost:TLS/c/secure.html
+GET localhost /c/secure.html | cookie: lh=lh-5d21
+-- 5 http://localhost:PORT/c/home.html
+GET localhost /c/home.html | cookie: lh=lh-5d21; s=s-9c04; __Host-id=id-9c04

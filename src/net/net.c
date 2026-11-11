@@ -43,8 +43,10 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -1126,6 +1128,567 @@ static net_outcome net_http(const net_url *u, net_tls *t, const char *extra, siz
     return o;
 }
 
+/* ---- the clock and dates ---- */
+
+/* the session's clock: AMB_NOW (for tests), or the time; seconds since the epoch */
+static int64_t net_now(void) {
+    const char *n = getenv("AMB_NOW");
+    return n && *n ? (int64_t)atoll(n) : (int64_t)time(0);
+}
+
+/* the days from 1970-01-01 to a date of the proleptic Gregorian calendar */
+static int64_t net_days_from_civil(int64_t y, int64_t m, int64_t d) {
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int64_t yoe = y - era * 400;
+    int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+static int net_cookie_delim(unsigned char c) {
+    return c == 0x09 || (c >= 0x20 && c <= 0x2f) || (c >= 0x3b && c <= 0x40) || (c >= 0x5b && c <= 0x60) || (c >= 0x7b && c <= 0x7e);
+}
+
+/* 1*maxd DIGIT, then nothing or a non-digit: the number, its digits in *k; -1 when not */
+static int net_date_digits(const char *t, size_t n, int mind, int maxd, size_t *k) {
+    size_t i = 0;
+    int v = 0;
+    while (i < n && t[i] >= '0' && t[i] <= '9') { if ((int)i >= maxd) return -1; v = v * 10 + (t[i] - '0'); i++; }
+    if ((int)i < mind) return -1;
+    *k = i;
+    return v;
+}
+
+/* a date as RFC 6265bis (5.1.1) reads a cookie's, and as HTTP's dates are read:
+   tokens between delimiters, the first time, day, month and year found, each once;
+   two-digit years 70-99 the 1900s, 0-69 the 2000s */
+static int net_parse_date(const char *s, size_t n, int64_t *out) {
+    static const char *const months[12] = { "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec" };
+    int have_time = 0, have_day = 0, have_month = 0, have_year = 0;
+    int hour = 0, minute = 0, second = 0, day = 0, month = 0, year = 0;
+    size_t i = 0;
+    while (i < n) {
+        while (i < n && net_cookie_delim((unsigned char)s[i])) i++;
+        size_t b = i;
+        while (i < n && !net_cookie_delim((unsigned char)s[i])) i++;
+        const char *t = s + b;
+        size_t tn = i - b, k = 0;
+        if (tn == 0) continue;
+        if (!have_time) {
+            int h = net_date_digits(t, tn, 1, 2, &k);
+            if (h >= 0 && k < tn && t[k] == ':') {
+                size_t k2 = 0, k3 = 0;
+                int mi = net_date_digits(t + k + 1, tn - k - 1, 1, 2, &k2);
+                if (mi >= 0 && k + 1 + k2 < tn && t[k + 1 + k2] == ':') {
+                    int se = net_date_digits(t + k + 2 + k2, tn - k - 2 - k2, 1, 2, &k3);
+                    if (se >= 0) { have_time = 1; hour = h; minute = mi; second = se; continue; }
+                }
+            }
+        }
+        if (!have_day) {
+            int d = net_date_digits(t, tn, 1, 2, &k);
+            if (d >= 0) { have_day = 1; day = d; continue; }
+        }
+        if (!have_month && tn >= 3) {
+            int found = 0;
+            for (int m = 0; m < 12 && !found; m++)
+                if (net_lower(t[0]) == months[m][0] && net_lower(t[1]) == months[m][1] && net_lower(t[2]) == months[m][2]) { month = m + 1; found = 1; }
+            if (found) { have_month = 1; continue; }
+        }
+        if (!have_year) {
+            int y = net_date_digits(t, tn, 2, 4, &k);
+            if (y >= 0) { have_year = 1; year = y; continue; }
+        }
+    }
+    if (have_year && year >= 70 && year <= 99) year += 1900;
+    else if (have_year && year >= 0 && year <= 69) year += 2000;
+    if (!have_time || !have_day || !have_month || !have_year) return 0;
+    if (day < 1 || day > 31 || year < 1601 || hour > 23 || minute > 59 || second > 59) return 0;
+    static const int mdays[12] = { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    int leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    if (day > mdays[month - 1] || (month == 2 && day == 29 && !leap)) return 0;
+    *out = net_days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second;
+    return 1;
+}
+
+int net_url_date(const char *text, long long *t) {
+    int64_t v = 0;
+    if (!net_parse_date(text, strlen(text), &v)) return 0;
+    *t = (long long)v;
+    return 1;
+}
+
+/* ---- sites: a scheme and a registrable domain ---- */
+
+/* the public suffixes of two labels that the site of a name takes three labels
+   under: the most used of the Public Suffix List, which is not bundled */
+static const char *const net_suffixes2[] = {
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "net.uk", "ltd.uk", "plc.uk", "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au", "co.nz", "net.nz", "org.nz", "com.br", "com.cn", "net.cn", "org.cn",
+    "gov.cn", "co.in", "net.in", "org.in", "co.kr", "or.kr", "com.mx", "com.tr", "com.tw", "co.za", "com.sg", "com.hk",
+    "github.io", "gitlab.io", "blogspot.com", "herokuapp.com", "appspot.com", "cloudfront.net", "azurewebsites.net",
+    "pages.dev", "netlify.app", "vercel.app", "web.app", "firebaseapp.com",
+};
+
+/* a domain that is a public suffix: one label, or one of the list's two */
+static int net_public_suffix(const char *d) {
+    if (!strchr(d, '.')) return 1;
+    for (size_t i = 0; i < sizeof net_suffixes2 / sizeof net_suffixes2[0]; i++) if (strcmp(d, net_suffixes2[i]) == 0) return 1;
+    return 0;
+}
+
+/* a URL's site, the scheme and the registrable domain (an address, or one label,
+   for itself), serialized: https://example.com; null for an opaque URL */
+static void net_site_of(const net_url *u, char *out, size_t cap) {
+    if (u->opaque || strcmp(u->scheme, "file") == 0) { snprintf(out, cap, "null"); return; }
+    char host[256];
+    net_bare_host(u->host, host, sizeof host);
+    size_t hn = strlen(host);
+    if (hn && host[hn - 1] == '.') host[--hn] = 0;
+    if (net_is_address(host)) { snprintf(out, cap, "%s://%s", u->scheme, u->host); return; }
+    /* the last two labels, or three under a two-label suffix */
+    size_t dots[3] = { 0, 0, 0 };
+    int nd = 0;
+    for (size_t i = hn; i > 0 && nd < 3; i--) if (host[i - 1] == '.') dots[nd++] = i - 1;
+    size_t from = 0;
+    if (nd >= 2) {
+        from = dots[1] + 1;
+        if (net_public_suffix(host + from)) from = nd >= 3 ? dots[2] + 1 : 0;
+    }
+    snprintf(out, cap, "%s://%s", u->scheme, host + from);
+}
+
+/* whether a request for u, from a page at pu, is same-site (5.2): their sites the same */
+static int net_same_site(const net_url *u, const net_url *pu) {
+    char a[300], b[300];
+    net_site_of(u, a, sizeof a);
+    net_site_of(pu, b, sizeof b);
+    return strcmp(a, "null") != 0 && strcmp(a, b) == 0;
+}
+
+int net_url_site(const char *url, char *out, size_t cap) {
+    net_url u;
+    if (!net_parse_abs(url, &u)) return 0;
+    net_site_of(&u, out, cap);
+    return 1;
+}
+
+/* ---- cookies (RFC 6265bis) ---- */
+
+#define NET_COOKIE_MAX 3000
+#define NET_COOKIE_AGE_LIMIT (400 * 86400)
+
+/* 5.1.3: a host in a domain: the same, or a name ending in "." and the domain */
+static int net_domain_match(const char *host, const char *dom) {
+    size_t hn = strlen(host), dn = strlen(dom);
+    if (hn == dn) return strcmp(host, dom) == 0;
+    if (dn == 0 || hn < dn + 1 || host[hn - dn - 1] != '.' || strcmp(host + hn - dn, dom) != 0) return 0;
+    char bare[256];
+    net_bare_host(host, bare, sizeof bare);
+    return !net_is_address(bare);
+}
+
+/* 5.1.4: a request's path in a cookie's path */
+static int net_path_match(const char *req, const char *cp, size_t cn) {
+    size_t rn = strlen(req);
+    if (rn < cn || strncmp(req, cp, cn) != 0) return 0;
+    return rn == cn || (cn > 0 && cp[cn - 1] == '/') || req[cn] == '/';
+}
+
+/* 5.1.4: the default path, the request's path to its last "/" */
+static void net_default_path(const char *path, char *out, size_t cap) {
+    size_t n = strlen(path), last = 0;
+    for (size_t i = 0; i < n; i++) if (path[i] == '/') last = i;
+    if (n == 0 || path[0] != '/' || last == 0) snprintf(out, cap, "/");
+    else snprintf(out, cap, "%.*s", (int)last, path);
+}
+
+static int net_ci_prefix(const char *s, size_t n, const char *p) {
+    size_t pn = strlen(p);
+    if (n < pn) return 0;
+    for (size_t i = 0; i < pn; i++) if (net_lower(s[i]) != net_lower(p[i])) return 0;
+    return 1;
+}
+static int net_ci_is(const char *s, size_t n, const char *w) { return strlen(w) == n && net_ci_prefix(s, n, w); }
+
+static int net_wsp(char c) { return c == ' ' || c == '\t'; }
+
+/* the cookie's text field as a C string */
+static void net_span_text(const net_loader *l, amb_span sp, char *out, size_t cap) {
+    if (sp.len == 0) { out[0] = 0; return; }
+    snprintf(out, cap, "%.*s", (int)sp.len, text_ptr(l, sp));
+}
+
+/* the jar's live cookies, past their expiry, expired */
+static void net_cookies_expire(net_loader *l, int64_t now) {
+    for (uint32_t c = 1; c < l->cookie_len; c++) {
+        if (!l->cookie[c].live || l->cookie[c].state != NET_COOKIE_STATE_KEPT || !l->cookie[c].persistent) continue;
+        if (l->cookie[c].expires <= now) {
+            l->cookie[c].state = NET_COOKIE_STATE_EXPIRED;
+            if (l->keeping_len > 1) l->keeping[1].dirty = 1;
+        }
+    }
+}
+
+/* a Set-Cookie value from the response for u, stored in the jar or refused, as the
+   storage model says (5.6, 5.7). The request was same-site with its page, or a
+   top-level navigation, when same is 1; r the resource whose response it is */
+static void net_cookie_set(net_loader *l, const net_url *u, const char *s, size_t n, int same, uint32_t r) {
+    int64_t now = net_now();
+    char host[256];
+    snprintf(host, sizeof host, "%s", u->host);
+    int secure = strcmp(u->scheme, "https") == 0 || strcmp(u->scheme, "wss") == 0;
+    net_refusal why = NET_REFUSAL_ACCEPTED;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if ((c < 0x20 && c != '\t') || c == 0x7f) why = NET_REFUSAL_MALFORMED;
+    }
+    /* the name and value */
+    size_t semi = 0;
+    while (semi < n && s[semi] != ';') semi++;
+    size_t eq = 0;
+    while (eq < semi && s[eq] != '=') eq++;
+    size_t na = 0, nb = 0, va = 0, vb = semi;
+    if (eq < semi) { nb = eq; va = eq + 1; }
+    while (na < nb && net_wsp(s[na])) na++;
+    while (nb > na && net_wsp(s[nb - 1])) nb--;
+    while (va < vb && net_wsp(s[va])) va++;
+    while (vb > va && net_wsp(s[vb - 1])) vb--;
+    if (why == NET_REFUSAL_ACCEPTED && nb == na && vb == va) why = NET_REFUSAL_MALFORMED;
+    if (why == NET_REFUSAL_ACCEPTED && (nb - na) + (vb - va) > 4096) why = NET_REFUSAL_TOO_LARGE;
+    /* the attributes, each the last of its name */
+    int has_max_age = 0, has_expires = 0, has_domain = 0, has_path = 0, csecure = 0, http_only = 0;
+    int64_t max_age = 0, expires = 0;
+    net_same_site ss = NET_SAME_SITE_UNSET;
+    char domain[256], path[1100];
+    domain[0] = 0;
+    net_default_path(u->path, path, sizeof path);
+    size_t i = semi;
+    while (i < n) {
+        i++;
+        size_t e = i;
+        while (e < n && s[e] != ';') e++;
+        size_t q = i;
+        while (q < e && s[q] != '=') q++;
+        size_t an = i, ab = q, aa = q < e ? q + 1 : e, ae = e;
+        while (an < ab && net_wsp(s[an])) an++;
+        while (ab > an && net_wsp(s[ab - 1])) ab--;
+        while (aa < ae && net_wsp(s[aa])) aa++;
+        while (ae > aa && net_wsp(s[ae - 1])) ae--;
+        const char *nm = s + an, *v = s + aa;
+        size_t nl = ab - an, vl = ae - aa;
+        if (vl <= 1024) {
+            int64_t t = 0;
+            if (net_ci_is(nm, nl, "expires")) {
+                if (net_parse_date(v, vl, &t)) { has_expires = 1; expires = t; }
+            } else if (net_ci_is(nm, nl, "max-age")) {
+                int ok = vl > 0 && ((v[0] >= '0' && v[0] <= '9') || v[0] == '-');
+                for (size_t k = 1; k < vl && ok; k++) if (v[k] < '0' || v[k] > '9') ok = 0;
+                if (ok && vl == 1 && v[0] == '-') ok = 0;
+                if (ok) {
+                    int64_t d = 0;
+                    for (size_t k = v[0] == '-' ? 1 : 0; k < vl; k++) { d = d * 10 + (v[k] - '0'); if (d > (int64_t)1 << 40) d = (int64_t)1 << 40; }
+                    if (v[0] == '-') d = -d;
+                    has_max_age = 1;
+                    max_age = d <= 0 ? 0 : now + d;
+                }
+            } else if (net_ci_is(nm, nl, "domain")) {
+                if (vl > 0) {
+                    size_t k = v[0] == '.' ? 1 : 0, o = 0;
+                    for (; k < vl && o + 1 < sizeof domain; k++) domain[o++] = net_lower(v[k]);
+                    domain[o] = 0;
+                    has_domain = 1;
+                }
+            } else if (net_ci_is(nm, nl, "path")) {
+                has_path = 1;
+                if (vl > 0 && v[0] == '/') snprintf(path, sizeof path, "%.*s", (int)vl, v);
+                else net_default_path(u->path, path, sizeof path);
+            } else if (net_ci_is(nm, nl, "secure")) csecure = 1;
+            else if (net_ci_is(nm, nl, "httponly")) http_only = 1;
+            else if (net_ci_is(nm, nl, "samesite")) {
+                if (net_ci_is(v, vl, "strict")) ss = NET_SAME_SITE_STRICT;
+                else if (net_ci_is(v, vl, "lax")) ss = NET_SAME_SITE_LAX;
+                else if (net_ci_is(v, vl, "none")) ss = NET_SAME_SITE_NO_RESTRICTION;
+                else ss = NET_SAME_SITE_UNSET;
+            }
+        }
+        i = e;
+    }
+    int persistent = has_max_age || has_expires;
+    int64_t exp = has_max_age ? max_age : expires;
+    if (persistent && exp > now + NET_COOKIE_AGE_LIMIT) exp = now + NET_COOKIE_AGE_LIMIT;
+    /* the domain: a public suffix only as the host itself; else the host must be in it */
+    int host_only = 1;
+    char dom[256];
+    snprintf(dom, sizeof dom, "%s", host);
+    if (has_domain && why == NET_REFUSAL_ACCEPTED) {
+        for (size_t k = 0; domain[k]; k++) if ((unsigned char)domain[k] >= 0x80) why = NET_REFUSAL_MALFORMED;
+        if (why != NET_REFUSAL_ACCEPTED) {}
+        else if (net_public_suffix(domain) && strcmp(domain, host) != 0) why = NET_REFUSAL_PUBLIC_SUFFIX;
+        else if (net_public_suffix(domain)) {}
+        else if (!net_domain_match(host, domain)) why = NET_REFUSAL_DOMAIN_MISMATCH;
+        else { host_only = 0; snprintf(dom, sizeof dom, "%s", domain); }
+    }
+    if (why == NET_REFUSAL_ACCEPTED && csecure && !secure) why = NET_REFUSAL_SECURE_OVER_HTTP;
+    if (why == NET_REFUSAL_ACCEPTED && !csecure && !secure) {
+        /* leave Secure cookies alone: none of their name over http: in their domain and path */
+        for (uint32_t c = 1; c < l->cookie_len && why == NET_REFUSAL_ACCEPTED; c++) {
+            if (!l->cookie[c].live || l->cookie[c].state != NET_COOKIE_STATE_KEPT || !l->cookie[c].secure) continue;
+            if (!text_eq(l, l->cookie[c].name, s + na, nb - na)) continue;
+            char cd[256], cp[1100];
+            net_span_text(l, l->cookie[c].domain, cd, sizeof cd);
+            net_span_text(l, l->cookie[c].path, cp, sizeof cp);
+            if ((net_domain_match(cd, dom) || net_domain_match(dom, cd)) && net_path_match(path, cp, strlen(cp))) why = NET_REFUSAL_OVERWRITES_SECURE;
+        }
+    }
+    if (why == NET_REFUSAL_ACCEPTED && ss != NET_SAME_SITE_NO_RESTRICTION && !same) why = NET_REFUSAL_CROSS_SITE;
+    if (why == NET_REFUSAL_ACCEPTED && ss == NET_SAME_SITE_NO_RESTRICTION && !csecure) why = NET_REFUSAL_NONE_INSECURE;
+    if (why == NET_REFUSAL_ACCEPTED && net_ci_prefix(s + na, nb - na, "__Secure-") && !csecure) why = NET_REFUSAL_PREFIX;
+    if (why == NET_REFUSAL_ACCEPTED && net_ci_prefix(s + na, nb - na, "__Host-") && (!csecure || !host_only || !has_path || strcmp(path, "/") != 0))
+        why = NET_REFUSAL_PREFIX;
+    if (why == NET_REFUSAL_ACCEPTED && nb == na && (net_ci_prefix(s + va, vb - va, "__Secure-") || net_ci_prefix(s + va, vb - va, "__Host-")))
+        why = NET_REFUSAL_PREFIX;
+    if (why == NET_REFUSAL_ACCEPTED) {
+        size_t kept = 0;
+        for (uint32_t c = 1; c < l->cookie_len; c++) if (l->cookie[c].live && l->cookie[c].state == NET_COOKIE_STATE_KEPT) kept++;
+        if (kept >= NET_COOKIE_MAX) why = NET_REFUSAL_TOO_MANY;
+    }
+    /* the record, kept or refused */
+    int64_t created = now;
+    if (why == NET_REFUSAL_ACCEPTED)
+        for (uint32_t c = 1; c < l->cookie_len; c++) {
+            if (!l->cookie[c].live || l->cookie[c].state != NET_COOKIE_STATE_KEPT || l->cookie[c].host_only != host_only) continue;
+            if (!text_eq(l, l->cookie[c].name, s + na, nb - na) || !text_eq(l, l->cookie[c].domain, dom, strlen(dom)) ||
+                !text_eq(l, l->cookie[c].path, path, strlen(path))) continue;
+            created = l->cookie[c].created;
+            l->cookie[c].state = NET_COOKIE_STATE_REPLACED;
+            l->cookie[c].seen = 1;
+        }
+    char name[4200], value[4200];
+    snprintf(name, sizeof name, "%.*s", (int)(nb - na), s + na);
+    snprintf(value, sizeof value, "%.*s", (int)(vb - va), s + va);
+    net_cookie_h h = cookie_new(l);
+    uint32_t c = h.index;
+    l->cookie[c].name = text_add(l, name, strlen(name));
+    l->cookie[c].value = text_add(l, value, strlen(value));
+    l->cookie[c].domain = text_add(l, dom, strlen(dom));
+    l->cookie[c].path = text_add(l, path, strlen(path));
+    l->cookie[c].host_only = (uint8_t)host_only;
+    l->cookie[c].secure = (uint8_t)csecure;
+    l->cookie[c].http_only = (uint8_t)http_only;
+    l->cookie[c].same_site = ss;
+    l->cookie[c].persistent = (uint8_t)persistent;
+    l->cookie[c].expires = persistent ? exp : 0;
+    l->cookie[c].created = created;
+    l->cookie[c].refusal = why;
+    l->cookie[c].set_by = r;
+    l->cookie[c].seen = 1;
+    if (why != NET_REFUSAL_ACCEPTED) l->cookie[c].state = NET_COOKIE_STATE_REFUSED;
+    else if (persistent && exp <= now) l->cookie[c].state = NET_COOKIE_STATE_EXPIRED;
+    else l->cookie[c].state = NET_COOKIE_STATE_KEPT;
+    if (why == NET_REFUSAL_ACCEPTED && l->keeping_len > 1) l->keeping[1].dirty = 1;
+}
+
+/* each Set-Cookie line of a response's head, stored or refused */
+static void net_cookies_from(net_loader *l, const net_url *u, const char *head, size_t hn, int same, uint32_t r) {
+    size_t i = 0;
+    while (i < hn) {
+        size_t e = i;
+        while (e < hn && head[e] != '\n') e++;
+        if (e - i > 11 && net_ci_prefix(head + i, e - i, "set-cookie:")) {
+            size_t a = i + 11, b = e;
+            while (a < b && net_wsp(head[a])) a++;
+            while (b > a && (head[b - 1] == '\r' || net_wsp(head[b - 1]))) b--;
+            net_cookie_set(l, u, head + a, b - a, same, r);
+        }
+        i = e + 1;
+    }
+}
+
+/* the Cookie header for a request for u (5.8.3): the jar's cookies for its host and
+   path, Secure ones over TLS alone, SameSite ones on a same-site request (a
+   top-level navigation is one); longest paths first, then the oldest; each sent
+   recorded for resource r. Its header line into out, when there is a cookie */
+static void net_cookie_header(net_loader *l, const net_url *u, int same, uint32_t r, vector<char> *out) {
+    int64_t now = net_now();
+    net_cookies_expire(l, now);
+    char host[256];
+    snprintf(host, sizeof host, "%s", u->host);
+    int secure = strcmp(u->scheme, "https") == 0 || strcmp(u->scheme, "wss") == 0;
+    vector<uint32_t> pick;
+    for (uint32_t c = 1; c < l->cookie_len; c++) {
+        if (!l->cookie[c].live || l->cookie[c].state != NET_COOKIE_STATE_KEPT) continue;
+        char cd[256], cp[1100];
+        net_span_text(l, l->cookie[c].domain, cd, sizeof cd);
+        net_span_text(l, l->cookie[c].path, cp, sizeof cp);
+        if (l->cookie[c].host_only ? strcmp(host, cd) != 0 : !net_domain_match(host, cd)) continue;
+        if (!net_path_match(u->path, cp, strlen(cp))) continue;
+        if (l->cookie[c].secure && !secure) continue;
+        if (l->cookie[c].same_site != NET_SAME_SITE_NO_RESTRICTION && !same) continue;
+        push_back(pick, c);
+    }
+    if (len(pick) == 0) return;
+    /* longest path first, then the oldest, then the first made (an insertion sort: a request's few) */
+    for (size_t a = 1; a < len(pick); a++) {
+        uint32_t x = pick[a];
+        size_t b = a;
+        while (b > 0) {
+            uint32_t y = pick[b - 1];
+            uint32_t px = l->cookie[x].path.len, py = l->cookie[y].path.len;
+            int before = px > py || (px == py && (l->cookie[x].created < l->cookie[y].created || (l->cookie[x].created == l->cookie[y].created && x < y)));
+            if (!before) break;
+            pick[b] = y;
+            b--;
+        }
+        pick[b] = x;
+    }
+    append_range(out, "Cookie: ", 8);
+    for (size_t k = 0; k < len(pick); k++) {
+        uint32_t c = pick[k];
+        if (k) append_range(out, "; ", 2);
+        amb_span nm = l->cookie[c].name, v = l->cookie[c].value;
+        if (nm.len) { append_range(out, text_ptr(l, nm), nm.len); push_back(out, '='); }
+        if (v.len) append_range(out, text_ptr(l, v), v.len);
+        l->cookie[c].seen = 1;
+        int had = 0;
+        for (uint32_t q = 1; q < l->sent_len && !had; q++) if (l->sent[q].live && l->sent[q].resource == r && l->sent[q].cookie == c) had = 1;
+        if (!had) {
+            net_sent_h sh = sent_new(l);
+            l->sent[sh.index].resource = r;
+            l->sent[sh.index].cookie = c;
+        }
+    }
+    append_range(out, "\r\n", 2);
+}
+
+/* ---- the jar's file: a cookie a line, its fields between tabs ---- */
+
+/* a field written with %, tab, CR and LF as %XX */
+static void net_jar_put(FILE *f, const char *p, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (p[i] == '%' || p[i] == '\t' || p[i] == '\n' || p[i] == '\r') fprintf(f, "%%%02X", (unsigned)(unsigned char)p[i]);
+        else fputc(p[i], f);
+    }
+}
+
+/* the jar's persistent cookies, written to its file through a new file renamed over it */
+static void net_jar_write(net_loader *l) {
+    if (l->keeping_len < 2 || l->keeping[1].jar.len == 0 || !l->keeping[1].dirty) return;
+    char path[1100], tmp[1200], dir[1100];
+    net_span_text(l, l->keeping[1].jar, path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    snprintf(dir, sizeof dir, "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash && slash != dir) { *slash = 0; mkdir(dir, 0700); }
+    int64_t now = net_now();
+    {
+        own FILE *f = fopen(tmp, "w");
+        if (!f) return;
+        defer(f) { fclose(f); }
+        fprintf(f, "# Ambitious's cookie jar: a cookie a line -- domain, host-only, path, secure, http-only, same-site, expires, created, name, value\n");
+        for (uint32_t c = 1; c < l->cookie_len; c++) {
+            if (!l->cookie[c].live || l->cookie[c].state != NET_COOKIE_STATE_KEPT || !l->cookie[c].persistent || l->cookie[c].expires <= now) continue;
+            amb_span d = l->cookie[c].domain, p = l->cookie[c].path, nm = l->cookie[c].name, v = l->cookie[c].value;
+            if (d.len) net_jar_put(f, text_ptr(l, d), d.len);
+            fprintf(f, "\t%d\t", l->cookie[c].host_only);
+            if (p.len) net_jar_put(f, text_ptr(l, p), p.len);
+            fprintf(f, "\t%d\t%d\t%s\t%lld\t%lld\t", l->cookie[c].secure, l->cookie[c].http_only, net_same_site_name(l->cookie[c].same_site),
+                    (long long)l->cookie[c].expires, (long long)l->cookie[c].created);
+            if (nm.len) net_jar_put(f, text_ptr(l, nm), nm.len);
+            fputc('\t', f);
+            if (v.len) net_jar_put(f, text_ptr(l, v), v.len);
+            fputc('\n', f);
+        }
+    }
+    if (rename(tmp, path) == 0) l->keeping[1].dirty = 0;
+}
+
+/* a field of a line read, its %XX undone */
+static void net_jar_field(const char *p, size_t n, char *out, size_t cap) {
+    size_t k = 0;
+    for (size_t i = 0; i < n && k + 1 < cap; i++) {
+        if (p[i] == '%' && i + 2 < n && net_hexval(p[i + 1]) >= 0 && net_hexval(p[i + 2]) >= 0) {
+            out[k++] = (char)(net_hexval(p[i + 1]) * 16 + net_hexval(p[i + 2]));
+            i += 2;
+        } else out[k++] = p[i];
+    }
+    out[k] = 0;
+}
+
+/* the jar's file read: each cookie not yet expired, kept, unseen until sent */
+static void net_jar_read(net_loader *l, const char *path) {
+    vector<char> text;
+    {
+        own FILE *f = fopen(path, "rb");
+        if (!f) return;
+        defer(f) { fclose(f); }
+        char buf[8192];
+        size_t k;
+        while ((k = fread(buf, 1, sizeof buf, f)) > 0) append_range(text, buf, k);
+    }
+    int64_t now = net_now();
+    size_t i = 0, n = len(text);
+    while (i < n) {
+        size_t e = i;
+        while (e < n && text[e] != '\n') e++;
+        size_t f[11], nf = 0;
+        f[nf++] = i;
+        for (size_t k = i; k < e && nf < 11; k++) if (text[k] == '\t') f[nf++] = k + 1;
+        if (e > i && text[i] != '#' && nf == 10) {
+            char dom[256], path[1100], ss[32], exps[32], cr[32], name[4200], value[4200], ho[8], sec[8], ho2[8];
+            const char *t = data(text);
+            net_jar_field(t + f[0], f[1] - 1 - f[0], dom, sizeof dom);
+            net_jar_field(t + f[1], f[2] - 1 - f[1], ho, sizeof ho);
+            net_jar_field(t + f[2], f[3] - 1 - f[2], path, sizeof path);
+            net_jar_field(t + f[3], f[4] - 1 - f[3], sec, sizeof sec);
+            net_jar_field(t + f[4], f[5] - 1 - f[4], ho2, sizeof ho2);
+            net_jar_field(t + f[5], f[6] - 1 - f[5], ss, sizeof ss);
+            net_jar_field(t + f[6], f[7] - 1 - f[6], exps, sizeof exps);
+            net_jar_field(t + f[7], f[8] - 1 - f[7], cr, sizeof cr);
+            net_jar_field(t + f[8], f[9] - 1 - f[8], name, sizeof name);
+            net_jar_field(t + f[9], e - f[9], value, sizeof value);
+            int64_t expires = atoll(exps);
+            if (expires > now && dom[0] && path[0] == '/') {
+                net_same_site s = NET_SAME_SITE_UNSET;
+                if (strcmp(ss, "lax") == 0) s = NET_SAME_SITE_LAX;
+                else if (strcmp(ss, "strict") == 0) s = NET_SAME_SITE_STRICT;
+                else if (strcmp(ss, "no_restriction") == 0) s = NET_SAME_SITE_NO_RESTRICTION;
+                net_cookie_h h = cookie_new(l);
+                uint32_t c = h.index;
+                l->cookie[c].name = text_add(l, name, strlen(name));
+                l->cookie[c].value = text_add(l, value, strlen(value));
+                l->cookie[c].domain = text_add(l, dom, strlen(dom));
+                l->cookie[c].path = text_add(l, path, strlen(path));
+                l->cookie[c].host_only = (uint8_t)(ho[0] == '1');
+                l->cookie[c].secure = (uint8_t)(sec[0] == '1');
+                l->cookie[c].http_only = (uint8_t)(ho2[0] == '1');
+                l->cookie[c].same_site = s;
+                l->cookie[c].persistent = 1;
+                l->cookie[c].expires = expires;
+                l->cookie[c].created = atoll(cr);
+                l->cookie[c].state = NET_COOKIE_STATE_KEPT;
+                l->cookie[c].refusal = NET_REFUSAL_ACCEPTED;
+            }
+        }
+        i = e + 1;
+    }
+}
+
+net_status net_keep(net_loader *l, const char *jar, size_t jar_len, const char *cache, size_t cache_len) {
+    if (l->keeping_len < 2) keeping_new(l);
+    l->keeping[1].jar = text_add(l, jar, jar_len);
+    l->keeping[1].cache = text_add(l, cache, cache_len);
+    l->keeping[1].dirty = 0;
+    if (jar_len) {
+        char path[1100];
+        snprintf(path, sizeof path, "%.*s", (int)jar_len, jar);
+        net_jar_read(l, path);
+    }
+    l->revision++;
+    return NET_OK;
+}
+
 /* ---- the loader's records ---- */
 
 static amb_span net_text(net_loader *l, const char *s) { return text_add(l, s, strlen(s)); }
@@ -1171,9 +1734,14 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
             snprintf(rt.reason, sizeof rt.reason, "%s: is not a scheme fetched here", u.scheme);
             break;
         }
-        vector<char> head;
-        out = net_http(&u, t, "", 0, &status, &head, &body, &rt);
+        /* a top-level fetch is a navigation, same-site with itself; a page's part is
+           same-site when its site is the page's */
+        int same = !page || net_same_site(&u, page);
+        vector<char> head, extra;
+        net_cookie_header(l, &u, same, r, &extra);
+        out = net_http(&u, t, data(extra), len(extra), &status, &head, &body, &rt);
         if (out != NET_OUTCOME_OK) { status = 0; break; }
+        net_cookies_from(l, &u, data(head), len(head), same, r);
         char ct[256];
         if (net_header(data(head), len(head), "content-type", ct, sizeof ct)) {
             size_t k = 0;
@@ -1218,6 +1786,7 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
     }
     l->resource[r].proxied = (uint8_t)rt.proxied;
     if (rt.proxied) l->resource[r].proxy = net_text(l, rt.proxy);
+    l->resource[r].cross_site = (uint8_t)(page && !net_same_site(&u, page));
     if (out == NET_OUTCOME_OK || out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(body), len(body));
     if (kind == NET_KIND_IMAGE && out == NET_OUTCOME_OK) {
         uint32_t w, hh;
@@ -1235,6 +1804,7 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
     net_tls t = {0};
     defer(t) { SSL_CTX_free(t.ctx); }
     uint32_t r = net_get(l, u, kind, 0, none, 0, &t);
+    net_jar_write(l);
     l->revision++;
     return resource_handle(l, r);
 }
@@ -1336,6 +1906,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }
         if (x) x = doc->node[x].next_sibling;
     }
+    net_jar_write(l);
     l->revision++;
     return NET_OK;
 }

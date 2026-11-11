@@ -69,4 +69,29 @@ ok   proxy for http://a.test/ with no_proxy '': http://h.test:8080
 ok   proxy for http://a.test/ with no_proxy '': none
 ok   proxy for http://a.test/ with no_proxy 'a.test': none
 ok   proxy for file:///etc/hostname with no_proxy '': none
-71 of 71 cases
+ok   date 'Wed, 01 Jan 2031 00:00:00 GMT': 1924992000
+ok   date 'Sun, 06 Nov 1994 08:49:37 GMT': 784111777
+ok   date 'Sunday, 06-Nov-94 08:49:37 GMT': 784111777
+ok   date 'Sun Nov  6 08:49:37 1994': 784111777
+ok   date 'Thu, 01 Jan 1970 00:00:00 GMT': 0
+ok   date 'Thu, 01-Jan-70 00:00:01 GMT': 1
+ok   date '09 Jun 2021 10:18:14': 1623233894
+ok   date 'Thu, 29 Feb 2024 12:00:00 GMT': 1709208000
+ok   date '31-Dec-69 23:59:59': 3155759999
+ok   date '1 jan 1601 0:0:0': -11644473600
+ok   date 'Tue, 29 Feb 2023 12:00:00 GMT': none
+ok   date 'Fri, 31 Feb 2023 00:00:00 GMT': none
+ok   date 'Mon, 01 Jan 1600 00:00:00 GMT': none
+ok   date 'Mon, 01 Jan 2024 25:00:00 GMT': none
+ok   date '2021-06-09T10:18:14Z': none
+ok   date 'tomorrow': none
+ok   site of https://www.example.com/x: https://example.com
+ok   site of http://a.b.example.co.uk/: http://example.co.uk
+ok   site of https://foo.github.io/: https://foo.github.io
+ok   site of http://localhost:8080/: http://localhost
+ok   site of http://127.0.0.1:9/: http://127.0.0.1
+ok   site of https://Example.COM./: https://example.com
+ok   site of http://co.uk/: http://co.uk
+ok   site of file:///x: null
+ok   site of data:text/plain,x: null
+96 of 96 cases

@@ -19,4 +19,12 @@ int net_url_origin(const char *url, char *out, size_t cap);
    proxy of a kind not spoken */
 int net_url_proxy(const char *url, char *out, size_t cap);
 
+/* a URL's site, its scheme and registrable domain, as cookies' same-site rules
+   compare them: https://example.com; null for an opaque URL */
+int net_url_site(const char *url, char *out, size_t cap);
+
+/* a date as a cookie's Expires and HTTP's dates are read (RFC 6265bis 5.1.1): 1 and
+   its seconds since the epoch in *t, or 0 when it is no date */
+int net_url_date(const char *text, long long *t);
+
 #endif

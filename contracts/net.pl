@@ -44,22 +44,74 @@ net_contract(record(resource, [
     field(tls_cipher, span(text)),
     field(alpn,      span(text)),            % the protocol the server chose by ALPN, or empty
     field(proxied,   bool),                  % its last exchange went through a proxy
-    field(proxy,     span(text))             % that proxy's origin
+    field(proxy,     span(text)),            % that proxy's origin
+    field(cross_site, bool)                  % asked for by a page of another site (scheme and registrable domain)
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
 
+%% a cookie's SameSite: unset (taken as Lax), lax, strict, or no_restriction for
+%% SameSite=None (none is the empty ref's word)
+net_contract(enum(same_site, [unset, lax, strict, no_restriction])).
+%% what became of a cookie: kept in the jar; replaced by a newer one of its name,
+%% domain and path; expired, or deleted by its server; refused when it was set
+net_contract(enum(cookie_state, [kept, replaced, expired, refused])).
+%% why a Set-Cookie was refused (RFC 6265bis 5.6, 5.7): malformed, too_large (name
+%% and value past 4096 bytes), secure_over_http (Secure from a response not over
+%% TLS), domain_mismatch (a Domain the host is not in), public_suffix (a Domain of
+%% a public suffix), prefix (a __Secure- or __Host- name without what the prefix
+%% asks), cross_site (SameSite other than None from a response to another site's
+%% page), none_insecure (SameSite=None without Secure), overwrites_secure (over
+%% http:, a name a Secure cookie of the domain holds), too_many (past 3000)
+net_contract(enum(refusal, [accepted, malformed, too_large, secure_over_http, domain_mismatch, public_suffix, prefix,
+    cross_site, none_insecure, overwrites_secure, too_many])).
+
+%% a cookie of the jar (RFC 6265bis): those kept in the jar's file between runs,
+%% and those the page's responses set or tried to
+net_contract(record(cookie, [
+    field(name,       span(text)),
+    field(value,      span(text)),           % never a fact: a value may be a secret
+    field(domain,     span(text)),           % the host it came from, or its Domain attribute's
+    field(path,       span(text)),
+    field(host_only,  bool),                 % sent to its domain alone, not to its subdomains
+    field(secure,     bool),                 % sent over TLS alone
+    field(http_only,  bool),                 % hidden from scripts
+    field(same_site,  enum(same_site)),
+    field(persistent, bool),                 % it has an expiry, and is kept in the jar's file
+    field(expires,    i64),                  % that expiry, seconds since the epoch, at most 400 days on
+    field(created,    i64),
+    field(state,      enum(cookie_state)),
+    field(refusal,    enum(refusal)),
+    field(set_by,     ref(resource)),        % the response that set it in this run; none for one from the jar's file
+    field(seen,       bool)                  % set, or sent, while the page loaded: its facts are the snapshot's
+])).
+%% a cookie sent with a request for a resource
+net_contract(record(sent, [field(resource, ref(resource)), field(cookie, ref(cookie))])).
+%% where the loader keeps what outlives a run: the cookie jar's file and the
+%% cache's directory, either empty for none; whether the jar changed since read
+net_contract(record(keeping, [field(jar, span(text)), field(cache, span(text)), field(dirty, bool)])).
+
 net_contract(handle(resource, rs)).
 net_contract(handle(hop, hp)).
+net_contract(handle(cookie, ck)).
+net_contract(handle(sent, sn)).
+net_contract(handle(keeping, kp)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-net_contract(store(loader, [table(resource), table(hop), pool(text), pool(bytes)])).
+net_contract(store(loader, [table(resource), table(hop), table(cookie), table(sent), table(keeping), pool(text), pool(bytes)])).
 net_contract(owns(loader, resource, store)).
 net_contract(owns(loader, hop, store)).
+net_contract(owns(loader, cookie, store)).
+net_contract(owns(loader, sent, store)).
+net_contract(owns(loader, keeping, store)).
 
 %% ---- OPERATIONS -------------------------------------------------------------
 
+%% where the jar's file and the cache's directory are (a profile's), each empty for
+%% none: cookies then last the run, and nothing is cached. The jar's cookies are read,
+%% and every fetch after keeps it up to date
+net_contract(operation(keep, [param(jar, text), param(cache, text)], status, [], [], [mutates])).
 %% a resource fetched: its record, whatever the outcome
 net_contract(operation(fetch, [param(url, text), param(kind, enum(kind))], handle(resource), [], [creates(resource)], [mutates])).
 %% the stylesheets, images and scripts the page's document asks for, fetched; the
@@ -83,6 +135,15 @@ net_contract(fact(net_image_size(handle, field(width), field(height)), table(res
 net_contract(fact(net_failure(handle, field(reason)), table(resource), field(outcome) \== ok)).
 net_contract(fact(net_tls(handle, field(tls_version), field(tls_cipher), field(alpn)), table(resource), field(tls) == true)).
 net_contract(fact(net_proxy(handle, field(proxy)), table(resource), field(proxied) == true)).
+net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == true)).
+%% the page's cookies, those its responses set or tried to and those sent for it:
+%% names, domains, paths and flags, never a value
+net_contract(fact(net_cookie(handle, field(name), field(domain), field(path), field(state)), table(cookie), field(seen) == true)).
+net_contract(fact(net_cookie_flags(handle, field(host_only), field(secure), field(http_only), field(same_site)), table(cookie), field(seen) == true)).
+net_contract(fact(net_cookie_expires(handle, field(expires)), table(cookie), (field(seen) == true, field(persistent) == true))).
+net_contract(fact(net_cookie_set_by(handle, field(set_by)), table(cookie), field(set_by) \== none)).
+net_contract(fact(net_cookie_refused(handle, field(refusal)), table(cookie), field(state) == refused)).
+net_contract(fact(net_cookie_sent(field(resource), field(cookie)), table(sent), true)).
 
 net_contract(rules('rules/net')).
 net_contract(derived(net_page/1, 'a document fetched as a page')).
@@ -92,6 +153,8 @@ net_contract(derived(net_failed/2, 'a resource whose fetch did not end well, and
 net_contract(derived(net_redirects/2, 'the URLs a resource was redirected through, in order')).
 net_contract(derived(net_secure/2, 'a resource got over TLS from a verified server, and the TLS version')).
 net_contract(derived(net_mixed_content/2, 'a part that a page served over TLS got over http:')).
+net_contract(derived(net_cookies_sent/2, 'the names of the cookies sent for a resource, in the order sent')).
+net_contract(derived(net_third_party_cookie/2, 'a cookie sent for a resource of another site than the page''s')).
 
 net_contract(query(loaded, (net_resource(R, U, K, O, S, _, _)), [R, U, K, O, S], 'every resource, what it is and how its fetch ended')).
 

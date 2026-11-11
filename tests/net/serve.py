@@ -1,29 +1,46 @@
 #!/usr/bin/env python3
-"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... ROOT... -- the
-test site over HTTP/1.1 on 127.0.0.1, on a free port, which it prints first.
+"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... [--log FILE] ROOT...
+-- the test site over HTTP/1.1 on 127.0.0.1, on a free port, which it prints first.
 
 Each ROOT's files, the first that has the path; in an .html file each NAME of --sub
-is replaced by its VALUE, then PORT by the server's port. Besides the files:
-/old.css moved (301) to /moved/new.css, which moved (302, relatively) to
+is replaced by its VALUE, then PORT by the server's port. A file's FILE.headers, if
+there is one, holds header lines its response adds (Set-Cookie ...). Besides the
+files: /old.css moved (301) to /moved/new.css, which moved (302, relatively) to
 /style2.css; /loop.css redirects to itself; /chunked.css comes in three chunks.
 
 --tls serves HTTPS with the certificate chain CERT and its key KEY, offering
-http/1.1 by ALPN; --tls12 holds it to TLS 1.2."""
+http/1.1 by ALPN; --tls12 holds it to TLS 1.2. --log appends a line for each
+request: its host, path and the Cookie it carried."""
 import argparse
 import http.server
 import os
 import socketserver
 import ssl
 import sys
+import threading
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--tls", nargs=2, metavar=("CERT", "KEY"))
 ap.add_argument("--tls12", action="store_true")
 ap.add_argument("--sub", action="append", default=[])
+ap.add_argument("--log")
 ap.add_argument("roots", nargs="+")
 args = ap.parse_args()
 ROOTS = [os.path.abspath(r) for r in args.roots]
 SUBS = [s.split("=", 1) for s in args.sub]
+LOCK = threading.Lock()
+
+
+def log(handler):
+    if not args.log:
+        return
+    host = (handler.headers.get("Host") or "").split(":")[0]
+    line = "%s %s %s" % (handler.command, host, handler.path)
+    cookie = handler.headers.get("Cookie")
+    if cookie is not None:
+        line += " | cookie: " + cookie
+    with LOCK, open(args.log, "a") as f:
+        f.write(line + "\n")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -42,6 +59,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         port = self.server.server_address[1]
+        log(self)
         if self.path == "/old.css":
             return self.plain(301, [("Location", "/moved/new.css")])
         if self.path == "/moved/new.css":
@@ -74,7 +92,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = body.replace(name.encode(), value.encode())
             body = body.replace(b"PORT", str(port).encode())
         types = {".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".png": "image/png"}
-        return self.plain(200, [("Content-Type", types.get(ext, "application/octet-stream"))], body)
+        headers = [("Content-Type", types.get(ext, "application/octet-stream"))]
+        if os.path.isfile(p + ".headers"):
+            with open(p + ".headers") as f:
+                for line in f:
+                    if ":" in line:
+                        k, v = line.rstrip("\n").split(":", 1)
+                        headers.append((k.strip(), v.strip()))
+        return self.plain(200, headers, body)
 
 
 class Server(socketserver.ThreadingTCPServer):
