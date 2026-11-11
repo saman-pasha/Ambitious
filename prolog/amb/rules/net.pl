@@ -6,7 +6,7 @@
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
 :- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3,
            net_failure/2, net_tls/4, net_proxy/2, net_cross_site/1, net_cookie/5, net_cookie_flags/5,
-           net_cookie_expires/2, net_cookie_set_by/2, net_cookie_refused/2, net_cookie_sent/2.
+           net_cookie_expires/2, net_cookie_set_by/2, net_cookie_refused/2, net_cookie_sent/2, net_cache/4.
 
 net_page(R) :- net_resource(R, _, document, _, _, _, _), \+ net_asked_by(R, _, _).
 
@@ -42,6 +42,9 @@ net_cookies_sent(R, Names) :-
 
 %% a cookie that went with a request for another site than the page's: a third party's
 net_third_party_cookie(C, R) :- net_cookie_sent(R, C), net_cross_site(R).
+
+%% a resource the HTTP cache answered: fresh, with no request, or revalidated by a 304
+net_from_cache(R, How) :- net_cache(R, How, _, _), ( How == fresh ; How == revalidated ).
 
 %% a refusal in words
 net_refusal_words(malformed, 'it is malformed').
@@ -83,6 +86,9 @@ net_diag(cookie_refused, C, Text) :-
     net_cookie_refused(C, Why), net_cookie(C, N, D, _, _), net_cookie_set_by(C, R), net_resource(R, U, _, _, _, _, _),
     net_refusal_words(Why, W),
     format(atom(Text), 'the cookie ~q of ~w, set by ~w, was refused: ~w', [N, D, U, W]).
+net_diag(no_lifetime, R, Text) :-
+    net_cache(R, How, _, 0), ( How == stored ; How == revalidated ), net_resource(R, U, K, _, _, _, _),
+    format(atom(Text), 'the ~w ~w has no freshness lifetime: each load asks the server for it again', [K, U]).
 net_diag(third_party_cookie, C, Text) :-
     net_third_party_cookie(C, R), net_cookie(C, N, D, _, _), net_resource(R, U, _, _, _, _, _),
     format(atom(Text), 'the cookie ~q of ~w went with ~w, another site''s', [N, D, U]).

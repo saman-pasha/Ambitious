@@ -1,28 +1,38 @@
 #!/usr/bin/env python3
-"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... [--log FILE] ROOT...
+"""tests/net/serve.py [--tls CERT KEY] [--tls12] [--sub NAME=VALUE]... [--date EPOCH] [--log FILE] ROOT...
 -- the test site over HTTP/1.1 on 127.0.0.1, on a free port, which it prints first.
 
 Each ROOT's files, the first that has the path; in an .html file each NAME of --sub
 is replaced by its VALUE, then PORT by the server's port. A file's FILE.headers, if
-there is one, holds header lines its response adds (Set-Cookie ...). Besides the
-files: /old.css moved (301) to /moved/new.css, which moved (302, relatively) to
-/style2.css; /loop.css redirects to itself; /chunked.css comes in three chunks.
+there is one, holds header lines its response adds (Set-Cookie, Cache-Control ...);
+an Expires or Last-Modified written +N or -N is the response's Date plus or less N
+seconds, and an ETag written auto is a hash of the body. A request whose
+If-None-Match holds the file's ETag, or else whose If-Modified-Since is not before
+its Last-Modified, is answered 304 with those headers, or with FILE.304.headers'
+when there is one. Besides the files: /old.css moved (301) to /moved/new.css,
+which moved (302, relatively) to /style2.css; /loop.css redirects to itself;
+/chunked.css comes in three chunks.
 
 --tls serves HTTPS with the certificate chain CERT and its key KEY, offering
-http/1.1 by ALPN; --tls12 holds it to TLS 1.2. --log appends a line for each
-request: its host, path and the Cookie it carried."""
+http/1.1 by ALPN; --tls12 holds it to TLS 1.2. --date fixes every response's Date
+(its clock, for the cache's ages). --log appends a line for each request: its host,
+its path, and the Cookie and validators it carried."""
 import argparse
+import email.utils
+import hashlib
 import http.server
 import os
 import socketserver
 import ssl
 import sys
 import threading
+import time
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--tls", nargs=2, metavar=("CERT", "KEY"))
 ap.add_argument("--tls12", action="store_true")
 ap.add_argument("--sub", action="append", default=[])
+ap.add_argument("--date", type=int)
 ap.add_argument("--log")
 ap.add_argument("roots", nargs="+")
 args = ap.parse_args()
@@ -31,16 +41,55 @@ SUBS = [s.split("=", 1) for s in args.sub]
 LOCK = threading.Lock()
 
 
+def now():
+    return args.date if args.date is not None else int(time.time())
+
+
 def log(handler):
     if not args.log:
         return
     host = (handler.headers.get("Host") or "").split(":")[0]
     line = "%s %s %s" % (handler.command, host, handler.path)
-    cookie = handler.headers.get("Cookie")
-    if cookie is not None:
-        line += " | cookie: " + cookie
+    for name in ("Cookie", "If-None-Match", "If-Modified-Since"):
+        v = handler.headers.get(name)
+        if v is not None:
+            line += " | %s: %s" % (name.lower(), v)
     with LOCK, open(args.log, "a") as f:
         f.write(line + "\n")
+
+
+def sidecar(path, body):
+    """the header lines of a FILE.headers, relative dates and auto ETags made"""
+    out = []
+    if os.path.isfile(path):
+        with open(path) as f:
+            for line in f:
+                if ":" not in line:
+                    continue
+                k, v = (x.strip() for x in line.rstrip("\n").split(":", 1))
+                if k.lower() in ("expires", "last-modified") and v[:1] in "+-" and v[1:].isdigit():
+                    v = email.utils.formatdate(now() + int(v), usegmt=True)
+                if k.lower() == "etag" and v == "auto":
+                    v = '"%s"' % hashlib.sha1(body).hexdigest()[:12]
+                out.append((k, v))
+    return out
+
+
+def fresh_for(handler, headers):
+    """whether the request's validators match the response's: If-None-Match first"""
+    etag = next((v for k, v in headers if k.lower() == "etag"), None)
+    inm = handler.headers.get("If-None-Match")
+    if inm is not None:
+        tags = [t.strip() for t in inm.split(",")]
+        return etag is not None and (etag in tags or "W/" + etag in tags or "*" in tags)
+    lm = next((v for k, v in headers if k.lower() == "last-modified"), None)
+    ims = handler.headers.get("If-Modified-Since")
+    if ims is not None and lm is not None:
+        try:
+            return email.utils.parsedate_to_datetime(ims) >= email.utils.parsedate_to_datetime(lm)
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -49,13 +98,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def date_time_string(self, timestamp=None):
+        return email.utils.formatdate(now(), usegmt=True)
+
     def plain(self, code, headers, body=b""):
         self.send_response(code)
         for k, v in headers:
             self.send_header(k, v)
-        self.send_header("Content-Length", str(len(body)))
+        if code != 304:
+            self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if code != 304:
+            self.wfile.write(body)
 
     def do_GET(self):
         port = self.server.server_address[1]
@@ -92,13 +146,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = body.replace(name.encode(), value.encode())
             body = body.replace(b"PORT", str(port).encode())
         types = {".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".png": "image/png"}
-        headers = [("Content-Type", types.get(ext, "application/octet-stream"))]
-        if os.path.isfile(p + ".headers"):
-            with open(p + ".headers") as f:
-                for line in f:
-                    if ":" in line:
-                        k, v = line.rstrip("\n").split(":", 1)
-                        headers.append((k.strip(), v.strip()))
+        headers = [("Content-Type", types.get(ext, "application/octet-stream"))] + sidecar(p + ".headers", body)
+        if fresh_for(self, headers):
+            if os.path.isfile(p + ".304.headers"):
+                headers = sidecar(p + ".304.headers", body)
+            return self.plain(304, [(k, v) for k, v in headers if k.lower() != "content-type"])
         return self.plain(200, headers, body)
 
 

@@ -1,0 +1,24 @@
+-- 1
+GET 127.0.0.1 /k/changed.css
+GET 127.0.0.1 /k/etag.css
+GET 127.0.0.1 /k/expires.css
+GET 127.0.0.1 /k/fresh.css
+GET 127.0.0.1 /k/heuristic.png
+GET 127.0.0.1 /k/modified.png
+GET 127.0.0.1 /k/nostore.css
+GET 127.0.0.1 /k/page.html
+GET 127.0.0.1 /k/private.css
+GET 127.0.0.1 /k/short.css
+-- 2
+GET 127.0.0.1 /k/changed.css | if-none-match: "0845c64bc5f7"
+GET 127.0.0.1 /k/etag.css | if-none-match: "e1"
+GET 127.0.0.1 /k/modified.png | if-modified-since: Wed, 01 Jan 2020 00:00:00 GMT
+GET 127.0.0.1 /k/nostore.css
+GET 127.0.0.1 /k/page.html
+GET 127.0.0.1 /k/short.css | if-none-match: "s1"
+-- 3
+GET 127.0.0.1 /k/changed.css | if-none-match: "e210186a36c5"
+GET 127.0.0.1 /k/etag.css | if-none-match: "e1"
+GET 127.0.0.1 /k/modified.png | if-modified-since: Wed, 01 Jan 2020 00:00:00 GMT
+GET 127.0.0.1 /k/nostore.css
+GET 127.0.0.1 /k/page.html

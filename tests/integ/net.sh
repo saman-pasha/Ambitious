@@ -26,7 +26,15 @@
 # header each request carried, as the server logged it, against Chromium's for the
 # same visits (tests/net/reference.sh). A private run leaves the jar as it was.
 #
-# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY.
+# The HTTP cache (tests/net/site/k/): three runs of a profile 61 s apart, from a server
+# whose Date stays put, a part for each of max-age, no-cache with an ETag, a max-age
+# that runs out and a 304 that lengthens it, no-store, private, Expires, a
+# Last-Modified revalidated, a heuristic lifetime, and an ETag that changes. What the
+# cache did for each part, and which requests reached the server, against Chromium's
+# over its own cache for the same visits. AMB_CACHE names a cache of its own; a
+# private run neither uses nor changes one.
+#
+# The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CACHE.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-net.XXXXXX")
 # the environment's proxies are not the tests': each test names its own
@@ -138,6 +146,39 @@ echo "-- a private session keeps its cookies to itself: the jar's file is as it 
 before=$(cksum < "$prof/cookies")
 AMB_NOW=1700000400 sh "$AMB_ROOT/bin/ambitious" --profile "$prof" --private load "http://127.0.0.1:$port/c/page.html" > /dev/null 2>&1
 [ "$before" = "$(cksum < "$prof/cookies")" ] && echo "the same" || echo "CHANGED"
+
+echo "== the HTTP cache, in the profile's directory:"
+# a server whose clock stays at 1700000000 (its responses' Date); its changed.css from a
+# root of the test's own, written anew between the first run and the second
+mkdir -p "$work/kroot/k"
+printf '.changed { color: red }\n' > "$work/kroot/k/changed.css"
+printf 'Cache-Control: no-cache\nETag: auto\n' > "$work/kroot/k/changed.css.headers"
+cache=$(serve cache "$AMB_ROOT/tests/net/serve.py" --date 1700000000 --log "$work/cache.log" "$work/kroot" "$nsite" "$site")
+kurl="http://127.0.0.1:$cache/k/page.html"
+kprof=$work/kprofile
+kq="net_cache(R, How, Age, Life), net_resource(R, U, _, _, S, _, _)"
+kamb() { sh "$AMB_ROOT/bin/ambitious" "$@" 2>&1 | names | sed "s/:$cache\b/:CACHE/g"; }
+for run in 1 2 3; do
+  echo "-- $run" >> "$work/cache.log"
+  now=$((1700000000 + 61 * (run - 1)))
+  echo "-- $run. at $now: each part, what the cache did, the age and lifetime it went by, the status"
+  AMB_NOW=$now kamb --profile "$kprof" query "$kurl" "$kq"
+  [ $run = 1 ] && printf '.changed { color: blue }\n' > "$work/kroot/k/changed.css"
+done
+echo "-- 4" >> "$work/cache.log"
+echo "-- the parts that must be asked about each time, as the reasoner says:"
+AMB_NOW=1700000183 kamb --profile "$kprof" advise "$kurl" | grep '^amb_diag(no_lifetime'
+echo "-- what reached the server in the three runs, against Chromium's for the same visits (tests/net/cache.chromium):"
+sed -e '/^-- 4/,$d' -e "s/:$cache\b/:CACHE/g" "$work/cache.log" | sh "$AMB_ROOT/tests/net/canon.sh" > "$work/cache.got"
+cat "$work/cache.got"
+diff "$AMB_ROOT/tests/net/cache.chromium" "$work/cache.got" && echo "the same, request by request"
+echo "-- AMB_CACHE, a cache of its own with no profile: every part stored again"
+AMB_CACHE=$work/other AMB_NOW=1700000200 kamb query "$kurl" "net_cache(R, stored, _, _), net_resource(R, U, _, _, _, _, _)" | wc -l
+echo "$(ls "$work/other" | wc -l) entries"
+echo "-- a private session caches nothing, and leaves the cache as it was:"
+before=$(cat "$kprof"/cache/* | cksum)
+AMB_NOW=1700000300 kamb --profile "$kprof" --private query "$kurl" "net_cache(R, How, _, _)"
+[ "$before" = "$(cat "$kprof"/cache/* | cksum)" ] && echo "the same" || echo "CHANGED"
 
 for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
 wait 2> /dev/null

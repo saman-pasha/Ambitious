@@ -936,6 +936,16 @@ static int net_header(const char *head, size_t hn, const char *name, char *out, 
     return 0;
 }
 
+/* a response's media type, from its Content-Type when it has one: lowercased, its
+   parameters dropped */
+static void net_type_of_head(const char *head, size_t hn, char *type, size_t cap) {
+    char ct[256];
+    if (!net_header(head, hn, "content-type", ct, sizeof ct)) return;
+    size_t k = 0;
+    while (ct[k] && ct[k] != ';' && ct[k] != ' ' && k + 1 < cap) { type[k] = net_lower(ct[k]); k++; }
+    type[k] = 0;
+}
+
 /* where the final head begins: past every interim 1xx head (not 101). The
    head's end in *end; 0 while no final head has arrived */
 static size_t net_final_head(const char *p, size_t n, size_t *end) {
@@ -1689,6 +1699,188 @@ net_status net_keep(net_loader *l, const char *jar, size_t jar_len, const char *
     return NET_OK;
 }
 
+/* ---- the HTTP cache (RFC 9111): an entry a file in the cache's directory ---- */
+
+/* the fields an entry keeps of its response's head, and that a 304 updates */
+static const char *const net_cache_fields[] = { "content-type", "cache-control", "expires", "date", "last-modified", "etag", "age" };
+
+/* every value a head has for a field, joined by ", " as a list's are */
+static int net_header_all(const char *head, size_t hn, const char *name, char *out, size_t cap) {
+    size_t nl = strlen(name), i = 0, k = 0;
+    int any = 0;
+    out[0] = 0;
+    while (i < hn) {
+        size_t e = i;
+        while (e < hn && head[e] != '\n') e++;
+        if (e - i > nl && head[i + nl] == ':' && net_ci_prefix(head + i, e - i, name)) {
+            size_t a = i + nl + 1, b = e;
+            while (a < b && net_wsp(head[a])) a++;
+            while (b > a && (head[b - 1] == '\r' || net_wsp(head[b - 1]))) b--;
+            int n = snprintf(out + k, cap - k, "%s%.*s", any ? ", " : "", (int)(b - a), head + a);
+            if (n > 0 && k + (size_t)n < cap) k += (size_t)n;
+            any = 1;
+        }
+        i = e + 1;
+    }
+    return any;
+}
+
+/* a Cache-Control directive of the head: 1 when it is there, its value (a number,
+   bare or quoted) in *v, or -1 for none */
+static int net_cache_directive(const char *head, size_t hn, const char *dir, int64_t *v) {
+    char cc[1024];
+    *v = -1;
+    if (!net_header_all(head, hn, "cache-control", cc, sizeof cc)) return 0;
+    size_t n = strlen(cc), a = 0, dn = strlen(dir);
+    while (a < n) {
+        size_t b = a;
+        while (b < n && cc[b] != ',') b++;
+        size_t x = a, y = b;
+        while (x < y && net_wsp(cc[x])) x++;
+        while (y > x && net_wsp(cc[y - 1])) y--;
+        if (y - x >= dn && net_ci_prefix(cc + x, y - x, dir) && (y - x == dn || cc[x + dn] == '=' || net_wsp(cc[x + dn]))) {
+            size_t q = x + dn;
+            while (q < y && (net_wsp(cc[q]) || cc[q] == '=' || cc[q] == '"')) q++;
+            if (q < y && cc[q] >= '0' && cc[q] <= '9') *v = atoll(cc + q);
+            return 1;
+        }
+        a = b + 1;
+    }
+    return 0;
+}
+
+/* a response's freshness lifetime (4.2.1): none under no-cache; its max-age; else its
+   Expires less its Date (an Expires that is no date has passed); else a tenth of the
+   time since its Last-Modified, at most a week (4.2.2); else none */
+static int64_t net_lifetime(const char *head, size_t hn, int64_t rtime) {
+    int64_t v, t;
+    if (net_cache_directive(head, hn, "no-cache", &v)) return 0;
+    if (net_cache_directive(head, hn, "max-age", &v)) return v < 0 ? 0 : v;
+    char e[256];
+    int64_t date = rtime;
+    if (net_header(head, hn, "date", e, sizeof e) && net_parse_date(e, strlen(e), &t)) date = t;
+    if (net_header(head, hn, "expires", e, sizeof e)) {
+        if (!net_parse_date(e, strlen(e), &t)) return 0;
+        return t > date ? t - date : 0;
+    }
+    if (net_header(head, hn, "last-modified", e, sizeof e) && net_parse_date(e, strlen(e), &t) && t < date) {
+        int64_t h = (date - t) / 10;
+        return h > 7 * 86400 ? 7 * 86400 : h;
+    }
+    return 0;
+}
+
+/* the age a response came with (4.2.3): the more of its apparent age (its Date's
+   distance before it was got) and its Age */
+static int64_t net_initial_age(const char *head, size_t hn, int64_t rtime) {
+    char e[256];
+    int64_t t, age = 0;
+    if (net_header(head, hn, "date", e, sizeof e) && net_parse_date(e, strlen(e), &t) && rtime > t) age = rtime - t;
+    if (net_header(head, hn, "age", e, sizeof e)) {
+        int64_t a = atoll(e);
+        if (a > age) age = a;
+    }
+    return age;
+}
+
+/* whether a response may be kept (3): a 200 not marked no-store whose Vary names
+   nothing a request of ours varies in (Accept-Encoding is the same in every one) */
+static int net_storable(int status, const char *head, size_t hn) {
+    int64_t v;
+    char vary[512];
+    if (status != 200 || net_cache_directive(head, hn, "no-store", &v)) return 0;
+    if (net_header_all(head, hn, "vary", vary, sizeof vary)) {
+        size_t n = strlen(vary), a = 0;
+        while (a < n) {
+            size_t b = a;
+            while (b < n && vary[b] != ',') b++;
+            size_t x = a, y = b;
+            while (x < y && net_wsp(vary[x])) x++;
+            while (y > x && net_wsp(vary[y - 1])) y--;
+            if (y > x && !net_ci_is(vary + x, y - x, "accept-encoding")) return 0;
+            a = b + 1;
+        }
+    }
+    return 1;
+}
+
+/* an entry's file: the cache's directory and the FNV-1a hash of the URL; 0 when
+   there is no cache */
+static int net_cache_path(const net_loader *l, const char *url, char *out, size_t cap) {
+    if (l->keeping_len < 2 || l->keeping[1].cache.len == 0) return 0;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; url[i]; i++) {
+        h ^= (uint8_t)url[i];
+        h *= 0x100000001b3ull;
+    }
+    char dir[1100];
+    net_span_text(l, l->keeping[1].cache, dir, sizeof dir);
+    snprintf(out, cap, "%s/%016llx", dir, (unsigned long long)h);
+    return 1;
+}
+
+/* an entry read: its status, when it was got, its head (a field a line) and its
+   body; 0 when there is none for the URL */
+static int net_cache_read(const char *path, const char *url, int *status, int64_t *rtime, vector<char> *head, vector<char> *body) {
+    vector<char> all;
+    {
+        own FILE *f = fopen(path, "rb");
+        if (!f) return 0;
+        defer(f) { fclose(f); }
+        char buf[16384];
+        size_t k;
+        while ((k = fread(buf, 1, sizeof buf, f)) > 0) {
+            append_range(all, buf, k);
+            if (len(all) > NET_MAX_BODY + 65536) return 0;
+        }
+    }
+    size_t n = len(all);
+    const char *p = data(all);
+    size_t end = net_head_end(p, n, 0);
+    if (!end || n < 18 || memcmp(p, "AMBITIOUS-CACHE 1\n", 18) != 0) return 0;
+    char u[8192], v[64];
+    if (!net_header(p, end, "url", u, sizeof u) || strcmp(u, url) != 0) return 0;
+    if (!net_header(p, end, "status", v, sizeof v)) return 0;
+    *status = atoi(v);
+    if (!net_header(p, end, "response-time", v, sizeof v)) return 0;
+    *rtime = atoll(v);
+    append_range(head, p, end);
+    append_range(body, p + end, n - end);
+    return 1;
+}
+
+/* an entry written, through a new file renamed over the old: the kept fields of
+   the head first, else of the head under it (a 304's over the stored response's) */
+static void net_cache_write(const char *path, const char *url, int status, int64_t rtime, const char *head, size_t hn, const char *under,
+                            size_t un, const char *body, size_t bn) {
+    char tmp[1300], dir[1200];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    snprintf(dir, sizeof dir, "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash && slash != dir) {
+        *slash = 0;
+        char up[1200];
+        snprintf(up, sizeof up, "%s", dir);
+        char *s2 = strrchr(up, '/');
+        if (s2 && s2 != up) { *s2 = 0; mkdir(up, 0700); }
+        mkdir(dir, 0700);
+    }
+    {
+        own FILE *f = fopen(tmp, "wb");
+        if (!f) return;
+        defer(f) { fclose(f); }
+        fprintf(f, "AMBITIOUS-CACHE 1\nurl: %s\nstatus: %d\nresponse-time: %lld\n", url, status, (long long)rtime);
+        for (size_t k = 0; k < sizeof net_cache_fields / sizeof net_cache_fields[0]; k++) {
+            char v[2048];
+            if (net_header_all(head, hn, net_cache_fields[k], v, sizeof v) || net_header_all(under, un, net_cache_fields[k], v, sizeof v))
+                fprintf(f, "%s: %s\n", net_cache_fields[k], v);
+        }
+        fputc('\n', f);
+        if (bn) fwrite(body, 1, bn, f);
+    }
+    rename(tmp, path);
+}
+
 /* ---- the loader's records ---- */
 
 static amb_span net_text(net_loader *l, const char *s) { return text_add(l, s, strlen(s)); }
@@ -1716,6 +1908,8 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
     int status = 200;
     net_route rt;
     memset(&rt, 0, sizeof rt);
+    net_cache_use cache = NET_CACHE_USE_UNUSED;
+    int64_t cache_age = 0, cache_life = 0;
     for (int hop = 0;; hop++) {
         memset(&rt, 0, sizeof rt);
         /* a page served over the network may not read the machine's files */
@@ -1734,20 +1928,59 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
             snprintf(rt.reason, sizeof rt.reason, "%s: is not a scheme fetched here", u.scheme);
             break;
         }
+        /* the cache: a fresh copy answers, and no request is made; a stale one with a
+           validator asks the server whether it still holds */
+        char here[8192], cpath[1300];
+        net_url_text(&u, here, sizeof here);
+        vector<char> c_head, c_body;
+        int c_status = 0;
+        int64_t c_rtime = 0, now = net_now(), c_age = 0, c_life = 0;
+        int caching = net_cache_path(l, here, cpath, sizeof cpath);
+        int cached = caching && net_cache_read(cpath, here, &c_status, &c_rtime, &c_head, &c_body);
+        if (cached) {
+            c_age = net_initial_age(data(c_head), len(c_head), c_rtime) + (now > c_rtime ? now - c_rtime : 0);
+            c_life = net_lifetime(data(c_head), len(c_head), c_rtime);
+            if (c_life > c_age) {
+                append_range(body, data(c_body), len(c_body));
+                status = c_status;
+                net_type_of_head(data(c_head), len(c_head), type, sizeof type);
+                cache = NET_CACHE_USE_FRESH;
+                cache_age = c_age;
+                cache_life = c_life;
+                break;
+            }
+        }
         /* a top-level fetch is a navigation, same-site with itself; a page's part is
            same-site when its site is the page's */
         int same = !page || net_same_site(&u, page);
         vector<char> head, extra;
         net_cookie_header(l, &u, same, r, &extra);
+        if (cached) {
+            char v[1024], line[1100];
+            if (net_header(data(c_head), len(c_head), "etag", v, sizeof v)) {
+                int n = snprintf(line, sizeof line, "If-None-Match: %s\r\n", v);
+                if (n > 0 && (size_t)n < sizeof line) append_range(extra, line, (size_t)n);
+            }
+            if (net_header(data(c_head), len(c_head), "last-modified", v, sizeof v)) {
+                int n = snprintf(line, sizeof line, "If-Modified-Since: %s\r\n", v);
+                if (n > 0 && (size_t)n < sizeof line) append_range(extra, line, (size_t)n);
+            }
+        }
         out = net_http(&u, t, data(extra), len(extra), &status, &head, &body, &rt);
         if (out != NET_OUTCOME_OK) { status = 0; break; }
         net_cookies_from(l, &u, data(head), len(head), same, r);
-        char ct[256];
-        if (net_header(data(head), len(head), "content-type", ct, sizeof ct)) {
-            size_t k = 0;
-            while (ct[k] && ct[k] != ';' && ct[k] != ' ' && k + 1 < sizeof type) { type[k] = net_lower(ct[k]); k++; }
-            type[k] = 0;
+        if (status == 304 && cached) {
+            /* revalidated: the stored response answers, its fields brought up to date by the 304's (4.3.4) */
+            net_cache_write(cpath, here, c_status, now, data(head), len(head), data(c_head), len(c_head), data(c_body), len(c_body));
+            clear(body);
+            append_range(body, data(c_body), len(c_body));
+            net_type_of_head(data(c_head), len(c_head), type, sizeof type);
+            cache = NET_CACHE_USE_REVALIDATED;
+            cache_age = c_age;
+            cache_life = c_life;
+            break;
         }
+        net_type_of_head(data(head), len(head), type, sizeof type);
         char loc[4096];
         if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308) &&
             net_header(data(head), len(head), "location", loc, sizeof loc)) {
@@ -1767,6 +2000,21 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
             continue;
         }
         if (status >= 400) out = NET_OUTCOME_HTTP_ERROR;
+        /* kept for later when it may be, and when a lifetime or a validator makes it of use */
+        if (caching) {
+            int64_t life = net_lifetime(data(head), len(head), now);
+            char v[1024];
+            int validator = net_header(data(head), len(head), "etag", v, sizeof v) || net_header(data(head), len(head), "last-modified", v, sizeof v);
+            if (net_storable(status, data(head), len(head)) && (life > 0 || validator)) {
+                net_cache_write(cpath, here, status, now, data(head), len(head), "", 0, data(body), len(body));
+                cache = NET_CACHE_USE_STORED;
+                cache_age = net_initial_age(data(head), len(head), now);
+                cache_life = life;
+            } else {
+                if (cached) unlink(cpath);
+                cache = NET_CACHE_USE_NOT_STORED;
+            }
+        }
         break;
     }
     net_url_text(&u, text, sizeof text);
@@ -1787,6 +2035,9 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
     l->resource[r].proxied = (uint8_t)rt.proxied;
     if (rt.proxied) l->resource[r].proxy = net_text(l, rt.proxy);
     l->resource[r].cross_site = (uint8_t)(page && !net_same_site(&u, page));
+    l->resource[r].cache = cache;
+    l->resource[r].cache_age = cache_age;
+    l->resource[r].cache_lifetime = cache_life;
     if (out == NET_OUTCOME_OK || out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(body), len(body));
     if (kind == NET_KIND_IMAGE && out == NET_OUTCOME_OK) {
         uint32_t w, hh;
