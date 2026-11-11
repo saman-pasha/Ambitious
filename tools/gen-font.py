@@ -2,11 +2,12 @@
 """tools/gen-font.py -- src/paint/font_data.h, the outlines the painter draws text with.
 
 A subset of the DejaVu fonts, read from their TrueType files by this script's
-own reader of the tables it needs (head, hhea, hmtx, maxp, loca, glyf, cmap)
-and written as C: for each face, a base64 string of its metrics and its
-glyphs' outlines -- each glyph's advance and contours, a contour's points as
-TrueType has them (on or off the curve, quadratic), delta-coded varints.
-Composite glyphs are resolved into their components' points.
+own reader of the tables it needs (head, hhea, hmtx, maxp, loca, glyf, cmap,
+kern) and written as C: for each face, a TrueType font of the code points the
+script lists, base64 -- the tables the painter reads (cmap format 4, glyf, head,
+hhea, hmtx, kern format 0, loca, maxp), so that src/paint/font.c reads the
+built-in faces as it reads a page's web fonts. Composite glyphs are resolved
+into their components' points; the kerning pairs are the subset's.
 
     python3 tools/gen-font.py [FONTDIR] > src/paint/font_data.h
 
@@ -15,13 +16,6 @@ part of the Font Software, so it carries the fonts' notice (the Bitstream Vera
 license, as DejaVu's own files do) and keeps the DejaVu names, as that license
 asks of a modified copy.
 
-The blob, before base64:
-  "AMBF" 1                                   magic and version
-  units_per_em ascender descender line_gap   varints (zigzag for the signed)
-  glyph_count, then for each glyph by code point:
-    cp - previous cp, advance, contour count
-    for each contour: point count, then each point's
-      zigzag(dx) << 1 | on_curve, zigzag(dy)   deltas from the previous point
 """
 import base64
 import struct
@@ -36,8 +30,11 @@ FACES = [
     ("amb_font_mono_bold", "DejaVuSansMono-Bold.ttf"),
 ]
 
-CODEPOINTS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
-              [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026, 0x2032, 0x2033,
+# Latin-1, Greek's small letters (lower-greek markers), Hebrew's letters (right-to-left
+# text), hyphens, quotes, bullets and the replacement character
+CODEPOINTS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + list(range(0x3B1, 0x3CA)) +
+              list(range(0x5D0, 0x5EB)) + [0x5BE, 0x5C0, 0x5C3, 0x5F3, 0x5F4] +
+              [0x2010, 0x2011, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026, 0x2032, 0x2033,
                0x20AC, 0x2122, 0x2190, 0x2191, 0x2192, 0x2193, 0x2212, 0x25AA, 0x25B8, 0x25BE, 0x25CB,
                0x25CF, 0x25E6, 0xFFFD])
 
@@ -235,66 +232,140 @@ class Font:
         return out
 
 
-def varint(n, out):
-    if n < 0:
-        raise ValueError(n)
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        if n:
-            out.append(b | 0x80)
+def kern_pairs(f):
+    """the font's kern table (format 0 subtables): {(left gid, right gid): value}"""
+    if "kern" not in f.tables:
+        return {}
+    off = f.tables["kern"][0]
+    _, n = struct.unpack_from(">HH", f.d, off)
+    p = off + 4
+    pairs = {}
+    for _ in range(n):
+        _, length, coverage = struct.unpack_from(">HHH", f.d, p)
+        if coverage >> 8 == 0 and coverage & 1:          # format 0, horizontal
+            npairs = struct.unpack_from(">H", f.d, p + 6)[0]
+            q = p + 14
+            for _ in range(npairs):
+                left, right, value = struct.unpack_from(">HHh", f.d, q)
+                pairs[(left, right)] = value
+                q += 6
+        p += length
+    return pairs
+
+
+def table_record(tag, body, offset):
+    return struct.pack(">4sIII", tag.encode("latin-1"), 0, offset, len(body))
+
+
+def encode_glyph(contours):
+    """a simple glyph's glyf entry: header, end points, no instructions, flags, x, y"""
+    if not contours:
+        return b""
+    pts = [pt for c in contours for pt in c]
+    xs = [x for x, _, _ in pts]
+    ys = [y for _, y, _ in pts]
+    out = bytearray(struct.pack(">hhhhh", len(contours), min(xs), min(ys), max(xs), max(ys)))
+    end = -1
+    for c in contours:
+        end += len(c)
+        out += struct.pack(">H", end)
+    out += struct.pack(">H", 0)
+    flags, xb, yb = bytearray(), bytearray(), bytearray()
+    px = py = 0
+    for (x, y, on) in pts:
+        fl = 1 if on else 0
+        dx, dy = x - px, y - py
+        if dx == 0:
+            fl |= 16
+        elif -255 <= dx <= 255:
+            fl |= 2 | (16 if dx > 0 else 0)
+            xb.append(abs(dx))
         else:
-            out.append(b)
-            return
+            xb += struct.pack(">h", dx)
+        if dy == 0:
+            fl |= 32
+        elif -255 <= dy <= 255:
+            fl |= 4 | (32 if dy > 0 else 0)
+            yb.append(abs(dy))
+        else:
+            yb += struct.pack(">h", dy)
+        flags.append(fl)
+        px, py = x, y
+    out += flags + xb + yb
+    while len(out) % 4:
+        out.append(0)
+    return bytes(out)
 
 
-def zigzag(n):
-    return n * 2 if n >= 0 else -n * 2 - 1
-
-
-def face_blob(path):
+def subset(path):
+    """a TrueType font of the code points the script lists: the tables the painter reads"""
     f = Font(path)
-    out = bytearray(b"AMBF")
-    out.append(1)
-    varint(f.upem, out)
-    varint(zigzag(f.ascender), out)
-    varint(zigzag(f.descender), out)
-    varint(f.line_gap, out)
     cps = [c for c in CODEPOINTS if c in f.cmap]
-    varint(len(cps), out)
-    prev = 0
-    for cp in cps:
-        gid = f.cmap[cp]
-        conts = [c for c in f.contours(gid) if c]
-        varint(cp - prev, out)
-        prev = cp
-        varint(f.advance(gid), out)
-        varint(len(conts), out)
-        px = py = 0
-        for cont in conts:
-            varint(len(cont), out)
-            for (x, y, on) in cont:
-                varint(zigzag(x - px) << 1 | (1 if on else 0), out)
-                varint(zigzag(y - py), out)
-                px, py = x, y
+    gids = [0]
+    for c in cps:
+        if f.cmap[c] not in gids:
+            gids.append(f.cmap[c])
+    newid = {g: i for i, g in enumerate(gids)}
+    glyphs = [encode_glyph([c for c in f.contours(g) if c]) for g in gids]
+    # loca (long) and glyf
+    loca, glyf = bytearray(), bytearray()
+    for g in glyphs:
+        loca += struct.pack(">I", len(glyf))
+        glyf += g
+    loca += struct.pack(">I", len(glyf))
+    allpts = [pt for g in gids for c in f.contours(g) for pt in c]
+    xmin = min(x for x, _, _ in allpts); xmax = max(x for x, _, _ in allpts)
+    ymin = min(y for _, y, _ in allpts); ymax = max(y for _, y, _ in allpts)
+    head = struct.pack(">IIIIHHqqhhhhHhhhh", 0x00010000, 0x00010000, 0, 0x5F0F3CF5, 0, f.upem, 0, 0,
+                       xmin, ymin, xmax, ymax, 0, 8, 2, 1, 0)
+    advances = [f.advance(g) for g in gids]
+    hhea = struct.pack(">IhhhHhhhhhhhhhhhH", 0x00010000, f.ascender, f.descender, f.line_gap, max(advances),
+                       0, 0, xmax, 1, 0, 0, 0, 0, 0, 0, 0, len(gids))
+    maxp = struct.pack(">IH", 0x00005000, len(gids))
+    hmtx = b"".join(struct.pack(">Hh", a, 0) for a in advances)
+    # cmap: format 4, a segment a code point (and the closing one)
+    segs = sorted(set(cps)) + [0xFFFF]
+    segx2 = 2 * len(segs)
+    ends = b"".join(struct.pack(">H", c) for c in segs)
+    starts = ends
+    deltas = b"".join(struct.pack(">H", (newid[f.cmap[c]] - c) % 0x10000) for c in segs[:-1]) + struct.pack(">H", 1)
+    ros = b"\0\0" * len(segs)
+    sub = struct.pack(">HHHHHHH", 4, 0, 0, segx2, 0, 0, 0) + ends + b"\0\0" + starts + deltas + ros
+    sub = sub[:2] + struct.pack(">H", len(sub)) + sub[4:]
+    cmap = struct.pack(">HHHHI", 0, 1, 3, 1, 12) + sub
+    # kern: format 0, the pairs of the subset's glyphs, in order
+    pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items() if l in newid and r in newid and v)
+    kbody = struct.pack(">HHHH", len(pairs), 0, 0, 0) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
+    kern = struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody
+    tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
+              ("kern", kern), ("loca", bytes(loca)), ("maxp", maxp)]
+    out = bytearray(struct.pack(">IHHHH", 0x00010000, len(tables), 128, 3, 0))
+    offset = 12 + 16 * len(tables)
+    bodies = bytearray()
+    for tag, body in tables:
+        out += table_record(tag, body, offset + len(bodies))
+        bodies += body
+        while len(bodies) % 4:
+            bodies.append(0)
     missing = [c for c in CODEPOINTS if c not in f.cmap]
-    return bytes(out), len(cps), missing
+    return bytes(out + bodies), len(gids), len(pairs), missing
 
 
 def main():
     fontdir = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
     w = sys.stdout.write
     w("/* src/paint/font_data.h -- generated by tools/gen-font.py from the DejaVu fonts' TrueType\n")
-    w("   files: for each face, its metrics and its glyphs' outlines (the code points the script\n")
-    w("   lists), base64. Do not edit; run the script. src/paint/font.c reads them.\n\n")
+    w("   files: for each face a TrueType font of the code points the script lists (cmap, glyf,\n")
+    w("   head, hhea, hmtx, kern, loca, maxp), base64. Do not edit; run the script.\n")
+    w("   src/paint/font.c reads them as it reads a page's web fonts.\n\n")
     w("   The fonts' notice, which this copy of part of the Font Software carries:\n\n")
     for line in NOTICE.split("\n"):
         w(("   " + line).rstrip() + "\n")
     w("*/\n")
     for name, file in FACES:
-        blob, n, missing = face_blob(fontdir + "/" + file)
+        blob, n, npairs, missing = subset(fontdir + "/" + file)
         text = base64.b64encode(blob).decode("ascii")
-        w("\n/* %s: %d glyphs, %d bytes%s */\n" % (file, n, len(blob),
+        w("\n/* %s: %d glyphs, %d kerning pairs, %d bytes%s */\n" % (file, n, npairs, len(blob),
           "" if not missing else "; not in the face: " + " ".join("U+%04X" % c for c in missing)))
         w("static const char %s[] =\n" % name)
         for i in range(0, len(text), 96):

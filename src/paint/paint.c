@@ -115,8 +115,11 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
     uint32_t ca = rgba & 0xff, r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
     int by = (int)floor(baseline - c->oy + 0.5);
     size_t i = 0;
+    uint32_t prev = 0;
     while (i < n) {
         uint32_t cp = amb_utf8_next(s, n, &i);
+        if (prev) x += amb_kern(f, face, prev, cp, size);       /* the pair's kerning, as layout measured it */
+        prev = cp;
         double fx = floor(x);
         int quarter = (int)((x - fx) * 4);
         uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
