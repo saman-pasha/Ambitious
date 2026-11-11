@@ -1,0 +1,919 @@
+/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:0c2f8d49:3883). Do not edit. */
+typedef enum css_status { CSS_OK, CSS_STALE_HANDLE, CSS_WRONG_KIND, CSS_BAD_REQUEST, CSS_NOT_REQUESTABLE, CSS_STALE_REVISION } css_status;
+typedef enum css_origin { CSS_ORIGIN_USER_AGENT, CSS_ORIGIN_AUTHOR, CSS_ORIGIN_INLINE } css_origin;
+typedef enum css_prop { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_STYLE, CSS_PROP_TEXT_ALIGN, CSS_PROP_LINE_HEIGHT, CSS_PROP_TEXT_DECORATION, CSS_PROP_WHITE_SPACE, CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_COLOR, CSS_PROP_WIDTH, CSS_PROP_HEIGHT, CSS_PROP_LIST_STYLE_TYPE } css_prop;
+typedef enum css_unit { CSS_UNIT_KEYWORD, CSS_UNIT_PX, CSS_UNIT_EM, CSS_UNIT_PERCENT, CSS_UNIT_COLOR, CSS_UNIT_AUTO, CSS_UNIT_NUMBER } css_unit;
+typedef enum css_how { CSS_HOW_DECLARED, CSS_HOW_INHERITED, CSS_HOW_INITIAL } css_how;
+typedef enum css_op { CSS_OP_PARSE_SHEET, CSS_OP_CASCADE } css_op;
+typedef struct css_sheet_h { uint32_t doc, index, gen; } css_sheet_h;
+typedef struct css_rule_h { uint32_t doc, index, gen; } css_rule_h;
+typedef struct css_decl_h { uint32_t doc, index, gen; } css_decl_h;
+typedef struct css_match_h { uint32_t doc, index, gen; } css_match_h;
+typedef struct css_cval_h { uint32_t doc, index, gen; } css_cval_h;
+typedef struct css_sheet { uint32_t gen, live, free_next; css_origin origin; uint32_t first_rule; uint32_t last_rule; } css_sheet;
+typedef struct css_rule { uint32_t gen, live, free_next; uint32_t sheet; uint32_t next; amb_span selector; uint32_t spec; uint32_t order; uint32_t first_decl; uint32_t last_decl; } css_rule;
+typedef struct css_decl { uint32_t gen, live, free_next; uint32_t rule; uint32_t next; css_prop prop; uint8_t important; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; } css_decl;
+typedef struct css_match { uint32_t gen, live, free_next; dom_node_h node; uint32_t rule; } css_match;
+typedef struct css_cval { uint32_t gen, live, free_next; dom_node_h node; css_prop prop; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; css_how how; uint32_t winner; } css_cval;
+typedef struct css_store_tag { char unused; } css_store_tag;
+typedef store<css_store_tag> css_style;
+extern const char css_fingerprint[];
+const char *css_status_name(css_status x);
+const char *css_op_name(css_op x);
+const char *css_origin_name(css_origin x);
+const char *css_prop_name(css_prop x);
+const char *css_unit_name(css_unit x);
+const char *css_how_name(css_how x);
+void css_init(css_style *d, uint32_t id);
+uint64_t css_revision(const css_style *d);
+css_status css_parse_sheet(css_style *d, css_origin origin, const char *src, size_t src_len);
+css_status css_cascade(css_style *d, dom_document *doc);
+css_status css_check_parse_sheet(const css_style *d, css_origin origin, const char *src, size_t src_len);
+css_status css_check_cascade(const css_style *d, dom_document *doc);
+css_rule_h css_rules_first(const css_style *d, css_sheet_h h);
+css_rule_h css_rules_next(const css_style *d, css_rule_h h);
+css_sheet_h css_rules_up(const css_style *d, css_rule_h h);
+css_rule_h css_rules_last(const css_style *d, css_sheet_h h);
+size_t css_rules_count(const css_style *d, css_sheet_h h);
+css_decl_h css_decls_first(const css_style *d, css_rule_h h);
+css_decl_h css_decls_next(const css_style *d, css_decl_h h);
+css_rule_h css_decls_up(const css_style *d, css_decl_h h);
+css_decl_h css_decls_last(const css_style *d, css_rule_h h);
+size_t css_decls_count(const css_style *d, css_rule_h h);
+int css_check_invariants(const css_style *d, FILE *report);
+void css_export(const css_style *d, FILE *out);
+css_status css_dispatch(css_style *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module css, generated from contracts/css.pl. Do not edit. */
+const char *css_status_name(css_status x) {
+    switch (x) {
+    case CSS_OK: return "ok";
+    case CSS_STALE_HANDLE: return "stale_handle";
+    case CSS_WRONG_KIND: return "wrong_kind";
+    case CSS_BAD_REQUEST: return "bad_request";
+    case CSS_NOT_REQUESTABLE: return "not_requestable";
+    case CSS_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *css_op_name(css_op x) {
+    switch (x) {
+    case CSS_OP_PARSE_SHEET: return "parse_sheet";
+    case CSS_OP_CASCADE: return "cascade";
+    }
+    return "?";
+}
+const char *css_origin_name(css_origin x) {
+    switch (x) {
+    case CSS_ORIGIN_USER_AGENT: return "user_agent";
+    case CSS_ORIGIN_AUTHOR: return "author";
+    case CSS_ORIGIN_INLINE: return "inline";
+    }
+    return "?";
+}
+const char *css_prop_name(css_prop x) {
+    switch (x) {
+    case CSS_PROP_DISPLAY: return "display";
+    case CSS_PROP_COLOR: return "color";
+    case CSS_PROP_BACKGROUND_COLOR: return "background_color";
+    case CSS_PROP_FONT_SIZE: return "font_size";
+    case CSS_PROP_FONT_WEIGHT: return "font_weight";
+    case CSS_PROP_FONT_STYLE: return "font_style";
+    case CSS_PROP_TEXT_ALIGN: return "text_align";
+    case CSS_PROP_LINE_HEIGHT: return "line_height";
+    case CSS_PROP_TEXT_DECORATION: return "text_decoration";
+    case CSS_PROP_WHITE_SPACE: return "white_space";
+    case CSS_PROP_MARGIN_TOP: return "margin_top";
+    case CSS_PROP_MARGIN_RIGHT: return "margin_right";
+    case CSS_PROP_MARGIN_BOTTOM: return "margin_bottom";
+    case CSS_PROP_MARGIN_LEFT: return "margin_left";
+    case CSS_PROP_PADDING_TOP: return "padding_top";
+    case CSS_PROP_PADDING_RIGHT: return "padding_right";
+    case CSS_PROP_PADDING_BOTTOM: return "padding_bottom";
+    case CSS_PROP_PADDING_LEFT: return "padding_left";
+    case CSS_PROP_BORDER_TOP_WIDTH: return "border_top_width";
+    case CSS_PROP_BORDER_RIGHT_WIDTH: return "border_right_width";
+    case CSS_PROP_BORDER_BOTTOM_WIDTH: return "border_bottom_width";
+    case CSS_PROP_BORDER_LEFT_WIDTH: return "border_left_width";
+    case CSS_PROP_BORDER_COLOR: return "border_color";
+    case CSS_PROP_WIDTH: return "width";
+    case CSS_PROP_HEIGHT: return "height";
+    case CSS_PROP_LIST_STYLE_TYPE: return "list_style_type";
+    }
+    return "?";
+}
+const char *css_unit_name(css_unit x) {
+    switch (x) {
+    case CSS_UNIT_KEYWORD: return "keyword";
+    case CSS_UNIT_PX: return "px";
+    case CSS_UNIT_EM: return "em";
+    case CSS_UNIT_PERCENT: return "percent";
+    case CSS_UNIT_COLOR: return "color";
+    case CSS_UNIT_AUTO: return "auto";
+    case CSS_UNIT_NUMBER: return "number";
+    }
+    return "?";
+}
+const char *css_how_name(css_how x) {
+    switch (x) {
+    case CSS_HOW_DECLARED: return "declared";
+    case CSS_HOW_INHERITED: return "inherited";
+    case CSS_HOW_INITIAL: return "initial";
+    }
+    return "?";
+}
+
+const char css_fingerprint[] = "fnv1a32:0c2f8d49:3883";
+void css_init(css_style *d, uint32_t id) {
+    if (d->sheet_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    text_add(d, "", 0);
+}
+uint64_t css_revision(const css_style *d) { return d->revision; }
+css_status css_check_parse_sheet(const css_style *d, css_origin origin, const char *src, size_t src_len)
+{
+    return CSS_OK;
+}
+
+css_status css_check_cascade(const css_style *d, dom_document *doc)
+{
+    return CSS_OK;
+}
+
+css_rule_h css_rules_first(const css_style *d, css_sheet_h h) {
+    css_rule_h none = { 0, 0, 0 };
+    if (!sheet_live(d, h)) return none;
+    return rule_handle(d, d->sheet[h.index].first_rule);
+}
+css_rule_h css_rules_next(const css_style *d, css_rule_h h) {
+    css_rule_h none = { 0, 0, 0 };
+    if (!rule_live(d, h)) return none;
+    return rule_handle(d, d->rule[h.index].next);
+}
+css_sheet_h css_rules_up(const css_style *d, css_rule_h h) {
+    css_sheet_h none = { 0, 0, 0 };
+    if (!rule_live(d, h)) return none;
+    return sheet_handle(d, d->rule[h.index].sheet);
+}
+css_rule_h css_rules_last(const css_style *d, css_sheet_h h) {
+    css_rule_h none = { 0, 0, 0 };
+    if (!sheet_live(d, h)) return none;
+    return rule_handle(d, d->sheet[h.index].last_rule);
+}
+size_t css_rules_count(const css_style *d, css_sheet_h h) {
+    if (!sheet_live(d, h)) return 0;
+    return rules_count(d, h.index);
+}
+
+css_decl_h css_decls_first(const css_style *d, css_rule_h h) {
+    css_decl_h none = { 0, 0, 0 };
+    if (!rule_live(d, h)) return none;
+    return decl_handle(d, d->rule[h.index].first_decl);
+}
+css_decl_h css_decls_next(const css_style *d, css_decl_h h) {
+    css_decl_h none = { 0, 0, 0 };
+    if (!decl_live(d, h)) return none;
+    return decl_handle(d, d->decl[h.index].next);
+}
+css_rule_h css_decls_up(const css_style *d, css_decl_h h) {
+    css_rule_h none = { 0, 0, 0 };
+    if (!decl_live(d, h)) return none;
+    return rule_handle(d, d->decl[h.index].rule);
+}
+css_decl_h css_decls_last(const css_style *d, css_rule_h h) {
+    css_decl_h none = { 0, 0, 0 };
+    if (!rule_live(d, h)) return none;
+    return decl_handle(d, d->rule[h.index].last_decl);
+}
+size_t css_decls_count(const css_style *d, css_rule_h h) {
+    if (!rule_live(d, h)) return 0;
+    return decls_count(d, h.index);
+}
+
+int css_check_invariants(const css_style *d, FILE *report) {
+    int bad = 0;
+    /* rule_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->rule_len ? d->rule_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->sheet_len; o++) {
+            if (!d->sheet[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->sheet[o].first_rule; i; i = d->rule[i].next) {
+                if (i >= d->rule_len || !d->rule[i].live || d->rule[i].sheet != o || ++steps > d->rule_len || seen[i]) { bad++; amb_report(report, "css", "rule_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->sheet[o].last_rule != prev) { bad++; amb_report(report, "css", "rule_links", o); }
+        }
+        for (uint32_t i = 1; i < d->rule_len; i++)
+            if (d->rule[i].live && d->rule[i].sheet && seen[i] != d->rule[i].sheet) { bad++; amb_report(report, "css", "rule_links", i); }
+        free(seen);
+    }
+    /* decl_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->decl_len ? d->decl_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->rule_len; o++) {
+            if (!d->rule[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->rule[o].first_decl; i; i = d->decl[i].next) {
+                if (i >= d->decl_len || !d->decl[i].live || d->decl[i].rule != o || ++steps > d->decl_len || seen[i]) { bad++; amb_report(report, "css", "decl_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        if (d->rule[o].last_decl != prev) { bad++; amb_report(report, "css", "decl_links", o); }
+        }
+        for (uint32_t i = 1; i < d->decl_len; i++)
+            if (d->decl[i].live && d->decl[i].rule && seen[i] != d->decl[i].rule) { bad++; amb_report(report, "css", "decl_links", i); }
+        free(seen);
+    }
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->sheet_len; i++) {
+            uint32_t r = d->sheet[i].first_rule;
+            if (d->sheet[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->sheet_len; i++) {
+            uint32_t r = d->sheet[i].last_rule;
+            if (d->sheet[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->rule_len; i++) {
+            uint32_t r = d->rule[i].sheet;
+            if (d->rule[i].live && r && (r >= d->sheet_len || !d->sheet[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->rule_len; i++) {
+            uint32_t r = d->rule[i].next;
+            if (d->rule[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->rule_len; i++) {
+            uint32_t r = d->rule[i].first_decl;
+            if (d->rule[i].live && r && (r >= d->decl_len || !d->decl[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->rule_len; i++) {
+            uint32_t r = d->rule[i].last_decl;
+            if (d->rule[i].live && r && (r >= d->decl_len || !d->decl[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->decl_len; i++) {
+            uint32_t r = d->decl[i].rule;
+            if (d->decl[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->decl_len; i++) {
+            uint32_t r = d->decl[i].next;
+            if (d->decl[i].live && r && (r >= d->decl_len || !d->decl[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->match_len; i++) {
+            uint32_t r = d->match[i].rule;
+            if (d->match[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->cval_len; i++) {
+            uint32_t r = d->cval[i].winner;
+            if (d->cval[i].live && r && (r >= d->decl_len || !d->decl[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void css_export(const css_style *d, FILE *out) {
+    fprintf(out, "amb_snapshot(css, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, css_fingerprint);
+    for (uint32_t i = 1; i < d->sheet_len; i++) {
+        if (!d->sheet[i].live) continue;
+        if (1) { fputs("css_sheet(", out); amb_put_handle(out, "sh", d->id, i, d->sheet[i].gen); fputs(",", out); fputs(css_origin_name(d->sheet[i].origin), out); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->rule_len; i++) {
+        if (!d->rule[i].live) continue;
+        if (1) { fputs("css_rule(", out); amb_put_handle(out, "ru", d->id, i, d->rule[i].gen); fputs(",", out); { uint32_t r = d->rule[i].sheet; amb_put_ref(out, "sh", d->id, r, r && r < d->sheet_len ? d->sheet[r].gen : 0); } fputs(",", out); text_put(d, out, d->rule[i].selector); fputs(",", out); fprintf(out, "%lld", (long long)d->rule[i].spec); fputs(",", out); fprintf(out, "%lld", (long long)d->rule[i].order); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->decl_len; i++) {
+        if (!d->decl[i].live) continue;
+        if (1) { fputs("css_decl(", out); amb_put_handle(out, "de", d->id, i, d->decl[i].gen); fputs(",", out); { uint32_t r = d->decl[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(",", out); fputs(css_prop_name(d->decl[i].prop), out); fputs(",", out); text_put(d, out, d->decl[i].text); fputs(",", out); fputs(d->decl[i].important ? "true" : "false", out); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->match_len; i++) {
+        if (!d->match[i].live) continue;
+        if (1) { fputs("css_matched(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->cval_len; i++) {
+        if (!d->cval[i].live) continue;
+        if (1) { fputs("css_computed(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); text_put(d, out, d->cval[i].text); fputs(",", out); fputs(css_how_name(d->cval[i].how), out); fputs(").\n", out); }
+        if (d->cval[i].winner != 0) { fputs("css_won(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); { uint32_t r = d->cval[i].winner; amb_put_ref(out, "de", d->id, r, r && r < d->decl_len ? d->decl[r].gen : 0); } fputs(").\n", out); }
+        if (d->cval[i].unit == CSS_UNIT_COLOR) { fputs("css_rgba(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); fprintf(out, "%lld", (long long)d->cval[i].color); fputs(").\n", out); }
+    }
+}
+css_status css_dispatch(css_style *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    css_status st = CSS_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return CSS_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return CSS_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return CSS_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return CSS_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return CSS_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return CSS_STALE_REVISION; }
+
+    if (amb_name_is(name, name_len, "parse_sheet") || amb_name_is(name, name_len, "cascade")) { amb_result(report, name, "not_requestable", d->revision); return CSS_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module css, an instance of store<css_store_tag>: one own buffer a part */
+typedef struct store_css_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t sheet_len, sheet_cap;
+    uint32_t sheet_free;
+    own css_sheet *sheet;
+    size_t rule_len, rule_cap;
+    uint32_t rule_free;
+    own css_rule *rule;
+    size_t decl_len, decl_cap;
+    uint32_t decl_free;
+    own css_decl *decl;
+    size_t match_len, match_cap;
+    uint32_t match_free;
+    own css_match *match;
+    size_t cval_len, cval_cap;
+    uint32_t cval_free;
+    own css_cval *cval;
+    size_t text_len, text_cap;
+    own char *text;
+    size_t names_len, names_cap, names_n, names_ncap, names_scap;
+    own char *names;
+    own amb_span *names_at;
+    own uint32_t *names_slots;
+} store_css_store_tag;
+void store_css_store_tag_drop(store_css_store_tag *s) { free(s->sheet); free(s->rule); free(s->decl); free(s->match); free(s->cval); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); }
+static void store_css_store_tag__sheet_grow(store_css_store_tag *s) {
+    size_t c = s->sheet_cap ? 2 * s->sheet_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->sheet = (css_sheet *)realloc(s->sheet, c * sizeof(css_sheet));
+    if (!s->sheet) abort();
+    s->sheet_cap = c;
+}
+css_sheet_h store_css_store_tag_sheet_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->sheet_free) {
+        i = s->sheet_free;
+        s->sheet_free = s->sheet[i].free_next;
+    } else {
+        if (s->sheet_len == 0) {
+            if (s->sheet_cap == 0) store_css_store_tag__sheet_grow(s);
+            memset(&s->sheet[0], 0, sizeof(css_sheet));
+            s->sheet_len = 1;
+        }
+        if (s->sheet_len == s->sheet_cap) store_css_store_tag__sheet_grow(s);
+        i = (uint32_t)s->sheet_len;
+        s->sheet_len++;
+        s->sheet[i].gen = 0;
+    }
+    uint32_t g = s->sheet[i].gen;
+    memset(&s->sheet[i], 0, sizeof(css_sheet));
+    s->sheet[i].gen = g;
+    s->sheet[i].live = 1;
+    css_sheet_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_sheet_live(const store_css_store_tag *s, css_sheet_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->sheet_len && s->sheet[h.index].live && s->sheet[h.index].gen == h.gen;
+}
+css_sheet store_css_store_tag_sheet_get(const store_css_store_tag *s, css_sheet_h h) {
+    if (!store_css_store_tag_sheet_live(s, h)) abort();
+    return s->sheet[h.index];
+}
+css_sheet *store_css_store_tag_sheet_ref(const store_css_store_tag *s, css_sheet_h h) tie s {
+    if (!store_css_store_tag_sheet_live(s, h)) abort();
+    return &s->sheet[h.index];
+}
+css_sheet *store_css_store_tag_sheet_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->sheet_len) abort();
+    return &s->sheet[i];
+}
+css_sheet_h store_css_store_tag_sheet_handle(const store_css_store_tag *s, uint32_t i) {
+    css_sheet_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->sheet_len && s->sheet[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->sheet[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_sheet_free(store_css_store_tag *s, css_sheet_h h) {
+    if (!store_css_store_tag_sheet_live(s, h)) abort();
+    s->sheet[h.index].live = 0;
+    s->sheet[h.index].gen++;
+    s->sheet[h.index].free_next = s->sheet_free;
+    s->sheet_free = h.index;
+}
+size_t store_css_store_tag_sheet_len(const store_css_store_tag *s) { return s->sheet_len; }
+size_t store_css_store_tag_sheet_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->sheet_len; i++) if (s->sheet[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__rule_grow(store_css_store_tag *s) {
+    size_t c = s->rule_cap ? 2 * s->rule_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->rule = (css_rule *)realloc(s->rule, c * sizeof(css_rule));
+    if (!s->rule) abort();
+    s->rule_cap = c;
+}
+css_rule_h store_css_store_tag_rule_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->rule_free) {
+        i = s->rule_free;
+        s->rule_free = s->rule[i].free_next;
+    } else {
+        if (s->rule_len == 0) {
+            if (s->rule_cap == 0) store_css_store_tag__rule_grow(s);
+            memset(&s->rule[0], 0, sizeof(css_rule));
+            s->rule_len = 1;
+        }
+        if (s->rule_len == s->rule_cap) store_css_store_tag__rule_grow(s);
+        i = (uint32_t)s->rule_len;
+        s->rule_len++;
+        s->rule[i].gen = 0;
+    }
+    uint32_t g = s->rule[i].gen;
+    memset(&s->rule[i], 0, sizeof(css_rule));
+    s->rule[i].gen = g;
+    s->rule[i].live = 1;
+    css_rule_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_rule_live(const store_css_store_tag *s, css_rule_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->rule_len && s->rule[h.index].live && s->rule[h.index].gen == h.gen;
+}
+css_rule store_css_store_tag_rule_get(const store_css_store_tag *s, css_rule_h h) {
+    if (!store_css_store_tag_rule_live(s, h)) abort();
+    return s->rule[h.index];
+}
+css_rule *store_css_store_tag_rule_ref(const store_css_store_tag *s, css_rule_h h) tie s {
+    if (!store_css_store_tag_rule_live(s, h)) abort();
+    return &s->rule[h.index];
+}
+css_rule *store_css_store_tag_rule_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->rule_len) abort();
+    return &s->rule[i];
+}
+css_rule_h store_css_store_tag_rule_handle(const store_css_store_tag *s, uint32_t i) {
+    css_rule_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->rule_len && s->rule[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->rule[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_rule_free(store_css_store_tag *s, css_rule_h h) {
+    if (!store_css_store_tag_rule_live(s, h)) abort();
+    s->rule[h.index].live = 0;
+    s->rule[h.index].gen++;
+    s->rule[h.index].free_next = s->rule_free;
+    s->rule_free = h.index;
+}
+size_t store_css_store_tag_rule_len(const store_css_store_tag *s) { return s->rule_len; }
+size_t store_css_store_tag_rule_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->rule_len; i++) if (s->rule[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__decl_grow(store_css_store_tag *s) {
+    size_t c = s->decl_cap ? 2 * s->decl_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->decl = (css_decl *)realloc(s->decl, c * sizeof(css_decl));
+    if (!s->decl) abort();
+    s->decl_cap = c;
+}
+css_decl_h store_css_store_tag_decl_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->decl_free) {
+        i = s->decl_free;
+        s->decl_free = s->decl[i].free_next;
+    } else {
+        if (s->decl_len == 0) {
+            if (s->decl_cap == 0) store_css_store_tag__decl_grow(s);
+            memset(&s->decl[0], 0, sizeof(css_decl));
+            s->decl_len = 1;
+        }
+        if (s->decl_len == s->decl_cap) store_css_store_tag__decl_grow(s);
+        i = (uint32_t)s->decl_len;
+        s->decl_len++;
+        s->decl[i].gen = 0;
+    }
+    uint32_t g = s->decl[i].gen;
+    memset(&s->decl[i], 0, sizeof(css_decl));
+    s->decl[i].gen = g;
+    s->decl[i].live = 1;
+    css_decl_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_decl_live(const store_css_store_tag *s, css_decl_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->decl_len && s->decl[h.index].live && s->decl[h.index].gen == h.gen;
+}
+css_decl store_css_store_tag_decl_get(const store_css_store_tag *s, css_decl_h h) {
+    if (!store_css_store_tag_decl_live(s, h)) abort();
+    return s->decl[h.index];
+}
+css_decl *store_css_store_tag_decl_ref(const store_css_store_tag *s, css_decl_h h) tie s {
+    if (!store_css_store_tag_decl_live(s, h)) abort();
+    return &s->decl[h.index];
+}
+css_decl *store_css_store_tag_decl_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->decl_len) abort();
+    return &s->decl[i];
+}
+css_decl_h store_css_store_tag_decl_handle(const store_css_store_tag *s, uint32_t i) {
+    css_decl_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->decl_len && s->decl[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->decl[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_decl_free(store_css_store_tag *s, css_decl_h h) {
+    if (!store_css_store_tag_decl_live(s, h)) abort();
+    s->decl[h.index].live = 0;
+    s->decl[h.index].gen++;
+    s->decl[h.index].free_next = s->decl_free;
+    s->decl_free = h.index;
+}
+size_t store_css_store_tag_decl_len(const store_css_store_tag *s) { return s->decl_len; }
+size_t store_css_store_tag_decl_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->decl_len; i++) if (s->decl[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__match_grow(store_css_store_tag *s) {
+    size_t c = s->match_cap ? 2 * s->match_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->match = (css_match *)realloc(s->match, c * sizeof(css_match));
+    if (!s->match) abort();
+    s->match_cap = c;
+}
+css_match_h store_css_store_tag_match_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->match_free) {
+        i = s->match_free;
+        s->match_free = s->match[i].free_next;
+    } else {
+        if (s->match_len == 0) {
+            if (s->match_cap == 0) store_css_store_tag__match_grow(s);
+            memset(&s->match[0], 0, sizeof(css_match));
+            s->match_len = 1;
+        }
+        if (s->match_len == s->match_cap) store_css_store_tag__match_grow(s);
+        i = (uint32_t)s->match_len;
+        s->match_len++;
+        s->match[i].gen = 0;
+    }
+    uint32_t g = s->match[i].gen;
+    memset(&s->match[i], 0, sizeof(css_match));
+    s->match[i].gen = g;
+    s->match[i].live = 1;
+    css_match_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_match_live(const store_css_store_tag *s, css_match_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->match_len && s->match[h.index].live && s->match[h.index].gen == h.gen;
+}
+css_match store_css_store_tag_match_get(const store_css_store_tag *s, css_match_h h) {
+    if (!store_css_store_tag_match_live(s, h)) abort();
+    return s->match[h.index];
+}
+css_match *store_css_store_tag_match_ref(const store_css_store_tag *s, css_match_h h) tie s {
+    if (!store_css_store_tag_match_live(s, h)) abort();
+    return &s->match[h.index];
+}
+css_match *store_css_store_tag_match_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->match_len) abort();
+    return &s->match[i];
+}
+css_match_h store_css_store_tag_match_handle(const store_css_store_tag *s, uint32_t i) {
+    css_match_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->match_len && s->match[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->match[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_match_free(store_css_store_tag *s, css_match_h h) {
+    if (!store_css_store_tag_match_live(s, h)) abort();
+    s->match[h.index].live = 0;
+    s->match[h.index].gen++;
+    s->match[h.index].free_next = s->match_free;
+    s->match_free = h.index;
+}
+size_t store_css_store_tag_match_len(const store_css_store_tag *s) { return s->match_len; }
+size_t store_css_store_tag_match_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->match_len; i++) if (s->match[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__cval_grow(store_css_store_tag *s) {
+    size_t c = s->cval_cap ? 2 * s->cval_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->cval = (css_cval *)realloc(s->cval, c * sizeof(css_cval));
+    if (!s->cval) abort();
+    s->cval_cap = c;
+}
+css_cval_h store_css_store_tag_cval_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->cval_free) {
+        i = s->cval_free;
+        s->cval_free = s->cval[i].free_next;
+    } else {
+        if (s->cval_len == 0) {
+            if (s->cval_cap == 0) store_css_store_tag__cval_grow(s);
+            memset(&s->cval[0], 0, sizeof(css_cval));
+            s->cval_len = 1;
+        }
+        if (s->cval_len == s->cval_cap) store_css_store_tag__cval_grow(s);
+        i = (uint32_t)s->cval_len;
+        s->cval_len++;
+        s->cval[i].gen = 0;
+    }
+    uint32_t g = s->cval[i].gen;
+    memset(&s->cval[i], 0, sizeof(css_cval));
+    s->cval[i].gen = g;
+    s->cval[i].live = 1;
+    css_cval_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_cval_live(const store_css_store_tag *s, css_cval_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->cval_len && s->cval[h.index].live && s->cval[h.index].gen == h.gen;
+}
+css_cval store_css_store_tag_cval_get(const store_css_store_tag *s, css_cval_h h) {
+    if (!store_css_store_tag_cval_live(s, h)) abort();
+    return s->cval[h.index];
+}
+css_cval *store_css_store_tag_cval_ref(const store_css_store_tag *s, css_cval_h h) tie s {
+    if (!store_css_store_tag_cval_live(s, h)) abort();
+    return &s->cval[h.index];
+}
+css_cval *store_css_store_tag_cval_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->cval_len) abort();
+    return &s->cval[i];
+}
+css_cval_h store_css_store_tag_cval_handle(const store_css_store_tag *s, uint32_t i) {
+    css_cval_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->cval_len && s->cval[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->cval[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_cval_free(store_css_store_tag *s, css_cval_h h) {
+    if (!store_css_store_tag_cval_live(s, h)) abort();
+    s->cval[h.index].live = 0;
+    s->cval[h.index].gen++;
+    s->cval[h.index].free_next = s->cval_free;
+    s->cval_free = h.index;
+}
+size_t store_css_store_tag_cval_len(const store_css_store_tag *s) { return s->cval_len; }
+size_t store_css_store_tag_cval_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->cval_len; i++) if (s->cval[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__text_room(store_css_store_tag *s, size_t n) {
+    if (s->text_len + n <= s->text_cap) return;
+    size_t c = s->text_cap ? s->text_cap : 256;
+    while (c < s->text_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->text = (char *)realloc(s->text, c);
+    if (!s->text) abort();
+    s->text_cap = c;
+}
+amb_span store_css_store_tag_text_add(store_css_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->text_len == 0) {
+        store_css_store_tag__text_room(s, 1);
+        s->text[0] = 0;
+        s->text_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->text && p < s->text + s->text_len;
+    size_t from = inside ? (size_t)(p - s->text) : 0;
+    store_css_store_tag__text_room(s, n);
+    if (inside) memmove(s->text + s->text_len, s->text + from, n);
+    else memcpy(s->text + s->text_len, p, n);
+    sp.off = (uint32_t)s->text_len;
+    sp.len = (uint32_t)n;
+    s->text_len += n;
+    return sp;
+}
+const char *store_css_store_tag_text_ptr(const store_css_store_tag *s, amb_span sp) tie s {
+    if (s->text_len == 0 || (size_t)sp.off + sp.len > s->text_len) abort();
+    return s->text + sp.off;
+}
+int store_css_store_tag_text_eq(const store_css_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    return memcmp(s->text + sp.off, p, n) == 0;
+}
+void store_css_store_tag_text_put(const store_css_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    amb_put_qatom(out, s->text + sp.off, sp.len);
+}
+size_t store_css_store_tag_text_size(const store_css_store_tag *s) { return s->text_len; }
+static uint32_t store_css_store_tag__names_hash(const char *p, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (unsigned char)p[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+static void store_css_store_tag__names_rehash(store_css_store_tag *s, size_t cap) {
+    own uint32_t *slots = (uint32_t *)calloc(cap, sizeof(uint32_t));
+    if (!slots) abort();
+    uint32_t m = (uint32_t)(cap - 1);
+    for (uint32_t id = 1; id < s->names_n; id++) {
+        amb_span sp = s->names_at[id];
+        uint32_t h = store_css_store_tag__names_hash(s->names + sp.off, sp.len) & m;
+        while (slots[h]) h = (h + 1) & m;
+        slots[h] = id;
+    }
+    free(s->names_slots);
+    s->names_slots = move(slots);
+    s->names_scap = cap;
+}
+uint32_t store_css_store_tag_names_find(const store_css_store_tag *s, const char *p, size_t n) {
+    if (s->names_scap == 0) return 0;
+    uint32_t m = (uint32_t)(s->names_scap - 1);
+    uint32_t h = store_css_store_tag__names_hash(p, n) & m;
+    while (s->names_slots[h]) {
+        uint32_t id = s->names_slots[h];
+        amb_span sp = s->names_at[id];
+        if (sp.len == n && (n == 0 || memcmp(s->names + sp.off, p, n) == 0)) return id;
+        h = (h + 1) & m;
+    }
+    return 0;
+}
+uint32_t store_css_store_tag_names_intern(store_css_store_tag *s, const char *p, size_t n) {
+    uint32_t id = store_css_store_tag_names_find(s, p, n);
+    if (id) return id;
+    if (s->names_n == 0) {
+        s->names_at = (amb_span *)realloc(s->names_at, 16 * sizeof(amb_span));
+        if (!s->names_at) abort();
+        s->names_ncap = 16;
+        s->names_at[0].off = 0;
+        s->names_at[0].len = 0;
+        s->names_n = 1;
+    }
+    if (s->names_n == s->names_ncap) {
+        size_t c = 2 * s->names_ncap;
+        if (c > 0x7FFFFFFF) abort();
+        s->names_at = (amb_span *)realloc(s->names_at, c * sizeof(amb_span));
+        if (!s->names_at) abort();
+        s->names_ncap = c;
+    }
+    if (s->names_len + n + 1 > s->names_cap) {
+        size_t c = s->names_cap ? s->names_cap : 256;
+        while (c < s->names_len + n + 1) c *= 2;
+        if (c > 0x7FFFFFFF) abort();
+        s->names = (char *)realloc(s->names, c);
+        if (!s->names) abort();
+        s->names_cap = c;
+    }
+    if (n) memcpy(s->names + s->names_len, p, n);
+    s->names[s->names_len + n] = 0;
+    id = (uint32_t)s->names_n;
+    s->names_at[id].off = (uint32_t)s->names_len;
+    s->names_at[id].len = (uint32_t)n;
+    s->names_len += n + 1;
+    s->names_n++;
+    if (2 * s->names_n > s->names_scap) {
+        store_css_store_tag__names_rehash(s, s->names_scap ? 2 * s->names_scap : 64);
+    } else {
+        uint32_t m = (uint32_t)(s->names_scap - 1);
+        uint32_t h = store_css_store_tag__names_hash(s->names + s->names_at[id].off, n) & m;
+        while (s->names_slots[h]) h = (h + 1) & m;
+        s->names_slots[h] = id;
+    }
+    return id;
+}
+const char *store_css_store_tag_names_ptr(const store_css_store_tag *s, uint32_t id) tie s {
+    if (id == 0 || id >= s->names_n) abort();
+    return s->names + s->names_at[id].off;
+}
+size_t store_css_store_tag_names_len(const store_css_store_tag *s, uint32_t id) {
+    if (id == 0 || id >= s->names_n) return 0;
+    return s->names_at[id].len;
+}
+int store_css_store_tag_names_is(const store_css_store_tag *s, uint32_t id, const char *p, size_t n) {
+    if (id == 0 || id >= s->names_n) return n == 0;
+    amb_span sp = s->names_at[id];
+    return sp.len == n && (n == 0 || memcmp(s->names + sp.off, p, n) == 0);
+}
+void store_css_store_tag_names_put(const store_css_store_tag *s, FILE *out, uint32_t id) {
+    if (id == 0 || id >= s->names_n) { amb_put_qatom(out, "", 0); return; }
+    amb_put_qatom(out, s->names + s->names_at[id].off, s->names_at[id].len);
+}
+size_t store_css_store_tag_names_count(const store_css_store_tag *s) { return s->names_n ? s->names_n - 1 : 0; }
+void store_css_store_tag_rules_append(store_css_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->sheet_len || i >= s->rule_len) abort();
+    uint32_t t = s->sheet[o].last_rule;
+    s->rule[i].sheet = o;
+    s->rule[i].next = 0;
+    if (t) s->rule[t].next = i; else s->sheet[o].first_rule = i;
+    s->sheet[o].last_rule = i;
+}
+
+void store_css_store_tag_rules_insert_before(store_css_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_css_store_tag_rules_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->sheet_len || i >= s->rule_len || b >= s->rule_len || s->rule[b].sheet != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->sheet[o].first_rule; x && x != b; x = s->rule[x].next) p = x;
+    s->rule[i].sheet = o;
+    s->rule[i].next = b;
+    if (p) s->rule[p].next = i; else s->sheet[o].first_rule = i;
+}
+
+void store_css_store_tag_rules_unlink(store_css_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->rule_len) abort();
+    uint32_t o = s->rule[i].sheet;
+    if (o == 0) return;
+    if (o >= s->sheet_len) abort();
+    uint32_t n = s->rule[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->sheet[o].first_rule; x && x != i; x = s->rule[x].next) p = x;
+    if (p) s->rule[p].next = n; else s->sheet[o].first_rule = n;
+    if (s->sheet[o].last_rule == i) s->sheet[o].last_rule = p;
+    s->rule[i].sheet = 0;
+    s->rule[i].next = 0;
+}
+
+uint32_t store_css_store_tag_rules_first(const store_css_store_tag *s, uint32_t o) { if (o >= s->sheet_len) abort(); return s->sheet[o].first_rule; }
+
+uint32_t store_css_store_tag_rules_next(const store_css_store_tag *s, uint32_t i) { if (i >= s->rule_len) abort(); return s->rule[i].next; }
+
+uint32_t store_css_store_tag_rules_up(const store_css_store_tag *s, uint32_t i) { if (i >= s->rule_len) abort(); return s->rule[i].sheet; }
+
+size_t store_css_store_tag_rules_count(const store_css_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->sheet_len) abort();
+    for (uint32_t i = s->sheet[o].first_rule; i; i = s->rule[i].next) {
+        n++;
+        if (n > s->rule_len) abort();
+    }
+    return n;
+}
+
+void store_css_store_tag_decls_append(store_css_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->rule_len || i >= s->decl_len) abort();
+    uint32_t t = s->rule[o].last_decl;
+    s->decl[i].rule = o;
+    s->decl[i].next = 0;
+    if (t) s->decl[t].next = i; else s->rule[o].first_decl = i;
+    s->rule[o].last_decl = i;
+}
+
+void store_css_store_tag_decls_insert_before(store_css_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_css_store_tag_decls_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->rule_len || i >= s->decl_len || b >= s->decl_len || s->decl[b].rule != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->rule[o].first_decl; x && x != b; x = s->decl[x].next) p = x;
+    s->decl[i].rule = o;
+    s->decl[i].next = b;
+    if (p) s->decl[p].next = i; else s->rule[o].first_decl = i;
+}
+
+void store_css_store_tag_decls_unlink(store_css_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->decl_len) abort();
+    uint32_t o = s->decl[i].rule;
+    if (o == 0) return;
+    if (o >= s->rule_len) abort();
+    uint32_t n = s->decl[i].next;
+    uint32_t p = 0;
+    for (uint32_t x = s->rule[o].first_decl; x && x != i; x = s->decl[x].next) p = x;
+    if (p) s->decl[p].next = n; else s->rule[o].first_decl = n;
+    if (s->rule[o].last_decl == i) s->rule[o].last_decl = p;
+    s->decl[i].rule = 0;
+    s->decl[i].next = 0;
+}
+
+uint32_t store_css_store_tag_decls_first(const store_css_store_tag *s, uint32_t o) { if (o >= s->rule_len) abort(); return s->rule[o].first_decl; }
+
+uint32_t store_css_store_tag_decls_next(const store_css_store_tag *s, uint32_t i) { if (i >= s->decl_len) abort(); return s->decl[i].next; }
+
+uint32_t store_css_store_tag_decls_up(const store_css_store_tag *s, uint32_t i) { if (i >= s->decl_len) abort(); return s->decl[i].rule; }
+
+size_t store_css_store_tag_decls_count(const store_css_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->rule_len) abort();
+    for (uint32_t i = s->rule[o].first_decl; i; i = s->decl[i].next) {
+        n++;
+        if (n > s->decl_len) abort();
+    }
+    return n;
+}
+

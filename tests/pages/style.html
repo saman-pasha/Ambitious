@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Styles, explained</title>
+<style>
+/* the author's sheet: tests/integ/style.sh asks the reasoner what each line did */
+body { font: 15px/1.5 Georgia, serif; color: #222; background: #fdfdf8 }
+h1 { color: maroon; margin: 0 0 0.5em }
+.lead { font-size: 1.2em; color: navy }
+p.lead { color: teal }
+#intro { color: purple !important }
+li:nth-child(odd) { background-color: #eeeeee }
+li:first-child { font-weight: bold }
+a[href^="http"] { color: green }
+a:hover { color: red }
+nav > a + a { margin-left: 1em }
+.faint { color: #c8c8c8 }
+.ghost { color: blue }
+blockquote { border-left: 4px solid gray; padding: 0 1em }
+@media print { body { color: black } }
+@media (max-width: 600px) { .wide { display: none } }
+</style>
+</head>
+<body>
+<h1>Styles, explained</h1>
+<p class="lead" id="intro" style="color: olive">The intro is purple: an important declaration beats even the style attribute.</p>
+<p class="lead">This lead is teal: p.lead is more specific than .lead.</p>
+<p style="color: olive">A style attribute beats the rules.</p>
+<ul><li>one</li><li>two</li><li>three</li></ul>
+<nav><a href="/a">here</a> <a href="https://example.org/">away</a></nav>
+<p class="faint">This text is too faint to read.</p>
+<blockquote>A quotation, <small>in small print</small>.</blockquote>
+<table bgcolor="#ffcc00" width="50%"><tr><td align="right"><font color="#800000" size="5">a hint</font></td></tr></table>
+<div class="wide">Shown: the viewport is 800px wide.</div>
+</body>
+</html>

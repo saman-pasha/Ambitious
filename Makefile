@@ -8,20 +8,22 @@
 #   make schema doc     the reasoning schemas and the contracts' references, in build/
 #
 # Every C unit is built by cicilang in memory (--no-kb: hermetic, and the user's
-# ~/.cicilang/KB is left alone) under a time cap, with the include directory by
-# its absolute path (a relative -I loses a macro file's NAME.pl.h: toolchain/REPORT.md).
+# ~/.cicilang/KB is left alone) under a time cap, for this machine named
+# (--target: the arch's generic CPU, not the host's every feature), with the
+# include directory by its absolute path (a relative -I loses a macro file's
+# NAME.pl.h). toolchain/env.sh sets AMB_CICILANG_FLAGS; toolchain/REPORT.md says why.
 SHELL := /bin/sh
 AMB_ROOT := $(CURDIR)
 export AMB_ROOT
 ENV := . $(AMB_ROOT)/toolchain/env.sh &&
 CAP := timeout 300
-AMB_CC := $(ENV) $(CAP) "$$AMB_CICILANG" --no-kb -I $(AMB_ROOT)/include
+AMB_CC := $(ENV) $(CAP) "$$AMB_CICILANG" $$AMB_CICILANG_FLAGS
 MODULES := $(basename $(notdir $(wildcard contracts/*.pl)))
 GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.pl prolog/amb/gen_schema.pl
 
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
-UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree
+UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 

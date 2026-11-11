@@ -339,6 +339,8 @@ ambc_field_type(_, Ds, enum(E)) :- !, memberchk(enum(E, _), Ds).
 ambc_field_type(_, Ds, ref(R)) :- !, memberchk(record(R, _), Ds).
 ambc_field_type(_, Ds, atom(A)) :- !, member(store(_, Ps), Ds), memberchk(atoms(A), Ps).
 ambc_field_type(_, Ds, span(P)) :- !, member(store(_, Ps), Ds), memberchk(pool(P), Ps).
+ambc_field_type(M, _, xhandle(M2, R2)) :- !, M2 \== M,
+    catch(( amb_contract_load(M2), amb_c(M2, handle(R2, _)) ), _, fail).
 
 ambc_event_type(_, _, enum(op)) :- !.        % the operations' own enum, generated
 ambc_event_type(M, Ds, T) :- ambc_field_type(M, Ds, T).
@@ -413,6 +415,7 @@ ambc_fact_arg(_, _, doc).
 ambc_fact_arg(_, _, rev).
 ambc_fact_arg(Ds, R, field(F)) :- ambc_field(Ds, R, F, T), ambc_fact_arg_type(Ds, T).
 ambc_fact_arg_type(Ds, ref(R2)) :- !, memberchk(handle(R2, _), Ds).
+ambc_fact_arg_type(_, xhandle(_, _)) :- !.
 ambc_fact_arg_type(_, _).
 
 ambc_where_ok(_, _, true) :- !.

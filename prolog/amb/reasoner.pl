@@ -160,6 +160,8 @@ amb_reason_shapes([A|As], [S|Ss], Doc, M) :- amb_reason_shape(S, A, Doc, M), amb
 
 amb_reason_shape(handle(R), H, Doc, M) :- amb_reason_schema_decl(M, handle(R, F)), H =.. [F, Doc, I, G], integer(I), I > 0, integer(G), G >= 0.
 amb_reason_shape(handle_or_none(R), H, Doc, M) :- ( H == none -> true ; amb_reason_shape(handle(R), H, Doc, M) ).
+amb_reason_shape(xhandle(M2, R), H, _, _) :-
+    ( H == none -> true ; amb_reason_schema(M2), amb_reason_schema_decl(M2, handle(R, F)), H =.. [F, D, I, G], integer(D), integer(I), integer(G) ).
 amb_reason_shape(enum(E), V, _, M) :- atom(V), amb_reason_schema_decl(M, enum(E, Vs)), memberchk(V, Vs).
 amb_reason_shape(enum_values(Vs), V, _, _) :- atom(V), memberchk(V, Vs).
 amb_reason_shape(atom, V, _, _) :- atom(V).

@@ -1,0 +1,121 @@
+ok   type: color rgb(255, 0, 0)
+ok   universal: color rgb(255, 0, 0)
+ok   class among classes: color rgb(255, 0, 0)
+ok   id: color rgb(255, 0, 0)
+ok   [attr]: color rgb(255, 0, 0)
+ok   [attr=v]: color rgb(255, 0, 0)
+ok   [attr~=v]: color rgb(255, 0, 0)
+ok   [attr|=v]: color rgb(255, 0, 0)
+ok   [^=][$=][*=]: color rgb(255, 0, 0)
+ok   [attr=v i]: color rgb(255, 0, 0)
+ok   [attr=v] case-sensitive: color rgb(0, 0, 0)
+ok   descendant: color rgb(255, 0, 0)
+ok   child, not a grandchild: color rgb(0, 0, 0)
+ok   next sibling: color rgb(255, 0, 0)
+ok   later sibling: color rgb(255, 0, 0)
+ok   :first-child: color rgb(255, 0, 0)
+ok   :last-child: color rgb(255, 0, 0)
+ok   :nth-child(2n+1): color rgb(255, 0, 0)
+ok   :nth-child(even) of the third: color rgb(0, 0, 0)
+ok   :nth-child(-n+2): color rgb(255, 0, 0)
+ok   :nth-last-child(1): color rgb(255, 0, 0)
+ok   :nth-of-type(2): color rgb(255, 0, 0)
+ok   :not(.x): color rgb(255, 0, 0)
+ok   :is(h1, p): color rgb(255, 0, 0)
+ok   :root, inherited: color rgb(255, 0, 0)
+ok   :empty: color rgb(255, 0, 0)
+ok   :hover at rest: color rgb(0, 0, 0)
+ok   ::before is not the element: color rgb(0, 0, 0)
+ok   :link (the UA's): color rgb(0, 0, 238)
+ok   :checked: color rgb(255, 0, 0)
+ok   a selector list: color rgb(255, 0, 0)
+ok   id over class: color rgb(0, 128, 0)
+ok   the later of equals: color rgb(0, 128, 0)
+ok   the later in one rule: color rgb(0, 128, 0)
+ok   !important over specificity: color rgb(0, 128, 0)
+ok   style attribute over an id: color rgb(0, 128, 0)
+ok   !important rule over the style attribute: color rgb(0, 128, 0)
+ok   !important style attribute over !important rule: color rgb(0, 128, 0)
+ok   author over user agent: font_size 20px
+ok   :where() adds nothing: color rgb(0, 128, 0)
+ok   :is() adds its argument's: color rgb(0, 128, 0)
+ok   :not() adds its argument's: color rgb(0, 128, 0)
+ok   colour inherited: color rgb(255, 0, 0)
+ok   padding not inherited: padding_top 0px
+ok   inherit: padding_top 5px
+ok   initial: color rgb(0, 0, 0)
+ok   unset, inherited: color rgb(255, 0, 0)
+ok   unset, not inherited: margin_top 0px
+ok   em of the parent's font size: font_size 30px
+ok   % of the parent's font size: font_size 10px
+ok   em of the element's own font size: margin_top 40px
+ok   rem: margin_top 32px
+ok   pt: font_size 16px
+ok   in: width 96px
+ok   a size keyword: font_size 24px
+ok   smaller: font_size 20px
+ok   bolder of 700 (the UA's b): font_weight 900
+ok   lighter of 400: font_weight 100
+ok   line-height, a number: line_height 1.5
+ok   line-height, a percentage: line_height 15px
+ok   #rgb: color rgb(0, 255, 0)
+ok   #rrggbbaa: color rgba(255, 0, 0, 0.501961)
+ok   rgb() of percentages: color rgb(255, 128, 0)
+ok   rgba(): color rgba(0, 0, 255, 0.501961)
+ok   rgb() with spaces and /: color rgba(0, 128, 0, 0.501961)
+ok   hsl(): color rgb(0, 128, 0)
+ok   a named colour: color rgb(102, 51, 153)
+ok   transparent: background_color rgba(0, 0, 0, 0)
+ok   currentcolor: border_color rgb(255, 0, 0)
+ok   border-color's initial is the colour: border_color rgb(0, 0, 255)
+ok   a length for a colour: color rgb(255, 0, 0)
+ok   a negative width: width 10px
+ok   a length without its unit: margin_top 16px
+ok   zero needs no unit: margin_top 0px
+ok   an unknown property: color rgb(0, 0, 0)
+ok   margin: 1 value: margin_left 5px
+ok   margin: 2 values: margin_left 2px
+ok   margin: 3 values: margin_bottom 3px
+ok   margin: 4 values: margin_left 4px
+ok   margin: 0 auto: margin_right auto
+ok   padding: 4 values: padding_bottom 3px
+ok   border: width style colour: border_left_width 2px
+ok   border: its colour: border_color rgb(255, 0, 0)
+ok   border: none: border_top_width 0px
+ok   border without a style: border_top_width 0px
+ok   border-bottom: its side: border_bottom_width 3px
+ok   border-bottom: not the others: border_top_width 0px
+ok   border: thick: border_right_width 5px
+ok   font: its style: font_style italic
+ok   font: its weight: font_weight 700
+ok   font: its size: font_size 20px
+ok   font: its line height: line_height 2
+ok   font: what it leaves out, reset: font_weight 400
+ok   font: without a size, dropped: font_weight 700
+ok   background: its colour: background_color rgb(255, 255, 0)
+ok   background: none resets the colour: background_color rgba(0, 0, 0, 0)
+ok   list-style: list_style_type square
+ok   text-decoration's line: text_decoration underline
+ok   @media print: color rgb(0, 0, 0)
+ok   @media screen and (min-width): color rgb(255, 0, 0)
+ok   @media (max-width): color rgb(0, 0, 0)
+ok   @media not print: color rgb(255, 0, 0)
+ok   <style media=print>: color rgb(0, 0, 0)
+ok   bgcolor: background_color rgb(255, 204, 0)
+ok   <font color>: color rgb(255, 0, 0)
+ok   <font size>: font_size 24px
+ok   <td align>: text_align right
+ok   <table width>: width 50%
+ok   a hint under an author rule: color rgb(0, 128, 0)
+ok   a hint under the author's *: color rgb(0, 128, 0)
+ok   comments: color rgb(255, 0, 0)
+ok   <!-- and -->: color rgb(255, 0, 0)
+ok   @font-face, skipped: color rgb(255, 0, 0)
+ok   @import, skipped: color rgb(255, 0, 0)
+ok   @supports, skipped whole: color rgb(255, 0, 0)
+ok   a string holding a brace: color rgb(255, 0, 0)
+ok   [hidden]: display none
+ok   li: display list-item
+ok   td: display table-cell
+ok   span: display inline
+120 of 120 cases

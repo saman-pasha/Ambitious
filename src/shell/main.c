@@ -6,6 +6,14 @@
  *                                 snapshot, an old batch refused, and the reasoner's
  *                                 answers checked against the C side's own traversal
  *   ambitious snapshot FILE       the demo document's snapshot, written to FILE
+ *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
+ *   ambitious style PAGE          the page's elements with their computed styles
+ *   ambitious query PAGE GOAL     the reasoner's answers over the page's facts
+ *   ambitious why PAGE GOAL       the reasoner's proofs
+ *   ambitious advise PAGE [--apply]  the reasoner's advice, applied as one batch
+ *
+ * A page's snapshot has three sections: the document, its parse and its style
+ * (the cascade's sheets, rules, matches and computed values).
  *
  * The reasoner is cocolog over prolog/amb/reason.pl, a process of its own: the
  * engine hands it a snapshot file and reads back text. AMB_ROOT and AMB_COCOLOG
@@ -21,6 +29,7 @@
 
 amb_interface(dom);
 amb_interface(html);
+amb_interface(css);
 
 #define S(lit) lit, sizeof(lit) - 1
 
@@ -300,34 +309,66 @@ static int cmd_snapshot(const char *path) {
     return write_snapshot(&d, path) ? 0 : 2;
 }
 
-/* ---- a page: an HTML file parsed into a document ---- */
+/* ---- a page: an HTML file parsed into a document, and styled ---- */
 
-static int load_page(const char *path, dom_document *d, html_parser *p) {
+static int load_page(const char *path, dom_document *d, html_parser *p, css_style *st) {
     vector<char> src;
     if (!read_all(path, &src)) { fprintf(stderr, "ambitious: cannot read %s\n", path); return 0; }
     dom_init(d, 1);
     html_init(p, 1);
+    css_init(st, 1);
     html_parse(p, d, data(src), len(src));
+    css_cascade(st, d);
     return 1;
 }
 
-/* the page's snapshot: the document's section, then the parse's */
-static int write_page_snapshot(const dom_document *d, const html_parser *p, const char *path) {
+/* the page's snapshot: the document's section, the parse's, the style's */
+static int write_page_snapshot(const dom_document *d, const html_parser *p, const css_style *st, const char *path) {
     own FILE *f = fopen(path, "w");
     if (!f) return 0;
     defer(f) { fclose(f); }
     dom_export(d, f);
     html_export(p, f);
+    css_export(st, f);
     return 1;
 }
 
 static int cmd_parse(const char *page) {
     dom_document d;
     html_parser p;
-    if (!load_page(page, &d, &p)) return 2;
+    css_style st;
+    if (!load_page(page, &d, &p, &st)) return 2;
     dom_serialize(&d, dom_root(&d), stdout);
     printf("\n");
     printf("%zu nodes, %zu parse errors, invariants: %d broken\n", node_count(d), error_count(p), dom_check_invariants(&d, stdout));
+    return 0;
+}
+
+/* the computed values of the properties a reader looks at first, of each element,
+   indented by its depth */
+static int cmd_style(const char *page) {
+    dom_document d;
+    html_parser p;
+    css_style st;
+    if (!load_page(page, &d, &p, &st)) return 2;
+    static const css_prop shown[] = { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE,
+                                      CSS_PROP_FONT_WEIGHT, CSS_PROP_MARGIN_TOP, CSS_PROP_PADDING_LEFT };
+    static const char *const names[] = { "display", "color", "background", "font-size", "weight", "margin-top", "padding-left" };
+    for (uint32_t c = 1; c < st.cval_len; c++) {
+        uint32_t x = st.cval[c].node.index;
+        if (c > 1 && st.cval[c - 1].node.index == x) continue;     /* each element's values are one run */
+        int depth = 0;
+        for (uint32_t y = d.node[x].parent; y > 1; y = d.node[y].parent) depth++;
+        printf("%*s<%s>", 2 * depth, "", names_ptr(&d, d.node[x].name));
+        for (size_t k = 0; k < sizeof shown / sizeof shown[0]; k++)
+            for (uint32_t e = c; e < st.cval_len && st.cval[e].node.index == x; e++)
+                if (st.cval[e].prop == shown[k]) {
+                    amb_span t = st.cval[e].text;
+                    printf(" %s: %.*s%s", names[k], (int)t.len, text_ptr(&st, t), st.cval[e].how == CSS_HOW_DECLARED ? "" : st.cval[e].how == CSS_HOW_INHERITED ? " (inherited)" : " (initial)");
+                }
+        printf("\n");
+    }
+    printf("%zu rules, %zu declarations, %zu matches, %zu computed values\n", rule_count(st), decl_count(st), match_count(st), cval_count(st));
     return 0;
 }
 
@@ -337,14 +378,15 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     if (!session_open(&s)) return 2;
     dom_document d;
     html_parser p;
-    if (!load_page(page, &d, &p)) return 2;
+    css_style st;
+    if (!load_page(page, &d, &p, &st)) return 2;
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
-    if (!write_page_snapshot(&d, &p, snap)) return 2;
-    int st = reason(&s, what, snap, goal, out);
+    if (!write_page_snapshot(&d, &p, &st, snap)) return 2;
+    int rc = reason(&s, what, snap, goal, out);
     print_file(out, "");
-    if (st != 0) return st;
+    if (rc != 0) return rc;
     if (apply) {
         int applied = 0, refused = 0;
         apply_batch(&d, out, &applied, &refused);
@@ -359,8 +401,9 @@ int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
+    if (argc >= 3 && strcmp(argv[1], "style") == 0) return cmd_style(argv[2]);
     if (argc >= 4 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "why") == 0)) return cmd_reason(argv[1], argv[2], argv[3], 0);
     if (argc >= 3 && strcmp(argv[1], "advise") == 0) return cmd_reason("advise", argv[2], 0, argc >= 4 && strcmp(argv[3], "--apply") == 0);
-    fprintf(stderr, "usage: ambitious loop | snapshot FILE | parse PAGE | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
+    fprintf(stderr, "usage: ambitious loop | snapshot FILE | parse PAGE | style PAGE | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
     return 2;
 }

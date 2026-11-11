@@ -103,6 +103,7 @@ ambm_ctype(M, enum(E), T) :- !, ambm_t(M, E, T).
 ambm_ctype(_, ref(_), uint32_t) :- !.
 ambm_ctype(_, atom(_), uint32_t) :- !.
 ambm_ctype(_, span(_), amb_span) :- !.
+ambm_ctype(_, xhandle(M2, R2), T) :- !, ambm_handle_t(M2, R2, T).
 
 ambm_rec_t(M, R, T) :- ambm_t(M, R, T).
 ambm_handle_t(M, R, T) :- ambm_t(M, R, R1), atom_concat(R1, '_h', T).
@@ -771,6 +772,8 @@ ambm_field_put(_, R, F, atom(P), A) :- !, format(atom(A), '~w_put(d, out, d->~w[
 ambm_field_put(_, R, F, span(P), A) :- !, format(atom(A), '~w_put(d, out, d->~w[i].~w);', [P, R, F]).
 ambm_field_put(M, R, F, ref(R2), A) :- !, ambm_handle_f(M, R2, Fn),
     format(atom(A), '{ uint32_t r = d->~w[i].~w; amb_put_ref(out, "~w", d->id, r, r && r < d->~w_len ? d->~w[r].gen : 0); }', [R, F, Fn, R2, R2]).
+ambm_field_put(_, R, F, xhandle(M2, R2), A) :- !, ambm_handle_f(M2, R2, Fn),
+    format(atom(A), 'amb_put_ref(out, "~w", d->~w[i].~w.doc, d->~w[i].~w.index, d->~w[i].~w.gen);', [Fn, R, F, R, F, R, F]).
 ambm_field_put(_, R, F, bool, A) :- !, format(atom(A), 'fputs(d->~w[i].~w ? "true" : "false", out);', [R, F]).
 ambm_field_put(_, R, F, f64, A) :- !, format(atom(A), 'fprintf(out, "%.17g", d->~w[i].~w);', [R, F]).
 ambm_field_put(_, R, F, _, A) :- format(atom(A), 'fprintf(out, "%lld", (long long)d->~w[i].~w);', [R, F]).

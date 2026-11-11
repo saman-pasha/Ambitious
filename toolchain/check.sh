@@ -54,7 +54,7 @@ int main(void) {
     return 0;
 }
 EOF
-  if timeout 120 "$AMB_CICILANG" --no-kb "$t/smoke.c" -o "$t/smoke" < /dev/null > "$t/build.log" 2>&1; then
+  if timeout 120 "$AMB_CICILANG" $AMB_CICILANG_FLAGS "$t/smoke.c" -o "$t/smoke" < /dev/null > "$t/build.log" 2>&1; then
     out=$("$t/smoke")
     [ "$out" = "ccllib 4 16" ] && ok cicilang "builds and runs a ccllib program (--no-kb)" || bad cicilang "the ccllib program printed: $out"
   else

@@ -162,3 +162,15 @@ neighbours.
 
    Ambitious's tree builder writes such a dispatch as an `if`/`else if` chain
    instead.
+9. **Without `--target`, cicilang compiles for the host CPU and every feature
+   it has** (`module/ccl_llvm.c`: `LLVMGetHostCPUName()`,
+   `LLVMGetHostCPUFeatures()`). On an AVX-512 machine, a `uint32_t` turned into
+   a `double` becomes `vcvtusi2sd`. Valgrind 3 cannot run it: the CSS test
+   stopped with `SIGILL` in `css_value_text`. A binary built this way also may
+   not run on a machine without those features.
+
+   Named, the target takes the arch's generic CPU, with no extra features and
+   the host's own headers and linker (`ccl_cross_target/2` is false for the
+   host's own triple). `toolchain/env.sh` therefore names this machine
+   (`AMB_TARGET`, from `uname`: `x86_64-linux-gnu` here). Every build passes
+   `AMB_CICILANG_FLAGS`, which is `--no-kb --target=$AMB_TARGET -I include`.

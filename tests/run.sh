@@ -20,7 +20,7 @@ mkdir -p "$OUT"
 red=0
 pass() { printf 'ok   %s\n' "$1"; }
 fail() { printf 'FAIL %s\n' "$1"; red=1; }
-CICILANG_FLAGS="--no-kb -I $AMB_ROOT/include"
+CICILANG_FLAGS=$AMB_CICILANG_FLAGS
 
 case "$1" in
 gen)

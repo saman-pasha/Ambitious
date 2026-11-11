@@ -90,6 +90,7 @@ ambs_arg_shape(Ds, R, field(F), Shape) :-
     ambc_field(Ds, R, F, T), ambs_type_shape(T, Shape).
 
 ambs_type_shape(ref(R), handle_or_none(R)) :- !.
+ambs_type_shape(xhandle(M, R), xhandle(M, R)) :- !.
 ambs_type_shape(enum(E), enum(E)) :- !.
 ambs_type_shape(atom(_), atom) :- !.
 ambs_type_shape(span(_), atom) :- !.

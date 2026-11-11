@@ -15,36 +15,49 @@ cocolog.
 
 ## What runs
 
-The first milestone is complete: the DOM vertical slice.
+Three modules, each declared by a contract and generated into C from it:
 
-- `contracts/dom.pl` declares the DOM: types, ownership, operations and their
+- **DOM** (`contracts/dom.pl`, `src/dom/`): the first milestone, the vertical
+  slice. The contract declares types, ownership, operations and their
   preconditions, invariants, events, and the facts it exposes to reasoning.
-- At C read time, `include/amb.pl`'s macros turn it into C:
+  At C read time, `include/amb.pl`'s macros turn it into C:
   - the types and the store type, which is autodropped;
   - handles checked by generation;
   - the precondition checks and the intrusive lists;
   - the invariant checks;
   - the fact exporter and the request dispatcher.
 
-  The hand-written operations in `src/dom/dom.c` stand on that interface.
-- The engine exports a snapshot of the live document. The reasoner
-  (`prolog/amb/reason.pl`, cocolog, a process of its own) validates the
-  snapshot against the schema generated from the same contract, then answers
-  queries, explains its answers with proofs, and proposes operations.
-- The engine runs a proposed operation only through its own dispatcher, held
-  to the contract.
+  The hand-written operations stand on that interface.
+- **HTML** (`contracts/html.pl`, `src/html/`): the WHATWG tokenizer and tree
+  builder. Bytes become a DOM, and parse errors become facts. It passes 1,374
+  of the 1,721 html5lib tree-construction cases it runs.
+- **CSS** (`contracts/css.pl`, `src/css/`): the user agent's sheet, `<style>`,
+  style attributes and presentational hints, Selectors 4 and the cascade.
+  Each element's computed values are facts that keep their winning
+  declaration.
+
+The engine exports a snapshot of a page: the document, its parse and its
+style. The reasoner (`prolog/amb/reason.pl`, cocolog, a process of its own)
+validates the snapshot against the schemas generated from the same contracts.
+It then answers queries, explains its answers with proofs, and proposes
+operations. The engine runs a proposed operation only through its own
+dispatcher, held to the contract.
 
 ```console
 $ bin/ambitious loop
-1. the document, at revision 36, 17 nodes: ...
-2. the snapshot, checked by the reasoner against the schema:
-cross-check: descendants of 17 nodes, the reasoner's and the C traversal's: agree
-3. the reasoner's advice, from the snapshot alone:
-   amb_request(1, 36, set_attribute(n(1,7,0),alt,'The Ambitious logo')).
-4. the requests, validated and applied by the engine as one batch: 3 applied, 0 refused
-5. what changed, the reasoner's diff of the two snapshots: ...
+...
 6. the first batch again, against the document that moved on: 0 applied, 3 refused
 GREEN: the loop, 0 failure(s)
+$ bin/ambitious query tests/pages/style.html "dom_element(N, p), css_explain(N, color, X)"
+N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
+N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
+...
+$ bin/ambitious query tests/pages/style.html "dom_attr(N, id, intro), css_lost(N, color, D, Why)"
+N = n(1,18,0), D = de(1,226,0), Why = origin_or_importance(lost('style attribute'),won('important author'))
+...
+$ bin/ambitious advise tests/pages/style.html
+amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
+amb_diag(unused_rule, ru(1,149,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
 ```
 
 ## Build and test
@@ -52,9 +65,12 @@ GREEN: the loop, 0 failure(s)
 ```sh
 sh toolchain/bootstrap.sh       # the toolchain, once (see toolchain/README.md)
 make                            # the modules and build/ambitious
-make test                       # the gates: contract gen exec safe reason integ
+make test                       # the gates: contract gen exec safe reason html integ
 bin/ambitious loop              # the DOM vertical slice end to end
-tools/amb doc dom               # the DOM contract's reference
+bin/ambitious parse PAGE        # an HTML file parsed: its tree and parse errors
+bin/ambitious style PAGE        # its elements' computed styles
+bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
+tools/amb doc css               # a contract's reference
 ```
 
 Set `AMB_DEPS` to the directory that holds the four checkouts (cicili,
@@ -67,6 +83,6 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `shell/` |
-| `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ integ/`, run by `make test` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `shell/` |
+| `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/ pages/`, run by `make test` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
