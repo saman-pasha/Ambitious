@@ -1,0 +1,11 @@
+-- the geometry page's console, against Chromium's:
+the same 46 lines
+-- the thrash page's console, against Chromium's:
+the same 2 lines
+-- the cascades and layouts each script's reads forced:
+R = sr(1,1,0), N = 6
+R = sr(1,1,0), N = 1
+R = sr(1,2,0), N = 12
+-- what the reasoner says of them:
+amb_diag(layout_thrash, sr(1,2,0), 'the script #2 (inline) made the cascade and the layout run 12 times, each read of style or geometry after a change to the page: read first, then write').
+0

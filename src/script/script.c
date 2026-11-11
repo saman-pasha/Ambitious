@@ -37,14 +37,26 @@ amb_implementation(script);
 
 /* the CSS module's matcher for a script's selector (src/css/css.c) */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n);
+/* the view a script reads, a cascade and a layout run when it asks (src/script/view.c):
+   made up to date; whether an element is rendered; its computed value of a property by
+   CSS's name (0: the cascade computes no such property); its border box, its borders
+   (top, right, bottom, left) and its client rects, in page px; the runs made so far */
+void script_view_update(struct js_host *h);
+int script_view_rendered(struct js_host *h, uint32_t x);
+int script_view_style(struct js_host *h, uint32_t x, const char *name, size_t n, vector<char> *out);
+int script_view_border_box(struct js_host *h, uint32_t x, double *r);
+int script_view_borders(struct js_host *h, uint32_t x, double *r);
+uint32_t script_view_rects(struct js_host *h, uint32_t x, double *r, uint32_t max);
+uint32_t script_view_runs(const struct js_host *h);
+uint32_t script_view_props(void);
 
 /* ---- the host's kinds and names ---- */
 
 /* a host object's kind, in its c slot */
-enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST };
+enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST, HK_COMPUTED };
 /* its prototypes, in the host's protos */
 enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_NODELIST,
-       HP_HTMLCOLLECTION, HP_N };
+       HP_HTMLCOLLECTION, HP_DOMRECT, HP_RECTLIST, HP_N };
 
 /* the names the host answers for, interned once (vm->hatoms: these first, then the
    reverse map from an atom to its name's number plus one) */
@@ -59,7 +71,9 @@ enum {
     HA_TIMESTAMP, HA_ISTRUSTED, HA_DETAIL, HA_CSSTEXT, HA_SELECTED, HA_HTMLFOR, HA_REL, HA_LENGTH, HA_CAPTURE,
     HA_ONCE, HA_LOCALNAME, HA_WINDOW, HA_DOCUMENT, HA_SELF, HA_READONLY, HA_REQUIRED, HA_ACTION, HA_METHOD,
     HA_NAMESPACEURI, HA_HASH, HA_VALUE_STATE, HA_FORMS, HA_IMAGES, HA_LINKS, HA_ANCHORS, HA_SCRIPTS, HA_ELEMENTS,
-    HA_OPTIONS, HA_ROWS, HA_CELLS, HA_TBODIES, HA_N
+    HA_OPTIONS, HA_ROWS, HA_CELLS, HA_TBODIES, HA_OFFSETWIDTH, HA_OFFSETHEIGHT, HA_OFFSETTOP, HA_OFFSETLEFT,
+    HA_OFFSETPARENT, HA_CLIENTWIDTH, HA_CLIENTHEIGHT, HA_CLIENTTOP, HA_CLIENTLEFT, HA_SCROLLTOP, HA_SCROLLLEFT,
+    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_N
 };
 static const char *const sh_names[HA_N] = {
     "textContent", "innerHTML", "outerHTML", "innerText", "id", "className", "classList", "tagName",
@@ -72,7 +86,9 @@ static const char *const sh_names[HA_N] = {
     "timeStamp", "isTrusted", "detail", "cssText", "selected", "htmlFor", "rel", "length", "capture",
     "once", "localName", "window", "document", "self", "readOnly", "required", "action", "method",
     "namespaceURI", "hash", "\001value", "forms", "images", "links", "anchors", "scripts", "elements",
-    "options", "rows", "cells", "tBodies" };
+    "options", "rows", "cells", "tBodies", "offsetWidth", "offsetHeight", "offsetTop", "offsetLeft",
+    "offsetParent", "clientWidth", "clientHeight", "clientTop", "clientLeft", "scrollTop", "scrollLeft",
+    "scrollWidth", "scrollHeight" };
 
 /* the host's natives' numbers, from JS_HOST_NATIVES */
 enum {
@@ -83,7 +99,7 @@ enum {
     H_CREATE_TEXT, H_CREATE_COMMENT, H_CL_ADD, H_CL_REMOVE, H_CL_TOGGLE, H_CL_CONTAINS, H_CL_REPLACE, H_CL_ITEM,
     H_CL_TOSTRING, H_ST_SET, H_ST_GET, H_ST_REMOVE, H_EV_PREVENT, H_EV_STOP, H_EV_STOP_NOW, H_EVENT, H_CUSTOM_EVENT,
     H_RAF, H_CAF, H_COMPUTED, H_ALERT, H_ILLEGAL, H_WIN_ADD, H_WIN_REMOVE, H_WIN_DISPATCH, H_INSERT_ADJ_HTML,
-    H_ADOPT_TEXT, H_LIST_ITEM, H_LIST_NAMED, H_BY_NAME
+    H_ADOPT_TEXT, H_LIST_ITEM, H_LIST_NAMED, H_BY_NAME, H_CLIENT_RECTS, H_RECT_JSON
 };
 
 /* an event's flags, in its a slot */
@@ -930,6 +946,97 @@ uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
 
 /* ---- the host's hooks ---- */
 
+/* ---- the view: computed values and geometry (src/script/view.c) ---- */
+
+/* the view made up to date for a script's read: a cascade and a layout it forced are
+   counted to the script whose code reads */
+static void sh_view(js_vm *vm) {
+    struct js_host *h = vm->host;
+    uint32_t before = script_view_runs(h);
+    script_view_update(h);
+    uint32_t r = vm->cur_run;
+    if (script_view_runs(h) != before && r && r < h->rt->run_len && h->rt->run[r].live) h->rt->run[r].layouts++;
+}
+/* a DOMRect of x, y, width and height, its top, right, bottom and left derived */
+static jv sh_rect(js_vm *vm, const double *v) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->host->protos[HP_DOMRECT]);
+    static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
+    double x = v[0], y = v[1], w = v[2], hh = v[3];
+    double all[8] = { x, y, w, hh, hh < 0 ? y + hh : y, w < 0 ? x : x + w, hh < 0 ? y : y + hh, w < 0 ? x + w : x };
+    for (size_t i = 0; i < 8; i++) js_define(vm, r, js_atom_ascii(vm, fs[i]), jv_num(all[i] == 0 ? 0 : all[i]), 0);
+    return jv_obj(r);
+}
+/* the bounding rect of an element's client rects (CSSOM View 6.1): zeros for none; the
+   first when every one is empty; else the smallest that holds every one not empty */
+static void sh_bounding(const double *r, uint32_t n, double *out) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (!n) return;
+    int any = 0;
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        const double *q = r + 4 * i;
+        if (q[2] == 0 || q[3] == 0) continue;
+        if (!any || q[0] < x0) x0 = q[0];
+        if (!any || q[1] < y0) y0 = q[1];
+        if (!any || q[0] + q[2] > x1) x1 = q[0] + q[2];
+        if (!any || q[1] + q[3] > y1) y1 = q[1] + q[3];
+        any = 1;
+    }
+    if (!any) { for (int k = 0; k < 4; k++) out[k] = r[k]; return; }
+    out[0] = x0; out[1] = y0; out[2] = x1 - x0; out[3] = y1 - y0;
+}
+#define SH_RECTS_MAX 256
+static double sh_round(double v) { return floor(v + 0.5); }
+/* a length's pixels as an integer property gives them: its end's and its start's rounded */
+static double sh_snap(double at, double size) { return sh_round(at + size) - sh_round(at); }
+
+/* the element's offset parent (CSSOM View 7): none for the root, the body, an element not
+   rendered; else its nearest ancestor that is a td, a th, a table or the body */
+static uint32_t sh_offset_parent(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    if (!script_view_rendered(h, x) || sh_named(d, x, "body") || x == sh_elem_child(d, 1, 0)) return 0;
+    for (uint32_t p = d->node[x].parent; p && p != 1; p = d->node[p].parent)
+        if (sh_named(d, p, "td") || sh_named(d, p, "th") || sh_named(d, p, "table") || sh_named(d, p, "body")) return p;
+    return 0;
+}
+/* offsetLeft, offsetTop, offsetWidth, offsetHeight (which 0 to 3): the first box's border
+   edge, from the offset parent's padding edge (or the page's, for the body or none), and
+   the size of every box's bounds */
+static double sh_offset(js_vm *vm, uint32_t x, uint32_t which) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    double r[4 * SH_RECTS_MAX], b[4];
+    uint32_t n = script_view_rects(h, x, r, SH_RECTS_MAX);
+    if (!n) return 0;
+    if (n > SH_RECTS_MAX) n = SH_RECTS_MAX;
+    sh_bounding(r, n, b);
+    if (which == 2) return sh_snap(b[0], b[2]);
+    if (which == 3) return sh_snap(b[1], b[3]);
+    if (sh_named(d, x, "body")) return 0;
+    uint32_t op = sh_offset_parent(vm, x);
+    double base = 0, pb[4], pbr[4];
+    if (op && !sh_named(d, op, "body") && script_view_border_box(h, op, pb) && script_view_borders(h, op, pbr))
+        base = which == 0 ? pb[0] + pbr[3] : pb[1] + pbr[0];
+    return sh_round((which == 0 ? r[0] : r[1]) - base);
+}
+/* clientLeft, clientTop, clientWidth, clientHeight (which 0 to 3): the borders' widths and
+   the padding box's size; the viewport's for the root element; 0 for an inline element */
+static double sh_client(js_vm *vm, uint32_t x, uint32_t which) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    double bb[4], br[4];
+    if (!script_view_border_box(h, x, bb) || !script_view_borders(h, x, br)) return 0;
+    if (x == sh_elem_child(d, 1, 0) && which >= 2) return which == 2 ? h->view_w : h->view_h;
+    if (which == 0) return sh_round(br[3]);
+    if (which == 1) return sh_round(br[0]);
+    if (which == 2) return sh_snap(bb[0] + br[3], bb[2] - br[1] - br[3]);
+    return sh_snap(bb[1] + br[0], bb[3] - br[0] - br[2]);
+}
+
 /* an element's reflected attribute: its value, or "" */
 static jv sh_attr_value(js_vm *vm, const dom_document *d, uint32_t x, const char *name) {
     uint32_t at = sh_attr_z(d, x, name);
@@ -1354,6 +1461,28 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
             return jv_num(f ? 0 : -1);
         }
         break;
+    case HA_OFFSETPARENT: if (el) return sh_wrap(vm, sh_offset_parent(vm, x)); break;
+    case HA_OFFSETLEFT: if (el) return jv_num(sh_offset(vm, x, 0)); break;
+    case HA_OFFSETTOP: if (el) return jv_num(sh_offset(vm, x, 1)); break;
+    case HA_OFFSETWIDTH: if (el) return jv_num(sh_offset(vm, x, 2)); break;
+    case HA_OFFSETHEIGHT: if (el) return jv_num(sh_offset(vm, x, 3)); break;
+    case HA_CLIENTLEFT: if (el) return jv_num(sh_client(vm, x, 0)); break;
+    case HA_CLIENTTOP: if (el) return jv_num(sh_client(vm, x, 1)); break;
+    case HA_CLIENTWIDTH: if (el) return jv_num(sh_client(vm, x, 2)); break;
+    case HA_CLIENTHEIGHT: if (el) return jv_num(sh_client(vm, x, 3)); break;
+    case HA_SCROLLTOP: case HA_SCROLLLEFT: if (el) return jv_num(0); break;
+    case HA_SCROLLWIDTH: case HA_SCROLLHEIGHT:
+        /* the viewport does not scroll: the root's is the page's, at least the viewport's; an
+           element's its padding box's */
+        if (el && x == sh_elem_child(d, 1, 0)) {
+            double bb[4];
+            sh_view(vm);
+            double v = ha == HA_SCROLLWIDTH ? vm->host->view_w : vm->host->view_h;
+            if (script_view_border_box(vm->host, x, bb)) { double e = ha == HA_SCROLLWIDTH ? bb[0] + bb[2] : bb[1] + bb[3]; if (e > v) v = sh_round(e); }
+            return jv_num(v);
+        }
+        if (el) return jv_num(sh_client(vm, x, ha == HA_SCROLLWIDTH ? 2 : 3));
+        break;
     case HA_CLASSLIST: if (el) return sh_host_obj(vm, HK_CLASSLIST, HP_CLASSLIST, x); break;
     case HA_STYLE: if (el) return sh_host_obj(vm, HK_STYLE, HP_STYLE, x); break;
     case HA_DATASET: if (el) return sh_host_obj(vm, HK_DATASET, HP_DATASET, x); break;
@@ -1380,6 +1509,23 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         return JV_UNDEF;
     }
     if (kind == HK_LIST) return sh_lc_prop(vm, o, atom, ha1, handled);
+    if (kind == HK_COMPUTED) {
+        /* a computed style's property: its resolved value, by its name camel-cased or as CSS
+           writes it; the empty string for a property the cascade does not compute */
+        uint32_t x = sh_owner(vm, o);
+        if (!x) { *handled = 1; return JV_HOLE; }
+        uint32_t idx;
+        if (js_key_is_sym(atom) || js_atom_index(vm, atom, &idx) || js_has(vm, vm->objs[o].proto, atom)) return JV_UNDEF;
+        *handled = 1;
+        if (ha1 == HA_CSSTEXT + 1) return jv_str(A_EMPTY);
+        if (ha1 == HA_LENGTH + 1) return jv_num(script_view_props());
+        vector<char> name, prop, v;
+        js_str_to_utf8(vm, atom, &name);
+        sh_css_name(&name, &prop);
+        sh_view(vm);
+        script_view_style(vm->host, x, data(prop), len(prop), &v);
+        return sh_str(vm, data(v), len(v));
+    }
     if (kind == HK_NODE) {
         uint32_t x = sh_node(vm, jv_obj(o), 0);
         if (!x) { *handled = 1; return JV_HOLE; }
@@ -1464,6 +1610,19 @@ int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
     uint32_t kind = vm->objs[o].c;
     uint32_t ha1 = sh_name_of(vm, atom);
     dom_document *d = vm->host->d;
+    /* a computed style is read-only */
+    if (kind == HK_COMPUTED) {
+        uint32_t idx;
+        if (js_key_is_sym(atom) || js_atom_index(vm, atom, &idx) || js_has(vm, vm->objs[o].proto, atom)) return 1;
+        vector<char> name;
+        js_str_to_utf8(vm, atom, &name);
+        push_back(name, 0);
+        char msg[300];
+        snprintf(msg, sizeof msg, "Failed to set the '%s' property on 'CSSStyleDeclaration': These styles are computed, and therefore the '%s' property is read-only.", data(name), data(name));
+        *handled = 1;
+        sh_dom_error(vm, "NoModificationAllowedError", msg);
+        return 0;
+    }
     /* a collection's items and length have no setter: a write to one does nothing */
     if (kind == HK_LIST) {
         uint32_t idx;
@@ -1684,10 +1843,24 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         return ev;
     }
     if (id == H_COMPUTED) {
-        /* the inline style alone: what a script reads most (display, a color it set) */
-        uint32_t x = sh_node(vm, a0, 1);
-        if (!x) return JV_HOLE;
-        return sh_host_obj(vm, HK_STYLE, HP_STYLE, x);
+        /* the element's resolved values, read when a property is (CSSOM 9.1): live */
+        uint32_t x = sh_node(vm, a0, 0);
+        if (vm->throwing) return JV_HOLE;
+        if (!x || !sh_is_elem(d, x))
+            return js_throw_msg(vm, vm->type_error_proto, "Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.");
+        return sh_host_obj(vm, HK_COMPUTED, HP_STYLE, x);
+    }
+    if (id == H_RECT_JSON) {
+        /* a DOMRect's toJSON: its eight numbers */
+        uint32_t o = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+        static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
+        for (size_t i = 0; i < 8; i++) {
+            uint32_t at = js_atom_ascii(vm, fs[i]);
+            jv v = js_get(vm, thisv, at);
+            if (vm->throwing) return JV_HOLE;
+            js_define(vm, o, at, v, 0);
+        }
+        return jv_obj(o);
     }
     /* an event's */
     if (id == H_EV_PREVENT || id == H_EV_STOP || id == H_EV_STOP_NOW) {
@@ -1755,6 +1928,24 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         return JV_TRUE;
     }
     /* a style's */
+    if ((id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) && jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_HOST &&
+        vm->objs[jv_idx(thisv)].c == HK_COMPUTED) {
+        uint32_t x = sh_owner(vm, jv_idx(thisv));
+        if (!x) return JV_HOLE;
+        vector<char> name, v;
+        if (!sh_utf8(vm, a0, &name)) return JV_HOLE;
+        if (id != H_ST_GET) {
+            push_back(name, 0);
+            char msg[300];
+            snprintf(msg, sizeof msg, "Failed to execute '%s' on 'CSSStyleDeclaration': These styles are computed, and therefore the '%s' property is read-only.",
+                     id == H_ST_SET ? "setProperty" : "removeProperty", data(name));
+            return sh_dom_error(vm, "NoModificationAllowedError", msg);
+        }
+        for (size_t i = 0; i < len(name); i++) if (name[i] >= 'A' && name[i] <= 'Z') name[i] = (char)(name[i] + 32);
+        sh_view(vm);
+        script_view_style(vm->host, x, data(name), len(name), &v);
+        return sh_str(vm, data(v), len(v));
+    }
     if (id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].c != HK_STYLE) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
         uint32_t x = sh_owner(vm, jv_idx(thisv));
@@ -1995,12 +2186,17 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
     }
     case H_CLICK: sh_click_at(vm, x, 0); return JV_UNDEF;
     case H_FOCUS: case H_BLUR: return JV_UNDEF;
-    case H_RECT: {
-        /* layout runs after the scripts: a box of no size */
-        uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-        static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
-        for (size_t i = 0; i < 8; i++) js_define(vm, r, js_atom_ascii(vm, fs[i]), jv_num(0), 0);
-        return jv_obj(r);
+    case H_RECT: case H_CLIENT_RECTS: {
+        /* the cascade and the layout as the page is now (run if the DOM changed since) */
+        sh_view(vm);
+        double r[4 * SH_RECTS_MAX], b[4];
+        uint32_t n = script_view_rects(vm->host, x, r, SH_RECTS_MAX);
+        if (n > SH_RECTS_MAX) n = SH_RECTS_MAX;
+        if (id == H_RECT) { sh_bounding(r, n, b); return sh_rect(vm, b); }
+        uint32_t a = js_array_new(vm, 0);
+        js_set_proto(vm, a, vm->host->protos[HP_RECTLIST]);
+        for (uint32_t i = 0; i < n; i++) { jv q = sh_rect(vm, r + 4 * i); js_array_push(vm, a, q); }
+        return jv_obj(a);
     }
     case H_INSERT_ADJ_HTML: {
         vector<char> where, html;
@@ -2065,6 +2261,8 @@ static void sh_ready(js_vm *vm) {
     vm->host->protos[HP_EVENT] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->host->protos[HP_NODELIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->host->protos[HP_HTMLCOLLECTION] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_DOMRECT] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_RECTLIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->host_kinds = HP_N;
     sh_method(vm, node, "appendChild", H_APPEND_CHILD, 1);
     sh_method(vm, node, "insertBefore", H_INSERT_BEFORE, 2);
@@ -2098,6 +2296,7 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, elem, "focus", H_FOCUS, 0);
     sh_method(vm, elem, "blur", H_BLUR, 0);
     sh_method(vm, elem, "getBoundingClientRect", H_RECT, 0);
+    sh_method(vm, elem, "getClientRects", H_CLIENT_RECTS, 0);
     sh_method(vm, elem, "insertAdjacentHTML", H_INSERT_ADJ_HTML, 2);
     sh_method(vm, docp, "getElementById", H_BY_ID, 1);
     sh_method(vm, docp, "createElement", H_CREATE_ELEMENT, 1);
@@ -2146,6 +2345,13 @@ static void sh_ready(js_vm *vm) {
     sh_interface(vm, "DOMTokenList", H_ILLEGAL, cl);
     sh_interface(vm, "CSSStyleDeclaration", H_ILLEGAL, sp);
     sh_interface(vm, "NodeList", H_ILLEGAL, nlp);
+    /* DOMRect, and getClientRects' list of them: an array of DOMRectList's prototype */
+    uint32_t drp = vm->host->protos[HP_DOMRECT], rlp = vm->host->protos[HP_RECTLIST];
+    sh_method(vm, drp, "toJSON", H_RECT_JSON, 0);
+    sh_method(vm, rlp, "item", H_LIST_ITEM, 1);
+    js_define(vm, rlp, JS_KEY_ITERATOR, values, JS_SHAPE_HIDDEN);
+    sh_interface(vm, "DOMRect", H_ILLEGAL, drp);
+    sh_interface(vm, "DOMRectList", H_ILLEGAL, rlp);
     sh_interface(vm, "HTMLCollection", H_ILLEGAL, hcp);
     sh_interface(vm, "Event", H_EVENT, ep);
     uint32_t cep = js_obj_new(vm, JK_PLAIN, ep);
@@ -2164,8 +2370,11 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, g, "cancelAnimationFrame", H_CAF, 1);
     sh_method(vm, g, "getComputedStyle", H_COMPUTED, 1);
     sh_method(vm, g, "alert", H_ALERT, 1);
-    js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(800), JS_SHAPE_HIDDEN);
-    js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(600), JS_SHAPE_HIDDEN);
+    js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
+    js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(h->view_h), JS_SHAPE_HIDDEN);
+    /* the viewport does not scroll */
+    static const char *const scrolls[] = { "scrollX", "scrollY", "pageXOffset", "pageYOffset" };
+    for (size_t i = 0; i < 4; i++) js_define(vm, g, js_atom_ascii(vm, scrolls[i]), jv_num(0), JS_SHAPE_HIDDEN);
     js_define(vm, g, js_atom_ascii(vm, "devicePixelRatio"), jv_num(1), JS_SHAPE_HIDDEN);
     /* location: the page's URL */
     uint32_t loc = js_obj_new(vm, JK_PLAIN, vm->object_proto);

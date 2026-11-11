@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Computed style and geometry</title>
+<style>
+  body { font-family: Georgia, 'DejaVu Serif', serif; color: #333; }
+  #box { width: 200px; height: 50px; margin: 10px auto; padding: 5px 7px; border: 3px solid red; background: #eef; }
+  #half { box-sizing: border-box; width: 50%; height: 40px; padding: 4px 6%; border: 2px solid blue; margin-left: 20px; }
+  .row { height: 30px; margin: 0 0 4px 0; }
+  .ib { display: inline-block; width: 100px; height: 30px; }
+  .hidden { display: none; }
+  #em { font-size: 20px; margin: 1em 2em; height: 10px; line-height: 1.5; font-weight: bold; font-style: italic; }
+  #outer { padding: 10px; border: 1px solid; height: 60px; }
+  #inner { margin: 5px 15px; height: 20px; border-left: 4px solid green; }
+  table { margin: 0; }
+  td { width: 60px; height: 20px; padding: 3px; }
+  ul { margin: 0; height: 20px; }
+  li { height: 20px; }
+  #font { font: italic bold 12px/30px "Trebuchet MS", Arial, sans-serif; height: 30px; }
+  #mono { font-family: monospace; height: 16px; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="half"></div>
+<div class="row"><span class="ib" id="ib1"></span><span class="ib" id="ib2"></span></div>
+<div id="em"></div>
+<div id="outer"><div id="inner"></div></div>
+<table id="t"><tr><td id="c1"></td><td id="c2"></td></tr></table>
+<ul id="list"><li id="li"></li></ul>
+<div id="font"></div>
+<div id="mono"></div>
+<div class="hidden" id="gone"><div id="under"></div></div>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  function r(e) { var b = e.getBoundingClientRect(); return [b.x, b.y, b.width, b.height, b.top, b.right, b.bottom, b.left].join(','); }
+  function off(e) { return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, e.offsetParent ? e.offsetParent.id || e.offsetParent.tagName : null].join(','); }
+  function cli(e) { return [e.clientLeft, e.clientTop, e.clientWidth, e.clientHeight].join(','); }
+  function cs(e, props) { var s = getComputedStyle(e); return props.map(function (q) { return s.getPropertyValue(q); }).join(' | '); }
+  var $ = function (id) { return document.getElementById(id); };
+  var sizes = ['width', 'height', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding-top', 'padding-right', 'padding-left', 'border-top-width', 'border-left-width'];
+  ['box', 'half', 'ib1', 'ib2', 'em', 'outer', 'inner', 't', 'c1', 'c2', 'list', 'li', 'font', 'mono'].forEach(function (id) {
+    var e = $(id);
+    p(id, r(e) + ' | offset ' + off(e) + ' | client ' + cli(e) + ' | rects ' + e.getClientRects().length);
+    p(id + ' sizes', cs(e, sizes));
+  });
+  p('colours', cs($('box'), ['color', 'background-color', 'border-top-color', 'border-left-color']) + ' / ' + cs($('half'), ['background-color', 'border-bottom-color']));
+  p('fonts', cs($('em'), ['font-size', 'font-weight', 'font-style', 'line-height', 'font-family']));
+  p('font shorthand', cs($('font'), ['font-size', 'font-weight', 'font-style', 'line-height', 'font-family']));
+  p('font family', cs($('mono'), ['font-family']) + ' / ' + cs(document.body, ['font-family']) + ' / ' + cs($('inner'), ['font-family']) + ' / ' + cs(document.documentElement, ['font-family']));
+  p('keywords', cs($('half'), ['display', 'box-sizing', 'white-space', 'max-width', 'list-style-type', 'text-decoration']) + ' / ' + cs($('li'), ['display', 'list-style-type']) + ' / ' + cs($('ib1'), ['display']));
+  p('display none', r($('gone')) + ' | ' + off($('under')) + ' | ' + cli($('gone')) + ' | ' + $('under').getClientRects().length + ' | ' + cs($('under'), ['display', 'width', 'margin-left']));
+  var s = getComputedStyle($('box'));
+  p('names', s.backgroundColor + ' | ' + s.marginTop + ' | ' + s['margin-top'] + ' | ' + s.getPropertyValue('MARGIN-TOP') + ' | ' + typeof s.length + ' | ' + (s instanceof CSSStyleDeclaration));
+  p('body and root', r(document.body) + ' | ' + off(document.body) + ' | ' + cli(document.body) + ' | ' + cli(document.documentElement) + ' | ' + off(document.documentElement));
+  p('window', innerWidth + ' ' + innerHeight + ' ' + scrollX + ' ' + scrollY + ' ' + document.documentElement.scrollTop);
+  var b = $('box').getBoundingClientRect();
+  p('a DOMRect', (b instanceof DOMRect) + ' ' + JSON.stringify(b) + ' ' + JSON.stringify(b.toJSON()));
+  var det = document.createElement('div');
+  p('detached', JSON.stringify(getComputedStyle(det).width) + ' ' + r(det) + ' ' + det.offsetWidth + ' ' + det.offsetParent);
+
+  /* live: a read after a change sees it */
+  $('box').style.width = '300px';
+  p('after a style change', s.width + ' ' + $('box').offsetWidth + ' ' + s.marginLeft);
+  $('box').className = 'hidden';
+  p('after a class change', s.display + ' ' + s.width + ' ' + $('box').offsetHeight + ' ' + $('half').offsetTop);
+  $('box').className = '';
+  var add = document.createElement('div');
+  add.style.height = '25px';
+  document.body.insertBefore(add, $('half'));
+  p('after an insertion', add.offsetTop + ' ' + add.offsetHeight + ' ' + $('half').offsetTop + ' ' + getComputedStyle(add).width);
+  var st = document.createElement('style');
+  st.textContent = '#half { height: 44px }';
+  document.head.appendChild(st);
+  p('after a style sheet', $('half').offsetHeight + ' ' + getComputedStyle($('half')).height);
+  try { s.width = '1px'; p('set', 'no error'); } catch (e) { p('set', e.name); }
+  try { s.setProperty('width', '1px'); } catch (e) { p('setProperty', e.name); }
+  try { getComputedStyle(document.createTextNode('x')); } catch (e) { p('a text node', e.name); }
+</script>
+</body>
+</html>

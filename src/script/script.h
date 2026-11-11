@@ -26,6 +26,18 @@ typedef struct sh_list {
     uint32_t n, ci, cn, spare;       /* its length (~0: unknown), the last item read and its node */
 } sh_list;
 
+/* the view a script reads (getComputedStyle, getBoundingClientRect ...): what a cascade
+   and a layout run when a script asked made, kept until the DOM changes
+   (src/script/view.c). A box: its element, its content box in page px, its margins,
+   borders and paddings (top, right, bottom, left) */
+typedef struct sh_vbox { uint32_t node, kind; double x, y, w, h, m[4], b[4], p[4]; } sh_vbox;
+/* a fragment of a line: its node (a text, an atomic or an inline element), its line */
+typedef struct sh_vfrag { uint32_t node, line; double x, y, w, h; } sh_vfrag;
+/* a computed value of a style: its property (the CSS module's), unit and number, how it
+   came (declared, inherited, initial), its text in the view's own; a style's values are a
+   run ended by one of prop ~0 */
+typedef struct sh_vval { uint32_t prop, unit, how, spare; double num; uint32_t off, len; } sh_vval;
+
 /* the page's scripts, each <script> in document order (its text, or its src as the
    loader fetched it), then DOMContentLoaded and load, then its timers as far as horizon
    ms of virtual time: the number of scripts run. A page without scripts makes no VM. */
@@ -64,6 +76,17 @@ struct js_host {
     size_t log_pos;
     vector<sh_list> lists;            /* the live collections */
     vector<char> keys;                /* their keys' text */
+    /* the view (src/script/view.c): the viewport, the DOM's revision it was made at (0:
+       never), how many times a script's read made it anew */
+    double view_w, view_h;
+    uint64_t view_rev;
+    uint32_t view_runs, view_ok;
+    vector<uint32_t> vstyle;          /* a node's style: its first value in vvals, plus 1 (0: none) */
+    vector<sh_vval> vvals;
+    vector<char> vtext;
+    vector<uint32_t> vbox;            /* a node's box in vboxes, plus 1 (0: none) */
+    vector<sh_vbox> vboxes;
+    vector<sh_vfrag> vfrags;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -72,9 +95,12 @@ struct js_host {
     memset(&(vm), 0, sizeof(vm)); \
     memset(&(h), 0, sizeof(h)); \
     (h).d = &(d); (h).nt = &(nt); (h).rt = &(sr); (h).tree_ver = 1; (h).attr_ver = 1; \
+    (h).view_w = 800; (h).view_h = 600; \
     (vm).host = &(h); \
 } while (0)
 /* the host's own vectors freed: a struct's are not autodropped */
-#define SCRIPT_HOST_DROP(h) vector_sh_list_drop(&(h).lists); vector_char_drop(&(h).keys)
+#define SCRIPT_HOST_DROP(h) vector_sh_list_drop(&(h).lists); vector_char_drop(&(h).keys); \
+    vector_uint32_t_drop(&(h).vstyle); vector_sh_vval_drop(&(h).vvals); vector_char_drop(&(h).vtext); \
+    vector_uint32_t_drop(&(h).vbox); vector_sh_vbox_drop(&(h).vboxes); vector_sh_vfrag_drop(&(h).vfrags)
 
 #endif

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Layout read between writes</title>
+<style> .bar { height: 10px; background: #8ac; } </style>
+</head>
+<body>
+<div id="bars"></div>
+<script>
+  /* one script reads first and writes after: the layout runs once */
+  var bars = document.getElementById('bars');
+  for (var i = 0; i < 12; i++) { var b = document.createElement('div'); b.className = 'bar'; bars.appendChild(b); }
+  var widths = [];
+  for (var i = 0; i < bars.children.length; i++) widths.push(bars.children[i].offsetWidth);
+  for (var i = 0; i < bars.children.length; i++) bars.children[i].style.width = (widths[i] / 2 - i * 10) + 'px';
+  console.log('read then write: ' + widths.length + ' widths of ' + widths[0]);
+</script>
+<script>
+  /* this one reads each bar's width after writing the one before: twelve layouts */
+  var total = 0;
+  for (var i = 0; i < bars.children.length; i++) {
+    bars.children[i].style.height = (10 + i) + 'px';
+    total += bars.children[i].offsetHeight;
+  }
+  console.log('interleaved: ' + total + ' px in all');
+</script>
+</body>
+</html>

@@ -9,7 +9,7 @@
 %% from settling. No clause here cuts: amb_why/2 proves them clause by clause.
 
 :- dynamic script_run/4, script_url/2, script_console/3, script_error/3, script_listener/3,
-   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2.
+   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -47,6 +47,11 @@ script_rules_short_text(N, T) :- dom_text_content(N, T), atom_length(T, L), L > 
 
 script_unsettled(T, R) :- script_timer(T, _, _, pending), script_timer_of(T, R).
 
+%% a read of style or geometry after a change to the DOM runs the cascade and the layout
+%% again (a forced, synchronous layout): a script that does it many times interleaves its
+%% reads with its writes, where reading first and writing after would run them once
+script_layout_thrash(R, N) :- script_forced_layout(R, N), N >= 10.
+
 %% ---- what the reasoner says of a page's scripts ------------------------------------
 
 script_diag(script_failed, R, Text) :-
@@ -64,6 +69,10 @@ script_diag(unsettled_timer, T, Text) :-
     ->  format(atom(Text), 'an interval of ~d ms set by the script ~w is never cleared: the page never comes to rest', [Delay, Where])
     ;   format(atom(Text), 'a timeout of ~d ms set by the script ~w had not fired when the page came to rest', [Delay, Where])
     ).
+
+script_diag(layout_thrash, R, Text) :-
+    script_layout_thrash(R, N), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w made the cascade and the layout run ~d times, each read of style or geometry after a change to the page: read first, then write', [Where, N]).
 
 %% a script named by its URL, or by its number on the page (its run's index)
 script_rules_where(R, Where) :- script_url(R, U), format(atom(Where), '~w', [U]).

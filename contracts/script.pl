@@ -34,7 +34,8 @@ script_contract(record(run, [
     field(elem,    xhandle(dom, node)),     % the <script> element, or the element of the on* attribute
     field(source,  enum(source)),
     field(url,     span(text)),             % an external script's URL, as resolved
-    field(outcome, enum(outcome))
+    field(outcome, enum(outcome)),
+    field(layouts, u32)                     % the cascades and layouts its code's reads forced (getComputedStyle, a box's size)
 ])).
 script_contract(record(console, [
     field(run,   ref(run)),                 % the script whose code wrote it (its listener's or timer's)
@@ -84,6 +85,9 @@ script_contract(invariant(live_links, 'Every link names a live record', refs_liv
 
 script_contract(fact(script_run(handle, field(elem), field(source), field(outcome)), table(run), true)).
 script_contract(fact(script_url(handle, field(url)), table(run), field(source) == external)).
+%% a script whose reads of the page's style or geometry made the cascade and the layout
+%% run, and how many times: each read after a change to the DOM runs them anew
+script_contract(fact(script_forced_layout(handle, field(layouts)), table(run), field(layouts) \== 0)).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).
 script_contract(fact(script_listener(field(target), field(type), field(run)), table(listener), field(on) == node)).
@@ -98,6 +102,7 @@ script_contract(derived(script_uncaught/3, 'an error no code caught: the script,
 script_contract(derived(script_click_unfocusable/2, 'an element with a click listener that a keyboard cannot reach, and its name')).
 script_contract(derived(script_unsettled/2, 'a timer still set when the page came to rest, and the script that set it')).
 script_contract(derived(script_listens/3, 'an element, an event it is listened for on, and the script whose listener')).
+script_contract(derived(script_layout_thrash/2, 'a script whose reads of style or geometry, each after a change, made the cascade and the layout run many times, and how many')).
 
 script_contract(query(errors, script_uncaught(R, P, M), [R, P, M], 'every error no code caught')).
 script_contract(query(listeners, script_listens(N, T, R), [N, T, R], 'every element listened on, for what, by which script')).
