@@ -94,6 +94,17 @@ static lay_len lay_len_at(const css_style *st, uint32_t c) {
 }
 static double lay_res(lay_len l, double base) { return l.unit == LAY_PCT ? base * l.v / 100 : l.unit == LAY_AUTO ? 0 : l.v; }
 
+/* the keyword of the value c, copied into w (32 bytes; "" for no keyword) */
+static void lay_word_of(const css_style *st, uint32_t c, char *w) {
+    w[0] = 0;
+    if (!c || st->cval[c].unit != CSS_UNIT_KEYWORD) return;
+    const char *p = names_ptr(st, st->cval[c].word);
+    size_t i = 0;
+    while (p[i] && i < 31) { w[i] = p[i]; i++; }
+    w[i] = 0;
+}
+static int lay_w(const char *w, const char *k) { return strcmp(w, k) == 0; }
+
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
@@ -101,72 +112,90 @@ static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
     s->face = AMB_FACE_SERIF;
     s->width.unit = LAY_AUTO;
     s->height.unit = LAY_AUTO;
-    uint32_t c = lay_cv(st, sx, x, CSS_PROP_DISPLAY);
+    /* the node's computed values, each found once; a keyword's word copied once (PLAN.md §11) */
+    uint32_t cv[64];
+    memset(cv, 0, sizeof cv);
+    if (x < len(*sx) && at(*sx, x))
+        for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].node.index == x; k++) {
+            uint32_t pn = (uint32_t)st->cval[k].prop;
+            if (pn < 64 && !cv[pn]) cv[pn] = k;
+        }
+    char w[32];
+    uint32_t c = cv[CSS_PROP_DISPLAY];
+    lay_word_of(st, c, w);
     if (!c) { s->display = D_NONE; return; }
-    if (lay_is(st, c, "none") || lay_is(st, c, "table-column") || lay_is(st, c, "table-column-group")) s->display = D_NONE;
-    else if (lay_is(st, c, "inline")) s->display = D_INLINE;
-    else if (lay_is(st, c, "list-item")) s->display = D_LIST_ITEM;
-    else if (lay_is(st, c, "inline-block") || lay_is(st, c, "inline-flex") || lay_is(st, c, "inline-grid") || lay_is(st, c, "inline-table"))
+    if (lay_w(w, "none") || lay_w(w, "table-column") || lay_w(w, "table-column-group")) s->display = D_NONE;
+    else if (lay_w(w, "inline")) s->display = D_INLINE;
+    else if (lay_w(w, "list-item")) s->display = D_LIST_ITEM;
+    else if (lay_w(w, "inline-block") || lay_w(w, "inline-flex") || lay_w(w, "inline-grid") || lay_w(w, "inline-table"))
         s->display = D_INLINE_BLOCK;
-    else if (lay_is(st, c, "table")) s->display = D_TABLE;
-    else if (lay_is(st, c, "table-row-group") || lay_is(st, c, "table-header-group") || lay_is(st, c, "table-footer-group"))
+    else if (lay_w(w, "table")) s->display = D_TABLE;
+    else if (lay_w(w, "table-row-group") || lay_w(w, "table-header-group") || lay_w(w, "table-footer-group"))
         s->display = D_ROW_GROUP;
-    else if (lay_is(st, c, "table-row")) s->display = D_ROW;
-    else if (lay_is(st, c, "table-cell")) s->display = D_CELL;
-    else if (lay_is(st, c, "table-caption")) s->display = D_CAPTION;
-    else if (lay_is(st, c, "contents")) s->display = D_CONTENTS;
+    else if (lay_w(w, "table-row")) s->display = D_ROW;
+    else if (lay_w(w, "table-cell")) s->display = D_CELL;
+    else if (lay_w(w, "table-caption")) s->display = D_CAPTION;
+    else if (lay_w(w, "contents")) s->display = D_CONTENTS;
     else {
         s->display = D_BLOCK;
-        s->bfc = lay_is(st, c, "flow-root") || lay_is(st, c, "flex") || lay_is(st, c, "grid");
+        s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid");
     }
-    c = lay_cv(st, sx, x, CSS_PROP_COLOR);
+    c = cv[CSS_PROP_COLOR];
     if (c) s->color = st->cval[c].color;
-    c = lay_cv(st, sx, x, CSS_PROP_BACKGROUND_COLOR);
+    c = cv[CSS_PROP_BACKGROUND_COLOR];
     if (c) s->bg = st->cval[c].color;
-    c = lay_cv(st, sx, x, CSS_PROP_BORDER_COLOR);
+    c = cv[CSS_PROP_BORDER_COLOR];
     s->bcolor = c ? st->cval[c].color : s->color;
-    c = lay_cv(st, sx, x, CSS_PROP_FONT_SIZE);
+    c = cv[CSS_PROP_FONT_SIZE];
     if (c) s->fs = st->cval[c].num;
-    c = lay_cv(st, sx, x, CSS_PROP_FONT_WEIGHT);
+    c = cv[CSS_PROP_FONT_WEIGHT];
     int bold = c && st->cval[c].num >= 600;
-    c = lay_cv(st, sx, x, CSS_PROP_FONT_FAMILY);
-    int family = lay_is(st, c, "sans-serif") ? 0 : lay_is(st, c, "monospace") ? 2 : 1;
+    c = cv[CSS_PROP_FONT_FAMILY];
+    lay_word_of(st, c, w);
+    int family = lay_w(w, "sans-serif") ? 0 : lay_w(w, "monospace") ? 2 : 1;
     s->face = amb_face_for(family, bold);
-    c = lay_cv(st, sx, x, CSS_PROP_FONT_STYLE);
-    s->italic = lay_is(st, c, "italic") || lay_is(st, c, "oblique");
+    c = cv[CSS_PROP_FONT_STYLE];
+    lay_word_of(st, c, w);
+    s->italic = lay_w(w, "italic") || lay_w(w, "oblique");
     double gap;
     amb_face_metrics(f, s->face, s->fs, &s->asc, &s->desc, &gap);
-    c = lay_cv(st, sx, x, CSS_PROP_LINE_HEIGHT);
+    c = cv[CSS_PROP_LINE_HEIGHT];
     if (c && st->cval[c].unit == CSS_UNIT_NUMBER) s->lh = st->cval[c].num * s->fs;
     else if (c && st->cval[c].unit == CSS_UNIT_PX) s->lh = st->cval[c].num;
     else s->lh = s->asc + s->desc + gap;
-    c = lay_cv(st, sx, x, CSS_PROP_TEXT_ALIGN);
-    s->align = lay_is(st, c, "right") || lay_is(st, c, "end") ? AL_RIGHT : lay_is(st, c, "center") ? AL_CENTER :
-               lay_is(st, c, "justify") ? AL_JUSTIFY : AL_LEFT;
-    c = lay_cv(st, sx, x, CSS_PROP_WHITE_SPACE);
-    s->ws = lay_is(st, c, "pre") ? WS_PRE : lay_is(st, c, "nowrap") ? WS_NOWRAP : lay_is(st, c, "pre-wrap") || lay_is(st, c, "break-spaces") ? WS_PRE_WRAP :
-            lay_is(st, c, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
-    c = lay_cv(st, sx, x, CSS_PROP_TEXT_DECORATION);
-    s->deco = lay_is(st, c, "underline") ? 1 : lay_is(st, c, "overline") ? 2 : lay_is(st, c, "line-through") ? 4 : 0;
-    c = lay_cv(st, sx, x, CSS_PROP_LIST_STYLE_TYPE);
-    s->list = lay_is(st, c, "none") ? 0 : lay_is(st, c, "circle") ? 2 : lay_is(st, c, "square") ? 3 :
-              lay_is(st, c, "decimal") || lay_is(st, c, "decimal-leading-zero") ? 4 :
-              lay_is(st, c, "lower-alpha") || lay_is(st, c, "lower-latin") || lay_is(st, c, "lower-greek") ? 5 :
-              lay_is(st, c, "upper-alpha") || lay_is(st, c, "upper-latin") ? 6 : lay_is(st, c, "lower-roman") ? 7 :
-              lay_is(st, c, "upper-roman") ? 8 : 1;
+    c = cv[CSS_PROP_TEXT_ALIGN];
+    lay_word_of(st, c, w);
+    s->align = lay_w(w, "right") || lay_w(w, "end") ? AL_RIGHT : lay_w(w, "center") ? AL_CENTER :
+               lay_w(w, "justify") ? AL_JUSTIFY : AL_LEFT;
+    c = cv[CSS_PROP_WHITE_SPACE];
+    lay_word_of(st, c, w);
+    s->ws = lay_w(w, "pre") ? WS_PRE : lay_w(w, "nowrap") ? WS_NOWRAP : lay_w(w, "pre-wrap") || lay_w(w, "break-spaces") ? WS_PRE_WRAP :
+            lay_w(w, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
+    c = cv[CSS_PROP_TEXT_DECORATION];
+    lay_word_of(st, c, w);
+    s->deco = lay_w(w, "underline") ? 1 : lay_w(w, "overline") ? 2 : lay_w(w, "line-through") ? 4 : 0;
+    c = cv[CSS_PROP_LIST_STYLE_TYPE];
+    lay_word_of(st, c, w);
+    s->list = lay_w(w, "none") ? 0 : lay_w(w, "circle") ? 2 : lay_w(w, "square") ? 3 :
+              lay_w(w, "decimal") || lay_w(w, "decimal-leading-zero") ? 4 :
+              lay_w(w, "lower-alpha") || lay_w(w, "lower-latin") || lay_w(w, "lower-greek") ? 5 :
+              lay_w(w, "upper-alpha") || lay_w(w, "upper-latin") ? 6 : lay_w(w, "lower-roman") ? 7 :
+              lay_w(w, "upper-roman") ? 8 : 1;
     for (int k = 0; k < 4; k++) {
-        s->m[k] = lay_len_at(st, lay_cv(st, sx, x, (css_prop)(CSS_PROP_MARGIN_TOP + k)));
-        s->p[k] = lay_len_at(st, lay_cv(st, sx, x, (css_prop)(CSS_PROP_PADDING_TOP + k)));
-        c = lay_cv(st, sx, x, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + k));
+        s->m[k] = lay_len_at(st, cv[(css_prop)(CSS_PROP_MARGIN_TOP + k)]);
+        s->p[k] = lay_len_at(st, cv[(css_prop)(CSS_PROP_PADDING_TOP + k)]);
+        c = cv[(css_prop)(CSS_PROP_BORDER_TOP_WIDTH + k)];
         s->b[k] = c ? st->cval[c].num : 0;
         if (s->b[k] > 0 && s->b[k] < 1) s->b[k] = 1;         /* a border shows at least a pixel */
     }
-    s->width = lay_len_at(st, lay_cv(st, sx, x, CSS_PROP_WIDTH));
-    s->height = lay_len_at(st, lay_cv(st, sx, x, CSS_PROP_HEIGHT));
-    s->border_box = lay_is(st, lay_cv(st, sx, x, CSS_PROP_BOX_SIZING), "border-box");
-    c = lay_cv(st, sx, x, CSS_PROP_MAX_WIDTH);
+    s->width = lay_len_at(st, cv[CSS_PROP_WIDTH]);
+    s->height = lay_len_at(st, cv[CSS_PROP_HEIGHT]);
+    lay_word_of(st, cv[CSS_PROP_BOX_SIZING], w);
+    s->border_box = lay_w(w, "border-box");
+    c = cv[CSS_PROP_MAX_WIDTH];
+    lay_word_of(st, c, w);
     s->maxw.unit = LAY_AUTO;
-    if (c && !lay_is(st, c, "none")) s->maxw = lay_len_at(st, c);
+    if (c && !lay_w(w, "none")) s->maxw = lay_len_at(st, c);
     if (s->border_box) {
         /* a declared height is its border box's: the content's is what is left */
         double vedges = s->b[0] + s->b[2] + (s->p[0].unit == LAY_PX ? s->p[0].v : 0) + (s->p[2].unit == LAY_PX ? s->p[2].v : 0);

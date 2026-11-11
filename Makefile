@@ -27,7 +27,7 @@ UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/l
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 
-.PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-html test-integ golden schema doc clean
+.PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-html test-integ golden schema doc clean bench
 all: build/ambitious schema
 
 build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl) $(wildcard src/*/*.h)
@@ -81,3 +81,10 @@ clean:
 
 test-html: $(OBJS)
 	@sh tests/run.sh html
+
+# the performance gate (PLAN.md §11): Ambitious against Chromium, page by page, into docs/benchmark.md's tables;
+# axe-core is fetched into build/bench the first time. RUNS=5 by default.
+bench: all
+	@mkdir -p build/bench
+	@test -f build/bench/node_modules/axe-core/axe.min.js || (cd build/bench && npm install --no-save --no-audit --no-fund axe-core@4.14.0 > /dev/null)
+	@python3 tools/bench/compare.py $${RUNS:-5} > build/bench/report.md && cat build/bench/report.md

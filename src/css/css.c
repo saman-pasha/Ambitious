@@ -1207,6 +1207,263 @@ static int css_complex_matches(const dom_document *d, uint32_t x, const char *s,
     return k > 0 && css_parts_match(d, x, s, parts, k, depth, budget);
 }
 
+/* ---- the rules' index (PLAN.md §11) ----
+
+   Matching is the matcher above, unchanged; the index only spares it the pairs that
+   cannot match. Each rule's selector is split once. Each rule sits in one bucket,
+   keyed by its rightmost compound's id, else its first class, else its type, else
+   universal, so an element meets the rules of its own buckets alone, merged back into
+   the rules' order. A rule also carries the keys its ancestors must have -- those of
+   each compound joined to the next by a descendant or child combinator -- as a 256-bit
+   Bloom filter, and an element the filter of its ancestors' keys: a rule whose keys are
+   not all in the element's filter is not tried. Buckets are told apart by kind, length
+   and hash alone; two keys that collide share a bucket, which the matcher then sorts. */
+
+enum { CSS_KEY_UNIVERSAL, CSS_KEY_TYPE, CSS_KEY_ID, CSS_KEY_CLASS, CSS_KEY_ATTR };
+#define CSS_MAX_KEYS 32
+
+typedef struct css_key { uint32_t kind, start, len; } css_key;
+typedef struct css_bucket { uint32_t kind, len, hash, head, tail; } css_bucket;
+typedef struct css_bent { uint32_t rule, next; } css_bent;                    /* a bucket's rule */
+typedef struct css_rx { uint32_t parts, nparts; uint64_t anc[4]; } css_rx;   /* a rule as the index holds it */
+
+/* a key's hash: its kind, then its bytes (a type's and an attribute name's lowered) */
+static uint32_t css_key_hash(uint32_t kind, const char *s, size_t n) {
+    uint32_t h = 2166136261u ^ kind;
+    h *= 16777619u;
+    int lower = kind == CSS_KEY_TYPE || kind == CSS_KEY_ATTR;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t c = (uint8_t)(lower ? css_lower(s[i]) : s[i]);
+        h ^= c;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void css_bloom_add(uint64_t *m, uint32_t h) {
+    m[(h >> 6) & 3] |= 1ull << (h & 63);
+    m[(h >> 14) & 3] |= 1ull << ((h >> 8) & 63);
+}
+
+/* a compound's own keys, outside its parentheses: its type (only first, as the matcher
+   reads one), each id, each class, and each attribute selector's name */
+static size_t css_compound_keys(const char *s, size_t n, css_key *k, size_t max) {
+    size_t i = 0, c = 0;
+    if (n > 0 && css_namechar(s[0])) {
+        while (i < n && css_namechar(s[i])) i++;
+        k[c].kind = CSS_KEY_TYPE;
+        k[c].start = 0;
+        k[c].len = (uint32_t)i;
+        c++;
+    }
+    while (i < n) {
+        char ch = s[i];
+        if (ch == '#' || ch == '.') {
+            size_t b = ++i;
+            while (i < n && css_namechar(s[i])) i++;
+            if (i > b && c < max) {
+                k[c].kind = ch == '#' ? CSS_KEY_ID : CSS_KEY_CLASS;
+                k[c].start = (uint32_t)b;
+                k[c].len = (uint32_t)(i - b);
+                c++;
+            }
+            continue;
+        }
+        if (ch == '[') {
+            size_t e = css_block_end(s, n, i, '[', ']');
+            size_t b = css_skip_ws(s, e, i + 1), ae = b;
+            while (ae < e && css_namechar(s[ae])) ae++;
+            if (ae > b && c < max) {
+                k[c].kind = CSS_KEY_ATTR;
+                k[c].start = (uint32_t)b;
+                k[c].len = (uint32_t)(ae - b);
+                c++;
+            }
+            i = e < n ? e + 1 : n;
+            continue;
+        }
+        if (ch == '(') { i = css_block_end(s, n, i, '(', ')'); if (i < n) i++; continue; }
+        i++;
+    }
+    return c;
+}
+
+/* the keys a rule is bucketed under, from its subject compound t[cs, cs+cn): the
+   compound's own best key (an id, else a class, else an attribute, else its type); or,
+   for a compound that is :is(...) or :where(...) alone, each alternative's (at depth 0
+   only); or none, universal. Offsets are into t. */
+static size_t css_bucket_keys(const char *t, size_t cs, size_t cn, css_key *out, size_t max, int depth) {
+    css_key keys[CSS_MAX_KEYS];
+    size_t nk = css_compound_keys(t + cs, cn, keys, CSS_MAX_KEYS);
+    for (int pi = 0; pi < 4; pi++) {
+        uint32_t pick = pi == 0 ? CSS_KEY_ID : pi == 1 ? CSS_KEY_CLASS : pi == 2 ? CSS_KEY_ATTR : CSS_KEY_TYPE;
+        for (size_t q = 0; q < nk; q++)
+            if (keys[q].kind == pick) {
+                if (max == 0) return 0;
+                out[0].kind = pick;
+                out[0].start = (uint32_t)(cs + keys[q].start);
+                out[0].len = keys[q].len;
+                return 1;
+            }
+    }
+    if (depth > 0 || nk > 0) return 0;
+    size_t i = cs, e = cs + cn;
+    if (i < e && t[i] == '*') i++;
+    if (i + 1 >= e || t[i] != ':') return 0;
+    size_t nb = ++i;
+    while (i < e && css_namechar(t[i])) i++;
+    if (!(css_eq_ci(t + nb, i - nb, "is") || css_eq_ci(t + nb, i - nb, "where")) || i >= e || t[i] != '(') return 0;
+    size_t close = css_block_end(t, e, i, '(', ')');
+    if (close + 1 != e) return 0;                       /* :is(...) and nothing after it */
+    size_t n = 0, alt = i + 1;
+    while (alt < close) {
+        size_t end = css_comma(t, close, alt);
+        css_part ps[CSS_MAXPARTS];
+        size_t k = css_split(t + alt, end - alt, ps, CSS_MAXPARTS);
+        if (k == 0 || n == max) return 0;
+        size_t got = css_bucket_keys(t, alt + ps[k - 1].start, ps[k - 1].len, out + n, max - n, depth + 1);
+        if (got == 0) return 0;
+        n += got;
+        alt = end + 1;
+    }
+    return n;
+}
+
+/* the bucket of a key: its number from 1, or 0 */
+static uint32_t css_bucket_find(const vector<css_bucket> *bk, const vector<uint32_t> *slots, uint32_t kind, uint32_t kl, uint32_t h) {
+    size_t mask = len(*slots) - 1;
+    for (size_t i = h & mask;; i = (i + 1) & mask) {
+        uint32_t b = at(*slots, i);
+        if (!b) return 0;
+        css_bucket e = at(*bk, b - 1);
+        if (e.hash == h && e.kind == kind && e.len == kl) return b;
+    }
+}
+
+/* the rule r put in the bucket of a key, made if need be (once, if a rule names it twice) */
+static void css_bucket_put(vector<css_bucket> *bk, vector<uint32_t> *slots, vector<css_bent> *be, uint32_t kind, uint32_t kl, uint32_t h,
+                           uint32_t r) {
+    size_t mask = len(*slots) - 1;
+    uint32_t b = 0;
+    for (size_t i = h & mask;; i = (i + 1) & mask) {
+        uint32_t x = at(*slots, i);
+        if (!x) {
+            css_bucket e = { kind, kl, h, 0, 0 };
+            push_back(bk, e);
+            (*slots)[i] = (uint32_t)len(*bk);
+            b = (uint32_t)len(*bk);
+            break;
+        }
+        css_bucket e = at(*bk, x - 1);
+        if (e.hash == h && e.kind == kind && e.len == kl) { b = x; break; }
+    }
+    css_bucket e = at(*bk, b - 1);
+    if (e.tail && at(*be, e.tail).rule == r) return;
+    css_bent en = { r, 0 };
+    push_back(be, en);
+    uint32_t ei = (uint32_t)(len(*be) - 1);
+    if (e.tail) (*be)[e.tail].next = ei;
+    else e.head = ei;
+    e.tail = ei;
+    (*bk)[b - 1] = e;
+}
+
+/* the index of the rules 1 .. n-1: each split once, bucketed, with its ancestors' keys */
+static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *parts, vector<css_rx> *rxs, vector<css_bucket> *bk,
+                            vector<uint32_t> *slots, vector<css_bent> *be) {
+    size_t cap = 16;
+    while (cap < 8 * (size_t)n + 8) cap *= 2;
+    resize(slots, cap);
+    resize(rxs, (size_t)n);
+    css_bent none = { 0, 0 };
+    push_back(be, none);                                /* entry 0: the end of a bucket */
+    for (uint32_t r = 1; r < n; r++) {
+        amb_span sel = s->rule[r].selector;
+        const char *t = text_ptr(s, sel);
+        css_part ps[CSS_MAXPARTS];
+        size_t k = css_split(t, sel.len, ps, CSS_MAXPARTS);
+        css_rx rx;
+        memset(&rx, 0, sizeof rx);
+        rx.parts = (uint32_t)len(*parts);
+        rx.nparts = (uint32_t)k;
+        for (size_t j = 0; j < k; j++) push_back(parts, ps[j]);
+        if (k == 0) { (*rxs)[r] = rx; continue; }        /* not a selector this reads: it matches nothing */
+        css_key keys[CSS_MAX_KEYS];
+        /* the ancestors' keys: each compound followed by a descendant or child combinator */
+        for (size_t j = 0; j + 1 < k; j++) {
+            if (ps[j + 1].comb != ' ' && ps[j + 1].comb != '>') continue;
+            size_t nk = css_compound_keys(t + ps[j].start, ps[j].len, keys, CSS_MAX_KEYS);
+            for (size_t q = 0; q < nk; q++) css_bloom_add(rx.anc, css_key_hash(keys[q].kind, t + ps[j].start + keys[q].start, keys[q].len));
+        }
+        (*rxs)[r] = rx;
+        size_t nb = css_bucket_keys(t, ps[k - 1].start, ps[k - 1].len, keys, CSS_MAX_KEYS, 0);
+        if (nb == 0) { css_bucket_put(bk, slots, be, CSS_KEY_UNIVERSAL, 0, css_key_hash(CSS_KEY_UNIVERSAL, "", 0), r); continue; }
+        for (size_t q = 0; q < nb; q++)
+            css_bucket_put(bk, slots, be, keys[q].kind, keys[q].len, css_key_hash(keys[q].kind, t + keys[q].start, keys[q].len), r);
+    }
+}
+
+/* the keys of the element x: its type, its id, its classes, its attributes' names (at
+   most max; past that, -1) */
+static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom, uint32_t class_atom, uint32_t *kind, uint32_t *kl,
+                            uint32_t *h, int max) {
+    int c = 0;
+    const char *nm = names_ptr(d, d->node[x].name);
+    size_t nl = strlen(nm);
+    kind[c] = CSS_KEY_TYPE;
+    kl[c] = (uint32_t)nl;
+    h[c] = css_key_hash(CSS_KEY_TYPE, nm, nl);
+    c++;
+    for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
+        uint32_t an = d->attr[at].name;
+        if (an == 0) continue;
+        const char *anm = names_ptr(d, an);
+        size_t anl = strlen(anm);
+        if (c == max) return -1;
+        kind[c] = CSS_KEY_ATTR;
+        kl[c] = (uint32_t)anl;
+        h[c] = css_key_hash(CSS_KEY_ATTR, anm, anl);
+        c++;
+        if (an != id_atom && an != class_atom) continue;
+        amb_span v = d->attr[at].value;
+        const char *vp = text_ptr(d, v);
+        if (an == id_atom) {
+            if (c == max) return -1;
+            kind[c] = CSS_KEY_ID;
+            kl[c] = (uint32_t)v.len;
+            h[c] = css_key_hash(CSS_KEY_ID, vp, v.len);
+            c++;
+            continue;
+        }
+        size_t i = 0;
+        while (i < v.len) {
+            while (i < v.len && css_ws(vp[i])) i++;
+            size_t b = i;
+            while (i < v.len && !css_ws(vp[i])) i++;
+            if (i == b) continue;
+            if (c == max) return -1;
+            kind[c] = CSS_KEY_CLASS;
+            kl[c] = (uint32_t)(i - b);
+            h[c] = css_key_hash(CSS_KEY_CLASS, vp + b, i - b);
+            c++;
+        }
+    }
+    return c;
+}
+
+/* the shared rule r matches x: its ancestors' keys in x's filter am, then the matcher */
+static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, uint32_t r, const vector<css_part> *parts,
+                            const vector<css_rx> *rxs, const uint64_t *am) {
+    css_rx rx = at(*rxs, r);
+    if (rx.nparts == 0) return 0;
+    if ((rx.anc[0] & ~am[0]) | (rx.anc[1] & ~am[1]) | (rx.anc[2] & ~am[2]) | (rx.anc[3] & ~am[3])) return 0;
+    css_part ps[CSS_MAXPARTS];
+    for (uint32_t j = 0; j < rx.nparts; j++) ps[j] = at(*parts, rx.parts + j);
+    int budget = CSS_MATCH_BUDGET;
+    amb_span sel = s->rule[r].selector;
+    return css_parts_match(d, x, text_ptr(s, sel), ps, rx.nparts, 0, &budget);
+}
+
 /* ---- the cascade ---- */
 
 static int css_inherited(css_prop p) {
@@ -1328,26 +1585,59 @@ static void css_decl_value(const css_style *s, uint32_t dc, css_val *v) {
     if (s->decl[dc].word) snprintf(v->word, sizeof v->word, "%s", names_ptr(s, s->decl[dc].word));
 }
 
-static void css_record(css_style *s, dom_node_h nh, css_prop p, const css_val *v, css_how how, uint32_t winner) {
+/* a computed value's text, kept for the values met before: a page's values repeat, so
+   most are written once (PLAN.md §11) */
+typedef struct css_vtext { uint32_t used; css_unit unit; uint32_t color, word; uint64_t num; amb_span text; } css_vtext;
+#define CSS_VTEXT 1024
+
+/* what a computed value records beside its value: its word's atom, its text, how it was
+   found and the declaration that won */
+typedef struct css_rec { uint32_t word; amb_span text; css_how how; uint32_t winner; } css_rec;
+
+static css_rec css_value_rec(css_style *s, const css_val *v, css_how how, uint32_t winner, vector<css_vtext> *vc) {
+    css_rec r;
+    r.word = v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
+    r.how = how;
+    r.winner = winner;
+    uint64_t nb;
+    memcpy(&nb, &v->num, sizeof nb);
+    uint32_t hh = ((uint32_t)(nb ^ (nb >> 29)) * 2654435761u) ^ (v->color * 40503u) ^ (r.word * 9973u) ^ (uint32_t)v->unit;
+    size_t slot = (hh ^ (hh >> 15)) & (CSS_VTEXT - 1);
+    css_vtext e = at(*vc, slot);
+    if (e.used && e.unit == v->unit && e.color == v->color && e.word == r.word && e.num == nb) { r.text = e.text; return r; }
     char buf[64];
     size_t bn = css_value_text(v, buf, sizeof buf);
-    amb_span t = text_add(s, buf, bn);
-    uint32_t w = v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
+    r.text = text_add(s, buf, bn);
+    e.used = 1;
+    e.unit = v->unit;
+    e.color = v->color;
+    e.word = r.word;
+    e.num = nb;
+    e.text = r.text;
+    (*vc)[slot] = e;
+    return r;
+}
+
+static void css_put(css_style *s, dom_node_h nh, css_prop p, const css_val *v, css_rec r) {
     css_cval_h h = cval_new(s);
     s->cval[h.index].node = nh;
     s->cval[h.index].prop = p;
     s->cval[h.index].unit = v->unit;
     s->cval[h.index].num = v->num;
     s->cval[h.index].color = v->color;
-    s->cval[h.index].word = w;
-    s->cval[h.index].text = t;
-    s->cval[h.index].how = how;
-    s->cval[h.index].winner = winner;
+    s->cval[h.index].word = r.word;
+    s->cval[h.index].text = r.text;
+    s->cval[h.index].how = r.how;
+    s->cval[h.index].winner = r.winner;
 }
 
+/* font-size first, for the em of the others; then color, for their currentcolor */
+static const int css_order[CSS_NPROPS] = { 3, 1, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+
 /* an element's computed values from its matched rules' declarations, pv its parent's
-   (or the initial values, at the root); recorded, and written into out */
-static void css_element(css_style *s, dom_node_h nh, const vector<uint32_t> *matched, const css_val *pv, int has_parent, css_val *out) {
+   (or the initial values, at the root): written into out, with what each records */
+static void css_element(css_style *s, const vector<uint32_t> *matched, const css_val *pv, int has_parent, css_val *out, css_rec *rec,
+                        vector<css_vtext> *vc) {
     uint32_t win[CSS_NPROPS];
     uint64_t best[CSS_NPROPS];
     memset(win, 0, sizeof win);
@@ -1360,10 +1650,8 @@ static void css_element(css_style *s, dom_node_h nh, const vector<uint32_t> *mat
             if (rk >= best[p]) { best[p] = rk; win[p] = dc; }
         }
     }
-    /* font-size first, for the em of the others; then color, for their currentcolor */
-    static const int order[CSS_NPROPS] = { 3, 1, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
-        css_prop p = (css_prop)order[oi];
+        css_prop p = (css_prop)css_order[oi];
         uint32_t w = win[p];
         css_val v;
         css_how how;
@@ -1378,8 +1666,40 @@ static void css_element(css_style *s, dom_node_h nh, const vector<uint32_t> *mat
         } else if (css_inherited(p) && has_parent) { v = pv[p]; how = CSS_HOW_INHERITED; }
         else { css_initial_at(p, out, &v); how = CSS_HOW_INITIAL; }
         out[p] = v;
-        css_record(s, nh, p, &v, how, w);
+        rec[p] = css_value_rec(s, &v, how, w, vc);
     }
+}
+
+/* ---- the computed styles kept (PLAN.md §11) ----
+   An element's values are a function of its matched rules, in order, and its parent's
+   values alone; so elements with the same matched rules under parents of the same style
+   share one style, computed once. A style is a number from 1: its 29 values and what
+   they record. An element's own rules (its hints, its style attribute) are its alone,
+   so an element that has them never shares. */
+typedef struct css_skey { uint32_t hash, parent, list, n, style; } css_skey;
+
+static uint32_t css_style_find(const vector<css_skey> *se, const vector<uint32_t> *slots, const vector<uint32_t> *lists,
+                               const vector<uint32_t> *matched, uint32_t parent, uint32_t h) {
+    size_t mask = len(*slots) - 1;
+    for (size_t i = h & mask;; i = (i + 1) & mask) {
+        uint32_t e = at(*slots, i);
+        if (!e) return 0;
+        css_skey k = at(*se, e - 1);
+        if (k.hash != h || k.parent != parent || k.n != (uint32_t)len(*matched)) continue;
+        int same = 1;
+        for (uint32_t q = 0; q < k.n && same; q++) if (at(*lists, k.list + q) != at(*matched, q)) same = 0;
+        if (same) return k.style;
+    }
+}
+
+static void css_style_add(vector<css_skey> *se, vector<uint32_t> *slots, vector<uint32_t> *lists, const vector<uint32_t> *matched,
+                          uint32_t parent, uint32_t h, uint32_t style) {
+    css_skey k = { h, parent, (uint32_t)len(*lists), (uint32_t)len(*matched), style };
+    for (size_t q = 0; q < len(*matched); q++) push_back(lists, at(*matched, q));
+    push_back(se, k);
+    size_t mask = len(*slots) - 1;
+    for (size_t i = h & mask;; i = (i + 1) & mask)
+        if (!at(*slots, i)) { (*slots)[i] = (uint32_t)len(*se); return; }
 }
 
 /* a rule of an element's own -- a presentational hint's, or its style attribute's --
@@ -1459,10 +1779,11 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
 }
 
 static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
+    if (!d->node[x].first_attr) return;             /* no attribute, no hint */
     for (size_t h = 0; h < sizeof css_hints / sizeof css_hints[0]; h++) {
-        if (!css_word_in(names_ptr(d, d->node[x].name), css_hints[h].elements)) continue;
         uint32_t at = css_attr_of(d, x, css_hints[h].attr, strlen(css_hints[h].attr));
         if (!at) continue;
+        if (!css_word_in(names_ptr(d, d->node[x].name), css_hints[h].elements)) continue;
         amb_span sp = d->attr[at].value;
         css_val v;
         if (!css_hint_value(css_hints[h].kind, text_ptr(d, sp), sp.len, &v)) continue;
@@ -1524,18 +1845,80 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     css_val initial[CSS_NPROPS];
     for (int k = 0; k < CSS_NPROPS; k++) css_initial((css_prop)k, &initial[k]);
     /* each element, parents before children: its rules, its hints and style attribute, its values */
-    vector<css_val> vals;
-    resize(vals, (size_t)doc->node_len * CSS_NPROPS);
+    /* the styles, from 1 (style 0 a row unused), and each element's */
+    vector<css_val> sv;
+    vector<css_rec> sr;
+    resize(sv, CSS_NPROPS);
+    resize(sr, CSS_NPROPS);
+    vector<css_skey> se;
+    vector<uint32_t> sslots;
+    vector<uint32_t> slists;
+    vector<uint32_t> estyle;
+    resize(estyle, (size_t)doc->node_len);
+    size_t scap = 16;
+    while (scap < 2 * (size_t)doc->node_len + 2) scap *= 2;
+    resize(sslots, scap);
     vector<uint32_t> matched;
     uint32_t hint_sheet = 0, inline_sheet = 0;
+    /* the shared rules' index, and each element's filters: its ancestors' keys, its own */
+    vector<css_part> parts;
+    vector<css_rx> rxs;
+    vector<css_bucket> bk;
+    vector<uint32_t> slots;
+    vector<css_bent> be;
+    css_index_rules(s, shared, &parts, &rxs, &bk, &slots, &be);
+    uint32_t univ = css_bucket_find(&bk, &slots, CSS_KEY_UNIVERSAL, 0, css_key_hash(CSS_KEY_UNIVERSAL, "", 0));
+    uint32_t id_atom = names_find(doc, "id", 2), class_atom = names_find(doc, "class", 5);
+    vector<uint64_t> anc;
+    vector<uint64_t> selfk;
+    resize(anc, (size_t)doc->node_len * 4);
+    resize(selfk, (size_t)doc->node_len * 4);
+    vector<css_vtext> vc;
+    resize(vc, CSS_VTEXT);
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         if (!css_is_element(doc, x)) continue;
         clear(matched);
-        for (uint32_t r = 1; r < shared; r++) {
-            amb_span sel = s->rule[r].selector;
-            int budget = CSS_MATCH_BUDGET;
-            if (css_complex_matches(doc, x, text_ptr(s, sel), sel.len, 0, &budget)) push_back(matched, r);
+        uint32_t px = css_parent_element(doc, x);
+        uint64_t am[4], om[4];
+        for (int q = 0; q < 4; q++) am[q] = px ? at(anc, (size_t)px * 4 + q) | at(selfk, (size_t)px * 4 + q) : 0;
+        memset(om, 0, sizeof om);
+        uint32_t kk[CSS_MAX_KEYS], kl[CSS_MAX_KEYS], kh[CSS_MAX_KEYS], heads[CSS_MAX_KEYS + 1], seen[CSS_MAX_KEYS + 1];
+        int nk = css_element_keys(doc, x, id_atom, class_atom, kk, kl, kh, CSS_MAX_KEYS);
+        int nb = 0;
+        if (nk < 0) {
+            /* more keys than the index keeps: every rule is tried, and the filter is full */
+            for (int q = 0; q < 4; q++) om[q] = ~0ull;
+            for (uint32_t r = 1; r < shared; r++) if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+        } else {
+            for (int q = 0; q < nk; q++) css_bloom_add(om, kh[q]);
+            if (univ) { heads[nb] = at(bk, univ - 1).head; seen[nb] = univ; nb++; }
+            for (int q = 0; q < nk; q++) {
+                uint32_t b = css_bucket_find(&bk, &slots, kk[q], kl[q], kh[q]);
+                int dup = b == 0;
+                for (int z = 0; z < nb && !dup; z++) if (seen[z] == b) dup = 1;
+                if (dup) continue;
+                heads[nb] = at(bk, b - 1).head;
+                seen[nb] = b;
+                nb++;
+            }
+            /* the buckets' rules merged back into the rules' order, each once */
+            uint32_t last = 0;
+            for (;;) {
+                uint32_t r = 0;
+                int bi = -1;
+                for (int q = 0; q < nb; q++) {
+                    if (!heads[q]) continue;
+                    uint32_t hr = at(be, heads[q]).rule;
+                    if (r == 0 || hr < r) { r = hr; bi = q; }
+                }
+                if (bi < 0) break;
+                heads[bi] = at(be, heads[bi]).next;
+                if (r == last) continue;
+                last = r;
+                if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+            }
         }
+        for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
         css_element_hints(s, doc, x, &hint_sheet, &matched);
         css_style_attr(s, doc, x, &inline_sheet, &matched);
         dom_node_h nh = node_handle(doc, x);
@@ -1544,12 +1927,29 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             s->match[m.index].node = nh;
             s->match[m.index].rule = at(matched, k);
         }
+        /* the element's style: the one its matched rules under its parent's style made, or a new one */
         uint32_t par = css_parent_element(doc, x);
-        css_val pv[CSS_NPROPS], out[CSS_NPROPS];
-        for (int k = 0; k < CSS_NPROPS; k++) pv[k] = par ? at(vals, (size_t)par * CSS_NPROPS + k) : initial[k];
-        memset(out, 0, sizeof out);
-        css_element(s, nh, &matched, pv, par != 0, out);
-        for (int k = 0; k < CSS_NPROPS; k++) vals[(size_t)x * CSS_NPROPS + k] = out[k];
+        uint32_t ps = par ? at(estyle, par) : 0;
+        uint32_t sh = 2166136261u ^ ps;
+        for (size_t k = 0; k < len(matched); k++) { sh ^= at(matched, k); sh *= 16777619u; }
+        sh ^= (uint32_t)len(matched) * 0x9E3779B9u;
+        uint32_t sid = css_style_find(&se, &sslots, &slists, &matched, ps, sh);
+        if (!sid) {
+            css_val pv[CSS_NPROPS], out[CSS_NPROPS];
+            css_rec rec[CSS_NPROPS];
+            for (int k = 0; k < CSS_NPROPS; k++) pv[k] = ps ? at(sv, (size_t)ps * CSS_NPROPS + k) : initial[k];
+            memset(out, 0, sizeof out);
+            css_element(s, &matched, pv, par != 0, out, rec, &vc);
+            sid = (uint32_t)(len(sv) / CSS_NPROPS);
+            for (int k = 0; k < CSS_NPROPS; k++) { push_back(sv, out[k]); push_back(sr, rec[k]); }
+            css_style_add(&se, &sslots, &slists, &matched, ps, sh, sid);
+        }
+        estyle[x] = sid;
+        for (int oi = 0; oi < CSS_NPROPS; oi++) {
+            css_prop p = (css_prop)css_order[oi];
+            css_val v = at(sv, (size_t)sid * CSS_NPROPS + p);
+            css_put(s, nh, p, &v, at(sr, (size_t)sid * CSS_NPROPS + p));
+        }
     }
     s->revision++;
     return CSS_OK;

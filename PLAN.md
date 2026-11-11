@@ -383,44 +383,68 @@ decoding GIF or JPEG pixels (their sizes are read).
 
 ### Phase 8: JavaScript integration
 
-- Integrate an embeddable engine (QuickJS, MIT) as a native library.
+- A JavaScript engine behind the `script` module's boundary.
 - Host objects and bindings in cicilang C: document, element, text,
   events, timers.
-- Event-loop integration. Engine internals stay behind a module boundary,
-  and only selected metadata reaches the reasoner.
+- Event-loop integration. Engine internals stay behind the boundary, and
+  only selected metadata reaches the reasoner.
 
-**Gate:** a basic interactive page runs, with DOM interoperability tests.
+**Gate:** a basic interactive page runs, with DOM interoperability tests,
+and the JavaScript rows of the benchmark (§11) are met.
 
-*Design, not yet built.* QuickJS (MIT), pinned in `toolchain/pins` and built
-from its source by `bootstrap.sh`, is linked as a native library, as libc is.
-Everything that touches it is cicilang:
-- **The C interface.** `quickjs.h` is not read as it stands, just as
-  `<netdb.h>`'s `addrinfo` was not (REPORT, finding 11). `src/js/` declares the
-  subset it uses. `JSRuntime` and `JSContext` are opaque `own` pointers whose
-  free functions take them `own`. `JSValue` is the 16-byte struct of a 64-bit
-  build. Reference counts are taken and given through QuickJS's exported
-  functions, not its inline ones.
-- **The module boundary.** A `script` module with a contract: scripts (source,
-  origin, outcome), console messages, errors, event listeners and timers, with
-  facts `js_script/4`, `js_console/3`, `js_error/3` and `js_listener/2`. No
-  JavaScript object ever reaches a snapshot.
-- **The DOM's bindings.** A wrapper holds a node's handle (document, index,
-  generation) packed as an integer, never a pointer. Every DOM call from script
-  is one of the DOM module's operations, so the contract's preconditions,
-  invariants and mutation log hold for script as for the reasoner. A stale
-  handle throws in JavaScript.
+*Revised by the benchmark (§11).* The design had been QuickJS as a native
+library. The benchmark put QuickJS and V8's interpreter (V8 `--jitless`)
+within 1–2x of each other, with V8's JIT ahead of both. Embedding QuickJS
+would therefore buy an interpreter-class engine, at the price of a
+50,000-line engine outside the checker. Its host callbacks would also reach
+the page through a `void *`, which the checker refuses. This phase builds the
+same class of engine in cicilang C with ccllib, designed for speed from the
+start (`src/js/`):
+- **Values** are NaN-boxed 64-bit words. A double is itself. Undefined, null,
+  booleans, and an object's or a string's heap index live in the NaN space.
+  A value holds no pointer, so to the checker it is an integer.
+- **Compilation.** Source becomes tokens, then a compact AST (an index
+  arena). Scopes are resolved, so the compiler knows which variables a closure
+  captures. Then stack bytecode is emitted, with a cache slot for each
+  property access and global name.
+- **Objects** have shapes: a shape is a node of a transition tree (its
+  parent, the key it adds, that key's slot). An object is its shape and its
+  slots, so `o.x` at a cached site is one comparison and one load. Arrays are
+  dense vectors of values.
+- **Strings** are UTF-16 in pools. Names are interned atoms. `+` makes a rope,
+  flattened when it is read.
+- **Calls** are frames on one value stack. Only captured variables live in
+  heap cells.
+- **Memory** is the page's arena: freed with the page, under a cap. A script
+  past the cap ends with a RangeError. A collector is the first follow-on,
+  for pages that run long.
+- **Determinism.** Time is virtual: timers fire in order of their virtual due
+  times, and `Date.now()` and `performance.now()` read the virtual clock.
+  Every script, handler and timer runs under a step budget.
+- **The module boundary.** A `script` module with a contract covers scripts
+  (source, origin, outcome), console messages, errors, event listeners and
+  timers. Its facts are `js_script/4`, `js_console/3`, `js_error/3`,
+  `js_listener/3` and `js_timer/4`. No JavaScript object ever reaches a
+  snapshot.
+- **The DOM's bindings.** A wrapper keeps a node's handle (document, index,
+  generation) in its slots, never a pointer. Every DOM call from script is
+  one of the DOM module's operations, so the contract's preconditions,
+  invariants and mutation log hold for script as they do for the reasoner. A
+  stale handle throws. `querySelector` runs the CSS module's compiled
+  matcher.
 - **The event loop.** Classic scripts run in document order after the parse
-  (no `document.write`, no parser blocking). Then DOMContentLoaded and load.
-  Timers run in virtual time, under a step budget per page.
-  `ambitious click PAGE SELECTOR` dispatches a click.
+  (no `document.write`, no parser blocking). Then come DOMContentLoaded and
+  load, then timers in virtual time. `ambitious click PAGE SELECTOR`
+  dispatches a click.
 - **Reasoning.** The DOM's mutation log says what script changed. The script
-  facts say what ran, what failed and what listens. New rules: a click listener
-  on an element that takes no focus (accessibility), uncaught errors, and
-  timers that never settle.
+  facts say what ran, what failed and what listens. The new rules find a click
+  listener on an element that takes no focus (accessibility), uncaught errors,
+  and timers that never settle.
 - **Gate.** A counter button and a list built by script, both run and
-  re-snapshotted, and interoperability tests for `getElementById`,
-  `querySelector` (over the CSS module's matcher), `textContent`,
-  `setAttribute`, `appendChild`, `classList` and events.
+  re-snapshotted. Interoperability tests for `getElementById`,
+  `querySelector`, `textContent`, `setAttribute`, `appendChild`, `classList`
+  and events. On the benchmark: `tools/bench/js/suite.js` faster than QuickJS
+  on each workload, and the scripted pages faster than Chromium.
 
 ### Phase 9: Accessibility and developer tools
 
@@ -507,6 +531,11 @@ Every cocolog run in the gates has a time cap and a memory cap, as
 cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 (the error kind and the name), not by the whole line.
 
+`make bench` is the performance gate, outside `make test` (§11). It compares
+Ambitious with Chromium page by page, and it compares the JavaScript suite
+with V8 and QuickJS. A performance change is done when every row it targets is
+won.
+
 ---
 
 ## 9. Status
@@ -521,13 +550,18 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 | 5 CSS | **done, first slice**: `contracts/css.pl` and `src/css/css.c`. It covers sheets (comments, strings, `@media` against an 800x600 viewport), Selectors 4 (attribute operators, the structural pseudo-classes, `:nth-*()`, `:not`, `:is`, `:where`) with their specificity, and the cascade (origin, importance, the style attribute, specificity, order). It also covers inheritance, the global keywords, presentational hints, and 26 computed properties with the shorthands that set them. Each computed value is a fact with its winning declaration. `css_explain/3` says why, `css_lost/4` names the cascade step at which each loser lost, and contrast and unused rules are diagnostics. `tests/exec/css_cascade` (120 cases, valgrind clean) and `tests/integ/style` |
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
-| 8 JavaScript | **designed, not built**: the container could not fetch QuickJS (apt's mirror does not resolve here), and fetching a third party's source is outside this work's scope. The design, as this work has taught it, is under Phase 8 |
+| 8 JavaScript | **redesigned by the benchmark (§11), in progress**: an engine of Ambitious's own in cicilang (NaN-boxed values, shapes with inline caches, stack bytecode) in place of embedded QuickJS, which the benchmark put in the same class as V8's interpreter |
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
+| Benchmark | **first run: 38 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`). The lost rows (style, diagnostics at scale, small-page paint) each changed the implementation, as §11's table says |
 
 ## 10. Risks
 
+- **Speed against a production engine.** §11 holds Ambitious to winning the
+  benchmark. A row it loses changes the implementation before more is built
+  on it, and a row it cannot win, such as a JIT's, is named rather than
+  hidden.
 - **The compiler on a large program.** cicilang is proven on fixtures and
   ccllib, not yet on a codebase of this size. Mitigations: small units, a
   compile after each step, and each defect cut to a reduction and recorded
@@ -539,3 +573,64 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 - **No ccllib string.** Byte pools and spans until the string module lands.
 - **JavaScript.** A large independent effort, kept behind its boundary in
   Phase 8.
+
+---
+
+## 11. Performance against a reference engine
+
+**The rule.** Ambitious is measured against a production engine on the same
+box, and it must win. A row of the comparison that Ambitious loses changes the
+implementation, here in the plan, before more is built on it. `make bench`
+(`tools/bench/compare.py`) runs the comparison. `docs/benchmark.md` holds its
+latest run. The comparison is not part of `make test`, because it needs the
+reference engine and takes minutes. It is the gate of every performance
+change.
+
+**The reference.** Chromium 1243 (Playwright's headless shell), on the same
+pages, in an 800x600 viewport at scale 1:
+- **Its stages** are the durations of its own trace events: ParseHTML; then
+  UpdateLayoutTree and ParseAuthorStyleSheet; Layout; and PrePaint, Paint and
+  Layerize, with the raster threads' RasterTask.
+- **Its whole loads** are timed from outside. *Warm*: one browser, each load
+  starting from `about:blank`, through the load event and a forced layout,
+  then a full-page PNG. *Cold*: a browser launched for the page.
+- **Diagnostics**: axe-core 4.14.0, injected into the loaded page and run.
+- **JavaScript**: `tools/bench/js/suite.js` on V8 (node 22), on V8
+  `--jitless`, and on QuickJS 2021-03-27, built from its source with clang -O2.
+  QuickJS is the engine Phase 8 had planned to embed.
+
+**The first run.** Ambitious was faster in 38 of 48 rows:
+- It won parse on every page (1.2–6.9x).
+- It won layout on 5 of the 6 pages (6.2x at 16,000 nodes).
+- It won paint and raster on 5 of 6 (7.8x at 16,000 nodes).
+- It won every whole load but one, warm and cold (cold to PNG, 6–8x on small
+  pages).
+- It won diagnostics on the four small pages (1.2–2.1x).
+
+It lost these:
+1. Style on 5 of the 6 pages: 1.3x on news.html, up to 8.3x at 16,000 nodes
+   (131.8 ms against 15.9 ms).
+2. Warm, laid out, at 16,000 nodes: 172.6 ms against 88.5 ms. This follows
+   from loss 1.
+3. Diagnostics at scale: 950 ms against 415 ms at 1,600 nodes, and 11.5 s
+   against 2.1 s at 16,000 nodes.
+4. Paint and raster on news.html: 4.0 ms against 3.0 ms.
+5. JavaScript, which Ambitious did not have.
+
+**What each loss changed:**
+
+| lost | measured cause | the implementation now |
+|---|---|---|
+| style | callgrind, large page: selector text split and matched anew for every rule against every element is 48% of the run (`css_split` 23%, `css_parts_match` 25%); each computed value's text written by `snprintf`, 7% | **Compiled selectors.** Each selector is compiled once per sheet into compounds: type, id and classes as interned atoms; attribute tests; pseudo-classes with their arguments parsed; combinators right to left. **Rule buckets.** Rules are bucketed by their rightmost compound's id, else a class, else the type, else universal, so an element meets only its own buckets' rules. **An ancestor filter.** A Bloom filter of the ancestors' ids, classes and types rejects descendant and child chains before the exact walk. Values' texts get a formatter of their own. Target: under Chromium's style time on every page |
+| warm, laid out | the cascade, as above; layout's `lay_style_of` searching all computed values, 11% | the cascade as above; each node's computed values found by an index |
+| diagnostics | the reasoner reads at 27 µs a fact. It holds each line as a string and parses it again, finds its declaration by a list scan, checks its shapes through `=..` and `call`, and holds every line and fact in lists. cocolog itself reads and asserts at 3.8 µs a fact with `read_term/3` | **A streamed snapshot.** `read_term/3` reads the file. The data is still never consulted: no directive runs, and only the shapes of declared facts are accepted. Each fact is checked against a declaration indexed by its predicate and stored as it is read. Target: under axe-core's time on every page |
+| paint on a small page | opaque fills written a pixel at a time through checked indexing (`pt_fill`, 11% of the run) | opaque fills written a row at a time; the canvas cleared in one fill |
+| JavaScript | not built | Phase 8 as revised: an engine of Ambitious's own, in cicilang, built to be measured (Phase 8) |
+
+**The JavaScript rows.** V8's JIT runs the suite's loops, calls and closures
+3–10x faster than either interpreter. V8 without its JIT and QuickJS are
+within 1–2x of each other. No interpreter wins a JIT's rows. A JIT needs
+memory that is written and then executed, which the safe part cannot express,
+so those rows are reported, not targeted. The rows Phase 8 must win are
+QuickJS's, the engine it replaces, and Chromium's on scripted pages: a list
+built by script, and a click handled and drawn again.
