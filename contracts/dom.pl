@@ -6,7 +6,7 @@
 %% (include/amb.pl) and the tool reads it for the reasoning schema (tools/amb):
 %% this file is the one source of truth for both.
 
-dom_contract(module(dom, '0.1.0', 'Document Object Model: documents, elements, text, comments, attributes')).
+dom_contract(module(dom, '0.1.0', 'Document Object Model: documents, elements in their namespaces, text, comments, attributes, template contents')).
 
 %% ---- TYPES ------------------------------------------------------------------
 
@@ -14,13 +14,22 @@ dom_contract(module(dom, '0.1.0', 'Document Object Model: documents, elements, t
 dom_contract(status([ok, stale_handle, wrong_kind, has_parent, not_a_child, would_cycle,
                      invalid_name, not_found, out_of_memory])).
 
-dom_contract(enum(node_kind, [document, doctype, element, text, comment])).
+%% a fragment is a template's contents: a tree of its own, no node's child,
+%% which only its template holds (DOM 4.7, HTML 4.12.3)
+dom_contract(enum(node_kind, [document, doctype, element, text, comment, fragment])).
+
+%% an element's namespace (Infra's HTML, SVG and MathML namespaces)
+dom_contract(enum(namespace, [html, svg, mathml])).
+%% an attribute's namespace: null for no namespace, or one of the three the
+%% HTML parser gives attributes of foreign elements (HTML 13.2.6.1)
+dom_contract(enum(attr_namespace, [null, xlink, xml, xmlns])).
 
 %% a node: one record of the node table. Links are refs within the store,
 %% never pointers; the record's slot, liveness and generation are the table's.
 dom_contract(record(node, [
     field(kind,         enum(node_kind)),
     field(name,         atom(names)),      % an element's local name, a doctype's name
+    field(ns,           enum(namespace)),  % an element's namespace
     field(data,         span(text)),       % a text or comment node's data
     field(public_id,    span(text)),       % a doctype's public identifier ...
     field(system_id,    span(text)),       % ... and its system identifier
@@ -30,12 +39,17 @@ dom_contract(record(node, [
     field(last_child,   ref(node)),
     field(prev_sibling, ref(node)),
     field(next_sibling, ref(node)),
-    field(first_attr,   ref(attr))
+    field(first_attr,   ref(attr)),
+    field(content,      ref(node)),        % an HTML template's contents, a fragment
+    field(host,         ref(node))         % a fragment's template
 ])).
 
+%% an attribute's name is its qualified name: an attribute in a namespace keeps
+%% its prefix there ('xlink:href'), as the HTML serialization writes it
 dom_contract(record(attr, [
     field(owner, ref(node)),
     field(name,  atom(names)),
+    field(ns,    enum(attr_namespace)),
     field(value, span(text)),
     field(next,  ref(attr))
 ])).
@@ -53,6 +67,7 @@ dom_contract(owns(document, node, store)).
 dom_contract(owns(document, attr, store)).
 dom_contract(owns(node, node, list(children))).       % destroying a node destroys its children
 dom_contract(owns(node, attr, list(attributes))).     % ... and its attributes
+%% (and a template its contents: dom_destroy follows the content link too)
 dom_contract(tie(handle(node), document)).            % a handle means something in its own document only
 dom_contract(tie(handle(attr), document)).
 
@@ -70,7 +85,12 @@ dom_contract(root(node, kind, document)).
 %% is every operation's implicit first parameter. A precondition names the
 %% status its failure answers. `requestable' lets the reasoner propose it.
 
+%% an element in the HTML namespace; a template is made with its contents
 dom_contract(operation(create_element, [param(name, text)], handle(node),
+    [pre(valid_name(name), invalid_name)],
+    [creates(node)], [mutates])).
+%% an element in a namespace (the HTML parser's foreign elements)
+dom_contract(operation(create_element_ns, [param(ns, enum(namespace)), param(name, text)], handle(node),
     [pre(valid_name(name), invalid_name)],
     [creates(node)], [mutates])).
 dom_contract(operation(create_text, [param(data, text)], handle(node),
@@ -81,9 +101,12 @@ dom_contract(operation(create_doctype, [param(name, text), param(public_id, text
                                         param(ids, u8)], handle(node),
     [],
     [creates(node)], [mutates])).
+%% the child may not be the parent's ancestor through a template either (the
+%% DOM's host-including inclusive ancestor): dom_append_child checks that link
+%% after the generated checks, and refuses with would_cycle
 dom_contract(operation(append_child, [param(parent, handle(node)), param(child, handle(node))], status,
     [pre(live(parent), stale_handle), pre(live(child), stale_handle),
-     pre(kind_in(parent, [document, element]), wrong_kind),
+     pre(kind_in(parent, [document, element, fragment]), wrong_kind),
      pre(kind_in(child, [doctype, element, text, comment]), wrong_kind),
      pre(unset(child, parent), has_parent),
      pre(not_inclusive_ancestor(child, parent, children), would_cycle)],
@@ -91,7 +114,7 @@ dom_contract(operation(append_child, [param(parent, handle(node)), param(child, 
 dom_contract(operation(insert_before, [param(parent, handle(node)), param(child, handle(node)),
                                        param(before, handle(node))], status,
     [pre(live(parent), stale_handle), pre(live(child), stale_handle), pre(live(before), stale_handle),
-     pre(kind_in(parent, [document, element]), wrong_kind),
+     pre(kind_in(parent, [document, element, fragment]), wrong_kind),
      pre(kind_in(child, [doctype, element, text, comment]), wrong_kind),
      pre(unset(child, parent), has_parent),
      pre(child_of(before, parent, children), not_a_child),
@@ -109,13 +132,21 @@ dom_contract(operation(set_attribute, [param(element, handle(node)), param(name,
     [pre(live(element), stale_handle), pre(kind_in(element, [element]), wrong_kind),
      pre(valid_name(name), invalid_name)],
     [sets(attributes, element, name)], [mutates, requestable])).
+%% an attribute in a namespace, by its qualified name (the HTML parser's
+%% adjusted foreign attributes: 'xlink:href' in the XLink namespace)
+dom_contract(operation(set_attribute_ns, [param(element, handle(node)), param(ns, enum(attr_namespace)),
+                                          param(name, text), param(value, text)], status,
+    [pre(live(element), stale_handle), pre(kind_in(element, [element]), wrong_kind),
+     pre(valid_name(name), invalid_name)],
+    [sets(attributes, element, name)], [mutates])).
 dom_contract(operation(remove_attribute, [param(element, handle(node)), param(name, text)], status,
     [pre(live(element), stale_handle), pre(kind_in(element, [element]), wrong_kind)],
     [unsets(attributes, element, name)], [mutates, requestable])).
 dom_contract(operation(set_data, [param(node, handle(node)), param(data, text)], status,
     [pre(live(node), stale_handle), pre(kind_in(node, [text, comment]), wrong_kind)],
     [sets(node, data)], [mutates, requestable])).
-%% the HTML serialization of a subtree (the document node: the whole document)
+%% the HTML serialization of a subtree (the document node: the whole document;
+%% a template: its contents)
 dom_contract(operation(serialize, [param(node, handle(node)), param(out, stream)], status,
     [pre(live(node), stale_handle)],
     [], [readonly])).
@@ -130,8 +161,8 @@ dom_contract(invariant(tree_links, 'Parent, child and sibling links agree, so a 
     list_consistent(children))).
 dom_contract(invariant(acyclic, 'No node is its own ancestor: the tree has no ownership cycle',
     acyclic(children))).
-dom_contract(invariant(only_containers, 'Only document and element nodes have children',
-    owner_kinds(children, kind, [document, element]))).
+dom_contract(invariant(only_containers, 'Only document, element and fragment nodes have children',
+    owner_kinds(children, kind, [document, element, fragment]))).
 dom_contract(invariant(attr_links, 'Each attribute is listed once, by its live owner',
     list_consistent(attributes))).
 dom_contract(invariant(attr_owners, 'Only elements have attributes',
@@ -158,10 +189,17 @@ dom_contract(fact(dom_parent(handle, field(parent)), table(node), field(parent) 
 dom_contract(fact(dom_next_sibling(handle, field(next_sibling)), table(node), field(next_sibling) \== none)).
 dom_contract(fact(dom_first_child(handle, field(first_child)), table(node), field(first_child) \== none)).
 dom_contract(fact(dom_attr(field(owner), field(name), field(value)), table(attr), true)).
+%% an element's namespace, when it is not HTML's; a template's contents
+dom_contract(fact(dom_namespace(handle, field(ns)), table(node), (field(kind) == element, field(ns) \== html))).
+dom_contract(fact(dom_template_content(handle, field(content)), table(node), field(content) \== none)).
+%% an attribute's namespace, when it has one (its name in dom_attr/3 has the prefix)
+dom_contract(fact(dom_attr_namespace(field(owner), field(name), field(ns)), table(attr), field(ns) \== null)).
 
 %% what the module's rules derive from those facts (prolog/amb/rules/dom.pl)
 dom_contract(rules('rules/dom')).
 dom_contract(derived(dom_root/1, 'the document node')).
+dom_contract(derived(dom_html_element/2, 'N is an element of the HTML namespace named E')).
+dom_contract(derived(dom_in_template/2, 'N is in the contents of the template T')).
 dom_contract(derived(dom_child/2, 'P is the parent of C')).
 dom_contract(derived(dom_children/2, 'the children of P, in order')).
 dom_contract(derived(dom_ancestor/2, 'A is an ancestor of D')).
@@ -170,7 +208,7 @@ dom_contract(derived(dom_inside/2, 'N is inside the subtree of A (A itself inclu
 dom_contract(derived(dom_path/2, 'the parent chain from the root to N')).
 dom_contract(derived(dom_text_content/2, 'the concatenated text of a subtree')).
 dom_contract(derived(dom_accessible_name/2, 'a control''s accessible name, from aria-label, alt, title or content')).
-dom_contract(derived(dom_missing_attribute/2, 'an element lacks an attribute it requires')).
+dom_contract(derived(dom_missing_attribute/2, 'an HTML element lacks an attribute it requires')).
 dom_contract(derived(dom_removal_effect/2, 'what removing N takes with it')).
 
 dom_contract(query(buttons, (dom_element(N, button), dom_accessible_name(N, Name)), [N, Name],

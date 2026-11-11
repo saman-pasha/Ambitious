@@ -29,7 +29,7 @@ html_contract(enum(error_code, [
     unexpected_character_after_doctype_system_identifier, missing_quote_before_doctype_public_identifier,
     missing_quote_before_doctype_system_identifier, missing_whitespace_after_doctype_public_keyword,
     missing_whitespace_after_doctype_system_keyword,
-    missing_whitespace_between_doctype_public_and_system_identifiers, cdata_in_html_content,
+    missing_whitespace_between_doctype_public_and_system_identifiers, cdata_in_html_content, eof_in_cdata,
     missing_semicolon_after_character_reference, unknown_named_character_reference,
     absence_of_digits_in_numeric_character_reference, null_character_reference,
     character_reference_outside_unicode_range, surrogate_character_reference,

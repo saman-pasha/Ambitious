@@ -7,14 +7,18 @@
    of the store, their text spans of its byte pool, so nothing here holds a
    pointer into the store across a call that may grow it.
 
-   The tokenizer switches to RCDATA, RAWTEXT, script data or PLAINTEXT after the
-   start tag of title and textarea; style, xmp, iframe, noembed and noframes;
-   script; plaintext -- the switches the tree builder makes for HTML content
-   (13.2.6.4), made here so that the token table is whole before the tree is
-   built. Scripting is off, so noscript is not RAWTEXT; there is no foreign
-   content yet, so CDATA is a bogus comment. U+0000 in the data state is a parse
-   error and is dropped, which is what the tree builder does with it in HTML
-   content. */
+   The tree builder decides what the tokenizer reads after the start tag of
+   title and textarea (RCDATA), style, xmp, iframe, noembed and noframes
+   (RAWTEXT), script (script data) and plaintext (PLAINTEXT): the switch it makes
+   in HTML content and not in foreign content (13.2.6.4, 13.2.6.5). It decides
+   too whether <![CDATA[ opens a CDATA section, which it does only when the
+   adjusted current node is foreign (13.2.5.42). So a run that the tree builder
+   drives stops at each such point, the tokens before it in the table, and goes
+   on in the state the tree builder chose (src/html/tokenizer.h); a run that is
+   not driven switches as HTML content would and reads CDATA as a bogus comment.
+   Scripting is off, so noscript is not RAWTEXT. U+0000 in the data state is a
+   parse error and a character token, which the tree builder drops in HTML
+   content and makes U+FFFD in foreign content. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -23,6 +27,7 @@
 
 amb_interface(dom);
 amb_interface(html);
+#include "tokenizer.h"
 
 enum html_state {
     S_DATA, S_RCDATA, S_RAWTEXT, S_SCRIPT, S_PLAINTEXT, S_TAG_OPEN, S_END_TAG_OPEN, S_TAG_NAME,
@@ -38,7 +43,7 @@ enum html_state {
     S_DOCTYPE_NAME, S_AFTER_DOCTYPE_NAME, S_AFTER_DOCTYPE_PUBLIC_KW, S_BEFORE_DOCTYPE_PUBLIC_ID,
     S_DOCTYPE_PUBLIC_ID_DQ, S_DOCTYPE_PUBLIC_ID_SQ, S_AFTER_DOCTYPE_PUBLIC_ID, S_BETWEEN_DOCTYPE_IDS,
     S_AFTER_DOCTYPE_SYSTEM_KW, S_BEFORE_DOCTYPE_SYSTEM_ID, S_DOCTYPE_SYSTEM_ID_DQ, S_DOCTYPE_SYSTEM_ID_SQ,
-    S_AFTER_DOCTYPE_SYSTEM_ID, S_BOGUS_DOCTYPE
+    S_AFTER_DOCTYPE_SYSTEM_ID, S_BOGUS_DOCTYPE, S_CDATA, S_CDATA_BRACKET, S_CDATA_END
 };
 
 /* the input, where the tokenizer is in it, and where that is as a line and a column */
@@ -196,25 +201,30 @@ static int html_name_is(const vector<char> *b, const char *w) {
     return len(*b) == n && memcmp(data(*b), w, n) == 0;
 }
 
-/* the tag being read, emitted: its name, its attributes, what the tokenizer reads next */
+/* the tag being read, emitted: its name, its attributes; answers the state the
+   tokenizer reads next. After the start tag of an element whose text may be raw
+   a driven tokenizer stops (*stop set) for the tree builder to choose; one that
+   is not driven chooses what the tree builder does in HTML content. */
 static int html_emit_tag(html_parser *p, html_token_h tok, vector<char> *name, vector<char> *an, vector<char> *av,
-                         vector<char> *last_start, int state_after, uint32_t line, uint32_t col) {
+                         vector<char> *last_start, int driven, int *stop, uint32_t line, uint32_t col) {
     html_commit_attr(p, tok, an, av, line, col);
     amb_span sp = bytes_add(p, data(*name), len(*name));
     p->token[tok.index].name = sp;
     if (p->token[tok.index].kind == HTML_TOKEN_KIND_END_TAG) {
         if (p->token[tok.index].first_attr) html_err(p, HTML_ERROR_CODE_END_TAG_WITH_ATTRIBUTES, line, col);
         if (p->token[tok.index].self_closing) html_err(p, HTML_ERROR_CODE_END_TAG_WITH_TRAILING_SOLIDUS, line, col);
-        return state_after;
+        return S_DATA;
     }
     clear(last_start);
     append_range(last_start, data(*name), len(*name));
-    if (html_name_is(name, "title") || html_name_is(name, "textarea")) return S_RCDATA;
-    if (html_name_is(name, "style") || html_name_is(name, "xmp") || html_name_is(name, "iframe") ||
-        html_name_is(name, "noembed") || html_name_is(name, "noframes")) return S_RAWTEXT;
-    if (html_name_is(name, "script")) return S_SCRIPT;
-    if (html_name_is(name, "plaintext")) return S_PLAINTEXT;
-    return state_after;
+    int raw = S_DATA;
+    if (html_name_is(name, "title") || html_name_is(name, "textarea")) raw = S_RCDATA;
+    else if (html_name_is(name, "style") || html_name_is(name, "xmp") || html_name_is(name, "iframe") ||
+             html_name_is(name, "noembed") || html_name_is(name, "noframes")) raw = S_RAWTEXT;
+    else if (html_name_is(name, "script")) raw = S_SCRIPT;
+    else if (html_name_is(name, "plaintext")) raw = S_PLAINTEXT;
+    if (raw != S_DATA && driven) { *stop = 1; return S_DATA; }
+    return raw;
 }
 
 static html_token_h html_new_token(html_parser *p, html_token_kind kind, uint32_t line, uint32_t col) {
@@ -269,38 +279,61 @@ static int html_starts_ci(const char *in, size_t n, size_t i, const char *w) {
     return 1;
 }
 
-/* the tokenizer from a state of the fragment algorithm (13.4): 0 data, 1 RCDATA,
-   2 RAWTEXT, 3 script data, 4 PLAINTEXT, last the context's name, the start tag
-   an end tag must match there */
-html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, int state0, const char *last, size_t last_len) {
-    /* 13.2.3.5: CR LF and CR to LF */
-    vector<char> norm;
-    reserve(norm, src_len);
-    for (size_t k = 0; k < src_len; k++) {
-        if (src[k] == '\r') { push_back(norm, '\n'); if (k + 1 < src_len && src[k + 1] == '\n') k++; }
-        else push_back(norm, src[k]);
+void html_tz_start(html_tz *z, int state, int driven) {
+    memset(z, 0, sizeof *z);
+    z->line = 1;
+    z->col = 1;
+    z->tline = 1;
+    z->tcol = 1;
+    z->state = state;
+    z->driven = driven;
+}
+
+size_t html_normalize_newlines(const char *src, size_t n, char *out) {
+    size_t m = 0;
+    for (size_t k = 0; k < n; k++) {
+        if (src[k] == '\r') { out[m++] = '\n'; if (k + 1 < n && src[k + 1] == '\n') k++; }
+        else out[m++] = src[k];
     }
+    return m;
+}
+
+/* A run of the tokenizer from z's place and state. In a fragment no end tag is
+   appropriate until the tokenizer has emitted a start tag (13.2.5, the
+   appropriate end tag token): a run that starts with no last start tag has
+   none. */
+html_status html_tokenize_run(html_parser *p, const char *in, size_t n, html_tz *z) {
     vector<char> chars, tname, an, av, cdata, last_start, tmp, dname, dpub, dsys;
     uint32_t cline = 1, ccol = 1;          /* where the characters being gathered began */
-    uint32_t tline = 1, tcol = 1;          /* where the token being read began */
+    uint32_t tline = z->tline, tcol = z->tcol;   /* where the token being read began */
     html_token_h tok = { 0, 0, 0 };
     uint8_t dids = 0;
     int dname_set = 0, dquirks = 0;
-    int state = state0 == 1 ? S_RCDATA : state0 == 2 ? S_RAWTEXT : state0 == 3 ? S_SCRIPT : state0 == 4 ? S_PLAINTEXT : S_DATA;
-    /* in a fragment no end tag is appropriate until this tokenizer emits a start
-       tag (13.2.5, the appropriate end tag token): the context's name is not one */
-    (void)last;
-    (void)last_len;
-    size_t n = len(norm);
-    size_t i = 0;
-    uint32_t line = 1, col = 1;
+    int zs = z->state;
+    int state = zs == HTML_TZ_RCDATA ? S_RCDATA : zs == HTML_TZ_RAWTEXT ? S_RAWTEXT : zs == HTML_TZ_SCRIPT ? S_SCRIPT :
+                zs == HTML_TZ_PLAINTEXT ? S_PLAINTEXT : zs == HTML_TZ_MARKUP ? S_MARKUP_DECL : S_DATA;
+    int answered = zs == HTML_TZ_MARKUP;   /* a run that stopped at <![CDATA[ goes on with the answer */
+    uint32_t last_tok = z->last_start;
+    if (last_tok && last_tok < p->token_len) {
+        amb_span ls = p->token[last_tok].name;
+        append_range(last_start, bytes_ptr(p, ls), ls.len);
+    }
+    size_t i = z->i;
+    uint32_t line = z->line, col = z->col;
+    z->stop = HTML_TZ_END;
     for (;;) {
-        const char *in = data(norm);
         int c = i < n ? (unsigned char)in[i] : -1;
         /* consume: c is read, and the cursor moves past it */
 #define ADV() do { if (i < n) { if (in[i] == '\n') { line++; col = 1; } else col++; i++; } } while (0)
 #define CHAR(x) do { if (len(chars) == 0) { cline = line; ccol = col; } push_back(chars, (char)(x)); } while (0)
 #define ERR(code) html_err(p, HTML_ERROR_CODE_##code, line, col)
+        /* where the run stops for the tree builder, to go on from there */
+#define STOP(why, next) do { z->i = i; z->line = line; z->col = col; z->tline = tline; z->tcol = tcol; z->last_start = last_tok; \
+                             z->state = (next); z->stop = (why); return HTML_OK; } while (0)
+        /* the tag emitted, and the state next: a start tag's whose text may be raw is the tree builder's to choose */
+#define EMIT() do { int stop_ = 0; state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, z->driven, &stop_, tline, tcol); \
+                    if (p->token[tok.index].kind == HTML_TOKEN_KIND_START_TAG) last_tok = tok.index; \
+                    if (stop_) STOP(HTML_TZ_TAG, HTML_TZ_DATA); } while (0)
         switch (state) {
         case S_DATA:
             if (c == '&') {
@@ -308,7 +341,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
                 size_t k = html_charref(p, in, n, i, 0, &chars, line, col);
                 for (size_t m = 0; m < k; m++) ADV();
             } else if (c == '<') { tline = line; tcol = col; ADV(); state = S_TAG_OPEN; }
-            else if (c == 0) { ERR(UNEXPECTED_NULL_CHARACTER); ADV(); }
+            else if (c == 0) { ERR(UNEXPECTED_NULL_CHARACTER); CHAR(0); ADV(); }
             else if (c == -1) {
                 html_flush_chars(p, &chars, cline, ccol);
                 html_new_token(p, HTML_TOKEN_KIND_EOF, line, col);
@@ -377,7 +410,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
         case S_TAG_NAME:
             if (html_ws(c)) { ADV(); state = S_BEFORE_ATTR_NAME; }
             else if (c == '/') { ADV(); state = S_SELF_CLOSING; }
-            else if (c == '>') { ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            else if (c == '>') { ADV(); EMIT(); }
             else if (c == 0) { ERR(UNEXPECTED_NULL_CHARACTER); ADV(); html_put_fffd(&tname); }
             else if (c == -1) { ERR(EOF_IN_TAG); html_drop_token(p, tok); html_new_token(p, HTML_TOKEN_KIND_EOF, line, col); return HTML_OK; }
             else { push_back(tname, (char)html_lower(c)); ADV(); }
@@ -419,7 +452,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
                 tok = html_new_token(p, HTML_TOKEN_KIND_END_TAG, tline, tcol);
                 if (html_ws(c)) { ADV(); state = S_BEFORE_ATTR_NAME; }
                 else if (c == '/') { ADV(); state = S_SELF_CLOSING; }
-                else { ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+                else { ADV(); EMIT(); }
             } else if (html_alpha(c)) {
                 push_back(tname, (char)html_lower(c)); push_back(tmp, (char)c); ADV();
             } else {
@@ -507,7 +540,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
             if (html_ws(c)) ADV();
             else if (c == '/') { ADV(); state = S_SELF_CLOSING; }
             else if (c == '=') { ADV(); state = S_BEFORE_ATTR_VALUE; }
-            else if (c == '>') { ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            else if (c == '>') { ADV(); EMIT(); }
             else if (c == -1) { ERR(EOF_IN_TAG); html_drop_token(p, tok); html_new_token(p, HTML_TOKEN_KIND_EOF, line, col); return HTML_OK; }
             else { html_commit_attr(p, tok, &an, &av, line, col); state = S_ATTR_NAME; }
             break;
@@ -515,7 +548,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
             if (html_ws(c)) ADV();
             else if (c == '"') { ADV(); state = S_ATTR_VALUE_DQ; }
             else if (c == '\'') { ADV(); state = S_ATTR_VALUE_SQ; }
-            else if (c == '>') { ERR(MISSING_ATTRIBUTE_VALUE); ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            else if (c == '>') { ERR(MISSING_ATTRIBUTE_VALUE); ADV(); EMIT(); }
             else state = S_ATTR_VALUE_UNQ;
             break;
         case S_ATTR_VALUE_DQ:
@@ -535,7 +568,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
             else if (c == '&') {
                 size_t k = html_charref(p, in, n, i, 1, &av, line, col);
                 for (size_t m = 0; m < k; m++) ADV();
-            } else if (c == '>') { ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            } else if (c == '>') { ADV(); EMIT(); }
             else if (c == 0) { ERR(UNEXPECTED_NULL_CHARACTER); ADV(); html_put_fffd(&av); }
             else if (c == -1) { ERR(EOF_IN_TAG); html_drop_token(p, tok); html_new_token(p, HTML_TOKEN_KIND_EOF, line, col); return HTML_OK; }
             else {
@@ -546,12 +579,12 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
         case S_AFTER_ATTR_VALUE_Q:
             if (html_ws(c)) { ADV(); state = S_BEFORE_ATTR_NAME; }
             else if (c == '/') { ADV(); state = S_SELF_CLOSING; }
-            else if (c == '>') { ADV(); state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            else if (c == '>') { ADV(); EMIT(); }
             else if (c == -1) { ERR(EOF_IN_TAG); html_drop_token(p, tok); html_new_token(p, HTML_TOKEN_KIND_EOF, line, col); return HTML_OK; }
             else { ERR(MISSING_WHITESPACE_BETWEEN_ATTRIBUTES); state = S_BEFORE_ATTR_NAME; }
             break;
         case S_SELF_CLOSING:
-            if (c == '>') { ADV(); p->token[tok.index].self_closing = 1; state = html_emit_tag(p, tok, &tname, &an, &av, &last_start, S_DATA, tline, tcol); }
+            if (c == '>') { ADV(); p->token[tok.index].self_closing = 1; EMIT(); }
             else if (c == -1) { ERR(EOF_IN_TAG); html_drop_token(p, tok); html_new_token(p, HTML_TOKEN_KIND_EOF, line, col); return HTML_OK; }
             else { ERR(UNEXPECTED_SOLIDUS_IN_TAG); state = S_BEFORE_ATTR_NAME; }
             break;
@@ -567,10 +600,36 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
             if (i + 1 < n && in[i] == '-' && in[i + 1] == '-') { ADV(); ADV(); state = S_COMMENT_START; }
             else if (html_starts_ci(in, n, i, "doctype")) { for (int k = 0; k < 7; k++) ADV(); state = S_DOCTYPE; }
             else if (i + 7 <= n && memcmp(in + i, "[CDATA[", 7) == 0) {
-                ERR(CDATA_IN_HTML_CONTENT);
-                for (int k = 0; k < 7; k++) { push_back(cdata, in[i]); ADV(); }
-                state = S_BOGUS_COMMENT;
+                /* a CDATA section where the adjusted current node is foreign: the
+                   tree builder's to say, its tokens so far in the table */
+                if (z->driven && !answered) STOP(HTML_TZ_CDATA, HTML_TZ_MARKUP);
+                int section = answered && z->cdata;
+                answered = 0;
+                if (section) { for (int k = 0; k < 7; k++) ADV(); state = S_CDATA; }
+                else {
+                    ERR(CDATA_IN_HTML_CONTENT);
+                    for (int k = 0; k < 7; k++) { push_back(cdata, in[i]); ADV(); }
+                    state = S_BOGUS_COMMENT;
+                }
             } else { ERR(INCORRECTLY_OPENED_COMMENT); state = S_BOGUS_COMMENT; }
+            break;
+        case S_CDATA:
+            if (c == ']') { ADV(); state = S_CDATA_BRACKET; }
+            else if (c == -1) {
+                ERR(EOF_IN_CDATA);
+                html_flush_chars(p, &chars, cline, ccol);
+                html_new_token(p, HTML_TOKEN_KIND_EOF, line, col);
+                return HTML_OK;
+            } else { CHAR(c); ADV(); }
+            break;
+        case S_CDATA_BRACKET:
+            if (c == ']') { ADV(); state = S_CDATA_END; }
+            else { CHAR(']'); state = S_CDATA; }
+            break;
+        case S_CDATA_END:
+            if (c == ']') { ADV(); CHAR(']'); }
+            else if (c == '>') { ADV(); state = S_DATA; }
+            else { CHAR(']'); CHAR(']'); state = S_CDATA; }
             break;
         case S_COMMENT_START:
             if (c == '-') { ADV(); state = S_COMMENT_START_DASH; }
@@ -716,5 +775,7 @@ html_status html_tokenize_in(html_parser *p, const char *src, size_t src_len, in
 #undef ADV
 #undef CHAR
 #undef ERR
+#undef STOP
+#undef EMIT
     }
 }
