@@ -612,6 +612,97 @@ into tabs (there are no tabs), and preferences that change rendering.
   bucketing in the cascade, and a faster deflate. Each is named in
   `docs/performance.md` with what it would save.
 
+### Phase 12: The limitations closed
+
+`docs/limitations.md` lists, module by module, what Phase 11 left undone. This
+phase does it. Every package keeps `make test` GREEN and adds the tests that
+prove its work. When the benchmark's pages change, §11's rule holds: a lost
+row changes the implementation. Each package owns its files, so packages can
+be built side by side and merged without touching each other's.
+
+- **12a Network** (`src/net/`, `contracts/net.pl`, `tests/net/`):
+  - `https:` through the system's OpenSSL: TLS 1.2 and 1.3, SNI, the
+    certificate chain and host name verified, a CONNECT proxy from
+    `https_proxy`. TLS is the one part a library gives: a TLS of the
+    browser's own would be its least trustworthy code. Decoders stay in the
+    checked language;
+  - cookies (RFC 6265bis: Domain, Path, Secure, HttpOnly, SameSite, expiry),
+    kept in the profile's directory when there is one;
+  - an HTTP cache (Cache-Control, Expires, ETag and Last-Modified
+    revalidation);
+  - gzip and deflate content codings, over the painter's own inflate;
+  - IPv6 literals; IDNA's punycode; `srcset`'s candidate chosen.
+  - Facts for cookies and the cache's answers.
+- **12b Encodings** (`src/html/encoding.c`, generated tables): the WHATWG
+  Encoding standard's decoders. That is UTF-8, UTF-16LE and BE, the
+  single-byte encodings, and Shift_JIS, EUC-JP, ISO-2022-JP, GBK and
+  gb18030, Big5 and EUC-KR. The encoding is sniffed from the BOM, the HTTP
+  charset, then a meta prescan, else windows-1252. A document is transcoded
+  to UTF-8 before the tokenizer, and its encoding is a fact.
+- **12c The tree builder** (`src/html/tree.c`, `contracts/dom.pl`):
+  - foreign content: SVG and MathML elements in their namespaces, with the
+    adjusted names and the integration points;
+  - template contents, a fragment of the template's own;
+  - the 2025 select rules.
+
+  Gate: html5lib's foreign, template and select cases pass.
+- **12d Images** (`src/paint/image.c`): JPEG (baseline and progressive, the
+  chroma subsamplings, restart intervals) and GIF (LZW, transparency,
+  interlace, the first frame) decoded and drawn. Gate: fixtures checked
+  against an independent decoder.
+- **12e Accessibility** (`src/a11y/`, `contracts/a11y.pl`):
+  - descriptions (aria-describedby, title);
+  - states and properties (checked, selected, expanded, pressed, disabled,
+    required, invalid, current, values of ranges, ...);
+  - live regions;
+  - accname's recursion through embedded controls.
+
+  With their facts and the rules that find faults in them.
+- **12f Rendering** (`src/css/`, `src/layout/`, `src/paint/paint.c`):
+  - CSS:
+    - the properties behind floats, positioning, flex and grid, plus
+      vertical-align, overflow, z-index, min/max sizes, opacity, visibility,
+      transforms, border styles and colours a side, backgrounds and shadows;
+    - `calc()` and custom properties, and rem against the root's font size;
+    - `@supports`, `@layer`, `@import` and `@font-face`;
+    - the pseudo-classes of state (from the event model), `::before` and
+      `::after`, `:has()`.
+  - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
+    grid; vertical-align; min/max-height and percentage heights; rowspan;
+    writing modes and bidirectional text; hyphenation; kerning.
+  - Paint: border styles, background images, box and text shadows, opacity,
+    transforms, clipping; the fonts a page asks for (TrueType parsed at
+    load).
+- **12g JavaScript** (`src/js/`):
+  - Promises and the microtask queue; async functions and `await`;
+    generators;
+  - Symbol and the iteration protocol;
+  - a regular-expression engine, and the String methods over it;
+  - Proxy and Reflect; typed arrays; weak collections; BigInt; `Intl`'s
+    common formats;
+  - modules; `with`; direct `eval`;
+  - a garbage collector, run at task boundaries, where no native holds an
+    object unrooted.
+- **12h Scripts** (`src/script/`):
+  - live node lists;
+  - `getComputedStyle` and `getBoundingClientRect` over a style and layout
+    run on demand;
+  - `fetch` and XMLHttpRequest through the loader; inserted scripts;
+    `document.write`;
+  - keyboard, focus and pointer events; forms' submission;
+  - `MutationObserver` from the DOM's mutation log;
+  - custom elements and shadow DOM;
+  - the window's history, storage, screen and `matchMedia`.
+- **12i Reasoning and the profile**:
+  - a reasoner process kept for a session, which takes snapshot deltas from
+    the mutation log;
+  - the reasoner sandboxed: resource limits, no network, a syscall filter;
+  - tabs, and sessions restored into them;
+  - preferences that change rendering: base font size, colour scheme,
+    reduced motion, zoom.
+- **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
+  their workarounds stay until then.
+
 ---
 
 ## 8. Testing and the gates
@@ -656,6 +747,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
+| 12 The limitations | **in progress**: the packages 12a-12i, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks
