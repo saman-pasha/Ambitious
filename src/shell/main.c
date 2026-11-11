@@ -547,21 +547,22 @@ static int cmd_style(const char *page) {
     static const css_prop shown[] = { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE,
                                       CSS_PROP_FONT_WEIGHT, CSS_PROP_MARGIN_TOP, CSS_PROP_PADDING_LEFT };
     static const char *const names[] = { "display", "color", "background", "font-size", "weight", "margin-top", "padding-left" };
-    for (uint32_t c = 1; c < st.cval_len; c++) {
-        uint32_t x = st.cval[c].node.index;
-        if (c > 1 && st.cval[c - 1].node.index == x) continue;     /* each element's values are one run */
+    for (uint32_t es = 1; es < st.estyle_len; es++) {
+        uint32_t x = st.estyle[es].node.index;
+        uint32_t c = st.estyle[es].first;                          /* the element's values: its style's run */
         int depth = 0;
         for (uint32_t y = d.node[x].parent; y > 1; y = d.node[y].parent) depth++;
         printf("%*s<%s>", 2 * depth, "", names_ptr(&d, d.node[x].name));
         for (size_t k = 0; k < sizeof shown / sizeof shown[0]; k++)
-            for (uint32_t e = c; e < st.cval_len && st.cval[e].node.index == x; e++)
+            for (uint32_t e = c; e < st.cval_len && st.cval[e].style == st.cval[c].style; e++)
                 if (st.cval[e].prop == shown[k]) {
                     amb_span t = st.cval[e].text;
                     printf(" %s: %.*s%s", names[k], (int)t.len, text_ptr(&st, t), st.cval[e].how == CSS_HOW_DECLARED ? "" : st.cval[e].how == CSS_HOW_INHERITED ? " (inherited)" : " (initial)");
                 }
         printf("\n");
     }
-    printf("%zu rules, %zu declarations, %zu matches, %zu computed values\n", rule_count(st), decl_count(st), match_count(st), cval_count(st));
+    printf("%zu rules, %zu declarations, %zu matches, %zu computed values (%zu styles)\n", rule_count(st), decl_count(st), match_count(st),
+           (size_t)estyle_count(st) * 29, (size_t)cval_count(st) / 29);
     return 0;
 }
 

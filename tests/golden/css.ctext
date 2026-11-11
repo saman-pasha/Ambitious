@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:f53c0f34:3938). Do not edit. */
+/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:668bf694:4930). Do not edit. */
 typedef enum css_status { CSS_OK, CSS_STALE_HANDLE, CSS_WRONG_KIND, CSS_BAD_REQUEST, CSS_NOT_REQUESTABLE, CSS_STALE_REVISION } css_status;
 typedef enum css_origin { CSS_ORIGIN_USER_AGENT, CSS_ORIGIN_AUTHOR, CSS_ORIGIN_INLINE } css_origin;
 typedef enum css_prop { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_STYLE, CSS_PROP_TEXT_ALIGN, CSS_PROP_LINE_HEIGHT, CSS_PROP_TEXT_DECORATION, CSS_PROP_WHITE_SPACE, CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_COLOR, CSS_PROP_WIDTH, CSS_PROP_HEIGHT, CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_FONT_FAMILY, CSS_PROP_BOX_SIZING, CSS_PROP_MAX_WIDTH } css_prop;
@@ -10,11 +10,15 @@ typedef struct css_rule_h { uint32_t doc, index, gen; } css_rule_h;
 typedef struct css_decl_h { uint32_t doc, index, gen; } css_decl_h;
 typedef struct css_match_h { uint32_t doc, index, gen; } css_match_h;
 typedef struct css_cval_h { uint32_t doc, index, gen; } css_cval_h;
+typedef struct css_initval_h { uint32_t doc, index, gen; } css_initval_h;
+typedef struct css_estyle_h { uint32_t doc, index, gen; } css_estyle_h;
 typedef struct css_sheet { uint32_t gen, live, free_next; css_origin origin; uint32_t first_rule; uint32_t last_rule; } css_sheet;
 typedef struct css_rule { uint32_t gen, live, free_next; uint32_t sheet; uint32_t next; amb_span selector; uint32_t spec; uint32_t order; uint32_t first_decl; uint32_t last_decl; } css_rule;
 typedef struct css_decl { uint32_t gen, live, free_next; uint32_t rule; uint32_t next; css_prop prop; uint8_t important; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; } css_decl;
 typedef struct css_match { uint32_t gen, live, free_next; dom_node_h node; uint32_t rule; } css_match;
-typedef struct css_cval { uint32_t gen, live, free_next; dom_node_h node; css_prop prop; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; css_how how; uint32_t winner; } css_cval;
+typedef struct css_cval { uint32_t gen, live, free_next; uint32_t style; css_prop prop; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; css_how how; uint32_t winner; } css_cval;
+typedef struct css_estyle { uint32_t gen, live, free_next; dom_node_h node; uint32_t style; uint32_t first; } css_estyle;
+typedef struct css_initval { uint32_t gen, live, free_next; css_prop prop; css_unit unit; uint32_t color; amb_span text; } css_initval;
 typedef struct css_store_tag { char unused; } css_store_tag;
 typedef store<css_store_tag> css_style;
 extern const char css_fingerprint[];
@@ -125,7 +129,7 @@ const char *css_how_name(css_how x) {
     return "?";
 }
 
-const char css_fingerprint[] = "fnv1a32:f53c0f34:3938";
+const char css_fingerprint[] = "fnv1a32:668bf694:4930";
 void css_init(css_style *d, uint32_t id) {
     if (d->sheet_len != 0) abort();
     d->id = id;
@@ -275,6 +279,10 @@ int css_check_invariants(const css_style *d, FILE *report) {
             uint32_t r = d->cval[i].winner;
             if (d->cval[i].live && r && (r >= d->decl_len || !d->decl[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->estyle_len; i++) {
+            uint32_t r = d->estyle[i].first;
+            if (d->estyle[i].live && r && (r >= d->cval_len || !d->cval[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -298,9 +306,18 @@ void css_export(const css_style *d, FILE *out) {
     }
     for (uint32_t i = 1; i < d->cval_len; i++) {
         if (!d->cval[i].live) continue;
-        if (1) { fputs("css_computed(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); text_put(d, out, d->cval[i].text); fputs(",", out); fputs(css_how_name(d->cval[i].how), out); fputs(").\n", out); }
-        if (d->cval[i].winner != 0) { fputs("css_won(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); { uint32_t r = d->cval[i].winner; amb_put_ref(out, "de", d->id, r, r && r < d->decl_len ? d->decl[r].gen : 0); } fputs(").\n", out); }
-        if (d->cval[i].unit == CSS_UNIT_COLOR) { fputs("css_rgba(", out); amb_put_ref(out, "n", d->cval[i].node.doc, d->cval[i].node.index, d->cval[i].node.gen); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); fprintf(out, "%lld", (long long)d->cval[i].color); fputs(").\n", out); }
+        if (d->cval[i].winner != 0) { fputs("css_style_declared(", out); fprintf(out, "%lld", (long long)d->cval[i].style); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); text_put(d, out, d->cval[i].text); fputs(",", out); fputs(css_how_name(d->cval[i].how), out); fputs(").\n", out); }
+        if (d->cval[i].winner != 0) { fputs("css_style_won(", out); fprintf(out, "%lld", (long long)d->cval[i].style); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); { uint32_t r = d->cval[i].winner; amb_put_ref(out, "de", d->id, r, r && r < d->decl_len ? d->decl[r].gen : 0); } fputs(").\n", out); }
+        if ((d->cval[i].unit == CSS_UNIT_COLOR) && (d->cval[i].winner != 0)) { fputs("css_style_rgba(", out); fprintf(out, "%lld", (long long)d->cval[i].style); fputs(",", out); fputs(css_prop_name(d->cval[i].prop), out); fputs(",", out); fprintf(out, "%lld", (long long)d->cval[i].color); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->estyle_len; i++) {
+        if (!d->estyle[i].live) continue;
+        if (1) { fputs("css_style_of(", out); amb_put_ref(out, "n", d->estyle[i].node.doc, d->estyle[i].node.index, d->estyle[i].node.gen); fputs(",", out); fprintf(out, "%lld", (long long)d->estyle[i].style); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->initval_len; i++) {
+        if (!d->initval[i].live) continue;
+        if (1) { fputs("css_initial(", out); fputs(css_prop_name(d->initval[i].prop), out); fputs(",", out); text_put(d, out, d->initval[i].text); fputs(").\n", out); }
+        if (d->initval[i].unit == CSS_UNIT_COLOR) { fputs("css_initial_rgba(", out); fputs(css_prop_name(d->initval[i].prop), out); fputs(",", out); fprintf(out, "%lld", (long long)d->initval[i].color); fputs(").\n", out); }
     }
 }
 css_status css_dispatch(css_style *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -341,6 +358,12 @@ typedef struct store_css_store_tag {
     size_t cval_len, cval_cap;
     uint32_t cval_free;
     own css_cval *cval;
+    size_t estyle_len, estyle_cap;
+    uint32_t estyle_free;
+    own css_estyle *estyle;
+    size_t initval_len, initval_cap;
+    uint32_t initval_free;
+    own css_initval *initval;
     size_t text_len, text_cap;
     own char *text;
     size_t names_len, names_cap, names_n, names_ncap, names_scap;
@@ -348,7 +371,7 @@ typedef struct store_css_store_tag {
     own amb_span *names_at;
     own uint32_t *names_slots;
 } store_css_store_tag;
-void store_css_store_tag_drop(store_css_store_tag *s) { free(s->sheet); free(s->rule); free(s->decl); free(s->match); free(s->cval); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); }
+void store_css_store_tag_drop(store_css_store_tag *s) { free(s->sheet); free(s->rule); free(s->decl); free(s->match); free(s->cval); free(s->estyle); free(s->initval); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); }
 static void store_css_store_tag__sheet_grow(store_css_store_tag *s) {
     size_t c = s->sheet_cap ? 2 * s->sheet_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -682,6 +705,140 @@ size_t store_css_store_tag_cval_len(const store_css_store_tag *s) { return s->cv
 size_t store_css_store_tag_cval_count(const store_css_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->cval_len; i++) if (s->cval[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__estyle_grow(store_css_store_tag *s) {
+    size_t c = s->estyle_cap ? 2 * s->estyle_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->estyle = (css_estyle *)realloc(s->estyle, c * sizeof(css_estyle));
+    if (!s->estyle) abort();
+    s->estyle_cap = c;
+}
+css_estyle_h store_css_store_tag_estyle_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->estyle_free) {
+        i = s->estyle_free;
+        s->estyle_free = s->estyle[i].free_next;
+    } else {
+        if (s->estyle_len == 0) {
+            if (s->estyle_cap == 0) store_css_store_tag__estyle_grow(s);
+            memset(&s->estyle[0], 0, sizeof(css_estyle));
+            s->estyle_len = 1;
+        }
+        if (s->estyle_len == s->estyle_cap) store_css_store_tag__estyle_grow(s);
+        i = (uint32_t)s->estyle_len;
+        s->estyle_len++;
+        s->estyle[i].gen = 0;
+    }
+    uint32_t g = s->estyle[i].gen;
+    memset(&s->estyle[i], 0, sizeof(css_estyle));
+    s->estyle[i].gen = g;
+    s->estyle[i].live = 1;
+    css_estyle_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_estyle_live(const store_css_store_tag *s, css_estyle_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->estyle_len && s->estyle[h.index].live && s->estyle[h.index].gen == h.gen;
+}
+css_estyle store_css_store_tag_estyle_get(const store_css_store_tag *s, css_estyle_h h) {
+    if (!store_css_store_tag_estyle_live(s, h)) abort();
+    return s->estyle[h.index];
+}
+css_estyle *store_css_store_tag_estyle_ref(const store_css_store_tag *s, css_estyle_h h) tie s {
+    if (!store_css_store_tag_estyle_live(s, h)) abort();
+    return &s->estyle[h.index];
+}
+css_estyle *store_css_store_tag_estyle_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->estyle_len) abort();
+    return &s->estyle[i];
+}
+css_estyle_h store_css_store_tag_estyle_handle(const store_css_store_tag *s, uint32_t i) {
+    css_estyle_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->estyle_len && s->estyle[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->estyle[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_estyle_free(store_css_store_tag *s, css_estyle_h h) {
+    if (!store_css_store_tag_estyle_live(s, h)) abort();
+    s->estyle[h.index].live = 0;
+    s->estyle[h.index].gen++;
+    s->estyle[h.index].free_next = s->estyle_free;
+    s->estyle_free = h.index;
+}
+size_t store_css_store_tag_estyle_len(const store_css_store_tag *s) { return s->estyle_len; }
+size_t store_css_store_tag_estyle_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->estyle_len; i++) if (s->estyle[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__initval_grow(store_css_store_tag *s) {
+    size_t c = s->initval_cap ? 2 * s->initval_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->initval = (css_initval *)realloc(s->initval, c * sizeof(css_initval));
+    if (!s->initval) abort();
+    s->initval_cap = c;
+}
+css_initval_h store_css_store_tag_initval_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->initval_free) {
+        i = s->initval_free;
+        s->initval_free = s->initval[i].free_next;
+    } else {
+        if (s->initval_len == 0) {
+            if (s->initval_cap == 0) store_css_store_tag__initval_grow(s);
+            memset(&s->initval[0], 0, sizeof(css_initval));
+            s->initval_len = 1;
+        }
+        if (s->initval_len == s->initval_cap) store_css_store_tag__initval_grow(s);
+        i = (uint32_t)s->initval_len;
+        s->initval_len++;
+        s->initval[i].gen = 0;
+    }
+    uint32_t g = s->initval[i].gen;
+    memset(&s->initval[i], 0, sizeof(css_initval));
+    s->initval[i].gen = g;
+    s->initval[i].live = 1;
+    css_initval_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_initval_live(const store_css_store_tag *s, css_initval_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->initval_len && s->initval[h.index].live && s->initval[h.index].gen == h.gen;
+}
+css_initval store_css_store_tag_initval_get(const store_css_store_tag *s, css_initval_h h) {
+    if (!store_css_store_tag_initval_live(s, h)) abort();
+    return s->initval[h.index];
+}
+css_initval *store_css_store_tag_initval_ref(const store_css_store_tag *s, css_initval_h h) tie s {
+    if (!store_css_store_tag_initval_live(s, h)) abort();
+    return &s->initval[h.index];
+}
+css_initval *store_css_store_tag_initval_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->initval_len) abort();
+    return &s->initval[i];
+}
+css_initval_h store_css_store_tag_initval_handle(const store_css_store_tag *s, uint32_t i) {
+    css_initval_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->initval_len && s->initval[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->initval[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_initval_free(store_css_store_tag *s, css_initval_h h) {
+    if (!store_css_store_tag_initval_live(s, h)) abort();
+    s->initval[h.index].live = 0;
+    s->initval[h.index].gen++;
+    s->initval[h.index].free_next = s->initval_free;
+    s->initval_free = h.index;
+}
+size_t store_css_store_tag_initval_len(const store_css_store_tag *s) { return s->initval_len; }
+size_t store_css_store_tag_initval_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->initval_len; i++) if (s->initval[i].live) n++;
     return n;
 }
 static void store_css_store_tag__text_room(store_css_store_tag *s, size_t n) {

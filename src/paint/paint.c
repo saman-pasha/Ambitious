@@ -36,10 +36,18 @@ static void pt_fill(amb_canvas *c, double x0, double y0, double x1, double y1, u
     if (ix1 > (int)c->w) ix1 = (int)c->w;
     if (iy1 > (int)c->h) iy1 = (int)c->h;
     uint32_t r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
+    if (ix1 <= ix0 || iy1 <= iy0) return;
+    if (a == 255) {
+        /* opaque: its first row written a pixel at a time, every other row a copy of it (PLAN.md 11) */
+        size_t first = ((size_t)iy0 * c->w + (size_t)ix0) * 3, rowb = (size_t)(ix1 - ix0) * 3;
+        for (size_t i = first; i < first + rowb; i += 3) { c->px[i] = (uint8_t)r; c->px[i + 1] = (uint8_t)g; c->px[i + 2] = (uint8_t)b; }
+        uint8_t *base = data(c->px);
+        for (int y = iy0 + 1; y < iy1; y++) memcpy(base + ((size_t)y * c->w + (size_t)ix0) * 3, base + first, rowb);
+        return;
+    }
     for (int y = iy0; y < iy1; y++)
         for (int x = ix0; x < ix1; x++) {
             size_t i = ((size_t)y * c->w + (size_t)x) * 3;
-            if (a == 255) { c->px[i] = (uint8_t)r; c->px[i + 1] = (uint8_t)g; c->px[i + 2] = (uint8_t)b; continue; }
             c->px[i] = (uint8_t)((r * a + c->px[i] * (255 - a)) / 255);
             c->px[i + 1] = (uint8_t)((g * a + c->px[i + 1] * (255 - a)) / 255);
             c->px[i + 2] = (uint8_t)((b * a + c->px[i + 2] * (255 - a)) / 255);
@@ -244,7 +252,7 @@ void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) {
             if (t->box[ch].kind == LAYOUT_BOX_KIND_BLOCK && (t->box[ch].background & 0xff)) { bg = t->box[ch].background; skip = ch; break; }
     }
     c->background = bg | 0xff;
-    pt_fill(c, 0, 0, c->w, c->h, 0xffffffff);
+    if ((bg & 0xff) != 0xff) pt_fill(c, 0, 0, c->w, c->h, 0xffffffff);
     pt_fill(c, 0, 0, c->w, c->h, bg);
     vector<pt_glyph> entries;
     vector<uint32_t> table;

@@ -76,7 +76,7 @@ static uint32_t lay_cv(const css_style *st, const vector<uint32_t> *sx, uint32_t
     if (x >= len(*sx)) return 0;
     uint32_t c = at(*sx, x);
     if (!c) return 0;
-    for (uint32_t k = c; k < st->cval_len && st->cval[k].node.index == x; k++) if (st->cval[k].prop == p) return k;
+    for (uint32_t k = c; k < st->cval_len && st->cval[k].style == st->cval[c].style; k++) if (st->cval[k].prop == p) return k;
     return 0;
 }
 static int lay_is(const css_style *st, uint32_t c, const char *w) {
@@ -116,7 +116,7 @@ static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
     uint32_t cv[64];
     memset(cv, 0, sizeof cv);
     if (x < len(*sx) && at(*sx, x))
-        for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].node.index == x; k++) {
+        for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].style == st->cval[at(*sx, x)].style; k++) {
             uint32_t pn = (uint32_t)st->cval[k].prop;
             if (pn < 64 && !cv[pn]) cv[pn] = k;
         }
@@ -1341,9 +1341,9 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     amb_fonts_load(&fonts);
     vector<uint32_t> first_cval;
     resize(first_cval, doc->node_len);
-    for (uint32_t c = 1; c < style->cval_len; c++) {
-        uint32_t x = style->cval[c].node.index;
-        if (x < doc->node_len && !at(first_cval, x)) first_cval[x] = c;
+    for (uint32_t e = 1; e < style->estyle_len; e++) {      /* each element's first value: its style's */
+        uint32_t x = style->estyle[e].node.index;
+        if (x < doc->node_len && !at(first_cval, x)) first_cval[x] = style->estyle[e].first;
     }
     /* the root element: the document's element child */
     uint32_t root = 0;

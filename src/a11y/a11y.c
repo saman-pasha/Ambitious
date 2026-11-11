@@ -62,7 +62,7 @@ static int ax_hidden(ACTX, uint32_t x) {
     if (d->node[x].kind != DOM_NODE_KIND_ELEMENT) return 0;
     if (ax_attr(d, x, "hidden") || ax_attr_is(d, x, "aria-hidden", "true")) return 1;
     if (x >= len(*sx) || !at(*sx, x)) return 1;
-    for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].node.index == x; k++)
+    for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].style == st->cval[at(*sx, x)].style; k++)
         if (st->cval[k].prop == CSS_PROP_DISPLAY) return names_is(st, st->cval[k].word, "none", 4);
     return 0;
 }
@@ -353,9 +353,9 @@ static void ax_walk(ACTX, uint32_t x, uint32_t parent) {
 a11y_status a11y_build(a11y_tree *t, dom_document *doc, css_style *style) {
     vector<uint32_t> sx;
     resize(sx, doc->node_len);
-    for (uint32_t c = 1; c < style->cval_len; c++) {
-        uint32_t x = style->cval[c].node.index;
-        if (x < doc->node_len && !at(sx, x)) sx[x] = c;
+    for (uint32_t e = 1; e < style->estyle_len; e++) {      /* each element's first value: its style's */
+        uint32_t x = style->estyle[e].node.index;
+        if (x < doc->node_len && !at(sx, x)) sx[x] = style->estyle[e].first;
     }
     /* the root element's children: html itself is no node */
     uint32_t root = 0;

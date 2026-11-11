@@ -9,6 +9,105 @@ Ambitious and the reference engines run on the same box, on the same pages:
 - **Ambitious's stages** are `ambitious bench`'s timers.
 - **The two engines are built differently.** Chromium uses several threads and processes. Ambitious uses one thread, built at -O2 for the generic x86-64 CPU.
 
+## The latest run: 48 of 48
+
+Measured by `python3 tools/bench/compare.py 5` on Intel(R) Xeon(R) Processor @ 2.10GHz (4 CPUs), Linux-6.18.44-fc-v378-x86_64-with-glibc2.39.
+
+| page | bytes | DOM nodes (Ambitious) | elements (Chromium) |
+|---|---:|---:|---:|
+| news.html | 466 | 50 | 22 |
+| layout.html | 2,257 | 101 | 44 |
+| style.html | 1,511 | 60 | 25 |
+| a11y.html | 1,666 | 123 | 56 |
+| medium.html | 28,451 | 1,632 | 746 |
+| large.html | 248,919 | 16,212 | 7,406 |
+
+### The stages (ms)
+
+Ambitious's timers against the durations of Chromium's trace events for the same work.
+
+| page | stage | Ambitious | Chromium | faster |
+|---|---|---:|---:|---|
+| news.html | parse | 0.06 | 0.54 | **Ambitious** (9.0x) |
+| news.html | style | 0.26 | 0.62 | **Ambitious** (2.4x) |
+| news.html | layout | 1.32 | 1.95 | **Ambitious** (1.5x) |
+| news.html | paint and raster | 2.16 | 4.19 | **Ambitious** (1.9x) |
+| layout.html | parse | 0.09 | 0.43 | **Ambitious** (4.8x) |
+| layout.html | style | 0.30 | 0.46 | **Ambitious** (1.5x) |
+| layout.html | layout | 1.28 | 2.10 | **Ambitious** (1.6x) |
+| layout.html | paint and raster | 2.64 | 6.59 | **Ambitious** (2.5x) |
+| style.html | parse | 0.07 | 0.44 | **Ambitious** (6.3x) |
+| style.html | style | 0.28 | 0.60 | **Ambitious** (2.1x) |
+| style.html | layout | 1.21 | 2.16 | **Ambitious** (1.8x) |
+| style.html | paint and raster | 2.29 | 4.77 | **Ambitious** (2.1x) |
+| a11y.html | parse | 0.12 | 0.66 | **Ambitious** (5.5x) |
+| a11y.html | style | 0.37 | 1.28 | **Ambitious** (3.5x) |
+| a11y.html | layout | 1.44 | 2.19 | **Ambitious** (1.5x) |
+| a11y.html | paint and raster | 3.14 | 10.59 | **Ambitious** (3.4x) |
+| medium.html | parse | 0.55 | 1.23 | **Ambitious** (2.2x) |
+| medium.html | style | 1.05 | 2.07 | **Ambitious** (2.0x) |
+| medium.html | layout | 2.52 | 16.79 | **Ambitious** (6.7x) |
+| medium.html | paint and raster | 20.28 | 46.99 | **Ambitious** (2.3x) |
+| large.html | parse | 5.55 | 10.05 | **Ambitious** (1.8x) |
+| large.html | style | 3.92 | 19.37 | **Ambitious** (4.9x) |
+| large.html | layout | 16.59 | 222.18 | **Ambitious** (13.4x) |
+| large.html | paint and raster | 47.17 | 682.23 | **Ambitious** (14.5x) |
+
+### Whole loads (ms)
+
+*Warm, laid out*: the page fetched, parsed, styled and laid out, in a process already running. *Warm, to PNG*: that, then drawn and encoded as a PNG. *Cold*: a process started, the page drawn into a PNG file, the process ended.
+
+| page | measure | Ambitious | Chromium | faster |
+|---|---|---:|---:|---|
+| news.html | warm, laid out | 1.7 | 17.8 | **Ambitious** (10.5x) |
+| news.html | warm, to PNG | 17.7 | 71.6 | **Ambitious** (4.0x) |
+| news.html | cold, to PNG | 27.7 | 217.6 | **Ambitious** (7.9x) |
+| layout.html | warm, laid out | 1.7 | 16.7 | **Ambitious** (9.8x) |
+| layout.html | warm, to PNG | 20.1 | 72.9 | **Ambitious** (3.6x) |
+| layout.html | cold, to PNG | 32.7 | 202.4 | **Ambitious** (6.2x) |
+| style.html | warm, laid out | 1.6 | 12.5 | **Ambitious** (7.8x) |
+| style.html | warm, to PNG | 18.3 | 60.3 | **Ambitious** (3.3x) |
+| style.html | cold, to PNG | 28.3 | 212.3 | **Ambitious** (7.5x) |
+| a11y.html | warm, laid out | 2.0 | 15.7 | **Ambitious** (7.9x) |
+| a11y.html | warm, to PNG | 26.0 | 89.2 | **Ambitious** (3.4x) |
+| a11y.html | cold, to PNG | 29.3 | 250.1 | **Ambitious** (8.5x) |
+| medium.html | warm, laid out | 4.2 | 23.1 | **Ambitious** (5.5x) |
+| medium.html | warm, to PNG | 324.3 | 440.7 | **Ambitious** (1.4x) |
+| medium.html | cold, to PNG | 379.1 | 593.0 | **Ambitious** (1.6x) |
+| large.html | warm, laid out | 26.5 | 103.3 | **Ambitious** (3.9x) |
+| large.html | warm, to PNG | 521.8 | 4854.6 | **Ambitious** (9.3x) |
+| large.html | cold, to PNG | 584.0 | 6029.3 | **Ambitious** (10.3x) |
+
+### Diagnostics (ms)
+
+Ambitious: the snapshot exported, then the reasoner's `advise` (every module's diagnostics, a cocolog process of its own). Chromium: axe-core 4.14.0 injected into the loaded page, then `axe.run()`.
+
+| page | Ambitious | its findings | Chromium + axe-core | its violations (nodes) | faster |
+|---|---:|---|---:|---|---|
+| news.html | 36.4 | | 120.6 | 4 (9) | **Ambitious** (3.3x) |
+| layout.html | 33.2 | | 118.6 | 4 (5) | **Ambitious** (3.6x) |
+| style.html | 38.1 | | 114.6 | 3 (12) | **Ambitious** (3.0x) |
+| a11y.html | 40.0 | | 140.7 | 6 (8) | **Ambitious** (3.5x) |
+| medium.html | 141.9 | | 365.0 | 2 (22) | **Ambitious** (2.6x) |
+| large.html | 994.9 | | 2014.2 | 2 (202) | **Ambitious** (2.0x) |
+
+**Ambitious is faster in 48 of 48 comparisons.**
+
+### What changed between the runs
+
+PLAN.md §11 has the causes, each measured with callgrind before it was changed. In short:
+
+| row lost at the first run | first run | latest run | what changed |
+|---|---:|---:|---|
+| style, large.html | 131.8 ms (Chromium 15.9) | 12.7 ms, 4.5 ms in `ambitious bench` | Each selector is split once. Rules are bucketed by their subject's id, class, attribute, type or `:is()` alternatives. An ancestor Bloom filter rejects chains early. Elements share computed styles: the same matched rules under parents of one style give one style, recorded once. Value texts are written once each |
+| style, medium.html | 12.0 ms (Chromium 2.2) | under 1 ms | the same; the shared styles halved what was left |
+| warm, laid out, large.html | 172.6 ms (Chromium 88.5) | 37.8 ms | the cascade, and layout reading each node's values in one pass |
+| diagnostics, large.html | 11.5 s (axe-core 2.1 s) | about 1.1 s | The reasoner reads terms from the stream and checks each with one clause compiled for its predicate. The snapshot carries each element's style, each style's declared values once, and the initial values; the rules derive the rest. 408,681 facts became 147,006 |
+| diagnostics, medium.html | 950 ms (axe-core 415 ms) | 171 ms | the same |
+| paint and raster, news.html | 4.0 ms (Chromium 3.0) | 2.0 ms | opaque fills are written a row at a time |
+
+Every gate of `make test` stayed green through each change. The pixels of every page are unchanged, and so is every answer the reasoner gives. The only exceptions are the proofs, which now show the derived values.
+
 ## The first run (before the changes of PLAN.md §11)
 
 Measured by `python3 tools/bench/compare.py 5` on Intel(R) Xeon(R) Processor @ 2.10GHz (4 CPUs), Linux-6.18.44-fc-v378-x86_64-with-glibc2.39.

@@ -337,8 +337,10 @@ static int css_parse_color(const char *s, size_t n, uint32_t *out) {
         return 1;
     }
     if (css_eq_ci(s, n, "transparent")) { *out = 0; return 1; }
+    /* the named colours (lower case in the table): the first letter told before the whole name */
+    char c0 = n ? css_lower(s[0]) : 0;
     for (size_t i = 0; i < sizeof css_colors / sizeof css_colors[0]; i++)
-        if (css_eq_ci(s, n, css_colors[i].name)) { *out = css_colors[i].rgb << 8 | 0xff; return 1; }
+        if (css_colors[i].name[0] == c0 && css_eq_ci(s, n, css_colors[i].name)) { *out = css_colors[i].rgb << 8 | 0xff; return 1; }
     size_t f = 0;
     while (f < n && css_namechar(s[f])) f++;
     if (f == 0 || f >= n || s[f] != '(' || s[n - 1] != ')') return 0;
@@ -605,11 +607,9 @@ static void css_pick(css_style *s, uint32_t rule, css_prop p, const char *reset,
 
 static int css_side_of(const char *name, size_t nn, const char *prefix, const char *suffix, int *side) {
     static const char *const sides[4] = { "top", "right", "bottom", "left" };
-    for (int i = 0; i < 4; i++) {
-        char w[48];
-        snprintf(w, sizeof w, "%s%s%s", prefix, sides[i], suffix);
-        if (css_eq_ci(name, nn, w)) { *side = i; return 1; }
-    }
+    size_t pl = strlen(prefix), sl = strlen(suffix);
+    if (nn <= pl + sl || !css_bytes_eq(name, prefix, pl, 1) || !css_bytes_eq(name + nn - sl, suffix, sl, 1)) return 0;
+    for (int i = 0; i < 4; i++) if (css_eq_ci(name + pl, nn - pl - sl, sides[i])) { *side = i; return 1; }
     return 0;
 }
 
@@ -662,7 +662,8 @@ static void css_declaration(css_style *s, uint32_t rule, const char *name, size_
     }
     css_prop p = CSS_PROP_DISPLAY;
     int found = 0;
-    for (int i = 0; i < CSS_NPROPS && !found; i++) if (css_eq_ci(name, nn, css_prop_names[i])) { p = (css_prop)i; found = 1; }
+    for (int i = 0; i < CSS_NPROPS && !found; i++)
+        if (css_prop_names[i][0] == css_lower(name[0]) && css_eq_ci(name, nn, css_prop_names[i])) { p = (css_prop)i; found = 1; }
     if (!found && css_side_of(name, nn, "border-", "-color", &side)) { p = CSS_PROP_BORDER_COLOR; found = 1; }
     if (!found) return;
     css_val v;
@@ -1408,21 +1409,19 @@ static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *pa
 static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom, uint32_t class_atom, uint32_t *kind, uint32_t *kl,
                             uint32_t *h, int max) {
     int c = 0;
-    const char *nm = names_ptr(d, d->node[x].name);
-    size_t nl = strlen(nm);
+    size_t nl = names_len(d, d->node[x].name);
     kind[c] = CSS_KEY_TYPE;
     kl[c] = (uint32_t)nl;
-    h[c] = css_key_hash(CSS_KEY_TYPE, nm, nl);
+    h[c] = css_key_hash(CSS_KEY_TYPE, names_ptr(d, d->node[x].name), nl);
     c++;
     for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
         uint32_t an = d->attr[at].name;
         if (an == 0) continue;
-        const char *anm = names_ptr(d, an);
-        size_t anl = strlen(anm);
+        size_t anl = names_len(d, an);
         if (c == max) return -1;
         kind[c] = CSS_KEY_ATTR;
         kl[c] = (uint32_t)anl;
-        h[c] = css_key_hash(CSS_KEY_ATTR, anm, anl);
+        h[c] = css_key_hash(CSS_KEY_ATTR, names_ptr(d, an), anl);
         c++;
         if (an != id_atom && an != class_atom) continue;
         amb_span v = d->attr[at].value;
@@ -1618,9 +1617,9 @@ static css_rec css_value_rec(css_style *s, const css_val *v, css_how how, uint32
     return r;
 }
 
-static void css_put(css_style *s, dom_node_h nh, css_prop p, const css_val *v, css_rec r) {
+static css_cval_h css_put(css_style *s, uint32_t style, css_prop p, const css_val *v, css_rec r) {
     css_cval_h h = cval_new(s);
-    s->cval[h.index].node = nh;
+    s->cval[h.index].style = style;
     s->cval[h.index].prop = p;
     s->cval[h.index].unit = v->unit;
     s->cval[h.index].num = v->num;
@@ -1629,6 +1628,7 @@ static void css_put(css_style *s, dom_node_h nh, css_prop p, const css_val *v, c
     s->cval[h.index].text = r.text;
     s->cval[h.index].how = r.how;
     s->cval[h.index].winner = r.winner;
+    return h;
 }
 
 /* font-size first, for the em of the others; then color, for their currentcolor */
@@ -1844,17 +1844,28 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     uint32_t shared = (uint32_t)s->rule_len;
     css_val initial[CSS_NPROPS];
     for (int k = 0; k < CSS_NPROPS; k++) css_initial((css_prop)k, &initial[k]);
+    /* each property's initial value, for the reasoner to derive the values no declaration gave */
+    for (int k = 0; k < CSS_NPROPS; k++) {
+        char buf[64];
+        size_t bn = css_value_text(&initial[k], buf, sizeof buf);
+        amb_span t = text_add(s, buf, bn);
+        css_initval_h ih = initval_new(s);
+        s->initval[ih.index].prop = (css_prop)k;
+        s->initval[ih.index].unit = initial[k].unit;
+        s->initval[ih.index].color = initial[k].color;
+        s->initval[ih.index].text = t;
+    }
     /* each element, parents before children: its rules, its hints and style attribute, its values */
     /* the styles, from 1 (style 0 a row unused), and each element's */
     vector<css_val> sv;
-    vector<css_rec> sr;
     resize(sv, CSS_NPROPS);
-    resize(sr, CSS_NPROPS);
+    vector<uint32_t> sfirst;
+    resize(sfirst, 1);
     vector<css_skey> se;
     vector<uint32_t> sslots;
     vector<uint32_t> slists;
-    vector<uint32_t> estyle;
-    resize(estyle, (size_t)doc->node_len);
+    vector<uint32_t> nstyle;
+    resize(nstyle, (size_t)doc->node_len);
     size_t scap = 16;
     while (scap < 2 * (size_t)doc->node_len + 2) scap *= 2;
     resize(sslots, scap);
@@ -1929,7 +1940,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         }
         /* the element's style: the one its matched rules under its parent's style made, or a new one */
         uint32_t par = css_parent_element(doc, x);
-        uint32_t ps = par ? at(estyle, par) : 0;
+        uint32_t ps = par ? at(nstyle, par) : 0;
         uint32_t sh = 2166136261u ^ ps;
         for (size_t k = 0; k < len(matched); k++) { sh ^= at(matched, k); sh *= 16777619u; }
         sh ^= (uint32_t)len(matched) * 0x9E3779B9u;
@@ -1941,15 +1952,22 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             memset(out, 0, sizeof out);
             css_element(s, &matched, pv, par != 0, out, rec, &vc);
             sid = (uint32_t)(len(sv) / CSS_NPROPS);
-            for (int k = 0; k < CSS_NPROPS; k++) { push_back(sv, out[k]); push_back(sr, rec[k]); }
+            for (int k = 0; k < CSS_NPROPS; k++) push_back(sv, out[k]);
             css_style_add(&se, &sslots, &slists, &matched, ps, sh, sid);
+            /* the new style's values, recorded once, in the cascade's order */
+            uint32_t first = 0;
+            for (int oi = 0; oi < CSS_NPROPS; oi++) {
+                css_prop p = (css_prop)css_order[oi];
+                css_cval_h ch = css_put(s, sid, p, &out[p], rec[p]);
+                if (oi == 0) first = ch.index;
+            }
+            push_back(sfirst, first);
         }
-        estyle[x] = sid;
-        for (int oi = 0; oi < CSS_NPROPS; oi++) {
-            css_prop p = (css_prop)css_order[oi];
-            css_val v = at(sv, (size_t)sid * CSS_NPROPS + p);
-            css_put(s, nh, p, &v, at(sr, (size_t)sid * CSS_NPROPS + p));
-        }
+        nstyle[x] = sid;
+        css_estyle_h eh = estyle_new(s);
+        s->estyle[eh.index].node = nh;
+        s->estyle[eh.index].style = sid;
+        s->estyle[eh.index].first = at(sfirst, sid);
     }
     s->revision++;
     return CSS_OK;

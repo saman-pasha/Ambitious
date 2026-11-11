@@ -317,8 +317,12 @@ tree-construction tests where they can be fetched.
 **Gate:** computed styles of the fixture pages, and an explanation for each
 win and loss.
 
-*As built:* the facts are `css_matched/2`, `css_won/3`, `css_computed/4` and
-`css_rgba/3`, beside the sheets, rules and declarations. `css_explain/3`
+*As built:* the facts are `css_matched/2`, each element's computed style
+(`css_style_of/2`), each style's declared values (`css_style_declared/4`,
+`css_style_won/3`, `css_style_rgba/3`) and the initial values
+(`css_initial/2`), beside the sheets, rules and declarations. The rules derive
+`css_computed/4`, `css_won/3` and `css_rgba/3` for every element and property
+(§11 says why). `css_explain/3`
 gives the winning declaration as written, its selector and its origin, or the
 parent a value was inherited from, or the initial value and why. `css_lost/4`
 names the step a loser lost at: origin or importance, specificity (as
@@ -554,7 +558,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| Benchmark | **first run: 38 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`). The lost rows (style, diagnostics at scale, small-page paint) each changed the implementation, as §11's table says |
+| Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. The JavaScript rows wait for Phase 8 |
 
 ## 10. Risks
 
@@ -626,6 +630,25 @@ It lost these:
 | diagnostics | the reasoner reads at 27 µs a fact. It holds each line as a string and parses it again, finds its declaration by a list scan, checks its shapes through `=..` and `call`, and holds every line and fact in lists. cocolog itself reads and asserts at 3.8 µs a fact with `read_term/3` | **A streamed snapshot.** `read_term/3` reads the file. The data is still never consulted: no directive runs, and only the shapes of declared facts are accepted. Each fact is checked against a declaration indexed by its predicate and stored as it is read. Target: under axe-core's time on every page |
 | paint on a small page | opaque fills written a pixel at a time through checked indexing (`pt_fill`, 11% of the run) | opaque fills written a row at a time; the canvas cleared in one fill |
 | JavaScript | not built | Phase 8 as revised: an engine of Ambitious's own, in cicilang, built to be measured (Phase 8) |
+
+**The latest run** (`docs/benchmark.md`): Ambitious is faster in **48 of 48
+rows**. The cascade had first been made 3x faster by splitting each selector
+once, bucketing the rules and adding the ancestor filter. That still lost to
+Chromium at 16,000 nodes, so two further changes followed:
+- **Shared computed styles.** An element's values depend only on its matched
+  rules and its parent's values, as in Blink's matched-properties cache. So
+  elements with the same matched rules under parents of one style share one
+  style, recorded once.
+- **The CSS facts follow the styles.** The snapshot carries `css_style_of/2`,
+  each style's declared values (`css_style_declared/4`, `css_style_won/3`,
+  `css_style_rgba/3`) and the initial values (`css_initial/2`). The rules
+  derive `css_computed/4`, `css_rgba/3`, `css_declared/4` and `css_won/3`,
+  which answer as the facts did.
+
+The results on the 16,000-node page:
+- style: 131.8 ms to 4.5 ms, against Chromium's 15.1;
+- the snapshot: 408,681 facts to 147,006;
+- diagnostics: 11.5 s to 1.1 s, against axe-core's 2.1 s.
 
 **The JavaScript rows.** V8's JIT runs the suite's loops, calls and closures
 3–10x faster than either interpreter. V8 without its JIT and QuickJS are

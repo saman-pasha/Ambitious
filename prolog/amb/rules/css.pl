@@ -9,7 +9,64 @@
 %%
 %% No clause here cuts: amb_why/2 proves these rules clause by clause, and an
 %% if-then-else says what a cut would.
-:- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_computed/4, css_won/3, css_rgba/3.
+:- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
+   css_style_rgba/3, css_initial/2, css_initial_rgba/2.
+
+%% STYLES. Elements whose matched rules are the same, under parents of one style,
+%% share a computed style (src/css/css.c): the snapshot says each element's style,
+%% and each style's values once
+css_declared(N, P, V, How) :- css_style_of(N, S), css_style_declared(S, P, V, How).
+css_won(N, P, D) :- css_style_of(N, S), css_style_won(S, P, D).
+css_declared_rgba(N, P, C) :- css_style_of(N, S), css_style_rgba(S, P, C).
+
+%% COMPUTED VALUES. The snapshot carries the values a declaration gave
+%% (css_declared/4, css_declared_rgba/3) and each property's initial value
+%% (css_initial/2, css_initial_rgba/2). Every other value is what the cascade made
+%% it (src/css/css.c, css_element): an inherited property's is the parent
+%% element's, and any other's the initial value, border-color's being the
+%% element's own colour. So css_computed/4 and css_rgba/3 answer as they did when
+%% every value was a fact, from a snapshot with a sixth as many (PLAN.md 11).
+css_computed(N, P, V, How) :-
+    css_declared(N, P, V, How).
+css_computed(N, P, V, How) :-
+    dom_element(N, _), css_initial(P, _), \+ css_declared(N, P, _, _),
+    css_rules_default(N, P, V, How).
+
+css_rules_default(N, P, V, How) :-
+    (   css_rules_inherited(P), dom_parent(N, Par), dom_element(Par, _)
+    ->  css_computed(Par, P, V, _), How = inherited
+    ;   P == border_color
+    ->  css_computed(N, color, V, _), How = initial
+    ;   css_initial(P, V), How = initial
+    ).
+
+css_rgba(N, P, C) :-
+    css_declared_rgba(N, P, C).
+css_rgba(N, P, C) :-
+    css_rules_colour(P), dom_element(N, _), \+ css_declared(N, P, _, _),
+    css_rules_default_rgba(N, P, C).
+
+css_rules_default_rgba(N, P, C) :-
+    (   css_rules_inherited(P), dom_parent(N, Par), dom_element(Par, _)
+    ->  css_rgba(Par, P, C)
+    ;   P == border_color
+    ->  css_rgba(N, color, C)
+    ;   css_initial_rgba(P, C)
+    ).
+
+%% the properties inherited (CSS 2.1's, of those the module computes) and the colours
+css_rules_inherited(color).
+css_rules_inherited(font_size).
+css_rules_inherited(font_weight).
+css_rules_inherited(font_style).
+css_rules_inherited(text_align).
+css_rules_inherited(line_height).
+css_rules_inherited(white_space).
+css_rules_inherited(list_style_type).
+css_rules_inherited(font_family).
+css_rules_colour(color).
+css_rules_colour(background_color).
+css_rules_colour(border_color).
 
 css_origin_of(D, O) :- css_decl(D, R, _, _, _), css_rule(R, S, _, _, _), css_sheet(S, O).
 
@@ -111,9 +168,11 @@ css_rules_has_text(N) :-
 
 %% ---- what the reasoner says of a page's style ------------------------------------
 
+%% (the cheap tests first: a ratio of 4.5 or more is below no threshold, so most
+%% elements stop at it before their rendering and their text's size are asked)
 css_diag(low_contrast, N, Text) :-
-    dom_element(N, E), css_rules_has_text(N), css_rendered(N),
-    css_contrast(N, Ratio), css_rules_needed(N, Min), Ratio < Min,
+    dom_element(N, E), css_rules_has_text(N),
+    css_contrast(N, Ratio), Ratio < 4.5, css_rendered(N), css_rules_needed(N, Min), Ratio < Min,
     css_computed(N, color, Fg, _), css_background_of(N, _, From),
     (   From == canvas -> Bg = 'the white canvas' ; css_computed(From, background_color, Bg, _) ),
     format(atom(Text), '<~w> text ~w on ~w: contrast ~2f:1, below ~w:1', [E, Fg, Bg, Ratio, Min]).

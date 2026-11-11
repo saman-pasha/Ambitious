@@ -7,9 +7,9 @@
 %%   cocolog -s prolog/amb/reason.pl -- advise SNAPSHOT           diagnostics and requests
 %%   cocolog -s prolog/amb/reason.pl -- diff OLD NEW              the facts that changed
 %%
-%% A SNAPSHOT IS DATA, NEVER CODE. It is read a line at a time with
-%% read_term_from_atom/3, never consulted, so no directive in it runs. Its first
-%% line must be amb_snapshot(M, Doc, Rev, Fingerprint) with M's schema loaded
+%% A SNAPSHOT IS DATA, NEVER CODE. It is read a term at a time with read_term/3,
+%% never consulted, so no directive in it runs. Its first
+%% term must be amb_snapshot(M, Doc, Rev, Fingerprint) with M's schema loaded
 %% (build/schema/M.pl) and Fingerprint that schema's, and every other line a fact
 %% the schema declares, each argument of its declared shape (a handle of the
 %% snapshot's own document, a value of the enum, an atom, an integer). Anything
@@ -24,6 +24,8 @@
 %% Every predicate here is amb_reason_* (or amb_why/2, amb_snapshot_load/2).
 :- ensure_loaded(library(amb/contract)).
 :- use_module(library(stream)).
+:- dynamic('$amb_take'/5).
+:- dynamic('$amb_conv'/3).
 
 amb_reason([check, Snap]) :- !,
     amb_snapshot_load(Snap, snap(_, _, _, N)),
@@ -96,15 +98,10 @@ amb_reason_error(E) :- format(user_error, 'reason: ~q~n', [E]).
 %% the snapshot's facts asserted, each section's module's rules loaded. A snapshot
 %% is one or more sections, each a header amb_snapshot(M, Doc, Rev, FP) and M's
 %% facts: a page's DOM and its parse, say. Snap is the first section, its count
-%% the snapshot's whole
+%% the snapshot's whole. Each fact is stored as it is read (PLAN.md section 11).
 amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
-    amb_snapshot_facts(File, Sections, Facts),
+    amb_reason_read_snapshot(File, store, Sections, _, N),
     Sections = [snap(M, Doc, Rev, _)|_],
-    forall(member(snap(SM, _, _, _), Sections),
-           ( amb_reason_schema_facts(SM, Decls),
-             forall(member(fact(F/A, Shapes), Decls), amb_reason_store_decl(F, A, Shapes)) )),
-    forall(member(Fact, Facts), amb_reason_store(Fact)),
-    length(Facts, N),
     nb_setval(amb_snapshot, Sections),
     forall(member(snap(SM2, _, _, _), Sections), amb_reason_rules(SM2)).
 
@@ -119,7 +116,8 @@ amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
 amb_reason_store_decl(F, A, Shapes) :-
     findall(P, ( nth1(P, Shapes, S), amb_reason_keyed_shape(S) ), Ps),
     functor(H, F, A), retractall(H), dynamic(F/A),
-    (   Ps == [] -> nb_setval(F, plain)
+    retractall('$amb_conv'(F, _, _)),
+    (   Ps == [] -> nb_setval(F, plain), assertz('$amb_conv'(F, X, X))
     ;   length(Ps, K), atom_concat('$amb_', F, SF), SA is K + A,
         functor(SH, SF, SA), retractall(SH), dynamic(SF/SA),
         nb_setval(F, keyed(SF, Ps)),
@@ -127,7 +125,10 @@ amb_reason_store_decl(F, A, Shapes) :-
         amb_reason_key_goals(KPs, Keys, Goals),
         append(Keys, Vs, SArgs), Stored =.. [SF|SArgs],
         amb_reason_conj(Goals, Stored, Body),
-        assertz((H :- Body))
+        assertz((H :- Body)),
+        %% and the fact as it is stored, from the fact as it is read: its keys worked out
+        amb_reason_conj(Goals, true, KeyBody),
+        assertz(('$amb_conv'(F, H, Stored) :- KeyBody))
     ).
 
 amb_reason_keyed_shape(handle(_)).
@@ -162,75 +163,121 @@ amb_reason_store(T) :-
 
 %% the snapshot read and validated: its sections and its facts, in their order
 amb_snapshot_facts(File, Sections, Facts) :-
-    (   exists_file(File) -> true ; throw(error(amb_snapshot(no_file(File)), _)) ),
-    amb_reason_lines(File, Lines0),
-    exclude(amb_reason_blank, Lines0, Lines),
-    (   Lines = [First|_] -> true ; throw(error(amb_snapshot(empty(File)), _)) ),
-    amb_reason_term(First, 1, Head),
-    (   amb_reason_header(Head) -> true ; throw(error(amb_snapshot(no_header(Head)), _)) ),
-    amb_reason_sections(Lines, 1, none, Sections, Facts).
+    amb_reason_read_snapshot(File, collect, Sections, Facts, _).
 
 amb_reason_header(amb_snapshot(M, Doc, Rev, FP)) :- atom(M), integer(Doc), integer(Rev), atom(FP).
 
-amb_reason_sections([], _, _, [], []).
-amb_reason_sections([L|Ls], No, Cur, Sections, Facts) :-
-    amb_reason_term(L, No, T),
-    No1 is No + 1,
-    (   T = amb_snapshot(_, _, _, _)
-    ->  (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
-        T = amb_snapshot(M, Doc, Rev, FP),
-        amb_reason_schema(M),
-        amb_reason_schema_decl(M, module(M, _, SchemaFP)),
-        (   FP == SchemaFP -> true
-        ;   throw(error(amb_snapshot(fingerprint(M, snapshot(FP), schema(SchemaFP))), _)) ),
-        amb_reason_schema_facts(M, Decls),
-        Sections = [snap(M, Doc, Rev, FP)|Ss],
-        amb_reason_sections(Ls, No1, sec(M, Doc, Decls), Ss, Facts)
-    ;   Cur = sec(M, Doc, Decls),
-        (   amb_reason_fact_ok(T, Doc, M, Decls) -> true
-        ;   throw(error(amb_snapshot(undeclared_or_malformed(line(No), T)), _)) ),
-        Facts = [T|Fs],
-        amb_reason_sections(Ls, No1, Cur, Sections, Fs)
-    ).
-
-amb_reason_blank(S) :- string_length(S, 0).
-
-%% the file's lines, read from a stream a line at a time: cocolog's
-%% read_file_to_codes/2 refuses a file past 16 MiB (toolchain/REPORT.md, finding 12)
-amb_reason_lines(File, Lines) :-
+%% THE READER. The file is read a term at a time with read_term/3, never consulted,
+%% so no directive in it runs and only data is read. Each term is checked as it
+%% comes: ground; the first a header; a header's schema loaded and its fingerprint
+%% the schema's; every other term a fact its section's schema declares, each
+%% argument of its declared shape. Anything else refuses the whole snapshot. The
+%% declarations are indexed by predicate with their shapes resolved once, and in
+%% mode store each fact is stored as it is read; in mode collect they are returned.
+amb_reason_read_snapshot(File, Mode, Sections, Facts, N) :-
+    (   exists_file(File) -> true ; throw(error(amb_snapshot(no_file(File)), _)) ),
     open(File, read, S),
-    amb_reason_read_lines(S, Lines),
+    catch(amb_reason_read_all(S, File, Mode, Sections, Facts, N), E, ( close(S), throw(E) )),
     close(S).
-amb_reason_read_lines(S, Lines) :-
-    read_line_to_codes(S, C),
-    (   C == end_of_file -> Lines = []
-    ;   ( append(C0, [0'\r], C) -> true ; C0 = C ),
-        string_codes(L, C0), Lines = [L|Rest], amb_reason_read_lines(S, Rest)
+
+amb_reason_read_all(S, File, Mode, Sections, Facts, N) :-
+    amb_reason_next(S, T),
+    (   T == end_of_file -> throw(error(amb_snapshot(empty(File)), _)) ; true ),
+    (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
+    nb_setval(amb_reason_open, []),
+    amb_reason_section(T, Mode, Sec, Snap),
+    amb_reason_terms(S, Mode, Sec, [Snap], Sections, Facts, 0, N).
+
+amb_reason_terms(S, Mode, Sec, Acc, Sections, Facts, N0, N) :-
+    amb_reason_next(S, T),
+    (   T == end_of_file
+    ->  reverse(Acc, Sections), Facts = [], N = N0
+    ;   T = amb_snapshot(_, _, _, _)
+    ->  (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
+        amb_reason_section(T, Mode, Sec1, Snap),
+        amb_reason_terms(S, Mode, Sec1, [Snap|Acc], Sections, Facts, N0, N)
+    ;   amb_reason_fact(S, T, Sec, Mode, Facts, Rest),
+        N1 is N0 + 1,
+        amb_reason_terms(S, Mode, Sec, Acc, Sections, Rest, N1, N)
     ).
 
-amb_reason_term(Line, No, T) :-
-    catch(read_term_from_atom(Line, T, []), _,
-          throw(error(amb_snapshot(syntax(line(No), Line)), _))),
-    (   ground(T) -> true ; throw(error(amb_snapshot(not_ground(line(No), T)), _)) ).
+%% the next term, ground, or end_of_file
+amb_reason_next(S, T) :-
+    catch(read_term(S, T, []), E, ( line_count(S, L), throw(error(amb_snapshot(syntax(line(L), E)), _)) )),
+    (   T == end_of_file -> true
+    ;   ground(T) -> true
+    ;   line_count(S, L2), throw(error(amb_snapshot(not_ground(line(L2), T)), _))
+    ).
 
-amb_reason_fact_ok(T, Doc, M, Decls) :-
-    compound(T), functor(T, F, A),
-    memberchk(fact(F/A, Shapes), Decls),
-    T =.. [_|Args],
-    amb_reason_shapes(Args, Shapes, Doc, M).
+%% a section opened: its schema loaded, its fingerprint the schema's; the first time
+%% its module is met, its facts' declarations indexed and, in mode store, its fact
+%% predicates made ready to store into
+amb_reason_section(amb_snapshot(M, Doc, Rev, FP), Mode, sec(M, Doc), snap(M, Doc, Rev, FP)) :-
+    amb_reason_schema(M),
+    amb_reason_schema_decl(M, module(M, _, SchemaFP)),
+    (   FP == SchemaFP -> true
+    ;   throw(error(amb_snapshot(fingerprint(M, snapshot(FP), schema(SchemaFP))), _)) ),
+    nb_getval(amb_reason_open, Open),
+    (   memberchk(M, Open) -> true
+    ;   nb_setval(amb_reason_open, [M|Open]),
+        amb_reason_schema_facts(M, Decls),
+        forall(member(fact(F/A, Shapes), Decls),
+               ( maplist(amb_reason_cshape(M), Shapes, CS),
+                 retractall('$amb_take'(F, M, _, _, _)),
+                 amb_reason_take_clause(M, F, A, Shapes, CS, Clause),
+                 assertz(Clause),
+                 ( Mode == store -> amb_reason_store_decl(F, A, Shapes) ; true ) ))
+    ).
 
-amb_reason_shapes([], [], _, _).
-amb_reason_shapes([A|As], [S|Ss], Doc, M) :- amb_reason_shape(S, A, Doc, M), amb_reason_shapes(As, Ss, Doc, M).
+%% THE CHECK OF A FACT, MADE ONCE A PREDICATE: one clause, '$amb_take'(F, M, Fact,
+%% Doc, Stored), whose head takes the fact apart and whose body tests each argument
+%% against its declared shape (a handle of the section's document, a value of the
+%% enum, an atom, an integer) and works out the stored form's keys, as
+%% amb_reason_store_decl/3 keeps the fact
+amb_reason_take_clause(M, F, A, Shapes, CS, ('$amb_take'(F, M, T, Doc, St) :- Body)) :-
+    functor(T, F, A), T =.. [_|Xs],
+    amb_reason_take_goals(Xs, CS, Doc, Goals, Keys),
+    (   Keys == [] -> St = T
+    ;   atom_concat('$amb_', F, SF), append(Keys, Xs, SArgs), St =.. [SF|SArgs]
+    ),
+    length(Shapes, A),
+    amb_reason_conj(Goals, true, Body).
 
-amb_reason_shape(handle(R), H, Doc, M) :- amb_reason_schema_decl(M, handle(R, F)), H =.. [F, Doc, I, G], integer(I), I > 0, integer(G), G >= 0.
-amb_reason_shape(handle_or_none(R), H, Doc, M) :- ( H == none -> true ; amb_reason_shape(handle(R), H, Doc, M) ).
-amb_reason_shape(xhandle(M2, R), H, _, _) :-
-    ( H == none -> true ; amb_reason_schema(M2), amb_reason_schema_decl(M2, handle(R, F)), H =.. [F, D, I, G], integer(D), integer(I), integer(G) ).
-amb_reason_shape(enum(E), V, _, M) :- atom(V), amb_reason_schema_decl(M, enum(E, Vs)), memberchk(V, Vs).
-amb_reason_shape(enum_values(Vs), V, _, _) :- atom(V), memberchk(V, Vs).
-amb_reason_shape(atom, V, _, _) :- atom(V).
-amb_reason_shape(integer, V, _, _) :- integer(V).
-amb_reason_shape(number, V, _, _) :- number(V).
+amb_reason_take_goals([], [], _, [], []).
+amb_reason_take_goals([X|Xs], [S|Ss], Doc, Goals, Keys) :-
+    amb_reason_take_goal(S, X, Doc, G, K),
+    amb_reason_take_goals(Xs, Ss, Doc, Gs, Ks),
+    Goals = [G|Gs],
+    ( var(K) -> Keys = [K|Ks] ; Keys = Ks ).
+
+%% an argument's test, and its key when the argument is a handle
+amb_reason_take_goal(h(Fn), X, Doc, (X = P, D == Doc, integer(I), I > 0, integer(G), G >= 0), I) :- !, P =.. [Fn, D, I, G].
+amb_reason_take_goal(hn(Fn), X, Doc, ( X == none -> K = 0 ; X = P, D == Doc, integer(I), I > 0, integer(G), G >= 0, K = I ), K) :- !,
+    P =.. [Fn, D, I, G].
+amb_reason_take_goal(x(Fn), X, _, ( X == none -> K = 0 ; X = P, integer(D), integer(I), integer(G), K = I ), K) :- !, P =.. [Fn, D, I, G].
+amb_reason_take_goal(e(Vs), X, _, (atom(X), memberchk(X, Vs)), none) :- !.
+amb_reason_take_goal(atom, X, _, atom(X), none) :- !.
+amb_reason_take_goal(integer, X, _, integer(X), none) :- !.
+amb_reason_take_goal(number, X, _, number(X), none).
+
+%% a declared shape, resolved: a handle's functor, an enum's values
+amb_reason_cshape(M, handle(R), h(F)) :- !, amb_reason_schema_decl(M, handle(R, F)).
+amb_reason_cshape(M, handle_or_none(R), hn(F)) :- !, amb_reason_schema_decl(M, handle(R, F)).
+amb_reason_cshape(_, xhandle(M2, R), x(F)) :- !, amb_reason_schema(M2), amb_reason_schema_decl(M2, handle(R, F)).
+amb_reason_cshape(M, enum(E), e(Vs)) :- !, amb_reason_schema_decl(M, enum(E, Vs)).
+amb_reason_cshape(_, enum_values(Vs), e(Vs)) :- !.
+amb_reason_cshape(_, S, S).
+
+%% a fact of the section, checked, then stored or kept
+amb_reason_fact(S, T, sec(M, Doc), Mode, Facts, Rest) :-
+    (   compound(T), functor(T, F, _), '$amb_take'(F, M, T, Doc, St)
+    ->  true
+    ;   line_count(S, L), throw(error(amb_snapshot(undeclared_or_malformed(line(L), T)), _))
+    ),
+    (   Mode == store -> assertz(St), Facts = Rest
+    ;   Facts = [T|Rest]
+    ).
+
 
 %% the schema of M: build/schema/M.pl, made by `make schema' from the contract
 amb_reason_schema(M) :-

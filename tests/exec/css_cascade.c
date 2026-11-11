@@ -184,8 +184,10 @@ int main(void) {
         uint32_t x = find_t(&d);
         char got[128];
         snprintf(got, sizeof got, "(no element t)");
-        for (uint32_t c = 1; c < st.cval_len; c++)
-            if (x && st.cval[c].node.index == x && st.cval[c].prop == cases[i].prop) {
+        uint32_t c0 = 0;                                     /* t's first value: its style's */
+        for (uint32_t e = 1; e < st.estyle_len; e++) if (x && st.estyle[e].node.index == x) c0 = st.estyle[e].first;
+        for (uint32_t c = c0; c0 && c < st.cval_len && st.cval[c].style == st.cval[c0].style; c++)
+            if (st.cval[c].prop == cases[i].prop) {
                 amb_span t = st.cval[c].text;
                 snprintf(got, sizeof got, "%.*s", (int)t.len, text_ptr(&st, t));
             }

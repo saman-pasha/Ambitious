@@ -51,9 +51,10 @@ css_contract(record(decl, [
 ])).
 %% a rule that matched an element
 css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule))])).
-%% an element's computed value of a property
+%% A COMPUTED STYLE is a style's 29 values, one record each, in a run; elements whose
+%% matched rules are the same, under parents of the same style, share one (PLAN.md 11)
 css_contract(record(cval, [
-    field(node,   xhandle(dom, node)),
+    field(style,  u32),                % the style the value is of, a number from 1
     field(prop,   enum(prop)),
     field(unit,   enum(unit)),
     field(num,    f64),
@@ -63,21 +64,38 @@ css_contract(record(cval, [
     field(how,    enum(how)),
     field(winner, ref(decl))           % the declaration that won the cascade, if one applied
 ])).                                   % (its value may be inherit, initial or unset)
+%% an element's computed style: which style, and the first of its values
+css_contract(record(estyle, [
+    field(node,   xhandle(dom, node)),
+    field(style,  u32),
+    field(first,  ref(cval))
+])).
+%% a property's initial value, as computed (border-color's is the element's colour)
+css_contract(record(initval, [
+    field(prop,   enum(prop)),
+    field(unit,   enum(unit)),
+    field(color,  u32),
+    field(text,   span(text))
+])).
 
 css_contract(handle(sheet, sh)).
 css_contract(handle(rule, ru)).
 css_contract(handle(decl, de)).
 css_contract(handle(match, ma)).
 css_contract(handle(cval, cv)).
+css_contract(handle(initval, iv)).
+css_contract(handle(estyle, es)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), pool(text), atoms(names)])).
+css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
 css_contract(owns(style, match, store)).
 css_contract(owns(style, cval, store)).
+css_contract(owns(style, initval, store)).
+css_contract(owns(style, estyle, store)).
 css_contract(owns(sheet, rule, list(rules))).
 css_contract(owns(rule, decl, list(decls))).
 css_contract(list(rules, sheet, rule, [first(first_rule), last(last_rule), next(next), up(sheet)])).
@@ -104,12 +122,23 @@ css_contract(fact(css_sheet(handle, field(origin)), table(sheet), true)).
 css_contract(fact(css_rule(handle, field(sheet), field(selector), field(spec), field(order)), table(rule), true)).
 css_contract(fact(css_decl(handle, field(rule), field(prop), field(text), field(important)), table(decl), true)).
 css_contract(fact(css_matched(field(node), field(rule)), table(match), true)).
-css_contract(fact(css_computed(field(node), field(prop), field(text), field(how)), table(cval), true)).
-css_contract(fact(css_won(field(node), field(prop), field(winner)), table(cval), field(winner) \== none)).
+%% EACH ELEMENT'S STYLE; OF EACH STYLE, THE VALUES A DECLARATION GAVE; and each
+%% property's initial value. Every other computed value is the parent element's or
+%% the initial one, which the rules derive (css_computed/4, css_rgba/3), so the
+%% snapshot need not carry it (PLAN.md 11)
+css_contract(fact(css_style_of(field(node), field(style)), table(estyle), true)).
+css_contract(fact(css_style_declared(field(style), field(prop), field(text), field(how)), table(cval), field(winner) \== none)).
+css_contract(fact(css_style_won(field(style), field(prop), field(winner)), table(cval), field(winner) \== none)).
 %% a computed colour as a number, RGBA (alpha in the low byte): what contrast is reckoned from
-css_contract(fact(css_rgba(field(node), field(prop), field(color)), table(cval), field(unit) == color)).
+css_contract(fact(css_style_rgba(field(style), field(prop), field(color)), table(cval), (field(unit) == color, field(winner) \== none))).
+css_contract(fact(css_initial(field(prop), field(text)), table(initval), true)).
+css_contract(fact(css_initial_rgba(field(prop), field(color)), table(initval), field(unit) == color)).
 
 css_contract(rules('rules/css')).
+css_contract(derived(css_declared/4, 'an element''s computed value of a property that a declaration gave, and how')).
+css_contract(derived(css_won/3, 'the declaration that won the cascade for an element''s property')).
+css_contract(derived(css_computed/4, 'an element''s computed value of a property, as CSS writes it, and whether it was declared, inherited or initial')).
+css_contract(derived(css_rgba/3, 'an element''s computed colour of a property as a number, RGBA')).
 css_contract(derived(css_origin_of/2, 'the origin of a declaration')).
 css_contract(derived(css_lost/4, 'a matching declaration that lost the cascade for a property, and at which step')).
 css_contract(derived(css_explain/3, 'why an element has its computed value of a property')).

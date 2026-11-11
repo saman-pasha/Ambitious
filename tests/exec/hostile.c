@@ -50,9 +50,12 @@ static void run(const char *what, const vector<char> *src) {
     amb_paint(&lt, 0, &c);
     /* the paragraph's colour: red only where a selector really matched */
     const char *color = "?";
-    for (uint32_t k = 1; k < st.cval_len; k++)
-        if (st.cval[k].prop == CSS_PROP_COLOR && names_is(&d, d.node[st.cval[k].node.index].name, "p", 1))
-            color = st.cval[k].color == 0xff0000ffu ? "red" : "not red";
+    for (uint32_t e = 1; e < st.estyle_len; e++) {
+        if (!names_is(&d, d.node[st.estyle[e].node.index].name, "p", 1)) continue;
+        uint32_t c0 = st.estyle[e].first;                    /* the paragraph's values: its style's */
+        for (uint32_t k = c0; k < st.cval_len && st.cval[k].style == st.cval[c0].style; k++)
+            if (st.cval[k].prop == CSS_PROP_COLOR) color = st.cval[k].color == 0xff0000ffu ? "red" : "not red";
+    }
     printf("%s: %zu bytes, %zu nodes, depth %zu, %zu boxes, the paragraph %s; invariants: %d broken\n", what, len(*src), node_count(d),
            depth_of(&d), box_count(lt), color, dom_check_invariants(&d, stdout) + layout_check_invariants(&lt, stdout));
 }

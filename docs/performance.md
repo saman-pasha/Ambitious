@@ -12,56 +12,63 @@ Intel Xeon at 2.10 GHz, the units built by cicilang at `-O2` for the generic
 x86-64 CPU. `tools/gen-big-page.py 200` makes the large page: 200 sections of
 headings, paragraphs, links, lists and tables, under 80 rules.
 
-| stage (ms, mean) | news.html | layout.html | the large page |
+| stage (ms, mean of 5) | news.html | layout.html | the large page |
 |---|---:|---:|---:|
 | the page's bytes, nodes, boxes | 466, 50, 17 | 2,257, 101, 32 | 248,919, 16,212, 5,404 |
-| fetch the page | 0.02 | 0.03 | 0.31 |
-| parse | 0.05 | 0.08 | 5.49 |
-| fetch its resources | 0.01 | 0.00 | 0.15 |
-| cascade | 0.40 | 0.71 | 113.52 |
-| layout | 1.16 | 1.34 | 33.03 |
-| accessibility tree | 0.01 | 0.02 | 3.55 |
-| paint | 2.90 | 4.24 | 75.84 |
-| encode the PNG | 11.98 | 15.68 | 455.19 |
-| export the snapshot | 0.94 | 1.48 | 149.75 |
-| **the engine, in all** | **17.5** | **23.6** | **836.8** |
-| the snapshot | 77 KB, 1,561 facts | 152 KB, 3,019 facts | 21.4 MB, 408,681 facts |
-| **reasoner: check** | **43** | **80** | **10,882** |
-| **reasoner: advise** | **64** | **87** | **10,939** |
+| fetch the page | 0.03 | 0.03 | 0.46 |
+| parse | 0.06 | 0.10 | 6.77 |
+| fetch its resources | 0.02 | 0.00 | 0.23 |
+| cascade | 0.30 | 0.32 | 4.51 |
+| layout | 1.30 | 1.24 | 17.26 |
+| accessibility tree | 0.02 | 0.02 | 1.75 |
+| paint | 2.44 | 2.56 | 48.15 |
+| encode the PNG | 14.45 | 15.43 | 432.69 |
+| export the snapshot | 0.88 | 1.21 | 74.52 |
+| **the engine, in all** | **19.5** | **20.9** | **586.3** |
+| the snapshot | 44 KB, 957 facts | 85 KB, 1,779 facts | 7.0 MB, 147,006 facts |
+| **reasoner: check** | **49** | **37** | **635** |
+| **reasoner: advise** | **34** | **34** | **1,206** |
+
+`docs/benchmark.md` sets these against Chromium on the same box (PLAN.md §11).
+Ambitious is faster at every stage it shares with Chromium, on every page.
 
 ## What reasoning costs against plain browsing
 
-For a page of ordinary size, reasoning over it costs two to four times what
-loading, laying out and drawing it costs: 40 to 90 ms, most of it cocolog
-starting and reading the snapshot. That price is paid only when the reasoner is
-asked: `load`, `style` and `render` export nothing and start no reasoner.
+For a page of ordinary size, reasoning over it costs one to two times what
+loading, laying out and drawing it costs. That is 35 to 50 ms, most of it
+cocolog starting. The price is paid only when the reasoner is asked: `load`,
+`style` and `render` export nothing and start no reasoner.
 
-At 400,000 facts, reading the snapshot costs about 27 µs a fact, and it is the
-whole of the reasoner's cost: proving every module's diagnostics takes 0.5 s of
-the 11. The fix is to send less, which the next section lists.
+At 147,000 facts, the large page's snapshot is read in about 0.6 s, at 4.3 µs
+a fact, and every module's diagnostics are proved in about 0.4 s. axe-core
+takes 2.1 s over the same page in Chromium.
 
-## What Phase 11 changed
+## What changed, and what it bought
 
 | change | before | after |
 |---|---|---|
 | units built at `-O2` (env.sh); pixels unchanged, checked by the render gate | 2,512 ms (the large page) | 837 ms |
-| the reasoner keeps handle-keyed facts by their integer keys (REPORT, finding 13) | `advise` 77 s; `low_contrast` alone 55 s | `advise` 11 s; every module's diagnostics 0.5 s |
+| the reasoner keeps handle-keyed facts by their integer keys (REPORT, finding 13) | `advise` 77 s; `low_contrast` alone 55 s | `advise` 11 s |
 | the snapshot read a line at a time (REPORT, finding 12) | refused past 16 MiB, exit 1 with nothing said | 21 MB read |
-| `check` reads the snapshot once | twice: 21 s | 10.9 s |
+| **the benchmark's changes (PLAN.md §11):** | | |
+| selectors split once; rules bucketed by their subject's id, class, attribute, type or `:is()` alternatives; an ancestor Bloom filter | cascade 131.8 ms (the large page) | 12.0 ms |
+| computed styles shared by elements with the same matched rules under parents of one style | 12.0 ms; 214,774 value records | 4.5 ms; one record per element and 29 per style |
+| layout reads a node's values in one pass | layout 38.7 ms | 17.3 ms |
+| the snapshot read a term at a time, each fact checked by a clause made for its predicate | 27 µs a fact | 4.3 µs a fact |
+| the snapshot carries each element's style and each style's declared values; the rules derive inherited and initial values | 408,681 facts, 21.4 MB | 147,006 facts, 7.0 MB |
+| `low_contrast` asks the cheap tests first | its diagnostics 0.45 s | 0.25 s |
+| opaque fills written a row at a time | paint 4.0 ms (news.html) | 2.4 ms |
 
 ## Hot paths, and what would make them faster
 
-- **Encoding the PNG** is the largest of the engine's stages. The painter's own
-  deflate is fixed codes, one LZ77 candidate per hash and no lazy matching, at
-  about 12 ns a byte. Dynamic codes and a hash chain would cut both the time
-  and the file.
-- **The cascade** matches every rule against every element, reading each
-  selector anew. Bucketing the rules by their rightmost compound's id, class or
-  type (as browsers do) skips most of the pairs.
-- **The snapshot.** Each element's 29 computed values are a third of the facts.
-  The next steps are to export only the values that differ from the parent's or
-  the initial ones, and to send deltas between revisions from the DOM's
-  mutation log (`diff` already compares two snapshots).
+- **Encoding the PNG** is now three quarters of the engine's time on every page.
+  The painter's own deflate uses fixed codes, one LZ77 candidate per hash and no
+  lazy matching, at about 12 ns a byte. It still beats Chromium's full-page
+  screenshot (`docs/benchmark.md`). A filter chosen per row and dynamic codes
+  would cut both the time and the file.
+- **The snapshot** could shrink further: deltas between revisions, from the DOM's
+  mutation log (`diff` already compares two snapshots), and a reasoner kept
+  running between them.
 
 ## Robustness
 
