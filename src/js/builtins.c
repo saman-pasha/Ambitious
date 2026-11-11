@@ -62,7 +62,8 @@ enum {
        collections' (src/js/proxy.c), JPX_N */
     N_RE_FIRST,
     N_PX_FIRST = N_RE_FIRST + JRE_N,
-    N_LAST = N_PX_FIRST + JPX_N
+    N_TA_FIRST = N_PX_FIRST + JPX_N,
+    N_LAST = N_TA_FIRST + JTN_N
 };
 
 /* ---- helpers ---- */
@@ -129,7 +130,7 @@ void js_set_proto(js_vm *vm, uint32_t o, uint32_t p) {
 }
 
 static double len_of(js_vm *vm, jv o) {
-    if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) return vm->objs[jv_idx(o)].b;
+    if (jv_is_obj(o) && (vm->objs[jv_idx(o)].kind == JK_ARRAY || vm->objs[jv_idx(o)].kind == JK_TYPEDARRAY)) return vm->objs[jv_idx(o)].b;
     jv n = js_get(vm, o, A_LENGTH);
     if (vm->throwing) return 0;
     double d = js_to_number(vm, n);
@@ -137,6 +138,7 @@ static double len_of(js_vm *vm, jv o) {
 }
 static jv elem_of(js_vm *vm, jv o, uint32_t i) {
     if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) return js_array_get(vm, jv_idx(o), i);
+    if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_TYPEDARRAY) return i < vm->objs[jv_idx(o)].b ? js_ta_get(vm, jv_idx(o), i) : JV_UNDEF;
     return js_get_value(vm, o, jv_num((double)i));
 }
 /* an array as the engine keeps one (the natives' fast paths) */
@@ -2059,6 +2061,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
        Reflect and the weak collections (src/js/proxy.c) */
     if (id >= N_RE_FIRST && id < N_RE_FIRST + JRE_N) return js_re_native(vm, id - N_RE_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_PX_FIRST && id < N_PX_FIRST + JPX_N) return js_proxy_native(vm, id - N_PX_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_TA_FIRST && id < N_TA_FIRST + JTN_N) return js_typed_native(vm, id - N_TA_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2674,6 +2677,23 @@ void js_builtins_init(js_vm *vm) {
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_MP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
     defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
     js_proxy_init(vm, N_PX_FIRST);
+    /* the typed arrays, and the methods they share with Array (generic over array-likes) */
+    js_typed_init(vm, N_TA_FIRST);
+    {
+        uint32_t tp = vm->typedarray_proto;
+        static const char *const shared[] = { "forEach", "every", "some", "find", "findIndex", "findLast", "findLastIndex", "indexOf",
+                                              "lastIndexOf", "includes", "join", "reduce", "reduceRight", "at", "keys", "entries", "toLocaleString" };
+        static const uint32_t sids[] = { N_AP_FOREACH, N_AP_EVERY, N_AP_SOME, N_AP_FIND, N_AP_FINDINDEX, N_AP_FINDLAST, N_AP_FINDLASTINDEX,
+                                         N_AP_INDEXOF, N_AP_LASTINDEXOF, N_AP_INCLUDES, N_AP_JOIN, N_AP_REDUCE, N_AP_REDUCERIGHT, N_AP_AT,
+                                         N_AP_KEYS, N_AP_ENTRIES, N_AP_JOIN };
+        for (uint32_t i = 0; i < 17; i++) defn(vm, tp, shared[i], sids[i], 1);
+        /* values and Symbol.iterator one function, toString Array's own */
+        uint32_t va = js_atom_ascii(vm, "values");
+        uint32_t vf = js_native_new(vm, N_AP_VALUES, va, 0);
+        js_define(vm, tp, va, jv_obj(vf), JS_SHAPE_HIDDEN);
+        js_define(vm, tp, JS_SYM_KEY | JSYM_ITERATOR, jv_obj(vf), JS_SHAPE_HIDDEN);
+        js_define(vm, tp, A_TOSTRING, js_get(vm, jv_obj(vm->array_proto), A_TOSTRING), JS_SHAPE_HIDDEN);
+    }
 
     /* Symbol: the function, its registry, the well-known ones; its prototype */
     uint32_t sy = ctor(vm, "Symbol", N_SYMBOL, 0, vm->symbol_proto);

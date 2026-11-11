@@ -81,8 +81,15 @@ enum {
     JK_GENERATOR,    /* a generator: a its state (JG_*), b its saved frame (an array), x its function */
     JK_ASYNC,        /* an async function's run: as a generator's, c its promise */
     JK_PROMISE,      /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
-    JK_PROXY         /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
+    JK_PROXY,        /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
+    JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length (src/js/typed.c) */
+    JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
+    JK_DATAVIEW      /* a its buffer, b its length in bytes, c its first byte in the buffer */
 };
+/* a typed array's element type, in its flags above JO_TA_SHIFT */
+enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UINT32, JTA_FLOAT32, JTA_FLOAT64,
+       JTA_BIGINT64, JTA_BIGUINT64, JTA_N };
+#define JO_TA_SHIFT 8
 /* an iterator: a its source, b its place, c its mode; JI_PROTOCOL's source is an
    iterator object whose next (kept in x) is called, JI_GEN's a generator resumed */
 enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES, JI_PROTOCOL, JI_GEN };
@@ -254,6 +261,9 @@ typedef struct js_vm {
     uint32_t map_proto, set_proto, iterator_proto;
     uint32_t symbol_proto, generator_proto, promise_proto, promise_ctor, aggregate_error_proto;
     uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
+    uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
+    uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
+    vector<uint8_t> bytes;            /* every ArrayBuffer's bytes (src/js/typed.c) */
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
@@ -289,7 +299,7 @@ typedef struct js_vm {
     vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms); vector_js_sym_drop(&(v).syms); \
     vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected); vector_js_regex_drop(&(v).regexes); \
     vector_uint32_t_drop(&(v).re_code); vector_uint32_t_drop(&(v).re_hash); vector_uint32_t_drop(&(v).re_stack); \
-    vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs)
+    vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs); vector_uint8_t_drop(&(v).bytes)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -380,6 +390,22 @@ enum { JPX_PROXY, JPX_REVOCABLE, JPX_REVOKE,
        JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER, JPX_N };
 jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_proxy_init(js_vm *vm, uint32_t first);
+/* typed arrays (src/js/typed.c): an element read and written (0: the conversion threw; an
+   index past the end ignored), the length; the natives of ArrayBuffer, the typed arrays,
+   DataView, TextEncoder and TextDecoder, after the first's id */
+jv js_ta_get(js_vm *vm, uint32_t o, uint32_t i);
+int js_ta_set(js_vm *vm, uint32_t o, uint32_t i, jv v);
+uint32_t js_ta_length(js_vm *vm, uint32_t o);
+enum { JTN_AB, JTN_AB_ISVIEW, JTN_AB_BYTELENGTH, JTN_AB_SLICE, JTN_AB_RESIZABLE, JTN_AB_MAXLENGTH,
+       JTN_CTOR, JTN_FROM, JTN_OF, JTN_BUFFER, JTN_BYTELENGTH, JTN_BYTEOFFSET, JTN_LENGTH, JTN_TAG,
+       JTN_SET, JTN_SUBARRAY, JTN_SLICE, JTN_FILL, JTN_MAP, JTN_FILTER, JTN_SORT, JTN_TOSORTED, JTN_REVERSE,
+       JTN_TOREVERSED, JTN_WITH, JTN_COPYWITHIN,
+       JTN_DV, JTN_DV_BUFFER, JTN_DV_BYTELENGTH, JTN_DV_BYTEOFFSET, JTN_DV_GET, JTN_DV_SET,
+       JTN_TE, JTN_TD, JTN_TE_ENCODING, JTN_TD_ENCODING, JTN_TD_FATAL, JTN_TD_IGNOREBOM, JTN_TE_ENCODE,
+       JTN_TE_ENCODEINTO, JTN_TD_DECODE, JTN_N };
+jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_typed_init(js_vm *vm, uint32_t first);
+
 /* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
 enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };
 uint32_t js_coll_new(js_vm *vm, uint32_t kind, uint32_t proto);

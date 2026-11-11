@@ -1,0 +1,28 @@
+Uint8Array[1,2,44,255] 4 4 44 
+Int8Array[127,-128,127,-1]
+Uint8ClampedArray[0,0,2,2,254,255,0]
+Float32Array[1.100000023841858,0.30000001192092896,Infinity] false
+Float64Array[1.5,NaN,7]
+Uint8Array[52,18,0,0] Uint16Array[0,4660,0,65535] 8 2 true
+deadbeef efbeadde -34 48813
+true 3370280550400
+RangeError
+RangeError start offset of Uint16Array should be a multiple of 2
+Int32Array[-3,0,0,2,5,10] Int32Array[3,2,1]
+Float64Array[-1,0,0,2,3,NaN]
+Uint8Array[4,3] Uint8Array[4,5] Uint8Array[2,4,6,8,10] Uint8Array[1,3,5] Uint8Array[5,4,3,2,1] 1
+99 4 1
+1 true 5-99-3-2-1 110 [0,1,2,3,4] 5 5,99,3,2,1
+[object Uint8Array] Uint8Array true ["0","1","2"]
+Int16Array[0,1,2,9] Int16Array[5,1,2,9] Int16Array[9,2,1,0] Int16Array[0,1,2,9]
+Uint8Array[0,1] Float32Array[1,2] Uint8Array[7,8]
+Uint8Array[0,0,0,0] Uint8Array[4,5,3,4,5] 1 8
+4 true false
+Uint8Array[104,195,169,108,108,111,32,240,159,152,128] 11 utf-8
+héllo 😀 €�A a
+TypeError
+{"read":3,"written":4} Uint8Array[97,195,177,98]
+2499975000
+key 0
+key 1
+{"0":1,"1":2} {"t":{"0":3}} false

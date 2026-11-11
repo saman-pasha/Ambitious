@@ -378,6 +378,15 @@ static void js_obj_room(js_vm *vm, uint32_t o, uint32_t i) {
 
 int js_get_own(js_vm *vm, uint32_t o, uint32_t atom, jv *v, uint32_t *flags) {
     if (vm->objs[o].kind == JK_PROXY) return js_proxy_get_own(vm, o, atom, v, flags);
+    if (vm->objs[o].kind == JK_TYPEDARRAY) {
+        uint32_t i;
+        if (js_atom_index(vm, atom, &i)) {
+            if (i >= vm->objs[o].b) return 0;
+            *v = js_ta_get(vm, o, i);
+            *flags = 0;
+            return 1;
+        }
+    }
     uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
     if (!e) return 0;
     jv x = vm->slots[vm->objs[o].slots + vm->shapes[e].slot];
@@ -872,6 +881,10 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
         uint32_t k = vm->objs[x].kind;
         /* a proxy, here or up the prototypes: its get, never cached (holder left unset) */
         if (k == JK_PROXY) return js_proxy_get(vm, x, atom, receiver);
+        if (k == JK_TYPEDARRAY) {
+            uint32_t i;
+            if (js_atom_index(vm, atom, &i)) return i < vm->objs[x].b ? js_ta_get(vm, x, i) : JV_UNDEF;
+        }
         if (k == JK_ARRAY) {
             if (atom == A_LENGTH) return jv_num(vm->objs[x].b);
             uint32_t i;
@@ -988,6 +1001,10 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     uint32_t o = jv_idx(objv);
     uint32_t k = vm->objs[o].kind;
     if (k == JK_PROXY) return js_proxy_set(vm, o, atom, v, objv);
+    if (k == JK_TYPEDARRAY) {
+        uint32_t i;
+        if (js_atom_index(vm, atom, &i)) return js_ta_set(vm, o, i, v);
+    }
     if (vm->objs[o].flags & JO_FROZEN) return 1;
     if (k == JK_ARRAY) {
         uint32_t i;
@@ -1070,6 +1087,8 @@ jv js_get_value(js_vm *vm, jv obj, jv key) {
                 jv v = vm->slots[vm->objs[o].a + index];
                 if (v != JV_HOLE) return v;
             }
+            /* a typed array's element, or nothing past its end (no prototype has its indexes) */
+            if (vm->objs[o].kind == JK_TYPEDARRAY) return index < vm->objs[o].b ? js_ta_get(vm, o, index) : JV_UNDEF;
         } else if (jv_is_str(obj)) {
             uint32_t s = jv_idx(obj);
             return index < vm->strs[s].len ? jv_str(js_str_sub(vm, s, index, index + 1)) : JV_UNDEF;
@@ -1089,6 +1108,7 @@ int js_set_value(js_vm *vm, jv obj, jv key, jv v) {
             js_array_set(vm, o, index, v);
             return 1;
         }
+        if (vm->objs[o].kind == JK_TYPEDARRAY) return js_ta_set(vm, o, index, v);
     }
     if (!atom) atom = js_atom(vm, js_num_to_str(vm, (double)index));
     return js_set(vm, obj, atom, v);
@@ -1099,6 +1119,7 @@ int js_has(js_vm *vm, uint32_t o, uint32_t atom) {
         uint32_t k = vm->objs[x].kind;
         if (k == JK_PROXY) return js_proxy_has(vm, x, atom);
         uint32_t i;
+        if (k == JK_TYPEDARRAY && js_atom_index(vm, atom, &i)) return i < vm->objs[x].b;
         if (k == JK_ARRAY) {
             if (atom == A_LENGTH) return 1;
             if (js_atom_index(vm, atom, &i) && i < vm->objs[x].b && vm->slots[vm->objs[x].a + i] != JV_HOLE) return 1;
@@ -1140,6 +1161,7 @@ static void js_sort_u64(vector<uint64_t> *v) {
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
     uint32_t k = vm->objs[o].kind;
     if (k == JK_PROXY) { js_proxy_own_keys(vm, o, 1, 0, enumerable_only, arr); return; }
+    if (k == JK_TYPEDARRAY) for (uint32_t i = 0; i < vm->objs[o].b; i++) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
     if (k == JK_ARRAY) {
         for (uint32_t i = 0; i < vm->objs[o].b; i++)
             if (vm->slots[vm->objs[o].a + i] != JV_HOLE) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
@@ -1336,7 +1358,7 @@ jv js_iter_of(js_vm *vm, jv v) {
     if (jv_is_obj(v)) {
         uint32_t o = jv_idx(v);
         uint32_t k = vm->objs[o].kind;
-        if (k == JK_ARRAY) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
+        if (k == JK_ARRAY || k == JK_TYPEDARRAY) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
         if (k == JK_ARGUMENTS) return jv_obj(js_iter_new(vm, vm->objs[o].a, JI_ARRAY));
         if (k == JK_MAP) return jv_obj(js_iter_new(vm, o, JI_MAP));
         if (k == JK_SET) return jv_obj(js_iter_new(vm, o, JI_SET));
@@ -1398,6 +1420,9 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
         if (vm->objs[src].kind == JK_ARRAY) {
             if (i >= vm->objs[src].b) return 0;
             *out = js_array_get(vm, src, i);
+        } else if (vm->objs[src].kind == JK_TYPEDARRAY) {
+            if (i >= vm->objs[src].b) return 0;
+            *out = js_ta_get(vm, src, i);
         } else {
             jv n = js_get(vm, jv_obj(src), A_LENGTH);
             if (vm->throwing || !jv_is_num(n) || (double)i >= jv_dbl(n)) return 0;
@@ -2310,6 +2335,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                         else stack[sp - 1] = v;
                         goto next;
                     }
+                } else if (objs[o].kind == JK_TYPEDARRAY && d >= 0 && d < (double)objs[o].b && d == (double)(uint32_t)d) {
+                    v = js_ta_get(vm, o, (uint32_t)d); RELOAD();
+                    if (op == OP_GET_ELEM) { sp--; stack[sp - 1] = v; }
+                    else stack[sp - 1] = v;
+                    goto next;
                 }
             }
             if (v == JV_HOLE) {
@@ -2329,6 +2359,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 double d = jv_dbl(k);
                 if (objs[o].kind == JK_ARRAY && !(objs[o].flags & JO_FROZEN) && d >= 0 && d <= (double)objs[o].b && d == (double)(uint32_t)d) {
                     js_array_set(vm, o, (uint32_t)d, v); RELOAD();
+                    done = 1;
+                } else if (objs[o].kind == JK_TYPEDARRAY && d >= 0 && d < (double)objs[o].b && d == (double)(uint32_t)d) {
+                    SYNC();
+                    js_ta_set(vm, o, (uint32_t)d, v); RELOAD();
+                    if (vm->throwing) break;
                     done = 1;
                 }
             }
