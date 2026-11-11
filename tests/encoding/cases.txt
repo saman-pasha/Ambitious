@@ -1,0 +1,1928 @@
+# tests/encoding/cases.txt -- written by tests/encoding/gen.py; tests/exec/encoding.c answers each line
+label 383636
+label 616e73695f78332e342d31393638
+label 617261626963
+label 6173636969
+label 61736d6f2d373038
+label 62696735
+label 626967352d686b736373
+label 6368696e657365
+label 636e2d62696735
+label 637031323530
+label 637031323531
+label 637031323532
+label 637031323533
+label 637031323534
+label 637031323535
+label 637031323536
+label 637031323537
+label 637031323538
+label 6370383139
+label 6370383636
+label 637362696735
+label 63736575636b72
+label 6373657563706b64666d746a6170616e657365
+label 6373676232333132
+label 637369626d383636
+label 637369736f323032326a70
+label 637369736f323032326b72
+label 637369736f35386762323331323830
+label 637369736f383835393665
+label 637369736f383835393669
+label 637369736f383835393865
+label 637369736f383835393869
+label 637369736f6c6174696e31
+label 637369736f6c6174696e32
+label 637369736f6c6174696e33
+label 637369736f6c6174696e34
+label 637369736f6c6174696e35
+label 637369736f6c6174696e36
+label 637369736f6c6174696e39
+label 637369736f6c6174696e617261626963
+label 637369736f6c6174696e637972696c6c6963
+label 637369736f6c6174696e677265656b
+label 637369736f6c6174696e686562726577
+label 63736b6f693872
+label 63736b73633536303131393837
+label 63736d6163696e746f7368
+label 637373686966746a6973
+label 6373756e69636f6465
+label 637972696c6c6963
+label 646f732d383734
+label 65636d612d313134
+label 65636d612d313138
+label 656c6f745f393238
+label 6575632d6a70
+label 6575632d6b72
+label 67623138303330
+label 676232333132
+label 67625f32333132
+label 67625f323331322d3830
+label 67626b
+label 677265656b
+label 677265656b38
+label 686562726577
+label 687a2d67622d32333132
+label 69626d383139
+label 69626d383636
+label 69736f2d31303634362d7563732d32
+label 69736f2d323032322d636e
+label 69736f2d323032322d636e2d657874
+label 69736f2d323032322d6a70
+label 69736f2d323032322d6b72
+label 69736f2d383835392d31
+label 69736f2d383835392d3130
+label 69736f2d383835392d3131
+label 69736f2d383835392d3133
+label 69736f2d383835392d3134
+label 69736f2d383835392d3135
+label 69736f2d383835392d3136
+label 69736f2d383835392d32
+label 69736f2d383835392d33
+label 69736f2d383835392d34
+label 69736f2d383835392d35
+label 69736f2d383835392d36
+label 69736f2d383835392d362d65
+label 69736f2d383835392d362d69
+label 69736f2d383835392d37
+label 69736f2d383835392d38
+label 69736f2d383835392d382d65
+label 69736f2d383835392d382d69
+label 69736f2d383835392d39
+label 69736f2d69722d313030
+label 69736f2d69722d313031
+label 69736f2d69722d313039
+label 69736f2d69722d313130
+label 69736f2d69722d313236
+label 69736f2d69722d313237
+label 69736f2d69722d313338
+label 69736f2d69722d313434
+label 69736f2d69722d313438
+label 69736f2d69722d313439
+label 69736f2d69722d313537
+label 69736f2d69722d3538
+label 69736f383835392d31
+label 69736f383835392d3130
+label 69736f383835392d3131
+label 69736f383835392d3133
+label 69736f383835392d3134
+label 69736f383835392d3135
+label 69736f383835392d32
+label 69736f383835392d33
+label 69736f383835392d34
+label 69736f383835392d35
+label 69736f383835392d36
+label 69736f383835392d37
+label 69736f383835392d38
+label 69736f383835392d39
+label 69736f3838353931
+label 69736f383835393130
+label 69736f383835393131
+label 69736f383835393133
+label 69736f383835393134
+label 69736f383835393135
+label 69736f3838353932
+label 69736f3838353933
+label 69736f3838353934
+label 69736f3838353935
+label 69736f3838353936
+label 69736f3838353937
+label 69736f3838353938
+label 69736f3838353939
+label 69736f5f383835392d31
+label 69736f5f383835392d3135
+label 69736f5f383835392d313a31393837
+label 69736f5f383835392d32
+label 69736f5f383835392d323a31393837
+label 69736f5f383835392d33
+label 69736f5f383835392d333a31393838
+label 69736f5f383835392d34
+label 69736f5f383835392d343a31393838
+label 69736f5f383835392d35
+label 69736f5f383835392d353a31393838
+label 69736f5f383835392d36
+label 69736f5f383835392d363a31393837
+label 69736f5f383835392d37
+label 69736f5f383835392d373a31393837
+label 69736f5f383835392d38
+label 69736f5f383835392d383a31393838
+label 69736f5f383835392d39
+label 69736f5f383835392d393a31393839
+label 6b6f69
+label 6b6f6938
+label 6b6f69382d72
+label 6b6f69382d7275
+label 6b6f69382d75
+label 6b6f69385f72
+label 6b6f7265616e
+label 6b735f635f353630312d31393837
+label 6b735f635f353630312d31393839
+label 6b736335363031
+label 6b73635f35363031
+label 6c31
+label 6c32
+label 6c33
+label 6c34
+label 6c35
+label 6c36
+label 6c39
+label 6c6174696e31
+label 6c6174696e32
+label 6c6174696e33
+label 6c6174696e34
+label 6c6174696e35
+label 6c6174696e36
+label 6c6f676963616c
+label 6d6163
+label 6d6163696e746f7368
+label 6d73393332
+label 6d735f6b616e6a69
+label 7265706c6163656d656e74
+label 73686966742d6a6973
+label 73686966745f6a6973
+label 736a6973
+label 73756e5f65755f677265656b
+label 7469732d363230
+label 7563732d32
+label 756e69636f6465
+label 756e69636f64652d312d312d7574662d38
+label 756e69636f6465313175746638
+label 756e69636f6465323075746638
+label 756e69636f646566656666
+label 756e69636f646566666665
+label 75732d6173636969
+label 7574662d3136
+label 7574662d31366265
+label 7574662d31366c65
+label 7574662d38
+label 75746638
+label 76697375616c
+label 77696e646f77732d31323530
+label 77696e646f77732d31323531
+label 77696e646f77732d31323532
+label 77696e646f77732d31323533
+label 77696e646f77732d31323534
+label 77696e646f77732d31323535
+label 77696e646f77732d31323536
+label 77696e646f77732d31323537
+label 77696e646f77732d31323538
+label 77696e646f77732d33316a
+label 77696e646f77732d383734
+label 77696e646f77732d393439
+label 782d637031323530
+label 782d637031323531
+label 782d637031323532
+label 782d637031323533
+label 782d637031323534
+label 782d637031323535
+label 782d637031323536
+label 782d637031323537
+label 782d637031323538
+label 782d6575632d6a70
+label 782d67626b
+label 782d6d61632d637972696c6c6963
+label 782d6d61632d726f6d616e
+label 782d6d61632d756b7261696e69616e
+label 782d736a6973
+label 782d756e69636f6465323075746638
+label 782d757365722d646566696e6564
+label 782d782d62696735
+label 207574662d38
+label 5554462d3809
+label 0a0c0d53686966745f4a49532009
+label 534a4953
+label 57696e646f77732d31323532
+label 49534f2d383835392d31
+label 55532d4153434949
+label 582d557365722d446566696e6564
+label 5554462d3136
+label 485a2d47422d32333132
+label 7574662d37
+label 7574663820
+label 0b7574662d38
+label 7574662d3800
+label 75207420662d38
+label -
+label 202020
+label 6373657563706b64666d746a6170616e65736578
+label 7574
+label 7574662d3830
+label 69736f2d383835392d3131
+label 69736f2d383835392d39
+label 7563732d32
+label 676232333132
+label 782d67626b
+label 6b6f69
+label c3a9
+decode ibm866 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-2 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-3 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-4 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-5 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-6 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-7 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-8 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-8-i 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-10 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-13 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-14 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-15 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode iso-8859-16 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode koi8-r 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode koi8-u 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode macintosh 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-874 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1250 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1251 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1252 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1253 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1254 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1255 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1256 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1257 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1258 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode x-mac-cyrillic 808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode x-user-defined 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+decode windows-1252 706c61696e20415343494920307837463a207f
+decode koi8-u 706c61696e20415343494920307837463a207f
+decode iso-8859-8-i 706c61696e20415343494920307837463a207f
+decode x-user-defined 706c61696e20415343494920307837463a207f
+pairs gb18030 -
+pairs gb18030 81
+pairs gb18030 82
+pairs gb18030 83
+pairs gb18030 84
+pairs gb18030 85
+pairs gb18030 86
+pairs gb18030 87
+pairs gb18030 88
+pairs gb18030 89
+pairs gb18030 8a
+pairs gb18030 8b
+pairs gb18030 8c
+pairs gb18030 8d
+pairs gb18030 8e
+pairs gb18030 8f
+pairs gb18030 90
+pairs gb18030 91
+pairs gb18030 92
+pairs gb18030 93
+pairs gb18030 94
+pairs gb18030 95
+pairs gb18030 96
+pairs gb18030 97
+pairs gb18030 98
+pairs gb18030 99
+pairs gb18030 9a
+pairs gb18030 9b
+pairs gb18030 9c
+pairs gb18030 9d
+pairs gb18030 9e
+pairs gb18030 9f
+pairs gb18030 a0
+pairs gb18030 a1
+pairs gb18030 a2
+pairs gb18030 a3
+pairs gb18030 a4
+pairs gb18030 a5
+pairs gb18030 a6
+pairs gb18030 a7
+pairs gb18030 a8
+pairs gb18030 a9
+pairs gb18030 aa
+pairs gb18030 ab
+pairs gb18030 ac
+pairs gb18030 ad
+pairs gb18030 ae
+pairs gb18030 af
+pairs gb18030 b0
+pairs gb18030 b1
+pairs gb18030 b2
+pairs gb18030 b3
+pairs gb18030 b4
+pairs gb18030 b5
+pairs gb18030 b6
+pairs gb18030 b7
+pairs gb18030 b8
+pairs gb18030 b9
+pairs gb18030 ba
+pairs gb18030 bb
+pairs gb18030 bc
+pairs gb18030 bd
+pairs gb18030 be
+pairs gb18030 bf
+pairs gb18030 c0
+pairs gb18030 c1
+pairs gb18030 c2
+pairs gb18030 c3
+pairs gb18030 c4
+pairs gb18030 c5
+pairs gb18030 c6
+pairs gb18030 c7
+pairs gb18030 c8
+pairs gb18030 c9
+pairs gb18030 ca
+pairs gb18030 cb
+pairs gb18030 cc
+pairs gb18030 cd
+pairs gb18030 ce
+pairs gb18030 cf
+pairs gb18030 d0
+pairs gb18030 d1
+pairs gb18030 d2
+pairs gb18030 d3
+pairs gb18030 d4
+pairs gb18030 d5
+pairs gb18030 d6
+pairs gb18030 d7
+pairs gb18030 d8
+pairs gb18030 d9
+pairs gb18030 da
+pairs gb18030 db
+pairs gb18030 dc
+pairs gb18030 dd
+pairs gb18030 de
+pairs gb18030 df
+pairs gb18030 e0
+pairs gb18030 e1
+pairs gb18030 e2
+pairs gb18030 e3
+pairs gb18030 e4
+pairs gb18030 e5
+pairs gb18030 e6
+pairs gb18030 e7
+pairs gb18030 e8
+pairs gb18030 e9
+pairs gb18030 ea
+pairs gb18030 eb
+pairs gb18030 ec
+pairs gb18030 ed
+pairs gb18030 ee
+pairs gb18030 ef
+pairs gb18030 f0
+pairs gb18030 f1
+pairs gb18030 f2
+pairs gb18030 f3
+pairs gb18030 f4
+pairs gb18030 f5
+pairs gb18030 f6
+pairs gb18030 f7
+pairs gb18030 f8
+pairs gb18030 f9
+pairs gb18030 fa
+pairs gb18030 fb
+pairs gb18030 fc
+pairs gb18030 fd
+pairs gb18030 fe
+pairs big5 -
+pairs big5 81
+pairs big5 82
+pairs big5 83
+pairs big5 84
+pairs big5 85
+pairs big5 86
+pairs big5 87
+pairs big5 88
+pairs big5 89
+pairs big5 8a
+pairs big5 8b
+pairs big5 8c
+pairs big5 8d
+pairs big5 8e
+pairs big5 8f
+pairs big5 90
+pairs big5 91
+pairs big5 92
+pairs big5 93
+pairs big5 94
+pairs big5 95
+pairs big5 96
+pairs big5 97
+pairs big5 98
+pairs big5 99
+pairs big5 9a
+pairs big5 9b
+pairs big5 9c
+pairs big5 9d
+pairs big5 9e
+pairs big5 9f
+pairs big5 a0
+pairs big5 a1
+pairs big5 a2
+pairs big5 a3
+pairs big5 a4
+pairs big5 a5
+pairs big5 a6
+pairs big5 a7
+pairs big5 a8
+pairs big5 a9
+pairs big5 aa
+pairs big5 ab
+pairs big5 ac
+pairs big5 ad
+pairs big5 ae
+pairs big5 af
+pairs big5 b0
+pairs big5 b1
+pairs big5 b2
+pairs big5 b3
+pairs big5 b4
+pairs big5 b5
+pairs big5 b6
+pairs big5 b7
+pairs big5 b8
+pairs big5 b9
+pairs big5 ba
+pairs big5 bb
+pairs big5 bc
+pairs big5 bd
+pairs big5 be
+pairs big5 bf
+pairs big5 c0
+pairs big5 c1
+pairs big5 c2
+pairs big5 c3
+pairs big5 c4
+pairs big5 c5
+pairs big5 c6
+pairs big5 c7
+pairs big5 c8
+pairs big5 c9
+pairs big5 ca
+pairs big5 cb
+pairs big5 cc
+pairs big5 cd
+pairs big5 ce
+pairs big5 cf
+pairs big5 d0
+pairs big5 d1
+pairs big5 d2
+pairs big5 d3
+pairs big5 d4
+pairs big5 d5
+pairs big5 d6
+pairs big5 d7
+pairs big5 d8
+pairs big5 d9
+pairs big5 da
+pairs big5 db
+pairs big5 dc
+pairs big5 dd
+pairs big5 de
+pairs big5 df
+pairs big5 e0
+pairs big5 e1
+pairs big5 e2
+pairs big5 e3
+pairs big5 e4
+pairs big5 e5
+pairs big5 e6
+pairs big5 e7
+pairs big5 e8
+pairs big5 e9
+pairs big5 ea
+pairs big5 eb
+pairs big5 ec
+pairs big5 ed
+pairs big5 ee
+pairs big5 ef
+pairs big5 f0
+pairs big5 f1
+pairs big5 f2
+pairs big5 f3
+pairs big5 f4
+pairs big5 f5
+pairs big5 f6
+pairs big5 f7
+pairs big5 f8
+pairs big5 f9
+pairs big5 fa
+pairs big5 fb
+pairs big5 fc
+pairs big5 fd
+pairs big5 fe
+pairs euc-kr -
+pairs euc-kr 81
+pairs euc-kr 82
+pairs euc-kr 83
+pairs euc-kr 84
+pairs euc-kr 85
+pairs euc-kr 86
+pairs euc-kr 87
+pairs euc-kr 88
+pairs euc-kr 89
+pairs euc-kr 8a
+pairs euc-kr 8b
+pairs euc-kr 8c
+pairs euc-kr 8d
+pairs euc-kr 8e
+pairs euc-kr 8f
+pairs euc-kr 90
+pairs euc-kr 91
+pairs euc-kr 92
+pairs euc-kr 93
+pairs euc-kr 94
+pairs euc-kr 95
+pairs euc-kr 96
+pairs euc-kr 97
+pairs euc-kr 98
+pairs euc-kr 99
+pairs euc-kr 9a
+pairs euc-kr 9b
+pairs euc-kr 9c
+pairs euc-kr 9d
+pairs euc-kr 9e
+pairs euc-kr 9f
+pairs euc-kr a0
+pairs euc-kr a1
+pairs euc-kr a2
+pairs euc-kr a3
+pairs euc-kr a4
+pairs euc-kr a5
+pairs euc-kr a6
+pairs euc-kr a7
+pairs euc-kr a8
+pairs euc-kr a9
+pairs euc-kr aa
+pairs euc-kr ab
+pairs euc-kr ac
+pairs euc-kr ad
+pairs euc-kr ae
+pairs euc-kr af
+pairs euc-kr b0
+pairs euc-kr b1
+pairs euc-kr b2
+pairs euc-kr b3
+pairs euc-kr b4
+pairs euc-kr b5
+pairs euc-kr b6
+pairs euc-kr b7
+pairs euc-kr b8
+pairs euc-kr b9
+pairs euc-kr ba
+pairs euc-kr bb
+pairs euc-kr bc
+pairs euc-kr bd
+pairs euc-kr be
+pairs euc-kr bf
+pairs euc-kr c0
+pairs euc-kr c1
+pairs euc-kr c2
+pairs euc-kr c3
+pairs euc-kr c4
+pairs euc-kr c5
+pairs euc-kr c6
+pairs euc-kr c7
+pairs euc-kr c8
+pairs euc-kr c9
+pairs euc-kr ca
+pairs euc-kr cb
+pairs euc-kr cc
+pairs euc-kr cd
+pairs euc-kr ce
+pairs euc-kr cf
+pairs euc-kr d0
+pairs euc-kr d1
+pairs euc-kr d2
+pairs euc-kr d3
+pairs euc-kr d4
+pairs euc-kr d5
+pairs euc-kr d6
+pairs euc-kr d7
+pairs euc-kr d8
+pairs euc-kr d9
+pairs euc-kr da
+pairs euc-kr db
+pairs euc-kr dc
+pairs euc-kr dd
+pairs euc-kr de
+pairs euc-kr df
+pairs euc-kr e0
+pairs euc-kr e1
+pairs euc-kr e2
+pairs euc-kr e3
+pairs euc-kr e4
+pairs euc-kr e5
+pairs euc-kr e6
+pairs euc-kr e7
+pairs euc-kr e8
+pairs euc-kr e9
+pairs euc-kr ea
+pairs euc-kr eb
+pairs euc-kr ec
+pairs euc-kr ed
+pairs euc-kr ee
+pairs euc-kr ef
+pairs euc-kr f0
+pairs euc-kr f1
+pairs euc-kr f2
+pairs euc-kr f3
+pairs euc-kr f4
+pairs euc-kr f5
+pairs euc-kr f6
+pairs euc-kr f7
+pairs euc-kr f8
+pairs euc-kr f9
+pairs euc-kr fa
+pairs euc-kr fb
+pairs euc-kr fc
+pairs euc-kr fd
+pairs euc-kr fe
+pairs shift_jis -
+pairs shift_jis 81
+pairs shift_jis 82
+pairs shift_jis 83
+pairs shift_jis 84
+pairs shift_jis 85
+pairs shift_jis 86
+pairs shift_jis 87
+pairs shift_jis 88
+pairs shift_jis 89
+pairs shift_jis 8a
+pairs shift_jis 8b
+pairs shift_jis 8c
+pairs shift_jis 8d
+pairs shift_jis 8e
+pairs shift_jis 8f
+pairs shift_jis 90
+pairs shift_jis 91
+pairs shift_jis 92
+pairs shift_jis 93
+pairs shift_jis 94
+pairs shift_jis 95
+pairs shift_jis 96
+pairs shift_jis 97
+pairs shift_jis 98
+pairs shift_jis 99
+pairs shift_jis 9a
+pairs shift_jis 9b
+pairs shift_jis 9c
+pairs shift_jis 9d
+pairs shift_jis 9e
+pairs shift_jis 9f
+pairs shift_jis e0
+pairs shift_jis e1
+pairs shift_jis e2
+pairs shift_jis e3
+pairs shift_jis e4
+pairs shift_jis e5
+pairs shift_jis e6
+pairs shift_jis e7
+pairs shift_jis e8
+pairs shift_jis e9
+pairs shift_jis ea
+pairs shift_jis eb
+pairs shift_jis ec
+pairs shift_jis ed
+pairs shift_jis ee
+pairs shift_jis ef
+pairs shift_jis f0
+pairs shift_jis f1
+pairs shift_jis f2
+pairs shift_jis f3
+pairs shift_jis f4
+pairs shift_jis f5
+pairs shift_jis f6
+pairs shift_jis f7
+pairs shift_jis f8
+pairs shift_jis f9
+pairs shift_jis fa
+pairs shift_jis fb
+pairs shift_jis fc
+pairs euc-jp -
+pairs euc-jp a1
+pairs euc-jp a2
+pairs euc-jp a3
+pairs euc-jp a4
+pairs euc-jp a5
+pairs euc-jp a6
+pairs euc-jp a7
+pairs euc-jp a8
+pairs euc-jp a9
+pairs euc-jp aa
+pairs euc-jp ab
+pairs euc-jp ac
+pairs euc-jp ad
+pairs euc-jp ae
+pairs euc-jp af
+pairs euc-jp b0
+pairs euc-jp b1
+pairs euc-jp b2
+pairs euc-jp b3
+pairs euc-jp b4
+pairs euc-jp b5
+pairs euc-jp b6
+pairs euc-jp b7
+pairs euc-jp b8
+pairs euc-jp b9
+pairs euc-jp ba
+pairs euc-jp bb
+pairs euc-jp bc
+pairs euc-jp bd
+pairs euc-jp be
+pairs euc-jp bf
+pairs euc-jp c0
+pairs euc-jp c1
+pairs euc-jp c2
+pairs euc-jp c3
+pairs euc-jp c4
+pairs euc-jp c5
+pairs euc-jp c6
+pairs euc-jp c7
+pairs euc-jp c8
+pairs euc-jp c9
+pairs euc-jp ca
+pairs euc-jp cb
+pairs euc-jp cc
+pairs euc-jp cd
+pairs euc-jp ce
+pairs euc-jp cf
+pairs euc-jp d0
+pairs euc-jp d1
+pairs euc-jp d2
+pairs euc-jp d3
+pairs euc-jp d4
+pairs euc-jp d5
+pairs euc-jp d6
+pairs euc-jp d7
+pairs euc-jp d8
+pairs euc-jp d9
+pairs euc-jp da
+pairs euc-jp db
+pairs euc-jp dc
+pairs euc-jp dd
+pairs euc-jp de
+pairs euc-jp df
+pairs euc-jp e0
+pairs euc-jp e1
+pairs euc-jp e2
+pairs euc-jp e3
+pairs euc-jp e4
+pairs euc-jp e5
+pairs euc-jp e6
+pairs euc-jp e7
+pairs euc-jp e8
+pairs euc-jp e9
+pairs euc-jp ea
+pairs euc-jp eb
+pairs euc-jp ec
+pairs euc-jp ed
+pairs euc-jp ee
+pairs euc-jp ef
+pairs euc-jp f0
+pairs euc-jp f1
+pairs euc-jp f2
+pairs euc-jp f3
+pairs euc-jp f4
+pairs euc-jp f5
+pairs euc-jp f6
+pairs euc-jp f7
+pairs euc-jp f8
+pairs euc-jp f9
+pairs euc-jp fa
+pairs euc-jp fb
+pairs euc-jp fc
+pairs euc-jp fd
+pairs euc-jp fe
+pairs gbk 80
+pairs gbk 81
+pairs gbk a1
+pairs gbk d7
+pairs gbk fe
+pairs gbk ff
+pairs big5 80
+pairs big5 ff
+pairs euc-kr 80
+pairs euc-kr ff
+pairs shift_jis a0
+pairs shift_jis fd
+pairs euc-jp 8e
+pairs euc-jp 80
+pairs euc-jp a0
+pairs euc-jp ff
+pairs euc-jp 8fa1
+pairs euc-jp 8fa2
+pairs euc-jp 8fa3
+pairs euc-jp 8fa4
+pairs euc-jp 8fa5
+pairs euc-jp 8fa6
+pairs euc-jp 8fa7
+pairs euc-jp 8fa8
+pairs euc-jp 8fa9
+pairs euc-jp 8faa
+pairs euc-jp 8fab
+pairs euc-jp 8fac
+pairs euc-jp 8fad
+pairs euc-jp 8fae
+pairs euc-jp 8faf
+pairs euc-jp 8fb0
+pairs euc-jp 8fb1
+pairs euc-jp 8fb2
+pairs euc-jp 8fb3
+pairs euc-jp 8fb4
+pairs euc-jp 8fb5
+pairs euc-jp 8fb6
+pairs euc-jp 8fb7
+pairs euc-jp 8fb8
+pairs euc-jp 8fb9
+pairs euc-jp 8fba
+pairs euc-jp 8fbb
+pairs euc-jp 8fbc
+pairs euc-jp 8fbd
+pairs euc-jp 8fbe
+pairs euc-jp 8fbf
+pairs euc-jp 8fc0
+pairs euc-jp 8fc1
+pairs euc-jp 8fc2
+pairs euc-jp 8fc3
+pairs euc-jp 8fc4
+pairs euc-jp 8fc5
+pairs euc-jp 8fc6
+pairs euc-jp 8fc7
+pairs euc-jp 8fc8
+pairs euc-jp 8fc9
+pairs euc-jp 8fca
+pairs euc-jp 8fcb
+pairs euc-jp 8fcc
+pairs euc-jp 8fcd
+pairs euc-jp 8fce
+pairs euc-jp 8fcf
+pairs euc-jp 8fd0
+pairs euc-jp 8fd1
+pairs euc-jp 8fd2
+pairs euc-jp 8fd3
+pairs euc-jp 8fd4
+pairs euc-jp 8fd5
+pairs euc-jp 8fd6
+pairs euc-jp 8fd7
+pairs euc-jp 8fd8
+pairs euc-jp 8fd9
+pairs euc-jp 8fda
+pairs euc-jp 8fdb
+pairs euc-jp 8fdc
+pairs euc-jp 8fdd
+pairs euc-jp 8fde
+pairs euc-jp 8fdf
+pairs euc-jp 8fe0
+pairs euc-jp 8fe1
+pairs euc-jp 8fe2
+pairs euc-jp 8fe3
+pairs euc-jp 8fe4
+pairs euc-jp 8fe5
+pairs euc-jp 8fe6
+pairs euc-jp 8fe7
+pairs euc-jp 8fe8
+pairs euc-jp 8fe9
+pairs euc-jp 8fea
+pairs euc-jp 8feb
+pairs euc-jp 8fec
+pairs euc-jp 8fed
+pairs euc-jp 8fee
+pairs euc-jp 8fef
+pairs euc-jp 8ff0
+pairs euc-jp 8ff1
+pairs euc-jp 8ff2
+pairs euc-jp 8ff3
+pairs euc-jp 8ff4
+pairs euc-jp 8ff5
+pairs euc-jp 8ff6
+pairs euc-jp 8ff7
+pairs euc-jp 8ff8
+pairs euc-jp 8ff9
+pairs euc-jp 8ffa
+pairs euc-jp 8ffb
+pairs euc-jp 8ffc
+pairs euc-jp 8ffd
+pairs euc-jp 8ffe
+pairs euc-jp 8f
+quads gb18030 8130
+quads gb18030 8131
+quads gb18030 8132
+quads gb18030 8133
+quads gb18030 8134
+quads gb18030 8135
+quads gb18030 8136
+quads gb18030 8137
+quads gb18030 8138
+quads gb18030 8139
+quads gb18030 8230
+quads gb18030 8231
+quads gb18030 8232
+quads gb18030 8233
+quads gb18030 8234
+quads gb18030 8235
+quads gb18030 8236
+quads gb18030 8237
+quads gb18030 8238
+quads gb18030 8239
+quads gb18030 8330
+quads gb18030 8331
+quads gb18030 8332
+quads gb18030 8333
+quads gb18030 8334
+quads gb18030 8335
+quads gb18030 8336
+quads gb18030 8337
+quads gb18030 8338
+quads gb18030 8339
+quads gb18030 8430
+quads gb18030 8431
+quads gb18030 8432
+quads gb18030 8433
+quads gb18030 8434
+quads gb18030 8435
+quads gb18030 8436
+quads gb18030 8437
+quads gb18030 8438
+quads gb18030 8439
+quads gb18030 8530
+quads gb18030 8f39
+quads gb18030 9030
+quads gb18030 9031
+quads gb18030 9532
+quads gb18030 a035
+quads gb18030 e332
+quads gb18030 e333
+quads gb18030 e430
+quads gb18030 fe39
+quads gbk 8130
+pairs iso-2022-jp -
+pairs iso-2022-jp 1b
+pairs iso-2022-jp 1b24
+pairs iso-2022-jp 1b28
+pairs iso-2022-jp 1b2842
+pairs iso-2022-jp 1b284a
+pairs iso-2022-jp 1b2849
+pairs iso-2022-jp 1b2440
+pairs iso-2022-jp 1b2442
+pairs iso-2022-jp 1b244221
+pairs iso-2022-jp 1b244222
+pairs iso-2022-jp 1b244223
+pairs iso-2022-jp 1b244224
+pairs iso-2022-jp 1b244225
+pairs iso-2022-jp 1b244226
+pairs iso-2022-jp 1b244227
+pairs iso-2022-jp 1b244228
+pairs iso-2022-jp 1b244229
+pairs iso-2022-jp 1b24422a
+pairs iso-2022-jp 1b24422b
+pairs iso-2022-jp 1b24422c
+pairs iso-2022-jp 1b24422d
+pairs iso-2022-jp 1b24422e
+pairs iso-2022-jp 1b24422f
+pairs iso-2022-jp 1b244230
+pairs iso-2022-jp 1b244231
+pairs iso-2022-jp 1b244232
+pairs iso-2022-jp 1b244233
+pairs iso-2022-jp 1b244234
+pairs iso-2022-jp 1b244235
+pairs iso-2022-jp 1b244236
+pairs iso-2022-jp 1b244237
+pairs iso-2022-jp 1b244238
+pairs iso-2022-jp 1b244239
+pairs iso-2022-jp 1b24423a
+pairs iso-2022-jp 1b24423b
+pairs iso-2022-jp 1b24423c
+pairs iso-2022-jp 1b24423d
+pairs iso-2022-jp 1b24423e
+pairs iso-2022-jp 1b24423f
+pairs iso-2022-jp 1b244240
+pairs iso-2022-jp 1b244241
+pairs iso-2022-jp 1b244242
+pairs iso-2022-jp 1b244243
+pairs iso-2022-jp 1b244244
+pairs iso-2022-jp 1b244245
+pairs iso-2022-jp 1b244246
+pairs iso-2022-jp 1b244247
+pairs iso-2022-jp 1b244248
+pairs iso-2022-jp 1b244249
+pairs iso-2022-jp 1b24424a
+pairs iso-2022-jp 1b24424b
+pairs iso-2022-jp 1b24424c
+pairs iso-2022-jp 1b24424d
+pairs iso-2022-jp 1b24424e
+pairs iso-2022-jp 1b24424f
+pairs iso-2022-jp 1b244250
+pairs iso-2022-jp 1b244251
+pairs iso-2022-jp 1b244252
+pairs iso-2022-jp 1b244253
+pairs iso-2022-jp 1b244254
+pairs iso-2022-jp 1b244255
+pairs iso-2022-jp 1b244256
+pairs iso-2022-jp 1b244257
+pairs iso-2022-jp 1b244258
+pairs iso-2022-jp 1b244259
+pairs iso-2022-jp 1b24425a
+pairs iso-2022-jp 1b24425b
+pairs iso-2022-jp 1b24425c
+pairs iso-2022-jp 1b24425d
+pairs iso-2022-jp 1b24425e
+pairs iso-2022-jp 1b24425f
+pairs iso-2022-jp 1b244260
+pairs iso-2022-jp 1b244261
+pairs iso-2022-jp 1b244262
+pairs iso-2022-jp 1b244263
+pairs iso-2022-jp 1b244264
+pairs iso-2022-jp 1b244265
+pairs iso-2022-jp 1b244266
+pairs iso-2022-jp 1b244267
+pairs iso-2022-jp 1b244268
+pairs iso-2022-jp 1b244269
+pairs iso-2022-jp 1b24426a
+pairs iso-2022-jp 1b24426b
+pairs iso-2022-jp 1b24426c
+pairs iso-2022-jp 1b24426d
+pairs iso-2022-jp 1b24426e
+pairs iso-2022-jp 1b24426f
+pairs iso-2022-jp 1b244270
+pairs iso-2022-jp 1b244271
+pairs iso-2022-jp 1b244272
+pairs iso-2022-jp 1b244273
+pairs iso-2022-jp 1b244274
+pairs iso-2022-jp 1b244275
+pairs iso-2022-jp 1b244276
+pairs iso-2022-jp 1b244277
+pairs iso-2022-jp 1b244278
+pairs iso-2022-jp 1b244279
+pairs iso-2022-jp 1b24427a
+pairs iso-2022-jp 1b24427b
+pairs iso-2022-jp 1b24427c
+pairs iso-2022-jp 1b24427d
+pairs iso-2022-jp 1b24427e
+pairs utf-8 80
+pairs utf-8 81
+pairs utf-8 82
+pairs utf-8 83
+pairs utf-8 84
+pairs utf-8 85
+pairs utf-8 86
+pairs utf-8 87
+pairs utf-8 88
+pairs utf-8 89
+pairs utf-8 8a
+pairs utf-8 8b
+pairs utf-8 8c
+pairs utf-8 8d
+pairs utf-8 8e
+pairs utf-8 8f
+pairs utf-8 90
+pairs utf-8 91
+pairs utf-8 92
+pairs utf-8 93
+pairs utf-8 94
+pairs utf-8 95
+pairs utf-8 96
+pairs utf-8 97
+pairs utf-8 98
+pairs utf-8 99
+pairs utf-8 9a
+pairs utf-8 9b
+pairs utf-8 9c
+pairs utf-8 9d
+pairs utf-8 9e
+pairs utf-8 9f
+pairs utf-8 a0
+pairs utf-8 a1
+pairs utf-8 a2
+pairs utf-8 a3
+pairs utf-8 a4
+pairs utf-8 a5
+pairs utf-8 a6
+pairs utf-8 a7
+pairs utf-8 a8
+pairs utf-8 a9
+pairs utf-8 aa
+pairs utf-8 ab
+pairs utf-8 ac
+pairs utf-8 ad
+pairs utf-8 ae
+pairs utf-8 af
+pairs utf-8 b0
+pairs utf-8 b1
+pairs utf-8 b2
+pairs utf-8 b3
+pairs utf-8 b4
+pairs utf-8 b5
+pairs utf-8 b6
+pairs utf-8 b7
+pairs utf-8 b8
+pairs utf-8 b9
+pairs utf-8 ba
+pairs utf-8 bb
+pairs utf-8 bc
+pairs utf-8 bd
+pairs utf-8 be
+pairs utf-8 bf
+pairs utf-8 c0
+pairs utf-8 c1
+pairs utf-8 c2
+pairs utf-8 c3
+pairs utf-8 c4
+pairs utf-8 c5
+pairs utf-8 c6
+pairs utf-8 c7
+pairs utf-8 c8
+pairs utf-8 c9
+pairs utf-8 ca
+pairs utf-8 cb
+pairs utf-8 cc
+pairs utf-8 cd
+pairs utf-8 ce
+pairs utf-8 cf
+pairs utf-8 d0
+pairs utf-8 d1
+pairs utf-8 d2
+pairs utf-8 d3
+pairs utf-8 d4
+pairs utf-8 d5
+pairs utf-8 d6
+pairs utf-8 d7
+pairs utf-8 d8
+pairs utf-8 d9
+pairs utf-8 da
+pairs utf-8 db
+pairs utf-8 dc
+pairs utf-8 dd
+pairs utf-8 de
+pairs utf-8 df
+pairs utf-8 e0
+pairs utf-8 e1
+pairs utf-8 e2
+pairs utf-8 e3
+pairs utf-8 e4
+pairs utf-8 e5
+pairs utf-8 e6
+pairs utf-8 e7
+pairs utf-8 e8
+pairs utf-8 e9
+pairs utf-8 ea
+pairs utf-8 eb
+pairs utf-8 ec
+pairs utf-8 ed
+pairs utf-8 ee
+pairs utf-8 ef
+pairs utf-8 f0
+pairs utf-8 f1
+pairs utf-8 f2
+pairs utf-8 f3
+pairs utf-8 f4
+pairs utf-8 f5
+pairs utf-8 f6
+pairs utf-8 f7
+pairs utf-8 f8
+pairs utf-8 f9
+pairs utf-8 fa
+pairs utf-8 fb
+pairs utf-8 fc
+pairs utf-8 fd
+pairs utf-8 fe
+pairs utf-8 ff
+pairs utf-8 -
+pairs utf-8 e0a0
+pairs utf-8 e080
+pairs utf-8 e09f
+pairs utf-8 ed9f
+pairs utf-8 eda0
+pairs utf-8 efbf
+pairs utf-8 f090
+pairs utf-8 f08f
+pairs utf-8 f48f
+pairs utf-8 f490
+pairs utf-8 f09080
+pairs utf-8 f48fbf
+pairs utf-8 f18080
+pairs utf-8 f58080
+pairs utf-8 c280
+pairs utf-16le -
+pairs utf-16le 00
+pairs utf-16le 00d8
+pairs utf-16le ffdb
+pairs utf-16le 00dc
+pairs utf-16le 4100
+pairs utf-16le 34d81e
+pairs utf-16le 00d8
+pairs utf-16le 00d8
+pairs utf-16le 00d8
+pairs utf-16le 00d8
+pairs utf-16le 00d8
+pairs utf-16le 00d8
+decode utf-16le 3dd800de
+decode utf-16le 3dd84100
+decode utf-16le 00de3dd8
+decode utf-16le 3dd8
+decode utf-16le 3d
+decode utf-16le fffe4200
+decode utf-16le feff
+decode utf-16le -
+decode utf-16le e9
+pairs utf-16be -
+pairs utf-16be d8
+pairs utf-16be d800
+pairs utf-16be dbff
+pairs utf-16be dc00
+pairs utf-16be 0041
+pairs utf-16be d834dd
+pairs utf-16be d800d8
+pairs utf-16be d800db
+pairs utf-16be d800dc
+pairs utf-16be d800df
+pairs utf-16be d80000
+pairs utf-16be d800ff
+decode utf-16be d83dde00
+decode utf-16be d83d0041
+decode utf-16be de00d83d
+decode utf-16be d83d
+decode utf-16be d8
+decode utf-16be feff0042
+decode utf-16be fffe
+decode utf-16be -
+decode utf-16be 00
+decode replacement -
+decode replacement 61
+decode replacement 0080ff20616263
+decode utf-8 efbbbf61
+decode utf-8 c080
+decode utf-8 e08080
+decode utf-8 eda080
+decode utf-8 f4908080
+decode utf-8 f888808080
+decode utf-8 e381
+decode utf-8 e38161
+decode utf-8 f09f98
+decode utf-8 618062
+decode utf-8 c2
+decode utf-8 f09f9880
+decode shift_jis 82a0
+decode shift_jis 8241
+decode shift_jis 82
+decode shift_jis 827f
+decode shift_jis 82fd
+decode shift_jis f040
+decode shift_jis f9fc
+decode shift_jis fa40
+decode shift_jis a0
+decode shift_jis 80
+decode shift_jis a1df
+decode shift_jis 5c7e
+decode shift_jis 815f
+decode euc-jp a4a2
+decode euc-jp 8ea1
+decode euc-jp 8ee0
+decode euc-jp 8fa2af
+decode euc-jp 8fa2
+decode euc-jp 8f41
+decode euc-jp 8fa241
+decode euc-jp a4
+decode euc-jp a441
+decode euc-jp 8fa2b7
+decode euc-kr b0a1
+decode euc-kr 8c63
+decode euc-kr b0
+decode euc-kr b041
+decode euc-kr 8141
+decode euc-kr c9a1
+decode euc-kr fefe
+decode euc-kr a2e6
+decode euc-kr a2e7
+decode gb18030 81308130
+decode gb18030 8135f437
+decode gb18030 a8bc
+decode gb18030 8431a439
+decode gb18030 8431a530
+decode gb18030 90308130
+decode gb18030 e3329a35
+decode gb18030 e3329a36
+decode gb18030 813081
+decode gb18030 8130
+decode gb18030 81308141
+decode gb18030 813041
+decode gb18030 80
+decode gb18030 ff
+decode gb18030 a3a0
+decode gb18030 8130ff30
+decode gb18030 8130813081
+decode big5 8862
+decode big5 8864
+decode big5 88a3
+decode big5 88a5
+decode big5 8740
+decode big5 a440
+decode big5 80
+decode big5 a4
+decode big5 a441
+decode big5 a145
+decode big5 a3e1
+decode big5 c87e
+decode big5 fefe
+decode big5 88628864
+decode iso-2022-jp 1b244230211b2842
+decode iso-2022-jp 1b284a5c7e
+decode iso-2022-jp 1b2849215f
+decode iso-2022-jp 1b244230
+decode iso-2022-jp 1b2442301b284261
+decode iso-2022-jp 1b28421b2842
+decode iso-2022-jp 1b2842611b2842
+decode iso-2022-jp 1b
+decode iso-2022-jp 1b24
+decode iso-2022-jp 1b28
+decode iso-2022-jp 1b58
+decode iso-2022-jp 1b2458
+decode iso-2022-jp 0e
+decode iso-2022-jp 0f
+decode iso-2022-jp 80
+decode iso-2022-jp 1b24402121
+decode iso-2022-jp 1b284960
+decode utf-8 f48fdfefa08fbc9f9fc27f4172ed398f
+decode utf-8 531af4cdf0e07f85dfc580
+decode utf-8 dfff5bed00ed9f80a0
+decode utf-8 bfbf41dfc0f0
+decode utf-8 55f59fa003ae00a0
+decode utf-8 4fc28fa0
+decode utf-8 dfef5341f4ef9ff4008fbfa0f084ed7f
+decode utf-8 ffdfe0008f13d4e0dfbffb80e0
+decode utf-8 dfc27fc0ed00ef41
+decode utf-8 c2a0df9fc08fc2eff47f41
+decode utf-8 e0ef80c000f09df0
+decode utf-8 4441dfc0c2bfe0bf
+decode ibm866 d0c2fcc4cc5d5669823889
+decode ibm866 b79c
+decode ibm866 9f6c0c9d15
+decode ibm866 57
+decode ibm866 536497615e9f0b
+decode ibm866 baff66e5
+decode ibm866 0340c9f9
+decode ibm866 efb6c6d40e8e0a4ffbbb
+decode ibm866 dacfbf24
+decode ibm866 b21f7637d8
+decode ibm866 1c047f
+decode ibm866 39
+decode iso-8859-2 74
+decode iso-8859-2 69ebacd8a17bc82cac1eb948983ef845
+decode iso-8859-2 0665753ff7dfaecfa2
+decode iso-8859-2 c3f8af63b92076aec58840
+decode iso-8859-2 8e81afd6343dfc58b94f8dc1ab9ebf
+decode iso-8859-2 a9eb2458cc68a5bbb34897ac
+decode iso-8859-2 cb15a825338053f82e9f57
+decode iso-8859-2 7590227760648c3e6c5df59eea43f7
+decode iso-8859-2 e1eec7b88b647af8adb5cc9c45
+decode iso-8859-2 26
+decode iso-8859-2 c794f64dd7a05b84d8d3
+decode iso-8859-2 4819
+decode iso-8859-3 3b9d7d516b3ec2fb9d2f624a74c283
+decode iso-8859-3 60406a377a8511e337fa5e1d
+decode iso-8859-3 9a0bfcc4b7cc2b27e8cc04bed448
+decode iso-8859-3 ab
+decode iso-8859-3 8d9f70
+decode iso-8859-3 d08fc9291792ba92b12a
+decode iso-8859-3 153a4820
+decode iso-8859-3 44555ab472
+decode iso-8859-3 094a90eae9a755800592ddde69
+decode iso-8859-3 0ab5b79530fa
+decode iso-8859-3 d4b6a6149a0498a1471da27a
+decode iso-8859-3 3e2c2159dcae89
+decode iso-8859-4 df70
+decode iso-8859-4 a2ac1aa1f568702230f5fc53
+decode iso-8859-4 efc7ac614556f1
+decode iso-8859-4 4f3a67d26d5a8324a7f0e62edec866
+decode iso-8859-4 5b492b55a657
+decode iso-8859-4 77f1
+decode iso-8859-4 47512deb754cfd4a8c7e858028c9538b
+decode iso-8859-4 da
+decode iso-8859-4 e640
+decode iso-8859-4 de5d1f09043e48
+decode iso-8859-4 996a2de02c59972353cf0dab05
+decode iso-8859-4 37280588bd
+decode iso-8859-5 9bb73c56e031dfd0be
+decode iso-8859-5 b93736a78c75a683f5
+decode iso-8859-5 ae023d2bcc035075e0ffc9c5222f50e4
+decode iso-8859-5 e59f98781801
+decode iso-8859-5 a1fcc8a0594521
+decode iso-8859-5 4328a8c303a3ec8db5269eadaf0a
+decode iso-8859-5 acd87888
+decode iso-8859-5 1ed44569057494
+decode iso-8859-5 1a490bbc
+decode iso-8859-5 bc6b58
+decode iso-8859-5 3c2e29b4f45e465bfeacda335f4d
+decode iso-8859-5 e33a1f0ef21d1a7ba206
+decode iso-8859-6 54d7d425a83f14f9331e
+decode iso-8859-6 d89ef6fedb7cf3cf436403eea85777f6
+decode iso-8859-6 256a4b5d0b57fcda72
+decode iso-8859-6 df535bb0fea358e0590a347e83d2
+decode iso-8859-6 e7ace9de21023e3c104a
+decode iso-8859-6 1f0d3fddc4e00f
+decode iso-8859-6 c4165ab31e66cc35898fc160c86aa3
+decode iso-8859-6 37506afae862513a
+decode iso-8859-6 2e4b
+decode iso-8859-6 c0bd3ec4fedd1c714a88f7e53ca9
+decode iso-8859-6 00687ad7402c13cf0e8c
+decode iso-8859-6 764c1605e4f416b13205
+decode iso-8859-7 8efb5b44fabf
+decode iso-8859-7 35e8
+decode iso-8859-7 a0cb72d6a03b7197f145ca99
+decode iso-8859-7 2174226049
+decode iso-8859-7 3e9f383189dff6487da5d567de58
+decode iso-8859-7 7e879d94eb83
+decode iso-8859-7 408a4b657565a605053cebea59bff23d
+decode iso-8859-7 46dacfd4f9bca6bbec9d
+decode iso-8859-7 06ed598fe40db042d5bb5249
+decode iso-8859-7 2edd70479a8dd0032c72da
+decode iso-8859-7 83346cc1f58fe3b57036a52b51e43ddc
+decode iso-8859-7 1044f0fdd8c4737b74ee99d0873ecfc7
+decode iso-8859-8 10692804842d54743414f7
+decode iso-8859-8 8e0b8b02d9b86005
+decode iso-8859-8 a1170fb0d4e9fc0aebde80
+decode iso-8859-8 4d0fe0bfc8d142baad4206bd6e
+decode iso-8859-8 8599
+decode iso-8859-8 378f5007a7192344
+decode iso-8859-8 c20b27d3bb80317080
+decode iso-8859-8 25d8ba56a5c71aff13dc973905b632
+decode iso-8859-8 9e851a9574ae98d62dcd8db1
+decode iso-8859-8 8228fd37
+decode iso-8859-8 03afef
+decode iso-8859-8 20e4
+decode iso-8859-8-i a2
+decode iso-8859-8-i a92140f251e7af
+decode iso-8859-8-i c0a958de0c57387725b8c31b2f9de8e1
+decode iso-8859-8-i 3985e8ba85ce185c
+decode iso-8859-8-i 3066829f4a63b4707cb8
+decode iso-8859-8-i d534
+decode iso-8859-8-i 3a4e
+decode iso-8859-8-i f481a5fb8277877934256d5fa4b1aed8
+decode iso-8859-8-i c6
+decode iso-8859-8-i 11feba67e4
+decode iso-8859-8-i c94647f5eb5e5ba29e
+decode iso-8859-8-i 383796f4
+decode iso-8859-10 b334085f
+decode iso-8859-10 b39692696652de9d384ad5
+decode iso-8859-10 58c7e8c942f5
+decode iso-8859-10 07a00e4619
+decode iso-8859-10 6899cde354859b2795370099
+decode iso-8859-10 329a3afec79e
+decode iso-8859-10 8a259c8f5d
+decode iso-8859-10 5804a9327863fc44b94c19f4823f73
+decode iso-8859-10 533d1a537cff40182cec64e85f
+decode iso-8859-10 395f49b3aa680b2359b5bed183
+decode iso-8859-10 4d0f7174e24f
+decode iso-8859-10 2db31b06a6fc22c042
+decode iso-8859-13 8587b0
+decode iso-8859-13 3a9d5439959ce14d0f8c365322dbec
+decode iso-8859-13 5b10006b6e85cf90c086185a0b16
+decode iso-8859-13 f72b4b4222aabc83a98e
+decode iso-8859-13 c73a936cda95ac79bef44fc81a
+decode iso-8859-13 244347240410
+decode iso-8859-13 d3
+decode iso-8859-13 22b347699e934e2eaa349b5c
+decode iso-8859-13 665710e0c4f06bcef3
+decode iso-8859-13 05ba49994e157ca82415
+decode iso-8859-13 b3a5fa5c7e8c71
+decode iso-8859-13 8399628b8fdf81ae805119edae60
+decode iso-8859-14 ca678019d7b8d88260
+decode iso-8859-14 70c2a3f8127bd73723fd2851690e
+decode iso-8859-14 87ab2d076a7a1cf932a5
+decode iso-8859-14 b989e54caa4171ce2022e8
+decode iso-8859-14 bc715475cf0c7eb465d0e5c0
+decode iso-8859-14 46ba724d
+decode iso-8859-14 cb5c5fbe793a49
+decode iso-8859-14 83f0321db83c6390186563698b161052
+decode iso-8859-14 bc1d20f3e285f7893109d652
+decode iso-8859-14 a7dc23dddee9ca1190778332345d
+decode iso-8859-14 36
+decode iso-8859-14 497ac9bd
+decode iso-8859-15 7a85cd2f
+decode iso-8859-15 1cb07af8
+decode iso-8859-15 07522b4edc6c4effd35348df25
+decode iso-8859-15 006f0a80482c9d
+decode iso-8859-15 6449f7fdc2f65bd5517e3e3377
+decode iso-8859-15 239d81da2537e686153eab
+decode iso-8859-15 5dcda490f9
+decode iso-8859-15 2e3696b70aa5ef3fad7ee1
+decode iso-8859-15 1f449068a5f8279c
+decode iso-8859-15 3454cdd53125698ca393f3f7a8
+decode iso-8859-15 57757fac890dbad9536d3456356a
+decode iso-8859-15 8675034b93e52feec7
+decode iso-8859-16 1693127634c258
+decode iso-8859-16 07ea929fd8dfb50a050842129057cd70
+decode iso-8859-16 191dfaf3
+decode iso-8859-16 35f3343a466bf481b8
+decode iso-8859-16 c7b075f8fd48d28e45c28f22
+decode iso-8859-16 172f01fe2a65
+decode iso-8859-16 fff5059667a8
+decode iso-8859-16 0c9c00
+decode iso-8859-16 8d2a6f0531
+decode iso-8859-16 2e2199ae350eab6255
+decode iso-8859-16 4220
+decode iso-8859-16 7a0e55a5bb1069
+decode koi8-r 957460d81b86f3ca40
+decode koi8-r e7bffa242f663c
+decode koi8-r 2f5a8857
+decode koi8-r 8b83
+decode koi8-r d88759
+decode koi8-r 6a4d852499826a5720a3e47a1c
+decode koi8-r d3cc42f8
+decode koi8-r 2f0ea4aad510ab82d734c08b7f
+decode koi8-r 84027d9d
+decode koi8-r 4570c0c659ab7e97d5ac20aacb
+decode koi8-r 964f30763d21b66c0443
+decode koi8-r 8ce40ce1b64722649b
+decode koi8-u 886fd7bd645e3f2fc9c924
+decode koi8-u eea41affa4d1a05bbc2d
+decode koi8-u b69f644a
+decode koi8-u bcb7
+decode koi8-u 0a8dcc939397be3994eb2090
+decode koi8-u 381a92adf2d5
+decode koi8-u 4b91a05a74a85580
+decode koi8-u 7a6c93f0e574367e11
+decode koi8-u 2788aed1942a415bb0
+decode koi8-u 8c
+decode koi8-u 6753bb68ccc6
+decode koi8-u 38
+decode macintosh 2163b4b6b6af9e5115928e74ec08
+decode macintosh d4
+decode macintosh 625fbf953739ae81d69a
+decode macintosh e11bf137
+decode macintosh 3b868e6072340e6ca82d45e7174ad6
+decode macintosh 4ab1f61585369681e51d23c08a
+decode macintosh 118e56737e
+decode macintosh 6c94e5c49fe469
+decode macintosh fc644b
+decode macintosh 1e38c8a24e
+decode macintosh a4
+decode macintosh 6c
+decode windows-874 fba83d5b
+decode windows-874 656d7adb96
+decode windows-874 d3a4eb745ebdde7878e59a2f6f2e73
+decode windows-874 10649b292787acf2a30b
+decode windows-874 fe7d7eabb0e8dac5a8cc50d1
+decode windows-874 96b353500ca4ae76
+decode windows-874 90dc
+decode windows-874 79215664
+decode windows-874 1c4e6c89dab2ab3ea764a7027dd9f1
+decode windows-874 029a77aa9a0d23e42839ad
+decode windows-874 8fd94dc1
+decode windows-874 92691be50352ed
+decode windows-1250 1ce018a248d1d1
+decode windows-1250 dbd1
+decode windows-1250 e9e698426d3d4b6c
+decode windows-1250 46fa2751ccf88b1dc3f868ab
+decode windows-1250 cf6e89dbac0e82d08ae6fc665bea
+decode windows-1250 1c
+decode windows-1250 c7
+decode windows-1250 d89c54
+decode windows-1250 edcfcdcd5e968f
+decode windows-1250 7e551c6b3654e6d1356ec83536
+decode windows-1250 3229fca6e30a10f8
+decode windows-1250 86ef951ae5
+decode windows-1251 df241bb952b795f839c5
+decode windows-1251 2a2d26440659a092a7dc5ae97575
+decode windows-1251 7eefcb
+decode windows-1251 21b35faec0
+decode windows-1251 aae3d59f216f20d11505
+decode windows-1251 55f952c00caac384513544
+decode windows-1251 afe87958
+decode windows-1251 552948a580cb820038980b15fdd237f3
+decode windows-1251 9cff6a8d80f237a1d325ce5594c4
+decode windows-1251 aba902306b5aa194fa00670b16
+decode windows-1251 c15df6
+decode windows-1251 bfe9f83c2acd278fa8f439c0b6ad060a
+decode windows-1252 3ee945
+decode windows-1252 f5faf59a9fa3f8b677
+decode windows-1252 e072c6
+decode windows-1252 82d48da7b87fa8bfa238d6ef1d81
+decode windows-1252 b423ec1d39bb12e70d33d3
+decode windows-1252 8179ca7a3b
+decode windows-1252 e630
+decode windows-1252 5ba69d0657af
+decode windows-1252 e1df049f98de05660bef8923c9b810
+decode windows-1252 6dfd042a6cf1a314e606
+decode windows-1252 d2913635844183526089
+decode windows-1252 d20e28180f2d27b306d87ad9329e5306
+decode windows-1253 9e3409fbc9
+decode windows-1253 59
+decode windows-1253 7e61c10f1669e6fdaeb11c19e439
+decode windows-1253 0467
+decode windows-1253 c5cec9c39c667d0215297a287d71
+decode windows-1253 bedef97d500747088c
+decode windows-1253 3c3c04e09a94b8b91f
+decode windows-1253 198bf46dbf70d7d60c05
+decode windows-1253 17603220797b9498e933902b37040c1c
+decode windows-1253 619b2b2bbecec057c39b
+decode windows-1253 fb1f20f528dea9cee6
+decode windows-1253 01ad87c2131cae68d94e8467
+decode windows-1254 ac68959c00dfa9c9e9fb2e61
+decode windows-1254 74d5494b6f86f1482e65d5ff
+decode windows-1254 66b9eec2c2f32e93000f957d
+decode windows-1254 4b59
+decode windows-1254 5c38a9f98abf21504d6887ba59df0e
+decode windows-1254 4c67f34285b94d00
+decode windows-1254 7e68a93c5bcc89
+decode windows-1254 d05a1b3aab0d339fe15ea6
+decode windows-1254 a5881cd9
+decode windows-1254 2e879c9ba8f73e8b4d6af798
+decode windows-1254 1c73cbd83667
+decode windows-1254 81371f551865eb
+decode windows-1255 4691fe7e7b
+decode windows-1255 8494d179dd46c08ab5fd
+decode windows-1255 79e06d3d7e2b8147716f56bd
+decode windows-1255 795beedf46b241779f90
+decode windows-1255 edc25dd9
+decode windows-1255 ee
+decode windows-1255 fac74fbb847b2a5fb18a171df138a7
+decode windows-1255 4b480c0967b4d5095e
+decode windows-1255 e4f20a727e5c24d2cd238e607d8c2c
+decode windows-1255 f816145e625782ddb75eaa843da70f
+decode windows-1255 3436b90c2c8a7be65c51a009c8eda552
+decode windows-1255 d7876a6c499f7d49af95
+decode windows-1256 9781f00f46466d
+decode windows-1256 60fd37febd
+decode windows-1256 f411706343aa7254df51757ac1
+decode windows-1256 ab348c265f0a360286abc44c808d
+decode windows-1256 dd09bf
+decode windows-1256 a4984a2808b9
+decode windows-1256 c87ef0fb5fac4a95
+decode windows-1256 a460960791c5eab9d619335e
+decode windows-1256 05a980a5090f
+decode windows-1256 b6bd1afeedcc89fd352778629a
+decode windows-1256 f5bc70
+decode windows-1256 1387dfeb66f3617742
+decode windows-1257 006c5c6b53
+decode windows-1257 803970198627be94
+decode windows-1257 fe6ff7cbc210
+decode windows-1257 8c61b148aa130c813931c2
+decode windows-1257 803ef8996032
+decode windows-1257 227d771e
+decode windows-1257 6b3e88
+decode windows-1257 d89753c7
+decode windows-1257 7e76d34a
+decode windows-1257 7afa803970a75f7f622c96438c3f0b
+decode windows-1257 fe8c8e6eca79cedaf6c7122336
+decode windows-1257 2c4f617156fad4af
+decode windows-1258 73ab34ab0326d68e
+decode windows-1258 0dfdc6
+decode windows-1258 c1f953d6ad8dec26c573d22f60cc0b8c
+decode windows-1258 5d8392afc83fcc18b9074942
+decode windows-1258 b1829e52158c
+decode windows-1258 5a771d0cf30e67
+decode windows-1258 beda344b4ce1f6252a6841f5
+decode windows-1258 70fec3cc4e40637efd0233
+decode windows-1258 42cc92dae781cb
+decode windows-1258 b804cf19c6f45ccb
+decode windows-1258 8f
+decode windows-1258 fa1c0db5c21d51
+decode x-mac-cyrillic f54e27f0a9d71fd523bcc6c6
+decode x-mac-cyrillic 66d3b9963011
+decode x-mac-cyrillic d33234a1842ac05de0
+decode x-mac-cyrillic 30e159fdac
+decode x-mac-cyrillic 75c41cb9dae6c6df5c4c9600eb95
+decode x-mac-cyrillic 70f9420d6284f04a0b23f6
+decode x-mac-cyrillic 0bcf3c6091a8be
+decode x-mac-cyrillic 1399bd8e604960f6c5
+decode x-mac-cyrillic 0d4d229ed1eaaf1718a1
+decode x-mac-cyrillic cede83b3a121199a51
+decode x-mac-cyrillic 1cfeb43e4ba20bb501f4fc
+decode x-mac-cyrillic 06cbca5a9e99064900
+decode gbk 589ddcce0455fa
+decode gbk b595
+decode gbk 547f
+decode gbk 956e5ce91c42c243314331e1a2f22d59
+decode gbk 092360f661d2ca
+decode gbk b61320254a3c8c0523ff72cbdc2a32
+decode gbk 26d30ee7a076b1
+decode gbk 17fc
+decode gbk 7f1f27
+decode gbk 9c6bd6f4e1248ad7052d19ac
+decode gbk 3de73cf83571dedf4dcfc24d23068bb2
+decode gbk 61a1273c8fe4b4aae6c4
+decode gb18030 4f3539558039e341ff397f418439
+decode gb18030 41fee33590fe7f41c9e3418030
+decode gb18030 fea884e3fe26ff7f9884ff4149
+decode gb18030 80
+decode gb18030 ffa8ffdb394139
+decode gb18030 5d847f358441
+decode gb18030 a875
+decode gb18030 35
+decode gb18030 9090ff64e3fe3953a88190
+decode gb18030 35
+decode gb18030 35306de335
+decode gb18030 30810c7f8490a3fe35
+decode big5 8840b8817e7ef97fa1
+decode big5 7ff9817e
+decode big5 a440a4a1
+decode big5 7fc9a1
+decode big5 ab
+decode big5 7f81c8fe88
+decode big5 6aa440a1a47e2da4fe817ea47e
+decode big5 877ff9a3ffa17fa45888
+decode big5 4141a1c881
+decode big5 ff7f4097e97fc8a1
+decode big5 a47e
+decode big5 ffc8fea1883a7e54a1e4a17f1b
+decode euc-jp a4
+decode euc-jp a4ffa28eb7df87df8e41
+decode euc-jp a280e0a48e8fd59243a1df415a
+decode euc-jp 8ee08f8e53e0024180df808fe0ff
+decode euc-jp dfe056a4dfffa1b730a2a2f8
+decode euc-jp 1a808f41b7a4e0dfa256df0aa2
+decode euc-jp 418f9f8080b780df8f410ea1a2a4ff
+decode euc-jp a18ea2a4e08f
+decode euc-jp dffefb
+decode euc-jp cf8ffe418fdfe08f4185a2
+decode euc-jp 7cd2ff8064b9a44106
+decode euc-jp e8e08fa18edfa18e88a1dae0e0418041
+decode iso-2022-jp 55154a805f40a9a960e5e0
+decode iso-2022-jp 607e212142
+decode iso-2022-jp e342245c280e0f
+decode iso-2022-jp 2180244921420e5c4a56285f4259
+decode iso-2022-jp fd5f0c5f5f0e1b1b245c5f80e511
+decode iso-2022-jp 80405f4515
+decode iso-2022-jp 7e09240e80407e67280f
+decode iso-2022-jp 5c5c605c210f5f215f7e42304a40
+decode iso-2022-jp 604a1b21504a0f2840cabd19424028
+decode iso-2022-jp 9342
+decode iso-2022-jp 600f0f
+decode iso-2022-jp 5f495c42
+decode shift_jis e04182809ffa81e000ff7ffc808141df
+decode shift_jis 9fadff9f40fc82a1ff
+decode shift_jis fc8d27
+decode shift_jis a137dffcff
+decode shift_jis 7e73df7e
+decode shift_jis f0ff9f647e9f4081df81fa7eff
+decode shift_jis 41fffc7e41
+decode shift_jis fd8281e0fc
+decode shift_jis 86df81fc80ffa082fd
+decode shift_jis 94f4fffda1ffb5f8807e60ff
+decode shift_jis 82e9829ca18081
+decode shift_jis a1f07f
+decode euc-kr 5a41c9ff8ca1c97f8cb07fc98161c9fe
+decode euc-kr f1a161618cb080c941b057c9ff048141
+decode euc-kr 419c05c9618c61c97fe07fa199c98c
+decode euc-kr 69328afe41c941
+decode euc-kr b090ffb0808cc9415a
+decode euc-kr b0feff80feefbfde5ab08c
+decode euc-kr 8041
+decode euc-kr c95a81ffc9ff
+decode euc-kr ff817fff83
+decode euc-kr 7ac1ff8c8c8c61c9b08181ff7fc9
+decode euc-kr 8d61be8141aafeff7a
+decode euc-kr fea1fecbf3
+decode replacement 918079d19d3f2d47d6544a3377a4
+decode replacement d88c8dfa
+decode replacement fe72d560d3bbe88f7bb05a3a1c852847
+decode replacement 41
+decode replacement 8c62bb59b6
+decode replacement c4a5b2f8
+decode replacement e83ae1
+decode replacement b8d519
+decode replacement f7c0f8
+decode replacement f9111f
+decode replacement 7644cbe16cb771ee18d949a9
+decode replacement 176ba51fee80ca9c
+decode utf-16be dfd2009d41ffffffdcffd72141ffff41
+decode utf-16be dcdfdc7212
+decode utf-16be ff41a9ff00bbdc9400dcfffed8df
+decode utf-16be 055441a823df
+decode utf-16be ff2afed8dc52
+decode utf-16be ffb9ff85dbc4ff
+decode utf-16be 4100
+decode utf-16be df8fdbdcdddbdc00db227a
+decode utf-16be d8dcd8fe
+decode utf-16be fecfffffed4100a5
+decode utf-16be fe6a41fedcdb004141d8fedcfe
+decode utf-16be dfdcdcdbfe412641fedcfefe68
+decode utf-16le d84141dcafd800db
+decode utf-16le dbff04b5db54
+decode utf-16le db0000dcd8d8
+decode utf-16le ffdb0041fffe89dcdb00
+decode utf-16le 41fe0041fffed8d8
+decode utf-16le 41d8
+decode utf-16le 15dcdbdcdc
+decode utf-16le fe
+decode utf-16le 41fedb084146dfdf41
+decode utf-16le dcd8f8ae00fffeff00
+decode utf-16le dcfffedf2ddb
+decode utf-16le dcfe41fefef30000
+decode x-user-defined bcd3
+decode x-user-defined 412953fc9c
+decode x-user-defined 5f98ed7caab101
+decode x-user-defined 17b992107c58f154
+decode x-user-defined 88b789
+decode x-user-defined e502
+decode x-user-defined 2e54f6f48d42cf1b6b9ade75
+decode x-user-defined cb8c933c76810efb912ebf
+decode x-user-defined 1d9d
+decode x-user-defined 2b12a7ef60e4759c
+decode x-user-defined 667b95943d002088b90b68d861
+decode x-user-defined cb
+sniff 0 746578742f68746d6c3b20636861727365743d6b6f69382d72 efbbbf3c6d65746120636861727365743d73686966745f6a69733e
+sniff 0 - feff003c
+sniff 0 - fffe3c00
+sniff 0 - fffe
+sniff 0 - efbb
+sniff 0 746578742f68746d6c3b20636861727365743d6b6f69382d72 3c6d65746120636861727365743d77696e646f77732d313235313e
+sniff 0 746578742f68746d6c3b636861727365743d2253686966745f4a495322 -
+sniff 0 746578742f68746d6c3b636861727365743d2273685c6966745f6a697322 -
+sniff 0 544558542f48544d4c203b20434841525345543d4555432d4b52 -
+sniff 0 746578742f2068746d6c3b20636861727365743d6575632d6b72 -
+sniff 0 746578742f68746d6c203b636861727365743d6575632d6b72 -
+sniff 0 746578742f68746d6c3b20434841525345543d6575632d6b72 -
+sniff 0 746578742f68746d6c3b20636861727365743d277574662d3827 -
+sniff 0 746578742f68746d6c3b20636861727365743d626f677573 3c6d65746120636861727365743d67626b3e
+sniff 0 746578742f68746d6c3b20636861727365743d3b20636861727365743d62696735 -
+sniff 0 746578742f68746d6c3b20636861727365743d626967353b20636861727365743d67626b -
+sniff 0 746578742f68746d6c3b2063686172736574203d62696735 -
+sniff 0 3b636861727365743d62696735 -
+sniff 0 746578742f68746d6c3b20636861727365743d227574662d313622 -
+sniff 0 746578742f68746d6c3b636861727365743d69736f2d323032322d6b72 -
+sniff 0 746578742f68746d6c3b20666f6f3d22613b62223b20636861727365743d6b6f69382d75 -
+sniff 0 - 3c6d65746120636861727365743d73686966745f6a69733e
+sniff 0 - 3c4d45544120434841525345543d274555432d4a50273e
+sniff 0 - 3c6d65746120636861727365743d2220206269673520223e
+sniff 0 - 3c6d6574612f636861727365743d6b6f69382d723e
+sniff 0 - 3c6d65746109636861727365743d6b6f69382d723e
+sniff 0 - 3c6d657461636861727365743d6b6f69382d723e
+sniff 0 - 3c6d65746120687474702d65717569763d22436f6e74656e742d547970652220636f6e74656e743d22746578742f68746d6c3b20636861727365743d6575632d6b72223e
+sniff 0 - 3c6d65746120636f6e74656e743d22746578742f68746d6c3b20636861727365743d6575632d6b722220687474702d65717569763d22636f6e74656e742d74797065223e
+sniff 0 - 3c6d65746120636f6e74656e743d22746578742f68746d6c3b20636861727365743d6575632d6b72223e
+sniff 0 - 3c6d65746120687474702d65717569763d7265667265736820636f6e74656e743d22636861727365743d6575632d6b72223e
+sniff 0 - 3c6d65746120636f6e74656e743d22636861727365743d6575632d6b722220636861727365743d6b6f69382d7220687474702d65717569763d636f6e74656e742d747970653e
+sniff 0 - 3c6d65746120636861727365743d6b6f69382d7220636f6e74656e743d22636861727365743d6575632d6b722220687474702d65717569763d636f6e74656e742d747970653e
+sniff 0 - 3c6d65746120636861727365743d626f6775733e3c6d65746120636861727365743d6b6f69382d753e
+sniff 0 - 3c6d65746120636861727365743d6b6f69382d7520636861727365743d6b6f69382d723e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d22746578742f68746d6c3b20636861727365743d276b6f69382d7227223e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d22746578742f68746d6c3b2063686172736574203d206b6f69382d72223e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d2263686172736574636861727365743d6b6f69382d72223e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d22746578742f68746d6c3b2063686172736574223e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d22636861727365743d223e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c6d65746120687474702d65717569763d636f6e74656e742d7479706520636f6e74656e743d27636861727365743d226b6f69382d72273e
+sniff 0 - 3c6d65746120636861727365743d7574662d31363e
+sniff 0 - 3c6d65746120636861727365743d7574662d313662653e
+sniff 0 - 3c6d65746120636861727365743d782d757365722d646566696e65643e
+sniff 0 - 3c6d65746120636861727365743d69736f2d323032322d6b723e
+sniff 0 - 3c212d2d203c6d65746120636861727365743d6b6f69382d723e202d2d3e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c212d2d3e3c6d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c212d2d2d3e3c6d65746120636861727365743d6b6f69382d723e202d2d3e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c61207469746c653d223c6d65746120636861727365743d6b6f69382d723e223e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c61207469746c653d27782720687265663d79203c6d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c2f6d65746120636861727365743d6b6f69382d723e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c21646f63747970652068746d6c3e3c3f70687020636861727365743d6b6f69382d72203f3e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c2f206d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c6d65746120636861727365743d226b6f69382d72
+sniff 0 - 3c212d2d203c6d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c212d2d787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878782d2d3e3c6d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c212d2d7878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878782d2d3e3c6d65746120636861727365743d6b6f69382d723e
+sniff 0 - 3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d2277696e646f77732d31323531223f3e3c703e
+sniff 0 - 3c3f786d6c2076657273696f6e3d27312e302720656e636f64696e67203d20274b4f49382d5227203f3e
+sniff 0 - 3c3f786d6c20656e636f64696e673d227574662d3136223f3e
+sniff 0 - 3c3f786d6c20656e636f64696e673d22782d757365722d646566696e6564223f3e
+sniff 0 - 203c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d226b6f69382d72223f3e
+sniff 0 - 3c3f786d6c2076657273696f6e3d22312e30223f3e3c212d2d20656e636f64696e673d226b6f69382d7222202d2d3e
+sniff 0 - 3c3f786d6c20656e636f64696e673d226b6f69382072223f3e
+sniff 0 - 3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d226b6f69382d72223f3e3c6d65746120636861727365743d67626b3e
+sniff 0 - 3c003f0078006d006c002000760065007200730069006f006e003d00220031002e00300022003f003e00
+sniff 0 - 003c003f0078006d006c002000760065007200730069006f006e003d00220031002e00300022003f003e
+sniff 1 - 61626320c3a9c3a820e697a5e69cac
+sniff 0 - 61626320c3a9c3a820e697a5e69cac
+sniff 1 - 636166e9206e61ef7665
+sniff 1 - 706c61696e206173636969
+sniff 1 - -
+sniff 1 - 3c6d65746120636861727365743d6b6f69382d723e61626320c3a9c3a820e697a5e69cac
+sniff 1 - 61626320c3a9c3a820e697a5e69cacff
