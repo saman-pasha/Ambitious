@@ -35,4 +35,9 @@ int amb_lex_atom(const char *t, size_t n, size_t *pos, char *buf, size_t cap, si
 int amb_lex_handle(const char *t, size_t n, size_t *pos, const char *f, uint32_t *doc, uint32_t *index, uint32_t *gen);
 int amb_lex_end(const char *t, size_t n, size_t *pos);
 int amb_name_is(const char *p, size_t n, const char *w);
+
+/* a program run to its end (src/rt/amb_proc.c): argv's last element 0, stdin
+   /dev/null, stdout to out_path, stderr to err_path (or the caller's, if 0);
+   its exit status, or -1 */
+int amb_run(const char *const argv[], const char *out_path, const char *err_path);
 #endif

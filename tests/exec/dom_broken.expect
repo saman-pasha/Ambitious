@@ -1,0 +1,33 @@
+-- the tree as built
+-- the root is no document node
+invariant(dom, root_document, 1).
+-- p's parent says html, but body lists it
+invariant(dom, tree_links, 3).
+invariant(dom, tree_links, 3).
+invariant(dom, tree_links, 5).
+-- p's previous sibling link names the wrong node
+invariant(dom, tree_links, 5).
+-- p's previous sibling link is dropped
+invariant(dom, tree_links, 5).
+-- html's parent is its own child: a cycle
+invariant(dom, tree_links, 1).
+invariant(dom, tree_links, 1).
+invariant(dom, tree_links, 2).
+invariant(dom, acyclic, 2).
+invariant(dom, acyclic, 3).
+invariant(dom, acyclic, 4).
+invariant(dom, acyclic, 5).
+-- a text node with a child
+invariant(dom, only_containers, 4).
+invariant(dom, only_containers, 6).
+-- an attribute moved onto a text node
+invariant(dom, attr_owners, 4).
+invariant(dom, attr_owners, 1).
+-- an attribute its owner does not list
+invariant(dom, attr_links, 1).
+-- a link to a destroyed node
+invariant(dom, tree_links, 5).
+invariant(dom, tree_links, 5).
+invariant(dom, live_links, 5).
+invariant(dom, live_links, 5).
+GREEN: 0 failure(s)

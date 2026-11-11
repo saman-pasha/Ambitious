@@ -15,21 +15,25 @@ AMB_ROOT := $(CURDIR)
 export AMB_ROOT
 ENV := . $(AMB_ROOT)/toolchain/env.sh &&
 CAP := timeout 300
-CICILANG := $(ENV) $(CAP) "$$AMB_CICILANG" --no-kb -I $(AMB_ROOT)/include
+AMB_CC := $(ENV) $(CAP) "$$AMB_CICILANG" --no-kb -I $(AMB_ROOT)/include
 MODULES := $(basename $(notdir $(wildcard contracts/*.pl)))
 GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.pl prolog/amb/gen_schema.pl
 
-# the units of the engine: the runtime, then each module's own
-UNITS := rt/amb_rt dom/dom
+# the units of the engine: the runtime, then each module's own; the tests link
+# these, and the command adds the shell's own
+UNITS := rt/amb_rt rt/amb_proc dom/dom
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 
 .PHONY: all check test test-contract test-gen test-exec test-safe test-reason test-integ golden schema doc clean
-all: $(OBJS) schema
+all: build/ambitious schema
 
 build/obj/%.o: src/%.c $(GEN) $(wildcard contracts/*.pl)
 	@mkdir -p $(@D)
-	$(CICILANG) -c $< -o $@ < /dev/null
+	$(AMB_CC) -c $< -o $@ < /dev/null
+
+build/ambitious: build/obj/shell/main.o $(OBJS)
+	$(AMB_CC) $^ -o $@ < /dev/null
 
 check:
 	sh toolchain/check.sh

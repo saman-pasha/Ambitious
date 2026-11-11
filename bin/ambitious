@@ -1,0 +1,7 @@
+#!/bin/sh
+# bin/ambitious -- the browser's command, with the toolchain's environment
+# (toolchain/env.sh: AMB_ROOT, AMB_COCOLOG, the library paths). `make' builds it.
+AMB_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$AMB_ROOT/toolchain/env.sh"
+[ -x "$AMB_ROOT/build/ambitious" ] || { echo "ambitious: not built (make)" >&2; exit 2; }
+exec "$AMB_ROOT/build/ambitious" "$@"

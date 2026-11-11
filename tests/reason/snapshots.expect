@@ -1,0 +1,19 @@
+loaded: dom snapshot of document 1 at revision 36, 69 facts
+the images: [n(1,7,0),n(1,8,0)]
+the body's children, in order: [[n(1,6,0),n(1,7,0),n(1,8,0),n(1,9,0),n(1,11,0),n(1,12,0)]]
+the button's accessible name: ['Go']
+what lacks a required attribute: [html-lang,img-alt,img-alt]
+the title's text: ['Ambitious']
+removing the body removes 11 nodes
+why the title's text is inside html: a proof of 3 leaves, every leaf a fact of the snapshot
+refused fingerprint: fingerprint
+refused directive: undeclared_or_malformed
+refused undeclared_fact: undeclared_or_malformed
+refused other_document: undeclared_or_malformed
+refused undeclared_value: undeclared_or_malformed
+refused not_ground: not_ground
+refused syntax: syntax
+refused wrong_handle: undeclared_or_malformed
+refused no_header: no_header
+text that looks like code is one atom of 24 characters, and nothing ran
+done

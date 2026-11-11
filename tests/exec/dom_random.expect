@@ -1,0 +1,11 @@
+steps: 20000, creates: 3873
+  ok               5226
+  stale_handle     5039
+  wrong_kind       4452
+  has_parent       246
+  not_a_child      341
+  would_cycle      411
+  not_found        362
+live nodes at the end: 401 of 401 slots; revision 9101; events logged 9101
+invariants broken after 0 steps; revisions mis-counted after 0
+GREEN: the random walk
