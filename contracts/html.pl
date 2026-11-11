@@ -88,8 +88,9 @@ html_contract(operation(tokenize, [param(src, text)], status, [], [creates(token
 html_contract(operation(build, [param(doc, store(dom))], status, [], [], [mutates])).
 %% both: the HTML document of src into doc
 html_contract(operation(parse, [param(doc, store(dom)), param(src, text)], status, [], [], [mutates])).
-%% the fragment parsing algorithm (13.4): src parsed as the children of an element
-%% named context; the nodes it makes become the document node's children
+%% the fragment parsing algorithm (13.4): src parsed as the children of the element
+%% context names -- its local name in the HTML namespace, or "svg NAME" or "math
+%% NAME" in SVG's or MathML's; the nodes it makes become the document node's children
 html_contract(operation(parse_fragment, [param(doc, store(dom)), param(context, text), param(src, text)], status,
     [], [], [mutates])).
 

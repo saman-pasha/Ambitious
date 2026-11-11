@@ -234,12 +234,14 @@ typedef struct html_tb {
     uint32_t tok;                       /* the token being processed ... */
     int tag;                            /* ... and its tag */
     uint32_t next;                      /* the next token to build */
+    int track_opts;                     /* a selectedcontent has been made: the options are followed */
+    int opt_cut;                        /* an option has left the stack from below its top */
     vector<html_open> l_open;           /* the stack of open elements */
     vector<html_open> l_afe;            /* the list of active formatting elements */
     vector<char> l_pend;                /* the pending table characters */
     vector<uint32_t> l_errs;            /* the builder's own parse errors: the tokens they are at */
     vector<int> l_tmodes;               /* the stack of template insertion modes */
-    vector<uint32_t> l_opts;            /* the option elements pushed and not yet seen popped */
+    vector<uint32_t> l_opts;            /* the options pushed and not yet seen popped: pairs of node and stack index */
 } html_tb;
 #define HTML_TB_DROP(b) vector_html_open_drop(&(b).l_open); vector_html_open_drop(&(b).l_afe); vector_char_drop(&(b).l_pend); \
     vector_uint32_t_drop(&(b).l_errs); vector_int_drop(&(b).l_tmodes); vector_uint32_t_drop(&(b).l_opts)
@@ -639,15 +641,39 @@ static void selectedcontent_update(dom_document *d, uint32_t sel, uint32_t opt) 
     }
 }
 
-/* each option pushed that the stack holds no more: popped since the last look */
+/* the k-th option followed is on the stack still: where it was pushed, or, moved
+   by the adoption agency, wherever it is now */
+static int option_open(CTX, size_t k) {
+    uint32_t o = at(*opts, 2 * k), i0 = at(*opts, 2 * k + 1);
+    if (i0 < st_len(open) && st_at(open, i0).node.index == o) return 1;
+    int i = st_index_of_node(open, node_handle(d, o));
+    if (i < 0) return 0;
+    (*opts)[2 * k + 1] = (uint32_t)i;
+    return 1;
+}
+
+/* each option followed that the stack holds no more: popped since the last look.
+   An option below the newest still open is open too, unless one left from below
+   the stack's top (opt_cut): so the look stops at the first open, and costs
+   nothing while the options stay */
 static void options_popped(CTX) {
-    for (size_t i = len(*opts); i-- > 0;) {
-        uint32_t o = at(*opts, i);
-        if (st_index_of_node(open, node_handle(d, o)) >= 0) continue;
-        erase(opts, i);
+    for (size_t k = len(*opts) / 2; k-- > 0;) {
+        if (option_open(ARGS, k)) { if (!c->opt_cut) break; continue; }
+        uint32_t o = at(*opts, 2 * k);
+        erase(opts, 2 * k + 1);
+        erase(opts, 2 * k);
         uint32_t sel = option_select(d, o);
         if (sel && select_shown(d, sel) == o) selectedcontent_update(d, sel, o);
     }
+    c->opt_cut = 0;
+}
+
+/* the options are followed from the first selectedcontent on: those open then, and
+   each pushed after */
+static void track_options(CTX) {
+    c->track_opts = 1;
+    for (size_t i = 0; i < st_len(open); i++)
+        if (st_at(open, i).tag == T_OPTION) { push_back(opts, st_at(open, i).node.index); push_back(opts, (uint32_t)i); }
 }
 
 /* insert an HTML element for the token, at the appropriate place, and push it */
@@ -658,8 +684,9 @@ static dom_node_h insert_element(CTX, uint32_t t) {
     dom_node_h e = create_element(ARGS, t);
     insert_node_at(ARGS, parent, before, e);
     int tag = c->tok == t ? c->tag : tk_tag(p, t);
+    if (!c->track_opts && tag == T_UNKNOWN && tk_name_is(p, t, "selectedcontent")) track_options(ARGS);
     push_back(open, open_entry(d, e, tag, t));
-    if (tag == T_OPTION) push_back(opts, e.index);
+    if (c->track_opts && tag == T_OPTION) { push_back(opts, e.index); push_back(opts, (uint32_t)(st_len(open) - 1)); }
     return e;
 }
 
@@ -831,7 +858,11 @@ static int adoption_agency(CTX, int tag, uint32_t atom) {
                 if (ai < bookmark) bookmark--;
                 ai = -1;
             }
-            if (ai < 0) { st_remove_at(open, (size_t)node_i); continue; }
+            if (ai < 0) {
+                if (node_e.tag == T_OPTION) c->opt_cut = 1;
+                st_remove_at(open, (size_t)node_i);
+                continue;
+            }
             /* a new element for the node's token, in the list and the stack */
             dom_node_h ne = create_element(ARGS, node_e.token);
             html_open ne_entry = open_entry(d, ne, (int)node_e.tag, node_e.token);
@@ -1920,7 +1951,10 @@ static void run_tokens(CTX) {
         }
         flush_table_text(ARGS);
         c->skip_lf = 0;
-        for (int guard = 0; guard < 64 && dispatch(ARGS); guard++) {}
+        /* a token is reprocessed a few times, or, at the end of the input in nested
+           templates, once a template popped: past that, a builder's fault ends it */
+        size_t guard = 64 + st_len(open);
+        while (dispatch(ARGS) && guard-- > 0) {}
         if (len(*opts)) options_popped(ARGS);
     }
 }
