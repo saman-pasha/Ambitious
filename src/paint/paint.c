@@ -177,7 +177,7 @@ static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba,
         amb_span b = nt->resource[r].body;
         vector<uint8_t> bytes;
         append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
-        return amb_png_decode(data(bytes), len(bytes), rgba, w, h);
+        return amb_image_decode(data(bytes), len(bytes), rgba, w, h);
     }
     return 0;
 }

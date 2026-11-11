@@ -1,0 +1,67 @@
+j_444 61x43, its header 61x43: within the bound
+j_422 61x43, its header 61x43: within the bound
+j_420 61x43, its header 61x43: within the bound
+j_420_5x3 5x3, its header 5x3: within the bound
+j_420_3x3 3x3, its header 3x3: within the bound
+j_1x1 1x1, its header 1x1: within the bound
+j_q100 40x24, its header 40x24: within the bound
+j_q100_420 40x24, its header 40x24: within the bound
+j_q5 61x43, its header 61x43: within the bound
+j_optimized 61x43, its header 61x43: within the bound
+j_prog_420 77x51, its header 77x51: within the bound
+j_prog_444 77x51, its header 77x51: within the bound
+j_prog_422 77x51, its header 77x51: within the bound
+j_restart_blocks 77x51, its header 77x51: within the bound
+j_restart_rows 77x51, its header 77x51: within the bound
+j_prog_restart 77x51, its header 77x51: within the bound
+j_grey 61x43, its header 61x43: within the bound
+j_grey_prog 61x43, its header 61x43: within the bound
+j_cmyk 61x43, its header 61x43: within the bound
+j_cmyk_prog 61x43, its header 61x43: within the bound
+j_adobe_rgb 61x43, its header 61x43: within the bound
+j_photo 160x120, its header 160x120: within the bound
+j_exif1 37x23, its header 37x23: within the bound
+j_exif2 37x23, its header 37x23: within the bound
+j_exif3 37x23, its header 37x23: within the bound
+j_exif4 37x23, its header 37x23: within the bound
+j_exif5 23x37, its header 23x37: within the bound
+j_exif6 23x37, its header 23x37: within the bound
+j_exif7 23x37, its header 23x37: within the bound
+j_exif8 23x37, its header 23x37: within the bound
+j_no_tables 61x43, its header 61x43: within the bound
+jo_411 45x21, its header 45x21: within the bound
+jo_440 31x29, its header 31x29: within the bound
+jo_31 37x19, its header 37x19: within the bound
+jo_c21 35x27, its header 35x27: within the bound
+jo_scans 43x29, its header 43x29: within the bound
+jo_restart7 53x31, its header 53x31: within the bound
+jo_q16 29x23, its header 29x23: within the bound
+jo_ids0 30x20, its header 30x20: within the bound
+jo_rgb_ids 30x20, its header 30x20: within the bound
+jo_grey_22 27x21, its header 27x21: within the bound
+jo_ycck 33x25, its header 33x25: within the bound
+jo_cmyk_sub 33x25, its header 33x25: within the bound
+exact, pixel for pixel: 43 of 43
+bad_cut_header: refused
+bad_cut_scan: a prefix 61x43
+bad_no_end: a prefix 61x43
+bad_cut_progressive: a prefix 77x51
+bad_sof_length: refused
+bad_dqt_length: refused
+bad_huge: refused
+bad_past_cap: refused
+bad_no_height: refused
+bad_12_bit: refused
+bad_arithmetic: refused
+bad_lossless: refused
+bad_sampling: refused
+bad_huffman_oversubscribed: refused
+bad_huffman_count: refused
+bad_huffman_dc_symbol: refused
+bad_scan_component: refused
+bad_mcu_blocks: refused
+bad_restart_missing: a prefix 77x51
+bad_progression: refused
+bad_not_jpeg: refused
+bad_tables_only: refused
+mutations of the fixtures: each decoded or refused
