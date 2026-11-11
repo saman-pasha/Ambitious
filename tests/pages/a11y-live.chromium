@@ -1,0 +1,17 @@
+heading#title "Live regions" level=1
+generic#feed live=polite atomic=false relevant="additions text"
+paragraph#feed-text
+status#feed-status live=polite atomic=true relevant="additions text"
+button#feed-button "Mark as read"
+generic#urgent live=assertive atomic=true relevant="all"
+paragraph#quiet-text
+generic#changes live=polite atomic=false relevant="additions removals"
+alert#alert live=assertive atomic=true relevant="additions text"
+status#status live=polite atomic=false relevant="additions text"
+log#log live=polite atomic=false relevant="additions text"
+paragraph#log-line
+marquee#ticker
+timer#timer
+status#sum live=polite atomic=true relevant="additions text"
+region#busy "Results" busy=true live=polite atomic=false relevant="additions text"
+paragraph#busy-text

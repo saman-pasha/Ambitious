@@ -1,0 +1,106 @@
+heading#title "States and properties" level=1
+form#choices "Choices"
+checkbox#cb-on "Checked" checked=true
+checkbox#cb-off "Unchecked" checked=false
+checkbox#cb-mixed "Some of them" checked=mixed
+checkbox#cb-false "Not this" checked=false
+checkbox#cb-none "No state given" checked=false
+switch#sw "Dark mode" checked=true
+paragraph#sizes
+radio#r-s "Small" checked=false
+radio#r-m "Medium" checked=true
+radio#r-l "Large" checked=false
+radiogroup#rg "Speed" required=true
+radio#rg-slow "Slow" checked=false
+radio#rg-fast "Fast" checked=true
+button#bold "Bold" pressed=true
+button#italic "Italic" pressed=false
+button#mixed-press "Some bold" pressed=mixed
+button#opener "Actions" expanded=false haspopup=menu
+button#dialog-opener "Settings" expanded=true haspopup=dialog
+button#true-popup "More" haspopup=menu
+link#here "This page"
+combobox#fruit "Fruit" expanded=false haspopup=menu value="Apple"
+option#f-none "Pick one" disabled=true
+group#citrus "Citrus"
+option#f-lemon "Lemon" disabled=true
+option#f-apple "Apple" selected=true
+option#f-pear "Pear"
+listbox#colours "Colours" orientation=vertical multiselectable=true
+option#c-red "Red" selected=true
+option#c-green "Green"
+option#c-blue "Blue" selected=true
+listbox#sized "Sized" orientation=vertical
+option#z-a "A"
+option#z-b "B"
+combobox#city "City" haspopup=listbox autocomplete=list
+combobox#search-combo "Find" expanded=true haspopup=listbox autocomplete=both
+textbox#who "Name" required=true
+textbox#code "Code" readonly=true value="X-42"
+textbox#mail "Mail" invalid=true placeholder="you@example.org"
+textbox#word "Word" invalid=true value="teh"
+textbox#secret "Secret" value="••••••"
+textbox#notes "Notes" multiline=true value="Two lines"
+textbox#editor "Editor" required=true multiline=true value="Draft"
+textbox#one-line "One line" value="Fixed"
+button#off "Off" disabled=true
+group#locked "Locked In the legend"
+textbox#in-legend "In the legend"
+textbox#after-legend "After the legend" disabled=true
+combobox#locked-select "Locked select" expanded=false disabled=true haspopup=menu value="Only"
+option#ls-a "Only" disabled=true
+link#locked-link "A link stays enabled"
+group#aria-off "Unavailable" disabled=true
+button#inner-button "Inner" disabled=true
+checkbox#inner-check "Not focusable" checked=false
+tablist#tabs "Views" orientation=vertical
+tab#tab-a "List" selected=true
+tab#tab-b "Grid"
+tree#tree "Files" orientation=vertical multiselectable=true
+treeitem#ti-src "src" level=1 selected=true expanded=true
+treeitem#ti-main "main.c" level=2
+treeitem#ti-docs "docs" level=1 expanded=false
+listbox#lb "Toppings" orientation=vertical multiselectable=true
+option#lb-ham "Ham" selected=true
+option#lb-egg "Egg"
+menubar#menubar "Main menu" orientation=horizontal
+menuitem#mi-file "File" expanded=false haspopup=menu
+menu#menu "View" orientation=vertical
+menuitemcheckbox#mi-ruler "Ruler" checked=true
+menuitemradio#mi-zoom "Zoom" checked=false
+toolbar#toolbar "Format" orientation=horizontal
+button#tb-cut "Cut"
+dialog#dlg "Confirm" modal=true
+heading#dlg-title "Confirm" level=2
+slider#volume "Volume" orientation=horizontal valuenow=7 valuemin=0 valuemax=11
+slider#balance "Balance" orientation=horizontal valuenow=50 valuemin=0 valuemax=100
+scrollbar#scroller "Scroll" orientation=vertical valuenow=25 valuemin=0 valuemax=100
+spinbutton#spin "Count" valuenow=3 valuemin=1 valuemax=9
+spinbutton#spin-free "Free count" valuenow=12
+progressbar#loading "Loading" valuemin=0 valuemax=100
+progressbar#upload "Upload" valuenow=40 valuemin=0 valuemax=100
+meter#fuel "Fuel" valuenow=0.25 valuemin=0 valuemax=1
+progressbar#native-progress "Copied" valuenow=3 valuemin=0 valuemax=4
+meter#native-meter "Disk" valuenow=60 valuemin=0 valuemax=80
+slider#rate "Rate" orientation=horizontal valuenow=16 valuemin=10 valuemax=20
+spinbutton#qty "Quantity" valuenow=4 valuemin=1 valuemax=9
+separator#splitter "Split" orientation=horizontal valuenow=30 valuemin=0 valuemax=100
+separator#rule orientation=horizontal
+heading#h-aria "A heading of level four" level=4
+heading#h-lowered "Three, told as two" level=2
+list#outer
+listitem#li-one level=1
+list#inner
+listitem#li-nested level=2
+listitem#li-two level=1
+group#more
+button#more-summary "More" expanded=false
+group#shown
+button#shown-summary "Shown" expanded=true
+paragraph#shown-text
+region#busy "Results" busy=true
+paragraph#busy-text
+grid#grid "Seats" multiselectable=true
+row#grid-row "A1 A2"
+gridcell#seat-a "A1" selected=true
+gridcell#seat-b "A2"

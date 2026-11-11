@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>States and properties</title>
+</head>
+<body>
+<!-- tests/pages/a11y-states.html: WAI-ARIA 1.2's and HTML-AAM's states and properties, each on an element with an id;
+     tests/integ/a11y-chromium.sh holds Ambitious's tree of it to Chromium's (a11y-states.chromium) -->
+<main>
+<h1 id="title">States and properties</h1>
+
+<form id="choices" aria-label="Choices">
+<label><input type="checkbox" id="cb-on" checked> Checked</label>
+<label><input type="checkbox" id="cb-off"> Unchecked</label>
+<div role="checkbox" id="cb-mixed" aria-checked="mixed" tabindex="0">Some of them</div>
+<div role="checkbox" id="cb-false" aria-checked="false" tabindex="0">Not this</div>
+<div role="checkbox" id="cb-none" tabindex="0">No state given</div>
+<div role="switch" id="sw" aria-checked="true" tabindex="0">Dark mode</div>
+<p id="sizes">Sizes:
+<label><input type="radio" name="size" id="r-s"> Small</label>
+<label><input type="radio" name="size" id="r-m" checked> Medium</label>
+<label><input type="radio" name="size" id="r-l"> Large</label></p>
+</form>
+
+<div role="radiogroup" id="rg" aria-label="Speed" aria-required="true">
+<div role="radio" id="rg-slow" aria-checked="false" tabindex="-1">Slow</div>
+<div role="radio" id="rg-fast" aria-checked="true" tabindex="0">Fast</div>
+</div>
+
+<button id="bold" aria-pressed="true">Bold</button>
+<button id="italic" aria-pressed="false">Italic</button>
+<div role="button" id="mixed-press" aria-pressed="mixed" tabindex="0">Some bold</div>
+<button id="opener" aria-expanded="false" aria-haspopup="menu">Actions</button>
+<button id="dialog-opener" aria-expanded="true" aria-haspopup="dialog">Settings</button>
+<button id="true-popup" aria-haspopup="true">More</button>
+<a href="#here" id="here" aria-current="page">This page</a>
+
+<label for="fruit">Fruit</label>
+<select id="fruit">
+<option id="f-none" disabled>Pick one</option>
+<optgroup label="Citrus" id="citrus" disabled><option id="f-lemon">Lemon</option></optgroup>
+<option id="f-apple">Apple</option>
+<option id="f-pear">Pear</option>
+</select>
+<label for="colours">Colours</label>
+<select id="colours" multiple><option id="c-red" selected>Red</option><option id="c-green">Green</option><option id="c-blue" selected>Blue</option></select>
+<label for="sized">Sized</label>
+<select id="sized" size="3"><option id="z-a">A</option><option id="z-b">B</option></select>
+<label for="city">City</label>
+<input id="city" list="cities"><datalist id="cities"><option value="Paris"></option></datalist>
+<input id="search-combo" role="combobox" aria-label="Find" aria-expanded="true" aria-autocomplete="both" aria-controls="sizes">
+
+<label for="who">Name</label> <input id="who" required>
+<label for="code">Code</label> <input id="code" readonly value="X-42">
+<label for="mail">Mail</label> <input id="mail" type="email" aria-invalid="true" placeholder="you@example.org">
+<label for="word">Word</label> <input id="word" aria-invalid="spelling" value="teh">
+<label for="secret">Secret</label> <input id="secret" type="password" value="hunter">
+<label for="notes">Notes</label> <textarea id="notes">Two
+lines</textarea>
+<div role="textbox" id="editor" aria-label="Editor" contenteditable="true" aria-required="true">Draft</div>
+<div role="textbox" id="one-line" aria-label="One line" contenteditable="true" aria-multiline="false" aria-readonly="true">Fixed</div>
+
+<button id="off" disabled>Off</button>
+<fieldset id="locked" disabled>
+<legend>Locked <input id="in-legend" aria-label="In the legend"></legend>
+<input id="after-legend" aria-label="After the legend">
+<select id="locked-select" aria-label="Locked select"><option id="ls-a">Only</option></select>
+<a href="#locked" id="locked-link">A link stays enabled</a>
+</fieldset>
+<div role="group" id="aria-off" aria-label="Unavailable" aria-disabled="true">
+<button id="inner-button">Inner</button>
+<div role="checkbox" id="inner-check" aria-checked="false">Not focusable</div>
+</div>
+
+<div role="tablist" id="tabs" aria-label="Views" aria-orientation="vertical">
+<div role="tab" id="tab-a" aria-selected="true" tabindex="0">List</div>
+<div role="tab" id="tab-b" aria-selected="false" tabindex="-1">Grid</div>
+</div>
+
+<div role="tree" id="tree" aria-label="Files" aria-multiselectable="true">
+<div role="treeitem" id="ti-src" aria-expanded="true" aria-selected="true">src
+<div role="group"><div role="treeitem" id="ti-main" aria-selected="false">main.c</div></div></div>
+<div role="treeitem" id="ti-docs" aria-expanded="false">docs</div>
+</div>
+
+<div role="listbox" id="lb" aria-label="Toppings" aria-multiselectable="true">
+<div role="option" id="lb-ham" aria-selected="true">Ham</div>
+<div role="option" id="lb-egg">Egg</div>
+</div>
+
+<div role="menubar" id="menubar" aria-label="Main menu">
+<div role="menuitem" id="mi-file" aria-haspopup="menu" aria-expanded="false">File</div>
+</div>
+<div role="menu" id="menu" aria-label="View">
+<div role="menuitemcheckbox" id="mi-ruler" aria-checked="true">Ruler</div>
+<div role="menuitemradio" id="mi-zoom" aria-checked="false">Zoom</div>
+</div>
+<div role="toolbar" id="toolbar" aria-label="Format"><button id="tb-cut">Cut</button></div>
+
+<div role="dialog" id="dlg" aria-modal="true" aria-labelledby="dlg-title"><h2 id="dlg-title">Confirm</h2></div>
+
+<div role="slider" id="volume" aria-label="Volume" aria-valuenow="7" aria-valuemin="0" aria-valuemax="11" aria-valuetext="seven" tabindex="0"></div>
+<div role="slider" id="balance" aria-label="Balance" tabindex="0"></div>
+<div role="scrollbar" id="scroller" aria-label="Scroll" aria-controls="tree" aria-valuenow="25"></div>
+<div role="spinbutton" id="spin" aria-label="Count" aria-valuenow="3" aria-valuemin="1" aria-valuemax="9" tabindex="0"></div>
+<div role="spinbutton" id="spin-free" aria-label="Free count" aria-valuenow="12" tabindex="0"></div>
+<div role="progressbar" id="loading" aria-label="Loading"></div>
+<div role="progressbar" id="upload" aria-label="Upload" aria-valuenow="40"></div>
+<div role="meter" id="fuel" aria-label="Fuel" aria-valuenow="0.25" aria-valuemin="0" aria-valuemax="1"></div>
+<label for="native-progress">Copied</label> <progress id="native-progress" value="3" max="4"></progress>
+<label for="native-meter">Disk</label> <meter id="native-meter" value="60" min="0" max="80"></meter>
+<label for="rate">Rate</label> <input type="range" id="rate" min="10" max="20" step="2" value="15">
+<label for="qty">Quantity</label> <input type="number" id="qty" value="4" min="1" max="9">
+<div role="separator" id="splitter" aria-label="Split" aria-valuenow="30" tabindex="0"></div>
+<hr id="rule">
+
+<div role="heading" id="h-aria" aria-level="4">A heading of level four</div>
+<h3 id="h-lowered" aria-level="2">Three, told as two</h3>
+
+<ul id="outer">
+<li id="li-one">One
+<ol id="inner"><li id="li-nested">Nested</li></ol></li>
+<li id="li-two" aria-posinset="5" aria-setsize="9">Two, told as fifth of nine</li>
+</ul>
+
+<details id="more"><summary id="more-summary">More</summary></details>
+<details id="shown" open><summary id="shown-summary">Shown</summary><p id="shown-text">Inside</p></details>
+
+<div role="region" id="busy" aria-label="Results" aria-busy="true"><p id="busy-text">Loading results</p></div>
+
+<div role="grid" id="grid" aria-label="Seats" aria-multiselectable="true">
+<div role="row" id="grid-row"><div role="gridcell" id="seat-a" aria-selected="true">A1</div><div role="gridcell" id="seat-b">A2</div></div>
+</div>
+</main>
+</body>
+</html>

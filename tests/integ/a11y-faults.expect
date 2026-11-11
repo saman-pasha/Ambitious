@@ -1,0 +1,43 @@
+amb_diag(unsupported_attribute, n(1,26,0), 'the checkbox <input> has aria-pressed, which its role does not support: a reader is not told it').
+amb_diag(unsupported_attribute, n(1,29,0), 'the link <a> has aria-selected, which its role does not support: a reader is not told it').
+amb_diag(unsupported_attribute, n(1,32,0), 'the generic <div> has aria-valuenow, which its role does not support: a reader is not told it').
+amb_diag(prohibited_attribute, n(1,35,0), 'the generic <div> has aria-label, but its role takes no name: a reader is not told it').
+amb_diag(prohibited_attribute, n(1,38,0), 'the paragraph <p> has aria-label, but its role takes no name: a reader is not told it').
+amb_diag(unknown_attribute, n(1,41,0), '<button> has aria-labeledby, which WAI-ARIA does not define').
+amb_diag(bad_value, n(1,47,0), '<div aria-checked=maybe>: the value is not one of true, false, mixed, undefined, so it counts as unset').
+amb_diag(bad_value, n(1,50,0), '<div aria-live=loud>: the value is not one of assertive, off, polite, so it counts as unset').
+amb_diag(bad_value, n(1,53,0), '<div aria-level=\'0\'>: the value is not an integer of 1 or more, so it counts as unset').
+amb_diag(bad_value, n(1,56,0), '<a aria-current=yes>: the value is not one of page, step, location, date, time, true, false, so it counts as true').
+amb_diag(bad_value, n(1,59,0), '<button aria-haspopup=popover>: the value is not one of false, true, menu, listbox, tree, grid, dialog, so it counts as unset').
+amb_diag(bad_value, n(1,62,0), '<div aria-orientation=diagonal>: the value is not one of horizontal, vertical, undefined, so it counts as unset').
+amb_diag(bad_value, n(1,91,0), '<li aria-posinset=\'0\'>: the value is not an integer of 1 or more, so it counts as unset').
+amb_diag(bad_value, n(1,94,0), '<li aria-setsize=\'-2\'>: the value is not an integer of -1 or more, so it counts as unset').
+amb_diag(range_missing_value, ax(1,18,0), 'the slider <div> has no aria-valuenow, which its role needs: a reader is told 50, a default').
+amb_diag(range_missing_value, ax(1,19,0), 'the scrollbar <div> has no aria-valuenow, which its role needs: a reader is told 50, a default').
+amb_diag(range_missing_value, ax(1,20,0), 'the meter <div> has no aria-valuenow, which its role needs: a reader is told 0, a default').
+amb_diag(range_out_of_bounds, ax(1,21,0), 'the slider <div> says its value is 150, outside its range of 0 to 100').
+amb_diag(range_out_of_bounds, ax(1,22,0), 'the slider <div> says its value is 5, outside its range of 10 to 0').
+amb_diag(hidden_focusable, n(1,106,0), 'the <button> takes focus inside aria-hidden content (<div>): a keyboard reaches what a reader is not told of').
+amb_diag(hidden_focusable, n(1,109,0), 'the <a> takes focus inside aria-hidden content (<div>): a keyboard reaches what a reader is not told of').
+amb_diag(hidden_focusable, n(1,120,0), 'the <button> takes focus inside aria-hidden content (<button>): a keyboard reaches what a reader is not told of').
+amb_diag(hidden_live_region, n(1,123,0), 'the live region <div> is inside hidden content (<div>, display_none): what changes in it is not announced').
+amb_diag(hidden_live_region, n(1,127,0), 'the live region <div> is inside hidden content (<div>, hidden_attribute): what changes in it is not announced').
+amb_diag(hidden_live_region, n(1,131,0), 'the live region <div> is inside hidden content (<div>, aria_hidden): what changes in it is not announced').
+amb_diag(position_out_of_range, ax(1,27,0), 'the listitem <li> is told it is at position 5 of a set of 3').
+-- the faults axe-core has rules for, against what axe-core finds:
+the same 19 findings
+-- the slider without a value, proved:
+a11y_range_missing(ax(1,18,0),slider)   because
+  a11y_valuenow(ax(1,18,0),50,default)   [fact]
+  a11y_node(ax(1,18,0),n(1,69,0),slider,'Volume',aria_label)   [fact]
+  a11y_rules_needs_value(slider)   [rule]
+
+-- the checkbox told it is pressed, proved:
+a11y_unsupported_attr(n(1,26,0),'aria-pressed',checkbox)   because
+  dom_attr(n(1,26,0),'aria-pressed',true)   [fact]
+  a11y_rules_attr('aria-pressed',token([true,false,mixed,undefined]))   [rule]
+  not a11y_rules_global('aria-pressed')   [no proof]
+  a11y_role_of(n(1,26,0),checkbox)   because
+    a11y_node(ax(1,5,0),n(1,26,0),checkbox,'A checkbox told it is pressed',label)   [fact]
+  not a11y_rules_supports(checkbox,'aria-pressed')   [no proof]
+

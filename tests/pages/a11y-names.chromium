@@ -1,0 +1,73 @@
+heading#title "Names and descriptions" level=1
+heading#h-desc "Descriptions" level=2
+button#save "Save" desc "Writes the file to disk"
+button#two-hints "Send" desc "Hidden, but named Shown text"
+button#extra "Help" desc "Opens in a new window"
+link#tip-link "Top" desc "Back to the top of the page"
+button#same-title "Print"
+img#logo "The logo" desc "Ambitious, a browser"
+button#go "Go" desc "Starts the search"
+table#named-table "Scores" desc "Last week's scores"
+cell#score "12"
+table#titled-table "Results" desc "Kept for the record"
+cell#result "3"
+button#self-desc "Describes itself" desc "Describes itself"
+heading#h-embedded "Embedded controls" level=2
+checkbox#flash "Flash the screen 3 times" checked=false
+textbox#times "Times" value="3"
+slider#vol orientation=horizontal valuenow=30 valuemin=0 valuemax=100
+button#vol-button "Volume thirty percent now"
+spinbutton#spin "Copies count" valuenow=8
+button#spin-button "Copies 8 made"
+listbox#pick "Choice" orientation=vertical
+option#p-a "Plain"
+option#p-b "Picked" selected=true
+button#pick-button "Pick Picked now"
+textbox#typed "Typed" value="typed in"
+button#text-button "Text typed in end"
+listbox#multi "Multi" orientation=vertical multiselectable=true
+button#multi-button "Sizes S L chosen"
+combobox#ship "Ship by please" expanded=false haspopup=menu value="Air"
+button#with-select "Colour Green"
+button#slider-button "Level 50 set"
+heading#h-hidden "Hidden content" level=2
+button#from-hidden "All of a hidden label"
+button#from-visible "Only the shown part"
+button#content-hidden "Shown text"
+heading#h-content "Names from content" level=2
+button#blocks "First Second"
+button#inline "Joined"
+button#chips "One chip"
+link#broken "Line break"
+button#cells "A B"
+link#icon-link "Twitter"
+button#ref-inside "Referenced text"
+button#title-inside "Read"
+button#self-ref "Delete the file"
+button#label-ref "The note's label"
+note#labelled-div "The note's label"
+button#group-inside "Pick"
+button#list-inside "Go first second"
+menu#menu "Edit" orientation=vertical
+menuitem#mi-paste "Paste"
+menuitem#mi-plain "Plain text"
+tree#tree "Places" orientation=vertical
+treeitem#ti-home "Home" level=1
+treeitem#ti-docs "Documents" level=2
+grid#grid "Board"
+row#grid-row "a1 a2"
+gridcell#cell-a "a1"
+heading#h-labels "Labels" level=2
+textbox#both "First second"
+textbox#first-control "Only" desc "Shown text"
+textbox#second-control
+textbox#aria-hint "Type here" placeholder="Type here"
+combobox#grouped "Grouped" expanded=false haspopup=menu value="Apple, red"
+group#og-fruit "Fruit"
+option#o-apple "Apple, red" selected=true
+button#submit "Submit"
+button#reset "Reset"
+button#image-go "Submit"
+button#image-alt "Search"
+group#where "Address" desc "Where to send it"
+figure#fig

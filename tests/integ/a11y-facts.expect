@@ -1,0 +1,115 @@
+-- positions in their sets:
+Id = 'r-s', A = ax(1,12,0), P = 1, S = 3
+Id = 'r-m', A = ax(1,13,0), P = 2, S = 3
+Id = 'r-l', A = ax(1,14,0), P = 3, S = 3
+Id = 'rg-slow', A = ax(1,16,0), P = 1, S = 2
+Id = 'rg-fast', A = ax(1,17,0), P = 2, S = 2
+Id = 'f-none', A = ax(1,26,0), P = 1, S = 3
+Id = 'f-lemon', A = ax(1,28,0), P = 1, S = 1
+Id = 'f-apple', A = ax(1,29,0), P = 2, S = 3
+Id = 'f-pear', A = ax(1,30,0), P = 3, S = 3
+Id = 'c-red', A = ax(1,32,0), P = 1, S = 3
+Id = 'c-green', A = ax(1,33,0), P = 2, S = 3
+Id = 'c-blue', A = ax(1,34,0), P = 3, S = 3
+Id = 'z-a', A = ax(1,36,0), P = 1, S = 2
+Id = 'z-b', A = ax(1,37,0), P = 2, S = 2
+Id = 'ls-a', A = ax(1,53,0), P = 1, S = 1
+Id = 'tab-a', A = ax(1,59,0), P = 1, S = 2
+Id = 'tab-b', A = ax(1,60,0), P = 2, S = 2
+Id = 'ti-src', A = ax(1,62,0), P = 1, S = 2
+Id = 'ti-main', A = ax(1,64,0), P = 1, S = 1
+Id = 'ti-docs', A = ax(1,65,0), P = 2, S = 2
+Id = 'lb-ham', A = ax(1,67,0), P = 1, S = 2
+Id = 'lb-egg', A = ax(1,68,0), P = 2, S = 2
+Id = 'mi-file', A = ax(1,70,0), P = 1, S = 1
+Id = 'mi-ruler', A = ax(1,72,0), P = 1, S = 2
+Id = 'mi-zoom', A = ax(1,73,0), P = 2, S = 2
+Id = 'li-one', A = ax(1,95,0), P = 1, S = 2
+Id = 'li-nested', A = ax(1,97,0), P = 1, S = 1
+Id = 'li-two', A = ax(1,98,0), P = 5, S = 9
+-- levels:
+Id = title, A = ax(1,3,0), L = 1
+Id = 'ti-src', A = ax(1,62,0), L = 1
+Id = 'ti-main', A = ax(1,64,0), L = 2
+Id = 'ti-docs', A = ax(1,65,0), L = 1
+Id = 'dlg-title', A = ax(1,77,0), L = 2
+Id = 'h-aria', A = ax(1,92,0), L = 4
+Id = 'h-lowered', A = ax(1,93,0), L = 2
+Id = 'li-one', A = ax(1,95,0), L = 1
+Id = 'li-nested', A = ax(1,97,0), L = 2
+Id = 'li-two', A = ax(1,98,0), L = 1
+-- aria-current and aria-valuetext:
+Id = here, A = ax(1,24,0), V = page
+Id = volume, A = ax(1,78,0), V = seven
+-- ranges, and where each value came from:
+Id = volume, A = ax(1,78,0), Now = 7, From = aria, Min = 0, Max = 11
+Id = balance, A = ax(1,79,0), Now = 50, From = default, Min = 0, Max = 100
+Id = scroller, A = ax(1,80,0), Now = 25, From = aria, Min = 0, Max = 100
+Id = spin, A = ax(1,81,0), Now = 3, From = aria, Min = 1, Max = 9
+Id = 'spin-free', A = ax(1,82,0), Now = 12, From = aria, Min = none, Max = none
+Id = upload, A = ax(1,84,0), Now = 40, From = aria, Min = 0, Max = 100
+Id = fuel, A = ax(1,85,0), Now = 0.25, From = aria, Min = 0, Max = 1
+Id = 'native-progress', A = ax(1,86,0), Now = 3, From = html, Min = 0, Max = 4
+Id = 'native-meter', A = ax(1,87,0), Now = 60, From = html, Min = 0, Max = 80
+Id = rate, A = ax(1,88,0), Now = 16, From = html, Min = 10, Max = 20
+Id = qty, A = ax(1,89,0), Now = 4, From = html, Min = 1, Max = 9
+Id = splitter, A = ax(1,90,0), Now = 30, From = aria, Min = 0, Max = 100
+-- fields' values and placeholders:
+Id = fruit, A = ax(1,25,0), V = 'Apple', K = value
+Id = code, A = ax(1,41,0), V = 'X-42', K = value
+Id = mail, A = ax(1,42,0), V = 'you@example.org', K = placeholder
+Id = word, A = ax(1,43,0), V = teh, K = value
+Id = secret, A = ax(1,44,0), V = ••••••, K = value
+Id = notes, A = ax(1,45,0), V = 'Two\nlines', K = value
+Id = editor, A = ax(1,46,0), V = 'Draft', K = value
+Id = 'one-line', A = ax(1,47,0), V = 'Fixed', K = value
+Id = 'locked-select', A = ax(1,52,0), V = 'Only', K = value
+-- why the disabled are disabled:
+Id = 'f-none', A = ax(1,26,0), Why = html('the disabled attribute',true)
+Id = citrus, A = ax(1,27,0), Why = html('the disabled attribute',true)
+Id = 'f-lemon', A = ax(1,28,0), Why = inherited(true,n(1,94,0),optgroup)
+Id = off, A = ax(1,48,0), Why = html('the disabled attribute',true)
+Id = locked, A = ax(1,49,0), Why = html('the disabled attribute',true)
+Id = 'after-legend', A = ax(1,51,0), Why = inherited(true,n(1,174,0),fieldset)
+Id = 'locked-select', A = ax(1,52,0), Why = inherited(true,n(1,174,0),fieldset)
+Id = 'ls-a', A = ax(1,53,0), Why = inherited(true,n(1,182,0),select)
+Id = 'aria-off', A = ax(1,55,0), Why = attribute('aria-disabled',true)
+Id = 'inner-button', A = ax(1,56,0), Why = inherited(true,n(1,190,0),div)
+-- why the fruit select's options are chosen or not:
+Id = 'f-none', A = ax(1,26,0), S = disabled, Why = html('the disabled attribute',true)
+Id = 'f-lemon', A = ax(1,28,0), S = disabled, Why = inherited(true,n(1,94,0),optgroup)
+Id = 'f-apple', A = ax(1,29,0), S = selected, Why = chosen_by_default(true)
+Id = 'f-pear', A = ax(1,30,0), S = selected, Why = html('the selected attribute',false)
+-- why the descriptions:
+Id = save, A = ax(1,5,0), Why = described_by(['save-hint'],'Writes the file to disk')
+Id = 'two-hints', A = ax(1,6,0), Why = described_by(['hint-hidden','hint-shown'],'Hidden, but named Shown text')
+Id = extra, A = ax(1,7,0), Why = aria_description('Opens in a new window')
+Id = 'tip-link', A = ax(1,8,0), Why = title('Back to the top of the page')
+Id = logo, A = ax(1,10,0), Why = title('Ambitious, a browser')
+Id = go, A = ax(1,11,0), Why = title('Starts the search')
+Id = 'named-table', A = ax(1,12,0), Why = caption('Last week\'s scores')
+Id = 'titled-table', A = ax(1,15,0), Why = title('Kept for the record')
+Id = 'self-desc', A = ax(1,18,0), Why = described_by(['self-desc'],'Describes itself')
+Id = 'first-control', A = ax(1,86,0), Why = described_by(['hint-shown'],'Shown text')
+Id = where, A = ax(1,96,0), Why = title('Where to send it')
+-- the live region each node is inside:
+Id = 'feed-text', A = ax(1,5,0), P = polite, R = ax(1,4,0), In = feed
+Id = 'feed-status', A = ax(1,6,0), P = polite, R = ax(1,4,0), In = feed
+Id = 'feed-button', A = ax(1,7,0), P = polite, R = ax(1,4,0), In = feed
+Id = 'quiet-text', A = ax(1,10,0), P = off, R = ax(1,9,0), In = quiet
+Id = 'log-line', A = ax(1,15,0), P = polite, R = ax(1,14,0), In = log
+Id = 'busy-text', A = ax(1,20,0), P = polite, R = ax(1,19,0), In = busy
+-- hidden subtrees, and what in them takes focus or is a live region:
+N = n(1,65,0), How = aria_hidden, Id = covered
+N = n(1,84,0), How = aria_hidden, Id = 'hidden-button'
+N = n(1,87,0), How = display_none, Id = later
+N = n(1,90,0), How = hidden_attribute, Id = tucked
+N = n(1,67,0), R = n(1,65,0), W = focusable, Id = 'covered-button', E = div
+N = n(1,70,0), R = n(1,65,0), W = focusable, Id = 'covered-link', E = div
+N = n(1,84,0), R = n(1,84,0), W = focusable, Id = 'hidden-button', E = button
+N = n(1,80,0), R = n(1,65,0), W = live_region, Id = 'covered-alert', E = div
+N = n(1,87,0), R = n(1,87,0), W = live_region, Id = later, E = div
+N = n(1,91,0), R = n(1,90,0), W = live_region, Id = 'tucked-status', E = div
+-- elements that are no node, kept for their aria-* attributes:
+N = n(1,32,0), Role = generic, Id = 'valued-div'
+N = n(1,35,0), Role = generic, Id = 'labelled-div'

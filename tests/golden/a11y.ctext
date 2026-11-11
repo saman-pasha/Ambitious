@@ -1,15 +1,38 @@
-/* Ambitious: the interface of module a11y, generated from contracts/a11y.pl (fnv1a32:655a7118:2900). Do not edit. */
+/* Ambitious: the interface of module a11y, generated from contracts/a11y.pl (fnv1a32:47f3ddac:8074). Do not edit. */
 typedef enum a11y_status { A11Y_OK, A11Y_STALE_HANDLE, A11Y_WRONG_KIND, A11Y_BAD_REQUEST, A11Y_NOT_REQUESTABLE, A11Y_STALE_REVISION } a11y_status;
-typedef enum a11y_role { A11Y_ROLE_DOCUMENT, A11Y_ROLE_GENERIC, A11Y_ROLE_PRESENTATION, A11Y_ROLE_LINK, A11Y_ROLE_BUTTON, A11Y_ROLE_CHECKBOX, A11Y_ROLE_RADIO, A11Y_ROLE_TEXTBOX, A11Y_ROLE_COMBOBOX, A11Y_ROLE_LISTBOX, A11Y_ROLE_OPTION, A11Y_ROLE_SLIDER, A11Y_ROLE_IMG, A11Y_ROLE_HEADING, A11Y_ROLE_PARAGRAPH, A11Y_ROLE_LIST, A11Y_ROLE_LISTITEM, A11Y_ROLE_TABLE, A11Y_ROLE_ROW, A11Y_ROLE_CELL, A11Y_ROLE_COLUMNHEADER, A11Y_ROLE_ROWHEADER, A11Y_ROLE_NAVIGATION, A11Y_ROLE_MAIN, A11Y_ROLE_BANNER, A11Y_ROLE_CONTENTINFO, A11Y_ROLE_COMPLEMENTARY, A11Y_ROLE_REGION, A11Y_ROLE_FORM, A11Y_ROLE_SEARCH, A11Y_ROLE_ARTICLE, A11Y_ROLE_DIALOG, A11Y_ROLE_FIGURE, A11Y_ROLE_GROUP, A11Y_ROLE_SEPARATOR, A11Y_ROLE_TERM, A11Y_ROLE_DEFINITION, A11Y_ROLE_BLOCKQUOTE, A11Y_ROLE_CODE, A11Y_ROLE_PROGRESSBAR, A11Y_ROLE_MENU, A11Y_ROLE_MENUITEM, A11Y_ROLE_TAB, A11Y_ROLE_TABLIST, A11Y_ROLE_TABPANEL, A11Y_ROLE_ALERT, A11Y_ROLE_STATUS, A11Y_ROLE_UNKNOWN } a11y_role;
-typedef enum a11y_name_from { A11Y_NAME_FROM_NOTHING, A11Y_NAME_FROM_ARIA_LABELLEDBY, A11Y_NAME_FROM_ARIA_LABEL, A11Y_NAME_FROM_ALT, A11Y_NAME_FROM_LABEL, A11Y_NAME_FROM_CAPTION, A11Y_NAME_FROM_LEGEND, A11Y_NAME_FROM_CONTENT, A11Y_NAME_FROM_TITLE, A11Y_NAME_FROM_PLACEHOLDER, A11Y_NAME_FROM_VALUE } a11y_name_from;
-typedef enum a11y_ref_attr { A11Y_REF_ATTR_ARIA_LABELLEDBY, A11Y_REF_ATTR_ARIA_DESCRIBEDBY, A11Y_REF_ATTR_ARIA_CONTROLS, A11Y_REF_ATTR_LABEL_FOR } a11y_ref_attr;
-typedef enum a11y_op { A11Y_OP_BUILD } a11y_op;
+typedef enum a11y_role { A11Y_ROLE_DOCUMENT, A11Y_ROLE_GENERIC, A11Y_ROLE_PRESENTATION, A11Y_ROLE_LINK, A11Y_ROLE_BUTTON, A11Y_ROLE_CHECKBOX, A11Y_ROLE_RADIO, A11Y_ROLE_TEXTBOX, A11Y_ROLE_COMBOBOX, A11Y_ROLE_LISTBOX, A11Y_ROLE_OPTION, A11Y_ROLE_SLIDER, A11Y_ROLE_IMG, A11Y_ROLE_HEADING, A11Y_ROLE_PARAGRAPH, A11Y_ROLE_LIST, A11Y_ROLE_LISTITEM, A11Y_ROLE_TABLE, A11Y_ROLE_ROW, A11Y_ROLE_CELL, A11Y_ROLE_COLUMNHEADER, A11Y_ROLE_ROWHEADER, A11Y_ROLE_NAVIGATION, A11Y_ROLE_MAIN, A11Y_ROLE_BANNER, A11Y_ROLE_CONTENTINFO, A11Y_ROLE_COMPLEMENTARY, A11Y_ROLE_REGION, A11Y_ROLE_FORM, A11Y_ROLE_SEARCH, A11Y_ROLE_ARTICLE, A11Y_ROLE_DIALOG, A11Y_ROLE_FIGURE, A11Y_ROLE_GROUP, A11Y_ROLE_SEPARATOR, A11Y_ROLE_TERM, A11Y_ROLE_DEFINITION, A11Y_ROLE_BLOCKQUOTE, A11Y_ROLE_CODE, A11Y_ROLE_PROGRESSBAR, A11Y_ROLE_MENU, A11Y_ROLE_MENUITEM, A11Y_ROLE_TAB, A11Y_ROLE_TABLIST, A11Y_ROLE_TABPANEL, A11Y_ROLE_ALERT, A11Y_ROLE_STATUS, A11Y_ROLE_ALERTDIALOG, A11Y_ROLE_APPLICATION, A11Y_ROLE_CAPTION, A11Y_ROLE_DELETION, A11Y_ROLE_DIRECTORY, A11Y_ROLE_EMPHASIS, A11Y_ROLE_FEED, A11Y_ROLE_GRID, A11Y_ROLE_GRIDCELL, A11Y_ROLE_INSERTION, A11Y_ROLE_LOG, A11Y_ROLE_MARQUEE, A11Y_ROLE_MATH, A11Y_ROLE_MENUBAR, A11Y_ROLE_MENUITEMCHECKBOX, A11Y_ROLE_MENUITEMRADIO, A11Y_ROLE_METER, A11Y_ROLE_NOTE, A11Y_ROLE_RADIOGROUP, A11Y_ROLE_ROWGROUP, A11Y_ROLE_SCROLLBAR, A11Y_ROLE_SEARCHBOX, A11Y_ROLE_SPINBUTTON, A11Y_ROLE_STRONG, A11Y_ROLE_SUBSCRIPT, A11Y_ROLE_SUPERSCRIPT, A11Y_ROLE_SWITCH, A11Y_ROLE_TIME, A11Y_ROLE_TIMER, A11Y_ROLE_TOOLBAR, A11Y_ROLE_TOOLTIP, A11Y_ROLE_TREE, A11Y_ROLE_TREEGRID, A11Y_ROLE_TREEITEM, A11Y_ROLE_UNKNOWN } a11y_role;
+typedef enum a11y_name_from { A11Y_NAME_FROM_NOTHING, A11Y_NAME_FROM_ARIA_LABELLEDBY, A11Y_NAME_FROM_ARIA_LABEL, A11Y_NAME_FROM_ALT, A11Y_NAME_FROM_LABEL, A11Y_NAME_FROM_CAPTION, A11Y_NAME_FROM_LEGEND, A11Y_NAME_FROM_CONTENT, A11Y_NAME_FROM_TITLE, A11Y_NAME_FROM_PLACEHOLDER, A11Y_NAME_FROM_VALUE, A11Y_NAME_FROM_LABEL_ATTRIBUTE } a11y_name_from;
+typedef enum a11y_desc_from { A11Y_DESC_FROM_NOTHING, A11Y_DESC_FROM_ARIA_DESCRIBEDBY, A11Y_DESC_FROM_ARIA_DESCRIPTION, A11Y_DESC_FROM_TITLE, A11Y_DESC_FROM_CAPTION } a11y_desc_from;
+typedef enum a11y_ref_attr { A11Y_REF_ATTR_ARIA_LABELLEDBY, A11Y_REF_ATTR_ARIA_DESCRIBEDBY, A11Y_REF_ATTR_ARIA_CONTROLS, A11Y_REF_ATTR_LABEL_FOR, A11Y_REF_ATTR_ARIA_OWNS, A11Y_REF_ATTR_ARIA_ACTIVEDESCENDANT, A11Y_REF_ATTR_ARIA_DETAILS, A11Y_REF_ATTR_ARIA_ERRORMESSAGE, A11Y_REF_ATTR_ARIA_FLOWTO } a11y_ref_attr;
+typedef enum a11y_state { A11Y_STATE_CHECKED, A11Y_STATE_SELECTED, A11Y_STATE_EXPANDED, A11Y_STATE_PRESSED, A11Y_STATE_DISABLED, A11Y_STATE_REQUIRED, A11Y_STATE_READONLY, A11Y_STATE_INVALID, A11Y_STATE_CURRENT, A11Y_STATE_BUSY, A11Y_STATE_HASPOPUP, A11Y_STATE_ORIENTATION, A11Y_STATE_MULTISELECTABLE, A11Y_STATE_MODAL, A11Y_STATE_AUTOCOMPLETE, A11Y_STATE_MULTILINE } a11y_state;
+typedef enum a11y_token { A11Y_TOKEN_TRUE, A11Y_TOKEN_FALSE, A11Y_TOKEN_MIXED, A11Y_TOKEN_PAGE, A11Y_TOKEN_STEP, A11Y_TOKEN_LOCATION, A11Y_TOKEN_DATE, A11Y_TOKEN_TIME, A11Y_TOKEN_GRAMMAR, A11Y_TOKEN_SPELLING, A11Y_TOKEN_MENU, A11Y_TOKEN_LISTBOX, A11Y_TOKEN_TREE, A11Y_TOKEN_GRID, A11Y_TOKEN_DIALOG, A11Y_TOKEN_HORIZONTAL, A11Y_TOKEN_VERTICAL, A11Y_TOKEN_INLINE, A11Y_TOKEN_LIST, A11Y_TOKEN_BOTH } a11y_token;
+typedef enum a11y_state_from { A11Y_STATE_FROM_ARIA, A11Y_STATE_FROM_HTML, A11Y_STATE_FROM_INHERITED, A11Y_STATE_FROM_IMPLICIT, A11Y_STATE_FROM_COMPUTED } a11y_state_from;
+typedef enum a11y_value_from { A11Y_VALUE_FROM_ARIA, A11Y_VALUE_FROM_HTML, A11Y_VALUE_FROM_DEFAULT } a11y_value_from;
+typedef enum a11y_politeness { A11Y_POLITENESS_NOT_LIVE, A11Y_POLITENESS_OFF, A11Y_POLITENESS_POLITE, A11Y_POLITENESS_ASSERTIVE } a11y_politeness;
+typedef enum a11y_hidden_how { A11Y_HIDDEN_HOW_DISPLAY_NONE, A11Y_HIDDEN_HOW_HIDDEN_ATTRIBUTE, A11Y_HIDDEN_HOW_ARIA_HIDDEN } a11y_hidden_how;
+typedef enum a11y_inside_what { A11Y_INSIDE_WHAT_FOCUSABLE, A11Y_INSIDE_WHAT_LIVE_REGION } a11y_inside_what;
+typedef enum a11y_text_prop { A11Y_TEXT_PROP_DESCRIPTION, A11Y_TEXT_PROP_VALUE, A11Y_TEXT_PROP_PLACEHOLDER, A11Y_TEXT_PROP_VALUETEXT } a11y_text_prop;
+typedef enum a11y_op { A11Y_OP_BUILD, A11Y_OP_PRINT_TREE } a11y_op;
 typedef struct a11y_anode_h { uint32_t doc, index, gen; } a11y_anode_h;
+typedef struct a11y_atext_h { uint32_t doc, index, gen; } a11y_atext_h;
+typedef struct a11y_arange_h { uint32_t doc, index, gen; } a11y_arange_h;
+typedef struct a11y_alive_h { uint32_t doc, index, gen; } a11y_alive_h;
+typedef struct a11y_astate_h { uint32_t doc, index, gen; } a11y_astate_h;
 typedef struct a11y_aref_h { uint32_t doc, index, gen; } a11y_aref_h;
 typedef struct a11y_badrole_h { uint32_t doc, index, gen; } a11y_badrole_h;
-typedef struct a11y_anode { uint32_t gen, live, free_next; dom_node_h node; a11y_role role; uint8_t stated; amb_span name; a11y_name_from name_from; uint32_t parent; uint32_t level; uint8_t focusable; } a11y_anode;
+typedef struct a11y_ahidden_h { uint32_t doc, index, gen; } a11y_ahidden_h;
+typedef struct a11y_ahinside_h { uint32_t doc, index, gen; } a11y_ahinside_h;
+typedef struct a11y_aplain_h { uint32_t doc, index, gen; } a11y_aplain_h;
+typedef struct a11y_anode { uint32_t gen, live, free_next; dom_node_h node; a11y_role role; uint8_t stated; amb_span name; a11y_name_from name_from; uint32_t parent; uint32_t level; uint8_t focusable; int32_t posinset; int32_t setsize; uint32_t region; } a11y_anode;
+typedef struct a11y_atext { uint32_t gen, live, free_next; uint32_t node; a11y_text_prop prop; amb_span text; a11y_desc_from desc_from; } a11y_atext;
+typedef struct a11y_arange { uint32_t gen, live, free_next; uint32_t node; double valuenow; double valuemin; double valuemax; uint8_t has_now; uint8_t has_min; uint8_t has_max; a11y_value_from now_from; } a11y_arange;
+typedef struct a11y_alive { uint32_t gen, live, free_next; uint32_t node; a11y_politeness politeness; uint8_t atomic; amb_span relevant; } a11y_alive;
+typedef struct a11y_astate { uint32_t gen, live, free_next; uint32_t node; a11y_state state; a11y_token value; a11y_state_from from; dom_node_h by; } a11y_astate;
 typedef struct a11y_aref { uint32_t gen, live, free_next; dom_node_h from; a11y_ref_attr attr; amb_span idref; dom_node_h target; } a11y_aref;
 typedef struct a11y_badrole { uint32_t gen, live, free_next; dom_node_h node; amb_span value; } a11y_badrole;
+typedef struct a11y_ahidden { uint32_t gen, live, free_next; dom_node_h node; a11y_hidden_how how; } a11y_ahidden;
+typedef struct a11y_ahinside { uint32_t gen, live, free_next; dom_node_h node; dom_node_h root; a11y_inside_what what; } a11y_ahinside;
+typedef struct a11y_aplain { uint32_t gen, live, free_next; dom_node_h node; a11y_role role; } a11y_aplain;
 typedef struct a11y_store_tag { char unused; } a11y_store_tag;
 typedef store<a11y_store_tag> a11y_tree;
 extern const char a11y_fingerprint[];
@@ -17,11 +40,22 @@ const char *a11y_status_name(a11y_status x);
 const char *a11y_op_name(a11y_op x);
 const char *a11y_role_name(a11y_role x);
 const char *a11y_name_from_name(a11y_name_from x);
+const char *a11y_desc_from_name(a11y_desc_from x);
 const char *a11y_ref_attr_name(a11y_ref_attr x);
+const char *a11y_state_name(a11y_state x);
+const char *a11y_token_name(a11y_token x);
+const char *a11y_state_from_name(a11y_state_from x);
+const char *a11y_value_from_name(a11y_value_from x);
+const char *a11y_politeness_name(a11y_politeness x);
+const char *a11y_hidden_how_name(a11y_hidden_how x);
+const char *a11y_inside_what_name(a11y_inside_what x);
+const char *a11y_text_prop_name(a11y_text_prop x);
 void a11y_init(a11y_tree *d, uint32_t id);
 uint64_t a11y_revision(const a11y_tree *d);
 a11y_status a11y_build(a11y_tree *d, dom_document *doc, css_style *style);
+a11y_status a11y_print_tree(const a11y_tree *d, dom_document *doc, FILE *out);
 a11y_status a11y_check_build(const a11y_tree *d, dom_document *doc, css_style *style);
+a11y_status a11y_check_print_tree(const a11y_tree *d, dom_document *doc, FILE *out);
 int a11y_check_invariants(const a11y_tree *d, FILE *report);
 void a11y_export(const a11y_tree *d, FILE *out);
 a11y_status a11y_dispatch(a11y_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
@@ -40,6 +74,7 @@ const char *a11y_status_name(a11y_status x) {
 const char *a11y_op_name(a11y_op x) {
     switch (x) {
     case A11Y_OP_BUILD: return "build";
+    case A11Y_OP_PRINT_TREE: return "print_tree";
     }
     return "?";
 }
@@ -92,6 +127,40 @@ const char *a11y_role_name(a11y_role x) {
     case A11Y_ROLE_TABPANEL: return "tabpanel";
     case A11Y_ROLE_ALERT: return "alert";
     case A11Y_ROLE_STATUS: return "status";
+    case A11Y_ROLE_ALERTDIALOG: return "alertdialog";
+    case A11Y_ROLE_APPLICATION: return "application";
+    case A11Y_ROLE_CAPTION: return "caption";
+    case A11Y_ROLE_DELETION: return "deletion";
+    case A11Y_ROLE_DIRECTORY: return "directory";
+    case A11Y_ROLE_EMPHASIS: return "emphasis";
+    case A11Y_ROLE_FEED: return "feed";
+    case A11Y_ROLE_GRID: return "grid";
+    case A11Y_ROLE_GRIDCELL: return "gridcell";
+    case A11Y_ROLE_INSERTION: return "insertion";
+    case A11Y_ROLE_LOG: return "log";
+    case A11Y_ROLE_MARQUEE: return "marquee";
+    case A11Y_ROLE_MATH: return "math";
+    case A11Y_ROLE_MENUBAR: return "menubar";
+    case A11Y_ROLE_MENUITEMCHECKBOX: return "menuitemcheckbox";
+    case A11Y_ROLE_MENUITEMRADIO: return "menuitemradio";
+    case A11Y_ROLE_METER: return "meter";
+    case A11Y_ROLE_NOTE: return "note";
+    case A11Y_ROLE_RADIOGROUP: return "radiogroup";
+    case A11Y_ROLE_ROWGROUP: return "rowgroup";
+    case A11Y_ROLE_SCROLLBAR: return "scrollbar";
+    case A11Y_ROLE_SEARCHBOX: return "searchbox";
+    case A11Y_ROLE_SPINBUTTON: return "spinbutton";
+    case A11Y_ROLE_STRONG: return "strong";
+    case A11Y_ROLE_SUBSCRIPT: return "subscript";
+    case A11Y_ROLE_SUPERSCRIPT: return "superscript";
+    case A11Y_ROLE_SWITCH: return "switch";
+    case A11Y_ROLE_TIME: return "time";
+    case A11Y_ROLE_TIMER: return "timer";
+    case A11Y_ROLE_TOOLBAR: return "toolbar";
+    case A11Y_ROLE_TOOLTIP: return "tooltip";
+    case A11Y_ROLE_TREE: return "tree";
+    case A11Y_ROLE_TREEGRID: return "treegrid";
+    case A11Y_ROLE_TREEITEM: return "treeitem";
     case A11Y_ROLE_UNKNOWN: return "unknown";
     }
     return "?";
@@ -109,6 +178,17 @@ const char *a11y_name_from_name(a11y_name_from x) {
     case A11Y_NAME_FROM_TITLE: return "title";
     case A11Y_NAME_FROM_PLACEHOLDER: return "placeholder";
     case A11Y_NAME_FROM_VALUE: return "value";
+    case A11Y_NAME_FROM_LABEL_ATTRIBUTE: return "label_attribute";
+    }
+    return "?";
+}
+const char *a11y_desc_from_name(a11y_desc_from x) {
+    switch (x) {
+    case A11Y_DESC_FROM_NOTHING: return "nothing";
+    case A11Y_DESC_FROM_ARIA_DESCRIBEDBY: return "aria_describedby";
+    case A11Y_DESC_FROM_ARIA_DESCRIPTION: return "aria_description";
+    case A11Y_DESC_FROM_TITLE: return "title";
+    case A11Y_DESC_FROM_CAPTION: return "caption";
     }
     return "?";
 }
@@ -118,11 +198,113 @@ const char *a11y_ref_attr_name(a11y_ref_attr x) {
     case A11Y_REF_ATTR_ARIA_DESCRIBEDBY: return "aria_describedby";
     case A11Y_REF_ATTR_ARIA_CONTROLS: return "aria_controls";
     case A11Y_REF_ATTR_LABEL_FOR: return "label_for";
+    case A11Y_REF_ATTR_ARIA_OWNS: return "aria_owns";
+    case A11Y_REF_ATTR_ARIA_ACTIVEDESCENDANT: return "aria_activedescendant";
+    case A11Y_REF_ATTR_ARIA_DETAILS: return "aria_details";
+    case A11Y_REF_ATTR_ARIA_ERRORMESSAGE: return "aria_errormessage";
+    case A11Y_REF_ATTR_ARIA_FLOWTO: return "aria_flowto";
+    }
+    return "?";
+}
+const char *a11y_state_name(a11y_state x) {
+    switch (x) {
+    case A11Y_STATE_CHECKED: return "checked";
+    case A11Y_STATE_SELECTED: return "selected";
+    case A11Y_STATE_EXPANDED: return "expanded";
+    case A11Y_STATE_PRESSED: return "pressed";
+    case A11Y_STATE_DISABLED: return "disabled";
+    case A11Y_STATE_REQUIRED: return "required";
+    case A11Y_STATE_READONLY: return "readonly";
+    case A11Y_STATE_INVALID: return "invalid";
+    case A11Y_STATE_CURRENT: return "current";
+    case A11Y_STATE_BUSY: return "busy";
+    case A11Y_STATE_HASPOPUP: return "haspopup";
+    case A11Y_STATE_ORIENTATION: return "orientation";
+    case A11Y_STATE_MULTISELECTABLE: return "multiselectable";
+    case A11Y_STATE_MODAL: return "modal";
+    case A11Y_STATE_AUTOCOMPLETE: return "autocomplete";
+    case A11Y_STATE_MULTILINE: return "multiline";
+    }
+    return "?";
+}
+const char *a11y_token_name(a11y_token x) {
+    switch (x) {
+    case A11Y_TOKEN_TRUE: return "true";
+    case A11Y_TOKEN_FALSE: return "false";
+    case A11Y_TOKEN_MIXED: return "mixed";
+    case A11Y_TOKEN_PAGE: return "page";
+    case A11Y_TOKEN_STEP: return "step";
+    case A11Y_TOKEN_LOCATION: return "location";
+    case A11Y_TOKEN_DATE: return "date";
+    case A11Y_TOKEN_TIME: return "time";
+    case A11Y_TOKEN_GRAMMAR: return "grammar";
+    case A11Y_TOKEN_SPELLING: return "spelling";
+    case A11Y_TOKEN_MENU: return "menu";
+    case A11Y_TOKEN_LISTBOX: return "listbox";
+    case A11Y_TOKEN_TREE: return "tree";
+    case A11Y_TOKEN_GRID: return "grid";
+    case A11Y_TOKEN_DIALOG: return "dialog";
+    case A11Y_TOKEN_HORIZONTAL: return "horizontal";
+    case A11Y_TOKEN_VERTICAL: return "vertical";
+    case A11Y_TOKEN_INLINE: return "inline";
+    case A11Y_TOKEN_LIST: return "list";
+    case A11Y_TOKEN_BOTH: return "both";
+    }
+    return "?";
+}
+const char *a11y_state_from_name(a11y_state_from x) {
+    switch (x) {
+    case A11Y_STATE_FROM_ARIA: return "aria";
+    case A11Y_STATE_FROM_HTML: return "html";
+    case A11Y_STATE_FROM_INHERITED: return "inherited";
+    case A11Y_STATE_FROM_IMPLICIT: return "implicit";
+    case A11Y_STATE_FROM_COMPUTED: return "computed";
+    }
+    return "?";
+}
+const char *a11y_value_from_name(a11y_value_from x) {
+    switch (x) {
+    case A11Y_VALUE_FROM_ARIA: return "aria";
+    case A11Y_VALUE_FROM_HTML: return "html";
+    case A11Y_VALUE_FROM_DEFAULT: return "default";
+    }
+    return "?";
+}
+const char *a11y_politeness_name(a11y_politeness x) {
+    switch (x) {
+    case A11Y_POLITENESS_NOT_LIVE: return "not_live";
+    case A11Y_POLITENESS_OFF: return "off";
+    case A11Y_POLITENESS_POLITE: return "polite";
+    case A11Y_POLITENESS_ASSERTIVE: return "assertive";
+    }
+    return "?";
+}
+const char *a11y_hidden_how_name(a11y_hidden_how x) {
+    switch (x) {
+    case A11Y_HIDDEN_HOW_DISPLAY_NONE: return "display_none";
+    case A11Y_HIDDEN_HOW_HIDDEN_ATTRIBUTE: return "hidden_attribute";
+    case A11Y_HIDDEN_HOW_ARIA_HIDDEN: return "aria_hidden";
+    }
+    return "?";
+}
+const char *a11y_inside_what_name(a11y_inside_what x) {
+    switch (x) {
+    case A11Y_INSIDE_WHAT_FOCUSABLE: return "focusable";
+    case A11Y_INSIDE_WHAT_LIVE_REGION: return "live_region";
+    }
+    return "?";
+}
+const char *a11y_text_prop_name(a11y_text_prop x) {
+    switch (x) {
+    case A11Y_TEXT_PROP_DESCRIPTION: return "description";
+    case A11Y_TEXT_PROP_VALUE: return "value";
+    case A11Y_TEXT_PROP_PLACEHOLDER: return "placeholder";
+    case A11Y_TEXT_PROP_VALUETEXT: return "valuetext";
     }
     return "?";
 }
 
-const char a11y_fingerprint[] = "fnv1a32:655a7118:2900";
+const char a11y_fingerprint[] = "fnv1a32:47f3ddac:8074";
 void a11y_init(a11y_tree *d, uint32_t id) {
     if (d->anode_len != 0) abort();
     d->id = id;
@@ -135,6 +317,11 @@ a11y_status a11y_check_build(const a11y_tree *d, dom_document *doc, css_style *s
     return A11Y_OK;
 }
 
+a11y_status a11y_check_print_tree(const a11y_tree *d, dom_document *doc, FILE *out)
+{
+    return A11Y_OK;
+}
+
 int a11y_check_invariants(const a11y_tree *d, FILE *report) {
     int bad = 0;
     /* live_links */
@@ -142,6 +329,26 @@ int a11y_check_invariants(const a11y_tree *d, FILE *report) {
         for (uint32_t i = 1; i < d->anode_len; i++) {
             uint32_t r = d->anode[i].parent;
             if (d->anode[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->anode_len; i++) {
+            uint32_t r = d->anode[i].region;
+            if (d->anode[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->atext_len; i++) {
+            uint32_t r = d->atext[i].node;
+            if (d->atext[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->arange_len; i++) {
+            uint32_t r = d->arange[i].node;
+            if (d->arange[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->alive_len; i++) {
+            uint32_t r = d->alive[i].node;
+            if (d->alive[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->astate_len; i++) {
+            uint32_t r = d->astate[i].node;
+            if (d->astate[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
         }
     }
     return bad;
@@ -155,6 +362,31 @@ void a11y_export(const a11y_tree *d, FILE *out) {
         if (d->anode[i].stated == 1) { fputs("a11y_explicit_role(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(").\n", out); }
         if (d->anode[i].role == A11Y_ROLE_HEADING) { fputs("a11y_heading(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->anode[i].level); fputs(").\n", out); }
         if (d->anode[i].focusable == 1) { fputs("a11y_focusable(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(").\n", out); }
+        if (d->anode[i].level != 0) { fputs("a11y_level(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->anode[i].level); fputs(").\n", out); }
+        if (d->anode[i].posinset != 0) { fputs("a11y_position(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->anode[i].posinset); fputs(",", out); fprintf(out, "%lld", (long long)d->anode[i].setsize); fputs(").\n", out); }
+        if (d->anode[i].region != 0) { fputs("a11y_live_region(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); { uint32_t r = d->anode[i].region; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->atext_len; i++) {
+        if (!d->atext[i].live) continue;
+        if (d->atext[i].prop == A11Y_TEXT_PROP_DESCRIPTION) { fputs("a11y_description(", out); { uint32_t r = d->atext[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); text_put(d, out, d->atext[i].text); fputs(",", out); fputs(a11y_desc_from_name(d->atext[i].desc_from), out); fputs(").\n", out); }
+        if (d->atext[i].prop == A11Y_TEXT_PROP_VALUE) { fputs("a11y_value(", out); { uint32_t r = d->atext[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); text_put(d, out, d->atext[i].text); fputs(").\n", out); }
+        if (d->atext[i].prop == A11Y_TEXT_PROP_PLACEHOLDER) { fputs("a11y_placeholder(", out); { uint32_t r = d->atext[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); text_put(d, out, d->atext[i].text); fputs(").\n", out); }
+        if (d->atext[i].prop == A11Y_TEXT_PROP_VALUETEXT) { fputs("a11y_valuetext(", out); { uint32_t r = d->atext[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); text_put(d, out, d->atext[i].text); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->arange_len; i++) {
+        if (!d->arange[i].live) continue;
+        if (d->arange[i].has_now == 1) { fputs("a11y_valuenow(", out); { uint32_t r = d->arange[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->arange[i].valuenow); fputs(",", out); fputs(a11y_value_from_name(d->arange[i].now_from), out); fputs(").\n", out); }
+        if (d->arange[i].has_min == 1) { fputs("a11y_valuemin(", out); { uint32_t r = d->arange[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->arange[i].valuemin); fputs(").\n", out); }
+        if (d->arange[i].has_max == 1) { fputs("a11y_valuemax(", out); { uint32_t r = d->arange[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->arange[i].valuemax); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->alive_len; i++) {
+        if (!d->alive[i].live) continue;
+        if (1) { fputs("a11y_live(", out); { uint32_t r = d->alive[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); fputs(a11y_politeness_name(d->alive[i].politeness), out); fputs(",", out); fputs(d->alive[i].atomic ? "true" : "false", out); fputs(",", out); text_put(d, out, d->alive[i].relevant); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->astate_len; i++) {
+        if (!d->astate[i].live) continue;
+        if (1) { fputs("a11y_state(", out); { uint32_t r = d->astate[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); fputs(a11y_state_name(d->astate[i].state), out); fputs(",", out); fputs(a11y_token_name(d->astate[i].value), out); fputs(").\n", out); }
+        if (1) { fputs("a11y_state_from(", out); { uint32_t r = d->astate[i].node; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(",", out); fputs(a11y_state_name(d->astate[i].state), out); fputs(",", out); fputs(a11y_state_from_name(d->astate[i].from), out); fputs(",", out); amb_put_ref(out, "n", d->astate[i].by.doc, d->astate[i].by.index, d->astate[i].by.gen); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->aref_len; i++) {
         if (!d->aref[i].live) continue;
@@ -163,6 +395,19 @@ void a11y_export(const a11y_tree *d, FILE *out) {
     for (uint32_t i = 1; i < d->badrole_len; i++) {
         if (!d->badrole[i].live) continue;
         if (1) { fputs("a11y_bad_role(", out); amb_put_ref(out, "n", d->badrole[i].node.doc, d->badrole[i].node.index, d->badrole[i].node.gen); fputs(",", out); text_put(d, out, d->badrole[i].value); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->ahidden_len; i++) {
+        if (!d->ahidden[i].live) continue;
+        if (1) { fputs("a11y_hidden(", out); amb_put_ref(out, "n", d->ahidden[i].node.doc, d->ahidden[i].node.index, d->ahidden[i].node.gen); fputs(",", out); fputs(a11y_hidden_how_name(d->ahidden[i].how), out); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->ahinside_len; i++) {
+        if (!d->ahinside[i].live) continue;
+        if (d->ahinside[i].what == A11Y_INSIDE_WHAT_FOCUSABLE) { fputs("a11y_hidden_focusable(", out); amb_put_ref(out, "n", d->ahinside[i].node.doc, d->ahinside[i].node.index, d->ahinside[i].node.gen); fputs(",", out); amb_put_ref(out, "n", d->ahinside[i].root.doc, d->ahinside[i].root.index, d->ahinside[i].root.gen); fputs(").\n", out); }
+        if (d->ahinside[i].what == A11Y_INSIDE_WHAT_LIVE_REGION) { fputs("a11y_hidden_live(", out); amb_put_ref(out, "n", d->ahinside[i].node.doc, d->ahinside[i].node.index, d->ahinside[i].node.gen); fputs(",", out); amb_put_ref(out, "n", d->ahinside[i].root.doc, d->ahinside[i].root.index, d->ahinside[i].root.gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->aplain_len; i++) {
+        if (!d->aplain[i].live) continue;
+        if (1) { fputs("a11y_no_node(", out); amb_put_ref(out, "n", d->aplain[i].node.doc, d->aplain[i].node.index, d->aplain[i].node.gen); fputs(",", out); fputs(a11y_role_name(d->aplain[i].role), out); fputs(").\n", out); }
     }
 }
 a11y_status a11y_dispatch(a11y_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -180,7 +425,7 @@ a11y_status a11y_dispatch(a11y_tree *d, const char *t, size_t n, uint64_t batch_
     if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return A11Y_BAD_REQUEST; }
     if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return A11Y_STALE_REVISION; }
 
-    if (amb_name_is(name, name_len, "build")) { amb_result(report, name, "not_requestable", d->revision); return A11Y_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "build") || amb_name_is(name, name_len, "print_tree")) { amb_result(report, name, "not_requestable", d->revision); return A11Y_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }
@@ -191,16 +436,37 @@ typedef struct store_a11y_store_tag {
     size_t anode_len, anode_cap;
     uint32_t anode_free;
     own a11y_anode *anode;
+    size_t atext_len, atext_cap;
+    uint32_t atext_free;
+    own a11y_atext *atext;
+    size_t arange_len, arange_cap;
+    uint32_t arange_free;
+    own a11y_arange *arange;
+    size_t alive_len, alive_cap;
+    uint32_t alive_free;
+    own a11y_alive *alive;
+    size_t astate_len, astate_cap;
+    uint32_t astate_free;
+    own a11y_astate *astate;
     size_t aref_len, aref_cap;
     uint32_t aref_free;
     own a11y_aref *aref;
     size_t badrole_len, badrole_cap;
     uint32_t badrole_free;
     own a11y_badrole *badrole;
+    size_t ahidden_len, ahidden_cap;
+    uint32_t ahidden_free;
+    own a11y_ahidden *ahidden;
+    size_t ahinside_len, ahinside_cap;
+    uint32_t ahinside_free;
+    own a11y_ahinside *ahinside;
+    size_t aplain_len, aplain_cap;
+    uint32_t aplain_free;
+    own a11y_aplain *aplain;
     size_t text_len, text_cap;
     own char *text;
 } store_a11y_store_tag;
-void store_a11y_store_tag_drop(store_a11y_store_tag *s) { free(s->anode); free(s->aref); free(s->badrole); free(s->text); }
+void store_a11y_store_tag_drop(store_a11y_store_tag *s) { free(s->anode); free(s->atext); free(s->arange); free(s->alive); free(s->astate); free(s->aref); free(s->badrole); free(s->ahidden); free(s->ahinside); free(s->aplain); free(s->text); }
 static void store_a11y_store_tag__anode_grow(store_a11y_store_tag *s) {
     size_t c = s->anode_cap ? 2 * s->anode_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -266,6 +532,274 @@ size_t store_a11y_store_tag_anode_len(const store_a11y_store_tag *s) { return s-
 size_t store_a11y_store_tag_anode_count(const store_a11y_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->anode_len; i++) if (s->anode[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__atext_grow(store_a11y_store_tag *s) {
+    size_t c = s->atext_cap ? 2 * s->atext_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->atext = (a11y_atext *)realloc(s->atext, c * sizeof(a11y_atext));
+    if (!s->atext) abort();
+    s->atext_cap = c;
+}
+a11y_atext_h store_a11y_store_tag_atext_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->atext_free) {
+        i = s->atext_free;
+        s->atext_free = s->atext[i].free_next;
+    } else {
+        if (s->atext_len == 0) {
+            if (s->atext_cap == 0) store_a11y_store_tag__atext_grow(s);
+            memset(&s->atext[0], 0, sizeof(a11y_atext));
+            s->atext_len = 1;
+        }
+        if (s->atext_len == s->atext_cap) store_a11y_store_tag__atext_grow(s);
+        i = (uint32_t)s->atext_len;
+        s->atext_len++;
+        s->atext[i].gen = 0;
+    }
+    uint32_t g = s->atext[i].gen;
+    memset(&s->atext[i], 0, sizeof(a11y_atext));
+    s->atext[i].gen = g;
+    s->atext[i].live = 1;
+    a11y_atext_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_atext_live(const store_a11y_store_tag *s, a11y_atext_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->atext_len && s->atext[h.index].live && s->atext[h.index].gen == h.gen;
+}
+a11y_atext store_a11y_store_tag_atext_get(const store_a11y_store_tag *s, a11y_atext_h h) {
+    if (!store_a11y_store_tag_atext_live(s, h)) abort();
+    return s->atext[h.index];
+}
+a11y_atext *store_a11y_store_tag_atext_ref(const store_a11y_store_tag *s, a11y_atext_h h) tie s {
+    if (!store_a11y_store_tag_atext_live(s, h)) abort();
+    return &s->atext[h.index];
+}
+a11y_atext *store_a11y_store_tag_atext_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->atext_len) abort();
+    return &s->atext[i];
+}
+a11y_atext_h store_a11y_store_tag_atext_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_atext_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->atext_len && s->atext[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->atext[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_atext_free(store_a11y_store_tag *s, a11y_atext_h h) {
+    if (!store_a11y_store_tag_atext_live(s, h)) abort();
+    s->atext[h.index].live = 0;
+    s->atext[h.index].gen++;
+    s->atext[h.index].free_next = s->atext_free;
+    s->atext_free = h.index;
+}
+size_t store_a11y_store_tag_atext_len(const store_a11y_store_tag *s) { return s->atext_len; }
+size_t store_a11y_store_tag_atext_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->atext_len; i++) if (s->atext[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__arange_grow(store_a11y_store_tag *s) {
+    size_t c = s->arange_cap ? 2 * s->arange_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->arange = (a11y_arange *)realloc(s->arange, c * sizeof(a11y_arange));
+    if (!s->arange) abort();
+    s->arange_cap = c;
+}
+a11y_arange_h store_a11y_store_tag_arange_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->arange_free) {
+        i = s->arange_free;
+        s->arange_free = s->arange[i].free_next;
+    } else {
+        if (s->arange_len == 0) {
+            if (s->arange_cap == 0) store_a11y_store_tag__arange_grow(s);
+            memset(&s->arange[0], 0, sizeof(a11y_arange));
+            s->arange_len = 1;
+        }
+        if (s->arange_len == s->arange_cap) store_a11y_store_tag__arange_grow(s);
+        i = (uint32_t)s->arange_len;
+        s->arange_len++;
+        s->arange[i].gen = 0;
+    }
+    uint32_t g = s->arange[i].gen;
+    memset(&s->arange[i], 0, sizeof(a11y_arange));
+    s->arange[i].gen = g;
+    s->arange[i].live = 1;
+    a11y_arange_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_arange_live(const store_a11y_store_tag *s, a11y_arange_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->arange_len && s->arange[h.index].live && s->arange[h.index].gen == h.gen;
+}
+a11y_arange store_a11y_store_tag_arange_get(const store_a11y_store_tag *s, a11y_arange_h h) {
+    if (!store_a11y_store_tag_arange_live(s, h)) abort();
+    return s->arange[h.index];
+}
+a11y_arange *store_a11y_store_tag_arange_ref(const store_a11y_store_tag *s, a11y_arange_h h) tie s {
+    if (!store_a11y_store_tag_arange_live(s, h)) abort();
+    return &s->arange[h.index];
+}
+a11y_arange *store_a11y_store_tag_arange_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->arange_len) abort();
+    return &s->arange[i];
+}
+a11y_arange_h store_a11y_store_tag_arange_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_arange_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->arange_len && s->arange[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->arange[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_arange_free(store_a11y_store_tag *s, a11y_arange_h h) {
+    if (!store_a11y_store_tag_arange_live(s, h)) abort();
+    s->arange[h.index].live = 0;
+    s->arange[h.index].gen++;
+    s->arange[h.index].free_next = s->arange_free;
+    s->arange_free = h.index;
+}
+size_t store_a11y_store_tag_arange_len(const store_a11y_store_tag *s) { return s->arange_len; }
+size_t store_a11y_store_tag_arange_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->arange_len; i++) if (s->arange[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__alive_grow(store_a11y_store_tag *s) {
+    size_t c = s->alive_cap ? 2 * s->alive_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->alive = (a11y_alive *)realloc(s->alive, c * sizeof(a11y_alive));
+    if (!s->alive) abort();
+    s->alive_cap = c;
+}
+a11y_alive_h store_a11y_store_tag_alive_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->alive_free) {
+        i = s->alive_free;
+        s->alive_free = s->alive[i].free_next;
+    } else {
+        if (s->alive_len == 0) {
+            if (s->alive_cap == 0) store_a11y_store_tag__alive_grow(s);
+            memset(&s->alive[0], 0, sizeof(a11y_alive));
+            s->alive_len = 1;
+        }
+        if (s->alive_len == s->alive_cap) store_a11y_store_tag__alive_grow(s);
+        i = (uint32_t)s->alive_len;
+        s->alive_len++;
+        s->alive[i].gen = 0;
+    }
+    uint32_t g = s->alive[i].gen;
+    memset(&s->alive[i], 0, sizeof(a11y_alive));
+    s->alive[i].gen = g;
+    s->alive[i].live = 1;
+    a11y_alive_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_alive_live(const store_a11y_store_tag *s, a11y_alive_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->alive_len && s->alive[h.index].live && s->alive[h.index].gen == h.gen;
+}
+a11y_alive store_a11y_store_tag_alive_get(const store_a11y_store_tag *s, a11y_alive_h h) {
+    if (!store_a11y_store_tag_alive_live(s, h)) abort();
+    return s->alive[h.index];
+}
+a11y_alive *store_a11y_store_tag_alive_ref(const store_a11y_store_tag *s, a11y_alive_h h) tie s {
+    if (!store_a11y_store_tag_alive_live(s, h)) abort();
+    return &s->alive[h.index];
+}
+a11y_alive *store_a11y_store_tag_alive_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->alive_len) abort();
+    return &s->alive[i];
+}
+a11y_alive_h store_a11y_store_tag_alive_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_alive_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->alive_len && s->alive[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->alive[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_alive_free(store_a11y_store_tag *s, a11y_alive_h h) {
+    if (!store_a11y_store_tag_alive_live(s, h)) abort();
+    s->alive[h.index].live = 0;
+    s->alive[h.index].gen++;
+    s->alive[h.index].free_next = s->alive_free;
+    s->alive_free = h.index;
+}
+size_t store_a11y_store_tag_alive_len(const store_a11y_store_tag *s) { return s->alive_len; }
+size_t store_a11y_store_tag_alive_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->alive_len; i++) if (s->alive[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__astate_grow(store_a11y_store_tag *s) {
+    size_t c = s->astate_cap ? 2 * s->astate_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->astate = (a11y_astate *)realloc(s->astate, c * sizeof(a11y_astate));
+    if (!s->astate) abort();
+    s->astate_cap = c;
+}
+a11y_astate_h store_a11y_store_tag_astate_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->astate_free) {
+        i = s->astate_free;
+        s->astate_free = s->astate[i].free_next;
+    } else {
+        if (s->astate_len == 0) {
+            if (s->astate_cap == 0) store_a11y_store_tag__astate_grow(s);
+            memset(&s->astate[0], 0, sizeof(a11y_astate));
+            s->astate_len = 1;
+        }
+        if (s->astate_len == s->astate_cap) store_a11y_store_tag__astate_grow(s);
+        i = (uint32_t)s->astate_len;
+        s->astate_len++;
+        s->astate[i].gen = 0;
+    }
+    uint32_t g = s->astate[i].gen;
+    memset(&s->astate[i], 0, sizeof(a11y_astate));
+    s->astate[i].gen = g;
+    s->astate[i].live = 1;
+    a11y_astate_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_astate_live(const store_a11y_store_tag *s, a11y_astate_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->astate_len && s->astate[h.index].live && s->astate[h.index].gen == h.gen;
+}
+a11y_astate store_a11y_store_tag_astate_get(const store_a11y_store_tag *s, a11y_astate_h h) {
+    if (!store_a11y_store_tag_astate_live(s, h)) abort();
+    return s->astate[h.index];
+}
+a11y_astate *store_a11y_store_tag_astate_ref(const store_a11y_store_tag *s, a11y_astate_h h) tie s {
+    if (!store_a11y_store_tag_astate_live(s, h)) abort();
+    return &s->astate[h.index];
+}
+a11y_astate *store_a11y_store_tag_astate_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->astate_len) abort();
+    return &s->astate[i];
+}
+a11y_astate_h store_a11y_store_tag_astate_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_astate_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->astate_len && s->astate[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->astate[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_astate_free(store_a11y_store_tag *s, a11y_astate_h h) {
+    if (!store_a11y_store_tag_astate_live(s, h)) abort();
+    s->astate[h.index].live = 0;
+    s->astate[h.index].gen++;
+    s->astate[h.index].free_next = s->astate_free;
+    s->astate_free = h.index;
+}
+size_t store_a11y_store_tag_astate_len(const store_a11y_store_tag *s) { return s->astate_len; }
+size_t store_a11y_store_tag_astate_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->astate_len; i++) if (s->astate[i].live) n++;
     return n;
 }
 static void store_a11y_store_tag__aref_grow(store_a11y_store_tag *s) {
@@ -400,6 +934,207 @@ size_t store_a11y_store_tag_badrole_len(const store_a11y_store_tag *s) { return 
 size_t store_a11y_store_tag_badrole_count(const store_a11y_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->badrole_len; i++) if (s->badrole[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__ahidden_grow(store_a11y_store_tag *s) {
+    size_t c = s->ahidden_cap ? 2 * s->ahidden_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->ahidden = (a11y_ahidden *)realloc(s->ahidden, c * sizeof(a11y_ahidden));
+    if (!s->ahidden) abort();
+    s->ahidden_cap = c;
+}
+a11y_ahidden_h store_a11y_store_tag_ahidden_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->ahidden_free) {
+        i = s->ahidden_free;
+        s->ahidden_free = s->ahidden[i].free_next;
+    } else {
+        if (s->ahidden_len == 0) {
+            if (s->ahidden_cap == 0) store_a11y_store_tag__ahidden_grow(s);
+            memset(&s->ahidden[0], 0, sizeof(a11y_ahidden));
+            s->ahidden_len = 1;
+        }
+        if (s->ahidden_len == s->ahidden_cap) store_a11y_store_tag__ahidden_grow(s);
+        i = (uint32_t)s->ahidden_len;
+        s->ahidden_len++;
+        s->ahidden[i].gen = 0;
+    }
+    uint32_t g = s->ahidden[i].gen;
+    memset(&s->ahidden[i], 0, sizeof(a11y_ahidden));
+    s->ahidden[i].gen = g;
+    s->ahidden[i].live = 1;
+    a11y_ahidden_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_ahidden_live(const store_a11y_store_tag *s, a11y_ahidden_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->ahidden_len && s->ahidden[h.index].live && s->ahidden[h.index].gen == h.gen;
+}
+a11y_ahidden store_a11y_store_tag_ahidden_get(const store_a11y_store_tag *s, a11y_ahidden_h h) {
+    if (!store_a11y_store_tag_ahidden_live(s, h)) abort();
+    return s->ahidden[h.index];
+}
+a11y_ahidden *store_a11y_store_tag_ahidden_ref(const store_a11y_store_tag *s, a11y_ahidden_h h) tie s {
+    if (!store_a11y_store_tag_ahidden_live(s, h)) abort();
+    return &s->ahidden[h.index];
+}
+a11y_ahidden *store_a11y_store_tag_ahidden_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->ahidden_len) abort();
+    return &s->ahidden[i];
+}
+a11y_ahidden_h store_a11y_store_tag_ahidden_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_ahidden_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->ahidden_len && s->ahidden[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->ahidden[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_ahidden_free(store_a11y_store_tag *s, a11y_ahidden_h h) {
+    if (!store_a11y_store_tag_ahidden_live(s, h)) abort();
+    s->ahidden[h.index].live = 0;
+    s->ahidden[h.index].gen++;
+    s->ahidden[h.index].free_next = s->ahidden_free;
+    s->ahidden_free = h.index;
+}
+size_t store_a11y_store_tag_ahidden_len(const store_a11y_store_tag *s) { return s->ahidden_len; }
+size_t store_a11y_store_tag_ahidden_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->ahidden_len; i++) if (s->ahidden[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__ahinside_grow(store_a11y_store_tag *s) {
+    size_t c = s->ahinside_cap ? 2 * s->ahinside_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->ahinside = (a11y_ahinside *)realloc(s->ahinside, c * sizeof(a11y_ahinside));
+    if (!s->ahinside) abort();
+    s->ahinside_cap = c;
+}
+a11y_ahinside_h store_a11y_store_tag_ahinside_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->ahinside_free) {
+        i = s->ahinside_free;
+        s->ahinside_free = s->ahinside[i].free_next;
+    } else {
+        if (s->ahinside_len == 0) {
+            if (s->ahinside_cap == 0) store_a11y_store_tag__ahinside_grow(s);
+            memset(&s->ahinside[0], 0, sizeof(a11y_ahinside));
+            s->ahinside_len = 1;
+        }
+        if (s->ahinside_len == s->ahinside_cap) store_a11y_store_tag__ahinside_grow(s);
+        i = (uint32_t)s->ahinside_len;
+        s->ahinside_len++;
+        s->ahinside[i].gen = 0;
+    }
+    uint32_t g = s->ahinside[i].gen;
+    memset(&s->ahinside[i], 0, sizeof(a11y_ahinside));
+    s->ahinside[i].gen = g;
+    s->ahinside[i].live = 1;
+    a11y_ahinside_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_ahinside_live(const store_a11y_store_tag *s, a11y_ahinside_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->ahinside_len && s->ahinside[h.index].live && s->ahinside[h.index].gen == h.gen;
+}
+a11y_ahinside store_a11y_store_tag_ahinside_get(const store_a11y_store_tag *s, a11y_ahinside_h h) {
+    if (!store_a11y_store_tag_ahinside_live(s, h)) abort();
+    return s->ahinside[h.index];
+}
+a11y_ahinside *store_a11y_store_tag_ahinside_ref(const store_a11y_store_tag *s, a11y_ahinside_h h) tie s {
+    if (!store_a11y_store_tag_ahinside_live(s, h)) abort();
+    return &s->ahinside[h.index];
+}
+a11y_ahinside *store_a11y_store_tag_ahinside_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->ahinside_len) abort();
+    return &s->ahinside[i];
+}
+a11y_ahinside_h store_a11y_store_tag_ahinside_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_ahinside_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->ahinside_len && s->ahinside[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->ahinside[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_ahinside_free(store_a11y_store_tag *s, a11y_ahinside_h h) {
+    if (!store_a11y_store_tag_ahinside_live(s, h)) abort();
+    s->ahinside[h.index].live = 0;
+    s->ahinside[h.index].gen++;
+    s->ahinside[h.index].free_next = s->ahinside_free;
+    s->ahinside_free = h.index;
+}
+size_t store_a11y_store_tag_ahinside_len(const store_a11y_store_tag *s) { return s->ahinside_len; }
+size_t store_a11y_store_tag_ahinside_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->ahinside_len; i++) if (s->ahinside[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__aplain_grow(store_a11y_store_tag *s) {
+    size_t c = s->aplain_cap ? 2 * s->aplain_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->aplain = (a11y_aplain *)realloc(s->aplain, c * sizeof(a11y_aplain));
+    if (!s->aplain) abort();
+    s->aplain_cap = c;
+}
+a11y_aplain_h store_a11y_store_tag_aplain_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->aplain_free) {
+        i = s->aplain_free;
+        s->aplain_free = s->aplain[i].free_next;
+    } else {
+        if (s->aplain_len == 0) {
+            if (s->aplain_cap == 0) store_a11y_store_tag__aplain_grow(s);
+            memset(&s->aplain[0], 0, sizeof(a11y_aplain));
+            s->aplain_len = 1;
+        }
+        if (s->aplain_len == s->aplain_cap) store_a11y_store_tag__aplain_grow(s);
+        i = (uint32_t)s->aplain_len;
+        s->aplain_len++;
+        s->aplain[i].gen = 0;
+    }
+    uint32_t g = s->aplain[i].gen;
+    memset(&s->aplain[i], 0, sizeof(a11y_aplain));
+    s->aplain[i].gen = g;
+    s->aplain[i].live = 1;
+    a11y_aplain_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_aplain_live(const store_a11y_store_tag *s, a11y_aplain_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->aplain_len && s->aplain[h.index].live && s->aplain[h.index].gen == h.gen;
+}
+a11y_aplain store_a11y_store_tag_aplain_get(const store_a11y_store_tag *s, a11y_aplain_h h) {
+    if (!store_a11y_store_tag_aplain_live(s, h)) abort();
+    return s->aplain[h.index];
+}
+a11y_aplain *store_a11y_store_tag_aplain_ref(const store_a11y_store_tag *s, a11y_aplain_h h) tie s {
+    if (!store_a11y_store_tag_aplain_live(s, h)) abort();
+    return &s->aplain[h.index];
+}
+a11y_aplain *store_a11y_store_tag_aplain_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->aplain_len) abort();
+    return &s->aplain[i];
+}
+a11y_aplain_h store_a11y_store_tag_aplain_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_aplain_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->aplain_len && s->aplain[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->aplain[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_aplain_free(store_a11y_store_tag *s, a11y_aplain_h h) {
+    if (!store_a11y_store_tag_aplain_live(s, h)) abort();
+    s->aplain[h.index].live = 0;
+    s->aplain[h.index].gen++;
+    s->aplain[h.index].free_next = s->aplain_free;
+    s->aplain_free = h.index;
+}
+size_t store_a11y_store_tag_aplain_len(const store_a11y_store_tag *s) { return s->aplain_len; }
+size_t store_a11y_store_tag_aplain_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->aplain_len; i++) if (s->aplain[i].live) n++;
     return n;
 }
 static void store_a11y_store_tag__text_room(store_a11y_store_tag *s, size_t n) {

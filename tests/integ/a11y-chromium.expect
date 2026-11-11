@@ -1,0 +1,18 @@
+-- the a11y-states page's tree, against Chromium's:
+106 lines; where they differ from Chromium's:
+25c25
+< group#citrus "Citrus"
+---
+> group#citrus "Citrus" disabled=true
+47c47
+< group#locked "Locked In the legend"
+---
+> group#locked "Locked In the legend" disabled=true
+-- the a11y-names page's tree, against Chromium's:
+73 lines; where they differ from Chromium's:
+73c73
+< figure#fig
+---
+> figure#fig "The figure's caption"
+-- the a11y-live page's tree, against Chromium's:
+the same 17 lines
