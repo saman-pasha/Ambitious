@@ -68,6 +68,7 @@ amb_interface(script);
 #include "../js/js.h"
 #include "../script/script.h"
 #include "../html/encoding.h"
+#include "../rt/amb_proc.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -75,7 +76,12 @@ amb_interface(script);
 
 #define S(lit) lit, sizeof(lit) - 1
 
-/* where the session's files go and how the reasoner is run: paths, no pointers */
+/* the tabs a session may hold, each with a reasoner of its own */
+#define AMB_TABS 16
+
+/* where the session's files go and how the reasoner is run: paths, no pointers. A
+   reasoner kept for the session (rs) holds its page's snapshot and is sent what
+   changes; use names the one reason() asks, or -1 for a fresh one each time */
 typedef struct session {
     char dir[512];
     char cocolog[1024];
@@ -83,7 +89,15 @@ typedef struct session {
     char keeper[1024];
     char profile[1024];        /* the profile's store directory; empty: none (or a private one) */
     int private_mode;
+    int use;
+    amb_sandbox sb;            /* the reasoner's (src/rt/amb_proc.c) */
+    amb_reasoner rs[AMB_TABS];
 } session;
+
+/* a file of the session: dir/name */
+static void session_path(const session *s, const char *name, char *out, size_t cap) {
+    snprintf(out, cap, "%s/%s", s->dir, name);
+}
 
 static int session_open(session *s) {
     const char *root = getenv("AMB_ROOT");
@@ -100,21 +114,48 @@ static int session_open(session *s) {
     const char *prof = getenv("AMB_PROFILE"), *priv = getenv("AMB_PRIVATE");
     s->private_mode = priv && priv[0] == '1';
     snprintf(s->profile, sizeof s->profile, "%s", prof && !s->private_mode ? prof : "");
-    if (work) snprintf(s->dir, sizeof s->dir, "%s", work);
+    /* the directory by its absolute path: the reasoner runs in a directory of its own */
+    char cwd[256];
+    if (!getcwd(cwd, sizeof cwd)) cwd[0] = 0;
+    if (work && work[0] == '/') snprintf(s->dir, sizeof s->dir, "%s", work);
+    else if (work) snprintf(s->dir, sizeof s->dir, "%s/%s", cwd, work);
     else snprintf(s->dir, sizeof s->dir, "%s/ambitious-%ld", tmp ? tmp : "/tmp", (long)getpid());
     mkdir(s->dir, 0700);
+    char rdir[700];
+    session_path(s, "reason", rdir, sizeof rdir);
+    amb_sandbox_init(&s->sb, rdir);
+    s->use = -1;
+    for (int i = 0; i < AMB_TABS; i++) {
+        char held[700], err[700], hn[32], en[32];
+        snprintf(hn, sizeof hn, "held-%d.pl", i);
+        snprintf(en, sizeof en, "kept-%d.err", i);
+        session_path(s, hn, held, sizeof held);
+        session_path(s, en, err, sizeof err);
+        amb_reasoner_init(&s->rs[i], s->cocolog, s->reasoner, held, err);
+    }
     return 1;
 }
 
-/* a file of the session: dir/name */
-static void session_path(const session *s, const char *name, char *out, size_t cap) {
-    snprintf(out, cap, "%s/%s", s->dir, name);
+/* the session's kept reasoners told to quit */
+static void session_close(session *s) {
+    for (int i = 0; i < AMB_TABS; i++) amb_reasoner_stop(&s->rs[i]);
 }
 
-/* the reasoner over its command and arguments, its answer into the file out.
-   The argument vector holds this function's own copies: a parameter is the
-   caller's borrow, which the safe part lets no array keep */
-static int reason(const session *s, const char *cmd, const char *a1, const char *a2, const char *out) {
+/* what a reasoner wrote to its standard error from the offset from, on the engine's */
+static void print_errors(const char *path, long from) {
+    own FILE *f = fopen(path, "rb");
+    if (!f) return;
+    defer(f) { fclose(f); }
+    if (from > 0) fseek(f, from, SEEK_SET);
+    char buf[2048];
+    size_t k = fread(buf, 1, sizeof buf - 1, f);
+    if (k) fprintf(stderr, "%.*s%s", (int)k, buf, buf[k - 1] == '\n' ? "" : "\n");
+}
+
+/* the reasoner run once over its command and arguments, in its sandbox, its answer into
+   the file out. The argument vector holds this function's own copies: a parameter is
+   the caller's borrow, which the safe part lets no array keep */
+static int reason_once(const session *s, const char *cmd, const char *a1, const char *a2, const char *out) {
     char err[700], prog[1024], script[1024], c[64], x1[1024], x2[4096];
     session_path(s, "reason.err", err, sizeof err);
     snprintf(prog, sizeof prog, "%s", s->cocolog);
@@ -124,9 +165,50 @@ static int reason(const session *s, const char *cmd, const char *a1, const char 
     snprintf(x2, sizeof x2, "%s", a2 ? a2 : "");
     const char *argv[] = { prog, "-s", script, "--", c, x1, x2, 0 };
     if (!a2) argv[6] = 0;
-    int st = amb_run(argv, out, err);
-    if (st != 0) fprintf(stderr, "ambitious: the reasoner answered %d to %s (its errors: %s)\n", st, cmd, err);
+    amb_ending how;
+    memset(&how, 0, sizeof how);
+    int st = amb_run_in(argv, out, err, &s->sb, &how);
+    if (st != 0 && how.ended && !how.exited) fprintf(stderr, "ambitious: the reasoner ended, %s, asked to %s\n", how.why, cmd);
+    else if (st != 0) { fprintf(stderr, "ambitious: the reasoner answered %d to %s:\n", st, cmd); print_errors(err, 0); }
     return st;
+}
+
+/* the reasoner kept for the session asked: the snapshot a1 made the one it holds (a
+   delta from the one it held), then the request; diff's two snapshots each in turn,
+   the second's delta then being the answer */
+static int reason_kept(session *s, amb_reasoner *r, const char *cmd, const char *a1, const char *a2, const char *out) {
+    int diff = strcmp(cmd, "diff") == 0;
+    uint32_t d0 = r->deltas;
+    int st = amb_reasoner_sync(r, a1, &s->sb);
+    if (st == 0 && diff) {
+        /* the second's delta keeps the facts it changes, which the reasoner then says */
+        d0 = r->deltas;
+        r->track = 1;
+        st = amb_reasoner_sync(r, a2, &s->sb);
+        r->track = 0;
+    }
+    if (st != 0) {
+        if (r->end.ended && !r->end.exited) fprintf(stderr, "ambitious: the reasoner ended, %s, sent the snapshot for %s\n", r->end.why, cmd);
+        else { fprintf(stderr, "ambitious: the reasoner refused the snapshot for %s:\n", cmd); print_errors(r->err, 0); }
+        return 2;
+    }
+    if (getenv("AMB_TIMES"))
+        fprintf(stderr, "ambitious: the snapshot reached the reasoner in %.1f ms, %.1f of them the engine's (%llu retracted, %llu added, %llu kept)\n",
+                r->sync_ms, r->diff_ms, (unsigned long long)r->retracted, (unsigned long long)r->added, (unsigned long long)r->kept);
+    /* a diff with no delta between its snapshots is answered by a fresh reasoner */
+    if (diff && r->deltas == d0) return reason_once(s, cmd, a1, a2, out);
+    st = amb_reasoner_ask(r, diff ? "changes" : cmd, diff ? 0 : a2, out, &s->sb);
+    if (getenv("AMB_TIMES")) fprintf(stderr, "ambitious: the reasoner answered %s in %.1f ms\n", cmd, r->ask_ms);
+    if (st < 0) fprintf(stderr, "ambitious: the reasoner ended, %s, asked to %s\n", r->end.why, cmd);
+    else if (st != 0) { fprintf(stderr, "ambitious: the reasoner answered %d to %s:\n", st, cmd); print_errors(r->err, r->err_mark); }
+    return st;
+}
+
+/* the reasoner over its command and arguments, its answer into the file out: the one
+   kept for the session when there is one, else one run for the command */
+static int reason(session *s, const char *cmd, const char *a1, const char *a2, const char *out) {
+    if (s->use >= 0 && s->use < AMB_TABS) return reason_kept(s, &s->rs[s->use], cmd, a1, a2, out);
+    return reason_once(s, cmd, a1, a2, out);
 }
 
 /* the profile keeper over a command and up to three arguments, its answer into the
@@ -290,7 +372,7 @@ static size_t c_text(const dom_document *d, uint32_t n, char *buf, size_t cap) {
 
 /* criterion 7: the reasoner's answers, from the snapshot, against the C side's
    own traversal of the live document */
-static int cross_check(const session *s, const dom_document *d, const char *snap) {
+static int cross_check(session *s, const dom_document *d, const char *snap) {
     char out[700];
     vector<char> text;
     int bad = 0, rows = 0;
@@ -336,9 +418,25 @@ static int cross_check(const session *s, const dom_document *d, const char *snap
     return bad + bad2;
 }
 
+/* the same request asked of a fresh reasoner over the whole snapshot snap, its answer
+   held to the kept reasoner's answer in the file kept: 1 the same, 0 not */
+static int same_as_fresh(session *s, const char *cmd, const char *snap, const char *goal, const char *kept) {
+    char fresh[700];
+    session_path(s, "fresh.txt", fresh, sizeof fresh);
+    if (reason_once(s, cmd, snap, goal, fresh) != 0) return 0;
+    vector<char> a;
+    vector<char> b;
+    if (!read_all(kept, &a) || !read_all(fresh, &b)) return 0;
+    if (len(a) == len(b) && memcmp(data(a), data(b), len(a)) == 0) return 1;
+    printf("DIFFERENT answers to %s %s: kept %s, fresh %s\n", cmd, goal ? goal : "", kept, fresh);
+    return 0;
+}
+
 static int cmd_loop(void) {
     session s;
     if (!session_open(&s)) return 2;
+    defer(s) { session_close(&s); }
+    s.use = 0;                 /* one reasoner for the whole loop */
     char snap1[700], snap2[700], advice[700], diff[700], out[700];
     session_path(&s, "snap1.pl", snap1, sizeof snap1);
     session_path(&s, "snap2.pl", snap2, sizeof snap2);
@@ -377,16 +475,34 @@ static int cmd_loop(void) {
     if (reason(&s, "diff", snap1, snap2, diff) != 0) return 2;
     printf("5. what changed, the reasoner's diff of the two snapshots:\n");
     print_file(diff, "   ");
+    amb_reasoner *r = &s.rs[0];
+    printf("   the second snapshot reached the reasoner as %s: %llu facts retracted, %llu added; it holds %llu\n",
+           r->deltas ? "a delta" : "a whole snapshot", (unsigned long long)r->retracted, (unsigned long long)r->added,
+           (unsigned long long)r->facts);
+    if (r->deltas != 1) failures++;
     if (reason(&s, "query", snap2, "dom_missing_attribute(N, alt)", out) != 0) return 2;
     printf("   images still without alt, asked of the new snapshot: ");
     print_file(out, "");
     failures += cross_check(&s, &d, snap2);
+    /* the answers after the delta, held to a fresh reasoner's over the whole snapshot */
+    static const char *const asked[][2] = { { "check", 0 }, { "advise", 0 }, { "query", "dom_missing_attribute(N, A)" },
+                                            { "query", "dom_element(N, _), dom_text_content(N, T)" },
+                                            { "why", "dom_inside(N, A), dom_element(A, body), dom_text(N, _)" } };
+    int same = 0, n_asked = (int)(sizeof asked / sizeof asked[0]);
+    for (int q = 0; q < n_asked; q++) {
+        if (reason(&s, asked[q][0], snap2, asked[q][1], out) != 0) return 2;
+        if (same_as_fresh(&s, asked[q][0], snap2, asked[q][1], out)) same++;
+    }
+    printf("   the reasoner after the delta, and a fresh one over the whole second snapshot: the same answers to %d of %d requests\n", same, n_asked);
+    failures += n_asked - same;
 
     printf("6. the first batch again, against the document that moved on:\n");
     apply_batch(&d, advice, &applied, &refused);
     printf("   %d applied, %d refused (the batch was made at an old revision)\n", applied, refused);
     if (applied != 0) failures++;
 
+    printf("the loop's reasoner: %u process, %u requests: %u whole snapshot, %u delta\n", r->starts, r->requests, r->loads, r->deltas);
+    if (r->starts != 1) failures++;
     printf("%s: the loop, %d failure(s)\n", failures ? "RED" : "GREEN", failures);
     return failures ? 1 : 0;
 }
@@ -757,6 +873,8 @@ static int cmd_bench(const char *page, int n) {
 /* the page as a developer sees it, and the reasoner's diagnostics of it */
 static int cmd_inspect(const char *page, const char *mode, const char *goal) {
     PAGE_SESSION;
+    defer(s) { session_close(&s); }
+    s.use = 0;                 /* one reasoner for the diagnostics and the question */
     PAGE_STORES;
     uint32_t pr = load_page(&s, page, PAGE_ARGS);
     if (!pr) return 2;
@@ -848,6 +966,165 @@ static int cmd_script(const char *page) {
     }
     printf("%zu scripts, %zu console messages, %zu errors, %zu listeners, %zu timers; %zu nodes\n", runs, cons, errs, lsn, tms, node_count(d));
     return 0;
+}
+
+/* ---- the session: `loop -`, commands a line each, over a page and its reasoner ---- */
+
+/* the page's cascade, layout and accessibility tree made anew over its document as it
+   is now (after a click, say), in stores of their own, and its snapshot written */
+static int session_snapshot(dom_document *d, const html_parser *p, net_loader *nt, const script_runtime *sr, const char *path) {
+    css_style st;
+    layout_tree lt;
+    a11y_tree ax;
+    css_init(&st, 1);
+    layout_init(&lt, 1);
+    a11y_init(&ax, 1);
+    css_cascade(&st, d, nt);
+    layout_run(&lt, d, &st, nt, VIEW_W, VIEW_H);
+    a11y_build(&ax, d, &st);
+    return write_page_snapshot(d, p, &st, &lt, nt, &ax, sr, path);
+}
+
+/* what the session's reasoner was sent and holds */
+static void session_reasoner(const amb_reasoner *r) {
+    printf("reasoner: %s; %u start(s), %u requests: %u whole snapshot(s), %u delta(s) (%u predicates edited, %u rebuilt); %llu facts held\n",
+           r->pid > 0 ? "running" : "not running", r->starts, r->requests, r->loads, r->deltas, r->edits, r->rebuilds,
+           (unsigned long long)r->facts);
+    if (r->last)
+        printf("reasoner: the last snapshot that changed reached it as %s: %llu facts retracted, %llu added\n",
+               r->last == 2 ? "a delta" : "a whole snapshot", (unsigned long long)r->retracted, (unsigned long long)r->added);
+    if (r->end.ended) printf("reasoner: the last one ended: %s\n", r->end.why);
+    /* its memory, as the kernel counts it */
+    char path[64], line[256];
+    snprintf(path, sizeof path, "/proc/%d/status", r->pid);
+    own FILE *f = r->pid > 0 ? fopen(path, "rb") : 0;
+    if (!f) return;
+    defer(f) { fclose(f); }
+    while (fgets(line, sizeof line, f))
+        if (strncmp(line, "VmRSS:", 6) == 0 && getenv("AMB_TIMES")) fprintf(stderr, "ambitious: the reasoner's memory, %s", line + 6);
+}
+
+#define SESSION_QUIT 0
+#define SESSION_OPEN 1
+
+/* a session's page: url loaded (none when empty), then the commands read from in run
+   over it, until one asks for another page (its URL into next) or the input ends. The
+   page's stores live here, and its reasoner in the session */
+static int session_page(session *s, const char *url, FILE *in, int echo, char *next, size_t cap) {
+    PAGE_STORES;
+    int loaded = url[0] && load_page(s, url, PAGE_ARGS) != 0;
+    int dirty = 1;
+    char snap[700], out[700], line[8192];
+    session_path(s, "page.pl", snap, sizeof snap);
+    session_path(s, "answer.txt", out, sizeof out);
+    if (loaded) {
+        amb_span pu = nt.resource[1].final_url;
+        printf("page: %.*s\n", (int)pu.len, text_ptr(&nt, pu));
+    }
+    while (fgets(line, sizeof line, in)) {
+        size_t n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) line[--n] = 0;
+        size_t b = 0;
+        while (line[b] == ' ' || line[b] == '\t') b++;
+        if (!line[b] || line[b] == '#') continue;
+        if (echo) printf("> %s\n", line + b);
+        /* the command, then its argument */
+        char cmd[64];
+        size_t k = 0;
+        while (line[b] && line[b] != ' ' && k + 1 < sizeof cmd) cmd[k++] = line[b++];
+        cmd[k] = 0;
+        while (line[b] == ' ') b++;
+        const char *arg = line + b;
+        if (strcmp(cmd, "quit") == 0) return SESSION_QUIT;
+        if (strcmp(cmd, "open") == 0) { snprintf(next, cap, "%s", arg); return SESSION_OPEN; }
+        if (strcmp(cmd, "echo") == 0) { printf("%s\n", arg); continue; }
+        if (strcmp(cmd, "reasoner") == 0) { session_reasoner(&s->rs[s->use]); continue; }
+        if (!loaded) { printf("no page: open one first\n"); continue; }
+        if (strcmp(cmd, "click") == 0) {
+            uint32_t x = script_select(&d, arg, strlen(arg));
+            if (!x) { printf("click %s: no element matches\n", arg); continue; }
+            script_click(&vm, x, SCRIPT_HORIZON);
+            script_settle(&vm);
+            dirty = 1;
+            printf("clicked ");
+            print_elem(&d, node_handle(&d, x));
+            printf("; the document is at revision %llu\n", (unsigned long long)dom_revision(&d));
+            continue;
+        }
+        /* fresh CMD [GOAL]: the request asked of a fresh reasoner over the whole snapshot */
+        int fresh = strcmp(cmd, "fresh") == 0;
+        if (fresh) {
+            size_t c = 0;
+            while (arg[c] && arg[c] != ' ' && c + 1 < sizeof cmd) { cmd[c] = arg[c]; c++; }
+            cmd[c] = 0;
+            arg += c;
+            while (*arg == ' ') arg++;
+        }
+        int ask = strcmp(cmd, "query") == 0 || strcmp(cmd, "why") == 0, plain = strcmp(cmd, "advise") == 0 || strcmp(cmd, "check") == 0;
+        if (ask || plain || (!fresh && strcmp(cmd, "snapshot") == 0)) {
+            if (dirty) {
+                double t0 = now_ms();
+                if (!session_snapshot(&d, &p, &nt, &sr, snap)) { printf("the snapshot could not be written\n"); continue; }
+                if (getenv("AMB_TIMES")) fprintf(stderr, "ambitious: the page styled, laid out and its snapshot written in %.1f ms\n", now_ms() - t0);
+                dirty = 0;
+            }
+            if (fresh) {
+                double t0 = now_ms();
+                reason_once(s, cmd, snap, ask ? arg : 0, out);
+                if (getenv("AMB_TIMES")) fprintf(stderr, "ambitious: a fresh reasoner answered %s in %.1f ms\n", cmd, now_ms() - t0);
+                print_file(out, "");
+                continue;
+            }
+            if (strcmp(cmd, "snapshot") == 0) {
+                vector<char> text;
+                if (!read_all(snap, &text)) { printf("snapshot %s: not written\n", arg); continue; }
+                own FILE *f = fopen(arg, "wb");
+                if (!f) { printf("snapshot %s: not written\n", arg); continue; }
+                defer(f) { fclose(f); }
+                fwrite(data(text), 1, len(text), f);
+                continue;
+            }
+            if (ask && !*arg) { printf("%s: a goal, please\n", cmd); continue; }
+            int apply = strcmp(cmd, "advise") == 0 && strcmp(arg, "--apply") == 0;
+            int rc = reason(s, cmd, snap, ask ? arg : 0, out);
+            print_file(out, "");
+            if (rc == 0 && apply) {
+                int applied = 0, refused = 0;
+                apply_batch(&d, out, &applied, &refused);
+                if (applied) dirty = 1;
+                printf("%d applied, %d refused; revision %llu\n", applied, refused, (unsigned long long)dom_revision(&d));
+            }
+            continue;
+        }
+        printf("%s: no such command (open, click, query, why, advise, check, fresh, snapshot, reasoner, echo, quit)\n", cmd);
+    }
+    return SESSION_QUIT;
+}
+
+/* the session over the commands in in, each a line, echoed when they come from no terminal */
+static int session_lines(FILE *in, int echo) {
+    session s;
+    if (!session_open(&s)) return 2;
+    defer(s) { session_close(&s); }
+    s.use = 0;
+    char url[4200], next[4200];
+    url[0] = 0;
+    for (;;) {
+        next[0] = 0;
+        int what = session_page(&s, url, in, echo, next, sizeof next);
+        if (what != SESSION_OPEN) break;
+        snprintf(url, sizeof url, "%s", next);
+    }
+    return 0;
+}
+
+/* `loop -` reads the session's commands from the standard input, `loop FILE` from FILE */
+static int cmd_session(const char *src) {
+    if (strcmp(src, "-") == 0) return session_lines(stdin, !isatty(0));
+    own FILE *f = fopen(src, "rb");
+    if (!f) { fprintf(stderr, "ambitious: cannot read %s\n", src); return 2; }
+    defer(f) { fclose(f); }
+    return session_lines(f, 1);
 }
 
 /* query, why, advise: the reasoner over the page's snapshot */
@@ -950,6 +1227,7 @@ int main(int argc, char **argv) {
         setenv("AMB_CLICKS", data(all), 1);
         return cmd_script(argv[2]);
     }
+    if (argc >= 3 && strcmp(argv[1], "loop") == 0) return cmd_session(argv[2]);
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "load") == 0) return cmd_load(argv[2]);

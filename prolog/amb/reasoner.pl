@@ -6,6 +6,7 @@
 %%   cocolog -s prolog/amb/reason.pl -- why SNAPSHOT GOAL         each answer with its proof
 %%   cocolog -s prolog/amb/reason.pl -- advise SNAPSHOT           diagnostics and requests
 %%   cocolog -s prolog/amb/reason.pl -- diff OLD NEW              the facts that changed
+%%   cocolog -s prolog/amb/reason.pl -- serve NONCE               a reasoner kept for a session
 %%
 %% A SNAPSHOT IS DATA, NEVER CODE. It is read a term at a time with read_term/3,
 %% never consulted, so no directive in it runs. Its first
@@ -29,20 +30,44 @@
 
 amb_reason([check, Snap]) :- !,
     amb_snapshot_load(Snap, snap(_, _, _, N)),
+    amb_reason_check(N).
+amb_reason([query, Snap, GoalText]) :- !,
+    amb_snapshot_load(Snap, _),
+    amb_reason_query(GoalText).
+amb_reason([why, Snap, GoalText]) :- !,
+    amb_snapshot_load(Snap, _),
+    amb_reason_why(GoalText).
+amb_reason([advise, Snap]) :- !,
+    amb_snapshot_load(Snap, _),
+    amb_reason_advise.
+amb_reason([diff, Old, New]) :- !,
+    amb_snapshot_facts(Old, [snap(M, Doc, R1, _)|_], F1),
+    amb_snapshot_facts(New, [snap(M2, Doc2, R2, _)|_], F2),
+    (   M == M2, Doc == Doc2 -> true
+    ;   throw(error(amb_snapshot(diff_mismatch(M, Doc, M2, Doc2)), _)) ),
+    amb_reason_print_diff(snap(M, Doc, R1, _), snap(M2, Doc2, R2, _), F1, F2).
+amb_reason([serve, Nonce]) :- !, amb_reason_serve(Nonce).
+amb_reason(Args) :-
+    format(user_error, 'reason: unknown command ~q~nusage: check S | query S GOAL | why S GOAL | advise S | diff OLD NEW | serve NONCE~n', [Args]),
+    halt(2).
+
+%% ---- what each command prints, over the snapshot held -----------------------------
+
+amb_reason_check(N) :-
     nb_getval(amb_snapshot, Sections),
     forall(member(snap(M, Doc, Rev, _), Sections), format('ok: ~w snapshot of document ~w at revision ~w~n', [M, Doc, Rev])),
     length(Sections, K),
     format('ok: ~d section(s), ~d facts~n', [K, N]).
-amb_reason([query, Snap, GoalText]) :- !,
-    amb_snapshot_load(Snap, _),
+
+amb_reason_query(GoalText) :-
     amb_reason_goal(GoalText, Goal, Vs),
     findall(Vs, call(Goal), Answers),
     (   Answers == []
     ->  format('no~n', [])
     ;   forall(member(A, Answers), amb_reason_print_bindings(A))
     ).
-amb_reason([why, Snap, GoalText]) :- !,
-    amb_snapshot_load(Snap, _),
+
+amb_reason_why(GoalText) :-
     amb_reason_goal(GoalText, Goal, _),
     findall(Goal-P, amb_why(Goal, P), Ps),
     (   Ps == []
@@ -50,23 +75,19 @@ amb_reason([why, Snap, GoalText]) :- !,
         format('no: ~W cannot be proved from the snapshot~n', [G2, [quoted(true), numbervars(true)]])
     ;   forall(member(_-P, Ps), ( amb_reason_print_proof(P, 0), format('~n', []) ))
     ).
-amb_reason([advise, Snap]) :- !,
-    amb_snapshot_load(Snap, _),
+
+amb_reason_advise :-
     nb_getval(amb_snapshot, Sections),
     forall(member(snap(M, Doc, Rev, _), Sections), amb_reason_advise(M, Doc, Rev)).
-amb_reason([diff, Old, New]) :- !,
-    amb_snapshot_facts(Old, [snap(M, Doc, R1, _)|_], F1),
-    amb_snapshot_facts(New, [snap(M2, Doc2, R2, _)|_], F2),
-    (   M == M2, Doc == Doc2 -> true
-    ;   throw(error(amb_snapshot(diff_mismatch(M, Doc, M2, Doc2)), _)) ),
+
+%% the facts of one snapshot against another's, each list as the facts were read:
+%% what the second lacks, then what it adds, each in the standard order
+amb_reason_print_diff(snap(M, Doc, R1, _), snap(_, _, R2, _), F1, F2) :-
     msort(F1, S1), msort(F2, S2),
     ord_subtract(S2, S1, Added), ord_subtract(S1, S2, Removed),
     format('%% ~w document ~w, revision ~w to ~w~n', [M, Doc, R1, R2]),
     forall(member(F, Removed), format('- ~q.~n', [F])),
     forall(member(F, Added), format('+ ~q.~n', [F])).
-amb_reason(Args) :-
-    format(user_error, 'reason: unknown command ~q~nusage: check S | query S GOAL | why S GOAL | advise S | diff OLD NEW~n', [Args]),
-    halt(2).
 
 %% a section's diagnostics and its requests, at its own document and revision
 amb_reason_advise(M, Doc, Rev) :-
@@ -101,8 +122,13 @@ amb_reason_error(E) :- format(user_error, 'reason: ~q~n', [E]).
 %% the snapshot's whole. Each fact is stored as it is read (PLAN.md section 11).
 amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
     amb_reason_read_snapshot(File, store, Sections, _, N),
-    Sections = [snap(M, Doc, Rev, _)|_],
+    amb_reason_hold(Sections, N),
+    Sections = [snap(M, Doc, Rev, _)|_].
+
+%% the sections read held, their count of facts kept, each module's rules loaded
+amb_reason_hold(Sections, N) :-
     nb_setval(amb_snapshot, Sections),
+    nb_setval(amb_reason_count, N),
     forall(member(snap(SM2, _, _, _), Sections), amb_reason_rules(SM2)).
 
 %% THE FACTS ARE KEPT KEYED BY THEIR HANDLES' INDEXES. cocolog indexes a call by an
@@ -115,11 +141,11 @@ amb_snapshot_load(File, snap(M, Doc, Rev, N)) :-
 %% rule, a query, a proof and a printed answer see F/A as before.
 amb_reason_store_decl(F, A, Shapes) :-
     findall(P, ( nth1(P, Shapes, S), amb_reason_keyed_shape(S) ), Ps),
-    functor(H, F, A), retractall(H), dynamic(F/A),
+    functor(H, F, A), amb_reason_empty(F, A),
     retractall('$amb_conv'(F, _, _)),
     (   Ps == [] -> nb_setval(F, plain), assertz('$amb_conv'(F, X, X))
     ;   length(Ps, K), atom_concat('$amb_', F, SF), SA is K + A,
-        functor(SH, SF, SA), retractall(SH), dynamic(SF/SA),
+        amb_reason_empty(SF, SA),
         nb_setval(F, keyed(SF, Ps)),
         H =.. [F|Vs], amb_reason_pick(Ps, Vs, KPs),         % not findall/3: it would copy the head's variables
         amb_reason_key_goals(KPs, Keys, Goals),
@@ -130,6 +156,11 @@ amb_reason_store_decl(F, A, Shapes) :-
         amb_reason_conj(Goals, true, KeyBody),
         assertz(('$amb_conv'(F, H, Stored) :- KeyBody))
     ).
+
+%% F/A, an empty dynamic predicate. abolish/1 and not retractall/1: cocolog's
+%% retractall/1 takes some 16 us a clause, abolish/1 drops them all at once, and a
+%% session's snapshot replaces predicates of thousands of clauses
+amb_reason_empty(F, A) :- abolish(F/A), dynamic(F/A).
 
 amb_reason_keyed_shape(handle(_)).
 amb_reason_keyed_shape(handle_or_none(_)).
@@ -177,33 +208,40 @@ amb_reason_header(amb_snapshot(M, Doc, Rev, FP)) :- atom(M), integer(Doc), integ
 amb_reason_read_snapshot(File, Mode, Sections, Facts, N) :-
     (   exists_file(File) -> true ; throw(error(amb_snapshot(no_file(File)), _)) ),
     open(File, read, S),
-    catch(amb_reason_read_all(S, File, Mode, Sections, Facts, N), E, ( close(S), throw(E) )),
+    catch(amb_reason_read_all(S, File, end_of_file, Mode, Sections, Facts, N), E, ( close(S), throw(E) )),
     close(S).
 
-amb_reason_read_all(S, File, Mode, Sections, Facts, N) :-
+%% the snapshot on the stream S up to the term End: end_of_file in a file, amb_end on a
+%% session's standard input, where a snapshot is one request among others
+amb_reason_read_all(S, File, End, Mode, Sections, Facts, N) :-
     amb_reason_next(S, T),
-    (   T == end_of_file -> throw(error(amb_snapshot(empty(File)), _)) ; true ),
+    (   T == End -> nb_setval(amb_reason_at_end, true), throw(error(amb_snapshot(empty(File)), _)) ; true ),
     (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
     nb_setval(amb_reason_open, []),
     amb_reason_section(T, Mode, Sec, Snap),
-    amb_reason_terms(S, Mode, Sec, [Snap], Sections, Facts, 0, N).
+    amb_reason_terms(S, End, Mode, Sec, [Snap], Sections, Facts, 0, N).
 
-amb_reason_terms(S, Mode, Sec, Acc, Sections, Facts, N0, N) :-
+amb_reason_terms(S, End, Mode, Sec, Acc, Sections, Facts, N0, N) :-
     amb_reason_next(S, T),
-    (   T == end_of_file
-    ->  reverse(Acc, Sections), Facts = [], N = N0
+    (   T == End
+    ->  nb_setval(amb_reason_at_end, true), reverse(Acc, Sections), Facts = [], N = N0
+    ;   T == end_of_file
+    ->  nb_setval(amb_reason_at_end, true), throw(error(amb_snapshot(truncated), _))
     ;   T = amb_snapshot(_, _, _, _)
     ->  (   amb_reason_header(T) -> true ; throw(error(amb_snapshot(no_header(T)), _)) ),
         amb_reason_section(T, Mode, Sec1, Snap),
-        amb_reason_terms(S, Mode, Sec1, [Snap|Acc], Sections, Facts, N0, N)
+        amb_reason_terms(S, End, Mode, Sec1, [Snap|Acc], Sections, Facts, N0, N)
     ;   amb_reason_fact(S, T, Sec, Mode, Facts, Rest),
         N1 is N0 + 1,
-        amb_reason_terms(S, Mode, Sec, Acc, Sections, Rest, N1, N)
+        amb_reason_terms(S, End, Mode, Sec, Acc, Sections, Rest, N1, N)
     ).
 
-%% the next term, ground, or end_of_file
+%% the next term, ground, or end_of_file. A read that ran out of memory says so: it
+%% is no syntax error
 amb_reason_next(S, T) :-
-    catch(read_term(S, T, []), E, ( line_count(S, L), throw(error(amb_snapshot(syntax(line(L), E)), _)) )),
+    catch(read_term(S, T, []), E,
+          (   E = error(resource_error(_), _) -> throw(E)
+          ;   line_count(S, L), throw(error(amb_snapshot(syntax(line(L), E)), _)) )),
     (   T == end_of_file -> true
     ;   ground(T) -> true
     ;   line_count(S, L2), throw(error(amb_snapshot(not_ground(line(L2), T)), _))
@@ -299,6 +337,236 @@ amb_reason_rules(M) :-
         ensure_loaded(library(LibT))
     ;   true
     ).
+
+%% ---- the session: one reasoner for many requests ----------------------------------
+%%
+%% `serve NONCE' keeps the reasoner for a session (src/rt/amb_proc.c is the engine's
+%% side). Each request is a term on the standard input. Its answer is what the command
+%% of its name prints, then the line amb_done(NONCE, Status): Status 0 answered, 1
+%% failed, 2 refused, with the reason on the standard error as a command gives it. The
+%% nonce is the engine's, so no text an answer prints can end the answer early.
+%%
+%%   amb_load.  SNAPSHOT  amb_end.     a whole snapshot, in place of the one held
+%%   amb_delta.  DELTA  amb_end.       what changed since the snapshot held
+%%   amb_delta(changes).  DELTA  amb_end.   the same, the facts it changes kept for `changes'
+%%       each answered held(N): the facts held now, which the engine counts too
+%%   check.  query(Goal).  why(Goal).  advise.
+%%                                     as the commands of those names print them
+%%   changes.                          the facts the last delta changed, as diff prints them
+%%   quit.                             (or the end of the input)
+%%
+%% A DELTA KEEPS EACH PREDICATE'S FACTS IN THE ORDER A LOAD OF THE WHOLE SNAPSHOT GIVES,
+%% so every answer is the one a fresh reasoner gives over the whole snapshot. A delta
+%% is each section's header, in the order held (its revision moves on), and after a
+%% header the predicates of its module that changed, each in one of two ways:
+%%
+%%   amb_edit(F).     then -(Fact) and +(Fact): a -(Fact) retracts the fact equal to it,
+%%                    a +(Fact) is added after the facts held. The engine edits only
+%%                    where that keeps the order: every fact added comes after every
+%%                    fact kept, and no fact retracted has a twin
+%%   amb_rebuild(F).  then amb_keep(Start, Count) and +(Fact), in the order of the new
+%%                    facts: a run of Count facts held from Start (the first is 0), and
+%%                    the facts added between the runs. The facts held and kept by no
+%%                    run are retracted, and F's clauses are made again in that order
+%%
+%% Every fact of a delta is checked as a snapshot's is. A delta that does not fit the
+%% snapshot held (a header out of place, a fact retracted that is not held, a run past
+%% the facts held) is refused whole: the reasoner then holds nothing, and the engine
+%% sends the whole snapshot.
+
+amb_reason_serve(Nonce) :-
+    nb_setval(amb_snapshot, []),
+    nb_setval(amb_reason_count, 0),
+    nb_setval(amb_reason_changes, none),
+    repeat,
+    catch(read_term(user_input, Req0, []), E, Req0 = amb_unreadable(E)),
+    (   Req0 == end_of_file -> !
+    ;   Req0 == quit -> !, amb_reason_done(Nonce, 0)
+    ;   amb_reason_answer(Req0, St), amb_reason_done(Nonce, St), fail
+    ).
+
+amb_reason_done(Nonce, St) :- format('amb_done(~w, ~w).~n', [Nonce, St]), flush_output.
+
+%% a request answered: 0, or 2 refused (its reason said), or 1 failed
+amb_reason_answer(Req, St) :-
+    (   catch(amb_reason_serve_one(Req), E, ( amb_reason_error(E), St0 = 2 ))
+    ->  ( var(St0) -> St = 0 ; St = St0 )
+    ;   format(user_error, 'reason: ~q failed~n', [Req]), St = 1
+    ).
+
+amb_reason_serve_one(amb_load) :- !, amb_reason_load_from(user_input, N), format('held(~d).~n', [N]).
+amb_reason_serve_one(amb_delta) :- !, amb_reason_delta_from(user_input, false, N), format('held(~d).~n', [N]).
+amb_reason_serve_one(amb_delta(changes)) :- !, amb_reason_delta_from(user_input, true, N), format('held(~d).~n', [N]).
+amb_reason_serve_one(check) :- !, amb_reason_held, nb_getval(amb_reason_count, N), amb_reason_check(N).
+amb_reason_serve_one(query(G)) :- !, amb_reason_held, amb_reason_text(G), amb_reason_query(G).
+amb_reason_serve_one(why(G)) :- !, amb_reason_held, amb_reason_text(G), amb_reason_why(G).
+amb_reason_serve_one(advise) :- !, amb_reason_held, amb_reason_advise.
+amb_reason_serve_one(changes) :- !, amb_reason_changes.
+amb_reason_serve_one(amb_unreadable(E)) :- !, throw(error(amb_snapshot(unreadable_request(E)), _)).
+amb_reason_serve_one(R) :- throw(error(amb_snapshot(unknown_request(R)), _)).
+
+amb_reason_held :-
+    nb_getval(amb_snapshot, S),
+    (   S == [] -> throw(error(amb_snapshot(nothing_held), _)) ; true ).
+
+amb_reason_text(G) :- ( atom(G) -> true ; throw(error(amb_snapshot(bad_goal(G, not_an_atom)), _)) ).
+
+%% the facts the last delta changed, as diff prints them
+amb_reason_changes :-
+    nb_getval(amb_reason_changes, C),
+    (   C = changes(H0, H1, Removed, Added) -> amb_reason_print_diff(H0, H1, Removed, Added)
+    ;   throw(error(amb_snapshot(no_delta), _)) ).
+
+%% after a refusal: nothing held, and the request's terms on S read up to its amb_end
+amb_reason_forget(S) :-
+    nb_setval(amb_snapshot, []),
+    nb_setval(amb_reason_changes, none),
+    (   nb_current(amb_reason_at_end, true) -> true
+    ;   repeat,
+        catch(read_term(S, T, []), _, T = unreadable),
+        ( T == amb_end ; T == end_of_file ), !
+    ).
+
+%% a whole snapshot read from the stream S up to amb_end, held in place of the one held:
+%% N its facts
+amb_reason_load_from(S, N) :-
+    nb_setval(amb_snapshot, []),
+    nb_setval(amb_reason_changes, none),
+    nb_setval(amb_reason_at_end, false),
+    catch(amb_reason_read_all(S, session, amb_end, store, Sections, _, N), E,
+          ( amb_reason_forget(S), throw(E) )),
+    amb_reason_hold(Sections, N).
+
+%% a delta read from the stream S up to amb_end and applied to the snapshot held: N the
+%% facts held after it. With Track, the facts it retracted and added are kept for
+%% `changes'; without, only counted, which spares a copy of each
+amb_reason_delta_from(S, Track, N) :-
+    amb_reason_held,
+    nb_getval(amb_snapshot, Held),
+    nb_setval(amb_reason_at_end, false),
+    nb_setval(amb_reason_changes, none),
+    (   Track == true -> Z = [] ; Z = 0 ),
+    catch(( amb_reason_next(S, T), amb_reason_dt(S, T, Held, none, none, [], Z, Z, New, Removed, Added) ), E,
+          ( amb_reason_forget(S), throw(E) )),
+    nb_getval(amb_reason_count, N0),
+    amb_reason_noted(Removed, R), amb_reason_noted(Added, A),
+    N is N0 - R + A,
+    nb_setval(amb_snapshot, New),
+    nb_setval(amb_reason_count, N),
+    (   Track == true
+    ->  Held = [H0|_], New = [H1|_], nb_setval(amb_reason_changes, changes(H0, H1, Removed, Added))
+    ;   true ).
+
+%% a fact retracted or added, noted: kept in the list, or counted
+amb_reason_note(L0, Fact, L) :- ( integer(L0) -> L is L0 + 1 ; L = [Fact|L0] ).
+amb_reason_noted(L, N) :- ( integer(L) -> N = L ; length(L, N) ).
+
+%% amb_reason_dt(S, T, Held, Sec, Block, NewAcc, Rm0, Ad0, New, Rm, Ad): the delta's term T
+%% and the terms after it on S. Held are the sections held whose headers are still to
+%% come, Sec the section the edits are of, Block the predicate they change; New the
+%% sections' new headers, Rm and Ad the facts retracted and added
+amb_reason_dt(_, amb_end, Held, _, Block, NewAcc, Rm0, Ad0, New, Rm, Ad) :- !,
+    nb_setval(amb_reason_at_end, true),
+    (   Held == [] -> true ; throw(error(amb_snapshot(bad_delta(sections_missing(Held))), _)) ),
+    amb_reason_block_end(Block, Rm0, Rm),
+    Ad = Ad0,
+    reverse(NewAcc, New).
+amb_reason_dt(_, end_of_file, _, _, _, _, _, _, _, _, _) :- !,
+    nb_setval(amb_reason_at_end, true),
+    throw(error(amb_snapshot(truncated), _)).
+amb_reason_dt(S, amb_snapshot(M, Doc, Rev, FP), Held, _, Block, NewAcc, Rm0, Ad0, New, Rm, Ad) :- !,
+    amb_reason_block_end(Block, Rm0, Rm1),
+    (   Held = [snap(M, Doc, _, _)|Held1], amb_reason_header(amb_snapshot(M, Doc, Rev, FP)) -> true
+    ;   throw(error(amb_snapshot(bad_delta(section(M, Doc))), _)) ),
+    amb_reason_schema_decl(M, module(M, _, SFP)),
+    (   FP == SFP -> true ; throw(error(amb_snapshot(fingerprint(M, snapshot(FP), schema(SFP))), _)) ),
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held1, sec(M, Doc), none, [snap(M, Doc, Rev, FP)|NewAcc], Rm1, Ad0, New, Rm, Ad).
+amb_reason_dt(S, amb_edit(F), Held, Sec, Block, NewAcc, Rm0, Ad0, New, Rm, Ad) :- !,
+    amb_reason_block_end(Block, Rm0, Rm1),
+    amb_reason_block_pred(Sec, F, A),
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held, Sec, edit(F, A), NewAcc, Rm1, Ad0, New, Rm, Ad).
+amb_reason_dt(S, amb_rebuild(F), Held, Sec, Block, NewAcc, Rm0, Ad0, New, Rm, Ad) :- !,
+    amb_reason_block_end(Block, Rm0, Rm1),
+    amb_reason_block_pred(Sec, F, A),
+    amb_reason_stored(F, A, SF, SA),
+    functor(SH, SF, SA),
+    findall(SH, SH, Old),
+    amb_reason_empty(SF, SA),
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held, Sec, rebuild(F, A, Old, 0), NewAcc, Rm1, Ad0, New, Rm, Ad).
+amb_reason_dt(S, -(Fact), Held, Sec, edit(F, A), NewAcc, Rm0, Ad0, New, Rm, Ad) :- !,
+    amb_reason_delta_take(Sec, F, Fact, St),
+    (   retract(St) -> true ; throw(error(amb_snapshot(bad_delta(not_held(Fact))), _)) ),
+    amb_reason_note(Rm0, Fact, Rm1),
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held, Sec, edit(F, A), NewAcc, Rm1, Ad0, New, Rm, Ad).
+amb_reason_dt(S, +(Fact), Held, Sec, Block, NewAcc, Rm0, Ad0, New, Rm, Ad) :-
+    ( Block = edit(F, _) ; Block = rebuild(F, _, _, _) ), !,
+    amb_reason_delta_take(Sec, F, Fact, St),
+    assertz(St),
+    amb_reason_note(Ad0, Fact, Ad1),
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held, Sec, Block, NewAcc, Rm0, Ad1, New, Rm, Ad).
+amb_reason_dt(S, amb_keep(K, C), Held, Sec, rebuild(F, A, Old, Cur), NewAcc, Rm0, Ad0, New, Rm, Ad) :-
+    integer(K), integer(C), K >= Cur, C >= 1, !,
+    Skip is K - Cur,
+    amb_reason_drop(Skip, F, A, Old, Old1, Rm0, Rm1),
+    amb_reason_keep(C, Old1, Old2),
+    Cur1 is K + C,
+    amb_reason_next(S, T1),
+    amb_reason_dt(S, T1, Held, Sec, rebuild(F, A, Old2, Cur1), NewAcc, Rm1, Ad0, New, Rm, Ad).
+amb_reason_dt(_, T, _, _, _, _, _, _, _, _, _) :- throw(error(amb_snapshot(bad_delta(T)), _)).
+
+%% the predicate a block changes: a fact its section's module declares
+amb_reason_block_pred(sec(M, _), F, A) :-
+    atom(F), amb_reason_schema_decl(M, fact(F/A, _)), !.
+amb_reason_block_pred(Sec, F, _) :- throw(error(amb_snapshot(bad_delta(not_a_fact(Sec, F))), _)).
+
+%% a block ended: the facts a rebuild kept no run of, retracted
+amb_reason_block_end(rebuild(F, A, Old, _), Rm0, Rm) :- !, amb_reason_drop_all(F, A, Old, Rm0, Rm).
+amb_reason_block_end(_, Rm, Rm).
+
+%% a fact of the delta, checked as a snapshot's: of the block's predicate, its section's
+%% shapes; and the form it is stored in
+amb_reason_delta_take(sec(M, Doc), F, Fact, St) :-
+    (   compound(Fact), functor(Fact, F, _), '$amb_take'(F, M, Fact, Doc, St) -> true
+    ;   throw(error(amb_snapshot(bad_delta(malformed(Fact))), _)) ).
+
+%% the predicate F/A's facts are stored in: itself, or '$amb_F' with the keys first
+amb_reason_stored(F, A, SF, SA) :-
+    (   nb_getval(F, keyed(SF, Ps)) -> length(Ps, K), SA is K + A ; SF = F, SA = A ).
+
+%% N stored facts dropped from the list, each noted as a fact retracted
+amb_reason_drop(0, _, _, L, L, Rm, Rm) :- !.
+amb_reason_drop(N, _, _, L, L1, Rm0, Rm) :- integer(Rm0), !,
+    (   length(Pre, N), append(Pre, L1, L) -> Rm is Rm0 + N
+    ;   throw(error(amb_snapshot(bad_delta(run_past_the_facts_held)), _)) ).
+amb_reason_drop(N, F, A, [St|L], L1, Rm0, Rm) :- !,
+    amb_reason_unstore(F, A, St, Fact),
+    N1 is N - 1,
+    amb_reason_drop(N1, F, A, L, L1, [Fact|Rm0], Rm).
+amb_reason_drop(_, _, _, [], _, _, _) :- throw(error(amb_snapshot(bad_delta(run_past_the_facts_held)), _)).
+
+%% the rest of the stored facts, dropped
+amb_reason_drop_all(_, _, L, Rm0, Rm) :- integer(Rm0), !, length(L, K), Rm is Rm0 + K.
+amb_reason_drop_all(_, _, [], Rm, Rm).
+amb_reason_drop_all(F, A, [St|L], Rm0, Rm) :-
+    amb_reason_unstore(F, A, St, Fact),
+    amb_reason_drop_all(F, A, L, [Fact|Rm0], Rm).
+
+%% N stored facts of the list kept: stored again, in order
+amb_reason_keep(0, L, L) :- !.
+amb_reason_keep(N, [St|L], L1) :- !, assertz(St), N1 is N - 1, amb_reason_keep(N1, L, L1).
+amb_reason_keep(_, [], _) :- throw(error(amb_snapshot(bad_delta(run_past_the_facts_held)), _)).
+
+%% a stored fact as the fact it stands for: its keys taken off
+amb_reason_unstore(F, A, St, Fact) :-
+    (   nb_getval(F, keyed(_, Ps))
+    ->  length(Ps, K), St =.. [_|Args], length(Keys, K), append(Keys, FArgs, Args), length(FArgs, A),
+        Fact =.. [F|FArgs]
+    ;   Fact = St ).
 
 %% ---- explanations -----------------------------------------------------------------
 %% amb_why(Goal, Proof): Goal proved from the snapshot, with the proof that shows why.

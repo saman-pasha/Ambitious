@@ -1,0 +1,14 @@
+an edit: a fact retracted, one appended: the facts held are a fresh load's, in order (10 facts, revision 2)
+a rebuild: runs kept, facts put between them, a twin dropped: the facts held are a fresh load's, in order (12 facts, revision 3)
+its changes, as diff says them: the same 153 characters
+a predicate emptied, and one that was empty filled: the facts held are a fresh load's, in order (11 facts, revision 4)
+refused not_held: not_held; then nothing_held, the next term read amb_td_after
+refused run_past_the_end: run_past_the_facts_held; then nothing_held, the next term read amb_td_after
+refused run_backwards: amb_keep; then nothing_held, the next term read amb_td_after
+refused other_document: malformed; then nothing_held, the next term read amb_td_after
+refused other_predicate: malformed; then nothing_held, the next term read amb_td_after
+refused undeclared: not_a_fact; then nothing_held, the next term read amb_td_after
+refused no_block: +; then nothing_held, the next term read amb_td_after
+refused directive: :-; then nothing_held, the next term read amb_td_after
+refused other_section: section; then nothing_held, the next term read amb_td_after
+done

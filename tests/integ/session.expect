@@ -1,0 +1,110 @@
+-- the session (every fact it holds left out):
+> open ROOT/tests/integ/session/cart.html
+page: file://ROOT/tests/integ/session/cart.html
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,19,0), T = apple
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+> advise
+amb_diag(unused_rule, ru(1,151,0), 'the rule li.sale matches no element (at rest: no hover, focus or other state)').
+amb_diag(click_not_focusable, n(1,34,0), 'the <div> \'Clear\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
+> click #more
+clicked <button id="more" type="button">; the document is at revision 102
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+L = n(1,40,0), T = 'sale 1'
+L = n(1,42,0), T = 'first 1'
+> click #more
+clicked <button id="more" type="button">; the document is at revision 118
+> echo -- after the clicks
+-- after the clicks
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,20,1), T = 'first 2'
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+L = n(1,29,1), T = 'sale 2'
+L = n(1,40,0), T = 'sale 1'
+> query dom_attr(N, title, T)
+N = n(1,15,0), T = 'changed 2 time(s)'
+> query dom_element(L, li), css_computed(L, color, V, H)
+L = n(1,20,1), V = 'rgb(0, 0, 0)', H = inherited
+L = n(1,21,0), V = 'rgb(0, 0, 0)', H = inherited
+L = n(1,23,0), V = 'rgb(0, 0, 0)', H = inherited
+L = n(1,29,1), V = 'rgb(187, 0, 0)', H = declared
+L = n(1,40,0), V = 'rgb(187, 0, 0)', H = declared
+> query dom_element(L, li), layout_box_of(L, B), layout_border_box(B, X, Y, W, H)
+L = n(1,20,1), B = bx(1,6,0), X = 56, Y = 80.13, W = 728, H = 18.625
+L = n(1,21,0), B = bx(1,7,0), X = 56, Y = 98.755, W = 728, H = 18.625
+L = n(1,23,0), B = bx(1,8,0), X = 56, Y = 117.38, W = 728, H = 18.625
+L = n(1,29,1), B = bx(1,10,0), X = 56, Y = 154.63, W = 728, H = 18.625
+L = n(1,40,0), B = bx(1,9,0), X = 56, Y = 136.005, W = 728, H = 18.625
+> query a11y_node(A, E, R, Nm, F), dom_element(E, li)
+A = ax(1,4,0), E = n(1,20,1), R = listitem, Nm = '', F = nothing
+A = ax(1,5,0), E = n(1,21,0), R = listitem, Nm = '', F = nothing
+A = ax(1,6,0), E = n(1,23,0), R = listitem, Nm = '', F = nothing
+A = ax(1,7,0), E = n(1,40,0), R = listitem, Nm = '', F = nothing
+A = ax(1,8,0), E = n(1,29,1), R = listitem, Nm = '', F = nothing
+> why dom_inside(T, U), dom_element(U, ul), dom_text(T, _)
+dom_inside(n(1,19,1),n(1,18,0))   because
+  dom_ancestor(n(1,18,0),n(1,19,1))   because
+    dom_parent(n(1,19,1),n(1,29,1))   [fact]
+    dom_ancestor(n(1,18,0),n(1,29,1))   because
+      dom_parent(n(1,29,1),n(1,18,0))   [fact]
+dom_element(n(1,18,0),ul)   [fact]
+dom_text(n(1,19,1),'sale 2')   [fact]
+
+dom_inside(n(1,22,0),n(1,18,0))   because
+  dom_ancestor(n(1,18,0),n(1,22,0))   because
+    dom_parent(n(1,22,0),n(1,21,0))   [fact]
+    dom_ancestor(n(1,18,0),n(1,21,0))   because
+      dom_parent(n(1,21,0),n(1,18,0))   [fact]
+dom_element(n(1,18,0),ul)   [fact]
+dom_text(n(1,22,0),banana)   [fact]
+
+dom_inside(n(1,24,0),n(1,18,0))   because
+  dom_ancestor(n(1,18,0),n(1,24,0))   because
+    dom_parent(n(1,24,0),n(1,23,0))   [fact]
+    dom_ancestor(n(1,18,0),n(1,23,0))   because
+      dom_parent(n(1,23,0),n(1,18,0))   [fact]
+dom_element(n(1,18,0),ul)   [fact]
+dom_text(n(1,24,0),cherry)   [fact]
+
+dom_inside(n(1,41,0),n(1,18,0))   because
+  dom_ancestor(n(1,18,0),n(1,41,0))   because
+    dom_parent(n(1,41,0),n(1,40,0))   [fact]
+    dom_ancestor(n(1,18,0),n(1,40,0))   because
+      dom_parent(n(1,40,0),n(1,18,0))   [fact]
+dom_element(n(1,18,0),ul)   [fact]
+dom_text(n(1,41,0),'sale 1')   [fact]
+
+dom_inside(n(1,45,0),n(1,18,0))   because
+  dom_ancestor(n(1,18,0),n(1,45,0))   because
+    dom_parent(n(1,45,0),n(1,20,1))   [fact]
+    dom_ancestor(n(1,18,0),n(1,20,1))   because
+      dom_parent(n(1,20,1),n(1,18,0))   [fact]
+dom_element(n(1,18,0),ul)   [fact]
+dom_text(n(1,45,0),'first 2')   [fact]
+
+> advise
+amb_diag(click_not_focusable, n(1,34,0), 'the <div> \'Clear\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
+> check
+ok: dom snapshot of document 1 at revision 118
+ok: html snapshot of document 1 at revision 0
+ok: css snapshot of document 1 at revision 3
+ok: layout snapshot of document 1 at revision 1
+ok: net snapshot of document 1 at revision 3
+ok: a11y snapshot of document 1 at revision 1
+ok: script snapshot of document 1 at revision 0
+ok: 7 section(s), 897 facts
+> query member(M, [dom, html, css, layout, net, a11y, script]), amb_reason_schema_decl(M, fact(F/K, _)), functor(G, F, K), call(G)
+> echo -- end
+-- end
+> snapshot WORK/after.pl
+> reasoner
+reasoner: running; 1 start(s), 15 requests: 1 whole snapshot(s), 2 delta(s) (13 predicates edited, 38 rebuilt); 897 facts held
+reasoner: the last snapshot that changed reached it as a delta: 57 facts retracted, 82 added
+> quit
+exit 0
+-- the same requests asked of a fresh reasoner over the whole snapshot after the clicks:
+the same 979 lines, 897 of them the facts held, in order
