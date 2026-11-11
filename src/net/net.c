@@ -41,10 +41,22 @@
    status line. Every fetch that fails has its reason in words.
 
    What a page asks for: <link rel=stylesheet href>, <img src>, <script src>
-   (fetched, never run), each URL fetched once. A page served over http: or
-   https: may not load a file: URL: blocked, here in C; nor any kind of resource
-   its profile denies its site. An image's size is read from its header (PNG,
-   GIF, JPEG); its pixels are not decoded here. */
+   (fetched, never run), each URL fetched once. An img with a srcset takes the
+   candidate HTML's image source selection gives for an 800x600 viewport at a
+   device pixel ratio of 1: srcset parsed as HTML says, a width descriptor's
+   density by the length of the first entry of sizes whose media condition holds
+   (100vw when none; px, em, vw ... and calc() of them), src a 1x candidate when
+   no candidate is 1x and none has a width, and of the densities sorted the first
+   at 1 or past it, else the greatest, as Blink picks; the image's size is then
+   its header's divided by its density. Not done: <picture> and its <source>s. A
+   page served over http: or https: may not load a file: URL: blocked, here in
+   C; nor any kind of resource its profile denies its site. An image's size is
+   read from its header (PNG, GIF, JPEG); its pixels are not decoded here.
+
+   Cookies (RFC 6265bis) are kept in a jar, in the file net_keep names (a
+   profile's) or for the run alone; the HTTP cache (RFC 9111) in the directory it
+   names; gzip and deflate are decoded over the painter's inflate. Each section
+   below says what of it is done. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -986,36 +998,39 @@ static const char *net_type_of_name(const char *path) {
 }
 
 /* an image's size from its header: PNG, GIF, JPEG */
-static void net_image_size(const vector<char> *b, uint32_t *w, uint32_t *h) {
-    size_t n = len(*b);
+static void net_image_size_of(const uint8_t *b, size_t n, uint32_t *w, uint32_t *h) {
     *w = 0;
     *h = 0;
-    if (n >= 24 && (uint8_t)at(*b, 0) == 0x89 && at(*b, 1) == 'P' && at(*b, 2) == 'N' && at(*b, 3) == 'G') {
-        *w = (uint32_t)(uint8_t)at(*b, 16) << 24 | (uint32_t)(uint8_t)at(*b, 17) << 16 | (uint32_t)(uint8_t)at(*b, 18) << 8 | (uint8_t)at(*b, 19);
-        *h = (uint32_t)(uint8_t)at(*b, 20) << 24 | (uint32_t)(uint8_t)at(*b, 21) << 16 | (uint32_t)(uint8_t)at(*b, 22) << 8 | (uint8_t)at(*b, 23);
+    if (n >= 24 && b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') {
+        *w = (uint32_t)b[16] << 24 | (uint32_t)b[17] << 16 | (uint32_t)b[18] << 8 | b[19];
+        *h = (uint32_t)b[20] << 24 | (uint32_t)b[21] << 16 | (uint32_t)b[22] << 8 | b[23];
         return;
     }
-    if (n >= 10 && at(*b, 0) == 'G' && at(*b, 1) == 'I' && at(*b, 2) == 'F') {
-        *w = (uint32_t)(uint8_t)at(*b, 6) | (uint32_t)(uint8_t)at(*b, 7) << 8;
-        *h = (uint32_t)(uint8_t)at(*b, 8) | (uint32_t)(uint8_t)at(*b, 9) << 8;
+    if (n >= 10 && b[0] == 'G' && b[1] == 'I' && b[2] == 'F') {
+        *w = (uint32_t)b[6] | (uint32_t)b[7] << 8;
+        *h = (uint32_t)b[8] | (uint32_t)b[9] << 8;
         return;
     }
-    if (n >= 4 && (uint8_t)at(*b, 0) == 0xFF && (uint8_t)at(*b, 1) == 0xD8) {
+    if (n >= 4 && b[0] == 0xFF && b[1] == 0xD8) {
         /* the markers to the first start of frame */
         size_t i = 2;
         while (i + 9 < n) {
-            if ((uint8_t)at(*b, i) != 0xFF) { i++; continue; }
-            uint8_t m = (uint8_t)at(*b, i + 1);
+            if (b[i] != 0xFF) { i++; continue; }
+            uint8_t m = b[i + 1];
             if (m == 0xD8 || m == 0x01 || (m >= 0xD0 && m <= 0xD7) || m == 0xFF) { i++; continue; }
-            size_t seg = (size_t)(uint8_t)at(*b, i + 2) << 8 | (uint8_t)at(*b, i + 3);
+            size_t seg = (size_t)b[i + 2] << 8 | b[i + 3];
             if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
-                *h = (uint32_t)(uint8_t)at(*b, i + 5) << 8 | (uint8_t)at(*b, i + 6);
-                *w = (uint32_t)(uint8_t)at(*b, i + 7) << 8 | (uint8_t)at(*b, i + 8);
+                *h = (uint32_t)b[i + 5] << 8 | b[i + 6];
+                *w = (uint32_t)b[i + 7] << 8 | b[i + 8];
                 return;
             }
             i += 2 + seg;
         }
     }
+}
+static void net_image_size(const vector<char> *b, uint32_t *w, uint32_t *h) {
+    if (len(*b) == 0) { *w = *h = 0; return; }
+    net_image_size_of((const uint8_t *)data(*b), len(*b), w, h);
 }
 
 /* ---- file: and data: ---- */
@@ -2518,6 +2533,463 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
     return resource_handle(l, r);
 }
 
+/* ---- srcset and sizes: the image source an img takes (HTML 4.8.4.3) ---- */
+
+static uint32_t net_attr(const dom_document *d, uint32_t x, const char *name);
+
+/* the viewport images are chosen for, the cascade's (800 x 600), at a device pixel
+   ratio of 1; a font-relative length in sizes is of the initial 16px */
+#define NET_VIEW_W 800.0
+#define NET_VIEW_H 600.0
+#define NET_EM 16.0
+
+static int net_ascii_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r'; }
+
+/* a candidate of a srcset: its URL's place in the attribute, and its width or density */
+typedef struct net_candidate {
+    size_t url, url_len;
+    int has_w, has_x;
+    double w, x;
+    char desc[32];
+} net_candidate;
+
+/* HTML's valid non-negative integer, and valid floating-point number */
+static int net_html_int(const char *s, size_t n, double *v) {
+    if (n == 0 || n > 15) return 0;
+    double x = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9') return 0;
+        x = x * 10 + (s[i] - '0');
+    }
+    *v = x;
+    return 1;
+}
+static int net_html_float(const char *s, size_t n, double *v) {
+    size_t i = 0, digits = 0;
+    if (i < n && s[i] == '-') i++;
+    while (i < n && s[i] >= '0' && s[i] <= '9') { i++; digits++; }
+    if (i < n && s[i] == '.') {
+        i++;
+        size_t f = 0;
+        while (i < n && s[i] >= '0' && s[i] <= '9') { i++; f++; }
+        if (!f) return 0;
+        digits += f;
+    }
+    if (!digits) return 0;
+    if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+        i++;
+        if (i < n && (s[i] == '-' || s[i] == '+')) i++;
+        size_t e = 0;
+        while (i < n && s[i] >= '0' && s[i] <= '9') { i++; e++; }
+        if (!e) return 0;
+    }
+    if (i != n) return 0;
+    char t[64];
+    snprintf(t, sizeof t, "%.*s", (int)n, s);
+    *v = strtod(t, 0);
+    return 1;
+}
+
+/* a candidate's descriptors (each between from and to in d): a width (Nw, N > 0),
+   a density (Nx, N >= 0), a height (Nh, only beside a width); 0 when they are
+   none of these, or more than one of a kind */
+static int net_descriptors(const char *d, size_t n, net_candidate *c) {
+    size_t i = 0;
+    int has_h = 0;
+    c->has_w = c->has_x = 0;
+    c->desc[0] = 0;
+    while (i < n) {
+        while (i < n && net_ascii_ws(d[i])) i++;
+        size_t b = i;
+        while (i < n && !net_ascii_ws(d[i])) i++;
+        if (i == b) break;
+        const char *t = d + b;
+        size_t tn = i - b;
+        char last = t[tn - 1];
+        double v;
+        if (last == 'w') {
+            if (c->has_w || c->has_x || !net_html_int(t, tn - 1, &v) || v <= 0) return 0;
+            c->has_w = 1;
+            c->w = v;
+        } else if (last == 'x') {
+            if (c->has_w || c->has_x || has_h || !net_html_float(t, tn - 1, &v) || v < 0) return 0;
+            c->has_x = 1;
+            c->x = v;
+        } else if (last == 'h') {
+            if (has_h || c->has_x || !net_html_int(t, tn - 1, &v) || v <= 0) return 0;
+            has_h = 1;
+        } else return 0;
+        if (last != 'h') snprintf(c->desc, sizeof c->desc, "%.*s", (int)tn, t);
+    }
+    if (has_h && !c->has_w) return 0;
+    return 1;
+}
+
+/* HTML's "parse a srcset attribute": candidates split at commas, a URL then its
+   descriptors (parentheses keep a comma within); one whose descriptors are wrong is
+   dropped. How many there are, at most cap */
+static int net_srcset_parse(const char *s, size_t n, net_candidate *out, int cap) {
+    size_t p = 0;
+    int k = 0;
+    while (k < cap) {
+        while (p < n && (net_ascii_ws(s[p]) || s[p] == ',')) p++;
+        if (p >= n) break;
+        size_t ua = p;
+        while (p < n && !net_ascii_ws(s[p])) p++;
+        size_t ue = p;
+        net_candidate c;
+        memset(&c, 0, sizeof c);
+        size_t da = p, de = p;
+        if (ue > ua && s[ue - 1] == ',') {
+            while (ue > ua && s[ue - 1] == ',') ue--;
+        } else {
+            /* the descriptors, to a comma outside parentheses or the end */
+            int paren = 0;
+            while (p < n && net_ascii_ws(s[p])) p++;
+            da = p;
+            while (p < n && (paren || s[p] != ',')) {
+                if (s[p] == '(') paren = 1;
+                else if (s[p] == ')') paren = 0;
+                p++;
+            }
+            de = p;
+            if (p < n) p++;
+        }
+        if (ue == ua) continue;
+        c.url = ua;
+        c.url_len = ue - ua;
+        if (net_descriptors(s + da, de - da, &c)) out[k++] = c;
+    }
+    return k;
+}
+
+/* a <length> of sizes in px: px, em and rem (16px), ex and ch (half an em), vw, vh,
+   vmin, vmax, in, cm, mm, q, pt, pc, a unitless 0; -1 when it is none */
+static double net_length(const char *s, size_t n) {
+    size_t i = 0;
+    while (i < n && ((s[i] >= '0' && s[i] <= '9') || s[i] == '.' || s[i] == '-' || s[i] == '+')) i++;
+    double v;
+    if (!i || !net_html_float(s + (s[0] == '+' ? 1 : 0), i - (s[0] == '+' ? 1 : 0), &v)) return -1e300;
+    const char *u = s + i;
+    size_t un = n - i;
+    static const char *const units[] = { "px", "em", "rem", "ex", "ch", "vw", "vh", "vmin", "vmax", "in", "cm", "mm", "q", "pt", "pc" };
+    double per[15] = { 1, NET_EM, NET_EM, NET_EM / 2, NET_EM / 2, NET_VIEW_W / 100, NET_VIEW_H / 100, NET_VIEW_H / 100, NET_VIEW_W / 100,
+                       96, 96 / 2.54, 96 / 25.4, 96 / 101.6, 96.0 / 72, 16 };
+    if (un == 0) return v == 0 ? 0 : -1e300;
+    for (int k = 0; k < 15; k++) if (net_ci_is(u, un, units[k])) return v * per[k];
+    return -1e300;
+}
+
+/* calc()'s sum: terms of lengths and numbers joined by + and -, each a product of
+   factors joined by * and /; a parenthesis or a nested calc() a factor. *dim says
+   whether the value is a length; -1e300 when it does not parse */
+static double net_calc_sum(const char *s, size_t n, size_t *p, int *dim, int depth);
+static double net_calc_factor(const char *s, size_t n, size_t *p, int *dim, int depth) {
+    while (*p < n && net_ascii_ws(s[*p])) (*p)++;
+    if (depth > 16) return -1e300;
+    if (*p + 5 <= n && net_ci_prefix(s + *p, n - *p, "calc(")) *p += 4;
+    if (*p < n && s[*p] == '(') {
+        (*p)++;
+        double v = net_calc_sum(s, n, p, dim, depth + 1);
+        while (*p < n && net_ascii_ws(s[*p])) (*p)++;
+        if (*p >= n || s[*p] != ')') return -1e300;
+        (*p)++;
+        return v;
+    }
+    size_t b = *p;
+    while (*p < n && ((s[*p] >= '0' && s[*p] <= '9') || s[*p] == '.' || ((s[*p] == '-' || s[*p] == '+') && *p == b))) (*p)++;
+    while (*p < n && ((s[*p] >= 'a' && s[*p] <= 'z') || (s[*p] >= 'A' && s[*p] <= 'Z') || s[*p] == '%')) (*p)++;
+    if (*p == b) return -1e300;
+    size_t e = *p, d = b;
+    while (d < e && ((s[d] >= '0' && s[d] <= '9') || s[d] == '.' || s[d] == '-' || s[d] == '+')) d++;
+    if (d == e) {
+        double v;
+        if (!net_html_float(s + b + (s[b] == '+'), e - b - (s[b] == '+'), &v)) return -1e300;
+        *dim = 0;
+        return v;
+    }
+    *dim = 1;
+    return net_length(s + b, e - b);
+}
+static double net_calc_product(const char *s, size_t n, size_t *p, int *dim, int depth) {
+    double v = net_calc_factor(s, n, p, dim, depth);
+    for (;;) {
+        if (v <= -1e299) return -1e300;
+        size_t q = *p;
+        while (q < n && net_ascii_ws(s[q])) q++;
+        if (q >= n || (s[q] != '*' && s[q] != '/')) return v;
+        *p = q;
+        char op = s[(*p)++];
+        int d2 = 0;
+        double w = net_calc_factor(s, n, p, &d2, depth);
+        if (w <= -1e299 || (*dim && d2) || (op == '/' && (d2 || w == 0))) return -1e300;
+        v = op == '*' ? v * w : v / w;
+        *dim = *dim || d2;
+    }
+}
+static double net_calc_sum(const char *s, size_t n, size_t *p, int *dim, int depth) {
+    double v = net_calc_product(s, n, p, dim, depth);
+    for (;;) {
+        if (v <= -1e299) return -1e300;
+        size_t q = *p;
+        while (q < n && net_ascii_ws(s[q])) q++;
+        if (q >= n || (s[q] != '+' && s[q] != '-') || q == *p || q + 1 >= n || !net_ascii_ws(s[q + 1])) return v;
+        char op = s[q];
+        *p = q + 1;
+        int d2 = 0;
+        double w = net_calc_product(s, n, p, &d2, depth);
+        if (w <= -1e299 || d2 != *dim) return -1e300;
+        v = op == '+' ? v + w : v - w;
+    }
+}
+
+/* a source size: a length, or calc() of lengths; -1 when it is none (a negative one too) */
+static double net_source_size(const char *s, size_t n) {
+    while (n && net_ascii_ws(s[n - 1])) n--;
+    while (n && net_ascii_ws(s[0])) { s++; n--; }
+    double v;
+    if (n > 5 && net_ci_prefix(s, n, "calc(")) {
+        size_t p = 0;
+        int dim = 0;
+        v = net_calc_factor(s, n, &p, &dim, 0);
+        while (p < n && net_ascii_ws(s[p])) p++;
+        if (p != n || (!dim && v != 0)) return -1;
+    } else v = net_length(s, n);
+    return v < 0 ? -1 : v;
+}
+
+/* one media feature in its parentheses: width, height and their min- and max-,
+   in a range too ((width >= 600px), (400px < width <= 700px)), orientation,
+   resolution (1dppx, 96dpi), prefers-color-scheme (light), prefers-reduced-motion
+   (no-preference); 0 for a feature not known */
+static int net_media_feature(const char *s, size_t n) {
+    while (n && net_ascii_ws(s[n - 1])) n--;
+    while (n && net_ascii_ws(s[0])) { s++; n--; }
+    size_t colon = 0;
+    while (colon < n && s[colon] != ':') colon++;
+    if (colon < n) {
+        size_t a = colon;
+        while (a && net_ascii_ws(s[a - 1])) a--;
+        const char *v = s + colon + 1;
+        size_t vn = n - colon - 1;
+        while (vn && net_ascii_ws(v[0])) { v++; vn--; }
+        double px = net_length(v, vn);
+        static const char *const fname[6] = { "width", "min-width", "max-width", "height", "min-height", "max-height" };
+        static const int fcmp[6] = { 0, 1, -1, 0, 1, -1 };
+        for (int k = 0; k < 6; k++)
+            if (net_ci_is(s, a, fname[k])) {
+                double have = k < 3 ? NET_VIEW_W : NET_VIEW_H;
+                if (px < -1e299) return 0;
+                return fcmp[k] == 0 ? have == px : fcmp[k] > 0 ? have >= px : have <= px;
+            }
+        if (net_ci_is(s, a, "orientation")) return net_ci_is(v, vn, "landscape");
+        if (net_ci_is(s, a, "prefers-color-scheme")) return net_ci_is(v, vn, "light");
+        if (net_ci_is(s, a, "prefers-reduced-motion")) return net_ci_is(v, vn, "no-preference");
+        if (net_ci_is(s, a, "resolution") || net_ci_is(s, a, "min-resolution") || net_ci_is(s, a, "max-resolution")) {
+            double d = -1;
+            if (vn > 4 && net_ci_is(v + vn - 4, 4, "dppx")) net_html_float(v, vn - 4, &d);
+            else if (vn > 1 && net_ci_is(v + vn - 1, 1, "x")) net_html_float(v, vn - 1, &d);
+            else if (vn > 3 && net_ci_is(v + vn - 3, 3, "dpi")) { if (net_html_float(v, vn - 3, &d)) d /= 96; }
+            if (d < 0) return 0;
+            return net_ci_prefix(s, a, "min-") ? 1 >= d : net_ci_prefix(s, a, "max-") ? 1 <= d : d == 1;
+        }
+        return 0;
+    }
+    /* a range: a value, a comparison and width or height, either way round, perhaps twice */
+    const char *t = s;
+    size_t i = 0;
+    double lo = -1e300, hi = 1e300, have = -1;
+    int lo_eq = 1, hi_eq = 1, ok = 1, named = 0;
+    double last = -1e300;
+    char lastop[3] = "";
+    while (i < n && ok) {
+        while (i < n && net_ascii_ws(t[i])) i++;
+        size_t b = i;
+        if (t[i] == '<' || t[i] == '>' || t[i] == '=') {
+            while (i < n && (t[i] == '<' || t[i] == '>' || t[i] == '=')) i++;
+            snprintf(lastop, sizeof lastop, "%.*s", (int)(i - b > 2 ? 2 : i - b), t + b);
+            continue;
+        }
+        while (i < n && !net_ascii_ws(t[i]) && t[i] != '<' && t[i] != '>' && t[i] != '=') i++;
+        if (net_ci_is(t + b, i - b, "width")) { have = NET_VIEW_W; named = 1; }
+        else if (net_ci_is(t + b, i - b, "height")) { have = NET_VIEW_H; named = 1; }
+        else {
+            double v = net_length(t + b, i - b);
+            if (v < -1e299) return 0;
+            /* the value before the name bounds it from below with < or <=, from above with > or >= */
+            if (!named) {
+                if (lastop[0] == 0) last = v;
+                else return 0;
+            } else {
+                if (strcmp(lastop, ">=") == 0 || strcmp(lastop, ">") == 0) { lo = v; lo_eq = lastop[1] == '='; }
+                else if (strcmp(lastop, "<=") == 0 || strcmp(lastop, "<") == 0) { hi = v; hi_eq = lastop[1] == '='; }
+                else if (strcmp(lastop, "=") == 0) { lo = hi = v; }
+                else return 0;
+            }
+            lastop[0] = 0;
+            continue;
+        }
+        if (last > -1e299) {
+            if (strcmp(lastop, "<=") == 0 || strcmp(lastop, "<") == 0) { lo = last; lo_eq = lastop[1] == '='; }
+            else if (strcmp(lastop, ">=") == 0 || strcmp(lastop, ">") == 0) { hi = last; hi_eq = lastop[1] == '='; }
+            else if (strcmp(lastop, "=") == 0) { lo = hi = last; }
+            else return 0;
+        }
+        lastop[0] = 0;
+    }
+    if (!named) return 0;
+    if (lo > -1e299 && (have < lo || (!lo_eq && have == lo))) return 0;
+    if (hi < 1e299 && (have > hi || (!hi_eq && have == hi))) return 0;
+    return 1;
+}
+
+/* a <media-condition>: `not' a parenthesized one, or parenthesized ones joined by
+   `and' alone or by `or' alone, each a feature or a condition in parentheses */
+static int net_media_condition(const char *s, size_t n, int depth) {
+    size_t i = 0;
+    while (i < n && net_ascii_ws(s[i])) i++;
+    if (depth > 8) return 0;
+    int neg = 0;
+    if (i + 3 < n && net_ci_prefix(s + i, n - i, "not") && net_ascii_ws(s[i + 3])) { neg = 1; i += 4; }
+    int result = -1, op = 0;   /* op: 1 and, 2 or */
+    while (i < n) {
+        while (i < n && net_ascii_ws(s[i])) i++;
+        if (i >= n) break;
+        if (s[i] != '(') {
+            size_t b = i;
+            while (i < n && !net_ascii_ws(s[i]) && s[i] != '(') i++;
+            int w = net_ci_is(s + b, i - b, "and") ? 1 : net_ci_is(s + b, i - b, "or") ? 2 : 0;
+            if (!w || (op && op != w) || result < 0) return 0;
+            op = w;
+            continue;
+        }
+        size_t b = ++i;
+        int d = 1;
+        while (i < n && d) { if (s[i] == '(') d++; else if (s[i] == ')') d--; i++; }
+        if (d) return 0;
+        const char *in = s + b;
+        size_t inn = i - b - 1, q = 0;
+        while (q < inn && net_ascii_ws(in[q])) q++;
+        int v = q < inn && (in[q] == '(' || (inn - q > 4 && net_ci_prefix(in + q, inn - q, "not") && net_ascii_ws(in[q + 3])))
+                    ? net_media_condition(in, inn, depth + 1) : net_media_feature(in, inn);
+        if (result < 0) result = v;
+        else if (op == 1) result = result && v;
+        else if (op == 2) result = result || v;
+        else return 0;
+    }
+    if (result < 0) return 0;
+    return neg ? !result : result;
+}
+
+/* HTML's "parse a sizes attribute": the first entry whose media condition holds, or
+   that has none, gives its length; 100vw when none does */
+static double net_sizes(const char *s, size_t n) {
+    size_t a = 0;
+    while (a < n) {
+        size_t b = a;
+        int d = 0;
+        while (b < n && (d || s[b] != ',')) { if (s[b] == '(') d++; else if (s[b] == ')' && d) d--; b++; }
+        size_t x = a, y = b;
+        while (x < y && net_ascii_ws(s[x])) x++;
+        while (y > x && net_ascii_ws(s[y - 1])) y--;
+        /* its last component: a function to its parenthesis, or a token */
+        size_t z = y;
+        if (z > x && s[z - 1] == ')') {
+            int dd = 0;
+            while (z > x) {
+                z--;
+                if (s[z] == ')') dd++;
+                else if (s[z] == '(' && --dd == 0) break;
+            }
+            while (z > x && ((s[z - 1] >= 'a' && s[z - 1] <= 'z') || (s[z - 1] >= 'A' && s[z - 1] <= 'Z') || s[z - 1] == '-')) z--;
+            if (z > x && !net_ascii_ws(s[z - 1])) z = y;    /* a parenthesized condition, no length */
+        } else
+            while (z > x && !net_ascii_ws(s[z - 1])) z--;
+        double v = z < y ? net_source_size(s + z, y - z) : -1;
+        if (v >= 0) {
+            size_t c = z;
+            while (c > x && net_ascii_ws(s[c - 1])) c--;
+            if (c == x || net_media_condition(s + x, c - x, 0)) return v;
+        }
+        a = b + 1;
+    }
+    return NET_VIEW_W;
+}
+
+/* the img's choice: its srcset's candidates, each density found (a width's by the
+   source size of sizes), its src a 1x one when no candidate is 1x and none has a
+   width; sorted by density, the first of equal ones kept; then as Blink picks at
+   a device pixel ratio of 1, the first density at 1 or past it, else the greatest.
+   The URL into url; 0 when the img has no srcset, or no candidate in it */
+typedef struct net_pick { double density, source_size; int candidates; char desc[32]; } net_pick;
+
+static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset, uint32_t src, char *url, size_t cap, net_pick *pk) {
+    char text[8192], sizes[2048];
+    amb_span v = d->attr[srcset].value;
+    snprintf(text, sizeof text, "%.*s", (int)v.len, text_ptr(d, v));
+    net_candidate c[64];
+    int k = net_srcset_parse(text, strlen(text), c, 63);
+    if (k == 0) return 0;
+    uint32_t sz = net_attr(d, x, "sizes");
+    double source = NET_VIEW_W;
+    int any_w = 0, any_1x = 0;
+    for (int i = 0; i < k; i++) if (c[i].has_w) any_w = 1;
+    if (any_w && sz) {
+        amb_span sv = d->attr[sz].value;
+        snprintf(sizes, sizeof sizes, "%.*s", (int)sv.len, text_ptr(d, sv));
+        source = net_sizes(sizes, strlen(sizes));
+    }
+    double density[65];
+    for (int i = 0; i < k; i++) {
+        density[i] = c[i].has_w ? (source > 0 ? c[i].w / source : 1e9) : c[i].has_x ? c[i].x : 1;
+        if (density[i] == 1) any_1x = 1;
+    }
+    int with_src = 0;
+    char srcurl[4096];
+    srcurl[0] = 0;
+    if (src && d->attr[src].value.len && !any_1x && !any_w) {
+        amb_span sv = d->attr[src].value;
+        snprintf(srcurl, sizeof srcurl, "%.*s", (int)sv.len, text_ptr(d, sv));
+        density[k] = 1;
+        memset(&c[k], 0, sizeof c[k]);
+        with_src = 1;
+    }
+    int total = k + with_src;
+    /* sorted by density, stably: an insertion sort of indices */
+    int order[65];
+    for (int i = 0; i < total; i++) {
+        int j = i;
+        while (j > 0 && density[order[j - 1]] > density[i]) { order[j] = order[j - 1]; j--; }
+        order[j] = i;
+    }
+    int w = total - 1;
+    for (int i = 0; i < total; i++) if (density[order[i]] >= 1) { w = i; break; }
+    while (w > 0 && density[order[w - 1]] == density[order[w]]) w--;
+    int pick = order[w];
+    if (pick == k) snprintf(url, cap, "%s", srcurl);
+    else snprintf(url, cap, "%.*s", (int)c[pick].url_len, text + c[pick].url);
+    pk->density = density[pick];
+    pk->source_size = source;
+    pk->candidates = total;
+    snprintf(pk->desc, sizeof pk->desc, "%s", pick == k ? "" : c[pick].desc);
+    return 1;
+}
+
+/* an img's size as a srcset choice gives it: its header's size divided by its density */
+static void net_srcset_size(net_loader *l, uint32_t r, const net_pick *pk) {
+    l->resource[r].srcset = 1;
+    l->resource[r].descriptor = net_text(l, pk->desc);
+    l->resource[r].density = pk->density;
+    l->resource[r].source_size = pk->source_size;
+    l->resource[r].candidates = (uint32_t)pk->candidates;
+    if (l->resource[r].outcome != NET_OUTCOME_OK || pk->density <= 0) return;
+    amb_span b = l->resource[r].body;
+    uint32_t w = 0, h = 0;
+    if (b.len) net_image_size_of((const uint8_t *)bytes_ptr(l, b), b.len, &w, &h);
+    l->resource[r].width = (uint32_t)(w / pk->density + 1e-6);
+    l->resource[r].height = (uint32_t)(h / pk->density + 1e-6);
+}
+
 /* ---- what a page asks for ---- */
 
 static int net_is(const dom_document *d, uint32_t x, const char *name) {
@@ -2563,13 +3035,23 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
     while (x) {
         net_kind kind = NET_KIND_OTHER;
         uint32_t a = 0;
+        char ref[8192], abs[8192];
+        net_pick pk;
+        int picked = 0;
+        uint32_t fetched = 0;
         if (net_is(doc, x, "link") && net_stylesheet_rel(doc, x)) { kind = NET_KIND_STYLESHEET; a = net_attr(doc, x, "href"); }
-        else if (net_is(doc, x, "img")) { kind = NET_KIND_IMAGE; a = net_attr(doc, x, "src"); }
-        else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
-        if (a && doc->attr[a].value.len > 0) {
-            char ref[8192], abs[8192];
-            amb_span v = doc->attr[a].value;
-            snprintf(ref, sizeof ref, "%.*s", (int)v.len, text_ptr(doc, v));
+        else if (net_is(doc, x, "img")) {
+            kind = NET_KIND_IMAGE;
+            a = net_attr(doc, x, "src");
+            /* an img with a srcset takes the candidate chosen for the viewport */
+            uint32_t ss = net_attr(doc, x, "srcset");
+            if (ss && doc->attr[ss].value.len) picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pk);
+        } else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
+        if (picked || (a && doc->attr[a].value.len > 0)) {
+            if (!picked) {
+                amb_span v = doc->attr[a].value;
+                snprintf(ref, sizeof ref, "%.*s", (int)v.len, text_ptr(doc, v));
+            }
             net_url u;
             dom_node_h eh = node_handle(doc, x);
             if (denied >> kind & 1) {
@@ -2589,9 +3071,9 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 char why[64];
                 snprintf(why, sizeof why, "the profile denies the site's %ss", net_kind_name(kind));
                 l->resource[r].reason = net_text(l, why);
+                fetched = r;
             } else if (!net_resolve(&base, ref, &u)) {
-                uint32_t r = net_get(l, ref, kind, pg, eh, &base, &t);
-                (void)r;
+                fetched = net_get(l, ref, kind, pg, eh, &base, &t);
             } else {
                 net_url_text(&u, abs, sizeof abs);
                 /* each URL fetched once: a second element asking for it shares the first's body */
@@ -2608,8 +3090,19 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                     l->resource[h.index].live = 1;
                     l->resource[h.index].elem = eh;
                     l->resource[h.index].kind = kind;
-                } else net_get(l, abs, kind, pg, eh, &base, &t);
+                    fetched = h.index;
+                    /* the first's choice is not this one's: the size again from the header */
+                    l->resource[fetched].srcset = 0;
+                    l->resource[fetched].descriptor = net_text(l, "");
+                    if (kind == NET_KIND_IMAGE && copy.outcome == NET_OUTCOME_OK && copy.body.len) {
+                        uint32_t w = 0, hh = 0;
+                        net_image_size_of((const uint8_t *)bytes_ptr(l, copy.body), copy.body.len, &w, &hh);
+                        l->resource[fetched].width = w;
+                        l->resource[fetched].height = hh;
+                    }
+                } else fetched = net_get(l, abs, kind, pg, eh, &base, &t);
             }
+            if (picked && fetched) net_srcset_size(l, fetched, &pk);
         }
         if (doc->node[x].first_child) { x = doc->node[x].first_child; continue; }
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }

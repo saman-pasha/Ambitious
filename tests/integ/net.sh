@@ -40,6 +40,12 @@
 # over its own cache for the same visits. AMB_CACHE names a cache of its own; a
 # private run neither uses nor changes one.
 #
+# srcset and sizes (tests/net/site/s/): fourteen imgs, x and w descriptors, sizes
+# with media conditions, em and calc(), src as the 1x, densities above and below 1, a
+# bad descriptor, a comma in a URL, w and x together. Each choice is a fact; the
+# candidate and its density-corrected size are Chromium's, image by image
+# (tests/net/srcset.chromium), and layout draws them at that size.
+#
 # IPv6: an image from an IPv6 literal, written back compressed and dialled through
 # getaddrinfo: loaded from a server on ::1 where the machine has one, else refused for
 # its address family. The line says which held, so either machine prints the same.
@@ -206,6 +212,18 @@ echo "-- a private session caches nothing, and leaves the cache as it was:"
 before=$(cat "$kprof"/cache/* | cksum)
 AMB_NOW=1700000300 kamb --profile "$kprof" --private query "$kurl" "net_cache(R, How, _, _)"
 [ "$before" = "$(cat "$kprof"/cache/* | cksum)" ] && echo "the same" || echo "CHANGED"
+
+echo "== srcset and sizes, in an 800x600 viewport at 1x (tests/net/site/s/page.html):"
+surl="http://127.0.0.1:$port/s/page.html"
+echo "-- each img's choice: its descriptor, its density, the source size, and how many candidates there were:"
+amb query "$surl" "dom_attr(N, id, Id), net_asked_by(R, _, N), net_srcset(R, D, X, S, C)" | sed 's/^N = n([0-9,]*), //'
+echo "-- each img's candidate and its size, against Chromium's (tests/net/srcset.chromium):"
+amb query "$surl" "dom_attr(N, id, Id), net_asked_by(R, _, N), net_resource(R, U, image, _, _, _, _), net_image_size(R, W, H)" |
+  sed -e "s/^N = [^,]*([^)]*), Id = \([^,]*\), R = [^,]*([^)]*), U = '[^']*\/\([^/']*\)', W = \([0-9]*\), H = \([0-9]*\)$/\1 \2 \3x\4/" > "$work/srcset.got"
+diff "$AMB_ROOT/tests/net/srcset.chromium" "$work/srcset.got" && echo "the same, image by image ($(wc -l < "$work/srcset.got" | tr -d ' ') of them)"
+echo "-- laid out at those sizes, and what the reasoner says of the one below 1x:"
+amb query "$surl" "member(Id, [narrow, below, mixed]), dom_attr(N, id, Id), layout_box_of(N, B), layout_box(B, _, _, _, _, W, H)" | sed 's/, N = n([0-9,]*), B = bx([0-9,]*)//'
+amb advise "$surl" | grep '^amb_diag(low_density'
 
 echo "== IPv6 literals: an image from http://[0:0:0:0:0:0:0:1]:V6/ (tests/net/site/v6.html)"
 # a server on ::1 where the machine has it; else port 9 of ::1, which the machine cannot dial

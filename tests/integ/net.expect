@@ -281,6 +281,29 @@ the same, request by request
 -- a private session caches nothing, and leaves the cache as it was:
 no
 the same
+== srcset and sizes, in an 800x600 viewport at 1x (tests/net/site/s/page.html):
+-- each img's choice: its descriptor, its density, the source size, and how many candidates there were:
+Id = x, R = rs(1,2,0), D = '1x', X = 1, S = 800, C = 2
+Id = w, R = rs(1,3,0), D = '800w', X = 1, S = 800, C = 3
+Id = half, R = rs(1,4,0), D = '400w', X = 1, S = 400, C = 3
+Id = media, R = rs(1,5,0), D = '800w', X = 1, S = 800, C = 3
+Id = narrow, R = rs(1,6,0), D = '400w', X = 1.33333333333333, S = 300, C = 3
+Id = calc, R = rs(1,7,0), D = '800w', X = 1.33333333333333, S = 600, C = 3
+Id = em, R = rs(1,8,0), D = '400w', X = 1, S = 400, C = 3
+Id = src, R = rs(1,9,0), D = '', X = 1, S = 800, C = 3
+Id = above, R = rs(1,10,0), D = '1.5x', X = 1.5, S = 800, C = 2
+Id = below, R = rs(1,11,0), D = '0.5x', X = 0.5, S = 800, C = 1
+Id = bare, R = rs(1,12,0), D = '', X = 1, S = 800, C = 1
+Id = bad, R = rs(1,13,0), D = '1x', X = 1, S = 800, C = 1
+Id = comma, R = rs(1,14,0), D = '1x', X = 1, S = 800, C = 2
+Id = mixed, R = rs(1,15,0), D = '2x', X = 2, S = 800, C = 2
+-- each img's candidate and its size, against Chromium's (tests/net/srcset.chromium):
+the same, image by image (14 of them)
+-- laid out at those sizes, and what the reasoner says of the one below 1x:
+Id = narrow, W = 72, H = 24
+Id = below, W = 192, H = 64
+Id = mixed, W = 48, H = 16
+amb_diag(low_density, rs(1,11,0), 'the image http://127.0.0.1:PORT/s/below-0.5x.png was chosen at a density of 0.5, below the screen\'s 1: it is drawn larger than its pixels').
 == IPv6 literals: an image from http://[0:0:0:0:0:0:0:1]:V6/ (tests/net/site/v6.html)
 -- its URL written back compressed, as the URL standard writes it:
 http://[::1]:V6/logo.png

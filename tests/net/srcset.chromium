@@ -1,0 +1,14 @@
+x x-1x.png 96x32
+w w-800w.png 96x32
+half half-400w.png 96x32
+media media-800w.png 96x32
+narrow narrow-400w.png 72x24
+calc calc-800w.png 72x24
+em em-400w.png 96x32
+src src-1x.png 96x32
+above above-1.5x.png 64x21
+below below-0.5x.png 192x64
+bare bare-1x.png 96x32
+bad bad-1x.png 96x32
+comma comma-1,x.png 96x32
+mixed mixed-2x.png 48x16

@@ -43,7 +43,7 @@ net_contract(record(resource, [
     field(origin,    span(text)),            % its origin, serialized: null for an opaque one
     field(from,      ref(resource)),         % the page that asked for it
     field(elem,      xhandle(dom, node)),    % the element that asked for it
-    field(width,     u32),                   % an image's size, from its header
+    field(width,     u32),                   % an image's size, from its header (divided by its density, for one from a srcset)
     field(height,    u32),
     field(reason,    span(text)),            % why its fetch did not end well, in words: the server's, the TLS library's, the proxy's, the system's
     field(tls,       bool),                  % its last exchange went over TLS, its server verified
@@ -58,7 +58,12 @@ net_contract(record(resource, [
     field(cache_lifetime, i64),              % and its freshness lifetime
     field(coded,     bool),                  % its body came in a content coding, decoded
     field(coding,    span(text)),            % that coding, as Content-Encoding named it: gzip, deflate
-    field(encoded_size, u32)                 % the body's bytes as they came
+    field(encoded_size, u32),                % the body's bytes as they came
+    field(srcset,    bool),                  % an image chosen from its element's srcset
+    field(descriptor, span(text)),           % the candidate's descriptor as written (2x, 800w), or empty for 1x and src
+    field(density,   f64),                   % its pixel density, for a device pixel ratio of 1
+    field(source_size, f64),                 % the sizes attribute's length in the viewport, px (100vw by default)
+    field(candidates, u32)                   % how many candidates there were, src among them when it was one
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
@@ -151,6 +156,7 @@ net_contract(fact(net_proxy(handle, field(proxy)), table(resource), field(proxie
 net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == true)).
 net_contract(fact(net_cache(handle, field(cache), field(cache_age), field(cache_lifetime)), table(resource), field(cache) \== unused)).
 net_contract(fact(net_coding(handle, field(coding), field(encoded_size)), table(resource), field(coded) == true)).
+net_contract(fact(net_srcset(handle, field(descriptor), field(density), field(source_size), field(candidates)), table(resource), field(srcset) == true)).
 %% the page's cookies, those its responses set or tried to and those sent for it:
 %% names, domains, paths and flags, never a value
 net_contract(fact(net_cookie(handle, field(name), field(domain), field(path), field(state)), table(cookie), field(seen) == true)).
@@ -171,6 +177,7 @@ net_contract(derived(net_mixed_content/2, 'a part that a page served over TLS go
 net_contract(derived(net_cookies_sent/2, 'the names of the cookies sent for a resource, in the order sent')).
 net_contract(derived(net_third_party_cookie/2, 'a cookie sent for a resource of another site than the page''s')).
 net_contract(derived(net_from_cache/2, 'a resource the cache answered, fresh or revalidated')).
+net_contract(derived(net_low_density/2, 'an image chosen from a srcset at a density below the screen''s, and that density')).
 
 net_contract(query(loaded, (net_resource(R, U, K, O, S, _, _)), [R, U, K, O, S], 'every resource, what it is and how its fetch ended')).
 
