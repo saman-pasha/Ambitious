@@ -1,0 +1,22 @@
+== return via yield*
+tick 2 inner finally
+tick 4 resolved {"value":"r","done":true}
+== throw via yield*
+tick 0 inner finally
+tick 1 outer caught
+tick 3 resolved {"value":"c","done":false}
+== next via yield*
+tick 3 resolved {"value":2,"done":false}
+== return plain
+tick 1 a finally
+tick 2 resolved {"value":"r","done":true}
+== return via yield* no return method
+tick 3 resolved {"value":"r","done":true}
+== return via yield* sync inner
+tick 1 inner finally
+tick 4 resolved {"value":"r","done":true}
+== next via yield* sync inner
+tick 3 resolved {"value":2,"done":false}
+== inner return value done
+tick 2 got iv
+tick 3 resolved {"done":true}

@@ -89,17 +89,24 @@ enum {
     JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length (src/js/typed.c) */
     JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
     JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
-    JK_BIGINT        /* a BigInt's wrapper: the value in x */
+    JK_BIGINT,       /* a BigInt's wrapper: the value in x */
+    JK_ASYNCGEN      /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
+                        mode, value and promise, three a request, the first the one its body answers), x its function */
 };
 /* a typed array's element type, in its flags above JO_TA_SHIFT */
 enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UINT32, JTA_FLOAT32, JTA_FLOAT64,
        JTA_BIGINT64, JTA_BIGUINT64, JTA_N };
 #define JO_TA_SHIFT 8
 /* an iterator: a its source, b its place, c its mode; JI_PROTOCOL's source is an
-   iterator object whose next (kept in x) is called, JI_GEN's a generator resumed */
-enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES, JI_PROTOCOL, JI_GEN };
-/* a generator's (an async run's) state */
-enum { JG_START, JG_YIELD, JG_RUNNING, JG_DONE };
+   iterator object whose next (kept in x) is called, JI_GEN's a generator resumed.
+   for await's and an async yield*'s: JI_ASYNC's source an async iterator whose next is
+   in x, JI_FROM_SYNC's a sync iterator (a JK_ITER) seen as an async one; b is 1 while
+   a step is under way, when an error leaves the iterator unclosed */
+enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES, JI_PROTOCOL, JI_GEN,
+       JI_ASYNC, JI_FROM_SYNC };
+/* a generator's (an async run's) state; an async generator's also suspended at an await
+   (executing, to its requests), and awaiting a return's value once done */
+enum { JG_START, JG_YIELD, JG_RUNNING, JG_DONE, JG_AWAIT, JG_AWAIT_RETURN };
 /* a promise's state, and its flags: handled (a reaction was added), reported */
 enum { JP_PENDING, JP_FULFILLED, JP_REJECTED };
 #define JPF_HANDLED 1u
@@ -268,6 +275,7 @@ typedef struct js_vm {
     uint32_t type_error_proto, range_error_proto, syntax_error_proto, reference_error_proto, date_proto, regexp_proto;
     uint32_t map_proto, set_proto, iterator_proto;
     uint32_t symbol_proto, generator_proto, promise_proto, promise_ctor, aggregate_error_proto;
+    uint32_t async_iterator_proto, async_generator_proto;
     uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
     uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
     uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
@@ -349,10 +357,26 @@ void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr);   /* the own symbol ke
 /* generators and async runs (src/js/vm.c): one resumed with a value, as next (mode 0),
    throw (1) or return (2): what it yields or returns, *done set when it returned */
 jv js_gen_resume(js_vm *vm, uint32_t g, jv value, int mode, int *done);
+/* {value, done}: an iterator's result */
+jv js_iter_result(js_vm *vm, jv v, int done);
+/* async generators (src/js/builtins.c, ECMA-262 27.6): the first request answered (its
+   promise rejected with v, or resolved with {v, done}); the requests left once the body
+   is done answered; an async iterator's step as for await and yield* take it: next (kind
+   0 with arg, 3 without), throw (1) or return (2 with arg, 4 without) called on a
+   JI_ASYNC or JI_FROM_SYNC record, the result (a promise from a JI_FROM_SYNC one) in *out;
+   0 when the method is missing, -1 when it threw */
+void js_ag_complete(js_vm *vm, uint32_t g, int rejected, jv v, int done);
+void js_ag_drain(js_vm *vm, uint32_t g);
+int js_aiter_call(js_vm *vm, uint32_t rec, int kind, jv arg, jv *out);
+/* an async iterator record for a value: its Symbol.asyncIterator's, else its sync iterator's (src/js/vm.c) */
+jv js_aiter_of(js_vm *vm, jv v);
 /* an iterable's iterator (for-of's), and its next value: 0 when done */
 jv js_iter_of(js_vm *vm, jv v);
 int js_iter_step(js_vm *vm, uint32_t it, jv *out);
 void js_iter_close(js_vm *vm, uint32_t it);
+/* a sync iterator sent next (mode 0), throw (1) or return (2): its result's value and
+   done; 1 sent, 0 no such method, -1 it threw */
+int js_iter_send(js_vm *vm, uint32_t it, int mode, jv arg, int has_arg, jv *value, int *done);
 
 /* promises (src/js/builtins.c): a new pending one; one settled; resolved (a thenable
    followed); a promise for any value; a reaction added (an async run's when target
@@ -637,6 +661,25 @@ enum {
     OP_DESTRUCT_ARR,                              /* u16 n: v -> an array pattern's array: v if an array, else the
                                                      first n values its iterator gives (0xFFFF: all), it closed */
     OP_REGEXP,                                    /* u32 regex: a literal's RegExp object, its pattern compiled with the script */
+    /* async generators and for await (their iterators are records: JK_ITER, JI_ASYNC or JI_FROM_SYNC) */
+    OP_AYIELD,                                    /* v -> received mode: the first request answered {v, false}; the next
+                                                     request's value and mode at once if one waits, else suspended */
+    OP_ITER_ASYNC,                                /* v -> its async iterator record */
+    OP_ITER_ANEXT,                                /* rec -> rec r: next() called (for await's step) */
+    OP_ITER_ARESULT,                              /* i32 done: rec r -> rec value; done: both popped, then jump */
+    OP_ITER_ACLOSE,                               /* u8 quiet, i32 skip: rec -> r, return()'s result to await; none (no
+                                                     return, the record mid-step, or quiet and it threw): jump */
+    OP_ITER_ACHECK,                               /* r -> : a TypeError unless r is an object */
+    OP_AYS_STEP,                                  /* i32 noreturn, i32 nothrow, u16 n: rec recv mode -> rec mode r, the
+                                                     inner's next, throw or return called; no return: recv at the
+                                                     statement's stack (GEN_RESUME's cut), jump; no throw: rec, jump */
+    OP_AYS_RESULT,                                /* i32 done, i32 return, u16 n: rec mode r -> rec value; done: value
+                                                     (the expression's), jump; done in a return: value at the cut, jump */
+    OP_AYS_UNWRAP,                                /* i32 loop: rec recv mode -> rec recv: a return's value to await; any
+                                                     other mode: left, jump */
+    OP_AYS_RETMODE,                               /* rec v m -> rec v mode: the awaited return value (mode 2) or its
+                                                     rejection (1) */
+    OP_AYS_NOTHROW,                               /* throws yield*'s TypeError: the inner iterator has no throw */
     OP_NOP,
     OP_NOPS
 };

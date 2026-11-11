@@ -54,6 +54,7 @@ enum {
     /* Symbol, generators, promises */
     N_SYM_FOR, N_SYM_KEYFOR, N_SYMP_TOSTRING, N_SYMP_VALUEOF, N_SYMP_DESC, N_OBJ_GETOWNSYMS, N_ITP_SELF,
     N_GEN_NEXT, N_GEN_RETURN, N_GEN_THROW,
+    N_AG_NEXT, N_AG_RETURN, N_AG_THROW, N_AG_RETURN_OK, N_AG_RETURN_ERR, N_AFS_UNWRAP, N_AFS_CLOSE,
     N_PROMISE, N_PR_RESOLVE_FN, N_PR_REJECT_FN, N_PRP_THEN, N_PRP_CATCH, N_PRP_FINALLY, N_PR_FIN_OK, N_PR_FIN_ERR,
     N_PR_THUNK_VALUE, N_PR_THUNK_THROW, N_PR_RESOLVE, N_PR_REJECT, N_PR_ALL, N_PR_ALLSETTLED, N_PR_RACE, N_PR_ANY,
     N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER, N_SP_MATCHALL,
@@ -860,12 +861,7 @@ static jv obj_keys_like(js_vm *vm, jv o, int which) {
 /* ---- iteration, for the builtins that take an iterable ---- */
 
 /* {value, done}: an iterator's result */
-static jv iter_result(js_vm *vm, jv v, int done) {
-    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    js_define(vm, r, A_VALUE, v, 0);
-    js_define(vm, r, A_DONE, jv_bool(done), 0);
-    return jv_obj(r);
-}
+static jv iter_result(js_vm *vm, jv v, int done) { return js_iter_result(vm, v, done); }
 /* every value an iterable gives, pushed onto the array out: 0 when it threw */
 static int iterate_into(js_vm *vm, jv v, uint32_t out) {
     jv it = js_iter_of(vm, v);
@@ -1069,6 +1065,151 @@ void js_run_jobs(js_vm *vm) {
     vm->in_jobs = 0;
 }
 
+/* ---- async generators (ECMA-262 27.6) ----
+   Each request (next, throw or return, with its value and promise) joins the queue; the
+   body answers the first one at each yield, at its end and when it throws. A request
+   resumes the body only when it is suspended at a yield (or not yet started); one that
+   comes while the body runs or awaits waits its turn. */
+
+static void ag_enqueue(js_vm *vm, uint32_t g, int mode, jv v, uint32_t p) {
+    uint32_t q = vm->objs[g].c;
+    if (!q) { q = js_array_new(vm, 0); vm->objs[g].c = q; }
+    js_array_push(vm, q, jv_num(mode));
+    js_array_push(vm, q, v);
+    js_array_push(vm, q, jv_obj(p));
+}
+
+void js_ag_complete(js_vm *vm, uint32_t g, int rejected, jv v, int done) {
+    uint32_t q = vm->objs[g].c;
+    if (!q || vm->objs[q].b < 3) return;
+    uint32_t p = jv_idx(js_array_get(vm, q, 2));
+    /* the request taken off the queue before its promise settles (which may run code) */
+    uint32_t n = vm->objs[q].b, base = vm->objs[q].a;
+    for (uint32_t i = 3; i < n; i++) vm->slots[base + i - 3] = vm->slots[base + i];
+    js_array_set_length(vm, q, n - 3);
+    if (rejected) js_promise_settle(vm, p, 1, v);
+    else js_promise_resolve_with(vm, p, js_iter_result(vm, v, done));
+}
+
+/* a return that came once the body was done (or before it began): its value awaited,
+   then its request answered {value, true}, or rejected with the value's rejection */
+static void ag_await_return(js_vm *vm, uint32_t g) {
+    uint32_t q = vm->objs[g].c;
+    uint32_t pr = js_promise_of(vm, js_array_get(vm, q, 1));
+    uint32_t ok = js_native_new(vm, N_AG_RETURN_OK, A_EMPTY, 1);
+    vm->objs[ok].x = jv_obj(g);
+    uint32_t err = js_native_new(vm, N_AG_RETURN_ERR, A_EMPTY, 1);
+    vm->objs[err].x = jv_obj(g);
+    js_promise_react(vm, pr, jv_obj(ok), jv_obj(err), JV_UNDEF, 0);
+}
+
+void js_ag_drain(js_vm *vm, uint32_t g) {
+    for (;;) {
+        uint32_t q = vm->objs[g].c;
+        if (!q || vm->objs[q].b < 3 || vm->objs[g].a != JG_DONE) return;
+        int mode = (int)jv_dbl(js_array_get(vm, q, 0));
+        if (mode == 2) { vm->objs[g].a = JG_AWAIT_RETURN; ag_await_return(vm, g); return; }
+        js_ag_complete(vm, g, mode == 1, mode == 1 ? js_array_get(vm, q, 1) : JV_UNDEF, 1);
+    }
+}
+
+/* next (mode 0), throw (1) or return (2) called on the generator: its promise p */
+static void ag_request(js_vm *vm, uint32_t g, int mode, jv v, uint32_t p) {
+    uint32_t st = vm->objs[g].a;
+    if (mode == 1 && st == JG_START) { vm->objs[g].a = JG_DONE; vm->objs[g].b = 0; st = JG_DONE; }
+    if (st == JG_DONE && mode != 2) {
+        if (mode == 1) js_promise_settle(vm, p, 1, v);
+        else js_promise_resolve_with(vm, p, js_iter_result(vm, JV_UNDEF, 1));
+        return;
+    }
+    ag_enqueue(vm, g, mode, v, p);
+    if (mode == 2 && (st == JG_START || st == JG_DONE)) {
+        vm->objs[g].a = JG_AWAIT_RETURN;
+        vm->objs[g].b = 0;
+        ag_await_return(vm, g);
+        return;
+    }
+    if (st != JG_START && st != JG_YIELD) return;
+    int done = 0;
+    js_gen_resume(vm, g, v, mode, &done);
+    if (vm->throwing == 1) {
+        /* the body could not be resumed (the stack is full): the request rejected */
+        jv e = vm->exception;
+        vm->throwing = 0;
+        vm->exception = JV_UNDEF;
+        vm->objs[g].a = JG_DONE;
+        vm->objs[g].b = 0;
+        js_ag_complete(vm, g, 1, e, 1);
+        js_ag_drain(vm, g);
+    }
+}
+
+/* %AsyncFromSyncIteratorPrototype%'s continuation (27.1.6.4): the step's value awaited,
+   the promise p resolved {v, done} then; when the value rejects, the sync iterator
+   closed first if it is not done and the step asks it (next and throw do) */
+static void afs_continue(js_vm *vm, uint32_t p, uint32_t it, jv value, int done, int close_on_reject) {
+    uint32_t vw = js_promise_of(vm, value);
+    uint32_t ok = js_native_new(vm, N_AFS_UNWRAP, A_EMPTY, 1);
+    vm->objs[ok].x = jv_bool(done);
+    jv on_err = JV_UNDEF;
+    if (!done && close_on_reject) {
+        uint32_t f = js_native_new(vm, N_AFS_CLOSE, A_EMPTY, 1);
+        vm->objs[f].x = jv_obj(it);
+        on_err = jv_obj(f);
+    }
+    js_promise_react(vm, vw, jv_obj(ok), on_err, jv_obj(p), 0);
+}
+
+/* the error a step threw: its promise's rejection */
+static void reject_with_exception(js_vm *vm, uint32_t p) {
+    if (vm->throwing != 1) return;
+    jv e = vm->exception;
+    vm->throwing = 0;
+    vm->exception = JV_UNDEF;
+    js_promise_settle(vm, p, 1, e);
+}
+
+/* a sync iterator's next, throw or return as an async iterator's: always a promise */
+static uint32_t afs_call(js_vm *vm, uint32_t it, int kind, jv arg) {
+    uint32_t p = js_promise_new(vm);
+    int mode = kind == 3 ? 0 : kind == 4 ? 2 : kind, has_arg = kind < 3;
+    jv value = JV_UNDEF;
+    int done = 1;
+    int r = js_iter_send(vm, it, mode, arg, has_arg, &value, &done);
+    if (r < 0) { reject_with_exception(vm, p); return p; }
+    if (r == 0 && mode == 2) { js_promise_resolve_with(vm, p, js_iter_result(vm, has_arg ? arg : JV_UNDEF, 1)); return p; }
+    if (r == 0) {
+        /* no throw: the iterator closed, then a TypeError for the protocol broken */
+        js_iter_close(vm, it);
+        if (vm->throwing) { reject_with_exception(vm, p); return p; }
+        uint32_t m = js_str_ascii(vm, "The iterator does not provide a 'throw' method.");
+        js_promise_settle(vm, p, 1, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+        return p;
+    }
+    afs_continue(vm, p, it, value, done, mode != 2);
+    return p;
+}
+
+int js_aiter_call(js_vm *vm, uint32_t rec, int kind, jv arg, jv *out) {
+    uint32_t src = vm->objs[rec].a;
+    *out = JV_UNDEF;
+    if (kind == 3) vm->objs[rec].b = 1;
+    if (vm->objs[rec].c == JI_FROM_SYNC) {
+        *out = jv_obj(afs_call(vm, src, kind, arg));
+        return vm->throwing ? -1 : 1;
+    }
+    jv it = jv_obj(src), m = vm->objs[rec].x;
+    if (kind != 0 && kind != 3) {
+        m = js_get(vm, it, kind == 1 ? A_THROW : A_RETURN);
+        if (vm->throwing) return -1;
+        if (jv_is_nullish(m)) return 0;
+    }
+    if (!js_is_callable(vm, m)) { js_type_error(vm, "is not a function", js_typeof(vm, m)); return -1; }
+    jv a1[1] = { arg };
+    *out = js_call(vm, m, it, a1, kind == 3 || kind == 4 ? 0 : 1);
+    return vm->throwing ? -1 : 1;
+}
+
 /* a combinator's element: its function's record [aggregate, index, called] */
 static jv promise_elem_fn(js_vm *vm, uint32_t id, uint32_t agg, uint32_t index) {
     uint32_t f = js_native_new(vm, id, A_EMPTY, 1);
@@ -1250,6 +1391,34 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         jv r = js_gen_resume(vm, jv_idx(thisv), a0, id == N_GEN_NEXT ? 0 : id == N_GEN_THROW ? 1 : 2, &done);
         if (vm->throwing) return JV_HOLE;
         return iter_result(vm, r, done);
+    }
+    /* ---- async generators ---- */
+    case N_AG_NEXT: case N_AG_RETURN: case N_AG_THROW: {
+        uint32_t p = js_promise_new(vm);
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ASYNCGEN) {
+            uint32_t m = js_str_ascii(vm, "next, return or throw called on something not an async generator");
+            js_promise_settle(vm, p, 1, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+            return jv_obj(p);
+        }
+        ag_request(vm, jv_idx(thisv), id == N_AG_NEXT ? 0 : id == N_AG_THROW ? 1 : 2, a0, p);
+        if (vm->throwing) return JV_HOLE;
+        return jv_obj(p);
+    }
+    case N_AG_RETURN_OK: case N_AG_RETURN_ERR: {
+        uint32_t g = jv_idx(vm->objs[jv_idx(callee)].x);
+        vm->objs[g].a = JG_DONE;
+        js_ag_complete(vm, g, id == N_AG_RETURN_ERR, a0, 1);
+        js_ag_drain(vm, g);
+        return JV_UNDEF;
+    }
+    case N_AFS_UNWRAP: return iter_result(vm, a0, vm->objs[jv_idx(callee)].x == JV_TRUE);
+    case N_AFS_CLOSE: {
+        /* IteratorClose with the rejection as its completion: what the closing throws is lost */
+        js_iter_close(vm, jv_idx(vm->objs[jv_idx(callee)].x));
+        if (vm->throwing == 2) return JV_HOLE;
+        vm->throwing = 0;
+        vm->exception = JV_UNDEF;
+        return js_throw(vm, a0);
     }
     /* ---- Promise ---- */
     case N_PROMISE: {
@@ -2508,6 +2677,8 @@ void js_builtins_init(js_vm *vm) {
     vm->iterator_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->symbol_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->generator_proto = js_obj_new(vm, JK_PLAIN, vm->iterator_proto);
+    vm->async_iterator_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->async_generator_proto = js_obj_new(vm, JK_PLAIN, vm->async_iterator_proto);
     vm->promise_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->global = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->global_lex = js_obj_new(vm, JK_PLAIN, 0);
@@ -2745,6 +2916,13 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, gp, "return", N_GEN_RETURN, 1);
     defn(vm, gp, "throw", N_GEN_THROW, 1);
     js_define(vm, gp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Generator")), JS_SHAPE_HIDDEN);
+    /* async iterators and async generators */
+    js_define(vm, vm->async_iterator_proto, JS_KEY_ASYNC_ITERATOR, jv_obj(js_native_new(vm, N_ITP_SELF, js_str_ascii(vm, "[Symbol.asyncIterator]"), 0)), JS_SHAPE_HIDDEN);
+    uint32_t agp = vm->async_generator_proto;
+    defn(vm, agp, "next", N_AG_NEXT, 1);
+    defn(vm, agp, "return", N_AG_RETURN, 1);
+    defn(vm, agp, "throw", N_AG_THROW, 1);
+    js_define(vm, agp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "AsyncGenerator")), JS_SHAPE_HIDDEN);
 
     /* Promise */
     uint32_t prc = ctor(vm, "Promise", N_PROMISE, 1, vm->promise_proto);

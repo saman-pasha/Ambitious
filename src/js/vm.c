@@ -855,7 +855,7 @@ static int js_func_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out) {
     if (k == JK_CLOSURE) {
         js_func f = vm->funcs[vm->objs[o].a];
         if (atom == A_PROTOTYPE && (f.flags & JF_GENERATOR)) {
-            uint32_t p = js_obj_new(vm, JK_PLAIN, vm->generator_proto);
+            uint32_t p = js_obj_new(vm, JK_PLAIN, (f.flags & JF_ASYNC) ? vm->async_generator_proto : vm->generator_proto);
             js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
             *out = jv_obj(p);
             return 1;
@@ -1529,6 +1529,78 @@ void js_iter_close(js_vm *vm, uint32_t it) {
     if (was) { vm->throwing = was; vm->exception = saved; }
 }
 
+jv js_iter_result(js_vm *vm, jv v, int done) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, A_VALUE, v, 0);
+    js_define(vm, r, A_DONE, jv_bool(done), 0);
+    return jv_obj(r);
+}
+
+/* a sync iterator sent next (mode 0), throw (1) or return (2), with arg when has_arg:
+   its result's value and done; 1 when sent, 0 when it has no such method, -1 when it
+   threw (a result that is not an object a TypeError) */
+int js_iter_send(js_vm *vm, uint32_t it, int mode, jv arg, int has_arg, jv *value, int *done) {
+    uint32_t src = vm->objs[it].a, im = vm->objs[it].c;
+    *value = JV_UNDEF;
+    *done = 1;
+    if (im == JI_GEN) {
+        int d = 0;
+        jv r = js_gen_resume(vm, src, arg, mode, &d);
+        if (vm->throwing) { vm->objs[it].b = 1; return -1; }
+        if (d) vm->objs[it].b = 1;
+        *value = r;
+        *done = d;
+        return 1;
+    }
+    if (im == JI_PROTOCOL) {
+        jv m = vm->objs[it].x;
+        if (mode != 0) {
+            m = js_get(vm, jv_obj(src), mode == 1 ? A_THROW : A_RETURN);
+            if (vm->throwing) return -1;
+            if (jv_is_nullish(m)) return 0;
+        }
+        if (!js_is_callable(vm, m)) { js_type_error(vm, "is not a function", js_typeof(vm, m)); return -1; }
+        jv a1[1] = { arg };
+        jv r = js_call(vm, m, jv_obj(src), a1, has_arg ? 1 : 0);
+        if (vm->throwing) return -1;
+        if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return -1; }
+        jv d = js_get(vm, r, A_DONE);
+        if (vm->throwing) return -1;
+        *done = js_truthy(vm, d);
+        *value = js_get(vm, r, A_VALUE);
+        return vm->throwing ? -1 : 1;
+    }
+    /* a builtin iterator: next alone */
+    if (mode != 0) return 0;
+    jv v = JV_UNDEF;
+    if (js_iter_step(vm, it, &v)) { *value = v; *done = 0; return 1; }
+    return vm->throwing ? -1 : 1;
+}
+
+/* for await's and an async yield*'s iterator (GetIterator, async): a record of the
+   value's Symbol.asyncIterator's iterator and its next, else of its sync iterator,
+   seen as an async one */
+jv js_aiter_of(js_vm *vm, jv v) {
+    if (jv_is_nullish(v)) return js_type_error(vm, "is not async iterable", js_typeof(vm, v));
+    jv f = js_get(vm, v, JS_KEY_ASYNC_ITERATOR);
+    if (vm->throwing) return JV_HOLE;
+    if (jv_is_nullish(f)) {
+        if (!jv_is_obj(v) && !jv_is_str(v)) return js_type_error(vm, "is not async iterable", js_typeof(vm, v));
+        jv it = js_iter_of(vm, v);
+        if (vm->throwing) return JV_HOLE;
+        return jv_obj(js_iter_new(vm, jv_idx(it), JI_FROM_SYNC));
+    }
+    if (!js_is_callable(vm, f)) return js_type_error(vm, "is not a function: its Symbol.asyncIterator", js_typeof(vm, f));
+    jv it = js_call(vm, f, v, 0, 0);
+    if (vm->throwing) return JV_HOLE;
+    if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.asyncIterator method is not an object");
+    jv next = js_get(vm, it, A_NEXT);
+    if (vm->throwing) return JV_HOLE;
+    uint32_t rec = js_iter_new(vm, jv_idx(it), JI_ASYNC);
+    vm->objs[rec].x = next;
+    return jv_obj(rec);
+}
+
 /* ---- generators and async runs ----
    A suspended frame lives in its object's array: [pc, env, callee, argc, func, flags,
    this, new.target, arguments, handlers' count], then each try handler of the frame
@@ -1604,7 +1676,7 @@ jv js_gen_resume(js_vm *vm, uint32_t g, jv value, int mode, int *done) {
         uint32_t from = vm->objs[arr].a + JS_GEN_HEAD + 3 * nh;
         for (uint32_t i = 0; i < nstack; i++) stack[base + i] = slots[from + i];
         uint32_t sp = base + nstack;
-        if (st == JG_YIELD) { stack[sp] = value; stack[sp + 1] = jv_num(mode); sp += 2; }
+        if (st == JG_YIELD || st == JG_AWAIT) { stack[sp] = value; stack[sp + 1] = jv_num(mode); sp += 2; }
         vm->sp = sp;
     }
     js_frame *frames = data(vm->frames);
@@ -2632,6 +2704,14 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                     SYNC();
                     js_promise_resolve_with(vm, pr, r); RELOAD();
                     r = jv_obj(pr);
+                } else if (objs[gob].kind == JK_ASYNCGEN) {
+                    /* done: its request answered {r, true}, the requests left after it */
+                    objs[gob].a = JG_DONE;
+                    objs[gob].b = 0;
+                    SYNC();
+                    js_ag_complete(vm, gob, 0, r, 1); RELOAD();
+                    js_ag_drain(vm, gob); RELOAD();
+                    r = JV_UNDEF;
                 }
                 objs[gob].a = JG_DONE;
                 objs[gob].b = 0;
@@ -2970,7 +3050,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (op == OP_GEN_START) {
                 jv pv = js_get(vm, jv_obj(frames[fi].callee), A_PROTOTYPE); RELOAD();
                 if (vm->throwing) break;
-                uint32_t g = js_obj_new(vm, JK_GENERATOR, jv_is_obj(pv) ? jv_idx(pv) : vm->generator_proto); RELOAD();
+                int ag = (funcs[frames[fi].func].flags & JF_ASYNC) != 0;
+                uint32_t dp = ag ? vm->async_generator_proto : vm->generator_proto;
+                uint32_t g = js_obj_new(vm, ag ? JK_ASYNCGEN : JK_GENERATOR, jv_is_obj(pv) ? jv_idx(pv) : dp); RELOAD();
                 objs[g].x = jv_obj(frames[fi].callee);
                 frames[fi].gen = g;
                 js_gen_save(vm, fi, pc, sp); RELOAD();
@@ -2988,9 +3070,10 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 uint32_t p2 = js_promise_of(vm, v); RELOAD();
                 if (vm->throwing) break;
                 js_gen_save(vm, fi, pc, sp); RELOAD();
-                objs[g].a = JG_YIELD;
+                int ag = objs[g].kind == JK_ASYNCGEN;
+                objs[g].a = ag ? JG_AWAIT : JG_YIELD;
                 js_promise_react(vm, p2, JV_UNDEF, JV_UNDEF, jv_obj(g), 1); RELOAD();
-                r = jv_obj(objs[g].c);
+                r = ag ? JV_UNDEF : jv_obj(objs[g].c);
             }
             vm->nhandlers = frames[fi].handlers;
             vm->nframes = fi;
@@ -3092,6 +3175,159 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             stack[sp - 1] = r;
             goto next;
         }
+        case OP_AYIELD: {
+            /* an async generator's yield, its value awaited before: the first request
+               answered {v, false}; the next request's value and mode at once when one
+               waits, else the frame suspended until a request resumes it */
+            jv v = stack[--sp];
+            uint32_t g = frames[fi].gen;
+            SYNC();
+            js_ag_complete(vm, g, 0, v, 0); RELOAD();
+            if (vm->throwing) break;
+            uint32_t q = objs[g].c;
+            if (q && objs[q].b >= 3) {
+                stack[sp++] = slots[objs[q].a + 1];
+                stack[sp++] = slots[objs[q].a];
+                goto next;
+            }
+            js_gen_save(vm, fi, pc, sp); RELOAD();
+            objs[g].a = JG_YIELD;
+            vm->nhandlers = frames[fi].handlers;
+            vm->nframes = fi;
+            sp = frames[fi].sp0;
+            if (frames[fi].flags & JFR_NATIVE_ENTRY) { vm->sp = sp; return JV_UNDEF; }
+            stack[sp++] = JV_UNDEF;
+            fi--;
+            pc = frames[fi].pc;
+            base = frames[fi].base;
+            goto next;
+        }
+        case OP_ITER_ASYNC: {
+            SYNC();
+            jv r = js_aiter_of(vm, stack[sp - 1]); RELOAD();
+            if (vm->throwing) break;
+            stack[sp - 1] = r;
+            goto next;
+        }
+        case OP_ITER_ANEXT: {
+            jv out = JV_UNDEF;
+            SYNC();
+            js_aiter_call(vm, jv_idx(stack[sp - 1]), 3, JV_UNDEF, &out); RELOAD();
+            if (vm->throwing) break;
+            stack[sp++] = out;
+            goto next;
+        }
+        case OP_ITER_ARESULT: {
+            /* the step's result awaited: done ends the loop; its value, the record no longer mid-step */
+            uint32_t at = pc;
+            int32_t off = (int32_t)RD32(at);
+            pc = at + 4;
+            jv r = stack[sp - 1];
+            SYNC();
+            if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            jv d = js_get(vm, r, A_DONE); RELOAD();
+            if (vm->throwing) break;
+            int dn = js_truthy(vm, d); RELOAD();
+            if (dn) { sp -= 2; pc = (uint32_t)((int32_t)(at + 4) + off); goto next; }
+            jv v = js_get(vm, r, A_VALUE); RELOAD();
+            if (vm->throwing) break;
+            objs[jv_idx(stack[sp - 2])].b = 0;
+            stack[sp - 1] = v;
+            goto next;
+        }
+        case OP_ITER_ACLOSE: {
+            /* AsyncIteratorClose: return() called, its result left to await; nothing to
+               await when the record is mid-step (an error of its own), already closed,
+               has no return, or (quiet) its return threw */
+            uint32_t quiet = code[pc];
+            uint32_t at = pc + 1;
+            int32_t off = (int32_t)RD32(at);
+            pc = at + 4;
+            uint32_t ro = jv_idx(stack[--sp]);
+            if (objs[ro].b) { pc = (uint32_t)((int32_t)(at + 4) + off); goto next; }
+            objs[ro].b = 1;
+            jv out = JV_UNDEF;
+            SYNC();
+            int k = js_aiter_call(vm, ro, 4, JV_UNDEF, &out); RELOAD();
+            if (k < 0 && quiet && vm->throwing == 1) { vm->throwing = 0; vm->exception = JV_UNDEF; k = 0; }
+            if (vm->throwing) break;
+            if (k == 0) { pc = (uint32_t)((int32_t)(at + 4) + off); goto next; }
+            stack[sp++] = out;
+            goto next;
+        }
+        case OP_ITER_ACHECK: {
+            jv r = stack[--sp];
+            if (!jv_is_obj(r)) { SYNC(); js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            goto next;
+        }
+        case OP_AYS_STEP: {
+            /* an async yield*'s step: the inner iterator's next, throw or return called
+               with what the generator received */
+            uint32_t at = pc;
+            int32_t nr_off = (int32_t)RD32(at), nt_off = (int32_t)RD32(at + 4);
+            uint32_t nit = RD16(at + 8);
+            pc = at + 10;
+            double m = jv_dbl(stack[--sp]);
+            jv recv = stack[--sp];
+            uint32_t ro = jv_idx(stack[sp - 1]);
+            jv out = JV_UNDEF;
+            SYNC();
+            int k = js_aiter_call(vm, ro, (int)m, recv, &out); RELOAD();
+            if (vm->throwing) break;
+            if (k == 0 && m == 2) {
+                sp = base + funcs[frames[fi].func].nslots + nit;
+                stack[sp++] = recv;
+                pc = (uint32_t)((int32_t)(at + 4) + nr_off);
+                goto next;
+            }
+            if (k == 0) { pc = (uint32_t)((int32_t)(at + 8) + nt_off); goto next; }
+            stack[sp++] = jv_num(m);
+            stack[sp++] = out;
+            goto next;
+        }
+        case OP_AYS_RESULT: {
+            uint32_t at = pc;
+            int32_t d_off = (int32_t)RD32(at), r_off = (int32_t)RD32(at + 4);
+            uint32_t nit = RD16(at + 8);
+            pc = at + 10;
+            jv r = stack[sp - 1];
+            double m = jv_dbl(stack[sp - 2]);
+            SYNC();
+            if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            jv d = js_get(vm, r, A_DONE); RELOAD();
+            if (vm->throwing) break;
+            int dn = js_truthy(vm, d);
+            jv v = js_get(vm, r, A_VALUE); RELOAD();
+            if (vm->throwing) break;
+            if (!dn) { sp--; stack[sp - 1] = v; goto next; }
+            if (m == 2) {
+                sp = base + funcs[frames[fi].func].nslots + nit;
+                stack[sp++] = v;
+                pc = (uint32_t)((int32_t)(at + 8) + r_off);
+                goto next;
+            }
+            sp -= 2;
+            stack[sp - 1] = v;
+            pc = (uint32_t)((int32_t)(at + 4) + d_off);
+            goto next;
+        }
+        case OP_AYS_UNWRAP: {
+            uint32_t at = pc;
+            int32_t off = (int32_t)RD32(at);
+            pc = at + 4;
+            if (jv_dbl(stack[sp - 1]) != 2) { pc = (uint32_t)((int32_t)(at + 4) + off); goto next; }
+            sp--;
+            goto next;
+        }
+        case OP_AYS_RETMODE: {
+            stack[sp - 1] = jv_num(jv_dbl(stack[sp - 1]) == 0 ? 2 : 1);
+            goto next;
+        }
+        case OP_AYS_NOTHROW: {
+            SYNC();
+            js_throw_msg(vm, vm->type_error_proto, "The iterator does not provide a 'throw' method"); RELOAD();
+            break;
+        }
         case OP_NOP: goto next;
         /* every byte has its case (no default): the switch's jump has no range check */
         OP_UNUSED8(OP_NOPS) OP_UNUSED8(OP_NOPS + 8) OP_UNUSED8(OP_NOPS + 16) OP_UNUSED8(OP_NOPS + 24)
@@ -3116,23 +3352,33 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 for (int64_t f = fi; f >= lo && caught < 0; f--) {
                     uint32_t g = frames[f].gen;
                     if (!g) continue;
-                    if (objs[g].kind == JK_ASYNC && vm->throwing == 1) caught = f;
+                    if ((objs[g].kind == JK_ASYNC || objs[g].kind == JK_ASYNCGEN) && vm->throwing == 1) caught = f;
                     objs[g].a = JG_DONE;
                     objs[g].b = 0;
                 }
                 if (caught >= 0) {
+                    /* the frames above the run's dropped first: an async generator's request
+                       answered may run code (a then getter) */
                     uint32_t af = (uint32_t)caught;
-                    uint32_t g = frames[af].gen, pr = objs[g].c;
+                    uint32_t g = frames[af].gen, aflags = frames[af].flags, asp0 = frames[af].sp0;
                     jv e = vm->exception;
                     vm->throwing = 0;
                     vm->exception = JV_UNDEF;
-                    vm->sp = frames[af].sp0;
-                    js_promise_settle(vm, pr, 1, e); RELOAD();
                     vm->nhandlers = frames[af].handlers;
                     vm->nframes = af;
-                    sp = frames[af].sp0;
-                    if (frames[af].flags & JFR_NATIVE_ENTRY) { vm->sp = sp; return jv_obj(pr); }
-                    stack[sp++] = jv_obj(pr);
+                    vm->sp = asp0;
+                    jv res = JV_UNDEF;
+                    if (objs[g].kind == JK_ASYNC) {
+                        uint32_t pr = objs[g].c;
+                        js_promise_settle(vm, pr, 1, e); RELOAD();
+                        res = jv_obj(pr);
+                    } else {
+                        js_ag_complete(vm, g, 1, e, 1); RELOAD();
+                        js_ag_drain(vm, g); RELOAD();
+                    }
+                    sp = asp0;
+                    if (aflags & JFR_NATIVE_ENTRY) { vm->sp = sp; return res; }
+                    stack[sp++] = res;
                     fi = af - 1;
                     pc = frames[fi].pc;
                     base = frames[fi].base;

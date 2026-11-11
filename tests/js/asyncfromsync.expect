@@ -1,0 +1,16 @@
+g gave first
+g closed
+caught rejected value
+next {"value":1,"done":false}
+h closed
+throw rejected x
+next {"value":"v","done":false}
+return called
+throw TypeError: The iterator does not provide a 'throw' method.
+plain 10
+plain 20
+r gave a
+r closed
+next {"value":"a","done":false}
+r closed
+return {"value":"back","done":true}

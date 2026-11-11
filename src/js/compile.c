@@ -890,8 +890,8 @@ static uint32_t p_object(CC) {
                 uint32_t pos0 = cc->pos, line0 = cc->line;
                 lx(CCA);
                 if (!cc->tok.nl && !is_p(cc, P_LPAREN) && !is_p(cc, P_COMMA) && !is_p(cc, P_COLON) && !is_p(cc, P_RBRACE) && !is_p(cc, P_ASSIGN)) {
-                    if (is_p(cc, P_STAR)) { cc_error(cc, line, "async generator methods are not supported"); break; }
                     mfl = JF_ASYNC;
+                    if (is_p(cc, P_STAR)) { lx(CCA); mfl = JF_ASYNC | JF_GENERATOR; }
                 } else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
             }
             int computed;
@@ -1132,10 +1132,11 @@ static uint32_t p_primary(CC) {
                 lx(CCA);
                 if (!cc->tok.nl && is_kw(cc, K_FUNCTION)) {
                     lx(CCA);
-                    if (is_p(cc, P_STAR)) { cc_error(cc, line, "async generators are not supported"); return node(cc, N_HOLE, line); }
+                    uint32_t fl = JF_ASYNC;
+                    if (is_p(cc, P_STAR)) { lx(CCA); fl |= JF_GENERATOR; }
                     uint32_t name = 0;
                     if (cc->tok.type == T_NAME) { name = cc->tok.str; lx(CCA); }
-                    return p_function(CCA, name, JF_ASYNC, 0, line, start);
+                    return p_function(CCA, name, fl, 0, line, start);
                 }
                 if (!cc->tok.nl && is_p(cc, P_LPAREN) && p_is_arrow(CCA)) return p_paren_arrow(CCA, JF_ASYNC, line, start);
                 if (!cc->tok.nl && cc->tok.type == T_NAME && !cc->tok.aux) {
@@ -1532,8 +1533,8 @@ static uint32_t p_class(CC, int is_decl) {
             uint32_t pos0 = cc->pos, line0 = cc->line;
             lx(CCA);
             if (!cc->tok.nl && !is_p(cc, P_LPAREN) && !is_p(cc, P_ASSIGN) && !is_p(cc, P_SEMI) && !is_p(cc, P_RBRACE)) {
-                if (is_p(cc, P_STAR)) { cc_error(cc, mline, "async generator methods are not supported"); break; }
                 mfl = JF_ASYNC;
+                if (is_p(cc, P_STAR)) { lx(CCA); mfl = JF_ASYNC | JF_GENERATOR; }
             } else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
         }
         int computed;
@@ -1637,7 +1638,6 @@ static uint32_t p_block(CC) {
 /* a function declaration, its function keyword read (and async before it: flags) */
 static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start) {
     if (is_p(cc, P_STAR)) {
-        if (flags & JF_ASYNC) { cc_error(cc, line, "async generators are not supported"); return node(cc, N_EMPTY, line); }
         lx(CCA);
         flags |= JF_GENERATOR;
     }
@@ -1711,7 +1711,12 @@ static uint32_t p_stmt_in(CC) {
         }
         if (a == cc->kw[K_FOR]) {
             lx(CCA);
-            if (is_kw(cc, K_AWAIT)) { cc_error(cc, line, "for await is not supported"); return node(cc, N_EMPTY, line); }
+            int aw = 0;
+            if (is_kw(cc, K_AWAIT)) {
+                if (in_async(cc) != 1) { cc_error(cc, line, "for await outside an async function"); return node(cc, N_EMPTY, line); }
+                lx(CCA);
+                aw = 1;
+            }
             expect_p(CCA, P_LPAREN, "'(' after for");
             uint32_t saved = cc->cur_scope;
             uint32_t sc = scope_new(cc, SC_BLOCK);
@@ -1721,9 +1726,11 @@ static uint32_t p_stmt_in(CC) {
                 uint32_t kind = is_kw(cc, K_VAR) ? D_VAR : is_kw(cc, K_CONST) ? D_CONST : D_LET;
                 init = p_var(CCA, kind, 1, 0);
             } else if (!is_p(cc, P_SEMI)) init = p_expr(CCA, 1);
+            if (aw && !is_kw(cc, K_OF)) { cc_error(cc, line, "for await needs of"); return node(cc, N_EMPTY, line); }
             if (is_kw(cc, K_OF) || is_kw(cc, K_IN)) {
                 uint32_t n = node(cc, N_FORIN, line);
-                cc->nodes[n].op = is_kw(cc, K_OF) ? 1 : 0;
+                /* 0 for-in, 1 for-of, 2 for await */
+                cc->nodes[n].op = is_kw(cc, K_OF) ? (aw ? 2 : 1) : 0;
                 lx(CCA);
                 if (cc->nodes[init].k != N_VAR) init = to_pattern(CCA, init);
                 cc->nodes[n].a = init;
@@ -2054,7 +2061,11 @@ static void unwind_to(CC, size_t depth, int for_return) {
         jctx c = cc->ctx[i - 1];
         if (c.kind == CX_ENV && (!for_return || ctx_below(cc, i - 1, CX_FINALLY))) emit(vm, OP_LEAVE_ENV);
         else if (c.kind == CX_LOOP && c.label == 1 && (!for_return || ctx_below(cc, i - 1, CX_ITER))) emit(vm, OP_POP);
-        else if (c.kind == CX_ITER) { emit(vm, OP_END_TRY); emit(vm, OP_ITER_CLOSE); emit(vm, 0); }
+        else if (c.kind == CX_ITER) {
+            emit(vm, OP_END_TRY);
+            if (c.label) gen_aclose(vm, 0);
+            else { emit(vm, OP_ITER_CLOSE); emit(vm, 0); }
+        }
         else if (c.kind == CX_TRY) emit(vm, OP_END_TRY);
         else if (c.kind == CX_FINALLY) {
             emit(vm, OP_END_TRY);
@@ -2082,6 +2093,40 @@ static uint32_t stack_iters(js_cc *cc) {
     return n;
 }
 
+/* the value on top awaited: the frame suspended until it settles, then its value (its
+   rejection thrown here) */
+static void gen_await(js_vm *vm) {
+    emit(vm, OP_AWAIT);
+    emit(vm, OP_GEN_RESUME);
+    emit32(vm, 0);
+    emit16(vm, 0);
+}
+
+/* a for await's (or an async yield*'s) iterator closed: its return called and the
+   result awaited (a TypeError unless an object); quiet on an exception's way out,
+   where what the closing throws or rejects with is lost */
+static void gen_aclose(js_vm *vm, int quiet) {
+    emit(vm, OP_ITER_ACLOSE);
+    emit(vm, (uint32_t)quiet);
+    uint32_t skip = here(vm);
+    emit32(vm, 0);
+    emit(vm, OP_AWAIT);
+    if (quiet) { emit(vm, OP_POP); emit(vm, OP_POP); }
+    else {
+        emit(vm, OP_GEN_RESUME);
+        emit32(vm, 0);
+        emit16(vm, 0);
+        emit(vm, OP_ITER_ACHECK);
+    }
+    patch_to(vm, skip, here(vm));
+}
+
+/* the function being generated is an async generator */
+static int gen_is_async_gen(js_cc *cc) {
+    uint32_t f = cc->fns[cc->gen_fn].flags;
+    return (f & JF_ASYNC) && (f & JF_GENERATOR);
+}
+
 /* the value on top returned, at a statement's stack: the way out run first */
 static void gen_return_top(CC) {
     if (has_finally(cc)) {
@@ -2093,6 +2138,63 @@ static void gen_return_top(CC) {
         emit16(vm, tmp);
     }
     emit(vm, OP_RETURN);
+}
+
+/* an async generator's yield: its value awaited, then the first request answered;
+   resumed by a request, its value (next), an exception at the yield (throw), or a
+   return, whose value is awaited before the way out is run */
+static void gen_ayield(CC, uint32_t a) {
+    if (a) gen_expr(CCA, a);
+    else emit(vm, OP_UNDEF);
+    gen_await(vm);
+    emit(vm, OP_AYIELD);
+    uint32_t r = jump_fwd(vm, OP_GEN_RESUME);
+    emit16(vm, stack_iters(cc));
+    uint32_t after = jump_fwd(vm, OP_JMP);
+    patch_to(vm, r, here(vm));
+    gen_await(vm);
+    gen_return_top(CCA);
+    patch_to(vm, after, here(vm));
+}
+
+/* an async generator's yield*: the inner async iterator (or a sync one seen as async)
+   sent what each request brings, each result awaited and its value yielded as it is;
+   a return's value awaited before it goes in; an inner without throw closed, then a
+   TypeError; a return with no inner return to take it: its value awaited, the way out
+   run; one the inner finished: its value as it is (V8's, one await fewer) */
+static void gen_ayield_star(CC, uint32_t a) {
+    uint32_t nit = stack_iters(cc);
+    gen_expr(CCA, a);
+    emit(vm, OP_ITER_ASYNC);
+    emit(vm, OP_UNDEF);
+    emit_num(vm, 0);
+    uint32_t loop = here(vm);
+    emit(vm, OP_AYS_STEP);
+    uint32_t at_noret = here(vm);
+    emit32(vm, 0);
+    uint32_t at_nothrow = here(vm);
+    emit32(vm, 0);
+    emit16(vm, nit);
+    gen_await(vm);
+    emit(vm, OP_AYS_RESULT);
+    uint32_t at_done = here(vm);
+    emit32(vm, 0);
+    uint32_t at_ret = here(vm);
+    emit32(vm, 0);
+    emit16(vm, nit);
+    emit(vm, OP_AYIELD);
+    jump_to(vm, OP_AYS_UNWRAP, loop);
+    emit(vm, OP_AWAIT);
+    emit(vm, OP_AYS_RETMODE);
+    jump_to(vm, OP_JMP, loop);
+    patch_to(vm, at_nothrow, here(vm));
+    gen_aclose(vm, 0);
+    emit(vm, OP_AYS_NOTHROW);
+    patch_to(vm, at_noret, here(vm));
+    gen_await(vm);
+    patch_to(vm, at_ret, here(vm));
+    gen_return_top(CCA);
+    patch_to(vm, at_done, here(vm));
 }
 
 static uint32_t binop_of(uint32_t p) {
@@ -2605,6 +2707,11 @@ static void gen_expr(CC, uint32_t n) {
     case N_YIELD: {
         /* resumed: its value (next), an exception at it (throw), or a return from it
            (return), the stack cut to its statement's and the way out run */
+        if (gen_is_async_gen(cc)) {
+            if (e.op == 1) gen_ayield_star(CCA, e.a);
+            else gen_ayield(CCA, e.a);
+            return;
+        }
         if (e.op == 1) {
             /* yield*: each step the inner iterator's, sent what this one was sent */
             gen_expr(CCA, e.a);
@@ -2638,10 +2745,7 @@ static void gen_expr(CC, uint32_t n) {
     }
     case N_AWAIT:
         gen_expr(CCA, e.a);
-        emit(vm, OP_AWAIT);
-        emit(vm, OP_GEN_RESUME);
-        emit32(vm, 0);
-        emit16(vm, 0);
+        gen_await(vm);
         return;
     case N_SPREAD: cc_error(cc, e.line, "'...' only spreads in a call, an array or an object"); return;
     case N_HOLE: emit(vm, OP_UNDEF); return;
@@ -2749,6 +2853,7 @@ static void gen_jump(CC, uint32_t n, int is_break) {
     if (is_break) {
         if (c.kind == CX_LOOP && c.label == 1) emit(vm, OP_POP);
         else if (c.kind == CX_LOOP && c.label == 2) { emit(vm, OP_END_TRY); emit(vm, OP_ITER_CLOSE); emit(vm, 0); }
+        else if (c.kind == CX_LOOP && c.label == 3) { emit(vm, OP_END_TRY); gen_aclose(vm, 0); }
         cc->ctx[t - 1].brk = chain_add(vm, OP_JMP, cc->ctx[t - 1].brk);
     } else if (c.has_cont) jump_to(vm, OP_JMP, c.cont_pc);
     else cc->ctx[t - 1].cont = chain_add(vm, OP_JMP, cc->ctx[t - 1].cont);
@@ -2946,15 +3051,22 @@ static void gen_stmt(CC, uint32_t n) {
         /* a for-of's iterator closed when the loop is left early: a break, a return or a
            continue past it (unwind_to), an exception (its handler, which loses an error
            the closing throws, and throws the exception on) */
+        /* for await: each step's result awaited; its iterator closed the async way */
         uint32_t sc = s.s;
+        int aw = s.op == 2;
         gen_expr(CCA, s.b);
-        emit(vm, s.op ? OP_ITER_OF : OP_ITER_IN);
+        emit(vm, aw ? OP_ITER_ASYNC : s.op ? OP_ITER_OF : OP_ITER_IN);
         uint32_t h = 0;
-        if (s.op) { h = jump_fwd(vm, OP_TRY); ctx_push(cc, CX_ITER, 0, 0); }
+        if (s.op) { h = jump_fwd(vm, OP_TRY); ctx_push(cc, CX_ITER, 0, (uint32_t)aw); }
         uint32_t top = here(vm);
-        gen_loop_ctx(cc, s.op ? 2 : 1, top, 1);
+        gen_loop_ctx(cc, aw ? 3 : s.op ? 2 : 1, top, 1);
         size_t me = len(cc->ctx) - 1;
-        uint32_t done = jump_fwd(vm, OP_ITER_NEXT);
+        uint32_t done;
+        if (aw) {
+            emit(vm, OP_ITER_ANEXT);
+            gen_await(vm);
+            done = jump_fwd(vm, OP_ITER_ARESULT);
+        } else done = jump_fwd(vm, OP_ITER_NEXT);
         gen_block_enter(CCA, sc);
         jn left = cc->nodes[s.a];
         if (left.k == N_VAR) gen_pattern(CCA, cc->nodes[cc->lists[left.a]].a, 1);
@@ -2971,17 +3083,21 @@ static void gen_stmt(CC, uint32_t n) {
             uint32_t end = jump_fwd(vm, OP_JMP);
             patch_to(vm, h, here(vm));
             emit(vm, OP_SWAP);
-            emit(vm, OP_ITER_CLOSE);
-            emit(vm, 1);
+            if (aw) gen_aclose(vm, 1);
+            else { emit(vm, OP_ITER_CLOSE); emit(vm, 1); }
             emit(vm, OP_THROW);
             patch_to(vm, end, here(vm));
         }
         return;
     }
     case N_RETURN: {
-        if (s.a && !has_finally(cc) && (cc->nodes[s.a].k == N_COND || local_slot1(cc, s.a))) { gen_return_value(CCA, s.a); return; }
-        if (s.a) gen_expr(CCA, s.a);
-        else emit(vm, OP_UNDEF);
+        /* an async generator's return awaits its value */
+        int ag = gen_is_async_gen(cc);
+        if (s.a && !ag && !has_finally(cc) && (cc->nodes[s.a].k == N_COND || local_slot1(cc, s.a))) { gen_return_value(CCA, s.a); return; }
+        if (s.a) {
+            gen_expr(CCA, s.a);
+            if (ag) gen_await(vm);
+        } else emit(vm, OP_UNDEF);
         gen_return_top(CCA);
         return;
     }
@@ -3077,7 +3193,7 @@ static void gen_function(CC, uint32_t f) {
         emit(vm, OP_RETURN_UNDEF);
     } else {
         /* an async function's promise is made before its parameters are (their errors reject it) */
-        if (F.flags & JF_ASYNC) emit(vm, OP_ASYNC_START);
+        if ((F.flags & JF_ASYNC) && !(F.flags & JF_GENERATOR)) emit(vm, OP_ASYNC_START);
         if (cc->scopes[fs].has_env) { emit(vm, OP_ENTER_ENV); emit16(vm, cc->scopes[fs].nenv); }
         for (uint32_t d = cc->scopes[fs].first; d; d = cc->decls[d].next) {
             jdecl x = cc->decls[d];

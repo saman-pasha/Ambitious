@@ -1,0 +1,74 @@
+tag [object AsyncGenerator] function true
+proto true function true
+not a constructor TypeError
+a promise true
+throw at start boom
+caught in gen rejected yield
+A A1
+return at start {"value":"early","done":true}
+next after return {"done":true}
+b first {"value":1,"done":false}
+finally ran
+finally ran
+finally ran
+bad1 {"value":1,"done":false}
+bad2 TypeError body threw
+bad3 {"done":true}
+f1 {"value":"body","done":false}
+A A2
+A return called
+counter 0
+return at yield {"value":"stop","done":true}
+b after {"done":true}
+y1 {"value":"recovered","done":false}
+y2 {"done":true}
+o {"value":"i1","done":false}
+inner got sent
+return awaits {"value":"awaited value","done":true}
+B B1
+B return called
+throw at yield inside
+f2 {"value":"in finally","done":false}
+after finally yield
+inner finally
+B caught stop
+counter 1
+f3 {"value":"ret","done":true}
+o {"value":"i2","done":false}
+C C11
+f4 {"done":true}
+fwd return {"value":"r","done":true}
+C1 return called
+yield* value inner done
+array [1,2,3]
+counter 2
+C C21
+echo {"done":false} {"value":"one","done":false} {"value":"two","done":false} {"value":"stopped","done":true} {"done":true}
+inner finally
+sync gen x
+C2 return called
+o {"value":10,"done":false}
+outer caught t
+sync gen y
+D return called
+fwd throw {"value":"after catch","done":false}
+next {"value":0,"done":false}
+o {"value":20,"done":false}
+fwd next {"done":true}
+D returned D1
+E E1
+for await caught rej
+E E2
+next {"value":1,"done":false}
+E E3
+methods ["o1","o2",2,4,6,0,1]
+o {"value":"last","done":false}
+next {"value":"end","done":true}
+o {"done":true}
+expression named
+next {"done":true}
+o {"done":true}
+string hi
+queued [{"value":"a","done":false},{"value":"b","done":false},{"value":"c","done":false},{"done":true}]
+order g0 t1 v1 g1 t2 t3 v2 g2 t4 loop end t5 t6
+sync order u1 a1 u2 u3 a2 u4 u5 a end
