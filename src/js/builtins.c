@@ -2,9 +2,10 @@
    global functions, each native a case of js_native_call's switch.
 
    What is here: Object, Function, Array, String, Number, Boolean, Math, JSON, Error
-   and its kinds, Map, Set, Date (in virtual time), console, performance.now, the
-   timers, parseInt and parseFloat. RegExp objects keep their source and flags, and
-   their methods throw: the engine has no regular expressions yet. */
+   and its kinds, Map, Set, Symbol, Promise, generators' methods, Date (in virtual
+   time), console, performance.now, the timers, queueMicrotask, parseInt and
+   parseFloat. RegExp and String's methods over it are src/js/regexp.c's, reached
+   through the native ids from N_RE_FIRST. */
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
@@ -16,7 +17,7 @@ enum {
     N_PARSE_INT, N_PARSE_FLOAT, N_IS_NAN, N_IS_FINITE, N_EVAL,
     /* constructors */
     N_OBJECT, N_FUNCTION, N_ARRAY, N_STRING, N_NUMBER, N_BOOLEAN, N_ERROR, N_TYPE_ERROR, N_RANGE_ERROR, N_SYNTAX_ERROR,
-    N_REFERENCE_ERROR, N_EVAL_ERROR, N_DATE, N_REGEXP, N_MAP, N_SET, N_SYMBOL,
+    N_REFERENCE_ERROR, N_EVAL_ERROR, N_DATE, N_MAP, N_SET, N_SYMBOL,
     /* Object */
     N_OBJ_KEYS, N_OBJ_VALUES, N_OBJ_ENTRIES, N_OBJ_ASSIGN, N_OBJ_CREATE, N_OBJ_GETPROTO, N_OBJ_SETPROTO, N_OBJ_DEFPROP,
     N_OBJ_DEFPROPS, N_OBJ_NAMES, N_OBJ_FREEZE, N_OBJ_ISFROZEN, N_OBJ_FROMENTRIES, N_OBJ_GETOWNDESC, N_OBJ_IS, N_OBJ_PREVENTEXT,
@@ -49,14 +50,16 @@ enum {
     N_SET_TIMEOUT, N_SET_INTERVAL, N_CLEAR_TIMEOUT, N_QUEUE_MICROTASK,
     /* Map, Set, RegExp, iterators */
     N_MP_GET, N_MP_SET, N_MP_HAS, N_MP_DELETE, N_MP_CLEAR, N_MP_SIZE, N_MP_FOREACH, N_MP_KEYS, N_MP_VALUES, N_MP_ENTRIES,
-    N_SETP_ADD, N_SETP_FOREACH, N_SETP_VALUES, N_SETP_ENTRIES, N_RP_TEST, N_RP_EXEC, N_RP_TOSTRING, N_ITP_NEXT,
+    N_SETP_ADD, N_SETP_FOREACH, N_SETP_VALUES, N_SETP_ENTRIES, N_ITP_NEXT,
     /* Symbol, generators, promises */
     N_SYM_FOR, N_SYM_KEYFOR, N_SYMP_TOSTRING, N_SYMP_VALUEOF, N_SYMP_DESC, N_OBJ_GETOWNSYMS, N_ITP_SELF,
     N_GEN_NEXT, N_GEN_RETURN, N_GEN_THROW,
     N_PROMISE, N_PR_RESOLVE_FN, N_PR_REJECT_FN, N_PRP_THEN, N_PRP_CATCH, N_PRP_FINALLY, N_PR_FIN_OK, N_PR_FIN_ERR,
     N_PR_THUNK_VALUE, N_PR_THUNK_THROW, N_PR_RESOLVE, N_PR_REJECT, N_PR_ALL, N_PR_ALLSETTLED, N_PR_RACE, N_PR_ANY,
-    N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER,
-    N_LAST
+    N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER, N_SP_MATCHALL,
+    /* RegExp's natives (src/js/regexp.c), JRE_N of them */
+    N_RE_FIRST,
+    N_LAST = N_RE_FIRST + JRE_N
 };
 
 /* ---- helpers ---- */
@@ -187,20 +190,53 @@ static uint32_t str_trim(js_vm *vm, uint32_t s, int start, int end) {
     return js_str_sub(vm, s, a, b);
 }
 
+/* a code point as UTF-16 */
+static void put_cp(vector<uint16_t> *u, uint32_t c) {
+    if (c > 0xFFFF) { push_back(*u, (uint16_t)(0xD800 + ((c - 0x10000) >> 10))); push_back(*u, (uint16_t)(0xDC00 + ((c - 0x10000) & 0x3FF))); }
+    else push_back(*u, (uint16_t)c);
+}
+/* the code point at i (a pair whole), *w its width */
+static uint32_t cp_at(js_vm *vm, uint32_t o, uint32_t n, uint32_t i, uint32_t *w) {
+    uint32_t c = vm->units[o + i];
+    *w = 1;
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && vm->units[o + i + 1] >= 0xDC00 && vm->units[o + i + 1] <= 0xDFFF) {
+        *w = 2;
+        return 0x10000 + ((c - 0xD800) << 10) + (vm->units[o + i + 1] - 0xDC00u);
+    }
+    return c;
+}
+static int cased(uint32_t c) { return js_uni_lower(c) != c || js_uni_upper(c) != c; }
+
+/* toUpperCase and toLowerCase: Unicode's full mappings (SpecialCasing's that hold
+   everywhere), and a final sigma lowercased as one */
 static uint32_t str_case(js_vm *vm, uint32_t s, int upper) {
     js_str_flatten(vm, s);
     uint32_t n = vm->strs[s].len, o = vm->strs[s].off;
     vector<uint16_t> u;
     for (uint32_t i = 0; i < n; i++) {
-        uint16_t c = vm->units[o + i];
-        if (upper) {
-            if (c >= 'a' && c <= 'z') c = (uint16_t)(c - 32);
-            else if ((c >= 0xE0 && c <= 0xFE && c != 0xF7)) c = (uint16_t)(c - 32);
-        } else {
-            if (c >= 'A' && c <= 'Z') c = (uint16_t)(c + 32);
-            else if ((c >= 0xC0 && c <= 0xDE && c != 0xD7)) c = (uint16_t)(c + 32);
+        uint32_t c = vm->units[o + i];
+        if (c < 128) {
+            if (upper && c >= 'a' && c <= 'z') c -= 32;
+            else if (!upper && c >= 'A' && c <= 'Z') c += 32;
+            push_back(u, (uint16_t)c);
+            continue;
         }
-        push_back(u, c);
+        uint32_t w = 1;
+        c = cp_at(vm, o, n, i, &w);
+        uint32_t out[3];
+        uint32_t k = js_uni_special(c, upper, out);
+        if (!k) {
+            out[0] = upper ? js_uni_upper(c) : js_uni_lower(c);
+            k = 1;
+            if (!upper && c == 0x3A3) {
+                /* a capital sigma after a cased letter and before none is a word's final one */
+                int before = i > 0 && cased(vm->units[o + i - 1]);
+                int after = i + 1 < n && cased(vm->units[o + i + 1]);
+                if (before && !after) out[0] = 0x3C2;
+            }
+        }
+        for (uint32_t j = 0; j < k; j++) put_cp(&u, out[j]);
+        i += w - 1;
     }
     return js_str_new(vm, data(u), len(u));
 }
@@ -232,7 +268,6 @@ static void replacement(js_vm *vm, uint32_t rep, uint32_t s, uint32_t pos, uint3
 }
 
 static jv str_replace(js_vm *vm, uint32_t s, jv pat, jv rep, int all) {
-    if (jv_is_obj(pat) && vm->objs[jv_idx(pat)].kind == JK_REGEXP) return js_throw_msg(vm, vm->type_error_proto, "replace with a regular expression is not supported");
     uint32_t p = js_to_string(vm, pat);
     if (!p) return JV_HOLE;
     int fn = js_is_callable(vm, rep);
@@ -1233,15 +1268,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         vm->objs[o].x = jv_num(t);
         return jv_obj(o);
     }
-    case N_REGEXP: {
-        uint32_t o = js_obj_new(vm, JK_REGEXP, vm->regexp_proto);
-        uint32_t src = jv_is_str(a0) ? jv_idx(a0) : js_to_string(vm, a0);
-        if (!src) return JV_HOLE;
-        js_define(vm, o, js_atom_ascii(vm, "source"), jv_str(src), JS_SHAPE_HIDDEN);
-        js_define(vm, o, js_atom_ascii(vm, "flags"), jv_is_str(a1) ? a1 : jv_str(A_EMPTY), JS_SHAPE_HIDDEN);
-        js_define(vm, o, A_LASTINDEX, jv_num(0), JS_SHAPE_HIDDEN);
-        return jv_obj(o);
-    }
     case N_MAP: case N_SET: {
         uint32_t kind = id == N_MAP ? JK_MAP : JK_SET;
         uint32_t c = coll_new(vm, kind, kind == JK_MAP ? vm->map_proto : vm->set_proto);
@@ -1824,6 +1850,16 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     default: break;
     }
     /* the rest of String.prototype: this a string */
+    /* RegExp, and String's methods over regular expressions (src/js/regexp.c) */
+    if (id >= N_RE_FIRST && id < N_RE_FIRST + JRE_N) return js_re_native(vm, id - N_RE_FIRST, callee, thisv, args, argc, newt);
+    if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
+    if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
+    if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
+    if ((id == N_SP_SPLIT || id == N_SP_REPLACE || id == N_SP_REPLACEALL) && jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP) {
+        if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "String.prototype method called on null or undefined");
+        uint32_t which = id == N_SP_SPLIT ? JRE_SP_SPLIT : id == N_SP_REPLACE ? JRE_SP_REPLACE : JRE_SP_REPLACEALL;
+        return js_re_native(vm, which, callee, thisv, args, argc, newt);
+    }
     if (id >= N_SP_CHARAT && id <= N_SP_SEARCH) {
         uint32_t s = this_str(vm, thisv);
         if (!s) return JV_HOLE;
@@ -1923,7 +1959,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             double lim = a1 == JV_UNDEF ? 4294967295.0 : js_to_number(vm, a1);
             if (lim == 0) return jv_obj(out);
             if (a0 == JV_UNDEF) { js_array_push(vm, out, jv_str(s)); return jv_obj(out); }
-            if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP) return js_throw_msg(vm, vm->type_error_proto, "split with a regular expression is not supported");
             uint32_t sep = js_to_string(vm, a0);
             if (!sep) return JV_HOLE;
             uint32_t m = vm->strs[sep].len;
@@ -1957,7 +1992,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return jv_num(js_str_cmp(vm, s, t));
         }
         case N_SP_NORMALIZE: return jv_str(s);
-        case N_SP_MATCH: case N_SP_SEARCH: return js_throw_msg(vm, vm->type_error_proto, "match and search need regular expressions, which are not supported");
         default: break;
         }
     }
@@ -2205,14 +2239,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         else { js_array_push(vm, arr, key); js_array_push(vm, arr, a1); vm->objs[c].b++; }
         return thisv;
     }
-    case N_RP_TEST: case N_RP_EXEC: return js_throw_msg(vm, vm->type_error_proto, "regular expressions are not supported");
-    case N_RP_TOSTRING: {
-        jv s = js_get(vm, thisv, js_atom_ascii(vm, "source")), f = js_get(vm, thisv, js_atom_ascii(vm, "flags"));
-        uint32_t ss = js_to_string(vm, s), fs = js_to_string(vm, f);
-        if (!ss || !fs) return JV_HOLE;
-        uint32_t sl = js_str_ascii(vm, "/");
-        return jv_str(js_str_concat(vm, js_str_concat(vm, js_str_concat(vm, sl, ss), sl), fs));
-    }
     case N_ITP_NEXT: {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER) return js_throw_msg(vm, vm->type_error_proto, "next called on something not an iterator");
         jv v = JV_UNDEF;
@@ -2405,10 +2431,8 @@ void js_builtins_init(js_vm *vm) {
     static const char *const dun[] = { "getUTCFullYear", "getUTCMonth", "getUTCDate", "getUTCDay", "getUTCHours", "getUTCMinutes", "getUTCSeconds", "getUTCMilliseconds" };
     for (uint32_t i = 0; i < 8; i++) { defn(vm, dp, dn[i], N_DP_GETFULLYEAR + i, 0); defn(vm, dp, dun[i], N_DP_GETFULLYEAR + i, 0); }
 
-    ctor(vm, "RegExp", N_REGEXP, 2, vm->regexp_proto);
-    defn(vm, vm->regexp_proto, "test", N_RP_TEST, 1);
-    defn(vm, vm->regexp_proto, "exec", N_RP_EXEC, 1);
-    defn(vm, vm->regexp_proto, "toString", N_RP_TOSTRING, 0);
+    js_re_init(vm, N_RE_FIRST);
+    defn(vm, vm->string_proto, "matchAll", N_SP_MATCHALL, 1);
 
     ctor(vm, "Map", N_MAP, 0, vm->map_proto);
     uint32_t mp = vm->map_proto;

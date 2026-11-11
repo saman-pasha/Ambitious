@@ -413,13 +413,24 @@ static void lx(CC) {
 }
 
 /* a regular expression literal, its slash at start: re-read as one */
+/* a line terminator at i (LF, CR, and U+2028 and U+2029 in UTF-8), which no regular
+   expression literal holds */
+static int lx_line_term(const char *src, uint32_t srcn, uint32_t i) {
+    if (src[i] == '\n' || src[i] == '\r') return 1;
+    return (uint8_t)src[i] == 0xE2 && i + 2 < srcn && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9);
+}
+
 static void lx_regex(CC, uint32_t start) {
     uint32_t i = start + 1;
     int cls = 0;
     for (;;) {
-        if (i >= srcn || src[i] == '\n') { cc_error(cc, cc->line, "an unterminated regular expression"); break; }
+        if (i >= srcn || lx_line_term(src, srcn, i)) { cc_error(cc, cc->line, "an unterminated regular expression"); break; }
         char c = src[i];
-        if (c == '\\') { i += 2; continue; }
+        if (c == '\\') {
+            if (i + 1 >= srcn || lx_line_term(src, srcn, i + 1)) { cc_error(cc, cc->line, "an unterminated regular expression"); break; }
+            i += 2;
+            continue;
+        }
         if (c == '[') cls = 1;
         else if (c == ']') cls = 0;
         else if (c == '/' && !cls) break;
@@ -1058,6 +1069,16 @@ static uint32_t p_primary(CC) {
         uint32_t n = node(cc, N_REGEX, line);
         cc->nodes[n].s = cc->tok.str;
         cc->nodes[n].a = cc->tok.aux;
+        {
+            /* a literal's pattern is compiled with the script: its errors are early ones */
+            vector<char> rerr;
+            uint32_t re = 0;
+            if (!cc->err && js_re_check(vm, cc->tok.str, cc->tok.aux, &re, &rerr)) {
+                push_back(rerr, 0);
+                cc_error(cc, line, data(rerr));
+            }
+            cc->nodes[n].b = re;
+        }
         lx(CCA);
         return n;
     }
@@ -2471,15 +2492,7 @@ static void gen_expr(CC, uint32_t n) {
         }
         return;
     }
-    case N_REGEX:
-        emit_atom_ic(vm, OP_GET_GLOBAL, js_atom_ascii(vm, "RegExp"));
-        emit(vm, OP_STR);
-        emit32(vm, e.s);
-        emit(vm, OP_STR);
-        emit32(vm, e.a);
-        emit(vm, OP_NEW);
-        emit16(vm, 2);
-        return;
+    case N_REGEX: emit(vm, OP_REGEXP); emit32(vm, e.b); return;
     case N_IDENT: gen_ident_get(CCA, n); return;
     case N_THIS: emit(vm, OP_THIS); return;
     case N_NEW_TARGET: emit(vm, OP_NEW_TARGET); return;

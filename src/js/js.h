@@ -176,6 +176,21 @@ enum { JSYM_NONE, JSYM_ITERATOR, JSYM_ASYNC_ITERATOR, JSYM_HAS_INSTANCE, JSYM_IS
 typedef struct js_job { uint32_t kind, mode, run; jv fn, arg, target; } js_job;
 enum { JOB_REACTION, JOB_RESUME, JOB_THENABLE, JOB_CALL };
 
+/* a regular expression compiled (src/js/regexp.c): its program's place in vm->re_code,
+   its groups (the whole match's the first), its flags' bits, its source (an atom), its
+   groups' names (an array of strings by group, 0 for none), the character every match
+   begins with (plus 1, 0 for none), its loops' registers, whether it matches only at
+   the input's start; and the characters a match can begin with, when they are known
+   (filter): the ASCII ones a bitmap, high when any beyond ASCII can; the literal every
+   match begins with when it is two characters or more (npre of them at pre in
+   re_code, then its 256 Horspool skips); lead, the place of a leading greedy loop
+   whose run a failed try may be passed over by (plus 1) */
+typedef struct js_regex {
+    uint32_t code, len, ngroups, flags, source, names, first, nregs, anchored;
+    uint32_t filter, fb0, fb1, fb2, fb3, high;
+    uint32_t pre, npre, lead;
+} js_regex;
+
 /* a console message, a script's error, an event listener: what the page's facts say */
 typedef struct js_msg { uint32_t level, text; } js_msg;
 /* a listener: its target (a node's index, or JS_WINDOW), its event type (an atom), its
@@ -223,6 +238,12 @@ typedef struct js_vm {
     vector<uint32_t> rejected;        /* the promises rejected with no handler yet, each with its run (pairs), checked at each checkpoint */
     uint32_t in_jobs;                 /* a checkpoint running: another waits for it */
     uint32_t has_instance;            /* a Symbol.hasInstance key was ever given a property: instanceof looks for it */
+    vector<js_regex> regexes;         /* the regular expressions compiled, each once for its source and flags */
+    vector<uint32_t> re_code;         /* their programs */
+    vector<uint32_t> re_hash;         /* (source, flags) -> regex, open addressing */
+    vector<uint32_t> re_stack;        /* the matcher's backtrack stack */
+    vector<uint32_t> re_caps;         /* the last match's slots: two a group */
+    vector<uint32_t> re_regs;         /* the matcher's loop registers */
     vector<uint32_t> lookup;          /* a (shape, atom) -> slot cache for the slow path */
     vector<char> out;                 /* scratch text: what a native writes */
     uint32_t global, global_lex;      /* the global object; the global lexical bindings */
@@ -246,6 +267,7 @@ typedef struct js_vm {
     uint32_t host_kinds;
     uint32_t natoms, nroots, ntrans;
     uint32_t digit_strs[10];
+    uint32_t int_strs[1024];          /* the strings of 0 .. 1023, each made at its first use */
     uint32_t sp, nframes, nhandlers;
     int echo;                         /* the console written to stdout as well (ambitious js) */
     struct js_host *host;             /* the page, while one of its scripts runs; 0 with no page */
@@ -261,7 +283,9 @@ typedef struct js_vm {
     vector_js_handler_drop(&(v).handlers); vector_js_timer_drop(&(v).timers); vector_js_msg_drop(&(v).msgs); \
     vector_js_listener_drop(&(v).listeners); vector_uint32_t_drop(&(v).lookup); vector_char_drop(&(v).out); \
     vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms); vector_js_sym_drop(&(v).syms); \
-    vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected)
+    vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected); vector_js_regex_drop(&(v).regexes); \
+    vector_uint32_t_drop(&(v).re_code); vector_uint32_t_drop(&(v).re_hash); vector_uint32_t_drop(&(v).re_stack); \
+    vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -319,6 +343,26 @@ void js_job_push(js_vm *vm, uint32_t kind, uint32_t mode, jv fn, jv arg, jv targ
 void js_run_jobs(js_vm *vm);
 /* the phase an error a microtask threw is reported in (the script module's promise phase) */
 #define JS_PHASE_PROMISE 3u
+
+/* regular expressions (src/js/regexp.c): a pattern compiled (its flags' bits), 0 with a
+   SyntaxError thrown; a literal's checked as the compiler reads it (0 well formed, its
+   regex in *re; else the error's text); a regex run on a string from an index (1 a match,
+   its slots in vm->re_caps; 0 none; -1 the step budget spent); a literal's object made;
+   the natives' cases, after the first's id */
+enum { JRE_CTOR, JRE_EXEC, JRE_TEST, JRE_TOSTRING, JRE_SOURCE, JRE_FLAGS, JRE_GLOBAL, JRE_IGNORECASE, JRE_MULTILINE,
+       JRE_DOTALL, JRE_UNICODE, JRE_UNICODESETS, JRE_STICKY, JRE_HASINDICES, JRE_MATCH, JRE_MATCHALL, JRE_REPLACE,
+       JRE_SEARCH, JRE_SPLIT, JRE_SP_MATCH, JRE_SP_MATCHALL, JRE_SP_REPLACE, JRE_SP_REPLACEALL, JRE_SP_SEARCH,
+       JRE_SP_SPLIT, JRE_N };
+uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags);
+int js_re_check(js_vm *vm, uint32_t src, uint32_t flags_str, uint32_t *re, vector<char> *err);
+jv js_re_object(js_vm *vm, uint32_t re);
+int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start);
+jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_re_init(js_vm *vm, uint32_t first);
+/* Unicode's simple case mappings, and the full ones of more than one code point (their count, into out) */
+uint32_t js_uni_upper(uint32_t c);
+uint32_t js_uni_lower(uint32_t c);
+uint32_t js_uni_special(uint32_t c, int upper, uint32_t *out);
 
 /* strings */
 uint32_t js_str_new(js_vm *vm, const uint16_t *u, size_t n);
@@ -504,6 +548,7 @@ enum {
                                                      return called; quiet: an error that throws is lost) */
     OP_DESTRUCT_ARR,                              /* u16 n: v -> an array pattern's array: v if an array, else the
                                                      first n values its iterator gives (0xFFFF: all), it closed */
+    OP_REGEXP,                                    /* u32 regex: a literal's RegExp object, its pattern compiled with the script */
     OP_NOP,
     OP_NOPS
 };

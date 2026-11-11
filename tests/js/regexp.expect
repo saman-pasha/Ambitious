@@ -1,0 +1,53 @@
+true false true
+["2024","01","15"]
+3 2024 03 2024-03
+["a","b","","c"] ["a","b","c"] ["a","1","b","2","c","3",""]
+hell0 w0rld Smith, John
+XaXaXaX [a]bc
+x1y3z Price: $5
+["1@1","22@3","333@6"]
+STRASSE 2 οδος ǆ
+ABC false true false true
+42 17 true 2
+["b",null,"b"] ["b",null]
+DEF αβγ 1
+true false 2 true
+true false true
+1 2 2 3 null 0
+/a\/b/g gimsuy a\/b (?:) \n
+1 -1 aaa aa
+SyntaxError Invalid regular expression: /(/: Unterminated group
+SyntaxError Invalid flags supplied to RegExp constructor 'gg'
+true true -a-b-c-
+true false true true true
+["a","a","a"] null 1
+ababab ["abcd","a","bcd",""] ["ab","b",null]
+the quick brown abx
+[1,2] [1,2] [1,2]
+true false 2
+|𝒳|𝒴| ba true
+true true true false true true
+[b|a|$3|a0|a] abbc acac
+2 $<n> |$<n
+ababc ["ab",null] ["zaacbbbcac","z","ac","a",null,"c"]
+XXX ["a","b"]
+true true true hi
+["one","two","three"] ["one"] [] [""] []
+dd true true
+[] true false  (?:)
+true object [object RegExp] g i
+false 0 true 2
+bb bbbb a-b-c
+TypeError
+TypeError
+true true true true
+["",""] [""] 2 ["","",""]
+a ["abc","a","a",null,"bc",null,"bc"]
+["",null] ["",""] ["abc","b"] aab
+["ss","ss"] 2 s
+true false 1
+AB
+camel_case_string trim me
+["555","1234"] 1234 true
+["a","b"] true true true true true true
+true a true true true true

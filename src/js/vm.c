@@ -95,12 +95,16 @@ uint32_t js_str_concat(js_vm *vm, uint32_t a, uint32_t b) {
     memset(&r, 0, sizeof r);
     r.len = la + lb;
     if (la + lb <= 24) {
+        /* a short one copied flat: the units grown once, then written through their borrow */
         js_str_flatten(vm, a);
         js_str_flatten(vm, b);
-        r.off = (uint32_t)len(vm->units);
         uint32_t oa = vm->strs[a].off, ob = vm->strs[b].off;
-        for (uint32_t i = 0; i < la; i++) push_back(vm->units, vm->units[oa + i]);
-        for (uint32_t i = 0; i < lb; i++) push_back(vm->units, vm->units[ob + i]);
+        size_t at = len(vm->units);
+        resize(vm->units, at + la + lb, 0);
+        uint16_t *u = data(vm->units);
+        for (uint32_t i = 0; i < la; i++) u[at + i] = u[oa + i];
+        for (uint32_t i = 0; i < lb; i++) u[at + la + i] = u[ob + i];
+        r.off = (uint32_t)at;
         return js_str_push(vm, r);
     }
     r.rope = 1;
@@ -685,6 +689,23 @@ void js_num_format(double d, char *buf, size_t cap) {
 
 uint32_t js_num_to_str(js_vm *vm, double d) {
     if (d >= 0 && d < 10 && d == trunc(d)) return vm->digit_strs[(int)d];
+    /* an integer's digits written here (snprintf's are slower), the small ones' strings kept */
+    if (d == trunc(d) && fabs(d) < 9007199254740992.0 && !(d == 0 && signbit(d))) {
+        if (d >= 0 && d < 1024) {
+            uint32_t k = (uint32_t)d;
+            if (vm->int_strs[k]) return vm->int_strs[k];
+        }
+        char buf[24];
+        uint32_t at = sizeof buf;
+        int64_t v = (int64_t)d;
+        uint64_t u = v < 0 ? (uint64_t)(-v) : (uint64_t)v;
+        buf[--at] = 0;
+        do { buf[--at] = (char)('0' + u % 10); u /= 10; } while (u);
+        if (v < 0) buf[--at] = '-';
+        uint32_t s = js_str_utf8(vm, buf + at, sizeof buf - 1 - at);
+        if (d >= 0 && d < 1024) vm->int_strs[(uint32_t)d] = s;
+        return s;
+    }
     char buf[64];
     js_num_format(d, buf, sizeof buf);
     return js_str_ascii(vm, buf);
@@ -2917,6 +2938,14 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 if (quiet && vm->throwing == 1) { vm->throwing = 0; vm->exception = JV_UNDEF; }
             }
             if (vm->throwing) break;
+            goto next;
+        }
+        case OP_REGEXP: {
+            uint32_t re = RD32(pc);
+            pc += 4;
+            SYNC();
+            jv r = js_re_object(vm, re); RELOAD();
+            stack[sp++] = r;
             goto next;
         }
         case OP_DESTRUCT_ARR: {
