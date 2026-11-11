@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>DOM interop</title>
+</head>
+<body>
+<div id="a">first <b>bold</b></div>
+<ul><li>one</li><li class="x">two</li><li>three</li></ul>
+<div id="b"></div>
+<p id="c" class="start">para</p>
+<label for="box">a box</label><input id="box" type="checkbox">
+<button id="go" onclick="console.log('onclick attribute', this.id, event.type)">go</button>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  document.addEventListener('DOMContentLoaded', function () { console.log('DOMContentLoaded', document.readyState); });
+  window.addEventListener('load', function () { console.log('load', document.readyState); });
+  setTimeout(function () { console.log('timeout 100'); }, 100);
+  setTimeout(function () { console.log('timeout 50'); }, 50);
+  p('readyState', document.readyState);
+
+  var a = document.getElementById('a');
+  p('getElementById', a.tagName + ' ' + a.id + ' ' + a.textContent + ' ' + a.childNodes.length + ' ' + a.children.length);
+  p('missing', document.getElementById('nope'));
+  p('querySelector', document.querySelector('ul > li.x').textContent + ' ' + document.querySelector('li:last-child').textContent);
+  var odd = document.querySelectorAll('li:nth-child(odd)');
+  p('querySelectorAll', document.querySelectorAll('li').length + ' ' + Array.prototype.map.call(odd, function (e) { return e.textContent; }).join(','));
+  p('byTag', document.getElementsByTagName('li').length + ' ' + document.getElementsByClassName('x').length);
+  p('nodes', a.nodeType + ' ' + a.nodeName + ' ' + a.firstChild.nodeType + ' ' + a.firstChild.nodeName + ' ' + JSON.stringify(a.firstChild.textContent));
+  p('siblings', a.nextElementSibling.tagName + ' ' + a.firstElementChild.tagName + ' ' + a.lastChild.textContent + ' ' + (a.parentNode === document.body));
+
+  a.textContent = 'changed';
+  p('textContent', a.textContent + ' ' + a.childNodes.length + ' ' + a.firstChild.nodeType);
+
+  a.setAttribute('data-x', '1');
+  p('setAttribute', a.getAttribute('data-x') + ' ' + a.hasAttribute('data-x') + ' ' + a.dataset.x + ' ' + a.getAttribute('nope'));
+  a.removeAttribute('data-x');
+  p('removeAttribute', a.getAttribute('data-x') + ' ' + a.hasAttribute('data-x'));
+  a.id = 'a2';
+  p('id', a.id + ' ' + a.getAttribute('id') + ' ' + (document.getElementById('a2') === a));
+
+  var ul = document.querySelector('ul');
+  var li = document.createElement('li');
+  li.textContent = 'new';
+  ul.appendChild(li);
+  p('appendChild', ul.children.length + ' ' + ul.lastElementChild.textContent + ' ' + (li.parentNode === ul) + ' ' + li.tagName);
+  var first = document.createElement('LI');
+  first.textContent = 'first';
+  ul.insertBefore(first, ul.firstElementChild);
+  p('insertBefore', ul.firstElementChild.textContent + ' ' + first.tagName);
+  ul.removeChild(first);
+  p('removeChild', ul.firstElementChild.textContent + ' ' + first.parentNode + ' ' + ul.contains(first) + ' ' + ul.contains(li));
+  var b = document.getElementById('b');
+  b.appendChild(li);
+  p('move', ul.children.length + ' ' + b.children.length + ' ' + b.lastChild.textContent);
+  b.append('text', document.createElement('span'));
+  p('append', b.childNodes.length + ' ' + b.lastChild.nodeName);
+  b.lastChild.remove();
+  p('remove', b.childNodes.length);
+
+  var c = document.getElementById('c');
+  c.classList.add('one', 'two');
+  c.classList.remove('one');
+  c.classList.toggle('three');
+  p('classList', c.className + ' ' + c.classList.contains('two') + ' ' + c.classList.contains('one') + ' ' + c.classList.length + ' ' + c.classList.item(0));
+  c.className = 'reset';
+  p('className', c.classList.length + ' ' + c.classList.toggle('reset') + ' ' + JSON.stringify(c.className));
+
+  c.style.color = 'red';
+  c.style.backgroundColor = 'blue';
+  p('style', c.style.color + ' ' + c.style.backgroundColor + ' ' + c.getAttribute('style'));
+  c.style.color = '';
+  p('style cleared', JSON.stringify(c.getAttribute('style')));
+
+  b.innerHTML = '<em>x</em> and <strong title="t">y</strong>';
+  p('innerHTML', b.children.length + ' ' + b.innerHTML + ' ' + b.querySelector('strong').title);
+  p('outerHTML', document.querySelector('em').outerHTML);
+
+  var log = [];
+  document.body.addEventListener('click', function (e) { log.push('body-bubble:' + e.target.id + ':' + e.eventPhase); });
+  document.body.addEventListener('click', function (e) { log.push('body-capture:' + e.eventPhase); }, true);
+  c.addEventListener('click', function (e) { log.push('c:' + e.eventPhase + ':' + (e.currentTarget === c) + ':' + (this === c)); });
+  c.addEventListener('click', function () { log.push('once'); }, { once: true });
+  c.click();
+  c.click();
+  p('events', log.join(' '));
+  log = [];
+  var stopper = function (e) { log.push('stop'); e.stopPropagation(); };
+  c.addEventListener('click', stopper);
+  c.click();
+  c.removeEventListener('click', stopper);
+  p('stopPropagation', log.join(' '));
+  var ev = new Event('custom', { bubbles: true, cancelable: true });
+  var got = [];
+  document.addEventListener('custom', function (e) { got.push('doc'); e.preventDefault(); });
+  c.addEventListener('custom', function (e) { got.push('c:' + e.type + ':' + e.bubbles); });
+  var notCancelled = c.dispatchEvent(ev);
+  p('dispatchEvent', got.join(' ') + ' ' + notCancelled + ' ' + ev.defaultPrevented);
+
+  var box = document.getElementById('box');
+  var changes = [];
+  box.addEventListener('change', function () { changes.push('change:' + box.checked); });
+  document.querySelector('label').click();
+  p('label click', box.checked + ' ' + changes.join(' '));
+  box.click();
+  p('checkbox click', box.checked + ' ' + changes.join(' '));
+
+  document.getElementById('go').click();
+  var t = document.createTextNode('txt');
+  p('text node', t.nodeType + ' ' + t.nodeName + ' ' + t.textContent + ' ' + t.parentNode);
+  p('closest', b.querySelector('em').closest('div').id + ' ' + b.matches('div#b') + ' ' + b.matches('p'));
+  p('document', document.title + ' ' + document.body.tagName + ' ' + document.documentElement.tagName + ' ' + document.head.tagName + ' ' + document.nodeType);
+  try { ul.appendChild(document.body); } catch (e) { p('hierarchy', e.name); }
+  try { document.querySelector(''); } catch (e) { p('bad selector', e.name); }
+  p('instanceof', (a instanceof Element) + ' ' + (a instanceof Node) + ' ' + (t instanceof Text) + ' ' + (document instanceof Document));
+  p('window', (window === this) + ' ' + (window.document === document) + ' ' + typeof window.setTimeout);
+</script>
+</body>
+</html>

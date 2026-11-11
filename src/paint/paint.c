@@ -30,6 +30,8 @@ amb_interface(net);
 static void pt_fill(amb_canvas *c, double x0, double y0, double x1, double y1, uint32_t rgba) {
     uint32_t a = rgba & 0xff;
     if (a == 0) return;
+    y0 -= c->oy;
+    y1 -= c->oy;
     int ix0 = (int)floor(x0 + 0.5), iy0 = (int)floor(y0 + 0.5), ix1 = (int)floor(x1 + 0.5), iy1 = (int)floor(y1 + 0.5);
     if (ix0 < 0) ix0 = 0;
     if (iy0 < 0) iy0 = 0;
@@ -111,7 +113,7 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
                     vector<float> *acc, vector<uint8_t> *mask, const char *s, size_t n, double x, double baseline,
                     int face, double size, int italic, uint32_t rgba) {
     uint32_t ca = rgba & 0xff, r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
-    int by = (int)floor(baseline + 0.5);
+    int by = (int)floor(baseline - c->oy + 0.5);
     size_t i = 0;
     while (i < n) {
         uint32_t cp = amb_utf8_next(s, n, &i);
@@ -144,6 +146,7 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
    bilinearly and blended by their alpha */
 static void pt_image(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh) {
     if (dw <= 0 || dh <= 0 || w == 0 || h == 0) return;
+    y0 -= c->oy;
     int ix0 = (int)floor(x0 + 0.5), iy0 = (int)floor(y0 + 0.5), ix1 = (int)floor(x0 + dw + 0.5), iy1 = (int)floor(y0 + dh + 0.5);
     for (int y = iy0 < 0 ? 0 : iy0; y < iy1 && y < (int)c->h; y++)
         for (int x = ix0 < 0 ? 0 : ix0; x < ix1 && x < (int)c->w; x++) {
@@ -208,6 +211,8 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
                 continue;
             }
             if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER) continue;
+            /* a fragment outside the canvas's window: nothing of it to draw */
+            if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
             amb_span sp = t->frag[fr].text;
             double size = t->frag[fr].size, base = t->frag[fr].baseline;
             uint32_t color = t->frag[fr].color;
@@ -230,14 +235,20 @@ static void pt_tree(const layout_tree *t, const net_loader *nt, uint32_t b, amb_
     for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) pt_tree(t, nt, ch, c, skip_bg, f, entries, table, masks, acc, mask);
 }
 
-void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) {
+/* the page drawn onto c, its window from page y oy down at most maxh px (the page's
+   own height when shorter) */
+static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, double oy, double maxh) {
     amb_fonts f = {0};
     defer(f) { AMB_FONTS_DROP(f); }
     amb_fonts_load(&f);
     uint32_t vp = 0;
     for (uint32_t b = 1; b < t->box_len && !vp; b++) if (t->box[b].live && t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) vp = b;
     double w = vp ? t->box[vp].w : 800, h = vp ? t->box[vp].h : 600;
-    if (h > 16384) h = 16384;
+    if (oy < 0) oy = 0;
+    h -= oy;
+    if (h > maxh) h = maxh;
+    if (h < 1) h = 1;
+    c->oy = oy;
     c->w = (uint32_t)ceil(w);
     c->h = (uint32_t)ceil(h);
     clear(c->px);
@@ -261,6 +272,10 @@ void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) {
     resize(&table, 1024);
     if (vp) pt_tree(t, nt, vp, c, skip, &f, &entries, &table, &masks, &acc, &mask);
 }
+
+void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) { pt_paint(t, nt, c, 0, 16384); }
+
+void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h) { pt_paint(t, nt, c, y, h); }
 
 uint64_t amb_canvas_hash(const amb_canvas *c) {
     uint64_t h = 1469598103934665603ull;

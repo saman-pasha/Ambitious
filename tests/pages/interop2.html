@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>DOM interop, more</title>
+</head>
+<body>
+<div id="host"><p class="item" data-kind="a">alpha</p><p class="item" data-kind="b">beta</p></div>
+<button id="btn">press</button>
+<input id="field" value="start">
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var host = document.getElementById('host');
+  var first = host.firstElementChild;
+
+  var copy = first.cloneNode(true);
+  copy.textContent = 'gamma';
+  host.appendChild(copy);
+  var shallow = first.cloneNode(false);
+  p('cloneNode', host.children.length + ' ' + copy.className + ' ' + copy.dataset.kind + ' ' + shallow.childNodes.length + ' ' + (copy !== first));
+
+  var repl = document.createElement('section');
+  repl.textContent = 'replaced';
+  var old = host.replaceChild(repl, host.children[1]);
+  p('replaceChild', old.textContent + ' ' + host.children[1].tagName + ' ' + old.parentNode);
+
+  host.insertAdjacentHTML('beforeend', '<span>end</span>');
+  host.insertAdjacentHTML('afterbegin', '<span>begin</span>');
+  p('insertAdjacentHTML', host.firstElementChild.textContent + ' ' + host.lastElementChild.textContent + ' ' + host.children.length);
+
+  first.dataset.fooBar = 'x';
+  p('dataset', first.getAttribute('data-foo-bar') + ' ' + first.dataset.fooBar + ' ' + first.dataset.kind);
+  p('toggleAttribute', first.toggleAttribute('hidden') + ' ' + first.hidden + ' ' + first.toggleAttribute('hidden') + ' ' + first.hidden);
+  p('getAttributeNames', first.getAttributeNames().join(','));
+
+  first.style.setProperty('margin-left', '4px');
+  first.style.color = 'navy';
+  p('setProperty', first.style.getPropertyValue('margin-left') + ' ' + first.style.marginLeft + ' ' + first.style.removeProperty('color') + ' ' + first.getAttribute('style'));
+
+  first.classList.add('one');
+  p('classList.replace', first.classList.replace('one', 'two') + ' ' + first.className + ' ' + first.classList.replace('zzz', 'y'));
+
+  var btn = document.getElementById('btn');
+  var seen = [];
+  btn.onclick = function (e) { seen.push('prop:' + e.type); };
+  var h = function () { seen.push('listener'); };
+  btn.addEventListener('click', h);
+  btn.click();
+  btn.removeEventListener('click', h);
+  btn.click();
+  btn.onclick = null;
+  btn.click();
+  p('handlers', seen.join(' '));
+
+  var detail = null;
+  document.addEventListener('hello', function (e) { detail = e.detail.msg + ':' + (e.target === btn); });
+  btn.dispatchEvent(new CustomEvent('hello', { bubbles: true, detail: { msg: 'hi' } }));
+  p('CustomEvent', detail);
+
+  btn.addEventListener('click', function () { throw new Error('listener failed'); });
+  btn.addEventListener('click', function () { seen.push('after the error'); });
+  btn.click();
+  p('error in a listener', seen[seen.length - 1]);
+
+  var field = document.getElementById('field');
+  p('input value', field.value + ' ' + field.type);
+  field.value = 'typed';
+  p('value set', field.value + ' ' + field.getAttribute('value'));
+
+  document.title = 'changed title';
+  p('title', document.title + ' ' + document.querySelector('title').textContent);
+  p('document children', document.childNodes.length + ' ' + document.documentElement.children.length);
+  p('text ops', document.createTextNode('a').nodeValue + ' ' + host.firstChild.firstChild.data);
+
+  var frames = 0;
+  requestAnimationFrame(function step(t) { frames++; if (frames < 3) requestAnimationFrame(step); else console.log('frames', frames, typeof t); });
+  var ticks = 0;
+  var iv = setInterval(function () { ticks++; if (ticks === 3) { clearInterval(iv); console.log('interval cleared after', ticks); } }, 20);
+  window.onload = function () { console.log('window.onload', document.readyState); };
+</script>
+</body>
+</html>

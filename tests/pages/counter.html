@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Counter</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .done { color: green; font-weight: bold; }
+  .fake-button { display: inline-block; padding: 4px 8px; background: #ddd; }
+</style>
+</head>
+<body>
+<h1>Counter</h1>
+<p>Count: <span id="count">0</span></p>
+<button id="inc" type="button">Add one</button>
+<div id="reset" class="fake-button">Reset</div>
+<script>
+  var n = 0;
+  var out = document.getElementById('count');
+  document.getElementById('inc').addEventListener('click', function () {
+    n++;
+    out.textContent = String(n);
+    if (n >= 2) out.classList.add('done');
+  });
+  document.querySelector('#reset').addEventListener('click', function () {
+    n = 0;
+    out.textContent = '0';
+    out.classList.remove('done');
+  });
+  console.log('counter ready');
+</script>
+</body>
+</html>

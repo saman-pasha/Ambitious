@@ -11,6 +11,10 @@
  *   ambitious style PAGE          the page's elements with their computed styles
  *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
  *   ambitious js FILE             a script run by the JavaScript engine with no page
+ *   ambitious script PAGE         what the page's scripts did: each script and how it ended,
+ *                                 its console and errors, the listeners and timers at rest
+ *   ambitious click PAGE SELECTOR the same after a click at the first element SELECTOR matches
+ *   ambitious --click SELECTOR CMD PAGE ...   any page command after such a click (repeatable)
  *   ambitious bench PAGE [N]      each stage's time, over N runs, and the snapshot's
  *                                 size and the reasoner's time over it
  *   ambitious inspect PAGE [--query GOAL | --why GOAL]
@@ -58,9 +62,11 @@ amb_interface(net);
 amb_interface(css);
 amb_interface(layout);
 amb_interface(a11y);
+amb_interface(script);
 
 #include "../paint/paint.h"
 #include "../js/js.h"
+#include "../script/script.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -393,9 +399,13 @@ static int cmd_snapshot(const char *path) {
 
 /* ---- a page: fetched, parsed, its resources loaded, styled and laid out ---- */
 
-/* a page's five stores, declared in the caller's scope, where each is dropped */
-#define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax
-#define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax
+/* a page's stores, declared in the caller's scope, where each is dropped; and its
+   scripts' engine, its host pointed at the stores there (src/script/script.h) */
+#define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax; \
+    script_runtime sr; js_vm vm; struct js_host hs; SCRIPT_HOST(hs, vm, d, nt, sr); defer(vm) { JS_VM_DROP(vm); }
+#define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax, &sr, &vm
+/* the virtual time a page's timers run for before it is taken to be at rest, ms */
+#define SCRIPT_HORIZON 10000.0
 /* a page command's session: its files, the reasoner, the profile */
 #define PAGE_SESSION session s; if (!session_open(&s)) return 2
 
@@ -448,8 +458,26 @@ static void page_title(const dom_document *d, char *out, size_t cap) {
 
 /* the page's record in the loader, or 0 when it could not be fetched. With a
    profile: its site's denied kinds asked for first, the visit recorded after */
+/* the clicks asked for (--click SELECTOR, AMB_CLICKS a line each), each at the first
+   element its selector matches, after the page's scripts */
+static void page_clicks(const dom_document *d, js_vm *vm) {
+    const char *env = getenv("AMB_CLICKS");
+    if (!env || !*env) return;
+    vector<char> all;
+    append_range(all, env, strlen(env));
+    size_t i = 0;
+    while (i < len(all)) {
+        size_t e = i;
+        while (e < len(all) && all[e] != '\n') e++;
+        uint32_t x = e > i ? script_select(d, data(all) + i, e - i) : 0;
+        if (!x) fprintf(stderr, "ambitious: --click %.*s: no element matches\n", (int)(e - i), data(all) + i);
+        else script_click(vm, x, SCRIPT_HORIZON);
+        i = e + 1;
+    }
+}
+
 static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
-                          a11y_tree *ax) {
+                          a11y_tree *ax, script_runtime *sr, js_vm *vm) {
     char url[4200];
     page_url(page, url, sizeof url);
     dom_init(d, 1);
@@ -458,6 +486,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     layout_init(lt, 1);
     net_init(nt, 1);
     a11y_init(ax, 1);
+    script_init(sr, 1);
     net_resource_h ph = net_fetch(nt, url, strlen(url), NET_KIND_DOCUMENT);
     uint32_t pr = ph.index;
     if (nt->resource[pr].outcome != NET_OUTCOME_OK) {
@@ -483,6 +512,13 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
         }
     }
     net_fetch_subresources(nt, d, ph, denied);
+    /* the scripts (unless the site's are denied), the clicks asked for, then the page at rest */
+    vm->host->page = pr;
+    if (!(denied & (1u << NET_KIND_SCRIPT))) {
+        script_run_page(vm, SCRIPT_HORIZON);
+        page_clicks(d, vm);
+    }
+    script_settle(vm);
     css_cascade(st, d, nt);
     layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
     a11y_build(ax, d, st);
@@ -495,7 +531,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
 
 /* the page's snapshot: the document's section, the parse's, the style's, the layout's, the loader's */
 static int write_page_snapshot(const dom_document *d, const html_parser *p, const css_style *st, const layout_tree *lt, const net_loader *nt,
-                               const a11y_tree *ax, const char *path) {
+                               const a11y_tree *ax, const script_runtime *sr, const char *path) {
     own FILE *f = fopen(path, "w");
     if (!f) return 0;
     defer(f) { fclose(f); }
@@ -505,6 +541,7 @@ static int write_page_snapshot(const dom_document *d, const html_parser *p, cons
     layout_export(lt, f);
     net_export(nt, f);
     a11y_export(ax, f);
+    script_export(sr, f);
     return 1;
 }
 
@@ -600,10 +637,10 @@ static int cmd_bench(const char *page, int n) {
     PAGE_SESSION;
     char url[4200];
     page_url(page, url, sizeof url);
-    double t[9];
+    double t[12];
     memset(t, 0, sizeof t);
-    static const char *const stage[9] = { "fetch the page", "parse", "fetch its resources", "cascade", "layout", "accessibility tree",
-                                          "paint", "encode the PNG", "export the snapshot" };
+    static const char *const stage[12] = { "fetch the page", "parse", "fetch its resources", "scripts", "click", "cascade", "layout",
+                                           "accessibility tree", "paint", "paint the viewport", "encode the PNG", "export the snapshot" };
     size_t nodes = 0, boxes = 0, bytes = 0, snap_bytes = 0;
     char snap[700];
     session_path(&s, "bench.pl", snap, sizeof snap);
@@ -615,6 +652,7 @@ static int cmd_bench(const char *page, int n) {
         layout_init(&lt, 1);
         net_init(&nt, 1);
         a11y_init(&ax, 1);
+        script_init(&sr, 1);
         double a = now_ms();
         net_resource_h ph = net_fetch(&nt, url, strlen(url), NET_KIND_DOCUMENT);
         if (nt.resource[ph.index].outcome != NET_OUTCOME_OK) { fprintf(stderr, "ambitious: cannot load %s\n", url); return 2; }
@@ -625,6 +663,13 @@ static int cmd_bench(const char *page, int n) {
         double c = now_ms();
         net_fetch_subresources(&nt, &d, ph, 0);
         double e = now_ms();
+        vm.host->page = ph.index;
+        script_run_page(&vm, SCRIPT_HORIZON);
+        double e1 = now_ms();
+        page_clicks(&d, &vm);
+        double e2 = now_ms();
+        script_settle(&vm);
+        double e3 = now_ms();
         css_cascade(&st, &d, &nt);
         double f = now_ms();
         layout_run(&lt, &d, &st, &nt, VIEW_W, VIEW_H);
@@ -635,15 +680,19 @@ static int cmd_bench(const char *page, int n) {
         defer(cv) { AMB_CANVAS_DROP(cv); }
         amb_paint(&lt, &nt, &cv);
         double i = now_ms();
+        amb_canvas vw = {0};
+        defer(vw) { AMB_CANVAS_DROP(vw); }
+        amb_paint_view(&lt, &nt, &vw, 0, VIEW_H);
+        double i2 = now_ms();
         own FILE *nul = fopen("/dev/null", "wb");
         if (!nul) return 2;
         defer(nul) { fclose(nul); }
         amb_png_write(&cv, nul);
         double j = now_ms();
-        write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap);
+        write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, &sr, snap);
         double k = now_ms();
-        double dt[9] = { b - a, c - b, e - c, f - e, g - f, h - g, i - h, j - i, k - j };
-        for (int q = 0; q < 9; q++) t[q] += dt[q];
+        double dt[12] = { b - a, c - b, e - c, (e1 - e) + (e3 - e2), e2 - e1, f - e3, g - f, h - g, i - h, i2 - i, j - i2, k - j };
+        for (int q = 0; q < 12; q++) t[q] += dt[q];
         nodes = node_count(d);
         boxes = box_count(lt);
         bytes = len(src);
@@ -652,7 +701,8 @@ static int cmd_bench(const char *page, int n) {
     if (stat(snap, &sb) == 0) snap_bytes = (size_t)sb.st_size;
     printf("%s: %zu bytes, %zu nodes, %zu boxes; mean of %d run(s)\n", url, bytes, nodes, boxes, n);
     double total = 0;
-    for (int q = 0; q < 9; q++) { printf("  %-22s %9.2f ms\n", stage[q], t[q] / n); total += t[q] / n; }
+    /* the engine's total: every stage but the viewport's paint, which repeats the page's */
+    for (int q = 0; q < 12; q++) { if (q != 9) total += t[q] / n; printf("  %-22s %9.2f ms\n", stage[q], t[q] / n); }
     printf("  %-22s %9.2f ms\n", "the engine, in all", total);
     /* the reasoner, a process of its own: loading and checking the snapshot, then advising */
     char out[700];
@@ -702,7 +752,7 @@ static int cmd_inspect(const char *page, const char *mode, const char *goal) {
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
-    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap)) return 2;
+    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, &sr, snap)) return 2;
     printf("== diagnostics\n");
     if (reason(&s, "advise", snap, 0, out) != 0) return 2;
     print_file(out, "  ");
@@ -714,6 +764,69 @@ static int cmd_inspect(const char *page, const char *mode, const char *goal) {
     return 0;
 }
 
+/* an element as a reader names it: <tag id="..."> or <tag class="..."> */
+static void print_elem(const dom_document *d, dom_node_h h) {
+    uint32_t x = h.index;
+    if (!x || x >= d->node_len || !d->node[x].live || d->node[x].gen != h.gen) { printf("(a node gone)"); return; }
+    if (d->node[x].kind == DOM_NODE_KIND_DOCUMENT) { printf("the document"); return; }
+    if (d->node[x].kind != DOM_NODE_KIND_ELEMENT) { printf("a %s node", dom_node_kind_name(d->node[x].kind)); return; }
+    printf("<%s", names_ptr(d, d->node[x].name));
+    static const char *const shown[] = { "id", "class", "type", "src" };
+    for (size_t k = 0; k < 4; k++) {
+        uint32_t a = names_find(d, shown[k], strlen(shown[k]));
+        for (uint32_t at = d->node[x].first_attr; a && at; at = d->attr[at].next)
+            if (d->attr[at].name == a) { amb_span v = d->attr[at].value; printf(" %s=\"%.*s\"", shown[k], (int)v.len, text_ptr(d, v)); break; }
+    }
+    printf(">");
+}
+
+/* what the page's scripts did: each script and how it ended, what it wrote to the
+   console and threw, the listeners and the timers at rest */
+static int cmd_script(const char *page) {
+    PAGE_SESSION;
+    PAGE_STORES;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
+    size_t runs = 0, cons = 0, errs = 0, lsn = 0, tms = 0;
+    for (uint32_t r = 1; r < sr.run_len; r++) {
+        if (!sr.run[r].live) continue;
+        runs++;
+        printf("script %-3u %-9s %-12s ", r, script_source_name(sr.run[r].source), script_outcome_name(sr.run[r].outcome));
+        amb_span u = sr.run[r].url;
+        if (u.len) printf("%.*s", (int)u.len, text_ptr(&sr, u));
+        else print_elem(&d, sr.run[r].elem);
+        printf("\n");
+    }
+    for (uint32_t c = 1; c < sr.console_len; c++) {
+        if (!sr.console[c].live) continue;
+        cons++;
+        amb_span t = sr.console[c].text;
+        printf("console %-5s [%u] %.*s\n", script_level_name(sr.console[c].level), sr.console[c].run, (int)t.len, text_ptr(&sr, t));
+    }
+    for (uint32_t e = 1; e < sr.error_len; e++) {
+        if (!sr.error[e].live) continue;
+        errs++;
+        amb_span t = sr.error[e].message;
+        printf("error   %-6s [%u] %.*s\n", script_phase_name(sr.error[e].phase), sr.error[e].run, (int)t.len, text_ptr(&sr, t));
+    }
+    for (uint32_t l = 1; l < sr.listener_len; l++) {
+        if (!sr.listener[l].live) continue;
+        lsn++;
+        amb_span t = sr.listener[l].type;
+        printf("listen  %-16.*s [%u] ", (int)t.len, text_ptr(&sr, t), sr.listener[l].run);
+        if (sr.listener[l].on == SCRIPT_LISTEN_ON_WINDOW) printf("the window");
+        else print_elem(&d, sr.listener[l].target);
+        printf("%s\n", sr.listener[l].capture ? " (capture)" : "");
+    }
+    for (uint32_t t = 1; t < sr.timer_len; t++) {
+        if (!sr.timer[t].live) continue;
+        tms++;
+        printf("timer   %u ms %s [%u], fired %u, %s\n", sr.timer[t].delay, sr.timer[t].repeats ? "interval" : "timeout", sr.timer[t].run,
+               sr.timer[t].fired, script_timer_state_name(sr.timer[t].state));
+    }
+    printf("%zu scripts, %zu console messages, %zu errors, %zu listeners, %zu timers; %zu nodes\n", runs, cons, errs, lsn, tms, node_count(d));
+    return 0;
+}
+
 /* query, why, advise: the reasoner over the page's snapshot */
 static int cmd_reason(const char *what, const char *page, const char *goal, int apply) {
     PAGE_SESSION;
@@ -722,7 +835,7 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
-    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap)) return 2;
+    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, &sr, snap)) return 2;
     int rc = reason(&s, what, snap, goal, out);
     print_file(out, "");
     if (rc != 0) return rc;
@@ -776,6 +889,18 @@ int main(int argc, char **argv) {
     while (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') {
         if (strcmp(argv[1], "--private") == 0) { setenv("AMB_PRIVATE", "1", 1); argv++; argc--; continue; }
         if (strcmp(argv[1], "--profile") == 0 && argc >= 3) { setenv("AMB_PROFILE", argv[2], 1); argv += 2; argc -= 2; continue; }
+        if (strcmp(argv[1], "--click") == 0 && argc >= 3) {
+            /* a click after the page's scripts, at the first element the selector matches */
+            vector<char> all;
+            const char *had = getenv("AMB_CLICKS");
+            if (had && *had) { append_range(all, had, strlen(had)); push_back(all, '\n'); }
+            append_range(all, argv[2], strlen(argv[2]));
+            push_back(all, 0);
+            setenv("AMB_CLICKS", data(all), 1);
+            argv += 2;
+            argc -= 2;
+            continue;
+        }
         break;
     }
     if (argc >= 2 && strcmp(argv[1], "history") == 0) return cmd_profile("history", 0, 0, 0);
@@ -788,6 +913,16 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "retain") == 0) return cmd_profile("retain", argv[2], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "profile") == 0) return cmd_profile("query", argv[2], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "js") == 0) return cmd_js(argv[2]);
+    if (argc >= 3 && strcmp(argv[1], "script") == 0) return cmd_script(argv[2]);
+    if (argc >= 4 && strcmp(argv[1], "click") == 0) {
+        vector<char> all;
+        const char *had = getenv("AMB_CLICKS");
+        if (had && *had) { append_range(all, had, strlen(had)); push_back(all, '\n'); }
+        append_range(all, argv[3], strlen(argv[3]));
+        push_back(all, 0);
+        setenv("AMB_CLICKS", data(all), 1);
+        return cmd_script(argv[2]);
+    }
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "load") == 0) return cmd_load(argv[2]);

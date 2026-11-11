@@ -92,6 +92,7 @@ typedef struct js_cc {
     jtok tok, prev;
     uint32_t pos, line, cur_fn, cur_scope, script, gen_fn, nslots, chain, in_class, in_fields;
     uint32_t kw[KW_N];
+    uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
     int err;
     uint32_t err_line;
     char errmsg[240];
@@ -537,6 +538,7 @@ static uint32_t p_function(CC, uint32_t name, uint32_t flags, int is_decl, uint3
 static uint32_t p_class(CC, int is_decl);
 static uint32_t p_binding(CC, uint32_t kind);
 static uint32_t p_unary(CC);
+static uint32_t p_unary_in(CC);
 static uint32_t p_call(CC);
 
 static int is_name_tok(js_cc *cc) { return cc->tok.type == T_NAME; }
@@ -1204,7 +1206,7 @@ static uint32_t p_postfix(CC) {
     return e;
 }
 
-static uint32_t p_unary(CC) {
+static uint32_t p_unary_in(CC) {
     uint32_t line = cc->tok.line;
     if (cc->tok.type == T_PUNCT) {
         uint32_t op = cc->tok.op;
@@ -1309,7 +1311,39 @@ static int is_assign_op(uint32_t op) {
            op == P_BOR_ASSIGN || op == P_BXOR_ASSIGN || op == P_LAND_ASSIGN || op == P_LOR_ASSIGN || op == P_NULLISH_ASSIGN;
 }
 
+/* the parser's recursion bounded: past JS_NEST_MAX levels of expressions or
+   statements a SyntaxError, so neither the C stack nor the value stack's margin
+   (JS_STACK_MARGIN) can be outrun */
+#define JS_NEST_MAX 400
+static uint32_t p_assign_in(CC, int no_in);
+static uint32_t p_unary_in(CC);
+static uint32_t p_stmt_in(CC);
+static int nest_in(js_cc *cc) {
+    if (++cc->depth <= JS_NEST_MAX) return 1;
+    cc_error(cc, cc->tok.line, "the code is nested more than 400 levels deep");
+    cc->depth--;
+    return 0;
+}
 static uint32_t p_assign(CC, int no_in) {
+    if (!nest_in(cc)) return 0;
+    uint32_t r = p_assign_in(CCA, no_in);
+    cc->depth--;
+    return r;
+}
+static uint32_t p_unary(CC) {
+    if (!nest_in(cc)) return 0;
+    uint32_t r = p_unary_in(CCA);
+    cc->depth--;
+    return r;
+}
+static uint32_t p_stmt(CC) {
+    if (!nest_in(cc)) return 0;
+    uint32_t r = p_stmt_in(CCA);
+    cc->depth--;
+    return r;
+}
+
+static uint32_t p_assign_in(CC, int no_in) {
     if (is_kw(cc, K_YIELD) && cc->in_class) { /* yield in a generator: none are read */ }
     uint32_t left = p_cond(CCA, no_in);
     if (cc->tok.type == T_PUNCT && is_assign_op(cc->tok.op)) {
@@ -1491,7 +1525,7 @@ static int is_decl_start(js_cc *cc) {
     return is_kw(cc, K_VAR) || is_kw(cc, K_CONST) || is_kw(cc, K_LET);
 }
 
-static uint32_t p_stmt(CC) {
+static uint32_t p_stmt_in(CC) {
     uint32_t line = cc->tok.line, start = cc->tok.start;
     if (cc->err) return node(cc, N_EMPTY, line);
     if (is_p(cc, P_LBRACE)) return p_block(CCA);
@@ -2018,7 +2052,8 @@ static void gen_list_array(CC, uint32_t off, uint32_t n) {
     }
 }
 static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op_arr) {
-    if (has_spread(cc, off, n)) { gen_list_array(CCA, off, n); emit(vm, op_arr); return; }
+    /* spread, or more than 64 values (JS_STACK_MARGIN): the arguments an array */
+    if (has_spread(cc, off, n) || n > 64) { gen_list_array(CCA, off, n); emit(vm, op_arr); return; }
     for (uint32_t i = 0; i < n; i++) gen_expr(CCA, cc->lists[off + i]);
     emit(vm, op);
     emit16(vm, n);
@@ -2041,7 +2076,7 @@ static void gen_call(CC, uint32_t n) {
         emit(vm, OP_THIS);
         if (cc->nodes[callee].op & NF_COMPUTED) { gen_expr(CCA, cc->nodes[callee].b); emit(vm, OP_GET_SUPER_ELEM); }
         else { emit(vm, OP_GET_SUPER); emit32(vm, cc->nodes[callee].s); }
-    } else if (!(c.op & NF_OPTIONAL) && !has_spread(cc, c.b, c.c)) {
+    } else if (!(c.op & NF_OPTIONAL) && !has_spread(cc, c.b, c.c) && c.c <= 64) {
         /* a plain call: no this pushed, the callee's own */
         gen_expr(CCA, callee);
         gen_args_call(CCA, c.b, c.c, OP_CALL0, OP_CALL_ARR);

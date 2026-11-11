@@ -135,14 +135,30 @@ typedef struct js_frame {
 typedef struct js_handler { uint32_t frame, pc, sp, env; } js_handler;
 
 /* a timer, in virtual time */
-typedef struct js_timer { uint32_t id; double due, interval; jv fn; uint32_t args, nargs, live, seq; } js_timer;
+/* run: the script that set it (vm->cur_run then), rec its record (src/script/script.c) */
+typedef struct js_timer { uint32_t id; double due, interval; jv fn; uint32_t args, nargs, live, seq, run, rec, fired; } js_timer;
 
 /* a console message, a script's error, an event listener: what the page's facts say */
 typedef struct js_msg { uint32_t level, text; } js_msg;
-typedef struct js_listener { uint32_t target, type, fn, capture, once, live; } js_listener;
+/* a listener: its target (a node's index, or JS_WINDOW), its event type (an atom), its
+   function; attr when an on* attribute's handler; run and rec, its script and its record */
+typedef struct js_listener { uint32_t target, type, fn, capture, once, live, attr, run, rec; } js_listener;
+#define JS_WINDOW 0xFFFFFFFFu
 
 #define JS_STACK_MAX (1u << 20)       /* values: a call deeper than this is a RangeError */
 #define JS_FRAMES_MAX 10000
+#define JS_STACK_START (1u << 16)     /* the stack's first size; it grows by doubling (js_room) */
+/* the native-to-script calls nested at most (a sort's comparator sorting, a listener
+   that clicks): each is a C frame of the interpreter's, so they stop well within the
+   C stack */
+#define JS_DEPTH_MAX 400u
+/* the values a frame may push past its slots: the compiler bounds an expression's
+   nesting (JS_NEST_MAX, 400 levels) and a call's or an array's values on the stack (64), so a frame's
+   operands stay under this */
+#define JS_STACK_MARGIN 16384u
+
+/* the page the VM runs in, while a page's script runs (src/script/script.c): its stores */
+struct js_host;
 
 /* the VM. Its owner drops its vectors (JS_VM_DROP): a struct's are not autodropped */
 typedef struct js_vm {
@@ -171,7 +187,7 @@ typedef struct js_vm {
     uint32_t type_error_proto, range_error_proto, syntax_error_proto, reference_error_proto, date_proto, regexp_proto;
     uint32_t map_proto, set_proto, iterator_proto;
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
-    uint32_t host_protos[16];         /* the host's prototypes, by its kinds (src/js/dom.c) */
+    uint32_t host_protos[16];         /* the host's prototypes, by its kinds (src/script/script.c) */
     jv exception;                     /* the thrown value, while one is in flight */
     int throwing;
     uint64_t steps, step_budget;      /* the bytecodes run; past the budget, a script is stopped */
@@ -181,11 +197,15 @@ typedef struct js_vm {
     uint64_t heap_cap;                /* the slots and units past which a script ends with a RangeError */
     uint32_t rng;
     uint32_t script;                  /* the script running: its number, for errors */
+    uint32_t cur_run;                 /* the page's script whose code runs now: its record (src/script/) */
     uint32_t host_kinds;
     uint32_t natoms, nroots, ntrans;
     uint32_t digit_strs[10];
     uint32_t sp, nframes, nhandlers;
     int echo;                         /* the console written to stdout as well (ambitious js) */
+    struct js_host *host;             /* the page, while one of its scripts runs; 0 with no page */
+    vector<uint32_t> wrappers;        /* a DOM node's index -> its wrapper object (src/script/script.c) */
+    vector<uint32_t> hatoms;          /* the host's names, interned once (src/script/script.c) */
     uint32_t root_proto, root_shape, root_valid;   /* the last prototype's root shape */
 } js_vm;
 
@@ -194,7 +214,8 @@ typedef struct js_vm {
     vector_uint32_t_drop(&(v).atom_slots); vector_js_func_drop(&(v).funcs); vector_uint8_t_drop(&(v).code); vector_uint64_t_drop(&(v).consts); \
     vector_js_ic_drop(&(v).ics); vector_uint64_t_drop(&(v).stack); vector_js_frame_drop(&(v).frames); \
     vector_js_handler_drop(&(v).handlers); vector_js_timer_drop(&(v).timers); vector_js_msg_drop(&(v).msgs); \
-    vector_js_listener_drop(&(v).listeners); vector_uint32_t_drop(&(v).lookup); vector_char_drop(&(v).out)
+    vector_js_listener_drop(&(v).listeners); vector_uint32_t_drop(&(v).lookup); vector_char_drop(&(v).out); \
+    vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -209,6 +230,7 @@ enum {
 
 /* the VM: made, its prototypes and globals built (src/js/builtins.c), and its limits */
 void js_init(js_vm *vm);
+void js_setup(js_vm *vm);                 /* js_init's work on a VM already zeroed: its host kept */
 /* a script compiled and run as a classic script: 0 done, -1 a syntax error, -2 an
    uncaught exception, -3 the step budget spent. Its error's text goes to vm->out */
 int js_eval(js_vm *vm, const char *src, size_t n, const char *name, uint32_t script);
@@ -286,7 +308,7 @@ uint32_t js_closure_new(js_vm *vm, uint32_t func, uint32_t env, jv thisv);
 jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);   /* src/js/builtins.c */
 void js_builtins_init(js_vm *vm);
 
-/* the console and the host's hooks (src/js/dom.c) */
+/* the console and the host's hooks (src/script/script.c) */
 void js_console(js_vm *vm, uint32_t level, uint32_t text);
 jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled);
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
@@ -392,8 +414,10 @@ enum {
 /* the interpreter's switch covers every byte: the values past the opcodes, 8 at a time */
 #define OP_UNUSED8(b) case (b): case (b) + 1: case (b) + 2: case (b) + 3: case (b) + 4: case (b) + 5: case (b) + 6: case (b) + 7:
 
-/* the timers run in virtual time up to until, at most max of them (src/js/dom.c) */
+/* the timers run in virtual time up to until, at most max of them (src/script/script.c) */
 uint32_t js_run_timers(js_vm *vm, double until, uint32_t max);
+/* room on the stack and in the frames (src/js/vm.c): 0 past their maximums */
+int js_room(js_vm *vm, uint32_t sp, uint32_t n);
 
 /* the native functions' numbers: the builtins' first, then the host's from JS_HOST_NATIVES */
 #define JS_HOST_NATIVES 1000

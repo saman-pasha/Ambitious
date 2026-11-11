@@ -1,6 +1,6 @@
 // tools/bench/chromium.js -- the reference engine's numbers for tools/bench/compare.py.
 //
-//   node tools/bench/chromium.js RUNS AXE_JS PAGE...
+//   node tools/bench/chromium.js RUNS AXE_JS [--click=SELECTOR] PAGE...
 //
 // Chromium (Playwright's, headless, one renderer, an 800x600 viewport at scale 1)
 // loads each page RUNS times, each from about:blank, as `ambitious bench` loads it:
@@ -9,8 +9,11 @@
 //     ParseAuthorStyleSheet), Layout, paint (PrePaint, Paint, Layerize) and the
 //     raster threads' RasterTask, summed by name;
 //   - cold: a browser launched, the page loaded and drawn, the browser closed;
-//   - audit: axe-core (AXE_JS) injected and run over the loaded page.
-// It writes one JSON object to stdout: { page: { warm, stages, cold, audit } }.
+//   - audit: axe-core (AXE_JS) injected and run over the loaded page;
+//   - click (for a page after --click=SELECTOR): the loaded page's first frame drawn,
+//     then a user's click at the element traced: the events' dispatch (the listeners
+//     run in it) and the frame it draws, style, layout, paint and raster.
+// It writes one JSON object to stdout: { page: { warm, stages, cold, audit, click } }.
 'use strict';
 const { chromium } = require('playwright');
 const { pathToFileURL } = require('url');
@@ -20,6 +23,7 @@ const ms = t0 => Number(process.hrtime.bigint() - t0) / 1e6;
 
 const STAGES = {
   parse: ['ParseHTML'],
+  script: ['EvaluateScript', 'FunctionCall'],
   style: ['UpdateLayoutTree', 'ParseAuthorStyleSheet'],
   layout: ['Layout'],
   paint: ['PrePaint', 'Paint', 'Layerize', 'UpdateLayer'],
@@ -28,11 +32,11 @@ const STAGES = {
 
 // the durations of the named events of a trace, in ms; nested events of one name
 // (a Layout inside a Layout) counted once
-function stageTimes(trace) {
+function stageTimes(trace, stages = STAGES) {
   const events = JSON.parse(trace.toString()).traceEvents || [];
   const want = new Map();
-  for (const [stage, names] of Object.entries(STAGES)) for (const n of names) want.set(n, stage);
-  const out = Object.fromEntries(Object.keys(STAGES).map(k => [k, 0]));
+  for (const [stage, names] of Object.entries(stages)) for (const n of names) want.set(n, stage);
+  const out = Object.fromEntries(Object.keys(stages).map(k => [k, 0]));
   const open = new Map();   // tid|name -> [depth, start]
   for (const e of events) {
     const stage = want.get(e.name);
@@ -64,8 +68,23 @@ async function loadAndDraw(page, url) {
   return { loaded, total: ms(t0), bytes: png.length };
 }
 
+// a click's work: the input events' dispatch, then the frame it draws
+const CLICK_STAGES = {
+  dispatch: ['EventDispatch'],
+  style: STAGES.style, layout: STAGES.layout, paint: STAGES.paint, raster: STAGES.raster,
+};
+const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
 async function main() {
-  const [runsArg, axePath, ...pages] = process.argv.slice(2);
+  const [runsArg, axePath, ...args] = process.argv.slice(2);
+  // the pages, each with the selector a --click before it named
+  const pages = [], clicks = {};
+  let pending = null;
+  for (const a of args) {
+    if (a.startsWith('--click=')) { pending = a.slice(8); continue; }
+    pages.push(a);
+    if (pending) { clicks[a] = pending; pending = null; }
+  }
   const runs = Math.max(1, Number(runsArg) || 5);
   const result = {};
   const browser = await chromium.launch();
@@ -130,8 +149,25 @@ async function main() {
       await b.close();
       cold.push(ms(t0));
     }
+    // the click: the page loaded and its first frame drawn, then the click traced
+    let click = null;
+    if (clicks[p]) {
+      click = Object.fromEntries(Object.keys(CLICK_STAGES).map(k => [k, 0]));
+      for (let r = 0; r < traced; r++) {
+        await tab.goto(url, { waitUntil: 'load' });
+        await tab.evaluate(frame);
+        await browser.startTracing(tab, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'cc',
+                                                        'disabled-by-default-cc.debug'] });
+        await tab.click(clicks[p]);
+        await tab.evaluate(frame);
+        const s = stageTimes(await browser.stopTracing(), CLICK_STAGES);
+        for (const k of Object.keys(click)) click[k] += s[k] / traced;
+      }
+      click.selector = clicks[p];
+      click.text = await tab.evaluate(() => document.getElementById('count') ? document.getElementById('count').textContent : '');
+    }
     result[p] = { warm: { loaded: median(warm.loaded), total: median(warm.total), png_bytes: warm.png_bytes, nav: warm.nav },
-                  stages, cold: median(cold), audit };
+                  stages, cold: median(cold), audit, click };
   }
   await browser.close();
   process.stdout.write(JSON.stringify(result, null, 1) + '\n');

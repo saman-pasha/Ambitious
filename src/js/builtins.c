@@ -549,6 +549,7 @@ static jv add_timer(js_vm *vm, uint32_t args, uint32_t argc, int repeat) {
     t.fn = fn;
     t.live = 1;
     t.seq = ++vm->timer_seq;
+    t.run = vm->cur_run;
     if (argc > 2) {
         uint32_t extra = js_array_new(vm, 0);
         for (uint32_t i = 2; i < argc; i++) js_array_push(vm, extra, arg(vm, args, argc, i));
@@ -1730,6 +1731,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         t.fn = a0;
         t.live = 1;
         t.seq = ++vm->timer_seq;
+        t.run = vm->cur_run;
+        t.rec = 0xFFFFFFFFu;           /* a microtask: no timer of the page's facts */
         push_back(vm->timers, t);
         return JV_UNDEF;
     }

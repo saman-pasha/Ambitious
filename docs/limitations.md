@@ -1,4 +1,4 @@
-# Limitations, as of Phase 11
+# Limitations, as of Phase 8
 
 What each module does not do, so that a reader knows what an answer can rest
 on. Each module's file says the same at its top.
@@ -12,6 +12,7 @@ on. Each module's file says the same at its top.
 | Network (`src/net/`) | https (no TLS), cookies, caching, compression, `@import`, `srcset`, iframes, forms, IDNA and IPv6 literals |
 | Accessibility (`src/a11y/`) | descriptions, states and properties (checked, expanded, ...), live regions, accname's recursion through embedded controls |
 | Profile (`prolog/amb/profile.pl`) | sessions restored into tabs (there are no tabs), and preferences that change rendering |
-| JavaScript | none: Phase 8 is a design (`PLAN.md`), not code |
-| Reasoning | a snapshot costs about 27 µs a fact to read, so pages past some 100,000 facts take seconds (`docs/performance.md`); snapshots are whole, not deltas; the reasoner runs unsandboxed |
+| JavaScript (`src/js/`) | generators, async functions and `await`, Promises, modules, `with`, BigInt, Symbol, Proxy and Reflect, typed arrays, weak collections, `Intl`, direct `eval`; regular expressions' semantics (a RegExp's methods throw); no collector: a page's objects live as long as the page, under a cap |
+| Scripts (`src/script/`) | node lists are arrays, read once, not live; `getComputedStyle` reads the inline style and `getBoundingClientRect` is empty (the scripts run before the cascade and layout); `fetch`, XHR, inserted scripts and `document.write`; keyboard, focus and pointer events beyond a click; forms' submission; `MutationObserver`, shadow DOM, custom elements; the window's properties beyond its timers, `location` and `navigator` |
+| Reasoning | snapshots are whole, not deltas, so a page of 16,000 nodes takes about a second to advise on (`docs/performance.md`); the reasoner runs unsandboxed |
 | Toolchain | the findings in `toolchain/REPORT.md`, among them no deep indexing in cocolog (worked around), a 16 MiB file read (worked around), and `struct addrinfo` not lowered from `<netdb.h>` (declared locally) |

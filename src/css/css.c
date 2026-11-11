@@ -1048,6 +1048,13 @@ static int css_list_matches(const dom_document *d, uint32_t x, const char *s, si
     return 0;
 }
 
+/* a script's selector list against the element x (querySelector, matches, closest:
+   src/script/script.c), by the matcher the cascade uses: 1 when x matches */
+int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n) {
+    int budget = 100000;
+    return css_list_matches(d, x, s, n, 0, &budget) && budget >= 0;
+}
+
 static int css_form_control(const dom_document *d, uint32_t x) {
     return css_is_named(d, x, "button") || css_is_named(d, x, "input") || css_is_named(d, x, "select") ||
            css_is_named(d, x, "textarea") || css_is_named(d, x, "option") || css_is_named(d, x, "optgroup") || css_is_named(d, x, "fieldset");

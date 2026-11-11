@@ -10,12 +10,16 @@
 #include <stdint.h>
 #include <vector.pl>
 
-typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; } amb_canvas;
+/* oy: the page's y the canvas's first row shows (0 for the whole page) */
+typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; double oy; } amb_canvas;
 #define AMB_CANVAS_DROP(c) vector_uint8_t_drop(&(c).px)
 
 /* the page laid out in t, drawn onto c (sized to the viewport box, at most 16384
    high); its images from the loader nt's resources, when there is one */
 void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c);
+/* the window of the page from y down h px, as wide as the viewport, drawn onto c: what
+   a screen of that height shows scrolled to y. What lies outside it is not drawn */
+void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h);
 
 /* the canvas as a PNG (8-bit RGB, deflated); 0 on a write error */
 int amb_png_write(const amb_canvas *c, FILE *out);

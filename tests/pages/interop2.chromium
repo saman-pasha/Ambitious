@@ -1,0 +1,20 @@
+cloneNode: 3 item a 0 true
+replaceChild: beta SECTION null
+insertAdjacentHTML: begin end 5
+dataset: x x a
+toggleAttribute: true true false false
+getAttributeNames: class,data-kind,data-foo-bar
+setProperty: 4px 4px navy margin-left: 4px;
+classList.replace: true item two false
+handlers: prop:click listener prop:click
+CustomEvent: hi:true
+error in a listener: after the error
+input value: start text
+value set: typed start
+title: changed title changed title
+document children: 2 2
+text ops: a begin
+window.onload complete
+frames 3 number
+interval cleared after 3
+error: Error: listener failed

@@ -18,7 +18,7 @@ cocolog.
 
 ## What runs
 
-Three modules, each declared by a contract and generated into C from it:
+Each module is declared by a contract and generated into C from it:
 
 - **DOM** (`contracts/dom.pl`, `src/dom/`): the first milestone, the vertical
   slice. The contract declares types, ownership, operations and their
@@ -48,6 +48,13 @@ Three modules, each declared by a contract and generated into C from it:
 - **Accessibility** (`contracts/a11y.pl`, `src/a11y/`): the accessibility tree,
   with its roles, names and where each name came from. `ambitious inspect`
   shows a page as a developer sees it, every module's diagnostics included.
+- **JavaScript** (`src/js/`): an engine of Ambitious's own (NaN-boxed values,
+  shapes with inline caches, stack bytecode), faster than QuickJS on each of
+  the benchmark's workloads. **Scripts** (`contracts/script.pl`,
+  `src/script/`): a page's scripts run in document order, then its events and
+  timers in virtual time. Every DOM change a script makes is one of the DOM
+  module's operations. What ran, what was written and thrown, the listeners and
+  the timers are facts. `ambitious click` dispatches a click.
 - **Profile** (`prolog/amb/profile.pl`): history, bookmarks, per-site
   permissions, preferences and sessions, kept in a cocolog store over
   ZiguratIP. `--private` keeps them in memory for the run alone.
@@ -96,6 +103,9 @@ bin/ambitious bench PAGE [N]    # each stage's time, and the reasoner's
 bin/ambitious --profile DIR load PAGE   # ... and the visit kept (history, bookmarks, permit, forget)
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
 bin/ambitious js FILE           # a script run by the engine, its console printed
+bin/ambitious script PAGE       # what the page's scripts did: their outcomes, console, errors, listeners, timers
+bin/ambitious click PAGE SEL    # ... after a click at the first element SEL matches
+bin/ambitious --click SEL CMD PAGE  # any page command after the click (repeatable: --click SEL --click SEL)
 tools/amb doc css               # a contract's reference
 ```
 
@@ -109,7 +119,7 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `a11y/`, `js/` (the JavaScript engine), `shell/` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `a11y/`, `js/` (the JavaScript engine), `script/` (a page's scripts: the DOM's bindings, the event loop), `shell/` |
 | `tests/` | `contract/ gen/ golden/ exec/ js/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
 | `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |

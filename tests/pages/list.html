@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A list built by script</title>
+<style>
+  li.odd { background: #eef; }
+  #summary { color: #333; }
+</style>
+</head>
+<body>
+<h1>Fruit</h1>
+<ul id="list"></ul>
+<p id="summary"></p>
+<script>
+  var fruit = ['apple', 'banana', 'cherry', 'date'];
+  var ul = document.getElementById('list');
+  fruit.forEach(function (f, i) {
+    var li = document.createElement('li');
+    li.textContent = f;
+    li.setAttribute('data-index', String(i));
+    if (i % 2) li.classList.add('odd');
+    ul.appendChild(li);
+  });
+  document.getElementById('summary').textContent = ul.children.length + ' items, the first ' + ul.querySelector('li').textContent;
+  setTimeout(function () {
+    ul.lastElementChild.remove();
+    console.log('trimmed to', ul.children.length);
+  }, 100);
+  setInterval(function () {}, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+readyState: loading
+getElementById: DIV a first bold 2 1
+missing: null
+querySelector: two three
+querySelectorAll: 3 one,three
+byTag: 3 1
+nodes: 1 DIV 3 #text "first "
+siblings: UL B bold true
+textContent: changed 1 3
+setAttribute: 1 true 1 null
+removeAttribute: null false
+id: a2 a2 true
+appendChild: 4 new true LI
+insertBefore: first LI
+removeChild: one null false true
+move: 3 1 new
+append: 3 SPAN
+remove: 2
+classList: start two three true false 3 start
+className: 1 false ""
+style: red blue color: red; background-color: blue;
+style cleared: "background-color: blue;"
+innerHTML: 2 <em>x</em> and <strong title="t">y</strong> t
+outerHTML: <em>x</em>
+events: body-capture:1 c:2:true:true once body-bubble:c:3 body-capture:1 c:2:true:true body-bubble:c:3
+stopPropagation: body-capture:1 c:2:true:true stop
+dispatchEvent: c:custom:true doc false true
+label click: true change:true
+checkbox click: false change:true change:false
+onclick attribute go click
+text node: 3 #text txt null
+closest: b true false
+document: DOM interop BODY HTML HEAD 9
+hierarchy: HierarchyRequestError
+bad selector: SyntaxError
+instanceof: true true true true
+window: true true function
+DOMContentLoaded interactive
+load complete
+timeout 50
+timeout 100

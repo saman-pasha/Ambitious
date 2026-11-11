@@ -930,7 +930,8 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { if (cur != JV_HOLE) return js_call_setter(vm, cur, objv, v); }
         else {
             vm->slots[vm->objs[o].slots + slot] = v;
-            if (ic && cur != JV_HOLE) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
+            /* a host object's writes are not cached: the host sees each one */
+            if (ic && cur != JV_HOLE && k != JK_HOST) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
             return 1;
         }
     }
@@ -953,7 +954,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     js_obj_room(vm, o, slot);
     vm->objs[o].shape = ns;
     vm->slots[vm->objs[o].slots + slot] = v;
-    if (ic) { js_ic c = { sh, 0xFFFFFFFFu, ns, slot }; vm->ics[ic] = c; }
+    if (ic && k != JK_HOST) { js_ic c = { sh, 0xFFFFFFFFu, ns, slot }; vm->ics[ic] = c; }
     return 1;
 }
 
@@ -1285,9 +1286,32 @@ static jv js_ctor_proto(js_vm *vm, jv ctor) {
     return js_get(vm, ctor, A_PROTOTYPE);
 }
 
+/* room on the value stack for sp values and in the frames for n frames: each grows by
+   doubling, up to its maximum (0 past it: the caller throws a RangeError). The
+   interpreter's borrows are taken again after any call, so a growth moves nothing it
+   holds. */
+int js_room(js_vm *vm, uint32_t sp, uint32_t n) {
+    if (sp > JS_STACK_MAX || n > JS_FRAMES_MAX) return 0;
+    if (sp > len(vm->stack)) {
+        size_t m = len(vm->stack) * 2;
+        if (m < sp) m = sp;
+        if (m > JS_STACK_MAX) m = JS_STACK_MAX;
+        resize(vm->stack, m, JV_UNDEF);
+    }
+    if (n > len(vm->frames)) {
+        size_t m = len(vm->frames) * 2;
+        if (m < n) m = n;
+        if (m > JS_FRAMES_MAX) m = JS_FRAMES_MAX;
+        js_frame f0;
+        memset(&f0, 0, sizeof f0);
+        resize(vm->frames, m, f0);
+    }
+    return 1;
+}
+
 /* a frame for the closure c, its argc arguments the values below vm->sp */
 static int js_enter(js_vm *vm, uint32_t c, jv thisv, uint32_t argc, jv newt, uint32_t flags, uint32_t sp0) {
-    if (vm->nframes + 1 >= JS_FRAMES_MAX || vm->sp + 1024 >= JS_STACK_MAX) {
+    if (!js_room(vm, vm->sp + JS_STACK_MARGIN + vm->funcs[vm->objs[c].a].nslots, vm->nframes + 2)) {
         js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
         return 0;
     }
@@ -1363,8 +1387,10 @@ static jv js_call_other(js_vm *vm, jv fn, jv thisv, uint32_t args, uint32_t argc
 
 jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
     if (vm->throwing) return JV_HOLE;
+    /* a native or the host calling back into script, nested: bounded before the C stack is */
+    if (vm->depth >= JS_DEPTH_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
     uint32_t sp0 = vm->sp;
-    if (jv_is_obj(fn) && (vm->objs[jv_idx(fn)].flags & JO_FASTCALL) && vm->nframes + 1 < JS_FRAMES_MAX &&
+    if (jv_is_obj(fn) && (vm->objs[jv_idx(fn)].flags & JO_FASTCALL) && vm->nframes + 1 < len(vm->frames) &&
         (jv_is_obj(thisv) || jv_is_nullish(thisv) || (vm->funcs[vm->objs[jv_idx(fn)].a].flags & (JF_STRICT | JF_ARROW)))) {
         /* a closure the interpreter runs, the common case (a native's callback): its
            frame made here, read and written through borrows */
@@ -1373,7 +1399,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
         const js_func *funcs = data(vm->funcs);
         uint32_t func = objs[o].a;
         uint32_t ff = funcs[func].flags, np = funcs[func].nparams, ns = funcs[func].nslots;
-        if (sp0 + argc + ns + 1100 < JS_STACK_MAX) {
+        if (sp0 + argc + ns + JS_STACK_MARGIN < len(vm->stack)) {
             js_frame fr;
             fr.func = func;
             fr.pc = funcs[func].code;
@@ -1408,7 +1434,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
         }
     }
     if (!js_is_callable(vm, fn)) return js_type_error(vm, "is not a function", js_typeof(vm, fn));
-    if (sp0 + argc + 1100 >= JS_STACK_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
+    if (!js_room(vm, sp0 + argc + JS_STACK_MARGIN, vm->nframes + 2)) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
     {
         uint64_t *stack = data(vm->stack);
         stack[sp0] = thisv;
@@ -1432,10 +1458,11 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
 /* new fn(...): the object its prototype makes, unless the function returns one */
 jv js_construct(js_vm *vm, jv fn, const jv *argv, uint32_t argc, jv newt) {
     if (vm->throwing) return JV_HOLE;
+    if (vm->depth >= JS_DEPTH_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
     if (!js_is_callable(vm, fn)) return js_type_error(vm, "is not a constructor", js_typeof(vm, fn));
     uint32_t o = jv_idx(fn);
     uint32_t sp0 = vm->sp;
-    if (sp0 + argc + 1100 >= JS_STACK_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
+    if (!js_room(vm, sp0 + argc + JS_STACK_MARGIN, vm->nframes + 2)) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
     vm->stack[vm->sp++] = JV_UNDEF;
     vm->stack[vm->sp++] = fn;
     for (uint32_t i = 0; i < argc; i++) vm->stack[vm->sp++] = argv[i];
@@ -2036,7 +2063,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                     jv tv0 = op == OP_CALL ? stack[nb - 2] : JV_UNDEF;
                     /* a sloppy function's this a primitive: boxed, on the general path */
                     int boxed = !(fl & (JF_STRICT | JF_ARROW)) && !jv_is_obj(tv0) && !jv_is_nullish(tv0) && tv0 != JV_HOLE;
-                    if (!boxed && n + 1 < JS_FRAMES_MAX && sp + ns + 1024 < JS_STACK_MAX) {
+                    if (!boxed && n + 1 < len(vm->frames) && sp + ns + JS_STACK_MARGIN < len(vm->stack)) {
                         frames[fi].pc = pc + 2;
                         js_frame fr;
                         fr.func = func;
@@ -2079,7 +2106,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 /* the arguments an array: spread onto the stack */
                 uint32_t arr = jv_idx(stack[--sp]);
                 argc = objs[arr].b;
-                if (sp + argc + 1100 >= JS_STACK_MAX) { SYNC(); js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded"); RELOAD(); break; }
+                {
+                    SYNC();
+                    int roomy = js_room(vm, sp + argc + JS_STACK_MARGIN, vm->nframes + 2); RELOAD();
+                    if (!roomy) { js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded"); RELOAD(); break; }
+                }
                 for (uint32_t i = 0; i < argc; i++) {
                     jv ev = slots[objs[arr].a + i];
                     stack[sp++] = ev == JV_HOLE ? JV_UNDEF : ev;
@@ -2495,6 +2526,12 @@ static const char *const js_atom_names[A_NATOMS] = {
 
 void js_init(js_vm *vm) {
     memset(vm, 0, sizeof *vm);
+    js_setup(vm);
+}
+
+/* a zeroed VM made ready (js_init's work after its memset): the host it was given, if
+   any, kept */
+void js_setup(js_vm *vm) {
     js_str dummy;
     memset(&dummy, 0, sizeof dummy);
     push_back(vm->strs, dummy);
@@ -2523,8 +2560,8 @@ void js_init(js_vm *vm) {
     push_back(vm->funcs, f0);
     push_back(vm->code, (uint8_t)OP_NOP);
     push_back(vm->consts, JV_UNDEF);
-    resize(vm->stack, JS_STACK_MAX);
-    resize(vm->frames, JS_FRAMES_MAX);
+    resize(vm->stack, JS_STACK_START);
+    resize(vm->frames, 256);
     resize(vm->handlers, 4096);
     vm->exception = JV_UNDEF;
     vm->step_budget = 20000000000ull;

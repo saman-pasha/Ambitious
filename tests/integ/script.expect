@@ -1,0 +1,28 @@
+-- the interop page's console, against Chromium's:
+the same 41 lines
+-- the interop2 page's console, against Chromium's:
+the same 20 lines
+-- the counter:
+script 1   inline    ran          <script>
+console log   [1] counter ready
+listen  click            [1] <button id="inc" type="button">
+listen  click            [1] <div id="reset" class="fake-button">
+1 scripts, 1 console messages, 0 errors, 2 listeners, 0 timers; 31 nodes
+-- clicked twice:
+N = n(1,20,0), T = '2', C = done
+-- its listeners, and what the reasoner says of them:
+N = n(1,23,0), T = click, R = sr(1,1,0), E = button
+N = n(1,26,0), T = click, R = sr(1,1,0), E = div
+amb_diag(click_not_focusable, n(1,26,0), 'the <div> \'Reset\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
+-- the list:
+script 1   inline    ran          <script>
+console log   [1] trimmed to 3
+timer   100 ms timeout [1], fired 1, fired
+timer   1000 ms interval [1], fired 10, pending
+1 scripts, 1 console messages, 0 errors, 0 listeners, 2 timers; 31 nodes
+L = n(1,25,0), T = apple
+L = n(1,27,0), T = banana
+L = n(1,29,0), T = cherry
+amb_diag(unsettled_timer, st(1,2,0), 'an interval of 1000 ms set by the script #1 (inline) is never cleared: the page never comes to rest').
+-- a click on nothing:
+ambitious: --click #nope: no element matches

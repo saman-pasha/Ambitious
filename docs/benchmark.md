@@ -9,7 +9,9 @@ Ambitious and the reference engines run on the same box, on the same pages:
 - **Ambitious's stages** are `ambitious bench`'s timers.
 - **The two engines are built differently.** Chromium uses several threads and processes. Ambitious uses one thread, built at -O2 for the generic x86-64 CPU.
 
-## The latest run: 48 of 48
+## The latest run: 64 of 64
+
+The pages now include `scripted.html` (`tools/gen-scripted-page.py 2000`): its script builds a list of 2,000 items, and a click at its button puts every item on sale. The page adds rows for its scripts, as a stage, and for a click handled and drawn again.
 
 Measured by `python3 tools/bench/compare.py 5` on Intel(R) Xeon(R) Processor @ 2.10GHz (4 CPUs), Linux-6.18.44-fc-v378-x86_64-with-glibc2.39.
 
@@ -21,6 +23,7 @@ Measured by `python3 tools/bench/compare.py 5` on Intel(R) Xeon(R) Processor @ 2
 | a11y.html | 1,666 | 123 | 56 |
 | medium.html | 28,451 | 1,632 | 746 |
 | large.html | 248,919 | 16,212 | 7,406 |
+| scripted.html | 1,734 | 10,029 | 6,011 |
 
 ### The stages (ms)
 
@@ -28,30 +31,41 @@ Ambitious's timers against the durations of Chromium's trace events for the same
 
 | page | stage | Ambitious | Chromium | faster |
 |---|---|---:|---:|---|
-| news.html | parse | 0.06 | 0.54 | **Ambitious** (9.0x) |
-| news.html | style | 0.26 | 0.62 | **Ambitious** (2.4x) |
-| news.html | layout | 1.32 | 1.95 | **Ambitious** (1.5x) |
-| news.html | paint and raster | 2.16 | 4.19 | **Ambitious** (1.9x) |
-| layout.html | parse | 0.09 | 0.43 | **Ambitious** (4.8x) |
-| layout.html | style | 0.30 | 0.46 | **Ambitious** (1.5x) |
-| layout.html | layout | 1.28 | 2.10 | **Ambitious** (1.6x) |
-| layout.html | paint and raster | 2.64 | 6.59 | **Ambitious** (2.5x) |
-| style.html | parse | 0.07 | 0.44 | **Ambitious** (6.3x) |
-| style.html | style | 0.28 | 0.60 | **Ambitious** (2.1x) |
-| style.html | layout | 1.21 | 2.16 | **Ambitious** (1.8x) |
-| style.html | paint and raster | 2.29 | 4.77 | **Ambitious** (2.1x) |
-| a11y.html | parse | 0.12 | 0.66 | **Ambitious** (5.5x) |
-| a11y.html | style | 0.37 | 1.28 | **Ambitious** (3.5x) |
-| a11y.html | layout | 1.44 | 2.19 | **Ambitious** (1.5x) |
-| a11y.html | paint and raster | 3.14 | 10.59 | **Ambitious** (3.4x) |
-| medium.html | parse | 0.55 | 1.23 | **Ambitious** (2.2x) |
-| medium.html | style | 1.05 | 2.07 | **Ambitious** (2.0x) |
-| medium.html | layout | 2.52 | 16.79 | **Ambitious** (6.7x) |
-| medium.html | paint and raster | 20.28 | 46.99 | **Ambitious** (2.3x) |
-| large.html | parse | 5.55 | 10.05 | **Ambitious** (1.8x) |
-| large.html | style | 3.92 | 19.37 | **Ambitious** (4.9x) |
-| large.html | layout | 16.59 | 222.18 | **Ambitious** (13.4x) |
-| large.html | paint and raster | 47.17 | 682.23 | **Ambitious** (14.5x) |
+| news.html | scripts | 0.00 | 7.51 | **Ambitious** (infx) |
+| news.html | parse | 0.07 | 0.40 | **Ambitious** (5.8x) |
+| news.html | style | 0.27 | 0.45 | **Ambitious** (1.7x) |
+| news.html | layout | 1.20 | 1.47 | **Ambitious** (1.2x) |
+| news.html | paint and raster | 1.89 | 3.52 | **Ambitious** (1.9x) |
+| layout.html | scripts | 0.00 | 7.10 | **Ambitious** (infx) |
+| layout.html | parse | 0.11 | 0.50 | **Ambitious** (4.5x) |
+| layout.html | style | 0.32 | 0.47 | **Ambitious** (1.5x) |
+| layout.html | layout | 1.28 | 1.61 | **Ambitious** (1.3x) |
+| layout.html | paint and raster | 2.46 | 5.78 | **Ambitious** (2.3x) |
+| style.html | scripts | 0.00 | 8.44 | **Ambitious** (infx) |
+| style.html | parse | 0.07 | 0.40 | **Ambitious** (5.7x) |
+| style.html | style | 0.31 | 0.57 | **Ambitious** (1.8x) |
+| style.html | layout | 1.21 | 2.00 | **Ambitious** (1.7x) |
+| style.html | paint and raster | 2.11 | 5.09 | **Ambitious** (2.4x) |
+| a11y.html | scripts | 0.00 | 6.82 | **Ambitious** (infx) |
+| a11y.html | parse | 0.11 | 0.62 | **Ambitious** (5.6x) |
+| a11y.html | style | 0.33 | 1.20 | **Ambitious** (3.6x) |
+| a11y.html | layout | 1.26 | 1.93 | **Ambitious** (1.5x) |
+| a11y.html | paint and raster | 2.40 | 10.38 | **Ambitious** (4.3x) |
+| medium.html | scripts | 0.00 | 8.54 | **Ambitious** (infx) |
+| medium.html | parse | 0.73 | 1.18 | **Ambitious** (1.6x) |
+| medium.html | style | 1.41 | 2.10 | **Ambitious** (1.5x) |
+| medium.html | layout | 3.07 | 18.39 | **Ambitious** (6.0x) |
+| medium.html | paint and raster | 29.83 | 48.26 | **Ambitious** (1.6x) |
+| large.html | scripts | 0.03 | 10.73 | **Ambitious** (357.6x) |
+| large.html | parse | 5.63 | 8.72 | **Ambitious** (1.5x) |
+| large.html | style | 3.65 | 17.16 | **Ambitious** (4.7x) |
+| large.html | layout | 15.12 | 202.17 | **Ambitious** (13.4x) |
+| large.html | paint and raster | 38.34 | 603.02 | **Ambitious** (15.7x) |
+| scripted.html | scripts | 5.08 | 15.94 | **Ambitious** (3.1x) |
+| scripted.html | parse | 0.06 | 8.03 | **Ambitious** (133.8x) |
+| scripted.html | style | 1.79 | 16.08 | **Ambitious** (9.0x) |
+| scripted.html | layout | 9.74 | 119.69 | **Ambitious** (12.3x) |
+| scripted.html | paint and raster | 36.73 | 252.94 | **Ambitious** (6.9x) |
 
 ### Whole loads (ms)
 
@@ -59,24 +73,27 @@ Ambitious's timers against the durations of Chromium's trace events for the same
 
 | page | measure | Ambitious | Chromium | faster |
 |---|---|---:|---:|---|
-| news.html | warm, laid out | 1.7 | 17.8 | **Ambitious** (10.5x) |
-| news.html | warm, to PNG | 17.7 | 71.6 | **Ambitious** (4.0x) |
-| news.html | cold, to PNG | 27.7 | 217.6 | **Ambitious** (7.9x) |
-| layout.html | warm, laid out | 1.7 | 16.7 | **Ambitious** (9.8x) |
-| layout.html | warm, to PNG | 20.1 | 72.9 | **Ambitious** (3.6x) |
-| layout.html | cold, to PNG | 32.7 | 202.4 | **Ambitious** (6.2x) |
-| style.html | warm, laid out | 1.6 | 12.5 | **Ambitious** (7.8x) |
-| style.html | warm, to PNG | 18.3 | 60.3 | **Ambitious** (3.3x) |
-| style.html | cold, to PNG | 28.3 | 212.3 | **Ambitious** (7.5x) |
-| a11y.html | warm, laid out | 2.0 | 15.7 | **Ambitious** (7.9x) |
-| a11y.html | warm, to PNG | 26.0 | 89.2 | **Ambitious** (3.4x) |
-| a11y.html | cold, to PNG | 29.3 | 250.1 | **Ambitious** (8.5x) |
-| medium.html | warm, laid out | 4.2 | 23.1 | **Ambitious** (5.5x) |
-| medium.html | warm, to PNG | 324.3 | 440.7 | **Ambitious** (1.4x) |
-| medium.html | cold, to PNG | 379.1 | 593.0 | **Ambitious** (1.6x) |
-| large.html | warm, laid out | 26.5 | 103.3 | **Ambitious** (3.9x) |
-| large.html | warm, to PNG | 521.8 | 4854.6 | **Ambitious** (9.3x) |
-| large.html | cold, to PNG | 584.0 | 6029.3 | **Ambitious** (10.3x) |
+| news.html | warm, laid out | 1.6 | 17.2 | **Ambitious** (10.8x) |
+| news.html | warm, to PNG | 17.7 | 56.7 | **Ambitious** (3.2x) |
+| news.html | cold, to PNG | 52.2 | 195.7 | **Ambitious** (3.7x) |
+| layout.html | warm, laid out | 1.8 | 14.7 | **Ambitious** (8.4x) |
+| layout.html | warm, to PNG | 21.5 | 72.6 | **Ambitious** (3.4x) |
+| layout.html | cold, to PNG | 42.4 | 214.7 | **Ambitious** (5.1x) |
+| style.html | warm, laid out | 1.6 | 17.7 | **Ambitious** (10.9x) |
+| style.html | warm, to PNG | 18.3 | 71.2 | **Ambitious** (3.9x) |
+| style.html | cold, to PNG | 39.1 | 231.2 | **Ambitious** (5.9x) |
+| a11y.html | warm, laid out | 1.8 | 15.3 | **Ambitious** (8.7x) |
+| a11y.html | warm, to PNG | 21.2 | 91.5 | **Ambitious** (4.3x) |
+| a11y.html | cold, to PNG | 45.0 | 233.7 | **Ambitious** (5.2x) |
+| medium.html | warm, laid out | 5.3 | 21.8 | **Ambitious** (4.1x) |
+| medium.html | warm, to PNG | 346.6 | 441.1 | **Ambitious** (1.3x) |
+| medium.html | cold, to PNG | 393.3 | 613.5 | **Ambitious** (1.6x) |
+| large.html | warm, laid out | 24.9 | 99.2 | **Ambitious** (4.0x) |
+| large.html | warm, to PNG | 493.2 | 5055.9 | **Ambitious** (10.3x) |
+| large.html | cold, to PNG | 614.0 | 5297.4 | **Ambitious** (8.6x) |
+| scripted.html | warm, laid out | 16.7 | 111.0 | **Ambitious** (6.6x) |
+| scripted.html | warm, to PNG | 505.1 | 2037.6 | **Ambitious** (4.0x) |
+| scripted.html | cold, to PNG | 560.9 | 2198.8 | **Ambitious** (3.9x) |
 
 ### Diagnostics (ms)
 
@@ -84,14 +101,23 @@ Ambitious: the snapshot exported, then the reasoner's `advise` (every module's d
 
 | page | Ambitious | its findings | Chromium + axe-core | its violations (nodes) | faster |
 |---|---:|---|---:|---|---|
-| news.html | 36.4 | | 120.6 | 4 (9) | **Ambitious** (3.3x) |
-| layout.html | 33.2 | | 118.6 | 4 (5) | **Ambitious** (3.6x) |
-| style.html | 38.1 | | 114.6 | 3 (12) | **Ambitious** (3.0x) |
-| a11y.html | 40.0 | | 140.7 | 6 (8) | **Ambitious** (3.5x) |
-| medium.html | 141.9 | | 365.0 | 2 (22) | **Ambitious** (2.6x) |
-| large.html | 994.9 | | 2014.2 | 2 (202) | **Ambitious** (2.0x) |
+| news.html | 40.9 | | 104.0 | 4 (9) | **Ambitious** (2.5x) |
+| layout.html | 45.8 | | 127.2 | 4 (5) | **Ambitious** (2.8x) |
+| style.html | 27.9 | | 129.0 | 3 (12) | **Ambitious** (4.6x) |
+| a11y.html | 35.4 | | 141.3 | 6 (8) | **Ambitious** (4.0x) |
+| medium.html | 155.2 | | 365.8 | 2 (22) | **Ambitious** (2.4x) |
+| large.html | 1034.9 | | 2282.9 | 2 (202) | **Ambitious** (2.2x) |
+| scripted.html | 670.7 | | 1606.8 | 2 (4) | **Ambitious** (2.4x) |
 
-**Ambitious is faster in 48 of 48 comparisons.**
+### A click, handled and drawn again (ms)
+
+The page loaded and drawn, then a user's click at the element. Ambitious: the click's listeners (`ambitious --click SELECTOR bench`), then the page styled, laid out and its viewport painted again. Chromium: the traced input events' dispatch, the listeners run in it, then the frame it draws: style, layout, paint and raster.
+
+| page | click at | Ambitious | its click, cascade, layout, viewport | Chromium | its dispatch, style, layout, paint and raster | faster |
+|---|---|---:|---|---:|---|---|
+| scripted.html | `#sale` | 19.4 | 3.7, 2.0, 11.1, 2.7 | 57.6 | 8.6, 4.8, 13.8, 30.5 | **Ambitious** (3.0x) |
+
+**Ambitious is faster in 64 of 64 comparisons.**
 
 ### What changed between the runs
 
@@ -105,6 +131,8 @@ PLAN.md §11 has the causes, each measured with callgrind before it was changed.
 | diagnostics, large.html | 11.5 s (axe-core 2.1 s) | about 1.1 s | The reasoner reads terms from the stream and checks each with one clause compiled for its predicate. The snapshot carries each element's style, each style's declared values once, and the initial values; the rules derive the rest. 408,681 facts became 147,006 |
 | diagnostics, medium.html | 950 ms (axe-core 415 ms) | 171 ms | the same |
 | paint and raster, news.html | 4.0 ms (Chromium 3.0) | 2.0 ms | opaque fills are written a row at a time |
+
+The scripted page's rows were first measured with Phase 8b. They lost none of them, but a click came out even: 60.9 ms against Chromium's 60.8. The paint after the click drew the whole page, 44,000 pixels tall, where Chromium rasterizes the tiles on screen. The painter now draws a window of the page (`amb_paint_view`), so the click is drawn again as a screen shows it: 2.7 ms of paint where the whole page takes 37.
 
 Every gate of `make test` stayed green through each change. The pixels of every page are unchanged, and so is every answer the reasoner gives. The only exceptions are the proofs, which now show the derived values.
 

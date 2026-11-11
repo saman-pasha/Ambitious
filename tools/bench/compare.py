@@ -8,7 +8,10 @@ for Chromium, means for `ambitious bench`):
   - warm: one process kept, the page loaded, laid out and drawn into a PNG;
   - cold: a process started for the page and drawn, as a command would be;
   - audit: Ambitious's diagnostics (the snapshot exported, then `advise`)
-    against axe-core run over the page in Chromium.
+    against axe-core run over the page in Chromium;
+  - on the scripted page (tools/gen-scripted-page.py), its scripts as a stage, and a
+    click handled and drawn again: Ambitious's click, cascade, layout and the
+    viewport's paint against Chromium's traced dispatch and the frame it draws.
 It prints a Markdown report, the source of docs/benchmark.md, and writes the
 raw numbers to build/bench/results.json."""
 import json, os, platform, re, statistics, subprocess, sys, time
@@ -27,12 +30,21 @@ def pages():
         with open(path, "w") as f:
             subprocess.run([sys.executable, os.path.join(ROOT, "tools", "gen-big-page.py"), str(sections)], stdout=f, check=True)
         out.append(path)
+    path = os.path.join(BENCH, "scripted.html")
+    with open(path, "w") as f:
+        subprocess.run([sys.executable, os.path.join(ROOT, "tools", "gen-scripted-page.py"), "2000"], stdout=f, check=True)
+    out.append(path)
     return out
 
 
-def ambitious_bench(page, runs):
+# the pages a click is measured on: the element it is at
+CLICKS = {"scripted.html": "#sale"}
+
+
+def ambitious_bench(page, runs, click=None):
     env = dict(os.environ, AMB_ROOT=ROOT)
-    r = subprocess.run([AMB, "bench", page, str(runs)], capture_output=True, text=True, env=env, timeout=3600)
+    r = subprocess.run([AMB] + (["--click", click] if click else []) + ["bench", page, str(runs)], capture_output=True, text=True,
+                       env=env, timeout=3600)
     if r.returncode != 0:
         raise SystemExit("ambitious bench %s: %s" % (page, r.stderr))
     stages = {}
@@ -58,7 +70,12 @@ def ambitious_cold(page, runs):
 
 def chromium(all_pages, runs):
     axe = AXE if os.path.exists(AXE) else "-"
-    r = subprocess.run(["node", os.path.join(ROOT, "tools", "bench", "chromium.js"), str(runs), axe] + all_pages,
+    args = []
+    for p in all_pages:
+        if os.path.basename(p) in CLICKS:
+            args.append("--click=" + CLICKS[os.path.basename(p)])
+        args.append(p)
+    r = subprocess.run(["node", os.path.join(ROOT, "tools", "bench", "chromium.js"), str(runs), axe] + args,
                        capture_output=True, text=True, timeout=7200)
     if r.returncode != 0:
         raise SystemExit("chromium.js: " + r.stderr)
@@ -81,6 +98,8 @@ def main():
         stages = ambitious_bench(p, runs)
         cold, png_bytes = ambitious_cold(p, runs)
         amb[p] = {"stages": stages, "cold": cold, "png_bytes": png_bytes}
+        if os.path.basename(p) in CLICKS:
+            amb[p]["click"] = ambitious_bench(p, runs, CLICKS[os.path.basename(p)])
     chr_ = chromium(ps, runs)
     with open(os.path.join(BENCH, "results.json"), "w") as f:
         json.dump({"ambitious": amb, "chromium": chr_}, f, indent=1)
@@ -114,6 +133,9 @@ def main():
     w("|---|---|---:|---:|---|")
     for p in ps:
         s, c = amb[p]["stages"], chr_[p]["stages"]
+        if s.get("scripts", 0) > 0.05 or c.get("script", 0) > 0.05:
+            w("| %s | %s | %.2f | %.2f | %s |" % (name(p), "scripts", s["scripts"], c["script"], winner(s["scripts"], c["script"])))
+            rows.append((name(p), "scripts", s["scripts"], c["script"]))
         for label, a, b in (("parse", s["parse"], c["parse"]),
                             ("style", s["cascade"], c["style"]),
                             ("layout", s["layout"], c["layout"]),
@@ -130,7 +152,7 @@ def main():
     w("|---|---|---:|---:|---|")
     for p in ps:
         s, c = amb[p]["stages"], chr_[p]
-        laid = s["fetch the page"] + s["parse"] + s["fetch its resources"] + s["cascade"] + s["layout"]
+        laid = s["fetch the page"] + s["parse"] + s["fetch its resources"] + s.get("scripts", 0) + s["cascade"] + s["layout"]
         png = laid + s["paint"] + s["encode the PNG"]
         for label, a, b in (("warm, laid out", laid, c["warm"]["loaded"]),
                             ("warm, to PNG", png, c["warm"]["total"]),
@@ -152,6 +174,25 @@ def main():
             b = c["inject"] + c["run"]
             w("| %s | %.1f | | %.1f | %d (%d) | %s |" % (name(p), a, b, c["violations"], c["nodes"], winner(a, b)))
             rows.append((name(p), "diagnostics", a, b))
+    clicked = [p for p in ps if amb[p].get("click") and chr_[p].get("click")]
+    if clicked:
+        w("")
+        w("### A click, handled and drawn again (ms)")
+        w("")
+        w("The page loaded and drawn, then a user's click at the element. Ambitious: the click's listeners (`ambitious --click SELECTOR bench`), "
+          "then the page styled, laid out and its viewport painted again. Chromium: the traced input events' dispatch, the listeners run in it, "
+          "then the frame it draws: style, layout, paint and raster.")
+        w("")
+        w("| page | click at | Ambitious | its click, cascade, layout, viewport | Chromium | its dispatch, style, layout, paint and raster | faster |")
+        w("|---|---|---:|---|---:|---|---|")
+        for p in clicked:
+            s, c = amb[p]["click"], chr_[p]["click"]
+            a = s["click"] + s["cascade"] + s["layout"] + s["paint the viewport"]
+            b = c["dispatch"] + c["style"] + c["layout"] + c["paint"] + c["raster"]
+            w("| %s | `%s` | %.1f | %.1f, %.1f, %.1f, %.1f | %.1f | %.1f, %.1f, %.1f, %.1f | %s |" % (
+                name(p), CLICKS[name(p)], a, s["click"], s["cascade"], s["layout"], s["paint the viewport"], b,
+                c["dispatch"], c["style"], c["layout"], c["paint"] + c["raster"], winner(a, b)))
+            rows.append((name(p), "click, drawn again", a, b))
     wins = sum(1 for r in rows if r[2] < r[3])
     w("")
     w("**Ambitious is faster in %d of %d comparisons.**" % (wins, len(rows)))

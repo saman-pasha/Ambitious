@@ -477,6 +477,77 @@ start (`src/js/`):
   fast instruction among them. The suite: faster than QuickJS on 8 of 8
   workloads (§11).
 
+*As built, 8b: the page's scripts* (`contracts/script.pl`, `src/script/`):
+- **The module is `script`**, and its facts are `script_*`. A contract's facts
+  begin with its module's name, and `js_` is the engine's C namespace.
+  - What ran: `script_run/4` (the element, the source, how it ended) and
+    `script_url/2`.
+  - What it wrote and threw: `script_console/3` and `script_error/3`, the
+    latter with where the error was thrown (a script, a listener, a timer).
+  - What listens and what is set: `script_listener/3`,
+    `script_window_listener/2`, `script_capture/2`, `script_timer/4` and
+    `script_timer_of/2`.
+
+  The rules derive `script_failed/2`, `script_uncaught/3`,
+  `script_click_unfocusable/2`, `script_unsettled/2` and `script_listens/3`.
+  `advise` reports four things: a click listener on an element a keyboard cannot
+  reach, an error nothing caught, a script that did not run to its end, and a
+  timer that keeps the page from coming to rest.
+- **The host.** The engine reaches the page through `vm->host`, a struct of
+  typed pointers to the page's stores. The safe part stores a borrow only
+  where it can follow it. So a command fills the host where it declares the
+  stores (`SCRIPT_HOST`), never in a function that is given them.
+- **The bindings.**
+  - A node's wrapper is a host object holding the node's index and generation,
+    one wrapper a node. A destroyed node's wrapper is stale, and using it
+    throws.
+  - The tree: `parentNode` to `childNodes`; `appendChild`, `insertBefore`,
+    `removeChild`, `replaceChild`; `remove`, `before`, `after`, `append`,
+    `prepend`, `replaceWith`; `contains`, `cloneNode`.
+  - Attributes: get, set, remove, has and toggle, and the reflected ones (`id`,
+    `className`, `href` ...).
+  - Content: `textContent` and `innerHTML`. `innerHTML` is parsed by the HTML
+    module as a fragment and copied in through DOM operations. `outerHTML`
+    serializes.
+  - `classList`; `style`, the style attribute's declarations; `dataset`.
+  - Queries: `querySelector(All)`, `matches` and `closest` run the CSS module's
+    own matcher. Also `getElementById`, `getElementsByTagName` and
+    `getElementsByClassName`, and `create{Element,TextNode,Comment}`.
+  - Events: `addEventListener` with capture and once, `removeEventListener`,
+    `dispatchEvent`, `click()`, `Event`, `CustomEvent`, `preventDefault`,
+    `stopPropagation`. An `on*` attribute or property is a handler.
+  - `window`: the timers, `requestAnimationFrame`, `location` and
+    `navigator`.
+
+  What differs from a browser:
+  - node lists are arrays, read once, not live;
+  - a checkbox's checked state is its attribute, so the cascade's `:checked`
+    and the reasoner see a click's change (a field's typed value is kept apart
+    from its attribute, as in a browser);
+  - `getComputedStyle` reads the inline style, and `getBoundingClientRect` is
+    empty, because the scripts run before the cascade and layout;
+  - there are no Promises and no `fetch`, and an inserted script does not run.
+- **The event loop** is as designed: the scripts in document order, then
+  `DOMContentLoaded` and `load`, then the timers in virtual time up to a
+  horizon of 10 s.
+  - A click runs the listeners on its path, capturing then bubbling.
+  - A checkbox's or radio's state changes before the click, and its `input`
+    and `change` follow. A label's control is clicked after the label.
+  - `--click SELECTOR` adds clicks after the scripts to any page command.
+    `ambitious script PAGE` and `ambitious click PAGE SELECTOR` print what the
+    scripts did.
+- **At rest.** Before the snapshot, each timer's state is recorded, and the
+  nodes no tree holds are destroyed.
+- **The gate**, `tests/integ/script.sh`:
+  - the two DOM interop pages' consoles must be Chromium's own, 41 and 20
+    lines with their uncaught errors (`tests/pages/*.chromium`, written by
+    `tools/bench/console.js`);
+  - the counter, clicked twice and queried again;
+  - the list a script builds and a timer trims;
+  - the diagnostics.
+
+  The benchmark's scripted page is in §11.
+
 ### Phase 9: Accessibility and developer tools
 
 - `src/a11y/`: an accessibility tree with roles and names (from content,
@@ -581,11 +652,11 @@ won.
 | 5 CSS | **done, first slice**: `contracts/css.pl` and `src/css/css.c`. It covers sheets (comments, strings, `@media` against an 800x600 viewport), Selectors 4 (attribute operators, the structural pseudo-classes, `:nth-*()`, `:not`, `:is`, `:where`) with their specificity, and the cascade (origin, importance, the style attribute, specificity, order). It also covers inheritance, the global keywords, presentational hints, and 26 computed properties with the shorthands that set them. Each computed value is a fact with its winning declaration. `css_explain/3` says why, `css_lost/4` names the cascade step at which each loser lost, and contrast and unused rules are diagnostics. `tests/exec/css_cascade` (120 cases, valgrind clean) and `tests/integ/style` |
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
-| 8 JavaScript | **redesigned by the benchmark (§11); 8a built, 8b in progress**: an engine of Ambitious's own in cicilang (NaN-boxed values, shapes with inline caches, stack bytecode) in place of embedded QuickJS. `ambitious js` runs a script; `tests/js` checks it line by line against V8; the suite is faster than QuickJS on 8 of 8 workloads. 8b, the page's scripts, DOM bindings and event loop, is next |
+| 8 JavaScript | **built** (redesigned by the benchmark, §11): an engine of Ambitious's own in cicilang (NaN-boxed values, shapes with inline caches, stack bytecode) in place of embedded QuickJS; `tests/js` checks it line by line against V8, and the suite is faster than QuickJS on 8 of 8 workloads. The `script` module runs a page's scripts, events and timers through DOM bindings whose every change is a DOM operation; its facts and rules find uncaught errors, unsettled timers and click listeners a keyboard cannot reach. The interop page's console is Chromium's line for line; the scripted page wins its rows against Chromium |
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. The JavaScript suite: 8 of 8 against QuickJS (Phase 8a); the scripted pages wait for 8b |
+| Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks
 
@@ -699,3 +770,20 @@ put each loss in the interpreter:
 The latest run is faster than QuickJS on **8 of 8** workloads: 1.2x on arrays
 and 1.3x on closures, up to 2.4x on objects. It is also faster than V8's
 interpreter on loop, fib, objects, classes and closures.
+
+**The scripted page, Phase 8b.** `tools/gen-scripted-page.py` writes a page whose
+script builds a list of 2,000 items, and whose button's click puts every item on
+sale. Two rows were added to the comparison:
+- **the scripts, as a stage**: Ambitious's scripts stage against Chromium's
+  traced `EvaluateScript` and `FunctionCall`;
+- **a click handled and drawn again**: Ambitious's click, cascade, layout and
+  viewport paint against Chromium's traced dispatch and the frame it draws.
+
+At the first measure the click came out even, 60.9 ms against 60.8. Paint
+redrew the whole page, 44,000 pixels tall, where Chromium rasterizes the tiles
+on screen. The painter now draws a window of the page (`amb_paint_view`), the
+viewport a click is seen in. The latest run (`docs/benchmark.md`) wins **64 of
+64** comparisons. On the scripted page:
+- the scripts: 5.1 ms against 15.9;
+- the click, drawn again: 19.4 ms against 57.6;
+- warm, laid out: 16.7 ms against 111.0.
