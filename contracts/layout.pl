@@ -44,7 +44,8 @@ layout_contract(record(box, [
     field(how,          enum(width_how)),
     field(avail,        f64),                   % the width its width was found from
     field(background,   u32),                   % RGBA, behind its padding box
-    field(border_color, u32)
+    field(bct, u32), field(bcr, u32), field(bcb, u32), field(bcl, u32),  % border colours, RGBA, a side each
+    field(bst, u8), field(bsr, u8), field(bsb, u8), field(bsl, u8)       % border styles (src/layout/layout.h)
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang=en><head><title>Values</title>
+<style>
+/* CSS values: calc(), min(), max(), clamp(), custom properties and var(), rem against the
+   root's font size, borders a side and their styles */
+:root { --gap: 12px; --wide: calc(100% - 2 * var(--gap)); --ink: #234; font-size: 20px }
+html { font-family: 'DejaVu Sans'; line-height: 20px }
+body { margin: 0.5rem; color: var(--ink) }
+.a { width: var(--wide); height: 2rem; margin: var(--gap) auto; background: #cde }
+.b { width: calc(50% + 10px); padding: calc(1em / 4) 1rem; border: 3px solid red; border-left: 6px dashed blue; background: #fec }
+.c { width: min(300px, 50%); height: max(20px, 1em); background: #cfc }
+.d { width: clamp(100px, 40vw, 200px); height: 10px; border-width: 4px; background: #ccf }
+.e { --pad: 8px; padding: var(--pad) calc(var(--pad) * 2); border: medium double #333; width: 10em; background: #eee }
+.f { margin-left: calc(25% - 1rem); width: 5rem; height: 30px; border-top: 1px solid; border-bottom: thick groove green }
+.g { width: var(--missing, 120px); height: var(--h, 15px); background: #fcc }
+.h { --x: var(--y); --y: var(--x); width: var(--x, 90px); height: 9px; background: #ccc }
+.i { width: calc((100% - 3 * var(--gap)) / 4); height: calc(1rem + 2px); display: inline-block; margin-right: var(--gap); background: #9cf }
+.j { border-style: solid none dotted; border-width: 2px 5px 7px; border-color: red green blue; height: 1em; width: 50vmin }
+.k { font-size: 0.75rem; padding: 0.5em 2em; border: 0.25em outset #c96; width: max-content }
+</style></head>
+<body>
+<div id=a class=a></div>
+<div id=b class=b>calc and rem</div>
+<div id=c class=c></div>
+<div id=d class=d></div>
+<div id=e class=e>var</div>
+<div id=f class=f></div>
+<div id=g class=g></div>
+<div id=h class=h></div>
+<div id=row><div id=i1 class=i></div><div id=i2 class=i></div><div id=i3 class=i></div></div>
+<div id=j class=j></div>
+<div id=k class=k>em of rem</div>
+</body></html>

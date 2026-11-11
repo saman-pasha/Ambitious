@@ -194,11 +194,10 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         else if ((t->box[b].background & 0xff) == 0 && t->box[b].bt + t->box[b].bl == 0)
             pt_fill(c, t->box[b].x, t->box[b].y, t->box[b].x + t->box[b].w, t->box[b].y + t->box[b].h, 0xe8e8e8ff);
     }
-    uint32_t bc = t->box[b].border_color;
-    if (t->box[b].bt > 0) pt_fill(c, bx, by, bx + bw, by + t->box[b].bt, bc);
-    if (t->box[b].bb > 0) pt_fill(c, bx, by + bh - t->box[b].bb, bx + bw, by + bh, bc);
-    if (t->box[b].bl > 0) pt_fill(c, bx, by, bx + t->box[b].bl, by + bh, bc);
-    if (t->box[b].br > 0) pt_fill(c, bx + bw - t->box[b].br, by, bx + bw, by + bh, bc);
+    if (t->box[b].bt > 0) pt_fill(c, bx, by, bx + bw, by + t->box[b].bt, t->box[b].bct);
+    if (t->box[b].bb > 0) pt_fill(c, bx, by + bh - t->box[b].bb, bx + bw, by + bh, t->box[b].bcb);
+    if (t->box[b].bl > 0) pt_fill(c, bx, by, bx + t->box[b].bl, by + bh, t->box[b].bcl);
+    if (t->box[b].br > 0) pt_fill(c, bx + bw - t->box[b].br, by, bx + bw, by + bh, t->box[b].bcr);
 }
 
 static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table,

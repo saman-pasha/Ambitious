@@ -47,17 +47,24 @@ amb_interface(dom);
 amb_interface(css);
 amb_interface(net);
 amb_implementation(layout);
+#include "../css/css.h"
+#include "layout.h"
 
-/* the run's context, as parameters: a struct may hold no borrow */
-#define LCTX layout_tree *t, const dom_document *d, const css_style *st, const net_loader *nt, const amb_fonts *f, const vector<uint32_t> *sx
-#define LARGS t, d, st, nt, f, sx
+/* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
+   (0 for none); sc: each style as layout reads it, made once a run */
+#define LCTX layout_tree *t, const dom_document *d, const css_style *st, const net_loader *nt, const amb_fonts *f, const vector<uint32_t> *sx, \
+    const vector<lay_style> *sc
+#define LARGS t, d, st, nt, f, sx, sc
 
 #define LAY_SPACING 2.0
 
 /* ---- the computed style of an element, as layout reads it ---- */
 
-enum { LAY_PX, LAY_PCT, LAY_AUTO };
-typedef struct lay_len { int unit; double v; } lay_len;
+/* a length: px, a percentage, auto, px plus a percentage (a calc()), a calc() whose
+   text (the value cv's) is reckoned against the percentages' basis; or a size its content
+   gives (min-content, max-content, fit-content) */
+enum { LAY_PX, LAY_PCT, LAY_AUTO, LAY_CALC, LAY_EXPR, LAY_MINC, LAY_MAXC, LAY_FITC };
+typedef struct lay_len { int unit; double v, pct; uint32_t cv; } lay_len;
 
 enum { D_NONE, D_INLINE, D_BLOCK, D_LIST_ITEM, D_INLINE_BLOCK, D_TABLE, D_ROW_GROUP, D_ROW, D_CELL, D_CAPTION, D_CONTENTS };
 enum { WS_NORMAL, WS_PRE, WS_NOWRAP, WS_PRE_WRAP, WS_PRE_LINE };
@@ -65,34 +72,46 @@ enum { AL_LEFT, AL_RIGHT, AL_CENTER, AL_JUSTIFY };
 
 typedef struct lay_style {
     int display, bfc;
-    uint32_t color, bg, bcolor;
+    uint32_t color, bg, bc[4];
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box;
+    uint8_t bs[4];
     lay_len m[4], p[4], width, height, maxw;
     double b[4];
 } lay_style;
 
-static uint32_t lay_cv(const css_style *st, const vector<uint32_t> *sx, uint32_t x, css_prop p) {
-    if (x >= len(*sx)) return 0;
-    uint32_t c = at(*sx, x);
-    if (!c) return 0;
-    for (uint32_t k = c; k < st->cval_len && st->cval[k].style == st->cval[c].style; k++) if (st->cval[k].prop == p) return k;
-    return 0;
-}
-static int lay_is(const css_style *st, uint32_t c, const char *w) {
-    return c && st->cval[c].unit == CSS_UNIT_KEYWORD && names_is(st, st->cval[c].word, w, strlen(w));
+static int lay_content_sized(lay_len l) { return l.unit == LAY_MINC || l.unit == LAY_MAXC || l.unit == LAY_FITC; }
+static double lay_res(const css_style *st, lay_len l, double base) {
+    if (l.unit == LAY_PCT) return base * l.v / 100;
+    if (l.unit == LAY_AUTO || lay_content_sized(l)) return 0;
+    if (l.unit == LAY_CALC) return l.v + base * l.pct / 100;
+    if (l.unit == LAY_EXPR) {
+        double x;
+        amb_span sp = st->cval[l.cv].text;
+        if (css_calc_eval(text_ptr(st, sp), sp.len, base, &x)) return x;
+        return 0;
+    }
+    return l.v;
 }
 static lay_len lay_len_at(const css_style *st, uint32_t c) {
     lay_len l;
     l.unit = LAY_PX;
     l.v = 0;
+    l.pct = 0;
+    l.cv = c;
     if (!c) return l;
-    if (st->cval[c].unit == CSS_UNIT_AUTO) l.unit = LAY_AUTO;
-    else if (st->cval[c].unit == CSS_UNIT_PERCENT) { l.unit = LAY_PCT; l.v = st->cval[c].num; }
+    css_unit u = st->cval[c].unit;
+    if (u == CSS_UNIT_KEYWORD) {
+        uint32_t w = st->cval[c].word;
+        l.unit = names_is(st, w, "min-content", 11) ? LAY_MINC : names_is(st, w, "max-content", 11) ? LAY_MAXC :
+                 names_is(st, w, "fit-content", 11) ? LAY_FITC : LAY_AUTO;
+    } else if (u == CSS_UNIT_AUTO) l.unit = LAY_AUTO;
+    else if (u == CSS_UNIT_PERCENT) { l.unit = LAY_PCT; l.v = st->cval[c].num; }
+    else if (u == CSS_UNIT_CALC) { l.unit = LAY_CALC; l.v = st->cval[c].num; l.pct = st->cval[c].pct; }
+    else if (u == CSS_UNIT_EXPR) l.unit = LAY_EXPR;
     else l.v = st->cval[c].num;
     return l;
 }
-static double lay_res(lay_len l, double base) { return l.unit == LAY_PCT ? base * l.v / 100 : l.unit == LAY_AUTO ? 0 : l.v; }
 
 /* the keyword of the value c, copied into w (32 bytes; "" for no keyword) */
 static void lay_word_of(const css_style *st, uint32_t c, char *w) {
@@ -105,25 +124,28 @@ static void lay_word_of(const css_style *st, uint32_t c, char *w) {
 }
 static int lay_w(const char *w, const char *k) { return strcmp(w, k) == 0; }
 
-static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
+static int lay_border_style(const char *w) {
+    static const char *const names[10] = { "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset" };
+    for (int i = 0; i < 10; i++) if (lay_w(w, names[i])) return i;
+    return LAY_BS_NONE;
+}
+
+/* a style as layout reads it, from its computed values: a run from c0 in enum(prop)'s
+   order (src/css/css.c) */
+static void lay_style_make(const css_style *st, const amb_fonts *f, uint32_t c0, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
     s->fs = 16;
     s->face = AMB_FACE_SERIF;
     s->width.unit = LAY_AUTO;
     s->height.unit = LAY_AUTO;
-    /* the node's computed values, each found once; a keyword's word copied once (PLAN.md §11) */
-    uint32_t cv[64];
-    memset(cv, 0, sizeof cv);
-    if (x < len(*sx) && at(*sx, x))
-        for (uint32_t k = at(*sx, x); k < st->cval_len && st->cval[k].style == st->cval[at(*sx, x)].style; k++) {
-            uint32_t pn = (uint32_t)st->cval[k].prop;
-            if (pn < 64 && !cv[pn]) cv[pn] = k;
-        }
+    s->maxw.unit = LAY_AUTO;
+    if (!c0) { s->display = D_NONE; return; }
+    uint32_t cv[CSS_NPROPS];
+    for (uint32_t k = 0; k < CSS_NPROPS; k++) cv[k] = c0 + k;
     char w[32];
     uint32_t c = cv[CSS_PROP_DISPLAY];
     lay_word_of(st, c, w);
-    if (!c) { s->display = D_NONE; return; }
     if (lay_w(w, "none") || lay_w(w, "table-column") || lay_w(w, "table-column-group")) s->display = D_NONE;
     else if (lay_w(w, "inline")) s->display = D_INLINE;
     else if (lay_w(w, "list-item")) s->display = D_LIST_ITEM;
@@ -140,68 +162,60 @@ static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
         s->display = D_BLOCK;
         s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid");
     }
-    c = cv[CSS_PROP_COLOR];
-    if (c) s->color = st->cval[c].color;
-    c = cv[CSS_PROP_BACKGROUND_COLOR];
-    if (c) s->bg = st->cval[c].color;
-    c = cv[CSS_PROP_BORDER_COLOR];
-    s->bcolor = c ? st->cval[c].color : s->color;
-    c = cv[CSS_PROP_FONT_SIZE];
-    if (c) s->fs = st->cval[c].num;
-    c = cv[CSS_PROP_FONT_WEIGHT];
-    int bold = c && st->cval[c].num >= 600;
-    c = cv[CSS_PROP_FONT_FAMILY];
-    lay_word_of(st, c, w);
+    s->color = st->cval[cv[CSS_PROP_COLOR]].color;
+    s->bg = st->cval[cv[CSS_PROP_BACKGROUND_COLOR]].color;
+    s->fs = st->cval[cv[CSS_PROP_FONT_SIZE]].num;
+    int bold = st->cval[cv[CSS_PROP_FONT_WEIGHT]].num >= 600;
+    lay_word_of(st, cv[CSS_PROP_FONT_FAMILY], w);
     int family = lay_w(w, "sans-serif") ? 0 : lay_w(w, "monospace") ? 2 : 1;
     s->face = amb_face_for(family, bold);
-    c = cv[CSS_PROP_FONT_STYLE];
-    lay_word_of(st, c, w);
+    lay_word_of(st, cv[CSS_PROP_FONT_STYLE], w);
     s->italic = lay_w(w, "italic") || lay_w(w, "oblique");
     double gap;
     amb_face_metrics(f, s->face, s->fs, &s->asc, &s->desc, &gap);
     c = cv[CSS_PROP_LINE_HEIGHT];
-    if (c && st->cval[c].unit == CSS_UNIT_NUMBER) s->lh = st->cval[c].num * s->fs;
-    else if (c && st->cval[c].unit == CSS_UNIT_PX) s->lh = st->cval[c].num;
+    if (st->cval[c].unit == CSS_UNIT_NUMBER) s->lh = st->cval[c].num * s->fs;
+    else if (st->cval[c].unit == CSS_UNIT_PX) s->lh = st->cval[c].num;
     else s->lh = s->asc + s->desc + gap;
-    c = cv[CSS_PROP_TEXT_ALIGN];
-    lay_word_of(st, c, w);
+    lay_word_of(st, cv[CSS_PROP_TEXT_ALIGN], w);
     s->align = lay_w(w, "right") || lay_w(w, "end") ? AL_RIGHT : lay_w(w, "center") ? AL_CENTER :
                lay_w(w, "justify") ? AL_JUSTIFY : AL_LEFT;
-    c = cv[CSS_PROP_WHITE_SPACE];
-    lay_word_of(st, c, w);
+    lay_word_of(st, cv[CSS_PROP_WHITE_SPACE], w);
     s->ws = lay_w(w, "pre") ? WS_PRE : lay_w(w, "nowrap") ? WS_NOWRAP : lay_w(w, "pre-wrap") || lay_w(w, "break-spaces") ? WS_PRE_WRAP :
             lay_w(w, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
-    c = cv[CSS_PROP_TEXT_DECORATION];
-    lay_word_of(st, c, w);
+    lay_word_of(st, cv[CSS_PROP_TEXT_DECORATION], w);
     s->deco = lay_w(w, "underline") ? 1 : lay_w(w, "overline") ? 2 : lay_w(w, "line-through") ? 4 : 0;
-    c = cv[CSS_PROP_LIST_STYLE_TYPE];
-    lay_word_of(st, c, w);
+    lay_word_of(st, cv[CSS_PROP_LIST_STYLE_TYPE], w);
     s->list = lay_w(w, "none") ? 0 : lay_w(w, "circle") ? 2 : lay_w(w, "square") ? 3 :
               lay_w(w, "decimal") || lay_w(w, "decimal-leading-zero") ? 4 :
               lay_w(w, "lower-alpha") || lay_w(w, "lower-latin") || lay_w(w, "lower-greek") ? 5 :
               lay_w(w, "upper-alpha") || lay_w(w, "upper-latin") ? 6 : lay_w(w, "lower-roman") ? 7 :
               lay_w(w, "upper-roman") ? 8 : 1;
     for (int k = 0; k < 4; k++) {
-        s->m[k] = lay_len_at(st, cv[(css_prop)(CSS_PROP_MARGIN_TOP + k)]);
-        s->p[k] = lay_len_at(st, cv[(css_prop)(CSS_PROP_PADDING_TOP + k)]);
-        c = cv[(css_prop)(CSS_PROP_BORDER_TOP_WIDTH + k)];
-        s->b[k] = c ? st->cval[c].num : 0;
-        if (s->b[k] > 0 && s->b[k] < 1) s->b[k] = 1;         /* a border shows at least a pixel */
+        s->m[k] = lay_len_at(st, cv[CSS_PROP_MARGIN_TOP + k]);
+        s->p[k] = lay_len_at(st, cv[CSS_PROP_PADDING_TOP + k]);
+        s->b[k] = st->cval[cv[CSS_PROP_BORDER_TOP_WIDTH + k]].num;
+        s->bc[k] = st->cval[cv[CSS_PROP_BORDER_TOP_COLOR + k]].color;
+        lay_word_of(st, cv[CSS_PROP_BORDER_TOP_STYLE + k], w);
+        s->bs[k] = (uint8_t)lay_border_style(w);
     }
     s->width = lay_len_at(st, cv[CSS_PROP_WIDTH]);
     s->height = lay_len_at(st, cv[CSS_PROP_HEIGHT]);
     lay_word_of(st, cv[CSS_PROP_BOX_SIZING], w);
     s->border_box = lay_w(w, "border-box");
     c = cv[CSS_PROP_MAX_WIDTH];
-    lay_word_of(st, c, w);
-    s->maxw.unit = LAY_AUTO;
-    if (c && !lay_w(w, "none")) s->maxw = lay_len_at(st, c);
+    if (st->cval[c].unit != CSS_UNIT_KEYWORD) s->maxw = lay_len_at(st, c);
     if (s->border_box) {
         /* a declared height is its border box's: the content's is what is left */
         double vedges = s->b[0] + s->b[2] + (s->p[0].unit == LAY_PX ? s->p[0].v : 0) + (s->p[2].unit == LAY_PX ? s->p[2].v : 0);
         if (s->height.unit == LAY_PX) { s->height.v -= vedges; if (s->height.v < 0) s->height.v = 0; }
     }
-    if (s->height.unit == LAY_PCT) s->height.unit = LAY_AUTO;   /* against no definite height */
+    if (s->height.unit != LAY_PX && s->height.unit != LAY_AUTO) s->height.unit = LAY_AUTO;   /* against no definite height */
+}
+
+static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
+    uint32_t si = x < len(*sx) ? at(*sx, x) : 0;
+    *s = at(*sc, si);
 }
 
 /* ---- the DOM, as layout walks it ---- */
@@ -334,7 +348,7 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                     dh = nt->resource[r].height;
                 }
             if (dw > 0 && dh > 0) {
-                if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) { *w = lay_res(s->width, cw); *h = *w * dh / dw; return; }
+                if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) { *w = lay_res(st, s->width, cw); *h = *w * dh / dw; return; }
                 if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) { *h = s->height.v; *w = *h * dw / dh; return; }
             }
         }
@@ -351,24 +365,24 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
         } else if (lay_is_named(d, el, "select")) { dw = 8 * s->fs; dh = s->lh; }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
         else if (lay_is_named(d, el, "canvas") || lay_is_named(d, el, "svg")) { dw = 300; dh = 150; }
-        *w = s->width.unit == LAY_AUTO ? dw : lay_res(s->width, cw);
+        *w = s->width.unit == LAY_AUTO ? dw : lay_res(st, s->width, cw);
         *h = s->height.unit == LAY_AUTO ? dh : s->height.v;
         return;
     }
-    double box_edges = s->b[1] + s->b[3] + lay_res(s->p[1], cw) + lay_res(s->p[3], cw);
-    if (s->width.unit != LAY_AUTO) {
-        *w = lay_res(s->width, cw) - (s->border_box ? box_edges : 0);
+    double box_edges = s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw);
+    if (s->width.unit != LAY_AUTO && !lay_content_sized(s->width)) {
+        *w = lay_res(st, s->width, cw) - (s->border_box ? box_edges : 0);
         if (*w < 0) *w = 0;
         return;
     }
     double mn, mx;
     lay_intrinsic(LARGS, el, cw, &mn, &mx);
-    double edges = lay_res(s->m[1], cw) + lay_res(s->m[3], cw) + box_edges;
+    double edges = lay_res(st, s->m[1], cw) + lay_res(st, s->m[3], cw) + box_edges;
     mn -= edges;
     mx -= edges;
     double avail = cw - edges;
     double v = avail > mn ? avail : mn;
-    *w = v < mx ? v : mx;
+    *w = s->width.unit == LAY_MINC ? mn : s->width.unit == LAY_MAXC ? mx : v < mx ? v : mx;
     if (*w < 0) *w = 0;
 }
 
@@ -471,7 +485,7 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
         p.kind = P_ATOMIC;
         p.aw = w;
         p.ah = h;
-        p.w = lay_res(s.m[3], cw) + s.b[3] + lay_res(s.p[3], cw) + w + lay_res(s.p[1], cw) + s.b[1] + lay_res(s.m[1], cw);
+        p.w = lay_res(st, s.m[3], cw) + s.b[3] + lay_res(st, s.p[3], cw) + w + lay_res(st, s.p[1], cw) + s.b[1] + lay_res(st, s.m[1], cw);
         push_back(ps, p);
         *sp = 0;
         return;
@@ -479,11 +493,11 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     int inner = deco | s.deco;
     p.kind = P_OPEN;
     p.bg = s.bg;
-    p.w = lay_res(s.m[3], cw) + s.b[3] + lay_res(s.p[3], cw);
+    p.w = lay_res(st, s.m[3], cw) + s.b[3] + lay_res(st, s.p[3], cw);
     push_back(ps, p);
     for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling) lay_node_pieces(LARGS, c, inner, cw, ps, sp);
     p.kind = P_CLOSE;
-    p.w = lay_res(s.p[1], cw) + s.b[1] + lay_res(s.m[1], cw);
+    p.w = lay_res(st, s.p[1], cw) + s.b[1] + lay_res(st, s.m[1], cw);
     push_back(ps, p);
 }
 
@@ -537,9 +551,9 @@ static void lay_run_intrinsic(const vector<lay_piece> *ps, double *mn, double *m
     if (chunk > *mn) *mn = chunk;
 }
 
-static double lay_edges_px(const lay_style *s, double cw) {
-    return (s->m[1].unit == LAY_AUTO ? 0 : lay_res(s->m[1], cw)) + (s->m[3].unit == LAY_AUTO ? 0 : lay_res(s->m[3], cw)) +
-           s->b[1] + s->b[3] + lay_res(s->p[1], cw) + lay_res(s->p[3], cw);
+static double lay_edges_px(const css_style *st, const lay_style *s, double cw) {
+    return (s->m[1].unit == LAY_AUTO ? 0 : lay_res(st, s->m[1], cw)) + (s->m[3].unit == LAY_AUTO ? 0 : lay_res(st, s->m[3], cw)) +
+           s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw);
 }
 
 static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
@@ -547,11 +561,11 @@ static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) {
     lay_style s;
     lay_style_of(LARGS, el, &s);
-    double edges = lay_edges_px(&s, cw);
+    double edges = lay_edges_px(st, &s, cw);
     *mn = 0;
     *mx = 0;
     if (s.width.unit == LAY_PX) {
-        double box_edges = s.b[1] + s.b[3] + lay_res(s.p[1], cw) + lay_res(s.p[3], cw);
+        double box_edges = s.b[1] + s.b[3] + lay_res(st, s.p[1], cw) + lay_res(st, s.p[3], cw);
         *mn = *mx = s.width.v + edges - (s.border_box ? box_edges : 0);
         return;
     }
@@ -593,27 +607,34 @@ static uint32_t lay_new_box(LCTX, uint32_t parent, uint32_t el, layout_box_kind 
 
 /* a box's margins (vertical ones, and horizontal ones that are not auto), borders,
    paddings and colours, against its containing block's width cw */
-static void lay_edges(layout_tree *t, uint32_t b, const lay_style *s, double cw) {
-    t->box[b].mt = lay_res(s->m[0], cw);
-    t->box[b].mb = lay_res(s->m[2], cw);
-    t->box[b].ml = lay_res(s->m[3], cw);
-    t->box[b].mr = lay_res(s->m[1], cw);
+static void lay_edges(layout_tree *t, const css_style *st, uint32_t b, const lay_style *s, double cw) {
+    t->box[b].mt = lay_res(st, s->m[0], cw);
+    t->box[b].mb = lay_res(st, s->m[2], cw);
+    t->box[b].ml = lay_res(st, s->m[3], cw);
+    t->box[b].mr = lay_res(st, s->m[1], cw);
     t->box[b].bt = s->b[0];
     t->box[b].br = s->b[1];
     t->box[b].bb = s->b[2];
     t->box[b].bl = s->b[3];
-    t->box[b].pt = lay_res(s->p[0], cw);
-    t->box[b].pr = lay_res(s->p[1], cw);
-    t->box[b].pb = lay_res(s->p[2], cw);
-    t->box[b].pl = lay_res(s->p[3], cw);
+    t->box[b].pt = lay_res(st, s->p[0], cw);
+    t->box[b].pr = lay_res(st, s->p[1], cw);
+    t->box[b].pb = lay_res(st, s->p[2], cw);
+    t->box[b].pl = lay_res(st, s->p[3], cw);
     t->box[b].background = s->bg;
-    t->box[b].border_color = s->bcolor;
+    t->box[b].bct = s->bc[0];
+    t->box[b].bcr = s->bc[1];
+    t->box[b].bcb = s->bc[2];
+    t->box[b].bcl = s->bc[3];
+    t->box[b].bst = s->bs[0];
+    t->box[b].bsr = s->bs[1];
+    t->box[b].bsb = s->bs[2];
+    t->box[b].bsl = s->bs[3];
     t->box[b].avail = cw;
 }
 
 /* a block-level box's width and horizontal margins (CSS 2.1, 10.3.3): a declared
    width is the border box's under box-sizing: border-box; max-width holds it narrower */
-static void lay_block_width(layout_tree *t, uint32_t b, const lay_style *s, double cw) {
+static void lay_block_width(layout_tree *t, const css_style *st, uint32_t b, const lay_style *s, double cw) {
     double edges = t->box[b].bl + t->box[b].br + t->box[b].pl + t->box[b].pr;
     int mla = s->m[3].unit == LAY_AUTO, mra = s->m[1].unit == LAY_AUTO;
     double ml = mla ? 0 : t->box[b].ml, mr = mra ? 0 : t->box[b].mr, w;
@@ -622,12 +643,12 @@ static void lay_block_width(layout_tree *t, uint32_t b, const lay_style *s, doub
         w = cw - ml - mr - edges;
         t->box[b].how = LAYOUT_WIDTH_HOW_FILL;
     } else {
-        w = lay_res(s->width, cw) - (s->border_box ? edges : 0);
-        t->box[b].how = s->width.unit == LAY_PCT ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED;
+        w = lay_res(st, s->width, cw) - (s->border_box ? edges : 0);
+        t->box[b].how = s->width.unit != LAY_PX ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED;
     }
     if (w < 0) w = 0;
     if (s->maxw.unit != LAY_AUTO) {
-        double mw = lay_res(s->maxw, cw) - (s->border_box ? edges : 0);
+        double mw = lay_res(st, s->maxw, cw) - (s->border_box ? edges : 0);
         if (mw < 0) mw = 0;
         if (w > mw) { w = mw; declared = 1; t->box[b].how = LAYOUT_WIDTH_HOW_MAX_WIDTH; }
     }
@@ -680,14 +701,14 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     lay_style_of(LARGS, el, &s);
     int replaced = lay_replaced(d, el);
     uint32_t b = lay_new_box(LARGS, parent, el, replaced ? LAYOUT_BOX_KIND_REPLACED : LAYOUT_BOX_KIND_INLINE_BLOCK);
-    lay_edges(t, b, &s, cw);
+    lay_edges(t, st, b, &s, cw);
     if (s.m[3].unit == LAY_AUTO) t->box[b].ml = 0;
     if (s.m[1].unit == LAY_AUTO) t->box[b].mr = 0;
     if (s.m[0].unit == LAY_AUTO) t->box[b].mt = 0;
     if (s.m[2].unit == LAY_AUTO) t->box[b].mb = 0;
     t->box[b].w = p->aw;
     t->box[b].how = replaced || s.width.unit == LAY_AUTO ? (replaced ? LAYOUT_WIDTH_HOW_INTRINSIC : LAYOUT_WIDTH_HOW_SHRINK_TO_FIT)
-                                                         : (s.width.unit == LAY_PCT ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED);
+                                                         : (s.width.unit != LAY_PX ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED);
     if (replaced) { t->box[b].h = p->ah > 0 ? p->ah : 0; return b; }
     lay_mc et, eb;
     int empty;
@@ -786,10 +807,10 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 uint32_t fr = fh.index;
                 t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
                 t->frag[fr].node = node_handle(d, elx);
-                t->frag[fr].x = x0 + (from < 0 ? 0 : lay_res(es.m[3], w));
-                t->frag[fr].w = px + p.w - lay_res(es.m[1], w) - t->frag[fr].x;
-                t->frag[fr].y = baseline - es.asc - lay_res(es.p[0], w) - es.b[0];
-                t->frag[fr].h = es.asc + es.desc + lay_res(es.p[0], w) + lay_res(es.p[2], w) + es.b[0] + es.b[2];
+                t->frag[fr].x = x0 + (from < 0 ? 0 : lay_res(st, es.m[3], w));
+                t->frag[fr].w = px + p.w - lay_res(st, es.m[1], w) - t->frag[fr].x;
+                t->frag[fr].y = baseline - es.asc - lay_res(st, es.p[0], w) - es.b[0];
+                t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
                 t->frag[fr].baseline = baseline;
                 t->frag[fr].background = es.bg;
                 frags_append(t, ln, fr);
@@ -803,15 +824,15 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         lay_style_of(LARGS, elx, &es);
         if ((es.bg & 0xff) == 0) continue;
         double from = at(starts, k);
-        double x0 = from < 0 ? 0 : from + lay_res(es.m[3], w);
+        double x0 = from < 0 ? 0 : from + lay_res(st, es.m[3], w);
         layout_frag_h fh = frag_new(t);
         uint32_t fr = fh.index;
         t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
         t->frag[fr].node = node_handle(d, elx);
         t->frag[fr].x = x0;
         t->frag[fr].w = line_w + shift + gap - x0;
-        t->frag[fr].y = baseline - es.asc - lay_res(es.p[0], w) - es.b[0];
-        t->frag[fr].h = es.asc + es.desc + lay_res(es.p[0], w) + lay_res(es.p[2], w) + es.b[0] + es.b[2];
+        t->frag[fr].y = baseline - es.asc - lay_res(st, es.p[0], w) - es.b[0];
+        t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
         t->frag[fr].baseline = baseline;
         t->frag[fr].background = es.bg;
         frags_append(t, ln, fr);
@@ -1111,8 +1132,8 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
     double ml = s->m[3].unit == LAY_AUTO ? 0 : t->box[b].ml, mr = s->m[1].unit == LAY_AUTO ? 0 : t->box[b].mr;
     double bw;
     if (s->width.unit != LAY_AUTO) {
-        bw = lay_res(s->width, cw);
-        t->box[b].how = s->width.unit == LAY_PCT ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED;
+        bw = lay_res(st, s->width, cw);
+        t->box[b].how = s->width.unit != LAY_PX ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED;
     } else {
         double avail = cw - ml - mr;
         bw = smax + spacing + edges;
@@ -1154,7 +1175,6 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         lay_style rs;
         lay_style_of(LARGS, row_el, &rs);
         t->box[rb].background = rs.bg;
-        t->box[rb].border_color = rs.bcolor;
         t->box[rb].w = t->box[b].w;
         t->box[rb].how = LAYOUT_WIDTH_HOW_FILL;
         t->box[rb].avail = t->box[b].w;
@@ -1169,7 +1189,7 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
             lay_style cs;
             lay_style_of(LARGS, c.el, &cs);
             uint32_t cb = lay_new_box(LARGS, rb, c.el, LAYOUT_BOX_KIND_CELL);
-            lay_edges(t, cb, &cs, t->box[b].w);
+            lay_edges(t, st, cb, &cs, t->box[b].w);
             t->box[cb].mt = t->box[cb].mr = t->box[cb].mb = t->box[cb].ml = 0;
             t->box[cb].w = span_w - t->box[cb].bl - t->box[cb].br - t->box[cb].pl - t->box[cb].pr;
             if (t->box[cb].w < 0) t->box[cb].w = 0;
@@ -1288,7 +1308,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     layout_box_kind kind = s.display == D_LIST_ITEM ? LAYOUT_BOX_KIND_LIST_ITEM : s.display == D_TABLE ? LAYOUT_BOX_KIND_TABLE :
                            LAYOUT_BOX_KIND_BLOCK;
     uint32_t b = lay_new_box(LARGS, parent, el, kind);
-    lay_edges(t, b, &s, cw);
+    lay_edges(t, st, b, &s, cw);
     if (s.m[0].unit == LAY_AUTO) t->box[b].mt = 0;
     if (s.m[2].unit == LAY_AUTO) t->box[b].mb = 0;
     if (s.display == D_TABLE) {
@@ -1298,7 +1318,18 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         *empty = 0;
         return b;
     }
-    lay_block_width(t, b, &s, cw);
+    int content_sized = lay_content_sized(s.width);
+    if (content_sized) {
+        double mn, mx;
+        lay_intrinsic(LARGS, el, cw, &mn, &mx);
+        double edges = lay_edges_px(st, &s, cw), box = s.b[1] + s.b[3] + lay_res(st, s.p[1], cw) + lay_res(st, s.p[3], cw);
+        double avail = cw - edges, v = avail > mn - edges ? avail : mn - edges;
+        double w = s.width.unit == LAY_MINC ? mn - edges : s.width.unit == LAY_MAXC ? mx - edges : v < mx - edges ? v : mx - edges;
+        s.width.unit = LAY_PX;
+        s.width.v = (w < 0 ? 0 : w) + (s.border_box ? box : 0);
+    }
+    lay_block_width(t, st, b, &s, cw);
+    if (content_sized && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_SHRINK_TO_FIT;
     int root = d->node[el].parent == 1;
     int bfc = root || s.bfc || s.display == D_CELL || s.display == D_CAPTION;
     lay_mc et, eb;
@@ -1339,27 +1370,39 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     amb_fonts fonts = {0};
     defer(fonts) { AMB_FONTS_DROP(fonts); }
     amb_fonts_load(&fonts);
-    vector<uint32_t> first_cval;
-    resize(first_cval, doc->node_len);
-    for (uint32_t e = 1; e < style->estyle_len; e++) {      /* each element's first value: its style's */
-        uint32_t x = style->estyle[e].node.index;
-        if (x < doc->node_len && !at(first_cval, x)) first_cval[x] = style->estyle[e].first;
+    /* each node's style, and each style's first value; then each style as layout reads it */
+    vector<uint32_t> node_style;
+    resize(node_style, doc->node_len);
+    vector<uint32_t> style_first;
+    resize(style_first, 1);
+    for (uint32_t e = 1; e < style->estyle_len; e++) {
+        uint32_t x = style->estyle[e].node.index, sid = style->estyle[e].style;
+        if (x < doc->node_len && !at(node_style, x)) node_style[x] = sid;
+        if (sid >= len(style_first)) resize(style_first, (size_t)sid + 1);
+        style_first[sid] = style->estyle[e].first;
+    }
+    vector<lay_style> styles;
+    resize(styles, len(style_first));
+    for (size_t k = 0; k < len(style_first); k++) {
+        lay_style ls;
+        lay_style_make(style, &fonts, at(style_first, k), &ls);
+        styles[k] = ls;
     }
     /* the root element: the document's element child */
     uint32_t root = 0;
     for (uint32_t c = doc->node_len > 1 ? doc->node[1].first_child : 0; c; c = doc->node[c].next_sibling)
         if (doc->node[c].kind == DOM_NODE_KIND_ELEMENT) root = c;
-    uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &first_cval, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
+    uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &node_style, &styles, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
     t->box[vp].w = width;
     t->box[vp].h = height;
     t->box[vp].how = LAYOUT_WIDTH_HOW_VIEWPORT;
     t->box[vp].avail = width;
     t->box[vp].background = 0xffffffff;
     if (!root) { t->revision++; return LAYOUT_NO_ROOT; }
-    if (lay_display_of(t, doc, style, net, &fonts, &first_cval, root) != D_NONE) {
+    if (lay_display_of(t, doc, style, net, &fonts, &node_style, &styles, root) != D_NONE) {
         lay_mc mt, mb;
         int empty;
-        uint32_t rb = lay_block(t, doc, style, net, &fonts, &first_cval, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
+        uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
         lay_place(t, rb, t->box[rb].ml, t->box[rb].mt);
         double bottom = t->box[rb].mt + lay_border_height(t, rb) + t->box[rb].mb;
         if (bottom > height) t->box[vp].h = bottom;

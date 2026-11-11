@@ -65,6 +65,7 @@ amb_interface(a11y);
 amb_interface(script);
 
 #include "../paint/paint.h"
+#include "../css/css.h"
 #include "../js/js.h"
 #include "../script/script.h"
 
@@ -600,8 +601,10 @@ static int cmd_style(const char *page) {
                 }
         printf("\n");
     }
-    printf("%zu rules, %zu declarations, %zu matches, %zu computed values (%zu styles)\n", rule_count(st), decl_count(st), match_count(st),
-           (size_t)estyle_count(st) * 29, (size_t)cval_count(st) / 29);
+    uint32_t styles = 0;
+    for (uint32_t es = 1; es < st.estyle_len; es++) if (st.estyle[es].style > styles) styles = st.estyle[es].style;
+    printf("%zu rules, %zu declarations, %zu matches, %zu computed values (%u styles)\n", rule_count(st), decl_count(st), match_count(st),
+           (size_t)estyle_count(st) * CSS_NPROPS, styles);
     return 0;
 }
 
