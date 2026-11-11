@@ -1128,8 +1128,7 @@ static int net_tls_ready(net_tls *t) {
     const char *env = getenv("SSL_CERT_FILE");
     char ca[1024];
     snprintf(ca, sizeof ca, "%s", env && *env ? env : NET_CA_FILE);
-    SSL_CTX_free(t->ctx);                   /* none yet: this is the first try */
-    t->ctx = SSL_CTX_new(TLS_client_method());
+    if (!t->ctx) t->ctx = SSL_CTX_new(TLS_client_method());
     if (!t->ctx) { snprintf(t->why, sizeof t->why, "no TLS context could be made"); return 0; }
     SSL_CTX_ctrl(t->ctx, NET_SSL_CTRL_SET_MIN_PROTO_VERSION, NET_TLS1_2_VERSION, 0);
     if (SSL_CTX_load_verify_locations(t->ctx, ca, 0) != 1) {
@@ -1923,7 +1922,10 @@ static void net_jar_write(net_loader *l) {
     if (slash && slash != dir) { *slash = 0; mkdir(dir, 0700); }
     int64_t now = net_now();
     {
+        /* readable by its owner alone: a cookie's value may be a secret */
+        mode_t mask = umask(077);
         own FILE *f = fopen(tmp, "w");
+        umask(mask);
         if (!f) return;
         defer(f) { fclose(f); }
         fprintf(f, "# Ambitious's cookie jar: a cookie a line -- domain, host-only, path, secure, http-only, same-site, expires, created, name, value\n");
@@ -2196,7 +2198,10 @@ static void net_cache_write(const char *path, const char *url, int status, int64
         mkdir(dir, 0700);
     }
     {
+        /* readable by its owner alone: a private response is the user's */
+        mode_t mask = umask(077);
         own FILE *f = fopen(tmp, "wb");
+        umask(mask);
         if (!f) return;
         defer(f) { fclose(f); }
         fprintf(f, "AMBITIOUS-CACHE 1\nurl: %s\nstatus: %d\nresponse-time: %lld\n", url, status, (long long)rtime);

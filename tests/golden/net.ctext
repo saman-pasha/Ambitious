@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:6bde7737:5895). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:38a37f3a:6103). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
 typedef enum net_cache_use { NET_CACHE_USE_UNUSED, NET_CACHE_USE_STORED, NET_CACHE_USE_FRESH, NET_CACHE_USE_REVALIDATED, NET_CACHE_USE_NOT_STORED } net_cache_use;
@@ -135,7 +135,7 @@ const char *net_refusal_name(net_refusal x) {
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:6bde7737:5895";
+const char net_fingerprint[] = "fnv1a32:38a37f3a:6103";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;

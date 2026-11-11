@@ -1,15 +1,19 @@
 %% contracts/net.pl -- the network module's contract (docs/contract.md is the format).
 %%
-%% URLs parsed and resolved (a WHATWG subset), resources fetched over file:,
-%% data:, http: and https: (HTTP/1.1: Content-Length, chunked, redirects within a
-%% bound; TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and
-%% the host name verified; a proxy from the environment), and what a page loads --
-%% its stylesheets, images and scripts -- each with the element and the resource
-%% that asked for it, its origin, its redirects, how its fetch ended and why. Same-
-%% origin decisions are made here in C (a page served over http: may not load a
-%% file: URL); the reasoner sees the dependency graph, the origins and what each
-%% fetch rode on, and says what failed and what crossed origins. src/net/net.c says
-%% what of URLs and HTTP the module does.
+%% URLs parsed and resolved (a WHATWG subset: IPv6 and IPv4 hosts, IDNA's
+%% lowercasing and Punycode), resources fetched over file:, data:, http: and https:
+%% (HTTP/1.1: Content-Length, chunked, redirects within a bound, gzip and deflate;
+%% TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
+%% name verified; a proxy from the environment), and what a page loads -- its
+%% stylesheets, images (from a srcset where there is one) and scripts -- each with
+%% the element and the resource that asked for it, its origin, its redirects, how
+%% its fetch ended and why. The loader keeps a cookie jar (RFC 6265bis) and an HTTP
+%% cache (RFC 9111), in a profile's directory when there is one. Same-origin and
+%% same-site decisions are made here in C (a page served over http: may not load a
+%% file: URL; SameSite cookies stay with their site); the reasoner sees the
+%% dependency graph, the origins, what each fetch rode on, the page's cookies (never
+%% a value) and what the cache did, and says what failed, what crossed origins and
+%% which cookies were refused. src/net/net.c says what of each the module does.
 
 net_contract(module(net, '0.2.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where')).
 
@@ -180,6 +184,8 @@ net_contract(derived(net_from_cache/2, 'a resource the cache answered, fresh or 
 net_contract(derived(net_low_density/2, 'an image chosen from a srcset at a density below the screen''s, and that density')).
 
 net_contract(query(loaded, (net_resource(R, U, K, O, S, _, _)), [R, U, K, O, S], 'every resource, what it is and how its fetch ended')).
+net_contract(query(cookies, (net_cookie(C, N, D, P, S)), [C, N, D, P, S], 'the page''s cookies: name, domain, path, and what became of each')).
+net_contract(query(cached, (net_from_cache(R, How)), [R, How], 'every resource the HTTP cache answered, and how')).
 
 net_contract(generate([c_types, c_store, c_accessors, c_checks, c_exporter, c_invariants, schema, doc])).
 net_contract(test(integ, 'tests/integ/net')).
