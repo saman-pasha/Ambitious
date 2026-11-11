@@ -10,15 +10,20 @@
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
  *   ambitious style PAGE          the page's elements with their computed styles
  *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
+ *   ambitious inspect PAGE [--query GOAL | --why GOAL]
+ *                                 the page as a developer sees it: what it loaded, its
+ *                                 style and layout, its accessibility tree, and every
+ *                                 module's diagnostics; and the reasoner asked
  *   ambitious query PAGE GOAL     the reasoner's answers over the page's facts
  *   ambitious why PAGE GOAL       the reasoner's proofs
  *   ambitious advise PAGE [--apply]  the reasoner's advice, applied as one batch
  *
- * A PAGE is a URL (file:, data:, http:) or a file's path. Its snapshot has five
+ * A PAGE is a URL (file:, data:, http:) or a file's path. Its snapshot has six
  * sections: the document, its parse, its style (the cascade's sheets, rules,
  * matches and computed values), its layout (boxes, lines and fragments, with how
- * each box's width was found) and what it loaded (resources, their origins,
- * redirects and outcomes).
+ * each box's width was found), what it loaded (resources, their origins,
+ * redirects and outcomes) and its accessibility tree (roles, names and where the
+ * names came from, ID references).
  *
  * The reasoner is cocolog over prolog/amb/reason.pl, a process of its own: the
  * engine hands it a snapshot file and reads back text. AMB_ROOT and AMB_COCOLOG
@@ -37,6 +42,7 @@ amb_interface(html);
 amb_interface(net);
 amb_interface(css);
 amb_interface(layout);
+amb_interface(a11y);
 
 #include "../paint/paint.h"
 
@@ -325,8 +331,8 @@ static int cmd_snapshot(const char *path) {
 /* ---- a page: fetched, parsed, its resources loaded, styled and laid out ---- */
 
 /* a page's five stores, declared in the caller's scope, where each is dropped */
-#define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt
-#define PAGE_ARGS &d, &p, &st, &lt, &nt
+#define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax
+#define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax
 
 /* the URL of a page named by a URL or by a file's path */
 static void page_url(const char *page, char *out, size_t cap) {
@@ -339,7 +345,7 @@ static void page_url(const char *page, char *out, size_t cap) {
 }
 
 /* the page's record in the loader, or 0 when it could not be fetched */
-static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt) {
+static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt, a11y_tree *ax) {
     char url[4200];
     page_url(page, url, sizeof url);
     dom_init(d, 1);
@@ -347,6 +353,7 @@ static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css
     css_init(st, 1);
     layout_init(lt, 1);
     net_init(nt, 1);
+    a11y_init(ax, 1);
     net_resource_h ph = net_fetch(nt, url, strlen(url), NET_KIND_DOCUMENT);
     uint32_t pr = ph.index;
     if (nt->resource[pr].outcome != NET_OUTCOME_OK) {
@@ -359,12 +366,13 @@ static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css
     net_fetch_subresources(nt, d, ph);
     css_cascade(st, d, nt);
     layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
+    a11y_build(ax, d, st);
     return pr;
 }
 
 /* the page's snapshot: the document's section, the parse's, the style's, the layout's, the loader's */
 static int write_page_snapshot(const dom_document *d, const html_parser *p, const css_style *st, const layout_tree *lt, const net_loader *nt,
-                               const char *path) {
+                               const a11y_tree *ax, const char *path) {
     own FILE *f = fopen(path, "w");
     if (!f) return 0;
     defer(f) { fclose(f); }
@@ -373,6 +381,7 @@ static int write_page_snapshot(const dom_document *d, const html_parser *p, cons
     css_export(st, f);
     layout_export(lt, f);
     net_export(nt, f);
+    a11y_export(ax, f);
     return 1;
 }
 
@@ -450,6 +459,50 @@ static int cmd_render(const char *page, const char *png) {
     return 0;
 }
 
+/* the page as a developer sees it, and the reasoner's diagnostics of it */
+static int cmd_inspect(const char *page, const char *mode, const char *goal) {
+    session s;
+    if (!session_open(&s)) return 2;
+    PAGE_STORES;
+    uint32_t pr = load_page(page, PAGE_ARGS);
+    if (!pr) return 2;
+    amb_span pu = nt.resource[pr].final_url;
+    printf("== %.*s\n", (int)pu.len, text_ptr(&nt, pu));
+    printf("%zu nodes, %zu parse errors; %zu resources; %zu rules, %zu declarations; %zu boxes, %zu lines\n", node_count(d), error_count(p),
+           resource_count(nt), rule_count(st), decl_count(st), box_count(lt), line_count(lt));
+    printf("== resources\n");
+    for (uint32_t r = 1; r < nt.resource_len; r++) {
+        if (!nt.resource[r].live) continue;
+        amb_span u = nt.resource[r].url;
+        printf("  %-10s %-18s %.*s\n", net_kind_name(nt.resource[r].kind), net_outcome_name(nt.resource[r].outcome), (int)u.len, text_ptr(&nt, u));
+    }
+    printf("== accessibility tree\n");
+    for (uint32_t a = 1; a < ax.anode_len; a++) {
+        if (!ax.anode[a].live) continue;
+        int depth = 0;
+        for (uint32_t q = ax.anode[a].parent; q; q = ax.anode[q].parent) depth++;
+        amb_span nm = ax.anode[a].name;
+        printf("  %*s%s", 2 * depth, "", a11y_role_name(ax.anode[a].role));
+        if (ax.anode[a].role == A11Y_ROLE_HEADING) printf(" %u", ax.anode[a].level);
+        if (nm.len) printf(" \"%.*s\" (%s)", (int)nm.len, text_ptr(&ax, nm), a11y_name_from_name(ax.anode[a].name_from));
+        if (ax.anode[a].focusable) printf(" focusable");
+        printf("\n");
+    }
+    char snap[700], out[700];
+    session_path(&s, "page.pl", snap, sizeof snap);
+    session_path(&s, "answer.txt", out, sizeof out);
+    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap)) return 2;
+    printf("== diagnostics\n");
+    if (reason(&s, "advise", snap, 0, out) != 0) return 2;
+    print_file(out, "  ");
+    if (mode && goal) {
+        printf("== %s %s\n", mode + 2, goal);
+        if (reason(&s, strcmp(mode, "--why") == 0 ? "why" : "query", snap, goal, out) != 0) return 2;
+        print_file(out, "  ");
+    }
+    return 0;
+}
+
 /* query, why, advise: the reasoner over the page's snapshot */
 static int cmd_reason(const char *what, const char *page, const char *goal, int apply) {
     session s;
@@ -459,7 +512,7 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
-    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, snap)) return 2;
+    if (!write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, snap)) return 2;
     int rc = reason(&s, what, snap, goal, out);
     print_file(out, "");
     if (rc != 0) return rc;
@@ -480,8 +533,11 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "style") == 0) return cmd_style(argv[2]);
     if (argc >= 4 && strcmp(argv[1], "render") == 0) return cmd_render(argv[2], argv[3]);
+    if (argc >= 3 && strcmp(argv[1], "inspect") == 0)
+        return cmd_inspect(argv[2], argc >= 5 && (strcmp(argv[3], "--query") == 0 || strcmp(argv[3], "--why") == 0) ? argv[3] : 0,
+                           argc >= 5 ? argv[4] : 0);
     if (argc >= 4 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "why") == 0)) return cmd_reason(argv[1], argv[2], argv[3], 0);
     if (argc >= 3 && strcmp(argv[1], "advise") == 0) return cmd_reason("advise", argv[2], 0, argc >= 4 && strcmp(argv[3], "--apply") == 0);
-    fprintf(stderr, "usage: ambitious loop | snapshot FILE | load PAGE | parse PAGE | style PAGE | render PAGE PNG | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
+    fprintf(stderr, "usage: ambitious loop | snapshot FILE | load PAGE | parse PAGE | style PAGE | render PAGE PNG | inspect PAGE [--query|--why GOAL] | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
     return 2;
 }

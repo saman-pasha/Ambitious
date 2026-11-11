@@ -1,0 +1,447 @@
+/* Ambitious: the interface of module a11y, generated from contracts/a11y.pl (fnv1a32:655a7118:2900). Do not edit. */
+typedef enum a11y_status { A11Y_OK, A11Y_STALE_HANDLE, A11Y_WRONG_KIND, A11Y_BAD_REQUEST, A11Y_NOT_REQUESTABLE, A11Y_STALE_REVISION } a11y_status;
+typedef enum a11y_role { A11Y_ROLE_DOCUMENT, A11Y_ROLE_GENERIC, A11Y_ROLE_PRESENTATION, A11Y_ROLE_LINK, A11Y_ROLE_BUTTON, A11Y_ROLE_CHECKBOX, A11Y_ROLE_RADIO, A11Y_ROLE_TEXTBOX, A11Y_ROLE_COMBOBOX, A11Y_ROLE_LISTBOX, A11Y_ROLE_OPTION, A11Y_ROLE_SLIDER, A11Y_ROLE_IMG, A11Y_ROLE_HEADING, A11Y_ROLE_PARAGRAPH, A11Y_ROLE_LIST, A11Y_ROLE_LISTITEM, A11Y_ROLE_TABLE, A11Y_ROLE_ROW, A11Y_ROLE_CELL, A11Y_ROLE_COLUMNHEADER, A11Y_ROLE_ROWHEADER, A11Y_ROLE_NAVIGATION, A11Y_ROLE_MAIN, A11Y_ROLE_BANNER, A11Y_ROLE_CONTENTINFO, A11Y_ROLE_COMPLEMENTARY, A11Y_ROLE_REGION, A11Y_ROLE_FORM, A11Y_ROLE_SEARCH, A11Y_ROLE_ARTICLE, A11Y_ROLE_DIALOG, A11Y_ROLE_FIGURE, A11Y_ROLE_GROUP, A11Y_ROLE_SEPARATOR, A11Y_ROLE_TERM, A11Y_ROLE_DEFINITION, A11Y_ROLE_BLOCKQUOTE, A11Y_ROLE_CODE, A11Y_ROLE_PROGRESSBAR, A11Y_ROLE_MENU, A11Y_ROLE_MENUITEM, A11Y_ROLE_TAB, A11Y_ROLE_TABLIST, A11Y_ROLE_TABPANEL, A11Y_ROLE_ALERT, A11Y_ROLE_STATUS, A11Y_ROLE_UNKNOWN } a11y_role;
+typedef enum a11y_name_from { A11Y_NAME_FROM_NOTHING, A11Y_NAME_FROM_ARIA_LABELLEDBY, A11Y_NAME_FROM_ARIA_LABEL, A11Y_NAME_FROM_ALT, A11Y_NAME_FROM_LABEL, A11Y_NAME_FROM_CAPTION, A11Y_NAME_FROM_LEGEND, A11Y_NAME_FROM_CONTENT, A11Y_NAME_FROM_TITLE, A11Y_NAME_FROM_PLACEHOLDER, A11Y_NAME_FROM_VALUE } a11y_name_from;
+typedef enum a11y_ref_attr { A11Y_REF_ATTR_ARIA_LABELLEDBY, A11Y_REF_ATTR_ARIA_DESCRIBEDBY, A11Y_REF_ATTR_ARIA_CONTROLS, A11Y_REF_ATTR_LABEL_FOR } a11y_ref_attr;
+typedef enum a11y_op { A11Y_OP_BUILD } a11y_op;
+typedef struct a11y_anode_h { uint32_t doc, index, gen; } a11y_anode_h;
+typedef struct a11y_aref_h { uint32_t doc, index, gen; } a11y_aref_h;
+typedef struct a11y_badrole_h { uint32_t doc, index, gen; } a11y_badrole_h;
+typedef struct a11y_anode { uint32_t gen, live, free_next; dom_node_h node; a11y_role role; uint8_t stated; amb_span name; a11y_name_from name_from; uint32_t parent; uint32_t level; uint8_t focusable; } a11y_anode;
+typedef struct a11y_aref { uint32_t gen, live, free_next; dom_node_h from; a11y_ref_attr attr; amb_span idref; dom_node_h target; } a11y_aref;
+typedef struct a11y_badrole { uint32_t gen, live, free_next; dom_node_h node; amb_span value; } a11y_badrole;
+typedef struct a11y_store_tag { char unused; } a11y_store_tag;
+typedef store<a11y_store_tag> a11y_tree;
+extern const char a11y_fingerprint[];
+const char *a11y_status_name(a11y_status x);
+const char *a11y_op_name(a11y_op x);
+const char *a11y_role_name(a11y_role x);
+const char *a11y_name_from_name(a11y_name_from x);
+const char *a11y_ref_attr_name(a11y_ref_attr x);
+void a11y_init(a11y_tree *d, uint32_t id);
+uint64_t a11y_revision(const a11y_tree *d);
+a11y_status a11y_build(a11y_tree *d, dom_document *doc, css_style *style);
+a11y_status a11y_check_build(const a11y_tree *d, dom_document *doc, css_style *style);
+int a11y_check_invariants(const a11y_tree *d, FILE *report);
+void a11y_export(const a11y_tree *d, FILE *out);
+a11y_status a11y_dispatch(a11y_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module a11y, generated from contracts/a11y.pl. Do not edit. */
+const char *a11y_status_name(a11y_status x) {
+    switch (x) {
+    case A11Y_OK: return "ok";
+    case A11Y_STALE_HANDLE: return "stale_handle";
+    case A11Y_WRONG_KIND: return "wrong_kind";
+    case A11Y_BAD_REQUEST: return "bad_request";
+    case A11Y_NOT_REQUESTABLE: return "not_requestable";
+    case A11Y_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *a11y_op_name(a11y_op x) {
+    switch (x) {
+    case A11Y_OP_BUILD: return "build";
+    }
+    return "?";
+}
+const char *a11y_role_name(a11y_role x) {
+    switch (x) {
+    case A11Y_ROLE_DOCUMENT: return "document";
+    case A11Y_ROLE_GENERIC: return "generic";
+    case A11Y_ROLE_PRESENTATION: return "presentation";
+    case A11Y_ROLE_LINK: return "link";
+    case A11Y_ROLE_BUTTON: return "button";
+    case A11Y_ROLE_CHECKBOX: return "checkbox";
+    case A11Y_ROLE_RADIO: return "radio";
+    case A11Y_ROLE_TEXTBOX: return "textbox";
+    case A11Y_ROLE_COMBOBOX: return "combobox";
+    case A11Y_ROLE_LISTBOX: return "listbox";
+    case A11Y_ROLE_OPTION: return "option";
+    case A11Y_ROLE_SLIDER: return "slider";
+    case A11Y_ROLE_IMG: return "img";
+    case A11Y_ROLE_HEADING: return "heading";
+    case A11Y_ROLE_PARAGRAPH: return "paragraph";
+    case A11Y_ROLE_LIST: return "list";
+    case A11Y_ROLE_LISTITEM: return "listitem";
+    case A11Y_ROLE_TABLE: return "table";
+    case A11Y_ROLE_ROW: return "row";
+    case A11Y_ROLE_CELL: return "cell";
+    case A11Y_ROLE_COLUMNHEADER: return "columnheader";
+    case A11Y_ROLE_ROWHEADER: return "rowheader";
+    case A11Y_ROLE_NAVIGATION: return "navigation";
+    case A11Y_ROLE_MAIN: return "main";
+    case A11Y_ROLE_BANNER: return "banner";
+    case A11Y_ROLE_CONTENTINFO: return "contentinfo";
+    case A11Y_ROLE_COMPLEMENTARY: return "complementary";
+    case A11Y_ROLE_REGION: return "region";
+    case A11Y_ROLE_FORM: return "form";
+    case A11Y_ROLE_SEARCH: return "search";
+    case A11Y_ROLE_ARTICLE: return "article";
+    case A11Y_ROLE_DIALOG: return "dialog";
+    case A11Y_ROLE_FIGURE: return "figure";
+    case A11Y_ROLE_GROUP: return "group";
+    case A11Y_ROLE_SEPARATOR: return "separator";
+    case A11Y_ROLE_TERM: return "term";
+    case A11Y_ROLE_DEFINITION: return "definition";
+    case A11Y_ROLE_BLOCKQUOTE: return "blockquote";
+    case A11Y_ROLE_CODE: return "code";
+    case A11Y_ROLE_PROGRESSBAR: return "progressbar";
+    case A11Y_ROLE_MENU: return "menu";
+    case A11Y_ROLE_MENUITEM: return "menuitem";
+    case A11Y_ROLE_TAB: return "tab";
+    case A11Y_ROLE_TABLIST: return "tablist";
+    case A11Y_ROLE_TABPANEL: return "tabpanel";
+    case A11Y_ROLE_ALERT: return "alert";
+    case A11Y_ROLE_STATUS: return "status";
+    case A11Y_ROLE_UNKNOWN: return "unknown";
+    }
+    return "?";
+}
+const char *a11y_name_from_name(a11y_name_from x) {
+    switch (x) {
+    case A11Y_NAME_FROM_NOTHING: return "nothing";
+    case A11Y_NAME_FROM_ARIA_LABELLEDBY: return "aria_labelledby";
+    case A11Y_NAME_FROM_ARIA_LABEL: return "aria_label";
+    case A11Y_NAME_FROM_ALT: return "alt";
+    case A11Y_NAME_FROM_LABEL: return "label";
+    case A11Y_NAME_FROM_CAPTION: return "caption";
+    case A11Y_NAME_FROM_LEGEND: return "legend";
+    case A11Y_NAME_FROM_CONTENT: return "content";
+    case A11Y_NAME_FROM_TITLE: return "title";
+    case A11Y_NAME_FROM_PLACEHOLDER: return "placeholder";
+    case A11Y_NAME_FROM_VALUE: return "value";
+    }
+    return "?";
+}
+const char *a11y_ref_attr_name(a11y_ref_attr x) {
+    switch (x) {
+    case A11Y_REF_ATTR_ARIA_LABELLEDBY: return "aria_labelledby";
+    case A11Y_REF_ATTR_ARIA_DESCRIBEDBY: return "aria_describedby";
+    case A11Y_REF_ATTR_ARIA_CONTROLS: return "aria_controls";
+    case A11Y_REF_ATTR_LABEL_FOR: return "label_for";
+    }
+    return "?";
+}
+
+const char a11y_fingerprint[] = "fnv1a32:655a7118:2900";
+void a11y_init(a11y_tree *d, uint32_t id) {
+    if (d->anode_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    text_add(d, "", 0);
+}
+uint64_t a11y_revision(const a11y_tree *d) { return d->revision; }
+a11y_status a11y_check_build(const a11y_tree *d, dom_document *doc, css_style *style)
+{
+    return A11Y_OK;
+}
+
+int a11y_check_invariants(const a11y_tree *d, FILE *report) {
+    int bad = 0;
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->anode_len; i++) {
+            uint32_t r = d->anode[i].parent;
+            if (d->anode[i].live && r && (r >= d->anode_len || !d->anode[r].live)) { bad++; amb_report(report, "a11y", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void a11y_export(const a11y_tree *d, FILE *out) {
+    fprintf(out, "amb_snapshot(a11y, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, a11y_fingerprint);
+    for (uint32_t i = 1; i < d->anode_len; i++) {
+        if (!d->anode[i].live) continue;
+        if (1) { fputs("a11y_node(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); amb_put_ref(out, "n", d->anode[i].node.doc, d->anode[i].node.index, d->anode[i].node.gen); fputs(",", out); fputs(a11y_role_name(d->anode[i].role), out); fputs(",", out); text_put(d, out, d->anode[i].name); fputs(",", out); fputs(a11y_name_from_name(d->anode[i].name_from), out); fputs(").\n", out); }
+        if (d->anode[i].parent != 0) { fputs("a11y_parent(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); { uint32_t r = d->anode[i].parent; amb_put_ref(out, "ax", d->id, r, r && r < d->anode_len ? d->anode[r].gen : 0); } fputs(").\n", out); }
+        if (d->anode[i].stated == 1) { fputs("a11y_explicit_role(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(").\n", out); }
+        if (d->anode[i].role == A11Y_ROLE_HEADING) { fputs("a11y_heading(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->anode[i].level); fputs(").\n", out); }
+        if (d->anode[i].focusable == 1) { fputs("a11y_focusable(", out); amb_put_handle(out, "ax", d->id, i, d->anode[i].gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->aref_len; i++) {
+        if (!d->aref[i].live) continue;
+        if (1) { fputs("a11y_ref(", out); amb_put_ref(out, "n", d->aref[i].from.doc, d->aref[i].from.index, d->aref[i].from.gen); fputs(",", out); fputs(a11y_ref_attr_name(d->aref[i].attr), out); fputs(",", out); text_put(d, out, d->aref[i].idref); fputs(",", out); amb_put_ref(out, "n", d->aref[i].target.doc, d->aref[i].target.index, d->aref[i].target.gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->badrole_len; i++) {
+        if (!d->badrole[i].live) continue;
+        if (1) { fputs("a11y_bad_role(", out); amb_put_ref(out, "n", d->badrole[i].node.doc, d->badrole[i].node.index, d->badrole[i].node.gen); fputs(",", out); text_put(d, out, d->badrole[i].value); fputs(").\n", out); }
+    }
+}
+a11y_status a11y_dispatch(a11y_tree *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    a11y_status st = A11Y_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return A11Y_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return A11Y_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return A11Y_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return A11Y_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return A11Y_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return A11Y_STALE_REVISION; }
+
+    if (amb_name_is(name, name_len, "build")) { amb_result(report, name, "not_requestable", d->revision); return A11Y_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module a11y, an instance of store<a11y_store_tag>: one own buffer a part */
+typedef struct store_a11y_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t anode_len, anode_cap;
+    uint32_t anode_free;
+    own a11y_anode *anode;
+    size_t aref_len, aref_cap;
+    uint32_t aref_free;
+    own a11y_aref *aref;
+    size_t badrole_len, badrole_cap;
+    uint32_t badrole_free;
+    own a11y_badrole *badrole;
+    size_t text_len, text_cap;
+    own char *text;
+} store_a11y_store_tag;
+void store_a11y_store_tag_drop(store_a11y_store_tag *s) { free(s->anode); free(s->aref); free(s->badrole); free(s->text); }
+static void store_a11y_store_tag__anode_grow(store_a11y_store_tag *s) {
+    size_t c = s->anode_cap ? 2 * s->anode_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->anode = (a11y_anode *)realloc(s->anode, c * sizeof(a11y_anode));
+    if (!s->anode) abort();
+    s->anode_cap = c;
+}
+a11y_anode_h store_a11y_store_tag_anode_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->anode_free) {
+        i = s->anode_free;
+        s->anode_free = s->anode[i].free_next;
+    } else {
+        if (s->anode_len == 0) {
+            if (s->anode_cap == 0) store_a11y_store_tag__anode_grow(s);
+            memset(&s->anode[0], 0, sizeof(a11y_anode));
+            s->anode_len = 1;
+        }
+        if (s->anode_len == s->anode_cap) store_a11y_store_tag__anode_grow(s);
+        i = (uint32_t)s->anode_len;
+        s->anode_len++;
+        s->anode[i].gen = 0;
+    }
+    uint32_t g = s->anode[i].gen;
+    memset(&s->anode[i], 0, sizeof(a11y_anode));
+    s->anode[i].gen = g;
+    s->anode[i].live = 1;
+    a11y_anode_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_anode_live(const store_a11y_store_tag *s, a11y_anode_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->anode_len && s->anode[h.index].live && s->anode[h.index].gen == h.gen;
+}
+a11y_anode store_a11y_store_tag_anode_get(const store_a11y_store_tag *s, a11y_anode_h h) {
+    if (!store_a11y_store_tag_anode_live(s, h)) abort();
+    return s->anode[h.index];
+}
+a11y_anode *store_a11y_store_tag_anode_ref(const store_a11y_store_tag *s, a11y_anode_h h) tie s {
+    if (!store_a11y_store_tag_anode_live(s, h)) abort();
+    return &s->anode[h.index];
+}
+a11y_anode *store_a11y_store_tag_anode_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->anode_len) abort();
+    return &s->anode[i];
+}
+a11y_anode_h store_a11y_store_tag_anode_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_anode_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->anode_len && s->anode[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->anode[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_anode_free(store_a11y_store_tag *s, a11y_anode_h h) {
+    if (!store_a11y_store_tag_anode_live(s, h)) abort();
+    s->anode[h.index].live = 0;
+    s->anode[h.index].gen++;
+    s->anode[h.index].free_next = s->anode_free;
+    s->anode_free = h.index;
+}
+size_t store_a11y_store_tag_anode_len(const store_a11y_store_tag *s) { return s->anode_len; }
+size_t store_a11y_store_tag_anode_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->anode_len; i++) if (s->anode[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__aref_grow(store_a11y_store_tag *s) {
+    size_t c = s->aref_cap ? 2 * s->aref_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->aref = (a11y_aref *)realloc(s->aref, c * sizeof(a11y_aref));
+    if (!s->aref) abort();
+    s->aref_cap = c;
+}
+a11y_aref_h store_a11y_store_tag_aref_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->aref_free) {
+        i = s->aref_free;
+        s->aref_free = s->aref[i].free_next;
+    } else {
+        if (s->aref_len == 0) {
+            if (s->aref_cap == 0) store_a11y_store_tag__aref_grow(s);
+            memset(&s->aref[0], 0, sizeof(a11y_aref));
+            s->aref_len = 1;
+        }
+        if (s->aref_len == s->aref_cap) store_a11y_store_tag__aref_grow(s);
+        i = (uint32_t)s->aref_len;
+        s->aref_len++;
+        s->aref[i].gen = 0;
+    }
+    uint32_t g = s->aref[i].gen;
+    memset(&s->aref[i], 0, sizeof(a11y_aref));
+    s->aref[i].gen = g;
+    s->aref[i].live = 1;
+    a11y_aref_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_aref_live(const store_a11y_store_tag *s, a11y_aref_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->aref_len && s->aref[h.index].live && s->aref[h.index].gen == h.gen;
+}
+a11y_aref store_a11y_store_tag_aref_get(const store_a11y_store_tag *s, a11y_aref_h h) {
+    if (!store_a11y_store_tag_aref_live(s, h)) abort();
+    return s->aref[h.index];
+}
+a11y_aref *store_a11y_store_tag_aref_ref(const store_a11y_store_tag *s, a11y_aref_h h) tie s {
+    if (!store_a11y_store_tag_aref_live(s, h)) abort();
+    return &s->aref[h.index];
+}
+a11y_aref *store_a11y_store_tag_aref_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->aref_len) abort();
+    return &s->aref[i];
+}
+a11y_aref_h store_a11y_store_tag_aref_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_aref_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->aref_len && s->aref[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->aref[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_aref_free(store_a11y_store_tag *s, a11y_aref_h h) {
+    if (!store_a11y_store_tag_aref_live(s, h)) abort();
+    s->aref[h.index].live = 0;
+    s->aref[h.index].gen++;
+    s->aref[h.index].free_next = s->aref_free;
+    s->aref_free = h.index;
+}
+size_t store_a11y_store_tag_aref_len(const store_a11y_store_tag *s) { return s->aref_len; }
+size_t store_a11y_store_tag_aref_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->aref_len; i++) if (s->aref[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__badrole_grow(store_a11y_store_tag *s) {
+    size_t c = s->badrole_cap ? 2 * s->badrole_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->badrole = (a11y_badrole *)realloc(s->badrole, c * sizeof(a11y_badrole));
+    if (!s->badrole) abort();
+    s->badrole_cap = c;
+}
+a11y_badrole_h store_a11y_store_tag_badrole_new(store_a11y_store_tag *s) {
+    uint32_t i;
+    if (s->badrole_free) {
+        i = s->badrole_free;
+        s->badrole_free = s->badrole[i].free_next;
+    } else {
+        if (s->badrole_len == 0) {
+            if (s->badrole_cap == 0) store_a11y_store_tag__badrole_grow(s);
+            memset(&s->badrole[0], 0, sizeof(a11y_badrole));
+            s->badrole_len = 1;
+        }
+        if (s->badrole_len == s->badrole_cap) store_a11y_store_tag__badrole_grow(s);
+        i = (uint32_t)s->badrole_len;
+        s->badrole_len++;
+        s->badrole[i].gen = 0;
+    }
+    uint32_t g = s->badrole[i].gen;
+    memset(&s->badrole[i], 0, sizeof(a11y_badrole));
+    s->badrole[i].gen = g;
+    s->badrole[i].live = 1;
+    a11y_badrole_h h = { s->id, i, g };
+    return h;
+}
+int store_a11y_store_tag_badrole_live(const store_a11y_store_tag *s, a11y_badrole_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->badrole_len && s->badrole[h.index].live && s->badrole[h.index].gen == h.gen;
+}
+a11y_badrole store_a11y_store_tag_badrole_get(const store_a11y_store_tag *s, a11y_badrole_h h) {
+    if (!store_a11y_store_tag_badrole_live(s, h)) abort();
+    return s->badrole[h.index];
+}
+a11y_badrole *store_a11y_store_tag_badrole_ref(const store_a11y_store_tag *s, a11y_badrole_h h) tie s {
+    if (!store_a11y_store_tag_badrole_live(s, h)) abort();
+    return &s->badrole[h.index];
+}
+a11y_badrole *store_a11y_store_tag_badrole_slot(const store_a11y_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->badrole_len) abort();
+    return &s->badrole[i];
+}
+a11y_badrole_h store_a11y_store_tag_badrole_handle(const store_a11y_store_tag *s, uint32_t i) {
+    a11y_badrole_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->badrole_len && s->badrole[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->badrole[i].gen;
+    }
+    return h;
+}
+void store_a11y_store_tag_badrole_free(store_a11y_store_tag *s, a11y_badrole_h h) {
+    if (!store_a11y_store_tag_badrole_live(s, h)) abort();
+    s->badrole[h.index].live = 0;
+    s->badrole[h.index].gen++;
+    s->badrole[h.index].free_next = s->badrole_free;
+    s->badrole_free = h.index;
+}
+size_t store_a11y_store_tag_badrole_len(const store_a11y_store_tag *s) { return s->badrole_len; }
+size_t store_a11y_store_tag_badrole_count(const store_a11y_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->badrole_len; i++) if (s->badrole[i].live) n++;
+    return n;
+}
+static void store_a11y_store_tag__text_room(store_a11y_store_tag *s, size_t n) {
+    if (s->text_len + n <= s->text_cap) return;
+    size_t c = s->text_cap ? s->text_cap : 256;
+    while (c < s->text_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->text = (char *)realloc(s->text, c);
+    if (!s->text) abort();
+    s->text_cap = c;
+}
+amb_span store_a11y_store_tag_text_add(store_a11y_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->text_len == 0) {
+        store_a11y_store_tag__text_room(s, 1);
+        s->text[0] = 0;
+        s->text_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->text && p < s->text + s->text_len;
+    size_t from = inside ? (size_t)(p - s->text) : 0;
+    store_a11y_store_tag__text_room(s, n);
+    if (inside) memmove(s->text + s->text_len, s->text + from, n);
+    else memcpy(s->text + s->text_len, p, n);
+    sp.off = (uint32_t)s->text_len;
+    sp.len = (uint32_t)n;
+    s->text_len += n;
+    return sp;
+}
+const char *store_a11y_store_tag_text_ptr(const store_a11y_store_tag *s, amb_span sp) tie s {
+    if (s->text_len == 0 || (size_t)sp.off + sp.len > s->text_len) abort();
+    return s->text + sp.off;
+}
+int store_a11y_store_tag_text_eq(const store_a11y_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    return memcmp(s->text + sp.off, p, n) == 0;
+}
+void store_a11y_store_tag_text_put(const store_a11y_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    amb_put_qatom(out, s->text + sp.off, sp.len);
+}
+size_t store_a11y_store_tag_text_size(const store_a11y_store_tag *s) { return s->text_len; }

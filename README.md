@@ -42,6 +42,9 @@ Three modules, each declared by a contract and generated into C from it:
 - **Network** (`contracts/net.pl`, `src/net/`): URLs, `file:`, `data:` and
   HTTP/1.1. It records what a page loads, who asked for each resource, where
   from, and how each fetch ended.
+- **Accessibility** (`contracts/a11y.pl`, `src/a11y/`): the accessibility tree,
+  with its roles, names and where each name came from. `ambitious inspect`
+  shows a page as a developer sees it, every module's diagnostics included.
 
 The engine exports a snapshot of a page: the document, its parse and its
 style. The reasoner (`prolog/amb/reason.pl`, cocolog, a process of its own)
@@ -82,6 +85,7 @@ bin/ambitious load PAGE         # a page (a URL or a path) and what it loaded
 bin/ambitious parse PAGE        # its tree and parse errors
 bin/ambitious style PAGE        # its elements' computed styles
 bin/ambitious render PAGE PNG   # laid out in an 800x600 viewport and drawn
+bin/ambitious inspect PAGE      # its resources, accessibility tree and diagnostics
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
 tools/amb doc css               # a contract's reference
 ```
@@ -96,7 +100,7 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `shell/` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `a11y/`, `shell/` |
 | `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
 | `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |

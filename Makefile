@@ -23,7 +23,7 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
-UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/layout paint/font paint/image paint/paint net/net
+UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree css/css layout/layout paint/font paint/image paint/paint net/net a11y/a11y
 OBJS := $(UNITS:%=build/obj/%.o)
 export AMB_OBJS := $(OBJS:%=$(AMB_ROOT)/%)
 

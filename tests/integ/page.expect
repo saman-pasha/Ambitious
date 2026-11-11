@@ -35,6 +35,7 @@ amb_diag(unnamed_control, n(1,46,0), 'the <a> has no accessible name').
 amb_request(1, 106, set_attribute(n(1,18,0),alt,'The Ambitious logo')).
 amb_diag(parse_error, err(1,1,0), 'tree_construction at 10:69').
 amb_diag(parse_error, err(1,2,0), 'tree_construction at 12:40').
+amb_diag(missing_name, ax(1,12,0), 'the link <a> has no accessible name, which its role needs').
 amb_result('set_attribute', ok, 107).
 1 applied, 0 refused; revision 107
 <!DOCTYPE html><html><head>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Accessibility, explained</title>
+<style>.offscreen { display: none } .icon { display: inline-block; width: 16px; height: 16px; background: #555 }</style>
+</head>
+<body>
+<header><a href="/"><img src="logo.png"></a> <nav aria-label="Primary"><a href="/news">News</a> <a href="/about">About</a></nav></header>
+<main>
+<h1>Accessibility, explained</h1>
+<p>Each control below is named, or not, in a different way.</p>
+<form>
+<label for="name">Your name</label> <input id="name" type="text">
+<label>Email <input type="email"></label>
+<input type="search" placeholder="Search the site">
+<input type="text">
+<input type="checkbox" id="terms"> <span id="terms-label">I agree</span>
+<input type="checkbox" aria-labelledby="no-such-id">
+<button>Send</button>
+<button aria-label="Close"><span class="icon"></span></button>
+<button><span class="icon"></span></button>
+<input type="submit">
+</form>
+<h3>A heading that skips a level</h3>
+<a href="/more"><button>A button inside a link</button></a>
+<div role="buton">A role with a typo</div>
+<div role="navigation" aria-labelledby="secondary-title"><h2 id="secondary-title">Elsewhere</h2></div>
+<p id="dup">One</p><p id="dup">Two</p>
+<table><caption>Modules and their sizes</caption><tr><th>Module</th><th>Lines</th></tr><tr><td>dom</td><td>66</td></tr></table>
+<fieldset><legend>Delivery</legend><input type="radio" name="d" id="fast"><label for="fast">Fast</label></fieldset>
+<img src="chart.png" alt="">
+<p class="offscreen">Hidden by CSS</p>
+<p aria-hidden="true">Hidden from readers</p>
+<p hidden>Hidden by the hidden attribute</p>
+</main>
+<footer>The end</footer>
+</body>
+</html>

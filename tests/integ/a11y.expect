@@ -1,0 +1,87 @@
+== file://ROOT/tests/pages/a11y.html
+123 nodes, 0 parse errors; 3 resources; 151 rules, 250 declarations; 45 boxes, 26 lines
+== resources
+  document   ok                 file://ROOT/tests/pages/a11y.html
+  image      ok                 file://ROOT/tests/pages/logo.png
+  image      no_such_file       file://ROOT/tests/pages/chart.png
+== accessibility tree
+  document
+    banner
+      link focusable
+        img
+      navigation "Primary" (aria_label)
+        link "News" (content) focusable
+        link "About" (content) focusable
+    main
+      heading 1 "Accessibility, explained" (content)
+      paragraph
+      form
+        textbox "Your name" (label) focusable
+        textbox "Email" (label) focusable
+        textbox "Search the site" (placeholder) focusable
+        textbox focusable
+        checkbox focusable
+        checkbox focusable
+        button "Send" (content) focusable
+        button "Close" (aria_label) focusable
+        button focusable
+        button "Submit" (value) focusable
+      heading 3 "A heading that skips a level" (content)
+      link "A button inside a link" (content) focusable
+        button "A button inside a link" (content) focusable
+      navigation "Elsewhere" (aria_labelledby)
+        heading 2 "Elsewhere" (content)
+      paragraph
+      paragraph
+      table "Modules and their sizes" (caption)
+        row
+          columnheader "Module" (content)
+          columnheader "Lines" (content)
+        row
+          cell "dom" (content)
+          cell "66" (content)
+      group "Delivery" (legend)
+        radio "Fast" (label) focusable
+    contentinfo
+== diagnostics
+  amb_diag(missing_attribute, n(1,17,0), '<img> lacks the alt attribute').
+  amb_diag(unnamed_control, n(1,16,0), 'the <a> has no accessible name').
+  amb_diag(unnamed_control, n(1,62,0), 'the <button> has no accessible name').
+  %% the image has no alt and nothing names it: mark it decorative
+  amb_request(1, 284, set_attribute(n(1,17,0),alt,'')).
+  amb_diag(failed, rs(1,3,0), 'the image file://ROOT/tests/pages/chart.png (asked for by <img>) failed: no_such_file').
+  amb_diag(missing_name, ax(1,3,0), 'the link <a> has no accessible name, which its role needs').
+  amb_diag(missing_name, ax(1,4,0), 'the img <img> has no accessible name, which its role needs').
+  amb_diag(missing_name, ax(1,15,0), 'the textbox <input> has no accessible name, which its role needs').
+  amb_diag(missing_name, ax(1,16,0), 'the checkbox <input> has no accessible name, which its role needs').
+  amb_diag(missing_name, ax(1,17,0), 'the checkbox <input> has no accessible name, which its role needs').
+  amb_diag(missing_name, ax(1,20,0), 'the button <button> has no accessible name, which its role needs').
+  amb_diag(broken_ref, n(1,54,0), '<input> aria_labelledby names id \'no-such-id\', which no element has').
+  amb_diag(heading_jump, ax(1,22,0), 'the level 3 heading \'A heading that skips a level\' follows a level 1 one: 1 level(s) skipped').
+  amb_diag(nested_interactive, ax(1,24,0), 'the button \'A button inside a link\' is inside the link \'A button inside a link\': a reader cannot tell them apart').
+  amb_diag(duplicate_id, n(1,84,0), 'id dup is on two elements: a reference to it finds the first').
+  amb_diag(unknown_role, n(1,75,0), '<div role=buton>: no such role, so the element keeps its own').
+-- why the controls have their names:
+A = ax(1,12,0), R = textbox, Why = label(n(1,36,0),'Your name')
+A = ax(1,13,0), R = textbox, Why = label('the label around it','Email')
+A = ax(1,14,0), R = textbox, Why = placeholder('Search the site')
+A = ax(1,15,0), R = textbox, Why = 'nothing names it'
+A = ax(1,16,0), R = checkbox, Why = 'nothing names it'
+A = ax(1,17,0), R = checkbox, Why = 'nothing names it'
+A = ax(1,18,0), R = button, Why = its_content('Send')
+A = ax(1,19,0), R = button, Why = aria_label('Close')
+A = ax(1,20,0), R = button, Why = 'nothing names it'
+A = ax(1,21,0), R = button, Why = value('Submit')
+A = ax(1,24,0), R = button, Why = its_content('A button inside a link')
+A = ax(1,37,0), R = radio, Why = label(n(1,106,0),'Fast')
+-- the outline:
+A = ax(1,9,0), Level = 1, Name = 'Accessibility, explained'
+A = ax(1,22,0), Level = 3, Name = 'A heading that skips a level'
+A = ax(1,26,0), Level = 2, Name = 'Elsewhere'
+-- the heading that skips a level, proved:
+== why a11y_heading_jump(A, From, To)
+  a11y_heading_jump(ax(1,22,0),1,3)   because
+    findall(A-B,a11y_heading(A,B),[ax(1,9,0)-1,ax(1,22,0)-3,ax(1,26,0)-2])   [test]
+    a11y_rules_next([ax(1,9,0)-1,ax(1,22,0)-3,ax(1,26,0)-2],ax(1,22,0),1,3)   [rule]
+    3>1+1   [test]
+  

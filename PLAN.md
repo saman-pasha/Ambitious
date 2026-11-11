@@ -402,6 +402,16 @@ decoding GIF or JPEG pixels (their sizes are read).
 
 **Gate:** diagnostics on fixture pages, each naming its nodes and its rule.
 
+*As built:* the facts are `a11y_node/5`, `a11y_parent/2`,
+`a11y_explicit_role/1`, `a11y_heading/2`, `a11y_focusable/1`, `a11y_ref/4`
+and `a11y_bad_role/2`. The rules add `a11y_missing_name/2`,
+`a11y_broken_ref/3`, `a11y_heading_jump/3`, `a11y_nested_interactive/2`,
+`a11y_duplicate_id/3`, `a11y_explain_name/2` and `a11y_outline/2`. Proofs
+now name their variables A, B, ... and show a bodiless clause as `[rule]`,
+so a proof prints the same each run. Not done: aria-describedby
+descriptions, states and properties (checked, expanded), live regions, and
+accname's recursion through embedded controls.
+
 ### Phase 10: ZiguratIP persistence
 
 - A profile is a cocolog `--embed` store holding history, bookmarks,
@@ -459,7 +469,7 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
 | 8 JavaScript | planned |
-| 9 Accessibility and devtools | planned |
+| 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | planned |
 | 11 Hardening | planned |
 

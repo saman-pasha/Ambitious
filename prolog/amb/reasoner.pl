@@ -222,11 +222,15 @@ amb_reason_is_rule(G) :-
 %% the proof as an indented tree: a derived goal, then what it rests on
 amb_reason_print_proof(true, _) :- !.
 amb_reason_print_proof(and(A, B), D) :- !, amb_reason_print_proof(A, D), amb_reason_print_proof(B, D).
-amb_reason_print_proof(fact(G), D) :- !, amb_reason_indent(D), format('~q   [fact]~n', [G]).
-amb_reason_print_proof(builtin(G), D) :- !, amb_reason_indent(D), format('~q   [test]~n', [G]).
-amb_reason_print_proof(not(G), D) :- !, amb_reason_indent(D), format('not ~q   [no proof]~n', [G]).
+amb_reason_print_proof(fact(G), D) :- !, amb_reason_indent(D), amb_reason_show(G), format('   [fact]~n', []).
+amb_reason_print_proof(builtin(G), D) :- !, amb_reason_indent(D), amb_reason_show(G), format('   [test]~n', []).
+amb_reason_print_proof(not(G), D) :- !, amb_reason_indent(D), format('not ', []), amb_reason_show(G), format('   [no proof]~n', []).
+amb_reason_print_proof(by(G, true), D) :- !, amb_reason_indent(D), amb_reason_show(G), format('   [rule]~n', []).
 amb_reason_print_proof(by(G, P), D) :- !,
-    amb_reason_indent(D), format('~q   because~n', [G]),
+    amb_reason_indent(D), amb_reason_show(G), format('   because~n', []),
     D1 is D + 1, amb_reason_print_proof(P, D1).
+
+%% a goal as a proof shows it: its variables named A, B, ... in order, the same each run
+amb_reason_show(G) :- copy_term(G, G2), numbervars(G2, 0, _), format('~W', [G2, [quoted(true), numbervars(true)]]).
 
 amb_reason_indent(D) :- forall(between(1, D, _), format('  ', [])).
