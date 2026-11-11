@@ -8,7 +8,7 @@ image      ok                 200    1213  file:///ROOT/tests/images/jo_411.jpg 
 image      ok                 200    1162  file:///ROOT/tests/images/jo_440.jpg  image/jpeg  31x29
 image      ok                 200    3506  file:///ROOT/tests/images/j_restart_blocks.jpg  image/jpeg  77x51
 image      ok                 200    1432  file:///ROOT/tests/images/j_exif3.jpg  image/jpeg  37x23
-image      ok                 200    1432  file:///ROOT/tests/images/j_exif6.jpg  image/jpeg  37x23
+image      ok                 200    1432  file:///ROOT/tests/images/j_exif6.jpg  image/jpeg  23x37
 image      ok                 200     710  file:///ROOT/tests/images/g_pil_trans.gif  image/gif  40x30
 image      ok                 200      86  file:///ROOT/tests/images/g_local_first.gif  image/gif  20x15
 image      ok                 200     148  file:///ROOT/tests/images/g_interlace_17.gif  image/gif  7x17
