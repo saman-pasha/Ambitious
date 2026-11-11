@@ -63,7 +63,8 @@ enum {
     N_RE_FIRST,
     N_PX_FIRST = N_RE_FIRST + JRE_N,
     N_TA_FIRST = N_PX_FIRST + JPX_N,
-    N_LAST = N_TA_FIRST + JTN_N
+    N_BG_FIRST = N_TA_FIRST + JTN_N,
+    N_LAST = N_BG_FIRST + JBG_N
 };
 
 /* ---- helpers ---- */
@@ -352,15 +353,16 @@ static void json_indent(vector<uint16_t> *o, uint32_t gap, uint32_t depth) {
 /* the value's JSON into o: 0 when it has none (undefined, a function) */
 static int json_write(js_vm *vm, jv v, vector<uint16_t> *o, uint32_t gap, uint32_t depth, vector<uint32_t> *stack) {
     if (vm->throwing) return 0;
-    if (jv_is_obj(v)) {
+    if (jv_is_obj(v) || jv_is_big(v)) {
         jv tj = js_get(vm, v, A_TOJSON);
         if (vm->throwing) return 0;
         if (js_is_callable(vm, tj)) { v = js_call(vm, tj, v, 0, 0); if (vm->throwing) return 0; }
     }
     if (jv_is_obj(v)) {
         uint32_t k = vm->objs[jv_idx(v)].kind;
-        if (k == JK_NUMBER || k == JK_STRING || k == JK_BOOLEAN) v = vm->objs[jv_idx(v)].x;
+        if (k == JK_NUMBER || k == JK_STRING || k == JK_BOOLEAN || k == JK_BIGINT) v = vm->objs[jv_idx(v)].x;
     }
+    if (jv_is_big(v)) { js_throw_msg(vm, vm->type_error_proto, "Do not know how to serialize a BigInt"); return 0; }
     if (v == JV_NULL) { out_ascii(o, "null"); return 1; }
     if (v == JV_TRUE) { out_ascii(o, "true"); return 1; }
     if (v == JV_FALSE) { out_ascii(o, "false"); return 1; }
@@ -534,6 +536,7 @@ static uint32_t coll_hash(js_vm *vm, jv k) {
         if (d == 0) d = 0;
         memcpy(&h, &d, sizeof h);
     } else if (jv_is_str(k)) return js_str_hash(vm, jv_idx(k));
+    else if (jv_is_big(k)) return js_big_hash(vm, k);
     else h = k;
     h ^= h >> 33;
     h *= 0xFF51AFD7ED558CCDull;
@@ -749,6 +752,9 @@ static jv console_out(js_vm *vm, uint32_t level, uint32_t args, uint32_t argc) {
             s = js_str_utf8(vm, data(t), len(t));
         } else if (jv_is_sym(v)) {
             s = js_sym_text(vm, jv_idx(v));
+        } else if (jv_is_big(v)) {
+            /* a BigInt written as V8's console writes one: its digits and an n */
+            s = js_str_concat(vm, js_big_to_string(vm, v, 10), js_str_ascii(vm, "n"));
         } else {
             s = js_to_string(vm, v);
             if (!s) return JV_HOLE;
@@ -1166,6 +1172,15 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_str(s);
     }
     case N_NUMBER: {
+        /* Number(big): the BigInt's value, rounded */
+        if (argc) {
+            jv p = js_to_primitive(vm, a0, 0);
+            if (vm->throwing) return JV_HOLE;
+            if (jv_is_big(p)) {
+                jv r = jv_num(js_big_to_double(vm, p));
+                return newt != JV_UNDEF && newt != JV_HOLE ? js_to_object(vm, r) : r;
+            }
+        }
         double d = argc ? js_to_number(vm, a0) : 0;
         if (newt != JV_UNDEF && newt != JV_HOLE) return js_to_object(vm, jv_num(d));
         return jv_num(d);
@@ -1655,6 +1670,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (jv_is_num(thisv)) t = "[object Number]";
         else if (jv_is_str(thisv)) t = "[object String]";
         else if (jv_is_bool(thisv)) t = "[object Boolean]";
+        else if (jv_is_big(thisv)) t = "[object BigInt]";
+        else if (jv_is_sym(thisv)) t = "[object Symbol]";
         else if (jv_is_obj(thisv)) {
             uint32_t k = vm->objs[jv_idx(thisv)].kind;
             if (k == JK_PROXY) { if (is_array_spec(vm, thisv)) k = JK_ARRAY; else if (vm->throwing) return JV_HOLE; }
@@ -2062,6 +2079,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id >= N_RE_FIRST && id < N_RE_FIRST + JRE_N) return js_re_native(vm, id - N_RE_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_PX_FIRST && id < N_PX_FIRST + JPX_N) return js_proxy_native(vm, id - N_PX_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_TA_FIRST && id < N_TA_FIRST + JTN_N) return js_typed_native(vm, id - N_TA_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_BG_FIRST && id < N_BG_FIRST + JBG_N) return js_big_native(vm, id - N_BG_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2677,6 +2695,7 @@ void js_builtins_init(js_vm *vm) {
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_MP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
     defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
     js_proxy_init(vm, N_PX_FIRST);
+    js_big_init(vm, N_BG_FIRST);
     /* the typed arrays, and the methods they share with Array (generic over array-likes) */
     js_typed_init(vm, N_TA_FIRST);
     {

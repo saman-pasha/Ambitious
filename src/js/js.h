@@ -6,7 +6,8 @@
    VALUES are NaN-boxed 64-bit words. A double is itself (its NaNs canonical); above
    the doubles, the top 16 bits tag the rest: 0xFFF9 the specials (undefined, null,
    false, true, and the hole that marks an uninitialized binding or a missing array
-   element), 0xFFFA an object's index, 0xFFFB a string's index, 0xFFFC a symbol's.
+   element), 0xFFFA an object's index, 0xFFFB a string's index, 0xFFFC a symbol's, 0xFFFD
+   a BigInt's (src/js/bigint.c).
    A property's key is an atom (a string's id) or a symbol's index with JS_SYM_KEY
    set: one key space for the shapes, two for what keys are.
 
@@ -42,17 +43,20 @@ typedef uint64_t jv;
 #define JV_OBJ_TAG 0xFFFA000000000000ull
 #define JV_STR_TAG 0xFFFB000000000000ull
 #define JV_SYM_TAG 0xFFFC000000000000ull
+#define JV_BIG_TAG 0xFFFD000000000000ull
 #define JV_NAN   0x7FF8000000000000ull
 
 #define jv_is_num(v) ((v) < 0xFFF9000000000000ull)
 #define jv_is_obj(v) (((v) >> 48) == 0xFFFAu)
 #define jv_is_str(v) (((v) >> 48) == 0xFFFBu)
 #define jv_is_sym(v) (((v) >> 48) == 0xFFFCu)
+#define jv_is_big(v) (((v) >> 48) == 0xFFFDu)
 #define jv_is_bool(v) ((v) == JV_TRUE || (v) == JV_FALSE)
 #define jv_is_nullish(v) ((v) == JV_UNDEF || (v) == JV_NULL)
 #define jv_obj(i) (JV_OBJ_TAG | (uint64_t)(uint32_t)(i))
 #define jv_str(i) (JV_STR_TAG | (uint64_t)(uint32_t)(i))
 #define jv_sym(i) (JV_SYM_TAG | (uint64_t)(uint32_t)(i))
+#define jv_big(i) (JV_BIG_TAG | (uint64_t)(uint32_t)(i))
 /* a property key that is a symbol's: its index with this bit (an atom never has it) */
 #define JS_SYM_KEY 0x80000000u
 #define js_key_is_sym(k) (((k) & JS_SYM_KEY) != 0)
@@ -84,7 +88,8 @@ enum {
     JK_PROXY,        /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
     JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length (src/js/typed.c) */
     JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
-    JK_DATAVIEW      /* a its buffer, b its length in bytes, c its first byte in the buffer */
+    JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
+    JK_BIGINT        /* a BigInt's wrapper: the value in x */
 };
 /* a typed array's element type, in its flags above JO_TA_SHIFT */
 enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UINT32, JTA_FLOAT32, JTA_FLOAT64,
@@ -168,6 +173,9 @@ typedef struct js_handler { uint32_t frame, pc, sp, env; } js_handler;
 /* a timer, in virtual time */
 /* run: the script that set it (vm->cur_run then), rec its record (src/script/script.c) */
 typedef struct js_timer { uint32_t id; double due, interval; jv fn; uint32_t args, nargs, live, seq, run, rec, fired; } js_timer;
+
+/* a BigInt: its sign, its magnitude's 32-bit limbs (least first, none for zero) a span of vm->bigl */
+typedef struct js_big { uint32_t neg, off, n; } js_big;
 
 /* a symbol: its description (a string, 0 for none); reg, its key in Symbol.for's registry plus one */
 typedef struct js_sym { uint32_t desc, reg; } js_sym;
@@ -264,6 +272,9 @@ typedef struct js_vm {
     uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
     uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
     vector<uint8_t> bytes;            /* every ArrayBuffer's bytes (src/js/typed.c) */
+    vector<js_big> bigs;              /* every BigInt (src/js/bigint.c) */
+    vector<uint32_t> bigl;            /* their limbs */
+    uint32_t bigint_proto;
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
@@ -299,7 +310,8 @@ typedef struct js_vm {
     vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms); vector_js_sym_drop(&(v).syms); \
     vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected); vector_js_regex_drop(&(v).regexes); \
     vector_uint32_t_drop(&(v).re_code); vector_uint32_t_drop(&(v).re_hash); vector_uint32_t_drop(&(v).re_stack); \
-    vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs); vector_uint8_t_drop(&(v).bytes)
+    vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs); vector_uint8_t_drop(&(v).bytes); \
+    vector_js_big_drop(&(v).bigs); vector_uint32_t_drop(&(v).bigl)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -405,6 +417,30 @@ enum { JTN_AB, JTN_AB_ISVIEW, JTN_AB_BYTELENGTH, JTN_AB_SLICE, JTN_AB_RESIZABLE,
        JTN_TE_ENCODEINTO, JTN_TD_DECODE, JTN_N };
 jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_typed_init(js_vm *vm, uint32_t first);
+
+/* BigInts (src/js/bigint.c): made, read, compared, written; an operator's result (op one of
+   the bytecode's OP_ADD .. OP_SHR); ToBigInt; the natives, after the first's id */
+jv js_big_from_u64(js_vm *vm, uint64_t u, int neg);
+jv js_big_from_i64(js_vm *vm, int64_t v);
+jv js_big_from_double(js_vm *vm, double d);
+double js_big_to_double(js_vm *vm, jv v);
+uint64_t js_big_to_u64(js_vm *vm, jv v);
+int js_big_is_zero(js_vm *vm, jv v);
+int js_big_cmp(js_vm *vm, jv a, jv b);
+int js_big_eq(js_vm *vm, jv a, jv b);
+int js_big_cmp_num(js_vm *vm, jv a, double d);
+uint32_t js_big_hash(js_vm *vm, jv v);
+uint32_t js_big_to_string(js_vm *vm, jv v, uint32_t radix);
+jv js_big_parse(js_vm *vm, uint32_t s, int literal);
+jv js_big_literal(js_vm *vm, const char *text, size_t n);
+jv js_big_binop(js_vm *vm, uint32_t op, jv a, jv b);
+jv js_big_neg(js_vm *vm, jv a);
+jv js_big_not(js_vm *vm, jv a);
+jv js_big_inc(js_vm *vm, jv a, int by);
+jv js_to_bigint(js_vm *vm, jv v);
+enum { JBG_CTOR, JBG_ASINTN, JBG_ASUINTN, JBG_TOSTRING, JBG_TOLOCALE, JBG_VALUEOF, JBG_N };
+jv js_big_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_big_init(js_vm *vm, uint32_t first);
 
 /* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
 enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };

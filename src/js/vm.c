@@ -553,6 +553,7 @@ void js_error_text(js_vm *vm, jv e, vector<char> *out) {
 int js_truthy(js_vm *vm, jv v) {
     if (jv_is_num(v)) { double d = jv_dbl(v); return d == d && d != 0; }
     if (jv_is_str(v)) return vm->strs[jv_idx(v)].len > 0;
+    if (jv_is_big(v)) return !js_big_is_zero(vm, v);
     if (jv_is_obj(v) || jv_is_sym(v)) return 1;
     return v == JV_TRUE;
 }
@@ -726,7 +727,7 @@ jv js_to_primitive(js_vm *vm, jv v, int hint_string) {
     if (!jv_is_obj(v)) return v;
     uint32_t o = jv_idx(v);
     uint32_t k = vm->objs[o].kind;
-    if (k == JK_NUMBER || k == JK_BOOLEAN || k == JK_STRING || k == JK_SYMBOL) return vm->objs[o].x;
+    if (k == JK_NUMBER || k == JK_BOOLEAN || k == JK_STRING || k == JK_SYMBOL || k == JK_BIGINT) return vm->objs[o].x;
     /* an object's own Symbol.toPrimitive, given the hint */
     if (k == JK_PLAIN || k == JK_HOST) {
         jv ex = js_get(vm, v, JS_SYM_KEY | JSYM_TO_PRIMITIVE);
@@ -761,6 +762,7 @@ double js_to_number(js_vm *vm, jv v) {
     if (v == JV_TRUE) return 1;
     if (jv_is_str(v)) return js_str_to_num(vm, jv_idx(v));
     if (jv_is_sym(v)) { js_throw_msg(vm, vm->type_error_proto, "Cannot convert a Symbol value to a number"); return NAN; }
+    if (jv_is_big(v)) { js_throw_msg(vm, vm->type_error_proto, "Cannot convert a BigInt value to a number"); return NAN; }
     jv p = js_to_primitive(vm, v, 0);
     if (vm->throwing) return NAN;
     return js_to_number(vm, p);
@@ -774,6 +776,7 @@ uint32_t js_to_string(js_vm *vm, jv v) {
     if (v == JV_TRUE) return A_TRUE;
     if (v == JV_FALSE) return A_FALSE;
     if (jv_is_sym(v)) { js_throw_msg(vm, vm->type_error_proto, "Cannot convert a Symbol value to a string"); return 0; }
+    if (jv_is_big(v)) return js_big_to_string(vm, v, 10);
     jv p = js_to_primitive(vm, v, 1);
     if (vm->throwing) return 0;
     return js_to_string(vm, p);
@@ -782,8 +785,9 @@ uint32_t js_to_string(js_vm *vm, jv v) {
 jv js_to_object(js_vm *vm, jv v) {
     if (jv_is_obj(v)) return v;
     if (jv_is_nullish(v) || v == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object");
-    uint32_t kind = jv_is_num(v) ? JK_NUMBER : jv_is_str(v) ? JK_STRING : jv_is_sym(v) ? JK_SYMBOL : JK_BOOLEAN;
-    uint32_t proto = kind == JK_NUMBER ? vm->number_proto : kind == JK_STRING ? vm->string_proto : kind == JK_SYMBOL ? vm->symbol_proto : vm->boolean_proto;
+    uint32_t kind = jv_is_num(v) ? JK_NUMBER : jv_is_str(v) ? JK_STRING : jv_is_sym(v) ? JK_SYMBOL : jv_is_big(v) ? JK_BIGINT : JK_BOOLEAN;
+    uint32_t proto = kind == JK_NUMBER ? vm->number_proto : kind == JK_STRING ? vm->string_proto : kind == JK_SYMBOL ? vm->symbol_proto :
+                     kind == JK_BIGINT ? vm->bigint_proto : vm->boolean_proto;
     uint32_t o = js_obj_new(vm, kind, proto);
     vm->objs[o].x = v;
     return jv_obj(o);
@@ -802,12 +806,14 @@ uint32_t js_typeof(js_vm *vm, jv v) {
     if (v == JV_UNDEF || v == JV_HOLE) return A_UNDEFINED;
     if (v == JV_NULL) return A_OBJECT;
     if (jv_is_sym(v)) return A_SYMBOL;
+    if (jv_is_big(v)) return A_BIGINT;
     return js_is_callable(vm, v) ? A_FUNCTION : A_OBJECT;
 }
 
 int js_strict_eq(js_vm *vm, jv a, jv b) {
     if (jv_is_num(a) && jv_is_num(b)) return jv_dbl(a) == jv_dbl(b);
     if (jv_is_str(a) && jv_is_str(b)) return js_str_eq(vm, jv_idx(a), jv_idx(b));
+    if (jv_is_big(a) && jv_is_big(b)) return js_big_eq(vm, a, b);
     return a == b;
 }
 
@@ -824,6 +830,12 @@ int js_loose_eq(js_vm *vm, jv a, jv b) {
         if ((jv_is_num(a) && jv_is_num(b)) || (jv_is_str(a) && jv_is_str(b)) || (jv_is_obj(a) && jv_is_obj(b))) return js_strict_eq(vm, a, b);
         if (jv_is_sym(a) && jv_is_sym(b)) return a == b;
         if (jv_is_nullish(a) || jv_is_nullish(b)) return jv_is_nullish(a) && jv_is_nullish(b);
+        /* a BigInt against a BigInt, a number (by value), a string (its digits, else unequal) */
+        if (jv_is_big(a) && jv_is_big(b)) return js_big_eq(vm, a, b);
+        if (jv_is_big(a) && jv_is_num(b)) return js_big_cmp_num(vm, a, jv_dbl(b)) == 0;
+        if (jv_is_num(a) && jv_is_big(b)) return js_big_cmp_num(vm, b, jv_dbl(a)) == 0;
+        if (jv_is_big(a) && jv_is_str(b)) { jv x = js_big_parse(vm, jv_idx(b), 0); return x != JV_HOLE && js_big_eq(vm, a, x); }
+        if (jv_is_str(a) && jv_is_big(b)) { jv x = js_big_parse(vm, jv_idx(a), 0); return x != JV_HOLE && js_big_eq(vm, x, b); }
         if (jv_is_bool(a)) { a = jv_num(a == JV_TRUE ? 1 : 0); continue; }
         if (jv_is_bool(b)) { b = jv_num(b == JV_TRUE ? 1 : 0); continue; }
         if (jv_is_num(a) && jv_is_str(b)) return jv_dbl(a) == js_str_to_num(vm, jv_idx(b));
@@ -927,6 +939,7 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
 
 static uint32_t js_proto_of_primitive(js_vm *vm, jv v) {
     if (jv_is_num(v)) return vm->number_proto;
+    if (jv_is_big(v)) return vm->bigint_proto;
     if (jv_is_str(v)) return vm->string_proto;
     if (jv_is_bool(v)) return vm->boolean_proto;
     if (jv_is_sym(v)) return vm->symbol_proto;
@@ -1274,6 +1287,10 @@ static jv js_add_slow(js_vm *vm, jv a, jv b) {
         if (!sb) return JV_HOLE;
         return jv_str(js_str_concat(vm, sa, sb));
     }
+    if (jv_is_big(pa) || jv_is_big(pb)) {
+        if (jv_is_big(pa) && jv_is_big(pb)) return js_big_binop(vm, OP_ADD, pa, pb);
+        return js_throw_msg(vm, vm->type_error_proto, "Cannot mix BigInt and other types, use explicit conversions");
+    }
     double x = js_to_number(vm, pa), y = js_to_number(vm, pb);
     return jv_num(x + y);
 }
@@ -1290,6 +1307,22 @@ static int js_less(js_vm *vm, jv a, jv b) {
     jv pb = js_to_primitive(vm, b, 0);
     if (vm->throwing) return 0;
     if (jv_is_str(pa) && jv_is_str(pb)) return js_str_cmp(vm, jv_idx(pa), jv_idx(pb)) < 0;
+    if (jv_is_big(pa) || jv_is_big(pb)) {
+        /* a BigInt against a BigInt, a number, or a string's digits (none: undefined) */
+        if (jv_is_str(pa)) { pa = js_big_parse(vm, jv_idx(pa), 0); if (pa == JV_HOLE) return -1; }
+        if (jv_is_str(pb)) { pb = js_big_parse(vm, jv_idx(pb), 0); if (pb == JV_HOLE) return -1; }
+        if (jv_is_big(pa) && jv_is_big(pb)) return js_big_cmp(vm, pa, pb) < 0;
+        if (jv_is_big(pa)) {
+            double y = js_to_number(vm, pb);
+            if (vm->throwing) return 0;
+            int c = js_big_cmp_num(vm, pa, y);
+            return c == 2 ? -1 : c < 0;
+        }
+        double x = js_to_number(vm, pa);
+        if (vm->throwing) return 0;
+        int c = js_big_cmp_num(vm, pb, x);
+        return c == 2 ? -1 : c > 0;
+    }
     double x = js_to_number(vm, pa), y = js_to_number(vm, pb);
     if (x != x || y != y) return -1;
     return x < y;
@@ -1908,16 +1941,33 @@ static jv js_global_get(js_vm *vm, uint32_t atom, uint32_t ic, int *found) {
 
 /* the operators' slow paths, shared by their instructions: the operands converted
    (valueOf and toString may run, and throw: NaN then, vm->throwing set) */
-static double js_arith_slow(js_vm *vm, uint32_t op, jv a, jv b) {
-    double x = jv_is_num(a) ? jv_dbl(a) : js_to_number(vm, a);
-    if (vm->throwing) return NAN;
-    double y = jv_is_num(b) ? jv_dbl(b) : js_to_number(vm, b);
-    if (vm->throwing) return NAN;
-    if (op == OP_SUB) return x - y;
-    if (op == OP_MUL) return x * y;
-    if (op == OP_DIV) return x / y;
-    if (op == OP_MOD) return js_mod(x, y);
-    return js_pow(x, y);
+/* a - b, a * b, a / b, a % b, a ** b, a & b ... a >>> b for any operands: numbers, or
+   BigInts both (one of each is a TypeError) */
+static jv js_arith_slow(js_vm *vm, uint32_t op, jv a, jv b) {
+    jv pa = jv_is_num(a) ? a : js_to_primitive(vm, a, 0);
+    if (vm->throwing) return JV_HOLE;
+    jv pb = jv_is_num(b) ? b : js_to_primitive(vm, b, 0);
+    if (vm->throwing) return JV_HOLE;
+    if (jv_is_big(pa) || jv_is_big(pb)) {
+        if (jv_is_big(pa) && jv_is_big(pb)) return js_big_binop(vm, op, pa, pb);
+        return js_throw_msg(vm, vm->type_error_proto, "Cannot mix BigInt and other types, use explicit conversions");
+    }
+    double x = jv_is_num(pa) ? jv_dbl(pa) : js_to_number(vm, pa);
+    if (vm->throwing) return JV_HOLE;
+    double y = jv_is_num(pb) ? jv_dbl(pb) : js_to_number(vm, pb);
+    if (vm->throwing) return JV_HOLE;
+    if (op == OP_SUB) return jv_num(x - y);
+    if (op == OP_MUL) return jv_num(x * y);
+    if (op == OP_DIV) return jv_num(x / y);
+    if (op == OP_MOD) return jv_num(js_mod(x, y));
+    if (op == OP_POW) return jv_num(js_pow(x, y));
+    int32_t ia = js_to_int32(x), ib = js_to_int32(y);
+    if (op == OP_BAND) return jv_num((double)(ia & ib));
+    if (op == OP_BOR) return jv_num((double)(ia | ib));
+    if (op == OP_BXOR) return jv_num((double)(ia ^ ib));
+    if (op == OP_SHL) return jv_num((double)(int32_t)((uint32_t)ia << (ib & 31)));
+    if (op == OP_SAR) return jv_num((double)(ia >> (ib & 31)));
+    return jv_num((double)((uint32_t)ia >> (ib & 31)));
 }
 /* a comparison by LT LE GT GE SEQ SNE EQ NE, any operands: its truth */
 static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
@@ -1936,10 +1986,10 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     jv b_ = stack[sp - 1], a_ = stack[sp - 2]; \
     if (jv_is_num(a_) && jv_is_num(b_)) { double x = jv_dbl(a_), y = jv_dbl(b_); stack[sp - 2] = jv_num(EXPR); sp--; goto next; } \
     SYNC(); \
-    double r_ = js_arith_slow(vm, OPC, a_, b_); RELOAD(); \
+    jv r_ = js_arith_slow(vm, OPC, a_, b_); RELOAD(); \
     if (vm->throwing) break; \
     sp--; \
-    stack[sp - 1] = jv_num(r_); \
+    stack[sp - 1] = r_; \
     goto next; }
 #define ARITH_I(OPC, BASE, EXPR) case OPC: { \
     jv a_ = stack[sp - 1]; \
@@ -1947,9 +1997,9 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     pc += 4; \
     if (jv_is_num(a_)) { double x = jv_dbl(a_); stack[sp - 1] = jv_num(EXPR); goto next; } \
     SYNC(); \
-    double r_ = js_arith_slow(vm, BASE, a_, jv_num(y)); RELOAD(); \
+    jv r_ = js_arith_slow(vm, BASE, a_, jv_num(y)); RELOAD(); \
     if (vm->throwing) break; \
-    stack[sp - 1] = jv_num(r_); \
+    stack[sp - 1] = r_; \
     goto next; }
 #define REL(OPC, EXPR, CMPN) case OPC: { \
     jv b_ = stack[sp - 1], a_ = stack[sp - 2]; \
@@ -1989,7 +2039,7 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     pc += 6; \
     if (jv_is_num(a_)) { double x = jv_dbl(a_); stack[sp++] = jv_num(EXPR); goto next; } \
     SYNC(); \
-    jv r_ = BASE == OP_ADD ? js_add_slow(vm, a_, jv_num(y)) : jv_num(js_arith_slow(vm, BASE, a_, jv_num(y))); RELOAD(); \
+    jv r_ = BASE == OP_ADD ? js_add_slow(vm, a_, jv_num(y)) : js_arith_slow(vm, BASE, a_, jv_num(y)); RELOAD(); \
     if (vm->throwing) break; \
     stack[sp++] = r_; \
     goto next; }
@@ -1998,7 +2048,7 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     pc += 4; \
     if (jv_is_num(a_) && jv_is_num(b_)) { double x = jv_dbl(a_), y = jv_dbl(b_); stack[sp++] = jv_num(EXPR); goto next; } \
     SYNC(); \
-    jv r_ = BASE == OP_ADD ? js_add_slow(vm, a_, b_) : jv_num(js_arith_slow(vm, BASE, a_, b_)); RELOAD(); \
+    jv r_ = BASE == OP_ADD ? js_add_slow(vm, a_, b_) : js_arith_slow(vm, BASE, a_, b_); RELOAD(); \
     if (vm->throwing) break; \
     stack[sp++] = r_; \
     goto next; }
@@ -2007,7 +2057,7 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     sp -= 2; \
     int r_; \
     if (jv_is_num(a_) && jv_is_num(b_)) r_ = jv_dbl(a_) == jv_dbl(b_); \
-    else if (jv_is_str(a_) && jv_is_str(b_)) { r_ = js_strict_eq(vm, a_, b_); RELOAD(); } \
+    else if ((jv_is_str(a_) && jv_is_str(b_)) || (jv_is_big(a_) && jv_is_big(b_))) { r_ = js_strict_eq(vm, a_, b_); RELOAD(); } \
     else r_ = a_ == b_; \
     JUMP_WHEN(r_, WHEN) }
 #define JEQ_LOOSE(OPC, WHEN) case OPC: { \
@@ -2665,11 +2715,16 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         ARITH_I(OP_MOD_I, OP_MOD, js_mod(x, y))
         case OP_BAND: case OP_BOR: case OP_BXOR: case OP_SHL: case OP_SAR: case OP_SHR: {
             jv b = stack[sp - 1], a = stack[sp - 2];
-            SYNC();
-            double x = jv_is_num(a) ? jv_dbl(a) : js_to_number(vm, a); RELOAD();
-            if (vm->throwing) break;
-            double y = jv_is_num(b) ? jv_dbl(b) : js_to_number(vm, b); RELOAD();
-            if (vm->throwing) break;
+            if (!jv_is_num(a) || !jv_is_num(b)) {
+                /* objects, strings, BigInts: the general path */
+                SYNC();
+                jv r = js_arith_slow(vm, op, a, b); RELOAD();
+                if (vm->throwing) break;
+                sp--;
+                stack[sp - 1] = r;
+                break;
+            }
+            double x = jv_dbl(a), y = jv_dbl(b);
             int32_t ia = js_to_int32(x), ib = js_to_int32(y);
             double r;
             if (op == OP_BAND) r = (double)(ia & ib);
@@ -2688,7 +2743,18 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (jv_is_num(a)) x = jv_dbl(a);
             else {
                 SYNC();
-                x = js_to_number(vm, a); RELOAD();
+                /* ToNumeric: a BigInt stays one (unary + alone refuses it) */
+                jv pa = jv_is_obj(a) ? js_to_primitive(vm, a, 0) : a; RELOAD();
+                if (vm->throwing) break;
+                if (jv_is_big(pa) && op != OP_PLUS) {
+                    jv r = op == OP_NEG ? js_big_neg(vm, pa) : op == OP_BNOT ? js_big_not(vm, pa) : op == OP_INC ? js_big_inc(vm, pa, 1) :
+                           op == OP_DEC ? js_big_inc(vm, pa, -1) : pa;
+                    RELOAD();
+                    if (vm->throwing) break;
+                    stack[sp - 1] = r;
+                    break;
+                }
+                x = js_to_number(vm, pa); RELOAD();
                 if (vm->throwing) break;
             }
             double r = op == OP_NEG ? -x : op == OP_BNOT ? (double)(~js_to_int32(x)) : op == OP_INC ? x + 1 : op == OP_DEC ? x - 1 : x;
@@ -2734,7 +2800,19 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             double x;
             if (jv_is_num(v)) x = jv_dbl(v);
             else if (v == JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Cannot access a variable before its declaration ran"); RELOAD(); break; }
-            else { SYNC(); x = js_to_number(vm, v); RELOAD(); if (vm->throwing) break; }
+            else {
+                SYNC();
+                jv pv = jv_is_obj(v) ? js_to_primitive(vm, v, 0) : v; RELOAD();
+                if (vm->throwing) break;
+                if (jv_is_big(pv)) {
+                    jv r = js_big_inc(vm, pv, op == OP_INC_LOC ? 1 : -1); RELOAD();
+                    if (vm->throwing) break;
+                    stack[base + slot] = r;
+                    goto next;
+                }
+                x = js_to_number(vm, pv); RELOAD();
+                if (vm->throwing) break;
+            }
             stack[base + slot] = jv_num(op == OP_INC_LOC ? x + 1 : x - 1);
             goto next;
         }

@@ -6,8 +6,8 @@
    type in its flags above JO_TA_SHIFT. A DataView is a span of one: a the buffer, b its
    byte length, c its first byte. The bytes are in the machine's order (little-endian);
    a DataView reads and writes either. A buffer is never detached: nothing transfers one
-   yet. The elements of BigInt64Array and BigUint64Array, and DataView's BigInt methods,
-   wait for BigInt: their constructors throw. */
+   yet. BigInt64Array's and BigUint64Array's elements are BigInts (src/js/bigint.c), as
+   DataView's BigInt methods read and write them. */
 #include <stdlib.h>
 #include <math.h>
 #include "js.h"
@@ -77,15 +77,38 @@ static void ta_write(js_vm *vm, uint32_t t, uint32_t p, double d, int little) {
     for (uint32_t k = 0; k < n; k++) vm->bytes[p + (little ? k : n - 1 - k)] = b[k];
 }
 
-/* a typed array's element i (i below its length) */
-jv js_ta_get(js_vm *vm, uint32_t o, uint32_t i) { return jv_num(ta_read(vm, ta_type(vm, o), ta_at(vm, o, i), 1)); }
+/* eight bytes at p as one 64-bit number, and written back */
+static uint64_t ta_read64(js_vm *vm, uint32_t p, int little) {
+    uint64_t u = 0;
+    for (uint32_t k = 0; k < 8; k++) u |= (uint64_t)vm->bytes[p + (little ? k : 7 - k)] << (8 * k);
+    return u;
+}
+static void ta_write64(js_vm *vm, uint32_t p, uint64_t u, int little) {
+    for (uint32_t k = 0; k < 8; k++) vm->bytes[p + (little ? k : 7 - k)] = (uint8_t)(u >> (8 * k));
+}
+static jv ta_big_of(js_vm *vm, uint32_t t, uint64_t u) { return t == JTA_BIGINT64 ? js_big_from_i64(vm, (int64_t)u) : js_big_from_u64(vm, u, 0); }
 
-/* element i set to v converted: 0 when the conversion threw. An index past the end is ignored */
+/* a typed array's element i (i below its length): a number, or a BigInt for the two of them */
+jv js_ta_get(js_vm *vm, uint32_t o, uint32_t i) {
+    uint32_t t = ta_type(vm, o);
+    if (t >= JTA_BIGINT64) return ta_big_of(vm, t, ta_read64(vm, ta_at(vm, o, i), 1));
+    return jv_num(ta_read(vm, t, ta_at(vm, o, i), 1));
+}
+
+/* element i set to v converted (ToNumber, or ToBigInt for the BigInt arrays): 0 when the
+   conversion threw. An index past the end is ignored */
 int js_ta_set(js_vm *vm, uint32_t o, uint32_t i, jv v) {
+    uint32_t t = ta_type(vm, o);
+    if (t >= JTA_BIGINT64) {
+        jv b = js_to_bigint(vm, v);
+        if (vm->throwing) return 0;
+        if (i < vm->objs[o].b) ta_write64(vm, ta_at(vm, o, i), js_big_to_u64(vm, b), 1);
+        return 1;
+    }
     double d = jv_is_num(v) ? jv_dbl(v) : js_to_number(vm, v);
     if (vm->throwing) return 0;
     if (i >= vm->objs[o].b) return 1;
-    ta_write(vm, ta_type(vm, o), ta_at(vm, o, i), d, 1);
+    ta_write(vm, t, ta_at(vm, o, i), d, 1);
     return 1;
 }
 
@@ -293,7 +316,6 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             snprintf(m, sizeof m, "Constructor %s requires 'new'", ta_name[t]);
             return js_throw_msg(vm, vm->type_error_proto, m);
         }
-        if (t >= JTA_BIGINT64) return js_throw_msg(vm, vm->type_error_proto, "BigInt64Array and BigUint64Array wait for BigInt");
         uint32_t proto = vm->ta_protos[t];
         if (jv_is_obj(newt) && newt != callee) {
             jv pv = js_get(vm, newt, A_PROTOTYPE);
@@ -337,7 +359,6 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
     case JTN_FROM: case JTN_OF: {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_NATIVE) return js_throw_msg(vm, vm->type_error_proto, "TypedArray.from and of need a typed array's constructor");
         uint32_t t = ctor_type(vm, thisv);
-        if (t >= JTA_BIGINT64) return js_throw_msg(vm, vm->type_error_proto, "BigInt64Array and BigUint64Array wait for BigInt");
         vector<jv> vals;
         if (which == JTN_OF) { for (uint32_t i = 0; i < argc; i++) push_back(vals, js_arg(vm, args, argc, i)); }
         else {
@@ -401,11 +422,18 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
     case JTN_FILL: {
         uint32_t o = this_ta(vm, thisv, "TypedArray.prototype.fill");
         if (!o) return JV_HOLE;
-        double d = js_to_number(vm, a0);
+        uint32_t t = ta_type(vm, o);
+        jv bv = JV_UNDEF;
+        double d = 0;
+        if (t >= JTA_BIGINT64) bv = js_to_bigint(vm, a0);
+        else d = js_to_number(vm, a0);
         if (vm->throwing) return JV_HOLE;
         uint32_t n = vm->objs[o].b, from = rel_index(vm, a1, n, 0), to = rel_index(vm, a2, n, n);
         if (vm->throwing) return JV_HOLE;
-        for (uint32_t i = from; i < to; i++) ta_write(vm, ta_type(vm, o), ta_at(vm, o, i), d, 1);
+        for (uint32_t i = from; i < to; i++) {
+            if (t >= JTA_BIGINT64) ta_write64(vm, ta_at(vm, o, i), js_big_to_u64(vm, bv), 1);
+            else ta_write(vm, t, ta_at(vm, o, i), d, 1);
+        }
         return thisv;
     }
     case JTN_MAP: case JTN_FILTER: {
@@ -440,7 +468,8 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
                 size_t x = lo, y = mid, k = lo;
                 while (x < mid && y < hi) {
                     int c;
-                    if (a0 == JV_UNDEF) c = cmp_num(jv_dbl(vals[y]), jv_dbl(vals[x]));
+                    if (a0 == JV_UNDEF && jv_is_big(vals[y])) c = js_big_cmp(vm, vals[y], vals[x]);
+                    else if (a0 == JV_UNDEF) c = cmp_num(jv_dbl(vals[y]), jv_dbl(vals[x]));
                     else {
                         jv av[2] = { vals[y], vals[x] };
                         jv r = js_call(vm, a0, JV_UNDEF, av, 2);
@@ -458,7 +487,7 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             for (size_t k = 0; k < len(vals); k++) vals[k] = tmp[k];
         }
         uint32_t dst = which == JTN_SORT ? o : ta_like(vm, o, n);
-        for (uint32_t i = 0; i < n && i < vm->objs[dst].b; i++) ta_write(vm, ta_type(vm, dst), ta_at(vm, dst, i), jv_dbl(vals[i]), 1);
+        for (uint32_t i = 0; i < n && i < vm->objs[dst].b; i++) if (!js_ta_set(vm, dst, i, vals[i])) return JV_HOLE;
         return jv_obj(dst);
     }
     case JTN_REVERSE: case JTN_TOREVERSED: {
@@ -466,9 +495,13 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (!o) return JV_HOLE;
         uint32_t n = vm->objs[o].b;
         uint32_t dst = which == JTN_REVERSE ? o : ta_like(vm, o, n);
-        vector<double> vals;
-        for (uint32_t i = 0; i < n; i++) push_back(vals, jv_dbl(js_ta_get(vm, o, i)));
-        for (uint32_t i = 0; i < n; i++) ta_write(vm, ta_type(vm, dst), ta_at(vm, dst, i), vals[n - 1 - i], 1);
+        /* the elements' bytes, whatever their type, in the other order */
+        uint32_t sz = ta_size[ta_type(vm, o)];
+        vector<uint8_t> tmp;
+        uint32_t src = ta_at(vm, o, 0);
+        for (uint32_t i = 0; i < n * sz; i++) push_back(tmp, vm->bytes[src + i]);
+        uint32_t d0 = ta_at(vm, dst, 0);
+        for (uint32_t i = 0; i < n; i++) for (uint32_t k = 0; k < sz; k++) vm->bytes[d0 + i * sz + k] = tmp[(n - 1 - i) * sz + k];
         return jv_obj(dst);
     }
     case JTN_WITH: {
@@ -479,13 +512,13 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (vm->throwing) return JV_HOLE;
         d = d != d ? 0 : trunc(d);
         if (d < 0) d += n;
-        double v = js_to_number(vm, a1);
+        jv v = ta_type(vm, o) >= JTA_BIGINT64 ? js_to_bigint(vm, a1) : jv_num(js_to_number(vm, a1));
         if (vm->throwing) return JV_HOLE;
         if (d < 0 || d >= n) return js_throw_msg(vm, vm->range_error_proto, "Invalid typed array index");
         uint32_t r = ta_like(vm, o, n);
         uint32_t sz = ta_size[ta_type(vm, o)], src = ta_at(vm, o, 0), dst = ta_at(vm, r, 0);
         for (uint32_t i = 0; i < n * sz; i++) vm->bytes[dst + i] = vm->bytes[src + i];
-        ta_write(vm, ta_type(vm, r), ta_at(vm, r, (uint32_t)d), v, 1);
+        if (!js_ta_set(vm, r, (uint32_t)d, v)) return JV_HOLE;
         return jv_obj(r);
     }
     case JTN_COPYWITHIN: {
@@ -530,11 +563,18 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATAVIEW) return js_throw_msg(vm, vm->type_error_proto, "a DataView's method called on an object that is not one");
         /* the element type in the callee's x */
         uint32_t t = (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x);
-        if (t >= JTA_BIGINT64) return js_throw_msg(vm, vm->type_error_proto, "DataView's BigInt methods wait for BigInt");
         uint32_t p;
         if (which == JTN_DV_GET) {
             if (!dv_check(vm, jv_idx(thisv), a0, ta_size[t], &p)) return JV_HOLE;
+            if (t >= JTA_BIGINT64) return ta_big_of(vm, t, ta_read64(vm, p, js_truthy(vm, a1)));
             return jv_num(ta_read(vm, t, p, js_truthy(vm, a1)));
+        }
+        if (t >= JTA_BIGINT64) {
+            jv b = js_to_bigint(vm, a1);
+            if (vm->throwing) return JV_HOLE;
+            if (!dv_check(vm, jv_idx(thisv), a0, 8, &p)) return JV_HOLE;
+            ta_write64(vm, p, js_big_to_u64(vm, b), js_truthy(vm, a2));
+            return JV_UNDEF;
         }
         double d = js_to_number(vm, a1);
         if (vm->throwing) return JV_HOLE;

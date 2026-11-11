@@ -326,8 +326,20 @@ static void lx(CC) {
                 t.num = v;
             } else t.num = strtod(nb, 0);
         }
-        if (i < srcn && src[i] == 'n') cc_error(cc, cc->line, "BigInt literals are not supported");
-        else if (i < srcn && lx_idstart((uint8_t)src[i])) cc_error(cc, cc->line, "an identifier starts right after a number");
+        if (i < srcn && src[i] == 'n') {
+            /* a BigInt literal: integer digits in any radix, no fraction, exponent or legacy octal */
+            int ok = 1;
+            for (uint32_t q = t.start; q < i; q++) if (src[q] == '.' || ((src[q] == 'e' || src[q] == 'E') && !(i - t.start > 1 && (src[t.start + 1] == 'x' || src[t.start + 1] == 'X')))) ok = 0;
+            if (src[t.start] == '0' && i - t.start > 1 && src[t.start + 1] >= '0' && src[t.start + 1] <= '9') ok = 0;
+            if (!ok) cc_error(cc, cc->line, "an invalid BigInt literal");
+            else {
+                jv b = js_big_literal(vm, src + t.start, i - t.start);
+                if (b == JV_HOLE) cc_error(cc, cc->line, "an invalid BigInt literal");
+                else { t.aux = 1; t.str = jv_idx(b); }
+            }
+            i++;
+            if (i < srcn && lx_idstart((uint8_t)src[i])) cc_error(cc, cc->line, "an identifier starts right after a number");
+        } else if (i < srcn && lx_idstart((uint8_t)src[i])) cc_error(cc, cc->line, "an identifier starts right after a number");
     } else if (c == '"' || c == '\'') {
         vector<uint16_t> u;
         uint32_t j = i + 1;
@@ -573,6 +585,7 @@ static uint32_t p_prop_key(CC, int *computed) {
     }
     uint32_t n = node(cc, N_STR, line);
     if (cc->tok.type == T_NAME || cc->tok.type == T_STR) cc->nodes[n].s = js_atom(vm, cc->tok.str);
+    else if (cc->tok.type == T_NUM && cc->tok.aux == 1) cc->nodes[n].s = js_atom(vm, js_big_to_string(vm, jv_big(cc->tok.str), 10));
     else if (cc->tok.type == T_NUM) cc->nodes[n].s = js_atom(vm, js_num_to_str(vm, cc->tok.num));
     else { cc_error(cc, line, "expected a property name"); return n; }
     lx(CCA);
@@ -1061,7 +1074,13 @@ static uint32_t p_args(CC, uint32_t n) {
 static uint32_t p_primary(CC) {
     uint32_t line = cc->tok.line, start = cc->tok.start;
     jtok t = cc->tok;
-    if (t.type == T_NUM) { uint32_t n = node(cc, N_NUM, line); cc->nodes[n].num = t.num; lx(CCA); return n; }
+    if (t.type == T_NUM) {
+        uint32_t n = node(cc, N_NUM, line);
+        cc->nodes[n].num = t.num;
+        if (t.aux == 1) { cc->nodes[n].op = 4; cc->nodes[n].s = t.str; }     /* a BigInt: its record */
+        lx(CCA);
+        return n;
+    }
     if (t.type == T_STR) { uint32_t n = node(cc, N_STR, line); cc->nodes[n].s = t.str; lx(CCA); return n; }
     if (t.type == T_TEMPLATE) return p_template(CCA);
     if (t.type == T_PUNCT && (t.op == P_SLASH || t.op == P_DIV_ASSIGN)) {
@@ -2461,7 +2480,11 @@ static void gen_expr(CC, uint32_t n) {
         if (e.op == 1) emit(vm, OP_NULL);
         else if (e.op == 2) emit(vm, OP_TRUE);
         else if (e.op == 3) emit(vm, OP_FALSE);
-        else emit_num(vm, e.num);
+        else if (e.op == 4) {
+            push_back(vm->consts, jv_big(e.s));
+            emit(vm, OP_CONST);
+            emit32(vm, (uint32_t)(len(vm->consts) - 1));
+        } else emit_num(vm, e.num);
         return;
     case N_STR: emit(vm, OP_STR); emit32(vm, e.s); return;
     case N_TEMPLATE: {
