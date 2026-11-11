@@ -423,6 +423,15 @@ accname's recursion through embedded controls.
 **Gate:** knowledge written by one process is read by the next; a private
 session writes nothing; deletion removes what it names.
 
+*As built:* the profile is a keeper process, as the reasoner is, over its own
+store. The page snapshots stay in the reasoner's memory store, so the two never
+meet; the test shows the reasoner answering `no` about a profile fact. The
+engine asks the keeper only two things, a site's denied kinds and a visit to
+record. The commands are `history`, `bookmarks`, `bookmark`, `forget` (`URL`,
+`--site`, `--since`), `permit SITE KIND allow|deny`, `retain DAYS` and
+`profile GOAL`. AMB_NOW fixes the clock for tests. Not done: sessions restored
+into tabs (there are no tabs), and preferences that change rendering.
+
 ### Phase 11: Compatibility, security, performance
 
 - More standards and interoperability tests.
@@ -470,7 +479,7 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 | 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
 | 8 JavaScript | planned |
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
-| 10 Persistence | planned |
+| 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | planned |
 
 ## 10. Risks

@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:bf55902d:2425). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:1d8e9afc:2443). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
 typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED } net_outcome;
@@ -17,9 +17,9 @@ const char *net_outcome_name(net_outcome x);
 void net_init(net_loader *d, uint32_t id);
 uint64_t net_revision(const net_loader *d);
 net_resource_h net_fetch(net_loader *d, const char *url, size_t url_len, net_kind kind);
-net_status net_fetch_subresources(net_loader *d, dom_document *doc, net_resource_h page);
+net_status net_fetch_subresources(net_loader *d, dom_document *doc, net_resource_h page, uint32_t denied);
 net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len, net_kind kind);
-net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page);
+net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page, uint32_t denied);
 int net_check_invariants(const net_loader *d, FILE *report);
 void net_export(const net_loader *d, FILE *out);
 net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
@@ -70,7 +70,7 @@ const char *net_outcome_name(net_outcome x) {
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:bf55902d:2425";
+const char net_fingerprint[] = "fnv1a32:1d8e9afc:2443";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;
@@ -84,7 +84,7 @@ net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len,
     return NET_OK;
 }
 
-net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page)
+net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page, uint32_t denied)
 {
     if (!resource_live(d, page)) return NET_STALE_HANDLE;
     return NET_OK;

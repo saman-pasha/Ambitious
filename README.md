@@ -45,6 +45,9 @@ Three modules, each declared by a contract and generated into C from it:
 - **Accessibility** (`contracts/a11y.pl`, `src/a11y/`): the accessibility tree,
   with its roles, names and where each name came from. `ambitious inspect`
   shows a page as a developer sees it, every module's diagnostics included.
+- **Profile** (`prolog/amb/profile.pl`): history, bookmarks, per-site
+  permissions, preferences and sessions, kept in a cocolog store over
+  ZiguratIP. `--private` keeps them in memory for the run alone.
 
 The engine exports a snapshot of a page: the document, its parse and its
 style. The reasoner (`prolog/amb/reason.pl`, cocolog, a process of its own)
@@ -86,6 +89,7 @@ bin/ambitious parse PAGE        # its tree and parse errors
 bin/ambitious style PAGE        # its elements' computed styles
 bin/ambitious render PAGE PNG   # laid out in an 800x600 viewport and drawn
 bin/ambitious inspect PAGE      # its resources, accessibility tree and diagnostics
+bin/ambitious --profile DIR load PAGE   # ... and the visit kept (history, bookmarks, permit, forget)
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
 tools/amb doc css               # a contract's reference
 ```

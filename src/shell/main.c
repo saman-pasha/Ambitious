@@ -17,6 +17,16 @@
  *   ambitious query PAGE GOAL     the reasoner's answers over the page's facts
  *   ambitious why PAGE GOAL       the reasoner's proofs
  *   ambitious advise PAGE [--apply]  the reasoner's advice, applied as one batch
+ *   ambitious history | bookmarks | bookmark URL [TITLE] | forget URL | forget --site SITE
+ *           | forget --since TIME | permit SITE KIND allow|deny | retain DAYS | profile GOAL
+ *                                 the profile: what is kept between runs
+ *
+ * The profile (prolog/amb/profile.pl) is a cocolog store a keeper process holds:
+ * --profile DIR (or AMB_PROFILE) keeps it in DIR, in ZiguratIP's store, from one
+ * run to the next; --private keeps it in memory for the run alone. Without
+ * either, nothing is kept. A page loaded is a visit; the page's site's
+ * permissions say which kinds of resource it may not load. AMB_NOW fixes the
+ * clock, for tests.
  *
  * A PAGE is a URL (file:, data:, http:) or a file's path. Its snapshot has six
  * sections: the document, its parse, its style (the cascade's sheets, rules,
@@ -34,6 +44,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
+#include "../net/url.h"
 #include <vector.pl>
 #include <amb.pl>
 
@@ -57,6 +69,9 @@ typedef struct session {
     char dir[512];
     char cocolog[1024];
     char reasoner[1024];
+    char keeper[1024];
+    char profile[1024];        /* the profile's store directory; empty: none (or a private one) */
+    int private_mode;
 } session;
 
 static int session_open(session *s) {
@@ -70,6 +85,10 @@ static int session_open(session *s) {
     }
     snprintf(s->cocolog, sizeof s->cocolog, "%s", coco);
     snprintf(s->reasoner, sizeof s->reasoner, "%s/prolog/amb/reason.pl", root);
+    snprintf(s->keeper, sizeof s->keeper, "%s/prolog/amb/profile_main.pl", root);
+    const char *prof = getenv("AMB_PROFILE"), *priv = getenv("AMB_PRIVATE");
+    s->private_mode = priv && priv[0] == '1';
+    snprintf(s->profile, sizeof s->profile, "%s", prof && !s->private_mode ? prof : "");
     if (work) snprintf(s->dir, sizeof s->dir, "%s", work);
     else snprintf(s->dir, sizeof s->dir, "%s/ambitious-%ld", tmp ? tmp : "/tmp", (long)getpid());
     mkdir(s->dir, 0700);
@@ -96,6 +115,46 @@ static int reason(const session *s, const char *cmd, const char *a1, const char 
     if (!a2) argv[6] = 0;
     int st = amb_run(argv, out, err);
     if (st != 0) fprintf(stderr, "ambitious: the reasoner answered %d to %s (its errors: %s)\n", st, cmd, err);
+    return st;
+}
+
+/* the profile keeper over a command and up to three arguments, its answer into the
+   file out: the profile's store, or memory for a private session; -1 when there is
+   no profile */
+static int keep(const session *s, const char *cmd, const char *a1, const char *a2, const char *a3, const char *out) {
+    if (!s->private_mode && !s->profile[0]) return -1;
+    char err[700], prog[1024], store[1100], script[1024], c[64], x1[4096], x2[4096], x3[1024];
+    session_path(s, "profile.err", err, sizeof err);
+    snprintf(prog, sizeof prog, "%s", s->cocolog);
+    snprintf(store, sizeof store, "%s", s->private_mode ? "--local" : s->profile);
+    snprintf(script, sizeof script, "%s", s->keeper);
+    snprintf(c, sizeof c, "%s", cmd);
+    snprintf(x1, sizeof x1, "%s", a1 ? a1 : "");
+    snprintf(x2, sizeof x2, "%s", a2 ? a2 : "");
+    snprintf(x3, sizeof x3, "%s", a3 ? a3 : "");
+    const char *argv[12];
+    int k = 0;
+    argv[k++] = prog;
+    if (s->private_mode) argv[k++] = "--local";
+    else { argv[k++] = "--embed"; argv[k++] = store; }
+    argv[k++] = "-s";
+    argv[k++] = script;
+    argv[k++] = "--";
+    argv[k++] = c;
+    if (a1) argv[k++] = x1;
+    if (a1 && a2) argv[k++] = x2;
+    if (a1 && a2 && a3) argv[k++] = x3;
+    argv[k] = 0;
+    int st = amb_run(argv, out, err);
+    if (st != 0) {
+        own FILE *f = fopen(err, "rb");
+        if (f) {
+            defer(f) { fclose(f); }
+            char buf[512];
+            size_t k = fread(buf, 1, sizeof buf, f);
+            fprintf(stderr, "%.*s", (int)k, buf);
+        }
+    }
     return st;
 }
 
@@ -333,6 +392,8 @@ static int cmd_snapshot(const char *path) {
 /* a page's five stores, declared in the caller's scope, where each is dropped */
 #define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax
 #define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax
+/* a page command's session: its files, the reasoner, the profile */
+#define PAGE_SESSION session s; if (!session_open(&s)) return 2
 
 /* the URL of a page named by a URL or by a file's path */
 static void page_url(const char *page, char *out, size_t cap) {
@@ -344,8 +405,47 @@ static void page_url(const char *page, char *out, size_t cap) {
     else snprintf(out, cap, "file://%s", page);
 }
 
-/* the page's record in the loader, or 0 when it could not be fetched */
-static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt, a11y_tree *ax) {
+/* the clock: AMB_NOW, or the time */
+static long long now_seconds(void) {
+    const char *n = getenv("AMB_NOW");
+    return n ? atoll(n) : (long long)time(0);
+}
+
+/* a page's site, as the profile keys permissions: its origin, or for an opaque
+   one its scheme */
+static void site_of(const char *url, char *out, size_t cap) {
+    if (net_url_origin(url, out, cap) && strcmp(out, "null") != 0) return;
+    size_t i = 0;
+    while (url[i] && url[i] != ':' && i + 1 < cap) { out[i] = url[i]; i++; }
+    out[i] = 0;
+}
+
+/* the document's title: its first title element's text, white space collapsed */
+static void page_title(const dom_document *d, char *out, size_t cap) {
+    size_t k = 0;
+    out[0] = 0;
+    for (uint32_t x = 1; x < d->node_len; x++) {
+        if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT || !names_is(d, d->node[x].name, "title", 5)) continue;
+        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+            if (d->node[c].kind != DOM_NODE_KIND_TEXT) continue;
+            amb_span sp = d->node[c].data;
+            const char *t = text_ptr(d, sp);
+            for (size_t i = 0; i < sp.len && k + 1 < cap; i++) {
+                int white = t[i] == ' ' || t[i] == '\t' || t[i] == '\n' || t[i] == '\r';
+                if (white) { if (k && out[k - 1] != ' ') out[k++] = ' '; }
+                else out[k++] = t[i];
+            }
+        }
+        break;
+    }
+    while (k && out[k - 1] == ' ') k--;
+    out[k] = 0;
+}
+
+/* the page's record in the loader, or 0 when it could not be fetched. With a
+   profile: its site's denied kinds asked for first, the visit recorded after */
+static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
+                          a11y_tree *ax) {
     char url[4200];
     page_url(page, url, sizeof url);
     dom_init(d, 1);
@@ -363,10 +463,29 @@ static uint32_t load_page(const char *page, dom_document *d, html_parser *p, css
     vector<char> src;
     append_range(src, bytes_ptr(nt, nt->resource[pr].body), nt->resource[pr].body.len);
     html_parse(p, d, data(src), len(src));
-    net_fetch_subresources(nt, d, ph);
+    char final[4200], site[512], answer[700];
+    amb_span fu = nt->resource[pr].final_url;
+    snprintf(final, sizeof final, "%.*s", (int)fu.len, text_ptr(nt, fu));
+    site_of(final, site, sizeof site);
+    session_path(s, "profile.out", answer, sizeof answer);
+    uint32_t denied = 0;
+    if (keep(s, "denied", site, 0, 0, answer) == 0) {
+        vector<char> kinds;
+        if (read_all(answer, &kinds)) {
+            push_back(kinds, 0);
+            if (strstr(data(kinds), "stylesheet")) denied |= 1u << NET_KIND_STYLESHEET;
+            if (strstr(data(kinds), "image")) denied |= 1u << NET_KIND_IMAGE;
+            if (strstr(data(kinds), "script")) denied |= 1u << NET_KIND_SCRIPT;
+        }
+    }
+    net_fetch_subresources(nt, d, ph, denied);
     css_cascade(st, d, nt);
     layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
     a11y_build(ax, d, st);
+    char title[512], when[32];
+    page_title(d, title, sizeof title);
+    snprintf(when, sizeof when, "%lld", now_seconds());
+    keep(s, "visit", final, title, when, answer);
     return pr;
 }
 
@@ -387,8 +506,9 @@ static int write_page_snapshot(const dom_document *d, const html_parser *p, cons
 
 /* what the page loaded: each resource, how its fetch ended, its redirects */
 static int cmd_load(const char *page) {
+    PAGE_SESSION;
     PAGE_STORES;
-    if (!load_page(page, PAGE_ARGS)) return 2;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
     for (uint32_t r = 1; r < nt.resource_len; r++) {
         if (!nt.resource[r].live) continue;
         amb_span u = nt.resource[r].url, ty = nt.resource[r].type;
@@ -407,8 +527,9 @@ static int cmd_load(const char *page) {
 }
 
 static int cmd_parse(const char *page) {
+    PAGE_SESSION;
     PAGE_STORES;
-    if (!load_page(page, PAGE_ARGS)) return 2;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
     dom_serialize(&d, dom_root(&d), stdout);
     printf("\n");
     printf("%zu nodes, %zu parse errors, invariants: %d broken\n", node_count(d), error_count(p), dom_check_invariants(&d, stdout));
@@ -418,8 +539,9 @@ static int cmd_parse(const char *page) {
 /* the computed values of the properties a reader looks at first, of each element,
    indented by its depth */
 static int cmd_style(const char *page) {
+    PAGE_SESSION;
     PAGE_STORES;
-    if (!load_page(page, PAGE_ARGS)) return 2;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
     static const css_prop shown[] = { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE,
                                       CSS_PROP_FONT_WEIGHT, CSS_PROP_MARGIN_TOP, CSS_PROP_PADDING_LEFT };
     static const char *const names[] = { "display", "color", "background", "font-size", "weight", "margin-top", "padding-left" };
@@ -443,8 +565,9 @@ static int cmd_style(const char *page) {
 
 /* the page drawn into a PNG: its size, what it holds, and its pixels' checksum */
 static int cmd_render(const char *page, const char *png) {
+    PAGE_SESSION;
     PAGE_STORES;
-    if (!load_page(page, PAGE_ARGS)) return 2;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
     amb_canvas c = {0};
     defer(c) { AMB_CANVAS_DROP(c); }
     amb_paint(&lt, &nt, &c);
@@ -461,10 +584,9 @@ static int cmd_render(const char *page, const char *png) {
 
 /* the page as a developer sees it, and the reasoner's diagnostics of it */
 static int cmd_inspect(const char *page, const char *mode, const char *goal) {
-    session s;
-    if (!session_open(&s)) return 2;
+    PAGE_SESSION;
     PAGE_STORES;
-    uint32_t pr = load_page(page, PAGE_ARGS);
+    uint32_t pr = load_page(&s, page, PAGE_ARGS);
     if (!pr) return 2;
     amb_span pu = nt.resource[pr].final_url;
     printf("== %.*s\n", (int)pu.len, text_ptr(&nt, pu));
@@ -505,10 +627,9 @@ static int cmd_inspect(const char *page, const char *mode, const char *goal) {
 
 /* query, why, advise: the reasoner over the page's snapshot */
 static int cmd_reason(const char *what, const char *page, const char *goal, int apply) {
-    session s;
-    if (!session_open(&s)) return 2;
+    PAGE_SESSION;
     PAGE_STORES;
-    if (!load_page(page, PAGE_ARGS)) return 2;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
     char snap[700], out[700];
     session_path(&s, "page.pl", snap, sizeof snap);
     session_path(&s, "answer.txt", out, sizeof out);
@@ -526,7 +647,34 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     return 0;
 }
 
+/* a profile command: the keeper's answer printed */
+static int cmd_profile(const char *cmd, const char *a1, const char *a2, const char *a3) {
+    session s;
+    if (!session_open(&s)) return 2;
+    char out[700];
+    session_path(&s, "profile.out", out, sizeof out);
+    int st = keep(&s, cmd, a1, a2, a3, out);
+    if (st < 0) { fprintf(stderr, "ambitious: no profile (pass --profile DIR, or set AMB_PROFILE; --private for one in memory)\n"); return 2; }
+    print_file(out, "");
+    return st;
+}
+
 int main(int argc, char **argv) {
+    /* the options before the command: the profile's store, or a private session */
+    while (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') {
+        if (strcmp(argv[1], "--private") == 0) { setenv("AMB_PRIVATE", "1", 1); argv++; argc--; continue; }
+        if (strcmp(argv[1], "--profile") == 0 && argc >= 3) { setenv("AMB_PROFILE", argv[2], 1); argv += 2; argc -= 2; continue; }
+        break;
+    }
+    if (argc >= 2 && strcmp(argv[1], "history") == 0) return cmd_profile("history", 0, 0, 0);
+    if (argc >= 2 && strcmp(argv[1], "bookmarks") == 0) return cmd_profile("bookmarks", 0, 0, 0);
+    if (argc >= 3 && strcmp(argv[1], "bookmark") == 0) return cmd_profile("bookmark", argv[2], argc >= 4 ? argv[3] : argv[2], 0);
+    if (argc >= 4 && strcmp(argv[1], "forget") == 0 && strcmp(argv[2], "--site") == 0) return cmd_profile("forget_site", argv[3], 0, 0);
+    if (argc >= 4 && strcmp(argv[1], "forget") == 0 && strcmp(argv[2], "--since") == 0) return cmd_profile("forget_since", argv[3], 0, 0);
+    if (argc >= 3 && strcmp(argv[1], "forget") == 0) return cmd_profile("forget", argv[2], 0, 0);
+    if (argc >= 5 && strcmp(argv[1], "permit") == 0) return cmd_profile("permit", argv[2], argv[3], argv[4]);
+    if (argc >= 3 && strcmp(argv[1], "retain") == 0) return cmd_profile("retain", argv[2], 0, 0);
+    if (argc >= 3 && strcmp(argv[1], "profile") == 0) return cmd_profile("query", argv[2], 0, 0);
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "load") == 0) return cmd_load(argv[2]);
@@ -538,6 +686,7 @@ int main(int argc, char **argv) {
                            argc >= 5 ? argv[4] : 0);
     if (argc >= 4 && (strcmp(argv[1], "query") == 0 || strcmp(argv[1], "why") == 0)) return cmd_reason(argv[1], argv[2], argv[3], 0);
     if (argc >= 3 && strcmp(argv[1], "advise") == 0) return cmd_reason("advise", argv[2], 0, argc >= 4 && strcmp(argv[3], "--apply") == 0);
+    fprintf(stderr, "usage: ambitious [--private | --profile DIR] COMMAND -- see src/shell/main.c\n");
     fprintf(stderr, "usage: ambitious loop | snapshot FILE | load PAGE | parse PAGE | style PAGE | render PAGE PNG | inspect PAGE [--query|--why GOAL] | query PAGE GOAL | why PAGE GOAL | advise PAGE [--apply]\n");
     return 2;
 }

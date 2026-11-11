@@ -1,0 +1,26 @@
+-- three pages loaded, by three processes; a bookmark, by a fourth:
+bookmarked file://ROOT/tests/pages/style.html
+-- read by the next:
+1700007200  file://ROOT/tests/pages/news.html  Ambitious — a reasoning browser
+1700003600  file://ROOT/tests/pages/style.html  Styles, explained
+1700000000  file://ROOT/tests/pages/news.html  Ambitious — a reasoning browser
+file://ROOT/tests/pages/style.html  Styles, kept
+U = 'file://ROOT/tests/pages/news.html', N = 2
+-- a private session writes nothing:
+the profile's files are as they were
+visits of the page loaded privately: 0
+-- a site's permission keeps its images from being fetched:
+file: deny image
+image      blocked              0       0  file://ROOT/tests/pages/logo.png  
+-- forgetting removes what it names, and no more:
+forgot file://ROOT/tests/pages/news.html: 3 visit(s), 0 bookmark(s)
+1700003600  file://ROOT/tests/pages/style.html  Styles, explained
+file://ROOT/tests/pages/style.html  Styles, kept
+-- visits older than the retention are deleted when the profile is opened:
+visits are kept 1 day(s)
+1700180000  file://ROOT/tests/pages/layout.html  Layout, explained
+-- the reasoner, over a page's snapshot, cannot see the profile:
+no
+-- a query cannot change the profile:
+profile: refused: not_read_only('retractall(amb_profile_bookmark(_, _, _))')
+file://ROOT/tests/pages/style.html  Styles, kept

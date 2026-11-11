@@ -51,8 +51,10 @@ net_contract(owns(loader, hop, store)).
 
 %% a resource fetched: its record, whatever the outcome
 net_contract(operation(fetch, [param(url, text), param(kind, enum(kind))], handle(resource), [], [creates(resource)], [mutates])).
-%% the stylesheets, images and scripts the page's document asks for, fetched
-net_contract(operation(fetch_subresources, [param(doc, store(dom)), param(page, handle(resource))], status,
+%% the stylesheets, images and scripts the page's document asks for, fetched; the
+%% kinds denied (bit k for the kind k of enum(kind): the profile's permissions for
+%% the page's site) are blocked, never fetched
+net_contract(operation(fetch_subresources, [param(doc, store(dom)), param(page, handle(resource)), param(denied, u32)], status,
     [pre(live(page), stale_handle)], [creates(resource)], [mutates])).
 
 %% ---- INVARIANTS -------------------------------------------------------------

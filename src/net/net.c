@@ -17,7 +17,7 @@
    https: and the rest are unsupported_scheme. What a page asks for: <link
    rel=stylesheet href>, <img src>, <script src> (fetched, never run), each
    URL fetched once. A page served over http: or https: may not load a file:
-   URL: blocked, here in C. An image's size is read from its header (PNG, GIF,
+   URL: blocked, here in C; nor any kind of resource its profile denies its site. An image's size is read from its header (PNG, GIF,
    JPEG); its pixels are not decoded. */
 #include <stdio.h>
 #include <string.h>
@@ -594,7 +594,7 @@ static int net_stylesheet_rel(const dom_document *d, uint32_t x) {
     return 0;
 }
 
-net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource_h page) {
+net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource_h page, uint32_t denied) {
     uint32_t pg = page.index;
     char base_text[8192];
     amb_span fs = l->resource[pg].final_url;
@@ -615,7 +615,21 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
             snprintf(ref, sizeof ref, "%.*s", (int)v.len, text_ptr(doc, v));
             net_url u;
             dom_node_h eh = node_handle(doc, x);
-            if (!net_resolve(&base, ref, &u)) {
+            if (denied >> kind & 1) {
+                /* the profile denies the site this kind: recorded, not fetched */
+                net_resource_h h = resource_new(l);
+                uint32_t r = h.index;
+                l->resource[r].kind = kind;
+                l->resource[r].from = pg;
+                l->resource[r].elem = eh;
+                if (net_resolve(&base, ref, &u)) net_url_text(&u, abs, sizeof abs);
+                else snprintf(abs, sizeof abs, "%s", ref);
+                l->resource[r].url = net_text(l, abs);
+                l->resource[r].final_url = l->resource[r].url;
+                l->resource[r].outcome = NET_OUTCOME_BLOCKED;
+                l->resource[r].origin = net_text(l, "null");
+                l->resource[r].type = net_text(l, "");
+            } else if (!net_resolve(&base, ref, &u)) {
                 uint32_t r = net_get(l, ref, kind, pg, eh, &base);
                 (void)r;
             } else {
