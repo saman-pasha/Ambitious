@@ -1,0 +1,10 @@
+#!/bin/sh
+# tools/amb -- the contract tool (prolog/amb/tool.pl), under a time cap.
+#
+#   tools/amb validate dom css ...    each contract checked; exit 1 on a refusal
+#   tools/amb schema dom              the reasoning schema, on stdout
+#   tools/amb doc dom                 the contract's reference, Markdown, on stdout
+#   tools/amb fingerprint dom         the contract's fingerprint
+AMB_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$AMB_ROOT/toolchain/env.sh"
+exec timeout "${AMB_TIMEOUT:-300}" "$AMB_COCOLOG" -s "$AMB_ROOT/prolog/amb/tool.pl" -- "$@" < /dev/null

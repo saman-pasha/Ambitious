@@ -1,0 +1,5 @@
+# build output: the binaries, the objects, the generated schema and references
+/build/
+*.o
+# test scratch
+/tests/**/out/

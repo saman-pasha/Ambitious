@@ -1,0 +1,18 @@
+# toolchain/pins -- the toolchain Ambitious was last verified on (Phase 0).
+# toolchain/check.sh compares a box against these lines; toolchain/bootstrap.sh
+# checks the four neighbours out at these commits. A pin moves in the commit
+# that re-runs toolchain/check.sh and the Ambitious gates over the new commit,
+# and toolchain/REPORT.md records the run.
+CICILI_COMMIT=3ba2ca450c0bf13f46f75679637320bbbca21846
+CICILI_VERSION=3.3.0
+ZIGURATIP_COMMIT=2a65f813d24727821bc8b725df89c0e1b523d8a4
+ZIGURATIP_VERSION=1.0.2
+COCOLOG_COMMIT=d4b55648e1c4767b843a46c1f33f5bcca7a9130f
+COCOLOG_VERSION=3.62.0
+CICILANG_COMMIT=2c724598bd0e902642b90689c47972fcc71dbf73
+CICILANG_VERSION=0.284
+# the platform it was verified on
+LLVM_MAJOR=18
+CLANG_MAJOR=18
+OS="Ubuntu 24.04"
+ARCH=x86_64
