@@ -11,6 +11,7 @@
 
 amb_interface(dom);
 amb_interface(html);
+amb_interface(net);
 amb_interface(css);
 amb_interface(layout);
 
@@ -83,8 +84,8 @@ int main(void) {
         css_init(&st, 1);
         layout_init(&t, 1);
         html_parse(&p, &d, cases[i].html, strlen(cases[i].html));
-        css_cascade(&st, &d);
-        layout_status s = layout_run(&t, &d, &st, 800, 600);
+        css_cascade(&st, &d, 0);
+        layout_status s = layout_run(&t, &d, &st, 0, 800, 600);
         printf("%s (%s, invariants: %d broken)\n", cases[i].what, layout_status_name(s), layout_check_invariants(&t, stdout));
         for (size_t k = 0; k < sizeof ids / sizeof ids[0]; k++) show(&d, &t, ids[k]);
     }

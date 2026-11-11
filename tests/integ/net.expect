@@ -1,0 +1,53 @@
+document   ok                 200     891  http://127.0.0.1:PORT/index.html  text/html
+stylesheet ok                 200     104  http://127.0.0.1:PORT/style.css  text/css
+stylesheet ok                 200      39  http://127.0.0.1:PORT/old.css  text/css
+           redirected (301) to http://127.0.0.1:PORT/moved/new.css
+           redirected (302) to http://127.0.0.1:PORT/style2.css
+stylesheet http_error         404      10  http://127.0.0.1:PORT/gone.css  text/plain
+stylesheet ok                 200      44  http://127.0.0.1:PORT/chunked.css  text/css
+stylesheet too_many_redirects 302       0  http://127.0.0.1:PORT/loop.css  
+           redirected (302) to http://127.0.0.1:PORT/loop.css
+           redirected (302) to http://127.0.0.1:PORT/loop.css
+           redirected (302) to http://127.0.0.1:PORT/loop.css
+           redirected (302) to http://127.0.0.1:PORT/loop.css
+           redirected (302) to http://127.0.0.1:PORT/loop.css
+script     ok                 200      53  http://127.0.0.1:PORT/app.js  text/javascript
+image      ok                 200     159  http://127.0.0.1:PORT/logo.png  image/png  96x32
+image      ok                 200     159  http://localhost:PORT/logo.png  image/png  96x32
+image      ok                 200      42  data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7  image/gif  1x1
+image      blocked              0       0  file:///etc/hostname  
+11 resources
+-- what the page needs:
+P = rs(1,1,0), R = rs(1,2,0), U = 'http://127.0.0.1:PORT/style.css', K = stylesheet, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,3,0), U = 'http://127.0.0.1:PORT/old.css', K = stylesheet, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,4,0), U = 'http://127.0.0.1:PORT/gone.css', K = stylesheet, O = http_error, S = 404
+P = rs(1,1,0), R = rs(1,5,0), U = 'http://127.0.0.1:PORT/chunked.css', K = stylesheet, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,6,0), U = 'http://127.0.0.1:PORT/loop.css', K = stylesheet, O = too_many_redirects, S = 302
+P = rs(1,1,0), R = rs(1,7,0), U = 'http://127.0.0.1:PORT/app.js', K = script, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,8,0), U = 'http://127.0.0.1:PORT/logo.png', K = image, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,9,0), U = 'http://localhost:PORT/logo.png', K = image, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,10,0), U = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', K = image, O = ok, S = 200
+P = rs(1,1,0), R = rs(1,11,0), U = 'file:///etc/hostname', K = image, O = blocked, S = 0
+-- from another origin than the page's:
+R = rs(1,9,0), U = 'http://localhost:PORT/logo.png', O = 'http://localhost:PORT'
+-- the stylesheet that moved, and where to:
+R = rs(1,3,0), Hops = ['http://127.0.0.1:PORT/moved/new.css'-301,'http://127.0.0.1:PORT/style2.css'-302], U = 'http://127.0.0.1:PORT/old.css', F = 'http://127.0.0.1:PORT/style2.css'
+-- why the lead is navy, and its span green and bold:
+C = lead, N = n(1,27,0), P = color, X = declared('rgb(0, 0, 128)',written(navy),by('.lead'),in(author))
+C = lead, N = n(1,27,0), P = font_weight, X = inherited('400',from(n(1,22,0)),'the property is inherited')
+C = chunked, N = n(1,29,0), P = color, X = declared('rgb(0, 128, 0)',written(green),by('.chunked'),in(author))
+C = chunked, N = n(1,29,0), P = font_weight, X = declared('700',written(bold),by('.chunked'),in(author))
+-- the images, as laid out:
+N = n(1,34,0), B = bx(1,7,0), W = 96, H = 32
+N = n(1,36,0), B = bx(1,8,0), W = 48, H = 16
+N = n(1,38,0), B = bx(1,9,0), W = 1, H = 1
+N = n(1,40,0), B = bx(1,10,0), W = 0, H = 0
+-- the reasoner's diagnostics:
+amb_diag(failed, rs(1,4,0), 'the stylesheet http://127.0.0.1:PORT/gone.css (asked for by <link>) failed: http_error(404)').
+amb_diag(failed, rs(1,6,0), 'the stylesheet http://127.0.0.1:PORT/loop.css (asked for by <link>) failed: too_many_redirects').
+amb_diag(failed, rs(1,11,0), 'the image file:///etc/hostname (asked for by <img>) failed: blocked').
+amb_diag(cross_origin, rs(1,9,0), 'the image http://localhost:PORT/logo.png comes from http://localhost:PORT, not the page\'s http://127.0.0.1:PORT').
+amb_diag(redirected, rs(1,3,0), 'http://127.0.0.1:PORT/old.css was redirected 2 time(s), to http://127.0.0.1:PORT/style2.css').
+amb_diag(redirected, rs(1,6,0), 'http://127.0.0.1:PORT/loop.css was redirected 5 time(s), to http://127.0.0.1:PORT/loop.css').
+-- drawn:
+rendered 800x600: 11 boxes, 4 lines, 7 text fragments; pixels fnv1a64:4ffa43b5a4dd0ddc

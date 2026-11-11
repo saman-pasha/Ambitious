@@ -187,3 +187,11 @@ neighbours.
     - A struct holding ccllib vectors is not autodropped. Its owner drops each
       vector by name under `defer`; a function given a pointer to the struct
       may not consume its fields.
+11. **`struct addrinfo` cannot be lowered from `<netdb.h>`**
+    (`not lowered yet: struct(addrinfo)`). glibc declares it only under
+    `__USE_XOPEN2K`, which cicilang's reading of the system headers never
+    sets, even with `_POSIX_C_SOURCE` defined. `sockaddr_in` and the rest of
+    the sockets API lower fine. `src/net/net.c` declares the struct (glibc's
+    LP64 layout), `getaddrinfo`, and `freeaddrinfo` with an `own` parameter,
+    so the checker sees the list consumed. Name lookup and connections then
+    work, and are valgrind clean.

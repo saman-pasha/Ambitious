@@ -45,11 +45,12 @@
 
 amb_interface(dom);
 amb_interface(css);
+amb_interface(net);
 amb_implementation(layout);
 
 /* the run's context, as parameters: a struct may hold no borrow */
-#define LCTX layout_tree *t, const dom_document *d, const css_style *st, const amb_fonts *f, const vector<uint32_t> *sx
-#define LARGS t, d, st, f, sx
+#define LCTX layout_tree *t, const dom_document *d, const css_style *st, const net_loader *nt, const amb_fonts *f, const vector<uint32_t> *sx
+#define LARGS t, d, st, nt, f, sx
 
 #define LAY_SPACING 2.0
 
@@ -295,6 +296,19 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     *h = -1;
     if (lay_replaced(d, el)) {
         double dw = 0, dh = 0;
+        if (lay_is_named(d, el, "img") && nt) {
+            /* its size, as the loader read it from the image's header; one dimension
+               declared, the other kept in proportion */
+            for (uint32_t r = 1; r < nt->resource_len; r++)
+                if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE) {
+                    dw = nt->resource[r].width;
+                    dh = nt->resource[r].height;
+                }
+            if (dw > 0 && dh > 0) {
+                if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) { *w = lay_res(s->width, cw); *h = *w * dh / dw; return; }
+                if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) { *h = s->height.v; *w = *h * dw / dh; return; }
+            }
+        }
         if (lay_is_named(d, el, "input")) {
             uint32_t a = lay_attr(d, el, "type");
             amb_span v = a ? d->attr[a].value : d->attr[0].value;
@@ -1292,7 +1306,7 @@ static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy) {
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_absolute(t, c, cx, cy);
 }
 
-layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, double width, double height) {
+layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, net_loader *net, double width, double height) {
     amb_fonts fonts = {0};
     defer(fonts) { AMB_FONTS_DROP(fonts); }
     amb_fonts_load(&fonts);
@@ -1306,17 +1320,17 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, do
     uint32_t root = 0;
     for (uint32_t c = doc->node_len > 1 ? doc->node[1].first_child : 0; c; c = doc->node[c].next_sibling)
         if (doc->node[c].kind == DOM_NODE_KIND_ELEMENT) root = c;
-    uint32_t vp = lay_new_box(t, doc, style, &fonts, &first_cval, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
+    uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &first_cval, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
     t->box[vp].w = width;
     t->box[vp].h = height;
     t->box[vp].how = LAYOUT_WIDTH_HOW_VIEWPORT;
     t->box[vp].avail = width;
     t->box[vp].background = 0xffffffff;
     if (!root) { t->revision++; return LAYOUT_NO_ROOT; }
-    if (lay_display_of(t, doc, style, &fonts, &first_cval, root) != D_NONE) {
+    if (lay_display_of(t, doc, style, net, &fonts, &first_cval, root) != D_NONE) {
         lay_mc mt, mb;
         int empty;
-        uint32_t rb = lay_block(t, doc, style, &fonts, &first_cval, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
+        uint32_t rb = lay_block(t, doc, style, net, &fonts, &first_cval, vp, root, width, 0, 0, 0, 0, &mt, &mb, &empty);
         lay_place(t, rb, t->box[rb].ml, t->box[rb].mt);
         double bottom = t->box[rb].mt + lay_border_height(t, rb) + t->box[rb].mb;
         if (bottom > height) t->box[vp].h = bottom;

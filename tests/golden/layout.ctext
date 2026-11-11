@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:8cdd3599:4079). Do not edit. */
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:6d78c64f:4101). Do not edit. */
 typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
 typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL } layout_box_kind;
 typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH } layout_width_how;
@@ -22,8 +22,8 @@ const char *layout_frag_kind_name(layout_frag_kind x);
 const char *layout_face_name(layout_face x);
 void layout_init(layout_tree *d, uint32_t id);
 uint64_t layout_revision(const layout_tree *d);
-layout_status layout_run(layout_tree *d, dom_document *doc, css_style *style, double width, double height);
-layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, double width, double height);
+layout_status layout_run(layout_tree *d, dom_document *doc, css_style *style, net_loader *net, double width, double height);
+layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, net_loader *net, double width, double height);
 layout_box_h layout_children_first(const layout_tree *d, layout_box_h h);
 layout_box_h layout_children_next(const layout_tree *d, layout_box_h h);
 layout_box_h layout_children_up(const layout_tree *d, layout_box_h h);
@@ -109,7 +109,7 @@ const char *layout_face_name(layout_face x) {
     return "?";
 }
 
-const char layout_fingerprint[] = "fnv1a32:8cdd3599:4079";
+const char layout_fingerprint[] = "fnv1a32:6d78c64f:4101";
 void layout_init(layout_tree *d, uint32_t id) {
     if (d->box_len != 0) abort();
     d->id = id;
@@ -117,7 +117,7 @@ void layout_init(layout_tree *d, uint32_t id) {
     text_add(d, "", 0);
 }
 uint64_t layout_revision(const layout_tree *d) { return d->revision; }
-layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, double width, double height)
+layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, net_loader *net, double width, double height)
 {
     return LAYOUT_OK;
 }

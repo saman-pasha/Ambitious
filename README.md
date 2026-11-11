@@ -37,7 +37,11 @@ Three modules, each declared by a contract and generated into C from it:
   declaration.
 - **Layout** (`contracts/layout.pl`, `src/layout/`): block, inline, table and
   list layout. Every box keeps how its width was found. **Paint**
-  (`src/paint/`) draws the boxes and text, set in DejaVu outlines, into a PNG.
+  (`src/paint/`) draws the boxes, the text (set in DejaVu outlines) and the
+  PNG images into a PNG.
+- **Network** (`contracts/net.pl`, `src/net/`): URLs, `file:`, `data:` and
+  HTTP/1.1. It records what a page loads, who asked for each resource, where
+  from, and how each fetch ended.
 
 The engine exports a snapshot of a page: the document, its parse and its
 style. The reasoner (`prolog/amb/reason.pl`, cocolog, a process of its own)
@@ -74,7 +78,8 @@ sh toolchain/bootstrap.sh       # the toolchain, once (see toolchain/README.md)
 make                            # the modules and build/ambitious
 make test                       # the gates: contract gen exec safe reason html integ
 bin/ambitious loop              # the DOM vertical slice end to end
-bin/ambitious parse PAGE        # an HTML file parsed: its tree and parse errors
+bin/ambitious load PAGE         # a page (a URL or a path) and what it loaded
+bin/ambitious parse PAGE        # its tree and parse errors
 bin/ambitious style PAGE        # its elements' computed styles
 bin/ambitious render PAGE PNG   # laid out in an 800x600 viewport and drawn
 bin/ambitious query PAGE GOAL   # the reasoner over the page (also: why, advise)
@@ -91,7 +96,7 @@ ZiguratIP, cocolog, cicilang). The default is `~/Projects/GitHub`.
 | `contracts/` | module contracts, one `M_contract/1` predicate each |
 | `include/amb.pl`, `amb.pl.h` | the macros C units include, and the C they call |
 | `prolog/amb/` | the contract validator, the generators, the reasoner, each module's rules |
-| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `shell/` |
-| `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/ pages/`, run by `make test` |
+| `src/` | the engine in cicilang C: `rt/` the runtime, `dom/`, `html/`, `css/`, `layout/`, `paint/`, `net/`, `shell/` |
+| `tests/` | `contract/ gen/ golden/ exec/ safe/ reason/ html/ integ/`, run by `make test`; `pages/`, `site/` (served by `net/serve.py`), `images/` |
 | `tools/amb` | the contract tool: validate, schema, doc, ctext, fingerprint |
 | `tools/gen-font.py` | `src/paint/font_data.h`, the DejaVu outlines (with the fonts' notice) |

@@ -38,6 +38,7 @@
 #include <amb.pl>
 
 amb_interface(dom);
+amb_interface(net);
 amb_implementation(css);
 
 #define CSS_NPROPS 29
@@ -1480,13 +1481,30 @@ static void css_style_attr(css_style *s, const dom_document *d, uint32_t x, uint
     push_back(matched, r);
 }
 
-css_status css_cascade(css_style *s, dom_document *doc) {
-    /* the user agent's sheet, then the document's style elements in tree order */
+/* the stylesheet the loader fetched for the link element x: its record, or 0 */
+static uint32_t css_linked_sheet(const net_loader *net, uint32_t x) {
+    for (uint32_t r = 1; r < net->resource_len; r++)
+        if (net->resource[r].live && net->resource[r].elem.index == x && net->resource[r].kind == NET_KIND_STYLESHEET &&
+            net->resource[r].outcome == NET_OUTCOME_OK) return r;
+    return 0;
+}
+
+css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
+    /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
     css_parse_sheet(s, CSS_ORIGIN_USER_AGENT, css_ua_sheet, sizeof css_ua_sheet - 1);
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
-        if (!css_is_named(doc, x, "style")) continue;
+        int link = css_is_named(doc, x, "link");
+        if (!css_is_named(doc, x, "style") && !link) continue;
         uint32_t ma = css_attr_of(doc, x, "media", 5);
         if (ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
+        if (link) {
+            uint32_t r = net ? css_linked_sheet(net, x) : 0;
+            if (!r) continue;
+            vector<char> body;
+            append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
+            css_parse_sheet(s, CSS_ORIGIN_AUTHOR, data(body), len(body));
+            continue;
+        }
         vector<char> t;
         for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
             if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);

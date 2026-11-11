@@ -1,0 +1,377 @@
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:bf55902d:2425). Do not edit. */
+typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
+typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
+typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED } net_outcome;
+typedef enum net_op { NET_OP_FETCH, NET_OP_FETCH_SUBRESOURCES } net_op;
+typedef struct net_resource_h { uint32_t doc, index, gen; } net_resource_h;
+typedef struct net_hop_h { uint32_t doc, index, gen; } net_hop_h;
+typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; } net_resource;
+typedef struct net_hop { uint32_t gen, live, free_next; uint32_t resource; amb_span url; uint32_t status; } net_hop;
+typedef struct net_store_tag { char unused; } net_store_tag;
+typedef store<net_store_tag> net_loader;
+extern const char net_fingerprint[];
+const char *net_status_name(net_status x);
+const char *net_op_name(net_op x);
+const char *net_kind_name(net_kind x);
+const char *net_outcome_name(net_outcome x);
+void net_init(net_loader *d, uint32_t id);
+uint64_t net_revision(const net_loader *d);
+net_resource_h net_fetch(net_loader *d, const char *url, size_t url_len, net_kind kind);
+net_status net_fetch_subresources(net_loader *d, dom_document *doc, net_resource_h page);
+net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len, net_kind kind);
+net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page);
+int net_check_invariants(const net_loader *d, FILE *report);
+void net_export(const net_loader *d, FILE *out);
+net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
+/* Ambitious: the implementation of module net, generated from contracts/net.pl. Do not edit. */
+const char *net_status_name(net_status x) {
+    switch (x) {
+    case NET_OK: return "ok";
+    case NET_STALE_HANDLE: return "stale_handle";
+    case NET_WRONG_KIND: return "wrong_kind";
+    case NET_FAILED: return "failed";
+    case NET_BAD_REQUEST: return "bad_request";
+    case NET_NOT_REQUESTABLE: return "not_requestable";
+    case NET_STALE_REVISION: return "stale_revision";
+    }
+    return "?";
+}
+const char *net_op_name(net_op x) {
+    switch (x) {
+    case NET_OP_FETCH: return "fetch";
+    case NET_OP_FETCH_SUBRESOURCES: return "fetch_subresources";
+    }
+    return "?";
+}
+const char *net_kind_name(net_kind x) {
+    switch (x) {
+    case NET_KIND_DOCUMENT: return "document";
+    case NET_KIND_STYLESHEET: return "stylesheet";
+    case NET_KIND_IMAGE: return "image";
+    case NET_KIND_SCRIPT: return "script";
+    case NET_KIND_OTHER: return "other";
+    }
+    return "?";
+}
+const char *net_outcome_name(net_outcome x) {
+    switch (x) {
+    case NET_OUTCOME_OK: return "ok";
+    case NET_OUTCOME_HTTP_ERROR: return "http_error";
+    case NET_OUTCOME_NO_SUCH_FILE: return "no_such_file";
+    case NET_OUTCOME_REFUSED: return "refused";
+    case NET_OUTCOME_UNREACHABLE: return "unreachable";
+    case NET_OUTCOME_TOO_MANY_REDIRECTS: return "too_many_redirects";
+    case NET_OUTCOME_UNSUPPORTED_SCHEME: return "unsupported_scheme";
+    case NET_OUTCOME_BAD_URL: return "bad_url";
+    case NET_OUTCOME_BLOCKED: return "blocked";
+    case NET_OUTCOME_TOO_LARGE: return "too_large";
+    case NET_OUTCOME_MALFORMED: return "malformed";
+    }
+    return "?";
+}
+
+const char net_fingerprint[] = "fnv1a32:bf55902d:2425";
+void net_init(net_loader *d, uint32_t id) {
+    if (d->resource_len != 0) abort();
+    d->id = id;
+    d->revision = 0;
+    text_add(d, "", 0);
+    bytes_add(d, "", 0);
+}
+uint64_t net_revision(const net_loader *d) { return d->revision; }
+net_status net_check_fetch(const net_loader *d, const char *url, size_t url_len, net_kind kind)
+{
+    return NET_OK;
+}
+
+net_status net_check_fetch_subresources(const net_loader *d, dom_document *doc, net_resource_h page)
+{
+    if (!resource_live(d, page)) return NET_STALE_HANDLE;
+    return NET_OK;
+}
+
+int net_check_invariants(const net_loader *d, FILE *report) {
+    int bad = 0;
+    /* live_links */
+    {
+        for (uint32_t i = 1; i < d->resource_len; i++) {
+            uint32_t r = d->resource[i].from;
+            if (d->resource[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->hop_len; i++) {
+            uint32_t r = d->hop[i].resource;
+            if (d->hop[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
+    }
+    return bad;
+}
+void net_export(const net_loader *d, FILE *out) {
+    fprintf(out, "amb_snapshot(net, %u, %llu, '%s').\n", (unsigned)d->id, (unsigned long long)d->revision, net_fingerprint);
+    for (uint32_t i = 1; i < d->resource_len; i++) {
+        if (!d->resource[i].live) continue;
+        if (1) { fputs("net_resource(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].url); fputs(",", out); fputs(net_kind_name(d->resource[i].kind), out); fputs(",", out); fputs(net_outcome_name(d->resource[i].outcome), out); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].status); fputs(",", out); text_put(d, out, d->resource[i].type); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].size); fputs(").\n", out); }
+        if (1) { fputs("net_final_url(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].final_url); fputs(").\n", out); }
+        if (1) { fputs("net_origin(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].origin); fputs(").\n", out); }
+        if (d->resource[i].from != 0) { fputs("net_asked_by(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); { uint32_t r = d->resource[i].from; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->resource[i].elem.doc, d->resource[i].elem.index, d->resource[i].elem.gen); fputs(").\n", out); }
+        if (d->resource[i].kind == NET_KIND_IMAGE) { fputs("net_image_size(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].width); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].height); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->hop_len; i++) {
+        if (!d->hop[i].live) continue;
+        if (1) { fputs("net_hop(", out); { uint32_t r = d->hop[i].resource; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); text_put(d, out, d->hop[i].url); fputs(",", out); fprintf(out, "%lld", (long long)d->hop[i].status); fputs(").\n", out); }
+    }
+}
+net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
+    size_t p = 0;
+    char name[64];
+    size_t name_len = 0;
+    int64_t doc = 0;
+    int64_t rev = 0;
+    net_status st = NET_BAD_REQUEST;
+    name[0] = 0;
+    if (!amb_lex_word(t, n, &p, "amb_request") || !amb_lex_char(t, n, &p, '(')) return NET_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &doc) || !amb_lex_char(t, n, &p, ',')) return NET_BAD_REQUEST;
+    if (!amb_lex_int(t, n, &p, &rev) || !amb_lex_char(t, n, &p, ',')) return NET_BAD_REQUEST;
+    if (!amb_lex_name(t, n, &p, name, sizeof name, &name_len)) return NET_BAD_REQUEST;
+    if (doc != (int64_t)d->id) { amb_result(report, name, "bad_request", d->revision); return NET_BAD_REQUEST; }
+    if (rev != (int64_t)batch_rev) { amb_result(report, name, "stale_revision", d->revision); return NET_STALE_REVISION; }
+
+    if (amb_name_is(name, name_len, "fetch") || amb_name_is(name, name_len, "fetch_subresources")) { amb_result(report, name, "not_requestable", d->revision); return NET_NOT_REQUESTABLE; }
+    amb_result(report, name, "bad_request", d->revision);
+    return st;
+}
+/* the store of module net, an instance of store<net_store_tag>: one own buffer a part */
+typedef struct store_net_store_tag {
+    uint32_t id;
+    uint64_t revision;
+    size_t resource_len, resource_cap;
+    uint32_t resource_free;
+    own net_resource *resource;
+    size_t hop_len, hop_cap;
+    uint32_t hop_free;
+    own net_hop *hop;
+    size_t text_len, text_cap;
+    own char *text;
+    size_t bytes_len, bytes_cap;
+    own char *bytes;
+} store_net_store_tag;
+void store_net_store_tag_drop(store_net_store_tag *s) { free(s->resource); free(s->hop); free(s->text); free(s->bytes); }
+static void store_net_store_tag__resource_grow(store_net_store_tag *s) {
+    size_t c = s->resource_cap ? 2 * s->resource_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->resource = (net_resource *)realloc(s->resource, c * sizeof(net_resource));
+    if (!s->resource) abort();
+    s->resource_cap = c;
+}
+net_resource_h store_net_store_tag_resource_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->resource_free) {
+        i = s->resource_free;
+        s->resource_free = s->resource[i].free_next;
+    } else {
+        if (s->resource_len == 0) {
+            if (s->resource_cap == 0) store_net_store_tag__resource_grow(s);
+            memset(&s->resource[0], 0, sizeof(net_resource));
+            s->resource_len = 1;
+        }
+        if (s->resource_len == s->resource_cap) store_net_store_tag__resource_grow(s);
+        i = (uint32_t)s->resource_len;
+        s->resource_len++;
+        s->resource[i].gen = 0;
+    }
+    uint32_t g = s->resource[i].gen;
+    memset(&s->resource[i], 0, sizeof(net_resource));
+    s->resource[i].gen = g;
+    s->resource[i].live = 1;
+    net_resource_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_resource_live(const store_net_store_tag *s, net_resource_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->resource_len && s->resource[h.index].live && s->resource[h.index].gen == h.gen;
+}
+net_resource store_net_store_tag_resource_get(const store_net_store_tag *s, net_resource_h h) {
+    if (!store_net_store_tag_resource_live(s, h)) abort();
+    return s->resource[h.index];
+}
+net_resource *store_net_store_tag_resource_ref(const store_net_store_tag *s, net_resource_h h) tie s {
+    if (!store_net_store_tag_resource_live(s, h)) abort();
+    return &s->resource[h.index];
+}
+net_resource *store_net_store_tag_resource_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->resource_len) abort();
+    return &s->resource[i];
+}
+net_resource_h store_net_store_tag_resource_handle(const store_net_store_tag *s, uint32_t i) {
+    net_resource_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->resource_len && s->resource[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->resource[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_resource_free(store_net_store_tag *s, net_resource_h h) {
+    if (!store_net_store_tag_resource_live(s, h)) abort();
+    s->resource[h.index].live = 0;
+    s->resource[h.index].gen++;
+    s->resource[h.index].free_next = s->resource_free;
+    s->resource_free = h.index;
+}
+size_t store_net_store_tag_resource_len(const store_net_store_tag *s) { return s->resource_len; }
+size_t store_net_store_tag_resource_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->resource_len; i++) if (s->resource[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__hop_grow(store_net_store_tag *s) {
+    size_t c = s->hop_cap ? 2 * s->hop_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->hop = (net_hop *)realloc(s->hop, c * sizeof(net_hop));
+    if (!s->hop) abort();
+    s->hop_cap = c;
+}
+net_hop_h store_net_store_tag_hop_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->hop_free) {
+        i = s->hop_free;
+        s->hop_free = s->hop[i].free_next;
+    } else {
+        if (s->hop_len == 0) {
+            if (s->hop_cap == 0) store_net_store_tag__hop_grow(s);
+            memset(&s->hop[0], 0, sizeof(net_hop));
+            s->hop_len = 1;
+        }
+        if (s->hop_len == s->hop_cap) store_net_store_tag__hop_grow(s);
+        i = (uint32_t)s->hop_len;
+        s->hop_len++;
+        s->hop[i].gen = 0;
+    }
+    uint32_t g = s->hop[i].gen;
+    memset(&s->hop[i], 0, sizeof(net_hop));
+    s->hop[i].gen = g;
+    s->hop[i].live = 1;
+    net_hop_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_hop_live(const store_net_store_tag *s, net_hop_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->hop_len && s->hop[h.index].live && s->hop[h.index].gen == h.gen;
+}
+net_hop store_net_store_tag_hop_get(const store_net_store_tag *s, net_hop_h h) {
+    if (!store_net_store_tag_hop_live(s, h)) abort();
+    return s->hop[h.index];
+}
+net_hop *store_net_store_tag_hop_ref(const store_net_store_tag *s, net_hop_h h) tie s {
+    if (!store_net_store_tag_hop_live(s, h)) abort();
+    return &s->hop[h.index];
+}
+net_hop *store_net_store_tag_hop_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->hop_len) abort();
+    return &s->hop[i];
+}
+net_hop_h store_net_store_tag_hop_handle(const store_net_store_tag *s, uint32_t i) {
+    net_hop_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->hop_len && s->hop[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->hop[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_hop_free(store_net_store_tag *s, net_hop_h h) {
+    if (!store_net_store_tag_hop_live(s, h)) abort();
+    s->hop[h.index].live = 0;
+    s->hop[h.index].gen++;
+    s->hop[h.index].free_next = s->hop_free;
+    s->hop_free = h.index;
+}
+size_t store_net_store_tag_hop_len(const store_net_store_tag *s) { return s->hop_len; }
+size_t store_net_store_tag_hop_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->hop_len; i++) if (s->hop[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__text_room(store_net_store_tag *s, size_t n) {
+    if (s->text_len + n <= s->text_cap) return;
+    size_t c = s->text_cap ? s->text_cap : 256;
+    while (c < s->text_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->text = (char *)realloc(s->text, c);
+    if (!s->text) abort();
+    s->text_cap = c;
+}
+amb_span store_net_store_tag_text_add(store_net_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->text_len == 0) {
+        store_net_store_tag__text_room(s, 1);
+        s->text[0] = 0;
+        s->text_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->text && p < s->text + s->text_len;
+    size_t from = inside ? (size_t)(p - s->text) : 0;
+    store_net_store_tag__text_room(s, n);
+    if (inside) memmove(s->text + s->text_len, s->text + from, n);
+    else memcpy(s->text + s->text_len, p, n);
+    sp.off = (uint32_t)s->text_len;
+    sp.len = (uint32_t)n;
+    s->text_len += n;
+    return sp;
+}
+const char *store_net_store_tag_text_ptr(const store_net_store_tag *s, amb_span sp) tie s {
+    if (s->text_len == 0 || (size_t)sp.off + sp.len > s->text_len) abort();
+    return s->text + sp.off;
+}
+int store_net_store_tag_text_eq(const store_net_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    return memcmp(s->text + sp.off, p, n) == 0;
+}
+void store_net_store_tag_text_put(const store_net_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->text_len) abort();
+    amb_put_qatom(out, s->text + sp.off, sp.len);
+}
+size_t store_net_store_tag_text_size(const store_net_store_tag *s) { return s->text_len; }
+static void store_net_store_tag__bytes_room(store_net_store_tag *s, size_t n) {
+    if (s->bytes_len + n <= s->bytes_cap) return;
+    size_t c = s->bytes_cap ? s->bytes_cap : 256;
+    while (c < s->bytes_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->bytes = (char *)realloc(s->bytes, c);
+    if (!s->bytes) abort();
+    s->bytes_cap = c;
+}
+amb_span store_net_store_tag_bytes_add(store_net_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->bytes_len == 0) {
+        store_net_store_tag__bytes_room(s, 1);
+        s->bytes[0] = 0;
+        s->bytes_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->bytes && p < s->bytes + s->bytes_len;
+    size_t from = inside ? (size_t)(p - s->bytes) : 0;
+    store_net_store_tag__bytes_room(s, n);
+    if (inside) memmove(s->bytes + s->bytes_len, s->bytes + from, n);
+    else memcpy(s->bytes + s->bytes_len, p, n);
+    sp.off = (uint32_t)s->bytes_len;
+    sp.len = (uint32_t)n;
+    s->bytes_len += n;
+    return sp;
+}
+const char *store_net_store_tag_bytes_ptr(const store_net_store_tag *s, amb_span sp) tie s {
+    if (s->bytes_len == 0 || (size_t)sp.off + sp.len > s->bytes_len) abort();
+    return s->bytes + sp.off;
+}
+int store_net_store_tag_bytes_eq(const store_net_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->bytes_len) abort();
+    return memcmp(s->bytes + sp.off, p, n) == 0;
+}
+void store_net_store_tag_bytes_put(const store_net_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->bytes_len) abort();
+    amb_put_qatom(out, s->bytes + sp.off, sp.len);
+}
+size_t store_net_store_tag_bytes_size(const store_net_store_tag *s) { return s->bytes_len; }

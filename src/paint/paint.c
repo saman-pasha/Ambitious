@@ -5,7 +5,9 @@
    box in tree order -- its background over its border box, its borders, then
    its lines (inline elements' backgrounds, text, decorations, list markers) --
    and its child boxes. Glyphs come from font.c at their size and quarter-pixel
-   position, cached. The PNG is written with this file's own deflate: each row
+   position, cached. An image is drawn from the bytes the loader fetched for its
+   element (image.c decodes PNG), sampled bilinearly into its content box; one
+   that cannot be decoded is a grey placeholder. The PNG is written with this file's own deflate: each row
    filtered (None, Sub or Up, whichever sums smallest), LZ77 over a hash of three
    bytes, fixed Huffman codes. */
 #include <stdio.h>
@@ -18,8 +20,10 @@
 
 amb_interface(dom);
 amb_interface(layout);
+amb_interface(net);
 
 #include "paint.h"
+#include "image.h"
 
 /* ---- the canvas ---- */
 
@@ -128,13 +132,57 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
 
 /* ---- the boxes ---- */
 
-static void pt_box(const layout_tree *t, uint32_t b, amb_canvas *c, uint32_t skip_bg) {
+/* an image's RGBA pixels, w x h, drawn into the rectangle (x0, y0, dw, dh), sampled
+   bilinearly and blended by their alpha */
+static void pt_image(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh) {
+    if (dw <= 0 || dh <= 0 || w == 0 || h == 0) return;
+    int ix0 = (int)floor(x0 + 0.5), iy0 = (int)floor(y0 + 0.5), ix1 = (int)floor(x0 + dw + 0.5), iy1 = (int)floor(y0 + dh + 0.5);
+    for (int y = iy0 < 0 ? 0 : iy0; y < iy1 && y < (int)c->h; y++)
+        for (int x = ix0 < 0 ? 0 : ix0; x < ix1 && x < (int)c->w; x++) {
+            double sx = (x + 0.5 - x0) * w / dw - 0.5, sy = (y + 0.5 - y0) * h / dh - 0.5;
+            if (sx < 0) sx = 0;
+            if (sy < 0) sy = 0;
+            uint32_t xa = (uint32_t)sx, ya = (uint32_t)sy, xb = xa + 1 < w ? xa + 1 : xa, yb = ya + 1 < h ? ya + 1 : ya;
+            if (xa >= w) xa = xb = w - 1;
+            if (ya >= h) ya = yb = h - 1;
+            double fx = sx - xa, fy = sy - ya, px[4];
+            for (int k = 0; k < 4; k++) {
+                double top = at(*rgba, ((size_t)ya * w + xa) * 4 + k) * (1 - fx) + at(*rgba, ((size_t)ya * w + xb) * 4 + k) * fx;
+                double bot = at(*rgba, ((size_t)yb * w + xa) * 4 + k) * (1 - fx) + at(*rgba, ((size_t)yb * w + xb) * 4 + k) * fx;
+                px[k] = top * (1 - fy) + bot * fy;
+            }
+            double a = px[3] / 255;
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            for (int k = 0; k < 3; k++) c->px[i + k] = (uint8_t)(px[k] * a + c->px[i + k] * (1 - a) + 0.5);
+        }
+}
+
+/* the image the loader fetched for an element, decoded into rgba: 1 when it was */
+static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+    if (!nt) return 0;
+    for (uint32_t r = 1; r < nt->resource_len; r++) {
+        if (!nt->resource[r].live || nt->resource[r].elem.index != el || nt->resource[r].kind != NET_KIND_IMAGE) continue;
+        if (nt->resource[r].outcome != NET_OUTCOME_OK) return 0;
+        amb_span b = nt->resource[r].body;
+        vector<uint8_t> bytes;
+        append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
+        return amb_png_decode(data(bytes), len(bytes), rgba, w, h);
+    }
+    return 0;
+}
+
+static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg) {
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
     double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
     if (b != skip_bg) pt_fill(c, bx, by, bx + bw, by + bh, t->box[b].background);
-    if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && (t->box[b].background & 0xff) == 0 && t->box[b].bt + t->box[b].bl == 0)
-        pt_fill(c, t->box[b].x, t->box[b].y, t->box[b].x + t->box[b].w, t->box[b].y + t->box[b].h, 0xe8e8e8ff);
+    if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
+        vector<uint8_t> rgba;
+        uint32_t iw, ih;
+        if (pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih)) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else if ((t->box[b].background & 0xff) == 0 && t->box[b].bt + t->box[b].bl == 0)
+            pt_fill(c, t->box[b].x, t->box[b].y, t->box[b].x + t->box[b].w, t->box[b].y + t->box[b].h, 0xe8e8e8ff);
+    }
     uint32_t bc = t->box[b].border_color;
     if (t->box[b].bt > 0) pt_fill(c, bx, by, bx + bw, by + t->box[b].bt, bc);
     if (t->box[b].bb > 0) pt_fill(c, bx, by + bh - t->box[b].bb, bx + bw, by + bh, bc);
@@ -167,14 +215,14 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
         }
 }
 
-static void pt_tree(const layout_tree *t, uint32_t b, amb_canvas *c, uint32_t skip_bg, const amb_fonts *f, vector<pt_glyph> *entries,
-                    vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
-    if (t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) pt_box(t, b, c, skip_bg);
+static void pt_tree(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, const amb_fonts *f,
+                    vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
+    if (t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) pt_box(t, nt, b, c, skip_bg);
     pt_lines(t, b, c, f, entries, table, masks, acc, mask);
-    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) pt_tree(t, ch, c, skip_bg, f, entries, table, masks, acc, mask);
+    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) pt_tree(t, nt, ch, c, skip_bg, f, entries, table, masks, acc, mask);
 }
 
-void amb_paint(const layout_tree *t, amb_canvas *c) {
+void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) {
     amb_fonts f = {0};
     defer(f) { AMB_FONTS_DROP(f); }
     amb_fonts_load(&f);
@@ -203,7 +251,7 @@ void amb_paint(const layout_tree *t, amb_canvas *c) {
     vector<uint8_t> masks, mask;
     vector<float> acc;
     resize(&table, 1024);
-    if (vp) pt_tree(t, vp, c, skip, &f, &entries, &table, &masks, &acc, &mask);
+    if (vp) pt_tree(t, nt, vp, c, skip, &f, &entries, &table, &masks, &acc, &mask);
 }
 
 uint64_t amb_canvas_hash(const amb_canvas *c) {

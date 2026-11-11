@@ -1,0 +1,46 @@
+ok   'g:h' -> g:h
+ok   'g' -> http://a/b/c/g
+ok   './g' -> http://a/b/c/g
+ok   'g/' -> http://a/b/c/g/
+ok   '/g' -> http://a/g
+ok   '//g' -> http://g/
+ok   '?y' -> http://a/b/c/d;p?y
+ok   'g?y' -> http://a/b/c/g?y
+ok   '#s' -> http://a/b/c/d;p?q
+ok   'g#s' -> http://a/b/c/g
+ok   'g?y#s' -> http://a/b/c/g?y
+ok   ';x' -> http://a/b/c/;x
+ok   'g;x' -> http://a/b/c/g;x
+ok   '' -> http://a/b/c/d;p?q
+ok   '.' -> http://a/b/c/
+ok   './' -> http://a/b/c/
+ok   '..' -> http://a/b/
+ok   '../' -> http://a/b/
+ok   '../g' -> http://a/b/g
+ok   '../..' -> http://a/
+ok   '../../' -> http://a/
+ok   '../../g' -> http://a/g
+ok   '../../../g' -> http://a/g
+ok   '../../../../g' -> http://a/g
+ok   '/./g' -> http://a/g
+ok   '/../g' -> http://a/g
+ok   'g.' -> http://a/b/c/g.
+ok   '.g' -> http://a/b/c/.g
+ok   'g..' -> http://a/b/c/g..
+ok   '..g' -> http://a/b/c/..g
+ok   './../g' -> http://a/b/g
+ok   './g/.' -> http://a/b/c/g/
+ok   'g/./h' -> http://a/b/c/g/h
+ok   'g/../h' -> http://a/b/c/h
+ok   'g;x=1/./y' -> http://a/b/c/g;x=1/y
+ok   'g;x=1/../y' -> http://a/b/c/y
+ok   '  HTTP://Example.COM:80/x\y ' -> http://example.com/x/y
+ok   'http://u:p@h:8080/' -> http://h:8080/
+ok   'file:///tmp/a b.html' -> file:///tmp/a b.html
+ok   'data:text/css,p{}' -> data:text/css,p{}
+ok   origin of http://a/b/c/d;p?q: http://a
+ok   origin of http://Example.com:8080/x: http://example.com:8080
+ok   origin of https://h:443/: https://h
+ok   origin of file:///tmp/x.html: null
+ok   origin of data:text/plain,hi: null
+45 of 45 cases

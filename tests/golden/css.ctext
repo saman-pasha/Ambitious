@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:43b95b7a:3916). Do not edit. */
+/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:f53c0f34:3938). Do not edit. */
 typedef enum css_status { CSS_OK, CSS_STALE_HANDLE, CSS_WRONG_KIND, CSS_BAD_REQUEST, CSS_NOT_REQUESTABLE, CSS_STALE_REVISION } css_status;
 typedef enum css_origin { CSS_ORIGIN_USER_AGENT, CSS_ORIGIN_AUTHOR, CSS_ORIGIN_INLINE } css_origin;
 typedef enum css_prop { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_STYLE, CSS_PROP_TEXT_ALIGN, CSS_PROP_LINE_HEIGHT, CSS_PROP_TEXT_DECORATION, CSS_PROP_WHITE_SPACE, CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_COLOR, CSS_PROP_WIDTH, CSS_PROP_HEIGHT, CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_FONT_FAMILY, CSS_PROP_BOX_SIZING, CSS_PROP_MAX_WIDTH } css_prop;
@@ -27,9 +27,9 @@ const char *css_how_name(css_how x);
 void css_init(css_style *d, uint32_t id);
 uint64_t css_revision(const css_style *d);
 css_status css_parse_sheet(css_style *d, css_origin origin, const char *src, size_t src_len);
-css_status css_cascade(css_style *d, dom_document *doc);
+css_status css_cascade(css_style *d, dom_document *doc, net_loader *net);
 css_status css_check_parse_sheet(const css_style *d, css_origin origin, const char *src, size_t src_len);
-css_status css_check_cascade(const css_style *d, dom_document *doc);
+css_status css_check_cascade(const css_style *d, dom_document *doc, net_loader *net);
 css_rule_h css_rules_first(const css_style *d, css_sheet_h h);
 css_rule_h css_rules_next(const css_style *d, css_rule_h h);
 css_sheet_h css_rules_up(const css_style *d, css_rule_h h);
@@ -125,7 +125,7 @@ const char *css_how_name(css_how x) {
     return "?";
 }
 
-const char css_fingerprint[] = "fnv1a32:43b95b7a:3916";
+const char css_fingerprint[] = "fnv1a32:f53c0f34:3938";
 void css_init(css_style *d, uint32_t id) {
     if (d->sheet_len != 0) abort();
     d->id = id;
@@ -138,7 +138,7 @@ css_status css_check_parse_sheet(const css_style *d, css_origin origin, const ch
     return CSS_OK;
 }
 
-css_status css_check_cascade(const css_style *d, dom_document *doc)
+css_status css_check_cascade(const css_style *d, dom_document *doc, net_loader *net)
 {
     return CSS_OK;
 }

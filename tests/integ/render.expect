@@ -1,4 +1,4 @@
-news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:9a1ae607dd11c46e
+news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:59ceb78592a8adde
 style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
 layout: rendered 800x601: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:c21c5ac365972c5e
 -- why the boxes are as wide as they are:

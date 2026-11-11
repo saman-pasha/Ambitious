@@ -10,6 +10,7 @@
 
 amb_interface(dom);
 amb_interface(html);
+amb_interface(net);
 amb_interface(css);
 
 typedef struct tcase { const char *what; const char *html; css_prop prop; const char *want; } tcase;
@@ -179,7 +180,7 @@ int main(void) {
         html_init(&p, 1);
         css_init(&st, 1);
         html_parse(&p, &d, cases[i].html, strlen(cases[i].html));
-        css_cascade(&st, &d);
+        css_cascade(&st, &d, 0);
         uint32_t x = find_t(&d);
         char got[128];
         snprintf(got, sizeof got, "(no element t)");

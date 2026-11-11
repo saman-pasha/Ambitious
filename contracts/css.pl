@@ -87,9 +87,10 @@ css_contract(list(decls, rule, decl, [first(first_decl), last(last_decl), next(n
 
 %% a style sheet's text parsed into rules and declarations, of an origin
 css_contract(operation(parse_sheet, [param(origin, enum(origin)), param(src, text)], status, [], [creates(sheet)], [mutates])).
-%% the user agent's sheet, the document's style elements and style attributes,
-%% matched and cascaded: every element's computed values
-css_contract(operation(cascade, [param(doc, store(dom))], status, [], [creates(cval)], [mutates])).
+%% the user agent's sheet, the document's style elements, the sheets its links
+%% loaded (from the network module's loader, when there is one) and its style
+%% attributes, matched and cascaded: every element's computed values
+css_contract(operation(cascade, [param(doc, store(dom)), param(net, store(net))], status, [], [creates(cval)], [mutates])).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 

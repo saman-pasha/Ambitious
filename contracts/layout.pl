@@ -91,8 +91,9 @@ layout_contract(list(frags, line, frag, [first(first_frag), last(last_frag), nex
 %% ---- OPERATIONS -------------------------------------------------------------
 
 %% the document's box tree, laid out in a viewport of width x height px
-layout_contract(operation(run, [param(doc, store(dom)), param(style, store(css)), param(width, f64), param(height, f64)],
-    status, [], [creates(box)], [mutates])).
+%% (images' sizes from the network module's loader, when there is one)
+layout_contract(operation(run, [param(doc, store(dom)), param(style, store(css)), param(net, store(net)), param(width, f64),
+    param(height, f64)], status, [], [creates(box)], [mutates])).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 

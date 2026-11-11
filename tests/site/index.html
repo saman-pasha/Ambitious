@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A page of many parts</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/old.css">
+<link rel="stylesheet" href="gone.css">
+<link rel="stylesheet" href="chunked.css">
+<link rel="stylesheet" href="loop.css">
+<script src="app.js"></script>
+</head>
+<body>
+<h1>A page of many parts</h1>
+<p class="lead">Its style comes from <span class="chunked">three sheets</span>, one of them moved twice.</p>
+<p><img src="logo.png" alt="The logo">
+<img src="http://localhost:PORT/logo.png" alt="The logo, from another origin" width="48">
+<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="A pixel">
+<img src="file:///etc/hostname" alt="A file the page may not read"></p>
+<p>A link to <a href="https://example.org/">example.org</a> is not fetched: a link is no resource.</p>
+</body>
+</html>

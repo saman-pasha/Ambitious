@@ -1,0 +1,20 @@
+gray1 13x7 a353a09884b40897
+gray2_adam7 17x11 01d5a56364848054
+gray4_key 9x9 698b7159df454a32
+gray8_stored 31x5 7b4c7c2583f61bda
+gray16 7x6 7e5dbdcb1e39419f
+rgb8_adam7 21x13 d102599abf350796
+rgb8_key 8x8 e4daccfb3e10013a
+rgb16 5x5 7bd6f643de096bba
+pal1 10x3 44a545862a0f329a
+pal2_trns 11x4 2dabc9060ca0496f
+pal4 15x6 4c87a1e3ecd1bfcc
+pal8_adam7 19x17 fc44560888afab67
+graya8 9x4 f4b891ebe314d053
+graya16 4x4 f641538fb5540303
+rgba8 16x9 0f3c99ef95bce9c3
+rgba16_adam7 10x10 9c61182407fafcd3
+one_pixel_adam7 1x1 80109b9826a4bc86
+pillow_rgba 24x12 19b51ab893c4459b
+pillow_pal 20x10 88321730d440d0a7
+round trip through the painter's writer: the same pixels

@@ -370,6 +370,17 @@ the top of `src/layout/layout.c`.
 **Gate:** a multi-resource page served by a local server loads, and its
 dependency graph is queryable.
 
+*As built:* `ambitious load URL` lists what a page loaded. Every page command
+takes a URL or a path, and the page's snapshot gains the loader's section:
+- `net_resource/7`, `net_final_url/2`, `net_origin/2`, `net_asked_by/3`,
+  `net_hop/3` and `net_image_size/3`;
+- the rules `net_depends/2`, `net_cross_origin/2` (opaque origins are neither
+  same nor cross), `net_failed/2` and `net_redirects/2`;
+- diagnostics for failures, cross-origin resources and redirects.
+
+Not done: https (no TLS), cookies, caching, `@import`, `srcset`, iframes, and
+decoding GIF or JPEG pixels (their sizes are read).
+
 ### Phase 8: JavaScript integration
 
 - Integrate an embeddable engine (QuickJS, MIT) as a native library.
@@ -439,14 +450,14 @@ cicilang's own gates do. A cicilang diagnostic is matched by its stable part
 
 | Phase | State |
 |---|---|
-| 0 Toolchain | **done**: `toolchain/`; `check.sh` GREEN; report with 10 findings (the 9th: builds name their target, so the code runs under valgrind and on other machines) |
+| 0 Toolchain | **done**: `toolchain/`; `check.sh` GREEN; report with 11 findings (the 9th: builds name their target, so the code runs under valgrind and on other machines) |
 | 1 Contract | **done**: `docs/contract.md`, `contracts/dom.pl`, the validator; contract gate GREEN (32 refusals) |
 | 2 Macro integration | **done**: `include/amb.pl` and `prolog/amb/gen_c.pl` make the DOM's C from its contract; gen gate (goldens) and exec gate GREEN, valgrind clean |
 | 3 DOM vertical slice | **done, the first milestone**: each §6.3 criterion has a passing test (the table in Phase 3); `bin/ambitious loop` runs the whole loop; `make test` GREEN |
 | 4 HTML parsing | **done, first slice**: the WHATWG tokenizer (every state, the 2,231 named references) and tree builder (the insertion modes, adoption agency, foster parenting, fragments) over `contracts/html.pl`. html5lib tree construction: **1,374 of 1,721 cases run pass (79.8%)**; every failure is foreign content (218), template contents (109) or the 2025 select rules (20). Parse errors are facts |
 | 5 CSS | **done, first slice**: `contracts/css.pl` and `src/css/css.c`. It covers sheets (comments, strings, `@media` against an 800x600 viewport), Selectors 4 (attribute operators, the structural pseudo-classes, `:nth-*()`, `:not`, `:is`, `:where`) with their specificity, and the cascade (origin, importance, the style attribute, specificity, order). It also covers inheritance, the global keywords, presentational hints, and 26 computed properties with the shorthands that set them. Each computed value is a fact with its winning declaration. `css_explain/3` says why, `css_lost/4` names the cascade step at which each loser lost, and contrast and unused rules are diagnostics. `tests/exec/css_cascade` (120 cases, valgrind clean) and `tests/integ/style` |
 | 6 Layout and rendering | **done, first slice**: `contracts/layout.pl`, `src/layout/layout.c`, `src/paint/`. Block layout covers CSS 2.1 widths, auto margins, max-width, box-sizing, and margins collapsed between siblings, through parents and through empty boxes. Inline layout covers the white-space modes, line breaking, baselines, left/right/centre/justify and inline backgrounds. Also: inline-blocks shrunk to fit, replaced elements, tables in automatic layout (colspan, cells centred), and list markers. Text is set in six DejaVu faces from outlines (`tools/gen-font.py`), rasterized by exact area coverage, and drawn into a PNG by the painter's own deflate. `ambitious render`. Every box has a width explanation that reaches the CSS rule behind a declared width; facts answer hit-testing and overflow. `tests/exec/layout_boxes` (valgrind clean) and `tests/integ/render`, which pins three pages' pixel checksums; `tests/golden/render/` holds their PNGs |
-| 7 Networking | planned |
+| 7 Networking | **done, first slice**: `contracts/net.pl` and `src/net/net.c`. URLs follow a WHATWG subset: `tests/exec/net_url` resolves all of RFC 3986's §5.4 examples. Fetching covers `file:`, `data:` and HTTP/1.1 (Content-Length, chunked, redirects bounded at five, relative Location). A page's stylesheets, images and scripts are fetched once each, with the element and page that asked; a page served over `http:` may not read `file:` (decided in C). Linked sheets join the cascade in document order. Images take their intrinsic size from their headers (PNG, GIF, JPEG), and PNGs are decoded and drawn (`src/paint/image.c`, its own inflate; `tests/exec/png_decode`: 19 fixtures whose pixels are known independently). Facts cover resources, origins, who asked and redirects; the rules give the dependency graph, cross-origin resources and failures. `tests/integ/net` serves a page of many parts from a local server: the gate |
 | 8 JavaScript | planned |
 | 9 Accessibility and devtools | planned |
 | 10 Persistence | planned |
