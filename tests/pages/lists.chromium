@@ -1,0 +1,31 @@
+same objects: true true true
+kinds: true true [object NodeList] [object HTMLCollection]
+lengths: 3 3
+after append: 5 4 3 four
+item: one null undefined null one
+namedItem: one two null one two
+in: true true false true true
+length is read-only: 4
+byTag: 4 one true
+byTag after a removal: 3 two 1
+foreign names: 1 1 0
+byClass: 1 2 0 two
+byClass after a class change: 0 0
+and after another: 1 four
+byName: 2 true INPUT SPAN
+byName after a change: 1
+for of: two,three,four
+forEach: 0:LI,1:LI,2:LI,3:#text
+spread: two,three,four
+Array.from: 1,2,3
+entries: 4 0,1,2,3
+iterator methods: undefined function true true function
+querySelectorAll is static: 3 3 4 true two null
+its forEach: two,three,four undefined
+document collections: 1 1 1 1 1 f f
+form elements: 4 x TEXTAREA TEXTAREA
+options: 2 b
+table: 3 1 2 2 3
+removed while live: 3 0 1
+a detached root: 2 2
+and after an append: 3

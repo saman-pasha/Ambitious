@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Live collections</title>
+</head>
+<body>
+<ul id="list"><li id="one" class="item a">one</li><li class="item b" name="second">two</li><li class="item a">three</li></ul>
+<form id="f" name="signup"><input name="who" value="x"><input type="image" name="pic"><select name="pick"><option>a</option><optgroup><option>b</option></optgroup></select><textarea name="note"></textarea><button>go</button></form>
+<table id="t"><thead><tr><th>h</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td></tr></tbody></table>
+<p><a href="#a">link</a> <a name="anchor">anchor</a> <img src="logo.png" alt="logo"> <span name="who">span</span></p>
+<svg><circle></circle><foreignObject></foreignObject></svg>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var list = document.getElementById('list');
+  var kids = list.childNodes, els = list.children;
+  p('same objects', (kids === list.childNodes) + ' ' + (els === list.children) + ' ' + (document.getElementsByTagName('li') === document.getElementsByTagName('li')));
+  p('kinds', (kids instanceof NodeList) + ' ' + (els instanceof HTMLCollection) + ' ' + Object.prototype.toString.call(kids) + ' ' + Object.prototype.toString.call(els));
+  p('lengths', kids.length + ' ' + els.length);
+  var li = document.createElement('li');
+  li.textContent = 'four';
+  li.className = 'item b';
+  list.appendChild(li);
+  list.appendChild(document.createTextNode(' tail'));
+  p('after append', kids.length + ' ' + els.length + ' ' + kids[4].nodeType + ' ' + els[3].textContent);
+  p('item', els.item(0).id + ' ' + els.item(9) + ' ' + els[9] + ' ' + kids.item(-1) + ' ' + els.item(4294967296).textContent);
+  p('namedItem', els.namedItem('one').textContent + ' ' + els.namedItem('second').textContent + ' ' + els.namedItem('nope') + ' ' + els.one.textContent + ' ' + els.second.textContent);
+  p('in', (0 in els) + ' ' + (3 in els) + ' ' + (4 in els) + ' ' + ('one' in els) + ' ' + ('item' in els));
+  els.length = 99;
+  p('length is read-only', els.length);
+
+  var byTag = document.getElementsByTagName('LI'), all = document.getElementsByTagName('*');
+  var before = all.length;
+  p('byTag', byTag.length + ' ' + byTag[0].id + ' ' + (all.length > 20));
+  list.removeChild(list.firstElementChild);
+  p('byTag after a removal', byTag.length + ' ' + byTag[0].textContent + ' ' + (before - all.length));
+  var circles = document.getElementsByTagName('circle'), fo = document.getElementsByTagName('foreignObject'), fol = document.getElementsByTagName('foreignobject');
+  p('foreign names', circles.length + ' ' + fo.length + ' ' + fol.length);
+
+  var as = document.getElementsByClassName('a'), ab = document.getElementsByClassName('  b   item '), none = document.getElementsByClassName('');
+  p('byClass', as.length + ' ' + ab.length + ' ' + none.length + ' ' + ab[0].textContent);
+  as[0].classList.remove('a');
+  p('byClass after a class change', as.length + ' ' + document.getElementsByClassName('a').length);
+  list.lastElementChild.classList.add('a');
+  p('and after another', as.length + ' ' + as[0].textContent);
+
+  var named = document.getElementsByName('who');
+  p('byName', named.length + ' ' + (named instanceof NodeList) + ' ' + named[0].tagName + ' ' + named[1].tagName);
+  named[1].setAttribute('name', 'other');
+  p('byName after a change', named.length);
+
+  var seen = [];
+  for (var n of list.children) seen.push(n.textContent);
+  p('for of', seen.join(','));
+  seen = [];
+  list.childNodes.forEach(function (n, i) { seen.push(i + ':' + n.nodeName); });
+  p('forEach', seen.join(','));
+  p('spread', [...list.children].map(function (e) { return e.textContent; }).join(','));
+  p('Array.from', Array.from(document.getElementsByTagName('td'), function (e) { return e.textContent; }).join(','));
+  p('entries', Array.from(list.childNodes.entries()).length + ' ' + Array.from(list.childNodes.keys()).join(','));
+  p('iterator methods', typeof list.children.forEach + ' ' + typeof list.childNodes.forEach + ' ' + (NodeList.prototype.forEach === Array.prototype.forEach) +
+    ' ' + (list.childNodes[Symbol.iterator] === Array.prototype.values) + ' ' + typeof list.children[Symbol.iterator]);
+
+  var qsa = document.querySelectorAll('li'), qlen = qsa.length;
+  list.appendChild(document.createElement('li'));
+  p('querySelectorAll is static', qlen + ' ' + qsa.length + ' ' + byTag.length + ' ' + (qsa instanceof NodeList) + ' ' + qsa.item(0).textContent + ' ' + qsa.item(7));
+  seen = [];
+  qsa.forEach(function (e) { seen.push(e.textContent); });
+  p('its forEach', seen.join(',') + ' ' + typeof qsa.map);
+
+  p('document collections', document.forms.length + ' ' + document.images.length + ' ' + document.links.length + ' ' + document.anchors.length + ' ' +
+    document.scripts.length + ' ' + document.forms.signup.id + ' ' + document.forms[0].id);
+  var f = document.getElementById('f');
+  p('form elements', f.elements.length + ' ' + f.elements.who.value + ' ' + f.elements.namedItem('note').tagName + ' ' + f.elements[2].tagName);
+  var sel = f.elements.pick;
+  p('options', sel.options.length + ' ' + sel.options[1].textContent);
+  var t = document.getElementById('t');
+  p('table', t.rows.length + ' ' + t.tBodies.length + ' ' + t.rows[1].cells.length + ' ' + t.tBodies[0].rows.length + ' ' + t.rows[2].cells[0].textContent);
+
+  var removed = 0, coll = document.getElementsByClassName('item');
+  while (coll.length) { coll[0].remove(); removed++; }
+  p('removed while live', removed + ' ' + coll.length + ' ' + list.children.length);
+
+  var detached = document.createElement('div');
+  detached.innerHTML = '<p>x</p><p>y</p>';
+  var ps = detached.getElementsByTagName('p');
+  p('a detached root', ps.length + ' ' + detached.children.length);
+  detached.appendChild(document.createElement('p'));
+  p('and after an append', ps.length);
+</script>
+</body>
+</html>

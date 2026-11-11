@@ -403,7 +403,8 @@ static int cmd_snapshot(const char *path) {
 /* a page's stores, declared in the caller's scope, where each is dropped; and its
    scripts' engine, its host pointed at the stores there (src/script/script.h) */
 #define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax; \
-    script_runtime sr; js_vm vm; struct js_host hs; SCRIPT_HOST(hs, vm, d, nt, sr); defer(vm) { JS_VM_DROP(vm); }
+    script_runtime sr; js_vm vm; struct js_host hs; SCRIPT_HOST(hs, vm, d, nt, sr); defer(vm) { JS_VM_DROP(vm); } \
+    defer(hs) { SCRIPT_HOST_DROP(hs); }
 #define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax, &sr, &vm
 /* the virtual time a page's timers run for before it is taken to be at rest, ms */
 #define SCRIPT_HORIZON 10000.0

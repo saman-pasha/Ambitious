@@ -2,6 +2,8 @@
 the same 41 lines
 -- the interop2 page's console, against Chromium's:
 the same 20 lines
+-- the lists page's console, against Chromium's:
+the same 31 lines
 -- the counter:
 script 1   inline    ran          <script>
 console log   [1] counter ready
