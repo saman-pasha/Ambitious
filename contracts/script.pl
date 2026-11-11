@@ -21,8 +21,10 @@ script_contract(enum(source, [inline, external, attribute])).
 %% classic script (a module, a template's data); not_fetched an src that failed
 script_contract(enum(outcome, [ran, threw, syntax_error, stopped, not_fetched, not_run])).
 script_contract(enum(level, [log, info, warn, error, debug])).
-%% where an uncaught error was thrown: a script's own run, a listener, a timer
-script_contract(enum(phase, [script, event, timer])).
+%% where an uncaught error was thrown: a script's own run, a listener, a timer, a
+%% microtask (a promise's reaction, an async function resumed; or a rejection no
+%% handler took)
+script_contract(enum(phase, [script, event, timer, promise])).
 %% what a listener listens on: an element (or the document), or the window
 script_contract(enum(listen_on, [node, window])).
 %% a timer at the end: it fired (a timeout), it was cleared, or it would fire again

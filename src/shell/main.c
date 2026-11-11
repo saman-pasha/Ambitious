@@ -878,7 +878,11 @@ static int cmd_js(const char *file) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     vm.real_clock = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
     int rc = js_eval(&vm, data(src), len(src), file, 1);
-    if (rc == 0) js_run_timers(&vm, 1e15, 1000000);
+    if (rc == 0) {
+        /* the microtasks the script queued, then its timers, each followed by its own */
+        js_run_jobs(&vm);
+        js_run_timers(&vm, 1e15, 1000000);
+    }
     fflush(stdout);
     if (rc != 0) { fprintf(stderr, "%.*s\n", (int)len(vm.out), data(vm.out)); return 1; }
     return 0;

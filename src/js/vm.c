@@ -224,6 +224,7 @@ uint32_t js_atom(js_vm *vm, uint32_t s) {
 uint32_t js_atom_ascii(js_vm *vm, const char *p) { return js_atom(vm, js_str_ascii(vm, p)); }
 
 int js_atom_index(js_vm *vm, uint32_t atom, uint32_t *index) {
+    if (js_key_is_sym(atom)) return 0;
     uint32_t n = vm->strs[atom].len;
     if (n == 0 || n > 10) return 0;
     js_str_flatten(vm, atom);
@@ -308,6 +309,7 @@ static uint32_t js_shape_add(js_vm *vm, uint32_t sh, uint32_t atom, uint32_t fla
     for (size_t i = h & mask;; i = (i + 1) & mask) {
         uint32_t t = at(vm->trans, i);
         if (!t) {
+            if (atom == (JS_SYM_KEY | JSYM_HAS_INSTANCE)) vm->has_instance = 1;
             js_shape s = { sh, atom, vm->shapes[sh].count, vm->shapes[sh].count + 1, vm->shapes[sh].proto, flags };
             uint32_t id = js_shape_push(vm, s);
             vm->trans[i] = id;
@@ -536,8 +538,38 @@ void js_error_text(js_vm *vm, jv e, vector<char> *out) {
 int js_truthy(js_vm *vm, jv v) {
     if (jv_is_num(v)) { double d = jv_dbl(v); return d == d && d != 0; }
     if (jv_is_str(v)) return vm->strs[jv_idx(v)].len > 0;
-    if (jv_is_obj(v)) return 1;
+    if (jv_is_obj(v) || jv_is_sym(v)) return 1;
     return v == JV_TRUE;
+}
+
+/* ---- symbols ---- */
+
+uint32_t js_sym_new(js_vm *vm, uint32_t desc) {
+    js_sym y = { desc, 0 };
+    push_back(vm->syms, y);
+    return (uint32_t)(len(vm->syms) - 1);
+}
+uint32_t js_sym_text(js_vm *vm, uint32_t sym) {
+    uint32_t d = vm->syms[sym].desc;
+    uint32_t t = js_str_concat(vm, js_str_ascii(vm, "Symbol("), d ? d : A_EMPTY);
+    return js_str_concat(vm, t, js_str_ascii(vm, ")"));
+}
+uint32_t js_key_name(js_vm *vm, uint32_t key) {
+    if (js_key_is_sym(key)) return js_sym_text(vm, key & ~JS_SYM_KEY);
+    return key;
+}
+uint32_t js_prop_key(js_vm *vm, jv v, int *ok) {
+    *ok = 1;
+    if (jv_is_sym(v)) return JS_SYM_KEY | jv_idx(v);
+    if (jv_is_obj(v)) {
+        jv p = js_to_primitive(vm, v, 1);
+        if (vm->throwing) { *ok = 0; return 0; }
+        if (jv_is_sym(p)) return JS_SYM_KEY | jv_idx(p);
+        v = p;
+    }
+    uint32_t s = js_to_string(vm, v);
+    if (!s) { *ok = 0; return 0; }
+    return js_atom(vm, s);
 }
 
 int32_t js_to_int32(double d) {
@@ -662,7 +694,20 @@ jv js_to_primitive(js_vm *vm, jv v, int hint_string) {
     if (!jv_is_obj(v)) return v;
     uint32_t o = jv_idx(v);
     uint32_t k = vm->objs[o].kind;
-    if (k == JK_NUMBER || k == JK_BOOLEAN || k == JK_STRING) return vm->objs[o].x;
+    if (k == JK_NUMBER || k == JK_BOOLEAN || k == JK_STRING || k == JK_SYMBOL) return vm->objs[o].x;
+    /* an object's own Symbol.toPrimitive, given the hint */
+    if (k == JK_PLAIN || k == JK_HOST) {
+        jv ex = js_get(vm, v, JS_SYM_KEY | JSYM_TO_PRIMITIVE);
+        if (vm->throwing) return JV_HOLE;
+        if (!jv_is_nullish(ex)) {
+            if (!js_is_callable(vm, ex)) return js_throw_msg(vm, vm->type_error_proto, "Symbol.toPrimitive is not a function");
+            jv hint[1] = { jv_str(hint_string > 0 ? A_STRING : hint_string == 0 ? A_NUMBER : A_DEFAULT) };
+            jv r = js_call(vm, ex, v, hint, 1);
+            if (vm->throwing) return JV_HOLE;
+            if (jv_is_obj(r)) return js_throw_msg(vm, vm->type_error_proto, "Cannot convert object to primitive value");
+            return r;
+        }
+    }
     if (k == JK_DATE && hint_string < 0) hint_string = 1;
     uint32_t first = hint_string > 0 ? A_TOSTRING : A_VALUEOF, second = hint_string > 0 ? A_VALUEOF : A_TOSTRING;
     for (int pass = 0; pass < 2; pass++) {
@@ -683,6 +728,7 @@ double js_to_number(js_vm *vm, jv v) {
     if (v == JV_NULL || v == JV_FALSE) return 0;
     if (v == JV_TRUE) return 1;
     if (jv_is_str(v)) return js_str_to_num(vm, jv_idx(v));
+    if (jv_is_sym(v)) { js_throw_msg(vm, vm->type_error_proto, "Cannot convert a Symbol value to a number"); return NAN; }
     jv p = js_to_primitive(vm, v, 0);
     if (vm->throwing) return NAN;
     return js_to_number(vm, p);
@@ -695,6 +741,7 @@ uint32_t js_to_string(js_vm *vm, jv v) {
     if (v == JV_NULL) return A_NULL;
     if (v == JV_TRUE) return A_TRUE;
     if (v == JV_FALSE) return A_FALSE;
+    if (jv_is_sym(v)) { js_throw_msg(vm, vm->type_error_proto, "Cannot convert a Symbol value to a string"); return 0; }
     jv p = js_to_primitive(vm, v, 1);
     if (vm->throwing) return 0;
     return js_to_string(vm, p);
@@ -703,8 +750,8 @@ uint32_t js_to_string(js_vm *vm, jv v) {
 jv js_to_object(js_vm *vm, jv v) {
     if (jv_is_obj(v)) return v;
     if (jv_is_nullish(v) || v == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object");
-    uint32_t kind = jv_is_num(v) ? JK_NUMBER : jv_is_str(v) ? JK_STRING : JK_BOOLEAN;
-    uint32_t proto = kind == JK_NUMBER ? vm->number_proto : kind == JK_STRING ? vm->string_proto : vm->boolean_proto;
+    uint32_t kind = jv_is_num(v) ? JK_NUMBER : jv_is_str(v) ? JK_STRING : jv_is_sym(v) ? JK_SYMBOL : JK_BOOLEAN;
+    uint32_t proto = kind == JK_NUMBER ? vm->number_proto : kind == JK_STRING ? vm->string_proto : kind == JK_SYMBOL ? vm->symbol_proto : vm->boolean_proto;
     uint32_t o = js_obj_new(vm, kind, proto);
     vm->objs[o].x = v;
     return jv_obj(o);
@@ -722,6 +769,7 @@ uint32_t js_typeof(js_vm *vm, jv v) {
     if (v == JV_TRUE || v == JV_FALSE) return A_BOOLEAN;
     if (v == JV_UNDEF || v == JV_HOLE) return A_UNDEFINED;
     if (v == JV_NULL) return A_OBJECT;
+    if (jv_is_sym(v)) return A_SYMBOL;
     return js_is_callable(vm, v) ? A_FUNCTION : A_OBJECT;
 }
 
@@ -742,6 +790,7 @@ int js_same_value_zero(js_vm *vm, jv a, jv b) {
 int js_loose_eq(js_vm *vm, jv a, jv b) {
     for (int guard = 0; guard < 4; guard++) {
         if ((jv_is_num(a) && jv_is_num(b)) || (jv_is_str(a) && jv_is_str(b)) || (jv_is_obj(a) && jv_is_obj(b))) return js_strict_eq(vm, a, b);
+        if (jv_is_sym(a) && jv_is_sym(b)) return a == b;
         if (jv_is_nullish(a) || jv_is_nullish(b)) return jv_is_nullish(a) && jv_is_nullish(b);
         if (jv_is_bool(a)) { a = jv_num(a == JV_TRUE ? 1 : 0); continue; }
         if (jv_is_bool(b)) { b = jv_num(b == JV_TRUE ? 1 : 0); continue; }
@@ -761,7 +810,13 @@ static int js_func_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out) {
     uint32_t k = vm->objs[o].kind;
     if (k == JK_CLOSURE) {
         js_func f = vm->funcs[vm->objs[o].a];
-        if (atom == A_PROTOTYPE && !(f.flags & (JF_ARROW | JF_METHOD))) {
+        if (atom == A_PROTOTYPE && (f.flags & JF_GENERATOR)) {
+            uint32_t p = js_obj_new(vm, JK_PLAIN, vm->generator_proto);
+            js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
+            *out = jv_obj(p);
+            return 1;
+        }
+        if (atom == A_PROTOTYPE && !(f.flags & (JF_ARROW | JF_METHOD | JF_ASYNC))) {
             uint32_t p = js_obj_new(vm, JK_PLAIN, vm->object_proto);
             js_define(vm, p, A_CONSTRUCTOR, jv_obj(o), JS_SHAPE_HIDDEN);
             js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
@@ -836,6 +891,7 @@ static uint32_t js_proto_of_primitive(js_vm *vm, jv v) {
     if (jv_is_num(v)) return vm->number_proto;
     if (jv_is_str(v)) return vm->string_proto;
     if (jv_is_bool(v)) return vm->boolean_proto;
+    if (jv_is_sym(v)) return vm->symbol_proto;
     return 0;
 }
 
@@ -851,7 +907,7 @@ static jv js_get_from(js_vm *vm, jv objv, uint32_t atom, uint32_t *holder, uint3
     if (!p) {
         if (vm->throwing) return JV_HOLE;
         uint32_t m = js_str_concat(vm, js_str_ascii(vm, objv == JV_NULL ? "Cannot read properties of null (reading '" : "Cannot read properties of undefined (reading '"),
-                                   js_str_concat(vm, atom, js_str_ascii(vm, "')")));
+                                   js_str_concat(vm, js_key_name(vm, atom), js_str_ascii(vm, "')")));
         return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
     }
     uint32_t h2 = 0, e2 = 0;
@@ -898,7 +954,7 @@ static int js_call_setter(js_vm *vm, jv acc, jv receiver, jv v) {
 int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     if (!jv_is_obj(objv)) {
         if (jv_is_nullish(objv) || objv == JV_HOLE) {
-            uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot set properties of undefined (setting '"), js_str_concat(vm, atom, js_str_ascii(vm, "')")));
+            uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot set properties of undefined (setting '"), js_str_concat(vm, js_key_name(vm, atom), js_str_ascii(vm, "')")));
             js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
             return 0;
         }
@@ -966,9 +1022,11 @@ static int js_key(js_vm *vm, jv key, uint32_t *atom, uint32_t *index) {
         double d = jv_dbl(key);
         if (d >= 0 && d < 4294967295.0 && d == trunc(d)) { *index = (uint32_t)d; *atom = 0; return 2; }
     }
-    uint32_t s = js_to_string(vm, key);
-    if (!s) return 0;
-    *atom = js_atom(vm, s);
+    if (jv_is_sym(key)) { *atom = JS_SYM_KEY | jv_idx(key); return 1; }
+    int ok = 1;
+    *atom = js_prop_key(vm, key, &ok);
+    if (!ok) return 0;
+    if (js_key_is_sym(*atom)) return 1;
     uint32_t i;
     if (js_atom_index(vm, *atom, &i)) { *index = i; return 3; }
     return 1;
@@ -1082,12 +1140,35 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
         if (vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) continue;
         if (enumerable_only && (vm->shapes[e].flags & JS_SHAPE_HIDDEN)) continue;
         uint32_t i;
-        if (js_atom_index(vm, vm->shapes[e].atom, &i)) continue;
+        if (js_key_is_sym(vm->shapes[e].atom) || js_atom_index(vm, vm->shapes[e].atom, &i)) continue;
         js_array_push(vm, arr, jv_str(vm->shapes[e].atom));
     }
 }
 
+void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr) {
+    vector<uint32_t> es;
+    for (uint32_t x = vm->objs[o].shape; x && vm->shapes[x].count; x = vm->shapes[x].parent) push_back(es, x);
+    for (size_t q = len(es); q > 0; q--) {
+        uint32_t e = at(es, q - 1);
+        if (vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) continue;
+        uint32_t k = vm->shapes[e].atom;
+        if (js_key_is_sym(k)) js_array_push(vm, arr, jv_sym(k & ~JS_SYM_KEY));
+    }
+}
+
 int js_instance_of(js_vm *vm, jv v, jv ctor) {
+    if (!jv_is_obj(ctor)) { js_throw_msg(vm, vm->type_error_proto, "Right-hand side of 'instanceof' is not an object"); return 0; }
+    /* the constructor's own test, Symbol.hasInstance, once any object was given one */
+    if (vm->has_instance) {
+        jv h = js_get(vm, ctor, JS_SYM_KEY | JSYM_HAS_INSTANCE);
+        if (vm->throwing) return 0;
+        if (!jv_is_nullish(h)) {
+            if (!js_is_callable(vm, h)) { js_throw_msg(vm, vm->type_error_proto, "Symbol.hasInstance is not a function"); return 0; }
+            jv a1[1] = { v };
+            jv r = js_call(vm, h, ctor, a1, 1);
+            return !vm->throwing && js_truthy(vm, r);
+        }
+    }
     if (!js_is_callable(vm, ctor)) { js_throw_msg(vm, vm->type_error_proto, "Right-hand side of 'instanceof' is not callable"); return 0; }
     if (vm->objs[jv_idx(ctor)].kind == JK_BOUND) ctor = jv_obj(vm->objs[jv_idx(ctor)].a);
     if (!jv_is_obj(v)) return 0;
@@ -1211,7 +1292,7 @@ static uint32_t js_iter_keys(js_vm *vm, jv v) {
     return js_iter_new(vm, keys, JI_KEYS);
 }
 
-static jv js_iter_of(js_vm *vm, jv v) {
+jv js_iter_of(js_vm *vm, jv v) {
     if (jv_is_str(v)) return jv_obj(js_iter_new(vm, jv_idx(v), JI_STRING));
     if (jv_is_obj(v)) {
         uint32_t o = jv_idx(v);
@@ -1221,7 +1302,24 @@ static jv js_iter_of(js_vm *vm, jv v) {
         if (k == JK_MAP) return jv_obj(js_iter_new(vm, o, JI_MAP));
         if (k == JK_SET) return jv_obj(js_iter_new(vm, o, JI_SET));
         if (k == JK_ITER) return v;
+        if (k == JK_GENERATOR) return jv_obj(js_iter_new(vm, o, JI_GEN));
         if (k == JK_STRING) return jv_obj(js_iter_new(vm, jv_idx(vm->objs[o].x), JI_STRING));
+        /* the iteration protocol: obj[Symbol.iterator](), its next */
+        jv f = js_get(vm, v, JS_KEY_ITERATOR);
+        if (vm->throwing) return JV_HOLE;
+        if (js_is_callable(vm, f)) {
+            jv it = js_call(vm, f, v, 0, 0);
+            if (vm->throwing) return JV_HOLE;
+            if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.iterator method is not an object");
+            uint32_t io = jv_idx(it);
+            if (vm->objs[io].kind == JK_ITER) return it;
+            if (vm->objs[io].kind == JK_GENERATOR) return jv_obj(js_iter_new(vm, io, JI_GEN));
+            jv next = js_get(vm, it, A_NEXT);
+            if (vm->throwing) return JV_HOLE;
+            uint32_t w = js_iter_new(vm, io, JI_PROTOCOL);
+            vm->objs[w].x = next;
+            return jv_obj(w);
+        }
         /* an array-like host collection: by its length */
         jv n = js_get(vm, v, A_LENGTH);
         if (vm->throwing) return JV_HOLE;
@@ -1231,8 +1329,32 @@ static jv js_iter_of(js_vm *vm, jv v) {
 }
 
 /* the iterator's next value into *out: 0 when it is done */
-static int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
+int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     uint32_t src = vm->objs[it].a, i = vm->objs[it].b, mode = vm->objs[it].c;
+    if (mode == JI_GEN) {
+        if (vm->objs[it].b) return 0;
+        int done = 0;
+        jv r = js_gen_resume(vm, src, JV_UNDEF, 0, &done);
+        if (vm->throwing || done) { vm->objs[it].b = 1; return 0; }
+        *out = r;
+        return 1;
+    }
+    if (mode == JI_PROTOCOL) {
+        if (vm->objs[it].b) return 0;
+        jv next = vm->objs[it].x;
+        if (!js_is_callable(vm, next)) { js_throw_msg(vm, vm->type_error_proto, "the iterator's next is not a function"); return 0; }
+        /* a next that threw (or gave no object) leaves the iterator done: it is not closed */
+        vm->objs[it].b = 1;
+        jv r = js_call(vm, next, jv_obj(src), 0, 0);
+        if (vm->throwing) return 0;
+        if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return 0; }
+        jv d = js_get(vm, r, A_DONE);
+        if (vm->throwing || js_truthy(vm, d)) return 0;
+        *out = js_get(vm, r, A_VALUE);
+        if (vm->throwing) return 0;
+        vm->objs[it].b = 0;
+        return 1;
+    }
     if (mode == JI_KEYS || mode == JI_ARRAY) {
         if (vm->objs[src].kind == JK_ARRAY) {
             if (i >= vm->objs[src].b) return 0;
@@ -1269,6 +1391,188 @@ static int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     }
     vm->objs[it].b = i + step;
     return 1;
+}
+
+/* an array pattern's values from an iterable that is not an array: the first n its
+   iterator gives (0xFFFF: all, for a rest element), the iterator closed when the
+   pattern leaves it before its end */
+static jv js_iter_take(js_vm *vm, jv v, uint32_t n) {
+    jv it = js_iter_of(vm, v);
+    if (vm->throwing) return JV_HOLE;
+    uint32_t arr = js_array_new(vm, 0);
+    for (uint32_t k = 0; n == 0xFFFF || k < n; k++) {
+        jv x = JV_UNDEF;
+        if (!js_iter_step(vm, jv_idx(it), &x)) return vm->throwing ? JV_HOLE : jv_obj(arr);
+        js_array_push(vm, arr, x);
+    }
+    js_iter_close(vm, jv_idx(it));
+    return vm->throwing ? JV_HOLE : jv_obj(arr);
+}
+
+/* an iterator left before its end (a for-of's break, return or throw): a generator
+   resumed to return, the protocol's return() called; an exception in flight kept */
+void js_iter_close(js_vm *vm, uint32_t it) {
+    if (!it || vm->objs[it].kind != JK_ITER) return;
+    uint32_t mode = vm->objs[it].c, src = vm->objs[it].a;
+    if ((mode != JI_GEN && mode != JI_PROTOCOL) || vm->objs[it].b) return;
+    vm->objs[it].b = 1;
+    int was = vm->throwing;
+    jv saved = vm->exception;
+    vm->throwing = 0;
+    if (mode == JI_GEN) {
+        int done = 0;
+        js_gen_resume(vm, src, JV_UNDEF, 2, &done);
+    } else {
+        jv rf = js_get(vm, jv_obj(src), A_RETURN);
+        if (!vm->throwing && js_is_callable(vm, rf)) {
+            jv r = js_call(vm, rf, jv_obj(src), 0, 0);
+            if (!vm->throwing && !jv_is_obj(r)) js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object");
+        }
+    }
+    if (was) { vm->throwing = was; vm->exception = saved; }
+}
+
+/* ---- generators and async runs ----
+   A suspended frame lives in its object's array: [pc, env, callee, argc, func, flags,
+   this, new.target, arguments, handlers' count], then each try handler of the frame
+   (pc, sp from the base, env), then its slots and operands from its base. Resumed, it
+   is a frame again at the top of the stack, entered from C (its return comes back to
+   js_gen_resume), the value it was sent and how pushed for its GEN_RESUME. */
+#define JS_GEN_HEAD 10u
+
+static void js_gen_save(js_vm *vm, uint32_t fi, uint32_t pc, uint32_t sp) {
+    js_frame f = vm->frames[fi];
+    uint32_t g = f.gen;
+    uint32_t arr = vm->objs[g].b;
+    if (!arr) { arr = js_array_new(vm, 0); vm->objs[g].b = arr; }
+    else js_array_set_length(vm, arr, 0);
+    uint32_t nh = vm->nhandlers - f.handlers;
+    jv head[JS_GEN_HEAD] = { jv_num(pc), jv_num(f.env), jv_num(f.callee), jv_num(f.argc), jv_num(f.func),
+                             jv_num(f.flags & ~(uint32_t)JFR_NATIVE_ENTRY), f.thisv, f.newt, jv_num(f.args), jv_num(nh) };
+    for (uint32_t i = 0; i < JS_GEN_HEAD; i++) js_array_push(vm, arr, head[i]);
+    for (uint32_t h = f.handlers; h < vm->nhandlers; h++) {
+        js_handler hd = vm->handlers[h];
+        js_array_push(vm, arr, jv_num(hd.pc));
+        js_array_push(vm, arr, jv_num(hd.sp - f.base));
+        js_array_push(vm, arr, jv_num(hd.env));
+    }
+    for (uint32_t i = f.base; i < sp; i++) js_array_push(vm, arr, vm->stack[i]);
+}
+
+static uint32_t js_gen_num(js_vm *vm, uint32_t arr, uint32_t i) { return (uint32_t)jv_dbl(vm->slots[vm->objs[arr].a + i]); }
+
+jv js_gen_resume(js_vm *vm, uint32_t g, jv value, int mode, int *done) {
+    *done = 1;
+    uint32_t st = vm->objs[g].a;
+    if (st == JG_RUNNING) return js_throw_msg(vm, vm->type_error_proto, "Generator is already running");
+    if (st == JG_DONE || (st == JG_START && mode != 0)) {
+        vm->objs[g].a = JG_DONE;
+        vm->objs[g].b = 0;
+        if (mode == 1) return js_throw(vm, value);
+        return mode == 2 ? value : JV_UNDEF;
+    }
+    if (vm->depth >= JS_DEPTH_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
+    uint32_t arr = vm->objs[g].b;
+    uint32_t total = vm->objs[arr].b, nh = js_gen_num(vm, arr, 9);
+    uint32_t nstack = total - JS_GEN_HEAD - 3 * nh;
+    uint32_t base = vm->sp, n = vm->nframes;
+    if (!js_room(vm, base + nstack + 2 + JS_STACK_MARGIN, n + 2) || vm->nhandlers + nh > len(vm->handlers))
+        return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
+    js_frame fr;
+    memset(&fr, 0, sizeof fr);
+    fr.pc = js_gen_num(vm, arr, 0);
+    fr.env = js_gen_num(vm, arr, 1);
+    fr.callee = js_gen_num(vm, arr, 2);
+    fr.argc = js_gen_num(vm, arr, 3);
+    fr.func = js_gen_num(vm, arr, 4);
+    fr.flags = js_gen_num(vm, arr, 5) | JFR_NATIVE_ENTRY;
+    fr.thisv = vm->slots[vm->objs[arr].a + 6];
+    fr.newt = vm->slots[vm->objs[arr].a + 7];
+    fr.args = js_gen_num(vm, arr, 8);
+    fr.base = base;
+    fr.sp0 = base;
+    fr.handlers = vm->nhandlers;
+    fr.gen = g;
+    for (uint32_t h = 0; h < nh; h++) {
+        js_handler hd;
+        hd.frame = n;
+        hd.pc = js_gen_num(vm, arr, JS_GEN_HEAD + 3 * h);
+        hd.sp = base + js_gen_num(vm, arr, JS_GEN_HEAD + 3 * h + 1);
+        hd.env = js_gen_num(vm, arr, JS_GEN_HEAD + 3 * h + 2);
+        vm->handlers[vm->nhandlers++] = hd;
+    }
+    {
+        uint64_t *stack = data(vm->stack);
+        const uint64_t *slots = data(vm->slots);
+        uint32_t from = vm->objs[arr].a + JS_GEN_HEAD + 3 * nh;
+        for (uint32_t i = 0; i < nstack; i++) stack[base + i] = slots[from + i];
+        uint32_t sp = base + nstack;
+        if (st == JG_YIELD) { stack[sp] = value; stack[sp + 1] = jv_num(mode); sp += 2; }
+        vm->sp = sp;
+    }
+    js_frame *frames = data(vm->frames);
+    frames[n] = fr;
+    vm->nframes = n + 1;
+    vm->objs[g].a = JG_RUNNING;
+    vm->depth++;
+    jv r = js_run(vm, n);
+    vm->depth--;
+    if (vm->throwing) { vm->objs[g].a = JG_DONE; vm->objs[g].b = 0; return JV_HOLE; }
+    *done = vm->objs[g].a == JG_DONE;
+    return r;
+}
+
+/* yield*'s step: the inner iterator sent the value as next, throw or return; *fin when
+   it finished (*ret: as a return), *out its value then, else the value to yield */
+static void js_yield_star(js_vm *vm, jv it, jv recv, int mode, jv *out, int *fin, int *ret) {
+    *fin = 0;
+    *ret = 0;
+    jv res = JV_UNDEF;
+    if (jv_is_obj(it) && vm->objs[jv_idx(it)].kind == JK_GENERATOR) {
+        int done = 0;
+        jv r = js_gen_resume(vm, jv_idx(it), recv, mode, &done);
+        if (vm->throwing) return;
+        *out = r;
+        if (done) { *fin = 1; *ret = mode == 2; }
+        return;
+    }
+    if (mode == 0) {
+        jv nf = js_get(vm, it, A_NEXT);
+        if (vm->throwing) return;
+        jv a1[1] = { recv };
+        res = js_call(vm, nf, it, a1, 1);
+    } else {
+        jv m = js_get(vm, it, mode == 1 ? A_THROW : A_RETURN);
+        if (vm->throwing) return;
+        if (jv_is_nullish(m)) {
+            if (mode == 2) { *fin = 1; *ret = 1; *out = recv; return; }
+            jv rf = js_get(vm, it, A_RETURN);
+            if (!vm->throwing && js_is_callable(vm, rf)) js_call(vm, rf, it, 0, 0);
+            if (!vm->throwing) js_throw_msg(vm, vm->type_error_proto, "The iterator does not provide a 'throw' method");
+            return;
+        }
+        jv a1[1] = { recv };
+        res = js_call(vm, m, it, a1, 1);
+    }
+    if (vm->throwing) return;
+    if (!jv_is_obj(res)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return; }
+    jv d = js_get(vm, res, A_DONE);
+    if (vm->throwing) return;
+    *out = js_get(vm, res, A_VALUE);
+    if (vm->throwing) return;
+    if (js_truthy(vm, d)) { *fin = 1; *ret = mode == 2; }
+}
+
+/* an iterable's iterator object (yield*'s): what Symbol.iterator gives; a generator itself */
+static jv js_iterator_object(js_vm *vm, jv v) {
+    if (jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_GENERATOR) return v;
+    jv f = js_get(vm, v, JS_KEY_ITERATOR);
+    if (vm->throwing) return JV_HOLE;
+    if (!js_is_callable(vm, f)) return js_type_error(vm, "is not iterable", jv_is_obj(v) ? A_OBJECT : js_typeof(vm, v));
+    jv it = js_call(vm, f, v, 0, 0);
+    if (vm->throwing) return JV_HOLE;
+    if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.iterator method is not an object");
+    return it;
 }
 
 /* ---- calls ---- */
@@ -1325,6 +1629,7 @@ static int js_enter(js_vm *vm, uint32_t c, jv thisv, uint32_t argc, jv newt, uin
     uint32_t ff = funcs[func].flags, np = funcs[func].nparams, ns = funcs[func].nslots;
     uint32_t base = vm->sp - argc;
     js_frame fr;
+    fr.gen = 0;
     fr.func = func;
     fr.pc = funcs[func].code;
     fr.base = base;
@@ -1401,6 +1706,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
         uint32_t ff = funcs[func].flags, np = funcs[func].nparams, ns = funcs[func].nslots;
         if (sp0 + argc + ns + JS_STACK_MARGIN < len(vm->stack)) {
             js_frame fr;
+            fr.gen = 0;
             fr.func = func;
             fr.pc = funcs[func].code;
             fr.base = sp0 + 2;
@@ -1469,7 +1775,7 @@ jv js_construct(js_vm *vm, jv fn, const jv *argv, uint32_t argc, jv newt) {
     jv r;
     if (vm->objs[o].kind == JK_CLOSURE) {
         js_func f = vm->funcs[vm->objs[o].a];
-        if (f.flags & (JF_ARROW | JF_METHOD)) { vm->sp = sp0; return js_type_error(vm, "is not a constructor", A_FUNCTION); }
+        if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { vm->sp = sp0; return js_type_error(vm, "is not a constructor", A_FUNCTION); }
         jv thisv = JV_HOLE;
         if (!(vm->objs[o].flags & JO_DERIVED)) {
             jv p = js_ctor_proto(vm, newt);
@@ -1845,10 +2151,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv v = stack[sp - 1], k = stack[sp - 2];
             uint32_t o = jv_idx(stack[sp - 3]);
             SYNC();
-            uint32_t s = js_to_string(vm, k); RELOAD();
-            if (!s) break;
+            int kok = 1;
+            uint32_t key = js_prop_key(vm, k, &kok); RELOAD();
+            if (!kok) break;
             if (jv_is_obj(v) && objs[jv_idx(v)].kind == JK_CLOSURE && (funcs[objs[jv_idx(v)].a].flags & JF_METHOD)) objs[jv_idx(v)].c = o;
-            js_define(vm, o, js_atom(vm, s), v, op == OP_DEF_METHOD_ELEM ? JS_SHAPE_HIDDEN : 0); RELOAD();
+            js_define(vm, o, key, v, op == OP_DEF_METHOD_ELEM ? JS_SHAPE_HIDDEN : 0); RELOAD();
             sp -= 2;
             break;
         }
@@ -1858,9 +2165,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (op == OP_DEF_GET || op == OP_DEF_SET) { atom = RD32(pc); pc += 4; sp--; }
             else {
                 SYNC();
-                uint32_t s = js_to_string(vm, stack[sp - 2]); RELOAD();
-                if (!s) break;
-                atom = js_atom(vm, s); RELOAD();
+                int kok = 1;
+                atom = js_prop_key(vm, stack[sp - 2], &kok); RELOAD();
+                if (!kok) break;
                 sp -= 2;
             }
             uint32_t o = jv_idx(stack[sp - 1]);
@@ -1998,9 +2305,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (op == OP_DEL_PROP) { atom = RD32(pc); pc += 4; }
             else {
                 SYNC();
-                uint32_t s = js_to_string(vm, stack[--sp]); RELOAD();
-                if (!s) break;
-                atom = js_atom(vm, s); RELOAD();
+                int kok = 1;
+                atom = js_prop_key(vm, stack[--sp], &kok); RELOAD();
+                if (!kok) break;
             }
             jv ov = stack[sp - 1];
             { jv rv_ = jv_bool(jv_is_obj(ov) ? js_delete(vm, jv_idx(ov), atom) : 1); RELOAD(); stack[sp - 1] = rv_; }
@@ -2010,9 +2317,18 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv ov = stack[--sp], k = stack[sp - 1];
             SYNC();
             if (!jv_is_obj(ov)) { js_throw_msg(vm, vm->type_error_proto, "Cannot use 'in' operator to search for a key in a value that is not an object"); RELOAD(); break; }
-            uint32_t s = js_to_string(vm, k); RELOAD();
-            if (!s) break;
-            { jv rv_ = jv_bool(js_has(vm, jv_idx(ov), js_atom(vm, s))); RELOAD(); stack[sp - 1] = rv_; }
+            int kok = 1;
+            uint32_t key = js_prop_key(vm, k, &kok); RELOAD();
+            if (!kok) break;
+            uint32_t idx = 0;
+            int found;
+            int isarr = objs[jv_idx(ov)].kind == JK_ARRAY;
+            int isidx = isarr && js_atom_index(vm, key, &idx);
+            RELOAD();
+            if (isidx) found = idx < objs[jv_idx(ov)].b && slots[objs[jv_idx(ov)].a + idx] != JV_HOLE;
+            else found = js_has(vm, jv_idx(ov), key);
+            RELOAD();
+            stack[sp - 1] = jv_bool(found);
             break;
         }
         case OP_INSTANCEOF: {
@@ -2027,9 +2343,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             SYNC();
             if (op == OP_GET_SUPER) { atom = RD32(pc); pc += 4; }
             else {
-                uint32_t s = js_to_string(vm, stack[--sp]); RELOAD();
-                if (!s) break;
-                atom = js_atom(vm, s); RELOAD();
+                int kok = 1;
+                atom = js_prop_key(vm, stack[--sp], &kok); RELOAD();
+                if (!kok) break;
             }
             uint32_t home = objs[frames[fi].callee].c;
             uint32_t p = home ? objs[home].proto : 0;
@@ -2066,6 +2382,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                     if (!boxed && n + 1 < len(vm->frames) && sp + ns + JS_STACK_MARGIN < len(vm->stack)) {
                         frames[fi].pc = pc + 2;
                         js_frame fr;
+                        fr.gen = 0;
                         fr.func = func;
                         fr.pc = funcs[func].code;
                         fr.base = nb;
@@ -2142,7 +2459,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 uint32_t flags = 0;
                 if (construct || super) {
                     js_func f = funcs[objs[o].a];
-                    if (f.flags & (JF_ARROW | JF_METHOD)) { js_type_error(vm, "is not a constructor", A_FUNCTION); RELOAD(); break; }
+                    if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { js_type_error(vm, "is not a constructor", A_FUNCTION); RELOAD(); break; }
                     flags = JFR_CONSTRUCT | (super ? JFR_NATIVE_ENTRY : 0);
                     if (!(objs[o].flags & JO_DERIVED)) {
                         jv p = js_ctor_proto(vm, newt); RELOAD();
@@ -2182,6 +2499,17 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (op == OP_RETURN) r = stack[sp - 1];
             else if (op == OP_RETURN_LOC) r = stack[base + RD16(pc)];
             uint32_t rfl = frames[fi].flags;
+            uint32_t gob = frames[fi].gen;
+            if (gob) {
+                if (objs[gob].kind == JK_ASYNC) {
+                    uint32_t pr = objs[gob].c;
+                    SYNC();
+                    js_promise_resolve_with(vm, pr, r); RELOAD();
+                    r = jv_obj(pr);
+                }
+                objs[gob].a = JG_DONE;
+                objs[gob].b = 0;
+            }
             if (rfl) {
                 if (rfl & JFR_CONSTRUCT) {
                     if (!jv_is_obj(r)) {
@@ -2481,6 +2809,127 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             else pc += 4;
             break;
         }
+        case OP_GEN_START: case OP_YIELD: case OP_AWAIT: {
+            /* the frame suspended into its object; what the caller (or the resumer) gets */
+            jv r = JV_UNDEF;
+            SYNC();
+            if (op == OP_GEN_START) {
+                jv pv = js_get(vm, jv_obj(frames[fi].callee), A_PROTOTYPE); RELOAD();
+                if (vm->throwing) break;
+                uint32_t g = js_obj_new(vm, JK_GENERATOR, jv_is_obj(pv) ? jv_idx(pv) : vm->generator_proto); RELOAD();
+                objs[g].x = jv_obj(frames[fi].callee);
+                frames[fi].gen = g;
+                js_gen_save(vm, fi, pc, sp); RELOAD();
+                objs[g].a = JG_START;
+                r = jv_obj(g);
+            } else if (op == OP_YIELD) {
+                r = stack[--sp];
+                SYNC();
+                js_gen_save(vm, fi, pc, sp); RELOAD();
+                objs[frames[fi].gen].a = JG_YIELD;
+            } else {
+                jv v = stack[--sp];
+                SYNC();
+                uint32_t g = frames[fi].gen;
+                uint32_t p2 = js_promise_of(vm, v); RELOAD();
+                if (vm->throwing) break;
+                js_gen_save(vm, fi, pc, sp); RELOAD();
+                objs[g].a = JG_YIELD;
+                js_promise_react(vm, p2, JV_UNDEF, JV_UNDEF, jv_obj(g), 1); RELOAD();
+                r = jv_obj(objs[g].c);
+            }
+            vm->nhandlers = frames[fi].handlers;
+            vm->nframes = fi;
+            sp = frames[fi].sp0;
+            if (frames[fi].flags & JFR_NATIVE_ENTRY) { vm->sp = sp; return r; }
+            stack[sp++] = r;
+            fi--;
+            pc = frames[fi].pc;
+            base = frames[fi].base;
+            goto next;
+        }
+        case OP_ASYNC_START: {
+            SYNC();
+            uint32_t g = js_obj_new(vm, JK_ASYNC, 0); RELOAD();
+            uint32_t pr = js_promise_new(vm); RELOAD();
+            objs[g].c = pr;
+            objs[g].a = JG_RUNNING;
+            objs[g].x = jv_obj(frames[fi].callee);
+            frames[fi].gen = g;
+            goto next;
+        }
+        case OP_GEN_RESUME: {
+            /* how the run was resumed: with a value (mode 0), a throw (1), or a return (2):
+               the stack cut to its statement's (the slots, then u16 loops' iterators), the
+               value on it, and the return path at i32 */
+            uint32_t at = pc;
+            int32_t off = (int32_t)RD32(at);
+            uint32_t nit = RD16(at + 4);
+            pc = at + 6;
+            double m = jv_dbl(stack[--sp]);
+            if (m == 0) goto next;
+            if (m == 1) { jv e = stack[--sp]; SYNC(); js_throw(vm, e); RELOAD(); break; }
+            jv v = stack[--sp];
+            sp = base + funcs[frames[fi].func].nslots + nit;
+            stack[sp++] = v;
+            pc = (uint32_t)((int32_t)(at + 4) + off);
+            goto next;
+        }
+        case OP_YIELD_STAR: {
+            /* i32 done, i32 return, u16 the loops' iterators (GEN_RESUME's) */
+            uint32_t at = pc;
+            int32_t done_off = (int32_t)RD32(at), ret_off = (int32_t)RD32(at + 4);
+            uint32_t nit = RD16(at + 8);
+            pc = at + 10;
+            double m = jv_dbl(stack[--sp]);
+            jv recv = stack[--sp], it = stack[sp - 1];
+            jv out = JV_UNDEF;
+            int fin = 0, asret = 0;
+            SYNC();
+            js_yield_star(vm, it, recv, (int)m, &out, &fin, &asret); RELOAD();
+            if (vm->throwing) break;
+            if (!fin) { stack[sp++] = out; goto next; }
+            if (asret) {
+                sp = base + funcs[frames[fi].func].nslots + nit;
+                stack[sp++] = out;
+                pc = (uint32_t)((int32_t)(at + 8) + ret_off);
+                goto next;
+            }
+            stack[sp - 1] = out;
+            pc = (uint32_t)((int32_t)(at + 4) + done_off);
+            goto next;
+        }
+        case OP_GET_ITER: {
+            SYNC();
+            jv it = js_iterator_object(vm, stack[sp - 1]); RELOAD();
+            if (vm->throwing) break;
+            stack[sp - 1] = it;
+            goto next;
+        }
+        case OP_ITER_CLOSE: {
+            /* u8: 1 on an exception's way out, where an error the closing throws is lost */
+            uint32_t quiet = code[pc];
+            pc++;
+            jv it = stack[--sp];
+            if (jv_is_obj(it) && objs[jv_idx(it)].kind == JK_ITER && (objs[jv_idx(it)].c == JI_GEN || objs[jv_idx(it)].c == JI_PROTOCOL)) {
+                SYNC();
+                js_iter_close(vm, jv_idx(it)); RELOAD();
+                if (quiet && vm->throwing == 1) { vm->throwing = 0; vm->exception = JV_UNDEF; }
+            }
+            if (vm->throwing) break;
+            goto next;
+        }
+        case OP_DESTRUCT_ARR: {
+            uint32_t n = RD16(pc);
+            pc += 2;
+            jv v = stack[sp - 1];
+            if (jv_is_obj(v) && objs[jv_idx(v)].kind == JK_ARRAY) goto next;
+            SYNC();
+            jv r = js_iter_take(vm, v, n); RELOAD();
+            if (vm->throwing) break;
+            stack[sp - 1] = r;
+            goto next;
+        }
         case OP_NOP: goto next;
         /* every byte has its case (no default): the switch's jump has no range check */
         OP_UNUSED8(OP_NOPS) OP_UNUSED8(OP_NOPS + 8) OP_UNUSED8(OP_NOPS + 16) OP_UNUSED8(OP_NOPS + 24)
@@ -2495,6 +2944,39 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         if (vm->throwing) {
             RELOAD();
             uint32_t floor = frames[entry_frame].handlers;
+            {
+                /* the frames the exception leaves on its way to its handler (or out of
+                   this run): a generator's run is over; an async run's catches it, its
+                   promise rejected, the run returning the promise */
+                int has_h = vm->throwing == 1 && vm->nhandlers > floor;
+                int64_t lo = has_h ? (int64_t)vm->handlers[vm->nhandlers - 1].frame + 1 : (int64_t)entry_frame;
+                int64_t caught = -1;
+                for (int64_t f = fi; f >= lo && caught < 0; f--) {
+                    uint32_t g = frames[f].gen;
+                    if (!g) continue;
+                    if (objs[g].kind == JK_ASYNC && vm->throwing == 1) caught = f;
+                    objs[g].a = JG_DONE;
+                    objs[g].b = 0;
+                }
+                if (caught >= 0) {
+                    uint32_t af = (uint32_t)caught;
+                    uint32_t g = frames[af].gen, pr = objs[g].c;
+                    jv e = vm->exception;
+                    vm->throwing = 0;
+                    vm->exception = JV_UNDEF;
+                    vm->sp = frames[af].sp0;
+                    js_promise_settle(vm, pr, 1, e); RELOAD();
+                    vm->nhandlers = frames[af].handlers;
+                    vm->nframes = af;
+                    sp = frames[af].sp0;
+                    if (frames[af].flags & JFR_NATIVE_ENTRY) { vm->sp = sp; return jv_obj(pr); }
+                    stack[sp++] = jv_obj(pr);
+                    fi = af - 1;
+                    pc = frames[fi].pc;
+                    base = frames[fi].base;
+                    goto next;
+                }
+            }
             if (vm->throwing == 1 && vm->nhandlers > floor) {
                 js_handler h = vm->handlers[--vm->nhandlers];
                 vm->nframes = h.frame + 1;
@@ -2522,7 +3004,8 @@ static const char *const js_atom_names[A_NATOMS] = {
     "", "length", "prototype", "constructor", "toString", "valueOf", "name", "message", "stack", "callee",
     "get", "set", "value", "writable", "enumerable", "configurable", "undefined", "null", "true", "false",
     "object", "function", "number", "string", "boolean", "symbol", "", "default", "done", "next",
-    "then", "toJSON", "index", "input", "arguments", "cause", "lastIndex", "size" };
+    "then", "toJSON", "index", "input", "arguments", "cause", "lastIndex", "size",
+    "return", "throw", "description", "status", "reason", "fulfilled", "rejected", "errors", "bigint" };
 
 void js_init(js_vm *vm) {
     memset(vm, 0, sizeof *vm);
@@ -2543,6 +3026,13 @@ void js_setup(js_vm *vm) {
     for (int d = 0; d < 10; d++) {
         char b[2] = { (char)('0' + d), 0 };
         vm->digit_strs[d] = js_atom_ascii(vm, b);
+    }
+    static const char *const wk[JSYM_N] = { "", "Symbol.iterator", "Symbol.asyncIterator", "Symbol.hasInstance",
+        "Symbol.isConcatSpreadable", "Symbol.match", "Symbol.matchAll", "Symbol.replace", "Symbol.search", "Symbol.species",
+        "Symbol.split", "Symbol.toPrimitive", "Symbol.toStringTag", "Symbol.unscopables" };
+    for (uint32_t i = 0; i < JSYM_N; i++) {
+        js_sym y = { i ? js_str_ascii(vm, wk[i]) : 0, 0 };
+        push_back(vm->syms, y);
     }
     js_shape s0 = { 0, 0, 0, 0, 0, 0 };
     push_back(vm->shapes, s0);

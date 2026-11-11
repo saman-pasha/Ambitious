@@ -1,0 +1,46 @@
+sync
+f start 3
+end sync
+typeof function function [object Promise]
+then1 1
+micro
+f after 3
+caught bad
+catch r
+method
+rejected TypeError
+loop 1
+thenable then called
+thenable then called
+caught in try
+finally runs
+param rejected param
+executor executor
+settled once first
+f result 6
+g done
+settled [{"status":"rejected","reason":1},{"status":"fulfilled","value":2}]
+any any ok
+any err true 1
+finally
+arrow
+loop 2
+resolved from thenable
+awaited thenable from thenable
+reason passed 8
+finally threw replaced
+tf from catch
+this holder 2
+class 3
+passed through 7
+in order p1,p2,p3
+finally kept kept
+chain 3
+sum 55
+timeout
+order 1,3,2,4
+trace A1 B1 sync A2 B2 A3
+race fast
+late then early
+return await
+all 1,2,3

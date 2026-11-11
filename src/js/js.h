@@ -6,7 +6,9 @@
    VALUES are NaN-boxed 64-bit words. A double is itself (its NaNs canonical); above
    the doubles, the top 16 bits tag the rest: 0xFFF9 the specials (undefined, null,
    false, true, and the hole that marks an uninitialized binding or a missing array
-   element), 0xFFFA an object's index, 0xFFFB a string's index.
+   element), 0xFFFA an object's index, 0xFFFB a string's index, 0xFFFC a symbol's.
+   A property's key is an atom (a string's id) or a symbol's index with JS_SYM_KEY
+   set: one key space for the shapes, two for what keys are.
 
    STRINGS are UTF-16 code units in one append-only pool. A string is a span of it, or
    a rope of two strings, flattened when it is read; a substring shares its parent's
@@ -39,15 +41,21 @@ typedef uint64_t jv;
 #define JV_TDZ   0xFFF9000000000005ull      /* a global let or const not yet set */
 #define JV_OBJ_TAG 0xFFFA000000000000ull
 #define JV_STR_TAG 0xFFFB000000000000ull
+#define JV_SYM_TAG 0xFFFC000000000000ull
 #define JV_NAN   0x7FF8000000000000ull
 
 #define jv_is_num(v) ((v) < 0xFFF9000000000000ull)
 #define jv_is_obj(v) (((v) >> 48) == 0xFFFAu)
 #define jv_is_str(v) (((v) >> 48) == 0xFFFBu)
+#define jv_is_sym(v) (((v) >> 48) == 0xFFFCu)
 #define jv_is_bool(v) ((v) == JV_TRUE || (v) == JV_FALSE)
 #define jv_is_nullish(v) ((v) == JV_UNDEF || (v) == JV_NULL)
 #define jv_obj(i) (JV_OBJ_TAG | (uint64_t)(uint32_t)(i))
 #define jv_str(i) (JV_STR_TAG | (uint64_t)(uint32_t)(i))
+#define jv_sym(i) (JV_SYM_TAG | (uint64_t)(uint32_t)(i))
+/* a property key that is a symbol's: its index with this bit (an atom never has it) */
+#define JS_SYM_KEY 0x80000000u
+#define js_key_is_sym(k) (((k) & JS_SYM_KEY) != 0)
 #define jv_bool(b) ((b) ? JV_TRUE : JV_FALSE)
 #define jv_idx(v) ((uint32_t)(v))
 
@@ -68,10 +76,21 @@ static inline double jv_dbl(jv v) {
 
 enum {
     JK_PLAIN, JK_ARRAY, JK_CLOSURE, JK_NATIVE, JK_BOUND, JK_ERROR, JK_BOOLEAN, JK_NUMBER, JK_STRING, JK_ARGUMENTS,
-    JK_ENV, JK_ACCESSOR, JK_DATE, JK_REGEXP, JK_MAP, JK_SET, JK_HOST, JK_ITER
+    JK_ENV, JK_ACCESSOR, JK_DATE, JK_REGEXP, JK_MAP, JK_SET, JK_HOST, JK_ITER,
+    JK_SYMBOL,       /* a symbol's wrapper: the symbol in x */
+    JK_GENERATOR,    /* a generator: a its state (JG_*), b its saved frame (an array), x its function */
+    JK_ASYNC,        /* an async function's run: as a generator's, c its promise */
+    JK_PROMISE       /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
 };
-/* an iterator: a its source, b its place, c its mode */
-enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES };
+/* an iterator: a its source, b its place, c its mode; JI_PROTOCOL's source is an
+   iterator object whose next (kept in x) is called, JI_GEN's a generator resumed */
+enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES, JI_PROTOCOL, JI_GEN };
+/* a generator's (an async run's) state */
+enum { JG_START, JG_YIELD, JG_RUNNING, JG_DONE };
+/* a promise's state, and its flags: handled (a reaction was added), reported */
+enum { JP_PENDING, JP_FULFILLED, JP_REJECTED };
+#define JPF_HANDLED 1u
+#define JPF_REPORTED 2u
 
 /* an object. a, b, c, x are its kind's: an array's elements (slot offset, length,
    capacity); a closure's function, environment and home object, with its captured
@@ -118,6 +137,8 @@ typedef struct js_func {
 #define JF_STRICT 32
 #define JF_HAS_REST 64
 #define JF_GETTER 128
+#define JF_GENERATOR 256
+#define JF_ASYNC 512
 
 /* a property access's cache: the receiver's shape, the holder (0: the receiver
    itself), the holder's shape, the slot */
@@ -128,6 +149,7 @@ typedef struct js_frame {
     jv thisv, newt;
     uint32_t args;                    /* the arguments object, made at its first use */
     uint32_t handlers;                /* the handler stack's height at entry */
+    uint32_t gen;                     /* a generator's or an async run's object, 0 for a plain frame */
 } js_frame;
 #define JFR_CONSTRUCT 1               /* a [[Construct]]: the result is this unless an object is returned */
 #define JFR_NATIVE_ENTRY 2            /* a native's call: return to C when it returns */
@@ -137,6 +159,22 @@ typedef struct js_handler { uint32_t frame, pc, sp, env; } js_handler;
 /* a timer, in virtual time */
 /* run: the script that set it (vm->cur_run then), rec its record (src/script/script.c) */
 typedef struct js_timer { uint32_t id; double due, interval; jv fn; uint32_t args, nargs, live, seq, run, rec, fired; } js_timer;
+
+/* a symbol: its description (a string, 0 for none); reg, its key in Symbol.for's registry plus one */
+typedef struct js_sym { uint32_t desc, reg; } js_sym;
+/* the well-known symbols, made first, in this order */
+enum { JSYM_NONE, JSYM_ITERATOR, JSYM_ASYNC_ITERATOR, JSYM_HAS_INSTANCE, JSYM_IS_CONCAT_SPREADABLE, JSYM_MATCH, JSYM_MATCH_ALL,
+       JSYM_REPLACE, JSYM_SEARCH, JSYM_SPECIES, JSYM_SPLIT, JSYM_TO_PRIMITIVE, JSYM_TO_STRING_TAG, JSYM_UNSCOPABLES, JSYM_N };
+#define JS_KEY_ITERATOR (JS_SYM_KEY | JSYM_ITERATOR)
+#define JS_KEY_ASYNC_ITERATOR (JS_SYM_KEY | JSYM_ASYNC_ITERATOR)
+
+/* a microtask: a promise's reaction (fn the handler or undefined, arg the value, target
+   the derived promise, mode 0 fulfilled 1 rejected); an async run resumed (target the
+   run, arg the value, mode); a thenable's then called (target the promise, arg the
+   thenable, fn its then); a queued function (fn). run: the page's script that queued
+   it (vm->cur_run then), whose code the job's is */
+typedef struct js_job { uint32_t kind, mode, run; jv fn, arg, target; } js_job;
+enum { JOB_REACTION, JOB_RESUME, JOB_THENABLE, JOB_CALL };
 
 /* a console message, a script's error, an event listener: what the page's facts say */
 typedef struct js_msg { uint32_t level, text; } js_msg;
@@ -180,12 +218,19 @@ typedef struct js_vm {
     vector<js_timer> timers;
     vector<js_msg> msgs;
     vector<js_listener> listeners;
+    vector<js_sym> syms;              /* the symbols: index 0 none, then the well-known ones */
+    vector<js_job> jobs;              /* the microtasks, run in order from jobs_head */
+    vector<uint32_t> rejected;        /* the promises rejected with no handler yet, each with its run (pairs), checked at each checkpoint */
+    uint32_t in_jobs;                 /* a checkpoint running: another waits for it */
+    uint32_t has_instance;            /* a Symbol.hasInstance key was ever given a property: instanceof looks for it */
     vector<uint32_t> lookup;          /* a (shape, atom) -> slot cache for the slow path */
     vector<char> out;                 /* scratch text: what a native writes */
     uint32_t global, global_lex;      /* the global object; the global lexical bindings */
     uint32_t object_proto, function_proto, array_proto, string_proto, number_proto, boolean_proto, error_proto;
     uint32_t type_error_proto, range_error_proto, syntax_error_proto, reference_error_proto, date_proto, regexp_proto;
     uint32_t map_proto, set_proto, iterator_proto;
+    uint32_t symbol_proto, generator_proto, promise_proto, promise_ctor, aggregate_error_proto;
+    uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t host_protos[16];         /* the host's prototypes, by its kinds (src/script/script.c) */
     jv exception;                     /* the thrown value, while one is in flight */
@@ -215,7 +260,8 @@ typedef struct js_vm {
     vector_js_ic_drop(&(v).ics); vector_uint64_t_drop(&(v).stack); vector_js_frame_drop(&(v).frames); \
     vector_js_handler_drop(&(v).handlers); vector_js_timer_drop(&(v).timers); vector_js_msg_drop(&(v).msgs); \
     vector_js_listener_drop(&(v).listeners); vector_uint32_t_drop(&(v).lookup); vector_char_drop(&(v).out); \
-    vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms)
+    vector_uint32_t_drop(&(v).wrappers); vector_uint32_t_drop(&(v).hatoms); vector_js_sym_drop(&(v).syms); \
+    vector_js_job_drop(&(v).jobs); vector_uint32_t_drop(&(v).rejected)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -223,6 +269,7 @@ enum {
     A_GET, A_SET, A_VALUE, A_WRITABLE, A_ENUMERABLE, A_CONFIGURABLE, A_UNDEFINED, A_NULL, A_TRUE, A_FALSE,
     A_OBJECT, A_FUNCTION, A_NUMBER, A_STRING, A_BOOLEAN, A_SYMBOL, A_EMPTY, A_DEFAULT, A_DONE, A_NEXT,
     A_THEN, A_TOJSON, A_INDEX, A_INPUT, A_ARGUMENTS, A_CAUSE, A_LASTINDEX, A_SIZE,
+    A_RETURN, A_THROW, A_DESCRIPTION, A_STATUS, A_REASON, A_FULFILLED, A_REJECTED, A_ERRORS, A_BIGINT,
     A_NATOMS
 };
 
@@ -240,6 +287,38 @@ int js_eval(js_vm *vm, const char *src, size_t n, const char *name, uint32_t scr
 jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc);
 jv js_construct(js_vm *vm, jv fn, const jv *argv, uint32_t argc, jv newt);
 jv js_arg(js_vm *vm, uint32_t args, uint32_t argc, uint32_t i);
+
+/* symbols: a new one of a description (a string, 0 for none); a key's printable name */
+uint32_t js_sym_new(js_vm *vm, uint32_t desc);
+uint32_t js_key_name(js_vm *vm, uint32_t key);       /* a string: the atom, or "Symbol(desc)" */
+uint32_t js_sym_text(js_vm *vm, uint32_t sym);       /* "Symbol(desc)" */
+/* a value as a property key: an atom or a symbol's key; 0 when its conversion threw */
+uint32_t js_prop_key(js_vm *vm, jv v, int *ok);
+void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr);   /* the own symbol keys, pushed as symbols */
+
+/* generators and async runs (src/js/vm.c): one resumed with a value, as next (mode 0),
+   throw (1) or return (2): what it yields or returns, *done set when it returned */
+jv js_gen_resume(js_vm *vm, uint32_t g, jv value, int mode, int *done);
+/* an iterable's iterator (for-of's), and its next value: 0 when done */
+jv js_iter_of(js_vm *vm, jv v);
+int js_iter_step(js_vm *vm, uint32_t it, jv *out);
+void js_iter_close(js_vm *vm, uint32_t it);
+
+/* promises (src/js/builtins.c): a new pending one; one settled; resolved (a thenable
+   followed); a promise for any value; a reaction added (an async run's when target
+   is one); the microtasks run until none is left: a checkpoint, which the host makes
+   after each script, listener and timer, and which does nothing while script code is
+   on the stack (a listener a script's click() ran) or a checkpoint is running. A
+   rejection no handler took by the checkpoint's end is reported then, once */
+uint32_t js_promise_new(js_vm *vm);
+void js_promise_settle(js_vm *vm, uint32_t p, int rejected, jv v);
+void js_promise_resolve_with(js_vm *vm, uint32_t p, jv v);
+uint32_t js_promise_of(js_vm *vm, jv v);
+void js_promise_react(js_vm *vm, uint32_t p, jv on_ok, jv on_err, jv target, int resume);
+void js_job_push(js_vm *vm, uint32_t kind, uint32_t mode, jv fn, jv arg, jv target);
+void js_run_jobs(js_vm *vm);
+/* the phase an error a microtask threw is reported in (the script module's promise phase) */
+#define JS_PHASE_PROMISE 3u
 
 /* strings */
 uint32_t js_str_new(js_vm *vm, const uint16_t *u, size_t n);
@@ -310,6 +389,9 @@ void js_builtins_init(js_vm *vm);
 
 /* the console and the host's hooks (src/script/script.c) */
 void js_console(js_vm *vm, uint32_t level, uint32_t text);
+/* an error no code caught, thrown by the code of vm->cur_run in the phase given (a
+   microtask's: JS_PHASE_PROMISE): the page's record, or stderr with no page */
+void js_report_error(js_vm *vm, jv e, uint32_t phase);
 jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled);
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
 jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
@@ -408,6 +490,20 @@ enum {
     OP_ADD_LI, OP_SUB_LI, OP_MUL_LI, OP_MOD_LI,
     OP_ADD_LL, OP_SUB_LL, OP_MUL_LL,
     OP_RETURN_LOC,
+    /* generators and async functions: a frame suspended into its object and resumed */
+    OP_GEN_START,                                 /* a generator's prologue done: its object made and returned, the body run at next() */
+    OP_ASYNC_START,                               /* an async function's start: its run and its promise made */
+    OP_YIELD,                                     /* v -> suspended; resumed: received mode */
+    OP_AWAIT,                                     /* v -> suspended until v settles; resumed: value mode */
+    OP_GEN_RESUME,                                /* i32, u16 n: value mode -> value (mode 0), thrown (1), or (2) the stack cut to
+                                                     the slots and n iterators, value pushed, and the return path at i32 */
+    OP_YIELD_STAR,                                /* i32 done, i32 return, u16 n: it received mode -> it v (yield v), or r
+                                                     (done: jump; a return: GEN_RESUME's cut, then jump) */
+    OP_GET_ITER,                                  /* v -> its iterator object (yield*'s) */
+    OP_ITER_CLOSE,                                /* u8 quiet: iter -> : a for-of's iterator closed on an early exit (its
+                                                     return called; quiet: an error that throws is lost) */
+    OP_DESTRUCT_ARR,                              /* u16 n: v -> an array pattern's array: v if an array, else the
+                                                     first n values its iterator gives (0xFFFF: all), it closed */
     OP_NOP,
     OP_NOPS
 };

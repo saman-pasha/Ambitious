@@ -6,9 +6,10 @@
    The language: ES2020's statements and expressions, with classes (fields, accessors,
    static members, super), destructuring, spread and rest, default parameters, template
    literals, optional chaining and nullish coalescing, getters and setters, labels,
-   for-in and for-of. Not read: generators, async functions and await, modules, with,
-   BigInt and regular expressions' semantics (a literal makes a RegExp
-   object whose methods throw), and direct eval. Each is a SyntaxError that names it. */
+   for-in and for-of, generators (yield and yield*) and async functions (await), as
+   functions, arrows and methods. Not read: async generators and for await, modules,
+   with, BigInt and regular expressions' semantics (a literal makes a RegExp object
+   whose methods throw), and direct eval. Each is a SyntaxError that names it. */
 #include <stdlib.h>
 #include <math.h>
 #include "js.h"
@@ -50,7 +51,9 @@ enum {
     N_SEQ, N_MEMBER, N_CALL, N_NEW, N_SPREAD, N_HOLE, N_CHAIN, N_PATTERN_OBJ, N_PATTERN_ARR, N_PELEM,
     N_PARAM,
     N_VAR, N_DECL, N_EXPR, N_BLOCK, N_IF, N_FOR, N_FORIN, N_WHILE, N_DO, N_RETURN, N_BREAK, N_CONTINUE,
-    N_THROW, N_TRY, N_SWITCH, N_CASE, N_LABEL, N_EMPTY, N_FUNCDECL, N_CLASSDECL
+    N_THROW, N_TRY, N_SWITCH, N_CASE, N_LABEL, N_EMPTY, N_FUNCDECL, N_CLASSDECL,
+    N_YIELD,           /* a its operand (0: none), op 1 for yield* */
+    N_AWAIT            /* a its operand */
 };
 /* N_PROP's kinds */
 enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
@@ -70,12 +73,15 @@ typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
 #define FN_EXPR 0x10000            /* a concise arrow's body: an expression */
 #define FN_FIELDS 0x20000          /* a class's field initializer */
 #define FN_DEFAULT_CTOR 0x40000    /* a class's constructor, not written */
+#define FN_PARAMS 0x80000          /* its parameters being read: no yield or await there */
 typedef struct jfn {
     uint32_t params, nparams, body, scope, flags, name, line, src_start, src_end, parent, id, nslots, cls, args_decl, nformal;
 } jfn;
 typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields; } jclass;
 
-/* the code generator's open contexts, innermost last */
+/* the code generator's open contexts, innermost last. A loop's label is 1 when its
+   iterator is on the stack (for-in), 2 for a for-of's, whose CX_ITER is just below it:
+   the handler that closes the iterator when an exception leaves the loop */
 enum { CX_ENV, CX_TRY, CX_FINALLY, CX_ITER, CX_LOOP, CX_SWITCH, CX_LABEL };
 typedef struct jctx { uint32_t kind, node, label, brk, cont, cont_pc, has_cont; } jctx;
 
@@ -565,6 +571,7 @@ static uint32_t p_prop_key(CC, int *computed) {
 /* the parameters of a function, its scope current */
 static void p_params(CC, uint32_t fi) {
     expect_p(CCA, P_LPAREN, "'(' before the parameters");
+    cc->fns[fi].flags |= FN_PARAMS;
     size_t mark = len(cc->tmp);
     uint32_t formal = 0;
     int counting = 1;
@@ -587,8 +594,20 @@ static void p_params(CC, uint32_t fi) {
         if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between parameters");
     }
     expect_p(CCA, P_RPAREN, "')' after the parameters");
+    cc->fns[fi].flags &= ~(uint32_t)FN_PARAMS;
     list_take(cc, mark, &cc->fns[fi].params, &cc->fns[fi].nparams);
     cc->fns[fi].nformal = formal;
+}
+
+/* the function being read is a generator (yield an operator in it) or async (await
+   one); 2 while its parameters are read, where neither may stand */
+static int in_generator(js_cc *cc) {
+    uint32_t f = cc->fns[cc->cur_fn].flags;
+    return !(f & JF_GENERATOR) ? 0 : (f & FN_PARAMS) ? 2 : 1;
+}
+static int in_async(js_cc *cc) {
+    uint32_t f = cc->fns[cc->cur_fn].flags;
+    return !(f & JF_ASYNC) ? 0 : (f & FN_PARAMS) ? 2 : 1;
 }
 
 /* statements to a closing brace (not taken): a list */
@@ -689,6 +708,41 @@ static uint32_t p_arrow_body(CC, uint32_t fi, uint32_t line) {
     uint32_t n = node(cc, N_FUNC, line);
     cc->nodes[n].a = fi;
     return n;
+}
+
+/* an arrow of parameters in parentheses (the current token their '('), flags its
+   JF_ASYNC or none */
+static uint32_t p_paren_arrow(CC, uint32_t flags, uint32_t line, uint32_t start) {
+    uint32_t fi = fn_new(cc, 0, JF_ARROW | flags, line, start);
+    uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+    cc->cur_fn = fi;
+    uint32_t fs = scope_new(cc, SC_FUNC);
+    cc->cur_scope = fs;
+    cc->fns[fi].scope = fs;
+    p_params(CCA, fi);
+    cc->cur_fn = saved_fn;
+    cc->cur_scope = saved_scope;
+    return p_arrow_body(CCA, fi, line);
+}
+/* an arrow of one parameter, its name a (the current token the '=>') */
+static uint32_t p_name_arrow(CC, uint32_t a, uint32_t flags, uint32_t line, uint32_t start) {
+    uint32_t fi = fn_new(cc, 0, JF_ARROW | flags, line, start);
+    uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+    cc->cur_fn = fi;
+    uint32_t fs = scope_new(cc, SC_FUNC);
+    cc->cur_scope = fs;
+    cc->fns[fi].scope = fs;
+    uint32_t d = declare(CCA, a, D_PARAM, line);
+    cc->decls[d].param = 1;
+    uint32_t p = node(cc, N_PARAM, line);
+    cc->nodes[p].a = ident_node(CCA, a, line);
+    size_t mark = len(cc->tmp);
+    push_back(cc->tmp, p);
+    list_take(cc, mark, &cc->fns[fi].params, &cc->fns[fi].nparams);
+    cc->fns[fi].nformal = 1;
+    cc->cur_fn = saved_fn;
+    cc->cur_scope = saved_scope;
+    return p_arrow_body(CCA, fi, line);
 }
 
 /* does the parenthesis at the current token close before an arrow? (read ahead, then
@@ -804,10 +858,17 @@ static uint32_t p_object(CC) {
                 if (!is_p(cc, P_LPAREN) && !is_p(cc, P_COMMA) && !is_p(cc, P_COLON) && !is_p(cc, P_RBRACE) && !is_p(cc, P_ASSIGN)) kind = which;
                 else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
             }
-            if (is_kw(cc, K_ASYNC) || is_p(cc, P_STAR)) {
-                jtok t0 = cc->tok;
-                if (is_p(cc, P_STAR)) { cc_error(cc, line, "generator methods are not supported"); break; }
-                (void)t0;
+            /* *m() a generator method; async m() an async one (async alone a key) */
+            uint32_t mfl = 0;
+            if (kind == PK_INIT && is_p(cc, P_STAR)) { lx(CCA); mfl = JF_GENERATOR; }
+            else if (kind == PK_INIT && is_kw(cc, K_ASYNC)) {
+                jtok t0 = cc->tok, p0 = cc->prev;
+                uint32_t pos0 = cc->pos, line0 = cc->line;
+                lx(CCA);
+                if (!cc->tok.nl && !is_p(cc, P_LPAREN) && !is_p(cc, P_COMMA) && !is_p(cc, P_COLON) && !is_p(cc, P_RBRACE) && !is_p(cc, P_ASSIGN)) {
+                    if (is_p(cc, P_STAR)) { cc_error(cc, line, "async generator methods are not supported"); break; }
+                    mfl = JF_ASYNC;
+                } else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
             }
             int computed;
             int shorthand_ok = cc->tok.type == T_NAME;
@@ -820,13 +881,13 @@ static uint32_t p_object(CC) {
                 cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | (kind == PK_GET ? JF_GETTER : 0), 0, line, start);
             } else if (is_p(cc, P_LPAREN)) {
                 cc->nodes[p].op = PK_METHOD;
-                cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD, 0, line, start);
+                cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | mfl, 0, line, start);
+            } else if (mfl) { cc_error(cc, line, "expected '(' after a generator's or an async method's name"); break;
             } else if (is_p(cc, P_COLON)) {
                 lx(CCA);
                 cc->nodes[p].op = PK_INIT;
                 cc->nodes[p].b = p_assign(CCA, 0);
             } else if (shorthand_ok && !computed) {
-                if (atom_tok == cc->kw[K_ASYNC] && cc->tok.type == T_NAME) { cc_error(cc, line, "async methods are not supported"); break; }
                 cc->nodes[p].op = PK_INIT;
                 uint32_t id = ident_node(CCA, atom_tok, line);
                 if (is_p(cc, P_ASSIGN)) {
@@ -1001,18 +1062,7 @@ static uint32_t p_primary(CC) {
         return n;
     }
     if (t.type == T_PUNCT && t.op == P_LPAREN) {
-        if (p_is_arrow(CCA)) {
-            uint32_t fi = fn_new(cc, 0, JF_ARROW, line, start);
-            uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
-            cc->cur_fn = fi;
-            uint32_t fs = scope_new(cc, SC_FUNC);
-            cc->cur_scope = fs;
-            cc->fns[fi].scope = fs;
-            p_params(CCA, fi);
-            cc->cur_fn = saved_fn;
-            cc->cur_scope = saved_scope;
-            return p_arrow_body(CCA, fi, line);
-        }
+        if (p_is_arrow(CCA)) return p_paren_arrow(CCA, 0, line, start);
         lx(CCA);
         uint32_t e = p_expr(CCA, 0);
         expect_p(CCA, P_RPAREN, "')'");
@@ -1028,19 +1078,32 @@ static uint32_t p_primary(CC) {
             if (a == cc->kw[K_TRUE] || a == cc->kw[K_FALSE]) { lx(CCA); uint32_t n = node(cc, N_NUM, line); cc->nodes[n].op = a == cc->kw[K_TRUE] ? 2 : 3; return n; }
             if (a == cc->kw[K_FUNCTION]) {
                 lx(CCA);
-                if (is_p(cc, P_STAR)) { cc_error(cc, line, "generator functions are not supported"); return node(cc, N_HOLE, line); }
+                uint32_t fl = 0;
+                if (is_p(cc, P_STAR)) { lx(CCA); fl = JF_GENERATOR; }
                 uint32_t name = 0;
                 if (cc->tok.type == T_NAME) { name = cc->tok.str; lx(CCA); }
-                return p_function(CCA, name, 0, 0, line, start);
+                return p_function(CCA, name, fl, 0, line, start);
             }
             if (a == cc->kw[K_CLASS]) return p_class(CCA, 0);
             if (a == cc->kw[K_ASYNC]) {
+                /* async function, async (..) =>, async x =>; else async is a name */
                 jtok t0 = cc->tok, p0 = cc->prev;
                 uint32_t pos0 = cc->pos, line0 = cc->line;
                 lx(CCA);
-                int async_fn = !cc->tok.nl && (is_kw(cc, K_FUNCTION) || is_p(cc, P_LPAREN) || cc->tok.type == T_NAME);
+                if (!cc->tok.nl && is_kw(cc, K_FUNCTION)) {
+                    lx(CCA);
+                    if (is_p(cc, P_STAR)) { cc_error(cc, line, "async generators are not supported"); return node(cc, N_HOLE, line); }
+                    uint32_t name = 0;
+                    if (cc->tok.type == T_NAME) { name = cc->tok.str; lx(CCA); }
+                    return p_function(CCA, name, JF_ASYNC, 0, line, start);
+                }
+                if (!cc->tok.nl && is_p(cc, P_LPAREN) && p_is_arrow(CCA)) return p_paren_arrow(CCA, JF_ASYNC, line, start);
+                if (!cc->tok.nl && cc->tok.type == T_NAME && !cc->tok.aux) {
+                    uint32_t pa = cc->tok.str;
+                    lx(CCA);
+                    if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, pa, JF_ASYNC, line, start);
+                }
                 cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
-                if (async_fn) { cc_error(cc, line, "async functions are not supported"); lx(CCA); return node(cc, N_HOLE, line); }
             }
             if (a == cc->kw[K_SUPER]) {
                 lx(CCA);
@@ -1093,31 +1156,13 @@ static uint32_t p_primary(CC) {
                 if (is_p(cc, P_LPAREN)) p_args(CCA, n);
                 return n;
             }
-            if (a == cc->kw[K_YIELD] || a == cc->kw[K_AWAIT]) {
-                /* names, outside generators and async functions */
-            }
+            /* yield and await: names outside generators and async functions; in one,
+               an operator only where an assignment (a unary for await) may stand */
+            if (a == cc->kw[K_YIELD] && in_generator(cc)) { cc_error(cc, line, "a yield stands where only an assignment's whole expression may (put it in parentheses)"); lx(CCA); return node(cc, N_HOLE, line); }
             if (a == cc->kw[K_IMPORT]) { cc_error(cc, line, "modules (import) are not supported"); lx(CCA); return node(cc, N_HOLE, line); }
         }
         lx(CCA);
-        if (is_p(cc, P_ARROW) && !cc->tok.nl) {
-            uint32_t fi = fn_new(cc, 0, JF_ARROW, line, start);
-            uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
-            cc->cur_fn = fi;
-            uint32_t fs = scope_new(cc, SC_FUNC);
-            cc->cur_scope = fs;
-            cc->fns[fi].scope = fs;
-            uint32_t d = declare(CCA, a, D_PARAM, line);
-            cc->decls[d].param = 1;
-            uint32_t p = node(cc, N_PARAM, line);
-            cc->nodes[p].a = ident_node(CCA, a, line);
-            size_t mark = len(cc->tmp);
-            push_back(cc->tmp, p);
-            list_take(cc, mark, &cc->fns[fi].params, &cc->fns[fi].nparams);
-            cc->fns[fi].nformal = 1;
-            cc->cur_fn = saved_fn;
-            cc->cur_scope = saved_scope;
-            return p_arrow_body(CCA, fi, line);
-        }
+        if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, a, 0, line, start);
         return ident_node(CCA, a, line);
     }
     if (t.type == T_EOF) cc_error(cc, line, "the script ends in the middle of an expression");
@@ -1234,8 +1279,13 @@ static uint32_t p_unary_in(CC) {
         cc->nodes[n].a = p_unary(CCA);
         return n;
     }
-    if (is_kw(cc, K_AWAIT) && cc->in_class == 0) {
-        /* await outside an async function is a name */
+    if (is_kw(cc, K_AWAIT) && in_async(cc)) {
+        /* await in an async function (outside one, a name) */
+        if (in_async(cc) == 2) { cc_error(cc, line, "await in an async function's parameters"); return node(cc, N_HOLE, line); }
+        lx(CCA);
+        uint32_t n = node(cc, N_AWAIT, line);
+        cc->nodes[n].a = p_unary(CCA);
+        return n;
     }
     uint32_t e = p_postfix(CCA);
     if (is_p(cc, P_POW)) {
@@ -1343,8 +1393,25 @@ static uint32_t p_stmt(CC) {
     return r;
 }
 
+/* a yield's operand left out: what follows cannot begin one */
+static int yield_bare(js_cc *cc) {
+    if (cc->tok.nl || cc->tok.type == T_EOF) return 1;
+    if (cc->tok.type == T_NAME) return !cc->tok.aux && (cc->tok.str == cc->kw[K_IN] || cc->tok.str == cc->kw[K_OF]);
+    if (cc->tok.type != T_PUNCT) return 0;
+    uint32_t op = cc->tok.op;
+    return op == P_RPAREN || op == P_RBRACK || op == P_RBRACE || op == P_COMMA || op == P_SEMI || op == P_COLON || op == P_QUESTION;
+}
+
 static uint32_t p_assign_in(CC, int no_in) {
-    if (is_kw(cc, K_YIELD) && cc->in_class) { /* yield in a generator: none are read */ }
+    if (is_kw(cc, K_YIELD) && in_generator(cc)) {
+        uint32_t line = cc->tok.line;
+        if (in_generator(cc) == 2) { cc_error(cc, line, "yield in a generator's parameters"); return node(cc, N_HOLE, line); }
+        lx(CCA);
+        uint32_t n = node(cc, N_YIELD, line);
+        if (!cc->tok.nl && is_p(cc, P_STAR)) { lx(CCA); cc->nodes[n].op = 1; cc->nodes[n].a = p_assign(CCA, no_in); }
+        else if (!yield_bare(cc)) cc->nodes[n].a = p_assign(CCA, no_in);
+        return n;
+    }
     uint32_t left = p_cond(CCA, no_in);
     if (cc->tok.type == T_PUNCT && is_assign_op(cc->tok.op)) {
         uint32_t op = cc->tok.op, line = cc->tok.line;
@@ -1417,21 +1484,27 @@ static uint32_t p_class(CC, int is_decl) {
             if (!is_p(cc, P_LPAREN) && !is_p(cc, P_ASSIGN) && !is_p(cc, P_SEMI) && !is_p(cc, P_RBRACE)) kind = which;
             else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
         }
-        if (is_kw(cc, K_ASYNC) || is_p(cc, P_STAR)) {
+        /* *m() a generator method; async m() an async one (async alone a member's name) */
+        uint32_t mfl = 0;
+        if (kind == PK_METHOD && is_p(cc, P_STAR)) { lx(CCA); mfl = JF_GENERATOR; }
+        else if (kind == PK_METHOD && is_kw(cc, K_ASYNC)) {
             jtok t0 = cc->tok, p0 = cc->prev;
             uint32_t pos0 = cc->pos, line0 = cc->line;
-            int star = is_p(cc, P_STAR);
             lx(CCA);
-            if (star || (!is_p(cc, P_LPAREN) && !is_p(cc, P_ASSIGN) && !cc->tok.nl)) { cc_error(cc, mline, "async and generator methods are not supported"); break; }
-            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+            if (!cc->tok.nl && !is_p(cc, P_LPAREN) && !is_p(cc, P_ASSIGN) && !is_p(cc, P_SEMI) && !is_p(cc, P_RBRACE)) {
+                if (is_p(cc, P_STAR)) { cc_error(cc, mline, "async generator methods are not supported"); break; }
+                mfl = JF_ASYNC;
+            } else { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
         }
         int computed;
         uint32_t key = p_prop_key(CCA, &computed);
         cc->nodes[p].a = key;
         cc->nodes[p].d = flags | (computed ? NF_COMPUTED : 0);
+        if (mfl && !is_p(cc, P_LPAREN)) { cc_error(cc, mline, "expected '(' after a generator's or an async method's name"); break; }
         if (is_p(cc, P_LPAREN)) {
             int ctor = !computed && !(flags & NF_STATIC) && kind == PK_METHOD && cc->nodes[key].s == cc->kw[K_CONSTRUCTOR];
-            uint32_t ff = JF_METHOD | JF_STRICT | (kind == PK_GET ? JF_GETTER : 0);
+            uint32_t ff = JF_METHOD | JF_STRICT | (kind == PK_GET ? JF_GETTER : 0) | mfl;
+            if (ctor && mfl) { cc_error(cc, mline, "a class's constructor cannot be a generator or async"); break; }
             if (ctor) ff = JF_CLASS_CTOR | JF_STRICT | (cc->classes[ci].extends ? JF_DERIVED : 0);
             uint32_t f = p_function(CCA, computed ? 0 : cc->nodes[key].s, ff, 0, mline, mstart);
             if (ctor) { cc->classes[ci].ctor = cc->nodes[f].a; cc->fns[cc->nodes[f].a].name = name; cc->fns[cc->nodes[f].a].cls = ci + 1; continue; }
@@ -1521,6 +1594,24 @@ static uint32_t p_block(CC) {
     return n;
 }
 
+/* a function declaration, its function keyword read (and async before it: flags) */
+static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start) {
+    if (is_p(cc, P_STAR)) {
+        if (flags & JF_ASYNC) { cc_error(cc, line, "async generators are not supported"); return node(cc, N_EMPTY, line); }
+        lx(CCA);
+        flags |= JF_GENERATOR;
+    }
+    if (cc->tok.type != T_NAME) { cc_error(cc, line, "a function declaration needs a name"); return node(cc, N_EMPTY, line); }
+    uint32_t name = cc->tok.str;
+    lx(CCA);
+    uint32_t d = declare(CCA, name, D_FUNC, line);
+    uint32_t f = p_function(CCA, name, flags, 1, line, start);
+    cc->decls[d].init = cc->nodes[f].a + 1;
+    uint32_t n = node(cc, N_FUNCDECL, line);
+    cc->nodes[n].a = cc->nodes[f].a;
+    return n;
+}
+
 static int is_decl_start(js_cc *cc) {
     return is_kw(cc, K_VAR) || is_kw(cc, K_CONST) || is_kw(cc, K_LET);
 }
@@ -1538,18 +1629,13 @@ static uint32_t p_stmt_in(CC) {
             semi(CCA);
             return n;
         }
-        if (a == cc->kw[K_FUNCTION]) {
+        if (a == cc->kw[K_FUNCTION]) { lx(CCA); return p_func_decl(CCA, 0, line, start); }
+        if (a == cc->kw[K_ASYNC]) {
+            jtok t0 = cc->tok, p0 = cc->prev;
+            uint32_t pos0 = cc->pos, line0 = cc->line;
             lx(CCA);
-            if (is_p(cc, P_STAR)) { cc_error(cc, line, "generator functions are not supported"); return node(cc, N_EMPTY, line); }
-            if (cc->tok.type != T_NAME) { cc_error(cc, line, "a function declaration needs a name"); return node(cc, N_EMPTY, line); }
-            uint32_t name = cc->tok.str;
-            lx(CCA);
-            uint32_t d = declare(CCA, name, D_FUNC, line);
-            uint32_t f = p_function(CCA, name, 0, 1, line, start);
-            cc->decls[d].init = cc->nodes[f].a + 1;
-            uint32_t n = node(cc, N_FUNCDECL, line);
-            cc->nodes[n].a = cc->nodes[f].a;
-            return n;
+            if (!cc->tok.nl && is_kw(cc, K_FUNCTION)) { lx(CCA); return p_func_decl(CCA, JF_ASYNC, line, start); }
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
         }
         if (a == cc->kw[K_CLASS]) return p_class(CCA, 1);
         if (a == cc->kw[K_IF]) {
@@ -1913,13 +1999,22 @@ static void gen_block_leave(CC, uint32_t sc) {
     }
 }
 
+/* a context of this kind below index i (a return's way out passes it) */
+static int ctx_below(js_cc *cc, size_t i, uint32_t kind) {
+    for (size_t j = 0; j < i; j++) if (cc->ctx[j].kind == kind) return 1;
+    return 0;
+}
+
 /* the code that leaves the contexts above depth: environments left, try handlers
-   dropped, finally blocks run, for-of iterators popped (break) */
+   dropped, finally blocks run, iterators popped and a for-of's closed. A return leaves
+   only what what runs on its way out needs: an environment for a finally block below
+   it, a for-in's iterator for a for-of's below (its RETURN drops the frame) */
 static void unwind_to(CC, size_t depth, int for_return) {
     for (size_t i = len(cc->ctx); i > depth; i--) {
         jctx c = cc->ctx[i - 1];
-        if (c.kind == CX_ENV && !for_return) emit(vm, OP_LEAVE_ENV);
-        else if (c.kind == CX_LOOP && c.label && !for_return) emit(vm, OP_POP);   /* label holds 1 for a loop with its iterator on the stack */
+        if (c.kind == CX_ENV && (!for_return || ctx_below(cc, i - 1, CX_FINALLY))) emit(vm, OP_LEAVE_ENV);
+        else if (c.kind == CX_LOOP && c.label == 1 && (!for_return || ctx_below(cc, i - 1, CX_ITER))) emit(vm, OP_POP);
+        else if (c.kind == CX_ITER) { emit(vm, OP_END_TRY); emit(vm, OP_ITER_CLOSE); emit(vm, 0); }
         else if (c.kind == CX_TRY) emit(vm, OP_END_TRY);
         else if (c.kind == CX_FINALLY) {
             emit(vm, OP_END_TRY);
@@ -1933,9 +2028,31 @@ static void unwind_to(CC, size_t depth, int for_return) {
     }
 }
 
+/* a return here has a way out to run: a finally block, a for-of's iterator to close */
 static int has_finally(js_cc *cc) {
-    for (size_t i = 0; i < len(cc->ctx); i++) if (cc->ctx[i].kind == CX_FINALLY) return 1;
+    for (size_t i = 0; i < len(cc->ctx); i++) if (cc->ctx[i].kind == CX_FINALLY || cc->ctx[i].kind == CX_ITER) return 1;
     return 0;
+}
+
+/* the loops' iterators on the stack here, above the frame's slots: a statement's
+   stack, which a generator resumed to return is cut back to */
+static uint32_t stack_iters(js_cc *cc) {
+    uint32_t n = 0;
+    for (size_t i = 0; i < len(cc->ctx); i++) if (cc->ctx[i].kind == CX_LOOP && cc->ctx[i].label) n++;
+    return n;
+}
+
+/* the value on top returned, at a statement's stack: the way out run first */
+static void gen_return_top(CC) {
+    if (has_finally(cc)) {
+        uint32_t tmp = new_slot(cc);
+        emit(vm, OP_PUT_LOC);
+        emit16(vm, tmp);
+        unwind_to(CCA, 0, 1);
+        emit(vm, OP_GET_LOC);
+        emit16(vm, tmp);
+    }
+    emit(vm, OP_RETURN);
 }
 
 static uint32_t binop_of(uint32_t p) {
@@ -2204,6 +2321,11 @@ static void gen_pattern(CC, uint32_t p, int init) {
         return;
     }
     if (t.k == N_PATTERN_ARR) {
+        /* any iterable read as the array of its values the pattern takes */
+        int rest = 0;
+        for (uint32_t i = 0; i < t.b; i++) if (cc->nodes[cc->lists[t.a + i]].op & NF_REST) rest = 1;
+        emit(vm, OP_DESTRUCT_ARR);
+        emit16(vm, rest || t.b >= 0xFFFF ? 0xFFFF : t.b);
         for (uint32_t i = 0; i < t.b; i++) {
             uint32_t e = cc->lists[t.a + i];
             jn el = cc->nodes[e];
@@ -2444,6 +2566,47 @@ static void gen_expr(CC, uint32_t n) {
         cc->chain = saved;
         return;
     }
+    case N_YIELD: {
+        /* resumed: its value (next), an exception at it (throw), or a return from it
+           (return), the stack cut to its statement's and the way out run */
+        if (e.op == 1) {
+            /* yield*: each step the inner iterator's, sent what this one was sent */
+            gen_expr(CCA, e.a);
+            emit(vm, OP_GET_ITER);
+            emit(vm, OP_UNDEF);
+            emit_num(vm, 0);
+            uint32_t loop = here(vm);
+            emit(vm, OP_YIELD_STAR);
+            uint32_t at_done = here(vm);
+            emit32(vm, 0);
+            uint32_t at_ret = here(vm);
+            emit32(vm, 0);
+            emit16(vm, stack_iters(cc));
+            emit(vm, OP_YIELD);
+            jump_to(vm, OP_JMP, loop);
+            patch_to(vm, at_ret, here(vm));
+            gen_return_top(CCA);
+            patch_to(vm, at_done, here(vm));
+            return;
+        }
+        if (e.a) gen_expr(CCA, e.a);
+        else emit(vm, OP_UNDEF);
+        emit(vm, OP_YIELD);
+        uint32_t r = jump_fwd(vm, OP_GEN_RESUME);
+        emit16(vm, stack_iters(cc));
+        uint32_t after = jump_fwd(vm, OP_JMP);
+        patch_to(vm, r, here(vm));
+        gen_return_top(CCA);
+        patch_to(vm, after, here(vm));
+        return;
+    }
+    case N_AWAIT:
+        gen_expr(CCA, e.a);
+        emit(vm, OP_AWAIT);
+        emit(vm, OP_GEN_RESUME);
+        emit32(vm, 0);
+        emit16(vm, 0);
+        return;
     case N_SPREAD: cc_error(cc, e.line, "'...' only spreads in a call, an array or an object"); return;
     case N_HOLE: emit(vm, OP_UNDEF); return;
     case N_PATTERN_OBJ: case N_PATTERN_ARR: cc_error(cc, e.line, "a destructuring pattern where a value should be"); return;
@@ -2533,8 +2696,11 @@ static void gen_jump(CC, uint32_t n, int is_break) {
         if (label) {
             if (c.kind == CX_LABEL && c.label == label) {
                 if (is_break) { found = 1; break; }
-                /* continue label: the loop the label names, just inside it */
-                if (t < len(cc->ctx) && cc->ctx[t].kind == CX_LOOP) { t++; found = 1; break; }
+                /* continue label: the loop the label names, just inside it (a for-of's
+                   handler between them) */
+                size_t u = t;
+                if (u < len(cc->ctx) && cc->ctx[u].kind == CX_ITER) u++;
+                if (u < len(cc->ctx) && cc->ctx[u].kind == CX_LOOP) { t = u + 1; found = 1; break; }
                 cc_error(cc, cc->nodes[n].line, "continue's label names no loop");
                 return;
             }
@@ -2545,7 +2711,8 @@ static void gen_jump(CC, uint32_t n, int is_break) {
     unwind_to(CCA, t, 0);
     jctx c = cc->ctx[t - 1];
     if (is_break) {
-        if (c.kind == CX_LOOP && c.label) emit(vm, OP_POP);
+        if (c.kind == CX_LOOP && c.label == 1) emit(vm, OP_POP);
+        else if (c.kind == CX_LOOP && c.label == 2) { emit(vm, OP_END_TRY); emit(vm, OP_ITER_CLOSE); emit(vm, 0); }
         cc->ctx[t - 1].brk = chain_add(vm, OP_JMP, cc->ctx[t - 1].brk);
     } else if (c.has_cont) jump_to(vm, OP_JMP, c.cont_pc);
     else cc->ctx[t - 1].cont = chain_add(vm, OP_JMP, cc->ctx[t - 1].cont);
@@ -2740,11 +2907,16 @@ static void gen_stmt(CC, uint32_t n) {
         return;
     }
     case N_FORIN: {
+        /* a for-of's iterator closed when the loop is left early: a break, a return or a
+           continue past it (unwind_to), an exception (its handler, which loses an error
+           the closing throws, and throws the exception on) */
         uint32_t sc = s.s;
         gen_expr(CCA, s.b);
         emit(vm, s.op ? OP_ITER_OF : OP_ITER_IN);
+        uint32_t h = 0;
+        if (s.op) { h = jump_fwd(vm, OP_TRY); ctx_push(cc, CX_ITER, 0, 0); }
         uint32_t top = here(vm);
-        gen_loop_ctx(cc, 1, top, 1);
+        gen_loop_ctx(cc, s.op ? 2 : 1, top, 1);
         size_t me = len(cc->ctx) - 1;
         uint32_t done = jump_fwd(vm, OP_ITER_NEXT);
         gen_block_enter(CCA, sc);
@@ -2755,23 +2927,26 @@ static void gen_stmt(CC, uint32_t n) {
         gen_block_leave(CCA, sc);
         jump_to(vm, OP_JMP, top);
         patch_to(vm, done, here(vm));
+        if (s.op) emit(vm, OP_END_TRY);
         chain_end(vm, cc->ctx[me].brk, here(vm));
         pop_back(cc->ctx);
+        if (s.op) {
+            pop_back(cc->ctx);
+            uint32_t end = jump_fwd(vm, OP_JMP);
+            patch_to(vm, h, here(vm));
+            emit(vm, OP_SWAP);
+            emit(vm, OP_ITER_CLOSE);
+            emit(vm, 1);
+            emit(vm, OP_THROW);
+            patch_to(vm, end, here(vm));
+        }
         return;
     }
     case N_RETURN: {
         if (s.a && !has_finally(cc) && (cc->nodes[s.a].k == N_COND || local_slot1(cc, s.a))) { gen_return_value(CCA, s.a); return; }
         if (s.a) gen_expr(CCA, s.a);
         else emit(vm, OP_UNDEF);
-        if (has_finally(cc)) {
-            uint32_t tmp = new_slot(cc);
-            emit(vm, OP_PUT_LOC);
-            emit16(vm, tmp);
-            unwind_to(CCA, 0, 1);
-            emit(vm, OP_GET_LOC);
-            emit16(vm, tmp);
-        }
-        emit(vm, OP_RETURN);
+        gen_return_top(CCA);
         return;
     }
     case N_BREAK: gen_jump(CCA, n, 1); return;
@@ -2865,6 +3040,8 @@ static void gen_function(CC, uint32_t f) {
         gen_statements(CCA, b.a, b.b);
         emit(vm, OP_RETURN_UNDEF);
     } else {
+        /* an async function's promise is made before its parameters are (their errors reject it) */
+        if (F.flags & JF_ASYNC) emit(vm, OP_ASYNC_START);
         if (cc->scopes[fs].has_env) { emit(vm, OP_ENTER_ENV); emit16(vm, cc->scopes[fs].nenv); }
         for (uint32_t d = cc->scopes[fs].first; d; d = cc->decls[d].next) {
             jdecl x = cc->decls[d];
@@ -2904,6 +3081,8 @@ static void gen_function(CC, uint32_t f) {
             gen_pattern(CCA, p.a, 1);
         }
         gen_scope_decls(CCA, fs);
+        /* a generator's call ends here, its object returned: the body runs at next() */
+        if (F.flags & JF_GENERATOR) emit(vm, OP_GEN_START);
         if ((F.flags & JF_CLASS_CTOR) && !(F.flags & JF_DERIVED)) emit(vm, OP_INIT_FIELDS);
         if (F.flags & FN_EXPR) { gen_expr(CCA, F.body); emit(vm, OP_RETURN); }
         else if (F.flags & FN_FIELDS) {

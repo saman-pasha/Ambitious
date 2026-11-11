@@ -1,0 +1,72 @@
+{"value":1,"done":false}
+got 5
+{"value":10,"done":false}
+{"value":"end","done":true}
+{"done":true}
+v 1
+got undefined
+v NaN
+1,2,3,4
+loop a
+inner cleanup
+0 1 1 2 3 5 8 13 21 34
+symbol Symbol(s) s Symbol(s)
+1 1 1
+10+20
+{"value":42,"done":true} {"done":true}
+thrown boom
+{"value":1,"done":false}
+caught in gen E
+{"value":"after catch","done":false}
+t1 finally
+{"value":"end","done":false}
+{"done":true}
+t1 finally
+{"value":"R","done":true}
+{"value":"from finally","done":false}
+after finally yield
+{"value":"X","done":true}
+in2 finally
+delegate returned in2 ret
+i1,i2,o
+in2 finally
+{"value":"stop","done":true}
+in2 finally
+outer got thr
+in2 finally
+{"value":"loopret","done":true}
+in2 finally
+body error body
+in2 finally
+destructured i1 i2
+3,K
+m1
+[object Generator] function true
+012
+in2 finally
+in2 finally
+in2 finally
+labels done
+["a","b",1,2,[1,2]]
+{"value":5,"done":true} []
+{"value":["x","y"],"done":true}
+new gen TypeError
+54321
+false true shared undefined
+symbol Symbol(Symbol.iterator) Symbol.asyncIterator
+{"x":2} x a,shared
+true true true false
+42 str:string str:default
+[object Tagged]
+true false
+TypeError
+TypeError
+true object a
+sym val
+{"value":1,"done":false} function
+Symbol() undefined
+8 7,8
+Symbol(a)
+v
+z
+{} [null]

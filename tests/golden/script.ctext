@@ -1,9 +1,9 @@
-/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:8778d33a:2965). Do not edit. */
+/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:f8a249ad:2973). Do not edit. */
 typedef enum script_status { SCRIPT_OK, SCRIPT_STALE_HANDLE, SCRIPT_WRONG_KIND, SCRIPT_FAILED, SCRIPT_BAD_REQUEST, SCRIPT_NOT_REQUESTABLE, SCRIPT_STALE_REVISION } script_status;
 typedef enum script_source { SCRIPT_SOURCE_INLINE, SCRIPT_SOURCE_EXTERNAL, SCRIPT_SOURCE_ATTRIBUTE } script_source;
 typedef enum script_outcome { SCRIPT_OUTCOME_RAN, SCRIPT_OUTCOME_THREW, SCRIPT_OUTCOME_SYNTAX_ERROR, SCRIPT_OUTCOME_STOPPED, SCRIPT_OUTCOME_NOT_FETCHED, SCRIPT_OUTCOME_NOT_RUN } script_outcome;
 typedef enum script_level { SCRIPT_LEVEL_LOG, SCRIPT_LEVEL_INFO, SCRIPT_LEVEL_WARN, SCRIPT_LEVEL_ERROR, SCRIPT_LEVEL_DEBUG } script_level;
-typedef enum script_phase { SCRIPT_PHASE_SCRIPT, SCRIPT_PHASE_EVENT, SCRIPT_PHASE_TIMER } script_phase;
+typedef enum script_phase { SCRIPT_PHASE_SCRIPT, SCRIPT_PHASE_EVENT, SCRIPT_PHASE_TIMER, SCRIPT_PHASE_PROMISE } script_phase;
 typedef enum script_listen_on { SCRIPT_LISTEN_ON_NODE, SCRIPT_LISTEN_ON_WINDOW } script_listen_on;
 typedef enum script_timer_state { SCRIPT_TIMER_STATE_FIRED, SCRIPT_TIMER_STATE_CLEARED, SCRIPT_TIMER_STATE_PENDING } script_timer_state;
 typedef struct script_run_h { uint32_t doc, index, gen; } script_run_h;
@@ -78,6 +78,7 @@ const char *script_phase_name(script_phase x) {
     case SCRIPT_PHASE_SCRIPT: return "script";
     case SCRIPT_PHASE_EVENT: return "event";
     case SCRIPT_PHASE_TIMER: return "timer";
+    case SCRIPT_PHASE_PROMISE: return "promise";
     }
     return "?";
 }
@@ -97,7 +98,7 @@ const char *script_timer_state_name(script_timer_state x) {
     return "?";
 }
 
-const char script_fingerprint[] = "fnv1a32:8778d33a:2965";
+const char script_fingerprint[] = "fnv1a32:f8a249ad:2973";
 void script_init(script_runtime *d, uint32_t id) {
     if (d->run_len != 0) abort();
     d->id = id;

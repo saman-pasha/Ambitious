@@ -149,6 +149,36 @@ static int sh_uncaught(js_vm *vm, uint32_t run, uint32_t phase) {
     return 1;
 }
 
+/* an error a microtask threw that no code caught, or a promise's rejection no handler
+   took (src/js/builtins.c): the page's record of the script whose code it was, in the
+   phase given; with no page, stderr's line, as V8's shell writes it */
+void js_report_error(js_vm *vm, jv e, uint32_t phase) {
+    int was = vm->throwing;
+    jv saved = vm->exception;
+    vm->throwing = 0;
+    vector<char> m;
+    js_error_text(vm, e, &m);
+    if (vm->throwing == 1) { vm->throwing = 0; vm->exception = JV_UNDEF; }   /* its text's getter threw: the text so far */
+    if (vm->throwing == 0 && was) { vm->throwing = was; vm->exception = saved; }
+    if (vm->host && vm->host->rt) sh_error_rec(vm, vm->cur_run, phase, data(m), len(m));
+    else {
+        const char *pre = phase == JS_PHASE_PROMISE ? "Uncaught (in promise) " : "Uncaught ";
+        fwrite(pre, 1, strlen(pre), stderr);
+        push_back(m, '\n');
+        fwrite(data(m), 1, len(m), stderr);
+    }
+}
+
+/* the microtasks, once no script code is on the stack: after a script, a listener a
+   user's event ran, a timer */
+static void sh_checkpoint(js_vm *vm) {
+    if (vm->nframes != 0 || vm->throwing) return;
+    uint32_t ph = vm->host ? vm->host->phase : 0;
+    if (vm->host) vm->host->phase = JS_PHASE_PROMISE;
+    js_run_jobs(vm);
+    if (vm->host) vm->host->phase = ph;
+}
+
 /* ---- the console: every message kept (vm->msgs), the page's recorded ---- */
 
 void js_console(js_vm *vm, uint32_t level, uint32_t text) {
@@ -686,10 +716,11 @@ static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run
     jv args[1] = { ev };
     jv r = js_call(vm, fn, sh_this_of(vm, node), args, 1);
     vm->cur_run = saved;
-    if (vm->throwing) return sh_uncaught(vm, run, SCRIPT_PHASE_EVENT) == 2 ? 0 : 1;
+    if (vm->throwing && sh_uncaught(vm, run, SCRIPT_PHASE_EVENT) == 2) return 0;
     /* an on* handler's false cancels the event */
     if (r == JV_FALSE && (vm->objs[jv_idx(ev)].a & EV_CANCELABLE)) vm->objs[jv_idx(ev)].a |= EV_PREVENTED;
-    return 1;
+    sh_checkpoint(vm);
+    return vm->throwing != 2;
 }
 /* the handler an on<type> property of node's wrapper (of the window: the global's) holds */
 static jv sh_prop_handler(js_vm *vm, uint32_t node, uint32_t type) {
@@ -866,6 +897,8 @@ uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
         ran++;
         if (vm->throwing == 2) break;
         if (vm->throwing) sh_uncaught(vm, t.run, SCRIPT_PHASE_TIMER);
+        sh_checkpoint(vm);
+        if (vm->throwing == 2) break;
     }
     return ran;
 }
@@ -1841,6 +1874,7 @@ static void sh_run_source(js_vm *vm, uint32_t run, const char *src, size_t n) {
     script_outcome oc = rc == 0 ? SCRIPT_OUTCOME_RAN : rc == -1 ? SCRIPT_OUTCOME_SYNTAX_ERROR : rc == -3 ? SCRIPT_OUTCOME_STOPPED : SCRIPT_OUTCOME_THREW;
     h->rt->run[run].outcome = oc;
     if (rc == -1 || rc == -2) sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, data(vm->out), len(vm->out));
+    if (rc != -3) sh_checkpoint(vm);
     vm->cur_run = 0;
 }
 

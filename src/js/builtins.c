@@ -50,6 +50,12 @@ enum {
     /* Map, Set, RegExp, iterators */
     N_MP_GET, N_MP_SET, N_MP_HAS, N_MP_DELETE, N_MP_CLEAR, N_MP_SIZE, N_MP_FOREACH, N_MP_KEYS, N_MP_VALUES, N_MP_ENTRIES,
     N_SETP_ADD, N_SETP_FOREACH, N_SETP_VALUES, N_SETP_ENTRIES, N_RP_TEST, N_RP_EXEC, N_RP_TOSTRING, N_ITP_NEXT,
+    /* Symbol, generators, promises */
+    N_SYM_FOR, N_SYM_KEYFOR, N_SYMP_TOSTRING, N_SYMP_VALUEOF, N_SYMP_DESC, N_OBJ_GETOWNSYMS, N_ITP_SELF,
+    N_GEN_NEXT, N_GEN_RETURN, N_GEN_THROW,
+    N_PROMISE, N_PR_RESOLVE_FN, N_PR_REJECT_FN, N_PRP_THEN, N_PRP_CATCH, N_PRP_FINALLY, N_PR_FIN_OK, N_PR_FIN_ERR,
+    N_PR_THUNK_VALUE, N_PR_THUNK_THROW, N_PR_RESOLVE, N_PR_REJECT, N_PR_ALL, N_PR_ALLSETTLED, N_PR_RACE, N_PR_ANY,
+    N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER,
     N_LAST
 };
 
@@ -577,6 +583,8 @@ static jv console_out(js_vm *vm, uint32_t level, uint32_t args, uint32_t argc) {
             vector<char> t;
             js_error_text(vm, v, &t);
             s = js_str_utf8(vm, data(t), len(t));
+        } else if (jv_is_sym(v)) {
+            s = js_sym_text(vm, jv_idx(v));
         } else {
             s = js_to_string(vm, v);
             if (!s) return JV_HOLE;
@@ -678,6 +686,240 @@ static jv obj_keys_like(js_vm *vm, jv o, int which) {
     return jv_obj(out);
 }
 
+
+/* ---- iteration, for the builtins that take an iterable ---- */
+
+/* {value, done}: an iterator's result */
+static jv iter_result(js_vm *vm, jv v, int done) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, A_VALUE, v, 0);
+    js_define(vm, r, A_DONE, jv_bool(done), 0);
+    return jv_obj(r);
+}
+/* every value an iterable gives, pushed onto the array out: 0 when it threw */
+static int iterate_into(js_vm *vm, jv v, uint32_t out) {
+    jv it = js_iter_of(vm, v);
+    if (vm->throwing) return 0;
+    jv x;
+    while (js_iter_step(vm, jv_idx(it), &x)) js_array_push(vm, out, x);
+    return !vm->throwing;
+}
+
+/* ---- promises (ECMA-262 27.2) ----
+   A promise is its state, its result and its reactions: four values each (the handlers
+   for fulfilment and rejection, the derived promise or the async run to resume, and
+   which of the two). Settling one queues a job per reaction; a handler runs only as
+   a job, at a checkpoint, never inside the code that settled it. */
+
+uint32_t js_promise_new(js_vm *vm) {
+    uint32_t p = js_obj_new(vm, JK_PROMISE, vm->promise_proto);
+    vm->objs[p].a = JP_PENDING;
+    vm->objs[p].x = JV_UNDEF;
+    return p;
+}
+
+void js_job_push(js_vm *vm, uint32_t kind, uint32_t mode, jv fn, jv arg, jv target) {
+    js_job j = { kind, mode, vm->cur_run, fn, arg, target };
+    push_back(vm->jobs, j);
+}
+
+static void promise_queue(js_vm *vm, jv on_ok, jv on_err, jv target, int resume, int rejected, jv v) {
+    if (resume) js_job_push(vm, JOB_RESUME, (uint32_t)rejected, JV_UNDEF, v, target);
+    else js_job_push(vm, JOB_REACTION, (uint32_t)rejected, rejected ? on_err : on_ok, v, target);
+}
+
+void js_promise_settle(js_vm *vm, uint32_t p, int rejected, jv v) {
+    if (vm->objs[p].kind != JK_PROMISE || vm->objs[p].a != JP_PENDING) return;
+    vm->objs[p].a = rejected ? JP_REJECTED : JP_FULFILLED;
+    vm->objs[p].x = v;
+    uint32_t rs = vm->objs[p].b;
+    vm->objs[p].b = 0;
+    if (rs) {
+        uint32_t n = vm->objs[rs].b;
+        for (uint32_t i = 0; i + 3 < n; i += 4) {
+            jv on_ok = js_array_get(vm, rs, i), on_err = js_array_get(vm, rs, i + 1), target = js_array_get(vm, rs, i + 2);
+            int resume = jv_dbl(js_array_get(vm, rs, i + 3)) != 0;
+            promise_queue(vm, on_ok, on_err, target, resume, rejected, v);
+        }
+    }
+    if (rejected && !(vm->objs[p].c & JPF_HANDLED)) { push_back(vm->rejected, p); push_back(vm->rejected, vm->cur_run); }
+}
+
+void js_promise_react(js_vm *vm, uint32_t p, jv on_ok, jv on_err, jv target, int resume) {
+    vm->objs[p].c |= JPF_HANDLED;
+    if (vm->objs[p].a == JP_PENDING) {
+        uint32_t rs = vm->objs[p].b;
+        if (!rs) { rs = js_array_new(vm, 0); vm->objs[p].b = rs; }
+        js_array_push(vm, rs, on_ok);
+        js_array_push(vm, rs, on_err);
+        js_array_push(vm, rs, target);
+        js_array_push(vm, rs, jv_num(resume ? 1 : 0));
+        return;
+    }
+    promise_queue(vm, on_ok, on_err, target, resume, vm->objs[p].a == JP_REJECTED, vm->objs[p].x);
+}
+
+void js_promise_resolve_with(js_vm *vm, uint32_t p, jv v) {
+    if (vm->objs[p].a != JP_PENDING) return;
+    if (v == jv_obj(p)) {
+        uint32_t m = js_str_ascii(vm, "Chaining cycle detected for promise #<Promise>");
+        js_promise_settle(vm, p, 1, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+        return;
+    }
+    if (jv_is_obj(v)) {
+        /* a native promise is followed without a job of its own for its then */
+        uint32_t o = jv_idx(v);
+        if (vm->objs[o].kind == JK_PROMISE && vm->objs[o].proto == vm->promise_proto) {
+            js_job_push(vm, JOB_THENABLE, 1, JV_UNDEF, v, jv_obj(p));
+            return;
+        }
+        jv then = js_get(vm, v, A_THEN);
+        if (vm->throwing) {
+            jv e = vm->exception;
+            vm->throwing = 0;
+            vm->exception = JV_UNDEF;
+            js_promise_settle(vm, p, 1, e);
+            return;
+        }
+        if (js_is_callable(vm, then)) { js_job_push(vm, JOB_THENABLE, 0, then, v, jv_obj(p)); return; }
+    }
+    js_promise_settle(vm, p, 0, v);
+}
+
+uint32_t js_promise_of(js_vm *vm, jv v) {
+    if (jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_PROMISE) return jv_idx(v);
+    uint32_t p = js_promise_new(vm);
+    js_promise_resolve_with(vm, p, v);
+    return p;
+}
+
+/* a promise's resolving functions: a pair sharing one record whose a says one ran */
+static void promise_resolvers(js_vm *vm, uint32_t p, jv *res, jv *rej) {
+    uint32_t rec = js_obj_new(vm, JK_PLAIN, 0);
+    uint32_t f = js_native_new(vm, N_PR_RESOLVE_FN, A_EMPTY, 1);
+    vm->objs[f].x = jv_obj(p);
+    vm->objs[f].c = 0;
+    uint32_t g = js_native_new(vm, N_PR_REJECT_FN, A_EMPTY, 1);
+    vm->objs[g].x = jv_obj(p);
+    vm->objs[g].c = 0;
+    /* the shared record in each one's own property, hidden */
+    js_define(vm, f, A_INDEX, jv_obj(rec), JS_SHAPE_HIDDEN);
+    js_define(vm, g, A_INDEX, jv_obj(rec), JS_SHAPE_HIDDEN);
+    *res = jv_obj(f);
+    *rej = jv_obj(g);
+}
+
+/* the error a job's code threw and nothing caught: the host's to record */
+static void job_uncaught(js_vm *vm) {
+    if (vm->throwing != 1) return;
+    jv e = vm->exception;
+    vm->throwing = 0;
+    vm->exception = JV_UNDEF;
+    js_report_error(vm, e, JS_PHASE_PROMISE);
+}
+
+static void run_job(js_vm *vm, js_job j) {
+    if (j.kind == JOB_REACTION) {
+        uint32_t d = jv_is_obj(j.target) ? jv_idx(j.target) : 0;
+        if (js_is_callable(vm, j.fn)) {
+            jv a1[1] = { j.arg };
+            jv r = js_call(vm, j.fn, JV_UNDEF, a1, 1);
+            if (vm->throwing == 2) return;
+            if (vm->throwing) {
+                jv e = vm->exception;
+                vm->throwing = 0;
+                vm->exception = JV_UNDEF;
+                if (d) js_promise_settle(vm, d, 1, e);
+                else js_report_error(vm, e, JS_PHASE_PROMISE);
+                return;
+            }
+            if (d) js_promise_resolve_with(vm, d, r);
+        } else if (d) {
+            if (j.mode) js_promise_settle(vm, d, 1, j.arg);
+            else js_promise_resolve_with(vm, d, j.arg);
+        }
+        return;
+    }
+    if (j.kind == JOB_RESUME) {
+        int done = 0;
+        js_gen_resume(vm, jv_idx(j.target), j.arg, (int)j.mode, &done);
+        job_uncaught(vm);
+        return;
+    }
+    if (j.kind == JOB_THENABLE) {
+        uint32_t p = jv_idx(j.target);
+        if (j.mode == 1) {
+            /* a native promise followed: its settlement becomes this one's */
+            js_promise_react(vm, jv_idx(j.arg), JV_UNDEF, JV_UNDEF, j.target, 0);
+            return;
+        }
+        jv res, rej;
+        promise_resolvers(vm, p, &res, &rej);
+        jv a2[2] = { res, rej };
+        js_call(vm, j.fn, j.arg, a2, 2);
+        if (vm->throwing == 1) {
+            jv e = vm->exception;
+            vm->throwing = 0;
+            vm->exception = JV_UNDEF;
+            jv recv;
+            uint32_t f;
+            if (js_get_own(vm, jv_idx(rej), A_INDEX, &recv, &f) && jv_is_obj(recv) && !vm->objs[jv_idx(recv)].a) {
+                vm->objs[jv_idx(recv)].a = 1;
+                js_promise_settle(vm, p, 1, e);
+            }
+        }
+        return;
+    }
+    js_call(vm, j.fn, JV_UNDEF, 0, 0);
+    job_uncaught(vm);
+}
+
+void js_run_jobs(js_vm *vm) {
+    if (vm->nframes != 0 || vm->in_jobs || vm->throwing) return;
+    vm->in_jobs = 1;
+    uint32_t saved = vm->cur_run;
+    while (vm->jobs_head < len(vm->jobs) && vm->throwing != 2) {
+        js_job j = vm->jobs[vm->jobs_head];
+        vm->jobs_head++;
+        vm->cur_run = j.run;
+        run_job(vm, j);
+        if (vm->throwing == 1) job_uncaught(vm);
+    }
+    if (vm->jobs_head >= len(vm->jobs)) { clear(vm->jobs); vm->jobs_head = 0; }
+    /* a rejection still without a handler when the queue is empty: reported once */
+    for (size_t i = 0; i + 1 < len(vm->rejected) && vm->throwing != 2; i += 2) {
+        uint32_t p = vm->rejected[i];
+        if (vm->objs[p].kind != JK_PROMISE || (vm->objs[p].c & (JPF_HANDLED | JPF_REPORTED))) continue;
+        vm->objs[p].c |= JPF_REPORTED;
+        vm->cur_run = vm->rejected[i + 1];
+        js_report_error(vm, vm->objs[p].x, JS_PHASE_PROMISE);
+    }
+    clear(vm->rejected);
+    vm->cur_run = saved;
+    vm->in_jobs = 0;
+}
+
+/* a combinator's element: its function's record [aggregate, index, called] */
+static jv promise_elem_fn(js_vm *vm, uint32_t id, uint32_t agg, uint32_t index) {
+    uint32_t f = js_native_new(vm, id, A_EMPTY, 1);
+    uint32_t rec = js_obj_new(vm, JK_PLAIN, 0);
+    vm->objs[rec].a = agg;
+    vm->objs[rec].b = index;
+    vm->objs[rec].c = 0;
+    vm->objs[f].x = jv_obj(rec);
+    return jv_obj(f);
+}
+/* the aggregate's values array, made with the count still waiting; done once all came */
+static void promise_agg_done(js_vm *vm, uint32_t agg) {
+    uint32_t kind = vm->objs[agg].c >> 8, p = (uint32_t)jv_idx(vm->objs[agg].x);
+    if (kind == 2) {
+        /* any: every one rejected */
+        uint32_t e = js_error_new(vm, vm->aggregate_error_proto, js_str_ascii(vm, "All promises were rejected"));
+        js_define(vm, e, A_ERRORS, jv_obj(vm->objs[agg].a), JS_SHAPE_HIDDEN);
+        js_promise_settle(vm, p, 1, jv_obj(e));
+    } else js_promise_settle(vm, p, 0, jv_obj(vm->objs[agg].a));
+}
+
 static jv iter_of_coll(js_vm *vm, uint32_t coll, uint32_t mode) {
     uint32_t it = js_obj_new(vm, JK_ITER, vm->iterator_proto);
     vm->objs[it].a = coll;
@@ -753,6 +995,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_obj(a);
     }
     case N_STRING: {
+        if (jv_is_sym(a0) && (newt == JV_UNDEF || newt == JV_HOLE)) return jv_str(js_sym_text(vm, jv_idx(a0)));
         uint32_t s = argc ? js_to_string(vm, a0) : A_EMPTY;
         if (!s) return JV_HOLE;
         if (newt != JV_UNDEF && newt != JV_HOLE) return js_to_object(vm, jv_str(s));
@@ -774,7 +1017,200 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_SYNTAX_ERROR: return make_error(vm, vm->syntax_error_proto, args, argc);
     case N_REFERENCE_ERROR: return make_error(vm, vm->reference_error_proto, args, argc);
     case N_EVAL_ERROR: return make_error(vm, vm->eval_error_proto, args, argc);
-    case N_SYMBOL: return js_throw_msg(vm, vm->type_error_proto, "Symbol is not supported");
+
+    /* ---- Symbol ---- */
+    case N_SYMBOL: {
+        if (newt != JV_UNDEF && newt != JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Symbol is not a constructor");
+        uint32_t d = 0;
+        if (argc && a0 != JV_UNDEF) { d = js_to_string(vm, a0); if (!d) return JV_HOLE; }
+        return jv_sym(js_sym_new(vm, d));
+    }
+    case N_SYM_FOR: {
+        uint32_t k = js_to_string(vm, a0);
+        if (!k) return JV_HOLE;
+        uint32_t ka = js_atom(vm, k);
+        for (size_t i = 1; i < len(vm->syms); i++) if (vm->syms[i].reg == ka + 1) return jv_sym((uint32_t)i);
+        uint32_t y = js_sym_new(vm, ka);
+        vm->syms[y].reg = ka + 1;
+        return jv_sym(y);
+    }
+    case N_SYM_KEYFOR: {
+        if (!jv_is_sym(a0)) return js_type_error(vm, "is not a symbol", js_typeof(vm, a0));
+        uint32_t r = vm->syms[jv_idx(a0)].reg;
+        return r ? jv_str(r - 1) : JV_UNDEF;
+    }
+    case N_SYMP_TOSTRING: case N_SYMP_VALUEOF: case N_SYMP_DESC: {
+        jv y = thisv;
+        if (jv_is_obj(y) && vm->objs[jv_idx(y)].kind == JK_SYMBOL) y = vm->objs[jv_idx(y)].x;
+        if (!jv_is_sym(y)) return js_throw_msg(vm, vm->type_error_proto, "this is not a Symbol");
+        if (id == N_SYMP_VALUEOF) return y;
+        if (id == N_SYMP_DESC) { uint32_t d = vm->syms[jv_idx(y)].desc; return d ? jv_str(d) : JV_UNDEF; }
+        return jv_str(js_sym_text(vm, jv_idx(y)));
+    }
+    case N_OBJ_GETOWNSYMS: {
+        jv o = js_to_object(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t out = js_array_new(vm, 0);
+        js_own_symbols(vm, jv_idx(o), out);
+        return jv_obj(out);
+    }
+    case N_ITP_SELF: return thisv;
+    case N_SP_ITER: {
+        uint32_t st = js_to_string(vm, thisv);
+        if (!st) return JV_HOLE;
+        uint32_t it = js_obj_new(vm, JK_ITER, vm->iterator_proto);
+        vm->objs[it].a = st;
+        vm->objs[it].c = JI_STRING;
+        return jv_obj(it);
+    }
+    /* ---- generators ---- */
+    case N_GEN_NEXT: case N_GEN_RETURN: case N_GEN_THROW: {
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_GENERATOR)
+            return js_throw_msg(vm, vm->type_error_proto, "next, return or throw called on something not a generator");
+        int done = 0;
+        jv r = js_gen_resume(vm, jv_idx(thisv), a0, id == N_GEN_NEXT ? 0 : id == N_GEN_THROW ? 1 : 2, &done);
+        if (vm->throwing) return JV_HOLE;
+        return iter_result(vm, r, done);
+    }
+    /* ---- Promise ---- */
+    case N_PROMISE: {
+        if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Promise constructor cannot be invoked without 'new'");
+        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function: Promise resolver", js_typeof(vm, a0));
+        uint32_t p = js_promise_new(vm);
+        jv res, rej;
+        promise_resolvers(vm, p, &res, &rej);
+        jv a2[2] = { res, rej };
+        js_call(vm, a0, JV_UNDEF, a2, 2);
+        if (vm->throwing == 1) {
+            jv e = vm->exception;
+            vm->throwing = 0;
+            vm->exception = JV_UNDEF;
+            jv recv;
+            uint32_t f;
+            if (js_get_own(vm, jv_idx(rej), A_INDEX, &recv, &f) && jv_is_obj(recv) && !vm->objs[jv_idx(recv)].a) {
+                vm->objs[jv_idx(recv)].a = 1;
+                js_promise_settle(vm, p, 1, e);
+            }
+        }
+        if (vm->throwing) return JV_HOLE;
+        return jv_obj(p);
+    }
+    case N_PR_RESOLVE_FN: case N_PR_REJECT_FN: {
+        uint32_t f = jv_idx(callee), p = jv_idx(vm->objs[f].x);
+        jv recv;
+        uint32_t fl;
+        if (js_get_own(vm, f, A_INDEX, &recv, &fl) && jv_is_obj(recv)) {
+            if (vm->objs[jv_idx(recv)].a) return JV_UNDEF;
+            vm->objs[jv_idx(recv)].a = 1;
+        }
+        if (id == N_PR_RESOLVE_FN) js_promise_resolve_with(vm, p, a0);
+        else js_promise_settle(vm, p, 1, a0);
+        return JV_UNDEF;
+    }
+    case N_PRP_THEN: {
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_PROMISE) return js_throw_msg(vm, vm->type_error_proto, "then called on something not a Promise");
+        uint32_t d = js_promise_new(vm);
+        js_promise_react(vm, jv_idx(thisv), js_is_callable(vm, a0) ? a0 : JV_UNDEF, js_is_callable(vm, a1) ? a1 : JV_UNDEF, jv_obj(d), 0);
+        return jv_obj(d);
+    }
+    case N_PRP_CATCH: case N_PRP_FINALLY: {
+        jv then = js_get(vm, thisv, A_THEN);
+        if (vm->throwing) return JV_HOLE;
+        if (!js_is_callable(vm, then)) return js_throw_msg(vm, vm->type_error_proto, "catch or finally called on something without then");
+        jv args2[2] = { JV_UNDEF, a0 };
+        if (id == N_PRP_FINALLY && js_is_callable(vm, a0)) {
+            uint32_t ok = js_native_new(vm, N_PR_FIN_OK, A_EMPTY, 1), er = js_native_new(vm, N_PR_FIN_ERR, A_EMPTY, 1);
+            vm->objs[ok].x = a0;
+            vm->objs[er].x = a0;
+            args2[0] = jv_obj(ok);
+            args2[1] = jv_obj(er);
+        } else if (id == N_PRP_FINALLY) args2[0] = a0;
+        return js_call(vm, then, thisv, args2, 2);
+    }
+    case N_PR_FIN_OK: case N_PR_FIN_ERR: {
+        /* finally's handler: its function run, then the value (or the reason) passed on
+           once what that returned has settled */
+        jv f = vm->objs[jv_idx(callee)].x;
+        jv r = js_call(vm, f, JV_UNDEF, 0, 0);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t pr = js_promise_of(vm, r);
+        uint32_t th = js_native_new(vm, id == N_PR_FIN_OK ? N_PR_THUNK_VALUE : N_PR_THUNK_THROW, A_EMPTY, 0);
+        vm->objs[th].x = a0;
+        uint32_t d = js_promise_new(vm);
+        js_promise_react(vm, pr, jv_obj(th), JV_UNDEF, jv_obj(d), 0);
+        return jv_obj(d);
+    }
+    case N_PR_THUNK_VALUE: return vm->objs[jv_idx(callee)].x;
+    case N_PR_THUNK_THROW: return js_throw(vm, vm->objs[jv_idx(callee)].x);
+    case N_PR_RESOLVE: {
+        if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_PROMISE) return a0;
+        return jv_obj(js_promise_of(vm, a0));
+    }
+    case N_PR_REJECT: {
+        uint32_t p = js_promise_new(vm);
+        js_promise_settle(vm, p, 1, a0);
+        return jv_obj(p);
+    }
+    case N_PR_ALL: case N_PR_ALLSETTLED: case N_PR_RACE: case N_PR_ANY: {
+        uint32_t p = js_promise_new(vm);
+        uint32_t items = js_array_new(vm, 0);
+        if (!iterate_into(vm, a0, items)) {
+            jv e = vm->exception;
+            vm->throwing = 0;
+            vm->exception = JV_UNDEF;
+            js_promise_settle(vm, p, 1, e);
+            return jv_obj(p);
+        }
+        uint32_t n = vm->objs[items].b;
+        jv res, rej;
+        promise_resolvers(vm, p, &res, &rej);
+        if (id == N_PR_RACE) {
+            for (uint32_t i = 0; i < n; i++) js_promise_react(vm, js_promise_of(vm, js_array_get(vm, items, i)), res, rej, JV_UNDEF, 0);
+            return jv_obj(p);
+        }
+        /* the aggregate: a the values, b how many are still waiting, c its kind, x the promise */
+        uint32_t agg = js_obj_new(vm, JK_PLAIN, 0);
+        uint32_t vals = js_array_new(vm, n);
+        for (uint32_t i = 0; i < n; i++) vm->slots[vm->objs[vals].a + i] = JV_UNDEF;
+        vm->objs[agg].a = vals;
+        vm->objs[agg].b = n;
+        vm->objs[agg].c = (id == N_PR_ALL ? 0u : id == N_PR_ALLSETTLED ? 1u : 2u) << 8;
+        vm->objs[agg].x = jv_obj(p);
+        if (n == 0) { promise_agg_done(vm, agg); return jv_obj(p); }
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t pi = js_promise_of(vm, js_array_get(vm, items, i));
+            jv ok = id == N_PR_ANY ? res : promise_elem_fn(vm, N_PR_ELEM_OK, agg, i);
+            jv er = id == N_PR_ALL ? rej : promise_elem_fn(vm, N_PR_ELEM_ERR, agg, i);
+            js_promise_react(vm, pi, ok, er, JV_UNDEF, 0);
+        }
+        return jv_obj(p);
+    }
+    case N_PR_ELEM_OK: case N_PR_ELEM_ERR: {
+        uint32_t rec = jv_idx(vm->objs[jv_idx(callee)].x);
+        if (vm->objs[rec].c) return JV_UNDEF;
+        vm->objs[rec].c = 1;
+        uint32_t agg = vm->objs[rec].a, i = vm->objs[rec].b, kind = vm->objs[agg].c >> 8;
+        jv v = a0;
+        if (kind == 1) {
+            uint32_t o = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+            js_define(vm, o, A_STATUS, jv_str(id == N_PR_ELEM_OK ? A_FULFILLED : A_REJECTED), 0);
+            js_define(vm, o, id == N_PR_ELEM_OK ? A_VALUE : A_REASON, a0, 0);
+            v = jv_obj(o);
+        }
+        js_array_set(vm, vm->objs[agg].a, i, v);
+        if (--vm->objs[agg].b == 0) promise_agg_done(vm, agg);
+        return JV_UNDEF;
+    }
+    case N_AGGREGATE_ERROR: {
+        uint32_t errs = js_array_new(vm, 0);
+        if (!iterate_into(vm, a0, errs)) return JV_HOLE;
+        uint32_t m = argc > 1 && a1 != JV_UNDEF ? js_to_string(vm, a1) : A_EMPTY;
+        if (!m) return JV_HOLE;
+        uint32_t e = js_error_new(vm, vm->aggregate_error_proto, m);
+        js_define(vm, e, A_ERRORS, jv_obj(errs), JS_SHAPE_HIDDEN);
+        return jv_obj(e);
+    }
+
     case N_DATE: {
         double t = vm->now;
         if (argc == 1 && jv_is_num(a0)) t = jv_dbl(a0);
@@ -810,20 +1246,11 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         uint32_t kind = id == N_MAP ? JK_MAP : JK_SET;
         uint32_t c = coll_new(vm, kind, kind == JK_MAP ? vm->map_proto : vm->set_proto);
         if (!jv_is_nullish(a0)) {
-            uint32_t src = jv_idx(js_to_object(vm, a0));
-            if (vm->throwing) return JV_HOLE;
-            jv it;
-            if (vm->objs[src].kind == JK_MAP || vm->objs[src].kind == JK_SET) it = iter_of_coll(vm, src, vm->objs[src].kind == JK_MAP ? JI_ENTRIES : JI_SET);
-            else it = jv_obj(src);
-            uint32_t n = vm->objs[jv_idx(it)].kind == JK_ITER ? 0xFFFFFFFFu : (uint32_t)len_of(vm, it);
+            uint32_t items = js_array_new(vm, 0);
+            if (!iterate_into(vm, a0, items)) return JV_HOLE;
+            uint32_t n = vm->objs[items].b;
             for (uint32_t i = 0; i < n && !vm->throwing; i++) {
-                jv v;
-                if (vm->objs[jv_idx(it)].kind == JK_ITER) {
-                    jv nx = js_call(vm, js_get(vm, it, A_NEXT), it, 0, 0);
-                    if (vm->throwing) break;
-                    if (js_truthy(vm, js_get(vm, nx, A_DONE))) break;
-                    v = js_get(vm, nx, A_VALUE);
-                } else v = elem_of(vm, it, i);
+                jv v = js_array_get(vm, items, i);
                 if (kind == JK_MAP) {
                     jv k = js_get_value(vm, v, jv_num(0)), val = js_get_value(vm, v, jv_num(1));
                     int64_t at_i = coll_find(vm, c, k);
@@ -887,12 +1314,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         uint32_t keys = js_array_new(vm, 0);
         jv descs = id == N_OBJ_DEFPROPS ? a1 : JV_UNDEF;
         if (id == N_OBJ_DEFPROP) {
-            uint32_t ks = js_to_string(vm, a1);
-            if (!ks) return JV_HOLE;
-            js_array_push(vm, keys, jv_str(ks));
-        } else if (jv_is_obj(descs)) js_own_keys(vm, jv_idx(descs), 1, keys);
+            int kok = 1;
+            uint32_t key = js_prop_key(vm, a1, &kok);
+            if (!kok) return JV_HOLE;
+            js_array_push(vm, keys, js_key_is_sym(key) ? jv_sym(key & ~JS_SYM_KEY) : jv_str(key));
+        } else if (jv_is_obj(descs)) { js_own_keys(vm, jv_idx(descs), 1, keys); js_own_symbols(vm, jv_idx(descs), keys); }
         for (uint32_t k = 0; k < vm->objs[keys].b && !vm->throwing; k++) {
-            uint32_t atom = js_atom(vm, jv_idx(js_array_get(vm, keys, k)));
+            jv kv = js_array_get(vm, keys, k);
+            uint32_t atom = jv_is_sym(kv) ? (JS_SYM_KEY | jv_idx(kv)) : js_atom(vm, jv_idx(kv));
             jv d = id == N_OBJ_DEFPROP ? arg(vm, args, argc, 2) : js_get(vm, descs, atom);
             if (!jv_is_obj(d)) return js_throw_msg(vm, vm->type_error_proto, "Property description must be an object");
             uint32_t flags = js_truthy(vm, js_get(vm, d, A_ENUMERABLE)) ? 0 : JS_SHAPE_HIDDEN;
@@ -939,9 +1368,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_OBJ_GETOWNDESC: {
         if (!jv_is_obj(a0)) return JV_UNDEF;
-        uint32_t ks = js_to_string(vm, a1);
-        if (!ks) return JV_HOLE;
-        uint32_t atom = js_atom(vm, ks);
+        int kok = 1;
+        uint32_t atom = js_prop_key(vm, a1, &kok);
+        if (!kok) return JV_HOLE;
         jv v;
         uint32_t f;
         if (!js_get_own(vm, jv_idx(a0), atom, &v, &f)) {
@@ -975,9 +1404,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_OP_HASOWN: {
         jv o = js_to_object(vm, thisv);
         if (vm->throwing) return JV_HOLE;
-        uint32_t ks = js_to_string(vm, a0);
-        if (!ks) return JV_HOLE;
-        uint32_t atom = js_atom(vm, ks), ob = jv_idx(o);
+        int kok = 1;
+        uint32_t atom = js_prop_key(vm, a0, &kok), ob = jv_idx(o);
+        if (!kok) return JV_HOLE;
         jv v;
         uint32_t f;
         if (js_get_own(vm, ob, atom, &v, &f)) return JV_TRUE;
@@ -1004,6 +1433,15 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             else if (k == JK_ARGUMENTS) t = "[object Arguments]";
             else if (k == JK_MAP) t = "[object Map]";
             else if (k == JK_SET) t = "[object Set]";
+            else if (k == JK_PROMISE) t = "[object Promise]";
+            else if (k == JK_GENERATOR) t = "[object Generator]";
+            else if (k == JK_SYMBOL) t = "[object Symbol]";
+            jv tag = js_get(vm, thisv, JS_SYM_KEY | JSYM_TO_STRING_TAG);
+            if (vm->throwing) return JV_HOLE;
+            if (jv_is_str(tag)) {
+                uint32_t r = js_str_concat(vm, js_str_concat(vm, js_str_ascii(vm, "[object "), jv_idx(tag)), js_str_ascii(vm, "]"));
+                return jv_str(r);
+            }
         }
         return jv_str(js_str_ascii(vm, t));
     }
@@ -1015,11 +1453,12 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_OP_PROPENUM: {
         if (!jv_is_obj(thisv)) return JV_FALSE;
-        uint32_t ks = js_to_string(vm, a0);
-        if (!ks) return JV_HOLE;
+        int kok = 1;
+        uint32_t key = js_prop_key(vm, a0, &kok);
+        if (!kok) return JV_HOLE;
         jv v;
         uint32_t f;
-        if (js_get_own(vm, jv_idx(thisv), js_atom(vm, ks), &v, &f)) return jv_bool(!(f & JS_SHAPE_HIDDEN));
+        if (js_get_own(vm, jv_idx(thisv), key, &v, &f)) return jv_bool(!(f & JS_SHAPE_HIDDEN));
         return jv_bool(vm->objs[jv_idx(thisv)].kind == JK_ARRAY);
     }
     /* ---- Function ---- */
@@ -1078,12 +1517,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
                     js_array_push(vm, out, jv_obj(pair));
                 }
             }
-        } else if (jv_is_obj(src) && vm->objs[jv_idx(src)].kind == JK_ITER) {
-            for (;;) {
-                jv nx = js_call(vm, js_get(vm, src, A_NEXT), src, 0, 0);
-                if (vm->throwing || js_truthy(vm, js_get(vm, nx, A_DONE))) break;
-                js_array_push(vm, out, js_get(vm, nx, A_VALUE));
-            }
+        } else if (jv_is_obj(src) && (vm->objs[jv_idx(src)].kind == JK_ITER || vm->objs[jv_idx(src)].kind == JK_GENERATOR ||
+                                       js_has(vm, jv_idx(src), JS_KEY_ITERATOR))) {
+            if (!iterate_into(vm, src, out)) return JV_HOLE;
         } else if (jv_is_str(src)) {
             uint32_t s = jv_idx(src);
             for (uint32_t i = 0; i < vm->strs[s].len; i++) {
@@ -1721,19 +2157,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_UNDEF;
     }
     case N_QUEUE_MICROTASK: {
-        /* a task at the present virtual time, after those already due */
+        /* a microtask, run at the next checkpoint in order with the promises' */
         if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
-        js_timer t;
-        memset(&t, 0, sizeof t);
-        t.id = ++vm->timer_id;
-        t.due = vm->now;
-        t.interval = -1;
-        t.fn = a0;
-        t.live = 1;
-        t.seq = ++vm->timer_seq;
-        t.run = vm->cur_run;
-        t.rec = 0xFFFFFFFFu;           /* a microtask: no timer of the page's facts */
-        push_back(vm->timers, t);
+        js_job_push(vm, JOB_CALL, 0, a0, JV_UNDEF, JV_UNDEF);
         return JV_UNDEF;
     }
     /* ---- Map and Set ---- */
@@ -1789,34 +2215,10 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_ITP_NEXT: {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER) return js_throw_msg(vm, vm->type_error_proto, "next called on something not an iterator");
-        uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-        uint32_t it = jv_idx(thisv);
-        uint32_t src = vm->objs[it].a, i = vm->objs[it].b, mode = vm->objs[it].c;
         jv v = JV_UNDEF;
-        int done = 1;
-        if (mode == JI_ARRAY) {
-            if (i < vm->objs[src].b) { v = js_array_get(vm, src, i); vm->objs[it].b = i + 1; done = 0; }
-        } else {
-            uint32_t arr = vm->objs[src].a, step = mode == JI_SET ? 1 : 2;
-            while (i < vm->objs[arr].b && vm->slots[vm->objs[arr].a + i] == JV_HOLE) i += step;
-            if (i < vm->objs[arr].b) {
-                jv k = vm->slots[vm->objs[arr].a + i];
-                if (mode == JI_SET || mode == JI_MAP_KEYS) v = k;
-                else if (mode == JI_MAP_VALUES) v = vm->slots[vm->objs[arr].a + i + 1];
-                else {
-                    uint32_t pair = js_array_new(vm, 0);
-                    js_array_push(vm, pair, k);
-                    js_array_push(vm, pair, mode == JI_SET ? k : vm->slots[vm->objs[arr].a + i + 1]);
-                    v = jv_obj(pair);
-                }
-                done = 0;
-                i += step;
-            }
-            vm->objs[it].b = i;
-        }
-        js_define(vm, r, A_VALUE, v, 0);
-        js_define(vm, r, A_DONE, jv_bool(done), 0);
-        return jv_obj(r);
+        int more = js_iter_step(vm, jv_idx(thisv), &v);
+        if (vm->throwing) return JV_HOLE;
+        return iter_result(vm, more ? v : JV_UNDEF, !more);
     }
     default: break;
     }
@@ -1839,11 +2241,15 @@ void js_builtins_init(js_vm *vm) {
     vm->syntax_error_proto = js_obj_new(vm, JK_PLAIN, vm->error_proto);
     vm->reference_error_proto = js_obj_new(vm, JK_PLAIN, vm->error_proto);
     vm->eval_error_proto = js_obj_new(vm, JK_PLAIN, vm->error_proto);
+    vm->aggregate_error_proto = js_obj_new(vm, JK_PLAIN, vm->error_proto);
     vm->date_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->regexp_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->map_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->set_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->iterator_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->symbol_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->generator_proto = js_obj_new(vm, JK_PLAIN, vm->iterator_proto);
+    vm->promise_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->global = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->global_lex = js_obj_new(vm, JK_PLAIN, 0);
     uint32_t g = vm->global;
@@ -2025,5 +2431,57 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, stp, "entries", N_SETP_ENTRIES, 0);
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_MP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
     defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
-    defn(vm, g, "Symbol", N_SYMBOL, 0);
+
+    /* Symbol: the function, its registry, the well-known ones; its prototype */
+    uint32_t sy = ctor(vm, "Symbol", N_SYMBOL, 0, vm->symbol_proto);
+    defn(vm, sy, "for", N_SYM_FOR, 1);
+    defn(vm, sy, "keyFor", N_SYM_KEYFOR, 1);
+    static const char *const wk[JSYM_N] = { "", "iterator", "asyncIterator", "hasInstance", "isConcatSpreadable", "match", "matchAll",
+                                            "replace", "search", "species", "split", "toPrimitive", "toStringTag", "unscopables" };
+    for (uint32_t i = 1; i < JSYM_N; i++) defv(vm, sy, wk[i], jv_sym(i));
+    uint32_t syp = vm->symbol_proto;
+    defn(vm, syp, "toString", N_SYMP_TOSTRING, 0);
+    defn(vm, syp, "valueOf", N_SYMP_VALUEOF, 0);
+    js_define_accessor(vm, syp, A_DESCRIPTION, jv_obj(js_native_new(vm, N_SYMP_DESC, A_DESCRIPTION, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
+    js_define(vm, syp, JS_SYM_KEY | JSYM_TO_PRIMITIVE, jv_obj(js_native_new(vm, N_SYMP_VALUEOF, A_EMPTY, 1)), JS_SHAPE_HIDDEN);
+    js_define(vm, syp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Symbol")), JS_SHAPE_HIDDEN);
+    {
+        uint32_t oc = jv_idx(js_get(vm, jv_obj(vm->global), js_atom_ascii(vm, "Object")));
+        defn(vm, oc, "getOwnPropertySymbols", N_OBJ_GETOWNSYMS, 1);
+    }
+
+    /* the iterators' protocol: each iterable's Symbol.iterator, and an iterator its own */
+    js_define(vm, vm->iterator_proto, JS_KEY_ITERATOR, jv_obj(js_native_new(vm, N_ITP_SELF, js_str_ascii(vm, "[Symbol.iterator]"), 0)), JS_SHAPE_HIDDEN);
+    js_define(vm, vm->array_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->array_proto), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
+    js_define(vm, vm->map_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->map_proto), js_atom_ascii(vm, "entries")), JS_SHAPE_HIDDEN);
+    js_define(vm, vm->set_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->set_proto), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
+    js_define(vm, vm->string_proto, JS_KEY_ITERATOR, jv_obj(js_native_new(vm, N_SP_ITER, js_str_ascii(vm, "[Symbol.iterator]"), 0)), JS_SHAPE_HIDDEN);
+
+    /* generators */
+    uint32_t gp = vm->generator_proto;
+    defn(vm, gp, "next", N_GEN_NEXT, 1);
+    defn(vm, gp, "return", N_GEN_RETURN, 1);
+    defn(vm, gp, "throw", N_GEN_THROW, 1);
+    js_define(vm, gp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Generator")), JS_SHAPE_HIDDEN);
+
+    /* Promise */
+    uint32_t prc = ctor(vm, "Promise", N_PROMISE, 1, vm->promise_proto);
+    vm->promise_ctor = prc;
+    defn(vm, prc, "resolve", N_PR_RESOLVE, 1);
+    defn(vm, prc, "reject", N_PR_REJECT, 1);
+    defn(vm, prc, "all", N_PR_ALL, 1);
+    defn(vm, prc, "allSettled", N_PR_ALLSETTLED, 1);
+    defn(vm, prc, "race", N_PR_RACE, 1);
+    defn(vm, prc, "any", N_PR_ANY, 1);
+    uint32_t pp = vm->promise_proto;
+    defn(vm, pp, "then", N_PRP_THEN, 2);
+    defn(vm, pp, "catch", N_PRP_CATCH, 1);
+    defn(vm, pp, "finally", N_PRP_FINALLY, 1);
+    js_define(vm, pp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Promise")), JS_SHAPE_HIDDEN);
+    {
+        uint32_t ae = ctor(vm, "AggregateError", N_AGGREGATE_ERROR, 2, vm->aggregate_error_proto);
+        defv(vm, vm->aggregate_error_proto, "name", jv_str(js_atom_ascii(vm, "AggregateError")));
+        defv(vm, vm->aggregate_error_proto, "message", jv_str(A_EMPTY));
+        vm->objs[ae].proto = vm->error_ctor;
+    }
 }
