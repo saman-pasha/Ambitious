@@ -1270,6 +1270,73 @@ be built side by side and merged without touching each other's.
   direction, a right-to-left paragraph before left-to-right ones of as many pieces. Its cost
   (`docs/performance.md`): the large page's layout 15.0 ms before, 53.3 ms after, against
   Chromium's 202.2 ms; paint unchanged.
+- **12z Shadow trees rendered** (the flat tree in `src/dom/dom.c`, `src/dom/dom.h` and
+  `contracts/dom.pl`: a host's root, each slot's assigned and manually assigned nodes, a shadow
+  root's options; a sheet's tree and depth in `src/css/css.c` and `contracts/css.pl`; the flat
+  tree walked in `src/layout/layout.c` and `src/a11y/a11y.c`; declarative shadow roots in
+  `src/html/tree.c`, their parts fetched in `src/net/net.c`; slots, `slotchange` and
+  `composedPath()` in `src/script/custom.c`; inheritance and the context's step in
+  `prolog/amb/rules/`), each measured in Chromium first, the specs deciding where it left room:
+  - the flat tree (DOM 4.2.2, CSS Scoping 1, 2.2): the DOM finds each slot's assigned nodes
+    (named: a host's element and text children by their slot attribute, each to the first slot
+    of its name in its tree's order; manual: those `assign()` gave, in its order, while they are
+    the host's children) when a walker asks after a change (`flatten`, its revision kept on the
+    document node), and keeps them as lists on the nodes; one walk (`dom_flat_first`, `_next`,
+    `_parent`, `_walk`) serves every module. The cascade styles the flat tree's elements alone,
+    each under its parent there (a slotted one under its slot, a shadow root's under its host;
+    a host's child no slot takes has no style, as Chromium's `getComputedStyle` gives none), an
+    item blockified by the box it is laid out in past a `display: contents` element (a flex
+    host's slotted children are its items: a style keeps whether its children's box is a flex
+    or grid container); the user agent's sheet makes a slot `display: contents`; layout lays a
+    host's shadow tree out in its place and a slot's nodes (else its fallback) where it stands;
+    accessibility walks it, its names from content too; the reasoner inherits through it
+    (`dom_flat_parent/2` and `dom_flat_child/2` over the facts `dom_assigned_slot/2`,
+    `dom_slot_first/2` and `dom_slot_next/2`);
+  - style scoping: a shadow tree's style elements and links make sheets of its tree, whose rules
+    match its elements alone, a combinator going up from the root's elements to the featureless
+    host (`:host`, `:host()` and `:host-context()` alone match it: neither `*`, `.k` nor
+    `:not(:host)`, and nothing is above it); `:host()` and `:host-context()` (the host or an
+    ancestor in the flat tree, as Chromium walks them) a pseudo-class and their argument's
+    specificity; `::slotted()` an element assigned to one of the tree's slots, through a slot
+    assigned to a slot, a pseudo-element and its argument's; `::part()` an element of a host's
+    tree by its part names or that a deeper one's `exportparts` gives them, `:host::part()` a
+    tree's own parts; pseudo-elements after each. A sheet's encapsulation context, its tree's
+    depth, ranks after origin and importance and before the style attribute (Cascade 5, 6.1):
+    the outer winning a normal declaration (a `::part()` rule over the part's own style
+    attribute), the inner an important one (`:host { color: red !important }` over the host's
+    important style attribute); a tree's elements' hints and style attributes in sheets of its
+    depth; `css_lost/4` names the step (`context(lost(shadow_tree(depth(1))), won(document))`);
+  - declarative shadow DOM (HTML 13.2.6.4.4): a template whose `shadowrootmode` is open or
+    closed, in any case, in a document parsed whole, attaches its parent's shadow root when the
+    parent may host one and hosts none, with `shadowrootdelegatesfocus`, `shadowrootclonable` and
+    `shadowrootserializable`; the template is pushed alone, the root its contents, and is never in
+    the document; a second one, one of a mode no one knows and `innerHTML`'s are templates as any
+    other; the loader fetches a page's parts in shadow-including order, a declarative tree's
+    links and images among them;
+  - scripts: `attachShadow()`'s `delegatesFocus`, `slotAssignment` (a value it does not know
+    refused as Chromium refuses it), `clonable` (a host's clone, deep or not, clones its root) and
+    `serializable`, read back; `assign()` and its refusal of a value no Element or Text;
+    `slotchange`: each change of a slot's assigned nodes, looked for at the end of each call into
+    the host, signals the slot once (a node's slot attribute changed, its old slot before its
+    new), its event fired after the observers' callbacks; `composedPath()` hiding a closed tree's
+    nodes from a listener outside it (DOM 2.9), a nested open tree's too; `appendChild` and
+    `insertBefore` into a shadow root (refused before).
+
+  Gate, each page held to Chromium: `tests/pages/shadowvals.html` (computed values, 78 of 78,
+  from 9: `tools/bench/cssref.js --shadow`, which reads the open trees' elements too),
+  `shadow-layout.html` (boxes 45 of 45, from 0; regions 32 of 32, from 0:
+  `tools/bench/boxes.js --shadow`), `shadow-dsd.html` (boxes 29 of 29, from 0; regions 19 of 19,
+  from 0), `shadow-slots.html` (its console, 54 lines, Chromium's line for line, from 1 of them:
+  the first script stopped at a declarative root's absence) and `a11y-shadow.html` (its
+  accessibility tree, 12 lines, from 3; `tools/bench/axtree.js` reading the shadow trees' ids);
+  the reasoner's flat tree and a root's options (`tests/integ/script-custom.sh`); every other
+  page's boxes, regions, values, consoles and trees as they were; the new pages render, and their
+  scripts run, valgrind clean. Its cost (`docs/performance.md`; callgrind, and `ambitious bench`
+  against main's build): the large page's cascade 4.7% more instructions (55.5M to 58.1M; 6.4 ms
+  and 6.6 ms), its accessibility tree 4.9% (10.7M to 11.2M), its layout none (488.9M to 485.9M),
+  the smaller pages' cascades within 0.4%; the reasoner's `advise` over the large page 4%
+  (1,024 ms to 1,069 ms), the flat tree's parent asked first as the DOM's in a document without
+  shadow roots.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

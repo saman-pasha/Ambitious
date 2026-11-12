@@ -17,10 +17,20 @@
    them, a node may not be inserted under its own template's contents, and the
    serialization of a template is that of its contents. The document node keeps the
    document's mode (DOM 4.5: no-quirks, quirks or limited-quirks), which the HTML parser
-   sets from the DOCTYPE. */
+   sets from the DOCTYPE.
+
+   A shadow root (DOM 4.8) is a fragment too, its host's (the host's shadow link names it),
+   with its options. The flat tree (src/dom/dom.h) is the DOM's: dom_flatten finds each slot's
+   assigned nodes when the document changed since they were last found -- a host's element
+   and text children by name, or those a script assigned the slot (assign_slot), in that
+   order -- and keeps them as lists on the nodes (slot, assigned_first, assigned_next); a
+   node freed leaves them, so no link names a freed node. */
+#include <string.h>
+#include <vector.pl>
 #include <amb.pl>
 
 amb_implementation(dom);
+#include "dom.h"
 
 static int dom_name_is(const dom_document *d, uint32_t name, const char *w) {
     return names_is(d, name, w, strlen(w));
@@ -191,6 +201,8 @@ static void dom_take_contents(dom_document *d, uint32_t x) {
         d->node[c].host = 0;
         children_append(d, x, c);
     }
+    if (!d->node[x].shadow) return;
+    d->node[x].shadow = 0;
     for (uint32_t s = 1; s < d->shadow_len; s++) {
         if (!d->shadow[s].live || d->shadow[s].host != x) continue;
         uint32_t r = d->shadow[s].root;
@@ -201,19 +213,129 @@ static void dom_take_contents(dom_document *d, uint32_t x) {
         }
     }
 }
+/* a node about to be freed taken out of the flat tree's lists: the slot it is assigned to
+   (by the flat tree or by a script) and the nodes assigned to it, so that no live node's
+   link names it */
+static void dom_flat_forget(dom_document *d, uint32_t x) {
+    if (d->node[x].slot) assigned_unlink(d, x);
+    while (d->node[x].assigned_first) assigned_unlink(d, d->node[x].assigned_first);
+    if (d->node[x].manual) manual_unlink(d, x);
+    while (d->node[x].manual_first) manual_unlink(d, d->node[x].manual_first);
+}
 
-dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode) {
+dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode, dom_slot_assignment assignment, uint8_t delegates_focus,
+                             uint8_t clonable, uint8_t serializable, uint8_t declarative) {
     dom_node_h none = { 0, 0, 0 };
-    if (dom_check_attach_shadow(d, host, mode) != DOM_OK) return none;
+    if (dom_check_attach_shadow(d, host, mode, assignment, delegates_focus, clonable, serializable, declarative) != DOM_OK) return none;
     dom_node_h r = node_new(d);
     d->node[r.index].kind = DOM_NODE_KIND_FRAGMENT;
     d->node[r.index].host = host.index;
+    d->node[host.index].shadow = r.index;
     dom_shadow_h s = shadow_new(d);
     d->shadow[s.index].host = host.index;
     d->shadow[s.index].root = r.index;
     d->shadow[s.index].mode = mode;
+    d->shadow[s.index].assignment = assignment;
+    d->shadow[s.index].delegates_focus = delegates_focus != 0;
+    d->shadow[s.index].clonable = clonable != 0;
+    d->shadow[s.index].serializable = serializable != 0;
+    d->shadow[s.index].declarative = declarative != 0;
     dom_log(d, DOM_OP_ATTACH_SHADOW, host.index, r.index);
     return r;
+}
+
+/* ---- the flat tree (DOM 4.2.2; CSS Scoping 1, 2.2; src/dom/dom.h) ---- */
+
+/* an HTML slot element */
+static int dom_is_slot(const dom_document *d, uint32_t x) {
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML && dom_name_is(d, d->node[x].name, "slot");
+}
+/* the value of x's attribute of that name (an empty span for none) */
+static amb_span dom_attr_value(const dom_document *d, uint32_t x, uint32_t name) {
+    amb_span none = { 0, 0 };
+    if (!name || d->node[x].kind != DOM_NODE_KIND_ELEMENT) return none;
+    for (uint32_t a = d->node[x].first_attr; a; a = d->attr[a].next) if (d->attr[a].name == name && d->attr[a].ns == DOM_ATTR_NAMESPACE_NULL) return d->attr[a].value;
+    return none;
+}
+/* the node after y in tree order within top's subtree (top not counted), 0 at its end */
+static uint32_t dom_next_under(const dom_document *d, uint32_t y, uint32_t top) {
+    if (d->node[y].first_child) return d->node[y].first_child;
+    while (y != top && !d->node[y].next_sibling) y = d->node[y].parent;
+    return y == top || !y ? 0 : d->node[y].next_sibling;
+}
+/* each shadow root's slots given their assigned nodes (assign slottables for a tree, DOM
+   4.2.2.3), when the document changed since they were last found: named, a host's element
+   and text children each to the first slot in its tree, in tree order, of the name its slot
+   attribute gives (none and the text's: the slot of no name, or an empty one); manual, each
+   slot its manually assigned nodes that are its host's children, in the order assign() gave */
+dom_status dom_flatten(dom_document *d) {
+    dom_status st = dom_check_flatten(d);
+    if (st != DOM_OK || d->node_len < 2 || d->node[1].flat == d->revision + 1) return st;
+    if (d->shadow_len > 1) {
+        for (uint32_t x = 1; x < d->node_len; x++) {
+            d->node[x].slot = 0;
+            d->node[x].assigned_first = 0;
+            d->node[x].assigned_next = 0;
+        }
+        uint32_t name_atom = names_find(d, "name", 4), slot_atom = names_find(d, "slot", 4);
+        vector<uint32_t> slots, tails;
+        for (uint32_t s = 1; s < d->shadow_len; s++) {
+            if (!d->shadow[s].live) continue;
+            uint32_t host = d->shadow[s].host, root = d->shadow[s].root;
+            if (!host || !root || host >= d->node_len || root >= d->node_len || !d->node[host].live || !d->node[root].live) continue;
+            clear(slots);
+            for (uint32_t c = d->node[root].first_child; c; c = dom_next_under(d, c, root)) if (dom_is_slot(d, c)) push_back(slots, c);
+            if (!len(slots)) continue;
+            clear(tails);
+            resize(tails, len(slots), 0u);
+            int manual = d->shadow[s].assignment == DOM_SLOT_ASSIGNMENT_MANUAL;
+            for (uint32_t c = manual ? 0 : d->node[host].first_child; c; c = d->node[c].next_sibling) {
+                if (d->node[c].kind != DOM_NODE_KIND_ELEMENT && d->node[c].kind != DOM_NODE_KIND_TEXT) continue;
+                amb_span want = dom_attr_value(d, c, slot_atom);
+                size_t k = 0;
+                for (; k < len(slots); k++) {
+                    amb_span nm = dom_attr_value(d, at(slots, k), name_atom);
+                    if (nm.len == want.len && (want.len == 0 || memcmp(text_ptr(d, nm), text_ptr(d, want), want.len) == 0)) break;
+                }
+                if (k == len(slots)) continue;
+                uint32_t sl = at(slots, k), t = at(tails, k);
+                d->node[c].slot = sl;
+                if (t) d->node[t].assigned_next = c;
+                else d->node[sl].assigned_first = c;
+                tails[k] = c;
+            }
+            for (size_t k = 0; manual && k < len(slots); k++) {
+                uint32_t sl = at(slots, k), t = 0;
+                for (uint32_t m = d->node[sl].manual_first; m; m = d->node[m].manual_next) {
+                    if (d->node[m].parent != host || d->node[m].slot) continue;
+                    d->node[m].slot = sl;
+                    if (t) d->node[t].assigned_next = m;
+                    else d->node[sl].assigned_first = m;
+                    t = m;
+                }
+            }
+        }
+    }
+    d->node[1].flat = d->revision + 1;
+    return DOM_OK;
+}
+
+/* assign() (HTMLSlotElement, DOM 4.2.2.6): the node appended to the slot's manually
+   assigned nodes, taken from those of the slot it had; clear_slot empties a slot's */
+dom_status dom_assign_slot(dom_document *d, dom_node_h slot, dom_node_h node) {
+    dom_status st = dom_check_assign_slot(d, slot, node);
+    if (st != DOM_OK) return st;
+    if (d->node[node.index].manual) manual_unlink(d, node.index);
+    manual_append(d, slot.index, node.index);
+    dom_log(d, DOM_OP_ASSIGN_SLOT, slot.index, node.index);
+    return DOM_OK;
+}
+dom_status dom_clear_slot(dom_document *d, dom_node_h slot) {
+    dom_status st = dom_check_clear_slot(d, slot);
+    if (st != DOM_OK) return st;
+    while (d->node[slot.index].manual_first) manual_unlink(d, d->node[slot.index].manual_first);
+    dom_log(d, DOM_OP_CLEAR_SLOT, slot.index, 0);
+    return DOM_OK;
 }
 
 /* a detached subtree freed, children before their parent, a template's
@@ -231,6 +353,7 @@ dom_status dom_destroy(dom_document *d, dom_node_h node) {
         uint32_t next = d->node[x].next_sibling;
         if (x != root) children_unlink(d, x);
         dom_free_attrs(d, x);
+        dom_flat_forget(d, x);
         node_free(d, node_handle(d, x));
         if (x == root) break;
         x = next ? next : up;

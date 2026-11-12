@@ -1,6 +1,6 @@
 // tools/bench/axtree.js PAGE -- the page loaded in Chromium (Playwright's headless shell) and its
 // accessibility tree (the DevTools protocol's Accessibility.getFullAXTree) printed a line a node,
-// for each node whose element has an id, in the tree's order: the reference that the expected
+// for each node whose element has an id (a shadow tree's too, open or closed), in the tree's order: the reference that the expected
 // trees of the accessibility fixtures (tests/pages/a11y-*.chromium) come from. A line is
 //
 //   ROLE#ID "NAME" desc "DESCRIPTION" level=N checked=V selected=true expanded=V pressed=V
@@ -90,9 +90,10 @@ function line(n, id, el) {
     for (let i = 0; i < a.length; i += 2) at[a[i]] = a[i + 1];
     if (at.id !== undefined) ids.set(d.backendNodeId, at.id);
     els.set(d.backendNodeId, { tag: String(d.nodeName || '').toLowerCase(), at });
+    for (const c of d.shadowRoots || []) walk(c);
     for (const c of d.children || []) walk(c);
   };
-  walk((await cdp.send('DOM.getDocument', { depth: -1 })).root);
+  walk((await cdp.send('DOM.getDocument', { depth: -1, pierce: true })).root);
   const { nodes } = await cdp.send('Accessibility.getFullAXTree');
   const byId = new Map(nodes.map((n) => [n.nodeId, n]));
   const out = [];

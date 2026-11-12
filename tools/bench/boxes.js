@@ -1,28 +1,38 @@
-// tools/bench/boxes.js PAGE... -- each page loaded in Chromium (Playwright's headless shell) in
-// an 800x600 viewport, and each element with an id written with its getBoundingClientRect():
-// its border box in page px, scrolled to the top. The reference tests/integ/boxes.sh holds
-// Ambitious's boxes to: `node tools/bench/boxes.js tests/pages/NAME.html` writes
+// tools/bench/boxes.js [--shadow] PAGE... -- each page loaded in Chromium (Playwright's headless
+// shell) in an 800x600 viewport, and each element with an id written with its
+// getBoundingClientRect(): its border box in page px, scrolled to the top; with --shadow, the
+// elements with an id in every open shadow tree too, each tree after its host's, in the
+// document's order (the ids unique across the page's trees). The reference tests/integ/boxes.sh
+// holds Ambitious's boxes to: `node tools/bench/boxes.js tests/pages/NAME.html` writes
 // tests/pages/NAME.chromium.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 (async () => {
+  let args = process.argv.slice(2), shadow = false;
+  if (args[0] === '--shadow') { shadow = true; args = args.slice(1); }
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
-  for (const file of process.argv.slice(2)) {
+  for (const file of args) {
     await page.goto('file://' + path.resolve(file), { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
-    const rows = await page.evaluate(() => {
+    const rows = await page.evaluate((shadow) => {
       const out = [];
-      for (const e of document.querySelectorAll('[id]')) {
-        const r = e.getBoundingClientRect();
-        const f = (v) => String(Math.round(v * 1000) / 1000);
-        out.push(e.id + ' ' + e.tagName.toLowerCase() + ' ' + [r.x + scrollX, r.y + scrollY, r.width, r.height].map(f).join(' '));
-      }
+      const walk = (root) => {
+        for (const e of root.querySelectorAll('*')) {
+          if (e.id) {
+            const r = e.getBoundingClientRect();
+            const f = (v) => String(Math.round(v * 1000) / 1000);
+            out.push(e.id + ' ' + e.tagName.toLowerCase() + ' ' + [r.x + scrollX, r.y + scrollY, r.width, r.height].map(f).join(' '));
+          }
+          if (shadow && e.shadowRoot) walk(e.shadowRoot);
+        }
+      };
+      walk(document);
       return out;
-    });
+    }, shadow);
     const name = path.basename(file, '.html');
-    const head = '# boxes of tests/pages/' + name + '.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height\n';
+    const head = '# boxes of tests/pages/' + name + '.html in Chromium (tools/bench/boxes.js' + (shadow ? ' --shadow' : '') + '): id, tag, x, y, width, height\n';
     fs.writeFileSync(path.join(path.dirname(file), name + '.chromium'), head + rows.map((l) => l + '\n').join(''));
   }
   await browser.close();

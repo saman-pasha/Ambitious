@@ -2,7 +2,10 @@
 %%
 %% The cascade's order, as CSS Cascade 5 has it for the origins the module
 %% knows: origin and importance first (normal user agent < normal author <
-%% animations < important author < important user agent), the style attribute's
+%% animations < important author < important user agent), then the encapsulation
+%% context (a shadow tree's rules against its host's tree's, by their sheets' depths,
+%% css_sheet_tree/3: the outer winning for normal declarations, the inner for important
+%% ones), the style attribute's
 %% declarations above the rules' within each (element-attached style), then the cascade layer
 %% (@layer: in the layers' order, the unlayered rules last; for !important the
 %% order reversed), then specificity, then scope proximity (@scope: a nearer scoping
@@ -11,7 +14,7 @@
 %%
 %% No clause here cuts: amb_why/2 proves these rules clause by clause, and an
 %% if-then-else says what a cut would.
-:- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
+:- dynamic css_sheet/2, css_sheet_tree/3, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
    css_imported/3, css_font_face/5, css_font_face_font/2,
    css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3, css_registered/5,
@@ -35,7 +38,10 @@ css_declared_rgba(N, P, C) :- css_style_of(N, S), css_style_rgba(S, P, C).
 %% longhand left at its initial value under a mask-image of more layers than one is that
 %% value an item for each layer, as Chromium computes it (mask-size: auto, auto).
 %% The elements are those the cascade styled (css_style_of/2): a template's
-%% contents are no part of the document's tree, and have no style.
+%% contents are no part of the document's tree, and have no style, and neither has a
+%% node of no flat tree (a host's child no slot takes). An element inherits from its
+%% parent in the flat tree (dom_flat_parent/2): a slotted one from its slot, a shadow
+%% root's from its host.
 css_computed(N, P, V, How) :-
     css_declared(N, P, V, How).
 css_computed(N, P, V, How) :-
@@ -43,7 +49,7 @@ css_computed(N, P, V, How) :-
     css_rules_default(N, P, V, How).
 
 css_rules_default(N, P, V, How) :-
-    (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
+    (   css_rules_inherited(P), dom_flat_parent(N, Par), css_style_of(Par, _)
     ->  css_computed(Par, P, V, _), How = inherited
     ;   css_rules_currentcolor(P)
     ->  css_computed(N, color, V, _), How = initial
@@ -61,7 +67,7 @@ css_rgba(N, P, C) :-
     css_rules_default_rgba(N, P, C).
 
 css_rules_default_rgba(N, P, C) :-
-    (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
+    (   css_rules_inherited(P), dom_flat_parent(N, Par), css_style_of(Par, _)
     ->  css_rgba(Par, P, C)
     ;   css_rules_currentcolor(P)
     ->  css_rgba(N, color, C)
@@ -154,13 +160,13 @@ css_rules_items(V0, K, V) :- K1 is K - 1, css_rules_items(V0, K1, V1), atomic_li
 css_custom(N, Name, V) :-
     css_style_of(N, S), css_style_custom(S, Name, V, How, _), ( How == initial -> V \== '' ; true ).
 css_custom(N, Name, V) :-
-    dom_parent(N, P), dom_element(P, _), css_custom(P, Name, V),
+    dom_flat_parent(N, P), dom_element(P, _), css_custom(P, Name, V),
     \+ ( css_style_of(N, S), css_style_custom(S, Name, _, _, _) ),
     \+ css_rules_registered(Name, _, false, _).
 css_custom(N, Name, V) :-
     css_style_of(N, S), css_rules_registered(Name, _, Inherits, V),
     \+ css_style_custom(S, Name, _, _, _),
-    (   Inherits == true -> \+ ( dom_parent(N, P), dom_element(P, _) ) ; true ).
+    (   Inherits == true -> \+ ( dom_flat_parent(N, P), dom_element(P, _) ) ; true ).
 
 %% a custom property's registration that holds: the last of its name's
 css_rules_registered(Name, Syntax, Inherits, Initial) :-
@@ -192,6 +198,22 @@ css_rules_rank(D, rank(Layer, LayerRank, Spec, Order)) :-
     css_decl(D, R, _, _, Imp), css_rule(R, _, _, Spec, Order), css_origin_of(D, O),
     (   css_keyframe(R, _, _) -> Layer = 4 ; css_rules_layer(O, Imp, Layer) ),
     css_rules_layer_rank(R, Imp, LayerRank).
+
+%% a declaration's encapsulation context (Cascade 5, 6.1): its origin and importance
+%% without the style attribute's place (the context is ranked between them), and its
+%% sheet's depth, the outer winning a normal declaration's, the inner an important one's
+css_rules_context(D, ctx(OI, K, Depth)) :-
+    css_decl(D, R, _, _, Imp), css_rule(R, S, _, _, _), css_origin_of(D, O),
+    (   css_keyframe(R, _, _) -> OI = 3 ; css_rules_oi(O, Imp, OI) ),
+    (   css_sheet_tree(S, _, Depth0) -> Depth = Depth0 ; Depth = 0 ),
+    (   Imp == true -> K = Depth ; K is 0 - Depth ).
+css_rules_oi(user_agent, false, 1).
+css_rules_oi(author, false, 2).
+css_rules_oi(inline, false, 2).
+css_rules_oi(author, true, 4).
+css_rules_oi(inline, true, 4).
+css_rules_oi(user_agent, true, 5).
+css_rules_context_name(D, Name) :- ( D =:= 0 -> Name = document ; Name = shadow_tree(depth(D)) ).
 
 %% a rule's cascade layer's place: its layer's rank, the unlayered after every layer
 %% (8191, as src/css/css.c has it); for !important, the order reversed
@@ -230,8 +252,10 @@ css_lost(N, P, D2, Why) :-
     css_won(N, P, D),
     css_matched(N, R2), css_decl(D2, R2, P, _, _), D2 \== D,
     css_rules_rank(D, rank(L1, LR1, S1, O1)), css_rules_rank(D2, rank(L2, LR2, S2, O2)),
+    css_rules_context(D, ctx(OI1, K1, De1)), css_rules_context(D2, ctx(OI2, K2, De2)),
     css_decl(D, R1, _, _, _), css_rules_nearness(N, R1, X1), css_rules_nearness(N, R2, X2),
-    (   L2 < L1 -> css_rules_layer_name(L2, W2), css_rules_layer_name(L1, W1), Why = origin_or_importance(lost(W2), won(W1))
+    (   OI2 =:= OI1, K2 < K1 -> css_rules_context_name(De2, C2), css_rules_context_name(De1, C1), Why = context(lost(C2), won(C1))
+    ;   L2 < L1 -> css_rules_layer_name(L2, W2), css_rules_layer_name(L1, W1), Why = origin_or_importance(lost(W2), won(W1))
     ;   LR2 < LR1 -> css_layer_of(D2, N2), css_layer_of(D, N1), Why = layer(lost(N2), won(N1))
     ;   S2 < S1 -> css_specificity(S2, T2), css_specificity(S1, T1), Why = specificity(T2, lower_than(T1))
     ;   X2 < X1 -> css_rules_scope_name(X2, W2), css_rules_scope_name(X1, W1), Why = scope_proximity(lost(W2), won(W1))
@@ -258,7 +282,7 @@ css_explain(N, P, animated(Value, by(Name, at(Offset)), written(Text))) :-
     css_computed(N, P, Value, animated), css_won(N, P, D),
     css_decl(D, R, _, Text, _), css_keyframe(R, K, Offset), css_keyframes(K, Name, _).
 css_explain(N, P, inherited(Value, from(Parent), Because)) :-
-    css_computed(N, P, Value, inherited), dom_parent(N, Parent),
+    css_computed(N, P, Value, inherited), dom_flat_parent(N, Parent),
     css_rules_because(N, P, 'the property is inherited', Because).
 css_explain(N, P, initial(Value, Because)) :-
     css_computed(N, P, Value, initial),
@@ -276,7 +300,7 @@ css_rules_because(N, P, Otherwise, Because) :-
 css_background_of(N, C, From) :-
     (   css_rgba(N, background_color, C0), C0 /\ 255 =\= 0
     ->  C = C0, From = N
-    ;   dom_parent(N, P), dom_element(P, _)
+    ;   dom_flat_parent(N, P), dom_element(P, _)
     ->  css_background_of(P, C, From)
     ;   layout_box(V, _, viewport, _, _, _, _), layout_background(V, C1)
     ->  C = C1, From = canvas
@@ -286,7 +310,7 @@ css_background_of(N, C, From) :-
 %% an element that is drawn: neither it nor an ancestor has display none
 css_rendered(N) :-
     css_computed(N, display, D, _), D \== none,
-    (   dom_parent(N, P), dom_element(P, _) -> css_rendered(P) ; true ).
+    (   dom_flat_parent(N, P), dom_element(P, _) -> css_rendered(P) ; true ).
 
 %% WCAG 2's contrast ratio of an element's text with its background
 css_contrast(N, Ratio) :-
@@ -312,7 +336,7 @@ css_rules_needed(N, Min) :-
 
 %% an element with text of its own that shows: a child text that is not all white space
 css_rules_has_text(N) :-
-    once(( dom_parent(T, N), dom_text(T, S), atom_codes(S, Cs), member(C, Cs), C > 32 )).
+    once(( dom_flat_child(N, T), dom_text(T, S), atom_codes(S, Cs), member(C, Cs), C > 32 )).
 
 %% ---- what the reasoner says of a page's style ------------------------------------
 

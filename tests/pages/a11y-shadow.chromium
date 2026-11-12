@@ -1,0 +1,12 @@
+button#sb "Do: Save"
+list#sul
+listitem#li1 level=1
+listitem#li2 level=1
+heading#sh2 "Shadow named heading" level=2
+link#xhw "named"
+region#sreg "The region"
+paragraph#sp
+paragraph#sop
+navigation#snav
+link#sfa "fallback link"
+link#lnk "from the link's tree"

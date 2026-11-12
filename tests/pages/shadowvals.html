@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>shadow trees styled</title>
+<!-- Style scoping (CSS Scoping 1, CSS Shadow Parts 1, Cascade 5's encapsulation contexts), PLAN.md
+     12z: a shadow tree's style elements match its elements alone and the document's none of them;
+     :host, :host(), :host-context() and their specificities; the featureless host (* and .k do not
+     match it, a combinator above it finds nothing); ::slotted() and its specificity, through a slot
+     assigned to a slot; ::part() and exportparts, :host::part(); the outer context winning a normal
+     declaration (over a style attribute too), the inner an important one; inheritance through the
+     flat tree (a slotted element from its slot, a slot's fallback, a shadow root's elements from the
+     host); a slot's display contents. Each element with an id and a data-check, the open shadow
+     trees' too, held to Chromium's computed values (tests/pages/shadowvals.chromium:
+     tools/bench/cssref.js --shadow). -->
+<style>
+x-a { color: rgb(0, 0, 255); }
+x-b { color: rgb(0, 0, 255) !important; }
+x-c { color: rgb(0, 0, 255); }
+p.sl { color: rgb(0, 0, 255); }
+p.si { color: rgb(0, 0, 255); }
+div { color: rgb(128, 0, 128); }
+:host { background-color: rgb(255, 0, 0); }
+x-p::part(lab) { color: rgb(0, 128, 128); }
+::part(lab) { font-size: 30px; }
+x-p::part(big) { font-size: 25px; }
+::part(big) { font-size: 35px; }
+x-ex::part(inner-lab) { color: rgb(0, 0, 128); }
+x-ex::part(both) { font-weight: 700; }
+.wrap x-v::part(lab) { color: rgb(0, 0, 128); }
+x-v::part(lab) { color: rgb(0, 128, 128); }
+x-h2 { color: rgb(0, 0, 255) !important; }
+</style>
+</head>
+<body>
+<x-a id="a" data-check="color background-color"></x-a>
+<x-b id="b" data-check="color"></x-b>
+<x-c id="c" class="k" data-check="color display"></x-c>
+<x-s id="s"><p id="s1" class="sl" data-check="color font-size font-weight">slotted</p><p id="s2" class="si" data-check="color font-size">slotted important</p><p id="s3" data-check="color font-size font-weight">plain</p></x-s>
+<x-h id="h" data-check="color"></x-h>
+<x-h2 id="h2" style="color: rgb(0, 128, 0) !important" data-check="color"></x-h2>
+<x-p id="pt"></x-p>
+<x-ex id="ex"></x-ex>
+<div class="dark"><x-ctx id="ctx" data-check="color background-color"></x-ctx></div>
+<x-ctx id="ctx2" data-check="color background-color"></x-ctx>
+<x-fb id="fb"><i id="fbl" data-check="color">light</i></x-fb>
+<x-fb id="fb2"></x-fb>
+<x-k id="k" class="k" data-check="color font-size font-style"></x-k>
+<x-o id="o"><b id="ob" data-check="color font-size font-weight font-style">light</b><i id="oi" slot="x" data-check="color font-weight">light i</i></x-o>
+<x-q id="q"><b id="qb" class="m" data-check="color font-size">light</b></x-q>
+<div class="wrap"><x-v id="v"></x-v></div>
+<x-in id="in" style="color: rgb(10, 20, 30); --v: 7px" data-check="color --v"></x-in>
+<script>
+function sh(el, html) { var r = (typeof el === 'string' ? document.getElementById(el) : el).attachShadow({ mode: 'open' }); r.innerHTML = html; return r; }
+sh('a', '<style>:host { color: rgb(255, 0, 0); background-color: rgb(0, 255, 0); }</style><span id="a1" data-check="color">t</span>');
+sh('b', '<style>:host { color: rgb(255, 0, 0) !important; }</style><span id="b1" data-check="color">t</span>');
+sh('c', '<style>:host(.k) { color: rgb(255, 0, 0); display: block; } :host { color: rgb(0, 128, 0); } :host(.k) span { color: rgb(255, 165, 0); } :host > span { font-size: 20px; } :host span { font-weight: 700; } * { text-transform: uppercase; } div :host span { letter-spacing: 3px; } :host.k span { font-style: italic; } * > span { text-indent: 5px; }</style>' +
+  '<span id="c1" data-check="color font-size font-weight text-transform letter-spacing font-style text-indent">t</span><div id="c2" data-check="color"><span id="c3" data-check="text-indent font-weight">n</span></div>');
+sh('s', '<style>::slotted(p) { color: rgb(255, 0, 0); font-size: 20px; } ::slotted(.si) { color: rgb(255, 0, 0) !important; } slot { color: rgb(0, 128, 0); font-weight: 700; } p { color: rgb(255, 165, 0); } .other { display: block; }</style>' +
+  '<slot id="sslot" data-check="color font-weight display"></slot><slot name="other" class="other" id="sother" data-check="display color"><b id="sfb" data-check="color font-weight">fallback</b></slot>');
+sh('h', '<style>div { font-size: 30px; } p { color: rgb(255, 0, 0); }</style><div id="h1" data-check="color font-size">t</div><p id="h3" data-check="color font-size">p</p>');
+sh('h2', '<style>:host { color: rgb(255, 0, 0) !important; }</style>t');
+sh('pt', '<style>[part=lab] { color: rgb(255, 0, 0); font-size: 12px; }</style><span id="pt1" part="lab" style="color: rgb(255, 0, 0); font-size: 13px" data-check="color font-size">l</span><span id="pt2" part="other lab" data-check="color font-size">l2</span><span id="pt3" part="big" data-check="font-size">b</span>');
+var exr = sh('ex', '<style>:host::part(both) { font-style: italic; }</style><x-p id="exin" exportparts="lab: inner-lab, both"></x-p><span id="exown" part="both" data-check="font-style font-weight">own</span>');
+sh(exr.getElementById('exin'), '<span id="exin1" part="lab" data-check="color">l</span><span id="exin2" part="both" data-check="font-weight font-style">b</span>');
+sh('ctx', '<style>:host-context(.dark) { color: rgb(255, 255, 255); background-color: rgb(0, 0, 0); } :host-context(div) span { font-size: 22px; }</style><span id="ctx1" data-check="color font-size">t</span>');
+sh('ctx2', '<style>:host-context(.dark) { color: rgb(255, 255, 255); background-color: rgb(0, 0, 0); }</style><span id="ctx21" data-check="color">t</span>');
+sh('fb', '<style>slot { color: rgb(255, 0, 0); }</style><slot id="fbs" data-check="color display"><em>fallback</em></slot>');
+sh('fb2', '<style>slot { color: rgb(255, 0, 0); }</style><slot id="fb2s"><em id="fb2e" data-check="color">fallback</em></slot>');
+sh('k', '<style>:host(.k) { color: rgb(255, 0, 0); } :host { color: rgb(0, 128, 0); } :host(:not(.zz)) { font-size: 20px; } :host(*) { font-size: 30px; } :host(:is(x-k)) { font-style: italic; }</style>t');
+var orr = sh('o', '<style>::slotted(b) { color: rgb(255, 0, 0); font-size: 20px; } slot { color: rgb(0, 0, 255); }</style><x-i id="n1"><slot id="os" slot="y"></slot><slot id="osx" name="x" slot="y"></slot></x-i>');
+sh(orr.getElementById('n1'), '<style>::slotted(*) { color: rgb(0, 128, 0); font-weight: 700; } ::slotted(b) { font-style: italic; color: rgb(255, 165, 0); }</style><slot id="ins" name="y" data-check="color"></slot>');
+sh('q', '<style>::slotted(.m) { color: rgb(255, 0, 0); } ::slotted(b) { color: rgb(0, 128, 0); } ::slotted(b.m) { font-size: 20px; } ::slotted(*) { font-size: 30px; }</style><slot></slot>');
+sh('v', '<span id="v1" part="lab" data-check="color">l<span id="v2" data-check="color">in</span></span>');
+sh('in', '<style>span { --w: 3px; }</style><span id="in1" data-check="color --v --w">t</span>');
+</script>
+</body></html>

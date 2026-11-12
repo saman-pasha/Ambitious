@@ -1,7 +1,10 @@
 /* src/layout/layout.c -- the layout module (contracts/layout.pl): the box tree of
    a styled document, laid out; and the module's generated implementation.
 
-   Boxes. The root element's box is the viewport box's child. An element whose
+   Boxes, over the flat tree (src/dom/dom.h): a shadow host's children are its shadow
+   root's, a slot's its assigned nodes or else its fallback, and a slot is display: contents
+   (the user agent's sheet); a table's rows and cells and a list item's ordinal are read from
+   the DOM's children. The root element's box is the viewport box's child. An element whose
    display is block, list-item, table, flex, grid or flow-root makes a
    block-level box. An inline element makes no box: its text and
    its inline children are laid out in its block container's lines, its margins,
@@ -241,6 +244,7 @@ amb_implementation(layout);
 #include "bidi_data.h"
 #include "../net/url.h"
 #include "../paint/svg.h"
+#include "../dom/dom.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run. The cascade's store and
@@ -924,7 +928,7 @@ static int lay_block_level(int dsp) {
    or floated child, which the cascade made a block, holds no place there) */
 static int lay_holds_block(LCTX, uint32_t x) {
     if (x & LAY_GEN) return 0;                  /* a pseudo-element holds its text alone */
-    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+    for (uint32_t c = dom_flat_first(d, x); c; c = dom_flat_next(d, c)) {
         int dsp = lay_display_of(LARGS, c);
         if (dsp == D_NONE) continue;
         if (lay_block_level(dsp)) {
@@ -960,7 +964,7 @@ static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uin
    absolutely; 0 for none, and for what is no fieldset. Laid out by its fieldset on its top border, not in its flow */
 static uint32_t lay_rendered_legend(LCTX, uint32_t x) {
     if ((x & LAY_GEN) || !lay_is_named(d, x, "fieldset")) return 0;
-    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+    for (uint32_t c = dom_flat_first(d, x); c; c = dom_flat_next(d, c)) {
         if (!lay_is_named(d, c, "legend")) continue;
         if (lay_display_of(LARGS, c) == D_NONE) continue;
         uint32_t si = lay_si(sx, gx, c);
@@ -1011,7 +1015,7 @@ static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uin
     }
     int closed = lay_closed_details(d, parent);
     uint32_t legend = lay_rendered_legend(LARGS, parent);
-    for (uint32_t c = d->node[parent].first_child; c; c = d->node[c].next_sibling) {
+    for (uint32_t c = dom_flat_first(d, parent); c; c = dom_flat_next(d, c)) {
         int kind = d->node[c].kind;
         if (kind == DOM_NODE_KIND_TEXT) { if (!closed) lay_item(segs, items, c); continue; }
         if (kind != DOM_NODE_KIND_ELEMENT || c == legend) continue;
@@ -1897,7 +1901,8 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
     }
     /* a text node's, in its parent's style (read in place: the run's styles grow only where a query container is
        restyled, in lay_block, which lay_chars never reaches) */
-    uint32_t pe = d->node[node].parent;
+    uint32_t pe = dom_flat_parent(d, node);
+    if (!pe) pe = d->node[node].parent;
     uint32_t si = pe < len(*sx) ? at(*sx, pe) & LAY_SMASK : 0;
     amb_span span = d->node[node].data;
     lay_chars(LARGS, data(*sc) + si, node, pe, text_ptr(d, span), span.len, deco, ps, sp, ih);
@@ -2459,7 +2464,8 @@ static double lay_xh(const lay_style *s) { return s->fs * amb_x_height(s->face);
 /* the parent of a run's item: an element's parent, or a pseudo-element's element */
 static uint32_t lay_parent_of(const dom_document *d, const vector<lay_gen> *gx, uint32_t x) {
     if (x & LAY_GEN) return at(*gx, x & LAY_GIDX).el;
-    return d->node[x].parent;
+    uint32_t p = dom_flat_parent(d, x);
+    return p ? p : d->node[x].parent;
 }
 
 /* a relatively positioned element's offset (CSS 2.1 9.4.3): left (or right's opposite),
@@ -2582,7 +2588,7 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
             if (g >= 0) lay_node_pieces(LARGS, LAY_GEN | (uint32_t)g, inner, cw, ps, sp, &in);
         }
         int closed = lay_closed_details(d, node);
-        for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling)
+        for (uint32_t c = dom_flat_first(d, node); c; c = dom_flat_next(d, c))
             if (!closed || d->node[c].kind != DOM_NODE_KIND_TEXT) lay_node_pieces(LARGS, c, inner, cw, ps, sp, &in);
         if (fl0 & LAY_HAS_AFTER) {
             int64_t g = lay_gen_find(gx, node, 2);
@@ -5686,7 +5692,7 @@ static int lay_marker_own_line(LCTX, uint32_t el, const lay_style *s) {
     if ((el & LAY_GEN) || s->display != D_LIST_ITEM || !s->list) return 0;
     if (s->list_inside) return 1;
     if (!lay_quirks || (el < len(*sx) && (at(*sx, el) & LAY_HAS_BEFORE))) return 0;
-    for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
+    for (uint32_t c = dom_flat_first(d, el); c; c = dom_flat_next(d, c)) {
         int kind = d->node[c].kind;
         if (kind == DOM_NODE_KIND_TEXT) { if (lay_blank_text(d, c)) continue; return 0; }
         if (kind != DOM_NODE_KIND_ELEMENT) continue;
@@ -7065,7 +7071,7 @@ static void lay_gen_walk(layout_tree *t, const dom_document *d, const css_style 
     size_t mark = len(*ctr);
     if (fl & LAY_HAS_BEFORE) lay_gen_content(t, d, st, xc, sc, gx, x, CSS_PSEUDO_BEFORE, ctr, mark, floor, depth);
     if (level < 1024)
-        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+        for (uint32_t c = dom_flat_first(d, x); c; c = dom_flat_next(d, c)) {
             if (d->node[c].kind != DOM_NODE_KIND_ELEMENT || c >= len(*sx)) continue;
             uint32_t si = at(*sx, c) & LAY_SMASK;
             if (!si || at(*sc, si).display == D_NONE) continue;
@@ -8973,7 +8979,8 @@ static void lay_sticky_shift(LCTX, uint32_t el, const double *bb, const double *
 static int lay_in_subtree(const dom_document *d, uint32_t x, uint32_t el) {
     for (int depth = 0; x && depth < 4096; depth++) {
         if (x == el) return 1;
-        x = d->node[x].parent;
+        uint32_t up = dom_flat_parent(d, x);
+        x = up ? up : d->node[x].parent;
     }
     return 0;
 }
@@ -9081,6 +9088,8 @@ static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy) {
 }
 
 layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, net_loader *net, double width, double height) {
+    /* the flat tree's links, which every walk of the DOM here takes (src/dom/dom.h) */
+    dom_flatten(doc);
     amb_fonts fonts = {0};
     defer(fonts) { AMB_FONTS_DROP(fonts); }
     amb_fonts_load(&fonts);

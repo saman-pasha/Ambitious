@@ -340,6 +340,13 @@ struct js_host {
     vector<uint32_t> remotes;
     vector<uint32_t> cseq;
     vector<uint32_t> xwins;
+    /* slots (src/script/custom.c): each slot's assigned nodes when they were last looked at (a slot, its
+       generation, their count, the nodes), the slots signalled whose slotchange is to be fired (NODEs, a
+       slot and its generation each); whether the document has a shadow root, the DOM's revision and its
+       log's length at the last look */
+    vector<uint32_t> sl_was;
+    vector<uint32_t> sl_sig;
+    uint32_t sl_on, sl_rev, sl_pos, sl_spare;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -364,6 +371,7 @@ struct js_host {
     vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext); \
     vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
     vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail); \
-    vector_uint32_t_drop(&(h).exports); vector_uint32_t_drop(&(h).remotes); vector_uint32_t_drop(&(h).cseq); vector_uint32_t_drop(&(h).xwins)
+    vector_uint32_t_drop(&(h).exports); vector_uint32_t_drop(&(h).remotes); vector_uint32_t_drop(&(h).cseq); vector_uint32_t_drop(&(h).xwins); \
+    vector_uint32_t_drop(&(h).sl_was); vector_uint32_t_drop(&(h).sl_sig)
 
 #endif

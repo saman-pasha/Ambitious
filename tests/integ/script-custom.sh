@@ -8,9 +8,13 @@
 #     attributeChangedCallback, disconnectedCallback, a move, innerHTML's elements, nested
 #     elements' order, one in a shadow tree, a constructor that throws;
 #   shadow.html: attachShadow's checks, open and closed roots, a root's own tree, slots and
-#     their assigned nodes, assignedSlot, events retargeted and their composed paths.
-# Then the facts the reasoner has of the definitions and the shadow trees, and its
-# diagnostic of an element of a custom element's name no script defined.
+#     their assigned nodes, assignedSlot, events retargeted and their composed paths;
+#   shadow-slots.html: declarative shadow roots read back, a clonable root cloned,
+#     attachShadow's options, slotchange in Chromium's order, manual assignment (assign()),
+#     composedPath() hiding a closed tree's nodes (PLAN.md 12z).
+# Then the facts the reasoner has of the definitions and the shadow trees (the flat tree's
+# slots among them), and its diagnostic of an element of a custom element's name no script
+# defined.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-scustom.XXXXXX")
 export AMB_WORK=$work
@@ -18,7 +22,7 @@ amb() { sh "$AMB_ROOT/bin/ambitious" "$@" < /dev/null 2>&1 | sed "s|$AMB_ROOT|RO
 pages="$AMB_ROOT/tests/pages"
 # a page's console as Chromium's is written: its messages, then its uncaught errors
 console() { amb script "$1" > "$work/s.txt"; sed -n -e 's/^console [a-z]* *\[[0-9]*\] //p' "$work/s.txt"; sed -n -e 's/^error *[a-z]* *\[[0-9]*\] /error: /p' "$work/s.txt"; }
-for p in custom shadow; do
+for p in custom shadow shadow-slots; do
   echo "-- the $p page's console, against Chromium's:"
   console "$pages/$p.html" > "$work/c.txt"
   if cmp -s "$pages/$p.chromium" "$work/c.txt"; then echo "the same $(wc -l < "$work/c.txt" | tr -d ' ') lines"
@@ -29,6 +33,10 @@ amb query "$pages/custom.html" "script_definition(D, Name, R), script_definition
 echo "-- the shadow roots, each its tree's own:"
 amb query "$pages/shadow.html" "dom_shadow_root(H, R, M), dom_attr(H, id, Id), dom_first_child(R, F), dom_element(F, E)"
 amb query "$pages/custom.html" "dom_shadow_root(H, R, M), dom_first_child(R, F), dom_attr(F, id, Id)"
+echo "-- the flat tree: each slotted node's slot, a declarative root's options, a node's parent there:"
+amb query "$pages/shadow-slots.html" "dom_assigned_slot(N, S), ( dom_attr(N, id, I) ; dom_text(N, I) ), ( dom_attr(S, id, SI) ; \\+ dom_attr(S, id, _), SI = none )"
+amb query "$pages/shadow-slots.html" "dom_shadow_options(R, A, D, C, Z, true), dom_shadow_root(H, R, M), dom_attr(H, id, I)"
+amb query "$pages/shadow-slots.html" "dom_attr(N, id, xin), dom_flat_children(N, Cs)"
 echo "-- what the reasoner says of them:"
 amb advise "$pages/custom.html" | grep -E '^amb_diag\(custom_'
 amb advise "$pages/shadow.html" | grep -E '^amb_diag\(custom_'

@@ -18,7 +18,8 @@
 
 :- dynamic dom_node/2, dom_element/2, dom_text/2, dom_comment/2, dom_doctype/2,
            dom_parent/2, dom_next_sibling/2, dom_first_child/2, dom_attr/3,
-           dom_namespace/2, dom_template_content/2, dom_attr_namespace/3, dom_mode/2.
+           dom_namespace/2, dom_template_content/2, dom_attr_namespace/3, dom_mode/2,
+           dom_shadow_root/3, dom_shadow_options/6, dom_assigned_slot/2, dom_manual_slot/2, dom_slot_first/2, dom_slot_next/2.
 
 dom_root(N) :- dom_node(N, document).
 
@@ -46,6 +47,42 @@ dom_descendant(D, A) :- dom_ancestor(A, D).
 
 dom_inside(N, A) :- dom_node(A, _), N = A.
 dom_inside(N, A) :- dom_ancestor(A, N).
+
+%% THE FLAT TREE (DOM 4.2.2, CSS Scoping 1, 2.2), which the cascade, layout and
+%% accessibility walk: a shadow host's children there are its shadow root's, a slot's
+%% its assigned nodes in their order (dom_slot_first/2, dom_slot_next/2) or, with none
+%% assigned it, its own; a host's child no slot takes, and a slot's own children while
+%% nodes are assigned it, are in no flat tree. Without shadow roots it is the DOM's tree,
+%% which is asked first (the inheritance of every value walks it)
+dom_flat_parent(N, P) :-
+    (   dom_shadow_root(_, _, _) -> dom_rules_flat_parent(N, P) ; dom_parent(N, P) ).
+
+dom_rules_flat_parent(N, P) :- dom_assigned_slot(N, P).
+dom_rules_flat_parent(N, P) :- dom_parent(N, Q), \+ dom_assigned_slot(N, _), dom_rules_flat_up(Q, P).
+
+dom_rules_flat_up(Q, H) :- dom_shadow_root(H, Q, _).
+dom_rules_flat_up(Q, Q) :- \+ dom_shadow_root(_, Q, _), \+ dom_shadow_root(Q, _, _), \+ dom_slot_first(Q, _).
+
+dom_flat_child(P, C) :-
+    (   dom_shadow_root(_, _, _) -> dom_rules_flat_child(P, C) ; dom_parent(C, P) ).
+
+dom_rules_flat_child(P, C) :- dom_shadow_root(P, R, _), dom_parent(C, R).
+dom_rules_flat_child(P, C) :- \+ dom_shadow_root(P, _, _), dom_slot_first(P, F), dom_rules_slot_member(F, C).
+dom_rules_flat_child(P, C) :- \+ dom_shadow_root(P, _, _), \+ dom_slot_first(P, _), dom_parent(C, P).
+
+dom_rules_slot_member(N, N).
+dom_rules_slot_member(N, C) :- dom_slot_next(N, M), dom_rules_slot_member(M, C).
+
+dom_flat_children(P, Cs) :-
+    (   dom_shadow_root(P, R, _) -> dom_children(R, Cs)
+    ;   dom_slot_first(P, F) -> dom_rules_slot_chain(F, Cs)
+    ;   dom_children(P, Cs)
+    ).
+dom_rules_slot_chain(N, [N|Ns]) :-
+    (   dom_slot_next(N, M) -> dom_rules_slot_chain(M, Ns) ; Ns = [] ).
+
+%% N is in the shadow tree whose root is R (at any depth, a nested tree's not)
+dom_shadow_tree_of(N, R) :- dom_shadow_root(_, R, _), dom_ancestor(R, N).
 
 %% the parent chain from the root down to N, N last
 dom_path(N, Path) :- dom_node(N, _), dom_rules_up(N, [N], Path).

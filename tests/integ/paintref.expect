@@ -42,6 +42,8 @@ quirks-fill: 5 of 5 regions agree with Chromium's drawing
 quirks-lists: 92 of 92 regions agree with Chromium's drawing
 roundimg: 10 of 10 regions agree with Chromium's drawing
 scripts: 22 of 22 regions agree with Chromium's drawing
+shadow-dsd: 19 of 19 regions agree with Chromium's drawing
+shadow-layout: 32 of 32 regions agree with Chromium's drawing
 shaping-arabic: 21 of 21 regions agree with Chromium's drawing
 shaping-kern: 15 of 15 regions agree with Chromium's drawing
 shaping: 33 of 33 regions agree with Chromium's drawing

@@ -117,6 +117,18 @@
    nothing here (its quirk is layout's). Not read: the unitless lengths of
    background-position, border-spacing and clip.
 
+   Shadow trees (CSS Scoping 1, CSS Shadow Parts 1; PLAN.md 12z): the cascade styles the
+   flat tree's elements (src/dom/dom.h), each under its parent there, which it inherits from;
+   a host's child no slot takes has no style. A shadow tree's style elements and links make
+   sheets of its tree, whose rules match its elements alone, their combinators going up to
+   its featureless host; :host, :host() and :host-context() rules match the host, ::slotted()
+   ones an element assigned to the tree's slots, ::part() ones an element of a host's tree
+   by its part names (and exportparts). A sheet's depth (its tree's) is its encapsulation
+   context, ranked after origin and importance, before the style attribute: the outer wins a
+   normal declaration, the inner an important one (Cascade 5, 6.1). Not done: the names a
+   tree's sheets give are the document's (keyframes, font faces, counter styles, registered
+   properties), its layers ranked with the document's; :host in :is(), :where() or :not().
+
    Speed (PLAN.md 11): the user agent's sheet is read once a process
    (css_ua_load); names and keywords are found by hash; elements under one
    parent style start from that style's template of inherited and initial
@@ -133,6 +145,7 @@ amb_interface(dom);
 amb_interface(net);
 amb_implementation(css);
 #include "css.h"
+#include "../dom/dom.h"
 #include "../net/url.h"
 
 #define CSS_MAXPARTS 32
@@ -274,7 +287,9 @@ static const char css_ua_sheet[] =
     "q::after { content: close-quote }\n"
     "input::placeholder, textarea::placeholder { color: #757575 }\n"
     "bdi, output { unicode-bidi: isolate }\n"
-    "bdo { unicode-bidi: bidi-override }\n";
+    "bdo { unicode-bidi: bidi-override }\n"
+    /* a slot is no box of its own: its assigned nodes (or its fallback) are laid out in its place (HTML 15.3.1) */
+    "slot { display: contents }\n";
 
 /* the user agent's sheet's additions in quirks mode (HTML 15.3's quirks rules, as Chromium's
    quirks.css has them, measured): a floated image's margin, a table that resets the text's
@@ -3661,6 +3676,10 @@ static uint32_t css_spec_compound(const char *s, size_t n, int depth) {
                 if (css_eq_ci(ps, pn, "where")) {}
                 else if (css_eq_ci(ps, pn, "not") || css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "matches") || css_eq_ci(ps, pn, "has"))
                     extra += css_spec_list(s + i + 1, e - i - 1, depth + 1);
+                /* :host(), :host-context(): a pseudo-class and their argument; ::slotted(): a pseudo-element and
+                   its argument (CSS Scoping 1, 3.2, 3.3); ::part(): a pseudo-element */
+                else if (!element && (css_eq_ci(ps, pn, "host") || css_eq_ci(ps, pn, "host-context"))) { b++; extra += css_spec_list(s + i + 1, e - i - 1, depth + 1); }
+                else if (element && css_eq_ci(ps, pn, "slotted")) { c++; extra += css_spec_list(s + i + 1, e - i - 1, depth + 1); }
                 else if (element) c++;
                 else b++;
                 i = e + 1;
@@ -3811,20 +3830,22 @@ static int css_selector_ok(const char *s, size_t n, int depth);
 
 /* a selector's pseudo-class or pseudo-element is one the matcher knows */
 static int css_pseudo_known(const char *p, size_t pn, int element, int fn) {
+    if (element && fn) return css_eq_ci(p, pn, "slotted") || css_eq_ci(p, pn, "part");
     if (element)
-        return !fn && (css_eq_ci(p, pn, "before") || css_eq_ci(p, pn, "after") || css_eq_ci(p, pn, "first-line") ||
-                       css_eq_ci(p, pn, "first-letter") || css_eq_ci(p, pn, "marker") || css_eq_ci(p, pn, "placeholder"));
+        return css_eq_ci(p, pn, "before") || css_eq_ci(p, pn, "after") || css_eq_ci(p, pn, "first-line") ||
+               css_eq_ci(p, pn, "first-letter") || css_eq_ci(p, pn, "marker") || css_eq_ci(p, pn, "placeholder");
     if (fn)
         return css_eq_ci(p, pn, "not") || css_eq_ci(p, pn, "is") || css_eq_ci(p, pn, "where") || css_eq_ci(p, pn, "matches") ||
                css_eq_ci(p, pn, "has") || css_eq_ci(p, pn, "nth-child") || css_eq_ci(p, pn, "nth-last-child") ||
-               css_eq_ci(p, pn, "nth-of-type") || css_eq_ci(p, pn, "nth-last-of-type");
+               css_eq_ci(p, pn, "nth-of-type") || css_eq_ci(p, pn, "nth-last-of-type") || css_eq_ci(p, pn, "host") ||
+               css_eq_ci(p, pn, "host-context");
     char w[24];
     if (pn == 0 || pn >= sizeof w) return 0;
     for (size_t i = 0; i < pn; i++) w[i] = css_lower(p[i]);
     w[pn] = 0;
     return css_word_in(w, "first-child last-child only-child first-of-type last-of-type only-of-type root empty link any-link "
                           "visited checked disabled enabled hover focus focus-visible focus-within active target scope before after "
-                          "first-line first-letter");
+                          "first-line first-letter host");
 }
 
 /* each compound of a selector is one the matcher reads */
@@ -3858,6 +3879,24 @@ static int css_selector_ok(const char *s, size_t n, int depth) {
                         if (!css_selector_ok(c + a, z - a, depth + 1)) return 0;
                         a = z + 1;
                     }
+                } else if (css_eq_ci(c + b, i - b, "host") || css_eq_ci(c + b, i - b, "host-context") || css_eq_ci(c + b, i - b, "slotted")) {
+                    /* a compound selector, one alone (CSS Scoping 1, 3.2 and 3.3) */
+                    css_part one[2];
+                    size_t a = css_skip_ws(c, e, i + 1), z = e;
+                    while (z > a && css_ws(c[z - 1])) z--;
+                    if (z == a || css_comma(c, z, a) < z || css_split(c + a, z - a, one, 2) != 1 || !css_selector_ok(c + a, z - a, depth + 1)) return 0;
+                } else if (css_eq_ci(c + b, i - b, "part")) {
+                    /* one or more part names (CSS Shadow Parts 1, 4.1) */
+                    size_t a = i + 1, names = 0;
+                    while (a < e) {
+                        while (a < e && css_ws(c[a])) a++;
+                        size_t z = a;
+                        while (z < e && css_namechar(c[z])) z++;
+                        if (z == a && a < e) return 0;
+                        if (z > a) names++;
+                        a = z;
+                    }
+                    if (!names) return 0;
                 }
                 i = e + 1;
             }
@@ -4161,6 +4200,9 @@ static uint32_t css_fetch(net_loader *net, const css_pctx *cx, const char *ref, 
     return net->resource[h.index].outcome == NET_OUTCOME_OK ? h.index : 0;
 }
 
+/* the tree the sheets being read are in (CSS Scoping 1): a shadow root's node and its depth; 0, the document */
+static dom_node_h css_read_tree;
+static uint32_t css_read_depth;
 /* a sheet's text, its comments stripped, read into a new sheet of the store */
 static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin, const char *src, size_t n, const char *url,
                                uint32_t parent, uint32_t layer, int depth, const char *base, uint32_t host) {
@@ -4170,6 +4212,8 @@ static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin,
     css_sheet_h sh = sheet_new(s);
     s->sheet[sh.index].origin = origin;
     s->sheet[sh.index].parent = parent;
+    s->sheet[sh.index].tree = css_read_tree;
+    s->sheet[sh.index].depth = css_read_depth;
     if (url) s->sheet[sh.index].url = text_add(s, url, strlen(url));
     css_pctx cx;
     memset(&cx, 0, sizeof cx);
@@ -5636,7 +5680,21 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
    whether visibly), active, and the URL's target; 0 for none. scope: the scoping root a
    scoped rule is matched under (:scope), 0 for none (the root element then). pe: the rule's
    subject compound is matched with its pseudo-element cut (no :hover quirk for it) */
-typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target, scope, pe; } css_mstate;
+/* tree: the shadow root of the tree the rule being matched is in (0: the document's), host its host, which
+   is featureless to the rule's compounds (CSS Scoping 1, 3.1): only :host, :host() and :host-context()
+   match it, and it is the top of the tree, the parent of the root's elements, to the combinators */
+typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target, scope, pe, tree, host; } css_mstate;
+/* a combinator's way up and back in the rule's tree: an element's parent (the featureless host, above
+   the shadow root's own elements), its previous sibling; none past the host */
+static uint32_t css_up(const dom_document *d, uint32_t x, const css_mstate *ms) {
+    if (ms->host && x == ms->host) return 0;
+    uint32_t p = d->node[x].parent;
+    if (css_is_element(d, p)) return p;
+    return ms->tree && p == ms->tree ? ms->host : 0;
+}
+static uint32_t css_back(const dom_document *d, uint32_t x, const css_mstate *ms) {
+    return ms->host && x == ms->host ? 0 : css_prev_element(d, x);
+}
 
 /* the document is in quirks mode (contracts/dom.pl: the document node's mode) */
 static int css_doc_quirks(const dom_document *d) { return d->node_len > 1 && d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS; }
@@ -5710,7 +5768,11 @@ static int css_disabled(const dom_document *d, uint32_t x) {
 /* a pseudo-class without arguments holds of x */
 /* y is x or one of x's descendants */
 static int css_within(const dom_document *d, uint32_t x, uint32_t y) {
-    for (int k = 0; y && k < 4096; k++, y = d->node[y].parent) if (y == x) return 1;
+    for (int k = 0; y && k < 4096; k++) {
+        if (y == x) return 1;
+        uint32_t up = dom_flat_parent(d, y);
+        y = up ? up : d->node[y].parent;
+    }
     return 0;
 }
 
@@ -5803,9 +5865,46 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
 /* a compound selector holds of the element x */
 static int css_has(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
 
+/* :host(compound) and :host-context(compound) of the host x (CSS Scoping 1, 3.2): the compound matches x
+   itself as its own tree sees it, or (:host-context) x or an ancestor of it in the flat tree, as Chromium
+   walks them */
+static int css_host_fn(const dom_document *d, uint32_t x, const css_mstate *ms, int context, const char *as, size_t an, int depth, int *budget) {
+    css_mstate m2 = *ms;
+    m2.tree = 0;
+    m2.host = 0;
+    m2.pe = 0;
+    for (uint32_t y = x; y && *budget >= 0; y = context ? dom_flat_element_parent(d, y) : 0)
+        if (css_list_matches(d, y, &m2, as, an, depth, budget)) return 1;
+    return 0;
+}
+
+/* a compound against the featureless host of the rule's tree (CSS Scoping 1, 3.1): :host, :host() and
+   :host-context() alone match it, and a compound of nothing else does when each of them holds */
+static int css_featureless(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
+    size_t i = 0;
+    if (n == 0) return 0;
+    while (i < n) {
+        if (s[i] != ':' || (i + 1 < n && s[i + 1] == ':')) return 0;
+        size_t b = ++i;
+        while (i < n && css_namechar(s[i])) i++;
+        const char *ps = s + b;
+        size_t pn = i - b;
+        if (i < n && s[i] == '(') {
+            size_t e = css_block_end(s, n, i, '(', ')');
+            int hc = css_eq_ci(ps, pn, "host-context");
+            if (e >= n || (!hc && !css_eq_ci(ps, pn, "host")) || !css_host_fn(d, x, ms, hc, s + i + 1, e - i - 1, depth + 1, budget)) return 0;
+            i = e + 1;
+            continue;
+        }
+        if (!css_eq_ci(ps, pn, "host")) return 0;
+    }
+    return 1;
+}
+
 static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     size_t i = 0;
     if (depth > CSS_MAX_NESTING || --*budget < 0) return 0;
+    if (ms->host && x == ms->host) return css_featureless(d, x, ms, s, n, depth, budget);
     if (n == 0) return 1;                       /* nothing left of it but its pseudo-element: universal */
     while (i < n) {
         char c = s[i];
@@ -5885,14 +5984,14 @@ static int css_parts_match(const dom_document *d, uint32_t x, const css_mstate *
     css_mstate m2 = *ms;
     m2.pe = 0;
     char comb = parts[k - 1].comb;
-    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
-    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
+    if (comb == '>') { uint32_t y = css_up(d, x, ms); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t y = css_back(d, x, ms); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
     if (comb == '~') {
-        for (uint32_t y = css_prev_element(d, x); y && *budget >= 0; y = css_prev_element(d, y))
+        for (uint32_t y = css_back(d, x, ms); y && *budget >= 0; y = css_back(d, y, ms))
             if (css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget)) return 1;
         return 0;
     }
-    for (uint32_t y = css_parent_element(d, x); y && *budget >= 0; y = css_parent_element(d, y))
+    for (uint32_t y = css_up(d, x, ms); y && *budget >= 0; y = css_up(d, y, ms))
         if (css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget)) return 1;
     return 0;
 }
@@ -6868,6 +6967,19 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
 /* a declaration's place in the cascade, larger winning: origin and importance with
    element-attached style above rules, then specificity, then order of appearance */
 #define CSS_LAYER_LAST 8191
+/* a declaration's encapsulation context (Cascade 5, 6.1), compared after its origin and importance and
+   before the rest: the class of those (normal user agent, normal author, important author, important user
+   agent), then, for normal declarations the outer context winning, for important ones the inner, by the
+   depth of its sheet's tree (0 the document's) */
+#define CSS_CTX_DEPTHS 8
+static uint32_t css_ctx(const css_style *s, uint32_t dc) {
+    uint32_t r = s->decl[dc].rule, sh = s->rule[r].sheet;
+    css_origin o = s->sheet[sh].origin;
+    int imp = s->decl[dc].important;
+    uint32_t oi = o == CSS_ORIGIN_USER_AGENT ? (imp ? 3u : 0u) : (imp ? 2u : 1u);
+    uint32_t dp = s->sheet[sh].depth < CSS_CTX_DEPTHS ? s->sheet[sh].depth : CSS_CTX_DEPTHS - 1;
+    return oi << 3 | (imp ? dp : CSS_CTX_DEPTHS - 1 - dp);
+}
 static uint64_t css_rank(const css_style *s, uint32_t dc) {
     uint32_t r = s->decl[dc].rule;
     css_origin o = s->sheet[s->rule[r].sheet].origin;
@@ -7121,13 +7233,16 @@ static void css_blockify(css_val *v) {
 }
 
 /* the per-style arrays the cascade keeps: values, what they record, custom properties;
-   each parent style's template (tmpl_of: its index from 1 in tv and tr); and where each
-   style's font size came from (fsx: CSS_FS_*), which its children's read */
+   each parent style's template (tmpl_of: its index from 1 in tv and tr); where each
+   style's font size came from (fsx: CSS_FS_*), which its children's read; and whether the
+   box its elements' children are laid out in is a flex or grid container (lflex: its own
+   display's, or under display: contents its parent style's -- a style is made under one
+   parent style, so it is the style's), which blockifies them */
 typedef struct css_styles { vector<uint32_t> first; vector<css_cust> cpool; vector<uint32_t> cfirst; vector<uint32_t> ccount;
-                            vector<uint32_t> tmpl_of; vector<css_val> tv; vector<css_rec> tr; vector<uint8_t> fsx; } css_styles;
+                            vector<uint32_t> tmpl_of; vector<css_val> tv; vector<css_rec> tr; vector<uint8_t> fsx; vector<uint8_t> lflex; } css_styles;
 #define CSS_STYLES_DROP(x) vector_uint32_t_drop(&(x).first); vector_css_cust_drop(&(x).cpool); \
     vector_uint32_t_drop(&(x).cfirst); vector_uint32_t_drop(&(x).ccount); vector_uint32_t_drop(&(x).tmpl_of); \
-    vector_css_val_drop(&(x).tv); vector_css_rec_drop(&(x).tr); vector_uint8_t_drop(&(x).fsx)
+    vector_css_val_drop(&(x).tv); vector_css_rec_drop(&(x).tr); vector_uint8_t_drop(&(x).fsx); vector_uint8_t_drop(&(x).lflex)
 /* a font size's origin, as Chromium's FontDescription keeps it: the absolute keyword it
    is (its column + 1; 0 for another), whether it is absolute (a length that is not
    relative to the parent's size, or relative to an absolute one), whether its family is
@@ -7177,9 +7292,8 @@ static void css_snap_width(css_val *v, const css_val *style, int border) {
    flow-root or inline-block, as Chromium's does. Its num 1 records that the old box was
    specified (Chromium's IsSpecifiedDisplayWebkitBox): layout clamps such a box alone, not
    one specified flow-root */
-static int css_display_fix(css_val *v, const css_val *out, const css_val *pdisplay, int is_root) {
-    int pflex = !is_root && (css_word_is(pdisplay, "flex") || css_word_is(pdisplay, "inline-flex") || css_word_is(pdisplay, "grid") ||
-                             css_word_is(pdisplay, "inline-grid"));
+static int css_display_fix(css_val *v, const css_val *out, int pflex, int is_root) {
+    pflex = pflex && !is_root;
     css_val b = *v;
     if (is_root && css_word_is(v, "contents")) css_word_val(v, "block");
     if (is_root || pflex || !css_word_is(&out[CSS_PROP_FLOAT], "none") || css_word_is(&out[CSS_PROP_POSITION], "absolute") ||
@@ -7201,9 +7315,9 @@ static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const cs
     if (ps >= len(ss->tmpl_of)) resize(&ss->tmpl_of, (size_t)ps + 1);
     uint32_t ti = (uint32_t)(len(ss->tv) / CSS_NPROPS) + 1;
     uint32_t pc0 = ps ? at(ss->first, ps) : 0;
-    css_val pcolor, pdisplay;
+    css_val pcolor;
     css_val_of(s, pc0, CSS_PROP_COLOR, initial, &pcolor);
-    css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
+    int pflex = ps && ps < len(ss->lflex) ? at(ss->lflex, ps) : 0;
     css_val out[CSS_NPROPS];
     css_rec rec[CSS_NPROPS];
     for (int k = 0; k < CSS_NPROPS; k++) {
@@ -7225,7 +7339,7 @@ static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const cs
             fix = 1;
         }
         if (css_pf[k] & CSS_PF_BW) { css_snap_width(&out[k], &out[k + 4], 1); fix = 1; }
-        if (k == CSS_PROP_DISPLAY) fix = css_display_fix(&out[k], out, &pdisplay, ps == 0);
+        if (k == CSS_PROP_DISPLAY) fix = css_display_fix(&out[k], out, pflex, ps == 0);
         if (fix) rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc);
     }
     for (int k = 0; k < CSS_NPROPS; k++) { push_back(ss->tv, out[k]); push_back(ss->tr, rec[k]); }
@@ -8262,15 +8376,27 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
        its order: rk's high 40 bits, the proximity's key, rk's order */
     uint32_t bestx[CSS_NPROPS];
     memset(bestx, 0, sizeof bestx);
+    /* and before them all but origin and importance, its encapsulation context (css_ctx) */
+    uint8_t bestc[CSS_NPROPS];
+    memset(bestc, 0, sizeof bestc);
+    vector<uint8_t> cctx;
+    for (size_t q = 0; q < len(crank); q++) push_back(cctx, (uint8_t)0);
     for (size_t k = 0; k < len(*matched); k++) {
         uint32_t r = at(*matched, k) & 0xffffff, px = at(*matched, k) >> 24;
         for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
             int p = (int)s->decl[dc].prop;
             uint64_t rk = css_rank(s, dc);
+            uint8_t kc = (uint8_t)css_ctx(s, dc);
             if (p != CSS_PROP_CUSTOM) {
                 uint64_t hi = rk >> 24, bhi = best[p] >> 24;
                 uint32_t lo = px << 24 | (uint32_t)(rk & 0xffffff), blo = bestx[p] << 24 | (uint32_t)(best[p] & 0xffffff);
-                if (!win[p] || hi > bhi || (hi == bhi && lo >= blo)) { best[p] = rk; bestx[p] = px; win[p] = dc; any = 1; }
+                if (!win[p] || kc > bestc[p] || (kc == bestc[p] && (hi > bhi || (hi == bhi && lo >= blo)))) {
+                    best[p] = rk;
+                    bestx[p] = px;
+                    bestc[p] = kc;
+                    win[p] = dc;
+                    any = 1;
+                }
                 continue;
             }
             uint32_t name = s->decl[dc].word;
@@ -8283,9 +8409,11 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
                 c.state = 3;
                 push_back(cust, c);
                 push_back(crank, 0);
+                push_back(cctx, (uint8_t)0);
             }
-            if (at(crank, q) > rk) continue;
+            if (at(cctx, q) > kc || (at(cctx, q) == kc && at(crank, q) > rk)) continue;
             crank[q] = rk;
+            cctx[q] = kc;
             css_cust c = at(*cust, q);
             c.winner = dc;
             c.how = CSS_HOW_DECLARED;
@@ -8410,10 +8538,9 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
             out[k] = mv;
             rec[k] = css_value_rec(s, &mv, rec[k].how, 0, vc);
         }
-    css_val pdisplay;
-    css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
+    int pflex = ps && ps < len(ss->lflex) ? at(ss->lflex, ps) : 0;
     if (win[CSS_PROP_DISPLAY] || win[CSS_PROP_FLOAT] || win[CSS_PROP_POSITION])
-        if (css_display_fix(&out[CSS_PROP_DISPLAY], out, &pdisplay, is_root))
+        if (css_display_fix(&out[CSS_PROP_DISPLAY], out, pflex, is_root))
             rec[CSS_PROP_DISPLAY] = css_value_rec(s, &out[CSS_PROP_DISPLAY], rec[CSS_PROP_DISPLAY].how, win[CSS_PROP_DISPLAY], vc);
     for (int k = 0; k < 4; k++) {
         int wp = CSS_PROP_BORDER_TOP_WIDTH + k;
@@ -8470,12 +8597,15 @@ static void css_style_add(vector<css_skey> *se, vector<uint32_t> *slots, vector<
         if (!at(*slots, i)) { (*slots)[i] = (uint32_t)len(*se); return; }
 }
 
+/* the depth of the tree whose elements' own rules are being made (their sheets', one a depth) */
+static uint32_t css_own_depth;
 /* a rule of an element's own -- a presentational hint's, or its style attribute's --
-   in the sheet *sheet (made at the first) */
+   in the sheet *sheet (made at the first, of the depth css_own_depth) */
 static uint32_t css_own_rule(css_style *s, uint32_t *sheet, css_origin origin, const char *what, size_t wn, int first) {
     if (!*sheet) {
         css_sheet_h sh = sheet_new(s);
         s->sheet[sh.index].origin = origin;
+        s->sheet[sh.index].depth = css_own_depth;
         *sheet = sh.index;
     }
     amb_span sp = text_add(s, what, wn);
@@ -8830,6 +8960,10 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
         }
         push_back(ss->first, first);
         push_back(ss->fsx, fso);
+        const css_val *dv = &out[CSS_PROP_DISPLAY];
+        uint8_t lf = css_word_is(dv, "contents") ? (ps && ps < len(ss->lflex) ? at(ss->lflex, ps) : 0)
+                     : (uint8_t)(css_word_is(dv, "flex") || css_word_is(dv, "inline-flex") || css_word_is(dv, "grid") || css_word_is(dv, "inline-grid"));
+        push_back(ss->lflex, lf);
     }
     return sid;
 }
@@ -8878,6 +9012,7 @@ static void css_styles_swap(css_styles *a, css_styles *b) {
     swap(&a->tv, &b->tv);
     swap(&a->tr, &b->tr);
     swap(&a->fsx, &b->fsx);
+    swap(&a->lflex, &b->lflex);
 }
 /* the kept state's buffers freed (at exit, and when a cascade keeps none) */
 static void css_cq_free(void) {
@@ -9008,8 +9143,8 @@ static int css_cq_query(const css_style *s, const dom_document *d, const vector<
     css_cqi it = at(*items, k);
     amb_span sp = s->cquery[it.q].text;
     const char *q = text_ptr(s, sp);
-    uint32_t a = pe ? x : css_parent_element(d, x);
-    for (; a; a = css_parent_element(d, a)) {
+    uint32_t a = pe ? x : dom_flat_element_parent(d, x);
+    for (; a; a = dom_flat_element_parent(d, a)) {
         uint32_t sid = a < len(*nstyle) ? at(*nstyle, a) : 0;
         uint32_t c0 = sid && sid < len(*first) ? at(*first, sid) : 0;
         if (!c0) continue;
@@ -9074,7 +9209,7 @@ static int css_cq_rule_holds(const css_style *s, const dom_document *d, const ve
 static void css_cq_bases(const css_style *s, const dom_document *d, const vector<uint32_t> *nstyle, const vector<uint32_t> *first,
                          const vector<double> *known, uint32_t x, int pe) {
     double bw = -1, bh = -1;
-    for (uint32_t a = pe ? x : css_parent_element(d, x); a && (bw < 0 || bh < 0); a = css_parent_element(d, a)) {
+    for (uint32_t a = pe ? x : dom_flat_element_parent(d, x); a && (bw < 0 || bh < 0); a = dom_flat_element_parent(d, a)) {
         double w, h;
         if (!css_cq_size_of(known, a, &w, &h)) continue;
         uint32_t sid = a < len(*nstyle) ? at(*nstyle, a) : 0;
@@ -9170,11 +9305,8 @@ int css_container_restyle(css_style *s, const dom_document *d, uint32_t x, doubl
     css_cq.known[(size_t)x * 2] = w;
     css_cq.known[(size_t)x * 2 + 1] = h;
     css_cq_epoch++;
-    /* the end of x's subtree in tree order; the containers in it are unsized until layout reaches them */
-    uint32_t end = x;
-    while (end != 1 && !d->node[end].next_sibling) end = d->node[end].parent;
-    end = end == 1 ? 0 : d->node[end].next_sibling;
-    for (uint32_t y = css_next_in_tree(d, x); y && y != end; y = css_next_in_tree(d, y)) {
+    /* x's subtree in the flat tree; the containers in it are unsized until layout reaches them */
+    for (uint32_t y = dom_flat_walk(d, x, x); y; y = dom_flat_walk(d, y, x)) {
         size_t k = (size_t)y * 2;
         css_cq.known[k] = -1;
         css_cq.known[k + 1] = -1;
@@ -9184,9 +9316,9 @@ int css_container_restyle(css_style *s, const dom_document *d, uint32_t x, doubl
     vector<uint32_t> matched;
     vector<css_cust> cust;
     css_cq_pseudos(s, d, x, sid, &matched, &cust, out);
-    for (uint32_t y = css_next_in_tree(d, x); y && y != end; y = css_next_in_tree(d, y)) {
+    for (uint32_t y = dom_flat_walk(d, x, x); y; y = dom_flat_walk(d, y, x)) {
         if (!css_is_element(d, y) || y >= len(css_cq.nstyle) || !at(css_cq.nstyle, y)) continue;
-        uint32_t py = css_parent_element(d, y), ps = py ? at(css_cq.nstyle, py) : 0;
+        uint32_t py = dom_flat_element_parent(d, y), ps = py ? at(css_cq.nstyle, py) : 0;
         uint32_t m0 = at(css_cq.mfirst, y), m1 = m0 + at(css_cq.mcount, y);
         css_cq_matched(s, d, y, 0, m0, m1, &matched);
         int reads = css_cq_reads(&css_cq.rule_cq, &matched);
@@ -9259,6 +9391,158 @@ static uint32_t css_url_target(const css_style *s, const dom_document *doc, cons
     return 0;
 }
 
+/* ---- shadow trees (CSS Scoping 1, CSS Shadow Parts 1) ----
+   A shadow tree's style elements and links make sheets of its own, whose rules match its elements alone,
+   their combinators going up to its featureless host (css_up); and three kinds of its rules reach out of it:
+   a rule whose subject is :host, :host() or :host-context() matches the host; ::slotted() an element
+   assigned to one of its slots (flattened: through a slot assigned to a slot); and a rule of the tree a host
+   is in whose subject is ::part() an element of the host's shadow tree whose part attribute names the part,
+   or that one in it exports under that name (exportparts), a tree's :host::part() its own. Each such rule's
+   sheet has its tree's depth, which orders it in the cascade (css_ctx). */
+
+/* a shadow root's depth: how many shadow trees in the document it is (1 a host's in the document); none
+   (~0) when it is not connected */
+static uint32_t css_tree_depth(const dom_document *d, uint32_t root) {
+    uint32_t dep = 0;
+    for (uint32_t r = root, guard = 0; guard < 256; guard++) {
+        if (r == 1) return dep;
+        uint32_t h = dom_shadow_root_host(d, r);
+        if (!h) return ~0u;
+        dep++;
+        r = dom_tree_root(d, h);
+    }
+    return ~0u;
+}
+/* the kinds of a rule that reach out of its tree, by its subject compound */
+enum { CSS_SH_NONE, CSS_SH_HOST, CSS_SH_SLOTTED, CSS_SH_PART };
+/* where in the compound c (n bytes) the pseudo-element or pseudo-class w (its name, then '(' when it is
+   functional) stands at its top level: its offset, or n */
+static size_t css_top_pseudo(const char *c, size_t n, const char *w, int element, int fn) {
+    size_t wn = strlen(w);
+    for (size_t i = 0; i < n;) {
+        if (c[i] == '(') { i = css_block_end(c, n, i, '(', ')'); if (i < n) i++; continue; }
+        if (c[i] == '[') { i = css_block_end(c, n, i, '[', ']'); if (i < n) i++; continue; }
+        if (c[i] != ':') { i++; continue; }
+        int el = i + 1 < n && c[i + 1] == ':';
+        size_t b = i + (el ? 2 : 1), e = b;
+        while (e < n && css_namechar(c[e])) e++;
+        int isfn = e < n && c[e] == '(';
+        if (el == element && isfn == fn && e - b == wn && css_bytes_eq(c + b, w, wn, 1)) return i;
+        i = e > i + 1 ? e : i + 1;
+    }
+    return n;
+}
+static int css_shadow_kind(const char *c, size_t n) {
+    if (css_top_pseudo(c, n, "slotted", 1, 1) < n) return CSS_SH_SLOTTED;
+    if (css_top_pseudo(c, n, "part", 1, 1) < n) return CSS_SH_PART;
+    if (css_top_pseudo(c, n, "host", 0, 0) < n || css_top_pseudo(c, n, "host", 0, 1) < n || css_top_pseudo(c, n, "host-context", 0, 1) < n)
+        return CSS_SH_HOST;
+    return CSS_SH_NONE;
+}
+/* the rule r's subject compound cut at its ::slotted( or ::part( (kind's): the rule's parts with the
+   subject cut to what comes before it, in ps (np of them); the argument's place in the selector; what
+   follows its ) up to the pseudo-element the index cut */
+static int css_shadow_cut(const css_style *s, uint32_t r, const vector<css_part> *parts, const vector<css_rx> *rxs, int kind, css_part *ps,
+                          uint32_t *np, size_t *aa, size_t *an, size_t *pa, size_t *pn) {
+    css_rx rx = at(*rxs, r);
+    uint32_t k = rx.nparts & 0xff;
+    if (k == 0 || k > CSS_MAXPARTS) return 0;
+    for (uint32_t j = 0; j < k; j++) ps[j] = at(*parts, rx.parts + j);
+    const char *t = text_ptr(s, s->rule[r].selector);
+    size_t cs = ps[k - 1].start, cn = ps[k - 1].len;
+    size_t at0 = css_top_pseudo(t + cs, cn, kind == CSS_SH_SLOTTED ? "slotted" : "part", 1, 1);
+    if (at0 >= cn) return 0;
+    size_t open = cs + at0;
+    while (open < cs + cn && t[open] != '(') open++;
+    size_t close = css_block_end(t, cs + cn, open, '(', ')');
+    if (close >= cs + cn) return 0;
+    *aa = open + 1;
+    *an = close - open - 1;
+    *pa = close + 1;
+    *pn = cs + cn - close - 1;
+    ps[k - 1].len = (uint32_t)at0;
+    *np = k;
+    return 1;
+}
+/* a ::slotted() rule r of the slot sl's tree matches x, assigned to it: the compound before it (and the
+   rest of the selector) the slot as its tree sees it, its argument x */
+static uint32_t css_slotted_matches(const css_style *s, const dom_document *d, uint32_t x, uint32_t sl, uint32_t tree, const css_mstate *ms,
+                                    uint32_t r, const vector<css_part> *parts, const vector<css_rx> *rxs) {
+    css_part ps[CSS_MAXPARTS];
+    uint32_t np;
+    size_t aa, an, pa, pn;
+    if (!css_shadow_cut(s, r, parts, rxs, CSS_SH_SLOTTED, ps, &np, &aa, &an, &pa, &pn) || pn) return 0;
+    const char *t = text_ptr(s, s->rule[r].selector);
+    int budget = CSS_MATCH_BUDGET;
+    css_mstate m2 = *ms;
+    m2.tree = tree;
+    m2.host = dom_shadow_root_host(d, tree);
+    m2.pe = 1;
+    if (!css_parts_match(d, sl, &m2, t, ps, np, 0, &budget)) return 0;
+    css_mstate m3 = *ms;
+    m3.tree = 0;
+    m3.host = 0;
+    m3.pe = 1;
+    if (!css_compound(d, x, &m3, t + aa, an, 1, &budget)) return 0;
+    return 1 | (at(*rxs, r).nparts & ~0xffu);
+}
+/* a ::part() rule r (of the tree tree) matches x, a part of host's shadow tree under the names nm (a
+   space between each): the compound before it the host, as tree sees it (its own featureless, by :host
+   alone), each part name it gives among nm, what follows it (pseudo-classes) x */
+static int css_has_word(const char *list, size_t ln, const char *w, size_t wn) { return css_has_token(list, ln, w, wn, 0); }
+static uint32_t css_part_matches(const css_style *s, const dom_document *d, uint32_t x, uint32_t host, uint32_t tree, const css_mstate *ms, uint32_t r,
+                                 const vector<css_part> *parts, const vector<css_rx> *rxs, const vector<char> *nm) {
+    css_part ps[CSS_MAXPARTS];
+    uint32_t np;
+    size_t aa, an, pa, pn;
+    if (!css_shadow_cut(s, r, parts, rxs, CSS_SH_PART, ps, &np, &aa, &an, &pa, &pn)) return 0;
+    const char *t = text_ptr(s, s->rule[r].selector);
+    for (size_t i = aa; i < aa + an;) {
+        while (i < aa + an && css_ws(t[i])) i++;
+        size_t b = i;
+        while (i < aa + an && !css_ws(t[i])) i++;
+        if (i > b && !css_has_word(data(*nm), len(*nm), t + b, i - b)) return 0;
+    }
+    int budget = CSS_MATCH_BUDGET;
+    css_mstate m2 = *ms;
+    m2.tree = tree;
+    m2.host = tree ? dom_shadow_root_host(d, tree) : 0;
+    m2.pe = 1;
+    if (!css_parts_match(d, host, &m2, t, ps, np, 0, &budget)) return 0;
+    css_mstate m3 = *ms;
+    m3.tree = 0;
+    m3.host = 0;
+    if (pn && !css_compound(d, x, &m3, t + pa, pn, 1, &budget)) return 0;
+    return 1 | (at(*rxs, r).nparts & ~0xffu);
+}
+/* the names host's exportparts (CSS Shadow Parts 1, 4.2) gives the parts nm of its shadow tree in the tree
+   it is in: each inner name of nm a pair names (inner, or inner: outer) as its outer one; into out */
+static void css_export_parts(const dom_document *d, uint32_t host, const vector<char> *nm, vector<char> *out) {
+    clear(*out);
+    uint32_t ea = css_attr_of(d, host, "exportparts", 11);
+    if (!ea) return;
+    amb_span v = d->attr[ea].value;
+    const char *t = text_ptr(d, v);
+    size_t i = 0;
+    while (i < v.len) {
+        size_t e = i;
+        while (e < v.len && t[e] != ',') e++;
+        size_t a = i, colon = i;
+        while (colon < e && t[colon] != ':') colon++;
+        while (a < colon && css_ws(t[a])) a++;
+        size_t ae = colon;
+        while (ae > a && css_ws(t[ae - 1])) ae--;
+        size_t b = colon < e ? colon + 1 : a, be = colon < e ? e : ae;
+        while (b < be && css_ws(t[b])) b++;
+        while (be > b && css_ws(t[be - 1])) be--;
+        if (ae > a && be > b && css_has_word(data(*nm), len(*nm), t + a, ae - a)) {
+            if (len(*out)) push_back(*out, ' ');
+            append_range(*out, t + b, be - b);
+        }
+        i = e + 1;
+    }
+}
+
 css_status css_set_state(css_style *s, dom_document *doc, css_state_kind kind, uint32_t node) {
     if (node == 0 || node >= doc->node_len || !doc->node[node].live || doc->node[node].kind != DOM_NODE_KIND_ELEMENT) return CSS_WRONG_KIND;
     css_state_h h = state_new(s);
@@ -9313,6 +9597,41 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
         css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
     }
+    /* each connected shadow tree's style elements and linked sheets, in its tree's order, read as its own */
+    dom_flatten(doc);
+    for (uint32_t sr = 1; sr < doc->shadow_len; sr++) {
+        if (!doc->shadow[sr].live) continue;
+        uint32_t root = doc->shadow[sr].root;
+        uint32_t dep = root && root < doc->node_len && doc->node[root].live ? css_tree_depth(doc, root) : ~0u;
+        if (dep == ~0u) continue;
+        css_read_tree = node_handle(doc, root);
+        css_read_depth = dep;
+        for (uint32_t x = css_next_under(doc, root, root); x; x = css_next_under(doc, x, root)) {
+            int link = css_is_named(doc, x, "link");
+            if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
+            uint32_t ma = css_attr_of(doc, x, "media", 5);
+            if (ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
+            if (link) {
+                uint32_t r = net ? css_linked_sheet(net, x) : 0;
+                if (!r) continue;
+                char base[4096];
+                amb_span fu = net->resource[r].final_url;
+                snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
+                vector<char> body;
+                append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
+                css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0);
+                continue;
+            }
+            vector<char> t;
+            for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
+                if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
+            uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
+        }
+    }
+    dom_node_h no_tree = { 0, 0, 0 };
+    css_read_tree = no_tree;
+    css_read_depth = 0;
     css_quirk_read = 0;
     /* the cascade layers' order, now every sheet has named its layers */
     css_layer_rank(s, 0, 1);
@@ -9411,6 +9730,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     defer(ss) { CSS_STYLES_DROP(ss); }
     resize(&ss.first, 1);
     resize(&ss.fsx, 1);
+    resize(&ss.lflex, 1);
     resize(&ss.cfirst, 1);
     resize(&ss.ccount, 1);
     vector<css_skey> se;
@@ -9437,7 +9757,6 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         else ms.target = nx;
     }
     if (!ms.target && net) ms.target = css_url_target(s, doc, net);
-    uint32_t hint_sheet = 0, inline_sheet = 0;
     /* -internal-quirk-inherit: color's initial value until the body's colour is known */
     int body_seen = 0;
     env.quirk_color = initial[CSS_PROP_COLOR].color;
@@ -9449,16 +9768,56 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     vector<css_bent> be;
     css_index_rules(s, shared, &parts, &rxs, &bk, &slots, &be);
     uint32_t univ = css_bucket_find(&bk, &slots, CSS_KEY_UNIVERSAL, 0, css_key_hash(CSS_KEY_UNIVERSAL, "", 0));
+    /* each author rule's tree (its shadow root; 0 the document's), and the rules that reach out of their trees,
+       by kind (css_shadow_kind): matched apart, not in the walk's buckets */
+    vector<uint32_t> rtree, xhost, xslot, xpart;
+    vector<uint8_t> rkind;
+    resize(rtree, (size_t)shared);
+    resize(rkind, (size_t)shared);
+    for (uint32_t r = ua_end; r < shared; r++) {
+        uint32_t sh = s->rule[r].sheet;
+        rtree[r] = sh && sh < s->sheet_len ? s->sheet[sh].tree.index : 0;
+        css_rx rx = at(rxs, r);
+        uint32_t np = rx.nparts & 0xff;
+        if (s->rule[r].keyframes || !np) continue;
+        css_part sp = at(parts, rx.parts + np - 1);
+        int kd = css_shadow_kind(text_ptr(s, s->rule[r].selector) + sp.start, sp.len);
+        rkind[r] = (uint8_t)kd;
+        if (kd == CSS_SH_HOST && rtree[r]) push_back(xhost, r);
+        else if (kd == CSS_SH_SLOTTED && rtree[r]) push_back(xslot, r);
+        else if (kd == CSS_SH_PART) push_back(xpart, r);
+    }
+    uint64_t allkeys[4] = { ~0ull, ~0ull, ~0ull, ~0ull };
+    /* a document with no shadow root has none of this to do: every rule of its own tree, none reaching out */
+    int scoped = doc->shadow_len > 1;
+    /* each node's tree (its shadow root, 0 the document's) and that tree's depth, found as the walk meets it */
+    vector<uint32_t> tsc, tdp;
+    resize(tsc, (size_t)doc->node_len);
+    resize(tdp, (size_t)doc->node_len);
+    uint32_t hint_sheets[CSS_CTX_DEPTHS], inline_sheets[CSS_CTX_DEPTHS];
+    memset(hint_sheets, 0, sizeof hint_sheets);
+    memset(inline_sheets, 0, sizeof inline_sheets);
+    vector<char> pnames, pnext;
     uint32_t id_atom = names_find(doc, "id", 2), class_atom = names_find(doc, "class", 5);
     vector<uint64_t> anc;
     vector<uint64_t> selfk;
     resize(anc, (size_t)doc->node_len * 4);
     resize(selfk, (size_t)doc->node_len * 4);
-    for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
+    /* the flat tree's elements (src/dom/dom.h), each under its parent there, whose values it inherits */
+    for (uint32_t x = dom_flat_walk(doc, 1, 1); x; x = dom_flat_walk(doc, x, 1)) {
+        if (scoped) {
+            uint32_t up = doc->node[x].parent, uh = up ? dom_shadow_root_host(doc, up) : 0;
+            if (uh) { tsc[x] = up; tdp[x] = at(tdp, uh) + 1; }
+            else if (up) { tsc[x] = at(tsc, up); tdp[x] = at(tdp, up); }
+        }
         if (!css_is_element(doc, x)) continue;
         clear(matched);
         clear(pmatched);
-        uint32_t px = css_parent_element(doc, x);
+        uint32_t px = dom_flat_element_parent(doc, x);
+        /* the rules of x's own tree, matched with its host featureless */
+        uint32_t xt = scoped ? at(tsc, x) : 0;
+        ms.tree = xt;
+        ms.host = xt ? dom_shadow_root_host(doc, xt) : 0;
         uint64_t am[4], om[4];
         for (int q = 0; q < 4; q++) am[q] = px ? at(anc, (size_t)px * 4 + q) | at(selfk, (size_t)px * 4 + q) : 0;
         memset(om, 0, sizeof om);
@@ -9471,7 +9830,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
             for (uint32_t r = first_rule; r < shared; r++)
                 {
-                    if (s->rule[r].keyframes) continue;
+                    if (s->rule[r].keyframes || (scoped && r >= ua_end && (at(rtree, r) != xt || at(rkind, r)))) continue;
                     uint32_t prox, mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am, &prox);
                     if (mk == 1) push_back(matched, (prox ? 256 - prox : 0) << 24 | r);
                     else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
@@ -9502,6 +9861,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 heads[bi] = at(be, heads[bi]).next;
                 if (r == last) continue;
                 last = r;
+                if (scoped && r >= ua_end && (at(rtree, r) != xt || at(rkind, r))) continue;
                 if (r >= first_rule) {
                     uint32_t prox, mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am, &prox);
                     if (mk == 1) push_back(matched, (prox ? 256 - prox : 0) << 24 | r);
@@ -9510,10 +9870,83 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             }
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
-        css_element_hints(s, doc, x, &hint_sheet, &matched);
+        /* the rules of the shadow tree x hosts whose subject is :host, :host() or :host-context() */
+        uint32_t own_root = scoped ? doc->node[x].shadow : 0;
+        for (size_t q = 0; own_root && q < len(xhost); q++) {
+            uint32_t r = at(xhost, q);
+            if (at(rtree, r) != own_root) continue;
+            css_mstate mh = ms;
+            mh.tree = own_root;
+            mh.host = x;
+            uint32_t prox, mk = css_rule_matches(s, doc, x, &mh, r, &parts, &rxs, allkeys, &prox);
+            if (mk == 1) push_back(matched, r);
+            else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
+        }
+        /* the ::slotted() rules of each slot x is assigned to, flattened */
+        for (uint32_t sl = scoped ? doc->node[x].slot : 0, guard = 0; sl && len(xslot) && guard < 64; sl = doc->node[sl].slot, guard++) {
+            uint32_t st = at(tsc, sl);
+            for (size_t q = 0; q < len(xslot); q++) {
+                uint32_t r = at(xslot, q);
+                if (at(rtree, r) != st) continue;
+                uint32_t mk = css_slotted_matches(s, doc, x, sl, st, &ms, r, &parts, &rxs);
+                if (mk == 1) push_back(matched, r);
+                else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
+            }
+        }
+        /* the ::part() rules of the trees around x's, by its part names and those its hosts export them as */
+        uint32_t pa = xt && len(xpart) ? css_attr_of(doc, x, "part", 4) : 0;
+        if (pa && doc->attr[pa].value.len) {
+            clear(pnames);
+            append_range(pnames, text_ptr(doc, doc->attr[pa].value), doc->attr[pa].value.len);
+            uint32_t root = xt, host = ms.host;
+            for (int level = 0; host && len(pnames) && level < 64; level++) {
+                uint32_t outer = at(tsc, host);
+                for (size_t q = 0; q < len(xpart); q++) {
+                    uint32_t r = at(xpart, q), rt = at(rtree, r);
+                    if (rt != outer && !(level == 0 && rt == root)) continue;   /* :host::part(), of its own parts alone */
+                    uint32_t mk = css_part_matches(s, doc, x, host, rt, &ms, r, &parts, &rxs, &pnames);
+                    if (mk == 1) push_back(matched, r);
+                    else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
+                }
+                if (!outer) break;
+                css_export_parts(doc, host, &pnames, &pnext);
+                swap(&pnames, &pnext);
+                root = outer;
+                host = dom_shadow_root_host(doc, outer);
+            }
+        }
+        /* the cascade's order of the rules matched apart: their own (css_ctx and the rest sort them) */
+        if (own_root || doc->node[x].slot || pa) {
+            vector<uint32_t> sorted;
+            for (size_t q = 0; q < len(matched); q++) push_back(sorted, at(matched, q));
+            for (size_t q = 1; q < len(sorted); q++)
+                for (size_t z = q; z > 0 && (at(sorted, z - 1) & 0xffffff) > (at(sorted, z) & 0xffffff); z--) {
+                    uint32_t tmp = at(sorted, z);
+                    sorted[z] = at(sorted, z - 1);
+                    sorted[z - 1] = tmp;
+                }
+            swap(&matched, &sorted);
+            vector<uint32_t> psorted;
+            for (size_t q = 0; q < len(pmatched); q++) push_back(psorted, at(pmatched, q));
+            for (size_t q = 1; q < len(psorted); q++)
+                for (size_t z = q; z > 0 && (at(psorted, z - 1) & 0xffffff) > (at(psorted, z) & 0xffffff); z--) {
+                    uint32_t tmp = at(psorted, z);
+                    psorted[z] = at(psorted, z - 1);
+                    psorted[z - 1] = tmp;
+                }
+            swap(&pmatched, &psorted);
+        }
+        /* its own rules, in a sheet of its tree's depth */
+        uint32_t dk = !scoped ? 0 : at(tdp, x) < CSS_CTX_DEPTHS ? at(tdp, x) : CSS_CTX_DEPTHS - 1;
+        css_own_depth = dk;
+        uint32_t hs = hint_sheets[dk], is = inline_sheets[dk];
+        css_element_hints(s, doc, x, &hs, &matched);
         css_quirk_read = css_quirks;
-        css_style_attr(s, doc, x, &inline_sheet, &matched);
+        css_style_attr(s, doc, x, &is, &matched);
         css_quirk_read = 0;
+        hint_sheets[dk] = hs;
+        inline_sheets[dk] = is;
+        css_own_depth = 0;
         /* an element's own rules (its hints', its style attribute's): whether they read a container unit */
         while (cq_on && len(rule_cq) < s->rule_len) {
             uint32_t r = (uint32_t)len(rule_cq);

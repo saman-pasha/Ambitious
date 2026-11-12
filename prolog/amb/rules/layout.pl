@@ -20,7 +20,8 @@ layout_pseudo_box_of(N, P, B) :-
 
 %% an inline element's box, which is no box of the tree's: the fragments it makes (its
 %% background's, its generated content's), its text's, an atomic inline's in it, and those
-%% of the inline elements in it, together
+%% of the inline elements in it (its children in the flat tree: a host's shadow tree's, a
+%% slot's assigned nodes), together
 layout_inline_box(N, X, Y, W, H) :-
     dom_element(N, _), \+ layout_box_of(N, _),
     findall(r(X0, Y0, X1, Y1), ( layout_rules_inline_part(N, X0, Y0, W0, H0), X1 is X0 + W0, Y1 is Y0 + H0 ), Rs),
@@ -30,10 +31,10 @@ layout_inline_box(N, X, Y, W, H) :-
     W is XE - X, H is YE - Y.
 
 layout_rules_inline_part(N, X, Y, W, H) :- layout_frag(_, _, K, N, X, Y, W, H), K \== atomic.
-layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(T, N), layout_text(_, _, T, _, X, Y, W, H).
-layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(C, N), dom_element(C, _), layout_frag(_, _, atomic, C, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :- dom_flat_child(N, T), layout_text(_, _, T, _, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :- dom_flat_child(N, C), dom_element(C, _), layout_frag(_, _, atomic, C, X, Y, W, H).
 layout_rules_inline_part(N, X, Y, W, H) :-
-    dom_parent(C, N), dom_element(C, _), \+ layout_box_of(C, _), layout_rules_inline_part(C, X, Y, W, H).
+    dom_flat_child(N, C), dom_element(C, _), \+ layout_box_of(C, _), layout_rules_inline_part(C, X, Y, W, H).
 
 %% a box's border box
 layout_border_box(B, X, Y, W, H) :-

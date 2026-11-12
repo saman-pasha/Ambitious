@@ -2,6 +2,8 @@
 the same 49 lines
 -- the shadow page's console, against Chromium's:
 the same 27 lines
+-- the shadow-slots page's console, against Chromium's:
+the same 54 lines
 -- the definitions: their names, what they observe, the elements upgraded, their callbacks:
 D = sd(1,1,0), Name = 'x-item', R = sr(1,1,0), O = 2, U = 7, C = y, A = y
 D = sd(1,2,0), Name = 'x-fn', R = sr(1,1,0), O = 0, U = 0, C = n, A = n
@@ -10,5 +12,21 @@ D = sd(1,3,0), Name = 'x-bad', R = sr(1,1,0), O = 0, U = 0, C = n, A = n
 H = n(1,14,0), R = n(1,29,0), M = open, Id = host, F = n(1,30,0), E = div
 H = n(1,23,0), R = n(1,38,0), M = closed, Id = closedHost, F = n(1,39,0), E = span
 H = n(1,32,0), R = n(1,33,0), M = open, F = n(1,34,0), Id = shadowed
+-- the flat tree: each slotted node's slot, a declarative root's options, a node's parent there:
+N = n(1,17,0), S = n(1,73,0), I = b, SI = sa
+N = n(1,27,0), S = n(1,26,0), I = light, SI = none
+N = n(1,32,0), S = n(1,31,0), I = 'closed light', SI = none
+N = n(1,46,0), S = n(1,45,0), I = 'inner light', SI = none
+N = n(1,77,0), S = n(1,74,0), I = '   ', SI = sd
+N = n(1,88,0), S = n(1,87,0), I = lt, SI = cs
+N = n(1,95,0), S = n(1,98,0), I = m2, SI = ms1
+N = n(1,96,0), S = n(1,99,0), I = m3, SI = ms2
+N = n(1,100,0), S = n(1,99,0), I = stray, SI = ms2
+R = n(1,21,0), A = named, D = true, C = true, Z = false, H = n(1,20,0), M = open, I = dsd
+R = n(1,30,0), A = named, D = false, C = false, Z = false, H = n(1,29,0), M = closed, I = dsdc
+R = n(1,35,0), A = named, D = false, C = false, Z = false, H = n(1,34,0), M = open, I = dsdu
+R = n(1,40,0), A = named, D = false, C = false, Z = false, H = n(1,39,0), M = open, I = dsdn
+R = n(1,42,0), A = named, D = false, C = false, Z = true, H = n(1,41,0), M = open, I = xin
+N = n(1,41,0), Cs = [n(1,43,0),n(1,45,0)]
 -- what the reasoner says of them:
 amb_diag(custom_element_undefined, n(1,17,0), 'the <x-never> element\'s name is a custom element\'s, but no script defines it (customElements.define): it stays an HTMLElement with no behaviour of its own').

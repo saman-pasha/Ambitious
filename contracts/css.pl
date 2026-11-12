@@ -95,7 +95,14 @@ css_contract(enum(state_kind, [hover, focus, focus_visible, active, target])).
 
 css_contract(record(sheet, [field(origin, enum(origin)), field(first_rule, ref(rule)), field(last_rule, ref(rule)),
     field(url,    span(text)),          % where it was fetched from: a linked or imported sheet's
-    field(parent, ref(sheet))           % the sheet whose @import brought it
+    field(parent, ref(sheet)),          % the sheet whose @import brought it
+    %% the tree its rules apply in (CSS Scoping 1): none, the document's; a shadow root, its tree's
+    %% (its style elements', its links'); and how many shadow trees in that tree is (0 the document),
+    %% its encapsulation context, which the cascade orders before the style attribute: for normal
+    %% declarations the outer wins, for important ones the inner (Cascade 5, 6.1). The presentational
+    %% hints and style attributes of a shadow tree's elements are in sheets of its depth
+    field(tree,   xhandle(dom, node)),
+    field(depth,  u32)
 ])).
 css_contract(record(rule, [
     field(sheet,      ref(sheet)),
@@ -248,6 +255,8 @@ css_contract(invariant(live_links, 'Every link names a live record', refs_live))
 %% ---- REASONING --------------------------------------------------------------
 
 css_contract(fact(css_sheet(handle, field(origin)), table(sheet), true)).
+%% a sheet of a shadow tree's: its tree (none for its elements' hints and style attributes) and depth
+css_contract(fact(css_sheet_tree(handle, field(tree), field(depth)), table(sheet), field(depth) \== 0)).
 %% a sheet an @import brought, the sheet it is in, and where it was fetched from
 css_contract(fact(css_imported(handle, field(parent), field(url)), table(sheet), field(parent) \== none)).
 css_contract(fact(css_rule(handle, field(sheet), field(selector), field(spec), field(order)), table(rule), true)).

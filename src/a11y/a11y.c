@@ -2,7 +2,9 @@
    accessibility tree of a styled document; and the module's generated
    implementation.
 
-   THE TREE, in document order, but that an element aria-owns takes (an id it
+   THE TREE, in the flat tree's order (src/dom/dom.h: a host's shadow tree in its place, a
+   slot's assigned nodes or else its fallback, a host's child no slot takes left out), but
+   that an element aria-owns takes (an id it
    lists, of an element not taken already and not above it) is its child after
    its own children. An element whose computed display is none -- the user agent
    sheet's for a closed details element's content and a dialog without open --,
@@ -122,6 +124,7 @@ amb_interface(css);
 amb_implementation(a11y);
 #include "../css/css.h"
 #include "../net/url.h"
+#include "../dom/dom.h"
 /* HTML's pattern attribute, read by the script engine's regular expressions (src/js/js.h) */
 int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
 
@@ -385,9 +388,12 @@ static int ax_id_is(ACTX, uint32_t y, const char *p, size_t n) {
     if (!a || d->attr[a].value.len != n) return 0;
     return n == 0 || memcmp(text_ptr(d, d->attr[a].value), p, n) == 0;
 }
-/* in the document's tree: not detached, nor in a template's contents (12c) */
+/* in the document's tree, or in a shadow tree of a host in it: not detached, nor in a template's contents (12c) */
 static int ax_connected(const dom_document *d, uint32_t x) {
-    while (x && x != 1) x = d->node[x].parent;
+    for (size_t steps = 0; x && x != 1 && steps <= d->node_len; steps++) {
+        uint32_t up = d->node[x].parent;
+        x = up ? up : dom_shadow_root_host(d, x);
+    }
     return x == 1;
 }
 static void ax_ids_index(ACTX) {
@@ -1077,8 +1083,8 @@ static void ax_control_value(ACTX, uint32_t y, int k, a11y_role r, vector<char> 
         return;
     }
     if (r == A11Y_ROLE_LISTBOX) {
-        /* an ARIA listbox: its options with aria-selected="true" */
-        uint32_t x = d->node[y].first_child;
+        /* an ARIA listbox: its options with aria-selected="true", in the flat tree */
+        uint32_t x = dom_flat_first(d, y);
         while (x) {
             int down = 1;
             if (d->node[x].kind == DOM_NODE_KIND_ELEMENT) {
@@ -1089,10 +1095,10 @@ static void ax_control_value(ACTX, uint32_t y, int k, a11y_role r, vector<char> 
                     if (ax_tok(d, ax_get(AARGS, x, A_SELECTED), "true") == 0) { ax_space(out); ax_option_text(AARGS, x, out); }
                 }
             } else down = 0;
-            if (down && d->node[x].first_child) { x = d->node[x].first_child; continue; }
-            while (x != y && !d->node[x].next_sibling) x = d->node[x].parent;
-            if (x == y) break;
-            x = d->node[x].next_sibling;
+            if (down && dom_flat_first(d, x)) { x = dom_flat_first(d, x); continue; }
+            while (x && x != y && !dom_flat_next(d, x)) x = dom_flat_parent(d, x);
+            if (!x || x == y) break;
+            x = dom_flat_next(d, x);
         }
         return;
     }
@@ -1245,7 +1251,8 @@ static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) 
    element being named (self) adds nothing to its own label. The walk is a loop: a subtree of any depth is read */
 static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<char> *out) {
     ax_gen_text(AARGS, root, CSS_PSEUDO_BEFORE, flags, out);
-    uint32_t x = d->node[root].first_child;
+    /* the flat tree's children (src/dom/dom.h): a host's shadow tree's, a slot's assigned nodes */
+    uint32_t x = dom_flat_first(d, root);
     while (x) {
         int down = 0;
         int nk = d->node[x].kind;
@@ -1268,7 +1275,7 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
                 } else {
                     resize(out, m0);
                     ax_gen_text(AARGS, x, CSS_PSEUDO_BEFORE, flags, out);
-                    if (d->node[x].first_child) down = 1;
+                    if (dom_flat_first(d, x)) down = 1;
                     else {
                         ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
                         if (block) ax_space(out);
@@ -1276,16 +1283,16 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
                 }
             }
         }
-        if (down) { x = d->node[x].first_child; continue; }
-        while (x != root && !d->node[x].next_sibling) {
-            x = d->node[x].parent;
-            if (x != root) {
+        if (down) { x = dom_flat_first(d, x); continue; }
+        while (x && x != root && !dom_flat_next(d, x)) {
+            x = dom_flat_parent(d, x);
+            if (x && x != root) {
                 ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
                 if (ax_block(AARGS, x)) ax_space(out);
             }
         }
-        if (x == root) break;
-        x = d->node[x].next_sibling;
+        if (!x || x == root) break;
+        x = dom_flat_next(d, x);
     }
     ax_gen_text(AARGS, root, CSS_PSEUDO_AFTER, flags, out);
 }
@@ -1844,7 +1851,7 @@ static int ax_live_element(ACTX, uint32_t y, int k) {
     return r == A11Y_ROLE_ALERT || r == A11Y_ROLE_STATUS || r == A11Y_ROLE_LOG;
 }
 static int ax_drawn_within(ACTX, uint32_t root, uint32_t y) {
-    for (uint32_t p = y; p && p != root; p = d->node[p].parent)
+    for (uint32_t p = y; p && p != root; p = dom_flat_parent(d, p) ? dom_flat_parent(d, p) : d->node[p].parent)
         if (ax_get(AARGS, p, K_HIDDEN) || ax_display_none(AARGS, p)) return 0;
     return 1;
 }
@@ -1909,7 +1916,7 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     if (how >= 0) { ax_hidden_root(AARGS, c, how); return 0; }
     *g = *f;
     g->x = c;
-    g->next = d->node[c].first_child;
+    g->next = dom_flat_first(d, c);
     g->fs_legend = 0;
     g->oa = d->node[c].first_attr ? ax_get(AARGS, c, A_OWNS) : 0;
     g->op = 0;
@@ -2079,7 +2086,7 @@ static uint32_t ax_next_owned(ACTX, ax_frame *f) {
 
 /* an element and every element above it are walked: none is hidden, nor never drawn */
 static int ax_walked(ACTX, uint32_t x) {
-    for (uint32_t p = x; p > 1; p = d->node[p].parent)
+    for (uint32_t p = x; p > 1; p = dom_flat_parent(d, p))
         if (d->node[p].kind == DOM_NODE_KIND_ELEMENT && (ax_undrawn(AARGS, p, ax_kind(AARGS, p)) || ax_hidden_how(AARGS, p) >= 0)) return 0;
     return 1;
 }
@@ -2088,7 +2095,7 @@ static int ax_walked(ACTX, uint32_t x) {
    above it (the tree as it stands, each owned element under its owner), and both are walked */
 static void ax_owners(ACTX) {
     resize(owner, d->node_len, 0);
-    uint32_t x = d->node_len > 1 ? d->node[1].first_child : 0;
+    uint32_t x = d->node_len > 1 ? dom_flat_walk(d, 1, 1) : 0;
     while (x) {
         uint32_t oa = d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].first_attr ? ax_get(AARGS, x, A_OWNS) : 0;
         if (oa && ax_walked(AARGS, x)) {
@@ -2103,13 +2110,11 @@ static void ax_owners(ACTX) {
                 uint32_t y = ax_by_id(AARGS, p + b, i - b);
                 if (!y || y == x || at(*owner, y) || !ax_walked(AARGS, y)) continue;
                 int above = 0;
-                for (uint32_t q = x; q > 1 && !above; q = at(*owner, q) ? at(*owner, q) : d->node[q].parent) if (q == y) above = 1;
+                for (uint32_t q = x; q > 1 && !above; q = at(*owner, q) ? at(*owner, q) : dom_flat_parent(d, q)) if (q == y) above = 1;
                 if (!above) (*owner)[y] = x;
             }
         }
-        if (d->node[x].first_child) { x = d->node[x].first_child; continue; }
-        while (x && !d->node[x].next_sibling) x = d->node[x].parent;
-        if (x) x = d->node[x].next_sibling;
+        x = dom_flat_walk(d, x, 1);
     }
 }
 
@@ -2120,13 +2125,13 @@ static void ax_walk(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     ax_frame f0;
     memset(&f0, 0, sizeof f0);
     f0.x = root;
-    f0.next = d->node[root].first_child;
+    f0.next = dom_flat_first(d, root);
     push_back(stack, f0);
     while (len(stack)) {
         size_t top = len(stack) - 1;
         uint32_t c = at(stack, top).next;
         if (c) {
-            stack[top].next = d->node[c].next_sibling;
+            stack[top].next = dom_flat_next(d, c);
             if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
             if (c < len(*owner) && at(*owner, c)) continue;
         } else {
@@ -2233,6 +2238,8 @@ static void ax_positions(ACTX, const vector<ax_radio> *radios) {
 }
 
 a11y_status a11y_build(a11y_tree *t, dom_document *d, css_style *st) {
+    /* the flat tree the walk takes (src/dom/dom.h) */
+    dom_flatten(d);
     vector<uint32_t> sx;
     resize(sx, d->node_len);
     for (uint32_t e = 1; e < st->estyle_len; e++) {      /* each element's first value: its style's */

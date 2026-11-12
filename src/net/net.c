@@ -4035,6 +4035,26 @@ typedef struct net_part {
     dom_node_h elem;
 } net_part;
 
+/* the node after x in shadow-including tree order (DOM 4.2.2): a host's shadow tree (a declarative one the
+   parser made) right after it, before its children; 0 at the document's end */
+static uint32_t net_next_part(const dom_document *d, uint32_t x) {
+    uint32_t r = d->node[x].shadow;
+    if (r && d->node[r].first_child) return d->node[r].first_child;
+    if (d->node[x].first_child) return d->node[x].first_child;
+    for (uint32_t y = x, steps = 0; y && y != 1 && steps <= d->node_len; steps++) {
+        if (d->node[y].next_sibling) return d->node[y].next_sibling;
+        uint32_t p = d->node[y].parent;
+        if (!p) {
+            uint32_t h = d->node[y].kind == DOM_NODE_KIND_FRAGMENT ? d->node[y].host : 0;
+            if (!h || d->node[h].shadow != y) return 0;
+            if (d->node[h].first_child) return d->node[h].first_child;
+            p = h;
+        }
+        y = p;
+    }
+    return 0;
+}
+
 net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource_h page, uint32_t denied) {
     uint32_t pg = page.index;
     char base_text[8192];
@@ -4159,9 +4179,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
             l->resource[r].type = net_text(l, "");
             l->resource[r].reason = net_text(l, a ? "the src attribute is empty" : srcset ? "the srcset attribute names no image" : "no source of its picture holds");
         }
-        if (doc->node[x].first_child) { x = doc->node[x].first_child; continue; }
-        while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }
-        if (x) x = doc->node[x].next_sibling;
+        x = net_next_part(doc, x);
     }
     net_batch(l, &jobs, &base, &t, &arena);
     /* then, in order, each part asked for twice given the first's record, and each image's

@@ -394,7 +394,7 @@ static dom_status sh_insert(dom_document *d, uint32_t parent, uint32_t child, ui
     if (d->node[child].kind == DOM_NODE_KIND_DOCUMENT) return DOM_WRONG_KIND;
     if (children_inclusive_ancestor(d, child, parent)) return DOM_WOULD_CYCLE;
     if (before && d->node[before].parent != parent) return DOM_NOT_A_CHILD;
-    if (parent != 1 && !sh_is_elem(d, parent)) return DOM_WRONG_KIND;
+    if (parent != 1 && !sh_is_elem(d, parent) && !script_shadow_host(d, parent)) return DOM_WRONG_KIND;
     dom_status st = sh_detach(d, child);
     if (st != DOM_OK) return st;
     if (before) return dom_insert_before(d, node_handle(d, parent), node_handle(d, child), node_handle(d, before));
@@ -434,6 +434,18 @@ static uint32_t sh_import(dom_document *to, const dom_document *from, uint32_t x
             append_range(an, names_ptr(from, from->attr[at].name), names_len(from, from->attr[at].name));
             append_range(av, text_ptr(from, from->attr[at].value), from->attr[at].value.len);
             dom_set_attribute_ns(to, h, from->attr[at].ns, data(an), len(an), data(av), len(av));
+        }
+        /* a clonable shadow root cloned with its host, its children whole (DOM 4.5, clone a node), deep or not */
+        uint32_t sr = from->node[x].shadow;
+        for (uint32_t q = 1; sr && q < from->shadow_len; q++) {
+            if (!from->shadow[q].live || from->shadow[q].host != x || !from->shadow[q].clonable) continue;
+            dom_shadow o = from->shadow[q];
+            dom_node_h r = dom_attach_shadow(to, h, o.mode, o.assignment, o.delegates_focus, o.clonable, o.serializable, o.declarative);
+            for (uint32_t c = r.index ? from->node[sr].first_child : 0; c; c = from->node[c].next_sibling) {
+                uint32_t y = sh_import(to, from, c, 1);
+                if (y) dom_append_child(to, r, node_handle(to, y));
+            }
+            break;
         }
         uint32_t fc = from->node[x].content, tc = to->node[h.index].content;
         if (deep && fc && tc)
@@ -860,6 +872,8 @@ int sh_dispatch(js_vm *vm, uint32_t target, jv ev) {
     vector<uint32_t> path;
     push_back(path, target);
     int shadows = d->shadow_len > 1;
+    /* the flat tree's slots, which a slotted node's path goes through (src/dom/dom.h) */
+    if (shadows) dom_flatten(d);
     if (target != JS_WINDOW && !(target & SH_OBJECT_TARGET) && !(vm->objs[e].a & EV_NOPATH)) {
         int composed = (vm->objs[e].a & EV_COMPOSED) != 0;
         if (shadows) for (uint32_t p = script_event_parent(d, target, target, composed); p; p = script_event_parent(d, p, target, composed)) push_back(path, p);
@@ -1827,7 +1841,7 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
 /* a property set on a host object: its change to the DOM made records, as a call's */
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
     struct js_host *h = vm->host;
-    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_set(vm, o, atom, v, handled);
+    if (!h || (!h->mreg_live && !len(h->cdefs) && !h->sl_on)) return sh_host_set(vm, o, atom, v, handled);
     if (h->mreg_live) script_observe_flush(vm);
     int r = sh_host_set(vm, o, atom, v, handled);
     sh_after_call(vm);
@@ -2033,12 +2047,14 @@ static void sh_after_call(js_vm *vm) {
         script_custom_flush(vm);
         if (h->mreg_live) script_observe_flush(vm);
     }
+    /* the slots whose nodes the call changed, signalled */
+    if (h->sl_on && !vm->throwing) script_slots_check(vm);
 }
 /* a call into the host: while a MutationObserver observes, the DOM's changes before it
    and its own made records, each its own (src/script/observe.c); else the call alone */
 jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
     struct js_host *h = vm->host;
-    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
+    if (!h || (!h->mreg_live && !len(h->cdefs) && !h->sl_on)) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
     if (h->mreg_live) script_observe_flush(vm);
     jv r = sh_host_call(vm, id, callee, thisv, args, argc, handled);
     sh_after_call(vm);

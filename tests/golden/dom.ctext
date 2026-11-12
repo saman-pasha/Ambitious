@@ -1,19 +1,20 @@
-/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:7e7d0d2d:8691). Do not edit. */
-typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:41fde7c7:10881). Do not edit. */
+typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_HAS_SHADOW, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
 typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT, DOM_NODE_KIND_FRAGMENT } dom_node_kind;
 typedef enum dom_namespace { DOM_NAMESPACE_HTML, DOM_NAMESPACE_SVG, DOM_NAMESPACE_MATHML } dom_namespace;
 typedef enum dom_shadow_mode { DOM_SHADOW_MODE_OPEN, DOM_SHADOW_MODE_CLOSED } dom_shadow_mode;
+typedef enum dom_slot_assignment { DOM_SLOT_ASSIGNMENT_NAMED, DOM_SLOT_ASSIGNMENT_MANUAL } dom_slot_assignment;
 typedef enum dom_attr_namespace { DOM_ATTR_NAMESPACE_NULL, DOM_ATTR_NAMESPACE_XLINK, DOM_ATTR_NAMESPACE_XML, DOM_ATTR_NAMESPACE_XMLNS } dom_attr_namespace;
 typedef enum dom_document_mode { DOM_DOCUMENT_MODE_NO_QUIRKS, DOM_DOCUMENT_MODE_QUIRKS, DOM_DOCUMENT_MODE_LIMITED_QUIRKS } dom_document_mode;
-typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_ATTACH_SHADOW, DOM_OP_KEEP_DETAILS, DOM_OP_SET_MODE, DOM_OP_SERIALIZE } dom_op;
+typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_ATTACH_SHADOW, DOM_OP_FLATTEN, DOM_OP_ASSIGN_SLOT, DOM_OP_CLEAR_SLOT, DOM_OP_KEEP_DETAILS, DOM_OP_SET_MODE, DOM_OP_SERIALIZE } dom_op;
 typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
 typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
 typedef struct dom_detail_h { uint32_t doc, index, gen; } dom_detail_h;
 typedef struct dom_shadow_h { uint32_t doc, index, gen; } dom_shadow_h;
-typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; dom_document_mode mode; } dom_node;
+typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; dom_document_mode mode; uint32_t shadow; uint32_t slot; uint32_t assigned_first; uint32_t assigned_next; uint32_t manual; uint32_t manual_first; uint32_t manual_next; uint64_t flat; } dom_node;
 typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; dom_attr_namespace ns; amb_span value; uint32_t next; } dom_attr;
 typedef struct dom_detail { uint32_t gen, live, free_next; uint32_t prev; uint32_t next; uint32_t name; uint32_t ns; amb_span old; uint8_t had; } dom_detail;
-typedef struct dom_shadow { uint32_t gen, live, free_next; uint32_t host; uint32_t root; dom_shadow_mode mode; } dom_shadow;
+typedef struct dom_shadow { uint32_t gen, live, free_next; uint32_t host; uint32_t root; dom_shadow_mode mode; dom_slot_assignment assignment; uint8_t delegates_focus; uint8_t clonable; uint8_t serializable; uint8_t declarative; } dom_shadow;
 typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint32_t detail; uint64_t revision; } dom_mutation;
 typedef struct dom_store_tag { char unused; } dom_store_tag;
 typedef store<dom_store_tag> dom_document;
@@ -23,6 +24,7 @@ const char *dom_op_name(dom_op x);
 const char *dom_node_kind_name(dom_node_kind x);
 const char *dom_namespace_name(dom_namespace x);
 const char *dom_shadow_mode_name(dom_shadow_mode x);
+const char *dom_slot_assignment_name(dom_slot_assignment x);
 const char *dom_attr_namespace_name(dom_attr_namespace x);
 const char *dom_document_mode_name(dom_document_mode x);
 void dom_init(dom_document *d, uint32_t id);
@@ -41,7 +43,10 @@ dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *na
 dom_status dom_set_attribute_ns(dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_remove_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_set_data(dom_document *d, dom_node_h node, const char *data, size_t data_len);
-dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode);
+dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode, dom_slot_assignment assignment, uint8_t delegates_focus, uint8_t clonable, uint8_t serializable, uint8_t declarative);
+dom_status dom_flatten(dom_document *d);
+dom_status dom_assign_slot(dom_document *d, dom_node_h slot, dom_node_h node);
+dom_status dom_clear_slot(dom_document *d, dom_node_h slot);
 dom_status dom_keep_details(dom_document *d);
 dom_status dom_set_mode(dom_document *d, dom_document_mode mode);
 dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
@@ -58,7 +63,10 @@ dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, co
 dom_status dom_check_set_attribute_ns(const dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_check_remove_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char *data, size_t data_len);
-dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode);
+dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode, dom_slot_assignment assignment, uint8_t delegates_focus, uint8_t clonable, uint8_t serializable, uint8_t declarative);
+dom_status dom_check_flatten(const dom_document *d);
+dom_status dom_check_assign_slot(const dom_document *d, dom_node_h slot, dom_node_h node);
+dom_status dom_check_clear_slot(const dom_document *d, dom_node_h slot);
 dom_status dom_check_keep_details(const dom_document *d);
 dom_status dom_check_set_mode(const dom_document *d, dom_document_mode mode);
 dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out);
@@ -72,6 +80,14 @@ dom_attr_h dom_attributes_first(const dom_document *d, dom_node_h h);
 dom_attr_h dom_attributes_next(const dom_document *d, dom_attr_h h);
 dom_node_h dom_attributes_up(const dom_document *d, dom_attr_h h);
 size_t dom_attributes_count(const dom_document *d, dom_node_h h);
+dom_node_h dom_assigned_first(const dom_document *d, dom_node_h h);
+dom_node_h dom_assigned_next(const dom_document *d, dom_node_h h);
+dom_node_h dom_assigned_up(const dom_document *d, dom_node_h h);
+size_t dom_assigned_count(const dom_document *d, dom_node_h h);
+dom_node_h dom_manual_first(const dom_document *d, dom_node_h h);
+dom_node_h dom_manual_next(const dom_document *d, dom_node_h h);
+dom_node_h dom_manual_up(const dom_document *d, dom_node_h h);
+size_t dom_manual_count(const dom_document *d, dom_node_h h);
 void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other, uint32_t detail);
 int dom_check_invariants(const dom_document *d, FILE *report);
 void dom_export(const dom_document *d, FILE *out);
@@ -88,6 +104,7 @@ const char *dom_status_name(dom_status x) {
     case DOM_INVALID_NAME: return "invalid_name";
     case DOM_NOT_FOUND: return "not_found";
     case DOM_OUT_OF_MEMORY: return "out_of_memory";
+    case DOM_HAS_SHADOW: return "has_shadow";
     case DOM_BAD_REQUEST: return "bad_request";
     case DOM_NOT_REQUESTABLE: return "not_requestable";
     case DOM_STALE_REVISION: return "stale_revision";
@@ -110,6 +127,9 @@ const char *dom_op_name(dom_op x) {
     case DOM_OP_REMOVE_ATTRIBUTE: return "remove_attribute";
     case DOM_OP_SET_DATA: return "set_data";
     case DOM_OP_ATTACH_SHADOW: return "attach_shadow";
+    case DOM_OP_FLATTEN: return "flatten";
+    case DOM_OP_ASSIGN_SLOT: return "assign_slot";
+    case DOM_OP_CLEAR_SLOT: return "clear_slot";
     case DOM_OP_KEEP_DETAILS: return "keep_details";
     case DOM_OP_SET_MODE: return "set_mode";
     case DOM_OP_SERIALIZE: return "serialize";
@@ -142,6 +162,13 @@ const char *dom_shadow_mode_name(dom_shadow_mode x) {
     }
     return "?";
 }
+const char *dom_slot_assignment_name(dom_slot_assignment x) {
+    switch (x) {
+    case DOM_SLOT_ASSIGNMENT_NAMED: return "named";
+    case DOM_SLOT_ASSIGNMENT_MANUAL: return "manual";
+    }
+    return "?";
+}
 const char *dom_attr_namespace_name(dom_attr_namespace x) {
     switch (x) {
     case DOM_ATTR_NAMESPACE_NULL: return "null";
@@ -160,7 +187,7 @@ const char *dom_document_mode_name(dom_document_mode x) {
     return "?";
 }
 
-const char dom_fingerprint[] = "fnv1a32:7e7d0d2d:8691";
+const char dom_fingerprint[] = "fnv1a32:41fde7c7:10881";
 void dom_init(dom_document *d, uint32_t id) {
     if (d->node_len != 0) abort();
     d->id = id;
@@ -268,10 +295,32 @@ dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char
     return DOM_OK;
 }
 
-dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode)
+dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode, dom_slot_assignment assignment, uint8_t delegates_focus, uint8_t clonable, uint8_t serializable, uint8_t declarative)
 {
     if (!node_live(d, host)) return DOM_STALE_HANDLE;
     { dom_node_kind k = d->node[host.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    if (d->node[host.index].shadow != 0) return DOM_HAS_SHADOW;
+    return DOM_OK;
+}
+
+dom_status dom_check_flatten(const dom_document *d)
+{
+    return DOM_OK;
+}
+
+dom_status dom_check_assign_slot(const dom_document *d, dom_node_h slot, dom_node_h node)
+{
+    if (!node_live(d, slot)) return DOM_STALE_HANDLE;
+    if (!node_live(d, node)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[slot.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    { dom_node_kind k = d->node[node.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_TEXT)) return DOM_WRONG_KIND; }
+    return DOM_OK;
+}
+
+dom_status dom_check_clear_slot(const dom_document *d, dom_node_h slot)
+{
+    if (!node_live(d, slot)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[slot.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
     return DOM_OK;
 }
 
@@ -341,6 +390,46 @@ size_t dom_attributes_count(const dom_document *d, dom_node_h h) {
     return attributes_count(d, h.index);
 }
 
+dom_node_h dom_assigned_first(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].assigned_first);
+}
+dom_node_h dom_assigned_next(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].assigned_next);
+}
+dom_node_h dom_assigned_up(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].slot);
+}
+size_t dom_assigned_count(const dom_document *d, dom_node_h h) {
+    if (!node_live(d, h)) return 0;
+    return assigned_count(d, h.index);
+}
+
+dom_node_h dom_manual_first(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].manual_first);
+}
+dom_node_h dom_manual_next(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].manual_next);
+}
+dom_node_h dom_manual_up(const dom_document *d, dom_node_h h) {
+    dom_node_h none = { 0, 0, 0 };
+    if (!node_live(d, h)) return none;
+    return node_handle(d, d->node[h.index].manual);
+}
+size_t dom_manual_count(const dom_document *d, dom_node_h h) {
+    if (!node_live(d, h)) return 0;
+    return manual_count(d, h.index);
+}
+
 void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other, uint32_t detail) {
     d->revision++;
     dom_mutation e = { op, target, other, detail, d->revision };
@@ -349,7 +438,7 @@ void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t othe
 int dom_check_invariants(const dom_document *d, FILE *report) {
     int bad = 0;
     /* root_document */
-    if (d->node_len < 2 || !d->node[1].live || d->node[1].kind != DOM_NODE_KIND_DOCUMENT || d->node[1].parent != 0) { bad++; amb_report(report, "dom", "root_document", 1); }
+    if (d->node_len < 2 || !d->node[1].live || d->node[1].kind != DOM_NODE_KIND_DOCUMENT || d->node[1].parent != 0 || d->node[1].slot != 0 || d->node[1].manual != 0) { bad++; amb_report(report, "dom", "root_document", 1); }
     /* tree_links */
     {
         own uint32_t *seen = (uint32_t *)calloc(d->node_len ? d->node_len : 1, sizeof(uint32_t));
@@ -452,6 +541,34 @@ int dom_check_invariants(const dom_document *d, FILE *report) {
             uint32_t r = d->node[i].host;
             if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].shadow;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].slot;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].assigned_first;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].assigned_next;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].manual;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].manual_first;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++) {
+            uint32_t r = d->node[i].manual_next;
+            if (d->node[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
         for (uint32_t i = 1; i < d->attr_len; i++) {
             uint32_t r = d->attr[i].owner;
             if (d->attr[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
@@ -469,6 +586,42 @@ int dom_check_invariants(const dom_document *d, FILE *report) {
             if (d->shadow[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
         }
     }
+    /* assigned_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->node_len ? d->node_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->node_len; o++) {
+            if (!d->node[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->node[o].assigned_first; i; i = d->node[i].assigned_next) {
+                if (i >= d->node_len || !d->node[i].live || d->node[i].slot != o || ++steps > d->node_len || seen[i]) { bad++; amb_report(report, "dom", "assigned_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++)
+            if (d->node[i].live && d->node[i].slot && seen[i] != d->node[i].slot) { bad++; amb_report(report, "dom", "assigned_links", i); }
+        free(seen);
+    }
+    /* manual_links */
+    {
+        own uint32_t *seen = (uint32_t *)calloc(d->node_len ? d->node_len : 1, sizeof(uint32_t));
+        if (!seen) abort();
+        for (uint32_t o = 1; o < d->node_len; o++) {
+            if (!d->node[o].live) continue;
+            uint32_t prev = 0;
+            size_t steps = 0;
+            for (uint32_t i = d->node[o].manual_first; i; i = d->node[i].manual_next) {
+                if (i >= d->node_len || !d->node[i].live || d->node[i].manual != o || ++steps > d->node_len || seen[i]) { bad++; amb_report(report, "dom", "manual_links", o); break; }
+                seen[i] = o;
+                prev = i;
+            }
+        }
+        for (uint32_t i = 1; i < d->node_len; i++)
+            if (d->node[i].live && d->node[i].manual && seen[i] != d->node[i].manual) { bad++; amb_report(report, "dom", "manual_links", i); }
+        free(seen);
+    }
     return bad;
 }
 void dom_export(const dom_document *d, FILE *out) {
@@ -485,6 +638,10 @@ void dom_export(const dom_document *d, FILE *out) {
         if (d->node[i].first_child != 0) { fputs("dom_first_child(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].first_child; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
         if ((d->node[i].kind == DOM_NODE_KIND_ELEMENT) && (d->node[i].ns != DOM_NAMESPACE_HTML)) { fputs("dom_namespace(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); fputs(dom_namespace_name(d->node[i].ns), out); fputs(").\n", out); }
         if (d->node[i].content != 0) { fputs("dom_template_content(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].content; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].slot != 0) { fputs("dom_assigned_slot(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].slot; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].manual != 0) { fputs("dom_manual_slot(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].manual; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].assigned_first != 0) { fputs("dom_slot_first(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].assigned_first; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
+        if (d->node[i].assigned_next != 0) { fputs("dom_slot_next(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); { uint32_t r = d->node[i].assigned_next; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(").\n", out); }
         if ((d->node[i].kind == DOM_NODE_KIND_DOCUMENT) && (d->node[i].mode != DOM_DOCUMENT_MODE_NO_QUIRKS)) { fputs("dom_mode(", out); amb_put_handle(out, "n", d->id, i, d->node[i].gen); fputs(",", out); fputs(dom_document_mode_name(d->node[i].mode), out); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->attr_len; i++) {
@@ -496,6 +653,7 @@ void dom_export(const dom_document *d, FILE *out) {
     for (uint32_t i = 1; i < d->shadow_len; i++) {
         if (!d->shadow[i].live) continue;
         if (1) { fputs("dom_shadow_root(", out); { uint32_t r = d->shadow[i].host; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); { uint32_t r = d->shadow[i].root; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); fputs(dom_shadow_mode_name(d->shadow[i].mode), out); fputs(").\n", out); }
+        if (1) { fputs("dom_shadow_options(", out); { uint32_t r = d->shadow[i].root; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); fputs(dom_slot_assignment_name(d->shadow[i].assignment), out); fputs(",", out); fputs(d->shadow[i].delegates_focus ? "true" : "false", out); fputs(",", out); fputs(d->shadow[i].clonable ? "true" : "false", out); fputs(",", out); fputs(d->shadow[i].serializable ? "true" : "false", out); fputs(",", out); fputs(d->shadow[i].declarative ? "true" : "false", out); fputs(").\n", out); }
     }
 }
 dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -600,7 +758,7 @@ dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch
         amb_result(report, name, dom_status_name(st), d->revision);
         return st;
     }
-    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "attach_shadow") || amb_name_is(name, name_len, "keep_details") || amb_name_is(name, name_len, "set_mode") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "attach_shadow") || amb_name_is(name, name_len, "flatten") || amb_name_is(name, name_len, "assign_slot") || amb_name_is(name, name_len, "clear_slot") || amb_name_is(name, name_len, "keep_details") || amb_name_is(name, name_len, "set_mode") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }
@@ -1159,5 +1317,121 @@ size_t store_dom_store_tag_attributes_count(const store_dom_store_tag *s, uint32
         if (n > s->attr_len) abort();
     }
     return n;
+}
+
+void store_dom_store_tag_assigned_append(store_dom_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len) abort();
+    uint32_t t = s->node[o].assigned_first;
+    if (t) while (s->node[t].assigned_next) t = s->node[t].assigned_next;
+    s->node[i].slot = o;
+    s->node[i].assigned_next = 0;
+    if (t) s->node[t].assigned_next = i; else s->node[o].assigned_first = i;
+}
+
+void store_dom_store_tag_assigned_insert_before(store_dom_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_dom_store_tag_assigned_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len || b >= s->node_len || s->node[b].slot != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].assigned_first; x && x != b; x = s->node[x].assigned_next) p = x;
+    s->node[i].slot = o;
+    s->node[i].assigned_next = b;
+    if (p) s->node[p].assigned_next = i; else s->node[o].assigned_first = i;
+}
+
+void store_dom_store_tag_assigned_unlink(store_dom_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->node_len) abort();
+    uint32_t o = s->node[i].slot;
+    if (o == 0) return;
+    if (o >= s->node_len) abort();
+    uint32_t n = s->node[i].assigned_next;
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].assigned_first; x && x != i; x = s->node[x].assigned_next) p = x;
+    if (p) s->node[p].assigned_next = n; else s->node[o].assigned_first = n;
+    s->node[i].slot = 0;
+    s->node[i].assigned_next = 0;
+}
+
+uint32_t store_dom_store_tag_assigned_first(const store_dom_store_tag *s, uint32_t o) { if (o >= s->node_len) abort(); return s->node[o].assigned_first; }
+
+uint32_t store_dom_store_tag_assigned_next(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].assigned_next; }
+
+uint32_t store_dom_store_tag_assigned_up(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].slot; }
+
+size_t store_dom_store_tag_assigned_count(const store_dom_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->node_len) abort();
+    for (uint32_t i = s->node[o].assigned_first; i; i = s->node[i].assigned_next) {
+        n++;
+        if (n > s->node_len) abort();
+    }
+    return n;
+}
+
+int store_dom_store_tag_assigned_inclusive_ancestor(const store_dom_store_tag *s, uint32_t a, uint32_t b) {
+    size_t steps = 0;
+    for (uint32_t x = b; x; x = s->node[x].slot) {
+        if (x >= s->node_len) abort();
+        if (x == a) return 1;
+        if (++steps > s->node_len) return 1;
+    }
+    return 0;
+}
+
+void store_dom_store_tag_manual_append(store_dom_store_tag *s, uint32_t o, uint32_t i) {
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len) abort();
+    uint32_t t = s->node[o].manual_first;
+    if (t) while (s->node[t].manual_next) t = s->node[t].manual_next;
+    s->node[i].manual = o;
+    s->node[i].manual_next = 0;
+    if (t) s->node[t].manual_next = i; else s->node[o].manual_first = i;
+}
+
+void store_dom_store_tag_manual_insert_before(store_dom_store_tag *s, uint32_t o, uint32_t i, uint32_t b) {
+    if (b == 0) { store_dom_store_tag_manual_append(s, o, i); return; }
+    if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len || b >= s->node_len || s->node[b].manual != o) abort();
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].manual_first; x && x != b; x = s->node[x].manual_next) p = x;
+    s->node[i].manual = o;
+    s->node[i].manual_next = b;
+    if (p) s->node[p].manual_next = i; else s->node[o].manual_first = i;
+}
+
+void store_dom_store_tag_manual_unlink(store_dom_store_tag *s, uint32_t i) {
+    if (i == 0 || i >= s->node_len) abort();
+    uint32_t o = s->node[i].manual;
+    if (o == 0) return;
+    if (o >= s->node_len) abort();
+    uint32_t n = s->node[i].manual_next;
+    uint32_t p = 0;
+    for (uint32_t x = s->node[o].manual_first; x && x != i; x = s->node[x].manual_next) p = x;
+    if (p) s->node[p].manual_next = n; else s->node[o].manual_first = n;
+    s->node[i].manual = 0;
+    s->node[i].manual_next = 0;
+}
+
+uint32_t store_dom_store_tag_manual_first(const store_dom_store_tag *s, uint32_t o) { if (o >= s->node_len) abort(); return s->node[o].manual_first; }
+
+uint32_t store_dom_store_tag_manual_next(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].manual_next; }
+
+uint32_t store_dom_store_tag_manual_up(const store_dom_store_tag *s, uint32_t i) { if (i >= s->node_len) abort(); return s->node[i].manual; }
+
+size_t store_dom_store_tag_manual_count(const store_dom_store_tag *s, uint32_t o) {
+    size_t n = 0;
+    if (o >= s->node_len) abort();
+    for (uint32_t i = s->node[o].manual_first; i; i = s->node[i].manual_next) {
+        n++;
+        if (n > s->node_len) abort();
+    }
+    return n;
+}
+
+int store_dom_store_tag_manual_inclusive_ancestor(const store_dom_store_tag *s, uint32_t a, uint32_t b) {
+    size_t steps = 0;
+    for (uint32_t x = b; x; x = s->node[x].manual) {
+        if (x >= s->node_len) abort();
+        if (x == a) return 1;
+        if (++steps > s->node_len) return 1;
+    }
+    return 0;
 }
 
