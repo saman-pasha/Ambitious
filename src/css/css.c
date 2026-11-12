@@ -72,6 +72,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <vector.pl>
 #include <amb.pl>
 
@@ -866,6 +867,19 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "translate", 0, G_TEXT, 0, "none", "none" },
     { "rotate", 0, G_TEXT, 0, "none", "none" },
     { "scale", 0, G_TEXT, 0, "none", "none" },
+    { "animation-name", 0, G_TEXT, 0, "none", "none" },
+    { "animation-duration", 0, G_TEXT, 0, 0, "0s" },
+    { "animation-timing-function", 0, G_TEXT, 0, 0, "ease" },
+    { "animation-delay", 0, G_TEXT, 0, 0, "0s" },
+    { "animation-iteration-count", 0, G_TEXT, 0, 0, "1" },
+    { "animation-direction", 0, G_TEXT, 0, 0, "normal" },
+    { "animation-fill-mode", 0, G_TEXT, 0, 0, "none" },
+    { "animation-play-state", 0, G_TEXT, 0, 0, "running" },
+    { "transition-property", 0, G_TEXT, 0, 0, "all" },
+    { "transition-duration", 0, G_TEXT, 0, 0, "0s" },
+    { "transition-timing-function", 0, G_TEXT, 0, 0, "ease" },
+    { "transition-delay", 0, G_TEXT, 0, 0, "0s" },
+    { "transition-behavior", 0, G_TEXT, 0, 0, "normal" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1292,6 +1306,128 @@ static int css_is_indiv(css_prop p, const char *s, size_t n) {
     return parts >= 1;
 }
 
+/* a time (CSS Values 4, 7.3): a number with s or ms, into *ms */
+static int css_time_ms(const char *s, size_t n, double *ms) {
+    double x;
+    size_t used = css_number(s, n, &x);
+    if (!used || used == n) return 0;
+    if (css_eq_ci(s + used, n - used, "s")) { *ms = x * 1000; return 1; }
+    if (css_eq_ci(s + used, n - used, "ms")) { *ms = x; return 1; }
+    return 0;
+}
+
+/* an easing function (CSS Easing 2): linear, ease and its kinds, step-start, step-end,
+   cubic-bezier() with its x values from 0 to 1, steps() with a count (two or more for
+   jump-none) and its position, linear() with its stops */
+static int css_is_easing(const char *s, size_t n) {
+    static const char *const words = "linear ease ease-in ease-out ease-in-out step-start step-end";
+    char w[16];
+    if (n < sizeof w && css_is_ident(s, n)) {
+        for (size_t k = 0; k < n; k++) w[k] = css_lower(s[k]);
+        w[n] = 0;
+        return css_word_in(w, words);
+    }
+    size_t open = 0;
+    while (open < n && s[open] != '(') open++;
+    if (open >= n || s[n - 1] != ')') return 0;
+    const char *a = s + open + 1;
+    size_t an = n - open - 2, j = 0, xs, xl;
+    double v[4];
+    int nv = 0;
+    if (css_eq_ci(s, open, "cubic-bezier")) {
+        while (css_next_part(a, an, &j, &xs, &xl)) {
+            if (nv == 4 || css_number(a + xs, xl, &v[nv]) != xl) return 0;
+            nv++;
+        }
+        return nv == 4 && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1;
+    }
+    if (css_eq_ci(s, open, "steps")) {
+        int count = 0, pos = 0, jn = 0;
+        while (css_next_part(a, an, &j, &xs, &xl)) {
+            const char *q = a + xs;
+            if (!count) {
+                double c;
+                if (css_number(q, xl, &c) != xl || c != (double)(long)c || c < 1) return 0;
+                count = (int)c;
+                continue;
+            }
+            if (pos++) return 0;
+            if (css_eq_ci(q, xl, "jump-none")) jn = 1;
+            else if (!(css_eq_ci(q, xl, "jump-start") || css_eq_ci(q, xl, "jump-end") || css_eq_ci(q, xl, "jump-both") ||
+                       css_eq_ci(q, xl, "start") || css_eq_ci(q, xl, "end"))) return 0;
+        }
+        return count >= 1 + jn;
+    }
+    if (css_eq_ci(s, open, "linear")) {
+        /* its stops: a number, with up to two percentages each */
+        size_t b = 0;
+        int stops = 0;
+        while (b <= an) {
+            size_t e = css_comma(a, an, b);
+            size_t k = 0, ps, pl;
+            int nums = 0, pcts = 0;
+            while (css_next_part(a + b, e - b, &k, &ps, &pl)) {
+                double x;
+                size_t used = css_number(a + b + ps, pl, &x);
+                if (used == pl && !nums && !pcts) nums++;
+                else if (used && used + 1 == pl && a[b + ps + used] == '%' && nums && pcts < 2) pcts++;
+                else return 0;
+            }
+            if (!nums) return 0;
+            stops++;
+            if (e >= an) break;
+            b = e + 1;
+        }
+        return stops >= 2;
+    }
+    return 0;
+}
+
+/* an item of an animation's or a transition's list (kind: the property's), valid */
+static int css_anim_item(css_prop p, const char *s, size_t n) {
+    double x;
+    switch (p) {
+    case CSS_PROP_ANIMATION_NAME: return css_is_ident(s, n) || css_is_string(s, n);
+    case CSS_PROP_ANIMATION_DURATION:
+    case CSS_PROP_TRANSITION_DURATION: return (css_time_ms(s, n, &x) && x >= 0) || (p == CSS_PROP_ANIMATION_DURATION && css_eq_ci(s, n, "auto"));
+    case CSS_PROP_ANIMATION_DELAY:
+    case CSS_PROP_TRANSITION_DELAY: return css_time_ms(s, n, &x);
+    case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+    case CSS_PROP_TRANSITION_TIMING_FUNCTION: return css_is_easing(s, n);
+    case CSS_PROP_ANIMATION_ITERATION_COUNT: return css_eq_ci(s, n, "infinite") || (css_number(s, n, &x) == n && x >= 0);
+    case CSS_PROP_ANIMATION_DIRECTION:
+        return css_eq_ci(s, n, "normal") || css_eq_ci(s, n, "reverse") || css_eq_ci(s, n, "alternate") || css_eq_ci(s, n, "alternate-reverse");
+    case CSS_PROP_ANIMATION_FILL_MODE:
+        return css_eq_ci(s, n, "none") || css_eq_ci(s, n, "forwards") || css_eq_ci(s, n, "backwards") || css_eq_ci(s, n, "both");
+    case CSS_PROP_ANIMATION_PLAY_STATE: return css_eq_ci(s, n, "running") || css_eq_ci(s, n, "paused");
+    case CSS_PROP_TRANSITION_PROPERTY: return css_is_ident(s, n);
+    case CSS_PROP_TRANSITION_BEHAVIOR: return css_eq_ci(s, n, "normal") || css_eq_ci(s, n, "allow-discrete");
+    default: return 0;
+    }
+}
+
+/* an animation's or a transition's longhand: its items, a comma between each; none and
+   all alone (transition-property's none in a list of one) */
+static int css_is_anim_list(css_prop p, const char *s, size_t n) {
+    size_t a = 0;
+    int items = 0;
+    while (a <= n) {
+        size_t b = css_comma(s, n, a);
+        size_t sa = css_skip_ws(s, b, a), sb = b;
+        while (sb > sa && css_ws(s[sb - 1])) sb--;
+        if (sb == sa) return 0;
+        size_t k = 0, ps, pl;
+        css_next_part(s + sa, sb - sa, &k, &ps, &pl);
+        if (ps + pl != sb - sa && !(p == CSS_PROP_ANIMATION_TIMING_FUNCTION || p == CSS_PROP_TRANSITION_TIMING_FUNCTION)) return 0;
+        if (!css_anim_item(p, s + sa, sb - sa)) return 0;
+        if (p == CSS_PROP_TRANSITION_PROPERTY && css_eq_ci(s + sa, sb - sa, "none") && (items || b < n)) return 0;
+        items++;
+        if (b >= n) break;
+        a = b + 1;
+    }
+    return items > 0;
+}
+
 /* content: strings, attr(), counter(), counters(), the quotes' keywords, url() */
 static int css_is_content(const char *s, size_t n) {
     size_t i = 0, st, ln;
@@ -1368,6 +1504,11 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_TRANSLATE:
     case CSS_PROP_ROTATE:
     case CSS_PROP_SCALE: return css_is_indiv(p, s, n);
+    case CSS_PROP_ANIMATION_NAME: case CSS_PROP_ANIMATION_DURATION: case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+    case CSS_PROP_ANIMATION_DELAY: case CSS_PROP_ANIMATION_ITERATION_COUNT: case CSS_PROP_ANIMATION_DIRECTION:
+    case CSS_PROP_ANIMATION_FILL_MODE: case CSS_PROP_ANIMATION_PLAY_STATE: case CSS_PROP_TRANSITION_PROPERTY:
+    case CSS_PROP_TRANSITION_DURATION: case CSS_PROP_TRANSITION_TIMING_FUNCTION: case CSS_PROP_TRANSITION_DELAY:
+    case CSS_PROP_TRANSITION_BEHAVIOR: return css_is_anim_list(p, s, n);
     case CSS_PROP_BOX_SHADOW: return css_is_list(1, s, n);
     case CSS_PROP_TEXT_SHADOW: return css_is_list(2, s, n);
     case CSS_PROP_TRANSFORM: return css_is_transform(s, n);
@@ -1838,6 +1979,11 @@ static const css_short css_shorts[] = {
     { "grid-column", 2, { CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END } },
     { "grid-area", 4, { CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_ROW_END, CSS_PROP_GRID_COLUMN_END } },
     { "grid-template", 2, { CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_TEMPLATE_COLUMNS } },
+    { "animation", 8, { CSS_PROP_ANIMATION_NAME, CSS_PROP_ANIMATION_DURATION, CSS_PROP_ANIMATION_TIMING_FUNCTION, CSS_PROP_ANIMATION_DELAY,
+                        CSS_PROP_ANIMATION_ITERATION_COUNT, CSS_PROP_ANIMATION_DIRECTION, CSS_PROP_ANIMATION_FILL_MODE,
+                        CSS_PROP_ANIMATION_PLAY_STATE } },
+    { "transition", 5, { CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION,
+                         CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -1854,6 +2000,77 @@ static int css_alias_of(const char *name, size_t nn) {
     if (css_eq_ci(name, nn, "grid-row-gap")) return CSS_PROP_ROW_GAP;
     if (css_eq_ci(name, nn, "grid-column-gap")) return CSS_PROP_COLUMN_GAP;
     return -1;
+}
+
+/* animation's and transition's shorthands (CSS Animations 1, 3.10; CSS Transitions 1,
+   2.5): each item of the comma-separated list one animation (transition), its parts in
+   any order: the first time its duration and the second its delay, an easing, and the
+   rest each its own longhand's (a count, a direction, a fill mode, a play state; a
+   transition's behaviour); a keyword the first longhand that takes it and has none yet
+   takes, so that what is left is the animation's name (the transition's property). Each
+   longhand's list as text, what an item leaves out its initial value */
+static int css_anim_short(int transition, const char *val, size_t vn, css_items *it) {
+    static const css_prop ap[8] = { CSS_PROP_ANIMATION_NAME, CSS_PROP_ANIMATION_DURATION, CSS_PROP_ANIMATION_TIMING_FUNCTION,
+                                    CSS_PROP_ANIMATION_DELAY, CSS_PROP_ANIMATION_ITERATION_COUNT, CSS_PROP_ANIMATION_DIRECTION,
+                                    CSS_PROP_ANIMATION_FILL_MODE, CSS_PROP_ANIMATION_PLAY_STATE };
+    static const css_prop tp[5] = { CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION,
+                                    CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR };
+    static const char *const adef[8] = { "none", "0s", "ease", "0s", "1", "normal", "none", "running" };
+    static const char *const tdef[5] = { "all", "0s", "ease", "0s", "normal" };
+    int nl = transition ? 5 : 8;
+    vector<char> l0, l1, l2, l3, l4, l5, l6, l7;
+    size_t a = 0;
+    int items = 0;
+    while (a <= vn) {
+        size_t b = css_comma(val, vn, a);
+        size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
+        size_t k = css_parts(val + a, b - a, st, ln, CSS_MAXPARTS);
+        /* each longhand's part in this item: its start and length, unset at -1 */
+        long ps[8], pl[8];
+        for (int q = 0; q < 8; q++) { ps[q] = -1; pl[q] = 0; }
+        int times = 0;
+        for (size_t j = 0; j < k; j++) {
+            const char *x = val + a + st[j];
+            size_t xl = ln[j];
+            double ms;
+            int slot = -1;
+            if (css_time_ms(x, xl, &ms)) {
+                if (times == 2) return 0;
+                slot = times++ == 0 ? 1 : 3;
+                if (slot == 1 && ms < 0) return 0;
+            } else if (css_is_easing(x, xl) && ps[2] < 0) slot = 2;
+            else if (!transition && ps[4] < 0 && css_anim_item(CSS_PROP_ANIMATION_ITERATION_COUNT, x, xl)) slot = 4;
+            else if (!transition && ps[5] < 0 && css_anim_item(CSS_PROP_ANIMATION_DIRECTION, x, xl)) slot = 5;
+            else if (!transition && ps[6] < 0 && css_anim_item(CSS_PROP_ANIMATION_FILL_MODE, x, xl)) slot = 6;
+            else if (!transition && ps[7] < 0 && css_anim_item(CSS_PROP_ANIMATION_PLAY_STATE, x, xl)) slot = 7;
+            else if (transition && ps[4] < 0 && css_anim_item(CSS_PROP_TRANSITION_BEHAVIOR, x, xl)) slot = 4;
+            else if (ps[0] < 0 && (transition ? css_is_ident(x, xl) : css_anim_item(CSS_PROP_ANIMATION_NAME, x, xl))) slot = 0;
+            if (slot < 0 || ps[slot] >= 0) return 0;
+            ps[slot] = (long)(a + st[j]);
+            pl[slot] = (long)xl;
+        }
+        /* a transition of none: none alone in the list */
+        if (transition && ps[0] >= 0 && css_eq_ci(val + ps[0], (size_t)pl[0], "none") && (items || b < vn)) return 0;
+        for (int q = 0; q < nl; q++) {
+            vector<char> *l = q == 0 ? &l0 : q == 1 ? &l1 : q == 2 ? &l2 : q == 3 ? &l3 : q == 4 ? &l4 : q == 5 ? &l5 : q == 6 ? &l6 : &l7;
+            if (items) append_range(*l, ", ", 2);
+            if (ps[q] >= 0) append_range(*l, val + ps[q], (size_t)pl[q]);
+            else if (transition) append_range(*l, tdef[q], strlen(tdef[q]));
+            else append_range(*l, adef[q], strlen(adef[q]));
+        }
+        items++;
+        if (b >= vn) break;
+        a = b + 1;
+    }
+    if (!items) return 0;
+    css_val t;
+    memset(&t, 0, sizeof t);
+    t.unit = CSS_UNIT_TEXT;
+    for (int q = 0; q < nl; q++) {
+        vector<char> *l = q == 0 ? &l0 : q == 1 ? &l1 : q == 2 ? &l2 : q == 3 ? &l3 : q == 4 ? &l4 : q == 5 ? &l5 : q == 6 ? &l6 : &l7;
+        css_item_made(it, transition ? tp[q] : ap[q], &t, data(*l), len(*l));
+    }
+    return 1;
 }
 
 /* a shorthand's value read into its longhands: 0 when it is none it takes */
@@ -1988,6 +2205,8 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, st[1], ln[1]);
         return 1;
     }
+    case 29: return css_anim_short(0, val, vn, it);
+    case 30: return css_anim_short(1, val, vn, it);
     default: return 0;
     }
 }
@@ -2505,6 +2724,67 @@ typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin or
 
 static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
 
+/* an @keyframes rule (CSS Animations 1, 4): its name (an identifier other than none and
+   the CSS-wide keywords, or a string) and its keyframes, each selector of a block (from,
+   to, a percentage) a rule of its own with its place, in the sheet but matched by no
+   element (css_index_rules leaves it out); a block whose selector this does not read is
+   dropped, as the standard has it */
+static void css_parse_block(css_style *s, uint32_t rule, const char *t, size_t n);
+static void css_keyframes_rule(css_style *s, const css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn) {
+    size_t a = css_skip_ws(pre, pn, 0), b = pn;
+    while (b > a && css_ws(pre[b - 1])) b--;
+    if (b <= a) return;
+    size_t na = a, nl = b - a;
+    if (css_is_string(pre + a, b - a)) { na = a + 1; nl = b - a - 2; }
+    else if (!css_is_ident(pre + a, nl) || css_eq_ci(pre + a, nl, "none") || css_eq_ci(pre + a, nl, "initial") ||
+             css_eq_ci(pre + a, nl, "inherit") || css_eq_ci(pre + a, nl, "unset") || css_eq_ci(pre + a, nl, "revert") ||
+             css_eq_ci(pre + a, nl, "revert-layer") || css_eq_ci(pre + a, nl, "default")) return;
+    amb_span nsp = text_add(s, pre + na, nl);
+    css_keyframes_h kh = keyframes_new(s);
+    s->keyframes[kh.index].name = nsp;
+    s->keyframes[kh.index].sheet = cx->sheet;
+    s->keyframes[kh.index].layer = cx->layer;
+    size_t i = 0;
+    while (i < bn) {
+        size_t open = i;
+        while (open < bn && blk[open] != '{') open++;
+        if (open >= bn) break;
+        size_t end = css_block_end(blk, bn, open, '{', '}');
+        size_t stop = end < bn ? end : bn;
+        /* its selectors, each a place */
+        double offs[64];
+        size_t os[64], ol[64];
+        int no = 0, ok = 1;
+        size_t q = i;
+        while (q <= open && ok) {
+            size_t c = css_comma(blk, open, q);
+            size_t sa = css_skip_ws(blk, c, q), sb = c;
+            while (sb > sa && css_ws(blk[sb - 1])) sb--;
+            double x = 0;
+            size_t used = sb > sa ? css_number(blk + sa, sb - sa, &x) : 0;
+            if (sb > sa && css_eq_ci(blk + sa, sb - sa, "from")) x = 0;
+            else if (sb > sa && css_eq_ci(blk + sa, sb - sa, "to")) x = 1;
+            else if (used && used + 1 == sb - sa && blk[sa + used] == '%' && x >= 0 && x <= 100) x /= 100;
+            else ok = 0;
+            if (ok && no < 64) { offs[no] = x; os[no] = sa; ol[no] = sb - sa; no++; }
+            if (c >= open) break;
+            q = c + 1;
+        }
+        for (int z = 0; ok && z < no; z++) {
+            amb_span sp = text_add(s, blk + os[z], ol[z]);
+            css_rule_h r = rule_new(s);
+            s->rule[r.index].selector = sp;
+            s->rule[r.index].order = r.index;
+            s->rule[r.index].layer = cx->layer;
+            s->rule[r.index].keyframes = kh.index;
+            s->rule[r.index].offset = offs[z];
+            rules_append(s, cx->sheet, r.index);
+            css_parse_block(s, r.index, blk + open + 1, stop - open - 1);
+        }
+        i = stop + 1;
+    }
+}
+
 /* a url() or a string's text, its quotes and white space gone, into out: 1 when it is one */
 static int css_url_of(const char *s, size_t n, char *out, size_t cap) {
     size_t a = 0, e = n;
@@ -2710,10 +2990,12 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
             cx->ruled = 1;
         } else if (at) {
             /* @media whose query holds, @supports whose condition does: their rules are the
-               sheet's; @font-face's face is fetched; @keyframes, @page and the rest: not read */
+               sheet's; @font-face's face is fetched; @keyframes' keyframes are rules of their own; @page
+               and the rest: not read */
             if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
+            else if (css_eq_ci(name, nn, "keyframes") || css_eq_ci(name, nn, "-webkit-keyframes")) css_keyframes_rule(s, cx, t + j, k - j, t + k + 1, inner);
             cx->ruled = 1;
         } else {
             css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
@@ -3301,6 +3583,7 @@ static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *pa
     css_bent none = { 0, 0 };
     push_back(be, none);                                /* entry 0: the end of a bucket */
     for (uint32_t r = 1; r < n; r++) {
+        if (s->rule[r].keyframes) continue;                /* a keyframe: matched by no element */
         amb_span sel = s->rule[r].selector;
         const char *t = text_ptr(s, sel);
         css_part ps[CSS_MAXPARTS];
@@ -3558,6 +3841,85 @@ static void css_filter_colours(css_style *s, css_val *v) {
     if (changed) v->tx = text_add(s, data(out), len(out));
 }
 
+/* an animation's or a transition's times and easings as Chromium computes them: each
+   time in seconds; linear() with each stop's place given; steps() without its default
+   position (end, jump-end) */
+static void css_anim_computed(css_style *s, css_val *v) {
+    vector<char> src, out;
+    append_range(src, text_ptr(s, v->tx), v->tx.len);
+    const char *t = data(src);
+    size_t n = len(src), a = 0;
+    while (a <= n) {
+        size_t b = css_comma(t, n, a), sa = css_skip_ws(t, b, a), sb = b;
+        while (sb > sa && css_ws(t[sb - 1])) sb--;
+        if (len(out)) append_range(out, ", ", 2);
+        const char *x = t + sa;
+        size_t xl = sb - sa, open = 0;
+        while (open < xl && x[open] != '(') open++;
+        double ms;
+        char buf[64];
+        if (css_time_ms(x, xl, &ms)) {
+            int bn = snprintf(buf, sizeof buf, "%gs", ms / 1000);
+            if (bn > 0) append_range(out, buf, (size_t)bn);
+        } else if (open < xl && css_eq_ci(x, open, "steps")) {
+            /* its count, and its position unless it is the default */
+            const char *ar = x + open + 1;
+            size_t an = xl >= open + 2 ? xl - open - 2 : 0, j = 0, ps, pl;
+            append_range(out, "steps(", 6);
+            if (css_next_part(ar, an, &j, &ps, &pl)) append_range(out, ar + ps, pl);
+            if (css_next_part(ar, an, &j, &ps, &pl) && !css_eq_ci(ar + ps, pl, "end") && !css_eq_ci(ar + ps, pl, "jump-end")) {
+                append_range(out, ", ", 2);
+                append_range(out, ar + ps, pl);
+            }
+            push_back(out, ')');
+        } else if (open < xl && css_eq_ci(x, open, "linear")) {
+            /* its stops, each output at its input (css_ease_at's places) */
+            const char *ar = x + open + 1;
+            size_t an = xl >= open + 2 ? xl - open - 2 : 0, c0 = 0;
+            double o[64], in[64];
+            int given[64], m = 0;
+            while (c0 <= an && m < 62) {
+                size_t e = css_comma(ar, an, c0), k = 0, ps, pl;
+                int nums = 0, pcts = 0;
+                double ov = 0, p1 = 0, p2 = 0;
+                while (css_next_part(ar + c0, e - c0, &k, &ps, &pl)) {
+                    double val;
+                    css_number(ar + c0 + ps, pl, &val);
+                    if (!nums) { ov = val; nums = 1; }
+                    else if (!pcts) { p1 = val; pcts = 1; }
+                    else { p2 = val; pcts = 2; }
+                }
+                o[m] = ov; in[m] = p1; given[m] = pcts > 0; m++;
+                if (pcts == 2) { o[m] = ov; in[m] = p2; given[m] = 1; m++; }
+                if (e >= an) break;
+                c0 = e + 1;
+            }
+            if (m >= 2) {
+                if (!given[0]) { in[0] = 0; given[0] = 1; }
+                if (!given[m - 1]) { in[m - 1] = 100; given[m - 1] = 1; }
+                double hi = in[0];
+                for (int k = 1; k < m; k++) if (given[k]) { if (in[k] < hi) in[k] = hi; hi = in[k]; }
+                for (int k = 1; k < m; k++) {
+                    if (given[k]) continue;
+                    int e = k;
+                    while (!given[e]) e++;
+                    for (int q = k; q < e; q++) in[q] = in[k - 1] + (in[e] - in[k - 1]) * (q - k + 1) / (e - k + 1);
+                    k = e;
+                }
+                append_range(out, "linear(", 7);
+                for (int k = 0; k < m; k++) {
+                    int bn = snprintf(buf, sizeof buf, "%s%g %g%%", k ? ", " : "", o[k], in[k]);
+                    if (bn > 0) append_range(out, buf, (size_t)bn);
+                }
+                push_back(out, ')');
+            } else append_range(out, x, xl);
+        } else append_range(out, x, xl);
+        if (b >= n) break;
+        a = b + 1;
+    }
+    if (len(out) != len(src) || memcmp(data(out), data(src), len(src)) != 0) v->tx = text_add(s, data(out), len(out));
+}
+
 /* a value kept as text made computed: its span, or a new one when it changed */
 static void css_text_computed(css_style *s, css_val *v, double em, double rem, uint32_t cur, int dark) {
     vector<char> src, out;
@@ -3679,6 +4041,9 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         if (v->unit == CSS_UNIT_TEXT) {
             if (p == CSS_PROP_FILTER || p == CSS_PROP_BACKDROP_FILTER) css_filter_colours(s, v);
             css_text_computed(s, v, fs, env->rem, color, cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK);
+            if (p == CSS_PROP_ANIMATION_DURATION || p == CSS_PROP_ANIMATION_DELAY || p == CSS_PROP_TRANSITION_DURATION ||
+                p == CSS_PROP_TRANSITION_DELAY || p == CSS_PROP_ANIMATION_TIMING_FUNCTION || p == CSS_PROP_TRANSITION_TIMING_FUNCTION)
+                css_anim_computed(s, v);
         } else if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
         else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
         else if (v->unit == CSS_UNIT_NUMBER) v->unit = CSS_UNIT_PX;
@@ -4126,6 +4491,542 @@ static void css_font_size(css_style *s, const css_env *env, uint32_t w, uint32_t
     rec[p] = css_value_rec(s, &v, how, w, vc);
 }
 
+/* the value declaration dc gives property p of an element (its parent's values pv, its
+   own computed so far out): var() substituted, a CSS-wide keyword taken, computed, a
+   border's width snapped; how it came */
+static css_how css_decl_computed(css_style *s, const css_env *env, css_prop p, uint32_t dc, vector<css_cust> *cust, uint32_t pc0,
+                                 const css_val *initial, const css_par *pv, css_val *out, int is_root, css_val *v) {
+    css_how how;
+    css_decl_value(s, dc, v);
+    int valid = v->unit != CSS_UNIT_VAR || css_var_value(s, dc, p, cust, v);
+    int unset = !valid || css_is_word(v, "unset") || css_is_word(v, "revert") || css_is_word(v, "revert-layer");
+    int inherit = css_is_word(v, "inherit") || (unset && (css_pf[p] & CSS_PF_INH));
+    int initial_kw = css_is_word(v, "initial") || (unset && !(css_pf[p] & CSS_PF_INH));
+    if (inherit && !is_root) { css_val_of(s, pc0, p, initial, v); how = CSS_HOW_INHERITED; }
+    else if (inherit || initial_kw) { *v = initial[p]; how = CSS_HOW_INITIAL; }
+    else { css_compute(s, env, p, v, pv, out); how = CSS_HOW_DECLARED; }
+    if (how == CSS_HOW_INITIAL && (css_pf[p] & CSS_PF_CC)) v->color = out[CSS_PROP_COLOR].color;
+    if (css_pf[p] & CSS_PF_BW) { if (v->unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, v, pv, out); css_snap_width(v, &out[p + 4], 1); }
+    if (p == CSS_PROP_OUTLINE_WIDTH) { if (v->unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, v, pv, out); css_snap_width(v, 0, 0); }
+    return how;
+}
+
+/* ---- animations at rest (CSS Animations 1, Web Animations 1, CSS Easing 2) ---- */
+
+/* the time a page is drawn at rest at, ms after it was loaded: what the shell's scripts
+   run to (src/shell/main.c, SCRIPT_HORIZON); each animation is evaluated then */
+#define CSS_REST_MS 10000.0
+
+/* a cubic Bézier easing's output at x (its x solved for t: Newton's steps, then halving);
+   past 0 and 1 the line its end's tangent makes (CSS Easing 2, 3.1) */
+static double css_bezier(double x1, double y1, double x2, double y2, double x) {
+    if (x <= 0) return (x1 > 0 ? y1 / x1 : x2 > 0 ? y2 / x2 : 0) * x;
+    if (x >= 1) return 1 + (x2 < 1 ? (y2 - 1) / (x2 - 1) : x1 < 1 ? (y1 - 1) / (x1 - 1) : 0) * (x - 1);
+    double cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+    double cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    double t = x;
+    for (int i = 0; i < 8; i++) {
+        double e = ((ax * t + bx) * t + cx) * t - x;
+        if (fabs(e) < 1e-7) return ((ay * t + by) * t + cy) * t;
+        double d = (3 * ax * t + 2 * bx) * t + cx;
+        if (fabs(d) < 1e-6) break;
+        t -= e / d;
+    }
+    double lo = 0, hi = 1;
+    t = x;
+    for (int i = 0; i < 64; i++) {
+        double xt = ((ax * t + bx) * t + cx) * t;
+        if (fabs(xt - x) < 1e-7) break;
+        if (xt < x) lo = t;
+        else hi = t;
+        t = (lo + hi) / 2;
+    }
+    return ((ay * t + by) * t + cy) * t;
+}
+
+/* an easing function's output at x (its text s): the keywords, cubic-bezier(), steps()
+   and its positions, linear() and its stops (CSS Easing 2) */
+static double css_ease_at(const char *s, size_t n, double x) {
+    if (n == 0 || css_eq_ci(s, n, "linear")) return x;
+    if (css_eq_ci(s, n, "ease")) return css_bezier(0.25, 0.1, 0.25, 1, x);
+    if (css_eq_ci(s, n, "ease-in")) return css_bezier(0.42, 0, 1, 1, x);
+    if (css_eq_ci(s, n, "ease-out")) return css_bezier(0, 0, 0.58, 1, x);
+    if (css_eq_ci(s, n, "ease-in-out")) return css_bezier(0.42, 0, 0.58, 1, x);
+    /* steps: their count; their position: 0 jump-end, 1 jump-start, 2 jump-none, 3 jump-both */
+    int steps = 0, pos = 0;
+    if (css_eq_ci(s, n, "step-start")) { steps = 1; pos = 1; }
+    else if (css_eq_ci(s, n, "step-end")) steps = 1;
+    size_t open = 0;
+    while (open < n && s[open] != '(') open++;
+    const char *a = s + (open < n ? open + 1 : n);
+    size_t an = open + 2 <= n ? n - open - 2 : 0, j = 0, xs, xl;
+    if (!steps && open < n && css_eq_ci(s, open, "cubic-bezier")) {
+        double v[4] = { 0, 0, 1, 1 };
+        int k = 0;
+        while (k < 4 && css_next_part(a, an, &j, &xs, &xl)) { css_number(a + xs, xl, &v[k]); k++; }
+        return css_bezier(v[0], v[1], v[2], v[3], x);
+    }
+    if (!steps && open < n && css_eq_ci(s, open, "steps")) {
+        double c = 1;
+        if (css_next_part(a, an, &j, &xs, &xl)) css_number(a + xs, xl, &c);
+        steps = c < 1 ? 1 : (int)c;
+        if (css_next_part(a, an, &j, &xs, &xl)) {
+            const char *q = a + xs;
+            if (css_eq_ci(q, xl, "jump-start") || css_eq_ci(q, xl, "start")) pos = 1;
+            else if (css_eq_ci(q, xl, "jump-none")) pos = 2;
+            else if (css_eq_ci(q, xl, "jump-both")) pos = 3;
+        }
+    }
+    if (steps) {
+        double step = floor(x * steps);
+        if (pos == 1 || pos == 3) step += 1;
+        int jumps = steps + (pos == 3) - (pos == 2);
+        if (x >= 0 && step < 0) step = 0;
+        if (x <= 1 && step > jumps) step = jumps;
+        return jumps > 0 ? step / jumps : 0;
+    }
+    if (open < n && css_eq_ci(s, open, "linear")) {
+        /* its stops: an output each, at the input given, or spread evenly between those given */
+        double out[64], in[64];
+        int given[64], m = 0;
+        size_t b = 0;
+        while (b <= an && m < 62) {
+            size_t e = css_comma(a, an, b);
+            size_t k = 0, ps, pl;
+            int nums = 0, pcts = 0;
+            double o = 0, p1 = 0, p2 = 0;
+            while (css_next_part(a + b, e - b, &k, &ps, &pl)) {
+                double v;
+                css_number(a + b + ps, pl, &v);
+                if (!nums) { o = v; nums = 1; }
+                else if (!pcts) { p1 = v / 100; pcts = 1; }
+                else { p2 = v / 100; pcts = 2; }
+            }
+            out[m] = o; in[m] = p1; given[m] = pcts > 0; m++;
+            if (pcts == 2) { out[m] = o; in[m] = p2; given[m] = 1; m++; }
+            if (e >= an) break;
+            b = e + 1;
+        }
+        if (m < 2) return x;
+        if (!given[0]) { in[0] = 0; given[0] = 1; }
+        if (!given[m - 1]) { in[m - 1] = 1; given[m - 1] = 1; }
+        double hi = in[0];
+        for (int k = 1; k < m; k++) if (given[k]) { if (in[k] < hi) in[k] = hi; hi = in[k]; }
+        for (int k = 1; k < m; k++) {
+            if (given[k]) continue;
+            int e = k;
+            while (!given[e]) e++;
+            for (int q = k; q < e; q++) in[q] = in[k - 1] + (in[e] - in[k - 1]) * (q - k + 1) / (e - k + 1);
+            k = e;
+        }
+        if (x <= in[0]) return out[0];
+        for (int k = 1; k < m; k++)
+            if (x <= in[k]) return in[k] > in[k - 1] ? out[k - 1] + (out[k] - out[k - 1]) * (x - in[k - 1]) / (in[k] - in[k - 1]) : out[k];
+        return out[m - 1];
+    }
+    return x;
+}
+
+/* the i-th item of a comma-separated list, trimmed (the list repeated as far as it must
+   be): its start and length */
+static void css_list_nth(const char *s, size_t n, size_t i, size_t *st, size_t *ln) {
+    size_t count = 1, a = 0, c;
+    while ((c = css_comma(s, n, a)) < n) { count++; a = c + 1; }
+    i %= count;
+    a = 0;
+    for (size_t k = 0; k < i; k++) a = css_comma(s, n, a) + 1;
+    size_t b = css_comma(s, n, a), sa = css_skip_ws(s, b, a), sb = b;
+    while (sb > sa && css_ws(s[sb - 1])) sb--;
+    *st = sa;
+    *ln = sb - sa;
+}
+
+/* an animation's iteration progress at time t (ms from its start): its duration D, delay
+   d, iteration count it (INFINITY for infinite), direction (0 normal, 1 reverse, 2
+   alternate, 3 alternate-reverse) and fill (1 backwards, 2 forwards, both 3); 0 when it
+   has no effect then (Web Animations 1, 4.8 to 4.10) */
+static int css_anim_progress(double t, double D, double d, double it, int dir, int fill, double *out) {
+    double ad = D <= 0 || it <= 0 ? 0 : it == INFINITY ? INFINITY : D * it;
+    double end = d + ad > 0 ? d + ad : 0;
+    double bab = fmax(fmin(d, end), 0), aab = fmax(fmin(d + ad, end), 0);
+    int phase = t < bab ? 0 : t >= aab ? 2 : 1;
+    double act;
+    if (phase == 0) { if (!(fill & 1)) return 0; act = fmax(t - d, 0); }
+    else if (phase == 2) { if (!(fill & 2)) return 0; act = fmax(fmin(t - d, ad), 0); }
+    else act = t - d;
+    double op = D <= 0 ? (phase == 0 ? 0 : it) : act / D;
+    double sip = 0;
+    if (op != INFINITY) {
+        sip = op - floor(op);
+        if (sip == 0 && phase != 0 && act == ad && it != 0) sip = 1;
+    }
+    double ci = phase == 2 && it == INFINITY ? 0 : sip == 1 ? floor(op) - 1 : floor(op);
+    int fwd = dir != 1;
+    if (dir >= 2) fwd = fmod(ci + (dir == 3), 2) == 0;
+    *out = fwd ? sip : 1 - sip;
+    return 1;
+}
+
+/* the @keyframes an animation's name names: of those so named, the one in the cascade
+   layer that comes last (the unlayered after every layer), the last of them in the
+   sheets' order (CSS Animations 1, 4; Cascade 5, 6.4.3) */
+static uint32_t css_find_keyframes(const css_style *s, const char *nm, size_t nl) {
+    uint32_t best = 0;
+    uint64_t bk = 0;
+    for (uint32_t k = 1; k < s->keyframes_len; k++) {
+        if (!s->keyframes[k].live) continue;
+        amb_span sp = s->keyframes[k].name;
+        if (sp.len != nl || memcmp(text_ptr(s, sp), nm, nl) != 0) continue;
+        uint32_t ly = s->keyframes[k].layer;
+        uint64_t lr = ly ? s->layer[ly].rank : CSS_LAYER_LAST;
+        uint64_t key = lr << 32 | k;
+        if (key >= bk) { bk = key; best = k; }
+    }
+    return best;
+}
+
+/* the text of an element's animation longhand p: its winner's (var() substituted,
+   inherit the parent's, the other CSS-wide keywords its initial value's) */
+static void css_list_text(css_style *s, css_prop p, uint32_t w, vector<css_cust> *cust, uint32_t pc0, const css_val *initial,
+                          int is_root, vector<char> *out) {
+    css_val v = initial[p];
+    if (w) {
+        css_decl_value(s, w, &v);
+        if (v.unit == CSS_UNIT_VAR && !css_var_value(s, w, p, cust, &v)) v = initial[p];
+        if (css_is_word(&v, "inherit") && !is_root) css_val_of(s, pc0, p, initial, &v);
+        else if (css_is_global(&v)) v = initial[p];
+    }
+    clear(*out);
+    if (v.unit == CSS_UNIT_TEXT || v.unit == CSS_UNIT_EXPR) append_range(*out, text_ptr(s, v.tx), v.tx.len);
+    else {
+        char buf[96];
+        size_t bn = css_value_text(&v, buf, sizeof buf);
+        append_range(*out, buf, bn);
+    }
+}
+
+/* a longhand an animation leaves alone in its keyframes: the animations' and the
+   transitions' own (a keyframe's animation-timing-function is its easing) */
+static int css_anim_own(css_prop p) { return p >= CSS_PROP_ANIMATION_NAME && p <= CSS_PROP_TRANSITION_BEHAVIOR; }
+
+/* of an animation's keyframes kr (rules, by place), the two that property p's value at
+   progress x lies between and the progress between them, eased (CSS Animations 1, 4;
+   Web Animations 1, 5.3): each place's last declaration of p; at places 0 and 1 the
+   element's own value (0) when no keyframe there gives one; a stretch eased by its first
+   keyframe's animation-timing-function, else by the animation's (ease) */
+static void css_anim_prop(const css_style *s, const vector<uint32_t> *kr, css_prop p, double x, const char *ease, size_t en, uint32_t *k0,
+                          uint32_t *k1, double *f) {
+    double off[66];
+    uint32_t dec[66], er[66];
+    int m = 0;
+    for (size_t q = 0; q < len(*kr) && m < 64; q++) {
+        uint32_t r = at(*kr, q), last = 0;
+        for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next)
+            if (s->decl[dc].prop == p && !s->decl[dc].important) last = dc;
+        if (!last) continue;
+        double o = s->rule[r].offset;
+        if (m && off[m - 1] == o) { dec[m - 1] = last; er[m - 1] = r; continue; }
+        off[m] = o; dec[m] = last; er[m] = r; m++;
+    }
+    if (m == 0 || off[0] > 0) {
+        for (int q = m; q > 0; q--) { off[q] = off[q - 1]; dec[q] = dec[q - 1]; er[q] = er[q - 1]; }
+        off[0] = 0; dec[0] = 0; er[0] = 0; m++;
+    }
+    if (off[m - 1] < 1) { off[m] = 1; dec[m] = 0; er[m] = 0; m++; }
+    int i = 0;
+    if (x >= 1) i = m - 2;
+    else if (x >= 0) while (i + 2 < m && off[i + 1] <= x) i++;
+    double a = off[i], b = off[i + 1];
+    double local = b > a ? (x - a) / (b - a) : 1;
+    /* the stretch's easing */
+    const char *et = ease;
+    size_t etn = en;
+    vector<char> kease;
+    uint32_t tdc = 0;
+    if (er[i]) {
+        for (uint32_t dc = s->rule[er[i]].first_decl; dc; dc = s->decl[dc].next)
+            if (s->decl[dc].prop == CSS_PROP_ANIMATION_TIMING_FUNCTION) tdc = dc;
+    }
+    if (tdc) append_range(kease, text_ptr(s, s->decl[tdc].text), s->decl[tdc].text.len);
+    if (len(kease)) {
+        size_t st, ln;
+        css_list_nth(data(kease), len(kease), 0, &st, &ln);
+        et = data(kease) + st;
+        etn = ln;
+    }
+    *f = local == 0 ? 0 : local == 1 ? 1 : css_ease_at(et, etn, local);
+    *k0 = dec[i];
+    *k1 = dec[i + 1];
+}
+
+/* an element's animations at the page's rest time (CSS Animations 1): for each property a
+   keyframe of one of them gives, the declarations its value lies between (0 for the
+   element's own value) and the eased progress between them, in ak0, ak1 and af, with aon
+   set; a later animation of the list over an earlier one. A property an !important
+   declaration gives is left alone: animations come under the important declarations and
+   over every other (Cascade 5, 6.1) */
+static void css_animate(css_style *s, const uint32_t *win, vector<css_cust> *cust, uint32_t pc0, const css_val *initial, int is_root,
+                        uint32_t *ak0, uint32_t *ak1, double *af, uint8_t *aon) {
+    vector<char> names, durs, eases, dels, its, dirs, fills, plays;
+    css_list_text(s, CSS_PROP_ANIMATION_NAME, win[CSS_PROP_ANIMATION_NAME], cust, pc0, initial, is_root, &names);
+    css_list_text(s, CSS_PROP_ANIMATION_DURATION, win[CSS_PROP_ANIMATION_DURATION], cust, pc0, initial, is_root, &durs);
+    css_list_text(s, CSS_PROP_ANIMATION_TIMING_FUNCTION, win[CSS_PROP_ANIMATION_TIMING_FUNCTION], cust, pc0, initial, is_root, &eases);
+    css_list_text(s, CSS_PROP_ANIMATION_DELAY, win[CSS_PROP_ANIMATION_DELAY], cust, pc0, initial, is_root, &dels);
+    css_list_text(s, CSS_PROP_ANIMATION_ITERATION_COUNT, win[CSS_PROP_ANIMATION_ITERATION_COUNT], cust, pc0, initial, is_root, &its);
+    css_list_text(s, CSS_PROP_ANIMATION_DIRECTION, win[CSS_PROP_ANIMATION_DIRECTION], cust, pc0, initial, is_root, &dirs);
+    css_list_text(s, CSS_PROP_ANIMATION_FILL_MODE, win[CSS_PROP_ANIMATION_FILL_MODE], cust, pc0, initial, is_root, &fills);
+    css_list_text(s, CSS_PROP_ANIMATION_PLAY_STATE, win[CSS_PROP_ANIMATION_PLAY_STATE], cust, pc0, initial, is_root, &plays);
+    size_t count = 1, a = 0, c;
+    while ((c = css_comma(data(names), len(names), a)) < len(names)) { count++; a = c + 1; }
+    for (size_t i = 0; i < count; i++) {
+        size_t st, ln;
+        css_list_nth(data(names), len(names), i, &st, &ln);
+        vector<char> nm;
+        append_range(nm, data(names) + st, ln);
+        if (css_eq_ci(data(nm), len(nm), "none")) continue;
+        size_t ns = 0, nl = len(nm);
+        if (css_is_string(data(nm), nl)) { ns = 1; nl -= 2; }
+        uint32_t kf = css_find_keyframes(s, data(nm) + ns, nl);
+        if (!kf) continue;
+        double D = 0, d = 0, itc = 1, x;
+        int dir = 0, fill = 0, paused = 0;
+        css_list_nth(data(durs), len(durs), i, &st, &ln);
+        if (!css_time_ms(data(durs) + st, ln, &D)) D = 0;
+        css_list_nth(data(dels), len(dels), i, &st, &ln);
+        if (!css_time_ms(data(dels) + st, ln, &d)) d = 0;
+        css_list_nth(data(its), len(its), i, &st, &ln);
+        if (css_eq_ci(data(its) + st, ln, "infinite")) itc = INFINITY;
+        else if (css_number(data(its) + st, ln, &x) == ln && x >= 0) itc = x;
+        css_list_nth(data(dirs), len(dirs), i, &st, &ln);
+        if (css_eq_ci(data(dirs) + st, ln, "reverse")) dir = 1;
+        else if (css_eq_ci(data(dirs) + st, ln, "alternate")) dir = 2;
+        else if (css_eq_ci(data(dirs) + st, ln, "alternate-reverse")) dir = 3;
+        css_list_nth(data(fills), len(fills), i, &st, &ln);
+        if (css_eq_ci(data(fills) + st, ln, "backwards")) fill = 1;
+        else if (css_eq_ci(data(fills) + st, ln, "forwards")) fill = 2;
+        else if (css_eq_ci(data(fills) + st, ln, "both")) fill = 3;
+        css_list_nth(data(plays), len(plays), i, &st, &ln);
+        paused = css_eq_ci(data(plays) + st, ln, "paused");
+        vector<char> ease;
+        css_list_nth(data(eases), len(eases), i, &st, &ln);
+        append_range(ease, data(eases) + st, ln);
+        double prog;
+        /* a paused animation stays at its start */
+        if (!css_anim_progress(paused ? 0 : CSS_REST_MS, D, d, itc, dir, fill, &prog)) continue;
+        /* its keyframes, by their places (the sheets' order among equals) */
+        vector<uint32_t> kr;
+        for (uint32_t r = 1; r < s->rule_len; r++) {
+            if (!s->rule[r].live || s->rule[r].keyframes != kf) continue;
+            push_back(kr, r);
+            size_t q = len(kr) - 1;
+            while (q > 0 && s->rule[at(kr, q - 1)].offset > s->rule[r].offset) { kr[q] = at(kr, q - 1); q--; }
+            kr[q] = r;
+        }
+        uint8_t seen[CSS_NPROPS];
+        memset(seen, 0, sizeof seen);
+        for (size_t q = 0; q < len(kr); q++)
+            for (uint32_t dc = s->rule[at(kr, q)].first_decl; dc; dc = s->decl[dc].next) {
+                css_prop p = s->decl[dc].prop;
+                if (p >= CSS_NPROPS || seen[p] || s->decl[dc].important || p == CSS_PROP_CUSTOM || css_anim_own(p)) continue;
+                seen[p] = 1;
+                if (win[p] && s->decl[win[p]].important) continue;
+                css_anim_prop(s, &kr, p, prog, data(ease), len(ease), &ak0[p], &ak1[p], &af[p]);
+                aon[p] = 1;
+            }
+    }
+}
+
+/* two colours mixed at f, premultiplied (CSS Color 4, 12.3) */
+static uint32_t css_mix_rgba(uint32_t a, uint32_t b, double f) {
+    double aa = (a & 0xff) / 255.0, ba = (b & 0xff) / 255.0, al = aa + (ba - aa) * f;
+    if (al <= 0) return 0;
+    if (al > 1) al = 1;
+    uint32_t out = 0;
+    for (int sh = 24; sh >= 8; sh -= 8) {
+        double ca = (a >> sh & 0xff) * aa, cb = (b >> sh & 0xff) * ba, v = (ca + (cb - ca) * f) / al;
+        out |= (uint32_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5) << sh;
+    }
+    return out | (uint32_t)(al * 255 + 0.5);
+}
+
+/* a value's text broken into its tokens: numbers (with their units) and the rest
+   (names, punctuation), each a token; white space between them kept */
+typedef struct css_tok { size_t s, n, u; int num; double v; } css_tok;
+static void css_tokens(const char *t, size_t n, vector<css_tok> *out) {
+    size_t i = 0;
+    while (i < n) {
+        css_tok k;
+        memset(&k, 0, sizeof k);
+        k.s = i;
+        double x;
+        int start = i == 0 || !(css_namechar(t[i - 1]) || t[i - 1] == '#');
+        size_t used = start && (css_is_digit(t[i]) || t[i] == '.' || t[i] == '-' || t[i] == '+') ? css_number(t + i, n - i, &x) : 0;
+        if (used) {
+            size_t e = i + used;
+            while (e < n && (css_is_alpha(t[e]) || t[e] == '%')) e++;
+            k.num = 1;
+            k.v = x;
+            k.u = i + used;
+            k.n = e - i;
+        } else if (css_namechar(t[i]) || t[i] == '#') {
+            size_t e = i;
+            while (e < n && (css_namechar(t[e]) || t[e] == '#')) e++;
+            k.n = e - i;
+        } else k.n = 1;
+        push_back(out, k);
+        i += k.n;
+    }
+}
+
+/* an angle's degrees, by its unit (t its text, its unit from u) */
+static int css_tok_angle(const char *t, const css_tok *k, double *deg) {
+    const char *u = t + k->u;
+    size_t un = k->s + k->n - k->u;
+    if (css_eq_ci(u, un, "deg")) *deg = k->v;
+    else if (css_eq_ci(u, un, "rad")) *deg = k->v * 180 / M_PI;
+    else if (css_eq_ci(u, un, "turn")) *deg = k->v * 360;
+    else if (css_eq_ci(u, un, "grad")) *deg = k->v * 0.9;
+    else return 0;
+    return 1;
+}
+
+/* two values kept as text (transforms, shadows, filters, ...) interpolated at f where
+   their tokens pair up: the same names and punctuation, numbers with the same unit (angles
+   in degrees, a unitless 0 as the other's unit); 1 when they did, the text in out */
+static int css_interp_tokens(const char *a, size_t an, const char *b, size_t bn, double f, vector<char> *out) {
+    vector<css_tok> ta, tb;
+    css_tokens(a, an, &ta);
+    css_tokens(b, bn, &tb);
+    /* white space is not a token that must pair: the tokens with it dropped */
+    vector<css_tok> xa, xb;
+    for (size_t i = 0; i < len(ta); i++) if (!(at(ta, i).n == 1 && !at(ta, i).num && css_ws(a[at(ta, i).s]))) push_back(xa, at(ta, i));
+    for (size_t i = 0; i < len(tb); i++) if (!(at(tb, i).n == 1 && !at(tb, i).num && css_ws(b[at(tb, i).s]))) push_back(xb, at(tb, i));
+    if (len(xa) != len(xb)) return 0;
+    for (size_t i = 0; i < len(xa); i++) {
+        css_tok p = at(xa, i), q = at(xb, i);
+        if (p.num != q.num) return 0;
+        if (!p.num) {
+            if (p.n != q.n || !css_bytes_eq(a + p.s, b + q.s, p.n, 1)) return 0;
+            continue;
+        }
+        size_t pu = p.s + p.n - p.u, qu = q.s + q.n - q.u;
+        double d1, d2;
+        if (pu == qu && css_bytes_eq(a + p.u, b + q.u, pu, 1)) continue;
+        if (css_tok_angle(a, &p, &d1) && css_tok_angle(b, &q, &d2)) continue;
+        if ((pu == 0 && p.v == 0) || (qu == 0 && q.v == 0)) continue;
+        return 0;
+    }
+    /* a's text, its numbers mixed */
+    size_t j = 0;
+    for (size_t i = 0; i < len(ta); i++) {
+        css_tok p = at(ta, i);
+        if (!p.num) { append_range(*out, a + p.s, p.n); continue; }
+        while (j < len(xb) && !at(xb, j).num) j++;
+        css_tok q = at(xb, j);
+        j++;
+        double d1, d2;
+        char buf[64];
+        int bn2;
+        if (css_tok_angle(a, &p, &d1) && css_tok_angle(b, &q, &d2)) bn2 = snprintf(buf, sizeof buf, "%gdeg", d1 + (d2 - d1) * f);
+        else {
+            /* the unit: a's, or b's when a's number is a bare 0 */
+            const char *u = a + p.u;
+            size_t un = p.s + p.n - p.u;
+            if (un == 0) { u = b + q.u; un = q.s + q.n - q.u; }
+            bn2 = snprintf(buf, sizeof buf, "%g%.*s", p.v + (q.v - p.v) * f, (int)un, u);
+        }
+        if (bn2 > 0) append_range(*out, buf, (size_t)bn2);
+    }
+    return 1;
+}
+
+/* the identity of a transform's functions (CSS Transforms 1, 9): each function's values
+   those that leave a box as it is, to stand for none beside them */
+static void css_identity_fns(const char *t, size_t n, vector<char> *out) {
+    size_t i = 0, pa, pl;
+    while (css_next_part(t, n, &i, &pa, &pl)) {
+        const char *fn = t + pa;
+        size_t open = 0;
+        while (open < pl && fn[open] != '(') open++;
+        if (len(*out)) push_back(*out, ' ');
+        append_range(*out, fn, open);
+        push_back(*out, '(');
+        size_t j = 0, xa, xl;
+        int k = 0;
+        const char *args = fn + open + 1;
+        size_t al = open + 2 <= pl ? pl - open - 2 : 0;
+        int scale = open >= 5 && css_bytes_eq(fn, "scale", 5, 1);
+        int matrix = open >= 6 && css_bytes_eq(fn, "matrix", 6, 1), m3 = open == 8;
+        while (css_next_part(args, al, &j, &xa, &xl)) {
+            if (k) append_range(*out, ", ", 2);
+            const char *v = "0";
+            if (scale) v = "1";
+            else if (matrix && !m3 && (k == 0 || k == 3)) v = "1";
+            else if (matrix && m3 && k % 5 == 0) v = "1";
+            else if (css_bytes_eq(fn, "rotate3d", 8, 1) && open == 8 && k < 3) {
+                /* rotate3d's axis kept, its angle 0 */
+                append_range(*out, args + xa, xl);
+                k++;
+                continue;
+            }
+            append_range(*out, v, strlen(v));
+            k++;
+        }
+        push_back(*out, ')');
+    }
+}
+
+/* two computed values of property p mixed at f (CSS Values 4, 3; Web Animations 1, 5.3):
+   lengths, numbers and percentages along a line (a length and a percentage as their
+   calc()); colours premultiplied; values kept as text token by token where they pair up
+   (none the identity of a transform's functions); visibility visible while either end
+   is; the rest discrete, the first value until halfway */
+static void css_interp(css_style *s, css_prop p, const css_val *a, const css_val *b, double f, css_val *out) {
+    if (f == 0) { *out = *a; return; }
+    if (f == 1) { *out = *b; return; }
+    css_unit ua = a->unit, ub = b->unit;
+    int la = ua == CSS_UNIT_PX || ua == CSS_UNIT_PERCENT || ua == CSS_UNIT_CALC, lb = ub == CSS_UNIT_PX || ub == CSS_UNIT_PERCENT || ub == CSS_UNIT_CALC;
+    if (ua == ub && (ua == CSS_UNIT_PX || ua == CSS_UNIT_NUMBER || ua == CSS_UNIT_PERCENT)) {
+        *out = *a;
+        out->num = a->num + (b->num - a->num) * f;
+        if (css_pdefs[p].flags & F_INT) out->num = floor(out->num + 0.5);
+        return;
+    }
+    if (la && lb) {
+        double pxa = ua == CSS_UNIT_PERCENT ? 0 : a->num, pca = ua == CSS_UNIT_PERCENT ? a->num : ua == CSS_UNIT_CALC ? a->pct : 0;
+        double pxb = ub == CSS_UNIT_PERCENT ? 0 : b->num, pcb = ub == CSS_UNIT_PERCENT ? b->num : ub == CSS_UNIT_CALC ? b->pct : 0;
+        memset(out, 0, sizeof *out);
+        out->unit = CSS_UNIT_CALC;
+        out->num = pxa + (pxb - pxa) * f;
+        out->pct = pca + (pcb - pca) * f;
+        return;
+    }
+    if (ua == CSS_UNIT_COLOR && ub == CSS_UNIT_COLOR) {
+        *out = *a;
+        out->color = css_mix_rgba(a->color, b->color, f);
+        return;
+    }
+    if (p == CSS_PROP_VISIBILITY && (css_is_word(a, "visible") || css_is_word(b, "visible"))) {
+        *out = css_is_word(a, "visible") ? *a : *b;
+        return;
+    }
+    if ((ua == CSS_UNIT_TEXT || css_is_word(a, "none")) && (ub == CSS_UNIT_TEXT || css_is_word(b, "none")) && css_pdefs[p].gram == G_TEXT) {
+        vector<char> ta, tb, mixed;
+        if (ua == CSS_UNIT_TEXT) append_range(ta, text_ptr(s, a->tx), a->tx.len);
+        if (ub == CSS_UNIT_TEXT) append_range(tb, text_ptr(s, b->tx), b->tx.len);
+        int fns = p == CSS_PROP_TRANSFORM || p == CSS_PROP_FILTER || p == CSS_PROP_BACKDROP_FILTER;
+        if (ua != CSS_UNIT_TEXT && fns) css_identity_fns(data(tb), len(tb), &ta);
+        if (ub != CSS_UNIT_TEXT && fns) css_identity_fns(data(ta), len(ta), &tb);
+        if (len(ta) && len(tb) && css_interp_tokens(data(ta), len(ta), data(tb), len(tb), f, &mixed)) {
+            memset(out, 0, sizeof *out);
+            out->unit = CSS_UNIT_TEXT;
+            out->tx = text_add(s, data(mixed), len(mixed));
+            return;
+        }
+    }
+    *out = f < 0.5 ? *a : *b;
+}
+
 /* an element's computed values from its matched rules' declarations under the parent
    style ps (0 at the root, whose parent values are the initial ones): its template, then
    each declaration that won made computed, and what those change of the values that hang
@@ -4215,24 +5116,38 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     uint32_t pc0 = ps ? at(ss->first, ps) : 0;
     css_par pv;
     css_par_of(s, pc0, initial, &pv);
+    /* the element's animations at the page's rest time: the values they give, over every
+       declaration but the important ones */
+    uint32_t ak0[CSS_NPROPS], ak1[CSS_NPROPS];
+    double af[CSS_NPROPS];
+    uint8_t aon[CSS_NPROPS];
+    memset(aon, 0, sizeof aon);
+    if (win[CSS_PROP_ANIMATION_NAME]) css_animate(s, win, cust, pc0, initial, is_root, ak0, ak1, af, aon);
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
         css_prop p = (css_prop)css_order[oi];
         uint32_t w = win[p];
+        if (aon[p]) {
+            /* the values at the two keyframes (the element's own where one gives none), mixed */
+            css_val ends[2], v;
+            for (int e = 0; e < 2; e++) {
+                uint32_t k = e ? ak1[p] : ak0[p], src = k ? k : w;
+                if (p == CSS_PROP_FONT_SIZE) {
+                    css_font_size(s, env, src, win[CSS_PROP_FONT_FAMILY], cust, pc0, initial, &pv, pfso, is_root, out, rec, vc, fso);
+                    ends[e] = out[p];
+                } else if (src) css_decl_computed(s, env, p, src, cust, pc0, initial, &pv, out, is_root, &ends[e]);
+                else ends[e] = out[p];
+            }
+            css_interp(s, p, &ends[0], &ends[1], af[p], &v);
+            uint32_t kw = af[p] >= 0.5 ? (ak1[p] ? ak1[p] : ak0[p]) : (ak0[p] ? ak0[p] : ak1[p]);
+            win[p] = kw;
+            out[p] = v;
+            rec[p] = css_value_rec(s, &v, CSS_HOW_ANIMATED, kw, vc);
+            continue;
+        }
         if (p == CSS_PROP_FONT_SIZE) { css_font_size(s, env, w, win[CSS_PROP_FONT_FAMILY], cust, pc0, initial, &pv, pfso, is_root, out, rec, vc, fso); continue; }
         if (!w) continue;
         css_val v;
-        css_how how;
-        css_decl_value(s, w, &v);
-        int valid = v.unit != CSS_UNIT_VAR || css_var_value(s, w, p, cust, &v);
-        int unset = !valid || css_is_word(&v, "unset") || css_is_word(&v, "revert") || css_is_word(&v, "revert-layer");
-        int inherit = css_is_word(&v, "inherit") || (unset && (css_pf[p] & CSS_PF_INH));
-        int initial_kw = css_is_word(&v, "initial") || (unset && !(css_pf[p] & CSS_PF_INH));
-        if (inherit && !is_root) { css_val_of(s, pc0, p, initial, &v); how = CSS_HOW_INHERITED; }
-        else if (inherit || initial_kw) { v = initial[p]; how = CSS_HOW_INITIAL; }
-        else { css_compute(s, env, p, &v, &pv, out); how = CSS_HOW_DECLARED; }
-        if (how == CSS_HOW_INITIAL && (css_pf[p] & CSS_PF_CC)) v.color = out[CSS_PROP_COLOR].color;
-        if (css_pf[p] & CSS_PF_BW) { if (v.unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, &v, &pv, out); css_snap_width(&v, &out[p + 4], 1); }
-        if (p == CSS_PROP_OUTLINE_WIDTH) { if (v.unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, &v, &pv, out); css_snap_width(&v, 0, 0); }
+        css_how how = css_decl_computed(s, env, p, w, cust, pc0, initial, &pv, out, is_root, &v);
         out[p] = v;
         rec[p] = css_value_rec(s, &v, how, w, vc);
     }
@@ -4764,6 +5679,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
             for (uint32_t r = first_rule; r < shared; r++)
                 {
+                    if (s->rule[r].keyframes) continue;
                     uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
                     if (mk == 1) push_back(matched, r);
                     else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);

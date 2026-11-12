@@ -44,6 +44,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     filter, backdrop_filter,           % their functions as text (lengths px, colours computed)
     perspective, perspective_origin, transform_style, backface_visibility,
     translate, rotate, scale,          % the individual transforms, before transform's functions
+    animation_name, animation_duration, animation_timing_function, animation_delay,
+    animation_iteration_count, animation_direction, animation_fill_mode, animation_play_state,
+    transition_property, transition_duration, transition_timing_function, transition_delay,
+    transition_behavior,               % each a list, as text, one item a comma
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is
@@ -51,7 +55,9 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
 %% length made px; a value kept as its text (lists, functions: gradients, shadows,
 %% transforms, track lists, content); a declared value with var() in it
 css_contract(enum(unit, [keyword, px, em, percent, color, auto, number, rem, calc, expr, text, var])).
-css_contract(enum(how, [declared, inherited, initial])).
+%% how a computed value came: a declaration gave it, the parent's, the initial one, or an
+%% animation at the page's rest time (its winner the keyframe's declaration)
+css_contract(enum(how, [declared, inherited, initial, animated])).
 %% what a rule's subject is: the element, or one of its pseudo-elements
 css_contract(enum(pseudo, [element, before, after, first_line, first_letter, marker, placeholder])).
 %% a state of the page the pseudo-classes of state read (:hover, :focus, :focus-visible,
@@ -70,8 +76,12 @@ css_contract(record(rule, [
     field(order,      u32),            % order of appearance, over every sheet
     field(first_decl, ref(decl)),
     field(last_decl,  ref(decl)),
-    field(layer,      ref(layer))       % its cascade layer (@layer); none: unlayered
+    field(layer,      ref(layer)),      % its cascade layer (@layer); none: unlayered
+    field(keyframes,  ref(keyframes)),  % a keyframe's: its @keyframes (it matches no element); none for a style rule
+    field(offset,     f64)              % a keyframe's place in its animation, 0 to 1
 ])).
+%% an @keyframes rule: its name, its sheet, its cascade layer; its keyframes are rules
+css_contract(record(keyframes, [field(name, span(text)), field(sheet, ref(sheet)), field(layer, ref(layer))])).
 %% a cascade layer (Cascade 5): its full name (a.b for b in a; an anonymous one's is
 %% written <anonymous N>), the layer it is in, and its place in the layers' order
 %% (each layer's own rules after its sublayers'; the unlayered rules after every layer)
@@ -138,11 +148,12 @@ css_contract(handle(layer, ly)).
 css_contract(handle(pstyle, ps)).
 css_contract(handle(state, st)).
 css_contract(handle(face, ff)).
+css_contract(handle(keyframes, kf)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), table(layer),
-    table(face), table(pstyle), table(state), pool(text), atoms(names)])).
+    table(face), table(pstyle), table(state), table(keyframes), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
@@ -152,6 +163,7 @@ css_contract(owns(style, initval, store)).
 css_contract(owns(style, estyle, store)).
 css_contract(owns(style, layer, store)).
 css_contract(owns(style, face, store)).
+css_contract(owns(style, keyframes, store)).
 css_contract(owns(style, pstyle, store)).
 css_contract(owns(style, state, store)).
 css_contract(owns(sheet, rule, list(rules))).
@@ -185,6 +197,9 @@ css_contract(fact(css_sheet(handle, field(origin)), table(sheet), true)).
 css_contract(fact(css_imported(handle, field(parent), field(url)), table(sheet), field(parent) \== none)).
 css_contract(fact(css_rule(handle, field(sheet), field(selector), field(spec), field(order)), table(rule), true)).
 css_contract(fact(css_rule_layer(handle, field(layer)), table(rule), field(layer) \== none)).
+%% @keyframes and their keyframes: each keyframe a rule of its own, with its place
+css_contract(fact(css_keyframes(handle, field(name), field(sheet)), table(keyframes), true)).
+css_contract(fact(css_keyframe(handle, field(keyframes), field(offset)), table(rule), field(keyframes) \== none)).
 css_contract(fact(css_layer(handle, field(name), field(rank)), table(layer), true)).
 css_contract(fact(css_font_face(handle, field(family), field(url), field(weight), field(italic)), table(face), true)).
 css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).

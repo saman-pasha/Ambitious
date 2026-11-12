@@ -2,8 +2,8 @@
 %%
 %% The cascade's order, as CSS Cascade 5 has it for the origins the module
 %% knows: origin and importance first (normal user agent < normal author <
-%% important author < important user agent), the style attribute's declarations
-%% above the rules' within each (element-attached style), then the cascade layer
+%% animations < important author < important user agent), the style attribute's
+%% declarations above the rules' within each (element-attached style), then the cascade layer
 %% (@layer: in the layers' order, the unlayered rules last; for !important the
 %% order reversed), then specificity, then the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
 %% way; css_lost/4 says, of each declaration that lost, at which of these steps.
@@ -13,7 +13,7 @@
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
    css_imported/3, css_font_face/5, css_font_face_font/2,
-   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2.
+   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -128,7 +128,8 @@ css_origin_of(D, O) :- css_decl(D, R, _, _, _), css_rule(R, S, _, _, _), css_she
 %% a declaration's place in the cascade: a term that sorts as the cascade does
 css_rules_rank(D, rank(Layer, LayerRank, Spec, Order)) :-
     css_decl(D, R, _, _, Imp), css_rule(R, _, _, Spec, Order), css_origin_of(D, O),
-    css_rules_layer(O, Imp, Layer), css_rules_layer_rank(R, Imp, LayerRank).
+    (   css_keyframe(R, _, _) -> Layer = 4 ; css_rules_layer(O, Imp, Layer) ),
+    css_rules_layer_rank(R, Imp, LayerRank).
 
 %% a rule's cascade layer's place: its layer's rank, the unlayered after every layer
 %% (8191, as src/css/css.c has it); for !important, the order reversed
@@ -141,19 +142,22 @@ css_layer_of(D, Name) :-
     css_decl(D, R, _, _, _),
     (   css_rule_layer(R, L), css_layer(L, N, _) -> Name = N ; Name = unlayered ).
 
+%% (an animation's keyframe is 4: animations above every normal declaration and
+%% under the important ones)
 css_rules_layer(user_agent, false, 1).
 css_rules_layer(author, false, 2).
 css_rules_layer(inline, false, 3).
-css_rules_layer(author, true, 4).
-css_rules_layer(inline, true, 5).
-css_rules_layer(user_agent, true, 6).
+css_rules_layer(author, true, 5).
+css_rules_layer(inline, true, 6).
+css_rules_layer(user_agent, true, 7).
 
 css_rules_layer_name(1, 'user agent').
 css_rules_layer_name(2, author).
 css_rules_layer_name(3, 'style attribute').
-css_rules_layer_name(4, 'important author').
-css_rules_layer_name(5, 'important style attribute').
-css_rules_layer_name(6, 'important user agent').
+css_rules_layer_name(4, animation).
+css_rules_layer_name(5, 'important author').
+css_rules_layer_name(6, 'important style attribute').
+css_rules_layer_name(7, 'important user agent').
 
 %% a specificity, a * 65536 + b * 256 + c, as Selectors writes it
 css_specificity(S, spec(A, B, C)) :- A is S >> 16, B is (S >> 8) /\ 255, C is S /\ 255.
@@ -172,13 +176,17 @@ css_lost(N, P, D2, Why) :-
     ).
 
 %% why an element has its value of a property: the declaration that won (as
-%% written, its rule and where that rule is), or the parent it inherited from, or
-%% the property's initial value; for the last two, the declaration that asked
-%% for it (inherit, initial, unset) if one did
+%% written, its rule and where that rule is), or the animation that gave it at
+%% the page's rest time (its @keyframes and the keyframe's place), or the parent it
+%% inherited from, or the property's initial value; for the last two, the
+%% declaration that asked for it (inherit, initial, unset) if one did
 css_explain(N, P, declared(Value, written(Text), by(Selector), in(Where))) :-
     css_computed(N, P, Value, declared), css_won(N, P, D),
     css_decl(D, R, _, Text, Imp), css_rule(R, _, Selector, _, _), css_origin_of(D, Origin),
     (   Imp == true -> Where = important(Origin) ; Where = Origin ).
+css_explain(N, P, animated(Value, by(Name, at(Offset)), written(Text))) :-
+    css_computed(N, P, Value, animated), css_won(N, P, D),
+    css_decl(D, R, _, Text, _), css_keyframe(R, K, Offset), css_keyframes(K, Name, _).
 css_explain(N, P, inherited(Value, from(Parent), Because)) :-
     css_computed(N, P, Value, inherited), dom_parent(N, Parent),
     css_rules_because(N, P, 'the property is inherited', Because).
@@ -247,6 +255,6 @@ css_diag(low_contrast, N, Text) :-
     (   From == canvas -> Bg = 'the white canvas' ; css_computed(From, background_color, Bg, _) ),
     format(atom(Text), '<~w> text ~w on ~w: contrast ~2f:1, below ~w:1', [E, Fg, Bg, Ratio, Min]).
 css_diag(unused_rule, R, Text) :-
-    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
+    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_keyframe(R, _, _), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
     (   css_state(_, _) -> State = 'in the state the page was put in' ; State = 'at rest: no hover, focus or other state' ),
     format(atom(Text), 'the rule ~w matches no element (~w)', [Selector, State]).

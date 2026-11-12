@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Animations</title>
+<style>
+/* tests/pages/animations.html: CSS animations as the page is at rest, 10 s after it was
+   loaded (each running animation's time set to 10,000 ms in Chromium: tools/bench/
+   cssref.js --at 10000), each case an element whose data-check names the properties
+   tests/integ/cssref.sh holds to Chromium's: fill modes, directions, iteration counts,
+   delays, play states, easings (keyframes' own among them), keyframes left implicit, a
+   later animation over an earlier one, !important over an animation, an animation's
+   value inherited and in em, colours premultiplied, discrete values */
+body { margin: 0; font: 16px sans-serif }
+div { height: 4px; margin: 1px 0 }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes w0 { from { width: 0px } to { width: 100px } }
+@keyframes w10 { 0% { width: 10px } 100% { width: 110px } }
+@keyframes paint { 0% { background-color: red } 100% { background-color: blue } }
+@keyframes clear { from { background-color: transparent } to { background-color: rgb(0, 0, 255) } }
+@keyframes mid { 50% { width: 200px } }
+@keyframes eased { 0% { width: 0px; animation-timing-function: ease-in } 100% { width: 100px } }
+@keyframes twostep { 0% { width: 0px; animation-timing-function: steps(2) } 50% { width: 100px; animation-timing-function: linear } 100% { width: 300px } }
+@keyframes show { from { visibility: hidden } to { visibility: visible } }
+@keyframes vanish { to { display: none } }
+@keyframes size { from { font-size: 10px } to { font-size: 30px } }
+@keyframes spaced { from { letter-spacing: 0px } to { letter-spacing: 8px } }
+@keyframes layered { to { width: 40px } }
+@layer base { @keyframes layered { to { width: 70px } } }
+@keyframes layered2 { to { width: 50px } }
+@keyframes layered2 { to { width: 90px } }
+#fade { opacity: 0.2; animation: fade 1s forwards }
+#nofill { opacity: 0.3; animation: fade 1s }
+#linear { animation: w10 20s linear }
+#ease { animation: w0 20s ease }
+#easeout { animation: w0 20s ease-out }
+#bezier { animation: w0 20s cubic-bezier(0.1, 0.7, 1, 0.1) }
+#steps { animation: w0 16s steps(4) }
+#stepsstart { animation: w0 16s steps(4, jump-start) }
+#stepsnone { animation: w0 16s steps(5, jump-none) }
+#linearfn { animation: w0 20s linear(0, 0.25 75%, 1) }
+#delayed { width: 33px; animation: w10 20s linear 20s }
+#backwards { width: 33px; animation: w10 20s linear 20s backwards }
+#negative { animation: w0 20s linear -5s }
+#alternate { animation: w0 4s linear infinite alternate }
+#altrev { animation: w0 3s linear infinite alternate-reverse }
+#reverse { animation: w0 40s linear reverse }
+#count { animation: w0 2s linear 2.5 forwards }
+#countnofill { width: 21px; animation: w0 2s linear 2.5 }
+#paused { animation: w10 1500ms linear paused }
+#implicit { width: 100px; animation: mid 40s linear }
+#keyease { animation: eased 20s linear }
+#keysteps { animation: twostep 20s linear }
+#two { animation: w0 20s linear, w10 40s linear }
+#important { width: 25px !important; animation: w0 20s linear }
+#colour { animation: paint 20s linear }
+#alpha { animation: clear 20s linear }
+#visible { visibility: hidden; animation: show 20s linear }
+#display { animation: vanish 1s forwards }
+#parent { animation: size 20s linear }
+#child { width: 2em }
+#letters { animation: spaced 40s linear }
+#layer { animation: layered 1s forwards }
+#later { animation: layered2 1s forwards }
+#transition { width: 60px; transition: width 5s, opacity 250ms ease-in 1s }
+#zero { width: 12px; animation: w0 0s forwards }
+#none { width: 13px; animation: none }
+</style>
+</head>
+<body>
+<div id=fade data-check="opacity"></div>
+<div id=nofill data-check="opacity"></div>
+<div id=linear data-check="width"></div>
+<div id=ease data-check="width animation-name animation-duration animation-timing-function animation-delay animation-iteration-count animation-direction animation-fill-mode animation-play-state"></div>
+<div id=easeout data-check="width"></div>
+<div id=bezier data-check="width animation-timing-function"></div>
+<div id=steps data-check="width animation-timing-function"></div>
+<div id=stepsstart data-check="width animation-timing-function"></div>
+<div id=stepsnone data-check="width"></div>
+<div id=linearfn data-check="width animation-timing-function"></div>
+<div id=delayed data-check="width"></div>
+<div id=backwards data-check="width"></div>
+<div id=negative data-check="width animation-delay"></div>
+<div id=alternate data-check="width"></div>
+<div id=altrev data-check="width"></div>
+<div id=reverse data-check="width"></div>
+<div id=count data-check="width animation-iteration-count animation-fill-mode"></div>
+<div id=countnofill data-check="width"></div>
+<div id=paused data-check="width animation-play-state animation-duration"></div>
+<div id=implicit data-check="width"></div>
+<div id=keyease data-check="width"></div>
+<div id=keysteps data-check="width"></div>
+<div id=two data-check="width animation-name animation-duration"></div>
+<div id=important data-check="width"></div>
+<div id=colour data-check="background-color"></div>
+<div id=alpha data-check="background-color"></div>
+<div id=visible data-check="visibility"></div>
+<div id=display data-check="display"></div>
+<div id=parent data-check="font-size"><div id=child data-check="font-size width"></div></div>
+<div id=letters data-check="letter-spacing"></div>
+<div id=layer data-check="width"></div>
+<div id=later data-check="width"></div>
+<div id=transition data-check="width transition-property transition-duration transition-timing-function transition-delay transition-behavior"></div>
+<div id=zero data-check="width"></div>
+<div id=none data-check="width animation-name"></div>
+</body>
+</html>

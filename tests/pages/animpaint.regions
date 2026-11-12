@@ -1,0 +1,11 @@
+# tests/pages/animpaint.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+spin 0 0 200 140
+move 200 0 400 140
+tilt 400 0 600 140
+glow 600 0 800 140
+soft 0 140 200 280
+tint 200 140 400 280
+size 400 140 600 280
+appear 600 140 800 280
+round 0 280 200 420
+gone 200 280 400 420

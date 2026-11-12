@@ -671,6 +671,13 @@ be built side by side and merged without touching each other's.
       colours and `light-dark()` in the scheme each element is used in, the
       user agent's links, marks and form controls in them, and the canvas the
       root's scheme gives (Chromium's values for each scheme).
+    - `@keyframes` and the animations' and transitions' properties, each
+      animation evaluated at the page's rest time (Web Animations' phases and
+      iterations, CSS Easing's functions, a keyframe's own easing, implicit
+      keyframes, values interpolated by their kinds), its value over every
+      declaration but the important ones and explained as the animation's;
+      held to Chromium's values and drawing with each animation at 10 s
+      (`tests/integ/cssref.sh`, `tests/integ/paintref.sh`).
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning.
