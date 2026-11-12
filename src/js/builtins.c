@@ -47,6 +47,10 @@ enum {
     N_JSON_STRINGIFY, N_JSON_PARSE, N_CON_LOG, N_CON_INFO, N_CON_WARN, N_CON_ERROR, N_CON_DEBUG,
     N_EP_TOSTRING, N_DATE_NOW, N_DATE_UTC, N_DP_GETTIME, N_DP_TOISO, N_DP_GETFULLYEAR, N_DP_GETMONTH, N_DP_GETDATE, N_DP_GETDAY,
     N_DP_GETHOURS, N_DP_GETMINUTES, N_DP_GETSECONDS, N_DP_GETMS, N_DP_TOSTRING, N_PERF_NOW,
+    N_DATE_PARSE, N_DP_GETTZO, N_DP_GETYEAR, N_DP_SETTIME, N_DP_SETMS, N_DP_SETSEC, N_DP_SETMIN, N_DP_SETHOURS, N_DP_SETDATE,
+    N_DP_SETMONTH, N_DP_SETFULLYEAR, N_DP_SETUTCMS, N_DP_SETUTCSEC, N_DP_SETUTCMIN, N_DP_SETUTCHOURS, N_DP_SETUTCDATE,
+    N_DP_SETUTCMONTH, N_DP_SETUTCFULLYEAR, N_DP_SETYEAR, N_DP_TODATESTRING, N_DP_TOTIMESTRING, N_DP_TOUTCSTRING, N_DP_TOJSON,
+    N_DP_TOPRIM,
     N_SET_TIMEOUT, N_SET_INTERVAL, N_CLEAR_TIMEOUT, N_QUEUE_MICROTASK,
     /* Map, Set, RegExp, iterators */
     N_MP_GET, N_MP_SET, N_MP_HAS, N_MP_DELETE, N_MP_CLEAR, N_MP_SIZE, N_MP_FOREACH, N_MP_KEYS, N_MP_VALUES, N_MP_ENTRIES,
@@ -1012,7 +1016,7 @@ static uint32_t this_coll(js_vm *vm, jv thisv, uint32_t kind, uint32_t id) {
     return 0;
 }
 
-/* ---- dates: virtual milliseconds since the epoch, UTC ---- */
+/* ---- dates: milliseconds since the epoch; the local time zone UTC (Chromium's on the machines it is measured on) ---- */
 
 static int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
     y -= m <= 2;
@@ -1021,25 +1025,6 @@ static int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
     unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
     unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + (int64_t)doe - 719468;
-}
-/* the time a date's parts give (the Date constructor's and Date.UTC's arguments: the year,
-   then the month, day, hours, minutes, seconds and ms, their defaults 0, 1 and 0), as
-   MakeDay, MakeTime and TimeClip make it (ECMA-262 21.4.1): each part an integer, a year
-   from 0 to 99 the 1900s', NaN when a part is not finite or the time out of range */
-static double date_from_parts(js_vm *vm, uint32_t args, uint32_t argc) {
-    double v[7] = { NAN, 0, 1, 0, 0, 0, 0 };
-    for (uint32_t i = 0; i < argc && i < 7; i++) v[i] = num_arg(vm, args, argc, i);
-    for (int i = 0; i < 7; i++) {
-        if (v[i] != v[i] || v[i] == INFINITY || v[i] == -INFINITY) return NAN;
-        v[i] = trunc(v[i]);
-    }
-    if (v[0] >= 0 && v[0] <= 99) v[0] += 1900;
-    double ym = v[0] + floor(v[1] / 12), mn = v[1] - floor(v[1] / 12) * 12;
-    if (fabs(ym) > 400000) return NAN;
-    double day = (double)days_from_civil((int64_t)ym, (unsigned)mn + 1, 1) + v[2] - 1;
-    double t = day * 86400000.0 + v[3] * 3600000.0 + v[4] * 60000.0 + v[5] * 1000.0 + v[6];
-    if (t != t || fabs(t) > 8.64e15) return NAN;
-    return t + 0.0;
 }
 static void civil_from_days(int64_t z, int64_t *y, unsigned *m, unsigned *d) {
     z += 719468;
@@ -1053,6 +1038,7 @@ static void civil_from_days(int64_t z, int64_t *y, unsigned *m, unsigned *d) {
     *m = mp < 10 ? mp + 3 : mp - 9;
     *y = yy + (*m <= 2);
 }
+/* a time's field: 0 its year, 1 month (0-based), 2 date, 3 weekday, 4 hours, 5 minutes, 6 seconds, 7 ms */
 static double date_field(double t, int which) {
     if (t != t) return NAN;
     int64_t ms = (int64_t)t;
@@ -1073,9 +1059,383 @@ static double date_field(double t, int which) {
     }
 }
 
-static double this_time(js_vm *vm, jv thisv) {
-    if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATE) { js_throw_msg(vm, vm->type_error_proto, "this is not a Date object"); return NAN; }
-    return jv_dbl(vm->objs[jv_idx(thisv)].x);
+/* MakeTime, MakeDay, MakeDate and TimeClip (ECMA-262 21.4.1), with V8's bounds: a year within a million of 0, a month
+   within ten million */
+static double date_make_time(double h, double m, double s, double ms) {
+    if (!isfinite(h) || !isfinite(m) || !isfinite(s) || !isfinite(ms)) return NAN;
+    return trunc(h) * 3600000.0 + trunc(m) * 60000.0 + trunc(s) * 1000.0 + trunc(ms);
+}
+static double date_make_day(double year, double month, double date) {
+    if (!(year >= -1000000.0 && year <= 1000000.0) || !(month >= -10000000.0 && month <= 10000000.0) || !isfinite(date)) return NAN;
+    int64_t y = (int64_t)year, m = (int64_t)month;
+    y += m / 12;
+    m %= 12;
+    if (m < 0) { m += 12; y -= 1; }
+    return (double)days_from_civil(y, (unsigned)m + 1, 1) + trunc(date) - 1;
+}
+static double date_make_date(double day, double time) {
+    if (!isfinite(day) || !isfinite(time)) return NAN;
+    if (time == 0.0 && day != 0.0) return day * 86400000.0;
+    return time + day * 86400000.0;
+}
+static double date_clip(double t) {
+    if (!(t >= -8.64e15 && t <= 8.64e15)) return NAN;
+    return trunc(t) + 0.0;
+}
+/* a local time made a UTC one (the zone's UTC, so only V8's bound: ten days past the range is no time) */
+static double date_utc(double t) {
+    if (!(t >= -8.64e15 - 864000000.0 && t <= 8.64e15 + 864000000.0)) return NAN;
+    return t;
+}
+/* a year argument as the constructor and Date.UTC read it: 0 to 99 the 1900s' */
+static double date_full_year(double y) {
+    if (y != y) return y;
+    double yi = trunc(y);
+    return yi >= 0 && yi <= 99 ? 1900 + yi : y;
+}
+
+/* ---- Date.parse: V8's date parser (src/date/dateparser*), its ES5 date-time strings first, then its legacy grammar ---- */
+
+enum { DT_INVALID, DT_UNKNOWN, DT_NUMBER, DT_SYMBOL, DT_WS, DT_END, DT_KEYWORD };
+enum { DK_INVALID, DK_MONTH, DK_TZ, DK_TSEP, DK_AMPM };
+#define DP_NONE 0x7FFFFFFF
+typedef struct dtok { int tag, kw, len, val; } dtok;
+typedef struct dscan { uint32_t off, n, idx; uint32_t ch; dtok next; } dscan;
+
+static int dp_ws_char(uint32_t c) {
+    return c == 9 || c == 11 || c == 12 || c == 32 || c == 0xA0 || c == 0xFEFF || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) ||
+           c == 0x202F || c == 0x205F || c == 0x3000;
+}
+static int dp_ws_or_lt(uint32_t c) { return dp_ws_char(c) || c == 10 || c == 13 || c == 0x2028 || c == 0x2029; }
+static void dp_next_ch(js_vm *vm, dscan *s) {
+    s->ch = s->idx < s->n ? vm->units[s->off + s->idx] : 0;
+    s->idx++;
+}
+static const struct { char k[3]; int type, value; } dp_words[] = {
+    { "jan", DK_MONTH, 1 }, { "feb", DK_MONTH, 2 }, { "mar", DK_MONTH, 3 }, { "apr", DK_MONTH, 4 }, { "may", DK_MONTH, 5 },
+    { "jun", DK_MONTH, 6 }, { "jul", DK_MONTH, 7 }, { "aug", DK_MONTH, 8 }, { "sep", DK_MONTH, 9 }, { "oct", DK_MONTH, 10 },
+    { "nov", DK_MONTH, 11 }, { "dec", DK_MONTH, 12 }, { "am", DK_AMPM, 0 }, { "pm", DK_AMPM, 12 }, { "ut", DK_TZ, 0 },
+    { "utc", DK_TZ, 0 }, { "z", DK_TZ, 0 }, { "gmt", DK_TZ, 0 }, { "cdt", DK_TZ, -5 }, { "cst", DK_TZ, -6 }, { "edt", DK_TZ, -4 },
+    { "est", DK_TZ, -5 }, { "mdt", DK_TZ, -6 }, { "mst", DK_TZ, -7 }, { "pdt", DK_TZ, -7 }, { "pst", DK_TZ, -8 }, { "t", DK_TSEP, 0 } };
+
+static dtok dp_scan(js_vm *vm, dscan *s) {
+    dtok t = { DT_UNKNOWN, 0, 1, -1 };
+    uint32_t pre = s->idx;
+    if (!s->ch) { t.tag = DT_END; t.len = 0; return t; }
+    if (s->ch >= '0' && s->ch <= '9') {
+        /* an unsigned numeral: its leading zeros skipped, nine significant digits read, the rest passed over */
+        int n = 0, k = 0;
+        while (s->ch == '0') dp_next_ch(vm, s);
+        while (s->ch >= '0' && s->ch <= '9') {
+            if (k < 9) n = n * 10 + (int)(s->ch - '0');
+            k++;
+            dp_next_ch(vm, s);
+        }
+        t.tag = DT_NUMBER;
+        t.val = n;
+        t.len = (int)(s->idx - pre);
+        return t;
+    }
+    if (s->ch == ':' || s->ch == '-' || s->ch == '+' || s->ch == '.' || s->ch == ')') {
+        t.tag = DT_SYMBOL;
+        t.val = (int)s->ch;
+        dp_next_ch(vm, s);
+        return t;
+    }
+    if (s->ch >= 'A' && !dp_ws_char(s->ch)) {
+        /* a word: its lower-cased prefix of three looked up (a longer word a month's alone) */
+        uint32_t pre3[3] = { 0, 0, 0 };
+        int n = 0;
+        for (; s->ch >= 'A' && !dp_ws_char(s->ch); dp_next_ch(vm, s), n++)
+            if (n < 3) pre3[n] = s->ch | 0x20;
+        t.tag = DT_KEYWORD;
+        t.kw = DK_INVALID;
+        t.val = 0;
+        t.len = n;
+        for (size_t w = 0; w < sizeof dp_words / sizeof dp_words[0]; w++) {
+            int j = 0;
+            while (j < 3 && pre3[j] == (uint32_t)(uint8_t)dp_words[w].k[j]) j++;
+            if (j == 3 && (n <= 3 || dp_words[w].type == DK_MONTH)) { t.kw = dp_words[w].type; t.val = dp_words[w].value; break; }
+        }
+        return t;
+    }
+    if (dp_ws_or_lt(s->ch)) {
+        dp_next_ch(vm, s);
+        t.tag = DT_WS;
+        t.len = (int)(s->idx - pre);
+        return t;
+    }
+    if (s->ch == '(') {
+        /* parenthesized text, nested, passed over */
+        int balance = 0;
+        do {
+            if (s->ch == ')') balance--;
+            else if (s->ch == '(') balance++;
+            dp_next_ch(vm, s);
+        } while (balance > 0 && s->ch);
+        return t;
+    }
+    dp_next_ch(vm, s);
+    return t;
+}
+static dtok dp_take(js_vm *vm, dscan *s) {
+    dtok r = s->next;
+    s->next = dp_scan(vm, s);
+    return r;
+}
+static int dp_is_sym(dtok t, int c) { return t.tag == DT_SYMBOL && t.val == c; }
+static int dp_skip(js_vm *vm, dscan *s, int c) {
+    if (!dp_is_sym(s->next, c)) return 0;
+    s->next = dp_scan(vm, s);
+    return 1;
+}
+static int dp_fixed(dtok t, int n) { return t.tag == DT_NUMBER && t.len == n; }
+static int dp_sign(dtok t) { return t.tag == DT_SYMBOL && (t.val == '-' || t.val == '+'); }
+static int dp_kw_z(dtok t) { return t.tag == DT_KEYWORD && t.kw == DK_TZ && t.len == 1 && t.val == 0; }
+static int dp_between(int x, int lo, int hi) { return x >= lo && x <= hi; }
+/* a fraction's digits as milliseconds: its first three significant ones */
+static int dp_ms(dtok t) {
+    int n = t.val, k = t.len;
+    if (k == 1) n *= 100;
+    else if (k == 2) n *= 10;
+    else if (k > 3) {
+        if (k > 9) k = 9;
+        int f = 1;
+        do { f *= 10; k--; } while (k > 3);
+        n /= f;
+    }
+    return n;
+}
+
+/* the composers: a day's up to three numbers and its month's name, a time's four fields and its am or pm, a zone */
+typedef struct dday { int comp[3], index, named_month, iso; } dday;
+typedef struct dtime { int comp[4], index, hour_offset; } dtime;
+typedef struct dzone { int sign, hour, minute; } dzone;
+
+static int dd_add(dday *d, int n) { if (d->index >= 3) return 0; d->comp[d->index++] = n; return 1; }
+static int dt_add(dtime *t, int n) { if (t->index >= 4) return 0; t->comp[t->index++] = n; return 1; }
+static int dt_add_final(dtime *t, int n) {
+    if (!dt_add(t, n)) return 0;
+    while (t->index < 4) t->comp[t->index++] = 0;
+    return 1;
+}
+static int dt_expecting(const dtime *t, int n) {
+    return (t->index == 1 && dp_between(n, 0, 59)) || (t->index == 2 && dp_between(n, 0, 59)) || (t->index == 3 && dp_between(n, 0, 999));
+}
+static void dz_set(dzone *z, int hours) { z->sign = hours < 0 ? -1 : 1; z->hour = hours * z->sign; z->minute = 0; }
+static int dz_expecting(const dzone *z, int n) { return z->hour != DP_NONE && z->minute == DP_NONE && dp_between(n, 0, 59); }
+static int dz_utc(const dzone *z) { return z->hour == 0 && z->minute == 0; }
+
+/* ParseES5DateTime: the token after what it read, an END when it read the whole string, an INVALID when it is no date */
+static dtok dp_es5(js_vm *vm, dscan *s, dday *day, dtime *time, dzone *tz) {
+    dtok bad = { DT_INVALID, 0, 0, -1 }, end = { DT_END, 0, 0, -1 };
+    if (dp_sign(s->next)) {
+        dtok st = dp_take(vm, s);
+        if (!dp_fixed(s->next, 6)) return st;
+        int sign = 44 - st.val, year = dp_take(vm, s).val;
+        if (sign < 0 && year == 0) return st;
+        dd_add(day, sign * year);
+    } else if (dp_fixed(s->next, 4)) dd_add(day, dp_take(vm, s).val);
+    else return dp_take(vm, s);
+    if (dp_skip(vm, s, '-')) {
+        if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 1, 12)) return dp_take(vm, s);
+        dd_add(day, dp_take(vm, s).val);
+        if (dp_skip(vm, s, '-')) {
+            if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 1, 31)) return dp_take(vm, s);
+            dd_add(day, dp_take(vm, s).val);
+        }
+    }
+    if (!(s->next.tag == DT_KEYWORD && s->next.kw == DK_TSEP)) {
+        if (s->next.tag != DT_END) return dp_take(vm, s);
+    } else {
+        dp_take(vm, s);
+        if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 0, 24)) return bad;
+        int h24 = s->next.val == 24;
+        dt_add(time, dp_take(vm, s).val);
+        if (!dp_skip(vm, s, ':')) return bad;
+        if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 0, 59) || (h24 && s->next.val > 0)) return bad;
+        dt_add(time, dp_take(vm, s).val);
+        if (dp_skip(vm, s, ':')) {
+            if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 0, 59) || (h24 && s->next.val > 0)) return bad;
+            dt_add(time, dp_take(vm, s).val);
+            if (dp_skip(vm, s, '.')) {
+                if (s->next.tag != DT_NUMBER || (h24 && s->next.val > 0)) return bad;
+                dt_add(time, dp_ms(dp_take(vm, s)));
+            }
+        }
+        if (dp_kw_z(s->next)) {
+            dp_take(vm, s);
+            dz_set(tz, 0);
+        } else if (dp_is_sym(s->next, '+') || dp_is_sym(s->next, '-')) {
+            tz->sign = dp_take(vm, s).val == '+' ? 1 : -1;
+            if (dp_fixed(s->next, 4)) {
+                int hm = dp_take(vm, s).val, hh = hm / 100, mm = hm % 100;
+                if (!dp_between(hh, 0, 23) || !dp_between(mm, 0, 59)) return bad;
+                tz->hour = hh;
+                tz->minute = mm;
+            } else {
+                if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 0, 23)) return bad;
+                tz->hour = dp_take(vm, s).val;
+                if (!dp_skip(vm, s, ':')) return bad;
+                if (!dp_fixed(s->next, 2) || !dp_between(s->next.val, 0, 59)) return bad;
+                tz->minute = dp_take(vm, s).val;
+            }
+        }
+        if (s->next.tag != DT_END) return bad;
+    }
+    /* a date alone is UTC's, a date and a time the local zone's */
+    if (tz->hour == DP_NONE && time->index == 0) dz_set(tz, 0);
+    day->iso = 1;
+    return end;
+}
+
+/* the string s's time (NaN: no date V8 reads) */
+static double date_parse(js_vm *vm, uint32_t str) {
+    js_str_flatten(vm, str);
+    dscan sc;
+    memset(&sc, 0, sizeof sc);
+    sc.off = vm->strs[str].off;
+    sc.n = vm->strs[str].len;
+    dp_next_ch(vm, &sc);
+    sc.next = dp_scan(vm, &sc);
+    dday day = { { 0, 0, 0 }, 0, DP_NONE, 0 };
+    dtime time = { { 0, 0, 0, 0 }, 0, DP_NONE };
+    dzone tz = { DP_NONE, DP_NONE, DP_NONE };
+    dtok tok = dp_es5(vm, &sc, &day, &time, &tz);
+    if (tok.tag == DT_INVALID) return NAN;
+    int has_number = day.index > 0;
+    for (; tok.tag != DT_END; tok = dp_take(vm, &sc)) {
+        if (tok.tag == DT_NUMBER) {
+            has_number = 1;
+            int n = tok.val;
+            if (dp_skip(vm, &sc, ':')) {
+                if (dp_skip(vm, &sc, ':')) {
+                    if (time.index) return NAN;
+                    dt_add(&time, n);
+                    dt_add(&time, 0);
+                } else {
+                    if (!dt_add(&time, n)) return NAN;
+                    if (dp_is_sym(sc.next, '.')) dp_take(vm, &sc);
+                }
+            } else if (dp_skip(vm, &sc, '.') && dt_expecting(&time, n)) {
+                dt_add(&time, n);
+                if (sc.next.tag != DT_NUMBER) return NAN;
+                int ms = dp_ms(dp_take(vm, &sc));
+                if (ms < 0) return NAN;
+                dt_add_final(&time, ms);
+            } else if (dz_expecting(&tz, n)) {
+                tz.minute = n;
+            } else if (dt_expecting(&time, n)) {
+                dt_add_final(&time, n);
+                /* a time ends at the end, white space, a Z or a sign */
+                dtok pk = sc.next;
+                if (pk.tag != DT_END && pk.tag != DT_WS && !dp_kw_z(pk) && !dp_sign(pk)) return NAN;
+            } else {
+                if (!dd_add(&day, n)) return NAN;
+                dp_skip(vm, &sc, '-');
+            }
+        } else if (tok.tag == DT_KEYWORD) {
+            if (tok.kw == DK_AMPM && time.index) time.hour_offset = tok.val;
+            else if (tok.kw == DK_MONTH) {
+                day.named_month = tok.val;
+                dp_skip(vm, &sc, '-');
+            } else if (tok.kw == DK_TZ && has_number) dz_set(&tz, tok.val);
+            else {
+                /* a word no date knows: none once a number came, nor one a number follows at once */
+                if (has_number) return NAN;
+                if (sc.next.tag == DT_NUMBER) return NAN;
+            }
+        } else if (dp_sign(tok) && (dz_utc(&tz) || time.index)) {
+            /* an offset, after UTC or a time */
+            tz.sign = 44 - tok.val < 0 ? -1 : 1;
+            int n = 0, k = 0;
+            if (sc.next.tag == DT_NUMBER) {
+                dtok nt = dp_take(vm, &sc);
+                k = nt.len;
+                n = nt.val;
+            }
+            has_number = 1;
+            if (dp_is_sym(sc.next, ':')) {
+                tz.hour = n;
+                tz.minute = DP_NONE;
+            } else if (k == 1 || k == 2) {
+                tz.hour = n;
+                tz.minute = 0;
+            } else if (k == 3 || k == 4) {
+                tz.hour = n / 100;
+                tz.minute = n % 100;
+            } else return NAN;
+        } else if ((dp_sign(tok) || dp_is_sym(tok, ')')) && has_number) return NAN;
+    }
+    /* the day: its numbers read as YMD, MD(Y), DMY or the like as V8 orders them */
+    if (day.index < 1) return NAN;
+    while (day.index < 3) day.comp[day.index++] = 1;
+    int year = 0, month = DP_NONE, date = DP_NONE;
+    if (day.named_month == DP_NONE) {
+        if (day.iso || (day.index == 3 && !dp_between(day.comp[0], 1, 31))) { year = day.comp[0]; month = day.comp[1]; date = day.comp[2]; }
+        else { month = day.comp[0]; date = day.comp[1]; if (day.index == 3) year = day.comp[2]; }
+    } else {
+        month = day.named_month;
+        if (day.index == 1) date = day.comp[0];
+        else if (!dp_between(day.comp[0], 1, 31)) { year = day.comp[0]; date = day.comp[1]; }
+        else { date = day.comp[0]; year = day.comp[1]; }
+    }
+    if (!day.iso) {
+        if (dp_between(year, 0, 49)) year += 2000;
+        else if (dp_between(year, 50, 99)) year += 1900;
+    }
+    if (!dp_between(month, 1, 12) || !dp_between(date, 1, 31)) return NAN;
+    /* the time */
+    while (time.index < 4) time.comp[time.index++] = 0;
+    int hour = time.comp[0], minute = time.comp[1], second = time.comp[2], milli = time.comp[3];
+    if (time.hour_offset != DP_NONE) {
+        if (!dp_between(hour, 0, 12)) return NAN;
+        hour %= 12;
+        hour += time.hour_offset;
+    }
+    if (!dp_between(hour, 0, 23) || !dp_between(minute, 0, 59) || !dp_between(second, 0, 59) || !dp_between(milli, 0, 999))
+        if (hour != 24 || minute != 0 || second != 0 || milli != 0) return NAN;
+    double t = date_make_date(date_make_day(year, month - 1, date), date_make_time(hour, minute, second, milli));
+    if (tz.sign != DP_NONE) {
+        int64_t secs = (int64_t)(tz.hour == DP_NONE ? 0 : tz.hour) * 3600 + (int64_t)(tz.minute == DP_NONE ? 0 : tz.minute) * 60;
+        if (secs > 0x3FFFFFFF) return NAN;
+        t -= (double)(tz.sign < 0 ? -secs : secs) * 1000.0;
+        if (!(t >= -8.64e15 && t <= 8.64e15)) return NAN;
+    } else t = date_utc(t);
+    return date_clip(t);
+}
+
+/* ---- a date written as V8 writes it: toString (0), toDateString (1), toTimeString (2), toUTCString (3), toISOString
+   (4); the local zone UTC, named as ICU names it ---- */
+static uint32_t date_text(js_vm *vm, double t, int which) {
+    static const char *const wd[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static const char *const mo[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    if (t != t) return js_str_ascii(vm, "Invalid Date");
+    int y = (int)date_field(t, 0), m = (int)date_field(t, 1), d = (int)date_field(t, 2), w = (int)date_field(t, 3);
+    int h = (int)date_field(t, 4), mi = (int)date_field(t, 5), s = (int)date_field(t, 6), ms = (int)date_field(t, 7);
+    char b[128];
+    const char *zone = "GMT+0000 (Coordinated Universal Time)";
+    if (which == 0) snprintf(b, sizeof b, y < 0 ? "%s %s %02d %05d %02d:%02d:%02d %s" : "%s %s %02d %04d %02d:%02d:%02d %s", wd[w], mo[m], d, y, h, mi, s, zone);
+    else if (which == 1) snprintf(b, sizeof b, y < 0 ? "%s %s %02d %05d" : "%s %s %02d %04d", wd[w], mo[m], d, y);
+    else if (which == 2) snprintf(b, sizeof b, "%02d:%02d:%02d %s", h, mi, s, zone);
+    else if (which == 3) snprintf(b, sizeof b, y < 0 ? "%s, %02d %s %05d %02d:%02d:%02d GMT" : "%s, %02d %s %04d %02d:%02d:%02d GMT", wd[w], d, mo[m], y, h, mi, s);
+    else if (y >= 0 && y <= 9999) snprintf(b, sizeof b, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", y, m + 1, d, h, mi, s, ms);
+    else if (y < 0) snprintf(b, sizeof b, "-%06d-%02d-%02dT%02d:%02d:%02d.%03dZ", -y, m + 1, d, h, mi, s, ms);
+    else snprintf(b, sizeof b, "+%06d-%02d-%02dT%02d:%02d:%02d.%03dZ", y, m + 1, d, h, mi, s, ms);
+    return js_str_ascii(vm, b);
+}
+
+/* the Date a method was called on, its time value in *t; else V8's TypeError: the getters' "this is not a Date
+   object." (name 0), the others' naming the method and the receiver */
+static int this_date(js_vm *vm, jv thisv, const char *name, double *t) {
+    if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_DATE) { *t = jv_dbl(vm->objs[jv_idx(thisv)].x); return 1; }
+    if (!name) js_throw_msg(vm, vm->type_error_proto, "this is not a Date object.");
+    else {
+        char pre[96];
+        snprintf(pre, sizeof pre, "Method Date.prototype.%s called on incompatible receiver ", name);
+        value_error(vm, pre, thisv, "");
+    }
+    return 0;
 }
 
 /* ---- timers ---- */
@@ -2395,22 +2755,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_obj(e);
     }
 
-    case N_DATE: {
-        double t = vm->now;
-        if (argc == 1 && jv_is_num(a0)) t = jv_dbl(a0);
-        else if (argc >= 2) t = date_from_parts(vm, args, argc);
-        else if (argc == 1) t = NAN;
-        if (newt == JV_UNDEF || newt == JV_HOLE) {
-            char b[64];
-            double tt = t;
-            snprintf(b, sizeof b, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", (int)date_field(tt, 0), (int)date_field(tt, 1) + 1, (int)date_field(tt, 2),
-                     (int)date_field(tt, 4), (int)date_field(tt, 5), (int)date_field(tt, 6), (int)date_field(tt, 7));
-            return jv_str(js_str_ascii(vm, b));
-        }
-        uint32_t o = js_obj_new(vm, JK_DATE, vm->date_proto);
-        vm->objs[o].x = jv_num(t);
-        return jv_obj(o);
-    }
     case N_MAP: case N_SET: {
         if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, id == N_MAP ? "Constructor Map requires 'new'" : "Constructor Set requires 'new'");
         uint32_t kind = id == N_MAP ? JK_MAP : JK_SET;
@@ -3460,7 +3804,6 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     /* ---- time ---- */
     case N_DATE_NOW: return jv_num(floor(vm->now));
-    case N_DATE_UTC: return jv_num(date_from_parts(vm, args, argc));
     case N_PERF_NOW: {
         if (vm->real_clock) {
             struct timespec ts;
@@ -3469,26 +3812,150 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         }
         return jv_num(vm->now);
     }
-    case N_DP_GETTIME: { double t = this_time(vm, thisv); return vm->throwing ? JV_HOLE : jv_num(t); }
+    case N_DATE: {
+        /* called: now as toString writes it; constructed: no argument now, one a date's time, a string parsed, or a
+           number; more the local parts of a time */
+        if (newt == JV_UNDEF || newt == JV_HOLE) return jv_str(date_text(vm, date_clip(floor(vm->now)), 0));
+        double t;
+        if (argc == 0) t = date_clip(floor(vm->now));
+        else if (argc == 1) {
+            if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_DATE) t = jv_dbl(vm->objs[jv_idx(a0)].x);
+            else {
+                jv pv = js_to_primitive(vm, a0, -1);
+                if (vm->throwing) return JV_HOLE;
+                if (jv_is_str(pv)) t = date_parse(vm, jv_idx(pv));
+                else {
+                    t = js_to_number(vm, pv);
+                    if (vm->throwing) return JV_HOLE;
+                }
+            }
+            t = date_clip(t);
+        } else {
+            double v[7] = { 0, 0, 1, 0, 0, 0, 0 };
+            for (uint32_t i = 0; i < argc && i < 7; i++) {
+                v[i] = js_to_number(vm, arg(vm, args, argc, i));
+                if (vm->throwing) return JV_HOLE;
+            }
+            t = date_clip(date_utc(date_make_date(date_make_day(date_full_year(v[0]), v[1], v[2]), date_make_time(v[3], v[4], v[5], v[6]))));
+        }
+        uint32_t o = js_obj_new(vm, JK_DATE, vm->date_proto);
+        vm->objs[o].x = jv_num(t);
+        return jv_obj(o);
+    }
+    case N_DATE_UTC: {
+        double v[7] = { NAN, 0, 1, 0, 0, 0, 0 };
+        for (uint32_t i = 0; i < argc && i < 7; i++) {
+            v[i] = js_to_number(vm, arg(vm, args, argc, i));
+            if (vm->throwing) return JV_HOLE;
+        }
+        return jv_num(date_clip(date_make_date(date_make_day(date_full_year(v[0]), v[1], v[2]), date_make_time(v[3], v[4], v[5], v[6]))));
+    }
+    case N_DATE_PARSE: {
+        uint32_t s = js_to_string(vm, a0);
+        if (!s) return JV_HOLE;
+        return jv_num(date_parse(vm, s));
+    }
+    case N_DP_GETTIME: {
+        double t;
+        if (!this_date(vm, thisv, 0, &t)) return JV_HOLE;
+        return jv_num(t);
+    }
+    case N_DP_GETTZO: {
+        double t;
+        if (!this_date(vm, thisv, 0, &t)) return JV_HOLE;
+        return jv_num(t != t ? NAN : 0);
+    }
     case N_DP_GETFULLYEAR: case N_DP_GETMONTH: case N_DP_GETDATE: case N_DP_GETDAY: case N_DP_GETHOURS: case N_DP_GETMINUTES:
     case N_DP_GETSECONDS: case N_DP_GETMS: {
-        double t = this_time(vm, thisv);
-        if (vm->throwing) return JV_HOLE;
-        int which = id == N_DP_GETFULLYEAR ? 0 : id == N_DP_GETMONTH ? 1 : id == N_DP_GETDATE ? 2 : id == N_DP_GETDAY ? 3 : id == N_DP_GETHOURS ? 4 :
-                    id == N_DP_GETMINUTES ? 5 : id == N_DP_GETSECONDS ? 6 : 7;
-        return jv_num(date_field(t, which));
+        double t;
+        if (!this_date(vm, thisv, 0, &t)) return JV_HOLE;
+        return jv_num(date_field(t, (int)(id - N_DP_GETFULLYEAR)));
     }
-    case N_DP_TOISO: case N_DP_TOSTRING: {
-        double t = this_time(vm, thisv);
+    case N_DP_GETYEAR: {
+        double t;
+        if (!this_date(vm, thisv, "getYear", &t)) return JV_HOLE;
+        return jv_num(t != t ? NAN : date_field(t, 0) - 1900);
+    }
+    case N_DP_SETTIME: {
+        double t;
+        if (!this_date(vm, thisv, "setTime", &t)) return JV_HOLE;
+        double v = js_to_number(vm, a0);
         if (vm->throwing) return JV_HOLE;
-        if (t != t) {
-            if (id == N_DP_TOISO) return js_throw_msg(vm, vm->range_error_proto, "Invalid time value");
-            return jv_str(js_str_ascii(vm, "Invalid Date"));
+        v = date_clip(v);
+        vm->objs[jv_idx(thisv)].x = jv_num(v);
+        return jv_num(v);
+    }
+    case N_DP_SETMS: case N_DP_SETSEC: case N_DP_SETMIN: case N_DP_SETHOURS: case N_DP_SETDATE: case N_DP_SETMONTH: case N_DP_SETFULLYEAR:
+    case N_DP_SETUTCMS: case N_DP_SETUTCSEC: case N_DP_SETUTCMIN: case N_DP_SETUTCHOURS: case N_DP_SETUTCDATE: case N_DP_SETUTCMONTH:
+    case N_DP_SETUTCFULLYEAR: {
+        /* a setter's fields (year, month, date, hours, minutes, seconds, ms) from its first: its arguments read, then
+           the time's own (setFullYear's of +0 when the time is NaN; the others give NaN) */
+        static const char *const sn[] = { "setMilliseconds", "setSeconds", "setMinutes", "setHours", "setDate", "setMonth", "setFullYear",
+            "setUTCMilliseconds", "setUTCSeconds", "setUTCMinutes", "setUTCHours", "setUTCDate", "setUTCMonth", "setUTCFullYear" };
+        static const int first[] = { 6, 5, 4, 3, 2, 1, 0 }, most[] = { 1, 2, 3, 4, 1, 2, 3 };
+        uint32_t k = id - N_DP_SETMS, which = k % 7;
+        double t;
+        if (!this_date(vm, thisv, sn[k], &t)) return JV_HOLE;
+        if (t != t && which == 6) t = 0;
+        double f[7];
+        for (int q = 0; q < 7; q++) f[q] = date_field(t, q < 3 ? q : q + 1);
+        /* V8 reads the first argument always, the others only of a valid date */
+        uint32_t n = argc < (uint32_t)most[which] ? argc : (uint32_t)most[which];
+        if (n == 0) n = 1;
+        for (uint32_t q = 0; q < n; q++) {
+            if (q == 1 && t != t) break;
+            f[first[which] + (int)q] = js_to_number(vm, arg(vm, args, argc, q));
+            if (vm->throwing) return JV_HOLE;
         }
-        char b[64];
-        snprintf(b, sizeof b, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", (int)date_field(t, 0), (int)date_field(t, 1) + 1, (int)date_field(t, 2),
-                 (int)date_field(t, 4), (int)date_field(t, 5), (int)date_field(t, 6), (int)date_field(t, 7));
-        return jv_str(js_str_ascii(vm, b));
+        if (t != t) return jv_num(NAN);
+        double v = date_clip(date_utc(date_make_date(date_make_day(f[0], f[1], f[2]), date_make_time(f[3], f[4], f[5], f[6]))));
+        vm->objs[jv_idx(thisv)].x = jv_num(v);
+        return jv_num(v);
+    }
+    case N_DP_SETYEAR: {
+        double t;
+        if (!this_date(vm, thisv, "setYear", &t)) return JV_HOLE;
+        double y = js_to_number(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        if (t != t) t = 0;
+        double v = NAN;
+        if (y == y)
+            v = date_clip(date_utc(date_make_date(date_make_day(date_full_year(y), date_field(t, 1), date_field(t, 2)),
+                                                  date_make_time(date_field(t, 4), date_field(t, 5), date_field(t, 6), date_field(t, 7)))));
+        vm->objs[jv_idx(thisv)].x = jv_num(v);
+        return jv_num(v);
+    }
+    case N_DP_TOSTRING: case N_DP_TODATESTRING: case N_DP_TOTIMESTRING: case N_DP_TOUTCSTRING: case N_DP_TOISO: {
+        static const char *const tn[] = { "toString", "toDateString", "toTimeString", "toUTCString", "toISOString" };
+        int which = id == N_DP_TOSTRING ? 0 : id == N_DP_TODATESTRING ? 1 : id == N_DP_TOTIMESTRING ? 2 : id == N_DP_TOUTCSTRING ? 3 : 4;
+        double t;
+        if (!this_date(vm, thisv, tn[which], &t)) return JV_HOLE;
+        if (which == 4 && t != t) return js_throw_msg(vm, vm->range_error_proto, "Invalid time value");
+        return jv_str(date_text(vm, t, which));
+    }
+    case N_DP_TOJSON: {
+        /* generic: a number that is not finite is null, else the object's own toISOString */
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        jv tv = js_to_primitive(vm, o, 0);
+        if (vm->throwing) return JV_HOLE;
+        if (jv_is_num(tv) && !isfinite(jv_dbl(tv))) return JV_NULL;
+        jv f = js_get(vm, o, js_atom_ascii(vm, "toISOString"));
+        if (vm->throwing) return JV_HOLE;
+        if (!js_is_callable(vm, f)) return js_throw_msg(vm, vm->type_error_proto, "toISOString is not a function");
+        return js_call(vm, f, o, 0, 0);
+    }
+    case N_DP_TOPRIM: {
+        /* Date.prototype[Symbol.toPrimitive]: "default" a string's, as "string" */
+        if (!jv_is_obj(thisv)) return value_error(vm, "Method Date.prototype [ @@toPrimitive ] called on incompatible receiver ", thisv, "");
+        int hs = -1;
+        if (jv_is_str(a0)) {
+            uint32_t h = js_atom(vm, jv_idx(a0));
+            if (h == A_STRING || h == A_DEFAULT) hs = 1;
+            else if (h == A_NUMBER) hs = 0;
+        }
+        if (hs < 0) return value_error(vm, "Invalid hint: ", a0, "");
+        return js_ordinary_to_primitive(vm, thisv, hs);
     }
     case N_SET_TIMEOUT: return add_timer(vm, args, argc, 0);
     case N_SET_INTERVAL: return add_timer(vm, args, argc, 1);
@@ -3754,16 +4221,35 @@ void js_builtins_init(js_vm *vm) {
 
     uint32_t d = ctor(vm, "Date", N_DATE, 7, vm->date_proto);
     defn(vm, d, "now", N_DATE_NOW, 0);
+    defn(vm, d, "parse", N_DATE_PARSE, 1);
     defn(vm, d, "UTC", N_DATE_UTC, 7);
-    uint32_t dp = vm->date_proto;
-    defn(vm, dp, "getTime", N_DP_GETTIME, 0);
-    defn(vm, dp, "valueOf", N_DP_GETTIME, 0);
-    defn(vm, dp, "toISOString", N_DP_TOISO, 0);
-    defn(vm, dp, "toJSON", N_DP_TOISO, 0);
-    defn(vm, dp, "toString", N_DP_TOSTRING, 0);
-    static const char *const dn[] = { "getFullYear", "getMonth", "getDate", "getDay", "getHours", "getMinutes", "getSeconds", "getMilliseconds" };
-    static const char *const dun[] = { "getUTCFullYear", "getUTCMonth", "getUTCDate", "getUTCDay", "getUTCHours", "getUTCMinutes", "getUTCSeconds", "getUTCMilliseconds" };
-    for (uint32_t i = 0; i < 8; i++) { defn(vm, dp, dn[i], N_DP_GETFULLYEAR + i, 0); defn(vm, dp, dun[i], N_DP_GETFULLYEAR + i, 0); }
+    {
+        /* Date.prototype's methods in V8's order (the UTC getters and the local ones one function each, the zone UTC;
+           toGMTString toUTCString itself) */
+        uint32_t dp = vm->date_proto;
+        static const struct { const char *name; uint32_t id, len; } dm[] = {
+            { "toString", N_DP_TOSTRING, 0 }, { "toDateString", N_DP_TODATESTRING, 0 }, { "toTimeString", N_DP_TOTIMESTRING, 0 },
+            { "toISOString", N_DP_TOISO, 0 }, { "toUTCString", N_DP_TOUTCSTRING, 0 }, { "toGMTString", 0, 0 },
+            { "getDate", N_DP_GETDATE, 0 }, { "setDate", N_DP_SETDATE, 1 }, { "getDay", N_DP_GETDAY, 0 },
+            { "getFullYear", N_DP_GETFULLYEAR, 0 }, { "setFullYear", N_DP_SETFULLYEAR, 3 }, { "getHours", N_DP_GETHOURS, 0 },
+            { "setHours", N_DP_SETHOURS, 4 }, { "getMilliseconds", N_DP_GETMS, 0 }, { "setMilliseconds", N_DP_SETMS, 1 },
+            { "getMinutes", N_DP_GETMINUTES, 0 }, { "setMinutes", N_DP_SETMIN, 3 }, { "getMonth", N_DP_GETMONTH, 0 },
+            { "setMonth", N_DP_SETMONTH, 2 }, { "getSeconds", N_DP_GETSECONDS, 0 }, { "setSeconds", N_DP_SETSEC, 2 },
+            { "getTime", N_DP_GETTIME, 0 }, { "setTime", N_DP_SETTIME, 1 }, { "getTimezoneOffset", N_DP_GETTZO, 0 },
+            { "getUTCDate", N_DP_GETDATE, 0 }, { "setUTCDate", N_DP_SETUTCDATE, 1 }, { "getUTCDay", N_DP_GETDAY, 0 },
+            { "getUTCFullYear", N_DP_GETFULLYEAR, 0 }, { "setUTCFullYear", N_DP_SETUTCFULLYEAR, 3 }, { "getUTCHours", N_DP_GETHOURS, 0 },
+            { "setUTCHours", N_DP_SETUTCHOURS, 4 }, { "getUTCMilliseconds", N_DP_GETMS, 0 }, { "setUTCMilliseconds", N_DP_SETUTCMS, 1 },
+            { "getUTCMinutes", N_DP_GETMINUTES, 0 }, { "setUTCMinutes", N_DP_SETUTCMIN, 3 }, { "getUTCMonth", N_DP_GETMONTH, 0 },
+            { "setUTCMonth", N_DP_SETUTCMONTH, 2 }, { "getUTCSeconds", N_DP_GETSECONDS, 0 }, { "setUTCSeconds", N_DP_SETUTCSEC, 2 },
+            { "valueOf", N_DP_GETTIME, 0 }, { "getYear", N_DP_GETYEAR, 0 }, { "setYear", N_DP_SETYEAR, 1 }, { "toJSON", N_DP_TOJSON, 1 } };
+        for (size_t i = 0; i < sizeof dm / sizeof dm[0]; i++) {
+            if (dm[i].id) defn(vm, dp, dm[i].name, dm[i].id, dm[i].len);
+            else js_define(vm, dp, js_atom_ascii(vm, dm[i].name), js_get(vm, jv_obj(dp), js_atom_ascii(vm, "toUTCString")), JS_SHAPE_HIDDEN);
+        }
+        /* Date.prototype[Symbol.toPrimitive]: not writable, configurable */
+        js_define(vm, dp, JS_SYM_KEY | JSYM_TO_PRIMITIVE, jv_obj(js_native_new(vm, N_DP_TOPRIM, js_str_ascii(vm, "[Symbol.toPrimitive]"), 1)),
+                  JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
+    }
 
     js_re_init(vm, N_RE_FIRST);
     defn(vm, vm->string_proto, "matchAll", N_SP_MATCHALL, 1);

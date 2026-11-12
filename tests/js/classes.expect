@@ -1,0 +1,67 @@
+static this A
+static order 7
+static arrow this C
+static block 2D
+static computed order k1,k2,k3,v1
+instance this G
+static super b
+static new.target undefined
+static field fn name fgh
+private static method 3
+expr name function undefined
+inner survives true
+expr assign TypeError: Assignment to constant variable.
+extends self AB
+heritage tdz ReferenceError: Cannot access 'X' before initialization
+computed key tdz ReferenceError: Cannot access 'Y' before initialization
+static field sees Z
+field sees inner function
+class inner name TypeError: Assignment to constant variable.
+computed field keys once k0k0 11 1
+computed key toString once 1
+symbol key 11
+static block vars numberundefined
+static block let 2
+static block super P
+static block arrow true
+static block throw Error: in block
+static instance 1
+static inherit 2
+static private access 42
+class decl tdz outer ReferenceError
+static method this true
+accessor static g3
+field init order a,b,ctor
+derived field init pre,P,f,post
+static order full a:function,block:function,b
+class name prop custom
+anon class name F
+class toString 22
+eval in static F
+new.target in field undefined
+this in computed key kk
+await as field name 1
+field named constructor SyntaxError: Classes may not have a field named 'constructor'
+static prototype SyntaxError: Classes may not have a static property named 'prototype'
+static prototype method SyntaxError: Classes may not have a static property named 'prototype'
+"class F { \"constructor\" = 1 }" SyntaxError: Classes may not have a field named 'constructor'
+"class F { constructor = 1 }" SyntaxError: Classes may not have a field named 'constructor'
+"class F { static prototype = 1 }" SyntaxError: Classes may not have a static property named 'prototype'
+"class F { static prototype() {} }" SyntaxError: Classes may not have a static property named 'prototype'
+"class F { static get prototype() {} }" SyntaxError: Classes may not have a static property named 'prototype'
+"class F { static \"prototype\" = 1 }" SyntaxError: Classes may not have a static property named 'prototype'
+"class F { static [\"prototype\"] = 1 }" TypeError: Classes may not have a static property named 'prototype'
+"class F { constructor() {} constructor() {} }" SyntaxError: A class may only have one constructor
+"class F { get constructor() {} }" SyntaxError: Class constructor may not be an accessor
+"class F { *constructor() {} }" SyntaxError: Class constructor may not be a generator
+"class F { async constructor() {} }" SyntaxError: Class constructor may not be an async method
+"class F { static constructor() {} }" ok
+"class F { static constructor = 1 }" SyntaxError: Classes may not have a field named 'constructor'
+"class F { #constructor = 1 }" SyntaxError: Classes may not have a field named 'constructor'
+"class F { x = arguments }" SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block
+"class F { static { arguments } }" SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block
+"class F { static { return } }" SyntaxError: Illegal return statement
+"class F { static { super() } }" SyntaxError: 'super' keyword unexpected here
+"class F extends Object { x = super() }" SyntaxError: 'super' keyword unexpected here
+"class F { prototype = 1 }" ok
+"class F { static async *prototype() {} }" SyntaxError: Classes may not have a static property named 'prototype'

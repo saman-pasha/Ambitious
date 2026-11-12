@@ -1151,8 +1151,8 @@ jv js_to_primitive(js_vm *vm, jv v, int hint_string) {
     uint32_t o = jv_idx(v);
     uint32_t k = vm->objs[o].kind;
     if (k == JK_NUMBER || k == JK_BOOLEAN || k == JK_STRING || k == JK_SYMBOL || k == JK_BIGINT) return vm->objs[o].x;
-    /* an object's own Symbol.toPrimitive, given the hint */
-    if (k == JK_PLAIN || k == JK_HOST) {
+    /* the object's Symbol.toPrimitive, given the hint (a Date's: "default" read as "string") */
+    {
         jv ex = js_get(vm, v, JS_SYM_KEY | JSYM_TO_PRIMITIVE);
         if (vm->throwing) return JV_HOLE;
         if (!jv_is_nullish(ex)) {
@@ -1164,8 +1164,12 @@ jv js_to_primitive(js_vm *vm, jv v, int hint_string) {
             return r;
         }
     }
-    if (k == JK_DATE && hint_string < 0) hint_string = 1;
-    uint32_t first = hint_string > 0 ? A_TOSTRING : A_VALUEOF, second = hint_string > 0 ? A_VALUEOF : A_TOSTRING;
+    return js_ordinary_to_primitive(vm, v, hint_string > 0);
+}
+
+/* OrdinaryToPrimitive (ECMA-262 7.1.1.1): toString then valueOf (string_first), or the other way */
+jv js_ordinary_to_primitive(js_vm *vm, jv v, int string_first) {
+    uint32_t first = string_first ? A_TOSTRING : A_VALUEOF, second = string_first ? A_VALUEOF : A_TOSTRING;
     for (int pass = 0; pass < 2; pass++) {
         jv f = js_get(vm, v, pass ? second : first);
         if (vm->throwing) return JV_HOLE;
@@ -2992,6 +2996,23 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             sp--;
             break;
         }
+        case OP_TO_PROPKEY: {
+            SYNC();
+            int kok = 1;
+            uint32_t key = js_prop_key(vm, stack[sp - 1], &kok); RELOAD();
+            if (!kok) break;
+            stack[sp - 1] = js_key_is_sym(key) ? jv_sym(key & ~JS_SYM_KEY) : jv_str(key);
+            goto next;
+        }
+        case OP_RUN_STATIC: {
+            jv fn = stack[--sp];
+            jv c = stack[sp - 1];
+            objs[jv_idx(fn)].c = jv_idx(c);
+            frames[fi].pc = pc;
+            SYNC();
+            js_call(vm, fn, c, 0, 0); RELOAD();
+            break;
+        }
         case OP_SET_PROTO_LIT: {
             jv v = stack[--sp];
             jv o = stack[sp - 1];
@@ -3014,6 +3035,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             int kok = 1;
             uint32_t key = js_prop_key(vm, k, &kok); RELOAD();
             if (!kok) break;
+            /* a class's computed static element named prototype: V8's TypeError */
+            if (key == A_PROTOTYPE && (objs[o].flags & JO_CLASS_CTOR)) {
+                js_throw_msg(vm, vm->type_error_proto, "Classes may not have a static property named 'prototype'"); RELOAD();
+                break;
+            }
             if (jv_is_obj(v) && objs[jv_idx(v)].kind == JK_CLOSURE && (funcs[objs[jv_idx(v)].a].flags & JF_METHOD)) objs[jv_idx(v)].c = o;
             js_define(vm, o, key, v, op == OP_DEF_METHOD_ELEM ? JS_SHAPE_HIDDEN : 0); RELOAD();
             sp -= 2;

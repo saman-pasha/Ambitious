@@ -60,7 +60,7 @@ enum {
     N_IMPORT_CALL      /* a the specifier, b the options (0: none) */
 };
 /* N_PROP's kinds */
-enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
+enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER, PK_BLOCK };
 #define NF_COMPUTED 1      /* a member's or a property's key is an expression */
 #define NF_OPTIONAL 2      /* ?. */
 #define NF_STATIC 4
@@ -93,10 +93,14 @@ typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
 #define FN_FIELDS 0x20000          /* a class's field initializer */
 #define FN_DEFAULT_CTOR 0x40000    /* a class's constructor, not written */
 #define FN_PARAMS 0x80000          /* its parameters being read: no yield or await there */
+#define FN_STATIC 0x100000         /* a class's static initializer: its static fields and blocks in order, the class its this */
+#define FN_BLOCK 0x200000          /* a class's static block: a method of its own, its body the block's statements */
 typedef struct jfn {
     uint32_t params, nparams, body, scope, flags, name, line, src_start, src_end, parent, id, nslots, cls, args_decl, nformal;
 } jfn;
-typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields; } jclass;
+/* a class: its name, heritage, constructor, members; its fields' function and its static initializer (0: none); its
+   declaration's outer binding; its own scope, whose inner binding of its name is immutable */
+typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn; } jclass;
 
 /* the code generator's open contexts, innermost last. A loop's label is 1 when its
    iterator is on the stack (for-in), 2 for a for-of's, whose CX_ITER is just below it:
@@ -1243,7 +1247,16 @@ static uint32_t p_primary(CC) {
             }
             if (a == cc->kw[K_SUPER]) {
                 lx(CCA);
-                if (is_p(cc, P_LPAREN)) { uint32_t n = node(cc, N_SUPER_CALL, line); return p_args(CCA, n); }
+                if (is_p(cc, P_LPAREN)) {
+                    /* super() in a field's initializer, a static block or a method: V8's early error */
+                    uint32_t f = cc->cur_fn;
+                    while (f && (cc->fns[f].flags & JF_ARROW)) f = cc->fns[f].parent;
+                    if (f && ((cc->fns[f].flags & (FN_FIELDS | FN_STATIC | FN_BLOCK)) ||
+                              ((cc->fns[f].flags & JF_METHOD) && !(cc->fns[f].flags & JF_CLASS_CTOR))))
+                        cc_error(cc, line, "'super' keyword unexpected here");
+                    uint32_t n = node(cc, N_SUPER_CALL, line);
+                    return p_args(CCA, n);
+                }
                 uint32_t n = node(cc, N_SUPER_MEMBER, line);
                 if (is_p(cc, P_DOT)) {
                     lx(CCA);
@@ -1621,6 +1634,19 @@ static uint32_t p_expr(CC, int no_in) {
 
 /* ---- classes ---- */
 
+/* a class's fields function (FN_FIELDS) or static initializer (FN_STATIC): a method of the class, its scope under the
+   class's */
+static uint32_t class_init_fn(CC, uint32_t ci, uint32_t kind, uint32_t line, uint32_t start) {
+    uint32_t f = fn_new(cc, 0, JF_METHOD | JF_STRICT | kind, line, start);
+    uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+    cc->cur_fn = f;
+    cc->fns[f].scope = scope_new(cc, SC_FUNC);
+    cc->fns[f].cls = ci + 1;
+    cc->cur_fn = saved_fn;
+    cc->cur_scope = saved_scope;
+    return f;
+}
+
 static uint32_t p_class(CC, int is_decl) {
     uint32_t line = cc->tok.line, cstart = cc->tok.start;
     lx(CCA);
@@ -1632,6 +1658,12 @@ static uint32_t p_class(CC, int is_decl) {
     k.name = name;
     k.line = line;
     if (is_decl && name) k.decl = declare(CCA, name, D_CLASS, line);
+    /* the class's own scope: its name's inner binding (immutable, in its dead zone until the class is made) and its
+       fields' computed keys; the heritage and every element are read in it */
+    uint32_t outer_scope = cc->cur_scope;
+    cc->cur_scope = scope_new(cc, SC_BLOCK);
+    k.scope = cc->cur_scope;
+    if (name) k.inner = declare(CCA, name, D_CONST, line);
     if (is_kw(cc, K_EXTENDS)) { lx(CCA); k.extends = p_call(CCA); }
     push_back(cc->classes, k);
     uint32_t ci = (uint32_t)(len(cc->classes) - 1);
@@ -1639,8 +1671,8 @@ static uint32_t p_class(CC, int is_decl) {
     uint32_t saved_in = cc->in_class;
     cc->in_class = 1;
     size_t mark = len(cc->tmp);
-    uint32_t fields_fn = 0;
-    uint32_t nfields = 0;
+    uint32_t fields_fn = 0, static_fn = 0;
+    uint32_t nfields = 0, nkeys = 0;
     while (!is_p(cc, P_RBRACE) && !cc->err) {
         if (is_p(cc, P_SEMI)) { lx(CCA); continue; }
         uint32_t mline = cc->tok.line, mstart = cc->tok.start;
@@ -1652,7 +1684,29 @@ static uint32_t p_class(CC, int is_decl) {
             lx(CCA);
             if (is_p(cc, P_LPAREN) || is_p(cc, P_ASSIGN) || is_p(cc, P_SEMI) || is_p(cc, P_RBRACE)) { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
             else { flags |= NF_STATIC; mstart = cc->tok.start; }   /* a static method's text begins after static */
-            if (is_p(cc, P_LBRACE)) { cc_error(cc, mline, "static blocks are not supported"); break; }
+            if ((flags & NF_STATIC) && is_p(cc, P_LBRACE)) {
+                /* a static block: a method of its own in the static initializer, its body the block's statements */
+                if (!static_fn) static_fn = class_init_fn(CCA, ci, FN_STATIC, mline, mstart);
+                uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+                cc->cur_fn = static_fn;
+                cc->cur_scope = cc->fns[static_fn].scope;
+                uint32_t bf = fn_new(cc, 0, JF_METHOD | JF_STRICT | FN_BLOCK, mline, mstart);
+                cc->cur_fn = bf;
+                cc->fns[bf].scope = scope_new(cc, SC_FUNC);
+                cc->cur_scope = cc->fns[bf].scope;
+                uint32_t body = node(cc, N_BLOCK, mline);
+                expect_p(CCA, P_LBRACE, "'{'");
+                { uint32_t so, sn; p_statements(CCA, &so, &sn); cc->nodes[body].a = so; cc->nodes[body].b = sn; }
+                expect_p(CCA, P_RBRACE, "'}' after a static block");
+                cc->fns[bf].body = body;
+                cc->cur_fn = saved_fn;
+                cc->cur_scope = saved_scope;
+                cc->nodes[p].op = PK_BLOCK;
+                cc->nodes[p].d = flags;
+                cc->nodes[p].b = bf;
+                push_back(cc->tmp, p);
+                continue;
+            }
         }
         uint32_t kind = PK_METHOD;
         if (is_kw(cc, K_GET) || is_kw(cc, K_SET)) {
@@ -1680,10 +1734,22 @@ static uint32_t p_class(CC, int is_decl) {
         cc->nodes[p].a = key;
         cc->nodes[p].d = flags | (computed ? NF_COMPUTED : 0);
         if (mfl && !is_p(cc, P_LPAREN)) { cc_error(cc, mline, "expected '(' after a generator's or an async method's name"); break; }
+        /* V8's early errors for a class's element names */
+        uint32_t kname = computed ? 0 : cc->nodes[key].s;
+        if ((flags & NF_STATIC) && kname == A_PROTOTYPE) { cc_error(cc, mline, "Classes may not have a static property named 'prototype'"); break; }
+        if (!is_p(cc, P_LPAREN) && (kname == cc->kw[K_CONSTRUCTOR] || kname == js_atom_ascii(vm, "#constructor"))) {
+            cc_error(cc, mline, "Classes may not have a field named 'constructor'");
+            break;
+        }
+        if (!(flags & NF_STATIC) && kname == cc->kw[K_CONSTRUCTOR] && is_p(cc, P_LPAREN)) {
+            if (kind != PK_METHOD) { cc_error(cc, mline, "Class constructor may not be an accessor"); break; }
+            if (mfl & JF_ASYNC) { cc_error(cc, mline, "Class constructor may not be an async method"); break; }
+            if (mfl & JF_GENERATOR) { cc_error(cc, mline, "Class constructor may not be a generator"); break; }
+            if (cc->classes[ci].ctor) { cc_error(cc, mline, "A class may only have one constructor"); break; }
+        }
         if (is_p(cc, P_LPAREN)) {
             int ctor = !computed && !(flags & NF_STATIC) && kind == PK_METHOD && cc->nodes[key].s == cc->kw[K_CONSTRUCTOR];
             uint32_t ff = JF_METHOD | JF_STRICT | (kind == PK_GET ? JF_GETTER : 0) | mfl;
-            if (ctor && mfl) { cc_error(cc, mline, "a class's constructor cannot be a generator or async"); break; }
             if (ctor) ff = JF_CLASS_CTOR | JF_STRICT | (cc->classes[ci].extends ? JF_DERIVED : 0);
             uint32_t fname = computed ? 0 : kind == PK_GET || kind == PK_SET ? accessor_name(vm, kind, cc->nodes[key].s) : cc->nodes[key].s;
             uint32_t f = p_function(CCA, fname, ff, 0, mline, mstart);
@@ -1691,32 +1757,37 @@ static uint32_t p_class(CC, int is_decl) {
             cc->nodes[p].op = (uint16_t)kind;
             cc->nodes[p].b = f;
         } else {
-            /* a field: its initializer is a function of its own, run on each new instance */
+            /* a field: its initializer is read in a function of its own, the instances' fields function (run on each
+               new instance) or the static initializer (run once, the class its this). A computed key is read when the
+               class is made, into a hidden binding of the class's scope: c its store, s its read in that function */
             cc->nodes[p].op = PK_FIELD;
-            if (!(flags & NF_STATIC)) {
-                if (!fields_fn) {
-                    fields_fn = fn_new(cc, 0, JF_METHOD | JF_STRICT | FN_FIELDS, mline, mstart);
-                    uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
-                    cc->cur_fn = fields_fn;
-                    cc->fns[fields_fn].scope = scope_new(cc, SC_FUNC);
-                    cc->fns[fields_fn].cls = ci + 1;
-                    cc->cur_fn = saved_fn;
-                    cc->cur_scope = saved_scope;
-                }
-                if (is_p(cc, P_ASSIGN)) {
-                    lx(CCA);
-                    uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
-                    cc->cur_fn = fields_fn;
-                    cc->cur_scope = cc->fns[fields_fn].scope;
-                    cc->nodes[p].b = p_assign(CCA, 0);
-                    cc->cur_fn = saved_fn;
-                    cc->cur_scope = saved_scope;
-                }
+            uint32_t ff;
+            if (flags & NF_STATIC) {
+                if (!static_fn) static_fn = class_init_fn(CCA, ci, FN_STATIC, mline, mstart);
+                ff = static_fn;
+            } else {
+                if (!fields_fn) fields_fn = class_init_fn(CCA, ci, FN_FIELDS, mline, mstart);
+                ff = fields_fn;
                 nfields++;
-            } else if (is_p(cc, P_ASSIGN)) {
+            }
+            uint32_t hidden = 0;
+            if (computed) {
+                char hn[48];
+                snprintf(hn, sizeof hn, " class %u key %u", ci, nkeys++);
+                hidden = js_atom_ascii(vm, hn);
+                declare(CCA, hidden, D_LET, mline);
+                cc->nodes[p].c = ident_node(CCA, hidden, mline);
+            }
+            uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+            cc->cur_fn = ff;
+            cc->cur_scope = cc->fns[ff].scope;
+            if (computed) cc->nodes[p].s = ident_node(CCA, hidden, mline);
+            if (is_p(cc, P_ASSIGN)) {
                 lx(CCA);
                 cc->nodes[p].b = p_assign(CCA, 0);
             }
+            cc->cur_fn = saved_fn;
+            cc->cur_scope = saved_scope;
             semi(CCA);
         }
         push_back(cc->tmp, p);
@@ -1726,6 +1797,7 @@ static uint32_t p_class(CC, int is_decl) {
     cc->in_class = saved_in;
     { jlist tl_ = list_take(cc, mark); cc->classes[ci].members = tl_.off; cc->classes[ci].nmembers = tl_.count; }
     cc->classes[ci].fields_fn = fields_fn;
+    cc->classes[ci].static_fn = static_fn;
     cc->classes[ci].nfields = nfields;
     if (!cc->classes[ci].ctor) {
         /* the constructor not written: an empty one, or super(...args) */
@@ -1741,6 +1813,7 @@ static uint32_t p_class(CC, int is_decl) {
     /* the constructor's text is the class's own, as toString gives it */
     cc->fns[cc->classes[ci].ctor].src_start = cstart;
     cc->fns[cc->classes[ci].ctor].src_end = cend;
+    cc->cur_scope = outer_scope;
     uint32_t n = node(cc, is_decl ? N_CLASSDECL : N_CLASS, line);
     cc->nodes[n].a = ci;
     return n;
@@ -2112,6 +2185,7 @@ static uint32_t p_stmt_in(CC) {
             return n;
         }
         if (a == cc->kw[K_RETURN]) {
+            if (cc->fns[cc->cur_fn].flags & FN_BLOCK) cc_error(cc, line, "Illegal return statement");
             lx(CCA);
             uint32_t n = node(cc, N_RETURN, line);
             if (!is_p(cc, P_SEMI) && !is_p(cc, P_RBRACE) && cc->tok.type != T_EOF && !cc->tok.nl) cc->nodes[n].a = p_expr(CCA, 0);
@@ -2270,7 +2344,11 @@ static void resolve(js_cc *cc) {
             if (found) break;
             if (cc->scopes[s].kind == SC_FUNC && ref.atom == cc->kw[K_ARGUMENTS]) {
                 uint32_t f = cc->scopes[s].fn;
-                if (!(cc->fns[f].flags & (JF_ARROW | FN_FIELDS))) { found = args_decl(cc, f); break; }
+                if (cc->fns[f].flags & (FN_FIELDS | FN_STATIC | FN_BLOCK)) {
+                    cc_error(cc, cc->fns[f].line, "'arguments' is not allowed in class field initializer or static initialization block");
+                    break;
+                }
+                if (!(cc->fns[f].flags & JF_ARROW)) { found = args_decl(cc, f); break; }
             }
             if (cc->scopes[s].kind == SC_SCRIPT || s == 0) break;
             s = cc->scopes[s].parent;
@@ -2976,8 +3054,12 @@ static void gen_object(CC, uint32_t n) {
     }
 }
 
+/* ClassDefinitionEvaluation: in the class's scope, the heritage, then each element in order (a method defined, a
+   field's computed key read and kept), the inner binding of the name, the fields function, and last the static
+   initializer, run with the class its this */
 static void gen_class(CC, uint32_t ci) {
     jclass k = cc->classes[ci];
+    gen_block_enter(CCA, k.scope);
     if (k.extends) gen_expr(CCA, k.extends);
     else emit(vm, OP_HOLE);
     emit(vm, OP_CLASS);
@@ -2987,15 +3069,17 @@ static void gen_class(CC, uint32_t ci) {
         uint32_t p = cc->lists[k.members + i];
         jnode pr = cc->nodes[p];
         int is_static = pr.d & NF_STATIC, computed = pr.d & NF_COMPUTED;
-        if (pr.op == PK_FIELD && !is_static) continue;
-        if (is_static) emit(vm, OP_SWAP);
+        if (pr.op == PK_BLOCK) continue;
         if (pr.op == PK_FIELD) {
-            if (computed) gen_expr(CCA, pr.a);
-            if (pr.b) gen_expr(CCA, pr.b);
-            else emit(vm, OP_UNDEF);
-            if (computed) emit(vm, OP_DEF_ELEM);
-            else { emit(vm, OP_DEF_PROP); emit32(vm, cc->nodes[pr.a].s); }
-        } else {
+            if (computed) {
+                gen_expr(CCA, pr.a);
+                emit(vm, OP_TO_PROPKEY);
+                gen_ident_put(CCA, pr.c, 0, 1);
+            }
+            continue;
+        }
+        if (is_static) emit(vm, OP_SWAP);
+        {
             if (computed) gen_expr(CCA, pr.a);
             gen_expr(CCA, pr.b);
             uint32_t op;
@@ -3008,11 +3092,21 @@ static void gen_class(CC, uint32_t ci) {
         if (is_static) emit(vm, OP_SWAP);
     }
     emit(vm, OP_POP);
+    if (k.inner) {
+        emit(vm, OP_DUP);
+        gen_put(CCA, k.name, k.inner, k.scope, 0, 1);
+    }
     if (k.fields_fn) {
         emit(vm, OP_CLOSURE);
         emit32(vm, cc->fns[k.fields_fn].id);
         emit(vm, OP_SET_FIELDS);
     }
+    if (k.static_fn) {
+        emit(vm, OP_CLOSURE);
+        emit32(vm, cc->fns[k.static_fn].id);
+        emit(vm, OP_RUN_STATIC);
+    }
+    gen_block_leave(CCA, k.scope);
 }
 
 /* how V8 names the value of the pattern gen_pattern begins next, in its errors: okind for
@@ -4020,13 +4114,25 @@ static void gen_function(CC, uint32_t f) {
         if (F.flags & JF_GENERATOR) emit(vm, OP_GEN_START);
         if ((F.flags & JF_CLASS_CTOR) && !(F.flags & JF_DERIVED)) emit(vm, OP_INIT_FIELDS);
         if (F.flags & FN_EXPR) { gen_expr(CCA, F.body); emit(vm, OP_RETURN); }
-        else if (F.flags & FN_FIELDS) {
+        else if (F.flags & (FN_FIELDS | FN_STATIC)) {
+            /* the instances' fields (FN_FIELDS) or the static fields and blocks (FN_STATIC), in order, each defined on
+               this: a computed key the one the class read, an anonymous function named by a written key */
             jclass k = cc->classes[F.cls - 1];
+            int want_static = (F.flags & FN_STATIC) != 0;
             for (uint32_t i = 0; i < k.nmembers; i++) {
                 jnode pr = cc->nodes[cc->lists[k.members + i]];
-                if (pr.op != PK_FIELD || (pr.d & NF_STATIC)) continue;
+                if ((pr.op != PK_FIELD && pr.op != PK_BLOCK) || ((pr.d & NF_STATIC) != 0) != want_static) continue;
+                if (pr.op == PK_BLOCK) {
+                    emit(vm, OP_THIS);
+                    emit(vm, OP_CLOSURE);
+                    emit32(vm, cc->fns[pr.b].id);
+                    emit(vm, OP_RUN_STATIC);
+                    emit(vm, OP_POP);
+                    continue;
+                }
                 emit(vm, OP_THIS);
-                if (pr.d & NF_COMPUTED) gen_expr(CCA, pr.a);
+                if (pr.d & NF_COMPUTED) gen_ident_get(CCA, pr.s);
+                else if (pr.b) name_fn(vm, cc, pr.b, cc->nodes[pr.a].s);
                 if (pr.b) gen_expr(CCA, pr.b);
                 else emit(vm, OP_UNDEF);
                 if (pr.d & NF_COMPUTED) emit(vm, OP_DEF_ELEM);

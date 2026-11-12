@@ -770,6 +770,7 @@ int js_set_throw(js_vm *vm, jv obj, jv key, jv v);
 int js_delete_throw(js_vm *vm, jv obj, jv key);
 int js_create_data_throw(js_vm *vm, jv obj, jv key, jv v);
 int js_create_data(js_vm *vm, jv obj, jv key, jv v);
+jv js_ordinary_to_primitive(js_vm *vm, jv v, int string_first);       /* OrdinaryToPrimitive: toString first, or valueOf */
 int js_set_proto_of(js_vm *vm, uint32_t o, jv np);                     /* [[SetPrototypeOf]]: 1, 0 refused, -1 thrown */                 /* CreateDataProperty: 1, 0 refused, -1 thrown */
 /* an array's length set as [[Set]] sets it (elements past it deleted, a non-configurable
    one stopping it): 1, 2 refused (vm->refused says why), 0 thrown */
@@ -838,6 +839,9 @@ enum {
     OP_SPREAD,                                    /* arr iterable -> arr */
     OP_DEF_PROP,                                  /* u32 atom: obj v -> obj */
     OP_SET_PROTO_LIT,                             /* obj v -> obj: a literal's __proto__: v, its prototype when v is an object or null */
+    OP_TO_PROPKEY,                                /* v -> key: ToPropertyKey (a class's computed field key, read when the class is made) */
+    OP_RUN_STATIC,                                /* c fn -> c: fn called with c its this and its home object (a class's static
+                                                     initializer, a static block) */
     OP_DEF_ELEM,                                  /* obj key v -> obj */
     OP_DEF_GET, OP_DEF_SET,                       /* u32 atom: obj fn -> obj */
     OP_DEF_GET_ELEM, OP_DEF_SET_ELEM,             /* obj key fn -> obj */
