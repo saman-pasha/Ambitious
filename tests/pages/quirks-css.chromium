@@ -107,10 +107,16 @@ i3 box-sizing border-box
 i4 box-sizing border-box
 g1 margin-right 3px
 g1 margin-left 0px
+g1 float left
+g1 vertical-align top
 g2 margin-left 3px
 g2 margin-right 0px
+g2 float right
+g2 vertical-align top
 g3 margin-left 0px
 g3 margin-right 0px
+g3 float none
 mode --mode BackCompat
 mode --by-class 1
 mode --by-selector found
+mode --client 800x600/800

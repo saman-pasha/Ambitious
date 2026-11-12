@@ -1174,14 +1174,16 @@ static double sh_offset(js_vm *vm, uint32_t x, uint32_t which) {
     return sh_round((which == 0 ? r[0] : r[1]) - base);
 }
 /* clientLeft, clientTop, clientWidth, clientHeight (which 0 to 3): the borders' widths and
-   the padding box's size; the viewport's for the root element; 0 for an inline element */
+   the padding box's size; the viewport's for the root element, and in quirks mode for the
+   body element instead (CSSOM View 6, as Chromium has it); 0 for an inline element */
 static double sh_client(js_vm *vm, uint32_t x, uint32_t which) {
     struct js_host *h = vm->host;
     const dom_document *d = h->d;
     sh_view(vm);
     double bb[4], br[4];
     if (!script_view_border_box(h, x, bb) || !script_view_borders(h, x, br)) return 0;
-    if (x == sh_elem_child(d, 1, 0) && which >= 2) return which == 2 ? h->view_w : h->view_h;
+    uint32_t vx = d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS ? sh_doc_child(d, "body") : sh_elem_child(d, 1, 0);
+    if (x == vx && which >= 2) return which == 2 ? h->view_w : h->view_h;
     if (which == 0) return sh_round(br[3]);
     if (which == 1) return sh_round(br[0]);
     if (which == 2) return sh_snap(bb[0] + br[3], bb[2] - br[1] - br[3]);

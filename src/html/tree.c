@@ -33,7 +33,11 @@
    flag, a name other than html, the public and system identifiers the standard lists) or
    there is none; limited-quirks mode for XHTML 1.0's transitional and frameset identifiers
    and HTML 4.01's with a system identifier; kept on the document (dom_set_mode). A fragment
-   is parsed in quirks mode when its document is.
+   is parsed in quirks mode when its document is. Not done as Chromium does it: an empty
+   system identifier is one that is there, as the standard has it, where Blink takes it for a
+   missing one (HTML 4.01's transitional and frameset identifiers with it are quirks mode in
+   Chromium, limited-quirks mode here); and no document is an iframe's srcdoc document (no
+   iframes are read).
 
    The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
    run): noscript's content is then raw text. Everything else follows the standard's

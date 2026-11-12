@@ -78,7 +78,8 @@
    hashless colours and unitless lengths of an author sheet or a style attribute for the
    properties that take them (css_quirky), class and id selectors without ASCII case,
    and :hover or :active alone holding of links alone. Limited-quirks mode changes
-   nothing here (its quirk is layout's).
+   nothing here (its quirk is layout's). Not read: the unitless lengths of
+   background-position, border-spacing and clip.
 
    Speed (PLAN.md 11): the user agent's sheet is read once a process
    (css_ua_load); names and keywords are found by hash; elements under one

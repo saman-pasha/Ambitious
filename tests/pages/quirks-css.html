@@ -3,7 +3,9 @@
      computed values (tests/integ/cssref.sh): hashless colours and unitless lengths for the
      properties that take them (and not for those that do not, or through other shorthands),
      the quirks sheet's tables, fields, forms and floated images, class and id selectors
-     without ASCII case (getElementsByClassName and querySelector's too), and document.compatMode. -->
+     without ASCII case (getElementsByClassName and querySelector's too), document.compatMode,
+     the body's clientWidth and clientHeight the viewport's, and an image's align a float (a
+     presentational hint in every mode). -->
 <style>
 body { font: 16px sans-serif; color: rgb(0, 0, 160); }
 /* hashless colours: identifiers of 3 or 6 hex digits, integers, integers with a unit */
@@ -104,13 +106,15 @@ body { font: 16px sans-serif; color: rgb(0, 0, 160); }
 <input id=i1 data-check="box-sizing"><input id=i2 type=image src="logo.png" data-check="box-sizing"><textarea id=i3 data-check="box-sizing"></textarea>
 <input id=i4 type=checkbox data-check="box-sizing">
 </form>
-<img id=g1 src="logo.png" align=left data-check="margin-right margin-left"><img id=g2 src="logo.png" align=RIGHT data-check="margin-left margin-right">
-<img id=g3 src="logo.png" align=middle data-check="margin-left margin-right">
-<p id=mode data-check="--mode --by-class --by-selector">compatMode</p>
+<img id=g1 src="logo.png" align=left data-check="margin-right margin-left float vertical-align"><img id=g2 src="logo.png" align=RIGHT data-check="margin-left margin-right float vertical-align">
+<img id=g3 src="logo.png" align=middle data-check="margin-left margin-right float">
+<p id=mode data-check="--mode --by-class --by-selector --client">compatMode</p>
 <script>
 /* a quirks-mode document's classes and ids without case in its scripts too */
 var root = document.documentElement.style;
 root.setProperty('--by-class', String(document.getElementsByClassName('SEL').length));
 root.setProperty('--by-selector', document.querySelector('#SEL2.SeL') ? 'found' : 'none');
+/* the body's client size the viewport's, the root element's its own (CSSOM View's quirk) */
+root.setProperty('--client', document.body.clientWidth + 'x' + document.body.clientHeight + '/' + document.documentElement.clientWidth);
 </script>
 </body></html>

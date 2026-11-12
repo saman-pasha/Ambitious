@@ -150,6 +150,11 @@
    auto height up to them; a cell's height its border box's; a nowrap cell of a length's
    width at least that wide; no wrap around an img in a cell's min-content; an empty
    table's height none; a broken image of a declared size a box of it, its alt text in it.
+   Not done: a percentage height taken through an inline-block, a float met in a line or an
+   inline image (it resolves against nothing there); a list item's line of its own for its
+   marker when its first child is a block (Chromium's, 4px high); a body that clips its
+   overflow or has a min-height keeps its last child's bottom margin in it, where Chromium's
+   lets it through, and fills that much more of the viewport.
 
    What is not done: writing modes other than horizontal-tb. Coordinates are
    relative to the parent box's content box while the tree is laid out, and made

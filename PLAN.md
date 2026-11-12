@@ -845,7 +845,8 @@ be built side by side and merged without touching each other's.
   sizes, scenes, hostile documents; valgrind clean).
 - **12r Quirks mode** (`src/html/tree.c`, `contracts/dom.pl`; the quirks in
   `src/css/css.c` and `src/layout/layout.c`, a broken image's in
-  `src/paint/paint.c`; `document.compatMode` in `src/script/input.c`):
+  `src/paint/paint.c`; `document.compatMode` in `src/script/input.c`, the
+  body's client size in `src/script/script.c`):
   - the document's mode decided by the tree builder as HTML 13.2.6.4.1 has it
     (the public and system identifier lists; limited-quirks for XHTML 1.0's
     transitional and frameset DOCTYPEs and HTML 4.01's with a system
@@ -872,7 +873,8 @@ be built side by side and merged without touching each other's.
     that wide; no wrap around an img in an auto-width cell's min-content; an
     empty table's height none; a broken image of a declared size a box of it
     (one dimension the other's too), its alt text laid out and drawn in it as
-    Blink's fallback has it;
+    Blink's fallback has it; the body's `clientWidth` and `clientHeight` the
+    viewport's, the root element's its own (CSSOM View's quirk);
   - in every mode, as the quirks' pages need them: a cell's `nowrap` and an
     image's `align` left or right (a float) read as presentational hints.
 
@@ -880,7 +882,7 @@ be built side by side and merged without touching each other's.
   `tools/bench/doctypes.js`; the four whose system identifier is empty kept as
   the standard has them); `tests/pages/quirks-*.html`, quirks-mode pages and one
   limited-quirks page, held to Chromium's boxes (337 of 337), regions (35 of 35)
-  and computed values (150 of 150, `:hover` measured with the mouse over the
+  and computed values (156 of 156, `:hover` measured with the mouse over the
   page: `tests/pages/NAME.hover`); the mode's facts (`tests/integ/quirks.sh`);
   every standards-mode page unmoved.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
