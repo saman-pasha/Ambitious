@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Values the host alone holds</title>
+</head>
+<body>
+<p id="target">The page's values, each held by the browser alone and used again after a timer.</p>
+<script>
+/* tests/pages/gc-host.html -- values no script holds but the host, each used again in a
+   later task, after a moment the collector may run at (src/js/gc.c; tests/integ/script-gc.sh
+   runs it at every one): an observer, its records' interface's global gone; a custom
+   element class, its callback taken off its prototype after define(); a class of a
+   constructor alone; two whenDefined promises for one name; a CustomEvent's detail; a
+   Response's own Headers; Headers and FormData lists dropped with their entries, then new
+   ones; an XMLHttpRequest only its listener names, ProgressEvent's global gone; a history
+   state. */
+const log = (...a) => console.log(a.join(' '));
+const later = (ms) => new Promise((r) => setTimeout(r, ms));
+const target = document.getElementById('target');
+delete window.MutationRecord;
+delete window.ProgressEvent;
+(async () => {
+  new MutationObserver((recs, obs) => log('observer:', recs.length, recs[0].constructor.name, obs instanceof MutationObserver))
+    .observe(target, { attributes: true });
+  customElements.define('gc-anon', class extends HTMLElement { connectedCallback() { log('connected:', this.localName); } });
+  delete customElements.get('gc-anon').prototype.connectedCallback;
+  customElements.define('gc-plain', class extends HTMLElement { constructor() { super(); log('constructed:', this.localName); } });
+  customElements.whenDefined('gc-later').then(() => log('defined: one'));
+  customElements.whenDefined('gc-later').then(() => log('defined: two'));
+  const ev = new CustomEvent('gc-detail', { detail: { n: 41 } });
+  target.addEventListener('gc-detail', (e) => log('detail:', e.detail.n + 1));
+  const resp = new Response(null);
+  for (let i = 0; i < 100; i++) new Headers({ ['x-old-' + i]: String(i) });
+  for (let i = 0; i < 100; i++) new FormData().append('old' + i, 'v');
+  await later(0);
+  target.setAttribute('data-step', '1');
+  await later(0);
+  document.body.appendChild(document.createElement('gc-anon'));
+  document.createElement('gc-plain');
+  customElements.define('gc-later', class extends HTMLElement {});
+  await later(0);
+  target.dispatchEvent(ev);
+  resp.headers.set('x-own', '1');
+  log('own headers:', [...resp.headers.keys()].join(','));
+  let stray = 0;
+  for (let i = 0; i < 100; i++) {
+    for (const k of new Headers().keys()) stray++;
+    for (const k of new FormData().keys()) stray++;
+  }
+  log('new lists empty:', stray === 0);
+  {
+    const x = new XMLHttpRequest();
+    x.open('GET', 'data:text/plain,xhr');
+    x.addEventListener('load', function (e) { log('xhr:', this.status, this.responseText, e.constructor.name); });
+    x.send();
+  }
+  await later(50);
+  history.pushState({ v: 7 }, '');
+  await later(0);
+  log('state:', history.state.v);
+})();
+</script>
+</body>
+</html>

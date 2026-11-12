@@ -1,0 +1,26 @@
+-- each gate of the pages' scripts, a collection at every moment between tasks, against its .expect:
+script: as its .expect
+script-custom: as its .expect
+script-input: as its .expect
+script-modules: as its .expect
+script-net: as its .expect
+script-observe: as its .expect
+script-view: as its .expect
+script-window: as its .expect
+foreign: as its .expect
+-- the values the host alone holds (gc-host.html), against Chromium's console:
+the same 10 lines
+-- and with a collection at every moment between tasks:
+the same 10 lines
+-- the collections that made, one at each script's end, each task's and each timer's:
+9
+-- and without the stress, none (the page makes less than the 32 MB a first collection waits for):
+0
+-- the served pages with the stress, under valgrind where it is installed: each run's exit status:
+fetch: exit 0
+window: exit 0
+modules: exit 0
+modules-cross: exit 0
+form, sent: exit 0
+form, multipart: exit 0
+form, formdata: exit 0

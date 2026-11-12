@@ -421,7 +421,7 @@ start (`src/js/`):
   heap cells.
 - **Memory** is the page's arena: freed with the page, under a cap. A script
   past the cap ends with a RangeError. A collector is the first follow-on,
-  for pages that run long.
+  for pages that run long (Phase 12g's, which runs between a page's tasks).
 - **Determinism.** Time is virtual: timers fire in order of their virtual due
   times, and `Date.now()` and `performance.now()` read the virtual clock.
   Every script, handler and timer runs under a step budget.
@@ -767,7 +767,11 @@ be built side by side and merged without touching each other's.
     would: CORS, the strict MIME check, its console lines), held to
     Chromium's consoles (`tests/integ/script-modules.sh`);
   - a garbage collector, run at task boundaries, where no native holds an
-    object unrooted.
+    object unrooted: for `ambitious js`, and for pages, the script host's
+    values among its roots (each unit's, `src/script/script.h`), every
+    scripted page's console and facts held unchanged with a collection at
+    every boundary, and memcheck clean so (`tests/integ/script-gc.sh`,
+    `tests/exec/script_gc`).
 - **12h Scripts** (`src/script/`):
   - live node lists;
   - `getComputedStyle` and `getBoundingClientRect` over a style and layout

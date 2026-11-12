@@ -1002,8 +1002,10 @@ static void sh_timer_rec(js_vm *vm, size_t i) {
 }
 /* a host task (a network response, an inserted script's run) after delay ms of virtual
    time, on the timers' queue: a timer of no script's, which no clearTimeout reaches, its
-   native the host's task runner (H_TASK) */
-void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg) {
+   native the host's task runner (H_TASK), its arguments the task's kind and its argument:
+   a number (a record's place), or an object, which the arguments keep for the task (the
+   collector reaches a live timer's) */
+static void sh_task_value(js_vm *vm, double delay, uint32_t kind, jv arg) {
     struct js_host *h = vm->host;
     js_timer t;
     memset(&t, 0, sizeof t);
@@ -1013,7 +1015,7 @@ void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg) {
     t.fn = jv_obj(h->task_fn);
     uint32_t a = js_array_new(vm, 0);
     js_array_push(vm, a, jv_num(kind));
-    js_array_push(vm, a, jv_num(arg));
+    js_array_push(vm, a, arg);
     t.args = a;
     t.nargs = 2;
     t.live = 1;
@@ -1022,6 +1024,8 @@ void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg) {
     t.rec = SH_TASK_REC;
     push_back(vm->timers, t);
 }
+void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg) { sh_task_value(vm, delay, kind, jv_num(arg)); }
+void sh_task_obj(js_vm *vm, double delay, uint32_t kind, uint32_t o) { sh_task_value(vm, delay, kind, jv_obj(o)); }
 /* the document's URL: the loader's for the page, then as its fragment and history change
    it (empty with no page) */
 void sh_page_url(js_vm *vm, char *out, size_t cap) {
@@ -1083,6 +1087,11 @@ uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
     }
     return ran;
 }
+/* the end of one of the page's tasks before its timers' (a script of the parse, a module
+   script, DOMContentLoaded's listeners, a waiting script): no C code holds an engine value
+   then outside the VM's tables and the host's roots, so the collector may run, as before
+   each timer (js_gc_maybe: when the heap has doubled since its last collection) */
+static void sh_between(js_vm *vm) { js_gc_maybe(vm); }
 
 /* ---- the host's hooks ---- */
 
@@ -2047,9 +2056,9 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         script_navigate(vm, id == H_LOC_RELOAD ? SCRIPT_NAV_CAUSE_RELOAD : SCRIPT_NAV_CAUSE_LOCATION, data(u), len(u));
         return JV_UNDEF;
     }
-    /* the host's tasks, from the timers' queue */
+    /* the host's tasks, from the timers' queue: an argument a number, or an object (sh_task_obj) */
     if (id == H_TASK) {
-        uint32_t kind = (uint32_t)js_to_number(vm, a0), arg = (uint32_t)js_to_number(vm, a1);
+        uint32_t kind = (uint32_t)js_to_number(vm, a0), arg = jv_is_obj(a1) ? jv_idx(a1) : (uint32_t)js_to_number(vm, a1);
         if (kind >= SH_TASK_FETCH && kind <= SH_TASK_NOTE) script_fetch_task(vm, kind, arg);
         else if (kind == SH_TASK_SCRIPT) sh_run_pending(vm, arg);
         else if (kind == SH_TASK_HASH || kind == SH_TASK_NAV) script_input_task(vm, kind, arg);
@@ -2592,15 +2601,51 @@ void sh_location_set(js_vm *vm, const char *url) {
     if (h->location) sh_location_fill(vm, h->location, url);
 }
 
+/* ---- the collector's roots (vm->host_roots, src/js/gc.c) ---- */
+
+/* each unit's: the engine's values its part of the host holds (script.h says, field by
+   field, which are roots) */
+void script_fetch_roots(js_vm *vm, vector<jv> *out);
+void script_input_roots(js_vm *vm, vector<jv> *out);
+void script_observe_roots(js_vm *vm, vector<jv> *out);
+void script_custom_roots(js_vm *vm, vector<jv> *out);
+void script_window_roots(js_vm *vm, vector<jv> *out);
+/* every engine value the page's host holds outside the VM's tables, which the collector
+   marks as roots: this unit's (the prototypes, the live collections' objects, the task
+   runner, location; and an object a listener of the VM's listens on, which the host fires
+   its events at: an XMLHttpRequest), then each other unit's. The VM's own tables (a node's
+   wrapper, the host's names, the listeners' functions, the timers') are the collector's */
+static void sh_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    if (!h) return;
+    for (uint32_t i = 0; i < SCRIPT_PROTOS; i++) if (h->protos[i]) push_back(*out, jv_obj(h->protos[i]));
+    for (size_t i = 0; i < len(h->lists); i++) if (h->lists[i].obj) push_back(*out, jv_obj(h->lists[i].obj));
+    if (h->task_fn) push_back(*out, jv_obj(h->task_fn));
+    if (h->location) push_back(*out, jv_obj(h->location));
+    for (size_t i = 0; i < len(vm->listeners); i++) {
+        uint32_t t = vm->listeners[i].target;
+        if (vm->listeners[i].live && t != JS_WINDOW && (t & SH_OBJECT_TARGET)) push_back(*out, jv_obj(t & ~SH_OBJECT_TARGET));
+    }
+    script_fetch_roots(vm, out);
+    script_input_roots(vm, out);
+    script_observe_roots(vm, out);
+    script_custom_roots(vm, out);
+    script_window_roots(vm, out);
+}
+
 /* the VM made for the page: the host's names, its prototypes, window and document */
 static int sh_load_module(js_vm *vm, uint32_t spec, uint32_t referrer, uint32_t *url, uint32_t *source);
 static void sh_ready(js_vm *vm) {
     struct js_host *h = vm->host;
     if (h->ready) return;
     /* the VM was zeroed with its host set (SCRIPT_HOST): made ready, the host kept; its
-       modules fetched as a page's are (never the engine's files) */
+       modules fetched as a page's are (never the engine's files); the collector run
+       between the page's tasks, when its heap has doubled (js_gc_maybe), the host's values
+       among its roots */
     js_setup(vm);
     vm->load_module = sh_load_module;
+    vm->host_roots = sh_roots;
+    vm->gc_enabled = 1;
     resize(vm->hatoms, HA_N, 0u);
     for (uint32_t i = 0; i < HA_N; i++) {
         uint32_t a = js_atom_ascii(vm, sh_names[i]);
@@ -3507,6 +3552,7 @@ static void sh_run_pending(js_vm *vm, uint32_t i) {
 /* the waiting scripts run, in their order, before the load event: it waits for them */
 static void sh_run_pending_all(js_vm *vm) {
     for (int guard = 0; guard < 100000 && vm->throwing != 2; guard++) {
+        if (guard) sh_between(vm);
         int64_t best = -1;
         for (size_t i = 0; i < len(vm->timers); i++) {
             js_timer t = vm->timers[i];
@@ -3817,6 +3863,7 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
         vm->throwing = 0;
         sh_run_written(vm);
         ran++;
+        sh_between(vm);
     }
     h->parsing = 0;
     vm->throwing = 0;
@@ -3831,6 +3878,7 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
         sh_module_run(vm, amods[i], amods[i + 1], m, data(err), len(err));
         vm->throwing = 0;
         ran++;
+        sh_between(vm);
     }
     vector<uint32_t> dm, deoff, delen;
     vector<char> derr;
@@ -3854,9 +3902,11 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     for (size_t i = 0, k = 0; i + 1 < len(deferred) && vm->throwing != 2; i += 2, k++) {
         if (!d->node[deferred[i]].live) continue;
         if (dmod[k]) {
+            /* (a module's number outlives a collection: the engine keeps every module) */
             sh_module_run(vm, deferred[i], deferred[i + 1], dm[k], data(derr) + deoff[k], delen[k]);
             vm->throwing = 0;
             ran++;
+            sh_between(vm);
             continue;
         }
         h->cur_script = deferred[i];
@@ -3864,10 +3914,12 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
         h->cur_script = 0;
         vm->throwing = 0;
         ran++;
+        sh_between(vm);
     }
     h->phase = SCRIPT_PHASE_EVENT;
     sh_fire(vm, 1, "DOMContentLoaded", EV_BUBBLES);
     vm->throwing = 0;
+    sh_between(vm);
     sh_run_pending_all(vm);
     h->phase = SCRIPT_PHASE_EVENT;
     h->ready = 3;

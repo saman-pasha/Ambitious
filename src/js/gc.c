@@ -1,17 +1,21 @@
 /* src/js/gc.c -- the collector: mark and sweep over the engine's heap, at a moment no
-   C code holds a value outside the VM's own tables (between tasks: a script's end, a
-   timer's, a listener's).
+   C code holds a value outside the VM's own tables and the host's roots (between tasks:
+   a script's end, a timer's, a listener's). It runs for `ambitious js` and for a page
+   (src/script/script.c turns it on), when the heap has doubled since the last
+   collection (32 MB at least); AMB_GC_STRESS=1 makes it run at every such moment.
 
    What is live is what the roots reach: the global object and the prototypes, the
    value stack and the frames on it, the code's constants, the jobs, timers, listeners
    and console messages, the regular expressions, the modules, the host's wrappers, the
-   symbols, every atom, and every prototype a shape names (shapes are never freed, and
-   theirs stay with them). An object reaches its prototype, its properties and what its
-   kind holds (an array's elements, a closure's environment, home and this, a bound
-   function's arguments, a promise's result and reactions, a generator's saved frame,
-   ...). A WeakMap's or a WeakSet's entry is live only while its key is (its value then
-   marked: ephemerons, to a fixpoint); a WeakRef's target is cleared once nothing else
-   reaches it.
+   symbols, every atom, every prototype a shape names (shapes are never freed, and
+   theirs stay with them), and every value the host says it holds (vm->host_roots: a
+   page's prototypes, its records' objects, its tasks' functions ...; each of the page's
+   units names its own, src/script/). An object reaches its prototype, its properties and
+   what its kind holds (an array's elements, a closure's environment, home and this, a
+   bound function's arguments, a promise's result and reactions, a generator's saved
+   frame, a host object's value, ...). A WeakMap's or a WeakSet's entry is live only
+   while its key is (its value then marked: ephemerons, to a fixpoint); a WeakRef's
+   target is cleared once nothing else reaches it.
 
    An object, a string and a BigInt keep their index while they live (the host and the
    values hold them by it); a dead one's record goes to a free list its kind's
@@ -97,7 +101,8 @@ static void visit_obj(js_vm *vm, gc_state *g, uint32_t o) {
     case JK_PROXY: mark_obj(vm, g, x.a); mark_obj(vm, g, x.b); break;
     case JK_TYPEDARRAY: case JK_DATAVIEW: mark_obj(vm, g, x.a); break;
     case JK_RECORD: mark_obj(vm, g, x.a); mark_val(vm, g, x.x); break;
-    case JK_HOST: break;
+    /* a host object: a, b and c the host's numbers (a node, a record), x a value (an event's detail) */
+    case JK_HOST: mark_val(vm, g, x.x); break;
     default:
         if (x.flags & JO_FINREG) {
             /* a FinalizationRegistry: its cleanup and its cells' held values kept, the cells'
@@ -149,7 +154,6 @@ static void mark_roots(js_vm *vm, gc_state *g) {
         vm->range_error_ctor, vm->syntax_error_ctor, vm->reference_error_ctor, vm->eval_error_proto, vm->root_proto };
     for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) mark_obj(vm, g, named[i]);
     for (uint32_t i = 0; i < JTA_N; i++) mark_obj(vm, g, vm->ta_protos[i]);
-    for (uint32_t i = 0; i < 16; i++) mark_obj(vm, g, vm->host_protos[i]);
     /* Intl's prototypes, and the formatters toLocaleString keeps for its defaults (src/js/intl.c) */
     for (uint32_t i = 0; i < 16; i++) mark_obj(vm, g, vm->intl_protos[i]);
     mark_obj(vm, g, vm->intl_cache);
@@ -211,6 +215,13 @@ static void mark_roots(js_vm *vm, gc_state *g) {
     for (uint32_t i = 0; i < 10; i++) if (vm->digit_strs[i]) mark_str(vm, g, vm->digit_strs[i]);
     for (uint32_t i = 0; i < 1024; i++) if (vm->int_strs[i]) mark_str(vm, g, vm->int_strs[i]);
     mark_str(vm, g, 0);
+    /* every value the host holds outside these tables, as it says (a page's: its
+       prototypes, its records' objects and values, its tasks' functions) */
+    if (vm->host_roots) {
+        vector<jv> held;
+        vm->host_roots(vm, &held);
+        for (size_t i = 0; i < len(held); i++) mark_val(vm, g, held[i]);
+    }
 }
 
 /* the ephemerons: a weak collection's value marked once its key is, until nothing more is */

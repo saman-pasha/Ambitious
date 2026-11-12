@@ -997,7 +997,8 @@ static void si_hash_task(js_vm *vm, const char *old, const char *now) {
     si_def(vm, ev, "state", JV_NULL);
     si_def(vm, ev, "hasUAVisualTransition", JV_FALSE);
     sh_dispatch(vm, JS_WINDOW, ev);
-    sh_task(vm, 0, SH_TASK_HASH, a);
+    /* the URLs' object the task's own argument, which keeps it until the task runs */
+    sh_task_obj(vm, 0, SH_TASK_HASH, a);
 }
 void script_input_task(js_vm *vm, uint32_t kind, uint32_t arg) {
     struct js_host *h = vm->host;
@@ -1664,4 +1665,19 @@ void script_formdata_body(js_vm *vm, uint32_t owner, vector<char> *out, char *ct
     static const char boundary[] = "----AmbitiousFormBoundary0123456789";
     si_multipart(vm->host, owner, -1, boundary, out);
     snprintf(ctype, cap, "multipart/form-data; boundary=%s", boundary);
+}
+
+/* the collector's roots of this unit (script.h's sh_fd, the user's state): the object of
+   each FormData with a live entry (its entries are kept by its index), and the click event
+   a user's click is dispatching */
+void script_input_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    uint32_t last = 0;
+    for (size_t i = 0; i < len(h->fds); i++) {
+        sh_fd e = h->fds[i];
+        if (!e.live || !e.owner || e.owner == last) continue;
+        push_back(*out, jv_obj(e.owner));
+        last = e.owner;
+    }
+    if (jv_is_obj(h->click_ev)) push_back(*out, h->click_ev);
 }

@@ -178,6 +178,10 @@ static void sf_hdr_del(struct js_host *h, uint32_t owner, const char *n, size_t 
         if (e.live && e.owner == owner && e.nlen == nn && sf_ci_eq(data(h->ntext) + e.noff, n, nn)) h->hdrs[i].live = 0;
     }
 }
+/* every header of a list taken out (its object no root of the host's then) */
+static void sf_hdr_clear(struct js_host *h, uint32_t owner) {
+    for (size_t i = 0; i < len(h->hdrs); i++) if (h->hdrs[i].owner == owner) h->hdrs[i].live = 0;
+}
 /* the values of a name, joined by ", " (Fetch's get), into out: 0 when it has none */
 static int sf_hdr_get(struct js_host *h, uint32_t owner, const char *n, size_t nn, vector<char> *out) {
     clear(*out);
@@ -377,6 +381,8 @@ static void sf_body_task(js_vm *vm, uint32_t r) {
         vm->exception = JV_UNDEF;
         js_promise_settle(vm, q.obj, 1, e);
     } else if (!vm->throwing) js_promise_resolve_with(vm, q.obj, v);
+    /* the promise settled: the host no longer holds it */
+    vm->host->reqs[r].obj = 0;
 }
 
 /* the Response of a request the loader answered: its status, type, URL, body */
@@ -530,10 +536,16 @@ static int sf_init(js_vm *vm, sh_req *q, jv input, jv init, const char *iface) {
         jv hv = js_get(vm, init, js_atom_ascii(vm, "headers"));
         if (vm->throwing) return 0;
         if (hv != JV_UNDEF) {
+            /* a list made for its lines alone, its headers taken out after (and its object
+               garbage with them) */
             jv tmp = sf_headers_new(vm, 0);
-            if (!sf_hdr_fill(vm, jv_idx(tmp), hv)) return 0;
-            clear(lines);
-            sf_hdr_lines(h, jv_idx(tmp), &lines);
+            int filled = sf_hdr_fill(vm, jv_idx(tmp), hv);
+            if (filled) {
+                clear(lines);
+                sf_hdr_lines(h, jv_idx(tmp), &lines);
+            }
+            sf_hdr_clear(h, jv_idx(tmp));
+            if (!filled) return 0;
         }
         jv bv = js_get(vm, init, js_atom_ascii(vm, "body"));
         if (vm->throwing) return 0;
@@ -1191,6 +1203,8 @@ void script_fetch_task(js_vm *vm, uint32_t kind, uint32_t id) {
     if (kind == SH_TASK_NOTE) { sf_messages(vm, id, 1); return; }
     sh_req q = h->reqs[id];
     sf_messages(vm, id, 0);
+    /* fetch's promise settled now: the host no longer holds it */
+    h->reqs[id].obj = 0;
     if (q.outcome == SCRIPT_REQ_OUTCOME_FAILED || q.outcome == SCRIPT_REQ_OUTCOME_BLOCKED) {
         uint32_t e = js_error_new(vm, vm->type_error_proto, js_str_ascii(vm, "Failed to fetch"));
         js_promise_settle(vm, q.obj, 1, jv_obj(e));
@@ -1199,6 +1213,25 @@ void script_fetch_task(js_vm *vm, uint32_t kind, uint32_t id) {
     }
     jv resp = sf_response_of(vm, id);
     js_promise_resolve_with(vm, q.obj, resp);
+}
+
+/* ---- the collector's roots ---- */
+
+/* the engine's values this unit's state holds (script.h's sh_req, sh_resp, sh_hdr): each
+   request's object while the host may use it, each response's Headers, the object of
+   each list with a live header (a list is kept by its object's index, which the object
+   must keep while the list lives) */
+void script_fetch_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    for (size_t i = 0; i < len(h->reqs); i++) if (h->reqs[i].obj) push_back(*out, jv_obj(h->reqs[i].obj));
+    for (size_t i = 0; i < len(h->resps); i++) if (h->resps[i].headers) push_back(*out, jv_obj(h->resps[i].headers));
+    uint32_t last = 0;
+    for (size_t i = 0; i < len(h->hdrs); i++) {
+        sh_hdr e = h->hdrs[i];
+        if (!e.live || !e.owner || e.owner == last) continue;
+        push_back(*out, jv_obj(e.owner));
+        last = e.owner;
+    }
 }
 
 /* ---- the globals ---- */

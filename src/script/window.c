@@ -748,6 +748,15 @@ jv script_window_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args
     return JV_UNDEF;
 }
 
+/* the collector's roots of this unit (script.h's sh_hent, the host's hstates): each
+   history entry's state, and the array that keeps every state pushed (the stored items are
+   text, no value) */
+void script_window_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    for (size_t i = 0; i < len(h->hents); i++) push_back(*out, h->hents[i].state);
+    if (h->hstates) push_back(*out, jv_obj(h->hstates));
+}
+
 void script_window_setup(js_vm *vm) {
     struct js_host *h = vm->host;
     uint32_t g = vm->global;
