@@ -837,6 +837,9 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     *h = -1;
     if (lay_replaced(d, el)) {
         double dw = 0, dh = 0;
+        /* a declared width or height of the border box (box-sizing) less its padding and border */
+        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
+        double eh = s->border_box ? s->b[0] + s->b[2] + lay_res(st, s->p[0], cw) + lay_res(st, s->p[2], cw) : 0;
         if (lay_is_named(d, el, "img") && nt) {
             /* its size, as the loader read it from the image's header; one dimension
                declared, the other kept in proportion */
@@ -846,8 +849,18 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                     dh = nt->resource[r].height;
                 }
             if (dw > 0 && dh > 0) {
-                if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) { *w = lay_res(st, s->width, cw); *h = *w * dh / dw; return; }
-                if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) { *h = s->height.v; *w = *h * dw / dh; return; }
+                if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) {
+                    *w = lay_res(st, s->width, cw) - ew;
+                    if (*w < 0) *w = 0;
+                    *h = *w * dh / dw;
+                    return;
+                }
+                if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) {
+                    *h = s->height.v - eh;
+                    if (*h < 0) *h = 0;
+                    *w = *h * dw / dh;
+                    return;
+                }
             }
         }
         if (lay_is_named(d, el, "input")) {
@@ -863,8 +876,10 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
         } else if (lay_is_named(d, el, "select")) { dw = 8 * s->fs; dh = s->lh; }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
         else if (lay_is_named(d, el, "canvas") || lay_is_svg(d, el)) { dw = 300; dh = 150; }
-        *w = s->width.unit == LAY_AUTO ? dw : lay_res(st, s->width, cw);
-        *h = s->height.unit == LAY_AUTO ? dh : s->height.v;
+        *w = s->width.unit == LAY_AUTO ? dw : lay_res(st, s->width, cw) - ew;
+        *h = s->height.unit == LAY_AUTO ? dh : s->height.v - eh;
+        if (*w < 0) *w = 0;
+        if (*h < 0) *h = 0;
         return;
     }
     double box_edges = s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw);
@@ -3892,8 +3907,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     lay_style_of(LARGS, el, &s);
     uint32_t si = lay_si(sx, gx, el);
     int lx = at(*xc, si).lx;
-    layout_box_kind kind = s.display == D_LIST_ITEM ? LAYOUT_BOX_KIND_LIST_ITEM : s.display == D_TABLE ? LAYOUT_BOX_KIND_TABLE :
-                           lx == LX_FLEX ? LAYOUT_BOX_KIND_FLEX : lx == LX_GRID ? LAYOUT_BOX_KIND_GRID : LAYOUT_BOX_KIND_BLOCK;
+    int replaced = lay_replaced(d, el);
+    layout_box_kind kind = replaced ? LAYOUT_BOX_KIND_REPLACED : s.display == D_LIST_ITEM ? LAYOUT_BOX_KIND_LIST_ITEM :
+                           s.display == D_TABLE ? LAYOUT_BOX_KIND_TABLE : lx == LX_FLEX ? LAYOUT_BOX_KIND_FLEX :
+                           lx == LX_GRID ? LAYOUT_BOX_KIND_GRID : LAYOUT_BOX_KIND_BLOCK;
     uint32_t b = lay_new_box(LARGS, parent, el, kind);
     lay_edges(t, st, b, &s, cw);
     lay_box_style(LARGS, b, el, cw, k->ch);
@@ -3907,6 +3924,42 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         return b;
     }
     double edges_h = t->box[b].bl + t->box[b].br + t->box[b].pl + t->box[b].pr;
+    if (replaced) {
+        /* a replaced element displayed as a block (CSS 2.1, 10.3.4 and 10.6.2): its width and height an inline
+           one's, its margins a block's (auto ones centring it); its width given (a flex or grid item's) or held
+           by min-width and max-width, its height kept in proportion when it is auto */
+        double w = 0, h = 0;
+        lay_atomic_size(LARGS, el, &s, cw, &w, &h);
+        double w0 = w;
+        int auto_w = s.width.unit == LAY_AUTO;
+        if (k->fw >= 0) {
+            t->box[b].w = k->fw - edges_h > 0 ? k->fw - edges_h : 0;
+            t->box[b].how = LAYOUT_WIDTH_HOW_FLEX;
+            t->box[b].ml = s.m[3].unit == LAY_AUTO ? 0 : lay_res(st, s.m[3], cw);
+            t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
+        } else {
+            /* its width the content width found, as a declared one, so a block's margins follow */
+            s.width.unit = LAY_PX;
+            s.width.v = (w > 0 ? w : 0) + (s.border_box ? edges_h : 0);
+            lay_len minw = at(*xc, si).minw;
+            lay_block_width(t, st, b, &s, cw, &minw);
+            if (auto_w && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_INTRINSIC;
+        }
+        /* a float's, a positioned box's, an item's margins as they are, auto ones 0 */
+        if (k->shrink || k->item || at(*xc, si).flt) {
+            t->box[b].ml = s.m[3].unit == LAY_AUTO ? 0 : lay_res(st, s.m[3], cw);
+            t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
+        }
+        /* an image's height in proportion to the width it was held to (min-width, max-width, a given width) */
+        if (lay_is_named(d, el, "img") && s.height.unit == LAY_AUTO && w0 > 0 && h > 0 && t->box[b].w != w0) h = h * t->box[b].w / w0;
+        t->box[b].h = h > 0 ? h : 0;
+        t->box[b].avail = cw;
+        lay_placeholder(LARGS, b, el, &s);
+        *mt = lay_mc_of(t->box[b].mt);
+        *mb = lay_mc_of(t->box[b].mb);
+        *empty = 0;
+        return b;
+    }
     if (k->fw >= 0) {
         /* a width it is given (a flex item's, a grid item's, a positioned box's): its border box's */
         t->box[b].w = k->fw - edges_h > 0 ? k->fw - edges_h : 0;
@@ -5630,8 +5683,9 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         double eh = s.b[1] + s.b[3] + lay_res(st, s.p[1], cbw) + lay_res(st, s.p[3], cbw);
         double fw = -1;
         int wdecl = s.width.unit != LAY_AUTO && !lay_content_sized(s.width), csized = lay_content_sized(s.width);
-        if (wdecl) fw = lay_res(st, s.width, cbw) + (s.border_box ? 0 : eh);
-        else if (!la && !ra && !csized) { fw = cbw - L - R - ml - mr; if (fw < 0) fw = 0; }   /* both offsets: what they leave, none when it is less */
+        int repl = lay_replaced(d, el);   /* a replaced box keeps its own size (CSS 2.1, 10.3.8 and 10.6.5) */
+        if (wdecl && !repl) fw = lay_res(st, s.width, cbw) + (s.border_box ? 0 : eh);
+        else if (!la && !ra && !csized && !repl) { fw = cbw - L - R - ml - mr; if (fw < 0) fw = 0; }   /* both offsets: what they leave, none when it is less */
         /* a fit-content (min-, max-content) width shrinks to its content within what the offsets leave */
         if (la && ra) { L = sx0 - px0; la = 0; }
         lay_bk bk;
@@ -5644,7 +5698,7 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         double avail = cbw - (la ? 0 : L) - (ra ? 0 : R);
         lay_mc m1, m2;
         int empty;
-        uint32_t bx = lay_block(LARGS, cb, el, fw >= 0 ? cbw : avail, 0, 0, 0, 0, &bk, &m1, &m2, &empty);
+        uint32_t bx = lay_block(LARGS, cb, el, fw >= 0 || repl ? cbw : avail, 0, 0, 0, 0, &bk, &m1, &m2, &empty);
         if (fw >= 0 && !wdecl) t->box[bx].how = LAYOUT_WIDTH_HOW_POSITIONED;
         else if (wdecl) t->box[bx].how = s.width.unit == LAY_PX ? LAYOUT_WIDTH_HOW_DECLARED : LAYOUT_WIDTH_HOW_PERCENT;
         t->box[bx].cb = cb == vp ? vp : cb;
@@ -5655,7 +5709,7 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         t->box[bx].avail = cbw;
         double bw = t->box[bx].w + eh;
         if (la) L = cbw - R - ml - mr - bw;
-        if (!ra && (wdecl || csized) && s.m[3].unit == LAY_AUTO && s.m[1].unit == LAY_AUTO) {
+        if (!ra && (wdecl || csized || repl) && s.m[3].unit == LAY_AUTO && s.m[1].unit == LAY_AUTO) {
             /* auto margins with both offsets and the width (a declared one, a content-sized one): the box in the middle */
             double rest = cbw - L - R - bw;
             if (rest > 0) { ml = rest / 2; mr = rest / 2; }
@@ -5665,11 +5719,16 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         /* its height: from both offsets when it is auto, else its content's */
         double mtv = t->box[bx].mt, mbv = t->box[bx].mb;
         double ve = t->box[bx].bt + t->box[bx].bb + t->box[bx].pt + t->box[bx].pb;
-        if (s.height.unit == LAY_AUTO && at(*xc, si).hraw.unit == LAY_AUTO && !ta && !ba) {
+        if (s.height.unit == LAY_AUTO && at(*xc, si).hraw.unit == LAY_AUTO && !ta && !ba && !repl) {
             double h = cbh - T - B - mtv - mbv - ve;
             t->box[bx].h = h > 0 ? h : 0;
         }
         double bh = lay_border_height(t, bx);
+        if (!ta && !ba && (repl || s.height.unit != LAY_AUTO) && s.m[0].unit == LAY_AUTO && s.m[2].unit == LAY_AUTO) {
+            /* auto margins with both offsets and the height: the box in the middle */
+            double rest = cbh - T - B - bh;
+            if (rest > 0) { mtv = rest / 2; mbv = rest / 2; t->box[bx].mt = mtv; t->box[bx].mb = mbv; }
+        }
         if (ta && ba) T = sy0 - py0;
         else if (ta) T = cbh - B - mtv - mbv - bh;
         lay_place(t, bx, px0 + L + ml, py0 + T + mtv);

@@ -1,0 +1,21 @@
+# boxes of tests/pages/blockimg.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+p1 p 8 16 784 18
+b-auto img 8 50 96 32
+b-center img 352 82 96 32
+b-right img 696 114 96 32
+b-width img 8 146 200 66.656
+b-pct img 8 212.656 392 130.656
+b-height img 8 343.313 192 64
+b-max img 8 407.313 784 261.328
+b-min img 8 668.641 300 100
+b-edges img 8 772.641 112 48
+b-bbox img 8 824.641 120 45.328
+d-after div 8 869.969 784 18
+f-left img 8 887.969 96 32
+p-float p 8 903.969 784 18
+row div 8 937.969 784 48
+r-item img 8 937.969 96 48
+r-item2 img 104 937.969 144 48
+rel div 8 985.969 784 60
+a-pos img 28 995.969 96 32
+a-both img 352 995.969 96 32
