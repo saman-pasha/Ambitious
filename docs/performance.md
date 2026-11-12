@@ -58,6 +58,8 @@ takes 2.1 s over the same page in Chromium.
 | the snapshot carries each element's style and each style's declared values; the rules derive inherited and initial values | 408,681 facts, 21.4 MB | 147,006 facts, 7.0 MB |
 | `low_contrast` asks the cheap tests first | its diagnostics 0.45 s | 0.25 s |
 | opaque fills written a row at a time | paint 4.0 ms (news.html) | 2.4 ms |
+| the collector runs for pages, between their tasks, its roots the script host's values (Phase 12n): a page whose timer makes 100 rounds of 10,000 records of garbage (`tools/gen-garbage-page.py`), its scripts stage (`ambitious bench`, 5 runs) and its peak memory (one `ambitious script`, its maximum resident set) | 417 to 469 ms; 371 MB | 331 to 358 ms, 12 collections of 6 ms each; 38 MB |
+| the same, on the benchmark's scripted page (2,000 items, `tools/gen-scripted-page.py`), which never makes the 32 MB a first collection waits for: its scripts stage, its click (`--click '#sale'`), its peak memory | 5.3 to 6.9 ms, 3.9 to 4.5 ms; 15.4 MB | 5.4 to 6.6 ms, 4.2 ms; 15.7 MB |
 
 ## Hot paths, and what would make them faster
 
