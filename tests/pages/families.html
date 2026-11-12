@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><title>Families</title>
+<style>
+body { margin: 8px }
+p, pre, div { margin: 0 0 4px }
+span { white-space: nowrap }
+</style></head>
+<body>
+<!-- each family's face: a span's width its advances and kerning, its height and the
+     lines' its metrics (src/paint/font.h) -->
+<p><span id=default>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: serif"><span id=serif>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: sans-serif"><span id=sans>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: monospace"><span id=mono>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: Arial"><span id=arial>Hamburgefonstiv</span></p>
+<p style="font-family: Helvetica, sans-serif"><span id=helvetica>Hamburgefonstiv</span></p>
+<p style="font-family: 'Times New Roman'"><span id=times>Hamburgefonstiv</span></p>
+<p style="font-family: 'Courier New'"><span id=courier>Hamburgefonstiv</span></p>
+<p style="font-family: Courier, monospace"><span id=courier2>Hamburgefonstiv</span></p>
+<p style="font-family: 'DejaVu Sans'"><span id=dvsans>Hamburgefonstiv</span></p>
+<p style="font-family: 'DejaVu Serif'"><span id=dvserif>Hamburgefonstiv</span></p>
+<p style="font-family: 'DejaVu Sans Mono'"><span id=dvmono>Hamburgefonstiv</span></p>
+<p style="font-family: Georgia, sans-serif"><span id=skipped>Hamburgefonstiv</span></p>
+<p style="font-family: Verdana"><span id=none>Hamburgefonstiv</span></p>
+<p style="font-family: cursive"><span id=cursive>Hamburgefonstiv</span></p>
+<p style="font-family: sans-serif; font-weight: bold"><span id=sansbold>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: serif; font-weight: bold"><span id=serifbold>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: 'Courier New'; font-weight: bold"><span id=courierbold>Hamburgefonstiv</span></p>
+<!-- what a face has no glyph for, drawn by its fallbacks -->
+<p style="font-family: sans-serif"><span id=nbhyphen>non&#x2011;breaking</span></p>
+<p style="font-family: serif"><span id=triangles>&#x25B8; more &#x25BE;</span></p>
+<p style="font-family: monospace"><span id=hebrew>&#x5E9;&#x5DC;&#x5D5;&#x5DD; ok</span></p>
+<p style="font-family: 'DejaVu Serif'"><span id=hebrew2>&#x5D0;&#x5D1;&#x5D2; ok</span></p>
+<!-- monospace alone, and the default fixed size its sizes take -->
+<pre id=pre>pre text</pre>
+<p id=para>text <code id=code>code</code> and <kbd id=kbd>kbd</kbd> after</p>
+<p style="font-family: monospace, monospace"><span id=twice>monospace twice</span></p>
+<p style="font-family: monospace; font-size: medium"><span id=medium>medium</span></p>
+<p style="font-family: monospace; font-size: large"><span id=large>large</span></p>
+<p style="font-family: monospace; font-size: 1.5em"><span id=em>1.5em</span></p>
+<p style="font-family: monospace; font-size: 120%"><span id=pct>120 percent</span></p>
+<p style="font-family: monospace; font-size: 20px"><span id=px>20px</span></p>
+<pre><span id=back style="font-family: sans-serif">sans-serif in pre</span></pre>
+<pre><span id=smaller style="font-size: smaller">smaller in pre</span></pre>
+<div style="font-size: 14px"><code id=abs>code under 14px</code></div>
+<div style="font-size: 100%"><code id=rel>code under 100 percent</code></div>
+<div style="font-size: x-large"><code id=kw>code under x-large</code></div>
+<div style="font-size: 2em"><code id=rel2>code under 2em</code></div>
+</body></html>

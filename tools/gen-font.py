@@ -1,26 +1,35 @@
 #!/usr/bin/env python3
 """tools/gen-font.py -- src/paint/font_data.h, the outlines the painter draws text with.
 
-A subset of the DejaVu fonts, read from their TrueType files by this script's
-own reader of the tables it needs (head, hhea, hmtx, maxp, loca, glyf, cmap,
-kern) and written as C: for each face, a TrueType font of the code points the
-script lists, base64 -- the tables the painter reads (cmap format 4, glyf, head,
-hhea, hmtx, kern format 0, loca, maxp), so that src/paint/font.c reads the
-built-in faces as it reads a page's web fonts. Composite glyphs are resolved
-into their components' points; the kerning pairs are the subset's.
+Subsets of the Liberation fonts (Serif, Sans and Mono: the faces Chromium draws
+serif, sans-serif, Times New Roman, Arial and Courier New with on a Linux machine
+with fontconfig's metric aliases) and of the DejaVu fonts (Sans, Serif and Sans
+Mono: monospace's face there, and the faces their own names name), each regular
+and bold, read from their TrueType files by this script's own reader of the tables
+it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern) and written as C: for each
+face, a TrueType font of the code points the script lists, base64 -- the tables the
+painter reads (cmap format 4, glyf, head, hhea, hmtx, kern format 0, loca, maxp), so
+that src/paint/font.c reads the built-in faces as it reads a page's web fonts.
+Composite glyphs are resolved into their components' points; the kerning pairs are
+the subset's. (Over these code points each face's kern table holds the pairs its
+GPOS kern feature does, which HarfBuzz applies; the faces' GSUB substitutes nothing
+in them by default but DejaVu's ligatures, which Ambitious does not form.)
 
-    python3 tools/gen-font.py [FONTDIR] > src/paint/font_data.h
+    python3 tools/gen-font.py [DEJAVUDIR [LIBERATIONDIR]] > src/paint/font_data.h
     python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.woff FAMILY
 
 The second writes a web font for the fixture pages: the same subset of one
 TrueType file as a font Chromium's sanitizer takes (with OS/2, post, name and a
-version 1.0 maxp), named FAMILY, the fonts' notice in its name table; as WOFF 1
+version 1.0 maxp), named FAMILY, its fonts' notice in its name table; as WOFF 1
 (its tables stored) when OUT ends in .woff.
 
-FONTDIR defaults to /usr/share/fonts/truetype/dejavu. The output is a copy of
-part of the Font Software, so it carries the fonts' notice (the Bitstream Vera
-license, as DejaVu's own files do) and keeps the DejaVu names, as that license
-asks of a modified copy.
+DEJAVUDIR and LIBERATIONDIR default to /usr/share/fonts/truetype/dejavu and
+/usr/share/fonts/truetype/liberation. The output is a copy of part of each Font
+Software, so it carries each one's notice: DejaVu's (the Bitstream Vera license,
+as DejaVu's own files do; a modified copy keeps the DejaVu names, as that license
+asks) and Liberation's (its copyright and the SIL Open Font License 1.1, under
+which that part of the output stays; the subsets carry no name table, so none is
+presented under the Reserved Font Names, and the painter answers to none of them).
 
 """
 import base64
@@ -28,12 +37,18 @@ import struct
 import sys
 
 FACES = [
-    ("amb_font_sans", "DejaVuSans.ttf"),
-    ("amb_font_sans_bold", "DejaVuSans-Bold.ttf"),
-    ("amb_font_serif", "DejaVuSerif.ttf"),
-    ("amb_font_serif_bold", "DejaVuSerif-Bold.ttf"),
-    ("amb_font_mono", "DejaVuSansMono.ttf"),
-    ("amb_font_mono_bold", "DejaVuSansMono-Bold.ttf"),
+    ("amb_font_serif", "liberation", "LiberationSerif-Regular.ttf"),
+    ("amb_font_serif_bold", "liberation", "LiberationSerif-Bold.ttf"),
+    ("amb_font_sans", "liberation", "LiberationSans-Regular.ttf"),
+    ("amb_font_sans_bold", "liberation", "LiberationSans-Bold.ttf"),
+    ("amb_font_courier", "liberation", "LiberationMono-Regular.ttf"),
+    ("amb_font_courier_bold", "liberation", "LiberationMono-Bold.ttf"),
+    ("amb_font_dv_sans", "dejavu", "DejaVuSans.ttf"),
+    ("amb_font_dv_sans_bold", "dejavu", "DejaVuSans-Bold.ttf"),
+    ("amb_font_dv_serif", "dejavu", "DejaVuSerif.ttf"),
+    ("amb_font_dv_serif_bold", "dejavu", "DejaVuSerif-Bold.ttf"),
+    ("amb_font_mono", "dejavu", "DejaVuSansMono.ttf"),
+    ("amb_font_mono_bold", "dejavu", "DejaVuSansMono-Bold.ttf"),
 ]
 
 # Latin-1, Greek's small letters (lower-greek markers), Hebrew's letters (right-to-left
@@ -46,7 +61,7 @@ CODEPOINTS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + list(range(0x
                0x25CF, 0x25E6, 0x201A, 0x201E, 0x2020, 0x2021, 0x2030, 0x2039, 0x203A, 0x2197, 0x2605, 0x2713,
                0x2714, 0x2717, 0xFFFD])
 
-NOTICE = """Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is
+DEJAVU_NOTICE = """Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is
 a trademark of Bitstream, Inc. DejaVu changes are in public domain.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -89,6 +104,108 @@ otherwise to promote the sale, use or other dealings in this Font Software
 without prior written authorization from the Gnome Foundation or Bitstream
 Inc., respectively. For further information, contact: fonts at gnome dot
 org."""
+
+LIBERATION_NOTICE = """Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo,
+Tinos and Cousine. Copyright (c) 2012 Red Hat, Inc. with Reserved Font Name
+Liberation.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE."""
+
+NOTICES = {"dejavu": DEJAVU_NOTICE, "liberation": LIBERATION_NOTICE}
+# the names a modified copy of the Liberation fonts may not be presented under (OFL, 3)
+RESERVED = ("liberation", "arimo", "tinos", "cousine")
+
+
+def source_of(path):
+    """which Font Software a TrueType file is part of, by its name"""
+    return "liberation" if "liberation" in path.rsplit("/", 1)[-1].lower() else "dejavu"
 
 
 class Font:
@@ -280,11 +397,11 @@ def bsearch(n, unit):
     return p * unit, e, n * unit - p * unit
 
 
-def name_table(family, style):
+def name_table(family, style, notice):
     """a name table: the notice, the family, its style, the full and PostScript names, the license"""
-    lines = NOTICE.split("\n")
+    lines = notice.split("\n")
     names = [(0, " ".join(lines[:2])), (1, family), (2, style), (3, family + " " + style), (4, family + " " + style),
-             (6, (family + "-" + style).replace(" ", "")), (13, NOTICE)]
+             (6, (family + "-" + style).replace(" ", "")), (13, notice)]
     recs, strs = bytearray(), bytearray()
     for nid, text in names:
         u = text.encode("utf-16-be")
@@ -399,7 +516,9 @@ def subset(path, web=None):
         o = f.tables["OS/2"]
         post = struct.pack(">IIhhIIIII", 0x00030000, 0, -100, 50, 0, 0, 0, 0, 0)
         style = "Bold" if "Bold" in path else "Oblique" if "Oblique" in path else "Regular"
-        tables += [("OS/2", f.d[o[0]:o[0] + o[1]]), ("name", name_table(web, style)), ("post", post)]
+        if source_of(path) == "liberation" and any(r in web.lower() for r in RESERVED):
+            raise SystemExit("gen-font: a modified copy of the Liberation fonts may not be named %s (OFL 1.1, 3)" % web)
+        tables += [("OS/2", f.d[o[0]:o[0] + o[1]]), ("name", name_table(web, style, NOTICES[source_of(path)])), ("post", post)]
         tables.sort(key=lambda t: t[0])
     out = bytearray(struct.pack(">IHH", 0x00010000, len(tables), 0) + struct.pack(">HH", *bsearch(len(tables), 16)[1:]))
     out[6:8] = struct.pack(">H", bsearch(len(tables), 16)[0])
@@ -420,21 +539,34 @@ def main():
         with open(sys.argv[3], "wb") as out:
             out.write(woff(blob) if sys.argv[3].endswith(".woff") else blob)
         return
-    fontdir = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
+    dirs = {"dejavu": sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu",
+            "liberation": sys.argv[2] if len(sys.argv) > 2 else "/usr/share/fonts/truetype/liberation"}
+    faces = [(name, src, file, subset(dirs[src] + "/" + file)) for name, src, file in FACES]
     w = sys.stdout.write
-    w("/* src/paint/font_data.h -- generated by tools/gen-font.py from the DejaVu fonts' TrueType\n")
-    w("   files: for each face a TrueType font of the code points the script lists (cmap, glyf,\n")
-    w("   head, hhea, hmtx, kern, loca, maxp), base64. Do not edit; run the script.\n")
-    w("   src/paint/font.c reads them as it reads a page's web fonts.\n\n")
-    w("   The fonts' notice, which this copy of part of the Font Software carries:\n\n")
-    for line in NOTICE.split("\n"):
-        w(("   " + line).rstrip() + "\n")
+    w("/* src/paint/font_data.h -- generated by tools/gen-font.py from the TrueType files of the\n")
+    w("   Liberation fonts (Serif, Sans, Mono) and the DejaVu fonts (Sans, Serif, Sans Mono): for each\n")
+    w("   face a TrueType font of the code points the script lists (cmap, glyf, head, hhea, hmtx,\n")
+    w("   kern, loca, maxp), base64. Do not edit; run the script. src/paint/font.c reads them as it\n")
+    w("   reads a page's web fonts.\n\n")
+    w("   Each face is a copy of part of its Font Software and carries its notice, below: the\n")
+    w("   Liberation faces' data is under the SIL Open Font License 1.1, not Ambitious's license;\n")
+    w("   the DejaVu faces' under the Bitstream Vera license. Neither is presented under its\n")
+    w("   fonts' names: the faces carry no name table.\n\n")
+    for src, title in (("liberation", "The Liberation faces"), ("dejavu", "The DejaVu faces")):
+        w("   %s' notice:\n\n" % title)
+        for line in NOTICES[src].split("\n"):
+            w(("   " + line).rstrip() + "\n")
+        w("\n")
     w("*/\n")
-    for name, file in FACES:
-        blob, n, npairs, missing = subset(fontdir + "/" + file)
+    # what they decode to, and the code points (each face's and its notdef) and pairs read from them:
+    # the pools src/paint/font.c reads them into
+    w("#define AMB_FONT_BYTES %d\n" % sum(len(blob) for _, _, _, (blob, _, _, _) in faces))
+    w("#define AMB_FONT_GLYPHS %d\n" % sum(len(CODEPOINTS) - len(m) + 1 for _, _, _, (_, _, _, m) in faces))
+    w("#define AMB_FONT_KERNS %d\n" % sum(k for _, _, _, (_, _, k, _) in faces))
+    for name, src, file, (blob, n, npairs, missing) in faces:
         text = base64.b64encode(blob).decode("ascii")
-        w("\n/* %s: %d glyphs, %d kerning pairs, %d bytes%s */\n" % (file, n, npairs, len(blob),
-          "" if not missing else "; not in the face: " + " ".join("U+%04X" % c for c in missing)))
+        w("\n/* %s (%s's notice): %d glyphs, %d kerning pairs, %d bytes%s */\n" % (file, "Liberation" if src == "liberation" else "DejaVu",
+          n, npairs, len(blob), "" if not missing else "; not in the face: " + " ".join("U+%04X" % c for c in missing)))
         w("static const char %s[] =\n" % name)
         for i in range(0, len(text), 96):
             w('    "%s"\n' % text[i:i + 96])

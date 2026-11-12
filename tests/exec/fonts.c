@@ -1,8 +1,15 @@
 /* tests/exec/fonts.c -- the TrueType reader (src/paint/font.c): the built-in faces, and
    the fixture pages' web fonts read as a page's are (a TrueType file and a WOFF), each
    measured -- metrics rounded as Chromium rounds them, advances and kerning -- and a
-   glyph drawn; and bytes that are no font, refused. Every width here is the one
-   tools/gen-font.py's own reader gives from the DejaVu files, kern table and all. */
+   glyph drawn; the families that name built-in faces; the code points a face has no
+   glyph for, drawn by its fallbacks; and bytes that are no font, refused. Every width
+   here is the one tools/gen-font.py's own reader gives from the Liberation and DejaVu
+   files, kern table and all; the built-in faces' are Chromium's on a machine with those
+   fonts within 0.01 px (tools/bench: 'AVAVAV To. Wa' at 16px is 111.4531 px in
+   sans-serif, 110.4688 in bold serif, 125.2344 in monospace, 124.8281 in Courier New,
+   116.9844 in DejaVu Sans; U+2011 as wide as U+2010, two Hebrew letters in monospace
+   17.3125, U+25B8 in serif 8.0313), but for the stars and checks it takes from Inter
+   where that is installed (U+2605 16.7188 px there). */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -37,6 +44,23 @@ int main(void) {
     show(&f, AMB_FACE_SANS, "built-in sans");
     show(&f, AMB_FACE_SERIF_BOLD, "built-in serif bold");
     show(&f, AMB_FACE_MONO, "built-in mono");
+    show(&f, AMB_FACE_COURIER, "built-in courier");
+    show(&f, AMB_FACE_DV_SANS, "built-in dejavu sans");
+    /* the families that name built-in faces, and one that names none */
+    static const char *const fams[9] = { "serif", "sans-serif", "monospace", "couriernew", "dejavusans", "dejavuserif",
+                                         "dejavusansmono", "liberationsans", "georgia" };
+    for (int k = 0; k < 9; k++) printf("%s: face %d, bold %d\n", fams[k], amb_face_named(fams[k], 0), amb_face_named(fams[k], 1));
+    /* what a face has no glyph for, drawn by its fallbacks: each code point's face, its
+       advance at 16px, and the kerning beside a letter of the face's own */
+    static const uint32_t cps[6] = { 0x2605, 0x2011, 0x05D0, 0x25B8, 0x4E00, 0x2010 };
+    static const int in[6] = { AMB_FACE_SANS, AMB_FACE_SANS, AMB_FACE_MONO, AMB_FACE_SERIF, AMB_FACE_SANS, AMB_FACE_SANS };
+    for (int k = 0; k < 6; k++) {
+        int by;
+        uint32_t g = amb_glyph_of(&f, in[k], cps[k], &by);
+        printf("U+%04X in face %d: drawn by face %d (its U+%04X), %.4f px; kerning after 'A' %.4f\n", cps[k], in[k], by,
+               at(f.glyphs, g).cp, amb_advance(&f, in[k], cps[k], 16), amb_kern(&f, in[k], 'A', cps[k], 16));
+    }
+    printf("'A\u2605A' in face %d: %.4f px\n", AMB_FACE_SANS, amb_text_width(&f, AMB_FACE_SANS, 16, "A\xe2\x98\x85A", 5));
     vector<uint8_t> ttf, woff;
     if (!read_file("tests/pages/fonts/oblique.ttf", &ttf) || !read_file("tests/pages/fonts/serif-bold.woff", &woff)) { printf("no fixture fonts\n"); return 1; }
     int a = amb_fonts_add(&f, data(ttf), len(ttf));

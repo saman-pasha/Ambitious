@@ -40,7 +40,8 @@ Each module is declared by a contract and generated into C from it:
   declaration.
 - **Layout** (`contracts/layout.pl`, `src/layout/`): block, inline, table and
   list layout. Every box keeps how its width was found. **Paint**
-  (`src/paint/`) draws the boxes, the text (set in DejaVu outlines) and the
+  (`src/paint/`) draws the boxes, the text (set in outlines of the Liberation
+  and DejaVu faces Chromium draws generic families with on Linux) and the
   PNG images into a PNG.
 - **Network** (`contracts/net.pl`, `src/net/`): URLs, `file:`, `data:` and
   HTTP/1.1. It records what a page loads, who asked for each resource, where

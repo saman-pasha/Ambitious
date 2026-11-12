@@ -1,4 +1,4 @@
-document   ok                 200    1814  file:///ROOT/tests/pages/images.html  text/html
+document   ok                 200    1966  file:///ROOT/tests/pages/images.html  text/html
 image      ok                 200   11953  file:///ROOT/tests/images/j_photo.jpg  image/jpeg  160x120
 image      ok                 200    3219  file:///ROOT/tests/images/j_prog_420.jpg  image/jpeg  77x51
 image      ok                 200    1865  file:///ROOT/tests/images/j_grey.jpg  image/jpeg  61x43
@@ -16,21 +16,21 @@ image      ok                 200    2152  file:///ROOT/tests/images/g_pil_anima
 image      ok                 200    2767  file:///ROOT/tests/images/g_pil_photo.gif  image/gif  50x40
 16 resources
 -- the images, as laid out:
-N = n(1,22,0), A = baseline, B = bx(1,7,0), X = 12, Y = 63, W = 160, H = 120
-N = n(1,23,0), A = progressive, B = bx(1,8,0), X = 178, Y = 81, W = 154, H = 102
-N = n(1,24,0), A = grey, B = bx(1,9,0), X = 338, Y = 140, W = 61, H = 43
-N = n(1,25,0), A = 'CMYK', B = bx(1,10,0), X = 405, Y = 140, W = 61, H = 43
-N = n(1,26,0), A = 'YCCK', B = bx(1,11,0), X = 472, Y = 133, W = 66, H = 50
-N = n(1,32,0), A = '4:1:1', B = bx(1,14,0), X = 12, Y = 246, W = 90, H = 42
-N = n(1,33,0), A = '4:4:0', B = bx(1,15,0), X = 108, Y = 230, W = 62, H = 58
-N = n(1,34,0), A = restarts, B = bx(1,16,0), X = 176, Y = 237, W = 77, H = 51
-N = n(1,35,0), A = 'half turn', B = bx(1,17,0), X = 259, Y = 242, W = 74, H = 46
-N = n(1,36,0), A = 'quarter turn', B = bx(1,18,0), X = 339, Y = 214, W = 46, H = 74
-N = n(1,43,0), A = transparent, B = bx(1,22,0), X = 18, Y = 406, W = 40, H = 30
-N = n(1,44,0), A = 'offset frame', B = bx(1,23,0), X = 64, Y = 391, W = 60, H = 45
-N = n(1,46,0), A = interlaced, B = bx(1,24,0), X = 141.0859375, Y = 334, W = 42, H = 102
-N = n(1,47,0), A = animated, B = bx(1,25,0), X = 189.0859375, Y = 376, W = 90, H = 60
-N = n(1,48,0), A = photograph, B = bx(1,26,0), X = 285.0859375, Y = 396, W = 50, H = 40
+N = n(1,22,0), A = baseline, B = bx(1,7,0), X = 12, Y = 62, W = 160, H = 120
+N = n(1,23,0), A = progressive, B = bx(1,8,0), X = 178, Y = 80, W = 154, H = 102
+N = n(1,24,0), A = grey, B = bx(1,9,0), X = 338, Y = 139, W = 61, H = 43
+N = n(1,25,0), A = 'CMYK', B = bx(1,10,0), X = 405, Y = 139, W = 61, H = 43
+N = n(1,26,0), A = 'YCCK', B = bx(1,11,0), X = 472, Y = 132, W = 66, H = 50
+N = n(1,32,0), A = '4:1:1', B = bx(1,14,0), X = 12, Y = 245, W = 90, H = 42
+N = n(1,33,0), A = '4:4:0', B = bx(1,15,0), X = 108, Y = 229, W = 62, H = 58
+N = n(1,34,0), A = restarts, B = bx(1,16,0), X = 176, Y = 236, W = 77, H = 51
+N = n(1,35,0), A = 'half turn', B = bx(1,17,0), X = 259, Y = 241, W = 74, H = 46
+N = n(1,36,0), A = 'quarter turn', B = bx(1,18,0), X = 339, Y = 213, W = 46, H = 74
+N = n(1,43,0), A = transparent, B = bx(1,22,0), X = 18, Y = 390, W = 40, H = 30
+N = n(1,44,0), A = 'offset frame', B = bx(1,23,0), X = 64, Y = 375, W = 60, H = 45
+N = n(1,46,0), A = interlaced, B = bx(1,24,0), X = 140.4453125, Y = 318, W = 42, H = 102
+N = n(1,47,0), A = animated, B = bx(1,25,0), X = 188.4453125, Y = 360, W = 90, H = 60
+N = n(1,48,0), A = photograph, B = bx(1,26,0), X = 284.4453125, Y = 380, W = 50, H = 40
 -- drawn:
-rendered 800x600: 26 boxes, 9 lines, 5 text fragments; pixels fnv1a64:3fbc2d6f5304eb82
+rendered 800x600: 26 boxes, 8 lines, 4 text fragments; pixels fnv1a64:2af81248530358f3
 exit 0

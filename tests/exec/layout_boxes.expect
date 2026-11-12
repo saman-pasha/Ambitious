@@ -1,166 +1,165 @@
 h1's top margin collapses through body's (ok, invariants: 0 broken)
-  #a block: content 8,21.44 784x38; margins 21.44 0 21.44 0; width fill of 784
-    line 8,21.44 784x38 baseline 51.44: [text 8+42.3906 'Hi']
+  #a block: content 8,21.44 784x37; margins 21.44 0 21.44 0; width fill of 784
+    line 8,21.44 784x37 baseline 50.44: [text 8+33.7812 'Hi']
 siblings' margins collapse (ok, invariants: 0 broken)
-  #a block: content 8,16 784x19; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [text 8+11.5547 'A']
-  #b block: content 8,51 784x19; margins 16 0 16 0; width fill of 784
-    line 8,51 784x19 baseline 66: [text 8+11.7578 'B']
+  #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 8+11.5547 'A']
+  #b block: content 8,50 784x18; margins 16 0 16 0; width fill of 784
+    line 8,50 784x18 baseline 64: [text 8+10.6719 'B']
 an empty block's margins collapse through it (ok, invariants: 0 broken)
-  #a block: content 8,16 784x19; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [text 8+11.5547 'A']
-  #b block: content 8,65 784x19; margins 16 0 16 0; width fill of 784
-    line 8,65 784x19 baseline 80: [text 8+11.7578 'B']
-  #e block: content 8,65 784x0; margins 30 0 30 0; width fill of 784
+  #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 8+11.5547 'A']
+  #b block: content 8,64 784x18; margins 16 0 16 0; width fill of 784
+    line 8,64 784x18 baseline 78: [text 8+10.6719 'B']
+  #e block: content 8,64 784x0; margins 30 0 30 0; width fill of 784
 padding keeps a child's margin inside (ok, invariants: 0 broken)
-  #a block: content 8,9 784x35; margins 0 0 0 0; width fill of 784
-  #b block: content 8,25 784x19; margins 16 0 16 0; width fill of 784
-    line 8,25 784x19 baseline 40: [text 8+9.02344 'x']
+  #a block: content 8,9 784x34; margins 0 0 0 0; width fill of 784
+  #b block: content 8,25 784x18; margins 16 0 16 0; width fill of 784
+    line 8,25 784x18 baseline 39: [text 8+8 'x']
 auto margins centre a declared width (ok, invariants: 0 broken)
-  #a block: content 300,8 200x19; margins 0 292 0 292; width declared of 784
-    line 300,8 200x19 baseline 23: [text 300+9.02344 'x']
+  #a block: content 300,8 200x18; margins 0 292 0 292; width declared of 784
+    line 300,8 200x18 baseline 22: [text 300+8 'x']
 a percentage of the containing block (ok, invariants: 0 broken)
-  #a block: content 8,8 392x19; margins 0 392 0 0; width percent of 784
-    line 8,8 392x19 baseline 23: [text 8+9.02344 'x']
+  #a block: content 8,8 392x18; margins 0 392 0 0; width percent of 784
+    line 8,8 392x18 baseline 22: [text 8+8 'x']
 max-width holds it narrower (ok, invariants: 0 broken)
-  #a block: content 250,8 300x19; margins 0 242 0 242; width max_width of 784
-    line 250,8 300x19 baseline 23: [text 250+9.02344 'x']
+  #a block: content 250,8 300x18; margins 0 242 0 242; width max_width of 784
+    line 250,8 300x18 baseline 22: [text 250+8 'x']
 box-sizing: border-box (ok, invariants: 0 broken)
-  #a block: content 23,23 170x19; margins 0 584 0 0; width declared of 784
-    line 23,23 170x19 baseline 38: [text 23+9.02344 'x']
+  #a block: content 23,23 170x18; margins 0 584 0 0; width declared of 784
+    line 23,23 170x18 baseline 37: [text 23+8 'x']
 an inline-block shrinks to fit (ok, invariants: 0 broken)
-  #a inline_block: content 10,18 43.2891x19; margins 0 0 0 0; width shrink_to_fit of 784
-    line 10,18 43.2891x19 baseline 33: [text 10+43.2891 'Hello']
+  #a inline_block: content 10,18 35.5469x18; margins 0 0 0 0; width shrink_to_fit of 784
+    line 10,18 35.5469x18 baseline 32: [text 10+35.5469 'Hello']
 text-align: center (ok, invariants: 0 broken)
-  #a block: content 8,16 784x19; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [text 390.465+19.0703 'Hi']
+  #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 392+16 'Hi']
 lines break at spaces (ok, invariants: 0 broken)
-  #a block: content 8,8 100x57; margins 0 684 0 0; width declared of 784
-    line 8,8 100x19 baseline 23: [text 8+64.25 'one two']
-    line 8,27 100x19 baseline 42: [text 8+81.9141 'three four']
-    line 8,46 100x19 baseline 61: [text 8+56.9844 'five six']
+  #a block: content 8,8 100x36; margins 0 684 0 0; width declared of 784
+    line 8,8 100x18 baseline 22: [text 8+87.0781 'one two three']
+    line 8,26 100x18 baseline 40: [text 8+78.2031 'four five six']
 nowrap overflows (ok, invariants: 0 broken)
-  #a block: content 8,8 50x19; margins 0 734 0 0; width declared of 784
-    line 8,8 50x19 baseline 23: [text 8+112.656 'one two three']
+  #a block: content 8,8 50x18; margins 0 734 0 0; width declared of 784
+    line 8,8 50x18 baseline 22: [text 8+87.0781 'one two three']
 pre keeps spaces and newlines (ok, invariants: 0 broken)
-  #a block: content 8,16 784x38; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [text 8+38.5312 'a  b']
-    line 8,35 784x19 baseline 50: [text 8+19.2656 ' c']
+  #a block: content 8,13 784x30; margins 13 0 13 0; width fill of 784
+    line 8,13 784x15 baseline 25: [text 8+31.3066 'a  b']
+    line 8,28 784x15 baseline 40: [text 8+15.6533 ' c']
 an inline element's background and padding (ok, invariants: 0 broken)
-  #a inline: 8,16 19.0234x19
-  #p block: content 8,16 784x19; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [inline 8+19.0234 ''] [text 13+9.02344 'x'] [text 32.1094+9.03906 'y']
+  #a inline: 8,16 18x17
+  #p block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [inline 8+18 ''] [text 13+8 'x'] [text 30+8 'y']
 a table's columns (ok, invariants: 0 broken)
-  #a cell: content 11,11 42.2266x19; margins 0 0 0 0; width column of 44.2266
-    line 11,11 42.2266x19 baseline 26: [text 11+42.2266 'short']
-  #b cell: content 57.2266,11 150.617x19; margins 0 0 0 0; width column of 152.617
-    line 57.2266,11 150.617x19 baseline 26: [text 57.2266+150.617 'a much longer cell']
-  #t table: content 8,8 202.844x25; margins 0 581.156 0 0; width shrink_to_fit of 784
+  #a cell: content 11,11 32x18; margins 0 0 0 0; width column of 34
+    line 11,11 32x18 baseline 25: [text 11+32 'short']
+  #b cell: content 47,11 118.617x18; margins 0 0 0 0; width column of 120.617
+    line 47,11 118.617x18 baseline 25: [text 47+118.617 'a much longer cell']
+  #t table: content 8,8 160.617x24; margins 0 623.383 0 0; width shrink_to_fit of 784
 a table's declared width, shared (ok, invariants: 0 broken)
-  #a cell: content 11,11 45.6179x19; margins 0 0 0 0; width column of 47.6179
-    line 11,11 45.6179x19 baseline 26: [text 11+9.53906 'a']
-  #b cell: content 60.6179,11 344.382x19; margins 0 0 0 0; width column of 346.382
-    line 60.6179,11 344.382x19 baseline 26: [text 60.6179+81.9375 'bbbbbbbb']
-  #t table: content 8,8 400x25; margins 0 384 0 0; width declared of 784
+  #a cell: content 11,11 45.7489x18; margins 0 0 0 0; width column of 47.7489
+    line 11,11 45.7489x18 baseline 25: [text 11+7.10156 'a']
+  #b cell: content 60.7489,11 344.251x18; margins 0 0 0 0; width column of 346.251
+    line 60.7489,11 344.251x18 baseline 25: [text 60.7489+64 'bbbbbbbb']
+  #t table: content 8,8 400x24; margins 0 384 0 0; width declared of 784
 a list item's marker (ok, invariants: 0 broken)
-  #a list_item: content 48,16 744x19; margins 0 0 0 0; width fill of 744
-    line 48,16 744x19 baseline 31: [text 48+9.02344 'x'] [marker 30.5625+9.4375 '•']
-  #b list_item: content 48,51 744x19; margins 0 0 0 0; width fill of 744
-    line 48,51 744x19 baseline 66: [text 48+9.03906 'y'] [marker 24.7344+15.2656 '1.']
+  #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
+    line 48,16 744x18 baseline 30: [text 48+8 'x'] [marker 34.3984+5.60156 '•']
+  #b list_item: content 48,50 744x18; margins 0 0 0 0; width fill of 744
+    line 48,50 744x18 baseline 64: [text 48+8 'y'] [marker 28+12 '1.']
 font sizes in em, and line height (ok, invariants: 0 broken)
   #a block: content 8,30 784x36; margins 30 0 30 0; width fill of 784
-    line 8,30 784x36 baseline 58.5: [text 8+16.9189 'x']
+    line 8,30 784x36 baseline 58: [text 8+15 'x']
 a float, and lines beside it (ok, invariants: 0 broken)
   #a block: content 8,8 50x50; margins 0 0 0 0; width declared of 200
-  #b block: content 8,8 200x38; margins 0 0 0 0; width fill of 200
-    line 58,8 150x19 baseline 23: [text 58+112.656 'one two three']
-    line 58,27 150x19 baseline 42: [text 58+147.156 'four five six seven']
+  #b block: content 8,8 200x36; margins 0 0 0 0; width fill of 200
+    line 58,8 150x18 baseline 22: [text 58+146.609 'one two three four five']
+    line 58,26 150x18 baseline 40: [text 58+59.1016 'six seven']
 a right float, and clearance (ok, invariants: 0 broken)
   #a block: content 732,8 60x40; margins 0 0 0 0; width declared of 784
-  #b block: content 8,48 784x19; margins 0 0 0 0; width fill of 784
-    line 8,48 784x19 baseline 63: [text 8+9.02344 'x']
+  #b block: content 8,48 784x18; margins 0 0 0 0; width fill of 784
+    line 8,48 784x18 baseline 62: [text 8+8 'x']
 a formatting context beside a float (ok, invariants: 0 broken)
-  #a block: content 108,8 684x19; margins 0 0 0 0; width fill of 684
-    line 108,8 684x19 baseline 23: [text 108+9.02344 'x']
+  #a block: content 108,8 684x18; margins 0 0 0 0; width fill of 684
+    line 108,8 684x18 baseline 22: [text 108+8 'x']
 a float shrinks to fit (ok, invariants: 0 broken)
-  #a block: content 8,8 56.4688x19; margins 0 0 0 0; width shrink_to_fit of 784
-    line 8,8 56.4688x19 baseline 23: [text 8+56.4688 'shrunk']
+  #a block: content 8,8 43.5547x18; margins 0 0 0 0; width shrink_to_fit of 784
+    line 8,8 43.5547x18 baseline 22: [text 8+43.5547 'shrunk']
 relative offsets (ok, invariants: 0 broken)
-  #a block: content 18,13 784x19; margins 0 0 0 0; width fill of 784
-    line 18,13 784x19 baseline 28: [text 18+9.02344 'x']
+  #a block: content 18,13 784x18; margins 0 0 0 0; width fill of 784
+    line 18,13 784x18 baseline 27: [text 18+8 'x']
 absolute in a relative box (ok, invariants: 0 broken)
   #a block: content 258,88 50x20; margins 0 0 0 0; width declared of 300
   #t block: content 8,8 300x100; margins 0 484 0 0; width declared of 784
 absolute at its static position (ok, invariants: 0 broken)
-  #a block: content 8,51 9.03906x19; margins 0 0 0 0; width shrink_to_fit of 800
-    line 8,51 9.03906x19 baseline 66: [text 8+9.03906 'y']
-  #t block: content 8,16 784x19; margins 16 0 16 0; width fill of 784
-    line 8,16 784x19 baseline 31: [text 8+9.02344 'x']
+  #a block: content 8,50 8x18; margins 0 0 0 0; width shrink_to_fit of 800
+    line 8,50 8x18 baseline 64: [text 8+8 'y']
+  #t block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 8+8 'x']
 fixed in the viewport (ok, invariants: 0 broken)
   #a block: content 0,590 800x10; margins 0 0 0 0; width positioned of 800
 a flex row that grows (ok, invariants: 0 broken)
-  #a block: content 8,8 100x19; margins 0 0 0 0; width flex of 300
-    line 8,8 100x19 baseline 23: [text 8+9.53906 'a']
-  #b block: content 108,8 200x19; margins 0 0 0 0; width flex of 300
-    line 108,8 200x19 baseline 23: [text 108+10.2422 'b']
-  #t flex: content 8,8 300x19; margins 0 484 0 0; width declared of 784
+  #a block: content 8,8 100x18; margins 0 0 0 0; width flex of 300
+    line 8,8 100x18 baseline 22: [text 8+7.10156 'a']
+  #b block: content 108,8 200x18; margins 0 0 0 0; width flex of 300
+    line 108,8 200x18 baseline 22: [text 108+8 'b']
+  #t flex: content 8,8 300x18; margins 0 484 0 0; width declared of 784
 a flex row that wraps, centred (ok, invariants: 0 broken)
-  #a block: content 33,8 150x19; margins 0 0 0 0; width flex of 200
-    line 33,8 150x19 baseline 23: [text 33+9.53906 'a']
-  #b block: content 33,27 150x19; margins 0 0 0 0; width flex of 200
-    line 33,27 150x19 baseline 42: [text 33+10.2422 'b']
-  #t flex: content 8,8 200x38; margins 0 584 0 0; width declared of 784
+  #a block: content 33,8 150x18; margins 0 0 0 0; width flex of 200
+    line 33,8 150x18 baseline 22: [text 33+7.10156 'a']
+  #b block: content 33,26 150x18; margins 0 0 0 0; width flex of 200
+    line 33,26 150x18 baseline 40: [text 33+8 'b']
+  #t flex: content 8,8 200x36; margins 0 584 0 0; width declared of 784
 a flex column with a definite height (ok, invariants: 0 broken)
-  #a block: content 8,8 784x19; margins 0 0 0 0; width flex of 784
-    line 8,8 784x19 baseline 23: [text 8+9.53906 'a']
-  #b block: content 8,27 784x81; margins 0 0 0 0; width flex of 784
-    line 8,27 784x19 baseline 42: [text 8+10.2422 'b']
+  #a block: content 8,8 784x18; margins 0 0 0 0; width flex of 784
+    line 8,8 784x18 baseline 22: [text 8+7.10156 'a']
+  #b block: content 8,26 784x82; margins 0 0 0 0; width flex of 784
+    line 8,26 784x18 baseline 40: [text 8+8 'b']
   #t flex: content 8,8 784x100; margins 0 0 0 0; width fill of 784
 a grid of fixed and fr columns (ok, invariants: 0 broken)
-  #a block: content 8,8 100x19; margins 0 0 0 0; width grid of 100
-    line 8,8 100x19 baseline 23: [text 8+9.53906 'a']
-  #b block: content 118,8 190x19; margins 0 0 0 0; width grid of 190
-    line 118,8 190x19 baseline 23: [text 118+10.2422 'b']
-  #e block: content 8,37 100x19; margins 0 0 0 0; width grid of 100
-    line 8,37 100x19 baseline 52: [text 8+8.96094 'c']
-  #t grid: content 8,8 300x48; margins 0 484 0 0; width declared of 784
+  #a block: content 8,8 100x18; margins 0 0 0 0; width grid of 100
+    line 8,8 100x18 baseline 22: [text 8+7.10156 'a']
+  #b block: content 118,8 190x18; margins 0 0 0 0; width grid of 190
+    line 118,8 190x18 baseline 22: [text 118+8 'b']
+  #e block: content 8,36 100x18; margins 0 0 0 0; width grid of 100
+    line 8,36 100x18 baseline 50: [text 8+7.10156 'c']
+  #t grid: content 8,8 300x46; margins 0 484 0 0; width declared of 784
 a grid item placed by line and span (ok, invariants: 0 broken)
-  #a block: content 108,8 200x19; margins 0 0 0 0; width grid of 200
-    line 108,8 200x19 baseline 23: [text 108+9.53906 'a']
-  #b block: content 8,27 100x19; margins 0 0 0 0; width grid of 100
-    line 8,27 100x19 baseline 42: [text 8+10.2422 'b']
-  #t grid: content 8,8 300x38; margins 0 484 0 0; width declared of 784
+  #a block: content 108,8 200x18; margins 0 0 0 0; width grid of 200
+    line 108,8 200x18 baseline 22: [text 108+7.10156 'a']
+  #b block: content 8,26 100x18; margins 0 0 0 0; width grid of 100
+    line 8,26 100x18 baseline 40: [text 8+8 'b']
+  #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
 vertical-align: super and middle (ok, invariants: 0 broken)
-  #b inline_block: content 25.5065,16 10x30; margins 0 0 0 0; width declared of 784
+  #b inline_block: content 22.6667,16 10x30; margins 0 0 0 0; width declared of 784
   #p block: content 8,16 784x30; margins 16 0 16 0; width fill of 784
-    line 8,16 784x30 baseline 35.152: [text 8+9.02344 'x'] [text 17.0234+8.48307 '2'] [atomic 25.5065+10 '']
+    line 8,16 784x30 baseline 34.672: [text 8+8 'x'] [text 16+6.66667 '2'] [atomic 22.6667+10 '']
 min-height and max-height (ok, invariants: 0 broken)
   #a block: content 8,8 784x50; margins 0 0 0 0; width fill of 784
-    line 8,8 784x19 baseline 23: [text 8+9.02344 'x']
+    line 8,8 784x18 baseline 22: [text 8+8 'x']
   #b block: content 8,58 784x10; margins 0 0 0 0; width fill of 784
-    line 8,58 784x19 baseline 73: [text 8+9.03906 'y']
+    line 8,58 784x18 baseline 72: [text 8+8 'y']
 a percentage height (ok, invariants: 0 broken)
   #a block: content 8,8 784x50; margins 0 0 0 0; width fill of 784
-    line 8,8 784x19 baseline 23: [text 8+9.02344 'x']
+    line 8,8 784x18 baseline 22: [text 8+8 'x']
   #t block: content 8,8 784x200; margins 0 0 0 0; width fill of 784
 a rowspan (ok, invariants: 0 broken)
-  #a cell: content 11,11 10.2422x57; margins 0 0 0 0; width column of 12.2422
-    line 11,11 10.2422x19 baseline 26: [text 11+9.53906 'a']
-    line 11,30 10.2422x19 baseline 45: [text 11+10.2422 'b']
-    line 11,49 10.2422x19 baseline 64: [text 11+8.96094 'c']
-  #b cell: content 25.2422,11 9.03906x26.5; margins 0 0 0 0; width column of 11.0391
-    line 25.2422,14.75 9.03906x19 baseline 29.75: [text 25.2422+9.02344 'x']
-  #e cell: content 25.2422,41.5 9.03906x26.5; margins 0 0 0 0; width column of 11.0391
-    line 25.2422,45.25 9.03906x19 baseline 60.25: [text 25.2422+9.03906 'y']
+  #a cell: content 11,11 8x54; margins 0 0 0 0; width column of 10
+    line 11,11 8x18 baseline 25: [text 11+7.10156 'a']
+    line 11,29 8x18 baseline 43: [text 11+8 'b']
+    line 11,47 8x18 baseline 61: [text 11+7.10156 'c']
+  #b cell: content 23,11 8x25; margins 0 0 0 0; width column of 10
+    line 23,14.5 8x18 baseline 28.5: [text 23+8 'x']
+  #e cell: content 23,40 8x25; margins 0 0 0 0; width column of 10
+    line 23,43.5 8x18 baseline 57.5: [text 23+8 'y']
 a word hyphenated (ok, invariants: 0 broken)
-  #a block: content 8,16 100x38; margins 16 684 16 0; width declared of 784
-    line 8,16 100x19 baseline 31: [text 8+81.9531 'incompre-']
-    line 8,35 100x19 baseline 50: [text 8+68.2344 'hensible']
+  #a block: content 8,16 100x36; margins 16 684 16 0; width declared of 784
+    line 8,16 100x18 baseline 30: [text 8+99.5234 'incomprehensi-']
+    line 8,34 100x18 baseline 48: [text 8+19.5469 'ble']
 right-to-left text (ok, invariants: 0 broken)
-  #a block: content 8,16 200x19; margins 16 584 16 0; width declared of 784
-    line 8,16 200x19 baseline 31: [text 179.258+28.7422 'abc'] [text 124.953+49.2188 'גבא'] [text 94.2344+25.6328 'def']
+  #a block: content 8,16 200x18; margins 16 584 16 0; width declared of 784
+    line 8,16 200x18 baseline 30: [text 185.797+22.2031 'abc'] [text 159.203+22.5938 'גבא'] [text 134.773+20.4297 'def']
 generated content and counters (ok, invariants: 0 broken)
-  #a list_item: content 48,16 744x19; margins 0 0 0 0; width fill of 744
-    line 48,16 744x19 baseline 31: [generated 48+15.2656 '1.'] [text 68.3516+9.02344 'x']
-  #b list_item: content 48,35 744x19; margins 0 0 0 0; width fill of 744
-    line 48,35 744x19 baseline 50: [generated 48+15.2656 '2.'] [text 68.3516+9.03906 'y']
+  #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
+    line 48,16 744x18 baseline 30: [generated 48+12 '1.'] [text 64+8 'x']
+  #b list_item: content 48,34 744x18; margins 0 0 0 0; width fill of 744
+    line 48,34 744x18 baseline 48: [generated 48+12 '2.'] [text 64+8 'y']

@@ -147,6 +147,7 @@ typedef struct lay_style {
     uint32_t color, bg, bc[4];
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
+    int lhn;                        /* line-height is normal */
     uint32_t font;                  /* a web font's resource (the loader's), 0 for a built-in face */
     double ls, wsp;                 /* letter-spacing, word-spacing: px */
     uint8_t bs[4];
@@ -356,21 +357,23 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     int bold = weight >= 600;
     lay_word_of(st, cv[CSS_PROP_FONT_STYLE], w);
     s->italic = lay_w(w, "italic") || lay_w(w, "oblique");
+    /* the family the cascade resolved: a web font the page declared under it (over a
+       built-in face of the name), else the built-in face it names, else the default */
     lay_word_of(st, cv[CSS_PROP_FONT_FAMILY], w);
-    int family = lay_w(w, "sans-serif") ? 0 : lay_w(w, "monospace") ? 2 : lay_w(w, "serif") ? 1 : -1;
-    int wf;
-    if (family < 0 && lay_web_face(st, webface, w, weight, s->italic, &wf, &s->font)) {
+    int generic = lay_w(w, "serif") || lay_w(w, "sans-serif") || lay_w(w, "monospace");
+    int builtin = amb_face_named(w, bold), wf;
+    if (!generic && lay_web_face(st, webface, w, weight, s->italic, &wf, &s->font)) {
         s->face = wf;
         /* an italic face is slanted already: no slant made for it */
         for (uint32_t fi = 1; fi < st->face_len && fi < len(*webface); fi++)
             if (at(*webface, fi) == wf && st->face[fi].italic) s->italic = 0;
-    } else s->face = amb_face_for(family < 0 ? 1 : family, bold);
+    } else s->face = builtin >= 0 ? builtin : bold ? AMB_FACE_SERIF_BOLD : AMB_FACE_SERIF;
     double gap;
     amb_face_metrics(f, s->face, s->fs, &s->asc, &s->desc, &gap);
     c = cv[CSS_PROP_LINE_HEIGHT];
     if (st->cval[c].unit == CSS_UNIT_NUMBER) s->lh = st->cval[c].num * s->fs;
     else if (st->cval[c].unit == CSS_UNIT_PX) s->lh = st->cval[c].num;
-    else s->lh = s->asc + s->desc + gap;
+    else { s->lh = s->asc + s->desc + gap; s->lhn = 1; }
     lay_word_of(st, cv[CSS_PROP_DIRECTION], w);
     s->rtl = lay_w(w, "rtl");
     /* text-align: start and end as the direction has them */
@@ -709,6 +712,7 @@ typedef struct lay_piece {
     uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it */
     uint8_t rtl;                                   /* a word of right-to-left letters (Hebrew, Arabic) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
+    uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     double ls, wsp;                                /* letter-spacing, word-spacing */
@@ -716,8 +720,19 @@ typedef struct lay_piece {
     double w, size, lh, asc, desc;
     uint32_t color, bg;
     float aw, ah;                                  /* an atomic box's content width (and a replaced one's height) */
+    float fa, fd;                                  /* those faces' lines above and below its baseline, under line-height
+                                                      normal (fb) */
     float shift, rx, ry;                           /* its baseline's shift (vertical-align), its relative offset */
 } lay_piece;
+
+/* the leading a line height leaves about a font's ascent and descent, split as Chromium
+   splits it (CalculateLeadingSpace): above, half of it floored to a whole px; below, the
+   rest */
+static void lay_leading(double lh, double asc, double desc, double *above, double *below) {
+    double lead = lh - (asc + desc), up = floor(lead / 2);
+    *above = asc + up;
+    *below = desc + (lead - up);
+}
 
 static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->face = (uint8_t)s->face;
@@ -852,6 +867,7 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     /* a space: its advance, with letter-spacing and word-spacing */
     double space = amb_advance(f, s->face, ' ', s->fs) + s->ls + s->wsp;
     int collapse = s->ws == WS_NORMAL || s->ws == WS_NOWRAP || s->ws == WS_PRE_LINE;
+    size_t start = len(*ps);
     while (i < n) {
         char c = tx[i];
         int white = c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\n';
@@ -896,9 +912,10 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             continue;
         }
         size_t j = i;
-        int soft = 0, rtl = 0;
+        int soft = 0, rtl = 0, hi = 0;
         while (j < n && !(tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f' || tx[j] == '\n')) {
             unsigned char c0 = (unsigned char)tx[j];
+            if (c0 >= 0x80) hi = 1;
             if (c0 >= 0xC2) {
                 if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
                 else if (c0 >= 0xD6 && c0 <= 0xDB) rtl = 1;      /* U+0580 to U+06FF: Hebrew, Arabic */
@@ -920,11 +937,46 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
         p.brk = 0;
         p.keep = 0;
+        /* the lines of the faces that draw what the word's face has no glyph for */
+        if (hi && s->lhn) {
+            uint32_t m = amb_text_fallbacks(f, s->face, tx + i, j - i);
+            for (int k = 0; m && k < AMB_NFACES; k++) {
+                if (!(m >> k & 1)) continue;
+                double fa, fd, fg, up, dn;
+                amb_face_metrics(f, k, s->fs, &fa, &fd, &fg);
+                lay_leading(fa + fd + fg, fa, fd, &up, &dn);
+                if (!p.fb || up > p.fa) p.fa = (float)up;
+                if (!p.fb || dn > p.fd) p.fd = (float)dn;
+                p.fb = 1;
+            }
+        }
         push_back(ps, p);
         p.rtl = 0;
         p.soft = 0;
+        p.fb = 0;
         *sp = 0;
         i = j;
+    }
+    /* each space's kerning with the letters beside it in this text, which paint draws a
+       run with (Chromium shapes the run whole: the Liberation faces kern a space before
+       A, T, W and Y, and after them) */
+    if (s->tt) return;
+    for (size_t k = start; k < len(*ps); k++) {
+        lay_piece q = at(*ps, k);
+        if (q.kind != P_SPACE) continue;
+        double kk = 0;
+        if (k > start && at(*ps, k - 1).kind == P_WORD) {
+            lay_piece w = at(*ps, k - 1);
+            size_t e = w.off + w.len;
+            while (e > w.off + 1 && ((unsigned char)tx[e - 1] & 0xC0) == 0x80) e--;
+            size_t z = e - 1;
+            kk += amb_kern(f, s->face, amb_utf8_next(tx, w.off + w.len, &z), ' ', s->fs);
+        }
+        if (k + 1 < len(*ps) && at(*ps, k + 1).kind == P_WORD) {
+            size_t z = at(*ps, k + 1).off;
+            kk += amb_kern(f, s->face, ' ', amb_utf8_next(tx, n, &z), s->fs);
+        }
+        if (kk != 0) { q.w += kk; (*ps)[k] = q; }
     }
 }
 
@@ -948,11 +1000,8 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
 }
 /* the pieces of an inline-level node: text, an inline element (its edges around its
    children's pieces), a forced break, an atomic box */
-/* the x-height of a style's font, as a share of its size: DejaVu's, a web font's taken as half */
-static double lay_xh(const lay_style *s) {
-    int fam = s->face < AMB_NFACES ? s->face / 2 : -1;
-    return s->fs * (fam == 0 ? 0.547 : fam == 1 ? 0.519 : fam == 2 ? 0.545 : 0.5);
-}
+/* the x-height of a style's font, in px (src/paint/font.h) */
+static double lay_xh(const lay_style *s) { return s->fs * amb_x_height(s->face); }
 
 /* the parent of a run's item: an element's parent, or a pseudo-element's element */
 static uint32_t lay_parent_of(const dom_document *d, const vector<lay_gen> *gx, uint32_t x) {
@@ -1289,11 +1338,13 @@ static double lay_mc_v(lay_mc a) { return a.pos + a.neg; }
 
 /* ---- lines ---- */
 
-/* the vertical extent of a piece about its baseline */
+/* the vertical extent of a piece about its baseline: its font's line, and under
+   line-height normal its fallback faces' (Chromium's AccumulateUsedFonts) */
 static void lay_piece_vert(const lay_piece *p, double *above, double *below) {
-    double hl = (p->lh - (p->asc + p->desc)) / 2;
-    *above = p->asc + hl;
-    *below = p->desc + hl;
+    lay_leading(p->lh, p->asc, p->desc, above, below);
+    if (!p->fb) return;
+    if (p->fa > *above) *above = p->fa;
+    if (p->fd > *below) *below = p->fd;
 }
 
 static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const vector<uint32_t> *items, uint32_t first, uint32_t n,
@@ -1501,8 +1552,8 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     vector<double> xs;
     vector<uint32_t> atoms;
     vector<double> abase;            /* each atomic box's baseline, from its margin box's top, as its vertical-align has it */
-    double x = indent, above, below, hl = (bs->lh - (bs->asc + bs->desc)) / 2;
-    double max_above = bs->asc + hl, max_below = bs->desc + hl, top_h = 0, bottom_h = 0;
+    double x = indent, above, below, max_above, max_below, top_h = 0, bottom_h = 0;
+    lay_leading(bs->lh, bs->asc, bs->desc, &max_above, &max_below);
     int spaces = 0;
     for (size_t k = a; k < end; k++) {
         lay_piece p = at(*ps, k);

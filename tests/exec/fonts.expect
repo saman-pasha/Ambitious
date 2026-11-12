@@ -1,10 +1,28 @@
-built-in sans: face 0, 286 code points, 1348 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
-built-in serif bold: face 3, 250 code points, 732 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 132.6250 px (unkerned 142.1094)
-built-in mono: face 4, 254 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
-web oblique (TrueType): face 6, 242 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
-web serif bold (WOFF): face 7, 242 code points, 710 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 132.6250 px (unkerned 142.1094)
-'g' at 20px in face 0: 11x18 at 1,-12, coverage 17692
-'g' at 20px in face 6: 13x18 at 0,-12, coverage 16919
-'g' at 20px in face 7: 15x17 at 0,-11, coverage 26595
+built-in sans: face 2, 277 code points, 188 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 111.4453 px (unkerned 120.0391)
+built-in serif bold: face 1, 277 code points, 158 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 110.4688 px (unkerned 124.0000)
+built-in mono: face 10, 254 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
+built-in courier: face 4, 277 code points, 0 kerning pairs; at 16px ascent 13 descent 5 gap 0; 'AVAVAV To. Wa' 124.8203 px (unkerned 124.8203)
+built-in dejavu sans: face 6, 286 code points, 1348 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
+serif: face 0, bold 1
+sans-serif: face 2, bold 3
+monospace: face 10, bold 11
+couriernew: face 4, bold 5
+dejavusans: face 6, bold 7
+dejavuserif: face 8, bold 9
+dejavusansmono: face 10, bold 11
+liberationsans: face -1, bold -1
+georgia: face -1, bold -1
+U+2605 in face 2: drawn by face 6 (its U+2605), 14.3438 px; kerning after 'A' 0.0000
+U+2011 in face 2: drawn by face 2 (its U+2010), 5.3281 px; kerning after 'A' 0.0000
+U+05D0 in face 10: drawn by face 0 (its U+05D0), 9.6016 px; kerning after 'A' 0.0000
+U+25B8 in face 0: drawn by face 6 (its U+25B8), 8.0312 px; kerning after 'A' 0.0000
+U+4E00 in face 2: drawn by face 6 (its U+FFFD), 16.4062 px; kerning after 'A' 0.0000
+U+2010 in face 2: drawn by face 2 (its U+2010), 5.3281 px; kerning after 'A' 0.0000
+'A★A' in face 2: 69.6641 px
+web oblique (TrueType): face 12, 242 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
+web serif bold (WOFF): face 13, 242 code points, 710 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 132.6250 px (unkerned 142.1094)
+'g' at 20px in face 2: 11x17 at 0,-11, coverage 16463
+'g' at 20px in face 12: 13x18 at 0,-12, coverage 16919
+'g' at 20px in face 13: 15x17 at 0,-11, coverage 26595
 a truncated font: -1; text: -1; an empty file: -1
-8 faces
+14 faces

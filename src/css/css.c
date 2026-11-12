@@ -1187,31 +1187,47 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
 /* ---- font-family ---- */
 
 /* font-family's list made the family the module draws with: the first of the list that
-   is a web font the page declared, a generic family, or a name it knows the kind of */
+   is a web font the page declared, a generic family, or a name of one of the built-in
+   faces (src/paint/font.h) -- a name it has no face under is passed over (CSS Fonts 4,
+   5), as Chromium passes over a font its machine has not. The word: the web font's name
+   (lower case, no spaces), or what names the built-in face Chromium draws the family
+   with on a Linux machine whose fonts are these (fontconfig's metric aliases taken):
+   serif for serif, cursive, fantasy, Times New Roman and Times (Liberation Serif, the
+   default too); sans-serif for sans-serif, Arial, Helvetica and system-ui (Chromium's is
+   the desktop's face; Liberation Sans stands in); couriernew for Courier New and Courier
+   (Liberation Mono); monospace for the generic family when it is the whole list (the
+   list font-size's defaults read), dejavusansmono for it in a longer one and by name
+   (DejaVu Sans Mono); dejavusans and dejavuserif by name. A quoted name is no generic
+   family. */
 static int css_family_of(const char *s, size_t n, const char *faces, css_val *v) {
-    static const char *const serif = "georgia times timesnewroman cambria garamond palatino palatinolinotype bookantiqua "
-        "baskerville didot constantia dejavuserif liberationserif notoserif sourceserifpro charter cursive fantasy";
-    static const char *const sans = "arial helvetica helveticaneue verdana tahoma trebuchetms segoeui roboto opensans lato "
-        "calibri ubuntu cantarell dejavusans liberationsans notosans sourcesanspro inter system-ui -apple-system "
-        "blinkmacsystemfont ui-sans-serif";
-    static const char *const mono = "courier couriernew consolas menlo monaco lucidaconsole sourcecodepro dejavusansmono "
-        "liberationmono notosansmono firacode firamono jetbrainsmono ui-monospace sfmono-regular";
+    static const char *const serif = "timesnewroman times";
+    static const char *const sans = "arial helvetica";
+    static const char *const courier = "couriernew courier";
+    static const char *const named = "dejavusans dejavuserif dejavusansmono";
+    int alone = css_comma(s, n, 0) >= n;
     size_t a = 0;
     while (a < n) {
         size_t b = css_comma(s, n, a);
         size_t i = css_skip_ws(s, b, a), e = b;
         while (e > i && css_ws(s[e - 1])) e--;
-        if (e > i && (s[i] == '"' || s[i] == '\'')) { i++; if (e > i && (s[e - 1] == '"' || s[e - 1] == '\'')) e--; }
+        int quoted = e > i && (s[i] == '"' || s[i] == '\'');
+        if (quoted) { i++; if (e > i && (s[e - 1] == '"' || s[e - 1] == '\'')) e--; }
         char w[48];
         size_t k = 0;
         for (size_t j = i; j < e && k + 1 < sizeof w; j++) if (!css_ws(s[j])) w[k++] = css_lower(s[j]);
         w[k] = 0;
-        if (k && faces && faces[0] && css_word_in(w, faces) && k < sizeof v->word) { css_word_val(v, w); return 1; }
-        if (strcmp(w, "serif") == 0 || strcmp(w, "sans-serif") == 0 || strcmp(w, "monospace") == 0) { css_word_val(v, w); return 1; }
+        a = b + 1;
+        if (!k) continue;
+        if (faces && faces[0] && css_word_in(w, faces) && k < sizeof v->word) { css_word_val(v, w); return 1; }
+        if (!quoted) {
+            if (strcmp(w, "serif") == 0 || strcmp(w, "cursive") == 0 || strcmp(w, "fantasy") == 0) { css_word_val(v, "serif"); return 1; }
+            if (strcmp(w, "sans-serif") == 0 || strcmp(w, "system-ui") == 0) { css_word_val(v, "sans-serif"); return 1; }
+            if (strcmp(w, "monospace") == 0) { css_word_val(v, alone ? "monospace" : "dejavusansmono"); return 1; }
+        }
         if (css_word_in(w, serif)) { css_word_val(v, "serif"); return 1; }
         if (css_word_in(w, sans)) { css_word_val(v, "sans-serif"); return 1; }
-        if (css_word_in(w, mono)) { css_word_val(v, "monospace"); return 1; }
-        a = b + 1;
+        if (css_word_in(w, courier)) { css_word_val(v, "couriernew"); return 1; }
+        if (css_word_in(w, named)) { css_word_val(v, w); return 1; }
     }
     return 0;
 }
@@ -3145,31 +3161,37 @@ static size_t css_value_text(const css_val *v, char *buf, size_t cap) {
     return (size_t)n < cap ? (size_t)n : cap - 1;
 }
 
-/* font-size's absolute keywords against the default font size, as Chromium has them: a
-   default of 9 to 16 px through its table (FontSizeFunctions' strict one), another by
-   CSS Fonts 4's scaling factors */
+/* font-size's absolute keywords against the default font size, as Chromium has them
+   (read from it under each default, in standards mode and quirks mode alike): a default
+   of 9 to 16 px through its table, another by CSS Fonts 4's scaling factors, at least
+   its minimum logical font size (6 px) */
 static const int css_size_table[8][8] = {
     { 9, 9, 9, 9, 11, 14, 18, 27 }, { 9, 9, 9, 10, 12, 15, 20, 30 }, { 9, 9, 10, 11, 13, 17, 22, 33 },
-    { 9, 9, 10, 12, 14, 18, 24, 36 }, { 9, 10, 12, 13, 14, 19, 26, 39 }, { 9, 10, 12, 14, 15, 20, 28, 42 },
-    { 9, 10, 13, 15, 16, 21, 30, 45 }, { 9, 10, 13, 16, 18, 24, 32, 48 } };
-static double css_size_of(int k) {
+    { 9, 9, 10, 12, 14, 18, 24, 36 }, { 9, 10, 12, 13, 16, 20, 26, 39 }, { 9, 10, 12, 14, 17, 21, 28, 42 },
+    { 9, 10, 13, 15, 18, 23, 30, 45 }, { 9, 10, 13, 16, 18, 24, 32, 48 } };
+static double css_size_at(int k, double medium) {
     static const double factor[8] = { 0.6, 0.75, 0.89, 1.0, 1.2, 1.5, 2.0, 3.0 };
-    int row = (int)(css_font_px + 0.5);
-    if (css_font_px == (double)row && row >= 9 && row <= 16) return css_size_table[row - 9][k];
-    return css_font_px * factor[k];
+    int row = (int)(medium + 0.5);
+    if (medium == (double)row && row >= 9 && row <= 16) return css_size_table[row - 9][k];
+    double x = medium * factor[k];
+    return x < 6 ? 6 : x;
 }
-/* font-size's keywords (CSS Fonts 4, 2.5), against the parent's size for smaller and larger */
-static double css_size_keyword(const char *w, double parent) {
-    if (strcmp(w, "xx-small") == 0) return css_size_of(0);
-    if (strcmp(w, "x-small") == 0) return css_size_of(1);
-    if (strcmp(w, "small") == 0) return css_size_of(2);
-    if (strcmp(w, "large") == 0) return css_size_of(4);
-    if (strcmp(w, "x-large") == 0) return css_size_of(5);
-    if (strcmp(w, "xx-large") == 0) return css_size_of(6);
-    if (strcmp(w, "xxx-large") == 0) return css_size_of(7);
+/* Chromium's default fixed font size: the medium of a family that is monospace alone */
+#define CSS_FIXED_PX 13.0
+/* the absolute keyword w's column (0 xx-small to 7 xxx-large), or -1 */
+static int css_size_column(const char *w) {
+    static const char *const kws[8] = { "xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "xxx-large" };
+    for (int k = 0; k < 8; k++) if (strcmp(w, kws[k]) == 0) return k;
+    return -1;
+}
+/* font-size's keywords (CSS Fonts 4, 2.5): the absolute ones against the default font
+   size, or the fixed one under a family that is monospace alone (as Chromium's
+   FontSizeForKeyword has them); smaller and larger against the parent's size */
+static double css_size_keyword(const char *w, double parent, int mono) {
     if (strcmp(w, "smaller") == 0) return parent / 1.2;
     if (strcmp(w, "larger") == 0) return parent * 1.2;
-    return css_font_px;
+    int k = css_size_column(w);
+    return css_size_at(k < 0 ? 3 : k, mono ? CSS_FIXED_PX : css_font_px);
 }
 
 /* the text t with every font- and viewport-relative length made px and currentcolor made
@@ -3284,7 +3306,7 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         if (v->unit == CSS_UNIT_EM) v->num *= pfs;
         else if (v->unit == CSS_UNIT_REM) v->num *= env->rem;
         else if (v->unit == CSS_UNIT_PERCENT) v->num = pfs * v->num / 100;
-        else if (v->unit == CSS_UNIT_KEYWORD) v->num = css_size_keyword(v->word, pfs);
+        else if (v->unit == CSS_UNIT_KEYWORD) v->num = css_size_keyword(v->word, pfs, css_is_word(&cur[CSS_PROP_FONT_FAMILY], "monospace"));
         else if (v->unit == CSS_UNIT_CALC || v->unit == CSS_UNIT_EXPR) {
             css_val c = *v;
             if (css_calc_computed(s, p, &c, pfs, env->rem, pfs, color) && c.unit == CSS_UNIT_PX) v->num = c.num;
@@ -3573,9 +3595,10 @@ static int css_var_value(css_style *s, uint32_t dc, css_prop p, vector<css_cust>
 enum { CSS_PF_INH = 1, CSS_PF_CC = 2, CSS_PF_BW = 4 };
 static uint8_t css_pf[CSS_NPROPS];
 
-/* the order values are computed in: font-size first (the em of the others), then color
-   (their currentcolor), position and float before display (which they blockify), the
-   border and outline styles before their widths (none makes a width 0) */
+/* the order values are computed in: font-family, then font-size (the em of the others,
+   whose defaults the family reads), then color (their currentcolor), position and float
+   before display (which they blockify), the border and outline styles before their
+   widths (none makes a width 0) */
 static int css_order[CSS_NPROPS];
 static void css_order_make(void) {
     css_ready = 1;
@@ -3597,7 +3620,7 @@ static void css_order_make(void) {
         }
         css_kwn[p] = (uint8_t)(k > CSS_MAXKW ? CSS_MAXKW + 1 : k);
     }
-    static const int first[] = { CSS_PROP_FONT_SIZE, CSS_PROP_COLOR, CSS_PROP_POSITION, CSS_PROP_FLOAT, CSS_PROP_DISPLAY,
+    static const int first[] = { CSS_PROP_FONT_FAMILY, CSS_PROP_FONT_SIZE, CSS_PROP_COLOR, CSS_PROP_POSITION, CSS_PROP_FLOAT, CSS_PROP_DISPLAY,
                                  CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE,
                                  CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_OUTLINE_STYLE };
     int n = 0, nf = (int)(sizeof first / sizeof first[0]);
@@ -3624,12 +3647,18 @@ static void css_blockify(css_val *v) {
 }
 
 /* the per-style arrays the cascade keeps: values, what they record, custom properties;
-   and each parent style's template (tmpl_of: its index from 1 in tv and tr) */
+   each parent style's template (tmpl_of: its index from 1 in tv and tr); and where each
+   style's font size came from (fsx: CSS_FS_*), which its children's read */
 typedef struct css_styles { vector<uint32_t> first; vector<css_cust> cpool; vector<uint32_t> cfirst; vector<uint32_t> ccount;
-                            vector<uint32_t> tmpl_of; vector<css_val> tv; vector<css_rec> tr; } css_styles;
+                            vector<uint32_t> tmpl_of; vector<css_val> tv; vector<css_rec> tr; vector<uint8_t> fsx; } css_styles;
 #define CSS_STYLES_DROP(x) vector_uint32_t_drop(&(x).first); vector_css_cust_drop(&(x).cpool); \
     vector_uint32_t_drop(&(x).cfirst); vector_uint32_t_drop(&(x).ccount); vector_uint32_t_drop(&(x).tmpl_of); \
-    vector_css_val_drop(&(x).tv); vector_css_rec_drop(&(x).tr)
+    vector_css_val_drop(&(x).tv); vector_css_rec_drop(&(x).tr); vector_uint8_t_drop(&(x).fsx)
+/* a font size's origin, as Chromium's FontDescription keeps it: the absolute keyword it
+   is (its column + 1; 0 for another), whether it is absolute (a length that is not
+   relative to the parent's size, or relative to an absolute one), whether its family is
+   monospace alone. The root's parent's: medium */
+enum { CSS_FS_KW = 0x0f, CSS_FS_ABS = 0x10, CSS_FS_MONO = 0x20, CSS_FS_MEDIUM = 4 };
 
 /* a style's value of p (its cvals from c0), or the initial one under no style, and its record */
 static void css_val_of(const css_style *s, uint32_t c0, css_prop p, const css_val *initial, css_val *v) {
@@ -3714,6 +3743,71 @@ static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const cs
     return ti;
 }
 
+/* whether a calc()'s text is relative to the parent's font size (an em, ex, ch, rem or
+   percentage in it) */
+static int css_text_font_relative(const css_style *s, amb_span tx) {
+    const char *t = text_ptr(s, tx);
+    for (uint32_t i = 0; i < tx.len; i++) {
+        char c = css_lower(t[i]);
+        if (c == '%') return 1;
+        if (i + 1 < tx.len && i > 0 && (css_is_digit(t[i - 1]) || t[i - 1] == '.')) {
+            char d = css_lower(t[i + 1]);
+            if ((c == 'e' && (d == 'm' || d == 'x')) || (c == 'c' && d == 'h') || (c == 'r' && d == 'e')) return 1;
+        }
+    }
+    return 0;
+}
+
+/* an element's font size: its winning declaration's (w), made computed as any value is,
+   or its parent's; then Chromium's rule for a family that is monospace alone
+   (FontBuilder's CheckForGenericFamilyChange): when the element's is and its parent's
+   is not, or the reverse, a size that is not absolute takes the other default -- a
+   keyword's from its table, another scaled by the fixed default over the standard one.
+   A size that rule changes, which no declaration of its own gave, is recorded as its
+   family's declaration gave it (the reasoner's derived values read the declared ones).
+   *fso: the size's origin, for the element's children */
+static void css_font_size(css_style *s, const css_env *env, uint32_t w, uint32_t wfam, const vector<css_cust> *cust, uint32_t pc0,
+                          const css_val *initial, const css_par *pv, uint8_t pfso, int is_root, css_val *out, css_rec *rec,
+                          vector<css_vtext> *vc, uint8_t *fso) {
+    css_prop p = CSS_PROP_FONT_SIZE;
+    int mono = css_word_is(&out[CSS_PROP_FONT_FAMILY], "monospace"), pmono = (pfso & CSS_FS_MONO) != 0;
+    uint8_t o = (uint8_t)(pfso & (CSS_FS_KW | CSS_FS_ABS));
+    css_val v = out[p];
+    css_how how = CSS_HOW_INHERITED;
+    if (w) {
+        css_decl_value(s, w, &v);
+        int valid = v.unit != CSS_UNIT_VAR || css_var_value(s, w, p, cust, &v);
+        int unset = !valid || css_is_word(&v, "unset") || css_is_word(&v, "revert") || css_is_word(&v, "revert-layer");
+        if ((css_is_word(&v, "inherit") || unset) && !is_root) { css_val_of(s, pc0, p, initial, &v); how = CSS_HOW_INHERITED; }
+        else if (css_is_word(&v, "inherit") || unset || css_is_word(&v, "initial")) {
+            v = initial[p];
+            v.num = css_size_at(3, mono ? CSS_FIXED_PX : css_font_px);
+            o = CSS_FS_MEDIUM;
+            how = CSS_HOW_INITIAL;
+        } else {
+            int k = v.unit == CSS_UNIT_KEYWORD ? css_size_column(v.word) : -1;
+            if (k >= 0) o = (uint8_t)(k + 1);
+            else if (v.unit == CSS_UNIT_KEYWORD || v.unit == CSS_UNIT_EM || v.unit == CSS_UNIT_REM || v.unit == CSS_UNIT_PERCENT ||
+                     ((v.unit == CSS_UNIT_CALC || v.unit == CSS_UNIT_EXPR) && css_text_font_relative(s, v.tx))) o = (uint8_t)(pfso & CSS_FS_ABS);
+            else o = CSS_FS_ABS;
+            css_compute(s, env, p, &v, pv, out);
+            how = CSS_HOW_DECLARED;
+        }
+    }
+    int changed = 0;
+    if (!(o & CSS_FS_ABS) && mono != pmono) {
+        int kw = o & CSS_FS_KW;
+        v.num = kw ? css_size_at(kw - 1, mono ? CSS_FIXED_PX : css_font_px) :
+                pmono ? v.num * css_font_px / CSS_FIXED_PX : v.num * CSS_FIXED_PX / css_font_px;
+        changed = 1;
+    }
+    *fso = (uint8_t)(o | (mono ? CSS_FS_MONO : 0));
+    if (!w && !changed) return;
+    if (!w) { w = wfam; how = CSS_HOW_DECLARED; }
+    out[p] = v;
+    rec[p] = css_value_rec(s, &v, how, w, vc);
+}
+
 /* an element's computed values from its matched rules' declarations under the parent
    style ps (0 at the root, whose parent values are the initial ones): its template, then
    each declaration that won made computed, and what those change of the values that hang
@@ -3721,7 +3815,7 @@ static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const cs
    into out and rec, its custom properties into cust */
 static void css_element(css_style *s, const css_env *env, const vector<uint32_t> *matched, css_styles *ss, uint32_t ps,
                         const css_val *initial, const css_rec *irec, int is_root, css_val *out, css_rec *rec, vector<css_cust> *cust,
-                        vector<css_vtext> *vc) {
+                        vector<css_vtext> *vc, uint8_t *fso) {
     uint32_t win[CSS_NPROPS];
     uint64_t best[CSS_NPROPS];
     memset(win, 0, sizeof win);
@@ -3793,6 +3887,10 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         (*cust)[q] = c;
     }
     for (uint32_t q = 0; q < (uint32_t)len(*cust); q++) if (at(*cust, q).state == 0) css_resolve_custom(s, cust, q, 0);
+    /* the parent's font size's origin: an element that declares nothing has its size and
+       family, and so its origin */
+    uint8_t pfso = ps && ps < len(ss->fsx) ? at(ss->fsx, ps) : (uint8_t)CSS_FS_MEDIUM;
+    *fso = pfso;
     if (!any) return;
     /* the properties a declaration won, in the order they depend on each other; the
        parent's values (the initial ones, at the root) read from its cvals */
@@ -3802,6 +3900,7 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
         css_prop p = (css_prop)css_order[oi];
         uint32_t w = win[p];
+        if (p == CSS_PROP_FONT_SIZE) { css_font_size(s, env, w, win[CSS_PROP_FONT_FAMILY], cust, pc0, initial, &pv, pfso, is_root, out, rec, vc, fso); continue; }
         if (!w) continue;
         css_val v;
         css_how how;
@@ -4095,7 +4194,8 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
     if (!sid) {
         css_val out[CSS_NPROPS];
         css_rec rec[CSS_NPROPS];
-        css_element(s, env, matched, ss, ps, initial, irec, is_root, out, rec, cust, vc);
+        uint8_t fso = 0;
+        css_element(s, env, matched, ss, ps, initial, irec, is_root, out, rec, cust, vc, &fso);
         if (is_root) env->rem = out[CSS_PROP_FONT_SIZE].num;      /* the root's size: the rem of the rest */
         sid = (uint32_t)len(ss->first);
         push_back(ss->cfirst, (uint32_t)len(ss->cpool));
@@ -4130,6 +4230,7 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
             css_put(s, sid, CSS_PROP_CUSTOM, &cv, cr);
         }
         push_back(ss->first, first);
+        push_back(ss->fsx, fso);
     }
     return sid;
 }
@@ -4257,6 +4358,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     css_styles ss = {0};
     defer(ss) { CSS_STYLES_DROP(ss); }
     resize(&ss.first, 1);
+    resize(&ss.fsx, 1);
     resize(&ss.cfirst, 1);
     resize(&ss.ccount, 1);
     vector<css_skey> se;

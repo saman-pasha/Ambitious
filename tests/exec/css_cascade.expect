@@ -98,7 +98,13 @@ ok   font: its size: font_size 20px
 ok   font: its line height: line_height 2
 ok   font: what it leaves out, reset: font_weight 400
 ok   font: its family: font_family sans-serif
-ok   font-family: a name it knows: font_family serif
+ok   font-family: names of faces it has not, passed over: font_family sans-serif
+ok   font-family: a name fontconfig aliases: font_family couriernew
+ok   font-family: a built-in face by its name: font_family dejavusans
+ok   font-family: a quoted generic name is a name: font_family serif
+ok   font-family: monospace in a longer list: font_family dejavusansmono
+ok   font-family: cursive, the default face: font_family serif
+ok   font-family: none of the list, the default: font_family serif
 ok   font-family: the UA's monospace: font_family monospace
 ok   font-family: inherited, serif at the root: font_family serif
 ok   font: without a size, dropped: font_weight 700
@@ -277,4 +283,4 @@ ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-279 of 279 cases
+285 of 285 cases

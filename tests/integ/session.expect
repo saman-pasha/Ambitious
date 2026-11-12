@@ -34,11 +34,11 @@ L = n(1,23,0), V = 'rgb(0, 0, 0)', H = inherited
 L = n(1,29,1), V = 'rgb(187, 0, 0)', H = declared
 L = n(1,40,0), V = 'rgb(187, 0, 0)', H = declared
 > query dom_element(L, li), layout_box_of(L, B), layout_border_box(B, X, Y, W, H)
-L = n(1,20,1), B = bx(1,6,0), X = 56, Y = 80.88, W = 728, H = 19
-L = n(1,21,0), B = bx(1,7,0), X = 56, Y = 99.88, W = 728, H = 19
-L = n(1,23,0), B = bx(1,8,0), X = 56, Y = 118.88, W = 728, H = 19
-L = n(1,29,1), B = bx(1,10,0), X = 56, Y = 156.88, W = 728, H = 19
-L = n(1,40,0), B = bx(1,9,0), X = 56, Y = 137.88, W = 728, H = 19
+L = n(1,20,1), B = bx(1,6,0), X = 56, Y = 79.88, W = 728, H = 18
+L = n(1,21,0), B = bx(1,7,0), X = 56, Y = 97.88, W = 728, H = 18
+L = n(1,23,0), B = bx(1,8,0), X = 56, Y = 115.88, W = 728, H = 18
+L = n(1,29,1), B = bx(1,10,0), X = 56, Y = 151.88, W = 728, H = 18
+L = n(1,40,0), B = bx(1,9,0), X = 56, Y = 133.88, W = 728, H = 18
 > query a11y_node(A, E, R, Nm, F), dom_element(E, li)
 A = ax(1,4,0), E = n(1,20,1), R = listitem, Nm = '', F = nothing
 A = ax(1,5,0), E = n(1,21,0), R = listitem, Nm = '', F = nothing

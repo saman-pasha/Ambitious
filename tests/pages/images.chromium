@@ -1,0 +1,24 @@
+# boxes of tests/pages/images.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+b1 h1 12 12 776 23
+b2 p 12 43 776 15
+b3 div 12 62 776 124
+b4 img 12 62 160 120
+b5 img 178 80 154 102
+b6 img 338 139 61 43
+b7 img 405 139 61 43
+b8 img 472 132 66 50
+b9 p 12 194 776 15
+b10 div 12 213 776 78
+b11 img 12 245 90 42
+b12 img 108 229 62 58
+b13 img 176 236 77 51
+b14 img 259 241 74 46
+b15 img 339 213 46 74
+b16 p 12 299 776 15
+b17 div 12 318 776 112
+b18 span 12 369 124 61
+b19 img 18 390 40 30
+b20 img 64 375 60 45
+b21 img 140.453 318 42 102
+b22 img 188.453 360 90 60
+b23 img 284.453 380 50 40

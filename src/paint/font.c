@@ -1,9 +1,10 @@
 /* src/paint/font.c -- the fonts (font.h): TrueType read, measured, and its glyphs
    drawn as coverage masks.
 
-   One reader serves every face. The built-in six are TrueType subsets of DejaVu
-   (font_data.h, tools/gen-font.py), decoded from base64 and read once a process
-   into static tables, which each amb_fonts_load copies. A page's web font is read
+   One reader serves every face. The built-in twelve are TrueType subsets of the
+   Liberation and DejaVu fonts (font_data.h, tools/gen-font.py), decoded from base64
+   and read once a process into static tables, which each amb_fonts_load copies; each
+   names the face it falls back to for a code point it has no glyph for (font.h). A page's web font is read
    when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
    code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
    hhea and OS/2, kerning pairs from kern (format 0); its outlines (glyf, through
@@ -35,9 +36,9 @@ static int amb_tag(const uint8_t *p, size_t n, size_t off, const char *t) {
 
 /* ---- the built-in faces, decoded and read once a process ---- */
 
-#define AMB_POOL 262144
-#define AMB_BI_GLYPHS 2048
-#define AMB_BI_KERNS 6144
+#define AMB_POOL AMB_FONT_BYTES
+#define AMB_BI_GLYPHS AMB_FONT_GLYPHS
+#define AMB_BI_KERNS AMB_FONT_KERNS
 static uint8_t amb_pool[AMB_POOL];
 static uint32_t amb_pool_len;
 static amb_glyph amb_bi_glyphs[AMB_BI_GLYPHS];
@@ -298,9 +299,10 @@ void amb_fonts_load(amb_fonts *f) {
     clear(f->bytes);
     memset(f->face, 0, sizeof f->face);
     if (!amb_bi_ready) {
-        /* the first load: the six decoded, read, and their tables kept */
-        static const char *const which[AMB_NFACES] = { amb_font_sans, amb_font_sans_bold, amb_font_serif, amb_font_serif_bold,
-                                                      amb_font_mono, amb_font_mono_bold };
+        /* the first load: the twelve decoded, read, and their tables kept */
+        static const char *const which[AMB_NFACES] = { amb_font_serif, amb_font_serif_bold, amb_font_sans, amb_font_sans_bold,
+                                                      amb_font_courier, amb_font_courier_bold, amb_font_dv_sans, amb_font_dv_sans_bold,
+                                                      amb_font_dv_serif, amb_font_dv_serif_bold, amb_font_mono, amb_font_mono_bold };
         vector<amb_glyph> gl;
         vector<amb_kern> kn;
         for (int k = 0; k < AMB_NFACES; k++) {
@@ -334,10 +336,24 @@ int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
     return (int)f->nfaces - 1;
 }
 
-int amb_face_for(int family, int bold) {
-    if (family == 0) return bold ? AMB_FACE_SANS_BOLD : AMB_FACE_SANS;
-    if (family == 2) return bold ? AMB_FACE_MONO_BOLD : AMB_FACE_MONO;
-    return bold ? AMB_FACE_SERIF_BOLD : AMB_FACE_SERIF;
+int amb_face_named(const char *family, int bold) {
+    static const char *const names[6] = { "serif", "sans-serif", "couriernew", "dejavusans", "dejavuserif", "monospace" };
+    for (int k = 0; k < 6; k++)
+        if (strcmp(family, names[k]) == 0) return 2 * k + (bold ? 1 : 0);
+    if (strcmp(family, "dejavusansmono") == 0) return bold ? AMB_FACE_MONO_BOLD : AMB_FACE_MONO;
+    return -1;
+}
+
+/* the face each built-in face falls back to for a code point it has no glyph for (-1
+   none), as Chromium's do on a machine with these fonts: Liberation's to DejaVu Sans,
+   DejaVu Serif's and DejaVu Sans Mono's to Liberation Serif (then on to DejaVu Sans) */
+static const int8_t amb_next_face[AMB_NFACES] = {
+    AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD, AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD, AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD,
+    -1, -1, AMB_FACE_SERIF, AMB_FACE_SERIF_BOLD, AMB_FACE_SERIF, AMB_FACE_SERIF_BOLD };
+
+double amb_x_height(int face) {
+    static const double xh[AMB_NFACES] = { 0.4590, 0.4590, 0.5283, 0.5283, 0.5283, 0.5283, 0.547, 0.547, 0.519, 0.519, 0.545, 0.545 };
+    return face >= 0 && face < AMB_NFACES ? xh[face] : 0.5;
 }
 
 /* ---- measuring ---- */
@@ -351,16 +367,43 @@ void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, do
     *gap = amb_round(f->face[face].gap * s);
 }
 
-uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp) {
-    if (cp < 128 && f->face[face].ascii[cp] != 0xffff) return f->face[face].first + f->face[face].ascii[cp];
+/* the glyph of cp among the face's own (its index in f->glyphs into *g): 1, or 0 when
+   the face has none -- U+00A0 drawn as a space and U+2011 as U+2010 when the face has
+   no glyph of its own for them (HarfBuzz's fallbacks) */
+static int amb_own_glyph(const amb_fonts *f, int face, uint32_t cp, uint32_t *g) {
+    if (cp < 128) {
+        if (f->face[face].ascii[cp] == 0xffff) return 0;
+        *g = f->face[face].first + f->face[face].ascii[cp];
+        return 1;
+    }
     uint32_t lo = f->face[face].first, hi = lo + f->face[face].count;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2;
         uint32_t c = f->glyphs[mid].cp;
-        if (c == cp) return mid;
+        if (c == cp) { *g = mid; return 1; }
         if (c < cp) lo = mid + 1; else hi = mid;
     }
-    if (cp == 0xA0) return amb_glyph_of(f, face, 0x20);
+    if (cp == 0xA0) return amb_own_glyph(f, face, 0x20, g);
+    if (cp == 0x2011) return amb_own_glyph(f, face, 0x2010, g);
+    return 0;
+}
+
+uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by) {
+    uint32_t g;
+    *drawn_by = face;
+    if (amb_own_glyph(f, face, cp, &g)) return g;
+    /* the fallbacks, a built-in face's, at most so many */
+    int fc = face < AMB_NFACES ? amb_next_face[face] : -1;
+    for (int hop = 0; hop < 4 && fc >= 0; hop++) {
+        if (amb_own_glyph(f, fc, cp, &g)) { *drawn_by = fc; return g; }
+        fc = amb_next_face[fc];
+    }
+    /* none has it: the replacement glyph, U+FFFD's from the face or its fallbacks */
+    if (cp != 0xFFFD) {
+        g = amb_glyph_of(f, face, 0xFFFD, drawn_by);
+        if (f->glyphs[g].cp == 0xFFFD) return g;
+    }
+    *drawn_by = face;
     return f->face[face].fallback;
 }
 
@@ -380,11 +423,16 @@ static int32_t amb_kern_units(const amb_fonts *f, int face, uint32_t a, uint32_t
 }
 
 double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size) {
-    return f->glyphs[amb_glyph_of(f, face, cp)].advance * size / f->face[face].upem;
+    int by;
+    uint32_t g = amb_glyph_of(f, face, cp, &by);
+    return f->glyphs[g].advance * size / f->face[by].upem;
 }
 
 double amb_kern(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size) {
-    return amb_kern_units(f, face, amb_glyph_of(f, face, left), amb_glyph_of(f, face, right)) * size / f->face[face].upem;
+    int lb, rb;
+    uint32_t a = amb_glyph_of(f, face, left, &lb), b = amb_glyph_of(f, face, right, &rb);
+    if (lb != face || rb != face) return 0;
+    return amb_kern_units(f, face, a, b) * size / f->face[face].upem;
 }
 
 uint32_t amb_utf8_next(const char *s, size_t n, size_t *i) {
@@ -408,16 +456,32 @@ uint32_t amb_utf8_next(const char *s, size_t n, size_t *i) {
 
 double amb_text_width(const amb_fonts *f, int face, double size, const char *s, size_t n) {
     int64_t units = 0;
+    double other = 0;                           /* the glyphs fallback faces draw, in px */
     uint32_t prev = 0xffffffffu;
     size_t i = 0;
     while (i < n) {
         uint32_t cp = (uint8_t)s[i] < 0x80 ? (uint32_t)(uint8_t)s[i++] : amb_utf8_next(s, n, &i);
-        uint32_t g = amb_glyph_of(f, face, cp);
+        int by;
+        uint32_t g = amb_glyph_of(f, face, cp, &by);
+        if (by != face) { other += f->glyphs[g].advance * size / f->face[by].upem; prev = 0xffffffffu; continue; }
         units += f->glyphs[g].advance;
         if (prev != 0xffffffffu) units += amb_kern_units(f, face, prev, g);
         prev = g;
     }
-    return (double)units * size / f->face[face].upem;
+    return (double)units * size / f->face[face].upem + other;
+}
+
+uint32_t amb_text_fallbacks(const amb_fonts *f, int face, const char *s, size_t n) {
+    uint32_t mask = 0;
+    size_t i = 0;
+    while (i < n) {
+        if ((uint8_t)s[i] < 0x80) { i++; continue; }        /* every built-in face has ASCII's */
+        uint32_t cp = amb_utf8_next(s, n, &i);
+        int by;
+        amb_glyph_of(f, face, cp, &by);
+        if (by != face && by < AMB_NFACES) mask |= 1u << by;
+    }
+    return mask;
 }
 
 /* ---- outlines: a glyph's points from glyf ---- */
@@ -582,8 +646,9 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     *h = 0;
     *ox = 0;
     *oy = 0;
-    amb_glyph g = at(f->glyphs, amb_glyph_of(f, face, cp));
-    amb_face fc = f->face[face];
+    int by;
+    amb_glyph g = at(f->glyphs, amb_glyph_of(f, face, cp, &by));
+    amb_face fc = f->face[by];
     vector<amb_pt> pts;
     if (fc.builtin) amb_outline(amb_pool + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);

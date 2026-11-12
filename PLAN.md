@@ -672,7 +672,12 @@ be built side by side and merged without touching each other's.
     writing modes and bidirectional text; hyphenation; kerning.
   - Paint: border styles, background images, box and text shadows, opacity,
     transforms, clipping; the fonts a page asks for (TrueType parsed at
-    load).
+    load); the built-in faces Chromium draws with on Linux (subsets of
+    Liberation Serif, Sans and Mono for serif, sans-serif and their
+    fontconfig aliases, of DejaVu for monospace and by name), each code point
+    a face lacks drawn by the face Chromium falls back to, with Chromium's
+    line metrics for fallback glyphs, its leading and its monospace default
+    size (13px).
 - **12g JavaScript** (`src/js/`):
   - Promises and the microtask queue; async functions and `await`;
     generators;
