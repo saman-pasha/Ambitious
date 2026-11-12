@@ -793,6 +793,37 @@ be built side by side and merged without touching each other's.
   - tabs, and sessions restored into them;
   - preferences that change rendering: base font size, colour scheme,
     reduced motion, zoom.
+- **12o SVG** (`src/paint/svg.c`, `src/paint/svg.h`; SVG's properties in
+  `contracts/css.pl`, the box's `svg` scene in `contracts/layout.pl`):
+  - the cascade computes SVG's properties (fill and stroke, their opacities,
+    the stroke's width, caps, joins, miter limit, dashes and offset, the fill
+    and clip rules, stop-color and -opacity, clip-path, text-anchor), reads
+    presentation attributes as author rules of specificity 0 (a bare number a
+    length's px), and the outermost svg's width and height as its box's;
+  - layout sizes an svg as Chromium does (its natural size and its viewBox's
+    ratio; inline, a block or positioned) and makes its subtree a scene in
+    user space: every shape and path command (arcs too), transforms (the
+    attribute's, a declared CSS one's), viewBoxes and preserveAspectRatio,
+    nested svgs, use and symbol (a use's tree inheriting from it), gradients
+    and clips resolved (objectBoundingBox through the element's box), text
+    and tspan placed (x, y, dx, dy lists, text-anchor by chunks);
+  - paint draws a scene as Skia does: curves flattened at the device's px,
+    strokes made outlines (joins with their tangents' miter limit, caps, a
+    hairline's alpha), dashes cut where SkDashPath cuts them over
+    SkContourMeasure's chords, coverage over sixteen rows a pixel under either
+    fill rule, groups with an opacity or a clip drawn in layers (a clip-path's
+    mask times its bounding box's, as Blink's two clips multiply), the svg's
+    content at whole CSS px;
+  - SVG documents as images (img, CSS backgrounds, picture's sources): read
+    by a small XML parser into a document of their own, cascaded with their
+    own style elements, drawn at their natural size scaled into the box (a
+    viewBox alone fitted into it), their natural size the loader's fact.
+
+  Gate: `tests/pages/svg.html`, `svg-paint.html`, `svg-text.html`,
+  `svg-image.html` and, zoomed 1.5, `svg-zoom.html`, each held to Chromium's
+  screenshot region by region (`tests/integ/paintref.sh`: 37, 40, 9, 11 and
+  9 regions agree); `tests/exec/svg_render` (path data, coverage, natural
+  sizes, scenes, hostile documents; valgrind clean).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
