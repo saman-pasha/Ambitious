@@ -26,7 +26,7 @@ I = _, L = _, N = 120
 ambitious: the reasoner ended, killed by its CPU time limit (SIGXCPU) (signal 24), asked to query
 -- in a session: the reasoner ended, then started again; one that does not answer in time:
 > open ROOT/tests/pages/counter.html
-page: file://ROOT/tests/pages/counter.html
+tab 1: file://ROOT/tests/pages/counter.html  'Counter'
 > query dom_attr(N, id, count), dom_text_content(N, T)
 N = n(1,20,0), T = '0'
 > query repeat, fail

@@ -1,6 +1,6 @@
 -- the session (every fact it holds left out):
 > open ROOT/tests/integ/session/cart.html
-page: file://ROOT/tests/integ/session/cart.html
+tab 1: file://ROOT/tests/integ/session/cart.html  'A cart'
 > query dom_element(L, li), dom_text_content(L, T)
 L = n(1,19,0), T = apple
 L = n(1,21,0), T = banana

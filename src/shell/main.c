@@ -1032,22 +1032,278 @@ static void session_reasoner(const amb_reasoner *r) {
         if (strncmp(line, "VmRSS:", 6) == 0 && getenv("AMB_TIMES")) fprintf(stderr, "ambitious: the reasoner's memory, %s", line + 6);
 }
 
-#define SESSION_QUIT 0
-#define SESSION_OPEN 1
+/* ---- the session's tabs (Phase 12i, 3) ----
+   A session holds up to AMB_TABS tabs, each a history of pages and a reasoner of its own
+   (s->rs[slot]). One reasoner a tab, not one for all of them: the rules speak of one
+   document (dom_root/1, every diagnostic), a page's facts stay apart from another's, a
+   reasoner that ends (its limits, its filter) ends one tab's, and each page's snapshot
+   reaches its own reasoner as a delta. One page is live at a time, the current tab's:
+   its stores are session_page's, and a tab made current again is loaded again with its
+   clicks made again, as a browser that discards a background tab reloads it, while its
+   reasoner keeps the facts it held, so the page reaches it as a delta (none at all when
+   nothing changed). The profile keeps the tabs (prolog/amb/profile.pl): `quit' saves
+   them as the session `last', unless it is private, and `loop --restore' opens them. */
 
-/* a session's page: url loaded (none when empty), then the commands read from in run
-   over it, until one asks for another page (its URL into next) or the input ends. The
-   page's stores live here, and its reasoner in the session */
-static int session_page(session *s, const char *url, FILE *in, int echo, char *next, size_t cap) {
+/* a tab: its number (the profile keeps it), its reasoner's slot, the page of its
+   history it shows (from 1) */
+typedef struct tab_rec { uint32_t id, slot, at; } tab_rec;
+/* a page of a tab's history: its URL and title in the session's text, and how it
+   loaded when the tab last showed it: 0 not known, 1 ok, 2 failed, why */
+typedef struct entry_rec { uint32_t tab, url_off, url_len, title_off, title_len; int loaded; char why[64]; } entry_rec;
+/* a click made in a tab's page since it was loaded, made again when it is loaded again */
+typedef struct click_rec { uint32_t tab, off, len; } click_rec;
+
+/* the index in entries of tab id's i-th page (from 1), or UINT32_MAX */
+static uint32_t tab_entry(const vector<entry_rec> *entries, uint32_t id, uint32_t i) {
+    uint32_t k = 0;
+    for (size_t e = 0; e < len(*entries); e++)
+        if (at(*entries, e).tab == id && ++k == i) return (uint32_t)e;
+    return UINT32_MAX;
+}
+
+/* the pages of tab id's history */
+static uint32_t tab_pages(const vector<entry_rec> *entries, uint32_t id) {
+    uint32_t k = 0;
+    for (size_t e = 0; e < len(*entries); e++) if (at(*entries, e).tab == id) k++;
+    return k;
+}
+
+/* a page put last in tab id's history */
+static void tab_push(vector<entry_rec> *entries, vector<char> *pool, uint32_t id, const char *url, size_t ul, const char *title, size_t tl) {
+    entry_rec x;
+    memset(&x, 0, sizeof x);
+    x.tab = id;
+    x.url_off = (uint32_t)len(*pool);
+    x.url_len = (uint32_t)ul;
+    append_range(pool, url, ul);
+    x.title_off = (uint32_t)len(*pool);
+    x.title_len = (uint32_t)tl;
+    append_range(pool, title, tl);
+    push_back(entries, x);
+}
+
+/* tab id's history cut after its keep-th page (all of it for 0) */
+static void tab_cut(vector<entry_rec> *entries, uint32_t id, uint32_t keep) {
+    vector<entry_rec> kept;
+    uint32_t k = 0;
+    for (size_t e = 0; e < len(*entries); e++) {
+        entry_rec x = at(*entries, e);
+        if (x.tab != id || ++k <= keep) push_back(kept, x);
+    }
+    clear(*entries);
+    for (size_t e = 0; e < len(kept); e++) push_back(entries, at(kept, e));
+}
+
+/* the clicks made in tab id's page, forgotten */
+static void tab_unclick(vector<click_rec> *clicks, uint32_t id) {
+    vector<click_rec> kept;
+    for (size_t c = 0; c < len(*clicks); c++) if (at(*clicks, c).tab != id) push_back(kept, at(*clicks, c));
+    clear(*clicks);
+    for (size_t c = 0; c < len(kept); c++) push_back(clicks, at(kept, c));
+}
+
+/* a reasoner's slot no tab holds, or -1 */
+static int tab_free_slot(const vector<tab_rec> *tabs) {
+    for (int sl = 0; sl < AMB_TABS; sl++) {
+        int used = 0;
+        for (size_t t = 0; t < len(*tabs); t++) if (at(*tabs, t).slot == (uint32_t)sl) used = 1;
+        if (!used) return sl;
+    }
+    return -1;
+}
+
+/* a tab opened at url, last; its number from 1, or 0 when no reasoner's slot is free */
+static uint32_t tab_open(vector<tab_rec> *tabs, vector<entry_rec> *entries, vector<char> *pool, const char *url, size_t ul, const char *title,
+                         size_t tl) {
+    int sl = tab_free_slot(tabs);
+    if (sl < 0) return 0;
+    uint32_t id = 1;
+    for (size_t t = 0; t < len(*tabs); t++) if (at(*tabs, t).id >= id) id = at(*tabs, t).id + 1;
+    tab_rec r = { id, (uint32_t)sl, 1 };
+    push_back(tabs, r);
+    tab_push(entries, pool, id, url, ul, title, tl);
+    return (uint32_t)len(*tabs);
+}
+
+/* the tabs, a line each: * the current one, its number, its page and title, where that
+   is in its history, how it loaded */
+static void tabs_list(const vector<tab_rec> *tabs, const vector<entry_rec> *entries, const vector<char> *pool, uint32_t cur) {
+    printf("%zu tab(s)\n", len(*tabs));
+    for (size_t t = 0; t < len(*tabs); t++) {
+        tab_rec r = at(*tabs, t);
+        uint32_t e = tab_entry(entries, r.id, r.at);
+        if (e == UINT32_MAX) continue;
+        entry_rec x = at(*entries, e);
+        printf("%c %zu  %.*s  '%.*s'  page %u of %u, ", t == cur ? '*' : ' ', t + 1, (int)x.url_len, data(*pool) + x.url_off, (int)x.title_len,
+               data(*pool) + x.title_off, r.at, tab_pages(entries, r.id));
+        if (x.loaded == 1) printf("loaded\n");
+        else if (x.loaded == 2) printf("failed to load: %s\n", x.why);
+        else printf("not loaded yet\n");
+    }
+}
+
+/* the current tab's history, a line each, > the page it shows */
+static void tab_history(const vector<tab_rec> *tabs, const vector<entry_rec> *entries, const vector<char> *pool, uint32_t cur) {
+    tab_rec r = at(*tabs, cur);
+    for (uint32_t i = 1; i <= tab_pages(entries, r.id); i++) {
+        entry_rec x = at(*entries, tab_entry(entries, r.id, i));
+        printf("%c %u  %.*s  '%.*s'\n", i == r.at ? '>' : ' ', i, (int)x.url_len, data(*pool) + x.url_off, (int)x.title_len, data(*pool) + x.title_off);
+    }
+}
+
+/* the tabs as the keeper reads them (prolog/amb/profile.pl, save_tabs): tab(Id, Order,
+   At), entry(Id, I, Url, Title), loaded(Id, I, ok | failed(Why)), current(Id) */
+static int tabs_write(const char *path, const vector<tab_rec> *tabs, const vector<entry_rec> *entries, const vector<char> *pool, uint32_t cur) {
+    own FILE *f = fopen(path, "w");
+    if (!f) return 0;
+    defer(f) { fclose(f); }
+    for (size_t t = 0; t < len(*tabs); t++) {
+        tab_rec r = at(*tabs, t);
+        fprintf(f, "tab(%u, %zu, %u).\n", r.id, t + 1, r.at);
+        for (uint32_t i = 1; i <= tab_pages(entries, r.id); i++) {
+            entry_rec x = at(*entries, tab_entry(entries, r.id, i));
+            fprintf(f, "entry(%u, %u, ", r.id, i);
+            amb_put_qatom(f, data(*pool) + x.url_off, x.url_len);
+            fputs(", ", f);
+            amb_put_qatom(f, data(*pool) + x.title_off, x.title_len);
+            fputs(").\n", f);
+            if (x.loaded == 1) fprintf(f, "loaded(%u, %u, ok).\n", r.id, i);
+            if (x.loaded == 2) {
+                fprintf(f, "loaded(%u, %u, failed(", r.id, i);
+                amb_put_qatom(f, x.why, strlen(x.why));
+                fputs(")).\n", f);
+            }
+        }
+    }
+    if (len(*tabs)) fprintf(f, "current(%u).\n", at(*tabs, cur).id);
+    return 1;
+}
+
+/* the tabs kept in the profile as the session name: none in a private session, or
+   with no profile */
+static void session_save(session *s, const char *name, const vector<tab_rec> *tabs, const vector<entry_rec> *entries, const vector<char> *pool,
+                         uint32_t cur, int asked) {
+    if (s->private_mode) { if (asked) printf("a private session is never stored\n"); return; }
+    if (!s->profile[0]) { if (asked) printf("no profile: nothing is kept (--profile DIR)\n"); return; }
+    char file[700], out[700], when[32];
+    session_path(s, "tabs.pl", file, sizeof file);
+    session_path(s, "profile.out", out, sizeof out);
+    if (!tabs_write(file, tabs, entries, pool, cur)) { printf("the session could not be written\n"); return; }
+    snprintf(when, sizeof when, "%lld", now_seconds());
+    if (keep(s, "save_tabs", name, file, when, out) == 0) print_file(out, "");
+}
+
+/* the profile's session name opened as the tabs: tab(Id, At), entry(Id, I, Url, Title),
+   loaded(Id, I, ok | Why), current(Id), a line each, as the keeper writes them */
+static void session_restore(session *s, const char *name, vector<tab_rec> *tabs, vector<entry_rec> *entries, vector<char> *pool, uint32_t *cur) {
+    if (s->private_mode) { printf("a private session restores no session\n"); return; }
+    char out[700];
+    session_path(s, "profile.out", out, sizeof out);
+    vector<char> text;
+    if (keep(s, "tabs", name, 0, 0, out) != 0 || !read_all(out, &text)) { printf("no profile: no session to restore\n"); return; }
+    const char *t = data(text);
+    size_t start = 0, bad = 0;
+    for (size_t i = 0; i < len(text); i++) {
+        if (t[i] != '\n') continue;
+        int64_t a = 0, b = 0;
+        char u[4096], ti[1024];
+        size_t ul = 0, tl = 0;
+        int done = 0;
+        size_t p = start;
+        if (amb_lex_word(t, i, &p, "tab") && amb_lex_char(t, i, &p, '(') && amb_lex_int(t, i, &p, &a) && amb_lex_char(t, i, &p, ',') &&
+            amb_lex_int(t, i, &p, &b)) {
+            int sl = tab_free_slot(tabs);
+            if (sl >= 0) { tab_rec r = { (uint32_t)a, (uint32_t)sl, (uint32_t)b }; push_back(tabs, r); }
+            done = 1;
+        }
+        p = start;
+        if (!done && amb_lex_word(t, i, &p, "entry") && amb_lex_char(t, i, &p, '(') && amb_lex_int(t, i, &p, &a) && amb_lex_char(t, i, &p, ',') &&
+            amb_lex_int(t, i, &p, &b) && amb_lex_char(t, i, &p, ',') && amb_lex_atom(t, i, &p, u, sizeof u, &ul) && amb_lex_char(t, i, &p, ',') &&
+            amb_lex_atom(t, i, &p, ti, sizeof ti, &tl)) {
+            tab_push(entries, pool, (uint32_t)a, u, ul, ti, tl);
+            done = 1;
+        }
+        p = start;
+        if (!done && amb_lex_word(t, i, &p, "loaded") && amb_lex_char(t, i, &p, '(') && amb_lex_int(t, i, &p, &a) && amb_lex_char(t, i, &p, ',') &&
+            amb_lex_int(t, i, &p, &b) && amb_lex_char(t, i, &p, ',') && amb_lex_atom(t, i, &p, u, sizeof u, &ul)) {
+            uint32_t e = tab_entry(entries, (uint32_t)a, (uint32_t)b);
+            if (e != UINT32_MAX) {
+                entry_rec x = at(*entries, e);
+                x.loaded = ul == 2 && memcmp(u, "ok", 2) == 0 ? 1 : 2;
+                snprintf(x.why, sizeof x.why, "%.*s", (int)ul, u);
+                if (x.loaded == 1) x.why[0] = 0;
+                (*entries)[e] = x;
+            }
+            done = 1;
+        }
+        p = start;
+        if (!done && amb_lex_word(t, i, &p, "current") && amb_lex_char(t, i, &p, '(') && amb_lex_int(t, i, &p, &a)) {
+            for (size_t k = 0; k < len(*tabs); k++) if (at(*tabs, k).id == (uint32_t)a) *cur = (uint32_t)k;
+            done = 1;
+        }
+        if (!done) bad++;
+        start = i + 1;
+    }
+    /* a tab whose shown page its history lacks shows its last */
+    for (size_t k = 0; k < len(*tabs); k++) {
+        tab_rec r = at(*tabs, k);
+        uint32_t n = tab_pages(entries, r.id);
+        if (n && (r.at < 1 || r.at > n)) { r.at = n; (*tabs)[k] = r; }
+    }
+    if (*cur >= len(*tabs)) *cur = 0;
+    printf("restored %zu tab(s) of the session %s%s\n", len(*tabs), name, bad ? ", some lines unread" : "");
+    if (len(*tabs)) tabs_list(tabs, entries, pool, *cur);
+}
+
+#define SESSION_QUIT 0
+#define SESSION_SWITCH 1
+
+/* the current tab's page loaded (none when there are no tabs), its clicks made again,
+   then the commands read from in run over it, until one makes another tab current or
+   another page the tab's, or the input ends. The page's stores live here; the tab's
+   reasoner is the session's (s->use) */
+static int session_page(session *s, vector<tab_rec> *tabs, vector<entry_rec> *entries, vector<click_rec> *clicks, vector<char> *pool,
+                        uint32_t *cur, FILE *in, int echo) {
     PAGE_STORES;
-    int loaded = url[0] && load_page(s, url, PAGE_ARGS) != 0;
-    int dirty = 1;
-    char snap[700], out[700], line[8192];
+    int loaded = 0, dirty = 1;
+    char snap[700], out[700], line[8192], url[4200];
     session_path(s, "page.pl", snap, sizeof snap);
     session_path(s, "answer.txt", out, sizeof out);
-    if (loaded) {
-        amb_span pu = nt.resource[1].final_url;
-        printf("page: %.*s\n", (int)pu.len, text_ptr(&nt, pu));
+    s->use = -1;
+    uint32_t tid = 0;
+    if (len(*tabs)) {
+        tab_rec t = at(*tabs, *cur);
+        tid = t.id;
+        s->use = (int)t.slot;
+        uint32_t e = tab_entry(entries, t.id, t.at);
+        entry_rec x = at(*entries, e);
+        snprintf(url, sizeof url, "%.*s", (int)x.url_len, data(*pool) + x.url_off);
+        fflush(stdout);                    /* what was said before what the loader says */
+        loaded = load_page(s, url, PAGE_ARGS) != 0;
+        if (loaded) {
+            char title[512];
+            page_title(&d, title, sizeof title);
+            x.loaded = 1;
+            x.why[0] = 0;
+            x.title_off = (uint32_t)len(*pool);
+            x.title_len = (uint32_t)strlen(title);
+            append_range(pool, title, strlen(title));
+            /* the clicks made in the page before, made again */
+            for (size_t c = 0; c < len(*clicks); c++) {
+                click_rec k = at(*clicks, c);
+                if (k.tab != t.id) continue;
+                uint32_t el = script_select(&d, data(*pool) + k.off, k.len);
+                if (el) { script_click(&vm, el, SCRIPT_HORIZON); script_settle(&vm); }
+            }
+            printf("tab %u: %s  '%s'\n", *cur + 1, url, title);
+        } else {
+            x.loaded = 2;
+            snprintf(x.why, sizeof x.why, "%s", "not_fetched");
+            for (uint32_t r = 1; r < nt.resource_len; r++)
+                if (nt.resource[r].live) { snprintf(x.why, sizeof x.why, "%s", net_outcome_name(nt.resource[r].outcome)); break; }
+            printf("tab %u: %s failed to load: %s\n", *cur + 1, url, x.why);
+        }
+        (*entries)[e] = x;
     }
     while (fgets(line, sizeof line, in)) {
         size_t n = strlen(line);
@@ -1065,15 +1321,82 @@ static int session_page(session *s, const char *url, FILE *in, int echo, char *n
         while (line[b] == ' ') b++;
         const char *arg = line + b;
         if (strcmp(cmd, "quit") == 0) return SESSION_QUIT;
-        if (strcmp(cmd, "open") == 0) { snprintf(next, cap, "%s", arg); return SESSION_OPEN; }
         if (strcmp(cmd, "echo") == 0) { printf("%s\n", arg); continue; }
-        if (strcmp(cmd, "reasoner") == 0) { session_reasoner(&s->rs[s->use]); continue; }
-        if (!loaded) { printf("no page: open one first\n"); continue; }
+        /* the tabs */
+        if (strcmp(cmd, "open") == 0) {
+            if (!*arg) { printf("open: a page, please\n"); continue; }
+            char u[4200];
+            page_url(arg, u, sizeof u);
+            uint32_t at_ = tab_open(tabs, entries, pool, u, strlen(u), "", 0);
+            if (!at_) { printf("open: %d tabs at most\n", AMB_TABS); continue; }
+            *cur = at_ - 1;
+            return SESSION_SWITCH;
+        }
+        if (strcmp(cmd, "tabs") == 0) { tabs_list(tabs, entries, pool, *cur); continue; }
+        if (strcmp(cmd, "save") == 0) { session_save(s, *arg ? arg : "last", tabs, entries, pool, *cur, 1); continue; }
+        if (!len(*tabs)) { printf("no tab: open one first\n"); continue; }
+        if (strcmp(cmd, "tab") == 0) {
+            int w = atoi(arg);
+            if (w < 1 || (size_t)w > len(*tabs)) { printf("tab %s: no such tab\n", arg); continue; }
+            if ((uint32_t)w - 1 == *cur) { printf("tab %d is the current tab\n", w); continue; }
+            *cur = (uint32_t)w - 1;
+            return SESSION_SWITCH;
+        }
+        if (strcmp(cmd, "close") == 0) {
+            int w = *arg ? atoi(arg) : (int)*cur + 1;
+            if (w < 1 || (size_t)w > len(*tabs)) { printf("close %s: no such tab\n", arg); continue; }
+            tab_rec t = at(*tabs, (size_t)w - 1);
+            /* its reasoner told to quit, and its slot made as new */
+            char held[1024], err[1024];
+            snprintf(held, sizeof held, "%s", s->rs[t.slot].held);
+            snprintf(err, sizeof err, "%s", s->rs[t.slot].err);
+            amb_reasoner_stop(&s->rs[t.slot]);
+            amb_reasoner_init(&s->rs[t.slot], s->cocolog, s->reasoner, held, err);
+            tab_cut(entries, t.id, 0);
+            tab_unclick(clicks, t.id);
+            vector<tab_rec> kept;
+            for (size_t q = 0; q < len(*tabs); q++) if (q != (size_t)w - 1) push_back(kept, at(*tabs, q));
+            clear(*tabs);
+            for (size_t q = 0; q < len(kept); q++) push_back(tabs, at(kept, q));
+            printf("closed tab %d; %zu left\n", w, len(*tabs));
+            if ((uint32_t)w - 1 < *cur) { (*cur)--; continue; }
+            if ((uint32_t)w - 1 > *cur) continue;
+            if (*cur >= len(*tabs) && *cur > 0) (*cur)--;
+            return SESSION_SWITCH;
+        }
+        tab_rec ct = at(*tabs, *cur);
+        if (strcmp(cmd, "history") == 0) { tab_history(tabs, entries, pool, *cur); continue; }
+        if (strcmp(cmd, "go") == 0) {
+            if (!*arg) { printf("go: a page, please\n"); continue; }
+            char u[4200];
+            page_url(arg, u, sizeof u);
+            tab_cut(entries, ct.id, ct.at);
+            tab_push(entries, pool, ct.id, u, strlen(u), "", 0);
+            ct.at++;
+            (*tabs)[*cur] = ct;
+            tab_unclick(clicks, ct.id);
+            return SESSION_SWITCH;
+        }
+        if (strcmp(cmd, "back") == 0 || strcmp(cmd, "forward") == 0) {
+            int back = cmd[0] == 'b';
+            if (back ? ct.at <= 1 : ct.at >= tab_pages(entries, ct.id)) { printf("%s: no page %s\n", cmd, back ? "before" : "after"); continue; }
+            if (back) ct.at--;
+            else ct.at++;
+            (*tabs)[*cur] = ct;
+            tab_unclick(clicks, ct.id);
+            return SESSION_SWITCH;
+        }
+        if (strcmp(cmd, "reload") == 0) { tab_unclick(clicks, ct.id); return SESSION_SWITCH; }
+        if (strcmp(cmd, "reasoner") == 0) { session_reasoner(&s->rs[ct.slot]); continue; }
+        if (!loaded) { printf("no page: tab %u's failed to load\n", *cur + 1); continue; }
         if (strcmp(cmd, "click") == 0) {
             uint32_t x = script_select(&d, arg, strlen(arg));
             if (!x) { printf("click %s: no element matches\n", arg); continue; }
             script_click(&vm, x, SCRIPT_HORIZON);
             script_settle(&vm);
+            click_rec c = { tid, (uint32_t)len(*pool), (uint32_t)strlen(arg) };
+            append_range(pool, arg, strlen(arg));
+            push_back(clicks, c);
             dirty = 1;
             printf("clicked ");
             print_elem(&d, node_handle(&d, x));
@@ -1125,35 +1448,39 @@ static int session_page(session *s, const char *url, FILE *in, int echo, char *n
             }
             continue;
         }
-        printf("%s: no such command (open, click, query, why, advise, check, fresh, snapshot, reasoner, echo, quit)\n", cmd);
+        printf("%s: no such command (open, tabs, tab, close, go, back, forward, reload, history, save, click, query, why, advise, check, fresh, "
+               "snapshot, reasoner, echo, quit)\n", cmd);
     }
     return SESSION_QUIT;
 }
 
-/* the session over the commands in in, each a line, echoed when they come from no terminal */
-static int session_lines(FILE *in, int echo) {
+/* the session over the commands in in, each a line, echoed when they come from no
+   terminal; with restore, the profile's session last opened first. At the end the tabs
+   are kept in the profile as last, unless the session is private */
+static int session_lines(FILE *in, int echo, int restore) {
     session s;
     if (!session_open(&s)) return 2;
     defer(s) { session_close(&s); }
-    s.use = 0;
-    char url[4200], next[4200];
-    url[0] = 0;
-    for (;;) {
-        next[0] = 0;
-        int what = session_page(&s, url, in, echo, next, sizeof next);
-        if (what != SESSION_OPEN) break;
-        snprintf(url, sizeof url, "%s", next);
-    }
+    vector<tab_rec> tabs;
+    vector<entry_rec> entries;
+    vector<click_rec> clicks;
+    vector<char> pool;
+    uint32_t cur = 0;
+    if (restore) session_restore(&s, "last", &tabs, &entries, &pool, &cur);
+    while (session_page(&s, &tabs, &entries, &clicks, &pool, &cur, in, echo) == SESSION_SWITCH) {}
+    session_save(&s, "last", &tabs, &entries, &pool, cur, 0);
+    if (s.private_mode) printf("the session was private: nothing of it is stored\n");
     return 0;
 }
 
-/* `loop -` reads the session's commands from the standard input, `loop FILE` from FILE */
-static int cmd_session(const char *src) {
-    if (strcmp(src, "-") == 0) return session_lines(stdin, !isatty(0));
+/* `loop [--restore] -` reads the session's commands from the standard input, `loop
+   [--restore] FILE` from FILE */
+static int cmd_session(const char *src, int restore) {
+    if (strcmp(src, "-") == 0) return session_lines(stdin, !isatty(0), restore);
     own FILE *f = fopen(src, "rb");
     if (!f) { fprintf(stderr, "ambitious: cannot read %s\n", src); return 2; }
     defer(f) { fclose(f); }
-    return session_lines(f, 1);
+    return session_lines(f, 1, restore);
 }
 
 /* query, why, advise: the reasoner over the page's snapshot */
@@ -1265,7 +1592,8 @@ int main(int argc, char **argv) {
         return cmd_script(argv[2]);
     }
     if (argc >= 2 && strcmp(argv[1], "sandbox") == 0) return cmd_sandbox();
-    if (argc >= 3 && strcmp(argv[1], "loop") == 0) return cmd_session(argv[2]);
+    if (argc >= 3 && strcmp(argv[1], "loop") == 0 && strcmp(argv[2], "--restore") == 0) return cmd_session(argc >= 4 ? argv[3] : "-", 1);
+    if (argc >= 3 && strcmp(argv[1], "loop") == 0) return cmd_session(argv[2], 0);
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "load") == 0) return cmd_load(argv[2]);
