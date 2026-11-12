@@ -9,6 +9,7 @@ position: rendered 800x600: 13 boxes, 8 lines, 11 text fragments; pixels fnv1a64
 sizing: rendered 800x600: 34 boxes, 21 lines, 30 text fragments; pixels fnv1a64:f0f525d7cf982aa1
 flex: rendered 800x674: 47 boxes, 32 lines, 33 text fragments; pixels fnv1a64:120ceb4a70cdc1aa
 grid: rendered 800x600: 34 boxes, 25 lines, 25 text fragments; pixels fnv1a64:8d58df17b6897c1d
+text: rendered 800x600: 9 boxes, 15 lines, 20 text fragments; pixels fnv1a64:edf19a5c4948ccb5
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
@@ -53,6 +54,15 @@ N = n(1,18,0), B = bx(1,9,0), K = key(3,2,bx(1,9,0))
 I = f1, N = n(1,15,0), B = bx(1,5,0), Why = floated(left)
 I = f2, N = n(1,17,0), B = bx(1,6,0), Why = floated(right)
 I = i1, N = n(1,48,0), B = bx(1,19,0), Why = floated(left)
+-- the lines of a hyphenated paragraph, and right-to-left text in its order:
+P = n(1,13,0), T = n(1,14,0), Text = 'Extraordinarily', X = 8, Y = 8
+P = n(1,13,0), T = n(1,14,0), Text = 'incomprehen-', X = 8, Y = 27
+P = n(1,13,0), T = n(1,14,0), Text = 'sible charac-', X = 8, Y = 46
+P = n(1,13,0), T = n(1,14,0), Text = 'teristics of hy-', X = 8, Y = 65
+P = n(1,13,0), T = n(1,14,0), Text = phenation, X = 8, Y = 84
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = 'Hello', X = 267.4453125
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = םלוע, X = 228.2734375
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = world, X = 179.1328125
 -- how flex and grid items got their widths:
 I = g2, N = n(1,16,0), B = bx(1,6,0), Why = flexed(250,within(500))
 I = s1, N = n(1,22,0), B = bx(1,9,0), Why = flexed(166.666666666667,within(500))

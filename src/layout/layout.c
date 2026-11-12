@@ -65,7 +65,16 @@
    pieces' line heights about one baseline, each piece shifted by its
    vertical-align as Chromium shifts it (sub, super, text-top, text-bottom,
    middle, a length, a percentage of the line height; top and bottom against
-   the line box); it is aligned left, right, centre or justified.
+   the line box); it is aligned left, right, centre or justified (start and end
+   as the direction has them). A word too wide for what is left of its line is
+   broken by a hyphen (hyphens: manual at its soft hyphens, which are otherwise
+   not drawn; auto there, else at the points Liang's algorithm finds with TeX's
+   American English patterns, tools/gen-hyph.py, two letters at least each
+   side), at the last point whose part fits. Bidirectional text (UAX #9, by
+   words): a word of Hebrew or Arabic letters is right to left, a word of others
+   left to right, spaces and punctuation their neighbours' direction when those
+   agree, else the paragraph's (direction); the line's words are placed in the
+   order rule L2 gives, a right-to-left word's letters drawn reversed.
 
    Pseudo-elements. An element's ::before and ::after are its first and last
    children, boxes as their display has them (inline ones in the lines), their
@@ -105,6 +114,7 @@ amb_interface(net);
 amb_implementation(layout);
 #include "../css/css.h"
 #include "layout.h"
+#include "hyph_data.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run */
@@ -135,7 +145,7 @@ typedef struct lay_style {
     int display, bfc;
     uint32_t color, bg, bc[4];
     double fs, lh, asc, desc;
-    int face, italic, align, ws, deco, list, border_box, tt;
+    int face, italic, align, ws, deco, list, border_box, tt, rtl;
     uint32_t font;                  /* a web font's resource (the loader's), 0 for a built-in face */
     double ls, wsp;                 /* letter-spacing, word-spacing: px */
     uint8_t bs[4];
@@ -354,9 +364,12 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     if (st->cval[c].unit == CSS_UNIT_NUMBER) s->lh = st->cval[c].num * s->fs;
     else if (st->cval[c].unit == CSS_UNIT_PX) s->lh = st->cval[c].num;
     else s->lh = s->asc + s->desc + gap;
+    lay_word_of(st, cv[CSS_PROP_DIRECTION], w);
+    s->rtl = lay_w(w, "rtl");
+    /* text-align: start and end as the direction has them */
     lay_word_of(st, cv[CSS_PROP_TEXT_ALIGN], w);
-    s->align = lay_w(w, "right") || lay_w(w, "end") ? AL_RIGHT : lay_w(w, "center") ? AL_CENTER :
-               lay_w(w, "justify") ? AL_JUSTIFY : AL_LEFT;
+    s->align = lay_w(w, "right") ? AL_RIGHT : lay_w(w, "left") ? AL_LEFT : lay_w(w, "center") ? AL_CENTER :
+               lay_w(w, "justify") ? AL_JUSTIFY : lay_w(w, "end") ? (s->rtl ? AL_LEFT : AL_RIGHT) : (s->rtl ? AL_RIGHT : AL_LEFT);
     lay_word_of(st, cv[CSS_PROP_WHITE_SPACE], w);
     s->ws = lay_w(w, "pre") ? WS_PRE : lay_w(w, "nowrap") ? WS_NOWRAP : lay_w(w, "pre-wrap") || lay_w(w, "break-spaces") ? WS_PRE_WRAP :
             lay_w(w, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
@@ -649,6 +662,9 @@ typedef struct lay_piece {
     uint8_t kind, face, italic, deco, brk, keep;   /* brk: a space a line may break at; keep: a kept (pre) space */
     uint8_t tt;                                    /* text-transform */
     uint8_t va;                                    /* VA_TOP, VA_BOTTOM: aligned with the line box; an atomic's own */
+    uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it */
+    uint8_t rtl;                                   /* a word of right-to-left letters (Hebrew, Arabic) */
+    uint8_t soft;                                  /* a word with soft hyphens in it */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     double ls, wsp;                                /* letter-spacing, word-spacing */
@@ -757,6 +773,16 @@ static void lay_transform(const char *s, size_t n, int tt, vector<char> *out) {
     }
 }
 
+/* text without its soft hyphens (U+00AD) */
+static void lay_strip_soft(vector<char> *tw) {
+    size_t o = 0;
+    for (size_t q = 0; q < len(*tw); q++) {
+        if ((unsigned char)at(*tw, q) == 0xC2 && q + 1 < len(*tw) && (unsigned char)at(*tw, q + 1) == 0xAD) { q++; continue; }
+        (*tw)[o++] = at(*tw, q);
+    }
+    resize(tw, o);
+}
+
 /* the code points of UTF-8 text: letter-spacing's count */
 static size_t lay_cps(const char *s, size_t n) {
     size_t k = 0;
@@ -826,19 +852,33 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             continue;
         }
         size_t j = i;
-        while (j < n && !(tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f' || tx[j] == '\n')) j++;
+        int soft = 0, rtl = 0;
+        while (j < n && !(tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f' || tx[j] == '\n')) {
+            unsigned char c0 = (unsigned char)tx[j];
+            if (c0 >= 0xC2) {
+                if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
+                else if (c0 >= 0xD6 && c0 <= 0xDB) rtl = 1;      /* U+0580 to U+06FF: Hebrew, Arabic */
+            }
+            j++;
+        }
         p.kind = P_WORD;
         p.off = (uint32_t)i;
         p.len = (uint32_t)(j - i);
-        if (s->tt) {
+        p.rtl = (uint8_t)rtl;
+        p.soft = (uint8_t)soft;
+        if (s->tt || soft) {
+            /* text-transform's letters; a soft hyphen, no width where it does not break */
             vector<char> tw;
-            lay_transform(tx + i, j - i, s->tt, &tw);
-            p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw));
-        } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i);
-        p.w += s->ls * (double)lay_cps(tx + i, j - i);
+            if (s->tt) lay_transform(tx + i, j - i, s->tt, &tw);
+            else append_range(tw, tx + i, j - i);
+            if (soft) lay_strip_soft(&tw);
+            p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw)) + s->ls * (double)lay_cps(data(tw), len(tw));
+        } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
         p.brk = 0;
         p.keep = 0;
         push_back(ps, p);
+        p.rtl = 0;
+        p.soft = 0;
         *sp = 0;
         i = j;
     }
@@ -1363,15 +1403,42 @@ static void lay_piece_text(const layout_tree *t, const dom_document *d, const ve
         lay_piece p = at(*ps, k);
         if (p.kind == P_SPACE && !p.keep) { push_back(out, ' '); continue; }
         if (p.kind != P_WORD && p.kind != P_SPACE) continue;
+        size_t from = len(*out);
         if (p.node & LAY_GEN) {
             amb_span g = at(*gx, p.node & LAY_GIDX).text;
             lay_piece_bytes(text_ptr(t, g), g.len, p.kind == P_WORD, p.tt, p.off, p.len, out);
-            continue;
+        } else {
+            amb_span sp = d->node[p.node].data;
+            const char *tx = text_ptr(d, sp);
+            if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) lay_transform(tx + p.off, p.len, p.tt, out);
+            else for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);
         }
-        amb_span sp = d->node[p.node].data;
-        const char *tx = text_ptr(d, sp);
-        if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) { lay_transform(tx + p.off, p.len, p.tt, out); continue; }
-        for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);
+        if (p.kind != P_WORD || !(p.hy || p.rtl || p.soft)) continue;
+        if (p.hy || p.rtl) {
+            /* the word's own bytes: soft hyphens out, the hyphen it is broken by, its letters
+               in the order they are drawn (right to left: reversed) */
+            vector<char> wd;
+            for (size_t q = from; q < len(*out); q++) push_back(wd, at(*out, q));
+            resize(out, from);
+            lay_strip_soft(&wd);
+            if (p.hy) push_back(wd, '-');
+            if (p.rtl) {
+                size_t q = len(wd);
+                while (q > 0) {
+                    size_t b0 = q - 1;
+                    while (b0 > 0 && ((unsigned char)at(wd, b0) & 0xC0) == 0x80) b0--;
+                    for (size_t z = b0; z < q; z++) push_back(out, at(wd, z));
+                    q = b0;
+                }
+            } else append_range(out, data(wd), len(wd));
+        } else {
+            /* soft hyphens where the word is not broken: none drawn */
+            vector<char> wd;
+            for (size_t q = from; q < len(*out); q++) push_back(wd, at(*out, q));
+            resize(out, from);
+            lay_strip_soft(&wd);
+            append_range(out, data(wd), len(wd));
+        }
     }
 }
 
@@ -1425,6 +1492,48 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             }
         }
         x += p.w;
+    }
+    /* bidirectional text (UAX #9, by words): each piece's level -- a right-to-left word's 1,
+       a left-to-right one's 0 (2 in a right-to-left paragraph), the others' (spaces,
+       punctuation, boxes) their neighbours' when those agree, else the paragraph's, the
+       line's trailing spaces the paragraph's -- and the pieces placed in the order L2
+       gives them, each run of a level and above reversed, from the highest down */
+    int reordered = 0;
+    if (bs->rtl && end > a) {
+        size_t m = end - a;
+        vector<int> lv;
+        for (size_t k = a; k < end; k++) {
+            lay_piece p = at(*ps, k);
+            int v = -1;
+            if (p.kind == P_WORD) v = p.rtl ? 1 : (bs->rtl & 1 ? 2 : 0);
+            push_back(lv, v);
+        }
+        for (size_t q = 0; q < m;) {
+            if (at(lv, q) >= 0) { q++; continue; }
+            size_t e2 = q;
+            while (e2 < m && at(lv, e2) < 0) e2++;
+            int para = bs->rtl & 1;
+            int before = q > 0 ? at(lv, q - 1) % 2 : para, after = e2 < m ? at(lv, e2) % 2 : para;
+            int v = before == after ? (before ? 1 : (para ? 2 : 0)) : para;
+            if (e2 == m) v = para;
+            for (size_t z = q; z < e2; z++) lv[z] = v;
+            q = e2;
+        }
+        int maxl = 0;
+        for (size_t q = 0; q < m; q++) if (at(lv, q) > maxl) maxl = at(lv, q);
+        vector<uint32_t> ord;
+        for (size_t q = 0; q < m; q++) push_back(ord, (uint32_t)q);
+        for (int l = maxl; l >= 1; l--)
+            for (size_t q = 0; q < m;) {
+                if (at(lv, at(ord, q)) < l) { q++; continue; }
+                size_t e2 = q;
+                while (e2 < m && at(lv, at(ord, e2)) >= l) e2++;
+                for (size_t i0 = q, i1 = e2 - 1; i0 < i1; i0++, i1--) { uint32_t tmp = at(ord, i0); ord[i0] = at(ord, i1); ord[i1] = tmp; }
+                q = e2;
+            }
+        double vx = indent;
+        for (size_t q = 0; q < m; q++) { uint32_t kk = at(ord, q); xs[kk] = vx; vx += at(*ps, a + kk).w; }
+        reordered = maxl > 0;
     }
     /* a top-aligned piece taller than the rest grows the line downward, a bottom-aligned one upward */
     if (top_h > max_above + max_below) max_below = top_h - max_above;
@@ -1544,7 +1653,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         /* a run: this text node's words and spaces that follow, on this line, in one style */
         size_t r = k + 1;
         double rw = p.w;
-        while (r < end && extra == 0) {
+        while (r < end && extra == 0 && !reordered) {
             lay_piece q = at(*ps, r);
             if ((q.kind != P_WORD && q.kind != P_SPACE) || q.node != p.node) break;
             if (q.size != p.size || q.color != p.color || q.face != p.face || q.font != p.font || q.deco != p.deco) break;
@@ -1692,6 +1801,157 @@ static double lay_first_chunk(const vector<lay_piece> *ps, size_t i) {
     }
     return w;
 }
+/* ---- hyphenation (Liang's algorithm over TeX's American English patterns) ---- */
+
+/* the patterns, found by their letters' hash: each slot a pattern's offset in
+   amb_hyph_patterns, plus one (0 an empty slot); made once a process */
+#define LAY_HYPH_SLOTS 16384
+static uint32_t lay_hyph_slot[LAY_HYPH_SLOTS];
+static int lay_hyph_ready;
+
+static uint32_t lay_hyph_hash(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 16777619u; }
+    return h & (LAY_HYPH_SLOTS - 1);
+}
+static int lay_digit(char c) { return c >= '0' && c <= '9'; }
+static void lay_hyph_load(void) {
+    if (lay_hyph_ready) return;
+    lay_hyph_ready = 1;
+    size_t i = 0, n = sizeof amb_hyph_patterns - 1;
+    while (i < n) {
+        size_t b = i, e = i;
+        while (i < n && amb_hyph_patterns[i] != ' ') i++;
+        while (e < i && !lay_digit(amb_hyph_patterns[e])) e++;
+        uint32_t h = lay_hyph_hash(amb_hyph_patterns + b, e - b);
+        while (lay_hyph_slot[h]) h = (h + 1) & (LAY_HYPH_SLOTS - 1);
+        lay_hyph_slot[h] = (uint32_t)b + 1;
+        i++;
+    }
+}
+
+/* the places a word of lower-case letters w[0, n) may be broken at (CSS hyphens: auto):
+   ok[i] is 1 where a hyphen may come before letter i -- an exception's hyphens, or the odd
+   values Liang's patterns give, two letters at least on each side */
+static void lay_hyph_points(const char *w, size_t n, uint8_t *ok) {
+    memset(ok, 0, n + 1);
+    if (n < 5 || n > 60) return;
+    /* an exception: its hyphens as written */
+    size_t i = 0, en = sizeof amb_hyph_exceptions - 1;
+    while (i < en) {
+        size_t b = i;
+        while (i < en && amb_hyph_exceptions[i] != ' ') i++;
+        size_t k = 0, q = b;
+        int same = 1;
+        for (; q < i && same; q++) {
+            if (amb_hyph_exceptions[q] == '-') continue;
+            if (k >= n || amb_hyph_exceptions[q] != w[k]) same = 0;
+            else k++;
+        }
+        if (same && k == n) {
+            k = 0;
+            for (q = b; q < i; q++) { if (amb_hyph_exceptions[q] == '-') ok[k] = 1; else k++; }
+            return;
+        }
+        i++;
+    }
+    lay_hyph_load();
+    char s0[64];
+    s0[0] = '.';
+    memcpy(s0 + 1, w, n);
+    s0[n + 1] = '.';
+    size_t m = n + 2;
+    uint8_t vals[64];
+    memset(vals, 0, sizeof vals);
+    for (size_t a = 0; a < m; a++)
+        for (size_t k = 1; k <= AMB_HYPH_LONGEST && a + k <= m; k++) {
+            uint32_t h = lay_hyph_hash(s0 + a, k);
+            while (lay_hyph_slot[h]) {
+                uint32_t off = lay_hyph_slot[h] - 1;
+                if (memcmp(amb_hyph_patterns + off, s0 + a, k) == 0 && lay_digit(amb_hyph_patterns[off + k])) {
+                    for (size_t q = 0; q <= k; q++) {
+                        uint8_t v = (uint8_t)(amb_hyph_patterns[off + k + q] - '0');
+                        if (v > vals[a + q]) vals[a + q] = v;
+                    }
+                    break;
+                }
+                h = (h + 1) & (LAY_HYPH_SLOTS - 1);
+            }
+        }
+    /* vals[j]: the value before s0[j]; letter i of w is s0[i + 1] */
+    for (size_t q = 2; q + 2 <= n; q++) ok[q] = (uint8_t)(vals[q + 1] & 1);
+}
+
+/* where a word piece p can be broken by a hyphen, the part before it and the hyphen
+   fitting in room: its last soft hyphen that fits (hyph 1 or 2), else (hyph 2) the last of
+   Liang's points; the bytes its part keeps (*keep), where its rest begins (*rest) and the
+   part's width (*pw); 0 when it has no such place */
+static int lay_hyph_split(LCTX, const vector<lay_piece> *ps, size_t k, int hyph, double room, uint32_t *keep, uint32_t *rest, double *pw) {
+    lay_piece p = at(*ps, k);
+    vector<char> raw;
+    if (p.node & LAY_GEN) { amb_span g = at(*gx, p.node & LAY_GIDX).text; if (p.off + p.len <= g.len) append_range(raw, text_ptr(t, g) + p.off, p.len); }
+    else { amb_span sp = d->node[p.node].data; if (p.off + p.len <= sp.len) append_range(raw, text_ptr(d, sp) + p.off, p.len); }
+    if (len(raw) != p.len || p.len < 2) return 0;
+    double hw = amb_text_width(f, p.face, p.size, "-", 1) + p.ls;
+    /* the candidates: soft hyphens, else Liang's points in the word's run of letters */
+    vector<uint32_t> cuts;           /* each: the part's bytes, then the rest's start */
+    for (uint32_t q = 1; q + 1 < p.len; q++)
+        if ((unsigned char)at(raw, q) == 0xC2 && (unsigned char)at(raw, q + 1) == 0xAD) { push_back(cuts, q); push_back(cuts, q + 2); }
+    if (!len(cuts) && hyph == 2) {
+        uint32_t a = 0, z = p.len;
+        while (a < z && !((at(raw, a) >= 'a' && at(raw, a) <= 'z') || (at(raw, a) >= 'A' && at(raw, a) <= 'Z'))) a++;
+        while (z > a && !((at(raw, z - 1) >= 'a' && at(raw, z - 1) <= 'z') || (at(raw, z - 1) >= 'A' && at(raw, z - 1) <= 'Z'))) z--;
+        char lw[64];
+        int letters = z - a < 61;
+        for (uint32_t q = a; q < z && letters; q++) {
+            char c = at(raw, q);
+            if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+            if (c < 'a' || c > 'z') letters = 0;
+            else lw[q - a] = c;
+        }
+        if (letters && z > a) {
+            uint8_t ok[64];
+            lay_hyph_points(lw, z - a, ok);
+            for (uint32_t q = 1; q < z - a; q++) if (ok[q]) { push_back(cuts, a + q); push_back(cuts, a + q); }
+        }
+    }
+    /* the last that fits */
+    for (size_t c = len(cuts); c >= 2; c -= 2) {
+        uint32_t kb = at(cuts, c - 2);
+        vector<char> part;
+        if (p.tt) lay_transform(data(raw), kb, p.tt, &part);
+        else append_range(part, data(raw), kb);
+        lay_strip_soft(&part);
+        double w = amb_text_width(f, p.face, p.size, data(part), len(part)) + p.ls * (double)lay_cps(data(part), len(part)) + hw;
+        if (w <= room + 0.01) { *keep = kb; *rest = at(cuts, c - 1); *pw = w; return 1; }
+    }
+    return 0;
+}
+
+/* a word piece broken at a hyphenation point: its part (keep bytes, pw wide, the hyphen
+   after it) and its rest, the next piece */
+static void lay_hyph_apply(LCTX, vector<lay_piece> *ps, size_t k, uint32_t keep, uint32_t rest, double pw) {
+    lay_piece p = at(*ps, k), q = p;
+    p.len = keep;
+    p.w = pw;
+    p.hy = 1;
+    q.off = p.off + rest;
+    q.len = at(*ps, k).len - rest;
+    /* the rest's width: its own letters */
+    vector<char> raw;
+    if (q.node & LAY_GEN) { amb_span g = at(*gx, q.node & LAY_GIDX).text; append_range(raw, text_ptr(t, g) + q.off, q.len); }
+    else { amb_span sp = d->node[q.node].data; append_range(raw, text_ptr(d, sp) + q.off, q.len); }
+    vector<char> tw;
+    if (q.tt) lay_transform(data(raw), len(raw), q.tt, &tw);
+    else append_range(tw, data(raw), len(raw));
+    lay_strip_soft(&tw);
+    q.w = amb_text_width(f, q.face, q.size, data(tw), len(tw)) + q.ls * (double)lay_cps(data(tw), len(tw));
+    (*ps)[k] = p;
+    push_back(ps, q);
+    for (size_t z = len(*ps) - 1; z > k + 1; z--) (*ps)[z] = at(*ps, z - 1);
+    (*ps)[k + 1] = q;
+}
+
 /* the end of the first letter of text s[0, n): the punctuation before it and the letter
    (a code point of UTF-8); 0 when there is none */
 static size_t lay_letter_end(const char *s, size_t n) {
@@ -1814,6 +2074,8 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
             bs1.desc = fls.desc;
         }
     }
+    /* bidirectional text to reorder: the paragraph's direction (1), right-to-left words (2) */
+    for (size_t q = 0; q < len(ps) && !(bs.rtl & 2); q++) if (at(ps, q).rtl) { bs.rtl |= 2; bs1.rtl |= 2; }
     vector<uint32_t> open;
     vector<uint32_t> later;           /* floats too wide for the line they are met on: placed below it */
     size_t i = 0, np = len(ps);
@@ -1876,6 +2138,21 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
                 c++;
             }
             int can_break = (breakable || atomic_edge) && end > start;
+            if (!has_fl && x + sw + cw > lw + 0.01 && c == k + 1 && at(ps, k).kind == P_WORD) {
+                /* a word too wide for what is left: broken by a hyphen where it may be */
+                int hyph = LAY_X(at(ps, k).elem).hyph;
+                if (hyph == 1 && !at(ps, k).soft) hyph = 0;
+                uint32_t keep, rst;
+                double pw;
+                if (hyph && lay_hyph_split(LARGS, &ps, k, hyph, lw - x - sw, &keep, &rst, &pw)) {
+                    lay_hyph_apply(LARGS, &ps, k, keep, rst, pw);
+                    np = len(ps);
+                    x += sw + pw;
+                    end = k + 1;
+                    j = k + 1;
+                    break;
+                }
+            }
             if (can_break && x + sw + cw > lw + 0.01) { j = k; break; }
             x += sw + cw;
             end = c;
