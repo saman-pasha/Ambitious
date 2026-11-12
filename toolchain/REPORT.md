@@ -410,3 +410,25 @@ neighbours.
 
     prints 4294965005 (gcc: `'t' redeclared as different kind of symbol`).
     The work-around is other names.
+28. **A local pointer computed from one that a function wrote through an
+    out-parameter is refused as "plain pointer not consumed"**, though it points
+    into the caller's string and owns nothing. After `strtod(s, &end)`, `end`
+    itself may be read, and `const char *rest = s + 2;` compiles, but
+    `rest = end + 2` is refused at the function's return, with or without an
+    early one (12o's layout met it reading an SVG length's unit after its
+    number):
+
+    ```c
+    #include <stdlib.h>
+    static int tail(const char *s) {
+        char *end = 0;
+        (void)strtod(s, &end);
+        char *rest = end + 2;
+        return *rest ? 1 : 0;
+    }
+    int main(void) { return tail("12px"); }
+    ```
+
+    reports `error: plain pointer not consumed: 'rest' in
+    return(cond(deref(id(rest)),int(1),int(0))) (function tail)`. The
+    work-around is indices into a copy of the string.

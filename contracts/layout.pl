@@ -89,6 +89,9 @@ layout_contract(record(box, [
     field(translate, span(text)), field(rotate, span(text)), field(scale, span(text)),  % the individual transforms
     field(persp, span(text)), field(porigin, span(text)),       % perspective, perspective-origin: what its children are seen through
     field(p3d, u8), field(backface, u8),        % transform-style: preserve-3d; backface-visibility: hidden
+    %% an svg element's drawing (src/paint/svg.h): its content's shapes, paints, groups, clips
+    %% and glyphs, each in its viewport's CSS px, which paint draws in its content box
+    field(svg, span(text)),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,

@@ -86,8 +86,22 @@ css_rules_inherited(direction).
 css_rules_inherited(writing_mode).
 css_rules_inherited(hyphens).
 css_rules_inherited(quotes).
+css_rules_inherited(fill).
+css_rules_inherited(fill_opacity).
+css_rules_inherited(fill_rule).
+css_rules_inherited(stroke).
+css_rules_inherited(stroke_width).
+css_rules_inherited(stroke_linecap).
+css_rules_inherited(stroke_linejoin).
+css_rules_inherited(stroke_miterlimit).
+css_rules_inherited(stroke_dasharray).
+css_rules_inherited(stroke_dashoffset).
+css_rules_inherited(stroke_opacity).
+css_rules_inherited(clip_rule).
+css_rules_inherited(text_anchor).
 css_rules_colour(color).
 css_rules_colour(background_color).
+css_rules_colour(stop_color).
 css_rules_colour(P) :- css_rules_currentcolor(P).
 css_rules_currentcolor(border_top_color).
 css_rules_currentcolor(border_right_color).

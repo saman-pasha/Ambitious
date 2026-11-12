@@ -35,11 +35,13 @@
 #include "font.h"
 
 amb_interface(dom);
+amb_interface(css);
 amb_interface(layout);
 amb_interface(net);
 
 #include "paint.h"
 #include "image.h"
+#include "svg.h"
 #include "../css/css.h"
 #include "../layout/layout.h"
 
@@ -1649,7 +1651,13 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     }
     if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
     if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
-    if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && t->box[b].svg.len) {
+        /* an svg element: the drawing layout made of its content (src/paint/svg.h) */
+        vector<char> scene;
+        append_range(scene, text_ptr(t, t->box[b].svg), t->box[b].svg.len);
+        double z = c->zoom > 0 ? c->zoom : 1;
+        amb_svg_draw(c, data(scene), len(scene), t->box[b].x, t->box[b].y, z, z);
+    } else if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;
         int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);

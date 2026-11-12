@@ -79,4 +79,10 @@ int amb_image_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t
    none of the four */
 int amb_image_size(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h);
 
+/* an SVG document's natural size (src/paint/svg.c), from its root svg element: its width
+   and height in px where they are absolute lengths, one of them from the other through its
+   viewBox's ratio (0 for one it has not), and that ratio, width over height (0 for none);
+   0 when the bytes are no SVG document (their first element is no svg) */
+int amb_svg_size(const uint8_t *p, size_t n, double *w, double *h, double *ratio);
+
 #endif
