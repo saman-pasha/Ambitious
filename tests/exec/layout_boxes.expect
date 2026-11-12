@@ -199,6 +199,11 @@ an inline-flex's baseline, its first item's border box's bottom (ok, invariants:
   #b block: content 20,16 20x30; margins 0 0 0 0; width flex of 28
   #p block: content 8,16 784x34; margins 16 0 16 0; width fill of 784
     line 8,16 784x34 baseline 46: [text 8+8 'x'] [atomic 20+28 '']
+an absolutely positioned box in a relatively positioned span (ok, invariants: 0 broken)
+  #a block: content 39,28 5x5; margins 0 0 0 0; width declared of 24
+  #p block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [inline 20+24 ''] [text 8+8 'x'] [text 24+16 'yy']
+  #t inline: 20,16 24x17
 sticky boxes moved in from the viewport's edges, within their blocks (ok, invariants: 0 broken)
   #a block: content 8,50 784x18; margins 0 0 0 0; width fill of 784
     line 8,50 784x18 baseline 64: [text 8+8 'x']

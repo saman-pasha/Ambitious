@@ -7,7 +7,8 @@
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
 :- dynamic layout_box/7, layout_parent/2, layout_margin/5, layout_border/5, layout_padding/5, layout_width/4,
            layout_line/6, layout_text/8, layout_frag/8, layout_pseudo/2, layout_generated/3, layout_positioned/5,
-           layout_stacking/2, layout_float/2, layout_clips/1, layout_background/2, layout_grid_item/6, layout_grid_area/2.
+           layout_stacking/2, layout_float/2, layout_clips/1, layout_background/2, layout_grid_item/6, layout_grid_area/2,
+           layout_inline_cb/2.
 
 %% the box an element generated (its pseudo-elements' are theirs)
 layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, \+ layout_pseudo(B, _).
@@ -38,14 +39,17 @@ layout_border_box(B, X, Y, W, H) :-
 
 %% why a box is where it is: the flow put it there; it floats to a side; it is offset
 %% from where the flow put it (relative), or placed in its containing block (absolute:
-%% the nearest positioned ancestor's, or the viewport's) or the viewport (fixed); sticky
+%% the nearest positioned ancestor's, or the viewport's; an inline element's first and
+%% last fragments, when the ancestor is one) or the viewport (fixed); sticky
 %% at rest, where the flow put it, or moved by (DX, DY) to keep the distance its offsets
 %% ask from its scrollport's edges, within its containing block; a grid item in its area, by the area's name, by its
 %% lines, or placed automatically (rows and columns as the explicit grid numbers its
 %% lines: the first line of each, and the line past the last)
 layout_explain_position(B, Why) :-
     layout_box(B, _, K, _, _, _, _), K \== viewport,
-    (   layout_positioned(B, P, CB, DX, DY)
+    (   layout_inline_cb(B, N), dom_element(N, E)
+    ->  Why = absolute(in_fragments_of(E))
+    ;   layout_positioned(B, P, CB, DX, DY)
     ->  layout_rules_position(P, CB, DX, DY, Why)
     ;   layout_float(B, Side)
     ->  Why = floated(Side)

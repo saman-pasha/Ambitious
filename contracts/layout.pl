@@ -64,6 +64,11 @@ layout_contract(record(box, [
     field(pseudo, u8),                          % 1 its element's ::before, 2 ::after; 0 the element's own
     field(position,     enum(position)),
     field(cb,           ref(box)),              % an absolutely positioned box's containing block (the viewport's for fixed)
+    %% an absolutely positioned box whose containing block is an inline element's: its
+    %% first and last fragments' padding boxes make it (CSS 2.1, 10.1); cb is then the box
+    %% the first one's line is in
+    field(cb_inline,    bool),
+    field(cb_node,      xhandle(dom, node)),
     field(float_side,   enum(float_side)),
     field(z,            i32),                   % z-index, a positioned box's (0 for auto)
     field(z_auto,       bool),                  % z-index is auto: the box makes no stacking context of its own
@@ -156,6 +161,8 @@ layout_contract(fact(layout_parent(handle, field(parent)), table(box), field(par
 layout_contract(fact(layout_pseudo(handle, field(pseudo)), table(box), field(pseudo) \== 0)).
 %% a positioned box: how, its containing block (an absolute or fixed one's), its offset (a relative one's)
 layout_contract(fact(layout_positioned(handle, field(position), field(cb), field(dx), field(dy)), table(box), field(position) \== static)).
+%% the inline element whose fragments make an absolutely positioned box's containing block
+layout_contract(fact(layout_inline_cb(handle, field(cb_node)), table(box), field(cb_inline) == true)).
 layout_contract(fact(layout_stacking(handle, field(z)), table(box), field(z_auto) == false)).
 layout_contract(fact(layout_float(handle, field(float_side)), table(box), field(float_side) \== unfloated)).
 %% a grid item's area: its first row line and column line, the rows and columns it spans, how it was placed
