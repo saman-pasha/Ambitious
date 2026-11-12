@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>WOFF2</title>
+<style>
+/* tests/pages/woff2.html -- web fonts in WOFF2 (Brotli-compressed tables, glyf and loca
+   transformed, hmtx too in one): the fixture fonts tools/gen-font.py --web writes, made
+   WOFF2 by fontTools 4.53.1 with Brotli 1.1.0 (fonttools ttLib.woff2 compress -o OUT
+   FONT) -- serif-bold.woff2 (of serif-bold.woff: composite glyphs, kerning pairs),
+   oblique-hmtx.woff2 (of oblique.ttf, with --hmtx-transform), oblique-null.woff2 (with
+   --no-glyf-transform: no table transformed), sans-cff.woff2 (of sans-cff.otf: CFF
+   outlines, drawn unkerned as Chromium draws a CFF web font) -- and a source list whose
+   first font does not load, for which the next is taken. The spans' boxes are held to
+   Chromium's (tests/pages/woff2.chromium), their drawing region by region
+   (woff2.shot.png, woff2.regions). */
+@font-face { font-family: "Woff2 Serif"; src: url(fonts/serif-bold.woff2) format("woff2"); font-weight: 700 }
+@font-face { font-family: "Woff2 Hmtx"; src: url(fonts/oblique-hmtx.woff2) format("woff2") }
+@font-face { font-family: "Woff2 Null"; src: url(fonts/oblique-null.woff2) format("woff2") }
+@font-face { font-family: "Woff2 CFF"; src: url(fonts/sans-cff.woff2) format("woff2") }
+@font-face { font-family: "Woff2 Next"; src: url(fonts/missing.woff2) format("woff2"), url(fonts/serif-bold.woff) format("woff"); font-weight: 700 }
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; }
+span { white-space: nowrap; }
+.serif { font-family: "Woff2 Serif"; font-weight: 700; }
+.hmtx { font-family: "Woff2 Hmtx"; }
+.null { font-family: "Woff2 Null"; }
+.cff { font-family: "Woff2 CFF"; }
+.next { font-family: "Woff2 Next"; font-weight: 700; }
+.big { font-size: 40px; }
+</style></head>
+<body>
+<p class=serif id=text-p-serif><span id=text-serif>AVAVAV To. Wa — Ærøskøbing, Zürich, façade, naïve</span></p>
+<p class=hmtx id=text-p-hmtx><span id=text-hmtx>Sphinx of black quartz, judge my vow: 0123456789</span></p>
+<p class=null id=text-p-null><span id=text-null>Sphinx of black quartz, judge my vow: 0123456789</span></p>
+<p class=cff id=text-p-cff><span id=text-cff>Sphinx of black quartz, judge my vow.</span></p>
+<p class=next id=text-p-next><span id=text-next>AVAVAV To. Wa — the next source</span></p>
+<p class="serif big" id=text-p-big><span id=text-big>Façade AVA Ærø</span></p>
+<p class="cff big" id=text-p-big2><span id=text-big2>Quartz vow</span></p>
+</body></html>

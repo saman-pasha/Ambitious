@@ -71,7 +71,7 @@ L = ly(1,1,0), N = base, R = 1
 L = ly(1,2,0), N = theme, R = 2
 -- the web fonts @font-face fetched, and a family resolved to one:
 F = ff(1,1,0), Fam = 'Web Oblique', U = 'file://ROOT/tests/pages/fonts/oblique.ttf', W = 400, I = false
-F = ff(1,2,0), Fam = 'Web Serif', U = 'file://ROOT/tests/pages/fonts/serif-bold.woff', W = 700, I = false
+F = ff(1,2,0), Fam = 'Web Serif', U = 'file://ROOT/tests/pages/fonts/serif-bold.woff2', W = 700, I = false
 N = n(1,22,0), X = declared(weboblique,written('\'Web Oblique\', monospace'),by('.mono'),in(author))
 -- what lost a card's properties: a layer under a later one, under the unlayered rules; order within a layer:
 N = n(1,13,0), P = background_color, D = de(1,373,0), Why = layer(lost(base),won(theme))

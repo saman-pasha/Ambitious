@@ -1,0 +1,15 @@
+# tests/pages/woff2.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-p-serif 8 8 792 27
+text-serif 8 8 474 27
+text-p-hmtx 8 31 792 50
+text-hmtx 8 31 471 50
+text-p-null 8 54 792 73
+text-null 8 54 471 73
+text-p-cff 8 77 792 96
+text-cff 8 77 315 96
+text-p-next 8 100 792 119
+text-next 8 100 307 119
+text-p-big 8 123 792 170
+text-big 8 123 368 170
+text-p-big2 8 174 792 220
+text-big2 8 174 237 220

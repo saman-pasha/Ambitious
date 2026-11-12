@@ -13,7 +13,9 @@
    first reaches it -- its cmap read alone, into runs of the code points it has -- and
    read whole, as a static face, when it has one a page needs (a collection's font found
    by its index; a missing file passed over), once a process. A page's web font is read
-   when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
+   when it is added: its sfnt's tables found (a WOFF file's rebuilt first: WOFF 1's tables
+   inflated; WOFF2's decompressed by brotli.c, its transformed glyf, loca and hmtx made
+   again as Google's decoder, which Chromium runs, makes them), its
    code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
    hhea and OS/2, kerning pairs from kern (format 0, not GPOS's; none for a web font
    with CFF outlines, whose kern table Chromium's sanitizer drops); its outlines are read
@@ -483,6 +485,377 @@ static int amb_woff(const uint8_t *p, size_t n, vector<uint8_t> *sf) {
     return 1;
 }
 
+/* ---- WOFF2: its tables decompressed (Brotli: brotli.c) and made an sfnt again ---- */
+
+#include "brotli.h"
+
+/* the tags a WOFF2 table directory names by their index (63: a tag of its own follows) */
+static const char amb_woff2_tags[] = "cmapheadhheahmtxmaxpnameOS/2postcvt fpgmglyflocaprepCFF VORGEBDTEBLCgasphdmxkernLTSHPCLTVDMXvheavmtxBASEGDEFGPOSGSUBEBSCJSTFMATHCBDTCBLCCOLRCPALSVG sbixacntavarbdatblocbslncvarfdscfeatfmtxfvargvarhstyjustlcarmortmorxopbdproptrakZapfSilfGlatGlocFeatSill";
+
+/* a UIntBase128 at *q (one to five bytes, seven bits each, no leading zero, below 2^32) */
+static int amb_base128(const uint8_t *p, size_t n, size_t *q, uint32_t *v) {
+    uint32_t r = 0;
+    for (int i = 0; i < 5; i++) {
+        if (*q >= n) return 0;
+        uint32_t c = p[(*q)++];
+        if ((i == 0 && c == 0x80) || (r & 0xFE000000)) return 0;
+        r = r << 7 | (c & 0x7f);
+        if (!(c & 0x80)) {
+            *v = r;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* a 255UInt16 at *q, before end */
+static int amb_u255(const uint8_t *p, size_t end, size_t *q, uint32_t *v) {
+    if (*q >= end) return 0;
+    uint32_t c = p[(*q)++];
+    if (c == 253) {
+        if (*q + 2 > end) return 0;
+        *v = (uint32_t)p[*q] << 8 | p[*q + 1];
+        *q += 2;
+    } else if (c == 254 || c == 255) {
+        if (*q >= end) return 0;
+        *v = p[(*q)++] + (c == 254 ? 506u : 253u);
+    } else *v = c;
+    return 1;
+}
+
+/* the transformed glyf table (t, tn bytes; WOFF2 5.1) made glyf and loca again as Google's
+   decoder makes them (which Chromium's sanitizer runs): each glyph from its streams -- its
+   contours' point counts, its points' flags and their coordinates' triplets, its
+   instructions, a composite's components, its box (given, or its points') -- written as
+   TrueType writes it (flags repeated, coordinates short where they fit) and padded to four
+   bytes; loca in the index format given. Each glyph's xMin into xmin (for hmtx). 1, or 0
+   when the streams do not hold the glyphs */
+static int amb_woff2_glyf(const uint8_t *t, size_t tn, vector<uint8_t> *glyf, vector<uint8_t> *loca, vector<int16_t> *xmin,
+                          uint32_t *nglyphs, uint32_t *ifmt) {
+    if (tn < 36) return 0;
+    uint32_t opt = amb_u16(t, tn, 2), ng = amb_u16(t, tn, 4);
+    *nglyphs = ng;
+    *ifmt = amb_u16(t, tn, 6);
+    if (*ifmt > 1) return 0;
+    /* the streams: contour counts, point counts, flags, glyphs (triplets, instruction
+       lengths), composites, boxes (a bitmap of the glyphs that have one, then theirs),
+       instructions; and the bitmap of glyphs whose contours overlap */
+    size_t c[7], e[7], sp = 36;
+    for (int k = 0; k < 7; k++) {
+        size_t sz = amb_u32(t, tn, 8 + 4 * (size_t)k);
+        if (sz > tn - sp) return 0;
+        c[k] = sp;
+        e[k] = sp + sz;
+        sp += sz;
+    }
+    size_t overlap = 0, bbmap = c[5];
+    if (opt & 1) {
+        if (((size_t)ng + 7) / 8 > tn - sp) return 0;
+        overlap = sp;
+    }
+    size_t bbsize = (((size_t)ng + 31) >> 5) << 2;
+    if (bbsize > e[5] - c[5]) return 0;
+    c[5] += bbsize;
+    clear(*glyf);
+    clear(*loca);
+    clear(*xmin);
+    vector<uint32_t> offs;
+    vector<int32_t> xs, ys;
+    vector<uint8_t> on, gb;
+    for (uint32_t i = 0; i < ng; i++) {
+        if (c[0] + 2 > e[0]) return 0;
+        uint32_t nc = amb_u16(t, tn, c[0]);
+        c[0] += 2;
+        int have_bbox = (t[bbmap + (i >> 3)] & (0x80 >> (i & 7))) != 0;
+        int16_t x0 = 0;
+        clear(gb);
+        if (nc == 0xFFFF) {
+            /* a composite: its components as they are, its box, its instructions */
+            if (!have_bbox) return 0;
+            size_t cs = c[4];
+            uint32_t flags = 0x20, instr = 0, ilen = 0;
+            while (flags & 0x20) {
+                if (cs + 2 > e[4]) return 0;
+                flags = amb_u16(t, tn, cs);
+                cs += 2;
+                instr |= flags & 0x100;
+                size_t arg = 2 + ((flags & 1) ? 4 : 2) + ((flags & 8) ? 2 : (flags & 0x40) ? 4 : (flags & 0x80) ? 8 : 0);
+                if (arg > e[4] - cs) return 0;
+                cs += arg;
+            }
+            if (instr && !amb_u255(t, e[3], &c[3], &ilen)) return 0;
+            if (c[5] + 8 > e[5] || ilen > e[6] - c[6]) return 0;
+            amb_be16(&gb, 0xFFFF);
+            append_range(gb, t + c[5], 8);
+            x0 = (int16_t)amb_u16(t, tn, c[5]);
+            c[5] += 8;
+            append_range(gb, t + c[4], cs - c[4]);
+            c[4] = cs;
+            if (instr) {
+                amb_be16(&gb, ilen);
+                append_range(gb, t + c[6], ilen);
+                c[6] += ilen;
+            }
+        } else if (nc > 0) {
+            /* a simple glyph: its contours' ends, its points from their triplets */
+            clear(offs);
+            uint32_t total = 0, k;
+            for (k = 0; k < nc; k++) {
+                uint32_t np;
+                if (!amb_u255(t, e[1], &c[1], &np)) return 0;
+                total += np;
+                if (total >= (1u << 16)) return 0;
+                push_back(offs, total);
+            }
+            if (total > e[2] - c[2]) return 0;
+            clear(xs);
+            clear(ys);
+            clear(on);
+            int32_t x = 0, y = 0;
+            for (k = 0; k < total; k++) {
+                uint32_t f = t[c[2] + k], b = f & 0x7f;
+                size_t nb = b < 84 ? 1 : b < 120 ? 2 : b < 124 ? 3 : 4;
+                if (nb > e[3] - c[3]) return 0;
+                size_t q = c[3];
+                int32_t dx, dy;
+                if (b < 10) {
+                    dx = 0;
+                    dy = (int32_t)(((b & 14) << 7) + t[q]);
+                } else if (b < 20) {
+                    dx = (int32_t)((((b - 10) & 14) << 7) + t[q]);
+                    dy = 0;
+                } else if (b < 84) {
+                    uint32_t b0 = b - 20, b1 = t[q];
+                    dx = (int32_t)(1 + (b0 & 0x30) + (b1 >> 4));
+                    dy = (int32_t)(1 + ((b0 & 0x0c) << 2) + (b1 & 0x0f));
+                } else if (b < 120) {
+                    uint32_t b0 = b - 84;
+                    dx = (int32_t)(1 + ((b0 / 12) << 8) + t[q]);
+                    dy = (int32_t)(1 + (((b0 % 12) >> 2) << 8) + t[q + 1]);
+                } else if (b < 124) {
+                    uint32_t b2 = t[q + 1];
+                    dx = (int32_t)(((uint32_t)t[q] << 4) + (b2 >> 4));
+                    dy = (int32_t)(((b2 & 0x0f) << 8) + t[q + 2]);
+                } else {
+                    dx = (int32_t)((uint32_t)t[q] << 8 | t[q + 1]);
+                    dy = (int32_t)((uint32_t)t[q + 2] << 8 | t[q + 3]);
+                }
+                /* the sign of each: the flag's low bit for x, its next for y (its low bit
+                   for a y alone) */
+                if (!(b & 1)) dx = -dx;
+                if (!((b < 10 ? b : b >> 1) & 1)) dy = -dy;
+                c[3] += nb;
+                x += dx;
+                y += dy;
+                push_back(xs, x);
+                push_back(ys, y);
+                push_back(on, (uint8_t)!(f >> 7));
+            }
+            c[2] += total;
+            uint32_t ilen;
+            if (!amb_u255(t, e[3], &c[3], &ilen) || ilen > e[6] - c[6]) return 0;
+            /* its box: given, or its points' */
+            int32_t bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+            if (have_bbox) {
+                if (c[5] + 8 > e[5]) return 0;
+                bx0 = (int16_t)amb_u16(t, tn, c[5]);
+                by0 = (int16_t)amb_u16(t, tn, c[5] + 2);
+                bx1 = (int16_t)amb_u16(t, tn, c[5] + 4);
+                by1 = (int16_t)amb_u16(t, tn, c[5] + 6);
+                c[5] += 8;
+            } else if (total) {
+                bx0 = bx1 = at(xs, 0);
+                by0 = by1 = at(ys, 0);
+                for (k = 1; k < total; k++) {
+                    int32_t px = at(xs, k), py = at(ys, k);
+                    if (px < bx0) bx0 = px;
+                    if (px > bx1) bx1 = px;
+                    if (py < by0) by0 = py;
+                    if (py > by1) by1 = py;
+                }
+            }
+            x0 = (int16_t)bx0;
+            amb_be16(&gb, nc);
+            amb_be16(&gb, (uint32_t)bx0 & 0xffff);
+            amb_be16(&gb, (uint32_t)by0 & 0xffff);
+            amb_be16(&gb, (uint32_t)bx1 & 0xffff);
+            amb_be16(&gb, (uint32_t)by1 & 0xffff);
+            for (k = 0; k < nc; k++) amb_be16(&gb, at(offs, k) - 1);
+            amb_be16(&gb, ilen);
+            append_range(gb, t + c[6], ilen);
+            c[6] += ilen;
+            /* the flags (a run of one repeated, with its count), then x's, then y's */
+            int overlapbit = overlap && (t[overlap + (i >> 3)] & (0x80 >> (i & 7)));
+            int last = -1;
+            uint32_t repeat = 0;
+            int32_t lx = 0, ly = 0;
+            for (k = 0; k < total; k++) {
+                int32_t dx = at(xs, k) - lx, dy = at(ys, k) - ly;
+                int fl = at(on, k) ? 1 : 0;
+                if (overlapbit && k == 0) fl |= 0x40;
+                if (dx == 0) fl |= 0x10;
+                else if (dx > -256 && dx < 256) fl |= 0x02 | (dx > 0 ? 0x10 : 0);
+                if (dy == 0) fl |= 0x20;
+                else if (dy > -256 && dy < 256) fl |= 0x04 | (dy > 0 ? 0x20 : 0);
+                if (fl == last && repeat != 255) {
+                    gb[len(gb) - 1 - (repeat ? 1 : 0)] |= 0x08;
+                    if (repeat) gb[len(gb) - 1] = (uint8_t)(repeat + 1);
+                    else push_back(gb, 1);
+                    repeat++;
+                } else {
+                    push_back(gb, (uint8_t)fl);
+                    repeat = 0;
+                }
+                last = fl;
+                lx = at(xs, k);
+                ly = at(ys, k);
+            }
+            for (int axis = 0; axis < 2; axis++) {
+                int32_t prev = 0;
+                for (k = 0; k < total; k++) {
+                    int32_t v = axis ? at(ys, k) : at(xs, k), d = v - prev;
+                    if (d != 0 && d > -256 && d < 256) push_back(gb, (uint8_t)(d < 0 ? -d : d));
+                    else if (d != 0) amb_be16(&gb, (uint32_t)d & 0xffff);
+                    prev = v;
+                }
+            }
+        } else if (have_bbox) return 0;                  /* an empty glyph has no box */
+        push_back(*xmin, x0);
+        uint32_t here = (uint32_t)len(*glyf);
+        if (*ifmt == 0) amb_be16(loca, here >> 1);
+        else amb_be32(loca, here);
+        append_range(*glyf, data(gb), len(gb));
+        while (len(*glyf) % 4) push_back(*glyf, 0);
+    }
+    uint32_t end = (uint32_t)len(*glyf);
+    if (*ifmt == 0 && end >= 0x20000) return 0;
+    if (*ifmt == 0) amb_be16(loca, end >> 1);
+    else amb_be32(loca, end);
+    return 1;
+}
+
+/* the transformed hmtx table (t, tn bytes; WOFF2 5.4) made hmtx again: its advances, and
+   its left side bearings, given or (as its flags say) each glyph's xMin */
+static int amb_woff2_hmtx(const uint8_t *t, size_t tn, uint32_t ng, uint32_t nhm, const vector<int16_t> *xmin, vector<uint8_t> *out) {
+    if (tn < 1 || nhm < 1 || nhm > ng || len(*xmin) != ng) return 0;
+    uint32_t fl = t[0];
+    if ((fl & 0xFC) || (fl & 3) == 0) return 0;
+    size_t lsb_at = 1 + 2 * (size_t)nhm;
+    if (lsb_at > tn) return 0;
+    clear(*out);
+    for (uint32_t i = 0; i < ng; i++) {
+        if (i < nhm) amb_be16(out, amb_u16(t, tn, 1 + 2 * (size_t)i));
+        int given = i < nhm ? !(fl & 1) : !(fl & 2);
+        if (given) {
+            if (lsb_at + 2 > tn) return 0;
+            amb_be16(out, amb_u16(t, tn, lsb_at));
+            lsb_at += 2;
+        } else amb_be16(out, (uint32_t)(uint16_t)at(*xmin, i));
+    }
+    return 1;
+}
+
+/* a WOFF2 font (WOFF2 3-5) made an sfnt: its directory read, its tables decompressed, glyf
+   and loca and hmtx made again where they were transformed. A collection is not read */
+static int amb_woff2(const uint8_t *p, size_t n, vector<uint8_t> *sf) {
+    if (n < 48 || amb_u32(p, n, 8) != n || amb_tag(p, n, 4, "ttcf")) return 0;
+    uint32_t nt = amb_u16(p, n, 12), comp = amb_u32(p, n, 20);
+    if (nt == 0 || nt > 256) return 0;
+    char tags[256 * 4];
+    uint32_t olen[256], tlen[256], xf[256];
+    size_t start[256], pos = 48, total = 0;
+    for (uint32_t i = 0; i < nt; i++) {
+        if (pos >= n) return 0;
+        uint32_t fl = p[pos++], idx = fl & 63, ver = fl >> 6;
+        if (idx == 63) {
+            if (pos + 4 > n) return 0;
+            for (int k = 0; k < 4; k++) tags[4 * i + k] = (char)p[pos + k];
+            pos += 4;
+        } else
+            for (int k = 0; k < 4; k++) tags[4 * i + k] = amb_woff2_tags[4 * idx + k];
+        if (!amb_base128(p, n, &pos, &olen[i])) return 0;
+        int glyf_or_loca = memcmp(tags + 4 * i, "glyf", 4) == 0 || memcmp(tags + 4 * i, "loca", 4) == 0;
+        /* transformed: glyf and loca by version 0 (3 is none), hmtx by version 1 */
+        if (glyf_or_loca) xf[i] = ver == 0;
+        else xf[i] = ver != 0;
+        if ((glyf_or_loca && ver != 0 && ver != 3) || (!glyf_or_loca && ver != 0 && !(ver == 1 && memcmp(tags + 4 * i, "hmtx", 4) == 0)))
+            return 0;
+        tlen[i] = olen[i];
+        if (xf[i] && !amb_base128(p, n, &pos, &tlen[i])) return 0;
+        if (xf[i] && memcmp(tags + 4 * i, "loca", 4) == 0 && tlen[i] != 0) return 0;
+        start[i] = total;
+        total += tlen[i];
+        if (total > (64u << 20)) return 0;
+    }
+    if (comp > n - pos) return 0;
+    vector<uint8_t> raw;
+    if (!amb_brotli(p + pos, comp, &raw, total) || len(raw) != total) return 0;
+    /* glyf and loca made again (both transformed, or neither), then hmtx */
+    int gi = -1, li = -1, hi = -1, hhi = -1, mi = -1;
+    for (uint32_t i = 0; i < nt; i++) {
+        if (memcmp(tags + 4 * i, "glyf", 4) == 0) gi = (int)i;
+        else if (memcmp(tags + 4 * i, "loca", 4) == 0) li = (int)i;
+        else if (memcmp(tags + 4 * i, "hmtx", 4) == 0) hi = (int)i;
+        else if (memcmp(tags + 4 * i, "hhea", 4) == 0) hhi = (int)i;
+        else if (memcmp(tags + 4 * i, "maxp", 4) == 0) mi = (int)i;
+    }
+    vector<uint8_t> glyf, loca, hmtx;
+    vector<int16_t> xmin;
+    int gx = gi >= 0 && xf[gi], lx = li >= 0 && xf[li], hx = hi >= 0 && xf[hi];
+    if (gx != lx) return 0;
+    uint32_t ng = 0, ifmt = 0;
+    if (gx) {
+        if (!amb_woff2_glyf(data(raw) + start[gi], tlen[gi], &glyf, &loca, &xmin, &ng, &ifmt)) return 0;
+        if (len(loca) != olen[li]) return 0;
+    }
+    if (hx) {
+        if (!gx || hhi < 0 || mi < 0 || tlen[hhi] < 36) return 0;
+        uint32_t nhm = amb_u16(data(raw) + start[hhi], tlen[hhi], 34);
+        if (!amb_woff2_hmtx(data(raw) + start[hi], tlen[hi], ng, nhm, &xmin, &hmtx)) return 0;
+    }
+    /* the sfnt: its directory in its tags' order, each table's bytes padded to four */
+    uint32_t order[256];
+    for (uint32_t i = 0; i < nt; i++) order[i] = i;
+    for (uint32_t i = 1; i < nt; i++)
+        for (uint32_t j = i; j > 0 && memcmp(tags + 4 * order[j - 1], tags + 4 * order[j], 4) > 0; j--) {
+            uint32_t tmp = order[j];
+            order[j] = order[j - 1];
+            order[j - 1] = tmp;
+        }
+    clear(*sf);
+    uint32_t sr = 1, es = 0;
+    while (sr * 2 <= nt) { sr *= 2; es++; }
+    amb_be32(sf, amb_u32(p, n, 4));
+    amb_be16(sf, nt);
+    amb_be16(sf, 16 * sr);
+    amb_be16(sf, es);
+    amb_be16(sf, 16 * nt - 16 * sr);
+    size_t dir = len(*sf);
+    for (uint32_t i = 0; i < 16 * nt; i++) push_back(*sf, 0);
+    for (uint32_t k = 0; k < nt; k++) {
+        uint32_t i = order[k];
+        size_t off = len(*sf);
+        if ((int)i == gi && gx) append_range(*sf, data(glyf), len(glyf));
+        else if ((int)i == li && lx) append_range(*sf, data(loca), len(loca));
+        else if ((int)i == hi && hx) append_range(*sf, data(hmtx), len(hmtx));
+        else append_range(*sf, data(raw) + start[i], tlen[i]);
+        size_t tl = len(*sf) - off;
+        while (len(*sf) % 4) push_back(*sf, 0);
+        uint32_t sum = 0;
+        for (size_t q = off; q < off + tl; q += 4)
+            sum += (uint32_t)at(*sf, q) << 24 | (uint32_t)(q + 1 < len(*sf) ? at(*sf, q + 1) : 0) << 16 |
+                   (uint32_t)(q + 2 < len(*sf) ? at(*sf, q + 2) : 0) << 8 | (q + 3 < len(*sf) ? at(*sf, q + 3) : 0);
+        size_t r = dir + 16 * (size_t)k;
+        for (int b = 0; b < 4; b++) {
+            (*sf)[r + b] = (uint8_t)tags[4 * i + b];
+            (*sf)[r + 4 + b] = (uint8_t)(sum >> (24 - 8 * b));
+            (*sf)[r + 8 + b] = (uint8_t)(off >> (24 - 8 * b));
+            (*sf)[r + 12 + b] = (uint8_t)(tl >> (24 - 8 * b));
+        }
+    }
+    return 1;
+}
+
 /* ---- loading ---- */
 
 /* each built-in face's font in font_data.h (a family's four styles, but DejaVu Sans's and
@@ -663,6 +1036,7 @@ int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
     if (f->nfaces >= AMB_WEBFIRST + AMB_MAXWEB || n < 12 || n > (64u << 20)) return -1;
     vector<uint8_t> sf;
     if (amb_tag(p, n, 0, "wOFF")) { if (!amb_woff(p, n, &sf)) return -1; }
+    else if (amb_tag(p, n, 0, "wOF2")) { if (!amb_woff2(p, n, &sf)) return -1; }
     else append_range(sf, p, n);
     uint32_t base = (uint32_t)len(f->bytes);
     amb_face fc;

@@ -2,7 +2,7 @@
    font_data.h (tools/gen-font.py: TrueType subsets of the Liberation and DejaVu fonts),
    the system faces (the machine's fonts Chromium falls back to, read from their files
    when a page first needs them) and a page's web fonts (@font-face: TrueType, OpenType
-   with TrueType, CFF or CFF2 outlines, WOFF 1), each read by one sfnt reader into an
+   with TrueType, CFF or CFF2 outlines, WOFF, WOFF2), each read by one sfnt reader into an
    amb_fonts, whose owner drops its vectors (AMB_FONTS_DROP). Layout asks it for advances,
    kerning and metrics; paint for each glyph's coverage at a size.
 
@@ -117,8 +117,9 @@ typedef struct amb_fonts {
    read when a face is first asked for, once a process */
 void amb_fonts_load(amb_fonts *f);
 
-/* a web font's bytes (TrueType, OpenType with TrueType, CFF or CFF2 outlines, WOFF) read
-   into f as a face: its index, or -1 when they are no font this reads */
+/* a web font's bytes (TrueType, OpenType with TrueType, CFF or CFF2 outlines, WOFF,
+   WOFF2 but a collection) read into f as a face: its index, or -1 when they are no font
+   this reads */
 int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n);
 
 /* the built-in face a family the cascade computed names (src/css: serif, sans-serif,

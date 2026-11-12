@@ -2959,19 +2959,19 @@ static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *
 }
 
 /* the bytes begin as a font the painter reads: TrueType, OpenType (with TrueType or CFF
-   outlines), WOFF */
+   outlines), WOFF, WOFF2 */
 static int css_font_magic(const char *b, size_t n) {
     if (n < 4) return 0;
     return (b[0] == 0 && b[1] == 1 && b[2] == 0 && b[3] == 0) || memcmp(b, "true", 4) == 0 || memcmp(b, "OTTO", 4) == 0 ||
-           memcmp(b, "wOFF", 4) == 0;
+           memcmp(b, "wOFF", 4) == 0 || memcmp(b, "wOF2", 4) == 0;
 }
 
-/* @font-face: its family, the first source whose format the painter reads, its weight
-   and style; the source fetched */
+/* @font-face: its family, the sources whose format the painter reads, its weight and
+   style; the first of those sources that is fetched and is a font */
 static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, const char *t, size_t n) {
     vector<char> family;
-    char ref[2048], abs[4096];
-    ref[0] = 0;
+    char refs[4][2048], abs[4096], first[4096];
+    int nref = 0;
     uint32_t weight = 400;
     int italic = 0;
     size_t d = 0;
@@ -2994,10 +2994,11 @@ static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, con
                 clear(family);
                 if (vn >= 2 && (v[0] == '"' || v[0] == '\'')) append_range(family, v + 1, vn - 2);
                 else append_range(family, v, vn);
-            } else if (css_eq_ci(t + na, nb - na, "src") && !ref[0]) {
-                /* the sources in order: the first url() whose format() is none or one read */
+            } else if (css_eq_ci(t + na, nb - na, "src") && !nref) {
+                /* the sources in order: the url()s whose format() is none or one read (the
+                   first four) */
                 size_t a = 0;
-                while (a < vn && !ref[0]) {
+                while (a < vn && nref < 4) {
                     size_t b = css_comma(v, vn, a), i = a, st, ln;
                     int ok = 1;
                     char u[2048];
@@ -3008,10 +3009,10 @@ static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, con
                             char f[64];
                             if (!css_url_of(v + st + 7, ln - 8, f, sizeof f)) snprintf(f, sizeof f, "%.*s", (int)(ln - 8), v + st + 7);
                             for (size_t q = 0; f[q]; q++) f[q] = css_lower(f[q]);
-                            if (!css_word_in(f, "truetype opentype woff")) ok = 0;
+                            if (!css_word_in(f, "truetype opentype woff woff2")) ok = 0;
                         } else if (css_is_fn(v + st, ln, "tech")) ok = 0;
                     }
-                    if (ok && u[0]) snprintf(ref, sizeof ref, "%s", u);
+                    if (ok && u[0]) snprintf(refs[nref++], sizeof refs[0], "%s", u);
                     a = b + 1;
                 }
             } else if (css_eq_ci(t + na, nb - na, "font-weight")) {
@@ -3022,21 +3023,31 @@ static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, con
         }
         d = e + 1;
     }
-    if (!len(family) || !ref[0]) return;
+    if (!len(family) || !nref) return;
     css_face_h h = face_new(s);
     uint32_t fi = h.index;
     amb_span fam = text_add(s, data(family), len(family));
     s->face[fi].family = fam;
     s->face[fi].weight = weight;
     s->face[fi].italic = (uint8_t)italic;
-    uint32_t r = css_fetch(net, cx, ref, NET_KIND_OTHER, abs, sizeof abs);
-    /* the URL fetched, or (a fetch that failed) as written; an if, as a ternary between
-       two arrays is not lowered (toolchain finding) */
+    /* each source fetched in turn till one is a font (as Chromium tries the next when one
+       fails to load): the face's URL that one's, else the first fetched, else the first
+       as written; an if, as a ternary between two arrays is not lowered (toolchain
+       finding) */
+    uint32_t r = 0, fetched = 0;
+    for (int k = 0; k < nref && !s->face[fi].font.index; k++) {
+        r = css_fetch(net, cx, refs[k], NET_KIND_OTHER, abs, sizeof abs);
+        if (r && !fetched) {
+            fetched = r;
+            snprintf(first, sizeof first, "%s", abs);
+        }
+        if (r && css_font_magic(bytes_ptr(net, net->resource[r].body), net->resource[r].body.len)) s->face[fi].font = resource_handle(net, r);
+    }
     amb_span ua;
-    if (r) ua = text_add(s, abs, strlen(abs));
-    else ua = text_add(s, ref, strlen(ref));
+    if (s->face[fi].font.index) ua = text_add(s, abs, strlen(abs));
+    else if (fetched) ua = text_add(s, first, strlen(first));
+    else ua = text_add(s, refs[0], strlen(refs[0]));
     s->face[fi].url = ua;
-    if (r && css_font_magic(bytes_ptr(net, net->resource[r].body), net->resource[r].body.len)) s->face[fi].font = resource_handle(net, r);
 }
 
 /* a sheet's text, its comments gone: rules and at-rules */
