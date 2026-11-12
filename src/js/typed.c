@@ -487,13 +487,12 @@ static void utf8_of(js_vm *vm, uint32_t s, vector<uint8_t> *out, uint32_t *read_
     *read_units = i;
 }
 
-/* the bytes [p, p + n) of vm->bytes as UTF-8, U+FFFD for each maximal bad subpart (the
+/* the bytes s[0, n) as UTF-8 onto out as UTF-16, U+FFFD for each maximal bad subpart (the
    Encoding standard's decoder): 0 when fatal and one was met */
-static int utf8_decode(js_vm *vm, uint32_t p, uint32_t n, int fatal, int bom, vector<uint16_t> *out) {
+static int utf8_decode(const char *s, uint32_t n, int fatal, vector<uint16_t> *out) {
     uint32_t i = 0;
-    if (!bom && n >= 3 && vm->bytes[p] == 0xEF && vm->bytes[p + 1] == 0xBB && vm->bytes[p + 2] == 0xBF) i = 3;
     while (i < n) {
-        uint32_t c = vm->bytes[p + i];
+        uint32_t c = (uint8_t)s[i];
         if (c < 0x80) { push_back(*out, (uint16_t)c); i++; continue; }
         uint32_t need = 0, cp = 0, lo = 0x80, hi = 0xBF;
         if (c >= 0xC2 && c <= 0xDF) { need = 1; cp = c & 0x1F; }
@@ -504,7 +503,7 @@ static int utf8_decode(js_vm *vm, uint32_t p, uint32_t n, int fatal, int bom, ve
         int bad = 0;
         for (; k <= need; k++) {
             if (i + k >= n) { bad = 1; break; }
-            uint32_t b = vm->bytes[p + i + k];
+            uint32_t b = (uint8_t)s[i + k];
             if (b < lo || b > hi) { bad = 1; break; }
             lo = 0x80;
             hi = 0xBF;
@@ -526,6 +525,283 @@ static int buffer_source(js_vm *vm, jv v, uint32_t *p, uint32_t *n) {
     if (k == JK_TYPEDARRAY) { *p = vm->objs[vm->objs[o].a].a + vm->objs[o].c; *n = vm->objs[o].b * ta_size[ta_type(vm, o)]; return 1; }
     if (k == JK_DATAVIEW) { *p = vm->objs[vm->objs[o].a].a + vm->objs[o].c; *n = vm->objs[o].b; return 1; }
     return 0;
+}
+
+/* ---- TextDecoder: the Encoding standard's decoders ----
+   UTF-8 is decoded here, straight into UTF-16. Every other encoding is the HTML module's
+   decoder (src/html/encoding.c), which reads a whole input to its end: a stream (decode
+   with { stream: true }) is cut where that decoder would be at rest (a cut_ function each
+   mirrors its states, without its indexes), the bytes after the cut wait for the next
+   call, and ISO-2022-JP's mode, which outlives its bytes, is given back to the decoder as
+   the escape that sets it. The byte order mark of UTF-8 and UTF-16 is the stream's first
+   output's, taken away unless ignoreBOM. The labels are the standard's; replacement is
+   refused (the standard's TextDecoder makes none), in node's words as every error here is.
+   x-user-defined and ISO-8859-16, which node's ICU lacks, are made as the standard and
+   Chromium make them. */
+
+/* the HTML module's public functions (src/html/encoding.h, whose own declarations need
+   the DOM's and HTML's interfaces; html_decode's is its HTML_DECODE_DECL) */
+int html_enc_of_label(const char *label, size_t n);
+const char *html_enc_name(int enc);
+size_t html_decode(int enc, const char *src, size_t n, vector<char> *out);
+
+/* a decoder's kinds of encoding, by how a stream is cut */
+enum { TK_UTF8, TK_UTF16LE, TK_UTF16BE, TK_SINGLE, TK_GB18030, TK_BIG5, TK_EUCJP, TK_ISO2022JP, TK_SJIS, TK_EUCKR, TK_NONE };
+/* a decoder's flags (in its a): its options; the stream's BOM seen; the last call one of a
+   stream ({ stream: true }), so that this one goes on with its state; ISO-2022-JP's mode at
+   the cut and its output flag; above, how many bytes wait (in its x) */
+#define TD_FATAL 1u
+#define TD_IGNOREBOM 2u
+#define TD_BOMSEEN 4u
+#define TD_STREAM 8u
+#define TD_MODE_SHIFT 4
+#define TD_OUTFLAG 0x40u
+#define TD_PEND_SHIFT 8
+/* a TextDecoder's and a TextEncoder's objects, marked in their flags */
+#define TD_DECODER 0x100u
+#define TE_ENCODER 0x200u
+
+/* an encoding's name in lowercase (its decoder's encoding), into b */
+static void td_name(int enc, char *b, size_t cap) {
+    snprintf(b, cap, "%s", html_enc_name(enc));
+    for (size_t i = 0; b[i]; i++) if (b[i] >= 'A' && b[i] <= 'Z') b[i] = (char)(b[i] + 32);
+}
+/* an encoding's kind, by its name */
+static uint32_t td_kind(int enc) {
+    char b[40];
+    td_name(enc, b, sizeof b);
+    if (!strcmp(b, "utf-8")) return TK_UTF8;
+    if (!strcmp(b, "utf-16le")) return TK_UTF16LE;
+    if (!strcmp(b, "utf-16be")) return TK_UTF16BE;
+    if (!strcmp(b, "gbk") || !strcmp(b, "gb18030")) return TK_GB18030;
+    if (!strcmp(b, "big5")) return TK_BIG5;
+    if (!strcmp(b, "euc-jp")) return TK_EUCJP;
+    if (!strcmp(b, "iso-2022-jp")) return TK_ISO2022JP;
+    if (!strcmp(b, "shift_jis")) return TK_SJIS;
+    if (!strcmp(b, "euc-kr")) return TK_EUCKR;
+    if (!strcmp(b, "replacement")) return TK_NONE;
+    return TK_SINGLE;
+}
+
+/* where UTF-8's decoder would be at rest last in s[0, n): before the sequence it has begun, else n */
+static uint32_t cut_utf8(const char *s, uint32_t n) {
+    uint32_t i = 0, start = 0, need = 0, seen = 0, lo = 0x80, hi = 0xBF;
+    while (i < n) {
+        uint32_t b = (uint8_t)s[i++];
+        if (need == 0) {
+            if (b >= 0xC2 && b <= 0xDF) need = 1;
+            else if (b >= 0xE0 && b <= 0xEF) { if (b == 0xE0) lo = 0xA0; if (b == 0xED) hi = 0x9F; need = 2; }
+            else if (b >= 0xF0 && b <= 0xF4) { if (b == 0xF0) lo = 0x90; if (b == 0xF4) hi = 0x8F; need = 3; }
+            if (need) start = i - 1;
+            continue;
+        }
+        if (b < lo || b > hi) { need = seen = 0; lo = 0x80; hi = 0xBF; i--; continue; }
+        lo = 0x80;
+        hi = 0xBF;
+        if (++seen == need) need = seen = 0;
+    }
+    return need ? start : n;
+}
+/* UTF-16's: before its lead byte, or the lead surrogate waiting for its trail */
+static uint32_t cut_utf16(const char *s, uint32_t n, int be) {
+    uint32_t i = 0, start = 0, lead_surr = 0;
+    int lead_byte = -1;
+    while (i < n) {
+        uint32_t b = (uint8_t)s[i++];
+        if (lead_byte < 0) { if (!lead_surr) start = i - 1; lead_byte = (int)b; continue; }
+        uint32_t unit = be ? ((uint32_t)lead_byte << 8) + b : (b << 8) + (uint32_t)lead_byte;
+        lead_byte = -1;
+        if (lead_surr) {
+            lead_surr = 0;
+            if (unit < 0xDC00 || unit > 0xDFFF) i -= 2;     /* the unit's bytes read again, as the decoder does */
+            continue;
+        }
+        if (unit >= 0xD800 && unit <= 0xDBFF) lead_surr = unit;
+    }
+    return lead_byte >= 0 || lead_surr ? start : n;
+}
+/* gb18030's (GBK's), with its four bytes and the bytes it reads again */
+static uint32_t cut_gb18030(const char *s, uint32_t n) {
+    uint32_t i = 0, start = 0, first = 0, second = 0, third = 0;
+    while (i < n) {
+        uint32_t b = (uint8_t)s[i++];
+        if (third) { if (b < 0x30 || b > 0x39) i -= 3; first = second = third = 0; continue; }
+        if (second) {
+            if (b >= 0x81 && b <= 0xFE) { third = b; continue; }
+            i -= 2;
+            first = second = 0;
+            continue;
+        }
+        if (first) { if (b >= 0x30 && b <= 0x39) { second = b; continue; } first = 0; continue; }
+        if (b >= 0x81 && b <= 0xFE) { first = b; start = i - 1; }
+    }
+    return first ? start : n;
+}
+/* the two-byte encodings', by their lead bytes (a trail that is ASCII, read again, never leads) */
+static uint32_t cut_lead(const char *s, uint32_t n, uint32_t kind) {
+    uint32_t start = 0, leading = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t b = (uint8_t)s[i];
+        if (kind == TK_EUCJP && leading == 0x8F && b >= 0xA1 && b <= 0xFE) { leading = b; continue; }   /* JIS X 0212's third byte to come */
+        if (leading) { leading = 0; continue; }
+        int lead = kind == TK_SJIS ? (b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC)
+                 : kind == TK_EUCJP ? b == 0x8E || b == 0x8F || (b >= 0xA1 && b <= 0xFE)
+                 : b >= 0x81 && b <= 0xFE;
+        if (lead) { leading = b; start = i; }
+    }
+    return leading ? start : n;
+}
+/* ISO-2022-JP's: its states as encoding.c's; the decoder at rest is in a mode (ASCII, Roman,
+   katakana, its lead's), *mode and *flag what it is and its output flag at the cut */
+enum { J_ASCII, J_ROMAN, J_KATAKANA, J_LEAD, J_TRAIL, J_ESC_START, J_ESC };
+static uint32_t cut_iso2022jp(const char *s, uint32_t n, uint32_t *mode, uint32_t *flag) {
+    uint32_t state = J_ASCII, out_state = J_ASCII, output = 0, i = 0, leading = 0, cut = 0;
+    for (;;) {
+        if (state <= J_LEAD) { cut = i; *mode = state; *flag = output; }
+        if (i >= n) break;
+        uint32_t b = (uint8_t)s[i++];
+        if (state <= J_KATAKANA) { if (b == 0x1B) state = J_ESC_START; else output = 0; }
+        else if (state == J_LEAD) {
+            if (b == 0x1B) state = J_ESC_START;
+            else { output = 0; if (b >= 0x21 && b <= 0x7E) { leading = b; state = J_TRAIL; } }
+        } else if (state == J_TRAIL) state = b == 0x1B ? J_ESC_START : J_LEAD;
+        else if (state == J_ESC_START) {
+            if (b == 0x24 || b == 0x28) { leading = b; state = J_ESC; }
+            else { i--; output = 0; state = out_state; }
+        } else {
+            uint32_t lead = leading, st = 99;
+            leading = 0;
+            if (lead == 0x28 && b == 0x42) st = J_ASCII;
+            else if (lead == 0x28 && b == 0x4A) st = J_ROMAN;
+            else if (lead == 0x28 && b == 0x49) st = J_KATAKANA;
+            else if (lead == 0x24 && (b == 0x40 || b == 0x42)) st = J_LEAD;
+            if (st != 99) { state = out_state = st; output = 1; }
+            else { i -= 2; output = 0; state = out_state; }
+        }
+    }
+    return state <= J_LEAD ? n : cut;
+}
+
+/* a value as node words it in a TypeError's "Received ...": null, undefined, a primitive's
+   type and value, an object's constructor */
+static void td_received(js_vm *vm, jv v, vector<char> *m) {
+    const char *t = 0;
+    if (v == JV_NULL) t = "null";
+    else if (v == JV_UNDEF) t = "undefined";
+    if (t) { append_range(*m, t, strlen(t)); return; }
+    if (jv_is_obj(v)) {
+        int fn = js_is_callable(vm, v);
+        t = fn ? "function " : "an instance of ";
+        append_range(*m, t, strlen(t));
+        jv nm = fn ? js_get(vm, v, A_NAME) : JV_UNDEF;
+        if (!fn) { jv c = js_get(vm, v, A_CONSTRUCTOR); nm = !vm->throwing && jv_is_obj(c) ? js_get(vm, c, A_NAME) : JV_UNDEF; }
+        vm->throwing = 0;
+        if (jv_is_str(nm)) js_str_to_utf8(vm, jv_idx(nm), m);
+        return;
+    }
+    t = jv_is_num(v) ? "type number (" : jv_is_str(v) ? "type string ('" : jv_is_sym(v) ? "type symbol (" : jv_is_big(v) ? "type bigint (" : "type boolean (";
+    append_range(*m, t, strlen(t));
+    uint32_t s = jv_is_sym(v) ? js_sym_text(vm, jv_idx(v)) : js_to_string(vm, v);
+    vm->throwing = 0;
+    if (s) js_str_to_utf8(vm, s, m);
+    if (jv_is_str(v)) push_back(*m, '\'');
+    if (jv_is_big(v)) push_back(*m, 'n');
+    push_back(*m, ')');
+}
+/* node's TypeError: "The \"<arg>\" argument must be <what>. Received <v>" */
+static jv td_arg_error(js_vm *vm, const char *arg, const char *what, jv v) {
+    vector<char> m;
+    const char *a = "The \"";
+    append_range(m, a, strlen(a));
+    append_range(m, arg, strlen(arg));
+    const char *b = "\" argument must be ";
+    append_range(m, b, strlen(b));
+    append_range(m, what, strlen(what));
+    const char *c = ". Received ";
+    append_range(m, c, strlen(c));
+    td_received(vm, v, &m);
+    push_back(m, 0);
+    return js_throw_msg(vm, vm->type_error_proto, data(m));
+}
+
+/* the decoder o's decode of the input's bytes in[0, n): its stream's state carried in o,
+   the output's string, or JV_HOLE with the fatal TypeError thrown */
+static jv td_decode(js_vm *vm, uint32_t o, const char *in, uint32_t n, int stream) {
+    uint32_t fl = vm->objs[o].a, kind = vm->objs[o].c;
+    int enc = (int)vm->objs[o].b;
+    /* a new stream when the last call ended one: the BOM not seen, nothing waiting, ASCII */
+    if (!(fl & TD_STREAM)) { fl &= TD_FATAL | TD_IGNOREBOM; vm->objs[o].x = 0; }
+    uint32_t np = (fl >> TD_PEND_SHIFT) & 15u, mode = (fl >> TD_MODE_SHIFT) & 3u, flag = (fl & TD_OUTFLAG) != 0;
+    uint64_t pend = vm->objs[o].x;
+    /* the bytes the decoder reads: an escape giving ISO-2022-JP its mode back, those that
+       waited, the input's */
+    vector<char> d;
+    uint32_t smode = mode, sflag = flag;
+    if (kind == TK_ISO2022JP) {
+        static const char esc[4][3] = { { 0x1B, 0x28, 0x42 }, { 0x1B, 0x28, 0x4A }, { 0x1B, 0x28, 0x49 }, { 0x1B, 0x24, 0x42 } };
+        char first[3] = { 0, 0, 0 };
+        uint32_t have = 0;
+        for (uint32_t k = 0; k < np && have < 3; k++) first[have++] = (char)(pend >> (8 * k));
+        for (uint32_t k = 0; k < n && have < 3; k++) first[have++] = in[k];
+        int valid = have == 3 && first[0] == 0x1B && ((first[1] == 0x28 && (first[2] == 0x42 || first[2] == 0x4A || first[2] == 0x49)) ||
+                                                      (first[1] == 0x24 && (first[2] == 0x40 || first[2] == 0x42)));
+        /* a valid escape first sets the mode itself, and errs when the output flag is set:
+           an escape before it sets the flag; else the mode's own escape, unless ASCII's */
+        int inject = -1;
+        if (valid) { if (flag) inject = J_ASCII; }
+        else if (mode != J_ASCII) inject = (int)mode;
+        if (inject >= 0) append_range(d, esc[inject], 3);
+    }
+    uint32_t il = (uint32_t)len(d);
+    for (uint32_t k = 0; k < np; k++) push_back(d, (char)(pend >> (8 * k)));
+    append_range(d, in, n);
+    uint32_t total = (uint32_t)len(d), cut = total;
+    if (stream) {
+        const char *s = data(d);
+        if (kind == TK_UTF8) cut = cut_utf8(s, total);
+        else if (kind == TK_UTF16LE || kind == TK_UTF16BE) cut = cut_utf16(s, total, kind == TK_UTF16BE);
+        else if (kind == TK_GB18030) cut = cut_gb18030(s, total);
+        else if (kind == TK_ISO2022JP) {
+            cut = cut_iso2022jp(s, total, &mode, &flag);
+            /* a cut before any byte of the stream's own: its mode and flag as they were (the
+               escape put before them set the flag, not the stream) */
+            if (cut <= il) { cut = il; mode = smode; flag = sflag; }
+        } else if (kind == TK_BIG5 || kind == TK_EUCJP || kind == TK_SJIS || kind == TK_EUCKR) cut = cut_lead(s, total, kind);
+    }
+    /* what is after the cut waits; the rest decoded, the BOM taken from the stream's first output */
+    uint64_t wait = 0;
+    for (uint32_t k = cut; k < total && k - cut < 8; k++) wait |= (uint64_t)(uint8_t)d[k] << (8 * (k - cut));
+    int bom = (kind == TK_UTF8 || kind == TK_UTF16LE || kind == TK_UTF16BE) && !(fl & (TD_IGNOREBOM | TD_BOMSEEN));
+    jv r = JV_HOLE;
+    int bad = 0;
+    if (kind == TK_UTF8) {
+        vector<uint16_t> u;
+        bad = !utf8_decode(data(d), cut, (fl & TD_FATAL) != 0, &u);
+        uint32_t from = bom && len(u) && u[0] == 0xFEFF ? 1 : 0;
+        if (len(u)) fl |= TD_BOMSEEN;
+        if (!bad) r = jv_str(js_str_new(vm, data(u) + from, len(u) - from));
+    } else {
+        vector<char> u;
+        size_t errors = html_decode(enc, data(d), cut, &u);
+        bad = errors && (fl & TD_FATAL);
+        uint32_t from = bom && len(u) >= 3 && (uint8_t)u[0] == 0xEF && (uint8_t)u[1] == 0xBB && (uint8_t)u[2] == 0xBF ? 3 : 0;
+        if (len(u)) fl |= TD_BOMSEEN;
+        if (!bad) r = jv_str(js_str_utf8(vm, data(u) + from, len(u) - from));
+    }
+    if (bad) {
+        /* the error ends the stream */
+        vm->objs[o].a = fl & (TD_FATAL | TD_IGNOREBOM);
+        vm->objs[o].x = 0;
+        char m[96], nm[40];
+        td_name(enc, nm, sizeof nm);
+        snprintf(m, sizeof m, "The encoded data was not valid for encoding %s", nm);
+        return js_throw_msg(vm, vm->type_error_proto, m);
+    }
+    fl &= TD_FATAL | TD_IGNOREBOM | TD_BOMSEEN;
+    if (stream) fl |= TD_STREAM | (mode << TD_MODE_SHIFT) | (flag ? TD_OUTFLAG : 0) | ((total - cut) << TD_PEND_SHIFT);
+    vm->objs[o].a = fl;
+    vm->objs[o].x = stream ? wait : 0;
+    return r;
 }
 
 /* a buffer's bytes given to a new one of n bytes (resizable as it was when keep), it detached */
@@ -930,43 +1206,68 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         ta_write(vm, t, p, d, little);
         return JV_UNDEF;
     }
-    /* ---- TextEncoder and TextDecoder: UTF-8 ---- */
+    /* ---- TextEncoder and TextDecoder, in node's words ---- */
     case JTN_TE: case JTN_TD: {
-        if (!constructing) return js_throw_msg(vm, vm->type_error_proto, which == JTN_TE ? "Constructor TextEncoder requires 'new'" : "Constructor TextDecoder requires 'new'");
+        if (!constructing) return js_throw_msg(vm, vm->type_error_proto, which == JTN_TE ? "Class constructor TextEncoder cannot be invoked without 'new'" : "Class constructor TextDecoder cannot be invoked without 'new'");
         uint32_t o = js_obj_new(vm, JK_PLAIN, which == JTN_TE ? vm->textenc_proto : vm->textdec_proto);
-        if (which == JTN_TD) {
-            if (a0 != JV_UNDEF) {
-                uint32_t l = js_to_string(vm, a0);
-                if (!l) return JV_HOLE;
-                vector<char> b;
-                js_str_to_utf8(vm, l, &b);
+        if (which == JTN_TE) { vm->objs[o].flags |= TE_ENCODER; return jv_obj(o); }
+        /* the label's encoding (utf-8 for none); the encodings node's ICU does not make refused by their name */
+        int enc = 0;
+        uint32_t l = a0 == JV_UNDEF ? 0 : js_to_string(vm, a0);
+        if (a0 != JV_UNDEF && !l) return JV_HOLE;
+        vector<char> b;
+        if (l) js_str_to_utf8(vm, l, &b);
+        else append_range(b, "utf-8", 5);
+        enc = html_enc_of_label(data(b), len(b));
+        uint32_t kind = enc < 0 ? TK_NONE : td_kind(enc);
+        if (kind == TK_NONE) {
+            /* the label named, or the encoding when it is known */
+            char m[240], nm[40];
+            if (enc >= 0) td_name(enc, nm, sizeof nm);
+            else {
                 push_back(b, 0);
-                const char *ok[] = { "utf-8", "utf8", "unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8", "x-unicode20utf8" };
-                int good = 0;
-                for (uint32_t i = 0; i < 6; i++) if (!strcasecmp(data(b), ok[i])) good = 1;
-                if (!good) {
-                    char m[200];
-                    snprintf(m, sizeof m, "The encoding label provided ('%s') is invalid.", data(b));
+                snprintf(nm, sizeof nm, "%.39s", data(b));
+                if (len(b) > 40) {
+                    snprintf(m, sizeof m, "The \"%.200s\" encoding is not supported", data(b));
                     return js_throw_msg(vm, vm->range_error_proto, m);
                 }
             }
-            uint32_t fl = 0;
-            if (jv_is_obj(a1)) {
-                jv f = js_get(vm, a1, js_atom_ascii(vm, "fatal"));
-                jv b = js_get(vm, a1, js_atom_ascii(vm, "ignoreBOM"));
-                if (vm->throwing) return JV_HOLE;
-                fl = (js_truthy(vm, f) ? 1u : 0u) | (js_truthy(vm, b) ? 2u : 0u);
-            }
-            vm->objs[o].a = fl;
-            vm->objs[o].flags |= JO_WEAK;      /* marks it a decoder (no collection reads it) */
+            snprintf(m, sizeof m, "The \"%s\" encoding is not supported", nm);
+            return js_throw_msg(vm, vm->range_error_proto, m);
         }
+        uint32_t fl = 0;
+        if (jv_is_obj(a1)) {
+            jv f = js_get(vm, a1, js_atom_ascii(vm, "fatal"));
+            if (vm->throwing) return JV_HOLE;
+            jv ib = js_get(vm, a1, js_atom_ascii(vm, "ignoreBOM"));
+            if (vm->throwing) return JV_HOLE;
+            fl = (js_truthy(vm, f) ? TD_FATAL : 0u) | (js_truthy(vm, ib) ? TD_IGNOREBOM : 0u);
+        }
+        vm->objs[o].a = fl;
+        vm->objs[o].b = (uint32_t)enc;
+        vm->objs[o].c = kind;
+        vm->objs[o].flags |= TD_DECODER;
         return jv_obj(o);
     }
-    case JTN_TE_ENCODING: case JTN_TD_ENCODING: return jv_str(js_str_ascii(vm, "utf-8"));
-    case JTN_TD_FATAL: case JTN_TD_IGNOREBOM:
-        if (!jv_is_obj(thisv)) return JV_UNDEF;
-        return jv_bool((vm->objs[jv_idx(thisv)].a & (which == JTN_TD_FATAL ? 1u : 2u)) != 0);
+    case JTN_TE_ENCODING: return jv_str(js_str_ascii(vm, "utf-8"));
+    case JTN_TD_ENCODING: case JTN_TD_FATAL: case JTN_TD_IGNOREBOM: {
+        if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & TD_DECODER) || vm->objs[jv_idx(thisv)].kind != JK_PLAIN)
+            return js_throw_msg(vm, vm->type_error_proto, "Value of \"this\" must be of type TextDecoder");
+        uint32_t o = jv_idx(thisv);
+        if (which == JTN_TD_ENCODING) {
+            char nm[40];
+            td_name((int)vm->objs[o].b, nm, sizeof nm);
+            return jv_str(js_str_ascii(vm, nm));
+        }
+        return jv_bool((vm->objs[o].a & (which == JTN_TD_FATAL ? TD_FATAL : TD_IGNOREBOM)) != 0);
+    }
     case JTN_TE_ENCODE: case JTN_TE_ENCODEINTO: {
+        if (which == JTN_TE_ENCODEINTO) {
+            /* node's checks: a string, then a Uint8Array */
+            if (!jv_is_str(a0)) return td_arg_error(vm, "src", "of type string", a0);
+            if (!jv_is_obj(a1) || vm->objs[jv_idx(a1)].kind != JK_TYPEDARRAY || ta_type(vm, jv_idx(a1)) != JTA_UINT8)
+                return td_arg_error(vm, "dest", "an instance of Uint8Array", a1);
+        }
         uint32_t s = a0 == JV_UNDEF ? A_EMPTY : js_to_string(vm, a0);
         if (!s) return JV_HOLE;
         vector<uint8_t> b;
@@ -978,8 +1279,6 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             for (size_t i = 0; i < len(b); i++) vm->bytes[dst + i] = b[i];
             return jv_obj(r);
         }
-        if (!jv_is_obj(a1) || vm->objs[jv_idx(a1)].kind != JK_TYPEDARRAY || ta_type(vm, jv_idx(a1)) != JTA_UINT8)
-            return js_throw_msg(vm, vm->type_error_proto, "TextEncoder.encodeInto's second argument must be a Uint8Array");
         uint32_t u = jv_idx(a1);
         utf8_of(vm, s, &b, &read, vm->objs[u].b);
         uint32_t dst = ta_at(vm, u, 0);
@@ -990,13 +1289,37 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         return jv_obj(r);
     }
     case JTN_TD_DECODE: {
-        uint32_t fl = jv_is_obj(thisv) ? vm->objs[jv_idx(thisv)].a : 0;
+        if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & TD_DECODER) || vm->objs[jv_idx(thisv)].kind != JK_PLAIN)
+            return js_throw_msg(vm, vm->type_error_proto, "Value of \"this\" must be of type TextDecoder");
         uint32_t p = 0, n = 0;
         if (a0 != JV_UNDEF && !buffer_source(vm, a0, &p, &n))
-            return js_throw_msg(vm, vm->type_error_proto, "TextDecoder.decode's argument must be an ArrayBuffer or an ArrayBufferView");
-        vector<uint16_t> out;
-        if (!utf8_decode(vm, p, n, (fl & 1) != 0, (fl & 2) != 0, &out)) return js_throw_msg(vm, vm->type_error_proto, "The encoded data was not valid.");
-        return jv_str(js_str_new(vm, data(out), len(out)));
+            return js_throw_msg(vm, vm->type_error_proto, "The \"list\" argument must be an instance of SharedArrayBuffer, ArrayBuffer or ArrayBufferView.");
+        int stream = 0;
+        if (jv_is_obj(a1)) {
+            jv sv = js_get(vm, a1, js_atom_ascii(vm, "stream"));
+            if (vm->throwing) return JV_HOLE;
+            stream = js_truthy(vm, sv);
+        }
+        uint32_t o = jv_idx(thisv), fl = vm->objs[o].a;
+        if (!stream && !(fl & TD_STREAM) && vm->objs[o].c == TK_UTF8) {
+            /* the common case, a whole input of UTF-8: decoded where it is, its BOM taken unless ignoreBOM */
+            vector<uint16_t> u;
+            int ok = 1;
+            if (n) {
+                const char *src = (const char *)(data(vm->bytes) + p);
+                ok = utf8_decode(src, n, (fl & TD_FATAL) != 0, &u);
+            }
+            if (!ok) return js_throw_msg(vm, vm->type_error_proto, "The encoded data was not valid for encoding utf-8");
+            uint32_t from = !(fl & TD_IGNOREBOM) && len(u) && u[0] == 0xFEFF ? 1 : 0;
+            return jv_str(js_str_new(vm, data(u) + from, len(u) - from));
+        }
+        /* the input's bytes copied first: the decode makes strings, which may grow the pools */
+        vector<char> in;
+        if (n) {
+            const uint8_t *src = data(vm->bytes) + p;
+            for (uint32_t i = 0; i < n; i++) push_back(in, (char)src[i]);
+        }
+        return td_decode(vm, jv_idx(thisv), data(in), n, stream);
     }
     default: return JV_UNDEF;
     }
@@ -1091,6 +1414,8 @@ void js_typed_init(js_vm *vm, uint32_t first) {
     td_get(vm, vm->textdec_proto, "fatal", first + JTN_TD_FATAL);
     td_get(vm, vm->textdec_proto, "ignoreBOM", first + JTN_TD_IGNOREBOM);
     td_def(vm, vm->textdec_proto, "decode", first + JTN_TD_DECODE, 0);
+    js_define(vm, vm->textenc_proto, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "TextEncoder")), JS_SHAPE_HIDDEN);
+    js_define(vm, vm->textdec_proto, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "TextDecoder")), JS_SHAPE_HIDDEN);
 }
 
 /* the shared methods on %TypedArray%.prototype wrapped (builtins.c calls this once it has
