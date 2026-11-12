@@ -2642,19 +2642,19 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
             }
         }
         double est = (first && through_top) ? 0 : cursor + lay_mc_v(lay_mc_add(pending, cm0));
-        /* clearance: below the floats it clears */
-        double clear_to = -1;
-        int clr = sg.block == SEG_BLOCK ? LAY_X(sg.node).clr : 0;
-        if (clr && len(*fl)) {
-            double cy = lay_clear_y(fl, clr) - oy;
-            if (cy > est) { est = cy; clear_to = cy; }
-        }
         /* the floats that waited: placed at the child's top */
         for (size_t q = 0; q < len(waiting); q++) {
             uint32_t fb = lay_float_box(LARGS, b, at(waiting, q), w, ch);
             lay_float_place(LARGS, fb, at(waiting, q), w, ox, oy, est);
         }
         clear(waiting);
+        /* clearance: below the floats it clears (those just placed too) */
+        double clear_to = -1;
+        int clr = sg.block == SEG_BLOCK ? LAY_X(sg.node).clr : 0;
+        if (clr && len(*fl)) {
+            double cy = lay_clear_y(fl, clr) - oy;
+            if (cy > est) { est = cy; clear_to = cy; }
+        }
         /* a child that makes a formatting context of its own goes beside the floats, narrowed */
         double cx = 0, ccw = w;
         if (sg.block == SEG_BLOCK && len(*fl) && lay_makes_bfc(LARGS, sg.node)) {
@@ -2678,11 +2678,14 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
         if (sg.block == SEG_BLOCK) cb = lay_block(LARGS, b, sg.node, ccw, 0, 0, 0, 0, &bk, &cmt, &cmb, &cempty);
         else cb = lay_block(LARGS, b, 0, w, &items, sg.first, sg.n, el, &bk, &cmt, &cmb, &cempty);
         if (cempty && clear_to < 0) {
-            /* an empty box: its margins collapse through it, into one */
+            /* an empty box: its margins collapse through it, into one; its top border
+               edge where it would be with a bottom border (CSS 2.1 8.3.1) */
             lay_mc both = lay_mc_add(cmt, cmb);
+            double at_y = (first && through_top) ? 0 : cursor + lay_mc_v(lay_mc_add(pending, cmt));
             if (first && through_top) *et = lay_mc_add(*et, both);
             else pending = lay_mc_add(pending, both);
-            lay_place(t, cb, cx + t->box[cb].ml, cursor);
+            lay_place(t, cb, cx + t->box[cb].ml, at_y);
+            if (at_y != est) for (size_t q = nf0; q < len(*fl); q++) (*fl)[q].y = at(*fl, q).y + at_y - est;
             continue;
         }
         double top;
