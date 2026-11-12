@@ -18,13 +18,14 @@
      frame; a frame of the wrong length; a window past 2^31-1 or a WINDOW_UPDATE of 0;
      DATA past a window; a header block that is no HPACK. Each a connection error: a
      GOAWAY, and the connection dead.
-   - a stream: its response's head malformed (an uppercase name, a pseudo-header after a
-     field or other than :status, no :status or two, 101, a connection-specific field,
-     te but trailers), DATA before its head or after its end, its header list past 256 KB.
+   - a stream: its response's head malformed (an uppercase name, a name or value with a
+     character HTTP/2 forbids -- a value's NUL, CR or LF --, a pseudo-header after a field
+     or other than :status, no :status or two, 101, a connection-specific field, te but
+     trailers), DATA before its head or after its end, its header list past 256 KB.
      Each a stream error: a RST_STREAM, the stream's request failed.
    SETTINGS are acknowledged and applied: the encoder's table size, the most concurrent
-   streams, the initial window (every open stream's moved by the change), the frame
-   size. A PING is answered. A 1xx head is passed over for the final one; trailers are
+   streams (100 until they come, at most 256, as Chromium takes them), the initial window
+   (every open stream's moved by the change), the frame size. A PING is answered. A 1xx head is passed over for the final one; trailers are
    read and dropped. GOAWAY's last stream is kept: the streams after it were not
    processed, and their requests may go again on another connection. As Chromium does, a
    window is given back with a WINDOW_UPDATE once more than half of it has been used:
@@ -87,7 +88,7 @@ void h2_start(h2_conn *c, vector<uint8_t> *out) {
     c->block_discard = 0;
     c->next_id = 1;
     c->peer_table = 4096;
-    c->peer_max_streams = 0xffffffffu;
+    c->peer_max_streams = 100;   /* Chromium's kInitialMaxConcurrentStreams, until the server's SETTINGS say */
     c->peer_window = 65535;
     c->peer_frame = H2_FRAME_MAX;
     c->peer_header_list = 0xffffffffu;
@@ -267,6 +268,10 @@ static int h2_headers_done(h2_conn *c, uint32_t id, h2_event *ev, vector<hpack_f
         size_t nl = fs[k].nlen, vl = fs[k].vlen;
         for (size_t j = 0; j < nl; j++)
             if (nm[j] >= 'A' && nm[j] <= 'Z') bad = "a field's name has an uppercase letter";
+            else if (nm[j] <= ' ' || nm[j] >= 0x7f || (nm[j] == ':' && j)) bad = "a field's name has a character no name may have";
+        for (size_t j = 0; j < vl && !bad; j++)
+            if (v[j] == 0 || v[j] == '\r' || v[j] == '\n') bad = "a field's value has a NUL, CR or LF";
+        if (!bad && nl == 0) bad = "a field has no name";
         if (bad) break;
         if (nl && nm[0] == ':') {
             if (regular) bad = "a pseudo-header field comes after a field";
@@ -489,7 +494,7 @@ int h2_read(h2_conn *c, const uint8_t *in, size_t n, size_t *used, h2_event *ev,
             } else if (key == 2 && v > 1) {
                 snprintf(ev->why, sizeof ev->why, "SETTINGS_ENABLE_PUSH of %u", v);
                 return h2_error(c, ev, H2_PROTOCOL_ERROR, out);
-            } else if (key == 3) c->peer_max_streams = v;
+            } else if (key == 3) c->peer_max_streams = v < 256 ? v : 256;   /* Chromium's kMaxConcurrentStreamLimit */
             else if (key == 4) {
                 if (v > 0x7fffffffu) {
                     snprintf(ev->why, sizeof ev->why, "SETTINGS_INITIAL_WINDOW_SIZE of %u", v);

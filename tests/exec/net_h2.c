@@ -237,6 +237,14 @@ static void e_pseudo_late(server *sv, vector<uint8_t> *in) {
     static const char *const h[] = { "content-type", "text/css", ":status", "200", 0 };
     server_head(sv, in, 1, 0, h, 0);
 }
+static void e_crlf(server *sv, vector<uint8_t> *in) {
+    static const char *const h[] = { ":status", "200", "content-type", "text/css\r\nx-smuggled: 1", 0 };
+    server_head(sv, in, 1, 0, h, 0);
+}
+static void e_space(server *sv, vector<uint8_t> *in) {
+    static const char *const h[] = { ":status", "200", "content type", "text/css", 0 };
+    server_head(sv, in, 1, 0, h, 0);
+}
 static void e_path(server *sv, vector<uint8_t> *in) {
     static const char *const h[] = { ":status", "200", ":path", "/", 0 };
     server_head(sv, in, 1, 0, h, 0);
@@ -476,6 +484,8 @@ int main(void) {
     error_case("11 bytes of DATA past a connection window made 10 bytes", 1, e_window11, 2);
     printf("== stream errors: the stream reset, the connection kept\n");
     error_case("a field named in uppercase", 1, e_upper, 0);
+    error_case("a field's value with CR and LF in it", 1, e_crlf, 0);
+    error_case("a field's name with a space in it", 1, e_space, 0);
     error_case("a head without :status", 1, e_nostatus, 0);
     error_case("a head with two :status", 1, e_twostatus, 0);
     error_case(":status after a field", 1, e_pseudo_late, 0);

@@ -93,13 +93,12 @@ R = rs(1,3,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS/logo.png
 R = rs(1,4,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:TLS12/logo.png', O = ok
 R = rs(1,5,0), P = 'http://127.0.0.1:PROXY', U = 'https://127.0.0.1:TLS/logo.png', O = tls_verify_failed
 R = rs(1,6,0), P = 'http://127.0.0.1:PROXY', U = 'https://localhost:PORT/logo.png', O = tls_handshake_failed
--- what the proxy was asked:
-CONNECT localhost:TLS
+-- what the proxy was asked (sorted: the parts' tunnels are opened at once; the page's, kept alive, carries a part):
+CONNECT 127.0.0.1:TLS
+CONNECT localhost:PORT
 CONNECT localhost:TLS
 CONNECT localhost:TLS
 CONNECT localhost:TLS12
-CONNECT 127.0.0.1:TLS
-CONNECT localhost:PORT
 -- no_proxy=localhost: localhost reached directly, the address through the proxy
 CONNECT 127.0.0.1:TLS
 -- a tunnel the proxy refuses:
@@ -200,7 +199,7 @@ raw.css 22
 both.css 24
 gz.png 159
 -- what did not decode, and why:
-amb_diag(failed, rs(1,6,0), 'the stylesheet http://127.0.0.1:CODED/z/br.css (asked for by <link>) failed: decoding_failed (the content coding br is not one read here)').
+amb_diag(failed, rs(1,6,0), 'the stylesheet http://127.0.0.1:CODED/z/br.css (asked for by <link>) failed: decoding_failed (the br body is not a whole Brotli stream (RFC 7932))').
 amb_diag(failed, rs(1,7,0), 'the stylesheet http://127.0.0.1:CODED/z/bad.css (asked for by <link>) failed: decoding_failed (the gzip body\'s CRC-32 is not its data\'s)').
 -- the decoded sheets' colours, and the decoded image's size as laid out:
 C = gz, N = n(1,24,0), X = declared('rgb(0, 0, 128)',written(navy),by('.gz'),in(author))
@@ -210,7 +209,7 @@ C = both, N = n(1,33,0), X = declared('rgb(128, 0, 128)',written(purple),by('.bo
 C = br, N = n(1,36,0), X = inherited('rgb(0, 0, 0)',from(n(1,22,0)),'the property is inherited')
 N = n(1,43,0), B = bx(1,11,0), W = 96, H = 32
 -- the codings each request asked for:
-40 accept-encoding: gzip, deflate
+40 accept-encoding: gzip, deflate, br, zstd
 == the HTTP cache, in the profile's directory:
 -- 1. at 1700000000: each part, what the cache did, the age and lifetime it went by, the status
 R = rs(1,1,0), How = not_stored, Age = 0, Life = 0, U = 'http://127.0.0.1:CACHE/k/page.html', S = 200

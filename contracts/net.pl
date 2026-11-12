@@ -5,8 +5,9 @@
 %% paths, and IDNA as UTS #46 makes a domain ASCII: the mapping table, NFC, the
 %% validity, joiner and bidi rules, Punycode both ways; the API's setters, and
 %% application/x-www-form-urlencoded), resources fetched over file:, data:, http: and https:
-%% (HTTP/1.1: Content-Length, chunked, redirects within a bound, gzip and deflate;
-%% TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
+%% (HTTP/1.1 over connections kept alive, and HTTP/2 over TLS when the server's ALPN
+%% chooses it: Content-Length, chunked, redirects within a bound, gzip, deflate, br and
+%% zstd; TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
 %% name verified; a proxy from the environment), and what a page loads -- its
 %% stylesheets, images (from a picture's source, or a srcset, where there is one) and scripts -- each with
 %% the element and the resource that asked for it, its origin, its redirects, how
@@ -14,11 +15,12 @@
 %% cache (RFC 9111), in a profile's directory when there is one. Same-origin and
 %% same-site decisions are made here in C (a page served over http: may not load a
 %% file: URL; SameSite cookies stay with their site); the reasoner sees the
-%% dependency graph, the origins, what each fetch rode on, the page's cookies (never
+%% dependency graph, the origins, what each fetch rode on (its TLS, its protocol, the
+%% connection and stream that carried it), the page's cookies (never
 %% a value) and what the cache did, and says what failed, what crossed origins and
 %% which cookies were refused. src/net/net.c says what of each the module does.
 
-net_contract(module(net, '0.2.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where')).
+net_contract(module(net, '0.3.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where')).
 
 %% ---- TYPES ------------------------------------------------------------------
 
@@ -34,9 +36,14 @@ net_contract(enum(cache_use, [unused, stored, fresh, revalidated, not_stored])).
 %% how a fetch ended: tls_handshake_failed is a TLS session that could not be set
 %% up, tls_verify_failed a server whose certificate chain or name did not verify,
 %% proxy_refused a proxy that would not open the tunnel, decoding_failed a body in a
-%% content coding not read here or that did not decode
+%% content coding not read here or that did not decode, reset an HTTP/2 stream the
+%% server reset or a connection that closed or went away before its response ended
 net_contract(enum(outcome, [ok, http_error, no_such_file, refused, unreachable, too_many_redirects, unsupported_scheme,
-    bad_url, blocked, too_large, malformed, tls_handshake_failed, tls_verify_failed, proxy_refused, decoding_failed])).
+    bad_url, blocked, too_large, malformed, tls_handshake_failed, tls_verify_failed, proxy_refused, decoding_failed, reset])).
+%% what a resource's last request went over: unsent (none went over the network: a file:
+%% or data: URL, the cache's fresh copy, a connection that could not be made), HTTP/1.1,
+%% or HTTP/2
+net_contract(enum(protocol, [unsent, http1, h2])).
 
 net_contract(record(resource, [
     field(url,       span(text)),            % the absolute URL asked for
@@ -57,7 +64,7 @@ net_contract(record(resource, [
     field(tls,       bool),                  % its last exchange went over TLS, its server verified
     field(tls_version, span(text)),          % TLSv1.2 or TLSv1.3
     field(tls_cipher, span(text)),
-    field(alpn,      span(text)),            % the protocol the server chose by ALPN, or empty
+    field(alpn,      span(text)),            % the protocol the server chose by ALPN (h2, http/1.1), or empty
     field(proxied,   bool),                  % its last exchange went through a proxy
     field(proxy,     span(text)),            % that proxy's origin
     field(cross_site, bool),                 % asked for by a page of another site (scheme and registrable domain)
@@ -65,7 +72,7 @@ net_contract(record(resource, [
     field(cache_age, i64),                   % the cached response's age then, in seconds
     field(cache_lifetime, i64),              % and its freshness lifetime
     field(coded,     bool),                  % its body came in a content coding, decoded
-    field(coding,    span(text)),            % that coding, as Content-Encoding named it: gzip, deflate
+    field(coding,    span(text)),            % that coding, as Content-Encoding named it: gzip, deflate, br, zstd
     field(encoded_size, u32),                % the body's bytes as they came
     field(srcset,    bool),                  % an image chosen from its element's srcset
     field(descriptor, span(text)),           % the candidate's descriptor as written (2x, 800w), or empty for 1x and src
@@ -73,7 +80,11 @@ net_contract(record(resource, [
     field(source_size, f64),                 % the sizes attribute's length in the viewport, px (100vw by default)
     field(candidates, u32),                  % how many candidates there were, src among them when it was one
     field(picture,   bool),                  % an image chosen from a <source> of its img's <picture>
-    field(source,    xhandle(dom, node))     % that <source>
+    field(source,    xhandle(dom, node)),    % that <source>
+    field(protocol,  enum(protocol)),        % what its last request went over
+    field(connection, u32),                  % the connection that carried it, numbered from 1 in the run
+    field(stream,    u32),                   % its HTTP/2 stream; 0 over HTTP/1.1
+    field(reused,    bool)                   % that connection had carried a request before it
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
@@ -162,6 +173,10 @@ net_contract(fact(net_hop(field(resource), field(url), field(status)), table(hop
 net_contract(fact(net_image_size(handle, field(width), field(height)), table(resource), field(kind) == image)).
 net_contract(fact(net_failure(handle, field(reason)), table(resource), field(outcome) \== ok)).
 net_contract(fact(net_tls(handle, field(tls_version), field(tls_cipher), field(alpn)), table(resource), field(tls) == true)).
+%% the protocol a resource's request went over, the connection (by its number in the run)
+%% and HTTP/2 stream that carried it, and whether the connection had carried one before
+net_contract(fact(net_http(handle, field(protocol), field(connection), field(stream), field(reused)), table(resource),
+    field(protocol) \== unsent)).
 net_contract(fact(net_proxy(handle, field(proxy)), table(resource), field(proxied) == true)).
 net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == true)).
 net_contract(fact(net_cache(handle, field(cache), field(cache_age), field(cache_lifetime)), table(resource), field(cache) \== unused)).

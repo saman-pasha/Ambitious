@@ -288,7 +288,10 @@ neighbours.
     ```
 18. **A unit that includes `<openssl/ssl.h>` takes about 64 s to read**, most
     of a build of `src/net/net.c`, against a few seconds for a unit of the same
-    size without it. Ambitious keeps OpenSSL to that one unit.
+    size without it. Ambitious keeps OpenSSL to that one unit. (12q: not so. The
+    time was the optimizer's, over one struct copied by assignment, finding 29;
+    with that copy a `memcpy` the unit builds in 7 s at `-O2`, and in 6 s at
+    `-O0` as it was.)
 19. **A call to a function with no declaration in scope, inside an operand of
     `?:`, is reported without the callee's name**: `uint32_t e = a ? nowhere(a,
     2) : 0;` gives `error: not lowered yet: type(unknown) (function uses)`, where
@@ -428,4 +431,58 @@ neighbours.
     for i in range(0, len(s), 96):
         print('    "%s"' % s[i:i + 96])
     print('    ;\nint main(void) { return (int)strlen(big) & 1; }')
+    ```
+29. **A struct assignment is lowered as a load and a store of the whole struct as one
+    value, which LLVM's `-O2` takes time and memory over that grow faster than the
+    square of the struct's size.** `*into = next`, `next` a local struct, is
+    `%t9 = load %struct.big, ptr %next.1` and `store %struct.big %t9, ptr %t10` (a
+    first-class aggregate), where clang emits `llvm.memcpy`. With `big` an `int` and
+    a char array, the reduction below took 1.6 s and 179 MB with 1 KB of array, 8.2 s
+    and 309 MB with 2 KB, 59 s and 796 MB with 4 KB; 0.8 s at `-O0`, and 0.6 s at
+    `-O2` with `memcpy(into, &next, sizeof next)`. 12q's `src/net/net.c` copied a URL
+    of 25 KB so and pushed a job of 45 KB on a vector (`push_back`'s parameter is the
+    element, by value): its build passed five minutes and 8 GB before it was stopped,
+    and at `-O1` it passed the 4.5 GB it was held to. With a `memcpy` and the job made
+    in its place (`resize`, then filled through a pointer) it builds in 10 s and 285
+    MB. It was finding 18's time too: the unit before 12q had one such copy (`u =
+    next`) and took 44 s and 1.2 GB at `-O2`, 7 s and 250 MB with that line a
+    `memcpy`. The reduction (`cicilang -O2 -c`; `-S -emit-llvm` at `-O0` shows the
+    load and the store):
+
+    ```c
+    #include <stdio.h>
+    #include <string.h>
+    typedef struct big { int n; char text[4096]; } big;
+    static void fill(big *b, int n) { b->n = n; snprintf(b->text, sizeof b->text, "filled %d", n); }
+    static void step(big *into, int n) {
+        big next;
+        fill(&next, n);
+        if (next.n > 0) *into = next;
+    }
+    int main(void) {
+        static big b;
+        step(&b, 1);
+        printf("%d %s\n", b.n, b.text);
+        return 0;
+    }
+    ```
+
+    Ambitious copies a large struct with `memcpy` and makes a large vector element
+    in its place.
+30. **A vector of a type the unit has not declared is refused inside the instance's
+    functions, not at its declaration**: with no `<stdint.h>`, `vector<uint8_t> v;
+    push_back(v, 7);` reports `not lowered yet: sizeof_type(base([],[typedef(uint8_t)]))
+    (function vector_uint8_t_reserve)` at the `push_back`, a function the program
+    never calls, where gcc says `unknown type name 'uint8_t'` at the declaration.
+    12q's probes met it. The reduction:
+
+    ```c
+    #include <stdio.h>
+    #include <vector.pl>
+    int main(void) {
+        vector<uint8_t> v;
+        push_back(v, 7);
+        printf("%d\n", (int)v[0]);
+        return 0;
+    }
     ```

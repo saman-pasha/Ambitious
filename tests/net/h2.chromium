@@ -1,0 +1,529 @@
+-- 1 https://localhost:H2/h2/page.html
+GET /h2/a.css
+  (its HEADERS frame's priority: exclusively, weight 256)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /h2/a.css
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: text/css,*/*;q=0.1
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: style
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=0
+GET /h2/app.js
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /h2/app.js
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: */*
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: script
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2
+GET /h2/b.css
+  (its HEADERS frame's priority: exclusively, weight 256)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /h2/b.css
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: text/css,*/*;q=0.1
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: style
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=0
+GET /h2/c.css
+  (its HEADERS frame's priority: exclusively, weight 256)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /h2/c.css
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: text/css,*/*;q=0.1
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: style
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=0
+GET /h2/page.html
+  (its HEADERS frame's priority: exclusively, weight 256)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /h2/page.html
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  upgrade-insecure-requests: 1
+  user-agent: (the browser's)
+  accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
+  sec-fetch-site: none
+  sec-fetch-mode: navigate
+  sec-fetch-user: ?1
+  sec-fetch-dest: document
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=0, i
+GET /logo.png?1
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?1
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2, i
+GET /logo.png?10
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?10
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?11
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?11
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?12
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?12
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?13
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?13
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?14
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?14
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?15
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?15
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?16
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?16
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?17
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?17
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?18
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?18
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?19
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?19
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?2
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?2
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2, i
+GET /logo.png?20
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?20
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?21
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?21
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?22
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?22
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?23
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?23
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?24
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?24
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?25
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?25
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?26
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?26
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?3
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?3
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2, i
+GET /logo.png?4
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?4
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2, i
+GET /logo.png?5
+  (its HEADERS frame's priority: exclusively, weight 183)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?5
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: u=2, i
+GET /logo.png?6
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?6
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?7
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?7
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?8
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?8
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i
+GET /logo.png?9
+  (its HEADERS frame's priority: exclusively, weight 147)
+  :method: GET
+  :authority: localhost:H2
+  :scheme: https
+  :path: /logo.png?9
+  sec-ch-ua-platform: "Linux"
+  user-agent: (the browser's)
+  sec-ch-ua: (the browser's)
+  sec-ch-ua-mobile: ?0
+  accept: image/webp,image/apng,image/*,*/*;q=0.8
+  sec-fetch-site: same-origin
+  sec-fetch-mode: no-cors
+  sec-fetch-dest: image
+  referer: https://localhost:H2/h2/page.html
+  accept-encoding: gzip, deflate, br, zstd
+  priority: i

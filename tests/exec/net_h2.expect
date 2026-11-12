@@ -216,6 +216,16 @@ after a WINDOW_UPDATE of 100: sent 250 of 250
   < reset, stream 1: the response's head is malformed: a field's name has an uppercase letter (PROTOCOL_ERROR)
   > SETTINGS flags 0x1 stream 0, 0 bytes
   > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- a field's value with CR and LF in it
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a field's value has a NUL, CR or LF (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- a field's name with a space in it
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a field's name has a character no name may have (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
 -- a head without :status
   < settings, stream 0
   < reset, stream 1: the response's head is malformed: the response has no single :status (PROTOCOL_ERROR)
@@ -279,4 +289,4 @@ after a WINDOW_UPDATE of 100: sent 250 of 250
   > SETTINGS flags 0x1 stream 0, 0 bytes
   > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
 == conversations broken at random
-3000 conversations, 14356 frames read: none 2382 headers 3865 data 3240 reset 96 goaway 276 window 0 settings 2434 error 2063
+3000 conversations, 14356 frames read: none 2382 headers 3860 data 3240 reset 101 goaway 276 window 0 settings 2434 error 2063
