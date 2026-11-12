@@ -1,20 +1,75 @@
-news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:59ceb78592a8adde
+news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:f82fd0ba47e7bf6b
 style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
-layout: rendered 800x601: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:c21c5ac365972c5e
+layout: rendered 800x605: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:9f46d443472e0701
+values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:584f4bcf427af34b
+atrules: rendered 800x600: 9 boxes, 6 lines, 6 text fragments; pixels fnv1a64:c250b6acdc3d4715
+selectors: rendered 800x726: 38 boxes, 30 lines, 27 text fragments; pixels fnv1a64:c1a3f75db3f48041
+floats: rendered 800x600: 24 boxes, 10 lines, 10 text fragments; pixels fnv1a64:5b971eed3df5253d
+position: rendered 800x600: 13 boxes, 8 lines, 11 text fragments; pixels fnv1a64:eceb3515d4f21efd
+sizing: rendered 800x600: 34 boxes, 21 lines, 30 text fragments; pixels fnv1a64:f0f525d7cf982aa1
+flex: rendered 800x674: 47 boxes, 32 lines, 33 text fragments; pixels fnv1a64:120ceb4a70cdc1aa
+grid: rendered 800x600: 34 boxes, 25 lines, 25 text fragments; pixels fnv1a64:8d58df17b6897c1d
+text: rendered 800x600: 9 boxes, 15 lines, 20 text fragments; pixels fnv1a64:edf19a5c4948ccb5
+paint: rendered 800x600: 36 boxes, 9 lines, 9 text fragments; pixels fnv1a64:37d106dc73322829
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
 E = div, N = n(1,97,0), B = bx(1,32,0), Why = declared(200,declared('200px',written('200px'),by('the style attribute'),in(inline)))
 E = h2, N = n(1,28,0), B = bx(1,6,0), Why = fills(600,of(600),less(margins(0,0),borders(0,0),paddings(0,0)))
-E = table, N = n(1,65,0), B = bx(1,16,0), Why = shrink_to_fit(527.2890625,within(600))
+E = table, N = n(1,65,0), B = bx(1,16,0), Why = shrink_to_fit(526.9375,within(600))
 E = span, N = n(1,47,0), B = bx(1,9,0), Why = shrink_to_fit(68.8046875,within(600))
 E = span, N = n(1,50,0), B = bx(1,10,0), Why = shrink_to_fit(63.7109375,within(600))
 -- what is at (150, 240), and at (400, 120):
 X = 150, Y = 240, N = n(1,47,0), E = span
 X = 400, Y = 120, N = n(1,31,0), E = p
 -- the lines the justified paragraph's text is on:
-L = ln(1,3,0), T = 'This', X = 100, W = 32.6953125, Y = 98.90625, H = 25.6
+L = ln(1,3,0), T = 'This', X = 100, W = 32.6953125, Y = 100, H = 25.6
+-- the text the pseudo-elements gave (counters, quotes, attr()), and a ::before's own box:
+N = n(1,33,0), T = '[', E = span
+N = n(1,33,0), T = ']', E = span
+N = n(1,36,0), T = 'Name:', E = span
+N = n(1,40,0), T = '1.', E = li
+N = n(1,42,0), T = '2.', E = li
+N = n(1,46,0), T = '1', E = li
+N = n(1,49,0), T = '1.1', E = li
+N = n(1,52,0), T = '1.2', E = li
+N = n(1,55,0), T = 'Block before', E = div
+N = n(1,60,0), T = «, E = q
+N = n(1,62,0), T = ‹, E = q
+N = n(1,62,0), T = ›, E = q
+N = n(1,60,0), T = », E = q
+N = n(1,73,0), T = 'IV', E = span
+N = n(1,76,0), T = 'IV', E = span
+N = n(1,84,0), T = 'Search the site', E = input
+N = n(1,55,0), P = before, B = bx(1,25,0), X = 18, Y = 321, W = 774, H = 30
+N = n(1,55,0), P = after, B = bx(1,27,0), X = 18, Y = 370, W = 774, H = 12
+-- where boxes are and why: floated, offset, in a containing block, fixed; their paint order's keys:
+I = r1, N = n(1,13,0), B = bx(1,4,0), Why = offset(20,10)
+I = a1, N = n(1,18,0), B = bx(1,9,0), Why = absolute(in(div))
+I = a2, N = n(1,27,0), B = bx(1,11,0), Why = absolute(in(div))
+I = a3, N = n(1,23,0), B = bx(1,10,0), Why = absolute(in(div))
+I = a4, N = n(1,30,0), B = bx(1,12,0), Why = absolute(in(div))
+I = s1, N = n(1,33,0), B = bx(1,7,0), Why = sticky(at_rest)
+I = fx, N = n(1,42,0), B = bx(1,13,0), Why = fixed(viewport)
+N = n(1,18,0), B = bx(1,9,0), K = key(3,2,bx(1,9,0))
+I = f1, N = n(1,15,0), B = bx(1,5,0), Why = floated(left)
+I = f2, N = n(1,17,0), B = bx(1,6,0), Why = floated(right)
+I = i1, N = n(1,48,0), B = bx(1,19,0), Why = floated(left)
+-- the lines of a hyphenated paragraph, and right-to-left text in its order:
+P = n(1,13,0), T = n(1,14,0), Text = 'Extraordinarily', X = 8, Y = 8
+P = n(1,13,0), T = n(1,14,0), Text = 'incomprehen-', X = 8, Y = 27
+P = n(1,13,0), T = n(1,14,0), Text = 'sible charac-', X = 8, Y = 46
+P = n(1,13,0), T = n(1,14,0), Text = 'teristics of hy-', X = 8, Y = 65
+P = n(1,13,0), T = n(1,14,0), Text = phenation, X = 8, Y = 84
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = 'Hello', X = 267.4453125
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = םלוע, X = 228.2734375
+N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = world, X = 179.1328125
+-- how flex and grid items got their widths:
+I = g2, N = n(1,16,0), B = bx(1,6,0), Why = flexed(250,within(500))
+I = s1, N = n(1,22,0), B = bx(1,9,0), Why = flexed(166.666666666667,within(500))
+I = a2, N = n(1,16,0), B = bx(1,6,0), Why = grid_area(160,within(160))
+I = b1, N = n(1,24,0), B = bx(1,10,0), Why = grid_area(398,within(398))
 -- the reasoner's diagnostics:
 amb_diag(missing_attribute, n(1,3,0), '<html> lacks the lang attribute').
-amb_diag(text_overflow, bx(1,32,0), 'text in <div> runs 143.2px past its 200.0px content box').
+amb_diag(text_overflow, bx(1,32,0), 'text in <div> runs 142.7px past its 200.0px content box').
 exit 0

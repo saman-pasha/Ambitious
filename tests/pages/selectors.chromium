@@ -1,0 +1,22 @@
+# boxes of tests/pages/selectors.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+s1 section 8 16 400 19
+p1 p 8 16 400 19
+s2 section 8 51 784 19
+p2 p 18 51 774 19
+a1 aside 8 86 784 19
+d1 div 8 105 784 19
+d2 div 8 124 784 19
+t1 span 8 159 38.719 19
+l1 span 51.813 159 107.047 19
+o1 ol 8 194 784 38
+li1 li 8 194 784 19
+li2 li 8 213 784 19
+o2 ol 8 248 784 57
+li3 span 118.547 267 11.766 19
+bg div 8 321 784 61
+q1 span 8 398 163.75 19
+dr p 8 433 220 84
+fl p 8 533 220 66
+r1 span 8 615 32 19
+r2 span 45.094 615 32.016 19
+m1 li 48 650 744 19

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang=en><head><title>Hyphenation and bidirectional text</title>
+<style>
+/* tests/pages/text.html -- hyphens: auto (Liang's patterns), soft hyphens (manual),
+   none; a right-to-left paragraph and Hebrew in a left-to-right one; the boxes held to
+   Chromium's (tests/pages/text.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+p { width: 120px; margin: 6px 0; }
+.a { hyphens: auto; }
+.m { hyphens: manual; }
+.n { hyphens: none; }
+.r { direction: rtl; width: 300px; }
+.w { width: 300px; }
+</style></head>
+<body>
+<p class=a id=a>Extraordinarily incomprehensible characteristics of hyphenation</p>
+<p class=m id=m>Extra&shy;ordinarily incompre&shy;hensible</p>
+<p class=n id=n>Extra&shy;ordinarily incompre&shy;hensible</p>
+<p class=a id=a2><span id=s1>Representatives</span> deliberated considerably</p>
+<p class=r id=r>Hello <span id=he>עולם</span> world</p>
+<p class=w id=h>abc <span id=hb>אבג דהו</span> def</p>
+</body></html>

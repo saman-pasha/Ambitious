@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang=en><head><title>At-rules</title>
+<style>
+/* @import (a sheet fetched and read where it stands, into a layer; one whose media does not
+   hold, not read), @layer's order, @supports, and @font-face's fonts: TrueType and WOFF */
+@import url("import/base.css") layer(base);
+@import "import/print.css" print;
+@layer base, theme;
+@layer theme { .card { background: #def; border-color: #36c } }
+@font-face { font-family: "Web Oblique"; src: url(fonts/oblique.ttf) format("truetype") }
+@font-face { font-family: "Web Serif"; src: local("Nothing"), url(fonts/serif-bold.woff2) format("woff2"), url(fonts/serif-bold.woff) format("woff"); font-weight: 700 }
+html { font: 16px/20px 'DejaVu Sans' }
+body { margin: 10px }
+.card { padding: 8px; margin-bottom: 6px; border: 2px solid; width: max-content }
+@supports (display: grid) and (not (display: grid-lanes)) { .yes { width: 300px } }
+@supports selector(p::frobbed) { .no { width: 50px } }
+.mono { font-family: 'Web Oblique', monospace; font-size: 15px }
+.serif { font-family: "Web Serif", serif; font-weight: bold; font-size: 18px }
+.missing { font-family: "Not Declared", 'DejaVu Sans' }
+</style></head>
+<body>
+<div id=a class=card>A card from the imported layer</div>
+<div id=b class="card yes">Supported</div>
+<div id=c class="card no">Not supported</div>
+<div id=m class="card mono">Oblique mono, a web font</div>
+<div id=s class="card serif">Serif bold from WOFF, AVATAR</div>
+<div id=x class="card missing">An undeclared family falls back</div>
+</body></html>

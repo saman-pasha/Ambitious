@@ -1,5 +1,19 @@
-/* src/paint/font.c -- the fonts (font.h): font_data.h's faces decoded, measured,
-   and their glyphs drawn as coverage masks. */
+/* src/paint/font.c -- the fonts (font.h): TrueType read, measured, and its glyphs
+   drawn as coverage masks.
+
+   One reader serves every face. The built-in six are TrueType subsets of DejaVu
+   (font_data.h, tools/gen-font.py), decoded from base64 and read once a process
+   into static tables, which each amb_fonts_load copies. A page's web font is read
+   when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
+   code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
+   hhea and OS/2, kerning pairs from kern (format 0); its outlines (glyf, through
+   loca) are read when a glyph is drawn. OpenType with CFF outlines is no font this
+   reads.
+
+   Metrics are rounded as Chromium rounds them (SimpleFontData): the ascent, the
+   descent and the line gap each to a whole px, a line's normal height their sum.
+   Widths are the advances and the kerning pairs of each two code points, summed
+   in font units and scaled once. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -8,7 +22,29 @@
 #include "font.h"
 #include "font_data.h"
 
-/* ---- decoding ---- */
+/* ---- reading big-endian bytes, every read inside the face's n bytes ---- */
+
+static uint32_t amb_u16(const uint8_t *p, size_t n, size_t off) { return off + 2 <= n ? (uint32_t)p[off] << 8 | p[off + 1] : 0; }
+static int32_t amb_s16(const uint8_t *p, size_t n, size_t off) { return (int32_t)(int16_t)amb_u16(p, n, off); }
+static uint32_t amb_u32(const uint8_t *p, size_t n, size_t off) {
+    return off + 4 <= n ? (uint32_t)p[off] << 24 | (uint32_t)p[off + 1] << 16 | (uint32_t)p[off + 2] << 8 | p[off + 3] : 0;
+}
+static int amb_tag(const uint8_t *p, size_t n, size_t off, const char *t) {
+    return off + 4 <= n && p[off] == (uint8_t)t[0] && p[off + 1] == (uint8_t)t[1] && p[off + 2] == (uint8_t)t[2] && p[off + 3] == (uint8_t)t[3];
+}
+
+/* ---- the built-in faces, decoded and read once a process ---- */
+
+#define AMB_POOL 262144
+#define AMB_BI_GLYPHS 2048
+#define AMB_BI_KERNS 6144
+static uint8_t amb_pool[AMB_POOL];
+static uint32_t amb_pool_len;
+static amb_glyph amb_bi_glyphs[AMB_BI_GLYPHS];
+static amb_kern amb_bi_kerns[AMB_BI_KERNS];
+static amb_face amb_bi_face[AMB_NFACES];
+static uint32_t amb_bi_nglyphs, amb_bi_nkerns;
+static int amb_bi_ready;
 
 static int amb_b64(char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -19,8 +55,9 @@ static int amb_b64(char c) {
     return -1;
 }
 
-static void amb_unbase64(const char *s, vector<uint8_t> *out) {
-    uint32_t acc = 0;
+/* a built-in face's base64 decoded into the pool: where it starts */
+static uint32_t amb_pool_add(const char *s) {
+    uint32_t start = amb_pool_len, acc = 0;
     int bits = 0;
     for (size_t i = 0; s[i]; i++) {
         int v = amb_b64(s[i]);
@@ -29,84 +66,272 @@ static void amb_unbase64(const char *s, vector<uint8_t> *out) {
         bits += 6;
         if (bits >= 8) {
             bits -= 8;
-            push_back(out, (uint8_t)(acc >> bits & 0xff));
+            if (amb_pool_len == AMB_POOL) abort();
+            amb_pool[amb_pool_len++] = (uint8_t)(acc >> bits & 0xff);
         }
     }
+    return start;
 }
 
-static uint32_t amb_varint(const vector<uint8_t> *b, size_t *i) {
-    uint32_t n = 0;
-    int shift = 0;
-    while (*i < len(*b)) {
-        uint8_t c = at(*b, *i);
-        (*i)++;
-        n |= (uint32_t)(c & 0x7f) << shift;
-        if (!(c & 0x80)) break;
-        shift += 7;
-        if (shift > 28) break;
+/* ---- an sfnt read as a face ---- */
+
+typedef struct amb_tables { uint32_t cmap, head, hhea, hmtx, maxp, loca, glyf, glyf_len, kern, kern_len, os2, os2_len; } amb_tables;
+
+static int amb_sfnt_tables(const uint8_t *p, size_t n, amb_tables *t) {
+    memset(t, 0, sizeof *t);
+    uint32_t v = amb_u32(p, n, 0);
+    if (v != 0x00010000 && !amb_tag(p, n, 0, "true")) return 0;      /* 'OTTO' (CFF outlines) is not read */
+    uint32_t nt = amb_u16(p, n, 4);
+    for (uint32_t i = 0; i < nt; i++) {
+        size_t r = 12 + 16 * (size_t)i;
+        uint32_t off = amb_u32(p, n, r + 8), len = amb_u32(p, n, r + 12);
+        if ((size_t)off + len > n) return 0;
+        if (amb_tag(p, n, r, "cmap")) t->cmap = off;
+        else if (amb_tag(p, n, r, "head")) t->head = off;
+        else if (amb_tag(p, n, r, "hhea")) t->hhea = off;
+        else if (amb_tag(p, n, r, "hmtx")) t->hmtx = off;
+        else if (amb_tag(p, n, r, "maxp")) t->maxp = off;
+        else if (amb_tag(p, n, r, "loca")) t->loca = off;
+        else if (amb_tag(p, n, r, "glyf")) { t->glyf = off; t->glyf_len = len; }
+        else if (amb_tag(p, n, r, "kern")) { t->kern = off; t->kern_len = len; }
+        else if (amb_tag(p, n, r, "OS/2")) { t->os2 = off; t->os2_len = len; }
     }
-    return n;
+    return t->cmap && t->head && t->hhea && t->hmtx && t->maxp && t->loca && t->glyf;
 }
-static int32_t amb_unzig(uint32_t v) { return (v & 1) ? -(int32_t)(v >> 1) - 1 : (int32_t)(v >> 1); }
 
-static void amb_face_load(amb_fonts *f, int k, const char *b64) {
-    vector<uint8_t> b;
-    amb_unbase64(b64, &b);
-    if (len(b) < 5 || at(b, 0) != 'A' || at(b, 1) != 'M' || at(b, 2) != 'B' || at(b, 3) != 'F') abort();
-    size_t i = 5;
-    uint32_t upem = amb_varint(&b, &i);
-    int32_t asc = amb_unzig(amb_varint(&b, &i)), desc = amb_unzig(amb_varint(&b, &i));
-    int32_t gap = (int32_t)amb_varint(&b, &i);
-    uint32_t count = amb_varint(&b, &i);
-    uint32_t first = (uint32_t)len(f->glyphs), cp = 0, fallback = first;
-    for (uint32_t g = 0; g < count; g++) {
-        cp += amb_varint(&b, &i);
-        uint32_t adv = amb_varint(&b, &i), ncont = amb_varint(&b, &i);
-        amb_glyph gl;
-        gl.cp = cp;
-        gl.first = (uint32_t)len(f->pts);
-        gl.advance = (uint16_t)adv;
-        gl.npts = 0;
-        int32_t x = 0, y = 0;
-        for (uint32_t c = 0; c < ncont; c++) {
-            uint32_t np = amb_varint(&b, &i);
-            for (uint32_t p = 0; p < np; p++) {
-                uint32_t vx = amb_varint(&b, &i);
-                x += amb_unzig(vx >> 1);
-                y += amb_unzig(amb_varint(&b, &i));
-                amb_pt pt;
-                pt.x = (int16_t)x;
-                pt.y = (int16_t)y;
-                pt.on = (uint8_t)(vx & 1);
-                pt.end = (uint8_t)(p + 1 == np);
-                push_back(f->pts, pt);
-                gl.npts++;
+/* a code point's glyph made one of the face's, its advance from hmtx */
+static void amb_map(vector<amb_glyph> *gl, const uint8_t *p, size_t n, const amb_tables *t, uint32_t nhm, uint32_t nglyphs,
+                    uint32_t cp, uint32_t gid) {
+    if (gid == 0 || gid >= nglyphs) return;
+    amb_glyph g;
+    g.cp = cp;
+    g.gid = gid;
+    g.advance = (uint16_t)amb_u16(p, n, t->hmtx + 4 * (size_t)(gid < nhm ? gid : nhm - 1));
+    g.kcount = 0;
+    g.kfirst = 0;
+    push_back(gl, g);
+}
+
+/* the sfnt p (n bytes, at base in its pool) read as the face fc, its code points and
+   kerning pairs pushed to gl and kn: 1, or 0 when it is no font this reads */
+static int amb_sfnt_face(const uint8_t *p, size_t n, uint32_t base, int builtin, vector<amb_glyph> *gl, vector<amb_kern> *kn, amb_face *fc) {
+    amb_tables t;
+    if (!amb_sfnt_tables(p, n, &t)) return 0;
+    memset(fc, 0, sizeof *fc);
+    fc->upem = amb_u16(p, n, t.head + 18);
+    if (fc->upem < 16 || fc->upem > 16384) return 0;
+    fc->loca_long = (uint8_t)(amb_s16(p, n, t.head + 50) == 1);
+    fc->nglyphs = amb_u16(p, n, t.maxp + 4);
+    uint32_t nhm = amb_u16(p, n, t.hhea + 34);
+    if (nhm == 0 || fc->nglyphs == 0 || (size_t)t.hmtx + 4 * (size_t)nhm > n) return 0;
+    fc->asc = amb_s16(p, n, t.hhea + 4);
+    fc->desc = -amb_s16(p, n, t.hhea + 6);
+    fc->gap = amb_s16(p, n, t.hhea + 8);
+    if (t.os2 && t.os2_len >= 78) {
+        /* OS/2's typographic metrics when the font asks for them (USE_TYPO_METRICS), its
+           Windows ones when hhea gives none */
+        if (amb_u16(p, n, t.os2 + 62) & 0x80) {
+            fc->asc = amb_s16(p, n, t.os2 + 68);
+            fc->desc = -amb_s16(p, n, t.os2 + 70);
+            fc->gap = amb_s16(p, n, t.os2 + 72);
+        } else if (fc->asc == 0 && fc->desc == 0) {
+            fc->asc = (int32_t)amb_u16(p, n, t.os2 + 74);
+            fc->desc = (int32_t)amb_u16(p, n, t.os2 + 76);
+            fc->gap = 0;
+        }
+    }
+    if (fc->gap < 0) fc->gap = 0;
+    fc->base = base;
+    fc->size = (uint32_t)n;
+    fc->builtin = (uint8_t)builtin;
+    fc->loca = t.loca;
+    fc->glyf = t.glyf;
+    fc->glyf_size = t.glyf_len;
+    /* cmap: a Unicode subtable, format 12 over format 4 */
+    uint32_t nsub = amb_u16(p, n, t.cmap + 2), sub = 0, fmt = 0;
+    for (uint32_t i = 0; i < nsub; i++) {
+        size_t r = t.cmap + 4 + 8 * (size_t)i;
+        uint32_t plat = amb_u16(p, n, r), enc = amb_u16(p, n, r + 2), off = t.cmap + amb_u32(p, n, r + 4);
+        uint32_t f = amb_u16(p, n, off);
+        int unicode = plat == 0 || (plat == 3 && (enc == 1 || enc == 10));
+        if (unicode && f == 12 && fmt != 12) { sub = off; fmt = 12; }
+        else if (unicode && f == 4 && !fmt) { sub = off; fmt = 4; }
+    }
+    if (!fmt) return 0;
+    fc->first = (uint32_t)len(*gl);
+    if (fmt == 4) {
+        uint32_t segs = amb_u16(p, n, sub + 6) / 2;
+        size_t ends = sub + 14, starts = ends + 2 * (size_t)segs + 2, deltas = starts + 2 * (size_t)segs, ros = deltas + 2 * (size_t)segs;
+        for (uint32_t s = 0; s < segs && len(*gl) - fc->first < 70000; s++) {
+            uint32_t end = amb_u16(p, n, ends + 2 * (size_t)s), start = amb_u16(p, n, starts + 2 * (size_t)s);
+            uint32_t delta = amb_u16(p, n, deltas + 2 * (size_t)s), ro = amb_u16(p, n, ros + 2 * (size_t)s);
+            for (uint32_t c = start; c <= end && c != 0xFFFF; c++) {
+                uint32_t g;
+                if (ro == 0) g = (c + delta) & 0xFFFF;
+                else {
+                    g = amb_u16(p, n, ros + 2 * (size_t)s + ro + 2 * (size_t)(c - start));
+                    if (g) g = (g + delta) & 0xFFFF;
+                }
+                amb_map(gl, p, n, &t, nhm, fc->nglyphs, c, g);
             }
         }
-        if (cp == 0xFFFD) fallback = (uint32_t)len(f->glyphs);
-        push_back(f->glyphs, gl);
+    } else {
+        uint32_t groups = amb_u32(p, n, sub + 12);
+        for (uint32_t k = 0; k < groups && len(*gl) - fc->first < 70000; k++) {
+            size_t r = sub + 16 + 12 * (size_t)k;
+            uint32_t start = amb_u32(p, n, r), end = amb_u32(p, n, r + 4), g0 = amb_u32(p, n, r + 8);
+            if (end < start || end - start > 70000 || end > 0x10FFFF) break;
+            for (uint32_t c = start; c <= end; c++) amb_map(gl, p, n, &t, nhm, fc->nglyphs, c, g0 + (c - start));
+        }
     }
-    amb_face fc;
-    fc.upem = upem ? upem : 2048;
-    fc.asc = asc;
-    fc.desc = -desc;
-    fc.gap = gap;
-    fc.first = first;
-    fc.count = count;
-    fc.fallback = fallback;
-    f->face[k] = fc;
+    fc->count = (uint32_t)len(*gl) - fc->first;
+    /* the notdef glyph, after every code point: the replacement glyph when U+FFFD is none */
+    {
+        amb_glyph nd;
+        nd.cp = 0x110000;
+        nd.gid = 0;
+        nd.advance = (uint16_t)amb_u16(p, n, t.hmtx);
+        nd.kcount = 0;
+        nd.kfirst = 0;
+        push_back(gl, nd);
+    }
+    fc->fallback = (uint32_t)len(*gl) - 1;
+    /* the code points in order (cmap's are): each found by halves; U+FFFD's the fallback */
+    for (uint32_t k = 1; k < fc->count; k++)
+        if (at(*gl, fc->first + k).cp <= at(*gl, fc->first + k - 1).cp) { fc->count = k; break; }
+    for (uint32_t k = 0; k < 128; k++) fc->ascii[k] = 0xffff;
+    for (uint32_t k = 0; k < fc->count; k++) {
+        uint32_t c = at(*gl, fc->first + k).cp;
+        if (c < 128) fc->ascii[c] = (uint16_t)k;
+        if (c == 0xFFFD) fc->fallback = fc->first + k;
+    }
+    /* kern: its format 0 subtables' horizontal pairs, in order */
+    fc->kfirst = (uint32_t)len(*kn);
+    if (t.kern && amb_u16(p, n, t.kern) == 0) {
+        uint32_t ntab = amb_u16(p, n, t.kern + 2);
+        size_t r = t.kern + 4;
+        for (uint32_t i = 0; i < ntab && r + 6 <= (size_t)t.kern + t.kern_len; i++) {
+            uint32_t sublen = amb_u16(p, n, r + 2), cov = amb_u16(p, n, r + 4);
+            if ((cov >> 8) == 0 && (cov & 1) && !(cov & 4)) {
+                uint32_t np = amb_u16(p, n, r + 6);
+                uint32_t last = 0;
+                for (uint32_t k = 0; k < np; k++) {
+                    size_t q = r + 14 + 6 * (size_t)k;
+                    if (q + 6 > n) break;
+                    uint32_t pair = amb_u16(p, n, q) << 16 | amb_u16(p, n, q + 2);
+                    if (pair < last) break;                         /* out of order: read no further */
+                    last = pair;
+                    amb_kern kk;
+                    kk.pair = pair;
+                    kk.value = amb_s16(p, n, q + 4);
+                    push_back(kn, kk);
+                }
+            }
+            if (sublen < 6) break;
+            r += sublen;
+        }
+    }
+    fc->kcount = (uint32_t)len(*kn) - fc->kfirst;
+    /* each code point's pairs as the left glyph */
+    for (uint32_t k = 0; k < fc->count && fc->kcount; k++) {
+        uint32_t gid = at(*gl, fc->first + k).gid, lo = 0, hi = fc->kcount;
+        while (lo < hi) {
+            uint32_t mid = (lo + hi) / 2;
+            if ((at(*kn, fc->kfirst + mid).pair >> 16) < gid) lo = mid + 1; else hi = mid;
+        }
+        uint32_t c = 0;
+        while (lo + c < fc->kcount && (at(*kn, fc->kfirst + lo + c).pair >> 16) == gid && c < 0xffff) c++;
+        (*gl)[fc->first + k].kfirst = lo;
+        (*gl)[fc->first + k].kcount = (uint16_t)c;
+    }
+    return 1;
 }
 
+/* ---- WOFF 1: its tables made an sfnt again ---- */
+
+#include "image.h"
+
+/* a WOFF table's zlib data inflated, through image.c's inflate (which the loader's
+   content codings share) */
+static int amb_woff_inflate(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
+    return amb_inflate(in, n, out, cap);
+}
+
+static void amb_be16(vector<uint8_t> *o, uint32_t v) { push_back(o, (uint8_t)(v >> 8)); push_back(o, (uint8_t)v); }
+static void amb_be32(vector<uint8_t> *o, uint32_t v) { amb_be16(o, v >> 16); amb_be16(o, v & 0xffff); }
+
+static int amb_woff(const uint8_t *p, size_t n, vector<uint8_t> *sf) {
+    uint32_t nt = amb_u16(p, n, 12);
+    if (nt == 0 || nt > 64 || 44 + 20 * (size_t)nt > n) return 0;
+    amb_be32(sf, amb_u32(p, n, 4));
+    amb_be16(sf, nt);
+    amb_be16(sf, 0); amb_be16(sf, 0); amb_be16(sf, 0);
+    size_t dir = len(*sf);
+    for (uint32_t i = 0; i < nt; i++) for (int k = 0; k < 16; k++) push_back(sf, 0);
+    for (uint32_t i = 0; i < nt; i++) {
+        size_t r = 44 + 20 * (size_t)i;
+        uint32_t off = amb_u32(p, n, r + 4), clen = amb_u32(p, n, r + 8), olen = amb_u32(p, n, r + 12);
+        if ((size_t)off + clen > n || olen > (1u << 24)) return 0;
+        while (len(*sf) % 4) push_back(sf, 0);
+        uint32_t at_off = (uint32_t)len(*sf);
+        if (clen == olen) append_range(sf, p + off, clen);
+        else {
+            vector<uint8_t> out;
+            if (!amb_woff_inflate(p + off, clen, &out, olen) || len(out) != olen) return 0;
+            append_range(sf, data(out), len(out));
+        }
+        size_t e = dir + 16 * (size_t)i;
+        for (int k = 0; k < 4; k++) (*sf)[e + k] = p[r + k];
+        uint32_t cs = amb_u32(p, n, r + 16);
+        for (int k = 0; k < 4; k++) (*sf)[e + 4 + k] = (uint8_t)(cs >> (24 - 8 * k));
+        for (int k = 0; k < 4; k++) (*sf)[e + 8 + k] = (uint8_t)(at_off >> (24 - 8 * k));
+        for (int k = 0; k < 4; k++) (*sf)[e + 12 + k] = (uint8_t)(olen >> (24 - 8 * k));
+    }
+    return 1;
+}
+
+/* ---- loading ---- */
+
 void amb_fonts_load(amb_fonts *f) {
-    memset(f->face, 0, sizeof f->face);
     clear(f->glyphs);
-    clear(f->pts);
-    amb_face_load(f, AMB_FACE_SANS, amb_font_sans);
-    amb_face_load(f, AMB_FACE_SANS_BOLD, amb_font_sans_bold);
-    amb_face_load(f, AMB_FACE_SERIF, amb_font_serif);
-    amb_face_load(f, AMB_FACE_SERIF_BOLD, amb_font_serif_bold);
-    amb_face_load(f, AMB_FACE_MONO, amb_font_mono);
-    amb_face_load(f, AMB_FACE_MONO_BOLD, amb_font_mono_bold);
+    clear(f->kerns);
+    clear(f->bytes);
+    memset(f->face, 0, sizeof f->face);
+    if (!amb_bi_ready) {
+        /* the first load: the six decoded, read, and their tables kept */
+        static const char *const which[AMB_NFACES] = { amb_font_sans, amb_font_sans_bold, amb_font_serif, amb_font_serif_bold,
+                                                      amb_font_mono, amb_font_mono_bold };
+        vector<amb_glyph> gl;
+        vector<amb_kern> kn;
+        for (int k = 0; k < AMB_NFACES; k++) {
+            uint32_t base = amb_pool_add(which[k]);
+            if (!amb_sfnt_face(amb_pool + base, amb_pool_len - base, base, 1, &gl, &kn, &amb_bi_face[k])) abort();
+        }
+        if (len(gl) > AMB_BI_GLYPHS || len(kn) > AMB_BI_KERNS) abort();
+        for (size_t i = 0; i < len(gl); i++) amb_bi_glyphs[i] = at(gl, i);
+        for (size_t i = 0; i < len(kn); i++) amb_bi_kerns[i] = at(kn, i);
+        amb_bi_nglyphs = (uint32_t)len(gl);
+        amb_bi_nkerns = (uint32_t)len(kn);
+        amb_bi_ready = 1;
+    }
+    append_range(f->glyphs, amb_bi_glyphs, amb_bi_nglyphs);
+    append_range(f->kerns, amb_bi_kerns, amb_bi_nkerns);
+    for (int k = 0; k < AMB_NFACES; k++) f->face[k] = amb_bi_face[k];
+    f->nfaces = AMB_NFACES;
+}
+
+int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
+    if (f->nfaces >= AMB_MAXFACES || n < 12 || n > (64u << 20)) return -1;
+    vector<uint8_t> sf;
+    if (amb_tag(p, n, 0, "wOFF")) { if (!amb_woff(p, n, &sf)) return -1; }
+    else append_range(sf, p, n);
+    uint32_t base = (uint32_t)len(f->bytes);
+    amb_face fc;
+    if (!amb_sfnt_face(data(sf), len(sf), base, 0, &f->glyphs, &f->kerns, &fc)) return -1;
+    append_range(f->bytes, data(sf), len(sf));
+    f->face[f->nfaces] = fc;
+    f->nfaces++;
+    return (int)f->nfaces - 1;
 }
 
 int amb_face_for(int family, int bold) {
@@ -117,18 +342,21 @@ int amb_face_for(int family, int bold) {
 
 /* ---- measuring ---- */
 
+static double amb_round(double x) { return x < 0 ? -(double)(long)(-x + 0.5) : (double)(long)(x + 0.5); }
+
 void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, double *desc, double *gap) {
     double s = size / f->face[face].upem;
-    *asc = f->face[face].asc * s;
-    *desc = f->face[face].desc * s;
-    *gap = f->face[face].gap * s;
+    *asc = amb_round(f->face[face].asc * s);
+    *desc = amb_round(f->face[face].desc * s);
+    *gap = amb_round(f->face[face].gap * s);
 }
 
 uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp) {
+    if (cp < 128 && f->face[face].ascii[cp] != 0xffff) return f->face[face].first + f->face[face].ascii[cp];
     uint32_t lo = f->face[face].first, hi = lo + f->face[face].count;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2;
-        uint32_t c = at(f->glyphs, mid).cp;
+        uint32_t c = f->glyphs[mid].cp;
         if (c == cp) return mid;
         if (c < cp) lo = mid + 1; else hi = mid;
     }
@@ -136,8 +364,27 @@ uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp) {
     return f->face[face].fallback;
 }
 
+/* the kerning of the glyphs a then b (indexes in f->glyphs), in font units */
+static int32_t amb_kern_units(const amb_fonts *f, int face, uint32_t a, uint32_t b) {
+    uint32_t kc = f->glyphs[a].kcount;
+    if (!kc) return 0;
+    uint32_t k0 = f->face[face].kfirst + f->glyphs[a].kfirst, right = f->glyphs[b].gid;
+    uint32_t lo = 0, hi = kc;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        uint32_t r = f->kerns[k0 + mid].pair & 0xffff;
+        if (r == right) return f->kerns[k0 + mid].value;
+        if (r < right) lo = mid + 1; else hi = mid;
+    }
+    return 0;
+}
+
 double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size) {
-    return at(f->glyphs, amb_glyph_of(f, face, cp)).advance * size / f->face[face].upem;
+    return f->glyphs[amb_glyph_of(f, face, cp)].advance * size / f->face[face].upem;
+}
+
+double amb_kern(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size) {
+    return amb_kern_units(f, face, amb_glyph_of(f, face, left), amb_glyph_of(f, face, right)) * size / f->face[face].upem;
 }
 
 uint32_t amb_utf8_next(const char *s, size_t n, size_t *i) {
@@ -160,10 +407,98 @@ uint32_t amb_utf8_next(const char *s, size_t n, size_t *i) {
 }
 
 double amb_text_width(const amb_fonts *f, int face, double size, const char *s, size_t n) {
-    double w = 0;
+    int64_t units = 0;
+    uint32_t prev = 0xffffffffu;
     size_t i = 0;
-    while (i < n) w += amb_advance(f, face, amb_utf8_next(s, n, &i), size);
-    return w;
+    while (i < n) {
+        uint32_t cp = (uint8_t)s[i] < 0x80 ? (uint32_t)(uint8_t)s[i++] : amb_utf8_next(s, n, &i);
+        uint32_t g = amb_glyph_of(f, face, cp);
+        units += f->glyphs[g].advance;
+        if (prev != 0xffffffffu) units += amb_kern_units(f, face, prev, g);
+        prev = g;
+    }
+    return (double)units * size / f->face[face].upem;
+}
+
+/* ---- outlines: a glyph's points from glyf ---- */
+
+/* the glyph gid of a face (its bytes p, n) into pts, each point (x, y) made
+   (a x + c y + e, b x + d y + g) for a composite's component */
+static void amb_outline(const uint8_t *p, size_t n, const amb_face *fc, uint32_t gid, int depth, double a, double b, double c, double d,
+                        double e, double g, vector<amb_pt> *pts) {
+    if (gid >= fc->nglyphs || depth > 8 || len(*pts) > 60000) return;
+    uint32_t o0, o1;
+    if (fc->loca_long) { o0 = amb_u32(p, n, fc->loca + 4 * (size_t)gid); o1 = amb_u32(p, n, fc->loca + 4 * (size_t)gid + 4); }
+    else { o0 = 2 * amb_u16(p, n, fc->loca + 2 * (size_t)gid); o1 = 2 * amb_u16(p, n, fc->loca + 2 * (size_t)gid + 2); }
+    if (o1 <= o0 || o1 > fc->glyf_size) return;
+    size_t q = fc->glyf + (size_t)o0, qe = fc->glyf + (size_t)o1;
+    if (qe > n) return;
+    int32_t nc = amb_s16(p, n, q);
+    if (nc >= 0) {
+        size_t ends = q + 10;
+        uint32_t npts = nc ? amb_u16(p, n, ends + 2 * (size_t)(nc - 1)) + 1 : 0;
+        if (npts > 20000) return;
+        size_t ins = ends + 2 * (size_t)nc, fl = ins + 2 + amb_u16(p, n, ins);
+        /* the flags (with their repeats), then the xs, then the ys */
+        vector<uint8_t> flags;
+        while (len(flags) < npts && fl < qe) {
+            uint8_t f = p[fl++];
+            push_back(flags, f);
+            if (f & 8) {
+                uint32_t r = fl < qe ? p[fl++] : 0;
+                for (uint32_t k = 0; k < r && len(flags) < npts; k++) push_back(flags, f);
+            }
+        }
+        if (len(flags) < npts) return;
+        vector<int32_t> xs;
+        int32_t v = 0;
+        size_t xi = fl;
+        for (uint32_t k = 0; k < npts; k++) {
+            uint8_t f = at(flags, k);
+            if (f & 2) { if (xi >= qe) return; v += (f & 16) ? p[xi] : -(int32_t)p[xi]; xi++; }
+            else if (!(f & 16)) { v += amb_s16(p, n, xi); xi += 2; }
+            push_back(xs, v);
+        }
+        v = 0;
+        size_t yi = xi;
+        uint32_t cont = 0, end = amb_u16(p, n, ends);
+        for (uint32_t k = 0; k < npts; k++) {
+            uint8_t f = at(flags, k);
+            if (f & 4) { if (yi >= qe) return; v += (f & 32) ? p[yi] : -(int32_t)p[yi]; yi++; }
+            else if (!(f & 32)) { v += amb_s16(p, n, yi); yi += 2; }
+            double X = at(xs, k), Y = v;
+            amb_pt pt;
+            pt.x = (int16_t)amb_round(a * X + c * Y + e);
+            pt.y = (int16_t)amb_round(b * X + d * Y + g);
+            pt.on = (uint8_t)(f & 1);
+            pt.end = (uint8_t)(k == end);
+            if (k == end && cont + 1 < (uint32_t)nc) { cont++; end = amb_u16(p, n, ends + 2 * (size_t)cont); }
+            push_back(pts, pt);
+        }
+        return;
+    }
+    /* a composite: each component, moved and scaled */
+    size_t r = q + 10;
+    for (int more = 1; more && r + 4 <= qe;) {
+        uint32_t fl = amb_u16(p, n, r), cg = amb_u16(p, n, r + 2);
+        r += 4;
+        double dx, dy;
+        if (fl & 1) { dx = amb_s16(p, n, r); dy = amb_s16(p, n, r + 2); r += 4; }
+        else { dx = (int8_t)p[r]; dy = (int8_t)p[r + 1]; r += 2; }
+        if (!(fl & 2)) { dx = 0; dy = 0; }                      /* placed by points: not read */
+        double ca = 1, cb = 0, cc = 0, cd = 1;
+        if (fl & 8) { ca = cd = amb_s16(p, n, r) / 16384.0; r += 2; }
+        else if (fl & 0x40) { ca = amb_s16(p, n, r) / 16384.0; cd = amb_s16(p, n, r + 2) / 16384.0; r += 4; }
+        else if (fl & 0x80) {
+            ca = amb_s16(p, n, r) / 16384.0; cb = amb_s16(p, n, r + 2) / 16384.0;
+            cc = amb_s16(p, n, r + 4) / 16384.0; cd = amb_s16(p, n, r + 6) / 16384.0;
+            r += 8;
+        }
+        /* the component's transform, then the composite's own */
+        amb_outline(p, n, fc, cg, depth + 1, a * ca + c * cb, b * ca + d * cb, a * cc + c * cd, b * cc + d * cd,
+                    a * dx + c * dy + e, b * dx + d * dy + g, pts);
+        more = (fl & 0x20) != 0;
+    }
 }
 
 /* ---- drawing: the signed area of each line, accumulated per pixel (as font-rs does) ---- */
@@ -243,18 +578,22 @@ static void amb_acc_quad(vector<float> *acc, int W, int H, double x0, double y0,
 
 int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, double dx, int italic,
                    vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
-    uint32_t gi = amb_glyph_of(f, face, cp);
-    amb_glyph g = at(f->glyphs, gi);
     *w = 0;
     *h = 0;
     *ox = 0;
     *oy = 0;
-    if (g.npts == 0) return 0;
-    double s = size / f->face[face].upem, slant = italic ? 0.2 : 0;
+    amb_glyph g = at(f->glyphs, amb_glyph_of(f, face, cp));
+    amb_face fc = f->face[face];
+    vector<amb_pt> pts;
+    if (fc.builtin) amb_outline(amb_pool + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    uint32_t npts = (uint32_t)len(pts);
+    if (npts == 0) return 0;
+    double s = size / fc.upem, slant = italic ? 0.2 : 0;
     /* the box of the points, in px from the pen (y down) */
     double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
-    for (uint32_t k = 0; k < g.npts; k++) {
-        amb_pt p = at(f->pts, g.first + k);
+    for (uint32_t k = 0; k < npts; k++) {
+        amb_pt p = at(pts, k);
         double X = (p.x + slant * p.y) * s + dx, Y = -p.y * s;
         if (X < minx) minx = X;
         if (X > maxx) maxx = X;
@@ -271,20 +610,20 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
        of its last and first), its lines and quadratic curves, back to the start */
     double ax = dx - x0, ay = (double)-y0;
     uint32_t c0 = 0;
-    while (c0 < g.npts) {
+    while (c0 < npts) {
         uint32_t c1 = c0;
-        while (c1 + 1 < g.npts && !at(f->pts, g.first + c1).end) c1++;
+        while (c1 + 1 < npts && !at(pts, c1).end) c1++;
         uint32_t n = c1 - c0 + 1, k0 = 0;
         int found = 0;
-        for (uint32_t k = 0; k < n && !found; k++) if (at(f->pts, g.first + c0 + k).on) { k0 = k; found = 1; }
+        for (uint32_t k = 0; k < n && !found; k++) if (at(pts, c0 + k).on) { k0 = k; found = 1; }
         double sx, sy, cx, cy, qx = 0, qy = 0, px, py;
         int ctrl = 0;
         if (found) {
-            amb_xf(at(f->pts, g.first + c0 + k0), s, slant, ax, ay, &sx, &sy);
+            amb_xf(at(pts, c0 + k0), s, slant, ax, ay, &sx, &sy);
             cx = sx;
             cy = sy;
             for (uint32_t j = 1; j <= n; j++) {
-                amb_pt p = at(f->pts, g.first + c0 + (k0 + j) % n);
+                amb_pt p = at(pts, c0 + (k0 + j) % n);
                 amb_xf(p, s, slant, ax, ay, &px, &py);
                 if (p.on) {
                     if (ctrl) amb_acc_quad(acc, W, gh, cx, cy, qx, qy, px, py);
@@ -306,14 +645,14 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
             }
         } else {
             double lx, ly;
-            amb_xf(at(f->pts, g.first + c0), s, slant, ax, ay, &px, &py);
-            amb_xf(at(f->pts, g.first + c1), s, slant, ax, ay, &lx, &ly);
+            amb_xf(at(pts, c0), s, slant, ax, ay, &px, &py);
+            amb_xf(at(pts, c1), s, slant, ax, ay, &lx, &ly);
             sx = (px + lx) * 0.5;
             sy = (py + ly) * 0.5;
             cx = sx;
             cy = sy;
             for (uint32_t j = 0; j < n; j++) {
-                amb_xf(at(f->pts, g.first + c0 + j), s, slant, ax, ay, &px, &py);
+                amb_xf(at(pts, c0 + j), s, slant, ax, ay, &px, &py);
                 if (ctrl) {
                     double mx = (qx + px) * 0.5, my = (qy + py) * 0.5;
                     amb_acc_quad(acc, W, gh, cx, cy, qx, qy, mx, my);

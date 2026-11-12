@@ -1,0 +1,15 @@
+# boxes of tests/pages/values.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+a div 22 12 756 40
+b div 10 64 449 36
+c div 10 100 300 20
+d div 10 120 200 10
+e div 10 130 238 42
+f div 185 172 100 36
+g div 10 208 120 15
+h div 10 223 90 9
+row div 10 232 780 25
+i1 div 10 232 186 22
+i2 div 208 232 186 22
+i3 div 406 232 186 22
+j div 10 257 300 29
+k div 10 286 143.516 41

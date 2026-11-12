@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><title>Vertical alignment and sizes</title>
+<style>
+/* tests/pages/sizing.html -- vertical-align (sub, super, middle, text-top, text-bottom,
+   top, bottom, a length, a percentage) of text and of inline-blocks; min-height,
+   max-height, min-width and a percentage height; a table's rowspan and its cells'
+   vertical-align; the boxes held to Chromium's (tests/pages/sizing.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.ib { display: inline-block; width: 20px; height: 30px; background: #ccf; }
+.big { font-size: 28px; }
+p { margin: 6px 0; }
+.mid { vertical-align: middle; }
+.tt { vertical-align: text-top; }
+.tb { vertical-align: text-bottom; }
+.top { vertical-align: top; }
+.bot { vertical-align: bottom; }
+.len { vertical-align: 6px; }
+.pct { vertical-align: -50%; }
+.minh { min-height: 50px; background: #eee; }
+.maxh { max-height: 20px; overflow: hidden; background: #ddd; }
+.minw { width: 50px; min-width: 120px; background: #def; }
+.outer { height: 120px; width: 300px; background: #fafafa; }
+.half { height: 50%; background: #fdd; }
+.quarter { height: 25%; min-height: 40px; background: #dfd; }
+table { border-collapse: separate; }
+td { border: 1px solid #999; }
+</style></head>
+<body>
+<p id=v1>H<sub id=sb>2</sub>O and E = mc<sup id=su>2</sup> in a line.</p>
+<p id=v2>x <span class=ib id=b1></span> <span class="ib mid" id=b2></span> <span class="ib tt" id=b3></span> <span class="ib tb" id=b4></span> <span class=big>Big</span></p>
+<p id=v3>y <span class="ib top" id=b5></span> <span class="ib bot" id=b6></span> <span class="ib len" id=b7></span> <span class="ib pct" id=b8></span> z</p>
+<p id=v4>text <span class=mid id=m1>middle</span> <span class=len id=l1>raised</span> <span class=big>and big</span></p>
+<div class=minh id=h1>At least 50px.</div>
+<div class=maxh id=h2>At most 20px, though this text is longer than one line of the block it is in, and wraps.</div>
+<div class=minw id=w1>Wide</div>
+<div class=outer id=o1><div class=half id=h3>Half</div><div class=quarter id=h4>A quarter, at least 40px</div></div>
+<table id=t1>
+<tr><td rowspan=2 id=c1>Two rows</td><td id=c2>One</td><td id=c3 style="vertical-align: top; height: 40px">Top</td></tr>
+<tr><td id=c4>Two<br>lines</td><td id=c5 style="vertical-align: bottom">Bottom</td></tr>
+<tr><td id=c6>Three</td><td colspan=2 rowspan=2 id=c7>Spans two by two<br>and<br>three<br>lines</td></tr>
+<tr><td id=c8>Four</td></tr>
+</table>
+</body></html>

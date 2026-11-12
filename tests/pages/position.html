@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><title>Positioning</title>
+<style>
+/* tests/pages/position.html -- relative offsets (a box's, an inline element's), absolute
+   boxes in a positioned ancestor (offsets, both offsets with an auto width, the static
+   position, auto margins in the middle), fixed boxes, sticky as at rest, z-index; the
+   boxes held to Chromium's (tests/pages/position.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.rel { position: relative; left: 20px; top: 10px; width: 300px; background: #eef; }
+.cb { position: relative; width: 400px; height: 200px; margin-top: 20px; padding: 10px; border: 2px solid #888; }
+.a1 { position: absolute; top: 5px; right: 10px; width: 100px; height: 50px; background: #fcc; z-index: 2; }
+.a2 { position: absolute; left: 30px; right: 30px; bottom: 0; background: #cfc; }
+.a3 { position: absolute; background: #ccf; }
+.a4 { position: absolute; left: 0; right: 0; width: 120px; margin: 0 auto; top: 80px; height: 20px; background: #ffc; }
+.fx { position: fixed; right: 0; bottom: 0; width: 150px; height: 30px; background: #fdd; }
+.st { position: sticky; top: 0; background: #dff; }
+sup.r { position: relative; top: -4px; }
+</style></head>
+<body>
+<div class=rel id=r1>Relatively offset.</div>
+<div class=cb id=cb>
+  <div class=a1 id=a1>A</div>
+  <p id=p1>In the flow <span class=a3 id=a3>static</span> after.</p>
+  <div class=a2 id=a2>Both offsets, an auto width.</div>
+  <div class=a4 id=a4></div>
+</div>
+<div class=st id=s1>Sticky, at rest.</div>
+<p id=p2>Text with a <sup class=r id=sp>raised</sup> word.</p>
+<div class=fx id=fx>Fixed.</div>
+</body></html>

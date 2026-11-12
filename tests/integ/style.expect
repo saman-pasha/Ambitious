@@ -23,16 +23,16 @@
           <td> display: table-cell color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 1px
             <font> display: inline (initial) color: rgb(128, 0, 0) background: rgba(0, 0, 0, 0) (initial) font-size: 24px weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
     <div> display: block color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
-169 rules, 281 declarations, 57 matches, 725 computed values (25 styles)
+185 rules, 404 declarations, 61 matches, 2600 computed values (25 styles)
 -- why each paragraph has its colour:
 N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
 N = n(1,24,0), X = declared('rgb(128, 128, 0)',written(olive),by('the style attribute'),in(inline))
 N = n(1,42,0), X = declared('rgb(200, 200, 200)',written('#c8c8c8'),by('.faint'),in(author))
 -- what lost the intro's colour, and at which step:
-N = n(1,18,0), D = de(1,259,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
-N = n(1,18,0), D = de(1,260,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
-N = n(1,18,0), D = de(1,275,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
+N = n(1,18,0), D = de(1,381,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
+N = n(1,18,0), D = de(1,382,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
+N = n(1,18,0), D = de(1,398,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
 -- the small print's size, proved:
 dom_element(n(1,47,0),small)   [fact]
 css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(user_agent)))   because
@@ -40,13 +40,13 @@ css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(
     css_declared(n(1,47,0),font_size,'12.5px',declared)   because
       css_style_of(n(1,47,0),19)   [fact]
       css_style_declared(19,font_size,'12.5px',declared)   [fact]
-  css_won(n(1,47,0),font_size,de(1,81,0))   because
+  css_won(n(1,47,0),font_size,de(1,100,0))   because
     css_style_of(n(1,47,0),19)   [fact]
-    css_style_won(19,font_size,de(1,81,0))   [fact]
-  css_decl(de(1,81,0),ru(1,69,0),font_size,smaller,false)   [fact]
+    css_style_won(19,font_size,de(1,100,0))   [fact]
+  css_decl(de(1,100,0),ru(1,69,0),font_size,smaller,false)   [fact]
   css_rule(ru(1,69,0),sh(1,1,0),small,1,69)   [fact]
-  css_origin_of(de(1,81,0),user_agent)   because
-    css_decl(de(1,81,0),ru(1,69,0),font_size,smaller,false)   [fact]
+  css_origin_of(de(1,100,0),user_agent)   because
+    css_decl(de(1,100,0),ru(1,69,0),font_size,smaller,false)   [fact]
     css_rule(ru(1,69,0),sh(1,1,0),small,1,69)   [fact]
     css_sheet(sh(1,1,0),user_agent)   [fact]
   user_agent=user_agent   [test]
@@ -54,9 +54,41 @@ css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(
 -- the font element's colour and size, from its attributes:
 N = n(1,55,0), P = color, X = declared('rgb(128, 0, 0)',written('color=#800000'),by('the color attribute'),in(author))
 N = n(1,55,0), P = font_size, X = declared('24px',written('size=5'),by('the size attribute'),in(author))
+-- custom properties: an element's own and its ancestors', var() replaced:
+N = n(1,22,0), Name = '--pad', V = '8px'
+N = n(1,22,0), Name = '--gap', V = '12px'
+N = n(1,22,0), Name = '--wide', V = 'calc(100% - 2 * 12px)'
+N = n(1,22,0), Name = '--ink', V = '#234'
+-- widths from var() and calc(), one whose var() is a cycle (its fallback), a border's width under style none:
+I = a, P = width, N = n(1,13,0), X = declared('calc(100% - 24px)',written('var(--wide)'),by('.a'),in(author))
+I = h, P = width, N = n(1,29,0), X = declared('90px',written('var(--x, 90px)'),by('.h'),in(author))
+I = j, P = border_right_width, N = n(1,36,0), X = declared('0px',written('5px'),by('.j'),in(author))
+I = k, P = border_top_width, N = n(1,38,0), X = declared('3px',written('0.25em'),by('.k'),in(author))
+-- the sheets @import brought (one for print, not read), and the cascade layers in their order:
+S = sh(1,3,0), P = sh(1,2,0), U = 'file://ROOT/tests/pages/import/base.css'
+S = sh(1,4,0), P = sh(1,3,0), U = 'file://ROOT/tests/pages/import/colors.css'
+L = ly(1,1,0), N = base, R = 1
+L = ly(1,2,0), N = theme, R = 2
+-- the web fonts @font-face fetched, and a family resolved to one:
+F = ff(1,1,0), Fam = 'Web Oblique', U = 'file://ROOT/tests/pages/fonts/oblique.ttf', W = 400, I = false
+F = ff(1,2,0), Fam = 'Web Serif', U = 'file://ROOT/tests/pages/fonts/serif-bold.woff', W = 700, I = false
+N = n(1,22,0), X = declared(weboblique,written('\'Web Oblique\', monospace'),by('.mono'),in(author))
+-- what lost a card's properties: a layer under a later one, under the unlayered rules; order within a layer:
+N = n(1,13,0), P = background_color, D = de(1,366,0), Why = layer(lost(base),won(theme))
+N = n(1,13,0), P = color, D = de(1,364,0), Why = order(166,earlier_than(167))
+N = n(1,13,0), P = border_top_color, D = de(1,372,0), Why = layer(lost(base),won(unlayered))
+N = n(1,13,0), P = border_top_color, D = de(1,385,0), Why = layer(lost(theme),won(unlayered))
+-- pseudo-elements' styles: a ::before's colour and content, its own or its element's; the drop cap's size:
+N = n(1,36,0), P = content, V = 'attr(data-label) ": "', H = declared
+N = n(1,36,0), P = font_weight, V = '700', H = declared
+N = n(1,36,0), P = color, V = 'rgb(0, 0, 0)', H = inherited
+N = n(1,66,0), V = '40px', H = declared
+-- the page hovered at #d2's span (--hover): the state, and :has() over it:
+K = hover, N = n(1,28,0), E = span
+N = n(1,27,0), X = declared('rgb(255, 255, 221)',written('#ffd'),by('div:has(span:hover)'),in(author))
 -- the reasoner's diagnostics:
 amb_diag(low_contrast, n(1,24,0), '<p> text rgb(128, 128, 0) on rgb(253, 253, 248): contrast 4.11:1, below 4.5:1').
 amb_diag(low_contrast, n(1,42,0), '<p> text rgb(200, 200, 200) on rgb(253, 253, 248): contrast 1.64:1, below 4.5:1').
-amb_diag(unused_rule, ru(1,158,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
-amb_diag(unused_rule, ru(1,161,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,174,0), 'the rule a:hover matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,177,0), 'the rule .ghost matches no element (at rest: no hover, focus or other state)').
 exit 0

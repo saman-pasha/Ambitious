@@ -8,7 +8,9 @@ ok   [attr~=v]: color rgb(255, 0, 0)
 ok   [attr|=v]: color rgb(255, 0, 0)
 ok   [^=][$=][*=]: color rgb(255, 0, 0)
 ok   [attr=v i]: color rgb(255, 0, 0)
+ok   [attr=v]: type's value without case (HTML): color rgb(255, 0, 0)
 ok   [attr=v] case-sensitive: color rgb(0, 0, 0)
+ok   [attr=v s]: color rgb(0, 0, 0)
 ok   descendant: color rgb(255, 0, 0)
 ok   child, not a grandchild: color rgb(0, 0, 0)
 ok   next sibling: color rgb(255, 0, 0)
@@ -59,15 +61,15 @@ ok   lighter of 400: font_weight 100
 ok   line-height, a number: line_height 1.5
 ok   line-height, a percentage: line_height 15px
 ok   #rgb: color rgb(0, 255, 0)
-ok   #rrggbbaa: color rgba(255, 0, 0, 0.501961)
+ok   #rrggbbaa: color rgba(255, 0, 0, 0.5)
 ok   rgb() of percentages: color rgb(255, 128, 0)
-ok   rgba(): color rgba(0, 0, 255, 0.501961)
-ok   rgb() with spaces and /: color rgba(0, 128, 0, 0.501961)
+ok   rgba(): color rgba(0, 0, 255, 0.5)
+ok   rgb() with spaces and /: color rgba(0, 128, 0, 0.5)
 ok   hsl(): color rgb(0, 128, 0)
 ok   a named colour: color rgb(102, 51, 153)
 ok   transparent: background_color rgba(0, 0, 0, 0)
-ok   currentcolor: border_color rgb(255, 0, 0)
-ok   border-color's initial is the colour: border_color rgb(0, 0, 255)
+ok   currentcolor: border_top_color rgb(255, 0, 0)
+ok   border-color's initial is the colour: border_left_color rgb(0, 0, 255)
 ok   box-sizing: box_sizing border-box
 ok   max-width: max_width 50%
 ok   max-width: none: max_width none
@@ -83,7 +85,8 @@ ok   margin: 4 values: margin_left 4px
 ok   margin: 0 auto: margin_right auto
 ok   padding: 4 values: padding_bottom 3px
 ok   border: width style colour: border_left_width 2px
-ok   border: its colour: border_color rgb(255, 0, 0)
+ok   border: its colour: border_right_color rgb(255, 0, 0)
+ok   border: its style: border_bottom_style dotted
 ok   border: none: border_top_width 0px
 ok   border without a style: border_top_width 0px
 ok   border-bottom: its side: border_bottom_width 3px
@@ -103,6 +106,97 @@ ok   background: its colour: background_color rgb(255, 255, 0)
 ok   background: none resets the colour: background_color rgba(0, 0, 0, 0)
 ok   list-style: list_style_type square
 ok   text-decoration's line: text_decoration underline
+ok   calc() of px: width 120px
+ok   calc() of em and px: width 50px
+ok   calc() of a percentage and px, kept: width calc(50% - 10px)
+ok   calc() with * and /: margin_top 15px
+ok   calc() nested: padding_top 20px
+ok   calc() in font-size: the parent's em: font_size 21px
+ok   min() of lengths: width 48px
+ok   max() over a percentage, kept: width max(50%, 100px)
+ok   clamp() of vw: font_size 20px
+ok   calc() of a length and a number: dropped: width 10px
+ok   calc() a number, for line-height: line_height 1.5
+ok   var(): color rgb(255, 0, 0)
+ok   var() of an inherited custom property: color rgb(255, 0, 0)
+ok   var()'s fallback: color rgb(0, 128, 0)
+ok   var() in a shorthand: margin_left 10px
+ok   var() of var(): padding_left 3px
+ok   a cycle is invalid: the fallback: color rgb(0, 128, 0)
+ok   invalid at computed-value time, inherited: color rgb(0, 128, 0)
+ok   invalid at computed-value time, initial: margin_top 0px
+ok   custom property names are case-sensitive: color rgb(0, 128, 0)
+ok   var() in calc(): width 30px
+ok   var() in the style attribute: padding_top 7px
+ok   rem against the root's font size: margin_top 40px
+ok   rem in the root's own font-size: font_size 32px
+ok   border-style a side: border_right_style dashed
+ok   border-color a side: border_bottom_color rgb(0, 0, 255)
+ok   border-width without a style: 0: border_top_width 0px
+ok   border-width with a style: border_top_width 4px
+ok   border-top-style hidden: 0: border_top_width 0px
+ok   a border width, snapped: border_left_width 2px
+ok   border-radius: border_bottom_right_radius 10px
+ok   border-radius, elliptical: border_top_right_radius 5px 20px
+ok   border-radius, a percentage: border_top_left_radius 50%
+ok   outline: outline_style dashed
+ok   outline-width without a style: kept: outline_width 3px
+ok   position: position absolute
+ok   top in em: top 32px
+ok   inset: left 2px
+ok   float: float left
+ok   a float is a block: display block
+ok   an absolute box is a block: display flex
+ok   an absolute box floats not: float none
+ok   clear: clear both
+ok   z-index: z_index 5
+ok   z-index not an integer: dropped: z_index auto
+ok   overflow: two values: overflow_y auto
+ok   overflow: one for both: overflow_x clip
+ok   vertical-align, a length: vertical_align -2px
+ok   vertical-align: sub (the UA's): vertical_align sub
+ok   min-height: min_height 160px
+ok   max-height: none: max_height none
+ok   opacity, a percentage: opacity 0.5
+ok   opacity, clamped: opacity 1
+ok   visibility, inherited: visibility hidden
+ok   a flex item is a block: display block
+ok   flex-flow: flex_wrap wrap
+ok   flex: 1's basis: flex_basis 0%
+ok   flex: none: flex_shrink 0
+ok   flex: auto: flex_basis auto
+ok   flex: grow shrink basis: flex_basis 160px
+ok   order: order -1
+ok   justify-content: justify_content space-between
+ok   align-self: align_self center
+ok   gap: two values: column_gap 20px
+ok   place-items: justify_items start
+ok   grid-template-columns: grid_template_columns 100px 1fr repeat(2, minmax(10px, auto))
+ok   grid-template-columns: em made px: grid_template_columns 32px [main] 1fr
+ok   grid-template-columns: an unknown size, dropped: grid_template_columns none
+ok   grid-column: grid_column_end span 3
+ok   grid-area: grid_column_end 4
+ok   grid-auto-flow: grid_auto_flow column dense
+ok   background-image: a gradient: background_image linear-gradient(red, blue)
+ok   background: layers' sizes: background_size cover, auto
+ok   background: layers' repeats: background_repeat no-repeat, repeat
+ok   background: the last layer's colour: background_color rgb(255, 255, 0)
+ok   box-shadow: em made px: box_shadow 0 0 16px red
+ok   text-shadow, inherited: text_shadow 1px 1px 2px black
+ok   transform: transform rotate(45deg) translateX(16px)
+ok   transform: an unknown function, dropped: transform none
+ok   letter-spacing in em, inherited: letter_spacing 1.6px
+ok   text-indent, a percentage: text_indent 10%
+ok   text-transform: text_transform uppercase
+ok   direction, inherited: direction rtl
+ok   unicode-bidi, not inherited: unicode_bidi normal
+ok   unicode-bidi: the UA's isolate: unicode_bidi isolate
+ok   writing-mode: writing_mode vertical-rl
+ok   hyphens: hyphens auto
+ok   content: content "a" counter(c)
+ok   counter-reset: counter_reset c 2 d 0
+ok   quotes, an odd count: dropped: quotes auto
+ok   list-style-position: list_style_position inside
 ok   @media print: color rgb(0, 0, 0)
 ok   @media screen and (min-width): color rgb(255, 0, 0)
 ok   @media (max-width): color rgb(0, 0, 0)
@@ -117,12 +211,70 @@ ok   a hint under an author rule: color rgb(0, 128, 0)
 ok   a hint under the author's *: color rgb(0, 128, 0)
 ok   comments: color rgb(255, 0, 0)
 ok   <!-- and -->: color rgb(255, 0, 0)
-ok   @font-face, skipped: color rgb(255, 0, 0)
-ok   @import, skipped: color rgb(255, 0, 0)
-ok   @supports, skipped whole: color rgb(255, 0, 0)
+ok   @font-face, no rules of its own: color rgb(255, 0, 0)
+ok   @import with no loader: read past: color rgb(255, 0, 0)
+ok   @supports, then a later rule: color rgb(255, 0, 0)
+ok   @supports a declaration read: color rgb(255, 0, 0)
+ok   @supports a value not read: color rgb(0, 0, 0)
+ok   @supports a property not read: color rgb(0, 0, 0)
+ok   @supports not: color rgb(255, 0, 0)
+ok   @supports and: color rgb(255, 0, 0)
+ok   @supports and, one false: color rgb(0, 0, 0)
+ok   @supports or: color rgb(255, 0, 0)
+ok   @supports and with or, unparenthesized: false: color rgb(0, 0, 0)
+ok   @supports nested: color rgb(255, 0, 0)
+ok   @supports a custom property: color rgb(255, 0, 0)
+ok   @supports selector(): color rgb(255, 0, 0)
+ok   @supports selector() not read: color rgb(0, 0, 0)
+ok   @layer: the later layer: color rgb(255, 0, 0)
+ok   @layer: unlayered over layered, specificity aside: color rgb(255, 0, 0)
+ok   @layer: !important, the earlier layer: color rgb(0, 128, 0)
+ok   @layer: !important layered over !important unlayered: color rgb(0, 128, 0)
+ok   @layer: a layer's own rules after its sublayers': color rgb(255, 0, 0)
+ok   @layer: a dotted name is a sublayer: color rgb(255, 0, 0)
+ok   @layer: the order its statement gives: color rgb(0, 128, 0)
+ok   @layer: anonymous layers in order: color rgb(0, 128, 0)
 ok   a string holding a brace: color rgb(255, 0, 0)
+ok   :has() a child: color rgb(255, 0, 0)
+ok   :has(>) not a grandchild: color rgb(0, 0, 0)
+ok   :has() a descendant: color rgb(255, 0, 0)
+ok   :has(+) the next sibling: color rgb(255, 0, 0)
+ok   :has(+) not a later one: color rgb(0, 0, 0)
+ok   :has(~) a later sibling: color rgb(255, 0, 0)
+ok   :has() complex: color rgb(255, 0, 0)
+ok   :has() a list: color rgb(255, 0, 0)
+ok   :not(:has()): color rgb(255, 0, 0)
+ok   :has() its argument's specificity: color rgb(255, 0, 0)
+ok   :hover: color rgb(255, 0, 0)
+ok   :hover at rest: color rgb(0, 0, 0)
+ok   :hover holds of the hovered's ancestors: color rgb(255, 0, 0)
+ok   :hover not of its descendants: color rgb(0, 0, 0)
+ok   :focus: color rgb(255, 0, 0)
+ok   :focus-visible: color rgb(255, 0, 0)
+ok   :focus not of an ancestor: color rgb(0, 0, 0)
+ok   :focus-within: color rgb(255, 0, 0)
+ok   :active: color rgb(255, 0, 0)
+ok   :visited: no history is read: color rgb(0, 0, 238)
+ok   :target with no URL: color rgb(0, 0, 0)
+ok   a ::before rule is not its element's: color rgb(0, 0, 0)
+ok   ::before's own value: ::before color rgb(0, 128, 0)
+ok   ::before inherits from its element: ::before color rgb(255, 0, 0)
+ok   ::before's content: ::before content 'x' counter(c)
+ok   ::before with no content: none: ::before color (none)
+ok   :before, as CSS 2 wrote it: ::before color rgb(0, 128, 0)
+ok   ::after: ::after color rgb(0, 128, 0)
+ok   ::before of any element: ::before color rgb(0, 128, 0)
+ok   ::before's specificity: ::before color rgb(0, 128, 0)
+ok   ::before's display, not blockified: ::before display inline
+ok   q's quotes (the user agent's): ::before content open-quote
+ok   ::first-line: ::first-line color rgb(0, 128, 0)
+ok   ::first-letter's em: ::first-letter font_size 32px
+ok   ::marker: ::marker color rgb(0, 128, 0)
+ok   ::placeholder (the user agent's): ::placeholder color rgb(117, 117, 117)
+ok   ::placeholder: ::placeholder color rgb(0, 128, 0)
+ok   ::selection: none read: color rgb(0, 0, 0)
 ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-127 of 127 cases
+279 of 279 cases

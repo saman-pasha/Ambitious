@@ -2,10 +2,14 @@
 %%
 %% The box tree made from the DOM and its computed style, and laid out: block
 %% layout (widths found as CSS 2.1 10.3 finds them, vertical margins collapsed),
-%% inline layout (white space processed, lines broken, aligned), atomic inlines
-%% (inline-blocks, replaced elements, form controls) shrunk to fit, tables in
-%% their automatic layout, list markers. Every box keeps how its width was found
-%% and from what, so the reasoner can say why a box is as wide as it is.
+%% floats and clearance, positioned boxes (relative, absolute, fixed; sticky as
+%% at rest), flex and grid containers, inline layout (white space processed,
+%% lines broken around floats, aligned, vertical-align, bidirectional text
+%% reordered), atomic inlines (inline-blocks, replaced elements, form controls)
+%% shrunk to fit, tables in their automatic layout (rowspan too), list markers.
+%% Every box keeps how its width was found and from what, so the reasoner can say
+%% why a box is as wide as it is; and how it is positioned, floated, stacked and
+%% clipped, which paint reads.
 %% src/layout/layout.c says what of CSS's layout the module does, and what not.
 
 layout_contract(module(layout, '0.1.0', 'Layout: the box tree of a styled document, laid out; each box''s geometry and why it has its width')).
@@ -16,17 +20,25 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 
 %% the viewport's box; a block container (an element's, an anonymous one, a list
 %% item's); an atomic inline (an inline-block, a replaced element, a form control);
-%% a table, its rows and its cells
-layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell])).
+%% a table, its rows and its cells; a flex container, a grid container
+layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid])).
 %% how a box's width was found: the viewport's; filling its containing block; a
 %% length, or a percentage, its style declared; shrunk to fit its content; its
 %% table column's; its content's own (a replaced element's, a form control's);
-%% its max-width, which held it narrower than any of those
-layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fit, column, intrinsic, max_width])).
+%% its max-width, which held it narrower than any of those; its min-width, which
+%% held it wider; its flex line's share (a flex item's); its grid area's; its
+%% containing block's less its offsets (an absolutely positioned box's)
+layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fit, column, intrinsic, max_width, min_width, flex, grid,
+    positioned])).
+%% how a box is positioned (CSS 2.1 9.3): in the flow; offset from there; taken
+%% out of it, in its containing block (absolute) or the viewport (fixed); sticky
+%% (at rest, where the flow put it)
+layout_contract(enum(position, [static, relative, absolute, fixed, sticky])).
+%% the side a box floats to
+layout_contract(enum(float_side, [unfloated, left, right])).
 %% what a fragment of a line is: a run of text; an atomic inline's box; a list
 %% item's marker; the part of an inline element on the line (its background)
-layout_contract(enum(frag_kind, [text, atomic, marker, inline])).
-layout_contract(enum(face, [sans, sans_bold, serif, serif_bold, mono, mono_bold])).
+layout_contract(enum(frag_kind, [text, atomic, marker, inline, generated])).
 
 layout_contract(record(box, [
     field(node,         xhandle(dom, node)),    % the element; none for the viewport and an anonymous box
@@ -44,7 +56,26 @@ layout_contract(record(box, [
     field(how,          enum(width_how)),
     field(avail,        f64),                   % the width its width was found from
     field(background,   u32),                   % RGBA, behind its padding box
-    field(border_color, u32)
+    field(bct, u32), field(bcr, u32), field(bcb, u32), field(bcl, u32),  % border colours, RGBA, a side each
+    field(bst, u8), field(bsr, u8), field(bsb, u8), field(bsl, u8),      % border styles (src/layout/layout.h)
+    field(pseudo, u8),                          % 1 its element's ::before, 2 ::after; 0 the element's own
+    field(position,     enum(position)),
+    field(cb,           ref(box)),              % an absolutely positioned box's containing block (the viewport's for fixed)
+    field(float_side,   enum(float_side)),
+    field(z,            i32),                   % z-index, a positioned box's (0 for auto)
+    field(z_auto,       bool),                  % z-index is auto: the box makes no stacking context of its own
+    field(clip,         u8),                    % overflow: 1 its content clipped to its padding box (hidden, clip, scroll, auto)
+    field(dx, f64), field(dy, f64),             % a relatively positioned box's offset, in its position already
+    %% what paint reads of its style: the corners' radii, its opacity, its shadows,
+    %% backgrounds, transform and outline as CSS computed them
+    field(rtl, f64), field(rtr, f64), field(rbr, f64), field(rbl, f64),
+    field(opacity,      f64),
+    field(shadows,      span(text)),            % box-shadow
+    field(bg_image,     span(text)),            % background-image: its layers (url(), gradients)
+    field(bg_res,       xhandle(net, resource)),% the image its first url() names, fetched; none for none
+    field(bg_pos,       span(text)), field(bg_size, span(text)), field(bg_repeat, span(text)),
+    field(transform,    span(text)), field(origin, span(text)),
+    field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64)   % outline: width, style, colour, offset
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -63,12 +94,16 @@ layout_contract(record(frag, [
     field(text,       span(text)),              % a text or marker fragment's text, its white space as laid out
     field(x, f64), field(y, f64), field(w, f64), field(h, f64),          % in page px
     field(baseline,   f64),
-    field(face,       enum(face)),
+    field(face,       u8),                      % its font: one of the six built-in faces (src/paint/font.h), or a web font's
+    field(font,       xhandle(net, resource)),  % the web font's resource (@font-face), the loader's; none for a built-in face
     field(size,       f64),
+    field(spacing,    f64),                     % letter-spacing, px after each character
+    field(word_spacing, f64),                   % word-spacing, px after each space
     field(italic,     bool),
     field(color,      u32),
     field(background, u32),                     % an inline fragment's
-    field(decoration, u8)                       % underline 1, overline 2, line-through 4
+    field(decoration, u8),                      % underline 1, overline 2, line-through 4
+    field(shadows,    span(text))               % text-shadow
 ])).
 
 layout_contract(handle(box, bx)).
@@ -106,6 +141,12 @@ layout_contract(invariant(live_links, 'Every link names a live record', refs_liv
 
 layout_contract(fact(layout_box(handle, field(node), field(kind), field(x), field(y), field(w), field(h)), table(box), true)).
 layout_contract(fact(layout_parent(handle, field(parent)), table(box), field(parent) \== none)).
+layout_contract(fact(layout_pseudo(handle, field(pseudo)), table(box), field(pseudo) \== 0)).
+%% a positioned box: how, its containing block (an absolute or fixed one's), its offset (a relative one's)
+layout_contract(fact(layout_positioned(handle, field(position), field(cb), field(dx), field(dy)), table(box), field(position) \== static)).
+layout_contract(fact(layout_stacking(handle, field(z)), table(box), field(z_auto) == false)).
+layout_contract(fact(layout_float(handle, field(float_side)), table(box), field(float_side) \== unfloated)).
+layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
 layout_contract(fact(layout_margin(handle, field(mt), field(mr), field(mb), field(ml)), table(box), true)).
 layout_contract(fact(layout_border(handle, field(bt), field(br), field(bb), field(bl)), table(box), true)).
 layout_contract(fact(layout_padding(handle, field(pt), field(pr), field(pb), field(pl)), table(box), true)).
@@ -115,9 +156,15 @@ layout_contract(fact(layout_text(handle, field(line), field(node), field(text), 
     field(kind) == text)).
 layout_contract(fact(layout_frag(handle, field(line), field(kind), field(node), field(x), field(y), field(w), field(h)), table(frag),
     field(kind) \== text)).
+%% the text a pseudo-element gave (::before's and ::after's content, a field's placeholder)
+layout_contract(fact(layout_generated(handle, field(node), field(text)), table(frag), field(kind) == generated)).
 
 layout_contract(rules('rules/layout')).
 layout_contract(derived(layout_box_of/2, 'the box an element generated')).
+layout_contract(derived(layout_inline_box/5, 'an inline element''s box, from its fragments and its text''s: X, Y, W, H')).
+layout_contract(derived(layout_pseudo_box_of/3, 'the box an element''s ::before or ::after generated')).
+layout_contract(derived(layout_explain_position/2, 'why a box is where it is: the flow, a float, an offset, its containing block')).
+layout_contract(derived(layout_paint_order/2, 'the order boxes are painted in: stacking contexts by z-index, then the flow')).
 layout_contract(derived(layout_border_box/5, 'a box''s border box: X, Y, W, H')).
 layout_contract(derived(layout_explain_width/2, 'why a box is as wide as it is')).
 layout_contract(derived(layout_at/3, 'the deepest element whose box holds a point')).

@@ -15,6 +15,9 @@
  *                                 its console and errors, the listeners and timers at rest
  *   ambitious click PAGE SELECTOR the same after a click at the first element SELECTOR matches
  *   ambitious --click SELECTOR CMD PAGE ...   any page command after such a click (repeatable)
+ *   ambitious --hover|--focus|--active SELECTOR CMD PAGE ...   any page command with the first
+ *                                 element SELECTOR matches hovered, focused (as from the
+ *                                 keyboard: :focus-visible too) or active, for the cascade
  *   ambitious bench PAGE [N]      each stage's time, over N runs, and the snapshot's
  *                                 size and the reasoner's time over it
  *   ambitious inspect PAGE [--query GOAL | --why GOAL]
@@ -65,6 +68,7 @@ amb_interface(a11y);
 amb_interface(script);
 
 #include "../paint/paint.h"
+#include "../css/css.h"
 #include "../js/js.h"
 #include "../script/script.h"
 #include "../html/encoding.h"
@@ -498,6 +502,23 @@ static void loader_keep(const session *s, net_loader *nt) {
     net_keep(nt, jar, strlen(jar), cache, strlen(cache));
 }
 
+/* one state asked for: the first element the selector v matches, in that state */
+static void page_state_one(css_style *st, dom_document *d, const char *opt, const char *v, css_state_kind kind) {
+    if (!v || !*v) return;
+    uint32_t x = script_select(d, v, strlen(v));
+    if (!x) { fprintf(stderr, "ambitious: --%s %s: no element matches\n", opt, v); return; }
+    css_set_state(st, d, kind, x);
+    if (kind == CSS_STATE_KIND_FOCUS) css_set_state(st, d, CSS_STATE_KIND_FOCUS_VISIBLE, x);
+}
+/* the page's state asked for (--hover, --focus, --active SELECTOR: AMB_HOVER, AMB_FOCUS,
+   AMB_ACTIVE), before the cascade: what :hover, :focus, :focus-visible, :focus-within and
+   :active read. A page at rest has none (the cascade reads no pointer or keyboard) */
+static void page_state(css_style *st, dom_document *d) {
+    page_state_one(st, d, "hover", getenv("AMB_HOVER"), CSS_STATE_KIND_HOVER);
+    page_state_one(st, d, "focus", getenv("AMB_FOCUS"), CSS_STATE_KIND_FOCUS);
+    page_state_one(st, d, "active", getenv("AMB_ACTIVE"), CSS_STATE_KIND_ACTIVE);
+}
+
 static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
                           a11y_tree *ax, script_runtime *sr, js_vm *vm) {
     char url[4200];
@@ -547,6 +568,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
         page_clicks(d, vm);
     }
     script_settle(vm);
+    page_state(st, d);
     css_cascade(st, d, nt);
     layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
     a11y_build(ax, d, st);
@@ -628,8 +650,10 @@ static int cmd_style(const char *page) {
                 }
         printf("\n");
     }
-    printf("%zu rules, %zu declarations, %zu matches, %zu computed values (%zu styles)\n", rule_count(st), decl_count(st), match_count(st),
-           (size_t)estyle_count(st) * 29, (size_t)cval_count(st) / 29);
+    uint32_t styles = 0;
+    for (uint32_t es = 1; es < st.estyle_len; es++) if (st.estyle[es].style > styles) styles = st.estyle[es].style;
+    printf("%zu rules, %zu declarations, %zu matches, %zu computed values (%u styles)\n", rule_count(st), decl_count(st), match_count(st),
+           (size_t)estyle_count(st) * CSS_NPROPS, styles);
     return 0;
 }
 
@@ -703,6 +727,7 @@ static int cmd_bench(const char *page, int n) {
         double e2 = now_ms();
         script_settle(&vm);
         double e3 = now_ms();
+        page_state(&st, &d);
         css_cascade(&st, &d, &nt);
         double f = now_ms();
         layout_run(&lt, &d, &st, &nt, VIEW_W, VIEW_H);
@@ -949,6 +974,15 @@ int main(int argc, char **argv) {
             append_range(all, argv[2], strlen(argv[2]));
             push_back(all, 0);
             setenv("AMB_CLICKS", data(all), 1);
+            argv += 2;
+            argc -= 2;
+            continue;
+        }
+        if ((strcmp(argv[1], "--hover") == 0 || strcmp(argv[1], "--focus") == 0 || strcmp(argv[1], "--active") == 0) && argc >= 3) {
+            /* a state of the page for the cascade, at the first element the selector matches */
+            if (strcmp(argv[1], "--hover") == 0) setenv("AMB_HOVER", argv[2], 1);
+            else if (strcmp(argv[1], "--focus") == 0) setenv("AMB_FOCUS", argv[2], 1);
+            else setenv("AMB_ACTIVE", argv[2], 1);
             argv += 2;
             argc -= 2;
             continue;

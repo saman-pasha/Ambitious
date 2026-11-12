@@ -4,35 +4,69 @@
    implementation.
 
    Parsing has CSS Syntax 3's shapes: comments, strings, the top level's <!-- and
-   -->, at-rules (an @media whose query holds for the viewport is read, every
-   other at-rule skipped), style rules, declarations with !important. A
-   shorthand is expanded into the module's properties (margin, padding,
-   border-width, border and its sides, border-color, font, background,
-   list-style, text-decoration). A value a property does not take drops its
-   declaration, as CSS has it.
+   -->, at-rules (an @media whose query holds for the viewport, an @supports
+   whose condition does, @layer, an @import fetched through the loader, and
+   @font-face are read; every other at-rule skipped), style rules, declarations
+   with !important. The 104
+   longhands of css_pdefs are read, each by its grammar: keywords, lengths and
+   percentages, colours, numbers, and the values kept as their text (track
+   lists, grid lines, images and gradients, shadows, transforms, content,
+   counters, quotes), each checked by a reader of its own. A shorthand is
+   expanded into its longhands (css_shorts: margin, padding, inset, the border
+   shorthands and border-radius, outline, font, background's layers,
+   list-style, text-decoration, overflow, flex, flex-flow, gap, place-*,
+   grid-row, grid-column, grid-area, grid-template). A value a property does
+   not take drops its declaration, as CSS has it.
+
+   Values: px and the absolute units, em, ex and ch (half an em), rem (the
+   root's font size), the viewport's units against 800 x 600; calc(), min(),
+   max() and clamp() over them, reckoned once the font is known, a percentage
+   kept beside px for layout (under min(), max() and clamp(), the expression
+   kept as text, its lengths made px). Custom properties (--name) are
+   inherited, their var()s replaced at computed-value time: a cycle, or a var()
+   of nothing with no fallback, makes a value invalid at computed-value time,
+   and its property is then unset.
 
    Selectors 4: type, universal, #id, .class, [a], [a=v], [a~=v], [a|=v],
-   [a^=v], [a$=v], [a*=v] (and their i flag), :first-child, :last-child,
+   [a^=v], [a$=v], [a*=v] (their i and s flags; HTML's attributes whose values
+   compare without case), :first-child, :last-child,
    :only-child, :first-of-type, :last-of-type, :only-of-type, :nth-child(),
    :nth-last-child(), :nth-of-type(), :nth-last-of-type(), :not(), :is(),
-   :where(), :root, :empty, :link, :any-link, :checked, :disabled, :enabled;
-   the combinators ' ', >, + and ~. A pseudo-class of state (:hover, :focus,
-   :visited, ...) and a pseudo-element never match: a page is laid out at rest.
-   :not(), :is() and :where() nest at most 16 deep, and one match tests at most
-   4096 compounds: past either, the selector matches nothing.
+   :where(), :has() (its relative selectors over the subject's descendants, for
+   ' ' and >, or its later siblings and theirs, for + and ~; at most 20000
+   elements searched a :has()), :root, :empty, :link, :any-link, :checked,
+   :disabled, :enabled; the combinators ' ', >, + and ~. The pseudo-classes of
+   state read the page's state (css_set_state; the command's --hover, --focus and
+   --active): :hover and :active hold of the element in that state and its
+   ancestors, :focus and :focus-visible of the focused element, :focus-within of
+   it and its ancestors, :target of the element the URL's fragment names; a page
+   at rest has none of these, and :visited holds of nothing (no history is read).
+   :not(), :is(), :where() and :has() nest at most 16 deep, and one match tests at
+   most 4096 compounds: past either, the selector matches nothing.
+
+   Pseudo-elements: ::before, ::after, ::first-line and ::first-letter (CSS 2's
+   single colon too), ::marker and ::placeholder. A rule whose subject ends in one
+   is matched as its element is, and makes a style under the element's
+   (css_pseudo_style_of): a ::before's or an ::after's only when its content is
+   something, as only then is it generated.
 
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
    height, align, a table's border) are author rules of specificity 0 before
-   every other author rule. Lengths compute to px: em against the font size
-   (the parent's for font-size), rem against 16px, the viewport's units
-   against 800 x 600; percentages stay percentages for layout.
+   every other author rule. A computed value is as each property's spec has
+   it: lengths px, percentages kept for layout, currentcolor the colour, a
+   border's width 0 under style none, display blockified for a float, an
+   absolute box, the root and a flex or grid item. Two differ from Chromium's:
+   an outline's width under style none is kept (as Chromium keeps it), and a
+   computed font family is the family drawn with -- a generic one, or the first
+   the list names that the module knows the kind of.
 
-   What is simplified: border-style is no property of its own -- the border
-   shorthands' style sets their widths to 0 when it is none or missing, and a
-   border-width written alone is taken at its word; one border colour serves
-   the four sides. The DOM is read through its fields, never changed. */
+   Speed (PLAN.md 11): the user agent's sheet is read once a process
+   (css_ua_load); names and keywords are found by hash; elements under one
+   parent style start from that style's template of inherited and initial
+   values, so only the declarations that won are computed. The DOM is read
+   through its fields, never changed. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -42,8 +76,9 @@
 amb_interface(dom);
 amb_interface(net);
 amb_implementation(css);
+#include "css.h"
+#include "../net/url.h"
 
-#define CSS_NPROPS 29
 #define CSS_MAXPARTS 32
 #define CSS_VIEWPORT_W 800.0
 #define CSS_VIEWPORT_H 600.0
@@ -59,7 +94,7 @@ static const char css_ua_sheet[] =
     "[hidden] { display: none }\n"
     "html, body { display: block }\n"
     "body { margin: 8px }\n"
-    "address, blockquote, center, dialog, div, figure, figcaption, footer, form, header, hr, legend, listing, main, p, plaintext, pre, search, xmp { display: block }\n"
+    "address, blockquote, center, dialog, div, figure, figcaption, footer, form, header, hr, legend, listing, main, p, plaintext, pre, search, xmp { display: block; unicode-bidi: isolate }\n"
     "blockquote, figure, listing, p, plaintext, pre, xmp { margin-top: 1em; margin-bottom: 1em }\n"
     "blockquote, figure { margin-left: 40px; margin-right: 40px }\n"
     "address { font-style: italic }\n"
@@ -69,6 +104,8 @@ static const char css_ua_sheet[] =
     "cite, dfn, em, i, var { font-style: italic }\n"
     "b, strong { font-weight: bolder }\n"
     "small { font-size: smaller }\n"
+    "sub { vertical-align: sub; font-size: smaller; line-height: normal }\n"
+    "sup { vertical-align: super; font-size: smaller; line-height: normal }\n"
     "big { font-size: larger }\n"
     "s, strike, del { text-decoration: line-through }\n"
     "u, ins { text-decoration: underline }\n"
@@ -102,13 +139,20 @@ static const char css_ua_sheet[] =
     "tfoot { display: table-footer-group }\n"
     "tr { display: table-row }\n"
     "td, th { display: table-cell; padding: 1px }\n"
+    "table, td, th { border-color: gray }\n"
+    "thead, tbody, tfoot, tr { border-color: inherit }\n"
+    "table[border] { border-style: outset }\n"
+    "table[border] td, table[border] th { border-width: 1px; border-style: inset }\n"
     "th { font-weight: bold; text-align: center }\n"
-    "hr { color: gray; border-width: 1px; margin: 0.5em auto }\n"
+    "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
     "fieldset { margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove }\n"
     "details, summary { display: block }\n"
     "button, input, select, textarea { display: inline-block }\n"
     "button { padding: 1px 6px; border: 2px solid #767676; background-color: #efefef }\n"
-    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n";
+    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n"
+    "q::before { content: open-quote }\n"
+    "q::after { content: close-quote }\n"
+    "input::placeholder, textarea::placeholder { color: #757575 }\n";
 
 /* ---- reading text ---- */
 
@@ -212,7 +256,12 @@ static size_t css_parts(const char *s, size_t n, size_t *st, size_t *ln, size_t 
 
 /* ---- values ---- */
 
-typedef struct css_val { css_unit unit; double num; uint32_t color; char word[32]; } css_val;
+/* a value as the module reads it. tx: in the store's pool, the text of a value kept as
+   text (a list, a function, a calc() over percentages, a var()); ck: what a calc()
+   reckons, CSS_CK_* */
+typedef struct css_val { css_unit unit; double num, pct; uint32_t color, ck; amb_span tx; char word[32]; } css_val;
+
+enum { CSS_CK_NUM = 1, CSS_CK_LEN = 2, CSS_CK_PCT = 4 };
 
 static void css_word_val(css_val *v, const char *w) {
     memset(v, 0, sizeof *v);
@@ -221,8 +270,11 @@ static void css_word_val(css_val *v, const char *w) {
 }
 static int css_is_word(const css_val *v, const char *w) { return v->unit == CSS_UNIT_KEYWORD && strcmp(v->word, w) == 0; }
 static int css_is_global(const css_val *v) {
-    return v->unit == CSS_UNIT_KEYWORD && css_word_in(v->word, "inherit initial unset revert");
+    char c = v->word[0];
+    return v->unit == CSS_UNIT_KEYWORD && (c == 'i' || c == 'u' || c == 'r') && css_word_in(v->word, "inherit initial unset revert revert-layer");
 }
+static int css_is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+static int css_is_digit(char c) { return c >= '0' && c <= '9'; }
 
 /* a number: its bytes, 0 when there is none */
 static size_t css_number(const char *s, size_t n, double *out) {
@@ -230,13 +282,24 @@ static size_t css_number(const char *s, size_t n, double *out) {
     int neg = 0, any = 0;
     double x = 0;
     if (i < n && (s[i] == '+' || s[i] == '-')) { neg = s[i] == '-'; i++; }
-    while (i < n && s[i] >= '0' && s[i] <= '9') { x = x * 10 + (s[i] - '0'); i++; any = 1; }
-    if (i + 1 < n && s[i] == '.' && s[i + 1] >= '0' && s[i + 1] <= '9') {
+    while (i < n && css_is_digit(s[i])) { x = x * 10 + (s[i] - '0'); i++; any = 1; }
+    if (i + 1 < n && s[i] == '.' && css_is_digit(s[i + 1])) {
         double f = 0.1;
         i++;
-        while (i < n && s[i] >= '0' && s[i] <= '9') { x += (s[i] - '0') * f; f /= 10; i++; any = 1; }
+        while (i < n && css_is_digit(s[i])) { x += (s[i] - '0') * f; f /= 10; i++; any = 1; }
     }
     if (!any) return 0;
+    /* an exponent: e, a sign, digits (not the e of em or ex) */
+    if (i + 1 < n && (s[i] == 'e' || s[i] == 'E')) {
+        size_t j = i + 1;
+        int eneg = 0, ex = 0, ed = 0;
+        if (j < n && (s[j] == '+' || s[j] == '-')) { eneg = s[j] == '-'; j++; }
+        while (j < n && css_is_digit(s[j]) && ed < 4) { ex = ex * 10 + (s[j] - '0'); j++; ed++; }
+        if (ed) {
+            for (int k = 0; k < ex && k < 300; k++) x = eneg ? x / 10 : x * 10;
+            i = j;
+        }
+    }
     *out = neg ? -x : x;
     return i;
 }
@@ -337,10 +400,19 @@ static int css_parse_color(const char *s, size_t n, uint32_t *out) {
         return 1;
     }
     if (css_eq_ci(s, n, "transparent")) { *out = 0; return 1; }
-    /* the named colours (lower case in the table): the first letter told before the whole name */
-    char c0 = n ? css_lower(s[0]) : 0;
-    for (size_t i = 0; i < sizeof css_colors / sizeof css_colors[0]; i++)
-        if (css_colors[i].name[0] == c0 && css_eq_ci(s, n, css_colors[i].name)) { *out = css_colors[i].rgb << 8 | 0xff; return 1; }
+    /* the named colours (lower case, in order in the table): found by halves */
+    if (n >= 3 && n <= 20 && css_is_alpha(s[0])) {
+        char w[24];
+        for (size_t i = 0; i < n; i++) w[i] = css_lower(s[i]);
+        w[n] = 0;
+        size_t lo = 0, hi = sizeof css_colors / sizeof css_colors[0];
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            int c = strcmp(css_colors[mid].name, w);
+            if (c == 0) { *out = css_colors[mid].rgb << 8 | 0xff; return 1; }
+            if (c < 0) lo = mid + 1; else hi = mid;
+        }
+    }
     size_t f = 0;
     while (f < n && css_namechar(s[f])) f++;
     if (f == 0 || f >= n || s[f] != '(' || s[n - 1] != ')') return 0;
@@ -371,34 +443,261 @@ static int css_parse_color(const char *s, size_t n, uint32_t *out) {
     return 0;
 }
 
-/* a value: a length (absolute units made px), a percentage, a number, auto, a colour or a keyword */
+int css_color_parse(const char *s, size_t n, uint32_t *rgba) { return css_parse_color(s, n, rgba); }
+
+/* ---- calc(), min(), max(), clamp() (CSS Values 4, 10) ----
+   An expression is reckoned to px + pct% + num, of a kind (CSS_CK_*). em and rem are
+   known in the cascade; before it (em < 0) they leave the length open. A percentage
+   is of the basis when there is one (layout's), else kept. min(), max() and clamp()
+   over percentages cannot be such a sum: nonlin, and the value is reckoned from its
+   text where the basis is known. */
+
+typedef struct css_lin { double px, pct, num; uint32_t kind; int open, nonlin; } css_lin;
+typedef struct css_cenv { double em, rem, basis; } css_cenv;
+
+/* the px of one of an absolute or viewport unit: 0 when the unit is no such one */
+static double css_abs_unit(const char *u, size_t un) {
+    if (css_eq_ci(u, un, "px")) return 1;
+    if (css_eq_ci(u, un, "pt")) return 4.0 / 3;
+    if (css_eq_ci(u, un, "pc")) return 16;
+    if (css_eq_ci(u, un, "in")) return 96;
+    if (css_eq_ci(u, un, "cm")) return 96 / 2.54;
+    if (css_eq_ci(u, un, "mm")) return 96 / 25.4;
+    if (css_eq_ci(u, un, "q")) return 96 / 101.6;
+    if (css_eq_ci(u, un, "vw") || css_eq_ci(u, un, "svw") || css_eq_ci(u, un, "lvw") || css_eq_ci(u, un, "dvw")) return CSS_VIEWPORT_W / 100;
+    if (css_eq_ci(u, un, "vh") || css_eq_ci(u, un, "svh") || css_eq_ci(u, un, "lvh") || css_eq_ci(u, un, "dvh")) return CSS_VIEWPORT_H / 100;
+    if (css_eq_ci(u, un, "vmin")) return (CSS_VIEWPORT_W < CSS_VIEWPORT_H ? CSS_VIEWPORT_W : CSS_VIEWPORT_H) / 100;
+    if (css_eq_ci(u, un, "vmax")) return (CSS_VIEWPORT_W > CSS_VIEWPORT_H ? CSS_VIEWPORT_W : CSS_VIEWPORT_H) / 100;
+    return 0;
+}
+/* a font-relative unit: 1 for a multiple k of the em (em, ex and ch as half an em), 2
+   for the rem; 0 for none */
+static int css_font_unit(const char *u, size_t un, double *k) {
+    if (css_eq_ci(u, un, "em")) { *k = 1; return 1; }
+    if (css_eq_ci(u, un, "ex") || css_eq_ci(u, un, "ch")) { *k = 0.5; return 1; }
+    if (css_eq_ci(u, un, "rem")) { *k = 1; return 2; }
+    return 0;
+}
+
+static int css_calc_sum(const char *s, size_t n, size_t *i, const css_cenv *e, int depth, css_lin *out);
+
+static void css_lin_scale(css_lin *l, double k) { l->px *= k; l->pct *= k; l->num *= k; }
+
+/* min() (which 0), max() (1) or clamp() (2) over the arguments s[a, close) */
+static int css_calc_minmax(const char *s, size_t a, size_t close, const css_cenv *e, int depth, int which, css_lin *out) {
+    css_lin args[16];
+    int k = 0;
+    size_t p = a;
+    while (p < close) {
+        size_t end = css_comma(s, close, p);
+        if (k == 16) return 0;
+        size_t q = p;
+        if (!css_calc_sum(s, end, &q, e, depth, &args[k]) || css_skip_ws(s, end, q) != end) return 0;
+        k++;
+        p = end + 1;
+    }
+    if (k == 0 || (which == 2 && k != 3)) return 0;
+    int num = args[0].kind == CSS_CK_NUM, pct = 0, open = 0, nonlin = 0;
+    uint32_t kind = 0;
+    for (int j = 0; j < k; j++) {
+        if ((args[j].kind == CSS_CK_NUM) != num) return 0;
+        if (args[j].pct != 0 || (args[j].kind & CSS_CK_PCT)) pct = 1;
+        open |= args[j].open;
+        nonlin |= args[j].nonlin;
+        kind |= args[j].kind;
+    }
+    *out = args[0];
+    out->kind = kind;
+    if (pct || open || nonlin) { out->open = open; out->nonlin = pct || nonlin; return 1; }
+    double v[16];
+    for (int j = 0; j < k; j++) v[j] = num ? args[j].num : args[j].px;
+    double r = v[0];
+    if (which == 2) { r = v[1] < v[2] ? v[1] : v[2]; if (v[0] > r) r = v[0]; }
+    else for (int j = 1; j < k; j++) if (which == 0 ? v[j] < r : v[j] > r) r = v[j];
+    memset(out, 0, sizeof *out);
+    out->kind = kind;
+    if (num) out->num = r; else out->px = r;
+    return 1;
+}
+
+/* a value of an expression: a number, a dimension, a percentage, a parenthesis, a function */
+static int css_calc_value(const char *s, size_t n, size_t *i, const css_cenv *e, int depth, css_lin *out) {
+    memset(out, 0, sizeof *out);
+    size_t p = css_skip_ws(s, n, *i);
+    if (p >= n || depth > 32) return 0;
+    if (s[p] == '(') {
+        size_t q = p + 1;
+        if (!css_calc_sum(s, n, &q, e, depth + 1, out)) return 0;
+        q = css_skip_ws(s, n, q);
+        if (q >= n || s[q] != ')') return 0;
+        *i = q + 1;
+        return 1;
+    }
+    if (css_is_alpha(s[p])) {
+        size_t q = p;
+        while (q < n && css_namechar(s[q])) q++;
+        if (q >= n || s[q] != '(') return 0;
+        size_t close = css_block_end(s, n, q, '(', ')');
+        if (close >= n) return 0;
+        const char *f = s + p;
+        size_t fn = q - p;
+        int ok;
+        if (css_eq_ci(f, fn, "calc")) {
+            size_t r = q + 1;
+            ok = css_calc_sum(s, close, &r, e, depth + 1, out) && css_skip_ws(s, close, r) == close;
+        } else if (css_eq_ci(f, fn, "min")) ok = css_calc_minmax(s, q + 1, close, e, depth + 1, 0, out);
+        else if (css_eq_ci(f, fn, "max")) ok = css_calc_minmax(s, q + 1, close, e, depth + 1, 1, out);
+        else if (css_eq_ci(f, fn, "clamp")) ok = css_calc_minmax(s, q + 1, close, e, depth + 1, 2, out);
+        else return 0;
+        *i = close + 1;
+        return ok;
+    }
+    double x;
+    size_t used = css_number(s + p, n - p, &x);
+    if (!used) return 0;
+    p += used;
+    if (p < n && s[p] == '%') {
+        p++;
+        if (e->basis >= 0) { out->px = x * e->basis / 100; out->kind = CSS_CK_LEN; }
+        else { out->pct = x; out->kind = CSS_CK_PCT; }
+        *i = p;
+        return 1;
+    }
+    size_t ue = p;
+    while (ue < n && css_is_alpha(s[ue])) ue++;
+    if (ue == p) { out->num = x; out->kind = CSS_CK_NUM; *i = p; return 1; }
+    out->kind = CSS_CK_LEN;
+    double k = css_abs_unit(s + p, ue - p);
+    if (k > 0) out->px = x * k;
+    else {
+        int fu = css_font_unit(s + p, ue - p, &k);
+        if (!fu) return 0;
+        double base = fu == 2 ? e->rem : e->em;
+        if (base < 0) out->open = 1;
+        else out->px = x * k * base;
+    }
+    *i = ue;
+    return 1;
+}
+
+static int css_calc_product(const char *s, size_t n, size_t *i, const css_cenv *e, int depth, css_lin *out) {
+    if (!css_calc_value(s, n, i, e, depth, out)) return 0;
+    for (;;) {
+        size_t p = css_skip_ws(s, n, *i);
+        if (p >= n || (s[p] != '*' && s[p] != '/')) return 1;
+        char op = s[p];
+        p++;
+        css_lin b;
+        if (!css_calc_value(s, n, &p, e, depth, &b)) return 0;
+        if (op == '*') {
+            if (b.kind == CSS_CK_NUM && !b.nonlin) css_lin_scale(out, b.num);
+            else if (out->kind == CSS_CK_NUM && !out->nonlin) { double k = out->num; *out = b; css_lin_scale(out, k); }
+            else return 0;
+        } else {
+            if (b.kind != CSS_CK_NUM || b.nonlin || b.num == 0) return 0;
+            css_lin_scale(out, 1 / b.num);
+        }
+        out->open |= b.open;
+        *i = p;
+    }
+}
+
+static int css_calc_sum(const char *s, size_t n, size_t *i, const css_cenv *e, int depth, css_lin *out) {
+    if (!css_calc_product(s, n, i, e, depth, out)) return 0;
+    for (;;) {
+        size_t p = css_skip_ws(s, n, *i);
+        if (p >= n || (s[p] != '+' && s[p] != '-')) return 1;
+        double k = s[p] == '-' ? -1 : 1;
+        p++;
+        css_lin b;
+        if (!css_calc_product(s, n, &p, e, depth, &b)) return 0;
+        if ((out->kind == CSS_CK_NUM) != (b.kind == CSS_CK_NUM)) return 0;
+        out->px += k * b.px;
+        out->pct += k * b.pct;
+        out->num += k * b.num;
+        out->kind |= b.kind;
+        out->open |= b.open;
+        out->nonlin |= b.nonlin;
+        *i = p;
+    }
+}
+
+/* s is one calc(), min(), max() or clamp() */
+static int css_calc_fn(const char *s, size_t n) {
+    size_t f = 0;
+    while (f < n && css_namechar(s[f])) f++;
+    if (f >= n || s[f] != '(' || s[n - 1] != ')' || css_block_end(s, n, f, '(', ')') != n - 1) return 0;
+    return css_eq_ci(s, f, "calc") || css_eq_ci(s, f, "min") || css_eq_ci(s, f, "max") || css_eq_ci(s, f, "clamp");
+}
+
+int css_calc_eval(const char *s, size_t n, double basis, double *out) {
+    css_cenv e = { 16, 16, basis };
+    css_lin l;
+    size_t i = 0;
+    if (!css_calc_value(s, n, &i, &e, 0, &l) || css_skip_ws(s, n, i) != n) return 0;
+    *out = l.kind == CSS_CK_NUM ? l.num : l.px + l.pct * (basis > 0 ? basis : 0) / 100;
+    return 1;
+}
+
+int css_length_eval(const char *s, size_t n, double basis, double *out) {
+    css_cenv e = { 16, 16, basis };
+    css_lin l;
+    size_t i = 0;
+    if (!css_calc_value(s, n, &i, &e, 0, &l) || css_skip_ws(s, n, i) != n) return 0;
+    if (l.kind == CSS_CK_NUM) { if (l.num != 0) return 0; *out = 0; return 1; }
+    *out = l.px + l.pct * (basis > 0 ? basis : 0) / 100;
+    return 1;
+}
+
+int css_next_part(const char *s, size_t n, size_t *i, size_t *start, size_t *len) {
+    size_t p = *i;
+    while (p < n && (css_ws(s[p]) || s[p] == ',')) p++;
+    if (p >= n) { *i = n; return 0; }
+    size_t b = p;
+    while (p < n && !css_ws(s[p]) && s[p] != ',') {
+        if (s[p] == '(') p = css_block_end(s, n, p, '(', ')');
+        else if (s[p] == '"' || s[p] == '\'') p = css_string_end(s, n, p);
+        if (p < n) p++;
+    }
+    *start = b;
+    *len = p - b;
+    *i = p;
+    return 1;
+}
+
+/* a value: a length (absolute and viewport units made px; em, ex, ch as em; rem), a
+   percentage, a number, auto, a colour, a calc(), or a keyword */
 static int css_parse_val(const char *s, size_t n, css_val *v) {
     memset(v, 0, sizeof *v);
     if (n == 0) return 0;
     if (css_eq_ci(s, n, "auto")) { v->unit = CSS_UNIT_AUTO; return 1; }
+    if (css_calc_fn(s, n)) {
+        /* reckoned now when nothing in it waits on the font or the basis; else its text,
+           the declaration's, is reckoned in the cascade */
+        css_cenv e = { -1, -1, -1 };
+        css_lin l;
+        size_t i = 0;
+        if (!css_calc_value(s, n, &i, &e, 0, &l) || css_skip_ws(s, n, i) != n) return 0;
+        v->ck = l.kind;
+        if (l.kind == CSS_CK_NUM && !l.nonlin) { v->unit = CSS_UNIT_NUMBER; v->num = l.num; return 1; }
+        if (!l.open && !l.nonlin && !(l.kind & CSS_CK_PCT)) { v->unit = CSS_UNIT_PX; v->num = l.px; return 1; }
+        if (!l.open && !l.nonlin && l.kind == CSS_CK_PCT) { v->unit = CSS_UNIT_PERCENT; v->num = l.pct; return 1; }
+        v->unit = CSS_UNIT_CALC;
+        return 1;
+    }
     double x;
     size_t used = css_number(s, n, &x);
     if (used) {
         const char *u = s + used;
         size_t un = n - used;
         v->num = x;
+        double k;
         if (un == 0) v->unit = CSS_UNIT_NUMBER;
-        else if (css_eq_ci(u, un, "px")) v->unit = CSS_UNIT_PX;
-        else if (css_eq_ci(u, un, "em")) v->unit = CSS_UNIT_EM;
         else if (css_eq_ci(u, un, "%")) v->unit = CSS_UNIT_PERCENT;
-        else if (css_eq_ci(u, un, "ex") || css_eq_ci(u, un, "ch")) { v->unit = CSS_UNIT_EM; v->num = x / 2; }
-        else {
-            v->unit = CSS_UNIT_PX;
-            if (css_eq_ci(u, un, "rem")) v->num = x * 16;
-            else if (css_eq_ci(u, un, "pt")) v->num = x * 4 / 3;
-            else if (css_eq_ci(u, un, "pc")) v->num = x * 16;
-            else if (css_eq_ci(u, un, "in")) v->num = x * 96;
-            else if (css_eq_ci(u, un, "cm")) v->num = x * 96 / 2.54;
-            else if (css_eq_ci(u, un, "mm")) v->num = x * 96 / 25.4;
-            else if (css_eq_ci(u, un, "vw")) v->num = x * CSS_VIEWPORT_W / 100;
-            else if (css_eq_ci(u, un, "vh")) v->num = x * CSS_VIEWPORT_H / 100;
-            else return 0;
-        }
+        else if (css_eq_ci(u, un, "rem")) v->unit = CSS_UNIT_REM;
+        else if (css_font_unit(u, un, &k) == 1) { v->unit = CSS_UNIT_EM; v->num = x * k; }
+        else if ((k = css_abs_unit(u, un)) > 0) { v->unit = CSS_UNIT_PX; v->num = x * k; }
+        else return 0;
         return 1;
     }
     if (css_parse_color(s, n, &v->color)) { v->unit = CSS_UNIT_COLOR; return 1; }
@@ -412,53 +711,468 @@ static int css_parse_val(const char *s, size_t n, css_val *v) {
     return 1;
 }
 
-/* the values a property takes (and every property takes the global keywords) */
-static int css_valid(css_prop p, const css_val *v) {
-    if (css_is_global(v)) return 1;
-    css_unit u = v->unit;
-    int kw = u == CSS_UNIT_KEYWORD;
-    int length = u == CSS_UNIT_PX || u == CSS_UNIT_EM || u == CSS_UNIT_PERCENT || (u == CSS_UNIT_NUMBER && v->num == 0);
-    if (p == CSS_PROP_DISPLAY)
-        return kw && css_word_in(v->word, "inline block list-item inline-block none flex inline-flex grid inline-grid flow-root contents "
-                                          "table inline-table table-row table-cell table-row-group table-header-group table-footer-group "
-                                          "table-caption table-column table-column-group");
-    if (p == CSS_PROP_COLOR || p == CSS_PROP_BACKGROUND_COLOR || p == CSS_PROP_BORDER_COLOR)
-        return u == CSS_UNIT_COLOR || css_is_word(v, "currentcolor");
-    if (p == CSS_PROP_FONT_SIZE)
-        return (length && v->num >= 0) || (kw && css_word_in(v->word, "xx-small x-small small medium large x-large xx-large smaller larger"));
-    if (p == CSS_PROP_FONT_WEIGHT)
-        return (u == CSS_UNIT_NUMBER && v->num >= 1 && v->num <= 1000) || (kw && css_word_in(v->word, "normal bold bolder lighter"));
-    if (p == CSS_PROP_FONT_STYLE) return kw && css_word_in(v->word, "normal italic oblique");
-    if (p == CSS_PROP_TEXT_ALIGN) return kw && css_word_in(v->word, "left right center justify start end");
-    if (p == CSS_PROP_LINE_HEIGHT)
-        return ((u == CSS_UNIT_NUMBER || u == CSS_UNIT_PX || u == CSS_UNIT_EM || u == CSS_UNIT_PERCENT) && v->num >= 0) || css_is_word(v, "normal");
-    if (p == CSS_PROP_TEXT_DECORATION) return kw && css_word_in(v->word, "none underline overline line-through");
-    if (p == CSS_PROP_WHITE_SPACE) return kw && css_word_in(v->word, "normal pre nowrap pre-wrap pre-line break-spaces");
-    if (p >= CSS_PROP_MARGIN_TOP && p <= CSS_PROP_MARGIN_LEFT) return length || u == CSS_UNIT_AUTO;
-    if (p >= CSS_PROP_PADDING_TOP && p <= CSS_PROP_PADDING_LEFT) return length && v->num >= 0;
-    if (p >= CSS_PROP_BORDER_TOP_WIDTH && p <= CSS_PROP_BORDER_LEFT_WIDTH)
-        return (length && u != CSS_UNIT_PERCENT && v->num >= 0) || (kw && css_word_in(v->word, "thin medium thick"));
-    if (p == CSS_PROP_WIDTH || p == CSS_PROP_HEIGHT) return (length && v->num >= 0) || u == CSS_UNIT_AUTO;
-    if (p == CSS_PROP_LIST_STYLE_TYPE)
-        return kw && css_word_in(v->word, "none disc circle square decimal decimal-leading-zero lower-roman upper-roman "
-                                          "lower-alpha upper-alpha lower-latin upper-latin lower-greek");
-    if (p == CSS_PROP_FONT_FAMILY) return kw && css_word_in(v->word, "serif sans-serif monospace");
-    if (p == CSS_PROP_BOX_SIZING) return kw && css_word_in(v->word, "content-box border-box");
-    if (p == CSS_PROP_MAX_WIDTH) return (length && v->num >= 0) || css_is_word(v, "none");
+/* ---- the properties (contracts/css.pl's enum(prop), in its order) ----
+   Each with its name, whether it is inherited, its grammar, and its initial value as
+   CSS writes it. A grammar's words are the keywords it takes; G_TEXT values are kept as
+   their text, each property's reader checking it (css_text_valid). */
+
+enum { G_KW, G_LEN, G_COLOR, G_NUM, G_TEXT, G_FAMILY, G_RADIUS };
+#define F_NEG 1         /* a negative length or number */
+#define F_PCT 2         /* a percentage */
+#define F_INT 4         /* an integer only */
+#define F_NUM 8         /* G_LEN: a number besides (line-height) */
+typedef struct css_pdef { const char *name; uint8_t inh, gram, flags; const char *words; const char *init; } css_pdef;
+
+#define CSS_W_BSTYLE "none hidden dotted dashed solid double groove ridge inset outset"
+#define CSS_W_SIZE "auto min-content max-content fit-content"
+#define CSS_W_SELF "auto normal stretch start end center flex-start flex-end self-start self-end left right baseline"
+static const css_pdef css_pdefs[CSS_NPROPS] = {
+    { "display", 0, G_KW, 0, "inline block list-item inline-block none flex inline-flex grid inline-grid flow-root contents table "
+      "inline-table table-row table-cell table-row-group table-header-group table-footer-group table-caption table-column "
+      "table-column-group", "inline" },
+    { "color", 1, G_COLOR, 0, 0, "black" },
+    { "background-color", 0, G_COLOR, 0, 0, "transparent" },
+    { "font-size", 1, G_LEN, F_PCT, "xx-small x-small small medium large x-large xx-large xxx-large smaller larger", "16px" },
+    { "font-weight", 1, G_NUM, 0, "normal bold bolder lighter", "400" },
+    { "font-style", 1, G_KW, 0, "normal italic oblique", "normal" },
+    { "text-align", 1, G_KW, 0, "left right center justify start end", "start" },
+    { "line-height", 1, G_LEN, F_PCT | F_NUM, "normal", "normal" },
+    { "text-decoration-line", 0, G_KW, 0, "none underline overline line-through", "none" },
+    { "white-space", 1, G_KW, 0, "normal pre nowrap pre-wrap pre-line break-spaces", "normal" },
+    { "margin-top", 0, G_LEN, F_NEG | F_PCT, "auto", "0px" },
+    { "margin-right", 0, G_LEN, F_NEG | F_PCT, "auto", "0px" },
+    { "margin-bottom", 0, G_LEN, F_NEG | F_PCT, "auto", "0px" },
+    { "margin-left", 0, G_LEN, F_NEG | F_PCT, "auto", "0px" },
+    { "padding-top", 0, G_LEN, F_PCT, 0, "0px" },
+    { "padding-right", 0, G_LEN, F_PCT, 0, "0px" },
+    { "padding-bottom", 0, G_LEN, F_PCT, 0, "0px" },
+    { "padding-left", 0, G_LEN, F_PCT, 0, "0px" },
+    { "border-top-width", 0, G_LEN, 0, "thin medium thick", "medium" },
+    { "border-right-width", 0, G_LEN, 0, "thin medium thick", "medium" },
+    { "border-bottom-width", 0, G_LEN, 0, "thin medium thick", "medium" },
+    { "border-left-width", 0, G_LEN, 0, "thin medium thick", "medium" },
+    { "border-top-style", 0, G_KW, 0, CSS_W_BSTYLE, "none" },
+    { "border-right-style", 0, G_KW, 0, CSS_W_BSTYLE, "none" },
+    { "border-bottom-style", 0, G_KW, 0, CSS_W_BSTYLE, "none" },
+    { "border-left-style", 0, G_KW, 0, CSS_W_BSTYLE, "none" },
+    { "border-top-color", 0, G_COLOR, 0, 0, "currentcolor" },
+    { "border-right-color", 0, G_COLOR, 0, 0, "currentcolor" },
+    { "border-bottom-color", 0, G_COLOR, 0, 0, "currentcolor" },
+    { "border-left-color", 0, G_COLOR, 0, 0, "currentcolor" },
+    { "border-top-left-radius", 0, G_RADIUS, F_PCT, 0, "0px" },
+    { "border-top-right-radius", 0, G_RADIUS, F_PCT, 0, "0px" },
+    { "border-bottom-right-radius", 0, G_RADIUS, F_PCT, 0, "0px" },
+    { "border-bottom-left-radius", 0, G_RADIUS, F_PCT, 0, "0px" },
+    { "width", 0, G_LEN, F_PCT, CSS_W_SIZE, "auto" },
+    { "height", 0, G_LEN, F_PCT, CSS_W_SIZE, "auto" },
+    { "min-width", 0, G_LEN, F_PCT, CSS_W_SIZE, "auto" },
+    { "min-height", 0, G_LEN, F_PCT, CSS_W_SIZE, "auto" },
+    { "max-width", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
+    { "max-height", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
+    { "list-style-type", 1, G_KW, 0, "none disc circle square decimal decimal-leading-zero lower-roman upper-roman lower-alpha "
+      "upper-alpha lower-latin upper-latin lower-greek", "disc" },
+    { "list-style-position", 1, G_KW, 0, "outside inside", "outside" },
+    { "font-family", 1, G_FAMILY, 0, 0, "serif" },
+    { "box-sizing", 0, G_KW, 0, "content-box border-box", "content-box" },
+    { "position", 0, G_KW, 0, "static relative absolute fixed sticky", "static" },
+    { "top", 0, G_LEN, F_NEG | F_PCT, "auto", "auto" },
+    { "right", 0, G_LEN, F_NEG | F_PCT, "auto", "auto" },
+    { "bottom", 0, G_LEN, F_NEG | F_PCT, "auto", "auto" },
+    { "left", 0, G_LEN, F_NEG | F_PCT, "auto", "auto" },
+    { "float", 0, G_KW, 0, "none left right inline-start inline-end", "none" },
+    { "clear", 0, G_KW, 0, "none left right both inline-start inline-end", "none" },
+    { "z-index", 0, G_NUM, F_INT | F_NEG, "auto", "auto" },
+    { "overflow-x", 0, G_KW, 0, "visible hidden clip scroll auto", "visible" },
+    { "overflow-y", 0, G_KW, 0, "visible hidden clip scroll auto", "visible" },
+    { "vertical-align", 0, G_LEN, F_NEG | F_PCT, "baseline sub super text-top text-bottom middle top bottom", "baseline" },
+    { "opacity", 0, G_NUM, F_PCT, 0, "1" },
+    { "visibility", 1, G_KW, 0, "visible hidden collapse", "visible" },
+    { "flex-direction", 0, G_KW, 0, "row row-reverse column column-reverse", "row" },
+    { "flex-wrap", 0, G_KW, 0, "nowrap wrap wrap-reverse", "nowrap" },
+    { "flex-grow", 0, G_NUM, 0, 0, "0" },
+    { "flex-shrink", 0, G_NUM, 0, 0, "1" },
+    { "flex-basis", 0, G_LEN, F_PCT, "auto content min-content max-content fit-content", "auto" },
+    { "order", 0, G_NUM, F_INT | F_NEG, 0, "0" },
+    { "justify-content", 0, G_KW, 0, "normal flex-start flex-end start end center left right space-between space-around "
+      "space-evenly stretch", "normal" },
+    { "justify-items", 0, G_KW, 0, "legacy normal stretch start end center flex-start flex-end self-start self-end left right "
+      "baseline", "legacy" },
+    { "justify-self", 0, G_KW, 0, CSS_W_SELF, "auto" },
+    { "align-items", 0, G_KW, 0, "normal stretch start end center flex-start flex-end self-start self-end baseline", "normal" },
+    { "align-self", 0, G_KW, 0, CSS_W_SELF, "auto" },
+    { "align-content", 0, G_KW, 0, "normal stretch start end center flex-start flex-end space-between space-around space-evenly "
+      "baseline", "normal" },
+    { "row-gap", 0, G_LEN, F_PCT, "normal", "normal" },
+    { "column-gap", 0, G_LEN, F_PCT, "normal", "normal" },
+    { "grid-template-columns", 0, G_TEXT, 0, "none", "none" },
+    { "grid-template-rows", 0, G_TEXT, 0, "none", "none" },
+    { "grid-auto-columns", 0, G_TEXT, 0, 0, "auto" },
+    { "grid-auto-rows", 0, G_TEXT, 0, 0, "auto" },
+    { "grid-auto-flow", 0, G_TEXT, 0, 0, "row" },
+    { "grid-column-start", 0, G_TEXT, 0, 0, "auto" },
+    { "grid-column-end", 0, G_TEXT, 0, 0, "auto" },
+    { "grid-row-start", 0, G_TEXT, 0, 0, "auto" },
+    { "grid-row-end", 0, G_TEXT, 0, 0, "auto" },
+    { "background-image", 0, G_TEXT, 0, "none", "none" },
+    { "background-position", 0, G_TEXT, 0, 0, "0% 0%" },
+    { "background-size", 0, G_TEXT, 0, 0, "auto" },
+    { "background-repeat", 0, G_TEXT, 0, 0, "repeat" },
+    { "box-shadow", 0, G_TEXT, 0, "none", "none" },
+    { "text-shadow", 1, G_TEXT, 0, "none", "none" },
+    { "transform", 0, G_TEXT, 0, "none", "none" },
+    { "transform-origin", 0, G_TEXT, 0, 0, "50% 50%" },
+    { "outline-width", 0, G_LEN, 0, "thin medium thick", "medium" },
+    { "outline-style", 0, G_KW, 0, "none auto dotted dashed solid double groove ridge inset outset", "none" },
+    { "outline-color", 0, G_COLOR, 0, 0, "currentcolor" },
+    { "outline-offset", 0, G_LEN, F_NEG, 0, "0px" },
+    { "letter-spacing", 1, G_LEN, F_NEG, "normal", "normal" },
+    { "word-spacing", 1, G_LEN, F_NEG | F_PCT, "normal", "normal" },
+    { "text-indent", 1, G_LEN, F_NEG | F_PCT, 0, "0px" },
+    { "text-transform", 1, G_KW, 0, "none capitalize uppercase lowercase full-width", "none" },
+    { "direction", 1, G_KW, 0, "ltr rtl", "ltr" },
+    { "unicode-bidi", 0, G_KW, 0, "normal embed isolate bidi-override isolate-override plaintext", "normal" },
+    { "writing-mode", 1, G_KW, 0, "horizontal-tb vertical-rl vertical-lr sideways-rl sideways-lr", "horizontal-tb" },
+    { "hyphens", 1, G_KW, 0, "none manual auto", "manual" },
+    { "content", 0, G_TEXT, 0, "normal none", "normal" },
+    { "counter-reset", 0, G_TEXT, 0, "none", "none" },
+    { "counter-increment", 0, G_TEXT, 0, "none", "none" },
+    { "quotes", 1, G_TEXT, 0, "auto none", "auto" },
+};
+
+static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
+/* a colour whose initial value is currentcolor: the element's colour */
+static int css_init_cc(css_prop p) { return css_pdefs[p].gram == G_COLOR && strcmp(css_pdefs[p].init, "currentcolor") == 0; }
+
+/* ---- the tables the module reads names through, made once a process ----
+   The property names (longhands, shorthands, other names) by their hash, and each
+   property's keywords as hashes: a declaration's name and a keyword are each found in a
+   few steps, not by a walk of every name */
+#define CSS_NAME_SLOTS 512
+#define CSS_MAXKW 40
+static int css_ready;
+static uint32_t css_name_hash[CSS_NAME_SLOTS];
+static int16_t css_name_code[CSS_NAME_SLOTS];        /* 0 empty; p + 1 the longhand p; -(i + 1) the shorthand i */
+static uint32_t css_kwh[CSS_NPROPS][CSS_MAXKW];
+static uint16_t css_kwo[CSS_NPROPS][CSS_MAXKW];     /* each keyword's place in the property's words, and its length */
+static uint8_t css_kwl[CSS_NPROPS][CSS_MAXKW];
+static uint8_t css_kwn[CSS_NPROPS];                 /* its keywords' count; CSS_MAXKW + 1: more, read as text */
+
+static uint32_t css_hash_ci(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) { h ^= (uint8_t)css_lower(s[i]); h *= 16777619u; }
+    return h;
+}
+static void css_name_put(const char *name, int code) {
+    uint32_t h = css_hash_ci(name, strlen(name));
+    for (uint32_t i = h & (CSS_NAME_SLOTS - 1);; i = (i + 1) & (CSS_NAME_SLOTS - 1))
+        if (!css_name_code[i]) { css_name_hash[i] = h; css_name_code[i] = (int16_t)code; return; }
+}
+static const char *css_short_name(int i);
+/* the code of a name (as css_name_code holds it), or 0 */
+static int css_name_find(const char *name, size_t nn) {
+    if (nn == 0 || nn > 40) return 0;
+    uint32_t h = css_hash_ci(name, nn);
+    for (uint32_t i = h & (CSS_NAME_SLOTS - 1); css_name_code[i]; i = (i + 1) & (CSS_NAME_SLOTS - 1)) {
+        if (css_name_hash[i] != h) continue;
+        int c = css_name_code[i];
+        if (css_eq_ci(name, nn, c > 0 ? css_pdefs[c - 1].name : css_short_name(-c - 1))) return c;
+    }
+    return 0;
+}
+static void css_order_make(void);
+
+/* the property a longhand's name names, or -1 */
+static int css_prop_of(const char *name, size_t nn) {
+    if (!css_ready) css_order_make();
+    int c = css_name_find(name, nn);
+    return c > 0 ? c - 1 : -1;
+}
+
+/* the keyword w is one of the property p's */
+static int css_kw_of(css_prop p, const char *w) {
+    if (!css_ready) css_order_make();
+    if (css_kwn[p] > CSS_MAXKW) return css_pdefs[p].words && css_word_in(w, css_pdefs[p].words);
+    size_t wn = strlen(w);
+    uint32_t h = css_hash_ci(w, wn);
+    for (int i = 0; i < css_kwn[p]; i++)
+        if (css_kwh[p][i] == h && css_kwl[p][i] == wn && memcmp(css_pdefs[p].words + css_kwo[p][i], w, wn) == 0) return 1;
     return 0;
 }
 
-/* ---- the sheet's records ---- */
+/* the values a property takes, read as a single value (every property takes the global
+   keywords); auto, for a property whose keywords hold it, is kept as that keyword */
+static int css_valid(css_prop p, css_val *v) {
+    if (css_is_global(v)) return 1;
+    const css_pdef *d = &css_pdefs[p];
+    css_unit u = v->unit;
+    int g = d->gram, f = d->flags;
+    if (u == CSS_UNIT_AUTO && g != G_LEN && d->words && css_word_in("auto", d->words)) { css_word_val(v, "auto"); return 1; }
+    if (u == CSS_UNIT_KEYWORD) {
+        if (g == G_COLOR) return strcmp(v->word, "currentcolor") == 0;
+        return d->words && css_kw_of(p, v->word);
+    }
+    if (g == G_COLOR) return u == CSS_UNIT_COLOR;
+    int neg = v->num < 0;
+    if (g == G_LEN) {
+        if (u == CSS_UNIT_AUTO) return d->words && css_word_in("auto", d->words);
+        if (u == CSS_UNIT_PX || u == CSS_UNIT_EM || u == CSS_UNIT_REM) return !neg || (f & F_NEG);
+        if (u == CSS_UNIT_PERCENT) return (f & F_PCT) && (!neg || (f & F_NEG));
+        if (u == CSS_UNIT_NUMBER) return v->num == 0 || ((f & F_NUM) && !neg);
+        if (u == CSS_UNIT_CALC) return (v->ck & (CSS_CK_LEN | CSS_CK_PCT)) ? (!(v->ck & CSS_CK_PCT) || (f & F_PCT)) : (f & F_NUM) != 0;
+        return 0;
+    }
+    if (g == G_NUM) {
+        if (u == CSS_UNIT_NUMBER) {
+            if ((f & F_INT) && v->num != (double)(long)v->num) return 0;
+            if (p == CSS_PROP_FONT_WEIGHT) return v->num >= 1 && v->num <= 1000;
+            return !neg || (f & F_NEG);
+        }
+        if (u == CSS_UNIT_PERCENT) return (f & F_PCT) && !neg;
+        if (u == CSS_UNIT_CALC) return v->ck == CSS_CK_NUM;
+        if (u == CSS_UNIT_AUTO) return d->words && css_word_in("auto", d->words);
+        return 0;
+    }
+    return 0;
+}
 
-static const char *const css_prop_names[CSS_NPROPS] = { "display", "color", "background-color", "font-size", "font-weight",
-    "font-style", "text-align", "line-height", "text-decoration", "white-space", "margin-top", "margin-right", "margin-bottom",
-    "margin-left", "padding-top", "padding-right", "padding-bottom", "padding-left", "border-top-width", "border-right-width",
-    "border-bottom-width", "border-left-width", "border-color", "width", "height", "list-style-type", "font-family", "box-sizing",
-    "max-width" };
+/* ---- the values kept as text: each property's reader ---- */
 
-/* font-family's list made the generic family the module draws with: the first
-   generic family of the list, or the first name it knows the kind of */
-static int css_family_of(const char *s, size_t n, css_val *v) {
+static int css_is_length(const char *s, size_t n, int pct, int neg) {
+    css_val v;
+    if (!css_parse_val(s, n, &v)) return 0;
+    if (v.unit == CSS_UNIT_CALC) return (v.ck & CSS_CK_LEN) || (pct && (v.ck & CSS_CK_PCT));
+    if (v.unit == CSS_UNIT_NUMBER) return v.num == 0;
+    if (v.unit == CSS_UNIT_PX || v.unit == CSS_UNIT_EM || v.unit == CSS_UNIT_REM) return neg || v.num >= 0;
+    if (v.unit == CSS_UNIT_PERCENT) return pct && (neg || v.num >= 0);
+    return 0;
+}
+static int css_is_fn(const char *s, size_t n, const char *name) {
+    size_t k = strlen(name);
+    return n > k + 1 && css_bytes_eq(s, name, k, 1) && s[k] == '(' && s[n - 1] == ')';
+}
+static int css_is_string(const char *s, size_t n) { return n >= 2 && (s[0] == '"' || s[0] == '\'') && s[n - 1] == s[0]; }
+static int css_is_ident(const char *s, size_t n) {
+    if (n == 0 || css_is_digit(s[0]) || (s[0] == '-' && n > 1 && css_is_digit(s[1]))) return 0;
+    for (size_t i = 0; i < n; i++) if (!css_namechar(s[i])) return 0;
+    return 1;
+}
+static int css_is_int(const char *s, size_t n, int *out) {
+    double x;
+    size_t used = css_number(s, n, &x);
+    if (!used || used != n || x != (double)(long)x) return 0;
+    *out = (int)x;
+    return 1;
+}
+static int css_is_color(const char *s, size_t n) { uint32_t c; return css_eq_ci(s, n, "currentcolor") || css_parse_color(s, n, &c); }
+
+/* an image: url(), or a gradient (its arguments read by paint) */
+static int css_is_image(const char *s, size_t n) {
+    return css_is_fn(s, n, "url") || css_is_fn(s, n, "linear-gradient") || css_is_fn(s, n, "radial-gradient") ||
+           css_is_fn(s, n, "repeating-linear-gradient") || css_is_fn(s, n, "repeating-radial-gradient");
+}
+
+/* a track size of a grid template: a length or percentage, fr, a sizing keyword,
+   minmax(), fit-content() */
+static int css_is_track(const char *s, size_t n) {
+    double x;
+    size_t used = css_number(s, n, &x);
+    if (used && used + 2 == n && css_eq_ci(s + used, 2, "fr")) return x >= 0;
+    if (css_eq_ci(s, n, "auto") || css_eq_ci(s, n, "min-content") || css_eq_ci(s, n, "max-content")) return 1;
+    if (css_is_fn(s, n, "minmax")) {
+        size_t a = 7, c = css_comma(s, n - 1, a);
+        if (c >= n - 1) return 0;
+        size_t a0 = css_skip_ws(s, c, a), a1 = c, b0 = css_skip_ws(s, n - 1, c + 1), b1 = n - 1;
+        while (a1 > a0 && css_ws(s[a1 - 1])) a1--;
+        while (b1 > b0 && css_ws(s[b1 - 1])) b1--;
+        return css_is_track(s + a0, a1 - a0) && css_is_track(s + b0, b1 - b0);
+    }
+    if (css_is_fn(s, n, "fit-content")) return css_is_length(s + 12, n - 13, 1, 0);
+    return css_is_length(s, n, 1, 0);
+}
+/* a track list: track sizes, repeat(), [line names] */
+static int css_is_tracks(const char *s, size_t n, int depth) {
+    size_t i = 0, st, ln;
+    int any = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        if (p[0] == '[') {
+            size_t e = css_block_end(s, n, st, '[', ']');
+            if (e >= n) return 0;
+            i = e + 1;
+            continue;
+        }
+        if (css_is_fn(p, ln, "repeat")) {
+            if (depth > 0) return 0;
+            size_t c = css_comma(p, ln - 1, 7);
+            if (c >= ln - 1) return 0;
+            size_t a0 = css_skip_ws(p, c, 7), a1 = c;
+            while (a1 > a0 && css_ws(p[a1 - 1])) a1--;
+            int k;
+            if (!css_is_int(p + a0, a1 - a0, &k) && !css_eq_ci(p + a0, a1 - a0, "auto-fill") && !css_eq_ci(p + a0, a1 - a0, "auto-fit")) return 0;
+            if (!css_is_tracks(p + c + 1, ln - 2 - c, depth + 1)) return 0;
+            any = 1;
+            continue;
+        }
+        if (!css_is_track(p, ln)) return 0;
+        any = 1;
+    }
+    return any;
+}
+
+/* each item of a comma list holds, by kind: 1 shadow (box), 2 shadow (text), 3 background
+   position, 4 background size, 5 background repeat, 6 image */
+static int css_is_list_item(int kind, const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int lengths = 0, colors = 0, insets = 0, parts = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        parts++;
+        if (kind == 6) { if (parts > 1 || !css_is_image(p, ln)) return 0; continue; }
+        if (kind == 1 || kind == 2) {
+            if (kind == 1 && css_eq_ci(p, ln, "inset")) { if (insets++) return 0; continue; }
+            if (css_is_color(p, ln)) { if (colors++) return 0; continue; }
+            if (!css_is_length(p, ln, 0, 1)) return 0;
+            lengths++;
+            continue;
+        }
+        if (kind == 3) {
+            if (!(css_eq_ci(p, ln, "left") || css_eq_ci(p, ln, "right") || css_eq_ci(p, ln, "top") ||
+                  css_eq_ci(p, ln, "bottom") || css_eq_ci(p, ln, "center") || css_is_length(p, ln, 1, 1))) return 0;
+            continue;
+        }
+        if (kind == 4) {
+            if ((css_eq_ci(p, ln, "cover") || css_eq_ci(p, ln, "contain")) && parts == 1) continue;
+            if (!(css_eq_ci(p, ln, "auto") || css_is_length(p, ln, 1, 0))) return 0;
+            continue;
+        }
+        if (kind == 5) {
+            if ((css_eq_ci(p, ln, "repeat-x") || css_eq_ci(p, ln, "repeat-y")) && parts == 1) continue;
+            if (!(css_eq_ci(p, ln, "repeat") || css_eq_ci(p, ln, "no-repeat") || css_eq_ci(p, ln, "space") || css_eq_ci(p, ln, "round"))) return 0;
+            continue;
+        }
+    }
+    if (kind == 1) return lengths >= 2 && lengths <= 4;
+    if (kind == 2) return lengths >= 2 && lengths <= 3;
+    if (kind == 3) return parts >= 1 && parts <= 4;
+    if (kind == 4 || kind == 5) return parts >= 1 && parts <= 2;
+    return parts == 1;
+}
+static int css_is_list(int kind, const char *s, size_t n) {
+    size_t a = 0;
+    while (a <= n) {
+        size_t b = css_comma(s, n, a);
+        if (!css_is_list_item(kind, s + a, b - a)) return 0;
+        a = b + 1;
+    }
+    return 1;
+}
+
+/* transform's functions, each with the count of arguments it takes */
+static int css_is_transform(const char *s, size_t n) {
+    static const char *const fns = "translate translatex translatey scale scalex scaley rotate skew skewx skewy matrix";
+    size_t i = 0, st, ln;
+    int any = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        size_t f = 0;
+        while (f < ln && css_namechar(p[f])) f++;
+        if (f == 0 || f >= ln || p[f] != '(' || p[ln - 1] != ')' || f >= 16) return 0;
+        char w[16];
+        for (size_t k = 0; k < f; k++) w[k] = css_lower(p[k]);
+        w[f] = 0;
+        if (!css_word_in(w, fns)) return 0;
+        any = 1;
+    }
+    return any;
+}
+
+/* content: strings, attr(), counter(), counters(), the quotes' keywords, url() */
+static int css_is_content(const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int any = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        if (css_is_string(p, ln) || css_is_fn(p, ln, "attr") || css_is_fn(p, ln, "counter") || css_is_fn(p, ln, "counters") ||
+            css_is_fn(p, ln, "url") || css_eq_ci(p, ln, "open-quote") || css_eq_ci(p, ln, "close-quote") ||
+            css_eq_ci(p, ln, "no-open-quote") || css_eq_ci(p, ln, "no-close-quote")) { any = 1; continue; }
+        return 0;
+    }
+    return any;
+}
+
+/* a grid line: auto, an integer, span and an integer or a name, a name */
+static int css_is_grid_line(const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int parts = 0, span = 0, num = 0, name = 0, k;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        parts++;
+        if (css_eq_ci(p, ln, "auto")) { if (n != ln + st) return 0; return parts == 1; }
+        if (css_eq_ci(p, ln, "span")) { if (span++) return 0; continue; }
+        if (css_is_int(p, ln, &k)) { if (num++ || k == 0 || (span && k < 0)) return 0; continue; }
+        if (css_is_ident(p, ln)) { if (name++) return 0; continue; }
+        return 0;
+    }
+    return parts > 0 && (num || name);
+}
+
+static int css_text_valid(css_prop p, const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int parts = 0, k;
+    switch (p) {
+    case CSS_PROP_GRID_TEMPLATE_COLUMNS: case CSS_PROP_GRID_TEMPLATE_ROWS: return css_is_tracks(s, n, 0);
+    case CSS_PROP_GRID_AUTO_COLUMNS: case CSS_PROP_GRID_AUTO_ROWS:
+        while (css_next_part(s, n, &i, &st, &ln)) { parts++; if (!css_is_track(s + st, ln)) return 0; }
+        return parts > 0;
+    case CSS_PROP_GRID_AUTO_FLOW: {
+        int dir = 0, dense = 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            if (css_eq_ci(s + st, ln, "row") || css_eq_ci(s + st, ln, "column")) { if (dir++) return 0; }
+            else if (css_eq_ci(s + st, ln, "dense")) { if (dense++) return 0; }
+            else return 0;
+        }
+        return dir || dense;
+    }
+    case CSS_PROP_GRID_COLUMN_START: case CSS_PROP_GRID_COLUMN_END: case CSS_PROP_GRID_ROW_START: case CSS_PROP_GRID_ROW_END:
+        return css_is_grid_line(s, n);
+    case CSS_PROP_BACKGROUND_IMAGE: return css_is_list(6, s, n);
+    case CSS_PROP_BACKGROUND_POSITION: return css_is_list(3, s, n);
+    case CSS_PROP_BACKGROUND_SIZE: return css_is_list(4, s, n);
+    case CSS_PROP_BACKGROUND_REPEAT: return css_is_list(5, s, n);
+    case CSS_PROP_BOX_SHADOW: return css_is_list(1, s, n);
+    case CSS_PROP_TEXT_SHADOW: return css_is_list(2, s, n);
+    case CSS_PROP_TRANSFORM: return css_is_transform(s, n);
+    case CSS_PROP_TRANSFORM_ORIGIN:
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            parts++;
+            const char *q = s + st;
+            if (!(css_eq_ci(q, ln, "left") || css_eq_ci(q, ln, "right") || css_eq_ci(q, ln, "top") || css_eq_ci(q, ln, "bottom") ||
+                  css_eq_ci(q, ln, "center") || css_is_length(q, ln, 1, 1))) return 0;
+        }
+        return parts >= 1 && parts <= 3;
+    case CSS_PROP_CONTENT: return css_is_content(s, n);
+    case CSS_PROP_COUNTER_RESET: case CSS_PROP_COUNTER_INCREMENT: {
+        int names = 0, last_name = 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            if (css_is_int(s + st, ln, &k)) { if (!last_name) return 0; last_name = 0; continue; }
+            if (!css_is_ident(s + st, ln) || css_eq_ci(s + st, ln, "none")) return 0;
+            names++;
+            last_name = 1;
+        }
+        return names > 0;
+    }
+    case CSS_PROP_QUOTES:
+        while (css_next_part(s, n, &i, &st, &ln)) { parts++; if (!css_is_string(s + st, ln)) return 0; }
+        return parts > 0 && parts % 2 == 0;
+    default: return 0;
+    }
+}
+
+/* ---- font-family ---- */
+
+/* font-family's list made the family the module draws with: the first of the list that
+   is a web font the page declared, a generic family, or a name it knows the kind of */
+static int css_family_of(const char *s, size_t n, const char *faces, css_val *v) {
     static const char *const serif = "georgia times timesnewroman cambria garamond palatino palatinolinotype bookantiqua "
         "baskerville didot constantia dejavuserif liberationserif notoserif sourceserifpro charter cursive fantasy";
     static const char *const sans = "arial helvetica helveticaneue verdana tahoma trebuchetms segoeui roboto opensans lato "
@@ -476,6 +1190,7 @@ static int css_family_of(const char *s, size_t n, css_val *v) {
         size_t k = 0;
         for (size_t j = i; j < e && k + 1 < sizeof w; j++) if (!css_ws(s[j])) w[k++] = css_lower(s[j]);
         w[k] = 0;
+        if (k && faces && faces[0] && css_word_in(w, faces) && k < sizeof v->word) { css_word_val(v, w); return 1; }
         if (strcmp(w, "serif") == 0 || strcmp(w, "sans-serif") == 0 || strcmp(w, "monospace") == 0) { css_word_val(v, w); return 1; }
         if (css_word_in(w, serif)) { css_word_val(v, "serif"); return 1; }
         if (css_word_in(w, sans)) { css_word_val(v, "sans-serif"); return 1; }
@@ -485,69 +1200,160 @@ static int css_family_of(const char *s, size_t n, css_val *v) {
     return 0;
 }
 
-static void css_add_decl(css_style *s, uint32_t rule, css_prop prop, const css_val *v, int important, const char *text, size_t tn) {
-    amb_span t = text_add(s, text, tn);
-    uint32_t w = v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
-    css_decl_h h = decl_new(s);
-    s->decl[h.index].prop = prop;
-    s->decl[h.index].important = (uint8_t)important;
-    s->decl[h.index].unit = v->unit;
-    s->decl[h.index].num = v->num;
-    s->decl[h.index].color = v->color;
-    s->decl[h.index].word = w;
-    s->decl[h.index].text = t;
-    decls_append(s, rule, h.index);
+
+/* ---- declarations: a name and a value made longhands ---- */
+
+/* a longhand a declaration sets: its value, and its text -- a part of the value (ts, tn),
+   the whole value for one a shorthand reset, or text the reader made (mine: in buf) */
+typedef struct css_item { css_prop prop; css_val v; uint32_t ts, tn, mine; } css_item;
+#define CSS_MAXITEMS 40
+typedef struct css_items { int n; uint32_t vn, bn; css_item it[CSS_MAXITEMS]; char buf[2048]; } css_items;
+
+static void css_item_add(css_items *it, css_prop p, const css_val *v, size_t ts, size_t tn) {
+    if (it->n == CSS_MAXITEMS) return;
+    css_item *x = &it->it[it->n];
+    x->prop = p;
+    x->v = *v;
+    x->ts = (uint32_t)ts;
+    x->tn = (uint32_t)tn;
+    x->mine = 0;
+    it->n++;
+}
+/* an item whose text the reader made */
+static void css_item_made(css_items *it, css_prop p, const css_val *v, const char *t, size_t tn) {
+    if (it->n == CSS_MAXITEMS || it->bn + tn > sizeof it->buf) return;
+    memcpy(it->buf + it->bn, t, tn);
+    css_item_add(it, p, v, it->bn, tn);
+    it->it[it->n - 1].mine = 1;
+    it->bn += (uint32_t)tn;
+}
+/* the longhand p reset to its initial value by a shorthand */
+static void css_item_reset(css_items *it, css_prop p) {
+    css_val v;
+    css_word_val(&v, "initial");
+    css_item_add(it, p, &v, 0, it->vn);
 }
 
-/* one value for each of props[0..n) */
-static void css_add_all(css_style *s, uint32_t rule, const css_prop *props, int n, const css_val *v, int important, const char *t, size_t tn) {
-    for (int i = 0; i < n; i++) css_add_decl(s, rule, props[i], v, important, t, tn);
+/* a font-family list: names (strings, or identifiers a space apart), a comma between each */
+static int css_is_family(const char *s, size_t n) {
+    size_t a = 0;
+    while (a <= n) {
+        size_t b = css_comma(s, n, a), i = css_skip_ws(s, b, a), e = b;
+        while (e > i && css_ws(s[e - 1])) e--;
+        if (e == i) return 0;
+        if (!css_is_string(s + i, e - i))
+            for (size_t j = i; j < e; j++) if (!css_namechar(s[j]) && !css_ws(s[j])) return 0;
+        a = b + 1;
+    }
+    return 1;
 }
 
-/* margin, padding, border-width: one to four values, top right bottom left */
-static void css_box(css_style *s, uint32_t rule, css_prop base, const char *val, size_t vn, int important) {
+/* a value read for the longhand p: a single value, or the text p keeps; 0 when p does not take it */
+static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
+    int g = css_pdefs[p].gram;
+    if (g == G_TEXT || g == G_FAMILY) {
+        if (css_parse_val(s, n, v)) {
+            if (v->unit == CSS_UNIT_AUTO && css_pdefs[p].words && css_word_in("auto", css_pdefs[p].words)) css_word_val(v, "auto");
+            if (css_is_global(v) || (v->unit == CSS_UNIT_KEYWORD && css_pdefs[p].words && css_word_in(v->word, css_pdefs[p].words))) return 1;
+        }
+        if (g == G_FAMILY ? !css_is_family(s, n) : !css_text_valid(p, s, n)) return 0;
+        memset(v, 0, sizeof *v);
+        v->unit = CSS_UNIT_TEXT;
+        return 1;
+    }
+    if (g == G_RADIUS) {
+        /* one length, or two (horizontal, vertical) kept as text */
+        size_t st[3], ln[3];
+        size_t k = css_parts(s, n, st, ln, 3);
+        if (k == 1) return css_parse_val(s, n, v) && (css_is_global(v) || css_is_length(s, n, 1, 0));
+        if (k != 2 || !css_is_length(s + st[0], ln[0], 1, 0) || !css_is_length(s + st[1], ln[1], 1, 0)) return 0;
+        memset(v, 0, sizeof *v);
+        v->unit = CSS_UNIT_TEXT;
+        return 1;
+    }
+    return css_parse_val(s, n, v) && css_valid(p, v);
+}
+
+static const size_t css_side_of[4][4] = { { 0, 0, 0, 0 }, { 0, 1, 0, 1 }, { 0, 1, 2, 1 }, { 0, 1, 2, 3 } };
+
+/* sides: one to four values for the four longhands base.. (top right bottom left; or the
+   corners, top-left top-right bottom-right bottom-left) */
+static int css_sides(css_prop base, const char *val, size_t vn, css_items *it) {
     size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
     size_t k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
-    if (k == 0 || k > 4) return;
+    if (k == 0 || k > 4) return 0;
     css_val v[4];
     for (size_t j = 0; j < k; j++)
-        if (!css_parse_val(val + st[j], ln[j], &v[j]) || !css_valid(base, &v[j]) || css_is_global(&v[j])) return;
-    static const size_t side_of[4][4] = { { 0, 0, 0, 0 }, { 0, 1, 0, 1 }, { 0, 1, 2, 1 }, { 0, 1, 2, 3 } };
+        if (!css_longhand(base, val + st[j], ln[j], &v[j]) || css_is_global(&v[j])) return 0;
     for (int side = 0; side < 4; side++) {
-        size_t j = side_of[k - 1][side];
-        css_add_decl(s, rule, (css_prop)(base + side), &v[j], important, val + st[j], ln[j]);
+        size_t j = css_side_of[k - 1][side];
+        css_item_add(it, (css_prop)(base + side), &v[j], st[j], ln[j]);
     }
+    return 1;
 }
 
-/* border and border-top ... border-left: a width, a style and a colour in any order; side -1 is all four */
-static void css_border(css_style *s, uint32_t rule, int side, const char *val, size_t vn, int important) {
+/* border-radius: one to four radii, and after a / one to four vertical ones */
+static int css_radii(const char *val, size_t vn, css_items *it) {
+    size_t slash = 0;
+    while (slash < vn && val[slash] != '/') slash++;
+    if (slash >= vn) return css_sides(CSS_PROP_BORDER_TOP_LEFT_RADIUS, val, vn, it);
+    const char *vv = val + slash + 1;
+    size_t hs[CSS_MAXPARTS], hl[CSS_MAXPARTS], vs[CSS_MAXPARTS], vl[CSS_MAXPARTS];
+    size_t hk = css_parts(val, slash, hs, hl, CSS_MAXPARTS), vk = css_parts(vv, vn - slash - 1, vs, vl, CSS_MAXPARTS);
+    if (hk == 0 || hk > 4 || vk == 0 || vk > 4) return 0;
+    for (size_t j = 0; j < hk; j++) if (!css_is_length(val + hs[j], hl[j], 1, 0)) return 0;
+    for (size_t j = 0; j < vk; j++) if (!css_is_length(vv + vs[j], vl[j], 1, 0)) return 0;
+    for (int c = 0; c < 4; c++) {
+        css_val v;
+        memset(&v, 0, sizeof v);
+        v.unit = CSS_UNIT_TEXT;
+        size_t a = css_side_of[hk - 1][c], b = css_side_of[vk - 1][c];
+        char t[160];
+        int tn = snprintf(t, sizeof t, "%.*s %.*s", (int)hl[a], val + hs[a], (int)vl[b], vv + vs[b]);
+        if (tn < 0 || (size_t)tn >= sizeof t) return 0;
+        css_item_made(it, (css_prop)(CSS_PROP_BORDER_TOP_LEFT_RADIUS + c), &v, t, (size_t)tn);
+    }
+    return 1;
+}
+
+/* border, border-top ... border-left, outline: a width, a style and a colour in any
+   order, what is left out reset; side -1 is the four, 4 the outline */
+static int css_border(int side, const char *val, size_t vn, css_items *it) {
     size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
     size_t k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
-    if (k == 0 || k > 3) return;
-    css_val width, color, v;
-    int has_width = 0, has_color = 0, has_style = 0, visible = 0;
-    css_word_val(&width, "medium");
-    css_word_val(&color, "currentcolor");
+    if (k == 0 || k > 3) return 0;
+    css_val width, style, color, v;
+    size_t wj = 0, sj = 0, cj = 0;
+    int has_width = 0, has_color = 0, has_style = 0;
+    css_prop wp = side == 4 ? CSS_PROP_OUTLINE_WIDTH : CSS_PROP_BORDER_TOP_WIDTH;
+    css_prop sp = side == 4 ? CSS_PROP_OUTLINE_STYLE : CSS_PROP_BORDER_TOP_STYLE;
     for (size_t j = 0; j < k; j++) {
-        if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return;
-        if (css_valid(CSS_PROP_BORDER_COLOR, &v)) { if (has_color) return; color = v; has_color = 1; }
-        else if (v.unit == CSS_UNIT_KEYWORD && css_word_in(v.word, "none hidden")) { if (has_style) return; has_style = 1; }
-        else if (v.unit == CSS_UNIT_KEYWORD && css_word_in(v.word, "solid dotted dashed double groove ridge inset outset")) {
-            if (has_style) return;
-            has_style = 1;
-            visible = 1;
-        } else if (css_valid(CSS_PROP_BORDER_TOP_WIDTH, &v)) { if (has_width) return; width = v; has_width = 1; }
-        else return;
+        if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return 0;
+        if (v.unit == CSS_UNIT_COLOR || css_is_word(&v, "currentcolor")) {
+            if (has_color) return 0;
+            color = v; has_color = 1; cj = j;
+        } else if ((v.unit == CSS_UNIT_KEYWORD || v.unit == CSS_UNIT_AUTO) && css_valid(sp, &v)) {
+            if (has_style) return 0;
+            style = v; has_style = 1; sj = j;
+        } else if (css_valid(wp, &v)) {
+            if (has_width) return 0;
+            width = v; has_width = 1; wj = j;
+        } else return 0;
     }
-    /* a border whose style is none is no border: its width computes to 0 */
-    if (!visible) { memset(&width, 0, sizeof width); width.unit = CSS_UNIT_PX; }
-    for (int i = 0; i < 4; i++)
-        if (side < 0 || side == i) css_add_decl(s, rule, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + i), &width, important, val, vn);
-    css_add_decl(s, rule, CSS_PROP_BORDER_COLOR, &color, important, val, vn);
+    int from = side < 0 || side == 4 ? 0 : side, to = side < 0 ? 4 : side == 4 ? 1 : side + 1;
+    for (int i = from; i < to; i++) {
+        css_prop pw = side == 4 ? CSS_PROP_OUTLINE_WIDTH : (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + i);
+        css_prop ps = side == 4 ? CSS_PROP_OUTLINE_STYLE : (css_prop)(CSS_PROP_BORDER_TOP_STYLE + i);
+        css_prop pc = side == 4 ? CSS_PROP_OUTLINE_COLOR : (css_prop)(CSS_PROP_BORDER_TOP_COLOR + i);
+        if (has_width) css_item_add(it, pw, &width, st[wj], ln[wj]); else css_item_reset(it, pw);
+        if (has_style) css_item_add(it, ps, &style, st[sj], ln[sj]); else css_item_reset(it, ps);
+        if (has_color) css_item_add(it, pc, &color, st[cj], ln[cj]); else css_item_reset(it, pc);
+    }
+    return 1;
 }
 
 /* font: [style || weight || variant]? size[/line-height] family; what it leaves out is reset */
-static void css_font(css_style *s, uint32_t rule, const char *val, size_t vn, int important) {
+static int css_font(const char *val, size_t vn, css_items *it) {
     size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
     size_t k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
     css_val style, weight, size, lh, v;
@@ -562,60 +1368,383 @@ static void css_font(css_style *s, uint32_t rule, const char *val, size_t vn, in
         size_t pn = ln[j], slash = 0;
         size_j = j;
         while (slash < pn && p[slash] != '/') slash++;
-        if (!css_parse_val(p, slash, &v) || css_is_global(&v)) return;
+        if (!css_parse_val(p, slash, &v) || css_is_global(&v)) return 0;
         if (slash == pn && v.unit == CSS_UNIT_KEYWORD && css_word_in(v.word, "italic oblique")) style = v;
         else if (slash == pn && v.unit == CSS_UNIT_KEYWORD && css_word_in(v.word, "normal small-caps")) {}
         else if (slash == pn && css_valid(CSS_PROP_FONT_WEIGHT, &v)) weight = v;
         else if (css_valid(CSS_PROP_FONT_SIZE, &v)) {
             size = v;
             have_size = 1;
-            if (slash < pn && (!css_parse_val(p + slash + 1, pn - slash - 1, &lh) || !css_valid(CSS_PROP_LINE_HEIGHT, &lh) || css_is_global(&lh))) return;
-        } else return;
+            if (slash < pn && (!css_parse_val(p + slash + 1, pn - slash - 1, &lh) || !css_valid(CSS_PROP_LINE_HEIGHT, &lh) || css_is_global(&lh))) return 0;
+        } else return 0;
     }
-    if (!have_size) return;     /* caption, menu and the other system fonts: not read */
+    if (!have_size) return 0;     /* caption, menu and the other system fonts: not read */
     /* the family list follows the size (and its line height) */
-    css_val fam;
     size_t after = size_j + 1 < k ? st[size_j + 1] : vn;
-    if (after >= vn || !css_family_of(val + after, vn - after, &fam)) css_word_val(&fam, "serif");
-    css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &fam, important, val, vn);
-    css_add_decl(s, rule, CSS_PROP_FONT_STYLE, &style, important, val, vn);
-    css_add_decl(s, rule, CSS_PROP_FONT_WEIGHT, &weight, important, val, vn);
-    css_add_decl(s, rule, CSS_PROP_FONT_SIZE, &size, important, val, vn);
-    css_add_decl(s, rule, CSS_PROP_LINE_HEIGHT, &lh, important, val, vn);
+    if (after >= vn || !css_is_family(val + after, vn - after)) return 0;
+    css_val fam;
+    memset(&fam, 0, sizeof fam);
+    fam.unit = CSS_UNIT_TEXT;
+    css_item_add(it, CSS_PROP_FONT_FAMILY, &fam, after, vn - after);
+    css_item_add(it, CSS_PROP_FONT_STYLE, &style, 0, vn);
+    css_item_add(it, CSS_PROP_FONT_WEIGHT, &weight, 0, vn);
+    css_item_add(it, CSS_PROP_FONT_SIZE, &size, 0, vn);
+    css_item_add(it, CSS_PROP_LINE_HEIGHT, &lh, 0, vn);
+    return 1;
 }
 
-/* background, list-style, text-decoration: the one part the module keeps, the rest
-   read past; what is not written is reset */
-static void css_pick(css_style *s, uint32_t rule, css_prop p, const char *reset, const char *val, size_t vn, int important) {
-    size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
-    size_t k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
-    css_val v, pick;
-    int have = 0;
-    if (p == CSS_PROP_BACKGROUND_COLOR) { memset(&pick, 0, sizeof pick); pick.unit = CSS_UNIT_COLOR; }
-    else css_word_val(&pick, reset);
-    for (size_t j = 0; j < k; j++) {
-        if (!css_parse_val(val + st[j], ln[j], &v)) continue;
-        if (css_is_global(&v)) return;
-        if (css_valid(p, &v) && !(p == CSS_PROP_BACKGROUND_COLOR && v.unit == CSS_UNIT_KEYWORD)) {
-            if (have) return;
-            pick = v;
-            have = 1;
+/* background: layers, a comma between each, of an image, a position (and / a size) and a
+   repeat; the last layer's colour. Each list longhand an item a layer; what a layer
+   leaves out is its initial value */
+static int css_background(const char *val, size_t vn, css_items *it) {
+    vector<char> img, pos, size, rep;
+    css_val color;
+    memset(&color, 0, sizeof color);
+    color.unit = CSS_UNIT_COLOR;
+    int layers = 0, any_image = 0, has_color = 0;
+    size_t cs = 0, cl = 0, a = 0;
+    for (;;) {
+        size_t b = css_comma(val, vn, a);
+        if (has_color) return 0;                        /* a colour only in the last layer */
+        /* the layer's parts, a / a part of its own */
+        vector<char> lay;
+        for (size_t i = a; i < b; i++) {
+            char c = val[i];
+            if (c == '(') { size_t e = css_block_end(val, b, i, '(', ')'); size_t stop = e < b ? e + 1 : b; append_range(lay, val + i, stop - i); i = stop - 1; continue; }
+            if (c == '"' || c == '\'') { size_t e = css_string_end(val, b, i); size_t stop = e < b ? e + 1 : b; append_range(lay, val + i, stop - i); i = stop - 1; continue; }
+            if (c == '/') { append_range(lay, " / ", 3); continue; }
+            push_back(lay, c);
         }
+        size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
+        size_t k = css_parts(data(lay), len(lay), st, ln, CSS_MAXPARTS);
+        int has_img = 0, has_size = 0, has_pos = 0, after_slash = 0;
+        vector<char> limg, lpos, lsize, lrep;
+        for (size_t j = 0; j < k; j++) {
+            const char *p = data(lay) + st[j];
+            size_t pn = ln[j];
+            uint32_t c;
+            if (pn == 1 && p[0] == '/') { if (!has_pos || after_slash || has_size) return 0; after_slash = 1; continue; }
+            if (after_slash && (css_eq_ci(p, pn, "cover") || css_eq_ci(p, pn, "contain") || css_eq_ci(p, pn, "auto") || css_is_length(p, pn, 1, 0))) {
+                if (len(lsize)) push_back(lsize, ' ');
+                append_range(lsize, p, pn);
+                has_size = 1;
+                continue;
+            }
+            if (after_slash) { if (!has_size) return 0; after_slash = 0; }
+            if (css_is_image(p, pn) || css_eq_ci(p, pn, "none")) {
+                if (has_img) return 0;
+                has_img = 1;
+                append_range(limg, p, pn);
+                if (!css_eq_ci(p, pn, "none")) any_image = 1;
+                continue;
+            }
+            if (css_eq_ci(p, pn, "repeat-x") || css_eq_ci(p, pn, "repeat-y") || css_eq_ci(p, pn, "repeat") || css_eq_ci(p, pn, "no-repeat") ||
+                css_eq_ci(p, pn, "space") || css_eq_ci(p, pn, "round")) {
+                if (len(lrep)) push_back(lrep, ' ');
+                append_range(lrep, p, pn);
+                continue;
+            }
+            if (css_eq_ci(p, pn, "left") || css_eq_ci(p, pn, "right") || css_eq_ci(p, pn, "top") || css_eq_ci(p, pn, "bottom") ||
+                css_eq_ci(p, pn, "center") || css_is_length(p, pn, 1, 1)) {
+                if (has_size) return 0;
+                if (len(lpos)) push_back(lpos, ' ');
+                append_range(lpos, p, pn);
+                has_pos = 1;
+                continue;
+            }
+            if (css_eq_ci(p, pn, "scroll") || css_eq_ci(p, pn, "fixed") || css_eq_ci(p, pn, "local") || css_eq_ci(p, pn, "border-box") ||
+                css_eq_ci(p, pn, "padding-box") || css_eq_ci(p, pn, "content-box")) continue;
+            if (css_eq_ci(p, pn, "currentcolor")) { if (has_color) return 0; css_word_val(&color, "currentcolor"); has_color = 1; continue; }
+            if (css_parse_color(p, pn, &c)) {
+                if (has_color) return 0;
+                color.unit = CSS_UNIT_COLOR;
+                color.color = c;
+                has_color = 1;
+                continue;
+            }
+            return 0;
+        }
+        if (after_slash && !has_size) return 0;
+        if (layers) { append_range(img, ", ", 2); append_range(pos, ", ", 2); append_range(size, ", ", 2); append_range(rep, ", ", 2); }
+        if (has_img) append_range(img, data(limg), len(limg)); else append_range(img, "none", 4);
+        if (has_pos) append_range(pos, data(lpos), len(lpos)); else append_range(pos, "0% 0%", 5);
+        if (has_size) append_range(size, data(lsize), len(lsize)); else append_range(size, "auto", 4);
+        if (len(lrep)) append_range(rep, data(lrep), len(lrep)); else append_range(rep, "repeat", 6);
+        layers++;
+        if (b >= vn) break;
+        a = b + 1;
     }
-    css_add_decl(s, rule, p, &pick, important, val, vn);
+    (void)cs;
+    (void)cl;
+    css_item_add(it, CSS_PROP_BACKGROUND_COLOR, &color, 0, vn);
+    css_val t, none;
+    memset(&t, 0, sizeof t);
+    t.unit = CSS_UNIT_TEXT;
+    css_word_val(&none, "none");
+    if (any_image) css_item_made(it, CSS_PROP_BACKGROUND_IMAGE, &t, data(img), len(img));
+    else css_item_made(it, CSS_PROP_BACKGROUND_IMAGE, &none, "none", 4);
+    css_item_made(it, CSS_PROP_BACKGROUND_POSITION, &t, data(pos), len(pos));
+    css_item_made(it, CSS_PROP_BACKGROUND_SIZE, &t, data(size), len(size));
+    css_item_made(it, CSS_PROP_BACKGROUND_REPEAT, &t, data(rep), len(rep));
+    return 1;
 }
 
-static int css_side_of(const char *name, size_t nn, const char *prefix, const char *suffix, int *side) {
-    static const char *const sides[4] = { "top", "right", "bottom", "left" };
-    size_t pl = strlen(prefix), sl = strlen(suffix);
-    if (nn <= pl + sl || !css_bytes_eq(name, prefix, pl, 1) || !css_bytes_eq(name + nn - sl, suffix, sl, 1)) return 0;
-    for (int i = 0; i < 4; i++) if (css_eq_ci(name + pl, nn - pl - sl, sides[i])) { *side = i; return 1; }
+/* the text up to the top-level /s of s: its pieces' bounds, at most max; their count */
+static size_t css_slashes(const char *s, size_t n, size_t *st, size_t *ln, size_t max) {
+    size_t k = 0, a = 0;
+    for (size_t i = 0; i <= n && k < max; i++) {
+        if (i < n && s[i] == '(') { i = css_block_end(s, n, i, '(', ')'); continue; }
+        if (i < n && s[i] != '/') continue;
+        size_t b = css_skip_ws(s, i, a), e = i;
+        while (e > b && css_ws(s[e - 1])) e--;
+        st[k] = b;
+        ln[k] = e - b;
+        k++;
+        a = i + 1;
+    }
+    return k;
+}
+
+/* the shorthands this reads, each with its longhands */
+typedef struct css_short { const char *name; uint8_t n; uint8_t p[12]; } css_short;
+static const css_short css_shorts[] = {
+    { "margin", 4, { CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT } },
+    { "padding", 4, { CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT } },
+    { "inset", 4, { CSS_PROP_TOP, CSS_PROP_RIGHT, CSS_PROP_BOTTOM, CSS_PROP_LEFT } },
+    { "border-width", 4, { CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH } },
+    { "border-style", 4, { CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_PROP_BORDER_LEFT_STYLE } },
+    { "border-color", 4, { CSS_PROP_BORDER_TOP_COLOR, CSS_PROP_BORDER_RIGHT_COLOR, CSS_PROP_BORDER_BOTTOM_COLOR, CSS_PROP_BORDER_LEFT_COLOR } },
+    { "border-radius", 4, { CSS_PROP_BORDER_TOP_LEFT_RADIUS, CSS_PROP_BORDER_TOP_RIGHT_RADIUS, CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS,
+                            CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS } },
+    { "border", 12, { CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_TOP_COLOR, CSS_PROP_BORDER_RIGHT_WIDTH,
+                      CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_RIGHT_COLOR, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_BOTTOM_STYLE,
+                      CSS_PROP_BORDER_BOTTOM_COLOR, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_LEFT_COLOR } },
+    { "border-top", 3, { CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_TOP_COLOR } },
+    { "border-right", 3, { CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_RIGHT_COLOR } },
+    { "border-bottom", 3, { CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_PROP_BORDER_BOTTOM_COLOR } },
+    { "border-left", 3, { CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_LEFT_COLOR } },
+    { "outline", 3, { CSS_PROP_OUTLINE_WIDTH, CSS_PROP_OUTLINE_STYLE, CSS_PROP_OUTLINE_COLOR } },
+    { "font", 5, { CSS_PROP_FONT_FAMILY, CSS_PROP_FONT_STYLE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_SIZE, CSS_PROP_LINE_HEIGHT } },
+    { "background", 5, { CSS_PROP_BACKGROUND_COLOR, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
+                         CSS_PROP_BACKGROUND_REPEAT } },
+    { "list-style", 2, { CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_LIST_STYLE_POSITION } },
+    { "text-decoration", 1, { CSS_PROP_TEXT_DECORATION } },
+    { "overflow", 2, { CSS_PROP_OVERFLOW_X, CSS_PROP_OVERFLOW_Y } },
+    { "flex", 3, { CSS_PROP_FLEX_GROW, CSS_PROP_FLEX_SHRINK, CSS_PROP_FLEX_BASIS } },
+    { "flex-flow", 2, { CSS_PROP_FLEX_DIRECTION, CSS_PROP_FLEX_WRAP } },
+    { "gap", 2, { CSS_PROP_ROW_GAP, CSS_PROP_COLUMN_GAP } },
+    { "grid-gap", 2, { CSS_PROP_ROW_GAP, CSS_PROP_COLUMN_GAP } },
+    { "place-content", 2, { CSS_PROP_ALIGN_CONTENT, CSS_PROP_JUSTIFY_CONTENT } },
+    { "place-items", 2, { CSS_PROP_ALIGN_ITEMS, CSS_PROP_JUSTIFY_ITEMS } },
+    { "place-self", 2, { CSS_PROP_ALIGN_SELF, CSS_PROP_JUSTIFY_SELF } },
+    { "grid-row", 2, { CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END } },
+    { "grid-column", 2, { CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END } },
+    { "grid-area", 4, { CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_ROW_END, CSS_PROP_GRID_COLUMN_END } },
+    { "grid-template", 2, { CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_TEMPLATE_COLUMNS } },
+};
+#define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
+
+static const char *css_short_name(int i) { return css_shorts[i].name; }
+
+static int css_short_of(const char *name, size_t nn) {
+    if (!css_ready) css_order_make();
+    int c = css_name_find(name, nn);
+    return c < 0 ? -c - 1 : -1;
+}
+
+/* the longhand a property's other name names: grid-row-gap, grid-column-gap */
+static int css_alias_of(const char *name, size_t nn) {
+    if (css_eq_ci(name, nn, "grid-row-gap")) return CSS_PROP_ROW_GAP;
+    if (css_eq_ci(name, nn, "grid-column-gap")) return CSS_PROP_COLUMN_GAP;
+    return -1;
+}
+
+/* a shorthand's value read into its longhands: 0 when it is none it takes */
+static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
+    const css_short *d = &css_shorts[sh];
+    size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
+    size_t k;
+    css_val v, w;
+    switch (sh) {
+    case 0: case 1: case 2: case 3: case 4: case 5: return css_sides((css_prop)d->p[0], val, vn, it);
+    case 6: return css_radii(val, vn, it);
+    case 7: return css_border(-1, val, vn, it);
+    case 8: case 9: case 10: case 11: return css_border(sh - 8, val, vn, it);
+    case 12: return css_border(4, val, vn, it);
+    case 13: return css_font(val, vn, it);
+    case 14: return css_background(val, vn, it);
+    case 15: {
+        /* list-style: a type, a position, an image (read past); none is the type's */
+        int typ = 0, posn = 0;
+        k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
+        for (size_t j = 0; j < k; j++) {
+            if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) {
+                if (css_is_fn(val + st[j], ln[j], "url")) continue;
+                return 0;
+            }
+            if (css_valid(CSS_PROP_LIST_STYLE_POSITION, &v)) { if (posn++) return 0; css_item_add(it, CSS_PROP_LIST_STYLE_POSITION, &v, st[j], ln[j]); }
+            else if (css_valid(CSS_PROP_LIST_STYLE_TYPE, &v)) { if (typ++) return 0; css_item_add(it, CSS_PROP_LIST_STYLE_TYPE, &v, st[j], ln[j]); }
+            else return 0;
+        }
+        if (!typ) { css_word_val(&w, "disc"); css_item_add(it, CSS_PROP_LIST_STYLE_TYPE, &w, 0, vn); }
+        if (!posn) css_item_reset(it, CSS_PROP_LIST_STYLE_POSITION);
+        return 1;
+    }
+    case 16: {
+        /* text-decoration: its line (the colour, style and thickness read past) */
+        int line = 0;
+        k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
+        for (size_t j = 0; j < k; j++) {
+            if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return 0;
+            if (css_valid(CSS_PROP_TEXT_DECORATION, &v)) { if (!line++) css_item_add(it, CSS_PROP_TEXT_DECORATION, &v, st[j], ln[j]); }
+        }
+        if (!line) { css_word_val(&w, "none"); css_item_add(it, CSS_PROP_TEXT_DECORATION, &w, 0, vn); }
+        return 1;
+    }
+    case 17: case 19: case 20: case 21: case 22: case 23: case 24: {
+        /* two longhands: one value for both (place-*, overflow, gap) or two; flex-flow's in any order */
+        k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
+        if (k == 0 || k > 2) return 0;
+        if (sh == 19) {
+            int dir = 0, wrap = 0;
+            for (size_t j = 0; j < k; j++) {
+                if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return 0;
+                if (css_valid(CSS_PROP_FLEX_DIRECTION, &v)) { if (dir++) return 0; css_item_add(it, CSS_PROP_FLEX_DIRECTION, &v, st[j], ln[j]); }
+                else if (css_valid(CSS_PROP_FLEX_WRAP, &v)) { if (wrap++) return 0; css_item_add(it, CSS_PROP_FLEX_WRAP, &v, st[j], ln[j]); }
+                else return 0;
+            }
+            if (!dir) css_item_reset(it, CSS_PROP_FLEX_DIRECTION);
+            if (!wrap) css_item_reset(it, CSS_PROP_FLEX_WRAP);
+            return 1;
+        }
+        if (!css_longhand((css_prop)d->p[0], val + st[0], ln[0], &v) || css_is_global(&v)) return 0;
+        size_t j2 = k == 2 ? 1 : 0;
+        if (!css_longhand((css_prop)d->p[1], val + st[j2], ln[j2], &w) || css_is_global(&w)) return 0;
+        css_item_add(it, (css_prop)d->p[0], &v, st[0], ln[0]);
+        css_item_add(it, (css_prop)d->p[1], &w, st[j2], ln[j2]);
+        return 1;
+    }
+    case 18: {
+        /* flex: none, auto, or a grow factor, a shrink factor and a basis (a number alone
+           is a grow factor with a basis of 0%) */
+        css_val g, s, b;
+        memset(&g, 0, sizeof g); g.unit = CSS_UNIT_NUMBER; g.num = 1;
+        s = g;
+        memset(&b, 0, sizeof b); b.unit = CSS_UNIT_PERCENT; b.num = 0;
+        if (css_eq_ci(val, vn, "none")) { g.num = 0; s.num = 0; b.unit = CSS_UNIT_AUTO; }
+        else if (css_eq_ci(val, vn, "auto")) b.unit = CSS_UNIT_AUTO;
+        else {
+            k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
+            if (k == 0 || k > 3) return 0;
+            int nums = 0, basis = 0;
+            for (size_t j = 0; j < k; j++) {
+                if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return 0;
+                if (v.unit == CSS_UNIT_NUMBER && !(basis && nums == 1) && nums < 2 && !(v.num == 0 && nums == 2)) {
+                    if (v.num < 0) return 0;
+                    if (nums == 0) g.num = v.num; else s.num = v.num;
+                    nums++;
+                    continue;
+                }
+                if (basis || !css_valid(CSS_PROP_FLEX_BASIS, &v)) return 0;
+                b = v;
+                basis = 1;
+            }
+        }
+        css_item_add(it, CSS_PROP_FLEX_GROW, &g, 0, vn);
+        css_item_add(it, CSS_PROP_FLEX_SHRINK, &s, 0, vn);
+        css_item_add(it, CSS_PROP_FLEX_BASIS, &b, 0, vn);
+        return 1;
+    }
+    case 25: case 26: {
+        /* grid-row, grid-column: a start line, and after a / an end line (a name alone is both) */
+        k = css_slashes(val, vn, st, ln, 3);
+        if (k == 0 || k > 2) return 0;
+        if (!css_longhand((css_prop)d->p[0], val + st[0], ln[0], &v) || css_is_global(&v)) return 0;
+        css_item_add(it, (css_prop)d->p[0], &v, st[0], ln[0]);
+        if (k == 2) {
+            if (!css_longhand((css_prop)d->p[1], val + st[1], ln[1], &w) || css_is_global(&w)) return 0;
+            css_item_add(it, (css_prop)d->p[1], &w, st[1], ln[1]);
+        } else if (css_is_ident(val + st[0], ln[0]) && !css_eq_ci(val + st[0], ln[0], "auto")) css_item_add(it, (css_prop)d->p[1], &v, st[0], ln[0]);
+        else { css_val au; memset(&au, 0, sizeof au); au.unit = CSS_UNIT_TEXT; css_item_made(it, (css_prop)d->p[1], &au, "auto", 4); }
+        return 1;
+    }
+    case 27: {
+        /* grid-area: row-start / column-start / row-end / column-end */
+        k = css_slashes(val, vn, st, ln, 5);
+        if (k == 0 || k > 4) return 0;
+        for (size_t j = 0; j < 4; j++) {
+            css_val x;
+            if (j < k) {
+                if (!css_longhand((css_prop)d->p[j], val + st[j], ln[j], &x) || css_is_global(&x)) return 0;
+                css_item_add(it, (css_prop)d->p[j], &x, st[j], ln[j]);
+            } else { memset(&x, 0, sizeof x); x.unit = CSS_UNIT_TEXT; css_item_made(it, (css_prop)d->p[j], &x, "auto", 4); }
+        }
+        return 1;
+    }
+    case 28: {
+        /* grid-template: none, or rows / columns */
+        if (css_eq_ci(val, vn, "none")) { css_word_val(&v, "none"); css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, 0, vn); css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &v, 0, vn); return 1; }
+        k = css_slashes(val, vn, st, ln, 3);
+        if (k != 2) return 0;
+        if (!css_longhand(CSS_PROP_GRID_TEMPLATE_ROWS, val + st[0], ln[0], &v) || !css_longhand(CSS_PROP_GRID_TEMPLATE_COLUMNS, val + st[1], ln[1], &w)) return 0;
+        css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, st[0], ln[0]);
+        css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, st[1], ln[1]);
+        return 1;
+    }
+    default: return 0;
+    }
+}
+
+/* a declaration's longhands and their values: 0 when it is none this reads */
+static int css_expand(const char *name, size_t nn, const char *val, size_t vn, css_items *it) {
+    it->n = 0;
+    it->bn = 0;
+    it->vn = (uint32_t)vn;
+    css_val g;
+    int global = vn >= 5 && vn <= 12 && css_parse_val(val, vn, &g) && css_is_global(&g);
+    int sh = css_short_of(name, nn);
+    if (sh >= 0) {
+        if (global) {
+            for (int k = 0; k < css_shorts[sh].n; k++) css_item_add(it, (css_prop)css_shorts[sh].p[k], &g, 0, vn);
+            return 1;
+        }
+        return css_short_read(sh, val, vn, it);
+    }
+    int p = css_prop_of(name, nn);
+    if (p < 0) p = css_alias_of(name, nn);
+    if (p < 0) return 0;
+    css_val v;
+    if (!css_longhand((css_prop)p, val, vn, &v)) return 0;
+    css_item_add(it, (css_prop)p, &v, 0, vn);
+    return 1;
+}
+
+/* the value holds var() */
+static int css_has_var(const char *s, size_t n) {
+    for (size_t i = 0; i + 4 <= n; i++)
+        if (css_lower(s[i]) == 'v' && css_lower(s[i + 1]) == 'a' && css_lower(s[i + 2]) == 'r' && s[i + 3] == '(' &&
+            (i == 0 || !css_namechar(s[i - 1]))) return 1;
     return 0;
 }
 
-/* a declaration, its shorthand expanded */
+static void css_add_decl(css_style *s, uint32_t rule, css_prop prop, const css_val *v, int important, const char *text, size_t tn,
+                         uint32_t word) {
+    amb_span t = text_add(s, text, tn);
+    uint32_t w = word ? word : v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
+    css_decl_h h = decl_new(s);
+    s->decl[h.index].prop = prop;
+    s->decl[h.index].important = (uint8_t)important;
+    s->decl[h.index].unit = v->unit;
+    s->decl[h.index].num = v->num;
+    s->decl[h.index].color = v->color;
+    s->decl[h.index].word = w;
+    s->decl[h.index].text = t;
+    decls_append(s, rule, h.index);
+}
+
+/* a declaration: its name and value, its shorthand expanded */
 static void css_declaration(css_style *s, uint32_t rule, const char *name, size_t nn, const char *val, size_t vn) {
-    int important = 0, side = 0;
+    int important = 0;
     while (vn && css_ws(val[vn - 1])) vn--;
     if (vn >= 9 && css_eq_ci(val + vn - 9, 9, "important")) {
         size_t b = vn - 9;
@@ -629,54 +1758,40 @@ static void css_declaration(css_style *s, uint32_t rule, const char *name, size_
     size_t vs = css_skip_ws(val, vn, 0);
     val += vs;
     vn -= vs;
-    if (vn == 0 || nn == 0) return;
-    css_val g;
-    int global = css_parse_val(val, vn, &g) && css_is_global(&g);
-    static const css_prop margins[4] = { CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT };
-    static const css_prop paddings[4] = { CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT };
-    static const css_prop borders[5] = { CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH,
-                                         CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_COLOR };
-    static const css_prop fonts[4] = { CSS_PROP_FONT_STYLE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_SIZE, CSS_PROP_LINE_HEIGHT };
-    if (css_eq_ci(name, nn, "margin")) { if (global) css_add_all(s, rule, margins, 4, &g, important, val, vn); else css_box(s, rule, CSS_PROP_MARGIN_TOP, val, vn, important); return; }
-    if (css_eq_ci(name, nn, "padding")) { if (global) css_add_all(s, rule, paddings, 4, &g, important, val, vn); else css_box(s, rule, CSS_PROP_PADDING_TOP, val, vn, important); return; }
-    if (css_eq_ci(name, nn, "border-width")) { if (global) css_add_all(s, rule, borders, 4, &g, important, val, vn); else css_box(s, rule, CSS_PROP_BORDER_TOP_WIDTH, val, vn, important); return; }
-    if (css_eq_ci(name, nn, "border")) { if (global) css_add_all(s, rule, borders, 5, &g, important, val, vn); else css_border(s, rule, -1, val, vn, important); return; }
-    if (css_side_of(name, nn, "border-", "", &side)) {
-        if (global) { css_add_decl(s, rule, borders[side], &g, important, val, vn); css_add_decl(s, rule, CSS_PROP_BORDER_COLOR, &g, important, val, vn); }
-        else css_border(s, rule, side, val, vn, important);
-        return;
-    }
-    if (css_eq_ci(name, nn, "font")) { if (global) css_add_all(s, rule, fonts, 4, &g, important, val, vn); else css_font(s, rule, val, vn, important); return; }
-    if (css_eq_ci(name, nn, "background")) { if (global) css_add_decl(s, rule, CSS_PROP_BACKGROUND_COLOR, &g, important, val, vn); else css_pick(s, rule, CSS_PROP_BACKGROUND_COLOR, "", val, vn, important); return; }
-    if (css_eq_ci(name, nn, "font-family")) {
-        css_val f;
-        if (global) css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &g, important, val, vn);
-        else if (css_family_of(val, vn, &f)) css_add_decl(s, rule, CSS_PROP_FONT_FAMILY, &f, important, val, vn);
-        return;
-    }
-    if (css_eq_ci(name, nn, "list-style")) { if (global) css_add_decl(s, rule, CSS_PROP_LIST_STYLE_TYPE, &g, important, val, vn); else css_pick(s, rule, CSS_PROP_LIST_STYLE_TYPE, "disc", val, vn, important); return; }
-    if (css_eq_ci(name, nn, "text-decoration") || css_eq_ci(name, nn, "text-decoration-line")) {
-        if (global) css_add_decl(s, rule, CSS_PROP_TEXT_DECORATION, &g, important, val, vn);
-        else css_pick(s, rule, CSS_PROP_TEXT_DECORATION, "none", val, vn, important);
-        return;
-    }
-    css_prop p = CSS_PROP_DISPLAY;
-    int found = 0;
-    for (int i = 0; i < CSS_NPROPS && !found; i++)
-        if (css_prop_names[i][0] == css_lower(name[0]) && css_eq_ci(name, nn, css_prop_names[i])) { p = (css_prop)i; found = 1; }
-    if (!found && css_side_of(name, nn, "border-", "-color", &side)) { p = CSS_PROP_BORDER_COLOR; found = 1; }
-    if (!found) return;
+    if (nn == 0) return;
     css_val v;
-    if (p == CSS_PROP_BORDER_COLOR && !global) {
-        /* border-color's one to four colours: the module keeps one, the first */
-        size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
-        size_t k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
-        if (k == 0 || k > 4 || !css_parse_val(val + st[0], ln[0], &v) || !css_valid(p, &v)) return;
-        css_add_decl(s, rule, p, &v, important, val, vn);
+    memset(&v, 0, sizeof v);
+    if (nn > 2 && name[0] == '-' && name[1] == '-') {
+        /* a custom property: its value as written, var() and all, read in the cascade */
+        v.unit = CSS_UNIT_TEXT;
+        uint32_t w = names_intern(s, name, nn);
+        css_add_decl(s, rule, CSS_PROP_CUSTOM, &v, important, val, vn, w);
         return;
     }
-    if (!css_parse_val(val, vn, &v) || !css_valid(p, &v)) return;
-    css_add_decl(s, rule, p, &v, important, val, vn);
+    if (vn == 0) return;
+    if (css_has_var(val, vn)) {
+        /* each longhand waits for the cascade: the value whole, and a shorthand's name */
+        v.unit = CSS_UNIT_VAR;
+        int sh = css_short_of(name, nn);
+        if (sh >= 0) {
+            char ln[32];
+            snprintf(ln, sizeof ln, "%s", css_shorts[sh].name);
+            uint32_t w = names_intern(s, ln, strlen(ln));
+            for (int k = 0; k < css_shorts[sh].n; k++) css_add_decl(s, rule, (css_prop)css_shorts[sh].p[k], &v, important, val, vn, w);
+            return;
+        }
+        int p = css_prop_of(name, nn);
+        if (p < 0) p = css_alias_of(name, nn);
+        if (p >= 0) css_add_decl(s, rule, (css_prop)p, &v, important, val, vn, 0);
+        return;
+    }
+    css_items it;
+    if (!css_expand(name, nn, val, vn, &it)) return;
+    for (int k = 0; k < it.n; k++) {
+        css_item x = it.it[k];
+        if (x.mine) css_add_decl(s, rule, x.prop, &x.v, important, it.buf + x.ts, x.tn, 0);
+        else css_add_decl(s, rule, x.prop, &x.v, important, val + x.ts, x.tn, 0);
+    }
 }
 
 /* a declaration block: name: value; ... */
@@ -701,71 +1816,6 @@ static void css_parse_block(css_style *s, uint32_t rule, const char *t, size_t n
     }
 }
 
-/* ---- media queries (Media Queries 4, abridged): against the viewport ---- */
-
-static int css_media_feature(const char *s, size_t n) {
-    size_t c = 0;
-    while (c < n && s[c] != ':') c++;
-    size_t a = css_skip_ws(s, c, 0), b = c;
-    while (b > a && css_ws(s[b - 1])) b--;
-    const char *name = s + a;
-    size_t nn = b - a;
-    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer");
-    size_t va = css_skip_ws(s, n, c + 1), vb = n;
-    while (vb > va && css_ws(s[vb - 1])) vb--;
-    css_val v;
-    if (!css_parse_val(s + va, vb - va, &v)) return 0;
-    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * 16 : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
-    if (css_eq_ci(name, nn, "min-width")) return px >= 0 && CSS_VIEWPORT_W >= px;
-    if (css_eq_ci(name, nn, "max-width")) return px >= 0 && CSS_VIEWPORT_W <= px;
-    if (css_eq_ci(name, nn, "width")) return px == CSS_VIEWPORT_W;
-    if (css_eq_ci(name, nn, "min-height")) return px >= 0 && CSS_VIEWPORT_H >= px;
-    if (css_eq_ci(name, nn, "max-height")) return px >= 0 && CSS_VIEWPORT_H <= px;
-    if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
-    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, "light");
-    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, "no-preference");
-    return 0;
-}
-
-/* one query: [not|only]? type? (and (feature))* */
-static int css_media_query(const char *s, size_t n) {
-    size_t i = css_skip_ws(s, n, 0);
-    int neg = 0, ok = 1, first = 1;
-    if (i >= n) return 0;
-    while (i < n) {
-        if (s[i] == '(') {
-            size_t e = css_block_end(s, n, i, '(', ')');
-            if (e >= n) return 0;
-            if (!css_media_feature(s + i + 1, e - i - 1)) ok = 0;
-            i = e + 1;
-        } else {
-            size_t b = i;
-            while (i < n && css_namechar(s[i])) i++;
-            if (i == b) return 0;
-            const char *w = s + b;
-            size_t wn = i - b;
-            if (first && css_eq_ci(w, wn, "not")) neg = 1;
-            else if (first && css_eq_ci(w, wn, "only")) {}
-            else if (css_eq_ci(w, wn, "and") || css_eq_ci(w, wn, "all") || css_eq_ci(w, wn, "screen")) {}
-            else ok = 0;    /* print, speech, an unknown type, or `or' */
-        }
-        first = 0;
-        i = css_skip_ws(s, n, i);
-    }
-    return neg ? !ok : ok;
-}
-
-/* a media query list: empty, or one of its queries holds */
-static int css_media_matches(const char *s, size_t n) {
-    if (css_skip_ws(s, n, 0) >= n) return 1;
-    size_t a = 0;
-    while (a < n) {
-        size_t b = css_comma(s, n, a);
-        if (css_media_query(s + a, b - a)) return 1;
-        a = b + 1;
-    }
-    return 0;
-}
 
 /* ---- specificity (Selectors 4, 17) ---- */
 
@@ -868,10 +1918,77 @@ static uint32_t css_spec_list(const char *s, size_t n, int depth) {
     return best;
 }
 
+/* ---- media queries (Media Queries 4, abridged): against the viewport ---- */
+
+static int css_media_feature(const char *s, size_t n) {
+    size_t c = 0;
+    while (c < n && s[c] != ':') c++;
+    size_t a = css_skip_ws(s, c, 0), b = c;
+    while (b > a && css_ws(s[b - 1])) b--;
+    const char *name = s + a;
+    size_t nn = b - a;
+    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer");
+    size_t va = css_skip_ws(s, n, c + 1), vb = n;
+    while (vb > va && css_ws(s[vb - 1])) vb--;
+    css_val v;
+    if (!css_parse_val(s + va, vb - va, &v)) return 0;
+    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * 16 : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
+    if (css_eq_ci(name, nn, "min-width")) return px >= 0 && CSS_VIEWPORT_W >= px;
+    if (css_eq_ci(name, nn, "max-width")) return px >= 0 && CSS_VIEWPORT_W <= px;
+    if (css_eq_ci(name, nn, "width")) return px == CSS_VIEWPORT_W;
+    if (css_eq_ci(name, nn, "min-height")) return px >= 0 && CSS_VIEWPORT_H >= px;
+    if (css_eq_ci(name, nn, "max-height")) return px >= 0 && CSS_VIEWPORT_H <= px;
+    if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
+    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, "light");
+    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, "no-preference");
+    return 0;
+}
+
+/* one query: [not|only]? type? (and (feature))* */
+static int css_media_query(const char *s, size_t n) {
+    size_t i = css_skip_ws(s, n, 0);
+    int neg = 0, ok = 1, first = 1;
+    if (i >= n) return 0;
+    while (i < n) {
+        if (s[i] == '(') {
+            size_t e = css_block_end(s, n, i, '(', ')');
+            if (e >= n) return 0;
+            if (!css_media_feature(s + i + 1, e - i - 1)) ok = 0;
+            i = e + 1;
+        } else {
+            size_t b = i;
+            while (i < n && css_namechar(s[i])) i++;
+            if (i == b) return 0;
+            const char *w = s + b;
+            size_t wn = i - b;
+            if (first && css_eq_ci(w, wn, "not")) neg = 1;
+            else if (first && css_eq_ci(w, wn, "only")) {}
+            else if (css_eq_ci(w, wn, "and") || css_eq_ci(w, wn, "all") || css_eq_ci(w, wn, "screen")) {}
+            else ok = 0;    /* print, speech, an unknown type, or `or' */
+        }
+        first = 0;
+        i = css_skip_ws(s, n, i);
+    }
+    return neg ? !ok : ok;
+}
+
+/* a media query list: empty, or one of its queries holds */
+static int css_media_matches(const char *s, size_t n) {
+    if (css_skip_ws(s, n, 0) >= n) return 1;
+    size_t a = 0;
+    while (a < n) {
+        size_t b = css_comma(s, n, a);
+        if (css_media_query(s + a, b - a)) return 1;
+        a = b + 1;
+    }
+    return 0;
+}
+
 /* ---- the sheet's rules ---- */
 
-/* a style rule: each selector of its list a rule of its own, with the block's declarations */
-static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t pn, const char *blk, size_t bn) {
+/* a style rule: each selector of its list a rule of its own, in the layer layer, with the
+   block's declarations */
+static void css_style_rule(css_style *s, uint32_t sheet, uint32_t layer, const char *pre, size_t pn, const char *blk, size_t bn) {
     size_t a = 0;
     while (a < pn) {
         size_t b = css_comma(pre, pn, a);
@@ -898,6 +2015,7 @@ static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t
             s->rule[r.index].selector = sp;
             s->rule[r.index].spec = css_spec_complex(data(sel), len(sel), 0);
             s->rule[r.index].order = r.index;
+            s->rule[r.index].layer = layer;
             rules_append(s, sheet, r.index);
             css_parse_block(s, r.index, blk, bn);
         }
@@ -905,8 +2023,349 @@ static void css_style_rule(css_style *s, uint32_t sheet, const char *pre, size_t
     }
 }
 
+/* ---- @supports (CSS Conditional 3): its condition, over what the module reads ---- */
+
+static int css_selector_ok(const char *s, size_t n, int depth);
+
+/* a selector's pseudo-class or pseudo-element is one the matcher knows */
+static int css_pseudo_known(const char *p, size_t pn, int element, int fn) {
+    if (element)
+        return !fn && (css_eq_ci(p, pn, "before") || css_eq_ci(p, pn, "after") || css_eq_ci(p, pn, "first-line") ||
+                       css_eq_ci(p, pn, "first-letter") || css_eq_ci(p, pn, "marker") || css_eq_ci(p, pn, "placeholder"));
+    if (fn)
+        return css_eq_ci(p, pn, "not") || css_eq_ci(p, pn, "is") || css_eq_ci(p, pn, "where") || css_eq_ci(p, pn, "matches") ||
+               css_eq_ci(p, pn, "has") || css_eq_ci(p, pn, "nth-child") || css_eq_ci(p, pn, "nth-last-child") ||
+               css_eq_ci(p, pn, "nth-of-type") || css_eq_ci(p, pn, "nth-last-of-type");
+    char w[24];
+    if (pn == 0 || pn >= sizeof w) return 0;
+    for (size_t i = 0; i < pn; i++) w[i] = css_lower(p[i]);
+    w[pn] = 0;
+    return css_word_in(w, "first-child last-child only-child first-of-type last-of-type only-of-type root empty link any-link "
+                          "visited checked disabled enabled hover focus focus-visible focus-within active target before after "
+                          "first-line first-letter");
+}
+
+/* each compound of a selector is one the matcher reads */
+static int css_selector_ok(const char *s, size_t n, int depth) {
+    css_part parts[CSS_MAXPARTS];
+    size_t k = css_split(s, n, parts, CSS_MAXPARTS);
+    if (k == 0 || depth > CSS_MAX_NESTING) return 0;
+    for (size_t j = 0; j < k; j++) {
+        const char *c = s + parts[j].start;
+        size_t cn = parts[j].len, i = 0;
+        while (i < cn) {
+            char ch = c[i];
+            if (ch == '*' || css_namechar(ch)) { i++; continue; }
+            if (ch == '#' || ch == '.') { size_t b = ++i; while (i < cn && css_namechar(c[i])) i++; if (i == b) return 0; continue; }
+            if (ch == '[') { size_t e = css_block_end(c, cn, i, '[', ']'); if (e >= cn) return 0; i = e + 1; continue; }
+            if (ch != ':') return 0;
+            int element = i + 1 < cn && c[i + 1] == ':';
+            i += element ? 2 : 1;
+            size_t b = i;
+            while (i < cn && css_namechar(c[i])) i++;
+            int fn = i < cn && c[i] == '(';
+            if (!css_pseudo_known(c + b, i - b, element, fn)) return 0;
+            if (fn) {
+                size_t e = css_block_end(c, cn, i, '(', ')');
+                if (e >= cn) return 0;
+                if (css_eq_ci(c + b, i - b, "not") || css_eq_ci(c + b, i - b, "is") || css_eq_ci(c + b, i - b, "where")) {
+                    /* a selector list: each of its selectors read */
+                    size_t a = i + 1;
+                    while (a < e) {
+                        size_t z = css_comma(c, e, a);
+                        if (!css_selector_ok(c + a, z - a, depth + 1)) return 0;
+                        a = z + 1;
+                    }
+                }
+                i = e + 1;
+            }
+        }
+    }
+    return 1;
+}
+
+static int css_supports(const char *s, size_t n, int depth);
+
+/* what a test's parentheses hold: a declaration the module reads, or a condition */
+static int css_supports_test(const char *in, size_t inn, int depth) {
+    {
+        size_t colon = 0;
+        while (colon < inn && in[colon] != ':' && in[colon] != '(') colon++;
+        if (colon < inn && in[colon] == ':') {
+            size_t a = css_skip_ws(in, colon, 0), b = colon;
+            while (b > a && css_ws(in[b - 1])) b--;
+            if (b - a > 2 && in[a] == '-' && in[a + 1] == '-') return 1;   /* a custom property takes any value */
+            size_t va = css_skip_ws(in, inn, colon + 1), vb = inn;
+            while (vb > va && css_ws(in[vb - 1])) vb--;
+            if (vb == va) return 0;
+            if (css_has_var(in + va, vb - va)) return css_short_of(in + a, b - a) >= 0 || css_prop_of(in + a, b - a) >= 0;
+            css_items it;
+            return css_expand(in + a, b - a, in + va, vb - va, &it);
+        }
+        return css_supports(in, inn, depth + 1);
+    }
+}
+
+/* one parenthesized test, or selector() */
+static int css_supports_in(const char *s, size_t n, int depth) {
+    if (n >= 2 && s[0] == '(' && s[n - 1] == ')') return css_supports_test(s + 1, n - 2, depth);
+    if (css_is_fn(s, n, "selector")) return css_selector_ok(s + 9, n - 10, 0);
+    return 0;               /* font-tech(), font-format() and what else: not known, false */
+}
+
+static int css_supports(const char *s, size_t n, int depth) {
+    if (depth > 16) return 0;
+    /* its parts: parenthesized tests, functions, and the words not, and, or */
+    size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS], k = 0, i = 0;
+    while (i < n && k < CSS_MAXPARTS) {
+        i = css_skip_ws(s, n, i);
+        if (i >= n) break;
+        size_t b = i;
+        if (s[i] == '(') { size_t e = css_block_end(s, n, i, '(', ')'); if (e >= n) return 0; i = e + 1; }
+        else {
+            while (i < n && css_namechar(s[i])) i++;
+            if (i < n && s[i] == '(') { size_t e = css_block_end(s, n, i, '(', ')'); if (e >= n) return 0; i = e + 1; }
+            if (i == b) return 0;
+        }
+        st[k] = b;
+        ln[k] = i - b;
+        k++;
+    }
+    if (k == 0) return 0;
+    if (css_eq_ci(s + st[0], ln[0], "not")) return k == 2 && !css_supports_in(s + st[1], ln[1], depth);
+    int v = css_supports_in(s + st[0], ln[0], depth), op = 0;
+    for (size_t j = 1; j + 1 < k; j += 2) {
+        int this_op = css_eq_ci(s + st[j], ln[j], "and") ? 1 : css_eq_ci(s + st[j], ln[j], "or") ? 2 : 0;
+        if (!this_op || (op && this_op != op)) return 0;          /* and and or are not mixed without parentheses */
+        op = this_op;
+        int w = css_supports_in(s + st[j + 1], ln[j + 1], depth);
+        v = op == 1 ? v && w : v || w;
+    }
+    return k % 2 == 1 ? v : 0;
+}
+
+/* ---- @layer (CSS Cascade 5) ---- */
+
+/* the layer name (one name of a dotted one) in the layer parent, made if it is new */
+static uint32_t css_layer_named(css_style *s, uint32_t parent, const char *name, size_t nn) {
+    for (uint32_t l = 1; l < s->layer_len; l++) {
+        if (s->layer[l].parent != parent) continue;
+        amb_span sp = s->layer[l].name;
+        const char *t = text_ptr(s, sp);
+        size_t dot = sp.len;
+        while (dot > 0 && t[dot - 1] != '.') dot--;
+        if (sp.len - dot == nn && memcmp(t + dot, name, nn) == 0) return l;
+    }
+    vector<char> full;
+    if (parent) { amb_span pp = s->layer[parent].name; append_range(full, text_ptr(s, pp), pp.len); push_back(full, '.'); }
+    append_range(full, name, nn);
+    amb_span sp = text_add(s, data(full), len(full));
+    css_layer_h h = layer_new(s);
+    s->layer[h.index].name = sp;
+    s->layer[h.index].parent = parent;
+    return h.index;
+}
+
+/* a dotted layer name (a.b.c) in the layer parent: its last layer */
+static uint32_t css_layer_path(css_style *s, uint32_t parent, const char *name, size_t nn) {
+    size_t a = css_skip_ws(name, nn, 0), e = nn;
+    while (e > a && css_ws(name[e - 1])) e--;
+    uint32_t l = parent;
+    while (a < e) {
+        size_t b = a;
+        while (b < e && name[b] != '.') b++;
+        if (b == a) return parent;
+        l = css_layer_named(s, l, name + a, b - a);
+        a = b + 1;
+    }
+    return l;
+}
+
+/* an anonymous layer in parent: a layer of its own, which no rule names */
+static uint32_t css_layer_anon(css_style *s, uint32_t parent) {
+    char nm[40];
+    int k = snprintf(nm, sizeof nm, "<anonymous %u>", (unsigned)s->layer_len);
+    return css_layer_named(s, parent, nm, k > 0 ? (size_t)k : 0);
+}
+
+/* each layer's rank: the order its rules cascade in -- a layer's sublayers before its own
+   rules, siblings in the order they were first named (a walk, children before parents) */
+static uint32_t css_layer_rank(css_style *s, uint32_t parent, uint32_t next) {
+    for (uint32_t l = 1; l < s->layer_len; l++) {
+        if (s->layer[l].parent != parent) continue;
+        next = css_layer_rank(s, l, next);
+        s->layer[l].rank = next++;
+    }
+    return next;
+}
+
+/* ---- @import and @font-face: what the loader fetches for a sheet ---- */
+
+/* where a sheet's rules are read: its sheet, its layer, its base URL, how deep in
+   @imports, and whether a rule other than @import has been met */
+typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; } css_pctx;
+
+static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
+
+/* a url() or a string's text, its quotes and white space gone, into out: 1 when it is one */
+static int css_url_of(const char *s, size_t n, char *out, size_t cap) {
+    size_t a = 0, e = n;
+    if (css_is_fn(s, n, "url")) { a = 4; e = n - 1; }
+    a = css_skip_ws(s, e, a);
+    while (e > a && css_ws(s[e - 1])) e--;
+    if (e > a && (s[a] == '"' || s[a] == '\'')) { if (s[e - 1] != s[a] || e - a < 2) return 0; a++; e--; }
+    else if (!css_is_fn(s, n, "url")) return 0;
+    if (e - a + 1 > cap) return 0;
+    memcpy(out, s + a, e - a);
+    out[e - a] = 0;
+    return 1;
+}
+
+/* a URL a sheet names, made absolute against its base, and fetched -- unless a page not
+   read from a file names a file (the loader's rule, net.c): the resource, or 0 */
+static uint32_t css_fetch(net_loader *net, const css_pctx *cx, const char *ref, net_kind kind, char *abs, size_t cap) {
+    if (!net || !cx->base[0] || !net_url_resolve(cx->base, ref, abs, cap)) return 0;
+    if (strncmp(abs, "file:", 5) == 0 && strncmp(cx->base, "file:", 5) != 0) return 0;
+    net_resource_h h = net_fetch(net, abs, strlen(abs), kind);
+    return net->resource[h.index].outcome == NET_OUTCOME_OK ? h.index : 0;
+}
+
+/* a sheet's text, its comments stripped, read into a new sheet of the store */
+static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin, const char *src, size_t n, const char *url,
+                               uint32_t parent, uint32_t layer, int depth, const char *base) {
+    vector<char> t;
+    css_strip_comments(src, n, &t);
+    css_sheet_h sh = sheet_new(s);
+    s->sheet[sh.index].origin = origin;
+    s->sheet[sh.index].parent = parent;
+    if (url) s->sheet[sh.index].url = text_add(s, url, strlen(url));
+    css_pctx cx;
+    memset(&cx, 0, sizeof cx);
+    cx.sheet = sh.index;
+    cx.layer = layer;
+    cx.depth = depth;
+    cx.origin = origin;
+    snprintf(cx.base, sizeof cx.base, "%s", base ? base : "");
+    css_rules(s, net, &cx, data(t), len(t));
+    s->revision++;
+    return sh.index;
+}
+
+/* @import url [layer | layer(name)] [supports(...)] [media]: the sheet fetched and read
+   where the rule stands, its rules in the layer it names */
+static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *p, size_t n) {
+    size_t i = 0, st, ln;
+    char ref[2048], abs[4096];
+    if (!css_next_part(p, n, &i, &st, &ln) || !css_url_of(p + st, ln, ref, sizeof ref)) return;
+    uint32_t layer = cx->layer;
+    size_t rest = i;
+    while (css_next_part(p, n, &i, &st, &ln)) {
+        if (css_eq_ci(p + st, ln, "layer")) { layer = css_layer_anon(s, cx->layer); rest = i; continue; }
+        if (css_is_fn(p + st, ln, "layer")) { layer = css_layer_path(s, cx->layer, p + st + 6, ln - 7); rest = i; continue; }
+        if (css_is_fn(p + st, ln, "supports")) {
+            if (!css_supports_test(p + st + 9, ln - 10, 0)) return;
+            rest = i;
+            continue;
+        }
+        break;
+    }
+    if (!css_media_matches(p + rest, n - rest) || cx->depth >= 8) return;
+    uint32_t r = css_fetch(net, cx, ref, NET_KIND_STYLESHEET, abs, sizeof abs);
+    if (!r) return;
+    /* an import of a sheet already being read (a cycle) is not read again */
+    for (uint32_t a = cx->sheet; a; a = s->sheet[a].parent) {
+        amb_span u = s->sheet[a].url;
+        if (u.len == strlen(abs) && memcmp(text_ptr(s, u), abs, u.len) == 0) return;
+    }
+    char base[4096];
+    amb_span fu = net->resource[r].final_url;
+    snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
+    vector<char> body;
+    append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
+    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base);
+}
+
+/* the bytes begin as a font the painter reads: TrueType, OpenType, WOFF */
+static int css_font_magic(const char *b, size_t n) {
+    if (n < 4) return 0;
+    return (b[0] == 0 && b[1] == 1 && b[2] == 0 && b[3] == 0) || memcmp(b, "true", 4) == 0 || memcmp(b, "wOFF", 4) == 0;
+}
+
+/* @font-face: its family, the first source whose format the painter reads, its weight
+   and style; the source fetched */
+static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, const char *t, size_t n) {
+    vector<char> family;
+    char ref[2048], abs[4096];
+    ref[0] = 0;
+    uint32_t weight = 400;
+    int italic = 0;
+    size_t d = 0;
+    while (d < n) {
+        size_t e = d;
+        while (e < n && t[e] != ';') {
+            if (t[e] == '(') e = css_block_end(t, n, e, '(', ')');
+            else if (t[e] == '"' || t[e] == '\'') e = css_string_end(t, n, e);
+            if (e < n) e++;
+        }
+        size_t colon = d;
+        while (colon < e && t[colon] != ':') colon++;
+        if (colon < e) {
+            size_t na = css_skip_ws(t, colon, d), nb = colon, va = css_skip_ws(t, e, colon + 1), vb = e;
+            while (nb > na && css_ws(t[nb - 1])) nb--;
+            while (vb > va && css_ws(t[vb - 1])) vb--;
+            const char *v = t + va;
+            size_t vn = vb - va;
+            if (css_eq_ci(t + na, nb - na, "font-family")) {
+                clear(family);
+                if (vn >= 2 && (v[0] == '"' || v[0] == '\'')) append_range(family, v + 1, vn - 2);
+                else append_range(family, v, vn);
+            } else if (css_eq_ci(t + na, nb - na, "src") && !ref[0]) {
+                /* the sources in order: the first url() whose format() is none or one read */
+                size_t a = 0;
+                while (a < vn && !ref[0]) {
+                    size_t b = css_comma(v, vn, a), i = a, st, ln;
+                    int ok = 1;
+                    char u[2048];
+                    u[0] = 0;
+                    while (css_next_part(v, b, &i, &st, &ln)) {
+                        if (css_is_fn(v + st, ln, "url")) { if (!css_url_of(v + st, ln, u, sizeof u)) ok = 0; }
+                        else if (css_is_fn(v + st, ln, "format")) {
+                            char f[64];
+                            if (!css_url_of(v + st + 7, ln - 8, f, sizeof f)) snprintf(f, sizeof f, "%.*s", (int)(ln - 8), v + st + 7);
+                            for (size_t q = 0; f[q]; q++) f[q] = css_lower(f[q]);
+                            if (!css_word_in(f, "truetype opentype woff")) ok = 0;
+                        } else if (css_is_fn(v + st, ln, "tech")) ok = 0;
+                    }
+                    if (ok && u[0]) snprintf(ref, sizeof ref, "%s", u);
+                    a = b + 1;
+                }
+            } else if (css_eq_ci(t + na, nb - na, "font-weight")) {
+                double x;
+                if (css_eq_ci(v, vn, "bold")) weight = 700;
+                else if (css_number(v, vn, &x)) weight = (uint32_t)x;
+            } else if (css_eq_ci(t + na, nb - na, "font-style")) italic = vn >= 6 && (css_eq_ci(v, 6, "italic") || css_eq_ci(v, 7, "oblique"));
+        }
+        d = e + 1;
+    }
+    if (!len(family) || !ref[0]) return;
+    css_face_h h = face_new(s);
+    uint32_t fi = h.index;
+    amb_span fam = text_add(s, data(family), len(family));
+    s->face[fi].family = fam;
+    s->face[fi].weight = weight;
+    s->face[fi].italic = (uint8_t)italic;
+    uint32_t r = css_fetch(net, cx, ref, NET_KIND_OTHER, abs, sizeof abs);
+    /* the URL fetched, or (a fetch that failed) as written; an if, as a ternary between
+       two arrays is not lowered (toolchain finding) */
+    amb_span ua;
+    if (r) ua = text_add(s, abs, strlen(abs));
+    else ua = text_add(s, ref, strlen(ref));
+    s->face[fi].url = ua;
+    if (r && css_font_magic(bytes_ptr(net, net->resource[r].body), net->resource[r].body.len)) s->face[fi].font = resource_handle(net, r);
+}
+
 /* a sheet's text, its comments gone: rules and at-rules */
-static void css_rules(css_style *s, uint32_t sheet, const char *t, size_t n) {
+static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n) {
     size_t i = 0;
     while (i < n) {
         i = css_skip_ws(t, n, i);
@@ -921,30 +2380,53 @@ static void css_rules(css_style *s, uint32_t sheet, const char *t, size_t n) {
             else if (t[k] == '[') k = css_block_end(t, n, k, '[', ']');
             if (k < n) k++;
         }
-        if (k >= n) break;
-        if (t[k] == ';') { i = k + 1; continue; }    /* @import, @charset, @namespace: not read */
+        size_t j = i + 1;
+        while (at && j < k && css_namechar(t[j])) j++;
+        const char *name = t + i + 1;
+        size_t nn = j - i - 1;
+        if (k >= n || t[k] == ';') {
+            /* a statement: @import (before any other rule), @layer's names; @charset and
+               @namespace read past */
+            size_t stop = k < n ? k : n;
+            if (at && css_eq_ci(name, nn, "import") && !cx->ruled) css_import(s, net, cx, t + j, stop - j);
+            else if (at && css_eq_ci(name, nn, "layer")) {
+                size_t a = j;
+                while (a < stop) {
+                    size_t b = css_comma(t, stop, a);
+                    css_layer_path(s, cx->layer, t + a, b - a);
+                    a = b + 1;
+                }
+            } else if (!(at && (css_eq_ci(name, nn, "charset") || css_eq_ci(name, nn, "namespace")))) cx->ruled = 1;
+            if (k >= n) break;
+            i = k + 1;
+            continue;
+        }
         size_t end = css_block_end(t, n, k, '{', '}');
         size_t inner = end < n ? end - k - 1 : n - k - 1;
-        if (at) {
-            size_t j = i + 1;
-            while (j < k && css_namechar(t[j])) j++;
-            /* @media whose query holds: its rules are the sheet's; @supports, @layer,
-               @font-face, @keyframes, @page and the rest: not read */
-            if (css_eq_ci(t + i + 1, j - i - 1, "media") && css_media_matches(t + j, k - j)) css_rules(s, sheet, t + k + 1, inner);
+        if (at && css_eq_ci(name, nn, "layer")) {
+            /* @layer name { } (or anonymous): its rules in that layer */
+            css_pctx sub = *cx;
+            size_t a = css_skip_ws(t, k, j);
+            sub.layer = a < k ? css_layer_path(s, cx->layer, t + a, k - a) : css_layer_anon(s, cx->layer);
+            css_rules(s, net, &sub, t + k + 1, inner);
+            cx->ruled = 1;
+        } else if (at) {
+            /* @media whose query holds, @supports whose condition does: their rules are the
+               sheet's; @font-face's face is fetched; @keyframes, @page and the rest: not read */
+            if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
+            else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
+            else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
+            cx->ruled = 1;
         } else {
-            css_style_rule(s, sheet, t + i, k - i, t + k + 1, inner);
+            css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
+            cx->ruled = 1;
         }
         i = end + 1;
     }
 }
 
 css_status css_parse_sheet(css_style *s, css_origin origin, const char *src, size_t src_len) {
-    vector<char> t;
-    css_strip_comments(src, src_len, &t);
-    css_sheet_h sh = sheet_new(s);
-    s->sheet[sh.index].origin = origin;
-    css_rules(s, sh.index, data(t), len(t));
-    s->revision++;
+    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0);
     return CSS_OK;
 }
 
@@ -1039,14 +2521,18 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
     return k % a == 0 && k / a >= 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget);
+/* the page's state the pseudo-classes of state read: the element hovered, focused (and
+   whether visibly), active, and the URL's target; 0 for none */
+typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target; } css_mstate;
+
+static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
 
 /* one of a selector list's complex selectors matches x */
-static int css_list_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_list_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     size_t a = 0;
     while (a < n) {
         size_t b = css_comma(s, n, a);
-        if (css_complex_matches(d, x, s + a, b - a, depth, budget)) return 1;
+        if (css_complex_matches(d, x, ms, s + a, b - a, depth, budget)) return 1;
         a = b + 1;
     }
     return 0;
@@ -1056,7 +2542,9 @@ static int css_list_matches(const dom_document *d, uint32_t x, const char *s, si
    src/script/script.c), by the matcher the cascade uses: 1 when x matches */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n) {
     int budget = 100000;
-    return css_list_matches(d, x, s, n, 0, &budget) && budget >= 0;
+    css_mstate none;
+    memset(&none, 0, sizeof none);
+    return css_list_matches(d, x, &none, s, n, 0, &budget) && budget >= 0;
 }
 
 static int css_form_control(const dom_document *d, uint32_t x) {
@@ -1065,7 +2553,13 @@ static int css_form_control(const dom_document *d, uint32_t x) {
 }
 
 /* a pseudo-class without arguments holds of x */
-static int css_pseudo(const dom_document *d, uint32_t x, const char *ps, size_t pn) {
+/* y is x or one of x's descendants */
+static int css_within(const dom_document *d, uint32_t x, uint32_t y) {
+    for (int k = 0; y && k < 4096; k++, y = d->node[y].parent) if (y == x) return 1;
+    return 0;
+}
+
+static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, const char *ps, size_t pn) {
     if (css_eq_ci(ps, pn, "first-child")) return css_siblings(d, x, 0, 0) == 0;
     if (css_eq_ci(ps, pn, "last-child")) return css_siblings(d, x, 1, 0) == 0;
     if (css_eq_ci(ps, pn, "only-child")) return css_siblings(d, x, 0, 0) == 0 && css_siblings(d, x, 1, 0) == 0;
@@ -1084,7 +2578,17 @@ static int css_pseudo(const dom_document *d, uint32_t x, const char *ps, size_t 
         return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
     if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
     if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_attr_of(d, x, "disabled", 8);
-    return 0;   /* :hover, :focus, :visited, :target and the rest: a page at rest has no such state */
+    /* the state the page is in: :hover and :active hold of the element and its ancestors,
+       :focus-within of the focused one and its; :visited of none (no history is read). A
+       page at rest: none of them holds */
+    if (!ms->hover && !ms->active && !ms->focus && !ms->focus_visible && !ms->target) return 0;
+    if (css_eq_ci(ps, pn, "hover")) return ms->hover && css_within(d, x, ms->hover);
+    if (css_eq_ci(ps, pn, "active")) return ms->active && css_within(d, x, ms->active);
+    if (css_eq_ci(ps, pn, "focus")) return ms->focus == x;
+    if (css_eq_ci(ps, pn, "focus-visible")) return ms->focus_visible == x;
+    if (css_eq_ci(ps, pn, "focus-within")) return ms->focus && css_within(d, x, ms->focus);
+    if (css_eq_ci(ps, pn, "target")) return ms->target == x;
+    return 0;   /* :visited and what else: no such state */
 }
 
 /* an attribute selector, [ to ] (e is the ]), holds of x */
@@ -1095,6 +2599,7 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
     size_t anl = ae - a;
     if (anl == 0 || anl >= sizeof an) return 0;
     for (size_t k = 0; k < anl; k++) an[k] = css_lower(s[a + k]);
+    an[anl] = 0;
     uint32_t at = css_attr_of(d, x, an, anl);
     if (!at) return 0;
     size_t o = css_skip_ws(s, e, ae);
@@ -1117,7 +2622,12 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
         after = ve;
     }
     after = css_skip_ws(s, e, after);
+    /* the i flag; or, without the s flag, an attribute whose value HTML compares without case (HTML 4.2.6.3?) */
     int ci = after < e && css_lower(s[after]) == 'i';
+    if (!ci && !(after < e && css_lower(s[after]) == 's') &&
+        css_word_in(an, "accept accept-charset align alink axis bgcolor charset checked clear codetype color compact declare defer dir "
+                        "direction disabled enctype face frame hreflang http-equiv lang language link media method multiple nohref "
+                        "noresize noshade nowrap readonly rel rev rules scope scrolling selected shape target text type valign valuetype vlink")) ci = 1;
     amb_span v = d->attr[at].value;
     const char *vp = text_ptr(d, v);
     const char *w = s + vs;
@@ -1135,9 +2645,12 @@ static int css_attr_sel(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* a compound selector holds of the element x */
-static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_has(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
+
+static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     size_t i = 0;
-    if (n == 0 || depth > CSS_MAX_NESTING || --*budget < 0) return 0;
+    if (depth > CSS_MAX_NESTING || --*budget < 0) return 0;
+    if (n == 0) return 1;                       /* nothing left of it but its pseudo-element: universal */
     while (i < n) {
         char c = s[i];
         if (c == '*') { i++; continue; }
@@ -1180,8 +2693,9 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
                 const char *as = s + i + 1;
                 size_t an = e - i - 1;
                 int ok;
-                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, as, an, depth + 1, budget) && *budget >= 0;
-                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, as, an, depth + 1, budget);
+                if (css_eq_ci(ps, pn, "not")) ok = !css_list_matches(d, x, ms, as, an, depth + 1, budget) && *budget >= 0;
+                else if (css_eq_ci(ps, pn, "is") || css_eq_ci(ps, pn, "where") || css_eq_ci(ps, pn, "matches")) ok = css_list_matches(d, x, ms, as, an, depth + 1, budget);
+                else if (css_eq_ci(ps, pn, "has")) ok = css_has(d, x, ms, as, an, depth + 1, budget);
                 else if (css_eq_ci(ps, pn, "nth-child")) ok = css_nth(d, x, as, an, 0, 0);
                 else if (css_eq_ci(ps, pn, "nth-last-child")) ok = css_nth(d, x, as, an, 1, 0);
                 else if (css_eq_ci(ps, pn, "nth-of-type")) ok = css_nth(d, x, as, an, 0, 1);
@@ -1192,7 +2706,7 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
                 continue;
             }
             if (css_eq_ci(ps, pn, "before") || css_eq_ci(ps, pn, "after") || css_eq_ci(ps, pn, "first-line") || css_eq_ci(ps, pn, "first-letter")) return 0;
-            if (!css_pseudo(d, x, ps, pn)) return 0;
+            if (!css_pseudo(d, x, ms, ps, pn)) return 0;
             continue;
         }
         return 0;
@@ -1201,26 +2715,88 @@ static int css_compound(const dom_document *d, uint32_t x, const char *s, size_t
 }
 
 /* the compounds parts[0..k) hold, parts[k-1] of x and the rest through their combinators */
-static int css_parts_match(const dom_document *d, uint32_t x, const char *s, const css_part *parts, size_t k, int depth, int *budget) {
-    if (!css_compound(d, x, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
+static int css_parts_match(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, const css_part *parts, size_t k, int depth,
+                           int *budget) {
+    if (!css_compound(d, x, ms, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
     if (k == 1) return 1;
     char comb = parts[k - 1].comb;
-    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
-    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, s, parts, k - 1, depth, budget); }
+    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
     if (comb == '~') {
         for (uint32_t y = css_prev_element(d, x); y && *budget >= 0; y = css_prev_element(d, y))
-            if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
+            if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
         return 0;
     }
     for (uint32_t y = css_parent_element(d, x); y && *budget >= 0; y = css_parent_element(d, y))
-        if (css_parts_match(d, y, s, parts, k - 1, depth, budget)) return 1;
+        if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
     return 0;
 }
 
-static int css_complex_matches(const dom_document *d, uint32_t x, const char *s, size_t n, int depth, int *budget) {
+static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
     css_part parts[CSS_MAXPARTS];
     size_t k = css_split(s, n, parts, CSS_MAXPARTS);
-    return k > 0 && css_parts_match(d, x, s, parts, k, depth, budget);
+    return k > 0 && css_parts_match(d, x, ms, s, parts, k, depth, budget);
+}
+
+/* the relative selector parts[0..k) (after its leading combinator lead) holds of y,
+   anchored at x: parts[k-1] of y, the rest through their combinators, and the first
+   compound in the relation lead names with x */
+static int css_rel_match(const dom_document *d, uint32_t y, uint32_t x, char lead, const css_mstate *ms, const char *s, const css_part *parts,
+                         size_t k, int depth, int *budget) {
+    if (!css_compound(d, y, ms, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
+    if (k == 1) {
+        if (lead == '>') return css_parent_element(d, y) == x;
+        if (lead == '+') return css_prev_element(d, y) == x;
+        if (lead == '~') { for (uint32_t z = css_prev_element(d, y); z; z = css_prev_element(d, z)) if (z == x) return 1; return 0; }
+        for (uint32_t z = css_parent_element(d, y); z; z = css_parent_element(d, z)) if (z == x) return 1;
+        return 0;
+    }
+    char comb = parts[k - 1].comb;
+    if (comb == '>') { uint32_t z = css_parent_element(d, y); return z && css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t z = css_prev_element(d, y); return z && css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '~') {
+        for (uint32_t z = css_prev_element(d, y); z && *budget >= 0; z = css_prev_element(d, z))
+            if (css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget)) return 1;
+        return 0;
+    }
+    for (uint32_t z = css_parent_element(d, y); z && z != x && *budget >= 0; z = css_parent_element(d, z))
+        if (css_rel_match(d, z, x, lead, ms, s, parts, k - 1, depth, budget)) return 1;
+    return 0;
+}
+
+/* the next node after y in tree order inside top's subtree (top not counted), or 0 */
+static uint32_t css_next_under(const dom_document *d, uint32_t y, uint32_t top) {
+    if (d->node[y].first_child) return d->node[y].first_child;
+    while (y != top && !d->node[y].next_sibling) y = d->node[y].parent;
+    return y == top ? 0 : d->node[y].next_sibling;
+}
+
+/* :has(): one of its relative selectors holds of an element of its scope -- x's
+   descendants (no combinator, or >), or x's later siblings and their descendants (+, ~).
+   Its search has a budget of its own: past it, it holds of none */
+static int css_has(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget) {
+    size_t a = 0;
+    int hb = 20000;
+    while (a < n) {
+        size_t b = css_comma(s, n, a), i = css_skip_ws(s, b, a);
+        char lead = ' ';
+        if (i < b && (s[i] == '>' || s[i] == '+' || s[i] == '~')) { lead = s[i]; i++; }
+        css_part parts[CSS_MAXPARTS];
+        size_t k = css_split(s + i, b - i, parts, CSS_MAXPARTS);
+        for (size_t q = 0; q < k; q++) parts[q].start += (uint32_t)i;
+        if (k > 0 && (lead == ' ' || lead == '>')) {
+            for (uint32_t y = d->node[x].first_child; y && hb > 0; y = css_next_under(d, y, x))
+                if (d->node[y].kind == DOM_NODE_KIND_ELEMENT && hb-- > 0 && css_rel_match(d, y, x, lead, ms, s, parts, k, depth, budget)) return 1;
+        } else if (k > 0) {
+            for (uint32_t z = css_next_element(d, x); z && hb > 0; z = lead == '+' ? 0 : css_next_element(d, z)) {
+                if (hb-- > 0 && css_rel_match(d, z, x, lead, ms, s, parts, k, depth, budget)) return 1;
+                for (uint32_t y = d->node[z].first_child; y && hb > 0; y = css_next_under(d, y, z))
+                    if (d->node[y].kind == DOM_NODE_KIND_ELEMENT && hb-- > 0 && css_rel_match(d, y, x, lead, ms, s, parts, k, depth, budget)) return 1;
+            }
+        }
+        a = b + 1;
+    }
+    return 0;
 }
 
 /* ---- the rules' index (PLAN.md §11) ----
@@ -1241,7 +2817,40 @@ enum { CSS_KEY_UNIVERSAL, CSS_KEY_TYPE, CSS_KEY_ID, CSS_KEY_CLASS, CSS_KEY_ATTR 
 typedef struct css_key { uint32_t kind, start, len; } css_key;
 typedef struct css_bucket { uint32_t kind, len, hash, head, tail; } css_bucket;
 typedef struct css_bent { uint32_t rule, next; } css_bent;                    /* a bucket's rule */
-typedef struct css_rx { uint32_t parts, nparts; uint64_t anc[4]; } css_rx;   /* a rule as the index holds it */
+/* a rule as the index holds it: its parts (nparts: their count, and its pseudo-element above
+   the low 8 bits), its ancestors' keys */
+typedef struct css_rx { uint32_t parts, nparts; uint64_t anc[4]; } css_rx;
+
+/* the pseudo-element a subject compound ends with (::before, ...; :before, :after,
+   :first-line and :first-letter as CSS 2 wrote them): its css_pseudo, and *n made the
+   compound's length without it; CSS_PSEUDO_ELEMENT when it has none */
+static css_pseudo css_pseudo_of(const char *s, size_t *n) {
+    if (!memchr(s, ':', *n)) return CSS_PSEUDO_ELEMENT;
+    size_t j = 0;
+    while (j < *n) {
+        if (s[j] == '(') { j = css_block_end(s, *n, j, '(', ')'); if (j < *n) j++; continue; }
+        if (s[j] == '[') { j = css_block_end(s, *n, j, '[', ']'); if (j < *n) j++; continue; }
+        if (s[j] != ':') { j++; continue; }
+        size_t c0 = j;
+        int dbl = j + 1 < *n && s[j + 1] == ':';
+        j += dbl ? 2 : 1;
+        size_t b = j;
+        while (j < *n && css_namechar(s[j])) j++;
+        if (j != *n) continue;
+        const char *w = s + b;
+        size_t wn = j - b;
+        css_pseudo k = CSS_PSEUDO_ELEMENT;
+        if (css_eq_ci(w, wn, "before")) k = CSS_PSEUDO_BEFORE;
+        else if (css_eq_ci(w, wn, "after")) k = CSS_PSEUDO_AFTER;
+        else if (css_eq_ci(w, wn, "first-line")) k = CSS_PSEUDO_FIRST_LINE;
+        else if (css_eq_ci(w, wn, "first-letter")) k = CSS_PSEUDO_FIRST_LETTER;
+        else if (dbl && css_eq_ci(w, wn, "marker")) k = CSS_PSEUDO_MARKER;
+        else if (dbl && css_eq_ci(w, wn, "placeholder")) k = CSS_PSEUDO_PLACEHOLDER;
+        if (k != CSS_PSEUDO_ELEMENT) *n = c0;
+        return k;
+    }
+    return CSS_PSEUDO_ELEMENT;
+}
 
 /* a key's hash: its kind, then its bytes (a type's and an attribute name's lowered) */
 static uint32_t css_key_hash(uint32_t kind, const char *s, size_t n) {
@@ -1400,8 +3009,15 @@ static void css_index_rules(const css_style *s, uint32_t n, vector<css_part> *pa
         size_t k = css_split(t, sel.len, ps, CSS_MAXPARTS);
         css_rx rx;
         memset(&rx, 0, sizeof rx);
+        uint32_t pseudo = 0;
+        if (k > 0) {
+            /* a pseudo-element: the rule matches its element, the pseudo-element cut from its subject */
+            size_t ln = ps[k - 1].len;
+            pseudo = (uint32_t)css_pseudo_of(t + ps[k - 1].start, &ln);
+            ps[k - 1].len = (uint32_t)ln;
+        }
         rx.parts = (uint32_t)len(*parts);
-        rx.nparts = (uint32_t)k;
+        rx.nparts = (uint32_t)k | pseudo << 8;
         for (size_t j = 0; j < k; j++) push_back(parts, ps[j]);
         if (k == 0) { (*rxs)[r] = rx; continue; }        /* not a selector this reads: it matches nothing */
         css_key keys[CSS_MAX_KEYS];
@@ -1465,63 +3081,48 @@ static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom,
     return c;
 }
 
-/* the shared rule r matches x: its ancestors' keys in x's filter am, then the matcher */
-static int css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, uint32_t r, const vector<css_part> *parts,
-                            const vector<css_rx> *rxs, const uint64_t *am) {
+/* the rule r matches x (its ancestors' keys in x's filter am, then the matcher): 1, or 1
+   and its pseudo-element (shifted 8 up); 0 when it does not */
+static uint32_t css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, const css_mstate *ms, uint32_t r,
+                            const vector<css_part> *parts, const vector<css_rx> *rxs, const uint64_t *am) {
     css_rx rx = at(*rxs, r);
-    if (rx.nparts == 0) return 0;
+    uint32_t np = rx.nparts & 0xff;
+    if (np == 0) return 0;
     if ((rx.anc[0] & ~am[0]) | (rx.anc[1] & ~am[1]) | (rx.anc[2] & ~am[2]) | (rx.anc[3] & ~am[3])) return 0;
     css_part ps[CSS_MAXPARTS];
-    for (uint32_t j = 0; j < rx.nparts; j++) ps[j] = at(*parts, rx.parts + j);
+    for (uint32_t j = 0; j < np; j++) ps[j] = at(*parts, rx.parts + j);
     int budget = CSS_MATCH_BUDGET;
     amb_span sel = s->rule[r].selector;
-    return css_parts_match(d, x, text_ptr(s, sel), ps, rx.nparts, 0, &budget);
+    return css_parts_match(d, x, ms, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
 }
 
 /* ---- the cascade ---- */
 
-static int css_inherited(css_prop p) {
-    return p == CSS_PROP_COLOR || p == CSS_PROP_FONT_SIZE || p == CSS_PROP_FONT_WEIGHT || p == CSS_PROP_FONT_STYLE ||
-           p == CSS_PROP_TEXT_ALIGN || p == CSS_PROP_LINE_HEIGHT || p == CSS_PROP_WHITE_SPACE || p == CSS_PROP_LIST_STYLE_TYPE ||
-           p == CSS_PROP_FONT_FAMILY;
-}
-
-/* a property's initial value, as computed */
-static void css_initial(css_prop p, css_val *v) {
-    memset(v, 0, sizeof *v);
-    v->unit = CSS_UNIT_PX;
-    if (p == CSS_PROP_DISPLAY) css_word_val(v, "inline");
-    else if (p == CSS_PROP_COLOR || p == CSS_PROP_BORDER_COLOR) { v->unit = CSS_UNIT_COLOR; v->color = 0x000000ff; }
-    else if (p == CSS_PROP_BACKGROUND_COLOR) v->unit = CSS_UNIT_COLOR;
-    else if (p == CSS_PROP_FONT_SIZE) v->num = 16;
-    else if (p == CSS_PROP_FONT_WEIGHT) { v->unit = CSS_UNIT_NUMBER; v->num = 400; }
-    else if (p == CSS_PROP_FONT_STYLE || p == CSS_PROP_LINE_HEIGHT || p == CSS_PROP_WHITE_SPACE) css_word_val(v, "normal");
-    else if (p == CSS_PROP_TEXT_ALIGN) css_word_val(v, "start");
-    else if (p == CSS_PROP_TEXT_DECORATION) css_word_val(v, "none");
-    else if (p == CSS_PROP_WIDTH || p == CSS_PROP_HEIGHT) v->unit = CSS_UNIT_AUTO;
-    else if (p == CSS_PROP_LIST_STYLE_TYPE) css_word_val(v, "disc");
-    else if (p == CSS_PROP_FONT_FAMILY) css_word_val(v, "serif");     /* as browsers have it */
-    else if (p == CSS_PROP_BOX_SIZING) css_word_val(v, "content-box");
-    else if (p == CSS_PROP_MAX_WIDTH) css_word_val(v, "none");
-}
-/* the initial value at an element: border-color's is currentcolor, the element's colour */
-static void css_initial_at(css_prop p, const css_val *cur, css_val *v) {
-    css_initial(p, v);
-    if (p == CSS_PROP_BORDER_COLOR) v->color = cur[CSS_PROP_COLOR].color;
-}
-
-/* the computed value, as CSS serializes it */
+/* the computed value, as CSS serializes it (a value kept as text is its text, not this) */
 static size_t css_value_text(const css_val *v, char *buf, size_t cap) {
     int n;
     if (v->unit == CSS_UNIT_PX) n = snprintf(buf, cap, "%gpx", v->num);
     else if (v->unit == CSS_UNIT_PERCENT) n = snprintf(buf, cap, "%g%%", v->num);
     else if (v->unit == CSS_UNIT_NUMBER) n = snprintf(buf, cap, "%g", v->num);
     else if (v->unit == CSS_UNIT_EM) n = snprintf(buf, cap, "%gem", v->num);
+    else if (v->unit == CSS_UNIT_REM) n = snprintf(buf, cap, "%grem", v->num);
     else if (v->unit == CSS_UNIT_AUTO) n = snprintf(buf, cap, "auto");
+    else if (v->unit == CSS_UNIT_CALC) n = snprintf(buf, cap, "calc(%g%% %c %gpx)", v->pct, v->num < 0 ? '-' : '+', v->num < 0 ? -v->num : v->num);
     else if (v->unit == CSS_UNIT_COLOR) {
         uint32_t c = v->color;
         if ((c & 0xff) == 0xff) n = snprintf(buf, cap, "rgb(%u, %u, %u)", c >> 24, (c >> 16) & 0xff, (c >> 8) & 0xff);
-        else n = snprintf(buf, cap, "rgba(%u, %u, %u, %g)", c >> 24, (c >> 16) & 0xff, (c >> 8) & 0xff, (double)(c & 0xff) / 255.0);
+        else {
+            /* alpha as the fewest decimals that come back to its byte (CSS Color 4, 15) */
+            uint32_t a = c & 0xff;
+            double x = a / 255.0;
+            int d = 1;
+            for (; d < 6; d++) {
+                double k = d == 1 ? 10 : d == 2 ? 100 : d == 3 ? 1000 : d == 4 ? 10000 : 100000;
+                double r = (double)(long)(x * k + 0.5) / k;
+                if ((uint32_t)(r * 255 + 0.5) == a) { x = r; break; }
+            }
+            n = snprintf(buf, cap, "rgba(%u, %u, %u, %g)", c >> 24, (c >> 16) & 0xff, (c >> 8) & 0xff, x);
+        }
     } else n = snprintf(buf, cap, "%s", v->word);
     if (n < 0) return 0;
     return (size_t)n < cap ? (size_t)n : cap - 1;
@@ -1535,60 +3136,228 @@ static double css_size_keyword(const char *w, double parent) {
     if (strcmp(w, "large") == 0) return 18;
     if (strcmp(w, "x-large") == 0) return 24;
     if (strcmp(w, "xx-large") == 0) return 32;
+    if (strcmp(w, "xxx-large") == 0) return 48;
     if (strcmp(w, "smaller") == 0) return parent / 1.2;
     if (strcmp(w, "larger") == 0) return parent * 1.2;
     return 16;
 }
 
+/* the text t with every font- and viewport-relative length made px and currentcolor made
+   the colour cur, into out (strings and url()s as they are): what a value kept as text
+   computes to. 1 when it changed anything */
+static int css_absolutize(const char *t, size_t n, double em, double rem, uint32_t cur, vector<char> *out) {
+    int changed = 0;
+    size_t i = 0;
+    while (i < n) {
+        char c = t[i];
+        if (c == '"' || c == '\'') {
+            size_t e = css_string_end(t, n, i);
+            size_t stop = e < n ? e + 1 : n;
+            append_range(out, t + i, stop - i);
+            i = stop;
+            continue;
+        }
+        int word_start = i == 0 || !css_namechar(t[i - 1]);
+        if (word_start && i + 4 <= n && css_bytes_eq(t + i, "url(", 4, 1)) {
+            size_t e = css_block_end(t, n, i + 3, '(', ')');
+            size_t stop = e < n ? e + 1 : n;
+            append_range(out, t + i, stop - i);
+            i = stop;
+            continue;
+        }
+        if (word_start && css_is_alpha(c)) {
+            size_t e = i;
+            while (e < n && css_namechar(t[e])) e++;
+            if (css_eq_ci(t + i, e - i, "currentcolor")) {
+                char buf[48];
+                css_val cv;
+                memset(&cv, 0, sizeof cv);
+                cv.unit = CSS_UNIT_COLOR;
+                cv.color = cur;
+                size_t bn = css_value_text(&cv, buf, sizeof buf);
+                append_range(out, buf, bn);
+                changed = 1;
+            } else append_range(out, t + i, e - i);
+            i = e;
+            continue;
+        }
+        double x;
+        size_t used = word_start && (css_is_digit(c) || c == '.' || c == '+' || c == '-') ? css_number(t + i, n - i, &x) : 0;
+        if (used) {
+            size_t ub = i + used, ue = ub;
+            while (ue < n && css_is_alpha(t[ue])) ue++;
+            double k;
+            int fu = css_font_unit(t + ub, ue - ub, &k);
+            double ab = fu ? 0 : css_abs_unit(t + ub, ue - ub);
+            if (fu || (ab > 0 && !css_eq_ci(t + ub, ue - ub, "px"))) {
+                double px = fu == 2 ? x * rem : fu == 1 ? x * k * em : x * ab;
+                char buf[48];
+                int bn = snprintf(buf, sizeof buf, "%gpx", px);
+                if (bn > 0) append_range(out, buf, (size_t)bn);
+                changed = 1;
+            } else append_range(out, t + i, ue - i);
+            i = ue;
+            continue;
+        }
+        push_back(out, c);
+        i++;
+    }
+    return changed;
+}
+
+/* a value kept as text made computed: its span, or a new one when it changed */
+static void css_text_computed(css_style *s, css_val *v, double em, double rem, uint32_t cur) {
+    vector<char> src, out;
+    append_range(src, text_ptr(s, v->tx), v->tx.len);
+    if (css_absolutize(data(src), len(src), em, rem, cur, &out)) v->tx = text_add(s, data(out), len(out));
+}
+
+/* a calc() made computed: px, a percentage, px and a percentage, a number, or (over
+   percentages, not such a sum) its text with its lengths made px */
+static int css_calc_computed(css_style *s, css_prop p, css_val *v, double em, double rem, double basis, uint32_t cur) {
+    vector<char> src;
+    append_range(src, text_ptr(s, v->tx), v->tx.len);
+    css_cenv e = { em, rem, basis };
+    css_lin l;
+    size_t i = 0;
+    if (!css_calc_value(data(src), len(src), &i, &e, 0, &l)) return 0;
+    if (l.kind == CSS_CK_NUM && !l.nonlin) { v->unit = CSS_UNIT_NUMBER; v->num = l.num; if (p != CSS_PROP_LINE_HEIGHT && css_pdefs[p].gram == G_LEN) v->unit = CSS_UNIT_PX; return 1; }
+    if (l.nonlin) {
+        vector<char> out;
+        css_absolutize(data(src), len(src), em, rem, cur, &out);
+        v->unit = CSS_UNIT_EXPR;
+        v->tx = text_add(s, data(out), len(out));
+        return 1;
+    }
+    if (!(l.kind & CSS_CK_PCT) || l.pct == 0) { v->unit = CSS_UNIT_PX; v->num = l.px; return 1; }
+    if (l.px == 0) { v->unit = CSS_UNIT_PERCENT; v->num = l.pct; return 1; }
+    v->unit = CSS_UNIT_CALC;
+    v->num = l.px;
+    v->pct = l.pct;
+    return 1;
+}
+
+/* the web fonts' families the page declared (src/css: @font-face), and the font sizes the
+   cascade is at: the root's, for rem */
+typedef struct css_env { double rem; char faces[1024]; } css_env;
+
 /* a declared value made computed: pv the parent's computed values, cur the element's
    computed so far (its font size and colour come first) */
-static void css_compute(css_prop p, css_val *v, const css_val *pv, const css_val *cur) {
-    double pfs = pv[CSS_PROP_FONT_SIZE].num, fs = cur[CSS_PROP_FONT_SIZE].num;
+/* what a value made computed needs of the parent's: its font size, weight and colour */
+typedef struct css_par { double fs, weight; uint32_t color; } css_par;
+
+static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v, const css_par *pv, const css_val *cur) {
+    double pfs = pv->fs, fs = cur[CSS_PROP_FONT_SIZE].num;
+    uint32_t color = cur[CSS_PROP_COLOR].color;
+    int g = css_pdefs[p].gram;
     if (p == CSS_PROP_FONT_SIZE) {
         if (v->unit == CSS_UNIT_EM) v->num *= pfs;
+        else if (v->unit == CSS_UNIT_REM) v->num *= env->rem;
         else if (v->unit == CSS_UNIT_PERCENT) v->num = pfs * v->num / 100;
         else if (v->unit == CSS_UNIT_KEYWORD) v->num = css_size_keyword(v->word, pfs);
+        else if (v->unit == CSS_UNIT_CALC || v->unit == CSS_UNIT_EXPR) {
+            css_val c = *v;
+            if (css_calc_computed(s, p, &c, pfs, env->rem, pfs, color) && c.unit == CSS_UNIT_PX) v->num = c.num;
+            else v->num = pfs;
+        }
         v->unit = CSS_UNIT_PX;
+        memset(v->word, 0, sizeof v->word);
         return;
     }
     if (p == CSS_PROP_FONT_WEIGHT) {
+        if (v->unit == CSS_UNIT_CALC) { css_calc_computed(s, p, v, fs, env->rem, -1, color); if (v->unit != CSS_UNIT_NUMBER) v->num = 400; v->unit = CSS_UNIT_NUMBER; return; }
         if (v->unit != CSS_UNIT_KEYWORD) return;
-        double w = pv[CSS_PROP_FONT_WEIGHT].num, r = 400;
+        double w = pv->weight, r = 400;
         if (strcmp(v->word, "bold") == 0) r = 700;
         else if (strcmp(v->word, "bolder") == 0) r = w < 350 ? 400 : w < 550 ? 700 : w < 900 ? 900 : w;
         else if (strcmp(v->word, "lighter") == 0) r = w < 100 ? w : w < 550 ? 100 : w < 750 ? 400 : 700;
+        memset(v, 0, sizeof *v);
         v->unit = CSS_UNIT_NUMBER;
         v->num = r;
         return;
     }
-    if (css_is_word(v, "currentcolor")) {
-        /* color's currentcolor is its parent's colour; another property's is the element's */
-        v->unit = CSS_UNIT_COLOR;
-        v->color = p == CSS_PROP_COLOR ? pv[CSS_PROP_COLOR].color : cur[CSS_PROP_COLOR].color;
+    if (g == G_COLOR) {
+        if (css_is_word(v, "currentcolor")) {
+            /* color's currentcolor is its parent's colour; another property's is the element's */
+            memset(v, 0, sizeof *v);
+            v->unit = CSS_UNIT_COLOR;
+            v->color = p == CSS_PROP_COLOR ? pv->color : color;
+        }
         return;
     }
+    if (g == G_FAMILY) {
+        if (v->unit != CSS_UNIT_TEXT) return;
+        vector<char> t;
+        append_range(t, text_ptr(s, v->tx), v->tx.len);
+        if (!css_family_of(data(t), len(t), env->faces, v)) css_word_val(v, "serif");
+        return;
+    }
+    if ((p == CSS_PROP_COUNTER_RESET || p == CSS_PROP_COUNTER_INCREMENT) && v->unit == CSS_UNIT_TEXT) {
+        /* each counter with its value: a name alone is reset to 0, incremented by 1 */
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        size_t i = 0, st, ln, pend = 0;
+        int k;
+        while (css_next_part(data(src), len(src), &i, &st, &ln)) {
+            if (css_is_int(data(src) + st, ln, &k)) { pend = 0; push_back(out, ' '); append_range(out, data(src) + st, ln); continue; }
+            if (pend) append_range(out, p == CSS_PROP_COUNTER_RESET ? " 0" : " 1", 2);
+            if (len(out)) push_back(out, ' ');
+            append_range(out, data(src) + st, ln);
+            pend = 1;
+        }
+        if (pend) append_range(out, p == CSS_PROP_COUNTER_RESET ? " 0" : " 1", 2);
+        v->tx = text_add(s, data(out), len(out));
+        return;
+    }
+    if (g == G_TEXT || g == G_RADIUS) {
+        if (v->unit == CSS_UNIT_TEXT) css_text_computed(s, v, fs, env->rem, color);
+        else if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
+        else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
+        else if (v->unit == CSS_UNIT_NUMBER) v->unit = CSS_UNIT_PX;
+        else if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, -1, color);
+        return;
+    }
+    if (g == G_NUM) {
+        if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, -1, color);
+        if (v->unit == CSS_UNIT_PERCENT) { v->unit = CSS_UNIT_NUMBER; v->num /= 100; }
+        if (p == CSS_PROP_OPACITY && v->unit == CSS_UNIT_NUMBER) v->num = v->num < 0 ? 0 : v->num > 1 ? 1 : v->num;
+        return;
+    }
+    if (g != G_LEN) return;
     if (p == CSS_PROP_LINE_HEIGHT) {
         if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
+        else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
         else if (v->unit == CSS_UNIT_PERCENT) { v->unit = CSS_UNIT_PX; v->num = fs * v->num / 100; }
+        else if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, fs, color);
         return;
     }
-    if (v->unit == CSS_UNIT_KEYWORD && p >= CSS_PROP_BORDER_TOP_WIDTH && p <= CSS_PROP_BORDER_LEFT_WIDTH) {
+    if (v->unit == CSS_UNIT_KEYWORD && (css_word_in(v->word, "thin medium thick"))) {
         v->num = strcmp(v->word, "thin") == 0 ? 1 : strcmp(v->word, "thick") == 0 ? 5 : 3;
         v->unit = CSS_UNIT_PX;
+        memset(v->word, 0, sizeof v->word);
         return;
     }
     if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
+    else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
     else if (v->unit == CSS_UNIT_NUMBER) v->unit = CSS_UNIT_PX;
+    else if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, -1, color);
 }
 
 /* a declaration's place in the cascade, larger winning: origin and importance with
    element-attached style above rules, then specificity, then order of appearance */
+#define CSS_LAYER_LAST 8191
 static uint64_t css_rank(const css_style *s, uint32_t dc) {
     uint32_t r = s->decl[dc].rule;
     css_origin o = s->sheet[s->rule[r].sheet].origin;
     int imp = s->decl[dc].important;
-    uint64_t layer = o == CSS_ORIGIN_USER_AGENT ? (imp ? 6 : 1) : (uint64_t)((imp ? 4 : 2) + (o == CSS_ORIGIN_INLINE));
-    return layer << 56 | (uint64_t)s->rule[r].spec << 24 | s->rule[r].order;
+    uint64_t cls = o == CSS_ORIGIN_USER_AGENT ? (imp ? 6 : 1) : (uint64_t)((imp ? 4 : 2) + (o == CSS_ORIGIN_INLINE));
+    /* the cascade layer: the unlayered rules after every layer; for !important, the order
+       reversed (Cascade 5, 6.4) */
+    uint32_t ly = s->rule[r].layer;
+    uint64_t lr = ly ? s->layer[ly].rank : CSS_LAYER_LAST;
+    if (lr > CSS_LAYER_LAST) lr = CSS_LAYER_LAST;
+    if (imp) lr = CSS_LAYER_LAST - lr;
+    return cls << 61 | lr << 48 | (uint64_t)(s->rule[r].spec & 0xffffff) << 24 | (s->rule[r].order & 0xffffff);
 }
 
 static void css_decl_value(const css_style *s, uint32_t dc, css_val *v) {
@@ -1596,12 +3365,13 @@ static void css_decl_value(const css_style *s, uint32_t dc, css_val *v) {
     v->unit = s->decl[dc].unit;
     v->num = s->decl[dc].num;
     v->color = s->decl[dc].color;
-    if (s->decl[dc].word) snprintf(v->word, sizeof v->word, "%s", names_ptr(s, s->decl[dc].word));
+    v->tx = s->decl[dc].text;
+    if (s->decl[dc].word && v->unit == CSS_UNIT_KEYWORD) snprintf(v->word, sizeof v->word, "%s", names_ptr(s, s->decl[dc].word));
 }
 
 /* a computed value's text, kept for the values met before: a page's values repeat, so
    most are written once (PLAN.md §11) */
-typedef struct css_vtext { uint32_t used; css_unit unit; uint32_t color, word; uint64_t num; amb_span text; } css_vtext;
+typedef struct css_vtext { uint32_t used; css_unit unit; uint32_t color, word; uint64_t num, pct; amb_span text; } css_vtext;
 #define CSS_VTEXT 1024
 
 /* what a computed value records beside its value: its word's atom, its text, how it was
@@ -1613,13 +3383,15 @@ static css_rec css_value_rec(css_style *s, const css_val *v, css_how how, uint32
     r.word = v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
     r.how = how;
     r.winner = winner;
-    uint64_t nb;
+    if (v->unit == CSS_UNIT_TEXT || v->unit == CSS_UNIT_EXPR) { r.text = v->tx; return r; }
+    uint64_t nb, pb;
     memcpy(&nb, &v->num, sizeof nb);
-    uint32_t hh = ((uint32_t)(nb ^ (nb >> 29)) * 2654435761u) ^ (v->color * 40503u) ^ (r.word * 9973u) ^ (uint32_t)v->unit;
+    memcpy(&pb, &v->pct, sizeof pb);
+    uint32_t hh = ((uint32_t)(nb ^ (nb >> 29) ^ (pb * 31)) * 2654435761u) ^ (v->color * 40503u) ^ (r.word * 9973u) ^ (uint32_t)v->unit;
     size_t slot = (hh ^ (hh >> 15)) & (CSS_VTEXT - 1);
     css_vtext e = at(*vc, slot);
-    if (e.used && e.unit == v->unit && e.color == v->color && e.word == r.word && e.num == nb) { r.text = e.text; return r; }
-    char buf[64];
+    if (e.used && e.unit == v->unit && e.color == v->color && e.word == r.word && e.num == nb && e.pct == pb) { r.text = e.text; return r; }
+    char buf[96];
     size_t bn = css_value_text(v, buf, sizeof buf);
     r.text = text_add(s, buf, bn);
     e.used = 1;
@@ -1627,6 +3399,7 @@ static css_rec css_value_rec(css_style *s, const css_val *v, css_how how, uint32
     e.color = v->color;
     e.word = r.word;
     e.num = nb;
+    e.pct = pb;
     e.text = r.text;
     (*vc)[slot] = e;
     return r;
@@ -1638,6 +3411,7 @@ static css_cval_h css_put(css_style *s, uint32_t style, css_prop p, const css_va
     s->cval[h.index].prop = p;
     s->cval[h.index].unit = v->unit;
     s->cval[h.index].num = v->num;
+    s->cval[h.index].pct = v->pct;
     s->cval[h.index].color = v->color;
     s->cval[h.index].word = r.word;
     s->cval[h.index].text = r.text;
@@ -1646,42 +3420,397 @@ static css_cval_h css_put(css_style *s, uint32_t style, css_prop p, const css_va
     return h;
 }
 
-/* font-size first, for the em of the others; then color, for their currentcolor */
-static const int css_order[CSS_NPROPS] = { 3, 1, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+/* ---- custom properties and var() (CSS Variables 1) ----
+   An element's custom properties are its parent's, then its own declarations' (the
+   cascade's winner a name). A value's var()s are replaced at computed-value time; a
+   cycle of references makes every property in it invalid, and a var() of an invalid or
+   missing property takes its fallback, or makes the whole value invalid. */
 
-/* an element's computed values from its matched rules' declarations, pv its parent's
-   (or the initial values, at the root): written into out, with what each records */
-static void css_element(css_style *s, const vector<uint32_t> *matched, const css_val *pv, int has_parent, css_val *out, css_rec *rec,
+/* a custom property of a style: its name's atom, its value (var() replaced once state is
+   2), how and by which declaration; state 0 to replace, 1 replacing, 2 done, 3 invalid */
+typedef struct css_cust { uint32_t name; amb_span value; css_how how; uint32_t winner; uint8_t state, cyc; } css_cust;
+
+static int css_subst(css_style *s, const char *t, size_t n, vector<css_cust> *cur, int depth, vector<char> *out);
+
+/* the custom property cur[k] made computed: 1 when its value is valid */
+static int css_resolve_custom(css_style *s, vector<css_cust> *cur, uint32_t k, int depth) {
+    css_cust c = at(*cur, k);
+    if (c.state == 2) return 1;
+    if (c.state == 3) return 0;
+    if (c.state == 1 || depth > 32) {
+        /* a cycle: every property being replaced is in it */
+        for (size_t q = 0; q < len(*cur); q++) if (at(*cur, q).state == 1) (*cur)[q].cyc = 1;
+        return 0;
+    }
+    (*cur)[k].state = 1;
+    vector<char> src, out;
+    append_range(src, text_ptr(s, c.value), c.value.len);
+    int ok = css_subst(s, data(src), len(src), cur, depth + 1, &out) && !at(*cur, k).cyc;
+    if (ok) {
+        /* trimmed, as a custom property's value is */
+        size_t a = 0, b = len(out);
+        while (a < b && css_ws(at(out, a))) a++;
+        while (b > a && css_ws(at(out, b - 1))) b--;
+        amb_span sp = text_add(s, data(out) + a, b - a);
+        (*cur)[k].value = sp;
+        (*cur)[k].state = 2;
+    } else {
+        (*cur)[k].state = 3;
+        (*cur)[k].how = CSS_HOW_INITIAL;
+        (*cur)[k].value = text_add(s, "", 0);
+    }
+    return ok;
+}
+
+/* the text t (the caller's copy, n bytes) with each var() replaced by its custom
+   property's value, or by its fallback: 0 when one has neither */
+static int css_subst(css_style *s, const char *t, size_t n, vector<css_cust> *cur, int depth, vector<char> *out) {
+    size_t i = 0;
+    if (depth > 64) return 0;
+    while (i < n) {
+        int at_var = i + 4 <= n && css_lower(t[i]) == 'v' && css_lower(t[i + 1]) == 'a' && css_lower(t[i + 2]) == 'r' && t[i + 3] == '(' &&
+                     (i == 0 || !css_namechar(t[i - 1]));
+        if (!at_var) {
+            if (t[i] == '"' || t[i] == '\'') {
+                size_t e = css_string_end(t, n, i);
+                size_t stop = e < n ? e + 1 : n;
+                append_range(out, t + i, stop - i);
+                i = stop;
+                continue;
+            }
+            push_back(out, t[i]);
+            i++;
+            continue;
+        }
+        size_t close = css_block_end(t, n, i + 3, '(', ')');
+        if (close >= n) return 0;
+        size_t a = css_skip_ws(t, close, i + 4), ne = a;
+        while (ne < close && css_namechar(t[ne])) ne++;
+        if (ne - a < 3 || t[a] != '-' || t[a + 1] != '-') return 0;
+        uint32_t name = names_find(s, t + a, ne - a);
+        size_t comma = css_skip_ws(t, close, ne);
+        int has_fb = comma < close && t[comma] == ',';
+        if (!has_fb && comma != close) return 0;
+        int done = 0;
+        for (uint32_t k = 0; name && k < (uint32_t)len(*cur) && !done; k++) {
+            if (at(*cur, k).name != name) continue;
+            if (css_resolve_custom(s, cur, k, depth)) {
+                amb_span v = at(*cur, k).value;
+                append_range(out, text_ptr(s, v), v.len);
+                done = 1;
+            } else k = (uint32_t)len(*cur);
+        }
+        if (!done) {
+            if (!has_fb) return 0;
+            if (!css_subst(s, t + comma + 1, close - comma - 1, cur, depth + 1, out)) return 0;
+        }
+        i = close + 1;
+    }
+    return 1;
+}
+
+/* a declared value with var() in it: replaced, then read as its declaration was (its
+   shorthand's, the declaration's word); 0 when it is invalid at computed-value time */
+static int css_var_value(css_style *s, uint32_t dc, css_prop p, vector<css_cust> *cur, css_val *v) {
+    vector<char> src, out;
+    amb_span sp = s->decl[dc].text;
+    append_range(src, text_ptr(s, sp), sp.len);
+    if (!css_subst(s, data(src), len(src), cur, 0, &out)) return 0;
+    size_t a = 0, b = len(out);
+    while (a < b && css_ws(at(out, a))) a++;
+    while (b > a && css_ws(at(out, b - 1))) b--;
+    char name[48];
+    uint32_t w = s->decl[dc].word;
+    if (w) snprintf(name, sizeof name, "%.*s", (int)names_len(s, w), names_ptr(s, w));
+    else snprintf(name, sizeof name, "%s", css_pdefs[p].name);
+    css_items it;
+    if (b == a || !css_expand(name, strlen(name), data(out) + a, b - a, &it)) return 0;
+    for (int k = 0; k < it.n; k++) {
+        css_item x = it.it[k];
+        if (x.prop != p) continue;
+        *v = x.v;
+        if (v->unit == CSS_UNIT_TEXT || v->unit == CSS_UNIT_CALC) {
+            if (x.mine) v->tx = text_add(s, it.buf + x.ts, x.tn);
+            else v->tx = text_add(s, data(out) + a + x.ts, x.tn);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* what each property is to the cascade, made once: inherited, its initial value
+   currentcolor, a border's width (its style the property 4 on) */
+enum { CSS_PF_INH = 1, CSS_PF_CC = 2, CSS_PF_BW = 4 };
+static uint8_t css_pf[CSS_NPROPS];
+
+/* the order values are computed in: font-size first (the em of the others), then color
+   (their currentcolor), position and float before display (which they blockify), the
+   border and outline styles before their widths (none makes a width 0) */
+static int css_order[CSS_NPROPS];
+static void css_order_make(void) {
+    css_ready = 1;
+    for (int p = 0; p < CSS_NPROPS; p++) css_name_put(css_pdefs[p].name, p + 1);
+    for (int i = 0; i < CSS_NSHORTS; i++) css_name_put(css_shorts[i].name, -(i + 1));
+    for (int p = 0; p < CSS_NPROPS; p++) {
+        int k = 0;
+        size_t i = 0, n = css_pdefs[p].words ? strlen(css_pdefs[p].words) : 0;
+        while (i < n) {
+            size_t b = i;
+            while (i < n && css_pdefs[p].words[i] != ' ') i++;
+            if (k < CSS_MAXKW) {
+                css_kwh[p][k] = css_hash_ci(css_pdefs[p].words + b, i - b);
+                css_kwo[p][k] = (uint16_t)b;
+                css_kwl[p][k] = (uint8_t)(i - b);
+            }
+            k++;
+            i++;
+        }
+        css_kwn[p] = (uint8_t)(k > CSS_MAXKW ? CSS_MAXKW + 1 : k);
+    }
+    static const int first[] = { CSS_PROP_FONT_SIZE, CSS_PROP_COLOR, CSS_PROP_POSITION, CSS_PROP_FLOAT, CSS_PROP_DISPLAY,
+                                 CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE,
+                                 CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_OUTLINE_STYLE };
+    int n = 0, nf = (int)(sizeof first / sizeof first[0]);
+    for (int i = 0; i < nf; i++) css_order[n++] = first[i];
+    for (int p = 0; p < CSS_NPROPS; p++) {
+        int seen = 0;
+        for (int i = 0; i < nf; i++) if (first[i] == p) seen = 1;
+        if (!seen) css_order[n++] = p;
+    }
+    for (int p = 0; p < CSS_NPROPS; p++)
+        css_pf[p] = (uint8_t)((css_pdefs[p].inh ? CSS_PF_INH : 0) | (css_init_cc((css_prop)p) ? CSS_PF_CC : 0) |
+                              (p >= CSS_PROP_BORDER_TOP_WIDTH && p <= CSS_PROP_BORDER_LEFT_WIDTH ? CSS_PF_BW : 0));
+}
+
+/* display blockified (CSS Display 3, 2.7): a float's, an absolutely positioned box's, the
+   root's, a flex or grid item's */
+static void css_blockify(css_val *v) {
+    if (v->unit != CSS_UNIT_KEYWORD) return;
+    const char *w = v->word;
+    if (strcmp(w, "inline-table") == 0) css_word_val(v, "table");
+    else if (strcmp(w, "inline-flex") == 0) css_word_val(v, "flex");
+    else if (strcmp(w, "inline-grid") == 0) css_word_val(v, "grid");
+    else if (strcmp(w, "inline") == 0 || strcmp(w, "inline-block") == 0 || strncmp(w, "table-", 6) == 0) css_word_val(v, "block");
+}
+
+/* the per-style arrays the cascade keeps: values, what they record, custom properties;
+   and each parent style's template (tmpl_of: its index from 1 in tv and tr) */
+typedef struct css_styles { vector<uint32_t> first; vector<css_cust> cpool; vector<uint32_t> cfirst; vector<uint32_t> ccount;
+                            vector<uint32_t> tmpl_of; vector<css_val> tv; vector<css_rec> tr; } css_styles;
+#define CSS_STYLES_DROP(x) vector_uint32_t_drop(&(x).first); vector_css_cust_drop(&(x).cpool); \
+    vector_uint32_t_drop(&(x).cfirst); vector_uint32_t_drop(&(x).ccount); vector_uint32_t_drop(&(x).tmpl_of); \
+    vector_css_val_drop(&(x).tv); vector_css_rec_drop(&(x).tr)
+
+/* a style's value of p (its cvals from c0), or the initial one under no style, and its record */
+static void css_val_of(const css_style *s, uint32_t c0, css_prop p, const css_val *initial, css_val *v) {
+    if (!c0) { *v = initial[p]; return; }
+    uint32_t c = c0 + (uint32_t)p;
+    memset(v, 0, sizeof *v);
+    v->unit = s->cval[c].unit;
+    v->num = s->cval[c].num;
+    v->pct = s->cval[c].pct;
+    v->color = s->cval[c].color;
+    v->tx = s->cval[c].text;
+    if (v->unit == CSS_UNIT_KEYWORD) snprintf(v->word, sizeof v->word, "%.*s", (int)names_len(s, s->cval[c].word), names_ptr(s, s->cval[c].word));
+}
+static css_rec css_rec_of(const css_style *s, uint32_t c) {
+    css_rec r;
+    r.word = s->cval[c].word;
+    r.text = s->cval[c].text;
+    r.how = s->cval[c].how;
+    r.winner = s->cval[c].winner;
+    return r;
+}
+static void css_par_of(const css_style *s, uint32_t c0, const css_val *initial, css_par *pv) {
+    pv->fs = c0 ? s->cval[c0 + CSS_PROP_FONT_SIZE].num : initial[CSS_PROP_FONT_SIZE].num;
+    pv->weight = c0 ? s->cval[c0 + CSS_PROP_FONT_WEIGHT].num : initial[CSS_PROP_FONT_WEIGHT].num;
+    pv->color = c0 ? s->cval[c0 + CSS_PROP_COLOR].color : initial[CSS_PROP_COLOR].color;
+}
+
+static int css_word_is(const css_val *v, const char *w) { return v->unit == CSS_UNIT_KEYWORD && v->word[0] == w[0] && strcmp(v->word, w) == 0; }
+
+/* a border width made computed by its style: 0 under none or hidden, else a whole px (a
+   thin one 1); an outline's is only snapped */
+static void css_snap_width(css_val *v, const css_val *style, int border) {
+    if (border && (css_word_is(style, "none") || css_word_is(style, "hidden"))) { v->unit = CSS_UNIT_PX; v->num = 0; return; }
+    if (v->unit == CSS_UNIT_PX && v->num > 0 && v->num < 1) v->num = 1;
+    else if (v->unit == CSS_UNIT_PX && v->num >= 1) v->num = (double)(long)v->num;
+}
+
+/* display blockified where the element's position, float, root or parent ask it */
+static int css_display_fix(css_val *v, const css_val *out, const css_val *pdisplay, int is_root) {
+    int pflex = !is_root && (css_word_is(pdisplay, "flex") || css_word_is(pdisplay, "inline-flex") || css_word_is(pdisplay, "grid") ||
+                             css_word_is(pdisplay, "inline-grid"));
+    css_val b = *v;
+    if (is_root && css_word_is(v, "contents")) css_word_val(v, "block");
+    if (is_root || pflex || !css_word_is(&out[CSS_PROP_FLOAT], "none") || css_word_is(&out[CSS_PROP_POSITION], "absolute") ||
+        css_word_is(&out[CSS_PROP_POSITION], "fixed")) css_blockify(v);
+    return strcmp(b.word, v->word) != 0;
+}
+
+/* the template of a parent style ps (0: none, the root's): the values an element under it
+   takes before its own declarations -- an inherited property's the parent's, any other's
+   its initial value -- with what each records. Made once a parent style */
+static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const css_val *initial, const css_rec *irec, vector<css_vtext> *vc) {
+    if (ps < len(ss->tmpl_of) && at(ss->tmpl_of, ps)) return at(ss->tmpl_of, ps);
+    if (ps >= len(ss->tmpl_of)) resize(&ss->tmpl_of, (size_t)ps + 1);
+    uint32_t ti = (uint32_t)(len(ss->tv) / CSS_NPROPS) + 1;
+    uint32_t pc0 = ps ? at(ss->first, ps) : 0;
+    css_val pcolor, pdisplay;
+    css_val_of(s, pc0, CSS_PROP_COLOR, initial, &pcolor);
+    css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
+    css_val out[CSS_NPROPS];
+    css_rec rec[CSS_NPROPS];
+    for (int k = 0; k < CSS_NPROPS; k++) {
+        if ((css_pf[k] & CSS_PF_INH) && ps) {
+            css_val_of(s, pc0, (css_prop)k, initial, &out[k]);
+            rec[k] = css_rec_of(s, pc0 + (uint32_t)k);
+            rec[k].how = CSS_HOW_INHERITED;
+            rec[k].winner = 0;
+            continue;
+        }
+        out[k] = initial[k];
+        rec[k] = irec[k];
+    }
+    for (int k = 0; k < CSS_NPROPS; k++) {
+        int fix = 0;
+        if (css_pf[k] & CSS_PF_CC) { out[k].color = pcolor.color; fix = 1; }
+        if (css_pf[k] & CSS_PF_BW) { css_snap_width(&out[k], &out[k + 4], 1); fix = 1; }
+        if (k == CSS_PROP_DISPLAY) fix = css_display_fix(&out[k], out, &pdisplay, ps == 0);
+        if (fix) rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc);
+    }
+    for (int k = 0; k < CSS_NPROPS; k++) { push_back(ss->tv, out[k]); push_back(ss->tr, rec[k]); }
+    ss->tmpl_of[ps] = ti;
+    return ti;
+}
+
+/* an element's computed values from its matched rules' declarations under the parent
+   style ps (0 at the root, whose parent values are the initial ones): its template, then
+   each declaration that won made computed, and what those change of the values that hang
+   on them (currentcolor, blockified display, border widths under their styles). Written
+   into out and rec, its custom properties into cust */
+static void css_element(css_style *s, const css_env *env, const vector<uint32_t> *matched, css_styles *ss, uint32_t ps,
+                        const css_val *initial, const css_rec *irec, int is_root, css_val *out, css_rec *rec, vector<css_cust> *cust,
                         vector<css_vtext> *vc) {
     uint32_t win[CSS_NPROPS];
     uint64_t best[CSS_NPROPS];
     memset(win, 0, sizeof win);
     memset(best, 0, sizeof best);
+    uint32_t ti = css_template(s, ss, ps, initial, irec, vc);
+    size_t tb = (size_t)(ti - 1) * CSS_NPROPS;
+    memcpy(out, data(ss->tv) + tb, sizeof(css_val) * CSS_NPROPS);
+    memcpy(rec, data(ss->tr) + tb, sizeof(css_rec) * CSS_NPROPS);
+    /* the parent's custom properties, then the winners of this element's own */
+    clear(*cust);
+    uint32_t pf = ps ? at(ss->cfirst, ps) : 0, pn = ps ? at(ss->ccount, ps) : 0;
+    vector<uint64_t> crank;
+    for (uint32_t q = 0; q < pn; q++) {
+        css_cust c = at(ss->cpool, pf + q);
+        c.how = CSS_HOW_INHERITED;
+        c.winner = 0;
+        push_back(cust, c);
+        push_back(crank, 0);
+    }
+    int any = 0;
     for (size_t k = 0; k < len(*matched); k++) {
         uint32_t r = at(*matched, k);
         for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
             int p = (int)s->decl[dc].prop;
             uint64_t rk = css_rank(s, dc);
-            if (rk >= best[p]) { best[p] = rk; win[p] = dc; }
+            if (p != CSS_PROP_CUSTOM) {
+                if (rk >= best[p]) { best[p] = rk; win[p] = dc; any = 1; }
+                continue;
+            }
+            uint32_t name = s->decl[dc].word;
+            size_t q = 0;
+            while (q < len(*cust) && at(*cust, q).name != name) q++;
+            if (q == len(*cust)) {
+                css_cust c;
+                memset(&c, 0, sizeof c);
+                c.name = name;
+                c.state = 3;
+                push_back(cust, c);
+                push_back(crank, 0);
+            }
+            if (at(crank, q) > rk) continue;
+            crank[q] = rk;
+            css_cust c = at(*cust, q);
+            c.winner = dc;
+            c.how = CSS_HOW_DECLARED;
+            c.value = s->decl[dc].text;
+            c.state = 0;
+            c.cyc = 0;
+            (*cust)[q] = c;
         }
     }
+    /* the CSS-wide keywords of a custom property: initial makes it invalid; inherit,
+       unset and revert take the parent's */
+    for (size_t q = 0; q < len(*cust); q++) {
+        css_cust c = at(*cust, q);
+        if (!c.winner) continue;
+        css_val g;
+        int global = c.value.len < 16 && css_parse_val(text_ptr(s, c.value), c.value.len, &g) && css_is_global(&g);
+        if (!global) continue;
+        int found = 0;
+        for (uint32_t z = 0; z < pn && !found; z++)
+            if (at(ss->cpool, pf + z).name == c.name && !css_is_word(&g, "initial")) {
+                c.value = at(ss->cpool, pf + z).value;
+                c.state = 2;
+                c.how = CSS_HOW_INHERITED;
+                found = 1;
+            }
+        if (!found) { c.state = 3; c.how = CSS_HOW_INITIAL; c.value = text_add(s, "", 0); }
+        (*cust)[q] = c;
+    }
+    for (uint32_t q = 0; q < (uint32_t)len(*cust); q++) if (at(*cust, q).state == 0) css_resolve_custom(s, cust, q, 0);
+    if (!any) return;
+    /* the properties a declaration won, in the order they depend on each other; the
+       parent's values (the initial ones, at the root) read from its cvals */
+    uint32_t pc0 = ps ? at(ss->first, ps) : 0;
+    css_par pv;
+    css_par_of(s, pc0, initial, &pv);
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
         css_prop p = (css_prop)css_order[oi];
         uint32_t w = win[p];
+        if (!w) continue;
         css_val v;
         css_how how;
-        if (w) {
-            css_decl_value(s, w, &v);
-            int unset = css_is_word(&v, "unset") || css_is_word(&v, "revert");
-            int inherit = css_is_word(&v, "inherit") || (unset && css_inherited(p));
-            int initial = css_is_word(&v, "initial") || (unset && !css_inherited(p));
-            if (inherit && has_parent) { v = pv[p]; how = CSS_HOW_INHERITED; }
-            else if (inherit || initial) { css_initial_at(p, out, &v); how = CSS_HOW_INITIAL; }
-            else { css_compute(p, &v, pv, out); how = CSS_HOW_DECLARED; }
-        } else if (css_inherited(p) && has_parent) { v = pv[p]; how = CSS_HOW_INHERITED; }
-        else { css_initial_at(p, out, &v); how = CSS_HOW_INITIAL; }
+        css_decl_value(s, w, &v);
+        int valid = v.unit != CSS_UNIT_VAR || css_var_value(s, w, p, cust, &v);
+        int unset = !valid || css_is_word(&v, "unset") || css_is_word(&v, "revert") || css_is_word(&v, "revert-layer");
+        int inherit = css_is_word(&v, "inherit") || (unset && (css_pf[p] & CSS_PF_INH));
+        int initial_kw = css_is_word(&v, "initial") || (unset && !(css_pf[p] & CSS_PF_INH));
+        if (inherit && !is_root) { css_val_of(s, pc0, p, initial, &v); how = CSS_HOW_INHERITED; }
+        else if (inherit || initial_kw) { v = initial[p]; how = CSS_HOW_INITIAL; }
+        else { css_compute(s, env, p, &v, &pv, out); how = CSS_HOW_DECLARED; }
+        if (how == CSS_HOW_INITIAL && (css_pf[p] & CSS_PF_CC)) v.color = out[CSS_PROP_COLOR].color;
+        if (css_pf[p] & CSS_PF_BW) { if (v.unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, &v, &pv, out); css_snap_width(&v, &out[p + 4], 1); }
+        if (p == CSS_PROP_OUTLINE_WIDTH) { if (v.unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, &v, &pv, out); css_snap_width(&v, 0, 0); }
         out[p] = v;
         rec[p] = css_value_rec(s, &v, how, w, vc);
+    }
+    /* what the winners change of the values that hang on them */
+    if (win[CSS_PROP_COLOR])
+        for (int k = 0; k < CSS_NPROPS; k++)
+            if ((css_pf[k] & CSS_PF_CC) && !win[k]) { out[k].color = out[CSS_PROP_COLOR].color; rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc); }
+    if (win[CSS_PROP_POSITION] && (css_word_is(&out[CSS_PROP_POSITION], "absolute") || css_word_is(&out[CSS_PROP_POSITION], "fixed")) &&
+        !css_word_is(&out[CSS_PROP_FLOAT], "none")) {
+        css_word_val(&out[CSS_PROP_FLOAT], "none");
+        rec[CSS_PROP_FLOAT] = css_value_rec(s, &out[CSS_PROP_FLOAT], rec[CSS_PROP_FLOAT].how, win[CSS_PROP_FLOAT], vc);
+    }
+    css_val pdisplay;
+    css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
+    if (win[CSS_PROP_DISPLAY] || win[CSS_PROP_FLOAT] || win[CSS_PROP_POSITION])
+        if (css_display_fix(&out[CSS_PROP_DISPLAY], out, &pdisplay, is_root))
+            rec[CSS_PROP_DISPLAY] = css_value_rec(s, &out[CSS_PROP_DISPLAY], rec[CSS_PROP_DISPLAY].how, win[CSS_PROP_DISPLAY], vc);
+    for (int k = 0; k < 4; k++) {
+        int wp = CSS_PROP_BORDER_TOP_WIDTH + k;
+        if (win[wp] || !win[wp + 4]) continue;
+        /* a style a declaration gave, over a width none did: the initial width (medium) under it */
+        css_val v = initial[wp];
+        css_snap_width(&v, &out[wp + 4], 1);
+        out[wp] = v;
+        rec[wp] = css_value_rec(s, &v, CSS_HOW_INITIAL, 0, vc);
     }
 }
 
@@ -1811,8 +3940,8 @@ static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, u
         /* author-level, specificity 0, before every other author rule: order 0 */
         uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, what, (size_t)wn, 1);
         if (css_hints[h].kind == CSS_HINT_BORDER)
-            for (int side = 0; side < 4; side++) css_add_decl(s, r, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + side), &v, 0, text, (size_t)tn);
-        else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn);
+            for (int side = 0; side < 4; side++) css_add_decl(s, r, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + side), &v, 0, text, (size_t)tn, 0);
+        else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
         push_back(matched, r);
     }
 }
@@ -1836,11 +3965,191 @@ static uint32_t css_linked_sheet(const net_loader *net, uint32_t x) {
     return 0;
 }
 
+/* ---- the user agent's sheet, read once a process ----
+   Its rules and declarations are every page's: read from its text at the first cascade,
+   kept in these tables, and each later page's records made from them, not read again */
+#define CSS_UA_RULES 320
+#define CSS_UA_DECLS 768
+#define CSS_UA_TEXT 24576
+typedef struct css_uarule { uint32_t sel, sel_len, spec, first, n; } css_uarule;
+typedef struct css_uadecl { uint32_t prop, unit, important, color, text, text_len, word, word_len; double num; } css_uadecl;
+static css_uarule css_ua_rules[CSS_UA_RULES];
+static css_uadecl css_ua_decls[CSS_UA_DECLS];
+static char css_ua_text[CSS_UA_TEXT];
+static uint32_t css_ua_nrules, css_ua_ndecls, css_ua_ntext;
+static int css_ua_state;        /* 0 not read, 1 kept, 2 read each time (too large to keep) */
+
+static uint32_t css_ua_keep(const char *t, size_t n) {
+    if (css_ua_ntext + n > CSS_UA_TEXT) { css_ua_state = 2; return 0; }
+    memcpy(css_ua_text + css_ua_ntext, t, n);
+    uint32_t off = css_ua_ntext;
+    css_ua_ntext += (uint32_t)n;
+    return off;
+}
+
+/* the user agent's sheet, the store's first: made from the tables, or read (and kept) */
+static void css_ua_load(css_style *s) {
+    if (css_ua_state != 1 || s->rule_len > 1) {
+        css_parse_sheet(s, CSS_ORIGIN_USER_AGENT, css_ua_sheet, sizeof css_ua_sheet - 1);
+        if (css_ua_state != 0 || s->sheet_len != 2) return;
+        /* the first read: its records kept */
+        css_ua_state = 1;
+        for (uint32_t r = 1; r < s->rule_len && css_ua_state == 1; r++) {
+            if (css_ua_nrules == CSS_UA_RULES) { css_ua_state = 2; break; }
+            css_uarule ur;
+            amb_span sel = s->rule[r].selector;
+            ur.sel = css_ua_keep(text_ptr(s, sel), sel.len);
+            ur.sel_len = sel.len;
+            ur.spec = s->rule[r].spec;
+            ur.first = css_ua_ndecls;
+            ur.n = 0;
+            for (uint32_t dc = s->rule[r].first_decl; dc && css_ua_state == 1; dc = s->decl[dc].next) {
+                if (css_ua_ndecls == CSS_UA_DECLS) { css_ua_state = 2; break; }
+                css_uadecl ud;
+                amb_span tx = s->decl[dc].text;
+                ud.prop = (uint32_t)s->decl[dc].prop;
+                ud.unit = (uint32_t)s->decl[dc].unit;
+                ud.important = s->decl[dc].important;
+                ud.color = s->decl[dc].color;
+                ud.num = s->decl[dc].num;
+                ud.text = css_ua_keep(text_ptr(s, tx), tx.len);
+                ud.text_len = tx.len;
+                uint32_t w = s->decl[dc].word;
+                ud.word_len = w ? (uint32_t)names_len(s, w) : 0;
+                ud.word = w ? css_ua_keep(names_ptr(s, w), ud.word_len) : 0;
+                css_ua_decls[css_ua_ndecls++] = ud;
+                ur.n++;
+            }
+            css_ua_rules[css_ua_nrules++] = ur;
+        }
+        return;
+    }
+    css_sheet_h sh = sheet_new(s);
+    s->sheet[sh.index].origin = CSS_ORIGIN_USER_AGENT;
+    for (uint32_t k = 0; k < css_ua_nrules; k++) {
+        css_uarule ur = css_ua_rules[k];
+        amb_span sp = text_add(s, css_ua_text + ur.sel, ur.sel_len);
+        css_rule_h r = rule_new(s);
+        s->rule[r.index].selector = sp;
+        s->rule[r.index].spec = ur.spec;
+        s->rule[r.index].order = r.index;
+        rules_append(s, sh.index, r.index);
+        for (uint32_t q = ur.first; q < ur.first + ur.n; q++) {
+            css_uadecl ud = css_ua_decls[q];
+            amb_span t = text_add(s, css_ua_text + ud.text, ud.text_len);
+            uint32_t w = ud.word_len ? names_intern(s, css_ua_text + ud.word, ud.word_len) : 0;
+            css_decl_h h = decl_new(s);
+            s->decl[h.index].prop = (css_prop)ud.prop;
+            s->decl[h.index].important = (uint8_t)ud.important;
+            s->decl[h.index].unit = (css_unit)ud.unit;
+            s->decl[h.index].num = ud.num;
+            s->decl[h.index].color = ud.color;
+            s->decl[h.index].word = w;
+            s->decl[h.index].text = t;
+            decls_append(s, r.index, h.index);
+        }
+    }
+    s->revision++;
+}
+
+/* the style of an element (or a pseudo-element) whose matched rules are matched, under
+   the parent style ps: the one those rules under ps made before, or a new one, its
+   values recorded once (PLAN.md 11) */
+static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vector<css_skey> *se, vector<uint32_t> *sslots,
+                               vector<uint32_t> *slists, const vector<uint32_t> *matched, uint32_t ps, int is_root, const css_val *initial,
+                               const css_rec *irec, vector<css_cust> *cust, vector<css_vtext> *vc) {
+    uint32_t sh = 2166136261u ^ ps;
+    for (size_t k = 0; k < len(*matched); k++) { sh ^= at(*matched, k); sh *= 16777619u; }
+    sh ^= (uint32_t)len(*matched) * 0x9E3779B9u;
+    uint32_t sid = css_style_find(se, sslots, slists, matched, ps, sh);
+    if (!sid) {
+        css_val out[CSS_NPROPS];
+        css_rec rec[CSS_NPROPS];
+        css_element(s, env, matched, ss, ps, initial, irec, is_root, out, rec, cust, vc);
+        if (is_root) env->rem = out[CSS_PROP_FONT_SIZE].num;      /* the root's size: the rem of the rest */
+        sid = (uint32_t)len(ss->first);
+        push_back(ss->cfirst, (uint32_t)len(ss->cpool));
+        uint32_t nc = 0;
+        for (size_t q = 0; q < len(*cust); q++) {
+            css_cust c = at(*cust, q);
+            if (c.state != 2) continue;                          /* an invalid one is no property of the style's */
+            push_back(ss->cpool, c);
+            nc++;
+        }
+        push_back(ss->ccount, nc);
+        css_style_add(se, sslots, slists, matched, ps, sh, sid);
+        /* the new style's values, recorded once: enum(prop)'s order, then its custom
+           properties (those its own declarations gave, invalid ones too) */
+        uint32_t first = 0;
+        for (int k = 0; k < CSS_NPROPS; k++) {
+            css_cval_h ch = css_put(s, sid, (css_prop)k, &out[k], rec[k]);
+            if (k == 0) first = ch.index;
+        }
+        for (size_t q = 0; q < len(*cust); q++) {
+            css_cust c = at(*cust, q);
+            if (c.state != 2 && !c.winner) continue;
+            css_val cv;
+            memset(&cv, 0, sizeof cv);
+            cv.unit = CSS_UNIT_TEXT;
+            cv.tx = c.value;
+            css_rec cr;
+            cr.word = c.name;
+            cr.text = c.value;
+            cr.how = c.how;
+            cr.winner = c.winner;
+            css_put(s, sid, CSS_PROP_CUSTOM, &cv, cr);
+        }
+        push_back(ss->first, first);
+    }
+    return sid;
+}
+
+/* the element the URL's fragment names: the page's #id (or an a's name), 0 for none */
+static uint32_t css_url_target(const css_style *s, const dom_document *doc, const net_loader *net) {
+    (void)s;
+    for (uint32_t r = 1; r < net->resource_len; r++) {
+        if (!net->resource[r].live || net->resource[r].kind != NET_KIND_DOCUMENT) continue;
+        amb_span u = net->resource[r].url;
+        const char *t = text_ptr(net, u);
+        size_t h = 0;
+        while (h < u.len && t[h] != '#') h++;
+        if (h + 1 >= u.len) return 0;
+        char frag[256];
+        size_t fn = u.len - h - 1 < sizeof frag ? u.len - h - 1 : sizeof frag - 1;
+        memcpy(frag, t + h + 1, fn);
+        for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
+            if (!css_is_element(doc, x)) continue;
+            uint32_t a = css_attr_of(doc, x, "id", 2);
+            if (!a && css_is_named(doc, x, "a")) a = css_attr_of(doc, x, "name", 4);
+            if (a && doc->attr[a].value.len == fn && memcmp(text_ptr(doc, doc->attr[a].value), frag, fn) == 0) return x;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+css_status css_set_state(css_style *s, dom_document *doc, css_state_kind kind, uint32_t node) {
+    if (node == 0 || node >= doc->node_len || !doc->node[node].live || doc->node[node].kind != DOM_NODE_KIND_ELEMENT) return CSS_WRONG_KIND;
+    css_state_h h = state_new(s);
+    s->state[h.index].kind = kind;
+    s->state[h.index].node = node_handle(doc, node);
+    s->revision++;
+    return CSS_OK;
+}
+
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
-    css_parse_sheet(s, CSS_ORIGIN_USER_AGENT, css_ua_sheet, sizeof css_ua_sheet - 1);
+    css_ua_load(s);
     /* the user agent's rules are the HTML elements' (its sheet is in the HTML namespace) */
     uint32_t ua_end = (uint32_t)s->rule_len;
+    /* the page's URL: the base its style elements' @imports and fonts resolve against */
+    char page[4096];
+    page[0] = 0;
+    for (uint32_t r = 1; net && r < net->resource_len && !page[0]; r++)
+        if (net->resource[r].live && net->resource[r].kind == NET_KIND_DOCUMENT) {
+            amb_span fu = net->resource[r].final_url;
+            snprintf(page, sizeof page, "%.*s", (int)fu.len, text_ptr(net, fu));
+        }
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         int link = css_is_named(doc, x, "link");
         if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
@@ -1849,36 +4158,75 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         if (link) {
             uint32_t r = net ? css_linked_sheet(net, x) : 0;
             if (!r) continue;
+            char base[4096];
+            amb_span fu = net->resource[r].final_url;
+            snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
             vector<char> body;
             append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-            css_parse_sheet(s, CSS_ORIGIN_AUTHOR, data(body), len(body));
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base);
             continue;
         }
         vector<char> t;
         for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
             if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
-        css_parse_sheet(s, CSS_ORIGIN_AUTHOR, data(t), len(t));
+        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page);
     }
+    /* the cascade layers' order, now every sheet has named its layers */
+    css_layer_rank(s, 0, 1);
     uint32_t shared = (uint32_t)s->rule_len;
+    if (!css_ready) css_order_make();
+    css_env env;
+    memset(&env, 0, sizeof env);
+    env.rem = 16;
+    /* the web fonts' families whose font was fetched: each a word of env.faces, lower case
+       and without its spaces, as font-family's names are matched */
+    for (uint32_t fi = 1; fi < s->face_len; fi++) {
+        if (!s->face[fi].font.index) continue;
+        amb_span fam = s->face[fi].family;
+        size_t k = strlen(env.faces);
+        if (k + fam.len + 2 >= sizeof env.faces) break;
+        if (k) env.faces[k++] = ' ';
+        for (uint32_t q = 0; q < fam.len; q++) {
+            char c = text_ptr(s, fam)[q];
+            if (!css_ws(c)) env.faces[k++] = css_lower(c);
+        }
+        env.faces[k] = 0;
+    }
+    /* each property's initial value, computed (currentcolor black, a border's medium 3px:
+       made the element's in css_element), and what it records */
     css_val initial[CSS_NPROPS];
-    for (int k = 0; k < CSS_NPROPS; k++) css_initial((css_prop)k, &initial[k]);
+    css_rec irec[CSS_NPROPS];
+    vector<css_vtext> vc;
+    resize(vc, CSS_VTEXT);
+    for (int k = 0; k < CSS_NPROPS; k++) {
+        css_val v;
+        size_t il = strlen(css_pdefs[k].init);
+        if (!css_longhand((css_prop)k, css_pdefs[k].init, il, &v)) css_word_val(&v, css_pdefs[k].init);
+        if (v.unit == CSS_UNIT_TEXT) v.tx = text_add(s, css_pdefs[k].init, il);
+        initial[k] = v;
+    }
+    css_par ipar;
+    css_par_of(s, 0, initial, &ipar);
+    for (int k = 0; k < CSS_NPROPS; k++) {
+        css_val v = initial[k];
+        css_compute(s, &env, (css_prop)k, &v, &ipar, initial);
+        initial[k] = v;
+        irec[k] = css_value_rec(s, &v, CSS_HOW_INITIAL, 0, &vc);
+    }
     /* each property's initial value, for the reasoner to derive the values no declaration gave */
     for (int k = 0; k < CSS_NPROPS; k++) {
-        char buf[64];
-        size_t bn = css_value_text(&initial[k], buf, sizeof buf);
-        amb_span t = text_add(s, buf, bn);
         css_initval_h ih = initval_new(s);
         s->initval[ih.index].prop = (css_prop)k;
         s->initval[ih.index].unit = initial[k].unit;
         s->initval[ih.index].color = initial[k].color;
-        s->initval[ih.index].text = t;
+        s->initval[ih.index].text = irec[k].text;
     }
-    /* each element, parents before children: its rules, its hints and style attribute, its values */
     /* the styles, from 1 (style 0 a row unused), and each element's */
-    vector<css_val> sv;
-    resize(sv, CSS_NPROPS);
-    vector<uint32_t> sfirst;
-    resize(sfirst, 1);
+    css_styles ss = {0};
+    defer(ss) { CSS_STYLES_DROP(ss); }
+    resize(&ss.first, 1);
+    resize(&ss.cfirst, 1);
+    resize(&ss.ccount, 1);
     vector<css_skey> se;
     vector<uint32_t> sslots;
     vector<uint32_t> slists;
@@ -1888,6 +4236,21 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     while (scap < 2 * (size_t)doc->node_len + 2) scap *= 2;
     resize(sslots, scap);
     vector<uint32_t> matched;
+    vector<uint32_t> pmatched;          /* the pseudo-elements' rules: pseudo << 24 | rule */
+    vector<css_cust> cust;
+    /* the page's state: what css_set_state recorded, and the target the URL's fragment names */
+    css_mstate ms;
+    memset(&ms, 0, sizeof ms);
+    for (uint32_t q = 1; q < s->state_len; q++) {
+        uint32_t nx = s->state[q].node.index;
+        css_state_kind k = s->state[q].kind;
+        if (k == CSS_STATE_KIND_HOVER) ms.hover = nx;
+        else if (k == CSS_STATE_KIND_FOCUS) ms.focus = nx;
+        else if (k == CSS_STATE_KIND_FOCUS_VISIBLE) ms.focus_visible = nx;
+        else if (k == CSS_STATE_KIND_ACTIVE) ms.active = nx;
+        else ms.target = nx;
+    }
+    if (!ms.target && net) ms.target = css_url_target(s, doc, net);
     uint32_t hint_sheet = 0, inline_sheet = 0;
     /* the shared rules' index, and each element's filters: its ancestors' keys, its own */
     vector<css_part> parts;
@@ -1902,11 +4265,10 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     vector<uint64_t> selfk;
     resize(anc, (size_t)doc->node_len * 4);
     resize(selfk, (size_t)doc->node_len * 4);
-    vector<css_vtext> vc;
-    resize(vc, CSS_VTEXT);
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         if (!css_is_element(doc, x)) continue;
         clear(matched);
+        clear(pmatched);
         uint32_t px = css_parent_element(doc, x);
         uint64_t am[4], om[4];
         for (int q = 0; q < 4; q++) am[q] = px ? at(anc, (size_t)px * 4 + q) | at(selfk, (size_t)px * 4 + q) : 0;
@@ -1918,7 +4280,12 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         if (nk < 0) {
             /* more keys than the index keeps: every rule is tried, and the filter is full */
             for (int q = 0; q < 4; q++) om[q] = ~0ull;
-            for (uint32_t r = first_rule; r < shared; r++) if (css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+            for (uint32_t r = first_rule; r < shared; r++)
+                {
+                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
+                    if (mk == 1) push_back(matched, r);
+                    else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
+                }
         } else {
             for (int q = 0; q < nk; q++) css_bloom_add(om, kh[q]);
             if (univ) { heads[nb] = at(bk, univ - 1).head; seen[nb] = univ; nb++; }
@@ -1945,7 +4312,11 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 heads[bi] = at(be, heads[bi]).next;
                 if (r == last) continue;
                 last = r;
-                if (r >= first_rule && css_rule_matches(s, doc, x, r, &parts, &rxs, am)) push_back(matched, r);
+                if (r >= first_rule) {
+                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
+                    if (mk == 1) push_back(matched, r);
+                    else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
+                }
             }
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
@@ -1958,35 +4329,37 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             s->match[m.index].rule = at(matched, k);
         }
         /* the element's style: the one its matched rules under its parent's style made, or a new one */
-        uint32_t par = css_parent_element(doc, x);
-        uint32_t ps = par ? at(nstyle, par) : 0;
-        uint32_t sh = 2166136261u ^ ps;
-        for (size_t k = 0; k < len(matched); k++) { sh ^= at(matched, k); sh *= 16777619u; }
-        sh ^= (uint32_t)len(matched) * 0x9E3779B9u;
-        uint32_t sid = css_style_find(&se, &sslots, &slists, &matched, ps, sh);
-        if (!sid) {
-            css_val pv[CSS_NPROPS], out[CSS_NPROPS];
-            css_rec rec[CSS_NPROPS];
-            for (int k = 0; k < CSS_NPROPS; k++) pv[k] = ps ? at(sv, (size_t)ps * CSS_NPROPS + k) : initial[k];
-            memset(out, 0, sizeof out);
-            css_element(s, &matched, pv, par != 0, out, rec, &vc);
-            sid = (uint32_t)(len(sv) / CSS_NPROPS);
-            for (int k = 0; k < CSS_NPROPS; k++) push_back(sv, out[k]);
-            css_style_add(&se, &sslots, &slists, &matched, ps, sh, sid);
-            /* the new style's values, recorded once, in the cascade's order */
-            uint32_t first = 0;
-            for (int oi = 0; oi < CSS_NPROPS; oi++) {
-                css_prop p = (css_prop)css_order[oi];
-                css_cval_h ch = css_put(s, sid, p, &out[p], rec[p]);
-                if (oi == 0) first = ch.index;
-            }
-            push_back(sfirst, first);
-        }
+        uint32_t ps = px ? at(nstyle, px) : 0;
+        uint32_t sid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, ps, px == 0, initial, irec, &cust, &vc);
         nstyle[x] = sid;
         css_estyle_h eh = estyle_new(s);
         s->estyle[eh.index].node = nh;
         s->estyle[eh.index].style = sid;
-        s->estyle[eh.index].first = at(sfirst, sid);
+        s->estyle[eh.index].first = at(ss.first, sid);
+        /* its pseudo-elements': the rules that matched each, under the element's style */
+        for (uint32_t pk = CSS_PSEUDO_BEFORE; pk <= CSS_PSEUDO_PLACEHOLDER && len(pmatched); pk++) {
+            clear(matched);
+            for (size_t q = 0; q < len(pmatched); q++) if (at(pmatched, q) >> 24 == pk) push_back(matched, at(pmatched, q) & 0xffffff);
+            if (!len(matched)) continue;
+            for (size_t q = 0; q < len(matched); q++) {
+                css_match_h m = match_new(s);
+                s->match[m.index].node = nh;
+                s->match[m.index].rule = at(matched, q);
+                s->match[m.index].pseudo = (css_pseudo)pk;
+            }
+            uint32_t psid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, sid, 0, initial, irec, &cust, &vc);
+            /* a ::before or an ::after whose content is none (or normal) is not generated */
+            if (pk == CSS_PSEUDO_BEFORE || pk == CSS_PSEUDO_AFTER) {
+                uint32_t cc = at(ss.first, psid) + CSS_PROP_CONTENT;
+                if (s->cval[cc].unit == CSS_UNIT_KEYWORD && (names_is(s, s->cval[cc].word, "none", 4) || names_is(s, s->cval[cc].word, "normal", 6)))
+                    continue;
+            }
+            css_pstyle_h ph = pstyle_new(s);
+            s->pstyle[ph.index].node = nh;
+            s->pstyle[ph.index].pseudo = (css_pseudo)pk;
+            s->pstyle[ph.index].style = psid;
+            s->pstyle[ph.index].first = at(ss.first, psid);
+        }
     }
     s->revision++;
     return CSS_OK;

@@ -3,7 +3,9 @@
    content box, how their width was found), their lines and fragments.
    Margin collapsing, auto margins, percentages, max-width, box-sizing,
    inline-blocks, alignment, line breaking, white space, inline backgrounds,
-   tables, list markers. */
+   tables, list markers; floats and clearance, positioned boxes, flex and grid
+   containers, vertical-align, min and max heights, a percentage height, rowspan,
+   hyphenation, bidirectional text, generated content. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -36,6 +38,26 @@ static const lcase cases[] = {
     { "a table's declared width, shared", "<table id=t width=400><tr><td id=a>a</td><td id=b>bbbbbbbb</td></tr></table>" },
     { "a list item's marker", "<ul><li id=a>x</li></ul><ol><li id=b>y</li></ol>" },
     { "font sizes in em, and line height", "<div style='font-size:20px'><p id=a style='font-size:1.5em;line-height:1.2'>x</p></div>" },
+    { "a float, and lines beside it", "<div style='width:200px'><div id=a style='float:left;width:50px;height:50px'></div><p id=b style='margin:0'>one two three four five six seven</p></div>" },
+    { "a right float, and clearance", "<div id=a style='float:right;width:60px;height:40px'></div><p id=b style='clear:both;margin:0'>x</p>" },
+    { "a formatting context beside a float", "<div style='float:left;width:100px;height:30px'></div><div id=a style='overflow:hidden'>x</div>" },
+    { "a float shrinks to fit", "<div id=a style='float:left'>shrunk</div>" },
+    { "relative offsets", "<div id=a style='position:relative;left:10px;top:5px'>x</div>" },
+    { "absolute in a relative box", "<div id=t style='position:relative;width:300px;height:100px'><div id=a style='position:absolute;right:0;bottom:0;width:50px;height:20px'></div></div>" },
+    { "absolute at its static position", "<p id=t>x</p><div id=a style='position:absolute'>y</div>" },
+    { "fixed in the viewport", "<div id=a style='position:fixed;left:0;right:0;bottom:0;height:10px'></div>" },
+    { "a flex row that grows", "<div id=t style='display:flex;width:300px'><div id=a style='flex:1'>a</div><div id=b style='flex:2'>b</div></div>" },
+    { "a flex row that wraps, centred", "<div id=t style='display:flex;flex-wrap:wrap;width:200px;justify-content:center'><div id=a style='width:150px'>a</div><div id=b style='width:150px'>b</div></div>" },
+    { "a flex column with a definite height", "<div id=t style='display:flex;flex-direction:column;height:100px'><div id=a>a</div><div id=b style='flex-grow:1'>b</div></div>" },
+    { "a grid of fixed and fr columns", "<div id=t style='display:grid;grid-template-columns:100px 1fr;gap:10px;width:300px'><div id=a>a</div><div id=b>b</div><div id=e>c</div></div>" },
+    { "a grid item placed by line and span", "<div id=t style='display:grid;grid-template-columns:repeat(3,1fr);width:300px'><div id=a style='grid-column:2/4'>a</div><div id=b style='grid-row:span 2'>b</div></div>" },
+    { "vertical-align: super and middle", "<p id=p>x<sup id=a>2</sup><span id=b style='display:inline-block;width:10px;height:30px;vertical-align:middle'></span></p>" },
+    { "min-height and max-height", "<div id=a style='min-height:50px'>x</div><div id=b style='max-height:10px'>y</div>" },
+    { "a percentage height", "<div id=t style='height:200px'><div id=a style='height:25%'>x</div></div>" },
+    { "a rowspan", "<table><tr><td id=a rowspan=2>a<br>b<br>c</td><td id=b>x</td></tr><tr><td id=e>y</td></tr></table>" },
+    { "a word hyphenated", "<p id=a style='width:100px;hyphens:auto' lang=en>incomprehensible</p>" },
+    { "right-to-left text", "<p id=a style='direction:rtl;width:200px'>abc \xd7\x90\xd7\x91\xd7\x92 def</p>" },
+    { "generated content and counters", "<style>ol{counter-reset:c}li{counter-increment:c}li::before{content:counter(c) \". \"}</style><ol style='list-style:none'><li id=a>x</li><li id=b>y</li></ol>" },
 };
 
 static uint32_t find_id(const dom_document *d, const char *id) {

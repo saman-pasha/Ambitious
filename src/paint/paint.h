@@ -1,7 +1,9 @@
 /* src/paint/paint.h -- a laid-out page drawn (src/paint/paint.c): its boxes'
-   backgrounds and borders, its lines' text and decorations, its markers, onto a
-   canvas of RGB pixels, its images decoded from what the loader fetched; and the
-   canvas as a PNG. A unit that includes this has said amb_interface(layout) and
+   shadows, backgrounds (colours, gradients, images) and borders in their styles
+   and rounded corners, its lines' text, shadows and decorations, its markers, its
+   boxes' opacity, transforms, clipping and stacking order, onto a canvas of RGB
+   pixels, its images decoded from what the loader fetched; and the canvas as a
+   PNG. A unit that includes this has said amb_interface(layout) and
    amb_interface(net) first. The canvas's owner drops its pixels
    (AMB_CANVAS_DROP): a struct's vectors are not autodropped. */
 #ifndef AMB_PAINT_H
@@ -10,8 +12,9 @@
 #include <stdint.h>
 #include <vector.pl>
 
-/* oy: the page's y the canvas's first row shows (0 for the whole page) */
-typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; double oy; } amb_canvas;
+/* oy: the page's y the canvas's first row shows (0 for the whole page); the clip: the
+   rectangle drawing reaches, in page coordinates (overflow's, as paint sets it) */
+typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; double oy, cx0, cy0, cx1, cy1; } amb_canvas;
 #define AMB_CANVAS_DROP(c) vector_uint8_t_drop(&(c).px)
 
 /* the page laid out in t, drawn onto c (sized to the viewport box, at most 16384

@@ -1,16 +1,19 @@
 %% prolog/amb/rules/css.pl -- what the CSS module's facts mean (contracts/css.pl).
 %%
-%% The cascade's order, as CSS Cascade 4 has it for the origins the module
+%% The cascade's order, as CSS Cascade 5 has it for the origins the module
 %% knows: origin and importance first (normal user agent < normal author <
 %% important author < important user agent), the style attribute's declarations
-%% above the rules' within each (element-attached style), then specificity, then
-%% the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
+%% above the rules' within each (element-attached style), then the cascade layer
+%% (@layer: in the layers' order, the unlayered rules last; for !important the
+%% order reversed), then specificity, then the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
 %% way; css_lost/4 says, of each declaration that lost, at which of these steps.
 %%
 %% No clause here cuts: amb_why/2 proves these rules clause by clause, and an
 %% if-then-else says what a cut would.
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
-   css_style_rgba/3, css_initial/2, css_initial_rgba/2.
+   css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
+   css_imported/3, css_font_face/5, css_font_face_font/2,
+   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -23,8 +26,9 @@ css_declared_rgba(N, P, C) :- css_style_of(N, S), css_style_rgba(S, P, C).
 %% (css_declared/4, css_declared_rgba/3) and each property's initial value
 %% (css_initial/2, css_initial_rgba/2). Every other value is what the cascade made
 %% it (src/css/css.c, css_element): an inherited property's is the parent
-%% element's, and any other's the initial value, border-color's being the
-%% element's own colour. So css_computed/4 and css_rgba/3 answer as they did when
+%% element's, and any other's the initial value: a border's colour and the
+%% outline's being the element's own colour, and a border's width 0 when its
+%% style is none or hidden. So css_computed/4 and css_rgba/3 answer as they did when
 %% every value was a fact, from a snapshot with a sixth as many (PLAN.md 11).
 %% The elements are those the cascade styled (css_style_of/2): a template's
 %% contents are no part of the document's tree, and have no style.
@@ -37,8 +41,10 @@ css_computed(N, P, V, How) :-
 css_rules_default(N, P, V, How) :-
     (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
     ->  css_computed(Par, P, V, _), How = inherited
-    ;   P == border_color
+    ;   css_rules_currentcolor(P)
     ->  css_computed(N, color, V, _), How = initial
+    ;   css_rules_border_style(P, S), css_computed(N, S, Style, _), ( Style == none ; Style == hidden )
+    ->  V = '0px', How = initial
     ;   css_initial(P, V), How = initial
     ).
 
@@ -51,12 +57,13 @@ css_rgba(N, P, C) :-
 css_rules_default_rgba(N, P, C) :-
     (   css_rules_inherited(P), dom_parent(N, Par), css_style_of(Par, _)
     ->  css_rgba(Par, P, C)
-    ;   P == border_color
+    ;   css_rules_currentcolor(P)
     ->  css_rgba(N, color, C)
     ;   css_initial_rgba(P, C)
     ).
 
-%% the properties inherited (CSS 2.1's, of those the module computes) and the colours
+%% the properties inherited (of those the module computes: src/css/css.c's table), the
+%% colours, those whose initial value is currentcolor, and each border width's style
 css_rules_inherited(color).
 css_rules_inherited(font_size).
 css_rules_inherited(font_weight).
@@ -65,17 +72,74 @@ css_rules_inherited(text_align).
 css_rules_inherited(line_height).
 css_rules_inherited(white_space).
 css_rules_inherited(list_style_type).
+css_rules_inherited(list_style_position).
 css_rules_inherited(font_family).
+css_rules_inherited(visibility).
+css_rules_inherited(text_shadow).
+css_rules_inherited(letter_spacing).
+css_rules_inherited(word_spacing).
+css_rules_inherited(text_indent).
+css_rules_inherited(text_transform).
+css_rules_inherited(direction).
+css_rules_inherited(writing_mode).
+css_rules_inherited(hyphens).
+css_rules_inherited(quotes).
 css_rules_colour(color).
 css_rules_colour(background_color).
-css_rules_colour(border_color).
+css_rules_colour(P) :- css_rules_currentcolor(P).
+css_rules_currentcolor(border_top_color).
+css_rules_currentcolor(border_right_color).
+css_rules_currentcolor(border_bottom_color).
+css_rules_currentcolor(border_left_color).
+css_rules_currentcolor(outline_color).
+css_rules_border_style(border_top_width, border_top_style).
+css_rules_border_style(border_right_width, border_right_style).
+css_rules_border_style(border_bottom_width, border_bottom_style).
+css_rules_border_style(border_left_width, border_left_style).
+
+%% CUSTOM PROPERTIES. An element's are its style's own (css_style_custom/5, var()
+%% replaced), and its parent's of every other name: a custom property is inherited
+css_custom(N, Name, V) :-
+    css_style_of(N, S), css_style_custom(S, Name, V, How, _), How \== initial.
+css_custom(N, Name, V) :-
+    dom_parent(N, P), dom_element(P, _), css_custom(P, Name, V),
+    \+ ( css_style_of(N, S), css_style_custom(S, Name, _, _, _) ).
+
+%% PSEUDO-ELEMENTS. A pseudo-element's style (css_pseudo_style_of/3: a ::before or an
+%% ::after whose content is something, and the others that rules matched) is a style
+%% like an element's, under its element's: a value a declaration gave, or else its
+%% element's (an inherited property's), the element's own colour (currentcolor's), a
+%% border's width 0 under the style none, or the initial value
+css_pseudo_computed(N, Ps, P, V, How) :-
+    css_pseudo_style_of(N, Ps, S), css_initial(P, _),
+    (   css_style_declared(S, P, V0, How0)
+    ->  V = V0, How = How0
+    ;   css_rules_inherited(P)
+    ->  css_computed(N, P, V, _), How = inherited
+    ;   css_rules_currentcolor(P)
+    ->  css_pseudo_computed(N, Ps, color, V, _), How = initial
+    ;   css_rules_border_style(P, Sp), css_pseudo_computed(N, Ps, Sp, Style, _), ( Style == none ; Style == hidden )
+    ->  V = '0px', How = initial
+    ;   css_initial(P, V), How = initial
+    ).
 
 css_origin_of(D, O) :- css_decl(D, R, _, _, _), css_rule(R, S, _, _, _), css_sheet(S, O).
 
 %% a declaration's place in the cascade: a term that sorts as the cascade does
-css_rules_rank(D, rank(Layer, Spec, Order)) :-
+css_rules_rank(D, rank(Layer, LayerRank, Spec, Order)) :-
     css_decl(D, R, _, _, Imp), css_rule(R, _, _, Spec, Order), css_origin_of(D, O),
-    css_rules_layer(O, Imp, Layer).
+    css_rules_layer(O, Imp, Layer), css_rules_layer_rank(R, Imp, LayerRank).
+
+%% a rule's cascade layer's place: its layer's rank, the unlayered after every layer
+%% (8191, as src/css/css.c has it); for !important, the order reversed
+css_rules_layer_rank(R, Imp, LR) :-
+    (   css_rule_layer(R, L), css_layer(L, _, Rank) -> Base = Rank ; Base = 8191 ),
+    (   Imp == true -> LR is 8191 - Base ; LR = Base ).
+
+%% the cascade layer a declaration is in: its name, or unlayered
+css_layer_of(D, Name) :-
+    css_decl(D, R, _, _, _),
+    (   css_rule_layer(R, L), css_layer(L, N, _) -> Name = N ; Name = unlayered ).
 
 css_rules_layer(user_agent, false, 1).
 css_rules_layer(author, false, 2).
@@ -99,8 +163,9 @@ css_specificity(S, spec(A, B, C)) :- A is S >> 16, B is (S >> 8) /\ 255, C is S 
 css_lost(N, P, D2, Why) :-
     css_won(N, P, D),
     css_matched(N, R2), css_decl(D2, R2, P, _, _), D2 \== D,
-    css_rules_rank(D, rank(L1, S1, O1)), css_rules_rank(D2, rank(L2, S2, O2)),
+    css_rules_rank(D, rank(L1, LR1, S1, O1)), css_rules_rank(D2, rank(L2, LR2, S2, O2)),
     (   L2 < L1 -> css_rules_layer_name(L2, W2), css_rules_layer_name(L1, W1), Why = origin_or_importance(lost(W2), won(W1))
+    ;   LR2 < LR1 -> css_layer_of(D2, N2), css_layer_of(D, N1), Why = layer(lost(N2), won(N1))
     ;   S2 < S1 -> css_specificity(S2, T2), css_specificity(S1, T1), Why = specificity(T2, lower_than(T1))
     ;   O2 < O1 -> Why = order(O2, earlier_than(O1))
     ;   Why = earlier_in_the_same_rule
@@ -179,5 +244,6 @@ css_diag(low_contrast, N, Text) :-
     (   From == canvas -> Bg = 'the white canvas' ; css_computed(From, background_color, Bg, _) ),
     format(atom(Text), '<~w> text ~w on ~w: contrast ~2f:1, below ~w:1', [E, Fg, Bg, Ratio, Min]).
 css_diag(unused_rule, R, Text) :-
-    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_matched(_, R),
-    format(atom(Text), 'the rule ~w matches no element (at rest: no hover, focus or other state)', [Selector]).
+    css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
+    (   css_state(_, _) -> State = 'in the state the page was put in' ; State = 'at rest: no hover, focus or other state' ),
+    format(atom(Text), 'the rule ~w matches no element (~w)', [Selector, State]).

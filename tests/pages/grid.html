@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><title>Grid</title>
+<style>
+/* tests/pages/grid.html -- grid containers: fixed, fr, auto and minmax() tracks,
+   repeat() with a count and auto-fill, gaps, items placed by line and by span and the
+   rest placed automatically, rows from the content and fixed, justify-self and
+   align-self, justify-content; the boxes held to Chromium's (tests/pages/grid.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.g { display: grid; width: 600px; background: #f4f4f4; margin-bottom: 10px; }
+.g > div { background: #cde; }
+.a { grid-template-columns: 100px 1fr 2fr; gap: 10px; }
+.b { grid-template-columns: repeat(3, 1fr); grid-template-rows: 40px auto; column-gap: 6px; row-gap: 4px; }
+.b > .wide { grid-column: 1 / 3; }
+.b > .tall { grid-row: span 2; }
+.c { grid-template-columns: auto 1fr auto; }
+.d { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.e { grid-template-columns: 150px 150px; justify-content: center; align-items: center; grid-auto-rows: 50px; }
+.e > .end { justify-self: end; }
+.e > .stretch { align-self: stretch; }
+.f { grid-template-columns: minmax(200px, 300px) 1fr; }
+.h { grid-template-columns: 1fr 1fr; }
+.h > .place { grid-column: 2; grid-row: 1; }
+</style></head>
+<body>
+<div class="g a" id=a><div id=a1>100px</div><div id=a2>1fr</div><div id=a3>2fr</div><div id=a4>next row</div></div>
+<div class="g b" id=b><div class=wide id=b1>two columns</div><div class=tall id=b2>two rows</div><div id=b3>auto</div><div id=b4>auto</div><div id=b5>auto, with more text in it that wraps</div></div>
+<div class="g c" id=c><div id=c1>auto</div><div id=c2>the rest</div><div id=c3>auto too</div></div>
+<div class="g d" id=d><div id=d1>1</div><div id=d2>2</div><div id=d3>3</div><div id=d4>4</div><div id=d5>5</div></div>
+<div class="g e" id=e><div id=e1>centred</div><div class=end id=e2>end</div><div class=stretch id=e3>stretched</div></div>
+<div class="g f" id=f><div id=f1>minmax</div><div id=f2>fr</div></div>
+<div class="g h" id=h><div id=h1>placed after</div><div class=place id=h2>placed first</div></div>
+</body></html>
