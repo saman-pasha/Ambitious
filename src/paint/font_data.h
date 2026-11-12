@@ -212,6 +212,32 @@ static const uint8_t amb_sys_order[AMB_SYS_ORDER] = { 0, 1, 2, 3, 4, 5, 6, 7, 8,
 #define AMB_SYS_EMOJI 21
 static const uint8_t amb_font_file[AMB_FONT_FACES] = { 12, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 1, 2, 10, 33, 34, 35, 36, 37 };
 
+/* each built-in font's file's average character width (OS/2's xAvgCharWidth) and its glyphs'
+   horizontal bounds (head's xMin and xMax), in its units per em: the widths Blink sizes a
+   text control by */
+static const int32_t amb_font_wide[AMB_FONT_FACES][3] = {
+    { 1124, -1114, 2618 },
+    { 1180, -1114, 2753 },
+    { 1098, -1114, 2635 },
+    { 1141, -1114, 2678 },
+    { 1187, -1114, 2666 },
+    { 1248, -987, 2671 },
+    { 1185, -1360, 2787 },
+    { 1249, -977, 2780 },
+    { 1229, -987, 1521 },
+    { 1229, -987, 1427 },
+    { 1229, -987, 1687 },
+    { 1229, -987, 1620 },
+    { 1038, -2090, 3673 },
+    { 1173, -2190, 4045 },
+    { 1050, -1576, 4312 },
+    { 1159, -1712, 3797 },
+    { 1233, -1144, 1470 },
+    { 1233, -915, 1499 },
+    { 1233, -863, 1528 },
+    { 1233, -915, 1654 }
+};
+
 /* the code points Blink takes the emoji font for first (Emoji_Presentation and
    Emoji_Modifier_Base, not Emoji_Modifier: a skin tone alone is text, measured, perl's Unicode::UCD): first, last, ... */
 #define AMB_EMOJI_RANGES 85

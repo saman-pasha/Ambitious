@@ -320,6 +320,9 @@ static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, 
     fc->asc = amb_s16(p, n, t.hhea + 4);
     fc->desc = -amb_s16(p, n, t.hhea + 6);
     fc->gap = amb_s16(p, n, t.hhea + 8);
+    fc->xmin = amb_s16(p, n, t.head + 36);
+    fc->xmax = amb_s16(p, n, t.head + 40);
+    if (t.os2 && t.os2_len >= 4) fc->avgw = amb_s16(p, n, t.os2 + 2);
     if (t.os2 && t.os2_len >= 78) {
         /* OS/2's typographic metrics when the font asks for them (USE_TYPO_METRICS), its
            Windows ones when hhea gives none */
@@ -880,6 +883,10 @@ static void amb_font_read(int k) {
         abort();
     amb_face fc;
     if (!amb_sfnt_face(data(amb_sb) + base, n, 0, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) abort();
+    /* the widths of its file, not of the subset (which has no OS/2, and its head bounds its own glyphs) */
+    fc.avgw = amb_font_wide[k][0];
+    fc.xmin = amb_font_wide[k][1];
+    fc.xmax = amb_font_wide[k][2];
     for (int face = 0; face < AMB_NBUILTIN; face++) {
         if (amb_font_of[face] != k) continue;
         amb_sf[face] = fc;
@@ -1103,6 +1110,16 @@ void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, do
     *asc = amb_round(fc.asc * s);
     *desc = amb_round(fc.desc * s);
     *gap = amb_round(fc.gap * s);
+}
+
+void amb_face_widths(const amb_fonts *f, int face, double size, double *avg, double *maxw) {
+    amb_face fc;
+    *avg = *maxw = 0;
+    if (!amb_ready(f, face)) return;
+    amb_rec(f, face, &fc);
+    double s = size / fc.upem;
+    *avg = fc.avgw > 0 ? fc.avgw * s : 0;
+    *maxw = amb_round((fc.xmax - fc.xmin) * s);
 }
 
 /* the glyph of cp among the face's own (its index among its kind's code points into *g):

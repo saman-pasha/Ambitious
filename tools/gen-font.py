@@ -1436,6 +1436,21 @@ def main():
     w("static const uint8_t amb_sys_order[AMB_SYS_ORDER] = { %s };\n" % ", ".join("%d" % k for k in range(len(order))))
     w("#define AMB_SYS_EMOJI %d\n" % emoji)
     w("static const uint8_t amb_font_file[AMB_FONT_FACES] = { %s };\n" % ", ".join("%d" % k for k in own))
+    # each built-in font's file's widths, which a text control is sized by (Blink's
+    # TextFieldIntrinsicInlineSize): OS/2's xAvgCharWidth, and head's xMin and xMax (the
+    # subset's own head bounds its glyphs alone), in its units per em
+    wide = []
+    for name, src, file in FACES:
+        src_font = Font(dirs[src] + "/" + file)
+        head = src_font.tables["head"][0]
+        xmin, xmax = struct.unpack_from(">h", src_font.d, head + 36)[0], struct.unpack_from(">h", src_font.d, head + 40)[0]
+        os2 = src_font.tables.get("OS/2")
+        avg = struct.unpack_from(">h", src_font.d, os2[0] + 2)[0] if os2 else 0
+        wide.append("{ %d, %d, %d }" % (avg, xmin, xmax))
+    w("\n/* each built-in font's file's average character width (OS/2's xAvgCharWidth) and its glyphs'\n")
+    w("   horizontal bounds (head's xMin and xMax), in its units per em: the widths Blink sizes a\n")
+    w("   text control by */\n")
+    w("static const int32_t amb_font_wide[AMB_FONT_FACES][3] = {\n    %s\n};\n" % ",\n    ".join(wide))
     # the code points Blink's emoji fallback takes before the others' (its emoji
     # presentation scanner's emoji: Emoji_Presentation and Emoji_Modifier_Base), and those
     # HarfBuzz hides (Default_Ignorable_Code_Point)

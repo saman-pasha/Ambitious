@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Form controls: their font and Chromium's sizes</title><style>
+body { margin: 8px; font: 16px/20px serif; }
+div { margin: 0 0 4px; }
+</style></head><body>
+<div id="l1"><input id="t1"></div>
+<div id="l2"><input id="t2" size="10" value="Ten wide"></div>
+<div id="l3"><input id="t3" style="font-size: 20px" placeholder="Twenty px"></div>
+<div id="l4"><input id="t4" style="font-family: monospace" value="mono"></div>
+<div id="l5"><input id="t5" style="font: 16px serif"></div>
+<div id="l6"><input id="t6" type="password" value="secret"> <input id="t7" type="number" value="42" size="5"></div>
+<div id="l7"><input id="c1" type="checkbox"><input id="c2" type="radio" checked>after</div>
+<div id="l8"><button id="b1">Go</button><button id="b2"></button><input id="b3" type="submit"><input id="b4" type="reset"><input id="b5" type="button" value="A button"></div>
+<div id="l9"><select id="s1"><option>One</option><option>Option two</option></select><select id="s2"><option>a</option><option selected>Longer selected one</option></select><select id="s3"><optgroup label="G"><option>In a group</option></optgroup></select></div>
+<div id="l10"><select id="s4" size="3"><option>One</option><option>Option two</option></select></div>
+<div id="l11"><textarea id="a1"></textarea><textarea id="a2" rows="3" cols="10">Some text in a narrow area that wraps</textarea></div>
+<div id="l12"><input id="r1" type="range"><input id="k1" type="color"></div>
+<div id="l13"><input id="t8" style="width: 100px" value="a value much too long for its box"><input id="t9" type="email" size="30"></div>
+<div id="after">After</div>
+</body></html>

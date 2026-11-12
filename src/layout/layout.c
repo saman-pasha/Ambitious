@@ -897,6 +897,105 @@ static int lay_alt_text(const dom_document *d, uint32_t el, vector<char> *out) {
     return 1;
 }
 
+/* ---- form controls: what each is drawn as, and Chromium's sizes for them ---- */
+
+/* an input element's kind, by its type attribute in any case (HTML 4.10.5): the text field's for text, search,
+   email, url, tel, number and any type HTML does not know */
+enum { LI_TEXT, LI_PASSWORD, LI_CHECK, LI_RADIO, LI_BUTTON, LI_SUBMIT, LI_RESET, LI_RANGE, LI_COLOR, LI_FILE, LI_DATE, LI_IMAGE, LI_HIDDEN };
+static int lay_input_kind(const dom_document *d, uint32_t el) {
+    static const char *const names[15] = { "password", "checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "date",
+                                           "datetime-local", "month", "time", "week", "image" };
+    static const int kinds[15] = { LI_PASSWORD, LI_CHECK, LI_RADIO, LI_BUTTON, LI_SUBMIT, LI_RESET, LI_RANGE, LI_COLOR, LI_FILE, LI_DATE,
+                                   LI_DATE, LI_DATE, LI_DATE, LI_DATE, LI_IMAGE };
+    uint32_t a = lay_attr(d, el, "type");
+    if (!a) return LI_TEXT;
+    amb_span v = d->attr[a].value;
+    const char *p = text_ptr(d, v);
+    for (int k = 0; k < 15; k++) {
+        size_t n = strlen(names[k]);
+        if (v.len != n) continue;
+        size_t i = 0;
+        while (i < n && (p[i] >= 'A' && p[i] <= 'Z' ? p[i] + 32 : p[i]) == names[k][i]) i++;
+        if (i == n) return kinds[k];
+    }
+    return LI_TEXT;
+}
+
+/* the text of x's descendants (a script's passed over), ASCII white space stripped and collapsed: an option's text */
+static void lay_collapsed_text(const dom_document *d, uint32_t x, vector<char> *out, int *sp, int depth) {
+    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+        if (d->node[c].kind == DOM_NODE_KIND_TEXT) {
+            amb_span v = d->node[c].data;
+            const char *src = text_ptr(d, v);
+            for (size_t i = 0; i < v.len; i++) {
+                char ch = src[i];
+                if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') { if (!*sp) push_back(*out, ' '); *sp = 1; continue; }
+                push_back(*out, ch);
+                *sp = 0;
+            }
+        } else if (d->node[c].kind == DOM_NODE_KIND_ELEMENT && depth < 32 && !lay_is_named(d, c, "script")) lay_collapsed_text(d, c, out, sp, depth + 1);
+    }
+}
+/* an option's label (HTML 4.10.10): its label attribute when it is not empty, else its text */
+static void lay_option_label(const dom_document *d, uint32_t opt, vector<char> *out) {
+    clear(*out);
+    uint32_t a = lay_attr(d, opt, "label");
+    if (a && d->attr[a].value.len) { append_range(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
+    int sp = 1;
+    lay_collapsed_text(d, opt, out, &sp, 0);
+    while (len(*out) && back(*out) == ' ') pop_back(out);
+}
+/* a select's list box or drop-down (HTML 4.10.7): a list box when it has multiple or a size above 1, its rows the
+   size (4 for multiple without one); its options' widest label in s's font, in *widest; its selected option's label
+   (the last with selected, else the first that is not disabled, else the first) in *shown. The options are its
+   children's and its optgroups' children's */
+static int lay_select(LCTX, uint32_t el, const lay_style *s, double *widest, vector<char> *shown, long *rows) {
+    int multiple = lay_attr(d, el, "multiple") != 0;
+    long size = lay_attr_int(d, el, "size", multiple ? 4 : 1);
+    if (size < 1) size = multiple ? 4 : 1;
+    *rows = size;
+    *widest = 0;
+    clear(*shown);
+    uint32_t chosen = 0, first = 0, first_enabled = 0;
+    vector<char> label;
+    for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
+        uint32_t g = lay_is_named(d, c, "optgroup") ? d->node[c].first_child : c, end = lay_is_named(d, c, "optgroup") ? 0 : d->node[c].next_sibling;
+        for (uint32_t o = g; o && o != end; o = d->node[o].next_sibling) {
+            if (!lay_is_named(d, o, "option")) { if (o == c) break; continue; }
+            lay_option_label(d, o, &label);
+            double w = amb_text_width(f, s->face, s->fs, data(label), len(label)) + s->ls * (double)lay_cps(data(label), len(label));
+            if (o != c) w += 4 * amb_text_width(f, s->face, s->fs, " ", 1);   /* in an optgroup: indented by four spaces */
+            if (w > *widest) *widest = w;
+            if (!first) first = o;
+            if (!first_enabled && !lay_attr(d, o, "disabled")) first_enabled = o;
+            if (lay_attr(d, o, "selected")) chosen = o;
+            if (o == c) break;
+        }
+    }
+    uint32_t o = chosen ? chosen : first_enabled ? first_enabled : first;
+    if (o) lay_option_label(d, o, shown);
+    return multiple || size > 1;
+}
+/* the character width a text control is sized by (Blink's GetAvgCharWidth), its face's at s: its OS/2 average,
+   which Chromium takes as it is where it rounds down and rounded where it rounds up (measured on 212 fields of six
+   faces at 28 sizes, all but three to the px); a face with none, a "0"'s width. *maxw: the widest character's
+   (head's extent, rounded), 0 for a face without an average */
+static double lay_char_width(LCTX, const lay_style *s, double *maxw) {
+    double avg = 0, mx = 0;
+    amb_face_widths(f, s->face, s->fs, &avg, &mx);
+    if (avg <= 0) { *maxw = 0; return amb_text_width(f, s->face, s->fs, "0", 1); }
+    *maxw = mx;
+    return fmax(floor(avg + 0.5), avg);
+}
+/* a button input's label: its value, or the default its type has (Chromium's: Submit, Reset, none) */
+static void lay_button_label(const dom_document *d, uint32_t el, int kind, vector<char> *out) {
+    clear(*out);
+    uint32_t a = lay_attr(d, el, "value");
+    if (a) { append_range(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
+    const char *dflt = kind == LI_SUBMIT ? "Submit" : kind == LI_RESET ? "Reset" : "";
+    append_range(*out, dflt, strlen(dflt));
+}
+
 static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
     *h = -1;
     if (lay_img_failed(LARGS, el)) {
@@ -911,19 +1010,17 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             return;
         }
         double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
-        double eh = s->border_box ? s->b[0] + s->b[2] + lay_res(st, s->p[0], cw) + lay_res(st, s->p[2], cw) : 0;
         double d0 = has_alt ? 0 : 16;
         *w = s->width.unit == LAY_AUTO ? d0 : lay_res(st, s->width, cw) - ew;
-        *h = s->height.unit == LAY_AUTO ? d0 : s->height.v - eh;
+        *h = s->height.unit == LAY_AUTO ? d0 : s->height.v;    /* a border box's height the style made its content's */
         if (*w < 0) *w = 0;
         if (*h < 0) *h = 0;
         return;
     }
     if (lay_replaced(d, el)) {
         double dw = 0, dh = 0;
-        /* a declared width or height of the border box (box-sizing) less its padding and border */
+        /* a declared width of the border box (box-sizing) less its padding and border (a height the style made its content's) */
         double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
-        double eh = s->border_box ? s->b[0] + s->b[2] + lay_res(st, s->p[0], cw) + lay_res(st, s->p[2], cw) : 0;
         if (lay_is_named(d, el, "img") && nt) {
             /* its size, as the loader read it from the image's header; one dimension
                declared, the other kept in proportion */
@@ -940,7 +1037,7 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                     return;
                 }
                 if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) {
-                    *h = s->height.v - eh;
+                    *h = s->height.v;
                     if (*h < 0) *h = 0;
                     *w = *h * dw / dh;
                     return;
@@ -948,20 +1045,64 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             }
         }
         if (lay_is_named(d, el, "input")) {
-            uint32_t a = lay_attr(d, el, "type");
-            amb_span v = a ? d->attr[a].value : d->attr[0].value;
-            const char *tp = a ? text_ptr(d, v) : "";
-            size_t tn = a ? v.len : 0;
-            if ((tn == 8 && memcmp(tp, "checkbox", 8) == 0) || (tn == 5 && memcmp(tp, "radio", 5) == 0)) { dw = 13; dh = 13; }
-            else { dw = (double)lay_attr_int(d, el, "size", 20) * s->fs * 0.5; dh = s->lh; }
+            /* Chromium's sizes: a check box or radio button 13px square, a range 129 by 16, a colour well 44 by 23
+               inside its border and padding, a file chooser 34 "0"s wide, a button its label's width and a line
+               high; a text field size characters (20 by default) of its face's average width and its widest
+               character's excess over it, ceiled (Blink's TextFieldIntrinsicInlineSize), a line high */
+            int kind = lay_input_kind(d, el);
+            if (kind == LI_CHECK || kind == LI_RADIO) { dw = 13; dh = 13; }
+            else if (kind == LI_RANGE) { dw = 129; dh = 16; }
+            else if (kind == LI_COLOR) { dw = 44; dh = 23; }
+            else if (kind == LI_FILE) { dw = ceil(34 * amb_text_width(f, s->face, s->fs, "0", 1)); dh = s->lh + 6; }
+            else if (kind == LI_BUTTON || kind == LI_SUBMIT || kind == LI_RESET) {
+                vector<char> label;
+                lay_button_label(d, el, kind, &label);
+                dw = amb_text_width(f, s->face, s->fs, data(label), len(label)) + s->ls * (double)lay_cps(data(label), len(label));
+                dh = s->lh;
+            } else if (kind == LI_DATE) {
+                /* its fields' text (mm/dd/yyyy) and its picker's icon */
+                dw = amb_text_width(f, s->face, s->fs, "mm/dd/yyyy", 10) + 39.0625;
+                dh = s->lh + 2.328125;
+            } else {
+                /* size counts for a text, search, url, tel, email or password field; a number field with a min and
+                   a max is as wide as the longer of them and its spin button's 15px (Blink's NumberInputType) */
+                uint32_t ta = lay_attr(d, el, "type");
+                int number = ta && d->attr[ta].value.len == 6 && (text_ptr(d, d->attr[ta].value)[0] | 32) == 'n';
+                long n = number ? 20 : lay_attr_int(d, el, "size", 20);
+                if (n <= 0) n = 20;
+                double extra = 0;
+                if (number) {
+                    uint32_t lo = lay_attr(d, el, "min"), hi = lay_attr(d, el, "max");
+                    if (lo && hi && d->attr[lo].value.len && d->attr[hi].value.len) {
+                        n = (long)(d->attr[lo].value.len > d->attr[hi].value.len ? d->attr[lo].value.len : d->attr[hi].value.len);
+                        extra = 15;
+                    }
+                }
+                double maxw = 0, chw = lay_char_width(LARGS, s, &maxw);
+                dw = ceil(chw * (double)n + (maxw > 0 ? maxw - chw : 0) - 1e-6) + extra;
+                dh = s->lh;
+            }
         } else if (lay_is_named(d, el, "textarea")) {
-            dw = (double)lay_attr_int(d, el, "cols", 20) * s->fs * 0.55;
-            dh = (double)lay_attr_int(d, el, "rows", 2) * s->lh;
-        } else if (lay_is_named(d, el, "select")) { dw = 8 * s->fs; dh = s->lh; }
+            /* cols characters of its face's average width, ceiled, and the vertical scroll bar's 15px; rows lines */
+            long cols = lay_attr_int(d, el, "cols", 20), rows = lay_attr_int(d, el, "rows", 2);
+            if (cols <= 0) cols = 20;
+            if (rows <= 0) rows = 2;
+            double maxw = 0, chw = lay_char_width(LARGS, s, &maxw);
+            dw = ceil(chw * (double)cols - 1e-6) + 15;
+            dh = (double)rows * s->lh;
+        } else if (lay_is_named(d, el, "select")) {
+            /* a drop-down: its widest option's label ceiled, 4px before it and the arrow's 16 after; a line and 2px
+               high. A list box: the widest label and 4px; its rows, a line and 2px each */
+            double widest = 0;
+            vector<char> shown;
+            long rows = 1;
+            if (lay_select(LARGS, el, s, &widest, &shown, &rows)) { dw = widest + 4; dh = (double)rows * (s->lh + 2); }
+            else { dw = ceil(widest - 1e-6) + 20; dh = s->lh + 2; }
+        }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
         else if (lay_is_named(d, el, "canvas") || lay_is_svg(d, el)) { dw = 300; dh = 150; }
         *w = s->width.unit == LAY_AUTO ? dw : lay_res(st, s->width, cw) - ew;
-        *h = s->height.unit == LAY_AUTO ? dh : s->height.v - eh;
+        *h = s->height.unit == LAY_AUTO ? dh : s->height.v;    /* a border box's height the style made its content's */
         if (*w < 0) *w = 0;
         if (*h < 0) *h = 0;
         return;
@@ -1608,6 +1749,7 @@ static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, 
 static uint32_t lay_nth_line(layout_tree *t, uint32_t b, long *n, double oy, double *bottom, uint32_t *owner);
 static void lay_clamp(LCTX, uint32_t b, uint32_t el, const lay_style *s);
 static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw);
+static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps, const char *s, size_t n, double x, double y, int center);
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
 static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
 static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh);
@@ -1654,67 +1796,157 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         frags_append(t, aln, afr);
         return;
     }
-    uint32_t a = lay_attr(d, el, "placeholder");
-    if (!a || d->attr[a].value.len == 0) return;
-    int input = lay_is_named(d, el, "input");
-    if (input) {
-        uint32_t ty = lay_attr(d, el, "type");
-        if (ty) {
-            static const char *const text_types[8] = { "text", "search", "email", "url", "tel", "password", "number", "" };
-            amb_span tv = d->attr[ty].value;
-            int ok = 0;
-            for (int k = 0; k < 8 && !ok; k++)
-                if (tv.len == strlen(text_types[k]) && memcmp(text_ptr(d, tv), text_types[k], tv.len) == 0) ok = 1;
-            if (!ok) return;
-        }
-        uint32_t v = lay_attr(d, el, "value");
-        if (v && d->attr[v].value.len) return;
-    } else if (!lay_is_named(d, el, "textarea") || d->node[el].first_child) return;
-    lay_style ps = *es;
-    lay_pseudo_style(LARGS, el, CSS_PSEUDO_PLACEHOLDER, &ps);
-    vector<char> txt;
-    amb_span v = d->attr[a].value;
-    const char *src = text_ptr(d, v);
-    int sp = 1;
-    for (size_t i = 0; i < v.len; i++) {
-        char c = src[i];
-        int white = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-        if (white) { if (!sp) push_back(txt, ' '); sp = 1; continue; }
-        push_back(txt, c);
-        sp = 0;
+    int input = lay_is_named(d, el, "input"), textarea = lay_is_named(d, el, "textarea"), select = lay_is_named(d, el, "select");
+    if (!input && !textarea && !select) return;
+    /* a control's text is clipped to it, as Chromium's inner editor clips its own */
+    t->box[b].clip = 1;
+    /* its baseline, from its content box's top, as Chromium places it: a text's (a line high, in the middle of the
+       box); a check box's, radio button's or range's border box's bottom; a colour well's 6px above that; a list
+       box's 3px above it; a textarea's its margin box's bottom */
+    {
+        double ch = t->box[b].h, bottom = ch + t->box[b].pb + t->box[b].bb, above = 0, below = 0;
+        int k = input ? lay_input_kind(d, el) : LI_TEXT;
+        double widest = 0;
+        long rows = 1;
+        vector<char> unused;
+        lay_leading(es->lh, es->asc, es->desc, &above, &below);
+        t->box[b].has_baseline = 1;
+        if (textarea) t->box[b].baseline = bottom + t->box[b].mb;
+        else if (input && (k == LI_CHECK || k == LI_RADIO || k == LI_RANGE)) t->box[b].baseline = bottom;
+        else if (input && k == LI_COLOR) t->box[b].baseline = bottom - 6;
+        else if (select && lay_select(LARGS, el, es, &widest, &unused, &rows)) t->box[b].baseline = bottom - 3;
+        else t->box[b].baseline = (ch - es->lh) / 2 + above;
     }
-    while (len(txt) && back(txt) == ' ') pop_back(&txt);
-    if (!len(txt)) return;
-    double tw = amb_text_width(f, ps.face, ps.fs, data(txt), len(txt)) + ps.ls * (double)lay_cps(data(txt), len(txt));
-    double h = t->box[b].h, lh = input ? h : ps.lh;
-    double base = (lh - (ps.asc + ps.desc)) / 2 + ps.asc;
+    lay_style ps = *es;
+    vector<char> txt;
+    int kind = input ? lay_input_kind(d, el) : LI_TEXT, center = 0;
+    double x = 0;
+    if (input && (kind == LI_BUTTON || kind == LI_SUBMIT || kind == LI_RESET)) {
+        /* a button's label, in the middle of it */
+        lay_button_label(d, el, kind, &txt);
+        center = 1;
+    } else if (select) {
+        /* a drop-down's selected option, 4px into it; a list box's options, a row each (a line and 2px), 2px into it */
+        double widest = 0;
+        long rows = 1;
+        if (lay_select(LARGS, el, es, &widest, &txt, &rows)) {
+            vector<char> label;
+            double y = 0;
+            for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
+                uint32_t g = lay_is_named(d, c, "optgroup") ? d->node[c].first_child : c, end = lay_is_named(d, c, "optgroup") ? 0 : d->node[c].next_sibling;
+                for (uint32_t o = g; o && o != end; o = d->node[o].next_sibling) {
+                    if (lay_is_named(d, o, "option")) {
+                        lay_option_label(d, o, &label);
+                        lay_control_line(LARGS, b, el, es, data(label), len(label), o != c ? 2 + 4 * amb_text_width(f, es->face, es->fs, " ", 1) : 2,
+                                         y, 0);
+                        y += es->lh + 2;
+                    }
+                    if (o == c) break;
+                }
+            }
+            return;
+        }
+        x = 4;
+    } else if (input && kind != LI_TEXT && kind != LI_PASSWORD) {
+        return;
+    } else {
+        /* a field's value (a password's a bullet a character; a single-line field's without its line breaks, which HTML's
+           value sanitization strips), else its placeholder, white space collapsed, in its ::placeholder's style */
+        uint32_t v = input ? lay_attr(d, el, "value") : 0;
+        if (textarea) {
+            for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling)
+                if (d->node[c].kind == DOM_NODE_KIND_TEXT) append_range(txt, text_ptr(d, d->node[c].data), d->node[c].data.len);
+        } else if (v && d->attr[v].value.len) {
+            amb_span vs = d->attr[v].value;
+            const char *src = text_ptr(d, vs);
+            for (size_t i = 0; i < vs.len; i++) {
+                if (src[i] == '\n' || src[i] == '\r') continue;
+                if (kind == LI_PASSWORD) {
+                    if (((uint8_t)src[i] & 0xC0) == 0x80) continue;
+                    push_back(txt, (char)0xE2); push_back(txt, (char)0x80); push_back(txt, (char)0xA2);
+                } else push_back(txt, src[i]);
+            }
+        }
+        if (!len(txt)) {
+            uint32_t a = lay_attr(d, el, "placeholder");
+            if (!a || d->attr[a].value.len == 0) return;
+            lay_pseudo_style(LARGS, el, CSS_PSEUDO_PLACEHOLDER, &ps);
+            amb_span pv = d->attr[a].value;
+            const char *src = text_ptr(d, pv);
+            int sp = 1;
+            for (size_t i = 0; i < pv.len; i++) {
+                char c = src[i];
+                int white = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+                if (white) { if (!sp) push_back(txt, ' '); sp = 1; continue; }
+                push_back(txt, c);
+                sp = 0;
+            }
+            while (len(txt) && back(txt) == ' ') pop_back(&txt);
+        } else if (textarea) {
+            /* a textarea's text: its lines, each broken where it reaches the box's width (the scroll bar's 15px its
+               intrinsic width keeps is no room taken: Chromium's scroll bars here overlay) */
+            double avail = t->box[b].w, y = 0;
+            size_t i = 0, n = len(txt);
+            const char *s0 = data(txt);
+            while (i <= n) {
+                size_t e = i;
+                while (e < n && s0[e] != '\n') e++;
+                size_t k = i;
+                do {
+                    /* as much of [k, e) as fits, broken after a space when one is in it, else at a character */
+                    size_t fit = e, last_space = 0;
+                    for (size_t j = k; j < e; j++) {
+                        if (s0[j] == ' ') last_space = j + 1;
+                        if (amb_text_width(f, ps.face, ps.fs, s0 + k, j + 1 - k) > avail && j > k) {
+                            fit = last_space > k ? last_space : j;
+                            break;
+                        }
+                    }
+                    lay_control_line(LARGS, b, el, &ps, s0 + k, fit - k, 0, y, 0);
+                    y += ps.lh;
+                    k = fit;
+                } while (k < e);
+                i = e + 1;
+            }
+            return;
+        }
+    }
+    if (len(txt)) lay_control_line(LARGS, b, el, &ps, data(txt), len(txt), x, -1, center);
+}
+/* one line of a control's text in its content box: at y (-1: in the middle of the box, as a field's or a button's
+   inner box is), from x, or in the middle of the box's width when center is set */
+static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps, const char *s, size_t n, double x, double y, int center) {
+    double tw = amb_text_width(f, ps->face, ps->fs, s, n) + ps->ls * (double)lay_cps(s, n);
+    double lh = y < 0 ? t->box[b].h : ps->lh, base = 0, below = 0;
+    if (y < 0) { base = (lh - (ps->asc + ps->desc)) / 2 + ps->asc; y = 0; }
+    else lay_leading(lh, ps->asc, ps->desc, &base, &below);
     layout_line_h lnh = line_new(t);
     uint32_t ln = lnh.index;
     t->line[ln].x = 0;
-    t->line[ln].y = 0;
+    t->line[ln].y = y;
     t->line[ln].w = t->box[b].w;
     t->line[ln].h = lh;
     t->line[ln].baseline = base;
     lines_append(t, b, ln);
-    amb_span tsp = text_add(t, data(txt), len(txt));
+    amb_span tsp = text_add(t, s, n);
     layout_frag_h fh = frag_new(t);
     uint32_t fr = fh.index;
     t->frag[fr].kind = LAYOUT_FRAG_KIND_GENERATED;
     t->frag[fr].node = node_handle(d, el);
     t->frag[fr].text = tsp;
-    t->frag[fr].x = 0;
-    t->frag[fr].y = base - ps.asc;
+    t->frag[fr].x = center ? (t->box[b].w - tw) / 2 : x;
+    t->frag[fr].y = base - ps->asc;
     t->frag[fr].w = tw;
-    t->frag[fr].h = ps.asc + ps.desc;
+    t->frag[fr].h = ps->asc + ps->desc;
     t->frag[fr].baseline = base;
-    t->frag[fr].face = (uint8_t)ps.face;
-    if (ps.font) t->frag[fr].font = resource_handle(nt, ps.font);
-    t->frag[fr].size = ps.fs;
-    t->frag[fr].spacing = ps.ls;
-    t->frag[fr].word_spacing = ps.wsp;
-    t->frag[fr].italic = ps.italic;
-    t->frag[fr].color = ps.color;
-    t->frag[fr].fill = ps.fill;
+    t->frag[fr].face = (uint8_t)ps->face;
+    if (ps->font) t->frag[fr].font = resource_handle(nt, ps->font);
+    t->frag[fr].size = ps->fs;
+    t->frag[fr].spacing = ps->ls;
+    t->frag[fr].word_spacing = ps->wsp;
+    t->frag[fr].italic = ps->italic;
+    t->frag[fr].color = ps->color;
+    t->frag[fr].fill = ps->fill;
     frags_append(t, ln, fr);
 }
 
@@ -1748,6 +1980,20 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     if (lx == LX_FLEX) lay_flex(LARGS, b, el, defh);
     else if (lx == LX_GRID) lay_grid(LARGS, b, el, defh);
     else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, &et, &eb, &empty);
+    if (lay_is_named(d, el, "button")) {
+        /* a button's content in the middle of a box made taller than it, as Chromium's button centres its anonymous
+           box; an empty one's baseline its content box's bottom (Blink's synthesized baseline) */
+        double ch = t->box[b].h;
+        if (defh > ch) {
+            double dy = (defh - ch) / 2;
+            for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next) t->line[ln].y += dy;
+            for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) t->box[c].y += dy;
+        }
+        if (!t->box[b].first_line && !t->box[b].first_child) {
+            t->box[b].has_baseline = 1;
+            t->box[b].baseline = defh >= 0 ? defh : 0;
+        }
+    }
     if (defh >= 0) t->box[b].h = defh;
     else if (LAY_X(el).clamp > 0) lay_clamp(LARGS, b, el, &s);
     return b;
@@ -1795,9 +2041,11 @@ static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
     int kind = t->box[b].kind;
     if (kind == LAYOUT_BOX_KIND_FLEX || kind == LAYOUT_BOX_KIND_GRID) { if (lay_first_baseline(t, b, &y, 0)) return top + y; }
     else if (kind == LAYOUT_BOX_KIND_REPLACED) {
+        if (t->box[b].has_baseline) return top + t->box[b].baseline;     /* a form control's (lay_placeholder) */
         uint32_t ln = t->box[b].last_line;
         if (ln) return top + t->line[ln].y + t->line[ln].baseline;
-    } else if (t->box[b].clip != 1 && lay_last_baseline(t, b, &y, 0)) return top + y;
+    } else if (kind == LAYOUT_BOX_KIND_INLINE_BLOCK && t->box[b].has_baseline) return top + t->box[b].baseline;  /* an empty button's */
+    else if (t->box[b].clip != 1 && lay_last_baseline(t, b, &y, 0)) return top + y;
     return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
 }
 

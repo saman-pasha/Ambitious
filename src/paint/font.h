@@ -85,6 +85,7 @@ typedef struct amb_pt { int16_t x, y; uint8_t on, end; } amb_pt;        /* on: 1
 enum { AMB_GLYF, AMB_CFF, AMB_CFF2, AMB_BITMAPS };
 typedef struct amb_face {
     uint32_t upem; int32_t asc, desc, gap;
+    int32_t avgw, xmin, xmax;                 /* OS/2's average character width (0: none), head's horizontal bounds */
     uint32_t first, count, fallback;          /* its code points in glyphs, in order; its notdef glyph's */
     uint32_t kfirst, kcount;                  /* its kerning pairs in kerns */
     uint32_t base, size;                      /* its font's bytes, in bytes */
@@ -137,6 +138,10 @@ double amb_x_height(int face);
 /* a face's ascent, descent (positive, below the baseline) and line gap at a size, in
    px, each rounded to a whole px as Chromium rounds them (its line height is their sum) */
 void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, double *desc, double *gap);
+/* the widths a text control is sized by (Blink's text field and textarea), the face at size: its average
+   character's, OS/2's, unrounded (0 when it has none), and its glyphs' horizontal extent, head's xMax - xMin,
+   rounded (Skia's fXMax - fXMin, Blink's MaxCharWidth). A built-in face's are its font file's */
+void amb_face_widths(const amb_fonts *f, int face, double size, double *avg, double *maxw);
 
 /* the code point whose glyph draws cp, and the face whose glyph it is: cp in the face
    or a fallback face (faces fall back as Chromium's do), the stand-in HarfBuzz takes for
