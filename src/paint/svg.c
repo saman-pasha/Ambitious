@@ -18,6 +18,11 @@
    stroke-width (a percentage of the viewport's normalized diagonal), linecap, linejoin
    (miter-clip and arcs drawn as miter), miterlimit, dasharray and dashoffset. Opacity: a
    group of its own.
+   Paints also: url(#id) of a linearGradient or radialGradient (gradientUnits,
+   gradientTransform, spreadMethod, its stops' offsets, stop-color and stop-opacity, every
+   attribute and the stops inherited through href) and a fallback. Clip-path: url(#id) of a
+   clipPath (clipPathUnits, its transform, its shapes' and uses' clip-rule, a clip-path on
+   the clipPath itself), a group of its own.
 
    THE DRAWING (amb_svg_draw). Every coordinate is mapped to the device's px, an svg's
    content placed at whole CSS px as Chromium places it. Curves are flattened at the
@@ -38,8 +43,7 @@
    as Blink clips by both and Skia multiplies the two (a rectangle along the axes clips as
    itself alone).
 
-   Not done: gradients, clips, text and SVG documents as images (this package's next
-   steps); filters, masks, markers, patterns, images inside SVG, foreignObject,
+   Not done: text and SVG documents as images (this package's next steps); filters, masks, markers, patterns, images inside SVG, foreignObject,
    SMIL animation, textPath, a text's stroke, its rotate, textLength and baseline
    properties, paint-order, vector-effect, a CSS clip-path's basic shapes, and fonts other
    than the built-in faces in SVG text. */
@@ -876,12 +880,114 @@ static void sv_paint_of(const dom_document *d, const css_style *st, uint32_t cv,
     if (sv_colour(data(t), len(t), cur, &p->rgba)) p->kind = SV_PAINT_COLOR;
 }
 
-/* the paint p resolved for a shape whose bounds (in its user space) are bb: a colour
-   (*rgba), or none: 1, 0 (a url()'s fallback colour) */
-static int sv_resolve(SB, const sv_paint *p, const double *bb, const sv_walk *w, uint32_t *gid, uint32_t *rgba) {
-    if (p->kind == SV_PAINT_COLOR) { *rgba = p->rgba; return 1; }
-    if (p->kind == SV_PAINT_URL && p->fb_kind == SV_PAINT_COLOR) { *rgba = p->fb; return 1; }
+/* a gradient element and those its href names, at most 16 deep without a cycle: chain[0..n) */
+static int sv_chain(const dom_document *d, uint32_t g, uint32_t *chain) {
+    int n = 0;
+    while (g && n < 16) {
+        if (!sv_is(d, g, "linearGradient") && !sv_is(d, g, "radialGradient")) break;
+        for (int k = 0; k < n; k++) if (chain[k] == g) return n;
+        chain[n++] = g;
+        g = sv_href(d, g);
+    }
+    return n;
+}
+static uint32_t sv_chain_attr(const dom_document *d, const uint32_t *chain, int n, const char *name) {
+    for (int k = 0; k < n; k++) if (sv_attr(d, chain[k], name)) return chain[k];
     return 0;
+}
+/* a gradient's coordinate: in its bounding box a number (a percentage a fraction), else a
+   length of the viewport */
+static double sv_gcoord(const dom_document *d, const uint32_t *chain, int n, const char *name, int bbox, double basis, double fs,
+                        double dflt_frac) {
+    uint32_t g = sv_chain_attr(d, chain, n, name);
+    int given;
+    if (!g) return bbox ? dflt_frac : dflt_frac * basis;
+    double v = sv_len_attr(d, g, name, bbox ? 1 : basis, fs, bbox ? dflt_frac : dflt_frac * basis, &given);
+    return v;
+}
+
+/* the paint p resolved for a shape whose bounds (in its user space) are bb: a gradient's
+   line written into the scene (its number in *gid), a colour (*rgba), or none: 2, 1, 0 */
+static int sv_resolve(SB, const sv_paint *p, const double *bb, const sv_walk *w, uint32_t *gid, uint32_t *rgba) {
+    if (p->kind == SV_PAINT_NONE) return 0;
+    if (p->kind == SV_PAINT_COLOR) { *rgba = p->rgba; return 1; }
+    uint32_t chain[16];
+    int n = sv_chain(d, p->ref, chain);
+    if (n == 0) {
+        if (p->fb_kind == SV_PAINT_COLOR) { *rgba = p->fb; return 1; }
+        return 0;
+    }
+    int radial = sv_is(d, chain[0], "radialGradient");
+    double fs = sv_fs(st, w), dg = sv_diag(w);
+    vector<char> v;
+    uint32_t ug = sv_chain_attr(d, chain, n, "gradientUnits");
+    int bbox = 1;
+    if (ug && sv_attr_text(d, ug, "gradientUnits", &v) && len(v) == 14 && memcmp(data(v), "userSpaceOnUse", 14) == 0) bbox = 0;
+    sv_mat gt = sv_id();
+    uint32_t tg = sv_chain_attr(d, chain, n, "gradientTransform");
+    if (tg && sv_attr_text(d, tg, "gradientTransform", &v) && !sv_transform_list(data(v), len(v), 0, &gt)) gt = sv_id();
+    int spread = 0;
+    uint32_t sg = sv_chain_attr(d, chain, n, "spreadMethod");
+    if (sg && sv_attr_text(d, sg, "spreadMethod", &v)) {
+        if (len(v) == 7 && memcmp(data(v), "reflect", 7) == 0) spread = 1;
+        else if (len(v) == 6 && memcmp(data(v), "repeat", 6) == 0) spread = 2;
+    }
+    /* the stops: those of the first in the chain that has any */
+    uint32_t holder = 0;
+    for (int k = 0; k < n && !holder; k++)
+        for (uint32_t c = d->node[chain[k]].first_child; c && !holder; c = d->node[c].next_sibling) if (sv_is(d, c, "stop")) holder = chain[k];
+    if (!holder) return 0;
+    vector<double> stops;
+    double last = 0;
+    for (uint32_t c = d->node[holder].first_child; c; c = d->node[c].next_sibling) {
+        if (!sv_is(d, c, "stop")) continue;
+        double off = 0;
+        if (sv_attr_text(d, c, "offset", &v)) {
+            size_t i = sv_skip_ws(data(v), len(v), 0);
+            if (sv_number(data(v), len(v), &i, &off) && i < len(v) && at(v, i) == '%') off /= 100;
+        }
+        off = off < 0 ? 0 : off > 1 ? 1 : off;
+        if (off < last) off = last;
+        last = off;
+        uint32_t c0 = sv_first(firsts, c);
+        uint32_t col = c0 ? st->cval[c0 + CSS_PROP_STOP_COLOR].color : 0x000000ff;
+        double op = c0 ? st->cval[c0 + CSS_PROP_STOP_OPACITY].num : 1;
+        uint32_t a = (uint32_t)floor((col & 0xff) * (op < 0 ? 0 : op > 1 ? 1 : op) + 0.5);
+        push_back(stops, off);
+        push_back(stops, (double)((col & 0xffffff00u) | a));
+    }
+    size_t ns = len(stops) / 2;
+    if (ns == 1) { *rgba = (uint32_t)at(stops, 1); return 1; }
+    sv_mat gm = gt;
+    if (bbox) {
+        double bw = bb[2] - bb[0], bh = bb[3] - bb[1];
+        if (bw <= 0 || bh <= 0) return 0;
+        gm = sv_mul(sv_make(bw, 0, 0, bh, bb[0], bb[1]), gt);
+    }
+    uint32_t id = ++*ids;
+    sv_w(out, radial ? "r" : "l");
+    sv_n(out, id);
+    sv_m(out, gm);
+    if (radial) {
+        double cx = sv_gcoord(d, chain, n, "cx", bbox, w->vw, fs, 0.5), cy = sv_gcoord(d, chain, n, "cy", bbox, w->vh, fs, 0.5);
+        double r = sv_gcoord(d, chain, n, "r", bbox, dg, fs, 0.5);
+        double fx = sv_chain_attr(d, chain, n, "fx") ? sv_gcoord(d, chain, n, "fx", bbox, w->vw, fs, 0.5) : cx;
+        double fy = sv_chain_attr(d, chain, n, "fy") ? sv_gcoord(d, chain, n, "fy", bbox, w->vh, fs, 0.5) : cy;
+        double fr = sv_gcoord(d, chain, n, "fr", bbox, dg, fs, 0);
+        if (r < 0 || fr < 0) return 0;
+        sv_n(out, cx); sv_n(out, cy); sv_n(out, r); sv_n(out, fx); sv_n(out, fy); sv_n(out, fr);
+    } else {
+        sv_n(out, sv_gcoord(d, chain, n, "x1", bbox, w->vw, fs, 0));
+        sv_n(out, sv_gcoord(d, chain, n, "y1", bbox, w->vh, fs, 0));
+        sv_n(out, sv_gcoord(d, chain, n, "x2", bbox, w->vw, fs, 1));
+        sv_n(out, sv_gcoord(d, chain, n, "y2", bbox, w->vh, fs, 0));
+    }
+    sv_n(out, spread);
+    sv_n(out, (double)ns);
+    for (size_t k = 0; k < ns; k++) { sv_n(out, at(stops, 2 * k)); sv_hex(out, (uint32_t)at(stops, 2 * k + 1)); }
+    sv_w(out, "\n");
+    *gid = id;
+    return 2;
 }
 /* a resolved paint's words in a path's line */
 static void sv_paint_words(vector<char> *line, int kind, uint32_t gid, uint32_t rgba) {
@@ -894,13 +1000,130 @@ static void sv_paint_words(vector<char> *line, int kind, uint32_t gid, uint32_t 
 
 static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth);
 
-/* a group's line, its opacity: 1 when one was written (the caller ends it) */
-static int sv_group_open(SB, double op) {
-    if (op >= 1) return 0;
+/* the bounds an element's content covers under m (with its own transform when withself is 1, as
+   a child's are; without, its user space's: an objectBoundingBox's): a shape's geometry's,
+   a group's or a use's children's together; 0 when none */
+static int sv_bounds(SB, uint32_t x, const sv_walk *pw, sv_mat m, double *bb, int depth, int withself) {
+    if (depth > 32 || ++*work > SV_WORK || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_SVG) return 0;
+    uint32_t c0 = sv_first(firsts, x);
+    if (c0 && sv_word_is(st, c0 + CSS_PROP_DISPLAY, "none")) return 0;
+    sv_walk w;
+    sv_inherit(st, firsts, x, pw, &w);
+    sv_mat mm = withself ? sv_mul(m, sv_transform_of(d, st, firsts, x, &w)) : m;
+    vector<double> p;
+    if (sv_geometry(d, st, x, &w, &p)) return sv_path_bounds(&p, mm, bb);
+    int any = 0;
+    if (sv_is(d, x, "g") || sv_is(d, x, "a") || sv_is(d, x, "switch") || sv_is(d, x, "use")) {
+        bb[0] = bb[1] = 1e300;
+        bb[2] = bb[3] = -1e300;
+        uint32_t ref = sv_is(d, x, "use") ? sv_href(d, x) : 0;
+        if (sv_is(d, x, "use")) {
+            int g;
+            double ux = sv_len_attr(d, x, "x", w.vw, sv_fs(st, &w), 0, &g), uy = sv_len_attr(d, x, "y", w.vh, sv_fs(st, &w), 0, &g);
+            mm = sv_mul(mm, sv_make(1, 0, 0, 1, ux, uy));
+        }
+        for (uint32_t c = ref ? ref : d->node[x].first_child; c; c = ref ? 0 : d->node[c].next_sibling) {
+            double cb[4];
+            if (!sv_bounds(SA, c, &w, mm, cb, depth + 1, 1)) continue;
+            bb[0] = fmin(bb[0], cb[0]);
+            bb[1] = fmin(bb[1], cb[1]);
+            bb[2] = fmax(bb[2], cb[2]);
+            bb[3] = fmax(bb[3], cb[3]);
+            any = 1;
+        }
+    }
+    return any;
+}
+
+/* a clipPath's shapes, each a line of its own into lines under m (the referencing element's
+   user space, in a viewport vw x vh; bb its bounds there, for objectBoundingBox): their
+   count */
+static int sv_clip_shapes(SB, uint32_t cp, const double *bb, int hasbb, sv_mat m, double vw, double vh, vector<char> *lines) {
+    sv_walk root;
+    memset(&root, 0, sizeof root);
+    uint32_t c0 = sv_first(firsts, cp);
+    if (!c0) return 0;
+    for (int k = 0; k < SI_N; k++) root.src[k] = c0 + (uint32_t)sv_iprops[k];
+    root.vw = vw;
+    root.vh = vh;
+    sv_mat cm = sv_mul(m, sv_transform_of(d, st, firsts, cp, &root));
+    vector<char> v;
+    if (sv_attr_text(d, cp, "clipPathUnits", &v) && len(v) == 17 && memcmp(data(v), "objectBoundingBox", 17) == 0) {
+        if (!hasbb || bb[2] - bb[0] <= 0 || bb[3] - bb[1] <= 0) return 0;
+        cm = sv_mul(cm, sv_make(bb[2] - bb[0], 0, 0, bb[3] - bb[1], bb[0], bb[1]));
+    }
+    int count = 0;
+    for (uint32_t c = d->node[cp].first_child; c; c = d->node[c].next_sibling) {
+        if (d->node[c].kind != DOM_NODE_KIND_ELEMENT || d->node[c].ns != DOM_NAMESPACE_SVG) continue;
+        uint32_t s0 = sv_first(firsts, c);
+        if (s0 && sv_word_is(st, s0 + CSS_PROP_DISPLAY, "none")) continue;
+        sv_walk w;
+        sv_inherit(st, firsts, c, &root, &w);
+        sv_mat sm = sv_mul(cm, sv_transform_of(d, st, firsts, c, &w));
+        uint32_t shape = c;
+        if (sv_is(d, c, "use")) {
+            shape = sv_href(d, c);
+            if (!shape) continue;
+            int g;
+            double ux = sv_len_attr(d, c, "x", w.vw, sv_fs(st, &w), 0, &g), uy = sv_len_attr(d, c, "y", w.vh, sv_fs(st, &w), 0, &g);
+            sm = sv_mul(sm, sv_make(1, 0, 0, 1, ux, uy));
+            sv_walk uw = w;
+            sv_inherit(st, firsts, shape, &uw, &w);
+            sm = sv_mul(sm, sv_transform_of(d, st, firsts, shape, &w));
+        }
+        if (sv_word_is(st, w.src[SI_VISIBILITY], "hidden") || sv_word_is(st, w.src[SI_VISIBILITY], "collapse")) continue;
+        vector<double> p;
+        if (!sv_geometry(d, st, shape, &w, &p)) continue;
+        sv_w(lines, "k");
+        sv_m(lines, sm);
+        sv_n(lines, sv_word_is(st, w.src[SI_CLIP_RULE], "evenodd"));
+        sv_path_out(lines, &p);
+        sv_w(lines, "\n");
+        count++;
+    }
+    return count;
+}
+
+/* the clipPath a clip-path value (cv) names: 0 for none, or one that is no clipPath */
+static uint32_t sv_clip_of(const dom_document *d, const css_style *st, uint32_t cv) {
+    if (st->cval[cv].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = st->cval[cv].text;
+    vector<char> t;
+    append_range(t, text_ptr(st, sp), sp.len);
+    size_t end;
+    uint32_t cp = sv_url(d, data(t), len(t), &end);
+    return cp && sv_is(d, cp, "clipPath") ? cp : 0;
+}
+
+/* a group's lines, its opacity and its clip (cp a clipPath, 0 for none), each line followed
+   by its clip's shapes: a clipPath's own clip-path a group about it. How many were written
+   (the caller ends each) */
+static int sv_group_open(SB, uint32_t x, uint32_t cp, double op, const sv_walk *pw, const sv_walk *w, sv_mat mm, int depth) {
+    if (op >= 1 && !cp) return 0;
+    double bb[4] = { 0, 0, 0, 0 };
+    int hb = 0, groups = 0;
+    vector<char> v;
+    if (cp && sv_attr_text(d, cp, "clipPathUnits", &v)) hb = sv_bounds(SA, x, pw, sv_id(), bb, depth, 0);
+    uint32_t c0 = cp ? sv_first(firsts, cp) : 0;
+    uint32_t outer = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
+    if (outer && outer != cp) {
+        vector<char> ol;
+        int ok = sv_clip_shapes(SA, outer, bb, hb, mm, w->vw, w->vh, &ol);
+        sv_w(out, "g 1 2");
+        sv_n(out, ok);
+        sv_w(out, "\n");
+        append_range(out, data(ol), len(ol));
+        groups++;
+    }
+    vector<char> lines;
+    int k = cp ? sv_clip_shapes(SA, cp, bb, hb, mm, w->vw, w->vh, &lines) : 0;
     sv_w(out, "g");
     sv_n(out, op);
-    sv_w(out, " 0 0\n");
-    return 1;
+    sv_n(out, cp ? 2 : 0);
+    sv_n(out, k);
+    sv_w(out, "\n");
+    append_range(out, data(lines), len(lines));
+    return groups + 1;
 }
 
 /* a shape's line: its matrix, its paints, its stroke, its path */
@@ -1033,7 +1256,8 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     sv_mat mm = sv_mul(m, sv_transform_of(d, st, firsts, x, &w));
     double op = c0 ? st->cval[c0 + CSS_PROP_OPACITY].num : 1;
     if (op <= 0) return;
-    int grouped = sv_group_open(SA, op);
+    uint32_t cp = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
+    int grouped = sv_group_open(SA, x, cp, op, pw, &w, mm, depth);
     if (shape) sv_shape(SA, x, &w, mm);
     else if (group) {
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {

@@ -105,8 +105,12 @@ page 2: box 8,8 30x30
 v 30 30 1
 p 1 0 0 1 5 5 c 123456ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 10 L 0 10 Z
 p 1 0 0 1 15 15 n 1 0 c ff0000ff 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 10 L 0 10 Z
-page 3: box 58.6484,16 40x20
+page 3: box 8,8 40x20
+v 40 20 1
+l 1 40 0 0 20 0 0 0 0 1 0 0 2 0 ff0000ff 1 0000ff80
+p 1 0 0 1 0 0 u 1 1 0 n 1 1 0 0 4 0 0 M 0 0 L 40 0 L 40 20 L 0 20 Z
+page 4: box 58.6484,16 40x20
 -- hostile documents
 uses ten a level, eight deep: 44996 lines, ink 255
 uses of themselves, numbers past floats: 3 lines, ink 637500
-300 groups clipped by a clip of itself: 131 lines, ink 0
+300 groups clipped by a clip of itself: 196 lines, ink 0

@@ -3,8 +3,8 @@
    error ending it); scenes' coverage drawn into small canvases (a rectangle at fractions
    of a pixel, the fill rules, strokes' caps and joins, dashes, a group's opacity, a clip);
    pages' inline svg elements laid out, their boxes and the scenes layout made of them
-   (presentation attributes, sheets, use); and hostile documents, which must draw in
-   bounded time and memory. */
+   (presentation attributes, sheets, use, gradients); and hostile documents, which must
+   draw in bounded time and memory. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -64,6 +64,8 @@ static const char *const pages[] = {
     "stroke=black /></svg>",
     "<svg id=s width=30 height=30><defs><rect id=r width=10 height=10 /></defs><use href=#r x=5 y=5 fill=#123456 /><g fill=none "
     "stroke=currentColor style='color: #ff0000'><use href=#r x=15 y=15 /></g></svg>",
+    "<svg id=s width=40 height=20><linearGradient id=g><stop offset=0 stop-color=red /><stop offset=1 stop-color=blue "
+    "stop-opacity=.5 /></linearGradient><rect width=40 height=20 fill='url(#g)' /></svg>",
     "<p>an icon <svg id=s height=20 viewBox='0 0 10 5'></svg> inline</p>",
 };
 
