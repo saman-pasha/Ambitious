@@ -720,6 +720,21 @@ jv script_custom_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args
     return JV_UNDEF;
 }
 
+/* the collector's roots of this unit (script.h's sh_cdef, the host's cwait and registry):
+   each definition's constructor, prototype and callbacks, each whenDefined promise not
+   yet settled (its name an atom, which the engine keeps), the registry (an element's state
+   and the construction stack hold nodes and places, no value) */
+void script_custom_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    for (size_t i = 0; i < len(h->cdefs); i++) {
+        sh_cdef c = h->cdefs[i];
+        uint32_t objs[6] = { c.ctor, c.proto, c.connected, c.disconnected, c.adopted, c.attr_changed };
+        for (int k = 0; k < 6; k++) if (objs[k]) push_back(*out, jv_obj(objs[k]));
+    }
+    for (size_t i = 0; i + 2 < len(h->cwait); i += 3) if (!h->cwait[i + 2] && h->cwait[i]) push_back(*out, jv_obj(h->cwait[i]));
+    if (h->registry) push_back(*out, jv_obj(h->registry));
+}
+
 void script_custom_setup(js_vm *vm) {
     struct js_host *h = vm->host;
     uint32_t elem = h->protos[HP_ELEMENT];

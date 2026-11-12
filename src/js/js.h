@@ -24,7 +24,8 @@
    frame slot, a cell of an environment (the variables closures capture), or a global.
    Calls push frames on one value stack; natives are cases of a switch, never pointers.
 
-   MEMORY is the page's arena, freed with the VM, under a cap; TIME is virtual. */
+   MEMORY is the page's arena, collected between tasks (src/js/gc.c) and freed with the
+   VM, under a cap; TIME is virtual. */
 #ifndef AMB_JS_H
 #define AMB_JS_H
 #include <stdio.h>
@@ -122,7 +123,9 @@ enum { JP_PENDING, JP_FULFILLED, JP_REJECTED };
    this in x; a native's case number in a and its data in x; a bound function's
    target in a, its arguments in b and c (offset, count) and its this in x; an
    environment's parent in a and its cells' count in b; an accessor's getter in x
-   and setter in a; a wrapper's or a date's value in x; a host object's handle in x */
+   and setter in a; a wrapper's or a date's value in x; a host object's numbers in a,
+   b and c (its node and generation, its record: src/script/) and a value in x (an
+   event's detail), which the collector follows */
 typedef struct js_obj {
     uint32_t shape, slots, cap, proto;
     uint16_t kind, flags;
@@ -357,7 +360,7 @@ typedef struct js_vm {
     uint64_t gc_last;                 /* the live heap's size after the last collection, in eight bytes */
     uint64_t gc_allocs;               /* the records made since (objects, strings, BigInts) */
     uint64_t gc_slots, gc_units;      /* the slots' and the units' lengths after it */
-    uint32_t gc_enabled;              /* collections between tasks (js_gc_maybe): the host's to allow */
+    uint32_t gc_enabled;              /* collections between tasks (js_gc_maybe): the host's to allow (ambitious js's, a page's) */
     uint32_t base_url;                /* the classic scripts' base for import(): a string (0: the current directory) */
     /* the host's module loader: the specifier (a string) resolved against the referrer
        (a module's URL; 0 for a classic script's import(), whose base is base_url), its
@@ -377,7 +380,10 @@ typedef struct js_vm {
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
-    uint32_t host_protos[16];         /* the host's prototypes, by its kinds (src/script/script.c) */
+    /* the host's roots: every value the host holds outside the VM's tables (a page's
+       prototypes, its records' objects and values: src/script/script.c) appended to out,
+       each marked by the collector as a root (src/js/gc.c); 0 with no host */
+    void (*host_roots)(js_vm *vm, vector<jv> *out);
     jv exception;                     /* the thrown value, while one is in flight */
     int throwing;
     uint64_t steps, step_budget;      /* the bytecodes run; past the budget, a script is stopped */
@@ -577,8 +583,9 @@ void js_big_init(js_vm *vm, uint32_t first);
    URL given); import()'s promise; import.meta; a module's namespace; the natives' cases */
 uint32_t js_module_import(js_vm *vm, uint32_t spec, uint32_t referrer);
 /* the collector (src/js/gc.c): a collection now, which only a moment between tasks may
-   ask for (no C code then holds a value outside the VM's tables); one when the heap has
-   doubled since the last; gc() for a test's script (ambitious js alone, src/js/builtins.c) */
+   ask for (no C code then holds a value outside the VM's tables and the host's roots);
+   one when the heap has doubled since the last; gc() for a test's script (ambitious js
+   alone, src/js/builtins.c) */
 void js_gc(js_vm *vm);
 void js_gc_maybe(js_vm *vm);
 void js_gc_expose(js_vm *vm);

@@ -10,6 +10,16 @@
    what the page's scripts keep beside the engine's heap (its live collections' caches,
    the versions they are read at): vectors, which SCRIPT_HOST_DROP frees.
 
+   THE COLLECTOR'S ROOTS. The engine's collector runs for a page between its tasks
+   (src/js/gc.c), and asks the host for every engine value it holds (vm->host_roots):
+   each unit names its own (script.c's sh_roots, then fetch.c's, input.c's, observe.c's,
+   custom.c's and window.c's script_*_roots; view.c holds none). Each field below says
+   what it is: a ROOT (an engine object or value, which the roots give while the host
+   may use it), a NODE (a DOM node's number, with its generation where one is kept), a
+   span of TEXT (an offset and a length in one of the host's texts), a RECORD (the
+   runtime's, the loader's, a place in one of the host's lists), or a number. An atom
+   (a string's id) is no root of the host's: the engine keeps every atom.
+
    A header's struct with a vector<T> member is lowered only where the header includes
    <vector.pl> itself and declares T (toolchain finding): so both are here. */
 #ifndef AMB_SCRIPT_H
@@ -19,31 +29,35 @@
 /* a live collection (DOM 4.2.10): what it holds under its root, and a cache of its
    length and of the last item read, valid at the versions of the DOM it was read at */
 typedef struct sh_list {
-    uint32_t root, gen, kind, obj;   /* its root node and that node's generation, its kind (src/script/script.c), its object */
-    uint32_t koff, klen, lower, given;   /* a by-tag, by-class or by-name key: its text in the host's keys; by tag, the
-                                            atoms of the name lower-cased (HTML elements') and as given (foreign ones') */
+    uint32_t root, gen, kind, obj;   /* its root, a NODE, and that node's generation; its kind (src/script/script.c); its
+                                        object, a ROOT */
+    uint32_t koff, klen, lower, given;   /* a by-tag, by-class or by-name key: its TEXT in the host's keys; by tag, the
+                                            DOM's names of it lower-cased (HTML elements') and as given (foreign ones') */
     uint64_t tree, attrs;            /* the versions of the DOM it was read at */
-    uint32_t n, ci, cn, spare;       /* its length (~0: unknown), the last item read and its node */
+    uint32_t n, ci, cn, spare;       /* its length (~0: unknown), the last item read and its NODE */
 } sh_list;
 
 /* the view a script reads (getComputedStyle, getBoundingClientRect ...): what a cascade
    and a layout run when a script asked made, kept until the DOM changes
-   (src/script/view.c). A box: its element, its content box in page px, its margins,
-   borders and paddings (top, right, bottom, left) */
+   (src/script/view.c); none of it a root. A box: its element, a NODE, its kind, its
+   content box in page px, its margins, borders and paddings (top, right, bottom, left) */
 typedef struct sh_vbox { uint32_t node, kind; double x, y, w, h, m[4], b[4], p[4]; } sh_vbox;
-/* a fragment of a line: its node (a text, an atomic or an inline element), its line */
+/* a fragment of a line: its NODE (a text, an atomic or an inline element), its line */
 typedef struct sh_vfrag { uint32_t node, line; double x, y, w, h; } sh_vfrag;
 /* a computed value of a style: its property (the CSS module's), unit and number, how it
-   came (declared, inherited, initial), its text in the view's own; a style's values are a
+   came (declared, inherited, initial), its TEXT in the view's own; a style's values are a
    run ended by one of prop ~0 */
 typedef struct sh_vval { uint32_t prop, unit, how, spare; double num; uint32_t off, len; } sh_vval;
 
 /* the network a script reaches (src/script/fetch.c). A request: fetch()'s, an
-   XMLHttpRequest's, a Request object's (not sent); its object (fetch's promise, the
-   XMLHttpRequest), the loader's record of it, XHR's readyState; the response's status,
-   the request's mode and whether it waits (a synchronous XHR); its method, URL, header
-   lines and body in the host's network text; XHR's responseType, its Response, its
-   record in the runtime, how it ended */
+   XMLHttpRequest's, a Request object's (not sent), a body's read; its object, a ROOT while
+   the host may use it (fetch's promise and a read's until the task that settles it, then
+   0; the XMLHttpRequest, which its events are fired at; 0 for a Request, whose object
+   holds the request's place), the loader's RECORD of it, XHR's readyState; the response's
+   status, the request's mode and whether it waits (a synchronous XHR), its flags (a
+   read's: its method's native number); its method, URL, header lines and body, TEXT in
+   the host's network text; XHR's responseType, its Response (a RECORD of resps), its
+   RECORD in the runtime, how it ended */
 typedef struct sh_req {
     uint32_t kind, obj, resource, state;
     uint32_t status, mode, sync, flags;
@@ -52,57 +66,67 @@ typedef struct sh_req {
     uint32_t rtype, resp, rec, outcome;
 } sh_req;
 /* a Response: its status, its type (basic, cors, opaque, default, error), whether it was
-   redirected and its body read; its URL, body, content type and status text in the
-   network text; its Headers object, made when asked for */
+   redirected and its body read; its URL, body, content type and status text, TEXT in the
+   network text; its Headers object, a ROOT, made when asked for (0: not yet) */
 typedef struct sh_resp {
     uint32_t status, type, redirected, used;
     uint32_t uoff, ulen, boff, blen;
     uint32_t toff, tlen, soff, slen;
     uint32_t headers, spare;
 } sh_resp;
-/* a header of a Headers object (its object's index): its name lower-cased and value */
+/* a header of a Headers object: its owner, the object, a ROOT while the header is live
+   (the list is kept by the object's index, which a dead object's successor would take);
+   its name lower-cased and value, TEXT in the network text; whether it is live */
 typedef struct sh_hdr { uint32_t owner, noff, nlen, voff, vlen, live; } sh_hdr;
 /* a script waiting to run (HTML 4.12.1.1): an external one a script inserted, or one the
-   parse found async; its element and that node's generation, the loader's record of its
-   src, how it came (script_insertion), whether it has run */
+   parse found async; its element, a NODE, and that node's generation, the loader's RECORD
+   of its src, how it came (script_insertion), whether it has run */
 typedef struct sh_pend { uint32_t node, gen, resource, how, done, spare; } sh_pend;
-/* a FormData's entry (src/script/input.c): its object's index, its name and value in the
-   network text, its control (0 for one a script appended), whether it is live */
+/* a FormData's entry (src/script/input.c): its owner, the FormData object, a ROOT while the
+   entry is live (kept by its index, as a header is); its name and value, TEXT in the
+   network text; its control, a NODE (0 for one a script appended); whether it is live */
 typedef struct sh_fd { uint32_t owner, noff, nlen, voff, vlen, control, live, spare; } sh_fd;
-/* MutationObserver (src/script/observe.c). An observer: its object, its callback, the run
-   that made it, its record in the runtime */
+/* MutationObserver (src/script/observe.c). An observer: its object and its callback,
+   ROOTs; the run that made it and its record in the runtime, RECORDs */
 typedef struct sh_mo { uint32_t obj, fn, run, rec; } sh_mo;
-/* an observer's registration at a node (its generation): its options' bits, its
-   attributeFilter's names in the host's filter text; transient: one a removal gave the
-   node, from the registration source (its place plus one) */
+/* an observer's registration at a node: its observer (a RECORD: its place in mos plus
+   one), the NODE and that node's generation, its options' bits, its attributeFilter's
+   names, TEXT in the host's filter text; transient: one a removal gave the node, from the
+   registration source (a RECORD: its place plus one); whether it is live. No root */
 typedef struct sh_mreg { uint32_t mo, node, gen, opts, foff, flen, transient, source, live, spare; } sh_mreg;
-/* a record waiting in its observer's queue: its type, target, siblings (each with its
-   generation), attribute name's atom and namespace, old value (had: one is given), its
-   nodes in the host's list (node, generation pairs; a removed one's bit 31 set) */
+/* a record waiting in its observer's queue: its observer (a RECORD, as a registration's),
+   its type, its target and siblings, NODEs each with its generation, its attribute's name
+   (the DOM's name, no atom) and namespace, its old value (had: one is given; a span of
+   the DOM's text), its nodes (a span of the host's mnodes: NODE and generation pairs, a
+   removed one's bit 31 set); whether it is live. No root */
 typedef struct sh_mrec {
     uint32_t mo, type, target, tgen, prev, pgen, next, ngen;
     uint32_t name, ns, had, noff, nlen, live;
     amb_span old;
 } sh_mrec;
-/* a custom element definition (src/script/custom.c): its constructor and prototype, the
-   run that defined it, its record in the runtime, its lifecycle callbacks (0: none), its
-   name and its observed attributes (each ended by a zero byte) in the host's custom text */
+/* a custom element definition (src/script/custom.c): its constructor and prototype, ROOTs;
+   the run that defined it and its record in the runtime, RECORDs; its lifecycle callbacks,
+   ROOTs (0: none); its name and its observed attributes (each ended by a zero byte), TEXT
+   in the host's custom text */
 typedef struct sh_cdef {
     uint32_t ctor, proto, run, rec, connected, disconnected, adopted, attr_changed;
     uint32_t noff, nlen, ooff, olen;
 } sh_cdef;
-/* an element's custom element state: the node and its generation, its definition, its state */
+/* an element's custom element state: the NODE and its generation, its definition (a
+   RECORD: its place plus one), its state, whether it was told it is connected. No root */
 typedef struct sh_cel { uint32_t node, gen, def, state, conn, spare; } sh_cel;
-/* a session history entry (src/script/window.c): its URL in the host's history text, whether
-   it is the page's document's (the blank entry is not), its state */
+/* a session history entry (src/script/window.c): its URL, TEXT in the host's history text,
+   whether it is the page's document's (the blank entry is not), its state, a ROOT */
 typedef struct sh_hent { uint32_t uoff, ulen, doc, spare; jv state; } sh_hent;
-/* a stored item: its area (1 local, 2 session), origin, key and value in the storage text */
+/* a stored item: its area (1 local, 2 session), origin, key and value, TEXT in the storage
+   text, whether it is live. No root */
 typedef struct sh_item { uint32_t area, ooff, olen, koff, klen, voff, vlen, live; } sh_item;
 /* an import map's entry (HTML 8.1.5.3): its scope's URL (none for the top level), a
-   specifier key (a URL or a bare name) and the address it maps to (has 0: null), each a
-   span of the host's imtext */
+   specifier key (a URL or a bare name) and the address it maps to (has 0: null), each
+   TEXT in the host's imtext. No root */
 typedef struct sh_imap { uint32_t soff, slen, koff, klen, voff, vlen, has, spare; } sh_imap;
-/* the changes of one call grouped as a record is, while the log is read */
+/* the changes of one call grouped as a record is, while the log is read (an observers'
+   flush's own: NODEs, the DOM's names and text, no root) */
 typedef struct sh_mgroup {
     uint32_t type, target, prev, pgen, next, ngen, name, ns;
     uint32_t had, order, nadd, nrem;
@@ -146,11 +170,11 @@ struct js_host {
     dom_document *d;
     net_loader *nt;
     script_runtime *rt;
-    uint32_t page;            /* the page's resource in the loader (its URL resolves a script's src) */
+    uint32_t page;            /* the page's resource, a RECORD in the loader (its URL resolves a script's src) */
     uint32_t ready;           /* the VM made and the page's globals defined */
     uint32_t phase;           /* what runs now: a script, a listener, a timer (script_phase) */
     uint32_t nscripts;        /* the scripts run so far: each one's number */
-    uint32_t protos[SCRIPT_PROTOS];   /* the host objects' prototypes, by kind */
+    uint32_t protos[SCRIPT_PROTOS];   /* the host objects' prototypes, by kind: ROOTs */
     /* the DOM's versions, as its mutation log says them: the tree's moves with each node
        inserted or removed, the attributes' with each attribute set or removed; the log
        is read from log_pos on */
@@ -159,68 +183,74 @@ struct js_host {
     vector<sh_list> lists;            /* the live collections */
     vector<char> keys;                /* their keys' text */
     /* the view (src/script/view.c): the viewport, the DOM's revision it was made at (0:
-       never), how many times a script's read made it anew */
+       never), how many times a script's read made it anew; a NODE's style (its first value
+       in vvals, plus 1) and box (in vboxes, plus 1), 0 for none. No root */
     double view_w, view_h;
     uint64_t view_rev;
     uint32_t view_runs, view_ok;
-    vector<uint32_t> vstyle;          /* a node's style: its first value in vvals, plus 1 (0: none) */
+    vector<uint32_t> vstyle;
     vector<sh_vval> vvals;
     vector<char> vtext;
-    vector<uint32_t> vbox;            /* a node's box in vboxes, plus 1 (0: none) */
+    vector<uint32_t> vbox;
     vector<sh_vbox> vboxes;
     vector<sh_vfrag> vfrags;
     /* the network (src/script/fetch.c): requests, responses, headers, their text; the
-       native function that runs the host's tasks from the timers' queue */
+       native function that runs the host's tasks from the timers' queue, a ROOT */
     vector<sh_req> reqs;
     vector<sh_resp> resps;
     vector<sh_hdr> hdrs;
     vector<char> ntext;
     uint32_t task_fn;
     /* the scripts (src/script/script.c): each script element's "already started" (its
-       generation plus one, by index); the scripts waiting to run, and those written to run
-       after their writer; document.write's text so far, its script and the nodes it made
-       there; the script running (document.currentScript); whether the parse's scripts run
-       (an insertion point), how deep external scripts run, whether the document is open */
+       generation plus one, by NODE); the scripts waiting to run, and those written to run
+       after their writer (NODE and loader RECORD pairs); document.write's text so far, its
+       script and the NODEs it made there; the script running (document.currentScript, a
+       NODE); whether the parse's scripts run (an insertion point), how deep external
+       scripts run, whether the document is open. No root */
     vector<uint32_t> started;
     vector<sh_pend> pending;
     vector<uint32_t> wpend;
     vector<char> wtext;
     vector<uint32_t> wnodes;
     uint32_t wscript, cur_script, parsing, ext_run, opened;
-    /* the user (src/script/input.c): the focused element and its generation, and its
-       value when it took focus (for its change event); the pointer: whether it is on the
-       page, where, the element under it; the click event a user's click dispatches;
-       FormData's entries; whether the page navigated away (its event loop stopped); the
-       form whose entry list is being constructed; the navigation planned (a form's, its
-       task to come) and its request's URL, body and type; whether beforeunload is being
-       fired; the document's encoding (its number plus one: 0 is UTF-8); the element a
-       click is at while its events' point is left to be found when read (src/script/input.c);
-       the name form's atom in the document, once one has had it, and how many names the
-       document had when it was last looked for */
+    /* the user (src/script/input.c): the focused element, a NODE, and its generation, and
+       its value when it took focus (for its change event, TEXT); the pointer: whether it is
+       on the page, where, the element under it (a NODE); the click event a user's click
+       dispatches, a ROOT; FormData's entries; whether the page navigated away (its event
+       loop stopped); the form whose entry list is being constructed (a NODE); the
+       navigation planned (a form's, its task to come: the runtime's RECORD) and its
+       request's URL, body and type (TEXT); whether beforeunload is being fired; the
+       document's encoding (its number plus one: 0 is UTF-8); the element a click is at
+       while its events' point is left to be found when read (a NODE); the name form's
+       name in the document's names, once one has had it, and how many names the document
+       had when it was last looked for */
     uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, spare4;
     int charset, spare2;
     vector<char> nav_url, nav_body, nav_ctype;
     /* the MutationObservers, their registrations (how many live), their records' queues
-       and nodes, the filters' names; how far the DOM's log was read, whether the
-       observers' microtask is queued, its function */
+       and NODEs, the filters' names (TEXT); how far the DOM's log was read, whether the
+       observers' microtask is queued, its function, a ROOT */
     vector<sh_mo> mos;
     vector<sh_mreg> mregs;
     vector<sh_mrec> mrecs;
     vector<uint32_t> mnodes;
     vector<char> mfilter;
     uint32_t mreg_live, mo_pos, mo_queued, mo_fn;
-    /* custom elements: the definitions, the elements' states and each node's place among
-       them, the construction stack, whenDefined's waiting promises (promise, name's atom,
-       settled), the names and observed attributes; how far the DOM's log was read for
-       the reactions, whether reactions are running, the registry object */
+    /* custom elements: the definitions, the elements' states and each NODE's place among
+       them (plus one), the construction stack (the NODEs being upgraded, ~0 once
+       constructed), whenDefined's waiting promises (three a promise: the promise, a ROOT
+       until it is settled; its name's atom; settled), the names and observed attributes
+       (TEXT); how far the DOM's log was read for the reactions, whether reactions are
+       running, the registry object, a ROOT */
     vector<sh_cdef> cdefs;
     vector<sh_cel> cels;
     vector<uint32_t> cmap, cstack, cwait;
     vector<char> ctext;
     uint32_t ce_pos, in_reactions, registry, spare5;
-    /* the window (src/script/window.c): the session history, its URLs, the current entry
-       and the array that keeps the states; the stored items, their text, the profile's
-       storage file, whether it was read and whether localStorage changed since */
+    /* the window (src/script/window.c): the session history, its URLs (TEXT), the current
+       entry (its place) and the array that keeps the states, a ROOT; the stored items,
+       their text, the profile's storage file, whether it was read and whether localStorage
+       changed since */
     vector<sh_hent> hents;
     vector<char> htext;
     uint32_t hcur, hstates, sloaded, sdirty;
@@ -230,12 +260,13 @@ struct js_host {
     jv click_ev;
     vector<char> fvalue;
     vector<sh_fd> fds;
-    /* the document's URL (its loader's, then as its fragment and history change it), and
-       the location object */
+    /* the document's URL (TEXT: its loader's, then as its fragment and history change
+       it), and the location object, a ROOT */
     vector<char> docurl;
     uint32_t location;
     /* module scripts (src/script/script.c): the import maps' entries and their text; the
-       URLs whose fetch for a module failed, each reported once ('\n' after each) */
+       URLs whose fetch for a module failed, each reported once ('\n' after each). No root:
+       a module's own values are the engine's, which keeps every module */
     vector<sh_imap> imap;
     vector<char> imtext;
     vector<char> modfail;

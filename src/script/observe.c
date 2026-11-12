@@ -526,6 +526,18 @@ jv script_observe_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     return JV_UNDEF;
 }
 
+/* the collector's roots of this unit (script.h's sh_mo): each observer's object and
+   callback, which a registration may call on as long as the page lives (registrations and
+   records hold nodes and places, no value), and the notification's native */
+void script_observe_roots(js_vm *vm, vector<jv> *out) {
+    struct js_host *h = vm->host;
+    for (size_t i = 0; i < len(h->mos); i++) {
+        if (h->mos[i].obj) push_back(*out, jv_obj(h->mos[i].obj));
+        if (h->mos[i].fn) push_back(*out, jv_obj(h->mos[i].fn));
+    }
+    if (h->mo_fn) push_back(*out, jv_obj(h->mo_fn));
+}
+
 void script_observe_setup(js_vm *vm) {
     struct js_host *h = vm->host;
     uint32_t p = js_obj_new(vm, JK_PLAIN, vm->object_proto);

@@ -5,7 +5,10 @@
    Include it after src/js/js.h.
 
    A helper that takes a vector is declared in each unit that calls it, not here: a
-   prototype after a vector<T> in a header is not registered (a toolchain finding). */
+   prototype after a vector<T> in a header is not registered (a toolchain finding). So
+   are the units' roots, which script.c's sh_roots gathers for the collector (vm->host_roots):
+   script_fetch_roots, script_input_roots, script_observe_roots, script_custom_roots and
+   script_window_roots, each appending the engine's values its unit's state holds. */
 #ifndef AMB_SCRIPT_HOST_H
 #define AMB_SCRIPT_HOST_H
 
@@ -90,8 +93,11 @@ jv sh_event_new(js_vm *vm, uint32_t type, uint32_t flags);
 int sh_dispatch(js_vm *vm, uint32_t target, jv ev);
 jv sh_add_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc);
 jv sh_remove_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc);
-/* a host task after delay ms of virtual time; the microtasks at a checkpoint; the page's URL */
+/* a host task after delay ms of virtual time, its argument a number (a record's place),
+   or an object of the engine's, which the task's arguments then hold for it; the
+   microtasks at a checkpoint; the page's URL */
 void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg);
+void sh_task_obj(js_vm *vm, double delay, uint32_t kind, uint32_t o);
 void sh_checkpoint(js_vm *vm);
 void sh_page_url(js_vm *vm, char *out, size_t cap);
 /* the document's URL changed (a fragment's navigation, history's): location's parts again */

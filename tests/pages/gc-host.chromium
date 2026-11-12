@@ -1,0 +1,10 @@
+observer: 1 MutationRecord true
+connected: gc-anon
+constructed: gc-plain
+defined: one
+defined: two
+detail: 42
+own headers: x-own
+new lists empty: true
+xhr: 200 xhr ProgressEvent
+state: 7

@@ -1,0 +1,24 @@
+interop.html: Chromium's console, 41 lines; 5 collections
+interop2.html: Chromium's console, 20 lines; 9 collections
+lists.html: Chromium's console, 31 lines; 3 collections
+list.html: 1 console lines, 14 collections:
+trimmed to 3
+custom.html: Chromium's console, 49 lines; 3 collections
+shadow.html: Chromium's console, 27 lines; 3 collections
+observer.html: Chromium's console, 85 lines; 13 collections
+observer-unsettled.html: Chromium's console, 1 lines; 103 collections
+geometry.html: Chromium's console, 46 lines; 3 collections
+thrash.html: Chromium's console, 2 lines; 4 collections
+inserted.html: Chromium's console, 26 lines; 9 collections
+inserted-order.html: Chromium's console, 4 lines; 8 collections
+write-async.html: Chromium's console, 2 lines; 4 collections
+write-dom.html: 0 console lines, 5 collections:
+foreign.html: Chromium's console, 6 lines; 3 collections
+storage-keep.html: 1 console lines, 3 collections:
+visits 1, "tab\there\nand a newline \\ backslash", 2
+gc-host.html: Chromium's console, 10 lines; 9 collections
+events.html after its actions: Chromium's console, 106 lines; 13 collections
+keys.html after its actions: Chromium's console, 101 lines; 18 collections
+counter.html after its actions: 1 console lines, 5 collections:
+counter ready
+0 page(s) whose console is not as it should be

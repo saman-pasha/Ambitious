@@ -12,7 +12,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 pages=$AMB_ROOT/tests/pages
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-refs.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
-for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled custom shadow; do
+for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled custom shadow gc-host; do
   node "$AMB_ROOT/tools/bench/console.js" "$pages/$p.html" > "$pages/$p.chromium" && echo "wrote $p.chromium"
 done
 # the module page read from its file: every module's fetch refused (a file's origin is
