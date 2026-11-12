@@ -8,12 +8,17 @@
    once a process, into tables every amb_fonts shares (the static faces: freed when the
    process exits); DejaVu Sans's and DejaVu Serif's italic styles are their upright
    fonts again, which amb_glyph_mask slants. Each face falls back for a code point it
-   has no glyph for as Chromium's does (font.h). A page's web font is read
+   has no glyph for as Chromium's does (font.h): to the system faces among others,
+   font_data.h's list of the machine's font files, each looked at when the fallback
+   first reaches it -- its cmap read alone, into runs of the code points it has -- and
+   read whole, as a static face, when it has one a page needs (a collection's font found
+   by its index; a missing file passed over), once a process. A page's web font is read
    when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
    code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
-   hhea and OS/2, kerning pairs from kern (format 0); its outlines (glyf, through
-   loca) are read when a glyph is drawn. OpenType with CFF outlines is no font this
-   reads.
+   hhea and OS/2, kerning pairs from kern (format 0, not GPOS's); its outlines (glyf,
+   through loca) are read when a glyph is drawn. OpenType with CFF outlines is no font
+   this reads; colour bitmaps (CBLC, CBDT) are measured in their strike's pixels, and not
+   drawn.
 
    Metrics are rounded as Chromium rounds them (SimpleFontData): the ascent, the
    descent and the line gap each to a whole px, a line's normal height their sum.
@@ -41,12 +46,14 @@ static int amb_tag(const uint8_t *p, size_t n, size_t off, const char *t) {
 /* ---- the static faces: read once a process, shared by every amb_fonts ---- */
 
 /* their fonts' bytes, code points and kerning pairs, each face's from its record's first
-   and kfirst, as a web font's are in its amb_fonts; the records, by face; each built-in
-   font's state: 0 not read yet, 1 read */
+   and kfirst, as a web font's are in its amb_fonts; the records, by face (the built-in
+   faces, then the system faces read); each built-in font's state: 0 not read yet, 1 read;
+   the system fonts' cmaps, as runs of code points (each one's first and last) */
 static vector<uint8_t> amb_sb;
 static vector<amb_glyph> amb_sg;
 static vector<amb_kern> amb_sk;
-static amb_face amb_sf[AMB_NFACES];
+static vector<uint32_t> amb_cov;
+static amb_face amb_sf[AMB_WEBFIRST];
 static uint8_t amb_font_state[AMB_FONT_FACES];
 static int amb_s_kept;
 
@@ -55,6 +62,7 @@ static void amb_static_drop(void) {
     vector_uint8_t_drop(&amb_sb);
     vector_amb_glyph_drop(&amb_sg);
     vector_amb_kern_drop(&amb_sk);
+    vector_uint32_t_drop(&amb_cov);
 }
 
 /* each base64 character's six bits; 64 for none (the padding) */
@@ -140,15 +148,21 @@ static int amb_unlz(const uint8_t *z, size_t zn, uint8_t *out, size_t n) {
 
 /* ---- an sfnt read as a face ---- */
 
-typedef struct amb_tables { uint32_t cmap, head, hhea, hmtx, maxp, loca, glyf, glyf_len, kern, kern_len, os2, os2_len; } amb_tables;
+typedef struct amb_tables {
+    uint32_t cmap, head, hhea, hmtx, maxp, loca, glyf, glyf_len, kern, kern_len, os2, os2_len;
+    uint32_t cff, cff_len, cff2, cff2_len, cblc, cblc_len, cbdt, cbdt_len;
+} amb_tables;
 
-static int amb_sfnt_tables(const uint8_t *p, size_t n, amb_tables *t) {
+/* an sfnt's tables, from its directory at dir (a collection's font's; 0 for a font alone):
+   1 when it has those a face is read from -- cmap, head, hhea, hmtx, maxp, and TrueType
+   outlines or colour bitmaps (CFF's are not read) */
+static int amb_sfnt_tables(const uint8_t *p, size_t n, size_t dir, amb_tables *t) {
     memset(t, 0, sizeof *t);
-    uint32_t v = amb_u32(p, n, 0);
-    if (v != 0x00010000 && !amb_tag(p, n, 0, "true")) return 0;      /* 'OTTO' (CFF outlines) is not read */
-    uint32_t nt = amb_u16(p, n, 4);
+    uint32_t v = amb_u32(p, n, dir);
+    if (v != 0x00010000 && !amb_tag(p, n, dir, "true") && !amb_tag(p, n, dir, "OTTO")) return 0;
+    uint32_t nt = amb_u16(p, n, dir + 4);
     for (uint32_t i = 0; i < nt; i++) {
-        size_t r = 12 + 16 * (size_t)i;
+        size_t r = dir + 12 + 16 * (size_t)i;
         uint32_t off = amb_u32(p, n, r + 8), len = amb_u32(p, n, r + 12);
         if ((size_t)off + len > n) return 0;
         if (amb_tag(p, n, r, "cmap")) t->cmap = off;
@@ -160,28 +174,136 @@ static int amb_sfnt_tables(const uint8_t *p, size_t n, amb_tables *t) {
         else if (amb_tag(p, n, r, "glyf")) { t->glyf = off; t->glyf_len = len; }
         else if (amb_tag(p, n, r, "kern")) { t->kern = off; t->kern_len = len; }
         else if (amb_tag(p, n, r, "OS/2")) { t->os2 = off; t->os2_len = len; }
+        else if (amb_tag(p, n, r, "CFF ")) { t->cff = off; t->cff_len = len; }
+        else if (amb_tag(p, n, r, "CFF2")) { t->cff2 = off; t->cff2_len = len; }
+        else if (amb_tag(p, n, r, "CBLC")) { t->cblc = off; t->cblc_len = len; }
+        else if (amb_tag(p, n, r, "CBDT")) { t->cbdt = off; t->cbdt_len = len; }
     }
-    return t->cmap && t->head && t->hhea && t->hmtx && t->maxp && t->loca && t->glyf;
+    int outlines = (t->loca && t->glyf) || (t->cblc && t->cbdt);
+    return t->cmap && t->head && t->hhea && t->hmtx && t->maxp && outlines;
 }
 
-/* a code point's glyph made one of the face's, its advance from hmtx */
+/* a colour bitmap font's strike (CBLC's BitmapSize record): its largest, by ppem; 0 for none */
+static size_t amb_cblc_strike(const uint8_t *p, size_t n, const amb_tables *t) {
+    uint32_t sizes = amb_u32(p, n, t->cblc + 4);
+    size_t best = 0;
+    for (uint32_t i = 0; i < sizes && i < 64; i++) {
+        size_t r = t->cblc + 8 + 48 * (size_t)i;
+        if (r + 48 > (size_t)t->cblc + t->cblc_len || r + 48 > n) break;
+        if (!best || p[r + 45] > p[best + 45]) best = r;
+    }
+    return best;
+}
+
+/* a glyph's advance in its strike's pixels, from its image's metrics (CBDT's formats 17
+   and 18 through CBLC's index formats 1 and 3; index formats 2 and 5 hold them
+   themselves): -1 when the strike has no image for it */
+static int32_t amb_cbdt_advance(const uint8_t *p, size_t n, const amb_tables *t, size_t strike, uint32_t gid) {
+    size_t arr = t->cblc + amb_u32(p, n, strike);
+    uint32_t subs = amb_u32(p, n, strike + 8);
+    for (uint32_t i = 0; i < subs && i < 4096; i++) {
+        size_t e = arr + 8 * (size_t)i;
+        uint32_t first = amb_u16(p, n, e), last = amb_u16(p, n, e + 2);
+        if (gid < first || gid > last) continue;
+        size_t st = arr + amb_u32(p, n, e + 4);
+        uint32_t ifmt = amb_u16(p, n, st), gfmt = amb_u16(p, n, st + 2), idata = amb_u32(p, n, st + 4);
+        size_t img;
+        if (ifmt == 1) img = idata + amb_u32(p, n, st + 8 + 4 * (size_t)(gid - first));
+        else if (ifmt == 3) img = idata + amb_u16(p, n, st + 8 + 2 * (size_t)(gid - first));
+        else if ((ifmt == 2 || ifmt == 5) && st + 17 <= n) return p[st + 16];       /* bigGlyphMetrics' horiAdvance */
+        else return -1;
+        img += t->cbdt;
+        if ((gfmt == 17 || gfmt == 18) && img + 5 <= n) return p[img + 4];
+        return -1;
+    }
+    return -1;
+}
+
+/* a code point's glyph made one of the face's, its advance from hmtx -- or, for colour
+   bitmaps (strike, the strike's record), from its image's metrics, in the strike's pixels */
 static void amb_map(vector<amb_glyph> *gl, const uint8_t *p, size_t n, const amb_tables *t, uint32_t nhm, uint32_t nglyphs,
-                    uint32_t cp, uint32_t gid) {
+                    size_t strike, uint32_t cp, uint32_t gid) {
     if (gid == 0 || gid >= nglyphs) return;
     amb_glyph g;
     g.cp = cp;
     g.gid = gid;
-    g.advance = (uint16_t)amb_u16(p, n, t->hmtx + 4 * (size_t)(gid < nhm ? gid : nhm - 1));
+    if (strike) {
+        int32_t adv = amb_cbdt_advance(p, n, t, strike, gid);
+        if (adv < 0) return;
+        g.advance = (uint16_t)adv;
+    } else g.advance = (uint16_t)amb_u16(p, n, t->hmtx + 4 * (size_t)(gid < nhm ? gid : nhm - 1));
     g.kcount = 0;
     g.kfirst = 0;
     push_back(gl, g);
 }
 
-/* the sfnt p (n bytes, at base in its pool) read as the face fc, its code points and
-   kerning pairs pushed to gl and kn: 1, or 0 when it is no font this reads */
-static int amb_sfnt_face(const uint8_t *p, size_t n, uint32_t base, int builtin, vector<amb_glyph> *gl, vector<amb_kern> *kn, amb_face *fc) {
+/* a cmap's Unicode subtable (format 12 over format 4) at its offset: its format into
+   *fmt, or 0 when it has none */
+static uint32_t amb_cmap_sub(const uint8_t *p, size_t n, size_t cmap, uint32_t *fmt) {
+    uint32_t nsub = amb_u16(p, n, cmap + 2), sub = 0;
+    *fmt = 0;
+    for (uint32_t i = 0; i < nsub; i++) {
+        size_t r = cmap + 4 + 8 * (size_t)i;
+        uint32_t plat = amb_u16(p, n, r), enc = amb_u16(p, n, r + 2), off = (uint32_t)cmap + amb_u32(p, n, r + 4);
+        uint32_t f = amb_u16(p, n, off);
+        int unicode = plat == 0 || (plat == 3 && (enc == 1 || enc == 10));
+        if (unicode && f == 12 && *fmt != 12) { sub = off; *fmt = 12; }
+        else if (unicode && f == 4 && !*fmt) { sub = off; *fmt = 4; }
+    }
+    return sub;
+}
+
+/* a walk through a cmap subtable's code points and their glyphs (amb_cmap_next): where
+   it is (a segment or group, and its next code point), how many it has given */
+typedef struct amb_cwalk { uint32_t seg, c, given; int started; } amb_cwalk;
+
+/* the next code point and its glyph (0 for none) of the subtable sub of format fmt: 1, or
+   0 when there are no more (at most 70,000) */
+static int amb_cmap_next(const uint8_t *p, size_t n, uint32_t sub, uint32_t fmt, amb_cwalk *w, uint32_t *cp, uint32_t *gid) {
+    if (w->given >= 70000) return 0;
+    if (fmt == 4) {
+        uint32_t segs = amb_u16(p, n, sub + 6) / 2;
+        size_t ends = sub + 14, starts = ends + 2 * (size_t)segs + 2, deltas = starts + 2 * (size_t)segs, ros = deltas + 2 * (size_t)segs;
+        while (w->seg < segs) {
+            uint32_t s = w->seg, end = amb_u16(p, n, ends + 2 * (size_t)s), start = amb_u16(p, n, starts + 2 * (size_t)s);
+            if (!w->started) { w->c = start; w->started = 1; }
+            if (w->c > end || w->c == 0xFFFF || w->c < start) { w->seg++; w->started = 0; continue; }
+            uint32_t c = w->c++, delta = amb_u16(p, n, deltas + 2 * (size_t)s), ro = amb_u16(p, n, ros + 2 * (size_t)s), g;
+            if (ro == 0) g = (c + delta) & 0xFFFF;
+            else {
+                g = amb_u16(p, n, ros + 2 * (size_t)s + ro + 2 * (size_t)(c - start));
+                if (g) g = (g + delta) & 0xFFFF;
+            }
+            *cp = c;
+            *gid = g;
+            w->given++;
+            return 1;
+        }
+        return 0;
+    }
+    uint32_t groups = amb_u32(p, n, sub + 12);
+    while (w->seg < groups) {
+        size_t r = sub + 16 + 12 * (size_t)w->seg;
+        uint32_t start = amb_u32(p, n, r), end = amb_u32(p, n, r + 4), g0 = amb_u32(p, n, r + 8);
+        if (end < start || end - start > 70000 || end > 0x10FFFF) return 0;
+        if (!w->started) { w->c = start; w->started = 1; }
+        if (w->c > end) { w->seg++; w->started = 0; continue; }
+        *cp = w->c;
+        *gid = g0 + (w->c - start);
+        w->c++;
+        w->given++;
+        return 1;
+    }
+    return 0;
+}
+
+/* the sfnt p (n bytes, at base in its pool; its table directory at dir) read as the face
+   fc, its code points and kerning pairs pushed to gl and kn: 1, or 0 when it is no font
+   this reads */
+static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, int builtin, vector<amb_glyph> *gl, vector<amb_kern> *kn,
+                         amb_face *fc) {
     amb_tables t;
-    if (!amb_sfnt_tables(p, n, &t)) return 0;
+    if (!amb_sfnt_tables(p, n, dir, &t)) return 0;
     memset(fc, 0, sizeof *fc);
     fc->upem = amb_u16(p, n, t.head + 18);
     if (fc->upem < 16 || fc->upem > 16384) return 0;
@@ -209,66 +331,58 @@ static int amb_sfnt_face(const uint8_t *p, size_t n, uint32_t base, int builtin,
     fc->base = base;
     fc->size = (uint32_t)n;
     fc->builtin = (uint8_t)builtin;
+    /* a font of the program's own or the machine's: italic as its head says (a web
+       font's style is its @font-face rule's, which layout reads) */
+    if (builtin) fc->slope = (uint8_t)((amb_u16(p, n, t.head + 44) & 2) != 0);
     fc->loca = t.loca;
     fc->glyf = t.glyf;
     fc->glyf_size = t.glyf_len;
-    /* cmap: a Unicode subtable, format 12 over format 4 */
-    uint32_t nsub = amb_u16(p, n, t.cmap + 2), sub = 0, fmt = 0;
-    for (uint32_t i = 0; i < nsub; i++) {
-        size_t r = t.cmap + 4 + 8 * (size_t)i;
-        uint32_t plat = amb_u16(p, n, r), enc = amb_u16(p, n, r + 2), off = t.cmap + amb_u32(p, n, r + 4);
-        uint32_t f = amb_u16(p, n, off);
-        int unicode = plat == 0 || (plat == 3 && (enc == 1 || enc == 10));
-        if (unicode && f == 12 && fmt != 12) { sub = off; fmt = 12; }
-        else if (unicode && f == 4 && !fmt) { sub = off; fmt = 4; }
+    fc->outlines = AMB_GLYF;
+    size_t strike = 0;
+    if (!(t.loca && t.glyf)) {
+        /* colour bitmaps alone: measured in the pixels of its largest strike, which Skia
+           scales to the size -- its advances and its line's ascent and descent the
+           strike's (Chromium's emoji) */
+        strike = amb_cblc_strike(p, n, &t);
+        if (!strike || p[strike + 45] == 0) return 0;
+        fc->outlines = AMB_BITMAPS;
+        fc->upem = p[strike + 45];
+        fc->asc = (int8_t)p[strike + 16];
+        fc->desc = -(int8_t)p[strike + 17];
+        fc->gap = 0;
+        fc->loca = t.cblc;
+        fc->glyf = t.cbdt;
+        fc->glyf_size = t.cbdt_len;
     }
+    /* cmap: a Unicode subtable, format 12 over format 4 */
+    uint32_t fmt;
+    uint32_t sub = amb_cmap_sub(p, n, t.cmap, &fmt);
     if (!fmt) return 0;
     fc->first = (uint32_t)len(*gl);
-    if (fmt == 4) {
-        uint32_t segs = amb_u16(p, n, sub + 6) / 2;
-        size_t ends = sub + 14, starts = ends + 2 * (size_t)segs + 2, deltas = starts + 2 * (size_t)segs, ros = deltas + 2 * (size_t)segs;
-        for (uint32_t s = 0; s < segs && len(*gl) - fc->first < 70000; s++) {
-            uint32_t end = amb_u16(p, n, ends + 2 * (size_t)s), start = amb_u16(p, n, starts + 2 * (size_t)s);
-            uint32_t delta = amb_u16(p, n, deltas + 2 * (size_t)s), ro = amb_u16(p, n, ros + 2 * (size_t)s);
-            for (uint32_t c = start; c <= end && c != 0xFFFF; c++) {
-                uint32_t g;
-                if (ro == 0) g = (c + delta) & 0xFFFF;
-                else {
-                    g = amb_u16(p, n, ros + 2 * (size_t)s + ro + 2 * (size_t)(c - start));
-                    if (g) g = (g + delta) & 0xFFFF;
-                }
-                amb_map(gl, p, n, &t, nhm, fc->nglyphs, c, g);
-            }
-        }
-    } else {
-        uint32_t groups = amb_u32(p, n, sub + 12);
-        for (uint32_t k = 0; k < groups && len(*gl) - fc->first < 70000; k++) {
-            size_t r = sub + 16 + 12 * (size_t)k;
-            uint32_t start = amb_u32(p, n, r), end = amb_u32(p, n, r + 4), g0 = amb_u32(p, n, r + 8);
-            if (end < start || end - start > 70000 || end > 0x10FFFF) break;
-            for (uint32_t c = start; c <= end; c++) amb_map(gl, p, n, &t, nhm, fc->nglyphs, c, g0 + (c - start));
-        }
-    }
+    amb_cwalk w;
+    memset(&w, 0, sizeof w);
+    uint32_t c, g;
+    while (amb_cmap_next(p, n, sub, fmt, &w, &c, &g)) amb_map(gl, p, n, &t, nhm, fc->nglyphs, strike, c, g);
     fc->count = (uint32_t)len(*gl) - fc->first;
-    /* the notdef glyph, after every code point: the replacement glyph when U+FFFD is none */
+    /* the notdef glyph, after every code point: what a code point no face has is drawn
+       with (Chromium draws the first font's) */
     {
         amb_glyph nd;
         nd.cp = 0x110000;
         nd.gid = 0;
-        nd.advance = (uint16_t)amb_u16(p, n, t.hmtx);
+        nd.advance = (uint16_t)(strike ? amb_u16(p, n, t.hmtx) * fc->upem / amb_u16(p, n, t.head + 18) : amb_u16(p, n, t.hmtx));
         nd.kcount = 0;
         nd.kfirst = 0;
         push_back(gl, nd);
     }
     fc->fallback = (uint32_t)len(*gl) - 1;
-    /* the code points in order (cmap's are): each found by halves; U+FFFD's the fallback */
+    /* the code points in order (cmap's are): each found by halves */
     for (uint32_t k = 1; k < fc->count; k++)
         if (at(*gl, fc->first + k).cp <= at(*gl, fc->first + k - 1).cp) { fc->count = k; break; }
     for (uint32_t k = 0; k < 128; k++) fc->ascii[k] = 0xffff;
     for (uint32_t k = 0; k < fc->count; k++) {
-        uint32_t c = at(*gl, fc->first + k).cp;
-        if (c < 128) fc->ascii[c] = (uint16_t)k;
-        if (c == 0xFFFD) fc->fallback = fc->first + k;
+        uint32_t cp = at(*gl, fc->first + k).cp;
+        if (cp < 128) fc->ascii[cp] = (uint16_t)k;
     }
     /* kern: its format 0 subtables' horizontal pairs, in order */
     fc->kfirst = (uint32_t)len(*kn);
@@ -359,7 +473,7 @@ static int amb_woff(const uint8_t *p, size_t n, vector<uint8_t> *sf) {
 
 /* each built-in face's font in font_data.h (a family's four styles, but DejaVu Sans's and
    DejaVu Serif's italics, which are their upright fonts) */
-static const uint8_t amb_font_of[AMB_NFACES] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 14, 15, 16, 17, 18, 19 };
+static const uint8_t amb_font_of[AMB_NBUILTIN] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 14, 15, 16, 17, 18, 19 };
 
 /* the built-in font k decoded, inflated and read into the static faces, and each face of
    it given its record: the style it stands for, and whether its font is italic itself.
@@ -378,8 +492,8 @@ static void amb_font_read(int k) {
     if (!amb_unbase64(amb_font_piece[k], amb_font_piece[k + 1], data(z), len(z)) || !amb_unlz(data(z), len(z), data(amb_sb) + base, n))
         abort();
     amb_face fc;
-    if (!amb_sfnt_face(data(amb_sb) + base, n, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) abort();
-    for (int face = 0; face < AMB_NFACES; face++) {
+    if (!amb_sfnt_face(data(amb_sb) + base, n, 0, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) abort();
+    for (int face = 0; face < AMB_NBUILTIN; face++) {
         if (amb_font_of[face] != k) continue;
         amb_sf[face] = fc;
         amb_sf[face].style = (uint8_t)(face & 3);
@@ -388,13 +502,138 @@ static void amb_font_read(int k) {
     amb_font_state[k] = 1;
 }
 
-/* a face that can be read: a built-in one (read on its first use), or a web font added */
+/* ---- the system faces: Chromium's fallback fonts on this machine, read from their files ---- */
+
+/* each of font_data.h's system fonts (fontconfig's order): its state -- 0 not looked at,
+   1 its cmap read, 2 read as a face, 3 none to read (no file, no font this reads, no
+   room); its face once read; the runs of code points its cmap has glyphs for, in amb_cov
+   (first and last of each) from its first run, so many */
+static uint8_t amb_sys_state[AMB_SYS_FONTS];
+static int amb_sys_face[AMB_SYS_FONTS];
+static uint32_t amb_sys_run[AMB_SYS_FONTS], amb_sys_nruns[AMB_SYS_FONTS];
+/* the system faces read so far; each one's built-in face of the same font (-1 none) */
+static int amb_sys_read;
+static int8_t amb_sys_same_face[AMB_NSYSTEM];
+
+/* bytes of a file from off, n of them (all to its end when n is 0), appended to out: how
+   many, or -1 when it cannot be read */
+static long amb_file_read(const char *path, size_t off, size_t n, vector<uint8_t> *out) {
+    own FILE *fp = fopen(path, "rb");
+    if (!fp) return -1;
+    defer(fp) { fclose(fp); }
+    if (fseek(fp, (long)off, SEEK_SET) != 0) return -1;
+    uint8_t buf[16384];
+    size_t got = 0, k;
+    while (n == 0 || got < n) {
+        size_t want = n == 0 || n - got > sizeof buf ? sizeof buf : n - got;
+        k = fread(buf, 1, want, fp);
+        if (k == 0) break;
+        append_range(out, buf, k);
+        got += k;
+        if (got > ((size_t)256 << 20)) return -1;
+    }
+    return (long)got;
+}
+
+/* where a font's table directory is in its file's first bytes h (a collection's index-th
+   font's): its offset, or -1 */
+static long amb_font_dir(const uint8_t *h, size_t n, uint32_t index) {
+    if (!amb_tag(h, n, 0, "ttcf")) return index == 0 ? 0 : -1;
+    if (index >= amb_u32(h, n, 8)) return -1;
+    return (long)amb_u32(h, n, 12 + 4 * (size_t)index);
+}
+
+/* system font s looked at: its table directory found, its cmap read into runs of the code
+   points it has glyphs for (cheaper than reading a collection of CJK fonts whole) */
+static void amb_sys_probe(int s) {
+    amb_sys_state[s] = 3;
+    if (!amb_s_kept) {
+        atexit(amb_static_drop);
+        amb_s_kept = 1;
+    }
+    vector<uint8_t> h;
+    if (amb_file_read(amb_sys_path[s], 0, 4096, &h) < 12) return;
+    long dir = amb_font_dir(data(h), len(h), amb_sys_ttc[s]);
+    if (dir < 0) return;
+    uint32_t nt = amb_u16(data(h), len(h), (size_t)dir + 4);
+    if ((size_t)dir + 12 + 16 * (size_t)nt > len(h)) {
+        clear(h);
+        if (amb_file_read(amb_sys_path[s], 0, (size_t)dir + 12 + 16 * (size_t)nt, &h) < 12) return;
+    }
+    uint32_t cmap = 0, cmap_len = 0;
+    for (uint32_t i = 0; i < nt; i++) {
+        size_t r = (size_t)dir + 12 + 16 * (size_t)i;
+        if (amb_tag(data(h), len(h), r, "cmap")) { cmap = amb_u32(data(h), len(h), r + 8); cmap_len = amb_u32(data(h), len(h), r + 12); }
+    }
+    if (!cmap || cmap_len > (16u << 20)) return;
+    vector<uint8_t> cm;
+    if (amb_file_read(amb_sys_path[s], cmap, cmap_len, &cm) != (long)cmap_len) return;
+    uint32_t fmt;
+    uint32_t sub = amb_cmap_sub(data(cm), len(cm), 0, &fmt);
+    if (!fmt) return;
+    amb_sys_run[s] = (uint32_t)len(amb_cov) / 2;
+    amb_cwalk w;
+    memset(&w, 0, sizeof w);
+    uint32_t c, g;
+    while (amb_cmap_next(data(cm), len(cm), sub, fmt, &w, &c, &g)) {
+        if (!g) continue;
+        size_t k = len(amb_cov);
+        if (k > 2 * amb_sys_run[s] && at(amb_cov, k - 1) + 1 == c) amb_cov[k - 1] = c;
+        else {
+            push_back(amb_cov, c);
+            push_back(amb_cov, c);
+        }
+    }
+    amb_sys_nruns[s] = (uint32_t)len(amb_cov) / 2 - amb_sys_run[s];
+    amb_sys_state[s] = 1;
+}
+
+/* whether system font s has a glyph for cp, by its cmap */
+static int amb_sys_has(int s, uint32_t cp) {
+    if (amb_sys_state[s] == 0) amb_sys_probe(s);
+    if (amb_sys_state[s] == 3) return 0;
+    uint32_t lo = amb_sys_run[s], hi = lo + amb_sys_nruns[s];
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (cp < at(amb_cov, 2 * (size_t)mid)) hi = mid;
+        else if (cp > at(amb_cov, 2 * (size_t)mid + 1)) lo = mid + 1;
+        else return 1;
+    }
+    return 0;
+}
+
+/* system font s read as a face: its file into the static bytes, its tables into the static
+   faces'. Its face, or -1 (no font this reads, or no room) */
+static int amb_sys_load(int s) {
+    if (amb_sys_state[s] == 2) return amb_sys_face[s];
+    if (amb_sys_state[s] != 1 || amb_sys_read >= AMB_NSYSTEM) return -1;
+    amb_sys_state[s] = 3;
+    size_t base = len(amb_sb);
+    long n = amb_file_read(amb_sys_path[s], 0, 0, &amb_sb);
+    long dir = n >= 12 ? amb_font_dir(data(amb_sb) + base, (size_t)n, amb_sys_ttc[s]) : -1;
+    amb_face fc;
+    if (dir < 0 || !amb_sfnt_face(data(amb_sb) + base, (size_t)n, (size_t)dir, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) {
+        resize(&amb_sb, base);
+        return -1;
+    }
+    int face = AMB_NBUILTIN + amb_sys_read;
+    amb_sf[face] = fc;
+    amb_sys_same_face[amb_sys_read] = amb_sys_same[s];
+    amb_sys_read++;
+    amb_sys_face[s] = face;
+    amb_sys_state[s] = 2;
+    return face;
+}
+
+/* a face that can be read: a built-in one (read on its first use), a system face read, or
+   a web font added */
 static int amb_ready(const amb_fonts *f, int face) {
     if (face < 0) return 0;
-    if (face < AMB_NFACES) {
+    if (face < AMB_NBUILTIN) {
         if (!amb_font_state[amb_font_of[face]]) amb_font_read(amb_font_of[face]);
         return 1;
     }
+    if (face < AMB_WEBFIRST) return face < AMB_NBUILTIN + amb_sys_read;
     return (uint32_t)face < f->nfaces;
 }
 
@@ -403,19 +642,19 @@ void amb_fonts_load(amb_fonts *f) {
     clear(f->kerns);
     clear(f->bytes);
     memset(f->face, 0, sizeof f->face);
-    f->nfaces = AMB_NFACES;
+    f->nfaces = AMB_WEBFIRST;
 }
 
 int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
-    if (f->nfaces >= AMB_MAXFACES || n < 12 || n > (64u << 20)) return -1;
+    if (f->nfaces >= AMB_WEBFIRST + AMB_MAXWEB || n < 12 || n > (64u << 20)) return -1;
     vector<uint8_t> sf;
     if (amb_tag(p, n, 0, "wOFF")) { if (!amb_woff(p, n, &sf)) return -1; }
     else append_range(sf, p, n);
     uint32_t base = (uint32_t)len(f->bytes);
     amb_face fc;
-    if (!amb_sfnt_face(data(sf), len(sf), base, 0, &f->glyphs, &f->kerns, &fc)) return -1;
+    if (!amb_sfnt_face(data(sf), len(sf), 0, base, 0, &f->glyphs, &f->kerns, &fc)) return -1;
     append_range(f->bytes, data(sf), len(sf));
-    f->face[f->nfaces] = fc;
+    f->face[f->nfaces - AMB_WEBFIRST] = fc;
     f->nfaces++;
     return (int)f->nfaces - 1;
 }
@@ -432,14 +671,14 @@ int amb_face_named(const char *family, int bold, int italic) {
 double amb_x_height(int face) {
     /* each family's (its styles share their x-heights) */
     static const double xh[6] = { 0.4590, 0.5283, 0.5283, 0.547, 0.519, 0.545 };
-    return face >= 0 && face < AMB_NFACES ? xh[face / 4] : 0.5;
+    return face >= 0 && face < AMB_NBUILTIN ? xh[face / 4] : 0.5;
 }
 
 /* ---- a face's record and tables: a static face's, or a web font's in its amb_fonts ---- */
 
 static void amb_rec(const amb_fonts *f, int face, amb_face *out) {
-    if (face < AMB_NFACES) *out = amb_sf[face];
-    else *out = f->face[face];
+    if (face < AMB_WEBFIRST) *out = amb_sf[face];
+    else *out = f->face[face - AMB_WEBFIRST];
 }
 int amb_face_record(const amb_fonts *f, int face, amb_face *out) {
     memset(out, 0, sizeof *out);
@@ -447,19 +686,19 @@ int amb_face_record(const amb_fonts *f, int face, amb_face *out) {
     amb_rec(f, face, out);
     return 1;
 }
-static uint32_t amb_upem(const amb_fonts *f, int face) { return face < AMB_NFACES ? amb_sf[face].upem : f->face[face].upem; }
-static uint32_t amb_first(const amb_fonts *f, int face) { return face < AMB_NFACES ? amb_sf[face].first : f->face[face].first; }
-static uint32_t amb_count(const amb_fonts *f, int face) { return face < AMB_NFACES ? amb_sf[face].count : f->face[face].count; }
-static uint32_t amb_kfirst(const amb_fonts *f, int face) { return face < AMB_NFACES ? amb_sf[face].kfirst : f->face[face].kfirst; }
-static uint32_t amb_notdef(const amb_fonts *f, int face) { return face < AMB_NFACES ? amb_sf[face].fallback : f->face[face].fallback; }
-static uint32_t amb_ascii(const amb_fonts *f, int face, uint32_t c) { return face < AMB_NFACES ? amb_sf[face].ascii[c] : f->face[face].ascii[c]; }
+static uint32_t amb_upem(const amb_fonts *f, int face) { return face < AMB_WEBFIRST ? amb_sf[face].upem : f->face[face - AMB_WEBFIRST].upem; }
+static uint32_t amb_first(const amb_fonts *f, int face) { return face < AMB_WEBFIRST ? amb_sf[face].first : f->face[face - AMB_WEBFIRST].first; }
+static uint32_t amb_count(const amb_fonts *f, int face) { return face < AMB_WEBFIRST ? amb_sf[face].count : f->face[face - AMB_WEBFIRST].count; }
+static uint32_t amb_kfirst(const amb_fonts *f, int face) { return face < AMB_WEBFIRST ? amb_sf[face].kfirst : f->face[face - AMB_WEBFIRST].kfirst; }
+static uint32_t amb_notdef(const amb_fonts *f, int face) { return face < AMB_WEBFIRST ? amb_sf[face].fallback : f->face[face - AMB_WEBFIRST].fallback; }
+static uint32_t amb_ascii(const amb_fonts *f, int face, uint32_t c) { return face < AMB_WEBFIRST ? amb_sf[face].ascii[c] : f->face[face - AMB_WEBFIRST].ascii[c]; }
 /* the i-th code point of the faces of face's kind (its glyph, advance and pairs) */
 static amb_glyph amb_gl(const amb_fonts *f, int face, uint32_t i) {
-    if (face < AMB_NFACES) return amb_sg[i];
+    if (face < AMB_WEBFIRST) return amb_sg[i];
     return f->glyphs[i];
 }
 static amb_kern amb_kn(const amb_fonts *f, int face, uint32_t i) {
-    if (face < AMB_NFACES) return amb_sk[i];
+    if (face < AMB_WEBFIRST) return amb_sk[i];
     return f->kerns[i];
 }
 
@@ -501,39 +740,74 @@ static int amb_own_glyph(const amb_fonts *f, int face, uint32_t cp, uint32_t *g)
     return 0;
 }
 
-/* the faces a face falls back to, in Blink's order, as Chromium's do on a machine with
-   these fonts (font.h): Liberation Serif in the style the face stands for (the standard
-   font, after the family), the family's regular face for a bold or an italic style, and
-   DejaVu Sans; a web font's, Liberation Serif and DejaVu Sans. The k-th, or -1 */
-static int amb_fallback(int face, int k) {
-    int style = face < AMB_NFACES ? (face & 3) : 0;
-    if (k == 0) return AMB_FACE_SERIF + style;
-    if (k == 1) return style && face < AMB_NFACES ? (face & ~3) : -1;
-    if (k == 2) return AMB_FACE_DV_SANS;
-    return -1;
+/* a code point in font_data.h's ranges (first, last, ... n of them) */
+static int amb_in_ranges(const uint32_t *r, uint32_t n, uint32_t cp) {
+    uint32_t lo = 0, hi = n;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (cp < r[2 * mid]) hi = mid;
+        else if (cp > r[2 * mid + 1]) lo = mid + 1;
+        else return 1;
+    }
+    return 0;
+}
+
+/* a default-ignorable code point (U+200D, U+FE0F, ...): drawn as nothing, no advance, as
+   HarfBuzz hides it */
+static int amb_ignorable(uint32_t cp) { return cp >= 0xAD && amb_in_ranges(amb_ignore, AMB_IGNORE_RANGES, cp); }
+
+/* the glyph of cp in system font s (as the built-in face it is, when it is one that has
+   it): 1, its index and face into *g and *by; 0 when the font has none or cannot be read */
+static int amb_sys_glyph(const amb_fonts *f, int s, uint32_t cp, uint32_t *g, int *by) {
+    int same = amb_sys_same[s];
+    if (same >= 0 && amb_own_glyph(f, same, cp, g)) { *by = same; return 1; }
+    if (!amb_sys_has(s, cp)) return 0;
+    int face = amb_sys_load(s);
+    if (face < 0 || !amb_own_glyph(f, face, cp, g)) return 0;
+    *by = face;
+    return 1;
+}
+
+/* the glyph of cp in a face -- a built-in face's from its subset or, when that has none,
+   from its font's file (Chromium draws every code point its font has with it): 1, its
+   index and face into *g and *by */
+static int amb_face_glyph(const amb_fonts *f, int face, uint32_t cp, uint32_t *g, int *by) {
+    if (amb_own_glyph(f, face, cp, g)) { *by = face; return 1; }
+    if (face < 0 || face >= AMB_NBUILTIN) return 0;
+    int s = amb_font_file[amb_font_of[face]];
+    if (!amb_sys_has(s, cp)) return 0;
+    int sf = amb_sys_load(s);
+    if (sf < 0 || !amb_own_glyph(f, sf, cp, g)) return 0;
+    *by = sf;
+    return 1;
 }
 
 /* the glyph that draws cp (its index among its face's kind's code points), and the face
-   whose it is: the face's, a fallback face's, or the face's replacement glyph */
+   whose it is, in Blink's order (measured, font.h): the face's own; Liberation Serif in the
+   style the face stands for (the standard font); for an emoji, the emoji font; for a bold
+   or italic style, the family's regular face; the system fallback's fonts in fontconfig's
+   order (but for a private-use code point, which Blink falls back for to none); else the
+   face's notdef */
 static uint32_t amb_glyph_at(const amb_fonts *f, int face, uint32_t cp, int *drawn_by) {
     uint32_t g;
     *drawn_by = face;
-    if (amb_own_glyph(f, face, cp, &g)) return g;
-    for (int k = 0; k < 3; k++) {
-        int fc = amb_fallback(face, k);
-        if (fc < 0 || fc == face) continue;
-        if (amb_own_glyph(f, fc, cp, &g)) { *drawn_by = fc; return g; }
-    }
-    /* none has it: the replacement glyph, U+FFFD's from the face or its fallbacks */
-    if (cp != 0xFFFD) {
-        g = amb_glyph_at(f, face, 0xFFFD, drawn_by);
-        if (amb_gl(f, *drawn_by, g).cp == 0xFFFD) return g;
-    }
+    if (amb_face_glyph(f, face, cp, &g, drawn_by)) return g;
+    int style = face < AMB_NBUILTIN ? (face & 3) : 0, fc = AMB_FACE_SERIF + style;
+    if (fc != face && amb_face_glyph(f, fc, cp, &g, drawn_by)) return g;
+    int emoji = amb_in_ranges(amb_emoji, AMB_EMOJI_RANGES, cp);
+    if (emoji && amb_sys_glyph(f, AMB_SYS_EMOJI, cp, &g, drawn_by)) return g;
+    fc = face & ~3;
+    if (style && !emoji && fc != face && amb_face_glyph(f, fc, cp, &g, drawn_by)) return g;
+    if (!((cp >= 0xE000 && cp <= 0xF8FF) || cp >= 0xF0000))
+        for (int k = 0; k < AMB_SYS_ORDER; k++)
+            if (amb_sys_glyph(f, amb_sys_order[k], cp, &g, drawn_by)) return g;
     *drawn_by = face;
     return amb_ready(f, face) ? amb_notdef(f, face) : 0;
 }
 
 uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by) {
+    *drawn_by = face;
+    if (amb_ignorable(cp)) return 0;
     uint32_t g = amb_glyph_at(f, face, cp, drawn_by);
     if (!amb_ready(f, *drawn_by)) return 0x110000;
     return amb_gl(f, *drawn_by, g).cp;
@@ -559,6 +833,7 @@ static int32_t amb_kern_units(const amb_fonts *f, int face, uint32_t a, uint32_t
 
 double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size) {
     int by;
+    if (amb_ignorable(cp)) return 0;
     uint32_t g = amb_glyph_at(f, face, cp, &by);
     if (!amb_ready(f, by)) return 0;
     return amb_gl(f, by, g).advance * size / amb_upem(f, by);
@@ -566,6 +841,7 @@ double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size) {
 
 double amb_kern(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size) {
     int lb, rb;
+    if (amb_ignorable(left) || amb_ignorable(right)) return 0;
     uint32_t a = amb_glyph_at(f, face, left, &lb), b = amb_glyph_at(f, face, right, &rb);
     if (lb != face || rb != face || !amb_ready(f, face)) return 0;
     return amb_kern_units(f, face, a, b) * size / amb_upem(f, face);
@@ -598,6 +874,7 @@ double amb_text_width(const amb_fonts *f, int face, double size, const char *s, 
     if (!amb_ready(f, face)) return 0;
     while (i < n) {
         uint32_t cp = (uint8_t)s[i] < 0x80 ? (uint32_t)(uint8_t)s[i++] : amb_utf8_next(s, n, &i);
+        if (cp >= 0xAD && amb_ignorable(cp)) { prev = 0xffffffffu; continue; }
         int by;
         uint32_t g = amb_glyph_at(f, face, cp, &by);
         if (by != face) {
@@ -618,8 +895,11 @@ uint32_t amb_text_fallbacks(const amb_fonts *f, int face, const char *s, size_t 
     while (i < n) {
         if ((uint8_t)s[i] < 0x80) { i++; continue; }        /* every built-in face has ASCII's */
         uint32_t cp = amb_utf8_next(s, n, &i);
+        if (amb_ignorable(cp)) continue;
         int by;
         amb_glyph_at(f, face, cp, &by);
+        /* a system face of a built-in face's font: that face's line metrics */
+        if (by >= AMB_NBUILTIN && by < AMB_WEBFIRST && amb_sys_same_face[by - AMB_NBUILTIN] >= 0) by = amb_sys_same_face[by - AMB_NBUILTIN];
         if (by != face && by < AMB_NFACES) mask |= 1u << by;
     }
     return mask;
@@ -788,19 +1068,21 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     *ox = 0;
     *oy = 0;
     int by;
+    if (amb_ignorable(cp)) return 0;
     uint32_t gi = amb_glyph_at(f, face, cp, &by);
     if (!amb_ready(f, by)) return 0;
     amb_glyph g = amb_gl(f, by, gi);
     amb_face fc;
     amb_rec(f, by, &fc);
+    if (fc.outlines != AMB_GLYF) return 0;                   /* colour bitmaps: not drawn */
     vector<amb_pt> pts;
-    if (by < AMB_NFACES) amb_outline(data(amb_sb) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    if (by < AMB_WEBFIRST) amb_outline(data(amb_sb) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     uint32_t npts = (uint32_t)len(pts);
     if (npts == 0) return 0;
     /* italic asked for, of a face whose outlines are upright: Skia's skew, a quarter of
        the height (Chromium's synthetic italic) */
-    int asked = italic || (face < AMB_NFACES && (amb_sf[face].style & 2));
+    int asked = italic || (face < AMB_NBUILTIN && (amb_sf[face].style & 2));
     double s = size / fc.upem, slant = asked && !fc.slope ? 0.25 : 0;
     /* the box of the points, in px from the pen (y down) */
     double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;

@@ -74,7 +74,8 @@ int main(void) {
         printf("U+%04X in face %d: drawn by face %d (its U+%04X), %.4f px; kerning after 'A' %.4f\n", cps[k], in[k], by,
                g, amb_advance(&f, in[k], cps[k], 16), amb_kern(&f, in[k], 'A', cps[k], 16));
     }
-    printf("'A\u2605A' in face %d: %.4f px\n", AMB_FACE_SANS, amb_text_width(&f, AMB_FACE_SANS, 16, "A\xe2\x98\x85A", 5));
+    /* (the escape ends before the A: "\x85A" would be one escape) */
+    printf("'A\u2605A' in face %d: %.4f px\n", AMB_FACE_SANS, amb_text_width(&f, AMB_FACE_SANS, 16, "A\xe2\x98\x85" "A", 5));
     /* the blocks the built-in faces carry (tests/pages/coverage.html and symbols.html hold
        them to Chromium): words of Latin Extended-A, Vietnamese, Greek and Cyrillic in a
        few faces (DejaVu Sans Mono draws the Vietnamese letters with two marks it has no
@@ -96,6 +97,29 @@ int main(void) {
         printf("U+%04X: in serif by face %d (U+%04X), %.4f px; in monospace by face %d (U+%04X), %.4f px\n", syms[k], bs, gs,
                amb_advance(&f, AMB_FACE_SERIF, syms[k], 16), bm, gm, amb_advance(&f, AMB_FACE_MONO, syms[k], 16));
     }
+    /* the system fallback (font_data.h's fonts, in fontconfig's order, read from their
+       files): what no built-in face has, drawn by the font Chromium draws it with here
+       (tests/pages/scripts.html) -- CJK ideographs, kana and hangul by WenQuanYi Zen Hei,
+       Arabic, Armenian and Georgian by DejaVu Sans's file, Devanagari by FreeSans, Ethiopic by
+       FreeSerif, an emoji by Noto Color Emoji (by its strike's advance: 19.9633 px), a skin
+       tone alone by FreeSerif; IPA by Liberation Serif's own file, Armenian in monospace by
+       DejaVu Sans Mono's; a private-use code point by the face's notdef (12.4453 px in
+       serif); a default-ignorable one by nothing. Each face's font by its size, and its line
+       at 16px */
+    static const uint32_t far[15] = { 0x4E00, 0x3042, 0xAC00, 0x0627, 0x0531, 0x10D0, 0x0915, 0x1200, 0x1F600, 0x1F3FB,
+                                      0x0250, 0x0531, 0xE000, 0x200D, 0xFE0F };
+    static const int farface[15] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, AMB_FACE_MONO, 0, 0, 0 };
+    for (int k = 0; k < 15; k++) {
+        int by;
+        uint32_t g = amb_glyph_of(&f, farface[k], far[k], &by);
+        amb_face fc;
+        amb_face_record(&f, by, &fc);
+        double asc, desc, gap;
+        amb_face_metrics(&f, by, 16, &asc, &desc, &gap);
+        printf("U+%04X in face %d: drawn by face %d (U+%04X; a font of %u bytes, %u units an em; at 16px %g + %g + %g), %.4f px\n", far[k],
+               farface[k], by, g, fc.size, fc.upem, asc, desc, gap, amb_advance(&f, farface[k], far[k], 16));
+    }
+    printf("'a‍b' %.4f px, 'ab' %.4f px\n", amb_text_width(&f, 0, 16, "a\xe2\x80\x8d" "b", 5), amb_text_width(&f, 0, 16, "ab", 2));
     vector<uint8_t> ttf, woff;
     if (!read_file("tests/pages/fonts/oblique.ttf", &ttf) || !read_file("tests/pages/fonts/serif-bold.woff", &woff)) { printf("no fixture fonts\n"); return 1; }
     int a = amb_fonts_add(&f, data(ttf), len(ttf));

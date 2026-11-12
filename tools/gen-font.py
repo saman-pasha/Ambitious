@@ -47,6 +47,7 @@ presented under the Reserved Font Names, and the painter answers to none of them
 """
 import base64
 import struct
+import subprocess
 import sys
 import unicodedata
 
@@ -839,6 +840,62 @@ def subset(path, web=None, cps_of=None):
     return bytes(out + bodies), len(gids), len(pairs), len(cps)
 
 
+# the built-in faces that are fonts of the system fallback's: each one's PostScript name
+SAME = {"LiberationSerif": 0, "LiberationSans": 4, "LiberationMono": 8, "DejaVuSans": 12, "DejaVuSans-Bold": 13,
+        "DejaVuSerif": 16, "DejaVuSerif-Bold": 17, "DejaVuSansMono": 20, "DejaVuSansMono-Bold": 21}
+
+
+def system_fallback():
+    """Chromium's system fallback on this machine: gfx::GetFallbackFontForChar takes the
+    first font of fontconfig's order for a pattern of no family in its locale (en-US) that
+    has the code point (measured: tests/pages/scripts.html), and Blink's emoji fallback the
+    font fontconfig gives the emoji locale (und-Zsye). Each (path, index in its
+    collection, PostScript name); and the emoji font's place among them"""
+    def fc(*args):
+        return subprocess.run(["fc-match"] + list(args) + ["--format", "%{file}|%{index}|%{postscriptname}\n"],
+                              capture_output=True, text=True, check=True).stdout.split("\n")
+    fonts = []
+    for line in fc("-s", ":lang=en-us"):
+        if line.strip():
+            path, idx, ps = line.split("|")
+            fonts.append((path, int(idx.split(",")[0] or 0), ps))
+    path, idx, ps = fc(":lang=und-zsye")[0].split("|")
+    emoji = (path, int(idx.split(",")[0] or 0), ps)
+    if emoji not in fonts:
+        fonts.append(emoji)
+    return fonts, fonts.index(emoji)
+
+
+def ucd_set(prop):
+    """the code points that have the binary Unicode property prop, as perl's Unicode::UCD
+    has them"""
+    out = subprocess.run(["perl", "-MUnicode::UCD=prop_invlist", "-e", 'print join(",", prop_invlist("%s")), "\\n"' % prop],
+                         capture_output=True, text=True, check=True).stdout
+    inv = [int(x) for x in out.strip().split(",") if x]
+    cps = set()
+    for k in range(0, len(inv), 2):
+        cps.update(range(inv[k], inv[k + 1] if k + 1 < len(inv) else 0x110000))
+    return cps
+
+
+def ucd_ranges(props, minus_props=(), minus=()):
+    """the code points that have any of the binary Unicode properties props, but none of
+    minus_props, and are not in minus: [first, last] each"""
+    cps = set()
+    for prop in props:
+        cps |= ucd_set(prop)
+    for prop in minus_props:
+        cps -= ucd_set(prop)
+    cps -= set(minus)
+    ranges = []
+    for c in sorted(cps):
+        if ranges and ranges[-1][1] == c - 1:
+            ranges[-1][1] = c
+        else:
+            ranges.append([c, c])
+    return ranges
+
+
 def main():
     if len(sys.argv) == 5 and sys.argv[1] == "--web":
         blob, _, _, _ = subset(sys.argv[2], sys.argv[4])
@@ -875,6 +932,57 @@ def main():
         w("\n")
     w("*/\n")
     w("#define AMB_FONT_FACES %d\n" % len(faces))
+    order, emoji = system_fallback()
+    # the files: the system fallback's, then the built-in fonts' own files it has not
+    # (which back a built-in face for a code point its subset has not, as Chromium draws
+    # those from the face's font)
+    files = list(order)
+    own = []
+    for name, src, file in FACES:
+        path = dirs[src] + "/" + file
+        k = next((i for i, (p, x, _) in enumerate(files) if p == path and x == 0), -1)
+        if k < 0:
+            files.append((path, 0, file.rsplit(".", 1)[0]))
+            k = len(files) - 1
+        own.append(k)
+    same = {}
+    for face, k in zip((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 20, 21, 22, 23), own):
+        same.setdefault(k, face)
+    w("\n/* the font files Ambitious reads at run time, on the machine this was made on (its path,\n")
+    w("   its index in a collection, the built-in face it is the font of, -1 for none): the\n")
+    w("   fonts of Chromium's system fallback -- fontconfig's order for a pattern of no family\n")
+    w("   in the locale en-US (amb_sys_order), the first that has a code point drawing it, and\n")
+    w("   the one fontconfig gives emoji (lang und-Zsye), which Blink's emoji fallback takes --\n")
+    w("   then the built-in fonts' own files (amb_font_file: each built-in font's), from which\n")
+    w("   a code point a built-in face's subset has not is drawn */\n")
+    w("#define AMB_SYS_FONTS %d\n" % len(files))
+    w("static const char *const amb_sys_path[AMB_SYS_FONTS] = {\n")
+    for path, idx, ps in files:
+        w('    "%s", /* %s */\n' % (path, ps))
+    w("};\n")
+    w("static const uint8_t amb_sys_ttc[AMB_SYS_FONTS] = { %s };\n" % ", ".join("%d" % idx for _, idx, _ in files))
+    w("static const int8_t amb_sys_same[AMB_SYS_FONTS] = { %s };\n" % ", ".join("%d" % same.get(k, -1) for k in range(len(files))))
+    w("#define AMB_SYS_ORDER %d\n" % len(order))
+    w("static const uint8_t amb_sys_order[AMB_SYS_ORDER] = { %s };\n" % ", ".join("%d" % k for k in range(len(order))))
+    w("#define AMB_SYS_EMOJI %d\n" % emoji)
+    w("static const uint8_t amb_font_file[AMB_FONT_FACES] = { %s };\n" % ", ".join("%d" % k for k in own))
+    # the code points Blink's emoji fallback takes before the others' (its emoji
+    # presentation scanner's emoji: Emoji_Presentation and Emoji_Modifier_Base), and those
+    # HarfBuzz hides (Default_Ignorable_Code_Point)
+    for title, name, count, props, minus_props, minus in (
+            ("the code points Blink takes the emoji font for first (Emoji_Presentation and\n"
+             "   Emoji_Modifier_Base, not Emoji_Modifier: a skin tone alone is text, measured", "amb_emoji", "AMB_EMOJI_RANGES",
+             ("Emoji_Presentation", "Emoji_Modifier_Base"), ("Emoji_Modifier",), ()),
+            ("the code points HarfBuzz draws as nothing, with no advance\n   (Default_Ignorable_Code_Point but the "
+             "Hangul fillers, which Chromium draws, measured", "amb_ignore", "AMB_IGNORE_RANGES",
+             ("Default_Ignorable_Code_Point",), (), (0x115F, 0x1160, 0x3164, 0xFFA0))):
+        ranges = ucd_ranges(props, minus_props, minus)
+        w("\n/* %s, perl's Unicode::UCD): first, last, ... */\n" % title)
+        w("#define %s %d\n" % (count, len(ranges)))
+        w("static const uint32_t %s[2 * %s] = {\n" % (name, count))
+        for k in range(0, len(ranges), 8):
+            w("    %s,\n" % ", ".join("0x%X, 0x%X" % (a, b) for a, b in ranges[k:k + 8]))
+        w("};\n")
     w("\n/* the faces' fonts, packed, base64, each face's pieces after its own; amb_font_piece\n")
     w("   below says where each begins */\n")
     w("static const char *const amb_font_b64[] = {\n")

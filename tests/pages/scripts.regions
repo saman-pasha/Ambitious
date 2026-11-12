@@ -1,0 +1,23 @@
+# tests/pages/scripts.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-p-zh 8 8 792 29
+text-zh 8 9 280 26
+text-p-ja 8 33 792 54
+text-ja 8 34 318 51
+text-p-ko 8 58 792 79
+text-ko 8 59 228 76
+text-p-mix 8 83 792 104
+text-mix 8 84 230 101
+text-p-hy 8 108 792 127
+text-hy 8 109 215 126
+text-p-ka 8 131 792 150
+text-ka 8 132 221 149
+text-p-am 8 154 792 172
+text-am 8 154 116 171
+text-p-ipa 8 176 792 194
+text-ipa 8 176 198 193
+text-p-grc 8 198 792 216
+text-grc 8 198 258 215
+text-p-mono 8 220 792 239
+text-mono 8 220 201 239
+text-p-mzh 8 243 792 264
+text-mzh 8 243 137 262

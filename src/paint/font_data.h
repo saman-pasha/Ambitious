@@ -157,6 +157,86 @@
 */
 #define AMB_FONT_FACES 20
 
+/* the font files Ambitious reads at run time, on the machine this was made on (its path,
+   its index in a collection, the built-in face it is the font of, -1 for none): the
+   fonts of Chromium's system fallback -- fontconfig's order for a pattern of no family
+   in the locale en-US (amb_sys_order), the first that has a code point drawing it, and
+   the one fontconfig gives emoji (lang und-Zsye), which Blink's emoji fallback takes --
+   then the built-in fonts' own files (amb_font_file: each built-in font's), from which
+   a code point a built-in face's subset has not is drawn */
+#define AMB_SYS_FONTS 38
+static const char *const amb_sys_path[AMB_SYS_FONTS] = {
+    "/usr/share/fonts/opentype/inter/Inter-Regular.otf", /* Inter-Regular */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", /* DejaVuSans */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", /* DejaVuSans-Bold */
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", /* WenQuanYiZenHei */
+    "/usr/share/fonts/opentype/tlwg/Loma.otf", /* Loma */
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf", /* IPAGothic */
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf", /* FreeSans */
+    "/usr/share/fonts/truetype/freefont/FreeSerif.ttf", /* FreeSerif */
+    "/usr/share/fonts/truetype/freefont/FreeMono.ttf", /* FreeMono */
+    "/usr/share/fonts/truetype/libreoffice/opens___.ttf", /* OpenSymbol */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", /* DejaVuSerif */
+    "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf", /* JetBrainsMono-Regular */
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", /* LiberationSerif */
+    "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf", /* Carlito-Regular */
+    "/usr/share/fonts/opentype/unifont/unifont.otf", /* Unifont */
+    "/usr/share/fonts/opentype/unifont/unifont_jp.otf", /* Unifont-JP */
+    "/usr/share/fonts/opentype/unifont/unifont_sample.otf", /* UnifontSample */
+    "/usr/share/fonts/opentype/unifont/unifont_csur.otf", /* UnifontCSUR */
+    "/usr/share/fonts/opentype/unifont/unifont_upper.otf", /* UnifontUpper */
+    "/usr/share/fonts/opentype/unifont/unifont_upper_sample.otf", /* UnifontSample */
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", /* WenQuanYiZenHeiMono */
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", /* NotoColorEmoji */
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf", /* LiberationSerif-Bold */
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf", /* LiberationSerif-Italic */
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf", /* LiberationSerif-BoldItalic */
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", /* LiberationSans-Regular */
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", /* LiberationSans-Bold */
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf", /* LiberationSans-Italic */
+    "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf", /* LiberationSans-BoldItalic */
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", /* LiberationMono-Regular */
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf", /* LiberationMono-Bold */
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf", /* LiberationMono-Italic */
+    "/usr/share/fonts/truetype/liberation/LiberationMono-BoldItalic.ttf", /* LiberationMono-BoldItalic */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", /* DejaVuSerif-Bold */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", /* DejaVuSansMono */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", /* DejaVuSansMono-Bold */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf", /* DejaVuSansMono-Oblique */
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf", /* DejaVuSansMono-BoldOblique */
+};
+static const uint8_t amb_sys_ttc[AMB_SYS_FONTS] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+static const int8_t amb_sys_same[AMB_SYS_FONTS] = { -1, 12, 13, -1, -1, -1, -1, -1, -1, -1, 16, -1, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 20, 21, 22, 23 };
+#define AMB_SYS_ORDER 22
+static const uint8_t amb_sys_order[AMB_SYS_ORDER] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 };
+#define AMB_SYS_EMOJI 21
+static const uint8_t amb_font_file[AMB_FONT_FACES] = { 12, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 1, 2, 10, 33, 34, 35, 36, 37 };
+
+/* the code points Blink takes the emoji font for first (Emoji_Presentation and
+   Emoji_Modifier_Base, not Emoji_Modifier: a skin tone alone is text, measured, perl's Unicode::UCD): first, last, ... */
+#define AMB_EMOJI_RANGES 85
+static const uint32_t amb_emoji[2 * AMB_EMOJI_RANGES] = {
+    0x231A, 0x231B, 0x23E9, 0x23EC, 0x23F0, 0x23F0, 0x23F3, 0x23F3, 0x25FD, 0x25FE, 0x2614, 0x2615, 0x261D, 0x261D, 0x2648, 0x2653,
+    0x267F, 0x267F, 0x2693, 0x2693, 0x26A1, 0x26A1, 0x26AA, 0x26AB, 0x26BD, 0x26BE, 0x26C4, 0x26C5, 0x26CE, 0x26CE, 0x26D4, 0x26D4,
+    0x26EA, 0x26EA, 0x26F2, 0x26F3, 0x26F5, 0x26F5, 0x26F9, 0x26FA, 0x26FD, 0x26FD, 0x2705, 0x2705, 0x270A, 0x270D, 0x2728, 0x2728,
+    0x274C, 0x274C, 0x274E, 0x274E, 0x2753, 0x2755, 0x2757, 0x2757, 0x2795, 0x2797, 0x27B0, 0x27B0, 0x27BF, 0x27BF, 0x2B1B, 0x2B1C,
+    0x2B50, 0x2B50, 0x2B55, 0x2B55, 0x1F004, 0x1F004, 0x1F0CF, 0x1F0CF, 0x1F18E, 0x1F18E, 0x1F191, 0x1F19A, 0x1F1E6, 0x1F1FF, 0x1F201, 0x1F201,
+    0x1F21A, 0x1F21A, 0x1F22F, 0x1F22F, 0x1F232, 0x1F236, 0x1F238, 0x1F23A, 0x1F250, 0x1F251, 0x1F300, 0x1F320, 0x1F32D, 0x1F335, 0x1F337, 0x1F37C,
+    0x1F37E, 0x1F393, 0x1F3A0, 0x1F3CC, 0x1F3CF, 0x1F3D3, 0x1F3E0, 0x1F3F0, 0x1F3F4, 0x1F3F4, 0x1F3F8, 0x1F3FA, 0x1F400, 0x1F43E, 0x1F440, 0x1F440,
+    0x1F442, 0x1F4FC, 0x1F4FF, 0x1F53D, 0x1F54B, 0x1F54E, 0x1F550, 0x1F567, 0x1F574, 0x1F575, 0x1F57A, 0x1F57A, 0x1F590, 0x1F590, 0x1F595, 0x1F596,
+    0x1F5A4, 0x1F5A4, 0x1F5FB, 0x1F64F, 0x1F680, 0x1F6C5, 0x1F6CC, 0x1F6CC, 0x1F6D0, 0x1F6D2, 0x1F6D5, 0x1F6D7, 0x1F6DC, 0x1F6DF, 0x1F6EB, 0x1F6EC,
+    0x1F6F4, 0x1F6FC, 0x1F7E0, 0x1F7EB, 0x1F7F0, 0x1F7F0, 0x1F90C, 0x1F93A, 0x1F93C, 0x1F945, 0x1F947, 0x1F9FF, 0x1FA70, 0x1FA7C, 0x1FA80, 0x1FA88,
+    0x1FA90, 0x1FABD, 0x1FABF, 0x1FAC5, 0x1FACE, 0x1FADB, 0x1FAE0, 0x1FAE8, 0x1FAF0, 0x1FAF8,
+};
+
+/* the code points HarfBuzz draws as nothing, with no advance
+   (Default_Ignorable_Code_Point but the Hangul fillers, which Chromium draws, measured, perl's Unicode::UCD): first, last, ... */
+#define AMB_IGNORE_RANGES 14
+static const uint32_t amb_ignore[2 * AMB_IGNORE_RANGES] = {
+    0xAD, 0xAD, 0x34F, 0x34F, 0x61C, 0x61C, 0x17B4, 0x17B5, 0x180B, 0x180F, 0x200B, 0x200F, 0x202A, 0x202E, 0x2060, 0x206F,
+    0xFE00, 0xFE0F, 0xFEFF, 0xFEFF, 0xFFF0, 0xFFF8, 0x1BCA0, 0x1BCA3, 0x1D173, 0x1D17A, 0xE0000, 0xE0FFF,
+};
+
 /* the faces' fonts, packed, base64, each face's pieces after its own; amb_font_piece
    below says where each begins */
 static const char *const amb_font_b64[] = {
