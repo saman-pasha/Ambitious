@@ -95,11 +95,21 @@
    broken by a hyphen (hyphens: manual at its soft hyphens, which are otherwise
    not drawn; auto there, else at the points Liang's algorithm finds with TeX's
    American English patterns, tools/gen-hyph.py, two letters at least each
-   side), at the last point whose part fits. Bidirectional text (UAX #9, by
-   words): a word of Hebrew or Arabic letters is right to left, a word of others
-   left to right, spaces and punctuation their neighbours' direction when those
-   agree, else the paragraph's (direction); the line's words are placed in the
-   order rule L2 gives, a right-to-left word's letters drawn reversed.
+   side), at the last point whose part fits. Bidirectional text (UAX #9, Unicode
+   15's data from tools/gen-bidi.pl), when a paragraph is right to left, holds a
+   right-to-left letter, an Arabic digit or a bidi control, or embeds right to left:
+   the paragraph's code points, with the controls each inline element's
+   unicode-bidi adds (embed, isolate, bidi-override, isolate-override, plaintext;
+   the dir attribute's isolation, dir=auto and bdi as first strong isolates), and
+   those in its text, resolved character by character (X1 to X10, W1 to W7, N0's
+   bracket pairs, N1, N2, I1, I2), its level its direction's, or its first strong
+   character's under plaintext or dir=auto (start and end aligned by it). Each line
+   is reordered (L1, L2): its words split where their level changes, an inline
+   element's edges going with what they bound (both edges on a line keep its left
+   and right edges on its left and right), a right-to-left run's text handed to
+   paint reversed, its brackets mirrored (L4); the controls are drawn as nothing.
+   Not done: each paragraph a forced break starts its own under plaintext; an
+   inline box's edges on lines after its first in a right-to-left paragraph.
 
    Pseudo-elements. An element's ::before and ::after are its first and last
    children, boxes as their display has them (inline ones in the lines), their
@@ -140,6 +150,7 @@ amb_implementation(layout);
 #include "../css/css.h"
 #include "layout.h"
 #include "hyph_data.h"
+#include "bidi_data.h"
 #include "../net/url.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
@@ -230,6 +241,7 @@ enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND
 
 typedef struct lay_ext {
     uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto, ostyle;
+    uint8_t ubidi, astart;              /* unicode-bidi (UB_); text-align start 1, end 2, other 0 */
     int32_t z, order;
     lay_len off[4];                     /* top, right, bottom, left */
     lay_len minw, minh, maxh, hraw, valen, basis, rgap, cgap;   /* hraw: height as declared, a percentage kept */
@@ -499,6 +511,11 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     else { e->va = VA_LEN; e->valen = lay_len_at(st, c); }
     lay_word_of(st, c0 + CSS_PROP_DIRECTION, w);
     e->rtl = lay_w(w, "rtl");
+    lay_word_of(st, c0 + CSS_PROP_UNICODE_BIDI, w);
+    e->ubidi = (uint8_t)(lay_w(w, "embed") ? 1 : lay_w(w, "isolate") ? 2 : lay_w(w, "bidi-override") ? 3 : lay_w(w, "isolate-override") ? 4 :
+                         lay_w(w, "plaintext") ? 5 : 0);
+    lay_word_of(st, c0 + CSS_PROP_TEXT_ALIGN, w);
+    e->astart = (uint8_t)(lay_w(w, "start") ? 1 : lay_w(w, "end") ? 2 : 0);
     lay_word_of(st, c0 + CSS_PROP_HYPHENS, w);
     e->hyph = lay_w(w, "auto") ? 2 : lay_w(w, "manual") ? 1 : 0;
     lay_word_of(st, c0 + CSS_PROP_DISPLAY, w);
@@ -745,10 +762,11 @@ typedef struct lay_piece {
     uint8_t tt;                                    /* text-transform */
     uint8_t va;                                    /* VA_TOP, VA_BOTTOM: aligned with the line box; an atomic's own */
     uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it */
-    uint8_t rtl;                                   /* a word of right-to-left letters (Hebrew, Arabic) */
+    uint8_t rtl;                                   /* a word that asks for the bidi algorithm (lay_bidi_hot) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
     uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
+    uint32_t bu;                                   /* in a bidi paragraph, its first unit (lay_bu) */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
@@ -877,11 +895,63 @@ static void lay_strip_soft(vector<char> *tw) {
     resize(tw, o);
 }
 
+/* text without the bidi controls, which draw nothing (Default_Ignorable_Code_Point): ALM,
+   LRM, RLM, the embeddings, overrides and isolates and their ends */
+static void lay_strip_controls(vector<char> *tw) {
+    size_t o = 0, n = len(*tw);
+    for (size_t q = 0; q < n; q++) {
+        unsigned char c = (unsigned char)at(*tw, q);
+        if (c == 0xD8 && q + 1 < n && (unsigned char)at(*tw, q + 1) == 0x9C) { q++; continue; }
+        if (c == 0xE2 && q + 2 < n) {
+            unsigned char c1 = (unsigned char)at(*tw, q + 1), c2 = (unsigned char)at(*tw, q + 2);
+            if ((c1 == 0x80 && (c2 == 0x8E || c2 == 0x8F || (c2 >= 0xAA && c2 <= 0xAE))) || (c1 == 0x81 && c2 >= 0xA6 && c2 <= 0xA9)) {
+                q += 2;
+                continue;
+            }
+        }
+        (*tw)[o++] = at(*tw, q);
+    }
+    resize(tw, o);
+}
+
 /* the code points of UTF-8 text: letter-spacing's count */
 static size_t lay_cps(const char *s, size_t n) {
     size_t k = 0;
     for (size_t i = 0; i < n; i++) if (((unsigned char)s[i] & 0xC0) != 0x80) k++;
     return k;
+}
+
+/* ---- bidirectional text (UAX #9): the classes ---- */
+
+/* the bidi classes, in tools/gen-bidi.pl's order (bidi_data.h) */
+enum { BC_L, BC_R, BC_AL, BC_EN, BC_ES, BC_ET, BC_AN, BC_CS, BC_NSM, BC_BN, BC_B, BC_S, BC_WS, BC_ON,
+       BC_LRE, BC_LRO, BC_RLE, BC_RLO, BC_PDF, BC_LRI, BC_RLI, BC_FSI, BC_PDI };
+
+/* a code point's Bidi_Class: its range's, the last that starts at or before it */
+static int lay_bidi_class(uint32_t cp) {
+    size_t lo = 0, hi = sizeof amb_bidi_class / sizeof amb_bidi_class[0];
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        if ((amb_bidi_class[mid] >> 5) <= cp) lo = mid;
+        else hi = mid;
+    }
+    return (int)(amb_bidi_class[lo] & 31);
+}
+
+/* the code point at s[i] (a lead byte, 0xC2 or more) asks for the bidi algorithm: it is right
+   to left (R, AL), an Arabic number (AN), or an explicit formatting character. RLM and the
+   controls (U+200F, U+202A to U+202E, U+2066 to U+2069) are known by their bytes; only in
+   the blocks of right-to-left scripts (U+0590 to U+08FF, U+FB1D to U+FDFF, U+FE70 to
+   U+FEFF, U+10800 to U+10FFF, U+1E800 to U+1EFFF) is a code point looked up */
+static int lay_bidi_hot(const char *s, size_t n, size_t i) {
+    unsigned char c0 = (unsigned char)s[i], c1 = i + 1 < n ? (unsigned char)s[i + 1] : 0, c2 = i + 2 < n ? (unsigned char)s[i + 2] : 0;
+    if (c0 == 0xE2) return (c1 == 0x80 && (c2 == 0x8F || (c2 >= 0xAA && c2 <= 0xAE))) || (c1 == 0x81 && c2 >= 0xA6 && c2 <= 0xA9);
+    int maybe = (c0 >= 0xD6 && c0 <= 0xDF) || (c0 == 0xE0 && c1 >= 0xA0 && c1 <= 0xA3) ||
+                (c0 == 0xEF && ((c1 >= 0xAC && c1 <= 0xB7) || (c1 >= 0xB9 && c1 <= 0xBB))) || (c0 == 0xF0 && (c1 == 0x90 || c1 == 0x9E) && c2 >= 0xA0);
+    if (!maybe) return 0;
+    size_t z = i;
+    int c = lay_bidi_class(amb_utf8_next(s, n, &z));
+    return c == BC_R || c == BC_AL || c == BC_AN || (c >= BC_LRE && c <= BC_PDI);
 }
 
 /* the pieces of text tx[0, n): a text node's (node), or a pseudo-element's content (node
@@ -953,7 +1023,7 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             if (c0 >= 0x80) hi = 1;
             if (c0 >= 0xC2) {
                 if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
-                else if (c0 >= 0xD6 && c0 <= 0xDB) rtl = 1;      /* U+0580 to U+06FF: Hebrew, Arabic */
+                else if (!rtl && lay_bidi_hot(tx, n, j)) rtl = 1;
             }
             j++;
         }
@@ -962,19 +1032,29 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         p.len = (uint32_t)(j - i);
         p.rtl = (uint8_t)rtl;
         p.soft = (uint8_t)soft;
-        if (s->tt || soft) {
-            /* text-transform's letters; a soft hyphen, no width where it does not break */
+        uint32_t fbm = 0;           /* the faces other than the word's that draw some of it */
+        if (s->tt || soft || rtl) {
+            /* text-transform's letters; a soft hyphen, no width where it does not break; the
+               bidi controls none */
             vector<char> tw;
             if (s->tt) lay_transform(tx + i, j - i, s->tt, &tw);
             else append_range(tw, tx + i, j - i);
             if (soft) lay_strip_soft(&tw);
+            if (rtl) lay_strip_controls(&tw);
             p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw)) + s->ls * (double)lay_cps(data(tw), len(tw));
-        } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
+            if (hi && s->lhn) {
+                if (rtl) fbm = amb_text_fallbacks(f, s->face, data(tw), len(tw));
+                else fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
+            }
+        } else {
+            p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
+            if (hi && s->lhn) fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
+        }
         p.brk = 0;
         p.keep = 0;
         /* the lines of the faces that draw what the word's face has no glyph for */
         if (hi && s->lhn) {
-            uint32_t m = amb_text_fallbacks(f, s->face, tx + i, j - i);
+            uint32_t m = fbm;
             for (int k = 0; m && k < AMB_NFACES; k++) {
                 if (!(m >> k & 1)) continue;
                 double fa, fd, fg, up, dn;
@@ -1567,24 +1647,15 @@ static void lay_piece_text(const layout_tree *t, const dom_document *d, const ve
             if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) lay_transform(tx + p.off, p.len, p.tt, out);
             else for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);
         }
-        if (p.kind != P_WORD || !(p.hy || p.rtl || p.soft)) continue;
-        if (p.hy || p.rtl) {
-            /* the word's own bytes: soft hyphens out, the hyphen it is broken by, its letters
-               in the order they are drawn (right to left: reversed) */
+        if (p.kind != P_WORD || !(p.hy || p.soft)) continue;
+        if (p.hy) {
+            /* the word's own bytes: soft hyphens out, the hyphen it is broken by */
             vector<char> wd;
             for (size_t q = from; q < len(*out); q++) push_back(wd, at(*out, q));
             resize(out, from);
             lay_strip_soft(&wd);
-            if (p.hy) push_back(wd, '-');
-            if (p.rtl) {
-                size_t q = len(wd);
-                while (q > 0) {
-                    size_t b0 = q - 1;
-                    while (b0 > 0 && ((unsigned char)at(wd, b0) & 0xC0) == 0x80) b0--;
-                    for (size_t z = b0; z < q; z++) push_back(out, at(wd, z));
-                    q = b0;
-                }
-            } else append_range(out, data(wd), len(wd));
+            push_back(wd, '-');
+            append_range(out, data(wd), len(wd));
         } else {
             /* soft hyphens where the word is not broken: none drawn */
             vector<char> wd;
@@ -1600,10 +1671,813 @@ static void lay_piece_text(const layout_tree *t, const dom_document *d, const ve
    relative offset, as its pieces have them */
 typedef struct lay_open { uint32_t el; float shift, rx, ry; } lay_open;
 
+/* ---- bidirectional text (UAX #9): a paragraph's levels ---- */
+
+/* a unit of a bidi paragraph: a code point of a word's or a kept space's text (its node, its
+   byte offset there and its length); a piece that is no text (a collapsed space WS; an atomic
+   box, a float or a positioned box ON, as U+FFFC; a forced break B); an inline element's
+   edge (a marker, BN), or a control its unicode-bidi adds (CSS Writing Modes 3, 2.4.2). Its
+   class as written (orig) and as the rules resolve it (cls), its embedding level (elvl) and
+   its resolved level (lvl) */
+typedef struct lay_bu { uint32_t cp, node, off; uint8_t len, orig, cls, lvl, elvl; } lay_bu;
+
+/* P2, P3: the first strong class from unit i on (R or AL 1, L 0, none -1), past isolates'
+   insides; within an isolate (iso), only to its matching PDI */
+static int lay_bidi_first_strong(const vector<lay_bu> *u, size_t i, int iso) {
+    int depth = 0;
+    for (; i < len(*u); i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_B) return -1;
+        if (c == BC_LRI || c == BC_RLI || c == BC_FSI) { depth++; continue; }
+        if (c == BC_PDI) {
+            if (depth) depth--;
+            else if (iso) return -1;
+            continue;
+        }
+        if (depth) continue;
+        if (c == BC_L) return 0;
+        if (c == BC_R || c == BC_AL) return 1;
+    }
+    return -1;
+}
+
+/* X1 to X8: each unit's embedding level, and its class where an override sets it; a stack of
+   embeddings, overrides and isolates 125 deep, past which they overflow */
+static void lay_bidi_explicit(vector<lay_bu> *u, int para) {
+    uint8_t sl[128], so[128], si[128];          /* each entry's level, override (1 L, 2 R), whether an isolate's */
+    int sp = 0, oi = 0, oe = 0, vi = 0;
+    sl[0] = (uint8_t)para;
+    so[0] = 0;
+    si[0] = 0;
+    for (size_t i = 0; i < len(*u); i++) {
+        lay_bu b = at(*u, i);
+        int c = b.orig, top = sl[sp];
+        b.cls = (uint8_t)c;
+        b.lvl = (uint8_t)top;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO) {
+            int nl = c == BC_RLE || c == BC_RLO ? (top + 1) | 1 : (top + 2) & ~1;
+            if (nl <= 125 && !oi && !oe && sp < 126) {
+                sp++;
+                sl[sp] = (uint8_t)nl;
+                so[sp] = (uint8_t)(c == BC_RLO ? 2 : c == BC_LRO ? 1 : 0);
+                si[sp] = 0;
+            } else if (!oi) oe++;
+        } else if (c == BC_RLI || c == BC_LRI || c == BC_FSI) {
+            if (so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+            int rtl = c == BC_RLI || (c == BC_FSI && lay_bidi_first_strong(u, i + 1, 1) == 1);
+            int nl = rtl ? (top + 1) | 1 : (top + 2) & ~1;
+            if (nl <= 125 && !oi && !oe && sp < 126) {
+                vi++;
+                sp++;
+                sl[sp] = (uint8_t)nl;
+                so[sp] = 0;
+                si[sp] = 1;
+            } else oi++;
+        } else if (c == BC_PDI) {
+            if (oi) oi--;
+            else if (vi) {
+                oe = 0;
+                while (sp > 0 && !si[sp]) sp--;
+                if (sp > 0) sp--;
+                vi--;
+            }
+            b.lvl = sl[sp];
+            if (so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+        } else if (c == BC_PDF) {
+            if (!oi) {
+                if (oe) oe--;
+                else if (!si[sp] && sp > 0) sp--;
+            }
+        } else if (c == BC_B) {
+            b.lvl = (uint8_t)para;
+            sp = 0;
+            oi = oe = vi = 0;
+        } else if (c != BC_BN && so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+        b.elvl = b.lvl;
+        (*u)[i] = b;
+    }
+}
+
+/* a class's strong direction for the neutrals (L, or R, which EN and AN count as); -1 none */
+static int lay_bidi_strong(int c) {
+    if (c == BC_L) return BC_L;
+    if (c == BC_R || c == BC_AL || c == BC_EN || c == BC_AN) return BC_R;
+    return -1;
+}
+static int lay_bidi_ni(int c) { return c == BC_B || c == BC_S || c == BC_WS || c == BC_ON || (c >= BC_LRI && c <= BC_PDI); }
+
+/* a bracket's pair (BidiBrackets.txt): 1 and the closing one for an opening bracket, 2 and
+   the opening one for a closing one, 0 for none; U+2329 and U+232A as their canonical
+   equivalents U+3008 and U+3009 */
+static int lay_bidi_bracket(uint32_t cp, uint32_t *pair) {
+    if (cp == 0x2329) cp = 0x3008;
+    else if (cp == 0x232A) cp = 0x3009;
+    size_t n = sizeof amb_bidi_brackets / sizeof amb_bidi_brackets[0];
+    for (size_t k = 0; k + 1 < n; k += 2) {
+        if (amb_bidi_brackets[k] == cp) { *pair = amb_bidi_brackets[k + 1]; return 1; }
+        if (amb_bidi_brackets[k + 1] == cp) { *pair = amb_bidi_brackets[k]; return 2; }
+    }
+    return 0;
+}
+
+/* an isolating run sequence's classes resolved (W1 to W7, N0, N1, N2) and its levels (I1,
+   I2): seq its places in idx, the units the rules see; para the paragraph's level */
+static void lay_bidi_sequence(vector<lay_bu> *u, const vector<uint32_t> *idx, const vector<uint32_t> *seq, int para) {
+    size_t m = len(*seq);
+    uint32_t q0 = at(*seq, 0), q1 = at(*seq, m - 1);
+    int lv = at(*u, at(*idx, q0)).elvl;
+    int before = q0 > 0 ? at(*u, at(*idx, q0 - 1)).elvl : para;
+    int lc = at(*u, at(*idx, q1)).orig;
+    int after = lc == BC_LRI || lc == BC_RLI || lc == BC_FSI || q1 + 1 >= len(*idx) ? para : at(*u, at(*idx, q1 + 1)).elvl;
+    int sos = ((lv > before ? lv : before) & 1) ? BC_R : BC_L, eos = ((lv > after ? lv : after) & 1) ? BC_R : BC_L;
+    int dir = (lv & 1) ? BC_R : BC_L;
+    vector<uint8_t> tc;
+    for (size_t k = 0; k < m; k++) push_back(tc, at(*u, at(*idx, at(*seq, k))).cls);
+    /* W1: a non-spacing mark the class before it (ON after an isolate's initiator or end) */
+    for (size_t k = 0; k < m; k++) {
+        if (at(tc, k) != BC_NSM) continue;
+        int pc = k ? at(tc, k - 1) : sos;
+        tc[k] = (uint8_t)(k && pc >= BC_LRI && pc <= BC_PDI ? BC_ON : pc);
+    }
+    /* W2: a European number after Arabic letters an Arabic number; W3: AL is R */
+    int strong = sos;
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k);
+        if (c == BC_L || c == BC_R || c == BC_AL) strong = c;
+        else if (c == BC_EN && strong == BC_AL) tc[k] = BC_AN;
+    }
+    for (size_t k = 0; k < m; k++) if (at(tc, k) == BC_AL) tc[k] = BC_R;
+    /* W4: one separator between two numbers of a kind is one of them */
+    for (size_t k = 1; k + 1 < m; k++) {
+        int c = at(tc, k), pc = at(tc, k - 1), nc = at(tc, k + 1);
+        if (c == BC_ES && pc == BC_EN && nc == BC_EN) tc[k] = BC_EN;
+        else if (c == BC_CS && (pc == BC_EN || pc == BC_AN) && nc == pc) tc[k] = (uint8_t)pc;
+    }
+    /* W5: terminators beside a European number are European numbers */
+    for (size_t k = 0; k < m;) {
+        if (at(tc, k) != BC_ET) { k++; continue; }
+        size_t e = k;
+        while (e < m && at(tc, e) == BC_ET) e++;
+        if ((k > 0 && at(tc, k - 1) == BC_EN) || (e < m && at(tc, e) == BC_EN)) for (size_t z = k; z < e; z++) tc[z] = BC_EN;
+        k = e;
+    }
+    /* W6: the separators and terminators left are neutral; W7: a European number after L is L */
+    for (size_t k = 0; k < m; k++) if (at(tc, k) == BC_ES || at(tc, k) == BC_ET || at(tc, k) == BC_CS) tc[k] = BC_ON;
+    strong = sos;
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k);
+        if (c == BC_L || c == BC_R) strong = c;
+        else if (c == BC_EN && strong == BC_L) tc[k] = BC_L;
+    }
+    /* N0: the bracket pairs (BD16, 63 open at most), in order of their openings: the
+       direction of the strong text in them when that is the embedding's; else, when their
+       strong text is the other way, the context's before them; and the marks after them */
+    vector<uint32_t> pairs, stk;
+    for (size_t k = 0; k < m; k++) {
+        if (at(tc, k) != BC_ON) continue;
+        uint32_t cp = at(*u, at(*idx, at(*seq, k))).cp, pair;
+        int kind = lay_bidi_bracket(cp, &pair);
+        if (kind == 1) {
+            if (len(stk) >= 126) break;
+            push_back(stk, pair);
+            push_back(stk, (uint32_t)k);
+        } else if (kind == 2) {
+            if (cp == 0x232A) cp = 0x3009;
+            for (size_t s = len(stk); s >= 2; s -= 2) {
+                if (at(stk, s - 2) != cp) continue;
+                push_back(pairs, at(stk, s - 1));
+                push_back(pairs, (uint32_t)k);
+                resize(&stk, s - 2);
+                break;
+            }
+        }
+    }
+    for (size_t p = 2; p < len(pairs); p += 2)
+        for (size_t z = p; z >= 2 && at(pairs, z - 2) > at(pairs, z); z -= 2) {
+            uint32_t o = at(pairs, z), c = at(pairs, z + 1);
+            pairs[z] = at(pairs, z - 2);
+            pairs[z + 1] = at(pairs, z - 1);
+            pairs[z - 2] = o;
+            pairs[z - 1] = c;
+        }
+    for (size_t p = 0; p + 1 < len(pairs); p += 2) {
+        uint32_t o = at(pairs, p), c = at(pairs, p + 1);
+        int found = 0;
+        for (uint32_t k = o + 1; k < c && found != 1; k++) {
+            int sd = lay_bidi_strong(at(tc, k));
+            if (sd == dir) found = 1;
+            else if (sd >= 0) found = 2;
+        }
+        if (!found) continue;
+        int to = dir;
+        if (found == 2) {
+            to = sos;
+            for (uint32_t k = o; k > 0; k--) {
+                int sd = lay_bidi_strong(at(tc, k - 1));
+                if (sd >= 0) { to = sd; break; }
+            }
+        }
+        tc[o] = (uint8_t)to;
+        tc[c] = (uint8_t)to;
+        for (uint32_t k = o + 1; k < m && at(*u, at(*idx, at(*seq, k))).orig == BC_NSM; k++) tc[k] = (uint8_t)to;
+        for (uint32_t k = c + 1; k < m && at(*u, at(*idx, at(*seq, k))).orig == BC_NSM; k++) tc[k] = (uint8_t)to;
+    }
+    /* N1, N2: neutrals between text of one direction take it, the others the embedding's */
+    for (size_t k = 0; k < m;) {
+        if (!lay_bidi_ni(at(tc, k))) { k++; continue; }
+        size_t e = k;
+        while (e < m && lay_bidi_ni(at(tc, e))) e++;
+        int b = k ? lay_bidi_strong(at(tc, k - 1)) : sos, a = e < m ? lay_bidi_strong(at(tc, e)) : eos;
+        int to = b == a && b >= 0 ? b : dir;
+        for (size_t z = k; z < e; z++) tc[z] = (uint8_t)to;
+        k = e;
+    }
+    /* I1, I2 */
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k), l = lv;
+        if (!(lv & 1)) { if (c == BC_R) l++; else if (c == BC_AN || c == BC_EN) l += 2; }
+        else if (c == BC_L || c == BC_EN || c == BC_AN) l++;
+        uint32_t i = at(*idx, at(*seq, k));
+        lay_bu b = at(*u, i);
+        b.cls = (uint8_t)c;
+        b.lvl = (uint8_t)l;
+        (*u)[i] = b;
+    }
+}
+
+/* a paragraph's levels (UAX #9): explicit (X1 to X8); the units X9 removes passed over (the
+   embeddings, overrides and their ends, an edge's marker); the isolating run sequences (BD9,
+   BD13, X10), each resolved; the units passed over the level of the unit before them */
+static void lay_bidi_resolve(vector<lay_bu> *u, int para) {
+    size_t n = len(*u);
+    lay_bidi_explicit(u, para);
+    vector<uint32_t> idx;
+    for (size_t i = 0; i < n; i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF || c == BC_BN) continue;
+        push_back(idx, (uint32_t)i);
+    }
+    size_t m = len(idx);
+    /* BD9: each isolate's initiator and its matching PDI, mates (places in idx; -1 none) */
+    vector<int32_t> mate;
+    resize(&mate, m, -1);
+    vector<uint32_t> stk;
+    for (size_t q = 0; q < m; q++) {
+        int c = at(*u, at(idx, q)).orig;
+        if (c == BC_LRI || c == BC_RLI || c == BC_FSI) push_back(stk, (uint32_t)q);
+        else if (c == BC_PDI && len(stk)) {
+            uint32_t o = back(stk);
+            pop_back(&stk);
+            mate[o] = (int32_t)q;
+            mate[q] = (int32_t)o;
+        } else if (c == BC_B) clear(&stk);
+    }
+    /* the level runs (by embedding level), each its first place and its end in idx */
+    vector<uint32_t> rs, re, runof;
+    resize(&runof, m, 0u);
+    for (size_t q = 0; q < m;) {
+        size_t e = q + 1;
+        int lv = at(*u, at(idx, q)).elvl;
+        while (e < m && at(*u, at(idx, e)).elvl == lv) e++;
+        for (size_t z = q; z < e; z++) runof[z] = (uint32_t)len(rs);
+        push_back(rs, (uint32_t)q);
+        push_back(re, (uint32_t)e);
+        q = e;
+    }
+    /* each sequence: a run that a matched PDI does not begin, and those an initiator it ends with goes on in */
+    vector<uint32_t> seq;
+    for (size_t r = 0; r < len(rs); r++) {
+        uint32_t first = at(rs, r);
+        if (at(*u, at(idx, first)).orig == BC_PDI && at(mate, first) >= 0) continue;
+        clear(&seq);
+        size_t rr = r;
+        for (int guard = 0; guard < 4096; guard++) {
+            for (uint32_t q = at(rs, rr); q < at(re, rr); q++) push_back(seq, q);
+            uint32_t last = at(re, rr) - 1;
+            int c = at(*u, at(idx, last)).orig;
+            if ((c != BC_LRI && c != BC_RLI && c != BC_FSI) || at(mate, last) < 0) break;
+            rr = at(runof, (size_t)at(mate, last));
+        }
+        lay_bidi_sequence(u, &idx, &seq, para);
+    }
+    int prev = para;
+    for (size_t i = 0; i < n; i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF || c == BC_BN) (*u)[i].lvl = (uint8_t)prev;
+        else prev = at(*u, i).lvl;
+    }
+}
+
+/* a code point drawn at an odd level: its mirror (L4, BidiMirroring.txt), or itself */
+static uint32_t lay_bidi_mirror(uint32_t cp) {
+    size_t lo = 0, hi = sizeof amb_bidi_mirror / sizeof amb_bidi_mirror[0] / 2;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (amb_bidi_mirror[2 * mid] < cp) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < sizeof amb_bidi_mirror / sizeof amb_bidi_mirror[0] / 2 && amb_bidi_mirror[2 * lo] == cp) return amb_bidi_mirror[2 * lo + 1];
+    return cp;
+}
+
+/* a code point's UTF-8 into out */
+static void lay_put_utf8(vector<char> *out, uint32_t cp) {
+    if (cp < 0x80) push_back(out, (char)cp);
+    else if (cp < 0x800) { push_back(out, (char)(0xC0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3F))); }
+    else if (cp < 0x10000) {
+        push_back(out, (char)(0xE0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    } else {
+        push_back(out, (char)(0xF0 | cp >> 18));
+        push_back(out, (char)(0x80 | (cp >> 12 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    }
+}
+
+/* text as a right-to-left run draws it: its code points in the other order, each its mirror (L4) */
+static void lay_bidi_reverse(const vector<char> *in, vector<char> *out) {
+    size_t q = len(*in);
+    while (q > 0) {
+        size_t b0 = q - 1;
+        while (b0 > 0 && ((unsigned char)at(*in, b0) & 0xC0) == 0x80) b0--;
+        size_t z = b0;
+        uint32_t cp = amb_utf8_next(data(*in), len(*in), &z);
+        uint32_t mc = lay_bidi_mirror(cp);
+        if (mc != cp) lay_put_utf8(out, mc);
+        else for (size_t k = b0; k < q; k++) push_back(out, at(*in, k));
+        q = b0;
+    }
+}
+
+/* the bytes [off, off + n) of a node's text (a pseudo-element's content's, in the tree's pool) into out */
+static void lay_src_bytes(LCTX, uint32_t node, uint32_t off, uint32_t n, vector<char> *out) {
+    if (node & LAY_GEN) {
+        amb_span g = at(*gx, node & LAY_GIDX).text;
+        if (off + n <= g.len) append_range(out, text_ptr(t, g) + off, n);
+        return;
+    }
+    amb_span sp = d->node[node].data;
+    if (off + n <= sp.len) append_range(out, text_ptr(d, sp) + off, n);
+}
+
+/* an element whose direction its content gives: HTML's dir=auto, a bdi without dir */
+static int lay_dir_auto(const dom_document *d, uint32_t x) {
+    if (x & LAY_GEN) return 0;
+    uint32_t a = lay_attr(d, x, "dir");
+    if (a) {
+        amb_span v = d->attr[a].value;
+        const char *p = text_ptr(d, v);
+        return v.len == 4 && (p[0] | 32) == 'a' && (p[1] | 32) == 'u' && (p[2] | 32) == 't' && (p[3] | 32) == 'o';
+    }
+    return lay_is_named(d, x, "bdi");
+}
+
+/* the unicode-bidi values (lay_ext's ubidi) */
+enum { UB_NORMAL, UB_EMBED, UB_ISOLATE, UB_OVERRIDE, UB_ISOLATE_OVERRIDE, UB_PLAINTEXT };
+
+/* the bidi paragraph of pieces ps into u: each word's and kept space's code points, each other
+   piece's unit (its first unit's index in its bu), an inline element's edges and the controls
+   its unicode-bidi and direction add (CSS Writing Modes 3, 2.4.2: embed LRE or RLE, isolate
+   LRI or RLI -- FSI for an element whose direction its content gives -- bidi-override LRO
+   or RLO, isolate-override both, plaintext FSI; each closed by PDF or PDI) */
+static void lay_bidi_units(LCTX, vector<lay_piece> *ps, vector<lay_bu> *u) {
+    for (size_t k = 0; k < len(*ps); k++) {
+        lay_piece p = at(*ps, k);
+        lay_bu b;
+        memset(&b, 0, sizeof b);
+        b.node = p.node;
+        b.off = p.off;
+        if (p.kind == P_WORD || (p.kind == P_SPACE && p.keep)) {
+            p.bu = (uint32_t)len(*u);
+            vector<char> raw;
+            lay_src_bytes(LARGS, p.node, p.off, p.len, &raw);
+            size_t z = 0;
+            while (z < len(raw)) {
+                size_t z0 = z;
+                uint32_t cp = amb_utf8_next(data(raw), len(raw), &z);
+                b.cp = cp;
+                b.off = p.off + (uint32_t)z0;
+                b.len = (uint8_t)(z - z0);
+                b.orig = (uint8_t)lay_bidi_class(cp);
+                push_back(u, b);
+            }
+        } else if (p.kind == P_OPEN || p.kind == P_CLOSE) {
+            lay_ext e = LAY_X(p.node);
+            int ub = e.ubidi, rtl = e.rtl;
+            int iso = ub == UB_ISOLATE || ub == UB_ISOLATE_OVERRIDE || ub == UB_PLAINTEXT;
+            int fsi = ub == UB_PLAINTEXT || (iso && lay_dir_auto(d, p.node));
+            uint8_t ctl[2];
+            int nc = 0;
+            if (p.kind == P_OPEN) {
+                if (iso) ctl[nc++] = (uint8_t)(fsi ? BC_FSI : rtl ? BC_RLI : BC_LRI);
+                if (ub == UB_EMBED) ctl[nc++] = (uint8_t)(rtl ? BC_RLE : BC_LRE);
+                if (ub == UB_OVERRIDE || ub == UB_ISOLATE_OVERRIDE) ctl[nc++] = (uint8_t)(rtl ? BC_RLO : BC_LRO);
+            } else {
+                if (ub == UB_EMBED || ub == UB_OVERRIDE || ub == UB_ISOLATE_OVERRIDE) ctl[nc++] = BC_PDF;
+                if (iso) ctl[nc++] = BC_PDI;
+            }
+            b.orig = BC_BN;
+            if (p.kind == P_OPEN) { p.bu = (uint32_t)len(*u); push_back(u, b); }
+            for (int q = 0; q < nc; q++) {
+                lay_bu cb = b;
+                cb.orig = ctl[q];
+                push_back(u, cb);
+            }
+            if (p.kind == P_CLOSE) { p.bu = (uint32_t)len(*u); push_back(u, b); }
+        } else {
+            p.bu = (uint32_t)len(*u);
+            b.cp = p.kind == P_SPACE ? 0x20 : p.kind == P_BREAK ? 0x2029 : 0xFFFC;
+            b.orig = (uint8_t)(p.kind == P_SPACE ? BC_WS : p.kind == P_BREAK ? BC_B : BC_ON);
+            push_back(u, b);
+        }
+        (*ps)[k] = p;
+    }
+}
+
+/* ---- bidirectional text: a line's visual runs ---- */
+
+/* a visual run of a bidi line: its piece k, its bytes [o0, o1) of the piece's node text (a
+   word's or a kept space's; 0 and 0 for the others), its level, width and place on the line */
+typedef struct lay_vr { uint32_t k, o0, o1; int lvl; double w, x; } lay_vr;
+
+/* the bytes [o0, o1) of a word's (or kept spaces') node text as laid out: text-transform's
+   letters, soft hyphens and bidi controls out, the hyphen after a broken word's last part;
+   into out */
+static void lay_run_bytes(LCTX, const lay_piece *p, uint32_t o0, uint32_t o1, vector<char> *out) {
+    vector<char> raw, tw;
+    lay_src_bytes(LARGS, p->node, o0, o1 - o0, &raw);
+    if (p->kind == P_WORD && p->tt) lay_transform(data(raw), len(raw), p->tt, &tw);
+    else for (size_t i = 0; i < len(raw); i++) push_back(tw, at(raw, i) == '\t' ? ' ' : at(raw, i));
+    if (p->kind == P_WORD && p->soft) lay_strip_soft(&tw);
+    lay_strip_controls(&tw);
+    if (p->kind == P_WORD && p->hy && o1 == p->off + p->len) push_back(tw, '-');
+    append_range(out, data(tw), len(tw));
+}
+
+/* a bidi line's visual runs (pieces [a, end) of ps) into vr: each piece's, a word split where
+   its level changes (its parts measured again), at its level -- its units', an inline
+   element's edge at its embedding level, the line's trailing spaces and breaks and a kept
+   tab at the paragraph's (L1) -- and in ord their visual order (L2): each run of a level and
+   above reversed, from the highest level down to the lowest odd one. An element's two edges
+   on the line, their order reversed, swap their widths: the left one draws the left edges */
+static void lay_bidi_line(LCTX, const vector<lay_piece> *ps, size_t a, size_t end, const vector<lay_bu> *bu, int para, vector<lay_vr> *vr,
+                          vector<uint32_t> *ord) {
+    size_t nb = len(*bu);
+    for (size_t k = a; k < end; k++) {
+        lay_piece p = at(*ps, k);
+        lay_vr r;
+        r.k = (uint32_t)k;
+        r.o0 = 0;
+        r.o1 = 0;
+        r.w = p.w;
+        r.x = 0;
+        r.lvl = para;
+        if (p.kind == P_WORD || (p.kind == P_SPACE && p.keep)) {
+            /* its units, from its first on (a hyphenated word's rest goes on from its own) */
+            size_t q = p.bu;
+            while (q < nb && at(*bu, q).node == p.node && at(*bu, q).off < p.off) q++;
+            size_t first = len(*vr);
+            int lv = -1, tab = 0;
+            r.o0 = p.off;
+            while (q < nb && at(*bu, q).node == p.node && at(*bu, q).off < p.off + p.len) {
+                lay_bu b = at(*bu, q);
+                if (b.orig == BC_S) tab = 1;
+                if (lv >= 0 && b.lvl != lv && p.kind == P_WORD) {
+                    r.o1 = b.off;
+                    push_back(vr, r);
+                    r.o0 = b.off;
+                }
+                if (lv < 0 || p.kind == P_WORD) lv = b.lvl;
+                r.lvl = lv;
+                q++;
+            }
+            r.o1 = p.off + p.len;
+            if (lv < 0 || tab) r.lvl = tab ? para : r.lvl;
+            push_back(vr, r);
+            if (len(*vr) - first > 1)
+                for (size_t z = first; z < len(*vr); z++) {
+                    lay_vr s = at(*vr, z);
+                    vector<char> tx;
+                    lay_run_bytes(LARGS, &p, s.o0, s.o1, &tx);
+                    s.w = amb_text_width(f, p.face, p.size, data(tx), len(tx)) + p.ls * (double)lay_cps(data(tx), len(tx));
+                    (*vr)[z] = s;
+                }
+            continue;
+        }
+        if (p.bu < nb) r.lvl = at(*bu, p.bu).lvl;
+        if (p.bu < nb && (p.kind == P_OPEN || p.kind == P_CLOSE)) {
+            /* an edge: the level of the unit next to it the rules keep, inside it (an
+               isolate's control, outside its isolate), else its embedding level */
+            r.lvl = at(*bu, p.bu).elvl;
+            size_t q = p.bu;
+            for (;;) {
+                if (p.kind == P_OPEN) { if (q + 1 >= nb) break; q++; }
+                else { if (q == 0) break; q--; }
+                int c = at(*bu, q).orig;
+                if (c == BC_BN || c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF) continue;
+                r.lvl = at(*bu, q).lvl;
+                break;
+            }
+        }
+        if (p.kind == P_BREAK) r.lvl = para;
+        push_back(vr, r);
+    }
+    /* L1: the trailing white space, at the paragraph's level */
+    for (size_t q = len(*vr); q > 0; q--) {
+        int kd = at(*ps, at(*vr, q - 1).k).kind;
+        if (kd != P_SPACE && kd != P_BREAK && kd != P_ABS && kd != P_FLOAT) break;
+        (*vr)[q - 1].lvl = para;
+    }
+    /* L2 */
+    size_t nr = len(*vr);
+    int maxl = 0, minodd = 1000;
+    for (size_t q = 0; q < nr; q++) {
+        push_back(ord, (uint32_t)q);
+        int l = at(*vr, q).lvl;
+        if (l > maxl) maxl = l;
+        if ((l & 1) && l < minodd) minodd = l;
+    }
+    for (int l = maxl; l >= minodd; l--)
+        for (size_t q = 0; q < nr;) {
+            if (at(*vr, at(*ord, q)).lvl < l) { q++; continue; }
+            size_t e2 = q;
+            while (e2 < nr && at(*vr, at(*ord, e2)).lvl >= l) e2++;
+            for (size_t i0 = q, i1 = e2 - 1; i0 < i1; i0++, i1--) {
+                uint32_t tmp = at(*ord, i0);
+                (*ord)[i0] = at(*ord, i1);
+                (*ord)[i1] = tmp;
+            }
+            q = e2;
+        }
+    /* an element's edges reversed: their widths swapped */
+    vector<uint32_t> pos, stk;
+    resize(&pos, nr, 0u);
+    for (size_t q = 0; q < nr; q++) pos[at(*ord, q)] = (uint32_t)q;
+    for (size_t q = 0; q < nr; q++) {
+        int kd = at(*ps, at(*vr, q).k).kind;
+        if (kd == P_OPEN) push_back(stk, (uint32_t)q);
+        else if (kd == P_CLOSE && len(stk)) {
+            uint32_t o = back(stk);
+            pop_back(&stk);
+            if (at(pos, q) < at(pos, o)) {
+                double tw = at(*vr, o).w;
+                (*vr)[o].w = at(*vr, q).w;
+                (*vr)[q].w = tw;
+            }
+        }
+    }
+}
+
+/* an inline element on a bidi line: it, its pieces [k0, k1] there, its shift and offsets */
+typedef struct lay_ent { uint32_t el, k0, k1; float shift, rx, ry; } lay_ent;
+
+/* a text fragment of line ln: its text txt[0, n) in its piece p's style, at px on the line, rw
+   wide; its baseline the line's, shifted (a top- or bottom-aligned one's against the line box) */
+static void lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt, size_t n, double px, double rw, double baseline, double height) {
+    amb_span sp = text_add(t, txt, n);
+    double pb = baseline + p->shift, above, below;
+    if (p->va == VA_TOP || p->va == VA_BOTTOM) {
+        lay_piece_vert(p, &above, &below);
+        pb = p->va == VA_TOP ? above : height - below;
+    }
+    layout_frag_h fh = frag_new(t);
+    uint32_t fr = fh.index;
+    /* a pseudo-element's content: generated, its element's */
+    t->frag[fr].kind = (p->node & LAY_GEN) ? LAYOUT_FRAG_KIND_GENERATED : LAYOUT_FRAG_KIND_TEXT;
+    t->frag[fr].node = node_handle(d, lay_dom(gx, p->node));
+    t->frag[fr].text = sp;
+    t->frag[fr].x = px + p->rx;
+    t->frag[fr].y = pb - p->asc + p->ry;
+    t->frag[fr].w = rw;
+    t->frag[fr].h = p->asc + p->desc;
+    t->frag[fr].baseline = pb + p->ry;
+    t->frag[fr].face = p->face;
+    if (p->font) t->frag[fr].font = resource_handle(nt, p->font);
+    t->frag[fr].spacing = p->ls;
+    t->frag[fr].word_spacing = p->wsp;
+    t->frag[fr].size = p->size;
+    t->frag[fr].italic = p->italic;
+    t->frag[fr].color = p->color;
+    t->frag[fr].decoration = p->deco;
+    if (p->elem) {
+        uint32_t ts = LAY_X(p->elem).tshadow;
+        if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
+    }
+    frags_append(t, ln, fr);
+}
+
+/* a visual run that is a whole piece: a collapsed space, or all of a word's or kept space's bytes */
+static int lay_vr_whole(const lay_vr *r, const lay_piece *p) {
+    return (p->kind == P_SPACE && !p->keep) || (r->o0 == p->off && r->o1 == p->off + p->len);
+}
+
+/* a bidi line's fragments, its runs vr in their visual order ord, each at its place shifted
+   right by shift: the inline elements' (a background, a positioned one's place), one for each
+   part of one side by side, the margins outside the edges its ends draw; its text runs, those
+   that go on in the text's order in one style merged (unless extra space justifies the line),
+   their collapsed spaces at either end drawn by none, a run at an odd level reversed and
+   mirrored; its atomic boxes placed; its positioned boxes' static places. open: the inline
+   elements open, kept as the other lines keep it */
+static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece> *ps, size_t a, size_t end, const vector<lay_vr> *vr,
+                           const vector<uint32_t> *ord, const vector<uint32_t> *atoms, const vector<double> *abase, vector<lay_open> *open,
+                           double x0, double y, double w, double shift, double extra, double baseline, double height) {
+    size_t nr = len(*vr);
+    vector<lay_ent> ents;
+    vector<uint32_t> estk;
+    for (size_t q = 0; q < len(*open); q++) {
+        lay_open o = at(*open, q);
+        lay_ent en;
+        en.el = o.el;
+        en.k0 = (uint32_t)a;
+        en.k1 = (uint32_t)end - 1;
+        en.shift = o.shift;
+        en.rx = o.rx;
+        en.ry = o.ry;
+        push_back(estk, (uint32_t)len(ents));
+        push_back(ents, en);
+    }
+    for (size_t k = a; k < end; k++) {
+        lay_piece p = at(*ps, k);
+        if (p.kind == P_OPEN) {
+            lay_ent en;
+            en.el = p.node;
+            en.k0 = (uint32_t)k;
+            en.k1 = (uint32_t)end - 1;
+            en.shift = p.shift;
+            en.rx = p.rx;
+            en.ry = p.ry;
+            push_back(estk, (uint32_t)len(ents));
+            push_back(ents, en);
+            lay_open o;
+            o.el = p.node;
+            o.shift = p.shift;
+            o.rx = p.rx;
+            o.ry = p.ry;
+            push_back(open, o);
+        } else if (p.kind == P_CLOSE && len(estk)) {
+            ents[back(estk)].k1 = (uint32_t)k;
+            pop_back(&estk);
+            if (len(*open)) pop_back(open);
+        }
+    }
+    for (size_t i = 0; i < len(ents); i++) {
+        lay_ent en = at(ents, i);
+        lay_style es;
+        lay_style_of(LARGS, en.el, &es);
+        if ((es.bg & 0xff) == 0 && LAY_X(en.el).pos == POS_STATIC) continue;
+        for (size_t q = 0; q < nr;) {
+            lay_vr r = at(*vr, at(*ord, q));
+            if (r.k < en.k0 || r.k > en.k1) { q++; continue; }
+            size_t e2 = q;
+            double ax0 = r.x, ax1 = r.x;
+            uint32_t kl = r.k, kr = r.k;
+            while (e2 < nr) {
+                lay_vr s = at(*vr, at(*ord, e2));
+                if (s.k < en.k0 || s.k > en.k1) break;
+                ax1 = s.x + s.w;
+                kr = s.k;
+                e2++;
+            }
+            lay_piece pl = at(*ps, kl), pr = at(*ps, kr);
+            if ((pl.kind == P_OPEN || pl.kind == P_CLOSE) && pl.node == en.el) ax0 += lay_res(st, es.m[3], w);
+            if ((pr.kind == P_OPEN || pr.kind == P_CLOSE) && pr.node == en.el) ax1 -= lay_res(st, es.m[1], w);
+            layout_frag_h fh = frag_new(t);
+            uint32_t fr = fh.index;
+            t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
+            t->frag[fr].node = node_handle(d, lay_dom(gx, en.el));
+            t->frag[fr].x = ax0 + shift + en.rx;
+            t->frag[fr].w = ax1 - ax0;
+            t->frag[fr].y = baseline + en.shift - es.asc - lay_res(st, es.p[0], w) - es.b[0] + en.ry;
+            t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
+            t->frag[fr].baseline = baseline;
+            t->frag[fr].background = es.bg;
+            frags_append(t, ln, fr);
+            q = e2;
+        }
+    }
+    /* each atomic piece's index in atoms (the line's order) */
+    vector<uint32_t> aidx;
+    resize(&aidx, end - a, 0u);
+    uint32_t na = 0;
+    for (size_t k = a; k < end; k++) if (at(*ps, k).kind == P_ATOMIC) aidx[k - a] = na++;
+    for (size_t q = 0; q < nr;) {
+        lay_vr r = at(*vr, at(*ord, q));
+        lay_piece p = at(*ps, r.k);
+        double px = r.x + shift;
+        if (p.kind == P_ATOMIC) {
+            uint32_t ab0 = at(*atoms, at(aidx, r.k - a));
+            double base = at(*abase, at(aidx, r.k - a));
+            double mh = t->box[ab0].mt + lay_border_height(t, ab0) + t->box[ab0].mb;
+            double top = baseline - base + p.shift;
+            if (p.va == VA_TOP) top = 0;
+            else if (p.va == VA_BOTTOM) top = height - mh;
+            lay_place(t, ab0, x0 + px + p.rx + t->box[ab0].ml, y + top + p.ry + t->box[ab0].mt);
+            layout_frag_h fh = frag_new(t);
+            uint32_t fr = fh.index;
+            t->frag[fr].kind = LAYOUT_FRAG_KIND_ATOMIC;
+            t->frag[fr].node = node_handle(d, lay_dom(gx, p.node));
+            t->frag[fr].atomic = ab0;
+            t->frag[fr].x = px + p.rx;
+            t->frag[fr].y = top + p.ry;
+            t->frag[fr].w = r.w;
+            t->frag[fr].h = mh;
+            t->frag[fr].baseline = baseline;
+            frags_append(t, ln, fr);
+            q++;
+            continue;
+        }
+        if (p.kind == P_ABS) {
+            lay_abs sa;
+            sa.el = p.node;
+            sa.box = b;
+            sa.x = x0 + px;
+            sa.y = y;
+            push_back(ab, sa);
+            q++;
+            continue;
+        }
+        if (p.kind != P_WORD && p.kind != P_SPACE) { q++; continue; }
+        size_t e2 = q + 1;
+        while (e2 < nr && extra == 0) {
+            lay_vr s = at(*vr, at(*ord, e2)), s0 = at(*vr, at(*ord, e2 - 1));
+            lay_piece p2 = at(*ps, s.k), p0 = at(*ps, s0.k);
+            if (s.lvl != r.lvl || (p2.kind != P_WORD && p2.kind != P_SPACE) || p2.node != p.node) break;
+            if (p2.size != p.size || p2.color != p.color || p2.face != p.face || p2.font != p.font || p2.deco != p.deco) break;
+            if (p2.shift != p.shift || p2.va != p.va || p2.rx != p.rx || p2.ry != p.ry) break;
+            if (!lay_vr_whole(&s, &p2) || !lay_vr_whole(&s0, &p0)) break;
+            if ((r.lvl & 1) ? s.k + 1 != s0.k : s0.k + 1 != s.k) break;
+            e2++;
+        }
+        size_t g0 = q, g1 = e2;
+        while (g0 < g1 && at(*ps, at(*vr, at(*ord, g0)).k).kind == P_SPACE && !at(*ps, at(*vr, at(*ord, g0)).k).keep) g0++;
+        while (g1 > g0 && at(*ps, at(*vr, at(*ord, g1 - 1)).k).kind == P_SPACE && !at(*ps, at(*vr, at(*ord, g1 - 1)).k).keep) g1--;
+        if (g0 < g1) {
+            lay_vr r0 = at(*vr, at(*ord, g0)), r1 = at(*vr, at(*ord, g1 - 1));
+            vector<char> lt, vt;
+            for (size_t z = 0; z < g1 - g0; z++) {
+                lay_vr s = at(*vr, at(*ord, (r.lvl & 1) ? g1 - 1 - z : g0 + z));
+                lay_piece p2 = at(*ps, s.k);
+                if (p2.kind == P_SPACE && !p2.keep) push_back(lt, ' ');
+                else lay_run_bytes(LARGS, &p2, s.o0, s.o1, &lt);
+            }
+            if (r.lvl & 1) lay_bidi_reverse(&lt, &vt);
+            else append_range(vt, data(lt), len(lt));
+            lay_piece pg = at(*ps, r0.k);
+            if (len(vt)) lay_text_frag(LARGS, ln, &pg, data(vt), len(vt), r0.x + shift, r1.x + r1.w - r0.x, baseline, height);
+        }
+        q = e2;
+    }
+}
+
+
+/* the rest of a bidi line (lay_line's, its pieces [a, end) measured, its atomic boxes laid
+   out, its extent above and below its baseline known): its visual runs, aligned (a collapsed
+   space with what justifying adds), the line, its fragments; its height */
+static double lay_bidi_finish(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t end, double x0, double w,
+                              double y, int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para,
+                              const vector<uint32_t> *atoms, const vector<double> *abase, double max_above, double max_below) {
+    vector<lay_vr> vr;
+    vector<uint32_t> ord;
+    lay_bidi_line(LARGS, ps, a, end, bu, para, &vr, &ord);
+    double line_w = indent;
+    int spaces = 0;
+    for (size_t q = 0; q < len(vr); q++) {
+        line_w += at(vr, q).w;
+        if (at(*ps, at(vr, q).k).kind == P_SPACE && !at(*ps, at(vr, q).k).keep) spaces++;
+    }
+    double free = w - line_w, shift = 0, extra = 0;
+    if (bs->align == AL_RIGHT && free > 0) shift = free;
+    else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
+    else if (bs->align == AL_JUSTIFY && justify_ok && free > 0 && spaces > 0) extra = free / spaces;
+    double baseline = max_above, height = max_above + max_below;
+    layout_line_h lh = line_new(t);
+    uint32_t ln = lh.index;
+    t->line[ln].x = x0;
+    t->line[ln].y = y;
+    t->line[ln].w = w;
+    t->line[ln].h = height;
+    t->line[ln].baseline = baseline;
+    lines_append(t, b, ln);
+    double vx = indent;
+    for (size_t q = 0; q < len(ord); q++) {
+        uint32_t i = at(ord, q);
+        lay_vr r = at(vr, i);
+        if (at(*ps, r.k).kind == P_SPACE && !at(*ps, r.k).keep) r.w += extra;
+        r.x = vx;
+        vx += r.w;
+        vr[i] = r;
+    }
+    lay_bidi_frags(LARGS, b, ln, ps, a, end, &vr, &ord, atoms, abase, open, x0, y, w, shift, extra, baseline, height);
+    return height;
+}
+
 /* one line of pieces [a, e) in box b at y, w wide; returns its height. open: the inline
-   elements open at its start, which it leaves as those open at its end */
+   elements open at its start, which it leaves as those open at its end. bu: its paragraph's
+   bidi units, at level para (empty: no bidi text in it) */
 static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t e, double x0, double w, double y,
-                       int justify_ok, double indent, vector<lay_open> *open) {
+                       int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para) {
     /* trailing collapsible spaces hang: they take no width */
     size_t end = e;
     while (end > a && at(*ps, end - 1).kind == P_SPACE && !at(*ps, end - 1).keep) end--;
@@ -1651,51 +2525,12 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         }
         x += p.w;
     }
-    /* bidirectional text (UAX #9, by words): each piece's level -- a right-to-left word's 1,
-       a left-to-right one's 0 (2 in a right-to-left paragraph), the others' (spaces,
-       punctuation, boxes) their neighbours' when those agree, else the paragraph's, the
-       line's trailing spaces the paragraph's -- and the pieces placed in the order L2
-       gives them, each run of a level and above reversed, from the highest down */
-    int reordered = 0;
-    if (bs->rtl && end > a) {
-        size_t m = end - a;
-        vector<int> lv;
-        for (size_t k = a; k < end; k++) {
-            lay_piece p = at(*ps, k);
-            int v = -1;
-            if (p.kind == P_WORD) v = p.rtl ? 1 : (bs->rtl & 1 ? 2 : 0);
-            push_back(lv, v);
-        }
-        for (size_t q = 0; q < m;) {
-            if (at(lv, q) >= 0) { q++; continue; }
-            size_t e2 = q;
-            while (e2 < m && at(lv, e2) < 0) e2++;
-            int para = bs->rtl & 1;
-            int before = q > 0 ? at(lv, q - 1) % 2 : para, after = e2 < m ? at(lv, e2) % 2 : para;
-            int v = before == after ? (before ? 1 : (para ? 2 : 0)) : para;
-            if (e2 == m) v = para;
-            for (size_t z = q; z < e2; z++) lv[z] = v;
-            q = e2;
-        }
-        int maxl = 0;
-        for (size_t q = 0; q < m; q++) if (at(lv, q) > maxl) maxl = at(lv, q);
-        vector<uint32_t> ord;
-        for (size_t q = 0; q < m; q++) push_back(ord, (uint32_t)q);
-        for (int l = maxl; l >= 1; l--)
-            for (size_t q = 0; q < m;) {
-                if (at(lv, at(ord, q)) < l) { q++; continue; }
-                size_t e2 = q;
-                while (e2 < m && at(lv, at(ord, e2)) >= l) e2++;
-                for (size_t i0 = q, i1 = e2 - 1; i0 < i1; i0++, i1--) { uint32_t tmp = at(ord, i0); ord[i0] = at(ord, i1); ord[i1] = tmp; }
-                q = e2;
-            }
-        double vx = indent;
-        for (size_t q = 0; q < m; q++) { uint32_t kk = at(ord, q); xs[kk] = vx; vx += at(*ps, a + kk).w; }
-        reordered = maxl > 0;
-    }
     /* a top-aligned piece taller than the rest grows the line downward, a bottom-aligned one upward */
     if (top_h > max_above + max_below) max_below = top_h - max_above;
     if (bottom_h > max_above + max_below) max_above = bottom_h - max_below;
+    /* bidirectional text (UAX #9): the line's visual runs, in their order */
+    if (len(*bu) > 0 && end > a)
+        return lay_bidi_finish(LARGS, b, bs, ps, a, end, x0, w, y, justify_ok, indent, open, bu, para, &atoms, &abase, max_above, max_below);
     double line_w = x, free = w - line_w, shift = 0, extra = 0;
     if (bs->align == AL_RIGHT && free > 0) shift = free;
     else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
@@ -1822,7 +2657,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         /* a run: this text node's words and spaces that follow, on this line, in one style */
         size_t r = k + 1;
         double rw = p.w;
-        while (r < end && extra == 0 && !reordered) {
+        while (r < end && extra == 0) {
             lay_piece q = at(*ps, r);
             if ((q.kind != P_WORD && q.kind != P_SPACE) || q.node != p.node) break;
             if (q.size != p.size || q.color != p.color || q.face != p.face || q.font != p.font || q.deco != p.deco) break;
@@ -2234,21 +3069,43 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
        out in the pseudo-element's style (its strut too), the rest as they were */
     lay_style fls, bs1 = bs;
     vector<lay_piece> rest;
-    int has_fl = 0;
+    int has_fl = 0, want_fl = 0;
     if (first == 0 && !(container & LAY_GEN) && container < len(*sx) && (at(*sx, container) & LAY_HAS_OTHER)) {
         int64_t gl = lay_gen_find(gx, container, CSS_PSEUDO_FIRST_LETTER);
         if (gl >= 0) lay_first_letter(LARGS, &ps, (uint32_t)gl, w);
-        if (lay_pseudo_style(LARGS, container, CSS_PSEUDO_FIRST_LINE, &fls)) {
-            has_fl = 1;
-            append_range(rest, data(ps), len(ps));
-            lay_first_line_pieces(LARGS, &ps, &bs, &fls);
-            bs1.lh = fls.lh;
-            bs1.asc = fls.asc;
-            bs1.desc = fls.desc;
-        }
+        want_fl = lay_pseudo_style(LARGS, container, CSS_PSEUDO_FIRST_LINE, &fls);
     }
-    /* bidirectional text to reorder: the paragraph's direction (1), right-to-left words (2) */
-    for (size_t q = 0; q < len(ps) && !(bs.rtl & 2); q++) if (at(ps, q).rtl) { bs.rtl |= 2; bs1.rtl |= 2; }
+    /* bidirectional text (UAX #9), when the paragraph is right to left, a word asks for it
+       (lay_bidi_hot), or an inline element embeds, isolates or overrides right to left: the
+       paragraph's units and levels; its level its direction's, or (unicode-bidi: plaintext,
+       dir=auto) its first strong character's, start and end then aligned by it */
+    vector<lay_bu> bu;
+    int para = bs.rtl, needs = bs.rtl;
+    for (size_t q = 0; q < len(ps) && !needs; q++) {
+        lay_piece p = at(ps, q);
+        if (p.rtl || (p.kind == P_OPEN && LAY_X(p.node).ubidi && LAY_X(p.node).rtl)) needs = 1;
+    }
+    if (needs) {
+        lay_bidi_units(LARGS, &ps, &bu);
+        if (LAY_X(container).ubidi == UB_PLAINTEXT || lay_dir_auto(d, container)) {
+            int fs = lay_bidi_first_strong(&bu, 0, 0);
+            if (fs >= 0 && fs != para) {
+                para = fs;
+                int as = LAY_X(container).astart;
+                if (as) bs.align = (as == 1) == (para == 1) ? AL_RIGHT : AL_LEFT;
+                bs1.align = bs.align;
+            }
+        }
+        lay_bidi_resolve(&bu, para);
+    }
+    if (want_fl) {
+        has_fl = 1;
+        append_range(rest, data(ps), len(ps));
+        lay_first_line_pieces(LARGS, &ps, &bs, &fls);
+        bs1.lh = fls.lh;
+        bs1.asc = fls.asc;
+        bs1.desc = fls.desc;
+    }
     vector<lay_open> open;
     vector<uint32_t> later;           /* floats too wide for the line they are met on: placed below it */
     size_t i = 0, np = len(ps);
@@ -2333,8 +3190,8 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open);
-        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open);
+        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
+        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
         indent = 0;
         i = j;
         /* the floats that waited for the line's end */

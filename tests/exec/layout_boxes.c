@@ -7,7 +7,8 @@
    containers, vertical-align, min and max heights, a percentage height, rowspan,
    hyphenation, bidirectional text, generated content; grid areas and named lines,
    a column flow, items spanning tracks; flex items and containers on their baselines;
-   sticky boxes at rest; an inline element as a containing block. */
+   sticky boxes at rest; an inline element as a containing block; bidirectional text by
+   characters (brackets mirrored, numbers, isolates). */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -59,6 +60,7 @@ static const lcase cases[] = {
     { "a rowspan", "<table><tr><td id=a rowspan=2>a<br>b<br>c</td><td id=b>x</td></tr><tr><td id=e>y</td></tr></table>" },
     { "a word hyphenated", "<p id=a style='width:100px;hyphens:auto' lang=en>incomprehensible</p>" },
     { "right-to-left text", "<p id=a style='direction:rtl;width:200px'>abc \xd7\x90\xd7\x91\xd7\x92 def</p>" },
+    { "right-to-left brackets, mirrored; numbers and isolates", "<p id=a dir=rtl>\xd7\x90\xd7\x91\xd7\x92 (\xd7\x93\xd7\x94\xd7\x95) 12</p><p id=b>ab <span dir=rtl>cd, \xd7\x90\xd7\x91</span> ef</p>" },
     { "generated content and counters", "<style>ol{counter-reset:c}li{counter-increment:c}li::before{content:counter(c) \". \"}</style><ol style='list-style:none'><li id=a>x</li><li id=b>y</li></ol>" },
     { "a grid's named areas and named lines", "<div id=t style='display:grid;grid-template-areas:\"h h\" \"s m\";grid-template-columns:[l] 100px [c] 1fr;width:300px'><div id=a style='grid-area:m'>m</div><div id=b style='grid-area:h'>h</div><div id=e style='grid-column:l/c'>e</div></div>" },
     { "a grid's column flow, dense", "<div id=t style='display:grid;grid-auto-flow:column dense;grid-template-rows:20px 20px;grid-auto-columns:50px'><div id=a>1</div><div id=b style='grid-row:span 2'>2</div><div id=e>3</div></div>" },

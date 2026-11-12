@@ -157,7 +157,12 @@ a word hyphenated (ok, invariants: 0 broken)
     line 8,34 100x18 baseline 48: [text 8+19.5469 'ble']
 right-to-left text (ok, invariants: 0 broken)
   #a block: content 8,16 200x18; margins 16 584 16 0; width declared of 784
-    line 8,16 200x18 baseline 30: [text 185.797+22.2031 'abc'] [text 159.203+22.5938 'גבא'] [text 134.773+20.4297 'def']
+    line 8,16 200x18 baseline 30: [text 134.773+20.4297 'def'] [text 159.203+22.5938 'גבא'] [text 185.797+22.2031 'abc']
+right-to-left brackets, mirrored; numbers and isolates (ok, invariants: 0 broken)
+  #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 713.758+16 '12'] [text 733.758+58.2422 '(והד) גבא']
+  #b block: content 8,50 784x18; margins 16 0 16 0; width fill of 784
+    line 8,50 784x18 baseline 64: [text 8+15.1016 'ab'] [text 27.1016+17.3125 'בא'] [text 48.4141+4 ','] [text 52.4141+15.1016 'cd'] [text 71.5156+12.4297 'ef']
 generated content and counters (ok, invariants: 0 broken)
   #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
     line 48,16 744x18 baseline 30: [generated 48+12 '1.'] [text 64+8 'x']

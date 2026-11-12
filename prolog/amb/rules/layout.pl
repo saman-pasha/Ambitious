@@ -19,18 +19,21 @@ layout_pseudo_box_of(N, P, B) :-
     (   K =:= 1 -> P = before ; P = after ).
 
 %% an inline element's box, which is no box of the tree's: the fragments it makes (its
-%% background's, its generated content's) and its text's, together
+%% background's, its generated content's), its text's, an atomic inline's in it, and those
+%% of the inline elements in it, together
 layout_inline_box(N, X, Y, W, H) :-
     dom_element(N, _), \+ layout_box_of(N, _),
-    findall(r(X0, Y0, X1, Y1),
-            ( (   dom_parent(T, N), layout_text(_, _, T, _, X0, Y0, W0, H0)
-              ;   layout_frag(_, _, K, N, X0, Y0, W0, H0), K \== atomic
-              ),
-              X1 is X0 + W0, Y1 is Y0 + H0 ), Rs),
+    findall(r(X0, Y0, X1, Y1), ( layout_rules_inline_part(N, X0, Y0, W0, H0), X1 is X0 + W0, Y1 is Y0 + H0 ), Rs),
     Rs \== [],
     aggregate_all(min(A), member(r(A, _, _, _), Rs), X), aggregate_all(min(B), member(r(_, B, _, _), Rs), Y),
     aggregate_all(max(C), member(r(_, _, C, _), Rs), XE), aggregate_all(max(D), member(r(_, _, _, D), Rs), YE),
     W is XE - X, H is YE - Y.
+
+layout_rules_inline_part(N, X, Y, W, H) :- layout_frag(_, _, K, N, X, Y, W, H), K \== atomic.
+layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(T, N), layout_text(_, _, T, _, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(C, N), dom_element(C, _), layout_frag(_, _, atomic, C, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :-
+    dom_parent(C, N), dom_element(C, _), \+ layout_box_of(C, _), layout_rules_inline_part(C, X, Y, W, H).
 
 %% a box's border box
 layout_border_box(B, X, Y, W, H) :-

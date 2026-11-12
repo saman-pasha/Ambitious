@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang=en><head><title>Bidirectional text</title>
+<meta charset=utf-8>
+<style>
+/* tests/pages/bidi.html -- bidirectional text (UAX #9), resolved character by character
+   across a paragraph: numbers and neutrals between Hebrew and Latin, a word of both, bracket
+   pairs (N0) and their mirrored glyphs, unicode-bidi's embed, isolate, bidi-override,
+   isolate-override and plaintext, the dir attribute (rtl, ltr, auto) and bdi and bdo, the
+   explicit formatting characters in text (RLE, LRE, RLO, LRO, PDF, RLI, LRI, FSI, PDI), an
+   inline element's padding in a right-to-left run, an inline-block among them, a paragraph
+   that wraps; the boxes held to Chromium's (tests/pages/bidi.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+p { margin: 0 0 6px; width: 500px; }
+.r { direction: rtl; }
+.e { unicode-bidi: embed; direction: rtl; }
+.o { unicode-bidi: bidi-override; direction: rtl; }
+.oi { unicode-bidi: isolate-override; direction: rtl; }
+.i { unicode-bidi: isolate; direction: rtl; }
+.pt { unicode-bidi: plaintext; }
+.bg { background: #fe9; padding: 0 10px; }
+.ib { display: inline-block; width: 30px; height: 10px; background: #9cf; }
+.narrow { width: 130px; }
+</style></head>
+<body>
+<p class=r id=p1><span id=a1>abc</span> <span id=a2>123</span> <span id=a3>אבג</span> <span id=a4>def</span></p>
+<p id=p2><span id=b1>Hello</span>, <span id=b2>עולם</span>! <span id=b3>אבג</span> <span id=b4>12</span> <span id=b5>דהו</span>.</p>
+<p class=r id=p3><span id=c1>Hello</span>, <span id=c2>עולם</span>!</p>
+<p id=p4>x <span id=d1>abcאבגdef</span> y</p>
+<p class=r id=p5><span id=e1>אבג</span> (<span id=e2>abc</span>) <span id=e3>דהו</span></p>
+<p id=p6><span id=f1>abc</span> (<span id=f2>אבג</span>) <span id=f3>def</span> [<span id=f4>דהו</span>] <span id=f5>ghi</span></p>
+<p class=r id=p7><span id=g1>אבג</span> <span id=g2>1,234.50</span> <span id=g3>דהו</span> <span id=g4>-5%</span></p>
+<p id=p8><span id=h1>one</span> <span class=e id=h2><span id=h21>two</span> <span id=h22>three</span></span> <span id=h3>four</span></p>
+<p id=p9><span id=i1>one</span> <span class=o id=i2>two three</span> <span id=i3>four</span></p>
+<p id=p10><span id=j1>one</span> <span class=i id=j2><span id=j21>two</span> <span id=j22>three</span></span> <span id=j3>four</span></p>
+<p id=p11><span id=k1>one</span> <span class=oi id=k2>two three</span> <span id=k3>four</span></p>
+<p class=pt id=p12><span id=l1>שלום</span> <span id=l2>world</span></p>
+<p dir=rtl id=p13><span id=m1>abc</span> <span id=m2>def</span>.</p>
+<p dir=auto id=p14><span id=n1>אבג</span> <span id=n2>abc</span>!</p>
+<p id=p15><span id=o1>abc</span> <span dir=rtl id=o2><span id=o21>def</span> <span id=o22>ghi</span></span> <span id=o3>jkl</span></p>
+<p id=p16><span id=q1>abc</span> <bdi id=q2><span id=q21>אבג</span> <span id=q22>12</span></bdi> <span id=q3>def</span></p>
+<p id=p17><span id=r1>abc</span> <bdo dir=rtl id=r2>def ghi</bdo> <span id=r3>jkl</span></p>
+<p id=p18><span id=s1>abc</span> &#x202B;<span id=s2>def</span> <span id=s3>ghi</span>&#x202C; <span id=s4>jkl</span></p>
+<p id=p19><span id=t1>abc</span> &#x2067;<span id=t2>def</span> <span id=t3>ghi</span>&#x2069; <span id=t4>jkl</span></p>
+<p id=p20><span id=u1>abc</span> &#x202E;<span id=u2>def</span>&#x202C; <span id=u3>ghi</span></p>
+<p class=r id=p21><span id=v1>אבג</span> &#x2068;<span id=v2>abc</span> <span id=v3>דהו</span>&#x2069; <span id=v4>זחט</span></p>
+<p class=r id=p22><span class=bg id=w1>abc</span> <span id=w2>אבג</span> <span class=bg id=w3>דהו</span></p>
+<p class=r id=p23><span id=x1>אבג</span> <span class=ib id=x2></span> <span id=x3>abc</span></p>
+<p class="r narrow" id=p24><span id=y1>אבג</span> <span id=y2>דהו</span> <span id=y3>abc</span> <span id=y4>def</span> <span id=y5>זחט</span></p>
+<p id=p25><span id=z1>abc</span> <span id=z2>&#x202A;&#x05D0;&#x05D1; cd&#x202C;</span> <span id=z3>(1+2)</span> <span id=z4>&#x05D2;&lt;&#x05D3;</span></p>
+</body></html>

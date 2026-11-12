@@ -169,7 +169,12 @@ static const char css_ua_sheet[] =
     "select { background-color: ButtonFace }\n"
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
-    "input::placeholder, textarea::placeholder { color: #757575 }\n";
+    "input::placeholder, textarea::placeholder { color: #757575 }\n"
+    "[dir=ltr] { direction: ltr }\n"
+    "[dir=rtl] { direction: rtl }\n"
+    "bdi, output, [dir] { unicode-bidi: isolate }\n"
+    "bdo, bdo[dir] { unicode-bidi: bidi-override }\n"
+    "textarea[dir=auto], pre[dir=auto] { unicode-bidi: plaintext }\n";
 
 /* ---- reading text ---- */
 
