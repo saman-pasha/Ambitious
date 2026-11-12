@@ -48,7 +48,15 @@
    Glyphs are drawn from font.c's masks at their device size, placed as the page's text is
    (a quarter of a px across, a whole px down); a rotated or skewed run is drawn upright.
 
-   Not done: SVG documents as images (this package's next step); filters, masks, markers, patterns, images inside SVG, foreignObject,
+   THE DOCUMENT (amb_svg_image). An SVG file's bytes are read as XML (elements, attributes,
+   text, CDATA, the five predefined entities and character references; the XML declaration,
+   comments, processing instructions and a DOCTYPE skipped; namespaces by their xmlns
+   attributes, the xlink one's attributes kept in it) into a dom_document of their own,
+   which the cascade styles (its style elements too). Its natural size is its root's width
+   and height (one from the other through its viewBox); it is drawn at that size scaled
+   into its box, or, with none, at the box's size (its viewBox fitted into it).
+
+   Not done: filters, masks, markers, patterns, images inside SVG, foreignObject,
    SMIL animation, textPath, a text's stroke, its rotate, textLength and baseline
    properties, paint-order, vector-effect, a CSS clip-path's basic shapes, and fonts other
    than the built-in faces in SVG text. */
@@ -2677,29 +2685,445 @@ void amb_svg_coverage(const char *scene, size_t n, uint32_t w, uint32_t h, vecto
     for (size_t k = 0; k < (size_t)w * h; k++) push_back(out, (uint8_t)(255 - c.px[3 * k]));
 }
 
-/* ---- SVG documents as images: this package's last step ---- */
+/* ---- SVG documents: their natural size, and their drawing ---- */
+
+/* the first element's start tag of an XML document (a BOM, the XML declaration, comments,
+   processing instructions, a DOCTYPE and white space before it skipped): its name's place,
+   and where its tag ends */
+static int sv_xml_root(const char *p, size_t n, size_t *name, size_t *nl, size_t *tag_end) {
+    size_t i = 0;
+    if (n >= 3 && (uint8_t)p[0] == 0xef && (uint8_t)p[1] == 0xbb && (uint8_t)p[2] == 0xbf) i = 3;
+    while (i < n) {
+        i = sv_skip_ws(p, n, i);
+        if (i >= n || p[i] != '<') return 0;
+        if (i + 4 <= n && memcmp(p + i, "<!--", 4) == 0) {
+            size_t j = i + 4;
+            while (j + 3 <= n && memcmp(p + j, "-->", 3) != 0) j++;
+            if (j + 3 > n) return 0;
+            i = j + 3;
+        } else if (i + 2 <= n && p[i + 1] == '?') {
+            size_t j = i + 2;
+            while (j + 2 <= n && memcmp(p + j, "?>", 2) != 0) j++;
+            if (j + 2 > n) return 0;
+            i = j + 2;
+        } else if (i + 2 <= n && p[i + 1] == '!') {
+            /* a DOCTYPE, its internal subset in brackets */
+            size_t j = i + 2;
+            int depth = 0;
+            while (j < n && (p[j] != '>' || depth > 0)) {
+                if (p[j] == '[') depth++;
+                else if (p[j] == ']') depth--;
+                j++;
+            }
+            if (j >= n) return 0;
+            i = j + 1;
+        } else {
+            size_t j = i + 1;
+            while (j < n && !sv_ws(p[j]) && p[j] != '>' && p[j] != '/') j++;
+            *name = i + 1;
+            *nl = j - i - 1;
+            char q = 0;
+            while (j < n && (q || p[j] != '>')) {
+                if (q && p[j] == q) q = 0;
+                else if (!q && (p[j] == '"' || p[j] == '\'')) q = p[j];
+                j++;
+            }
+            *tag_end = j;
+            return j < n;
+        }
+    }
+    return 0;
+}
+/* an attribute's value in the start tag p[from, to): its place; 0 when it has none */
+static int sv_tag_attr(const char *p, size_t from, size_t to, const char *name, size_t *va, size_t *vl) {
+    size_t nn = strlen(name), i = from;
+    while (i < to) {
+        i = sv_skip_ws(p, to, i);
+        size_t a = i;
+        while (i < to && !sv_ws(p[i]) && p[i] != '=' && p[i] != '>' && p[i] != '/') i++;
+        size_t al = i - a;
+        i = sv_skip_ws(p, to, i);
+        if (i >= to || p[i] != '=') { if (al == 0) i++; continue; }
+        i = sv_skip_ws(p, to, i + 1);
+        if (i >= to || (p[i] != '"' && p[i] != '\'')) return 0;
+        char q = p[i];
+        size_t b = i + 1, e = b;
+        while (e < to && p[e] != q) e++;
+        if (al == nn && memcmp(p + a, name, nn) == 0) { *va = b; *vl = e - b; return 1; }
+        i = e + 1;
+    }
+    return 0;
+}
 
 int amb_svg_size(const uint8_t *bytes, size_t n, double *w, double *h, double *ratio) {
-    (void)bytes;
-    (void)n;
     *w = *h = *ratio = 0;
-    return 0;
+    vector<char> t;
+    append_range(t, (const char *)bytes, n);
+    size_t name, nl, end;
+    if (!sv_xml_root(data(t), len(t), &name, &nl, &end)) return 0;
+    int prefixed = nl == 7 && memcmp(data(t) + name, "svg:svg", 7) == 0;
+    if (!(nl == 3 && memcmp(data(t) + name, "svg", 3) == 0) && !prefixed) return 0;
+    size_t va, vl;
+    /* in SVG's namespace, as an SVG image's root must be */
+    if (!sv_tag_attr(data(t), name + nl, end, prefixed ? "xmlns:svg" : "xmlns", &va, &vl) || vl != 26 ||
+        memcmp(data(t) + va, "http://www.w3.org/2000/svg", 26) != 0) return 0;
+    double nw = -1, nh = -1, vb[4];
+    int ok;
+    if (sv_tag_attr(data(t), name + nl, end, "width", &va, &vl)) {
+        double v = sv_length(data(t) + va, vl, -1, 16, &ok);
+        if (ok && v >= 0 && !memchr(data(t) + va, '%', vl)) nw = v;
+    }
+    if (sv_tag_attr(data(t), name + nl, end, "height", &va, &vl)) {
+        double v = sv_length(data(t) + va, vl, -1, 16, &ok);
+        if (ok && v >= 0 && !memchr(data(t) + va, '%', vl)) nh = v;
+    }
+    if (sv_tag_attr(data(t), name + nl, end, "viewBox", &va, &vl)) {
+        size_t i = sv_skip_ws(data(t) + va, vl, 0);
+        int got = 1;
+        for (int k = 0; k < 4 && got; k++) {
+            if (k) i = sv_skip_sep(data(t) + va, vl, i);
+            got = sv_number(data(t) + va, vl, &i, &vb[k]);
+        }
+        if (got && vb[2] > 0 && vb[3] > 0) *ratio = vb[2] / vb[3];
+    }
+    if (*ratio <= 0 && nw > 0 && nh > 0) *ratio = nw / nh;
+    if (nw >= 0 && nh < 0 && *ratio > 0) nh = nw / *ratio;
+    if (nh >= 0 && nw < 0 && *ratio > 0) nw = nh * *ratio;
+    *w = nw > 0 ? nw : 0;
+    *h = nh > 0 ? nh : 0;
+    return 1;
 }
+
 int amb_svg_size_of(const net_loader *nt, uint32_t r, double *w, double *h, double *ratio) {
-    (void)nt;
-    (void)r;
     *w = *h = *ratio = 0;
+    if (!nt || r == 0 || r >= nt->resource_len || nt->resource[r].outcome != NET_OUTCOME_OK) return 0;
+    amb_span b = nt->resource[r].body;
+    vector<uint8_t> bytes;
+    append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
+    return amb_svg_size(data(bytes), len(bytes), w, h, ratio);
+}
+
+/* ---- SVG documents read: a small XML parser, for well-formed files ---- */
+
+static const char sv_ns_svg[] = "http://www.w3.org/2000/svg";
+static const char sv_ns_xlink[] = "http://www.w3.org/1999/xlink";
+
+static void sv_utf8(vector<char> *out, uint32_t cp) {
+    if (cp < 0x80) push_back(out, (char)cp);
+    else if (cp < 0x800) { push_back(out, (char)(0xc0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3f))); }
+    else if (cp < 0x10000) {
+        push_back(out, (char)(0xe0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3f)));
+        push_back(out, (char)(0x80 | (cp & 0x3f)));
+    } else {
+        push_back(out, (char)(0xf0 | cp >> 18));
+        push_back(out, (char)(0x80 | (cp >> 12 & 0x3f)));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3f)));
+        push_back(out, (char)(0x80 | (cp & 0x3f)));
+    }
+}
+/* text from s[a, b), its five predefined entities and character references made what they
+   name, appended to out; 0 on a reference it does not know */
+static int sv_xml_text(const char *s, size_t a, size_t b, vector<char> *out) {
+    size_t i = a;
+    while (i < b) {
+        if (s[i] != '&') { push_back(out, s[i]); i++; continue; }
+        size_t e = i + 1;
+        while (e < b && s[e] != ';' && e - i < 12) e++;
+        if (e >= b || s[e] != ';') return 0;
+        size_t r = i + 1, rl = e - i - 1;
+        uint32_t cp = 0;
+        if (rl == 2 && memcmp(s + r, "lt", 2) == 0) cp = '<';
+        else if (rl == 2 && memcmp(s + r, "gt", 2) == 0) cp = '>';
+        else if (rl == 3 && memcmp(s + r, "amp", 3) == 0) cp = '&';
+        else if (rl == 4 && memcmp(s + r, "quot", 4) == 0) cp = '"';
+        else if (rl == 4 && memcmp(s + r, "apos", 4) == 0) cp = '\'';
+        else if (rl >= 2 && s[r] == '#') {
+            int hex = s[r + 1] == 'x';
+            size_t q = r + 1 + (size_t)hex;
+            if (q >= e) return 0;
+            for (; q < e; q++) {
+                char c = s[q];
+                int dg = c >= '0' && c <= '9' ? c - '0' : hex && c >= 'a' && c <= 'f' ? c - 'a' + 10 : hex && c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+                if (dg < 0 || cp > 0x10ffff) return 0;
+                cp = cp * (hex ? 16 : 10) + (uint32_t)dg;
+            }
+            if (cp == 0 || cp > 0x10ffff) return 0;
+        } else return 0;
+        sv_utf8(out, cp);
+        i = e + 1;
+    }
+    return 1;
+}
+
+/* a namespace bound: its prefix's place in the file (none for the default), its URI's in
+   uris, and the depth of the element that bound it */
+typedef struct sv_bind { size_t pa, pl, ua, ul; int depth; } sv_bind;
+
+/* the URI a prefix (p[a, a + l), none for the default) is bound to at this depth: its place in uris */
+static int sv_ns_of(const char *p, size_t a, size_t l, const vector<sv_bind> *binds, size_t *ua, size_t *ul) {
+    for (size_t k = len(*binds); k > 0; k--) {
+        sv_bind b = at(*binds, k - 1);
+        if (b.pl == l && (l == 0 || memcmp(p + b.pa, p + a, l) == 0)) { *ua = b.ua; *ul = b.ul; return 1; }
+    }
     return 0;
 }
+
+/* an SVG document's bytes read as XML into d: elements of SVG's namespace (another's and
+   theirs left out), their attributes (an XLink one's under its prefix xlink), text and
+   CDATA; the XML declaration, processing instructions, comments and a DOCTYPE skipped.
+   The root svg element's index, or 0 when the bytes are not well formed or it is none */
+static uint32_t sv_xml_parse(const char *p, size_t n, dom_document *d, vector<char> *uris) {
+    vector<sv_bind> binds;
+    vector<uint32_t> open;          /* the elements open: their node's index, 0 for one left out */
+    vector<char> txt, nm, val;
+    uint32_t root = 0;
+    int skip = 0;                   /* within an element left out: how deep */
+    size_t i = 0;
+    if (n >= 3 && (uint8_t)p[0] == 0xef && (uint8_t)p[1] == 0xbb && (uint8_t)p[2] == 0xbf) i = 3;
+    dom_node_h doc = dom_root(d);
+    while (i < n) {
+        if (p[i] != '<') {
+            size_t e = i;
+            while (e < n && p[e] != '<') e++;
+            if (len(open) && !skip && at(open, len(open) - 1)) {
+                clear(txt);
+                if (!sv_xml_text(p, i, e, &txt)) return 0;
+                dom_node_h t = dom_create_text(d, data(txt), len(txt));
+                dom_append_child(d, node_handle(d, at(open, len(open) - 1)), t);
+            }
+            i = e;
+            continue;
+        }
+        if (i + 4 <= n && memcmp(p + i, "<!--", 4) == 0) {
+            size_t e = i + 4;
+            while (e + 3 <= n && memcmp(p + e, "-->", 3) != 0) e++;
+            if (e + 3 > n) return 0;
+            i = e + 3;
+            continue;
+        }
+        if (i + 9 <= n && memcmp(p + i, "<![CDATA[", 9) == 0) {
+            size_t e = i + 9;
+            while (e + 3 <= n && memcmp(p + e, "]]>", 3) != 0) e++;
+            if (e + 3 > n) return 0;
+            if (len(open) && !skip && at(open, len(open) - 1)) {
+                dom_node_h t = dom_create_text(d, p + i + 9, e - i - 9);
+                dom_append_child(d, node_handle(d, at(open, len(open) - 1)), t);
+            }
+            i = e + 3;
+            continue;
+        }
+        if (i + 2 <= n && (p[i + 1] == '?' || p[i + 1] == '!')) {
+            /* the declaration, a processing instruction, a DOCTYPE (its subset in brackets) */
+            size_t e = i + 2;
+            int depth = 0;
+            char end = p[i + 1] == '?' ? '?' : 0;
+            while (e < n && !(end ? (p[e] == '?' && e + 1 < n && p[e + 1] == '>') : (p[e] == '>' && depth == 0))) {
+                if (!end && p[e] == '[') depth++;
+                else if (!end && p[e] == ']') depth--;
+                e++;
+            }
+            if (e >= n) return 0;
+            i = e + (end ? 2 : 1);
+            continue;
+        }
+        if (i + 2 <= n && p[i + 1] == '/') {
+            size_t e = i + 2;
+            while (e < n && p[e] != '>') e++;
+            if (e >= n || !len(open)) return 0;
+            size_t depth = len(open);
+            while (len(binds) && at(binds, len(binds) - 1).depth >= (int)depth) resize(binds, len(binds) - 1);
+            resize(open, len(open) - 1);
+            if (skip) skip--;
+            i = e + 1;
+            continue;
+        }
+        /* a start tag: its name, its attributes, whether it closes itself */
+        size_t na = i + 1, ne = na;
+        while (ne < n && !sv_ws(p[ne]) && p[ne] != '>' && p[ne] != '/') ne++;
+        if (ne == na || ne >= n || len(open) > 256) return 0;
+        size_t te = ne;
+        char q = 0;
+        while (te < n && (q || p[te] != '>')) {
+            if (q && p[te] == q) q = 0;
+            else if (!q && (p[te] == '"' || p[te] == '\'')) q = p[te];
+            te++;
+        }
+        if (te >= n) return 0;
+        int closes = p[te - 1] == '/';
+        size_t ae = closes ? te - 1 : te;
+        int depth = (int)len(open) + 1;
+        /* its namespace declarations first */
+        size_t k = ne;
+        while (k < ae) {
+            k = sv_skip_ws(p, ae, k);
+            size_t a0 = k;
+            while (k < ae && !sv_ws(p[k]) && p[k] != '=') k++;
+            size_t al = k - a0;
+            k = sv_skip_ws(p, ae, k);
+            if (k >= ae || p[k] != '=') { if (al == 0) break; return 0; }
+            k = sv_skip_ws(p, ae, k + 1);
+            if (k >= ae || (p[k] != '"' && p[k] != '\'')) return 0;
+            char qq = p[k];
+            size_t v0 = k + 1, v1 = v0;
+            while (v1 < ae && p[v1] != qq) v1++;
+            if (v1 >= ae) return 0;
+            if ((al == 5 && memcmp(p + a0, "xmlns", 5) == 0) || (al > 6 && memcmp(p + a0, "xmlns:", 6) == 0)) {
+                sv_bind b;
+                b.pa = al == 5 ? 0 : a0 + 6;
+                b.pl = al == 5 ? 0 : al - 6;
+                b.ua = len(*uris);
+                clear(val);
+                if (!sv_xml_text(p, v0, v1, &val)) return 0;
+                append_range(uris, data(val), len(val));
+                b.ul = len(val);
+                b.depth = depth;
+                push_back(binds, b);
+            }
+            k = v1 + 1;
+        }
+        /* the element's namespace, from its prefix */
+        size_t colon = na;
+        while (colon < ne && p[colon] != ':') colon++;
+        size_t ua = 0, ul = 0, la = colon < ne ? colon + 1 : na;
+        int bound = sv_ns_of(p, na, colon < ne ? colon - na : 0, &binds, &ua, &ul);
+        int svg = bound && ul == strlen(sv_ns_svg) && memcmp(data(*uris) + ua, sv_ns_svg, ul) == 0;
+        uint32_t el = 0;
+        if (!skip && svg && (len(open) == 0 || at(open, len(open) - 1))) {
+            dom_node_h h = dom_create_element_ns(d, DOM_NAMESPACE_SVG, p + la, ne - la);
+            el = h.index;
+            if (len(open) == 0) {
+                if (root) return 0;
+                root = el;
+                dom_append_child(d, doc, h);
+            } else dom_append_child(d, node_handle(d, at(open, len(open) - 1)), h);
+            /* its other attributes */
+            k = ne;
+            while (k < ae) {
+                k = sv_skip_ws(p, ae, k);
+                size_t a0 = k;
+                while (k < ae && !sv_ws(p[k]) && p[k] != '=') k++;
+                size_t al = k - a0;
+                k = sv_skip_ws(p, ae, k);
+                if (k >= ae || p[k] != '=') break;
+                k = sv_skip_ws(p, ae, k + 1);
+                char qq = p[k];
+                size_t v0 = k + 1, v1 = v0;
+                while (v1 < ae && p[v1] != qq) v1++;
+                k = v1 + 1;
+                if ((al == 5 && memcmp(p + a0, "xmlns", 5) == 0) || (al > 6 && memcmp(p + a0, "xmlns:", 6) == 0)) continue;
+                clear(val);
+                if (!sv_xml_text(p, v0, v1, &val)) return 0;
+                size_t ac = a0;
+                while (ac < a0 + al && p[ac] != ':') ac++;
+                if (ac < a0 + al) {
+                    size_t xa, xl;
+                    int xb = sv_ns_of(p, a0, ac - a0, &binds, &xa, &xl);
+                    if (xb && xl == strlen(sv_ns_xlink) && memcmp(data(*uris) + xa, sv_ns_xlink, xl) == 0) {
+                        clear(nm);
+                        append_range(nm, "xlink:", 6);
+                        append_range(nm, p + ac + 1, a0 + al - ac - 1);
+                        dom_set_attribute_ns(d, h, DOM_ATTR_NAMESPACE_XLINK, data(nm), len(nm), data(val), len(val));
+                        continue;
+                    }
+                }
+                dom_set_attribute(d, h, p + a0, al, data(val), len(val));
+            }
+        } else if (len(open) == 0) return 0;
+        if (!el) skip++;
+        if (closes) {
+            while (len(binds) && at(binds, len(binds) - 1).depth >= depth) resize(binds, len(binds) - 1);
+            if (!el) skip--;
+        } else push_back(open, el);
+        i = te + 1;
+    }
+    return len(open) == 0 ? root : 0;
+}
+
+/* an SVG document's bytes made a scene for a viewport vw x vh: read, cascaded (its own
+   style elements), walked; 0 when they are none */
+static int sv_doc_scene(const uint8_t *bytes, size_t n, double vw, double vh, vector<char> *scene) {
+    vector<char> t, uris;
+    append_range(t, (const char *)bytes, n);
+    dom_document d;
+    dom_init(&d, 1);
+    uint32_t root = sv_xml_parse(data(t), len(t), &d, &uris);
+    if (!root) return 0;
+    css_style st;
+    css_init(&st, 1);
+    css_cascade(&st, &d, 0);
+    vector<uint32_t> firsts;
+    resize(firsts, d.node_len);
+    for (uint32_t e = 1; e < st.estyle_len; e++) {
+        uint32_t x = st.estyle[e].node.index;
+        if (x < d.node_len && !at(firsts, x)) firsts[x] = st.estyle[e].first;
+    }
+    amb_fonts f = {0};
+    defer(f) { AMB_FONTS_DROP(f); }
+    amb_fonts_load(&f);
+    amb_svg_scene(&d, &st, &firsts, &f, root, vw, vh, scene);
+    return 1;
+}
+
+/* the viewport an SVG image is drawn in, w x h px for its box (z px a CSS px): its natural
+   size, or the box's */
+static int sv_image_viewport(const uint8_t *p, size_t n, double w, double h, double z, double *vw, double *vh) {
+    double nw, nh, r;
+    if (w <= 0 || h <= 0 || !amb_svg_size(p, n, &nw, &nh, &r)) return 0;
+    if (nw > 0 && nh > 0) { *vw = nw; *vh = nh; }
+    else { *vw = w / z; *vh = h / z; }
+    return 1;
+}
+
 int amb_svg_image(amb_canvas *c, const uint8_t *p, size_t n, double x, double y, double w, double h) {
-    (void)c; (void)p; (void)n; (void)x; (void)y; (void)w; (void)h;
-    return 0;
+    double vw, vh;
+    if (!sv_image_viewport(p, n, w, h, c->zoom > 0 ? c->zoom : 1, &vw, &vh)) return 0;
+    vector<char> scene;
+    if (!sv_doc_scene(p, n, vw, vh, &scene)) return 0;
+    amb_svg_draw(c, data(scene), len(scene), x, y, w / vw, h / vh);
+    return 1;
 }
+
 int amb_svg_image_of(amb_canvas *c, const net_loader *nt, uint32_t el, double x, double y, double w, double h) {
-    (void)c; (void)nt; (void)el; (void)x; (void)y; (void)w; (void)h;
+    if (!nt) return 0;
+    for (uint32_t r = 1; r < nt->resource_len; r++) {
+        if (!nt->resource[r].live || nt->resource[r].elem.index != el || nt->resource[r].kind != NET_KIND_IMAGE) continue;
+        if (nt->resource[r].outcome != NET_OUTCOME_OK) return 0;
+        amb_span b = nt->resource[r].body;
+        vector<uint8_t> bytes;
+        append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
+        return amb_svg_image(c, data(bytes), len(bytes), x, y, w, h);
+    }
     return 0;
 }
+
 int amb_svg_raster_of(const net_loader *nt, uint32_t r, uint32_t w, uint32_t h, vector<uint8_t> *rgba) {
-    (void)nt; (void)r; (void)w; (void)h; (void)rgba;
-    return 0;
+    if (!nt || r == 0 || r >= nt->resource_len || nt->resource[r].outcome != NET_OUTCOME_OK || w == 0 || h == 0 ||
+        (uint64_t)w * h > AMB_IMAGE_MAX_PIXELS) return 0;
+    amb_span b = nt->resource[r].body;
+    vector<uint8_t> bytes;
+    append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
+    double vw, vh;
+    if (!sv_image_viewport(data(bytes), len(bytes), w, h, 1, &vw, &vh)) return 0;
+    vector<char> scene;
+    if (!sv_doc_scene(data(bytes), len(bytes), vw, vh, &scene)) return 0;
+    clear(*rgba);
+    resize(rgba, (size_t)w * h * 4);
+    size_t i;
+    double sw, sh;
+    int clip;
+    if (!sv_head(data(scene), len(scene), &sw, &sh, &clip, &i)) return 1;
+    vector<float> layv;
+    sv_render(data(scene), len(scene), i, (int)w, (int)h, sv_make(w / vw, 0, 0, h / vh, 0, 0), &layv);
+    /* unpremultiplied, as an image's pixels are */
+    for (size_t p = 0; p < (size_t)w * h; p++) {
+        float a = at(layv, 4 * p + 3);
+        if (a <= 0) continue;
+        for (int k = 0; k < 3; k++) {
+            double v = at(layv, 4 * p + (size_t)k) / a * 255;
+            (*rgba)[4 * p + (size_t)k] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+        }
+        (*rgba)[4 * p + 3] = (uint8_t)(a > 1 ? 255 : a * 255 + 0.5);
+    }
+    return 1;
 }

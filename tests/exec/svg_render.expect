@@ -94,6 +94,17 @@ a square clipped by a disc
 a linear gradient, black to transparent
   9876543210
   9876543210
+-- natural sizes
+1 100 x 50, ratio 2
+1 0 x 0, ratio 2
+1 288 x 144, ratio 2
+1 60 x 30, ratio 2
+1 0 x 40, ratio 0
+1 0 x 0, ratio 0
+1 7 x 9, ratio 0.7778
+0 0 x 0, ratio 0
+0 0 x 0, ratio 0
+0 0 x 0, ratio 0
 -- scenes
 page 0: box 8,8 60x40
 v 60 40 1
@@ -114,3 +125,7 @@ page 4: box 58.6484,16 40x20
 uses ten a level, eight deep: 44996 lines, ink 255
 uses of themselves, numbers past floats: 4 lines, ink 637500
 300 groups clipped by a clip of itself: 196 lines, ink 0
+image 0: not drawn, pixel (2,2) ffffff, (7,7) ffffff
+image 1: not drawn, pixel (2,2) ffffff, (7,7) ffffff
+image 2: drawn, pixel (2,2) ffffff, (7,7) 123456
+image 3: drawn, pixel (2,2) ffffff, (7,7) ffffff

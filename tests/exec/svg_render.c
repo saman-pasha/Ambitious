@@ -2,9 +2,10 @@
    as SVG 2 reads it (relative and implicit commands, arcs, compact numbers and flags, an
    error ending it); scenes' coverage drawn into small canvases (a rectangle at fractions
    of a pixel, the fill rules, strokes' caps and joins, dashes, a group's opacity, a clip);
-   pages' inline svg elements laid out, their boxes and the scenes layout made of them
-   (presentation attributes, sheets, use, gradients); and hostile documents, which must
-   draw in bounded time and memory. */
+   SVG documents' natural sizes; pages' inline svg elements laid out, their boxes and the
+   scenes layout made of them (presentation attributes, sheets, use, gradients); hostile
+   documents, which must draw in bounded time and memory; and SVG images that are not
+   well formed, which draw nothing. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -16,6 +17,7 @@ amb_interface(net);
 amb_interface(css);
 amb_interface(layout);
 #include "../../src/paint/svg.h"
+#include "../../src/paint/image.h"
 
 static const char *const paths[] = {
     "M10 20 L30 40",
@@ -57,6 +59,19 @@ static void show_scene(const char *what, const char *scene, uint32_t w, uint32_t
         printf("\n");
     }
 }
+
+static const char *const docs[] = {
+    "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'/>",
+    "<?xml version='1.0'?>\n<!-- a comment -->\n<!DOCTYPE svg [ <!ENTITY e 'x'> ]>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox='0 0 40 20'></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' width='3in' viewBox='0,0,40,20'></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' height='30' viewBox='0 0 40 20'></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' width='50%' height='40'></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+    "<svg:svg xmlns:svg='http://www.w3.org/2000/svg' width='7' height='9'/>",
+    "<svg width='10' height='10'/>",
+    "<html><svg width='10' height='10'/></html>",
+    "not xml at all",
+};
 
 static const char *const pages[] = {
     "<svg id=s width=60 height=40><rect x=5 y=5 width=20 height=10 fill=red stroke=blue stroke-width=2 /></svg>",
@@ -101,6 +116,14 @@ static void hostile(vector<char> *out, int which) {
     append_range(out, "</svg>", 6);
 }
 
+static const char *const bad_images[] = {
+    "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5' fill='&nosuch;'/></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><g xmlns='http://example.com/other'><rect width='5' height='5'/></g>"
+    "<rect x='5' y='5' width='5' height='5' fill='&#x23;123456'/></svg>",
+    "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><![CDATA[ <rect/> ]]><!-- <rect/> --><?pi x?></svg>",
+};
+
 static uint32_t find_id(const dom_document *d, const char *id) {
     uint32_t a = names_find(d, "id", 2);
     size_t n = strlen(id);
@@ -143,6 +166,13 @@ int main(void) {
                "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 12 0 L 12 12 L 0 12 Z\ne\n", 12, 12);
     show_scene("a linear gradient, black to transparent",
                "v 10 2 1\nl 1 10 0 0 2 0 0 0 0 1 0 0 2 0 000000ff 1 00000000\np 1 0 0 1 0 0 u 1 1 0 n 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 2 L 0 2 Z\n", 10, 2);
+
+    printf("-- natural sizes\n");
+    for (size_t i = 0; i < sizeof docs / sizeof docs[0]; i++) {
+        double w, h, r;
+        int ok = amb_svg_size((const uint8_t *)docs[i], strlen(docs[i]), &w, &h, &r);
+        printf("%d %g x %g, ratio %.4g\n", ok, w, h, r);
+    }
 
     printf("-- scenes\n");
     for (size_t i = 0; i < sizeof pages / sizeof pages[0]; i++) {
@@ -195,6 +225,20 @@ int main(void) {
             for (size_t q = 0; q < len(px); q++) ink += at(px, q);
             printf("%s: %zu lines, ink %zu\n", what[k], lines, ink);
         }
+    }
+    for (size_t i = 0; i < sizeof bad_images / sizeof bad_images[0]; i++) {
+        amb_canvas c = {0};
+        defer(c) { AMB_CANVAS_DROP(c); }
+        c.w = 10;
+        c.h = 10;
+        c.cx1 = 10;
+        c.cy1 = 10;
+        c.zoom = 1;
+        resize(c.px, 300);
+        for (size_t q = 0; q < 300; q++) c.px[q] = 255;
+        int drawn = amb_svg_image(&c, (const uint8_t *)bad_images[i], strlen(bad_images[i]), 0, 0, 10, 10);
+        printf("image %zu: %s, pixel (2,2) %02x%02x%02x, (7,7) %02x%02x%02x\n", i, drawn ? "drawn" : "not drawn", c.px[36], c.px[37], c.px[38],
+               c.px[231], c.px[232], c.px[233]);
     }
     return 0;
 }

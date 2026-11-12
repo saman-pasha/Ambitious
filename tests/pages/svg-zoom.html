@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG zoomed: drawn at 1.5 device px a CSS px</title>
+<style>
+body { margin: 0; background: #fff }
+svg, img, div { position: absolute }
+#bg { left: 5px; top: 229px; width: 100px; height: 60px; background: url(svg-tile.svg) }
+</style>
+</head>
+<body>
+<svg id="z-shapes" style="left:5px;top:5px" width="100" height="100">
+  <rect x="10.5" y="10" width="45" height="30" rx="6" fill="#3070d0" stroke="#102040" stroke-width="3"/>
+  <circle cx="70" cy="65" r="25" fill="none" stroke="#c03030" stroke-width="5" stroke-dasharray="12 5"/>
+  <path d="M10 90 L 30 55 L 45 90" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
+</svg>
+<svg id="z-paint" style="left:117px;top:5px" width="100" height="100">
+  <linearGradient id="zg" x2="0" y2="1"><stop offset="0" stop-color="#f0d000"/><stop offset="1" stop-color="#d03000"/></linearGradient>
+  <clipPath id="zc"><circle cx="50" cy="50" r="42"/></clipPath>
+  <rect x="0" y="0" width="100" height="100" fill="url(#zg)" clip-path="url(#zc)"/>
+  <rect x="25" y="25" width="50" height="50" fill="#204080" opacity="0.5" transform="rotate(15 50 50)"/>
+</svg>
+<svg id="z-viewbox" style="left:229px;top:5px" width="100" height="60" viewBox="0 0 50 50" preserveAspectRatio="xMidYMid slice">
+  <rect width="50" height="50" fill="#e0f0e0"/>
+  <circle cx="25" cy="25" r="20" fill="#30a060"/>
+  <use href="#z-dot" x="5" y="5"/>
+  <defs><circle id="z-dot" r="4" fill="#000"/></defs>
+</svg>
+<img id="z-img" src="svg-badge.svg" style="left:5px;top:117px">
+<svg id="text-z" style="left:141px;top:117px" width="190" height="60">
+  <text x="10" y="38" font-size="22" fill="#203060">Zoomed text</text>
+</svg>
+<div id="bg"></div>
+</body>
+</html>

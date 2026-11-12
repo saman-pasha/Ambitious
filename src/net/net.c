@@ -44,7 +44,7 @@
    its header's divided by its density. An img in a <picture> first takes the
    first <source> before it, among the picture's children, whose srcset has a
    candidate, whose type (its MIME type's essence, in any case; empty for any) is
-   one the painter decodes (PNG, GIF, JPEG, WebP: not AVIF, SVG or BMP, which
+   one the painter draws (PNG, GIF, JPEG, WebP, SVG: not AVIF or BMP, which
    Chromium takes) and whose media query list holds (all and screen, not print;
    and, or, not, only; width, height, orientation and resolution, ranges, the
    colour scheme (light), a mouse's hover and fine pointer, a feature's name
@@ -589,11 +589,17 @@ static const char *net_type_of_name(const char *path) {
 }
 
 /* an image's size from its header (PNG, GIF, JPEG, WebP): the painter's reading, which
-   turns a JPEG by its EXIF orientation, so that layout gives it the box it is drawn in */
+   turns a JPEG by its EXIF orientation, so that layout gives it the box it is drawn in; an
+   SVG document's natural size from its root svg element (src/paint/svg.c), none when it
+   has a ratio alone or nothing */
 static void net_image_size_of(const uint8_t *b, size_t n, uint32_t *w, uint32_t *h) {
     *w = 0;
     *h = 0;
-    if (!amb_image_size(b, n, w, h)) { *w = 0; *h = 0; }
+    if (amb_image_size(b, n, w, h)) return;
+    *w = 0;
+    *h = 0;
+    double sw = 0, sh = 0, sr = 0;
+    if (amb_svg_size(b, n, &sw, &sh, &sr) && sw > 0 && sh > 0) { *w = (uint32_t)(sw + 0.5); *h = (uint32_t)(sh + 0.5); }
 }
 static void net_image_size(const vector<char> *b, uint32_t *w, uint32_t *h) {
     if (len(*b) == 0) { *w = *h = 0; return; }
@@ -2698,10 +2704,10 @@ static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset,
 }
 
 /* the image types the painter decodes, by their MIME types and the names Chromium also
-   takes for them: PNG (an APNG's first frame), GIF, JPEG, WebP. AVIF, SVG and BMP,
-   which Chromium decodes, are not among them */
+   takes for them: PNG (an APNG's first frame), GIF, JPEG, WebP, and SVG, which it draws
+   (src/paint/svg.c). AVIF and BMP, which Chromium decodes, are not among them */
 static const char *const net_image_types[] = { "image/png", "image/x-png", "image/apng", "image/gif", "image/jpeg", "image/jpg",
-                                               "image/pjpeg", "image/webp" };
+                                               "image/pjpeg", "image/webp", "image/svg+xml" };
 
 /* a <source>'s type, as Blink reads one (its MIME type's essence: white space and
    parameters aside, in any case), one the painter decodes; an empty type is any */

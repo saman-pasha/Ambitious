@@ -8,9 +8,9 @@
    borders and paddings as space at its two ends, and its background drawn
    behind its part of each line. An inline element that holds a block is
    flattened into its container. inline-block, img, svg, input, button, textarea and
-   select make atomic inline boxes; an svg made a block (display: block, a float, a
-   positioned box) is still a replaced box, sized as an inline one, its content none of
-   the flow's. An svg is sized as Chromium sizes one: its width and height
+   select make atomic inline boxes; an img or an svg made a block (display: block, a
+   float, a positioned box) is still a replaced box, sized as an inline one, its content
+   none of the flow's. An svg is sized as Chromium sizes one: its width and height
    attributes its CSS width and height (the cascade's presentation attributes), its
    natural size their absolute lengths, its ratio its viewBox's; its subtree is made the
    box's scene (src/paint/svg.h) once the box's size is known. A container with both block-level and
@@ -929,7 +929,8 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     *h = -1;
     if (lay_is_svg(d, el)) { lay_svg_size(LARGS, el, s, cw, w, h); return; }
     if (lay_replaced(d, el)) {
-        double dw = 0, dh = 0;
+        double dw = 0, dh = 0, ratio = 0;
+        int svg = 0;
         if (lay_is_named(d, el, "img") && nt) {
             /* its size, as the loader read it from the image's header; one dimension
                declared, the other kept in proportion */
@@ -937,10 +938,26 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                 if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE) {
                     dw = nt->resource[r].width;
                     dh = nt->resource[r].height;
+                    double sw, sh;
+                    svg = (dw <= 0 || dh <= 0) && nt->resource[r].outcome == NET_OUTCOME_OK && amb_svg_size_of(nt, r, &sw, &sh, &ratio);
                 }
             if (dw > 0 && dh > 0) {
                 if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) { *w = lay_res(st, s->width, cw); *h = *w * dh / dw; return; }
                 if (s->width.unit == LAY_AUTO && s->height.unit != LAY_AUTO) { *h = s->height.v; *w = *h * dw / dh; return; }
+            } else if (svg) {
+                /* an SVG image with no natural size: its ratio alone (a viewBox's) sizes it as
+                   an svg element's, else the default 300 x 150 */
+                int wa = s->width.unit == LAY_AUTO, ha = s->height.unit == LAY_AUTO;
+                *w = wa ? 300 : lay_res(st, s->width, cw);
+                *h = ha ? 150 : s->height.v;
+                if (ratio > 0 && wa && ha) {
+                    double edges = lay_res(st, s->m[1], cw) + lay_res(st, s->m[3], cw) + s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) +
+                                   lay_res(st, s->p[3], cw);
+                    *w = cw - edges > 0 ? cw - edges : 0;
+                    *h = *w / ratio;
+                } else if (ratio > 0 && wa) *w = *h * ratio;
+                else if (ratio > 0 && ha) *h = *w / ratio;
+                return;
             }
         }
         if (lay_is_named(d, el, "input")) {
@@ -3987,10 +4004,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     int lx = at(*xc, si).lx;
     layout_box_kind kind = s.display == D_LIST_ITEM ? LAYOUT_BOX_KIND_LIST_ITEM : s.display == D_TABLE ? LAYOUT_BOX_KIND_TABLE :
                            lx == LX_FLEX ? LAYOUT_BOX_KIND_FLEX : lx == LX_GRID ? LAYOUT_BOX_KIND_GRID : LAYOUT_BOX_KIND_BLOCK;
-    /* an svg made a block (display: block, a float, a positioned box): a replaced box
-       still, its width an inline one's unless declared or given, its content none of the
-       flow's */
-    int repl = lay_is_svg(d, el);
+    /* an svg or an img made a block (display: block, a float, a positioned box): a replaced
+       box still, its width an inline one's unless declared or given, its content none of
+       the flow's */
+    int repl = lay_is_svg(d, el) || lay_is_named(d, el, "img");
     if (repl) {
         kind = LAYOUT_BOX_KIND_REPLACED;
         if (s.width.unit == LAY_AUTO) s.width.unit = LAY_FITC;

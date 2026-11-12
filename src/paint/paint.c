@@ -1580,10 +1580,23 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         int is_url = ll > 4 && memcmp(li, "url(", 4) == 0;
         size_t off = 0;
         uint32_t iw = 0, ih = 0;
-        if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) continue;
+        /* an SVG image (src/paint/svg.h): its natural size its tile's (a ratio alone as
+           contain has it, neither the area), drawn at its tile's size */
+        double snw = 0, snh = 0, sr = 0;
+        int svg = is_url && t->box[b].bg_res.index && amb_svg_size_of(nt, t->box[b].bg_res.index, &snw, &snh, &sr);
+        if (svg) {
+            double z = c->zoom > 0 ? c->zoom : 1, cw = aw, ch = ah;
+            if (snw > 0 && snh > 0) { cw = snw * z; ch = snh * z; }
+            else if (sr > 0 && ah > 0) { if (aw / ah > sr) cw = ah * sr; else ch = aw / sr; }
+            iw = (uint32_t)floor(cw + 0.5);
+            ih = (uint32_t)floor(ch + 0.5);
+        } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) continue;
         double tw, th, ox, oy;
         pt_tile_size(data(siz) + sa, sl, iw, ih, aw, ah, &tw, &th);
         if (tw < 0.5 || th < 0.5) continue;
+        vector<uint8_t> spx;
+        uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);
+        if (svg && (spw < 1 || sph < 1 || !amb_svg_raster_of(nt, t->box[b].bg_res.index, spw, sph, &spx))) continue;
         pt_tile_pos(data(pos) + pa, pl, aw, ah, tw, th, &ox, &oy);
         double x0 = ax + ox, y0 = ay + oy;
         /* the tiles over the painting area: from the first that reaches it */
@@ -1598,7 +1611,8 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         for (double ty = sy; ty < by1 && (ry || ty == sy); ty += th) {
             if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
             for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
-                if (is_url) {
+                if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
+                else if (is_url) {
                     vector<uint8_t> tile;
                     append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
                     pt_image(c, &tile, iw, ih, tx, ty, tw, th);
@@ -1663,6 +1677,7 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
         if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else amb_svg_image_of(c, nt, t->box[b].node.index, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
     }
     int st0 = t->box[b].bst, st1 = t->box[b].bsr, st2 = t->box[b].bsb, st3 = t->box[b].bsl;
     int plain = (st0 == LAY_BS_SOLID || st0 <= LAY_BS_HIDDEN) && (st1 == LAY_BS_SOLID || st1 <= LAY_BS_HIDDEN) &&
