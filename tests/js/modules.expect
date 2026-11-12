@@ -1,0 +1,30 @@
+before import
+after import call
+order ["lib","stars","reexport","cycleB","cycleA","main"]
+default hello world greet 42 not exported assigned at evaluation
+live before 0 0
+live after 2 2
+class 0 function
+reexports 42 hello again own stars a b 42
+namespace keys ["Shape","counter","default","increment","later","renamed","value"]
+namespace tag [object Module] object false
+star keys ["answer","fromStars","greetAgain","libNs","onlyA","onlyB","own"]
+ambiguous left out false undefined
+default not starred false
+same namespace true
+namespace assignment TypeError
+import assignment TypeError
+cycle hoisted A, B says B hoisted A, B says B ReferenceError
+this at top undefined
+strict ReferenceError
+meta main.mjs function lib.mjs
+main exports ["fromMain"] main export
+same module true
+tla true ["tla start","tla end","afterTla sees tla ready"]
+throws RangeError module threw
+throws again RangeError
+missing export SyntaxError The requested module './lib.mjs' does not provide an export named 'nothere'
+syntax SyntaxError
+not there true
+dynamic 42 function 2
+done

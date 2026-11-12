@@ -1,0 +1,16 @@
+frozen through a warm cache 4
+strict frozen TypeError
+sloppy frozen no throw
+strict new on not extensible TypeError
+strict existing on not extensible no throw
+existing changed 2 false
+strict getter only TypeError
+sloppy getter only no throw
+strict inherited getter TypeError
+strict primitive TypeError
+sloppy primitive no throw
+strict frozen array element TypeError
+strict frozen array computed TypeError
+array kept 1,2,3
+strict computed frozen TypeError
+frozen kept 4

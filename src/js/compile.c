@@ -32,14 +32,14 @@ enum {
     K_EXPORT, K_EXTENDS, K_FALSE, K_FINALLY, K_FOR, K_FUNCTION, K_IF, K_IMPORT, K_IN, K_INSTANCEOF, K_LET,
     K_NEW, K_NULL, K_OF, K_RETURN, K_STATIC, K_SUPER, K_SWITCH, K_THIS, K_THROW, K_TRUE, K_TRY, K_TYPEOF,
     K_VAR, K_VOID, K_WHILE, K_WITH, K_YIELD, K_ASYNC, K_AWAIT, K_GET, K_SET, K_TARGET, K_CONSTRUCTOR,
-    K_ARGUMENTS, K_SLICE, K_ENUM, K_EVAL, KW_N
+    K_ARGUMENTS, K_SLICE, K_ENUM, K_EVAL, K_AS, K_FROM, K_META, K_ASSERT, KW_N
 };
 static const char *const js_kw_names[KW_N] = {
     "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else",
     "export", "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "let",
     "new", "null", "of", "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof",
     "var", "void", "while", "with", "yield", "async", "await", "get", "set", "target", "constructor",
-    "arguments", "slice", "enum", "eval" };
+    "arguments", "slice", "enum", "eval", "as", "from", "meta", "assert" };
 
 typedef struct jtok { uint32_t type, op, start, end, line, nl, str, aux; double num; } jtok;
 
@@ -54,7 +54,10 @@ enum {
     N_THROW, N_TRY, N_SWITCH, N_CASE, N_LABEL, N_EMPTY, N_FUNCDECL, N_CLASSDECL,
     N_YIELD,           /* a its operand (0: none), op 1 for yield* */
     N_AWAIT,           /* a its operand */
-    N_WITH             /* a its object, b its body, s the body's scope (its object's cell there) */
+    N_WITH,            /* a its object, b its body, s the body's scope (its object's cell there) */
+    N_EXPORT_DEFAULT,  /* a its expression, b the default binding's declaration */
+    N_IMPORT_META,
+    N_IMPORT_CALL      /* a the specifier, b the options (0: none) */
 };
 /* N_PROP's kinds */
 enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
@@ -76,7 +79,8 @@ enum { SC_SCRIPT, SC_FUNC, SC_BLOCK, SC_SELF, SC_EVAL };
 typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth; } jscope;
 /* D_EV: a sloppy function's eval vars object; D_WITH: a with's object; D_EVALVAR: a var or
    function a sloppy direct eval's code declares in its caller's function (that object's) */
-enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS, D_EV, D_WITH, D_EVALVAR };
+enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS, D_EV, D_WITH, D_EVALVAR,
+       D_IMPORT };                       /* an imported name: param its binding (vm->mod_binds) */
 #define JS_SYNTH_FN 0xFFFFFFFFu            /* a synthetic declaration's function: none of this unit's */
 typedef struct jdecl { uint32_t scope, atom, kind, captured, slot, next, fn, param, init, envslot; } jdecl;
 typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
@@ -95,6 +99,12 @@ typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_
 enum { CX_ENV, CX_TRY, CX_FINALLY, CX_ITER, CX_LOOP, CX_SWITCH, CX_LABEL };
 typedef struct jctx { uint32_t kind, node, label, brk, cont, cont_pc, has_cont; } jctx;
 
+/* a module's import (its request, the name imported, 0 the namespace; the local name's
+   declaration) and export (JX_*, its name, the local name's atom or declaration, the
+   request and the name imported there) as the parser reads them */
+typedef struct jmimp { uint32_t req, name, decl; } jmimp;
+typedef struct jmexp { uint32_t kind, name, local, req, import; } jmexp;
+
 typedef struct js_cc {
     vector<jn> nodes;
     vector<uint32_t> lists;
@@ -105,12 +115,18 @@ typedef struct js_cc {
     vector<jfn> fns;
     vector<jclass> classes;
     vector<jctx> ctx;
+    vector<uint32_t> mreqs;           /* a module's requests' specifiers (strings), each once */
+    vector<jmimp> mimps;
+    vector<jmexp> mexps;
+    vector<uint32_t> export_names;    /* the names an export's declaration declares */
     jtok tok, prev;
     uint32_t pos, line, cur_fn, cur_scope, script, gen_fn, nslots, chain, in_class, in_fields;
     uint32_t mode;                    /* JS_CC_*: what is read */
     uint32_t ndyn;                    /* the dynamic scopes' count: names checked against them */
     uint32_t nsynth;                  /* a direct eval's synthetic scopes: 1..nsynth */
     uint32_t ev_atom, with_atom;      /* the cells' names, which no source can write */
+    uint32_t default_atom;            /* a module's default export's binding */
+    uint32_t exporting, tla;          /* an export's declaration being read; a module's top-level await */
     uint32_t completion;              /* an eval's completion value: its slot in function 0, plus one */
     uint32_t kw[KW_N];
     uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
@@ -121,7 +137,8 @@ typedef struct js_cc {
 
 #define JS_CC_DROP(c) vector_jn_drop(&(c).nodes); vector_uint32_t_drop(&(c).lists); vector_uint32_t_drop(&(c).tmp); \
     vector_jscope_drop(&(c).scopes); vector_jdecl_drop(&(c).decls); vector_jref_drop(&(c).refs); vector_jfn_drop(&(c).fns); \
-    vector_jclass_drop(&(c).classes); vector_jctx_drop(&(c).ctx)
+    vector_jclass_drop(&(c).classes); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
+    vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names)
 
 #define CC js_vm *vm, const char *src, uint32_t srcn, js_cc *cc
 #define CCA vm, src, srcn, cc
@@ -526,6 +543,7 @@ static uint32_t var_scope(js_cc *cc, uint32_t s) {
 
 static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     uint32_t sc = kind == D_VAR || (kind == D_FUNC && cc->scopes[cc->cur_scope].kind == SC_EVAL) ? var_scope(cc, cc->cur_scope) : cc->cur_scope;
+    if (cc->exporting && sc == 0) push_back(cc->export_names, atom);
     for (uint32_t d = cc->scopes[sc].first; d; d = cc->decls[d].next) {
         if (cc->decls[d].atom != atom) continue;
         uint32_t dk = cc->decls[d].kind;
@@ -1241,7 +1259,30 @@ static uint32_t p_primary(CC) {
             /* yield and await: names outside generators and async functions; in one,
                an operator only where an assignment (a unary for await) may stand */
             if (a == cc->kw[K_YIELD] && in_generator(cc)) { cc_error(cc, line, "a yield stands where only an assignment's whole expression may (put it in parentheses)"); lx(CCA); return node(cc, N_HOLE, line); }
-            if (a == cc->kw[K_IMPORT]) { cc_error(cc, line, "modules (import) are not supported"); lx(CCA); return node(cc, N_HOLE, line); }
+            if (a == cc->kw[K_IMPORT]) {
+                /* import(specifier[, options]): a module loaded, its namespace's promise;
+                   import.meta: a module's own */
+                lx(CCA);
+                if (is_p(cc, P_DOT)) {
+                    lx(CCA);
+                    if (!(cc->tok.type == T_NAME && cc->tok.str == cc->kw[K_META])) { cc_error(cc, line, "expected import.meta"); return node(cc, N_HOLE, line); }
+                    if (cc->mode != JS_CC_MODULE) { cc_error(cc, line, "Cannot use 'import.meta' outside a module"); return node(cc, N_HOLE, line); }
+                    lx(CCA);
+                    return node(cc, N_IMPORT_META, line);
+                }
+                uint32_t n = node(cc, N_IMPORT_CALL, line);
+                expect_p(CCA, P_LPAREN, "'(' after import");
+                cc->nodes[n].a = p_assign(CCA, 0);
+                if (is_p(cc, P_COMMA)) {
+                    lx(CCA);
+                    if (!is_p(cc, P_RPAREN)) {
+                        cc->nodes[n].b = p_assign(CCA, 0);
+                        if (is_p(cc, P_COMMA)) lx(CCA);
+                    }
+                }
+                expect_p(CCA, P_RPAREN, "')' after import's specifier");
+                return n;
+            }
         }
         lx(CCA);
         if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, a, 0, line, start);
@@ -1370,6 +1411,7 @@ static uint32_t p_unary_in(CC) {
         if (in_async(cc) == 2) { cc_error(cc, line, "await in an async function's parameters"); return node(cc, N_HOLE, line); }
         lx(CCA);
         uint32_t n = node(cc, N_AWAIT, line);
+        if (cc->cur_fn == 0) cc->tla = 1;
         cc->nodes[n].a = p_unary(CCA);
         return n;
     }
@@ -1697,6 +1739,210 @@ static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start) {
     return n;
 }
 
+/* ---- a module's import and export declarations (its top level alone) ---- */
+
+static int is_name(js_cc *cc, uint32_t k) { return cc->tok.type == T_NAME && cc->tok.str == cc->kw[k]; }
+
+/* a request: its specifier (a string) added once, its index */
+static uint32_t mod_request(CC, uint32_t spec) {
+    for (size_t i = 0; i < len(cc->mreqs); i++) if (js_str_eq(vm, cc->mreqs[i], spec)) return (uint32_t)i;
+    push_back(cc->mreqs, spec);
+    return (uint32_t)(len(cc->mreqs) - 1);
+}
+
+/* a specifier, then its import attributes (with { type: 'json' }), read and passed over */
+static uint32_t p_specifier(CC) {
+    if (cc->tok.type != T_STR) { cc_error(cc, cc->tok.line, "expected a module's specifier (a string)"); return 0; }
+    uint32_t r = mod_request(CCA, cc->tok.str);
+    lx(CCA);
+    if ((is_kw(cc, K_WITH) || is_name(cc, K_ASSERT)) && !cc->tok.nl) {
+        lx(CCA);
+        expect_p(CCA, P_LBRACE, "'{' after with");
+        while (!is_p(cc, P_RBRACE) && cc->tok.type != T_EOF && !cc->err) lx(CCA);
+        expect_p(CCA, P_RBRACE, "'}'");
+    }
+    return r;
+}
+static uint32_t p_from(CC) {
+    if (!is_name(cc, K_FROM)) { cc_error(cc, cc->tok.line, "expected 'from' and a module's specifier"); return 0; }
+    lx(CCA);
+    return p_specifier(CCA);
+}
+
+/* a ModuleExportName: any name (a keyword too) or a string's atom */
+static uint32_t p_export_name(CC) {
+    uint32_t a = 0;
+    if (cc->tok.type == T_NAME) a = cc->tok.str;
+    else if (cc->tok.type == T_STR) a = js_atom(vm, cc->tok.str);
+    else { cc_error(cc, cc->tok.line, "expected a name to import or export"); return 0; }
+    lx(CCA);
+    return a;
+}
+
+/* an import's local name: an immutable binding to the export (a namespace: a const its own) */
+static void mod_import_binding(CC, uint32_t local, uint32_t name, uint32_t line) {
+    jmimp e = { 0, name, 0 };
+    if (!name) e.decl = declare(CCA, local, D_CONST, line);
+    else {
+        e.decl = declare(CCA, local, D_IMPORT, line);
+        js_modbind b = { 0, 0 };
+        cc->decls[e.decl].param = (uint32_t)len(vm->mod_binds);
+        push_back(vm->mod_binds, b);
+    }
+    push_back(cc->mimps, e);
+}
+
+static uint32_t p_import_decl(CC, uint32_t line) {
+    lx(CCA);
+    if (cc->tok.type == T_STR) { p_specifier(CCA); semi(CCA); return node(cc, N_EMPTY, line); }
+    size_t mark = len(cc->mimps);
+    int more = 1;
+    if (cc->tok.type == T_NAME) {
+        /* the default export's local name */
+        uint32_t local = cc->tok.str;
+        lx(CCA);
+        mod_import_binding(CCA, local, cc->kw[K_DEFAULT], line);
+        if (is_p(cc, P_COMMA)) lx(CCA);
+        else more = 0;
+    }
+    if (more && is_p(cc, P_STAR)) {
+        lx(CCA);
+        if (!is_name(cc, K_AS)) { cc_error(cc, line, "expected 'as' after import *"); return node(cc, N_EMPTY, line); }
+        lx(CCA);
+        if (cc->tok.type != T_NAME) { cc_error(cc, line, "expected the namespace's name"); return node(cc, N_EMPTY, line); }
+        uint32_t local = cc->tok.str;
+        lx(CCA);
+        mod_import_binding(CCA, local, 0, line);
+    } else if (more && is_p(cc, P_LBRACE)) {
+        lx(CCA);
+        while (!is_p(cc, P_RBRACE) && !cc->err) {
+            int str = cc->tok.type == T_STR;
+            uint32_t name = p_export_name(CCA), local = name;
+            if (is_name(cc, K_AS)) {
+                lx(CCA);
+                if (cc->tok.type != T_NAME) { cc_error(cc, line, "expected a local name after as"); break; }
+                local = cc->tok.str;
+                lx(CCA);
+            } else if (str) { cc_error(cc, line, "a string imported needs 'as' and a local name"); break; }
+            mod_import_binding(CCA, local, name, line);
+            if (!is_p(cc, P_COMMA)) break;
+            lx(CCA);
+        }
+        expect_p(CCA, P_RBRACE, "'}'");
+    } else if (more) { cc_error(cc, line, "expected what to import"); return node(cc, N_EMPTY, line); }
+    uint32_t req = p_from(CCA);
+    for (size_t i = mark; i < len(cc->mimps); i++) cc->mimps[i].req = req;
+    semi(CCA);
+    return node(cc, N_EMPTY, line);
+}
+
+static void mod_export(js_cc *cc, uint32_t kind, uint32_t name, uint32_t local, uint32_t req, uint32_t import) {
+    jmexp e = { kind, name, local, req, import };
+    push_back(cc->mexps, e);
+}
+
+static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start);
+static uint32_t p_export_decl(CC, uint32_t line, uint32_t start) {
+    lx(CCA);
+    if (is_p(cc, P_STAR)) {
+        /* export * from, export * as name from */
+        lx(CCA);
+        uint32_t name = 0;
+        if (is_name(cc, K_AS)) { lx(CCA); name = p_export_name(CCA); }
+        uint32_t req = p_from(CCA);
+        if (name) mod_export(cc, JX_INDIRECT, name, 0, req, 0);
+        else mod_export(cc, JX_STAR, 0, 0, req, 0);
+        semi(CCA);
+        return node(cc, N_EMPTY, line);
+    }
+    if (is_p(cc, P_LBRACE)) {
+        /* export { a, b as c } [from], each a local name's (or, from a module, its export's) */
+        lx(CCA);
+        size_t mark = len(cc->mexps);
+        while (!is_p(cc, P_RBRACE) && !cc->err) {
+            uint32_t local = p_export_name(CCA), name = local;
+            if (is_name(cc, K_AS)) { lx(CCA); name = p_export_name(CCA); }
+            mod_export(cc, JX_LOCAL, name, local, 0, 0);
+            if (!is_p(cc, P_COMMA)) break;
+            lx(CCA);
+        }
+        expect_p(CCA, P_RBRACE, "'}'");
+        if (is_name(cc, K_FROM)) {
+            uint32_t req = p_from(CCA);
+            for (size_t i = mark; i < len(cc->mexps); i++) {
+                cc->mexps[i].kind = JX_INDIRECT;
+                cc->mexps[i].req = req;
+                cc->mexps[i].import = cc->mexps[i].local;
+                cc->mexps[i].local = 0;
+            }
+        }
+        semi(CCA);
+        return node(cc, N_EMPTY, line);
+    }
+    if (is_kw(cc, K_DEFAULT)) {
+        lx(CCA);
+        uint32_t fstart = cc->tok.start;
+        int is_fn = is_kw(cc, K_FUNCTION), is_async = 0;
+        if (is_kw(cc, K_ASYNC)) {
+            jtok t0 = cc->tok, p0 = cc->prev;
+            uint32_t pos0 = cc->pos, line0 = cc->line;
+            lx(CCA);
+            if (!cc->tok.nl && is_kw(cc, K_FUNCTION)) { is_fn = 1; is_async = 1; }
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+        }
+        if (is_fn || is_kw(cc, K_CLASS)) {
+            /* a function or a class: named, a declaration exported as default; nameless,
+               the default binding's (a function hoisted, named default) */
+            jtok t0 = cc->tok, p0 = cc->prev;
+            uint32_t pos0 = cc->pos, line0 = cc->line;
+            uint32_t fl = 0;
+            if (is_async) { lx(CCA); fl = JF_ASYNC; }
+            lx(CCA);
+            if (is_fn && is_p(cc, P_STAR)) { lx(CCA); fl |= JF_GENERATOR; }
+            int named = cc->tok.type == T_NAME && !is_kw(cc, K_EXTENDS);
+            if (named) {
+                cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+                size_t mark = len(cc->export_names);
+                cc->exporting = 1;
+                uint32_t n = p_stmt(CCA);
+                cc->exporting = 0;
+                if (len(cc->export_names) > mark) mod_export(cc, JX_LOCAL, cc->kw[K_DEFAULT], cc->export_names[mark], 0, 0);
+                resize(cc->export_names, mark);
+                return n;
+            }
+            if (is_fn) {
+                uint32_t d = declare(CCA, cc->default_atom, D_FUNC, line);
+                uint32_t f = p_function(CCA, cc->kw[K_DEFAULT], fl, 1, line, fstart);
+                cc->decls[d].init = cc->nodes[f].a + 1;
+                mod_export(cc, JX_LOCAL, cc->kw[K_DEFAULT], cc->default_atom, 0, 0);
+                return node(cc, N_EMPTY, line);
+            }
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+        }
+        /* an expression (a nameless class's too): the default binding set where it stands */
+        uint32_t n = node(cc, N_EXPORT_DEFAULT, line);
+        cc->nodes[n].b = declare(CCA, cc->default_atom, D_CONST, line);
+        int cls = is_kw(cc, K_CLASS);
+        cc->nodes[n].a = cls ? p_class(CCA, 0) : p_assign(CCA, 0);
+        if (!cls) semi(CCA);
+        mod_export(cc, JX_LOCAL, cc->kw[K_DEFAULT], cc->default_atom, 0, 0);
+        return n;
+    }
+    /* a declaration: each name it declares exported as itself */
+    if (!is_decl_start(cc) && !is_kw(cc, K_FUNCTION) && !is_kw(cc, K_ASYNC) && !is_kw(cc, K_CLASS)) {
+        cc_error(cc, line, "expected a declaration, a default or a list after export");
+        return node(cc, N_EMPTY, line);
+    }
+    (void)start;
+    size_t mark = len(cc->export_names);
+    cc->exporting = 1;
+    uint32_t n = p_stmt(CCA);
+    cc->exporting = 0;
+    for (size_t i = mark; i < len(cc->export_names); i++) mod_export(cc, JX_LOCAL, cc->export_names[i], cc->export_names[i], 0, 0);
+    resize(cc->export_names, mark);
+    return n;
+}
+
 static int is_decl_start(js_cc *cc) {
     return is_kw(cc, K_VAR) || is_kw(cc, K_CONST) || is_kw(cc, K_LET);
 }
@@ -1761,6 +2007,7 @@ static uint32_t p_stmt_in(CC) {
                 if (in_async(cc) != 1) { cc_error(cc, line, "for await outside an async function"); return node(cc, N_EMPTY, line); }
                 lx(CCA);
                 aw = 1;
+                if (cc->cur_fn == 0) cc->tla = 1;
             }
             expect_p(CCA, P_LPAREN, "'(' after for");
             uint32_t saved = cc->cur_scope;
@@ -1890,7 +2137,22 @@ static uint32_t p_stmt_in(CC) {
             cc->cur_scope = saved;
             return n;
         }
-        if (a == cc->kw[K_IMPORT] || a == cc->kw[K_EXPORT]) { cc_error(cc, line, "modules (import and export) are not supported"); return node(cc, N_EMPTY, line); }
+        if (a == cc->kw[K_IMPORT] || a == cc->kw[K_EXPORT]) {
+            /* import( and import. begin expressions; else a module's declarations, at its top level */
+            int decl = a == cc->kw[K_EXPORT];
+            if (!decl) {
+                jtok t0 = cc->tok, p0 = cc->prev;
+                uint32_t pos0 = cc->pos, line0 = cc->line;
+                lx(CCA);
+                decl = !is_p(cc, P_LPAREN) && !is_p(cc, P_DOT);
+                cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+            }
+            if (decl) {
+                if (cc->mode != JS_CC_MODULE) { cc_error(cc, line, "Cannot use import statement outside a module"); return node(cc, N_EMPTY, line); }
+                if (cc->cur_fn != 0 || cc->cur_scope != 0) { cc_error(cc, line, "an import or an export stands at a module's top level alone"); return node(cc, N_EMPTY, line); }
+                return a == cc->kw[K_EXPORT] ? p_export_decl(CCA, line, start) : p_import_decl(CCA, line);
+            }
+        }
         /* a label */
         jtok t0 = cc->tok, p0 = cc->prev;
         uint32_t pos0 = cc->pos, line0 = cc->line;
@@ -2125,6 +2387,7 @@ static uint32_t gen_eval_site(CC, uint32_t site) {
 static void gen_get_static(CC, uint32_t atom, uint32_t d, uint32_t scope) {
     if (!d || is_script_decl(cc, d)) { emit_atom_ic(vm, OP_GET_GLOBAL, atom); return; }
     jdecl x = cc->decls[d];
+    if (x.kind == D_IMPORT) { emit(vm, OP_GET_IMPORT); emit32(vm, x.param); emit32(vm, atom); return; }
     if (x.kind == D_SELF && !x.captured) { emit(vm, OP_CALLEE); return; }
     if (x.captured) {
         emit(vm, is_lexical(x.kind) ? OP_GET_ENV_CHK : OP_GET_ENV);
@@ -2167,7 +2430,7 @@ static void gen_put_static(CC, uint32_t atom, uint32_t d, uint32_t scope, int ke
         return;
     }
     jdecl x = cc->decls[d];
-    if (!init && x.kind == D_CONST) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
+    if ((!init && x.kind == D_CONST) || x.kind == D_IMPORT) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
     if (x.kind == D_SELF && !x.captured) { if (!keep) emit(vm, OP_POP); return; }
     if (x.captured) {
         emit(vm, keep ? OP_SET_ENV : OP_PUT_ENV);
@@ -2961,6 +3224,13 @@ static void gen_expr(CC, uint32_t n) {
         gen_expr(CCA, e.a);
         gen_await(vm);
         return;
+    case N_IMPORT_META: emit(vm, OP_IMPORT_META); return;
+    case N_IMPORT_CALL:
+        gen_expr(CCA, e.a);
+        if (e.b) gen_expr(CCA, e.b);
+        else emit(vm, OP_UNDEF);
+        emit(vm, OP_IMPORT_DYN);
+        return;
     case N_SPREAD: cc_error(cc, e.line, "'...' only spreads in a call, an array or an object"); return;
     case N_HOLE: emit(vm, OP_UNDEF); return;
     case N_PATTERN_OBJ: case N_PATTERN_ARR: cc_error(cc, e.line, "a destructuring pattern where a value should be"); return;
@@ -3327,6 +3597,12 @@ static void gen_stmt(CC, uint32_t n) {
     }
     case N_BREAK: gen_jump(CCA, n, 1); return;
     case N_CONTINUE: gen_jump(CCA, n, 0); return;
+    case N_EXPORT_DEFAULT:
+        /* the default binding set where the statement stands; a nameless function's or class's name default */
+        name_fn(cc, s.a, cc->kw[K_DEFAULT]);
+        gen_expr(CCA, s.a);
+        gen_put(CCA, cc->default_atom, s.b, 0, 0, 1);
+        return;
     case N_WITH: {
         /* the object in its cell, in the body's environment */
         gen_expr(CCA, s.a);
@@ -3394,6 +3670,7 @@ static void assign_slots(js_cc *cc, uint32_t f) {
         jdecl x = cc->decls[d];
         if (x.fn != f || cc->scopes[x.scope].kind == SC_SCRIPT) continue;
         if (x.kind == D_SELF && !x.captured) continue;
+        if (x.kind == D_IMPORT) continue;
         if (x.kind == D_PARAM && x.param) cc->decls[d].slot = x.param - 1;
         else if (!x.captured) cc->decls[d].slot = cc->nslots++;
         if (x.captured) cc->decls[d].envslot = cc->scopes[x.scope].nenv++;
@@ -3456,7 +3733,7 @@ static void gen_function(CC, uint32_t f) {
     assign_slots(cc, f);
     uint32_t fs = F.scope;
     cc->completion = 0;
-    if (f == 0 && cc->mode >= JS_CC_EVAL) {
+    if (f == 0 && cc->mode >= JS_CC_EVAL && cc->mode != JS_CC_MODULE) {
         /* an eval's program: its completion value kept in a slot of its own */
         cc->completion = new_slot(cc) + 1;
         emit(vm, OP_UNDEF);
@@ -3485,6 +3762,13 @@ static void gen_function(CC, uint32_t f) {
             gen_statements(CCA, b.a, b.b);
             emit(vm, OP_RETURN_UNDEF);
         }
+    } else if (f == 0 && cc->mode == JS_CC_MODULE) {
+        /* a module's code: its cells made when it was linked (its environment the closure's),
+           its functions made then; a top-level await's makes it an async function */
+        if (F.flags & JF_ASYNC) emit(vm, OP_ASYNC_START);
+        jn b = cc->nodes[F.body];
+        gen_statements(CCA, b.a, b.b);
+        emit(vm, OP_RETURN_UNDEF);
     } else {
         /* an async function's promise is made before its parameters are (their errors reject it) */
         if ((F.flags & JF_ASYNC) && !(F.flags & JF_GENERATOR)) emit(vm, OP_ASYNC_START);
@@ -3583,6 +3867,74 @@ static int eval_is_strict(const char *src, uint32_t n) {
     return memcmp(src + i + 1, "use strict", 10) == 0;
 }
 
+/* a module's local exports' names to their declarations; an imported name re-exported
+   as the import it is */
+static void mod_resolve_exports(js_vm *vm, js_cc *cc) {
+    for (size_t i = 0; i < len(cc->mexps) && !cc->err; i++) {
+        jmexp e = cc->mexps[i];
+        if (e.kind != JX_LOCAL) continue;
+        uint32_t found = 0;
+        for (uint32_t d = cc->scopes[0].first; d && !found; d = cc->decls[d].next) if (cc->decls[d].atom == e.local) found = d;
+        if (!found) {
+            vector<char> m;
+            append_range(m, "Export '", 8);
+            js_str_to_utf8(vm, e.local, &m);
+            append_range(m, "' is not defined in module", 26);
+            push_back(m, 0);
+            cc_error(cc, 1, data(m));
+            return;
+        }
+        cc->mexps[i].local = found;
+        if (cc->decls[found].kind != D_IMPORT) continue;
+        for (size_t j = 0; j < len(cc->mimps); j++) {
+            if (cc->mimps[j].decl != found) continue;
+            cc->mexps[i].kind = JX_INDIRECT;
+            cc->mexps[i].req = cc->mimps[j].req;
+            cc->mexps[i].import = cc->mimps[j].name;
+            cc->mexps[i].local = 0;
+        }
+    }
+}
+
+/* the module's record (vm->mod_compiling) from what its code declared: its requests,
+   imports, exports and the cells its linking makes */
+static void mod_record(js_vm *vm, js_cc *cc) {
+    uint32_t m = vm->mod_compiling;
+    vm->modules[m].func = cc->fns[0].id;
+    vm->modules[m].nenv = cc->scopes[0].nenv;
+    if (cc->fns[0].flags & JF_ASYNC) vm->modules[m].flags |= JMF_TLA;
+    vm->modules[m].req = (uint32_t)len(vm->mod_reqs);
+    vm->modules[m].nreq = (uint32_t)len(cc->mreqs);
+    for (size_t i = 0; i < len(cc->mreqs); i++) { js_modreq r = { cc->mreqs[i], 0 }; push_back(vm->mod_reqs, r); }
+    vm->modules[m].imp = (uint32_t)len(vm->mod_imps);
+    vm->modules[m].nimp = (uint32_t)len(cc->mimps);
+    for (size_t i = 0; i < len(cc->mimps); i++) {
+        jmimp e = cc->mimps[i];
+        jdecl x = cc->decls[e.decl];
+        js_modimp r = { e.req, e.name, e.name ? x.param : 0, e.name ? 0 : x.envslot };
+        push_back(vm->mod_imps, r);
+    }
+    vm->modules[m].exp = (uint32_t)len(vm->mod_exps);
+    vm->modules[m].nexp = (uint32_t)len(cc->mexps);
+    for (size_t i = 0; i < len(cc->mexps); i++) {
+        jmexp e = cc->mexps[i];
+        js_modexp r = { e.kind, e.name, e.kind == JX_LOCAL ? cc->decls[e.local].envslot : 0, e.req, e.import };
+        push_back(vm->mod_exps, r);
+    }
+    vm->modules[m].init = (uint32_t)len(vm->mod_inits);
+    uint32_t n = 0;
+    for (uint32_t d = cc->scopes[0].first; d; d = cc->decls[d].next) {
+        jdecl x = cc->decls[d];
+        js_modinit r = { x.envslot, JMI_LEXICAL, 0 };
+        if (x.kind == D_IMPORT) continue;
+        if (x.kind == D_FUNC && x.init) { r.kind = JMI_FUNC; r.func = cc->fns[x.init - 1].id; }
+        else if (x.kind == D_VAR || x.kind == D_FUNC) r.kind = JMI_VAR;
+        push_back(vm->mod_inits, r);
+        n++;
+    }
+    vm->modules[m].ninit = n;
+}
+
 int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, uint32_t *func, vector<char> *err) {
     js_cc ccs;
     memset(&ccs, 0, sizeof ccs);
@@ -3601,18 +3953,22 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     for (int k = 0; k < KW_N; k++) cc->kw[k] = js_atom_ascii(vm, js_kw_names[k]);
     cc->ev_atom = js_atom_ascii(vm, " ev");
     cc->with_atom = js_atom_ascii(vm, " with");
+    cc->default_atom = js_atom_ascii(vm, " default");
     cc->script = script;
     cc->mode = (uint32_t)mode;
-    int is_eval = mode >= JS_CC_EVAL;
+    int is_eval = mode >= JS_CC_EVAL && mode != JS_CC_MODULE;
     int strict = is_eval && eval_is_strict(src, srcn);
     if (mode == JS_CC_DIRECT && (vm->eval_sites[vm->eval_site].flags & JS_EVAL_STRICT)) strict = 1;
     /* the script: function 0 in scope 0 (a handler's body: a function of event; a
        strict eval's code: a function, its vars its own) */
-    jscope s0 = { 0, 0, (mode == JS_CC_HANDLER || strict) && mode != JS_CC_DIRECT ? SC_FUNC : SC_SCRIPT, 0, 0, 0, 0, 0 };
+    jscope s0 = { 0, 0, ((mode == JS_CC_HANDLER || strict) && mode != JS_CC_DIRECT) || mode == JS_CC_MODULE ? SC_FUNC : SC_SCRIPT, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s0);
     jfn f0;
     memset(&f0, 0, sizeof f0);
     f0.flags = strict ? JF_STRICT : 0;
+    /* a module's code: strict, its this undefined (an arrow's, of none), await allowed
+       at its top level (async only when it awaits there) */
+    if (mode == JS_CC_MODULE) f0.flags = JF_STRICT | JF_ARROW | JF_ASYNC;
     push_back(cc->fns, f0);
     cc->cur_fn = 0;
     cc->cur_scope = 0;
@@ -3696,6 +4052,10 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     }
     cc->fns[0].body = body;
     cc->nodes[body].c = body_scope;
+    if (!cc->err && mode == JS_CC_MODULE) {
+        if (!cc->tla) cc->fns[0].flags &= ~(uint32_t)JF_ASYNC;
+        mod_resolve_exports(vm, cc);
+    }
     if (!cc->err && mode == JS_CC_FUNCTION) {
         /* the Function constructor's source: one statement, the function expression */
         jn b = cc->nodes[body];
@@ -3704,6 +4064,12 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     }
     if (!cc->err) {
         resolve(cc);
+        if (mode == JS_CC_MODULE) {
+            /* a module's top-level bindings live in its environment, which its importers read */
+            for (uint32_t d = cc->scopes[0].first; d; d = cc->decls[d].next)
+                if (cc->decls[d].kind != D_IMPORT) cc->decls[d].captured = 1;
+            cc->scopes[0].has_env = 1;
+        }
         /* every function's record, then each one's code */
         for (size_t f = 0; f < len(cc->fns); f++) {
             js_func jf;
@@ -3717,10 +4083,12 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
             jf.src_off = F.src_start;
             jf.src_len = F.src_end > F.src_start ? F.src_end - F.src_start : 0;
             jf.arity = F.nformal;
+            jf.module = mode == JS_CC_MODULE ? vm->mod_compiling : 0;
             push_back(vm->funcs, jf);
             cc->fns[f].id = (uint32_t)(len(vm->funcs) - 1);
         }
         for (size_t f = 0; f < len(cc->fns) && !cc->err; f++) gen_function(vm, src, srcn, cc, (uint32_t)f);
+        if (!cc->err && mode == JS_CC_MODULE) mod_record(vm, cc);
     }
     if (cc->err) {
         char m[320];

@@ -995,13 +995,15 @@ jv js_get_ic(js_vm *vm, jv obj, uint32_t atom, uint32_t ic) {
 
 static int js_call_setter(js_vm *vm, jv acc, jv receiver, jv v) {
     uint32_t s = vm->objs[jv_idx(acc)].a;
-    if (!s) return 1;
+    if (!s) return 2;
     jv args[1] = { v };
     js_call(vm, jv_obj(s), receiver, args, 1);
     return !vm->throwing;
 }
 
-/* obj.atom = v; ic, when not 0, is filled for the next time */
+/* obj.atom = v; ic, when not 0, is filled for the next time. 1 set; 0 thrown; 2 refused
+   (a primitive's property, a frozen object's, a new one on an object not extensible, an
+   accessor without a setter), which strict code throws for */
 int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     if (!jv_is_obj(objv)) {
         if (jv_is_nullish(objv) || objv == JV_HOLE) {
@@ -1009,7 +1011,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
             js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
             return 0;
         }
-        return 1;
+        return 2;
     }
     uint32_t o = jv_idx(objv);
     uint32_t k = vm->objs[o].kind;
@@ -1018,7 +1020,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         uint32_t i;
         if (js_atom_index(vm, atom, &i)) return js_ta_set(vm, o, i, v);
     }
-    if (vm->objs[o].flags & JO_FROZEN) return 1;
+    if (vm->objs[o].flags & JO_FROZEN) return 2;
     if (k == JK_ARRAY) {
         uint32_t i;
         if (atom == A_LENGTH) {
@@ -1061,7 +1063,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
             if (acc != JV_HOLE) return js_call_setter(vm, acc, objv, v);
         }
     }
-    if (!(vm->objs[o].flags & JO_EXTENSIBLE)) return 1;
+    if (!(vm->objs[o].flags & JO_EXTENSIBLE)) return 2;
     uint32_t ns = js_shape_add(vm, sh, atom, 0);
     uint32_t slot = vm->shapes[ns].slot;
     js_obj_room(vm, o, slot);
@@ -1072,6 +1074,14 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
 }
 
 int js_set(js_vm *vm, jv obj, uint32_t atom, jv v) { return js_set_ic(vm, obj, atom, v, 0); }
+
+/* strict code's assignment the object refused: a TypeError naming the property */
+static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
+    uint32_t name = js_key_name(vm, key), m;
+    if (!jv_is_obj(obj)) m = js_str_concat(vm, js_str_ascii(vm, "Cannot create property '"), js_str_concat(vm, name, js_str_ascii(vm, "' on a primitive value")));
+    else m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to property '"), js_str_concat(vm, name, js_str_ascii(vm, "': the object is frozen, not extensible, or has only a getter for it")));
+    js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+}
 
 /* a key's atom, or an array index */
 static int js_key(js_vm *vm, jv key, uint32_t *atom, uint32_t *index) {
@@ -1983,7 +1993,7 @@ static jv js_ref_error(js_vm *vm, uint32_t atom, const char *what) {
 }
 
 
-static uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n) {
+uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n) {
     uint32_t e = js_obj_new(vm, JK_ENV, 0);
     vm->objs[e].slots = js_slots_alloc(vm, n ? n : 1);
     vm->objs[e].cap = n;
@@ -2425,7 +2435,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (jv_is_obj(ov)) {
                 uint32_t o = jv_idx(ov);
                 js_ic c = vm->ics[ic];
-                if (objs[o].shape == c.shape && c.shape) {
+                if (objs[o].shape == c.shape && c.shape && !(objs[o].flags & JO_FROZEN)) {
                     if (c.holder == 0) {
                         slots[objs[o].slots + c.slot] = v;
                         stack[sp - 2] = v;
@@ -2443,8 +2453,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 }
             }
             SYNC();
-            js_set_ic(vm, ov, atom, v, ic); RELOAD();
+            int r = js_set_ic(vm, ov, atom, v, ic); RELOAD();
             if (vm->throwing) break;
+            if (r == 2 && (funcs[frames[fi].func].flags & JF_STRICT)) { js_set_refused(vm, ov, atom); RELOAD(); break; }
             stack[sp - 2] = v;
             sp--;
             break;
@@ -2496,8 +2507,14 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             }
             if (!done) {
                 SYNC();
-                js_set_value(vm, ov, k, v); RELOAD();
+                int r = js_set_value(vm, ov, k, v); RELOAD();
                 if (vm->throwing) break;
+                if (r == 2 && (funcs[frames[fi].func].flags & JF_STRICT)) {
+                    uint32_t ka = js_prop_key(vm, k, &r); RELOAD();
+                    if (vm->throwing) break;
+                    js_set_refused(vm, ov, ka); RELOAD();
+                    break;
+                }
             }
             sp -= 2;
             stack[sp - 1] = v;
@@ -3431,6 +3448,38 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv r = js_to_object(vm, v); RELOAD();
             if (vm->throwing) break;
             stack[sp - 1] = r;
+            goto next;
+        }
+        case OP_GET_IMPORT: {
+            /* an imported name: its exporter's cell (or the namespace), read as it is now */
+            uint32_t b = RD32(pc), atom = RD32(pc + 4);
+            pc += 8;
+            js_modbind mb = vm->mod_binds[b];
+            jv v = JV_HOLE;
+            if (!mb.module) { if (mb.cell) v = jv_obj(mb.cell); }
+            else {
+                uint32_t env = vm->modules[mb.module].env;
+                if (env) v = slots[objs[env].slots + mb.cell];
+            }
+            if (v == JV_HOLE) { SYNC(); js_ref_error(vm, atom, " is not initialized: an import read before its module's declaration of it ran"); RELOAD(); break; }
+            stack[sp++] = v;
+            goto next;
+        }
+        case OP_IMPORT_META: {
+            SYNC();
+            jv r = js_module_meta(vm, funcs[frames[fi].func].module); RELOAD();
+            stack[sp++] = r;
+            goto next;
+        }
+        case OP_IMPORT_DYN: {
+            /* import(): the referrer this code's module, or (0) the classic scripts' base */
+            sp--;
+            jv spec = stack[--sp];
+            uint32_t mod = funcs[frames[fi].func].module;
+            uint32_t referrer = mod ? vm->modules[mod].url : 0;
+            SYNC();
+            jv r = js_module_dynamic(vm, spec, referrer); RELOAD();
+            stack[sp++] = r;
             goto next;
         }
         case OP_NOP: goto next;

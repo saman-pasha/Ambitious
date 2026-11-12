@@ -900,7 +900,26 @@ static int cmd_js(const char *file) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     vm.real_clock = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-    int rc = js_eval(&vm, data(src), len(src), file, 1);
+    /* the file's URL: a module's own (a .mjs file is one), the classic script's base for import() */
+    vector<char> url;
+    append_range(url, "file://", 7);
+    char absbuf[4096];
+    if (realpath(file, absbuf)) append_range(url, absbuf, strlen(absbuf));
+    else append_range(url, file, strlen(file));
+    vm.base_url = js_str_utf8(&vm, data(url), len(url));
+    size_t fl = strlen(file);
+    int rc = 0;
+    if (fl > 4 && strcmp(file + fl - 4, ".mjs") == 0) {
+        uint32_t p = js_module_main(&vm, vm.base_url, data(src), len(src));
+        if (!p) {
+            jv e = vm.exception;
+            vm.throwing = 0;
+            vm.exception = JV_UNDEF;
+            clear(vm.out);
+            js_error_text(&vm, e, &vm.out);
+            rc = -2;
+        }
+    } else rc = js_eval(&vm, data(src), len(src), file, 1);
     if (rc == 0) {
         /* the microtasks the script queued, then its timers, each followed by its own */
         js_run_jobs(&vm);

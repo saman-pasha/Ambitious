@@ -65,7 +65,8 @@ enum {
     N_PX_FIRST = N_RE_FIRST + JRE_N,
     N_TA_FIRST = N_PX_FIRST + JPX_N,
     N_BG_FIRST = N_TA_FIRST + JTN_N,
-    N_LAST = N_BG_FIRST + JBG_N
+    N_MD_FIRST = N_BG_FIRST + JBG_N,
+    N_LAST = N_MD_FIRST + JMD_N
 };
 
 /* ---- helpers ---- */
@@ -2268,6 +2269,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id >= N_PX_FIRST && id < N_PX_FIRST + JPX_N) return js_proxy_native(vm, id - N_PX_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_TA_FIRST && id < N_TA_FIRST + JTN_N) return js_typed_native(vm, id - N_TA_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_BG_FIRST && id < N_BG_FIRST + JBG_N) return js_big_native(vm, id - N_BG_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_MD_FIRST && id < N_MD_FIRST + JMD_N) return js_module_native(vm, id - N_MD_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2887,6 +2889,7 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
     js_proxy_init(vm, N_PX_FIRST);
     js_big_init(vm, N_BG_FIRST);
+    js_module_init(vm, N_MD_FIRST);
     /* the typed arrays, and the methods they share with Array (generic over array-likes) */
     js_typed_init(vm, N_TA_FIRST);
     {

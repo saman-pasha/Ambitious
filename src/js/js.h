@@ -149,6 +149,7 @@ typedef struct js_func {
     uint32_t flags, line, script;
     uint32_t src_off, src_len;        /* its source text's place in its script */
     uint32_t arity;                   /* its length: the parameters before a default or a rest */
+    uint32_t module;                  /* the module whose code it is, plus one (0: a script's) */
 } js_func;
 #define JF_ARROW 1
 #define JF_ARGUMENTS 2                /* uses arguments */
@@ -188,6 +189,42 @@ typedef struct js_evalcache { uint32_t mode, site, src, func; } js_evalcache;
 #define JS_EVAL_CACHE_MAX 256
 #define JS_EVAL_STRICT 1
 #define JS_EVAL_INFN 2
+
+/* a module (src/js/module.c, ECMA-262 16.2.1): its URL (a string, its key), its code (a
+   function whose environment, made when the module is linked, holds its top-level
+   bindings in nenv cells), its requests, imports, exports and cells made at linking
+   (spans of the tables below), its namespace and import.meta (made at first need), and
+   its linking's and evaluation's state: status (JM_*), flags (JMF_*), the evaluation's
+   error, the depth-first indexes, its pending async dependencies, its async evaluation's
+   order, its cycle's root, its top-level promise (0 none) and its async parents (an array) */
+typedef struct js_module {
+    uint32_t url, func, env, nenv, status, flags;
+    uint32_t req, nreq, imp, nimp, exp, nexp, init, ninit;
+    uint32_t ns, meta;
+    jv error;
+    uint32_t dfs, anc, pending, order, cycle_root, cap, parents;
+} js_module;
+enum { JM_NEW, JM_LINKING, JM_LINKED, JM_EVALUATING, JM_EVALUATING_ASYNC, JM_EVALUATED };
+#define JMF_TLA 1                     /* its code awaits at its top level */
+#define JMF_ASYNC_EVAL 2              /* its evaluation is (or was) asynchronous */
+#define JMF_ERROR 4                   /* its evaluation threw: error holds what */
+#define JMF_REQUESTED 8               /* its requests loaded */
+/* a request: the specifier as written (a string), the module it names (0: not loaded) */
+typedef struct js_modreq { uint32_t spec, module; } js_modreq;
+/* an import: its request, the name imported (an atom; 0: the namespace), the binding
+   entry its local name reads (vm->mod_binds) or, for the namespace, the module's cell */
+typedef struct js_modimp { uint32_t req, name, bind, cell; } js_modimp;
+/* an export: a local one (its name, the module's cell), an indirect one (its name, the
+   request, the name imported there: 0 for the namespace), a star one (the request) */
+typedef struct js_modexp { uint32_t kind, name, cell, req, import; } js_modexp;
+enum { JX_LOCAL, JX_INDIRECT, JX_STAR };
+/* a cell made when its module is linked: a var's (undefined), a let's, const's or
+   class's (not yet initialized), a hoisted function's (the closure of func) */
+typedef struct js_modinit { uint32_t cell, kind, func; } js_modinit;
+enum { JMI_VAR, JMI_LEXICAL, JMI_FUNC };
+/* an import's binding, resolved when its module is linked: the module and the cell it
+   reads (module 0: cell is the namespace object) */
+typedef struct js_modbind { uint32_t module, cell; } js_modbind;
 
 /* a timer, in virtual time */
 /* run: the script that set it (vm->cur_run then), rec its record (src/script/script.c) */
@@ -293,6 +330,21 @@ typedef struct js_vm {
     uint32_t eval_site;               /* the site a direct eval's code is compiled for */
     uint32_t eval_fn;                 /* eval itself: a call of it by its name is a direct eval */
     vector<js_evalcache> eval_cache;  /* the evals' code compiled, newest last: the same code at the same site compiled once */
+    vector<js_module> modules;        /* the modules, by their index (0 none) */
+    vector<js_modreq> mod_reqs;
+    vector<js_modimp> mod_imps;
+    vector<js_modexp> mod_exps;
+    vector<js_modinit> mod_inits;
+    vector<js_modbind> mod_binds;
+    uint32_t mod_compiling;           /* the module js_compile reads (JS_CC_MODULE) */
+    uint32_t mod_order;               /* the async evaluations' count */
+    uint32_t mod_first;               /* the modules' first native id (src/js/module.c) */
+    uint32_t base_url;                /* the classic scripts' base for import(): a string (0: the current directory) */
+    /* the host's module loader: the specifier (a string) resolved against the referrer
+       (a module's URL; 0 for a classic script's import(), whose base is base_url), its
+       URL and its source (strings); 0 when it cannot, the message in *source. With none,
+       files are read */
+    int (*load_module)(js_vm *vm, uint32_t spec, uint32_t referrer, uint32_t *url, uint32_t *source);
     uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
     uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
     uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
@@ -337,7 +389,9 @@ typedef struct js_vm {
     vector_uint32_t_drop(&(v).re_code); vector_uint32_t_drop(&(v).re_hash); vector_uint32_t_drop(&(v).re_stack); \
     vector_uint32_t_drop(&(v).re_caps); vector_uint32_t_drop(&(v).re_regs); vector_uint8_t_drop(&(v).bytes); \
     vector_js_big_drop(&(v).bigs); vector_uint32_t_drop(&(v).bigl); vector_js_evalbind_drop(&(v).eval_binds); \
-    vector_js_evalsite_drop(&(v).eval_sites); vector_js_evalcache_drop(&(v).eval_cache)
+    vector_js_evalsite_drop(&(v).eval_sites); vector_js_evalcache_drop(&(v).eval_cache); \
+    vector_js_module_drop(&(v).modules); vector_js_modreq_drop(&(v).mod_reqs); vector_js_modimp_drop(&(v).mod_imps); \
+    vector_js_modexp_drop(&(v).mod_exps); vector_js_modinit_drop(&(v).mod_inits); vector_js_modbind_drop(&(v).mod_binds)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -488,6 +542,20 @@ enum { JBG_CTOR, JBG_ASINTN, JBG_ASUINTN, JBG_TOSTRING, JBG_TOLOCALE, JBG_VALUEO
 jv js_big_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_big_init(js_vm *vm, uint32_t first);
 
+/* modules (src/js/module.c): a module's graph loaded (spec resolved against referrer, a
+   module or 0 for the classic scripts' base), linked and evaluated, the promise of its
+   evaluation returned (0 with an exception thrown); a source run as the main module (its
+   URL given); import()'s promise; import.meta; a module's namespace; the natives' cases */
+uint32_t js_module_import(js_vm *vm, uint32_t spec, uint32_t referrer);
+uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n);    /* an environment of n cells (src/js/vm.c) */
+uint32_t js_module_main(js_vm *vm, uint32_t url, const char *src, size_t n);
+jv js_module_dynamic(js_vm *vm, jv spec, uint32_t referrer);
+jv js_module_meta(js_vm *vm, uint32_t m);
+jv js_module_namespace(js_vm *vm, uint32_t m);
+enum { JMD_NS_GET, JMD_ASYNC_OK, JMD_ASYNC_ERR, JMD_DYN_RUN, JMD_DYN_DONE, JMD_DYN_FAIL, JMD_META_RESOLVE, JMD_N };
+jv js_module_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_module_init(js_vm *vm, uint32_t first);
+
 /* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
 enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };
 uint32_t js_coll_new(js_vm *vm, uint32_t kind, uint32_t proto);
@@ -583,7 +651,7 @@ int js_set_ic(js_vm *vm, jv obj, uint32_t atom, jv v, uint32_t ic);
    event), an eval's code in the global scope (indirect eval: its completion value
    returned), the Function constructor's source (one function expression, checked to be
    no more), an eval's code in its caller's scopes (direct eval, the site vm->eval_site) */
-enum { JS_CC_SCRIPT, JS_CC_HANDLER, JS_CC_EVAL, JS_CC_FUNCTION, JS_CC_DIRECT };
+enum { JS_CC_SCRIPT, JS_CC_HANDLER, JS_CC_EVAL, JS_CC_FUNCTION, JS_CC_DIRECT, JS_CC_MODULE };
 int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, uint32_t *func, vector<char> *err);
 /* the interpreter (src/js/vm.c) */
 jv js_run(js_vm *vm, uint32_t entry_frames);
@@ -718,6 +786,11 @@ enum {
     OP_EVALVAR_DEF,                               /* u8 depth, u16 cell, u32 atom, u8 func: v -> : a sloppy eval's var
                                                      (or function) declared in its caller's eval vars object */
     OP_TO_OBJECT,                                 /* v -> ToObject(v): with's object */
+    /* modules */
+    OP_GET_IMPORT,                                /* u32 binding, u32 atom: an imported name's value, read where its
+                                                     module's binding lives (vm->mod_binds) */
+    OP_IMPORT_META,                               /* -> this module's import.meta */
+    OP_IMPORT_DYN,                                /* spec options -> import(spec)'s promise */
     OP_NOP,
     OP_NOPS
 };
