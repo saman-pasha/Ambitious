@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Zoom</title>
+<style>
+/* tests/pages/zoom.html: a page drawn zoomed, two device px a CSS px (tests/pages/zoom.zoom),
+   each case in a cell of its own (the cell, which has the id, is the region
+   tests/integ/paintref.sh compares with Chromium's screenshot, taken zoomed by
+   tools/bench/shot.js --zoom 2): text set at the larger size, in each of the built-in
+   faces (the cells text-..., which are held to how much of their ink is anti-aliased);
+   a hairline border, a rounded one with a shadow; a gradient; a transform */
+body { margin: 0; background: white; font: 16px serif }
+.cell { display: inline-block; width: 110px; height: 80px; padding: 10px; margin: 0; vertical-align: top; overflow: hidden }
+p { margin: 0 }
+</style>
+</head>
+<body>
+<div class=cell id=text-serif><p>The quick brown fox jumps over the lazy dog.</p></div><div class=cell id=text-sans style="font-family: sans-serif"><p>Pack my box with five dozen liquor jugs, 1234567890.</p></div><div class=cell id=text-mono style="font: 13px monospace"><p>while (n &gt; 0) n--;<br>return x * 2;</p></div>
+<div class=cell id=text-styled><p><b>Bold</b>, <i>italic</i> and <u>underlined</u> words, small <small>print</small>.</p></div><div class=cell id=boxes><div style="width: 100px; height: 25px; border: 1px solid #333; margin-bottom: 10px"></div><div style="width: 100px; height: 30px; border: 3px solid #36e; border-radius: 12px; box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.4)"></div></div><div class=cell id=gradient><div style="width: 110px; height: 80px; background: repeating-linear-gradient(45deg, #222 0 6px, #fd4 6px 12px)"></div></div>
+<div class=cell id=turned><div style="width: 90px; height: 40px; margin: 15px 10px; border: 2px solid #c33; transform: rotate(-12deg); font: 12px sans-serif">turned</div></div><div class=cell id=text-small style="font-size: 9px"><p>Nine px text, set at eighteen device px when zoomed.</p></div><div class=cell id=text-big style="font: bold 28px serif">Big</div>
+</body>
+</html>

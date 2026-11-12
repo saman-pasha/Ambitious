@@ -1,0 +1,10 @@
+# tests/pages/zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-serif 0 0 260 200
+text-sans 260 0 520 200
+text-mono 520 0 780 200
+text-styled 0 200 260 400
+boxes 260 200 520 400
+gradient 520 200 780 400
+turned 0 400 260 600
+text-small 260 400 520 600
+text-big 520 400 780 600

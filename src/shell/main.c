@@ -588,7 +588,7 @@ static void session_prefs(session *s) {
    has the preferences beside it (src/rt/amb_prefs.h says what each is to do): the
    cascade reads the default font size, the colour scheme and reduced motion, and the
    viewport the zoom leaves (css_set_env); layout runs over that viewport, in CSS px;
-   paint draws the page at its CSS px and scales it zoom device px each */
+   paint draws the page at the device's px, its lengths scaled zoom device px each */
 static void page_state(css_style *st, dom_document *d);
 /* the cascade, after the page's states asked for (--hover, --focus, --active), with the
    reader's preferences: the viewport the zoom leaves, the default font size, the colour
@@ -604,22 +604,17 @@ static void page_layout(layout_tree *lt, dom_document *d, css_style *st, net_loa
     double z = pr && pr->zoom > 0 ? pr->zoom : 1;
     layout_run(lt, d, st, nt, VIEW_W / z, VIEW_H / z);
 }
-/* the page drawn at its CSS px, then, zoomed, scaled to the device's */
+/* the page drawn at the device's px: zoomed, its lengths scaled first, so its text is set
+   at the larger size */
 static void page_paint(const layout_tree *lt, const net_loader *nt, amb_canvas *c, const amb_prefs *pr) {
     double z = pr && pr->zoom > 0 ? pr->zoom : 1;
     if (z == 1) { amb_paint(lt, nt, c); return; }
-    amb_canvas css = {0};
-    defer(css) { AMB_CANVAS_DROP(css); }
-    amb_paint(lt, nt, &css);
-    amb_canvas_zoom(&css, c, z);
+    amb_paint_zoom(lt, nt, c, z, 0, 0);
 }
 static void page_paint_view(const layout_tree *lt, const net_loader *nt, amb_canvas *c, double y, double h, const amb_prefs *pr) {
     double z = pr && pr->zoom > 0 ? pr->zoom : 1;
     if (z == 1) { amb_paint_view(lt, nt, c, y, h); return; }
-    amb_canvas css = {0};
-    defer(css) { AMB_CANVAS_DROP(css); }
-    amb_paint_view(lt, nt, &css, y / z, h / z);
-    amb_canvas_zoom(&css, c, z);
+    amb_paint_zoom(lt, nt, c, z, y, h);
 }
 
 /* the URL of a page named by a URL or by a file's path */

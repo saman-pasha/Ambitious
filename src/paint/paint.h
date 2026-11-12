@@ -23,8 +23,11 @@ void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c);
 /* the window of the page from y down h px, as wide as the viewport, drawn onto c: what
    a screen of that height shows scrolled to y. What lies outside it is not drawn */
 void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h);
-/* a page drawn at its CSS px (src) scaled onto dst, z device px each: the reader's zoom
-   (bilinear: text is not set again at the larger size) */
+/* the page zoomed, z device px a CSS px, drawn onto c at the device's px: its lengths
+   scaled before it is drawn, so its text is set at the larger size; its window from
+   device px y down h (h 0: the whole page) */
+void amb_paint_zoom(const layout_tree *t, const net_loader *nt, amb_canvas *c, double z, double y, double h);
+/* a page drawn at its CSS px (src) scaled onto dst, z device px each (bilinear) */
 void amb_canvas_zoom(const amb_canvas *src, amb_canvas *dst, double z);
 
 /* the canvas as a PNG (8-bit RGB, deflated); 0 on a write error */

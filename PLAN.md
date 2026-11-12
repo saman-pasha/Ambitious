@@ -682,7 +682,8 @@ be built side by side and merged without touching each other's.
     transforms (4x4 matrices, a parent's perspective, each plane drawn
     through its homography, backface-visibility as Chromium tests it, the
     planes of a preserve-3d space drawn far to near) and the individual
-    transforms; dashed and
+    transforms; a zoomed page drawn at the device's px from a copy of its
+    box tree with every length scaled, its text set at the larger size; dashed and
     dotted borders laid round rounded corners as Blink lays them (its dash
     ratios, its path's start, Skia's arc lengths), and the corners where
     unlike sides meet split along their diagonals (Blink's miters), each

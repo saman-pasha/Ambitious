@@ -42,4 +42,4 @@ the session was private: nothing of it is stored
 with:    rendered 800x600: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:183561c5cea9e054
 without: rendered 800x600: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:428559f6058b31f5
 -- zoomed 2: laid out in a 400 x 300 px viewport, drawn twice as large:
-rendered 800x818: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:0a5834ba4194c35c
+rendered 800x818: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:2524a2afa06a8706

@@ -3,8 +3,12 @@
 region: for each line of REGIONS (id x0 y0 x1 y1, as tools/bench/shot.js writes them;
 lines starting # skipped), the share of the region's pixels whose colours differ by more
 than the tolerance in any channel (anti-aliasing's differences fall within it), and the
-largest difference. Prints `ID SHARE% MAX` a region. The PNGs are read by this script's
-own decoder (8-bit RGB or RGBA, any filter, not interlaced), so nothing is installed."""
+largest difference. Prints `ID SHARE% MAX` a region. A region whose id starts `text-`
+holds text, which each engine sets a pixel or two apart: of it, the share of its inked
+pixels that are anti-aliased greys, in each drawing (text set at its size has about as
+many as Chromium's; a drawing scaled up has many more): `ID grey A B`. The PNGs are read
+by this script's own decoder (8-bit RGB or RGBA, any filter, not interlaced), so nothing
+is installed."""
 import struct
 import sys
 import zlib
@@ -54,6 +58,20 @@ def read_png(path):
     return w, h, bpp, rows
 
 
+def grey_share(rows, bpp, x0, y0, x1, y1):
+    """of the region's inked pixels (darker than white), the share that are greys"""
+    grey = ink = 0
+    for y in range(y0, y1):
+        r = rows[y]
+        for x in range(x0, x1):
+            v = (r[x * bpp] + r[x * bpp + 1] + r[x * bpp + 2]) / 3
+            if v < 250:
+                ink += 1
+                if 40 <= v <= 215:
+                    grey += 1
+    return grey / ink if ink else 0.0
+
+
 def main():
     if len(sys.argv) != 4:
         raise SystemExit("usage: tools/pixdiff.py A.png B.png REGIONS")
@@ -65,6 +83,9 @@ def main():
         name, x0, y0, x1, y1 = line.split()
         x0, y0 = max(0, int(x0)), max(0, int(y0))
         x1, y1 = min(int(x1), wa, wb), min(int(y1), ha, hb)
+        if name.startswith("text-"):
+            print("%s grey %.3f %.3f" % (name, grey_share(ra, ba, x0, y0, x1, y1), grey_share(rb, bb, x0, y0, x1, y1)))
+            continue
         total = bad = worst = 0
         for y in range(y0, y1):
             pa, pb = ra[y], rb[y]

@@ -2432,6 +2432,150 @@ static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, 
     if (vp) pt_ctx(t, nt, c, skip, &f, &webmap, &entries, &table, &masks, &acc, &mask, &icache, &ipx, vp);
 }
 
+/* ---- zoom: the page drawn at the device's px, its text set at the larger size ---- */
+
+static int pt_digit(char c) { return c >= '0' && c <= '9'; }
+static int pt_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+static int pt_alnum(char c) { return pt_digit(c) || pt_alpha(c); }
+
+/* the text s with each px length scaled by z (url()s and strings as they are), into out */
+static void pt_scale_px(const char *s, size_t n, double z, vector<char> *out) {
+    size_t i = 0;
+    while (i < n) {
+        char ch = s[i];
+        int start = i == 0 || !(pt_alnum(s[i - 1]) || s[i - 1] == '-' || s[i - 1] == '_' || s[i - 1] == '#' || s[i - 1] == '.');
+        if (ch == '"' || ch == '\'') {
+            size_t e = i + 1;
+            while (e < n && s[e] != ch) e += s[e] == '\\' ? 2 : 1;
+            if (e > n) e = n;
+            size_t stop = e < n ? e + 1 : n;
+            append_range(*out, s + i, stop - i);
+            i = stop;
+            continue;
+        }
+        if (start && i + 4 <= n && pt_is_ci(s + i, 4, "url(")) {
+            size_t e = i + 4;
+            while (e < n && s[e] != ')') e++;
+            size_t stop = e < n ? e + 1 : n;
+            append_range(*out, s + i, stop - i);
+            i = stop;
+            continue;
+        }
+        if (start && (pt_digit(ch) || ((ch == '.' || ch == '-' || ch == '+') && i + 1 < n &&
+                                                     (pt_digit(s[i + 1]) || s[i + 1] == '.')))) {
+            /* a number: its sign, digits, point and exponent; then its unit */
+            size_t e = i + (ch == '-' || ch == '+');
+            while (e < n && (pt_digit(s[e]) || s[e] == '.')) e++;
+            if (e + 1 < n && (s[e] == 'e' || s[e] == 'E') && (pt_digit(s[e + 1]) ||
+                                                           ((s[e + 1] == '-' || s[e + 1] == '+') && e + 2 < n && pt_digit(s[e + 2])))) {
+                e += 2;
+                while (e < n && pt_digit(s[e])) e++;
+            }
+            size_t u = e;
+            while (u < n && pt_alpha(s[u])) u++;
+            if (u - e == 2 && pt_is_ci(s + e, 2, "px") && e - i < 40) {
+                char num[48], buf[48];
+                memcpy(num, s + i, e - i);
+                num[e - i] = 0;
+                int bn = snprintf(buf, sizeof buf, "%gpx", strtod(num, 0) * z);
+                if (bn > 0) append_range(*out, buf, (size_t)bn);
+            } else append_range(*out, s + i, u - i);
+            i = u;
+            continue;
+        }
+        push_back(*out, ch);
+        i++;
+    }
+}
+
+/* a value of zt's (its span sp) with its px lengths scaled by z: a new span when that
+   changed it */
+static amb_span pt_zoom_span(layout_tree *zt, amb_span sp, double z) {
+    if (!sp.len) return sp;
+    vector<char> src, out;
+    append_range(src, text_ptr(zt, sp), sp.len);
+    pt_scale_px(data(src), len(src), z, &out);
+    if (len(out) == len(src) && memcmp(data(out), data(src), len(src)) == 0) return sp;
+    return text_add(zt, data(out), len(out));
+}
+
+/* the tree t copied into zt (empty) with every length paint reads scaled by z: each box's
+   and line's geometry, a box's radii and outline, a fragment's place, font size and
+   spacing, and the px lengths in the values paint reads as text. The records keep their
+   indices and the text its offsets (the pool copied whole after its first byte) */
+static void pt_zoom_tree(const layout_tree *t, double z, layout_tree *zt) {
+    if (t->text_len > 1) {
+        amb_span all = { 1, (uint32_t)(t->text_len - 1) };
+        text_add(zt, text_ptr(t, all), all.len);
+    }
+    for (uint32_t i = 1; i < t->box_len; i++) {
+        box_new(zt);
+        layout_box *b = box_slot(zt, i);
+        *b = t->box[i];
+        b->x *= z; b->y *= z; b->w *= z; b->h *= z;
+        b->mt *= z; b->mr *= z; b->mb *= z; b->ml *= z;
+        b->bt *= z; b->br *= z; b->bb *= z; b->bl *= z;
+        b->pt *= z; b->pr *= z; b->pb *= z; b->pl *= z;
+        b->avail *= z; b->dx *= z; b->dy *= z;
+        b->rtl *= z; b->rtr *= z; b->rbr *= z; b->rbl *= z;
+        b->rtlv *= z; b->rtrv *= z; b->rbrv *= z; b->rblv *= z;
+        b->ow *= z; b->ooffset *= z;
+    }
+    for (uint32_t i = 1; i < t->box_len; i++) {
+        amb_span sp[11] = { t->box[i].shadows, t->box[i].bg_image, t->box[i].bg_pos, t->box[i].bg_size, t->box[i].transform, t->box[i].origin,
+                            t->box[i].filter, t->box[i].backdrop, t->box[i].translate, t->box[i].persp, t->box[i].porigin };
+        for (int k = 0; k < 11; k++) sp[k] = pt_zoom_span(zt, sp[k], z);
+        layout_box *b = box_slot(zt, i);
+        b->shadows = sp[0];
+        b->bg_image = sp[1];
+        b->bg_pos = sp[2];
+        b->bg_size = sp[3];
+        b->transform = sp[4];
+        b->origin = sp[5];
+        b->filter = sp[6];
+        b->backdrop = sp[7];
+        b->translate = sp[8];
+        b->persp = sp[9];
+        b->porigin = sp[10];
+    }
+    for (uint32_t i = 1; i < t->line_len; i++) {
+        line_new(zt);
+        layout_line *l = line_slot(zt, i);
+        *l = t->line[i];
+        l->x *= z;
+        l->y *= z;
+        l->w *= z;
+        l->h *= z;
+        l->baseline *= z;
+    }
+    for (uint32_t i = 1; i < t->frag_len; i++) {
+        frag_new(zt);
+        amb_span sh = pt_zoom_span(zt, t->frag[i].shadows, z);
+        layout_frag *f = frag_slot(zt, i);
+        *f = t->frag[i];
+        f->x *= z;
+        f->y *= z;
+        f->w *= z;
+        f->h *= z;
+        f->baseline *= z;
+        f->size *= z;
+        f->spacing *= z;
+        f->word_spacing *= z;
+        f->shadows = sh;
+    }
+}
+
+/* the page zoomed, z device px a CSS px, drawn onto c: its tree copied with its lengths
+   scaled and drawn as it is, its text set at the larger size as Chromium sets a zoomed
+   page's; its window from device px y down h (h 0: the whole page, at most 16384 CSS px) */
+void amb_paint_zoom(const layout_tree *t, const net_loader *nt, amb_canvas *c, double z, double y, double h) {
+    if (z <= 0) z = 1;
+    layout_tree zt;
+    layout_init(&zt, t->id);
+    pt_zoom_tree(t, z, &zt);
+    pt_paint(&zt, nt, c, y, h > 0 ? h : 16384 * z);
+}
+
 void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) { pt_paint(t, nt, c, 0, 16384); }
 
 void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h) { pt_paint(t, nt, c, y, h); }
