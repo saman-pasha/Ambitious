@@ -1989,7 +1989,25 @@ static int ax_url_ok(const char *p, size_t n) {
     while (i < n && (ax_alnum(p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.')) i++;
     if (i >= n || p[i] != ':') return 0;
     vector<char> ref, out;
-    append_range(ref, p, n);
+    /* a space in a special scheme's host, written or as %20, Chromium's parser takes (it escapes it), where the URL
+       standard refuses it: the host is judged without its spaces (measured on tests/pages/a11y-url.html) */
+    int special = (i == 4 && (ax_word_is(p, 4, "http") || ax_word_is(p, 4, "file"))) || (i == 5 && ax_word_is(p, 5, "https")) ||
+                  (i == 3 && ax_word_is(p, 3, "ftp")) || (i == 2 && ax_word_is(p, 2, "ws")) || (i == 3 && ax_word_is(p, 3, "wss"));
+    size_t hb = n, he = n;
+    if (special && i + 2 < n && p[i + 1] == '/' && p[i + 2] == '/') {
+        hb = i + 3;
+        he = hb;
+        while (he < n && p[he] != '/' && p[he] != '?' && p[he] != '#' && p[he] != '\\') he++;
+        for (size_t k = hb; k < he; k++) if (p[k] == '@') hb = k + 1;
+        if (hb < he && p[hb] == '[') hb = he;   /* an IPv6 address keeps its spaces, which Chromium refuses too */
+    }
+    for (size_t k = 0; k < n; k++) {
+        if (k >= hb && k < he) {
+            if (p[k] == ' ') continue;
+            if (p[k] == '%' && k + 2 < he && p[k + 1] == '2' && p[k + 2] == '0') { k += 2; continue; }
+        }
+        push_back(ref, p[k]);
+    }
     push_back(ref, 0);
     resize(out, 3 * n + 256);
     return net_url_resolve("about:blank", data(ref), data(out), len(out));
