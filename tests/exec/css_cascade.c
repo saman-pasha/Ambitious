@@ -6,7 +6,9 @@
    it has one, names a pseudo-element of t whose value it is ("::before"; "(none)"
    when t has none), or a state the page is in before the cascade (":hover",
    ":focus" -- :focus-visible too, as the command's --focus has it -- ":active") at
-   the element whose id is h, or t when there is none. */
+   the element whose id is h, or t when there is none. A case's page is a standards-mode
+   page (a DOCTYPE is put first) unless it begins with <! itself: a comment there makes
+   a quirks-mode page, whose cases are measured in Chromium. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -360,6 +362,31 @@ static const tcase cases[] = {
     { "li", "<ul><li id=t>x</ul>", CSS_PROP_DISPLAY, "list-item" },
     { "td", "<table><tr><td id=t>x</table>", CSS_PROP_DISPLAY, "table-cell" },
     { "span", "<span id=t>x</span>", CSS_PROP_DISPLAY, "inline" },
+    /* a quirks-mode page (no DOCTYPE; the Quirks Mode Standard, as Chromium reads it) */
+    { "quirks: a length without its unit, px", "<!--q--><style>p { margin-top: 5 }</style><p id=t>x", CSS_PROP_MARGIN_TOP, "5px" },
+    { "quirks: through margin's shorthand", "<!--q--><style>p { margin: 1 2 3 4 }</style><p id=t>x", CSS_PROP_MARGIN_LEFT, "4px" },
+    { "quirks: not through border's", "<!--q--><style>p { border: 3 solid }</style><p id=t>x", CSS_PROP_BORDER_TOP_STYLE, "none" },
+    { "quirks: a style attribute's", "<!--q--><p id=t style='width: 120'>x", CSS_PROP_WIDTH, "120px" },
+    { "quirks: a colour without its #", "<!--q--><style>p { color: ff0000 }</style><p id=t>x", CSS_PROP_COLOR, RED },
+    { "quirks: an integer's digits", "<!--q--><style>p { color: 123456 }</style><p id=t>x", CSS_PROP_COLOR, "rgb(18, 52, 86)" },
+    { "quirks: an integer and its unit", "<!--q--><style>p { background-color: 12ab }</style><p id=t>x", CSS_PROP_BACKGROUND_COLOR, "rgb(0, 18, 171)" },
+    { "quirks: no exponent", "<!--q--><style>p { color: red; color: 1e3 }</style><p id=t>x", CSS_PROP_COLOR, RED },
+    { "quirks: not outline's colour", "<!--q--><style>p { outline-color: 0000ff }</style><p id=t>x", CSS_PROP_OUTLINE_COLOR, BLACK },
+    { "quirks: through border-color", "<!--q--><style>p { border-color: abc def }</style><p id=t>x", CSS_PROP_BORDER_RIGHT_COLOR, "rgb(221, 238, 255)" },
+    { "standards: no colour without its #", "<style>p { color: red; color: ff0000 }</style><p id=t>x", CSS_PROP_COLOR, RED },
+    { "quirks: a class without case", "<!--q--><style>.Foo { color: red }</style><p id=t class=foo>x", CSS_PROP_COLOR, RED },
+    { "quirks: an id without case", "<!--q--><style>#T { color: red }</style><p id=t>x", CSS_PROP_COLOR, RED },
+    { "quirks: an attribute's value with it", "<!--q--><style>[class=Foo] { color: red }</style><p id=t class=foo>x", CSS_PROP_COLOR, BLACK },
+    { "quirks: :hover alone, a link's alone", "<!--q--><style>:hover { color: red }</style><p id=t>x", CSS_PROP_COLOR, BLACK, ":hover" },
+    { "quirks: :hover with a type", "<!--q--><style>p:hover { color: red }</style><p id=t>x", CSS_PROP_COLOR, RED, ":hover" },
+    { "quirks: :hover of a link", "<!--q--><style>:hover { color: red }</style><a id=t href=#x>x</a>", CSS_PROP_COLOR, RED, ":hover" },
+    { "quirks: :hover in :is()", "<!--q--><style>:is(:hover) { color: red }</style><p id=t>x", CSS_PROP_COLOR, RED, ":hover" },
+    { "quirks: a table's font size reset", "<!--q--><body style='font-size: 30px'><table id=t><tr><td>x</table>", CSS_PROP_FONT_SIZE, "16px" },
+    { "quirks: a table's colour, the body's", "<!--q--><body style='color: green'><div style='color: red'><table id=t><tr><td>x</table></div>",
+      CSS_PROP_COLOR, GREEN },
+    { "quirks: a text field's box-sizing", "<!--q--><input id=t>", CSS_PROP_BOX_SIZING, "border-box" },
+    { "limited quirks: no length without its unit", "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\">"
+      "<style>p { margin-top: 5 }</style><p id=t>x", CSS_PROP_MARGIN_TOP, "16px" },
 };
 
 /* the element whose id is the letter c */
@@ -389,7 +416,12 @@ int main(void) {
         dom_init(&d, 1);
         html_init(&p, 1);
         css_init(&st, 1);
-        html_parse(&p, &d, cases[i].html, strlen(cases[i].html));
+        /* a standards-mode page, as the cases are written: a DOCTYPE first, unless the case's
+           own page begins with one or a comment (a quirks-mode page when it has none) */
+        vector<char> src;
+        if (strncmp(cases[i].html, "<!", 2) != 0) append_range(src, "<!DOCTYPE html>", 15);
+        append_range(src, cases[i].html, strlen(cases[i].html));
+        html_parse(&p, &d, data(src), len(src));
         uint32_t x = find_id(&d, 't'), h = find_id(&d, 'h');
         if (cases[i].where && cases[i].where[0] == ':' && cases[i].where[1] != ':') {
             /* the state the case puts the page in, at h (or t) */

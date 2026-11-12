@@ -860,6 +860,48 @@ be built side by side and merged without touching each other's.
   screenshot region by region (`tests/integ/paintref.sh`: 37, 40, 9, 11 and
   9 regions agree); `tests/exec/svg_render` (path data, coverage, natural
   sizes, scenes, hostile documents; valgrind clean).
+- **12r Quirks mode** (`src/html/tree.c`, `contracts/dom.pl`; the quirks in
+  `src/css/css.c` and `src/layout/layout.c`, a broken image's in
+  `src/paint/paint.c`; `document.compatMode` in `src/script/input.c`, the
+  body's client size in `src/script/script.c`):
+  - the document's mode decided by the tree builder as HTML 13.2.6.4.1 has it
+    (the public and system identifier lists; limited-quirks for XHTML 1.0's
+    transitional and frameset DOCTYPEs and HTML 4.01's with a system
+    identifier), kept on the document node (`dom_set_mode`), a fact
+    (`dom_mode/2`, `dom_document_mode/2`), a fragment parsed in its document's
+    mode, and `document.compatMode`;
+  - the Quirks Mode Standard's quirks as Blink applies them, each measured in
+    Chromium first: hashless colours and unitless lengths for the properties
+    that take them (never through `border`, `font`, `background`, `inset` or a
+    function); class and id selectors without ASCII case (the rules' keys and
+    `getElementsByClassName` too); `:hover` and `:active` alone holding of
+    links alone; Chromium's quirks sheet
+    (a table resets the text's properties and takes the body's colour, a text
+    field and a textarea are sized by their border box, a form's bottom margin,
+    a floated image's 3px); the line height quirk, in limited-quirks mode too (a
+    block's strut on a line with its own text or on a list item's lines, an
+    inline box's on a line with its text or an edge's border or padding, a
+    forced break's on a line of nothing else); Blink's quirky margins (the user
+    agent's of a p, a heading, a list, a blockquote, a pre) left out at the
+    start and the end of the body and of a table cell; the html element and the
+    body filling the viewport, their margins as they collapse taken off, and a
+    percentage height taken through the blocks of an auto height up to them; a
+    cell's height its border box's; a nowrap cell of a length's width at least
+    that wide; no wrap around an img in an auto-width cell's min-content; an
+    empty table's height none; a broken image of a declared size a box of it
+    (one dimension the other's too), its alt text laid out and drawn in it as
+    Blink's fallback has it; the body's `clientWidth` and `clientHeight` the
+    viewport's, the root element's its own (CSSOM View's quirk);
+  - in every mode, as the quirks' pages need them: a cell's `nowrap` and an
+    image's `align` left or right (a float) read as presentational hints.
+
+  Gate: Chromium's mode for 107 document starts (`tests/exec/quirks_mode`,
+  `tools/bench/doctypes.js`; the four whose system identifier is empty kept as
+  the standard has them); `tests/pages/quirks-*.html`, quirks-mode pages and one
+  limited-quirks page, held to Chromium's boxes (337 of 337), regions (35 of 35)
+  and computed values (156 of 156, `:hover` measured with the mouse over the
+  page: `tests/pages/NAME.hover`); the mode's facts (`tests/integ/quirks.sh`);
+  every standards-mode page unmoved.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

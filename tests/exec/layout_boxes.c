@@ -8,7 +8,9 @@
    hyphenation, bidirectional text, generated content; grid areas and named lines,
    a column flow, items spanning tracks; flex items and containers on their baselines;
    sticky boxes at rest; an inline element as a containing block; bidirectional text by
-   characters (brackets mirrored, numbers, isolates). */
+   characters (brackets mirrored, numbers, isolates). A case's page is a standards-mode page (a
+   DOCTYPE is put first) unless it begins with <! itself: a comment there makes a quirks-mode
+   page, whose quirks tests/pages/quirks-*.html hold to Chromium. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -69,6 +71,15 @@ static const lcase cases[] = {
     { "an inline-flex's baseline, its first item's border box's bottom", "<p id=p>x <span id=a style='display:inline-flex'><span id=b style='display:block;width:20px;height:30px'></span><span>y</span></span></p>" },
     { "an absolutely positioned box in a relatively positioned span", "<p id=p>x <span id=t style='position:relative;padding:0 4px'>yy<span id=a style='position:absolute;right:0;bottom:0;width:5px;height:5px'></span></span></p>" },
     { "sticky boxes moved in from the viewport's edges, within their blocks", "<div id=t style='height:200px'><div id=a style='position:sticky;top:50px'>x</div></div><div style='height:700px'><div style='height:650px'></div><div id=b style='position:sticky;bottom:0'>y</div></div>" },
+    /* a quirks-mode page (no DOCTYPE): its quirks as Chromium lays them out (tests/pages/quirks-*.html) */
+    { "quirks: the body's first p's top margin left out, the body filling the viewport", "<!--q--><body id=t><p id=a>A</p><p id=b>B</p>" },
+    { "quirks: a table cell's p's margins left out, its h1's bottom one kept", "<!--q--><table><tr><td id=a><p>x</p></td><td id=b><h1>y</h1></td></tr></table>" },
+    { "quirks: an inline-block alone on its line, no strut", "<!--q--><div id=a><span id=b style='display:inline-block;width:10px;height:10px'></span></div>" },
+    { "quirks: a span's own line height, not the block's", "<!--q--><div id=a style='line-height:50px'><span style='line-height:10px'>text</span></div>" },
+    { "quirks: a percentage height through an auto one, to the body's", "<!--q--><div id=t><div id=a style='height:50%'>x</div></div>" },
+    { "quirks: a cell's height its border box's", "<!--q--><table><tr><td id=a style='height:50px;padding:10px'>x</td></tr></table>" },
+    { "limited quirks: no strut, but the margins and heights of standards mode",
+      "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"><p id=a><span id=b style='display:inline-block;width:10px;height:10px'></span></p>" },
 };
 
 static uint32_t find_id(const dom_document *d, const char *id) {
@@ -116,7 +127,12 @@ int main(void) {
         html_init(&p, 1);
         css_init(&st, 1);
         layout_init(&t, 1);
-        html_parse(&p, &d, cases[i].html, strlen(cases[i].html));
+        /* a standards-mode page, as the cases are written: a DOCTYPE first, unless the case's own
+           page begins with one or a comment (a quirks-mode page when it has none) */
+        vector<char> src;
+        if (strncmp(cases[i].html, "<!", 2) != 0) append_range(src, "<!DOCTYPE html>", 15);
+        append_range(src, cases[i].html, strlen(cases[i].html));
+        html_parse(&p, &d, data(src), len(src));
         css_cascade(&st, &d, 0);
         layout_status s = layout_run(&t, &d, &st, 0, 800, 600);
         printf("%s (%s, invariants: %d broken)\n", cases[i].what, layout_status_name(s), layout_check_invariants(&t, stdout));

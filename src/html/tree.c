@@ -29,6 +29,16 @@
    modes, select in the default scope, and the start tags of input, select,
    option, optgroup and hr closing or keeping what a select holds.
 
+   The document's mode (13.2.6.4.1): quirks mode when the DOCTYPE asks for it (its force-quirks
+   flag, a name other than html, the public and system identifiers the standard lists) or
+   there is none; limited-quirks mode for XHTML 1.0's transitional and frameset identifiers
+   and HTML 4.01's with a system identifier; kept on the document (dom_set_mode). A fragment
+   is parsed in quirks mode when its document is. Not done as Chromium does it: an empty
+   system identifier is one that is there, as the standard has it, where Blink takes it for a
+   missing one (HTML 4.01's transitional and frameset identifiers with it are quirks mode in
+   Chromium, limited-quirks mode here); and no document is an iframe's srcdoc document (no
+   iframes are read).
+
    The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
    run): noscript's content is then raw text. Everything else follows the standard's
    steps, by its names. */
@@ -263,6 +273,13 @@ typedef struct html_tb {
 #define opts (&c->l_opts)
 
 static void html_terr(CTX) { push_back(errs, c->tok); }
+
+/* the document set to quirks mode (13.2.6.4.1): the builder's flag, and the mode kept on
+   the document, where CSS and layout read it */
+static void set_quirks(CTX) {
+    c->quirks = 1;
+    dom_set_mode(d, DOM_DOCUMENT_MODE_QUIRKS);
+}
 
 /* ---- the token being processed ---- */
 static html_token_kind tk_kind(const html_parser *p, uint32_t t) { return p->token[t].kind; }
@@ -1021,7 +1038,7 @@ static void characters(CTX, const char *s, size_t n) {
         int m = c->mode;
         if (m == M_INITIAL || m == M_BEFORE_HTML || m == M_BEFORE_HEAD) {
             if (ws) { s += ws; n -= ws; }
-            else if (m == M_INITIAL) { html_terr(ARGS); c->quirks = 1; c->mode = M_BEFORE_HTML; }
+            else if (m == M_INITIAL) { html_terr(ARGS); set_quirks(ARGS); c->mode = M_BEFORE_HTML; }
             else if (m == M_BEFORE_HTML) { insert_html_root(ARGS); c->mode = M_BEFORE_HEAD; }
             else { c->head = insert_implied(ARGS, "head", T_HEAD); c->mode = M_IN_HEAD; }
         } else if (m == M_AFTER_AFTER_BODY || m == M_AFTER_AFTER_FRAMESET || m == M_AFTER_BODY) {
@@ -1546,7 +1563,9 @@ static int template_switch(CTX, int mode) {
     return 1;
 }
 
-/* 13.2.6.4.1: the doctype that puts the document in quirks mode */
+/* 13.2.6.4.1: the doctype that puts the document in quirks mode (1), or in limited-quirks
+   mode (2); 0 for no-quirks. The identifiers compare without ASCII case; an empty system
+   identifier is not a missing one */
 static int ci_prefix(const char *s, size_t n, const char *w) {
     size_t k = strlen(w);
     if (n < k) return 0;
@@ -1596,6 +1615,11 @@ static int doctype_quirks(const html_parser *p, uint32_t t) {
             return 1;
     }
     if ((ids & 2) && ci_equal(bytes_ptr(p, sy), sy.len, "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd")) return 1;
+    if (ids & 1) {
+        if (ci_prefix(pp, pu.len, "-//W3C//DTD XHTML 1.0 Frameset//") || ci_prefix(pp, pu.len, "-//W3C//DTD XHTML 1.0 Transitional//")) return 2;
+        if ((ids & 2) && (ci_prefix(pp, pu.len, "-//W3C//DTD HTML 4.01 Frameset//") || ci_prefix(pp, pu.len, "-//W3C//DTD HTML 4.01 Transitional//")))
+            return 2;
+    }
     return 0;
 }
 
@@ -1617,12 +1641,14 @@ static int process(CTX, int mode) {
                                                bytes_ptr(p, pu), pu.len, bytes_ptr(p, sy), sy.len, (uint8_t)(ids & 3));
             if (!dt.index && named) dt = dom_create_doctype(d, "", 0, bytes_ptr(p, pu), pu.len, bytes_ptr(p, sy), sy.len, (uint8_t)(ids & 3));
             if (dt.index) dom_append_child(d, dom_root(d), dt);
-            if (doctype_quirks(p, t)) c->quirks = 1;
+            int qm = doctype_quirks(p, t);
+            if (qm == 1) set_quirks(ARGS);
+            else if (qm == 2) dom_set_mode(d, DOM_DOCUMENT_MODE_LIMITED_QUIRKS);
             c->mode = M_BEFORE_HTML;
             return 0;
         }
         html_terr(ARGS);
-        c->quirks = 1;
+        set_quirks(ARGS);
         c->mode = M_BEFORE_HTML;
         return 1;
     case M_BEFORE_HTML:
@@ -2076,6 +2102,9 @@ html_status html_parse_fragment(html_parser *p, dom_document *d, const char *con
     init_tb(&tb);
     defer(tb) { HTML_TB_DROP(tb); }
     tb.fragment = 1;
+    /* in quirks mode when the document is: the context element's document's mode, which
+       the caller gives the fragment's document */
+    tb.quirks = d->node_len > 1 && d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS;
     tb.ctx_tag = ctx_tag;
     tb.ctx_ns = ns;
     tb.ctx_flags = ns == DOM_NAMESPACE_HTML ? html_flags(ctx_tag) : foreign_flags(ns, cn, cl, 0);

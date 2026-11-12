@@ -1,0 +1,49 @@
+<html id=html><head><title>Quirks: margins</title>
+<!-- No DOCTYPE: a quirks-mode page. Blink's quirky margins (the HTML Standard's margin
+     collapsing quirks, as Chromium has them): the user agent's top margin of a p, a heading, a
+     list, a blockquote or a pre, and the bottom one of a p or a pre, count for nothing at the
+     start and at the end of a quirky container (the body, a table cell) -- through the boxes
+     whose margins collapse with them there, and past empty ones -- and as any margin elsewhere;
+     an author's margin is never quirky. The body and the html element fill the viewport. A form's
+     bottom margin and a text field's border-box sizing (Chromium's quirks sheet). -->
+<style>
+body { font: 16px/20px sans-serif; }
+td { vertical-align: top; background: #eee; }
+.box { border: 1px solid #888; }
+</style></head><body id=body>
+<p id=p1>The body's first p: its top margin left out</p>
+<div id=w1><p id=p2>Its next p, as any p</p></div>
+<table id=t1><tr>
+<td id=c1><p id=c1p>p</p></td>
+<td id=c2><h1 id=c2h>h1</h1></td>
+<td id=c3><h3 id=c3h>h3</h3></td>
+<td id=c4><ul id=c4u><li>ul</li></ul></td>
+<td id=c5><blockquote id=c5b>bq</blockquote></td>
+<td id=c6><pre id=c6p>pre</pre></td>
+<td id=c7><dl id=c7d><dt>dl</dt></dl></td>
+<td id=c8><ol id=c8o><li>ol</li></ol></td>
+</tr></table>
+<table id=t2><tr>
+<td id=d1>a<p id=d1p>mid</p>b</td>
+<td id=d2><p id=d2a>first</p><p id=d2b>last</p></td>
+<td id=d3><div id=d3d><p id=d3p>in a div</p></div></td>
+<td id=d4><p id=d4e></p><p id=d4p>after an empty p</p></td>
+<td id=d5><div id=d5d style="margin-top: 10px"></div><p id=d5p>after a margin</p></td>
+<td id=d6><p id=d6p style="margin: 12px 0">an author's</p></td>
+<td id=d7><h2 id=d7h>h2</h2><p id=d7p>p</p></td>
+<td id=d8 class=box><p id=d8p>bordered cell</p></td>
+</tr></table>
+<table id=t3><tr>
+<th id=e1><p id=e1p>th</p></th>
+<td id=e2><figure id=e2f>figure</figure></td>
+<td id=e3><div id=e3d style="padding-top: 1px"><p id=e3p>padded div</p></div></td>
+<td id=e4><p id=e4p>p</p><div id=e4d style="margin-top: 0">div</div></td>
+<td id=e5><div id=e5d><p id=e5p>last in a div</p></div></td>
+<td id=e6><h4 id=e6h>h4</h4></td>
+<td id=e7><menu id=e7m><li>menu</li></menu></td>
+<td id=e8><xmp id=e8x>xmp</xmp></td>
+</tr></table>
+<form id=f1><input id=f1i style="width: 100px; padding: 5px"><textarea id=f1t style="width: 100px; height: 40px; padding: 5px"></textarea></form>
+<div id=f2>After the form's bottom margin (the quirks sheet's), the fields sized by their border boxes</div>
+<h1 id=h1>The body's last block: an h1</h1>
+</body></html>

@@ -1,0 +1,28 @@
+<html id=html><head><title>Quirks: heights</title>
+<!-- No DOCTYPE: a quirks-mode page. The html element fills the viewport and the body fills the
+     html element (the Quirks Mode Standard 3.6, 3.7): their auto heights the size they are given,
+     their margins taken off -- the body's as they collapse, its first child's through its top and
+     its last's through its bottom -- and the height their children's percentages take. The
+     percentage height calculation quirk (3.5): a percentage height (min-height and max-height
+     too) taken through every block container of an auto height up to the body's, but not through
+     one positioned absolutely, a table cell or a flex container. -->
+<style>
+body { font: 16px/20px sans-serif; margin: 10px 8px 12px; }
+div { background: rgba(0, 0, 0, 0.05); }
+</style></head><body id=body>
+<p id=p1>The body's first p, its top margin left out</p>
+<div id=a1 style="height: 10%">10% of the body's fill</div>
+<div id=a2><div id=a2b style="height: 5%">5%, through an auto div</div></div>
+<div id=a3 style="height: 100px"><div id=a3b><div id=a3c style="height: 50%">50% of 100px, two levels down</div></div></div>
+<div id=a4 style="position: relative"><div id=a4b style="height: 5%">through a relative div</div></div>
+<div id=a5 style="overflow: hidden"><div id=a5b style="height: 5%">through an overflow: hidden one</div></div>
+<div id=a6 style="display: flow-root"><div id=a6b style="height: 5%">through a flow root</div></div>
+<div id=a7 style="height: calc(5% + 10px)">calc(5% + 10px)</div>
+<div id=a8 style="min-height: 8%">min-height 8%</div>
+<div id=a9 style="height: 300px; max-height: 6%">max-height 6%</div>
+<div id=b1 style="display: flex"><div id=b1b style="height: 50%">not through a flex container</div></div>
+<table id=b2><tr><td id=b2c><div id=b2d style="height: 50%">not through a cell</div></td></tr></table>
+<div id=b3 style="position: absolute; top: 0; left: 500px; width: 100px"><div id=b3b><div id=b3c style="height: 50%">not through an absolute box</div></div></div>
+<div id=b4 style="position: absolute; top: 0; left: 650px; width: 100px; height: 20%">20% of the viewport</div>
+<p id=p2>The body's last p, its bottom margin through the body's</p>
+</body></html>

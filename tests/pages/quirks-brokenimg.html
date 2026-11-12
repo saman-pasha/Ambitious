@@ -1,0 +1,24 @@
+<html><head><title>Quirks: broken images</title>
+<!-- No DOCTYPE: a quirks-mode page. A broken image's fallback as Chromium lays it out in quirks
+     mode (tests/pages/brokenimg.html has standards mode's), each at a line's start: with a width or a height declared, a
+     box of that size, alt text or none -- one dimension declared, the other the same -- its
+     baseline its content box's bottom; with neither, as standards mode has it. Its border, icon
+     and alt text drawn as Chromium draws them (the alt text's regions, text-*, by their ink). -->
+<style>body { margin: 8px; font: 16px sans-serif; } p { margin: 0 0 6px; }</style>
+</head><body>
+<p id=p1><img id=text-sized src="missing.png" alt="Sized alt" width=120 height=40> b</p>
+<p id=p2><img id=i2 src="missing.png" alt="W" width=80> b</p>
+<p id=p3><img id=i3 src="missing.png" alt="H" height=30> b</p>
+<p id=p4><img id=i4 src="missing.png" alt="W" width=60 height=12> b</p>
+<p id=p5><img id=i5 src="missing.png" width=50> b</p>
+<p id=p6><img id=i6 src="missing.png" height=20> b</p>
+<p id=p7><img id=i7 src="missing.png" alt="" width=40> b</p>
+<p id=p8><img id=i8 src="missing.png" alt="Css" style="width: 70px; height: 25px"> b</p>
+<p id=p9><img id=text-long src="missing.png" alt="A rather long alternative text here" width=60 height=30> b</p>
+<p id=p10><img id=i10 src="missing.png" alt="Top" width=60 height=30 style="vertical-align: top"> b</p>
+<p id=p11><img id=i11 src="missing.png" alt="Pad" width=60 height=30 style="padding: 3px; border: 2px solid #00c"> b</p>
+<p id=p12><img id=i12 src="missing.png" alt="B" width=60 height=30 style="display: block"> b</p>
+<p id=p13><img id=i13 src="missing.png" alt="Edge" width=18 height=18> b</p>
+<p id=p14><img id=text-unsized src="missing.png" alt="Unsized"> b</p>
+<p id=p15><img id=i15 src="missing.png"> b</p>
+</body></html>

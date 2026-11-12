@@ -1,0 +1,107 @@
+quirks	<!DOCTYPE html PUBLIC "+//Silmaril//dtd html Pro v0r11 19970101//EN">
+quirks	<!DOCTYPE html PUBLIC "-//AS//DTD HTML 3.0 asWedit + extensions//">
+quirks	<!DOCTYPE html PUBLIC "-//AdvaSoft Ltd//DTD HTML 3.0 asWedit + extensions//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Level 1//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Level 2//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict Level 1//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict Level 2//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.1E//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.2 Final//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.2//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 1//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 2//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 3//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 1//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 2//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 3//">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict//EN">
+quirks	<!DOCTYPE html PUBLIC "-//IETF//DTD HTML//">
+quirks	<!DOCTYPE html PUBLIC "-//Metrius//DTD Metrius Presentational//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 HTML Strict//">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 HTML//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 Tables//">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 HTML Strict//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 HTML//">
+quirks	<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 Tables//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Netscape Comm. Corp.//DTD HTML//">
+quirks	<!DOCTYPE html PUBLIC "-//Netscape Comm. Corp.//DTD Strict HTML//EN">
+quirks	<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML 2.0//">
+quirks	<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML Extended 1.0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML Extended Relaxed 1.0//">
+quirks	<!DOCTYPE html PUBLIC "-//SQ//DTD HTML 2.0 HoTMetaL + extensions//EN">
+quirks	<!DOCTYPE html PUBLIC "-//SoftQuad Software//DTD HoTMetaL PRO 6.0::19990601::extensions to HTML 4.0//">
+quirks	<!DOCTYPE html PUBLIC "-//SoftQuad//DTD HoTMetaL PRO 4.0::19971010::extensions to HTML 4.0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Spyglass//DTD HTML 2.0 Extended//">
+quirks	<!DOCTYPE html PUBLIC "-//Sun Microsystems Corp.//DTD HotJava HTML//EN">
+quirks	<!DOCTYPE html PUBLIC "-//Sun Microsystems Corp.//DTD HotJava Strict HTML//">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3 1995-03-24//EN">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2 Draft//">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2//">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2S Draft//EN">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Frameset//">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML Experimental 19960712//">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML Experimental 970421//EN">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD W3 HTML//">
+quirks	<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML 3.0//EN">
+quirks	<!DOCTYPE html PUBLIC "-//WebTechs//DTD Mozilla HTML 2.0//">
+quirks	<!DOCTYPE html PUBLIC "-//WebTechs//DTD Mozilla HTML//EN">
+quirks	<!DOCTYPE HTML PUBLIC "-//w3c//dtd html 4.0 transitional//en">
+quirks	<!doctype html public "-//ietf//dtd html//EN" "http://example.com/x.dtd">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2//">
+no_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2">
+quirks	<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//">
+no_quirks	<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//X">
+quirks	<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/EN">
+no_quirks	<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/ENX">
+quirks	<!DOCTYPE html PUBLIC "HTML">
+no_quirks	<!DOCTYPE html PUBLIC "HTMLX">
+quirks	<!DOCTYPE html PUBLIC "html">
+quirks	<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd">
+quirks	<!DOCTYPE html SYSTEM "HTTP://WWW.IBM.COM/data/dtd/v11/ibmxhtml1-transitional.dtd">
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd">
+no_quirks	<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd/">
+quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "">
+limited_quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 transitional//en' ''>
+quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN">
+limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/loose.dtd">
+limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "">
+limited_quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 frameset//en' ''>
+no_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+no_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+limited_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+limited_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN">
+limited_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">
+limited_quirks	<!DOCTYPE html PUBLIC "-//w3c//dtd xhtml 1.0 frameset//">
+no_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+no_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+no_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.0//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic10.dtd">
+no_quirks	<!DOCTYPE html>
+no_quirks	<!doctype HTML>
+no_quirks	<!DOCTYPE html SYSTEM "about:legacy-compat">
+no_quirks	<!DOCTYPE html SYSTEM "http://example.com/">
+no_quirks	<!DOCTYPE html PUBLIC "">
+no_quirks	<!DOCTYPE html PUBLIC "" "">
+quirks	<!DOCTYPE htm>
+quirks	<!DOCTYPE xhtml>
+quirks	<!DOCTYPE>
+quirks	<!DOCTYPE html PUBLIC>
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" bogus>
+quirks	<!DOCTYPE html SYSTEM>
+quirks	<!DOCTYPE html bogus>
+quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN
+no_quirks	<!-- a comment first --><!DOCTYPE html>
+no_quirks	   <!DOCTYPE html>
+quirks	x<!DOCTYPE html>
+quirks	<html><!DOCTYPE html>
+no_quirks	<?xml version="1.0"?><!DOCTYPE html>
+quirks	

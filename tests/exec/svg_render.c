@@ -184,7 +184,11 @@ int main(void) {
         html_init(&p, 1);
         css_init(&st, 1);
         layout_init(&t, 1);
-        html_parse(&p, &d, pages[i], strlen(pages[i]));
+        /* a standards-mode page (a quirks-mode page's p would lose its top margin) */
+        vector<char> page;
+        append_range(page, "<!DOCTYPE html>", 15);
+        append_range(page, pages[i], strlen(pages[i]));
+        html_parse(&p, &d, data(page), len(page));
         css_cascade(&st, &d, 0);
         layout_run(&t, &d, &st, 0, 800, 600);
         uint32_t x = find_id(&d, "s");

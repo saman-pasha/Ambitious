@@ -85,7 +85,7 @@ enum {
     SI_UIEVENT = SH_INPUT_FIRST, SI_MOUSEEVENT, SI_POINTEREVENT, SI_KEYBOARDEVENT, SI_FOCUSEVENT, SI_INPUTEVENT, SI_SUBMITEVENT,
     SI_FORMDATAEVENT, SI_POPSTATEEVENT, SI_HASHCHANGEEVENT, SI_ILLEGAL, SI_CHARSET, SI_MODIFIER, SI_FORMDATA, SI_FD_APPEND, SI_FD_SET, SI_FD_GET, SI_FD_GETALL, SI_FD_HAS, SI_FD_DELETE, SI_FD_ENTRIES,
     SI_FD_KEYS, SI_FD_VALUES, SI_FD_FOREACH, SI_SUBMIT, SI_REQUEST_SUBMIT, SI_RESET, SI_CHECK_VALIDITY, SI_REPORT_VALIDITY,
-    SI_HAS_FOCUS, SI_N
+    SI_HAS_FOCUS, SI_COMPAT_MODE, SI_N
 };
 /* the modifier keys held, as bits */
 #define SI_SHIFT 1u
@@ -1356,6 +1356,8 @@ jv script_input_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args,
         int enc = h->charset - 1;
         return sh_cstr(vm, enc >= 0 ? html_enc_name(enc) : "UTF-8");
     }
+    /* document.compatMode (DOM 4.5): BackCompat in quirks mode, else CSS1Compat */
+    if (id == SI_COMPAT_MODE) return sh_cstr(vm, d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS ? "BackCompat" : "CSS1Compat");
     if (id >= SI_UIEVENT && id <= SI_HASHCHANGEEVENT) {
         /* an event a script makes: its type, bubbles and cancelable, and its interface's fields */
         static const uint32_t protos[] = { HP_UIEVENT, HP_MOUSEEVENT, HP_POINTEREVENT, HP_KEYBOARDEVENT, HP_FOCUSEVENT, HP_INPUTEVENT, HP_SUBMITEVENT,
@@ -1588,6 +1590,8 @@ void script_input_setup(js_vm *vm) {
         uint32_t a = si_atom(vm, cs[i]);
         js_define_accessor(vm, h->protos[HP_DOCUMENT], a, jv_obj(js_native_new(vm, SI_CHARSET, a, 0)), JV_UNDEF, 0);
     }
+    uint32_t cma = si_atom(vm, "compatMode");
+    js_define_accessor(vm, h->protos[HP_DOCUMENT], cma, jv_obj(js_native_new(vm, SI_COMPAT_MODE, cma, 0)), JV_UNDEF, 0);
     uint32_t fd = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     h->protos[HP_FORMDATA] = fd;
     static const char *const fm[] = { "append", "set", "get", "getAll", "has", "delete", "entries", "keys", "values", "forEach" };

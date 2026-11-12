@@ -1,0 +1,120 @@
+<html><head><title>Quirks: CSS</title>
+<!-- No DOCTYPE: a quirks-mode page. The Quirks Mode Standard's CSS quirks, held to Chromium's
+     computed values (tests/integ/cssref.sh): hashless colours and unitless lengths for the
+     properties that take them (and not for those that do not, or through other shorthands),
+     the quirks sheet's tables, fields, forms and floated images, class and id selectors
+     without ASCII case (getElementsByClassName and querySelector's too), document.compatMode,
+     the body's clientWidth and clientHeight the viewport's, and an image's align a float (a
+     presentational hint in every mode). -->
+<style>
+body { font: 16px sans-serif; color: rgb(0, 0, 160); }
+/* hashless colours: identifiers of 3 or 6 hex digits, integers, integers with a unit */
+#c1 { color: ff0000 }
+#c2 { color: f0a }
+#c3 { color: 123456 }
+#c4 { color: 12ab }
+#c5 { color: rgb(1, 2, 3); color: 1e3 }
+#c6 { color: rgb(1, 2, 3); color: fffffff }
+#c7 { color: +123456 }
+#c8 { color: rgb(1, 2, 3); color: -12345 }
+#c9 { color: 999 }
+#c10 { color: ABCDEF }
+#c11 { color: 0f0f0f }
+#c12 { color: rgb(1, 2, 3); color: 1.5e3 }
+#c13 { color: 12e }
+#c14 { background-color: 00ff00 }
+#c15 { background-color: rgb(9, 9, 9); background: 00ff00 }
+#c16 { border-style: solid; border-color: abc def }
+#c17 { border-style: solid; border-left-color: 0000ff; border-top-color: 1234 }
+#c18 { border: 2px solid 0000ff }
+#c19 { outline: 1px solid red; outline-color: 0000ff }
+#c20 { color: ff0000 !important }
+/* unitless lengths */
+#l1 { width: 100; height: 50 }
+#l2 { min-width: 30; max-width: 200; min-height: 10; max-height: 300 }
+#l3 { margin: 1 2 3 4 }
+#l4 { margin-left: 7; margin-top: 5 }
+#l5 { padding: 6; padding-top: 3 }
+#l6 { border-style: solid; border-width: 4; border-left-width: 2 }
+#l7 { border: 3 solid }
+#l8 { position: relative; top: 10; left: 20 }
+#l8b { position: relative; bottom: 5; right: 6 }
+#l9 { font-size: 20 }
+#l10 { font: 20 serif }
+#l11 { letter-spacing: 2; word-spacing: 3; text-indent: 15 }
+#l12 { vertical-align: 5 }
+#l14 { width: 100.5; height: 1e2 }
+#l15 { width: 50px; width: -10 }
+#l16 { width: 50px; width: calc(100) }
+#l17 { width: +50 }
+#l18 { outline: 1px solid; outline-width: 7 }
+#l19 { position: relative; top: 2px; inset: 5 }
+#l20 { row-gap: 3px; column-gap: 4px; gap: 10 }
+#l21 { margin: auto 10; width: 30px }
+#l22 { width: 80 !important }
+/* selectors: class and id without case, attributes with it */
+.Sel { color: rgb(1, 0, 0) }
+#SEL2 { background-color: rgb(0, 2, 0) }
+[class=SEL] { border-top-color: rgb(0, 0, 3); border-top-style: solid }
+.sel.SEL { outline: 1px solid rgb(0, 0, 4) }
+:is(.SeL) { letter-spacing: 1px }
+</style>
+<script>document.documentElement.style.setProperty('--mode', document.compatMode);</script>
+</head><body>
+<p id=c1 data-check="color">c1</p><p id=c2 data-check="color">c2</p><p id=c3 data-check="color">c3</p><p id=c4 data-check="color">c4</p>
+<p id=c5 data-check="color">c5</p><p id=c6 data-check="color">c6</p><p id=c7 data-check="color">c7</p><p id=c8 data-check="color">c8</p>
+<p id=c9 data-check="color">c9</p><p id=c10 data-check="color">c10</p><p id=c11 data-check="color">c11</p><p id=c12 data-check="color">c12</p>
+<p id=c13 data-check="color">c13</p><p id=c14 data-check="background-color">c14</p><p id=c15 data-check="background-color">c15</p>
+<p id=c16 data-check="border-top-color border-right-color border-bottom-color border-left-color">c16</p>
+<p id=c17 data-check="border-left-color border-top-color">c17</p><p id=c18 data-check="border-top-color border-top-width">c18</p>
+<p id=c19 data-check="outline-color">c19</p><p id=c20 data-check="color">c20</p>
+<p id=s1 style="color: ff00ff; background-color: 0f0" data-check="color background-color">s1</p>
+<div id=l1 data-check="width height">l1</div>
+<div id=l2 data-check="min-width max-width min-height max-height">l2</div>
+<div id=l3 data-check="margin-top margin-right margin-bottom margin-left">l3</div>
+<div id=l4 data-check="margin-left margin-top">l4</div>
+<div id=l5 data-check="padding-top padding-left">l5</div>
+<div id=l6 data-check="border-top-width border-left-width">l6</div>
+<div id=l7 data-check="border-top-width border-top-style">l7</div>
+<div id=l8 data-check="top left">l8</div>
+<div id=l8b data-check="bottom right">l8b</div>
+<div id=l9 data-check="font-size">l9</div>
+<div id=l10 data-check="font-size">l10</div>
+<div id=l11 data-check="letter-spacing word-spacing text-indent">l11</div>
+<div id=l12 data-check="vertical-align">l12</div>
+<div id=l14 data-check="width height">l14</div>
+<div id=l15 data-check="width">l15</div>
+<div id=l16 data-check="width">l16</div>
+<div id=l17 data-check="width">l17</div>
+<div id=l18 data-check="outline-width">l18</div>
+<div id=l19 data-check="top">l19</div>
+<div id=l20 data-check="row-gap column-gap">l20</div>
+<div id=l21 data-check="margin-left">l21</div>
+<div id=l22 data-check="width">l22</div>
+<div id=s2 style="width: 123; height: 45; margin-left: 9" data-check="width height margin-left">s2</div>
+<p id=sel2 class=sel data-check="color background-color border-top-color outline-color letter-spacing">selectors</p>
+<p id=sel3 class="éte" data-check="color">not ASCII</p>
+<!-- the quirks sheet: a table resets the text's properties, its colour the body's -->
+<div style="color: rgb(0, 128, 0); font: italic bold 20px/40px serif; white-space: nowrap; text-align: center">
+<table id=t1 data-check="font-size line-height white-space font-weight font-style text-align color font-family"><tr>
+<td id=d1 data-check="font-size line-height white-space font-weight font-style text-align color">cell</td></tr></table>
+<table id=t2 style="color: rgb(200, 0, 0); font-size: 30px" data-check="color font-size"><tr><td id=d2 data-check="color font-size">x</td></tr></table>
+<table id=t3 style="color: inherit; font-size: inherit" data-check="color font-size"><tr><td id=d3 data-check="color">y</td></tr></table>
+<span id=t4 style="display: table" data-check="color font-size line-height"><span style="display: table-cell">z</span></span>
+</div>
+<form id=f1 data-check="margin-bottom margin-top">
+<input id=i1 data-check="box-sizing"><input id=i2 type=image src="logo.png" data-check="box-sizing"><textarea id=i3 data-check="box-sizing"></textarea>
+<input id=i4 type=checkbox data-check="box-sizing">
+</form>
+<img id=g1 src="logo.png" align=left data-check="margin-right margin-left float vertical-align"><img id=g2 src="logo.png" align=RIGHT data-check="margin-left margin-right float vertical-align">
+<img id=g3 src="logo.png" align=middle data-check="margin-left margin-right float">
+<p id=mode data-check="--mode --by-class --by-selector --client">compatMode</p>
+<script>
+/* a quirks-mode document's classes and ids without case in its scripts too */
+var root = document.documentElement.style;
+root.setProperty('--by-class', String(document.getElementsByClassName('SEL').length));
+root.setProperty('--by-selector', document.querySelector('#SEL2.SeL') ? 'found' : 'none');
+/* the body's client size the viewport's, the root element's its own (CSSOM View's quirk) */
+root.setProperty('--client', document.body.clientWidth + 'x' + document.body.clientHeight + '/' + document.documentElement.clientWidth);
+</script>
+</body></html>

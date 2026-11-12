@@ -15,7 +15,9 @@
    the root of a tree of its own, whose host is the template (HTML 4.12.3). The
    template holds its contents as it holds its children: destroying it destroys
    them, a node may not be inserted under its own template's contents, and the
-   serialization of a template is that of its contents. */
+   serialization of a template is that of its contents. The document node keeps the
+   document's mode (DOM 4.5: no-quirks, quirks or limited-quirks), which the HTML parser
+   sets from the DOCTYPE. */
 #include <amb.pl>
 
 amb_implementation(dom);
@@ -45,6 +47,17 @@ static uint32_t dom_detail(dom_document *d, uint32_t prev, uint32_t next, uint32
 #define DOM_DETAIL(d, prev, next, name, ns, old, had) ((d)->detail_len > 1 ? dom_detail((d), (prev), (next), (name), (ns), (old), (had)) : 0u)
 /* a mutation logged with no more than its target and other node: a node made, a subtree freed */
 static void dom_log(dom_document *d, dom_op op, uint32_t target, uint32_t other) { dom_log_mutation(d, op, target, other, 0); }
+
+/* the document's mode (DOM 4.5), the HTML parser's from the DOCTYPE: kept on the document
+   node; a change logged, none when the mode is already that */
+dom_status dom_set_mode(dom_document *d, dom_document_mode mode) {
+    dom_status st = dom_check_set_mode(d, mode);
+    if (st != DOM_OK) return st;
+    if (d->node[1].mode == mode) return DOM_OK;
+    d->node[1].mode = mode;
+    dom_log(d, DOM_OP_SET_MODE, 1, 0);
+    return DOM_OK;
+}
 
 /* an element of a namespace; an HTML template, with its contents */
 static dom_node_h dom_new_element(dom_document *d, dom_namespace ns, dom_op op, const char *name, size_t name_len) {

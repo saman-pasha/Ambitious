@@ -1,0 +1,6 @@
+# tests/pages/quirks-fill.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+html 5 5 795 595
+body 20 50 780 574
+text-first 20 50 780 70
+d2 20 70 780 209
+text-last 20 224 780 245
