@@ -166,9 +166,9 @@ double amb_text_width(const amb_fonts *f, int face, double size, const char *s, 
 
 /* a glyph a run is drawn with (amb_shape): its glyph in the face that draws it, the byte of the
    text its cluster begins at, its advance and offset from the pen (y up), in that face's units
-   (amb_face_scale makes them px); AMB_SHAPED_HIDDEN for a default ignorable, which draws
-   nothing */
-typedef struct amb_shaped { uint32_t gid, cluster; int32_t ax, dx, dy; uint16_t face, flags; } amb_shaped;
+   (amb_face_scale makes them px), and its advance before positioning (what kerning added is
+   the difference); AMB_SHAPED_HIDDEN for a default ignorable, which draws nothing */
+typedef struct amb_shaped { uint32_t gid, cluster; int32_t ax, dx, dy, base; uint16_t face, flags; } amb_shaped;
 enum { AMB_SHAPED_HIDDEN = 1 };
 /* how a run is shaped: right to left (its bidi level odd; the glyphs then given in visual
    order), ligatures off (liga, clig and calt: letter-spacing, as Blink has it), kerning off */
@@ -184,8 +184,16 @@ enum { AMB_SHAPE_RTL = 1, AMB_SHAPE_NOLIGA = 4, AMB_SHAPE_NOKERN = 8 };
    their GSUB and GPOS (or kern table) for their scripts */
 void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t from, size_t to, int flags, vector<amb_shaped> *out);
 
-/* a face's units at a size, in px (size over its units per em) */
+/* a laid-out run's glyph (a layout fragment's, packed in its glyphs): its glyph, the face that
+   draws it (AMB_RGLYPH_OWN: the fragment's own, a web font's number being paint's to give),
+   its AMB_SHAPED_* flags, its pen's x from the fragment's start and its y from the baseline
+   (down), in px */
+typedef struct amb_rglyph { uint32_t gid; uint16_t face, flags; float y; uint32_t pad; double x; } amb_rglyph;
+enum { AMB_RGLYPH_OWN = 0xFFFF };
+
+/* a face's units at a size, in px (size over its units per em); its units per em (0: no face) */
 double amb_face_scale(const amb_fonts *f, int face, double size);
+double amb_face_upem(const amb_fonts *f, int face);
 
 /* whether a face's text is italic by the face (a built-in italic style), which slants the
    glyphs a face with no italic outlines draws */
@@ -195,6 +203,9 @@ int amb_face_italic(int face);
    whose line metrics layout takes for its line: a mask, bit k for face k below AMB_NFACES
    (a system face of a built-in face's font as that face) */
 uint32_t amb_text_fallbacks(const amb_fonts *f, int face, const char *s, size_t n);
+/* the face whose line metrics a face's glyphs bring a line: a system face of a built-in face's
+   font that face, any other itself */
+int amb_metrics_face(int face);
 
 /* the next code point of UTF-8 text from *i (a malformed byte reads as U+FFFD) */
 uint32_t amb_utf8_next(const char *s, size_t n, size_t *i);

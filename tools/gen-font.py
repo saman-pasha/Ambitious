@@ -8,13 +8,13 @@ the DejaVu fonts (Sans, Serif and Sans Mono: monospace's face there, and the fac
 their own names name), each regular and bold, and Sans Mono's oblique and bold
 oblique (Sans and Serif have no italic face on such a machine: Chromium slants their
 upright ones), read from their TrueType files by this script's own reader of the tables
-it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern) and written as C: for each
-face, a TrueType font of the code points the script lists (each face has those its
-file has), packed (lz_pack: LZ77 in LZ4's byte-aligned tokens, which font.c unpacks
-at a few instructions a byte, where deflate's bits cost it some hundred), base64 -- the
-tables the painter reads (cmap format 4,
-glyf, head, hhea, hmtx, kern format 0, loca, maxp), so that src/paint/font.c reads the
-built-in faces as it reads a page's web fonts. A composite glyph stays a composite,
+it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern, GDEF, GSUB, GPOS) and written
+as C: for each face, a TrueType font of the code points the script lists (each face has
+those its file has), packed (lz_pack: LZ77 in LZ4's byte-aligned tokens, which font.c
+unpacks at a few instructions a byte, where deflate's bits cost it some hundred), base64
+-- the tables the painter reads (cmap format 4, glyf, head, hhea, hmtx, kern format 0,
+loca, maxp, and the layout tables GDEF, GSUB and GPOS), so that src/paint/font.c reads
+the built-in faces as it reads a page's web fonts. A composite glyph stays a composite,
 its components in the subset (none of these faces' glyphs here places one by points).
 A code point a face has no glyph for but has every part of the canonical decomposition
 of, HarfBuzz draws with those parts in that face (hb-ot-shape-normalize: DejaVu Sans
@@ -22,19 +22,25 @@ Mono's Vietnamese with two marks, Liberation's arrows and relations with a strok
 Kelvin and Angstrom signs), so the subset has it: a singleton's as its part's glyph, a
 base and marks as a composite of them, each mark where the face's GPOS mark and mkmk
 lookups attach it (else where HarfBuzz leaves it, past the base), the base's advance
-the glyph's. The kerning pairs are the subset's code points'. (Over these code points each face's
-kern table holds the pairs its GPOS kern feature does, which HarfBuzz applies; the
-faces' GSUB substitutes nothing in them by default but DejaVu's ligatures, which
-Ambitious does not form.) What each block of code points costs the faces is written on
-stderr.
+the glyph's. The kerning pairs are the subset's code points' (HarfBuzz applies them to a
+run whose script's GPOS has no kern feature: Liberation's Hebrew). The layout tables keep
+the features HarfBuzz applies by default (src/paint/shape.c applies them as it does) and
+the lookups they use, over the subset's glyphs and those the substitutions can put in their
+place (a ligature, a joining form), which join the subset. What each block of code points
+costs the faces is written on stderr.
 
     python3 tools/gen-font.py [DEJAVUDIR [LIBERATIONDIR]] > src/paint/font_data.h
-    python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.otf|OUT.woff FAMILY [cff|cid|cff2]
+    python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.otf|OUT.woff FAMILY [truetype|layout|gpos|curs|cff|cid|cff2 [HEX-RANGES]]
 
 The second writes a web font for the fixture pages: the same subset of one
 TrueType file as a font Chromium's sanitizer takes (with OS/2, post, name and a
 version 1.0 maxp), named FAMILY, its fonts' notice in its name table; as WOFF 1
-(its tables stored) when OUT ends in .woff. With cff, cid or cff2, its Basic Latin
+(its tables stored) when OUT ends in .woff. HEX-RANGES (20-7E,300-36F) take the code
+points it has instead of the script's list. With layout, its layout tables too (GDEF,
+GSUB, GPOS); with gpos, those and no kern table (its kerning GPOS's alone, as a font
+made today has it); with curs, those and a cursive attachment of the script's own
+(each glyph's entry and exit at heights of its glyph number's), which no font on the
+machine has. With cff, cid or cff2, its Basic Latin
 alone, as OpenType with CFF outlines (name-keyed, or CID-keyed) or CFF2 ones, the
 glyphs DejaVu's quadratic curves made cubic, exactly, written as Type 2 charstrings
 that use what a reader must read (subroutines and their biases, hints and hintmasks,
@@ -1457,11 +1463,13 @@ def ot_subset_gdef(gdef, keep, remap):
     return w.bytes()
 
 
-def subset(path, web=None, cps_of=None, only=None, layout=True):
+def subset(path, web=None, cps_of=None, only=None, layout=True, kern=True, curs=False):
     """a TrueType font of the code points the script lists (or only those of only): the
-    tables the painter reads; for the web (web, its family's name), the tables a sanitizer
-    asks for besides. With cps_of, each glyph's bytes are added to the block of the first
-    code point that needs them (cps_of: block of a code point -> its bytes)"""
+    tables the painter reads (the layout tables with layout; no kern table without kern; a
+    cursive attachment of its own with curs); for the web (web, its family's name), the
+    tables a sanitizer asks for besides. With cps_of, each glyph's bytes are added to the
+    block of the first code point that needs them (cps_of: block of a code point -> its
+    bytes)"""
     f = Font(path)
     listed = only or CODEPOINTS
     # a code point the font has no glyph for but has its canonical decomposition, HarfBuzz
@@ -1555,13 +1563,31 @@ def subset(path, web=None, cps_of=None, only=None, layout=True):
     if web:
         m = f.tables["maxp"][0]
         maxp = struct.pack(">IH", 0x00010000, len(gids)) + f.d[m + 6:m + 32]
-    hmtx = b"".join(struct.pack(">Hh", a, 0) for a in advances)
+    # the left side bearings: for the web each glyph's xMin, as a font's are (FreeType places a
+    # TrueType glyph by its bearing, moving its outline by the difference); the built-in faces'
+    # 0, which the painter does not read
+    bearings = [struct.unpack(">h", g[2:4])[0] if web and len(g) >= 10 else 0 for g in glyphs]
+    hmtx = b"".join(struct.pack(">Hh", a, b) for a, b in zip(advances, bearings))
     cmap = cmap4([(c, newid[cpmap[c]]) for c in cps])
     tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
               ("loca", bytes(loca)), ("maxp", maxp)]
     # GSUB, GPOS and GDEF: the kept features, the lookups they use, the glyphs of the subset
     keep = {g for g in newid if not isinstance(g, tuple)}
     remap = {g: newid[g] for g in keep}
+    if curs and gpos:
+        # a cursive attachment the font has not (no font on the machine has one): each base
+        # glyph's entry at its advance and its exit at its origin, at heights that step with its
+        # glyph's number, so that a joined run climbs and falls as HarfBuzz chains it (right to
+        # left, the last glyph on the baseline), a feature of every language system
+        classes = gdef["classes"] if gdef else {}
+        anchors = {g: ((f.advance(g), 100 + 150 * (g % 4)), (0, 50 + 120 * (g % 3)))
+                   for g in sorted(keep) if classes.get(g, 1) != 3 and f.advance(g) > 0}
+        gpos["lookups"].append((3, 0x0009, None, [{"t": 3, "map": anchors, "gsub": False}]))
+        gpos["features"].append(("curs", [len(gpos["lookups"]) - 1]))
+        for default, langs in gpos["scripts"].values():
+            for ls in [default] + list(langs.values()):
+                if ls is not None:
+                    ls[1].append(len(gpos["features"]) - 1)
     if gpos:
         used = ot_used(gpos, GPOS_KEEP)
         tables.append(("GPOS", ot_subset(gpos, keep, remap, GPOS_KEEP, False, {li: k for k, li in enumerate(sorted(used))})))
@@ -1574,7 +1600,7 @@ def subset(path, web=None, cps_of=None, only=None, layout=True):
     mapped = {newid[cpmap[c]] for c in cps}
     pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items()
                    if l in newid and r in newid and newid[l] in mapped and newid[r] in mapped and v)
-    if pairs or not layout:
+    if (pairs and kern) or not layout:
         kbody = struct.pack(">HHHH", len(pairs), *bsearch(len(pairs), 6)) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
         tables.append(("kern", struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody))
     tables.sort(key=lambda t: t[0])
@@ -2093,13 +2119,14 @@ def ucd_ranges(props, minus_props=(), minus=()):
 def main():
     if len(sys.argv) in (5, 6, 7) and sys.argv[1] == "--web":
         kind = sys.argv[5] if len(sys.argv) >= 6 else "truetype"
-        if kind not in ("truetype", "layout", "cff", "cff2", "cid"):
-            raise SystemExit("gen-font: --web's outlines are truetype, layout, cff, cff2 or cid, not %s" % kind)
+        if kind not in ("truetype", "layout", "gpos", "curs", "cff", "cff2", "cid"):
+            raise SystemExit("gen-font: --web's outlines are truetype, layout, gpos, curs, cff, cff2 or cid, not %s" % kind)
         only = None
         if len(sys.argv) == 7:
             only = sorted({c for r in sys.argv[6].split(",") for c in range(int(r.split("-")[0], 16), int(r.split("-")[-1], 16) + 1)})
-        if kind in ("truetype", "layout"):
-            blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=only, layout=kind == "layout")
+        if kind in ("truetype", "layout", "gpos", "curs"):
+            blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=only, layout=kind != "truetype", kern=kind not in ("gpos", "curs"),
+                                   curs=kind == "curs")
         else:
             blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=WEB_CODEPOINTS, layout=False)
             blob = otf(blob, kind, sys.argv[4], NOTICES[source_of(sys.argv[2])])

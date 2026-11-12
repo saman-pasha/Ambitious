@@ -1,0 +1,22 @@
+# boxes of tests/pages/shaping-arabic.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+salam span 117.141 9 95.031 22
+marhaba span 8 9 104.141 22
+lam-alef span 104.141 39 82.594 22
+joins span 8 39 91.141 22
+zwj span 8 69 100.453 22
+across span 87.734 102 31.266 22
+across-b span 107.375 102 6.047 22
+across-pad span 45.469 102 37.266 22
+across-pad-b span 65.109 102 12.047 22
+across-size-b span 27.641 99 7.25 26
+harakat span 8 133 137.563 22
+mixed span 8 163 144.563 22
+rtl span 577.438 193 214.563 22
+rtl-dv span 613.625 222 178.375 24
+persian span 63.422 252 107.047 22
+urdu span 8 252 50.422 22
+persian-dv span 8 282 143.234 22
+hebrew span 57.266 312 55.766 22
+hebrew-dv span 8 311 44.266 24
+curs span 94.219 349 145.359 24
+curs-marks span 8 349 79.859 24

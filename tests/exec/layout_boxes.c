@@ -10,11 +10,15 @@
    sticky boxes at rest; an inline element as a containing block; bidirectional text by
    characters (brackets mirrored, numbers, isolates). A case's page is a standards-mode page (a
    DOCTYPE is put first) unless it begins with <! itself: a comment there makes a quirks-mode
-   page, whose quirks tests/pages/quirks-*.html hold to Chromium. */
+   page, whose quirks tests/pages/quirks-*.html hold to Chromium. Last, each text fragment's
+   glyphs (frag.glyphs) against its text shaped alone in its paragraph's direction, for
+   paragraphs of one direction each whose runs have as many pieces: a fragment takes its run's
+   glyphs, shaped in that run's own direction. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
 #include <amb.pl>
+#include "../../src/paint/font.h"
 
 amb_interface(dom);
 amb_interface(html);
@@ -116,6 +120,72 @@ static void show(const dom_document *d, const layout_tree *t, const char *id) {
             printf("  #%s inline: %g,%g %gx%g\n", id, t->frag[fr].x, t->frag[fr].y, t->frag[fr].w, t->frag[fr].h);
 }
 
+/* a text fragment's glyphs against text shaped alone, right to left or not: 1 when they are the
+   same glyphs in the same order; their count into *count */
+static int frag_as_shaped(const layout_tree *t, uint32_t fr, const amb_fonts *f, const char *text, int rtl, size_t *count) {
+    amb_span gs = t->frag[fr].glyphs;
+    vector<amb_shaped> gl;
+    size_t tn = strlen(text);
+    amb_shape(f, t->frag[fr].face, text, tn, 0, tn, rtl ? AMB_SHAPE_RTL : 0, &gl);
+    size_t n = gs.len / sizeof(amb_rglyph);
+    *count = n;
+    if (n != len(gl)) return 0;
+    const char *p = glyphs_ptr(t, gs);
+    for (size_t k = 0; k < n; k++) {
+        amb_rglyph g;
+        memcpy(&g, p + k * sizeof g, sizeof g);
+        if (g.gid != at(gl, k).gid) return 0;
+    }
+    return 1;
+}
+
+/* paragraphs of one line and one direction each, a right-to-left one first, each a run of three
+   pieces: each one's text fragment's glyphs against its text shaped alone in its direction */
+static void glyph_runs(void) {
+    static const char *const ids[4] = { "a", "b", "e", "p" };
+    static const char *const texts[4] = { "\xd7\x90\xd7\x91\xd7\x92 \xd7\x93\xd7\x94\xd7\x95", "abc (de)", "\xd7\x90\xd7\x91\xd7\x92 (\xd7\x93\xd7\x94)",
+                                          "ab (cd)" };
+    static const int rtl[4] = { 1, 0, 1, 0 };
+    vector<char> page;
+    append_range(page, "<!DOCTYPE html>", 15);
+    for (size_t k = 0; k < 4; k++) {
+        char head[32];
+        int hn = snprintf(head, sizeof head, "<p id=%s%s>", ids[k], rtl[k] ? " dir=rtl" : "");
+        append_range(page, head, (size_t)hn);
+        append_range(page, texts[k], strlen(texts[k]));
+        append_range(page, "</p>", 4);
+    }
+    amb_fonts f = {0};
+    defer(f) { AMB_FONTS_DROP(f); }
+    amb_fonts_load(&f);
+    dom_document d;
+    html_parser p;
+    css_style st;
+    layout_tree t;
+    dom_init(&d, 1);
+    html_init(&p, 1);
+    css_init(&st, 1);
+    layout_init(&t, 1);
+    html_parse(&p, &d, data(page), len(page));
+    css_cascade(&st, &d, 0);
+    layout_status s = layout_run(&t, &d, &st, 0, 800, 600);
+    printf("each text fragment's glyphs, its run's in the run's direction (%s):\n", layout_status_name(s));
+    for (size_t k = 0; k < 4; k++) {
+        uint32_t x = find_id(&d, ids[k]);
+        for (uint32_t b = 1; b < t.box_len; b++) {
+            if (!x || !t.box[b].live || t.box[b].node.index != x) continue;
+            for (uint32_t ln = t.box[b].first_line; ln; ln = t.line[ln].next)
+                for (uint32_t fr = t.line[ln].first_frag; fr; fr = t.frag[fr].next) {
+                    if (t.frag[fr].kind != LAYOUT_FRAG_KIND_TEXT) continue;
+                    size_t n = 0;
+                    int same = frag_as_shaped(&t, fr, &f, texts[k], rtl[k], &n);
+                    printf("  #%s '%s': %zu glyphs, %s its text shaped alone %s\n", ids[k], texts[k], n, same ? "as" : "NOT as",
+                           rtl[k] ? "right to left" : "left to right");
+                }
+        }
+    }
+}
+
 int main(void) {
     static const char *const ids[] = { "a", "b", "e", "p", "t" };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
@@ -138,5 +208,6 @@ int main(void) {
         printf("%s (%s, invariants: %d broken)\n", cases[i].what, layout_status_name(s), layout_check_invariants(&t, stdout));
         for (size_t k = 0; k < sizeof ids / sizeof ids[0]; k++) show(&d, &t, ids[k]);
     }
+    glyph_runs();
     return 0;
 }

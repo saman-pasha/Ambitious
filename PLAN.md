@@ -1106,6 +1106,51 @@ be built side by side and merged without touching each other's.
   scripts across frames and realms, read from a file and served over HTTP from two origins, line
   for line (22, 9 and 11 lines); the facts and the diagnostics (`tests/integ/frames.sh`);
   `tests/exec/frames` runs the pages' frames through the pipeline under valgrind.
+- **12v Text shaping** (`src/paint/shape.c`, `src/paint/shape.h` and `src/paint/shape_data.h`,
+  which `tools/gen-shape.pl` writes from perl's Unicode tables; the shaper's entry and font
+  fallback in `src/paint/font.c`, its glyph runs in `src/paint/font.h`; the built-in faces'
+  layout tables by `tools/gen-font.py`'s OpenType subsetter in `src/paint/font_data.h`; runs
+  measured and each text fragment's glyphs in `src/layout/layout.c` and `contracts/layout.pl`;
+  the glyphs drawn in `src/paint/paint.c`), measured in Chromium first, HarfBuzz's and Blink's
+  sources deciding where it left room:
+  - text shaped as HarfBuzz shapes it for Chromium: the normalizer (decomposed and composed by
+    the face's cmap, marks ordered by their classes), the plan of each font, script and
+    direction (its features in the shaper's stages: ccmp, locl, the Arabic joining forms,
+    rlig, calt, clig, liga, rclt; kern, mark, mkmk, curs, dist, abvm, blwm), GSUB's eight
+    lookup types and GPOS's nine, GDEF's classes and the lookup flags, the kern table where a
+    run's script has no GPOS kern, Arabic joining from the context about a run, Hebrew's and
+    Thai's own steps; 553 strings in 12 of the machine's fonts and a cursive one of the tests'
+    own shaped as HarfBuzz 15 shapes them, glyph for glyph (`tests/exec/shaping`), a mark
+    taking its base's offset across the line as it is attached (a cursive chain's, if that
+    came first), as HarfBuzz 15 has it;
+  - the built-in faces keep their GDEF, GSUB and GPOS, cut to their glyphs and those their
+    substitutions reach; `--web ... layout`, `gpos` and `curs` write web fonts with them (the
+    last with a cursive attachment of its own, which no font on the machine has);
+  - font fallback as Blink's: a grapheme drawn whole by one face, the family's faces first,
+    then the system font for the first code point of the first hole left (a right-to-left
+    run's holes in visual order: its last first), each taking what it draws; a line's height
+    from the fonts its runs used;
+  - layout measures each run of pieces as Blink's ShapeText shapes it (one font, across an
+    inline element's edge unless a margin, border or padding on that side or its
+    vertical-align breaks it; one direction; in the paragraph's text as context): a pair's
+    kerning across an edge on its first glyph, a ligature across one drawn by its first
+    letter's element, letter-spacing turning ligatures off, the kerning before the space a
+    line ends at dropped; each item of a line (a text node's run) placed at its width
+    rounded up to a 64th of a px, as Blink places its LayoutUnits;
+  - each text fragment keeps its run's glyphs (`frag.glyphs`: glyph, face, pen), which paint
+    draws from a cache keyed by face and glyph at Skia's quarter pixel; a fragment with none
+    (a placeholder's, a marker's, text an ellipsis cut) is shaped by paint.
+
+  Gate: `tests/pages/shaping.html`, `shaping-arabic.html` (with `fonts/cursive.ttf`) and
+  `shaping-kern.html` (with `fonts/serif-gpos.ttf`, kerned by GPOS alone), each held to
+  Chromium: their boxes (33, 21 and 15 of them) and their regions pixel by pixel (33, 21 and
+  15); every page's boxes (1,849 of 1,849) and regions (1,170 of 1,170) within the gates; 31
+  pages' golden drawings moved, 25 nearer Chromium's screenshot and 6 by a quarter pixel
+  where other differences hold them off it; `tests/exec/shaping` (valgrind clean);
+  `tests/exec/layout_boxes`, each text fragment's glyphs against its text shaped alone in its
+  direction, a right-to-left paragraph before left-to-right ones of as many pieces. Its cost
+  (`docs/performance.md`): the large page's layout 15.0 ms before, 53.3 ms after, against
+  Chromium's 202.2 ms; paint unchanged.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

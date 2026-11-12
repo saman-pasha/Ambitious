@@ -1,0 +1,22 @@
+# tests/pages/shaping-arabic.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+salam 117 9 213 31
+marhaba 8 9 113 31
+lam-alef 104 39 187 61
+joins 8 39 100 61
+zwj 8 69 109 91
+across 87 102 119 124
+across-b 107 102 114 124
+across-pad 45 102 83 124
+across-pad-b 65 102 78 124
+across-size-b 27 99 35 125
+harakat 8 133 146 155
+mixed 8 163 153 185
+rtl 577 193 792 215
+rtl-dv 613 222 792 246
+persian 63 252 171 274
+urdu 8 252 59 274
+persian-dv 8 282 152 304
+hebrew 57 312 114 334
+hebrew-dv 8 311 53 335
+curs 94 349 240 373
+curs-marks 8 349 88 373

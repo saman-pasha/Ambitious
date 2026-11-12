@@ -971,10 +971,18 @@ typedef struct lay_piece {
     uint8_t rtl;                                   /* a word that asks for the bidi algorithm (lay_bidi_hot) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
     uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
+    uint8_t lhn;                                   /* its line-height normal: the faces its run's shaping draws it
+                                                      with bring their lines (fa, fd: lay_shape_pieces) */
+    uint8_t sdir;                                  /* its direction for shaping, from its paragraph's bidi levels
+                                                      (lay_shape_dirs): 1 left to right, 2 right to left, 3 both; 0
+                                                      none resolved */
+    uint8_t rrtl;                                  /* its run (run) shaped right to left */
     uint8_t img;                                   /* an img element's atomic box (quirks mode keeps it beside what
                                                       is next to it in a table cell's min-content) */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
     uint32_t bu;                                   /* in a bidi paragraph, its first unit (lay_bu) */
+    uint32_t run;                                  /* the shaping run it was measured in (lay_shape_pieces): that
+                                                      run's first piece's index then, + 1; 0 none */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
@@ -1006,6 +1014,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->lh = s->lh;
     p->asc = s->asc;
     p->desc = s->desc;
+    p->lhn = (uint8_t)s->lhn;
     p->color = s->color;
     p->fill = s->fill;
 }
@@ -1740,7 +1749,6 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     /* a space: its advance, with letter-spacing and word-spacing */
     double space = amb_advance(f, s->face, ' ', s->fs) + s->ls + s->wsp;
     int collapse = s->ws == WS_NORMAL || s->ws == WS_NOWRAP || s->ws == WS_PRE_LINE;
-    size_t start = len(*ps);
     while (i < n) {
         char c = tx[i];
         int white = c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\n';
@@ -1785,10 +1793,9 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             continue;
         }
         size_t j = i;
-        int soft = 0, rtl = 0, hi = 0;
+        int soft = 0, rtl = 0;
         while (j < n && !(tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f' || tx[j] == '\n')) {
             unsigned char c0 = (unsigned char)tx[j];
-            if (c0 >= 0x80) hi = 1;
             if (c0 >= 0xC2) {
                 if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
                 else if (!rtl && lay_bidi_hot(tx, n, j)) rtl = 1;
@@ -1800,66 +1807,16 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         p.len = (uint32_t)(j - i);
         p.rtl = (uint8_t)rtl;
         p.soft = (uint8_t)soft;
-        uint32_t fbm = 0;           /* the faces other than the word's that draw some of it */
-        if (s->tt || soft || rtl) {
-            /* text-transform's letters; a soft hyphen, no width where it does not break; the
-               bidi controls none */
-            vector<char> tw;
-            if (s->tt) lay_transform(tx + i, j - i, s->tt, &tw);
-            else append_range(tw, tx + i, j - i);
-            if (soft) lay_strip_soft(&tw);
-            if (rtl) lay_strip_controls(&tw);
-            p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw)) + s->ls * (double)lay_cps(data(tw), len(tw));
-            if (hi && s->lhn) {
-                if (rtl) fbm = amb_text_fallbacks(f, s->face, data(tw), len(tw));
-                else fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
-            }
-        } else {
-            p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
-            if (hi && s->lhn) fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
-        }
+        /* its width, and the lines of the faces other than its own that draw some of it: its
+           run's shaping's (lay_shape_pieces) */
+        p.w = 0;
         p.brk = 0;
         p.keep = 0;
-        /* the lines of the faces that draw what the word's face has no glyph for */
-        if (hi && s->lhn) {
-            uint32_t m = fbm;
-            for (int k = 0; m && k < AMB_NFACES; k++) {
-                if (!(m >> k & 1)) continue;
-                double fa, fd, fg, up, dn;
-                amb_face_metrics(f, k, s->fs, &fa, &fd, &fg);
-                lay_leading(fa + fd + fg, fa, fd, &up, &dn);
-                if (!p.fb || up > p.fa) p.fa = (float)up;
-                if (!p.fb || dn > p.fd) p.fd = (float)dn;
-                p.fb = 1;
-            }
-        }
         push_back(ps, p);
         p.rtl = 0;
         p.soft = 0;
-        p.fb = 0;
         *sp = 0;
         i = j;
-    }
-    /* each space's kerning with the letters beside it in this text, which paint draws a
-       run with (Chromium shapes the run whole: the Liberation faces kern a space before
-       A, T, W and Y, and after them) */
-    if (s->tt) return;
-    for (size_t k = start; k < len(*ps); k++) {
-        lay_piece q = at(*ps, k);
-        if (q.kind != P_SPACE) continue;
-        double kk = 0;
-        if (k > start && at(*ps, k - 1).kind == P_WORD) {
-            lay_piece w = at(*ps, k - 1);
-            size_t e = w.off + w.len;
-            while (e > w.off + 1 && ((unsigned char)tx[e - 1] & 0xC0) == 0x80) e--;
-            size_t z = e - 1;
-            kk += amb_kerning(f, s->face, amb_utf8_next(tx, w.off + w.len, &z), ' ', s->fs);
-        }
-        if (k + 1 < len(*ps) && at(*ps, k + 1).kind == P_WORD) {
-            size_t z = at(*ps, k + 1).off;
-            kk += amb_kerning(f, s->face, ' ', amb_utf8_next(tx, n, &z), s->fs);
-        }
-        if (kk != 0) { q.w += kk; (*ps)[k] = q; }
     }
 }
 
@@ -1882,6 +1839,555 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
     amb_span span = d->node[node].data;
     lay_chars(LARGS, data(*sc) + si, node, pe, text_ptr(d, span), span.len, deco, ps, sp, ih);
 }
+/* ---- shaping: runs of pieces measured as Chromium shapes them ---- */
+
+static void lay_piece_text(const layout_tree *t, const dom_document *d, const vector<lay_gen> *gx, const vector<lay_piece> *ps, size_t a, size_t b,
+                           vector<char> *out);
+static int lay_bidi_class(uint32_t cp);
+static void lay_pack_glyphs(LCTX, const lay_piece *pp, const vector<char> *tx, size_t txo, const vector<amb_shaped> *gl, size_t gb, size_t gn,
+                            uint32_t b0, uint32_t b1, double *px, vector<char> *out);
+static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr);
+
+/* two text pieces of one shaping run: one font (face, web font, size, letter- and word-spacing,
+   style: Blink's FontDescription) */
+static int lay_same_font(lay_piece a, lay_piece b) {
+    return a.face == b.face && a.font == b.font && a.size == b.size && a.ls == b.ls && a.wsp == b.wsp && a.italic == b.italic;
+}
+
+/* an inline element's edge a run is shaped across (Blink's ShouldBreakShapingBefore/AfterBox):
+   no margin, border or padding on that side, its vertical-align baseline */
+static int lay_edge_open(LCTX, lay_piece p) {
+    return p.w == 0 && LAY_X(p.node).va == VA_BASELINE;
+}
+
+/* a kept run of spaces with a tab in it (laid out by its tab stop, not shaped) */
+static int lay_tabbed(LCTX, lay_piece p) {
+    if (p.kind != P_SPACE || !p.keep || (p.node & LAY_GEN)) return 0;
+    amb_span sp = d->node[p.node].data;
+    const char *tx = text_ptr(d, sp);
+    for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) if (tx[i] == '\t') return 1;
+    return 0;
+}
+
+/* a text piece's bytes as they are laid out and shaped (a collapsed space one; text-transform's
+   letters, soft hyphens and bidi controls out), appended to out */
+static void lay_shape_bytes(LCTX, const vector<lay_piece> *ps, size_t k, vector<char> *out) {
+    lay_piece p = at(*ps, k);
+    if (p.kind == P_SPACE && !p.keep) { push_back(out, ' '); return; }
+    size_t from = len(*out);
+    lay_piece_text(t, d, gx, ps, k, k + 1, out);
+    if (p.kind == P_WORD && p.rtl) {
+        vector<char> w;
+        for (size_t q = from; q < len(*out); q++) push_back(w, at(*out, q));
+        resize(out, from);
+        lay_strip_controls(&w);
+        append_range(out, data(w), len(w));
+    }
+}
+
+/* a word's direction by its first strong letter: 1 right to left, 0 left to right, -1 none */
+static int lay_word_dir(LCTX, const vector<lay_piece> *ps, size_t k) {
+    lay_piece p = at(*ps, k);
+    if (p.kind != P_WORD || !p.rtl) return p.kind == P_WORD ? 0 : -1;
+    vector<char> w;
+    lay_shape_bytes(LARGS, ps, k, &w);
+    size_t i = 0;
+    while (i < len(w)) {
+        int c = lay_bidi_class(amb_utf8_next(data(w), len(w), &i));
+        if (c == BC_L) return 0;
+        if (c == BC_R || c == BC_AL) return 1;
+    }
+    return -1;
+}
+
+/* where the shaping run that begins at text piece k ends: past its last text piece before one of
+   another font or direction, an edge it is not shaped across, a piece that is no text, or a kept
+   tab; its direction into *rtl */
+static size_t lay_run_end(LCTX, const vector<lay_piece> *ps, size_t k, size_t end, int *rtl) {
+    lay_piece p0 = at(*ps, k);
+    int dir = p0.sdir == 1 ? 0 : p0.sdir == 2 ? 1 : lay_word_dir(LARGS, ps, k);
+    size_t e = k + 1, last = k + 1;
+    while (e < end) {
+        lay_piece q = at(*ps, e);
+        if (q.kind == P_OPEN || q.kind == P_CLOSE) {
+            if (!lay_edge_open(LARGS, q)) break;
+            e++;
+            continue;
+        }
+        if ((q.kind != P_WORD && q.kind != P_SPACE) || !lay_same_font(p0, q) || lay_tabbed(LARGS, q)) break;
+        if (p0.sdir || q.sdir) {
+            /* the bidi levels' directions: a word of both shaped alone */
+            if (q.sdir != p0.sdir || p0.sdir == 3) break;
+        } else {
+            int qd = lay_word_dir(LARGS, ps, e);
+            if (qd >= 0 && dir >= 0 && qd != dir) break;
+            if (dir < 0) dir = qd;
+        }
+        e++;
+        last = e;
+    }
+    *rtl = dir == 1;
+    return last;
+}
+
+/* a piece's text as the context of a run shaped beside it: a word's or kept space's bytes as
+   laid out, a collapsed space one, an atomic inline's U+FFFC and a forced break's newline (in
+   Blink's text content), an edge none */
+static void lay_ctx_bytes(LCTX, const vector<lay_piece> *ps, size_t k, vector<char> *out) {
+    lay_piece p = at(*ps, k);
+    if (p.kind == P_WORD || p.kind == P_SPACE) lay_shape_bytes(LARGS, ps, k, out);
+    else if (p.kind == P_ATOMIC) append_range(out, "\xEF\xBF\xBC", 3);
+    else if (p.kind == P_BREAK) push_back(out, '\n');
+}
+
+/* the last five code points of text (the context before a run), or its first five (after one),
+   appended to out */
+static void lay_ctx_tail(const vector<char> *all, vector<char> *out) {
+    size_t i = 0, c = lay_cps(data(*all), len(*all));
+    while (c > 5 && i < len(*all)) { amb_utf8_next(data(*all), len(*all), &i); c--; }
+    for (size_t q = i; q < len(*all); q++) push_back(out, at(*all, q));
+}
+static void lay_ctx_head(const vector<char> *all, vector<char> *out) {
+    size_t i = 0;
+    for (int c = 0; c < 5 && i < len(*all); c++) amb_utf8_next(data(*all), len(*all), &i);
+    for (size_t q = 0; q < i; q++) push_back(out, at(*all, q));
+}
+
+/* the context HarfBuzz is given about a run (Blink shapes each run in its paragraph's whole
+   text, which Arabic joining reads across an element's edge or a change of font): the last
+   five code points of the text before piece k, appended to out */
+static void lay_ctx_before(LCTX, const vector<lay_piece> *ps, size_t k, vector<char> *out) {
+    size_t j = k, n = 0;
+    while (j > 0 && n < 5) {
+        vector<char> one;
+        lay_ctx_bytes(LARGS, ps, j - 1, &one);
+        n += lay_cps(data(one), len(one));
+        j--;
+    }
+    vector<char> all;
+    for (size_t q = j; q < k; q++) lay_ctx_bytes(LARGS, ps, q, &all);
+    lay_ctx_tail(&all, out);
+}
+
+/* and the first five of the text after piece k */
+static void lay_ctx_after(LCTX, const vector<lay_piece> *ps, size_t k, vector<char> *out) {
+    vector<char> all;
+    for (size_t j = k + 1; j < len(*ps) && lay_cps(data(all), len(all)) < 5; j++) lay_ctx_bytes(LARGS, ps, j, &all);
+    lay_ctx_head(&all, out);
+}
+
+/* the pieces [a, b) of one run shaped as one text, in its context: each text piece's bytes in tx
+   from at0[k - a] (an edge's its next piece's), the context before at0[0] and after at0[b - a];
+   the glyphs into gl, visual order (their clusters in order, the other way right to left) */
+static void lay_run_shape(LCTX, const vector<lay_piece> *ps, size_t a, size_t b, int rtl, vector<char> *tx, vector<uint32_t> *at0,
+                          vector<amb_shaped> *gl) {
+    lay_ctx_before(LARGS, ps, a, tx);
+    for (size_t k = a; k < b; k++) {
+        push_back(at0, (uint32_t)len(*tx));
+        lay_piece q = at(*ps, k);
+        if (q.kind == P_WORD || q.kind == P_SPACE) lay_shape_bytes(LARGS, ps, k, tx);
+    }
+    push_back(at0, (uint32_t)len(*tx));
+    size_t from = at(*at0, 0), to = len(*tx);
+    lay_ctx_after(LARGS, ps, b - 1, tx);
+    lay_piece p0 = at(*ps, a);
+    int flags = (rtl ? AMB_SHAPE_RTL : 0) | (p0.ls != 0 ? AMB_SHAPE_NOLIGA : 0);
+    if (to > from) amb_shape(f, p0.face, data(*tx), len(*tx), from, to, flags, gl);
+}
+
+/* a run as the cache knows it: its first and last pieces and those about it (a text node's
+   bytes, or an element's), its count of pieces, its font, its letters' case (text-transform,
+   which ::first-line may change) and its direction */
+typedef struct lay_rk {
+    uint32_t n0, o0, l0, n1, o1, l1, nb, ob, na, oa, cnt, face, font, tt, rtl;
+    double size, ls, wsp;
+} lay_rk;
+
+static int lay_rk_eq(lay_rk x, lay_rk y) {
+    return x.n0 == y.n0 && x.o0 == y.o0 && x.l0 == y.l0 && x.n1 == y.n1 && x.o1 == y.o1 && x.l1 == y.l1 && x.nb == y.nb && x.ob == y.ob &&
+           x.na == y.na && x.oa == y.oa && x.cnt == y.cnt && x.face == y.face && x.font == y.font && x.tt == y.tt && x.rtl == y.rtl &&
+           x.size == y.size && x.ls == y.ls && x.wsp == y.wsp;
+}
+
+/* the runs this layout shaped (lay_run_cached; some 500,000 glyphs' worth at most), each its key
+   and where in the pools after its text with its context is, each piece's first byte in it and
+   its glyphs, found by its key's hash: a paragraph's runs are measured before its lines take
+   them, a table cell's for its widths before it is laid out, and each line's fragments take
+   their run's glyphs (each run shaped once). Freed at the layout's end (lay_cq_free) */
+typedef struct lay_sce { lay_rk key; uint32_t tx0, txn, at0, atn, gl0, gln; } lay_sce;
+static vector<lay_sce> lay_ar;
+static vector<char> lay_ar_tx;
+static vector<uint32_t> lay_ar_at;
+static vector<amb_shaped> lay_ar_gl;
+static vector<uint32_t> lay_ar_slot;   /* the kept runs by their keys' hash: each slot an entry + 1, 0 none */
+
+/* the runs kept emptied */
+static void lay_ar_clear(void) {
+    clear(lay_ar);
+    clear(lay_ar_tx);
+    clear(lay_ar_at);
+    clear(lay_ar_gl);
+    clear(lay_ar_slot);
+}
+
+/* a run key's hash (FNV-1a over its fields) */
+static uint32_t lay_rk_hash(lay_rk k) {
+    uint32_t v[15] = { k.n0, k.o0, k.l0, k.n1, k.o1, k.l1, k.nb, k.ob, k.na, k.oa, k.cnt, k.face, k.font, k.tt, k.rtl };
+    uint64_t h = 1469598103934665603ull, bits;
+    for (int i = 0; i < 15; i++) h = (h ^ v[i]) * 1099511628211ull;
+    memcpy(&bits, &k.size, sizeof bits);
+    h = (h ^ bits) * 1099511628211ull;
+    memcpy(&bits, &k.ls, sizeof bits);
+    h = (h ^ bits) * 1099511628211ull;
+    memcpy(&bits, &k.wsp, sizeof bits);
+    h = (h ^ bits) * 1099511628211ull;
+    return (uint32_t)(h ^ h >> 32);
+}
+
+/* the kept run of key k: its entry + 1, 0 none */
+static uint32_t lay_ar_find(lay_rk k) {
+    size_t ns = len(lay_ar_slot);
+    if (!ns) return 0;
+    size_t i = lay_rk_hash(k) & (ns - 1);
+    while (at(lay_ar_slot, i)) {
+        uint32_t e = at(lay_ar_slot, i);
+        if (lay_rk_eq(at(lay_ar, e - 1).key, k)) return e;
+        i = (i + 1) & (ns - 1);
+    }
+    return 0;
+}
+
+/* entry e (its index) in the slots, made twice as many when they are half full */
+static void lay_ar_index(uint32_t e) {
+    size_t ns = len(lay_ar_slot);
+    if (2 * (len(lay_ar) + 1) > ns) {
+        size_t m = ns ? 2 * ns : 64;
+        while (2 * (len(lay_ar) + 1) > m) m *= 2;
+        clear(lay_ar_slot);
+        resize(lay_ar_slot, m);
+        for (uint32_t q = 0; q < (uint32_t)len(lay_ar); q++) {
+            if (q == e) continue;
+            size_t i = lay_rk_hash(at(lay_ar, q).key) & (m - 1);
+            while (at(lay_ar_slot, i)) i = (i + 1) & (m - 1);
+            lay_ar_slot[i] = q + 1;
+        }
+        ns = m;
+    }
+    size_t i = lay_rk_hash(at(lay_ar, e).key) & (ns - 1);
+    while (at(lay_ar_slot, i)) i = (i + 1) & (ns - 1);
+    lay_ar_slot[i] = e + 1;
+}
+
+/* the run of pieces [a, b) of ps kept (lay_ar_*): the one kept, or shaped and kept; its entry
+   (valid until the next run is taken) */
+static lay_sce lay_run_cached(LCTX, const vector<lay_piece> *ps, size_t a, size_t b, int rtl) {
+    lay_rk k;
+    memset(&k, 0, sizeof k);
+    lay_piece p0 = at(*ps, a), p1 = at(*ps, b - 1);
+    k.n0 = p0.node;
+    k.o0 = p0.off;
+    k.l0 = p0.len;
+    k.n1 = p1.node;
+    k.o1 = p1.off;
+    k.l1 = p1.len;
+    if (a > 0) { k.nb = at(*ps, a - 1).node; k.ob = at(*ps, a - 1).off + 1; }
+    if (b < len(*ps)) { k.na = at(*ps, b).node; k.oa = at(*ps, b).off + 1; }
+    k.cnt = (uint32_t)(b - a);
+    k.face = p0.face;
+    k.font = p0.font;
+    k.tt = (uint32_t)p0.tt << 8 | p1.tt;
+    k.rtl = (uint32_t)rtl;
+    k.size = p0.size;
+    k.ls = p0.ls;
+    k.wsp = p0.wsp;
+    uint32_t found = lay_ar_find(k);
+    if (found) return at(lay_ar, found - 1);
+    vector<char> tx;
+    vector<uint32_t> at0;
+    vector<amb_shaped> gl;
+    lay_run_shape(LARGS, ps, a, b, rtl, &tx, &at0, &gl);
+    if (len(lay_ar_gl) + len(gl) > 524288) lay_ar_clear();       /* about 15 MB kept at most */
+    lay_sce en;
+    memset(&en, 0, sizeof en);
+    en.key = k;
+    en.tx0 = (uint32_t)len(lay_ar_tx);
+    en.txn = (uint32_t)len(tx);
+    en.at0 = (uint32_t)len(lay_ar_at);
+    en.atn = (uint32_t)len(at0);
+    en.gl0 = (uint32_t)len(lay_ar_gl);
+    en.gln = (uint32_t)len(gl);
+    append_range(lay_ar_tx, data(tx), len(tx));
+    append_range(lay_ar_at, data(at0), len(at0));
+    append_range(lay_ar_gl, data(gl), len(gl));
+    push_back(lay_ar, en);
+    lay_ar_index((uint32_t)len(lay_ar) - 1);
+    return en;
+}
+
+/* the run of piece i (its run, measured: lay_shape_pieces) in ps: [*c0, *c1), and the direction
+   it was shaped in (its pieces'); the bounds last found kept, and taken when they are the run's
+   in ps (the next fragment's most often the same) */
+static uint32_t lay_rb_run;
+static size_t lay_rb_c0, lay_rb_c1;
+static void lay_run_bounds(const vector<lay_piece> *ps, size_t i, size_t *c0, size_t *c1, int *rtl) {
+    lay_piece p = at(*ps, i);
+    uint32_t id = p.run;
+    size_t n = len(*ps), a = lay_rb_c0, b = lay_rb_c1;
+    *rtl = p.rrtl;
+    if (id && id == lay_rb_run && a <= i && i < b && b <= n && at(*ps, a).run == id && at(*ps, b - 1).run == id && (a == 0 || at(*ps, a - 1).run != id) &&
+        (b == n || at(*ps, b).run != id)) {
+        *c0 = a;
+        *c1 = b;
+        return;
+    }
+    a = i;
+    b = i + 1;
+    while (a > 0 && at(*ps, a - 1).run == id) a--;
+    while (b < n && at(*ps, b).run == id) b++;
+    lay_rb_run = id;
+    lay_rb_c0 = a;
+    lay_rb_c1 = b;
+    *c0 = a;
+    *c1 = b;
+}
+
+/* the piece of a kept run (its pieces' first bytes from lay_ar_at[a0]) whose bytes hold byte c
+   of its text, from piece j on (the run's glyphs' clusters in order: one way or the other) */
+static size_t lay_run_piece(size_t a0, size_t np, uint32_t c, size_t j) {
+    while (j > 0 && at(lay_ar_at, a0 + j) > c) j--;
+    while (j + 1 < np && at(lay_ar_at, a0 + j + 1) <= c) j++;
+    return j;
+}
+
+/* the text pieces of ps from start measured by their runs' shaping, as Chromium measures them:
+   each its glyphs' advances (a glyph's its cluster's piece's: a kerning pair's to its first,
+   a ligature across an element's edge to the piece its first letter is in), its letter-spacing
+   after each code point and word-spacing after each space; but the kerning of a word's last
+   letter with the space after it in its own text the space's, which a line ending at that space
+   drops (Chromium shapes a line's last word without its space) */
+static void lay_shape_pieces(LCTX, vector<lay_piece> *ps, size_t start) {
+    size_t np = len(*ps);
+    vector<int64_t> units;
+    vector<double> other;
+    vector<uint32_t> fbm, gp, lastc;
+    for (size_t k = start; k < np; k++) (*ps)[k].run = 0;
+    for (size_t k = start; k < np;) {
+        uint8_t kind = (*ps)[k].kind;
+        if (kind != P_WORD && kind != P_SPACE) { k++; continue; }
+        lay_piece p = at(*ps, k);
+        if (lay_tabbed(LARGS, p)) { k++; continue; }
+        int rtl;
+        size_t b = lay_run_end(LARGS, ps, k, np, &rtl);
+        for (size_t j = k; j < b; j++) {
+            (*ps)[j].run = (uint32_t)k + 1;
+            (*ps)[j].rrtl = (uint8_t)rtl;
+        }
+        lay_sce en = lay_run_cached(LARGS, ps, k, b, rtl);
+        size_t n = b - k, ng = en.gln;
+        /* each piece's advances: its own face's in its units, the others' in px; and the
+           faces other than its own that draw some of it (a mask of those below AMB_NFACES);
+           each glyph's piece, and each piece's last cluster with an advance of its own face's
+           (+ 1; 0 none) */
+        clear(units);
+        clear(other);
+        clear(fbm);
+        clear(gp);
+        clear(lastc);
+        resize(units, n);
+        resize(other, n);
+        resize(fbm, n);
+        resize(lastc, n);
+        resize(gp, ng);
+        double upem = amb_face_upem(f, p.face);
+        size_t jj = rtl ? n - 1 : 0;
+        for (size_t g = 0; g < ng; g++) {
+            amb_shaped s = at(lay_ar_gl, en.gl0 + g);
+            size_t j = lay_run_piece(en.at0, n, s.cluster, jj);
+            jj = j;
+            gp[g] = (uint32_t)j;
+            if (s.face == p.face) {
+                units[j] += s.ax;
+                if (s.ax != 0 && s.cluster + 1 > at(lastc, j)) lastc[j] = s.cluster + 1;
+            } else {
+                other[j] += s.ax * p.size / amb_face_upem(f, s.face);
+                int by = amb_metrics_face(s.face);
+                if (by != p.face && by < AMB_NFACES) fbm[j] |= 1u << by;
+            }
+        }
+        /* a word's last letter's kerning with the space after it, of its own text: the space's */
+        for (size_t g = 0; g < ng; g++) {
+            amb_shaped s = at(lay_ar_gl, en.gl0 + g);
+            size_t j = at(gp, g);
+            if (s.ax == 0 || s.face != p.face || j + 1 >= n || s.cluster + 1 != at(lastc, j)) continue;
+            lay_piece w = at(*ps, k + j), sp = at(*ps, k + j + 1);
+            if (w.kind != P_WORD || sp.kind != P_SPACE || sp.node != w.node) continue;
+            units[j] -= s.ax - s.base;
+            units[j + 1] += s.ax - s.base;
+        }
+        for (size_t j = 0; j < n; j++) {
+            lay_piece q = at(*ps, k + j);
+            if (q.kind != P_WORD && q.kind != P_SPACE) continue;
+            size_t b0 = at(lay_ar_at, en.at0 + j), b1 = at(lay_ar_at, en.at0 + j + 1);
+            double w = upem > 0 ? (double)at(units, j) * p.size / upem + at(other, j) : 0;
+            w += q.ls * (double)lay_cps(data(lay_ar_tx) + en.tx0 + b0, b1 - b0);
+            if (q.kind == P_SPACE) w += q.wsp * (double)(q.keep ? q.len : 1);
+            q.w = w;
+            /* under line-height normal, a word's fallback faces' lines (Blink's used fonts) */
+            q.fb = 0;
+            uint32_t m = q.kind == P_WORD && q.lhn ? at(fbm, j) : 0;
+            for (int z = 0; m && z < AMB_NFACES; z++) {
+                if (!(m >> z & 1)) continue;
+                double fa, fd, fg, up, dn;
+                amb_face_metrics(f, z, q.size, &fa, &fd, &fg);
+                lay_leading(fa + fd + fg, fa, fd, &up, &dn);
+                if (!q.fb || up > q.fa) q.fa = (float)up;
+                if (!q.fb || dn > q.fd) q.fd = (float)dn;
+                q.fb = 1;
+            }
+            (*ps)[k + j] = q;
+        }
+        k = b;
+    }
+}
+
+/* a text fragment's glyphs (the whole pieces [k, r) of ps, in their text's order; rtl: their
+   level odd): the glyphs their runs' shaping gave them (Blink's fragment of its items' shape
+   results, as their widths were measured), each run's in its visual order, the runs too (a
+   piece no run measured, a kept tab, its width), each placed from the first's pen,
+   letter-spacing after each code point and word-spacing after each space as their widths have
+   them; packed into the fragment fr */
+static void lay_frag_glyphs(LCTX, const vector<lay_piece> *ps, size_t k, size_t r, int rtl, uint32_t fr) {
+    vector<uint32_t> segs;
+    for (size_t i = k; i < r;) {
+        uint32_t id = at(*ps, i).run;
+        size_t e = i + 1;
+        while (id && e < r && at(*ps, e).run == id) e++;
+        push_back(segs, (uint32_t)i);
+        push_back(segs, (uint32_t)e);
+        i = e;
+    }
+    vector<char> out;
+    double x = 0;
+    size_t ns = len(segs) / 2;
+    for (size_t q = 0; q < ns; q++) {
+        size_t z = rtl ? ns - 1 - q : q;
+        size_t i = at(segs, 2 * z), e = at(segs, 2 * z + 1);
+        lay_piece p = at(*ps, i);
+        if (!p.run) { x += p.w; continue; }
+        size_t c0, c1;
+        int dir;
+        lay_run_bounds(ps, i, &c0, &c1, &dir);
+        lay_sce en = lay_run_cached(LARGS, ps, c0, c1, dir);
+        lay_pack_glyphs(LARGS, &p, &lay_ar_tx, en.tx0, &lay_ar_gl, en.gl0, en.gln, at(lay_ar_at, en.at0 + i - c0), at(lay_ar_at, en.at0 + e - c0), &x,
+                        &out);
+    }
+    lay_put_glyphs(t, &out, fr);
+}
+
+/* a fragment's packed glyphs out kept as its glyphs; none, a glyph that draws nothing */
+static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr) {
+    if (!len(*out)) {
+        amb_rglyph rg;
+        memset(&rg, 0, sizeof rg);
+        rg.face = AMB_RGLYPH_OWN;
+        rg.flags = AMB_SHAPED_HIDDEN;
+        char raw[sizeof(amb_rglyph)];
+        memcpy(raw, &rg, sizeof rg);
+        append_range(out, raw, sizeof raw);
+    }
+    t->frag[fr].glyphs = glyphs_add(t, data(*out), len(*out));
+}
+
+/* the glyphs gl[gb, gb + gn) of a run whose clusters are in [b0, b1) of its text (tx from txo)
+   packed onto out (in the style of piece p), the first's pen at *x, which they move on: after
+   each cluster (its last glyph in visual order) its letter-spacing for each of its code points
+   and its word-spacing for each space (as the pieces' widths have them) */
+static void lay_pack_glyphs(LCTX, const lay_piece *pp, const vector<char> *tx, size_t txo, const vector<amb_shaped> *gl, size_t gb, size_t gn,
+                            uint32_t b0, uint32_t b1, double *px, vector<char> *out) {
+    lay_piece p = *pp;
+    /* the glyphs of [b0, b1): side by side, the run's clusters in order (or the other way, right
+       to left), found by halving */
+    size_t g0 = gb, g1 = gb + gn;
+    if (gn) {
+        int down = at(*gl, gb).cluster > at(*gl, gb + gn - 1).cluster;
+        size_t lo = gb, hi = gb + gn;
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            uint32_t c = at(*gl, mid).cluster;
+            if (down ? c >= b1 : c < b0) lo = mid + 1; else hi = mid;
+        }
+        g0 = lo;
+        hi = gb + gn;
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            uint32_t c = at(*gl, mid).cluster;
+            if (down ? c >= b0 : c < b1) lo = mid + 1; else hi = mid;
+        }
+        g1 = lo;
+    }
+    /* with letter- or word-spacing, the clusters' starts, in order (a run left to right gives
+       them so, one right to left the other way), each once */
+    vector<uint32_t> starts;
+    for (size_t g = g0; g < g1 && (p.ls != 0 || p.wsp != 0); g++) {
+        uint32_t c = at(*gl, g).cluster;
+        if (c >= b0 && c < b1) push_back(starts, c);
+    }
+    size_t ns = len(starts);
+    int up_order = 1, down_order = 1;
+    for (size_t i = 1; i < ns; i++) {
+        if (at(starts, i) < at(starts, i - 1)) up_order = 0;
+        if (at(starts, i) > at(starts, i - 1)) down_order = 0;
+    }
+    if (!up_order && down_order)
+        for (size_t i = 0; i < ns / 2; i++) {
+            uint32_t v = at(starts, i);
+            starts[i] = at(starts, ns - 1 - i);
+            starts[ns - 1 - i] = v;
+        }
+    else if (!up_order)
+        for (size_t i = 1; i < ns; i++) {
+            uint32_t v = at(starts, i);
+            size_t j = i;
+            while (j > 0 && at(starts, j - 1) > v) { starts[j] = at(starts, j - 1); j--; }
+            starts[j] = v;
+        }
+    size_t u = 0;
+    for (size_t i = 0; i < ns; i++) if (!u || at(starts, u - 1) != at(starts, i)) starts[u++] = at(starts, i);
+    resize(starts, u);
+    double x = *px, sc = p.size / amb_face_upem(f, p.face);
+    size_t o = len(*out), w = 0;
+    resize(out, o + (g1 - g0) * sizeof(amb_rglyph));
+    for (size_t g = g0; g < g1; g++) {
+        amb_shaped s = at(*gl, g);
+        if (s.cluster < b0 || s.cluster >= b1) continue;
+        double gs = s.face == p.face ? sc : p.size / amb_face_upem(f, s.face);
+        amb_rglyph rg;
+        memset(&rg, 0, sizeof rg);
+        rg.gid = s.gid;
+        rg.face = s.face == p.face ? (uint16_t)AMB_RGLYPH_OWN : s.face;
+        rg.flags = s.flags;
+        rg.x = x + s.dx * gs;
+        rg.y = (float)(-s.dy * gs);
+        memcpy(data(*out) + o + w * sizeof(amb_rglyph), &rg, sizeof rg);
+        w++;
+        x += s.ax * gs;
+        if (g + 1 < gb + gn && at(*gl, g + 1).cluster == s.cluster) continue;
+        if (p.ls == 0 && p.wsp == 0) continue;
+        /* the cluster's bytes: to the next cluster's start */
+        size_t lo = 0, hi = len(starts);
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (at(starts, mid) <= s.cluster) lo = mid + 1; else hi = mid;
+        }
+        uint32_t next = lo < len(starts) ? at(starts, lo) : b1;
+        size_t spaces = 0;
+        for (uint32_t q = s.cluster; q < next; q++) if (at(*tx, txo + q) == ' ') spaces++;
+        x += p.ls * (double)lay_cps(data(*tx) + txo + s.cluster, next - s.cluster) + p.wsp * (double)spaces;
+    }
+    resize(out, o + w * sizeof(amb_rglyph));
+    *px = x;
+}
+
 /* the pieces of an inline-level node: text, an inline element (its edges around its
    children's pieces), a forced break, an atomic box */
 /* the x-height of a style's font, in px (src/paint/font.h) */
@@ -2022,7 +2528,9 @@ static void lay_run_pieces(LCTX, uint32_t container, const vector<uint32_t> *ite
     int sp = 1;
     lay_inh ih;
     memset(&ih, 0, sizeof ih);
+    size_t from = len(*ps);
     for (uint32_t k = first; k < first + n; k++) lay_node_pieces(LARGS, at(*items, k), s.deco, cw, ps, &sp, &ih);
+    lay_shape_pieces(LARGS, ps, from);
 }
 /* a run shows something: a word, a kept space, an atomic box, a break, or an inline
    element's non-zero edge */
@@ -3382,6 +3890,25 @@ static void lay_bidi_units(LCTX, vector<lay_piece> *ps, vector<lay_bu> *u) {
     }
 }
 
+/* each text piece's direction for shaping (its sdir), from its paragraph's resolved levels u:
+   Blink shapes no run across a change of direction (a level's parity) */
+static void lay_shape_dirs(vector<lay_piece> *ps, const vector<lay_bu> *u) {
+    size_t nb = len(*u);
+    for (size_t k = 0; k < len(*ps); k++) {
+        lay_piece p = at(*ps, k);
+        if (p.kind != P_WORD && p.kind != P_SPACE) continue;
+        int got = 0;
+        size_t q = p.bu;
+        if (p.kind == P_WORD || p.keep) {
+            while (q < nb && at(*u, q).node == p.node && at(*u, q).off < p.off) q++;
+            for (; q < nb && at(*u, q).node == p.node && at(*u, q).off < p.off + p.len; q++)
+                if (at(*u, q).orig != BC_BN) got |= (at(*u, q).lvl & 1) ? 2 : 1;
+        } else if (q < nb) got = (at(*u, q).lvl & 1) ? 2 : 1;
+        p.sdir = (uint8_t)got;
+        (*ps)[k] = p;
+    }
+}
+
 /* ---- bidirectional text: a line's visual runs ---- */
 
 /* a visual run of a bidi line: its piece k, its bytes [o0, o1) of the piece's node text (a
@@ -3520,8 +4047,9 @@ static void lay_bidi_line(LCTX, const vector<lay_piece> *ps, size_t a, size_t en
 typedef struct lay_ent { uint32_t el, k0, k1; float shift, rx, ry; } lay_ent;
 
 /* a text fragment of line ln: its text txt[0, n) in its piece p's style, at px on the line, rw
-   wide; its baseline the line's, shifted (a top- or bottom-aligned one's against the line box) */
-static void lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt, size_t n, double px, double rw, double baseline, double height) {
+   wide; its baseline the line's, shifted (a top- or bottom-aligned one's against the line box).
+   Its index */
+static uint32_t lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt, size_t n, double px, double rw, double baseline, double height) {
     amb_span sp = text_add(t, txt, n);
     double pb = baseline + p->shift, above, below;
     if (p->va == VA_TOP || p->va == VA_BOTTOM) {
@@ -3553,6 +4081,7 @@ static void lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt
         if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
     }
     frags_append(t, ln, fr);
+    return fr;
 }
 
 /* a visual run that is a whole piece: a collapsed space, or all of a word's or kept space's bytes */
@@ -3703,22 +4232,67 @@ static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece
         while (g1 > g0 && at(*ps, at(*vr, at(*ord, g1 - 1)).k).kind == P_SPACE && !at(*ps, at(*vr, at(*ord, g1 - 1)).k).keep) g1--;
         if (g0 < g1) {
             lay_vr r0 = at(*vr, at(*ord, g0)), r1 = at(*vr, at(*ord, g1 - 1));
-            vector<char> lt, vt;
+            /* its text in logical order (lt), its context about it (the rest of its first and last
+               pieces when it begins or ends inside one, else the pieces' about them); and in
+               visual order (vt) */
+            vector<char> lt, vt, cx;
+            int rtl = r.lvl & 1, whole = 1;
+            lay_vr sf = at(*vr, at(*ord, rtl ? g1 - 1 : g0)), sl = at(*vr, at(*ord, rtl ? g0 : g1 - 1));
+            lay_piece pf = at(*ps, sf.k), pl = at(*ps, sl.k);
+            int fw = pf.kind == P_WORD || (pf.kind == P_SPACE && pf.keep), lw = pl.kind == P_WORD || (pl.kind == P_SPACE && pl.keep);
+            if (fw && sf.o0 > pf.off) {
+                lay_run_bytes(LARGS, &pf, pf.off, sf.o0, &cx);
+                lay_ctx_tail(&cx, &lt);
+            } else lay_ctx_before(LARGS, ps, sf.k, &lt);
+            size_t lf = len(lt);
             for (size_t z = 0; z < g1 - g0; z++) {
-                lay_vr s = at(*vr, at(*ord, (r.lvl & 1) ? g1 - 1 - z : g0 + z));
+                lay_vr s = at(*vr, at(*ord, rtl ? g1 - 1 - z : g0 + z));
                 lay_piece p2 = at(*ps, s.k);
+                if (!lay_vr_whole(&s, &p2) || (p2.kind == P_WORD && p2.sdir == 3)) whole = 0;
                 if (p2.kind == P_SPACE && !p2.keep) push_back(lt, ' ');
                 else lay_run_bytes(LARGS, &p2, s.o0, s.o1, &lt);
             }
-            if (r.lvl & 1) lay_bidi_reverse(&lt, &vt);
-            else append_range(vt, data(lt), len(lt));
+            size_t lto = len(lt);
+            vector<char> body;
+            for (size_t q2 = lf; q2 < lto; q2++) push_back(body, at(lt, q2));
+            clear(cx);
+            if (lw && sl.o1 < pl.off + pl.len) {
+                lay_run_bytes(LARGS, &pl, sl.o1, pl.off + pl.len, &cx);
+                lay_ctx_head(&cx, &lt);
+            } else lay_ctx_after(LARGS, ps, sl.k, &lt);
+            if (rtl) lay_bidi_reverse(&body, &vt);
+            else append_range(vt, data(body), len(body));
             lay_piece pg = at(*ps, r0.k);
-            if (len(vt)) lay_text_frag(LARGS, ln, &pg, data(vt), len(vt), r0.x + shift, r1.x + r1.w - r0.x, baseline, height);
+            if (len(vt)) {
+                uint32_t fr = lay_text_frag(LARGS, ln, &pg, data(vt), len(vt), r0.x + shift, r1.x + r1.w - r0.x, baseline, height);
+                /* its glyphs: its pieces' runs' (whole pieces), else its own text shaped in its
+                   direction (a part of a word the levels split) */
+                if (whole) lay_frag_glyphs(LARGS, ps, sf.k, (size_t)sl.k + 1, rtl, fr);
+                else {
+                    vector<amb_shaped> gl;
+                    vector<char> out;
+                    double gx0 = 0;
+                    if (lto > lf) amb_shape(f, pg.face, data(lt), len(lt), lf, lto, (rtl ? AMB_SHAPE_RTL : 0) | (pg.ls != 0 ? AMB_SHAPE_NOLIGA : 0), &gl);
+                    lay_pack_glyphs(LARGS, &pg, &lt, 0, &gl, 0, len(gl), (uint32_t)lf, (uint32_t)lto, &gx0, &out);
+                    lay_put_glyphs(t, &out, fr);
+                }
+            }
         }
         q = e2;
     }
 }
 
+
+/* a text item's width as Blink places what follows it: rounded up to a 64th of a px (its
+   LayoutUnit, ShapeResult::SnappedWidth: a line's items, each a text node's run on it or an
+   inline element's edge or an atomic box, follow each other at their LayoutUnits) */
+static double lay_ceil64(double w) { return ceil(w * 64 - 1e-5) / 64; }
+
+/* two text pieces of one item (a text node's, on a line; a kept tab is an item of its own) */
+static int lay_one_item(LCTX, lay_piece p, lay_piece q) {
+    return (p.kind == P_WORD || p.kind == P_SPACE) && (q.kind == P_WORD || q.kind == P_SPACE) && p.node == q.node && !lay_tabbed(LARGS, p) &&
+           !lay_tabbed(LARGS, q);
+}
 
 /* the rest of a bidi line (lay_line's, its pieces [a, end) measured, its atomic boxes laid
    out, its extent above and below its baseline known): its visual runs, aligned (a collapsed
@@ -3729,6 +4303,26 @@ static double lay_bidi_finish(LCTX, uint32_t b, const lay_style *bs, const vecto
     vector<lay_vr> vr;
     vector<uint32_t> ord;
     lay_bidi_line(LARGS, ps, a, end, bu, para, &vr, &ord);
+    /* each text item (one text node's runs side by side at one level) its width rounded up, the
+       difference its last run's (lay_ceil64) */
+    for (size_t q = 0; q < len(ord);) {
+        lay_vr r = at(vr, at(ord, q));
+        lay_piece p = at(*ps, r.k);
+        size_t q1 = q + 1;
+        if (p.kind != P_WORD && p.kind != P_SPACE) { q = q1; continue; }
+        double tot = r.w;
+        while (q1 < len(ord)) {
+            lay_vr s = at(vr, at(ord, q1));
+            if (s.lvl != r.lvl || !lay_one_item(LARGS, p, at(*ps, s.k))) break;
+            tot += s.w;
+            q1++;
+        }
+        uint32_t li = at(ord, q1 - 1);
+        lay_vr lr = at(vr, li);
+        lr.w += lay_ceil64(tot) - tot;
+        vr[li] = lr;
+        q = q1;
+    }
     double line_w = indent;
     int spaces = 0;
     for (size_t q = 0; q < len(vr); q++) {
@@ -3774,7 +4368,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     vector<double> xs;
     vector<uint32_t> atoms;
     vector<double> abase;            /* each atomic box's baseline, from its margin box's top, as its vertical-align has it */
-    double x = indent, above, below, max_above, max_below, top_h = 0, bottom_h = 0;
+    double x = indent, above, below, max_above, max_below, top_h = 0, bottom_h = 0, istart = indent;
     lay_leading(bs->lh, bs->asc, bs->desc, &max_above, &max_below);
     /* the line height quirk (quirks and limited-quirks modes; the Quirks Mode Standard 3.3 and 3.4,
        as Blink has it, measured): no strut -- the block's line height counts on a line with text of
@@ -3832,7 +4426,10 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 if (mh - base + p.shift > max_below) max_below = mh - base + p.shift;
             }
         }
+        if (k == a || !lay_one_item(LARGS, at(*ps, k - 1), p)) istart = x;
         x += p.w;
+        /* a text item's end: what follows starts at its width rounded up (lay_ceil64) */
+        if ((p.kind == P_WORD || p.kind == P_SPACE) && (k + 1 >= end || !lay_one_item(LARGS, p, at(*ps, k + 1)))) x = istart + lay_ceil64(x - istart);
     }
     if (lay_lhq && root_text) {
         if (strut_above > max_above) max_above = strut_above;
@@ -4025,6 +4622,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             uint32_t ts = LAY_X(p.elem).tshadow;
             if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
         }
+        lay_frag_glyphs(LARGS, ps, k, r, 0, fr);
         frags_append(t, ln, fr);
         k = r;
     }
@@ -4354,7 +4952,7 @@ static void lay_first_letter(LCTX, vector<lay_piece> *ps, uint32_t gi, double cw
 }
 
 /* ::first-line: the pieces in the style of the pseudo-element fls where they have their
-   block's (bs) -- what they inherit -- measured again */
+   block's (bs) -- what they inherit -- measured again, as their runs shape */
 static void lay_first_line_pieces(LCTX, vector<lay_piece> *ps, const lay_style *bs, const lay_style *fls) {
     for (size_t k = 0; k < len(*ps); k++) {
         lay_piece p = at(*ps, k);
@@ -4369,18 +4967,15 @@ static void lay_first_line_pieces(LCTX, vector<lay_piece> *ps, const lay_style *
         p.lh = fls->lh;
         p.asc = fls->asc;
         p.desc = fls->desc;
+        p.lhn = (uint8_t)fls->lhn;
         p.ls = fls->ls;
         p.wsp = fls->wsp;
         if (fls->tt && p.kind == P_WORD) p.tt = (uint8_t)fls->tt;
         double space = amb_advance(f, p.face, ' ', p.size) + p.ls + p.wsp;
-        if (p.kind == P_WORD) {
-            vector<char> wt;
-            (*ps)[k] = p;
-            lay_piece_text(t, d, gx, ps, k, k + 1, &wt);
-            p.w = amb_text_width(f, p.face, p.size, data(wt), len(wt)) + p.ls * (double)lay_cps(data(wt), len(wt));
-        } else if (p.kind == P_SPACE) p.w = old_space > 0 ? p.w * space / old_space : space;
+        if (p.kind == P_SPACE && lay_tabbed(LARGS, p)) p.w = old_space > 0 ? p.w * space / old_space : space;
         (*ps)[k] = p;
     }
+    lay_shape_pieces(LARGS, ps, 0);
 }
 
 /* the lines of the inline run [first, first + n) of items in box b, w wide; returns their height */
@@ -4427,6 +5022,9 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
             }
         }
         lay_bidi_resolve(&bu, para);
+        /* measured again, each run of one direction */
+        lay_shape_dirs(&ps, &bu);
+        lay_shape_pieces(LARGS, &ps, 0);
     }
     if (want_fl) {
         has_fl = 1;
@@ -4587,6 +5185,11 @@ static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, 
             keep = j;
             kw = cw;
             i = j;
+        }
+        if (keep < sp.len) {
+            /* cut: its glyphs paint's, of what stays shaped (amb_text_width's) */
+            amb_span none = { 0, 0 };
+            t->frag[fr].glyphs = none;
         }
         t->frag[fr].text.len = (uint32_t)keep;
         t->frag[fr].w = kw;
@@ -5962,6 +6565,14 @@ static void lay_cq_free(void) {
     shrink_to_fit(&lay_cq_depth);
     clear(lay_cq_pool);
     shrink_to_fit(&lay_cq_pool);
+    /* and the runs shaped */
+    lay_rb_run = 0;
+    lay_ar_clear();
+    shrink_to_fit(&lay_ar);
+    shrink_to_fit(&lay_ar_tx);
+    shrink_to_fit(&lay_ar_at);
+    shrink_to_fit(&lay_ar_gl);
+    shrink_to_fit(&lay_ar_slot);
 }
 
 static void lay_cq_save(uint32_t x, const vector<lay_ctr> *ctr, int depth) {
@@ -7799,6 +8410,8 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     amb_fonts fonts = {0};
     defer(fonts) { AMB_FONTS_DROP(fonts); }
     amb_fonts_load(&fonts);
+    lay_rb_run = 0;                   /* no run shaped yet in these fonts */
+    lay_ar_clear();
     /* each node's style, and each style's first value; then each style as layout reads it */
     vector<uint32_t> node_style;
     resize(node_style, doc->node_len);

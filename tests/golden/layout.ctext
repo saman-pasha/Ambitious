@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:5820d145:7264). Do not edit. */
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:c8912db3:7304). Do not edit. */
 typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
 typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL, LAYOUT_BOX_KIND_FLEX, LAYOUT_BOX_KIND_GRID, LAYOUT_BOX_KIND_INLINE } layout_box_kind;
 typedef enum layout_theme { LAYOUT_THEME_CSS, LAYOUT_THEME_FIELD, LAYOUT_THEME_AREA, LAYOUT_THEME_BUTTON, LAYOUT_THEME_MENULIST, LAYOUT_THEME_LISTBOX, LAYOUT_THEME_CHECKBOX, LAYOUT_THEME_RADIO, LAYOUT_THEME_RANGE, LAYOUT_THEME_COLORWELL, LAYOUT_THEME_PROGRESS, LAYOUT_THEME_METER, LAYOUT_THEME_FILE, LAYOUT_THEME_DATE } layout_theme;
@@ -13,7 +13,7 @@ typedef struct layout_line_h { uint32_t doc, index, gen; } layout_line_h;
 typedef struct layout_frag_h { uint32_t doc, index, gen; } layout_frag_h;
 typedef struct layout_box { uint32_t gen, live, free_next; dom_node_h node; layout_box_kind kind; uint32_t parent; uint32_t next; uint32_t first_child; uint32_t last_child; uint32_t first_line; uint32_t last_line; double x; double y; double w; double h; double mt; double mr; double mb; double ml; double bt; double br; double bb; double bl; double pt; double pr; double pb; double pl; layout_width_how how; double avail; uint32_t background; uint32_t bct; uint32_t bcr; uint32_t bcb; uint32_t bcl; uint8_t bst; uint8_t bsr; uint8_t bsb; uint8_t bsl; uint8_t pseudo; layout_position position; uint32_t cb; uint8_t cb_inline; dom_node_h cb_node; layout_float_side float_side; int32_t z; uint8_t z_auto; uint8_t clip; double dx; double dy; double rtl; double rtr; double rbr; double rbl; double rtlv; double rtrv; double rbrv; double rblv; double opacity; amb_span shadows; amb_span bg_image; net_resource_h bg_res; amb_span bg_pos; amb_span bg_size; amb_span bg_repeat; amb_span bg_clip; amb_span bg_origin; amb_span transform; amb_span origin; amb_span filter; amb_span backdrop; amb_span translate; amb_span rotate; amb_span scale; amb_span persp; amb_span porigin; uint8_t p3d; uint8_t backface; amb_span svg; layout_theme theme; uint8_t checked; double fraction; uint32_t swatch; uint8_t part; double part_w; uint8_t tstate; uint8_t unsourced; uint8_t ofit; amb_span opos; amb_span cpath; double ow; uint8_t ostyle; uint32_t ocolor; double ooffset; int32_t grid_row; int32_t grid_col; uint32_t grid_rows; uint32_t grid_cols; layout_grid_by grid_by; amb_span grid_area; double baseline; uint8_t has_baseline; uint32_t legend; } layout_box;
 typedef struct layout_line { uint32_t gen, live, free_next; uint32_t box; uint32_t next; uint32_t first_frag; uint32_t last_frag; double x; double y; double w; double h; double baseline; } layout_line;
-typedef struct layout_frag { uint32_t gen, live, free_next; uint32_t line; uint32_t next; layout_frag_kind kind; dom_node_h node; uint32_t atomic; amb_span text; double x; double y; double w; double h; double baseline; uint8_t face; net_resource_h font; double size; double spacing; double word_spacing; uint8_t italic; uint32_t color; uint32_t fill; uint32_t background; uint32_t piece; uint8_t decoration; amb_span shadows; } layout_frag;
+typedef struct layout_frag { uint32_t gen, live, free_next; uint32_t line; uint32_t next; layout_frag_kind kind; dom_node_h node; uint32_t atomic; amb_span text; double x; double y; double w; double h; double baseline; uint8_t face; net_resource_h font; double size; double spacing; double word_spacing; uint8_t italic; uint32_t color; uint32_t fill; uint32_t background; uint32_t piece; uint8_t decoration; amb_span shadows; amb_span glyphs; } layout_frag;
 typedef struct layout_store_tag { char unused; } layout_store_tag;
 typedef store<layout_store_tag> layout_tree;
 extern const char layout_fingerprint[];
@@ -158,12 +158,13 @@ const char *layout_frag_kind_name(layout_frag_kind x) {
     return "?";
 }
 
-const char layout_fingerprint[] = "fnv1a32:5820d145:7264";
+const char layout_fingerprint[] = "fnv1a32:c8912db3:7304";
 void layout_init(layout_tree *d, uint32_t id) {
     if (d->box_len != 0) abort();
     d->id = id;
     d->revision = 0;
     text_add(d, "", 0);
+    glyphs_add(d, "", 0);
 }
 uint64_t layout_revision(const layout_tree *d) { return d->revision; }
 layout_status layout_check_run(const layout_tree *d, dom_document *doc, css_style *style, net_loader *net, double width, double height)
@@ -439,8 +440,10 @@ typedef struct store_layout_store_tag {
     own layout_frag *frag;
     size_t text_len, text_cap;
     own char *text;
+    size_t glyphs_len, glyphs_cap;
+    own char *glyphs;
 } store_layout_store_tag;
-void store_layout_store_tag_drop(store_layout_store_tag *s) { free(s->box); free(s->line); free(s->frag); free(s->text); }
+void store_layout_store_tag_drop(store_layout_store_tag *s) { free(s->box); free(s->line); free(s->frag); free(s->text); free(s->glyphs); }
 static void store_layout_store_tag__box_grow(store_layout_store_tag *s) {
     size_t c = s->box_cap ? 2 * s->box_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -685,6 +688,49 @@ void store_layout_store_tag_text_put(const store_layout_store_tag *s, FILE *out,
     amb_put_qatom(out, s->text + sp.off, sp.len);
 }
 size_t store_layout_store_tag_text_size(const store_layout_store_tag *s) { return s->text_len; }
+static void store_layout_store_tag__glyphs_room(store_layout_store_tag *s, size_t n) {
+    if (s->glyphs_len + n <= s->glyphs_cap) return;
+    size_t c = s->glyphs_cap ? s->glyphs_cap : 256;
+    while (c < s->glyphs_len + n) c *= 2;
+    if (c > 0x7FFFFFFF) abort();
+    s->glyphs = (char *)realloc(s->glyphs, c);
+    if (!s->glyphs) abort();
+    s->glyphs_cap = c;
+}
+amb_span store_layout_store_tag_glyphs_add(store_layout_store_tag *s, const char *p, size_t n) {
+    amb_span sp = { 0, 0 };
+    if (s->glyphs_len == 0) {
+        store_layout_store_tag__glyphs_room(s, 1);
+        s->glyphs[0] = 0;
+        s->glyphs_len = 1;
+    }
+    if (n == 0) return sp;
+    int inside = p >= s->glyphs && p < s->glyphs + s->glyphs_len;
+    size_t from = inside ? (size_t)(p - s->glyphs) : 0;
+    store_layout_store_tag__glyphs_room(s, n);
+    if (inside) memmove(s->glyphs + s->glyphs_len, s->glyphs + from, n);
+    else memcpy(s->glyphs + s->glyphs_len, p, n);
+    sp.off = (uint32_t)s->glyphs_len;
+    sp.len = (uint32_t)n;
+    s->glyphs_len += n;
+    return sp;
+}
+const char *store_layout_store_tag_glyphs_ptr(const store_layout_store_tag *s, amb_span sp) tie s {
+    if (s->glyphs_len == 0 || (size_t)sp.off + sp.len > s->glyphs_len) abort();
+    return s->glyphs + sp.off;
+}
+int store_layout_store_tag_glyphs_eq(const store_layout_store_tag *s, amb_span sp, const char *p, size_t n) {
+    if (sp.len != n) return 0;
+    if (n == 0) return 1;
+    if ((size_t)sp.off + sp.len > s->glyphs_len) abort();
+    return memcmp(s->glyphs + sp.off, p, n) == 0;
+}
+void store_layout_store_tag_glyphs_put(const store_layout_store_tag *s, FILE *out, amb_span sp) {
+    if (sp.len == 0) { amb_put_qatom(out, "", 0); return; }
+    if ((size_t)sp.off + sp.len > s->glyphs_len) abort();
+    amb_put_qatom(out, s->glyphs + sp.off, sp.len);
+}
+size_t store_layout_store_tag_glyphs_size(const store_layout_store_tag *s) { return s->glyphs_len; }
 void store_layout_store_tag_children_append(store_layout_store_tag *s, uint32_t o, uint32_t i) {
     if (o == 0 || i == 0 || o >= s->box_len || i >= s->box_len) abort();
     uint32_t t = s->box[o].last_child;

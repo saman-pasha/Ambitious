@@ -6,8 +6,9 @@
    scripts (then DFLT, dflt and latn), its default language system, and in it the features
    HarfBuzz applies for Chromium -- rvrn; ltra and ltrm, or rtla and rtlm; the common ones
    (abvm, blwm, ccmp, locl, mark, mkmk, rlig) and the horizontal ones (calt, clig, curs,
-   dist, kern, liga, rclt), Blink turning liga, clig and calt off under letter-spacing and
-   kern off under font-kerning: none -- in the stages the default shaper gives them (rvrn,
+   dist, kern, liga, rclt), Blink turning liga, clig and calt off under letter-spacing (and
+   kern off under font-kerning: none, AMB_SHAPE_NOKERN, a property the cascade does not read
+   yet) -- in the stages the default shaper gives them (rvrn,
    then the rest), or the Arabic shaper (ccmp and locl; isol, fina, fin2, fin3, medi, med2,
    init each its own; rlig; rclt and calt; mset, clig, liga), each feature's lookups sorted by
    their index and merged within a stage, each with its features' masks and whether they
@@ -33,7 +34,9 @@
    buffer, GPOS in place, a reverse chained lookup backward in place. Then marks' advances
    are zeroed by their class (late, as the default, Arabic and Hebrew shapers do), default
    ignorables' advances and offsets, and attachments' offsets carried to the glyphs attached
-   (a mark's less the advances between it and its base; a cursive chain's across).
+   (a mark's along the line, less the advances between it and its base -- across it, a mark
+   takes its base's offset, up its cursive chain, as it is attached, so a mark attached before
+   a later lookup chains its base stays where it was put; a cursive chain's across).
 
    Not done: FeatureVariations, a language's own system (the default one is taken, as for a
    page with no lang), 'rand' (alternates are their first), Device tables (read by HarfBuzz
@@ -140,13 +143,28 @@ uint32_t amb_mirror_of(uint32_t cp) {
     return cp;
 }
 
-int amb_script_of(uint32_t cp) {
+static int ot_script_search(uint32_t cp) {
     size_t lo = 0, hi = AMB_SH_SCRIPT;
     while (hi - lo > 1) {
         size_t mid = (lo + hi) / 2;
         if ((amb_sh_script[mid] >> 8) <= cp) lo = mid; else hi = mid;
     }
     return (int)(amb_sh_script[lo] & 255);
+}
+
+/* the scripts of the code points below U+0250, looked up once */
+static uint8_t ot_script_low[0x250];
+static int ot_script_low_made;
+
+int amb_script_of(uint32_t cp) {
+    if (cp < 0x250) {
+        if (!ot_script_low_made) {
+            for (uint32_t c = 0; c < 0x250; c++) ot_script_low[c] = (uint8_t)ot_script_search(c);
+            ot_script_low_made = 1;
+        }
+        return ot_script_low[cp];
+    }
+    return ot_script_search(cp);
 }
 
 uint32_t amb_script_tag(int script) {
@@ -230,6 +248,48 @@ static int ot_coverage(const uint8_t *p, size_t n, size_t off, uint32_t g) {
     return -1;
 }
 
+/* glyphs a to b in a lookup's digest (d, its three masks) */
+static void ot_dg_range(uint64_t *d, uint32_t a, uint32_t b) {
+    for (int k = 0; k < 3; k++) {
+        int s = k == 0 ? 0 : k == 1 ? 4 : 9;
+        uint32_t x0 = a >> s, x1 = b >> s;
+        if (x1 - x0 >= 63) { d[k] = ~(uint64_t)0; continue; }
+        for (uint32_t x = x0; x <= x1; x++) d[k] |= (uint64_t)1 << (x & 63);
+    }
+}
+
+/* the glyphs of the Coverage table at off in a digest (any glyph, for a table it cannot read) */
+static void ot_dg_coverage(const uint8_t *p, size_t n, uint64_t *d, size_t off) {
+    uint32_t fmt = off ? ot_u16(p, n, off) : 0, cnt = off ? ot_u16(p, n, off + 2) : 0;
+    if (fmt == 1) {
+        for (uint32_t k = 0; k < cnt; k++) {
+            uint32_t g = ot_u16(p, n, off + 4 + 2 * (size_t)k);
+            ot_dg_range(d, g, g);
+        }
+    } else if (fmt == 2) {
+        for (uint32_t k = 0; k < cnt; k++) ot_dg_range(d, ot_u16(p, n, off + 4 + 6 * (size_t)k), ot_u16(p, n, off + 6 + 6 * (size_t)k));
+    } else ot_dg_range(d, 0, 0xFFFF);
+}
+
+/* whether a digest may hold glyph g */
+static int ot_dg_may(const uint64_t *d, uint32_t g) {
+    return (d[0] >> (g & 63) & 1) && (d[1] >> ((g >> 4) & 63) & 1) && (d[2] >> ((g >> 9) & 63) & 1);
+}
+
+/* the digest of a buffer's glyphs (HarfBuzz's buffer digest) */
+static void ot_dg_buffer(const vector<amb_otg> *buf, uint64_t *d) {
+    d[0] = d[1] = d[2] = 0;
+    for (size_t i = 0; i < len(*buf); i++) {
+        uint32_t g = at(*buf, i).gid;
+        d[0] |= (uint64_t)1 << (g & 63);
+        d[1] |= (uint64_t)1 << ((g >> 4) & 63);
+        d[2] |= (uint64_t)1 << ((g >> 9) & 63);
+    }
+}
+
+/* whether two digests may share a glyph: a lookup whose digest meets no buffer's is passed over */
+static int ot_dg_meets(const uint64_t *a, const uint64_t *b) { return (a[0] & b[0]) && (a[1] & b[1]) && (a[2] & b[2]); }
+
 /* the class of a glyph in the ClassDef table at off (0 for none, and for a null offset) */
 static uint32_t ot_class(const uint8_t *p, size_t n, size_t off, uint32_t g) {
     if (!off) return 0;
@@ -276,7 +336,10 @@ static int ot_mark_set(const uint8_t *p, size_t n, size_t gdef, uint32_t k, uint
 
 /* a lookup a plan applies: the features' masks, its index, its table (0 GSUB, 1 GPOS), its
    stage, whether its features skip ZWJ and ZWNJ on their own */
-typedef struct ot_lookup { uint32_t mask; uint16_t index; uint8_t table, stage, zwj, zwnj; } ot_lookup;
+/* a lookup of a plan: its index, the features' mask, its table and stage, whether it skips the
+   joiners; and its digest, the glyphs it may apply at (HarfBuzz's set digest: three masks of a
+   glyph id's bits from bit 0, 4 and 9 on, of its subtables' first coverages) */
+typedef struct ot_lookup { uint64_t d[3]; uint32_t mask; uint16_t index; uint8_t table, stage, zwj, zwnj; } ot_lookup;
 /* a plan: for a font (its id), a script, the flags; its lookups in ot_lks from first (GSUB's,
    then GPOS's); what HarfBuzz decides of it */
 typedef struct ot_plan {
@@ -290,9 +353,39 @@ static vector<ot_lookup> ot_lks;
 static vector<ot_plan> ot_plans;
 static int ot_kept;
 
+/* each font's glyphs' GDEF classes (ot_gdef_props), read at its first run: its id, where they
+   begin in ot_gpv, how many */
+typedef struct ot_gpc { uint32_t id, first, count; } ot_gpc;
+static vector<ot_gpc> ot_gpcs;
+static vector<uint16_t> ot_gpv;
+
 static void ot_static_drop(void) {
     vector_ot_lookup_drop(&ot_lks);
     vector_ot_plan_drop(&ot_plans);
+    vector_ot_gpc_drop(&ot_gpcs);
+    vector_uint16_t_drop(&ot_gpv);
+}
+
+/* the GDEF classes of a font's glyphs (it has a GlyphClassDef): their entry in ot_gpcs */
+static ot_gpc ot_gdef_classes(const uint8_t *p, size_t n, const amb_otf *t) {
+    for (size_t k = 0; k < len(ot_gpcs); k++)
+        if (at(ot_gpcs, k).id == t->id) return at(ot_gpcs, k);
+    if (!ot_kept) {
+        atexit(ot_static_drop);
+        ot_kept = 1;
+    }
+    if (len(ot_gpcs) >= 32 || len(ot_gpv) + t->nglyphs > (4u << 20)) {
+        clear(ot_gpcs);
+        clear(ot_gpv);
+    }
+    ot_gpc e;
+    e.id = t->id;
+    e.first = (uint32_t)len(ot_gpv);
+    e.count = t->nglyphs;
+    resize(ot_gpv, len(ot_gpv) + t->nglyphs);
+    for (uint32_t g = 0; g < t->nglyphs; g++) ot_gpv[e.first + g] = (uint16_t)ot_gdef_props(p, n, t->gdef, g);
+    push_back(ot_gpcs, e);
+    return e;
 }
 
 /* the script table of GSUB or GPOS (at tb) for tag, else DFLT, dflt, latn: its offset (0 none),
@@ -491,6 +584,30 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
         resize(ot_lks, o);
         if (tb) pl.npos = o - start;
         else pl.nsub = o - start;
+        /* each one's digest, from its subtables' first coverages (an extension's subtable's; a
+           contextual one's of its first input in format 3) */
+        for (uint32_t i = start; i < o; i++) {
+            ot_lookup x = at(ot_lks, i);
+            size_t lt = ot_at(p, n, ll, 2 + 2 * (size_t)x.index);
+            uint32_t type = lt ? ot_u16(p, n, lt) : 0, cnt = lt ? ot_u16(p, n, lt + 4) : 0;
+            for (uint32_t j = 0; j < cnt; j++) {
+                size_t st = ot_at(p, n, lt, 6 + 2 * (size_t)j);
+                uint32_t ty = type;
+                if (st && ty == (tb ? 9u : 7u)) {
+                    ty = ot_u16(p, n, st + 2);
+                    st += ot_u32(p, n, st + 4);
+                }
+                if (!st) continue;
+                int ctx = tb ? (ty == 7 || ty == 8) : (ty == 5 || ty == 6), chain = ty == (tb ? 8u : 6u);
+                size_t cov;
+                if (ctx && ot_u16(p, n, st) == 3) {
+                    size_t bc = chain ? ot_u16(p, n, st + 2) : 0;
+                    cov = ot_u16(p, n, st + 2 + (chain ? 2 + 2 * bc : 0)) ? ot_at(p, n, st, (chain ? 6 + 2 * bc : 6)) : 0;
+                } else cov = ot_at(p, n, st, 2);
+                ot_dg_coverage(p, n, x.d, cov);
+            }
+            ot_lks[i] = x;
+        }
     }
     /* who positions: GPOS, unless the Hebrew shaper's font has no hebr script in it; then the
        kern table, unless GPOS applies a kern feature */
@@ -1068,8 +1185,25 @@ static int ot_anchor(const uint8_t *p, size_t n, size_t a, int32_t *x, int32_t *
     return 1;
 }
 
+/* the offset across the line a mark takes from glyph j as it is attached to it (HarfBuzz's
+   resolve_cross_offset): j's y offset and, up its cursive chain, each parent's, as they are now */
+static int32_t ot_cross_offset(const vector<amb_otg> *in, size_t j) {
+    size_t cnt = len(*in);
+    int32_t off = at(*in, j).dy;
+    for (size_t k = 1; k < cnt && at(*in, j).attach == 2; k++) {
+        int32_t chain = at(*in, j).chain;
+        if (!chain) break;
+        long parent = (long)j + chain;
+        if (parent < 0 || (size_t)parent >= cnt) break;
+        j = (size_t)parent;
+        off += at(*in, j).dy;
+    }
+    return off;
+}
+
 /* the mark at the current glyph attached to glyph j by the mark record mi of the MarkArray at ma
-   and the anchor of the record at row for its class (offsets from rb): 1 when the anchor is there */
+   and the anchor of the record at row for its class (offsets from rb), j's offset across the line
+   (a cursive chain's) taken now: 1 when the anchor is there */
 static int ot_mark_attach(OTX, size_t ma, uint32_t mi, size_t rb, size_t row, uint32_t nclass, size_t j) {
     (void)out;
     uint32_t cls = ot_u16(p, n, ma + 2 + 4 * (size_t)mi);
@@ -1078,9 +1212,10 @@ static int ot_mark_attach(OTX, size_t ma, uint32_t mi, size_t rb, size_t row, ui
     size_t mark_anchor = ot_at(p, n, ma, 4 + 4 * (size_t)mi);
     int32_t bx, by, mx, my;
     if (!ot_anchor(p, n, base_anchor, &bx, &by) || !ot_anchor(p, n, mark_anchor, &mx, &my)) return 0;
+    int32_t cross = ot_cross_offset(in, j);
     amb_otg g = at(*in, *idx);
     g.dx = bx - mx;
-    g.dy = by - my;
+    g.dy = by - my + cross;
     g.attach = 1;
     g.chain = (int32_t)j - (int32_t)*idx;
     (*in)[*idx] = g;
@@ -1315,8 +1450,8 @@ static int ot_lookup_reverse(const uint8_t *p, size_t n, size_t lk) {
 }
 
 /* a lookup applied over the buffer: forward through an output buffer (GSUB), in place (GPOS),
-   backward in place (a reverse chained substitution) */
-static void ot_lookup_string(const uint8_t *p, size_t n, ot_ctx *c, vector<amb_otg> *buf, size_t lk) {
+   backward in place (a reverse chained substitution); a glyph its digest d has not passed over */
+static void ot_lookup_string(const uint8_t *p, size_t n, ot_ctx *c, vector<amb_otg> *buf, size_t lk, const uint64_t *d) {
     vector<amb_otg> out;
     size_t idx = 0;
     if (!len(*buf) || !c->mask) return;
@@ -1329,15 +1464,16 @@ static void ot_lookup_string(const uint8_t *p, size_t n, ot_ctx *c, vector<amb_o
             i--;
             idx = i;
             amb_otg g = at(*buf, i);
-            if ((g.mask & c->mask) && ot_props_ok(p, n, c, c->props, g)) ot_lookup_apply(p, n, c, buf, &out, &idx, lk);
+            if ((g.mask & c->mask) && ot_dg_may(d, g.gid) && ot_props_ok(p, n, c, c->props, g)) ot_lookup_apply(p, n, c, buf, &out, &idx, lk);
         }
         return;
     }
     c->hout = c->table == 0;
+    if (c->hout) reserve(out, len(*buf) + 8);
     while (idx < len(*buf)) {
         amb_otg g = at(*buf, idx);
         int applied = 0;
-        if ((g.mask & c->mask) && ot_props_ok(p, n, c, c->props, g)) applied = ot_lookup_apply(p, n, c, buf, &out, &idx, lk);
+        if ((g.mask & c->mask) && ot_dg_may(d, g.gid) && ot_props_ok(p, n, c, c->props, g)) applied = ot_lookup_apply(p, n, c, buf, &out, &idx, lk);
         if (!applied) ot_next_glyph(p, n, c, buf, &out, &idx);
     }
     if (c->hout) swap(buf, &out);
@@ -1413,11 +1549,14 @@ void amb_ot_substitute(const uint8_t *p, size_t n, const amb_otf *t, int script,
     uint32_t pi = ot_plan_of(p, n, t, script, flags);
     ot_plan pl = at(ot_plans, pi);
     int classes = t->gdef && ot_at(p, n, t->gdef, 4);
+    ot_gpc gc;
+    memset(&gc, 0, sizeof gc);
+    if (classes) gc = ot_gdef_classes(p, n, t);
     for (size_t i = 0; i < len(*buf); i++) {
         amb_otg g = at(*buf, i);
         g.ccc = (uint8_t)amb_ccc_of(g.cp);
         g.uprops = (uint16_t)amb_uprops_of(g.cp, i ? at(*buf, i - 1).cp : 0);
-        if (classes) g.props = (uint16_t)ot_gdef_props(p, n, t->gdef, g.gid);
+        if (classes) g.props = g.gid < gc.count ? at(ot_gpv, gc.first + g.gid) : (uint16_t)ot_gdef_props(p, n, t->gdef, g.gid);
         else g.props = (g.uprops & AMB_U_MN) && !(g.uprops & AMB_U_IGNORABLE) ? AMB_P_MARK : AMB_P_BASE;
         g.lig = 0;
         g.action = 7;
@@ -1432,14 +1571,19 @@ void amb_ot_substitute(const uint8_t *p, size_t n, const amb_otf *t, int script,
     c.lookups = t->gsub ? ot_at(p, n, t->gsub, 8) : 0;
     c.table = 0;
     c.rtl = (flags & AMB_SH_BACKWARD) != 0;
+    /* a lookup tried only when its digest meets the buffer's, taken again after each one tried */
+    uint64_t bd[3];
+    ot_dg_buffer(buf, bd);
     for (uint32_t k = 0; k < pl.nsub; k++) {
         ot_lookup lk = at(ot_lks, pl.first + k);
+        if (!ot_dg_meets(lk.d, bd)) continue;
         size_t lt = ot_lookup_at(p, n, &c, lk.index);
         if (!lt) continue;
         c.mask = lk.mask;
         c.zwj = lk.zwj;
         c.zwnj = lk.zwnj;
-        ot_lookup_string(p, n, &c, buf, lt);
+        ot_lookup_string(p, n, &c, buf, lt, lk.d);
+        ot_dg_buffer(buf, bd);
     }
 }
 
@@ -1505,10 +1649,11 @@ static void ot_propagate(vector<amb_otg> *buf, size_t i, int rtl, int depth) {
     ot_propagate(buf, j, rtl, depth + 1);
     g = at(*buf, i);
     amb_otg b = at(*buf, j);
+    /* a cursive glyph its parent's offset across the line; a mark its base's along it (across it,
+       it took its base's as it was attached: ot_mark_attach) */
     if (type == 2) g.dy += b.dy;
     else {
         g.dx += b.dx;
-        g.dy += b.dy;
         if (j < i) {
             if (!rtl) for (size_t k = j; k < i; k++) g.dx -= at(*buf, k).ax;
             else for (size_t k = j + 1; k < i + 1; k++) g.dx += at(*buf, k).ax;
@@ -1532,18 +1677,22 @@ void amb_ot_position(const uint8_t *p, size_t n, const amb_otf *t, int script, i
     c.lookups = t->gpos ? ot_at(p, n, t->gpos, 8) : 0;
     c.table = 1;
     c.rtl = (flags & AMB_SH_BACKWARD) != 0;
+    uint64_t bd[3];
+    ot_dg_buffer(buf, bd);
     for (uint32_t k = 0; k < pl.npos; k++) {
         ot_lookup lk = at(ot_lks, pl.first + pl.nsub + k);
+        if (!ot_dg_meets(lk.d, bd)) continue;
         size_t lt = ot_lookup_at(p, n, &c, lk.index);
         if (!lt) continue;
         c.mask = lk.mask;
         c.zwj = lk.zwj;
         c.zwnj = lk.zwnj;
-        ot_lookup_string(p, n, &c, buf, lt);
+        ot_lookup_string(p, n, &c, buf, lt, lk.d);
     }
     if (pl.apply_kern) ot_kern_table(p, n, t, buf);
     /* marks' advances zeroed by their class (with no GPOS, left to right, a mark moved back by
-       its advance, over the glyph before it); default ignorables' advances and offsets */
+       its advance, over the glyph before it); default ignorables' advances and offsets along the
+       line (across it, one keeps what a cursive chain gave it, as HarfBuzz's does) */
     int adjust = !pl.apply_gpos && !c.rtl;
     for (size_t i = 0; i < len(*buf); i++) {
         amb_otg g = at(*buf, i);
@@ -1554,7 +1703,6 @@ void amb_ot_position(const uint8_t *p, size_t n, const amb_otf *t, int script, i
         if (ot_ignorable(g)) {
             g.ax = 0;
             g.dx = 0;
-            g.dy = 0;
         }
         (*buf)[i] = g;
     }

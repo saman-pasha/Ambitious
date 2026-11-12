@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Arabic shaping</title>
+<style>
+/* tests/pages/shaping-arabic.html -- Arabic shaped as Chromium shapes it (HarfBuzz's Arabic
+   shaper, src/paint/shape.c), drawn by the font Chromium falls back to for it here (DejaVu
+   Sans; FreeSerif for the letters DejaVu Sans has not, and for the whole of a run whose
+   fallback Blink asks for by such a letter: a right-to-left run's holes come in visual order,
+   its last first): each letter's joining form (isolated, initial, medial, final), lam-alef's
+   ligatures, ZWJ and ZWNJ, the harakat placed by GPOS mark and mark-to-mark; letters joined
+   across an inline element's edge, whether Blink shapes across it (a colour) or not (padding,
+   a change of size: the letters beyond it are the run's context); a word in a left-to-right
+   paragraph, and a right-to-left one with Latin, numbers and brackets (mirrored); Hebrew's
+   points; cursive attachment, which no font on the machine has (fonts/cursive.ttf: DejaVu
+   Sans's Arabic and Latin with a cursive lookup of right-to-left chains, each glyph's entry
+   and exit at heights of its own: tools/gen-font.py --web DejaVuSans.ttf cursive.ttf
+   "Cursive Test" curs 20-7E,600-6FF), and marks riding on the chained glyphs. The spans'
+   boxes are held to Chromium's (tests/pages/shaping-arabic.chromium), their drawing region
+   by region, pixel by pixel (shaping-arabic.shot.png, shaping-arabic.regions). */
+@font-face { font-family: "Cursive Test"; src: url(fonts/cursive.ttf) format("truetype") }
+body { margin: 8px; font-size: 20px; }
+p { margin: 0 0 6px; white-space: nowrap; }
+.dv { font-family: "DejaVu Sans"; }
+.curs { font-family: "Cursive Test"; line-height: 40px; }
+.red { color: #c00; }
+.pad { padding: 0 3px; background: #def; }
+</style></head>
+<body>
+<p><span id=salam>سلام عليكم</span> <span id=marhaba>مرحبا بالعالم</span></p>
+<p><span id=lam-alef>لا الا لأ لإ لآ</span> <span id=joins>ببب بـب ب</span></p>
+<p><span id=zwj>ب&#x200D; &#x200D;ب ب&#x200C;ب ع&#x200D;ع</span></p>
+<p><span id=across>ب<span class=red id=across-b>ب</span>ب</span> <span id=across-pad>ب<span class=pad id=across-pad-b>ب</span>ب</span> <span>ب<span id=across-size-b style="font-size: 24px">ب</span>ب</span></p>
+<p><span id=harakat>بِسْمِ اللَّهِ الرَّحْمَٰنِ</span></p>
+<p><span id=mixed>abc مرحبا 123 def</span></p>
+<p dir=rtl><span id=rtl>مرحبا بالعالم، hello عليكم.</span></p>
+<p dir=rtl class=dv><span id=rtl-dv>مرحبا (بالعالم) 2024</span></p>
+<p><span id=persian>فارسی می‌خواهم</span> <span id=urdu>اردو ہے</span></p>
+<p><span id=persian-dv>فارسی می‌خواهم</span></p>
+<p><span id=hebrew>שָׁלוֹם בְּ</span> <span id=hebrew-dv class=dv>שָׁלוֹם</span></p>
+<p class=curs><span id=curs>بببب سسس لا بلا</span> <span id=curs-marks>بِبَبْ سَسّ</span></p>
+</body></html>

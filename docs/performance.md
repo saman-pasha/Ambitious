@@ -65,6 +65,7 @@ takes 2.1 s over the same page in Chromium.
 | the user agent's sheet kept in its tables again (Phase 12u): its shorthands expanded, it had passed the 768 declarations they held, so every cascade parsed it anew (a page's frames run two each) | cascade 0.46 ms (`tests/pages/frames.html`, `ambitious bench`, 20 runs) | 0.29 ms; outputs unchanged (`make test`) |
 | a page's frames (Phase 12u, `src/shell/frame.c`): `tests/pages/frames.html`, 13 frames, `ambitious bench` (20 runs), against main's build, whose iframes are empty boxes | the engine in all 16.6 ms | 23.9 ms: the frames' stage 6.8 ms (each frame made, parsed, laid out for its scroll bars and again at rest, and drawn), and 1.6 ms more paint, their drawings composed into the page's: about 0.65 ms a frame |
 | a frame whose root (or body) has an opaque background drawn once, not over black and over white: `tests/pages/frames-deep.html`, 15 frames, 12 deep | its frames' stage 39.9 ms | 19.1 ms (the sheet kept too) |
+| text measured and drawn as Chromium shapes it (Phase 12v): each run of text through GSUB and GPOS (`src/paint/shape.c`), its glyphs kept for paint; `ambitious bench` (10 runs) against the build before 12v, the pages of `docs/benchmark.md` | layout 0.26 ms (news.html), 0.32 (layout.html), 1.69 (medium.html), 14.97 (the large page), 7.68 (scripted.html) | 0.36, 0.64, 5.14, 53.3 and 17.1 ms, paint unchanged; Chromium's layout of the same pages 1.47, 1.61, 18.39, 202.17 and 119.69 ms. Each run shaped once a layout (its pieces' key hashed), a lookup passed over when its digest meets none of the run's glyphs (HarfBuzz's set digests), a font's GDEF classes read once: the large page's layout was 62 ms before them |
 
 ## Hot paths, and what would make them faster
 
@@ -76,6 +77,14 @@ takes 2.1 s over the same page in Chromium.
 - **The snapshot** could shrink further: deltas between revisions, from the DOM's
   mutation log (`diff` already compares two snapshots), and a reasoner kept
   running between them.
+- **Shaping** is now most of layout's time on a page of text: the large page's
+  160,573 code points cost about 1,700 instructions each (callgrind), a third of
+  it GPOS's kerning (each glyph's coverage and pair set searched) and almost half
+  the passes before the lookups (segments, fallback, normalization, each a copy of
+  the run). HarfBuzz's per-lookup caches of coverage and class values, and one pass
+  from code points to glyphs, would cut both. Blink keeps a node's shape results
+  until its text or style changes; runs kept across layouts would spare a relayout
+  (a click's) most of its shaping.
 
 ## Robustness
 

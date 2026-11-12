@@ -1,22 +1,25 @@
 /* tests/exec/shaping.c -- the shaper (src/paint/shape.c through font.c's amb_shape) against
    HarfBuzz: strings in the machine's fonts (DejaVu, Liberation, FreeSerif, Inter, Carlito,
-   JetBrains Mono, Loma), each font read as a page's web font is, shaped left to right or right
-   to left; each glyph printed as its id @ its cluster's byte + its advance (its x and y
-   offsets), in font units, in visual order. tests/exec/shaping.expect is HarfBuzz 15's own
-   output for the same strings and directions (uharfbuzz, hb_shape with no features given:
-   Chromium's defaults), the strings it shapes with a notdef left out. Ligatures (DejaVu's fi
-   and ffi, Carlito's), contextual alternates (Inter's, JetBrains Mono's arrows), kerning from
-   GPOS (latn's) and from the kern table (Liberation's Hebrew and DFLT runs), marks on bases and
-   on marks (GPOS mark and mkmk), Arabic joining (init, medi, fina, isol; lam-alef; ZWJ, ZWNJ,
-   tatweel), Hebrew's ccmp and points, composition and decomposition by the face's cmap, marks
-   reordered by their combining classes. */
+   JetBrains Mono, Loma) and in a font of the tests' own (tests/pages/fonts/cursive.ttf: DejaVu
+   Sans's Arabic and Latin with a cursive attachment, which no font on the machine has), each
+   font read as a page's web font is, shaped left to right or right to left; each glyph printed
+   as its id @ its cluster's byte + its advance (its x and y offsets), in font units, in visual
+   order. tests/exec/shaping.expect is HarfBuzz 15's own output for the same strings and
+   directions (uharfbuzz, hb_shape with no features given: Chromium's defaults), the strings it
+   shapes with a notdef left out. Ligatures (DejaVu's fi and ffi, Carlito's), contextual
+   alternates (Inter's, JetBrains Mono's arrows), kerning from GPOS (latn's) and from the kern
+   table (Liberation's Hebrew and DFLT runs), marks on bases and on marks (GPOS mark and mkmk),
+   cursive chains (right to left, and a right-to-left lookup's in left-to-right text, marks on
+   their glyphs), Arabic joining (init, medi, fina, isol; lam-alef; ZWJ, ZWNJ, tatweel), Hebrew's
+   ccmp and points, composition and decomposition by the face's cmap, marks reordered by their
+   combining classes. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <vector.pl>
 #include "../../src/paint/font.h"
 
-static const char *const sh_fonts[24] = {
+static const char *const sh_fonts[26] = {
     "dvs", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "dvsb", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "dvserif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
@@ -29,9 +32,11 @@ static const char *const sh_fonts[24] = {
     "carlito", "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf",
     "jetbrains", "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf",
     "loma", "/usr/share/fonts/opentype/tlwg/Loma.otf",
+    "curs", "tests/pages/fonts/cursive.ttf",
 };
-#define SH_CASES 525
-static const char *const sh_texts[1575] = {
+#define SH_FONTS 13
+#define SH_CASES 553
+static const char *const sh_texts[1659] = {
     "dvs", "office affluent", "0",
     "dvs", "fi fl ffi ffl", "0",
     "dvs", "AVATAR To. Wa", "0",
@@ -557,6 +562,34 @@ static const char *const sh_texts[1575] = {
     "carlito", "-9", "0",
     "carlito", "vy 2", "0",
     "carlito", "P8v", "0",
+    "curs", "\xd8\xb3\xd9\x84\xd8\xa7\xd9\x85", "1",
+    "curs", "\xd8\xa8\xd8\xa8\xd8\xa8", "1",
+    "curs", "\xd8\xa8", "1",
+    "curs", "\xd9\x84\xd8\xa7", "1",
+    "curs", "\xd9\x84\xd8\xa3", "1",
+    "curs", "\xd8\xb9\xd9\x84\xd9\x8a\xd9\x83\xd9\x85", "1",
+    "curs", "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7", "1",
+    "curs", "\xd8\xa8\xd9\x8e\xd8\xa8\xd9\x91\xd9\x8e", "1",
+    "curs", "\xd8\xa8\xe2\x80\x8d", "1",
+    "curs", "\xe2\x80\x8d\xd8\xa8", "1",
+    "curs", "\xd8\xa8\xe2\x80\x8c\xd8\xa8", "1",
+    "curs", "\xd8\xa7\xd9\x84\xd9\x84\xd9\x87", "1",
+    "curs", "\xd9\x81\xd9\x8a", "1",
+    "curs", "\xd9\x83\xd8\xaa\xd8\xa7\xd8\xa8", "1",
+    "curs", "\xd9\x84\xd9\x84\xd9\x87", "1",
+    "curs", "\xd8\xa8\xd9\x80\xd8\xa8", "1",
+    "curs", "\xd8\xa8\xd9\x94\xd9\x8f", "1",
+    "curs", "\xd9\x8a\xd9\x94", "1",
+    "curs", "(\xd8\xa8)", "1",
+    "curs", "\xd9\x84\xd8\xa7\xd9\x90", "1",
+    "curs", "\xd9\x84\xd9\x91\xd8\xa7", "1",
+    "curs", "\xd8\xa8\xd8\xa8 \xd8\xa8", "1",
+    "curs", "\xd8\xa8\xd9\x90\xd8\xa8\xd9\x8e\xd8\xa8\xd9\x92 \xd8\xb3\xd9\x8e\xd8\xb3\xd9\x91", "1",
+    "curs", "\xd8\xa8\xd8\xa8\xd8\xa8\xd8\xa8 \xd8\xb3\xd8\xb3\xd8\xb3", "1",
+    "curs", "\xd9\x84\xd8\xa7 \xd8\xa8\xd9\x84\xd8\xa7", "1",
+    "curs", "AVA abc", "0",
+    "curs", "fi fl", "0",
+    "curs", "ab cd", "0",
 };
 
 static int read_file(const char *path, vector<uint8_t> *out) {
@@ -583,15 +616,15 @@ int main(void) {
     amb_fonts f = {0};
     defer(f) { AMB_FONTS_DROP(f); }
     amb_fonts_load(&f);
-    int faces[12];
-    for (int k = 0; k < 12; k++) {
+    int faces[SH_FONTS];
+    for (int k = 0; k < SH_FONTS; k++) {
         vector<uint8_t> bytes;
         faces[k] = read_file(sh_fonts[2 * k + 1], &bytes) ? amb_fonts_add(&f, data(bytes), len(bytes)) : -1;
     }
     vector<amb_shaped> gl;
     for (int c = 0; c < SH_CASES; c++) {
         int rtl = sh_texts[3 * c + 2][0] == '1', face = -1;
-        for (int k = 0; k < 12; k++) if (strcmp(sh_fonts[2 * k], sh_texts[3 * c]) == 0) face = faces[k];
+        for (int k = 0; k < SH_FONTS; k++) if (strcmp(sh_fonts[2 * k], sh_texts[3 * c]) == 0) face = faces[k];
         size_t n = strlen(sh_texts[3 * c + 1]);
         printf("%s ", sh_texts[3 * c]);
         print_text(sh_texts[3 * c + 1], n);

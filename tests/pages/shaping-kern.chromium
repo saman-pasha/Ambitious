@@ -1,0 +1,16 @@
+# boxes of tests/pages/shaping-kern.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+gpos span 8 8 238.953 19
+gpos-in span 8 31 56.953 19
+gpos-in-b span 18.766 31 10.469 19
+gpos-in-x span 29.234 31 26.078 19
+gpos-in-c span 55.313 31 9.641 19
+gpos-big span 8 55 260.438 46
+gpos-marks span 8 107 134.953 46
+eth span 8 158 129 17
+eth-big span 8 181 174.641 45
+sans span 8 232 183.531 17
+sans-big span 8 256 165.234 44
+upper span 8 306 130.141 17
+wsp span 8 328 104.438 17
+lsp span 8 350 121.641 17
+lsp-k span 8 372 87.094 19

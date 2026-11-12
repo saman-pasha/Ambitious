@@ -163,7 +163,10 @@ layout_contract(record(frag, [
     field(background, u32),                     % an inline fragment's
     field(piece,      ref(box)),                % an inline fragment's box of decorations (borders, rounded corners, images, shadows); none
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
-    field(shadows,    span(text))               % text-shadow
+    field(shadows,    span(text)),              % text-shadow
+    %% a text fragment's glyphs as layout shaped them (src/paint/font.h's amb_rglyph each, packed: its
+    %% glyph, its face, its pen from the fragment's start), which paint draws; none: paint shapes the text
+    field(glyphs,     span(glyphs))
 ])).
 
 layout_contract(handle(box, bx)).
@@ -172,7 +175,7 @@ layout_contract(handle(frag, fr)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-layout_contract(store(tree, [table(box), table(line), table(frag), pool(text)])).
+layout_contract(store(tree, [table(box), table(line), table(frag), pool(text), pool(glyphs)])).
 layout_contract(owns(tree, box, store)).
 layout_contract(owns(tree, line, store)).
 layout_contract(owns(tree, frag, store)).

@@ -1,0 +1,16 @@
+# tests/pages/shaping-kern.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+gpos 8 8 247 27
+gpos-in 8 31 65 50
+gpos-in-b 18 31 30 50
+gpos-in-x 29 31 56 50
+gpos-in-c 55 31 65 50
+gpos-big 8 55 269 101
+gpos-marks 8 107 143 153
+eth 8 158 137 175
+eth-big 8 181 183 226
+sans 8 232 192 249
+sans-big 8 256 174 300
+upper 8 306 139 323
+wsp 8 328 113 345
+lsp 8 350 130 367
+lsp-k 8 372 96 391
