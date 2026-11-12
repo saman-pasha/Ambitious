@@ -1,24 +1,29 @@
-/* tests/exec/gif_decode.c -- the GIF decoder (src/paint/image.c) against Pillow's
-   decoding of the same files: each fixture's size, frame count and the FNV-1a 64 of
-   its first frame's RGBA8 pixels on its canvas, which tests/images/gen.py takes from
-   Pillow (gif_decode.expect). Then the hostile files, each refused or decoded to a
-   prefix as gen.py names them, and mutations of the fixtures, which may decode to
-   anything but must not crash (the gate runs this under valgrind). */
+/* tests/exec/gif_decode.c -- the GIF decoder (src/paint/image.c) against Chromium's
+   composition over Pillow's decoding of the same files: each fixture's canvas, frame
+   count and the FNV-1a 64 of each frame's RGBA8 canvas, the frame an animation shows at
+   rest and how often it plays, which tests/images/gen.py works out (gif_decode.expect;
+   its gif_frames says how the composition was measured). Then the hostile files, each
+   refused or decoded to a prefix as gen.py names them, and mutations of the fixtures,
+   which may decode to anything but must not crash (the gate runs this under
+   valgrind). */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
 #include "../../src/paint/image.h"
 
+/* what each fixture exercises is said beside it in tests/images/gen.py (gif_cases) */
 static const char *const names[] = {
     "g_local_first", "g_offset_opaque", "g_interlace_1", "g_interlace_2", "g_interlace_3", "g_interlace_5", "g_interlace_9", "g_interlace_17",
     "g_mcs2", "g_mcs3", "g_mcs4", "g_mcs5", "g_mcs6", "g_mcs7", "g_mcs8", "g_full_kept", "g_full_cleared", "g_clears", "g_no_first_clear",
     "g_no_table", "g_past_table", "g_clipped", "g_one_pixel", "g_87a", "g_animated", "g_pil", "g_pil_trans", "g_pil_flat", "g_pil_animated",
-    "g_pil_photo" };
+    "g_pil_photo", "g_dispose1", "g_dispose2", "g_dispose3", "g_dispose4", "g_dispose6", "g_first_restored", "g_first_past", "g_zero_screen",
+    "g_loop_none", "g_loop_1", "g_loop_2", "g_loop_ever", "g_no_delay" };
 
 static const char *const hostile[] = { "bad_gif_cut_header", "bad_gif_cut_table", "bad_gif_cut_lzw", "bad_gif_huge_screen", "bad_gif_huge_frame",
     "bad_gif_code_size", "bad_gif_code_range", "bad_gif_no_image", "bad_gif_zero_screen", "bad_gif_cut_extension" };
 
-static const char *const mutated[] = { "g_local_first", "g_interlace_17", "g_full_kept", "g_clears", "g_animated", "g_pil_photo" };
+static const char *const mutated[] = { "g_local_first", "g_interlace_17", "g_full_kept", "g_clears", "g_animated", "g_pil_photo", "g_dispose3",
+    "g_dispose2" };
 
 static uint64_t fnv(const vector<uint8_t> *b) {
     uint64_t h = 1469598103934665603ull;
@@ -64,7 +69,10 @@ static void mutations(void) {
                 else if (pos > 6) n = pos;
             }
             amb_image_info info;
+            uint32_t w, h;
             amb_gif_decode(data(b), n, &rgba, &info);
+            amb_gif_frame(data(b), n, AMB_IMAGE_AT_REST, &rgba, &info);
+            amb_image_size(data(b), n, &w, &h);
         }
     }
     printf("mutations of the fixtures: each decoded or refused\n");
@@ -84,6 +92,13 @@ int main(void) {
         }
         printf("%s %ux%u, %u frame%s, %016llx%s\n", names[i], info.w, info.h, info.frames, info.frames == 1 ? "" : "s",
                (unsigned long long)fnv(&rgba), info.partial ? " (partial)" : "");
+        if (info.frames < 2) continue;
+        uint32_t frames = info.frames;
+        for (uint32_t k = 1; k < frames; k++) {
+            if (!amb_gif_frame(data(file), len(file), k, &rgba, &info)) printf("  frame %u not decoded\n", k);
+            else printf("  frame %u %016llx%s\n", k, (unsigned long long)fnv(&rgba), info.partial ? " (partial)" : "");
+        }
+        if (amb_gif_frame(data(file), len(file), AMB_IMAGE_AT_REST, &rgba, &info)) printf("  at rest frame %u, plays %u\n", info.frame, info.loops);
     }
     for (size_t i = 0; i < sizeof hostile / sizeof hostile[0]; i++) {
         vector<uint8_t> file, rgba;

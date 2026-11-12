@@ -992,13 +992,14 @@ static const char *net_type_of_name(const char *path) {
     if (strcmp(e, "png") == 0) return "image/png";
     if (strcmp(e, "gif") == 0) return "image/gif";
     if (strcmp(e, "jpg") == 0 || strcmp(e, "jpeg") == 0) return "image/jpeg";
+    if (strcmp(e, "webp") == 0) return "image/webp";
     if (strcmp(e, "svg") == 0) return "image/svg+xml";
     if (strcmp(e, "txt") == 0) return "text/plain";
     return "application/octet-stream";
 }
 
-/* an image's size from its header (PNG, GIF, JPEG): the painter's reading, which turns a
-   JPEG by its EXIF orientation, so that layout gives it the box it is drawn in */
+/* an image's size from its header (PNG, GIF, JPEG, WebP): the painter's reading, which
+   turns a JPEG by its EXIF orientation, so that layout gives it the box it is drawn in */
 static void net_image_size_of(const uint8_t *b, size_t n, uint32_t *w, uint32_t *h) {
     *w = 0;
     *h = 0;

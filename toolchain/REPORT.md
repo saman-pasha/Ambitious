@@ -240,6 +240,15 @@ neighbours.
     ```
 
     Ambitious returns an index instead, or passes the table as a parameter.
+    The same holds of a local pointer to a row of a static table, though no
+    function returns it (12k's WebP decoder met it; it indexes the table):
+
+    ```c
+    static const unsigned char table[2][3] = { { 1, 2, 3 }, { 4, 5, 6 } };
+    int main(int argc, char **argv) { (void)argv; const unsigned char *row = table[argc & 1]; return row[0]; }
+    ```
+
+    reports `error: plain pointer not consumed: 'row' in return(index(id(row),int(0)))`.
 16. **The checker accepts a pointer into a vector's element passed beside the
     vector to a function that grows it**, which then writes through a pointer
     into the freed buffer. A borrow of `data(v)` is refused after a call that

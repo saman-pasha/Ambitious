@@ -1,5 +1,6 @@
 /* src/paint/image.c -- images decoded (image.h): PNG over this file's own inflate,
-   GIF over its own LZW, JPEG over its own Huffman decoder and inverse DCT.
+   GIF over its own LZW, JPEG over its own Huffman decoder and inverse DCT; WebP is
+   src/paint/webp.c's, which this file's dispatch calls.
 
    inflate (RFC 1950 and 1951): zlib's header and Adler-32, deflate's stored,
    fixed and dynamic blocks, decoded as zlib's puff.c does -- a canonical Huffman
@@ -9,11 +10,21 @@
    high byte, tRNS's key or palette alpha applied).
 
    GIF (87a and 89a): the logical screen and its global colour table, a frame's
-   local table, the graphic control extension's transparent index, LZW with its
-   code size growing to 12 bits, clear codes and a full table kept, interlaced
-   rows; the first frame composed onto a transparent canvas of the screen's size,
-   the frames counted. An index past its table is opaque black, no table at all a
-   grey ramp, as PIL has them.
+   local table, the graphic control extension's transparent index, disposal and
+   delay, the NETSCAPE2.0 (or ANIMEXTS1.0) loop count, LZW with its code size growing
+   to 12 bits, clear codes and a full table kept, interlaced rows. Each frame is
+   composed as Chromium composes it, measured frame by frame through WebCodecs'
+   ImageDecoder: on a transparent canvas the size of the screen and the first frame
+   together (a later frame clipped to it), the transparent index leaving what is
+   under it, disposal 2 clearing the frame's rectangle to transparent, 3 and 4
+   restoring what it covered. An index past its table is opaque black, and so is
+   every index of a file with no table at all.
+
+   An animation is drawn at the frame its timeline reaches once the page is at rest
+   (AMB_IMAGE_REST_MS): Chromium shows the first frame at load, each for its
+   duration (10 ms or less taken as 100), a GIF once without a loop count and its
+   count plus one times with one, then stops on the last frame; its screenshots
+   10 s after load show that frame.
 
    JPEG (ITU T.81): baseline, extended and progressive Huffman-coded frames of
    8-bit samples, 1, 3 or 4 components at any sampling factors (1 to 4), restart
@@ -29,6 +40,13 @@
    ends or breaks inside a scan leaves the rest of that restart interval grey,
    and decoding resumes at the next restart marker. EXIF's orientation (1 to 8)
    is applied last.
+
+   Arithmetic-coded frames (baseline and progressive) and 12-bit samples are
+   refused as Chromium refuses them: it lays out the size their header gives
+   (amb_image_size reads it here too) and draws nothing -- measured on files that
+   jpegtran -arithmetic and a 12-bit encoder wrote, which Chromium 153 reports
+   loaded, its canvas reading them transparent. Lossless (SOF3, which Chromium
+   decodes) and hierarchical frames are refused too.
 
    Every image has at most 2^24 pixels; a larger one is refused from its header. */
 #include <stdio.h>
@@ -447,115 +465,244 @@ static uint32_t gif_row(uint32_t r, uint32_t h, int interlaced) {
     return (r - n3) * 2 + 1;
 }
 
-int amb_gif_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image_info *info) {
-    memset(info, 0, sizeof *info);
+/* a frame's place in the file: its rectangle, its flags (a local table, interlacing), the
+   graphic control before it (its transparent index or -1, its disposal, its delay in
+   hundredths of a second), where its local table and its LZW data (from the code size's
+   byte) lie */
+typedef struct gif_frame { uint32_t x, y, w, h; int32_t flags, trans, disposal; uint32_t delay; size_t table, lzw; } gif_frame;
+
+/* the file's screen and what its walk found: the canvas (the screen and the first frame's
+   rectangle together, the size Chromium gives it), the global table, how many times it
+   plays (a NETSCAPE2.0 or ANIMEXTS1.0 block's loop count plus one, 0 for ever; once
+   without one), whether its trailer was reached */
+typedef struct gif_head { uint32_t sw, sh, cw, ch, plays; size_t gct, ngct; int32_t ended; } gif_head;
+
+/* the GIF's blocks walked: its frames into frames, each with the graphic control before
+   it, and the first loop count; a walk that meets a block cut short or a byte that is
+   no block stops there. 0 when it is no GIF, it has no frame, or its canvas is empty or
+   past the cap */
+static int gif_scan(const uint8_t *p, size_t n, gif_head *g, vector<gif_frame> *frames) {
+    memset(g, 0, sizeof *g);
+    clear(*frames);
     if (n < 13 || p[0] != 'G' || p[1] != 'I' || p[2] != 'F' || p[3] != '8' || (p[4] != '7' && p[4] != '9') || p[5] != 'a') return 0;
-    uint32_t W = p[6] | (uint32_t)p[7] << 8, H = p[8] | (uint32_t)p[9] << 8;
-    if (W == 0 || H == 0 || (uint64_t)W * H > AMB_IMAGE_MAX_PIXELS) return 0;
-    uint8_t gct[768], lct[768];
-    size_t ngct = 0, nlct = 0, i = 13;
+    g->sw = p[6] | (uint32_t)p[7] << 8;
+    g->sh = p[8] | (uint32_t)p[9] << 8;
+    g->plays = 1;
+    size_t i = 13;
     if (p[10] & 0x80) {
-        ngct = (size_t)2 << (p[10] & 7);
-        if (3 * ngct > n - i) return 0;
-        memcpy(gct, p + i, 3 * ngct);
-        i += 3 * ngct;
+        g->ngct = (size_t)2 << (p[10] & 7);
+        if (3 * g->ngct > n - i) return 0;
+        g->gct = i;
+        i += 3 * g->ngct;
     }
-    int trans = -1, ended = 0, broken = 0, drawn = 0;
-    uint32_t frames = 0;
-    vector<uint8_t> lzw, idx;
+    int trans = -1, disposal = 0, looped = 0;
+    uint32_t delay = 0;
     while (i < n) {
         int blk = p[i++];
-        if (blk == 0x3B) { ended = 1; break; }
+        if (blk == 0x3B) {
+            g->ended = 1;
+            break;
+        }
         if (blk == 0x21) {
-            /* an extension: the graphic control's transparent index is for the image that follows it */
+            /* an extension: the graphic control is for the image that follows it */
             if (i >= n) break;
             int label = p[i++];
-            if (label == 0xF9 && i < n && p[i] >= 4 && 5 <= n - i) trans = (p[i + 1] & 1) ? p[i + 4] : -1;
+            if (label == 0xF9 && i < n && p[i] >= 4 && 5 <= n - i) {
+                trans = (p[i + 1] & 1) ? p[i + 4] : -1;
+                disposal = p[i + 1] >> 2 & 7;
+                delay = p[i + 2] | (uint32_t)p[i + 3] << 8;
+            } else if (label == 0xFF && !looped && n - i >= 16 && p[i] == 11 &&
+                       (memcmp(p + i + 1, "NETSCAPE2.0", 11) == 0 || memcmp(p + i + 1, "ANIMEXTS1.0", 11) == 0) && p[i + 12] == 3 && p[i + 13] == 1) {
+                uint32_t count = p[i + 14] | (uint32_t)p[i + 15] << 8;
+                g->plays = count ? count + 1 : 0;
+                looped = 1;
+            }
             int cut = 0;
             i = gif_skip(p, n, i, &cut);
             if (cut) break;
             continue;
         }
         if (blk != 0x2C || 9 > n - i) break;
-        uint32_t fx = p[i] | (uint32_t)p[i + 1] << 8, fy = p[i + 2] | (uint32_t)p[i + 3] << 8;
-        uint32_t fw = p[i + 4] | (uint32_t)p[i + 5] << 8, fh = p[i + 6] | (uint32_t)p[i + 7] << 8;
-        int flags = p[i + 8];
+        gif_frame f;
+        memset(&f, 0, sizeof f);
+        f.x = p[i] | (uint32_t)p[i + 1] << 8;
+        f.y = p[i + 2] | (uint32_t)p[i + 3] << 8;
+        f.w = p[i + 4] | (uint32_t)p[i + 5] << 8;
+        f.h = p[i + 6] | (uint32_t)p[i + 7] << 8;
+        f.flags = p[i + 8];
         i += 9;
-        size_t nl = 0;
-        if (flags & 0x80) {
-            nl = (size_t)2 << (flags & 7);
+        if (f.flags & 0x80) {
+            size_t nl = (size_t)2 << (f.flags & 7);
             if (3 * nl > n - i) break;
-            if (frames == 0) {
-                memcpy(lct, p + i, 3 * nl);
-                nlct = nl;
-            }
+            f.table = i;
             i += 3 * nl;
         }
         if (i >= n) break;
-        int mcs = p[i++];
-        frames++;
-        int cut = 0;
-        if (frames > 1) {
-            i = gif_skip(p, n, i, &cut);
-            trans = -1;
-            if (cut) break;
-            continue;
-        }
-        /* a code size of 2 to 8, as GIF89a has them (at 1 the first free code would
-           already fill its width, and the width would never grow) */
-        if (mcs < 2 || mcs > 8 || (uint64_t)fw * fh > AMB_IMAGE_MAX_PIXELS) return 0;
-        i = gif_gather(p, n, i, &lzw, &cut);
-        size_t total = (size_t)fw * fh;
-        clear(idx);
-        resize(&idx, total + 1);
-        int bad = 0;
-        size_t got = gif_lzw(data(lzw), len(lzw), mcs, data(idx), total, &bad);
-        if (!drawn) {
-            clear(*rgba);
-            resize(rgba, (size_t)W * H * 4);
-            drawn = 1;
-        }
-        /* the frame onto the canvas, clipped to it: each index its table's colour (the
-           table chosen by an if: cicilang lowers a conditional of two arrays as a cast) */
-        const uint8_t *pal = gct;
-        size_t npal = ngct;
-        if (nlct) {
-            pal = lct;
-            npal = nlct;
-        }
-        const uint8_t *ix = data(idx);
-        uint8_t *o = data(*rgba);
-        for (uint32_t r = 0; r < fh; r++) {
-            uint32_t y = fy + gif_row(r, fh, flags & 0x40);
-            if ((size_t)r * fw >= got) break;
-            if (y >= H) continue;
-            for (uint32_t x = 0; x < fw && fx + x < W; x++) {
-                size_t k = (size_t)r * fw + x;
-                if (k >= got) break;
-                int v = ix[k];
-                if (v == trans) continue;
-                size_t d = ((size_t)y * W + fx + x) * 4;
-                if (npal == 0) { o[d] = (uint8_t)v; o[d + 1] = (uint8_t)v; o[d + 2] = (uint8_t)v; }
-                else if ((size_t)v < npal) { o[d] = pal[3 * v]; o[d + 1] = pal[3 * v + 1]; o[d + 2] = pal[3 * v + 2]; }
-                else { o[d] = 0; o[d + 1] = 0; o[d + 2] = 0; }
-                o[d + 3] = 255;
-            }
-        }
-        if (got < total || bad) broken = 1;
+        f.lzw = i;
+        f.trans = trans;
+        f.disposal = disposal;
+        f.delay = delay;
+        push_back(frames, f);
         trans = -1;
+        disposal = 0;
+        delay = 0;
+        int cut = 0;
+        i = gif_skip(p, n, i + 1, &cut);
         if (cut) break;
     }
-    if (!frames) return 0;
-    if (!drawn) {
-        clear(*rgba);
-        resize(rgba, (size_t)W * H * 4);
+    if (len(*frames) == 0) return 0;
+    gif_frame f0 = at(*frames, 0);
+    g->cw = f0.x + f0.w > g->sw ? f0.x + f0.w : g->sw;
+    g->ch = f0.y + f0.h > g->sh ? f0.y + f0.h : g->sh;
+    return g->cw > 0 && g->ch > 0 && (uint64_t)g->cw * g->ch <= AMB_IMAGE_MAX_PIXELS;
+}
+
+/* frame f drawn onto the canvas (cw wide, ch high), clipped to it: its LZW indices
+   decoded, each its table's colour (the frame's own, else the global; with neither,
+   opaque black, as Chromium draws it; past the table, opaque black), its transparent
+   index leaving what is under it. *broken when its data ended or broke before the frame
+   was whole, or its code size is not 2 to 8 (at 1 the first free code would already
+   fill its width, and the width would never grow), or it is past the cap */
+static void gif_draw(const uint8_t *p, size_t n, const gif_head *g, const gif_frame *f, uint8_t *o, int *broken) {
+    int mcs = p[f->lzw];
+    if (mcs < 2 || mcs > 8 || (uint64_t)f->w * f->h > AMB_IMAGE_MAX_PIXELS) {
+        *broken = 1;
+        return;
     }
-    info->w = W;
-    info->h = H;
-    info->frames = frames;
+    vector<uint8_t> lzw, idx;
+    int cut = 0, bad = 0;
+    gif_gather(p, n, f->lzw + 1, &lzw, &cut);
+    size_t total = (size_t)f->w * f->h;
+    resize(&idx, total + 1);
+    size_t got = gif_lzw(data(lzw), len(lzw), mcs, data(idx), total, &bad);
+    if (got < total || bad) *broken = 1;
+    /* the table chosen by an if: cicilang lowers a conditional of two arrays as a cast */
+    size_t pal = g->gct, npal = g->ngct;
+    if (f->flags & 0x80) {
+        pal = f->table;
+        npal = (size_t)2 << (f->flags & 7);
+    }
+    const uint8_t *ix = data(idx);
+    uint32_t W = g->cw, H = g->ch;
+    for (uint32_t r = 0; r < f->h; r++) {
+        uint32_t y = f->y + gif_row(r, f->h, f->flags & 0x40);
+        if ((size_t)r * f->w >= got) break;
+        if (y >= H) continue;
+        for (uint32_t x = 0; x < f->w && f->x + x < W; x++) {
+            size_t k = (size_t)r * f->w + x;
+            if (k >= got) break;
+            int v = ix[k];
+            if (v == f->trans) continue;
+            size_t d = ((size_t)y * W + f->x + x) * 4;
+            if ((size_t)v < npal) {
+                o[d] = p[pal + 3 * (size_t)v];
+                o[d + 1] = p[pal + 3 * (size_t)v + 1];
+                o[d + 2] = p[pal + 3 * (size_t)v + 2];
+            } else {
+                o[d] = 0;
+                o[d + 1] = 0;
+                o[d + 2] = 0;
+            }
+            o[d + 3] = 255;
+        }
+    }
+}
+
+/* a frame's rectangle clipped to the canvas: x0, y0, x1, y1 (empty when x0 >= x1) */
+static void gif_clip(const gif_head *g, const gif_frame *f, uint32_t *r) {
+    r[0] = f->x < g->cw ? f->x : g->cw;
+    r[1] = f->y < g->ch ? f->y : g->ch;
+    r[2] = f->x + f->w < g->cw ? f->x + f->w : g->cw;
+    r[3] = f->y + f->h < g->ch ? f->y + f->h : g->ch;
+}
+
+/* the canvas after frame upto, as Chromium composes it (measured through WebCodecs'
+   ImageDecoder, frame by frame): each frame drawn over what the last left, after the
+   last is disposed of -- disposal 2 clearing its rectangle to transparent (not to the
+   background colour), 3 and 4 restoring the rectangle as it was before that frame was
+   drawn, any other value leaving it. The frames' areas summed are capped
+   (AMB_IMAGE_MAX_FRAME_WORK): past it, the frames before are drawn. *broken as
+   gif_draw's, or when the cap stopped it. The frame drawn last */
+static uint32_t gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vector<gif_frame> *frames, uint32_t upto, vector<uint8_t> *rgba,
+                            int *broken) {
+    clear(*rgba);
+    resize(rgba, (size_t)g->cw * g->ch * 4);
+    vector<uint8_t> saved;
+    uint64_t work = 0;
+    for (uint32_t k = 0; k <= upto; k++) {
+        gif_frame f = at(*frames, k);
+        work += (uint64_t)f.w * f.h + 1;
+        if (work > AMB_IMAGE_MAX_FRAME_WORK) {
+            *broken = 1;
+            return k ? k - 1 : 0;
+        }
+        uint32_t r[4];
+        uint8_t *o = data(*rgba);
+        size_t row = (size_t)g->cw * 4;
+        if (k > 0) {
+            gif_frame pf = at(*frames, k - 1);
+            gif_clip(g, &pf, r);
+            size_t span = r[0] < r[2] ? (size_t)(r[2] - r[0]) * 4 : 0;
+            for (uint32_t y = r[1]; y < r[3] && span; y++) {
+                if (pf.disposal == 2) memset(o + y * row + (size_t)r[0] * 4, 0, span);
+                else if (pf.disposal == 3 || pf.disposal == 4) memcpy(o + y * row + (size_t)r[0] * 4, data(saved) + (size_t)(y - r[1]) * span, span);
+            }
+        }
+        gif_clip(g, &f, r);
+        if (f.disposal == 3 || f.disposal == 4) {
+            clear(saved);
+            for (uint32_t y = r[1]; y < r[3] && r[0] < r[2]; y++) append_range(saved, o + y * row + (size_t)r[0] * 4, (size_t)(r[2] - r[0]) * 4);
+        }
+        gif_draw(p, n, g, &f, data(*rgba), broken);
+    }
+    return upto;
+}
+
+int amb_gif_frame(const uint8_t *p, size_t n, uint32_t index, vector<uint8_t> *rgba, amb_image_info *info) {
+    memset(info, 0, sizeof *info);
+    gif_head g;
+    vector<gif_frame> frames;
+    if (!gif_scan(p, n, &g, &frames)) return 0;
+    /* the first frame must be one this decodes */
+    gif_frame f0 = at(frames, 0);
+    if (p[f0.lzw] < 2 || p[f0.lzw] > 8 || (uint64_t)f0.w * f0.h > AMB_IMAGE_MAX_PIXELS) return 0;
+    uint32_t count = (uint32_t)len(frames);
+    if (index == AMB_IMAGE_AT_REST) {
+        vector<uint32_t> ms;
+        for (uint32_t k = 0; k < count; k++) push_back(ms, 10 * at(frames, k).delay);
+        index = amb_image_frame_at(data(ms), count, g.plays, AMB_IMAGE_REST_MS);
+    }
+    if (index >= count) return 0;
+    int broken = 0;
+    uint32_t drawn = gif_compose(p, n, &g, &frames, index, rgba, &broken);
+    info->w = g.cw;
+    info->h = g.ch;
+    info->frames = count;
     info->orientation = 1;
-    info->partial = !ended || broken;
+    info->partial = !g.ended || broken;
+    info->loops = g.plays;
+    info->frame = drawn;
     return 1;
+}
+
+int amb_gif_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image_info *info) { return amb_gif_frame(p, n, 0, rgba, info); }
+
+/* the frame Chromium's timeline shows at ms at: frame k from the sum of the durations
+   before it (each of 10 ms or less taken as 100, as Chromium takes it), the frames again
+   from the first after the last, until it has played plays times (0: for ever), then
+   the last */
+uint32_t amb_image_frame_at(const uint32_t *ms, uint32_t count, uint32_t plays, uint32_t at) {
+    if (count <= 1) return 0;
+    uint64_t total = 0;
+    for (uint32_t k = 0; k < count; k++) total += ms[k] <= 10 ? 100 : ms[k];
+    if (plays && (uint64_t)at >= total * plays) return count - 1;
+    uint64_t t = (uint64_t)at % total;
+    for (uint32_t k = 0; k < count; k++) {
+        uint64_t d = ms[k] <= 10 ? 100 : ms[k];
+        if (t < d) return k;
+        t -= d;
+    }
+    return count - 1;
 }
 
 /* ---- JPEG ---- */
@@ -1480,14 +1627,18 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
 
 /* ---- any of them ---- */
 
+/* a WebP, as Chromium sniffs one: a RIFF chunk of WEBP whose first chunk is a VP8 one */
+static int image_is_webp(const uint8_t *p, size_t n) { return n >= 16 && memcmp(p, "RIFF", 4) == 0 && memcmp(p + 8, "WEBPVP", 6) == 0; }
+
 int amb_image_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
     *w = 0;
     *h = 0;
     if (n >= 8 && p[0] == 0x89 && p[1] == 'P' && p[2] == 'N' && p[3] == 'G') return amb_png_decode(p, n, rgba, w, h);
     amb_image_info info;
     int ok = 0;
-    if (n >= 6 && p[0] == 'G' && p[1] == 'I' && p[2] == 'F') ok = amb_gif_decode(p, n, rgba, &info);
+    if (n >= 6 && p[0] == 'G' && p[1] == 'I' && p[2] == 'F') ok = amb_gif_frame(p, n, AMB_IMAGE_AT_REST, rgba, &info);
     else if (n >= 3 && p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) ok = amb_jpeg_decode(p, n, rgba, &info);
+    else if (image_is_webp(p, n)) ok = amb_webp_frame(p, n, AMB_IMAGE_AT_REST, rgba, &info);
     if (ok) {
         *w = info.w;
         *h = info.h;
@@ -1504,10 +1655,14 @@ int amb_image_size(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
         return 1;
     }
     if (n >= 10 && p[0] == 'G' && p[1] == 'I' && p[2] == 'F') {
-        *w = p[6] | (uint32_t)p[7] << 8;
-        *h = p[8] | (uint32_t)p[9] << 8;
+        gif_head g;
+        vector<gif_frame> frames;
+        if (!gif_scan(p, n, &g, &frames)) return 0;
+        *w = g.cw;
+        *h = g.ch;
         return 1;
     }
+    if (image_is_webp(p, n)) return amb_webp_size(p, n, w, h);
     if (n < 4 || p[0] != 0xFF || p[1] != 0xD8) return 0;
     /* a JPEG's markers to its first scan: the frame's size, and the first Exif segment's orientation */
     size_t i = 2;

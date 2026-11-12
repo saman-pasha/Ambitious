@@ -660,7 +660,12 @@ be built side by side and merged without touching each other's.
 - **12d Images** (`src/paint/image.c`): JPEG (baseline and progressive, the
   chroma subsamplings, restart intervals) and GIF (LZW, transparency,
   interlace, the first frame) decoded and drawn. Gate: fixtures checked
-  against an independent decoder.
+  against an independent decoder. Then (12k): every GIF frame composed as
+  Chromium composes it (disposal, transparency, delays, loop counts), and
+  WebP (`src/paint/webp.c`: lossless, lossy with fancy upsampling, alpha,
+  the extended format, animation), an animation drawn at the frame it
+  shows once the page is at rest; held to Chromium's frames (WebCodecs'
+  ImageDecoder) and Pillow's pixels, and fuzzed.
 - **12e Accessibility** (`src/a11y/`, `contracts/a11y.pl`):
   - descriptions (aria-describedby, title);
   - states and properties (checked, selected, expanded, pressed, disabled,

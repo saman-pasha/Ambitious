@@ -13,13 +13,33 @@ GIF. Written by Pillow's encoder and by this script's own: a first frame with a
 local table and offset on its canvas, interlacing at heights 1 to 17, each code
 size, a full LZW table kept without a clear and one cleared, clear codes
 mid-stream, none to begin, no colour table at all, indices past the table,
-animation. Each is checked against Pillow's decoding of the same file, exactly:
-its size, its frames and the FNV-1a 64 of its RGBA8 pixels, in
-tests/exec/gif_decode.expect. A browser composes the first frame onto a
-transparent canvas the logical screen's size, where Pillow fills what the frame
-leaves with an index and grows the canvas to a frame past it: so outside the
-frame the expectation is transparent, and the canvas is the screen's. A fully
-transparent pixel is (0, 0, 0, 0) on both sides.
+animation: every disposal method, transparency over what the last frame left,
+frames past the canvas, loop counts and delays. Each frame is checked exactly, the
+FNV-1a 64 of its RGBA8 canvas in tests/exec/gif_decode.expect, against a model of
+how Chromium composes frames over Pillow's decoding of each frame alone. The model
+was measured, frame by frame, through Chromium's WebCodecs ImageDecoder: the
+canvas is the logical screen and the first frame together, transparent where no
+frame has drawn; disposal 2 clears a frame's rectangle to transparent (not to the
+background colour Pillow fills), 3 and 4 restore it as it was before the frame;
+a file with no colour table at all is drawn black, where Pillow has a grey ramp.
+The frame an animation shows at rest is Chromium's timeline at 10 s (rest_frame).
+
+WebP. Written by Pillow (libwebp): lossless at each effort, with alpha, with its
+RGB under alpha kept, paletted at each packing, at odd sizes; lossy at the
+qualities' extremes, at sizes that test the chroma upsampling's edges, with
+alpha (compressed, level-reduced); an animation of Pillow's own encoder. By
+libwebp's cwebp, for what Pillow does not expose: the simple loop filter, the
+filter's sharpness, one segment, no filter. By ffmpeg's libvpx, a VP8 key frame
+of eight token partitions and libvpx's own loop-filter deltas, and one of VP8's
+profile 1. By this script's own muxer: ALPH chunks raw and lossless with each
+filter, an ALPH chunk without VP8X's alpha flag (ignored), ICCP, EXIF, XMP and
+unknown chunks, and animations of each blend and disposal, key frames, loop
+counts and short durations. Each frame is checked exactly against Pillow's
+decoding (libwebp's animation decoder for an animation), the FNV-1a 64 of its
+RGBA8 pixels in tests/exec/webp_decode.expect. Chromium's pixels were measured
+equal to Pillow's for lossy (libwebp's fancy upsampling), lossless and alpha.
+The cwebp and ffmpeg fixtures are remade when those tools are on the PATH, and
+kept as they are otherwise.
 
 JPEG. Written by Pillow (libjpeg-turbo) -- each subsampling it writes,
 progressive, restart intervals, grey, CMYK, Adobe's RGB, optimized tables, the
@@ -31,15 +51,23 @@ Pillow's decoding of each (EXIF's orientation applied by ImageOps.exif_transpose
 CMYK made RGB by its convert) is written beside it as NAME.pil.png, which
 tests/exec/jpeg_decode.c compares with its own: every channel within 4, the mean
 error under 1. tests/exec/jpeg_decode.expect names each with Pillow's size.
+Arithmetic-coded and 12-bit JPEGs stay refused: Chromium (measured, with real
+ones from jpegtran -arithmetic and a 12-bit encoder) lays out the size their
+header gives and draws nothing, as the engine does.
 
 The hostile files (bad_*): truncated, wrong lengths, sizes past the cap, bad
-Huffman tables, LZW codes out of range, each refused or decoded to a prefix as
-the .expect files say; the tests add mutations of their own.
+Huffman tables, LZW codes out of range, malformed WebP chunks, each refused or
+decoded to a prefix as the .expect files say; the tests add mutations of their
+own.
 
 Run from anywhere: python3 tests/images/gen.py"""
+import io
 import os
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -303,9 +331,10 @@ def interlaced(rows):
     return [rows[y] for y in list(range(0, len(rows), 8)) + list(range(4, len(rows), 8)) + list(range(2, len(rows), 4)) + list(range(1, len(rows), 2))]
 
 
-def gif(w, h, frames, gct=None, version=b"89a"):
+def gif(w, h, frames, gct=None, version=b"89a", loop=None):
     """a GIF of the frames: each (x, y, rows of indices, options): lct, trans, interlace,
-    mcs, and the LZW encoder's options"""
+    mcs, delay, disposal, and the LZW encoder's options; a NETSCAPE2.0 block of the loop
+    count unless loop is None"""
     out = bytearray(b"GIF" + version)
     flags = 0
     table = b""
@@ -314,10 +343,13 @@ def gif(w, h, frames, gct=None, version=b"89a"):
         flags = 0x80 | 0x70 | sz
     out += struct.pack("<HHBBB", w, h, flags, 0, 0)
     out += table
+    if loop is not None:
+        out += b"\x21\xff\x0bNETSCAPE2.0\x03\x01" + struct.pack("<H", loop) + b"\x00"
     for (x, y, rows, opt) in frames:
         trans = opt.get("trans")
-        if trans is not None or opt.get("delay"):
-            out += bytes([0x21, 0xF9, 4, 1 if trans is not None else 0]) + struct.pack("<H", opt.get("delay", 0)) + bytes([trans or 0, 0])
+        if trans is not None or opt.get("delay") or opt.get("disposal"):
+            gce = opt.get("disposal", 0) << 2 | (1 if trans is not None else 0)
+            out += bytes([0x21, 0xF9, 4, gce]) + struct.pack("<H", opt.get("delay", 0)) + bytes([trans or 0, 0])
         fl, lct = 0, b""
         if opt.get("lct") is not None:
             sz, lct = colour_table(opt["lct"])
@@ -399,25 +431,146 @@ def gif_cases():
     path = os.path.join(HERE, "g_pil_photo.gif")
     pil_rgb(photo(50, 40, 3)).save(path)
     cases.append(("g_pil_photo", open(path, "rb").read(), None))
+    # animation, composed as Chromium composes it: a full first frame, then a box whose
+    # centre is its transparent index with each disposal (2 clears its rectangle, 3 and 4
+    # restore what it covered, 1 and 6 keep it), then two frames over what it left, the
+    # last one past the canvas's edge, clipped
+    box = [[0 if 1 < x < 4 and 0 < y < 4 else 1 + (x + y) % 3 for x in range(6)] for y in range(5)]
+    for d in (1, 2, 3, 4, 6):
+        frames = [(0, 0, indices(10, 8, 8, 30), {"mcs": 3, "delay": 50, "disposal": 1}),
+                  (2, 2, box, {"mcs": 3, "trans": 0, "delay": 50, "disposal": d}),
+                  (4, 1, indices(5, 6, 8, 31), {"mcs": 3, "trans": 7, "delay": 50}),
+                  (7, 5, indices(6, 5, 8, 32), {"mcs": 3, "delay": 60, "disposal": 2})]
+        cases.append(("g_dispose%d" % d, gif(10, 8, frames, gct=ramp(8, 30 + d), loop=0), None))
+    # a first frame restored to what was before it (nothing): the next drawn on a clear canvas
+    frames = [(0, 0, indices(10, 8, 8, 33), {"mcs": 3, "delay": 50, "disposal": 3}), (3, 2, box, {"mcs": 3, "trans": 0, "delay": 50})]
+    cases.append(("g_first_restored", gif(10, 8, frames, gct=ramp(8, 36), loop=0), None))
+    # a first frame past the logical screen: the canvas grows to hold it (Chromium's size);
+    # a screen of 0 x 0 takes the first frame's
+    cases.append(("g_first_past", gif(8, 6, [(4, 3, indices(8, 6, 4, 34), {"mcs": 2})], gct=ramp(4, 37)), None))
+    cases.append(("g_zero_screen", gif(0, 0, [(0, 0, indices(5, 4, 4, 35), {"mcs": 2})], gct=ramp(4, 38)), None))
+    # the timeline: four frames of a second, played once (no NETSCAPE2.0 block), twice
+    # (a loop count of 1), three times, for ever; frames of no delay (100 ms each)
+    four = [(0, 0, indices(6, 4, 4, 40 + k), {"mcs": 2, "delay": 100}) for k in range(4)]
+    for name, loop in (("g_loop_none", None), ("g_loop_1", 1), ("g_loop_2", 2), ("g_loop_ever", 0)):
+        cases.append((name, gif(6, 4, four, gct=ramp(4, 39), loop=loop), None))
+    quick = [(0, 0, indices(6, 4, 4, 50 + k), {"mcs": 2, "delay": 1 if k % 2 else 0, "disposal": 1}) for k in range(7)]
+    cases.append(("g_no_delay", gif(6, 4, quick, gct=ramp(4, 41), loop=0), None))
     return cases
 
 
-def gif_expectation(name, b, box):
-    """what Pillow decodes the first frame to, on a transparent canvas the screen's size"""
-    import io
+def gif_parse(b):
+    """a GIF's screen, global table and frames, walked as the decoder walks them: each
+    frame's graphic control (its packed byte, delay and transparent index), rectangle,
+    local table and LZW data; and the first loop count (None without one)"""
+    sw, sh, flags = struct.unpack("<HHB", b[6:11])
+    i, gct = 13, b""
+    if flags & 0x80:
+        gct = b[i:i + 3 * (2 << (flags & 7))]
+        i += len(gct)
+    frames, gce, loop = [], None, None
+    while i < len(b) and b[i] != 0x3B:
+        blk = b[i]
+        i += 1
+        if blk == 0x21:
+            label, subs = b[i], []
+            i += 1
+            while b[i]:
+                subs.append(b[i + 1:i + 1 + b[i]])
+                i += 1 + b[i]
+            i += 1
+            if label == 0xF9:
+                gce = subs[0][:4]
+            if label == 0xFF and loop is None and subs[0] in (b"NETSCAPE2.0", b"ANIMEXTS1.0") and len(subs[1]) == 3 and subs[1][0] == 1:
+                loop = struct.unpack("<H", subs[1][1:3])[0]
+            continue
+        x, y, w, h, fl = struct.unpack("<HHHHB", b[i:i + 9])
+        i += 9
+        lct = b[i:i + 3 * (2 << (fl & 7))] if fl & 0x80 else b""
+        i += len(lct)
+        start = i
+        i += 1
+        while b[i]:
+            i += 1 + b[i]
+        i += 1
+        frames.append({"x": x, "y": y, "w": w, "h": h, "flags": fl, "gce": gce, "lct": lct, "data": b[start:i],
+                       "disposal": gce[0] >> 2 & 7 if gce else 0, "delay": struct.unpack("<H", gce[1:3])[0] if gce else 0})
+        gce = None
+    return sw, sh, gct, frames, loop
+
+
+def rest_frame(ms, plays, at=10000):
+    """the frame Chromium shows at ms at after an animation loaded, measured by
+    screenshots every 100 to 250 ms for 11 s: frame k for its duration (10 ms or less
+    taken as 100 ms) after the frames before it, the frames again from the first, until
+    the animation has played plays times (0: for ever), then the last frame"""
+    d = [100 if v <= 10 else v for v in ms]
+    if len(d) <= 1:
+        return 0
+    if plays and at >= sum(d) * plays:
+        return len(d) - 1
+    t = at % sum(d)
+    for k, v in enumerate(d):
+        if t < v:
+            return k
+        t -= v
+    return len(d) - 1
+
+
+def gif_frames(b):
+    """the canvas after each frame, RGBA8, as Chromium composes them (measured frame by
+    frame through WebCodecs' ImageDecoder): the canvas the screen and the first frame
+    together, transparent; each frame's own pixels Pillow's decoding of that frame alone
+    -- a GIF of it on the canvas -- its transparent index leaving what is under it, every
+    index black when the file has no table at all (Pillow's is a grey ramp); before each
+    frame the last one disposed of: 2 clears its rectangle to transparent, 3 and 4 restore
+    it as it was before that frame, the rest leave it. And the canvas's size, the loop
+    count"""
     from PIL import Image
-    w, h = struct.unpack("<HH", b[6:10])
-    im = Image.open(io.BytesIO(b))
-    frames = im.n_frames
-    im.seek(0)
-    px = im.convert("RGBA")
-    out = bytearray()
-    for y in range(h):
-        for x in range(w):
-            inside = box is None or (box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3])
-            p = px.getpixel((x, y)) if x < px.width and y < px.height else (0, 0, 0, 0)
-            out += bytes(p) if inside and p[3] else bytes(4)
-    return "%s %dx%d, %d frame%s, %016x" % (name, w, h, frames, "" if frames == 1 else "s", fnv(out))
+    sw, sh, gct, frames, loop = gif_parse(b)
+    f0 = frames[0]
+    W, H = max(sw, f0["x"] + f0["w"]), max(sh, f0["y"] + f0["h"])
+    canvas, out, saved, prev = bytearray(W * H * 4), [], None, None
+    flags = 0x80 | 0x70 | ((len(gct) // 3).bit_length() - 2) if gct else 0
+    for f in frames:
+        if prev is not None:
+            for y in range(prev["y"], min(H, prev["y"] + prev["h"])):
+                for x in range(prev["x"], min(W, prev["x"] + prev["w"])):
+                    k = 4 * (y * W + x)
+                    if prev["disposal"] == 2:
+                        canvas[k:k + 4] = bytes(4)
+                    elif prev["disposal"] in (3, 4):
+                        canvas[k:k + 4] = saved[k:k + 4]
+        if f["disposal"] in (3, 4):
+            saved = bytes(canvas)
+        alone = b"GIF89a" + struct.pack("<HHBBB", W, H, flags, 0, 0) + gct
+        if f["gce"] is not None:
+            alone += b"\x21\xf9\x04" + bytes(f["gce"]) + b"\x00"
+        alone += b"\x2c" + struct.pack("<HHHHB", f["x"], f["y"], f["w"], f["h"], f["flags"]) + f["lct"] + f["data"] + b"\x3b"
+        px = Image.open(io.BytesIO(alone)).convert("RGBA")
+        for y in range(f["y"], min(H, f["y"] + f["h"])):
+            for x in range(f["x"], min(W, f["x"] + f["w"])):
+                p = px.getpixel((x, y))
+                if p[3]:
+                    canvas[4 * (y * W + x):4 * (y * W + x) + 4] = bytes(p[:3]) + b"\xff" if gct or f["lct"] else b"\x00\x00\x00\xff"
+        out.append(bytes(canvas))
+        prev = f
+    return W, H, out, [10 * f["delay"] for f in frames], loop
+
+
+def gif_expectation(name, b, box):
+    """the lines tests/exec/gif_decode.c prints of a GIF: its canvas, its frames, the
+    first's pixels; of an animation, each later frame's, the frame it shows at rest and
+    how often it plays (Chromium's count: once without a loop count, its loop count plus
+    one, 0 for ever)"""
+    w, h, frames, ms, loop = gif_frames(b)
+    n = len(frames)
+    lines = ["%s %dx%d, %d frame%s, %016x" % (name, w, h, n, "" if n == 1 else "s", fnv(frames[0]))]
+    if n > 1:
+        plays = 1 if loop is None else 0 if loop == 0 else loop + 1
+        lines += ["  frame %d %016x" % (k, fnv(frames[k])) for k in range(1, n)]
+        lines.append("  at rest frame %d, plays %d" % (rest_frame(ms, plays), plays))
+    return "\n".join(lines)
 
 
 def gif_hostile(cases):
@@ -457,6 +610,334 @@ def gif_hostile(cases):
     out.append(("bad_gif_zero_screen", b"GIF89a" + struct.pack("<HHBBB", 0, 4, 0, 0, 0) + b"\x3b", "refused"))
     ext = bytearray(good[:13 + 768]) + b"\x21\xf9\x04\x01\x00"
     out.append(("bad_gif_cut_extension", bytes(ext), "refused"))
+    return out
+
+
+# ---- WebP: Pillow's encoder, libwebp's cwebp, libvpx, and this script's own muxer ----
+
+def webp_chunk(tag, d):
+    return tag + struct.pack("<I", len(d)) + d + (b"\x00" if len(d) & 1 else b"")
+
+
+def webp_riff(chunks):
+    body = b"WEBP" + b"".join(webp_chunk(t, d) for t, d in chunks)
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def webp_chunks(b):
+    """a RIFF WebP's chunks: (tag, payload)"""
+    out, i = [], 12
+    while i + 8 <= len(b):
+        tag, n = b[i:i + 4], struct.unpack("<I", b[i + 4:i + 8])[0]
+        out.append((tag, b[i + 8:i + 8 + n]))
+        i += 8 + n + (n & 1)
+    return out
+
+
+def pil_webp(im, **opts):
+    buf = io.BytesIO()
+    im.save(buf, "WEBP", **opts)
+    return buf.getvalue()
+
+
+def le24(v):
+    return struct.pack("<I", v)[:3]
+
+
+def vp8x(flags, w, h):
+    return (b"VP8X", bytes([flags, 0, 0, 0]) + le24(w - 1) + le24(h - 1))
+
+
+def image_chunks(b):
+    """a still WebP's image chunks: its ALPH, if any, and its VP8 or VP8L"""
+    return [(t, d) for t, d in webp_chunks(b) if t in (b"ALPH", b"VP8 ", b"VP8L")]
+
+
+def anmf(x, y, im, chunks, ms, blend=True, dispose=False):
+    """an ANMF chunk: im's place and duration, how it is drawn, its image chunks"""
+    flags = (0 if blend else 2) | (1 if dispose else 0)
+    return (b"ANMF", le24(x // 2) + le24(y // 2) + le24(im.width - 1) + le24(im.height - 1) + le24(ms) + bytes([flags]) +
+            b"".join(webp_chunk(t, d) for t, d in chunks))
+
+
+def webp_anim(w, h, frames, loop=0, alpha=True):
+    """an animation muxed here (VP8X, ANIM, ANMF): frames are anmf chunks"""
+    return webp_riff([vp8x(0x02 | (0x10 if alpha else 0), w, h), (b"ANIM", b"\xff\xff\xff\xff" + struct.pack("<H", loop))] + frames)
+
+
+def alpha_filter(a, w, h, f):
+    """an alpha plane (rows of w) filtered as libwebp's encoder filters it: 1 from the
+    left, 2 from above, 3 by the gradient; the first row of each from the left, the
+    first column from above"""
+    out = bytearray(len(a))
+    for y in range(h):
+        for x in range(w):
+            if f == 0:
+                pred = 0
+            elif y == 0:
+                pred = a[x - 1] if x else 0
+            elif x == 0:
+                pred = a[(y - 1) * w]
+            elif f == 1:
+                pred = a[y * w + x - 1]
+            elif f == 2:
+                pred = a[(y - 1) * w + x]
+            else:
+                pred = max(0, min(255, a[y * w + x - 1] + a[(y - 1) * w + x] - a[(y - 1) * w + x - 1]))
+            out[y * w + x] = (a[y * w + x] - pred) & 0xFF
+    return bytes(out)
+
+
+def alph(a, w, h, method, f):
+    """an ALPH chunk of the plane a: raw (method 0), or lossless (1) -- the filtered plane
+    in the green of an image Pillow codes losslessly, its VP8L stream after the header"""
+    filtered = alpha_filter(a, w, h, f)
+    if method == 0:
+        return (b"ALPH", bytes([f << 2]) + filtered)
+    from PIL import Image
+    im = Image.new("RGB", (w, h))
+    im.putdata([(0, v, 0) for v in filtered])
+    return (b"ALPH", bytes([1 | f << 2]) + dict(webp_chunks(pil_webp(im, lossless=True)))[b"VP8L"][5:])
+
+
+def smooth(w, h, seed=1):
+    """RGB rows a lossless coder can shrink: gradients, a disc, hard edges, light noise"""
+    rng = Lcg(seed)
+    rows = []
+    for y in range(h):
+        row = []
+        for x in range(w):
+            r, g, b = x * 255 // max(1, w - 1), y * 255 // max(1, h - 1), (x * 4 + y * 2) % 256
+            if (2 * x - w) ** 2 + (2 * y - h) ** 2 < min(w, h) ** 2 // 2:
+                r, g, b = 240, 80 + (x % 8) * 8, 40
+            if x // 5 % 3 == 0 and y // 4 % 2 == 0:
+                r, g, b = 255 - r, 255 - g, b
+            n = rng.next() % 5 - 2
+            row.append(tuple(max(0, min(255, c + n)) for c in (r, g, b)))
+        rows.append(row)
+    return rows
+
+
+def alpha_plane(w, h):
+    """an alpha plane of each kind: clear, opaque, ramps and steps"""
+    return bytes(0 if (x + 2 * y) % 11 == 0 else 255 if y % 5 == 0 else (x * 255 // max(1, w - 1) + y * 7) % 256 for y in range(h) for x in range(w))
+
+
+def with_alpha(rows):
+    im = pil_rgb(rows)
+    a = alpha_plane(im.width, im.height)
+    from PIL import Image
+    im.putalpha(Image.frombytes("L", im.size, a))
+    return im
+
+
+def tool(name, run):
+    """a fixture an outside encoder makes (cwebp, ffmpeg's libvpx): made when the tool is on
+    the PATH, else the committed file kept"""
+    path = os.path.join(HERE, name + ".webp")
+    try:
+        b = run()
+        with open(path, "wb") as f:
+            f.write(b)
+    except (OSError, subprocess.CalledProcessError):
+        if not os.path.exists(path):
+            raise
+    return open(path, "rb").read()
+
+
+def cwebp(im, *opts):
+    with tempfile.TemporaryDirectory() as d:
+        im.save(os.path.join(d, "in.png"))
+        subprocess.run([shutil.which("cwebp") or "cwebp", "-quiet"] + list(opts) + [os.path.join(d, "in.png"), "-o", os.path.join(d, "out.webp")],
+                       check=True, capture_output=True)
+        return open(os.path.join(d, "out.webp"), "rb").read()
+
+
+def libvpx(im, *opts):
+    """a VP8 key frame of libvpx's (ffmpeg), as a simple lossy WebP"""
+    with tempfile.TemporaryDirectory() as d:
+        im.save(os.path.join(d, "in.png"))
+        subprocess.run([shutil.which("ffmpeg") or "ffmpeg", "-loglevel", "error", "-y", "-i", os.path.join(d, "in.png"), "-frames:v", "1",
+                        "-c:v", "libvpx", "-pix_fmt", "yuv420p"] + list(opts) + [os.path.join(d, "out.ivf")], check=True, capture_output=True)
+        b = open(os.path.join(d, "out.ivf"), "rb").read()
+    n = struct.unpack("<I", b[32:36])[0]
+    return webp_riff([(b"VP8 ", b[44:44 + n])])
+
+
+def webp_cases():
+    """(name, bytes) of the WebP fixtures"""
+    from PIL import Image
+    out = []
+    sm, ph = pil_rgb(smooth(61, 43, 2)), pil_rgb(photo(64, 48, 22))
+    rgba = with_alpha(smooth(61, 43, 3))
+    # lossless: Pillow's default effort (predictor, cross-colour, subtract-green), its
+    # fastest and its best (an entropy image of groups, a colour cache), with alpha, with
+    # the RGB under clear alpha kept, paletted at 1, 2, 4 and 8 bits a pixel, 1 x 1, odd,
+    # and a row two pixels high (distance codes past the image's width)
+    out.append(("w_ll_photo", pil_webp(sm, lossless=True)))
+    out.append(("w_ll_fast", pil_webp(sm, lossless=True, method=0, quality=0)))
+    out.append(("w_ll_best", pil_webp(pil_rgb(smooth(90, 70, 4)), lossless=True, method=6, quality=100)))
+    out.append(("w_ll_rgba", pil_webp(rgba, lossless=True)))
+    out.append(("w_ll_exact", pil_webp(rgba, lossless=True, exact=True)))
+    for k in (2, 4, 16, 200):
+        out.append(("w_ll_pal%d" % k, pil_webp(pil_rgb(photo(40, 30, k)).quantize(k).convert("RGB"), lossless=True)))
+    out.append(("w_ll_1x1", pil_webp(pil_rgb(smooth(1, 1, 5)), lossless=True)))
+    out.append(("w_ll_odd", pil_webp(pil_rgb(smooth(13, 7, 6)), lossless=True, method=6)))
+    out.append(("w_ll_wide", pil_webp(pil_rgb(smooth(150, 2, 7)), lossless=True, method=6)))
+    # lossy: its default (the normal loop filter, four segments), the qualities' extremes,
+    # the fastest method, and sizes at the chroma upsampling's edges (odd, one pixel, one row)
+    out.append(("w_lossy_photo", pil_webp(ph, quality=80)))
+    out.append(("w_lossy_q5", pil_webp(ph, quality=5)))
+    out.append(("w_lossy_q100", pil_webp(ph, quality=100)))
+    out.append(("w_lossy_m0", pil_webp(ph, quality=60, method=0)))
+    for w, h in ((5, 3), (1, 1), (17, 2), (33, 1)):
+        out.append(("w_lossy_%dx%d" % (w, h), pil_webp(pil_rgb(photo(w, h, w + h)), quality=80)))
+    # cwebp: the simple loop filter, sharpness, one segment, no loop filter
+    out.append(("w_lossy_simple", tool("w_lossy_simple", lambda: cwebp(ph, "-nostrong", "-f", "60"))))
+    out.append(("w_lossy_sharp", tool("w_lossy_sharp", lambda: cwebp(ph, "-sharpness", "6", "-f", "80"))))
+    out.append(("w_lossy_seg1", tool("w_lossy_seg1", lambda: cwebp(ph, "-segments", "1"))))
+    out.append(("w_lossy_nofilter", tool("w_lossy_nofilter", lambda: cwebp(ph, "-f", "0"))))
+    # libvpx: eight token partitions with its loop-filter deltas; VP8's profile 1
+    out.append(("w_vpx_parts", tool("w_vpx_parts", lambda: libvpx(ph, "-slices", "8"))))
+    out.append(("w_vpx_simple", tool("w_vpx_simple", lambda: libvpx(ph, "-profile:v", "1"))))
+    # lossy with alpha: Pillow's (lossless-coded alpha), level-reduced alpha; ALPH raw and
+    # lossless with each filter; an ALPH chunk VP8X does not flag, which is ignored
+    out.append(("w_alpha", pil_webp(rgba, quality=80)))
+    out.append(("w_alpha_q50", pil_webp(rgba, quality=80, alpha_quality=50)))
+    vp8 = dict(webp_chunks(pil_webp(sm, quality=80)))[b"VP8 "]
+    a = alpha_plane(61, 43)
+    for method in (0, 1):
+        for f in range(4) if method == 0 else range(1, 4):
+            out.append(("w_alpha_%s%d" % ("raw" if method == 0 else "ll", f), webp_riff([vp8x(0x10, 61, 43), alph(a, 61, 43, method, f), (b"VP8 ", vp8)])))
+    out.append(("w_alpha_unflagged", webp_riff([vp8x(0, 61, 43), alph(a, 61, 43, 1, 2), (b"VP8 ", vp8)])))
+    # VP8X with ICCP, EXIF and XMP chunks, and one this decoder does not know, all passed over
+    ext = webp_chunks(pil_webp(rgba, lossless=True, icc_profile=b"\x00" * 128, exif=b"Exif\x00\x00MM\x00*\x00\x00\x00\x08\x00\x00", xmp=b"<x/>"))
+    out.append(("w_extended", webp_riff(ext[:1] + [(b"ZZZZ", b"unknown")] + ext[1:])))
+    # animations: Pillow's own (libwebp's encoder picks each frame's rectangle, blend and disposal)
+    seq = [pil_rgb(photo(40, 30, 60 + k)) for k in range(4)]
+    out.append(("w_anim_pil", pil_webp(seq[0], save_all=True, append_images=seq[1:], duration=[400, 300, 200, 150], loop=0, quality=70)))
+    # frames blended over what is under them, and not; offset (by even pixels)
+    def lossless(im):
+        return image_chunks(pil_webp(im, lossless=True, exact=True))
+    half = Image.new("RGBA", (20, 14), (0, 0, 255, 128))
+    clear = with_alpha(smooth(16, 12, 8))
+    out.append(("w_anim_blend", webp_anim(40, 30, [anmf(0, 0, seq[0], lossless(seq[0]), 500),
+                                                   anmf(4, 2, half, lossless(half), 500),
+                                                   anmf(10, 8, clear, lossless(clear), 500),
+                                                   anmf(12, 6, clear, lossless(clear), 700, blend=False)])))
+    # frames disposed to the background: the next blended only outside the cleared rectangle
+    out.append(("w_anim_dispose", webp_anim(40, 30, [anmf(0, 0, seq[1], lossless(seq[1]), 300),
+                                                     anmf(6, 4, clear, lossless(clear), 300, dispose=True),
+                                                     anmf(2, 2, half, lossless(half), 300),
+                                                     anmf(8, 8, clear, lossless(clear), 300, dispose=True),
+                                                     anmf(0, 0, half, lossless(half), 300)])))
+    # key frames: one covering the canvas without alpha, one after a covering frame disposed
+    # of, one after a key frame disposed of (each drawn on a clear canvas)
+    full = with_alpha(smooth(40, 30, 9))
+    out.append(("w_anim_keys", webp_anim(40, 30, [anmf(2, 2, clear, lossless(clear), 200, dispose=True),
+                                                  anmf(0, 0, half, lossless(half), 200),
+                                                  anmf(0, 0, seq[2], lossless(seq[2]), 200),
+                                                  anmf(0, 0, full, lossless(full), 200, dispose=True),
+                                                  anmf(4, 4, half, lossless(half), 250)])))
+    # lossy frames with alpha (ALPH) blended over lossless ones
+    lossy = with_alpha(smooth(24, 16, 10))
+    out.append(("w_anim_lossy", webp_anim(40, 30, [anmf(0, 0, seq[3], lossless(seq[3]), 250),
+                                                   anmf(8, 6, lossy, image_chunks(pil_webp(lossy, quality=70)), 250),
+                                                   anmf(14, 10, lossy, image_chunks(pil_webp(lossy, quality=30)), 250, blend=False)])))
+    # the timeline: once (a loop count of 1); twice, at rest in its second play; frames of
+    # 0 and 10 ms (each 100 ms) for ever
+    tiles = [pil_rgb([[(40 * k, 255 - 40 * k, 128)] * 8 for _ in range(6)]) for k in range(4)]
+    frames4 = [anmf(0, 0, t, lossless(t), 1000) for t in tiles]
+    out.append(("w_anim_once", webp_anim(8, 6, frames4, loop=1, alpha=False)))
+    frames15 = [anmf(0, 0, t, lossless(t), 1500) for t in tiles]
+    out.append(("w_anim_twice", webp_anim(8, 6, frames15, loop=2, alpha=False)))
+    short = [anmf(0, 0, t, lossless(t), 10 * (k % 2)) for k, t in enumerate(tiles + tiles[:3])]
+    out.append(("w_anim_short", webp_anim(8, 6, short, loop=0, alpha=False)))
+    return out
+
+
+def webp_expectation(name, b):
+    """the lines tests/exec/webp_decode.c prints of a WebP, from Pillow's decoding: its
+    canvas and header size, a still image's pixels; an animation's frames, how often it
+    plays (its loop count, 0 for ever), the frame it shows at rest, each frame's pixels"""
+    from PIL import Image
+    im = Image.open(io.BytesIO(b))
+    n = getattr(im, "n_frames", 1)
+    w, h = im.size
+    if n == 1:
+        return "%s %dx%d, its header %dx%d, %016x" % (name, w, h, w, h, fnv(im.convert("RGBA").tobytes()))
+    hashes, ms = [], []
+    for k in range(n):
+        im.seek(k)
+        hashes.append(fnv(im.convert("RGBA").tobytes()))
+        ms.append(im.info["duration"])
+    loop = im.info.get("loop", 0)
+    lines = ["%s %dx%d, its header %dx%d, %d frames, plays %d, at rest frame %d" % (name, w, h, w, h, n, loop, rest_frame(ms, loop))]
+    return "\n".join(lines + ["  frame %d %016x" % (k, v) for k, v in enumerate(hashes)])
+
+
+def webp_hostile(by):
+    """(name, bytes, what the decoder must make of them): every one Pillow refuses too;
+    a malformed bitstream in sound chunks still has the size its header gives (Chromium
+    lays such a WebP out and draws nothing), malformed chunks none"""
+    from PIL import Image
+    out = []
+    ph = by["w_lossy_photo"]
+    out.append(("bad_webp_cut", ph[:len(ph) * 2 // 3], "refused, its header 64x48"))
+    small = bytearray(ph)
+    small[4:8] = struct.pack("<I", len(ph) - 8 - 100)
+    out.append(("bad_webp_riff_size", bytes(small), "refused, no header"))
+    ll = bytearray(by["w_ll_photo"])
+    ll[24] |= 0x20
+    out.append(("bad_webp_version", bytes(ll), "refused, no header"))
+    sc = bytearray(ph)
+    sc[23] = 0x2b
+    out.append(("bad_webp_start_code", bytes(sc), "refused, no header"))
+    # a VP8L stream broken past its header: the first change, from the middle on, that
+    # Pillow refuses
+    good = by["w_ll_best"]
+    for i in range(len(good) // 2, len(good)):
+        b = bytearray(good)
+        b[i] ^= 0x55
+        try:
+            Image.open(io.BytesIO(bytes(b))).load()
+        except Exception:
+            out.append(("bad_webp_huffman", bytes(b), "refused, its header 90x70"))
+            break
+    # a canvas past the cap (2^24 pixels), its VP8 frame's header saying the same size
+    big = bytearray(dict(webp_chunks(ph))[b"VP8 "])
+    big[6:10] = struct.pack("<HH", 4097, 4097)
+    out.append(("bad_webp_huge", webp_riff([vp8x(0, 4097, 4097), (b"VP8 ", bytes(big))]), "refused, its header 4097x4097"))
+    t = by["w_anim_once"]
+    c = webp_chunks(t)
+    frame = bytearray(c[2][1])
+    frame[0:3] = le24(2)
+    out.append(("bad_webp_outside", webp_riff(c[:2] + [(b"ANMF", bytes(frame))] + c[3:]), "refused, no header"))
+    out.append(("bad_webp_anmf_first", webp_riff([c[0], c[2], c[1]] + c[3:]), "refused, no header"))
+    vp8l = dict(webp_chunks(by["w_ll_photo"]))[b"VP8L"]
+    out.append(("bad_webp_alph_vp8l", webp_riff([vp8x(0x10, 61, 43), alph(alpha_plane(61, 43), 61, 43, 0, 0), (b"VP8L", vp8l)]), "refused, no header"))
+    fl = bytearray(by["w_alpha_raw1"])
+    fl[20] |= 0x01
+    out.append(("bad_webp_flags", bytes(fl), "refused, no header"))
+    am = webp_chunks(by["w_alpha_raw1"])
+    am[1] = (b"ALPH", bytes([2]) + am[1][1][1:])
+    out.append(("bad_webp_alpha_method", webp_riff(am), "refused, its header 61x43"))
+    pt = bytearray(ph)
+    pt[20:23] = bytes([pt[20] & 0x1f | 0xe0, 0xff, 0xff])
+    out.append(("bad_webp_partition", bytes(pt), "refused, no header"))
+    out.append(("bad_webp_still_size", webp_riff([vp8x(0, 10, 10)] + image_chunks(ph)), "refused, no header"))
+    it = bytearray(ph)
+    it[20] |= 1
+    out.append(("bad_webp_interframe", bytes(it), "refused, no header"))
+    out.append(("bad_webp_not_vp8", webp_riff([(b"ZZZZ", b"1234")] + webp_chunks(ph)), "refused, no header"))
+    for name, b, _ in out:
+        try:
+            Image.open(io.BytesIO(b)).load()
+            raise SystemExit("%s: Pillow decodes it" % name)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
     return out
 
 
@@ -842,7 +1323,19 @@ def main():
         lines.append("%s: %s" % (name, want))
     lines.append("mutations of the fixtures: each decoded or refused")
     write(os.path.join(EXEC, "jpeg_decode.expect"), "\n".join(lines) + "\n")
-    sys.stdout.write("%d PNG, %d GIF and %d JPEG fixtures\n" % (len(png), len(gifs), len(jpegs)))
+    webps = webp_cases()
+    lines = []
+    for name, b in webps:
+        with open(os.path.join(HERE, name + ".webp"), "wb") as f:
+            f.write(b)
+        lines.append(webp_expectation(name, b))
+    for name, b, want in webp_hostile(dict(webps)):
+        with open(os.path.join(HERE, name + ".webp"), "wb") as f:
+            f.write(b)
+        lines.append("%s: %s" % (name, want))
+    lines.append("mutations of the fixtures: each decoded or refused")
+    write(os.path.join(EXEC, "webp_decode.expect"), "\n".join(lines) + "\n")
+    sys.stdout.write("%d PNG, %d GIF, %d JPEG and %d WebP fixtures\n" % (len(png), len(gifs), len(jpegs), len(webps)))
 
 
 if __name__ == "__main__":
