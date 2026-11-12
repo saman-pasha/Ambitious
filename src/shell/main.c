@@ -1218,8 +1218,10 @@ static void tabs_list(const vector<tab_rec> *tabs, const vector<entry_rec> *entr
         uint32_t e = tab_entry(entries, r.id, r.at);
         if (e == UINT32_MAX) continue;
         entry_rec x = at(*entries, e);
-        printf("%c %zu  %.*s  '%.*s'  page %u of %u, ", t == cur ? '*' : ' ', t + 1, (int)x.url_len, data(*pool) + x.url_off, (int)x.title_len,
-               data(*pool) + x.title_off, r.at, tab_pages(entries, r.id));
+        char shown[8192];
+        url_display(data(*pool) + x.url_off, x.url_len, shown, sizeof shown);
+        printf("%c %zu  %s  '%.*s'  page %u of %u, ", t == cur ? '*' : ' ', t + 1, shown, (int)x.title_len, data(*pool) + x.title_off, r.at,
+               tab_pages(entries, r.id));
         if (x.loaded == 1) printf("loaded\n");
         else if (x.loaded == 2) printf("failed to load: %s\n", x.why);
         else printf("not loaded yet\n");
@@ -1231,7 +1233,9 @@ static void tab_history(const vector<tab_rec> *tabs, const vector<entry_rec> *en
     tab_rec r = at(*tabs, cur);
     for (uint32_t i = 1; i <= tab_pages(entries, r.id); i++) {
         entry_rec x = at(*entries, tab_entry(entries, r.id, i));
-        printf("%c %u  %.*s  '%.*s'\n", i == r.at ? '>' : ' ', i, (int)x.url_len, data(*pool) + x.url_off, (int)x.title_len, data(*pool) + x.title_off);
+        char shown[8192];
+        url_display(data(*pool) + x.url_off, x.url_len, shown, sizeof shown);
+        printf("%c %u  %s  '%.*s'\n", i == r.at ? '>' : ' ', i, shown, (int)x.title_len, data(*pool) + x.title_off);
     }
 }
 
@@ -1362,6 +1366,8 @@ static int session_page(session *s, vector<tab_rec> *tabs, vector<entry_rec> *en
         uint32_t e = tab_entry(entries, t.id, t.at);
         entry_rec x = at(*entries, e);
         snprintf(url, sizeof url, "%.*s", (int)x.url_len, data(*pool) + x.url_off);
+        char shown[8192];                  /* the URL as a person is shown it: its host in Unicode */
+        url_display(url, strlen(url), shown, sizeof shown);
         fflush(stdout);                    /* what was said before what the loader says */
         loaded = load_page(s, url, PAGE_ARGS) != 0;
         if (loaded) {
@@ -1379,13 +1385,13 @@ static int session_page(session *s, vector<tab_rec> *tabs, vector<entry_rec> *en
                 uint32_t el = script_select(&d, data(*pool) + k.off, k.len);
                 if (el) { script_click(&vm, el, SCRIPT_HORIZON); script_settle(&vm); }
             }
-            printf("tab %u: %s  '%s'\n", *cur + 1, url, title);
+            printf("tab %u: %s  '%s'\n", *cur + 1, shown, title);
         } else {
             x.loaded = 2;
             snprintf(x.why, sizeof x.why, "%s", "not_fetched");
             for (uint32_t r = 1; r < nt.resource_len; r++)
                 if (nt.resource[r].live) { snprintf(x.why, sizeof x.why, "%s", net_outcome_name(nt.resource[r].outcome)); break; }
-            printf("tab %u: %s failed to load: %s\n", *cur + 1, url, x.why);
+            printf("tab %u: %s failed to load: %s\n", *cur + 1, shown, x.why);
         }
         (*entries)[e] = x;
     }

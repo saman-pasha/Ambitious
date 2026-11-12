@@ -52,6 +52,16 @@ enum { URL_HREF, URL_PROTOCOL, URL_USERNAME, URL_PASSWORD, URL_HOST, URL_HOSTNAM
        URL_ORIGIN };
 size_t url_attr(const char *href, const url_parts *p, int which, char *out, size_t cap);
 
+/* the URL standard's domain to Unicode (3.3), for showing a host: UTS #46's ToUnicode
+   of the domain (n bytes), its xn-- labels decoded, into out (NUL-terminated, cut at
+   cap); 1, or 0 when ToUnicode records an error, out then the domain as it is */
+int url_domain_to_unicode(const char *domain, size_t n, char *out, size_t cap);
+
+/* a URL as a person is shown it (4.8): serialized, its host, when a domain, through
+   domain to Unicode; what is no URL (a file's path) as it is. Into out, NUL-terminated
+   and cut at cap; its length */
+size_t url_display(const char *in, size_t n, char *out, size_t cap);
+
 /* ---- the loader's URLs (src/net/net.c) ---- */
 
 /* ref resolved against base (an absolute URL), serialized as the loader keeps a URL:

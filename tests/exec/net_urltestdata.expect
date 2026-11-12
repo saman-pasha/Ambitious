@@ -274,8 +274,8 @@ ok   <http://example example.com> against <http://other.com/>
 ok   <http://Goo%20 goo%7C|.com> against <http://other.com/>
 ok   <http://[]> against <http://other.com/>
 ok   <http://[:]> against <http://other.com/>
-FAIL <http://GOO\u{A0}\u{3000}goo.com> against <http://other.com/>: parsed as http://xn--googoo-rga8318g.com/, not failure
-FAIL <http://GOO\u{200B}\u{2060}\u{FEFF}goo.com> against <http://other.com/>: href http://xn--googoo-df0c40ax241n.com/ not http://googoo.com/; host xn--googoo-df0c40ax241n.com not googoo.com; hostname xn--googoo-df0c40ax241n.com not googoo.com; origin http://xn--googoo-df0c40ax241n.com not http://googoo.com
+ok   <http://GOO\u{A0}\u{3000}goo.com> against <http://other.com/>
+ok   <http://GOO\u{200B}\u{2060}\u{FEFF}goo.com> against <http://other.com/>
 ok   <\x00\x1B\x04\x12 http://example.com/\x1F \x0D >
 ok   <\x7Fhttp://example.com/>
 ok   <\x7Fjavascript:alert(1)> against <http://example.org/foo/bar>
@@ -289,10 +289,10 @@ ok   <non-special:opaque \x09\x09  \x09#hi>
 ok   <non-special:opaque \x09\x09  #hi>
 ok   <non-special:opaque\x09\x09  \x0D #hi>
 ok   <http://www.foo\u{3002}bar.com> against <http://other.com/>
-FAIL <http://\u{FDD0}zyx.com> against <http://other.com/>: parsed as http://xn--zyx-h05s.com/, not failure
-FAIL <http://%ef%b7%90zyx.com> against <http://other.com/>: parsed as http://xn--zyx-h05s.com/, not failure
-FAIL <https://\u{FFFD}>: parsed as https://xn--zn7c/, not failure
-FAIL <https://%EF%BF%BD>: parsed as https://xn--zn7c/, not failure
+ok   <http://\u{FDD0}zyx.com> against <http://other.com/>
+ok   <http://%ef%b7%90zyx.com> against <http://other.com/>
+ok   <https://\u{FFFD}>
+ok   <https://%EF%BF%BD>
 ok   <https://x/\u{FFFD}?\u{FFFD}#\u{FFFD}>
 ok   <http://a.b.c.xn--pokxncvks>
 ok   <http://10.0.0.xn--pokxncvks>
@@ -731,11 +731,11 @@ ok   <non-spec:/test?a#b\x00c>
 ok   <10.0.0.7:8080/foo.html> against <file:///some/dir/bar.html>
 ok   <a!@$*=/foo.html> against <file:///some/dir/bar.html>
 ok   <a1234567890-+.:foo/bar> against <http://example.com/dir/file>
-FAIL <file://a\u{AD}b/p>: href file://xn--ab-5da/p not file://ab/p; host xn--ab-5da not ab; hostname xn--ab-5da not ab
-FAIL <file://a%C2%ADb/p>: href file://xn--ab-5da/p not file://ab/p; host xn--ab-5da not ab; hostname xn--ab-5da not ab
-FAIL <file://loC\u{1D400}\u{1D40B}\u{1D407}\u{1D428}\u{1D42C}\u{1D42D}/usr/bin>: href file://xn--loc-2140b9ax8r6aj/usr/bin not file:///usr/bin; host xn--loc-2140b9ax8r6aj not ; hostname xn--loc-2140b9ax8r6aj not 
-FAIL <file://\u{AD}/p>: parsed as file://xn--kba/p, not failure
-FAIL <file://%C2%AD/p>: parsed as file://xn--kba/p, not failure
+ok   <file://a\u{AD}b/p>
+ok   <file://a%C2%ADb/p>
+ok   <file://loC\u{1D400}\u{1D40B}\u{1D407}\u{1D428}\u{1D42C}\u{1D42D}/usr/bin>
+ok   <file://\u{AD}/p>
+ok   <file://%C2%AD/p>
 ok   <file://xn--/p>
 ok   <#link> against <https://example.org/##link>
 ok   <non-special:cannot-be-a-base-url-\x00\x01\x1F\x1E~\x7F\u{80}>
@@ -794,7 +794,7 @@ ok   <https://\x00y>
 ok   <https://x/\x00y>
 ok   <https://x/?\x00y>
 ok   <https://x/?#\x00y>
-FAIL <https://\u{FFFF}y>: parsed as https://xn--y-t10i/, not failure
+ok   <https://\u{FFFF}y>
 ok   <https://x/\u{FFFF}y>
 ok   <https://x/?\u{FFFF}y>
 ok   <https://x/?#\u{FFFF}y>
@@ -808,9 +808,9 @@ ok   <non-special:x/?\u{FFFF}y>
 ok   <non-special:x/?#\u{FFFF}y>
 ok   <>
 ok   <https://example.com/"quoted">
-FAIL <https://a%C2%ADb/>: href https://xn--ab-5da/ not https://ab/; host xn--ab-5da not ab; hostname xn--ab-5da not ab; origin https://xn--ab-5da not https://ab
-FAIL <https://\u{AD}/>: parsed as https://xn--kba/, not failure
-FAIL <https://%C2%AD/>: parsed as https://xn--kba/, not failure
+ok   <https://a%C2%ADb/>
+ok   <https://\u{AD}/>
+ok   <https://%C2%AD/>
 ok   <https://xn--/>
 ok   <constructor:example>
 ok   <constructor:/example>
@@ -902,4 +902,4 @@ ok   <?q2> against <git://host?q#r>
 ok   <#h> against <git://host?q#r>
 ok   <?q2> against <git:/.//a?q#r>
 ok   <#h> against <git:/.//a?q#r>
-urltestdata: 889 of 904 cases pass
+urltestdata: 904 of 904 cases pass

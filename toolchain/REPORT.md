@@ -363,3 +363,23 @@ neighbours.
 
     prints 8, where gcc's build prints 200. The work-around is
     `enum { M = 24 };`.
+24. **A function named as a static table of an included header is accepted, and
+    the name then means the function**: where gcc refuses the redeclaration,
+    cicilang compiles it, and the table's name passed as a pointer is the
+    function's code. 12m's IDNA named its lookups as its tables (`idna_ccc`,
+    `idna_mark`) and read machine code as combining classes; in one file the
+    same is refused, as `not lowered yet: call(id(t))`:
+
+    ```c
+    /* dup.h */
+    static const unsigned t[3] = { 7, 8, 9 };
+    /* dup.c */
+    #include <stdio.h>
+    #include "dup.h"
+    static unsigned look(const unsigned *a, unsigned i) { return a[i]; }
+    static unsigned t(unsigned i) { return look(t, i); }
+    int main(void) { printf("%u\n", t(1)); return 0; }
+    ```
+
+    prints 4294965005 (gcc: `'t' redeclared as different kind of symbol`).
+    The work-around is other names.
