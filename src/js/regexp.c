@@ -1739,13 +1739,19 @@ static uint32_t re_compile(js_vm *vm, uint32_t src, uint32_t flags, uint32_t *wh
         uint32_t pre[64];
         uint32_t np = rc_prefix(p, root, pre);
         if (np >= 2) {
+            /* the prefix's last character's bytes skip 0 (the place compared whole), and
+               the shift after a place that was not a match follows the table at 256 */
             r.pre = (uint32_t)len(vm->re_code);
             r.npre = np;
             for (uint32_t i = 0; i < np; i++) push_back(vm->re_code, pre[i]);
-            for (uint32_t b = 0; b < 256; b++) push_back(vm->re_code, np);
+            for (uint32_t b = 0; b < 257; b++) push_back(vm->re_code, np);
             for (uint32_t i = 0; i + 1 < np; i++) vm->re_code[r.pre + np + (pre[i] & 0xFF)] = np - 1 - i;
             if ((flags & RF_I)) for (uint32_t i = 0; i + 1 < np; i++)
                 if (pre[i] >= 'a' && pre[i] <= 'z') vm->re_code[r.pre + np + (pre[i] - 32)] = np - 1 - i;
+            uint32_t lb = pre[np - 1] & 0xFF;
+            vm->re_code[r.pre + np + 256] = vm->re_code[r.pre + np + lb];
+            vm->re_code[r.pre + np + lb] = 0;
+            if ((flags & RF_I) && pre[np - 1] >= 'a' && pre[np - 1] <= 'z') vm->re_code[r.pre + np + (pre[np - 1] - 32)] = 0;
         }
     }
     if (len(p->names)) {
@@ -1915,8 +1921,10 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 goto next;
             case RE_JMP: pc = (uint32_t)((int32_t)(pc + 2) + (int32_t)prog[pc + 1]); goto next;
             case RE_SAVE: {
+                /* an undo only with a choice or a lookaround below it: with none a failure
+                   ends the run, and the next run starts with the slots unset */
                 uint32_t k = prog[pc + 1];
-                bt_push(st, BT_CAP, k, cap[k], 0);
+                if (len(*st)) bt_push(st, BT_CAP, k, cap[k], 0);
                 cap[k] = pos;
                 pc += 2;
                 goto next;
@@ -1924,7 +1932,7 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
             case RE_RESET: {
                 for (uint32_t k = prog[pc + 1]; k < prog[pc + 2]; k++) {
                     if (cap[k] == RE_INF) continue;
-                    bt_push(st, BT_CAP, k, cap[k], 0);
+                    if (len(*st)) bt_push(st, BT_CAP, k, cap[k], 0);
                     cap[k] = RE_INF;
                 }
                 pc += 3;
@@ -1995,7 +2003,7 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
             }
             case RE_LOOP_INIT: {
                 uint32_t r = prog[pc + 1];
-                bt_push(st, BT_REG, 2 * r, regs[2 * r], 0);
+                if (len(*st)) bt_push(st, BT_REG, 2 * r, regs[2 * r], 0);
                 regs[2 * r] = 0;
                 pc += 2;
                 goto next;
@@ -2013,7 +2021,7 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
             }
             case RE_LOOP_BODY: {
                 uint32_t r = prog[pc + 1];
-                bt_push(st, BT_REG, 2 * r + 1, regs[2 * r + 1], 0);
+                if (len(*st)) bt_push(st, BT_REG, 2 * r + 1, regs[2 * r + 1], 0);
                 regs[2 * r + 1] = pos;
                 pc += 2;
                 goto next;
@@ -2022,7 +2030,7 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 uint32_t r = prog[pc + 1], min = prog[pc + 2];
                 /* an iteration past the least that took nothing ends the loop's tries here */
                 if (pos == regs[2 * r + 1] && regs[2 * r] >= min) goto fail;
-                bt_push(st, BT_REG, 2 * r, regs[2 * r], 0);
+                if (len(*st)) bt_push(st, BT_REG, 2 * r, regs[2 * r], 0);
                 regs[2 * r]++;
                 pc = (uint32_t)((int32_t)(pc + 4) + (int32_t)prog[pc + 3]);
                 goto next;
@@ -2032,7 +2040,36 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 uint32_t min = prog[pc + 1], max = prog[pc + 2], greedy = prog[pc + 3], al = prog[pc + 4], lit = prog[pc + 5];
                 uint32_t atom = pc + 6, after = pc + 6 + al;
                 uint32_t k = 0, p = pos, width = 1;
-                if (greedy) {
+                if (greedy && !back && !uni) {
+                    /* forward without u: a code unit a character, the atom's test in line */
+                    uint32_t aw = prog[atom], aop = aw & 0xFF, lim = max < n - p ? max : n - p;
+                    if (aop == RE_CHAR) {
+                        uint32_t ch = prog[atom + 1];
+                        while (k < lim && s[p + k] == ch) k++;
+                    } else if (aop == RE_ANY) {
+                        while (k < lim && !re_line_term(s[p + k])) k++;
+                    } else if (aop == RE_ANY_ALL) {
+                        k = lim;
+                    } else if (aop == RE_CLASS && !(aw & RB_ICASE) && prog[atom + 1] <= 8) {
+                        uint32_t nr = prog[atom + 1], neg = (aw & RB_NEG) ? 1u : 0u;
+                        while (k < lim) {
+                            uint32_t c = s[p + k], in = 0;
+                            for (uint32_t j = 0; j < nr; j++) {
+                                if (c < prog[atom + 2 + 2 * j]) break;
+                                if (c <= prog[atom + 3 + 2 * j]) { in = 1; break; }
+                            }
+                            if (in == neg) break;
+                            k++;
+                        }
+                    } else {
+                        while (k < lim && re_takes(prog, atom, s[p + k], 0)) k++;
+                    }
+                    p += k;
+                    count += k & ~1023u;
+                    if (k < min) goto fail;
+                    if (lit) while (k > min && (p >= n || s[p] != lit - 1)) { p--; k--; }
+                    if (k > min) bt_push(st, BT_SIMPLE, pc, p, k);
+                } else if (greedy) {
                     while (k < max) {
                         uint32_t c;
                         if (back) { if (p == 0) break; c = re_bwd(s, p, uni, &width); }
@@ -2144,8 +2181,8 @@ int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start) {
     js_regex r = vm->regexes[re];
     js_str_flatten(vm, s);
     uint32_t n = vm->strs[s].len, off = vm->strs[s].off;
-    resize(vm->re_caps, 2 * r.ngroups, 0);
-    resize(vm->re_regs, 2 * r.nregs + 2, 0);
+    if (len(vm->re_caps) != 2 * r.ngroups) resize(vm->re_caps, 2 * r.ngroups, 0);
+    if (len(vm->re_regs) != 2 * r.nregs + 2) resize(vm->re_regs, 2 * r.nregs + 2, 0);
     int sticky = (r.flags & RF_Y) != 0, uni = (r.flags & (RF_U | RF_V)) != 0;
     uint64_t steps = vm->steps, budget = vm->step_budget;
     int found = 0;
@@ -2159,23 +2196,22 @@ int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start) {
         int icase = (r.flags & RF_I) != 0;
         for (uint32_t i = start; i <= n; i++) {
             if (r.npre && !sticky) {
-                /* Horspool over the literal prefix: the place's last character's skip */
-                uint32_t np = r.npre, last = pre[np - 1];
+                /* Horspool over the literal prefix: the place's last code unit's skip, 0
+                   where it may be the prefix's last character, the place then compared */
+                uint32_t np = r.npre, shift = pre[np + 256];
                 int found_at = 0;
                 while (i + np <= n) {
-                    uint32_t c = str[i + np - 1];
-                    uint32_t fc = icase && c >= 'A' && c <= 'Z' ? c + 32 : c;
-                    if (fc == last) {
-                        uint32_t k = 0;
-                        while (k + 1 < np) {
-                            uint32_t d = str[i + k];
-                            uint32_t fd = icase && d >= 'A' && d <= 'Z' ? d + 32 : d;
-                            if (fd != pre[k]) break;
-                            k++;
-                        }
-                        if (k + 1 >= np) { found_at = 1; break; }
+                    uint32_t skip = pre[np + (str[i + np - 1] & 0xFF)];
+                    if (skip) { i += skip; continue; }
+                    uint32_t k = 0;
+                    while (k < np) {
+                        uint32_t d = str[i + k];
+                        uint32_t fd = icase && d >= 'A' && d <= 'Z' ? d + 32 : d;
+                        if (fd != pre[k]) break;
+                        k++;
                     }
-                    i += pre[np + (c & 0xFF)];
+                    if (k >= np) { found_at = 1; break; }
+                    i += shift;
                 }
                 if (!found_at) break;
             } else if (r.first && !sticky) {
@@ -2250,6 +2286,34 @@ static uint32_t re_advance(js_vm *vm, uint32_t s, uint32_t i, int uni) {
     return i + 1;
 }
 
+/* SameValue: NaN is NaN, +0 is not -0 */
+static int re_same(js_vm *vm, jv a, jv b) {
+    if (jv_is_num(a) && jv_is_num(b)) {
+        double x = jv_dbl(a), y = jv_dbl(b);
+        if (x != x) return y != y;
+        return x == y && signbit(x) == signbit(y);
+    }
+    return js_strict_eq(vm, a, b);
+}
+
+/* Set(R, "lastIndex", v, true) on a RegExp object: its own data property written; a
+   frozen regex's or a read-only lastIndex refuses with V8's TypeError. 1 written, 0 thrown */
+static int re_set_last(js_vm *vm, jv rxv, jv v) {
+    uint32_t o = jv_is_obj(rxv) ? jv_idx(rxv) : 0;
+    jv cur = JV_UNDEF;
+    uint32_t f = 0;
+    if (!o || vm->objs[o].kind != JK_REGEXP || !js_get_own(vm, o, A_LASTINDEX, &cur, &f) || (f & JS_SHAPE_ACCESSOR)) {
+        js_set(vm, rxv, A_LASTINDEX, v);
+        return !vm->throwing;
+    }
+    if ((vm->objs[o].flags & JO_FROZEN) || (f & JS_SHAPE_READONLY)) {
+        js_throw_msg(vm, vm->type_error_proto, "Cannot assign to read only property 'lastIndex' of object '[object RegExp]'");
+        return 0;
+    }
+    js_define(vm, o, A_LASTINDEX, v, f);
+    return 1;
+}
+
 /* RegExpBuiltinExec's search: the start from lastIndex (g, y), a match's slots in
    vm->re_caps; lastIndex set as the flags say. 1 a match, 0 none, -1 thrown */
 static int re_builtin_exec(js_vm *vm, jv rxv, uint32_t re, uint32_t s) {
@@ -2261,17 +2325,17 @@ static int re_builtin_exec(js_vm *vm, jv rxv, uint32_t re, uint32_t s) {
         if (vm->throwing) return -1;
     }
     if (li > vm->strs[s].len) {
-        if (global) js_set(vm, rxv, A_LASTINDEX, jv_num(0));
-        return vm->throwing ? -1 : 0;
+        if (global && !re_set_last(vm, rxv, jv_num(0))) return -1;
+        return 0;
     }
     int rc = js_re_exec(vm, re, s, (uint32_t)li);
     if (rc < 0) return -1;
     if (rc == 0) {
-        if (global) js_set(vm, rxv, A_LASTINDEX, jv_num(0));
-        return vm->throwing ? -1 : 0;
+        if (global && !re_set_last(vm, rxv, jv_num(0))) return -1;
+        return 0;
     }
-    if (global) js_set(vm, rxv, A_LASTINDEX, jv_num(vm->re_caps[1]));
-    return vm->throwing ? -1 : 1;
+    if (global && !re_set_last(vm, rxv, jv_num(vm->re_caps[1]))) return -1;
+    return 1;
 }
 
 /* the match in vm->re_caps as exec's array: the groups' strings, index, input, groups
@@ -2376,36 +2440,100 @@ static void re_substitute(js_vm *vm, uint32_t tpl, uint32_t s, const uint32_t *c
 }
 
 static void re_append(js_vm *vm, uint32_t s, uint32_t from, uint32_t to, vector<uint16_t> *out) {
+    if (to <= from) return;
     js_str_flatten(vm, s);
-    for (uint32_t k = from; k < to; k++) push_back(*out, vm->units[vm->strs[s].off + k]);
+    const uint16_t *u = data(vm->units) + vm->strs[s].off;
+    append_range(*out, u + from, to - from);
+}
+
+/* a global regex's matches in s from 0 (match's and replace's), the first keep slots of
+   every one onto all: each match's end the next's start, an empty one's a step further.
+   lastIndex, which no code reads between them, is set to 0 first and left 0 as the last
+   failed search leaves it; a regex that refuses the first write refuses them all.
+   1 done, 0 thrown */
+static int re_global_matches(js_vm *vm, jv rxv, uint32_t re, uint32_t s, uint32_t keep, vector<uint32_t> *all) {
+    js_regex r = vm->regexes[re];
+    int uni = (r.flags & (RF_U | RF_V)) != 0;
+    if (!re_set_last(vm, rxv, jv_num(0))) return 0;
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len, start = 0;
+    while (start <= n) {
+        int rc = js_re_exec(vm, re, s, start);
+        if (rc < 0) return 0;
+        if (rc == 0) break;
+        if (keep == 2) {
+            push_back(*all, vm->re_caps[0]);
+            push_back(*all, vm->re_caps[1]);
+        } else {
+            const uint32_t *cp = data(vm->re_caps);
+            append_range(*all, cp, keep);
+        }
+        uint32_t a = vm->re_caps[0], e = vm->re_caps[1];
+        start = a == e ? re_advance(vm, s, e, uni) : e;
+    }
+    return re_set_last(vm, rxv, jv_num(0));
 }
 
 /* s with rx's matches replaced: every one with g (lastIndex from 0), else the first from
    exec's place; rep a function called for each, or a template */
 static jv re_replace(js_vm *vm, jv rxv, uint32_t re, uint32_t s, jv rep) {
     js_regex r = vm->regexes[re];
-    int global = (r.flags & RF_G) != 0, uni = (r.flags & (RF_U | RF_V)) != 0;
+    int global = (r.flags & RF_G) != 0;
     int fn = js_is_callable(vm, rep);
     uint32_t tpl = 0;
     if (!fn) { tpl = js_to_string(vm, rep); if (!tpl) return JV_HOLE; }
-    if (global) { js_set(vm, rxv, A_LASTINDEX, jv_num(0)); if (vm->throwing) return JV_HOLE; }
     /* every match's slots, one after another */
     vector<uint32_t> all;
     uint32_t ng = r.ngroups;
-    for (;;) {
+    if (global) { if (!re_global_matches(vm, rxv, re, s, 2 * ng, &all)) return JV_HOLE; }
+    else {
         int rc = re_builtin_exec(vm, rxv, re, s);
         if (rc < 0) return JV_HOLE;
-        if (rc == 0) break;
-        for (uint32_t k = 0; k < 2 * ng; k++) push_back(all, vm->re_caps[k]);
-        if (!global) break;
-        if (vm->re_caps[0] == vm->re_caps[1]) {
-            js_set(vm, rxv, A_LASTINDEX, jv_num(re_advance(vm, s, vm->re_caps[1], uni)));
-            if (vm->throwing) return JV_HOLE;
-        }
+        if (rc) for (uint32_t k = 0; k < 2 * ng; k++) push_back(all, vm->re_caps[k]);
     }
+    uint32_t nm = (uint32_t)(len(all) / (2 * ng));
+    js_str_flatten(vm, s);
+    if (nm == 0) return jv_str(s);
     vector<uint16_t> out;
     uint32_t next_src = 0;
-    uint32_t nm = (uint32_t)(len(all) / (2 * ng));
+    /* a template without $ is its own text for every match: the result's length known
+       first, the pieces copied into it */
+    int plain = 0;
+    if (!fn) {
+        js_str_flatten(vm, tpl);
+        uint32_t tn = vm->strs[tpl].len, to = vm->strs[tpl].off, k = 0;
+        while (k < tn && vm->units[to + k] != '$') k++;
+        plain = k == tn;
+    }
+    if (plain) {
+        uint32_t tn = vm->strs[tpl].len, n = vm->strs[s].len;
+        uint64_t total = 0;
+        for (uint32_t m = 0; m < nm; m++) {
+            uint32_t pos = all[m * 2 * ng], end = all[m * 2 * ng + 1];
+            if (pos < next_src) continue;
+            total += (uint64_t)(pos - next_src) + tn;
+            next_src = end;
+        }
+        total += n - next_src;
+        /* V8's longest string, 2^29 - 24 units */
+        if (total > 536870888u) return js_throw_msg(vm, vm->range_error_proto, "Invalid string length");
+        resize(out, (size_t)total, 0);
+        {
+            const uint16_t *su = data(vm->units) + vm->strs[s].off;
+            const uint16_t *tu = data(vm->units) + vm->strs[tpl].off;
+            uint16_t *o = data(out);
+            uint32_t w = 0, at = 0;
+            for (uint32_t m = 0; m < nm; m++) {
+                uint32_t pos = all[m * 2 * ng], end = all[m * 2 * ng + 1];
+                if (pos < at) continue;
+                for (uint32_t k = at; k < pos; k++) o[w++] = su[k];
+                for (uint32_t k = 0; k < tn; k++) o[w++] = tu[k];
+                at = end;
+            }
+            for (uint32_t k = at; k < n; k++) o[w++] = su[k];
+        }
+        return jv_str(js_str_new(vm, data(out), (uint32_t)total));
+    }
     for (uint32_t m = 0; m < nm; m++) {
         vector<uint32_t> caps;
         for (uint32_t k = 0; k < 2 * ng; k++) push_back(caps, all[m * 2 * ng + k]);
@@ -2442,12 +2570,11 @@ static jv re_replace(js_vm *vm, jv rxv, uint32_t re, uint32_t s, jv rep) {
         }
         if (pos >= next_src) {
             re_append(vm, s, next_src, pos, &out);
-            for (size_t k = 0; k < len(piece); k++) push_back(out, piece[k]);
+            if (len(piece)) append_range(out, data(piece), len(piece));
             next_src = end;
         }
     }
     js_str_flatten(vm, s);
-    if (next_src == 0 && nm == 0) return jv_str(s);
     re_append(vm, s, next_src, vm->strs[s].len, &out);
     return jv_str(js_str_new(vm, data(out), len(out)));
 }
@@ -2691,19 +2818,13 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (rc < 0) return JV_HOLE;
             return rc ? re_result(vm, re, s) : JV_NULL;
         }
-        int uni = (vm->regexes[re].flags & (RF_U | RF_V)) != 0;
-        js_set(vm, rxv, A_LASTINDEX, jv_num(0));
-        if (vm->throwing) return JV_HOLE;
-        uint32_t arr = js_array_new(vm, 0);
-        for (;;) {
-            int rc = re_builtin_exec(vm, rxv, re, s);
-            if (rc < 0) return JV_HOLE;
-            if (rc == 0) break;
-            uint32_t a = vm->re_caps[0], b = vm->re_caps[1];
-            js_array_push(vm, arr, jv_str(js_str_sub(vm, s, a, b)));
-            if (a == b) { js_set(vm, rxv, A_LASTINDEX, jv_num(re_advance(vm, s, b, uni))); if (vm->throwing) return JV_HOLE; }
-        }
-        return vm->objs[arr].b ? jv_obj(arr) : JV_NULL;
+        vector<uint32_t> all;
+        if (!re_global_matches(vm, rxv, re, s, 2, &all)) return JV_HOLE;
+        uint32_t nm = (uint32_t)(len(all) / 2);
+        if (!nm) return JV_NULL;
+        uint32_t arr = js_array_new(vm, nm);
+        for (uint32_t m = 0; m < nm; m++) js_array_set(vm, arr, m, jv_str(js_str_sub(vm, s, all[2 * m], all[2 * m + 1])));
+        return jv_obj(arr);
     }
     case JRE_MATCHALL: case JRE_SP_MATCHALL: {
         jv rxv = thisv;
@@ -2768,15 +2889,18 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
         }
         if (!re) return JV_HOLE;
-        /* lastIndex set to 0 for the search, then put back */
+        /* lastIndex set to 0 for the search, then put back, each write only when the
+           value differs (a frozen regex searches when its lastIndex is 0 and not g or y) */
         jv prev = js_get(vm, rxv, A_LASTINDEX);
         if (vm->throwing) return JV_HOLE;
-        uint32_t f = vm->regexes[re].flags;
-        int rc = js_re_exec(vm, re, s, 0);
+        if (!re_same(vm, prev, jv_num(0)) && !re_set_last(vm, rxv, jv_num(0))) return JV_HOLE;
+        int rc = re_builtin_exec(vm, rxv, re, s);
         if (rc < 0) return JV_HOLE;
-        (void)f;
-        js_set(vm, rxv, A_LASTINDEX, prev);
-        return jv_num(rc ? (double)vm->re_caps[0] : -1.0);
+        double at = rc ? (double)vm->re_caps[0] : -1.0;
+        jv cur = js_get(vm, rxv, A_LASTINDEX);
+        if (vm->throwing) return JV_HOLE;
+        if (!re_same(vm, cur, prev) && !re_set_last(vm, rxv, prev)) return JV_HOLE;
+        return jv_num(at);
     }
     case JRE_SPLIT: case JRE_SP_SPLIT: {
         uint32_t s, re;
