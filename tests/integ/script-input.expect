@@ -1,0 +1,30 @@
+-- the events page's console after its actions, against Chromium's:
+the same 106 lines
+-- the keys page's console after its actions, against Chromium's:
+the same 101 lines
+-- the form's submissions, each one's console and requests, against Chromium's:
+the same 84 lines
+-- the navigations, as the reasoner has them: the form's, the field names it sent:
+N = sn(1,1,0), C = form, M = 'POST', U = 'http://127.0.0.1:PORT/echo/form', F = n(1,17,0), S = n(1,59,0), Fi = f, Si = go, St = 200
+N = sn(1,1,0), Name = who
+N = sn(1,1,0), Name = secret
+N = sn(1,1,0), Name = pick
+N = sn(1,1,0), Name = flag
+N = sn(1,1,0), Name = size
+N = sn(1,1,0), Name = 'sp ace'
+N = sn(1,1,0), Name = color
+N = sn(1,1,0), Name = many
+N = sn(1,1,0), Name = many
+N = sn(1,1,0), Name = note
+N = sn(1,1,0), Name = go
+N = sn(1,1,0), Name = outside
+-- a planned one that another took the place of, and a link's:
+N = sn(1,1,0), C = form, M = 'POST', U = 'http://127.0.0.1:PORT/echo/form', St = none
+N = sn(1,2,0), C = form, M = 'GET', U = 'http://127.0.0.1:PORT/echo/other', St = 200
+N = sn(1,1,0), C = link, M = 'GET', U = 'http://127.0.0.1:PORT/echo/away', St = 200
+-- what the reasoner says of them:
+amb_diag(form_cross_origin_http, sn(1,1,0), 'a form was submitted to http://localhost:PORT/echo/cross: another origin, over http:, so what it sends crosses the network unencrypted').
+amb_diag(form_password_http, n(1,82,0), 'the password field pw was submitted to http://localhost:PORT/echo/cross over http:, unencrypted').
+amb_diag(form_password_http, n(1,82,0), 'the password field pw was submitted to http://127.0.0.1:PORT/echo/form over http:, unencrypted').
+amb_diag(form_password_get, n(1,82,0), 'the password field pw was sent in a GET\'s URL, where logs and histories keep it').
+amb_diag(key_not_focusable, n(1,39,0), 'the <a> \'no href\' has a key listener but neither it nor anything inside it takes focus: no key event reaches it (tabindex makes it focusable)').

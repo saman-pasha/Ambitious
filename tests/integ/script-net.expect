@@ -14,7 +14,7 @@ F = 15, X = 8, C = 5
 -- what the server was sent:
 POST /echo/post?q=1 | a=1&b=two
 POST /echo/text | plain
-POST /echo/xhr | a,b
+POST /echo/xhr | a,b\n1,2
 PUT /echo/put | {"n":1}
 -- what the reasoner says of them:
 amb_diag(request_blocked, sq(1,10,0), 'the script #1 (inline) asked for http://localhost:PORT/fetch-data.json, which was blocked: another origin answers a script only with CORS\'s Access-Control-Allow-Origin, and a page may not read a file: URL').

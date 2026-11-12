@@ -10,7 +10,8 @@ file PORT is replaced by the server's port. Besides the files, for any method:
   /status/NNN        that status, HTTP's reason phrase for it, a short body
   /redirect/PATH     302 to /PATH
   /cross/PATH        302 to /PATH at http://localhost:PORT
---log appends a line a request: its method, its path, and its body when it has one."""
+--log appends a line a request: its method, its path, and its body when it has one, its
+CR and LF written \r and \n."""
 import argparse
 import http.server
 import os
@@ -54,7 +55,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         sent = self.body()
         if args.log:
             with LOCK, open(args.log, "a") as f:
-                f.write("%s %s%s\n" % (self.command, self.path, (" | " + sent.decode("utf-8", "replace")) if sent else ""))
+                body = sent.decode("utf-8", "replace").replace("\r", "\\r").replace("\n", "\\n")
+                f.write("%s %s%s\n" % (self.command, self.path, (" | " + body) if sent else ""))
         port = self.server.server_address[1]
         path = self.path.split("#")[0]
         if path.startswith("/echo"):

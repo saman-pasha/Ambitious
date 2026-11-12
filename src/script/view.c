@@ -201,6 +201,8 @@ static int sv_val_is(const struct js_host *h, uint32_t i, const char *w) {
     return i != ~0u && h->vvals[i].len == n && memcmp(data(h->vtext) + h->vvals[i].off, w, n) == 0;
 }
 
+int script_view_fresh(struct js_host *h) { return h->view_ok && h->view_rev == dom_revision(h->d); }
+
 int script_view_rendered(struct js_host *h, uint32_t x) {
     script_view_update(h);
     const dom_document *d = h->d;

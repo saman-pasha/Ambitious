@@ -1,0 +1,1 @@
+--click '#b' --type '#t' 'aB' --key Backspace --key Tab --key Enter --dblclick '#d' --key x --key Tab --click '#r'

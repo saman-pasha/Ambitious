@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>keys</title>
+<!-- A user's keys and focus (src/script/input.c): the sequential focus order (positive
+     tabindex first, then the document's; tabindex -1, a disabled control and a hidden one
+     left out), Shift+Tab back, Space and Enter on a button and a box, Enter in a textarea, a
+     modifier's key, a label's click, focus() of what cannot take it. Each event a capturing
+     listener on the window sees, a line each, against Chromium's (tests/pages/keys.chromium,
+     the actions in tests/integ/script-input.sh). Every box's size is declared. -->
+<style>
+body { margin: 0; }
+input, button, textarea, a, div, label, select { display: block; margin: 0; padding: 0; border: 0; width: 120px; height: 20px; }
+</style>
+</head>
+<body>
+<input id="first" value="one">
+<button id="b2" tabindex="2">two</button>
+<input id="cb" type="checkbox">
+<button id="b1" tabindex="1">one</button>
+<input id="off" disabled value="off">
+<div id="minus" tabindex="-1">minus</div>
+<textarea id="ta"></textarea>
+<input id="hid" type="hidden" value="h">
+<label id="lab" for="cb">box</label>
+<a id="noref">no href</a>
+<select id="sel"><option>x</option><option>y</option></select>
+<button id="last">last</button>
+<script>
+  function who(t) { return t && t.nodeType === 1 ? (t.id || t.nodeName) : (t === window ? 'window' : t ? t.nodeName : 'null'); }
+  function rec(e) {
+    var s = e.type + '@' + who(e.target);
+    if (e instanceof KeyboardEvent) s += '(' + JSON.stringify(e.key) + ' ' + e.code + ' ' + e.keyCode + ' ' + e.charCode + (e.shiftKey ? ' shift' : '') + (e.ctrlKey ? ' ctrl' : '') + (e.getModifierState('Shift') ? ' S' : '') + ' loc' + e.location + ')';
+    if (e instanceof FocusEvent) s += '(' + who(e.relatedTarget) + ')';
+    if (e.type === 'click') s += '(' + e.detail + ' ' + e.clientX + ',' + e.clientY + ' ' + (e.pointerType === undefined ? 'u' : JSON.stringify(e.pointerType)) + ')';
+    if (e.type === 'input' || e.type === 'beforeinput') s += '(' + JSON.stringify(e.data) + ' ' + e.inputType + ')';
+    if (e.type === 'change' || e.type === 'input') s += '[' + (e.target.type === 'checkbox' ? e.target.checked : JSON.stringify(e.target.value)) + ']';
+    console.log(s);
+  }
+  ['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'change', 'focus', 'blur', 'focusin', 'focusout', 'click'].forEach(function (t) { window.addEventListener(t, rec, true); });
+  /* a key listener on a link without href, which no key reaches (the reasoner says so) */
+  document.getElementById('noref').addEventListener('keydown', function () { console.log('never'); });
+  document.getElementById('last').addEventListener('click', function () {
+    var a = document.activeElement;
+    console.log('active: ' + who(a) + ' box: ' + document.getElementById('cb').checked + ' text: ' + JSON.stringify(document.getElementById('ta').value));
+    document.getElementById('minus').focus();
+    console.log('focus() -1: ' + who(document.activeElement));
+    document.getElementById('off').focus();
+    console.log('focus() disabled: ' + who(document.activeElement));
+    document.getElementById('noref').focus();
+    console.log('focus() no href: ' + who(document.activeElement));
+    document.getElementById('hid').focus();
+    console.log('focus() hidden: ' + who(document.activeElement));
+    document.activeElement.blur();
+    console.log('blurred: ' + who(document.activeElement));
+  });
+</script>
+</body></html>

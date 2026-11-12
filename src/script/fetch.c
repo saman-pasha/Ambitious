@@ -40,8 +40,9 @@ amb_interface(script);
 /* the loader's fetch by method (src/net/net.c) */
 net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len, net_kind kind, const char *method, const char *sent,
                                  size_t sent_n, const char *hdrs, size_t hdrs_n, uint32_t from);
-/* script.c's, which takes a vector */
+/* script.c's and input.c's, which take a vector */
 int sh_utf8(js_vm *vm, jv v, vector<char> *out);
+void script_formdata_body(js_vm *vm, uint32_t owner, vector<char> *out, char *ctype, size_t cap);
 
 /* the natives of this unit */
 enum {
@@ -475,6 +476,7 @@ static int sf_body(js_vm *vm, jv v, vector<char> *out, char *ct, size_t cap) {
             for (uint32_t i = 0; i < vm->objs[o].b; i++) push_back(*out, (char)vm->bytes[vm->objs[o].a + i]);
             return 1;
         }
+        if (k == JK_HOST && vm->objs[o].c == HK_FORMDATA) { script_formdata_body(vm, vm->objs[o].a, out, ct, cap); return 1; }
         if (k == JK_TYPEDARRAY || k == JK_DATAVIEW) {
             uint32_t buf = vm->objs[o].a, at = vm->objs[o].c;
             uint32_t n = k == JK_DATAVIEW ? vm->objs[o].b : (uint32_t)jv_dbl(js_get(vm, v, js_atom_ascii(vm, "byteLength")));

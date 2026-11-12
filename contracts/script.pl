@@ -44,6 +44,9 @@ script_contract(enum(req_outcome, [ok, http_error, opaque, failed, blocked, abor
 %% the script's place), after the page loaded (a new document: the old one gone), or
 %% ignored (an asynchronously loaded script's)
 script_contract(enum(write_when, [parsing, after_load, ignored])).
+%% what navigated the page: a form's submission, a link followed, location set (assign,
+%% replace, href), a reload
+script_contract(enum(nav_cause, [form, link, location, reload])).
 
 script_contract(record(run, [
     field(elem,    xhandle(dom, node)),     % the <script> element, or the element of the on* attribute
@@ -96,6 +99,26 @@ script_contract(record(write, [
     field(bytes, u32)
 ])).
 
+%% a navigation the page made: the request through the loader that leaves it
+script_contract(record(navigation, [
+    field(run,       ref(run)),             % the script whose code navigated; none for a user's own click
+    field(cause,     enum(nav_cause)),
+    field(method,    span(text)),
+    field(url,       span(text)),           % where to, resolved (a GET form's without its query of fields, whose values are not kept)
+    field(form,      xhandle(dom, node)),   % the form submitted, none for another cause
+    field(submitter, xhandle(dom, node)),   % the button that submitted it, none for submit()
+    field(target,    span(text)),           % the browsing context named (_blank ...), empty for the page's own
+    field(resource,  xhandle(net, resource)),  % the loader's fetch of it; none when it was not fetched here
+    field(status,    u32),
+    field(fields,    u32)                   % the form data set's entries
+])).
+%% a field a form's submission sent: its name and its control, never its value
+script_contract(record(form_field, [
+    field(navigation, ref(navigation)),
+    field(name,       span(text)),
+    field(control,    xhandle(dom, node))
+])).
+
 script_contract(handle(run, sr)).
 script_contract(handle(console, sc)).
 script_contract(handle(error, se)).
@@ -103,11 +126,13 @@ script_contract(handle(listener, sl)).
 script_contract(handle(timer, st)).
 script_contract(handle(request, sq)).
 script_contract(handle(write, sw)).
+script_contract(handle(navigation, sn)).
+script_contract(handle(form_field, sf)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), table(request), table(write),
-    pool(text)])).
+    table(navigation), table(form_field), pool(text)])).
 script_contract(owns(runtime, run, store)).
 script_contract(owns(runtime, console, store)).
 script_contract(owns(runtime, error, store)).
@@ -115,6 +140,8 @@ script_contract(owns(runtime, listener, store)).
 script_contract(owns(runtime, timer, store)).
 script_contract(owns(runtime, request, store)).
 script_contract(owns(runtime, write, store)).
+script_contract(owns(runtime, navigation, store)).
+script_contract(owns(runtime, form_field, store)).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 
@@ -137,6 +164,15 @@ script_contract(fact(script_request_status(handle, field(status)), table(request
 script_contract(fact(script_request_resource(handle, field(resource)), table(request), true)).
 script_contract(fact(script_request_cross(handle), table(request), field(cross) == true)).
 script_contract(fact(script_write(handle, field(run), field(when), field(bytes)), table(write), true)).
+%% each navigation: what made it, by which method, to where; who, the form and its
+%% submitter, the context it was for, the loader's fetch, its status; the fields sent
+script_contract(fact(script_navigation(handle, field(cause), field(method), field(url)), table(navigation), true)).
+script_contract(fact(script_navigation_by(handle, field(run)), table(navigation), true)).
+script_contract(fact(script_navigation_form(handle, field(form), field(submitter)), table(navigation), field(cause) == form)).
+script_contract(fact(script_navigation_target(handle, field(target)), table(navigation), true)).
+script_contract(fact(script_navigation_resource(handle, field(resource)), table(navigation), true)).
+script_contract(fact(script_navigation_status(handle, field(status)), table(navigation), field(status) \== 0)).
+script_contract(fact(script_form_field(field(navigation), field(name), field(control)), table(form_field), true)).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).
 script_contract(fact(script_listener(field(target), field(type), field(run)), table(listener), field(on) == node)).
@@ -156,11 +192,16 @@ script_contract(derived(script_request_failed/3, 'a request a script made that h
 script_contract(derived(script_insecure_request/2, 'a request over http: from a page served over https:, and its URL')).
 script_contract(derived(script_write_replaced/1, 'a script whose document.write after the page loaded replaced the whole document')).
 script_contract(derived(script_write_ignored/1, 'a script loaded asynchronously whose document.write was ignored')).
+script_contract(derived(script_form_cross_origin_http/2, 'a form submitted to another origin over http:, and where to')).
+script_contract(derived(script_form_password_http/2, 'a form submitted over http: with a password field, and the field')).
+script_contract(derived(script_form_password_get/2, 'a form whose GET put a password field in its URL, and the field')).
+script_contract(derived(script_key_unfocusable/2, 'an element with a key listener that neither it nor anything inside it can take focus for, and its name')).
 script_contract(derived(script_layout_thrash/2, 'a script whose reads of style or geometry, each after a change, made the cascade and the layout run many times, and how many')).
 
 script_contract(query(errors, script_uncaught(R, P, M), [R, P, M], 'every error no code caught')).
 script_contract(query(listeners, script_listens(N, T, R), [N, T, R], 'every element listened on, for what, by which script')).
 script_contract(query(requests, script_request(Q, A, M, U, O), [Q, A, M, U, O], 'every request the scripts made, and how it ended')).
+script_contract(query(navigations, script_navigation(N, C, M, U), [N, C, M, U], 'every navigation the page made: why, how and where to')).
 
 %% ---- GENERATION -------------------------------------------------------------
 

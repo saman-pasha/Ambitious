@@ -66,6 +66,9 @@ typedef struct sh_hdr { uint32_t owner, noff, nlen, voff, vlen, live; } sh_hdr;
    parse found async; its element and that node's generation, the loader's record of its
    src, how it came (script_insertion), whether it has run */
 typedef struct sh_pend { uint32_t node, gen, resource, how, done, spare; } sh_pend;
+/* a FormData's entry (src/script/input.c): its object's index, its name and value in the
+   network text, its control (0 for one a script appended), whether it is live */
+typedef struct sh_fd { uint32_t owner, noff, nlen, voff, vlen, control, live, spare; } sh_fd;
 
 /* the page's scripts, each <script> in document order (its text, or its src as the
    loader fetched it), then DOMContentLoaded and load, then its timers as far as horizon
@@ -80,6 +83,15 @@ uint32_t script_select(const dom_document *d, const char *sel, size_t n);
 /* the page come to rest, before its snapshot: each timer's state recorded, and the
    nodes no tree holds any more destroyed (a wrapper of one is stale from then on) */
 void script_settle(js_vm *vm);
+/* a user's action at the page after its scripts (src/script/input.c): a click at the
+   element x, a double click, focus given it, text typed into it (clicked first), a key
+   pressed (text: its name, Enter, Tab, Shift+A ...); then the timers they set, as far as
+   horizon ms past now. 0 when there is no such element, or the page navigated away */
+enum { SCRIPT_ACT_CLICK = 1, SCRIPT_ACT_DBLCLICK, SCRIPT_ACT_FOCUS, SCRIPT_ACT_TYPE, SCRIPT_ACT_KEY };
+int script_action(js_vm *vm, uint32_t kind, uint32_t x, const char *text, size_t n, double horizon);
+/* the encoding the document was decoded with, by its name (the parser's record): its
+   forms submit in it, document.characterSet names it. Unset, UTF-8 */
+void script_charset(js_vm *vm, const char *name, size_t n);
 
 /* the host: a command's, beside its stores. Declared after the prototypes above: a
    prototype after a vector<T> in a header is not registered (PLAN.md's toolchain
@@ -134,6 +146,26 @@ struct js_host {
     vector<char> wtext;
     vector<uint32_t> wnodes;
     uint32_t wscript, cur_script, parsing, ext_run, opened;
+    /* the user (src/script/input.c): the focused element and its generation, and its
+       value when it took focus (for its change event); the pointer: whether it is on the
+       page, where, the element under it; the click event a user's click dispatches;
+       FormData's entries; whether the page navigated away (its event loop stopped); the
+       form whose entry list is being constructed; the navigation planned (a form's, its
+       task to come) and its request's URL, body and type; whether beforeunload is being
+       fired; the document's encoding (its number plus one: 0 is UTF-8); the element a
+       click is at while its events' point is left to be found when read (src/script/input.c);
+       the name form's atom in the document, once one has had it */
+    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm;
+    int charset, spare2;
+    vector<char> nav_url, nav_body, nav_ctype;
+    double mouse_x, mouse_y;
+    jv click_ev;
+    vector<char> fvalue;
+    vector<sh_fd> fds;
+    /* the document's URL (its loader's, then as its fragment and history change it), and
+       the location object */
+    vector<char> docurl;
+    uint32_t location;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -151,6 +183,8 @@ struct js_host {
     vector_uint32_t_drop(&(h).vbox); vector_sh_vbox_drop(&(h).vboxes); vector_sh_vfrag_drop(&(h).vfrags); \
     vector_sh_req_drop(&(h).reqs); vector_sh_resp_drop(&(h).resps); vector_sh_hdr_drop(&(h).hdrs); vector_char_drop(&(h).ntext); \
     vector_uint32_t_drop(&(h).started); vector_sh_pend_drop(&(h).pending); vector_uint32_t_drop(&(h).wpend); \
-    vector_char_drop(&(h).wtext); vector_uint32_t_drop(&(h).wnodes)
+    vector_char_drop(&(h).wtext); vector_uint32_t_drop(&(h).wnodes); vector_char_drop(&(h).fvalue); vector_sh_fd_drop(&(h).fds); \
+    vector_char_drop(&(h).docurl); vector_char_drop(&(h).nav_url); vector_char_drop(&(h).nav_body); \
+    vector_char_drop(&(h).nav_ctype)
 
 #endif

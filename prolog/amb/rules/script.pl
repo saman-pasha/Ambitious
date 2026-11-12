@@ -11,7 +11,8 @@
 :- dynamic script_run/4, script_url/2, script_console/3, script_error/3, script_listener/3,
    script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2,
    script_inserted/2, script_request/5, script_request_by/2, script_request_status/2, script_request_resource/2,
-   script_request_cross/1, script_write/4.
+   script_request_cross/1, script_write/4, script_navigation/4, script_navigation_by/2, script_navigation_form/3,
+   script_navigation_target/2, script_navigation_resource/2, script_navigation_status/2, script_form_field/3.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -63,6 +64,30 @@ script_write_replaced(R) :- script_write(_, R, after_load, _).
 %% an asynchronously loaded script may not write into the document that is being parsed
 script_write_ignored(R) :- script_write(_, R, ignored, _).
 
+%% a form submitted to another origin over http:: its data crosses the network in the clear
+%% to a site that is not the page's
+script_form_cross_origin_http(N, U) :-
+    script_navigation(N, form, _, U), sub_atom(U, 0, _, _, 'http:'),
+    net_page(P), net_origin(P, O), \+ script_rules_of_origin(U, O).
+%% a password a form sends over http:, or puts in a GET's URL (kept by logs and histories)
+script_form_password_http(N, F) :-
+    script_navigation(N, form, _, U), sub_atom(U, 0, _, _, 'http:'),
+    script_form_field(N, _, F), script_rules_password(F).
+script_form_password_get(N, F) :-
+    script_navigation(N, form, 'GET', _), script_form_field(N, _, F), script_rules_password(F).
+script_rules_password(F) :- dom_attr(F, type, T), downcase_atom(T, password).
+%% a URL of an origin: the origin, then its path's slash or nothing
+script_rules_of_origin(U, O) :- atom_length(O, L), sub_atom(U, 0, L, A, O), ( A =:= 0 ; sub_atom(U, L, 1, _, '/') ).
+
+%% a key listener where no key event comes: key events go to the element that has focus
+%% and up from it, so an element that takes none, with nothing inside that does, never
+%% hears one (a page's own containers aside: they hear them all)
+script_key_unfocusable(N, Name) :-
+    script_listener(N, T, _), memberchk(T, [keydown, keyup, keypress]), dom_element(N, E),
+    \+ script_rules_container(E), \+ script_rules_focusable(N),
+    \+ ( dom_descendant(D, N), script_rules_focusable(D) ),
+    script_rules_name(N, Name).
+
 %% a read of style or geometry after a change to the DOM runs the cascade and the layout
 %% again (a forced, synchronous layout): a script that does it many times interleaves its
 %% reads with its writes, where reading first and writing after would run them once
@@ -106,6 +131,19 @@ script_diag(write_replaced, R, Text) :-
 script_diag(write_ignored, R, Text) :-
     script_write_ignored(R), script_rules_where(R, Where),
     format(atom(Text), 'the script ~w was loaded asynchronously, so its document.write was ignored', [Where]).
+
+script_diag(form_cross_origin_http, N, Text) :-
+    script_form_cross_origin_http(N, U),
+    format(atom(Text), 'a form was submitted to ~w: another origin, over http:, so what it sends crosses the network unencrypted', [U]).
+script_diag(form_password_http, F, Text) :-
+    script_form_password_http(N, F), script_navigation(N, _, _, U), script_form_field(N, Name, F),
+    format(atom(Text), 'the password field ~q was submitted to ~w over http:, unencrypted', [Name, U]).
+script_diag(form_password_get, F, Text) :-
+    script_form_password_get(N, F), script_form_field(N, Name, F),
+    format(atom(Text), 'the password field ~q was sent in a GET''s URL, where logs and histories keep it', [Name]).
+script_diag(key_not_focusable, N, Text) :-
+    script_key_unfocusable(N, Name), dom_element(N, E),
+    format(atom(Text), 'the <~w> ~q has a key listener but neither it nor anything inside it takes focus: no key event reaches it (tabindex makes it focusable)', [E, Name]).
 
 %% a script named by its URL, or by its number on the page (its run's index)
 script_rules_where(R, Where) :- script_url(R, U), format(atom(Where), '~w', [U]).

@@ -14,7 +14,11 @@
  *   ambitious script PAGE         what the page's scripts did: each script and how it ended,
  *                                 its console and errors, the listeners and timers at rest
  *   ambitious click PAGE SELECTOR the same after a click at the first element SELECTOR matches
- *   ambitious --click SELECTOR CMD PAGE ...   any page command after such a click (repeatable)
+ *   ambitious --click SELECTOR CMD PAGE ...   any page command after such a click (repeatable);
+ *                                 a user's other actions the same way, in their order:
+ *                                 --dblclick SELECTOR, --focus SELECTOR, --type SELECTOR TEXT
+ *                                 (the element clicked, then TEXT typed), --key KEY (Enter,
+ *                                 Tab, a, Shift+A ...): src/script/input.c
  *   ambitious bench PAGE [N]      each stage's time, over N runs, and the snapshot's
  *                                 size and the reasoner's time over it
  *   ambitious inspect PAGE [--query GOAL | --why GOAL]
@@ -465,22 +469,58 @@ static void page_title(const dom_document *d, char *out, size_t cap) {
 
 /* the page's record in the loader, or 0 when it could not be fetched. With a
    profile: its site's denied kinds asked for first, the visit recorded after */
-/* the clicks asked for (--click SELECTOR, AMB_CLICKS a line each), each at the first
-   element its selector matches, after the page's scripts */
+/* the user's actions asked for (--click SELECTOR and its kin; AMB_ACTIONS a line each,
+   ACTION TAB ARGUMENT [TAB TEXT]), in their order after the page's scripts: each at the
+   first element its selector matches, a key by its name. The timers due run between
+   actions, the last action's for the horizon */
 static void page_clicks(const dom_document *d, js_vm *vm) {
-    const char *env = getenv("AMB_CLICKS");
+    const char *env = getenv("AMB_ACTIONS");
     if (!env || !*env) return;
     vector<char> all;
     append_range(all, env, strlen(env));
     size_t i = 0;
+    static const char *const kinds[] = { "click", "dblclick", "focus", "type", "key" };
+    static const uint32_t codes[] = { SCRIPT_ACT_CLICK, SCRIPT_ACT_DBLCLICK, SCRIPT_ACT_FOCUS, SCRIPT_ACT_TYPE, SCRIPT_ACT_KEY };
     while (i < len(all)) {
         size_t e = i;
         while (e < len(all) && all[e] != '\n') e++;
-        uint32_t x = e > i ? script_select(d, data(all) + i, e - i) : 0;
-        if (!x) fprintf(stderr, "ambitious: --click %.*s: no element matches\n", (int)(e - i), data(all) + i);
-        else script_click(vm, x, SCRIPT_HORIZON);
+        size_t t1 = i, t2;
+        while (t1 < e && all[t1] != '\t') t1++;
+        t2 = t1 < e ? t1 + 1 : e;
+        size_t t3 = t2;
+        while (t3 < e && all[t3] != '\t') t3++;
+        uint32_t kind = 0;
+        for (size_t k = 0; k < 5; k++) if (t1 - i == strlen(kinds[k]) && memcmp(data(all) + i, kinds[k], t1 - i) == 0) kind = codes[k];
+        const char *text = data(all) + (t3 < e ? t3 + 1 : e);
+        size_t tn = t3 < e ? e - t3 - 1 : 0;
+        double horizon = e + 1 >= len(all) ? SCRIPT_HORIZON : 0;
+        if (kind == SCRIPT_ACT_KEY) script_action(vm, kind, 0, data(all) + t2, t3 - t2, horizon);
+        else {
+            uint32_t x = t3 > t2 ? script_select(d, data(all) + t2, t3 - t2) : 0;
+            if (!x) fprintf(stderr, "ambitious: --%.*s %.*s: no element matches\n", (int)(t1 - i), data(all) + i, (int)(t3 - t2), data(all) + t2);
+            /* an action not done still lets the timers run */
+            script_action(vm, x ? kind : 0, x, text, tn, horizon);
+        }
         i = e + 1;
     }
+}
+/* the virtual time the page's timers run for before its user's actions: none when there
+   are actions, which come at load as a user's would; else the horizon */
+static double page_horizon(void) {
+    const char *e = getenv("AMB_ACTIONS");
+    return e && *e ? 0 : SCRIPT_HORIZON;
+}
+/* a user's action appended to AMB_ACTIONS: its kind, its argument, its text */
+static void add_action(const char *kind, const char *arg, const char *text) {
+    vector<char> all;
+    const char *had = getenv("AMB_ACTIONS");
+    if (had && *had) { append_range(all, had, strlen(had)); push_back(all, '\n'); }
+    append_range(all, kind, strlen(kind));
+    push_back(all, '\t');
+    append_range(all, arg, strlen(arg));
+    if (text) { push_back(all, '\t'); append_range(all, text, strlen(text)); }
+    push_back(all, 0);
+    setenv("AMB_ACTIONS", data(all), 1);
 }
 
 /* where the loader keeps cookies and cached responses (net_keep): the profile's
@@ -528,6 +568,11 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     /* the bytes decoded in the encoding sniffed from them, the type they were served as
        and whether they are a local file's (src/html/encoding.h) */
     html_parse_bytes(p, d, data(src), len(src), type, strlen(type), strncmp(final, "file:", 5) == 0);
+    /* the encoding it was decoded with, which its forms submit in */
+    if (p->encoding_len > 1) {
+        amb_span en = p->encoding[p->encoding_len - 1].name;
+        script_charset(vm, bytes_ptr(p, en), en.len);
+    }
     site_of(final, site, sizeof site);
     session_path(s, "profile.out", answer, sizeof answer);
     uint32_t denied = 0;
@@ -544,7 +589,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     /* the scripts (unless the site's are denied), the clicks asked for, then the page at rest */
     vm->host->page = pr;
     if (!(denied & (1u << NET_KIND_SCRIPT))) {
-        script_run_page(vm, SCRIPT_HORIZON);
+        script_run_page(vm, page_horizon());
         page_clicks(d, vm);
     }
     script_settle(vm);
@@ -673,6 +718,7 @@ static int cmd_bench(const char *page, int n) {
     size_t nodes = 0, boxes = 0, bytes = 0, snap_bytes = 0;
     char snap[700];
     session_path(&s, "bench.pl", snap, sizeof snap);
+    double horizon = page_horizon();
     for (int r = 0; r < n; r++) {
         PAGE_STORES;
         dom_init(&d, 1);
@@ -698,7 +744,7 @@ static int cmd_bench(const char *page, int n) {
         net_fetch_subresources(&nt, &d, ph, 0);
         double e = now_ms();
         vm.host->page = ph.index;
-        script_run_page(&vm, SCRIPT_HORIZON);
+        script_run_page(&vm, horizon);
         double e1 = now_ms();
         page_clicks(&d, &vm);
         double e2 = now_ms();
@@ -917,16 +963,19 @@ int main(int argc, char **argv) {
     while (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') {
         if (strcmp(argv[1], "--private") == 0) { setenv("AMB_PRIVATE", "1", 1); argv++; argc--; continue; }
         if (strcmp(argv[1], "--profile") == 0 && argc >= 3) { setenv("AMB_PROFILE", argv[2], 1); argv += 2; argc -= 2; continue; }
-        if (strcmp(argv[1], "--click") == 0 && argc >= 3) {
-            /* a click after the page's scripts, at the first element the selector matches */
-            vector<char> all;
-            const char *had = getenv("AMB_CLICKS");
-            if (had && *had) { append_range(all, had, strlen(had)); push_back(all, '\n'); }
-            append_range(all, argv[2], strlen(argv[2]));
-            push_back(all, 0);
-            setenv("AMB_CLICKS", data(all), 1);
+        /* a user's action after the page's scripts: at the first element a selector
+           matches, or a key by its name */
+        if ((strcmp(argv[1], "--click") == 0 || strcmp(argv[1], "--dblclick") == 0 || strcmp(argv[1], "--focus") == 0 ||
+             strcmp(argv[1], "--key") == 0) && argc >= 3) {
+            add_action(argv[1] + 2, argv[2], 0);
             argv += 2;
             argc -= 2;
+            continue;
+        }
+        if (strcmp(argv[1], "--type") == 0 && argc >= 4) {
+            add_action("type", argv[2], argv[3]);
+            argv += 3;
+            argc -= 3;
             continue;
         }
         break;
@@ -943,12 +992,7 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "js") == 0) return cmd_js(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "script") == 0) return cmd_script(argv[2]);
     if (argc >= 4 && strcmp(argv[1], "click") == 0) {
-        vector<char> all;
-        const char *had = getenv("AMB_CLICKS");
-        if (had && *had) { append_range(all, had, strlen(had)); push_back(all, '\n'); }
-        append_range(all, argv[3], strlen(argv[3]));
-        push_back(all, 0);
-        setenv("AMB_CLICKS", data(all), 1);
+        add_action("click", argv[3], 0);
         return cmd_script(argv[2]);
     }
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
