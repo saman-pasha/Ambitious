@@ -151,7 +151,7 @@ static void mark_roots(js_vm *vm, gc_state *g) {
         vm->aggregate_error_proto, vm->async_iterator_proto, vm->async_generator_proto, vm->eval_fn, vm->weakmap_proto,
         vm->weakset_proto, vm->weakref_proto, vm->finreg_proto, vm->arraybuffer_proto, vm->typedarray_proto,
         vm->dataview_proto, vm->textenc_proto, vm->textdec_proto, vm->bigint_proto, vm->error_ctor, vm->type_error_ctor,
-        vm->range_error_ctor, vm->syntax_error_ctor, vm->reference_error_ctor, vm->eval_error_proto, vm->root_proto, vm->throw_te, vm->array_values, vm->pr_species_acc, vm->pr_species_get,
+        vm->range_error_ctor, vm->syntax_error_ctor, vm->reference_error_ctor, vm->eval_error_proto, vm->root_proto, vm->throw_te, vm->uri_error_proto, vm->array_values, vm->pr_species_acc, vm->pr_species_get,
         vm->array_iter_proto, vm->map_iter_proto, vm->set_iter_proto, vm->string_iter_proto, vm->regexp_iter_proto };
     for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) mark_obj(vm, g, named[i]);
     for (uint32_t i = 0; i < JTA_N; i++) mark_obj(vm, g, vm->ta_protos[i]);

@@ -425,6 +425,7 @@ typedef struct js_vm {
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t throw_te;                /* %ThrowTypeError%: an unmapped arguments object's callee, both its get and its set */
+    uint32_t uri_error_proto;         /* URIError.prototype (the URI functions' errors) */
     uint32_t array_values;            /* %Array.prototype.values%: an arguments object's Symbol.iterator */
     /* the iterators' prototypes, each its kind's next and Symbol.toStringTag: arrays', maps', sets', strings',
        matchAll's */
@@ -562,7 +563,7 @@ void js_run_jobs(js_vm *vm);
 enum { JRE_CTOR, JRE_EXEC, JRE_TEST, JRE_TOSTRING, JRE_SOURCE, JRE_FLAGS, JRE_GLOBAL, JRE_IGNORECASE, JRE_MULTILINE,
        JRE_DOTALL, JRE_UNICODE, JRE_UNICODESETS, JRE_STICKY, JRE_HASINDICES, JRE_MATCH, JRE_MATCHALL, JRE_REPLACE,
        JRE_SEARCH, JRE_SPLIT, JRE_SP_MATCH, JRE_SP_MATCHALL, JRE_SP_REPLACE, JRE_SP_REPLACEALL, JRE_SP_SEARCH,
-       JRE_SP_SPLIT, JRE_N };
+       JRE_SP_SPLIT, JRE_COMPILE, JRE_N };
 uint32_t js_re_compile(js_vm *vm, uint32_t src, uint32_t flags);
 int js_re_check(js_vm *vm, uint32_t src, uint32_t flags_str, uint32_t *re, vector<char> *err);
 jv js_re_object(js_vm *vm, uint32_t re);
@@ -605,7 +606,9 @@ enum { JTN_AB, JTN_AB_ISVIEW, JTN_AB_BYTELENGTH, JTN_AB_SLICE, JTN_AB_RESIZABLE,
        JTN_DV, JTN_DV_BUFFER, JTN_DV_BYTELENGTH, JTN_DV_BYTEOFFSET, JTN_DV_GET, JTN_DV_SET,
        JTN_TE, JTN_TD, JTN_TE_ENCODING, JTN_TD_ENCODING, JTN_TD_FATAL, JTN_TD_IGNOREBOM, JTN_TE_ENCODE,
        JTN_TE_ENCODEINTO, JTN_TD_DECODE,
-       JTN_AB_RESIZE, JTN_AB_TRANSFER, JTN_AB_TRANSFER_FIXED, JTN_AB_DETACHED, JTN_SHARED, JTN_N };
+       JTN_AB_RESIZE, JTN_AB_TRANSFER, JTN_AB_TRANSFER_FIXED, JTN_AB_DETACHED, JTN_SHARED,
+       JTN_AT_ADD, JTN_AT_AND, JTN_AT_CMPXCHG, JTN_AT_EXCHANGE, JTN_AT_ISLOCKFREE, JTN_AT_LOAD, JTN_AT_NOTIFY, JTN_AT_OR,
+       JTN_AT_STORE, JTN_AT_SUB, JTN_AT_WAIT, JTN_AT_WAITASYNC, JTN_AT_XOR, JTN_N };
 jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_typed_init(js_vm *vm, uint32_t first);
 /* the methods the typed arrays share with Array's (builtins.c puts them on %TypedArray%.prototype)

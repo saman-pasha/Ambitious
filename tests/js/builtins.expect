@@ -1,0 +1,71 @@
+eURIC a%20b%26c%3Dd%2F%C3%A9%3F%23%F0%9F%98%80~!*'()-_.
+eURI http://x.y/a%20b?c=d&e#f%20%C3%A9;,+$@:
+eURI lone URIError: URI malformed
+eURI lone low URIError: URI malformed
+dURIC A €😀;
+dURI reserved A%3B%2F%3F%23%%26
+dURI bad URIError: URI malformed
+dURI bad2 URIError: URI malformed
+dURI bad3 URIError: URI malformed
+dURI bad4 URIError: URI malformed
+dURI bad5 URIError: URI malformed
+dURI lower €
+URIError function,URIError,true,URIError,true
+escape a%20b+c@*_-./%E9%u0100%uD83D%uDE00%25
+unescape AB😀%zz%u12%4
+lens 1,1,1,1,1,1
+union 1,2,3,4
+intersection 2,3
+difference 1
+symdiff 1,4
+subset false,true,true,true
+setlike 1,2,3,9
+setlike map 2
+setlike bad TypeError: The .size property is NaN
+setlike bad size TypeError: The .size property is NaN
+setlike neg size RangeError: '-1' is an invalid size
+setlike no has TypeError: string "has" is not a function
+setlike no keys TypeError: string "keys" is not a function
+setlike prim TypeError: Set.prototype.union argument must be an object
+inter order 3,2,1 3,2,1
+neg zero false
+set methods len 1,1,1,1,1,1,1
+subclass result false
+toReversed 2,1,3 3,1,2
+toSorted 1,2,3 3,2,1 3,1,2
+toSorted bad TypeError: The comparison function must be either a function or undefined: 5
+toSpliced 3,x,y,2 | 3 | 3,1,2 | 3,1,z,2
+with a,1,2 | 3,1,b
+with bad RangeError: Invalid index : 3
+with bad neg RangeError: Invalid index : -4
+holes [[1,null],[1,null],[null,2],[null,1]]
+generic [["b","a"],["b"]]
+toLocaleString 1,234.5,,,1/1/1970, 12:00:00 AM,x,L
+change lens 0,1,2,2,0
+unscopables true,true,true,
+wellformed true:"ab",false:"a�",false:"�b",true:"😀"
+html <a name="a&quot;b">x</a><big>x</big><blink>x</blink><b>x</b><tt>x</tt><font color="a&quot;b">x</font><font size="a&quot;b">x</font><i>x</i><a href="a&quot;b">x</a><small>x</small><strike>x</strike><sub>x</sub><sup>x</sup>
+html null TypeError: String.prototype.bold called on null or undefined
+html lens 1,0,1,1
+toExponential 1.23456e+2 1.23e+2 1.5e-4 3e+0 1.4e+0 0e+0 -1.500e-7 1e+21 5e-324 1.79769e+308 NaN Infinity 3e+1 5e-1 1.3e+0
+toExponential bad RangeError: toExponential() argument must be between 0 and 100
+toExponential bad nan NaN
+toExponential recv TypeError: Number.prototype.toExponential requires that 'this' be a Number
+acosh etc 0 1.3169578969248166 NaN 0.881373587019543 0 0.5493061443340548 Infinity -Infinity NaN 691.4686750787736 23.7189981105004 1e-10
+defineGetter G,5,{"enumerable":true,"configurable":true},function,function,,true
+defineGetter bad TypeError: Object.prototype.__defineGetter__: Expecting function
+defineSetter bad TypeError: Object.prototype.__defineSetter__: Expecting function
+defineGetter null TypeError: Cannot convert undefined or null to object
+lookup null TypeError: Cannot convert undefined or null to object
+dg lens 2,1
+compile true,b,i,0,true
+compile re cm
+compile re flags TypeError: Cannot supply flags when constructing one RegExp from another
+compile bad SyntaxError: Invalid regular expression: /(/: Unterminated group
+compile none (?:)|
+atomics add,and,compareExchange,exchange,isLockFree,load,notify,or,store,sub,wait,waitAsync,xor
+atomics ops 0,5,5,3,1,7,0,9,7,4,4,7,0,true,false,0
+atomics bad TypeError: [object Float64Array] is not an integer typed array.
+atomics wait TypeError: [object Int32Array] is not a shared typed array.
+atomics range RangeError: Invalid atomic access index
+atomics tag [object Atomics]

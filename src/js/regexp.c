@@ -2753,6 +2753,38 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         }
         return re_object(vm, re, proto);
     }
+    case JRE_COMPILE: {
+        /* Annex B: the RegExp made again in place from a pattern (a RegExp's own source and flags) and flags */
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_REGEXP) { re_this(vm, thisv, "RegExp.prototype.compile"); return JV_HOLE; }
+        int is_re = jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP;
+        uint32_t src, flags = 0;
+        if (is_re) {
+            if (a1 != JV_UNDEF) return js_throw_msg(vm, vm->type_error_proto, "Cannot supply flags when constructing one RegExp from another");
+            js_regex r = vm->regexes[vm->objs[jv_idx(a0)].a];
+            src = r.source;
+            flags = r.flags;
+        } else {
+            src = a0 == JV_UNDEF ? A_EMPTY : js_to_string(vm, a0);
+            if (!src) return JV_HOLE;
+            uint32_t fs = a1 == JV_UNDEF ? A_EMPTY : js_to_string(vm, a1);
+            if (!fs) return JV_HOLE;
+            flags = re_flags_of(vm, fs);
+            if (flags == RE_INF) {
+                vector<char> m;
+                const char *pre = "Invalid flags supplied to RegExp constructor '";
+                append_range(m, pre, strlen(pre));
+                js_str_to_utf8(vm, fs, &m);
+                push_back(m, '\'');
+                push_back(m, 0);
+                return js_throw_msg(vm, vm->syntax_error_proto, data(m));
+            }
+        }
+        uint32_t re = js_re_compile(vm, src, flags);
+        if (!re) return JV_HOLE;
+        vm->objs[jv_idx(thisv)].a = re;
+        js_set(vm, thisv, A_LASTINDEX, jv_num(0));
+        return vm->throwing ? JV_HOLE : thisv;
+    }
     case JRE_EXEC: case JRE_TEST: {
         /* test of an object that is no RegExp fails in the exec it falls back to, as V8's does */
         uint32_t re = re_this(vm, thisv, which == JRE_EXEC || jv_is_obj(thisv) ? "RegExp.prototype.exec" : "RegExp.prototype.test");
@@ -2950,6 +2982,10 @@ void js_re_init(js_vm *vm, uint32_t first) {
     for (uint32_t i = 0; i < 3; i++) {
         uint32_t at = js_atom_ascii(vm, fns[i]);
         js_define(vm, rp, at, jv_obj(js_native_new(vm, first + fids[i], at, i == 2 ? 0 : 1)), JS_SHAPE_HIDDEN);
+    }
+    {
+        uint32_t ca = js_atom_ascii(vm, "compile");
+        js_define(vm, rp, ca, jv_obj(js_native_new(vm, first + JRE_COMPILE, ca, 2)), JS_SHAPE_HIDDEN);
     }
     static const char *const gets[] = { "source", "flags", "global", "ignoreCase", "multiline", "dotAll", "unicode", "unicodeSets", "sticky", "hasIndices" };
     static const uint32_t gids[] = { JRE_SOURCE, JRE_FLAGS, JRE_GLOBAL, JRE_IGNORECASE, JRE_MULTILINE, JRE_DOTALL, JRE_UNICODE, JRE_UNICODESETS, JRE_STICKY, JRE_HASINDICES };

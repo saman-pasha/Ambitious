@@ -838,7 +838,113 @@ static const char *const ta_shared[] = { "forEach", "every", "some", "find", "fi
                                          "toLocaleString", "values" };
 #define TA_NSHARED 18
 
+/* ---- Atomics (ECMA-262 25.4), over the buffers this engine has: none is shared, so an operation is the plain read and
+   write it is there, notify wakes no one and wait is V8's TypeError ---- */
+
+/* "<the value's text><what>": V8's TypeError for an Atomics operation's array */
+static jv atomics_refused(js_vm *vm, jv v, const char *what) {
+    vector<char> m;
+    recv_text(vm, v, &m);
+    append_range(m, what, strlen(what));
+    push_back(m, 0);
+    return js_throw_msg(vm, vm->type_error_proto, data(m));
+}
+/* the typed array and the index an operation reads (ValidateIntegerTypedArray, ValidateAtomicAccess): 0 with V8's
+   error; waitable, Int32Array or BigInt64Array alone (wait's and notify's) */
+static int atomics_target(js_vm *vm, jv ta, jv index, int waitable, uint32_t *o, uint32_t *idx) {
+    int ok = jv_is_obj(ta) && vm->objs[jv_idx(ta)].kind == JK_TYPEDARRAY;
+    uint32_t t = ok ? ta_type(vm, jv_idx(ta)) : 0;
+    if (ok) ok = waitable ? t == JTA_INT32 || t == JTA_BIGINT64 : t != JTA_UINT8C && t != JTA_FLOAT32 && t != JTA_FLOAT64;
+    if (!ok) { atomics_refused(vm, ta, waitable ? " is not an int32 or BigInt64 typed array." : " is not an integer typed array."); return 0; }
+    *o = jv_idx(ta);
+    double num;
+    uint32_t i;
+    if (!to_index_num(vm, index, &i, &num, "Invalid atomic access index")) return 0;
+    if (vw_oob(vm, *o)) { ta_detached(vm, "Atomics"); return 0; }
+    if (num >= vm->objs[*o].b) { js_throw_msg(vm, vm->range_error_proto, "Invalid atomic access index"); return 0; }
+    *idx = i;
+    return 1;
+}
+/* an integer's low 32 bits */
+static uint32_t atomics_bits(double x) {
+    double m = fmod(x, 4294967296.0);
+    if (m < 0) m += 4294967296.0;
+    return (uint32_t)m;
+}
+static jv atomics_op(js_vm *vm, uint32_t which, uint32_t args, uint32_t argc) {
+    jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1), a2 = js_arg(vm, args, argc, 2), a3 = js_arg(vm, args, argc, 3);
+    if (which == JTN_AT_ISLOCKFREE) {
+        double n = js_to_number(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        return jv_bool(n == 1 || n == 2 || n == 4 || n == 8);
+    }
+    uint32_t o, i;
+    if (which == JTN_AT_WAIT || which == JTN_AT_WAITASYNC) {
+        int ok = jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_TYPEDARRAY &&
+                 (ta_type(vm, jv_idx(a0)) == JTA_INT32 || ta_type(vm, jv_idx(a0)) == JTA_BIGINT64);
+        return atomics_refused(vm, a0, ok ? " is not a shared typed array." : " is not an int32 or BigInt64 typed array.");
+    }
+    if (!atomics_target(vm, a0, a1, which == JTN_AT_NOTIFY, &o, &i)) return JV_HOLE;
+    if (which == JTN_AT_NOTIFY) {
+        /* the count read, no one waiting on a buffer that is not shared */
+        if (a2 != JV_UNDEF) { js_to_number(vm, a2); if (vm->throwing) return JV_HOLE; }
+        return jv_num(0);
+    }
+    if (which == JTN_AT_LOAD) return js_ta_get(vm, o, i);
+    uint32_t t = ta_type(vm, o);
+    if (t >= JTA_BIGINT64) {
+        jv bv = js_to_bigint(vm, a2);
+        if (vm->throwing) return JV_HOLE;
+        uint64_t v = js_big_to_u64(vm, bv), rep = 0;
+        if (which == JTN_AT_CMPXCHG) {
+            jv rv = js_to_bigint(vm, a3);
+            if (vm->throwing) return JV_HOLE;
+            rep = js_big_to_u64(vm, rv);
+        }
+        if (vw_oob(vm, o) || i >= vm->objs[o].b) return ta_detached(vm, "Atomics");
+        uint32_t p = ta_at(vm, o, i);
+        uint64_t old = ta_read64(vm, p, 1), nw = old;
+        switch (which) {
+        case JTN_AT_ADD: nw = old + v; break;
+        case JTN_AT_SUB: nw = old - v; break;
+        case JTN_AT_AND: nw = old & v; break;
+        case JTN_AT_OR: nw = old | v; break;
+        case JTN_AT_XOR: nw = old ^ v; break;
+        case JTN_AT_CMPXCHG: if (old == v) nw = rep; break;
+        default: nw = v; break;
+        }
+        ta_write64(vm, p, nw, 1);
+        return which == JTN_AT_STORE ? bv : ta_big_of(vm, t, old);
+    }
+    /* the integers ToIntegerOrInfinity makes, the element's bits computed and written back */
+    double v = js_to_number(vm, a2), rep = 0;
+    if (vm->throwing) return JV_HOLE;
+    v = v != v ? 0 : trunc(v) + 0.0;
+    if (which == JTN_AT_CMPXCHG) {
+        rep = js_to_number(vm, a3);
+        if (vm->throwing) return JV_HOLE;
+        rep = rep != rep ? 0 : trunc(rep);
+    }
+    if (vw_oob(vm, o) || i >= vm->objs[o].b) return ta_detached(vm, "Atomics");
+    uint32_t p = ta_at(vm, o, i);
+    double old = ta_read(vm, t, p, 1);
+    uint32_t ob = atomics_bits(old), vb = atomics_bits(v), nb = ob;
+    uint32_t mask = ta_size[t] == 4 ? 0xFFFFFFFFu : ((1u << (8 * ta_size[t])) - 1u);
+    switch (which) {
+    case JTN_AT_ADD: nb = ob + vb; break;
+    case JTN_AT_SUB: nb = ob - vb; break;
+    case JTN_AT_AND: nb = ob & vb; break;
+    case JTN_AT_OR: nb = ob | vb; break;
+    case JTN_AT_XOR: nb = ob ^ vb; break;
+    case JTN_AT_CMPXCHG: if ((ob & mask) == (vb & mask)) nb = atomics_bits(rep); break;
+    default: nb = vb; break;
+    }
+    ta_write(vm, t, p, (double)nb, 1);
+    return which == JTN_AT_STORE ? jv_num(v) : jv_num(old);
+}
+
 jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
+    if (which >= JTN_AT_ADD && which <= JTN_AT_XOR) return atomics_op(vm, which, args, argc);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1), a2 = js_arg(vm, args, argc, 2);
     int constructing = newt != JV_UNDEF && newt != JV_HOLE;
     switch (which) {
@@ -1374,6 +1480,16 @@ static uint32_t td_ctor(js_vm *vm, const char *name, uint32_t id, uint32_t nargs
    (forEach, join, indexOf and their like) are builtins.c's, put on %TypedArray%.prototype there */
 void js_typed_init(js_vm *vm, uint32_t first) {
     vm->arraybuffer_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    {
+        /* Atomics: a plain object of functions, tagged */
+        uint32_t at = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+        js_define(vm, vm->global, js_atom_ascii(vm, "Atomics"), jv_obj(at), JS_SHAPE_HIDDEN);
+        static const char *const an[] = { "add", "and", "compareExchange", "exchange", "isLockFree", "load", "notify", "or", "store", "sub",
+                                           "wait", "waitAsync", "xor" };
+        static const uint32_t al[] = { 3, 3, 4, 3, 1, 2, 3, 3, 3, 3, 4, 4, 3 };
+        for (uint32_t i = 0; i < 13; i++) td_def(vm, at, an[i], first + JTN_AT_ADD + i, al[i]);
+        js_define(vm, at, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Atomics")), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
+    }
     uint32_t ab = td_ctor(vm, "ArrayBuffer", first + JTN_AB, 1, vm->arraybuffer_proto);
     td_def(vm, ab, "isView", first + JTN_AB_ISVIEW, 1);
     td_get(vm, vm->arraybuffer_proto, "byteLength", first + JTN_AB_BYTELENGTH);

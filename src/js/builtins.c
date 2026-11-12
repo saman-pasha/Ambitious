@@ -54,7 +54,8 @@ enum {
     N_SET_TIMEOUT, N_SET_INTERVAL, N_CLEAR_TIMEOUT, N_QUEUE_MICROTASK,
     /* Map, Set, RegExp, iterators */
     N_MP_GET, N_MP_SET, N_MP_HAS, N_MP_DELETE, N_MP_CLEAR, N_MP_SIZE, N_MP_FOREACH, N_MP_KEYS, N_MP_VALUES, N_MP_ENTRIES,
-    N_SETP_ADD, N_SETP_FOREACH, N_SETP_VALUES, N_SETP_ENTRIES, N_SETP_HAS, N_SETP_DELETE, N_SETP_CLEAR, N_SETP_SIZE, N_ITP_NEXT,
+    N_SETP_ADD, N_SETP_FOREACH, N_SETP_VALUES, N_SETP_ENTRIES, N_SETP_HAS, N_SETP_DELETE, N_SETP_CLEAR, N_SETP_SIZE,
+    N_SETP_UNION, N_SETP_INTERSECTION, N_SETP_DIFFERENCE, N_SETP_SYMDIFF, N_SETP_ISSUBSET, N_SETP_ISSUPERSET, N_SETP_ISDISJOINT, N_ITP_NEXT,
     /* Symbol, generators, promises */
     N_SYM_FOR, N_SYM_KEYFOR, N_SYMP_TOSTRING, N_SYMP_VALUEOF, N_SYMP_DESC, N_OBJ_GETOWNSYMS, N_ITP_SELF,
     N_GEN_NEXT, N_GEN_RETURN, N_GEN_THROW,
@@ -65,6 +66,11 @@ enum {
     N_OBJ_HASOWN, N_OBJ_ISEXT, N_OBJ_ISSEALED, N_OBJ_GETOWNDESCS, N_OBJ_GROUPBY, N_MAP_GROUPBY,
     N_PR_WITHRESOLVERS, N_PR_CAP_EXEC, N_SPECIES, N_THROW_TE, N_OP_PROTO_GET, N_OP_PROTO_SET,
     N_MIT_NEXT, N_SIT_NEXT, N_STIT_NEXT, N_RSIT_NEXT, N_SP_VALUEOF,
+    N_ENCODE_URI, N_ENCODE_URIC, N_DECODE_URI, N_DECODE_URIC, N_ESCAPE, N_UNESCAPE, N_URI_ERROR,
+    N_AP_TOREVERSED, N_AP_TOSORTED, N_AP_TOSPLICED, N_AP_WITH, N_AP_TOLOCALE, N_SP_ISWELLFORMED, N_SP_TOWELLFORMED,
+    N_SP_ANCHOR, N_SP_BIG, N_SP_BLINK, N_SP_BOLD, N_SP_FIXED, N_SP_FONTCOLOR, N_SP_FONTSIZE, N_SP_ITALICS, N_SP_LINK, N_SP_SMALL,
+    N_SP_STRIKE, N_SP_SUB, N_SP_SUP, N_NP_TOEXPONENTIAL, N_M_ACOSH, N_M_ASINH, N_M_ATANH, N_OP_DEFGETTER, N_OP_DEFSETTER,
+    N_OP_LOOKUPGETTER, N_OP_LOOKUPSETTER,
     /* RegExp's natives (src/js/regexp.c), JRE_N of them; Proxy's, Reflect's and the weak
        collections' (src/js/proxy.c), JPX_N */
     N_RE_FIRST,
@@ -1010,7 +1016,9 @@ static uint32_t this_coll(js_vm *vm, jv thisv, uint32_t kind, uint32_t id) {
     static const char *const names[] = { "Map.prototype.get", "Map.prototype.set", "Map.prototype.has", "Map.prototype.delete",
         "Map.prototype.clear", "get Map.prototype.size", "Map.prototype.forEach", "Map.prototype.keys", "Map.prototype.values",
         "Map.prototype.entries", "Set.prototype.add", "Set.prototype.forEach", "Set.prototype.values", "Set.prototype.entries",
-        "Set.prototype.has", "Set.prototype.delete", "Set.prototype.clear", "get Set.prototype.size" };
+        "Set.prototype.has", "Set.prototype.delete", "Set.prototype.clear", "get Set.prototype.size", "Set.prototype.union",
+        "Set.prototype.intersection", "Set.prototype.difference", "Set.prototype.symmetricDifference", "Set.prototype.isSubsetOf",
+        "Set.prototype.isSupersetOf", "Set.prototype.isDisjointFrom" };
     char pre[96];
     snprintf(pre, sizeof pre, "Method %s called on incompatible receiver ", names[id - N_MP_GET]);
     value_error(vm, pre, thisv, "");
@@ -2083,6 +2091,402 @@ static void promise_agg_done(js_vm *vm, uint32_t agg) {
     } else promise_target_settle(vm, vm->objs[agg].x, 0, jv_obj(vm->objs[agg].a));
 }
 
+/* ---- the URI functions (ECMA-262 19.2.6) and escape/unescape (B.2.1) ---- */
+
+static jv uri_malformed(js_vm *vm) {
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->uri_error_proto, js_str_ascii(vm, "URI malformed"))));
+}
+/* a unit the encoding keeps: an alphanumeric or a mark, and for encodeURI the reserved and '#' */
+static int uri_kept(uint16_t c, int full) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return 1;
+    if (c && c < 128 && strchr("-_.!~*'()", (int)c)) return 1;
+    return full && c && c < 128 && strchr(";/?:@&=+$,#", (int)c) != 0;
+}
+static jv uri_encode(js_vm *vm, uint32_t s, int full) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len;
+    static const char hx[] = "0123456789ABCDEF";
+    vector<uint16_t> out;
+    for (uint32_t i = 0; i < n; i++) {
+        uint16_t c = vm->units[vm->strs[s].off + i];
+        if (uri_kept(c, full)) { push_back(out, c); continue; }
+        uint32_t cp = c;
+        if (c >= 0xDC00 && c <= 0xDFFF) return uri_malformed(vm);
+        if (c >= 0xD800 && c <= 0xDBFF) {
+            uint16_t d = i + 1 < n ? vm->units[vm->strs[s].off + i + 1] : 0;
+            if (d < 0xDC00 || d > 0xDFFF) return uri_malformed(vm);
+            cp = 0x10000 + ((uint32_t)(c - 0xD800) << 10) + (uint32_t)(d - 0xDC00);
+            i++;
+        }
+        uint8_t b[4];
+        int k = 0;
+        if (cp < 0x80) b[k++] = (uint8_t)cp;
+        else if (cp < 0x800) { b[k++] = (uint8_t)(0xC0 | cp >> 6); b[k++] = (uint8_t)(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { b[k++] = (uint8_t)(0xE0 | cp >> 12); b[k++] = (uint8_t)(0x80 | (cp >> 6 & 0x3F)); b[k++] = (uint8_t)(0x80 | (cp & 0x3F)); }
+        else {
+            b[k++] = (uint8_t)(0xF0 | cp >> 18); b[k++] = (uint8_t)(0x80 | (cp >> 12 & 0x3F));
+            b[k++] = (uint8_t)(0x80 | (cp >> 6 & 0x3F)); b[k++] = (uint8_t)(0x80 | (cp & 0x3F));
+        }
+        for (int q = 0; q < k; q++) {
+            push_back(out, (uint16_t)'%');
+            push_back(out, (uint16_t)hx[b[q] >> 4]);
+            push_back(out, (uint16_t)hx[b[q] & 15]);
+        }
+    }
+    return jv_str(js_str_new(vm, data(out), len(out)));
+}
+static int uri_hex(uint16_t c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+/* the byte of the escape %XX at i of s (-1: none) */
+static int uri_byte(js_vm *vm, uint32_t s, uint32_t n, uint32_t i) {
+    if (i + 2 >= n) return -1;
+    if (vm->units[vm->strs[s].off + i] != '%') return -1;
+    int h = uri_hex(vm->units[vm->strs[s].off + i + 1]), l = uri_hex(vm->units[vm->strs[s].off + i + 2]);
+    return h < 0 || l < 0 ? -1 : h * 16 + l;
+}
+static jv uri_decode(js_vm *vm, uint32_t s, int full) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len;
+    vector<uint16_t> out;
+    for (uint32_t k = 0; k < n; k++) {
+        uint16_t c = vm->units[vm->strs[s].off + k];
+        if (c != '%') { push_back(out, c); continue; }
+        uint32_t start = k;
+        if (k + 2 >= n) return uri_malformed(vm);
+        int b = uri_byte(vm, s, n, k);
+        if (b < 0) return uri_malformed(vm);
+        k += 2;
+        if (b < 0x80) {
+            /* decodeURI keeps a reserved character's escape as it was */
+            if (full && strchr(";/?:@&=+$,#", b)) for (uint32_t q = start; q <= k; q++) push_back(out, vm->units[vm->strs[s].off + q]);
+            else push_back(out, (uint16_t)b);
+            continue;
+        }
+        int nb = (b & 0xE0) == 0xC0 ? 2 : (b & 0xF0) == 0xE0 ? 3 : (b & 0xF8) == 0xF0 ? 4 : 0;
+        if (!nb) return uri_malformed(vm);
+        uint32_t cp = (uint32_t)(b & (0xFF >> (nb + 1)));
+        if (k + 3 * (uint32_t)(nb - 1) >= n) return uri_malformed(vm);
+        for (int j = 1; j < nb; j++) {
+            k++;
+            int bb = uri_byte(vm, s, n, k);
+            if (bb < 0 || (bb & 0xC0) != 0x80) return uri_malformed(vm);
+            k += 2;
+            cp = cp << 6 | (uint32_t)(bb & 0x3F);
+        }
+        /* no overlong form, no surrogate, nothing past U+10FFFF */
+        uint32_t least = nb == 2 ? 0x80 : nb == 3 ? 0x800 : 0x10000;
+        if (cp < least || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return uri_malformed(vm);
+        if (cp < 0x10000) push_back(out, (uint16_t)cp);
+        else { cp -= 0x10000; push_back(out, (uint16_t)(0xD800 + (cp >> 10))); push_back(out, (uint16_t)(0xDC00 + (cp & 0x3FF))); }
+    }
+    return jv_str(js_str_new(vm, data(out), len(out)));
+}
+static jv js_escape(js_vm *vm, uint32_t s) {
+    js_str_flatten(vm, s);
+    static const char hx[] = "0123456789ABCDEF";
+    vector<uint16_t> out;
+    for (uint32_t i = 0; i < vm->strs[s].len; i++) {
+        uint16_t c = vm->units[vm->strs[s].off + i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c && c < 128 && strchr("@*_+-./", (int)c))) push_back(out, c);
+        else if (c < 256) { push_back(out, (uint16_t)'%'); push_back(out, (uint16_t)hx[c >> 4]); push_back(out, (uint16_t)hx[c & 15]); }
+        else {
+            push_back(out, (uint16_t)'%');
+            push_back(out, (uint16_t)'u');
+            for (int sh = 12; sh >= 0; sh -= 4) push_back(out, (uint16_t)hx[(c >> sh) & 15]);
+        }
+    }
+    return jv_str(js_str_new(vm, data(out), len(out)));
+}
+static jv js_unescape(js_vm *vm, uint32_t s) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len;
+    vector<uint16_t> out;
+    for (uint32_t k = 0; k < n; k++) {
+        uint16_t c = vm->units[vm->strs[s].off + k];
+        if (c == '%') {
+            const uint16_t *u = data(vm->units) + vm->strs[s].off;
+            if (k + 6 <= n && u[k + 1] == 'u' && uri_hex(u[k + 2]) >= 0 && uri_hex(u[k + 3]) >= 0 && uri_hex(u[k + 4]) >= 0 && uri_hex(u[k + 5]) >= 0) {
+                c = (uint16_t)(uri_hex(u[k + 2]) << 12 | uri_hex(u[k + 3]) << 8 | uri_hex(u[k + 4]) << 4 | uri_hex(u[k + 5]));
+                k += 5;
+            } else if (k + 3 <= n && uri_hex(u[k + 1]) >= 0 && uri_hex(u[k + 2]) >= 0) {
+                c = (uint16_t)(uri_hex(u[k + 1]) << 4 | uri_hex(u[k + 2]));
+                k += 2;
+            }
+        }
+        push_back(out, c);
+    }
+    return jv_str(js_str_new(vm, data(out), len(out)));
+}
+
+/* ---- the Set methods of ES2025: an argument read as a set-like record (its size, has and keys) ---- */
+
+typedef struct setrec { jv obj, has, keys; double size; } setrec;
+static int set_record(js_vm *vm, jv other, const char *method, setrec *r) {
+    if (!jv_is_obj(other)) {
+        char m[96];
+        snprintf(m, sizeof m, "%s argument must be an object", method);
+        js_throw_msg(vm, vm->type_error_proto, m);
+        return 0;
+    }
+    jv rs = js_get(vm, other, A_SIZE);
+    if (vm->throwing) return 0;
+    double ns = js_to_number(vm, rs);
+    if (vm->throwing) return 0;
+    if (ns != ns) { js_throw_msg(vm, vm->type_error_proto, "The .size property is NaN"); return 0; }
+    double is = trunc(ns);
+    if (is < 0) {
+        char m[96];
+        js_num_format(is, m, 40);
+        char m2[128];
+        snprintf(m2, sizeof m2, "'%s' is an invalid size", m);
+        js_throw_msg(vm, vm->range_error_proto, m2);
+        return 0;
+    }
+    r->obj = other;
+    r->size = is;
+    r->has = js_get(vm, other, js_atom_ascii(vm, "has"));
+    if (vm->throwing) return 0;
+    if (!js_is_callable(vm, r->has)) { js_throw_msg(vm, vm->type_error_proto, "string \"has\" is not a function"); return 0; }
+    r->keys = js_get(vm, other, js_atom_ascii(vm, "keys"));
+    if (vm->throwing) return 0;
+    if (!js_is_callable(vm, r->keys)) { js_throw_msg(vm, vm->type_error_proto, "string \"keys\" is not a function"); return 0; }
+    return 1;
+}
+/* the set-like's keys(): its iterator and that iterator's next (0 with a TypeError thrown) */
+static int set_keys(js_vm *vm, const setrec *r, jv *it, jv *next) {
+    *it = js_call(vm, r->keys, r->obj, 0, 0);
+    if (vm->throwing) return 0;
+    if (!jv_is_obj(*it)) { value_error(vm, "", *it, " is not an object"); return 0; }
+    *next = js_get(vm, *it, A_NEXT);
+    if (vm->throwing) return 0;
+    if (!js_is_callable(vm, *next)) { js_not_function(vm, *next); return 0; }
+    return 1;
+}
+/* a step of it: 1 its value in *out (-0 made +0), 0 done, -1 thrown */
+static int set_step(js_vm *vm, jv it, jv next, jv *out) {
+    jv r = js_call(vm, next, it, 0, 0);
+    if (vm->throwing) return -1;
+    if (!jv_is_obj(r)) { value_error(vm, "Iterator result ", r, " is not an object"); return -1; }
+    jv d = js_get(vm, r, A_DONE);
+    if (vm->throwing) return -1;
+    if (js_truthy(vm, d)) return 0;
+    *out = js_get(vm, r, A_VALUE);
+    if (vm->throwing) return -1;
+    if (jv_is_num(*out) && jv_dbl(*out) == 0) *out = jv_num(0);
+    return 1;
+}
+/* IteratorClose of a set-like's keys, what it throws its own */
+static void set_close(js_vm *vm, jv it) {
+    jv rf = js_get(vm, it, A_RETURN);
+    if (vm->throwing || !js_is_callable(vm, rf)) return;
+    js_call(vm, rf, it, 0, 0);
+}
+/* a copy of the set c's elements in order, as a new Set */
+static uint32_t set_copy(js_vm *vm, uint32_t c) {
+    uint32_t r = coll_new(vm, JK_SET, vm->set_proto);
+    uint32_t arr = vm->objs[c].a;
+    for (uint32_t i = 0; i < vm->objs[arr].b; i++) {
+        jv k = vm->slots[vm->objs[arr].a + i];
+        if (k != JV_HOLE) coll_append(vm, r, k, JV_UNDEF);
+    }
+    return r;
+}
+static void set_drop(js_vm *vm, uint32_t c, jv k) {
+    int64_t at_i = coll_find(vm, c, k);
+    if (at_i >= 0) coll_remove(vm, c, k, (uint32_t)at_i);
+}
+static void set_add(js_vm *vm, uint32_t c, jv k) {
+    if (coll_find(vm, c, k) < 0) coll_append(vm, c, k, JV_UNDEF);
+}
+/* the set c's element at its i-th place (JV_HOLE: none), its places read live as the standard's loops read them */
+static jv set_at(js_vm *vm, uint32_t c, uint32_t i) {
+    uint32_t arr = vm->objs[c].a;
+    return i < vm->objs[arr].b ? vm->slots[vm->objs[arr].a + i] : JV_UNDEF;
+}
+static uint32_t set_places(js_vm *vm, uint32_t c) { return vm->objs[vm->objs[c].a].b; }
+
+static jv set_method(js_vm *vm, uint32_t id, jv thisv, jv other) {
+    static const char *const sm[] = { "Set.prototype.union", "Set.prototype.intersection", "Set.prototype.difference",
+        "Set.prototype.symmetricDifference", "Set.prototype.isSubsetOf", "Set.prototype.isSupersetOf", "Set.prototype.isDisjointFrom" };
+    uint32_t c = this_coll(vm, thisv, JK_SET, id);
+    if (!c) return JV_HOLE;
+    setrec r;
+    if (!set_record(vm, other, sm[id - N_SETP_UNION], &r)) return JV_HOLE;
+    double this_size = vm->objs[c].b;
+    jv it, next, v;
+    int st;
+    if (id == N_SETP_UNION || id == N_SETP_SYMDIFF) {
+        uint32_t res = set_copy(vm, c);
+        if (!set_keys(vm, &r, &it, &next)) return JV_HOLE;
+        while ((st = set_step(vm, it, next, &v)) > 0) {
+            if (id == N_SETP_UNION) set_add(vm, res, v);
+            else if (coll_find(vm, c, v) >= 0) set_drop(vm, res, v);
+            else set_add(vm, res, v);
+        }
+        return st < 0 ? JV_HOLE : jv_obj(res);
+    }
+    if (id == N_SETP_INTERSECTION) {
+        uint32_t res = coll_new(vm, JK_SET, vm->set_proto);
+        if (this_size <= r.size) {
+            for (uint32_t i = 0; i < set_places(vm, c); i++) {
+                jv e = set_at(vm, c, i);
+                if (e == JV_HOLE) continue;
+                jv in = js_call(vm, r.has, r.obj, &e, 1);
+                if (vm->throwing) return JV_HOLE;
+                if (js_truthy(vm, in)) set_add(vm, res, e);
+            }
+            return jv_obj(res);
+        }
+        if (!set_keys(vm, &r, &it, &next)) return JV_HOLE;
+        while ((st = set_step(vm, it, next, &v)) > 0) if (coll_find(vm, c, v) >= 0) set_add(vm, res, v);
+        return st < 0 ? JV_HOLE : jv_obj(res);
+    }
+    if (id == N_SETP_DIFFERENCE) {
+        uint32_t res = set_copy(vm, c);
+        if (this_size <= r.size) {
+            for (uint32_t i = 0; i < set_places(vm, c); i++) {
+                jv e = set_at(vm, c, i);
+                if (e == JV_HOLE) continue;
+                jv in = js_call(vm, r.has, r.obj, &e, 1);
+                if (vm->throwing) return JV_HOLE;
+                if (js_truthy(vm, in)) set_drop(vm, res, e);
+            }
+            return jv_obj(res);
+        }
+        if (!set_keys(vm, &r, &it, &next)) return JV_HOLE;
+        while ((st = set_step(vm, it, next, &v)) > 0) set_drop(vm, res, v);
+        return st < 0 ? JV_HOLE : jv_obj(res);
+    }
+    if (id == N_SETP_ISSUBSET) {
+        if (this_size > r.size) return JV_FALSE;
+        for (uint32_t i = 0; i < set_places(vm, c); i++) {
+            jv e = set_at(vm, c, i);
+            if (e == JV_HOLE) continue;
+            jv in = js_call(vm, r.has, r.obj, &e, 1);
+            if (vm->throwing) return JV_HOLE;
+            if (!js_truthy(vm, in)) return JV_FALSE;
+        }
+        return JV_TRUE;
+    }
+    if (id == N_SETP_ISSUPERSET) {
+        if (this_size < r.size) return JV_FALSE;
+        if (!set_keys(vm, &r, &it, &next)) return JV_HOLE;
+        while ((st = set_step(vm, it, next, &v)) > 0)
+            if (coll_find(vm, c, v) < 0) { set_close(vm, it); return vm->throwing ? JV_HOLE : JV_FALSE; }
+        return st < 0 ? JV_HOLE : JV_TRUE;
+    }
+    /* isDisjointFrom */
+    if (this_size <= r.size) {
+        for (uint32_t i = 0; i < set_places(vm, c); i++) {
+            jv e = set_at(vm, c, i);
+            if (e == JV_HOLE) continue;
+            jv in = js_call(vm, r.has, r.obj, &e, 1);
+            if (vm->throwing) return JV_HOLE;
+            if (js_truthy(vm, in)) return JV_FALSE;
+        }
+        return JV_TRUE;
+    }
+    if (!set_keys(vm, &r, &it, &next)) return JV_HOLE;
+    while ((st = set_step(vm, it, next, &v)) > 0)
+        if (coll_find(vm, c, v) >= 0) { set_close(vm, it); return vm->throwing ? JV_HOLE : JV_FALSE; }
+    return st < 0 ? JV_HOLE : JV_TRUE;
+}
+
+/* ---- Number.prototype.toExponential: the digits rounded half up, as the standard picks the larger n ---- */
+static uint32_t num_to_exponential(js_vm *vm, double x, double f, int have_f) {
+    char out[160];
+    size_t k = 0;
+    if (x < 0) { out[k++] = '-'; x = -x; }
+    char digs[128];
+    int nd = 0, e10 = 0;
+    if (x == 0) {
+        digs[0] = '0';
+        nd = have_f ? (int)f + 1 : 1;
+        for (int q = 1; q < nd; q++) digs[q] = '0';
+    } else if (!have_f) {
+        /* the shortest digits that read back as x */
+        char tmp[40];
+        int prec = 1;
+        for (; prec <= 17; prec++) {
+            snprintf(tmp, sizeof tmp, "%.*e", prec - 1, x);
+            if (strtod(tmp, 0) == x) break;
+        }
+        int i = 0;
+        for (; tmp[i] && tmp[i] != 'e'; i++) if (tmp[i] >= '0' && tmp[i] <= '9') digs[nd++] = tmp[i];
+        e10 = atoi(tmp + i + 1);
+        while (nd > 1 && digs[nd - 1] == '0') nd--;
+    } else {
+        /* f + 1 digits, from the exact expansion (glibc prints it): a remainder of exactly one half rounds up */
+        int p = (int)f + 1;
+        char tmp[200];
+        snprintf(tmp, sizeof tmp, "%.*e", p + 40, x);
+        char all[160];
+        int na = 0, i = 0;
+        for (; tmp[i] && tmp[i] != 'e'; i++) if (tmp[i] >= '0' && tmp[i] <= '9') all[na++] = tmp[i];
+        e10 = atoi(tmp + i + 1);
+        int up = 0;
+        if (all[p] > '5') up = 1;
+        else if (all[p] == '5') up = 1;
+        for (int q = 0; q < p; q++) digs[q] = all[q];
+        nd = p;
+        if (up) {
+            int q = p - 1;
+            while (q >= 0 && digs[q] == '9') { digs[q] = '0'; q--; }
+            if (q >= 0) digs[q]++;
+            else {
+                /* 9.99 up to 10.0: one more place before the point */
+                for (int z = nd; z > 0; z--) digs[z] = digs[z - 1];
+                digs[0] = '1';
+                e10++;
+            }
+        }
+    }
+    out[k++] = digs[0];
+    if (nd > 1) {
+        out[k++] = '.';
+        for (int q = 1; q < nd; q++) out[k++] = digs[q];
+    }
+    out[k] = 0;
+    char tail[16];
+    snprintf(tail, sizeof tail, "e%c%d", e10 < 0 ? '-' : '+', e10 < 0 ? -e10 : e10);
+    char fin[180];
+    snprintf(fin, sizeof fin, "%s%s", out, tail);
+    return js_str_ascii(vm, fin);
+}
+
+/* ---- String's HTML methods (B.2.2): CreateHTML ---- */
+static jv string_html(js_vm *vm, jv thisv, const char *name, const char *tag, const char *attr, jv value) {
+    if (jv_is_nullish(thisv)) {
+        char m[96];
+        snprintf(m, sizeof m, "String.prototype.%s called on null or undefined", name);
+        return js_throw_msg(vm, vm->type_error_proto, m);
+    }
+    uint32_t s = js_to_string(vm, thisv);
+    if (!s) return JV_HOLE;
+    vector<char> o;
+    push_back(o, '<');
+    append_range(o, tag, strlen(tag));
+    if (attr) {
+        uint32_t v = js_to_string(vm, value);
+        if (!v) return JV_HOLE;
+        push_back(o, ' ');
+        append_range(o, attr, strlen(attr));
+        append_range(o, "=\"", 2);
+        vector<char> vt;
+        js_str_to_utf8(vm, v, &vt);
+        for (size_t i = 0; i < len(vt); i++) {
+            if (at(vt, i) == '"') append_range(o, "&quot;", 6);
+            else push_back(o, at(vt, i));
+        }
+        push_back(o, '"');
+    }
+    push_back(o, '>');
+    js_str_to_utf8(vm, s, &o);
+    append_range(o, "</", 2);
+    append_range(o, tag, strlen(tag));
+    push_back(o, '>');
+    return jv_str(js_str_utf8(vm, data(o), len(o)));
+}
+
 /* the iterators' kinds (V8's names for them) by mode: 0 an array's, 1 a map's, 2 a set's, 3 a string's, 4 matchAll's */
 static int iter_family(uint32_t mode) {
     if (mode == JI_ARRAY || mode == JI_ARRAY_KEYS || mode == JI_ARRAY_ENTRIES) return 0;
@@ -2995,7 +3399,15 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         int r = js_proxy_get_own(vm, ob, atom, &v, &f);
         return vm->throwing ? JV_HOLE : jv_bool(r);
     }
-    case N_OP_TOSTRING: case N_OP_TOLOCALE: {
+    case N_OP_TOLOCALE: {
+        /* Invoke(this, "toString") */
+        if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "Object.prototype.toLocaleString called on null or undefined");
+        jv f = js_get_value(vm, thisv, jv_str(A_TOSTRING));
+        if (vm->throwing) return JV_HOLE;
+        if (!js_is_callable(vm, f)) return js_not_function(vm, f);
+        return js_call(vm, f, thisv, 0, 0);
+    }
+    case N_OP_TOSTRING: {
         if (thisv == JV_UNDEF) return jv_str(js_str_ascii(vm, "[object Undefined]"));
         if (thisv == JV_NULL) return jv_str(js_str_ascii(vm, "[object Null]"));
         const char *t = "[object Object]";
@@ -4000,6 +4412,205 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_UNDEF;
     }
     /* ---- Map and Set ---- */
+    /* ---- the URI functions, escape, unescape ---- */
+    case N_ENCODE_URI: case N_ENCODE_URIC: case N_DECODE_URI: case N_DECODE_URIC: case N_ESCAPE: case N_UNESCAPE: {
+        uint32_t s = js_to_string(vm, a0);
+        if (!s) return JV_HOLE;
+        if (id == N_ESCAPE) return js_escape(vm, s);
+        if (id == N_UNESCAPE) return js_unescape(vm, s);
+        if (id == N_ENCODE_URI || id == N_ENCODE_URIC) return uri_encode(vm, s, id == N_ENCODE_URI);
+        return uri_decode(vm, s, id == N_DECODE_URI);
+    }
+    case N_URI_ERROR: return make_error(vm, vm->uri_error_proto, args, argc);
+    /* ---- Set's ES2025 methods ---- */
+    case N_SETP_UNION: case N_SETP_INTERSECTION: case N_SETP_DIFFERENCE: case N_SETP_SYMDIFF: case N_SETP_ISSUBSET: case N_SETP_ISSUPERSET:
+    case N_SETP_ISDISJOINT: return set_method(vm, id, thisv, a0);
+    /* ---- Array's methods that change a copy ---- */
+    case N_AP_TOREVERSED: case N_AP_TOSORTED: case N_AP_TOSPLICED: case N_AP_WITH: {
+        if (id == N_AP_TOSORTED && a0 != JV_UNDEF && !js_is_callable(vm, a0))
+            return value_error(vm, "The comparison function must be either a function or undefined: ", a0, "");
+        AP_ON_NOTHING();
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        jv lv = js_get(vm, o, A_LENGTH);
+        if (vm->throwing) return JV_HOLE;
+        double n = js_to_number(vm, lv);
+        if (vm->throwing) return JV_HOLE;
+        n = n != n || n <= 0 ? 0 : n > 9007199254740991.0 ? 9007199254740991.0 : trunc(n);
+        vector<jv> out;
+        if (id == N_AP_WITH) {
+            double rel = js_to_number(vm, a0);
+            if (vm->throwing) return JV_HOLE;
+            rel = rel != rel ? 0 : trunc(rel);
+            double ix = rel >= 0 ? rel : n + rel;
+            if (ix >= n || ix < 0) {
+                char b[64], m[96];
+                js_num_format(rel, b, sizeof b);
+                snprintf(m, sizeof m, "Invalid index : %s", b);
+                return js_throw_msg(vm, vm->range_error_proto, m);
+            }
+            if (n > 4294967295.0) return js_throw_msg(vm, vm->range_error_proto, "Invalid array length");
+            for (double i = 0; i < n; i++) {
+                jv v = i == ix ? a1 : elem_of(vm, o, (uint32_t)i);
+                if (vm->throwing) return JV_HOLE;
+                push_back(out, v);
+            }
+        } else if (id == N_AP_TOSPLICED) {
+            double st = 0, skip = 0;
+            if (argc > 0) {
+                double rs = js_to_number(vm, a0);
+                if (vm->throwing) return JV_HOLE;
+                rs = rs != rs ? 0 : trunc(rs);
+                st = rs < 0 ? (n + rs > 0 ? n + rs : 0) : (rs < n ? rs : n);
+            }
+            if (argc == 1) skip = n - st;
+            else if (argc > 1) {
+                double sc = js_to_number(vm, a1);
+                if (vm->throwing) return JV_HOLE;
+                sc = sc != sc ? 0 : trunc(sc);
+                skip = sc < 0 ? 0 : sc > n - st ? n - st : sc;
+            }
+            double ins = argc > 2 ? argc - 2 : 0, nl = n + ins - skip;
+            if (nl > 9007199254740991.0) return js_throw_msg(vm, vm->type_error_proto, "Invalid array length");
+            if (nl > 4294967295.0) return js_throw_msg(vm, vm->range_error_proto, "Invalid array length");
+            for (double i = 0; i < st; i++) {
+                jv v = elem_of(vm, o, (uint32_t)i);
+                if (vm->throwing) return JV_HOLE;
+                push_back(out, v);
+            }
+            for (uint32_t i = 2; i < argc; i++) push_back(out, arg(vm, args, argc, i));
+            for (double i = st + skip; i < n; i++) {
+                jv v = elem_of(vm, o, (uint32_t)i);
+                if (vm->throwing) return JV_HOLE;
+                push_back(out, v);
+            }
+        } else {
+            if (n > 4294967295.0) return js_throw_msg(vm, vm->range_error_proto, "Invalid array length");
+            for (double i = 0; i < n; i++) {
+                jv v = elem_of(vm, o, (uint32_t)(id == N_AP_TOREVERSED ? n - 1 - i : i));
+                if (vm->throwing) return JV_HOLE;
+                push_back(out, v);
+            }
+            if (id == N_AP_TOSORTED) {
+                vector<jv> tmp;
+                resize(tmp, len(out));
+                int err = 0;
+                merge_sort(vm, &out, &tmp, 0, len(out), a0, &err);
+                if (err || vm->throwing) return JV_HOLE;
+            }
+        }
+        uint32_t r = js_array_new(vm, 0);
+        for (size_t i = 0; i < len(out); i++) js_array_push(vm, r, at(out, i));
+        return jv_obj(r);
+    }
+    case N_AP_TOLOCALE: {
+        /* each element's own toLocaleString, given the locales and options; an empty string for null and undefined */
+        AP_ON_NOTHING();
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        double n = len_of(vm, o);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t r = A_EMPTY, comma = js_str_ascii(vm, ",");
+        for (double i = 0; i < n; i++) {
+            if (i > 0) r = js_str_concat(vm, r, comma);
+            jv e = elem_of(vm, o, (uint32_t)i);
+            if (vm->throwing) return JV_HOLE;
+            if (jv_is_nullish(e)) continue;
+            jv f = js_get_value(vm, e, jv_str(js_atom_ascii(vm, "toLocaleString")));
+            if (vm->throwing) return JV_HOLE;
+            if (!js_is_callable(vm, f)) return js_not_function(vm, f);
+            jv av[2] = { a0, a1 };
+            jv sv = js_call(vm, f, e, av, 2);
+            if (vm->throwing) return JV_HOLE;
+            uint32_t ss = js_to_string(vm, sv);
+            if (!ss) return JV_HOLE;
+            r = js_str_concat(vm, r, ss);
+        }
+        return jv_str(r);
+    }
+    /* ---- String: well-formedness, and the HTML methods ---- */
+    case N_SP_ISWELLFORMED: case N_SP_TOWELLFORMED: {
+        if (jv_is_nullish(thisv))
+            return js_throw_msg(vm, vm->type_error_proto, id == N_SP_ISWELLFORMED ? "String.prototype.isWellFormed called on null or undefined" :
+                                "String.prototype.toWellFormed called on null or undefined");
+        uint32_t s = js_to_string(vm, thisv);
+        if (!s) return JV_HOLE;
+        js_str_flatten(vm, s);
+        uint32_t n = vm->strs[s].len;
+        vector<uint16_t> out;
+        int ok = 1;
+        for (uint32_t i = 0; i < n; i++) {
+            uint16_t c = vm->units[vm->strs[s].off + i];
+            int lone = 0;
+            if (c >= 0xD800 && c <= 0xDBFF) {
+                uint16_t d = i + 1 < n ? vm->units[vm->strs[s].off + i + 1] : 0;
+                if (d >= 0xDC00 && d <= 0xDFFF) { push_back(out, c); push_back(out, d); i++; continue; }
+                lone = 1;
+            } else if (c >= 0xDC00 && c <= 0xDFFF) lone = 1;
+            if (lone) { ok = 0; push_back(out, (uint16_t)0xFFFD); }
+            else push_back(out, c);
+        }
+        if (id == N_SP_ISWELLFORMED) return jv_bool(ok);
+        return ok ? jv_str(s) : jv_str(js_str_new(vm, data(out), len(out)));
+    }
+    case N_SP_ANCHOR: return string_html(vm, thisv, "anchor", "a", "name", a0);
+    case N_SP_BIG: return string_html(vm, thisv, "big", "big", 0, JV_UNDEF);
+    case N_SP_BLINK: return string_html(vm, thisv, "blink", "blink", 0, JV_UNDEF);
+    case N_SP_BOLD: return string_html(vm, thisv, "bold", "b", 0, JV_UNDEF);
+    case N_SP_FIXED: return string_html(vm, thisv, "fixed", "tt", 0, JV_UNDEF);
+    case N_SP_FONTCOLOR: return string_html(vm, thisv, "fontcolor", "font", "color", a0);
+    case N_SP_FONTSIZE: return string_html(vm, thisv, "fontsize", "font", "size", a0);
+    case N_SP_ITALICS: return string_html(vm, thisv, "italics", "i", 0, JV_UNDEF);
+    case N_SP_LINK: return string_html(vm, thisv, "link", "a", "href", a0);
+    case N_SP_SMALL: return string_html(vm, thisv, "small", "small", 0, JV_UNDEF);
+    case N_SP_STRIKE: return string_html(vm, thisv, "strike", "strike", 0, JV_UNDEF);
+    case N_SP_SUB: return string_html(vm, thisv, "sub", "sub", 0, JV_UNDEF);
+    case N_SP_SUP: return string_html(vm, thisv, "sup", "sup", 0, JV_UNDEF);
+    /* ---- Number.prototype.toExponential ---- */
+    case N_NP_TOEXPONENTIAL: {
+        jv tv = thisv;
+        if (jv_is_obj(tv) && vm->objs[jv_idx(tv)].kind == JK_NUMBER) tv = vm->objs[jv_idx(tv)].x;
+        if (!jv_is_num(tv)) return js_throw_msg(vm, vm->type_error_proto, "Number.prototype.toExponential requires that 'this' be a Number");
+        double x = jv_dbl(tv), f = js_to_number(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        f = f != f ? 0 : trunc(f);
+        if (!isfinite(x)) return jv_str(js_num_to_str(vm, x));
+        if (f < 0 || f > 100) return js_throw_msg(vm, vm->range_error_proto, "toExponential() argument must be between 0 and 100");
+        return jv_str(num_to_exponential(vm, x, f, a0 != JV_UNDEF));
+    }
+    case N_M_ACOSH: return jv_num(acosh(num_arg(vm, args, argc, 0)));
+    case N_M_ASINH: { double x = num_arg(vm, args, argc, 0); return jv_num(x == 0 ? x : asinh(x)); }
+    case N_M_ATANH: { double x = num_arg(vm, args, argc, 0); return jv_num(x == 0 ? x : atanh(x)); }
+    /* ---- Object.prototype's legacy accessor methods (B.2.2.2-5) ---- */
+    case N_OP_DEFGETTER: case N_OP_DEFSETTER: {
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        if (!js_is_callable(vm, a1))
+            return js_throw_msg(vm, vm->type_error_proto, id == N_OP_DEFGETTER ? "Object.prototype.__defineGetter__: Expecting function" :
+                                "Object.prototype.__defineSetter__: Expecting function");
+        int ok = 1;
+        uint32_t key = js_prop_key(vm, a0, &ok);
+        if (!ok) return JV_HOLE;
+        js_define_accessor(vm, jv_idx(o), key, id == N_OP_DEFGETTER ? a1 : JV_HOLE, id == N_OP_DEFSETTER ? a1 : JV_HOLE, 0);
+        return JV_UNDEF;
+    }
+    case N_OP_LOOKUPGETTER: case N_OP_LOOKUPSETTER: {
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        int ok = 1;
+        uint32_t key = js_prop_key(vm, a0, &ok);
+        if (!ok) return JV_HOLE;
+        for (uint32_t x = jv_idx(o), d = 0; x && d < 10000; x = vm->objs[x].proto, d++) {
+            jv v;
+            uint32_t fl;
+            if (!js_get_own(vm, x, key, &v, &fl)) continue;
+            if (!(fl & JS_SHAPE_ACCESSOR)) return JV_UNDEF;
+            uint32_t acc = jv_idx(v);
+            if (id == N_OP_LOOKUPGETTER) return vm->objs[acc].x;
+            return vm->objs[acc].a ? jv_obj(vm->objs[acc].a) : JV_UNDEF;
+        }
+        return JV_UNDEF;
+    }
     case N_MP_GET: case N_MP_SET: case N_MP_HAS: case N_MP_DELETE: case N_MP_CLEAR: case N_MP_SIZE: case N_MP_FOREACH:
     case N_MP_KEYS: case N_MP_VALUES: case N_MP_ENTRIES: case N_SETP_ADD: case N_SETP_FOREACH: case N_SETP_VALUES: case N_SETP_ENTRIES:
     case N_SETP_HAS: case N_SETP_DELETE: case N_SETP_CLEAR: case N_SETP_SIZE: {
@@ -4117,6 +4728,12 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, g, "clearTimeout", N_CLEAR_TIMEOUT, 1);
     defn(vm, g, "clearInterval", N_CLEAR_TIMEOUT, 1);
     defn(vm, g, "queueMicrotask", N_QUEUE_MICROTASK, 1);
+    defn(vm, g, "decodeURI", N_DECODE_URI, 1);
+    defn(vm, g, "decodeURIComponent", N_DECODE_URIC, 1);
+    defn(vm, g, "encodeURI", N_ENCODE_URI, 1);
+    defn(vm, g, "encodeURIComponent", N_ENCODE_URIC, 1);
+    defn(vm, g, "escape", N_ESCAPE, 1);
+    defn(vm, g, "unescape", N_UNESCAPE, 1);
 
     uint32_t o = ctor(vm, "Object", N_OBJECT, 1, vm->object_proto);
     defn(vm, o, "keys", N_OBJ_KEYS, 1);
@@ -4153,6 +4770,10 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, op, "valueOf", N_OP_VALUEOF, 0);
     defn(vm, op, "isPrototypeOf", N_OP_ISPROTO, 1);
     defn(vm, op, "propertyIsEnumerable", N_OP_PROPENUM, 1);
+    defn(vm, op, "__defineGetter__", N_OP_DEFGETTER, 2);
+    defn(vm, op, "__defineSetter__", N_OP_DEFSETTER, 2);
+    defn(vm, op, "__lookupGetter__", N_OP_LOOKUPGETTER, 1);
+    defn(vm, op, "__lookupSetter__", N_OP_LOOKUPSETTER, 1);
 
     uint32_t fp = vm->function_proto;
     ctor(vm, "Function", N_FUNCTION, 1, fp);
@@ -4170,6 +4791,11 @@ void js_builtins_init(js_vm *vm) {
         "lastIndexOf", "includes", "find", "findIndex", "findLast", "findLastIndex", "filter", "map", "forEach", "reduce", "reduceRight",
         "some", "every", "sort", "fill", "keys", "values", "entries", "flat", "flatMap", "at", "copyWithin", "toString" };
     for (uint32_t i = 0; i < sizeof an / sizeof an[0]; i++) defn(vm, ap, an[i], N_AP_PUSH + i, 1);
+    defn(vm, ap, "toReversed", N_AP_TOREVERSED, 0);
+    defn(vm, ap, "toSorted", N_AP_TOSORTED, 1);
+    defn(vm, ap, "toSpliced", N_AP_TOSPLICED, 2);
+    defn(vm, ap, "with", N_AP_WITH, 2);
+    defn(vm, ap, "toLocaleString", N_AP_TOLOCALE, 0);
 
     uint32_t s = ctor(vm, "String", N_STRING, 1, vm->string_proto);
     defn(vm, s, "fromCharCode", N_STR_FROMCHARCODE, 1);
@@ -4186,6 +4812,13 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, sp, "toLocaleLowerCase", N_SP_TOLOWER, 0);
     /* Annex B's names for trimStart and trimEnd: the same functions (V8's toString names them so) */
     js_define(vm, sp, js_atom_ascii(vm, "trimLeft"), js_get(vm, jv_obj(sp), js_atom_ascii(vm, "trimStart")), JS_SHAPE_HIDDEN);
+    defn(vm, sp, "isWellFormed", N_SP_ISWELLFORMED, 0);
+    defn(vm, sp, "toWellFormed", N_SP_TOWELLFORMED, 0);
+    {
+        static const char *const hm[] = { "anchor", "big", "blink", "bold", "fixed", "fontcolor", "fontsize", "italics", "link", "small", "strike", "sub", "sup" };
+        static const uint32_t hl[] = { 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0 };
+        for (uint32_t i = 0; i < 13; i++) defn(vm, sp, hm[i], N_SP_ANCHOR + i, hl[i]);
+    }
     js_define(vm, sp, js_atom_ascii(vm, "trimRight"), js_get(vm, jv_obj(sp), js_atom_ascii(vm, "trimEnd")), JS_SHAPE_HIDDEN);
 
     uint32_t nm = ctor(vm, "Number", N_NUMBER, 1, vm->number_proto);
@@ -4207,6 +4840,7 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, np, "toString", N_NP_TOSTRING, 1);
     defn(vm, np, "toFixed", N_NP_TOFIXED, 1);
     defn(vm, np, "toPrecision", N_NP_TOPRECISION, 1);
+    defn(vm, np, "toExponential", N_NP_TOEXPONENTIAL, 1);
     defn(vm, np, "valueOf", N_NP_VALUEOF, 0);
     defn(vm, np, "toLocaleString", N_NP_TOLOCALE, 0);
     ctor(vm, "Boolean", N_BOOLEAN, 1, vm->boolean_proto);
@@ -4219,6 +4853,9 @@ void js_builtins_init(js_vm *vm) {
         "log", "log2", "log10", "log1p", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "hypot", "random",
         "fround", "imul", "clz32" };
     for (uint32_t i = 0; i < sizeof mn / sizeof mn[0]; i++) defn(vm, m, mn[i], N_M_ABS + i, 1);
+    defn(vm, m, "acosh", N_M_ACOSH, 1);
+    defn(vm, m, "asinh", N_M_ASINH, 1);
+    defn(vm, m, "atanh", N_M_ATANH, 1);
     defv(vm, m, "PI", jv_num(3.141592653589793));
     defv(vm, m, "E", jv_num(2.718281828459045));
     defv(vm, m, "LN2", jv_num(0.6931471805599453));
@@ -4254,6 +4891,14 @@ void js_builtins_init(js_vm *vm) {
         else vm->objs[e].proto = vm->error_ctor;
     }
     defn(vm, vm->error_proto, "toString", N_EP_TOSTRING, 0);
+    {
+        /* URIError, the URI functions' */
+        vm->uri_error_proto = js_obj_new(vm, JK_PLAIN, vm->error_proto);
+        uint32_t ue = ctor(vm, "URIError", N_URI_ERROR, 1, vm->uri_error_proto);
+        defv(vm, vm->uri_error_proto, "name", jv_str(js_atom_ascii(vm, "URIError")));
+        defv(vm, vm->uri_error_proto, "message", jv_str(A_EMPTY));
+        vm->objs[ue].proto = vm->error_ctor;
+    }
 
     uint32_t d = ctor(vm, "Date", N_DATE, 7, vm->date_proto);
     defn(vm, d, "now", N_DATE_NOW, 0);
@@ -4310,6 +4955,10 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, stp, "values", N_SETP_VALUES, 0);
     /* keys is values itself, as Symbol.iterator is */
     js_define(vm, stp, js_atom_ascii(vm, "keys"), js_get(vm, jv_obj(stp), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
+    {
+        static const char *const sm[] = { "union", "intersection", "difference", "symmetricDifference", "isSubsetOf", "isSupersetOf", "isDisjointFrom" };
+        for (uint32_t i = 0; i < 7; i++) defn(vm, stp, sm[i], N_SETP_UNION + i, 1);
+    }
     defn(vm, stp, "entries", N_SETP_ENTRIES, 0);
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_SETP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
     {
