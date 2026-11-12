@@ -702,6 +702,10 @@ be built side by side and merged without touching each other's.
       selectors, or a style element's parent) and above its limits, `:scope`
       and `&` as Chromium ranks them, and scope proximity in the cascade
       between specificity and order, which the reasons name.
+    - the `-webkit-` names Chromium keeps as aliases of standard properties,
+      and `-webkit-text-fill-color`, an inherited colour whose currentcolor
+      each element takes from its own `color` (the word kept through
+      inheritance, CSS Color 4), with which glyphs and decorations are filled.
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning. Then (12j):
@@ -714,7 +718,8 @@ be built side by side and merged without touching each other's.
     held to Chromium's boxes (`tests/integ/boxes.sh`).
   - Paint: border styles, background images, box and text shadows, opacity,
     transforms, clipping; outer and inset shadows, elliptical and
-    percentage radii, `background-clip` and `background-origin`; `filter`
+    percentage radii, `background-clip` and `background-origin` (`text`: a
+    block's background drawn through the coverage of its text's glyphs); `filter`
     and `backdrop-filter` (Blink's colour matrices and transfer functions in
     sRGB, blur, drop-shadow, a backdrop's blur mirrored at its edges); 3D
     transforms (4x4 matrices, a parent's perspective, each plane drawn

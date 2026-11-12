@@ -1,0 +1,8 @@
+# tests/pages/bgtext.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+grad 8 8 792 79
+text-fill 8 86 792 157
+image 8 164 792 230
+colour 8 237 792 283
+nested 8 290 792 365
+text-inherit 8 372 792 405
+prefixed 8 412 308 461

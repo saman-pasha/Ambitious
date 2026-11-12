@@ -177,6 +177,37 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
     }
 }
 
+/* a text's glyphs' coverage as pt_text draws it, into the mask m (mw px wide and mh rows,
+   its first row the page's y my0): each pixel the most any glyph covers of it */
+static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table,
+                         vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask, const char *s, size_t n, double x, double baseline,
+                         int face, double size, int italic, double ls, double wsp) {
+    int by = (int)floor(baseline - my0 + 0.5);
+    size_t i = 0;
+    uint32_t prev = 0;
+    while (i < n) {
+        uint32_t cp = amb_utf8_next(s, n, &i);
+        if (prev) x += amb_kern(f, face, prev, cp, size);
+        prev = cp;
+        double fx = floor(x);
+        int quarter = (int)((x - fx) * 4);
+        uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
+        pt_glyph gl = at(*entries, e);
+        for (int yy = 0; yy < gl.h; yy++) {
+            int Y = by + gl.oy + yy;
+            if (Y < 0 || Y >= mh) continue;
+            for (int xx = 0; xx < gl.w; xx++) {
+                int X = (int)fx + gl.ox + xx;
+                if (X < 0 || X >= mw) continue;
+                uint8_t v = at(*masks, gl.off + (size_t)yy * gl.w + xx);
+                size_t q = (size_t)Y * (size_t)mw + (size_t)X;
+                if (v > at(*m, q)) (*m)[q] = v;
+            }
+        }
+        x += amb_advance(f, face, cp, size) + ls + (cp == ' ' ? wsp : 0);
+    }
+}
+
 /* ---- the boxes ---- */
 
 /* an image's RGBA pixels, w x h, drawn into the rectangle (x0, y0, dw, dh), sampled
@@ -1479,7 +1510,8 @@ static int pt_cached_image(const net_loader *nt, uint32_t r, vector<uint32_t> *i
 }
 
 /* a box's background layers (background-image's value, last first): each tile placed by
-   background-size, -position and -repeat in its padding box, drawn in its rounded border box */
+   background-size, -position and -repeat in its padding box, drawn in its rounded border box;
+   those clipped to the text alone (text_only), or the others */
 /* a box of b's a keyword names -- border-box, padding-box, content-box; another its border
    box -- into a (x0, y0, x1, y1), and its corners' radii from the border box's rad, each
    less what lies between (CSS Backgrounds 5.2) into r */
@@ -1497,7 +1529,7 @@ static void pt_area(const layout_tree *t, uint32_t b, const char *w, size_t wn, 
 }
 
 static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
-                      const double *rad) {
+                      const double *rad, int text_only) {
     vector<char> img, pos, siz, rep, org, clp;
     amb_span sp = t->box[b].bg_image;
     append_range(img, text_ptr(t, sp), sp.len);
@@ -1527,11 +1559,13 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         size_t oa = 0, ol = 0, ca = 0, cl = 0;
         if (len(org)) pt_nth(data(org), len(org), q - 1, &oa, &ol);
         if (len(clp)) pt_nth(data(clp), len(clp), q - 1, &ca, &cl);
-        if (cl && pt_is(data(clp) + ca, cl, "text")) continue;          /* clipped to the text: not drawn */
+        /* a layer clipped to the text is drawn by pt_text_bg (text_only), over the border box */
+        int to_text = cl && pt_is(data(clp) + ca, cl, "text");
+        if (to_text != (text_only != 0)) continue;
         double area[4], ar[8], clip[4], cr[8];
         if (ol) pt_area(t, b, data(org) + oa, ol, rad, area, ar);
         else pt_area(t, b, "padding-box", 11, rad, area, ar);
-        if (cl) pt_area(t, b, data(clp) + ca, cl, rad, clip, cr);
+        if (cl && !to_text) pt_area(t, b, data(clp) + ca, cl, rad, clip, cr);
         else pt_area(t, b, "border-box", 10, rad, clip, cr);
         double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
         double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
@@ -1613,7 +1647,7 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
             pt_rrect(c, ca[0], ca[1], ca[2], ca[3], cr, t->box[b].background);
         }
     }
-    if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad);
+    if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
     if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
     if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
@@ -1799,17 +1833,18 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
             if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
             amb_span sp = t->frag[fr].text;
             double size = t->frag[fr].size, base = t->frag[fr].baseline;
-            uint32_t color = t->frag[fr].color;
             if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
             pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
-                    pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, color);
+                    pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
+            /* the decorations in the text's fill, as Blink resolves their currentcolor */
             uint8_t deco = t->frag[fr].decoration;
             double th = floor(size / 16 + 0.5);
             if (th < 1) th = 1;
             double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
-            if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, color); }
-            if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, color); }
-            if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, color); }
+            uint32_t dc = t->frag[fr].fill;
+            if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+            if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+            if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
         }
 }
 
@@ -1822,6 +1857,84 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
 
 static int pt_positioned(const layout_tree *t, uint32_t b) {
     return t->box[b].position != LAYOUT_POSITION_STATIC;
+}
+
+/* the box's background clipped to its text (background-clip: text, CSS Backgrounds 4):
+   the layers so clipped, and its colour when its bottom layer is, drawn over a copy of
+   what lies under its border box, then laid onto the canvas through the coverage of the
+   glyphs of its text and of its in-flow and floated descendants' (not a positioned
+   one's). Drawn after the box's borders, which glyphs seldom reach */
+static void pt_text_bg(PCTX, uint32_t b) {
+    if (!t->box[b].bg_clip.len) return;
+    vector<char> clp;
+    amb_span cs = t->box[b].bg_clip;
+    append_range(clp, text_ptr(t, cs), cs.len);
+    int any = 0;
+    for (size_t i = 0; i + 4 <= len(clp); i++)
+        if (memcmp(data(clp) + i, "text", 4) == 0) any = 1;
+    if (!any) return;
+    double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
+    double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
+    double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+    double rad[8] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl,
+                      t->box[b].rtlv, t->box[b].rtrv, t->box[b].rbrv, t->box[b].rblv };
+    pt_fit_radii(bw, bh, rad);
+    /* the canvas's rows the border box covers */
+    double y0 = fmax(by, c->oy), y1 = fmin(by + bh, c->oy + c->h);
+    if (y1 <= y0) return;
+    int r0 = (int)floor(y0 - c->oy), r1 = (int)ceil(y1 - c->oy);
+    if (r1 > (int)c->h) r1 = (int)c->h;
+    int kh = r1 - r0;
+    if (kh <= 0 || c->w == 0) return;
+    amb_canvas k;
+    memset(&k, 0, sizeof k);
+    defer(k) { AMB_CANVAS_DROP(k); }
+    k.w = c->w;
+    k.h = (uint32_t)kh;
+    k.oy = c->oy + r0;
+    k.zoom = c->zoom;
+    k.cx0 = c->cx0;
+    k.cx1 = c->cx1;
+    k.cy0 = fmax(c->cy0, k.oy);
+    k.cy1 = fmin(c->cy1, k.oy + kh);
+    append_range(k.px, data(c->px) + (size_t)r0 * c->w * 3, (size_t)kh * c->w * 3);
+    /* the colour, when the bottom layer (the last of the list) is clipped to the text */
+    size_t ba = 0, bl = 0;
+    pt_nth(data(clp), len(clp), 1u << 30, &ba, &bl);
+    if ((t->box[b].background & 0xff) && bl && pt_is(data(clp) + ba, bl, "text")) pt_rrect(&k, bx, by, bx + bw, by + bh, rad, t->box[b].background);
+    if (t->box[b].bg_image.len) pt_layers(t, nt, b, &k, icache, ipx, rad, 1);
+    /* the mask: the glyphs of the text the box holds */
+    vector<uint8_t> m;
+    resize(&m, (size_t)c->w * (size_t)kh);
+    for (uint32_t fr = 1; fr < t->frag_len; fr++) {
+        layout_frag_kind kd = t->frag[fr].kind;
+        if (kd != LAYOUT_FRAG_KIND_TEXT && kd != LAYOUT_FRAG_KIND_GENERATED) continue;
+        if (t->frag[fr].y > k.oy + kh || t->frag[fr].y + t->frag[fr].h < k.oy) continue;
+        uint32_t x = t->line[t->frag[fr].line].box;
+        int in = 0;
+        while (x) {
+            if (x == b) { in = 1; break; }
+            if (t->box[x].position == LAYOUT_POSITION_ABSOLUTE || t->box[x].position == LAYOUT_POSITION_FIXED) break;
+            x = t->box[x].parent;
+        }
+        if (!in) continue;
+        amb_span sp = t->frag[fr].text;
+        pt_text_mask(&m, (int)c->w, k.oy, kh, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, t->frag[fr].baseline,
+                     pt_face_of(t, fr, webmap), t->frag[fr].size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing);
+    }
+    /* laid on through it */
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = 0; y < kh; y++) {
+        int Y = r0 + y;
+        if (Y < ky0 || Y >= ky1) continue;
+        for (int X = kx0; X < kx1; X++) {
+            uint32_t a = at(m, (size_t)y * c->w + (size_t)X);
+            if (!a) continue;
+            size_t p = ((size_t)Y * c->w + (size_t)X) * 3, q = ((size_t)y * c->w + (size_t)X) * 3;
+            for (int ch = 0; ch < 3; ch++) c->px[p + ch] = (uint8_t)((at(k.px, q + ch) * a + c->px[p + ch] * (255 - a) + 127) / 255);
+        }
+    }
 }
 /* a box transformed: by its transform's functions or its individual transforms */
 static int pt_transformed(const layout_tree *t, uint32_t b) {
@@ -2385,7 +2498,10 @@ static void pt_order(PCTX, const vector<uint32_t> *list, int neg) {
    its padding box when it clips its overflow; the positioned boxes in it kept in later for
    its stacking context (those under a clipping box drawn there, clipped) */
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
-    if (with_box && t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) pt_box(t, nt, b, c, skip_bg, icache, ipx);
+    if (with_box && t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) {
+        pt_box(t, nt, b, c, skip_bg, icache, ipx);
+        pt_text_bg(PARGS, b);
+    }
     double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
     int clips = t->box[b].clip != 0;
     if (clips) {
@@ -2438,7 +2554,10 @@ static void pt_collect(const layout_tree *t, uint32_t b, vector<uint32_t> *later
 /* a stacking context: its own box; the positioned boxes in its flow with a negative
    z-index; its flow; then the rest of them, by z-index */
 static void pt_ctx(PCTX, uint32_t b) {
-    if (t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) pt_box(t, nt, b, c, skip_bg, icache, ipx);
+    if (t->box[b].kind != LAYOUT_BOX_KIND_VIEWPORT) {
+        pt_box(t, nt, b, c, skip_bg, icache, ipx);
+        pt_text_bg(PARGS, b);
+    }
     vector<uint32_t> later, seen;
     pt_collect(t, b, &later);
     pt_order(PARGS, &later, 1);

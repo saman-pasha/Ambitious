@@ -124,6 +124,7 @@ layout_contract(record(frag, [
     field(word_spacing, f64),                   % word-spacing, px after each space
     field(italic,     bool),
     field(color,      u32),
+    field(fill,       u32),                     % -webkit-text-fill-color: the colour its glyphs are filled with (color's unless set)
     field(background, u32),                     % an inline fragment's
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
     field(shadows,    span(text))               % text-shadow

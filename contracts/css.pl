@@ -49,6 +49,7 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     transition_property, transition_duration, transition_timing_function, transition_delay,
     transition_behavior,               % each a list, as text, one item a comma
     grid_template_areas,               % the named areas, kept as their strings
+    webkit_text_fill_color,            % -webkit-text-fill-color: the colour glyphs are filled with
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

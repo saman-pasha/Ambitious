@@ -887,6 +887,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "transition-delay", 0, G_TEXT, 0, 0, "0s" },
     { "transition-behavior", 0, G_TEXT, 0, 0, "normal" },
     { "grid-template-areas", 0, G_TEXT, 0, "none", "none" },
+    { "-webkit-text-fill-color", 1, G_COLOR, 0, 0, "currentcolor" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -918,7 +919,17 @@ static void css_name_put(const char *name, int code) {
         if (!css_name_code[i]) { css_name_hash[i] = h; css_name_code[i] = (int16_t)code; return; }
 }
 static const char *css_short_name(int i);
-/* the code of a name (as css_name_code holds it), or 0 */
+/* the properties whose -webkit- prefixed names Chromium keeps as aliases of theirs (of
+   those this module has) */
+static const char css_webkit_aliases[] =
+    "align-content align-items align-self animation animation-delay animation-direction animation-duration animation-fill-mode "
+    "animation-iteration-count animation-name animation-play-state animation-timing-function backface-visibility background-clip "
+    "background-origin background-size border-bottom-left-radius border-bottom-right-radius border-radius border-top-left-radius "
+    "border-top-right-radius box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
+    "justify-content order perspective perspective-origin transform transform-origin transform-style transition transition-delay "
+    "transition-duration transition-property transition-timing-function";
+
+/* the code of a name (as css_name_code holds it), or 0; a -webkit- alias, its property's */
 static int css_name_find(const char *name, size_t nn) {
     if (nn == 0 || nn > 40) return 0;
     uint32_t h = css_hash_ci(name, nn);
@@ -926,6 +937,13 @@ static int css_name_find(const char *name, size_t nn) {
         if (css_name_hash[i] != h) continue;
         int c = css_name_code[i];
         if (css_eq_ci(name, nn, c > 0 ? css_pdefs[c - 1].name : css_short_name(-c - 1))) return c;
+    }
+    if (nn > 8 && css_eq_ci(name, 8, "-webkit-")) {
+        char un[48];
+        size_t k = 0;
+        for (; k < nn - 8 && k + 1 < sizeof un; k++) un[k] = css_lower(name[8 + k]);
+        un[k] = 0;
+        if (k == nn - 8 && css_word_in(un, css_webkit_aliases)) return css_name_find(name + 8, nn - 8);
     }
     return 0;
 }
@@ -4248,10 +4266,13 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
     }
     if (g == G_COLOR) {
         if (css_is_word(v, "currentcolor")) {
-            /* color's currentcolor is its parent's colour; another property's is the element's */
+            /* color's currentcolor is its parent's colour; another property's is the element's.
+               An inherited property keeps the word (CSS Color 4: currentcolor is its own
+               computed value), so that a child takes its own colour */
             memset(v, 0, sizeof *v);
             v->unit = CSS_UNIT_COLOR;
             v->color = p == CSS_PROP_COLOR ? pv->color : color;
+            if (p != CSS_PROP_COLOR && css_pdefs[p].inh) memcpy(v->word, "currentcolor", 13);
         } else if (v->unit == CSS_UNIT_KEYWORD || v->unit == CSS_UNIT_TEXT) {
             /* a system colour or light-dark(), in the scheme the element is used in */
             int dark = cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK;
@@ -4368,7 +4389,8 @@ typedef struct css_rec { uint32_t word; amb_span text; css_how how; uint32_t win
 
 static css_rec css_value_rec(css_style *s, const css_val *v, css_how how, uint32_t winner, vector<css_vtext> *vc) {
     css_rec r;
-    r.word = v->unit == CSS_UNIT_KEYWORD ? names_intern(s, v->word, strlen(v->word)) : 0;
+    /* a keyword's word; and an inherited colour's currentcolor, which its children follow */
+    r.word = v->unit == CSS_UNIT_KEYWORD || (v->unit == CSS_UNIT_COLOR && v->word[0]) ? names_intern(s, v->word, strlen(v->word)) : 0;
     r.how = how;
     r.winner = winner;
     if (v->unit == CSS_UNIT_TEXT || v->unit == CSS_UNIT_EXPR) { r.text = v->tx; return r; }
@@ -4608,7 +4630,8 @@ static void css_val_of(const css_style *s, uint32_t c0, css_prop p, const css_va
     v->pct = s->cval[c].pct;
     v->color = s->cval[c].color;
     v->tx = s->cval[c].text;
-    if (v->unit == CSS_UNIT_KEYWORD) snprintf(v->word, sizeof v->word, "%.*s", (int)names_len(s, s->cval[c].word), names_ptr(s, s->cval[c].word));
+    if (v->unit == CSS_UNIT_KEYWORD || (v->unit == CSS_UNIT_COLOR && names_len(s, s->cval[c].word)))
+        snprintf(v->word, sizeof v->word, "%.*s", (int)names_len(s, s->cval[c].word), names_ptr(s, s->cval[c].word));
 }
 static css_rec css_rec_of(const css_style *s, uint32_t c) {
     css_rec r;
@@ -4671,7 +4694,11 @@ static uint32_t css_template(css_style *s, css_styles *ss, uint32_t ps, const cs
     }
     for (int k = 0; k < CSS_NPROPS; k++) {
         int fix = 0;
-        if (css_pf[k] & CSS_PF_CC) { out[k].color = pcolor.color; fix = 1; }
+        if ((css_pf[k] & CSS_PF_CC) && (!(css_pf[k] & CSS_PF_INH) || !ps || strcmp(out[k].word, "currentcolor") == 0)) {
+            out[k].color = pcolor.color;
+            if (css_pf[k] & CSS_PF_INH) memcpy(out[k].word, "currentcolor", 13);
+            fix = 1;
+        }
         if (css_pf[k] & CSS_PF_BW) { css_snap_width(&out[k], &out[k + 4], 1); fix = 1; }
         if (k == CSS_PROP_DISPLAY) fix = css_display_fix(&out[k], out, &pdisplay, ps == 0);
         if (fix) rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc);
@@ -5827,7 +5854,10 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     /* what the winners change of the values that hang on them */
     if (win[CSS_PROP_COLOR] || root_text)
         for (int k = 0; k < CSS_NPROPS; k++)
-            if ((css_pf[k] & CSS_PF_CC) && !win[k]) { out[k].color = out[CSS_PROP_COLOR].color; rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc); }
+            if ((css_pf[k] & CSS_PF_CC) && !win[k] && (!(css_pf[k] & CSS_PF_INH) || strcmp(out[k].word, "currentcolor") == 0)) {
+                out[k].color = out[CSS_PROP_COLOR].color;
+                rec[k] = css_value_rec(s, &out[k], (css_pf[k] & CSS_PF_INH) && rec[k].how == CSS_HOW_INHERITED ? CSS_HOW_INHERITED : CSS_HOW_INITIAL, 0, vc);
+            }
     if (win[CSS_PROP_POSITION] && (css_word_is(&out[CSS_PROP_POSITION], "absolute") || css_word_is(&out[CSS_PROP_POSITION], "fixed")) &&
         !css_word_is(&out[CSS_PROP_FLOAT], "none")) {
         css_word_val(&out[CSS_PROP_FLOAT], "none");

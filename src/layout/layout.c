@@ -180,7 +180,7 @@ enum { TT_NONE, TT_UPPER, TT_LOWER, TT_CAPITALIZE };
 
 typedef struct lay_style {
     int display, bfc;
-    uint32_t color, bg, bc[4];
+    uint32_t color, fill, bg, bc[4];
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
     int lhn;                        /* line-height is normal */
@@ -365,6 +365,7 @@ static int lay_web_face(const css_style *st, const vector<int32_t> *webface, con
 static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
+    s->fill = 0x000000ff;
     s->fs = 16;
     s->face = AMB_FACE_SERIF;
     s->width.unit = LAY_AUTO;
@@ -393,6 +394,7 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
         s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid");
     }
     s->color = st->cval[cv[CSS_PROP_COLOR]].color;
+    s->fill = st->cval[cv[CSS_PROP_WEBKIT_TEXT_FILL_COLOR]].color;
     s->bg = st->cval[cv[CSS_PROP_BACKGROUND_COLOR]].color;
     s->fs = st->cval[cv[CSS_PROP_FONT_SIZE]].num;
     double weight = st->cval[cv[CSS_PROP_FONT_WEIGHT]].num;
@@ -789,7 +791,7 @@ typedef struct lay_piece {
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
     double w, size, lh, asc, desc;
-    uint32_t color, bg;
+    uint32_t color, fill, bg;
     float aw, ah;                                  /* an atomic box's content width (and a replaced one's height) */
     float fa, fd;                                  /* those faces' lines above and below its baseline, under line-height
                                                       normal (fb) */
@@ -817,6 +819,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->asc = s->asc;
     p->desc = s->desc;
     p->color = s->color;
+    p->fill = s->fill;
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
@@ -1554,6 +1557,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
     t->frag[fr].word_spacing = ps.wsp;
     t->frag[fr].italic = ps.italic;
     t->frag[fr].color = ps.color;
+    t->frag[fr].fill = ps.fill;
     frags_append(t, ln, fr);
 }
 
@@ -2278,6 +2282,7 @@ static void lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt
     t->frag[fr].size = p->size;
     t->frag[fr].italic = p->italic;
     t->frag[fr].color = p->color;
+    t->frag[fr].fill = p->fill;
     t->frag[fr].decoration = p->deco;
     if (p->elem) {
         uint32_t ts = LAY_X(p->elem).tshadow;
@@ -2711,6 +2716,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].size = p.size;
         t->frag[fr].italic = p.italic;
         t->frag[fr].color = p.color;
+        t->frag[fr].fill = p.fill;
         t->frag[fr].decoration = p.deco;
         if (p.elem) {
             uint32_t ts = LAY_X(p.elem).tshadow;
@@ -3049,6 +3055,7 @@ static void lay_first_line_pieces(LCTX, vector<lay_piece> *ps, const lay_style *
     for (size_t k = 0; k < len(*ps); k++) {
         lay_piece p = at(*ps, k);
         if (p.color == bs->color) p.color = fls->color;
+        if (p.fill == bs->fill) p.fill = fls->fill;
         if (p.face != bs->face || p.font != bs->font || p.size != bs->fs || p.ls != bs->ls || p.wsp != bs->wsp) { (*ps)[k] = p; continue; }
         double old_space = amb_advance(f, p.face, ' ', p.size) + p.ls + p.wsp;
         p.face = (uint8_t)fls->face;
@@ -3309,6 +3316,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     if (sm.font) t->frag[fr].font = resource_handle(nt, sm.font);
     t->frag[fr].size = sm.fs;
     t->frag[fr].color = sm.color;
+    t->frag[fr].fill = sm.fill;
     frags_append(t, ln, fr);
 }
 
