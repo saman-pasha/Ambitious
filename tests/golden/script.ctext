@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:7adad931:9195). Do not edit. */
+/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:c8ec6ee6:9839). Do not edit. */
 typedef enum script_status { SCRIPT_OK, SCRIPT_STALE_HANDLE, SCRIPT_WRONG_KIND, SCRIPT_FAILED, SCRIPT_BAD_REQUEST, SCRIPT_NOT_REQUESTABLE, SCRIPT_STALE_REVISION } script_status;
 typedef enum script_source { SCRIPT_SOURCE_INLINE, SCRIPT_SOURCE_EXTERNAL, SCRIPT_SOURCE_ATTRIBUTE } script_source;
 typedef enum script_outcome { SCRIPT_OUTCOME_RAN, SCRIPT_OUTCOME_THREW, SCRIPT_OUTCOME_SYNTAX_ERROR, SCRIPT_OUTCOME_STOPPED, SCRIPT_OUTCOME_NOT_FETCHED, SCRIPT_OUTCOME_NOT_RUN } script_outcome;
@@ -10,7 +10,9 @@ typedef enum script_insertion { SCRIPT_INSERTION_PARSED, SCRIPT_INSERTION_INSERT
 typedef enum script_api { SCRIPT_API_FETCH, SCRIPT_API_XHR, SCRIPT_API_SCRIPT } script_api;
 typedef enum script_req_outcome { SCRIPT_REQ_OUTCOME_OK, SCRIPT_REQ_OUTCOME_HTTP_ERROR, SCRIPT_REQ_OUTCOME_OPAQUE, SCRIPT_REQ_OUTCOME_FAILED, SCRIPT_REQ_OUTCOME_BLOCKED, SCRIPT_REQ_OUTCOME_ABORTED, SCRIPT_REQ_OUTCOME_PENDING } script_req_outcome;
 typedef enum script_write_when { SCRIPT_WRITE_WHEN_PARSING, SCRIPT_WRITE_WHEN_AFTER_LOAD, SCRIPT_WRITE_WHEN_IGNORED } script_write_when;
-typedef enum script_nav_cause { SCRIPT_NAV_CAUSE_FORM, SCRIPT_NAV_CAUSE_LINK, SCRIPT_NAV_CAUSE_LOCATION, SCRIPT_NAV_CAUSE_RELOAD } script_nav_cause;
+typedef enum script_nav_cause { SCRIPT_NAV_CAUSE_FORM, SCRIPT_NAV_CAUSE_LINK, SCRIPT_NAV_CAUSE_LOCATION, SCRIPT_NAV_CAUSE_RELOAD, SCRIPT_NAV_CAUSE_HISTORY } script_nav_cause;
+typedef enum script_storage_area { SCRIPT_STORAGE_AREA_LOCAL, SCRIPT_STORAGE_AREA_SESSION } script_storage_area;
+typedef enum script_storage_op { SCRIPT_STORAGE_OP_SET, SCRIPT_STORAGE_OP_REMOVE, SCRIPT_STORAGE_OP_CLEAR } script_storage_op;
 typedef struct script_run_h { uint32_t doc, index, gen; } script_run_h;
 typedef struct script_console_h { uint32_t doc, index, gen; } script_console_h;
 typedef struct script_error_h { uint32_t doc, index, gen; } script_error_h;
@@ -23,6 +25,7 @@ typedef struct script_form_field_h { uint32_t doc, index, gen; } script_form_fie
 typedef struct script_observer_h { uint32_t doc, index, gen; } script_observer_h;
 typedef struct script_observation_h { uint32_t doc, index, gen; } script_observation_h;
 typedef struct script_definition_h { uint32_t doc, index, gen; } script_definition_h;
+typedef struct script_storage_h { uint32_t doc, index, gen; } script_storage_h;
 typedef struct script_run { uint32_t gen, live, free_next; dom_node_h elem; script_source source; amb_span url; script_outcome outcome; uint32_t layouts; script_insertion insert; } script_run;
 typedef struct script_console { uint32_t gen, live, free_next; uint32_t run; script_level level; amb_span text; } script_console;
 typedef struct script_error { uint32_t gen, live, free_next; uint32_t run; script_phase phase; amb_span message; } script_error;
@@ -33,6 +36,7 @@ typedef struct script_write { uint32_t gen, live, free_next; uint32_t run; scrip
 typedef struct script_navigation { uint32_t gen, live, free_next; uint32_t run; script_nav_cause cause; amb_span method; amb_span url; dom_node_h form; dom_node_h submitter; amb_span target; net_resource_h resource; uint32_t status; uint32_t fields; } script_navigation;
 typedef struct script_form_field { uint32_t gen, live, free_next; uint32_t navigation; amb_span name; dom_node_h control; } script_form_field;
 typedef struct script_observer { uint32_t gen, live, free_next; uint32_t run; uint8_t disconnected; uint32_t records; uint32_t calls; } script_observer;
+typedef struct script_storage { uint32_t gen, live, free_next; uint32_t run; script_storage_area area; script_storage_op op; amb_span key; uint32_t bytes; uint8_t secret; } script_storage;
 typedef struct script_definition { uint32_t gen, live, free_next; uint32_t run; amb_span name; uint32_t observed; uint8_t connected; uint8_t disconnected; uint8_t attribute_changed; uint32_t upgraded; } script_definition;
 typedef struct script_observation { uint32_t gen, live, free_next; uint32_t observer; uint32_t run; dom_node_h target; uint8_t child_list; uint8_t attributes; uint8_t character_data; uint8_t subtree; uint8_t old_value; uint32_t filter; } script_observation;
 typedef struct script_store_tag { char unused; } script_store_tag;
@@ -50,6 +54,8 @@ const char *script_api_name(script_api x);
 const char *script_req_outcome_name(script_req_outcome x);
 const char *script_write_when_name(script_write_when x);
 const char *script_nav_cause_name(script_nav_cause x);
+const char *script_storage_area_name(script_storage_area x);
+const char *script_storage_op_name(script_storage_op x);
 void script_init(script_runtime *d, uint32_t id);
 uint64_t script_revision(const script_runtime *d);
 int script_check_invariants(const script_runtime *d, FILE *report);
@@ -163,11 +169,27 @@ const char *script_nav_cause_name(script_nav_cause x) {
     case SCRIPT_NAV_CAUSE_LINK: return "link";
     case SCRIPT_NAV_CAUSE_LOCATION: return "location";
     case SCRIPT_NAV_CAUSE_RELOAD: return "reload";
+    case SCRIPT_NAV_CAUSE_HISTORY: return "history";
+    }
+    return "?";
+}
+const char *script_storage_area_name(script_storage_area x) {
+    switch (x) {
+    case SCRIPT_STORAGE_AREA_LOCAL: return "local";
+    case SCRIPT_STORAGE_AREA_SESSION: return "session";
+    }
+    return "?";
+}
+const char *script_storage_op_name(script_storage_op x) {
+    switch (x) {
+    case SCRIPT_STORAGE_OP_SET: return "set";
+    case SCRIPT_STORAGE_OP_REMOVE: return "remove";
+    case SCRIPT_STORAGE_OP_CLEAR: return "clear";
     }
     return "?";
 }
 
-const char script_fingerprint[] = "fnv1a32:7adad931:9195";
+const char script_fingerprint[] = "fnv1a32:c8ec6ee6:9839";
 void script_init(script_runtime *d, uint32_t id) {
     if (d->run_len != 0) abort();
     d->id = id;
@@ -226,6 +248,10 @@ int script_check_invariants(const script_runtime *d, FILE *report) {
         for (uint32_t i = 1; i < d->definition_len; i++) {
             uint32_t r = d->definition[i].run;
             if (d->definition[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->storage_len; i++) {
+            uint32_t r = d->storage[i].run;
+            if (d->storage[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
         }
     }
     return bad;
@@ -307,6 +333,12 @@ void script_export(const script_runtime *d, FILE *out) {
         if (d->definition[i].disconnected == 1) { fputs("script_defines_disconnected(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(").\n", out); }
         if (d->definition[i].attribute_changed == 1) { fputs("script_defines_attribute_changed(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(").\n", out); }
     }
+    for (uint32_t i = 1; i < d->storage_len; i++) {
+        if (!d->storage[i].live) continue;
+        if (1) { fputs("script_storage_write(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(",", out); fputs(script_storage_area_name(d->storage[i].area), out); fputs(",", out); fputs(script_storage_op_name(d->storage[i].op), out); fputs(",", out); text_put(d, out, d->storage[i].key); fputs(").\n", out); }
+        if (1) { fputs("script_storage_by(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(",", out); { uint32_t r = d->storage[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->storage[i].secret == 1) { fputs("script_storage_secret(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(").\n", out); }
+    }
 }
 script_status script_dispatch(script_runtime *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
     size_t p = 0;
@@ -366,10 +398,13 @@ typedef struct store_script_store_tag {
     size_t definition_len, definition_cap;
     uint32_t definition_free;
     own script_definition *definition;
+    size_t storage_len, storage_cap;
+    uint32_t storage_free;
+    own script_storage *storage;
     size_t text_len, text_cap;
     own char *text;
 } store_script_store_tag;
-void store_script_store_tag_drop(store_script_store_tag *s) { free(s->run); free(s->console); free(s->error); free(s->listener); free(s->timer); free(s->request); free(s->write); free(s->navigation); free(s->form_field); free(s->observer); free(s->observation); free(s->definition); free(s->text); }
+void store_script_store_tag_drop(store_script_store_tag *s) { free(s->run); free(s->console); free(s->error); free(s->listener); free(s->timer); free(s->request); free(s->write); free(s->navigation); free(s->form_field); free(s->observer); free(s->observation); free(s->definition); free(s->storage); free(s->text); }
 static void store_script_store_tag__run_grow(store_script_store_tag *s) {
     size_t c = s->run_cap ? 2 * s->run_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -1172,6 +1207,73 @@ size_t store_script_store_tag_definition_len(const store_script_store_tag *s) { 
 size_t store_script_store_tag_definition_count(const store_script_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->definition_len; i++) if (s->definition[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__storage_grow(store_script_store_tag *s) {
+    size_t c = s->storage_cap ? 2 * s->storage_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->storage = (script_storage *)realloc(s->storage, c * sizeof(script_storage));
+    if (!s->storage) abort();
+    s->storage_cap = c;
+}
+script_storage_h store_script_store_tag_storage_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->storage_free) {
+        i = s->storage_free;
+        s->storage_free = s->storage[i].free_next;
+    } else {
+        if (s->storage_len == 0) {
+            if (s->storage_cap == 0) store_script_store_tag__storage_grow(s);
+            memset(&s->storage[0], 0, sizeof(script_storage));
+            s->storage_len = 1;
+        }
+        if (s->storage_len == s->storage_cap) store_script_store_tag__storage_grow(s);
+        i = (uint32_t)s->storage_len;
+        s->storage_len++;
+        s->storage[i].gen = 0;
+    }
+    uint32_t g = s->storage[i].gen;
+    memset(&s->storage[i], 0, sizeof(script_storage));
+    s->storage[i].gen = g;
+    s->storage[i].live = 1;
+    script_storage_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_storage_live(const store_script_store_tag *s, script_storage_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->storage_len && s->storage[h.index].live && s->storage[h.index].gen == h.gen;
+}
+script_storage store_script_store_tag_storage_get(const store_script_store_tag *s, script_storage_h h) {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    return s->storage[h.index];
+}
+script_storage *store_script_store_tag_storage_ref(const store_script_store_tag *s, script_storage_h h) tie s {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    return &s->storage[h.index];
+}
+script_storage *store_script_store_tag_storage_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->storage_len) abort();
+    return &s->storage[i];
+}
+script_storage_h store_script_store_tag_storage_handle(const store_script_store_tag *s, uint32_t i) {
+    script_storage_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->storage_len && s->storage[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->storage[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_storage_free(store_script_store_tag *s, script_storage_h h) {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    s->storage[h.index].live = 0;
+    s->storage[h.index].gen++;
+    s->storage[h.index].free_next = s->storage_free;
+    s->storage_free = h.index;
+}
+size_t store_script_store_tag_storage_len(const store_script_store_tag *s) { return s->storage_len; }
+size_t store_script_store_tag_storage_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->storage_len; i++) if (s->storage[i].live) n++;
     return n;
 }
 static void store_script_store_tag__text_room(store_script_store_tag *s, size_t n) {

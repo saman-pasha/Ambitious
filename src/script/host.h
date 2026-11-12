@@ -11,22 +11,22 @@
 
 /* a host object's kind, in its c slot */
 enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST, HK_COMPUTED, HK_RESPONSE, HK_REQUEST, HK_HEADERS,
-       HK_XHR, HK_FORMDATA, HK_OBSERVER };
+       HK_XHR, HK_FORMDATA, HK_OBSERVER, HK_STORAGE, HK_MQL };
 /* its prototypes, in the host's protos */
 enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_NODELIST,
        HP_HTMLCOLLECTION, HP_DOMRECT, HP_RECTLIST, HP_RESPONSE, HP_REQUEST, HP_HEADERS, HP_XHR, HP_PROGRESS, HP_UIEVENT,
        HP_MOUSEEVENT, HP_POINTEREVENT, HP_KEYBOARDEVENT, HP_FOCUSEVENT, HP_INPUTEVENT, HP_SUBMITEVENT, HP_FORMDATAEVENT,
        HP_POPSTATEEVENT, HP_HASHCHANGEEVENT, HP_BEFOREUNLOADEVENT, HP_FORMDATA, HP_MUTATIONOBSERVER, HP_MUTATIONRECORD, HP_SHADOWROOT,
-       HP_N };
+       HP_STORAGE, HP_STORAGEEVENT, HP_MEDIAQUERYLIST, HP_N };
 
 /* the natives' numbers: script.c's from JS_HOST_NATIVES (1000), fetch.c's from SH_FETCH_FIRST,
    input.c's from SH_INPUT_FIRST, observe.c's from SH_OBSERVE_FIRST, custom.c's from
-   SH_CUSTOM_FIRST. A
+   SH_CUSTOM_FIRST, window.c's from SH_WINDOW_FIRST. A
    literal: in an included header an object-like macro in a declaration is not expanded,
    and the declarations after an enum that used one are not registered (a toolchain
    finding) */
 enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INPUT_END = 1600, SH_OBSERVE_FIRST = 1600, SH_OBSERVE_END = 1700,
-       SH_CUSTOM_FIRST = 1700, SH_CUSTOM_END = 1800 };
+       SH_CUSTOM_FIRST = 1700, SH_CUSTOM_END = 1800, SH_WINDOW_FIRST = 1800, SH_WINDOW_END = 1900 };
 
 /* an event's flags, in its a slot */
 #define EV_STOP 1u
@@ -47,7 +47,7 @@ enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INP
    which is no page's timer */
 #define SH_TASK_REC 0xFFFFFFFDu
 /* the host's tasks */
-enum { SH_TASK_FETCH = 1, SH_TASK_XHR, SH_TASK_BODY, SH_TASK_NOTE, SH_TASK_SCRIPT, SH_TASK_HASH, SH_TASK_NAV };
+enum { SH_TASK_FETCH = 1, SH_TASK_XHR, SH_TASK_BODY, SH_TASK_NOTE, SH_TASK_SCRIPT, SH_TASK_HASH, SH_TASK_NAV, SH_TASK_TRAVERSE };
 
 /* ---- script.c's, for the other units ---- */
 /* the DOM read: an element; an HTML element of a name; a script element; an attribute of
@@ -146,6 +146,15 @@ jv script_custom_create(js_vm *vm, uint32_t def);
 uint32_t script_shadow_host(const dom_document *d, uint32_t x);
 uint32_t script_event_parent(const dom_document *d, uint32_t x, uint32_t target, int composed);
 uint32_t script_retarget(const dom_document *d, uint32_t a, uint32_t b);
+/* ---- window.c's: history, storage, screen, matchMedia ---- */
+void script_window_setup(js_vm *vm);
+jv script_window_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
+void script_window_task(js_vm *vm, uint32_t kind, uint32_t arg);
+/* a Storage object's keys as its properties */
+jv script_storage_named(js_vm *vm, uint32_t o, uint32_t atom, int *handled);
+int script_storage_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
+/* localStorage written back to the profile's storage file, when it changed */
+void script_storage_save(js_vm *vm);
 /* a form's named property: the element it owns of that id or name (handled), else none */
 jv script_form_named(js_vm *vm, uint32_t form, uint32_t atom, int *handled);
 /* the input unit's host tasks: hashchange, a form's planned navigation */

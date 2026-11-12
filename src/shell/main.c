@@ -549,6 +549,12 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     layout_init(lt, 1);
     net_init(nt, 1);
     loader_keep(s, nt);
+    /* localStorage kept in the profile's directory; a private session's for the run */
+    if (!s->private_mode && s->profile[0]) {
+        char stfile[1100];
+        snprintf(stfile, sizeof stfile, "%s/storage", s->profile);
+        script_storage_file(vm, stfile);
+    }
     a11y_init(ax, 1);
     script_init(sr, 1);
     net_resource_h ph = net_fetch(nt, url, strlen(url), NET_KIND_DOCUMENT);

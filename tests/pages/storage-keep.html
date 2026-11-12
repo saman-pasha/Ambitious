@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>storage kept</title>
+<!-- localStorage kept in the profile between runs (src/script/window.c): each run counts one
+     visit more; a private session's starts again (tests/integ/script-window.sh). -->
+</head>
+<body>
+<script>
+  var n = Number(localStorage.getItem('visits') || 0) + 1;
+  localStorage.setItem('visits', String(n));
+  localStorage.setItem('line', 'tab\there\nand a newline \\ backslash');
+  sessionStorage.setItem('visits', 'not kept');
+  console.log('visits ' + localStorage.getItem('visits') + ', ' + JSON.stringify(localStorage.getItem('line')) + ', ' + localStorage.length);
+</script>
+</body></html>

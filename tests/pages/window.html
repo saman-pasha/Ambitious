@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>window</title>
+<!-- The window's own (src/script/window.c), served by tests/integ/script-serve.py: screen and
+     the window's sizes, navigator's fields (its user agent aside), matchMedia's answers and
+     serializations, history (pushState and replaceState with their states' clones and their
+     refusals, back and forward with popstate), localStorage and sessionStorage (their methods,
+     their keys as properties, StorageEvent; the order of many keys is Chromium's hash's, so
+     only one is asked for by its place). A console line each, against Chromium's
+     (tests/pages/window.chromium). The authToken stored looks like a credential (the
+     reasoner says so). -->
+</head>
+<body>
+<script>
+  function p() { console.log(Array.prototype.join.call(arguments, ' ')); }
+  var s = screen;
+  p('screen', JSON.stringify([s.width, s.height, s.availWidth, s.availHeight, s.availLeft, s.availTop, s.colorDepth, s.pixelDepth, s.orientation.type, s.orientation.angle, s.isExtended]));
+  /* outerWidth and outerHeight left out: the headless shell's are 0 or the viewport's, by the run */
+  p('window', JSON.stringify([innerWidth, innerHeight, screenX, screenY, screenLeft, screenTop, devicePixelRatio, scrollX, scrollY]));
+  var n = navigator;
+  p('navigator', JSON.stringify([n.language, n.languages, n.platform, n.cookieEnabled, n.onLine, n.vendor, n.vendorSub, n.product, n.productSub, n.appName, n.appCodeName, n.maxTouchPoints, n.doNotTrack, n.pdfViewerEnabled, typeof n.userAgent, typeof n.hardwareConcurrency]));
+  ['(min-width: 500px)', '(max-width: 500px)', '(width: 800px)', '(orientation: landscape)', '(orientation: portrait)', '(prefers-color-scheme: dark)', '(prefers-color-scheme: light)',
+   '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)', 'screen', 'print', 'not print', 'not screen', 'screen and (min-height: 700px)', '(min-aspect-ratio: 4/3)',
+   '(max-aspect-ratio: 1/1)', '(hover: hover)', '(pointer: coarse)', '(width >= 600px)', '(400px < width < 1000px)', '(width < 400px)', '(min-resolution: 1dppx)', '(min-resolution: 2dppx)',
+   '(color)', '(monochrome)', '', '(min-width: 30em)', '(max-width: 49em)', '(prefers-contrast: no-preference)', '(forced-colors: none)', '(scripting: enabled)', '(height: 600px)',
+   'all and (max-width: 799px), (max-height: 600px)', 'SCREEN AND (MIN-WIDTH:500PX)', 'only screen and (max-width: 1000px)', '(max-width: 799.5px)', 'garbage('].forEach(function (q) {
+    var m = matchMedia(q);
+    p(JSON.stringify(q), m.matches, JSON.stringify(m.media), m instanceof MediaQueryList, m.onchange);
+  });
+  var mq = matchMedia('(min-width: 1px)');
+  mq.addEventListener('change', function () { p('never'); });
+  mq.addListener(function () { p('never'); });
+  console.log('-- history');
+  p('at load', history.length, history.state, history.scrollRestoration, location.pathname + location.search + location.hash);
+  var st = { n: 1, list: [1, 'two', { three: 3 }], text: 'x' };
+  history.pushState(st, '', '/window.html?step=2#two');
+  p('pushed', history.length, JSON.stringify(history.state), history.state === st, history.state === history.state, location.pathname + location.search + location.hash);
+  history.replaceState('plain', '', 'window.html?step=3');
+  p('replaced', history.length, JSON.stringify(history.state), location.search, location.hash);
+  history.pushState(null, '', '#frag');
+  p('pushed a fragment', history.length, history.state, location.hash);
+  [[{}, 'http://localhost:1/other'], [function () {}, null], [{ f: function () {} }, null]].forEach(function (a) {
+    try { history.pushState(a[0], '', a[1]); p('pushed'); } catch (e) { p(e.name + (e.name === 'SecurityError' ? ': ' + e.message.replace(/:\d+\//g, ':PORT/') : '')); }
+  });
+  var steps = [
+    function () { history.back(); },
+    function () { history.back(); },
+    function () { history.forward(); },
+    function () { storage(); }
+  ];
+  var at = 0;
+  window.addEventListener('popstate', function (e) {
+    p('popstate', JSON.stringify(e.state), history.length, location.search + location.hash, e instanceof PopStateEvent, e.bubbles, e.cancelable);
+    steps[at++]();
+  });
+  steps[at++]();
+  function storage() {
+    console.log('-- storage');
+    p('empty', localStorage.length, sessionStorage.length, localStorage.getItem('a'), localStorage.key(0), localStorage instanceof Storage, typeof StorageEvent);
+    localStorage.setItem('a', 1);
+    p('the first key', localStorage.key(0), localStorage.key(1));
+    localStorage.setItem('b', { toString: function () { return 'bee'; } });
+    localStorage.c = 'see';
+    sessionStorage.setItem('a', 'session');
+    p('set', localStorage.length, localStorage.getItem('a'), typeof localStorage.getItem('a'), localStorage.b, localStorage.c, localStorage.key(5), sessionStorage.a);
+    localStorage.setItem('a', 'again');
+    localStorage.removeItem('b');
+    localStorage.removeItem('missing');
+    p('changed', localStorage.length, localStorage.getItem('a'), localStorage.getItem('b'), localStorage.b, localStorage.missing);
+    localStorage.setItem('authToken', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl');
+    localStorage.setItem('theme', 'dark');
+    try { localStorage.setItem('only'); } catch (e) { p(e.name + ': ' + e.message); }
+    sessionStorage.clear();
+    p('cleared session', sessionStorage.length, localStorage.length);
+    var ev = new StorageEvent('storage', { key: 'k', newValue: 'v' });
+    p('event', ev.type, ev.key, ev.oldValue, ev.newValue, JSON.stringify(ev.url), ev.storageArea, ev instanceof Event);
+    localStorage.clear();
+    p('cleared', localStorage.length);
+  }
+</script>
+</body></html>

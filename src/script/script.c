@@ -1021,7 +1021,7 @@ void sh_page_url(js_vm *vm, char *out, size_t cap) {
     amb_span u = h->nt->resource[h->page].final_url;
     snprintf(out, cap, "%.*s", (int)u.len, text_ptr(h->nt, u));
 }
-static void sh_page_url_v(js_vm *vm, vector<char> *out) {
+void sh_page_url_v(js_vm *vm, vector<char> *out) {
     char u[8400];
     sh_page_url(vm, u, sizeof u);
     clear(*out);
@@ -1655,6 +1655,18 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     if (!vm->host || !vm->host->ready) return JV_UNDEF;
     uint32_t kind = vm->objs[o].c;
     uint32_t ha1 = sh_name_of(vm, atom);
+    /* a node's, the most read, first */
+    if (kind == HK_NODE) {
+        uint32_t x = sh_node(vm, jv_obj(o), 0);
+        if (!x) { *handled = 1; return JV_HOLE; }
+        /* a form's controls by their names, before its own properties */
+        if (sh_is_form(vm->host, x)) {
+            jv el = script_form_named(vm, x, atom, handled);
+            if (*handled) return el;
+        }
+        if (!ha1) return JV_UNDEF;
+        return sh_node_get(vm, x, ha1 - 1, handled);
+    }
     if (kind == HK_EVENT) {
         uint32_t f = vm->objs[o].a;
         if ((f & EV_LAZYPOINT) && !ha1) {
@@ -1673,6 +1685,7 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     }
     if (kind == HK_LIST) return sh_lc_prop(vm, o, atom, ha1, handled);
     if (kind >= HK_RESPONSE && kind <= HK_XHR) return script_fetch_get(vm, o, atom, handled);
+    if (kind == HK_STORAGE) return script_storage_named(vm, o, atom, handled);
     if (kind == HK_COMPUTED) {
         /* a computed style's property: its resolved value, by its name camel-cased or as CSS
            writes it; the empty string for a property the cascade does not compute */
@@ -1690,17 +1703,7 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         script_view_style(vm->host, x, data(prop), len(prop), &v);
         return sh_str(vm, data(v), len(v));
     }
-    if (kind == HK_NODE) {
-        uint32_t x = sh_node(vm, jv_obj(o), 0);
-        if (!x) { *handled = 1; return JV_HOLE; }
-        /* a form's controls by their names, before its own properties */
-        if (sh_is_form(vm->host, x)) {
-            jv el = script_form_named(vm, x, atom, handled);
-            if (*handled) return el;
-        }
-        if (!ha1) return JV_UNDEF;
-        return sh_node_get(vm, x, ha1 - 1, handled);
-    }
+
     if (kind == HK_CLASSLIST || kind == HK_STYLE || kind == HK_DATASET) {
         uint32_t x = sh_owner(vm, o);
         if (!x) { *handled = 1; return JV_HOLE; }
@@ -1803,6 +1806,7 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
         sh_dom_error(vm, "NoModificationAllowedError", msg);
         return 0;
     }
+    if (kind == HK_STORAGE) return script_storage_set(vm, o, atom, v, handled);
     /* a collection's items and length have no setter: a write to one does nothing */
     if (kind == HK_LIST) {
         uint32_t idx;
@@ -2002,6 +2006,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     if (id >= SH_INPUT_FIRST && id < SH_INPUT_END) return script_input_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_OBSERVE_FIRST && id < SH_OBSERVE_END) return script_observe_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_CUSTOM_FIRST && id < SH_CUSTOM_END) return script_custom_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_WINDOW_FIRST && id < SH_WINDOW_END) return script_window_call(vm, id, callee, thisv, args, argc, handled);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
     /* location's: its href (a hidden part), navigations by it */
     if (id == H_LOC_STRING || id == H_LOC_HREF_GET || id == H_LOC_HASH_GET) {
@@ -2036,6 +2041,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         if (kind >= SH_TASK_FETCH && kind <= SH_TASK_NOTE) script_fetch_task(vm, kind, arg);
         else if (kind == SH_TASK_SCRIPT) sh_run_pending(vm, arg);
         else if (kind == SH_TASK_HASH || kind == SH_TASK_NAV) script_input_task(vm, kind, arg);
+        else if (kind == SH_TASK_TRAVERSE) script_window_task(vm, kind, arg);
         return JV_UNDEF;
     }
     /* the window's own */
@@ -2723,6 +2729,7 @@ static void sh_ready(js_vm *vm) {
     script_input_setup(vm);
     script_observe_setup(vm);
     script_custom_setup(vm);
+    script_window_setup(vm);
     sh_method(vm, h->protos[HP_SHADOWROOT], "getElementById", H_BY_ID, 1);
     js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
     js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(h->view_h), JS_SHAPE_HIDDEN);
@@ -2750,7 +2757,20 @@ static void sh_ready(js_vm *vm) {
     js_define(vm, g, js_atom_ascii(vm, "location"), jv_obj(loc), JS_SHAPE_HIDDEN);
     uint32_t nav = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     js_define(vm, nav, js_atom_ascii(vm, "userAgent"), sh_cstr(vm, "Ambitious/0.1 (a reasoning-native browser)"), 0);
-    js_define(vm, nav, js_atom_ascii(vm, "language"), sh_cstr(vm, "en"), 0);
+    /* Chromium's headless shell's, but its user agent, which is Ambitious's own */
+    js_define(vm, nav, js_atom_ascii(vm, "language"), sh_cstr(vm, "en-US"), 0);
+    uint32_t langs = js_array_new(vm, 0);
+    js_array_push(vm, langs, sh_cstr(vm, "en-US"));
+    js_define(vm, nav, js_atom_ascii(vm, "languages"), jv_obj(langs), 0);
+    static const char *const nk[] = { "platform", "vendor", "vendorSub", "product", "productSub", "appName", "appCodeName" };
+    static const char *const nv[] = { "Linux x86_64", "Google Inc.", "", "Gecko", "20030107", "Netscape", "Mozilla" };
+    for (int i = 0; i < 7; i++) js_define(vm, nav, js_atom_ascii(vm, nk[i]), sh_cstr(vm, nv[i]), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "cookieEnabled"), JV_TRUE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "onLine"), JV_TRUE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "pdfViewerEnabled"), JV_FALSE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "maxTouchPoints"), jv_num(0), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "hardwareConcurrency"), jv_num(4), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "doNotTrack"), JV_NULL, 0);
     js_define(vm, g, js_atom_ascii(vm, "navigator"), jv_obj(nav), JS_SHAPE_HIDDEN);
 }
 
@@ -3275,6 +3295,8 @@ void script_settle(js_vm *vm) {
         if (l.attr != 2 || !l.rec || !h->rt->listener[l.rec].live) continue;
         if (sh_prop_handler(vm, l.target, l.type) == JV_UNDEF) listener_free(h->rt, listener_handle(h->rt, l.rec));
     }
+    /* localStorage kept in the profile */
+    script_storage_save(vm);
     /* the nodes no tree holds: destroyed, their subtrees with them */
     dom_document *d = h->d;
     for (uint32_t x = 2; x < d->node_len; x++) {

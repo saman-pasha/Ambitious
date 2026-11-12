@@ -93,6 +93,11 @@ typedef struct sh_cdef {
 } sh_cdef;
 /* an element's custom element state: the node and its generation, its definition, its state */
 typedef struct sh_cel { uint32_t node, gen, def, state, conn, spare; } sh_cel;
+/* a session history entry (src/script/window.c): its URL in the host's history text, whether
+   it is the page's document's (the blank entry is not), its state */
+typedef struct sh_hent { uint32_t uoff, ulen, doc, spare; jv state; } sh_hent;
+/* a stored item: its area (1 local, 2 session), origin, key and value in the storage text */
+typedef struct sh_item { uint32_t area, ooff, olen, koff, klen, voff, vlen, live; } sh_item;
 /* the changes of one call grouped as a record is, while the log is read */
 typedef struct sh_mgroup {
     uint32_t type, target, prev, pgen, next, ngen, name, ns;
@@ -122,6 +127,8 @@ int script_action(js_vm *vm, uint32_t kind, uint32_t x, const char *text, size_t
 /* the encoding the document was decoded with, by its name (the parser's record): its
    forms submit in it, document.characterSet names it. Unset, UTF-8 */
 void script_charset(js_vm *vm, const char *name, size_t n);
+/* where localStorage is kept: the profile's storage file (unset: for the run only) */
+void script_storage_file(js_vm *vm, const char *path);
 
 /* the host: a command's, beside its stores. Declared after the prototypes above: a
    prototype after a vector<T> in a header is not registered (PLAN.md's toolchain
@@ -207,6 +214,14 @@ struct js_host {
     vector<uint32_t> cmap, cstack, cwait;
     vector<char> ctext;
     uint32_t ce_pos, in_reactions, registry, spare5;
+    /* the window (src/script/window.c): the session history, its URLs, the current entry
+       and the array that keeps the states; the stored items, their text, the profile's
+       storage file, whether it was read and whether localStorage changed since */
+    vector<sh_hent> hents;
+    vector<char> htext;
+    uint32_t hcur, hstates, sloaded, sdirty;
+    vector<sh_item> items;
+    vector<char> stext, spath;
     double mouse_x, mouse_y;
     jv click_ev;
     vector<char> fvalue;
@@ -236,6 +251,8 @@ struct js_host {
     vector_char_drop(&(h).docurl); vector_char_drop(&(h).nav_url); vector_char_drop(&(h).nav_body); \
     vector_char_drop(&(h).nav_ctype); vector_sh_mo_drop(&(h).mos); vector_sh_mreg_drop(&(h).mregs); vector_sh_mrec_drop(&(h).mrecs); \
     vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter); vector_sh_cdef_drop(&(h).cdefs); vector_sh_cel_drop(&(h).cels); \
-    vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext)
+    vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext); \
+    vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
+    vector_char_drop(&(h).spath)
 
 #endif

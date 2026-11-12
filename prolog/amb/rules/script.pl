@@ -16,7 +16,8 @@
    script_observer/2, script_observer_disconnected/1, script_observer_delivered/3, script_observation/4,
    script_observes_children/1, script_observes_attributes/2, script_observes_data/1, script_observes_subtree/1,
    script_observes_old_values/1, script_definition/3, script_definition_observes/2, script_definition_upgraded/2,
-   script_defines_connected/1, script_defines_disconnected/1, script_defines_attribute_changed/1.
+   script_defines_connected/1, script_defines_disconnected/1, script_defines_attribute_changed/1,
+   script_storage_write/4, script_storage_by/2, script_storage_secret/1.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -129,6 +130,14 @@ script_rules_kept_name('font-face-format').
 script_rules_kept_name('font-face-name').
 script_rules_kept_name('missing-glyph').
 
+%% a credential kept in Web Storage: every script of the origin reads it, an injected one
+%% too, and localStorage keeps it past the session (an HttpOnly cookie keeps it from scripts)
+script_storage_credential(S, Area, Key) :-
+    script_storage_write(S, Area, set, Key), script_storage_secret(S).
+
+script_diag(storage_credential, S, Text) :-
+    script_storage_credential(S, Area, Key), script_storage_by(S, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w stored a value that looks like a credential in ~wStorage under ~q: every script of the origin can read it there (an HttpOnly cookie keeps it from scripts)', [Where, Area, Key]).
 script_diag(custom_element_undefined, N, Text) :-
     script_custom_undefined(N, Name),
     format(atom(Text), 'the <~w> element\'s name is a custom element\'s, but no script defines it (customElements.define): it stays an HTMLElement with no behaviour of its own', [Name]).

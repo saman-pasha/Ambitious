@@ -46,7 +46,10 @@ script_contract(enum(req_outcome, [ok, http_error, opaque, failed, blocked, abor
 script_contract(enum(write_when, [parsing, after_load, ignored])).
 %% what navigated the page: a form's submission, a link followed, location set (assign,
 %% replace, href), a reload
-script_contract(enum(nav_cause, [form, link, location, reload])).
+script_contract(enum(nav_cause, [form, link, location, reload, history])).
+%% a Storage's area, and what a write did
+script_contract(enum(storage_area, [local, session])).
+script_contract(enum(storage_op, [set, remove, clear])).
 
 script_contract(record(run, [
     field(elem,    xhandle(dom, node)),     % the <script> element, or the element of the on* attribute
@@ -127,6 +130,17 @@ script_contract(record(observer, [
     field(records,      u32),
     field(calls,        u32)
 ])).
+%% a write to localStorage or sessionStorage (src/script/window.c): the script, the area,
+%% what it did, the key's name and the value's length, never the value; whether the value
+%% looked like a credential (a JWT, a token under a key named for one)
+script_contract(record(storage, [
+    field(run,    ref(run)),
+    field(area,   enum(storage_area)),
+    field(op,     enum(storage_op)),
+    field(key,    span(text)),
+    field(bytes,  u32),
+    field(secret, bool)
+])).
 %% a custom element definition (src/script/custom.c): the script that defined it, the
 %% name, how many attributes it observes, which lifecycle callbacks its class has, how
 %% many elements its definition and their insertion upgraded
@@ -164,11 +178,13 @@ script_contract(handle(form_field, sf)).
 script_contract(handle(observer, sm)).
 script_contract(handle(observation, so)).
 script_contract(handle(definition, sd)).
+script_contract(handle(storage, ss)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), table(request), table(write),
-    table(navigation), table(form_field), table(observer), table(observation), table(definition), pool(text)])).
+    table(navigation), table(form_field), table(observer), table(observation), table(definition), table(storage), pool(text)])).
+script_contract(owns(runtime, storage, store)).
 script_contract(owns(runtime, definition, store)).
 script_contract(owns(runtime, run, store)).
 script_contract(owns(runtime, console, store)).
@@ -231,6 +247,11 @@ script_contract(fact(script_definition_upgraded(handle, field(upgraded)), table(
 script_contract(fact(script_defines_connected(handle), table(definition), field(connected) == true)).
 script_contract(fact(script_defines_disconnected(handle), table(definition), field(disconnected) == true)).
 script_contract(fact(script_defines_attribute_changed(handle), table(definition), field(attribute_changed) == true)).
+%% each storage write: its area, what it did, the key; whether the value looked secret
+script_contract(fact(script_storage_write(handle, field(area), field(op), field(key)), table(storage), true)).
+script_contract(fact(script_storage_by(handle, field(run)), table(storage), true)).
+script_contract(fact(script_storage_secret(handle), table(storage), field(secret) == true)).
+script_contract(derived(script_storage_credential/3, 'a value that looks like a credential a script stored, its area and its key')).
 script_contract(derived(script_custom_undefined/2, 'an element in the document whose name is a custom element\'s that no script defined, and its name')).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).

@@ -29,6 +29,7 @@ while [ ! -s "$work/port" ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
 port=$(head -1 "$work/port")
 served() { name=$1; shift; node "$AMB_ROOT/tools/bench/console-actions.js" "http://127.0.0.1:$port/$name.html" "$@" | sed "s/:$port\b/:PORT/g" > "$pages/$name.chromium" && echo "wrote $name.chromium"; }
 served fetch
+served window
 norm() { sed -e "s/:$port\b/:PORT/g" -e 's/----[A-Za-z]*FormBoundary[A-Za-z0-9]*/BOUNDARY/g'; }
 : > "$work/form.txt"
 while read -r q acts; do
