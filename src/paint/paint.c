@@ -1872,6 +1872,31 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
     }
 }
 
+/* a disclosure marker (a details element's summary's, list-style-type disclosure-closed or -open), drawn as Chromium
+   draws it: a triangle in a square of 0.66em whose bottom is on the baseline, pointing to the end (an equilateral
+   one, from the square's start) or down (centred in it); 1 when the fragment is one */
+static int pt_disclosure(const layout_tree *t, uint32_t fr, amb_canvas *c, vector<float> *acc) {
+    amb_span sp = t->frag[fr].text;
+    if (sp.len != 3) return 0;
+    const char *s = text_ptr(t, sp);
+    if ((uint8_t)s[0] != 0xE2 || (uint8_t)s[1] != 0x96 || ((uint8_t)s[2] != 0xB8 && (uint8_t)s[2] != 0xBE)) return 0;
+    int open = (uint8_t)s[2] == 0xBE;
+    double sz = floor(0.66 * t->frag[fr].size * 64) / 64, x0 = t->frag[fr].x, y0 = t->frag[fr].baseline - sz;
+    vector<double> xs, ys;
+    if (open) {
+        double inset = sz * (1 - 0.8660254) / 2;
+        push_back(xs, x0); push_back(ys, y0 + inset);
+        push_back(xs, x0 + sz); push_back(ys, y0 + inset);
+        push_back(xs, x0 + sz / 2); push_back(ys, y0 + sz - inset);
+    } else {
+        push_back(xs, x0); push_back(ys, y0);
+        push_back(xs, x0 + sz * 0.8660254); push_back(ys, y0 + sz / 2);
+        push_back(xs, x0); push_back(ys, y0 + sz);
+    }
+    pt_poly(c, &xs, &ys, t->frag[fr].fill, acc);
+    return 1;
+}
+
 /* an inline fragment's decorations: its box of them (the element as one strip, CSS Backgrounds 3's slice) drawn
    clipped to the fragment where the strip breaks -- not at the strip's own ends, where its shadows reach out */
 static void pt_inline_piece(const layout_tree *t, const net_loader *nt, uint32_t fr, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx) {
@@ -1900,6 +1925,7 @@ static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb
                 continue;
             }
             if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
+            if (k == LAYOUT_FRAG_KIND_MARKER && pt_disclosure(t, fr, c, acc)) continue;
             /* a fragment outside the canvas's window: nothing of it to draw */
             if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
             amb_span sp = t->frag[fr].text;

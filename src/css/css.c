@@ -169,6 +169,9 @@ static const char css_ua_sheet[] =
     "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace }\n"
     "legend { padding-left: 2px; padding-right: 2px }\n"
     "details, summary { display: block }\n"
+    /* a details element's summary: a list item with its disclosure triangle inside (HTML 15.5.17, Chromium's sheet) */
+    "details > summary:first-of-type { display: list-item; counter-increment: list-item 0; list-style: disclosure-closed inside }\n"
+    "details[open] > summary:first-of-type { list-style-type: disclosure-open }\n"
     /* a closed details element shows its first summary alone (HTML 15.5.17; its text
        directly inside is layout's to pass over); a dialog without open is not drawn, and
        an open one is Chromium's box: absolutely positioned, centred, its own border and
@@ -802,7 +805,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "max-width", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
     { "max-height", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
     { "list-style-type", 1, G_KW, 0, "none disc circle square decimal decimal-leading-zero lower-roman upper-roman lower-alpha "
-      "upper-alpha lower-latin upper-latin lower-greek", "disc" },
+      "upper-alpha lower-latin upper-latin lower-greek disclosure-open disclosure-closed", "disc" },
     { "list-style-position", 1, G_KW, 0, "outside inside", "outside" },
     { "font-family", 1, G_FAMILY, 0, 0, "serif" },
     { "box-sizing", 0, G_KW, 0, "content-box border-box", "content-box" },

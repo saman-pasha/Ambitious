@@ -183,6 +183,7 @@ typedef struct lay_style {
     uint32_t color, fill, bg, bc[4];
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
+    int list_inside;                /* list-style-position: inside */
     int lhn;                        /* line-height is normal */
     uint32_t font;                  /* a web font's resource (the loader's), 0 for a built-in face */
     double ls, wsp;                 /* letter-spacing, word-spacing: px */
@@ -441,7 +442,9 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
               lay_w(w, "decimal") || lay_w(w, "decimal-leading-zero") ? 4 :
               lay_w(w, "lower-alpha") || lay_w(w, "lower-latin") || lay_w(w, "lower-greek") ? 5 :
               lay_w(w, "upper-alpha") || lay_w(w, "upper-latin") ? 6 : lay_w(w, "lower-roman") ? 7 :
-              lay_w(w, "upper-roman") ? 8 : 1;
+              lay_w(w, "upper-roman") ? 8 : lay_w(w, "disclosure-closed") ? 9 : lay_w(w, "disclosure-open") ? 10 : 1;
+    lay_word_of(st, cv[CSS_PROP_LIST_STYLE_POSITION], w);
+    s->list_inside = lay_w(w, "inside");
     for (int k = 0; k < 4; k++) {
         s->m[k] = lay_len_at(st, cv[CSS_PROP_MARGIN_TOP + k]);
         s->p[k] = lay_len_at(st, cv[CSS_PROP_PADDING_TOP + k]);
@@ -1576,6 +1579,7 @@ static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height
                               int *empty);
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
 static int lay_decorated(LCTX, uint32_t el, const lay_style *es);
+static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls);
 static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw);
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
 static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
@@ -3264,8 +3268,10 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
     vector<uint32_t> later;           /* floats too wide for the line they are met on: placed below it */
     size_t i = 0, np = len(ps);
     double y = 0;
-    /* text-indent: the first line of the block's first run, from its start edge */
+    /* text-indent: the first line of the block's first run, from its start edge; a list item's marker inside it
+       before that line's content */
     double indent = first == 0 ? lay_res(st, bs.indent, w) : 0;
+    if (first == 0 && bs.display == D_LIST_ITEM) indent += lay_marker_inside(LARGS, container, &bs);
     while (i < np) {
         while (i < np && at(ps, i).kind == P_SPACE && !at(ps, i).keep) i++;
         if (i >= np) break;
@@ -3386,6 +3392,57 @@ static uint32_t lay_first_line(const layout_tree *t, uint32_t b, uint32_t *owner
     return 0;
 }
 
+/* a list item's marker: its text (a symbol's character, or its ordinal and a full stop) into txt, its length */
+static size_t lay_marker_text(LCTX, uint32_t el, int list, char *txt, size_t cap) {
+    size_t tn = 0;
+    uint32_t cp = 0;
+    if (list == 1) cp = 0x2022;
+    else if (list == 2) cp = 0x25E6;
+    else if (list == 3) cp = 0x25AA;
+    else if (list == 9) cp = 0x25B8;     /* disclosure-closed: a small triangle pointing to the end */
+    else if (list == 10) cp = 0x25BE;    /* disclosure-open: one pointing down */
+    if (cp) {
+        txt[0] = (char)(0xE0 | cp >> 12);
+        txt[1] = (char)(0x80 | (cp >> 6 & 0x3F));
+        txt[2] = (char)(0x80 | (cp & 0x3F));
+        txt[3] = 0;
+        return 3;
+    }
+    /* its ordinal: its place among its parent's list items, from the list's start */
+    uint32_t parent = d->node[el].parent;
+    long ord = lay_attr_int(d, parent, "start", 1);
+    for (uint32_t c = d->node[parent].first_child; c && c != el; c = d->node[c].next_sibling)
+        if (lay_display_of(LARGS, c) == D_LIST_ITEM) ord++;
+    ord = lay_attr_int(d, el, "value", ord);
+    char num[24];
+    if (list == 4) snprintf(num, sizeof num, "%ld", ord);
+    else if (list == 5 || list == 6) {
+        long v = ord;
+        char rev[16];
+        size_t k = 0;
+        while (v > 0 && k < sizeof rev) { v--; rev[k++] = (char)((list == 5 ? 'a' : 'A') + v % 26); v /= 26; }
+        for (size_t i = 0; i < k; i++) num[i] = rev[k - 1 - i];
+        num[k] = 0;
+    } else lay_roman(ord, list == 8, num, sizeof num);
+    tn = (size_t)snprintf(txt, cap, "%s.", num);
+    return tn;
+}
+/* the room a marker inside its list item's first line takes before the content, as Chromium gives it: a disc's,
+   circle's or square's its font size and a third of its ascent, one more; a disclosure triangle's its square of
+   0.66em and 0.4em after it; an ordinal's its text and a space */
+static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls) {
+    if (!ls->list || !ls->list_inside || (el & LAY_GEN)) return 0;
+    lay_style sm = *ls;
+    lay_pseudo_style(LARGS, el, CSS_PSEUDO_MARKER, &sm);
+    if (ls->list <= 3) return sm.fs + 1 + floor(floor(sm.asc + 0.5) / 3 + 0.5);
+    /* a disclosure triangle: its square of 0.66em and 0.4em after it, each in Chromium's 1/64 px */
+    if (ls->list >= 9) return floor(0.66 * sm.fs * 64) / 64 + floor(0.4 * sm.fs * 64) / 64;
+    char txt[32];
+    size_t tn = lay_marker_text(LARGS, el, ls->list, txt, sizeof txt - 1);
+    txt[tn++] = ' ';
+    return amb_text_width(f, sm.face, sm.fs, txt, tn);
+}
+
 static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     if (ls->list == 0 || (el & LAY_GEN)) return;
     /* the marker's style: its ::marker's, or the list item's */
@@ -3400,6 +3457,8 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     if (sm.list == 1) cp = 0x2022;
     else if (sm.list == 2) cp = 0x25E6;
     else if (sm.list == 3) cp = 0x25AA;
+    else if (sm.list == 9) cp = 0x25B8;
+    else if (sm.list == 10) cp = 0x25BE;
     if (cp) {
         txt[0] = (char)(0xE0 | cp >> 12);
         txt[1] = (char)(0x80 | (cp >> 6 & 0x3F));
@@ -3425,10 +3484,12 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
         } else lay_roman(ord, sm.list == 8, num, sizeof num);
         tn = (size_t)snprintf(txt, sizeof txt, "%s.", num);
     }
-    /* outside the content, its right end half an em before the list item's content box */
+    /* outside the content, its right end half an em before the list item's content box; inside, at its first line's
+       start, which the line's indent left it (when that line is the item's own, or an anonymous block's in it) */
     double mw = amb_text_width(f, sm.face, sm.fs, txt, tn);
     double off_x = 0;
     for (uint32_t x = owner; x && x != b; x = t->box[x].parent) off_x += t->box[x].x;
+    int inside = ls->list_inside && (owner == b || (t->box[owner].kind == LAYOUT_BOX_KIND_ANONYMOUS && t->box[owner].parent == b));
     amb_span sp = text_add(t, txt, tn);
     layout_frag_h fh = frag_new(t);
     uint32_t fr = fh.index;
@@ -3436,7 +3497,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     t->frag[fr].kind = LAYOUT_FRAG_KIND_MARKER;
     t->frag[fr].node = node_handle(d, el);
     t->frag[fr].text = sp;
-    t->frag[fr].x = -off_x - t->line[ln].x - mw - sm.fs * 0.5;
+    t->frag[fr].x = inside ? -off_x - t->line[ln].x + lay_res(st, ls->indent, t->box[b].w) : -off_x - t->line[ln].x - mw - sm.fs * 0.5;
     t->frag[fr].y = base - sm.asc;
     t->frag[fr].w = mw;
     t->frag[fr].h = sm.asc + sm.desc;
