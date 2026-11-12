@@ -28,7 +28,7 @@ typedef struct amb_ending {
     char why[240];           /* "exited 2", "killed by its syscall filter (SIGSYS)", ... */
 } amb_ending;
 
-/* the sandbox as AMB_SANDBOX (1: on), AMB_REASON_MEM (bytes, or with K, M or G),
+/* the sandbox as AMB_SANDBOX (0: none), AMB_REASON_MEM (bytes, or with K, M or G),
    AMB_REASON_CPU and AMB_REASON_TIMEOUT (seconds), AMB_REASON_FILES and
    AMB_REASON_FSIZE set it, else its defaults; dir its working directory, made 0700 */
 void amb_sandbox_init(amb_sandbox *sb, const char *dir);

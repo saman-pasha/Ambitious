@@ -5,6 +5,11 @@
  *                                 validated and applied, the change seen in a second
  *                                 snapshot, an old batch refused, and the reasoner's
  *                                 answers checked against the C side's own traversal
+ *   ambitious loop - | loop FILE  a session: its commands a line each, from the standard
+ *                                 input or FILE (session_page, below, lists them), over
+ *                                 a page and a reasoner kept for the session, which is
+ *                                 sent each snapshot as a delta from the one it holds
+ *   ambitious sandbox             the reasoner's sandbox, as a child given it finds it
  *   ambitious snapshot FILE       the demo document's snapshot, written to FILE
  *   ambitious load PAGE           a page fetched with what it asks for: each resource
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
@@ -43,7 +48,11 @@
  * names came from, ID references).
  *
  * The reasoner is cocolog over prolog/amb/reason.pl, a process of its own: the
- * engine hands it a snapshot file and reads back text. AMB_ROOT and AMB_COCOLOG
+ * engine hands it a snapshot file and reads back text, or keeps it for a session
+ * and speaks to it over its pipes (src/rt/amb_proc.c). It runs in a sandbox, and so
+ * does the profile's keeper: limits, no network, a syscall filter, and one
+ * directory to write in (AMB_SANDBOX=0 runs them without; AMB_REASON_MEM, _CPU,
+ * _TIMEOUT, _FILES and _FSIZE set its limits). AMB_ROOT and AMB_COCOLOG
  * (toolchain/env.sh, or bin/ambitious) say where they are; AMB_WORK names the
  * directory for the session's files (default $TMPDIR/ambitious-PID). */
 #include <stdio.h>
@@ -113,10 +122,13 @@ static int session_open(session *s) {
     snprintf(s->keeper, sizeof s->keeper, "%s/prolog/amb/profile_main.pl", root);
     const char *prof = getenv("AMB_PROFILE"), *priv = getenv("AMB_PRIVATE");
     s->private_mode = priv && priv[0] == '1';
-    snprintf(s->profile, sizeof s->profile, "%s", prof && !s->private_mode ? prof : "");
-    /* the directory by its absolute path: the reasoner runs in a directory of its own */
+    /* the directories by their absolute paths: the reasoner and the keeper each run in
+       a directory of their own */
     char cwd[256];
     if (!getcwd(cwd, sizeof cwd)) cwd[0] = 0;
+    if (!prof || s->private_mode) s->profile[0] = 0;
+    else if (prof[0] == '/') snprintf(s->profile, sizeof s->profile, "%s", prof);
+    else snprintf(s->profile, sizeof s->profile, "%s/%s", cwd, prof);
     if (work && work[0] == '/') snprintf(s->dir, sizeof s->dir, "%s", work);
     else if (work) snprintf(s->dir, sizeof s->dir, "%s/%s", cwd, work);
     else snprintf(s->dir, sizeof s->dir, "%s/ambitious-%ld", tmp ? tmp : "/tmp", (long)getpid());
@@ -168,6 +180,7 @@ static int reason_once(const session *s, const char *cmd, const char *a1, const 
     amb_ending how;
     memset(&how, 0, sizeof how);
     int st = amb_run_in(argv, out, err, &s->sb, &how);
+    if (st != 0) fflush(stdout);           /* what was said before, before what is said of it */
     if (st != 0 && how.ended && !how.exited) fprintf(stderr, "ambitious: the reasoner ended, %s, asked to %s\n", how.why, cmd);
     else if (st != 0) { fprintf(stderr, "ambitious: the reasoner answered %d to %s:\n", st, cmd); print_errors(err, 0); }
     return st;
@@ -179,6 +192,7 @@ static int reason_once(const session *s, const char *cmd, const char *a1, const 
 static int reason_kept(session *s, amb_reasoner *r, const char *cmd, const char *a1, const char *a2, const char *out) {
     int diff = strcmp(cmd, "diff") == 0;
     uint32_t d0 = r->deltas;
+    fflush(stdout);                        /* what was said before, before what is said of it */
     int st = amb_reasoner_sync(r, a1, &s->sb);
     if (st == 0 && diff) {
         /* the second's delta keeps the facts it changes, which the reasoner then says */
@@ -216,6 +230,17 @@ static int reason(session *s, const char *cmd, const char *a1, const char *a2, c
    no profile */
 static int keep(const session *s, const char *cmd, const char *a1, const char *a2, const char *a3, const char *out) {
     if (!s->private_mode && !s->profile[0]) return -1;
+    /* the keeper's sandbox: the reasoner's, writing in the profile's directory alone (a
+       private session's keeper writes nowhere: its store is memory). Its address space
+       is its own, AMB_KEEPER_MEM or 64 GiB: ZiguratIP maps its store a gigabyte at a time,
+       and a store whose map is refused opens empty, then is written back empty */
+    amb_sandbox kb = s->sb;
+    const char *km = getenv("AMB_KEEPER_MEM");
+    kb.mem = km && *km ? strtoull(km, 0, 10) : 64ull << 30;
+    if (!s->private_mode) {
+        mkdir(s->profile, 0700);
+        snprintf(kb.dir, sizeof kb.dir, "%s", s->profile);
+    }
     char err[700], prog[1024], store[1100], script[1024], c[64], x1[4096], x2[4096], x3[1024];
     session_path(s, "profile.err", err, sizeof err);
     snprintf(prog, sizeof prog, "%s", s->cocolog);
@@ -238,7 +263,10 @@ static int keep(const session *s, const char *cmd, const char *a1, const char *a
     if (a1 && a2) argv[k++] = x2;
     if (a1 && a2 && a3) argv[k++] = x3;
     argv[k] = 0;
-    int st = amb_run(argv, out, err);
+    amb_ending how;
+    memset(&how, 0, sizeof how);
+    int st = amb_run_in(argv, out, err, &kb, &how);
+    if (st != 0 && how.ended && !how.exited) fprintf(stderr, "ambitious: the profile's keeper ended, %s\n", how.why);
     if (st != 0) {
         own FILE *f = fopen(err, "rb");
         if (f) {
@@ -1028,6 +1056,7 @@ static int session_page(session *s, const char *url, FILE *in, int echo, char *n
         while (line[b] == ' ' || line[b] == '\t') b++;
         if (!line[b] || line[b] == '#') continue;
         if (echo) printf("> %s\n", line + b);
+        fflush(stdout);
         /* the command, then its argument */
         char cmd[64];
         size_t k = 0;
@@ -1149,6 +1178,14 @@ static int cmd_reason(const char *what, const char *page, const char *goal, int 
     return 0;
 }
 
+/* the reasoner's sandbox as a child given it finds it on this machine */
+static int cmd_sandbox(void) {
+    session s;
+    if (!session_open(&s)) return 2;
+    if (!s.sb.on) { printf("the sandbox is off (AMB_SANDBOX=0)\n"); return 0; }
+    return amb_sandbox_report(&s.sb, stdout) == 0 ? 0 : 1;
+}
+
 /* a profile command: the keeper's answer printed */
 static int cmd_profile(const char *cmd, const char *a1, const char *a2, const char *a3) {
     session s;
@@ -1227,6 +1264,7 @@ int main(int argc, char **argv) {
         setenv("AMB_CLICKS", data(all), 1);
         return cmd_script(argv[2]);
     }
+    if (argc >= 2 && strcmp(argv[1], "sandbox") == 0) return cmd_sandbox();
     if (argc >= 3 && strcmp(argv[1], "loop") == 0) return cmd_session(argv[2]);
     if (argc >= 2 && strcmp(argv[1], "loop") == 0) return cmd_loop();
     if (argc >= 3 && strcmp(argv[1], "snapshot") == 0) return cmd_snapshot(argv[2]);

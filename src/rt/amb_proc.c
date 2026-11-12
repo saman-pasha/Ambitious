@@ -15,9 +15,11 @@
        outside its domain. Where the kernel has no Landlock, the syscall filter refuses
        every open for writing, and every call that makes, moves or removes a file;
      - a seccomp-bpf filter that allows the calls cocolog's runtime makes (those it
-       made over every gate, traced) and kills the process on any other. socket(2) is
-       refused for every family: the runtime needs none, and a Unix socket reaches the
-       host's services through their files. A new process (fork, vfork, clone without
+       made over every gate, traced) and kills the process on any other, socket(2)
+       among them, of every family: the runtime needs none, a Unix socket would reach
+       the host's services through their files, and cocolog's own libraries take a
+       refused socket for a connection that failed, where the end of the process is
+       what the engine reports. A new process (fork, vfork, clone without
        CLONE_THREAD, clone3) is refused, and so is every execve but the one that starts
        the program, known by its path's address. kill and tgkill reach the process
        itself alone; prlimit64 reads a limit and sets none; ioctl answers a terminal's
@@ -123,7 +125,7 @@ static const long sb_allowed[] = {
     SYS_getuid, SYS_geteuid, SYS_getgid, SYS_getegid, SYS_getresuid, SYS_getresgid, SYS_getgroups,
     SYS_getrandom, SYS_clock_gettime, SYS_clock_getres, SYS_gettimeofday, SYS_nanosleep, SYS_clock_nanosleep,
     SYS_sched_yield, SYS_sched_getaffinity, SYS_uname, SYS_getrusage, SYS_times, SYS_sysinfo, SYS_umask,
-    SYS_membarrier, SYS_fadvise64, SYS_fsync, SYS_fdatasync, SYS_ftruncate,
+    SYS_membarrier, SYS_fadvise64, SYS_fsync, SYS_fdatasync, SYS_ftruncate, SYS_flock,
 #if defined(__x86_64__)
     SYS_stat, SYS_lstat, SYS_access, SYS_readlink, SYS_dup2, SYS_poll, SYS_select, SYS_getrlimit,
     SYS_arch_prctl, SYS_time, SYS_getpgrp, SYS_faccessat2,
@@ -139,7 +141,7 @@ static const long sb_files[] = {
 };
 /* the calls refused with an error, not killed: the runtime meets their refusal */
 static const long sb_refused[] = {
-    SYS_socket, SYS_execveat, SYS_setrlimit, SYS_prctl, SYS_mknodat, SYS_fchmodat, SYS_fchmod, SYS_fchownat, SYS_fchown,
+    SYS_execveat, SYS_setrlimit, SYS_prctl, SYS_mknodat, SYS_fchmodat, SYS_fchmod, SYS_fchownat, SYS_fchown,
     SYS_utimensat, SYS_truncate, SYS_setpgid, SYS_setsid,
 #if defined(__x86_64__)
     SYS_fork, SYS_vfork, SYS_creat, SYS_mknod, SYS_chmod, SYS_chown, SYS_lchown, SYS_utimes, SYS_futimesat,
@@ -224,7 +226,7 @@ static int sb_filter(const char *path, pid_t pid, int landlock) {
     }
     for (size_t i = 0; i < sizeof sb_files / sizeof sb_files[0]; i++) sb_rule(f, &n, sb_files[i], landlock ? SB_RET_ALLOW : SB_RET_ERRNO | EACCES);
     for (size_t i = 0; i < sizeof sb_refused / sizeof sb_refused[0]; i++)
-        sb_rule(f, &n, sb_refused[i], sb_refused[i] == SYS_socket ? SB_RET_ERRNO | EACCES : SB_RET_ERRNO | EPERM);
+        sb_rule(f, &n, sb_refused[i], SB_RET_ERRNO | EPERM);
     for (size_t i = 0; i < sizeof sb_allowed / sizeof sb_allowed[0]; i++) sb_rule(f, &n, sb_allowed[i], SB_RET_ALLOW);
     sb_ret(f, &n, SB_RET_KILL);
     if (n >= SB_CAP || SB_ARCH == 0) return -1;
@@ -326,7 +328,7 @@ static uint64_t sb_env(const char *name, uint64_t dflt) {
 
 void amb_sandbox_init(amb_sandbox *sb, const char *dir) {
     const char *on = getenv("AMB_SANDBOX");
-    sb->on = on && on[0] == '1';
+    sb->on = !(on && on[0] == '0');
     sb->mem = sb_env("AMB_REASON_MEM", 4ull << 30);
     sb->cpu = sb_env("AMB_REASON_CPU", 600);
     sb->timeout = sb_env("AMB_REASON_TIMEOUT", 600);
@@ -434,8 +436,12 @@ int amb_run(const char *const argv[], const char *out_path, const char *err_path
     return amb_run_in(argv, out_path, err_path, 0, 0);
 }
 
-/* the sandbox tried from inside: a child enters it and asks for what it should be
-   refused, then answers a line each on its standard output */
+/* a line to the descriptor fd */
+static void say(int fd, const char *m) { (void)!write(fd, m, strlen(m)); }
+
+/* the sandbox tried from inside: a child enters it and asks for each thing it should be
+   refused, saying each before it asks, the socket last since it ends the child; the
+   lines into out */
 int amb_sandbox_report(const amb_sandbox *sb, FILE *out) {
     int p[2];
     if (pipe2(p, O_CLOEXEC) != 0) return -1;
@@ -446,28 +452,34 @@ int amb_sandbox_report(const amb_sandbox *sb, FILE *out) {
         sb_layers got;
         char path[16];
         snprintf(path, sizeof path, "/bin/true");
-        if (sb_enter(sb, path, &got) != 0) _exit(125);
-        char m[2048];
-        int k = 0;
-        k += snprintf(m + k, sizeof m - k, "limits: address space %llu MiB, CPU %llu s, %llu open files, files of %llu MiB at most, no core\n",
-                      (unsigned long long)(sb->mem >> 20), (unsigned long long)sb->cpu, (unsigned long long)sb->files,
-                      (unsigned long long)(sb->fsize >> 20));
-        static const char *const nets[] = { "none of its own: the syscall filter refuses every socket",
-                                            "a namespace of its own, with no device up",
-                                            "a user and a network namespace of its own, with no device up" };
-        k += snprintf(m + k, sizeof m - k, "network: %s\n", nets[got.net]);
-        if (got.landlock) k += snprintf(m + k, sizeof m - k, "file writes: Landlock (ABI %d), beneath its working directory alone\n", got.landlock);
-        else k += snprintf(m + k, sizeof m - k, "file writes: none (the kernel has no Landlock; the filter refuses every open for writing)\n");
-        k += snprintf(m + k, sizeof m - k, "syscall filter: on, a call it does not allow kills the process\n");
-        long s = syscall(SYS_socket, 2, 1, 0);
-        k += snprintf(m + k, sizeof m - k, "a TCP socket: %s\n", s < 0 && errno == EACCES ? "refused" : "MADE");
+        if (sb_enter(sb, path, &got) != 0) { say(p[1], "the sandbox could not be made\n"); _exit(125); }
+        char m[512];
+        snprintf(m, sizeof m, "limits: address space %llu MiB, CPU %llu s, %llu open files, files of %llu MiB at most, no core file\n",
+                 (unsigned long long)(sb->mem >> 20), (unsigned long long)sb->cpu, (unsigned long long)sb->files,
+                 (unsigned long long)(sb->fsize >> 20));
+        say(p[1], m);
+        static const char *const nets[] = { "network: none of its own (the syscall filter is the wall)\n",
+                                            "network: a namespace of its own, no device up\n",
+                                            "network: a user and a network namespace of its own, no device up\n" };
+        say(p[1], nets[got.net]);
+        if (got.landlock) {
+            snprintf(m, sizeof m, "file writes: Landlock (ABI %d), beneath its working directory alone\n", got.landlock);
+            say(p[1], m);
+        } else say(p[1], "file writes: none (no Landlock here: the filter refuses every open for writing)\n");
+        say(p[1], "syscall filter: on; a call it does not allow ends the process\n");
         int fd = open("/tmp/ambitious-sandbox-probe", O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        k += snprintf(m + k, sizeof m - k, "a file written in /tmp: %s\n", fd < 0 ? "refused" : "WRITTEN");
+        say(p[1], fd < 0 ? "a file written in /tmp: refused\n" : "a file written in /tmp: WRITTEN\n");
         if (fd >= 0) { close(fd); unlink("/tmp/ambitious-sandbox-probe"); }
+        fd = open("probe", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        say(p[1], fd < 0 ? "a file written in its working directory: refused\n" : "a file written in its working directory: written\n");
+        if (fd >= 0) { close(fd); unlink("probe"); }
         long c = syscall(SYS_clone, (unsigned long)SIGCHLD, 0, 0, 0, 0);
         if (c == 0) _exit(0);
-        k += snprintf(m + k, sizeof m - k, "a new process: %s\n", c < 0 && errno == EPERM ? "refused" : "MADE");
-        (void)!write(p[1], m, (size_t)k);
+        say(p[1], c < 0 && errno == EPERM ? "a new process: refused\n" : "a new process: MADE\n");
+        say(p[1], kill(getppid(), 0) != 0 ? "a signal to the engine: refused\n" : "a signal to the engine: SENT\n");
+        say(p[1], "a socket: ");
+        long so = syscall(SYS_socket, 1, 1, 0);
+        say(p[1], so < 0 ? "refused\n" : "MADE\n");
         _exit(0);
     }
     close(p[1]);
@@ -478,7 +490,9 @@ int amb_sandbox_report(const amb_sandbox *sb, FILE *out) {
     close(p[0]);
     int st = 0;
     waitpid(pid, &st, 0);
-    return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : -1;
+    if (WIFSIGNALED(st) && WTERMSIG(st) == SIGSYS) fprintf(out, "the process ended by its syscall filter (SIGSYS)\n");
+    else if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) { fprintf(out, "the probe ended otherwise\n"); return -1; }
+    return 0;
 }
 
 /* ---- the delta ---------------------------------------------------------------- */
