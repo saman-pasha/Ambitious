@@ -23,6 +23,19 @@ static void big_load(js_vm *vm, jv v, vector<uint32_t> *m, int *neg) {
     *neg = (int)b.neg;
 }
 
+/* a BigInt's record: a freed one's taken first (src/js/gc.c) */
+static jv big_push(js_vm *vm, js_big b) {
+    vm->gc_allocs++;
+    if (vm->big_free) {
+        uint32_t i = vm->big_free - 1;
+        vm->big_free = vm->bigs[i].off;
+        vm->bigs[i] = b;
+        return jv_big(i);
+    }
+    push_back(vm->bigs, b);
+    return jv_big((uint32_t)(len(vm->bigs) - 1));
+}
+
 /* a magnitude and a sign as a BigInt value; JV_HOLE with a RangeError past the size */
 static jv big_make(js_vm *vm, vector<uint32_t> *m, int neg) {
     mag_trim(m);
@@ -32,8 +45,7 @@ static jv big_make(js_vm *vm, vector<uint32_t> *m, int neg) {
     b.n = (uint32_t)len(*m);
     b.neg = b.n ? (uint32_t)(neg != 0) : 0;
     for (size_t i = 0; i < len(*m); i++) push_back(vm->bigl, (*m)[i]);
-    push_back(vm->bigs, b);
-    return jv_big((uint32_t)(len(vm->bigs) - 1));
+    return big_push(vm, b);
 }
 
 /* a BigInt of at most 64 bits: its magnitude and sign (1), else 0 */
@@ -53,8 +65,7 @@ static jv big_make_u64(js_vm *vm, uint64_t u, int neg) {
     b.neg = u ? (uint32_t)(neg != 0) : 0;
     if (u) push_back(vm->bigl, (uint32_t)u);
     if (u >> 32) push_back(vm->bigl, (uint32_t)(u >> 32));
-    push_back(vm->bigs, b);
-    return jv_big((uint32_t)(len(vm->bigs) - 1));
+    return big_push(vm, b);
 }
 
 static int mag_cmp(vector<uint32_t> *a, vector<uint32_t> *b) {

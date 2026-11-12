@@ -892,6 +892,7 @@ static void sh_timers_seen(js_vm *vm) {
 uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
     uint32_t ran = 0;
     while (ran < max) {
+        js_gc_maybe(vm);
         if (vm->host) sh_timers_seen(vm);
         int64_t best = -1;
         for (size_t i = 0; i < len(vm->timers); i++) {

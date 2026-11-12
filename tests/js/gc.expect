@@ -1,0 +1,9 @@
+before kept | 1,2,3 | {"deep":["a",{"b":"c"}]} | 200 | abcde | klmnopqrstuvwxyzabcdefghijklmn | wxyzabcdef | 100 | 57 | true | 100 | 3 | 1606938044258990275541962092341162602522202993782792835313721 | -42 | got x | 10,20,30,40 | Symbol(described) | 42 | KAB | 74 | 50
+after one kept | 1,2,3 | {"deep":["a",{"b":"c"}]} | 200 | abcde | klmnopqrstuvwxyzabcdefghijklmn | wxyzabcdef | 100 | 57 | true | 100 | 4 | 1606938044258990275541962092341162602522202993782792835313721 | -42 | got x | 10,20,30,40 | Symbol(described) | 42 | KAB | 74 | 50
+weakref cleared true
+weakmap live key live value true
+after rounds kept | 1,2,3 | {"deep":["a",{"b":"c"}]} | 200 | abcde | klmnopqrstuvwxyzabcdefghijklmn | wxyzabcdef | 100 | 57 | true | 100 | 5 | 1606938044258990275541962092341162602522202993782792835313721 | -42 | got x | 10,20,30,40 | Symbol(described) | 42 | KAB | 74 | 50
+made after 1000 new999 1500 true
+generator got y got z
+last kept | 1,2,3 | {"deep":["a",{"b":"c"}]} | 200 | abcde | klmnopqrstuvwxyzabcdefghijklmn | wxyzabcdef | 100 | 57 | true | 100 | 6 | 1606938044258990275541962092341162602522202993782792835313721 | -42 | got x | 10,20,30,40 | Symbol(described) | 42 | KAB | 74 | 50
+promise resolved after collections

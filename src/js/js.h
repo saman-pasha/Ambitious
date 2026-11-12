@@ -90,8 +90,10 @@ enum {
     JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
     JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
     JK_BIGINT,       /* a BigInt's wrapper: the value in x */
-    JK_ASYNCGEN      /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
+    JK_ASYNCGEN,     /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
                         mode, value and promise, three a request, the first the one its body answers), x its function */
+    JK_RECORD,       /* the engine's own record, never a script's value: a an object it holds, x a value, b and c numbers */
+    JK_FREE          /* a record the collector freed: a the next on the free list (src/js/gc.c) */
 };
 /* a typed array's element type, in its flags above JO_TA_SHIFT */
 enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UINT32, JTA_FLOAT32, JTA_FLOAT64,
@@ -339,6 +341,13 @@ typedef struct js_vm {
     uint32_t mod_compiling;           /* the module js_compile reads (JS_CC_MODULE) */
     uint32_t mod_order;               /* the async evaluations' count */
     uint32_t mod_first;               /* the modules' first native id (src/js/module.c) */
+    /* the collector (src/js/gc.c): the free lists' heads (an object's and a string's index;
+       a BigInt's plus one), the collections made, the heap's size after the last */
+    uint32_t obj_free, str_free, big_free, gc_count;
+    uint64_t gc_last;                 /* the live heap's size after the last collection, in eight bytes */
+    uint64_t gc_allocs;               /* the records made since (objects, strings, BigInts) */
+    uint64_t gc_slots, gc_units;      /* the slots' and the units' lengths after it */
+    uint32_t gc_enabled;              /* collections between tasks (js_gc_maybe): the host's to allow */
     uint32_t base_url;                /* the classic scripts' base for import(): a string (0: the current directory) */
     /* the host's module loader: the specifier (a string) resolved against the referrer
        (a module's URL; 0 for a classic script's import(), whose base is base_url), its
@@ -547,6 +556,12 @@ void js_big_init(js_vm *vm, uint32_t first);
    evaluation returned (0 with an exception thrown); a source run as the main module (its
    URL given); import()'s promise; import.meta; a module's namespace; the natives' cases */
 uint32_t js_module_import(js_vm *vm, uint32_t spec, uint32_t referrer);
+/* the collector (src/js/gc.c): a collection now, which only a moment between tasks may
+   ask for (no C code then holds a value outside the VM's tables); one when the heap has
+   doubled since the last; gc() for a test's script (ambitious js alone, src/js/builtins.c) */
+void js_gc(js_vm *vm);
+void js_gc_maybe(js_vm *vm);
+void js_gc_expose(js_vm *vm);
 uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n);    /* an environment of n cells (src/js/vm.c) */
 uint32_t js_module_main(js_vm *vm, uint32_t url, const char *src, size_t n);
 jv js_module_dynamic(js_vm *vm, jv spec, uint32_t referrer);

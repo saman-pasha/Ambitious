@@ -17,7 +17,15 @@ jv js_arg(js_vm *vm, uint32_t args, uint32_t argc, uint32_t i) {
 
 /* ---- strings ---- */
 
+/* a string's record: a freed one's taken first (src/js/gc.c) */
 static uint32_t js_str_push(js_vm *vm, js_str s) {
+    vm->gc_allocs++;
+    if (vm->str_free) {
+        uint32_t i = vm->str_free;
+        vm->str_free = vm->strs[i].left;
+        vm->strs[i] = s;
+        return i;
+    }
     push_back(vm->strs, s);
     return (uint32_t)(len(vm->strs) - 1);
 }
@@ -360,6 +368,14 @@ uint32_t js_obj_new(js_vm *vm, uint32_t kind, uint32_t proto) {
     o.flags = JO_EXTENSIBLE;
     o.proto = proto;
     o.shape = js_shape_of(vm, proto);
+    vm->gc_allocs++;
+    if (vm->obj_free) {
+        /* a record the collector freed */
+        uint32_t i = vm->obj_free;
+        vm->obj_free = vm->objs[i].a;
+        vm->objs[i] = o;
+        return i;
+    }
     push_back(vm->objs, o);
     return (uint32_t)(len(vm->objs) - 1);
 }

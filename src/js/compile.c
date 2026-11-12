@@ -3049,7 +3049,8 @@ static void gen_expr(CC, uint32_t n) {
             emit32(vm, (uint32_t)(len(vm->consts) - 1));
         } else emit_num(vm, e.num);
         return;
-    case N_STR: emit(vm, OP_STR); emit32(vm, e.s); return;
+    /* a literal's string an atom: the code names it by its index, so it lives as long as the code */
+    case N_STR: emit(vm, OP_STR); emit32(vm, js_atom(vm, e.s)); return;
     case N_TEMPLATE: {
         if (e.op == 1) {
             /* a tag's strings: made once, here, and the same array each time */
@@ -3072,7 +3073,7 @@ static void gen_expr(CC, uint32_t n) {
             if (cc->nodes[part].k == N_STR) {
                 if (i > 0 && vm->strs[cc->nodes[part].s].len == 0) continue;
                 emit(vm, OP_STR);
-                emit32(vm, cc->nodes[part].s);
+                emit32(vm, js_atom(vm, cc->nodes[part].s));
             } else { gen_expr(CCA, part); emit(vm, OP_TOSTR); }
             if (i > 0) emit(vm, OP_ADD);
         }

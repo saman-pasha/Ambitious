@@ -24,7 +24,7 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
 UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree html/encoding css/css layout/layout paint/font paint/image paint/paint net/net a11y/a11y \
-         js/vm js/compile js/builtins js/regexp js/proxy js/typed js/bigint js/module script/script
+         js/vm js/compile js/builtins js/regexp js/proxy js/typed js/bigint js/module js/gc script/script
 OBJS := $(UNITS:%=build/obj/%.o)
 # the system libraries the units link with: OpenSSL's, for https: (src/net/net.c);
 # the tests' links take them after the units

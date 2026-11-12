@@ -919,10 +919,16 @@ static int cmd_js(const char *file) {
             js_error_text(&vm, e, &vm.out);
             rc = -2;
         }
-    } else rc = js_eval(&vm, data(src), len(src), file, 1);
+    } else {
+        js_gc_expose(&vm);
+        rc = js_eval(&vm, data(src), len(src), file, 1);
+    }
+    /* the collector runs between this script's tasks (a page's waits on its host's roots) */
+    vm.gc_enabled = 1;
     if (rc == 0) {
         /* the microtasks the script queued, then its timers, each followed by its own */
         js_run_jobs(&vm);
+        js_gc_maybe(&vm);
         js_run_timers(&vm, 1e15, 1000000);
     }
     fflush(stdout);

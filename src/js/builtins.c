@@ -54,7 +54,7 @@ enum {
     /* Symbol, generators, promises */
     N_SYM_FOR, N_SYM_KEYFOR, N_SYMP_TOSTRING, N_SYMP_VALUEOF, N_SYMP_DESC, N_OBJ_GETOWNSYMS, N_ITP_SELF,
     N_GEN_NEXT, N_GEN_RETURN, N_GEN_THROW,
-    N_AG_NEXT, N_AG_RETURN, N_AG_THROW, N_AG_RETURN_OK, N_AG_RETURN_ERR, N_AFS_UNWRAP, N_AFS_CLOSE,
+    N_AG_NEXT, N_AG_RETURN, N_AG_THROW, N_AG_RETURN_OK, N_AG_RETURN_ERR, N_AFS_UNWRAP, N_AFS_CLOSE, N_GC,
     N_PROMISE, N_PR_RESOLVE_FN, N_PR_REJECT_FN, N_PRP_THEN, N_PRP_CATCH, N_PRP_FINALLY, N_PR_FIN_OK, N_PR_FIN_ERR,
     N_PR_THUNK_VALUE, N_PR_THUNK_THROW, N_PR_RESOLVE, N_PR_REJECT, N_PR_ALL, N_PR_ALLSETTLED, N_PR_RACE, N_PR_ANY,
     N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER, N_SP_MATCHALL,
@@ -1211,10 +1211,12 @@ int js_aiter_call(js_vm *vm, uint32_t rec, int kind, jv arg, jv *out) {
     return vm->throwing ? -1 : 1;
 }
 
+void js_gc_expose(js_vm *vm) { defn(vm, vm->global, "gc", N_GC, 0); }
+
 /* a combinator's element: its function's record [aggregate, index, called] */
 static jv promise_elem_fn(js_vm *vm, uint32_t id, uint32_t agg, uint32_t index) {
     uint32_t f = js_native_new(vm, id, A_EMPTY, 1);
-    uint32_t rec = js_obj_new(vm, JK_PLAIN, 0);
+    uint32_t rec = js_obj_new(vm, JK_RECORD, 0);
     vm->objs[rec].a = agg;
     vm->objs[rec].b = index;
     vm->objs[rec].c = 0;
@@ -1432,6 +1434,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_UNDEF;
     }
     case N_AFS_UNWRAP: return iter_result(vm, a0, vm->objs[jv_idx(callee)].x == JV_TRUE);
+    /* gc(): a collection now, for a test's script (called where no native's work is under way) */
+    case N_GC: js_gc(vm); return JV_UNDEF;
     case N_AFS_CLOSE: {
         /* IteratorClose with the rejection as its completion: what the closing throws is lost */
         js_iter_close(vm, jv_idx(vm->objs[jv_idx(callee)].x));
@@ -1537,7 +1541,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return jv_obj(p);
         }
         /* the aggregate: a the values, b how many are still waiting, c its kind, x the promise */
-        uint32_t agg = js_obj_new(vm, JK_PLAIN, 0);
+        uint32_t agg = js_obj_new(vm, JK_RECORD, 0);
         uint32_t vals = js_array_new(vm, n);
         for (uint32_t i = 0; i < n; i++) vm->slots[vm->objs[vals].a + i] = JV_UNDEF;
         vm->objs[agg].a = vals;
