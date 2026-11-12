@@ -39,6 +39,7 @@ enum {
     IN_RELTIMEFORMAT, IN_RT_FORMAT, IN_RT_FORMATTOPARTS, IN_RT_RESOLVED,
     IN_DISPLAYNAMES, IN_DN_OF, IN_DN_RESOLVED,
     IN_SEGMENTER, IN_SG_SEGMENT, IN_SG_RESOLVED, IN_SGM_CONTAINING, IN_SGM_ITERATOR, IN_SGI_NEXT,
+    IN_COLLATOR, IN_CL_COMPARE_GET, IN_CL_COMPARE_BOUND, IN_CL_RESOLVED, IN_STR_LOCALECOMPARE,
     IN_COUNT
 };
 _Static_assert(IN_COUNT <= JIN_N, "Intl's natives fit their range");
@@ -3127,7 +3128,7 @@ static jv nf_resolved(js_vm *vm, uint32_t nf) {
 }
 
 /* the formatters toLocaleString keeps for its defaults (no locales, no options), by use */
-enum { IC_NUMBER, IC_DATE, IC_N = IC_DATE + 3 };
+enum { IC_NUMBER, IC_DATE, IC_COLLATOR = IC_DATE + 3, IC_N };
 static uint32_t intl_cache_get(js_vm *vm, uint32_t slot) {
     if (!vm->intl_cache) return 0;
     jv v = js_array_get(vm, vm->intl_cache, slot);
@@ -6449,6 +6450,362 @@ static jv sg_next(js_vm *vm, uint32_t it) {
     return js_iter_result(vm, sg_data(vm, m, arr, g, nb, k), 0);
 }
 
+/* ==== Intl.Collator (ECMA-402 10) and String.prototype.localeCompare ==== */
+
+/* the slots; the sensitivities and the case orders */
+enum { CLS_LOCALE, CLS_USAGE, CLS_SENS, CLS_IGNP, CLS_COLL, CLS_NUMERIC, CLS_CASEFIRST, CLS_BOUND, CLS_N };
+static const char *const cl_usages[] = { "sort", "search", 0 };
+static const char *const cl_sens[] = { "base", "accent", "case", "variant", 0 };
+static const char *const cl_casefirst[] = { "upper", "lower", "false", 0 };
+enum { CF_UPPER, CF_LOWER, CF_OFF };
+
+/* a collation's -u- keyword kept: co a collation of the language's (not standard or
+   search), kn and kf their values */
+static int cl_collation_ok(const char *lang, const char *co) {
+    if (!co[0] || !strcmp(co, "standard") || !strcmp(co, "search")) return 0;
+    uint32_t c = db_find_z(IDB_COLLATIONS, IDB_COLLATIONS_N, lang);
+    char list[128];
+    list[0] = 0;
+    if (c) db_copy(c, list, sizeof list);
+    cat(list, sizeof list, " emoji eor");
+    size_t n = strlen(co), at = 0;
+    while (list[at]) {
+        while (list[at] == ' ') at++;
+        size_t k = 0;
+        while (list[at + k] && list[at + k] != ' ') k++;
+        if (k == n && !strncmp(list + at, co, n)) return 1;
+        at += k;
+    }
+    return 0;
+}
+
+static jv cl_new(js_vm *vm, jv locales, jv options, jv newt) {
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    const char *svc = "Intl.Collator";
+    jv opts = options_object(vm, options, svc);
+    if (opts == JV_HOLE) return JV_HOLE;
+    int usage = get_option_str(vm, opts, "usage", cl_usages, svc, 0);
+    if (usage == -2) return JV_HOLE;
+    if (usage < 0) usage = 0;
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    uint32_t cs = 0;
+    char co_opt[16];
+    co_opt[0] = 0;
+    int r = get_option_str(vm, opts, "collation", 0, svc, &cs);
+    if (r == -2) return JV_HOLE;
+    if (r >= 0) {
+        char b[80];
+        int n = str_ascii(vm, cs, b, sizeof b);
+        if (n < 0 || !is_type(b)) {
+            vector<char> m;
+            const char *a = "Invalid collation : ";
+            append_range(m, a, strlen(a));
+            js_str_to_utf8(vm, cs, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+        if (n < 16) copyz(co_opt, sizeof co_opt, b);
+    }
+    int numeric = get_option_bool(vm, opts, "numeric");
+    if (numeric == -2) return JV_HOLE;
+    int cf = get_option_str(vm, opts, "caseFirst", cl_casefirst, svc, 0);
+    if (cf == -2) return JV_HOLE;
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_COLLATOR, found, sizeof found, &t);
+    char lang[9];
+    copyz(lang, sizeof lang, found);
+    char *dash = strchr(lang, '-');
+    if (dash) *dash = 0;
+    /* the keywords: kn and kf kept whatever the options say, co the option's when it is a
+       collation of the language (V8's locale string) */
+    char kco[16], kkn[8], kkf[8];
+    kco[0] = kkn[0] = kkf[0] = 0;
+    int kw = find_kw(&t, "co");
+    if (kw >= 0 && strlen(t.val[kw]) < 16 && cl_collation_ok(lang, t.val[kw])) copyz(kco, sizeof kco, t.val[kw]);
+    kw = find_kw(&t, "kn");
+    if (kw >= 0 && (!t.val[kw][0] || !strcmp(t.val[kw], "true") || !strcmp(t.val[kw], "false"))) {
+        if (t.val[kw][0]) copyz(kkn, sizeof kkn, t.val[kw]);
+        else copyz(kkn, sizeof kkn, "true");
+    }
+    kw = find_kw(&t, "kf");
+    if (kw >= 0 && (!strcmp(t.val[kw], "upper") || !strcmp(t.val[kw], "lower") || !strcmp(t.val[kw], "false"))) copyz(kkf, sizeof kkf, t.val[kw]);
+    char co[16];
+    co[0] = 0;
+    if (co_opt[0] && cl_collation_ok(lang, co_opt)) copyz(kco, sizeof kco, co_opt);
+    copyz(co, sizeof co, kco);
+    int num = 0;
+    if (numeric >= 0) num = numeric;
+    else if (kkn[0]) num = !strcmp(kkn, "true");
+    /* the case order: the option, the keyword, else the language's (Danish's upper) */
+    int casefirst = CF_OFF;
+    if (!strcmp(lang, "da")) casefirst = CF_UPPER;
+    if (cf >= 0) casefirst = cf;
+    else if (kkf[0]) {
+        for (int i = 0; cl_casefirst[i]; i++) if (!strcmp(kkf, cl_casefirst[i])) casefirst = i;
+    }
+    int sens = get_option_str(vm, opts, "sensitivity", cl_sens, svc, 0);
+    if (sens == -2) return JV_HOLE;
+    if (sens < 0) sens = 3;
+    int ignp = get_option_bool(vm, opts, "ignorePunctuation");
+    if (ignp == -2) return JV_HOLE;
+    if (ignp < 0) ignp = !strcmp(lang, "th");
+    char loc[TAG_MAX + 1];
+    copyz(loc, sizeof loc, found);
+    if (kco[0] || kkf[0] || kkn[0]) {
+        cat(loc, sizeof loc, "-u");
+        if (kco[0]) { cat(loc, sizeof loc, "-co-"); cat(loc, sizeof loc, kco); }
+        if (kkf[0]) { cat(loc, sizeof loc, "-kf-"); cat(loc, sizeof loc, kkf); }
+        if (kkn[0]) {
+            cat(loc, sizeof loc, "-kn");
+            if (strcmp(kkn, "true")) { cat(loc, sizeof loc, "-"); cat(loc, sizeof loc, kkn); }
+        }
+    }
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_COLLATOR, CLS_N, &ok);
+    if (!ok) return JV_HOLE;
+    slot_set(vm, o, CLS_LOCALE, jv_str(js_str_ascii(vm, loc)));
+    slot_set(vm, o, CLS_USAGE, jv_num(usage));
+    slot_set(vm, o, CLS_SENS, jv_num(sens));
+    slot_set(vm, o, CLS_IGNP, jv_num(ignp));
+    slot_set(vm, o, CLS_COLL, jv_str(js_str_ascii(vm, co)));
+    slot_set(vm, o, CLS_NUMERIC, jv_num(num));
+    slot_set(vm, o, CLS_CASEFIRST, jv_num(casefirst));
+    return jv_obj(o);
+}
+static jv cl_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, CLS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "usage"), jv_str(js_str_ascii(vm, cl_usages[slot_int(vm, o, CLS_USAGE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "sensitivity"), jv_str(js_str_ascii(vm, cl_sens[slot_int(vm, o, CLS_SENS)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "ignorePunctuation"), slot_int(vm, o, CLS_IGNP) ? JV_TRUE : JV_FALSE, 0);
+    jv co = slot_get(vm, o, CLS_COLL);
+    if (!vm->strs[jv_idx(co)].len) co = jv_str(js_str_ascii(vm, "default"));
+    js_define(vm, r, js_atom_ascii(vm, "collation"), co, 0);
+    js_define(vm, r, js_atom_ascii(vm, "numeric"), slot_int(vm, o, CLS_NUMERIC) ? JV_TRUE : JV_FALSE, 0);
+    js_define(vm, r, js_atom_ascii(vm, "caseFirst"), jv_str(js_str_ascii(vm, cl_casefirst[slot_int(vm, o, CLS_CASEFIRST)])), 0);
+    return jv_obj(r);
+}
+
+/* ---- the root collation (CLDR's DUCET): a string's collation elements ---- */
+
+typedef struct cel { uint32_t p, s, t, var; } cel;
+static void cel_at(uint32_t i, cel *e) {
+    uint32_t a = IDB_COLL_CES + i * 6;
+    e->p = db16(a);
+    e->s = db16(a + 2);
+    e->t = db8(a + 4);
+    e->var = db8(a + 5);
+}
+/* a code point's elements: their count (0 none), *off the first's index */
+static uint32_t coll_single(uint32_t cp, uint32_t *off) {
+    uint32_t lo = 0, hi = IDB_COLL_N;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2, w = db32(IDB_COLL + mid * 8), c = w & 0xFFFFFF;
+        if (c == cp) { *off = db32(IDB_COLL + mid * 8 + 4); return w >> 24; }
+        if (c < cp) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+/* a contraction of three code points (the third 0 for two): its count, *off its first's */
+static uint32_t coll_contraction(uint32_t a, uint32_t b, uint32_t c, uint32_t *off) {
+    uint32_t lo = 0, hi = IDB_COLLX_N;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2, at = IDB_COLLX + mid * 16;
+        uint32_t x = db32(at), y = db32(at + 4), z = db32(at + 8);
+        int cmp = 0;
+        if (x != a) cmp = x < a ? -1 : 1;
+        else if (y != b) cmp = y < b ? -1 : 1;
+        else if (z != c) cmp = z < c ? -1 : 1;
+        if (!cmp) {
+            uint32_t w = db32(at + 12);
+            *off = w & 0xFFFFFF;
+            return w >> 24;
+        }
+        if (cmp < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+static void push_cels(vector<cel> *out, uint32_t off, uint32_t n) {
+    for (uint32_t k = 0; k < n; k++) {
+        cel e;
+        cel_at(off + k, &e);
+        push_back(*out, e);
+    }
+}
+static void push_cel(vector<cel> *out, uint32_t p, uint32_t s, uint32_t t) {
+    cel e;
+    e.p = p;
+    e.s = s;
+    e.t = t;
+    e.var = 0;
+    push_back(*out, e);
+}
+/* a code point the table lacks: UCA's implicit weights (Han's bases first) */
+static void implicit_cels(uint32_t cp, vector<cel> *out) {
+    uint32_t base = 0xFBC0;
+    if (cp >= 0x4E00 && cp <= 0x9FFF) base = 0xFB40;
+    else if ((cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x20000 && cp <= 0x3FFFF)) base = 0xFB80;
+    push_cel(out, base + (cp >> 15), 0x20, 0x02);
+    push_cel(out, (cp & 0x7FFF) | 0x8000, 0, 0);
+}
+/* a decimal digit's value (ASCII's and the numbering systems'), -1 none */
+static int digit_value(uint32_t c) {
+    if (c >= '0' && c <= '9') return (int)(c - '0');
+    if (c < 0x660 || !is_nd(c)) return -1;
+    for (uint32_t i = 0; i < IDB_NUMBERING_N; i++) {
+        uint32_t z = ns_digit((int)i, 0);
+        if (c >= z && c <= z + 9) return (int)(c - z);
+    }
+    return -1;
+}
+/* a string's elements; with numeric, a run of digits one number (its significant digits'
+   count, then each digit, after the zero's primary) */
+static void coll_elements(vector<uint32_t> *cps, int numeric, vector<cel> *out) {
+    size_t n = len(*cps);
+    uint32_t zero_off = 0;
+    uint32_t zero_p = 0;
+    if (coll_single('0', &zero_off)) {
+        cel z;
+        cel_at(zero_off, &z);
+        zero_p = z.p;
+    }
+    for (size_t i = 0; i < n;) {
+        uint32_t c = (*cps)[i], off;
+        if (numeric && digit_value(c) >= 0) {
+            size_t j = i;
+            while (j < n && digit_value((*cps)[j]) >= 0) j++;
+            size_t k = i;
+            while (k + 1 < j && digit_value((*cps)[k]) == 0) k++;
+            push_cel(out, zero_p, 0x20, 0x02);
+            push_cel(out, (uint32_t)(j - k), 0x20, 0x02);
+            for (size_t q = k; q < j; q++) push_cel(out, 1 + (uint32_t)digit_value((*cps)[q]), 0x20, 0x02);
+            i = j;
+            continue;
+        }
+        if (i + 2 < n) {
+            uint32_t m = coll_contraction(c, (*cps)[i + 1], (*cps)[i + 2], &off);
+            if (m) { push_cels(out, off, m); i += 3; continue; }
+        }
+        if (i + 1 < n) {
+            uint32_t m = coll_contraction(c, (*cps)[i + 1], 0, &off);
+            if (m) { push_cels(out, off, m); i += 2; continue; }
+        }
+        uint32_t m = coll_single(c, &off);
+        if (m) { push_cels(out, off, m); i++; continue; }
+        if (c >= 0xAC00 && c <= 0xD7A3) {
+            /* a Hangul syllable: its jamo's */
+            uint32_t si = c - 0xAC00, jamo[3];
+            jamo[0] = 0x1100 + si / 588;
+            jamo[1] = 0x1161 + (si % 588) / 28;
+            jamo[2] = 0x11A7 + si % 28;
+            for (int q = 0; q < 3; q++) {
+                if (q == 2 && jamo[2] == 0x11A7) break;
+                uint32_t jm = coll_single(jamo[q], &off);
+                if (jm) push_cels(out, off, jm);
+            }
+            i++;
+            continue;
+        }
+        implicit_cels(c, out);
+        i++;
+    }
+}
+
+/* an element's case at the case level and in the tertiary: upper from the tertiary weights
+   of capitals */
+static int cel_upper(uint32_t t) {
+    return t == 0x08 || t == 0x09 || t == 0x0A || t == 0x0B || t == 0x0C || t == 0x0E || t == 0x11 || t == 0x12 || t == 0x1D;
+}
+
+/* the comparison: primaries, then (accent, variant) secondaries, then (case) the case
+   level, then (variant) tertiaries; ignorePunctuation shifts the variable elements away */
+static int coll_compare(js_vm *vm, uint32_t o, uint32_t a, uint32_t b) {
+    int sens = slot_int(vm, o, CLS_SENS), shifted = slot_int(vm, o, CLS_IGNP), numeric = slot_int(vm, o, CLS_NUMERIC);
+    int cf = slot_int(vm, o, CLS_CASEFIRST);
+    vector<uint32_t> ca, cb, oa, ob;
+    code_points(vm, a, &ca, &oa);
+    code_points(vm, b, &cb, &ob);
+    vector<cel> ea, eb;
+    coll_elements(&ca, numeric, &ea);
+    coll_elements(&cb, numeric, &eb);
+    /* the shifted elements (and the ignorables after them) zeroed */
+    for (int pass = 0; pass < 2 && shifted; pass++) {
+        vector<cel> *e = &ea;
+        if (pass) e = &eb;
+        int after = 0;
+        for (size_t i = 0; i < len(*e); i++) {
+            if ((*e)[i].var) { (*e)[i].p = 0; (*e)[i].s = 0; (*e)[i].t = 0; after = 1; }
+            else if ((*e)[i].p == 0 && after) { (*e)[i].s = 0; (*e)[i].t = 0; }
+            else if ((*e)[i].p) after = 0;
+        }
+    }
+    for (int level = 1; level <= 4; level++) {
+        if (level == 2 && sens != 1 && sens != 3) continue;
+        if (level == 3 && sens != 2) continue;
+        if (level == 4 && sens != 3) continue;
+        size_t i = 0, j = 0;
+        for (;;) {
+            uint32_t x = 0, y = 0;
+            while (i < len(ea)) {
+                cel e = ea[i++];
+                if (level == 1) x = e.p;
+                else if (level == 2) x = e.s;
+                else if (level == 3) { if (e.p) x = 1 + (uint32_t)(cel_upper(e.t) != (cf == CF_UPPER)); }
+                else if (e.t) {
+                    x = e.t;
+                    if (cf == CF_UPPER) x |= (uint32_t)(!cel_upper(e.t)) << 8;
+                }
+                if (x) break;
+            }
+            while (j < len(eb)) {
+                cel e = eb[j++];
+                if (level == 1) y = e.p;
+                else if (level == 2) y = e.s;
+                else if (level == 3) { if (e.p) y = 1 + (uint32_t)(cel_upper(e.t) != (cf == CF_UPPER)); }
+                else if (e.t) {
+                    y = e.t;
+                    if (cf == CF_UPPER) y |= (uint32_t)(!cel_upper(e.t)) << 8;
+                }
+                if (y) break;
+            }
+            if (x != y) return x < y ? -1 : 1;
+            if (!x) break;
+        }
+    }
+    return 0;
+}
+
+static jv cl_compare(js_vm *vm, uint32_t o, jv x, jv y) {
+    uint32_t a = js_to_string(vm, x);
+    if (!a) return JV_HOLE;
+    uint32_t b = js_to_string(vm, y);
+    if (!b) return JV_HOLE;
+    return jv_num(coll_compare(vm, o, a, b));
+}
+
+/* String.prototype.localeCompare: a Collator of the arguments compares this with that */
+static jv locale_compare(js_vm *vm, jv thisv, jv that, jv locales, jv options) {
+    if (thisv == JV_UNDEF || thisv == JV_NULL)
+        return js_throw_msg(vm, vm->type_error_proto, "String.prototype.localeCompare called on null or undefined");
+    uint32_t s = js_to_string(vm, thisv);
+    if (!s) return JV_HOLE;
+    uint32_t t = js_to_string(vm, that);
+    if (!t) return JV_HOLE;
+    uint32_t o = 0;
+    int cache = locales == JV_UNDEF && options == JV_UNDEF;
+    if (cache) o = intl_cache_get(vm, IC_COLLATOR);
+    if (!o) {
+        jv c = cl_new(vm, locales, options, JV_UNDEF);
+        if (c == JV_HOLE) return JV_HOLE;
+        o = jv_idx(c);
+        if (cache) intl_cache_put(vm, IC_COLLATOR, o);
+    }
+    return jv_num(coll_compare(vm, o, s, t));
+}
+
 /* a receiver of a service's method: itself, else the TypeError */
 static jv this_of(js_vm *vm, jv thisv, uint32_t kind, const char *method) {
     if (!is_intl(vm, thisv, kind)) return incompatible(vm, method, thisv);
@@ -6550,6 +6907,23 @@ jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args,
     case IN_DTF_FORMATRANGETOPARTS:
         if (this_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.formatRangeToParts") == JV_HOLE) return JV_HOLE;
         return dtf_format_range(vm, jv_idx(thisv), a0, a1, 1);
+    case IN_COLLATOR: return cl_new(vm, a0, a1, newt);
+    case IN_CL_COMPARE_GET: {
+        if (this_of(vm, thisv, JIK_COLLATOR, "get Intl.Collator.prototype.compare") == JV_HOLE) return JV_HOLE;
+        uint32_t o = jv_idx(thisv);
+        jv b = slot_get(vm, o, CLS_BOUND);
+        if (jv_is_obj(b)) return b;
+        uint32_t first = vm->objs[jv_idx(callee)].a - which;
+        uint32_t f = js_native_new(vm, first + IN_CL_COMPARE_BOUND, A_EMPTY, 2);
+        vm->objs[f].x = thisv;
+        slot_set(vm, o, CLS_BOUND, jv_obj(f));
+        return jv_obj(f);
+    }
+    case IN_CL_COMPARE_BOUND: return cl_compare(vm, jv_idx(vm->objs[jv_idx(callee)].x), a0, a1);
+    case IN_CL_RESOLVED:
+        if (this_of(vm, thisv, JIK_COLLATOR, "Intl.Collator.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return cl_resolved(vm, jv_idx(thisv));
+    case IN_STR_LOCALECOMPARE: return locale_compare(vm, thisv, a0, a1, js_arg(vm, args, argc, 2));
     case IN_PLURALRULES: return pr_new(vm, a0, a1, newt);
     case IN_PR_SELECT:
         if (this_of(vm, thisv, JIK_PLURALRULES, "Intl.PluralRules.prototype.select") == JV_HOLE) return JV_HOLE;
@@ -6694,6 +7068,12 @@ void js_intl_init(js_vm *vm, uint32_t first) {
         vm->objs[f].x = jv_num(i);
         js_define(vm, vm->date_proto, js_atom_ascii(vm, dn[i]), jv_obj(f), JS_SHAPE_HIDDEN);
     }
+
+    intl_ctor(vm, intl, first, IN_COLLATOR, JIK_COLLATOR, "Collator", 0, 1);
+    uint32_t cp = vm->intl_protos[JIK_COLLATOR];
+    method(vm, cp, first, IN_CL_RESOLVED, "resolvedOptions", 0);
+    getter(vm, cp, first, IN_CL_COMPARE_GET, "compare", 0);
+    method(vm, vm->string_proto, first, IN_STR_LOCALECOMPARE, "localeCompare", 1);
 
     intl_ctor(vm, intl, first, IN_PLURALRULES, JIK_PLURALRULES, "PluralRules", 0, 1);
     uint32_t pp = vm->intl_protos[JIK_PLURALRULES];

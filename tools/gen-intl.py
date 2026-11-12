@@ -28,6 +28,8 @@ The output is a function of the files alone. What it carries:
   - the list patterns, the relative times, the date fields' names, the display names
     of languages, regions, scripts, variants, currencies and calendars (each locale
     the names that differ from its parent's);
+  - CLDR's root collation (allkeys_CLDR.txt, in SRC or fetched): each code point's
+    collation elements and the contractions;
   - Unicode 17's break properties (UAX #29's grapheme, word and sentence classes,
     Extended_Pictographic, Indic_Conjunct_Break) as ranges, from the UCD (in SRC's
     ucd/, else fetched). The available formats come from the locales' XML files: the JSON resolves
@@ -40,6 +42,7 @@ offset; a number is little-endian."""
 import io
 import json
 import os
+import re
 import sys
 import tarfile
 import urllib.error
@@ -52,6 +55,7 @@ PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-dates-full", "cldr-units-ful
 ROOT_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/root.xml"
 MAIN_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/%s.xml"
 UCD = "https://www.unicode.org/Public/17.0.0/ucd/%s"
+ALLKEYS = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/uca/allkeys_CLDR.txt"
 UCD_FILES = {"GraphemeBreakProperty.txt": "auxiliary/", "WordBreakProperty.txt": "auxiliary/",
              "SentenceBreakProperty.txt": "auxiliary/", "emoji-data.txt": "emoji/", "DerivedCoreProperties.txt": ""}
 
@@ -125,6 +129,16 @@ class Source:
             if line:
                 out.append([x.strip() for x in line.split(";")])
         return out
+
+    def allkeys(self):
+        """CLDR's root collation table's lines"""
+        if self.src:
+            with open(os.path.join(self.src, "allkeys_CLDR.txt"), "rb") as f:
+                raw = f.read()
+        else:
+            with urllib.request.urlopen(ALLKEYS) as r:
+                raw = r.read()
+        return raw.decode("utf-8").split("\n")
 
     def main_xml(self, name):
         """a locale's common/main XML file (its name's dashes underscores), None when CLDR
@@ -919,6 +933,55 @@ def break_tables(S, B):
     write_ranges(B, "SB", sb)
 
 
+# ---- the root collation ----
+
+def collation_table(S, B):
+    """CLDR's root collation: its elements (primary u16, secondary u16, tertiary u8, 1 for
+    a variable one), each code point's (its code point and their count in a word, their
+    first's index in the next), the contractions (three code points, 0 for none, and their
+    elements' place and count), each table sorted"""
+    singles, contr = {}, {}
+    for line in S.allkeys():
+        line = line.split("#")[0].strip()
+        if not line or line.startswith("@"):
+            continue
+        cps, ces = line.split(";")
+        cps = tuple(int(x, 16) for x in cps.split())
+        out = [(m.group(1) == "*", int(m.group(2), 16), int(m.group(3), 16), int(m.group(4), 16))
+               for m in re.finditer(r"\[([.*])([0-9A-F]+)\.([0-9A-F]+)\.([0-9A-F]+)\]", ces)]
+        if len(cps) == 1:
+            singles[cps[0]] = out
+        else:
+            contr[cps] = out
+    pool, where = [], {}
+
+    def place(ces):
+        k = tuple(ces)
+        if k not in where:
+            where[k] = len(pool)
+            pool.extend(ces)
+        return where[k]
+    rows = sorted((cp, place(ces), len(ces)) for cp, ces in singles.items())
+    crows = sorted((cps + (0,) * (3 - len(cps)), place(ces), len(ces)) for cps, ces in contr.items())
+    B.mark("IDB_COLL_CES")
+    for var, a, b, c in pool:
+        B.u16(a)
+        B.u16(b)
+        B.u8(c)
+        B.u8(1 if var else 0)
+    B.mark("IDB_COLL_N", len(rows))
+    B.mark("IDB_COLL")
+    for cp, off, n in rows:
+        B.u32(cp | n << 24)
+        B.u32(off)
+    B.mark("IDB_COLLX_N", len(crows))
+    B.mark("IDB_COLLX")
+    for cps, off, n in crows:
+        for c in cps:
+            B.u32(c)
+        B.u32(off | n << 24)
+
+
 def plural_tables(S, B):
     """each plural locale's (every language's, as ICU has them all) cardinal and ordinal
     rule sets: a set is its categories' count,
@@ -998,6 +1061,7 @@ def main():
     plural_tables(S, B)
     date_tables(S, B)
     break_tables(S, B)
+    collation_table(S, B)
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     emit(B, os.path.join(root, "src/js/intl_data.c"), os.path.join(root, "src/js/intl_data.h"))
 

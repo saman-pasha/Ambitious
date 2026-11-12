@@ -1,0 +1,128 @@
+{} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,á,á,Á,à,ä,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+-1,-1,-1,-1,-1,-1,1,-1,-1,1,1,0,1,-1,-1,1,1,0,-1,1,1,-1
+{"sensitivity":"base"} {"locale":"en","usage":"sort","sensitivity":"base","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,Á,à,ä,á,á,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,æ,ae,Æ,b,B,ð,ǆ,Ǆ,é,e,E,ê,ë,ﬁ,fi,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,l·l,ll,L·L,ø,o,œ,ß,ss,z,Z,þ,ŉ,α,β,Ω,ω,А,а,б,ё,е,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,άλφα,αλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+Æsir,aesir,Ångström,angstrom,Čech,cech,co-op,Co-op,coop,cooperate,façade,facade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ĳsselmeer,ijsselmeer,Łódź,lodz,naïve,naive,Naïve,œuvre,oeuvre,Øre,ore,résumé,resume,Resume,résume,rèsume,Šimon,simon,straße,strasse,Strasse,X Ray,x-ray,xray,Zoë,zoe,zoo,Zürich,zurich
+0,0,0,0,-1,-1,1,-1,-1,0,0,0,1,0,0,0,0,0,-1,1,1,-1
+{"sensitivity":"accent"} {"locale":"en","usage":"sort","sensitivity":"accent","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,Á,á,á,à,ä,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,ﬁ,fi,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,Ω,ω,А,а,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ĳsselmeer,ijsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+0,-1,-1,0,-1,-1,1,-1,-1,1,1,0,1,0,0,1,1,0,-1,1,1,-1
+{"sensitivity":"case"} {"locale":"en","usage":"sort","sensitivity":"case","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,á,à,ä,á,á,A,Á,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,æ,ae,Æ,b,B,ð,ǆ,Ǆ,é,e,ê,ë,E,ﬁ,fi,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,l·l,ll,L·L,ø,o,œ,ß,ss,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,ё,е,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,άλφα,αλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,façade,facade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ĳsselmeer,ijsselmeer,lodz,Łódź,naïve,naive,Naïve,œuvre,oeuvre,ore,Øre,résumé,resume,résume,rèsume,Resume,simon,Šimon,straße,strasse,Strasse,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+-1,0,1,-1,-1,-1,1,-1,-1,0,0,0,1,-1,-1,0,0,0,-1,1,1,-1
+{"ignorePunctuation":true} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":true,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,#,@,&,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,á,á,Á,à,ä,a1,a10,a2,ab,a b,a-b,a_b,ab.,.ab,aB,Ab,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,coop,co-op,Co-op,cooperate,facade,façade,file1,file 1,file_1,file-1,File1,file10,File10.txt,file2,file9.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,x-ray,xray,X Ray,zoe,Zoë,zoo,zurich,Zürich
+-1,-1,-1,-1,0,0,1,-1,-1,1,1,0,1,-1,-1,1,1,0,-1,1,1,-1
+{"numeric":true} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":true,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,1,01,١,1a,2,٢,10,a,A,á,á,á,Á,à,ä,a b,a_b,a-b,a1,a2,a10,ab,aB,Ab,ab.,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,file1,File1,file2,file9.txt,file10,File10.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+-1,-1,-1,-1,-1,-1,0,1,1,1,1,0,1,-1,-1,1,1,0,-1,1,-1,0
+{"caseFirst":"upper"} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,A,a,Á,á,á,á,à,ä,a b,a_b,a-b,a1,a10,a2,Ab,aB,ab,ab.,ae,Æ,æ,B,b,ð,Ǆ,ǆ,E,e,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,L·L,l·l,o,ø,œ,ss,ß,Z,z,þ,ŉ,α,β,Ω,ω,А,а,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,Άλφα,άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,Ель,ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,Co-op,co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,File1,file1,file10,File10.txt,file2,file9.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,Naïve,naïve,oeuvre,œuvre,ore,Øre,Resume,resume,résume,résumé,rèsume,simon,Šimon,Strasse,strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+1,-1,-1,1,-1,-1,1,-1,-1,1,1,0,1,1,1,1,1,0,-1,1,1,-1
+{"caseFirst":"lower"} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"lower"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,á,á,Á,à,ä,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+-1,-1,-1,-1,-1,-1,1,-1,-1,1,1,0,1,-1,-1,1,1,0,-1,1,1,-1
+{"usage":"search"} {"locale":"en","usage":"search","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,á,á,Á,à,ä,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,ae,æ,Æ,b,B,ð,ǆ,Ǆ,e,E,é,ê,ë,fi,ﬁ,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,ll,l·l,L·L,o,ø,œ,ss,ß,z,Z,þ,ŉ,α,β,ω,Ω,а,А,б,е,ё,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,αλφα,άλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+aesir,Æsir,angstrom,Ångström,cech,Čech,co-op,Co-op,coop,cooperate,facade,façade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ijsselmeer,ĳsselmeer,lodz,Łódź,naive,naïve,Naïve,oeuvre,œuvre,ore,Øre,resume,Resume,résume,résumé,rèsume,simon,Šimon,strasse,Strasse,straße,X Ray,x-ray,xray,zoe,Zoë,zoo,zurich,Zürich
+-1,-1,-1,-1,-1,-1,1,-1,-1,1,1,0,1,-1,-1,1,1,0,-1,1,1,-1
+{"usage":"search","sensitivity":"base"} {"locale":"en","usage":"search","sensitivity":"base","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,a,A,á,Á,à,ä,á,á,a b,a_b,a-b,a1,a10,a2,ab,aB,Ab,ab.,æ,ae,Æ,b,B,ð,ǆ,Ǆ,é,e,E,ê,ë,ﬁ,fi,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,l·l,ll,L·L,ø,o,œ,ß,ss,z,Z,þ,ŉ,α,β,Ω,ω,А,а,б,ё,е,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,άλφα,αλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+Æsir,aesir,Ångström,angstrom,Čech,cech,co-op,Co-op,coop,cooperate,façade,facade,file 1,file_1,file-1,file1,File1,file10,File10.txt,file2,file9.txt,ĳsselmeer,ijsselmeer,Łódź,lodz,naïve,naive,Naïve,œuvre,oeuvre,Øre,ore,résumé,resume,Resume,résume,rèsume,Šimon,simon,straße,strasse,Strasse,X Ray,x-ray,xray,Zoë,zoe,zoo,Zürich,zurich
+0,0,0,0,-1,-1,1,-1,-1,0,0,0,1,0,0,0,0,0,-1,1,1,-1
+{"numeric":true,"sensitivity":"base","ignorePunctuation":true} {"locale":"en","usage":"sort","sensitivity":"base","ignorePunctuation":true,"collation":"default","numeric":true,"caseFirst":"false"}
+, ,-,#,@,&,😀,$,€,1,01,١,1a,2,٢,10,a,A,á,Á,à,ä,á,á,a1,a2,a10,ab,aB,Ab,a b,a-b,a_b,ab.,.ab,æ,ae,Æ,b,B,ð,ǆ,Ǆ,é,e,E,ê,ë,ﬁ,fi,i,İ,ĳ,ı,ȷ,ŀ,Ǉ,l·l,ll,L·L,ø,o,œ,ß,ss,z,Z,þ,ŉ,α,β,Ω,ω,А,а,б,ё,е,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,άλφα,αλφα,Άλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,ель,Ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+Æsir,aesir,Ångström,angstrom,Čech,cech,coop,co-op,Co-op,cooperate,façade,facade,file1,File1,file 1,file_1,file-1,file2,file9.txt,file10,File10.txt,ĳsselmeer,ijsselmeer,Łódź,lodz,naïve,naive,Naïve,œuvre,oeuvre,Øre,ore,résumé,resume,Resume,résume,rèsume,Šimon,simon,straße,strasse,Strasse,x-ray,xray,X Ray,Zoë,zoe,zoo,Zürich,zurich
+0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,-1,1,-1,0
+{"caseFirst":"upper","sensitivity":"case"} {"locale":"en","usage":"sort","sensitivity":"case","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"}
+, ,-,.ab,@,&,#,😀,$,€,01,1,١,10,1a,2,٢,A,Á,a,á,à,ä,á,á,a b,a_b,a-b,a1,a10,a2,Ab,aB,ab,ab.,Æ,æ,ae,B,b,ð,Ǆ,ǆ,E,é,e,ê,ë,ﬁ,fi,İ,i,ĳ,ı,ȷ,ŀ,Ǉ,L·L,l·l,ll,ø,o,œ,ß,ss,Z,z,þ,ŉ,α,β,Ω,ω,А,а,б,ё,е,и,ї,й,й,й,글,한,あ,ア,中,文
+Αθήνα,Άλφα,άλφα,αλφα,βήτα,γάμμα,Δέλτα,έψιλον,ζήτα,ήτα,θήτα,ϊ,ΐ,ιώτα,κάππα,λάμδα,μι,νι,ξι,όμικρον,πι,ρω,ς,σίγμα,ταυ,ύψιλον,φι,χι,ψι,Ω,ωμέγα
+Ґанок,гора,ђак,ёж,Ёлка,Ель,ель,єнот,жук,зебра,ива,ігри,їжак,йод,кот,лес,љубав,мир,ночь,Њива,овца,пёс,рак,сок,тигр,ћерка,ўсё,утка,фея,хлеб,цирк,чай,џеп,шар,щука,ъ,ы,ь,эхо,юла,яблоко
+Æsir,aesir,Ångström,angstrom,Čech,cech,Co-op,co-op,coop,cooperate,façade,facade,file 1,file_1,file-1,File1,file1,file10,File10.txt,file2,file9.txt,ĳsselmeer,ijsselmeer,Łódź,lodz,Naïve,naïve,naive,œuvre,oeuvre,Øre,ore,Resume,résumé,resume,résume,rèsume,Šimon,simon,Strasse,straße,strasse,X Ray,x-ray,xray,Zoë,zoe,zoo,Zürich,zurich
+1,0,-1,1,-1,-1,1,-1,-1,0,0,0,1,1,1,0,0,0,-1,1,1,-1
+de {"locale":"de","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+fr {"locale":"fr","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+es {"locale":"es","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+pl {"locale":"pl","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+ru {"locale":"ru","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+uk {"locale":"uk","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+el {"locale":"el","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+ja {"locale":"ja","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+zh {"locale":"zh","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+ko {"locale":"ko","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+ar {"locale":"ar","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+he {"locale":"he","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+th {"locale":"th","usage":"sort","sensitivity":"variant","ignorePunctuation":true,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,ab,a-b,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+es-u-co-trad {"locale":"es-u-co-trad","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"trad","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-kn {"locale":"en-u-kn","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":true,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-kn-false {"locale":"en-u-kn-false","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-kf-upper {"locale":"en-u-kf-upper","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-kf-lower {"locale":"en-u-kf-lower","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"lower"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-co-emoji {"locale":"en-u-co-emoji","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"emoji","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+xx {"locale":"en-US","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-US {"locale":"en-US","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+pt-BR {"locale":"pt","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+it {"locale":"it","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+nl {"locale":"nl","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"} a,ä,a b,a-b,ab,c,ch,h,i,ı,l,ł,n,ñ,s,ş,z
+en-u-kn {"numeric":false} {"locale":"en-u-kn","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+en-u-kn-false {"numeric":true} {"locale":"en-u-kn-false","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":true,"caseFirst":"false"}
+en-u-kf-upper {"caseFirst":"lower"} {"locale":"en-u-kf-upper","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"lower"}
+en-u-kf-upper {"caseFirst":"upper"} {"locale":"en-u-kf-upper","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"}
+de-u-co-phonebk {"collation":"eor"} {"locale":"de-u-co-eor","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"eor","numeric":false,"caseFirst":"false"}
+de {"collation":"phonebk"} {"locale":"de-u-co-phonebk","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"phonebk","numeric":false,"caseFirst":"false"}
+en {"collation":"phonebk"} {"locale":"en","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+de-u-co-phonebk-kn {} {"locale":"de-u-co-phonebk-kn","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"phonebk","numeric":true,"caseFirst":"false"}
+da {} {"locale":"da","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"upper"}
+da {"caseFirst":"false"} {"locale":"da","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+th {"ignorePunctuation":false} {"locale":"th","usage":"sort","sensitivity":"variant","ignorePunctuation":false,"collation":"default","numeric":false,"caseFirst":"false"}
+-1 1 0 -1 -1 0 1 0 -1 1 1 aAábC AaábC 1 -1
+RangeError Value x out of range for Intl.Collator options property usage
+RangeError Value x out of range for Intl.Collator options property sensitivity
+RangeError Value x out of range for Intl.Collator options property caseFirst
+RangeError Invalid collation : a!
+TypeError Method get Intl.Collator.prototype.compare called on incompatible receiver #<Collator>
+TypeError Method get Intl.Collator.prototype.compare called on incompatible receiver 5
+TypeError Method Intl.Collator.prototype.resolvedOptions called on incompatible receiver #<Object>
+ok ["constructor","resolvedOptions","compare"]
+ok 0
+ok true
+ok 
+ok 2
+ok true
+ok ["en","de","zh-Hant"]
+TypeError Intl.Collator called on null or undefined
+TypeError String.prototype.localeCompare called on null or undefined
+RangeError Incorrect locale information provided
+ok [object Intl.Collator]
+["usage","localeMatcher","collation","numeric","caseFirst","sensitivity","ignorePunctuation"]
+["x9","x10"] true de

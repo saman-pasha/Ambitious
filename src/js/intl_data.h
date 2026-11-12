@@ -79,4 +79,9 @@
 #define IDB_WB 1978021u
 #define IDB_SB_N 2495u
 #define IDB_SB 1989343u
-#define IDB_BYTES 2011798u
+#define IDB_COLL_CES 2011798u
+#define IDB_COLL_N 38787u
+#define IDB_COLL 2262142u
+#define IDB_COLLX_N 974u
+#define IDB_COLLX 2572438u
+#define IDB_BYTES 2588022u
