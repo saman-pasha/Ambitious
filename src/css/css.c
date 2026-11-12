@@ -221,7 +221,7 @@ static const char css_ua_sheet[] =
     /* a disabled control's colours, as Chromium's sheet gives them (measured in both schemes) */
     "input:disabled, textarea:disabled { color: light-dark(#545454, #aaaaaa); background-color: light-dark(rgba(239, 239, 239, 0.3), "
     "rgba(59, 59, 59, 0.3)); border-color: rgba(118, 118, 118, 0.3) }\n"
-    "select:disabled { color: light-dark(#808080, #aaaaaa); border-color: rgba(118, 118, 118, 0.3) }\n"
+    "select:disabled { color: light-dark(#808080, #aaaaaa); border-color: rgba(118, 118, 118, 0.3); opacity: 0.7 }\n"
     "button:disabled, input[type=button i]:disabled, input[type=submit i]:disabled, input[type=reset i]:disabled, "
     "input[type=color i]:disabled { color: light-dark(rgba(16, 16, 16, 0.3), rgba(255, 255, 255, 0.3)); background-color: "
     "light-dark(rgba(239, 239, 239, 0.3), rgba(19, 1, 1, 0.3)); border-color: light-dark(rgba(118, 118, 118, 0.3), rgba(195, 195, 195, 0.3)) }\n"

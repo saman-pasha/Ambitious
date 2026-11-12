@@ -102,7 +102,8 @@ layout_contract(record(box, [
     %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track; a
     %% colour well's colour, a drop-down's arrow's
     field(theme, enum(theme)), field(checked, bool), field(fraction, f64), field(swatch, u32),
-    %% the state the theme draws the control in: 1 disabled (its own disabled attribute, or a disabled fieldset's)
+    %% the state the theme draws the control in: 1 disabled (its own disabled attribute, or a disabled fieldset's),
+    %% 2 in the dark scheme (its color-scheme's)
     field(tstate, u8),
     %% an img with no image to load (no src, no srcset, no source of its picture chosen): with alt text, its
     %% fallback, a broken image's icon before the text; without, its content box outlined in light grey as

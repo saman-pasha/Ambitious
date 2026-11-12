@@ -1931,38 +1931,39 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
     /* disabled (Chromium's lighten layer, then each part in its disabled colour; measured over a white and a black
        page, each part's colour and alpha solved from the two): the border #767676 at 30% over an interior of #f5f5f5
        at 68%, the accent #767676 at 30% too, a check mark white at 60% (0x99), a range's value and thumb #cbcbcb */
-    int dis = t->box[b].tstate & 1;
-    const uint32_t line = dis ? 0x7676764d : 0x767676ff, accent = dis ? 0x7676764d : 0x0075ffff;
-    const uint32_t inner = 0xf5f5f5ad;
-    uint32_t fill = t->box[b].background & 0xff ? t->box[b].background : 0xffffffff;
+    /* the dark scheme's (measured alike): fields #3b3b3b bordered #858585 (disabled #626262), buttons #6b6b6b (disabled
+       #363636) their border their fill, the accent #99c8ff (disabled #757575), a check mark #3b3b3b, a range's track
+       #3b3b3b (disabled #363636). A disabled select is the disabled field at the 0.7 opacity the sheet gives it */
+    int dis = t->box[b].tstate & 1, dark = (t->box[b].tstate & 2) != 0;
+    const uint32_t line = dark ? (dis ? 0x626262ff : 0x858585ff) : dis ? 0x7676764d : 0x767676ff;
+    const uint32_t accent = dark ? (dis ? 0x757575ff : 0x99c8ffff) : dis ? 0x7676764d : 0x0075ffff;
+    const uint32_t inner = dark ? 0x3b3b3bff : 0xf5f5f5ad, field = dark ? 0x3b3b3bff : 0xffffffff, mark = dark ? 0x3b3b3bff : dis ? 0xffffff99 : 0xffffffff;
+    uint32_t fill = t->box[b].background & 0xff ? t->box[b].background : field;
     int X0 = (int)floor(x + 0.5), Y0 = (int)floor(y + 0.5), X1 = (int)floor(x + w + 0.5), Y1 = (int)floor(y + h + 0.5);
     layout_theme th = t->box[b].theme;
     if (th == LAYOUT_THEME_FIELD || th == LAYOUT_THEME_AREA || th == LAYOUT_THEME_LISTBOX) {
-        if (th == LAYOUT_THEME_LISTBOX && dis) pt_theme_field(c, X0, Y0, X1, Y1, 0xffffffb3, 0x76767638);
-        else pt_theme_field(c, X0, Y0, X1, Y1, dis ? inner : fill, line);
+        /* a list box keeps its own background disabled (the select's opacity fades it) */
+        pt_theme_field(c, X0, Y0, X1, Y1, dis && th != LAYOUT_THEME_LISTBOX ? inner : fill, line);
         if (th == LAYOUT_THEME_AREA) {
             /* the resizer: two diagonals in the bottom right corner */
-            uint32_t rz = dis ? 0x6666664d : 0x666666ff;
+            uint32_t rz = dark ? (dis ? 0x626262ff : 0xb0b0b0ff) : dis ? 0x6666664d : 0x666666ff;
             for (int k = 0; k < 7; k++) pt_fill(c, X1 - 4 - k, Y1 - 10 + k, X1 - 3 - k, Y1 - 9 + k, rz);
             for (int k = 0; k < 3; k++) pt_fill(c, X1 - 4 - k, Y1 - 6 + k, X1 - 3 - k, Y1 - 5 + k, rz);
         }
     } else if (th == LAYOUT_THEME_MENULIST) {
         /* a drop-down: a field's frame on the field's white, and its arrow, an 8 by 4 chevron stroked 2px wide in the
-           text's colour, 12px before the inner right edge, at the box's middle (ThemePainterDefault::SetupMenuListArrow);
-           disabled, the frame fainter and the arrow at 70% */
-        pt_theme_field(c, X0, Y0, X1, Y1, dis ? 0xf4f4f478 : 0xffffffff, dis ? 0x76767638 : line);
+           text's colour, 12px before the inner right edge, at the box's middle (ThemePainterDefault::SetupMenuListArrow) */
+        pt_theme_field(c, X0, Y0, X1, Y1, dis ? inner : field, line);
         double ax = X1 - floor(t->box[b].br) - 12, ay = Y0 + floor((Y1 - Y0) / 2);
         double px[3] = { ax, ax + 4, ax + 8 }, py[3] = { ay - 2, ay + 2, ay - 2 };
-        uint32_t arrow = t->box[b].swatch & 0xff ? t->box[b].swatch : 0x000000ff;
-        if (dis) arrow = (arrow & 0xffffff00) | (uint32_t)((arrow & 0xff) * 0.7 + 0.5);
-        pt_theme_stroke(c, px, py, 3, 2, arrow, acc);
+        pt_theme_stroke(c, px, py, 3, 2, t->box[b].swatch & 0xff ? t->box[b].swatch : 0x000000ff, acc);
     } else if (th == LAYOUT_THEME_BUTTON || th == LAYOUT_THEME_COLORWELL) {
         /* a button: its background as a rounded rectangle of radius 2, its border 1px inside it (PaintButton);
-           disabled, #d8d8d8 at 44% and its border #c0c0c0 at 68% */
-        if (dis) fill = 0xd8d8d870;
+           disabled, #d8d8d8 at 44% and its border #c0c0c0 at 68% (dark: #363636, its border its fill) */
+        if (dis) fill = dark ? 0x363636ff : 0xd8d8d870;
         if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, fill); return; }
         pt_theme_rr(c, X0, Y0, X1, Y1, 2, fill, 0);
-        pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, dis ? 0xc0c0c0ad : line);
+        pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, dark ? fill : dis ? 0xc0c0c0ad : line);
         if (th == LAYOUT_THEME_COLORWELL) {
             /* the swatch: the content box less 4px above and below and 2px aside, a 1px #777777 border round the colour */
             double cx0 = x + t->box[b].bl + t->box[b].pl + 2, cy0 = y + t->box[b].bt + t->box[b].pt + 4;
@@ -1981,13 +1982,13 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
         if (s <= 2) { pt_fill(c, sx, sy, sx + s, sy + s, line); return; }
         if (dis) pt_theme_rr(c, sx, sy, sx + s, sy + s, r, inner, 0);
         if (!dis || (th == LAYOUT_THEME_CHECKBOX && checked))
-            pt_theme_rr(c, sx, sy, sx + s, sy + s, r, th == LAYOUT_THEME_CHECKBOX && checked ? accent : 0xffffffff, 0);
+            pt_theme_rr(c, sx, sy, sx + s, sy + s, r, th == LAYOUT_THEME_CHECKBOX && checked ? accent : field, 0);
         if (th == LAYOUT_THEME_CHECKBOX && checked) {
             double px[3] = { sx + s * 0.2, sx + s * 0.4, sx + s - s * 0.2 }, py[3] = { sy + s / 2, sy + s / 2 + s * 0.2, sy + s * 0.2 };
-            pt_theme_stroke(c, px, py, 3, s * 0.16, dis ? 0xffffff99 : 0xffffffff, acc);
+            pt_theme_stroke(c, px, py, 3, s * 0.16, mark, acc);
             return;
         }
-        pt_hair_rrect(c, sx + 0.5, sy + 0.5, sx + s - 0.5, sy + s - 0.5, th == LAYOUT_THEME_RADIO ? (s - 1) / 2 : 2, checked && !dis ? accent : line);
+        pt_hair_rrect(c, sx + 0.5, sy + 0.5, sx + s - 0.5, sy + s - 0.5, th == LAYOUT_THEME_RADIO ? (s - 1) / 2 : 2, checked && (!dis || dark) ? accent : line);
         if (th == LAYOUT_THEME_RADIO && checked) {
             /* the dot: as Chromium's draws, its radius 0.28 of the box and 0.36px (fitted to its pixels: 4px in 13,
                7.1 in 24) */
@@ -1999,13 +2000,13 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
            before the end along the value (PaintSliderTrack, PaintSliderThumb) */
         double ty0 = y + (h - 8) / 2, ty1 = ty0 + 8, tx0 = x + 1, tx1 = x + w - 1, cxm = x + 8 + floor(t->box[b].fraction * (w - 16) + 0.5);
         /* disabled: the track #eeeeee at 30%, its value and the thumb #cbcbcb */
-        uint32_t value = dis ? 0xcbcbcbff : accent;
-        pt_theme_rr(c, tx0, ty0, tx1, ty1, 4, dis ? 0xeeeeee4d : 0xefefefff, 0);
+        uint32_t value = dis && !dark ? 0xcbcbcbff : accent;
+        pt_theme_rr(c, tx0, ty0, tx1, ty1, 4, dark ? (dis ? 0x363636ff : 0x3b3b3bff) : dis ? 0xeeeeee4d : 0xefefefff, 0);
         double save = c->cx1;
         c->cx1 = fmin(c->cx1, cxm);
         pt_theme_rr(c, tx0, ty0, tx1, ty1, 4, value, 0);
         c->cx1 = save;
-        pt_hair_rrect(c, tx0 + 0.5, ty0 + 0.5, tx1 - 0.5, ty1 - 0.5, 4, dis ? 0x7676764d : 0x76767680);
+        pt_hair_rrect(c, tx0 + 0.5, ty0 + 0.5, tx1 - 0.5, ty1 - 0.5, 4, dark ? line : dis ? 0x7676764d : 0x76767680);
         pt_theme_disc(c, cxm, y + h / 2, 7.4, value);    /* as Chromium's 16px thumb draws (fitted: 7.4px) */
     }
 }

@@ -2311,6 +2311,8 @@ static void lay_theme(LCTX, uint32_t b, uint32_t el) {
     t->box[b].theme = th;
     t->box[b].checked = lay_attr(d, el, "checked") != 0;
     t->box[b].tstate = (uint8_t)(th != LAYOUT_THEME_CSS && lay_disabled(d, el));
+    /* the scheme it is used in: its color-scheme's colour, the dark Canvas (#121212) */
+    if (th != LAYOUT_THEME_CSS && st->cval[e.c0 + CSS_PROP_COLOR_SCHEME].color == 0x121212ffu) t->box[b].tstate |= 2;
     if (th == LAYOUT_THEME_RANGE) {
         double lo = 0, hi = 100, v = -1;
         uint32_t a;

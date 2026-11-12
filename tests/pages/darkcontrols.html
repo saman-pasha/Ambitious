@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Form controls in the dark scheme</title>
+<style>:root { color-scheme: dark } body { margin: 8px; } div { margin: 0 0 6px; }</style></head>
+<body>
+<div><input id="t1" value="text"> <input id="t2" value="text" disabled></div>
+<div><textarea id="a1" rows="2">area</textarea> <textarea id="a2" rows="2" disabled>area</textarea></div>
+<div><select id="s1"><option>one</option></select> <select id="s2" disabled><option>one</option></select></div>
+<div><button>Button</button> <button id="b2" disabled>Button</button> <input id="b3" type="submit"> <input id="b4" type="submit" disabled></div>
+<div><input id="c1" type="checkbox"> <input id="c2" type="checkbox" disabled> <input id="c3" type="checkbox" checked> <input id="c4" type="checkbox" checked disabled></div>
+<div><input id="r1" type="radio"> <input id="r2" type="radio" disabled> <input id="r3" type="radio" checked name="x"> <input id="r4" type="radio" checked disabled name="y"></div>
+<div><input id="g1" type="range"> <input id="g2" type="range" disabled></div>
+<div><input id="k1" type="color" value="#ff0000"> <input id="k2" type="color" value="#ff0000" disabled></div>
+<div><select id="l1" size="3"><option>a</option><option>b</option></select> <select id="l2" size="3" disabled><option>a</option><option>b</option></select></div>
+<div><input id="c5" type="checkbox" disabled style="width:24px;height:24px"> <input id="c6" type="checkbox" checked disabled style="width:24px;height:24px">
+<input id="r5" type="radio" disabled style="width:24px;height:24px"> <input id="r6" type="radio" checked disabled style="width:24px;height:24px" name="z"></div>
+<fieldset disabled><legend><input id="f0" value="in the legend"></legend><input id="f1" value="in a fieldset"> <button id="f2">In it</button>
+<fieldset><input id="f3" type="checkbox" checked></fieldset></fieldset>
+</body></html>
