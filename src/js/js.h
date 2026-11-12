@@ -90,8 +90,9 @@ enum {
     JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
     JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
     JK_BIGINT,       /* a BigInt's wrapper: the value in x */
-    JK_ASYNCGEN      /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
+    JK_ASYNCGEN,     /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
                         mode, value and promise, three a request, the first the one its body answers), x its function */
+    JK_INTL          /* an Intl object (src/js/intl.c): a its kind (JIK_*), x its internal slots (an array, as a value) */
 };
 /* a typed array's element type, in its flags above JO_TA_SHIFT */
 enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UINT32, JTA_FLOAT32, JTA_FLOAT64,
@@ -283,6 +284,8 @@ typedef struct js_vm {
     vector<js_big> bigs;              /* every BigInt (src/js/bigint.c) */
     vector<uint32_t> bigl;            /* their limbs */
     uint32_t bigint_proto;
+    uint32_t intl_protos[16];         /* each Intl constructor's prototype, by its kind (src/js/intl.c) */
+    uint32_t intl_cache;              /* the formatters toLocaleString made for its defaults (an array, 0 none yet) */
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
@@ -465,6 +468,13 @@ jv js_to_bigint(js_vm *vm, jv v);
 enum { JBG_CTOR, JBG_ASINTN, JBG_ASUINTN, JBG_TOSTRING, JBG_TOLOCALE, JBG_VALUEOF, JBG_N };
 jv js_big_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_big_init(js_vm *vm, uint32_t first);
+
+/* Intl (src/js/intl.c, ECMA-402): its natives, JIN_N ids from the first (intl.c numbers
+   them), and the locale-sensitive methods of Number, BigInt, String, Date and Array it
+   gives their prototypes in place of the plain ones */
+#define JIN_N 256
+jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_intl_init(js_vm *vm, uint32_t first);
 
 /* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
 enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };

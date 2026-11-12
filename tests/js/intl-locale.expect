@@ -1,0 +1,265 @@
+object [object Intl] ["en-US"] 1
+"EN-us" ["en-US"]
+"en-latn-us" ["en-Latn-US"]
+"zh-hant-tw" ["zh-Hant-TW"]
+"de-u-co-phonebook" RangeError Invalid language tag: de-u-co-phonebook
+"de-u-co-phonebk" ["de-u-co-phonebk"]
+"en-u-ca-ethiopic-amete-alem" ["en-u-ca-ethioaa"]
+"en-u-ca-islamicc" ["en-u-ca-islamic-civil"]
+"en-u-ks-primary" ["en-u-ks-level1"]
+"en-u-ms-imperial" ["en-u-ms-uksystem"]
+"en-u-kb-yes" ["en-u-kb"]
+"en-u-kb-true" ["en-u-kb"]
+"en-u-kn-false" ["en-u-kn-false"]
+"en-u-kn-true" ["en-u-kn"]
+"en-u-tz-aqams" ["en-u-tz-aqmcm"]
+"en-u-tz-cnckg" ["en-u-tz-cnsha"]
+"sgn-GR" ["gss"]
+"iw-IL" ["he-IL"]
+"in" ["id"]
+"ji" ["yi"]
+"jw" ["jv"]
+"mo" ["ro"]
+"sh" ["sr-Latn"]
+"sh-Cyrl" ["sr-Cyrl"]
+"cmn" ["zh"]
+"cmn-Hans" ["zh-Hans"]
+"zh-cmn-Hans" RangeError Incorrect locale information provided
+"aar" ["aa"]
+"hy-arevela" ["hy"]
+"hy-arevmda" ["hyw"]
+"art-lojban" ["jbo"]
+"zh-guoyu" ["zh"]
+"zh-hakka" ["hak"]
+"en-x-private" ["en-x-private"]
+"x-private" RangeError Incorrect locale information provided
+"en-t-ru-Cyrl" ["en-t-ru-cyrl"]
+"EN-u-CA-gregory-NU-latn" ["en-u-ca-gregory-nu-latn"]
+"en-u-nu-latn-ca-gregory" ["en-u-ca-gregory-nu-latn"]
+"en-z-zz-u-ca-gregory" ["en-u-ca-gregory-z-zz"]
+"en-b-bb-a-aa" ["en-a-aa-b-bb"]
+"en-variant1-abcde" ["en-abcde-variant1"]
+"en-polytoni" ["en-polyton"]
+"el-polytoni" ["el-polyton"]
+"en-heploc" ["en-alalc97"]
+"de-1901-1996" ["de-1901-1996"]
+"sr-Latn-RS" ["sr-Latn-RS"]
+"und" ["und"]
+"und-US" ["und-US"]
+"und-Latn" ["und-Latn"]
+"en-SU" ["en-RU"]
+"ru-SU" ["ru-RU"]
+"hy-SU" ["hy-AM"]
+"und-SU" ["und-RU"]
+"uz-SU" ["uz-UZ"]
+"en-DD" ["en-DE"]
+"en-YU" ["en-RS"]
+"en-BU" ["en-MM"]
+"en-830" ["en-JE"]
+"en-958" ["en-AA"]
+"en-016" ["en-AS"]
+"en-554" ["en-NZ"]
+"no-bok" RangeError Incorrect locale information provided
+"no-bokmal" ["nb"]
+"no-nyn" RangeError Incorrect locale information provided
+"i-klingon" RangeError Incorrect locale information provided
+"en-GB-oed" RangeError Incorrect locale information provided
+"tlh" ["tlh"]
+"EN-U-CA-GREGORIAN" RangeError Invalid language tag: en-u-ca-gregorian
+"de-1901-1901" RangeError Invalid language tag: de-1901-1901
+"en-u-ca-gregory-u-nu-latn" RangeError Invalid language tag: en-u-ca-gregory-u-nu-latn
+"en-a-aa-a-bb" RangeError Invalid language tag: en-a-aa-a-bb
+"" RangeError Incorrect locale information provided
+"en-" RangeError Invalid language tag: en-
+"-en" RangeError Incorrect locale information provided
+"en--US" RangeError Incorrect locale information provided
+"en_US" RangeError Incorrect locale information provided
+"e" RangeError Incorrect locale information provided
+"toolonglang" RangeError Incorrect locale information provided
+"abcde" ["abcde"]
+"abcdefghi" RangeError Incorrect locale information provided
+"en-US-x" RangeError Invalid language tag: en-us-x
+"en-0abc" ["en-0abc"]
+"en-1234" ["en-1234"]
+"en-12345" ["en-12345"]
+"en-a1b2c" ["en-a1b2c"]
+"en-u" RangeError Invalid language tag: en-u
+"en-u-ca" ["en-u-ca"]
+"en-u-ca-gregory-ca-buddhist" ["en-u-ca-gregory"]
+"en-u-aa-bbb-cc" ["en-u-aa-bbb-cc"]
+"en-u-attr1-ca-gregory" ["en-u-attr1-ca-gregory"]
+"en-u-attr2-attr1" ["en-u-attr1-attr2"]
+"en-u-attr1-attr1" ["en-u-attr1"]
+"en-t-en-us" ["en-t-en-us"]
+"en-t-h0-hybrid" ["en-t-h0-hybrid"]
+"en-t-a1b-c" RangeError Invalid language tag: en-t-a1b-c
+"en-u-co-yes" ["en-u-co"]
+"en-u-ca-yes" ["en-u-ca"]
+"ar-u-nu-arab-ca-islamicc" ["ar-u-ca-islamic-civil-nu-arab"]
+"en-u-dx-thai" ["en-u-dx-thai"]
+"en-u-va-posix" ["en-u-va-posix"]
+"en-u-rg-ukzzzz" ["en-u-rg-ukzzzz"]
+"en-US-POSIX" ["en-US-u-va-posix"]
+"sr-cyrl-ba" ["sr-Cyrl-BA"]
+"az-Arab-IR" ["az-Arab-IR"]
+"ın" RangeError Incorrect locale information provided
+"i-default" RangeError Incorrect locale information provided
+"en-Qaai" ["en-Zinh"]
+"en-latn-us-valencia" ["en-Latn-US-valencia"]
+"en-scouse-fonipa" ["en-fonipa-scouse"]
+"hy-arevela-AM" RangeError Incorrect locale information provided
+"EN-LATN" ["en-Latn"]
+"en-us-u-ca-gregory-x-abc-def" ["en-US-u-ca-gregory-x-abc-def"]
+"de-DE-u-co-phonebk-ka-shifted" ["de-DE-u-co-phonebk-ka-shifted"]
+"und-Cyrl-RU" ["und-Cyrl-RU"]
+"und-hans" ["und-Hans"]
+"zh-yue" RangeError Incorrect locale information provided
+"yue" ["yue"]
+"en-t-iw" ["en-t-he"]
+"en-t-m0-ungegn-h0-hybrid" ["en-t-h0-hybrid-m0-ungegn"]
+"fr-x-a-b-c" ["fr-x-a-b-c"]
+"en-US-u-kf-upper-co-emoji-kn" ["en-US-u-co-emoji-kf-upper-kn"]
+"pt-br" ["pt-BR"]
+"es-419" ["es-419"]
+"en-001" ["en-001"]
+"zh-min-nan" RangeError Incorrect locale information provided
+"cel-gaulish" ["xtg"]
+"und-aaland" ["und-AX"]
+TypeError Language ID should be string or object.
+TypeError Cannot convert undefined or null to object
+TypeError Language ID should be string or object.
+RangeError Incorrect locale information provided
+TypeError Language ID should be string or object.
+["en-US","de"] [] [] ["fr","fr-FR"] ["it"] ["de","en-u-ca-buddhist"] ["ja-JP"]
+["ko-KR"]
+TypeError First argument to Intl.Locale constructor can't be empty or missing
+TypeError First argument to Intl.Locale constructor can't be empty or missing
+RangeError First argument to Intl.Locale constructor can't be empty or missing
+TypeError Constructor Intl.Locale requires 'new'
+RangeError Incorrect locale information provided
+RangeError Incorrect locale information provided
+RangeError Incorrect locale information provided
+RangeError Incorrect locale information provided
+RangeError Value h13 out of range for locale options property hourCycle
+RangeError Value up out of range for locale options property caseFirst
+ok en-u-kn
+TypeError First argument to Intl.Locale constructor can't be empty or missing
+RangeError Incorrect locale information provided
+RangeError Incorrect locale information provided
+RangeError Incorrect locale information provided
+ok fr-CA
+ok en
+TypeError Intl.Locale called on null or undefined
+TypeError Method Intl.Locale.prototype.toString called on incompatible receiver #<Object>
+TypeError Method Intl.Locale.prototype.maximize called on incompatible receiver 1
+TypeError Method Intl.Locale.prototype.baseName called on incompatible receiver #<Object>
+TypeError Method Intl.Locale.prototype.minimize called on incompatible receiver function maximize() { [native code] }
+en-Latn-GB-u-ca-buddhist-co-phonebk-hc-h12-kf-upper-kn-false-nu-latn en-Latn-GB en Latn GB buddhist phonebk h12 upper false latn
+    false    en
+he-Latn-US-u-ca-gregory en-Cyrl-RU de-u-co-emoji en-u-kn en-u-kn-false true true ja-u-ca-japanese-hc-h11-kf-lower-nu-jpan sr-Latn-RS zh-Hant
+1 Locale function get baseName Intl.Locale [object Intl.Locale] {} en-US [] true
+fr-CA true true fr-Latn-CA false
+zh zh-Hans-CN zh zh
+zh-TW zh-Hant-TW zh-TW zh-TW
+zh-Hant zh-Hant-TW zh-TW zh-TW
+zh-Hant-TW zh-Hant-TW zh-TW zh-TW
+zh-HK zh-Hant-HK zh-HK zh-HK
+zh-Hans-HK zh-Hans-HK zh-Hans-HK zh-Hans-HK
+en en-Latn-US en en
+en-GB en-Latn-GB en-GB en-GB
+en-Latn-US en-Latn-US en en
+en-Latn-US-u-ca-gregory en-Latn-US-u-ca-gregory en-u-ca-gregory en-u-ca-gregory
+und en-Latn-US en en
+und-Cyrl ru-Cyrl-RU ru ru
+und-US en-Latn-US en en
+und-Arab ar-Arab-EG ar ar
+und-Hant zh-Hant-TW und-Hant zh-TW
+und-CN zh-Hans-CN zh zh
+sr sr-Cyrl-RS sr sr
+sr-ME sr-Latn-ME sr-ME sr-ME
+sr-Latn sr-Latn-RS sr-Latn sr-Latn
+sr-Latn-RS sr-Latn-RS sr-Latn sr-Latn
+de-CH de-Latn-CH de-CH de-CH
+pt pt-Latn-BR pt pt
+pt-PT pt-Latn-PT pt-PT pt-PT
+pt-Latn-PT pt-Latn-PT pt-PT pt-PT
+zh-Hans zh-Hans-CN zh zh
+ar ar-Arab-EG ar ar
+ar-SA ar-Arab-SA ar-SA ar-SA
+he he-Hebr-IL he he
+iw he-Hebr-IL he he
+ja ja-Jpan-JP ja ja
+ja-JP ja-Jpan-JP ja ja
+ko ko-Kore-KR ko ko
+hi hi-Deva-IN hi hi
+fa fa-Arab-IR fa fa
+fa-AF fa-Arab-AF fa-AF fa-AF
+ru ru-Cyrl-RU ru ru
+uk uk-Cyrl-UA uk uk
+el el-Grek-GR el el
+th th-Thai-TH th th
+vi vi-Latn-VN vi vi
+id id-Latn-ID id id
+az az-Latn-AZ az az
+az-IR az-Arab-IR az-IR az-IR
+uz uz-Latn-UZ uz uz
+uz-AF uz-Arab-AF uz-AF uz-AF
+ms ms-Latn-MY ms ms
+mn mn-Cyrl-MN mn mn
+mn-CN mn-Mong-CN mn-CN mn-CN
+pa pa-Guru-IN pa pa
+pa-PK pa-Arab-PK pa-PK pa-PK
+es-419 es-Latn-419 es-419 es-419
+en-001 en-Latn-001 en-001 en-001
+fr-x-foo fr-Latn-FR-x-foo fr-x-foo fr-x-foo
+de-1996 de-Latn-DE-1996 de-1996 de-1996
+xx xx xx xx
+xx-Latn xx-Latn xx-Latn xx-Latn
+en-Cyrl en-Cyrl-US en-Cyrl en-Cyrl
+en-Zzzz-ZZ en-Zzzz-ZZ en en
+en ["emoji","eor"] ["gregory"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+de ["emoji","eor","phonebk"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+fr ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+es ["emoji","eor","trad"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+it ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+pt ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+nl ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+ru ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+pl ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+ja ["emoji","eor","unihan"] ["gregory","japanese"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+zh ["emoji","eor","pinyin","stroke","unihan","zhuyin"] ["gregory","chinese"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+ko ["emoji","eor","searchjl","unihan"] ["gregory","dangi"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+hi ["emoji","eor"] ["gregory","indian"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[7],"minimalDays":1} 
+ar ["compat","emoji","eor"] ["gregory","coptic","islamic","islamic-civil","islamic-tbla"] ["h12"] ["latn"] {"direction":"rtl"} {"firstDay":6,"weekend":[5,6],"minimalDays":1} 
+he ["emoji","eor"] ["gregory","hebrew","islamic","islamic-civil","islamic-tbla"] ["h23"] ["latn"] {"direction":"rtl"} {"firstDay":7,"weekend":[5,6],"minimalDays":1} 
+tr ["emoji","eor"] ["gregory","islamic-civil","islamic-tbla"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+sv ["emoji","eor","trad"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+da ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+nb ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+no ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+fi ["emoji","eor","trad"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+cs ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+uk ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+el ["emoji","eor"] ["gregory"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+hu ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} 
+ro ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+id ["emoji","eor"] ["gregory","islamic","islamic-civil","islamic-tbla"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+vi ["emoji","eor","trad"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+th ["emoji","eor"] ["buddhist","gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+fa ["emoji","eor"] ["persian","gregory","islamic","islamic-civil","islamic-tbla"] ["h23"] ["arabext"] {"direction":"rtl"} {"firstDay":6,"weekend":[5],"minimalDays":1} 
+zh-TW ["emoji","eor","pinyin","stroke","unihan","zhuyin"] ["gregory","roc","chinese"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} ["Asia/Taipei"]
+ar-SA ["compat","emoji","eor"] ["gregory","islamic-umalqura","islamic","islamic-rgsa"] ["h12"] ["arab"] {"direction":"rtl"} {"firstDay":7,"weekend":[5,6],"minimalDays":1} ["Asia/Riyadh"]
+ar-EG ["compat","emoji","eor"] ["gregory","coptic","islamic","islamic-civil","islamic-tbla"] ["h12"] ["arab"] {"direction":"rtl"} {"firstDay":6,"weekend":[5,6],"minimalDays":1} ["Africa/Cairo"]
+fa-IR ["emoji","eor"] ["persian","gregory","islamic","islamic-civil","islamic-tbla"] ["h23"] ["arabext"] {"direction":"rtl"} {"firstDay":6,"weekend":[5],"minimalDays":1} ["Asia/Tehran"]
+th-TH ["emoji","eor"] ["buddhist","gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} ["Asia/Bangkok"]
+en-IN ["emoji","eor"] ["gregory","indian"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[7],"minimalDays":1} ["Asia/Calcutta"]
+hi-IN ["emoji","eor"] ["gregory","indian"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[7],"minimalDays":1} ["Asia/Calcutta"]
+ja-JP ["emoji","eor","unihan"] ["gregory","japanese"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} ["Asia/Tokyo"]
+he-IL ["emoji","eor"] ["gregory","hebrew","islamic","islamic-civil","islamic-tbla"] ["h23"] ["latn"] {"direction":"rtl"} {"firstDay":7,"weekend":[5,6],"minimalDays":1} ["Asia/Jerusalem"]
+en-GB ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} ["Europe/London"]
+en-US ["emoji","eor"] ["gregory"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} ["America/Adak","America/Anchorage","America/Boise","America/Chicago","America/Denver","America/Detroit","America/Indiana/Knox","America/Indiana/Marengo","America/Indiana/Petersburg","America/Indiana/Tell_City","America/Indiana/Vevay","America/Indiana/Vincennes","America/Indiana/Winamac","America/Indianapolis","America/Juneau","America/Kentucky/Monticello","America/Los_Angeles","America/Louisville","America/Menominee","America/Metlakatla","America/New_York","America/Nome","America/North_Dakota/Beulah","America/North_Dakota/Center","America/North_Dakota/New_Salem","America/Phoenix","America/Sitka","America/Yakutat","Pacific/Honolulu"]
+de-CH ["emoji","eor","phonebk"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":4} ["Europe/Zurich"]
+sr-Latn ["emoji","eor"] ["gregory"] ["h23"] ["latn"] {"direction":"ltr"} {"firstDay":1,"weekend":[6,7],"minimalDays":1} 
+zh-Hant ["emoji","eor","pinyin","stroke","unihan","zhuyin"] ["gregory","roc","chinese"] ["h12"] ["latn"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+en-u-ca-buddhist-hc-h11-co-emoji-nu-arab ["emoji"] ["buddhist"] ["h11"] ["arab"] {"direction":"ltr"} {"firstDay":7,"weekend":[6,7],"minimalDays":1} 
+["Europe/Berlin","Europe/Busingen"] ["America/Adak","America/Anchorage","America/Boise","America/Chicago","America/Denver","America/Detroit","America/Indiana/Knox","America/Indiana/Marengo","America/Indiana/Petersburg","America/Indiana/Tell_City","America/Indiana/Vevay","America/Indiana/Vincennes","America/Indiana/Winamac","America/Indianapolis","America/Juneau","America/Kentucky/Monticello","America/Los_Angeles","America/Louisville","America/Menominee","America/Metlakatla","America/New_York","America/Nome","America/North_Dakota/Beulah","America/North_Dakota/Center","America/North_Dakota/New_Salem","America/Phoenix","America/Sitka","America/Yakutat","Pacific/Honolulu"] 26 ["Asia/Gaza","Asia/Hebron"] ["Asia/Jerusalem"] ["Antarctica/Casey","Antarctica/Davis","Antarctica/DumontDUrville","Antarctica/Mawson","Antarctica/McMurdo","Antarctica/Palmer","Antarctica/Rothera","Antarctica/Syowa","Antarctica/Troll","Antarctica/Vostok"]

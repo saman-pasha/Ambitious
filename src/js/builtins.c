@@ -65,7 +65,8 @@ enum {
     N_PX_FIRST = N_RE_FIRST + JRE_N,
     N_TA_FIRST = N_PX_FIRST + JPX_N,
     N_BG_FIRST = N_TA_FIRST + JTN_N,
-    N_LAST = N_BG_FIRST + JBG_N
+    N_IN_FIRST = N_BG_FIRST + JBG_N,      /* Intl's (src/js/intl.c), JIN_N */
+    N_LAST = N_IN_FIRST + JIN_N
 };
 
 /* ---- helpers ---- */
@@ -2249,6 +2250,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id >= N_PX_FIRST && id < N_PX_FIRST + JPX_N) return js_proxy_native(vm, id - N_PX_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_TA_FIRST && id < N_TA_FIRST + JTN_N) return js_typed_native(vm, id - N_TA_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_BG_FIRST && id < N_BG_FIRST + JBG_N) return js_big_native(vm, id - N_BG_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_IN_FIRST && id < N_IN_FIRST + JIN_N) return js_intl_native(vm, id - N_IN_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2944,4 +2946,6 @@ void js_builtins_init(js_vm *vm) {
         defv(vm, vm->aggregate_error_proto, "message", jv_str(A_EMPTY));
         vm->objs[ae].proto = vm->error_ctor;
     }
+    /* Intl, and the locale-sensitive methods it gives the prototypes made above */
+    js_intl_init(vm, N_IN_FIRST);
 }
