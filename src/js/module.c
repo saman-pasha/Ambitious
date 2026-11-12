@@ -141,20 +141,34 @@ static uint32_t mod_load(js_vm *vm, uint32_t spec, uint32_t referrer) {
     return mod_compile(vm, url, data(text), len(text));
 }
 
-/* a module's requests loaded, and theirs: the graph its linking needs */
+/* a module's requests loaded, and theirs: the graph its linking needs. Each request is
+   asked for though one before failed (as HTML fetches a module's descendants together),
+   the first failure the one thrown. One that failed is no graph loaded: a later import
+   of it tries its requests again */
 static int mod_load_graph(js_vm *vm, uint32_t m) {
     if (vm->modules[m].flags & JMF_REQUESTED) return 1;
     vm->modules[m].flags |= JMF_REQUESTED;
     uint32_t req = vm->modules[m].req, n = vm->modules[m].nreq;
+    int ok = 1;
+    jv first = JV_UNDEF;
     for (uint32_t i = 0; i < n; i++) {
-        if (!vm->mod_reqs[req + i].module) {
-            uint32_t c = mod_load(vm, vm->mod_reqs[req + i].spec, vm->modules[m].url);
-            if (!c) return 0;
-            vm->mod_reqs[req + i].module = c;
+        uint32_t c = vm->mod_reqs[req + i].module;
+        if (!c) {
+            c = mod_load(vm, vm->mod_reqs[req + i].spec, vm->modules[m].url);
+            if (c) vm->mod_reqs[req + i].module = c;
         }
-        if (!mod_load_graph(vm, vm->mod_reqs[req + i].module)) return 0;
+        if (c && mod_load_graph(vm, c)) continue;
+        if (vm->throwing == 2) { vm->modules[m].flags &= ~(uint32_t)JMF_REQUESTED; return 0; }
+        if (ok) first = vm->exception;
+        ok = 0;
+        vm->throwing = 0;
+        vm->exception = JV_UNDEF;
     }
-    return 1;
+    if (ok) return 1;
+    vm->modules[m].flags &= ~(uint32_t)JMF_REQUESTED;
+    vm->throwing = 1;
+    vm->exception = first;
+    return 0;
 }
 
 static uint32_t req_module(js_vm *vm, uint32_t m, uint32_t r) { return vm->mod_reqs[vm->modules[m].req + r].module; }
@@ -558,6 +572,18 @@ uint32_t js_module_main(js_vm *vm, uint32_t url, const char *src, size_t n) {
     return mod_run(vm, m);
 }
 
+uint32_t js_module_fetch(js_vm *vm, uint32_t url, const char *src, size_t n, int fresh) {
+    uint32_t m = fresh ? 0 : mod_find(vm, url);
+    if (!m) m = mod_compile(vm, url, src, n);
+    if (!m || !mod_load_graph(vm, m)) return 0;
+    return m;
+}
+
+uint32_t js_module_eval(js_vm *vm, uint32_t m) {
+    if (!m || !mod_link(vm, m)) return 0;
+    return mod_evaluate(vm, m);
+}
+
 /* import(): a promise; the module loaded, linked and evaluated in a task of its own (as a
    fetch's completion would come), the promise resolved with its namespace or rejected
    with what failed */
@@ -586,6 +612,7 @@ jv js_module_dynamic(js_vm *vm, jv spec, uint32_t referrer) {
     t.live = 1;
     t.seq = ++vm->timer_seq;
     t.run = vm->cur_run;
+    t.rec = JS_TIMER_MODULE;
     push_back(vm->timers, t);
     return jv_obj(p);
 }
@@ -648,7 +675,9 @@ jv js_module_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t arg
         uint32_t s = js_to_string(vm, a0);
         if (!s) return JV_HOLE;
         uint32_t url = 0, source = 0;
+        vm->mod_resolve_only = 1;
         int ok = vm->load_module ? vm->load_module(vm, s, vm->modules[m].url, &url, &source) : file_loader(vm, s, vm->modules[m].url, &url, &source);
+        vm->mod_resolve_only = 0;
         if (vm->throwing) return JV_HOLE;
         if (!ok) return mod_throw(vm, vm->type_error_proto, source ? source : js_str_ascii(vm, "Failed to resolve the module specifier"));
         return jv_str(url);

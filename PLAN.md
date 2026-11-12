@@ -748,7 +748,10 @@ be built side by side and merged without touching each other's.
     RelativeTimeFormat, DisplayNames, Segmenter, Collator; the locale-
     sensitive methods of Number, BigInt, String, Date and Array) over CLDR's
     data for 29 languages, each test's output node's line for line;
-  - modules; `with`; direct `eval`;
+  - modules; `with`; direct `eval`; and in pages, `<script type=module>`
+    and import maps (each module run as HTML orders it, fetched as Chromium
+    would: CORS, the strict MIME check, its console lines), held to
+    Chromium's consoles (`tests/integ/script-modules.sh`);
   - a garbage collector, run at task boundaries, where no native holds an
     object unrooted.
 - **12h Scripts** (`src/script/`):

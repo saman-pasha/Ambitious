@@ -19,6 +19,17 @@
    window down, the target's, then the bubbling ones back up; an on* attribute's or
    property's handler first on its node.
 
+   MODULE SCRIPTS (HTML 8.1.5). A script of type module is run after the parse, in order
+   with the deferred scripts (an async one as soon as its graph is fetched); its graph
+   is fetched as the parse ends, after import()'s tasks then due. A specifier resolves
+   through the import maps the page gave (each scope its URL's, the longest first, then
+   the top level) or as a URL-like one; each module is fetched through the loader as
+   Chromium's would be: of the document's origin or a data: URL (another origin's and a
+   file's refused by CORS, no header read), its MIME type a JavaScript one, each refusal
+   written to the console once a URL. A specifier that resolves to nothing, and a
+   module that throws, are the script's errors; a fetch that failed fires its error
+   event; import() rejects with Chromium's TypeError. nomodule scripts are passed over.
+
    THE RECORDS. What ran, what the console was given, what was thrown and caught by
    nothing, the listeners and the timers are this module's records (its facts): the
    engine's values never are. */
@@ -2582,11 +2593,14 @@ void sh_location_set(js_vm *vm, const char *url) {
 }
 
 /* the VM made for the page: the host's names, its prototypes, window and document */
+static int sh_load_module(js_vm *vm, uint32_t spec, uint32_t referrer, uint32_t *url, uint32_t *source);
 static void sh_ready(js_vm *vm) {
     struct js_host *h = vm->host;
     if (h->ready) return;
-    /* the VM was zeroed with its host set (SCRIPT_HOST): made ready, the host kept */
+    /* the VM was zeroed with its host set (SCRIPT_HOST): made ready, the host kept; its
+       modules fetched as a page's are (never the engine's files) */
     js_setup(vm);
+    vm->load_module = sh_load_module;
     resize(vm->hatoms, HA_N, 0u);
     for (uint32_t i = 0; i < HA_N; i++) {
         uint32_t a = js_atom_ascii(vm, sh_names[i]);
@@ -2793,6 +2807,558 @@ static int sh_script_type_ok(const dom_document *d, uint32_t x) {
                                       "application/x-javascript", "text/x-javascript", "text/jscript", "text/livescript" };
     for (size_t k = 0; k < sizeof ok / sizeof ok[0]; k++) if (n == strlen(ok[k]) && sh_ci_eq(t, ok[k], n)) return 1;
     return 0;
+}
+
+/* ---- module scripts (HTML 8.1.5) ---- */
+
+static void sh_fetch_failed(js_vm *vm, uint32_t res);
+
+/* what a script element is, its type read (HTML 4.12.1.1): 1 a classic script, 2 a module
+   script, 3 an import map, 0 none of them (a data block, or a classic script marked
+   nomodule, which a browser that runs modules passes over) */
+static int sh_script_kind(const dom_document *d, uint32_t x) {
+    if (sh_script_type_ok(d, x)) return sh_attr_z(d, x, "nomodule") ? 0 : 1;
+    uint32_t ty = sh_attr_z(d, x, "type");
+    if (!ty) return 0;
+    amb_span v = d->attr[ty].value;
+    const char *t = text_ptr(d, v);
+    size_t n = v.len;
+    while (n && sh_ws(t[n - 1])) n--;
+    size_t i = 0;
+    while (i < n && sh_ws(t[i])) i++;
+    if (n - i == 6 && sh_ci_eq(t + i, "module", 6)) return 2;
+    if (n - i == 9 && sh_ci_eq(t + i, "importmap", 9)) return 3;
+    return 0;
+}
+
+/* JSON's white space passed over */
+static void sj_ws(const char *s, size_t n, size_t *i) {
+    while (*i < n && (s[*i] == ' ' || s[*i] == '\t' || s[*i] == '\n' || s[*i] == '\r')) (*i)++;
+}
+/* a code point as UTF-8 */
+static void sj_utf8(vector<char> *out, uint32_t c) {
+    if (c < 0x80) push_back(out, (char)c);
+    else if (c < 0x800) { push_back(out, (char)(0xC0 | c >> 6)); push_back(out, (char)(0x80 | (c & 0x3F))); }
+    else if (c < 0x10000) { push_back(out, (char)(0xE0 | c >> 12)); push_back(out, (char)(0x80 | (c >> 6 & 0x3F))); push_back(out, (char)(0x80 | (c & 0x3F))); }
+    else {
+        push_back(out, (char)(0xF0 | c >> 18));
+        push_back(out, (char)(0x80 | (c >> 12 & 0x3F)));
+        push_back(out, (char)(0x80 | (c >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (c & 0x3F)));
+    }
+}
+static int sj_hex4(const char *s, size_t n, size_t i, uint32_t *v) {
+    if (i + 4 > n) return 0;
+    *v = 0;
+    for (size_t k = 0; k < 4; k++) {
+        char c = s[i + k];
+        uint32_t d = c >= '0' && c <= '9' ? (uint32_t)(c - '0') : c >= 'a' && c <= 'f' ? (uint32_t)(c - 'a' + 10) : c >= 'A' && c <= 'F' ? (uint32_t)(c - 'A' + 10) : 99;
+        if (d > 15) return 0;
+        *v = *v << 4 | d;
+    }
+    return 1;
+}
+/* a JSON string at s[*i] (at its quote), decoded into out: 1, or 0 when it is none */
+static int sj_string(const char *s, size_t n, size_t *i, vector<char> *out) {
+    clear(out);
+    if (*i >= n || s[*i] != '"') return 0;
+    (*i)++;
+    while (*i < n && s[*i] != '"') {
+        char c = s[*i];
+        if ((unsigned char)c < 0x20) return 0;
+        if (c != '\\') { push_back(out, c); (*i)++; continue; }
+        if (*i + 1 >= n) return 0;
+        char e = s[*i + 1];
+        *i += 2;
+        if (e == 'n') push_back(out, '\n');
+        else if (e == 't') push_back(out, '\t');
+        else if (e == 'r') push_back(out, '\r');
+        else if (e == 'b') push_back(out, '\b');
+        else if (e == 'f') push_back(out, '\f');
+        else if (e == '/' || e == '\\' || e == '"') push_back(out, e);
+        else if (e == 'u') {
+            uint32_t c1 = 0, c2 = 0;
+            if (!sj_hex4(s, n, *i, &c1)) return 0;
+            *i += 4;
+            if (c1 >= 0xD800 && c1 < 0xDC00 && *i + 6 <= n && s[*i] == '\\' && s[*i + 1] == 'u' && sj_hex4(s, n, *i + 2, &c2) && c2 >= 0xDC00 && c2 < 0xE000) {
+                c1 = 0x10000 + ((c1 - 0xD800) << 10) + (c2 - 0xDC00);
+                *i += 6;
+            }
+            sj_utf8(out, c1);
+        } else return 0;
+    }
+    if (*i >= n) return 0;
+    (*i)++;
+    return 1;
+}
+/* any JSON value at s[*i] passed over: 1, or 0 when it is malformed */
+static int sj_skip(const char *s, size_t n, size_t *i, int depth) {
+    sj_ws(s, n, i);
+    if (*i >= n || depth > 64) return 0;
+    char c = s[*i];
+    if (c == '"') { vector<char> t; return sj_string(s, n, i, &t); }
+    if (c == '{' || c == '[') {
+        char close = c == '{' ? '}' : ']';
+        (*i)++;
+        sj_ws(s, n, i);
+        if (*i < n && s[*i] == close) { (*i)++; return 1; }
+        for (;;) {
+            if (c == '{') {
+                vector<char> k;
+                sj_ws(s, n, i);
+                if (!sj_string(s, n, i, &k)) return 0;
+                sj_ws(s, n, i);
+                if (*i >= n || s[*i] != ':') return 0;
+                (*i)++;
+            }
+            if (!sj_skip(s, n, i, depth + 1)) return 0;
+            sj_ws(s, n, i);
+            if (*i < n && s[*i] == ',') { (*i)++; continue; }
+            if (*i < n && s[*i] == close) { (*i)++; return 1; }
+            return 0;
+        }
+    }
+    size_t b = *i;
+    while (*i < n && (s[*i] == '-' || s[*i] == '+' || s[*i] == '.' || (s[*i] >= '0' && s[*i] <= '9') || (s[*i] >= 'a' && s[*i] <= 'z') || (s[*i] >= 'A' && s[*i] <= 'Z'))) (*i)++;
+    return *i > b;
+}
+
+/* a URL-like specifier resolved (HTML 8.1.5.4): one that begins /, ./ or ../ against base,
+   else one that is an absolute URL by itself; into out: 1, or 0 when it is neither */
+static int sh_url_like(const char *spec, size_t sn, const char *base, char *out, size_t cap) {
+    char ref[8400];
+    if (sn >= sizeof ref) return 0;
+    memcpy(ref, spec, sn);
+    ref[sn] = 0;
+    if ((sn >= 1 && spec[0] == '/') || (sn >= 2 && spec[0] == '.' && spec[1] == '/') || (sn >= 3 && spec[0] == '.' && spec[1] == '.' && spec[2] == '/'))
+        return net_url_resolve(base, ref, out, cap);
+    /* an absolute URL: a scheme, then a colon */
+    size_t k = 0;
+    if (!(sn && ((spec[0] >= 'a' && spec[0] <= 'z') || (spec[0] >= 'A' && spec[0] <= 'Z')))) return 0;
+    while (k < sn && ((spec[k] >= 'a' && spec[k] <= 'z') || (spec[k] >= 'A' && spec[k] <= 'Z') || (spec[k] >= '0' && spec[k] <= '9') || spec[k] == '+' || spec[k] == '-' || spec[k] == '.')) k++;
+    if (k >= sn || spec[k] != ':') return 0;
+    return net_url_resolve(ref, ref, out, cap);
+}
+
+/* an import map's mapping added: in scope (empty: the top level), a key and its address */
+static void sh_imap_add(struct js_host *h, const char *sc, size_t scn, const char *k, size_t kn, const char *v, size_t vn, int has) {
+    sh_imap e;
+    memset(&e, 0, sizeof e);
+    e.soff = (uint32_t)len(h->imtext);
+    append_range(h->imtext, sc, scn);
+    e.slen = (uint32_t)scn;
+    e.koff = (uint32_t)len(h->imtext);
+    append_range(h->imtext, k, kn);
+    e.klen = (uint32_t)kn;
+    e.voff = (uint32_t)len(h->imtext);
+    append_range(h->imtext, v, vn);
+    e.vlen = (uint32_t)vn;
+    e.has = (uint32_t)has;
+    push_back(h->imap, e);
+}
+
+/* an object of specifier keys and addresses at s[*i] read into the map, in scope (HTML
+   8.1.5.3, sort and normalize a module specifier map): a key URL-like taken as its URL
+   (else kept as written; an empty one left out), an address a URL-like string resolved
+   (else null, as is one for a key ending / whose address does not) */
+static int sh_imap_object(struct js_host *h, const char *s, size_t n, size_t *i, const char *base, const char *sc, size_t scn) {
+    sj_ws(s, n, i);
+    if (*i >= n || s[*i] != '{') return sj_skip(s, n, i, 0);
+    (*i)++;
+    sj_ws(s, n, i);
+    if (*i < n && s[*i] == '}') { (*i)++; return 1; }
+    for (;;) {
+        vector<char> k, v;
+        sj_ws(s, n, i);
+        if (!sj_string(s, n, i, &k)) return 0;
+        sj_ws(s, n, i);
+        if (*i >= n || s[*i] != ':') return 0;
+        (*i)++;
+        sj_ws(s, n, i);
+        int is_str = *i < n && s[*i] == '"';
+        if (is_str) { if (!sj_string(s, n, i, &v)) return 0; }
+        else if (!sj_skip(s, n, i, 0)) return 0;
+        if (len(k)) {
+            char key[8400], addr[8400];
+            const char *kp = data(k);
+            size_t kl = len(k);
+            if (sh_url_like(data(k), len(k), base, key, sizeof key)) { kp = key; kl = strlen(key); }
+            int has = is_str && sh_url_like(data(v), len(v), base, addr, sizeof addr);
+            if (has && kl && kp[kl - 1] == '/' && addr[strlen(addr) - 1] != '/') has = 0;
+            /* (an if, not ?: -- a conditional whose arm is an array does not lower: REPORT.md 14) */
+            if (has) sh_imap_add(h, sc, scn, kp, kl, addr, strlen(addr), 1);
+            else sh_imap_add(h, sc, scn, kp, kl, "", 0, 0);
+        }
+        sj_ws(s, n, i);
+        if (*i < n && s[*i] == ',') { (*i)++; continue; }
+        if (*i < n && s[*i] == '}') { (*i)++; return 1; }
+        return 0;
+    }
+}
+
+/* an import map's text read into the host's map (HTML 8.1.5.3): its imports, and its
+   scopes' (each scope's prefix a URL against the document's); 1, or 0 when it is no JSON
+   object */
+static int sh_importmap(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    vector<char> src;
+    sh_text_of(h->d, x, &src);
+    char base[8400];
+    sh_page_url(vm, base, sizeof base);
+    const char *s = data(src);
+    size_t n = len(src), i = 0;
+    sj_ws(s, n, &i);
+    if (i >= n || s[i] != '{') return 0;
+    i++;
+    sj_ws(s, n, &i);
+    if (i < n && s[i] == '}') return 1;
+    for (;;) {
+        vector<char> k;
+        sj_ws(s, n, &i);
+        if (!sj_string(s, n, &i, &k)) return 0;
+        sj_ws(s, n, &i);
+        if (i >= n || s[i] != ':') return 0;
+        i++;
+        if (len(k) == 7 && memcmp(data(k), "imports", 7) == 0) {
+            if (!sh_imap_object(h, s, n, &i, base, "", 0)) return 0;
+        } else if (len(k) == 6 && memcmp(data(k), "scopes", 6) == 0) {
+            sj_ws(s, n, &i);
+            if (i >= n || s[i] != '{') { if (!sj_skip(s, n, &i, 0)) return 0; }
+            else {
+                i++;
+                sj_ws(s, n, &i);
+                if (i < n && s[i] == '}') i++;
+                else for (;;) {
+                    vector<char> sk;
+                    char scope[8400];
+                    sj_ws(s, n, &i);
+                    if (!sj_string(s, n, &i, &sk)) return 0;
+                    sj_ws(s, n, &i);
+                    if (i >= n || s[i] != ':') return 0;
+                    i++;
+                    char ref[8400];
+                    snprintf(ref, sizeof ref, "%.*s", (int)len(sk), data(sk));
+                    if (net_url_resolve(base, ref, scope, sizeof scope)) {
+                        if (!sh_imap_object(h, s, n, &i, base, scope, strlen(scope))) return 0;
+                    } else if (!sj_skip(s, n, &i, 0)) return 0;
+                    sj_ws(s, n, &i);
+                    if (i < n && s[i] == ',') { i++; continue; }
+                    if (i < n && s[i] == '}') { i++; break; }
+                    return 0;
+                }
+            }
+        } else if (!sj_skip(s, n, &i, 0)) return 0;
+        sj_ws(s, n, &i);
+        if (i < n && s[i] == ',') { i++; continue; }
+        if (i < n && s[i] == '}') return 1;
+        return 0;
+    }
+}
+
+/* the address a specifier map of scope gives (HTML 8.1.5.4, resolve an imports match):
+   the key equal to the normalized specifier, else the longest key ending / that begins
+   it (for a bare name, or a URL whose scheme is special), the rest resolved against its
+   address; 1 found (*has 0: a null), 0 none */
+static int sh_imap_match(struct js_host *h, const char *sc, size_t scn, const char *norm, size_t nn, int special, char *out, size_t cap, int *has) {
+    int64_t best = -1;
+    size_t bl = 0;
+    for (size_t q = 0; q < len(h->imap); q++) {
+        sh_imap e = h->imap[q];
+        if (e.slen != scn || (scn && memcmp(data(h->imtext) + e.soff, sc, scn) != 0)) continue;
+        const char *k = data(h->imtext) + e.koff;
+        if (e.klen == nn && memcmp(k, norm, nn) == 0) { best = (int64_t)q; bl = (size_t)-1; break; }
+        if (special && e.klen && k[e.klen - 1] == '/' && e.klen <= nn && memcmp(k, norm, e.klen) == 0 && e.klen > bl) { best = (int64_t)q; bl = e.klen; }
+    }
+    if (best < 0) return 0;
+    sh_imap e = h->imap[(size_t)best];
+    *has = (int)e.has;
+    if (!e.has) return 1;
+    char addr[8400], rest[8400];
+    snprintf(addr, sizeof addr, "%.*s", (int)e.vlen, data(h->imtext) + e.voff);
+    if (bl == (size_t)-1) { snprintf(out, cap, "%s", addr); return 1; }
+    snprintf(rest, sizeof rest, "%.*s", (int)(nn - e.klen), norm + e.klen);
+    if (!net_url_resolve(addr, rest, out, cap)) *has = 0;
+    return 1;
+}
+
+/* a module specifier resolved from base (the referrer's URL, or the document's), as HTML's
+   resolve a module specifier does (8.1.5.4): by the import map's scopes base is in, the
+   longest prefix first, then its top level, else as a URL-like specifier; into out: 1;
+   0 when it resolves to nothing (a bare name no map maps; a map's null) */
+static int sh_mod_resolve(js_vm *vm, const char *spec, size_t sn, const char *base, char *out, size_t cap) {
+    struct js_host *h = vm->host;
+    char as_url[8400];
+    int url_like = sh_url_like(spec, sn, base, as_url, sizeof as_url);
+    const char *norm = spec;
+    size_t nn = sn;
+    if (url_like) { norm = as_url; nn = strlen(as_url); }
+    int special = !url_like || strncmp(as_url, "http:", 5) == 0 || strncmp(as_url, "https:", 6) == 0 || strncmp(as_url, "file:", 5) == 0;
+    size_t bn = strlen(base);
+    /* the scopes base is in: the longest first */
+    size_t tried = (size_t)-1;
+    for (;;) {
+        size_t sl = 0, so = 0;
+        int any = 0;
+        for (size_t q = 0; q < len(h->imap); q++) {
+            sh_imap e = h->imap[q];
+            if (!e.slen || e.slen >= tried) continue;
+            const char *sp = data(h->imtext) + e.soff;
+            int in = (e.slen == bn && memcmp(sp, base, bn) == 0) || (sp[e.slen - 1] == '/' && e.slen <= bn && memcmp(sp, base, e.slen) == 0);
+            if (in && e.slen > sl) { sl = e.slen; so = e.soff; any = 1; }
+        }
+        if (!any) break;
+        char scope[8400];
+        snprintf(scope, sizeof scope, "%.*s", (int)sl, data(h->imtext) + so);
+        int has = 0;
+        if (sh_imap_match(h, scope, sl, norm, nn, special, out, cap, &has)) return has;
+        tried = sl;
+    }
+    int has = 0;
+    if (sh_imap_match(h, "", 0, norm, nn, special, out, cap, &has)) return has;
+    if (url_like) { snprintf(out, cap, "%s", as_url); return 1; }
+    return 0;
+}
+
+/* what a module's failed fetch throws (Chromium's TypeError, which import() rejects
+   with): for a module script, no error of its own, only its console lines and its
+   element's error event */
+#define SH_MOD_FAILED "Failed to fetch dynamically imported module: "
+
+/* a URL whose fetch for a module failed before (reported then) */
+static int sh_mod_failed_before(struct js_host *h, const char *url) {
+    size_t un = strlen(url), i = 0;
+    while (i < len(h->modfail)) {
+        size_t e = i;
+        while (e < len(h->modfail) && h->modfail[e] != '\n') e++;
+        if (e - i == un && memcmp(data(h->modfail) + i, url, un) == 0) return 1;
+        i = e + 1;
+    }
+    return 0;
+}
+static void sh_mod_console(js_vm *vm, const char *msg) { js_console(vm, 3, js_str_utf8(vm, msg, strlen(msg))); }
+
+/* a module's source fetched as HTML's fetch a single module script has it (8.1.5.3), with
+   Chromium's console lines for each refusal, once a URL: url's response, the loader's
+   record res when there is one, else fetched now. A URL of another origin than the
+   document's is refused (no Access-Control-Allow-Origin header is read), as is a file:
+   one (a file's origin is opaque), a scheme of neither, an HTTP error, a response whose
+   MIME type is no JavaScript's. Its text and the URL it came from: 1, or 0 */
+static int sh_mod_get(js_vm *vm, const char *url, uint32_t res, vector<char> *body, vector<char> *final) {
+    struct js_host *h = vm->host;
+    if (sh_mod_failed_before(h, url)) return 0;
+    char page[8400], po[600], uo[600], msg[9000];
+    sh_page_url(vm, page, sizeof page);
+    if (!net_url_origin(page, po, sizeof po)) snprintf(po, sizeof po, "null");
+    int is_data = strncmp(url, "data:", 5) == 0, is_http = strncmp(url, "http:", 5) == 0 || strncmp(url, "https:", 6) == 0;
+    int same = is_http && strcmp(po, "null") != 0 && net_url_origin(url, uo, sizeof uo) && strcmp(po, uo) == 0;
+    int ok = 1;
+    if (strncmp(url, "file:", 5) == 0) {
+        snprintf(msg, sizeof msg, "Access to script at '%s' from origin '%s' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-untrusted, data, http, https.", url, po);
+        sh_mod_console(vm, msg);
+        sh_mod_console(vm, "Failed to load resource: net::ERR_FAILED");
+        ok = 0;
+    } else if (is_http && !same) {
+        snprintf(msg, sizeof msg, "Access to script at '%s' from origin '%s' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", url, po);
+        sh_mod_console(vm, msg);
+        sh_mod_console(vm, "Failed to load resource: net::ERR_FAILED");
+        ok = 0;
+    } else if (!is_http && !is_data) {
+        sh_mod_console(vm, "Failed to load resource: net::ERR_FAILED");
+        ok = 0;
+    }
+    if (ok && !res) {
+        net_resource_h r = net_fetch_request(h->nt, url, strlen(url), NET_KIND_SCRIPT, "GET", "", 0, "", 0, h->page);
+        res = r.index;
+    }
+    if (ok && (!res || h->nt->resource[res].outcome != NET_OUTCOME_OK)) { sh_fetch_failed(vm, res); ok = 0; }
+    if (ok) {
+        /* a redirect to another origin is that origin's answer */
+        amb_span f = h->nt->resource[res].final_url;
+        char fu[8400];
+        snprintf(fu, sizeof fu, "%.*s", (int)f.len, text_ptr(h->nt, f));
+        if (is_http && !(net_url_origin(fu, uo, sizeof uo) && strcmp(po, uo) == 0)) {
+            snprintf(msg, sizeof msg, "Access to script at '%s' (redirected from '%s') from origin '%s' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", fu, url, po);
+            sh_mod_console(vm, msg);
+            sh_mod_console(vm, "Failed to load resource: net::ERR_FAILED");
+            ok = 0;
+        }
+    }
+    if (ok) {
+        /* the MIME type's essence: a JavaScript MIME type, strictly */
+        amb_span ty = h->nt->resource[res].type;
+        char t[200];
+        size_t tn = 0;
+        const char *tp = text_ptr(h->nt, ty);
+        for (size_t k = 0; k < ty.len && tp[k] != ';' && tn + 1 < sizeof t; k++)
+            if (!sh_ws(tp[k])) t[tn++] = (char)(tp[k] >= 'A' && tp[k] <= 'Z' ? tp[k] + 32 : tp[k]);
+        t[tn] = 0;
+        static const char *const js[] = { "text/javascript", "application/javascript", "text/ecmascript", "application/ecmascript",
+                                           "application/x-javascript", "text/x-javascript", "text/jscript", "text/livescript",
+                                           "application/x-ecmascript", "text/x-ecmascript", "text/javascript1.0", "text/javascript1.1",
+                                           "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5" };
+        int is_js = 0;
+        for (size_t k = 0; k < sizeof js / sizeof js[0]; k++) if (strcmp(t, js[k]) == 0) is_js = 1;
+        if (!is_js) {
+            snprintf(msg, sizeof msg, "Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"%s\". Strict MIME type checking is enforced for module scripts per HTML spec.", t);
+            sh_mod_console(vm, msg);
+            ok = 0;
+        }
+    }
+    if (!ok) {
+        append_range(h->modfail, url, strlen(url));
+        push_back(h->modfail, '\n');
+        return 0;
+    }
+    clear(body);
+    amb_span b = h->nt->resource[res].body;
+    append_range(body, (const char *)bytes_ptr(h->nt, b), b.len);
+    clear(final);
+    amb_span f = h->nt->resource[res].final_url;
+    append_range(final, text_ptr(h->nt, f), f.len);
+    return 1;
+}
+
+/* the engine's module loader for a page (vm->load_module): the specifier resolved from its
+   referrer (a module's URL; 0: the document's), then fetched; a fetch that failed throws
+   SH_MOD_FAILED, a specifier that resolves to nothing Chromium's TypeError */
+static int sh_load_module(js_vm *vm, uint32_t spec, uint32_t referrer, uint32_t *url, uint32_t *source) {
+    vector<char> sp, rf;
+    js_str_to_utf8(vm, spec, &sp);
+    char base[8400], abs[8400];
+    if (referrer) {
+        js_str_to_utf8(vm, referrer, &rf);
+        snprintf(base, sizeof base, "%.*s", (int)len(rf), data(rf));
+    } else sh_page_url(vm, base, sizeof base);
+    if (!sh_mod_resolve(vm, data(sp), len(sp), base, abs, sizeof abs)) {
+        char msg[9000];
+        snprintf(msg, sizeof msg, "Failed to resolve module specifier \"%.*s\". Relative references must start with either \"/\", \"./\", or \"../\".", (int)len(sp), data(sp));
+        *source = js_str_utf8(vm, msg, strlen(msg));
+        return 0;
+    }
+    *url = js_str_utf8(vm, abs, strlen(abs));
+    if (vm->mod_resolve_only) { *source = js_str_ascii(vm, ""); return 1; }
+    vector<char> body, final;
+    if (!sh_mod_get(vm, abs, 0, &body, &final)) {
+        char msg[9000];
+        snprintf(msg, sizeof msg, "%s%s", SH_MOD_FAILED, abs);
+        *source = js_str_utf8(vm, msg, strlen(msg));
+        return 0;
+    }
+    *url = js_str_utf8(vm, data(final), len(final));
+    *source = js_str_utf8(vm, data(body), len(body));
+    return 1;
+}
+
+/* a module script's graph fetched (HTML 8.1.5.2): an inline one's text a module of the
+   document's URL, an external one's source as the loader got it (res), and what they
+   import. Its module's number; 0 when it failed, the error its running reports in err
+   (empty when its fetch failed: its console lines written, its error event to come) */
+static uint32_t sh_module_fetch(js_vm *vm, uint32_t x, uint32_t res, vector<char> *err) {
+    struct js_host *h = vm->host;
+    clear(err);
+    uint32_t sa = sh_attr_z(h->d, x, "src"), m = 0;
+    if (sa) {
+        char url[8400];
+        if (res) snprintf(url, sizeof url, "%.*s", (int)h->nt->resource[res].url.len, text_ptr(h->nt, h->nt->resource[res].url));
+        else {
+            char page[8400], ref[8400];
+            sh_page_url(vm, page, sizeof page);
+            snprintf(ref, sizeof ref, "%.*s", (int)h->d->attr[sa].value.len, text_ptr(h->d, h->d->attr[sa].value));
+            if (!net_url_resolve(page, ref, url, sizeof url)) return 0;
+        }
+        vector<char> body, final;
+        if (!sh_mod_get(vm, url, res, &body, &final)) return 0;
+        m = js_module_fetch(vm, js_str_utf8(vm, data(final), len(final)), data(body), len(body), 0);
+    } else {
+        vector<char> src;
+        sh_text_of(h->d, x, &src);
+        char page[8400];
+        sh_page_url(vm, page, sizeof page);
+        m = js_module_fetch(vm, js_str_utf8(vm, page, strlen(page)), data(src), len(src), 1);
+    }
+    if (m) return m;
+    jv e = vm->exception;
+    vm->throwing = 0;
+    vm->exception = JV_UNDEF;
+    js_error_text(vm, e, err);
+    if (!len(*err)) append_range(err, "Error", 5);
+    /* a fetch that failed: its console lines written, no error of the script's */
+    size_t fl = strlen("TypeError: ") + strlen(SH_MOD_FAILED);
+    if (len(*err) >= fl && memcmp(data(*err), "TypeError: ", 11) == 0 && memcmp(data(*err) + 11, SH_MOD_FAILED, fl - 11) == 0) clear(err);
+    return 0;
+}
+
+/* a module script run (HTML's run a module script): its record; the error its fetch left
+   reported as uncaught, a failed fetch's error event fired; else its module evaluated,
+   document.currentScript null meanwhile, and its evaluation's rejection reported as an
+   uncaught error of its own (as Chromium reports a module's, not a promise's) */
+static void sh_module_run(js_vm *vm, uint32_t x, uint32_t res, uint32_t m, const char *err, size_t en) {
+    struct js_host *h = vm->host;
+    uint32_t sa = sh_attr_z(h->d, x, "src");
+    vector<char> url;
+    if (sa && res) append_range(url, text_ptr(h->nt, h->nt->resource[res].url), h->nt->resource[res].url.len);
+    else if (sa) append_range(url, text_ptr(h->d, h->d->attr[sa].value), h->d->attr[sa].value.len);
+    uint32_t run = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, data(url), len(url));
+    h->rt->run[run].insert = SCRIPT_INSERTION_PARSED;
+    if (!m && !en) {
+        h->rt->run[run].outcome = SCRIPT_OUTCOME_NOT_FETCHED;
+        sh_fire(vm, x, "error", 0);
+        return;
+    }
+    if (!m) {
+        h->rt->run[run].outcome = en >= 12 && memcmp(err, "SyntaxError:", 12) == 0 ? SCRIPT_OUTCOME_SYNTAX_ERROR : SCRIPT_OUTCOME_THREW;
+        sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, err, en);
+        return;
+    }
+    uint32_t saved_run = vm->cur_run, saved_phase = h->phase, saved_cur = h->cur_script;
+    vm->cur_run = run;
+    h->phase = SCRIPT_PHASE_SCRIPT;
+    h->cur_script = 0;
+    h->nscripts++;
+    uint32_t cap = js_module_eval(vm, m);
+    if (!cap) {
+        h->rt->run[run].outcome = SCRIPT_OUTCOME_THREW;
+        sh_uncaught(vm, run, SCRIPT_PHASE_SCRIPT);
+    } else {
+        vm->objs[cap].c |= JPF_HANDLED;
+        sh_checkpoint(vm);
+        if (vm->objs[cap].a == JP_REJECTED) {
+            vector<char> t;
+            js_error_text(vm, vm->objs[cap].x, &t);
+            h->rt->run[run].outcome = SCRIPT_OUTCOME_THREW;
+            sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, data(t), len(t));
+        }
+    }
+    vm->cur_run = saved_run;
+    h->phase = saved_phase;
+    h->cur_script = saved_cur;
+}
+
+/* import()'s tasks due now, run as the parse ends (before the deferred scripts), as a
+   module a parse-time script asked for comes while the parse goes on */
+static void sh_module_tasks(js_vm *vm) {
+    for (;;) {
+        int64_t best = -1;
+        for (size_t i = 0; i < len(vm->timers); i++) {
+            js_timer t = vm->timers[i];
+            if (!t.live || t.rec != JS_TIMER_MODULE || t.due > vm->now) continue;
+            if (best < 0 || t.seq < vm->timers[(size_t)best].seq) best = (int64_t)i;
+        }
+        if (best < 0) return;
+        js_timer t = vm->timers[(size_t)best];
+        vm->timers[(size_t)best].live = 0;
+        vm->timers[(size_t)best].fired++;
+        vector<jv> av;
+        uint32_t saved = vm->cur_run;
+        vm->cur_run = t.run;
+        vm->host->phase = SCRIPT_PHASE_TIMER;
+        js_call(vm, t.fn, JV_UNDEF, data(av), 0);
+        vm->cur_run = saved;
+        if (vm->throwing == 2) return;
+        if (vm->throwing) sh_uncaught(vm, t.run, SCRIPT_PHASE_TIMER);
+        sh_checkpoint(vm);
+        if (vm->throwing == 2) return;
+    }
 }
 
 /* a script's source run, its record's outcome and its errors set */
@@ -3202,7 +3768,9 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     sh_attr_handlers(vm);
     /* the scripts there were when the parse ended, in document order: the parser's own,
        started before any runs, so a script that moves a later one does not run it */
-    vector<uint32_t> xs, deferred;
+    /* deferred: each deferred script and its resource, and whether it is a module (dmod);
+       amods: the async module scripts and their resources */
+    vector<uint32_t> xs, deferred, dmod, amods;
     for (uint32_t x = sh_next_in(d, 1, 1); x; x = sh_next_in(d, x, 1)) if (sh_script_elem(d, x)) { push_back(xs, x); sh_start(h, x); }
     uint32_t ran = 0;
     h->parsing = 1;
@@ -3210,19 +3778,34 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
         uint32_t x = xs[i];
         if (!d->node[x].live) continue;
         uint32_t sa = sh_attr_z(d, x, "src");
-        if (!sh_script_type_ok(d, x)) {
+        int kind = sh_script_kind(d, x);
+        if (kind == 0) {
             uint32_t r = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, "", 0);
             h->rt->run[r].outcome = SCRIPT_OUTCOME_NOT_RUN;
             continue;
         }
+        /* the loader's fetch of it: the resource this element asked for */
+        uint32_t res = 0;
+        for (uint32_t r = 1; sa && r < h->nt->resource_len && !res; r++)
+            if (h->nt->resource[r].live && h->nt->resource[r].kind == NET_KIND_SCRIPT && h->nt->resource[r].elem.index == x) res = r;
+        if (kind == 3) {
+            /* an import map, read now: an external one is not read, as in Chromium */
+            uint32_t r = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, "", 0);
+            h->rt->run[r].insert = SCRIPT_INSERTION_PARSED;
+            if (sa || !sh_importmap(vm, x)) h->rt->run[r].outcome = SCRIPT_OUTCOME_SYNTAX_ERROR;
+            continue;
+        }
+        if (kind == 2) {
+            /* a module script: run once its graph is fetched, after the parse (deferred, in
+               order with the deferred scripts), or async as soon as it is */
+            if (sh_attr_z(d, x, "async")) { push_back(amods, x); push_back(amods, res); }
+            else { push_back(deferred, x); push_back(deferred, res); push_back(dmod, 1); }
+            continue;
+        }
         if (sa) {
-            /* the loader's fetch of it: the resource this element asked for */
-            uint32_t res = 0;
-            for (uint32_t r = 1; r < h->nt->resource_len && !res; r++)
-                if (h->nt->resource[r].live && h->nt->resource[r].kind == NET_KIND_SCRIPT && h->nt->resource[r].elem.index == x) res = r;
             /* async: when it comes, before load; defer: after the parse, in order; else now */
             if (sh_attr_z(d, x, "async")) { sh_pend_script(vm, x, res, SCRIPT_INSERTION_PARSED, 1); continue; }
-            if (sh_attr_z(d, x, "defer")) { push_back(deferred, x); push_back(deferred, res); continue; }
+            if (sh_attr_z(d, x, "defer")) { push_back(deferred, x); push_back(deferred, res); push_back(dmod, 0); continue; }
             h->cur_script = x;
             sh_run_fetched(vm, x, res, SCRIPT_INSERTION_PARSED);
         } else {
@@ -3237,11 +3820,45 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     }
     h->parsing = 0;
     vm->throwing = 0;
-    /* the parse over (interactive): the deferred scripts, then DOMContentLoaded at the
-       document; the waiting scripts, then the document complete and load at the window */
+    /* the modules as the parse ends: import()'s tasks due, the async module scripts (each
+       run as its graph comes), then the deferred module scripts' graphs fetched, in order */
+    sh_module_tasks(vm);
+    vm->throwing = 0;
+    for (size_t i = 0; i + 1 < len(amods) && vm->throwing != 2; i += 2) {
+        if (!d->node[amods[i]].live) continue;
+        vector<char> err;
+        uint32_t m = sh_module_fetch(vm, amods[i], amods[i + 1], &err);
+        sh_module_run(vm, amods[i], amods[i + 1], m, data(err), len(err));
+        vm->throwing = 0;
+        ran++;
+    }
+    vector<uint32_t> dm, deoff, delen;
+    vector<char> derr;
+    for (size_t i = 0, k = 0; i + 1 < len(deferred); i += 2, k++) {
+        uint32_t mn = 0;
+        size_t eo = len(derr);
+        if (dmod[k] && d->node[deferred[i]].live && vm->throwing != 2) {
+            vector<char> err;
+            mn = sh_module_fetch(vm, deferred[i], deferred[i + 1], &err);
+            append_range(derr, data(err), len(err));
+            vm->throwing = 0;
+        }
+        push_back(dm, mn);
+        push_back(deoff, (uint32_t)eo);
+        push_back(delen, (uint32_t)(len(derr) - eo));
+    }
+    /* the parse over (interactive): the deferred scripts (the module scripts among them, in
+       order), then DOMContentLoaded at the document; the waiting scripts, then the
+       document complete and load at the window */
     h->ready = 2;
-    for (size_t i = 0; i + 1 < len(deferred) && vm->throwing != 2; i += 2) {
+    for (size_t i = 0, k = 0; i + 1 < len(deferred) && vm->throwing != 2; i += 2, k++) {
         if (!d->node[deferred[i]].live) continue;
+        if (dmod[k]) {
+            sh_module_run(vm, deferred[i], deferred[i + 1], dm[k], data(derr) + deoff[k], delen[k]);
+            vm->throwing = 0;
+            ran++;
+            continue;
+        }
         h->cur_script = deferred[i];
         sh_run_fetched(vm, deferred[i], deferred[i + 1], SCRIPT_INSERTION_PARSED);
         h->cur_script = 0;
@@ -3286,7 +3903,7 @@ void script_settle(js_vm *vm) {
     sh_timers_seen(vm);
     for (size_t i = 0; i < len(vm->timers); i++) {
         js_timer t = vm->timers[i];
-        if (!t.rec || t.rec >= SH_TASK_REC || !h->rt->timer[t.rec].live) continue;
+        if (!t.rec || t.rec >= JS_TIMER_MODULE || !h->rt->timer[t.rec].live) continue;
         h->rt->timer[t.rec].fired = t.fired;
         h->rt->timer[t.rec].state = t.live ? SCRIPT_TIMER_STATE_PENDING : (t.fired && t.interval < 0 ? SCRIPT_TIMER_STATE_FIRED : SCRIPT_TIMER_STATE_CLEARED);
     }

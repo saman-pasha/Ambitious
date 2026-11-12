@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<html><head><title>Modules refused: another origin's, and a text file's</title>
+<script type="module" src="http://localhost:PORT/mod/lib.js"></script>
+<script type="module">import { name } from "http://localhost:PORT/mod/lib.js"; console.log("cross import", name);</script>
+<script type="module">import "./mod/text.txt";</script>
+<script type="module" async>console.log("async inline module");</script>
+<script>console.log("classic");</script>
+</head><body></body></html>

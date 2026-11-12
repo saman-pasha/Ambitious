@@ -98,6 +98,10 @@ typedef struct sh_cel { uint32_t node, gen, def, state, conn, spare; } sh_cel;
 typedef struct sh_hent { uint32_t uoff, ulen, doc, spare; jv state; } sh_hent;
 /* a stored item: its area (1 local, 2 session), origin, key and value in the storage text */
 typedef struct sh_item { uint32_t area, ooff, olen, koff, klen, voff, vlen, live; } sh_item;
+/* an import map's entry (HTML 8.1.5.3): its scope's URL (none for the top level), a
+   specifier key (a URL or a bare name) and the address it maps to (has 0: null), each a
+   span of the host's imtext */
+typedef struct sh_imap { uint32_t soff, slen, koff, klen, voff, vlen, has, spare; } sh_imap;
 /* the changes of one call grouped as a record is, while the log is read */
 typedef struct sh_mgroup {
     uint32_t type, target, prev, pgen, next, ngen, name, ns;
@@ -230,6 +234,11 @@ struct js_host {
        the location object */
     vector<char> docurl;
     uint32_t location;
+    /* module scripts (src/script/script.c): the import maps' entries and their text; the
+       URLs whose fetch for a module failed, each reported once ('\n' after each) */
+    vector<sh_imap> imap;
+    vector<char> imtext;
+    vector<char> modfail;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -253,6 +262,6 @@ struct js_host {
     vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter); vector_sh_cdef_drop(&(h).cdefs); vector_sh_cel_drop(&(h).cels); \
     vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext); \
     vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
-    vector_char_drop(&(h).spath)
+    vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail)
 
 #endif

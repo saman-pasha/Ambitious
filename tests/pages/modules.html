@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><title>Module scripts</title>
+<script type="importmap">
+{ "imports": { "lib": "./mod/lib.js", "util/": "./mod/util/" },
+  "scopes": { "./mod/scoped/": { "lib": "./mod/lib2.js" } } }
+</script>
+<script>console.log("classic 1");</script>
+<script type="module">
+import { add, name } from "lib";
+import def from "./mod/a.js";
+import * as ns from "util/ns.js";
+console.log("inline module", add(2, 3), name, def, Object.keys(ns).join(","));
+console.log("meta", import.meta.url.replace(/^http:\/\/[^/]*/, ""));
+</script>
+<script defer src="mod/deferred.js"></script>
+<script type="module" src="mod/main.js"></script>
+<script nomodule>console.log("nomodule ran");</script>
+<script>console.log("classic 2");</script>
+<script type="module">import "./mod/scoped/s.js";</script>
+<script type="module">import "bare-unmapped";</script>
+<script type="module">throw new Error("module boom");</script>
+<script type="module">const v = await Promise.resolve(42); console.log("top-level await", v);</script>
+</head><body>
+<p>Module scripts</p>
+<script>
+document.addEventListener("DOMContentLoaded", () => console.log("DOMContentLoaded"));
+window.addEventListener("load", () => { console.log("load"); import("./mod/dyn.js").then(m => console.log("dynamic", m.value)); });
+</script>
+</body></html>

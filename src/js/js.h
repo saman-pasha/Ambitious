@@ -364,6 +364,7 @@ typedef struct js_vm {
        URL and its source (strings); 0 when it cannot, the message in *source. With none,
        files are read */
     int (*load_module)(js_vm *vm, uint32_t spec, uint32_t referrer, uint32_t *url, uint32_t *source);
+    uint32_t mod_resolve_only;        /* the loader is asked for the URL alone (import.meta.resolve): no fetch */
     uint32_t weakmap_proto, weakset_proto, weakref_proto, finreg_proto;
     uint32_t arraybuffer_proto, typedarray_proto, dataview_proto, textenc_proto, textdec_proto;
     uint32_t ta_protos[JTA_N];        /* each typed array's prototype, by its element type */
@@ -583,6 +584,15 @@ void js_gc_maybe(js_vm *vm);
 void js_gc_expose(js_vm *vm);
 uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n);    /* an environment of n cells (src/js/vm.c) */
 uint32_t js_module_main(js_vm *vm, uint32_t url, const char *src, size_t n);
+/* a host's module script in two steps, as HTML runs one: its graph fetched (a source made a
+   module, a new one when fresh, else the one its URL has; its requests loaded through the
+   loader): the module's number, 0 thrown; then linked and evaluated: its evaluation's
+   promise, 0 thrown */
+uint32_t js_module_fetch(js_vm *vm, uint32_t url, const char *src, size_t n, int fresh);
+uint32_t js_module_eval(js_vm *vm, uint32_t m);
+/* a timer's record mark for a module's task (import()'s load and evaluation), which is no
+   page's timer */
+#define JS_TIMER_MODULE 0xFFFFFFFCu
 jv js_module_dynamic(js_vm *vm, jv spec, uint32_t referrer);
 jv js_module_meta(js_vm *vm, uint32_t m);
 jv js_module_namespace(js_vm *vm, uint32_t m);

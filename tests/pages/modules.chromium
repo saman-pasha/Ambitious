@@ -1,0 +1,16 @@
+classic 1
+classic 2
+lib evaluated
+a evaluated
+inline module 5 lib a(lib) x,y
+meta /modules.html
+deferred classic
+main module 2 /mod/main.js
+lib2 evaluated
+scoped lib2
+top-level await 42
+DOMContentLoaded
+load
+dynamic dyn
+error: TypeError: Failed to resolve module specifier "bare-unmapped". Relative references must start with either "/", "./", or "../".
+error: Error: module boom

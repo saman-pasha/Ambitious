@@ -15,6 +15,9 @@ unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
 for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled custom shadow; do
   node "$AMB_ROOT/tools/bench/console.js" "$pages/$p.html" > "$pages/$p.chromium" && echo "wrote $p.chromium"
 done
+# the module page read from its file: every module's fetch refused (a file's origin is
+# opaque), in an order the network's timing sets, so its lines kept sorted
+node "$AMB_ROOT/tools/bench/console.js" "$pages/modules.html" | sed "s|$AMB_ROOT|ROOT|g" | LC_ALL=C sort > "$pages/modules-file.chromium" && echo "wrote modules-file.chromium"
 for p in write-dom; do
   node "$AMB_ROOT/tools/bench/serialize.js" "$pages/$p.html" > "$pages/$p.serialized" && echo "wrote $p.serialized"
 done
@@ -30,6 +33,8 @@ port=$(head -1 "$work/port")
 served() { name=$1; shift; node "$AMB_ROOT/tools/bench/console-actions.js" "http://127.0.0.1:$port/$name.html" "$@" | sed "s/:$port\b/:PORT/g" > "$pages/$name.chromium" && echo "wrote $name.chromium"; }
 served fetch
 served window
+served modules
+served modules-cross
 norm() { sed -e "s/:$port\b/:PORT/g" -e 's/----[A-Za-z]*FormBoundary[A-Za-z0-9]*/BOUNDARY/g'; }
 : > "$work/form.txt"
 while read -r q acts; do

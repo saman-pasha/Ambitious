@@ -1,0 +1,5 @@
+classic
+async inline module
+Access to script at 'http://localhost:PORT/mod/lib.js' from origin 'http://127.0.0.1:PORT' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+Failed to load resource: net::ERR_FAILED
+Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "text/plain". Strict MIME type checking is enforced for module scripts per HTML spec.
