@@ -32,10 +32,13 @@ layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fi
     positioned])).
 %% how a box is positioned (CSS 2.1 9.3): in the flow; offset from there; taken
 %% out of it, in its containing block (absolute) or the viewport (fixed); sticky
-%% (at rest, where the flow put it)
+%% (at rest: where the flow put it, moved inward when an offset it has asks)
 layout_contract(enum(position, [static, relative, absolute, fixed, sticky])).
 %% the side a box floats to
 layout_contract(enum(float_side, [unfloated, left, right])).
+%% how a grid item was placed (Grid 1, 8): it is no grid item; automatically; by its
+%% lines (a number or a name, on either axis); in a named area (grid-area: NAME)
+layout_contract(enum(grid_by, [ungridded, auto, lines, area])).
 %% what a fragment of a line is: a run of text; an atomic inline's box; a list
 %% item's marker; the part of an inline element on the line (its background)
 layout_contract(enum(frag_kind, [text, atomic, marker, inline, generated])).
@@ -61,11 +64,16 @@ layout_contract(record(box, [
     field(pseudo, u8),                          % 1 its element's ::before, 2 ::after; 0 the element's own
     field(position,     enum(position)),
     field(cb,           ref(box)),              % an absolutely positioned box's containing block (the viewport's for fixed)
+    %% an absolutely positioned box whose containing block is an inline element's: its
+    %% first and last fragments' padding boxes make it (CSS 2.1, 10.1); cb is then the box
+    %% the first one's line is in
+    field(cb_inline,    bool),
+    field(cb_node,      xhandle(dom, node)),
     field(float_side,   enum(float_side)),
     field(z,            i32),                   % z-index, a positioned box's (0 for auto)
     field(z_auto,       bool),                  % z-index is auto: the box makes no stacking context of its own
     field(clip,         u8),                    % overflow: 1 its content clipped to its padding box (hidden, clip, scroll, auto)
-    field(dx, f64), field(dy, f64),             % a relatively positioned box's offset, in its position already
+    field(dx, f64), field(dy, f64),             % a relatively positioned box's offset (a sticky one's at rest), in its position already
     %% what paint reads of its style: the corners' radii (horizontal, then vertical), its
     %% opacity, its shadows, backgrounds, transform, filters and outline as CSS computed them
     field(rtl, f64), field(rtr, f64), field(rbr, f64), field(rbl, f64),
@@ -81,7 +89,16 @@ layout_contract(record(box, [
     field(translate, span(text)), field(rotate, span(text)), field(scale, span(text)),  % the individual transforms
     field(persp, span(text)), field(porigin, span(text)),       % perspective, perspective-origin: what its children are seen through
     field(p3d, u8), field(backface, u8),        % transform-style: preserve-3d; backface-visibility: hidden
-    field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64)   % outline: width, style, colour, offset
+    field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
+    %% a grid item's area: its first row and column lines (the explicit grid's first line
+    %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,
+    %% and the area's name when it was placed in one
+    field(grid_row, i32), field(grid_col, i32), field(grid_rows, u32), field(grid_cols, u32),
+    field(grid_by,      enum(grid_by)),
+    field(grid_area,    span(text)),
+    %% a flex container's first baseline, from its content box's top, which its items give
+    %% it (Flexbox 1, 8.5), when it has one
+    field(baseline, f64), field(has_baseline, bool)
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -150,8 +167,14 @@ layout_contract(fact(layout_parent(handle, field(parent)), table(box), field(par
 layout_contract(fact(layout_pseudo(handle, field(pseudo)), table(box), field(pseudo) \== 0)).
 %% a positioned box: how, its containing block (an absolute or fixed one's), its offset (a relative one's)
 layout_contract(fact(layout_positioned(handle, field(position), field(cb), field(dx), field(dy)), table(box), field(position) \== static)).
+%% the inline element whose fragments make an absolutely positioned box's containing block
+layout_contract(fact(layout_inline_cb(handle, field(cb_node)), table(box), field(cb_inline) == true)).
 layout_contract(fact(layout_stacking(handle, field(z)), table(box), field(z_auto) == false)).
 layout_contract(fact(layout_float(handle, field(float_side)), table(box), field(float_side) \== unfloated)).
+%% a grid item's area: its first row line and column line, the rows and columns it spans, how it was placed
+layout_contract(fact(layout_grid_item(handle, field(grid_row), field(grid_col), field(grid_rows), field(grid_cols), field(grid_by)), table(box),
+    field(grid_by) \== ungridded)).
+layout_contract(fact(layout_grid_area(handle, field(grid_area)), table(box), field(grid_by) == area)).
 layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
 %% a box's background colour, RGBA, where it has one; the viewport's is the canvas's: the
 %% Canvas of the scheme the root is used in (CSS Color Adjust 1)

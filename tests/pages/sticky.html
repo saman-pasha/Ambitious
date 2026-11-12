@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><head><title>Sticky boxes</title>
+<style>
+/* tests/pages/sticky.html -- position: sticky at rest, unscrolled: a box whose top, left,
+   bottom or right inset asks it in from its scrollport's edge (the viewport, or a scroll
+   container's padding box: overflow auto, hidden) moved there, as far as its margin box
+   stays in its containing block (the margins as written; a padded block's content box);
+   top with bottom, left with right (top and left win); a percentage; a flex item, an
+   inline-block, a ::before, nested sticky boxes, an absolutely positioned child moving
+   with its parent; the boxes held to Chromium's (tests/pages/sticky.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.cb { background: #f4f4f4; margin-bottom: 10px; }
+.st { position: sticky; background: #cde; }
+.t0 { top: 0; }
+.t50 { top: 50px; }
+.t200 { top: 200px; }
+.short { height: 60px; }
+.tall { height: 300px; }
+.w100 { width: 100px; }
+.l30 { left: 30px; }
+.r0 { right: 0; }
+.b0 { bottom: 0; }
+.b20 { bottom: 20px; }
+.tp { top: 10%; }
+.sc { overflow: auto; height: 100px; width: 300px; }
+.sc > .inner { height: 400px; }
+.fl { display: flex; height: 120px; align-items: flex-start; }
+.wide { width: 1000px; }
+.mb { margin-bottom: 15px; }
+.pb { padding: 20px 0 40px; }
+.ib { display: inline-block; position: sticky; top: 3400px; background: #dec; }
+.lr { left: 40px; right: 500px; }
+.lp { left: 10%; }
+.hid { overflow: hidden; height: 80px; width: 400px; }
+.bf::before { content: "before"; display: block; position: sticky; top: 4200px; background: #edc; }
+</style></head><body>
+<div class="cb tall" id=c1><div class="st t50 mb" id=s1>top 50 in a tall block</div><p id=p1>after</p></div>
+<div class="cb short" id=c2><div class="st t200" id=s2>top 200 in a short block</div></div>
+<div class="cb" id=c3><div class="st t0" id=s3>top 0, at rest</div></div>
+<div class="cb" style="width: 400px" id=c4><div class="st l30 w100" id=s4>left 30</div></div>
+<div class="cb wide" id=c5><div class="st r0 w100" style="margin-left: 750px" id=s5>right 0</div></div>
+<div class="cb sc" id=c6><div class=inner id=c6i><div style="height: 150px"></div><div class="st b20" id=s6>bottom 20 in a scroller</div></div></div>
+<div class="cb fl" id=c7><div class="st t200" id=s7>flex item, top 200</div><div id=s7b>other</div></div>
+<div class="cb tall" id=c8><div class="st tp" id=s8>top 10%</div></div>
+<div class="cb tall" id=c9><div class="st t200" style="padding: 5px" id=s9><div class="st" style="top: 260px" id=s9i>nested, top 260</div></div></div>
+<div class="cb" style="height: 900px" id=c10><div style="height: 700px"></div><div class="st b0" id=s10>bottom 0, far below</div></div>
+<div class="cb" style="height: 900px" id=c11><div style="height: 100px"></div><div class="st b0 t50" id=s11>top 50 and bottom 0</div></div>
+<div class="cb pb" style="height: 100px" id=c12><div class="st t0" style="top: 3200px" id=s12>top 3000 in a padded block</div></div>
+<div class="cb tall" id=c13><span class=ib id=s13>inline-block, top 3000</span></div>
+<div class="cb" style="width: 600px" id=c14><div class="st lr w100" id=s14>left 40, right 500</div></div>
+<div class="cb" style="width: 600px" id=c15><div class="st lp w100" id=s15>left 10%</div></div>
+<div class="cb tall" id=c16><div class="st" style="top: 3800px; position: sticky" id=s16>with an absolute child<span style="position: absolute; left: 10px; top: 20px; background: #fcc" id=a16>abs</span></div></div>
+<div class="cb hid" id=c17><div style="height: 300px"><div style="height: 120px"></div><div class="st b0" id=s17>bottom 0 in a hidden one</div></div></div>
+<div class="cb tall bf" id=c18><p id=p18>after the before</p></div>
+</body></html>

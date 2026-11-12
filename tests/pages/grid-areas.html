@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html><head><title>Grid areas</title>
+<style>
+/* tests/pages/grid-areas.html -- grid containers placed by name: named lines in the track
+   lists (repeat()'s too), placement by a line's name, by its nth name, a span to a name,
+   a name no line has; grid-template-areas and grid-area (each area's implicit -start and
+   -end lines, a null cell), the grid-template shorthand with areas; grid-auto-flow
+   column, row dense and column dense; implicit tracks before the explicit grid; items
+   that span tracks sharing their size among them (fit-content's limits, minmax(), a
+   scroll container's minimum); areas that make no rectangles, dropped; fr rows of an auto
+   height, a percentage row of one; the boxes held to Chromium's
+   (tests/pages/grid-areas.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.g { display: grid; width: 600px; background: #f4f4f4; margin-bottom: 10px; }
+.g > div { background: #cde; }
+.n { grid-template-columns: [a] 100px [b c] 1fr [d] 80px [e]; grid-template-rows: [top] 30px [mid] auto [bot]; column-gap: 10px; }
+.n > .ad { grid-column: a / d; }
+.n > .ce { grid-column: c / e; grid-row-start: mid; }
+.n > .be { grid-column-start: b; grid-column-end: span e; grid-row: 3; }
+.r { grid-template-columns: repeat(3, [x] 60px [y]) [z] 1fr; gap: 4px; }
+.r > .x2 { grid-column: x 2 / x 3; }
+.r > .y { grid-column: y -1 / z; }
+.r > .sp { grid-column: span y 2 / z; grid-row: 2; }
+.r > .none { grid-column: nowhere; }
+.t { grid-template-areas: "head head head" "nav main side" "foot . side"; grid-template-columns: 120px 1fr 90px; grid-template-rows: 40px auto 30px; gap: 6px; }
+.t > .head { grid-area: head; }
+.t > .nav { grid-area: nav; }
+.t > .main { grid-area: main; }
+.t > .side { grid-area: side; }
+.t > .foot { grid-area: foot; }
+.t > .lines { grid-column: nav-start / main-end; grid-row: foot-start; }
+.u { grid-template: "a a b" 50px [mid] "c d b" 40px / 1fr 2fr 100px; }
+.u > .a { grid-area: a; }
+.u > .b { grid-area: b; }
+.u > .d { grid-area: d; }
+.u > .m { grid-row: mid; grid-column: 1; }
+.c { grid-auto-flow: column; grid-template-rows: repeat(3, 30px); grid-auto-columns: 100px; column-gap: 8px; }
+.c > .w2 { grid-row: span 2; }
+.dr { grid-template-columns: repeat(4, 100px); grid-auto-flow: row dense; grid-auto-rows: 30px; }
+.dr > .wide { grid-column: span 3; }
+.dc { grid-template-rows: repeat(3, 25px); grid-auto-flow: column dense; grid-auto-columns: 70px; }
+.dc > .tall { grid-row: span 3; }
+.dc > .two { grid-row: span 2; }
+.v { grid-template-areas: "x y z" "x . z"; grid-template-columns: 100px; grid-auto-rows: 24px; }
+.v > .x { grid-area: x; }
+.v > .y { grid-area: y; }
+.v > .z { grid-area: z; }
+.v > .after { grid-column: -2; }
+.neg { grid-template-columns: 100px 100px; grid-auto-columns: 50px; }
+.neg > .before { grid-column: -4 / -3; }
+.s { grid-template-columns: auto auto auto; }
+.s > .span2 { grid-column: span 2; }
+.f { grid-template-columns: 100px auto 1fr; }
+.f > .span2 { grid-column: 1 / 3; }
+.h { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+.h > .tall { grid-row: span 2; height: 100px; }
+.k { grid-template-columns: min-content max-content; }
+.k > .span2 { grid-column: span 2; }
+.bad { grid-template-areas: "a b" "b a"; grid-template-columns: 100px 100px; }
+.bad > .a { grid-area: a; }
+.two { grid-template-areas: "x y" "z w"; grid-template-columns: 1fr 1fr; }
+.two > .p { grid-area: z / y; }
+.pre { grid-template: [top] "h h" 30px [m1] [m2] "s c" 1fr [bot] / [l] 100px [r] 1fr; height: 120px; }
+.pre > .q { grid-row: m2 / bot; grid-column: r; }
+.pre > .h { grid-area: h; }
+.frr { grid-template-rows: 1fr 2fr; grid-template-columns: 200px; }
+.fit { grid-template-columns: fit-content(150px) fit-content(100px) 1fr; }
+.fit > .sp { grid-column: span 2; }
+.mm { grid-template-columns: minmax(auto, 120px) minmax(50px, auto) 100px; }
+.mm > .sp { grid-column: 1 / 3; }
+.pct { grid-template-columns: 25% 1fr; grid-template-rows: 50%; }
+.ov > .o { overflow: hidden; grid-column: span 2; }
+.ov { grid-template-columns: auto 1fr; }
+.dn { grid-auto-flow: dense; grid-template-columns: repeat(3, 80px); }
+.dn > .w { grid-column: span 2; }
+.cn { grid-auto-flow: column; grid-template-rows: 20px 20px; grid-template-columns: 60px; }
+</style></head>
+<body>
+<div class="g n" id=n><div class=ad id=n1>a to d</div><div class=ce id=n2>c to e, mid</div><div class=be id=n3>b, span to e</div><div id=n4>auto</div></div>
+<div class="g r" id=r><div class=x2 id=r1>x2</div><div class=y id=r2>last y</div><div class=sp id=r3>span y 2</div><div class=none id=r4>nowhere</div><div id=r5>auto</div></div>
+<div class="g t" id=t><div class=head id=t1>head</div><div class=nav id=t2>nav</div><div class=main id=t3>main, with text enough to wrap onto a second line here</div><div class=side id=t4>side</div><div class=foot id=t5>foot</div></div>
+<div class="g t" id=t6><div class=lines id=t7>lines of areas</div><div class=side id=t8>side</div></div>
+<div class="g u" id=u><div class=a id=u1>a</div><div class=b id=u2>b</div><div class=d id=u3>d</div><div class=m id=u4>mid</div></div>
+<div class="g c" id=c><div id=c1>1</div><div class=w2 id=c2>2, two rows</div><div id=c3>3</div><div id=c4>4</div><div id=c5>5</div></div>
+<div class="g dr" id=dr><div id=dr1>1</div><div class=wide id=dr2>2 wide</div><div id=dr3>3</div><div id=dr4>4</div><div class=wide id=dr5>5 wide</div><div id=dr6>6</div></div>
+<div class="g dc" id=dc><div id=dc1>1</div><div class=tall id=dc2>2</div><div id=dc3>3</div><div class=two id=dc4>4</div><div id=dc5>5</div></div>
+<div class="g v" id=v><div class=z id=v1>z</div><div class=y id=v2>y</div><div class=x id=v3>x</div><div class=after id=v4>last column</div></div>
+<div class="g neg" id=ng><div id=ng1>1</div><div class=before id=ng2>before</div><div id=ng3>3</div></div>
+<div class="g s" id=s><div id=s1>a</div><div id=s2>b</div><div id=s3>c</div><div class=span2 id=s4>a long item that spans two of the columns</div></div>
+<div class="g f" id=f><div class=span2 id=f1>spans the fixed and the auto columns here</div><div id=f2>x</div><div id=f3>fr</div></div>
+<div class="g h" id=h><div class=tall id=h1>tall</div><div id=h2>one</div><div id=h3>two</div></div>
+<div class="g k" id=k><div id=k1>min content</div><div id=k2>max</div><div class=span2 id=k3>a spanning item wider than the two of them together</div></div>
+<div class="g bad" id=bad><div class=a id=bad1>a</div><div id=bad2>2</div></div>
+<div class="g two" id=two><div id=two1>1</div><div class=p id=two2>z to y</div></div>
+<div class="g pre" id=pre><div class=h id=pre1>h</div><div class=q id=pre2>q</div><div id=pre3>3</div></div>
+<div class="g frr" id=frr><div id=frr1>one</div><div id=frr2>two<br>lines</div></div>
+<div class="g fit" id=fit><div id=fit1>a</div><div id=fit2>b</div><div id=fit3>c</div><div class=sp id=fit4>a spanning item with a lot of text in it, wrapping</div></div>
+<div class="g mm" id=mm><div id=mm1>x</div><div id=mm2>y</div><div id=mm3>z</div><div class=sp id=mm4>spanning text across the two of them here</div></div>
+<div class="g pct" id=pct><div id=pct1>p</div><div id=pct2>q</div></div>
+<div class="g ov" id=ov><div id=ov1>a</div><div id=ov2>b</div><div class=o id=ov3>Overflowinghiddenlongwordthatgoesonandon and more</div></div>
+<div class="g dn" id=dn><div id=dn1>1</div><div class=w id=dn2>2</div><div class=w id=dn3>3</div><div id=dn4>4</div></div>
+<div class="g cn" id=cn><div id=cn1>1</div><div id=cn2>2</div><div id=cn3>3</div><div id=cn4>4</div><div id=cn5>5</div></div>
+</body></html>

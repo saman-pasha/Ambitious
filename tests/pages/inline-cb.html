@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><title>Inline containing blocks</title>
+<style>
+/* tests/pages/inline-cb.html -- an absolutely positioned box whose nearest positioned
+   ancestor is an inline element (CSS 2.1, 10.1, 4): placed in the box from the inline's
+   first fragment's padding box's start and top to its last one's end and bottom (no
+   width when that end is before that start), by each offset, its static position, a
+   percentage of that box; the inline's padding, border and margins, its own relative
+   offset, a sticky inline, the nearer of two, a fixed box (the viewport's still); an
+   inline holding a float or an absolutely positioned box keeps its own fragments; the
+   boxes held to Chromium's (tests/pages/inline-cb.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+p { margin: 0 0 20px; width: 400px; background: #f4f4f4; }
+.rel { position: relative; background: #cde; }
+.pad { padding: 4px 10px; border: 3px solid #888; }
+.abs { position: absolute; background: #fcc; font-size: 10px; }
+.tl { top: 0; left: 0; }
+.br { right: 0; bottom: 0; }
+.lr { left: 5px; right: 5px; top: 0; }
+.pw { width: 50%; top: 0; left: 0; height: 50%; }
+.off { left: 10px; top: 5px; }
+.box { position: relative; padding: 20px; background: #eee; width: 400px; }
+</style></head><body>
+<p id=p1>Before <span class=rel id=r1>the relative span<span class="abs tl" id=a1>tl</span></span> after.</p>
+<p id=p2>Before <span class=rel id=r2>the relative span<span class="abs br" id=a2>br</span></span> after.</p>
+<p id=p3>Before <span class="rel pad" id=r3>padded<span class="abs tl" id=a3>tl</span><span class="abs br" id=a3b>br</span></span> after.</p>
+<p id=p4>Some text before <span class=rel id=r4>a relative span that wraps onto the second line<span class="abs tl" id=a4>tl</span><span class="abs br" id=a4b>br</span></span> after.</p>
+<p id=p5>Before <span class=rel id=r5>static<span class=abs id=a5>static</span> here</span> after.</p>
+<p id=p6>Before <span class=rel id=r6>the percentage<span class="abs pw" id=a6>pw</span></span> after.</p>
+<div class=box id=b7><p id=p7>Before <span class=rel id=r7>the nearer one<span class="abs tl" id=a7>tl</span></span> after.</p></div>
+<p id=p8>Before <span class="rel off" id=r8>offset itself<span class="abs tl" id=a8>tl</span></span> after.</p>
+<p id=p9>Before <span class=rel id=r9>left and right<span class="abs lr" id=a9>lr</span></span> after.</p>
+<p id=p10>Some text before <span class=rel id=r10>a relative span that wraps onto the second line, the end left of its start</span></p>
+<p id=p11>Some text before it here, a <span class=rel id=r11>relative span that wraps<span class="abs lr" id=a11>lr</span></span> x</p>
+<p id=p12>Before <span class=rel id=r12>outer <span class=rel style="background:#ddf" id=r12i>inner<span class="abs br" id=a12>br</span></span> rest<span class="abs br" id=a12b>ob</span></span> after.</p>
+<p id=p13>Before <span class=rel style="margin-left: 20px; margin-right: 15px" id=r13>margins<span class="abs tl" id=a13>tl</span><span class="abs br" id=a13b>br</span></span> after.</p>
+<p id=p14>Before <span style="position: sticky; background: #dfd" id=r14>sticky span<span class="abs tl" style="left: 50%" id=a14>half</span></span> after.</p>
+<p id=p15>Before <span class=rel id=r15>with a fixed<span style="position: fixed; right: 0; bottom: 0; font-size: 10px" id=a15>fixed</span></span> after.</p>
+<p id=p16 style="height: 60px">Before <span style="background: #fdd" id=r16>a span with <span style="float: right; width: 50px; height: 30px; background: #aaa" id=f16></span>a float</span> after.</p>
+<p id=p17>Some text before <span class=rel id=r17>a span over two lines, with its end past its start here<span class="abs br" id=a17>br</span></span></p>
+</body></html>

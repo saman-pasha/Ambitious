@@ -42,8 +42,15 @@
    containing block -- the padding box of its nearest positioned ancestor's box,
    or the viewport (800 x 600) for fixed or for none -- its width from its
    offsets or shrunk to fit, auto offsets at the static position, and its box is
-   that block's last child. A sticky box is where the flow puts it (as at rest,
-   unscrolled). z-index and overflow are kept for paint.
+   that block's last child. When the nearest positioned ancestor is an inline element
+   (10.1, 4), the containing block is the box from its first fragment's padding box's
+   start and top to its last one's end and bottom, as Chromium makes it. A sticky box is where it is at rest, unscrolled (CSS
+   Position 3, 3.4): where an inset it has puts that edge of its scrollport (the
+   nearest scroll container's padding box, else the viewport) inset by its offsets
+   past its border box, it is moved inward, as far as its margin box stays in its
+   containing block (top and left winning), once the tree has its page coordinates;
+   an inline element's own stickiness is not done. z-index and overflow are kept for
+   paint.
 
    Flex containers (Flexbox 1, 9): the items in order (order, then the tree's),
    their flex base sizes (flex-basis, a declared size, or the content's), min and
@@ -51,13 +58,31 @@
    the flexible lengths resolved by freezing the items clamped, the items laid
    out at their main sizes, the lines' cross sizes (stretched, align-content),
    justify-content and auto margins along the main axis, align-items and
-   align-self across. Grid containers (Grid 1, 11, simplified): the track lists
-   read (px, %, fr, auto, min-content, max-content, minmax(), fit-content(),
-   repeat() with a count or auto-fill), the items placed by their lines and spans
-   and the rest automatically row by row, the columns sized from the items that
-   span one (then to their growth limits, the fr tracks sharing the rest, auto
-   tracks stretched), the items laid out in their columns, the rows from their
-   heights; justify-self, align-self, justify-content and align-content.
+   align-self across: baseline (first baseline) aligns a row's items on their first
+   baselines, each line as tall as the most they rise above it and fall below it
+   (9.4, 8); last baseline on their last ones, flush to the line's end; an item with
+   no line its border box's bottom; in a column, baseline is start and last baseline
+   the items' end edges shared. A flex container's baseline (8.5) is its first
+   line's baseline items', else its first item's; an inline-block's is its last
+   line's in its flow, however deep, unless its overflow is not visible.
+
+   Grid containers (Grid 1): the track lists read (px, %, fr,
+   auto, min-content, max-content, minmax(), fit-content(), repeat() with a count
+   or auto-fill, the lines' names), grid-template-areas (each area's -start and -end
+   lines named); the items' lines resolved (8.3: by number, by name and its nth
+   line, a span of lines or of a name's lines, an area's name, a name no line has
+   taken by the implicit lines), the rest placed by the auto-placement cursor (8.5:
+   along rows or columns, sparse or dense), implicit tracks before the explicit
+   grid as well as after it (grid-auto-rows and -columns' pattern); the tracks
+   sized (11.4 to 11.8: base sizes and growth limits from the items that span one
+   track, then from the others by their spans and those that cross an fr track,
+   the free space to the growth limits, the fr tracks' share of what is left, of a
+   size not definite too, auto tracks stretched), the columns first, the items
+   laid out in them, then the rows from their heights (a percentage row of an auto
+   height resolved against it); justify-self, align-self, justify-content and
+   align-content. A grid item's box says where it was placed and how (a named
+   area, its lines, automatically). Not done: subgrid, masonry, auto-fit's empty
+   tracks collapsed, baseline alignment in a grid.
 
    Inline layout. White space is collapsed or kept as white-space says. Lines
    break at spaces (and around atomic inlines), never inside a word, a word too
@@ -70,11 +95,21 @@
    broken by a hyphen (hyphens: manual at its soft hyphens, which are otherwise
    not drawn; auto there, else at the points Liang's algorithm finds with TeX's
    American English patterns, tools/gen-hyph.py, two letters at least each
-   side), at the last point whose part fits. Bidirectional text (UAX #9, by
-   words): a word of Hebrew or Arabic letters is right to left, a word of others
-   left to right, spaces and punctuation their neighbours' direction when those
-   agree, else the paragraph's (direction); the line's words are placed in the
-   order rule L2 gives, a right-to-left word's letters drawn reversed.
+   side), at the last point whose part fits. Bidirectional text (UAX #9, Unicode
+   15's data from tools/gen-bidi.pl), when a paragraph is right to left, holds a
+   right-to-left letter, an Arabic digit or a bidi control, or embeds right to left:
+   the paragraph's code points, with the controls each inline element's
+   unicode-bidi adds (embed, isolate, bidi-override, isolate-override, plaintext;
+   the dir attribute's isolation, dir=auto and bdi as first strong isolates), and
+   those in its text, resolved character by character (X1 to X10, W1 to W7, N0's
+   bracket pairs, N1, N2, I1, I2), its level its direction's, or its first strong
+   character's under plaintext or dir=auto (start and end aligned by it). Each line
+   is reordered (L1, L2): its words split where their level changes, an inline
+   element's edges going with what they bound (both edges on a line keep its left
+   and right edges on its left and right), a right-to-left run's text handed to
+   paint reversed, its brackets mirrored (L4); the controls are drawn as nothing.
+   Not done: each paragraph a forced break starts its own under plaintext; an
+   inline box's edges on lines after its first in a right-to-left paragraph.
 
    Pseudo-elements. An element's ::before and ::after are its first and last
    children, boxes as their display has them (inline ones in the lines), their
@@ -115,6 +150,7 @@ amb_implementation(layout);
 #include "../css/css.h"
 #include "layout.h"
 #include "hyph_data.h"
+#include "bidi_data.h"
 #include "../net/url.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
@@ -199,16 +235,18 @@ enum { POS_STATIC, POS_RELATIVE, POS_ABSOLUTE, POS_FIXED, POS_STICKY };
 enum { FL_NONE, FL_LEFT, FL_RIGHT };
 enum { VA_BASELINE, VA_SUB, VA_SUPER, VA_TEXT_TOP, VA_TEXT_BOTTOM, VA_MIDDLE, VA_TOP, VA_BOTTOM, VA_LEN };
 enum { LX_FLOW, LX_FLEX, LX_GRID };
-/* the alignment keywords: justify-content, align-items, align-self, align-content, justify-items, justify-self */
-enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND, AJ_EVENLY, AJ_BASELINE, AJ_AUTO };
+/* the alignment keywords: justify-content, align-items, align-self, align-content, justify-items,
+   justify-self (AJ_BASELINE first baseline, AJ_LBASE last baseline) */
+enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND, AJ_EVENLY, AJ_BASELINE, AJ_AUTO, AJ_LBASE };
 
 typedef struct lay_ext {
     uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto, ostyle;
+    uint8_t ubidi, astart;              /* unicode-bidi (UB_); text-align start 1, end 2, other 0 */
     int32_t z, order;
     lay_len off[4];                     /* top, right, bottom, left */
     lay_len minw, minh, maxh, hraw, valen, basis, rgap, cgap;   /* hraw: height as declared, a percentage kept */
     double grow, shrink;
-    uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre;    /* the grid's values, kept as text: their cvals */
+    uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre, gta;    /* the grid's values, kept as text: their cvals */
     /* what paint reads: the corners' radii (a percentage of the border box's width), the
        opacity, the cvals of the values kept as text (none: 0), the outline, the image */
     lay_len rad[4];
@@ -236,7 +274,9 @@ static uint32_t lay_si(const vector<uint32_t> *sx, const vector<lay_gen> *gx, ui
     if (x & LAY_GEN) return at(*gx, x & LAY_GIDX).style;
     return x < len(*sx) ? at(*sx, x) & LAY_SMASK : 0;
 }
-#define LAY_X(x) at(*xc, lay_si(sx, gx, (x)))
+/* a run's item's lay_ext, read in place: a field of it costs no copy of the whole (lay_si's
+   index is always one of xc's) */
+#define LAY_X(x) data(*xc)[lay_si(sx, gx, (x))]
 
 static int lay_content_sized(lay_len l) { return l.unit == LAY_MINC || l.unit == LAY_MAXC || l.unit == LAY_FITC; }
 static double lay_res(const css_style *st, lay_len l, double base) {
@@ -431,6 +471,7 @@ static int lay_align_of(const char *w) {
     if (lay_w(w, "space-around")) return AJ_AROUND;
     if (lay_w(w, "space-evenly")) return AJ_EVENLY;
     if (lay_w(w, "baseline")) return AJ_BASELINE;
+    if (w[0] == 'l' && lay_w(w, "last-baseline")) return AJ_LBASE;
     if (lay_w(w, "auto")) return AJ_AUTO;
     return AJ_NORMAL;
 }
@@ -472,6 +513,11 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     else { e->va = VA_LEN; e->valen = lay_len_at(st, c); }
     lay_word_of(st, c0 + CSS_PROP_DIRECTION, w);
     e->rtl = lay_w(w, "rtl");
+    lay_word_of(st, c0 + CSS_PROP_UNICODE_BIDI, w);
+    e->ubidi = (uint8_t)(lay_w(w, "embed") ? 1 : lay_w(w, "isolate") ? 2 : lay_w(w, "bidi-override") ? 3 : lay_w(w, "isolate-override") ? 4 :
+                         lay_w(w, "plaintext") ? 5 : 0);
+    lay_word_of(st, c0 + CSS_PROP_TEXT_ALIGN, w);
+    e->astart = (uint8_t)(lay_w(w, "start") ? 1 : lay_w(w, "end") ? 2 : 0);
     lay_word_of(st, c0 + CSS_PROP_HYPHENS, w);
     e->hyph = lay_w(w, "auto") ? 2 : lay_w(w, "manual") ? 1 : 0;
     lay_word_of(st, c0 + CSS_PROP_DISPLAY, w);
@@ -520,6 +566,7 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->gce = c0 + CSS_PROP_GRID_COLUMN_END;
     e->grs = c0 + CSS_PROP_GRID_ROW_START;
     e->gre = c0 + CSS_PROP_GRID_ROW_END;
+    e->gta = c0 + CSS_PROP_GRID_TEMPLATE_AREAS;
     /* paint's: values that are text are kept when they are not their initial ones */
     for (int k = 0; k < 4; k++) {
         e->rad[k] = lay_len_at(st, c0 + CSS_PROP_BORDER_TOP_LEFT_RADIUS + k);
@@ -639,13 +686,18 @@ static int lay_display_of(LCTX, uint32_t x) {
 static int lay_block_level(int dsp) {
     return dsp == D_BLOCK || dsp == D_LIST_ITEM || dsp == D_TABLE || dsp == D_ROW_GROUP || dsp == D_ROW || dsp == D_CELL || dsp == D_CAPTION;
 }
-/* an inline element with a block-level box inside it */
+/* an inline element with a block-level box inside it, in its flow (an absolutely positioned
+   or floated child, which the cascade made a block, holds no place there) */
 static int lay_holds_block(LCTX, uint32_t x) {
     if (x & LAY_GEN) return 0;                  /* a pseudo-element holds its text alone */
     for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
         int dsp = lay_display_of(LARGS, c);
         if (dsp == D_NONE) continue;
-        if (lay_block_level(dsp)) return 1;
+        if (lay_block_level(dsp)) {
+            lay_ext ce = LAY_X(c);
+            if (ce.pos == POS_ABSOLUTE || ce.pos == POS_FIXED || ce.flt) continue;
+            return 1;
+        }
         if ((dsp == D_INLINE || dsp == D_CONTENTS) && d->node[c].kind == DOM_NODE_KIND_ELEMENT && lay_holds_block(LARGS, c)) return 1;
     }
     return 0;
@@ -728,10 +780,11 @@ typedef struct lay_piece {
     uint8_t tt;                                    /* text-transform */
     uint8_t va;                                    /* VA_TOP, VA_BOTTOM: aligned with the line box; an atomic's own */
     uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it */
-    uint8_t rtl;                                   /* a word of right-to-left letters (Hebrew, Arabic) */
+    uint8_t rtl;                                   /* a word that asks for the bidi algorithm (lay_bidi_hot) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
     uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
+    uint32_t bu;                                   /* in a bidi paragraph, its first unit (lay_bu) */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
@@ -860,11 +913,63 @@ static void lay_strip_soft(vector<char> *tw) {
     resize(tw, o);
 }
 
+/* text without the bidi controls, which draw nothing (Default_Ignorable_Code_Point): ALM,
+   LRM, RLM, the embeddings, overrides and isolates and their ends */
+static void lay_strip_controls(vector<char> *tw) {
+    size_t o = 0, n = len(*tw);
+    for (size_t q = 0; q < n; q++) {
+        unsigned char c = (unsigned char)at(*tw, q);
+        if (c == 0xD8 && q + 1 < n && (unsigned char)at(*tw, q + 1) == 0x9C) { q++; continue; }
+        if (c == 0xE2 && q + 2 < n) {
+            unsigned char c1 = (unsigned char)at(*tw, q + 1), c2 = (unsigned char)at(*tw, q + 2);
+            if ((c1 == 0x80 && (c2 == 0x8E || c2 == 0x8F || (c2 >= 0xAA && c2 <= 0xAE))) || (c1 == 0x81 && c2 >= 0xA6 && c2 <= 0xA9)) {
+                q += 2;
+                continue;
+            }
+        }
+        (*tw)[o++] = at(*tw, q);
+    }
+    resize(tw, o);
+}
+
 /* the code points of UTF-8 text: letter-spacing's count */
 static size_t lay_cps(const char *s, size_t n) {
     size_t k = 0;
     for (size_t i = 0; i < n; i++) if (((unsigned char)s[i] & 0xC0) != 0x80) k++;
     return k;
+}
+
+/* ---- bidirectional text (UAX #9): the classes ---- */
+
+/* the bidi classes, in tools/gen-bidi.pl's order (bidi_data.h) */
+enum { BC_L, BC_R, BC_AL, BC_EN, BC_ES, BC_ET, BC_AN, BC_CS, BC_NSM, BC_BN, BC_B, BC_S, BC_WS, BC_ON,
+       BC_LRE, BC_LRO, BC_RLE, BC_RLO, BC_PDF, BC_LRI, BC_RLI, BC_FSI, BC_PDI };
+
+/* a code point's Bidi_Class: its range's, the last that starts at or before it */
+static int lay_bidi_class(uint32_t cp) {
+    size_t lo = 0, hi = sizeof amb_bidi_class / sizeof amb_bidi_class[0];
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        if ((amb_bidi_class[mid] >> 5) <= cp) lo = mid;
+        else hi = mid;
+    }
+    return (int)(amb_bidi_class[lo] & 31);
+}
+
+/* the code point at s[i] (a lead byte, 0xC2 or more) asks for the bidi algorithm: it is right
+   to left (R, AL), an Arabic number (AN), or an explicit formatting character. RLM and the
+   controls (U+200F, U+202A to U+202E, U+2066 to U+2069) are known by their bytes; only in
+   the blocks of right-to-left scripts (U+0590 to U+08FF, U+FB1D to U+FDFF, U+FE70 to
+   U+FEFF, U+10800 to U+10FFF, U+1E800 to U+1EFFF) is a code point looked up */
+static int lay_bidi_hot(const char *s, size_t n, size_t i) {
+    unsigned char c0 = (unsigned char)s[i], c1 = i + 1 < n ? (unsigned char)s[i + 1] : 0, c2 = i + 2 < n ? (unsigned char)s[i + 2] : 0;
+    if (c0 == 0xE2) return (c1 == 0x80 && (c2 == 0x8F || (c2 >= 0xAA && c2 <= 0xAE))) || (c1 == 0x81 && c2 >= 0xA6 && c2 <= 0xA9);
+    int maybe = (c0 >= 0xD6 && c0 <= 0xDF) || (c0 == 0xE0 && c1 >= 0xA0 && c1 <= 0xA3) ||
+                (c0 == 0xEF && ((c1 >= 0xAC && c1 <= 0xB7) || (c1 >= 0xB9 && c1 <= 0xBB))) || (c0 == 0xF0 && (c1 == 0x90 || c1 == 0x9E) && c2 >= 0xA0);
+    if (!maybe) return 0;
+    size_t z = i;
+    int c = lay_bidi_class(amb_utf8_next(s, n, &z));
+    return c == BC_R || c == BC_AL || c == BC_AN || (c >= BC_LRE && c <= BC_PDI);
 }
 
 /* the pieces of text tx[0, n): a text node's (node), or a pseudo-element's content (node
@@ -936,7 +1041,7 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             if (c0 >= 0x80) hi = 1;
             if (c0 >= 0xC2) {
                 if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
-                else if (c0 >= 0xD6 && c0 <= 0xDB) rtl = 1;      /* U+0580 to U+06FF: Hebrew, Arabic */
+                else if (!rtl && lay_bidi_hot(tx, n, j)) rtl = 1;
             }
             j++;
         }
@@ -945,19 +1050,29 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         p.len = (uint32_t)(j - i);
         p.rtl = (uint8_t)rtl;
         p.soft = (uint8_t)soft;
-        if (s->tt || soft) {
-            /* text-transform's letters; a soft hyphen, no width where it does not break */
+        uint32_t fbm = 0;           /* the faces other than the word's that draw some of it */
+        if (s->tt || soft || rtl) {
+            /* text-transform's letters; a soft hyphen, no width where it does not break; the
+               bidi controls none */
             vector<char> tw;
             if (s->tt) lay_transform(tx + i, j - i, s->tt, &tw);
             else append_range(tw, tx + i, j - i);
             if (soft) lay_strip_soft(&tw);
+            if (rtl) lay_strip_controls(&tw);
             p.w = amb_text_width(f, s->face, s->fs, data(tw), len(tw)) + s->ls * (double)lay_cps(data(tw), len(tw));
-        } else p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
+            if (hi && s->lhn) {
+                if (rtl) fbm = amb_text_fallbacks(f, s->face, data(tw), len(tw));
+                else fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
+            }
+        } else {
+            p.w = amb_text_width(f, s->face, s->fs, tx + i, j - i) + s->ls * (double)lay_cps(tx + i, j - i);
+            if (hi && s->lhn) fbm = amb_text_fallbacks(f, s->face, tx + i, j - i);
+        }
         p.brk = 0;
         p.keep = 0;
         /* the lines of the faces that draw what the word's face has no glyph for */
         if (hi && s->lhn) {
-            uint32_t m = amb_text_fallbacks(f, s->face, tx + i, j - i);
+            uint32_t m = fbm;
             for (int k = 0; m && k < AMB_NFACES; k++) {
                 if (!(m >> k & 1)) continue;
                 double fa, fd, fg, up, dn;
@@ -1475,31 +1590,52 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     if (defh >= 0) t->box[b].h = defh;
     return b;
 }
-/* the baseline of a laid-out atomic box, from its margin box's top: its last line's,
-   or its bottom margin edge */
-/* the first baseline in b's box subtree, from b's content box's top: its first line's, or
-   its first child's that has one */
+/* a child box out of its parent's flow: positioned absolutely, fixed, or floated */
+static int lay_out_of_flow(const layout_tree *t, uint32_t c) {
+    return t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED ||
+           t->box[c].float_side != LAYOUT_FLOAT_SIDE_UNFLOATED;
+}
+/* the first baseline in b's box subtree, from b's content box's top: a flex container's (its
+   items give it, Flexbox 1, 8.5), its first line's, or its first in-flow child's that has one */
 static int lay_first_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
     if (t->box[b].first_line) { *y = t->line[t->box[b].first_line].y + t->line[t->box[b].first_line].baseline; return 1; }
     if (depth > 32) return 0;
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
         double cy;
-        if (t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED) continue;
+        if (lay_out_of_flow(t, c)) continue;
         if (lay_first_baseline(t, c, &cy, depth + 1)) { *y = t->box[c].y + cy; return 1; }
     }
     return 0;
 }
-
-/* an atomic box's baseline, from its margin box's top: an inline-block's last line's, a
-   flex or grid container's first item's; else its bottom margin edge */
-static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
-    double top = t->box[b].mt + t->box[b].bt + t->box[b].pt;
-    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX || t->box[b].kind == LAYOUT_BOX_KIND_GRID) {
-        double y;
-        if (lay_first_baseline(t, b, &y, 0)) return top + y;
-    }
+/* the last baseline in b's box subtree, from b's content box's top: a flex container's (its
+   first), its last line's, or its last in-flow child's that has one */
+static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
     uint32_t ln = t->box[b].last_line;
-    if (ln) return top + t->line[ln].y + t->line[ln].baseline;
+    if (ln) { *y = t->line[ln].y + t->line[ln].baseline; return 1; }
+    if (depth > 32) return 0;
+    int found = 0;
+    for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
+        double cy;
+        if (lay_out_of_flow(t, c)) continue;
+        if (lay_last_baseline(t, c, &cy, depth + 1)) { *y = t->box[c].y + cy; found = 1; }
+    }
+    return found;
+}
+
+/* an atomic box's baseline, from its margin box's top (CSS 2.1, 10.8.1): a flex or grid
+   container's first one (its items'); a replaced element's placeholder's line's; an
+   inline-block's last line's in its flow, however deep -- its bottom margin edge when it
+   has none, or when its overflow is not visible */
+static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
+    double top = t->box[b].mt + t->box[b].bt + t->box[b].pt, y;
+    int kind = t->box[b].kind;
+    if (kind == LAYOUT_BOX_KIND_FLEX || kind == LAYOUT_BOX_KIND_GRID) { if (lay_first_baseline(t, b, &y, 0)) return top + y; }
+    else if (kind == LAYOUT_BOX_KIND_REPLACED) {
+        uint32_t ln = t->box[b].last_line;
+        if (ln) return top + t->line[ln].y + t->line[ln].baseline;
+    } else if (t->box[b].clip != 1 && lay_last_baseline(t, b, &y, 0)) return top + y;
     return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
 }
 
@@ -1529,24 +1665,15 @@ static void lay_piece_text(const layout_tree *t, const dom_document *d, const ve
             if (p.kind == P_WORD && p.tt && p.off + p.len <= sp.len) lay_transform(tx + p.off, p.len, p.tt, out);
             else for (uint32_t i = p.off; i < p.off + p.len && i < sp.len; i++) push_back(out, tx[i] == '\t' ? ' ' : tx[i]);
         }
-        if (p.kind != P_WORD || !(p.hy || p.rtl || p.soft)) continue;
-        if (p.hy || p.rtl) {
-            /* the word's own bytes: soft hyphens out, the hyphen it is broken by, its letters
-               in the order they are drawn (right to left: reversed) */
+        if (p.kind != P_WORD || !(p.hy || p.soft)) continue;
+        if (p.hy) {
+            /* the word's own bytes: soft hyphens out, the hyphen it is broken by */
             vector<char> wd;
             for (size_t q = from; q < len(*out); q++) push_back(wd, at(*out, q));
             resize(out, from);
             lay_strip_soft(&wd);
-            if (p.hy) push_back(wd, '-');
-            if (p.rtl) {
-                size_t q = len(wd);
-                while (q > 0) {
-                    size_t b0 = q - 1;
-                    while (b0 > 0 && ((unsigned char)at(wd, b0) & 0xC0) == 0x80) b0--;
-                    for (size_t z = b0; z < q; z++) push_back(out, at(wd, z));
-                    q = b0;
-                }
-            } else append_range(out, data(wd), len(wd));
+            push_back(wd, '-');
+            append_range(out, data(wd), len(wd));
         } else {
             /* soft hyphens where the word is not broken: none drawn */
             vector<char> wd;
@@ -1558,10 +1685,817 @@ static void lay_piece_text(const layout_tree *t, const dom_document *d, const ve
     }
 }
 
+/* an inline element open at a line's start or end: it, its baseline's shift and its
+   relative offset, as its pieces have them */
+typedef struct lay_open { uint32_t el; float shift, rx, ry; } lay_open;
+
+/* ---- bidirectional text (UAX #9): a paragraph's levels ---- */
+
+/* a unit of a bidi paragraph: a code point of a word's or a kept space's text (its node, its
+   byte offset there and its length); a piece that is no text (a collapsed space WS; an atomic
+   box, a float or a positioned box ON, as U+FFFC; a forced break B); an inline element's
+   edge (a marker, BN), or a control its unicode-bidi adds (CSS Writing Modes 3, 2.4.2). Its
+   class as written (orig) and as the rules resolve it (cls), its embedding level (elvl) and
+   its resolved level (lvl) */
+typedef struct lay_bu { uint32_t cp, node, off; uint8_t len, orig, cls, lvl, elvl; } lay_bu;
+
+/* P2, P3: the first strong class from unit i on (R or AL 1, L 0, none -1), past isolates'
+   insides; within an isolate (iso), only to its matching PDI */
+static int lay_bidi_first_strong(const vector<lay_bu> *u, size_t i, int iso) {
+    int depth = 0;
+    for (; i < len(*u); i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_B) return -1;
+        if (c == BC_LRI || c == BC_RLI || c == BC_FSI) { depth++; continue; }
+        if (c == BC_PDI) {
+            if (depth) depth--;
+            else if (iso) return -1;
+            continue;
+        }
+        if (depth) continue;
+        if (c == BC_L) return 0;
+        if (c == BC_R || c == BC_AL) return 1;
+    }
+    return -1;
+}
+
+/* X1 to X8: each unit's embedding level, and its class where an override sets it; a stack of
+   embeddings, overrides and isolates 125 deep, past which they overflow */
+static void lay_bidi_explicit(vector<lay_bu> *u, int para) {
+    uint8_t sl[128], so[128], si[128];          /* each entry's level, override (1 L, 2 R), whether an isolate's */
+    int sp = 0, oi = 0, oe = 0, vi = 0;
+    sl[0] = (uint8_t)para;
+    so[0] = 0;
+    si[0] = 0;
+    for (size_t i = 0; i < len(*u); i++) {
+        lay_bu b = at(*u, i);
+        int c = b.orig, top = sl[sp];
+        b.cls = (uint8_t)c;
+        b.lvl = (uint8_t)top;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO) {
+            int nl = c == BC_RLE || c == BC_RLO ? (top + 1) | 1 : (top + 2) & ~1;
+            if (nl <= 125 && !oi && !oe && sp < 126) {
+                sp++;
+                sl[sp] = (uint8_t)nl;
+                so[sp] = (uint8_t)(c == BC_RLO ? 2 : c == BC_LRO ? 1 : 0);
+                si[sp] = 0;
+            } else if (!oi) oe++;
+        } else if (c == BC_RLI || c == BC_LRI || c == BC_FSI) {
+            if (so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+            int rtl = c == BC_RLI || (c == BC_FSI && lay_bidi_first_strong(u, i + 1, 1) == 1);
+            int nl = rtl ? (top + 1) | 1 : (top + 2) & ~1;
+            if (nl <= 125 && !oi && !oe && sp < 126) {
+                vi++;
+                sp++;
+                sl[sp] = (uint8_t)nl;
+                so[sp] = 0;
+                si[sp] = 1;
+            } else oi++;
+        } else if (c == BC_PDI) {
+            if (oi) oi--;
+            else if (vi) {
+                oe = 0;
+                while (sp > 0 && !si[sp]) sp--;
+                if (sp > 0) sp--;
+                vi--;
+            }
+            b.lvl = sl[sp];
+            if (so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+        } else if (c == BC_PDF) {
+            if (!oi) {
+                if (oe) oe--;
+                else if (!si[sp] && sp > 0) sp--;
+            }
+        } else if (c == BC_B) {
+            b.lvl = (uint8_t)para;
+            sp = 0;
+            oi = oe = vi = 0;
+        } else if (c != BC_BN && so[sp]) b.cls = (uint8_t)(so[sp] == 1 ? BC_L : BC_R);
+        b.elvl = b.lvl;
+        (*u)[i] = b;
+    }
+}
+
+/* a class's strong direction for the neutrals (L, or R, which EN and AN count as); -1 none */
+static int lay_bidi_strong(int c) {
+    if (c == BC_L) return BC_L;
+    if (c == BC_R || c == BC_AL || c == BC_EN || c == BC_AN) return BC_R;
+    return -1;
+}
+static int lay_bidi_ni(int c) { return c == BC_B || c == BC_S || c == BC_WS || c == BC_ON || (c >= BC_LRI && c <= BC_PDI); }
+
+/* a bracket's pair (BidiBrackets.txt): 1 and the closing one for an opening bracket, 2 and
+   the opening one for a closing one, 0 for none; U+2329 and U+232A as their canonical
+   equivalents U+3008 and U+3009 */
+static int lay_bidi_bracket(uint32_t cp, uint32_t *pair) {
+    if (cp == 0x2329) cp = 0x3008;
+    else if (cp == 0x232A) cp = 0x3009;
+    size_t n = sizeof amb_bidi_brackets / sizeof amb_bidi_brackets[0];
+    for (size_t k = 0; k + 1 < n; k += 2) {
+        if (amb_bidi_brackets[k] == cp) { *pair = amb_bidi_brackets[k + 1]; return 1; }
+        if (amb_bidi_brackets[k + 1] == cp) { *pair = amb_bidi_brackets[k]; return 2; }
+    }
+    return 0;
+}
+
+/* an isolating run sequence's classes resolved (W1 to W7, N0, N1, N2) and its levels (I1,
+   I2): seq its places in idx, the units the rules see; para the paragraph's level */
+static void lay_bidi_sequence(vector<lay_bu> *u, const vector<uint32_t> *idx, const vector<uint32_t> *seq, int para) {
+    size_t m = len(*seq);
+    uint32_t q0 = at(*seq, 0), q1 = at(*seq, m - 1);
+    int lv = at(*u, at(*idx, q0)).elvl;
+    int before = q0 > 0 ? at(*u, at(*idx, q0 - 1)).elvl : para;
+    int lc = at(*u, at(*idx, q1)).orig;
+    int after = lc == BC_LRI || lc == BC_RLI || lc == BC_FSI || q1 + 1 >= len(*idx) ? para : at(*u, at(*idx, q1 + 1)).elvl;
+    int sos = ((lv > before ? lv : before) & 1) ? BC_R : BC_L, eos = ((lv > after ? lv : after) & 1) ? BC_R : BC_L;
+    int dir = (lv & 1) ? BC_R : BC_L;
+    vector<uint8_t> tc;
+    for (size_t k = 0; k < m; k++) push_back(tc, at(*u, at(*idx, at(*seq, k))).cls);
+    /* W1: a non-spacing mark the class before it (ON after an isolate's initiator or end) */
+    for (size_t k = 0; k < m; k++) {
+        if (at(tc, k) != BC_NSM) continue;
+        int pc = k ? at(tc, k - 1) : sos;
+        tc[k] = (uint8_t)(k && pc >= BC_LRI && pc <= BC_PDI ? BC_ON : pc);
+    }
+    /* W2: a European number after Arabic letters an Arabic number; W3: AL is R */
+    int strong = sos;
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k);
+        if (c == BC_L || c == BC_R || c == BC_AL) strong = c;
+        else if (c == BC_EN && strong == BC_AL) tc[k] = BC_AN;
+    }
+    for (size_t k = 0; k < m; k++) if (at(tc, k) == BC_AL) tc[k] = BC_R;
+    /* W4: one separator between two numbers of a kind is one of them */
+    for (size_t k = 1; k + 1 < m; k++) {
+        int c = at(tc, k), pc = at(tc, k - 1), nc = at(tc, k + 1);
+        if (c == BC_ES && pc == BC_EN && nc == BC_EN) tc[k] = BC_EN;
+        else if (c == BC_CS && (pc == BC_EN || pc == BC_AN) && nc == pc) tc[k] = (uint8_t)pc;
+    }
+    /* W5: terminators beside a European number are European numbers */
+    for (size_t k = 0; k < m;) {
+        if (at(tc, k) != BC_ET) { k++; continue; }
+        size_t e = k;
+        while (e < m && at(tc, e) == BC_ET) e++;
+        if ((k > 0 && at(tc, k - 1) == BC_EN) || (e < m && at(tc, e) == BC_EN)) for (size_t z = k; z < e; z++) tc[z] = BC_EN;
+        k = e;
+    }
+    /* W6: the separators and terminators left are neutral; W7: a European number after L is L */
+    for (size_t k = 0; k < m; k++) if (at(tc, k) == BC_ES || at(tc, k) == BC_ET || at(tc, k) == BC_CS) tc[k] = BC_ON;
+    strong = sos;
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k);
+        if (c == BC_L || c == BC_R) strong = c;
+        else if (c == BC_EN && strong == BC_L) tc[k] = BC_L;
+    }
+    /* N0: the bracket pairs (BD16, 63 open at most), in order of their openings: the
+       direction of the strong text in them when that is the embedding's; else, when their
+       strong text is the other way, the context's before them; and the marks after them */
+    vector<uint32_t> pairs, stk;
+    for (size_t k = 0; k < m; k++) {
+        if (at(tc, k) != BC_ON) continue;
+        uint32_t cp = at(*u, at(*idx, at(*seq, k))).cp, pair;
+        int kind = lay_bidi_bracket(cp, &pair);
+        if (kind == 1) {
+            if (len(stk) >= 126) break;
+            push_back(stk, pair);
+            push_back(stk, (uint32_t)k);
+        } else if (kind == 2) {
+            if (cp == 0x232A) cp = 0x3009;
+            for (size_t s = len(stk); s >= 2; s -= 2) {
+                if (at(stk, s - 2) != cp) continue;
+                push_back(pairs, at(stk, s - 1));
+                push_back(pairs, (uint32_t)k);
+                resize(&stk, s - 2);
+                break;
+            }
+        }
+    }
+    for (size_t p = 2; p < len(pairs); p += 2)
+        for (size_t z = p; z >= 2 && at(pairs, z - 2) > at(pairs, z); z -= 2) {
+            uint32_t o = at(pairs, z), c = at(pairs, z + 1);
+            pairs[z] = at(pairs, z - 2);
+            pairs[z + 1] = at(pairs, z - 1);
+            pairs[z - 2] = o;
+            pairs[z - 1] = c;
+        }
+    for (size_t p = 0; p + 1 < len(pairs); p += 2) {
+        uint32_t o = at(pairs, p), c = at(pairs, p + 1);
+        int found = 0;
+        for (uint32_t k = o + 1; k < c && found != 1; k++) {
+            int sd = lay_bidi_strong(at(tc, k));
+            if (sd == dir) found = 1;
+            else if (sd >= 0) found = 2;
+        }
+        if (!found) continue;
+        int to = dir;
+        if (found == 2) {
+            to = sos;
+            for (uint32_t k = o; k > 0; k--) {
+                int sd = lay_bidi_strong(at(tc, k - 1));
+                if (sd >= 0) { to = sd; break; }
+            }
+        }
+        tc[o] = (uint8_t)to;
+        tc[c] = (uint8_t)to;
+        for (uint32_t k = o + 1; k < m && at(*u, at(*idx, at(*seq, k))).orig == BC_NSM; k++) tc[k] = (uint8_t)to;
+        for (uint32_t k = c + 1; k < m && at(*u, at(*idx, at(*seq, k))).orig == BC_NSM; k++) tc[k] = (uint8_t)to;
+    }
+    /* N1, N2: neutrals between text of one direction take it, the others the embedding's */
+    for (size_t k = 0; k < m;) {
+        if (!lay_bidi_ni(at(tc, k))) { k++; continue; }
+        size_t e = k;
+        while (e < m && lay_bidi_ni(at(tc, e))) e++;
+        int b = k ? lay_bidi_strong(at(tc, k - 1)) : sos, a = e < m ? lay_bidi_strong(at(tc, e)) : eos;
+        int to = b == a && b >= 0 ? b : dir;
+        for (size_t z = k; z < e; z++) tc[z] = (uint8_t)to;
+        k = e;
+    }
+    /* I1, I2 */
+    for (size_t k = 0; k < m; k++) {
+        int c = at(tc, k), l = lv;
+        if (!(lv & 1)) { if (c == BC_R) l++; else if (c == BC_AN || c == BC_EN) l += 2; }
+        else if (c == BC_L || c == BC_EN || c == BC_AN) l++;
+        uint32_t i = at(*idx, at(*seq, k));
+        lay_bu b = at(*u, i);
+        b.cls = (uint8_t)c;
+        b.lvl = (uint8_t)l;
+        (*u)[i] = b;
+    }
+}
+
+/* a paragraph's levels (UAX #9): explicit (X1 to X8); the units X9 removes passed over (the
+   embeddings, overrides and their ends, an edge's marker); the isolating run sequences (BD9,
+   BD13, X10), each resolved; the units passed over the level of the unit before them */
+static void lay_bidi_resolve(vector<lay_bu> *u, int para) {
+    size_t n = len(*u);
+    lay_bidi_explicit(u, para);
+    vector<uint32_t> idx;
+    for (size_t i = 0; i < n; i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF || c == BC_BN) continue;
+        push_back(idx, (uint32_t)i);
+    }
+    size_t m = len(idx);
+    /* BD9: each isolate's initiator and its matching PDI, mates (places in idx; -1 none) */
+    vector<int32_t> mate;
+    resize(&mate, m, -1);
+    vector<uint32_t> stk;
+    for (size_t q = 0; q < m; q++) {
+        int c = at(*u, at(idx, q)).orig;
+        if (c == BC_LRI || c == BC_RLI || c == BC_FSI) push_back(stk, (uint32_t)q);
+        else if (c == BC_PDI && len(stk)) {
+            uint32_t o = back(stk);
+            pop_back(&stk);
+            mate[o] = (int32_t)q;
+            mate[q] = (int32_t)o;
+        } else if (c == BC_B) clear(&stk);
+    }
+    /* the level runs (by embedding level), each its first place and its end in idx */
+    vector<uint32_t> rs, re, runof;
+    resize(&runof, m, 0u);
+    for (size_t q = 0; q < m;) {
+        size_t e = q + 1;
+        int lv = at(*u, at(idx, q)).elvl;
+        while (e < m && at(*u, at(idx, e)).elvl == lv) e++;
+        for (size_t z = q; z < e; z++) runof[z] = (uint32_t)len(rs);
+        push_back(rs, (uint32_t)q);
+        push_back(re, (uint32_t)e);
+        q = e;
+    }
+    /* each sequence: a run that a matched PDI does not begin, and those an initiator it ends with goes on in */
+    vector<uint32_t> seq;
+    for (size_t r = 0; r < len(rs); r++) {
+        uint32_t first = at(rs, r);
+        if (at(*u, at(idx, first)).orig == BC_PDI && at(mate, first) >= 0) continue;
+        clear(&seq);
+        size_t rr = r;
+        for (int guard = 0; guard < 4096; guard++) {
+            for (uint32_t q = at(rs, rr); q < at(re, rr); q++) push_back(seq, q);
+            uint32_t last = at(re, rr) - 1;
+            int c = at(*u, at(idx, last)).orig;
+            if ((c != BC_LRI && c != BC_RLI && c != BC_FSI) || at(mate, last) < 0) break;
+            rr = at(runof, (size_t)at(mate, last));
+        }
+        lay_bidi_sequence(u, &idx, &seq, para);
+    }
+    int prev = para;
+    for (size_t i = 0; i < n; i++) {
+        int c = at(*u, i).orig;
+        if (c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF || c == BC_BN) (*u)[i].lvl = (uint8_t)prev;
+        else prev = at(*u, i).lvl;
+    }
+}
+
+/* a code point drawn at an odd level: its mirror (L4, BidiMirroring.txt), or itself */
+static uint32_t lay_bidi_mirror(uint32_t cp) {
+    size_t lo = 0, hi = sizeof amb_bidi_mirror / sizeof amb_bidi_mirror[0] / 2;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (amb_bidi_mirror[2 * mid] < cp) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < sizeof amb_bidi_mirror / sizeof amb_bidi_mirror[0] / 2 && amb_bidi_mirror[2 * lo] == cp) return amb_bidi_mirror[2 * lo + 1];
+    return cp;
+}
+
+/* a code point's UTF-8 into out */
+static void lay_put_utf8(vector<char> *out, uint32_t cp) {
+    if (cp < 0x80) push_back(out, (char)cp);
+    else if (cp < 0x800) { push_back(out, (char)(0xC0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3F))); }
+    else if (cp < 0x10000) {
+        push_back(out, (char)(0xE0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    } else {
+        push_back(out, (char)(0xF0 | cp >> 18));
+        push_back(out, (char)(0x80 | (cp >> 12 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    }
+}
+
+/* text as a right-to-left run draws it: its code points in the other order, each its mirror (L4) */
+static void lay_bidi_reverse(const vector<char> *in, vector<char> *out) {
+    size_t q = len(*in);
+    while (q > 0) {
+        size_t b0 = q - 1;
+        while (b0 > 0 && ((unsigned char)at(*in, b0) & 0xC0) == 0x80) b0--;
+        size_t z = b0;
+        uint32_t cp = amb_utf8_next(data(*in), len(*in), &z);
+        uint32_t mc = lay_bidi_mirror(cp);
+        if (mc != cp) lay_put_utf8(out, mc);
+        else for (size_t k = b0; k < q; k++) push_back(out, at(*in, k));
+        q = b0;
+    }
+}
+
+/* the bytes [off, off + n) of a node's text (a pseudo-element's content's, in the tree's pool) into out */
+static void lay_src_bytes(LCTX, uint32_t node, uint32_t off, uint32_t n, vector<char> *out) {
+    if (node & LAY_GEN) {
+        amb_span g = at(*gx, node & LAY_GIDX).text;
+        if (off + n <= g.len) append_range(out, text_ptr(t, g) + off, n);
+        return;
+    }
+    amb_span sp = d->node[node].data;
+    if (off + n <= sp.len) append_range(out, text_ptr(d, sp) + off, n);
+}
+
+/* an element whose direction its content gives: HTML's dir=auto, a bdi without dir */
+static int lay_dir_auto(const dom_document *d, uint32_t x) {
+    if (x & LAY_GEN) return 0;
+    uint32_t a = lay_attr(d, x, "dir");
+    if (a) {
+        amb_span v = d->attr[a].value;
+        const char *p = text_ptr(d, v);
+        return v.len == 4 && (p[0] | 32) == 'a' && (p[1] | 32) == 'u' && (p[2] | 32) == 't' && (p[3] | 32) == 'o';
+    }
+    return lay_is_named(d, x, "bdi");
+}
+
+/* the unicode-bidi values (lay_ext's ubidi) */
+enum { UB_NORMAL, UB_EMBED, UB_ISOLATE, UB_OVERRIDE, UB_ISOLATE_OVERRIDE, UB_PLAINTEXT };
+
+/* the bidi paragraph of pieces ps into u: each word's and kept space's code points, each other
+   piece's unit (its first unit's index in its bu), an inline element's edges and the controls
+   its unicode-bidi and direction add (CSS Writing Modes 3, 2.4.2: embed LRE or RLE, isolate
+   LRI or RLI -- FSI for an element whose direction its content gives -- bidi-override LRO
+   or RLO, isolate-override both, plaintext FSI; each closed by PDF or PDI) */
+static void lay_bidi_units(LCTX, vector<lay_piece> *ps, vector<lay_bu> *u) {
+    for (size_t k = 0; k < len(*ps); k++) {
+        lay_piece p = at(*ps, k);
+        lay_bu b;
+        memset(&b, 0, sizeof b);
+        b.node = p.node;
+        b.off = p.off;
+        if (p.kind == P_WORD || (p.kind == P_SPACE && p.keep)) {
+            p.bu = (uint32_t)len(*u);
+            vector<char> raw;
+            lay_src_bytes(LARGS, p.node, p.off, p.len, &raw);
+            size_t z = 0;
+            while (z < len(raw)) {
+                size_t z0 = z;
+                uint32_t cp = amb_utf8_next(data(raw), len(raw), &z);
+                b.cp = cp;
+                b.off = p.off + (uint32_t)z0;
+                b.len = (uint8_t)(z - z0);
+                b.orig = (uint8_t)lay_bidi_class(cp);
+                push_back(u, b);
+            }
+        } else if (p.kind == P_OPEN || p.kind == P_CLOSE) {
+            lay_ext e = LAY_X(p.node);
+            int ub = e.ubidi, rtl = e.rtl;
+            int iso = ub == UB_ISOLATE || ub == UB_ISOLATE_OVERRIDE || ub == UB_PLAINTEXT;
+            int fsi = ub == UB_PLAINTEXT || (iso && lay_dir_auto(d, p.node));
+            uint8_t ctl[2];
+            int nc = 0;
+            if (p.kind == P_OPEN) {
+                if (iso) ctl[nc++] = (uint8_t)(fsi ? BC_FSI : rtl ? BC_RLI : BC_LRI);
+                if (ub == UB_EMBED) ctl[nc++] = (uint8_t)(rtl ? BC_RLE : BC_LRE);
+                if (ub == UB_OVERRIDE || ub == UB_ISOLATE_OVERRIDE) ctl[nc++] = (uint8_t)(rtl ? BC_RLO : BC_LRO);
+            } else {
+                if (ub == UB_EMBED || ub == UB_OVERRIDE || ub == UB_ISOLATE_OVERRIDE) ctl[nc++] = BC_PDF;
+                if (iso) ctl[nc++] = BC_PDI;
+            }
+            b.orig = BC_BN;
+            if (p.kind == P_OPEN) { p.bu = (uint32_t)len(*u); push_back(u, b); }
+            for (int q = 0; q < nc; q++) {
+                lay_bu cb = b;
+                cb.orig = ctl[q];
+                push_back(u, cb);
+            }
+            if (p.kind == P_CLOSE) { p.bu = (uint32_t)len(*u); push_back(u, b); }
+        } else {
+            p.bu = (uint32_t)len(*u);
+            b.cp = p.kind == P_SPACE ? 0x20 : p.kind == P_BREAK ? 0x2029 : 0xFFFC;
+            b.orig = (uint8_t)(p.kind == P_SPACE ? BC_WS : p.kind == P_BREAK ? BC_B : BC_ON);
+            push_back(u, b);
+        }
+        (*ps)[k] = p;
+    }
+}
+
+/* ---- bidirectional text: a line's visual runs ---- */
+
+/* a visual run of a bidi line: its piece k, its bytes [o0, o1) of the piece's node text (a
+   word's or a kept space's; 0 and 0 for the others), its level, width and place on the line */
+typedef struct lay_vr { uint32_t k, o0, o1; int lvl; double w, x; } lay_vr;
+
+/* the bytes [o0, o1) of a word's (or kept spaces') node text as laid out: text-transform's
+   letters, soft hyphens and bidi controls out, the hyphen after a broken word's last part;
+   into out */
+static void lay_run_bytes(LCTX, const lay_piece *p, uint32_t o0, uint32_t o1, vector<char> *out) {
+    vector<char> raw, tw;
+    lay_src_bytes(LARGS, p->node, o0, o1 - o0, &raw);
+    if (p->kind == P_WORD && p->tt) lay_transform(data(raw), len(raw), p->tt, &tw);
+    else for (size_t i = 0; i < len(raw); i++) push_back(tw, at(raw, i) == '\t' ? ' ' : at(raw, i));
+    if (p->kind == P_WORD && p->soft) lay_strip_soft(&tw);
+    lay_strip_controls(&tw);
+    if (p->kind == P_WORD && p->hy && o1 == p->off + p->len) push_back(tw, '-');
+    append_range(out, data(tw), len(tw));
+}
+
+/* a bidi line's visual runs (pieces [a, end) of ps) into vr: each piece's, a word split where
+   its level changes (its parts measured again), at its level -- its units', an inline
+   element's edge at its embedding level, the line's trailing spaces and breaks and a kept
+   tab at the paragraph's (L1) -- and in ord their visual order (L2): each run of a level and
+   above reversed, from the highest level down to the lowest odd one. An element's two edges
+   on the line, their order reversed, swap their widths: the left one draws the left edges */
+static void lay_bidi_line(LCTX, const vector<lay_piece> *ps, size_t a, size_t end, const vector<lay_bu> *bu, int para, vector<lay_vr> *vr,
+                          vector<uint32_t> *ord) {
+    size_t nb = len(*bu);
+    for (size_t k = a; k < end; k++) {
+        lay_piece p = at(*ps, k);
+        lay_vr r;
+        r.k = (uint32_t)k;
+        r.o0 = 0;
+        r.o1 = 0;
+        r.w = p.w;
+        r.x = 0;
+        r.lvl = para;
+        if (p.kind == P_WORD || (p.kind == P_SPACE && p.keep)) {
+            /* its units, from its first on (a hyphenated word's rest goes on from its own) */
+            size_t q = p.bu;
+            while (q < nb && at(*bu, q).node == p.node && at(*bu, q).off < p.off) q++;
+            size_t first = len(*vr);
+            int lv = -1, tab = 0;
+            r.o0 = p.off;
+            while (q < nb && at(*bu, q).node == p.node && at(*bu, q).off < p.off + p.len) {
+                lay_bu b = at(*bu, q);
+                if (b.orig == BC_S) tab = 1;
+                if (lv >= 0 && b.lvl != lv && p.kind == P_WORD) {
+                    r.o1 = b.off;
+                    push_back(vr, r);
+                    r.o0 = b.off;
+                }
+                if (lv < 0 || p.kind == P_WORD) lv = b.lvl;
+                r.lvl = lv;
+                q++;
+            }
+            r.o1 = p.off + p.len;
+            if (lv < 0 || tab) r.lvl = tab ? para : r.lvl;
+            push_back(vr, r);
+            if (len(*vr) - first > 1)
+                for (size_t z = first; z < len(*vr); z++) {
+                    lay_vr s = at(*vr, z);
+                    vector<char> tx;
+                    lay_run_bytes(LARGS, &p, s.o0, s.o1, &tx);
+                    s.w = amb_text_width(f, p.face, p.size, data(tx), len(tx)) + p.ls * (double)lay_cps(data(tx), len(tx));
+                    (*vr)[z] = s;
+                }
+            continue;
+        }
+        if (p.bu < nb) r.lvl = at(*bu, p.bu).lvl;
+        if (p.bu < nb && (p.kind == P_OPEN || p.kind == P_CLOSE)) {
+            /* an edge: the level of the unit next to it the rules keep, inside it (an
+               isolate's control, outside its isolate), else its embedding level */
+            r.lvl = at(*bu, p.bu).elvl;
+            size_t q = p.bu;
+            for (;;) {
+                if (p.kind == P_OPEN) { if (q + 1 >= nb) break; q++; }
+                else { if (q == 0) break; q--; }
+                int c = at(*bu, q).orig;
+                if (c == BC_BN || c == BC_RLE || c == BC_LRE || c == BC_RLO || c == BC_LRO || c == BC_PDF) continue;
+                r.lvl = at(*bu, q).lvl;
+                break;
+            }
+        }
+        if (p.kind == P_BREAK) r.lvl = para;
+        push_back(vr, r);
+    }
+    /* L1: the trailing white space, at the paragraph's level */
+    for (size_t q = len(*vr); q > 0; q--) {
+        int kd = at(*ps, at(*vr, q - 1).k).kind;
+        if (kd != P_SPACE && kd != P_BREAK && kd != P_ABS && kd != P_FLOAT) break;
+        (*vr)[q - 1].lvl = para;
+    }
+    /* L2 */
+    size_t nr = len(*vr);
+    int maxl = 0, minodd = 1000;
+    for (size_t q = 0; q < nr; q++) {
+        push_back(ord, (uint32_t)q);
+        int l = at(*vr, q).lvl;
+        if (l > maxl) maxl = l;
+        if ((l & 1) && l < minodd) minodd = l;
+    }
+    for (int l = maxl; l >= minodd; l--)
+        for (size_t q = 0; q < nr;) {
+            if (at(*vr, at(*ord, q)).lvl < l) { q++; continue; }
+            size_t e2 = q;
+            while (e2 < nr && at(*vr, at(*ord, e2)).lvl >= l) e2++;
+            for (size_t i0 = q, i1 = e2 - 1; i0 < i1; i0++, i1--) {
+                uint32_t tmp = at(*ord, i0);
+                (*ord)[i0] = at(*ord, i1);
+                (*ord)[i1] = tmp;
+            }
+            q = e2;
+        }
+    /* an element's edges reversed: their widths swapped */
+    vector<uint32_t> pos, stk;
+    resize(&pos, nr, 0u);
+    for (size_t q = 0; q < nr; q++) pos[at(*ord, q)] = (uint32_t)q;
+    for (size_t q = 0; q < nr; q++) {
+        int kd = at(*ps, at(*vr, q).k).kind;
+        if (kd == P_OPEN) push_back(stk, (uint32_t)q);
+        else if (kd == P_CLOSE && len(stk)) {
+            uint32_t o = back(stk);
+            pop_back(&stk);
+            if (at(pos, q) < at(pos, o)) {
+                double tw = at(*vr, o).w;
+                (*vr)[o].w = at(*vr, q).w;
+                (*vr)[q].w = tw;
+            }
+        }
+    }
+}
+
+/* an inline element on a bidi line: it, its pieces [k0, k1] there, its shift and offsets */
+typedef struct lay_ent { uint32_t el, k0, k1; float shift, rx, ry; } lay_ent;
+
+/* a text fragment of line ln: its text txt[0, n) in its piece p's style, at px on the line, rw
+   wide; its baseline the line's, shifted (a top- or bottom-aligned one's against the line box) */
+static void lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char *txt, size_t n, double px, double rw, double baseline, double height) {
+    amb_span sp = text_add(t, txt, n);
+    double pb = baseline + p->shift, above, below;
+    if (p->va == VA_TOP || p->va == VA_BOTTOM) {
+        lay_piece_vert(p, &above, &below);
+        pb = p->va == VA_TOP ? above : height - below;
+    }
+    layout_frag_h fh = frag_new(t);
+    uint32_t fr = fh.index;
+    /* a pseudo-element's content: generated, its element's */
+    t->frag[fr].kind = (p->node & LAY_GEN) ? LAYOUT_FRAG_KIND_GENERATED : LAYOUT_FRAG_KIND_TEXT;
+    t->frag[fr].node = node_handle(d, lay_dom(gx, p->node));
+    t->frag[fr].text = sp;
+    t->frag[fr].x = px + p->rx;
+    t->frag[fr].y = pb - p->asc + p->ry;
+    t->frag[fr].w = rw;
+    t->frag[fr].h = p->asc + p->desc;
+    t->frag[fr].baseline = pb + p->ry;
+    t->frag[fr].face = p->face;
+    if (p->font) t->frag[fr].font = resource_handle(nt, p->font);
+    t->frag[fr].spacing = p->ls;
+    t->frag[fr].word_spacing = p->wsp;
+    t->frag[fr].size = p->size;
+    t->frag[fr].italic = p->italic;
+    t->frag[fr].color = p->color;
+    t->frag[fr].decoration = p->deco;
+    if (p->elem) {
+        uint32_t ts = LAY_X(p->elem).tshadow;
+        if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
+    }
+    frags_append(t, ln, fr);
+}
+
+/* a visual run that is a whole piece: a collapsed space, or all of a word's or kept space's bytes */
+static int lay_vr_whole(const lay_vr *r, const lay_piece *p) {
+    return (p->kind == P_SPACE && !p->keep) || (r->o0 == p->off && r->o1 == p->off + p->len);
+}
+
+/* a bidi line's fragments, its runs vr in their visual order ord, each at its place shifted
+   right by shift: the inline elements' (a background, a positioned one's place), one for each
+   part of one side by side, the margins outside the edges its ends draw; its text runs, those
+   that go on in the text's order in one style merged (unless extra space justifies the line),
+   their collapsed spaces at either end drawn by none, a run at an odd level reversed and
+   mirrored; its atomic boxes placed; its positioned boxes' static places. open: the inline
+   elements open, kept as the other lines keep it */
+static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece> *ps, size_t a, size_t end, const vector<lay_vr> *vr,
+                           const vector<uint32_t> *ord, const vector<uint32_t> *atoms, const vector<double> *abase, vector<lay_open> *open,
+                           double x0, double y, double w, double shift, double extra, double baseline, double height) {
+    size_t nr = len(*vr);
+    vector<lay_ent> ents;
+    vector<uint32_t> estk;
+    for (size_t q = 0; q < len(*open); q++) {
+        lay_open o = at(*open, q);
+        lay_ent en;
+        en.el = o.el;
+        en.k0 = (uint32_t)a;
+        en.k1 = (uint32_t)end - 1;
+        en.shift = o.shift;
+        en.rx = o.rx;
+        en.ry = o.ry;
+        push_back(estk, (uint32_t)len(ents));
+        push_back(ents, en);
+    }
+    for (size_t k = a; k < end; k++) {
+        lay_piece p = at(*ps, k);
+        if (p.kind == P_OPEN) {
+            lay_ent en;
+            en.el = p.node;
+            en.k0 = (uint32_t)k;
+            en.k1 = (uint32_t)end - 1;
+            en.shift = p.shift;
+            en.rx = p.rx;
+            en.ry = p.ry;
+            push_back(estk, (uint32_t)len(ents));
+            push_back(ents, en);
+            lay_open o;
+            o.el = p.node;
+            o.shift = p.shift;
+            o.rx = p.rx;
+            o.ry = p.ry;
+            push_back(open, o);
+        } else if (p.kind == P_CLOSE && len(estk)) {
+            ents[back(estk)].k1 = (uint32_t)k;
+            pop_back(&estk);
+            if (len(*open)) pop_back(open);
+        }
+    }
+    for (size_t i = 0; i < len(ents); i++) {
+        lay_ent en = at(ents, i);
+        lay_style es;
+        lay_style_of(LARGS, en.el, &es);
+        if ((es.bg & 0xff) == 0 && LAY_X(en.el).pos == POS_STATIC) continue;
+        for (size_t q = 0; q < nr;) {
+            lay_vr r = at(*vr, at(*ord, q));
+            if (r.k < en.k0 || r.k > en.k1) { q++; continue; }
+            size_t e2 = q;
+            double ax0 = r.x, ax1 = r.x;
+            uint32_t kl = r.k, kr = r.k;
+            while (e2 < nr) {
+                lay_vr s = at(*vr, at(*ord, e2));
+                if (s.k < en.k0 || s.k > en.k1) break;
+                ax1 = s.x + s.w;
+                kr = s.k;
+                e2++;
+            }
+            lay_piece pl = at(*ps, kl), pr = at(*ps, kr);
+            if ((pl.kind == P_OPEN || pl.kind == P_CLOSE) && pl.node == en.el) ax0 += lay_res(st, es.m[3], w);
+            if ((pr.kind == P_OPEN || pr.kind == P_CLOSE) && pr.node == en.el) ax1 -= lay_res(st, es.m[1], w);
+            layout_frag_h fh = frag_new(t);
+            uint32_t fr = fh.index;
+            t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
+            t->frag[fr].node = node_handle(d, lay_dom(gx, en.el));
+            t->frag[fr].x = ax0 + shift + en.rx;
+            t->frag[fr].w = ax1 - ax0;
+            t->frag[fr].y = baseline + en.shift - es.asc - lay_res(st, es.p[0], w) - es.b[0] + en.ry;
+            t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
+            t->frag[fr].baseline = baseline;
+            t->frag[fr].background = es.bg;
+            frags_append(t, ln, fr);
+            q = e2;
+        }
+    }
+    /* each atomic piece's index in atoms (the line's order) */
+    vector<uint32_t> aidx;
+    resize(&aidx, end - a, 0u);
+    uint32_t na = 0;
+    for (size_t k = a; k < end; k++) if (at(*ps, k).kind == P_ATOMIC) aidx[k - a] = na++;
+    for (size_t q = 0; q < nr;) {
+        lay_vr r = at(*vr, at(*ord, q));
+        lay_piece p = at(*ps, r.k);
+        double px = r.x + shift;
+        if (p.kind == P_ATOMIC) {
+            uint32_t ab0 = at(*atoms, at(aidx, r.k - a));
+            double base = at(*abase, at(aidx, r.k - a));
+            double mh = t->box[ab0].mt + lay_border_height(t, ab0) + t->box[ab0].mb;
+            double top = baseline - base + p.shift;
+            if (p.va == VA_TOP) top = 0;
+            else if (p.va == VA_BOTTOM) top = height - mh;
+            lay_place(t, ab0, x0 + px + p.rx + t->box[ab0].ml, y + top + p.ry + t->box[ab0].mt);
+            layout_frag_h fh = frag_new(t);
+            uint32_t fr = fh.index;
+            t->frag[fr].kind = LAYOUT_FRAG_KIND_ATOMIC;
+            t->frag[fr].node = node_handle(d, lay_dom(gx, p.node));
+            t->frag[fr].atomic = ab0;
+            t->frag[fr].x = px + p.rx;
+            t->frag[fr].y = top + p.ry;
+            t->frag[fr].w = r.w;
+            t->frag[fr].h = mh;
+            t->frag[fr].baseline = baseline;
+            frags_append(t, ln, fr);
+            q++;
+            continue;
+        }
+        if (p.kind == P_ABS) {
+            lay_abs sa;
+            sa.el = p.node;
+            sa.box = b;
+            sa.x = x0 + px;
+            sa.y = y;
+            push_back(ab, sa);
+            q++;
+            continue;
+        }
+        if (p.kind != P_WORD && p.kind != P_SPACE) { q++; continue; }
+        size_t e2 = q + 1;
+        while (e2 < nr && extra == 0) {
+            lay_vr s = at(*vr, at(*ord, e2)), s0 = at(*vr, at(*ord, e2 - 1));
+            lay_piece p2 = at(*ps, s.k), p0 = at(*ps, s0.k);
+            if (s.lvl != r.lvl || (p2.kind != P_WORD && p2.kind != P_SPACE) || p2.node != p.node) break;
+            if (p2.size != p.size || p2.color != p.color || p2.face != p.face || p2.font != p.font || p2.deco != p.deco) break;
+            if (p2.shift != p.shift || p2.va != p.va || p2.rx != p.rx || p2.ry != p.ry) break;
+            if (!lay_vr_whole(&s, &p2) || !lay_vr_whole(&s0, &p0)) break;
+            if ((r.lvl & 1) ? s.k + 1 != s0.k : s0.k + 1 != s.k) break;
+            e2++;
+        }
+        size_t g0 = q, g1 = e2;
+        while (g0 < g1 && at(*ps, at(*vr, at(*ord, g0)).k).kind == P_SPACE && !at(*ps, at(*vr, at(*ord, g0)).k).keep) g0++;
+        while (g1 > g0 && at(*ps, at(*vr, at(*ord, g1 - 1)).k).kind == P_SPACE && !at(*ps, at(*vr, at(*ord, g1 - 1)).k).keep) g1--;
+        if (g0 < g1) {
+            lay_vr r0 = at(*vr, at(*ord, g0)), r1 = at(*vr, at(*ord, g1 - 1));
+            vector<char> lt, vt;
+            for (size_t z = 0; z < g1 - g0; z++) {
+                lay_vr s = at(*vr, at(*ord, (r.lvl & 1) ? g1 - 1 - z : g0 + z));
+                lay_piece p2 = at(*ps, s.k);
+                if (p2.kind == P_SPACE && !p2.keep) push_back(lt, ' ');
+                else lay_run_bytes(LARGS, &p2, s.o0, s.o1, &lt);
+            }
+            if (r.lvl & 1) lay_bidi_reverse(&lt, &vt);
+            else append_range(vt, data(lt), len(lt));
+            lay_piece pg = at(*ps, r0.k);
+            if (len(vt)) lay_text_frag(LARGS, ln, &pg, data(vt), len(vt), r0.x + shift, r1.x + r1.w - r0.x, baseline, height);
+        }
+        q = e2;
+    }
+}
+
+
+/* the rest of a bidi line (lay_line's, its pieces [a, end) measured, its atomic boxes laid
+   out, its extent above and below its baseline known): its visual runs, aligned (a collapsed
+   space with what justifying adds), the line, its fragments; its height */
+static double lay_bidi_finish(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t end, double x0, double w,
+                              double y, int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para,
+                              const vector<uint32_t> *atoms, const vector<double> *abase, double max_above, double max_below) {
+    vector<lay_vr> vr;
+    vector<uint32_t> ord;
+    lay_bidi_line(LARGS, ps, a, end, bu, para, &vr, &ord);
+    double line_w = indent;
+    int spaces = 0;
+    for (size_t q = 0; q < len(vr); q++) {
+        line_w += at(vr, q).w;
+        if (at(*ps, at(vr, q).k).kind == P_SPACE && !at(*ps, at(vr, q).k).keep) spaces++;
+    }
+    double free = w - line_w, shift = 0, extra = 0;
+    if (bs->align == AL_RIGHT && free > 0) shift = free;
+    else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
+    else if (bs->align == AL_JUSTIFY && justify_ok && free > 0 && spaces > 0) extra = free / spaces;
+    double baseline = max_above, height = max_above + max_below;
+    layout_line_h lh = line_new(t);
+    uint32_t ln = lh.index;
+    t->line[ln].x = x0;
+    t->line[ln].y = y;
+    t->line[ln].w = w;
+    t->line[ln].h = height;
+    t->line[ln].baseline = baseline;
+    lines_append(t, b, ln);
+    double vx = indent;
+    for (size_t q = 0; q < len(ord); q++) {
+        uint32_t i = at(ord, q);
+        lay_vr r = at(vr, i);
+        if (at(*ps, r.k).kind == P_SPACE && !at(*ps, r.k).keep) r.w += extra;
+        r.x = vx;
+        vx += r.w;
+        vr[i] = r;
+    }
+    lay_bidi_frags(LARGS, b, ln, ps, a, end, &vr, &ord, atoms, abase, open, x0, y, w, shift, extra, baseline, height);
+    return height;
+}
+
 /* one line of pieces [a, e) in box b at y, w wide; returns its height. open: the inline
-   elements open at its start, which it leaves as those open at its end */
+   elements open at its start, which it leaves as those open at its end. bu: its paragraph's
+   bidi units, at level para (empty: no bidi text in it) */
 static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t e, double x0, double w, double y,
-                       int justify_ok, double indent, vector<uint32_t> *open) {
+                       int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para) {
     /* trailing collapsible spaces hang: they take no width */
     size_t end = e;
     while (end > a && at(*ps, end - 1).kind == P_SPACE && !at(*ps, end - 1).keep) end--;
@@ -1609,51 +2543,12 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         }
         x += p.w;
     }
-    /* bidirectional text (UAX #9, by words): each piece's level -- a right-to-left word's 1,
-       a left-to-right one's 0 (2 in a right-to-left paragraph), the others' (spaces,
-       punctuation, boxes) their neighbours' when those agree, else the paragraph's, the
-       line's trailing spaces the paragraph's -- and the pieces placed in the order L2
-       gives them, each run of a level and above reversed, from the highest down */
-    int reordered = 0;
-    if (bs->rtl && end > a) {
-        size_t m = end - a;
-        vector<int> lv;
-        for (size_t k = a; k < end; k++) {
-            lay_piece p = at(*ps, k);
-            int v = -1;
-            if (p.kind == P_WORD) v = p.rtl ? 1 : (bs->rtl & 1 ? 2 : 0);
-            push_back(lv, v);
-        }
-        for (size_t q = 0; q < m;) {
-            if (at(lv, q) >= 0) { q++; continue; }
-            size_t e2 = q;
-            while (e2 < m && at(lv, e2) < 0) e2++;
-            int para = bs->rtl & 1;
-            int before = q > 0 ? at(lv, q - 1) % 2 : para, after = e2 < m ? at(lv, e2) % 2 : para;
-            int v = before == after ? (before ? 1 : (para ? 2 : 0)) : para;
-            if (e2 == m) v = para;
-            for (size_t z = q; z < e2; z++) lv[z] = v;
-            q = e2;
-        }
-        int maxl = 0;
-        for (size_t q = 0; q < m; q++) if (at(lv, q) > maxl) maxl = at(lv, q);
-        vector<uint32_t> ord;
-        for (size_t q = 0; q < m; q++) push_back(ord, (uint32_t)q);
-        for (int l = maxl; l >= 1; l--)
-            for (size_t q = 0; q < m;) {
-                if (at(lv, at(ord, q)) < l) { q++; continue; }
-                size_t e2 = q;
-                while (e2 < m && at(lv, at(ord, e2)) >= l) e2++;
-                for (size_t i0 = q, i1 = e2 - 1; i0 < i1; i0++, i1--) { uint32_t tmp = at(ord, i0); ord[i0] = at(ord, i1); ord[i1] = tmp; }
-                q = e2;
-            }
-        double vx = indent;
-        for (size_t q = 0; q < m; q++) { uint32_t kk = at(ord, q); xs[kk] = vx; vx += at(*ps, a + kk).w; }
-        reordered = maxl > 0;
-    }
     /* a top-aligned piece taller than the rest grows the line downward, a bottom-aligned one upward */
     if (top_h > max_above + max_below) max_below = top_h - max_above;
     if (bottom_h > max_above + max_below) max_above = bottom_h - max_below;
+    /* bidirectional text (UAX #9): the line's visual runs, in their order */
+    if (len(*bu) > 0 && end > a)
+        return lay_bidi_finish(LARGS, b, bs, ps, a, end, x0, w, y, justify_ok, indent, open, bu, para, &atoms, &abase, max_above, max_below);
     double line_w = x, free = w - line_w, shift = 0, extra = 0;
     if (bs->align == AL_RIGHT && free > 0) shift = free;
     else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
@@ -1667,10 +2562,12 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     t->line[ln].h = height;
     t->line[ln].baseline = baseline;
     lines_append(t, b, ln);
-    /* the inline elements' backgrounds, under the text: each open one from where it is
-       opened (or the line's start) to where it is closed (or the line's end) */
-    vector<double> starts;           /* for each open element, where it opens on this line (-1: before the line), and its baseline's shift */
-    for (size_t k = 0; k < len(*open); k++) { push_back(starts, -1.0); push_back(starts, 0.0); }
+    /* the inline elements' backgrounds, under the text, and a positioned one's place (which
+       makes the containing block of an absolutely positioned box in it): each open one from
+       where it is opened (or the line's start) to where it is closed (or the line's end),
+       shifted and offset as its pieces are */
+    vector<double> starts;           /* for each open element, where it opens on this line (-1: before the line) */
+    for (size_t k = 0; k < len(*open); k++) push_back(starts, -1.0);
     double gap = 0;
     for (size_t k = a; k < end; k++) {
         lay_piece p = at(*ps, k);
@@ -1685,17 +2582,24 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             sa.y = y;
             push_back(ab, sa);
         }
-        if (p.kind == P_OPEN) { push_back(open, p.node); push_back(starts, px); push_back(starts, (double)p.shift); }
+        if (p.kind == P_OPEN) {
+            lay_open o;
+            o.el = p.node;
+            o.shift = p.shift;
+            o.rx = p.rx;
+            o.ry = p.ry;
+            push_back(open, o);
+            push_back(starts, px);
+        }
         if (p.kind == P_CLOSE && len(*open)) {
             /* its background, from its start on this line (or the line's start) to here */
-            pop_back(&starts);
             double from = back(starts);
-            uint32_t elx = back(*open);
-            pop_back(open);
             pop_back(&starts);
+            uint32_t elx = back(*open).el;
+            pop_back(open);
             lay_style es;
             lay_style_of(LARGS, elx, &es);
-            if ((es.bg & 0xff) != 0) {
+            if ((es.bg & 0xff) != 0 || LAY_X(elx).pos != POS_STATIC) {
                 double x0b = from < 0 ? 0 : from;
                 layout_frag_h fh = frag_new(t);
                 uint32_t fr = fh.index;
@@ -1713,19 +2617,21 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     }
     /* the inline elements still open at the line's end: their backgrounds to the end */
     for (size_t k = 0; k < len(*open); k++) {
-        uint32_t elx = at(*open, k);
+        lay_open o = at(*open, k);
+        uint32_t elx = o.el;
         lay_style es;
         lay_style_of(LARGS, elx, &es);
-        if ((es.bg & 0xff) == 0) continue;
-        double from = at(starts, 2 * k);
+        if ((es.bg & 0xff) == 0 && LAY_X(elx).pos == POS_STATIC) continue;
+        double from = at(starts, k);
         double x0b = from < 0 ? 0 : from + lay_res(st, es.m[3], w);
+        double sh = o.shift, orx = o.rx, ory = o.ry;
         layout_frag_h fh = frag_new(t);
         uint32_t fr = fh.index;
         t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
         t->frag[fr].node = node_handle(d, lay_dom(gx, elx));
-        t->frag[fr].x = x0b;
+        t->frag[fr].x = x0b + orx;
         t->frag[fr].w = line_w + shift + gap - x0b;
-        t->frag[fr].y = baseline + at(starts, 2 * k + 1) - es.asc - lay_res(st, es.p[0], w) - es.b[0];
+        t->frag[fr].y = baseline + sh - es.asc - lay_res(st, es.p[0], w) - es.b[0] + ory;
         t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
         t->frag[fr].baseline = baseline;
         t->frag[fr].background = es.bg;
@@ -1769,7 +2675,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         /* a run: this text node's words and spaces that follow, on this line, in one style */
         size_t r = k + 1;
         double rw = p.w;
-        while (r < end && extra == 0 && !reordered) {
+        while (r < end && extra == 0) {
             lay_piece q = at(*ps, r);
             if ((q.kind != P_WORD && q.kind != P_SPACE) || q.node != p.node) break;
             if (q.size != p.size || q.color != p.color || q.face != p.face || q.font != p.font || q.deco != p.deco) break;
@@ -2181,22 +3087,44 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
        out in the pseudo-element's style (its strut too), the rest as they were */
     lay_style fls, bs1 = bs;
     vector<lay_piece> rest;
-    int has_fl = 0;
+    int has_fl = 0, want_fl = 0;
     if (first == 0 && !(container & LAY_GEN) && container < len(*sx) && (at(*sx, container) & LAY_HAS_OTHER)) {
         int64_t gl = lay_gen_find(gx, container, CSS_PSEUDO_FIRST_LETTER);
         if (gl >= 0) lay_first_letter(LARGS, &ps, (uint32_t)gl, w);
-        if (lay_pseudo_style(LARGS, container, CSS_PSEUDO_FIRST_LINE, &fls)) {
-            has_fl = 1;
-            append_range(rest, data(ps), len(ps));
-            lay_first_line_pieces(LARGS, &ps, &bs, &fls);
-            bs1.lh = fls.lh;
-            bs1.asc = fls.asc;
-            bs1.desc = fls.desc;
-        }
+        want_fl = lay_pseudo_style(LARGS, container, CSS_PSEUDO_FIRST_LINE, &fls);
     }
-    /* bidirectional text to reorder: the paragraph's direction (1), right-to-left words (2) */
-    for (size_t q = 0; q < len(ps) && !(bs.rtl & 2); q++) if (at(ps, q).rtl) { bs.rtl |= 2; bs1.rtl |= 2; }
-    vector<uint32_t> open;
+    /* bidirectional text (UAX #9), when the paragraph is right to left, a word asks for it
+       (lay_bidi_hot), or an inline element embeds, isolates or overrides right to left: the
+       paragraph's units and levels; its level its direction's, or (unicode-bidi: plaintext,
+       dir=auto) its first strong character's, start and end then aligned by it */
+    vector<lay_bu> bu;
+    int para = bs.rtl, needs = bs.rtl;
+    for (size_t q = 0; q < len(ps) && !needs; q++) {
+        lay_piece p = at(ps, q);
+        if (p.rtl || (p.kind == P_OPEN && LAY_X(p.node).ubidi && LAY_X(p.node).rtl)) needs = 1;
+    }
+    if (needs) {
+        lay_bidi_units(LARGS, &ps, &bu);
+        if (LAY_X(container).ubidi == UB_PLAINTEXT || lay_dir_auto(d, container)) {
+            int fs = lay_bidi_first_strong(&bu, 0, 0);
+            if (fs >= 0 && fs != para) {
+                para = fs;
+                int as = LAY_X(container).astart;
+                if (as) bs.align = (as == 1) == (para == 1) ? AL_RIGHT : AL_LEFT;
+                bs1.align = bs.align;
+            }
+        }
+        lay_bidi_resolve(&bu, para);
+    }
+    if (want_fl) {
+        has_fl = 1;
+        append_range(rest, data(ps), len(ps));
+        lay_first_line_pieces(LARGS, &ps, &bs, &fls);
+        bs1.lh = fls.lh;
+        bs1.asc = fls.asc;
+        bs1.desc = fls.desc;
+    }
+    vector<lay_open> open;
     vector<uint32_t> later;           /* floats too wide for the line they are met on: placed below it */
     size_t i = 0, np = len(ps);
     double y = 0;
@@ -2280,8 +3208,8 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open);
-        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open);
+        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
+        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
         indent = 0;
         i = j;
         /* the floats that waited for the line's end */
@@ -3294,6 +4222,7 @@ typedef struct lay_fi {
     uint32_t el, first, n, idx, box;
     int32_t order;
     double base, hypo, mn, mx, size, cross, grow, shrink, mm0, mm1, cm0, cm1;
+    double above;                       /* aligned on a baseline: from its margin box's cross start to it */
     int frozen, auto_m0, auto_m1, auto_c0, auto_c1, align, cross_auto;
 } lay_fi;
 
@@ -3552,18 +4481,41 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
         }
         its[q] = it;
     }
-    /* each line's cross size: its tallest item's (the container's, a single line's when definite) */
-    vector<double> lcross, lpos;
+    /* each line's cross size (9.4, 8): its tallest item's; in a row, the items aligned on
+       their first baselines as tall as the most any rises above that baseline and the most any
+       falls below it (on their last ones likewise); the container's, a single line's when
+       definite. Per line: those first baselines' rise (lup) and the last ones' fall (ldn); in a
+       column, the widest item aligned on its last baseline (which a column has none of: the
+       items share an edge at the end) */
+    vector<double> lcross, lpos, lup, ldn;
     double cross_total = 0;
     double cross_avail = row ? defh : W;
     for (size_t l = 0; l < nl; l++) {
-        double c = 0;
+        double c = 0, up0 = -1e30, dn0 = -1e30, up1 = -1e30, dn1 = -1e30;
         for (size_t q = at(lstart, l); q < at(lstart, l + 1); q++) {
-            double o = at(its, q).cross + at(its, q).cm0 + at(its, q).cm1;
+            lay_fi it = at(its, q);
+            double o = it.cross + it.cm0 + it.cm1;
+            if ((it.align == AJ_BASELINE || it.align == AJ_LBASE) && !it.auto_c0 && !it.auto_c1) {
+                if (!row) { if (it.align == AJ_LBASE && o > dn1) dn1 = o; if (o > c) c = o; continue; }
+                int last = it.align == AJ_LBASE;
+                double rise, yb;
+                if (last ? lay_last_baseline(t, it.box, &yb, 0) : lay_first_baseline(t, it.box, &yb, 0))
+                    rise = it.cm0 + t->box[it.box].bt + t->box[it.box].pt + yb;
+                else rise = it.cm0 + it.cross;
+                it.above = rise;
+                its[q] = it;
+                if (last) { if (rise > up1) up1 = rise; if (o - rise > dn1) dn1 = o - rise; }
+                else { if (rise > up0) up0 = rise; if (o - rise > dn0) dn0 = o - rise; }
+                continue;
+            }
             if (o > c) c = o;
         }
+        if (up0 > -1e29 && up0 + dn0 > c) c = up0 + dn0;
+        if (up1 > -1e29 && up1 + dn1 > c) c = up1 + dn1;
         if (nl == 1 && !e.fwrap && cross_avail >= 0) c = cross_avail;
         push_back(lcross, c);
+        push_back(lup, up0);
+        push_back(ldn, dn1);
         cross_total += c + (l > 0 ? gap_cross : 0);
     }
     /* align-content: the lines in the container's cross size, when it has one */
@@ -3631,6 +4583,8 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
             else if (it.auto_c1) cp = c0;
             else if (it.align == AJ_END) cp = c0 + cfree;
             else if (it.align == AJ_CENTER) cp = c0 + cfree / 2;
+            else if (it.align == AJ_BASELINE && row) cp = c0 + at(lup, l) - it.above;
+            else if (it.align == AJ_LBASE) cp = c0 + (row ? lc - at(ldn, l) - it.above : lc - at(ldn, l));
             cp += at(lpos, l);
             if (row) lay_place(t, it.box, mp, cp);
             else lay_place(t, it.box, cp, mp);
@@ -3639,17 +4593,42 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
     }
     if (defh < 0) t->box[b].h = row ? (cy > 0 ? cy - gap_cross - lbetween : 0) : main_size;
     if (row && defh < 0 && t->box[b].h < 0) t->box[b].h = 0;
+    /* the container's first baseline (8.5): that of its first line's items aligned on their
+       first baselines; else its first item's, the bottom of its border box when it has none */
+    if (ni) {
+        double fb, yb;
+        uint32_t ib = at(its, 0).box;
+        if (row && at(lup, 0) > -1e29) fb = at(lpos, 0) + at(lup, 0);
+        else if (lay_first_baseline(t, ib, &yb, 0)) fb = t->box[ib].y + yb;
+        else fb = t->box[ib].y - t->box[ib].pt - t->box[ib].bt + lay_border_height(t, ib);
+        t->box[b].baseline = fb;
+        t->box[b].has_baseline = 1;
+    }
 }
 
-/* ---- grid containers (CSS Grid 1, 11, simplified) ---- */
+/* ---- grid containers (CSS Grid 1, 7 to 11) ---- */
 
 /* a track's sizing: its min and its max (fixed px, auto, min-content, max-content, fr,
-   fit-content's limit), its base size and growth limit, its place */
+   fit-content's limit), its base size and growth limit (LAY_INF while it has none), whether
+   that limit may still grow past what an item gave it (11.5's infinitely growable), the
+   increase a step of 11.5 plans for it, its place; pct: a percentage read as auto, the
+   grid's size not definite (its value, -1 for none) */
 enum { TK_FIXED, TK_AUTO, TK_MINC, TK_MAXC, TK_FR, TK_FIT };
-typedef struct lay_track { int mink, maxk; double minv, maxv, base, limit, pos; } lay_track;
+#define LAY_INF 1e30
+typedef struct lay_track { int mink, maxk, grows, touched; double minv, maxv, base, limit, pos, plan, pct; } lay_track;
 
-/* one track size as written (px, %, fr, auto, min-content, max-content): its kind and value */
-static int lay_track_one(const char *s, size_t n, double avail, int *kind, double *v) {
+/* a line's name (its hash) and the line it names, 1 the first line of its list */
+typedef struct lay_lname { uint64_t h; int32_t line; } lay_lname;
+
+/* the hash lay_hash gives a text that goes on from one whose hash is h with s[0, n) */
+static uint64_t lay_hash_cont(uint64_t h, const char *s, size_t n) {
+    for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+/* one track size as written (px, %, fr, auto, min-content, max-content): its kind and value;
+   a percentage of an avail that is not definite auto, its value in *pct */
+static int lay_track_one(const char *s, size_t n, double avail, int *kind, double *v, double *pct) {
     *v = 0;
     if (lay_is_word(s, n, "auto")) { *kind = TK_AUTO; return 1; }
     if (lay_is_word(s, n, "min-content")) { *kind = TK_MINC; return 1; }
@@ -3663,7 +4642,7 @@ static int lay_track_one(const char *s, size_t n, double avail, int *kind, doubl
     if (end == buf) return 0;
     if (strcmp(end, "fr") == 0) { *kind = TK_FR; *v = x; return 1; }
     if (strcmp(end, "%") == 0) {
-        if (avail < 0) { *kind = TK_AUTO; return 1; }
+        if (avail < 0) { *kind = TK_AUTO; *pct = x; return 1; }
         *kind = TK_FIXED;
         *v = avail * x / 100;
         return 1;
@@ -3673,22 +4652,47 @@ static int lay_track_one(const char *s, size_t n, double avail, int *kind, doubl
     return 1;
 }
 
-/* a track list (grid-template-columns' or -rows' computed text) into out: repeat() (a
-   count, auto-fill, auto-fit), minmax(), fit-content(); line names passed over */
-static void lay_tracks(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, int depth) {
+/* the names of a bracketed list, its inside s[0, n), each naming line */
+static void lay_line_names(const char *s, size_t n, int32_t line, vector<lay_lname> *names) {
+    size_t i = 0;
+    while (i < n) {
+        while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n')) i++;
+        size_t b = i;
+        while (i < n && s[i] != ' ' && s[i] != '\t' && s[i] != '\n') i++;
+        if (i == b) continue;
+        lay_lname x;
+        x.h = lay_hash(s + b, i - b);
+        x.line = line;
+        push_back(names, x);
+    }
+}
+
+/* a track list (grid-template-columns' or -rows' computed text) into out, and its lines'
+   names into names (a list's names name the line before the track after them):
+   repeat() (a count, auto-fill, auto-fit; its names repeated too), minmax(), fit-content() */
+static void lay_tracks(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, vector<lay_lname> *names, int depth) {
     size_t i = 0, a, ln, fa, fn;
     while (css_next_part(s, n, &i, &a, &ln)) {
         const char *p = s + a;
-        if (p[0] == '[') continue;
+        if (p[0] == '[') {
+            size_t e = a + 1;
+            while (e < n && s[e] != ']') e++;
+            lay_line_names(s + a + 1, e - a - 1, (int32_t)len(*out) + 1, names);
+            i = e < n ? e + 1 : n;
+            continue;
+        }
         lay_track tk;
         memset(&tk, 0, sizeof tk);
+        tk.pct = -1;
+        double unused = -1;
         if (lay_call(p, ln, "repeat", &fa, &fn) && depth < 2) {
             size_t j = 0, ca, cn, la, lnn;
             if (!lay_arg(p + fa, fn, &j, &ca, &cn) || !lay_arg(p + fa, fn, &j, &la, &lnn)) continue;
             /* the rest of the arguments: the tracks repeated */
             lnn = fn - la;
             vector<lay_track> one;
-            lay_tracks(p + fa + la, lnn, avail, gap, &one, depth + 1);
+            vector<lay_lname> onames;
+            lay_tracks(p + fa + la, lnn, avail, gap, &one, &onames, depth + 1);
             if (!len(one)) continue;
             long count = 0;
             if (lay_is_word(p + fa + ca, cn, "auto-fill") || lay_is_word(p + fa + ca, cn, "auto-fit")) {
@@ -3705,13 +4709,17 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
                 for (size_t q = 0; q < cn; q++) if (p[fa + ca + q] >= '0' && p[fa + ca + q] <= '9') count = count * 10 + (p[fa + ca + q] - '0');
             }
             if (count > 1000) count = 1000;
-            for (long c = 0; c < count; c++) for (size_t q = 0; q < len(one); q++) push_back(out, at(one, q));
+            for (long c = 0; c < count; c++) {
+                int32_t base = (int32_t)len(*out);
+                for (size_t q = 0; q < len(onames); q++) { lay_lname x = at(onames, q); x.line += base; push_back(names, x); }
+                for (size_t q = 0; q < len(one); q++) push_back(out, at(one, q));
+            }
             continue;
         }
         if (lay_call(p, ln, "minmax", &fa, &fn)) {
             size_t j = 0, xa, xn, ya, yn;
             if (!lay_arg(p + fa, fn, &j, &xa, &xn) || !lay_arg(p + fa, fn, &j, &ya, &yn)) continue;
-            if (!lay_track_one(p + fa + xa, xn, avail, &tk.mink, &tk.minv) || !lay_track_one(p + fa + ya, yn, avail, &tk.maxk, &tk.maxv)) continue;
+            if (!lay_track_one(p + fa + xa, xn, avail, &tk.mink, &tk.minv, &unused) || !lay_track_one(p + fa + ya, yn, avail, &tk.maxk, &tk.maxv, &unused)) continue;
             if (tk.mink == TK_FR) tk.mink = TK_AUTO;
             push_back(out, tk);
             continue;
@@ -3719,7 +4727,7 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
         if (lay_call(p, ln, "fit-content", &fa, &fn)) {
             int kk;
             double v;
-            if (!lay_track_one(p + fa, fn, avail, &kk, &v)) continue;
+            if (!lay_track_one(p + fa, fn, avail, &kk, &v, &unused)) continue;
             tk.mink = TK_AUTO;
             tk.maxk = TK_FIT;
             tk.maxv = v;
@@ -3728,7 +4736,7 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
         }
         int kk;
         double v;
-        if (!lay_track_one(p, ln, avail, &kk, &v)) continue;
+        if (!lay_track_one(p, ln, avail, &kk, &v, &tk.pct)) continue;
         tk.mink = kk == TK_FR ? TK_AUTO : kk;
         tk.minv = v;
         tk.maxk = kk;
@@ -3737,108 +4745,475 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
     }
 }
 
-/* a grid line as written (grid-column-start's computed text): a number (from the end when
-   negative), span n, or auto (0) */
-static void lay_grid_line(const css_style *st, uint32_t c, long *line, long *span) {
-    *line = 0;
-    *span = 0;
+/* a named area of grid-template-areas: its name's hash, its -start and -end lines' names'
+   hashes, its rows [r0, r1) and columns [c0, c1) */
+typedef struct lay_area { uint64_t h, hs, he; uint32_t r0, r1, c0, c1; } lay_area;
+
+/* grid-template-areas' strings s[0, n) (the cascade has checked them) into areas, and the
+   rows and columns they make */
+static void lay_areas(const char *s, size_t n, vector<lay_area> *areas, uint32_t *rows, uint32_t *cols) {
+    size_t i = 0, a, ln;
+    *rows = 0;
+    *cols = 0;
+    while (css_next_part(s, n, &i, &a, &ln)) {
+        const char *q = s + a;
+        if (ln < 2 || (q[0] != '"' && q[0] != '\'')) continue;
+        uint32_t c = 0;
+        size_t k = 1;
+        while (k + 1 < ln) {
+            char ch = q[k];
+            if (ch == ' ' || ch == '\t' || ch == '\n') { k++; continue; }
+            size_t b = k;
+            if (ch == '.') { while (k + 1 < ln && q[k] == '.') k++; c++; continue; }
+            while (k + 1 < ln && q[k] != ' ' && q[k] != '\t' && q[k] != '\n' && q[k] != '.') k++;
+            uint64_t h = lay_hash(q + b, k - b);
+            size_t z = 0;
+            while (z < len(*areas) && at(*areas, z).h != h) z++;
+            if (z == len(*areas)) {
+                lay_area ar;
+                ar.h = h;
+                ar.hs = lay_hash_cont(h, "-start", 6);
+                ar.he = lay_hash_cont(h, "-end", 4);
+                ar.r0 = *rows;
+                ar.r1 = *rows + 1;
+                ar.c0 = c;
+                ar.c1 = c + 1;
+                push_back(areas, ar);
+            } else {
+                lay_area ar = at(*areas, z);
+                if (*rows + 1 > ar.r1) ar.r1 = *rows + 1;
+                if (c + 1 > ar.c1) ar.c1 = c + 1;
+                (*areas)[z] = ar;
+            }
+            c++;
+        }
+        if (c > *cols) *cols = c;
+        (*rows)++;
+    }
+}
+
+/* a grid line as written (grid-column-start's computed text, Grid 1, 8.3): auto; a number
+   (from the end when negative), with a name the nth line of that name; span and a count, or
+   a name; a name alone (an area's -start or -end line, else the first line of the name) */
+enum { GL_AUTO, GL_LINE, GL_SPAN, GL_NAME };
+typedef struct lay_gl { int kind, named; long n; uint64_t h, hs, he; } lay_gl;
+
+static void lay_grid_line(const css_style *st, uint32_t c, lay_gl *g) {
+    memset(g, 0, sizeof *g);
     vector<char> src;
     amb_span sp = st->cval[c].text;
     append_range(src, text_ptr(st, sp), sp.len);
     size_t i = 0, a, n;
-    int is_span = 0;
+    int is_span = 0, digits = 0;
+    long v = 0;
     while (css_next_part(data(src), len(src), &i, &a, &n)) {
-        if (lay_is_word(data(src) + a, n, "span")) { is_span = 1; continue; }
-        long v = 0;
-        int neg = 0, digits = 0;
-        for (size_t q = a; q < a + n; q++) {
-            char ch = data(src)[q];
-            if (ch == '-') neg = 1;
-            else if (ch >= '0' && ch <= '9') { v = v * 10 + (ch - '0'); digits = 1; }
+        const char *p = data(src) + a;
+        if (lay_is_word(p, n, "span")) { is_span = 1; continue; }
+        if (lay_is_word(p, n, "auto")) continue;
+        int sign = p[0] == '-' || p[0] == '+';
+        if ((p[0] >= '0' && p[0] <= '9') || (sign && n > 1 && p[1] >= '0' && p[1] <= '9')) {
+            long x = 0;
+            for (size_t q = sign ? 1 : 0; q < n && p[q] >= '0' && p[q] <= '9'; q++) if (x < 100000) x = x * 10 + (p[q] - '0');
+            v = p[0] == '-' ? -x : x;
+            digits = 1;
+            continue;
         }
-        if (!digits) continue;
-        if (is_span) *span = v;
-        else *line = neg ? -v : v;
+        g->named = 1;
+        g->h = lay_hash(p, n);
+        g->hs = lay_hash_cont(g->h, "-start", 6);
+        g->he = lay_hash_cont(g->h, "-end", 4);
     }
-    if (is_span && *span < 1) *span = 1;
+    if (is_span) { g->kind = GL_SPAN; g->n = digits && v > 0 ? v : 1; return; }
+    if (digits && v != 0) { g->kind = GL_LINE; g->n = v; return; }
+    g->kind = g->named ? GL_NAME : GL_AUTO;
 }
 
-/* an item's area: its first column and span, its first row and span */
-typedef struct lay_ga { uint32_t c0, cs, r0, rs; } lay_ga;
+/* line l has the name h */
+static int lay_named(const vector<lay_lname> *nm, uint64_t h, long l) {
+    for (size_t k = 0; k < len(*nm); k++) if (at(*nm, k).h == h && at(*nm, k).line == l) return 1;
+    return 0;
+}
+/* the nth line of the name h among the explicit grid's lines 1 to L (from its start when
+   n > 0, from its end when n < 0), the implicit lines past them taken to have every name */
+static long lay_nth_named(const vector<lay_lname> *nm, uint64_t h, long n, long L) {
+    long k = 0;
+    if (n > 0) {
+        for (long l = 1; l <= L; l++) if (lay_named(nm, h, l) && ++k == n) return l;
+        return L + (n - k);
+    }
+    for (long l = L; l >= 1; l--) if (lay_named(nm, h, l) && ++k == -n) return l;
+    return 1 - (-n - k);
+}
+/* the line a span reaches from line `from`, ahead (dir 1) or back (-1): its count of lines,
+   or of lines of its name, the implicit lines taken to have the name */
+static long lay_span_to(const vector<lay_lname> *nm, const lay_gl *g, long from, int dir, long L) {
+    if (!g->named) return from + dir * g->n;
+    long k = 0;
+    if (dir > 0) {
+        for (long l = from + 1; l <= L; l++) if (lay_named(nm, g->h, l) && ++k == g->n) return l;
+        return (from > L ? from : L) + (g->n - k);
+    }
+    for (long l = from - 1; l >= 1; l--) if (lay_named(nm, g->h, l) && ++k == g->n) return l;
+    return (from < 1 ? from : 1) - (g->n - k);
+}
+/* the line a start line (end 0) or an end line (end 1) as written names */
+static long lay_line_at(const vector<lay_lname> *nm, const lay_gl *g, int end, long L) {
+    if (g->kind == GL_NAME) {
+        uint64_t hx = end ? g->he : g->hs;
+        for (long l = 1; l <= L; l++) if (lay_named(nm, hx, l)) return l;
+        return lay_nth_named(nm, g->h, 1, L);
+    }
+    if (g->named) return lay_nth_named(nm, g->h, g->n, L);
+    return g->n > 0 ? g->n : L + 1 + g->n;
+}
+/* an item's place along an axis (Grid 1, 8.3, its conflicts handled as 8.3.1 has them): its
+   first line and its span, the explicit grid's lines numbered 1 to L; 0 when it has no
+   definite line on the axis, its span alone found */
+static int lay_place_axis(const vector<lay_lname> *nm, const lay_gl *s0, const lay_gl *e0, long L, long *start, long *span) {
+    lay_gl s = *s0, e = *e0;
+    if (s.kind == GL_SPAN && e.kind == GL_SPAN) e.kind = GL_AUTO;
+    int sl = s.kind == GL_LINE || s.kind == GL_NAME, el = e.kind == GL_LINE || e.kind == GL_NAME;
+    if (!sl && !el) {
+        long k = s.kind == GL_SPAN ? (s.named ? 1 : s.n) : e.kind == GL_SPAN ? (e.named ? 1 : e.n) : 1;
+        *span = k < 1 ? 1 : k > 1000 ? 1000 : k;
+        return 0;
+    }
+    long a = sl ? lay_line_at(nm, &s, 0, L) : 0, z = el ? lay_line_at(nm, &e, 1, L) : 0;
+    if (sl && el) {
+        if (a > z) { long x = a; a = z; z = x; }
+        if (a == z) z = a + 1;
+    } else if (sl) z = e.kind == GL_SPAN ? lay_span_to(nm, &e, a, 1, L) : a + 1;
+    else a = s.kind == GL_SPAN ? lay_span_to(nm, &s, z, -1, L) : z - 1;
+    if (a < -1000) a = -1000;
+    if (z > 2000) z = 2000;
+    if (z <= a) z = a + 1;
+    *start = a;
+    *span = z - a;
+    return 1;
+}
 
-/* the tracks' sizes (11.4-11.7, simplified): their base sizes from the content of the
-   items that span one track, then up to their growth limits in the free space, the fr
-   tracks sharing what is left, the auto ones stretched when nothing else takes it */
-static void lay_size_tracks(vector<lay_track> *tr, const vector<double> *cmin, const vector<double> *cmax, double avail, double gap, int stretch) {
+/* an item's contributions to the tracks it spans along an axis: its first track and span,
+   its min-content and max-content contributions and its minimum contribution (outer sizes) */
+typedef struct lay_gc { uint32_t first, span; double mn, mx, minc; } lay_gc;
+
+static int lay_tk_imin(lay_track k) { return k.mink == TK_AUTO || k.mink == TK_MINC || k.mink == TK_MAXC; }
+static int lay_tk_imax(lay_track k) { return k.maxk == TK_AUTO || k.maxk == TK_MINC || k.maxk == TK_MAXC || k.maxk == TK_FIT; }
+static int lay_tk_maxc(lay_track k) { return k.maxk == TK_AUTO || k.maxk == TK_MAXC || k.maxk == TK_FIT; }
+
+/* space shared among tracks (inc[k] what track k gets, room[k] how much more it may take,
+   w[k] its weight, open[k] whether it takes any): equally by weight, a track that reaches
+   its room taking no more; what is left of the space */
+static double lay_fill(vector<double> *inc, const vector<double> *room, const vector<double> *w, const vector<uint8_t> *open, double space) {
+    size_t n = len(*inc);
+    for (int round = 0; round < 64 && space > 1e-9; round++) {
+        double sw = 0, step = -1;
+        for (size_t k = 0; k < n; k++) {
+            if (!at(*open, k) || at(*inc, k) >= at(*room, k) - 1e-9) continue;
+            sw += at(*w, k);
+            double s = (at(*room, k) - at(*inc, k)) / at(*w, k);
+            if (step < 0 || s < step) step = s;
+        }
+        if (sw <= 0) break;
+        double per = space / sw;
+        if (step >= per) step = per;
+        for (size_t k = 0; k < n; k++) {
+            if (!at(*open, k) || at(*inc, k) >= at(*room, k) - 1e-9) continue;
+            (*inc)[k] = at(*inc, k) + step * at(*w, k);
+        }
+        space -= step * sw;
+    }
+    return space > 0 ? space : 0;
+}
+
+/* a step of 11.5.3 for a group of items (gc's, each an index in group): the space each
+   item's contribution (step 1: its minimum one; 2, 5: its min-content one; 3, 6: its
+   max-content one) needs past the sizes of the tracks it spans (the base sizes in steps
+   1 to 3, the growth limits in 5 and 6), shared among those of its tracks the step affects
+   up to their limits, then past them (11.5.1); each track's size then grows by the most
+   an item asked of it. flex: the flexible tracks alone take space, by their factors (11.5.4) */
+static void lay_spread(vector<lay_track> *tr, const vector<lay_gc> *gc, const vector<uint32_t> *group, double gap, int step, int flex) {
     size_t n = len(*tr);
-    double total = gap * (double)(n > 0 ? n - 1 : 0), frs = 0;
+    int on_limit = step >= 5;
+    for (size_t q = 0; q < n; q++) { (*tr)[q].plan = 0; (*tr)[q].touched = 0; }
+    for (size_t g = 0; g < len(*group); g++) {
+        lay_gc c = at(*gc, at(*group, g));
+        double want = step == 1 ? c.minc : (step == 2 || step == 5) ? c.mn : c.mx;
+        double have = gap * (double)(c.span - 1);
+        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
+        vector<double> inc, room, w;
+        vector<uint8_t> aff, beyond;
+        int naff = 0, nbeyond = 0;
+        double frs = 0;
+        for (uint32_t k = c.first; k < z; k++) {
+            lay_track tk = at(*tr, k);
+            have += on_limit && tk.limit < LAY_INF ? tk.limit : tk.base;
+            int a;
+            if (flex && tk.maxk != TK_FR) a = 0;
+            else if (step == 1) a = lay_tk_imin(tk);
+            else if (step == 2) a = tk.mink == TK_MINC || tk.mink == TK_MAXC;
+            else if (step == 3) a = tk.mink == TK_MAXC;
+            else if (step == 5) a = lay_tk_imax(tk);
+            else a = lay_tk_maxc(tk);
+            /* how far it grows before it meets its limit: a base size its growth limit (a
+               fit-content track's argument too), a growth limit none past a finite one */
+            double r = 0;
+            if (!on_limit) {
+                r = (tk.limit >= LAY_INF ? LAY_INF : tk.limit) - tk.base;
+                if (tk.maxk == TK_FIT && tk.maxv - tk.base < r) r = tk.maxv - tk.base;
+            } else {
+                r = tk.limit >= LAY_INF || tk.grows ? LAY_INF : 0;
+                /* step 6 grows a fit-content track's limit no further than its argument */
+                if (step == 6 && tk.maxk == TK_FIT) {
+                    double cap = tk.maxv - (tk.limit < LAY_INF ? tk.limit : tk.base);
+                    if (cap < r) r = cap;
+                }
+            }
+            if (r < 0) r = 0;
+            /* past the limits: a track whose max is intrinsic (steps 1, 2), max-content (3), any (5, 6) */
+            int bz = !a ? 0 : step <= 2 ? lay_tk_imax(tk) : step == 3 ? lay_tk_maxc(tk) : 1;
+            push_back(inc, 0.0);
+            push_back(room, r);
+            push_back(w, flex ? tk.maxv : 1.0);
+            push_back(aff, (uint8_t)a);
+            push_back(beyond, (uint8_t)bz);
+            naff += a;
+            nbeyond += bz;
+            if (flex && a) frs += tk.maxv;
+            if (a) (*tr)[k].touched = 1;
+        }
+        double space = want - have;
+        if (space <= 0 || !naff) continue;
+        if (flex && frs < 1) for (size_t k = 0; k < len(w); k++) w[k] = 1.0;
+        space = lay_fill(&inc, &room, &w, &aff, space);
+        if (space > 1e-9) {
+            /* past the limits: to the tracks of the step's kind (a fit-content track up to
+               its argument), else to every affected track */
+            vector<double> past;
+            for (size_t k = 0; k < len(room); k++) {
+                lay_track tk = at(*tr, c.first + (uint32_t)k);
+                double r = LAY_INF;
+                if ((step == 3 || step == 6) && tk.maxk == TK_FIT) {
+                    r = tk.maxv - (on_limit && tk.limit < LAY_INF ? tk.limit : tk.base);
+                    if (r < at(inc, k)) r = at(inc, k);
+                }
+                push_back(past, r);
+            }
+            if (nbeyond) space = lay_fill(&inc, &past, &w, &beyond, space);
+            if (space > 1e-9) {
+                /* then to every affected track (a fit-content track's limit, in step 6, still
+                   held at its argument) */
+                for (size_t k = 0; k < len(past); k++)
+                    if (!(step == 6 && at(*tr, c.first + (uint32_t)k).maxk == TK_FIT)) past[k] = LAY_INF;
+                lay_fill(&inc, &past, &w, &aff, space);
+            }
+        }
+        for (size_t k = 0; k < len(inc); k++) {
+            uint32_t tq = c.first + (uint32_t)k;
+            if (at(aff, k) && at(inc, k) > at(*tr, tq).plan) (*tr)[tq].plan = at(inc, k);
+        }
+    }
     for (size_t q = 0; q < n; q++) {
         lay_track tk = at(*tr, q);
-        double mn = at(*cmin, q), mx = at(*cmax, q);
-        tk.base = tk.mink == TK_FIXED ? tk.minv : tk.mink == TK_MAXC ? mx : tk.mink == TK_MINC || tk.mink == TK_AUTO ? mn : 0;
-        tk.limit = tk.maxk == TK_FIXED ? tk.maxv : tk.maxk == TK_MINC ? mn : tk.maxk == TK_FIT ? (mx < tk.maxv ? mx : tk.maxv) : tk.maxk == TK_FR ? tk.base : mx;
-        if (tk.maxk == TK_FIT && tk.limit < mn) tk.limit = mn;
-        if (tk.limit < tk.base) tk.limit = tk.base;
-        if (tk.maxk == TK_FR) frs += tk.maxv;
-        total += tk.base;
+        if (!tk.touched) continue;
+        if (!on_limit) tk.base += tk.plan;
+        else if (tk.limit >= LAY_INF) {
+            tk.limit = tk.base + tk.plan;
+            if (step == 5) tk.grows = 1;
+        } else tk.limit += tk.plan;
         (*tr)[q] = tk;
-    }
-    if (avail < 0) {
-        /* no definite size: each track at its limit, an fr at its share of the largest */
-        for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).maxk == TK_FR ? at(*tr, q).base : at(*tr, q).limit;
-        return;
-    }
-    /* the free space to the growth limits, shared evenly */
-    for (int round = 0; round < 32; round++) {
-        double free = avail - total;
-        int growing = 0;
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk != TK_FR && at(*tr, q).limit > at(*tr, q).base + 0.001) growing++;
-        if (free <= 0.001 || !growing) break;
-        double each = free / growing;
-        for (size_t q = 0; q < n; q++) {
-            lay_track tk = at(*tr, q);
-            if (tk.maxk == TK_FR || tk.limit <= tk.base + 0.001) continue;
-            double add = tk.limit - tk.base < each ? tk.limit - tk.base : each;
-            tk.base += add;
-            total += add;
-            (*tr)[q] = tk;
-        }
-    }
-    /* the fr tracks: what is left, by their factors; one whose base is more keeps it */
-    if (frs > 0) {
-        double fixed = gap * (double)(n > 0 ? n - 1 : 0);
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk != TK_FR) fixed += at(*tr, q).base;
-        vector<uint8_t> out_of;
-        resize(&out_of, n);
-        for (int round = 0; round < 16; round++) {
-            double left = avail - fixed, f = 0;
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR && !at(out_of, q)) f += at(*tr, q).maxv;
-            if (f <= 0) break;
-            double unit = left / (f < 1 ? 1 : f);
-            int changed = 0;
-            for (size_t q = 0; q < n; q++) {
-                if (at(*tr, q).maxk != TK_FR || at(out_of, q)) continue;
-                if (at(*tr, q).base > unit * at(*tr, q).maxv) { out_of[q] = 1; fixed += at(*tr, q).base; changed = 1; }
-            }
-            if (changed) continue;
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR && !at(out_of, q)) (*tr)[q].base = unit * at(*tr, q).maxv > 0 ? unit * at(*tr, q).maxv : 0;
-            break;
-        }
-        return;
-    }
-    /* the auto tracks stretched over what is left */
-    if (stretch) {
-        double free = avail - total;
-        int autos = 0;
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) autos++;
-        if (free > 0 && autos)
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) (*tr)[q].base = at(*tr, q).base + free / autos;
     }
 }
 
-/* a grid container's items laid out: placed in its tracks (explicitly, then automatically
-   row by row), the columns sized, the items laid out in them, the rows sized; b's content
-   height when defh (its definite one) is -1 */
+/* the size of an fr among tracks [a, z) to fill space (11.7.1): the space less the tracks
+   that are not flexible and the gaps, over the factors (1 at least), a flexible track whose
+   base size is more than its share taken as one that is not */
+static double lay_fr_size(const vector<lay_track> *tr, size_t a, size_t z, double space, double gap) {
+    if (z <= a) return 0;
+    vector<uint8_t> fixed;
+    resize(&fixed, z - a, (uint8_t)0);
+    for (int round = 0; round < 32; round++) {
+        double left = space - gap * (double)(z - a - 1), f = 0;
+        for (size_t q = a; q < z; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && !at(fixed, q - a)) f += tk.maxv;
+            else left -= tk.base;
+        }
+        double fr = left / (f < 1 ? 1 : f);
+        int again = 0;
+        for (size_t q = a; q < z; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && !at(fixed, q - a) && fr * tk.maxv < tk.base) { fixed[q - a] = 1; again = 1; }
+        }
+        if (!again) return fr > 0 ? fr : 0;
+    }
+    return 0;
+}
+
+/* the tracks' sizes along an axis (Grid 1, 11.4 to 11.8): their base sizes and growth
+   limits from the items in them -- those that span one track, then the others by their
+   spans, then those that cross a flexible track -- the free space to the growth limits, the
+   fr tracks their share of what is left, the auto ones stretched over the rest (stretch).
+   avail: the grid's size along the axis, -1 when it is not definite */
+static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, double avail, double gap, int stretch) {
+    size_t n = len(*tr), ng = len(*gc);
+    for (size_t q = 0; q < n; q++) {
+        lay_track tk = at(*tr, q);
+        tk.base = tk.mink == TK_FIXED ? tk.minv : 0;
+        tk.limit = tk.maxk == TK_FIXED ? tk.maxv : LAY_INF;
+        if (tk.limit < tk.base) tk.limit = tk.base;
+        tk.grows = 0;
+        (*tr)[q] = tk;
+    }
+    /* 11.5.2: the items that span one track, one that is not flexible */
+    vector<double> lim;
+    resize(&lim, n, -1.0);
+    vector<uint8_t> crosses;
+    resize(&crosses, ng, (uint8_t)0);
+    size_t maxspan = 1;
+    for (size_t g = 0; g < ng; g++) {
+        lay_gc c = at(*gc, g);
+        if (c.first >= n) continue;
+        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
+        for (uint32_t k = c.first; k < z; k++) if (at(*tr, k).maxk == TK_FR) crosses[g] = 1;
+        if (c.span > maxspan) maxspan = c.span;
+        if (c.span != 1 || at(crosses, g)) continue;
+        lay_track tk = at(*tr, c.first);
+        if (tk.mink == TK_MINC && c.mn > tk.base) tk.base = c.mn;
+        else if (tk.mink == TK_MAXC && c.mx > tk.base) tk.base = c.mx;
+        else if (tk.mink == TK_AUTO && c.minc > tk.base) tk.base = c.minc;
+        double l = tk.maxk == TK_MINC ? c.mn : lay_tk_maxc(tk) ? c.mx : -1;
+        if (tk.maxk == TK_FIT && l > tk.maxv) l = tk.maxv;
+        if (l > at(lim, c.first)) lim[c.first] = l;
+        (*tr)[c.first] = tk;
+    }
+    for (size_t q = 0; q < n; q++) {
+        lay_track tk = at(*tr, q);
+        if (at(lim, q) >= 0) tk.limit = at(lim, q);
+        if (tk.limit < tk.base) tk.limit = tk.base;
+        (*tr)[q] = tk;
+    }
+    /* 11.5.3: the items that span more, by their spans; 11.5.4: those crossing a flexible track */
+    vector<uint32_t> group;
+    for (size_t span = 2; span <= maxspan; span++) {
+        clear(&group);
+        for (size_t g = 0; g < ng; g++) if (at(*gc, g).span == span && at(*gc, g).first < n && !at(crosses, g)) push_back(&group, (uint32_t)g);
+        if (!len(group)) continue;
+        for (int step = 1; step <= 6; step++) {
+            if (step == 4) {
+                for (size_t q = 0; q < n; q++) if (at(*tr, q).limit < at(*tr, q).base) (*tr)[q].limit = at(*tr, q).base;
+                continue;
+            }
+            lay_spread(tr, gc, &group, gap, step, 0);
+        }
+    }
+    clear(&group);
+    for (size_t g = 0; g < ng; g++) if (at(crosses, g)) push_back(&group, (uint32_t)g);
+    if (len(group)) for (int step = 1; step <= 3; step++) lay_spread(tr, gc, &group, gap, step, 1);
+    /* 11.5.5: a growth limit still none is the base size */
+    for (size_t q = 0; q < n; q++) if (at(*tr, q).limit >= LAY_INF || at(*tr, q).limit < at(*tr, q).base) (*tr)[q].limit = at(*tr, q).base;
+    /* 11.6: the free space to the growth limits, shared equally; with no definite size, each at its limit */
+    double total = gap * (double)(n > 0 ? n - 1 : 0);
+    for (size_t q = 0; q < n; q++) total += at(*tr, q).base;
+    if (avail < 0) for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).limit;
+    else if (avail - total > 0.001) {
+        vector<double> inc, room, w;
+        vector<uint8_t> open;
+        for (size_t q = 0; q < n; q++) {
+            push_back(inc, 0.0);
+            push_back(room, at(*tr, q).limit - at(*tr, q).base);
+            push_back(w, 1.0);
+            push_back(open, (uint8_t)1);
+        }
+        lay_fill(&inc, &room, &w, &open, avail - total);
+        for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).base + at(inc, q);
+    }
+    /* 11.7: the fr tracks, by the size of an fr: of the free space when it is definite, else
+       the largest each fr track's base and each item that crosses one asks */
+    double frs = 0;
+    for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR) frs += at(*tr, q).maxv;
+    if (frs > 0) {
+        double fr = 0;
+        if (avail >= 0) fr = lay_fr_size(tr, 0, n, avail, gap);
+        else {
+            for (size_t q = 0; q < n; q++) {
+                lay_track tk = at(*tr, q);
+                if (tk.maxk != TK_FR) continue;
+                double v = tk.maxv > 1 ? tk.base / tk.maxv : tk.base;
+                if (v > fr) fr = v;
+            }
+            for (size_t g = 0; g < ng; g++) {
+                if (!at(crosses, g)) continue;
+                lay_gc c = at(*gc, g);
+                size_t z = c.first + c.span < n ? c.first + c.span : n;
+                double v = lay_fr_size(tr, c.first, z, c.mx, gap);
+                if (v > fr) fr = v;
+            }
+        }
+        for (size_t q = 0; q < n; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && fr * tk.maxv > tk.base) (*tr)[q].base = fr * tk.maxv;
+        }
+    }
+    /* 11.8: the auto tracks stretched over what is left */
+    if (stretch && avail >= 0) {
+        double used = gap * (double)(n > 0 ? n - 1 : 0);
+        int autos = 0;
+        for (size_t q = 0; q < n; q++) { used += at(*tr, q).base; if (at(*tr, q).maxk == TK_AUTO) autos++; }
+        if (avail - used > 0 && autos)
+            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) (*tr)[q].base = at(*tr, q).base + (avail - used) / autos;
+    }
+}
+
+/* an item's place in the grid: along each axis (0 the columns, 1 the rows) its first line
+   (as the explicit grid numbers them, then its track in the implicit grid) and its span,
+   whether that line was definite, how it was placed, its area (1 + its index) */
+typedef struct lay_gp { long s0, s1, n0, n1; int d0, d1, by; uint32_t area; } lay_gp;
+
+/* the area [a0, a0 + na) x [b0, b0 + nb) (minor, major) is clear of the items of gp placed
+   in both axes (placed: their tracks), mi the minor axis */
+static int lay_gp_clear(const vector<lay_gp> *gp, const vector<uint8_t> *placed, int mi, long a0, long na, long b0, long nb) {
+    for (size_t q = 0; q < len(*gp); q++) {
+        if (!at(*placed, q)) continue;
+        lay_gp g = at(*gp, q);
+        long x0 = mi == 0 ? g.s0 : g.s1, xn = mi == 0 ? g.n0 : g.n1, y0 = mi == 0 ? g.s1 : g.s0, yn = mi == 0 ? g.n1 : g.n0;
+        if (x0 < a0 + na && a0 < x0 + xn && y0 < b0 + nb && b0 < y0 + yn) return 0;
+    }
+    return 1;
+}
+/* the cells of occ (rows of the major axis, cols cells each) the area [a0, a0 + na) x
+   [b0, b0 + nb) covers are free; set: mark them taken, the rows grown as needed */
+static int lay_cells(vector<uint8_t> *occ, long cols, long a0, long na, long b0, long nb, int set) {
+    long rows = cols > 0 ? (long)len(*occ) / cols : 0;
+    if (set && b0 + nb > rows) { resize(occ, (size_t)((b0 + nb) * cols), (uint8_t)0); rows = b0 + nb; }
+    for (long y = b0; y < b0 + nb && y < rows; y++)
+        for (long x = a0; x < a0 + na && x < cols; x++) {
+            if (set) (*occ)[(size_t)(y * cols + x)] = 1;
+            else if (at(*occ, (size_t)(y * cols + x))) return 0;
+        }
+    return 1;
+}
+
+/* a track of the implicit grid, the explicit grid's line `line` its start: a template's
+   track, else grid-auto-*'s pattern, forwards after the template's, backwards before */
+static lay_track lay_track_at(const vector<lay_track> *tmpl, const vector<lay_track> *autos, long line) {
+    lay_track tk;
+    memset(&tk, 0, sizeof tk);
+    tk.mink = TK_AUTO;
+    tk.maxk = TK_AUTO;
+    tk.pct = -1;
+    long nt = (long)len(*tmpl), na = (long)len(*autos);
+    if (line >= 1 && line <= nt) return at(*tmpl, (size_t)(line - 1));
+    if (!na) return tk;
+    if (line > nt) return at(*autos, (size_t)((line - 1 - nt) % na));
+    return at(*autos, (size_t)(na - 1 - (-line) % na));
+}
+
+/* a grid container's items laid out (CSS Grid 1): placed (8.5: those with definite lines,
+   those locked to a row (to a column, in a column flow), then the rest by a cursor moving
+   along the rows (the columns), sparse or dense), the columns sized from the items'
+   widths (11), the items laid out in their columns, the rows sized from their heights,
+   each item in its area by justify-self and align-self; b's content height when defh (its
+   definite one) is -1 */
 static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     lay_ext e = LAY_X(el);
     double W = t->box[b].w;
@@ -3847,126 +5222,211 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     lay_items(LARGS, b, el, &its, &items);
     size_t ni = len(its);
     double cgap = lay_res(st, e.cgap, W), rgap = lay_res(st, e.rgap, defh >= 0 ? defh : 0);
-    vector<lay_track> cols, rows, acol, arow;
+    /* the track lists and their lines' names: the columns', the rows', the auto tracks' */
+    vector<lay_track> tcol, trow, acol, arow;
+    vector<lay_lname> ncol, nrow, nauto;
     vector<char> src;
     amb_span sp = st->cval[e.gtc].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), W, cgap, &cols, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), W, cgap, &tcol, &ncol, 0);
+    clear(&src);
     sp = st->cval[e.gtr].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &rows, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), defh, rgap, &trow, &nrow, 0);
+    clear(&src);
     sp = st->cval[e.gac].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), W, cgap, &acol, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), W, cgap, &acol, &nauto, 0);
+    clear(&src);
     sp = st->cval[e.gar].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &arow, 0);
-    lay_track auto_tk;
-    memset(&auto_tk, 0, sizeof auto_tk);
-    auto_tk.mink = TK_AUTO;
-    auto_tk.maxk = TK_AUTO;
-    lay_track col_tk = len(acol) ? at(acol, 0) : auto_tk, row_tk = len(arow) ? at(arow, 0) : auto_tk;
-    size_t ncols = len(cols) ? len(cols) : 1, nrows_x = len(rows);
-    if (!len(cols)) push_back(cols, col_tk);
-    /* the items' areas: lines as written (from the explicit grid's end when negative) */
-    vector<lay_ga> areas;
+    lay_tracks(data(src), len(src), defh, rgap, &arow, &nauto, 0);
+    /* the areas: the explicit grid as large as they need, each area's -start and -end lines named */
+    vector<lay_area> areas;
+    uint32_t arows = 0, acols = 0;
+    if (st->cval[e.gta].unit == CSS_UNIT_TEXT) {
+        clear(&src);
+        sp = st->cval[e.gta].text;
+        append_range(src, text_ptr(st, sp), sp.len);
+        lay_areas(data(src), len(src), &areas, &arows, &acols);
+    }
+    for (size_t z = 0; z < len(areas); z++) {
+        lay_area ar = at(areas, z);
+        lay_lname x;
+        x.h = ar.hs; x.line = (int32_t)ar.c0 + 1; push_back(ncol, x);
+        x.h = ar.he; x.line = (int32_t)ar.c1 + 1; push_back(ncol, x);
+        x.h = ar.hs; x.line = (int32_t)ar.r0 + 1; push_back(nrow, x);
+        x.h = ar.he; x.line = (int32_t)ar.r1 + 1; push_back(nrow, x);
+    }
+    long nx0 = (long)len(tcol) > (long)acols ? (long)len(tcol) : (long)acols;
+    long nx1 = (long)len(trow) > (long)arows ? (long)len(trow) : (long)arows;
+    /* grid-auto-flow */
+    int colflow = 0, dense = 0;
+    {
+        clear(&src);
+        sp = st->cval[e.gflow].text;
+        append_range(src, text_ptr(st, sp), sp.len);
+        size_t i = 0, a, n;
+        while (css_next_part(data(src), len(src), &i, &a, &n)) {
+            if (lay_is_word(data(src) + a, n, "column")) colflow = 1;
+            else if (lay_is_word(data(src) + a, n, "dense")) dense = 1;
+        }
+    }
+    /* each item's lines (8.3), and how it is placed */
+    vector<lay_gp> gp;
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g;
+        lay_gp g;
         memset(&g, 0, sizeof g);
-        g.cs = 1;
-        g.rs = 1;
+        lay_gl cs, ce, rs, re;
+        memset(&cs, 0, sizeof cs);
+        ce = cs;
+        rs = cs;
+        re = cs;
         uint32_t ie = at(its, q).el;
-        long cl0 = 0, cs0 = 0, cl1 = 0, cs1 = 0, rl0 = 0, rs0 = 0, rl1 = 0, rs1 = 0;
         if (ie) {
-            lay_grid_line(st, LAY_X(ie).gcs, &cl0, &cs0);
-            lay_grid_line(st, LAY_X(ie).gce, &cl1, &cs1);
-            lay_grid_line(st, LAY_X(ie).grs, &rl0, &rs0);
-            lay_grid_line(st, LAY_X(ie).gre, &rl1, &rs1);
+            lay_grid_line(st, LAY_X(ie).gcs, &cs);
+            lay_grid_line(st, LAY_X(ie).gce, &ce);
+            lay_grid_line(st, LAY_X(ie).grs, &rs);
+            lay_grid_line(st, LAY_X(ie).gre, &re);
         }
-        if (cl0 < 0) cl0 = (long)ncols + 2 + cl0;
-        if (cl1 < 0) cl1 = (long)ncols + 2 + cl1;
-        if (rl0 < 0) rl0 = (long)nrows_x + 2 + rl0;
-        if (rl1 < 0) rl1 = (long)nrows_x + 2 + rl1;
-        if (cl0 > 0 && cl1 > cl0) g.cs = (uint32_t)(cl1 - cl0);
-        else if (cs0 > 0) g.cs = (uint32_t)cs0;
-        else if (cs1 > 0) g.cs = (uint32_t)cs1;
-        if (rl0 > 0 && rl1 > rl0) g.rs = (uint32_t)(rl1 - rl0);
-        else if (rs0 > 0) g.rs = (uint32_t)rs0;
-        else if (rs1 > 0) g.rs = (uint32_t)rs1;
-        if (cl0 <= 0 && cl1 > 0) cl0 = cl1 - (long)g.cs;
-        if (rl0 <= 0 && rl1 > 0) rl0 = rl1 - (long)g.rs;
-        g.c0 = cl0 > 0 ? (uint32_t)(cl0 - 1) : 0xffffffffu;
-        g.r0 = rl0 > 0 ? (uint32_t)(rl0 - 1) : 0xffffffffu;
-        if (g.cs > 1000) g.cs = 1000;
-        if (g.rs > 1000) g.rs = 1000;
-        push_back(areas, g);
-        if (g.c0 != 0xffffffffu && g.c0 + g.cs > ncols) ncols = g.c0 + g.cs;
-        if (g.cs > ncols) ncols = g.cs;
+        g.d0 = lay_place_axis(&ncol, &cs, &ce, nx0 + 1, &g.s0, &g.n0);
+        g.d1 = lay_place_axis(&nrow, &rs, &re, nx1 + 1, &g.s1, &g.n1);
+        g.by = g.d0 || g.d1 ? LAYOUT_GRID_BY_LINES : LAYOUT_GRID_BY_AUTO;
+        if (cs.kind == GL_NAME && ce.kind == GL_NAME && rs.kind == GL_NAME && re.kind == GL_NAME && cs.h == ce.h && cs.h == rs.h && cs.h == re.h)
+            for (size_t z = 0; z < len(areas); z++) if (at(areas, z).h == cs.h) { g.by = LAYOUT_GRID_BY_AREA; g.area = (uint32_t)z + 1; }
+        push_back(gp, g);
     }
-    while (len(cols) < ncols) push_back(cols, col_tk);
-    /* placed: the items whose row is given first, then the rest in the order of a cursor
-       moving along each row (sparse) */
-    vector<uint8_t> used;              /* rows x ncols */
-    size_t nrows = nrows_x;
-    resize(&used, nrows * ncols);
-    for (int pass = 0; pass < 2; pass++) {
-        size_t cr = 0, cc = 0;
-        for (size_t q = 0; q < ni; q++) {
-            lay_ga g = at(areas, q);
-            if ((pass == 0) != (g.r0 != 0xffffffffu)) continue;
-            if (g.r0 != 0xffffffffu && g.c0 == 0xffffffffu) {
-                /* its row given: the first columns free in it */
-                size_t c = 0;
-                for (; c + g.cs <= ncols; c++) {
-                    int free_here = 1;
-                    for (size_t rr = g.r0; rr < g.r0 + g.rs && free_here; rr++)
-                        for (size_t k = c; k < c + g.cs && free_here; k++) if (rr < nrows && at(used, rr * ncols + k)) free_here = 0;
-                    if (free_here) break;
-                }
-                g.c0 = (uint32_t)(c + g.cs <= ncols ? c : 0);
-            } else if (g.r0 == 0xffffffffu) {
-                /* the cursor's next area that is free */
-                for (;;) {
-                    if (g.c0 != 0xffffffffu) { if (cc > g.c0) cr++; cc = g.c0; }
-                    if (cc + g.cs > ncols) { cc = 0; cr++; continue; }
-                    int free_here = 1;
-                    for (size_t rr = cr; rr < cr + g.rs && free_here; rr++)
-                        for (size_t k = cc; k < cc + g.cs && free_here; k++) if (rr < nrows && at(used, rr * ncols + k)) free_here = 0;
-                    if (free_here) break;
-                    if (g.c0 != 0xffffffffu) { cr++; continue; }
-                    cc++;
-                }
-                g.r0 = (uint32_t)cr;
-                g.c0 = (uint32_t)cc;
-                cc += g.cs;
-            }
-            if (g.r0 + g.rs > nrows) { nrows = g.r0 + g.rs; resize(&used, nrows * ncols); }
-            for (size_t rr = g.r0; rr < g.r0 + g.rs; rr++) for (size_t k = g.c0; k < g.c0 + g.cs && k < ncols; k++) used[rr * ncols + k] = 1;
-            areas[q] = g;
-        }
-    }
-    while (len(rows) < nrows) push_back(rows, row_tk);
-    /* the columns: from the content of the items that span one */
-    vector<double> cmin, cmax;
-    resize(&cmin, ncols);
-    resize(&cmax, ncols);
+    /* the implicit grid: tracks before the explicit grid's first line as the definite lines
+       need them (lead), then each definite line made a track's index */
+    long lead0 = 0, lead1 = 0, cnt0 = nx0, cnt1 = nx1;
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.cs != 1 || g.c0 >= ncols) continue;
-        lay_track tk = at(cols, g.c0);
-        if (tk.mink == TK_FIXED && (tk.maxk == TK_FIXED)) continue;
-        double mn, mx;
+        lay_gp g = at(gp, q);
+        if (g.d0 && 1 - g.s0 > lead0) lead0 = 1 - g.s0;
+        if (g.d1 && 1 - g.s1 > lead1) lead1 = 1 - g.s1;
+    }
+    cnt0 += lead0;
+    cnt1 += lead1;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        if (g.d0) { g.s0 += lead0 - 1; if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0; }
+        if (g.d1) { g.s1 += lead1 - 1; if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1; }
+        gp[q] = g;
+    }
+    /* the axis the cursor runs along (mi: the columns in a row flow), the one it moves on to
+       (the rows); 1: those of each item placed along both */
+    int mi = colflow ? 1 : 0;
+    vector<uint8_t> placed;
+    resize(&placed, ni, (uint8_t)0);
+    for (size_t q = 0; q < ni; q++) if (at(gp, q).d0 && at(gp, q).d1) placed[q] = 1;
+    /* those locked to a row (a column): each in it, at the first place clear of those placed
+       (past those this step placed in that row, sparse) */
+    vector<long> rowcur;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        int dmi = mi == 0 ? g.d0 : g.d1, dma = mi == 0 ? g.d1 : g.d0;
+        if (dmi || !dma) continue;
+        long ma0 = mi == 0 ? g.s1 : g.s0, man = mi == 0 ? g.n1 : g.n0, min_ = mi == 0 ? g.n0 : g.n1;
+        if ((long)len(rowcur) <= ma0) resize(&rowcur, (size_t)ma0 + 1, 0L);
+        long c = dense ? 0 : at(rowcur, (size_t)ma0);
+        while (!lay_gp_clear(&gp, &placed, mi, c, min_, ma0, man) && c < 4000) c++;
+        if (mi == 0) g.s0 = c; else g.s1 = c;
+        rowcur[(size_t)ma0] = c + min_;
+        gp[q] = g;
+        placed[q] = 1;
+        if (mi == 0 && c + min_ > cnt0) cnt0 = c + min_;
+        if (mi == 1 && c + min_ > cnt1) cnt1 = c + min_;
+    }
+    /* the minor axis's tracks: as many as the widest item placed automatically needs too */
+    long ncross = mi == 0 ? cnt0 : cnt1;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        long n = mi == 0 ? g.n0 : g.n1;
+        if (n > ncross) ncross = n;
+    }
+    if (mi == 0) cnt0 = ncross; else cnt1 = ncross;
+    /* the rest, by the cursor: the cells taken so far, then each item in turn */
+    vector<uint8_t> occ;
+    for (size_t q = 0; q < ni; q++) {
+        if (!at(placed, q)) continue;
+        lay_gp g = at(gp, q);
+        if (mi == 0) lay_cells(&occ, ncross, g.s0, g.n0, g.s1, g.n1, 1);
+        else lay_cells(&occ, ncross, g.s1, g.n1, g.s0, g.n0, 1);
+    }
+    long cur_mi = 0, cur_ma = 0;
+    for (size_t q = 0; q < ni; q++) {
+        if (at(placed, q)) continue;
+        lay_gp g = at(gp, q);
+        int dmi = mi == 0 ? g.d0 : g.d1;
+        long a0 = mi == 0 ? g.s0 : g.s1, an = mi == 0 ? g.n0 : g.n1, bn = mi == 0 ? g.n1 : g.n0;
+        if (dmi) {
+            /* its column (row) given: the first row (column) clear there, from the cursor's when sparse */
+            if (dense) cur_ma = 0;
+            else if (a0 < cur_mi) cur_ma++;
+            cur_mi = a0;
+            while (!lay_cells(&occ, ncross, a0, an, cur_ma, bn, 0)) cur_ma++;
+        } else {
+            if (dense) { cur_ma = 0; cur_mi = 0; }
+            for (;;) {
+                while (cur_mi + an <= ncross && !lay_cells(&occ, ncross, cur_mi, an, cur_ma, bn, 0)) cur_mi++;
+                if (cur_mi + an <= ncross) break;
+                cur_ma++;
+                cur_mi = 0;
+            }
+            a0 = cur_mi;
+        }
+        lay_cells(&occ, ncross, a0, an, cur_ma, bn, 1);
+        if (mi == 0) { g.s0 = a0; g.s1 = cur_ma; } else { g.s1 = a0; g.s0 = cur_ma; }
+        gp[q] = g;
+        placed[q] = 1;
+    }
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0;
+        if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1;
+    }
+    /* the tracks: the templates', grid-auto-*'s before and after them */
+    vector<lay_track> cols, rows;
+    for (long c = 0; c < cnt0; c++) push_back(cols, lay_track_at(&tcol, &acol, c + 1 - lead0));
+    for (long r = 0; r < cnt1; r++) push_back(rows, lay_track_at(&trow, &arow, r + 1 - lead1));
+    size_t ncols = len(cols), nrows = len(rows);
+    /* the columns: from the items' widths, those in tracks of fixed sizes alone not measured */
+    vector<lay_gc> gc;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        lay_item_intrinsic(LARGS, el, &it, &items, W, &mn, &mx);
-        if (mn > at(cmin, g.c0)) cmin[g.c0] = mn;
-        if (mx > at(cmax, g.c0)) cmax[g.c0] = mx;
+        lay_gc c;
+        memset(&c, 0, sizeof c);
+        c.first = (uint32_t)g.s0;
+        c.span = (uint32_t)g.n0;
+        int sized = 0, flexed = 0, fixed_max = 1;
+        double maxes = cgap * (double)(g.n0 - 1);
+        for (long k = g.s0; k < g.s0 + g.n0 && k < (long)ncols; k++) {
+            lay_track tk = at(cols, (size_t)k);
+            if (tk.mink != TK_FIXED || tk.maxk != TK_FIXED) sized = 1;
+            if (tk.maxk == TK_FR) flexed = 1;
+            if (tk.maxk == TK_FIXED) maxes += tk.maxv; else fixed_max = 0;
+        }
+        if (sized) {
+            lay_item_intrinsic(LARGS, el, &it, &items, W, &c.mn, &c.mx);
+            c.minc = c.mn;
+            /* its minimum contribution: its min-content one, but for a scroll container, a
+               min-width, or a span across a flexible track, its edges alone (and min-width) */
+            if (it.el) {
+                lay_style is;
+                lay_style_of(LARGS, it.el, &is);
+                lay_ext ie = LAY_X(it.el);
+                double edges = lay_edges_px(st, &is, W);
+                if (ie.minw.unit != LAY_AUTO && !lay_content_sized(ie.minw))
+                    c.minc = lay_res(st, ie.minw, W) + edges - (is.border_box ? is.b[1] + is.b[3] + lay_res(st, is.p[1], W) + lay_res(st, is.p[3], W) : 0);
+                else if (ie.clip == 1 || (g.n0 > 1 && flexed)) c.minc = edges;
+            }
+            if (fixed_max && c.minc > maxes) c.minc = maxes;
+        }
+        push_back(gc, c);
     }
     int jc = e.jc;
-    lay_size_tracks(&cols, &cmin, &cmax, W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
-    double cols_total = cgap * (double)(ncols - 1);
+    lay_size_tracks(&cols, &gc, W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
+    double cols_total = ncols ? cgap * (double)(ncols - 1) : 0;
     for (size_t c = 0; c < ncols; c++) cols_total += at(cols, c).base;
     double cstart = 0, cbetween = 0;
     if (jc != AJ_NORMAL && jc != AJ_STRETCH) lay_distribute(jc, W - cols_total, ncols, &cstart, &cbetween);
@@ -3975,10 +5435,10 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     /* the items laid out in their columns: stretched, or shrunk to fit and placed by
        justify-self */
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        double aw = cgap * (double)(g.cs - 1);
-        for (size_t c = g.c0; c < g.c0 + g.cs && c < ncols; c++) aw += at(cols, c).base;
+        double aw = cgap * (double)(g.n0 - 1);
+        for (long c = g.s0; c < g.s0 + g.n0 && c < (long)ncols; c++) aw += at(cols, (size_t)c).base;
         lay_style is;
         double ml = 0, mr = 0;
         int js = AJ_STRETCH, wauto = 1;
@@ -4001,37 +5461,43 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         it.cross = t->box[it.box].mt + lay_border_height(t, it.box) + t->box[it.box].mb;
         its[q] = it;
     }
-    /* the rows: from the heights of the items that span one */
-    vector<double> rmin;
-    resize(&rmin, nrows);
+    /* the rows: from the items' heights (a scroll container's minimum its edges alone) */
+    clear(&gc);
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.rs != 1 || g.r0 >= nrows) continue;
-        if (at(its, q).cross > at(rmin, g.r0)) rmin[g.r0] = at(its, q).cross;
+        lay_gp g = at(gp, q);
+        lay_fi it = at(its, q);
+        lay_gc c;
+        c.first = (uint32_t)g.s1;
+        c.span = (uint32_t)g.n1;
+        c.mn = it.cross;
+        c.mx = it.cross;
+        c.minc = it.cross;
+        if (it.el && LAY_X(it.el).clip == 1 && LAY_X(it.el).minh.unit == LAY_AUTO)
+            c.minc = t->box[it.box].mt + t->box[it.box].bt + t->box[it.box].pt + t->box[it.box].pb + t->box[it.box].bb + t->box[it.box].mb;
+        push_back(gc, c);
     }
     int ac = e.ac;
-    lay_size_tracks(&rows, &rmin, &rmin, defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
-    /* an item that spans rows: what they lack, to the last of them */
-    for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.rs < 2 || g.r0 + g.rs > nrows) continue;
-        double sum = rgap * (double)(g.rs - 1);
-        for (size_t rr = g.r0; rr < g.r0 + g.rs; rr++) sum += at(rows, rr).base;
-        if (at(its, q).cross > sum) rows[g.r0 + g.rs - 1].base = at(rows, g.r0 + g.rs - 1).base + at(its, q).cross - sum;
-    }
+    lay_size_tracks(&rows, &gc, defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
     double rows_total = nrows ? rgap * (double)(nrows - 1) : 0;
     for (size_t rr = 0; rr < nrows; rr++) rows_total += at(rows, rr).base;
+    double grid_h = rows_total;
+    if (defh < 0) {
+        /* a percentage row of a grid whose height is not definite: sized as auto, then of
+           the height the grid has so (Grid 1, 7.2) */
+        for (size_t rr = 0; rr < nrows; rr++)
+            if (at(rows, rr).pct >= 0) { rows_total += grid_h * at(rows, rr).pct / 100 - at(rows, rr).base; rows[rr].base = grid_h * at(rows, rr).pct / 100; }
+    }
     double rstart = 0, rbetween = 0;
     if (defh >= 0 && ac != AJ_NORMAL && ac != AJ_STRETCH) lay_distribute(ac, defh - rows_total, nrows, &rstart, &rbetween);
     double y = rstart;
     for (size_t rr = 0; rr < nrows; rr++) { rows[rr].pos = y; y += at(rows, rr).base + rgap + rbetween; }
-    /* each item in its area: align-self (stretched as tall as its rows, by default) */
+    /* each item in its area: align-self (stretched as tall as its rows, by default); how it was placed */
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        if (g.r0 >= nrows || g.c0 >= ncols) continue;
-        double ah = rgap * (double)(g.rs - 1);
-        for (size_t rr = g.r0; rr < g.r0 + g.rs && rr < nrows; rr++) ah += at(rows, rr).base;
+        if (g.s1 >= (long)nrows || g.s0 >= (long)ncols) continue;
+        double ah = rgap * (double)(g.n1 - 1);
+        for (long rr = g.s1; rr < g.s1 + g.n1 && rr < (long)nrows; rr++) ah += at(rows, (size_t)rr).base;
         int as = AJ_STRETCH, hauto = 1;
         if (it.el) {
             lay_style is;
@@ -4042,24 +5508,52 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         }
         double mt = t->box[it.box].mt, mb = t->box[it.box].mb;
         if (as == AJ_STRETCH && hauto) {
+            /* stretched: as tall as its area, its content overflowing a shorter one */
             double ve = t->box[it.box].bt + t->box[it.box].bb + t->box[it.box].pt + t->box[it.box].pb;
             double hh = ah - mt - mb - ve;
-            if (hh > t->box[it.box].h) t->box[it.box].h = hh;
+            t->box[it.box].h = hh > 0 ? hh : 0;
         }
         double bh = lay_border_height(t, it.box), yoff = mt;
         if (as == AJ_END) yoff = ah - mb - bh;
         else if (as == AJ_CENTER) yoff = mt + (ah - mt - mb - bh) / 2;
-        lay_place(t, it.box, at(cols, g.c0).pos + it.mm0, at(rows, g.r0).pos + yoff);
+        lay_place(t, it.box, at(cols, (size_t)g.s0).pos + it.mm0, at(rows, (size_t)g.s1).pos + yoff);
+        t->box[it.box].grid_col = (int32_t)(g.s0 + 1 - lead0);
+        t->box[it.box].grid_row = (int32_t)(g.s1 + 1 - lead1);
+        t->box[it.box].grid_cols = (uint32_t)g.n0;
+        t->box[it.box].grid_rows = (uint32_t)g.n1;
+        t->box[it.box].grid_by = (layout_grid_by)g.by;
+        if (g.area && it.el) t->box[it.box].grid_area = lay_kept(t, st, LAY_X(it.el).grs);
     }
-    if (defh < 0) t->box[b].h = rows_total > 0 ? rows_total : 0;
+    if (defh < 0) t->box[b].h = grid_h > 0 ? grid_h : 0;
 }
 
 /* ---- absolutely positioned boxes (CSS 2.1 10.3.7, 10.6.4), after the flow ---- */
 
+/* the inline element whose fragments make the containing block of el (CSS 2.1, 10.1, 4):
+   its nearest positioned ancestor, when that is an inline element; 0 when it is not */
+static uint32_t lay_inline_cb(LCTX, uint32_t el) {
+    uint32_t x = lay_parent_of(d, gx, el);
+    for (int depth = 0; depth < 1024 && x > 1; depth++) {
+        if (!(x & LAY_GEN) && d->node[x].kind != DOM_NODE_KIND_ELEMENT) return 0;
+        if (LAY_X(x).pos != POS_STATIC) return lay_display_of(LARGS, x) == D_INLINE ? x : 0;
+        x = lay_parent_of(d, gx, x);
+    }
+    return 0;
+}
+/* a box's content box's place in the viewport's, before the tree has page coordinates */
+static void lay_box_at(const layout_tree *t, uint32_t b, uint32_t vp, double *x, double *y) {
+    *x = 0;
+    *y = 0;
+    for (uint32_t q = b; q && q != vp; q = t->box[q].parent) { *x += t->box[q].x; *y += t->box[q].y; }
+}
+
 /* each element the flow met out of it, laid out in its containing block -- the nearest
-   positioned ancestor's padding box, the viewport's for fixed or for none -- by its
-   offsets, or its static position where they are auto; its box that block's last child.
-   Those inside it are met as it is laid out, and laid out in turn */
+   positioned ancestor's padding box, the viewport's for fixed or for none; when that
+   ancestor is an inline element, the box from its first fragment's padding box's start
+   and top to its last one's end and bottom (no wider than nothing when that end is before
+   that start, as Chromium has it) -- by its offsets, or its static position where they
+   are auto; its box that block's last child (an inline's: that of the box its first
+   fragment's line is in). Those inside it are met as it is laid out, and laid out in turn */
 static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
     for (size_t q = 0; q < len(*ab); q++) {
         lay_abs a = at(*ab, q);
@@ -4068,20 +5562,47 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         lay_style_of(LARGS, el, &s);
         uint32_t si = lay_si(sx, gx, el);
         int fixed = at(*xc, si).pos == POS_FIXED;
-        uint32_t cb = vp;
-        if (!fixed)
+        uint32_t cb = vp, icb = 0, f0 = 0, f1 = 0;
+        if (!fixed) {
             for (uint32_t x = a.box; x && x != vp; x = t->box[x].parent)
                 if (t->box[x].position != LAYOUT_POSITION_STATIC) { cb = x; break; }
-        /* the static position in cb's content box */
-        double sx0 = a.x, sy0 = a.y;
-        for (uint32_t x = a.box; x && x != cb && x != vp; x = t->box[x].parent) { sx0 += t->box[x].x; sy0 += t->box[x].y; }
-        /* cb's padding box, in its content box */
-        double px0 = 0, py0 = 0, cbw = vw, cbh = vh;
-        if (cb != vp) {
-            px0 = -t->box[cb].pl;
-            py0 = -t->box[cb].pt;
-            cbw = t->box[cb].w + t->box[cb].pl + t->box[cb].pr;
-            cbh = t->box[cb].h + t->box[cb].pt + t->box[cb].pb;
+            icb = lay_inline_cb(LARGS, el);
+            if (icb) {
+                /* its first and last fragments */
+                uint32_t want = lay_dom(gx, icb);
+                for (uint32_t fr = 1; fr < t->frag_len; fr++)
+                    if (t->frag[fr].live && t->frag[fr].kind == LAYOUT_FRAG_KIND_INLINE && t->frag[fr].node.index == want) { if (!f0) f0 = fr; f1 = fr; }
+            }
+        }
+        /* the static position in cb's content box, and cb's padding box in it */
+        double sx0 = a.x, sy0 = a.y, px0 = 0, py0 = 0, cbw = vw, cbh = vh;
+        if (f0) {
+            uint32_t l0 = t->frag[f0].line, l1 = t->frag[f1].line;
+            uint32_t b0 = t->line[l0].box, b1 = t->line[l1].box;
+            double x0, y0, x1, y1, ax, ay;
+            lay_box_at(t, b0, vp, &x0, &y0);
+            lay_box_at(t, b1, vp, &x1, &y1);
+            lay_box_at(t, a.box, vp, &ax, &ay);
+            lay_style is;
+            lay_style_of(LARGS, icb, &is);
+            double l = x0 + t->line[l0].x + t->frag[f0].x + is.b[3], tp = y0 + t->line[l0].y + t->frag[f0].y + is.b[0];
+            double r = x1 + t->line[l1].x + t->frag[f1].x + t->frag[f1].w - is.b[1];
+            double bm = y1 + t->line[l1].y + t->frag[f1].y + t->frag[f1].h - is.b[2];
+            cb = b0;
+            sx0 = ax + a.x - x0;
+            sy0 = ay + a.y - y0;
+            px0 = l - x0;
+            py0 = tp - y0;
+            cbw = r > l ? r - l : 0;
+            cbh = bm > tp ? bm - tp : 0;
+        } else {
+            for (uint32_t x = a.box; x && x != cb && x != vp; x = t->box[x].parent) { sx0 += t->box[x].x; sy0 += t->box[x].y; }
+            if (cb != vp) {
+                px0 = -t->box[cb].pl;
+                py0 = -t->box[cb].pt;
+                cbw = t->box[cb].w + t->box[cb].pl + t->box[cb].pr;
+                cbh = t->box[cb].h + t->box[cb].pt + t->box[cb].pb;
+            }
         }
         lay_len o0 = at(*xc, si).off[0], o1 = at(*xc, si).off[1], o2 = at(*xc, si).off[2], o3 = at(*xc, si).off[3];
         int la = o3.unit == LAY_AUTO, ra = o1.unit == LAY_AUTO, ta = o0.unit == LAY_AUTO, ba = o2.unit == LAY_AUTO;
@@ -4092,7 +5613,7 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         double fw = -1;
         int wdecl = s.width.unit != LAY_AUTO && !lay_content_sized(s.width);
         if (wdecl) fw = lay_res(st, s.width, cbw) + (s.border_box ? 0 : eh);
-        else if (!la && !ra) fw = cbw - L - R - ml - mr;
+        else if (!la && !ra) { fw = cbw - L - R - ml - mr; if (fw < 0) fw = 0; }   /* both offsets: what they leave, none when it is less */
         if (la && ra) { L = sx0 - px0; la = 0; }
         lay_bk bk;
         bk.ox = 0;
@@ -4108,6 +5629,10 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         if (fw >= 0 && !wdecl) t->box[bx].how = LAYOUT_WIDTH_HOW_POSITIONED;
         else if (wdecl) t->box[bx].how = s.width.unit == LAY_PX ? LAYOUT_WIDTH_HOW_DECLARED : LAYOUT_WIDTH_HOW_PERCENT;
         t->box[bx].cb = cb == vp ? vp : cb;
+        if (f0) {
+            t->box[bx].cb_inline = 1;
+            t->box[bx].cb_node = node_handle(d, lay_dom(gx, icb));
+        }
         t->box[bx].avail = cbw;
         double bw = t->box[bx].w + eh;
         if (la) L = cbw - R - ml - mr - bw;
@@ -4175,6 +5700,99 @@ static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c
             memcmp(text_ptr(net, net->resource[r].url), abs_url, al) == 0) return r;
     net_resource_h h = net_fetch(net, abs_url, al, NET_KIND_IMAGE);
     return h.index;
+}
+
+/* ---- sticky boxes, at rest (CSS Position 3, 3.4) ---- */
+
+/* a laid-out box moved by (dx, dy) in page coordinates: it, its lines and their fragments,
+   and every box in it */
+static void lay_move(layout_tree *t, uint32_t b, double dx, double dy, int depth) {
+    t->box[b].x += dx;
+    t->box[b].y += dy;
+    for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next) {
+        t->line[ln].x += dx;
+        t->line[ln].y += dy;
+        t->line[ln].baseline += dy;
+        for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+            t->frag[fr].x += dx;
+            t->frag[fr].y += dy;
+            t->frag[fr].baseline += dy;
+        }
+    }
+    if (depth < 1024) for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_move(t, c, dx, dy, depth + 1);
+}
+
+/* each sticky box where it is at rest, unscrolled: where an inset it has (top, right, bottom,
+   left) puts that edge of its sticky view rectangle -- its scrollport, the nearest scroll
+   container's padding box or the viewport, inset by them -- past its border box's, it moves
+   inward, as far as its margin box stays in its containing block's content box. Bottom and
+   right first, so that top and left win; an outer box before those in it */
+static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
+    uint32_t root = t->box[vp].first_child;
+    for (uint32_t b = 1; b < t->box_len; b++) {
+        if (!t->box[b].live || t->box[b].position != LAYOUT_POSITION_STICKY) continue;
+        uint32_t cb = t->box[b].parent, el = t->box[b].node.index;
+        if (!cb || cb == vp || !el) continue;
+        if (t->box[b].pseudo) {
+            int64_t g = lay_gen_find(gx, el, t->box[b].pseudo);
+            if (g < 0) continue;
+            el = LAY_GEN | (uint32_t)g;
+        }
+        lay_ext e = LAY_X(el);
+        /* the scrollport: a scroll container's padding box (not the root's, nor the body's
+           when the root's overflow is visible: theirs is the viewport's), else the viewport */
+        double spx = 0, spy = 0, spw = vw, sph = vh;
+        for (uint32_t a = cb; a && a != vp && a != root; a = t->box[a].parent) {
+            if (t->box[a].clip != 1) continue;
+            if (t->box[a].parent == root && t->box[root].clip != 1 && lay_is_named(d, t->box[a].node.index, "body")) continue;
+            spx = t->box[a].x - t->box[a].pl;
+            spy = t->box[a].y - t->box[a].pt;
+            spw = t->box[a].w + t->box[a].pl + t->box[a].pr;
+            sph = t->box[a].h + t->box[a].pt + t->box[a].pb;
+            break;
+        }
+        double bx0 = t->box[b].x - t->box[b].pl - t->box[b].bl, by0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        double bx1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br, by1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb;
+        double cx0 = t->box[cb].x, cy0 = t->box[cb].y, cx1 = cx0 + t->box[cb].w, cy1 = cy0 + t->box[cb].h;
+        /* its margins as its style has them (auto none: not those an over-constrained width gives) */
+        lay_style ss;
+        lay_style_of(LARGS, el, &ss);
+        double m[4];
+        for (int k = 0; k < 4; k++) m[k] = ss.m[k].unit == LAY_AUTO ? 0 : lay_res(st, ss.m[k], t->box[cb].w);
+        double dx = 0, dy = 0, lim, dd, room;
+        if (e.off[2].unit != LAY_AUTO) {
+            lim = spy + sph - lay_res(st, e.off[2], sph);
+            dd = by1 - lim;
+            room = by0 - m[0] - cy0;
+            if (dd > room) dd = room;
+            if (dd > 0) dy -= dd;
+        }
+        if (e.off[0].unit != LAY_AUTO) {
+            lim = spy + lay_res(st, e.off[0], sph);
+            dd = lim - (by0 + dy);
+            room = cy1 - (by1 + dy + m[2]);
+            if (dd > room) dd = room;
+            if (dd > 0) dy += dd;
+        }
+        if (e.off[1].unit != LAY_AUTO) {
+            lim = spx + spw - lay_res(st, e.off[1], spw);
+            dd = bx1 - lim;
+            room = bx0 - m[3] - cx0;
+            if (dd > room) dd = room;
+            if (dd > 0) dx -= dd;
+        }
+        if (e.off[3].unit != LAY_AUTO) {
+            lim = spx + lay_res(st, e.off[3], spw);
+            dd = lim - (bx0 + dx);
+            room = cx1 - (bx1 + dx + m[1]);
+            if (dd > room) dd = room;
+            if (dd > 0) dx += dd;
+        }
+        if (dx == 0 && dy == 0) continue;
+        lay_move(t, b, dx, dy, 0);
+        t->box[b].dx += dx;
+        t->box[b].dy += dy;
+    }
 }
 
 /* ---- page coordinates ---- */
@@ -4321,6 +5939,9 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     }
     lay_absolute(t, vp, 0, 0);
     lay_radii(t);
+    /* the sticky boxes, when a style is sticky */
+    for (size_t k = 0; k < len(exts); k++)
+        if (at(exts, k).pos == POS_STICKY) { lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height); break; }
     t->revision++;
     return LAYOUT_OK;
 }

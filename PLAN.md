@@ -704,7 +704,14 @@ be built side by side and merged without touching each other's.
       between specificity and order, which the reasons name.
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
-    writing modes and bidirectional text; hyphenation; kerning.
+    writing modes and bidirectional text; hyphenation; kerning. Then (12j):
+    grid's named lines and areas (`grid-template-areas`), column and dense
+    auto-flow, and Grid 1's track sizing (11.4-11.8) with spanning items;
+    flex's first and last baseline alignment and a flex container's
+    baseline; sticky boxes placed as at rest by Chromium's rules; an inline
+    element's fragments as a containing block; UAX #9 bidi by characters
+    (embeddings, overrides, isolates, brackets, `dir=auto`, `bdi`); each
+    held to Chromium's boxes (`tests/integ/boxes.sh`).
   - Paint: border styles, background images, box and text shadows, opacity,
     transforms, clipping; outer and inset shadows, elliptical and
     percentage radii, `background-clip` and `background-origin`; `filter`

@@ -7,10 +7,10 @@
    -->, at-rules (an @media whose query holds for the viewport, an @supports
    whose condition does, @layer, an @import fetched through the loader, and
    @font-face are read; every other at-rule skipped), style rules, declarations
-   with !important. The 104
+   with !important. The 106
    longhands of css_pdefs are read, each by its grammar: keywords, lengths and
    percentages, colours, numbers, and the values kept as their text (track
-   lists, grid lines, images and gradients, shadows, transforms, content,
+   lists, grid lines and areas, images and gradients, shadows, transforms, content,
    counters, quotes), each checked by a reader of its own. A shorthand is
    expanded into its longhands (css_shorts: margin, padding, inset, the border
    shorthands and border-radius, outline, font, background's layers,
@@ -55,7 +55,7 @@
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
-   height, align, a table's border) are author rules of specificity 0 before
+   height, align, a table's border; dir, as Chromium maps it) are author rules of specificity 0 before
    every other author rule. A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
    border's width 0 under style none, display blockified for a float, an
@@ -174,7 +174,9 @@ static const char css_ua_sheet[] =
     "select { background-color: ButtonFace }\n"
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
-    "input::placeholder, textarea::placeholder { color: #757575 }\n";
+    "input::placeholder, textarea::placeholder { color: #757575 }\n"
+    "bdi, output { unicode-bidi: isolate }\n"
+    "bdo { unicode-bidi: bidi-override }\n";
 
 /* ---- reading text ---- */
 
@@ -884,6 +886,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "transition-timing-function", 0, G_TEXT, 0, 0, "ease" },
     { "transition-delay", 0, G_TEXT, 0, 0, "0s" },
     { "transition-behavior", 0, G_TEXT, 0, 0, "normal" },
+    { "grid-template-areas", 0, G_TEXT, 0, "none", "none" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1462,6 +1465,46 @@ static int css_is_grid_line(const char *s, size_t n) {
     return parts > 0 && (num || name);
 }
 
+/* grid-template-areas (Grid 1, 7.3): strings, a row each, of as many cells each -- a cell
+   a name, or a run of full stops (a null cell) -- every name's cells a rectangle: as many
+   as the box its first and last rows and columns make. At most 128 names */
+static int css_is_areas(const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int rows = 0, cols = -1, nn = 0;
+    size_t nmo[128], nml[128];
+    int r0[128], r1[128], c0[128], c1[128], cnt[128];
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *q = s + st;
+        if (!css_is_string(q, ln)) return 0;
+        int c = 0;
+        size_t k = 1;
+        while (k + 1 < ln) {
+            if (css_ws(q[k])) { k++; continue; }
+            size_t b = k;
+            if (q[k] == '.') { while (k + 1 < ln && q[k] == '.') k++; c++; continue; }
+            while (k + 1 < ln && css_namechar(q[k])) k++;
+            if (k == b) return 0;            /* a trash token */
+            int a = 0;
+            while (a < nn && !(nml[a] == k - b && memcmp(s + nmo[a], q + b, k - b) == 0)) a++;
+            if (a == nn) {
+                if (nn == 128) return 0;
+                nmo[a] = st + b; nml[a] = k - b; r0[a] = r1[a] = rows; c0[a] = c1[a] = c; cnt[a] = 0; nn++;
+            }
+            if (rows < r0[a]) r0[a] = rows;
+            if (rows > r1[a]) r1[a] = rows;
+            if (c < c0[a]) c0[a] = c;
+            if (c > c1[a]) c1[a] = c;
+            cnt[a]++;
+            c++;
+        }
+        if (c == 0 || (cols >= 0 && c != cols)) return 0;
+        cols = c;
+        rows++;
+    }
+    for (int a = 0; a < nn; a++) if (cnt[a] != (r1[a] - r0[a] + 1) * (c1[a] - c0[a] + 1)) return 0;
+    return rows > 0;
+}
+
 static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
@@ -1496,6 +1539,7 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     }
     case CSS_PROP_GRID_COLUMN_START: case CSS_PROP_GRID_COLUMN_END: case CSS_PROP_GRID_ROW_START: case CSS_PROP_GRID_ROW_END:
         return css_is_grid_line(s, n);
+    case CSS_PROP_GRID_TEMPLATE_AREAS: return css_is_areas(s, n);
     case CSS_PROP_BACKGROUND_IMAGE: return css_is_list(6, s, n);
     case CSS_PROP_BACKGROUND_POSITION: return css_is_list(3, s, n);
     case CSS_PROP_BACKGROUND_SIZE: return css_is_list(4, s, n);
@@ -1673,6 +1717,15 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
         memset(v, 0, sizeof *v);
         v->unit = CSS_UNIT_TEXT;
         return 1;
+    }
+    if (p == CSS_PROP_ALIGN_ITEMS || p == CSS_PROP_ALIGN_SELF) {
+        /* first baseline (baseline's other name) and last baseline: the keywords baseline and
+           last-baseline, the text kept as written (Box Alignment 3, 4.2) */
+        size_t st[3], ln[3];
+        if (css_parts(s, n, st, ln, 3) == 2 && css_eq_ci(s + st[1], ln[1], "baseline")) {
+            if (css_eq_ci(s + st[0], ln[0], "first")) { css_word_val(v, "baseline"); return 1; }
+            if (css_eq_ci(s + st[0], ln[0], "last")) { css_word_val(v, "last-baseline"); return 1; }
+        }
     }
     return css_parse_val(s, n, v) && css_valid(p, v);
 }
@@ -1982,7 +2035,7 @@ static const css_short css_shorts[] = {
     { "grid-row", 2, { CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END } },
     { "grid-column", 2, { CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END } },
     { "grid-area", 4, { CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_ROW_END, CSS_PROP_GRID_COLUMN_END } },
-    { "grid-template", 2, { CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_TEMPLATE_COLUMNS } },
+    { "grid-template", 3, { CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_TEMPLATE_COLUMNS, CSS_PROP_GRID_TEMPLATE_AREAS } },
     { "animation", 8, { CSS_PROP_ANIMATION_NAME, CSS_PROP_ANIMATION_DURATION, CSS_PROP_ANIMATION_TIMING_FUNCTION, CSS_PROP_ANIMATION_DELAY,
                         CSS_PROP_ANIMATION_ITERATION_COUNT, CSS_PROP_ANIMATION_DIRECTION, CSS_PROP_ANIMATION_FILL_MODE,
                         CSS_PROP_ANIMATION_PLAY_STATE } },
@@ -2187,7 +2240,9 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         return 1;
     }
     case 27: {
-        /* grid-area: row-start / column-start / row-end / column-end */
+        /* grid-area: row-start / column-start / row-end / column-end; a part left out is the
+           one it pairs with when that is a name (column-start and row-end row-start's,
+           column-end column-start's), else auto (Grid 1, 8.4) */
         k = css_slashes(val, vn, st, ln, 5);
         if (k == 0 || k > 4) return 0;
         for (size_t j = 0; j < 4; j++) {
@@ -2195,18 +2250,90 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
             if (j < k) {
                 if (!css_longhand((css_prop)d->p[j], val + st[j], ln[j], &x) || css_is_global(&x)) return 0;
                 css_item_add(it, (css_prop)d->p[j], &x, st[j], ln[j]);
+                continue;
+            }
+            size_t f = j == 3 && k >= 2 ? 1 : 0;
+            if (css_is_ident(val + st[f], ln[f]) && !css_eq_ci(val + st[f], ln[f], "auto") && !css_eq_ci(val + st[f], ln[f], "span")) {
+                if (!css_longhand((css_prop)d->p[j], val + st[f], ln[f], &x)) return 0;
+                css_item_add(it, (css_prop)d->p[j], &x, st[f], ln[f]);
             } else { memset(&x, 0, sizeof x); x.unit = CSS_UNIT_TEXT; css_item_made(it, (css_prop)d->p[j], &x, "auto", 4); }
         }
         return 1;
     }
     case 28: {
-        /* grid-template: none, or rows / columns */
-        if (css_eq_ci(val, vn, "none")) { css_word_val(&v, "none"); css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, 0, vn); css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &v, 0, vn); return 1; }
+        /* grid-template: none; rows / columns; or the areas' strings, each row's after its
+           string with its line names, and after a / the columns (Grid 1, 7.4) */
+        if (css_eq_ci(val, vn, "none")) {
+            css_word_val(&v, "none");
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, 0, vn);
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &v, 0, vn);
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_AREAS, &v, 0, vn);
+            return 1;
+        }
         k = css_slashes(val, vn, st, ln, 3);
-        if (k != 2) return 0;
-        if (!css_longhand(CSS_PROP_GRID_TEMPLATE_ROWS, val + st[0], ln[0], &v) || !css_longhand(CSS_PROP_GRID_TEMPLATE_COLUMNS, val + st[1], ln[1], &w)) return 0;
-        css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, st[0], ln[0]);
-        css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, st[1], ln[1]);
+        if (k == 0 || k > 2) return 0;
+        size_t q = css_skip_ws(val, st[0] + ln[0], st[0]);
+        int strings = 0;
+        for (size_t j = st[0]; j < st[0] + ln[0]; j++) if (val[j] == '"' || val[j] == '\'') strings = 1;
+        if (!strings) {
+            if (k != 2) return 0;
+            if (!css_longhand(CSS_PROP_GRID_TEMPLATE_ROWS, val + st[0], ln[0], &v) || !css_longhand(CSS_PROP_GRID_TEMPLATE_COLUMNS, val + st[1], ln[1], &w)) return 0;
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_ROWS, &v, st[0], ln[0]);
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, st[1], ln[1]);
+            css_word_val(&v, "none");
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_AREAS, &v, 0, vn);
+            return 1;
+        }
+        /* the strings are the areas; the rows their sizes (auto where none is given) and
+           the line names about them. state: 0 before a string, 1 after one, 2 after its size */
+        char rows[1024], areas[1024];
+        size_t rn = 0, an = 0, e0 = st[0] + ln[0];
+        int state = 0;
+        while (q < e0) {
+            size_t b = q, e;
+            if (val[q] == '"' || val[q] == '\'') {
+                e = css_string_end(val, e0, q);
+                if (e >= e0) return 0;
+                if (state == 1) { if (rn + 5 > sizeof rows) return 0; memcpy(rows + rn, "auto ", 5); rn += 5; }
+                if (an + (e - b) + 2 > sizeof areas) return 0;
+                memcpy(areas + an, val + b, e - b + 1);
+                an += e - b + 1;
+                areas[an++] = ' ';
+                state = 1;
+            } else if (val[q] == '[') {
+                e = css_block_end(val, e0, q, '[', ']');
+                if (e >= e0) return 0;
+                if (state == 1) { if (rn + 5 > sizeof rows) return 0; memcpy(rows + rn, "auto ", 5); rn += 5; state = 2; }
+                if (rn + (e - b) + 2 > sizeof rows) return 0;
+                memcpy(rows + rn, val + b, e - b + 1);
+                rn += e - b + 1;
+                rows[rn++] = ' ';
+            } else {
+                /* a row's size: to the next white space, a function's parentheses kept whole */
+                size_t z = q;
+                while (z < e0 && !css_ws(val[z])) { if (val[z] == '(') z = css_block_end(val, e0, z, '(', ')'); if (z < e0) z++; }
+                e = z - 1;
+                if (state != 1 || !css_is_track(val + b, e - b + 1) || rn + (e - b) + 2 > sizeof rows) return 0;
+                memcpy(rows + rn, val + b, e - b + 1);
+                rn += e - b + 1;
+                rows[rn++] = ' ';
+                state = 2;
+            }
+            q = css_skip_ws(val, e0, e + 1);
+        }
+        if (state == 1) { if (rn + 4 > sizeof rows) return 0; memcpy(rows + rn, "auto", 4); rn += 4; }
+        while (rn > 0 && rows[rn - 1] == ' ') rn--;
+        while (an > 0 && areas[an - 1] == ' ') an--;
+        if (!css_is_areas(areas, an) || !css_is_tracks(rows, rn, 0)) return 0;
+        css_val tv;
+        memset(&tv, 0, sizeof tv);
+        tv.unit = CSS_UNIT_TEXT;
+        if (k == 2) {
+            if (!css_longhand(CSS_PROP_GRID_TEMPLATE_COLUMNS, val + st[1], ln[1], &w) || css_is_global(&w)) return 0;
+            css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, st[1], ln[1]);
+        } else { css_word_val(&w, "none"); css_item_add(it, CSS_PROP_GRID_TEMPLATE_COLUMNS, &w, 0, vn); }
+        css_item_made(it, CSS_PROP_GRID_TEMPLATE_ROWS, &tv, rows, rn);
+        css_item_made(it, CSS_PROP_GRID_TEMPLATE_AREAS, &tv, areas, an);
         return 1;
     }
     case 29: return css_anim_short(0, val, vn, it);
@@ -5852,6 +5979,27 @@ static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, u
         else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
         push_back(matched, r);
     }
+    /* dir (HTML 15.3.6), a hint as Chromium maps it: ltr and rtl its direction; and every
+       dir but a bdi's, a bdo's and an output's isolates (auto a pre's or a textarea's
+       plaintext) */
+    uint32_t da = css_attr_of(d, x, "dir", 3);
+    if (!da) return;
+    amb_span dv = d->attr[da].value;
+    int ltr = css_eq_ci(text_ptr(d, dv), dv.len, "ltr"), rtl = css_eq_ci(text_ptr(d, dv), dv.len, "rtl");
+    int autod = css_eq_ci(text_ptr(d, dv), dv.len, "auto");
+    if (!ltr && !rtl && !autod) return;
+    uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, "the dir attribute", 17, 1);
+    css_val v;
+    const char *text = rtl ? "dir=rtl" : ltr ? "dir=ltr" : "dir=auto";
+    if (ltr || rtl) {
+        css_word_val(&v, rtl ? "rtl" : "ltr");
+        css_add_decl(s, r, CSS_PROP_DIRECTION, &v, 0, text, strlen(text), 0);
+    }
+    if (!css_word_in(names_ptr(d, d->node[x].name), "bdi bdo output")) {
+        css_word_val(&v, autod && css_word_in(names_ptr(d, d->node[x].name), "pre textarea") ? "plaintext" : "isolate");
+        css_add_decl(s, r, CSS_PROP_UNICODE_BIDI, &v, 0, text, strlen(text), 0);
+    }
+    push_back(matched, r);
 }
 
 static void css_style_attr(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {

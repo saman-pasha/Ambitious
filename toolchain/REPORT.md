@@ -324,3 +324,18 @@ neighbours.
     }
     int main(void) { scribble(); printf("%d\n", in_struct(1)); return 0; }
     ```
+21. **A block-scoped local that shadows a parameter, declared without an
+    initializer and assigned later, is taken for the parameter** by the
+    ownership checker; with an initializer it compiles. 12j's layout met it
+    twice, with locals named as the layout context's macro parameters:
+
+    ```c
+    static double sum(vector<int> *v) {
+        double r = 0;
+        for (int i = 0; i < 2; i++) { double v; v = i; r += v; }
+        return r + (double)len(*v);
+    }
+    ```
+
+    reports `error: owner overwritten while live: 'v->data' in
+    assign(=,id(v),id(i))`. The work-around is another name.

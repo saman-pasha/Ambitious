@@ -157,9 +157,61 @@ a word hyphenated (ok, invariants: 0 broken)
     line 8,34 100x18 baseline 48: [text 8+19.5469 'ble']
 right-to-left text (ok, invariants: 0 broken)
   #a block: content 8,16 200x18; margins 16 584 16 0; width declared of 784
-    line 8,16 200x18 baseline 30: [text 185.797+22.2031 'abc'] [text 159.203+22.5938 'גבא'] [text 134.773+20.4297 'def']
+    line 8,16 200x18 baseline 30: [text 134.773+20.4297 'def'] [text 159.203+22.5938 'גבא'] [text 185.797+22.2031 'abc']
+right-to-left brackets, mirrored; numbers and isolates (ok, invariants: 0 broken)
+  #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [text 713.758+16 '12'] [text 733.758+58.2422 '(והד) גבא']
+  #b block: content 8,50 784x18; margins 16 0 16 0; width fill of 784
+    line 8,50 784x18 baseline 64: [text 8+15.1016 'ab'] [text 27.1016+17.3125 'בא'] [text 48.4141+4 ','] [text 52.4141+15.1016 'cd'] [text 71.5156+12.4297 'ef']
 generated content and counters (ok, invariants: 0 broken)
   #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
     line 48,16 744x18 baseline 30: [generated 48+12 '1.'] [text 64+8 'x']
   #b list_item: content 48,34 744x18; margins 0 0 0 0; width fill of 744
     line 48,34 744x18 baseline 48: [generated 48+12 '2.'] [text 64+8 'y']
+a grid's named areas and named lines (ok, invariants: 0 broken)
+  #a block: content 108,26 200x18; margins 0 0 0 0; width grid of 200
+    line 108,26 200x18 baseline 40: [text 108+12.4453 'm']
+  #b block: content 8,8 300x18; margins 0 0 0 0; width grid of 300
+    line 8,8 300x18 baseline 22: [text 8+8 'h']
+  #e block: content 8,26 100x18; margins 0 0 0 0; width grid of 100
+    line 8,26 100x18 baseline 40: [text 8+7.10156 'e']
+  #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
+a grid's column flow, dense (ok, invariants: 0 broken)
+  #a block: content 8,8 50x20; margins 0 0 0 0; width grid of 50
+    line 8,8 50x18 baseline 22: [text 8+8 '1']
+  #b block: content 58,8 50x40; margins 0 0 0 0; width grid of 50
+    line 58,8 50x18 baseline 22: [text 58+8 '2']
+  #e block: content 8,28 50x20; margins 0 0 0 0; width grid of 50
+    line 8,28 50x18 baseline 42: [text 8+8 '3']
+  #t grid: content 8,8 784x40; margins 0 0 0 0; width fill of 784
+a grid item that spans two auto columns (ok, invariants: 0 broken)
+  #a block: content 8,8 68.6445x18; margins 0 0 0 0; width grid of 68.6445
+    line 8,8 68.6445x18 baseline 22: [text 8+7.10156 'a']
+  #b block: content 76.6445,8 77.543x18; margins 0 0 0 0; width grid of 77.543
+    line 76.6445,8 77.543x18 baseline 22: [text 76.6445+16 'bb']
+  #e block: content 8,26 146.188x18; margins 0 0 0 0; width grid of 146.188
+    line 8,26 146.188x18 baseline 40: [text 8+146.188 'a longer spanning item']
+  #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
+flex items aligned on their baselines (ok, invariants: 0 broken)
+  #a block: content 8,24 8x18; margins 0 0 0 0; width flex of 784
+    line 8,24 8x18 baseline 38: [text 8+8 'x']
+  #b block: content 16,9 23.1094x37; margins 0 0 0 0; width flex of 784
+    line 16,9 23.1094x37 baseline 38: [text 16+23.1094 'Y']
+  #e block: content 39.1094,8 20x30; margins 0 0 0 0; width flex of 784
+  #t flex: content 8,8 784x38; margins 0 0 0 0; width fill of 784
+an inline-flex's baseline, its first item's border box's bottom (ok, invariants: 0 broken)
+  #a flex: content 20,16 28x30; margins 0 0 0 0; width shrink_to_fit of 784
+  #b block: content 20,16 20x30; margins 0 0 0 0; width flex of 28
+  #p block: content 8,16 784x34; margins 16 0 16 0; width fill of 784
+    line 8,16 784x34 baseline 46: [text 8+8 'x'] [atomic 20+28 '']
+an absolutely positioned box in a relatively positioned span (ok, invariants: 0 broken)
+  #a block: content 39,28 5x5; margins 0 0 0 0; width declared of 24
+  #p block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
+    line 8,16 784x18 baseline 30: [inline 20+24 ''] [text 8+8 'x'] [text 24+16 'yy']
+  #t inline: 20,16 24x17
+sticky boxes moved in from the viewport's edges, within their blocks (ok, invariants: 0 broken)
+  #a block: content 8,50 784x18; margins 0 0 0 0; width fill of 784
+    line 8,50 784x18 baseline 64: [text 8+8 'x']
+  #b block: content 8,582 784x18; margins 0 0 0 0; width fill of 784
+    line 8,582 784x18 baseline 596: [text 8+8 'y']
+  #t block: content 8,8 784x200; margins 0 0 0 0; width fill of 784

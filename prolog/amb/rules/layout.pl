@@ -7,7 +7,8 @@
 %% No clause here cuts: amb_why/2 proves these rules clause by clause.
 :- dynamic layout_box/7, layout_parent/2, layout_margin/5, layout_border/5, layout_padding/5, layout_width/4,
            layout_line/6, layout_text/8, layout_frag/8, layout_pseudo/2, layout_generated/3, layout_positioned/5,
-           layout_stacking/2, layout_float/2, layout_clips/1, layout_background/2.
+           layout_stacking/2, layout_float/2, layout_clips/1, layout_background/2, layout_grid_item/6, layout_grid_area/2,
+           layout_inline_cb/2.
 
 %% the box an element generated (its pseudo-elements' are theirs)
 layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, \+ layout_pseudo(B, _).
@@ -18,18 +19,21 @@ layout_pseudo_box_of(N, P, B) :-
     (   K =:= 1 -> P = before ; P = after ).
 
 %% an inline element's box, which is no box of the tree's: the fragments it makes (its
-%% background's, its generated content's) and its text's, together
+%% background's, its generated content's), its text's, an atomic inline's in it, and those
+%% of the inline elements in it, together
 layout_inline_box(N, X, Y, W, H) :-
     dom_element(N, _), \+ layout_box_of(N, _),
-    findall(r(X0, Y0, X1, Y1),
-            ( (   dom_parent(T, N), layout_text(_, _, T, _, X0, Y0, W0, H0)
-              ;   layout_frag(_, _, K, N, X0, Y0, W0, H0), K \== atomic
-              ),
-              X1 is X0 + W0, Y1 is Y0 + H0 ), Rs),
+    findall(r(X0, Y0, X1, Y1), ( layout_rules_inline_part(N, X0, Y0, W0, H0), X1 is X0 + W0, Y1 is Y0 + H0 ), Rs),
     Rs \== [],
     aggregate_all(min(A), member(r(A, _, _, _), Rs), X), aggregate_all(min(B), member(r(_, B, _, _), Rs), Y),
     aggregate_all(max(C), member(r(_, _, C, _), Rs), XE), aggregate_all(max(D), member(r(_, _, _, D), Rs), YE),
     W is XE - X, H is YE - Y.
+
+layout_rules_inline_part(N, X, Y, W, H) :- layout_frag(_, _, K, N, X, Y, W, H), K \== atomic.
+layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(T, N), layout_text(_, _, T, _, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :- dom_parent(C, N), dom_element(C, _), layout_frag(_, _, atomic, C, X, Y, W, H).
+layout_rules_inline_part(N, X, Y, W, H) :-
+    dom_parent(C, N), dom_element(C, _), \+ layout_box_of(C, _), layout_rules_inline_part(C, X, Y, W, H).
 
 %% a box's border box
 layout_border_box(B, X, Y, W, H) :-
@@ -38,19 +42,32 @@ layout_border_box(B, X, Y, W, H) :-
 
 %% why a box is where it is: the flow put it there; it floats to a side; it is offset
 %% from where the flow put it (relative), or placed in its containing block (absolute:
-%% the nearest positioned ancestor's, or the viewport's) or the viewport (fixed); sticky
-%% at rest, where the flow put it
+%% the nearest positioned ancestor's, or the viewport's; an inline element's first and
+%% last fragments, when the ancestor is one) or the viewport (fixed); sticky
+%% at rest, where the flow put it, or moved by (DX, DY) to keep the distance its offsets
+%% ask from its scrollport's edges, within its containing block; a grid item in its area, by the area's name, by its
+%% lines, or placed automatically (rows and columns as the explicit grid numbers its
+%% lines: the first line of each, and the line past the last)
 layout_explain_position(B, Why) :-
     layout_box(B, _, K, _, _, _, _), K \== viewport,
-    (   layout_positioned(B, P, CB, DX, DY)
+    (   layout_inline_cb(B, N), dom_element(N, E)
+    ->  Why = absolute(in_fragments_of(E))
+    ;   layout_positioned(B, P, CB, DX, DY)
     ->  layout_rules_position(P, CB, DX, DY, Why)
     ;   layout_float(B, Side)
     ->  Why = floated(Side)
+    ;   layout_grid_item(B, R, C, RS, CS, By)
+    ->  R1 is R + RS, C1 is C + CS, layout_rules_grid(By, B, rows(R, R1), columns(C, C1), Why)
     ;   Why = flow
     ).
 
+layout_rules_grid(area, B, Rows, Cols, grid_area(Name, Rows, Cols)) :- layout_grid_area(B, Name).
+layout_rules_grid(lines, _, Rows, Cols, grid_lines(Rows, Cols)).
+layout_rules_grid(auto, _, Rows, Cols, grid_auto(Rows, Cols)).
+
 layout_rules_position(relative, _, DX, DY, offset(DX, DY)).
-layout_rules_position(sticky, _, _, _, sticky(at_rest)).
+layout_rules_position(sticky, _, DX, DY, Why) :-
+    (   DX =:= 0, DY =:= 0 -> Why = sticky(at_rest) ; Why = sticky(at_rest, offset(DX, DY)) ).
 layout_rules_position(fixed, _, _, _, fixed(viewport)).
 layout_rules_position(absolute, CB, _, _, absolute(in(E))) :- layout_rules_named(CB, E).
 
