@@ -134,11 +134,14 @@ typedef struct js_obj {
 #define JO_FASTCALL 16        /* a closure the interpreter calls with a frame of its own: not a class's
                                  constructor, without arguments or a rest parameter */
 #define JO_WEAK 32            /* a WeakMap, a WeakSet or a WeakRef (src/js/proxy.c) */
+#define JO_SEALED 64          /* sealed: every own property not configurable (src/js/proxy.c) */
 
 /* a shape: the key it adds to its parent's, at which slot; its proto, its count */
 typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js_shape;
 #define JS_SHAPE_ACCESSOR 1   /* the slot holds an accessor pair */
 #define JS_SHAPE_HIDDEN 2     /* not enumerable */
+#define JS_SHAPE_READONLY 4   /* not writable (Object.defineProperty's; src/js/proxy.c) */
+#define JS_SHAPE_FIXED 8      /* not configurable (the same) */
 
 typedef struct js_str { uint32_t off, len, hash, atom, left, right; uint32_t rope; } js_str;
 
@@ -425,7 +428,10 @@ enum { JPX_PROXY, JPX_REVOCABLE, JPX_REVOKE,
        JPX_R_APPLY, JPX_R_CONSTRUCT, JPX_R_DEFINE, JPX_R_DELETE, JPX_R_GET, JPX_R_GETOWNDESC, JPX_R_GETPROTO, JPX_R_HAS,
        JPX_R_ISEXTENSIBLE, JPX_R_OWNKEYS, JPX_R_PREVENTEXT, JPX_R_SET, JPX_R_SETPROTO,
        JPX_WEAKMAP, JPX_WEAKSET, JPX_WM_GET, JPX_WM_SET, JPX_WM_HAS, JPX_WM_DELETE, JPX_WS_ADD,
-       JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER, JPX_N };
+       JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER,
+       /* Object's functions over the descriptors (builtins.c's Object passes them here) */
+       JPX_OBJ_DEFPROP, JPX_OBJ_DEFPROPS, JPX_OBJ_GETOWNDESC, JPX_OBJ_PREVENTEXT, JPX_OBJ_SEAL, JPX_OBJ_ISSEALED, JPX_OBJ_ISFROZEN,
+       JPX_N };
 jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_proxy_init(js_vm *vm, uint32_t first);
 /* typed arrays (src/js/typed.c): an element read and written (0: the conversion threw; an

@@ -1646,42 +1646,15 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (vm->objs[jv_idx(a0)].kind == JK_PROXY) {
             jv r = js_proxy_native(vm, JPX_R_SETPROTO, callee, thisv, args, argc, newt);
             if (vm->throwing) return JV_HOLE;
-            if (r == JV_FALSE) return js_throw_msg(vm, vm->type_error_proto, "'setPrototypeOf' on proxy: trap returned falsish");
+            if (r == JV_FALSE) return js_throw_msg(vm, vm->type_error_proto, "'setPrototypeOf' on proxy: trap returned falsish for property 'undefined'");
             return a0;
         }
         js_set_proto(vm, jv_idx(a0), a1 == JV_NULL ? 0 : jv_idx(a1));
         return a0;
     }
-    case N_OBJ_DEFPROP: case N_OBJ_DEFPROPS: {
-        if (!jv_is_obj(a0)) return js_throw_msg(vm, vm->type_error_proto, "Object.defineProperty called on non-object");
-        if (id == N_OBJ_DEFPROP && vm->objs[jv_idx(a0)].kind == JK_PROXY) {
-            jv r = js_proxy_native(vm, JPX_R_DEFINE, callee, thisv, args, argc, newt);
-            if (vm->throwing) return JV_HOLE;
-            if (r == JV_FALSE) return js_throw_msg(vm, vm->type_error_proto, "'defineProperty' on proxy: trap returned falsish");
-            return a0;
-        }
-        uint32_t o = jv_idx(a0);
-        uint32_t keys = js_array_new(vm, 0);
-        jv descs = id == N_OBJ_DEFPROPS ? a1 : JV_UNDEF;
-        if (id == N_OBJ_DEFPROP) {
-            int kok = 1;
-            uint32_t key = js_prop_key(vm, a1, &kok);
-            if (!kok) return JV_HOLE;
-            js_array_push(vm, keys, js_key_is_sym(key) ? jv_sym(key & ~JS_SYM_KEY) : jv_str(key));
-        } else if (jv_is_obj(descs)) { js_own_keys(vm, jv_idx(descs), 1, keys); js_own_symbols(vm, jv_idx(descs), keys); }
-        for (uint32_t k = 0; k < vm->objs[keys].b && !vm->throwing; k++) {
-            jv kv = js_array_get(vm, keys, k);
-            uint32_t atom = jv_is_sym(kv) ? (JS_SYM_KEY | jv_idx(kv)) : js_atom(vm, jv_idx(kv));
-            jv d = id == N_OBJ_DEFPROP ? arg(vm, args, argc, 2) : js_get(vm, descs, atom);
-            if (!jv_is_obj(d)) return js_throw_msg(vm, vm->type_error_proto, "Property description must be an object");
-            uint32_t flags = js_truthy(vm, js_get(vm, d, A_ENUMERABLE)) ? 0 : JS_SHAPE_HIDDEN;
-            jv g = js_get(vm, d, A_GET), s = js_get(vm, d, A_SET);
-            if (g != JV_UNDEF || s != JV_UNDEF) js_define_accessor(vm, o, atom, g == JV_UNDEF ? JV_HOLE : g, s == JV_UNDEF ? JV_HOLE : s, flags);
-            else if (vm->objs[o].kind == JK_ARRAY) js_set(vm, a0, atom, js_get(vm, d, A_VALUE));
-            else js_define(vm, o, atom, js_get(vm, d, A_VALUE), flags);
-        }
-        return a0;
-    }
+    case N_OBJ_DEFPROP: case N_OBJ_DEFPROPS:
+        /* over the descriptors: src/js/proxy.c's, which keeps writable and configurable */
+        return js_proxy_native(vm, id == N_OBJ_DEFPROP ? JPX_OBJ_DEFPROP : JPX_OBJ_DEFPROPS, callee, thisv, args, argc, newt);
     case N_OBJ_NAMES: {
         jv o = js_to_object(vm, a0);
         if (vm->throwing) return JV_HOLE;
@@ -1782,33 +1755,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         }
         return jv_obj(o);
     }
-    case N_OBJ_GETOWNDESC: {
-        if (!jv_is_obj(a0)) return JV_UNDEF;
-        int kok = 1;
-        uint32_t atom = js_prop_key(vm, a1, &kok);
-        if (!kok) return JV_HOLE;
-        jv v;
-        uint32_t f;
-        if (!js_get_own(vm, jv_idx(a0), atom, &v, &f)) {
-            if (vm->objs[jv_idx(a0)].kind == JK_ARRAY || vm->objs[jv_idx(a0)].kind == JK_STRING) {
-                jv x = js_get(vm, a0, atom);
-                if (x == JV_UNDEF) return JV_UNDEF;
-                v = x;
-                f = 0;
-            } else return JV_UNDEF;
-        }
-        uint32_t d = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-        if (f & JS_SHAPE_ACCESSOR) {
-            js_define(vm, d, A_GET, vm->objs[jv_idx(v)].x, 0);
-            js_define(vm, d, A_SET, vm->objs[jv_idx(v)].a ? jv_obj(vm->objs[jv_idx(v)].a) : JV_UNDEF, 0);
-        } else {
-            js_define(vm, d, A_VALUE, v, 0);
-            js_define(vm, d, A_WRITABLE, JV_TRUE, 0);
-        }
-        js_define(vm, d, A_ENUMERABLE, jv_bool(!(f & JS_SHAPE_HIDDEN)), 0);
-        js_define(vm, d, A_CONFIGURABLE, JV_TRUE, 0);
-        return jv_obj(d);
-    }
+    case N_OBJ_GETOWNDESC: return js_proxy_native(vm, JPX_OBJ_GETOWNDESC, callee, thisv, args, argc, newt);
     case N_OBJ_IS: {
         if (jv_is_num(a0) && jv_is_num(a1)) {
             double x = jv_dbl(a0), y = jv_dbl(a1);
@@ -2711,11 +2658,11 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, o, "getOwnPropertyNames", N_OBJ_NAMES, 1);
     defn(vm, o, "getOwnPropertyDescriptor", N_OBJ_GETOWNDESC, 2);
     defn(vm, o, "freeze", N_OBJ_FREEZE, 1);
-    defn(vm, o, "isFrozen", N_OBJ_ISFROZEN, 1);
-    defn(vm, o, "preventExtensions", N_OBJ_PREVENTEXT, 1);
-    defn(vm, o, "seal", N_OBJ_PREVENTEXT, 1);
+    defn(vm, o, "isFrozen", N_PX_FIRST + JPX_OBJ_ISFROZEN, 1);
+    defn(vm, o, "preventExtensions", N_PX_FIRST + JPX_OBJ_PREVENTEXT, 1);
+    defn(vm, o, "seal", N_PX_FIRST + JPX_OBJ_SEAL, 1);
     defn(vm, o, "isExtensible", N_OBJ_ISEXT, 1);
-    defn(vm, o, "isSealed", N_OBJ_ISSEALED, 1);
+    defn(vm, o, "isSealed", N_PX_FIRST + JPX_OBJ_ISSEALED, 1);
     defn(vm, o, "hasOwn", N_OBJ_HASOWN, 2);
     defn(vm, o, "getOwnPropertyDescriptors", N_OBJ_GETOWNDESCS, 1);
     defn(vm, o, "groupBy", N_OBJ_GROUPBY, 2);
