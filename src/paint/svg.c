@@ -23,6 +23,9 @@
    attribute and the stops inherited through href) and a fallback. Clip-path: url(#id) of a
    clipPath (clipPathUnits, its transform, its shapes' and uses' clip-rule, a clip-path on
    the clipPath itself), a group of its own.
+   Text: text and tspan (x, y, dx, dy lists, text-anchor by chunks, font-size, -family,
+   -weight, -style, letter- and word-spacing, fill), its glyphs placed by the built-in
+   faces' advances and kerning.
 
    THE DRAWING (amb_svg_draw). Every coordinate is mapped to the device's px, an svg's
    content placed at whole CSS px as Chromium places it. Curves are flattened at the
@@ -42,8 +45,10 @@
    clip's shapes' coverage (their union) a mask: a clip-path's times its bounding box's,
    as Blink clips by both and Skia multiplies the two (a rectangle along the axes clips as
    itself alone).
+   Glyphs are drawn from font.c's masks at their device size, placed as the page's text is
+   (a quarter of a px across, a whole px down); a rotated or skewed run is drawn upright.
 
-   Not done: text and SVG documents as images (this package's next steps); filters, masks, markers, patterns, images inside SVG, foreignObject,
+   Not done: SVG documents as images (this package's next step); filters, masks, markers, patterns, images inside SVG, foreignObject,
    SMIL animation, textPath, a text's stroke, its rotate, textLength and baseline
    properties, paint-order, vector-effect, a CSS clip-path's basic shapes, and fonts other
    than the built-in faces in SVG text. */
@@ -1242,6 +1247,8 @@ static void sv_use(SB, uint32_t x, const sv_walk *w, sv_mat m, int depth) {
     resize(uses, len(*uses) - 1);
 }
 
+static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m);
+
 static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     if (depth > 64 || ++*work > SV_WORK || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_SVG) return;
     uint32_t c0 = sv_first(firsts, x);
@@ -1249,8 +1256,8 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     int shape = sv_is(d, x, "rect") || sv_is(d, x, "circle") || sv_is(d, x, "ellipse") || sv_is(d, x, "line") || sv_is(d, x, "polyline") ||
                 sv_is(d, x, "polygon") || sv_is(d, x, "path");
     int group = sv_is(d, x, "g") || sv_is(d, x, "a") || sv_is(d, x, "switch");
-    int nested = sv_is(d, x, "svg"), use = sv_is(d, x, "use");
-    if (!shape && !group && !nested && !use) return;
+    int nested = sv_is(d, x, "svg"), use = sv_is(d, x, "use"), text = sv_is(d, x, "text");
+    if (!shape && !group && !nested && !use && !text) return;
     sv_walk w;
     sv_inherit(st, firsts, x, pw, &w);
     sv_mat mm = sv_mul(m, sv_transform_of(d, st, firsts, x, &w));
@@ -1273,8 +1280,217 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
         double vx = sv_len_attr(d, x, "x", pw->vw, fs, 0, &g), vy = sv_len_attr(d, x, "y", pw->vh, fs, 0, &g);
         double vw = sv_len_attr(d, x, "width", pw->vw, fs, pw->vw, &g), vh = sv_len_attr(d, x, "height", pw->vh, fs, pw->vh, &g);
         sv_viewport(SA, x, &w, mm, vx, vy, vw, vh, depth);
-    } else sv_use(SA, x, &w, mm, depth);
+    } else if (use) sv_use(SA, x, &w, mm, depth);
+    else sv_text(SA, x, &w, mm);
     for (int k = 0; k < grouped; k++) sv_w(out, "e\n");
+}
+
+/* ---- text (SVG 2, 11): its glyphs placed ---- */
+
+/* a text's characters, each with what places and draws it: its code point; the element it is
+   in (its style's); its x, y, dx, dy as the lists set them (set: bit k for each of the four) */
+typedef struct sv_char { uint32_t cp, el, set; double x, y, dx, dy; } sv_char;
+
+/* the characters of x's text nodes and tspans into cs, white space collapsed as CSS's normal
+   collapses it (a run of spaces, tabs and newlines one space, none at the text's start);
+   each element's own walk into ws (its index in els, with its style) */
+static void sv_text_chars(const dom_document *d, uint32_t x, vector<sv_char> *cs, vector<uint32_t> *els, int *space, int depth) {
+    if (depth > 32) return;
+    push_back(els, x);
+    uint32_t ei = (uint32_t)len(*els) - 1;
+    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+        if (d->node[c].kind == DOM_NODE_KIND_TEXT) {
+            amb_span sp = d->node[c].data;
+            vector<char> t;
+            append_range(t, text_ptr(d, sp), sp.len);
+            size_t i = 0;
+            while (i < len(t)) {
+                uint32_t cp = amb_utf8_next(data(t), len(t), &i);
+                if (cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r') {
+                    if (*space) continue;
+                    *space = 1;
+                    cp = ' ';
+                } else *space = 0;
+                sv_char ch;
+                ch.cp = cp;
+                ch.el = ei;
+                ch.set = 0;
+                ch.x = ch.y = ch.dx = ch.dy = 0;
+                push_back(cs, ch);
+            }
+        } else if (sv_is(d, c, "tspan") || sv_is(d, c, "a")) sv_text_chars(d, c, cs, els, space, depth + 1);
+    }
+}
+
+/* an element's x, y, dx or dy list set on its characters from the first, k (0 x, 1 y, 2 dx,
+   3 dy), for those of its own and its descendants' (the descendants' set after) */
+static void sv_text_list(const dom_document *d, uint32_t x, const char *name, int k, uint32_t ei, const vector<uint32_t> *els,
+                         vector<sv_char> *cs, double basis, double fs) {
+    vector<char> v;
+    if (!sv_attr_text(d, x, name, &v)) return;
+    /* the element's characters: those whose element is it or below it */
+    size_t i = 0, ci = 0, n = len(*cs);
+    while (ci < n) {
+        uint32_t e = at(*cs, ci).el;
+        int mine = 0;
+        for (uint32_t a = at(*els, e); a; a = d->node[a].parent) if (a == x) { mine = 1; break; }
+        if (mine) break;
+        ci++;
+    }
+    (void)ei;
+    while (i < len(v) && ci < n) {
+        i = sv_skip_sep(data(v), len(v), i);
+        if (i >= len(v)) break;
+        size_t b = i;
+        while (i < len(v) && !sv_ws(at(v, i)) && at(v, i) != ',') i++;
+        int ok;
+        double val = sv_length(data(v) + b, i - b, basis, fs, &ok);
+        if (!ok) break;
+        uint32_t e = at(*cs, ci).el;
+        int mine = 0;
+        for (uint32_t a = at(*els, e); a; a = d->node[a].parent) if (a == x) { mine = 1; break; }
+        if (!mine) break;
+        sv_char ch = at(*cs, ci);
+        if (k == 0) ch.x = val;
+        else if (k == 1) ch.y = val;
+        else if (k == 2) ch.dx = val;
+        else ch.dy = val;
+        ch.set |= 1u << k;
+        (*cs)[ci] = ch;
+        ci++;
+    }
+}
+
+/* the built-in face a walk's font names: its family and weight */
+static int sv_face(const css_style *st, const sv_walk *w) {
+    uint32_t fc = w->src[SI_FONT_FAMILY];
+    const char *fam = st->cval[fc].word ? names_ptr(st, st->cval[fc].word) : "serif";
+    int bold = st->cval[w->src[SI_FONT_WEIGHT]].num >= 600;
+    int face = amb_face_named(fam, bold);
+    return face < 0 ? (bold ? AMB_FACE_SERIF_BOLD : AMB_FACE_SERIF) : face;
+}
+
+/* a text element's glyphs: its characters placed by their lists and advances, each chunk
+   (from an absolutely placed character) moved by its text-anchor; runs of one style each a
+   line: its matrix, face, size, slant, paint, opacity, then each glyph's code point and
+   place */
+static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
+    vector<sv_char> cs;
+    vector<uint32_t> els;
+    int space = 1;
+    sv_text_chars(d, x, &cs, &els, &space, 0);
+    while (len(cs) && at(cs, len(cs) - 1).cp == ' ') resize(cs, len(cs) - 1);
+    if (!len(cs)) return;
+    /* each element's walk, its parent's first */
+    size_t ne = len(els);
+    vector<sv_walk> ws;
+    for (size_t k = 0; k < ne; k++) {
+        uint32_t e = at(els, k);
+        sv_walk pw = *w, cw;
+        if (k > 0) {
+            for (size_t q = 0; q < k; q++) if (at(els, q) == d->node[e].parent) pw = at(ws, q);
+            sv_inherit(st, firsts, e, &pw, &cw);
+        } else cw = *w;
+        push_back(ws, cw);
+    }
+    /* the lists: the text's, then each tspan's over its own characters */
+    for (size_t k = 0; k < ne; k++) {
+        uint32_t e = at(els, k);
+        sv_walk ew = at(ws, k);
+        double fs = sv_fs(st, &ew);
+        sv_text_list(d, e, "x", 0, (uint32_t)k, &els, &cs, w->vw, fs);
+        sv_text_list(d, e, "y", 1, (uint32_t)k, &els, &cs, w->vh, fs);
+        sv_text_list(d, e, "dx", 2, (uint32_t)k, &els, &cs, w->vw, fs);
+        sv_text_list(d, e, "dy", 3, (uint32_t)k, &els, &cs, w->vh, fs);
+    }
+    /* the pen: each character's place, then each chunk moved by its anchor */
+    size_t n = len(cs);
+    vector<double> gx, gy;
+    resize(gx, n);
+    resize(gy, n);
+    double px = 0, py = 0;
+    size_t chunk = 0;
+    for (size_t i = 0; i <= n; i++) {
+        int starts = i == n || (i > 0 && (at(cs, i).set & 3));
+        if (starts && i > 0) {
+            /* the chunk before ends: its anchor (its first character's element's) */
+            sv_walk aw = at(ws, at(cs, chunk).el);
+            int an = sv_word_is(st, aw.src[SI_ANCHOR], "middle") ? 1 : sv_word_is(st, aw.src[SI_ANCHOR], "end") ? 2 : 0;
+            if (an) {
+                double x0 = at(gx, chunk), x1 = px, shift = an == 1 ? (x1 - x0) / 2 : x1 - x0;
+                for (size_t q = chunk; q < i; q++) gx[q] = at(gx, q) - shift;
+            }
+            chunk = i;
+        }
+        if (i == n) break;
+        sv_char ch = at(cs, i);
+        if (ch.set & 1) px = ch.x;
+        if (ch.set & 2) py = ch.y;
+        if (ch.set & 4) px += ch.dx;
+        if (ch.set & 8) py += ch.dy;
+        gx[i] = px;
+        gy[i] = py;
+        sv_walk cwv = at(ws, ch.el);
+        const sv_walk *cw = &cwv;
+        int face = sv_face(st, cw);
+        double fs = sv_fs(st, cw);
+        px += amb_advance(f, face, ch.cp, fs);
+        if (i + 1 < n && at(cs, i + 1).el == ch.el && !(at(cs, i + 1).set & 1)) px += amb_kern(f, face, ch.cp, at(cs, i + 1).cp, fs);
+        uint32_t ls = cw->src[SI_LETTER_SPACING];
+        if (st->cval[ls].unit == CSS_UNIT_PX) px += st->cval[ls].num;
+        uint32_t wsp = cw->src[SI_WORD_SPACING];
+        if (ch.cp == ' ' && st->cval[wsp].unit == CSS_UNIT_PX) px += st->cval[wsp].num;
+    }
+    /* runs of one element's characters, each a line */
+    size_t i = 0;
+    while (i < n) {
+        size_t j = i;
+        while (j < n && at(cs, j).el == at(cs, i).el) j++;
+        sv_walk cwv = at(ws, at(cs, i).el);
+        const sv_walk *cw = &cwv;
+        if (sv_word_is(st, cw->src[SI_VISIBILITY], "hidden") || sv_word_is(st, cw->src[SI_VISIBILITY], "collapse")) { i = j; continue; }
+        int face = sv_face(st, cw);
+        double fs = sv_fs(st, cw);
+        double asc, desc, gap;
+        amb_face_metrics(f, face, fs, &asc, &desc, &gap);
+        double bb[4] = { 1e300, 1e300, -1e300, -1e300 };
+        for (size_t q = i; q < j; q++) {
+            double adv = amb_advance(f, face, at(cs, q).cp, fs);
+            bb[0] = fmin(bb[0], at(gx, q));
+            bb[2] = fmax(bb[2], at(gx, q) + adv);
+            bb[1] = fmin(bb[1], at(gy, q) - asc);
+            bb[3] = fmax(bb[3], at(gy, q) + desc);
+        }
+        uint32_t cur = st->cval[cw->src[SI_COLOR]].color;
+        sv_paint fp;
+        sv_paint_of(d, st, cw->src[SI_FILL], cur, &fp);
+        uint32_t fg = 0, frgba = 0;
+        int fk = sv_resolve(SA, &fp, bb, cw, &fg, &frgba);
+        if (fk) {
+            uint32_t sc = cw->src[SI_FONT_STYLE];
+            int italic = sv_word_is(st, sc, "italic") || sv_word_is(st, sc, "oblique");
+            vector<char> line;
+            sv_w(&line, "t");
+            sv_m(&line, m);
+            sv_n(&line, face);
+            sv_n(&line, fs);
+            sv_n(&line, italic);
+            sv_paint_words(&line, fk, fg, frgba);
+            sv_n(&line, st->cval[cw->src[SI_FILL_OPACITY]].num);
+            size_t count = 0;
+            for (size_t q = i; q < j; q++) if (at(cs, q).cp != ' ') count++;
+            sv_n(&line, (double)count);
+            for (size_t q = i; q < j; q++) {
+                if (at(cs, q).cp == ' ') continue;
+                sv_n(&line, at(cs, q).cp);
+                sv_n(&line, at(gx, q));
+                sv_n(&line, at(gy, q));
+            }
+            sv_w(&line, "\n");
+            append_range(out, data(line), len(line));
+        }
+        i = j;
+    }
 }
 
 void amb_svg_scene(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t el, double vw,
@@ -2274,6 +2490,8 @@ static void sv_pop(RC) {
     if (mk >= 0) resize(masks, mo);
 }
 
+static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fonts *f);
+
 /* a scene's commands from s[i] drawn into a layer of w x h px (premultiplied RGBA,
    transparent to begin with; into layer), dev mapping the viewport's CSS px into it */
 static void sv_render(const char *s, size_t n, size_t i, int w, int h, sv_mat dev, vector<float> *layer) {
@@ -2292,6 +2510,9 @@ static void sv_render(const char *s, size_t n, size_t i, int w, int h, sv_mat de
     vector<uint8_t> cornerv, ccfv;
     vector<sv_mseg> dcfv;
     resize(layv, (size_t)dvv.w * (size_t)dvv.h * 4);
+    amb_fonts fonts = {0};
+    defer(fonts) { AMB_FONTS_DROP(fonts); }
+    int fonts_loaded = 0;
     while (sv_tok(s, n, &i, 0, &a, &k)) {
         char cmd = s[a];
         if (cmd == 'p' && k == 1)
@@ -2306,6 +2527,11 @@ static void sv_render(const char *s, size_t n, size_t i, int w, int h, sv_mat de
         else if (cmd == 'e' && k == 1)
             sv_pop(dv, &layv, &lopv, &masksv, &lmkv, &grv, &gixv, &pathv, &edgesv, &covv, &ptsv, &cornerv, &subsv, &dpv, &dcfv, &dsv, &tmpv, &clv,
                    &ccfv, &xsv, &orderv, &actv, &accv);
+        else if (cmd == 't' && k == 1) {
+            if (!fonts_loaded) { amb_fonts_load(&fonts); fonts_loaded = 1; }
+            sv_draw_glyphs(s, n, &i, dv, &layv, &lopv, &masksv, &lmkv, &grv, &gixv, &pathv, &edgesv, &covv, &ptsv, &cornerv, &subsv, &dpv, &dcfv,
+                           &dsv, &tmpv, &clv, &ccfv, &xsv, &orderv, &actv, &accv, &fonts);
+        }
         sv_skip_line(s, n, &i);
     }
     /* groups left open end here */
@@ -2375,6 +2601,58 @@ void amb_svg_draw(amb_canvas *c, const char *s, size_t n, double x, double y, do
             for (int ch = 0; ch < 3; ch++) {
                 double v = at(layv, q + (size_t)ch) * 255 * k + c->px[p + (size_t)ch] * (1 - al * k);
                 c->px[p + (size_t)ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+    }
+}
+
+/* a run of glyphs' line: its matrix, face, size, slant, paint and opacity, then each glyph's
+   code point and place */
+static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fonts *f) {
+    sv_mat m = sv_rmat(s, n, i), full = sv_mul(dv->dev, m);
+    int face = (int)sv_rnum(s, n, i);
+    double size = sv_rnum(s, n, i);
+    int italic = (int)sv_rnum(s, n, i);
+    sv_ink ink;
+    sv_rink(s, n, i, RA, m, &ink);
+    sv_ink_opacity(&ink, sv_rnum(s, n, i));
+    int count = (int)sv_rnum(s, n, i);
+    if (face < 0 || face >= (int)f->nfaces) face = AMB_FACE_SERIF;
+    /* the device's size: the matrix's scale (a rotated or skewed run drawn upright, at its
+       area's scale) */
+    double dsize = size * sqrt(fabs(full.a * full.d - full.b * full.c));
+    if (!ink.kind || dsize <= 0 || dsize > 2000) return;
+    size_t top = sv_top(RA);
+    vector<float> facc;
+    vector<uint8_t> mask;
+    for (int g = 0; g < count; g++) {
+        uint32_t cp = (uint32_t)sv_rnum(s, n, i);
+        double gx = sv_rnum(s, n, i), gy = sv_rnum(s, n, i);
+        double X = sv_ax(full, gx, gy), Y = sv_ay(full, gx, gy);
+        if (!(fabs(X) < 1e7 && fabs(Y) < 1e7)) continue;
+        /* as the page's text is set: its pen at a quarter of a px across, its baseline at a whole px */
+        double fx = floor(X);
+        int quarter = (int)((X - fx) * 4);
+        int by = (int)floor(Y + 0.5);
+        int w, h, ox, oy;
+        if (!amb_glyph_mask(f, face, cp, dsize, quarter / 4.0, italic, &facc, &mask, &w, &h, &ox, &oy)) continue;
+        for (int yy = 0; yy < h; yy++) {
+            int py = by + oy + yy;
+            if (py < 0 || py >= dv->h) continue;
+            for (int xx = 0; xx < w; xx++) {
+                int px = (int)fx + ox + xx;
+                if (px < 0 || px >= dv->w) continue;
+                uint8_t mv = at(mask, (size_t)yy * (size_t)w + (size_t)xx);
+                if (!mv) continue;
+                float cv = mv / 255.0f;
+                float c[4] = { ink.r, ink.g, ink.b, ink.a };
+                if (ink.kind == 2 && !sv_grad_at(gr, &ink, px + 0.5, py + 0.5, c)) continue;
+                size_t q = top + ((size_t)py * (size_t)dv->w + (size_t)px) * 4;
+                float a = c[3] * cv, keep = 1 - a;
+                (*lay)[q] = c[0] * cv + at(*lay, q) * keep;
+                (*lay)[q + 1] = c[1] * cv + at(*lay, q + 1) * keep;
+                (*lay)[q + 2] = c[2] * cv + at(*lay, q + 2) * keep;
+                (*lay)[q + 3] = a + at(*lay, q + 3) * keep;
             }
         }
     }
