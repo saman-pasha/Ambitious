@@ -119,16 +119,36 @@
    Not done: each paragraph a forced break starts its own under plaintext; an
    inline box's edges on lines after its first in a right-to-left paragraph.
 
+   Query containers (CSS Conditional 5): a container of container-type size or
+   inline-size makes a formatting context of its own; its content counts for
+   nothing in its inline size (inline-size containment: shrunk to fit, it is as
+   wide as its edges), and a size container's auto height is as if it held
+   nothing. Once its content box is sized (lay_block), before what it holds is
+   laid out, the cascade makes its subtree's styles again with that size known
+   (lay_cq_restyle, css_container_restyle): the run's tables take the changed
+   nodes' styles and pseudo-elements, and its generated content is made again
+   from the counters the walk entered it with (a container's counters are its
+   subtree's own: style containment). No subtree is laid out twice for it.
+
    Pseudo-elements. An element's ::before and ::after are its first and last
    children, boxes as their display has them (inline ones in the lines), their
    content's text made in tree order before layout: strings, attr(), counter()
    and counters() (counter-reset and counter-increment, each counter's scope
    its element's, its descendants' and its later siblings', CSS 2.1 12.4.1),
    and the quotes (open-quote, close-quote: the quotes property's, or English's
-   for auto). ::first-letter is its block's first letter (the punctuation before
+   for auto); each counter written by its counter style (src/css: css_counter_text).
+   A list item's marker is its counter style's representation of its ordinal with
+   the style's prefix and suffix, outside ending at the content box, as Chromium
+   places a marker of text, its right-to-left letters in their order; a disc,
+   circle, square or disclosure triangle (or a style extending one) a shape, as
+   before; a string as written. ::first-letter is its block's first letter (the punctuation before
    it too) in its own style; ::first-line the first line's pieces in its style
    where they have their block's, the line broken in it; ::marker the list
-   marker's style; ::placeholder an empty field's placeholder text.
+   marker's style; ::placeholder an empty field's placeholder text. Not done: a
+   counter() in a disclosure style is its triangle's character (Chromium draws
+   the triangle); a list item's ordinal is its place among its list's items
+   from start and value (not reversed, nor list-item's counter-reset or
+   counter-increment); a ::marker's content is not read.
 
    Tables, in the automatic layout. Each column's minimum and maximum widths come
    from its cells' content (colspan shared out), a declared cell width fixing
@@ -179,9 +199,11 @@ amb_implementation(layout);
 #include "../paint/svg.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
-   (0 for none); sc: each style as layout reads it, made once a run */
-#define LCTX layout_tree *t, const dom_document *d, const css_style *st, const net_loader *nt, const amb_fonts *f, const vector<uint32_t> *sx, \
-    const vector<lay_style> *sc, const vector<lay_gen> *gx, const vector<lay_ext> *xc, vector<lay_abs> *ab, vector<lay_flt> *fl
+   (0 for none); sc: each style as layout reads it, made once a run. The cascade's store and
+   the tables of styles change in a run where a query container is laid out: its subtree is
+   restyled (lay_cq_restyle), new styles added, nodes' styles and pseudo-elements' replaced */
+#define LCTX layout_tree *t, const dom_document *d, css_style *st, const net_loader *nt, const amb_fonts *f, vector<uint32_t> *sx, \
+    vector<lay_style> *sc, vector<lay_gen> *gx, vector<lay_ext> *xc, vector<lay_abs> *ab, vector<lay_flt> *fl
 #define LARGS t, d, st, nt, f, sx, sc, gx, xc, ab, fl
 /* the context with another block formatting context's floats */
 #define LARGS_FL(x) t, d, st, nt, f, sx, sc, gx, xc, ab, (x)
@@ -213,6 +235,7 @@ typedef struct lay_style {
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
     int list_inside;                /* list-style-position: inside */
+    uint32_t lcv;                   /* list-style-type's value: the counter style's name, or the string (list 4) */
     int lhn;                        /* line-height is normal */
     uint32_t font;                  /* a web font's resource (the loader's), 0 for a built-in face */
     double ls, wsp;                 /* letter-spacing, word-spacing: px */
@@ -294,6 +317,7 @@ typedef struct lay_ext {
     uint32_t opos;                      /* object-position's cval; 0 at its initial value */
     uint32_t cpath;                     /* clip-path's cval when it is a basic shape or a geometry box; else 0 */
     uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
+    uint8_t cq;                         /* container-type: 1 inline-size, 2 size (a query container; containment) */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -400,6 +424,46 @@ static int lay_web_face(const css_style *st, const vector<int32_t> *webface, con
     return 1;
 }
 
+/* a style's container-type (its values from c0): 1 inline-size, 2 size, 0 none (CSS Conditional 5, 6.1.2: size and
+   inline-size give size or inline-size containment and an independent formatting context) */
+static int lay_cq_kind(const css_style *st, uint32_t c0) {
+    uint32_t c = c0 + CSS_PROP_CONTAINER_TYPE;
+    if (st->cval[c].unit == CSS_UNIT_KEYWORD) {
+        uint32_t w = st->cval[c].word;
+        return names_is(st, w, "inline-size", 11) ? 1 : names_is(st, w, "size", 4) ? 2 : 0;
+    }
+    if (st->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = st->cval[c].text;
+    const char *t = text_ptr(st, sp);
+    return sp.len >= 11 && memcmp(t, "inline-size", 11) == 0 ? 1 : sp.len >= 4 && memcmp(t, "size", 4) == 0 ? 2 : 0;
+}
+
+/* a list-style-type's marker (its value c): 0 none; a predefined symbol marker Chromium draws as a shape, or a
+   counter style extending one (1 disc, 2 circle, 3 square, 9 disclosure-closed, 10 disclosure-open); else 4, a
+   marker of text: a counter style's representation with its prefix and suffix, or a string */
+static int lay_list_kind(const css_style *st, uint32_t c) {
+    vector<char> tmp;
+    if (st->cval[c].unit == CSS_UNIT_TEXT) {
+        amb_span sp = st->cval[c].text;
+        const char *t = text_ptr(st, sp);
+        if (sp.len && t[0] == '"') return 4;
+        int k = css_counter_text(st, t, sp.len, 1, 1, &tmp);
+        return k ? k : 4;
+    }
+    if (st->cval[c].unit != CSS_UNIT_KEYWORD) return 1;
+    uint32_t w = st->cval[c].word;
+    /* the names no sheet may define: their markers known */
+    if (names_is(st, w, "none", 4)) return 0;
+    if (names_is(st, w, "disc", 4)) return 1;
+    if (names_is(st, w, "circle", 6)) return 2;
+    if (names_is(st, w, "square", 6)) return 3;
+    if (names_is(st, w, "disclosure-closed", 17)) return 9;
+    if (names_is(st, w, "disclosure-open", 15)) return 10;
+    if (names_is(st, w, "decimal", 7)) return 4;
+    int k = css_counter_text(st, names_ptr(st, w), names_len(st, w), 1, 1, &tmp);
+    return k ? k : 4;
+}
+
 /* a style as layout reads it, from its computed values: a run from c0 in enum(prop)'s
    order (src/css/css.c) */
 static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, lay_style *s) {
@@ -434,6 +498,8 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
         s->display = D_BLOCK;
         s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid") || lay_w(w, "-webkit-box");
     }
+    /* a query container makes a formatting context of its own (CSS Conditional 5, 6.1.2) */
+    if (lay_cq_kind(st, c0)) s->bfc = 1;
     s->color = st->cval[cv[CSS_PROP_COLOR]].color;
     s->fill = st->cval[cv[CSS_PROP_WEBKIT_TEXT_FILL_COLOR]].color;
     s->bg = st->cval[cv[CSS_PROP_BACKGROUND_COLOR]].color;
@@ -477,12 +543,8 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     s->indent = lay_len_at(st, cv[CSS_PROP_TEXT_INDENT]);
     lay_word_of(st, cv[CSS_PROP_TEXT_DECORATION], w);
     s->deco = lay_w(w, "underline") ? 1 : lay_w(w, "overline") ? 2 : lay_w(w, "line-through") ? 4 : 0;
-    lay_word_of(st, cv[CSS_PROP_LIST_STYLE_TYPE], w);
-    s->list = lay_w(w, "none") ? 0 : lay_w(w, "circle") ? 2 : lay_w(w, "square") ? 3 :
-              lay_w(w, "decimal") || lay_w(w, "decimal-leading-zero") ? 4 :
-              lay_w(w, "lower-alpha") || lay_w(w, "lower-latin") || lay_w(w, "lower-greek") ? 5 :
-              lay_w(w, "upper-alpha") || lay_w(w, "upper-latin") ? 6 : lay_w(w, "lower-roman") ? 7 :
-              lay_w(w, "upper-roman") ? 8 : lay_w(w, "disclosure-closed") ? 9 : lay_w(w, "disclosure-open") ? 10 : 1;
+    s->lcv = cv[CSS_PROP_LIST_STYLE_TYPE];
+    s->list = lay_list_kind(st, s->lcv);
     lay_word_of(st, cv[CSS_PROP_LIST_STYLE_POSITION], w);
     s->list_inside = lay_w(w, "inside");
     for (int k = 0; k < 4; k++) {
@@ -598,6 +660,7 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->ofit = (uint8_t)(lay_w(w, "contain") ? 1 : lay_w(w, "cover") ? 2 : lay_w(w, "none") ? 3 : lay_w(w, "scale-down") ? 4 : 0);
     e->opos = st->cval[c0 + CSS_PROP_OBJECT_POSITION].how == CSS_HOW_INITIAL ? 0 : c0 + CSS_PROP_OBJECT_POSITION;
     if (e->ofit || e->opos) e->paints = 1;
+    e->cq = (uint8_t)lay_cq_kind(st, c0);
     {
         /* clip-path's basic shape or geometry box (an HTML box's; a url() is an SVG element's) */
         uint32_t cc = c0 + CSS_PROP_CLIP_PATH;
@@ -1578,7 +1641,8 @@ static void lay_text_pieces(LCTX, uint32_t node, int deco, vector<lay_piece> *ps
         lay_chars(LARGS, &s, node, pe, data(gt), len(gt), deco, ps, sp, ih);
         return;
     }
-    /* a text node's, in its parent's style (read in place) */
+    /* a text node's, in its parent's style (read in place: the run's styles grow only where a query container is
+       restyled, in lay_block, which lay_chars never reaches) */
     uint32_t pe = d->node[node].parent;
     uint32_t si = pe < len(*sx) ? at(*sx, pe) & LAY_SMASK : 0;
     amb_span span = d->node[node].data;
@@ -1804,6 +1868,9 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
         *mn = *mx = w + edges;
         return;
     }
+    /* a query container's content counts for nothing in its inline size (size and inline-size containment: CSS
+       Contain 2, 3.2; a table's cells have no containment) */
+    if (LAY_X(el).cq && s.display != D_TABLE && s.display != D_CELL && s.display != D_INLINE) { *mn = *mx = edges; return; }
     if (s.display == D_TABLE) { lay_table_intrinsic(LARGS, el, cw, mn, mx); *mn += edges; *mx += edges; return; }
     vector<lay_seg> segs;
     vector<uint32_t> items;
@@ -2018,8 +2085,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
 static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et,
                               lay_mc *eb, int *empty);
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
+static void lay_cq_restyle(LCTX, uint32_t el, double w, double h);
 static int lay_decorated(LCTX, uint32_t el, const lay_style *es);
 static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls);
+static int lay_marker_strut(LCTX, uint32_t el, const lay_style *ls, const lay_style *line, double *above, double *below);
 static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, int force);
 static uint32_t lay_nth_line(layout_tree *t, uint32_t b, long *n, double oy, double *bottom, uint32_t *owner);
 static void lay_clamp(LCTX, uint32_t b, uint32_t el, const lay_style *s);
@@ -4002,6 +4071,11 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
        before that line's content */
     double indent = first == 0 ? lay_res(st, bs.indent, w) : 0;
     if (first == 0 && bs.display == D_LIST_ITEM) indent += lay_marker_inside(LARGS, container, &bs);
+    /* the first line's strut, when an inside marker's text in it reaches past it (its font's and its fallback faces'
+       line): mgrow, the line's extent above and below the baseline in ma and mb */
+    double ma = 0, mb = 0;
+    int mgrow = first == 0 && bs.display == D_LIST_ITEM && bs.list == 4 && bs.list_inside &&
+                lay_marker_strut(LARGS, container, &bs, has_fl ? &bs1 : &bs, &ma, &mb);
     /* a list item's own lines (not an anonymous block's in it): the line height quirk counts its line
        height on each (measured) */
     int marker = bs.display == D_LIST_ITEM && !(container & LAY_GEN) && t->box[b].node.index == container;
@@ -4083,7 +4157,13 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
+        if (start == 0 && mgrow) {
+            lay_style bsm = has_fl ? bs1 : bs;
+            bsm.asc = ma;
+            bsm.desc = mb;
+            bsm.lh = ma + mb;
+            y += lay_line(LARGS, b, &bsm, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
+        } else if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
         else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
         indent = 0;
         i = j;
@@ -4215,40 +4295,40 @@ static uint32_t lay_first_line(const layout_tree *t, uint32_t b, uint32_t *owner
     return 0;
 }
 
-/* a list item's marker: its text (a symbol's character, or its ordinal and a full stop) into txt, its length */
-static size_t lay_marker_text(LCTX, uint32_t el, int list, char *txt, size_t cap) {
-    size_t tn = 0;
+/* a list item's marker: its text into out -- a symbol's character, or for a marker of text (list 4) the string
+   list-style-type gives, or its ordinal as its counter style writes it with its prefix and suffix (CSS Counter
+   Styles 3: decimal's suffix a full stop and a space) */
+static void lay_marker_text(LCTX, uint32_t el, const lay_style *ls, vector<char> *out) {
     uint32_t cp = 0;
+    int list = ls->list;
     if (list == 1) cp = 0x2022;
     else if (list == 2) cp = 0x25E6;
     else if (list == 3) cp = 0x25AA;
     else if (list == 9) cp = 0x25B8;     /* disclosure-closed: a small triangle pointing to the end */
     else if (list == 10) cp = 0x25BE;    /* disclosure-open: one pointing down */
     if (cp) {
-        txt[0] = (char)(0xE0 | cp >> 12);
-        txt[1] = (char)(0x80 | (cp >> 6 & 0x3F));
-        txt[2] = (char)(0x80 | (cp & 0x3F));
-        txt[3] = 0;
-        return 3;
+        push_back(out, (char)(0xE0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+        return;
     }
+    uint32_t c = ls->lcv;
+    vector<char> name;
+    if (st->cval[c].unit == CSS_UNIT_TEXT) {
+        amb_span sp = st->cval[c].text;
+        append_range(name, text_ptr(st, sp), sp.len);
+        if (len(name) >= 2 && at(name, 0) == '"') { lay_unquote(data(name), len(name), out); return; }
+    } else if (st->cval[c].unit == CSS_UNIT_KEYWORD) {
+        uint32_t w = st->cval[c].word;
+        append_range(name, names_ptr(st, w), names_len(st, w));
+    } else append_range(name, "decimal", 7);
     /* its ordinal: its place among its parent's list items, from the list's start */
     uint32_t parent = d->node[el].parent;
     long ord = lay_attr_int(d, parent, "start", 1);
-    for (uint32_t c = d->node[parent].first_child; c && c != el; c = d->node[c].next_sibling)
-        if (lay_display_of(LARGS, c) == D_LIST_ITEM) ord++;
+    for (uint32_t ch = d->node[parent].first_child; ch && ch != el; ch = d->node[ch].next_sibling)
+        if (lay_display_of(LARGS, ch) == D_LIST_ITEM) ord++;
     ord = lay_attr_int(d, el, "value", ord);
-    char num[24];
-    if (list == 4) snprintf(num, sizeof num, "%ld", ord);
-    else if (list == 5 || list == 6) {
-        long v = ord;
-        char rev[16];
-        size_t k = 0;
-        while (v > 0 && k < sizeof rev) { v--; rev[k++] = (char)((list == 5 ? 'a' : 'A') + v % 26); v /= 26; }
-        for (size_t i = 0; i < k; i++) num[i] = rev[k - 1 - i];
-        num[k] = 0;
-    } else lay_roman(ord, list == 8, num, sizeof num);
-    tn = (size_t)snprintf(txt, cap, "%s.", num);
-    return tn;
+    css_counter_text(st, data(name), len(name), ord, 1, out);
 }
 /* the room a marker inside its list item's first line takes before the content, as Chromium gives it: a disc's,
    circle's or square's its font size and a third of its ascent, one more; a disclosure triangle's its square of
@@ -4260,10 +4340,64 @@ static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls) {
     if (ls->list <= 3) return sm.fs + 1 + floor(floor(sm.asc + 0.5) / 3 + 0.5);
     /* a disclosure triangle: its square of 0.66em and 0.4em after it, each in Chromium's 1/64 px */
     if (ls->list >= 9) return floor(0.66 * sm.fs * 64) / 64 + floor(0.4 * sm.fs * 64) / 64;
-    char txt[32];
-    size_t tn = lay_marker_text(LARGS, el, ls->list, txt, sizeof txt - 1);
-    txt[tn++] = ' ';
-    return amb_text_width(f, sm.face, sm.fs, txt, tn);
+    vector<char> txt;
+    lay_marker_text(LARGS, el, ls, &txt);
+    return amb_text_width(f, sm.face, sm.fs, data(txt), len(txt));
+}
+
+/* a marker's text in the order it is drawn, its own direction left to right (an isolate: UAX #9 for its simple case):
+   each run of right-to-left letters, with the neutrals between them, reversed, as paint takes a right-to-left run (a
+   Hebrew counter style's letters); text without them as it is */
+static void lay_marker_visual(const vector<char> *in, vector<char> *out) {
+    size_t n = len(*in), i = 0;
+    while (i < n) {
+        size_t z = i;
+        uint32_t cp = amb_utf8_next(data(*in), n, &z);
+        int c = lay_bidi_class(cp);
+        if (c != BC_R && c != BC_AL) { append_range(out, data(*in) + i, z - i); i = z; continue; }
+        /* the run: to the last right-to-left letter before a left-to-right one or a number */
+        size_t end = z, k = z;
+        while (k < n) {
+            size_t z2 = k;
+            int c2 = lay_bidi_class(amb_utf8_next(data(*in), n, &z2));
+            if (c2 == BC_R || c2 == BC_AL || c2 == BC_NSM) { end = z2; k = z2; continue; }
+            if (c2 == BC_L || c2 == BC_EN || c2 == BC_AN) break;
+            k = z2;
+        }
+        vector<char> run;
+        append_range(run, data(*in) + i, end - i);
+        lay_bidi_reverse(&run, out);
+        i = end;
+    }
+}
+
+/* the strut of an inside marker's line (line, the block's) made to hold the marker's text too: its own font's line
+   and, under line-height normal, its fallback faces' (Chromium's marker is an inline box of the line). 1, and the
+   extent above and below the baseline, when the marker's reaches past the line's */
+static int lay_marker_strut(LCTX, uint32_t el, const lay_style *ls, const lay_style *line, double *out_above, double *out_below) {
+    if (ls->list != 4 || !ls->list_inside || (el & LAY_GEN)) return 0;
+    lay_style sm = *ls;
+    lay_pseudo_style(LARGS, el, CSS_PSEUDO_MARKER, &sm);
+    vector<char> txt;
+    lay_marker_text(LARGS, el, ls, &txt);
+    double above, below, la, lb;
+    lay_leading(line->lh, line->asc, line->desc, &la, &lb);
+    lay_leading(sm.lh, sm.asc, sm.desc, &above, &below);
+    if (sm.lhn) {
+        uint32_t m = amb_text_fallbacks(f, sm.face, data(txt), len(txt));
+        for (int k = 0; m && k < AMB_NFACES; k++) {
+            if (!(m >> k & 1)) continue;
+            double fa, fd, fg, up, dn;
+            amb_face_metrics(f, k, sm.fs, &fa, &fd, &fg);
+            lay_leading(fa + fd + fg, fa, fd, &up, &dn);
+            if (up > above) above = up;
+            if (dn > below) below = dn;
+        }
+    }
+    if (above <= la && below <= lb) return 0;
+    *out_above = above > la ? above : la;
+    *out_below = below > lb ? below : lb;
+    return 1;
 }
 
 static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
@@ -4274,41 +4408,17 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     sm.list = ls->list;
     uint32_t owner = 0, ln = lay_first_line(t, b, &owner);
     if (!ln) return;
-    char txt[32];
-    size_t tn;
-    uint32_t cp = 0;
-    if (sm.list == 1) cp = 0x2022;
-    else if (sm.list == 2) cp = 0x25E6;
-    else if (sm.list == 3) cp = 0x25AA;
-    else if (sm.list == 9) cp = 0x25B8;
-    else if (sm.list == 10) cp = 0x25BE;
-    if (cp) {
-        txt[0] = (char)(0xE0 | cp >> 12);
-        txt[1] = (char)(0x80 | (cp >> 6 & 0x3F));
-        txt[2] = (char)(0x80 | (cp & 0x3F));
-        txt[3] = 0;
-        tn = 3;
-    } else {
-        /* its ordinal: its place among its parent's list items, from the list's start */
-        uint32_t parent = d->node[el].parent;
-        long ord = lay_attr_int(d, parent, "start", 1);
-        for (uint32_t c = d->node[parent].first_child; c && c != el; c = d->node[c].next_sibling)
-            if (lay_display_of(LARGS, c) == D_LIST_ITEM) ord++;
-        ord = lay_attr_int(d, el, "value", ord);
-        char num[24];
-        if (sm.list == 4) snprintf(num, sizeof num, "%ld", ord);
-        else if (sm.list == 5 || sm.list == 6) {
-            long v = ord;
-            char rev[16];
-            size_t k = 0;
-            while (v > 0 && k < sizeof rev) { v--; rev[k++] = (char)((sm.list == 5 ? 'a' : 'A') + v % 26); v /= 26; }
-            for (size_t i = 0; i < k; i++) num[i] = rev[k - 1 - i];
-            num[k] = 0;
-        } else lay_roman(ord, sm.list == 8, num, sizeof num);
-        tn = (size_t)snprintf(txt, sizeof txt, "%s.", num);
-    }
-    /* outside the content, its right end half an em before the list item's content box; inside, at its first line's
-       start, which the line's indent left it (when that line is the item's own, or an anonymous block's in it) */
+    vector<char> tl, tv;
+    lay_marker_text(LARGS, el, ls, &tl);
+    int rtl = 0;
+    for (size_t q = 0; q < len(tl) && !rtl; q++) rtl = (unsigned char)at(tl, q) >= 0xD6 && (unsigned char)at(tl, q) <= 0xDF;
+    if (rtl) lay_marker_visual(&tl, &tv);
+    else swap(&tv, &tl);
+    const char *txt = data(tv);
+    size_t tn = len(tv);
+    /* outside the content, its text (its suffix's space too) ending at the list item's content box, as Chromium's
+       ListMarker places a marker of text; inside, at its first line's start, which the line's indent left it (when
+       that line is the item's own, or an anonymous block's in it) */
     double mw = amb_text_width(f, sm.face, sm.fs, txt, tn);
     double off_x = 0;
     for (uint32_t x = owner; x && x != b; x = t->box[x].parent) off_x += t->box[x].x;
@@ -4318,7 +4428,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     uint32_t fr = fh.index;
     double base = t->line[ln].baseline;
     double start = -off_x - t->line[ln].x + (inside ? lay_res(st, ls->indent, t->box[b].w) : 0), asc = sm.asc;
-    double mx = inside ? start : start - mw - sm.fs * 0.5;
+    double mx = inside ? start : start - mw;
     if (sm.list <= 3) {
         /* a disc, circle or square: a shape Chromium draws in a square of its own (ListMarker's symbol rect), 1px into
            a marker box that starts its whole ascent's two thirds and 8px before the content outside, 1px before the
@@ -5114,6 +5224,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         defh = lay_res(st, hraw, k->ch) - (s.border_box ? vedges : 0);
         if (defh < 0) defh = 0;
     }
+    /* a size container's auto height is its content's as if it had none (size containment), min- and max-height
+       holding it */
+    int cqk = s.display == D_CELL || s.display == D_CAPTION ? 0 : at(*xc, si).cq;
+    if (defh < 0 && cqk == 2) defh = 0;
     double minh = 0, maxh = -1;
     lay_len mnl = at(*xc, si).minh, mxl = at(*xc, si).maxh;
     if (mnl.unit != LAY_AUTO && !lay_content_sized(mnl) && (mnl.unit == LAY_PX || k->ch >= 0)) minh = lay_res(st, mnl, k->ch) - (s.border_box ? vedges : 0);
@@ -5143,6 +5257,9 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
             if (pch < minh) pch = minh;
         } else if (lx == LX_FLOW && pos != POS_ABSOLUTE && pos != POS_FIXED && s.display != D_CELL) pch = k->ch;
     }
+    /* a query container sized: its subtree's styles made again for its content box (src/css/css.h), before what it
+       holds is laid out */
+    if (cqk && !(el & LAY_GEN)) lay_cq_restyle(LARGS, el, t->box[b].w, defh);
     lay_mc et, eb;
     /* a fieldset's rendered legend (HTML 15.3.13): shrunk to fit, its auto margins aligning it, set on the top border
        -- its margin box from the border box's top, or centred on a border taller than it --; the content begins
@@ -5283,28 +5400,10 @@ static void lay_unquote(const char *s, size_t n, vector<char> *out) {
         }
     }
 }
-/* v as the counter style named s[0, n) writes it (decimal for one not known), into out */
-static void lay_counter_style(long v, const char *s, size_t n, vector<char> *out) {
-    char num[48];
-    size_t k = 0;
-    if (lay_is_word(s, n, "none")) return;
-    if (lay_is_word(s, n, "disc")) { append_range(out, "\xe2\x80\xa2", 3); return; }
-    if (lay_is_word(s, n, "circle")) { append_range(out, "\xe2\x97\xa6", 3); return; }
-    if (lay_is_word(s, n, "square")) { append_range(out, "\xe2\x96\xaa", 3); return; }
-    int upper = lay_is_word(s, n, "upper-roman") || lay_is_word(s, n, "upper-alpha") || lay_is_word(s, n, "upper-latin");
-    if ((lay_is_word(s, n, "lower-roman") || lay_is_word(s, n, "upper-roman")) && v > 0 && v < 4000) k = lay_roman(v, upper, num, sizeof num);
-    else if ((lay_is_word(s, n, "lower-alpha") || lay_is_word(s, n, "lower-latin") || lay_is_word(s, n, "upper-alpha") ||
-              lay_is_word(s, n, "upper-latin")) && v > 0) {
-        char rev[16];
-        size_t r = 0;
-        long x = v;
-        while (x > 0 && r < sizeof rev) { x--; rev[r++] = (char)((upper ? 'A' : 'a') + x % 26); x /= 26; }
-        for (size_t i = 0; i < r; i++) num[i] = rev[r - 1 - i];
-        k = r;
-    } else if (lay_is_word(s, n, "decimal-leading-zero") && v >= 0 && v < 10) k = (size_t)snprintf(num, sizeof num, "0%ld", v);
-    else k = (size_t)snprintf(num, sizeof num, "%ld", v);
-    if (k > sizeof num - 1) k = sizeof num - 1;
-    append_range(out, num, k);
+/* v as the counter style named s[0, n) writes it (the page's @counter-style rules and the predefined styles: src/css;
+   decimal for a name none defines, nothing for none), into out */
+static void lay_counter_style(const css_style *st, long v, const char *s, size_t n, vector<char> *out) {
+    css_counter_text(st, s, n, v, 0, out);
 }
 /* the quote of the quotes property's value qc at depth (an open one, or a close one) into
    out: auto's are English's, none's none */
@@ -5333,11 +5432,30 @@ static void lay_quote(const css_style *st, uint32_t qc, int depth, int close, ve
     if (pn) lay_unquote(data(src) + pa, pn, out);
 }
 
+/* the element's counter-reset (its values from c0) names the counter name */
+static int lay_resets(const css_style *st, uint32_t c0, uint64_t name) {
+    uint32_t c = c0 + CSS_PROP_COUNTER_RESET;
+    if (st->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    vector<char> src;
+    amb_span sp = st->cval[c].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a, n;
+    int k = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) if (k++ % 2 == 0 && lay_hash(data(src) + a, n) == name) return 1;
+    return 0;
+}
+
 /* an element's counter-reset and counter-increment (its values from c0): a reset makes a
    counter of this level (from mark in ctr), or sets one an earlier sibling made; an
-   increment adds to the innermost counter of its name, or makes one */
-static void lay_counters(const css_style *st, uint32_t c0, vector<lay_ctr> *ctr, size_t mark) {
+   increment adds to the innermost counter of its name at floor or after it, or makes one
+   (a style container's counters are its subtree's own: CSS Contain 2, 3.3; floor is where
+   the innermost container's begin). A query container's own, as Chromium counts them:
+   mode 1, as its parent's walk meets it, its increments of the counters it does not reset
+   (they count outside it); mode 2, as its own walk begins, its resets and the increments
+   of those (inside it). mode 0 every other element's */
+static void lay_counters(const css_style *st, uint32_t c0, vector<lay_ctr> *ctr, size_t mark, size_t floor, int mode) {
     for (int pass = 0; pass < 2; pass++) {
+        if (mode == 1 && pass == 0) continue;
         uint32_t c = c0 + (pass == 0 ? CSS_PROP_COUNTER_RESET : CSS_PROP_COUNTER_INCREMENT);
         if (st->cval[c].unit != CSS_UNIT_TEXT) continue;
         vector<char> src;
@@ -5357,7 +5475,8 @@ static void lay_counters(const css_style *st, uint32_t c0, vector<lay_ctr> *ctr,
                 else if (ch >= '0' && ch <= '9' && v < 100000000) v = v * 10 + (ch - '0');
             }
             if (neg) v = -v;
-            size_t q = len(*ctr), lo = pass == 0 ? mark : 0;
+            if (pass == 1 && mode && (mode == 1) == lay_resets(st, c0, name)) continue;
+            size_t q = len(*ctr), lo = pass == 0 ? mark : floor;
             int found = 0;
             while (q > lo && !found) {
                 q--;
@@ -5420,52 +5539,153 @@ static void lay_content(const dom_document *d, const css_style *st, uint32_t el,
                 if (at(*ctr, q).name != name) continue;
                 if (!many) continue;
                 if (any) lay_unquote(p + fa + sa, sn, out);
-                lay_counter_style(at(*ctr, q).v, data(sty), len(sty), out);
+                lay_counter_style(st, at(*ctr, q).v, data(sty), len(sty), out);
                 any = 1;
             }
             if (!many) {
                 long v = 0;
                 for (size_t q = len(*ctr); q > 0; q--) if (at(*ctr, q - 1).name == name) { v = at(*ctr, q - 1).v; break; }
-                lay_counter_style(v, data(sty), len(sty), out);
-            } else if (!any) lay_counter_style(0, data(sty), len(sty), out);
+                lay_counter_style(st, v, data(sty), len(sty), out);
+            } else if (!any) lay_counter_style(st, 0, data(sty), len(sty), out);
             continue;
         }
     }
 }
 
 /* a pseudo-element's counters and its text, as the walk reaches it */
-static void lay_gen_content(layout_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sf, const vector<lay_style> *sc,
-                            vector<lay_gen> *gx, uint32_t x, uint32_t pk, vector<lay_ctr> *ctr, size_t mark, int *depth) {
+static void lay_gen_content(layout_tree *t, const dom_document *d, const css_style *st, const vector<lay_ext> *xc, const vector<lay_style> *sc,
+                            vector<lay_gen> *gx, uint32_t x, uint32_t pk, vector<lay_ctr> *ctr, size_t mark, size_t floor, int *depth) {
     int64_t g = lay_gen_find(gx, x, pk);
     if (g < 0) return;
     uint32_t si = at(*gx, (size_t)g).style;
     if (at(*sc, si).display == D_NONE) return;
-    uint32_t c0 = at(*sf, si);
-    lay_counters(st, c0, ctr, mark);
+    uint32_t c0 = at(*xc, si).c0;
+    lay_counters(st, c0, ctr, mark, floor, 0);
     vector<char> out;
     lay_content(d, st, x, c0 + CSS_PROP_CONTENT, c0 + CSS_PROP_QUOTES, ctr, depth, &out);
     amb_span sp = text_add(t, data(out), len(out));
     (*gx)[(size_t)g].text = sp;
 }
 
+/* what a run keeps for its query containers' restyles (lay_cq_restyle), freed at its end: the web faces' indexes
+   (lay_style_make's), and each container's counters and quotes' depth as the walk below entered it, which the walk
+   of its subtree starts from again (lay_cq_gen): lay_cq_at a node's state's number + 1 */
+static vector<int32_t> lay_cq_wf;
+static vector<uint32_t> lay_cq_at, lay_cq_off, lay_cq_cnt;
+static vector<int32_t> lay_cq_depth;
+static vector<lay_ctr> lay_cq_pool;
+
+/* the run's state for its query containers, freed */
+static void lay_cq_free(void) {
+    clear(lay_cq_wf);
+    shrink_to_fit(&lay_cq_wf);
+    clear(lay_cq_at);
+    shrink_to_fit(&lay_cq_at);
+    clear(lay_cq_off);
+    shrink_to_fit(&lay_cq_off);
+    clear(lay_cq_cnt);
+    shrink_to_fit(&lay_cq_cnt);
+    clear(lay_cq_depth);
+    shrink_to_fit(&lay_cq_depth);
+    clear(lay_cq_pool);
+    shrink_to_fit(&lay_cq_pool);
+}
+
+static void lay_cq_save(uint32_t x, const vector<lay_ctr> *ctr, int depth) {
+    if (x >= len(lay_cq_at)) resize(&lay_cq_at, (size_t)x + 1);
+    uint32_t k = at(lay_cq_at, x);
+    if (!k) {
+        push_back(lay_cq_off, 0);
+        push_back(lay_cq_cnt, 0);
+        push_back(lay_cq_depth, 0);
+        k = (uint32_t)len(lay_cq_off);
+        lay_cq_at[x] = k;
+    }
+    lay_cq_off[k - 1] = (uint32_t)len(lay_cq_pool);
+    lay_cq_cnt[k - 1] = (uint32_t)len(*ctr);
+    lay_cq_depth[k - 1] = depth;
+    for (size_t q = 0; q < len(*ctr); q++) push_back(lay_cq_pool, at(*ctr, q));
+}
+
 /* the walk that gives each ::before and ::after its text, in tree order, which counters
    and quotes follow: x's ::before, its children (each displayed one's counters, then its
-   own walk), its ::after; the counters x's children made go out of scope at its end */
-static void lay_gen_walk(layout_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sx, const vector<uint32_t> *sf,
-                         const vector<lay_style> *sc, vector<lay_gen> *gx, uint32_t x, vector<lay_ctr> *ctr, int *depth, int level) {
-    size_t mark = len(*ctr);
+   own walk), its ::after; the counters x's children made go out of scope at its end. A
+   query container's counters and quotes are its subtree's (style containment: CSS Contain
+   2, 3.3): the counters it and its subtree make are dropped at its end, their increments
+   kept from those outside it (floor), and the quotes' depth is as it was before it */
+static void lay_gen_walk(layout_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sx, const vector<lay_ext> *xc,
+                         const vector<lay_style> *sc, vector<lay_gen> *gx, uint32_t x, vector<lay_ctr> *ctr, int *depth, size_t floor, int level) {
     uint32_t fl = x < len(*sx) ? at(*sx, x) : 0;
-    if (fl & LAY_HAS_BEFORE) lay_gen_content(t, d, st, sf, sc, gx, x, CSS_PSEUDO_BEFORE, ctr, mark, depth);
+    uint32_t xsi = fl & LAY_SMASK;
+    int contained = xsi && xsi < len(*xc) && at(*xc, xsi).cq;
+    size_t entry = len(*ctr);
+    int depth0 = *depth;
+    if (contained) {
+        lay_cq_save(x, ctr, *depth);
+        floor = entry;
+        lay_counters(st, at(*xc, xsi).c0, ctr, entry, floor, 2);
+    }
+    size_t mark = len(*ctr);
+    if (fl & LAY_HAS_BEFORE) lay_gen_content(t, d, st, xc, sc, gx, x, CSS_PSEUDO_BEFORE, ctr, mark, floor, depth);
     if (level < 1024)
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
             if (d->node[c].kind != DOM_NODE_KIND_ELEMENT || c >= len(*sx)) continue;
             uint32_t si = at(*sx, c) & LAY_SMASK;
             if (!si || at(*sc, si).display == D_NONE) continue;
-            lay_counters(st, at(*sf, si), ctr, mark);
-            lay_gen_walk(t, d, st, sx, sf, sc, gx, c, ctr, depth, level + 1);
+            lay_counters(st, at(*xc, si).c0, ctr, mark, floor, at(*xc, si).cq ? 1 : 0);
+            lay_gen_walk(t, d, st, sx, xc, sc, gx, c, ctr, depth, floor, level + 1);
         }
-    if (fl & LAY_HAS_AFTER) lay_gen_content(t, d, st, sf, sc, gx, x, CSS_PSEUDO_AFTER, ctr, mark, depth);
-    resize(ctr, mark);
+    if (fl & LAY_HAS_AFTER) lay_gen_content(t, d, st, xc, sc, gx, x, CSS_PSEUDO_AFTER, ctr, mark, floor, depth);
+    resize(ctr, contained ? entry : mark);
+    if (contained) *depth = depth0;
+}
+
+/* ---- query containers (CSS Conditional 5): the cascade asked again once a container is sized ---- */
+
+/* the style sid (its first value c0) as layout reads it, made for a restyle: its background's image the one the loader
+   has (layout_run fetched those @container rules name) */
+static uint32_t lay_image_known(const css_style *st, const net_loader *nt, uint32_t c);
+static void lay_cq_style(LCTX, uint32_t sid, uint32_t c0) {
+    if (sid >= len(*sc)) resize(sc, (size_t)sid + 1);
+    if (sid >= len(*xc)) resize(xc, (size_t)sid + 1);
+    lay_style ls;
+    lay_style_make(st, f, &lay_cq_wf, c0, &ls);
+    (*sc)[sid] = ls;
+    lay_ext le;
+    lay_ext_make(st, c0, &le);
+    if (le.bgimg && nt) le.bgres = lay_image_known(st, nt, le.bgimg);
+    (*xc)[sid] = le;
+}
+
+/* the generated content of the container el's subtree made again, from the state the walk entered it with */
+static void lay_cq_gen(LCTX, uint32_t el) {
+    if (el >= len(lay_cq_at) || !at(lay_cq_at, el)) return;
+    uint32_t k = at(lay_cq_at, el) - 1;
+    vector<lay_ctr> ctr;
+    for (uint32_t q = 0; q < at(lay_cq_cnt, k); q++) push_back(ctr, at(lay_cq_pool, (size_t)at(lay_cq_off, k) + q));
+    int depth = at(lay_cq_depth, k);
+    lay_gen_walk(t, d, st, sx, xc, sc, gx, el, &ctr, &depth, 0, 0);
+}
+
+/* the query container el, its content box w x h (h < 0: its height its content's): the cascade's styles of its subtree
+   made again for that size (css_container_restyle), and the run's tables made to follow -- each changed node's style,
+   each pseudo-element's (generated or not), the styles new to the run -- then its generated content again */
+static void lay_cq_restyle(LCTX, uint32_t el, double w, double h) {
+    vector<css_restyled> ch;
+    if (!css_container_restyle(st, d, el, w, h, &ch) || !len(ch)) return;
+    for (size_t k = 0; k < len(ch); k++) {
+        css_restyled r = at(ch, k);
+        if (r.first && (r.style >= len(*xc) || at(*xc, r.style).c0 != r.first)) lay_cq_style(LARGS, r.style, r.first);
+        if (r.node >= len(*sx)) continue;
+        if (!r.pseudo) { (*sx)[r.node] = (at(*sx, r.node) & ~LAY_SMASK) | (r.style & LAY_SMASK); continue; }
+        int64_t g = lay_gen_find(gx, r.node, r.pseudo);
+        if (g < 0) continue;
+        (*gx)[(size_t)g].style = r.style;
+        uint32_t flag = r.pseudo == CSS_PSEUDO_BEFORE ? LAY_HAS_BEFORE : r.pseudo == CSS_PSEUDO_AFTER ? LAY_HAS_AFTER : LAY_HAS_OTHER;
+        if (r.first) (*sx)[r.node] |= flag;
+        else if (flag != LAY_HAS_OTHER) (*sx)[r.node] &= ~flag;
+    }
+    lay_cq_gen(LARGS, el);
 }
 
 /* ---- flex containers (CSS Flexbox 1, 9) ---- */
@@ -7034,9 +7254,11 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
 
 /* the image a background-image's first url() names (its cval c), fetched through the
    loader (once a URL: a resource fetched before is the one): its resource, 0 for none */
-static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c) {
+/* the image a background's text sp names (its first url()), resolved against the sheet of the declaration dcl (the
+   page's when it has none): the loader's resource for it, or 0 with its URL in abs_url (empty: it names none) */
+static uint32_t lay_image_url(const css_style *st, const net_loader *net, amb_span sp, uint32_t dcl, char *abs_url, size_t cap) {
+    abs_url[0] = 0;
     vector<char> v;
-    amb_span sp = st->cval[c].text;
     append_range(v, text_ptr(st, sp), sp.len);
     push_back(v, 0);
     const char *u = strstr(data(v), "url(");
@@ -7052,7 +7274,6 @@ static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c
     /* the base: the declaration's sheet's URL, or the page's */
     char base[2048];
     base[0] = 0;
-    uint32_t dcl = st->cval[c].winner;
     if (dcl && dcl < st->decl_len) {
         uint32_t ru = st->decl[dcl].rule;
         uint32_t sh = ru && ru < st->rule_len ? st->rule[ru].sheet : 0;
@@ -7067,14 +7288,25 @@ static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c
             amb_span fu = net->resource[r].final_url.len ? net->resource[r].final_url : net->resource[r].url;
             if (fu.len < sizeof base) { memcpy(base, text_ptr(net, fu), fu.len); base[fu.len] = 0; }
         }
-    char abs_url[4096];
-    if (!base[0] || !net_url_resolve(base, ref, abs_url, sizeof abs_url)) return 0;
+    if (!base[0] || !net_url_resolve(base, ref, abs_url, cap)) { abs_url[0] = 0; return 0; }
     size_t al = strlen(abs_url);
     for (uint32_t r = 1; r < net->resource_len; r++)
         if (net->resource[r].live && net->resource[r].kind == NET_KIND_IMAGE && net->resource[r].url.len == al &&
             memcmp(text_ptr(net, net->resource[r].url), abs_url, al) == 0) return r;
-    net_resource_h h = net_fetch(net, abs_url, al, NET_KIND_IMAGE);
+    return 0;
+}
+/* the image a style's background (its value c) names: fetched once */
+static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c) {
+    char abs_url[4096];
+    uint32_t r = lay_image_url(st, net, st->cval[c].text, st->cval[c].winner, abs_url, sizeof abs_url);
+    if (r || !abs_url[0]) return r;
+    net_resource_h h = net_fetch(net, abs_url, strlen(abs_url), NET_KIND_IMAGE);
     return h.index;
+}
+/* the image a style's background (its value c) names, as the loader has it: 0 when it was not fetched */
+static uint32_t lay_image_known(const css_style *st, const net_loader *nt, uint32_t c) {
+    char abs_url[4096];
+    return lay_image_url(st, nt, st->cval[c].text, st->cval[c].winner, abs_url, sizeof abs_url);
 }
 
 /* ---- sticky boxes, at rest (CSS Position 3, 3.4) ---- */
@@ -7223,10 +7455,12 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
                 g.pseudo = (uint32_t)style->pstyle[q].pseudo;
                 g.style = style->pstyle[q].style;
                 push_back(gens, g);
+                if (g.style >= len(style_first)) resize(style_first, (size_t)g.style + 1);
+                /* a ::before or an ::after not generated (its content none): kept, for a query container's restyle */
+                if (!style->pstyle[q].first) continue;
                 if (g.pseudo == CSS_PSEUDO_BEFORE) node_style[x] |= LAY_HAS_BEFORE;
                 else if (g.pseudo == CSS_PSEUDO_AFTER) node_style[x] |= LAY_HAS_AFTER;
                 else node_style[x] |= LAY_HAS_OTHER;
-                if (g.style >= len(style_first)) resize(style_first, (size_t)g.style + 1);
                 style_first[g.style] = style->pstyle[q].first;
             }
         }
@@ -7272,11 +7506,27 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         uint32_t res = lay_fetch_image(style, net, c);
         exts[k].bgres = res;
     }
+    /* a query container met: what its restyles need -- the web faces, and the images the rules of @container name,
+       fetched now, for styles the restyles make (lay_cq_style finds them) */
+    int has_cq = 0;
+    for (size_t k = 0; k < len(exts) && !has_cq; k++) if (at(exts, k).cq) has_cq = 1;
+    if (has_cq) {
+        for (size_t k = 0; k < len(webface); k++) push_back(lay_cq_wf, at(webface, k));
+        for (uint32_t r = 1; r < style->rule_len && net; r++) {
+            if (!style->rule[r].container) continue;
+            for (uint32_t dc = style->rule[r].first_decl; dc; dc = style->decl[dc].next) {
+                if (style->decl[dc].prop != CSS_PROP_BACKGROUND_IMAGE) continue;
+                char abs_url[4096];
+                if (!lay_image_url(style, net, style->decl[dc].text, dc, abs_url, sizeof abs_url) && abs_url[0])
+                    net_fetch(net, abs_url, strlen(abs_url), NET_KIND_IMAGE);
+            }
+        }
+    }
     /* the text of each ::before and ::after, in tree order */
     if (len(gens) && doc->node_len > 1) {
         vector<lay_ctr> ctr;
         int depth = 0;
-        lay_gen_walk(t, doc, style, &node_style, &style_first, &styles, &gens, 1, &ctr, &depth, 0);
+        lay_gen_walk(t, doc, style, &node_style, &exts, &styles, &gens, 1, &ctr, &depth, 0, 0);
     }
     /* the root element: the document's element child */
     uint32_t root = 0;
@@ -7293,7 +7543,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     uint32_t rc0 = rsid && rsid < len(style_first) ? at(style_first, rsid) : 0;
     uint32_t canvas = rc0 ? style->cval[rc0 + CSS_PROP_COLOR_SCHEME].color : 0;
     t->box[vp].background = (canvas & 0xff) == 0xff ? canvas : 0xffffffff;
-    if (!root) { t->revision++; return LAYOUT_NO_ROOT; }
+    if (!root) { lay_cq_free(); t->revision++; return LAYOUT_NO_ROOT; }
     if (lay_display_of(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, root) != D_NONE) {
         lay_mc mt, mb;
         int empty;
@@ -7342,6 +7592,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
             t->box[b].svg = sp;
         }
     }
+    lay_cq_free();
     t->revision++;
     return LAYOUT_OK;
 }

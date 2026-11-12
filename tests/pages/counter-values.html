@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Counter styles: list-style-type's computed values</title>
+<style>
+/* tests/pages/counter-values.html -- list-style-type as Chromium computes it (tests/integ/cssref.sh): a predefined
+   counter style's name without its case, another's (an @counter-style's) as written, a string in double quotes, the
+   list-style shorthand's type and position; values Chromium does not take (symbols(), two strings) dropped */
+@counter-style thumbs { system: cyclic; symbols: "\1F44D"; suffix: " "; }
+@counter-style Mixed { system: numeric; symbols: "0" "1"; }
+</style></head>
+<body>
+<ol>
+<li id="a" style="list-style-type: Decimal" data-check="list-style-type">a</li>
+<li id="b" style="list-style-type: thumbs" data-check="list-style-type">b</li>
+<li id="c" style="list-style-type: unknown-style" data-check="list-style-type">c</li>
+<li id="d" style="list-style-type: '-> '" data-check="list-style-type">d</li>
+<li id="e" style="list-style-type: symbols(cyclic '*')" data-check="list-style-type">e</li>
+<li id="f" style="list-style-type: Mixed" data-check="list-style-type">f</li>
+<li id="g" style="list-style-type: mixed" data-check="list-style-type">g</li>
+<li id="h" style="list-style-type: LOWER-ROMAN" data-check="list-style-type">h</li>
+<li id="i" style="list-style-type: none" data-check="list-style-type">i</li>
+<li id="j" style="list-style: square inside" data-check="list-style-type list-style-position">j</li>
+<li id="k" style="list-style: thumbs inside" data-check="list-style-type list-style-position">k</li>
+<li id="l" style="list-style: 'x' inside" data-check="list-style-type list-style-position">l</li>
+<li id="m" style="list-style-type: cjk-ideographic" data-check="list-style-type">m</li>
+<li id="n" style="list-style-type: inherit" data-check="list-style-type">n</li>
+<li id="o" style="list-style-type: initial" data-check="list-style-type">o</li>
+<li id="p" style="list-style-type: Thumbs" data-check="list-style-type">p</li>
+<li id="q" style="list-style-type: 'a' 'b'" data-check="list-style-type">q</li>
+<li id="r" style="list-style-type: DISC" data-check="list-style-type">r</li>
+<li id="s" style="list-style-type: Lower-Alpha" data-check="list-style-type">s</li>
+<li id="t" style="list-style-type: korean-hangul-formal" data-check="list-style-type">t</li>
+<li id="u" style="list-style-type: '\2192'" data-check="list-style-type">u</li>
+<li id="v" style="list-style-type: ethiopic-halehame-ti-er" data-check="list-style-type">v</li>
+<li id="w" style="list-style: none" data-check="list-style-type list-style-position">w</li>
+</ol>
+</body></html>

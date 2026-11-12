@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Container queries drawn: colours, sizes and generated boxes by their containers</title>
+<style>
+/* tests/pages/container-paint.html -- container queries held to Chromium's drawing region by region
+   (tests/integ/paintref.sh): swatches whose colour, size and generated content each container's queries and units
+   give; inline-size and size containers, named, nested, under a flex row and a grid */
+body { margin: 0; background: #fff; }
+.ci { container-type: inline-size; }
+.cs { container-type: size; }
+.row { display: flex; gap: 10px; margin: 10px; }
+.sw { height: 20px; width: 50cqw; background: rgb(120, 120, 120); }
+@container (width < 150px) { .sw { background: rgb(220, 40, 40); } }
+@container (150px <= width < 300px) { .sw { background: rgb(40, 160, 40); } }
+@container (width >= 300px) { .sw { background: rgb(40, 40, 220); height: 30px; } }
+.box { height: 10cqh; width: 80cqw; background: rgb(250, 160, 0); }
+@container (aspect-ratio > 1) { .box { background: rgb(0, 160, 160); } }
+.gen::before { content: ""; display: block; height: 12px; width: 30cqw; background: rgb(160, 0, 160); }
+@container (width > 200px) { .gen::before { width: 60cqw; background: rgb(0, 0, 0); } }
+@container wide (width > 250px) { .named { background: rgb(255, 0, 128); } }
+.named { height: 16px; background: rgb(200, 200, 200); }
+@container style(--tone: warm) { .tone { background: rgb(255, 120, 60); } }
+.tone { height: 16px; background: rgb(60, 120, 255); }
+.pad { padding: 5cqi; background: rgb(230, 230, 230); }
+.pad > div { height: 8px; background: rgb(90, 60, 30); }
+</style></head>
+<body>
+<div class="row">
+  <div id="c1" class="ci" style="width: 120px; background: #eee"><div id="s1" class="sw"></div></div>
+  <div id="c2" class="ci" style="width: 200px; background: #eee"><div id="s2" class="sw"></div></div>
+  <div id="c3" class="ci" style="width: 340px; background: #eee"><div id="s3" class="sw"></div></div>
+</div>
+<div class="row">
+  <div id="c4" class="cs" style="width: 300px; height: 120px; background: #f4f4f4"><div id="b4" class="box"></div></div>
+  <div id="c5" class="cs" style="width: 100px; height: 150px; background: #f4f4f4"><div id="b5" class="box"></div></div>
+  <div id="c6" class="ci" style="width: 260px; background: #eee"><div id="g6" class="gen"></div></div>
+  <div id="c7" class="ci" style="width: 150px; background: #eee"><div id="g7" class="gen"></div></div>
+</div>
+<div class="row">
+  <div id="c8" class="ci" style="width: 400px; container-name: wide">
+    <div id="n8" class="named"></div>
+    <div id="c9" class="ci" style="width: 120px; margin-top: 6px"><div id="n9" class="named"></div><div id="s9" class="sw"></div></div>
+  </div>
+  <div id="c10" class="ci" style="width: 200px; --tone: warm"><div id="t10" class="tone"></div></div>
+  <div id="c11" class="ci" style="width: 120px"><div id="t11" class="tone"></div></div>
+</div>
+<div class="row" style="width: 700px">
+  <div id="f1" class="ci" style="flex: 1; background: #eee"><div id="fs1" class="sw"></div></div>
+  <div id="f2" class="ci" style="flex: 2; background: #eee"><div id="fs2" class="sw"></div></div>
+</div>
+<div style="display: grid; grid-template-columns: 100px 1fr 2fr; gap: 10px; margin: 10px; width: 640px">
+  <div id="g1" class="ci"><div id="gs1" class="sw"></div></div>
+  <div id="g2" class="ci"><div id="gs2" class="sw"></div></div>
+  <div id="g3" class="ci"><div id="gs3" class="sw"></div></div>
+</div>
+<div class="row">
+  <div id="p1" class="ci" style="width: 300px"><div id="pp1" class="pad"><div></div></div></div>
+  <div id="p2" class="ci" style="width: 160px"><div id="pp2" class="pad"><div></div></div></div>
+</div>
+</body></html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Container queries: containers of each type, their queries and units</title>
+<style>
+/* tests/pages/container.html -- CSS Conditional 5's container queries, held to Chromium's boxes (tests/integ/boxes.sh)
+   and drawing (tests/integ/paintref.sh): inline-size and size containers, named and unnamed, nested; the size features in
+   range and plain syntax, and, or, not; the container units; queries that change display, size, colour and content;
+   size containment (a size container's auto height its content's as if empty; a shrinking container as if empty) */
+body { margin: 8px; font: 14px/18px sans-serif; }
+.ci { container-type: inline-size; }
+.cs { container-type: size; }
+.card { background: #ddd; margin: 0 0 6px; }
+.card .a, .card .b { padding: 4px; }
+.card .a { background: #f0c0c0; }
+.card .b { background: #c0c0f0; }
+@container (width > 500px) { .card { display: flex; } .card .a { width: 30%; } .card .b { flex: 1; } }
+@container (width <= 500px) { .card .a { background: #c0f0c0; } }
+/* named containers: the query asks the nearest of its name */
+.page { container: page / inline-size; }
+.side { container: side / inline-size; }
+@container page (width > 600px) { .np { background: rgb(255, 200, 0); } }
+@container side (width < 300px) { .ns { background: rgb(0, 200, 255); } }
+@container (width < 300px) { .nn { background: rgb(200, 0, 255); } }
+/* nested: the nearest container answers */
+@container (300px <= width <= 400px) { .nest { background: rgb(0, 160, 0); color: white; } }
+/* the units */
+.units { width: 50cqw; height: 25cqh; background: rgb(40, 80, 200); }
+.uf { font-size: 4cqi; line-height: 1.2; padding: 2cqw 0 0 5cqi; background: #eee; }
+/* content and display */
+@container (width > 400px) { .tag::before { content: "wide: "; font-weight: bold; } }
+@container (width < 350px) { .hide { display: none; } }
+@container not (width < 350px) { .only-narrow { display: none; } }
+/* aspect-ratio and orientation of a size container */
+@container (aspect-ratio > 2) { .ar { background: rgb(250, 120, 0); } }
+@container (orientation: portrait) { .or { background: rgb(120, 0, 250); } }
+@container (min-height: 100px) and (max-height: 200px) { .hh { height: 30px; background: rgb(0, 120, 120); } }
+/* style queries */
+@container style(--theme: dark) { .themed { background: #222; color: #fff; } }
+/* @container in @media, @media in @container */
+@media (min-width: 100px) { @container (width > 200px) { .mq1 { background: rgb(200, 100, 100); } } }
+@container (width > 200px) { @media (min-width: 100px) { .mq2 { background: rgb(100, 200, 100); } } }
+</style></head>
+<body>
+<div id="w1" class="ci" style="width: 600px"><div id="card1" class="card"><div id="a1" class="a">first</div><div id="b1" class="b">second, beside the first where the container is wide</div></div></div>
+<div id="w2" class="ci" style="width: 300px"><div id="card2" class="card"><div id="a2" class="a">first</div><div id="b2" class="b">second, below the first where the container is narrow</div></div></div>
+<div id="pg" class="page" style="width: 700px">
+  <div id="np1" class="np nn">page wide: amber</div>
+  <div id="sd" class="side" style="width: 250px"><div id="ns1" class="ns np">side narrow: cyan, and page wide too</div><div id="nn1" class="nn">nearest narrow: violet</div></div>
+</div>
+<div id="out" class="ci" style="width: 600px"><div id="in" class="ci" style="width: 60%"><div id="nest1" class="nest">nearest is 360px: green</div></div><div id="nest2" class="nest">outer is 600px: none</div></div>
+<div id="cs1" class="cs" style="width: 400px; height: 120px; background: #f4f4f4"><div id="u1" class="units"></div></div>
+<div id="ci3" class="ci" style="width: 500px"><div id="uf1" class="uf">four cqi letters</div></div>
+<div id="t1" class="ci" style="width: 450px"><span id="tag1" class="tag">tagged</span> <span id="hide1" class="hide">shown</span><span class="only-narrow">narrow only</span></div>
+<div id="t2" class="ci" style="width: 300px"><span id="tag2" class="tag">tagged</span> <span class="hide">hidden</span><span id="on2" class="only-narrow">narrow only</span></div>
+<div id="cs2" class="cs" style="width: 300px; height: 100px"><div id="ar1" class="ar or hh">wide size container</div></div>
+<div id="cs3" class="cs" style="width: 100px; height: 150px; float: left"><div id="ar2" class="ar or hh">tall</div></div>
+<div id="cs4" class="cs" style="width: 120px; min-height: 40px; background: #ccc; float: left; margin-left: 8px"><div id="cs4c">auto height: its min</div></div>
+<div id="fl1" class="ci" style="float: left; padding: 3px; border: 1px solid; margin-left: 8px">shrunk</div>
+<span id="ib1" class="ci" style="display: inline-block; padding: 4px; background: #cfc">inline block</span>
+<div id="th" style="--theme: dark; clear: both"><div id="th1" class="themed">dark theme by a style query</div></div>
+<div id="fx" style="display: flex; width: 600px"><div id="fx1" class="ci" style="flex: 1"><div id="fxc" class="card"><div id="fa" class="a">flexed</div><div id="fb" class="b">container</div></div></div><div id="fx2" class="ci" style="background: #fcc">empty item</div></div>
+<div id="m1" class="ci" style="width: 300px"><div id="mq1" class="mq1">media then container</div><div id="mq2" class="mq2">container then media</div></div>
+<div id="bf" style="margin: 10px 0"><div id="bfc" class="ci" style="margin: 0"><p id="bfp" style="margin: 12px 0">margins stay in</p></div></div>
+</body></html>

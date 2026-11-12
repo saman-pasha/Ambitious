@@ -61,6 +61,9 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     appearance,                        % none, auto or a control's own (CSS UI 4): whether the theme draws it
     object_fit,                        % fill, contain, cover, none or scale-down (CSS Images 3, 5.5)
     object_position,                   % each axis a percentage, px, or a calc() of both, the percentage first
+    %% CSS Conditional 5's query containers: container-type (normal, size, inline-size, scroll-state, as a
+    %% keyword or kept as text) and container-name (none, or its names kept as text)
+    container_type, container_name,
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is
@@ -95,8 +98,17 @@ css_contract(record(rule, [
     field(scoped,     bool),            % in an @scope: its selector matched below a scoping root
     field(scope,      span(text)),      % the scoping roots' selector list (empty: the style element's parent)
     field(scope_end,  span(text)),      % the scoping limits' (empty: none)
-    field(scope_host, xhandle(dom, node))   % the root of an @scope without roots' selectors
+    field(scope_host, xhandle(dom, node)),  % the root of an @scope without roots' selectors
+    field(container,  ref(cquery))      % the innermost @container it is in (none: in none); it applies where each one's condition holds
 ])).
+%% an @container rule (CSS Conditional 5, 6.1): its prelude as written (its queries, each a container's name and a
+%% condition; white space one space), the @container it is in, its sheet. Its condition is answered for each element by
+%% the container it asks (the nearest of the type and the name it needs), once layout knows that container's size
+css_contract(record(cquery, [field(text, span(text)), field(parent, ref(cquery)), field(sheet, ref(sheet))])).
+%% a counter style a sheet defined (@counter-style, CSS Counter Styles 3): its name, its system as written (symbolic
+%% when it gives none), its descriptors as written (`name: value;' each), its sheet. The predefined styles (decimal,
+%% the alphabets, the CJK and Indic numbers, ...) are the module's own and are not records
+css_contract(record(cstyle, [field(name, span(text)), field(system, span(text)), field(text, span(text)), field(sheet, ref(sheet))])).
 %% a custom property a sheet registered (@property, CSS Properties and Values 1): its name,
 %% its syntax (as written, its quotes gone), whether it inherits, its initial value (computed)
 css_contract(record(regprop, [field(name, atom(names)), field(syntax, span(text)), field(inherits, bool),
@@ -124,7 +136,8 @@ css_contract(record(decl, [
 ])).
 %% a rule that matched an element (or, pseudo, one of its pseudo-elements)
 css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule)), field(pseudo, enum(pseudo)),
-    field(proximity, u32)               % a scoped rule's: its scoping root's generations above the node, plus one; 0 unscoped
+    field(proximity, u32),              % a scoped rule's: its scoping root's generations above the node, plus one; 0 unscoped
+    field(unmet, bool)                  % its selector matched, but its @container's condition does not hold for the node
 ])).
 %% a pseudo-element's computed style: its element, which one, its style (whose parent is
 %% the element's), the first of its values
@@ -173,11 +186,13 @@ css_contract(handle(state, st)).
 css_contract(handle(face, ff)).
 css_contract(handle(keyframes, kf)).
 css_contract(handle(regprop, rg)).
+css_contract(handle(cquery, cq)).
+css_contract(handle(cstyle, cs)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), table(layer),
-    table(face), table(pstyle), table(state), table(keyframes), table(regprop), pool(text), atoms(names)])).
+    table(face), table(pstyle), table(state), table(keyframes), table(regprop), table(cquery), table(cstyle), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
@@ -189,6 +204,8 @@ css_contract(owns(style, layer, store)).
 css_contract(owns(style, face, store)).
 css_contract(owns(style, keyframes, store)).
 css_contract(owns(style, regprop, store)).
+css_contract(owns(style, cquery, store)).
+css_contract(owns(style, cstyle, store)).
 css_contract(owns(style, pstyle, store)).
 css_contract(owns(style, state, store)).
 css_contract(owns(sheet, rule, list(rules))).
@@ -230,13 +247,20 @@ css_contract(fact(css_layer(handle, field(name), field(rank)), table(layer), tru
 css_contract(fact(css_font_face(handle, field(family), field(url), field(weight), field(italic)), table(face), true)).
 css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).
 css_contract(fact(css_decl(handle, field(rule), field(prop), field(text), field(important)), table(decl), true)).
-css_contract(fact(css_matched(field(node), field(rule)), table(match), field(pseudo) == element)).
+css_contract(fact(css_matched(field(node), field(rule)), table(match), (field(pseudo) == element, field(unmet) == false))).
 %% a scoped rule (@scope, Cascade 6): its roots' and limits' selectors; a match of one, its
 %% scoping root's distance (generations, plus one), which ranks it over a farther one
 css_contract(fact(css_scope(handle, field(scope), field(scope_end)), table(rule), field(scoped) == true)).
 css_contract(fact(css_match_proximity(field(node), field(rule), field(proximity)), table(match), field(proximity) \== 0)).
-css_contract(fact(css_pseudo_matched(field(node), field(pseudo), field(rule)), table(match), field(pseudo) \== element)).
-css_contract(fact(css_pseudo_style_of(field(node), field(pseudo), field(style)), table(pstyle), true)).
+css_contract(fact(css_pseudo_matched(field(node), field(pseudo), field(rule)), table(match), (field(pseudo) \== element, field(unmet) == false))).
+%% a rule whose selector matched an element (or its pseudo-element) but whose @container's condition does not hold for it
+css_contract(fact(css_container_unmet(field(node), field(rule)), table(match), field(unmet) == true)).
+%% @container rules and the rules in them; the counter styles a sheet defined
+css_contract(fact(css_container_query(handle, field(text), field(parent)), table(cquery), true)).
+css_contract(fact(css_rule_container(handle, field(container)), table(rule), field(container) \== none)).
+css_contract(fact(css_counter_style(handle, field(name), field(system)), table(cstyle), true)).
+%% a pseudo-element's style when it is generated (a ::before or an ::after whose content is none has its style, no first)
+css_contract(fact(css_pseudo_style_of(field(node), field(pseudo), field(style)), table(pstyle), field(first) \== none)).
 css_contract(fact(css_state(field(kind), field(node)), table(state), true)).
 %% EACH ELEMENT'S STYLE; OF EACH STYLE, THE VALUES A DECLARATION GAVE; and each
 %% property's initial value. Every other computed value is the parent element's or

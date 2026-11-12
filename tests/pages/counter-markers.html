@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>List markers by counter styles</title>
+<style>
+/* tests/pages/counter-markers.html (tools: gen_mkpage.py) -- list markers by counter styles, outside (the text and its
+   suffix ending at the content box) and inside, their prefixes and suffixes, each region an empty box over a marker */
+body { margin: 0; font: 20px serif; }
+.cell { position: absolute; width: 200px; height: 50px; }
+ol { margin: 0; padding: 0 0 0 140px; line-height: 1; }
+.t { color: transparent; }
+.r { position: absolute; }
+@counter-style cyc { system: cyclic; symbols: "\25C6" "\25C7" "\25CB"; prefix: "("; suffix: ") "; }
+@counter-style ext { system: extends lower-roman; prefix: "["; suffix: "] "; }
+@counter-style bin { system: numeric; symbols: "0" "1"; suffix: "b "; }
+@counter-style dotted { system: extends upper-roman; suffix: " \2014  "; }
+@counter-style rng { system: numeric; symbols: "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"; range: 2 4; fallback: upper-alpha; }
+@counter-style padded { system: extends decimal; pad: 4 "0"; prefix: "#"; }
+@counter-style thumb { system: cyclic; symbols: "\2605"; suffix: " "; }
+</style></head><body>
+<div class="cell" style="left: 0px; top: 0px"><ol style="list-style: decimal outside; padding-left: 140px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="o0" class="r" style="left: 0px; top: 0px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 0px"><ol style="list-style: decimal inside; padding-left: 10px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="i0" class="r" style="left: 210px; top: 0px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 0px"><ol style="list-style: decimal outside; padding-left: 140px" start="12"><li><span class="t">x</span></li></ol></div>
+<div id="o1" class="r" style="left: 400px; top: 0px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 0px"><ol style="list-style: decimal inside; padding-left: 10px" start="12"><li><span class="t">x</span></li></ol></div>
+<div id="i1" class="r" style="left: 610px; top: 0px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 50px"><ol style="list-style: lower-roman outside; padding-left: 140px" start="4"><li><span class="t">x</span></li></ol></div>
+<div id="o2" class="r" style="left: 0px; top: 50px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 50px"><ol style="list-style: lower-roman inside; padding-left: 10px" start="4"><li><span class="t">x</span></li></ol></div>
+<div id="i2" class="r" style="left: 210px; top: 50px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 50px"><ol style="list-style: upper-roman outside; padding-left: 140px" start="1999"><li><span class="t">x</span></li></ol></div>
+<div id="o3" class="r" style="left: 400px; top: 50px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 50px"><ol style="list-style: upper-roman inside; padding-left: 10px" start="1999"><li><span class="t">x</span></li></ol></div>
+<div id="i3" class="r" style="left: 610px; top: 50px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 100px"><ol style="list-style: lower-alpha outside; padding-left: 140px" start="28"><li><span class="t">x</span></li></ol></div>
+<div id="o4" class="r" style="left: 0px; top: 100px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 100px"><ol style="list-style: lower-alpha inside; padding-left: 10px" start="28"><li><span class="t">x</span></li></ol></div>
+<div id="i4" class="r" style="left: 210px; top: 100px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 100px"><ol style="list-style: lower-greek outside; padding-left: 140px" start="5"><li><span class="t">x</span></li></ol></div>
+<div id="o5" class="r" style="left: 400px; top: 100px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 100px"><ol style="list-style: lower-greek inside; padding-left: 10px" start="5"><li><span class="t">x</span></li></ol></div>
+<div id="i5" class="r" style="left: 610px; top: 100px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 150px"><ol style="list-style: decimal-leading-zero outside; padding-left: 140px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="o6" class="r" style="left: 0px; top: 150px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 150px"><ol style="list-style: decimal-leading-zero inside; padding-left: 10px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="i6" class="r" style="left: 210px; top: 150px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 150px"><ol style="list-style: armenian outside; padding-left: 140px" start="18"><li><span class="t">x</span></li></ol></div>
+<div id="o7" class="r" style="left: 400px; top: 150px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 150px"><ol style="list-style: armenian inside; padding-left: 10px" start="18"><li><span class="t">x</span></li></ol></div>
+<div id="i7" class="r" style="left: 610px; top: 150px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 200px"><ol style="list-style: georgian outside; padding-left: 140px" start="31"><li><span class="t">x</span></li></ol></div>
+<div id="o8" class="r" style="left: 0px; top: 200px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 200px"><ol style="list-style: georgian inside; padding-left: 10px" start="31"><li><span class="t">x</span></li></ol></div>
+<div id="i8" class="r" style="left: 210px; top: 200px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 200px"><ol style="list-style: hebrew outside; padding-left: 140px" start="15"><li><span class="t">x</span></li></ol></div>
+<div id="o9" class="r" style="left: 400px; top: 200px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 200px"><ol style="list-style: hebrew inside; padding-left: 10px" start="15"><li><span class="t">x</span></li></ol></div>
+<div id="i9" class="r" style="left: 610px; top: 200px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 250px"><ol style="list-style: cjk-decimal outside; padding-left: 140px" start="205"><li><span class="t">x</span></li></ol></div>
+<div id="o10" class="r" style="left: 0px; top: 250px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 250px"><ol style="list-style: cjk-decimal inside; padding-left: 10px" start="205"><li><span class="t">x</span></li></ol></div>
+<div id="i10" class="r" style="left: 210px; top: 250px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 250px"><ol style="list-style: japanese-informal outside; padding-left: 140px" start="21"><li><span class="t">x</span></li></ol></div>
+<div id="o11" class="r" style="left: 400px; top: 250px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 250px"><ol style="list-style: japanese-informal inside; padding-left: 10px" start="21"><li><span class="t">x</span></li></ol></div>
+<div id="i11" class="r" style="left: 610px; top: 250px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 300px"><ol style="list-style: korean-hangul-formal outside; padding-left: 140px" start="7"><li><span class="t">x</span></li></ol></div>
+<div id="o12" class="r" style="left: 0px; top: 300px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 300px"><ol style="list-style: korean-hangul-formal inside; padding-left: 10px" start="7"><li><span class="t">x</span></li></ol></div>
+<div id="i12" class="r" style="left: 210px; top: 300px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 300px"><ol style="list-style: trad-chinese-formal outside; padding-left: 140px" start="1001"><li><span class="t">x</span></li></ol></div>
+<div id="o13" class="r" style="left: 400px; top: 300px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 300px"><ol style="list-style: trad-chinese-formal inside; padding-left: 10px" start="1001"><li><span class="t">x</span></li></ol></div>
+<div id="i13" class="r" style="left: 610px; top: 300px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 350px"><ol style="list-style: hiragana outside; padding-left: 140px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="o14" class="r" style="left: 0px; top: 350px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 350px"><ol style="list-style: hiragana inside; padding-left: 10px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="i14" class="r" style="left: 210px; top: 350px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 350px"><ol style="list-style: katakana-iroha outside; padding-left: 140px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="o15" class="r" style="left: 400px; top: 350px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 350px"><ol style="list-style: katakana-iroha inside; padding-left: 10px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="i15" class="r" style="left: 610px; top: 350px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 400px"><ol style="list-style: cyc outside; padding-left: 140px" start="2"><li><span class="t">x</span></li></ol></div>
+<div id="o16" class="r" style="left: 0px; top: 400px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 400px"><ol style="list-style: cyc inside; padding-left: 10px" start="2"><li><span class="t">x</span></li></ol></div>
+<div id="i16" class="r" style="left: 210px; top: 400px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 400px"><ol style="list-style: ext outside; padding-left: 140px" start="9"><li><span class="t">x</span></li></ol></div>
+<div id="o17" class="r" style="left: 400px; top: 400px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 400px"><ol style="list-style: ext inside; padding-left: 10px" start="9"><li><span class="t">x</span></li></ol></div>
+<div id="i17" class="r" style="left: 610px; top: 400px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 450px"><ol style="list-style: bin outside; padding-left: 140px" start="6"><li><span class="t">x</span></li></ol></div>
+<div id="o18" class="r" style="left: 0px; top: 450px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 450px"><ol style="list-style: bin inside; padding-left: 10px" start="6"><li><span class="t">x</span></li></ol></div>
+<div id="i18" class="r" style="left: 210px; top: 450px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 450px"><ol style="list-style: dotted outside; padding-left: 140px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="o19" class="r" style="left: 400px; top: 450px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 450px"><ol style="list-style: dotted inside; padding-left: 10px" start="3"><li><span class="t">x</span></li></ol></div>
+<div id="i19" class="r" style="left: 610px; top: 450px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 500px"><ol style="list-style: rng outside; padding-left: 140px" start="7"><li><span class="t">x</span></li></ol></div>
+<div id="o20" class="r" style="left: 0px; top: 500px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 500px"><ol style="list-style: rng inside; padding-left: 10px" start="7"><li><span class="t">x</span></li></ol></div>
+<div id="i20" class="r" style="left: 210px; top: 500px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 500px"><ol style="list-style: padded outside; padding-left: 140px" start="42"><li><span class="t">x</span></li></ol></div>
+<div id="o21" class="r" style="left: 400px; top: 500px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 500px"><ol style="list-style: padded inside; padding-left: 10px" start="42"><li><span class="t">x</span></li></ol></div>
+<div id="i21" class="r" style="left: 610px; top: 500px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 0px; top: 550px"><ol style="list-style: '\2192  ' outside; padding-left: 140px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="o22" class="r" style="left: 0px; top: 550px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 200px; top: 550px"><ol style="list-style: '\2192  ' inside; padding-left: 10px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="i22" class="r" style="left: 210px; top: 550px; width: 190px; height: 26px"></div>
+<div class="cell" style="left: 400px; top: 550px"><ol style="list-style: thumb outside; padding-left: 140px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="o23" class="r" style="left: 400px; top: 550px; width: 140px; height: 26px"></div>
+<div class="cell" style="left: 600px; top: 550px"><ol style="list-style: thumb inside; padding-left: 10px" start="1"><li><span class="t">x</span></li></ol></div>
+<div id="i23" class="r" style="left: 610px; top: 550px; width: 190px; height: 26px"></div>
+</body></html>

@@ -1,7 +1,7 @@
-/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:13d81357:10041). Do not edit. */
+/* Ambitious: the interface of module css, generated from contracts/css.pl (fnv1a32:7f52b8f6:10834). Do not edit. */
 typedef enum css_status { CSS_OK, CSS_STALE_HANDLE, CSS_WRONG_KIND, CSS_BAD_REQUEST, CSS_NOT_REQUESTABLE, CSS_STALE_REVISION } css_status;
 typedef enum css_origin { CSS_ORIGIN_USER_AGENT, CSS_ORIGIN_AUTHOR, CSS_ORIGIN_INLINE } css_origin;
-typedef enum css_prop { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_STYLE, CSS_PROP_TEXT_ALIGN, CSS_PROP_LINE_HEIGHT, CSS_PROP_TEXT_DECORATION, CSS_PROP_WHITE_SPACE, CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_TOP_COLOR, CSS_PROP_BORDER_RIGHT_COLOR, CSS_PROP_BORDER_BOTTOM_COLOR, CSS_PROP_BORDER_LEFT_COLOR, CSS_PROP_BORDER_TOP_LEFT_RADIUS, CSS_PROP_BORDER_TOP_RIGHT_RADIUS, CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS, CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS, CSS_PROP_WIDTH, CSS_PROP_HEIGHT, CSS_PROP_MIN_WIDTH, CSS_PROP_MIN_HEIGHT, CSS_PROP_MAX_WIDTH, CSS_PROP_MAX_HEIGHT, CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_LIST_STYLE_POSITION, CSS_PROP_FONT_FAMILY, CSS_PROP_BOX_SIZING, CSS_PROP_POSITION, CSS_PROP_TOP, CSS_PROP_RIGHT, CSS_PROP_BOTTOM, CSS_PROP_LEFT, CSS_PROP_FLOAT, CSS_PROP_CLEAR, CSS_PROP_Z_INDEX, CSS_PROP_OVERFLOW_X, CSS_PROP_OVERFLOW_Y, CSS_PROP_VERTICAL_ALIGN, CSS_PROP_OPACITY, CSS_PROP_VISIBILITY, CSS_PROP_FLEX_DIRECTION, CSS_PROP_FLEX_WRAP, CSS_PROP_FLEX_GROW, CSS_PROP_FLEX_SHRINK, CSS_PROP_FLEX_BASIS, CSS_PROP_ORDER, CSS_PROP_JUSTIFY_CONTENT, CSS_PROP_JUSTIFY_ITEMS, CSS_PROP_JUSTIFY_SELF, CSS_PROP_ALIGN_ITEMS, CSS_PROP_ALIGN_SELF, CSS_PROP_ALIGN_CONTENT, CSS_PROP_ROW_GAP, CSS_PROP_COLUMN_GAP, CSS_PROP_GRID_TEMPLATE_COLUMNS, CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_AUTO_COLUMNS, CSS_PROP_GRID_AUTO_ROWS, CSS_PROP_GRID_AUTO_FLOW, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE, CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_BOX_SHADOW, CSS_PROP_TEXT_SHADOW, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_OUTLINE_WIDTH, CSS_PROP_OUTLINE_STYLE, CSS_PROP_OUTLINE_COLOR, CSS_PROP_OUTLINE_OFFSET, CSS_PROP_LETTER_SPACING, CSS_PROP_WORD_SPACING, CSS_PROP_TEXT_INDENT, CSS_PROP_TEXT_TRANSFORM, CSS_PROP_DIRECTION, CSS_PROP_UNICODE_BIDI, CSS_PROP_WRITING_MODE, CSS_PROP_HYPHENS, CSS_PROP_CONTENT, CSS_PROP_COUNTER_RESET, CSS_PROP_COUNTER_INCREMENT, CSS_PROP_QUOTES, CSS_PROP_COLOR_SCHEME, CSS_PROP_BACKGROUND_CLIP, CSS_PROP_BACKGROUND_ORIGIN, CSS_PROP_FILTER, CSS_PROP_BACKDROP_FILTER, CSS_PROP_PERSPECTIVE, CSS_PROP_PERSPECTIVE_ORIGIN, CSS_PROP_TRANSFORM_STYLE, CSS_PROP_BACKFACE_VISIBILITY, CSS_PROP_TRANSLATE, CSS_PROP_ROTATE, CSS_PROP_SCALE, CSS_PROP_ANIMATION_NAME, CSS_PROP_ANIMATION_DURATION, CSS_PROP_ANIMATION_TIMING_FUNCTION, CSS_PROP_ANIMATION_DELAY, CSS_PROP_ANIMATION_ITERATION_COUNT, CSS_PROP_ANIMATION_DIRECTION, CSS_PROP_ANIMATION_FILL_MODE, CSS_PROP_ANIMATION_PLAY_STATE, CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION, CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR, CSS_PROP_GRID_TEMPLATE_AREAS, CSS_PROP_WEBKIT_TEXT_FILL_COLOR, CSS_PROP_TEXT_OVERFLOW, CSS_PROP_WEBKIT_LINE_CLAMP, CSS_PROP_WEBKIT_BOX_ORIENT, CSS_PROP_FILL, CSS_PROP_FILL_OPACITY, CSS_PROP_FILL_RULE, CSS_PROP_STROKE, CSS_PROP_STROKE_WIDTH, CSS_PROP_STROKE_LINECAP, CSS_PROP_STROKE_LINEJOIN, CSS_PROP_STROKE_MITERLIMIT, CSS_PROP_STROKE_DASHARRAY, CSS_PROP_STROKE_DASHOFFSET, CSS_PROP_STROKE_OPACITY, CSS_PROP_STOP_COLOR, CSS_PROP_STOP_OPACITY, CSS_PROP_CLIP_PATH, CSS_PROP_CLIP_RULE, CSS_PROP_TEXT_ANCHOR, CSS_PROP_APPEARANCE, CSS_PROP_OBJECT_FIT, CSS_PROP_OBJECT_POSITION, CSS_PROP_CUSTOM } css_prop;
+typedef enum css_prop { CSS_PROP_DISPLAY, CSS_PROP_COLOR, CSS_PROP_BACKGROUND_COLOR, CSS_PROP_FONT_SIZE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_STYLE, CSS_PROP_TEXT_ALIGN, CSS_PROP_LINE_HEIGHT, CSS_PROP_TEXT_DECORATION, CSS_PROP_WHITE_SPACE, CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_LEFT, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_LEFT, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_TOP_COLOR, CSS_PROP_BORDER_RIGHT_COLOR, CSS_PROP_BORDER_BOTTOM_COLOR, CSS_PROP_BORDER_LEFT_COLOR, CSS_PROP_BORDER_TOP_LEFT_RADIUS, CSS_PROP_BORDER_TOP_RIGHT_RADIUS, CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS, CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS, CSS_PROP_WIDTH, CSS_PROP_HEIGHT, CSS_PROP_MIN_WIDTH, CSS_PROP_MIN_HEIGHT, CSS_PROP_MAX_WIDTH, CSS_PROP_MAX_HEIGHT, CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_LIST_STYLE_POSITION, CSS_PROP_FONT_FAMILY, CSS_PROP_BOX_SIZING, CSS_PROP_POSITION, CSS_PROP_TOP, CSS_PROP_RIGHT, CSS_PROP_BOTTOM, CSS_PROP_LEFT, CSS_PROP_FLOAT, CSS_PROP_CLEAR, CSS_PROP_Z_INDEX, CSS_PROP_OVERFLOW_X, CSS_PROP_OVERFLOW_Y, CSS_PROP_VERTICAL_ALIGN, CSS_PROP_OPACITY, CSS_PROP_VISIBILITY, CSS_PROP_FLEX_DIRECTION, CSS_PROP_FLEX_WRAP, CSS_PROP_FLEX_GROW, CSS_PROP_FLEX_SHRINK, CSS_PROP_FLEX_BASIS, CSS_PROP_ORDER, CSS_PROP_JUSTIFY_CONTENT, CSS_PROP_JUSTIFY_ITEMS, CSS_PROP_JUSTIFY_SELF, CSS_PROP_ALIGN_ITEMS, CSS_PROP_ALIGN_SELF, CSS_PROP_ALIGN_CONTENT, CSS_PROP_ROW_GAP, CSS_PROP_COLUMN_GAP, CSS_PROP_GRID_TEMPLATE_COLUMNS, CSS_PROP_GRID_TEMPLATE_ROWS, CSS_PROP_GRID_AUTO_COLUMNS, CSS_PROP_GRID_AUTO_ROWS, CSS_PROP_GRID_AUTO_FLOW, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE, CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_BOX_SHADOW, CSS_PROP_TEXT_SHADOW, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_OUTLINE_WIDTH, CSS_PROP_OUTLINE_STYLE, CSS_PROP_OUTLINE_COLOR, CSS_PROP_OUTLINE_OFFSET, CSS_PROP_LETTER_SPACING, CSS_PROP_WORD_SPACING, CSS_PROP_TEXT_INDENT, CSS_PROP_TEXT_TRANSFORM, CSS_PROP_DIRECTION, CSS_PROP_UNICODE_BIDI, CSS_PROP_WRITING_MODE, CSS_PROP_HYPHENS, CSS_PROP_CONTENT, CSS_PROP_COUNTER_RESET, CSS_PROP_COUNTER_INCREMENT, CSS_PROP_QUOTES, CSS_PROP_COLOR_SCHEME, CSS_PROP_BACKGROUND_CLIP, CSS_PROP_BACKGROUND_ORIGIN, CSS_PROP_FILTER, CSS_PROP_BACKDROP_FILTER, CSS_PROP_PERSPECTIVE, CSS_PROP_PERSPECTIVE_ORIGIN, CSS_PROP_TRANSFORM_STYLE, CSS_PROP_BACKFACE_VISIBILITY, CSS_PROP_TRANSLATE, CSS_PROP_ROTATE, CSS_PROP_SCALE, CSS_PROP_ANIMATION_NAME, CSS_PROP_ANIMATION_DURATION, CSS_PROP_ANIMATION_TIMING_FUNCTION, CSS_PROP_ANIMATION_DELAY, CSS_PROP_ANIMATION_ITERATION_COUNT, CSS_PROP_ANIMATION_DIRECTION, CSS_PROP_ANIMATION_FILL_MODE, CSS_PROP_ANIMATION_PLAY_STATE, CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION, CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR, CSS_PROP_GRID_TEMPLATE_AREAS, CSS_PROP_WEBKIT_TEXT_FILL_COLOR, CSS_PROP_TEXT_OVERFLOW, CSS_PROP_WEBKIT_LINE_CLAMP, CSS_PROP_WEBKIT_BOX_ORIENT, CSS_PROP_FILL, CSS_PROP_FILL_OPACITY, CSS_PROP_FILL_RULE, CSS_PROP_STROKE, CSS_PROP_STROKE_WIDTH, CSS_PROP_STROKE_LINECAP, CSS_PROP_STROKE_LINEJOIN, CSS_PROP_STROKE_MITERLIMIT, CSS_PROP_STROKE_DASHARRAY, CSS_PROP_STROKE_DASHOFFSET, CSS_PROP_STROKE_OPACITY, CSS_PROP_STOP_COLOR, CSS_PROP_STOP_OPACITY, CSS_PROP_CLIP_PATH, CSS_PROP_CLIP_RULE, CSS_PROP_TEXT_ANCHOR, CSS_PROP_APPEARANCE, CSS_PROP_OBJECT_FIT, CSS_PROP_OBJECT_POSITION, CSS_PROP_CONTAINER_TYPE, CSS_PROP_CONTAINER_NAME, CSS_PROP_CUSTOM } css_prop;
 typedef enum css_unit { CSS_UNIT_KEYWORD, CSS_UNIT_PX, CSS_UNIT_EM, CSS_UNIT_PERCENT, CSS_UNIT_COLOR, CSS_UNIT_AUTO, CSS_UNIT_NUMBER, CSS_UNIT_REM, CSS_UNIT_CALC, CSS_UNIT_EXPR, CSS_UNIT_TEXT, CSS_UNIT_VAR } css_unit;
 typedef enum css_how { CSS_HOW_DECLARED, CSS_HOW_INHERITED, CSS_HOW_INITIAL, CSS_HOW_ANIMATED } css_how;
 typedef enum css_pseudo { CSS_PSEUDO_ELEMENT, CSS_PSEUDO_BEFORE, CSS_PSEUDO_AFTER, CSS_PSEUDO_FIRST_LINE, CSS_PSEUDO_FIRST_LETTER, CSS_PSEUDO_MARKER, CSS_PSEUDO_PLACEHOLDER } css_pseudo;
@@ -20,14 +20,18 @@ typedef struct css_state_h { uint32_t doc, index, gen; } css_state_h;
 typedef struct css_face_h { uint32_t doc, index, gen; } css_face_h;
 typedef struct css_keyframes_h { uint32_t doc, index, gen; } css_keyframes_h;
 typedef struct css_regprop_h { uint32_t doc, index, gen; } css_regprop_h;
+typedef struct css_cquery_h { uint32_t doc, index, gen; } css_cquery_h;
+typedef struct css_cstyle_h { uint32_t doc, index, gen; } css_cstyle_h;
 typedef struct css_sheet { uint32_t gen, live, free_next; css_origin origin; uint32_t first_rule; uint32_t last_rule; amb_span url; uint32_t parent; } css_sheet;
-typedef struct css_rule { uint32_t gen, live, free_next; uint32_t sheet; uint32_t next; amb_span selector; uint32_t spec; uint32_t order; uint32_t first_decl; uint32_t last_decl; uint32_t layer; uint32_t keyframes; double offset; uint8_t scoped; amb_span scope; amb_span scope_end; dom_node_h scope_host; } css_rule;
+typedef struct css_rule { uint32_t gen, live, free_next; uint32_t sheet; uint32_t next; amb_span selector; uint32_t spec; uint32_t order; uint32_t first_decl; uint32_t last_decl; uint32_t layer; uint32_t keyframes; double offset; uint8_t scoped; amb_span scope; amb_span scope_end; dom_node_h scope_host; uint32_t container; } css_rule;
+typedef struct css_cquery { uint32_t gen, live, free_next; amb_span text; uint32_t parent; uint32_t sheet; } css_cquery;
+typedef struct css_cstyle { uint32_t gen, live, free_next; amb_span name; amb_span system; amb_span text; uint32_t sheet; } css_cstyle;
 typedef struct css_regprop { uint32_t gen, live, free_next; uint32_t name; amb_span syntax; uint8_t inherits; amb_span initial; uint32_t sheet; } css_regprop;
 typedef struct css_keyframes { uint32_t gen, live, free_next; amb_span name; uint32_t sheet; uint32_t layer; } css_keyframes;
 typedef struct css_layer { uint32_t gen, live, free_next; amb_span name; uint32_t parent; uint32_t rank; } css_layer;
 typedef struct css_face { uint32_t gen, live, free_next; amb_span family; amb_span url; uint32_t weight; uint8_t italic; net_resource_h font; } css_face;
 typedef struct css_decl { uint32_t gen, live, free_next; uint32_t rule; uint32_t next; css_prop prop; uint8_t important; css_unit unit; double num; uint32_t word; uint32_t color; amb_span text; } css_decl;
-typedef struct css_match { uint32_t gen, live, free_next; dom_node_h node; uint32_t rule; css_pseudo pseudo; uint32_t proximity; } css_match;
+typedef struct css_match { uint32_t gen, live, free_next; dom_node_h node; uint32_t rule; css_pseudo pseudo; uint32_t proximity; uint8_t unmet; } css_match;
 typedef struct css_pstyle { uint32_t gen, live, free_next; dom_node_h node; css_pseudo pseudo; uint32_t style; uint32_t first; } css_pstyle;
 typedef struct css_state { uint32_t gen, live, free_next; css_state_kind kind; dom_node_h node; } css_state;
 typedef struct css_cval { uint32_t gen, live, free_next; uint32_t style; css_prop prop; css_unit unit; double num; double pct; uint32_t word; uint32_t color; amb_span text; css_how how; uint32_t winner; } css_cval;
@@ -248,6 +252,8 @@ const char *css_prop_name(css_prop x) {
     case CSS_PROP_APPEARANCE: return "appearance";
     case CSS_PROP_OBJECT_FIT: return "object_fit";
     case CSS_PROP_OBJECT_POSITION: return "object_position";
+    case CSS_PROP_CONTAINER_TYPE: return "container_type";
+    case CSS_PROP_CONTAINER_NAME: return "container_name";
     case CSS_PROP_CUSTOM: return "custom";
     }
     return "?";
@@ -301,7 +307,7 @@ const char *css_state_kind_name(css_state_kind x) {
     return "?";
 }
 
-const char css_fingerprint[] = "fnv1a32:13d81357:10041";
+const char css_fingerprint[] = "fnv1a32:7f52b8f6:10834";
 void css_init(css_style *d, uint32_t id) {
     if (d->sheet_len != 0) abort();
     d->id = id;
@@ -452,6 +458,10 @@ int css_check_invariants(const css_style *d, FILE *report) {
             uint32_t r = d->rule[i].keyframes;
             if (d->rule[i].live && r && (r >= d->keyframes_len || !d->keyframes[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->rule_len; i++) {
+            uint32_t r = d->rule[i].container;
+            if (d->rule[i].live && r && (r >= d->cquery_len || !d->cquery[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
         for (uint32_t i = 1; i < d->decl_len; i++) {
             uint32_t r = d->decl[i].rule;
             if (d->decl[i].live && r && (r >= d->rule_len || !d->rule[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
@@ -492,6 +502,18 @@ int css_check_invariants(const css_style *d, FILE *report) {
             uint32_t r = d->regprop[i].sheet;
             if (d->regprop[i].live && r && (r >= d->sheet_len || !d->sheet[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->cquery_len; i++) {
+            uint32_t r = d->cquery[i].parent;
+            if (d->cquery[i].live && r && (r >= d->cquery_len || !d->cquery[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->cquery_len; i++) {
+            uint32_t r = d->cquery[i].sheet;
+            if (d->cquery[i].live && r && (r >= d->sheet_len || !d->sheet[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->cstyle_len; i++) {
+            uint32_t r = d->cstyle[i].sheet;
+            if (d->cstyle[i].live && r && (r >= d->sheet_len || !d->sheet[r].live)) { bad++; amb_report(report, "css", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -508,6 +530,7 @@ void css_export(const css_style *d, FILE *out) {
         if (d->rule[i].layer != 0) { fputs("css_rule_layer(", out); amb_put_handle(out, "ru", d->id, i, d->rule[i].gen); fputs(",", out); { uint32_t r = d->rule[i].layer; amb_put_ref(out, "ly", d->id, r, r && r < d->layer_len ? d->layer[r].gen : 0); } fputs(").\n", out); }
         if (d->rule[i].keyframes != 0) { fputs("css_keyframe(", out); amb_put_handle(out, "ru", d->id, i, d->rule[i].gen); fputs(",", out); { uint32_t r = d->rule[i].keyframes; amb_put_ref(out, "kf", d->id, r, r && r < d->keyframes_len ? d->keyframes[r].gen : 0); } fputs(",", out); amb_put_f64(out, d->rule[i].offset); fputs(").\n", out); }
         if (d->rule[i].scoped == 1) { fputs("css_scope(", out); amb_put_handle(out, "ru", d->id, i, d->rule[i].gen); fputs(",", out); text_put(d, out, d->rule[i].scope); fputs(",", out); text_put(d, out, d->rule[i].scope_end); fputs(").\n", out); }
+        if (d->rule[i].container != 0) { fputs("css_rule_container(", out); amb_put_handle(out, "ru", d->id, i, d->rule[i].gen); fputs(",", out); { uint32_t r = d->rule[i].container; amb_put_ref(out, "cq", d->id, r, r && r < d->cquery_len ? d->cquery[r].gen : 0); } fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->decl_len; i++) {
         if (!d->decl[i].live) continue;
@@ -516,9 +539,10 @@ void css_export(const css_style *d, FILE *out) {
     }
     for (uint32_t i = 1; i < d->match_len; i++) {
         if (!d->match[i].live) continue;
-        if (d->match[i].pseudo == CSS_PSEUDO_ELEMENT) { fputs("css_matched(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
+        if ((d->match[i].pseudo == CSS_PSEUDO_ELEMENT) && (d->match[i].unmet == 0)) { fputs("css_matched(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
         if (d->match[i].proximity != 0) { fputs("css_match_proximity(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(",", out); fprintf(out, "%lld", (long long)d->match[i].proximity); fputs(").\n", out); }
-        if (d->match[i].pseudo != CSS_PSEUDO_ELEMENT) { fputs("css_pseudo_matched(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); fputs(css_pseudo_name(d->match[i].pseudo), out); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
+        if ((d->match[i].pseudo != CSS_PSEUDO_ELEMENT) && (d->match[i].unmet == 0)) { fputs("css_pseudo_matched(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); fputs(css_pseudo_name(d->match[i].pseudo), out); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
+        if (d->match[i].unmet == 1) { fputs("css_container_unmet(", out); amb_put_ref(out, "n", d->match[i].node.doc, d->match[i].node.index, d->match[i].node.gen); fputs(",", out); { uint32_t r = d->match[i].rule; amb_put_ref(out, "ru", d->id, r, r && r < d->rule_len ? d->rule[r].gen : 0); } fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->cval_len; i++) {
         if (!d->cval[i].live) continue;
@@ -547,7 +571,7 @@ void css_export(const css_style *d, FILE *out) {
     }
     for (uint32_t i = 1; i < d->pstyle_len; i++) {
         if (!d->pstyle[i].live) continue;
-        if (1) { fputs("css_pseudo_style_of(", out); amb_put_ref(out, "n", d->pstyle[i].node.doc, d->pstyle[i].node.index, d->pstyle[i].node.gen); fputs(",", out); fputs(css_pseudo_name(d->pstyle[i].pseudo), out); fputs(",", out); fprintf(out, "%lld", (long long)d->pstyle[i].style); fputs(").\n", out); }
+        if (d->pstyle[i].first != 0) { fputs("css_pseudo_style_of(", out); amb_put_ref(out, "n", d->pstyle[i].node.doc, d->pstyle[i].node.index, d->pstyle[i].node.gen); fputs(",", out); fputs(css_pseudo_name(d->pstyle[i].pseudo), out); fputs(",", out); fprintf(out, "%lld", (long long)d->pstyle[i].style); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->state_len; i++) {
         if (!d->state[i].live) continue;
@@ -560,6 +584,14 @@ void css_export(const css_style *d, FILE *out) {
     for (uint32_t i = 1; i < d->regprop_len; i++) {
         if (!d->regprop[i].live) continue;
         if (1) { fputs("css_registered(", out); amb_put_handle(out, "rg", d->id, i, d->regprop[i].gen); fputs(",", out); names_put(d, out, d->regprop[i].name); fputs(",", out); text_put(d, out, d->regprop[i].syntax); fputs(",", out); fputs(d->regprop[i].inherits ? "true" : "false", out); fputs(",", out); text_put(d, out, d->regprop[i].initial); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->cquery_len; i++) {
+        if (!d->cquery[i].live) continue;
+        if (1) { fputs("css_container_query(", out); amb_put_handle(out, "cq", d->id, i, d->cquery[i].gen); fputs(",", out); text_put(d, out, d->cquery[i].text); fputs(",", out); { uint32_t r = d->cquery[i].parent; amb_put_ref(out, "cq", d->id, r, r && r < d->cquery_len ? d->cquery[r].gen : 0); } fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->cstyle_len; i++) {
+        if (!d->cstyle[i].live) continue;
+        if (1) { fputs("css_counter_style(", out); amb_put_handle(out, "cs", d->id, i, d->cstyle[i].gen); fputs(",", out); text_put(d, out, d->cstyle[i].name); fputs(",", out); text_put(d, out, d->cstyle[i].system); fputs(").\n", out); }
     }
 }
 css_status css_dispatch(css_style *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -624,6 +656,12 @@ typedef struct store_css_store_tag {
     size_t regprop_len, regprop_cap;
     uint32_t regprop_free;
     own css_regprop *regprop;
+    size_t cquery_len, cquery_cap;
+    uint32_t cquery_free;
+    own css_cquery *cquery;
+    size_t cstyle_len, cstyle_cap;
+    uint32_t cstyle_free;
+    own css_cstyle *cstyle;
     size_t text_len, text_cap;
     own char *text;
     size_t names_len, names_cap, names_n, names_ncap, names_scap;
@@ -631,7 +669,7 @@ typedef struct store_css_store_tag {
     own amb_span *names_at;
     own uint32_t *names_slots;
 } store_css_store_tag;
-void store_css_store_tag_drop(store_css_store_tag *s) { free(s->sheet); free(s->rule); free(s->decl); free(s->match); free(s->cval); free(s->estyle); free(s->initval); free(s->layer); free(s->face); free(s->pstyle); free(s->state); free(s->keyframes); free(s->regprop); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); }
+void store_css_store_tag_drop(store_css_store_tag *s) { free(s->sheet); free(s->rule); free(s->decl); free(s->match); free(s->cval); free(s->estyle); free(s->initval); free(s->layer); free(s->face); free(s->pstyle); free(s->state); free(s->keyframes); free(s->regprop); free(s->cquery); free(s->cstyle); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); }
 static void store_css_store_tag__sheet_grow(store_css_store_tag *s) {
     size_t c = s->sheet_cap ? 2 * s->sheet_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -1501,6 +1539,140 @@ size_t store_css_store_tag_regprop_len(const store_css_store_tag *s) { return s-
 size_t store_css_store_tag_regprop_count(const store_css_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->regprop_len; i++) if (s->regprop[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__cquery_grow(store_css_store_tag *s) {
+    size_t c = s->cquery_cap ? 2 * s->cquery_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->cquery = (css_cquery *)realloc(s->cquery, c * sizeof(css_cquery));
+    if (!s->cquery) abort();
+    s->cquery_cap = c;
+}
+css_cquery_h store_css_store_tag_cquery_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->cquery_free) {
+        i = s->cquery_free;
+        s->cquery_free = s->cquery[i].free_next;
+    } else {
+        if (s->cquery_len == 0) {
+            if (s->cquery_cap == 0) store_css_store_tag__cquery_grow(s);
+            memset(&s->cquery[0], 0, sizeof(css_cquery));
+            s->cquery_len = 1;
+        }
+        if (s->cquery_len == s->cquery_cap) store_css_store_tag__cquery_grow(s);
+        i = (uint32_t)s->cquery_len;
+        s->cquery_len++;
+        s->cquery[i].gen = 0;
+    }
+    uint32_t g = s->cquery[i].gen;
+    memset(&s->cquery[i], 0, sizeof(css_cquery));
+    s->cquery[i].gen = g;
+    s->cquery[i].live = 1;
+    css_cquery_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_cquery_live(const store_css_store_tag *s, css_cquery_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->cquery_len && s->cquery[h.index].live && s->cquery[h.index].gen == h.gen;
+}
+css_cquery store_css_store_tag_cquery_get(const store_css_store_tag *s, css_cquery_h h) {
+    if (!store_css_store_tag_cquery_live(s, h)) abort();
+    return s->cquery[h.index];
+}
+css_cquery *store_css_store_tag_cquery_ref(const store_css_store_tag *s, css_cquery_h h) tie s {
+    if (!store_css_store_tag_cquery_live(s, h)) abort();
+    return &s->cquery[h.index];
+}
+css_cquery *store_css_store_tag_cquery_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->cquery_len) abort();
+    return &s->cquery[i];
+}
+css_cquery_h store_css_store_tag_cquery_handle(const store_css_store_tag *s, uint32_t i) {
+    css_cquery_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->cquery_len && s->cquery[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->cquery[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_cquery_free(store_css_store_tag *s, css_cquery_h h) {
+    if (!store_css_store_tag_cquery_live(s, h)) abort();
+    s->cquery[h.index].live = 0;
+    s->cquery[h.index].gen++;
+    s->cquery[h.index].free_next = s->cquery_free;
+    s->cquery_free = h.index;
+}
+size_t store_css_store_tag_cquery_len(const store_css_store_tag *s) { return s->cquery_len; }
+size_t store_css_store_tag_cquery_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->cquery_len; i++) if (s->cquery[i].live) n++;
+    return n;
+}
+static void store_css_store_tag__cstyle_grow(store_css_store_tag *s) {
+    size_t c = s->cstyle_cap ? 2 * s->cstyle_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->cstyle = (css_cstyle *)realloc(s->cstyle, c * sizeof(css_cstyle));
+    if (!s->cstyle) abort();
+    s->cstyle_cap = c;
+}
+css_cstyle_h store_css_store_tag_cstyle_new(store_css_store_tag *s) {
+    uint32_t i;
+    if (s->cstyle_free) {
+        i = s->cstyle_free;
+        s->cstyle_free = s->cstyle[i].free_next;
+    } else {
+        if (s->cstyle_len == 0) {
+            if (s->cstyle_cap == 0) store_css_store_tag__cstyle_grow(s);
+            memset(&s->cstyle[0], 0, sizeof(css_cstyle));
+            s->cstyle_len = 1;
+        }
+        if (s->cstyle_len == s->cstyle_cap) store_css_store_tag__cstyle_grow(s);
+        i = (uint32_t)s->cstyle_len;
+        s->cstyle_len++;
+        s->cstyle[i].gen = 0;
+    }
+    uint32_t g = s->cstyle[i].gen;
+    memset(&s->cstyle[i], 0, sizeof(css_cstyle));
+    s->cstyle[i].gen = g;
+    s->cstyle[i].live = 1;
+    css_cstyle_h h = { s->id, i, g };
+    return h;
+}
+int store_css_store_tag_cstyle_live(const store_css_store_tag *s, css_cstyle_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->cstyle_len && s->cstyle[h.index].live && s->cstyle[h.index].gen == h.gen;
+}
+css_cstyle store_css_store_tag_cstyle_get(const store_css_store_tag *s, css_cstyle_h h) {
+    if (!store_css_store_tag_cstyle_live(s, h)) abort();
+    return s->cstyle[h.index];
+}
+css_cstyle *store_css_store_tag_cstyle_ref(const store_css_store_tag *s, css_cstyle_h h) tie s {
+    if (!store_css_store_tag_cstyle_live(s, h)) abort();
+    return &s->cstyle[h.index];
+}
+css_cstyle *store_css_store_tag_cstyle_slot(const store_css_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->cstyle_len) abort();
+    return &s->cstyle[i];
+}
+css_cstyle_h store_css_store_tag_cstyle_handle(const store_css_store_tag *s, uint32_t i) {
+    css_cstyle_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->cstyle_len && s->cstyle[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->cstyle[i].gen;
+    }
+    return h;
+}
+void store_css_store_tag_cstyle_free(store_css_store_tag *s, css_cstyle_h h) {
+    if (!store_css_store_tag_cstyle_live(s, h)) abort();
+    s->cstyle[h.index].live = 0;
+    s->cstyle[h.index].gen++;
+    s->cstyle[h.index].free_next = s->cstyle_free;
+    s->cstyle_free = h.index;
+}
+size_t store_css_store_tag_cstyle_len(const store_css_store_tag *s) { return s->cstyle_len; }
+size_t store_css_store_tag_cstyle_count(const store_css_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->cstyle_len; i++) if (s->cstyle[i].live) n++;
     return n;
 }
 static void store_css_store_tag__text_room(store_css_store_tag *s, size_t n) {

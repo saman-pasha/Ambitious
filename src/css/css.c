@@ -5,9 +5,10 @@
 
    Parsing has CSS Syntax 3's shapes: comments, strings, the top level's <!-- and
    -->, at-rules (an @media whose query holds for the viewport, an @supports
-   whose condition does, @layer, an @import fetched through the loader, and
-   @font-face are read; every other at-rule skipped), style rules, declarations
-   with !important. The 106
+   whose condition does, @layer, an @import fetched through the loader,
+   @font-face, @keyframes, @property, @scope, @container and @counter-style are
+   read; every other at-rule skipped), style rules, declarations with
+   !important. The 106
    longhands of css_pdefs are read, each by its grammar: keywords, lengths and
    percentages, colours, numbers, and the values kept as their text (track
    lists, grid lines and areas, images and gradients, shadows, transforms, content,
@@ -27,7 +28,35 @@
    kept as text, its lengths made px). Custom properties (--name) are
    inherited, their var()s replaced at computed-value time: a cycle, or a var()
    of nothing with no fallback, makes a value invalid at computed-value time,
-   and its property is then unset.
+   and its property is then unset. The container units (cqw, cqh, cqi, cqb,
+   cqmin, cqmax) are reckoned when a style is made, against the content box of
+   the nearest ancestor container of each axis whose size layout gave (an
+   element's own pseudo-elements count it), else the small viewport's.
+
+   Container queries (CSS Conditional 5, 6): container-type (normal, size,
+   inline-size; scroll-state read, not answered), container-name and the
+   container shorthand computed as Chromium computes them. An @container's rules
+   are matched as any rule is, each knowing its query (cquery); where its
+   condition does not hold for an element, the match is kept, unmet, and not
+   applied. A condition (size features in plain, boolean and range syntax: width,
+   height, inline-size, block-size, aspect-ratio, orientation; and, or, not; em
+   in it the container's; style() over custom properties) asks the nearest
+   ancestor of the name it gives whose type gives the axes it needs; a container
+   whose size layout has not given answers unknown, which is false. The cascade
+   cannot know a size, so it answers what it can (style queries; a size query
+   false), keeps its state (css_cq) and lets layout ask again: at each container
+   it sizes, layout calls css_container_restyle, which makes the container's
+   subtree's styles again from the kept matches, with its size known, before
+   layout lays the subtree out (src/css/css.h; PLAN.md 12s). Not done:
+   scroll-state() queries (unknown); a container unit inside a query is the
+   small viewport's, where Chromium takes the query container's own container's;
+   container units in a @keyframes keyframe are not reckoned.
+
+   Counter styles (CSS Counter Styles 3): @counter-style rules kept (cstyle) and
+   the predefined styles Chromium has (css_cs_ua), each value written by its
+   system's algorithm (css_counter_text), for list markers and counter(). Not
+   done: a pad counts code points, combining marks left out, where Chromium
+   counts grapheme clusters.
 
    Selectors 4: type, universal, #id, .class, [a], [a=v], [a~=v], [a|=v],
    [a^=v], [a$=v], [a*=v] (their i and s flags; HTML's attributes whose values
@@ -114,6 +143,8 @@ static int css_scripting = 1;
    such a document is being read, its hashless colours and unitless lengths taken (css_quirky);
    css_quirk_ua, the quirks sheet is, its -internal-quirk-inherit taken */
 static int css_quirks, css_quirk_read, css_quirk_ua;
+/* sheets read, ever: the counter styles read for a store (css_cs_get's cache) are as the sheets were when it read them */
+static uint32_t css_sheets_read;
 void css_set_scripting(int on) { css_scripting = on != 0; }
 #define CSS_VIEWPORT_W css_view_w
 #define CSS_VIEWPORT_H css_view_h
@@ -561,6 +592,30 @@ static int css_font_unit(const char *u, size_t un, double *k) {
     return 0;
 }
 
+/* ---- container units (CSS Conditional 5, 6.1.1) ---- */
+
+/* the element's container units' bases (its query containers' content box, the small viewport's where it has none),
+   which css_calc_value and css_absolutize read while a style is made; -1 while a sheet is read (a unit stays open) */
+static double css_cqw = -1, css_cqh = -1;
+
+/* the container unit u[0, un): 1 cqw, 2 cqh, 3 cqi, 4 cqb, 5 cqmin, 6 cqmax; 0 for none */
+static int css_cq_unit(const char *u, size_t un) {
+    if (un < 3 || css_lower(u[0]) != 'c' || css_lower(u[1]) != 'q') return 0;
+    if (css_eq_ci(u, un, "cqw")) return 1;
+    if (css_eq_ci(u, un, "cqh")) return 2;
+    if (css_eq_ci(u, un, "cqi")) return 3;
+    if (css_eq_ci(u, un, "cqb")) return 4;
+    if (css_eq_ci(u, un, "cqmin")) return 5;
+    if (css_eq_ci(u, un, "cqmax")) return 6;
+    return 0;
+}
+/* the px of one container unit k, as the element's bases have it; -1 while they are open */
+static double css_cq_px(int k) {
+    if (css_cqw < 0 || css_cqh < 0) return -1;
+    double w = css_cqw / 100, h = css_cqh / 100;
+    return k == 1 || k == 3 ? w : k == 2 || k == 4 ? h : k == 5 ? (w < h ? w : h) : (w > h ? w : h);
+}
+
 static int css_calc_sum(const char *s, size_t n, size_t *i, const css_cenv *e, int depth, css_lin *out);
 
 static void css_lin_scale(css_lin *l, double k) { l->px *= k; l->pct *= k; l->num *= k; }
@@ -650,8 +705,13 @@ static int css_calc_value(const char *s, size_t n, size_t *i, const css_cenv *e,
     if (ue == p) { out->num = x; out->kind = CSS_CK_NUM; *i = p; return 1; }
     out->kind = CSS_CK_LEN;
     double k = css_abs_unit(s + p, ue - p);
+    int cqk = k > 0 ? 0 : css_cq_unit(s + p, ue - p);
     if (k > 0) out->px = x * k;
-    else {
+    else if (cqk) {
+        double b = css_cq_px(cqk);
+        if (b < 0) out->open = 1;
+        else out->px = x * b;
+    } else {
         int fu = css_font_unit(s + p, ue - p, &k);
         if (!fu) return 0;
         double base = fu == 2 ? e->rem : e->em;
@@ -779,6 +839,7 @@ static int css_parse_val(const char *s, size_t n, css_val *v) {
         else if (css_eq_ci(u, un, "rem")) v->unit = CSS_UNIT_REM;
         else if (css_font_unit(u, un, &k) == 1) { v->unit = CSS_UNIT_EM; v->num = x * k; }
         else if ((k = css_abs_unit(u, un)) > 0) { v->unit = CSS_UNIT_PX; v->num = x * k; }
+        else if (css_cq_unit(u, un)) { v->unit = CSS_UNIT_CALC; v->ck = CSS_CK_LEN; v->num = 0; }
         else return 0;
         return 1;
     }
@@ -808,6 +869,14 @@ typedef struct css_pdef { const char *name; uint8_t inh, gram, flags; const char
 #define CSS_W_BSTYLE "none hidden dotted dashed solid double groove ridge inset outset"
 #define CSS_W_SIZE "auto min-content max-content fit-content"
 #define CSS_W_SELF "auto normal stretch start end center flex-start flex-end self-start self-end left right baseline"
+/* the counter styles Chromium predefines (css_cs_ua), which list-style-type and counter() name without ASCII case */
+#define CSS_W_COUNTERS "decimal decimal-leading-zero arabic-indic armenian upper-armenian lower-armenian bengali cambodian khmer " \
+    "cjk-decimal devanagari georgian gujarati gurmukhi hebrew kannada lao malayalam mongolian myanmar oriya persian lower-roman " \
+    "upper-roman tamil telugu thai tibetan lower-alpha lower-latin upper-alpha upper-latin lower-greek hiragana hiragana-iroha " \
+    "katakana katakana-iroha disc circle square disclosure-open disclosure-closed cjk-earthly-branch cjk-heavenly-stem " \
+    "japanese-informal japanese-formal korean-hangul-formal korean-hanja-informal korean-hanja-formal simp-chinese-informal " \
+    "simp-chinese-formal trad-chinese-informal trad-chinese-formal cjk-ideographic ethiopic-numeric ethiopic-halehame " \
+    "ethiopic-halehame-am ethiopic-halehame-ti-er ethiopic-halehame-ti-et hangul hangul-consonant urdu"
 static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "display", 0, G_KW, 0, "inline block list-item inline-block none flex inline-flex grid inline-grid flow-root contents table "
       "inline-table table-row table-cell table-row-group table-header-group table-footer-group table-caption table-column "
@@ -851,8 +920,9 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "min-height", 0, G_LEN, F_PCT, CSS_W_SIZE, "auto" },
     { "max-width", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
     { "max-height", 0, G_LEN, F_PCT, "none min-content max-content fit-content", "none" },
-    { "list-style-type", 1, G_KW, 0, "none disc circle square decimal decimal-leading-zero lower-roman upper-roman lower-alpha "
-      "upper-alpha lower-latin upper-latin lower-greek disclosure-open disclosure-closed", "disc" },
+    /* a predefined counter style's name (a keyword), another counter style's (an @counter-style's, kept as text as
+       written: its name has case) or a string (kept as text) */
+    { "list-style-type", 1, G_TEXT, 0, "none " CSS_W_COUNTERS, "disc" },
     { "list-style-position", 1, G_KW, 0, "outside inside", "outside" },
     { "font-family", 1, G_FAMILY, 0, 0, "serif" },
     { "box-sizing", 0, G_KW, 0, "content-box border-box", "content-box" },
@@ -970,6 +1040,10 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
       "push-button searchfield slider-horizontal square-button textarea", "none" },
     { "object-fit", 0, G_KW, 0, "fill contain cover none scale-down", "fill" },
     { "object-position", 0, G_TEXT, 0, 0, "50% 50%" },
+    /* query containers (CSS Conditional 5, 6.1): one keyword, or a size's with scroll-state (kept as text); the names
+       a container answers to, kept as text (they have case) */
+    { "container-type", 0, G_TEXT, 0, "normal size inline-size scroll-state", "normal" },
+    { "container-name", 0, G_TEXT, 0, "none", "none" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -2228,6 +2302,34 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_QUOTES:
         while (css_next_part(s, n, &i, &st, &ln)) { parts++; if (!css_is_string(s + st, ln)) return 0; }
         return parts > 0 && parts % 2 == 0;
+    case CSS_PROP_LIST_STYLE_TYPE: {
+        /* a counter style's name (an identifier) or one string; the predefined names are keywords */
+        if (css_is_string(s, n)) return css_string_end(s, n, 0) == n - 1;
+        css_val g;
+        return css_is_ident(s, n) && !(css_parse_val(s, n, &g) && css_is_global(&g)) && !css_eq_ci(s, n, "default");
+    }
+    case CSS_PROP_CONTAINER_TYPE: {
+        /* size or inline-size, and scroll-state, in either order (one keyword alone is a keyword) */
+        int sz = 0, sc = 0;
+        if (memchr(s, ',', n)) return 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            if (css_eq_ci(s + st, ln, "size") || css_eq_ci(s + st, ln, "inline-size")) { if (sz++) return 0; }
+            else if (css_eq_ci(s + st, ln, "scroll-state")) { if (sc++) return 0; }
+            else return 0;
+        }
+        return sz == 1 && sc == 1;
+    }
+    case CSS_PROP_CONTAINER_NAME:
+        /* names, each an identifier that is none of none, and, or, not and the CSS-wide keywords */
+        if (memchr(s, ',', n)) return 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            const char *q = s + st;
+            css_val g;
+            if (!css_is_ident(q, ln) || css_eq_ci(q, ln, "none") || css_eq_ci(q, ln, "and") || css_eq_ci(q, ln, "or") || css_eq_ci(q, ln, "not") ||
+                css_eq_ci(q, ln, "default") || (css_parse_val(q, ln, &g) && css_is_global(&g))) return 0;
+            parts++;
+        }
+        return parts > 0;
     default: return 0;
     }
 }
@@ -2820,6 +2922,7 @@ static const css_short css_shorts[] = {
                         CSS_PROP_ANIMATION_PLAY_STATE } },
     { "transition", 5, { CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION,
                          CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR } },
+    { "container", 2, { CSS_PROP_CONTAINER_NAME, CSS_PROP_CONTAINER_TYPE } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -2928,13 +3031,14 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         int typ = 0, posn = 0;
         k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
         for (size_t j = 0; j < k; j++) {
-            if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) {
-                if (css_is_fn(val + st[j], ln[j], "url")) continue;
-                return 0;
-            }
-            if (css_valid(CSS_PROP_LIST_STYLE_POSITION, &v)) { if (posn++) return 0; css_item_add(it, CSS_PROP_LIST_STYLE_POSITION, &v, st[j], ln[j]); }
-            else if (css_valid(CSS_PROP_LIST_STYLE_TYPE, &v)) { if (typ++) return 0; css_item_add(it, CSS_PROP_LIST_STYLE_TYPE, &v, st[j], ln[j]); }
-            else return 0;
+            if (css_is_fn(val + st[j], ln[j], "url")) continue;
+            if (css_parse_val(val + st[j], ln[j], &v) && !css_is_global(&v) && css_valid(CSS_PROP_LIST_STYLE_POSITION, &v)) {
+                if (posn++) return 0;
+                css_item_add(it, CSS_PROP_LIST_STYLE_POSITION, &v, st[j], ln[j]);
+            } else if (css_longhand(CSS_PROP_LIST_STYLE_TYPE, val + st[j], ln[j], &v) && !css_is_global(&v)) {
+                if (typ++) return 0;
+                css_item_add(it, CSS_PROP_LIST_STYLE_TYPE, &v, st[j], ln[j]);
+            } else return 0;
         }
         if (!typ) { css_word_val(&w, "disc"); css_item_add(it, CSS_PROP_LIST_STYLE_TYPE, &w, 0, vn); }
         if (!posn) css_item_reset(it, CSS_PROP_LIST_STYLE_POSITION);
@@ -3117,6 +3221,18 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
     }
     case 29: return css_anim_short(0, val, vn, it);
     case 30: return css_anim_short(1, val, vn, it);
+    case 31: {
+        /* container: a name (or none), and after a / a type (CSS Conditional 5, 6.1.3) */
+        k = css_slashes(val, vn, st, ln, 3);
+        if (k == 0 || k > 2 || !ln[0]) return 0;
+        if (!css_longhand(CSS_PROP_CONTAINER_NAME, val + st[0], ln[0], &v) || css_is_global(&v)) return 0;
+        css_item_add(it, CSS_PROP_CONTAINER_NAME, &v, st[0], ln[0]);
+        if (k == 2) {
+            if (!css_longhand(CSS_PROP_CONTAINER_TYPE, val + st[1], ln[1], &w) || css_is_global(&w)) return 0;
+            css_item_add(it, CSS_PROP_CONTAINER_TYPE, &w, st[1], ln[1]);
+        } else css_item_reset(it, CSS_PROP_CONTAINER_TYPE);
+        return 1;
+    }
     default: return 0;
     }
 }
@@ -3645,7 +3761,7 @@ static uint32_t css_layer_rank(css_style *s, uint32_t parent, uint32_t next) {
    rules are in (scoped; its roots' and limits' selectors) and the element a sheet's @scope
    without roots is rooted at (a style element's parent) */
 typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; int scoped; amb_span scope, scope_end;
-                          uint32_t scope_host; } css_pctx;
+                          uint32_t scope_host, container; } css_pctx;
 
 static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
 
@@ -3822,6 +3938,7 @@ static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin,
                                uint32_t parent, uint32_t layer, int depth, const char *base, uint32_t host) {
     vector<char> t;
     css_strip_comments(src, n, &t);
+    css_sheets_read++;
     css_sheet_h sh = sheet_new(s);
     s->sheet[sh.index].origin = origin;
     s->sheet[sh.index].parent = parent;
@@ -3965,6 +4082,1158 @@ static void css_font_face(css_style *s, net_loader *net, const css_pctx *cx, con
     s->face[fi].url = ua;
 }
 
+/* ---- @container (CSS Conditional 5, 6) ----
+   A prelude is a list of queries a comma apart, each a container's name, a condition, or both. A condition is not,
+   and or or (not mixed) over conditions in parentheses: a size feature (width, height, inline-size, block-size,
+   aspect-ratio, orientation; min- and max- of the range ones) as a plain value, a boolean or a range of one or two
+   comparisons, or a style query (style(): a custom property's value as written, or that it has one). The rules in it
+   are the sheet's, each knowing its innermost @container (rule.container); a rule applies to an element where each
+   @container's condition holds. A condition is answered for the container it asks: the nearest ancestor (for a
+   pseudo-element, its element too) whose name is the query's and whose container-type gives the axes its size
+   features need. A container whose size layout has not given answers unknown, which is false; so does a feature or
+   a query this does not read (scroll-state()), and a prelude this cannot read drops the rule, as Chromium's does. */
+
+/* what a condition is answered against: the container's content box (w x h px, -1 where layout gave none), its font
+   size and the root's (em and rem in the query), its first value (style queries; 0 for none); eval 0: the text is
+   only read (its axes found, its syntax checked) */
+typedef struct css_cqc { double w, h, fs, rem; uint32_t c0; int eval; } css_cqc;
+
+/* the word w at t[i]: a whole word, white space or a parenthesis after it */
+static int css_cq_word(const char *t, size_t n, size_t i, const char *w) {
+    size_t k = strlen(w);
+    return i + k < n && css_bytes_eq(t + i, w, k, 1) && (css_ws(t[i + k]) || t[i + k] == '(');
+}
+
+/* the size feature named s[0, n): 1 a length of the inline axis, 2 of the block axis, 3 aspect-ratio, 4 orientation;
+   *mm 1 for its min- form, 2 for max- (orientation has none); 0 for none */
+static int css_cq_feature(const char *s, size_t n, int *mm) {
+    *mm = 0;
+    if (n > 4 && (css_bytes_eq(s, "min-", 4, 1) || css_bytes_eq(s, "max-", 4, 1))) {
+        *mm = css_lower(s[1]) == 'i' ? 1 : 2;
+        s += 4;
+        n -= 4;
+    }
+    if (css_eq_ci(s, n, "width") || css_eq_ci(s, n, "inline-size")) return 1;
+    if (css_eq_ci(s, n, "height") || css_eq_ci(s, n, "block-size")) return 2;
+    if (css_eq_ci(s, n, "aspect-ratio")) return 3;
+    if (!*mm && css_eq_ci(s, n, "orientation")) return 4;
+    return 0;
+}
+
+/* a value of a query: a length in px (relative units the container's: its em, the root's rem; the viewport's units),
+   0 alone; for aspect-ratio (ratio) a number or a ratio a / b. 1 when it is one */
+static int css_cq_value(const css_cqc *c, const char *t, size_t n, int ratio, double *out) {
+    size_t a = css_skip_ws(t, n, 0), b = n;
+    while (b > a && css_ws(t[b - 1])) b--;
+    if (b <= a) return 0;
+    if (ratio) {
+        size_t sl = a;
+        while (sl < b && t[sl] != '/') sl++;
+        double x, y = 1;
+        size_t e1 = sl;
+        while (e1 > a && css_ws(t[e1 - 1])) e1--;
+        if (css_number(t + a, e1 - a, &x) != e1 - a || x < 0) return 0;
+        if (sl < b) {
+            size_t s2 = css_skip_ws(t, b, sl + 1);
+            if (s2 >= b || css_number(t + s2, b - s2, &y) != b - s2 || y < 0) return 0;
+        }
+        *out = y > 0 ? x / y : x > 0 ? 1e300 : 0;
+        return 1;
+    }
+    css_cenv e = { c->fs > 0 ? c->fs : 16, c->rem > 0 ? c->rem : 16, -1 };
+    css_lin l;
+    size_t i = a;
+    if (!css_calc_value(t, b, &i, &e, 0, &l) || css_skip_ws(t, b, i) != b || l.open || l.nonlin) return 0;
+    if (l.kind == CSS_CK_NUM) { if (l.num != 0) return 0; *out = 0; return 1; }
+    if (l.kind != CSS_CK_LEN) return 0;
+    *out = l.px;
+    return 1;
+}
+
+/* a comparison of a range feature, its text at t[i]: 1 <, 2 <=, 3 >, 4 >=, 5 =, its length in *k; 0 for none */
+static int css_cq_op(const char *t, size_t n, size_t i, size_t *k) {
+    if (i >= n) return 0;
+    int eq = i + 1 < n && t[i + 1] == '=';
+    *k = eq ? 2 : 1;
+    if (t[i] == '<') return eq ? 2 : 1;
+    if (t[i] == '>') return eq ? 4 : 3;
+    if (t[i] == '=') { *k = 1; return 5; }
+    return 0;
+}
+static int css_cq_cmp(double a, int op, double b) {
+    return op == 1 ? a < b : op == 2 ? a <= b : op == 3 ? a > b : op == 4 ? a >= b : a == b;
+}
+
+/* a size feature in parentheses, t[0, n) its inside: its value for the container (1, 0; -1 unknown), -2 when it is not
+   one; *axes takes the axes it needs */
+static int css_cq_size(const css_cqc *c, const char *t, size_t n, int *axes) {
+    size_t a = css_skip_ws(t, n, 0), b = n;
+    while (b > a && css_ws(t[b - 1])) b--;
+    if (b <= a) return -2;
+    /* the comparisons and the colon at its top level */
+    size_t ops[3], opk[3], colon = 0;
+    int opc[3], nops = 0, has_colon = 0;
+    for (size_t i = a; i < b; i++) {
+        if (t[i] == '(') { i = css_block_end(t, b, i, '(', ')'); continue; }
+        size_t k;
+        int op = css_cq_op(t, b, i, &k);
+        if (op) { if (nops == 2) return -2; ops[nops] = i; opk[nops] = k; opc[nops] = op; nops++; i += k - 1; continue; }
+        if (t[i] == ':') { if (has_colon) return -2; has_colon = 1; colon = i; }
+    }
+    if (has_colon && nops) return -2;
+    double fv = 0;
+    int known = 0, mm, f;
+    if (!nops) {
+        size_t ne = has_colon ? colon : b;
+        while (ne > a && css_ws(t[ne - 1])) ne--;
+        f = css_cq_feature(t + a, ne - a, &mm);
+        if (!f || (!has_colon && mm)) return -2;
+        *axes |= f == 1 ? 1 : f == 2 ? 2 : 3;
+        known = f == 1 ? c->w >= 0 : f == 2 ? c->h >= 0 : c->w >= 0 && c->h >= 0;
+        if (known) fv = f == 1 ? c->w : f == 2 ? c->h : c->h > 0 ? c->w / c->h : c->w > 0 ? 1e300 : 0;
+        if (!has_colon) return !c->eval ? 1 : !known ? -1 : f == 4 ? 1 : fv != 0;
+        const char *v = t + colon + 1;
+        size_t vn = b - colon - 1;
+        if (f == 4) {
+            size_t va = css_skip_ws(v, vn, 0), vb = vn;
+            while (vb > va && css_ws(v[vb - 1])) vb--;
+            int portrait = css_eq_ci(v + va, vb - va, "portrait");
+            if (!portrait && !css_eq_ci(v + va, vb - va, "landscape")) return -2;
+            if (!c->eval) return 1;
+            if (!known) return -1;
+            return portrait == (c->h >= c->w);
+        }
+        double qv;
+        if (!css_cq_value(c, v, vn, f == 3, &qv)) return -2;
+        if (!c->eval) return 1;
+        if (!known) return -1;
+        return mm == 1 ? fv >= qv : mm == 2 ? fv <= qv : fv == qv;
+    }
+    /* a range: name op value, value op name, or value op name op value */
+    size_t ps[3], pe[3];
+    ps[0] = a;
+    pe[0] = ops[0];
+    ps[1] = ops[0] + opk[0];
+    pe[1] = nops == 2 ? ops[1] : b;
+    if (nops == 2) { ps[2] = ops[1] + opk[1]; pe[2] = b; }
+    int np = nops + 1, which = -1;
+    for (int k = 0; k < np; k++) {
+        size_t s0 = css_skip_ws(t, pe[k], ps[k]), e0 = pe[k];
+        while (e0 > s0 && css_ws(t[e0 - 1])) e0--;
+        ps[k] = s0;
+        pe[k] = e0;
+        int m2;
+        if (e0 > s0 && css_cq_feature(t + s0, e0 - s0, &m2) && !m2) { if (which >= 0) return -2; which = k; }
+    }
+    if (which < 0 || (np == 3 && which != 1)) return -2;
+    f = css_cq_feature(t + ps[which], pe[which] - ps[which], &mm);
+    if (f == 4) return -2;
+    if (np == 3) {
+        int lo = opc[0] <= 2, hi = opc[1] <= 2;
+        if (opc[0] == 5 || opc[1] == 5 || lo != hi) return -2;
+    }
+    *axes |= f == 1 ? 1 : f == 2 ? 2 : 3;
+    known = f == 1 ? c->w >= 0 : f == 2 ? c->h >= 0 : c->w >= 0 && c->h >= 0;
+    if (known) fv = f == 1 ? c->w : f == 2 ? c->h : c->h > 0 ? c->w / c->h : c->w > 0 ? 1e300 : 0;
+    int r = 1;
+    for (int k = 0; k < np; k++) {
+        if (k == which) continue;
+        double qv;
+        if (!css_cq_value(c, t + ps[k], pe[k] - ps[k], f == 3, &qv)) return -2;
+        if (!c->eval || !known) continue;
+        /* value op name: the feature on the right of its comparison */
+        if (k < which) r &= css_cq_cmp(qv, opc[k], fv);
+        else r &= css_cq_cmp(fv, opc[k - 1], qv);
+    }
+    if (!c->eval) return 1;
+    return known ? r : -1;
+}
+
+/* a style feature, t[0, n): a custom property's value on the container equal to the one written (as text, its white
+   space about it gone), or that it has one; another property's is false, as Chromium answers it */
+static int css_cq_style_feature(const css_style *s, const css_cqc *c, const char *t, size_t n) {
+    size_t a = css_skip_ws(t, n, 0), b = n;
+    while (b > a && css_ws(t[b - 1])) b--;
+    size_t colon = a;
+    while (colon < b && t[colon] != ':') colon++;
+    size_t ne = colon;
+    while (ne > a && css_ws(t[ne - 1])) ne--;
+    if (ne <= a || !css_is_ident(t + a, ne - a)) return -2;
+    if (!c->eval) return 1;
+    if (ne - a < 3 || t[a] != '-' || t[a + 1] != '-' || !c->c0) return 0;
+    size_t va = colon < b ? css_skip_ws(t, b, colon + 1) : b;
+    uint32_t name = names_find(s, t + a, ne - a);
+    if (!name) return 0;
+    uint32_t sid = s->cval[c->c0].style;
+    for (uint32_t e = c->c0 + CSS_NPROPS; e < s->cval_len && s->cval[e].style == sid; e++) {
+        if (s->cval[e].prop != CSS_PROP_CUSTOM || s->cval[e].word != name) continue;
+        if (s->cval[e].how == CSS_HOW_INITIAL) return 0;
+        if (colon >= b) return 1;
+        amb_span sp = s->cval[e].text;
+        const char *v = text_ptr(s, sp);
+        size_t x = 0, y = sp.len;
+        while (x < y && css_ws(v[x])) x++;
+        while (y > x && css_ws(v[y - 1])) y--;
+        return y - x == b - va && memcmp(v + x, t + va, y - x) == 0;
+    }
+    return 0;
+}
+
+static int css_cq_cond(const css_style *s, const css_cqc *c, const char *t, size_t n, int depth, int style, int *axes);
+
+/* a condition in parentheses (or a style() or scroll-state() of one) at t[*i]: its value, -2 when it is none; *i past it.
+   In a style query (style) its inside is a style feature or a condition over them */
+static int css_cq_in_parens(const css_style *s, const css_cqc *c, const char *t, size_t n, size_t *i, int depth, int style, int *axes) {
+    size_t p = *i;
+    if (p >= n) return -2;
+    int fn = 0;
+    if (t[p] != '(') {
+        if (!style && p + 6 <= n && css_bytes_eq(t + p, "style(", 6, 1)) { fn = 1; p += 5; }
+        else if (!style && p + 13 <= n && css_bytes_eq(t + p, "scroll-state(", 13, 1)) { fn = 2; p += 12; }
+        else return -2;
+    }
+    size_t e = css_block_end(t, n, p, '(', ')');
+    if (e >= n) return -2;
+    *i = e + 1;
+    const char *in = t + p + 1;
+    size_t inn = e - p - 1, a = css_skip_ws(in, inn, 0);
+    if (fn == 2) return c->eval ? -1 : 1;      /* scroll-state(): not read; unknown */
+    int nested = a < inn && (in[a] == '(' || css_cq_word(in, inn, a, "not") ||
+                             (!style && !fn && ((a + 6 <= inn && css_bytes_eq(in + a, "style(", 6, 1)) ||
+                                                (a + 13 <= inn && css_bytes_eq(in + a, "scroll-state(", 13, 1)))));
+    if (fn == 1) return nested ? css_cq_cond(s, c, in, inn, depth + 1, 1, axes) : css_cq_style_feature(s, c, in, inn);
+    if (nested) return css_cq_cond(s, c, in, inn, depth + 1, style, axes);
+    return style ? css_cq_style_feature(s, c, in, inn) : css_cq_size(c, in, inn, axes);
+}
+
+/* a condition, t[0, n) whole: not, and or or over conditions in parentheses (Kleene's logic: unknown -1). -2 when it
+   is not one this reads */
+static int css_cq_cond(const css_style *s, const css_cqc *c, const char *t, size_t n, int depth, int style, int *axes) {
+    if (depth > 16) return -2;
+    size_t i = css_skip_ws(t, n, 0);
+    if (i >= n) return -2;
+    if (css_cq_word(t, n, i, "not")) {
+        i = css_skip_ws(t, n, i + 3);
+        int r = css_cq_in_parens(s, c, t, n, &i, depth, style, axes);
+        if (r == -2 || css_skip_ws(t, n, i) != n) return -2;
+        return r < 0 ? -1 : !r;
+    }
+    int r = css_cq_in_parens(s, c, t, n, &i, depth, style, axes), op = 0;
+    if (r == -2) return -2;
+    for (;;) {
+        i = css_skip_ws(t, n, i);
+        if (i >= n) return r;
+        int o = css_cq_word(t, n, i, "and") ? 1 : css_cq_word(t, n, i, "or") ? 2 : 0;
+        if (!o || (op && o != op)) return -2;
+        op = o;
+        i = css_skip_ws(t, n, i + (o == 1 ? 3 : 2));
+        int q = css_cq_in_parens(s, c, t, n, &i, depth, style, axes);
+        if (q == -2) return -2;
+        if (op == 1) r = r == 0 || q == 0 ? 0 : r < 0 || q < 0 ? -1 : 1;
+        else r = r == 1 || q == 1 ? 1 : r < 0 || q < 0 ? -1 : 0;
+    }
+}
+
+/* one query of a prelude, q[0, n): its container's name (*na, *nl; none: *nl 0) and its condition (*ca, *cl; none: *cl
+   0); 0 when it is none this reads (a name of none, and, or, not or a CSS-wide keyword; neither part) */
+static int css_cq_split(const char *q, size_t n, size_t *na, size_t *nl, size_t *ca, size_t *cl) {
+    size_t a = css_skip_ws(q, n, 0), b = n;
+    while (b > a && css_ws(q[b - 1])) b--;
+    *nl = 0;
+    *cl = 0;
+    if (b <= a) return 0;
+    size_t e = a;
+    while (e < b && css_namechar(q[e])) e++;
+    if (e > a && (e == b || q[e] != '(') && !css_eq_ci(q + a, e - a, "not")) {
+        if (!css_is_ident(q + a, e - a) || css_eq_ci(q + a, e - a, "none") || css_eq_ci(q + a, e - a, "and") || css_eq_ci(q + a, e - a, "or") ||
+            css_eq_ci(q + a, e - a, "initial") || css_eq_ci(q + a, e - a, "inherit") || css_eq_ci(q + a, e - a, "unset") ||
+            css_eq_ci(q + a, e - a, "revert") || css_eq_ci(q + a, e - a, "revert-layer") || css_eq_ci(q + a, e - a, "default")) return 0;
+        *na = a;
+        *nl = e - a;
+        a = css_skip_ws(q, b, e);
+    }
+    if (a < b) { *ca = a; *cl = b - a; }
+    return *nl || *cl;
+}
+
+/* an @container's prelude this reads: each of its queries, their conditions read */
+static int css_cq_prelude_ok(const css_style *s, const char *pre, size_t pn) {
+    css_cqc c;
+    memset(&c, 0, sizeof c);
+    size_t a = 0;
+    for (;;) {
+        size_t b = css_comma(pre, pn, a), na, nl, ca, cl;
+        if (!css_cq_split(pre + a, b - a, &na, &nl, &ca, &cl)) return 0;
+        int axes = 0;
+        if (cl && css_cq_cond(s, &c, pre + a + ca, cl, 0, 0, &axes) == -2) return 0;
+        if (b >= pn) return 1;
+        a = b + 1;
+    }
+}
+
+static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
+
+/* an @container rule: its query kept (cquery: its prelude as written, white space about it gone; a style query compares
+   its value as written), its rules the sheet's in it */
+static void css_container_rule(css_style *s, net_loader *net, css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn) {
+    if (!css_cq_prelude_ok(s, pre, pn)) return;
+    size_t a = css_skip_ws(pre, pn, 0), b = pn;
+    while (b > a && css_ws(pre[b - 1])) b--;
+    css_cquery_h h = cquery_new(s);
+    amb_span sp = text_add(s, pre + a, b - a);
+    s->cquery[h.index].text = sp;
+    s->cquery[h.index].parent = cx->container;
+    s->cquery[h.index].sheet = cx->sheet;
+    css_pctx sub;
+    memcpy(&sub, cx, sizeof sub);
+    sub.container = h.index;
+    css_rules(s, net, &sub, blk, bn);
+    cx->ruled = 1;
+}
+
+/* ---- @counter-style (CSS Counter Styles 3) ----
+   A sheet's @counter-style rule is kept as a record (cstyle): its name, its system, its descriptors as written. A
+   counter's value is written by its style's algorithm: cyclic, fixed (from its first value), symbolic, alphabetic,
+   numeric, additive (its weights in order), or extends (another style's, the descriptors it gives over its own);
+   its range (auto: the system's), negative sign, pad, prefix and suffix (a marker's) as the descriptors give them,
+   its fallback where the range or the algorithm gives nothing (decimal past a cycle of fallbacks). The predefined
+   styles are Chromium's (css_cs_ua): the spec's simple ones, its complex ones by Chromium's algorithms (the
+   Chinese, Japanese and Korean longhands, Hebrew to 999999, Armenian to 99999999, Ethiopic numbers), and the
+   legacy ones Chromium keeps (ethiopic-halehame..., hangul, hangul-consonant, urdu). speak-as is read and ignored;
+   symbols() and images as symbols are not read (Chromium reads neither). */
+
+/* the predefined counter styles, as Chromium defines them: a name, then its descriptors */
+static const char *const css_cs_ua[] = {
+    "decimal", "system: numeric; symbols: '0' '1' '2' '3' '4' '5' '6' '7' '8' '9';",
+    "decimal-leading-zero", "system: extends decimal; pad: 2 '0';",
+    "arabic-indic", "system: numeric; symbols: '\\660' '\\661' '\\662' '\\663' '\\664' '\\665' '\\666' '\\667' '\\668' '\\669';",
+    "armenian", "system: -internal-upper-armenian; range: 1 99999999;",
+    "upper-armenian", "system: extends armenian;",
+    "lower-armenian", "system: -internal-lower-armenian; range: 1 99999999;",
+    "bengali", "system: numeric; symbols: '\\9E6' '\\9E7' '\\9E8' '\\9E9' '\\9EA' '\\9EB' '\\9EC' '\\9ED' '\\9EE' '\\9EF';",
+    "cambodian", "system: numeric; symbols: '\\17E0' '\\17E1' '\\17E2' '\\17E3' '\\17E4' '\\17E5' '\\17E6' '\\17E7' '\\17E8' '\\17E9';",
+    "khmer", "system: extends cambodian;",
+    "cjk-decimal", "system: numeric; range: 0 infinite; symbols: '\\3007' '\\4E00' '\\4E8C' '\\4E09' '\\56DB' '\\4E94' '\\516D' '\\4E03' "
+                   "'\\516B' '\\4E5D'; suffix: '\\3001';",
+    "devanagari", "system: numeric; symbols: '\\966' '\\967' '\\968' '\\969' '\\96A' '\\96B' '\\96C' '\\96D' '\\96E' '\\96F';",
+    "georgian", "system: additive; range: 1 19999; additive-symbols: 10000 '\\10F5', 9000 '\\10F0', 8000 '\\10EF', 7000 '\\10F4', "
+                "6000 '\\10EE', 5000 '\\10ED', 4000 '\\10EC', 3000 '\\10EB', 2000 '\\10EA', 1000 '\\10E9', 900 '\\10E8', 800 '\\10E7', "
+                "700 '\\10E6', 600 '\\10E5', 500 '\\10E4', 400 '\\10F3', 300 '\\10E2', 200 '\\10E1', 100 '\\10E0', 90 '\\10DF', 80 '\\10DE', "
+                "70 '\\10DD', 60 '\\10F2', 50 '\\10DC', 40 '\\10DB', 30 '\\10DA', 20 '\\10D9', 10 '\\10D8', 9 '\\10D7', 8 '\\10F1', "
+                "7 '\\10D6', 6 '\\10D5', 5 '\\10D4', 4 '\\10D3', 3 '\\10D2', 2 '\\10D1', 1 '\\10D0';",
+    "gujarati", "system: numeric; symbols: '\\AE6' '\\AE7' '\\AE8' '\\AE9' '\\AEA' '\\AEB' '\\AEC' '\\AED' '\\AEE' '\\AEF';",
+    "gurmukhi", "system: numeric; symbols: '\\A66' '\\A67' '\\A68' '\\A69' '\\A6A' '\\A6B' '\\A6C' '\\A6D' '\\A6E' '\\A6F';",
+    "hebrew", "system: -internal-hebrew; range: 0 999999;",
+    "kannada", "system: numeric; symbols: '\\CE6' '\\CE7' '\\CE8' '\\CE9' '\\CEA' '\\CEB' '\\CEC' '\\CED' '\\CEE' '\\CEF';",
+    "lao", "system: numeric; symbols: '\\ED0' '\\ED1' '\\ED2' '\\ED3' '\\ED4' '\\ED5' '\\ED6' '\\ED7' '\\ED8' '\\ED9';",
+    "malayalam", "system: numeric; symbols: '\\D66' '\\D67' '\\D68' '\\D69' '\\D6A' '\\D6B' '\\D6C' '\\D6D' '\\D6E' '\\D6F';",
+    "mongolian", "system: numeric; symbols: '\\1810' '\\1811' '\\1812' '\\1813' '\\1814' '\\1815' '\\1816' '\\1817' '\\1818' '\\1819';",
+    "myanmar", "system: numeric; symbols: '\\1040' '\\1041' '\\1042' '\\1043' '\\1044' '\\1045' '\\1046' '\\1047' '\\1048' '\\1049';",
+    "oriya", "system: numeric; symbols: '\\B66' '\\B67' '\\B68' '\\B69' '\\B6A' '\\B6B' '\\B6C' '\\B6D' '\\B6E' '\\B6F';",
+    "persian", "system: numeric; symbols: '\\6F0' '\\6F1' '\\6F2' '\\6F3' '\\6F4' '\\6F5' '\\6F6' '\\6F7' '\\6F8' '\\6F9';",
+    "lower-roman", "system: additive; range: 1 3999; additive-symbols: 1000 m, 900 cm, 500 d, 400 cd, 100 c, 90 xc, 50 l, 40 xl, 10 x, "
+                   "9 ix, 5 v, 4 iv, 1 i;",
+    "upper-roman", "system: additive; range: 1 3999; additive-symbols: 1000 M, 900 CM, 500 D, 400 CD, 100 C, 90 XC, 50 L, 40 XL, 10 X, "
+                   "9 IX, 5 V, 4 IV, 1 I;",
+    "tamil", "system: numeric; symbols: '\\BE6' '\\BE7' '\\BE8' '\\BE9' '\\BEA' '\\BEB' '\\BEC' '\\BED' '\\BEE' '\\BEF';",
+    "telugu", "system: numeric; symbols: '\\C66' '\\C67' '\\C68' '\\C69' '\\C6A' '\\C6B' '\\C6C' '\\C6D' '\\C6E' '\\C6F';",
+    "thai", "system: numeric; symbols: '\\E50' '\\E51' '\\E52' '\\E53' '\\E54' '\\E55' '\\E56' '\\E57' '\\E58' '\\E59';",
+    "tibetan", "system: numeric; symbols: '\\F20' '\\F21' '\\F22' '\\F23' '\\F24' '\\F25' '\\F26' '\\F27' '\\F28' '\\F29';",
+    "lower-alpha", "system: alphabetic; symbols: a b c d e f g h i j k l m n o p q r s t u v w x y z;",
+    "lower-latin", "system: extends lower-alpha;",
+    "upper-alpha", "system: alphabetic; symbols: A B C D E F G H I J K L M N O P Q R S T U V W X Y Z;",
+    "upper-latin", "system: extends upper-alpha;",
+    "lower-greek", "system: alphabetic; symbols: '\\3B1' '\\3B2' '\\3B3' '\\3B4' '\\3B5' '\\3B6' '\\3B7' '\\3B8' '\\3B9' '\\3BA' '\\3BB' "
+                   "'\\3BC' '\\3BD' '\\3BE' '\\3BF' '\\3C0' '\\3C1' '\\3C3' '\\3C4' '\\3C5' '\\3C6' '\\3C7' '\\3C8' '\\3C9';",
+    "hiragana", "system: alphabetic; symbols: '\\3042' '\\3044' '\\3046' '\\3048' '\\304A' '\\304B' '\\304D' '\\304F' '\\3051' '\\3053' "
+                "'\\3055' '\\3057' '\\3059' '\\305B' '\\305D' '\\305F' '\\3061' '\\3064' '\\3066' '\\3068' '\\306A' '\\306B' '\\306C' '\\306D' "
+                "'\\306E' '\\306F' '\\3072' '\\3075' '\\3078' '\\307B' '\\307E' '\\307F' '\\3080' '\\3081' '\\3082' '\\3084' '\\3086' '\\3088' "
+                "'\\3089' '\\308A' '\\308B' '\\308C' '\\308D' '\\308F' '\\3090' '\\3091' '\\3092' '\\3093'; suffix: '\\3001';",
+    "hiragana-iroha", "system: alphabetic; symbols: '\\3044' '\\308D' '\\306F' '\\306B' '\\307B' '\\3078' '\\3068' '\\3061' '\\308A' "
+                      "'\\306C' '\\308B' '\\3092' '\\308F' '\\304B' '\\3088' '\\305F' '\\308C' '\\305D' '\\3064' '\\306D' '\\306A' '\\3089' "
+                      "'\\3080' '\\3046' '\\3090' '\\306E' '\\304A' '\\304F' '\\3084' '\\307E' '\\3051' '\\3075' '\\3053' '\\3048' '\\3066' "
+                      "'\\3042' '\\3055' '\\304D' '\\3086' '\\3081' '\\307F' '\\3057' '\\3091' '\\3072' '\\3082' '\\305B' '\\3059'; "
+                      "suffix: '\\3001';",
+    "katakana", "system: alphabetic; symbols: '\\30A2' '\\30A4' '\\30A6' '\\30A8' '\\30AA' '\\30AB' '\\30AD' '\\30AF' '\\30B1' '\\30B3' "
+                "'\\30B5' '\\30B7' '\\30B9' '\\30BB' '\\30BD' '\\30BF' '\\30C1' '\\30C4' '\\30C6' '\\30C8' '\\30CA' '\\30CB' '\\30CC' '\\30CD' "
+                "'\\30CE' '\\30CF' '\\30D2' '\\30D5' '\\30D8' '\\30DB' '\\30DE' '\\30DF' '\\30E0' '\\30E1' '\\30E2' '\\30E4' '\\30E6' '\\30E8' "
+                "'\\30E9' '\\30EA' '\\30EB' '\\30EC' '\\30ED' '\\30EF' '\\30F0' '\\30F1' '\\30F2' '\\30F3'; suffix: '\\3001';",
+    "katakana-iroha", "system: alphabetic; symbols: '\\30A4' '\\30ED' '\\30CF' '\\30CB' '\\30DB' '\\30D8' '\\30C8' '\\30C1' '\\30EA' "
+                      "'\\30CC' '\\30EB' '\\30F2' '\\30EF' '\\30AB' '\\30E8' '\\30BF' '\\30EC' '\\30BD' '\\30C4' '\\30CD' '\\30CA' '\\30E9' "
+                      "'\\30E0' '\\30A6' '\\30F0' '\\30CE' '\\30AA' '\\30AF' '\\30E4' '\\30DE' '\\30B1' '\\30D5' '\\30B3' '\\30A8' '\\30C6' "
+                      "'\\30A2' '\\30B5' '\\30AD' '\\30E6' '\\30E1' '\\30DF' '\\30B7' '\\30F1' '\\30D2' '\\30E2' '\\30BB' '\\30B9'; "
+                      "suffix: '\\3001';",
+    "disc", "system: cyclic; symbols: '\\2022'; suffix: ' ';",
+    "circle", "system: cyclic; symbols: '\\25E6'; suffix: ' ';",
+    "square", "system: cyclic; symbols: '\\25A0'; suffix: ' ';",
+    "disclosure-open", "system: cyclic; symbols: '\\25BE'; suffix: ' ';",
+    "disclosure-closed", "system: cyclic; symbols: '\\25B8'; suffix: ' ';",
+    "cjk-earthly-branch", "system: fixed; symbols: '\\5B50' '\\4E11' '\\5BC5' '\\536F' '\\8FB0' '\\5DF3' '\\5348' '\\672A' '\\7533' "
+                          "'\\9149' '\\620C' '\\4EA5'; suffix: '\\3001'; fallback: cjk-decimal;",
+    "cjk-heavenly-stem", "system: fixed; symbols: '\\7532' '\\4E59' '\\4E19' '\\4E01' '\\620A' '\\5DF1' '\\5E9A' '\\8F9B' '\\58EC' '\\7678'; "
+                         "suffix: '\\3001'; fallback: cjk-decimal;",
+    "japanese-informal", "system: additive; range: -9999 9999; additive-symbols: 9000 '\\4E5D\\5343', 8000 '\\516B\\5343', "
+                         "7000 '\\4E03\\5343', 6000 '\\516D\\5343', 5000 '\\4E94\\5343', 4000 '\\56DB\\5343', 3000 '\\4E09\\5343', "
+                         "2000 '\\4E8C\\5343', 1000 '\\5343', 900 '\\4E5D\\767E', 800 '\\516B\\767E', 700 '\\4E03\\767E', 600 '\\516D\\767E', "
+                         "500 '\\4E94\\767E', 400 '\\56DB\\767E', 300 '\\4E09\\767E', 200 '\\4E8C\\767E', 100 '\\767E', 90 '\\4E5D\\5341', "
+                         "80 '\\516B\\5341', 70 '\\4E03\\5341', 60 '\\516D\\5341', 50 '\\4E94\\5341', 40 '\\56DB\\5341', 30 '\\4E09\\5341', "
+                         "20 '\\4E8C\\5341', 10 '\\5341', 9 '\\4E5D', 8 '\\516B', 7 '\\4E03', 6 '\\516D', 5 '\\4E94', 4 '\\56DB', 3 '\\4E09', "
+                         "2 '\\4E8C', 1 '\\4E00', 0 '\\3007'; suffix: '\\3001'; negative: '\\30DE\\30A4\\30CA\\30B9'; fallback: cjk-decimal;",
+    "japanese-formal", "system: additive; range: -9999 9999; additive-symbols: 9000 '\\4E5D\\9621', 8000 '\\516B\\9621', "
+                       "7000 '\\4E03\\9621', 6000 '\\516D\\9621', 5000 '\\4F0D\\9621', 4000 '\\56DB\\9621', 3000 '\\53C2\\9621', "
+                       "2000 '\\5F10\\9621', 1000 '\\58F1\\9621', 900 '\\4E5D\\767E', 800 '\\516B\\767E', 700 '\\4E03\\767E', "
+                       "600 '\\516D\\767E', 500 '\\4F0D\\767E', 400 '\\56DB\\767E', 300 '\\53C2\\767E', 200 '\\5F10\\767E', "
+                       "100 '\\58F1\\767E', 90 '\\4E5D\\62FE', 80 '\\516B\\62FE', 70 '\\4E03\\62FE', 60 '\\516D\\62FE', 50 '\\4F0D\\62FE', "
+                       "40 '\\56DB\\62FE', 30 '\\53C2\\62FE', 20 '\\5F10\\62FE', 10 '\\58F1\\62FE', 9 '\\4E5D', 8 '\\516B', 7 '\\4E03', "
+                       "6 '\\516D', 5 '\\4F0D', 4 '\\56DB', 3 '\\53C2', 2 '\\5F10', 1 '\\58F1', 0 '\\96F6'; suffix: '\\3001'; "
+                       "negative: '\\30DE\\30A4\\30CA\\30B9'; fallback: cjk-decimal;",
+    "korean-hangul-formal", "system: -internal-korean-hangul-formal; suffix: ', '; negative: '\\B9C8\\C774\\B108\\C2A4  '; fallback: cjk-decimal;",
+    "korean-hanja-informal", "system: -internal-korean-hanja-informal; suffix: ', '; negative: '\\B9C8\\C774\\B108\\C2A4  '; fallback: cjk-decimal;",
+    "korean-hanja-formal", "system: -internal-korean-hanja-formal; suffix: ', '; negative: '\\B9C8\\C774\\B108\\C2A4  '; fallback: cjk-decimal;",
+    "simp-chinese-informal", "system: -internal-simp-chinese-informal; suffix: '\\3001'; negative: '\\8D1F'; fallback: cjk-decimal;",
+    "simp-chinese-formal", "system: -internal-simp-chinese-formal; suffix: '\\3001'; negative: '\\8D1F'; fallback: cjk-decimal;",
+    "trad-chinese-informal", "system: -internal-trad-chinese-informal; suffix: '\\3001'; negative: '\\8CA0'; fallback: cjk-decimal;",
+    "trad-chinese-formal", "system: -internal-trad-chinese-formal; suffix: '\\3001'; negative: '\\8CA0'; fallback: cjk-decimal;",
+    "cjk-ideographic", "system: extends trad-chinese-informal;",
+    "ethiopic-numeric", "system: -internal-ethiopic-numeric; range: 1 infinite; suffix: '/ ';",
+    "ethiopic-halehame", "system: alphabetic; symbols: '\\1200' '\\1208' '\\1210' '\\1218' '\\1220' '\\1228' '\\1230' '\\1240' '\\1260' "
+                         "'\\1270' '\\1280' '\\1290' '\\12A0' '\\12A8' '\\12C8' '\\12D0' '\\12D8' '\\12E8' '\\12F0' '\\1308' '\\1320' '\\1330' "
+                         "'\\1338' '\\1340' '\\1348' '\\1350'; suffix: '\\1366 ';",
+    "ethiopic-halehame-am", "system: alphabetic; symbols: '\\1200' '\\1208' '\\1210' '\\1218' '\\1220' '\\1228' '\\1230' '\\1238' '\\1240' "
+                            "'\\1260' '\\1270' '\\1278' '\\1280' '\\1290' '\\1298' '\\12A0' '\\12A8' '\\12B8' '\\12C8' '\\12D0' '\\12D8' '\\12E0' "
+                            "'\\12E8' '\\12F0' '\\1300' '\\1308' '\\1320' '\\1328' '\\1330' '\\1338' '\\1340' '\\1348' '\\1350'; suffix: '\\1366 ';",
+    "ethiopic-halehame-ti-er", "system: alphabetic; symbols: '\\1200' '\\1208' '\\1210' '\\1218' '\\1228' '\\1230' '\\1238' '\\1240' "
+                               "'\\1250' '\\1260' '\\1270' '\\1278' '\\1290' '\\1298' '\\12A0' '\\12A8' '\\12B8' '\\12C8' '\\12D0' '\\12D8' "
+                               "'\\12E0' '\\12E8' '\\12F0' '\\1300' '\\1308' '\\1320' '\\1328' '\\1330' '\\1338' '\\1348' '\\1350'; "
+                               "suffix: '\\1366 ';",
+    "ethiopic-halehame-ti-et", "system: alphabetic; symbols: '\\1200' '\\1208' '\\1210' '\\1218' '\\1220' '\\1228' '\\1230' '\\1238' "
+                               "'\\1240' '\\1250' '\\1260' '\\1270' '\\1278' '\\1280' '\\1290' '\\1298' '\\12A0' '\\12A8' '\\12B8' '\\12C8' "
+                               "'\\12D0' '\\12D8' '\\12E0' '\\12E8' '\\12F0' '\\1300' '\\1308' '\\1320' '\\1328' '\\1330' '\\1338' '\\1340' "
+                               "'\\1348' '\\1350'; suffix: '\\1366 ';",
+    "hangul", "system: alphabetic; symbols: '\\AC00' '\\B098' '\\B2E4' '\\B77C' '\\B9C8' '\\BC14' '\\C0AC' '\\C544' '\\C790' '\\CC28' "
+              "'\\CE74' '\\D0C0' '\\D30C' '\\D558';",
+    "hangul-consonant", "system: alphabetic; symbols: '\\3131' '\\3134' '\\3137' '\\3139' '\\3141' '\\3142' '\\3145' '\\3147' '\\3148' "
+                        "'\\314A' '\\314B' '\\314C' '\\314D' '\\314E';",
+    "urdu", "system: extends persian;",
+};
+#define CSS_CS_NUA (sizeof css_cs_ua / sizeof css_cs_ua[0] / 2)
+
+/* the systems: the spec's, then Chromium's own algorithms for the complex predefined styles */
+enum { CS_NONE, CS_CYCLIC, CS_NUMERIC, CS_ALPHABETIC, CS_SYMBOLIC, CS_ADDITIVE, CS_FIXED, CS_EXTENDS, CS_HEBREW, CS_UARMENIAN,
+       CS_LARMENIAN, CS_SCH_INF, CS_SCH_FORM, CS_TCH_INF, CS_TCH_FORM, CS_KO_HANGUL, CS_KO_HANJA_INF, CS_KO_HANJA_FORM, CS_ETHIOPIC };
+enum { CSS_CS_SYMS = 64, CSS_CS_RANGES = 8, CSS_CS_BUF = 2048 };
+
+/* a counter style read: its system (fixed's first value), symbols and additive weights, range, negative, pad, prefix
+   and suffix (each a span of buf, *_l 0xffff when not given), fallback, what it extends; predefined, and which of
+   the predefined symbol markers it is or extends (lay's codes: 1 disc, 2 circle, 3 square, 9 disclosure-closed, 10
+   disclosure-open) */
+typedef struct css_cs {
+    int system, nsym, nrange, has_range, symbol;
+    long first, pad, weight[CSS_CS_SYMS], rlo[CSS_CS_RANGES], rhi[CSS_CS_RANGES];
+    uint16_t so[CSS_CS_SYMS], sl[CSS_CS_SYMS];
+    uint16_t neg_o, neg_l, nsuf_o, nsuf_l, pre_o, pre_l, suf_o, suf_l, pads_o, pads_l;
+    char fb[64], ext[64];
+    uint16_t bn;
+    char buf[CSS_CS_BUF];
+} css_cs;
+#define CSS_CS_UNSET 0xffff
+
+static void css_put_cp(vector<char> *out, uint32_t cp) {
+    if (cp < 0x80) push_back(out, (char)cp);
+    else if (cp < 0x800) { push_back(out, (char)(0xC0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3F))); }
+    else if (cp < 0x10000) {
+        push_back(out, (char)(0xE0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    } else {
+        push_back(out, (char)(0xF0 | cp >> 18));
+        push_back(out, (char)(0x80 | (cp >> 12 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    }
+}
+static void css_cs_put_cp(css_cs *c, uint32_t cp) {
+    char u[4];
+    int k = 0;
+    if (cp < 0x80) u[k++] = (char)cp;
+    else if (cp < 0x800) { u[k++] = (char)(0xC0 | cp >> 6); u[k++] = (char)(0x80 | (cp & 0x3F)); }
+    else if (cp < 0x10000) { u[k++] = (char)(0xE0 | cp >> 12); u[k++] = (char)(0x80 | (cp >> 6 & 0x3F)); u[k++] = (char)(0x80 | (cp & 0x3F)); }
+    else {
+        u[k++] = (char)(0xF0 | cp >> 18);
+        u[k++] = (char)(0x80 | (cp >> 12 & 0x3F));
+        u[k++] = (char)(0x80 | (cp >> 6 & 0x3F));
+        u[k++] = (char)(0x80 | (cp & 0x3F));
+    }
+    if (c->bn + k > CSS_CS_BUF) return;
+    memcpy(c->buf + c->bn, u, (size_t)k);
+    c->bn = (uint16_t)(c->bn + k);
+}
+/* a symbol at t[*i]: a string or an identifier, its escapes made characters, appended to c's buf (its start *o and
+   length *l); *i past it. 0 when there is none */
+static int css_cs_symbol(css_cs *c, const char *t, size_t n, size_t *i, uint16_t *o, uint16_t *l) {
+    size_t p = css_skip_ws(t, n, *i);
+    if (p >= n) return 0;
+    char q = t[p] == '"' || t[p] == '\'' ? t[p] : 0;
+    if (!q && !(css_namechar(t[p]) || t[p] == '\\')) return 0;
+    if (!q && css_is_digit(t[p])) return 0;
+    *o = c->bn;
+    if (q) p++;
+    while (p < n) {
+        char ch = t[p];
+        if (q && ch == q) { p++; break; }
+        if (!q && !(css_namechar(ch) || ch == '\\')) break;
+        if (ch == '\\' && p + 1 < n) {
+            p++;
+            uint32_t cp = 0;
+            int k = 0;
+            while (k < 6 && p < n) {
+                int v = css_hex(t[p]);
+                if (v < 0) break;
+                cp = cp * 16 + (uint32_t)v;
+                p++;
+                k++;
+            }
+            if (k == 0) { css_cs_put_cp(c, (unsigned char)t[p]); p++; continue; }
+            if (p < n && css_ws(t[p])) p++;
+            if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+            css_cs_put_cp(c, cp);
+            continue;
+        }
+        if (c->bn < CSS_CS_BUF) c->buf[c->bn++] = ch;
+        p++;
+    }
+    *l = (uint16_t)(c->bn - *o);
+    *i = p;
+    return 1;
+}
+/* a string token's value (t[0, n) its quotes included), its escapes made characters, appended to out */
+static void css_string_text(const char *t, size_t n, vector<char> *out) {
+    if (n < 2) return;
+    for (size_t p = 1; p + 1 < n;) {
+        if (t[p] != '\\') { push_back(out, t[p]); p++; continue; }
+        p++;
+        if (p + 1 >= n) break;
+        if (t[p] == '\n') { p++; continue; }
+        uint32_t cp = 0;
+        int k = 0;
+        while (k < 6 && p + 1 < n) {
+            int v = css_hex(t[p]);
+            if (v < 0) break;
+            cp = cp * 16 + (uint32_t)v;
+            p++;
+            k++;
+        }
+        if (k == 0) { push_back(out, t[p]); p++; continue; }
+        if (p + 1 < n && css_ws(t[p])) p++;
+        if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+        css_put_cp(out, cp);
+    }
+}
+
+/* an integer at t[*i] (or infinite, *inf): 1 when it is one, *i past it */
+static int css_cs_int(const char *t, size_t n, size_t *i, long *v, int *inf) {
+    size_t p = css_skip_ws(t, n, *i), b = p;
+    *inf = 0;
+    if (p + 8 <= n && css_eq_ci(t + p, 8, "infinite")) { *inf = 1; *i = p + 8; return 1; }
+    if (p < n && (t[p] == '-' || t[p] == '+')) p++;
+    size_t d0 = p;
+    while (p < n && css_is_digit(t[p])) p++;
+    if (p == d0) return 0;
+    long x = 0;
+    for (size_t k = d0; k < p; k++) if (x < 1000000000000L) x = x * 10 + (t[k] - '0');
+    *v = t[b] == '-' ? -x : x;
+    *i = p;
+    return 1;
+}
+
+/* the descriptors' text of a counter style read into c (over what it holds: an extended style's); 0 when its system
+   and symbols are not a style (Chromium's HasValidSymbols); ua: the predefined table's, whose internal systems it may
+   name */
+static int css_cs_read(css_cs *c, const char *t, size_t n, int ua) {
+    size_t d = 0;
+    int sym_given = 0, add_given = 0, sys_given = 0;
+    while (d < n) {
+        size_t e = d;
+        while (e < n && t[e] != ';') {
+            if (t[e] == '"' || t[e] == '\'') e = css_string_end(t, n, e);
+            else if (t[e] == '(') e = css_block_end(t, n, e, '(', ')');
+            if (e < n) e++;
+        }
+        size_t colon = d;
+        while (colon < e && t[colon] != ':') colon++;
+        size_t na = css_skip_ws(t, colon, d), nb = colon;
+        while (nb > na && css_ws(t[nb - 1])) nb--;
+        size_t va = colon < e ? colon + 1 : e, ve = e;
+        while (ve > va && css_ws(t[ve - 1])) ve--;
+        const char *nm = t + na;
+        size_t nl = nb - na, i = va;
+        if (colon >= e) { d = e + 1; continue; }
+        if (css_eq_ci(nm, nl, "system")) {
+            size_t a = css_skip_ws(t, ve, va), b = a;
+            while (b < ve && css_namechar(t[b])) b++;
+            const char *w = t + a;
+            size_t wn = b - a, rest = css_skip_ws(t, ve, b);
+            int sys = css_eq_ci(w, wn, "cyclic") ? CS_CYCLIC : css_eq_ci(w, wn, "numeric") ? CS_NUMERIC :
+                      css_eq_ci(w, wn, "alphabetic") ? CS_ALPHABETIC : css_eq_ci(w, wn, "symbolic") ? CS_SYMBOLIC :
+                      css_eq_ci(w, wn, "additive") ? CS_ADDITIVE : css_eq_ci(w, wn, "fixed") ? CS_FIXED :
+                      css_eq_ci(w, wn, "extends") ? CS_EXTENDS : 0;
+            if (!sys && ua) {
+                static const char *const internal[11] = { "-internal-hebrew", "-internal-upper-armenian", "-internal-lower-armenian",
+                    "-internal-simp-chinese-informal", "-internal-simp-chinese-formal", "-internal-trad-chinese-informal",
+                    "-internal-trad-chinese-formal", "-internal-korean-hangul-formal", "-internal-korean-hanja-informal",
+                    "-internal-korean-hanja-formal", "-internal-ethiopic-numeric" };
+                for (int k = 0; k < 11 && !sys; k++) if (css_eq_ci(w, wn, internal[k])) sys = CS_HEBREW + k;
+            }
+            if (sys == CS_FIXED) {
+                long v = 1;
+                int inf;
+                size_t p = rest;
+                if (p < ve && (!css_cs_int(t, ve, &p, &v, &inf) || inf || css_skip_ws(t, ve, p) != ve)) sys = 0;
+                else c->first = v;
+            } else if (sys == CS_EXTENDS) {
+                size_t b2 = rest;
+                while (b2 < ve && css_namechar(t[b2])) b2++;
+                if (b2 == rest || css_skip_ws(t, ve, b2) != ve || b2 - rest >= sizeof c->ext || css_eq_ci(t + rest, b2 - rest, "none")) sys = 0;
+                else { memcpy(c->ext, t + rest, b2 - rest); c->ext[b2 - rest] = 0; }
+            } else if (rest != ve) sys = 0;
+            if (sys) { c->system = sys; sys_given = 1; }
+        } else if (css_eq_ci(nm, nl, "symbols")) {
+            int k = 0;
+            uint16_t o, l;
+            uint16_t so[CSS_CS_SYMS], sl[CSS_CS_SYMS];
+            uint16_t bn0 = c->bn;
+            int ok = 1;
+            while (ok && css_skip_ws(t, ve, i) < ve) {
+                if (k == CSS_CS_SYMS || !css_cs_symbol(c, t, ve, &i, &o, &l)) ok = 0;
+                else { so[k] = o; sl[k] = l; k++; }
+            }
+            if (!ok || !k) c->bn = bn0;
+            else {
+                for (int q = 0; q < k; q++) { c->so[q] = so[q]; c->sl[q] = sl[q]; }
+                c->nsym = k;
+                sym_given = 1;
+            }
+        } else if (css_eq_ci(nm, nl, "additive-symbols")) {
+            int k = 0, ok = 1;
+            long last = -1;
+            uint16_t so[CSS_CS_SYMS], sl[CSS_CS_SYMS];
+            long wt[CSS_CS_SYMS];
+            uint16_t bn0 = c->bn;
+            size_t a = va;
+            while (ok && a < ve) {
+                size_t b = css_comma(t, ve, a), p = a;
+                long w = -1;
+                int inf, got_w = 0, got_s = 0;
+                uint16_t o = 0, l = 0;
+                for (int part = 0; part < 2 && ok; part++) {
+                    size_t p0 = css_skip_ws(t, b, p);
+                    if (p0 >= b) { ok = 0; break; }
+                    if (!got_w && (css_is_digit(t[p0]) || t[p0] == '+' || t[p0] == '-') && css_cs_int(t, b, &p0, &w, &inf) && !inf) got_w = 1;
+                    else if (!got_s && css_cs_symbol(c, t, b, &p0, &o, &l)) got_s = 1;
+                    else ok = 0;
+                    p = p0;
+                }
+                if (!ok || !got_w || !got_s || w < 0 || css_skip_ws(t, b, p) != b || k == CSS_CS_SYMS || (last >= 0 && w >= last)) { ok = 0; break; }
+                so[k] = o; sl[k] = l; wt[k] = w; k++;
+                last = w;
+                a = b + 1;
+            }
+            if (!ok || !k) c->bn = bn0;
+            else {
+                for (int q = 0; q < k; q++) { c->so[q] = so[q]; c->sl[q] = sl[q]; c->weight[q] = wt[q]; }
+                c->nsym = k;
+                add_given = 1;
+            }
+        } else if (css_eq_ci(nm, nl, "negative")) {
+            uint16_t o1, l1, o2, l2;
+            uint16_t bn0 = c->bn;
+            if (css_cs_symbol(c, t, ve, &i, &o1, &l1)) {
+                int two = css_skip_ws(t, ve, i) < ve;
+                if (two && (!css_cs_symbol(c, t, ve, &i, &o2, &l2) || css_skip_ws(t, ve, i) != ve)) c->bn = bn0;
+                else { c->neg_o = o1; c->neg_l = l1; c->nsuf_o = two ? o2 : 0; c->nsuf_l = two ? l2 : 0; }
+            }
+        } else if (css_eq_ci(nm, nl, "prefix") || css_eq_ci(nm, nl, "suffix")) {
+            uint16_t o, l;
+            uint16_t bn0 = c->bn;
+            if (css_cs_symbol(c, t, ve, &i, &o, &l) && css_skip_ws(t, ve, i) == ve) {
+                if (css_lower(nm[0]) == 'p') { c->pre_o = o; c->pre_l = l; }
+                else { c->suf_o = o; c->suf_l = l; }
+            } else c->bn = bn0;
+        } else if (css_eq_ci(nm, nl, "range")) {
+            size_t a = css_skip_ws(t, ve, va);
+            if (ve - a == 4 && css_eq_ci(t + a, 4, "auto")) { c->has_range = 0; c->nrange = 0; }
+            else {
+                long lo[CSS_CS_RANGES], hi[CSS_CS_RANGES];
+                int k = 0, ok = 1;
+                while (ok && a < ve) {
+                    size_t b = css_comma(t, ve, a), p = a;
+                    long x, y;
+                    int i1, i2;
+                    if (k == CSS_CS_RANGES || !css_cs_int(t, b, &p, &x, &i1) || !css_cs_int(t, b, &p, &y, &i2) || css_skip_ws(t, b, p) != b) { ok = 0; break; }
+                    lo[k] = i1 ? -2147483647L - 1 : x;
+                    hi[k] = i2 ? 2147483647L : y;
+                    if (lo[k] > hi[k]) { ok = 0; break; }
+                    k++;
+                    a = b + 1;
+                }
+                if (ok && k) {
+                    for (int q = 0; q < k; q++) { c->rlo[q] = lo[q]; c->rhi[q] = hi[q]; }
+                    c->nrange = k;
+                    c->has_range = 1;
+                }
+            }
+        } else if (css_eq_ci(nm, nl, "pad")) {
+            long w = -1;
+            int inf, got_w = 0, got_s = 0;
+            uint16_t o = 0, l = 0, bn0 = c->bn;
+            size_t p = va;
+            for (int part = 0; part < 2; part++) {
+                size_t p0 = css_skip_ws(t, ve, p);
+                if (p0 >= ve) break;
+                if (!got_w && (css_is_digit(t[p0]) || t[p0] == '+') && css_cs_int(t, ve, &p0, &w, &inf) && !inf) got_w = 1;
+                else if (!got_s && css_cs_symbol(c, t, ve, &p0, &o, &l)) got_s = 1;
+                else break;
+                p = p0;
+            }
+            if (got_w && got_s && w >= 0 && css_skip_ws(t, ve, p) == ve) { c->pad = w; c->pads_o = o; c->pads_l = l; }
+            else c->bn = bn0;
+        } else if (css_eq_ci(nm, nl, "fallback")) {
+            size_t a = css_skip_ws(t, ve, va), b = a;
+            while (b < ve && css_namechar(t[b])) b++;
+            if (b > a && b == ve && b - a < sizeof c->fb && !css_eq_ci(t + a, b - a, "none")) { memcpy(c->fb, t + a, b - a); c->fb[b - a] = 0; }
+        }
+        d = e + 1;
+    }
+    (void)sys_given;
+    /* the symbols the system needs (an extended one's are its own) */
+    int sys = c->system;
+    if (sys == CS_EXTENDS) return !sym_given && !add_given;
+    if (sys == CS_CYCLIC || sys == CS_FIXED || sys == CS_SYMBOLIC) return sym_given && c->nsym >= 1;
+    if (sys == CS_ALPHABETIC || sys == CS_NUMERIC) return sym_given && c->nsym >= 2;
+    if (sys == CS_ADDITIVE) return add_given;
+    return sys >= CS_HEBREW;
+}
+
+static void css_cs_init(css_cs *c) {
+    memset(c, 0, sizeof *c);
+    c->system = CS_SYMBOLIC;
+    c->first = 1;
+    c->neg_l = CSS_CS_UNSET;
+    c->pre_l = CSS_CS_UNSET;
+    c->suf_l = CSS_CS_UNSET;
+    c->pads_l = CSS_CS_UNSET;
+}
+
+/* the predefined style named nm[0, nn), as an index of css_cs_ua's pairs, or -1 */
+static int css_cs_ua_of(const char *nm, size_t nn) {
+    for (size_t k = 0; k < CSS_CS_NUA; k++) if (css_eq_ci(nm, nn, css_cs_ua[2 * k])) return (int)k;
+    return -1;
+}
+static int css_cs_symbol_code(const char *nm) {
+    return strcmp(nm, "disc") == 0 ? 1 : strcmp(nm, "circle") == 0 ? 2 : strcmp(nm, "square") == 0 ? 3 :
+           strcmp(nm, "disclosure-closed") == 0 ? 9 : strcmp(nm, "disclosure-open") == 0 ? 10 : 0;
+}
+
+/* the counter style named nm[0, nn) read into c, what it extends first: the page's last @counter-style of the name
+   (names with case), else the predefined style of the name (without), its extends chain resolved (a cycle, or a name
+   none defines, extends decimal). 0 when no style has the name */
+static int css_cs_resolve(const css_style *s, const char *nm, size_t nn, css_cs *c, int depth) {
+    if (depth > 16) return 0;
+    uint32_t rec = 0;
+    for (uint32_t k = s->cstyle_len; k > 1 && !rec; k--) {
+        uint32_t q = k - 1;
+        if (!s->cstyle[q].live) continue;
+        amb_span sp = s->cstyle[q].name;
+        if (sp.len == nn && memcmp(text_ptr(s, sp), nm, nn) == 0) rec = q;
+    }
+    int ua = rec ? -1 : css_cs_ua_of(nm, nn);
+    if (!rec && ua < 0) return 0;
+    /* the descriptors' text, and what they extend */
+    vector<char> txt;
+    if (rec) { amb_span sp = s->cstyle[rec].text; append_range(txt, text_ptr(s, sp), sp.len); }
+    else append_range(txt, css_cs_ua[2 * ua + 1], strlen(css_cs_ua[2 * ua + 1]));
+    css_cs_init(c);
+    if (!css_cs_read(c, data(txt), len(txt), !rec)) return 0;
+    if (!rec) c->symbol = css_cs_symbol_code(css_cs_ua[2 * ua]);
+    if (c->system != CS_EXTENDS) return 1;
+    /* extends: the other style's descriptors, its own given over them */
+    char ext[64];
+    snprintf(ext, sizeof ext, "%s", c->ext);
+    if (!css_cs_resolve(s, ext, strlen(ext), c, depth + 1) && !css_cs_resolve(s, "decimal", 7, c, depth + 1)) return 0;
+    if (c->system == CS_EXTENDS) return 0;
+    int sys = c->system, symbol = c->symbol;
+    long first = c->first;
+    css_cs_read(c, data(txt), len(txt), !rec);
+    c->system = sys;
+    c->first = first;
+    if (rec) c->symbol = symbol;
+    return 1;
+}
+
+/* the count of a text's characters, its combining marks left out (the pad's grapheme clusters, near enough) */
+static size_t css_cs_clusters(const char *t, size_t n) {
+    size_t k = 0;
+    for (size_t i = 0; i < n;) {
+        unsigned char b = (unsigned char)t[i];
+        uint32_t cp = b;
+        size_t l = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        if (l > 1 && i + l <= n) {
+            cp = b & (0xFF >> (l + 1));
+            for (size_t q = 1; q < l; q++) cp = cp << 6 | ((unsigned char)t[i + q] & 0x3F);
+        }
+        if (!((cp >= 0x300 && cp <= 0x36F) || (cp >= 0x1AB0 && cp <= 0x1AFF) || (cp >= 0x20D0 && cp <= 0x20FF) || (cp >= 0xFE20 && cp <= 0xFE2F))) k++;
+        i += l;
+    }
+    return k;
+}
+
+
+/* Chromium's CJK longhand algorithm (CJKIdeoGraphicAlgorithm): a number's groups of four digits, each digit with its
+   marker, zeros as each language drops or keeps them. table: the language (1 Chinese, 2 Korean, 3 Japanese), the
+   three group markers (two code points each), the three digit markers, the ten digits */
+static void css_cs_cjk(unsigned long number, const uint32_t *table, int informal, vector<char> *out) {
+    enum { LANG = 0, SECOND_GROUP = 1, THIRD_GROUP = 3, FOURTH_GROUP = 5, SECOND_DIGIT = 7, THIRD_DIGIT = 8, FOURTH_DIGIT = 9, DIGIT0 = 10 };
+    if (number == 0) { css_put_cp(out, table[DIGIT0]); return; }
+    int buffer[36];
+    for (int k = 0; k < 36; k++) buffer[k] = 0;
+    int chinese = table[LANG] == 1, korean = table[LANG] == 2;
+    for (int i = 0; i < 4; i++) {
+        unsigned long group_value = number % 10000;
+        number /= 10000;
+        int g = (3 - i) * 9;
+        if (group_value && i) {
+            buffer[g + 8] = SECOND_GROUP + i;
+            buffer[g + 7] = SECOND_GROUP - 1 + i;
+        }
+        unsigned long digit = group_value % 10;
+        int trailing_zero = chinese && !digit;
+        if (digit) {
+            int drop_one = korean && informal && digit == 1 && i > 0;
+            if (!drop_one) buffer[g + 6] = DIGIT0 + (int)(group_value % 10);
+        }
+        if (number != 0 || group_value > 9) {
+            digit = (group_value / 10) % 10;
+            int drop_one = korean && informal && digit == 1;
+            if ((digit && !drop_one) || (!digit && !trailing_zero)) buffer[g + 4] = DIGIT0 + (int)digit;
+            trailing_zero &= !digit;
+            if (digit) buffer[g + 5] = SECOND_DIGIT;
+        }
+        if (number != 0 || group_value > 99) {
+            digit = (group_value / 100) % 10;
+            int drop_one = korean && informal && digit == 1;
+            if ((digit && !drop_one) || (!digit && !trailing_zero)) buffer[g + 2] = DIGIT0 + (int)digit;
+            trailing_zero &= !digit;
+            if (digit) buffer[g + 3] = THIRD_DIGIT;
+        }
+        if (number != 0 || group_value > 999) {
+            digit = group_value / 1000;
+            int drop_one = korean && informal && digit == 1;
+            if ((digit && !drop_one) || (!digit && !trailing_zero)) buffer[g + 0] = DIGIT0 + (int)digit;
+            if (digit) buffer[g + 1] = FOURTH_DIGIT;
+        }
+        if (trailing_zero && i > 0) {
+            buffer[g + 6] = buffer[g + 7];
+            buffer[g + 7] = buffer[g + 8];
+            buffer[g + 8] = DIGIT0;
+        }
+        if (chinese && informal && group_value < 20) buffer[g + 4] = 0;
+        if (number == 0) break;
+    }
+    uint32_t chars[48];
+    int length = 0, last = 0;
+    for (int k = 0; k < 36; k++) {
+        int a = buffer[k];
+        if (!a) continue;
+        if (a != DIGIT0 || (chinese && last != DIGIT0)) {
+            uint32_t ch = table[a];
+            if (ch) {
+                chars[length++] = ch;
+                if (korean && (a == SECOND_GROUP || a == THIRD_GROUP || a == FOURTH_GROUP)) chars[length++] = ' ';
+            }
+        }
+        last = a;
+    }
+    if (length > 0 && ((chinese && last == DIGIT0) || chars[length - 1] == ' ')) length--;
+    for (int k = 0; k < length; k++) css_put_cp(out, chars[k]);
+}
+
+/* Chromium's Hebrew numbers under 1000 (HebrewAlgorithmUnder1000) */
+static void css_cs_hebrew999(unsigned long number, vector<char> *out) {
+    static const uint32_t tens[9] = { 1497, 1499, 1500, 1502, 1504, 1505, 1506, 1508, 1510 };
+    for (unsigned long k = number / 400; k > 0; k--) css_put_cp(out, 1514);
+    number %= 400;
+    if (number / 100) css_put_cp(out, (uint32_t)(1511 + number / 100 - 1));
+    number %= 100;
+    if (number == 15 || number == 16) { css_put_cp(out, 1496); css_put_cp(out, (uint32_t)(1487 + number - 9)); return; }
+    if (number / 10) css_put_cp(out, tens[number / 10 - 1]);
+    if (number % 10) css_put_cp(out, (uint32_t)(1487 + number % 10));
+}
+/* Chromium's Armenian numbers under 10000 (ArmenianAlgorithmUnder10000), a circumflex after each letter of a ten
+   thousands' group */
+static void css_cs_armenian9999(unsigned long number, int upper, int circumflex, vector<char> *out) {
+    uint32_t lo = upper ? 0 : 0x30;
+    unsigned long th = number / 1000, hu = number / 100 % 10, te = number / 10 % 10, on = number % 10;
+    if (th) { css_put_cp(out, th == 7 ? 0x552 + lo : 0x54C - 1 + lo + (uint32_t)th); if (circumflex) css_put_cp(out, 0x302); }
+    if (hu) { css_put_cp(out, 0x543 - 1 + lo + (uint32_t)hu); if (circumflex) css_put_cp(out, 0x302); }
+    if (te) { css_put_cp(out, 0x53A - 1 + lo + (uint32_t)te); if (circumflex) css_put_cp(out, 0x302); }
+    if (on) { css_put_cp(out, 0x531 - 1 + lo + (uint32_t)on); if (circumflex) css_put_cp(out, 0x302); }
+}
+/* Chromium's Ethiopic numbers (EthiopicNumericAlgorithm) */
+static void css_cs_ethiopic(unsigned long value, vector<char> *out) {
+    if (value < 10) { css_put_cp(out, 0x1369 + (uint32_t)value - 1); return; }
+    uint32_t r[64];
+    int n = 0, odd = 0;
+    while (value && n < 60) {
+        unsigned long g = value % 100;
+        value /= 100;
+        if (!odd) r[n++] = 0x137C;
+        else if (g) r[n++] = 0x137B;
+        int most = !value, remove = !g || (g == 1 && most) || (g == 1 && odd);
+        if (!remove) {
+            if (g % 10) r[n++] = 0x1369 + (uint32_t)(g % 10) - 1;
+            if (g / 10) r[n++] = 0x1372 + (uint32_t)(g / 10) - 1;
+        }
+        odd = !odd;
+    }
+    /* reversed, the extra mark of the lowest group gone */
+    for (int k = n - 1; k >= 1; k--) css_put_cp(out, r[k]);
+}
+
+static const uint32_t css_cs_cjk_tables[7][21] = {
+    { 1, 0x4E07, 0, 0x4EBF, 0, 0x4E07, 0x4EBF, 0x5341, 0x767E, 0x5343, 0x96F6, 0x4E00, 0x4E8C, 0x4E09, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D, 0 },
+    { 1, 0x4E07, 0, 0x4EBF, 0, 0x4E07, 0x4EBF, 0x62FE, 0x4F70, 0x4EDF, 0x96F6, 0x58F9, 0x8D30, 0x53C1, 0x8086, 0x4F0D, 0x9646, 0x67D2, 0x634C, 0x7396, 0 },
+    { 1, 0x842C, 0, 0x5104, 0, 0x5146, 0, 0x5341, 0x767E, 0x5343, 0x96F6, 0x4E00, 0x4E8C, 0x4E09, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D, 0 },
+    { 1, 0x842C, 0, 0x5104, 0, 0x5146, 0, 0x62FE, 0x4F70, 0x4EDF, 0x96F6, 0x58F9, 0x8CB3, 0x53C3, 0x8086, 0x4F0D, 0x9678, 0x67D2, 0x634C, 0x7396, 0 },
+    { 2, 0xB9CC, 0, 0xC5B5, 0, 0xC870, 0, 0xC2ED, 0xBC31, 0xCC9C, 0xC601, 0xC77C, 0xC774, 0xC0BC, 0xC0AC, 0xC624, 0xC721, 0xCE60, 0xD314, 0xAD6C, 0 },
+    { 2, 0x842C, 0, 0x5104, 0, 0x5146, 0, 0x5341, 0x767E, 0x5343, 0x96F6, 0x4E00, 0x4E8C, 0x4E09, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D, 0 },
+    { 2, 0x842C, 0, 0x5104, 0, 0x5146, 0, 0x62FE, 0x767E, 0x4EDF, 0x96F6, 0x58F9, 0x8CB3, 0x53C3, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D, 0 },
+};
+
+/* the value's range holds it: the style's, or its system's (auto) */
+static int css_cs_in_range(const css_cs *c, long v) {
+    if (c->has_range) {
+        for (int k = 0; k < c->nrange; k++) if (v >= c->rlo[k] && v <= c->rhi[k]) return 1;
+        return 0;
+    }
+    int s = c->system;
+    if (s == CS_SYMBOLIC || s == CS_ALPHABETIC || s == CS_ETHIOPIC) return v >= 1;
+    if (s == CS_ADDITIVE) return v >= 0;
+    if (s == CS_HEBREW) return v >= 0 && v <= 999999;
+    if (s == CS_UARMENIAN || s == CS_LARMENIAN) return v >= 1 && v <= 99999999;
+    return 1;
+}
+static void css_cs_sym(const css_cs *c, int k, vector<char> *out) { if (k >= 0 && k < c->nsym) append_range(out, c->buf + c->so[k], c->sl[k]); }
+
+/* the value's representation by the style's own algorithm (its range held, its negative sign and pad about it) into
+   out: 0 when it gives none, and the fallback's is to be used */
+static int css_cs_repr(const css_cs *c, long v, vector<char> *out) {
+    if (c->pad > 120 || !css_cs_in_range(c, v)) return 0;
+    unsigned long a = v < 0 ? (unsigned long)(-(v + 1)) + 1 : (unsigned long)v;
+    vector<char> r;
+    int s = c->system, ok = 1;
+    if (s == CS_CYCLIC) {
+        long k = c->nsym ? v % c->nsym - 1 : 0;
+        if (k < 0) k += c->nsym;
+        css_cs_sym(c, (int)k, &r);
+    } else if (s == CS_FIXED) {
+        if (v < c->first || v - c->first >= c->nsym) ok = 0;
+        else css_cs_sym(c, (int)(v - c->first), &r);
+    } else if (s == CS_NUMERIC) {
+        int dig[64], n = 0;
+        unsigned long x = a;
+        if (!x) dig[n++] = 0;
+        while (x && n < 64) { dig[n++] = (int)(x % (unsigned long)c->nsym); x /= (unsigned long)c->nsym; }
+        for (int k = n - 1; k >= 0; k--) css_cs_sym(c, dig[k], &r);
+    } else if (s == CS_ALPHABETIC) {
+        int dig[64], n = 0;
+        unsigned long x = a;
+        if (!x) ok = 0;
+        while (x && n < 64) { x--; dig[n++] = (int)(x % (unsigned long)c->nsym); x /= (unsigned long)c->nsym; }
+        for (int k = n - 1; k >= 0 && ok; k--) css_cs_sym(c, dig[k], &r);
+    } else if (s == CS_SYMBOLIC) {
+        if (!a) ok = 0;
+        else {
+            unsigned long reps = (a + (unsigned long)c->nsym - 1) / (unsigned long)c->nsym;
+            if (reps > 120) ok = 0;
+            for (unsigned long q = 0; q < reps && ok; q++) css_cs_sym(c, (int)((a - 1) % (unsigned long)c->nsym), &r);
+        }
+    } else if (s == CS_ADDITIVE) {
+        if (!a) {
+            if (c->nsym && c->weight[c->nsym - 1] == 0) css_cs_sym(c, c->nsym - 1, &r);
+            else ok = 0;
+        } else {
+            unsigned long x = a, count = 0;
+            for (int k = 0; k < c->nsym && x && c->weight[k]; k++) {
+                unsigned long reps = x / (unsigned long)c->weight[k];
+                if (count + reps > 120) { ok = 0; break; }
+                for (unsigned long q = 0; q < reps; q++) css_cs_sym(c, k, &r);
+                count += reps;
+                x %= (unsigned long)c->weight[k];
+            }
+            if (x) ok = 0;
+        }
+    } else if (s == CS_HEBREW) {
+        if (a > 999999) ok = 0;
+        else if (a == 0) { css_put_cp(&r, 0x5D0); css_put_cp(&r, 0x5E4); css_put_cp(&r, 0x5E1); }
+        else if (a <= 999) css_cs_hebrew999(a, &r);
+        else { css_cs_hebrew999(a / 1000, &r); css_put_cp(&r, 0x5F3); css_cs_hebrew999(a % 1000, &r); }
+    } else if (s == CS_UARMENIAN || s == CS_LARMENIAN) {
+        if (!a || a > 99999999) ok = 0;
+        else { css_cs_armenian9999(a / 10000, s == CS_UARMENIAN, 1, &r); css_cs_armenian9999(a % 10000, s == CS_UARMENIAN, 0, &r); }
+    } else if (s >= CS_SCH_INF && s <= CS_KO_HANJA_FORM) {
+        int ti = s - CS_SCH_INF;
+        int informal = s == CS_SCH_INF || s == CS_TCH_INF || s == CS_KO_HANJA_INF;
+        css_cs_cjk(a, css_cs_cjk_tables[ti], informal, &r);
+    } else if (s == CS_ETHIOPIC) {
+        if (!a) ok = 0;
+        else css_cs_ethiopic(a, &r);
+    } else ok = 0;
+    if (!ok || !len(r)) return 0;
+    /* the negative sign (a system that takes one), and the pad */
+    int neg = v < 0 && s != CS_CYCLIC && s != CS_FIXED;
+    const char *np = c->neg_l == CSS_CS_UNSET ? "-" : c->buf + c->neg_o;
+    size_t nl = c->neg_l == CSS_CS_UNSET ? 1 : c->neg_l;
+    const char *ns = c->neg_l == CSS_CS_UNSET ? "" : c->buf + c->nsuf_o;
+    size_t nsl = c->neg_l == CSS_CS_UNSET ? 0 : c->nsuf_l;
+    size_t have = css_cs_clusters(data(r), len(r)) + (neg ? css_cs_clusters(np, nl) + css_cs_clusters(ns, nsl) : 0);
+    if (neg) append_range(out, np, nl);
+    if (c->pads_l != CSS_CS_UNSET && (size_t)c->pad > have)
+        for (size_t q = have; q < (size_t)c->pad; q++) append_range(out, c->buf + c->pads_o, c->pads_l);
+    append_range(out, data(r), len(r));
+    if (neg) append_range(out, ns, nsl);
+    return 1;
+}
+
+/* a cache of the styles read, by the store, its revision and the name: a list of markers asks one style many times */
+enum { CSS_CS_CACHE = 8 };
+static css_cs css_cs_kept[CSS_CS_CACHE];
+static uintptr_t css_cs_kstore[CSS_CS_CACHE];
+static uint32_t css_cs_krev[CSS_CS_CACHE], css_cs_kread[CSS_CS_CACHE];
+static char css_cs_kname[CSS_CS_CACHE][64];
+static int css_cs_kok[CSS_CS_CACHE], css_cs_knext;
+
+/* the style named nm read into the cache: its slot, or -1 when no style has the name */
+static int css_cs_get(const css_style *s, const char *nm, size_t nn) {
+    if (nn >= 64) return -1;
+    uintptr_t id = (uintptr_t)(const void *)s;
+    for (int k = 0; k < CSS_CS_CACHE; k++)
+        if (css_cs_kstore[k] == id && css_cs_krev[k] == s->revision && css_cs_kread[k] == css_sheets_read && strlen(css_cs_kname[k]) == nn &&
+            memcmp(css_cs_kname[k], nm, nn) == 0)
+            return css_cs_kok[k] ? k : -1;
+    int k = css_cs_knext;
+    css_cs_knext = (css_cs_knext + 1) % CSS_CS_CACHE;
+    css_cs_kstore[k] = id;
+    css_cs_krev[k] = s->revision;
+    css_cs_kread[k] = css_sheets_read;
+    memcpy(css_cs_kname[k], nm, nn);
+    css_cs_kname[k][nn] = 0;
+    css_cs_kok[k] = css_cs_resolve(s, nm, nn, &css_cs_kept[k], 0);
+    return css_cs_kok[k] ? k : -1;
+}
+
+int css_counter_text(const css_style *s, const char *name, size_t nn, long v, int marker, vector<char> *out) {
+    if (css_eq_ci(name, nn, "none")) return 0;
+    if (v > 2147483647L) v = 2147483647L;
+    if (v < -2147483647L - 1) v = -2147483647L - 1;
+    if (css_eq_ci(name, nn, "decimal")) {
+        /* decimal, which no sheet may define: its digits, a marker's ". " after them */
+        char num[24];
+        int k = snprintf(num, sizeof num, marker ? "%ld. " : "%ld", v);
+        if (k > 0) append_range(out, num, (size_t)k);
+        return 0;
+    }
+    int k = css_cs_get(s, name, nn);
+    if (k < 0) k = css_cs_get(s, "decimal", 7);
+    if (k < 0) return 0;
+    /* the representation: the style's, else its fallback's (decimal's past a second fallback) */
+    vector<char> r;
+    int done = css_cs_repr(&css_cs_kept[k], v, &r);
+    if (!done && css_cs_kept[k].fb[0]) {
+        char fb[64];
+        snprintf(fb, sizeof fb, "%s", css_cs_kept[k].fb);
+        int f = css_cs_get(s, fb, strlen(fb));
+        if (f >= 0) done = css_cs_repr(&css_cs_kept[f], v, &r);
+        k = css_cs_get(s, name, nn);
+        if (k < 0) k = css_cs_get(s, "decimal", 7);
+        if (k < 0) return 0;
+    }
+    if (!done) {
+        int dk = css_cs_get(s, "decimal", 7);
+        if (dk >= 0) css_cs_repr(&css_cs_kept[dk], v, &r);
+        k = css_cs_get(s, name, nn);
+        if (k < 0) k = css_cs_get(s, "decimal", 7);
+        if (k < 0) return 0;
+    }
+    const css_cs *c = &css_cs_kept[k];
+    if (marker) {
+        if (c->pre_l != CSS_CS_UNSET) append_range(out, c->buf + c->pre_o, c->pre_l);
+        append_range(out, data(r), len(r));
+        if (c->suf_l != CSS_CS_UNSET) append_range(out, c->buf + c->suf_o, c->suf_l);
+        else append_range(out, ". ", 2);
+    } else append_range(out, data(r), len(r));
+    return c->symbol;
+}
+
+/* an @counter-style rule (CSS Counter Styles 3, 3): its name (an identifier, none of none, decimal, disc, square,
+   circle, disclosure-open, disclosure-closed or a CSS-wide keyword) and its descriptors, kept when they make a style */
+static void css_counter_style_rule(css_style *s, const css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn) {
+    size_t a = css_skip_ws(pre, pn, 0), b = pn;
+    while (b > a && css_ws(pre[b - 1])) b--;
+    const char *nm = pre + a;
+    size_t nl = b - a;
+    static const char *const bad[13] = { "none", "decimal", "disc", "square", "circle", "disclosure-open", "disclosure-closed", "initial",
+                                         "inherit", "unset", "revert", "revert-layer", "default" };
+    if (!nl || nl >= 64 || !css_is_ident(nm, nl)) return;
+    for (int k = 0; k < 13; k++) if (css_eq_ci(nm, nl, bad[k])) return;
+    css_cs c;
+    css_cs_init(&c);
+    if (!css_cs_read(&c, blk, bn, 0)) return;
+    /* its descriptors as written, each `name: value;', white space one space */
+    vector<char> t, sys;
+    size_t d = 0;
+    while (d < bn) {
+        size_t e = d;
+        while (e < bn && blk[e] != ';') {
+            if (blk[e] == '"' || blk[e] == '\'') e = css_string_end(blk, bn, e);
+            if (e < bn) e++;
+        }
+        size_t x = css_skip_ws(blk, e, d), y = e;
+        while (y > x && css_ws(blk[y - 1])) y--;
+        if (y > x) {
+            if (len(t)) push_back(t, ' ');
+            for (size_t q = x; q < y; q++) {
+                if (blk[q] == '"' || blk[q] == '\'') {
+                    size_t qe = css_string_end(blk, y, q);
+                    size_t stop = qe < y ? qe + 1 : y;
+                    append_range(t, blk + q, stop - q);
+                    q = stop - 1;
+                    continue;
+                }
+                if (css_ws(blk[q])) { if (back(t) != ' ') push_back(t, ' '); }
+                else push_back(t, blk[q]);
+            }
+            push_back(t, ';');
+            size_t colon = x;
+            while (colon < y && blk[colon] != ':') colon++;
+            size_t ne = colon;
+            while (ne > x && css_ws(blk[ne - 1])) ne--;
+            if (colon < y && css_eq_ci(blk + x, ne - x, "system")) {
+                clear(sys);
+                size_t va = css_skip_ws(blk, y, colon + 1);
+                append_range(sys, blk + va, y - va);
+            }
+        }
+        d = e + 1;
+    }
+    if (!len(sys)) append_range(sys, "symbolic", 8);
+    css_cstyle_h h = cstyle_new(s);
+    amb_span ns = text_add(s, nm, nl), ss = text_add(s, data(sys), len(sys)), ts = text_add(s, data(t), len(t));
+    s->cstyle[h.index].name = ns;
+    s->cstyle[h.index].system = ss;
+    s->cstyle[h.index].text = ts;
+    s->cstyle[h.index].sheet = cx->sheet;
+}
+
 /* a sheet's text, its comments gone: rules and at-rules */
 static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n) {
     size_t i = 0;
@@ -4014,8 +5283,9 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
         } else if (at) {
             /* @media whose query holds, @supports whose condition does: their rules are the
                sheet's; @font-face's face is fetched; @keyframes' keyframes are rules of their own;
-               @property registers its custom property; @scope's rules are scoped (css_scope_rules); @page
-               and the rest: not read */
+               @property registers its custom property; @scope's rules are scoped (css_scope_rules);
+               @container's rules are the sheet's, each knowing its query; @counter-style's style is kept; @page and
+               the rest: not read */
             if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
@@ -4024,12 +5294,14 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
             else if (css_eq_ci(name, nn, "scope")) {
                 css_pctx sub = *cx;
                 if (css_scope_prelude(s, t + j, k - j, &sub)) css_rules(s, net, &sub, t + k + 1, inner);
-            }
+            } else if (css_eq_ci(name, nn, "container")) css_container_rule(s, net, cx, t + j, k - j, t + k + 1, inner);
+            else if (css_eq_ci(name, nn, "counter-style")) css_counter_style_rule(s, cx, t + j, k - j, t + k + 1, inner);
             cx->ruled = 1;
         } else {
             uint32_t r0 = (uint32_t)s->rule_len;
             css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
             if (cx->scoped) css_scope_rules(s, cx, r0);
+            if (cx->container) for (uint32_t r = r0; r < s->rule_len; r++) s->rule[r].container = cx->container;
             cx->ruled = 1;
         }
         i = end + 1;
@@ -4885,8 +6157,10 @@ static int css_absolutize(const char *t, size_t n, double em, double rem, uint32
             double k;
             int fu = css_font_unit(t + ub, ue - ub, &k);
             double ab = fu ? 0 : css_abs_unit(t + ub, ue - ub);
-            if (fu || (ab > 0 && !css_eq_ci(t + ub, ue - ub, "px"))) {
-                double px = fu == 2 ? x * rem : fu == 1 ? x * k * em : x * ab;
+            int cqk = fu || ab > 0 ? 0 : css_cq_unit(t + ub, ue - ub);
+            double cb = cqk ? css_cq_px(cqk) : -1;
+            if (fu || (ab > 0 && !css_eq_ci(t + ub, ue - ub, "px")) || cb >= 0) {
+                double px = fu == 2 ? x * rem : fu == 1 ? x * k * em : cb >= 0 ? x * cb : x * ab;
                 char buf[48];
                 int bn = snprintf(buf, sizeof buf, "%gpx", px);
                 if (bn > 0) append_range(out, buf, (size_t)bn);
@@ -5174,6 +6448,32 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
             pend = 1;
         }
         if (pend) append_range(out, p == CSS_PROP_COUNTER_RESET ? " 0" : " 1", 2);
+        v->tx = text_add(s, data(out), len(out));
+        return;
+    }
+    if ((p == CSS_PROP_LIST_STYLE_TYPE || p == CSS_PROP_CONTAINER_TYPE || p == CSS_PROP_CONTAINER_NAME) && v->unit == CSS_UNIT_TEXT) {
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        const char *t = data(src);
+        size_t n = len(src), i = 0, st, ln;
+        if (p == CSS_PROP_LIST_STYLE_TYPE && css_is_string(t, n)) {
+            /* a string as Chromium serializes it: in double quotes, its escapes made characters */
+            vector<char> sv;
+            css_string_text(t, n, &sv);
+            push_back(out, '"');
+            for (size_t k = 0; k < len(sv); k++) {
+                char ch = at(sv, k);
+                if (ch == '"' || ch == '\\') push_back(out, '\\');
+                push_back(out, ch);
+            }
+            push_back(out, '"');
+        } else if (p == CSS_PROP_CONTAINER_TYPE) {
+            int inl = 0;
+            while (css_next_part(t, n, &i, &st, &ln)) if (css_eq_ci(t + st, ln, "inline-size")) inl = 1;
+            if (inl) append_range(out, "inline-size scroll-state", 24);
+            else append_range(out, "size scroll-state", 17);
+        } else
+            while (css_next_part(t, n, &i, &st, &ln)) { if (len(out)) push_back(out, ' '); append_range(out, t + st, ln); }
         v->tx = text_add(s, data(out), len(out));
         return;
     }
@@ -6772,16 +8072,16 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
    share one style, computed once. A style is a number from 1: its 29 values and what
    they record. An element's own rules (its hints, its style attribute) are its alone,
    so an element that has them never shares. */
-typedef struct css_skey { uint32_t hash, parent, list, n, style; } css_skey;
+typedef struct css_skey { uint32_t hash, parent, list, n, style, cq; } css_skey;
 
 static uint32_t css_style_find(const vector<css_skey> *se, const vector<uint32_t> *slots, const vector<uint32_t> *lists,
-                               const vector<uint32_t> *matched, uint32_t parent, uint32_t h) {
+                               const vector<uint32_t> *matched, uint32_t parent, uint32_t h, uint32_t cq) {
     size_t mask = len(*slots) - 1;
     for (size_t i = h & mask;; i = (i + 1) & mask) {
         uint32_t e = at(*slots, i);
         if (!e) return 0;
         css_skey k = at(*se, e - 1);
-        if (k.hash != h || k.parent != parent || k.n != (uint32_t)len(*matched)) continue;
+        if (k.hash != h || k.parent != parent || k.cq != cq || k.n != (uint32_t)len(*matched)) continue;
         int same = 1;
         for (uint32_t q = 0; q < k.n && same; q++) if (at(*lists, k.list + q) != at(*matched, q)) same = 0;
         if (same) return k.style;
@@ -6789,10 +8089,22 @@ static uint32_t css_style_find(const vector<css_skey> *se, const vector<uint32_t
 }
 
 static void css_style_add(vector<css_skey> *se, vector<uint32_t> *slots, vector<uint32_t> *lists, const vector<uint32_t> *matched,
-                          uint32_t parent, uint32_t h, uint32_t style) {
-    css_skey k = { h, parent, (uint32_t)len(*lists), (uint32_t)len(*matched), style };
+                          uint32_t parent, uint32_t h, uint32_t style, uint32_t cq) {
+    css_skey k = { h, parent, (uint32_t)len(*lists), (uint32_t)len(*matched), style, cq };
     for (size_t q = 0; q < len(*matched); q++) push_back(lists, at(*matched, q));
     push_back(se, k);
+    if (len(*se) * 2 >= len(*slots)) {
+        /* half full: the slots doubled and every key put again (container queries' restyles add styles) */
+        size_t cap = len(*slots) * 2;
+        clear(*slots);
+        resize(slots, cap);
+        for (size_t q = 0; q < len(*se); q++) {
+            size_t m = cap - 1;
+            for (size_t i = at(*se, q).hash & m;; i = (i + 1) & m)
+                if (!at(*slots, i)) { (*slots)[i] = (uint32_t)(q + 1); break; }
+        }
+        return;
+    }
     size_t mask = len(*slots) - 1;
     for (size_t i = h & mask;; i = (i + 1) & mask)
         if (!at(*slots, i)) { (*slots)[i] = (uint32_t)len(*se); return; }
@@ -7092,11 +8404,12 @@ static void css_ua_load(css_style *s) {
    values recorded once (PLAN.md 11) */
 static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vector<css_skey> *se, vector<uint32_t> *sslots,
                                vector<uint32_t> *slists, const vector<uint32_t> *matched, uint32_t ps, int is_root, const css_val *initial,
-                               const css_rec *irec, vector<css_cust> *cust, vector<css_vtext> *vc) {
+                               const css_rec *irec, vector<css_cust> *cust, vector<css_vtext> *vc, uint32_t cq) {
     uint32_t sh = 2166136261u ^ ps;
     for (size_t k = 0; k < len(*matched); k++) { sh ^= at(*matched, k); sh *= 16777619u; }
     sh ^= (uint32_t)len(*matched) * 0x9E3779B9u;
-    uint32_t sid = css_style_find(se, sslots, slists, matched, ps, sh);
+    sh ^= cq * 0x85EBCA6Bu;
+    uint32_t sid = css_style_find(se, sslots, slists, matched, ps, sh, cq);
     if (!sid) {
         css_val out[CSS_NPROPS];
         css_rec rec[CSS_NPROPS];
@@ -7113,7 +8426,7 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
             nc++;
         }
         push_back(ss->ccount, nc);
-        css_style_add(se, sslots, slists, matched, ps, sh, sid);
+        css_style_add(se, sslots, slists, matched, ps, sh, sid, cq);
         /* the new style's values, recorded once: enum(prop)'s order, then its custom
            properties (those its own declarations gave, invalid ones too) */
         uint32_t first = 0;
@@ -7139,6 +8452,387 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
         push_back(ss->fsx, fso);
     }
     return sid;
+}
+
+/* ---- container queries in the cascade: the state kept for layout's restyles ----
+   A cascade whose sheets have @container rules or container units keeps, when it ends, what it styled with -- each
+   node's style, its estyle, matches and pstyle records, the styles' table and the style sharing's, the initial
+   values -- so that css_container_restyle can make a container's subtree's styles again when layout has sized it
+   (src/css/css.h), without matching a selector again: each element's matches are kept with the rules whose
+   condition failed among them (match.unmet). The next cascade drops it. */
+/* each @container's queries, read once a cascade (css_cq_read): a query's cquery, its name's and its condition's spans
+   in its prelude, the axes its size features need, whether it has a style query (sty); and its last answer, for the
+   container it last asked, while the sizes are as they were (css_cq_epoch: a cascade, or a restyle, begins another) */
+typedef struct css_cqi { uint32_t q, na, nl, ca, cl, mnode, mepoch; int axes, memo, sty; } css_cqi;
+static uint32_t css_cq_epoch;
+typedef struct css_cqx {
+    uintptr_t store, doc;           /* the store and the document it is of (their addresses), and the store's revision */
+    uint32_t revision;
+    int on;
+    css_env env;
+    css_val initial[CSS_NPROPS];
+    css_rec irec[CSS_NPROPS];
+    css_styles ss;
+    vector<css_skey> se;
+    vector<uint32_t> sslots, slists;
+    vector<css_vtext> vc;
+    vector<uint32_t> nstyle;        /* each node's style */
+    vector<uint32_t> eidx;          /* each element's estyle record */
+    vector<uint32_t> mfirst, mcount; /* each element's match records (its pseudo-elements' after its own) */
+    vector<uint32_t> pfirst, pcount; /* each element's pstyle records */
+    vector<uint8_t> rule_cq;        /* each rule: a declaration of it reads a container unit (or a var(), which may) */
+    vector<double> known;           /* each node's content box as layout gave it, w and h (-1: none given) */
+    vector<double> styled;          /* each container's size its subtree was last made for */
+    vector<double> cqs;             /* the container units' bases met: w, h a pair, a style's key the pair's number + 1 */
+    vector<css_cqi> items;          /* the @container queries, read (css_cq_read), and each cquery's first and count */
+    vector<uint32_t> cqf, cqn;
+} css_cqx;
+static css_cqx css_cq;
+static int css_cq_exit;
+static void css_styles_swap(css_styles *a, css_styles *b) {
+    swap(&a->first, &b->first);
+    swap(&a->cpool, &b->cpool);
+    swap(&a->cfirst, &b->cfirst);
+    swap(&a->ccount, &b->ccount);
+    swap(&a->tmpl_of, &b->tmpl_of);
+    swap(&a->tv, &b->tv);
+    swap(&a->tr, &b->tr);
+    swap(&a->fsx, &b->fsx);
+}
+/* the kept state's buffers freed (at exit, and when a cascade keeps none) */
+static void css_cq_free(void) {
+    css_styles none = {0};
+    defer(none) { CSS_STYLES_DROP(none); }
+    css_styles_swap(&css_cq.ss, &none);
+    vector<css_skey> a;
+    vector<uint32_t> b, c, d0, e0, f0, g0, h0, i0;
+    vector<css_vtext> v;
+    vector<uint8_t> r;
+    vector<double> k, l, m;
+    vector<css_cqi> qi;
+    vector<uint32_t> qf, qn;
+    swap(&css_cq.items, &qi);
+    swap(&css_cq.cqf, &qf);
+    swap(&css_cq.cqn, &qn);
+    swap(&css_cq.se, &a);
+    swap(&css_cq.sslots, &b);
+    swap(&css_cq.slists, &c);
+    swap(&css_cq.nstyle, &d0);
+    swap(&css_cq.eidx, &e0);
+    swap(&css_cq.mfirst, &f0);
+    swap(&css_cq.mcount, &g0);
+    swap(&css_cq.pfirst, &h0);
+    swap(&css_cq.pcount, &i0);
+    swap(&css_cq.vc, &v);
+    swap(&css_cq.rule_cq, &r);
+    swap(&css_cq.known, &k);
+    swap(&css_cq.styled, &l);
+    swap(&css_cq.cqs, &m);
+    css_cq.on = 0;
+    css_cq.store = 0;
+    css_cq.doc = 0;
+}
+
+/* a declaration's text that reads a container unit (2), or a var() whose value may (1); 0 neither. Its bytes tested
+   for a q (a unit's second letter) or a ( (var's), the rest only there */
+static int css_text_cq(const char *t, size_t n) {
+    int r = 0;
+    for (size_t i = 1; i < n; i++) {
+        char c = t[i];
+        if (c == '(') {
+            if (i >= 3 && css_lower(t[i - 3]) == 'v' && css_lower(t[i - 2]) == 'a' && css_lower(t[i - 1]) == 'r') r = 1;
+            continue;
+        }
+        if ((c != 'q' && c != 'Q') || i < 2 || css_lower(t[i - 1]) != 'c' || !(css_is_digit(t[i - 2]) || t[i - 2] == '.')) continue;
+        size_t e = i - 1;
+        while (e < n && css_is_alpha(t[e])) e++;
+        if (css_cq_unit(t + i - 1, e - i + 1)) return 2;
+    }
+    return r;
+}
+
+/* a style's container-type (its values from c0): 1 inline-size, 2 size, 0 none (normal, scroll-state alone) */
+static int css_cq_kind(const css_style *s, uint32_t c0) {
+    if (!c0) return 0;
+    uint32_t c = c0 + CSS_PROP_CONTAINER_TYPE;
+    if (s->cval[c].unit == CSS_UNIT_KEYWORD) return names_is(s, s->cval[c].word, "inline-size", 11) ? 1 : names_is(s, s->cval[c].word, "size", 4) ? 2 : 0;
+    if (s->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = s->cval[c].text;
+    const char *t = text_ptr(s, sp);
+    size_t i = 0, st, ln;
+    int k = 0;
+    while (css_next_part(t, sp.len, &i, &st, &ln)) {
+        if (css_eq_ci(t + st, ln, "inline-size")) k = 1;
+        else if (css_eq_ci(t + st, ln, "size")) k = 2;
+    }
+    return k;
+}
+/* a style's container-name holds the name q[0, qn) */
+static int css_cq_named(const css_style *s, uint32_t c0, const char *q, size_t qn) {
+    if (!c0) return 0;
+    uint32_t c = c0 + CSS_PROP_CONTAINER_NAME;
+    if (s->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = s->cval[c].text;
+    const char *t = text_ptr(s, sp);
+    size_t i = 0, st, ln;
+    while (css_next_part(t, sp.len, &i, &st, &ln)) if (ln == qn && memcmp(t + st, q, qn) == 0) return 1;
+    return 0;
+}
+/* the size layout gave the node x's content box: 1, or 0 when it gave none */
+static int css_cq_size_of(const vector<double> *known, uint32_t x, double *w, double *h) {
+    if ((size_t)x * 2 + 1 >= len(*known) || at(*known, (size_t)x * 2) < 0) return 0;
+    *w = at(*known, (size_t)x * 2);
+    *h = at(*known, (size_t)x * 2 + 1);
+    return 1;
+}
+
+
+/* the store's @container queries into items, each cquery's first and count by its number (cqf, cqn) */
+static void css_cq_read(const css_style *s, vector<css_cqi> *items, vector<uint32_t> *cqf, vector<uint32_t> *cqn) {
+    resize(cqf, (size_t)s->cquery_len);
+    resize(cqn, (size_t)s->cquery_len);
+    for (uint32_t q = 1; q < s->cquery_len; q++) {
+        amb_span sp = s->cquery[q].text;
+        const char *t = text_ptr(s, sp);
+        size_t n = sp.len, a = 0;
+        (*cqf)[q] = (uint32_t)len(*items);
+        for (;;) {
+            size_t b = css_comma(t, n, a), na, nl, ca, cl;
+            if (css_cq_split(t + a, b - a, &na, &nl, &ca, &cl)) {
+                css_cqi it;
+                memset(&it, 0, sizeof it);
+                it.q = q;
+                it.na = (uint32_t)(a + na);
+                it.nl = (uint32_t)nl;
+                it.ca = (uint32_t)(a + ca);
+                it.cl = (uint32_t)cl;
+                css_cqc c;
+                memset(&c, 0, sizeof c);
+                if (cl) css_cq_cond(s, &c, t + a + ca, cl, 0, 0, &it.axes);
+                for (size_t i = 0; i + 6 <= cl && !it.sty; i++) it.sty = css_bytes_eq(t + a + ca + i, "style(", 6, 1);
+                push_back(items, it);
+            }
+            if (b >= n) break;
+            a = b + 1;
+        }
+        (*cqn)[q] = (uint32_t)len(*items) - at(*cqf, q);
+    }
+}
+
+/* the query items[k], for the element x (its pseudo-element, when pe): its container -- the nearest ancestor (x itself
+   for a pseudo-element) of the name it gives, whose container-type gives the axes its size features need -- found by
+   its style (nstyle, first), its condition answered against it (its size as known gave it: unknown without), once
+   for the container while the sizes stand. 1 when it holds */
+static int css_cq_query(const css_style *s, const dom_document *d, const vector<uint32_t> *nstyle, const vector<uint32_t> *first,
+                        const vector<double> *known, double rem, uint32_t x, int pe, vector<css_cqi> *items, size_t k) {
+    css_cqi it = at(*items, k);
+    amb_span sp = s->cquery[it.q].text;
+    const char *q = text_ptr(s, sp);
+    uint32_t a = pe ? x : css_parent_element(d, x);
+    for (; a; a = css_parent_element(d, a)) {
+        uint32_t sid = a < len(*nstyle) ? at(*nstyle, a) : 0;
+        uint32_t c0 = sid && sid < len(*first) ? at(*first, sid) : 0;
+        if (!c0) continue;
+        if (it.nl && !css_cq_named(s, c0, q + it.na, it.nl)) continue;
+        if (it.axes) {
+            int kd = css_cq_kind(s, c0), ax = kd == 2 ? 3 : kd == 1 ? 1 : 0;
+            if ((ax & it.axes) != it.axes) continue;
+        }
+        break;
+    }
+    if (!a) return 0;
+    if (!it.cl) return 1;
+    if (it.mnode == a && it.mepoch == css_cq_epoch) return it.memo;
+    double w, h;
+    int sized = css_cq_size_of(known, a, &w, &h);
+    (*items)[k].mnode = a;
+    (*items)[k].mepoch = css_cq_epoch;
+    (*items)[k].memo = 0;
+    /* size features alone, of a container layout has not sized: unknown, which is false */
+    if (!sized && !it.sty) return 0;
+    css_cqc c;
+    memset(&c, 0, sizeof c);
+    int axes = 0;
+    uint32_t sid = at(*nstyle, a);
+    c.c0 = at(*first, sid);
+    c.w = -1;
+    c.h = -1;
+    if (sized) {
+        int kd = css_cq_kind(s, c.c0);
+        c.w = w;
+        c.h = kd == 2 ? h : -1;
+    }
+    c.fs = s->cval[c.c0 + CSS_PROP_FONT_SIZE].num;
+    c.rem = rem;
+    c.eval = 1;
+    /* the container units in a query: the small viewport's (Chromium's, where the container has no container) */
+    double sw = css_cqw, sh = css_cqh;
+    css_cqw = CSS_VIEWPORT_W;
+    css_cqh = CSS_VIEWPORT_H;
+    int r = css_cq_cond(s, &c, q + it.ca, it.cl, 0, 0, &axes);
+    css_cqw = sw;
+    css_cqh = sh;
+    (*items)[k].memo = r == 1;
+    return r == 1;
+}
+/* the rule r's @container conditions, its innermost and those it is in, hold for x (its pseudo-element, when pe): one
+   query of each at least (items, cqf, cqn: css_cq_read's) */
+static int css_cq_rule_holds(const css_style *s, const dom_document *d, const vector<uint32_t> *nstyle, const vector<uint32_t> *first,
+                             const vector<double> *known, double rem, uint32_t x, int pe, uint32_t r, vector<css_cqi> *items,
+                             const vector<uint32_t> *cqf, const vector<uint32_t> *cqn) {
+    int guard = 0;
+    for (uint32_t q = s->rule[r].container; q && q < len(*cqf) && guard < 64; q = s->cquery[q].parent, guard++) {
+        int any = 0;
+        for (uint32_t k = at(*cqf, q); k < at(*cqf, q) + at(*cqn, q) && !any; k++)
+            if (css_cq_query(s, d, nstyle, first, known, rem, x, pe, items, k)) any = 1;
+        if (!any) return 0;
+    }
+    return 1;
+}
+/* the element x's container units' bases (pseudo-elements': pe, x itself among the containers): the content box of
+   the nearest container of each axis whose size layout gave, else the small viewport's */
+static void css_cq_bases(const css_style *s, const dom_document *d, const vector<uint32_t> *nstyle, const vector<uint32_t> *first,
+                         const vector<double> *known, uint32_t x, int pe) {
+    double bw = -1, bh = -1;
+    for (uint32_t a = pe ? x : css_parent_element(d, x); a && (bw < 0 || bh < 0); a = css_parent_element(d, a)) {
+        double w, h;
+        if (!css_cq_size_of(known, a, &w, &h)) continue;
+        uint32_t sid = a < len(*nstyle) ? at(*nstyle, a) : 0;
+        uint32_t c0 = sid && sid < len(*first) ? at(*first, sid) : 0;
+        int k = css_cq_kind(s, c0);
+        if (k && bw < 0) bw = w;
+        if (k == 2 && bh < 0) bh = h;
+    }
+    css_cqw = bw >= 0 ? bw : CSS_VIEWPORT_W;
+    css_cqh = bh >= 0 ? bh : CSS_VIEWPORT_H;
+}
+/* the element's rules (matched) read a container unit, or may (a var()) */
+static int css_cq_reads(const vector<uint8_t> *rule_cq, const vector<uint32_t> *matched) {
+    for (size_t k = 0; k < len(*matched); k++) {
+        uint32_t r = at(*matched, k) & 0xffffff;
+        if (r < len(*rule_cq) && at(*rule_cq, r)) return 1;
+    }
+    return 0;
+}
+/* the style key's part for container units, the element's rules reading them (reads): the number of its bases' pair
+   (css_cqw, css_cqh) + 1; 0 for rules that read none */
+static uint32_t css_cq_key(vector<double> *cqs, int reads) {
+    if (!reads) return 0;
+    for (size_t k = 0; k + 1 < len(*cqs); k += 2)
+        if (at(*cqs, k) == css_cqw && at(*cqs, k + 1) == css_cqh) return (uint32_t)(k / 2) + 1;
+    push_back(cqs, css_cqw);
+    push_back(cqs, css_cqh);
+    return (uint32_t)(len(*cqs) / 2);
+}
+
+/* the element x's (pseudo 0) or its pseudo-element pk's candidate rules, its match records from m0 (m1 its end) in
+   their order, each one's @container answered again (its record's unmet set as it is), into matched */
+static void css_cq_matched(css_style *s, const dom_document *d, uint32_t x, uint32_t pk, uint32_t m0, uint32_t m1, vector<uint32_t> *matched) {
+    clear(*matched);
+    for (uint32_t m = m0; m < m1 && m < s->match_len; m++) {
+        if ((uint32_t)s->match[m].pseudo != pk) continue;
+        uint32_t r = s->match[m].rule;
+        if (s->rule[r].container) {
+            int ok = css_cq_rule_holds(s, d, &css_cq.nstyle, &css_cq.ss.first, &css_cq.known, css_cq.env.rem, x, pk != 0, r, &css_cq.items,
+                                       &css_cq.cqf, &css_cq.cqn);
+            s->match[m].unmet = (uint8_t)!ok;
+            if (!ok) continue;
+        }
+        uint32_t px = s->match[m].proximity;
+        push_back(matched, pk ? r : (px ? 256 - px : 0) << 24 | r);
+    }
+}
+
+/* x's pseudo-elements' styles made again under its style sid, each that changed appended to out */
+static void css_cq_pseudos(css_style *s, const dom_document *d, uint32_t x, uint32_t sid, vector<uint32_t> *matched, vector<css_cust> *cust,
+                           vector<css_restyled> *out) {
+    uint32_t p0 = at(css_cq.pfirst, x), pn = at(css_cq.pcount, x), m0 = at(css_cq.mfirst, x), m1 = m0 + at(css_cq.mcount, x);
+    for (uint32_t q = p0; q < p0 + pn && q < s->pstyle_len; q++) {
+        uint32_t pk = (uint32_t)s->pstyle[q].pseudo;
+        css_cq_matched(s, d, x, pk, m0, m1, matched);
+        int reads = css_cq_reads(&css_cq.rule_cq, matched);
+        if (reads) css_cq_bases(s, d, &css_cq.nstyle, &css_cq.ss.first, &css_cq.known, x, 1);
+        uint32_t key = css_cq_key(&css_cq.cqs, reads);
+        uint32_t psid = css_style_make(s, &css_cq.env, &css_cq.ss, &css_cq.se, &css_cq.sslots, &css_cq.slists, matched, sid, 0, css_cq.initial,
+                                       css_cq.irec, cust, &css_cq.vc, key);
+        css_cqw = -1;
+        css_cqh = -1;
+        uint32_t first = at(css_cq.ss.first, psid);
+        if (pk == CSS_PSEUDO_BEFORE || pk == CSS_PSEUDO_AFTER) {
+            uint32_t cc = first + CSS_PROP_CONTENT;
+            if (s->cval[cc].unit == CSS_UNIT_KEYWORD && (names_is(s, s->cval[cc].word, "none", 4) || names_is(s, s->cval[cc].word, "normal", 6)))
+                first = 0;
+        }
+        if (s->pstyle[q].style == psid && s->pstyle[q].first == first) continue;
+        s->pstyle[q].style = psid;
+        s->pstyle[q].first = first;
+        css_restyled ch = { x, pk, psid, first };
+        push_back(out, ch);
+    }
+}
+
+int css_container_restyle(css_style *s, const dom_document *d, uint32_t x, double w, double h, vector<css_restyled> *out) {
+    if (!css_cq.on || css_cq.store != (uintptr_t)(const void *)s || css_cq.doc != (uintptr_t)(const void *)d || css_cq.revision != s->revision)
+        return 0;
+    if (x == 0 || x >= d->node_len || x >= len(css_cq.nstyle) || !at(css_cq.nstyle, x)) return 0;
+    uint32_t sid = at(css_cq.nstyle, x);
+    int kind = css_cq_kind(s, at(css_cq.ss.first, sid));
+    if (!kind) return 0;
+    if (kind == 1) h = -1;
+    size_t nn = (size_t)d->node_len * 2;
+    if (len(css_cq.known) < nn) {
+        size_t k0 = len(css_cq.known);
+        resize(&css_cq.known, nn);
+        resize(&css_cq.styled, nn);
+        for (size_t k = k0; k < nn; k++) { css_cq.known[k] = -1; css_cq.styled[k] = -1; }
+    }
+    if (at(css_cq.styled, (size_t)x * 2) == w && at(css_cq.styled, (size_t)x * 2 + 1) == h) return 0;
+    css_cq.known[(size_t)x * 2] = w;
+    css_cq.known[(size_t)x * 2 + 1] = h;
+    css_cq_epoch++;
+    /* the end of x's subtree in tree order; the containers in it are unsized until layout reaches them */
+    uint32_t end = x;
+    while (end != 1 && !d->node[end].next_sibling) end = d->node[end].parent;
+    end = end == 1 ? 0 : d->node[end].next_sibling;
+    for (uint32_t y = css_next_in_tree(d, x); y && y != end; y = css_next_in_tree(d, y)) {
+        size_t k = (size_t)y * 2;
+        css_cq.known[k] = -1;
+        css_cq.known[k + 1] = -1;
+        css_cq.styled[k] = -1;
+        css_cq.styled[k + 1] = -1;
+    }
+    vector<uint32_t> matched;
+    vector<css_cust> cust;
+    css_cq_pseudos(s, d, x, sid, &matched, &cust, out);
+    for (uint32_t y = css_next_in_tree(d, x); y && y != end; y = css_next_in_tree(d, y)) {
+        if (!css_is_element(d, y) || y >= len(css_cq.nstyle) || !at(css_cq.nstyle, y)) continue;
+        uint32_t py = css_parent_element(d, y), ps = py ? at(css_cq.nstyle, py) : 0;
+        uint32_t m0 = at(css_cq.mfirst, y), m1 = m0 + at(css_cq.mcount, y);
+        css_cq_matched(s, d, y, 0, m0, m1, &matched);
+        int reads = css_cq_reads(&css_cq.rule_cq, &matched);
+        if (reads) css_cq_bases(s, d, &css_cq.nstyle, &css_cq.ss.first, &css_cq.known, y, 0);
+        uint32_t key = css_cq_key(&css_cq.cqs, reads);
+        uint32_t ns = css_style_make(s, &css_cq.env, &css_cq.ss, &css_cq.se, &css_cq.sslots, &css_cq.slists, &matched, ps, 0, css_cq.initial,
+                                     css_cq.irec, &cust, &css_cq.vc, key);
+        css_cqw = -1;
+        css_cqh = -1;
+        if (ns != at(css_cq.nstyle, y)) {
+            css_cq.nstyle[y] = ns;
+            uint32_t e = at(css_cq.eidx, y);
+            if (e && e < s->estyle_len) {
+                s->estyle[e].style = ns;
+                s->estyle[e].first = at(css_cq.ss.first, ns);
+            }
+            css_restyled ch = { y, 0, ns, at(css_cq.ss.first, ns) };
+            push_back(out, ch);
+        }
+        css_cq_pseudos(s, d, y, ns, &matched, &cust, out);
+    }
+    css_cq.styled[(size_t)x * 2] = w;
+    css_cq.styled[(size_t)x * 2 + 1] = h;
+    css_cqw = -1;
+    css_cqh = -1;
+    return 1;
 }
 
 /* the page's color scheme (HTML, 4.2.5.4): the first meta name=color-scheme's content that
@@ -7243,6 +8937,40 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the cascade layers' order, now every sheet has named its layers */
     css_layer_rank(s, 0, 1);
     uint32_t shared = (uint32_t)s->rule_len;
+    /* container queries: whether a rule is in an @container or reads a container unit (cq_on: some do, or a style
+       attribute reads one), so that the state layout's restyles need is kept */
+    vector<uint8_t> rule_cq;
+    int cq_on = 0;
+    css_cqw = -1;
+    css_cqh = -1;
+    resize(rule_cq, (size_t)s->rule_len);
+    for (uint32_t r = ua_end; r < s->rule_len; r++) {
+        if (s->rule[r].container) cq_on = 1;
+        for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
+            amb_span tx = s->decl[dc].text;
+            int k = css_text_cq(text_ptr(s, tx), tx.len);
+            if (k) rule_cq[r] = 1;
+            if (k == 2) cq_on = 1;
+        }
+    }
+    uint32_t style_atom = names_find(doc, "style", 5);
+    for (uint32_t x = 1; x < doc->node_len && !cq_on && style_atom; x++) {
+        if (!doc->node[x].live || doc->node[x].kind != DOM_NODE_KIND_ELEMENT) continue;
+        for (uint32_t a = doc->node[x].first_attr; a && !cq_on; a = doc->attr[a].next)
+            if (doc->attr[a].name == style_atom && css_text_cq(text_ptr(doc, doc->attr[a].value), doc->attr[a].value.len) == 2) cq_on = 1;
+    }
+    vector<uint32_t> eidx, mfirst, mcount, pfirst, pcount, cqf, cqn;
+    vector<double> noknown, cqs;
+    vector<css_cqi> cqitems;
+    if (cq_on) {
+        css_cq_read(s, &cqitems, &cqf, &cqn);
+        css_cq_epoch++;
+        resize(eidx, (size_t)doc->node_len);
+        resize(mfirst, (size_t)doc->node_len);
+        resize(mcount, (size_t)doc->node_len);
+        resize(pfirst, (size_t)doc->node_len);
+        resize(pcount, (size_t)doc->node_len);
+    }
     if (!css_ready) css_order_make();
     css_env env;
     memset(&env, 0, sizeof env);
@@ -7406,16 +9134,41 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         css_quirk_read = css_quirks;
         css_style_attr(s, doc, x, &inline_sheet, &matched);
         css_quirk_read = 0;
+        /* an element's own rules (its hints', its style attribute's): whether they read a container unit */
+        while (cq_on && len(rule_cq) < s->rule_len) {
+            uint32_t r = (uint32_t)len(rule_cq);
+            uint8_t k = 0;
+            for (uint32_t dc = s->rule[r].first_decl; dc && !k; dc = s->decl[dc].next) {
+                amb_span tx = s->decl[dc].text;
+                k = css_text_cq(text_ptr(s, tx), tx.len) != 0;
+            }
+            push_back(rule_cq, k);
+        }
         dom_node_h nh = node_handle(doc, x);
+        uint32_t m0 = (uint32_t)s->match_len;
+        size_t kept = 0;
         for (size_t k = 0; k < len(matched); k++) {
+            uint32_t r = at(matched, k) & 0xffffff;
             css_match_h m = match_new(s);
             s->match[m.index].node = nh;
-            s->match[m.index].rule = at(matched, k) & 0xffffff;
+            s->match[m.index].rule = r;
             s->match[m.index].proximity = at(matched, k) >> 24 ? 256 - (at(matched, k) >> 24) : 0;
+            if (!cq_on) continue;
+            /* a rule in an @container whose condition does not hold for the element: a match, unmet, not applied */
+            if (s->rule[r].container && !css_cq_rule_holds(s, doc, &nstyle, &ss.first, &noknown, env.rem, x, 0, r, &cqitems, &cqf, &cqn)) {
+                s->match[m.index].unmet = 1;
+                continue;
+            }
+            matched[kept++] = at(matched, k);
         }
+        if (cq_on) resize(matched, kept);
         /* the element's style: the one its matched rules under its parent's style made, or a new one */
         uint32_t ps = px ? at(nstyle, px) : 0;
-        uint32_t sid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, ps, px == 0, initial, irec, &cust, &vc);
+        int reads = cq_on && css_cq_reads(&rule_cq, &matched);
+        if (reads) css_cq_bases(s, doc, &nstyle, &ss.first, &noknown, x, 0);
+        uint32_t sid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, ps, px == 0, initial, irec, &cust, &vc, css_cq_key(&cqs, reads));
+        css_cqw = -1;
+        css_cqh = -1;
         nstyle[x] = sid;
         if (px == 0 && s->cval[at(ss.first, sid) + CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK) {
             /* the root in the dark scheme: color's initial value, CanvasText, is white there,
@@ -7437,30 +9190,88 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         s->estyle[eh.index].style = sid;
         s->estyle[eh.index].first = at(ss.first, sid);
         /* its pseudo-elements': the rules that matched each, under the element's style */
+        uint32_t p0 = (uint32_t)s->pstyle_len;
         for (uint32_t pk = CSS_PSEUDO_BEFORE; pk <= CSS_PSEUDO_PLACEHOLDER && len(pmatched); pk++) {
             clear(matched);
             for (size_t q = 0; q < len(pmatched); q++) if (at(pmatched, q) >> 24 == pk) push_back(matched, at(pmatched, q) & 0xffffff);
             if (!len(matched)) continue;
+            size_t pkept = 0;
             for (size_t q = 0; q < len(matched); q++) {
+                uint32_t r = at(matched, q);
                 css_match_h m = match_new(s);
                 s->match[m.index].node = nh;
-                s->match[m.index].rule = at(matched, q);
+                s->match[m.index].rule = r;
                 s->match[m.index].pseudo = (css_pseudo)pk;
-            }
-            uint32_t psid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, sid, 0, initial, irec, &cust, &vc);
-            /* a ::before or an ::after whose content is none (or normal) is not generated */
-            if (pk == CSS_PSEUDO_BEFORE || pk == CSS_PSEUDO_AFTER) {
-                uint32_t cc = at(ss.first, psid) + CSS_PROP_CONTENT;
-                if (s->cval[cc].unit == CSS_UNIT_KEYWORD && (names_is(s, s->cval[cc].word, "none", 4) || names_is(s, s->cval[cc].word, "normal", 6)))
+                if (!cq_on) continue;
+                if (s->rule[r].container && !css_cq_rule_holds(s, doc, &nstyle, &ss.first, &noknown, env.rem, x, 1, r, &cqitems, &cqf, &cqn)) {
+                    s->match[m.index].unmet = 1;
                     continue;
+                }
+                matched[pkept++] = r;
+            }
+            if (cq_on) resize(matched, pkept);
+            int preads = cq_on && css_cq_reads(&rule_cq, &matched);
+            if (preads) css_cq_bases(s, doc, &nstyle, &ss.first, &noknown, x, 1);
+            uint32_t psid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, sid, 0, initial, irec, &cust, &vc, css_cq_key(&cqs, preads));
+            css_cqw = -1;
+            css_cqh = -1;
+            uint32_t pfirst0 = at(ss.first, psid);
+            /* a ::before or an ::after whose content is none (or normal) is not generated: under container queries its
+               record is kept, its first value none, for a restyle to generate it */
+            if (pk == CSS_PSEUDO_BEFORE || pk == CSS_PSEUDO_AFTER) {
+                uint32_t cc = pfirst0 + CSS_PROP_CONTENT;
+                if (s->cval[cc].unit == CSS_UNIT_KEYWORD && (names_is(s, s->cval[cc].word, "none", 4) || names_is(s, s->cval[cc].word, "normal", 6))) {
+                    if (!cq_on) continue;
+                    pfirst0 = 0;
+                }
             }
             css_pstyle_h ph = pstyle_new(s);
             s->pstyle[ph.index].node = nh;
             s->pstyle[ph.index].pseudo = (css_pseudo)pk;
             s->pstyle[ph.index].style = psid;
-            s->pstyle[ph.index].first = at(ss.first, psid);
+            s->pstyle[ph.index].first = pfirst0;
+        }
+        if (cq_on) {
+            eidx[x] = eh.index;
+            mfirst[x] = m0;
+            mcount[x] = (uint32_t)s->match_len - m0;
+            pfirst[x] = p0;
+            pcount[x] = (uint32_t)s->pstyle_len - p0;
         }
     }
     s->revision++;
+    /* the state layout's restyles need, kept (src/css/css.h: css_container_restyle); the last cascade's dropped */
+    if (cq_on) {
+        if (!css_cq_exit) { css_cq_exit = 1; atexit(css_cq_free); }
+        css_cq.store = (uintptr_t)(const void *)s;
+        css_cq.doc = (uintptr_t)(const void *)doc;
+        css_cq.revision = s->revision;
+        memcpy(&css_cq.env, &env, sizeof env);
+        memcpy(css_cq.initial, initial, sizeof initial);
+        memcpy(css_cq.irec, irec, sizeof irec);
+        css_styles_swap(&css_cq.ss, &ss);
+        swap(&css_cq.se, &se);
+        swap(&css_cq.sslots, &sslots);
+        swap(&css_cq.slists, &slists);
+        swap(&css_cq.vc, &vc);
+        swap(&css_cq.nstyle, &nstyle);
+        swap(&css_cq.eidx, &eidx);
+        swap(&css_cq.mfirst, &mfirst);
+        swap(&css_cq.mcount, &mcount);
+        swap(&css_cq.pfirst, &pfirst);
+        swap(&css_cq.pcount, &pcount);
+        swap(&css_cq.rule_cq, &rule_cq);
+        swap(&css_cq.cqs, &cqs);
+        swap(&css_cq.items, &cqitems);
+        swap(&css_cq.cqf, &cqf);
+        swap(&css_cq.cqn, &cqn);
+        swap(&css_cq.known, &noknown);
+        vector<double> nostyled;
+        swap(&css_cq.styled, &nostyled);
+        clear(css_cq.known);
+        css_cq.on = 1;
+    } else if (css_cq.on) css_cq_free();
+    css_cqw = -1;
+    css_cqh = -1;
     return CSS_OK;
 }
