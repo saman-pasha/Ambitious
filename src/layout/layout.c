@@ -276,7 +276,10 @@ enum { WS_NORMAL, WS_PRE, WS_NOWRAP, WS_PRE_WRAP, WS_PRE_LINE };
 enum { AL_LEFT, AL_RIGHT, AL_CENTER, AL_JUSTIFY };
 
 /* text-transform */
-enum { TT_NONE, TT_UPPER, TT_LOWER, TT_CAPITALIZE };
+enum { TT_NONE, TT_UPPER, TT_LOWER, TT_CAPITALIZE, TT_MATH_AUTO };
+/* with capitalize: the piece goes on with a word a piece before it began (the rest of a word hyphenation or
+   ::first-letter breaks), whose first letter is no word's */
+enum { TT_MID = 0x10 };
 
 typedef struct lay_style {
     int display, bfc;
@@ -605,7 +608,8 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     s->ws = lay_w(w, "pre") ? WS_PRE : lay_w(w, "nowrap") ? WS_NOWRAP : lay_w(w, "pre-wrap") || lay_w(w, "break-spaces") ? WS_PRE_WRAP :
             lay_w(w, "pre-line") ? WS_PRE_LINE : WS_NORMAL;
     lay_word_of(st, cv[CSS_PROP_TEXT_TRANSFORM], w);
-    s->tt = lay_w(w, "uppercase") ? TT_UPPER : lay_w(w, "lowercase") ? TT_LOWER : lay_w(w, "capitalize") ? TT_CAPITALIZE : TT_NONE;
+    s->tt = lay_w(w, "uppercase") ? TT_UPPER : lay_w(w, "lowercase") ? TT_LOWER : lay_w(w, "capitalize") ? TT_CAPITALIZE :
+            lay_w(w, "math-auto") ? TT_MATH_AUTO : TT_NONE;
     c = cv[CSS_PROP_LETTER_SPACING];
     s->ls = st->cval[c].unit == CSS_UNIT_PX ? st->cval[c].num : 0;
     c = cv[CSS_PROP_WORD_SPACING];
@@ -1707,32 +1711,113 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     if (*w < 0) *w = 0;
 }
 
-/* the text-transform tt of s[0, n) into out (a word's: capitalize makes its first letter
-   upper case): ASCII's and Latin-1's letters, each the length it was */
+/* the class of the code point at s[i] in a word, as Chromium's word breaks split words for capitalize (UAX #29's, a
+   full stop and a colon splitting letters; measured on tests/pages/texttransform.html): 1 a letter (a code point past
+   Latin-1 one too, but general punctuation's and the emoji's), 2 a digit, 3 _ (which joins what it is between), 4 '
+   or a right single quote (between letters, or between digits), 5 the middle dot (between letters), 6 . , or ;
+   (between digits), 0 anything else; its length into bl */
+static int lay_word_class(const char *s, size_t n, size_t i, size_t *bl) {
+    unsigned char c = (unsigned char)s[i];
+    *bl = 1;
+    if (c < 0x80) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return 1;
+        if (c >= '0' && c <= '9') return 2;
+        return c == '_' ? 3 : c == '\'' ? 4 : c == '.' || c == ',' || c == ';' ? 6 : 0;
+    }
+    size_t k = 1;
+    while (i + k < n && ((unsigned char)s[i + k] & 0xC0) == 0x80) k++;
+    *bl = k;
+    unsigned char e = k > 1 ? (unsigned char)s[i + 1] : 0, e2 = k > 2 ? (unsigned char)s[i + 2] : 0;
+    if (c == 0xC2) return e == 0xB7 ? 5 : e == 0xAA || e == 0xB5 || e == 0xBA ? 1 : 0;
+    if (c == 0xC3) return e == 0x97 || e == 0xB7 ? 0 : 1;
+    if (c == 0xE2 && e == 0x80) return e2 == 0x98 || e2 == 0x99 ? 4 : 0;
+    if (c == 0xE2 && e == 0x81 && e2 <= 0xAF) return 0;
+    if (c == 0xF0 && e == 0x9F) return 0;
+    return (c & 0xC0) == 0x80 ? 0 : 1;
+}
+/* math-auto's italic of a code point (MathML Core's italic mapping), or the code point itself */
+static uint32_t lay_math_italic(uint32_t c) {
+    if (c >= 'A' && c <= 'Z') return 0x1D434 + (c - 'A');
+    if (c == 'h') return 0x210E;
+    if (c >= 'a' && c <= 'z') return 0x1D44E + (c - 'a');
+    if (c >= 0x391 && c <= 0x3A1) return 0x1D6E2 + (c - 0x391);
+    if (c >= 0x3A3 && c <= 0x3A9) return 0x1D6F4 + (c - 0x3A3);
+    if (c >= 0x3B1 && c <= 0x3C9) return 0x1D6FC + (c - 0x3B1);
+    switch (c) {
+    case 0x131: return 0x1D6A4;
+    case 0x237: return 0x1D6A5;
+    case 0x3F4: return 0x1D6F3;
+    case 0x2207: return 0x1D6FB;
+    case 0x2202: return 0x1D715;
+    case 0x3F5: return 0x1D716;
+    case 0x3D1: return 0x1D717;
+    case 0x3F0: return 0x1D718;
+    case 0x3D5: return 0x1D719;
+    case 0x3F1: return 0x1D71A;
+    case 0x3D6: return 0x1D71B;
+    default: return c;
+    }
+}
+/* s[0, n) is one code point */
+static int lay_one_cp(const char *s, size_t n) {
+    size_t z = 0;
+    if (!n) return 0;
+    amb_utf8_next(s, n, &z);
+    return z == n;
+}
+/* the text-transform tt of s[0, n) into out: ASCII's and Latin-1's letters, each the length it was; capitalize makes
+   upper case each word's first letter (a word as lay_word_class has words run; with TT_MID, s goes on with one);
+   math-auto (given a text of one code point alone, lay_chars sees to it) its italic */
 static void lay_transform(const char *s, size_t n, int tt, vector<char> *out) {
-    int first = 1;
-    for (size_t i = 0; i < n; i++) {
+    int mid = (tt & TT_MID) != 0;
+    tt &= ~TT_MID;
+    if (tt == TT_MATH_AUTO) {
+        size_t z = 0;
+        uint32_t c = n ? lay_math_italic(amb_utf8_next(s, n, &z)) : 0;
+        if (n && c < 0x80) push_back(out, (char)c);
+        else if (n && c < 0x800) { push_back(out, (char)(0xC0 | c >> 6)); push_back(out, (char)(0x80 | (c & 0x3F))); }
+        else if (n && c < 0x10000) {
+            push_back(out, (char)(0xE0 | c >> 12));
+            push_back(out, (char)(0x80 | (c >> 6 & 0x3F)));
+            push_back(out, (char)(0x80 | (c & 0x3F)));
+        } else if (n) {
+            push_back(out, (char)(0xF0 | c >> 18));
+            push_back(out, (char)(0x80 | (c >> 12 & 0x3F)));
+            push_back(out, (char)(0x80 | (c >> 6 & 0x3F)));
+            push_back(out, (char)(0x80 | (c & 0x3F)));
+        }
+        if (z < n) append_range(out, s + z, n - z);
+        return;
+    }
+    int in = mid, last = mid;
+    size_t i = 0;
+    while (i < n) {
+        size_t bl;
+        int cl = lay_word_class(s, n, i, &bl);
+        int up = tt == TT_UPPER;
+        if (cl >= 1 && cl <= 3) {
+            if (tt == TT_CAPITALIZE && !in) up = 1;
+            in = 1;
+            last = cl;
+        } else if (in && cl >= 4) {
+            size_t nb;
+            int nc = i + bl < n ? lay_word_class(s, n, i + bl, &nb) : 0;
+            int joins = (cl != 6 && last == 1 && nc == 1) || (cl != 5 && last == 2 && nc == 2);
+            if (!joins) in = 0;
+        } else in = 0;
         unsigned char c = (unsigned char)s[i];
-        int up = tt == TT_UPPER || (tt == TT_CAPITALIZE && first);
         if (c < 0x80) {
             if (up && c >= 'a' && c <= 'z') c = (unsigned char)(c - 32);
             else if (tt == TT_LOWER && c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) first = 0;
             push_back(out, (char)c);
-            continue;
-        }
-        if (c == 0xC3 && i + 1 < n) {
+        } else if (c == 0xC3 && bl == 2) {
             unsigned char e = (unsigned char)s[i + 1];
             if (up && e >= 0xA0 && e <= 0xBE && e != 0xB7) e = (unsigned char)(e - 0x20);
             else if (tt == TT_LOWER && e >= 0x80 && e <= 0x9E && e != 0x97) e = (unsigned char)(e + 0x20);
             push_back(out, (char)c);
             push_back(out, (char)e);
-            i++;
-            first = 0;
-            continue;
-        }
-        push_back(out, (char)c);
-        if ((c & 0xC0) != 0x80) first = 0;
+        } else append_range(out, s + i, bl);
+        i += bl;
     }
 }
 
@@ -1813,6 +1898,8 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     lay_piece p;
     memset(&p, 0, sizeof p);
     lay_piece_style(&p, s);
+    /* math-auto italicises a text of one character, and no other (as Chromium has it) */
+    if (p.tt == TT_MATH_AUTO && !lay_one_cp(tx, n)) p.tt = TT_NONE;
     p.node = node;
     p.elem = pe;
     p.deco = (uint8_t)deco;
@@ -5151,6 +5238,7 @@ static void lay_hyph_apply(LCTX, vector<lay_piece> *ps, size_t k, uint32_t keep,
     p.hy = 1;
     q.off = p.off + rest;
     q.len = at(*ps, k).len - rest;
+    if (q.tt == TT_CAPITALIZE) q.tt |= TT_MID;
     /* the rest's width: its own letters */
     vector<char> raw;
     if (q.node & LAY_GEN) { amb_span g = at(*gx, q.node & LAY_GIDX).text; append_range(raw, text_ptr(t, g) + q.off, q.len); }
@@ -5209,6 +5297,7 @@ static void lay_first_letter(LCTX, vector<lay_piece> *ps, uint32_t gi, double cw
     a.w = amb_text_width(f, a.face, a.size, data(wt), cut) + a.ls * (double)lay_cps(data(wt), cut);
     r.off = p.off + (uint32_t)cut;
     r.len = p.len - (uint32_t)cut;
+    if (r.tt == TT_CAPITALIZE) r.tt |= TT_MID;
     r.w = amb_text_width(f, r.face, r.size, data(wt) + cut, len(wt) - cut) + r.ls * (double)lay_cps(data(wt) + cut, len(wt) - cut);
     vector<lay_piece> out;
     for (size_t q = 0; q < k; q++) push_back(out, at(*ps, q));

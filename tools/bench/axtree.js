@@ -15,7 +15,8 @@
 //     DisclosureTriangle is the button it is in ARIA, and a label's LabelText and a legend's
 //     Legend are generic, as HTML-AAM gives those elements no role; a table Chromium takes for
 //     layout, its rows and its cells are Ambitious's layout_table, layout_table_row and
-//     layout_table_cell;
+//     layout_table_cell; MathML's MathMLMath is math, and its others mathml_ and their names
+//     (MathMLSquareRoot is mathml_square_root);
 //   - a true-or-false state only when true, but checked, pressed and expanded, whose false says
 //     something; invalid's grammar and spelling are true, as Chromium has them; haspopup false
 //     and autocomplete none are no state;
@@ -32,7 +33,9 @@ const path = require('path');
 
 const RANGE = new Set(['slider', 'spinbutton', 'scrollbar', 'progressbar', 'meter', 'separator']);
 const ROLES = { image: 'img', DisclosureTriangle: 'button', RootWebArea: 'document', LabelText: 'generic', Legend: 'generic',
-  LayoutTable: 'layout_table', LayoutTableRow: 'layout_table_row', LayoutTableCell: 'layout_table_cell' };
+  LayoutTable: 'layout_table', LayoutTableRow: 'layout_table_row', LayoutTableCell: 'layout_table_cell', MathMLMath: 'math' };
+// Chromium's roles for MathML's elements, MathMLSquareRoot and the rest: Ambitious's mathml_square_root and so on
+const roleOf = (r) => ROLES[r] || (/^MathML[A-Z]/.test(r) ? 'mathml_' + r.slice(6).replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() : r);
 const text = (s) => String(s).replace(/\s+/g, ' ').trim();
 const num = (v) => String(Number(Number(v).toPrecision(6)));
 
@@ -40,7 +43,7 @@ const num = (v) => String(Number(Number(v).toPrecision(6)));
 const VALID = /^-?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?$/;
 
 function line(n, id, el) {
-  const role = ROLES[n.role.value] || n.role.value;
+  const role = roleOf(n.role.value);
   const p = {};
   for (const q of n.properties || []) p[q.name] = q.value.value;
   const parts = [];

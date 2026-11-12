@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>text-transform as Chromium sets it</title>
+<style>
+body { margin: 8px; font: 16px serif; }
+div { margin: 0 0 2px; }
+.c { text-transform: capitalize; }
+.u { text-transform: uppercase; }
+.l { text-transform: lowercase; }
+.m { text-transform: math-auto; }
+.f { text-transform: full-width; }
+.h { width: 90px; hyphens: auto; }
+#fl1::first-letter { color: #a00; }
+</style></head>
+<body>
+<div><span id="c1" class="c">hello world</span></div>
+<div><span id="c2" class="c">x-y don't-stop</span></div>
+<div><span id="c3" class="c">o'neil o&rsquo;neil &lsquo;quoted&rsquo;</span></div>
+<div><span id="c4" class="c">(world) [list] {set}</span></div>
+<div><span id="c5" class="c">a.b x.y.z e.g.</span></div>
+<div><span id="c6" class="c">foo:bar a,b a;b</span></div>
+<div><span id="c7" class="c">3d 12ab 1_a a__b 1.5x 3,x</span></div>
+<div><span id="c8" class="c">a&middot;b caf&eacute;-bar &uuml;ber &ntilde;and&uacute;</span></div>
+<div><span id="c9" class="c">&copy;abc &iquest;que &laquo;quote&raquo; hello&nbsp;there</span></div>
+<div><span id="c10" class="c">&times;cross &divide;split &mdash;dash &hellip;more</span></div>
+<div><span id="u1" class="u">x-y &eacute;t&eacute; &ccedil;a</span></div>
+<div><span id="l1" class="l">ABC &Eacute;T&Eacute; &Ccedil;A</span></div>
+<div><span id="m1" class="m">x</span> <span id="m2" class="m">xy</span></div>
+<div><span id="f1" class="f">ab</span></div>
+<div class="h"><span id="h1" class="c">extraordinarily understandable</span></div>
+<div id="fl1" class="c">hello world</div>
+</body></html>

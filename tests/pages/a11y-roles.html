@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>roles in their context, as Chromium has them</title></head>
+<body>
+<!-- MathML: its roles, its names, a walk of aria-labelledby through it; role math named from its content -->
+<div role="math" id="am-2">a + b</div>
+<div role="math" id="am2" aria-label="sum">a + b</div>
+<div role="option" id="ao-2">loose</div>
+<div role="listbox" id="lb-2"><div role="option" id="ao2-2">kept</div></div>
+<math id="m1"><mi>x</mi><mo>+</mo><mn>1</mn></math>
+<math id="m2" aria-label="x plus one"><mi>x</mi><mo>+</mo><mn>1</mn></math>
+<math id="m3" alttext="alt text"><mi>x</mi></math>
+<math id="m4" display="block"><mi id="mi1">y</mi></math>
+<button id="bm">see <math><mi>z</mi></math> here</button>
+<div><option id="o1-2">loose</option></div>
+<math id="m0"><mrow id="e-mrow"><mi id="e-mi">x</mi><mo id="e-mo">+</mo><mn id="e-mn">1</mn></mrow><mfrac id="e-mfrac"><mn>1</mn><mn>2</mn></mfrac><msqrt id="e-msqrt"><mi>y</mi></msqrt><mroot id="e-mroot"><mi>y</mi><mn>3</mn></mroot><msub id="e-msub"><mi>a</mi><mn>1</mn></msub><msup id="e-msup"><mi>a</mi><mn>2</mn></msup><msubsup id="e-msubsup"><mi>a</mi><mn>1</mn><mn>2</mn></msubsup><munder id="e-munder"><mi>a</mi><mo>_</mo></munder><mover id="e-mover"><mi>a</mi><mo>^</mo></mover><munderover id="e-munderover"><mo>&#x2211;</mo><mn>0</mn><mn>9</mn></munderover><mmultiscripts id="e-mms"><mi>a</mi><mn>1</mn><none id="e-none"/><mprescripts id="e-mpre"/><mn>2</mn><mn>3</mn></mmultiscripts><mtext id="e-mtext">text</mtext><ms id="e-ms">str</ms><mspace id="e-mspace" width="1em"/><mtable id="e-mtable"><mtr id="e-mtr"><mtd id="e-mtd"><mn>1</mn></mtd></mtr></mtable><mstyle id="e-mstyle"><mi>s</mi></mstyle><mpadded id="e-mpadded"><mi>p</mi></mpadded><mphantom id="e-mphantom"><mi>q</mi></mphantom><menclose id="e-menclose"><mi>e</mi></menclose><merror id="e-merror"><mi>r</mi></merror><semantics id="e-sem"><mi>z</mi><annotation id="e-ann">z</annotation></semantics><maction id="e-maction"><mi>w</mi></maction><mfenced id="e-mfenced"><mi>f</mi></mfenced><unknownel id="e-unk"><mi>u</mi></unknownel></math>
+<math id="m-role" role="img" aria-label="pic"><mi>x</mi></math>
+<math id="m-title" title="titled"><mi>x</mi></math>
+<span id="lbl">by <math><mi>kk</mi></math> label</span><button id="bl" aria-labelledby="lbl">x</button>
+<span id="lbl2"><math id="m-ref"><mi>k2</mi></math></span><button id="bl2" aria-labelledby="m-ref">x</button>
+<div role="math" id="am"><span>a</span> + <b>b</b></div>
+<button id="b-am">see <span role="math">q</span> here</button>
+<div role="option" id="ao">loose</div>
+<div role="group" id="grp"><div role="option" id="ao-g">in group</div></div>
+<div role="listbox" id="lb"><div role="option" id="ao2">kept</div></div>
+<div role="listbox" id="lb2"><div><div role="option" id="ao3">deep</div></div></div>
+<div role="listbox" id="lb3"><div role="group" id="lbg"><div role="option" id="ao4">grouped</div></div></div>
+<div role="combobox" id="cb" aria-expanded="false"><div role="option" id="ao5">in combo</div></div>
+<div role="menu" id="mn"><div role="option" id="ao6">in menu</div></div>
+<div role="tree" id="tr"><div role="option" id="ao7">in tree</div></div>
+<div role="listbox" id="lb4" aria-owns="ao8"></div><div role="option" id="ao8">owned</div>
+<ul role="listbox" id="lb5"><li role="option" id="ao9">li</li></ul>
+<div role="option" id="ao10" tabindex="0">focusable</div>
+<div role="option" id="ao11" aria-selected="true">selected</div>
+<datalist id="dl"><option id="o-dl" value="dv">dl</option></datalist>
+<div><option id="o1">loose</option></div>
+<div role="listbox" id="lb6"><option id="o-in-lb">html in lb</option></div>
+<div role="menuitem" id="mi-loose">loose menuitem</div>
+<div role="tab" id="tab-loose">loose tab</div>
+<div role="row" id="row-loose">loose row</div>
+<div role="cell" id="cell-loose">loose cell</div>
+<div role="listitem" id="li-loose">loose listitem</div>
+<div role="treeitem" id="ti-loose">loose treeitem</div>
+<!-- where an option, a list item or a tree item may be -->
+<div role="listbox"><div role="list"><div role="option" id="o-lb-list">a</div></div></div>
+<div role="listbox"><div role="region" aria-label="r"><div role="option" id="o-lb-region">a</div></div></div>
+<div role="listbox"><ul><li role="option" id="o-lb-ul">a</li></ul></div>
+<div role="listbox"><p><span role="option" id="o-lb-p">a</span></p></div>
+<div role="listbox"><div role="none"><div role="option" id="o-lb-none">a</div></div></div>
+<div role="listbox"><div role="presentation"><div role="option" id="o-lb-pres">a</div></div></div>
+<div role="listbox"><section><div role="option" id="o-lb-section">a</div></section></div>
+<div role="listbox"><button><span role="option" id="o-lb-button">a</span></button></div>
+<div role="listbox"><div role="group"><div role="group"><div role="option" id="o-lb-gg">a</div></div></div></div>
+<div role="group"><div><div role="option" id="o-g-deep">a</div></div></div>
+<select id="sel-x"><option id="o-sel">s</option></select>
+<div role="listbox"><div role="listbox"><div role="option" id="o-lb-lb">a</div></div></div>
+<fieldset><div role="option" id="o-fieldset">a</div></fieldset>
+<details open><summary>s</summary><div role="option" id="o-details">a</div></details>
+<div role="radiogroup"><div role="option" id="o-radiogroup">a</div></div>
+<div role="grid"><div role="option" id="o-grid">a</div></div>
+<div role="option" id="o-in-o"><div role="option" id="o-in-o2">b</div></div>
+<div><li id="li-html-loose">html li loose</li></div>
+<ul><li id="li-ul">in ul</li></ul>
+<ul><div><li id="li-ul-div">in ul div</li></div></ul>
+<div role="list"><div role="listitem" id="li-rl">in role list</div></div>
+<ul><div role="listitem" id="li-ul-aria">aria in ul</div></ul>
+<menu><li id="li-menu">in menu</li></menu>
+<div role="directory"><div role="listitem" id="li-dir">in directory</div></div>
+<div role="group"><div role="listitem" id="li-group">in group</div></div>
+<div role="list"><div role="group"><div role="listitem" id="li-list-group">in list group</div></div></div>
+<div role="list"><div><div role="listitem" id="li-list-deep">deep</div></div></div>
+<div role="list"><p><span role="listitem" id="li-list-p">in p</span></p></div>
+<div role="list" aria-owns="li-owned"></div><div role="listitem" id="li-owned">owned</div>
+<div role="listbox"><div role="listitem" id="li-listbox">in listbox</div></div>
+<ul role="none"><li id="li-ul-none">ul none</li></ul>
+<div role="tree"><div role="treeitem" id="ti-tree">in tree</div></div>
+<div role="group"><div role="treeitem" id="ti-group">in group</div></div>
+<div role="tree"><div role="group"><div role="treeitem" id="ti-tree-group">in tree group</div></div></div>
+<div role="tree"><div><div role="treeitem" id="ti-tree-deep">deep</div></div></div>
+<div role="treegrid"><div role="treeitem" id="ti-treegrid">in treegrid</div></div>
+<div role="tree"><div role="list"><div role="treeitem" id="ti-tree-list">in tree list</div></div></div>
+<div role="menuitemcheckbox" id="mic-loose">mic</div>
+<div role="menuitemradio" id="mir-loose">mir</div>
+<div role="gridcell" id="gc-loose">gc</div>
+<div role="rowheader" id="rh-loose">rh</div>
+<div role="columnheader" id="ch-loose">ch</div>
+<div role="rowgroup" id="rg-loose">rg</div>
+<div role="radio" id="radio-loose" aria-checked="false">r</div>
+<div role="tabpanel" id="tp-loose">tp</div>
+<div role="term" id="term-loose">t</div>
+<div role="definition" id="def-loose">d</div>
+<div role="caption" id="cap-loose">c</div>
+<div role="tablist"><div><div role="tab" id="tab-deep">t</div></div></div>
+<!-- more of the same -->
+<fieldset><div role="listitem" id="li-fieldset">a</div></fieldset>
+<details open><summary>s</summary><div role="listitem" id="li-details">a</div></details>
+<fieldset><div role="treeitem" id="ti-fieldset">a</div></fieldset>
+<fieldset role="group"><div role="option" id="o-fieldset-group">a</div></fieldset>
+<ul role="group"><li role="option" id="o-ul-group">a</li></ul>
+<div role="listbox"><div role="group"><li role="option" id="o-lb-g-li">a</li></div></div>
+<optgroup><div role="option" id="o-optgroup">a</div></optgroup>
+<div role="listbox"><table><tr><td><div role="option" id="o-lb-td">a</div></td></tr></table></div>
+<div role="listbox"><div role="generic"><div role="option" id="o-lb-generic">a</div></div></div>
+<div role="listbox"><span><div role="option" id="o-lb-span">a</div></span></div>
+<div role="listbox"><label><div role="option" id="o-lb-label">a</div></label></div>
+<div role="listbox"><div aria-label="named div"><div role="option" id="o-lb-named">a</div></div></div>
+<div role="listbox"><div tabindex="0"><div role="option" id="o-lb-focus">a</div></div></div>
+<div role="listbox"><div aria-live="polite"><div role="option" id="o-lb-live">a</div></div></div>
+<div role="listbox"><div hidden><div role="option" id="o-lb-hidden">a</div></div><div style="display:contents"><div role="option" id="o-lb-contents">a</div></div></div>
+<div role="listbox"><a href="#"><span role="option" id="o-lb-a">a</span></a></div>
+<div role="listbox"><a><span role="option" id="o-lb-a-nohref">a</span></a></div>
+<div role="listbox"><b><span role="option" id="o-lb-b">a</span></b></div>
+<div role="listbox"><div role="combobox"><div role="option" id="o-lb-cb">a</div></div></div>
+<div role="list"><div role="listbox"><div role="listitem" id="li-list-lb">a</div></div></div>
+<ol><li><div role="listitem" id="li-li">in li</div></li></ol>
+<div role="list"><div role="listitem"><div role="listitem" id="li-li2">in listitem</div></div></div>
+<div role="tree"><div role="treeitem"><div role="treeitem" id="ti-ti">in treeitem</div></div></div>
+<div role="tree"><div role="treeitem"><div role="group"><div role="treeitem" id="ti-ti-g">in treeitem group</div></div></div></div>
+<div role="tree"><div role="option" id="o-tree">option in tree</div></div>
+<div role="combobox" aria-expanded="true" aria-controls="pop"></div><div role="listbox" id="pop"><div role="option" id="o-pop">popup</div></div>
+<div role="option" id="o-owned-by-group"></div><div role="group" aria-owns="o-owned-by-group"></div>
+<div role="feed"><div role="article" id="art-feed">a</div></div>
+<div role="article" id="art-loose">a</div>
+<div role="menubar"><div role="menuitem" id="mi-menubar">m</div></div>
+<div role="tablist"><div role="option" id="o-tablist">a</div></div>
+<!-- role directory, a combobox's value, tree item levels, text-transform in names -->
+<div role="directory" id="dir"><div role="listitem" id="dir-li">x</div></div>
+<div role="combobox" id="cb1"><div role="option" id="cb1-o">in combo</div></div>
+<div role="combobox" id="cb2">plain text</div>
+<div role="combobox" id="cb3" tabindex="0">focusable text</div>
+<div role="combobox" id="cb4"><span>span text</span></div>
+<div role="combobox" id="cb5"><input id="cb5-i" value="typed"></div>
+<div role="group"><div role="group"><div role="treeitem" id="ti-gg">gg</div></div></div>
+<button id="tt"><span style="text-transform:uppercase">abc</span> def</button>
+<button id="tt2"><span style="text-transform:capitalize">abc def</span></button>
+<button id="tt3"><span style="text-transform:full-width">ab</span></button>
+<button id="ma1"><span style="text-transform:math-auto">x</span></button>
+<button id="ma2"><span style="text-transform:math-auto"> h </span>+<span style="text-transform:math-auto">&#x3B1;</span></button>
+<button id="ma3"><span style="text-transform:math-auto">xy</span></button>
+<button id="ma4" style="text-transform:math-auto">a <b>b</b></button>
+<button id="tt4"><span style="text-transform:lowercase">ABC &Eacute;</span> <span style="text-transform:uppercase">&eacute;t&eacute;</span></button>
+<button id="tt5"><span style="text-transform:capitalize">hello (world) o'neil x-y</span></button>
+</body></html>

@@ -29,9 +29,13 @@ a11y_contract(enum(role, [document, generic, presentation, link, button, checkbo
     alertdialog, application, caption, deletion, directory, emphasis, feed, grid, gridcell, insertion, log, marquee, math,
     menubar, menuitemcheckbox, menuitemradio, meter, note, radiogroup, rowgroup, scrollbar, searchbox, spinbutton, strong,
     subscript, superscript, switch, time, timer, toolbar, tooltip, tree, treegrid, treeitem, unknown,
-    layout_table, layout_table_row, layout_table_cell])).
-%% (the last three Chromium's own, after unknown so that no role attribute names them: a table it takes for layout,
-%% its rows and its cells)
+    layout_table, layout_table_row, layout_table_cell,
+    mathml_row, mathml_identifier, mathml_operator, mathml_number, mathml_fraction, mathml_square_root, mathml_root,
+    mathml_sub, mathml_sup, mathml_sub_sup, mathml_under, mathml_over, mathml_under_over, mathml_multiscripts,
+    mathml_none_script, mathml_prescript_delimiter, mathml_text, mathml_string_literal, mathml_table, mathml_table_row,
+    mathml_table_cell])).
+%% (those after unknown Chromium's own, so that no role attribute names them: a table it takes for layout, its rows and
+%% its cells; MathML's elements within a math element, which is math)
 %% where an accessible name came from
 a11y_contract(enum(name_from, [nothing, aria_labelledby, aria_label, alt, label, caption, legend, content, title, placeholder, value,
     label_attribute, summary])).

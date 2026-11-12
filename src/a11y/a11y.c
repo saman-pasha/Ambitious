@@ -129,16 +129,16 @@ int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
 
 /* the element names, in strcmp order (a name's kind is its index, found by halving) */
 enum { E_NONE, E_A, E_AREA, E_ARTICLE, E_ASIDE, E_AUDIO, E_BASE, E_BLOCKQUOTE, E_BODY, E_BR, E_BUTTON, E_CAPTION, E_CODE,
-       E_COL, E_COLGROUP, E_DATALIST, E_DD, E_DETAILS, E_DIALOG, E_DT, E_FIELDSET, E_FIGCAPTION, E_FIGURE, E_FOOTER, E_FORM, E_H1, E_H2, E_H3,
+       E_COL, E_COLGROUP, E_DATALIST, E_DD, E_DETAILS, E_DIALOG, E_DIV, E_DT, E_FIELDSET, E_FIGCAPTION, E_FIGURE, E_FOOTER, E_FORM, E_H1, E_H2, E_H3,
        E_H4, E_H5, E_H6, E_HEAD, E_HEADER, E_HR, E_IFRAME, E_IMG, E_INPUT, E_LABEL, E_LEGEND, E_LI, E_LINK, E_MAIN, E_MENU,
        E_META, E_METER, E_NAV, E_NOSCRIPT, E_OL, E_OPTGROUP, E_OPTION, E_OUTPUT, E_P, E_PARAM, E_PROGRESS, E_SCRIPT, E_SEARCH,
-       E_SECTION, E_SELECT, E_SOURCE, E_STYLE, E_SUMMARY, E_TABLE, E_TBODY, E_TD, E_TEMPLATE, E_TEXTAREA, E_TFOOT, E_TH,
+       E_SECTION, E_SELECT, E_SLOT, E_SOURCE, E_SPAN, E_STYLE, E_SUMMARY, E_TABLE, E_TBODY, E_TD, E_TEMPLATE, E_TEXTAREA, E_TFOOT, E_TH,
        E_THEAD, E_TITLE, E_TR, E_TRACK, E_UL, E_VIDEO, E_COUNT };
 static const char *const ax_elements[E_COUNT] = { "", "a", "area", "article", "aside", "audio", "base", "blockquote", "body", "br",
-    "button", "caption", "code", "col", "colgroup", "datalist", "dd", "details", "dialog", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "button", "caption", "code", "col", "colgroup", "datalist", "dd", "details", "dialog", "div", "dt", "fieldset", "figcaption", "figure", "footer", "form",
     "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "iframe", "img", "input", "label", "legend", "li", "link", "main",
     "menu", "meta", "meter", "nav", "noscript", "ol", "optgroup", "option", "output", "p", "param", "progress", "script", "search",
-    "section", "select", "source", "style", "summary", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead",
+    "section", "select", "slot", "source", "span", "style", "summary", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead",
     "title", "tr", "track", "ul", "video" };
 
 /* the attributes: HTML's, then the aria-* ones from A_FIRST, in strcmp order */
@@ -176,7 +176,7 @@ enum { IT_TEXT, IT_HIDDEN, IT_CHECKBOX, IT_RADIO, IT_RANGE, IT_NUMBER, IT_BUTTON
        IT_TEL, IT_URL, IT_PASSWORD, IT_DATE, IT_MONTH, IT_WEEK, IT_TIME, IT_DTL, IT_COLOR, IT_FILE };
 
 /* the display and visibility keywords this module tells apart, as the style's atoms */
-enum { W_NONE, W_INLINE, W_CONTENTS, W_HIDDEN, W_COLLAPSE, W_COUNT };
+enum { W_NONE, W_INLINE, W_CONTENTS, W_HIDDEN, W_COLLAPSE, W_UPPERCASE, W_LOWERCASE, W_CAPITALIZE, W_MATH_AUTO, W_COUNT };
 
 /* the walk of a name's text: inside an aria-labelledby or -describedby walk; all of a hidden element's subtree in it;
    at the element such a walk names, whose own content counts whatever its role */
@@ -236,6 +236,33 @@ static int ax_kind(ACTX, uint32_t x) {
     }
     return k;
 }
+/* MathML's elements whose roles Chromium names, in strcmp order, and those roles: an mrow's for those laid out as one
+   (mstyle, mpadded, merror, semantics, maction); any other MathML element is generic */
+enum { AX_MATHML_N = 28 };
+static const char *const ax_mathml_names[AX_MATHML_N] = { "", "maction", "math", "merror", "mfrac", "mi", "mmultiscripts",
+    "mn", "mo", "mover", "mpadded", "mprescripts", "mroot", "mrow", "ms", "msqrt", "mstyle", "msub", "msubsup", "msup",
+    "mtable", "mtd", "mtext", "mtr", "munder", "munderover", "none", "semantics" };
+static const a11y_role ax_mathml_roles[AX_MATHML_N] = { A11Y_ROLE_GENERIC, A11Y_ROLE_MATHML_ROW, A11Y_ROLE_MATH,
+    A11Y_ROLE_MATHML_ROW, A11Y_ROLE_MATHML_FRACTION, A11Y_ROLE_MATHML_IDENTIFIER, A11Y_ROLE_MATHML_MULTISCRIPTS,
+    A11Y_ROLE_MATHML_NUMBER, A11Y_ROLE_MATHML_OPERATOR, A11Y_ROLE_MATHML_OVER, A11Y_ROLE_MATHML_ROW,
+    A11Y_ROLE_MATHML_PRESCRIPT_DELIMITER, A11Y_ROLE_MATHML_ROOT, A11Y_ROLE_MATHML_ROW, A11Y_ROLE_MATHML_STRING_LITERAL,
+    A11Y_ROLE_MATHML_SQUARE_ROOT, A11Y_ROLE_MATHML_ROW, A11Y_ROLE_MATHML_SUB, A11Y_ROLE_MATHML_SUB_SUP,
+    A11Y_ROLE_MATHML_SUP, A11Y_ROLE_MATHML_TABLE, A11Y_ROLE_MATHML_TABLE_CELL, A11Y_ROLE_MATHML_TEXT,
+    A11Y_ROLE_MATHML_TABLE_ROW, A11Y_ROLE_MATHML_UNDER, A11Y_ROLE_MATHML_UNDER_OVER, A11Y_ROLE_MATHML_NONE_SCRIPT,
+    A11Y_ROLE_MATHML_ROW };
+/* x is a MathML element */
+static int ax_mathml(const dom_document *d, uint32_t x) {
+    return d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_MATHML;
+}
+/* a MathML element's own role, as Chromium gives it */
+static a11y_role ax_mathml_role(const dom_document *d, uint32_t x) {
+    uint32_t nm = d->node[x].name;
+    int i = ax_find_name(ax_mathml_names, 1, AX_MATHML_N, names_ptr(d, nm), names_len(d, nm));
+    return ax_mathml_roles[i];
+}
+/* a role Chromium gives MathML alone (math aside, which a role attribute may give an element of any kind) */
+static int ax_mathml_only(a11y_role r) { return r >= A11Y_ROLE_MATHML_ROW && r <= A11Y_ROLE_MATHML_TABLE_CELL; }
+
 /* x's attribute of the kind k, or 0 */
 static uint32_t ax_get(ACTX, uint32_t x, int k) {
     uint32_t a = d->node[x].first_attr;
@@ -476,16 +503,15 @@ static int ax_same_text(const vector<char> *x, const vector<char> *y) {
 static int ax_role_word(const char *p, size_t n) {
     if (ax_word_is(p, n, "none")) return A11Y_ROLE_PRESENTATION;
     if (ax_word_is(p, n, "image")) return A11Y_ROLE_IMG;
+    if (ax_word_is(p, n, "directory")) return A11Y_ROLE_LIST;   /* deprecated in WAI-ARIA 1.2: Chromium's list */
     for (int k = 0; k < (int)A11Y_ROLE_UNKNOWN; k++)
         if (ax_word_is(p, n, a11y_role_name((a11y_role)k))) return k;
     return -1;
 }
-/* a role attribute's first token that is a role: its role, 1; or 0, its first token in bad */
-static int ax_role_attr(ACTX, uint32_t x, a11y_role *role, size_t *bad_off, size_t *bad_len) {
-    *bad_len = 0;
-    if (!d->node[x].first_attr) return 0;
-    uint32_t a = ax_get(AARGS, x, K_ROLE);
-    if (!a) return 0;
+/* a role attribute's first token that is a role, whatever its context: that role, or -1 (none for no attribute) */
+static int ax_raw_role(ACTX, uint32_t x) {
+    uint32_t a = d->node[x].first_attr ? ax_get(AARGS, x, K_ROLE) : 0;
+    if (!a) return -1;
     amb_span v = d->attr[a].value;
     const char *p = text_ptr(d, v);
     size_t i = 0;
@@ -495,7 +521,70 @@ static int ax_role_attr(ACTX, uint32_t x, a11y_role *role, size_t *bad_off, size
         while (i < v.len && !ax_white(p[i])) i++;
         if (i == b) break;
         int r = ax_role_word(p + b, i - b);
-        if (r >= 0) { *role = (a11y_role)r; return 1; }
+        if (r >= 0) return r;
+    }
+    return -1;
+}
+static a11y_role ax_role_of(ACTX, uint32_t x, int k);
+/* an element a list item, option or tree item looks through for its context: a div, span or slot of no role attribute,
+   or an element of a custom element's name (Blink's IsGenericWrapper) */
+static int ax_wrapper(ACTX, uint32_t x, int k) {
+    uint32_t ra = d->node[x].first_attr ? ax_get(AARGS, x, K_ROLE) : 0;
+    if (ra && d->attr[ra].value.len) return 0;
+    if (k == E_DIV || k == E_SPAN || k == E_SLOT) return 1;
+    if (d->node[x].ns != DOM_NAMESPACE_HTML) return 0;
+    uint32_t nm = d->node[x].name;
+    const char *p = names_ptr(d, nm);
+    size_t n = names_len(d, nm);
+    if (!n || p[0] < 'a' || p[0] > 'z') return 0;
+    for (size_t i = 0; i < n; i++) if (p[i] == '-') return 1;
+    return 0;
+}
+/* an element of role r -- listitem, option or treeitem -- outside the context WAI-ARIA asks of it, as Chromium judges it
+   (Blink's IsOrphanedListItem, IsOrphanedOption and IsOrphanedTreeItem): not owned by aria-owns by what may hold it (a
+   list, listbox or tree, or a group), and the nearest of its ancestors that is not looked through (a wrapper, an element
+   whose role attribute says none, a tree item's tree item) not one that may: a ul, ol or menu for a list item, a select
+   for an option, or one whose role attribute's role is that list, listbox, tree or group */
+static int ax_orphaned(ACTX, uint32_t x, a11y_role r) {
+    a11y_role holder = r == A11Y_ROLE_LISTITEM ? A11Y_ROLE_LIST : r == A11Y_ROLE_OPTION ? A11Y_ROLE_LISTBOX : A11Y_ROLE_TREE;
+    uint32_t o = x < len(*owner) ? at(*owner, x) & ~AX_MET : 0;
+    if (o) {
+        a11y_role orole = ax_role_of(AARGS, o, ax_kind(AARGS, o));
+        if (orole == holder || orole == A11Y_ROLE_GROUP) return 0;
+    }
+    for (uint32_t p = d->node[x].parent; p > 1; p = d->node[p].parent) {
+        if (d->node[p].kind != DOM_NODE_KIND_ELEMENT) continue;
+        int k = ax_kind(AARGS, p);
+        if (r == A11Y_ROLE_LISTITEM && (k == E_UL || k == E_OL || k == E_MENU)) return 0;
+        if (r == A11Y_ROLE_OPTION && k == E_SELECT) return 0;
+        int pr = ax_raw_role(AARGS, p);
+        if (pr == (int)holder || pr == A11Y_ROLE_GROUP) return 0;
+        if (pr == A11Y_ROLE_PRESENTATION || (r == A11Y_ROLE_TREEITEM && pr == A11Y_ROLE_TREEITEM) || ax_wrapper(AARGS, p, k)) continue;
+        break;
+    }
+    return 1;
+}
+/* a role attribute's first token that is a role in its context (a list item, an option or a tree item must be where
+   one may be, or the next token is read): its role, 1; or 0, its first token that is no role in bad */
+static int ax_role_attr(ACTX, uint32_t x, a11y_role *role, size_t *bad_off, size_t *bad_len) {
+    *bad_len = 0;
+    if (!d->node[x].first_attr) return 0;
+    uint32_t a = ax_get(AARGS, x, K_ROLE);
+    if (!a) return 0;
+    amb_span v = d->attr[a].value;
+    size_t i = 0;
+    while (i < v.len) {
+        const char *p = text_ptr(d, d->attr[a].value);
+        while (i < v.len && ax_white(p[i])) i++;
+        size_t b = i;
+        while (i < v.len && !ax_white(p[i])) i++;
+        if (i == b) break;
+        int r = ax_role_word(p + b, i - b);
+        if (r >= 0) {
+            if ((r == A11Y_ROLE_LISTITEM || r == A11Y_ROLE_OPTION || r == A11Y_ROLE_TREEITEM) && ax_orphaned(AARGS, x, (a11y_role)r)) continue;
+            *role = (a11y_role)r;
+            return 1;
+        }
         if (!*bad_len) { *bad_off = b; *bad_len = i - b; }
     }
     return 0;
@@ -693,7 +782,7 @@ static a11y_role ax_implicit(ACTX, uint32_t x, int k) {
     case E_METER: return A11Y_ROLE_METER;
     case E_OUTPUT: return A11Y_ROLE_STATUS;
     case E_SUMMARY: return ax_summary_button(AARGS, x) ? A11Y_ROLE_BUTTON : A11Y_ROLE_GENERIC;
-    default: return A11Y_ROLE_GENERIC;
+    default: return ax_mathml(d, x) ? ax_mathml_role(d, x) : A11Y_ROLE_GENERIC;
     }
 }
 /* an element whose role attribute's role is presentation (none), whatever conflict resolution keeps */
@@ -1261,6 +1350,9 @@ static int ax_part(ACTX, uint32_t y, int k, int flags, uint32_t self, vector<cha
         return 1;
     }
     if (!(flags & T_TARGET) && ax_nested_silent(r) && !((k == E_TABLE || k == E_TR) && !ax_get(AARGS, y, K_ROLE))) return 1;
+    /* MathML gives an element it is in no text, outside a walk aria-labelledby starts (Chromium names none of its roles
+       from content) */
+    if (!(flags & T_REF) && ax_mathml(d, y) && (r == A11Y_ROLE_MATH || ax_mathml_only(r))) return 1;
     return 0;
 }
 
@@ -1359,14 +1451,182 @@ static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) 
    so is what an element gives whole -- an alt, a label, a control's value --, as Chromium sets it off. What is hidden
    or drawn as nothing (visibility hidden or collapse) is left out unless the walk counts all of a hidden subtree; the
    element being named (self) adds nothing to its own label. The walk is a loop: a subtree of any depth is read */
+/* the element whose inline content x's text is in: x's nearest ancestor (itself too) set off as a block, the
+   document's root for none (Blink's IsInSameNonInlineBlockFlow) */
+static uint32_t ax_flow_of(ACTX, uint32_t x) {
+    for (uint32_t p = x; p > 1; p = d->node[p].parent)
+        if (d->node[p].kind == DOM_NODE_KIND_ELEMENT && ax_block(AARGS, p)) return p;
+    return 1;
+}
+static void ax_content_child(ACTX, uint32_t x, int flags, uint32_t self, vector<char> *out);
+/* the elements x owns by aria-owns, in its list's order, read after its children as children of its own: a space
+   before each whose text is in another block's inline content than what came before it, as Chromium sets them */
+static void ax_owned_content(ACTX, uint32_t x, int flags, uint32_t self, vector<char> *out) {
+    uint32_t oa = d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].first_attr ? ax_get(AARGS, x, A_OWNS) : 0;
+    if (!oa) return;
+    uint32_t prev = x;
+    size_t i = 0;
+    while (i < d->attr[oa].value.len) {
+        amb_span v = d->attr[oa].value;
+        const char *p = text_ptr(d, v);
+        while (i < v.len && ax_white(p[i])) i++;
+        size_t b = i;
+        while (i < v.len && !ax_white(p[i])) i++;
+        if (i == b) break;
+        uint32_t y = ax_by_id(AARGS, p + b, i - b);
+        if (!y || y >= len(*owner) || (at(*owner, y) & ~AX_MET) != x || y == self) continue;
+        if (ax_flow_of(AARGS, prev) != ax_flow_of(AARGS, y)) ax_space(out);
+        ax_content_child(AARGS, y, flags, self, out);
+        prev = y;
+    }
+}
+/* an element read as a child in a name from content: left out (a script, hidden), a space (br), an embedded control's
+   part, or its content (its pseudo-elements, children and what it owns), a block's set off by spaces */
+static void ax_content_child(ACTX, uint32_t x, int flags, uint32_t self, vector<char> *out) {
+    if (x == self) return;
+    int k = ax_kind(AARGS, x);
+    if (k == E_SCRIPT || k == E_STYLE || k == E_TEMPLATE) return;
+    if (!(flags & T_ALL) && (ax_hidden_how(AARGS, x) >= 0 || ax_invisible(AARGS, x))) return;
+    if (k == E_BR) { ax_space(out); return; }
+    int block = ax_block(AARGS, x);
+    if (block) ax_space(out);
+    size_t m0 = len(*out);
+    ax_space(out);
+    size_t m1 = len(*out);
+    if (ax_part(AARGS, x, k, flags & ~T_TARGET, self, out)) {
+        if (ax_says(out, m1)) ax_space(out);
+        else resize(out, m0);
+    } else {
+        resize(out, m0);
+        ax_content(AARGS, x, flags, self, out);
+    }
+    if (block) ax_space(out);
+}
+
+/* the class of the code point at s[i] in a word, as text-transform's capitalize splits words (layout's lay_word_class):
+   1 a letter, 2 a digit, 3 _, 4 ' or a right single quote, 5 the middle dot, 6 . , or ;, 0 anything else (a
+   continuation byte its code point's); its length into bl */
+static int ax_word_class(const char *s, size_t n, size_t i, size_t *bl) {
+    unsigned char c = (unsigned char)s[i];
+    *bl = 1;
+    if (c < 0x80) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return 1;
+        if (c >= '0' && c <= '9') return 2;
+        return c == '_' ? 3 : c == '\'' ? 4 : c == '.' || c == ',' || c == ';' ? 6 : 0;
+    }
+    if ((c & 0xC0) == 0x80) {
+        /* the last byte of a code point: its lead byte's class */
+        size_t b = i;
+        while (b > 0 && ((unsigned char)s[b] & 0xC0) == 0x80) b--;
+        if (b == i || ((unsigned char)s[b] & 0xC0) == 0x80) return 0;
+        size_t lb;
+        int cl = ax_word_class(s, n, b, &lb);
+        return b + lb > i ? cl : 0;
+    }
+    size_t k = 1;
+    while (i + k < n && ((unsigned char)s[i + k] & 0xC0) == 0x80) k++;
+    *bl = k;
+    unsigned char e = k > 1 ? (unsigned char)s[i + 1] : 0, e2 = k > 2 ? (unsigned char)s[i + 2] : 0;
+    if (c == 0xC2) return e == 0xB7 ? 5 : e == 0xAA || e == 0xB5 || e == 0xBA ? 1 : 0;
+    if (c == 0xC3) return e == 0x97 || e == 0xB7 ? 0 : 1;
+    if (c == 0xE2 && e == 0x80) return e2 == 0x98 || e2 == 0x99 ? 4 : 0;
+    if (c == 0xE2 && e == 0x81 && e2 <= 0xAF) return 0;
+    if (c == 0xF0 && e == 0x9F) return 0;
+    return 1;
+}
+/* math-auto's italic of a code point (MathML Core's italic mapping), or the code point itself */
+static uint32_t ax_math_italic(uint32_t c) {
+    if (c >= 'A' && c <= 'Z') return 0x1D434 + (c - 'A');
+    if (c == 'h') return 0x210E;
+    if (c >= 'a' && c <= 'z') return 0x1D44E + (c - 'a');
+    if (c >= 0x391 && c <= 0x3A1) return 0x1D6E2 + (c - 0x391);
+    if (c >= 0x3A3 && c <= 0x3A9) return 0x1D6F4 + (c - 0x3A3);
+    if (c >= 0x3B1 && c <= 0x3C9) return 0x1D6FC + (c - 0x3B1);
+    switch (c) {
+    case 0x131: return 0x1D6A4;
+    case 0x237: return 0x1D6A5;
+    case 0x3F4: return 0x1D6F3;
+    case 0x2207: return 0x1D6FB;
+    case 0x2202: return 0x1D715;
+    case 0x3F5: return 0x1D716;
+    case 0x3D1: return 0x1D717;
+    case 0x3F0: return 0x1D718;
+    case 0x3D5: return 0x1D719;
+    case 0x3F1: return 0x1D71A;
+    case 0x3D6: return 0x1D71B;
+    default: return c;
+    }
+}
+/* a text node's text into out, as it is drawn: its element's text-transform applied as layout applies it, to ASCII's
+   and Latin-1's letters (capitalize: a word's first, a word starting after white space, or after what out ends with);
+   math-auto's italic to a text of one character, as Chromium has it */
+static void ax_text_node(ACTX, uint32_t x, vector<char> *out) {
+    uint32_t p = d->node[x].parent;
+    uint32_t c = p ? ax_cval(AARGS, p, CSS_PROP_TEXT_TRANSFORM) : 0;
+    uint32_t w = c ? st->cval[c].word : 0;
+    int tt = !w ? 0 : w == cw[W_UPPERCASE] ? 1 : w == cw[W_LOWERCASE] ? 2 : w == cw[W_CAPITALIZE] ? 3 : w == cw[W_MATH_AUTO] ? 4 : 0;
+    if (!tt) { ax_put(out, text_ptr(d, d->node[x].data), d->node[x].data.len); return; }
+    vector<char> tx;
+    append_range(tx, text_ptr(d, d->node[x].data), d->node[x].data.len);
+    if (tt == 4) {
+        size_t b = 0, e = len(tx);
+        unsigned char c0 = b < e ? (unsigned char)at(tx, b) : 0;
+        size_t n = c0 < 0x80 ? 1 : c0 >= 0xF0 ? 4 : c0 >= 0xE0 ? 3 : 2;
+        if (b < e && e - b == n) {
+            uint32_t cp = n == 1 ? c0 : n == 2 ? (c0 & 0x1Fu) << 6 | ((unsigned char)at(tx, b + 1) & 0x3Fu)
+                        : n == 3 ? (c0 & 0x0Fu) << 12 | ((unsigned char)at(tx, b + 1) & 0x3Fu) << 6 | ((unsigned char)at(tx, b + 2) & 0x3Fu)
+                                 : (c0 & 0x07u) << 18 | ((unsigned char)at(tx, b + 1) & 0x3Fu) << 12 | ((unsigned char)at(tx, b + 2) & 0x3Fu) << 6 |
+                                       ((unsigned char)at(tx, b + 3) & 0x3Fu);
+            vector<char> it;
+            append_range(it, data(tx), b);
+            ax_utf8(&it, ax_math_italic(cp));
+            append_range(it, data(tx) + e, len(tx) - e);
+            ax_put(out, data(it), len(it));
+        } else ax_put(out, data(tx), len(tx));
+        return;
+    }
+    /* a word runs on from what out ends with */
+    size_t ob;
+    int in = len(*out) && back(*out) != ' ' ? ax_word_class(data(*out), len(*out), len(*out) - 1, &ob) : 0;
+    int last = in >= 1 && in <= 3 ? in : 0;
+    in = last != 0;
+    size_t i = 0;
+    while (i < len(tx)) {
+        size_t bl;
+        int cl = ax_word_class(data(tx), len(tx), i, &bl);
+        int up = tt == 1;
+        if (cl >= 1 && cl <= 3) {
+            if (tt == 3 && !in) up = 1;
+            in = 1;
+            last = cl;
+        } else if (in && cl >= 4) {
+            size_t nb;
+            int nc = i + bl < len(tx) ? ax_word_class(data(tx), len(tx), i + bl, &nb) : 0;
+            if (!((cl != 6 && last == 1 && nc == 1) || (cl != 5 && last == 2 && nc == 2))) in = 0;
+        } else in = 0;
+        unsigned char ch = (unsigned char)at(tx, i);
+        if (ch < 0x80) {
+            if (up && ch >= 'a' && ch <= 'z') tx[i] = (char)(ch - 32);
+            else if (tt == 2 && ch >= 'A' && ch <= 'Z') tx[i] = (char)(ch + 32);
+        } else if (ch == 0xC3 && bl == 2) {
+            unsigned char e = (unsigned char)at(tx, i + 1);
+            if (up && e >= 0xA0 && e <= 0xBE && e != 0xB7) tx[i + 1] = (char)(e - 0x20);
+            else if (tt == 2 && e >= 0x80 && e <= 0x9E && e != 0x97) tx[i + 1] = (char)(e + 0x20);
+        }
+        i += bl;
+    }
+    ax_put(out, data(tx), len(tx));
+}
+
 static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<char> *out) {
     ax_gen_text(AARGS, root, CSS_PSEUDO_BEFORE, flags, out);
     uint32_t x = d->node[root].first_child;
     while (x) {
         int down = 0;
         int nk = d->node[x].kind;
-        if (nk == DOM_NODE_KIND_TEXT) ax_put(out, text_ptr(d, d->node[x].data), d->node[x].data.len);
-        else if (nk == DOM_NODE_KIND_ELEMENT && x != self) {
+        if (nk == DOM_NODE_KIND_TEXT) ax_text_node(AARGS, x, out);
+        /* an element another owns by aria-owns is read under its owner, not here */
+        else if (nk == DOM_NODE_KIND_ELEMENT && x != self && !(x < len(*owner) && at(*owner, x))) {
             int k = ax_kind(AARGS, x);
             if (k == E_SCRIPT || k == E_STYLE || k == E_TEMPLATE) {}
             else if (!(flags & T_ALL) && (ax_hidden_how(AARGS, x) >= 0 || ax_invisible(AARGS, x))) {}
@@ -1386,6 +1646,7 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
                     ax_gen_text(AARGS, x, CSS_PSEUDO_BEFORE, flags, out);
                     if (d->node[x].first_child) down = 1;
                     else {
+                        ax_owned_content(AARGS, x, flags, self, out);
                         ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
                         if (block) ax_space(out);
                     }
@@ -1396,6 +1657,7 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
         while (x != root && !d->node[x].next_sibling) {
             x = d->node[x].parent;
             if (x != root) {
+                ax_owned_content(AARGS, x, flags, self, out);
                 ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
                 if (ax_block(AARGS, x)) ax_space(out);
             }
@@ -1403,6 +1665,7 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
         if (x == root) break;
         x = d->node[x].next_sibling;
     }
+    ax_owned_content(AARGS, root, flags, self, out);
     ax_gen_text(AARGS, root, CSS_PSEUDO_AFTER, flags, out);
 }
 
@@ -1892,7 +2155,10 @@ static void ax_values(ACTX, const uint32_t *sl, vector<char> *scratch, uint32_t 
             if (d->node[c].kind == DOM_NODE_KIND_TEXT) append_range(scratch, text_ptr(d, d->node[c].data), d->node[c].data.len);
     } else if (k == E_SELECT && role == A11Y_ROLE_COMBOBOX) {
         if (pick) ax_option_text(AARGS, pick, scratch);
-    } else if (k != E_INPUT && k != E_SELECT && (role == A11Y_ROLE_TEXTBOX || role == A11Y_ROLE_SEARCHBOX || role == A11Y_ROLE_COMBOBOX))
+    } else if (k != E_INPUT && k != E_SELECT &&
+               (role == A11Y_ROLE_TEXTBOX || role == A11Y_ROLE_SEARCHBOX || (role == A11Y_ROLE_COMBOBOX && (focusable || k == E_BUTTON))))
+        /* a combobox's content is its value when it takes focus, a menu button's as Chromium has it; one that holds a
+           field and a list has none */
         ax_content(AARGS, x, 0, 0, scratch);
     if (len(*scratch)) ax_text(t, a, A11Y_TEXT_PROP_VALUE, scratch, A11Y_DESC_FROM_NOTHING, k == E_INPUT || k == E_TEXTAREA);
     /* its placeholder */
@@ -2005,7 +2271,6 @@ typedef struct ax_frame {
     uint32_t ad;              /* the element with aria-disabled="true" whose focusable descendants are disabled */
     uint32_t live;            /* the live region (a node) its children are inside */
     uint32_t lists, items;    /* the lists its children are inside, and the groups of a tree (a tree item's level) */
-    uint32_t in_tree;         /* its children are inside a tree */
     uint32_t form;            /* the form its children are inside */
     uint32_t oa, op;          /* its aria-owns attribute, and the place in it of the next id whose element it owns */
 } ax_frame;
@@ -2123,7 +2388,9 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     uint32_t up = f->parent;
     if (up && t->anode[up].role == A11Y_ROLE_ROWGROUP) up = t->anode[up].parent;
     int in_grid = up && (t->anode[up].role == A11Y_ROLE_GRID || t->anode[up].role == A11Y_ROLE_TREEGRID);
-    a11y_name_from nf = ax_name_of(AARGS, sl, c, k, role, ax_from_content(role) || (role == A11Y_ROLE_ROW && in_grid), name);
+    /* a role attribute's math is named from its content too, as Chromium names it; MathML's math is not */
+    int content = ax_from_content(role) || (role == A11Y_ROLE_ROW && in_grid) || (role == A11Y_ROLE_MATH && !ax_mathml(d, c));
+    a11y_name_from nf = ax_name_of(AARGS, sl, c, k, role, content, name);
     amb_span nsp = ax_name(t, name);
     t->anode[a].name = nsp;
     t->anode[a].name_from = nf;
@@ -2167,9 +2434,9 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     g->parent = a;
     if (live) g->live = a;
     if (role == A11Y_ROLE_LIST) g->lists = f->lists + 1;
-    /* a tree item's level counts the groups it is in, inside its tree (as Chromium counts it) */
-    if (role == A11Y_ROLE_TREE) { g->items = 0; g->in_tree = 1; }
-    if (role == A11Y_ROLE_GROUP && f->in_tree) g->items = f->items + 1;
+    /* a tree item's level counts the groups it is in, up to its tree, or all of them outside one (as Chromium counts) */
+    if (role == A11Y_ROLE_TREE) g->items = 0;
+    if (role == A11Y_ROLE_GROUP) g->items = f->items + 1;
     return 1;
 }
 
@@ -2373,6 +2640,10 @@ a11y_status a11y_build(a11y_tree *t, dom_document *d, css_style *st) {
     cw[W_CONTENTS] = names_find(st, "contents", 8);
     cw[W_HIDDEN] = names_find(st, "hidden", 6);
     cw[W_COLLAPSE] = names_find(st, "collapse", 8);
+    cw[W_UPPERCASE] = names_find(st, "uppercase", 9);
+    cw[W_LOWERCASE] = names_find(st, "lowercase", 9);
+    cw[W_CAPITALIZE] = names_find(st, "capitalize", 10);
+    cw[W_MATH_AUTO] = names_find(st, "math-auto", 9);
     vector<uint32_t> ids, labels;
     vector<uint8_t> sel;
     vector<ax_radio> radios;

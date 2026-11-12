@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>names from content with aria-owns, math and options</title></head>
+<body>
+<button id="b1" aria-owns="x1">Save</button>
+<span id="x1">now</span>
+<button id="b2" aria-owns="x2 x3">Send</button>
+<div><span id="x3">later</span> <span id="x2">mail</span></div>
+<div id="g1" role="group" aria-labelledby="h1"><span id="h1" aria-owns="x4">Head</span></div>
+<p><span id="x4">line</span></p>
+<a id="l1" href="#" aria-owns="x5"><span>Go</span></a>
+<span id="x5">home</span>
+<button id="b3"><span aria-owns="x6">in</span></button>
+<span id="x6">side</span>
+<button id="b4">Keep <span id="x7">this</span></button>
+<div aria-owns="x7"></div>
+<math id="m1"><mi>x</mi><mo>+</mo><mn>1</mn></math>
+<div><option id="o1">loose</option></div>
+<select id="s1"><option id="o2">kept</option></select>
+</body></html>

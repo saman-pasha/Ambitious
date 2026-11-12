@@ -1,0 +1,10 @@
+button#b1 "Save now"
+button#b2 "Send maillater"
+group#g1 "Head line"
+link#l1 "Gohome"
+button#b3 "in side"
+button#b4 "Keep"
+math#m1
+option#o1 "loose"
+combobox#s1 expanded=false haspopup=menu value="kept"
+option#o2 "kept" selected=true

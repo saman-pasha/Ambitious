@@ -1,0 +1,18 @@
+# boxes of tests/pages/texttransform.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+c1 span 8 8 78.859 17
+c2 span 8 28 101.406 17
+c3 span 8 48 145.063 17
+c4 span 8 68 129.609 17
+c5 span 8 88 102.375 17
+c6 span 8 108 111.578 17
+c7 span 8 128 176.438 17
+c8 span 8 148 170.156 17
+c9 span 8 168 216.531 17
+c10 span 8 188 196.031 17
+u1 span 8 208 87.391 17
+l1 span 8 228 63.063 17
+m1 span 8 248 8.922 17
+m2 span 20.922 248 16 17
+f1 span 8 268 15.109 17
+h1 span 8 288 100.406 35
+fl1 div 8 326 784 18

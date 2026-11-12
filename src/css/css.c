@@ -1011,7 +1011,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "letter-spacing", 1, G_LEN, F_NEG, "normal", "normal" },
     { "word-spacing", 1, G_LEN, F_NEG | F_PCT, "normal", "normal" },
     { "text-indent", 1, G_LEN, F_NEG | F_PCT, 0, "0px" },
-    { "text-transform", 1, G_KW, 0, "none capitalize uppercase lowercase full-width", "none" },
+    { "text-transform", 1, G_KW, 0, "none capitalize uppercase lowercase math-auto", "none" },   /* Chromium's: no full-width */
     { "direction", 1, G_KW, 0, "ltr rtl", "ltr" },
     { "unicode-bidi", 0, G_KW, 0, "normal embed isolate bidi-override isolate-override plaintext", "normal" },
     { "writing-mode", 1, G_KW, 0, "horizontal-tb vertical-rl vertical-lr sideways-rl sideways-lr", "horizontal-tb" },

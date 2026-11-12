@@ -1,0 +1,18 @@
+# tests/pages/texttransform.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+c1 8 8 87 25
+c2 8 28 110 45
+c3 8 48 154 65
+c4 8 68 138 85
+c5 8 88 111 105
+c6 8 108 120 125
+c7 8 128 185 145
+c8 8 148 179 165
+c9 8 168 225 185
+c10 8 188 205 205
+u1 8 208 96 225
+l1 8 228 72 245
+m1 8 248 17 265
+m2 20 248 37 265
+f1 8 268 24 285
+h1 8 288 109 323
+fl1 8 326 792 344
