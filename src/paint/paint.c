@@ -1913,6 +1913,130 @@ static void pt_inline_piece(const layout_tree *t, const net_loader *nt, uint32_t
     c->cy1 = save[3];
 }
 
+/* ---- Skia's anti-aliased hairline (SkScan_Antihair.cpp), for a circle marker's 1px stroke, which Skia draws as a
+   hairline (SkDrawTreatAsHairline) ---- */
+
+/* one pixel blended at coverage a (0..255), a page's y */
+static void pt_hair_blit(amb_canvas *c, int x, int y, uint32_t col, int a) {
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    int yy = (int)(y - c->oy);
+    if (a <= 0 || x < kx0 || x >= kx1 || yy < ky0 || yy >= ky1) return;
+    pt_blend(c, x, yy, col, a / 255.0);
+}
+/* a line from (x0, y0) to (x1, y1) in 26.6 fixed point (do_anti_hairline): stepped along its major axis a pixel at a
+   time, the minor axis's position in 16.16 split between the two pixels it falls between, its end pixels' coverage
+   scaled by how much of them the line spans */
+static void pt_hair_line(amb_canvas *c, int x0, int y0, int x1, int y1, uint32_t col) {
+    int horiz = abs(x1 - x0) > abs(y1 - y0);
+    if (!horiz) { int s = x0; x0 = y0; y0 = s; s = x1; x1 = y1; y1 = s; }   /* the major axis as x from here */
+    if (x0 > x1) { int s = x0; x0 = x1; x1 = s; s = y0; y0 = y1; y1 = s; }
+    int istart = x0 >> 6, istop = (x1 + 63) >> 6;
+    long fstart = (long)y0 << 10, slope = 0;
+    if (y0 != y1) {
+        slope = (long)(((int64_t)(y1 - y0) << 16) / (x1 - x0));
+        fstart += (slope * (32 - (x0 & 63)) + 32) >> 6;
+    }
+    int scale_start, scale_stop;
+    if (istop - istart == 1) { scale_start = x1 - x0; scale_stop = 0; }
+    else { scale_start = 64 - (x0 & 63); scale_stop = x1 & 63; }
+    long fy = fstart;
+    for (int i = istart; i < istop; i++) {
+        int mod = i == istart ? scale_start : (i == istop - 1 && scale_stop > 0) ? scale_stop : 64;
+        long f = fy + 32768;
+        int lower = (int)(f >> 16), a = (int)((f >> 8) & 0xFF);
+        int a0 = (255 - a) * mod >> 6, a1 = a * mod >> 6;
+        if (horiz) { pt_hair_blit(c, i, lower - 1, col, a0); pt_hair_blit(c, i, lower, col, a1); }
+        else { pt_hair_blit(c, lower - 1, i, col, a0); pt_hair_blit(c, lower, i, col, a1); }
+        fy += slope;
+    }
+}
+/* a quadratic (x[3], y[3]) cut into 2^level lines (hair_quad), at Skia's level for it: the control point's distance
+   from its chord's middle, whole px, until under a px (compute_quad_level) */
+static void pt_hair_quad(amb_canvas *c, const double *x, const double *y, uint32_t col) {
+    double dx = fabs((x[0] + x[2]) / 2 - x[1]), dy = fabs((y[0] + y[2]) / 2 - y[1]);
+    uint32_t ix = (uint32_t)ceil(dx), iy = (uint32_t)ceil(dy), d = ix > iy ? ix + (iy >> 1) : iy + (ix >> 1);
+    int bits = 0;
+    while (bits < 32 && (d >> bits)) bits++;
+    int level = (33 - (32 - bits)) >> 1;
+    if (level > 4) level = 4;
+    int n = 1 << level;
+    double ax = x[2] - 2 * x[1] + x[0], ay = y[2] - 2 * y[1] + y[0], bx = 2 * (x[1] - x[0]), by = 2 * (y[1] - y[0]);
+    double px = x[0], py = y[0];
+    for (int i = 1; i <= n; i++) {
+        double tt = (double)i / n, qx = i == n ? x[2] : (ax * tt + bx) * tt + x[0], qy = i == n ? y[2] : (ay * tt + by) * tt + y[0];
+        pt_hair_line(c, (int)(px * 64), (int)(py * 64), (int)(qx * 64), (int)(qy * 64), col);
+        px = qx;
+        py = qy;
+    }
+}
+/* a conic (x[3], y[3], weight w) as quadratics within a quarter px of it (SkConic::computeQuadPOW2, chop): halved
+   pow2 times, each half's weight sqrt((1 + w) / 2) */
+static void pt_hair_conic(amb_canvas *c, const double *x, const double *y, double w, int pow2, uint32_t col) {
+    if (pow2 < 0) {
+        double a = w - 1, k = a / (4 * (2 + a)), ex = k * (x[0] - 2 * x[1] + x[2]), ey = k * (y[0] - 2 * y[1] + y[2]);
+        double err = sqrt(ex * ex + ey * ey);
+        for (pow2 = 0; pow2 < 5 && err > 0.25; pow2++) err *= 0.25;
+    }
+    if (pow2 == 0) { pt_hair_quad(c, x, y, col); return; }
+    double sc = 1 / (1 + w), nw = sqrt(0.5 + w * 0.5), wx = w * x[1], wy = w * y[1];
+    double mx = (x[0] + 2 * wx + x[2]) * sc * 0.5, my = (y[0] + 2 * wy + y[2]) * sc * 0.5;
+    double l[3] = { x[0], (x[0] + wx) * sc, mx }, lt[3] = { y[0], (y[0] + wy) * sc, my };
+    double r[3] = { mx, (wx + x[2]) * sc, x[2] }, rt[3] = { my, (wy + y[2]) * sc, y[2] };
+    pt_hair_conic(c, l, lt, nw, pow2 - 1, col);
+    pt_hair_conic(c, r, rt, nw, pow2 - 1, col);
+}
+/* an oval's hairline as Skia draws one: SkPath::Oval's four conics from its right middle, clockwise (each a quarter,
+   its control point the bounds' corner, weight sqrt(2)/2) */
+static void pt_hair_oval(amb_canvas *c, double l, double t, double r, double b, uint32_t col) {
+    double cx = (l + r) / 2, cy = (t + b) / 2;
+    const double ox[4] = { cx, r, cx, l }, oy[4] = { t, cy, b, cy }, rx[4] = { l, r, r, l }, ry[4] = { t, t, b, b };
+    for (int i = 0; i < 4; i++) {
+        int from = (1 + i) % 4, to = (2 + i) % 4;
+        double x[3] = { ox[from], rx[to], ox[to] }, y[3] = { oy[from], ry[to], oy[to] };
+        pt_hair_conic(c, x, y, 0.70710678118654752, -1, col);
+    }
+}
+
+/* a disc's, circle's or square's marker, drawn as Chromium draws it (ListMarkerPainter::PaintSymbol): in a square of
+   (2/3 of its whole ascent + 1) / 2 px, 1px into its marker box and half its ascent's last third below the ascent's
+   top, snapped to pixels; a disc an ellipse filled, a circle one stroked 1px wide (a hairline, as Skia draws a 1px
+   stroke), a square the square filled; 1 when the fragment is one. The fragment's top is its whole ascent above the
+   baseline (layout's lay_marker) */
+static int pt_symbol(const layout_tree *t, uint32_t fr, amb_canvas *c) {
+    amb_span sp = t->frag[fr].text;
+    if (sp.len != 3) return 0;
+    const uint8_t *s = (const uint8_t *)text_ptr(t, sp);
+    int kind = s[0] == 0xE2 && s[1] == 0x80 && s[2] == 0xA2 ? 1 : s[0] == 0xE2 && s[1] == 0x97 && s[2] == 0xA6 ? 2 :
+               s[0] == 0xE2 && s[1] == 0x96 && s[2] == 0xAA ? 3 : 0;
+    if (!kind) return 0;
+    int ai = (int)floor(t->frag[fr].baseline - t->frag[fr].y + 0.5), off = ai * 2 / 3, bw = (off + 1) / 2;
+    if (bw <= 0) return 1;
+    double x0 = floor(t->frag[fr].x + 1 + 0.5), y0 = floor(t->frag[fr].baseline - ai + 0.5) + 3 * (ai - off) / 2;
+    uint32_t col = t->frag[fr].fill;
+    if (kind == 3) { pt_fill(c, x0, y0, x0 + bw, y0 + bw, col); return 1; }
+    if (kind == 2) { pt_hair_oval(c, x0, y0, x0 + bw, y0 + bw, col); return 1; }
+    /* a disc: the ellipse's coverage of each pixel, from 16 by 16 samples */
+    double cx = x0 + bw / 2.0, cy = y0 + bw / 2.0, r = bw / 2.0;
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int Y = (int)floor(cy - r); Y < (int)ceil(cy + r); Y++) {
+        int yy = (int)(Y - c->oy);
+        if (yy < ky0 || yy >= ky1) continue;
+        for (int X = (int)floor(cx - r); X < (int)ceil(cx + r); X++) {
+            if (X < kx0 || X >= kx1) continue;
+            int in = 0;
+            for (int sy = 0; sy < 16; sy++)
+                for (int sx = 0; sx < 16; sx++) {
+                    double dx = X + (sx + 0.5) / 16 - cx, dy = Y + (sy + 0.5) / 16 - cy;
+                    if (dx * dx + dy * dy <= r * r) in++;
+                }
+            if (in) pt_blend(c, X, yy, col, in / 256.0);
+        }
+    }
+    return 1;
+}
+
 static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
                      vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
                      vector<uint32_t> *icache, vector<uint8_t> *ipx) {
@@ -1925,7 +2049,7 @@ static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb
                 continue;
             }
             if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
-            if (k == LAYOUT_FRAG_KIND_MARKER && pt_disclosure(t, fr, c, acc)) continue;
+            if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) continue;
             /* a fragment outside the canvas's window: nothing of it to draw */
             if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
             amb_span sp = t->frag[fr].text;

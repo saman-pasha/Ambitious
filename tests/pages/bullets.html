@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>List markers: disc, circle and square drawn as Chromium draws them</title><style>
+/* Each marker in a cell of its own, its list item one line of transparent text (line-height 1). The regions are
+   empty boxes around where Chromium draws each marker: a square of (2/3 of the whole ascent + 1) / 2 px */
+body { margin: 0; font-family: sans-serif; }
+.cell { position: absolute; width: 130px; height: 50px; }
+ul { margin: 0; padding: 0 0 0 60px; line-height: 1; }
+.t { color: transparent; }
+.r { position: absolute; }
+</style></head><body>
+<div class="cell" style="left: 0px; top: 0px"><ul style="list-style: disc outside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 50px"><ul style="list-style: disc outside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 100px"><ul style="list-style: disc outside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 150px"><ul style="list-style: disc outside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 200px"><ul style="list-style: disc outside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 250px"><ul style="list-style: disc outside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 300px"><ul style="list-style: disc outside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 350px"><ul style="list-style: disc outside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 400px"><ul style="list-style: disc outside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 450px"><ul style="list-style: disc outside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 500px"><ul style="list-style: disc outside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 0px; top: 550px"><ul style="list-style: disc outside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 0px"><ul style="list-style: disc inside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 50px"><ul style="list-style: disc inside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 100px"><ul style="list-style: disc inside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 150px"><ul style="list-style: disc inside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 200px"><ul style="list-style: disc inside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 250px"><ul style="list-style: disc inside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 300px"><ul style="list-style: disc inside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 350px"><ul style="list-style: disc inside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 400px"><ul style="list-style: disc inside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 450px"><ul style="list-style: disc inside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 500px"><ul style="list-style: disc inside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 130px; top: 550px"><ul style="list-style: disc inside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 0px"><ul style="list-style: circle outside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 50px"><ul style="list-style: circle outside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 100px"><ul style="list-style: circle outside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 150px"><ul style="list-style: circle outside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 200px"><ul style="list-style: circle outside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 250px"><ul style="list-style: circle outside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 300px"><ul style="list-style: circle outside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 350px"><ul style="list-style: circle outside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 400px"><ul style="list-style: circle outside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 450px"><ul style="list-style: circle outside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 500px"><ul style="list-style: circle outside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 260px; top: 550px"><ul style="list-style: circle outside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 0px"><ul style="list-style: circle inside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 50px"><ul style="list-style: circle inside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 100px"><ul style="list-style: circle inside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 150px"><ul style="list-style: circle inside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 200px"><ul style="list-style: circle inside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 250px"><ul style="list-style: circle inside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 300px"><ul style="list-style: circle inside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 350px"><ul style="list-style: circle inside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 400px"><ul style="list-style: circle inside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 450px"><ul style="list-style: circle inside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 500px"><ul style="list-style: circle inside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 390px; top: 550px"><ul style="list-style: circle inside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 0px"><ul style="list-style: square outside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 50px"><ul style="list-style: square outside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 100px"><ul style="list-style: square outside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 150px"><ul style="list-style: square outside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 200px"><ul style="list-style: square outside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 250px"><ul style="list-style: square outside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 300px"><ul style="list-style: square outside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 350px"><ul style="list-style: square outside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 400px"><ul style="list-style: square outside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 450px"><ul style="list-style: square outside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 500px"><ul style="list-style: square outside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 520px; top: 550px"><ul style="list-style: square outside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 0px"><ul style="list-style: square inside; font-size: 8px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 50px"><ul style="list-style: square inside; font-size: 10px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 100px"><ul style="list-style: square inside; font-size: 12px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 150px"><ul style="list-style: square inside; font-size: 13px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 200px"><ul style="list-style: square inside; font-size: 14px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 250px"><ul style="list-style: square inside; font-size: 16px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 300px"><ul style="list-style: square inside; font-size: 18px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 350px"><ul style="list-style: square inside; font-size: 20px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 400px"><ul style="list-style: square inside; font-size: 24px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 450px"><ul style="list-style: square inside; font-size: 27px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 500px"><ul style="list-style: square inside; font-size: 32px"><li><span class="t">x</span></li></ul></div>
+<div class="cell" style="left: 650px; top: 550px"><ul style="list-style: square inside; font-size: 40px"><li><span class="t">x</span></li></ul></div>
+<div id="disc-outside-8" class="r" style="left: 46px; top: 0px; width: 8px; height: 8px"></div>
+<div id="disc-outside-10" class="r" style="left: 44px; top: 50px; width: 9px; height: 9px"></div>
+<div id="disc-outside-12" class="r" style="left: 43px; top: 102px; width: 10px; height: 10px"></div>
+<div id="disc-outside-13" class="r" style="left: 42px; top: 152px; width: 10px; height: 10px"></div>
+<div id="disc-outside-14" class="r" style="left: 42px; top: 203px; width: 10px; height: 10px"></div>
+<div id="disc-outside-16" class="r" style="left: 41px; top: 253px; width: 11px; height: 11px"></div>
+<div id="disc-outside-18" class="r" style="left: 40px; top: 305px; width: 11px; height: 11px"></div>
+<div id="disc-outside-20" class="r" style="left: 38px; top: 355px; width: 12px; height: 12px"></div>
+<div id="disc-outside-24" class="r" style="left: 36px; top: 407px; width: 13px; height: 13px"></div>
+<div id="disc-outside-27" class="r" style="left: 34px; top: 457px; width: 14px; height: 14px"></div>
+<div id="disc-outside-32" class="r" style="left: 31px; top: 510px; width: 16px; height: 16px"></div>
+<div id="disc-outside-40" class="r" style="left: 26px; top: 563px; width: 18px; height: 18px"></div>
+<div id="disc-inside-8" class="r" style="left: 187px; top: 0px; width: 8px; height: 8px"></div>
+<div id="disc-inside-10" class="r" style="left: 187px; top: 50px; width: 9px; height: 9px"></div>
+<div id="disc-inside-12" class="r" style="left: 187px; top: 102px; width: 10px; height: 10px"></div>
+<div id="disc-inside-13" class="r" style="left: 187px; top: 152px; width: 10px; height: 10px"></div>
+<div id="disc-inside-14" class="r" style="left: 187px; top: 203px; width: 10px; height: 10px"></div>
+<div id="disc-inside-16" class="r" style="left: 187px; top: 253px; width: 11px; height: 11px"></div>
+<div id="disc-inside-18" class="r" style="left: 187px; top: 305px; width: 11px; height: 11px"></div>
+<div id="disc-inside-20" class="r" style="left: 187px; top: 355px; width: 12px; height: 12px"></div>
+<div id="disc-inside-24" class="r" style="left: 187px; top: 407px; width: 13px; height: 13px"></div>
+<div id="disc-inside-27" class="r" style="left: 187px; top: 457px; width: 14px; height: 14px"></div>
+<div id="disc-inside-32" class="r" style="left: 187px; top: 510px; width: 16px; height: 16px"></div>
+<div id="disc-inside-40" class="r" style="left: 187px; top: 563px; width: 18px; height: 18px"></div>
+<div id="circle-outside-8" class="r" style="left: 306px; top: 0px; width: 8px; height: 8px"></div>
+<div id="circle-outside-10" class="r" style="left: 304px; top: 50px; width: 9px; height: 9px"></div>
+<div id="circle-outside-12" class="r" style="left: 303px; top: 102px; width: 10px; height: 10px"></div>
+<div id="circle-outside-13" class="r" style="left: 302px; top: 152px; width: 10px; height: 10px"></div>
+<div id="circle-outside-14" class="r" style="left: 302px; top: 203px; width: 10px; height: 10px"></div>
+<div id="circle-outside-16" class="r" style="left: 301px; top: 253px; width: 11px; height: 11px"></div>
+<div id="circle-outside-18" class="r" style="left: 300px; top: 305px; width: 11px; height: 11px"></div>
+<div id="circle-outside-20" class="r" style="left: 298px; top: 355px; width: 12px; height: 12px"></div>
+<div id="circle-outside-24" class="r" style="left: 296px; top: 407px; width: 13px; height: 13px"></div>
+<div id="circle-outside-27" class="r" style="left: 294px; top: 457px; width: 14px; height: 14px"></div>
+<div id="circle-outside-32" class="r" style="left: 291px; top: 510px; width: 16px; height: 16px"></div>
+<div id="circle-outside-40" class="r" style="left: 286px; top: 563px; width: 18px; height: 18px"></div>
+<div id="circle-inside-8" class="r" style="left: 447px; top: 0px; width: 8px; height: 8px"></div>
+<div id="circle-inside-10" class="r" style="left: 447px; top: 50px; width: 9px; height: 9px"></div>
+<div id="circle-inside-12" class="r" style="left: 447px; top: 102px; width: 10px; height: 10px"></div>
+<div id="circle-inside-13" class="r" style="left: 447px; top: 152px; width: 10px; height: 10px"></div>
+<div id="circle-inside-14" class="r" style="left: 447px; top: 203px; width: 10px; height: 10px"></div>
+<div id="circle-inside-16" class="r" style="left: 447px; top: 253px; width: 11px; height: 11px"></div>
+<div id="circle-inside-18" class="r" style="left: 447px; top: 305px; width: 11px; height: 11px"></div>
+<div id="circle-inside-20" class="r" style="left: 447px; top: 355px; width: 12px; height: 12px"></div>
+<div id="circle-inside-24" class="r" style="left: 447px; top: 407px; width: 13px; height: 13px"></div>
+<div id="circle-inside-27" class="r" style="left: 447px; top: 457px; width: 14px; height: 14px"></div>
+<div id="circle-inside-32" class="r" style="left: 447px; top: 510px; width: 16px; height: 16px"></div>
+<div id="circle-inside-40" class="r" style="left: 447px; top: 563px; width: 18px; height: 18px"></div>
+<div id="square-outside-8" class="r" style="left: 566px; top: 0px; width: 8px; height: 8px"></div>
+<div id="square-outside-10" class="r" style="left: 564px; top: 50px; width: 9px; height: 9px"></div>
+<div id="square-outside-12" class="r" style="left: 563px; top: 102px; width: 10px; height: 10px"></div>
+<div id="square-outside-13" class="r" style="left: 562px; top: 152px; width: 10px; height: 10px"></div>
+<div id="square-outside-14" class="r" style="left: 562px; top: 203px; width: 10px; height: 10px"></div>
+<div id="square-outside-16" class="r" style="left: 561px; top: 253px; width: 11px; height: 11px"></div>
+<div id="square-outside-18" class="r" style="left: 560px; top: 305px; width: 11px; height: 11px"></div>
+<div id="square-outside-20" class="r" style="left: 558px; top: 355px; width: 12px; height: 12px"></div>
+<div id="square-outside-24" class="r" style="left: 556px; top: 407px; width: 13px; height: 13px"></div>
+<div id="square-outside-27" class="r" style="left: 554px; top: 457px; width: 14px; height: 14px"></div>
+<div id="square-outside-32" class="r" style="left: 551px; top: 510px; width: 16px; height: 16px"></div>
+<div id="square-outside-40" class="r" style="left: 546px; top: 563px; width: 18px; height: 18px"></div>
+<div id="square-inside-8" class="r" style="left: 707px; top: 0px; width: 8px; height: 8px"></div>
+<div id="square-inside-10" class="r" style="left: 707px; top: 50px; width: 9px; height: 9px"></div>
+<div id="square-inside-12" class="r" style="left: 707px; top: 102px; width: 10px; height: 10px"></div>
+<div id="square-inside-13" class="r" style="left: 707px; top: 152px; width: 10px; height: 10px"></div>
+<div id="square-inside-14" class="r" style="left: 707px; top: 203px; width: 10px; height: 10px"></div>
+<div id="square-inside-16" class="r" style="left: 707px; top: 253px; width: 11px; height: 11px"></div>
+<div id="square-inside-18" class="r" style="left: 707px; top: 305px; width: 11px; height: 11px"></div>
+<div id="square-inside-20" class="r" style="left: 707px; top: 355px; width: 12px; height: 12px"></div>
+<div id="square-inside-24" class="r" style="left: 707px; top: 407px; width: 13px; height: 13px"></div>
+<div id="square-inside-27" class="r" style="left: 707px; top: 457px; width: 14px; height: 14px"></div>
+<div id="square-inside-32" class="r" style="left: 707px; top: 510px; width: 16px; height: 16px"></div>
+<div id="square-inside-40" class="r" style="left: 707px; top: 563px; width: 18px; height: 18px"></div>
+</body></html>

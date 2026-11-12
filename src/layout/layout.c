@@ -3613,13 +3613,24 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     layout_frag_h fh = frag_new(t);
     uint32_t fr = fh.index;
     double base = t->line[ln].baseline;
+    double start = -off_x - t->line[ln].x + (inside ? lay_res(st, ls->indent, t->box[b].w) : 0), asc = sm.asc;
+    double mx = inside ? start : start - mw - sm.fs * 0.5;
+    if (sm.list <= 3) {
+        /* a disc, circle or square: a shape Chromium draws in a square of its own (ListMarker's symbol rect), 1px into
+           a marker box that starts its whole ascent's two thirds and 8px before the content outside, 1px before the
+           line's start inside; the fragment's top is its whole ascent above the baseline, which paint reads */
+        int ai = (int)floor(sm.asc + 0.5), off = ai * 2 / 3;
+        mx = inside ? start - 1 : start - off - 8;
+        mw = (off + 1) / 2 + 2;
+        asc = ai;
+    }
     t->frag[fr].kind = LAYOUT_FRAG_KIND_MARKER;
     t->frag[fr].node = node_handle(d, el);
     t->frag[fr].text = sp;
-    t->frag[fr].x = inside ? -off_x - t->line[ln].x + lay_res(st, ls->indent, t->box[b].w) : -off_x - t->line[ln].x - mw - sm.fs * 0.5;
-    t->frag[fr].y = base - sm.asc;
+    t->frag[fr].x = mx;
+    t->frag[fr].y = base - asc;
     t->frag[fr].w = mw;
-    t->frag[fr].h = sm.asc + sm.desc;
+    t->frag[fr].h = asc + sm.desc;
     t->frag[fr].baseline = base;
     t->frag[fr].face = (uint8_t)sm.face;
     if (sm.font) t->frag[fr].font = resource_handle(nt, sm.font);

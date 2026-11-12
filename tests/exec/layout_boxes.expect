@@ -63,7 +63,7 @@ a table's declared width, shared (ok, invariants: 0 broken)
   #t table: content 8,8 400x24; margins 0 384 0 0; width declared of 784
 a list item's marker (ok, invariants: 0 broken)
   #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
-    line 48,16 744x18 baseline 30: [text 48+8 'x'] [marker 34.3984+5.60156 '•']
+    line 48,16 744x18 baseline 30: [text 48+8 'x'] [marker 31+7 '•']
   #b list_item: content 48,50 744x18; margins 0 0 0 0; width fill of 744
     line 48,50 744x18 baseline 64: [text 48+8 'y'] [marker 28+12 '1.']
 font sizes in em, and line height (ok, invariants: 0 broken)
