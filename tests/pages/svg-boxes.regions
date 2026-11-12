@@ -1,0 +1,24 @@
+# tests/pages/svg-boxes.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+fs 0 0 0 0
+mb 0 0 0 0
+cb 0 0 0 0
+gb 0 0 0 0
+b-textfilter 5 5 105 105
+b-textmask 117 5 217 105
+b-textclip 229 5 329 105
+b-imagemask 341 5 441 105
+b-imagefilter 453 5 553 105
+b-group 565 5 665 105
+b-gradtext 677 5 777 105
+c-blur 5 117 105 217
+c-shadow 117 117 217 217
+c-grey 229 117 329 217
+c-hue 341 117 441 217
+c-bright 453 117 553 217
+c-contrast 565 117 665 217
+c-invert 677 117 777 217
+c-faint 5 229 105 329
+c-saturate 117 229 217 329
+c-sepia 229 229 329 329
+c-chain 341 229 441 329

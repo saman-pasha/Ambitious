@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: patterns</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.pat-stroke { stroke: url(#ph) }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <pattern id="pa" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="10" height="10" fill="#c03030"/></pattern>
+    <pattern id="pb" width="0.25" height="0.25"><rect width="12" height="12" fill="#3030c0"/></pattern>
+    <pattern id="pc" width="0.5" height="0.5" patternContentUnits="objectBoundingBox"><circle cx="0.25" cy="0.25" r="0.2" fill="#30a030"/></pattern>
+    <pattern id="pd" patternUnits="userSpaceOnUse" width="30" height="20" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#a050a0"/></pattern>
+    <pattern id="pe" patternUnits="userSpaceOnUse" width="20" height="20" patternTransform="rotate(30)"><rect width="10" height="20" fill="#208080"/></pattern>
+    <pattern id="pf" href="#pa" x="5" y="5"/>
+    <pattern id="pg" patternUnits="userSpaceOnUse" width="10.5" height="10.5"><rect width="5" height="5" fill="#000"/></pattern>
+    <pattern id="ph" patternUnits="userSpaceOnUse" width="8" height="8"><rect width="4" height="4" fill="#d07000"/><rect x="4" y="4" width="4" height="4" fill="#0070d0"/></pattern>
+    <pattern id="pi" patternUnits="userSpaceOnUse" width="20" height="20"><circle cx="10" cy="10" r="8" fill="#000"/></pattern>
+    <pattern id="pj" patternUnits="userSpaceOnUse" x="3" y="7" width="25" height="15"><rect x="-5" y="-5" width="15" height="15" fill="#806020"/><circle cx="25" cy="15" r="6" fill="#2060a0"/></pattern>
+    <linearGradient id="gk"><stop offset="0" stop-color="#f0e000"/><stop offset="1" stop-color="#e00060"/></linearGradient>
+    <pattern id="pk" patternUnits="userSpaceOnUse" width="25" height="25"><rect x="2" y="2" width="21" height="21" fill="url(#gk)"/><circle cx="12.5" cy="12.5" r="6" fill="url(#pg)"/></pattern>
+    <pattern id="pl" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="scale(2) translate(1 1)"><path d="M0 6 L6 0" stroke="#304060" stroke-width="2"/></pattern>
+    <pattern id="pm" width="0" height="0.5"><rect width="10" height="10" fill="#000"/></pattern>
+    <pattern id="pn" patternUnits="userSpaceOnUse" width="16" height="16" preserveAspectRatio="xMinYMid slice" viewBox="0 0 8 4"><rect width="8" height="4" fill="#60c0f0"/><rect width="4" height="2" fill="#2040a0"/></pattern>
+    <pattern id="po" patternUnits="userSpaceOnUse" width="12" height="12" style="color:#a02000"><circle cx="6" cy="6" r="5" fill="currentColor" opacity="0.5"/><circle cx="6" cy="6" r="2" fill="currentColor"/></pattern>
+  </defs>
+</svg>
+<!-- row 1: units, content units, viewBox, transform, href -->
+<svg id="p-user" style="left:5px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pa)"/></svg>
+<svg id="p-bbox" style="left:117px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pb)"/></svg>
+<svg id="p-content" style="left:229px;top:5px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="url(#pc)"/></svg>
+<svg id="p-viewbox" style="left:341px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pd)"/></svg>
+<svg id="p-transform" style="left:453px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pe)"/></svg>
+<svg id="p-href" style="left:565px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pf)"/></svg>
+<svg id="p-fraction" style="left:677px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pg)"/></svg>
+<!-- row 2: strokes, scales, overflow, rotations, opacity, nesting, text -->
+<svg id="p-stroke" style="left:5px;top:117px" width="100" height="100"><circle class="pat-stroke" cx="50" cy="50" r="40" fill="none" stroke-width="12"/></svg>
+<svg id="p-scaled" style="left:117px;top:117px" width="100" height="100"><g transform="scale(2.5)"><rect x="0" y="0" width="40" height="40" fill="url(#pi)"/></g></svg>
+<svg id="p-overflow" style="left:229px;top:117px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pj)"/></svg>
+<svg id="p-rotated" style="left:341px;top:117px" width="100" height="100"><g transform="rotate(20 50 50)"><rect x="10" y="10" width="80" height="80" fill="url(#ph)"/></g></svg>
+<svg id="p-opacity" style="left:453px;top:117px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pa)" fill-opacity="0.5"/><rect x="25" y="25" width="50" height="50" fill="url(#pl)"/></svg>
+<svg id="p-nested" style="left:565px;top:117px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pk)"/></svg>
+<svg id="p-text" style="left:677px;top:117px" width="100" height="100"><text x="4" y="70" font-size="64" font-weight="bold" font-family="sans-serif" fill="url(#ph)">W</text></svg>
+<!-- row 3: fallbacks, a tile of no area, a viewBox sliced, currentColor in a tile, an ellipse -->
+<svg id="p-fallback" style="left:5px;top:229px" width="100" height="100"><rect x="5" y="5" width="40" height="90" fill="url(#nosuch) #40a0a0"/><rect x="55" y="5" width="40" height="90" fill="url(#pm) #a04040" stroke="#000"/></svg>
+<svg id="p-slice" style="left:117px;top:229px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#pn)"/></svg>
+<svg id="p-color" style="left:229px;top:229px" width="100" height="100"><ellipse cx="50" cy="50" rx="45" ry="30" fill="url(#po)" stroke="url(#pa)" stroke-width="6"/></svg>
+</body>
+</html>

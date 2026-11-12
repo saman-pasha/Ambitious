@@ -1,0 +1,15 @@
+# tests/pages/svg-embed.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+i-raster 5 5 105 105
+i-svg 117 5 217 105
+i-align 229 5 329 105
+i-turned 341 5 441 105
+i-slice 453 5 553 105
+i-scaled 565 5 665 105
+i-viewbox 677 5 777 105
+i-xlink 5 117 105 217
+i-css 117 117 217 217
+i-data 229 117 329 217
+i-effects 341 117 441 217
+ic 0 0 0 0
+i-nested 453 117 553 217
+i-auto 565 117 665 217

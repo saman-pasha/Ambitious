@@ -923,6 +923,50 @@ be built side by side and merged without touching each other's.
   and computed values (156 of 156, `:hover` measured with the mouse over the
   page: `tests/pages/NAME.hover`); the mode's facts (`tests/integ/quirks.sh`);
   every standards-mode page unmoved.
+- **12t SVG, the rest of it** (`src/paint/svg.c`, `src/paint/svg.h`; a glyph's
+  outline in `src/paint/font.c`; SVG's new properties in `contracts/css.pl` and
+  `src/css/css.c`; an SVG image element's picture fetched by `src/net/net.c` and drawn
+  through the loader paint passes, `amb_svg_draw_with`), each measured in Chromium
+  first, Blink's and Skia's sources deciding where the specs leave room:
+  - patterns as a fill, stroke or text's paint (patternUnits, patternContentUnits,
+    viewBox and preserveAspectRatio, patternTransform, href inheritance of attributes and
+    content): each tile drawn as Skia rasterizes a picture shader's, at its matrix's
+    scale (reckoned in floats) rounded up to whole px, then sampled bilinearly, repeated;
+  - markers (marker-start, -mid, -end and the marker shorthand; markerUnits, refX and
+    refY, orient's auto, auto-start-reverse and angles, viewBox, markerWidth and
+    markerHeight, overflow) at the places Blink's SVGMarkerDataBuilder finds, a closed
+    subpath's ends bisecting its closing segment and its first, the viewport's clip not
+    anti-aliased; paint-order between fill, stroke and markers;
+  - masks (maskUnits, maskContentUnits, mask-type, CSS's `mask: url()`): the content's
+    Rec. 709 luminance (or alpha) in eight bits, its region a clip Skia rounds to whole px;
+  - image elements: raster pictures (from the mipmap level Chromium's decode cache picks,
+    sampled bilinearly) and SVG ones (laid out in the viewport, a document without a
+    viewBox stretched there from its natural size), preserveAspectRatio, CSS's width and
+    height, data: URLs;
+  - filters (filterUnits, primitiveUnits, regions and subregions rounded out, in, in2 and
+    result, SourceGraphic and SourceAlpha, color-interpolation-filters): feGaussianBlur as
+    Skia's three box passes (SVG's windows, summed whole and divided once), feOffset,
+    feFlood, feComposite (arithmetic too), feMerge, feColorMatrix, feBlend (every mode),
+    feDropShadow and feComponentTransfer, each result kept in eight bits and converted
+    between linearRGB and sRGB as Skia's colour filters convert it; CSS's filter
+    functions on an SVG element made their shorthand primitives; a text's and an
+    image's bounding boxes for objectBoundingBox units;
+  - vector-effect: non-scaling-stroke; the geometry properties from CSS (r, cx, cy, rx,
+    ry, x, y, width, height, `d: path()`); switch's conditions; a text's stroke, its
+    rotate lists, textLength (spacing and spacingAndGlyphs), textPath (href,
+    startOffset, its anchor, glyphs off its ends dropped), dominant-baseline, and runs
+    turned, skewed or stretched drawn as their outlines; strokes no wider than a device
+    px drawn as Skia's anti-aliased hairlines.
+
+  Gate: `tests/pages/svg-pattern.html`, `svg-marker.html`, `svg-mask.html`,
+  `svg-filter.html`, `svg-embed.html`, `svg-textpath.html`, `svg-props.html` and
+  `svg-boxes.html`, each held to Chromium's screenshot region by region
+  (`tests/integ/paintref.sh`: 34, 29, 33, 42, 14, 19, 17 and 23 regions agree), and
+  `svg-zoom2.html`, each kind drawn again at a zoom of 1.5 (17 of 17); 12o's pages
+  unmoved (37, 40, 9, 11 and 9);
+  `tests/exec/svg_render` (scenes of each, a pattern's tile, a mask, a filter and a
+  hairline drawn, documents of patterns, masks and markers of themselves and of filters
+  and text past every bound; valgrind clean).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
@@ -970,7 +1014,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12o, each with its own files and gate |
+| 12 The limitations | **in progress**: the packages 12a-12r and 12t merged, each with its own files and gate; 12s and 12u under way |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks

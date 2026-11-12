@@ -1,0 +1,18 @@
+# tests/pages/svg-zoom2.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+ph 0 0 0 0
+pc 0 0 0 0
+ms 0 0 0 0
+mm 0 0 0 0
+k1 0 0 0 0
+f1 0 0 0 0
+f2 0 0 0 0
+arc 0 0 0 0
+z-pattern 7 7 158 158
+z-marker 175 7 326 158
+z-mask 343 7 494 158
+z-filter 511 7 662 158
+z-blur 7 175 158 326
+z-image 175 175 326 326
+z-textpath 343 175 494 326
+z-hair 511 175 662 326

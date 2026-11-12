@@ -1,0 +1,20 @@
+# tests/pages/svg-textpath.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+arc 0 0 0 0
+line 0 0 0 0
+wave 0 0 0 0
+tg 0 0 0 0
+t-stroke 5 5 105 105
+t-rotate 117 5 217 105
+t-length 229 5 329 105
+t-path 341 5 441 105
+t-offset 453 5 553 105
+t-wave 565 5 665 105
+t-baseline 677 5 777 105
+t-baseline2 5 117 105 217
+t-turned 117 117 217 217
+t-skewed 229 117 329 217
+t-order 341 117 441 217
+t-dash 453 117 553 217
+t-tspans 565 117 665 217
+t-italic 677 117 777 217

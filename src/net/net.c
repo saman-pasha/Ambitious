@@ -56,7 +56,8 @@
    that fails has its reason in words.
 
    What a page asks for: <link rel=stylesheet href>, <img src>, <script src>
-   (fetched, never run), each URL fetched once. An img with a srcset takes the
+   (fetched, never run), an SVG <image href> (or xlink:href), each URL fetched once.
+   An img with a srcset takes the
    candidate HTML's image source selection gives for an 800x600 viewport at a
    device pixel ratio of 1: srcset parsed as HTML says, a width descriptor's
    density by the length of the first entry of sizes whose media condition holds
@@ -4065,6 +4066,14 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
             srcset = ss;
             if (!pt.picked && ss && doc->attr[ss].value.len) pt.picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pt.pk);
         } else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
+        else if (doc->node[x].kind == DOM_NODE_KIND_ELEMENT && doc->node[x].ns == DOM_NAMESPACE_SVG && names_is(doc, doc->node[x].name, "image", 5)) {
+            /* an SVG image element's picture (SVG 2, 12.3): its href, else its xlink:href; none
+               when it is empty (no request is made) */
+            kind = NET_KIND_IMAGE;
+            a = net_attr(doc, x, "href");
+            if (!a) a = net_attr(doc, x, "xlink:href");
+            if (a && doc->attr[a].value.len == 0) a = 0;
+        }
         if (pt.picked || (a && doc->attr[a].value.len > 0)) {
             if (!pt.picked) {
                 amb_span v = doc->attr[a].value;

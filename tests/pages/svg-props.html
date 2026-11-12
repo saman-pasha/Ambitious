@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: paint order, vector effects, geometry from CSS, switch</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.big { r: 30px; cx: 40px; cy: 45px }
+.wide { width: 70px; height: 30px; x: 15px; y: 10px; rx: 8px }
+.route { d: path("M 10 80 L 50 20 L 90 80 Z") }
+.pct { r: 20%; cx: 50%; cy: 50% }
+.unfixed { vector-effect: none }
+#css-ellipse { rx: 40px; ry: 15px }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <marker id="pm" markerWidth="8" markerHeight="8" refX="4" refY="4"><circle cx="4" cy="4" r="4" fill="#e0a000"/></marker>
+  </defs>
+</svg>
+<!-- row 1: paint-order; vector-effect -->
+<svg id="o-stroke" style="left:5px;top:5px" width="100" height="100"><rect x="15" y="15" width="70" height="30" fill="#4080c0" stroke="#203040" stroke-width="10" paint-order="stroke"/><circle cx="50" cy="72" r="18" fill="#c04040" stroke="#000" stroke-width="8" paint-order="stroke markers fill"/></svg>
+<svg id="o-markers" style="left:117px;top:5px" width="100" height="100"><polyline points="10,90 50,10 90,90" fill="#d0e0f0" stroke="#000" stroke-width="6" marker-start="url(#pm)" marker-mid="url(#pm)" marker-end="url(#pm)" paint-order="markers stroke"/></svg>
+<svg id="v-fixed" style="left:229px;top:5px" width="100" height="100"><g transform="scale(4 1)"><rect x="3" y="10" width="19" height="30" fill="none" stroke="#000" stroke-width="2" vector-effect="non-scaling-stroke"/></g><g transform="scale(4 1)"><rect x="3" y="55" width="19" height="30" fill="none" stroke="#000" stroke-width="2"/></g></svg>
+<svg id="v-dashed" style="left:341px;top:5px" width="100" height="100"><g transform="translate(50 50) scale(3) rotate(30)"><circle r="12" fill="none" stroke="#a02060" stroke-width="3" stroke-dasharray="6 3" vector-effect="non-scaling-stroke"/></g></svg>
+<svg id="v-viewbox" style="left:453px;top:5px" width="100" height="100" viewBox="0 0 20 20"><line x1="2" y1="5" x2="18" y2="5" stroke="#204080" stroke-width="2" vector-effect="non-scaling-stroke"/><line x1="2" y1="12" x2="18" y2="12" stroke="#204080" stroke-width="2"/><path d="M2 17 L10 15 L18 17" fill="none" stroke="#408020" stroke-width="1" vector-effect="non-scaling-stroke" class="unfixed"/></svg>
+<!-- row 2: geometry from CSS -->
+<svg id="g-circle" style="left:5px;top:117px" width="100" height="100"><circle class="big" cx="10" cy="10" r="5" fill="#30a060"/></svg>
+<svg id="g-rect" style="left:117px;top:117px" width="100" height="100"><rect class="wide" fill="#6040c0"/><rect x="15" y="60" width="70" height="30" style="width: 40px; height: 15px" fill="#c06040"/></svg>
+<svg id="g-path" style="left:229px;top:117px" width="100" height="100"><path class="route" d="M 0 0 L 10 10" fill="#40a0a0" stroke="#000"/></svg>
+<svg id="g-percent" style="left:341px;top:117px" width="100" height="100"><circle class="pct" fill="#a0a020"/></svg>
+<svg id="g-ellipse" style="left:453px;top:117px" width="100" height="100"><ellipse id="css-ellipse" cx="50" cy="50" rx="10" ry="10" fill="#2080c0"/></svg>
+<!-- row 3: switch and conditional processing -->
+<svg id="s-language" style="left:5px;top:229px" width="100" height="100"><switch><rect systemLanguage="fr" x="10" y="10" width="80" height="80" fill="#c02020"/><rect systemLanguage="de, en" x="10" y="10" width="80" height="80" fill="#20a020"/><rect x="10" y="10" width="80" height="80" fill="#2020c0"/></switch></svg>
+<svg id="s-extension" style="left:117px;top:229px" width="100" height="100"><switch><g requiredExtensions="http://example.com/nosuch"><rect x="10" y="10" width="80" height="80" fill="#c02020"/></g><circle cx="50" cy="50" r="40" fill="#20a0a0" requiredExtensions="http://www.w3.org/1999/xhtml" requiredFeatures="http://example.com/nosuch"/><rect x="10" y="10" width="80" height="80" fill="#c02020"/></switch></svg>
+<svg id="s-desc" style="left:229px;top:229px" width="100" height="100"><switch><desc>the first child whose tests hold, though it is never drawn</desc><circle cx="50" cy="50" r="40" fill="#c02020"/></switch><rect x="40" y="40" width="20" height="20" fill="#202020"/></svg>
+<svg id="s-outside" style="left:341px;top:229px" width="100" height="100"><rect systemLanguage="fr" x="10" y="10" width="80" height="80" fill="#c02020"/><rect x="30" y="30" width="40" height="40" fill="#202020"/><rect requiredExtensions="" x="0" y="0" width="20" height="20" fill="#c02020"/></svg>
+</body>
+</html>

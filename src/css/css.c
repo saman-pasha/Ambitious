@@ -63,7 +63,11 @@
    properties are longhands as the others are: fill and stroke kept as their text (none and
    currentcolor keywords, currentcolor each element's own colour), their opacities, the
    stroke's width, caps, joins, miter limit, dash array and offset, the fill and clip rules,
-   stop-color and stop-opacity, clip-path (none or url()), text-anchor. A computed value is as each property's spec has
+   stop-color and stop-opacity, clip-path (none or url()), text-anchor; marker-start, -mid and -end (none or url(), the
+   marker shorthand setting the three), paint-order, mask (none or url()) and mask-type, vector-effect,
+   dominant-baseline, flood-color and flood-opacity, color-interpolation-filters, and the geometry properties (cx, cy,
+   r, rx, ry, x, y; d as path()), which src/paint/svg.c reads over the attributes when a rule declares them; filter
+   is a presentation attribute too. A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
    border's width 0 under style none, display blockified for a float, an
    absolute box, the root and a flex or grid item. Two differ from Chromium's:
@@ -978,7 +982,29 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "clip-path", 0, G_TEXT, 0, "none", "none" },
     { "clip-rule", 1, G_KW, 0, "nonzero evenodd", "nonzero" },
     { "text-anchor", 1, G_KW, 0, "start middle end", "start" },
-    { "appearance", 0, G_KW, 0, "none auto menulist-button textfield button checkbox radio listbox menulist meter progress-bar "
+    /* SVG's markers, paint order, masks, vector effects, baselines, filters' floods and colour space, and its geometry
+       properties (SVG 2, 9.2-9.6, 11.10, 13.7-13.9; CSS Masking 1, 7; Filter Effects 1, 9.2, 15) */
+    { "marker-start", 1, G_TEXT, 0, "none", "none" },
+    { "marker-mid", 1, G_TEXT, 0, "none", "none" },
+    { "marker-end", 1, G_TEXT, 0, "none", "none" },
+    { "paint-order", 1, G_TEXT, 0, "normal", "normal" },
+    { "mask", 0, G_TEXT, 0, "none", "none" },
+    { "mask-type", 0, G_KW, 0, "luminance alpha", "luminance" },
+    { "vector-effect", 0, G_KW, 0, "none non-scaling-stroke non-scaling-size non-rotation fixed-position", "none" },
+    { "dominant-baseline", 1, G_KW, 0, "auto alphabetic ideographic middle central mathematical hanging text-before-edge "
+      "text-after-edge use-script no-change reset-size", "auto" },
+    { "flood-color", 0, G_COLOR, 0, 0, "black" },
+    { "flood-opacity", 0, G_NUM, F_PCT | F_NEG, 0, "1" },
+    { "color-interpolation-filters", 1, G_KW, 0, "auto srgb linearrgb", "linearrgb" },
+    { "cx", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
+    { "cy", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
+    { "r", 0, G_LEN, F_PCT | F_NUM, 0, "0px" },
+    { "rx", 0, G_LEN, F_PCT | F_NUM, "auto", "auto" },
+    { "ry", 0, G_LEN, F_PCT | F_NUM, "auto", "auto" },
+    { "x", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
+    { "y", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
+    { "d", 0, G_TEXT, 0, "none", "none" },
+    { "appearance",0, G_KW, 0, "none auto menulist-button textfield button checkbox radio listbox menulist meter progress-bar "
       "push-button searchfield slider-horizontal square-button textarea", "none" },
     { "object-fit", 0, G_KW, 0, "fill contain cover none scale-down", "fill" },
     { "object-position", 0, G_TEXT, 0, 0, "50% 50%" },
@@ -2155,6 +2181,32 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     }
     case CSS_PROP_FILL: case CSS_PROP_STROKE: return css_is_paint(s, n);
     case CSS_PROP_STROKE_DASHARRAY: return css_is_dashes(s, n);
+    case CSS_PROP_MARKER_START: case CSS_PROP_MARKER_MID: case CSS_PROP_MARKER_END: case CSS_PROP_MASK: {
+        /* none (its keyword) or a url() alone */
+        size_t cs[2], cl[2];
+        return css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url");
+    }
+    case CSS_PROP_PAINT_ORDER: {
+        /* normal (its keyword), or fill, stroke and markers each at most once: the first painted first */
+        int seen = 0;
+        if (memchr(s, ',', n)) return 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            const char *q = s + st;
+            int b = css_eq_ci(q, ln, "fill") ? 1 : css_eq_ci(q, ln, "stroke") ? 2 : css_eq_ci(q, ln, "markers") ? 4 : 0;
+            if (!b || (seen & b)) return 0;
+            seen |= b;
+        }
+        return seen != 0;
+    }
+    case CSS_PROP_D: {
+        /* none (its keyword) or path() of a string of path data that reads whole */
+        if (!css_is_fn(s, n, "path")) return 0;
+        size_t a = css_skip_ws(s, n - 1, 5), e = n - 1;
+        while (e > a && css_ws(s[e - 1])) e--;
+        if (!css_is_string(s + a, e - a)) return 0;
+        vector<char> norm;
+        return css_path_norm(s + a + 1, e - a - 2, &norm);
+    }
     case CSS_PROP_CLIP_PATH: {
         size_t cs[2], cl[2];
         if (css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url")) return 1;
@@ -2832,6 +2884,7 @@ static const css_short css_shorts[] = {
                         CSS_PROP_ANIMATION_PLAY_STATE } },
     { "transition", 5, { CSS_PROP_TRANSITION_PROPERTY, CSS_PROP_TRANSITION_DURATION, CSS_PROP_TRANSITION_TIMING_FUNCTION,
                          CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR } },
+    { "marker", 3, { CSS_PROP_MARKER_START, CSS_PROP_MARKER_MID, CSS_PROP_MARKER_END } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -3129,6 +3182,11 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
     }
     case 29: return css_anim_short(0, val, vn, it);
     case 30: return css_anim_short(1, val, vn, it);
+    case 31:
+        /* marker (SVG 2, 13.7.4): none or one url(), each of marker-start, -mid and -end's */
+        if (!css_longhand(CSS_PROP_MARKER_START, val, vn, &v) || css_is_global(&v)) return 0;
+        for (int q = 0; q < 3; q++) css_item_add(it, (css_prop)d->p[q], &v, 0, vn);
+        return 1;
     default: return 0;
     }
 }
@@ -6924,7 +6982,8 @@ static const char css_svg_presentation[] =
     "fill fill-opacity fill-rule stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray "
     "stroke-dashoffset stroke-opacity stop-color stop-opacity clip-path clip-rule text-anchor opacity color display visibility "
     "font-family font-size font-weight font-style letter-spacing word-spacing overflow direction unicode-bidi writing-mode "
-    "transform-origin";
+    "transform-origin marker-start marker-mid marker-end paint-order mask mask-type vector-effect dominant-baseline filter "
+    "flood-color flood-opacity color-interpolation-filters";
 
 /* an SVG element's presentation attributes, each a declaration of its property in one author
    rule of specificity 0 before every other (a value the property does not take dropped, as

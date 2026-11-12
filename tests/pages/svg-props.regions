@@ -1,0 +1,18 @@
+# tests/pages/svg-props.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+pm 0 0 0 0
+o-stroke 5 5 105 105
+o-markers 117 5 217 105
+v-fixed 229 5 329 105
+v-dashed 341 5 441 105
+v-viewbox 453 5 553 105
+g-circle 5 117 105 217
+g-rect 117 117 217 217
+g-path 229 117 329 217
+g-percent 341 117 441 217
+g-ellipse 453 117 553 217
+css-ellipse 463 152 543 182
+s-language 5 229 105 329
+s-extension 117 229 217 329
+s-desc 229 229 329 329
+s-outside 341 229 441 329

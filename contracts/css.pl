@@ -58,7 +58,14 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% fallback; a dash array as text; clip-path's none or url(#id)
     fill, fill_opacity, fill_rule, stroke, stroke_width, stroke_linecap, stroke_linejoin, stroke_miterlimit,
     stroke_dasharray, stroke_dashoffset, stroke_opacity, stop_color, stop_opacity, clip_path, clip_rule, text_anchor,
-    appearance,                        % none, auto or a control's own (CSS UI 4): whether the theme draws it
+    %% markers (none or url(#id), inherited; the marker shorthand sets the three), the order a
+    %% shape's fill, stroke and markers are painted in (inherited), mask (none or url(#id)) and
+    %% a mask element's mask-type, vector-effect, dominant-baseline (inherited), a filter
+    %% primitive's flood colour and opacity, the filters' colour space (inherited), and the
+    %% geometry properties (cx, cy, r, rx, ry, x, y: lengths a number may be; d: path())
+    marker_start, marker_mid, marker_end, paint_order, mask, mask_type, vector_effect, dominant_baseline,
+    flood_color, flood_opacity, color_interpolation_filters, cx, cy, r, rx, ry, x, y, d,
+    appearance,                       % none, auto or a control's own (CSS UI 4): whether the theme draws it
     object_fit,                        % fill, contain, cover, none or scale-down (CSS Images 3, 5.5)
     object_position,                   % each axis a percentage, px, or a calc() of both, the percentage first
     custom])).
