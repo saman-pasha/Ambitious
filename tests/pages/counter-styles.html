@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Counter styles: each system and the predefined styles</title>
+<style>
+/* tests/pages/counter-styles.html (tools: gen_cspage.py) -- counter styles as Chromium writes them: each predefined
+   style, and @counter-style rules of each system, as counter() writes a value in a ::before (each inline-block as wide as
+   its text), and lists whose markers are inside, each item's text after its marker (tests/integ/boxes.sh) */
+body { margin: 8px; font: 14px sans-serif; }
+.r { height: 20px; }
+.ib { display: inline-block; white-space: pre; }
+ol { margin: 0; padding: 0 0 0 30px; list-style-position: inside; }
+@counter-style cyc { system: cyclic; symbols: "\25C6" "\25C7" "\25CB"; prefix: "("; suffix: ") "; }
+@counter-style fix { system: fixed 3; symbols: A B C D; }
+@counter-style sym { system: symbolic; symbols: "*" "\2020" "\2021"; }
+@counter-style bin { system: numeric; symbols: "0" "1"; suffix: "b "; }
+@counter-style add { system: additive; additive-symbols: 10 "X", 5 "V", 1 "I"; }
+@counter-style ext { system: extends lower-roman; prefix: "["; suffix: "] "; }
+@counter-style rng { system: numeric; symbols: "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"; range: 2 4, 10 12; fallback: upper-alpha; }
+@counter-style padded { system: extends decimal; pad: 4 "0"; }
+@counter-style neg { system: extends decimal; negative: "(" ")"; }
+@counter-style dotted { system: extends upper-roman; suffix: " \2014  "; }
+.p0::before { content: counter(c, decimal); }
+.p1::before { content: counter(c, decimal-leading-zero); }
+.p2::before { content: counter(c, arabic-indic); }
+.p3::before { content: counter(c, armenian); }
+.p4::before { content: counter(c, upper-armenian); }
+.p5::before { content: counter(c, lower-armenian); }
+.p6::before { content: counter(c, bengali); }
+.p7::before { content: counter(c, cambodian); }
+.p8::before { content: counter(c, khmer); }
+.p9::before { content: counter(c, cjk-decimal); }
+.p10::before { content: counter(c, devanagari); }
+.p11::before { content: counter(c, georgian); }
+.p12::before { content: counter(c, gujarati); }
+.p13::before { content: counter(c, gurmukhi); }
+.p14::before { content: counter(c, hebrew); }
+.p15::before { content: counter(c, kannada); }
+.p16::before { content: counter(c, lao); }
+.p17::before { content: counter(c, malayalam); }
+.p18::before { content: counter(c, mongolian); }
+.p19::before { content: counter(c, myanmar); }
+.p20::before { content: counter(c, oriya); }
+.p21::before { content: counter(c, persian); }
+.p22::before { content: counter(c, lower-roman); }
+.p23::before { content: counter(c, upper-roman); }
+.p24::before { content: counter(c, tamil); }
+.p25::before { content: counter(c, telugu); }
+.p26::before { content: counter(c, thai); }
+.p27::before { content: counter(c, tibetan); }
+.p28::before { content: counter(c, lower-alpha); }
+.p29::before { content: counter(c, lower-latin); }
+.p30::before { content: counter(c, upper-alpha); }
+.p31::before { content: counter(c, upper-latin); }
+.p32::before { content: counter(c, lower-greek); }
+.p33::before { content: counter(c, hiragana); }
+.p34::before { content: counter(c, hiragana-iroha); }
+.p35::before { content: counter(c, katakana); }
+.p36::before { content: counter(c, katakana-iroha); }
+.p37::before { content: counter(c, disc); }
+.p38::before { content: counter(c, circle); }
+.p39::before { content: counter(c, square); }
+.p40::before { content: counter(c, cjk-earthly-branch); }
+.p41::before { content: counter(c, cjk-heavenly-stem); }
+.p42::before { content: counter(c, japanese-informal); }
+.p43::before { content: counter(c, japanese-formal); }
+.p44::before { content: counter(c, korean-hangul-formal); }
+.p45::before { content: counter(c, korean-hanja-informal); }
+.p46::before { content: counter(c, korean-hanja-formal); }
+.p47::before { content: counter(c, simp-chinese-informal); }
+.p48::before { content: counter(c, simp-chinese-formal); }
+.p49::before { content: counter(c, trad-chinese-informal); }
+.p50::before { content: counter(c, trad-chinese-formal); }
+.p51::before { content: counter(c, cjk-ideographic); }
+.p52::before { content: counter(c, ethiopic-numeric); }
+.p53::before { content: counter(c, ethiopic-halehame); }
+.p54::before { content: counter(c, ethiopic-halehame-am); }
+.p55::before { content: counter(c, ethiopic-halehame-ti-er); }
+.p56::before { content: counter(c, ethiopic-halehame-ti-et); }
+.p57::before { content: counter(c, hangul); }
+.p58::before { content: counter(c, hangul-consonant); }
+.p59::before { content: counter(c, urdu); }
+.p60::before { content: counter(c, hebrew); }
+.p61::before { content: counter(c, lower-roman); }
+.p62::before { content: counter(c, upper-alpha); }
+.p63::before { content: counter(c, japanese-informal); }
+.p64::before { content: counter(c, cyc); }
+.p65::before { content: counter(c, fix); }
+.p66::before { content: counter(c, fix); }
+.p67::before { content: counter(c, sym); }
+.p68::before { content: counter(c, bin); }
+.p69::before { content: counter(c, add); }
+.p70::before { content: counter(c, ext); }
+.p71::before { content: counter(c, rng); }
+.p72::before { content: counter(c, rng); }
+.p73::before { content: counter(c, padded); }
+.p74::before { content: counter(c, neg); }
+.p75::before { content: counter(c, dotted); }
+</style></head><body>
+<div class="r"><span id="p0" class="ib p0" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p1" class="ib p1" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p2" class="ib p2" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p3" class="ib p3" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p4" class="ib p4" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p5" class="ib p5" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p6" class="ib p6" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p7" class="ib p7" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p8" class="ib p8" style="counter-reset: c 56"></span></div>
+<div class="r"><span id="p9" class="ib p9" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p10" class="ib p10" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p11" class="ib p11" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p12" class="ib p12" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p13" class="ib p13" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p14" class="ib p14" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p15" class="ib p15" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p16" class="ib p16" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p17" class="ib p17" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p18" class="ib p18" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p19" class="ib p19" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p20" class="ib p20" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p21" class="ib p21" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p22" class="ib p22" style="counter-reset: c 1999"></span></div>
+<div class="r"><span id="p23" class="ib p23" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p24" class="ib p24" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p25" class="ib p25" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p26" class="ib p26" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p27" class="ib p27" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p28" class="ib p28" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p29" class="ib p29" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p30" class="ib p30" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p31" class="ib p31" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p32" class="ib p32" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p33" class="ib p33" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p34" class="ib p34" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p35" class="ib p35" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p36" class="ib p36" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p37" class="ib p37" style="counter-reset: c 3"></span></div>
+<div class="r"><span id="p38" class="ib p38" style="counter-reset: c 3"></span></div>
+<div class="r"><span id="p39" class="ib p39" style="counter-reset: c 3"></span></div>
+<div class="r"><span id="p40" class="ib p40" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p41" class="ib p41" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p42" class="ib p42" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p43" class="ib p43" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p44" class="ib p44" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p45" class="ib p45" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p46" class="ib p46" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p47" class="ib p47" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p48" class="ib p48" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p49" class="ib p49" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p50" class="ib p50" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p51" class="ib p51" style="counter-reset: c 105"></span></div>
+<div class="r"><span id="p52" class="ib p52" style="counter-reset: c 2024"></span></div>
+<div class="r"><span id="p53" class="ib p53" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p54" class="ib p54" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p55" class="ib p55" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p56" class="ib p56" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p57" class="ib p57" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p58" class="ib p58" style="counter-reset: c 30"></span></div>
+<div class="r"><span id="p59" class="ib p59" style="counter-reset: c 1234"></span></div>
+<div class="r"><span id="p60" class="ib p60" style="counter-reset: c -15"></span></div>
+<div class="r"><span id="p61" class="ib p61" style="counter-reset: c 4000"></span></div>
+<div class="r"><span id="p62" class="ib p62" style="counter-reset: c 0"></span></div>
+<div class="r"><span id="p63" class="ib p63" style="counter-reset: c -12"></span></div>
+<div class="r"><span id="p64" class="ib p64" style="counter-reset: c 2"></span></div>
+<div class="r"><span id="p65" class="ib p65" style="counter-reset: c 4"></span></div>
+<div class="r"><span id="p66" class="ib p66" style="counter-reset: c 9"></span></div>
+<div class="r"><span id="p67" class="ib p67" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p68" class="ib p68" style="counter-reset: c 13"></span></div>
+<div class="r"><span id="p69" class="ib p69" style="counter-reset: c 28"></span></div>
+<div class="r"><span id="p70" class="ib p70" style="counter-reset: c 14"></span></div>
+<div class="r"><span id="p71" class="ib p71" style="counter-reset: c 3"></span></div>
+<div class="r"><span id="p72" class="ib p72" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p73" class="ib p73" style="counter-reset: c 7"></span></div>
+<div class="r"><span id="p74" class="ib p74" style="counter-reset: c -7"></span></div>
+<div class="r"><span id="p75" class="ib p75" style="counter-reset: c 9"></span></div>
+<ol id="ol0" start="7" style="list-style-type: upper-roman">
+<li id="l0_0"><span id="t0_0">item</span></li>
+<li id="l0_1"><span id="t0_1">item</span></li>
+</ol>
+<ol id="ol1" start="8" style="list-style-type: cyc">
+<li id="l1_0"><span id="t1_0">item</span></li>
+<li id="l1_1"><span id="t1_1">item</span></li>
+</ol>
+<ol id="ol2" start="9" style="list-style-type: ext">
+<li id="l2_0"><span id="t2_0">item</span></li>
+<li id="l2_1"><span id="t2_1">item</span></li>
+</ol>
+<ol id="ol3" start="10" style="list-style-type: bin">
+<li id="l3_0"><span id="t3_0">item</span></li>
+<li id="l3_1"><span id="t3_1">item</span></li>
+</ol>
+<ol id="ol4" start="11" style="list-style-type: dotted">
+<li id="l4_0"><span id="t4_0">item</span></li>
+<li id="l4_1"><span id="t4_1">item</span></li>
+</ol>
+<ol id="ol5" start="12" style="list-style-type: cjk-decimal">
+<li id="l5_0"><span id="t5_0">item</span></li>
+<li id="l5_1"><span id="t5_1">item</span></li>
+</ol>
+<ol id="ol6" start="13" style="list-style-type: korean-hangul-formal">
+<li id="l6_0"><span id="t6_0">item</span></li>
+<li id="l6_1"><span id="t6_1">item</span></li>
+</ol>
+<ol id="ol7" start="14" style="list-style-type: '\2192  '">
+<li id="l7_0"><span id="t7_0">item</span></li>
+<li id="l7_1"><span id="t7_1">item</span></li>
+</ol>
+<ol id="ol8" start="15" style="list-style-type: disc">
+<li id="l8_0"><span id="t8_0">item</span></li>
+<li id="l8_1"><span id="t8_1">item</span></li>
+</ol>
+<ol id="ol9" start="16" style="list-style-type: circle">
+<li id="l9_0"><span id="t9_0">item</span></li>
+<li id="l9_1"><span id="t9_1">item</span></li>
+</ol>
+</body></html>

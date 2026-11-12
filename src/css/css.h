@@ -7,9 +7,10 @@
 #define AMB_CSS_H
 #include <stdint.h>
 #include <stddef.h>
+#include <vector.pl>
 
 /* the properties of a computed style: every value of enum(prop) but custom */
-#define CSS_NPROPS 172
+#define CSS_NPROPS 174
 
 /* a calc(), min(), max() or clamp() whose lengths are px, its percentages taken of
    basis: 1 and the px in *out, or 0 when it is none */
@@ -37,5 +38,32 @@ void css_set_scripting(int on);
 
 /* a script's selector list against the element x (src/script): 1 when x matches */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n);
+
+/* ---- container queries (CSS Conditional 5): what layout tells the cascade ----
+   The cascade answers a query that asks a container whose size it does not know as
+   false, and measures container units against the small viewport. Layout, at each query
+   container (container-type size or inline-size, its containment in force) whose content
+   box it has sized, before it lays out what is in it, hands the cascade that size: the
+   cascade then makes the container's descendants' and its pseudo-elements' styles again,
+   their queries and units answered for it, and says which changed. A change: an element
+   (pseudo 0) or one of its pseudo-elements (its css_pseudo), its style now and that
+   style's first value (0: a ::before or an ::after no longer generated) */
+typedef struct css_restyled { uint32_t node, pseudo, style, first; } css_restyled;
+
+/* the container x of d, laid out, its content box w x h px (h < 0: its block size is its
+   content's, an inline-size container): its subtree restyled, each change appended to out.
+   0 when nothing could change: the cascade that ran last was not of this store and
+   document, or x is no query container, or its subtree was made for this size already */
+int css_container_restyle(css_style *s, const dom_document *d, uint32_t x, double w, double h, vector<css_restyled> *out);
+
+/* ---- counter styles (CSS Counter Styles 3) ---- */
+
+/* the value v as the counter style named name writes it (the page's @counter-style rules,
+   then the predefined styles; decimal for a name none defines), appended to out: as a
+   marker (marker 1: its prefix and suffix about it) or as counter() writes it. Returns,
+   for a style that is one of the predefined symbol markers Chromium draws as a shape or
+   extends one, its shape: 1 disc, 2 circle, 3 square, 9 disclosure-closed, 10
+   disclosure-open; else 0 */
+int css_counter_text(const css_style *s, const char *name, size_t nn, long v, int marker, vector<char> *out);
 
 #endif

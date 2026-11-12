@@ -15,7 +15,7 @@
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
    css_imported/3, css_font_face/5, css_font_face_font/2,
    css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3, css_registered/5,
-   css_scope/3, css_match_proximity/3.
+   css_scope/3, css_match_proximity/3, css_container_unmet/2, css_container_query/3, css_rule_container/2, css_counter_style/3.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -300,5 +300,11 @@ css_diag(low_contrast, N, Text) :-
     format(atom(Text), '<~w> text ~w on ~w: contrast ~2f:1, below ~w:1', [E, Fg, Bg, Ratio, Min]).
 css_diag(unused_rule, R, Text) :-
     css_rule(R, S, Selector, _, _), css_sheet(S, author), \+ css_keyframe(R, _, _), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
+    \+ css_container_unmet(_, R),
     (   css_state(_, _) -> State = 'in the state the page was put in' ; State = 'at rest: no hover, focus or other state' ),
     format(atom(Text), 'the rule ~w matches no element (~w)', [Selector, State]).
+%% a rule in an @container whose selector matches but whose condition holds for none of the elements it matches
+css_diag(container_unmet, R, Text) :-
+    css_rule(R, _, Selector, _, _), css_rule_container(R, Q), css_container_unmet(_, R), \+ css_matched(_, R), \+ css_pseudo_matched(_, _, R),
+    css_container_query(Q, Query, _),
+    format(atom(Text), 'the rule ~w matches, but its @container ~w holds for none of the elements it matches', [Selector, Query]).

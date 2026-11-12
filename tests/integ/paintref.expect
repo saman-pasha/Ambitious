@@ -4,6 +4,8 @@ borders: 12 of 12 regions agree with Chromium's drawing
 bullets: 72 of 72 regions agree with Chromium's drawing
 cff: 24 of 24 regions agree with Chromium's drawing
 clippath: 24 of 24 regions agree with Chromium's drawing
+container-paint: 37 of 37 regions agree with Chromium's drawing
+counter-markers: 48 of 48 regions agree with Chromium's drawing
 coverage: 17 of 17 regions agree with Chromium's drawing
 darkcontrols: 31 of 31 regions agree with Chromium's drawing
 datefile: 33 of 33 regions agree with Chromium's drawing

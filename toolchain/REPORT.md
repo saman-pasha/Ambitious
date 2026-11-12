@@ -583,3 +583,34 @@ neighbours.
 
     Met in src/layout/layout.c's date fields (a field's value text or its placeholder),
     which fill the buffer with the placeholder instead.
+
+36. **A borrow of a vector's buffer passed beside the vector itself, into a call
+    that may grow it, is accepted**, and the callee reads freed memory. A borrow of
+    `data(v)` used after such a call is refused (finding 16); passed as an argument
+    of the same call, beside `&v`, it is not. 12s's layout met it when the run's
+    style tables became growable (a query container's restyle adds styles, in
+    `lay_block`): a text's style is passed as `data(*sc) + si` beside the tables
+    to `lay_chars`, which is safe only because that call never reaches
+    `lay_block` -- a comment there says so; the compiler would not have said
+    otherwise (a copy, a `lay_style` per text node, is what it would take to
+    be safe without the argument). Repro:
+
+    ```c
+    #include <stdio.h>
+    #include <vector.pl>
+    typedef struct item { int a, b; } item;
+    static int grow(vector<item> *v, const item *p) {
+        for (int i = 0; i < 1000; i++) { item x = { i, i }; push_back(v, x); }
+        return p->a;
+    }
+    int main(void) {
+        vector<item> v;
+        item first = { 7, 7 };
+        push_back(v, first);
+        printf("%d\n", grow(&v, data(v)));
+        return 0;
+    }
+    ```
+
+    compiles, and valgrind reports `Invalid read of size 4 ... inside a block of
+    size 32 free'd` (by the `realloc` of `push_back`).

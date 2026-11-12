@@ -923,6 +923,97 @@ be built side by side and merged without touching each other's.
   and computed values (156 of 156, `:hover` measured with the mouse over the
   page: `tests/pages/NAME.hover`); the mode's facts (`tests/integ/quirks.sh`);
   every standards-mode page unmoved.
+- **12s Container queries and counter styles** (`src/css/css.c`,
+  `src/css/css.h`, `contracts/css.pl`, `prolog/amb/rules/css.pl`; the
+  containers' layout, their restyle and the list markers in
+  `src/layout/layout.c`), each measured in Chromium first:
+  - `container-type` (normal, size, inline-size; scroll-state read and kept,
+    never answered), `container-name` and the `container` shorthand, computed
+    as Chromium serializes them. A size or inline-size container has that
+    containment (its content counts for nothing in its inline size; a size
+    container's auto height is as if it held nothing), makes a formatting
+    context of its own, and its counters and quotes are its subtree's (style
+    containment);
+  - `@container [name] <condition>`: width, height, inline-size, block-size,
+    aspect-ratio and orientation, in plain (`min-`, `max-`), boolean and range
+    syntax (either way round, a value between two); `and`, `or`, `not`,
+    parentheses, a list of queries; `@container` nested, inside `@media` and
+    around it; `style()` over custom properties. A query asks the nearest
+    ancestor of its name whose type has the axes its features need (an element
+    itself, for its pseudo-elements); none, or one not sized, is unknown, which
+    is false. The matches whose condition fails are kept, unmet
+    (`css_container_unmet/2`, `css_container_query/3`, `css_rule_container/2`;
+    an unused rule is not one of them, a `container_unmet` diagnostic names
+    them);
+  - the units cqw, cqh, cqi, cqb, cqmin, cqmax, against the nearest container
+    of each axis, the small viewport's without one;
+  - `@counter-style` and its descriptors: system (cyclic, numeric, alphabetic,
+    symbolic, additive, fixed and its first value, extends), symbols,
+    additive-symbols, negative, prefix, suffix, range, pad, fallback (a cycle
+    of them ends at decimal), speak-as read and ignored; Chromium's limits
+    kept (120 symbols a representation, a pad of 120 at most, its integers'
+    range). Every style Chromium predefines (62 names: its UA sheet's and the
+    algorithms it writes in C++, the CJK longhands, Hebrew, Armenian, Ethiopic
+    numeric), for `list-style-type` (a name or a string) and `counter()` and
+    `counters()`.
+    A marker of text is the style's representation with its prefix and suffix,
+    outside ending at the content box as Chromium places it, its right-to-left
+    letters in order; disc, circle, square, the disclosure triangles and the
+    styles extending them are shapes, as before.
+
+  The cycle between style and layout is broken as Chromium breaks it, by
+  interleaving: a size query needs the container's size, which needs the
+  styles. The cascade cannot know a size, so it answers what it can (style
+  queries; size queries unknown, which is false; container units the small
+  viewport's), keeps every @container rule's match with its answer, and keeps
+  its working state for the store (`css_cq`: each node's matches and records,
+  the style table and its sharing). Layout, at each container whose content
+  box it has sized (its width; a size container's height too, definite or as
+  if empty) and before it lays out the children, calls
+  `css_container_restyle`: the subtree's matched lists are rebuilt from the
+  kept matches, their conditions asked again, the styles made through the
+  same shared table (a style that reads container units keyed by their bases
+  too), and layout's tables take the changed nodes' and pseudo-elements'
+  styles and its generated content again, from the counters it entered with.
+  No subtree is laid out twice for it, and a page without `@container` or
+  container units does nothing more. Rejected: laying the page out, then
+  cascading each container's subtree again and laying out again until nothing
+  changes. That lays each container's subtree out twice or more, so a page of
+  containers costs twice as much, and a cycle needs a cap.
+
+  Cost (callgrind's instructions, `ambitious bench`, before and after):
+  without containers, the cascade from -1.6% (a11y) to +1.8% (medium,
+  scripted), mostly the two new properties every style holds (155 values a
+  style, from 153), and layout from -0.5% (news) to +1.4% (scripted). On a
+  page of 200 cards, each a container whose rules lay it out, size its title
+  and generate a badge (`cards-cq`), the restyles are 3.3M instructions, 8.6%
+  of its layout (16.5K a container: matched lists and conditions 1.2M, styles
+  made 0.7M, generated content walked again 1.1M), and its cascade 14% more
+  than the same page's with no container and its narrow rules written plainly
+  (`cards-plain`: 12.3M against 10.8M); its cascade and layout together
+  (50.8M) are less than the plain page's (55.2M), the containment sparing the
+  grid its items' contents. Wall time, ms, the cascade and layout, before
+  and after (the medians of seven rounds of ten runs, the two binaries in
+  turn, on a shared machine): news 0.36 and 0.28, then 0.37 and 0.27;
+  layout.html 0.51 and 0.39, then 0.50 and 0.40; style 0.42 and 0.19, then
+  0.43 and 0.19; a11y 0.55 and 0.31, then 0.57 and 0.28; medium 1.69 and
+  1.70, then 1.65 and 1.64; large 4.86 and 16.52, then 5.18 and 16.54;
+  scripted 2.20 and 6.96, then 2.01 and 6.81; cards-cq 0.82 and 2.86 (its
+  @container rules skipped), then 1.04 and 2.94; cards-plain 0.86 and 2.96,
+  then 0.86 and 3.01.
+
+  Gates: `tests/pages/container.html` (boxes, 49 of 49), `container-paint.html`
+  (regions, 37 of 37), `container-values.html` (computed values, 125 of 125),
+  `counter-styles.html` (boxes, 126 of 126), `counter-markers.html` (regions,
+  48 of 48), `counter-values.html` (computed values, 27 of 27);
+  `tests/exec/counter_styles` (the 62 styles from 0 to 123456789 and below 0,
+  and the test's own 33 rules, invalid ones among them, with names in other
+  cases and unknown ones, as `counter()` writes them and as markers: 4,716
+  lines, Chromium's line for line), `tests/exec/container_queries` (the
+  restyle case by case; valgrind clean); layout.html's markers as Chromium
+  draws them (8.8% of their region's pixels differed; none do), and the
+  ordered lists' of quirks-margins.html and a11y-states.html (66 and 60
+  pixels of their regions differed; 4 and 0 do).
 - **12t SVG, the rest of it** (`src/paint/svg.c`, `src/paint/svg.h`; a glyph's
   outline in `src/paint/font.c`; SVG's new properties in `contracts/css.pl` and
   `src/css/css.c`; an SVG image element's picture fetched by `src/net/net.c` and drawn
@@ -1062,7 +1153,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12r and 12t merged, each with its own files and gate; 12s and 12u under way |
+| 12 The limitations | **in progress**: the packages 12a-12u merged, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks

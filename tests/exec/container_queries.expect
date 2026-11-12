@@ -1,0 +1,36 @@
+an inline-size container's query and units (ok, invariants: 0 broken)
+  #a color rgb(255, 0, 0)
+  #a block: content 8,8 200x20
+    line 200x20: [text 'wide']
+a size container: its auto height its content's as if empty, its units in both axes (ok, invariants: 0 broken)
+  #t color rgb(0, 0, 0)
+  #t block: content 13,13 300x0
+  #a color rgb(0, 0, 0)
+  #a block: content 13,13 30x0
+nested containers: the nearest answers, a named one by its name (ok, invariants: 0 broken)
+  #a color rgb(0, 128, 0)
+  #a block: content 8,24 300x20
+    line 300x20: [text 'inner']
+  #b color rgb(0, 0, 255)
+  #b block: content 8,60 300x20
+    line 300x20: [text 'outer's']
+a ::before a query generates, counters inside a container (ok, invariants: 0 broken)
+  #a color rgb(0, 0, 0)
+  #a block: content 8,24 300x20
+    line 300x20: [generated '[1]'] [text 'x']
+  #b color rgb(0, 0, 0)
+  #b block: content 8,76 784x20
+    line 784x20: [text 'y']
+a container as a flex item: laid out at its flexed width, its query answered for it (ok, invariants: 0 broken)
+  #t color rgb(0, 0, 0)
+  #t flex: content 8,8 500x20
+  #a color rgb(0, 0, 0)
+  #b color rgb(255, 0, 0)
+a shrinking container is as wide as its own edges (ok, invariants: 0 broken)
+  #a color rgb(0, 0, 0)
+  #a block: content 12,12 0x20
+    line 0x20: [text 'shrink']
+a page with no container query after those with them (ok, invariants: 0 broken)
+  #a color rgb(255, 0, 0)
+  #a block: content 8,16 784x20
+    line 784x20: [text 'plain']
