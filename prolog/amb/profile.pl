@@ -9,7 +9,12 @@
 %%   amb_profile_bookmark(Url, Title, Time)        a page kept, when
 %%   amb_profile_permission(Site, Kind, Decision)  may a site's pages load a kind of
 %%                                                 resource: allow or deny
-%%   amb_profile_pref(Key, Value)                  a preference
+%%   amb_profile_pref(Key, Value)                  a preference. Four change how pages
+%%                                                 are drawn: font_size (px, 6 to 72),
+%%                                                 color_scheme (light, dark),
+%%                                                 reduced_motion (no_preference, reduce)
+%%                                                 and zoom (0.25 to 5); the shell hands
+%%                                                 them to the stages (src/rt/amb_prefs.h)
 %%   amb_profile_session(Name, Order, Url)         a saved list of pages
 %%   amb_profile_retention(Days)                   visits older are deleted
 %%
@@ -52,6 +57,35 @@ amb_profile_session_pages(S, Urls) :-
     amb_profile_saved(S, _),
     findall(O-U, ( amb_profile_tab(S, T, O, _), amb_profile_tab_url(S, T, U) ), Ps), msort(Ps, Ss),
     findall(U, member(_-U, Ss), Urls).
+
+%% the preferences that change how pages are drawn: each one's default, and the test
+%% its value must pass
+amb_profile_rendering_pref(font_size, 16).
+amb_profile_rendering_pref(color_scheme, light).
+amb_profile_rendering_pref(reduced_motion, no_preference).
+amb_profile_rendering_pref(zoom, 1).
+amb_profile_pref_valid(font_size, V) :- number(V), V >= 6, V =< 72.
+amb_profile_pref_valid(color_scheme, V) :- memberchk(V, [light, dark]).
+amb_profile_pref_valid(reduced_motion, V) :- memberchk(V, [no_preference, reduce]).
+amb_profile_pref_valid(zoom, V) :- number(V), V >= 0.25, V =< 5.
+%% a rendering preference as pages are drawn with it: the reader's, when it is valid,
+%% else its default
+amb_profile_rendering(K, V) :-
+    amb_profile_rendering_pref(K, D),
+    (   amb_profile_pref(K, V0), amb_profile_pref_valid(K, V0) -> V = V0 ; V = D ).
+%% the size, in device px, text set at the base font size is drawn at
+amb_profile_text_px(Px) :- amb_profile_rendering(font_size, F), amb_profile_rendering(zoom, Z), Px is F * Z.
+
+%% WHAT IS WRONG WITH THE PREFERENCES:
+%% a rendering preference whose value is none it takes (kept from before it was checked)
+amb_profile_fault(bad_pref, pref(K), Text) :-
+    amb_profile_rendering_pref(K, D), amb_profile_pref(K, V), \+ amb_profile_pref_valid(K, V),
+    format(atom(Text), 'the preference ~w is ~q, which it cannot be: pages are drawn with ~w', [K, V, D]).
+%% text drawn smaller than 9 px, which the base font size and the zoom make together
+amb_profile_fault(small_text, prefs, Text) :-
+    amb_profile_text_px(Px), Px < 9,
+    amb_profile_rendering(font_size, F), amb_profile_rendering(zoom, Z),
+    format(atom(Text), 'text at the base font size is drawn ~w px high (font_size ~w at zoom ~w), under 9 px', [Px, F, Z]).
 
 %% WHAT IS WRONG WITH A SAVED SESSION, as amb_profile_fault(Kind, Subject, Text):
 %% a tab restored to a page that failed to load when the tab showed it again
@@ -104,7 +138,17 @@ amb_pk([permit, Site, Kind, D]) :- !,
     ;   throw(error(amb_profile(bad_permission(Kind, D)), _)) ),
     retractall(amb_profile_permission(Site, Kind, _)), assertz(amb_profile_permission(Site, Kind, D)),
     format('~w: ~w ~w~n', [Site, D, Kind]).
-amb_pk([prefer, Key, Value]) :- !, retractall(amb_profile_pref(Key, _)), assertz(amb_profile_pref(Key, Value)).
+%% a preference kept; a rendering one only with a value it takes, a number as a number
+amb_pk([prefer, Key, Value]) :- !,
+    (   amb_profile_rendering_pref(Key, _)
+    ->  ( atom_number(Value, N) -> V = N ; V = Value ),
+        (   amb_profile_pref_valid(Key, V) -> true ; throw(error(amb_profile(bad_pref(Key, Value)), _)) )
+    ;   V = Value ),
+    retractall(amb_profile_pref(Key, _)), assertz(amb_profile_pref(Key, V)),
+    format('~w: ~w~n', [Key, V]).
+%% the rendering preferences, each as pages are drawn with it, a line each for the
+%% engine (src/rt/amb_prefs.h reads them)
+amb_pk([prefs]) :- !, forall(amb_profile_rendering_pref(K, _), ( amb_profile_rendering(K, V), format('pref(~w, ~w).~n', [K, V]) )).
 amb_pk([save_session, Name|Urls]) :- !,
     retractall(amb_profile_session(Name, _, _)),
     forall(nth1(I, Urls, U), assertz(amb_profile_session(Name, I, U))),

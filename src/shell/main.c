@@ -31,6 +31,7 @@
  *   ambitious advise PAGE [--apply]  the reasoner's advice, applied as one batch
  *   ambitious history | bookmarks | bookmark URL [TITLE] | forget URL | forget --site SITE
  *           | forget --since TIME | permit SITE KIND allow|deny | retain DAYS | profile GOAL
+ *           | prefer KEY VALUE | prefs     (font_size, color_scheme, reduced_motion, zoom)
  *                                 the profile: what is kept between runs
  *
  * The profile (prolog/amb/profile.pl) is a cocolog store a keeper process holds:
@@ -78,6 +79,7 @@ amb_interface(script);
 #include "../script/script.h"
 #include "../html/encoding.h"
 #include "../rt/amb_proc.h"
+#include "../rt/amb_prefs.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -99,6 +101,7 @@ typedef struct session {
     char profile[1024];        /* the profile's store directory; empty: none (or a private one) */
     int private_mode;
     int use;
+    amb_prefs prefs;           /* the reader's preferences the stages are handed (src/rt/amb_prefs.h) */
     amb_sandbox sb;            /* the reasoner's (src/rt/amb_proc.c) */
     amb_reasoner rs[AMB_TABS];
 } session;
@@ -136,6 +139,7 @@ static int session_open(session *s) {
     char rdir[700];
     session_path(s, "reason", rdir, sizeof rdir);
     amb_sandbox_init(&s->sb, rdir);
+    amb_prefs_default(&s->prefs);
     s->use = -1;
     for (int i = 0; i < AMB_TABS; i++) {
         char held[700], err[700], hn[32], en[32];
@@ -551,8 +555,53 @@ static int cmd_snapshot(const char *path) {
 #define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax, &sr, &vm
 /* the virtual time a page's timers run for before it is taken to be at rest, ms */
 #define SCRIPT_HORIZON 10000.0
-/* a page command's session: its files, the reasoner, the profile */
-#define PAGE_SESSION session s; if (!session_open(&s)) return 2
+/* the reader's preferences, from the profile when there is one (its keeper's prefs):
+   each as pages are drawn with it. A private session opens no profile, and draws with
+   the defaults */
+static void session_prefs(session *s) {
+    if (s->private_mode || !s->profile[0]) return;
+    char out[700];
+    session_path(s, "profile.out", out, sizeof out);
+    vector<char> text;
+    if (keep(s, "prefs", 0, 0, 0, out) != 0 || !read_all(out, &text)) return;
+    push_back(text, 0);
+    const char *t = data(text);
+    for (size_t i = 0; t[i];) {
+        if (amb_prefs_line(&s->prefs, t + i)) s->prefs.from_profile = 1;
+        while (t[i] && t[i] != '\n') i++;
+        if (t[i]) i++;
+    }
+}
+
+/* a page command's session: its files, the reasoner, the profile, the reader's preferences */
+#define PAGE_SESSION session s; if (!session_open(&s)) return 2; session_prefs(&s)
+
+/* ---- the stages, each handed the reader's preferences (Phase 12i, 4) ----
+   Every command runs the cascade, layout and paint through these, so each stage's call
+   has the preferences beside it (src/rt/amb_prefs.h says what each is to do). The
+   stages do not take them yet: the rendering package's functions are to, as
+   css_cascade(st, d, nt, pr): font_size the initial font-size and rem's root, the
+   media features prefers-color-scheme and prefers-reduced-motion, the viewport for
+   media queries width / zoom; layout_run(lt, d, st, nt, VIEW_W / pr->zoom, VIEW_H /
+   pr->zoom, pr): the layout viewport in CSS px; amb_paint(lt, nt, c, pr) and
+   amb_paint_view(lt, nt, c, y, h, pr): each CSS px pr->zoom device px, the canvas
+   dark under a dark scheme. Until then a page is drawn as before, whatever they are */
+static void page_cascade(css_style *st, dom_document *d, net_loader *nt, const amb_prefs *pr) {
+    (void)pr;
+    css_cascade(st, d, nt);
+}
+static void page_layout(layout_tree *lt, dom_document *d, css_style *st, net_loader *nt, const amb_prefs *pr) {
+    (void)pr;
+    layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
+}
+static void page_paint(const layout_tree *lt, const net_loader *nt, amb_canvas *c, const amb_prefs *pr) {
+    (void)pr;
+    amb_paint(lt, nt, c);
+}
+static void page_paint_view(const layout_tree *lt, const net_loader *nt, amb_canvas *c, double y, double h, const amb_prefs *pr) {
+    (void)pr;
+    amb_paint_view(lt, nt, c, y, h);
+}
 
 /* the URL of a page named by a URL or by a file's path */
 static void page_url(const char *page, char *out, size_t cap) {
@@ -691,8 +740,8 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
         page_clicks(d, vm);
     }
     script_settle(vm);
-    css_cascade(st, d, nt);
-    layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
+    page_cascade(st, d, nt, &s->prefs);
+    page_layout(lt, d, st, nt, &s->prefs);
     a11y_build(ax, d, st);
     char title[512], when[32];
     page_title(d, title, sizeof title);
@@ -784,7 +833,7 @@ static int cmd_render(const char *page, const char *png) {
     if (!load_page(&s, page, PAGE_ARGS)) return 2;
     amb_canvas c = {0};
     defer(c) { AMB_CANVAS_DROP(c); }
-    amb_paint(&lt, &nt, &c);
+    page_paint(&lt, &nt, &c, &s.prefs);
     own FILE *f = fopen(png, "wb");
     if (!f) { fprintf(stderr, "ambitious: cannot write %s\n", png); return 2; }
     defer(f) { fclose(f); }
@@ -847,19 +896,19 @@ static int cmd_bench(const char *page, int n) {
         double e2 = now_ms();
         script_settle(&vm);
         double e3 = now_ms();
-        css_cascade(&st, &d, &nt);
+        page_cascade(&st, &d, &nt, &s.prefs);
         double f = now_ms();
-        layout_run(&lt, &d, &st, &nt, VIEW_W, VIEW_H);
+        page_layout(&lt, &d, &st, &nt, &s.prefs);
         double g = now_ms();
         a11y_build(&ax, &d, &st);
         double h = now_ms();
         amb_canvas cv = {0};
         defer(cv) { AMB_CANVAS_DROP(cv); }
-        amb_paint(&lt, &nt, &cv);
+        page_paint(&lt, &nt, &cv, &s.prefs);
         double i = now_ms();
         amb_canvas vw = {0};
         defer(vw) { AMB_CANVAS_DROP(vw); }
-        amb_paint_view(&lt, &nt, &vw, 0, VIEW_H);
+        page_paint_view(&lt, &nt, &vw, 0, VIEW_H, &s.prefs);
         double i2 = now_ms();
         own FILE *nul = fopen("/dev/null", "wb");
         if (!nul) return 2;
@@ -1000,15 +1049,15 @@ static int cmd_script(const char *page) {
 
 /* the page's cascade, layout and accessibility tree made anew over its document as it
    is now (after a click, say), in stores of their own, and its snapshot written */
-static int session_snapshot(dom_document *d, const html_parser *p, net_loader *nt, const script_runtime *sr, const char *path) {
+static int session_snapshot(dom_document *d, const html_parser *p, net_loader *nt, const script_runtime *sr, const amb_prefs *pr, const char *path) {
     css_style st;
     layout_tree lt;
     a11y_tree ax;
     css_init(&st, 1);
     layout_init(&lt, 1);
     a11y_init(&ax, 1);
-    css_cascade(&st, d, nt);
-    layout_run(&lt, d, &st, nt, VIEW_W, VIEW_H);
+    page_cascade(&st, d, nt, pr);
+    page_layout(&lt, d, &st, nt, pr);
     a11y_build(&ax, d, &st);
     return write_page_snapshot(d, p, &st, &lt, nt, &ax, sr, path);
 }
@@ -1334,6 +1383,12 @@ static int session_page(session *s, vector<tab_rec> *tabs, vector<entry_rec> *en
         }
         if (strcmp(cmd, "tabs") == 0) { tabs_list(tabs, entries, pool, *cur); continue; }
         if (strcmp(cmd, "save") == 0) { session_save(s, *arg ? arg : "last", tabs, entries, pool, *cur, 1); continue; }
+        if (strcmp(cmd, "prefs") == 0) {
+            printf("the stages are handed: font_size %g px, color_scheme %s, reduced_motion %s, zoom %g (%s)\n", s->prefs.font_size,
+                   s->prefs.color_scheme == AMB_SCHEME_DARK ? "dark" : "light", s->prefs.reduced_motion ? "reduce" : "no_preference",
+                   s->prefs.zoom, s->prefs.from_profile ? "the profile's" : "the defaults");
+            continue;
+        }
         if (!len(*tabs)) { printf("no tab: open one first\n"); continue; }
         if (strcmp(cmd, "tab") == 0) {
             int w = atoi(arg);
@@ -1416,7 +1471,7 @@ static int session_page(session *s, vector<tab_rec> *tabs, vector<entry_rec> *en
         if (ask || plain || (!fresh && strcmp(cmd, "snapshot") == 0)) {
             if (dirty) {
                 double t0 = now_ms();
-                if (!session_snapshot(&d, &p, &nt, &sr, snap)) { printf("the snapshot could not be written\n"); continue; }
+                if (!session_snapshot(&d, &p, &nt, &sr, &s->prefs, snap)) { printf("the snapshot could not be written\n"); continue; }
                 if (getenv("AMB_TIMES")) fprintf(stderr, "ambitious: the page styled, laid out and its snapshot written in %.1f ms\n", now_ms() - t0);
                 dirty = 0;
             }
@@ -1461,6 +1516,7 @@ static int session_lines(FILE *in, int echo, int restore) {
     session s;
     if (!session_open(&s)) return 2;
     defer(s) { session_close(&s); }
+    session_prefs(&s);
     vector<tab_rec> tabs;
     vector<entry_rec> entries;
     vector<click_rec> clicks;
@@ -1578,6 +1634,8 @@ int main(int argc, char **argv) {
     if (argc >= 4 && strcmp(argv[1], "forget") == 0 && strcmp(argv[2], "--since") == 0) return cmd_profile("forget_since", argv[3], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "forget") == 0) return cmd_profile("forget", argv[2], 0, 0);
     if (argc >= 5 && strcmp(argv[1], "permit") == 0) return cmd_profile("permit", argv[2], argv[3], argv[4]);
+    if (argc >= 4 && strcmp(argv[1], "prefer") == 0) return cmd_profile("prefer", argv[2], argv[3], 0);
+    if (argc >= 2 && strcmp(argv[1], "prefs") == 0) return cmd_profile("prefs", 0, 0, 0);
     if (argc >= 3 && strcmp(argv[1], "retain") == 0) return cmd_profile("retain", argv[2], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "profile") == 0) return cmd_profile("query", argv[2], 0, 0);
     if (argc >= 3 && strcmp(argv[1], "js") == 0) return cmd_js(argv[2]);

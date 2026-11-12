@@ -6,7 +6,7 @@
 %% The commands: visit URL TITLE TIME, bookmark URL TITLE, unbookmark URL, permit SITE KIND
 %% allow|deny, prefer KEY VALUE, save_session NAME URL..., session NAME, retain DAYS,
 %% forget URL, forget_site SITE, forget_since TIME, history, bookmarks, permissions,
-%% denied SITE, stats, query GOAL; and a session's tabs: save_tabs NAME FILE TIME, tabs
+%% denied SITE, stats, query GOAL, prefs; and a session's tabs: save_tabs NAME FILE TIME, tabs
 %% NAME, sessions, faults. Exit 0 done, 2 refused.
 :- ensure_loaded(library(amb/profile)).
 
