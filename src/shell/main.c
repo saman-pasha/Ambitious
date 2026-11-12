@@ -585,32 +585,41 @@ static void session_prefs(session *s) {
 
 /* ---- the stages, each handed the reader's preferences (Phase 12i, 4) ----
    Every command runs the cascade, layout and paint through these, so each stage's call
-   has the preferences beside it (src/rt/amb_prefs.h says what each is to do). The
-   stages do not take them yet: the rendering package's functions are to, as
-   css_cascade(st, d, nt, pr): font_size the initial font-size and rem's root, the
-   media features prefers-color-scheme and prefers-reduced-motion, the viewport for
-   media queries width / zoom; layout_run(lt, d, st, nt, VIEW_W / pr->zoom, VIEW_H /
-   pr->zoom, pr): the layout viewport in CSS px; amb_paint(lt, nt, c, pr) and
-   amb_paint_view(lt, nt, c, y, h, pr): each CSS px pr->zoom device px, the canvas
-   dark under a dark scheme. Until then a page is drawn as before, whatever they are */
+   has the preferences beside it (src/rt/amb_prefs.h says what each is to do): the
+   cascade reads the default font size, the colour scheme and reduced motion, and the
+   viewport the zoom leaves (css_set_env); layout runs over that viewport, in CSS px;
+   paint draws the page at its CSS px and scales it zoom device px each */
 static void page_state(css_style *st, dom_document *d);
-/* the cascade, after the page's states asked for (--hover, --focus, --active) */
+/* the cascade, after the page's states asked for (--hover, --focus, --active), with the
+   reader's preferences: the viewport the zoom leaves, the default font size, the colour
+   scheme and reduced motion as the media queries see them */
 static void page_cascade(css_style *st, dom_document *d, net_loader *nt, const amb_prefs *pr) {
-    (void)pr;
+    double z = pr && pr->zoom > 0 ? pr->zoom : 1;
+    css_set_env(VIEW_W / z, VIEW_H / z, pr ? pr->font_size : 16, pr && pr->color_scheme == AMB_SCHEME_DARK, pr && pr->reduced_motion);
     page_state(st, d);
     css_cascade(st, d, nt);
 }
+/* the layout over the viewport in CSS px: the window over the zoom */
 static void page_layout(layout_tree *lt, dom_document *d, css_style *st, net_loader *nt, const amb_prefs *pr) {
-    (void)pr;
-    layout_run(lt, d, st, nt, VIEW_W, VIEW_H);
+    double z = pr && pr->zoom > 0 ? pr->zoom : 1;
+    layout_run(lt, d, st, nt, VIEW_W / z, VIEW_H / z);
 }
+/* the page drawn at its CSS px, then, zoomed, scaled to the device's */
 static void page_paint(const layout_tree *lt, const net_loader *nt, amb_canvas *c, const amb_prefs *pr) {
-    (void)pr;
-    amb_paint(lt, nt, c);
+    double z = pr && pr->zoom > 0 ? pr->zoom : 1;
+    if (z == 1) { amb_paint(lt, nt, c); return; }
+    amb_canvas css = {0};
+    defer(css) { AMB_CANVAS_DROP(css); }
+    amb_paint(lt, nt, &css);
+    amb_canvas_zoom(&css, c, z);
 }
 static void page_paint_view(const layout_tree *lt, const net_loader *nt, amb_canvas *c, double y, double h, const amb_prefs *pr) {
-    (void)pr;
-    amb_paint_view(lt, nt, c, y, h);
+    double z = pr && pr->zoom > 0 ? pr->zoom : 1;
+    if (z == 1) { amb_paint_view(lt, nt, c, y, h); return; }
+    amb_canvas css = {0};
+    defer(css) { AMB_CANVAS_DROP(css); }
+    amb_paint_view(lt, nt, &css, y / z, h / z);
+    amb_canvas_zoom(&css, c, z);
 }
 
 /* the URL of a page named by a URL or by a file's path */

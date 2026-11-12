@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<title>Preferences</title>
+<style>
+/* tests/pages/prefs.html: what the reader's preferences change in a page -- the default
+   font size (an inherited size, rem, em, the keywords, a media query's em), the colour
+   scheme and reduced motion as media queries see them, and the viewport a zoom leaves
+   (max-width, vw and vh). tools/bench/prefs.js writes Chromium's under each setting.
+   Every line 20px high and no text wrapped: the boxes measure what the settings change,
+   not the faces' line metrics */
+body { margin: 8px; line-height: 20px; white-space: nowrap; }
+#rem { font-size: 1.5rem; width: 10rem; }
+#em { font-size: 2em; }
+#small { font-size: small; }
+#large { font-size: x-large; }
+#mq { color: rgb(0, 0, 0); }
+@media (prefers-color-scheme: dark) { #mq { color: rgb(200, 200, 255); background: rgb(20, 20, 40); } }
+#motion { width: 100px; }
+@media (prefers-reduced-motion: reduce) { #motion { width: 50px; } }
+#motion2 { width: 80px; }
+@media (prefers-reduced-motion) { #motion2 { width: 60px; } }
+#narrow { width: 300px; }
+@media (max-width: 500px) { #narrow { width: 150px; } }
+#vw { width: 50vw; height: 10vh; }
+#emq { width: 100px; }
+@media (min-width: 30em) { #emq { width: 222px; } }
+</style>
+</head>
+<body>
+<p id="plain">Plain text in the default size.</p>
+<p id="rem">rem text</p>
+<p id="em">em text</p>
+<p id="small">small</p>
+<p id="large">x-large</p>
+<div id="mq">a colour by the scheme</div>
+<div id="motion">motion</div>
+<div id="motion2">motion alone</div>
+<div id="narrow">narrow</div>
+<div id="vw"></div>
+<div id="emq">a media query in em</div>
+</body>
+</html>

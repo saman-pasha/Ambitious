@@ -5,9 +5,10 @@
 # no_preference or reduce, zoom 0.25 to 5) and each with its default; its rules state
 # what is wrong with them: text drawn under 9 px, and a value kept from before values
 # were checked (written here straight into the store). The shell reads them for every
-# page command and session and hands them to the stages; the cascade, layout and paint
-# take them when the rendering package lands, so a page is drawn the same with them
-# as without. Paths are written WORK.
+# page command and session and hands them to the stages: the cascade reads the default
+# font size, the colour scheme and reduced motion, layout the viewport the zoom leaves,
+# paint draws zoomed (tests/integ/prefsref.sh holds them to Chromium's). Paths are
+# written WORK.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 . "$AMB_ROOT/toolchain/env.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-prefs.XXXXXX")
@@ -47,6 +48,9 @@ prefs
 quit
 EOF
 echo "-- a page drawn with the reader's preferences and with none:"
-amb render "$AMB_ROOT/tests/pages/style.html" "$work/with.png" | sed 's/^/with:    /'
-sh "$AMB_ROOT/bin/ambitious" render "$AMB_ROOT/tests/pages/style.html" "$work/none.png" 2>&1 | sed 's/^/without: /'
+amb render "$AMB_ROOT/tests/pages/prefs.html" "$work/with.png" | sed 's/^/with:    /'
+sh "$AMB_ROOT/bin/ambitious" render "$AMB_ROOT/tests/pages/prefs.html" "$work/none.png" 2>&1 | sed 's/^/without: /'
+echo "-- zoomed 2: laid out in a 400 x 300 px viewport, drawn twice as large:"
+amb prefer zoom 2 > /dev/null
+amb render "$AMB_ROOT/tests/pages/prefs.html" "$work/zoom.png"
 rm -rf "$work"

@@ -27,6 +27,12 @@ int css_length_eval(const char *s, size_t n, double basis, double *out);
    length; 0 at the end of s. Parentheses and quotes are kept whole */
 int css_next_part(const char *s, size_t n, size_t *i, size_t *start, size_t *len);
 
+/* the reader's settings each cascade from now on reads: the viewport in CSS px (what
+   media queries and vw, vh read), the default font size in px (medium, the root's, rem's),
+   prefers-color-scheme dark (1) and prefers-reduced-motion reduce (1). Unset: 800 x 600,
+   16 px, light, no preference */
+void css_set_env(double view_w, double view_h, double font_size, int dark, int reduced_motion);
+
 /* a script's selector list against the element x (src/script): 1 when x matches */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n);
 

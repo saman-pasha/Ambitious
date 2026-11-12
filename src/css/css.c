@@ -19,7 +19,9 @@
    not take drops its declaration, as CSS has it.
 
    Values: px and the absolute units, em, ex and ch (half an em), rem (the
-   root's font size), the viewport's units against 800 x 600; calc(), min(),
+   root's font size), the viewport's units against the reader's viewport (800 x 600
+   over the zoom: css_set_env, which also gives the default font size and the
+   prefers-color-scheme and prefers-reduced-motion media features); calc(), min(),
    max() and clamp() over them, reckoned once the font is known, a percentage
    kept beside px for layout (under min(), max() and clamp(), the expression
    kept as text, its lengths made px). Custom properties (--name) are
@@ -80,8 +82,22 @@ amb_implementation(css);
 #include "../net/url.h"
 
 #define CSS_MAXPARTS 32
-#define CSS_VIEWPORT_W 800.0
-#define CSS_VIEWPORT_H 600.0
+/* the reader's settings the cascade reads (css_set_env, from the profile's preferences):
+   the viewport media queries and the viewport units read, in CSS px (the window over
+   the zoom); the default font size (medium, font-size's initial value, rem's at the root,
+   a media query's em); prefers-color-scheme and prefers-reduced-motion */
+static double css_view_w = 800.0, css_view_h = 600.0, css_font_px = 16.0;
+static int css_pref_dark = 0, css_pref_reduce = 0;
+#define CSS_VIEWPORT_W css_view_w
+#define CSS_VIEWPORT_H css_view_h
+
+void css_set_env(double view_w, double view_h, double font_size, int dark, int reduced_motion) {
+    css_view_w = view_w > 0 ? view_w : 800.0;
+    css_view_h = view_h > 0 ? view_h : 600.0;
+    css_font_px = font_size > 0 ? font_size : 16.0;
+    css_pref_dark = dark != 0;
+    css_pref_reduce = reduced_motion != 0;
+}
 /* a selector's functional pseudo-classes nest at most so deep, and one match of an
    element against a selector tests at most so many compounds: a selector made to
    recurse or to backtrack without end matches nothing, and costs no more */
@@ -1927,20 +1943,21 @@ static int css_media_feature(const char *s, size_t n) {
     while (b > a && css_ws(s[b - 1])) b--;
     const char *name = s + a;
     size_t nn = b - a;
-    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer");
+    if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer") ||
+                       css_eq_ci(name, nn, "prefers-color-scheme") || (css_eq_ci(name, nn, "prefers-reduced-motion") && css_pref_reduce);
     size_t va = css_skip_ws(s, n, c + 1), vb = n;
     while (vb > va && css_ws(s[vb - 1])) vb--;
     css_val v;
     if (!css_parse_val(s + va, vb - va, &v)) return 0;
-    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * 16 : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
+    double px = v.unit == CSS_UNIT_PX ? v.num : v.unit == CSS_UNIT_EM ? v.num * css_font_px : v.unit == CSS_UNIT_NUMBER && v.num == 0 ? 0 : -1;
     if (css_eq_ci(name, nn, "min-width")) return px >= 0 && CSS_VIEWPORT_W >= px;
     if (css_eq_ci(name, nn, "max-width")) return px >= 0 && CSS_VIEWPORT_W <= px;
     if (css_eq_ci(name, nn, "width")) return px == CSS_VIEWPORT_W;
     if (css_eq_ci(name, nn, "min-height")) return px >= 0 && CSS_VIEWPORT_H >= px;
     if (css_eq_ci(name, nn, "max-height")) return px >= 0 && CSS_VIEWPORT_H <= px;
     if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
-    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, "light");
-    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, "no-preference");
+    if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, css_pref_dark ? "dark" : "light");
+    if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, css_pref_reduce ? "reduce" : "no-preference");
     return 0;
 }
 
@@ -3128,18 +3145,31 @@ static size_t css_value_text(const css_val *v, char *buf, size_t cap) {
     return (size_t)n < cap ? (size_t)n : cap - 1;
 }
 
+/* font-size's absolute keywords against the default font size, as Chromium has them: a
+   default of 9 to 16 px through its table (FontSizeFunctions' strict one), another by
+   CSS Fonts 4's scaling factors */
+static const int css_size_table[8][8] = {
+    { 9, 9, 9, 9, 11, 14, 18, 27 }, { 9, 9, 9, 10, 12, 15, 20, 30 }, { 9, 9, 10, 11, 13, 17, 22, 33 },
+    { 9, 9, 10, 12, 14, 18, 24, 36 }, { 9, 10, 12, 13, 14, 19, 26, 39 }, { 9, 10, 12, 14, 15, 20, 28, 42 },
+    { 9, 10, 13, 15, 16, 21, 30, 45 }, { 9, 10, 13, 16, 18, 24, 32, 48 } };
+static double css_size_of(int k) {
+    static const double factor[8] = { 0.6, 0.75, 0.89, 1.0, 1.2, 1.5, 2.0, 3.0 };
+    int row = (int)(css_font_px + 0.5);
+    if (css_font_px == (double)row && row >= 9 && row <= 16) return css_size_table[row - 9][k];
+    return css_font_px * factor[k];
+}
 /* font-size's keywords (CSS Fonts 4, 2.5), against the parent's size for smaller and larger */
 static double css_size_keyword(const char *w, double parent) {
-    if (strcmp(w, "xx-small") == 0) return 9;
-    if (strcmp(w, "x-small") == 0) return 10;
-    if (strcmp(w, "small") == 0) return 13;
-    if (strcmp(w, "large") == 0) return 18;
-    if (strcmp(w, "x-large") == 0) return 24;
-    if (strcmp(w, "xx-large") == 0) return 32;
-    if (strcmp(w, "xxx-large") == 0) return 48;
+    if (strcmp(w, "xx-small") == 0) return css_size_of(0);
+    if (strcmp(w, "x-small") == 0) return css_size_of(1);
+    if (strcmp(w, "small") == 0) return css_size_of(2);
+    if (strcmp(w, "large") == 0) return css_size_of(4);
+    if (strcmp(w, "x-large") == 0) return css_size_of(5);
+    if (strcmp(w, "xx-large") == 0) return css_size_of(6);
+    if (strcmp(w, "xxx-large") == 0) return css_size_of(7);
     if (strcmp(w, "smaller") == 0) return parent / 1.2;
     if (strcmp(w, "larger") == 0) return parent * 1.2;
-    return 16;
+    return css_font_px;
 }
 
 /* the text t with every font- and viewport-relative length made px and currentcolor made
@@ -4177,7 +4207,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     if (!css_ready) css_order_make();
     css_env env;
     memset(&env, 0, sizeof env);
-    env.rem = 16;
+    env.rem = css_font_px;
     /* the web fonts' families whose font was fetched: each a word of env.faces, lower case
        and without its spaces, as font-family's names are matched */
     for (uint32_t fi = 1; fi < s->face_len; fi++) {
@@ -4205,6 +4235,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         if (v.unit == CSS_UNIT_TEXT) v.tx = text_add(s, css_pdefs[k].init, il);
         initial[k] = v;
     }
+    /* the default font size the reader chose: the root's, which the page's inherit */
+    initial[CSS_PROP_FONT_SIZE].num = css_font_px;
     css_par ipar;
     css_par_of(s, 0, initial, &ipar);
     for (int k = 0; k < CSS_NPROPS; k++) {

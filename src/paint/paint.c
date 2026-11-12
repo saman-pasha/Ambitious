@@ -1320,6 +1320,46 @@ void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) { pt_p
 
 void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h) { pt_paint(t, nt, c, y, h); }
 
+void amb_canvas_zoom(const amb_canvas *src, amb_canvas *dst, double z) {
+    if (z <= 0) z = 1;
+    uint32_t w = (uint32_t)(src->w * z + 0.5), h = (uint32_t)(src->h * z + 0.5);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    dst->w = w;
+    dst->h = h;
+    dst->background = src->background;
+    dst->oy = src->oy * z;
+    dst->cx0 = src->cx0 * z;
+    dst->cy0 = src->cy0 * z;
+    dst->cx1 = src->cx1 * z;
+    dst->cy1 = src->cy1 * z;
+    clear(dst->px);
+    resize(&dst->px, (size_t)w * h * 3);
+    const uint8_t *sp = data(src->px);
+    uint8_t *dp = data(dst->px);
+    uint32_t sw = src->w, sh = src->h;
+    for (uint32_t y = 0; y < h; y++) {
+        /* each device pixel's centre in the source's pixels, between the four it falls among */
+        double fy = (y + 0.5) / z - 0.5;
+        if (fy < 0) fy = 0;
+        uint32_t y0 = (uint32_t)fy, y1 = y0 + 1 < sh ? y0 + 1 : y0;
+        double ty = fy - y0;
+        for (uint32_t x = 0; x < w; x++) {
+            double fx = (x + 0.5) / z - 0.5;
+            if (fx < 0) fx = 0;
+            uint32_t x0 = (uint32_t)fx, x1 = x0 + 1 < sw ? x0 + 1 : x0;
+            if (x0 >= sw) x0 = x1 = sw - 1;
+            double tx = fx - x0;
+            for (int k = 0; k < 3; k++) {
+                double a = sp[((size_t)y0 * sw + x0) * 3 + k], b = sp[((size_t)y0 * sw + x1) * 3 + k];
+                double cc = sp[((size_t)y1 * sw + x0) * 3 + k], d = sp[((size_t)y1 * sw + x1) * 3 + k];
+                double v = (a + (b - a) * tx) * (1 - ty) + (cc + (d - cc) * tx) * ty;
+                dp[((size_t)y * w + x) * 3 + k] = (uint8_t)(v + 0.5);
+            }
+        }
+    }
+}
+
 uint64_t amb_canvas_hash(const amb_canvas *c) {
     uint64_t h = 1469598103934665603ull;
     for (size_t i = 0; i < len(c->px); i++) { h ^= at(c->px, i); h *= 1099511628211ull; }

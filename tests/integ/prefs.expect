@@ -39,5 +39,7 @@ the stages are handed: font_size 16 px, color_scheme light, reduced_motion no_pr
 > quit
 the session was private: nothing of it is stored
 -- a page drawn with the reader's preferences and with none:
-with:    rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
-without: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
+with:    rendered 800x600: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:e13ca8daeaa6bb2f
+without: rendered 800x600: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:099cf7d6477c30af
+-- zoomed 2: laid out in a 400 x 300 px viewport, drawn twice as large:
+rendered 800x818: 14 boxes, 10 lines, 10 text fragments; pixels fnv1a64:192d3f959db47535
