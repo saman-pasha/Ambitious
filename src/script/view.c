@@ -162,7 +162,7 @@ void script_view_update(struct js_host *h) {
     clear(h->vboxes);
     clear(h->vfrags);
     for (uint32_t b = 1; b < lt.box_len; b++) {
-        if (!lt.box[b].live || lt.box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) continue;
+        if (!lt.box[b].live || lt.box[b].kind == LAYOUT_BOX_KIND_VIEWPORT || lt.box[b].kind == LAYOUT_BOX_KIND_INLINE) continue;
         uint32_t x = lt.box[b].node.index;
         if (!x || x >= d->node_len || h->vbox[x]) continue;
         sh_vbox v;

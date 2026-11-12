@@ -1,0 +1,18 @@
+# boxes of tests/pages/legend.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+f1 fieldset 10 8 780 85.594
+l1 legend 24 8 92.078 18
+p1 p 24 47.594 752 18
+f2 fieldset 10 93.594 780 62
+l2 legend 26 93.594 96.922 18
+c2 div 26 121.594 748 18
+f3 fieldset 10 155.594 780 72.594
+l3 legend 24 155.594 155.234 37
+c3 div 24 198.188 752 18
+f4 fieldset 10 228.188 780 37.594
+c4 div 24 235.781 752 18
+f5 fieldset 10 265.781 328 53.594
+l5 legend 262.641 265.781 41.359 18
+c5 div 24 289.375 300 18
+f6 fieldset 10 319.375 780 69.594
+l6 legend 24 319.375 134.313 34
+c6 div 24 358.969 752 18

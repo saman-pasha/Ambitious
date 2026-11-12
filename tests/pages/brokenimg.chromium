@@ -1,0 +1,15 @@
+# boxes of tests/pages/brokenimg.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+p1 p 8 16 784 18
+i1 img 59.594 16 122.703 18
+p2 p 8 50 784 18
+i2 img 52.469 50 56.031 18
+p3 p 8 84 784 20
+i3 img 54.25 84 16 16
+p4 p 8 120 784 18
+i4 img 79.141 134 0 0
+p5 p 8 154 784 18
+i5 img 87.141 154 31.109 18
+p6 p 8 188 784 18
+i6 img 69.391 188 607.484 18
+p7 p 8 222 784 54
+i7 img 8 240 784 18

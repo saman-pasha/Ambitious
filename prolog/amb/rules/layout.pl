@@ -11,7 +11,7 @@
            layout_inline_cb/2.
 
 %% the box an element generated (its pseudo-elements' are theirs)
-layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, \+ layout_pseudo(B, _).
+layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, K \== inline, \+ layout_pseudo(B, _).
 
 %% the box an element's ::before (1) or ::after (2) generated
 layout_pseudo_box_of(N, P, B) :-
@@ -49,7 +49,7 @@ layout_border_box(B, X, Y, W, H) :-
 %% lines, or placed automatically (rows and columns as the explicit grid numbers its
 %% lines: the first line of each, and the line past the last)
 layout_explain_position(B, Why) :-
-    layout_box(B, _, K, _, _, _, _), K \== viewport,
+    layout_box(B, _, K, _, _, _, _), K \== viewport, K \== inline,
     (   layout_inline_cb(B, N), dom_element(N, E)
     ->  Why = absolute(in_fragments_of(E))
     ;   layout_positioned(B, P, CB, DX, DY)
@@ -75,7 +75,7 @@ layout_rules_position(absolute, CB, _, _, absolute(in(E))) :- layout_rules_named
 %% negative z-index first, then the flow in the tree's order, then the positioned ones
 %% with z-index auto or 0, then those with a positive z-index -- a key that sorts so
 layout_paint_order(B, key(Layer, Z, B)) :-
-    layout_box(B, _, _, _, _, _, _),
+    layout_box(B, _, K, _, _, _, _), K \== inline,
     (   layout_stacking(B, Z0)
     ->  Z = Z0, ( Z0 < 0 -> Layer = 0 ; Z0 =:= 0 -> Layer = 2 ; Layer = 3 )
     ;   layout_positioned(B, _, _, _, _)

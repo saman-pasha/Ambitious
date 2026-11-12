@@ -1,0 +1,8 @@
+# tests/pages/inlinedeco.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+pill 62 20 126 52
+grad 169 25 308 47
+img 20 57 248 79
+round 292 56 378 80
+shadow 422 57 514 79
+wrap 20 87 319 177
+thick 61 181 276 211

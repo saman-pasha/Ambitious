@@ -167,6 +167,7 @@ static const char css_ua_sheet[] =
     "th { font-weight: bold; text-align: center }\n"
     "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
     "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace }\n"
+    "legend { padding-left: 2px; padding-right: 2px }\n"
     "details, summary { display: block }\n"
     /* a closed details element shows its first summary alone (HTML 15.5.17; its text
        directly inside is layout's to pass over); a dialog without open is not drawn, and

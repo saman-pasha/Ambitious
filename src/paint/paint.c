@@ -5,7 +5,9 @@
    context -- the root, and each positioned box -- paints its own box, the
    positioned boxes in it with a negative z-index, its flow (each box in tree
    order: its shadows, its background, its borders, its lines -- inline
-   elements' backgrounds, text and its shadows, decorations, list markers --
+   elements' backgrounds (an element with borders, rounded corners, images
+   or shadows drawn from its box of them, the element as one strip sliced
+   at its line breaks), text and its shadows, decorations, list markers --
    its child boxes, its outline), then those with z-index auto or 0 in tree
    order and those with a positive one by z-index. A box that clips its overflow
    clips what is in it to its padding box.
@@ -13,7 +15,8 @@
    A box: its outer box-shadows (offset, spread, blurred: three box blurs, a
    Gaussian's), its background colour and layers (url() images, linear and
    radial gradients; background-size, -position and -repeat; the last layer
-   first) in its border box, rounded by its corners' radii; its borders, solid,
+   first) in its border box, rounded by its corners' radii (a fieldset's from
+   its legend's middle, its top border left out behind the legend); its borders, solid,
    dotted, dashed, double, groove, ridge, inset or outset (Chromium's darker
    colour for the shaded sides), round where its corners are. A box with an
    opacity is drawn and blended with what was under it; one with a transform
@@ -22,7 +25,8 @@
    onto the canvas, sampled bilinearly. Glyphs come from font.c at their size and
    quarter-pixel position, cached. An image is drawn from the bytes the loader
    fetched for its element (image.c decodes PNG), sampled bilinearly into its
-   content box; one that cannot be decoded is a grey placeholder. The PNG is
+   content box; one whose load failed is Chromium's fallback (its 16px icon,
+   before its alt text or in a box of its own size). The PNG is
    written with this file's own deflate: each row filtered (None, Sub or Up,
    whichever sums smallest), LZ77 over a hash of three bytes, fixed Huffman
    codes. */
@@ -1438,8 +1442,23 @@ static const uint32_t pt_broken_icon[256] = {
    the 16px icon inside, overflow hidden), when the box is 18 CSS px or more each way;
    else nothing. An image whose bytes were fetched but do not decode draws nothing, as in
    Chromium */
+/* a broken image's 16px icon, at (x, y) */
+static void pt_broken_icon_at(amb_canvas *c, double x, double y) {
+    double z = c->zoom > 0 ? c->zoom : 1;
+    vector<uint8_t> px;
+    for (int k = 0; k < 256; k++) {
+        uint32_t v = pt_broken_icon[k];
+        push_back(px, (uint8_t)(v >> 24));
+        push_back(px, (uint8_t)(v >> 16));
+        push_back(px, (uint8_t)(v >> 8));
+        push_back(px, (uint8_t)v);
+    }
+    pt_image(c, &px, 16, 16, x, y, 16 * z, 16 * z);
+}
 static void pt_broken(amb_canvas *c, double x, double y, double w, double h) {
     double z = c->zoom > 0 ? c->zoom : 1;
+    /* the icon's own box (no size declared, no alt): the icon alone, as Chromium draws it */
+    if (w >= 16 * z - 0.01 && h >= 16 * z - 0.01 && (w < 18 * z - 0.01 || h < 18 * z - 0.01)) { pt_broken_icon_at(c, x, y); return; }
     if (w < 18 * z - 0.01 || h < 18 * z - 0.01) return;
     uint32_t edge = 0xc0c0c0ff;
     pt_fill(c, x, y, x + w, y + z, edge);
@@ -1515,13 +1534,22 @@ static int pt_cached_image(const net_loader *nt, uint32_t r, vector<uint32_t> *i
 /* a box of b's a keyword names -- border-box, padding-box, content-box; another its border
    box -- into a (x0, y0, x1, y1), and its corners' radii from the border box's rad, each
    less what lies between (CSS Backgrounds 5.2) into r */
+/* how far a fieldset's border box is drawn below its top: to the middle of a legend taller than its top border, as
+   Chromium draws it; 0 for any other box */
+static double pt_legend_shift(const layout_tree *t, uint32_t b) {
+    uint32_t lg = t->box[b].legend;
+    if (!lg) return 0;
+    double lmh = t->box[lg].mt + t->box[lg].bt + t->box[lg].pt + t->box[lg].h + t->box[lg].pb + t->box[lg].bb + t->box[lg].mb;
+    return lmh > t->box[b].bt ? (lmh - t->box[b].bt) / 2 : 0;
+}
+
 static void pt_area(const layout_tree *t, uint32_t b, const char *w, size_t wn, const double *rad, double *a, double *r) {
     layout_box x = t->box[b];
     double dl = 0, dt = 0, dr = 0, db = 0;
     if (pt_is(w, wn, "padding-box")) { dl = x.bl; dt = x.bt; dr = x.br; db = x.bb; }
     else if (pt_is(w, wn, "content-box")) { dl = x.bl + x.pl; dt = x.bt + x.pt; dr = x.br + x.pr; db = x.bb + x.pb; }
     a[0] = x.x - x.pl - x.bl + dl;
-    a[1] = x.y - x.pt - x.bt + dt;
+    a[1] = x.y - x.pt - x.bt + dt + (dt < x.bt + x.pt ? pt_legend_shift(t, b) : 0);
     a[2] = x.x + x.w + x.pr + x.br - dr;
     a[3] = x.y + x.h + x.pb + x.bb - db;
     r[0] = fmax(0, rad[0] - dl); r[1] = fmax(0, rad[1] - dr); r[2] = fmax(0, rad[2] - dr); r[3] = fmax(0, rad[3] - dl);
@@ -1617,6 +1645,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
     double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+    double lsh = pt_legend_shift(t, b);
+    by += lsh;
+    bh -= lsh;
     double rad[8] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl,
                       t->box[b].rtlv, t->box[b].rtrv, t->box[b].rbrv, t->box[b].rblv };
     pt_fit_radii(bw, bh, rad);
@@ -1654,7 +1685,25 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         uint32_t iw, ih;
         int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
         if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else if (got < 0 && t->box[b].first_line) pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));   /* its icon before its alt text */
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+    }
+    /* a fieldset's top border not behind its legend's border box: the band kept as the background left it */
+    vector<uint8_t> gap;
+    int gx0 = 0, gx1 = 0, gy0 = 0, gy1 = 0;
+    if (t->box[b].legend && bt > 0) {
+        uint32_t lg = t->box[b].legend;
+        int kx0, ky0, kx1, ky1;
+        pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+        gx0 = (int)floor(t->box[lg].x - t->box[lg].pl - t->box[lg].bl + 0.5);
+        gx1 = (int)floor(t->box[lg].x + t->box[lg].w + t->box[lg].pr + t->box[lg].br + 0.5);
+        gy0 = (int)floor(by - c->oy);
+        gy1 = (int)ceil(by + bt - c->oy);
+        if (gx0 < kx0) gx0 = kx0;
+        if (gx1 > kx1) gx1 = kx1;
+        if (gy0 < ky0) gy0 = ky0;
+        if (gy1 > ky1) gy1 = ky1;
+        for (int y = gy0; y < gy1 && gx1 > gx0; y++) append_range(gap, data(c->px) + ((size_t)y * c->w + (size_t)gx0) * 3, (size_t)(gx1 - gx0) * 3);
     }
     int st0 = t->box[b].bst, st1 = t->box[b].bsr, st2 = t->box[b].bsb, st3 = t->box[b].bsl;
     int plain = (st0 == LAY_BS_SOLID || st0 <= LAY_BS_HIDDEN) && (st1 == LAY_BS_SOLID || st1 <= LAY_BS_HIDDEN) &&
@@ -1723,6 +1772,10 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         int sts[4] = { st0, st1, st2, st3 };
         uint32_t cols[4] = { t->box[b].bct, t->box[b].bcr, t->box[b].bcb, t->box[b].bcl };
         pt_styled_sides(c, bx, by, bw, bh, ws, sts, cols);
+    }
+    if (len(gap)) {
+        size_t row = (size_t)(gx1 - gx0) * 3, q = 0;
+        for (int y = gy0; y < gy1; y++, q += row) memcpy(data(c->px) + ((size_t)y * c->w + (size_t)gx0) * 3, data(gap) + q, row);
     }
 }
 
@@ -1819,13 +1872,31 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
     }
 }
 
-static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap, vector<pt_glyph> *entries, vector<uint32_t> *table,
-                     vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
+/* an inline fragment's decorations: its box of them (the element as one strip, CSS Backgrounds 3's slice) drawn
+   clipped to the fragment where the strip breaks -- not at the strip's own ends, where its shadows reach out */
+static void pt_inline_piece(const layout_tree *t, const net_loader *nt, uint32_t fr, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    uint32_t b = t->frag[fr].piece;
+    double s0 = t->box[b].x - t->box[b].pl - t->box[b].bl, s1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br;
+    double f0 = floor(t->frag[fr].x + 0.5), f1 = floor(t->frag[fr].x + t->frag[fr].w + 0.5);
+    double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
+    if (f0 > s0 + 0.01) c->cx0 = fmax(c->cx0, f0);
+    if (f1 < s1 - 0.01) c->cx1 = fmin(c->cx1, f1);
+    if (c->cx1 > c->cx0) pt_box(t, nt, b, c, 0, icache, ipx);
+    c->cx0 = save[0];
+    c->cy0 = save[1];
+    c->cx1 = save[2];
+    c->cy1 = save[3];
+}
+
+static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
+                     vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
+                     vector<uint32_t> *icache, vector<uint8_t> *ipx) {
     for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next)
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
             layout_frag_kind k = t->frag[fr].kind;
             if (k == LAYOUT_FRAG_KIND_INLINE) {
-                pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
+                if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
+                else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
                 continue;
             }
             if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
@@ -2510,7 +2581,7 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
         c->cx1 = fmin(c->cx1, t->box[b].x + t->box[b].w + t->box[b].pr);
         c->cy1 = fmin(c->cy1, t->box[b].y + t->box[b].h + t->box[b].pb);
     }
-    pt_lines(t, b, c, f, webmap, entries, table, masks, acc, mask);
+    pt_lines(t, nt, b, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
     vector<uint32_t> inner;
     for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) {
         if (pt_positioned(t, ch)) {

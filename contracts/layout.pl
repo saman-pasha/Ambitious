@@ -20,8 +20,12 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 
 %% the viewport's box; a block container (an element's, an anonymous one, a list
 %% item's); an atomic inline (an inline-block, a replaced element, a form control);
-%% a table, its rows and its cells; a flex container, a grid container
-layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid])).
+%% a table, its rows and its cells; a flex container, a grid container; an inline
+%% element's decorations, a box a fragment (its piece) draws them from: the element
+%% as one unbroken strip, its fragments laid end to end, placed so that the
+%% fragment's part of it lies on the fragment (box-decoration-break: slice), in no
+%% box's children
+layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline])).
 %% how a box's width was found: the viewport's; filling its containing block; a
 %% length, or a percentage, its style declared; shrunk to fit its content; its
 %% table column's; its content's own (a replaced element's, a form control's);
@@ -98,7 +102,10 @@ layout_contract(record(box, [
     field(grid_area,    span(text)),
     %% a flex container's first baseline, from its content box's top, which its items give
     %% it (Flexbox 1, 8.5), when it has one
-    field(baseline, f64), field(has_baseline, bool)
+    field(baseline, f64), field(has_baseline, bool),
+    %% a fieldset's rendered legend's box (HTML 15.3.13), set on its top border, whose
+    %% border box the top border is not drawn behind; none
+    field(legend, ref(box))
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -126,6 +133,7 @@ layout_contract(record(frag, [
     field(color,      u32),
     field(fill,       u32),                     % -webkit-text-fill-color: the colour its glyphs are filled with (color's unless set)
     field(background, u32),                     % an inline fragment's
+    field(piece,      ref(box)),                % an inline fragment's box of decorations (borders, rounded corners, images, shadows); none
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
     field(shadows,    span(text))               % text-shadow
 ])).

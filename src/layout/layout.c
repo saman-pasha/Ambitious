@@ -730,6 +730,21 @@ static void lay_item(vector<lay_seg> *segs, vector<uint32_t> *items, uint32_t no
 }
 static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uint32_t> *items);
 
+/* a fieldset's rendered legend (HTML 15.3.13): its first legend child that is drawn, not floated and not positioned
+   absolutely; 0 for none, and for what is no fieldset. Laid out by its fieldset on its top border, not in its flow */
+static uint32_t lay_rendered_legend(LCTX, uint32_t x) {
+    if ((x & LAY_GEN) || !lay_is_named(d, x, "fieldset")) return 0;
+    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+        if (!lay_is_named(d, c, "legend")) continue;
+        if (lay_display_of(LARGS, c) == D_NONE) continue;
+        uint32_t si = lay_si(sx, gx, c);
+        int pos = at(*xc, si).pos;
+        if (at(*xc, si).flt || pos == POS_ABSOLUTE || pos == POS_FIXED) continue;
+        return c;
+    }
+    return 0;
+}
+
 /* an element child (or a pseudo-element) of a container: a block-level box, its children
    in its place (display: contents, or an inline element that holds a block), or an item */
 static void lay_collect_el(LCTX, uint32_t c, vector<lay_seg> *segs, vector<uint32_t> *items) {
@@ -769,10 +784,11 @@ static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uin
         if (g >= 0) lay_collect_el(LARGS, LAY_GEN | (uint32_t)g, segs, items);
     }
     int closed = lay_closed_details(d, parent);
+    uint32_t legend = lay_rendered_legend(LARGS, parent);
     for (uint32_t c = d->node[parent].first_child; c; c = d->node[c].next_sibling) {
         int kind = d->node[c].kind;
         if (kind == DOM_NODE_KIND_TEXT) { if (!closed) lay_item(segs, items, c); continue; }
-        if (kind != DOM_NODE_KIND_ELEMENT) continue;
+        if (kind != DOM_NODE_KIND_ELEMENT || c == legend) continue;
         lay_collect_el(LARGS, c, segs, items);
     }
     if (fl0 & LAY_HAS_AFTER) {
@@ -833,8 +849,55 @@ static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
 
 /* the content box of an atomic inline: a replaced element's size, or an inline-block's
    width shrunk to fit within avail */
+/* an image whose load failed (its request broken: no URL, refused, not found ...) */
+static int lay_img_failed(LCTX, uint32_t el) {
+    if (!nt || !lay_is_named(d, el, "img")) return 0;
+    for (uint32_t r = 1; r < nt->resource_len; r++)
+        if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE)
+            return nt->resource[r].outcome != NET_OUTCOME_OK;
+    return 0;
+}
+/* an img's alt text, its white space runs one space and trimmed; 0 when it has no alt attribute, 1 when it has one */
+static int lay_alt_text(const dom_document *d, uint32_t el, vector<char> *out) {
+    clear(*out);
+    uint32_t a = lay_attr(d, el, "alt");
+    if (!a) return 0;
+    amb_span v = d->attr[a].value;
+    const char *src = text_ptr(d, v);
+    int sp = 1;
+    for (size_t i = 0; i < v.len; i++) {
+        char c = src[i];
+        int white = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+        if (white) { if (!sp) push_back(out, ' '); sp = 1; continue; }
+        push_back(out, c);
+        sp = 0;
+    }
+    while (len(*out) && back(*out) == ' ') pop_back(out);
+    return 1;
+}
+
 static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
     *h = -1;
+    if (lay_img_failed(LARGS, el)) {
+        /* a broken image is its fallback, as Chromium lays it out (a standards-mode page's): with alt text, its 16px
+           icon and the text inline, at the text's size and line, its declared size passed over; without, the icon's
+           16px box unless a size is declared; with an empty alt, nothing but a declared size */
+        vector<char> alt;
+        int has_alt = lay_alt_text(d, el, &alt);
+        if (has_alt && len(alt)) {
+            *w = 16 + amb_text_width(f, s->face, s->fs, data(alt), len(alt)) + s->ls * (double)lay_cps(data(alt), len(alt));
+            *h = s->lh;
+            return;
+        }
+        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
+        double eh = s->border_box ? s->b[0] + s->b[2] + lay_res(st, s->p[0], cw) + lay_res(st, s->p[2], cw) : 0;
+        double d0 = has_alt ? 0 : 16;
+        *w = s->width.unit == LAY_AUTO ? d0 : lay_res(st, s->width, cw) - ew;
+        *h = s->height.unit == LAY_AUTO ? d0 : s->height.v - eh;
+        if (*w < 0) *w = 0;
+        if (*h < 0) *h = 0;
+        return;
+    }
     if (lay_replaced(d, el)) {
         double dw = 0, dh = 0;
         /* a declared width or height of the border box (box-sizing) less its padding and border */
@@ -1512,6 +1575,8 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
 static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, lay_mc *et, lay_mc *eb,
                               int *empty);
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
+static int lay_decorated(LCTX, uint32_t el, const lay_style *es);
+static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw);
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
 static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
 static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh);
@@ -1521,6 +1586,43 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh);
    collapsed) in its content box, in the style of its ::placeholder: a line of one
    generated fragment, in the middle of an input, at the top of a textarea */
 static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
+    if (lay_img_failed(LARGS, el)) {
+        /* a broken image's alt text, after its 16px icon, on its line */
+        vector<char> alt;
+        if (!lay_alt_text(d, el, &alt) || !len(alt)) return;
+        double tw = amb_text_width(f, es->face, es->fs, data(alt), len(alt)) + es->ls * (double)lay_cps(data(alt), len(alt));
+        double lh = t->box[b].h, base = 0, below = 0;
+        lay_leading(lh, es->asc, es->desc, &base, &below);   /* the baseline a line of the text has */
+        layout_line_h alh = line_new(t);
+        uint32_t aln = alh.index;
+        t->line[aln].x = 0;
+        t->line[aln].y = 0;
+        t->line[aln].w = t->box[b].w;
+        t->line[aln].h = lh;
+        t->line[aln].baseline = base;
+        lines_append(t, b, aln);
+        amb_span asp = text_add(t, data(alt), len(alt));
+        layout_frag_h afh = frag_new(t);
+        uint32_t afr = afh.index;
+        t->frag[afr].kind = LAYOUT_FRAG_KIND_GENERATED;
+        t->frag[afr].node = node_handle(d, el);
+        t->frag[afr].text = asp;
+        t->frag[afr].x = 16;
+        t->frag[afr].y = base - es->asc;
+        t->frag[afr].w = tw;
+        t->frag[afr].h = es->asc + es->desc;
+        t->frag[afr].baseline = base;
+        t->frag[afr].face = (uint8_t)es->face;
+        if (es->font) t->frag[afr].font = resource_handle(nt, es->font);
+        t->frag[afr].size = es->fs;
+        t->frag[afr].spacing = es->ls;
+        t->frag[afr].word_spacing = es->wsp;
+        t->frag[afr].italic = es->italic;
+        t->frag[afr].color = es->color;
+        t->frag[afr].fill = es->fill;
+        frags_append(t, aln, afr);
+        return;
+    }
     uint32_t a = lay_attr(d, el, "placeholder");
     if (!a || d->attr[a].value.len == 0) return;
     int input = lay_is_named(d, el, "input");
@@ -2373,7 +2475,7 @@ static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece
         lay_ent en = at(ents, i);
         lay_style es;
         lay_style_of(LARGS, en.el, &es);
-        if ((es.bg & 0xff) == 0 && LAY_X(en.el).pos == POS_STATIC) continue;
+        if ((es.bg & 0xff) == 0 && LAY_X(en.el).pos == POS_STATIC && !lay_decorated(LARGS, en.el, &es)) continue;
         for (size_t q = 0; q < nr;) {
             lay_vr r = at(*vr, at(*ord, q));
             if (r.k < en.k0 || r.k > en.k1) { q++; continue; }
@@ -2400,6 +2502,7 @@ static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece
             t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
             t->frag[fr].baseline = baseline;
             t->frag[fr].background = es.bg;
+            lay_inline_piece(LARGS, fr, en.el, &es, w);
             frags_append(t, ln, fr);
             q = e2;
         }
@@ -2628,7 +2731,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             pop_back(open);
             lay_style es;
             lay_style_of(LARGS, elx, &es);
-            if ((es.bg & 0xff) != 0 || LAY_X(elx).pos != POS_STATIC) {
+            if ((es.bg & 0xff) != 0 || LAY_X(elx).pos != POS_STATIC || lay_decorated(LARGS, elx, &es)) {
                 double x0b = from < 0 ? 0 : from;
                 layout_frag_h fh = frag_new(t);
                 uint32_t fr = fh.index;
@@ -2640,6 +2743,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
                 t->frag[fr].baseline = baseline;
                 t->frag[fr].background = es.bg;
+                lay_inline_piece(LARGS, fr, elx, &es, w);
                 frags_append(t, ln, fr);
             }
         }
@@ -2650,7 +2754,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         uint32_t elx = o.el;
         lay_style es;
         lay_style_of(LARGS, elx, &es);
-        if ((es.bg & 0xff) == 0 && LAY_X(elx).pos == POS_STATIC) continue;
+        if ((es.bg & 0xff) == 0 && LAY_X(elx).pos == POS_STATIC && !lay_decorated(LARGS, elx, &es)) continue;
         double from = at(starts, k);
         double x0b = from < 0 ? 0 : from + lay_res(st, es.m[3], w);
         double sh = o.shift, orx = o.rx, ory = o.ry;
@@ -2664,6 +2768,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
         t->frag[fr].baseline = baseline;
         t->frag[fr].background = es.bg;
+        lay_inline_piece(LARGS, fr, elx, &es, w);
         frags_append(t, ln, fr);
     }
     /* the text runs (a text node's words and spaces, as one fragment unless justified)
@@ -3870,6 +3975,80 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].ooffset = e.ooffset;
 }
 
+/* an inline element drawn as more than its background colour: with a border, a rounded corner, a background image
+   or a box shadow */
+static int lay_decorated(LCTX, uint32_t el, const lay_style *es) {
+    if (es->b[0] > 0 || es->b[1] > 0 || es->b[2] > 0 || es->b[3] > 0) return 1;
+    lay_ext e = LAY_X(el);
+    if (!e.paints) return 0;
+    if (e.bgimg || e.shadows) return 1;
+    for (int k = 0; k < 4; k++) if (e.rad[k].v != 0) return 1;
+    return 0;
+}
+/* the box an inline element's fragment fr draws its decorations from, when it has any (lay_decorated): the element's
+   borders, paddings, colours, background layers, corners and shadows, its place left to lay_inline_strips once every
+   line is where it ends (and a percentage corner to lay_radii, of the whole strip) */
+static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw) {
+    if (!lay_decorated(LARGS, el, es)) return;
+    layout_box_h h = box_new(t);
+    uint32_t b = h.index;
+    t->box[b].kind = LAYOUT_BOX_KIND_INLINE;
+    t->box[b].opacity = 1;
+    t->box[b].node = t->frag[fr].node;
+    if (el & LAY_GEN) t->box[b].pseudo = (uint8_t)at(*gx, el & LAY_GIDX).pseudo;
+    lay_edges(t, st, b, es, cw);
+    t->box[b].mt = 0;
+    t->box[b].mr = 0;
+    t->box[b].mb = 0;
+    t->box[b].ml = 0;
+    double ew = t->box[b].bl + t->box[b].pl + t->box[b].pr + t->box[b].br, ev = t->box[b].bt + t->box[b].pt + t->box[b].pb + t->box[b].bb;
+    t->box[b].w = t->frag[fr].w > ew ? t->frag[fr].w - ew : 0;
+    t->box[b].h = t->frag[fr].h > ev ? t->frag[fr].h - ev : 0;
+    uint32_t si = lay_si(sx, gx, el);
+    if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
+    t->frag[fr].piece = b;
+}
+/* each decorated inline element's fragments, in the order they were made (line by line), as one strip laid end to end
+   (CSS Backgrounds 3, box-decoration-break: slice): each fragment's box is the whole strip, its content box from the
+   strip's start, placed so that the fragment's part of the strip lies on the fragment, its edges at whole pixels */
+static void lay_inline_strips(layout_tree *t) {
+    vector<uint32_t> frs;
+    for (uint32_t fr = 1; fr < t->frag_len; fr++)
+        if (t->frag[fr].live && t->frag[fr].kind == LAYOUT_FRAG_KIND_INLINE && t->frag[fr].piece) push_back(frs, fr);
+    vector<uint8_t> done;
+    resize(done, len(frs), 0);
+    vector<uint32_t> group;
+    for (size_t i = 0; i < len(frs); i++) {
+        if (at(done, i)) continue;
+        uint32_t b0 = t->frag[at(frs, i)].piece;
+        uint32_t node = t->box[b0].node.index;
+        uint8_t ps = t->box[b0].pseudo;
+        clear(group);
+        double total = 0;
+        for (size_t j = i; j < len(frs); j++) {
+            uint32_t bj = t->frag[at(frs, j)].piece;
+            if (at(done, j) || t->box[bj].node.index != node || t->box[bj].pseudo != ps) continue;
+            done[j] = 1;
+            push_back(group, at(frs, j));
+            total += t->frag[at(frs, j)].w;
+        }
+        double off = 0;
+        for (size_t q = 0; q < len(group); q++) {
+            uint32_t fr = at(group, q), b = t->frag[fr].piece;
+            double left = t->box[b].bl + t->box[b].pl, ew = left + t->box[b].pr + t->box[b].br;
+            double top = t->box[b].bt + t->box[b].pt, ev = top + t->box[b].pb + t->box[b].bb;
+            /* at whole pixels, as Chromium paints a box's decorations (its rectangle pixel-snapped) */
+            double x0 = floor(t->frag[fr].x - off + 0.5), x1 = floor(t->frag[fr].x - off + total + 0.5);
+            double y0 = floor(t->frag[fr].y + 0.5), y1 = floor(t->frag[fr].y + t->frag[fr].h + 0.5);
+            t->box[b].x = x0 + left;
+            t->box[b].y = y0 + top;
+            t->box[b].w = x1 - x0 > ew ? x1 - x0 - ew : 0;
+            t->box[b].h = y1 - y0 > ev ? y1 - y0 - ev : 0;
+            off += t->frag[fr].w;
+        }
+    }
+}
+
 /* what a box's style says of it besides its geometry: how it is positioned (a relative
    one's offset), its stacking and its clipping */
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
@@ -3932,6 +4111,9 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         lay_atomic_size(LARGS, el, &s, cw, &w, &h);
         double w0 = w;
         int auto_w = s.width.unit == LAY_AUTO;
+        /* a broken image's alt text as a block is as wide as a block (Chromium), its height its line's */
+        vector<char> altv;
+        int alt_block = auto_w && lay_img_failed(LARGS, el) && lay_alt_text(d, el, &altv) && len(altv);
         if (k->fw >= 0) {
             t->box[b].w = k->fw - edges_h > 0 ? k->fw - edges_h : 0;
             t->box[b].how = LAYOUT_WIDTH_HOW_FLEX;
@@ -3939,8 +4121,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
             t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
         } else {
             /* its width the content width found, as a declared one, so a block's margins follow */
-            s.width.unit = LAY_PX;
-            s.width.v = (w > 0 ? w : 0) + (s.border_box ? edges_h : 0);
+            if (!alt_block) {
+                s.width.unit = LAY_PX;
+                s.width.v = (w > 0 ? w : 0) + (s.border_box ? edges_h : 0);
+            }
             lay_len minw = at(*xc, si).minw;
             lay_block_width(t, st, b, &s, cw, &minw);
             if (auto_w && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_INTRINSIC;
@@ -3951,7 +4135,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
             t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
         }
         /* an image's height in proportion to the width it was held to (min-width, max-width, a given width) */
-        if (lay_is_named(d, el, "img") && s.height.unit == LAY_AUTO && w0 > 0 && h > 0 && t->box[b].w != w0) h = h * t->box[b].w / w0;
+        if (lay_is_named(d, el, "img") && !alt_block && s.height.unit == LAY_AUTO && w0 > 0 && h > 0 && t->box[b].w != w0) h = h * t->box[b].w / w0;
         t->box[b].h = h > 0 ? h : 0;
         t->box[b].avail = cw;
         lay_placeholder(LARGS, b, el, &s);
@@ -4005,6 +4189,35 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     if (defh >= 0 && maxh >= 0 && defh > maxh) defh = maxh;
     if (defh >= 0 && defh < minh) defh = minh;
     lay_mc et, eb;
+    /* a fieldset's rendered legend (HTML 15.3.13): shrunk to fit, its auto margins aligning it, set on the top border
+       -- its margin box from the border box's top, or centred on a border taller than it --; the content begins
+       below the taller of the two */
+    uint32_t lg = lay_rendered_legend(LARGS, el), lgb = 0;
+    double lg_y = 0;
+    if (lg) {
+        lay_bk lk;
+        lk.ox = 0;
+        lk.oy = 0;
+        lk.ch = -1;
+        lk.fw = -1;
+        lk.shrink = 1;
+        lk.item = 0;
+        lay_mc lm1, lm2;
+        int lempty;
+        lgb = lay_block(LARGS, b, lg, t->box[b].w, 0, 0, 0, 0, &lk, &lm1, &lm2, &lempty);
+        lay_style ls;
+        lay_style_of(LARGS, lg, &ls);
+        double lbw = t->box[lgb].w + t->box[lgb].pl + t->box[lgb].pr + t->box[lgb].bl + t->box[lgb].br;
+        double rest = t->box[b].w - lbw - t->box[lgb].ml - t->box[lgb].mr;
+        int mla = ls.m[3].unit == LAY_AUTO, mra = ls.m[1].unit == LAY_AUTO;
+        if (rest > 0 && mla && mra) { t->box[lgb].ml = rest / 2; t->box[lgb].mr = rest / 2; }
+        else if (rest > 0 && mla) t->box[lgb].ml = rest;
+        double lmh = t->box[lgb].mt + lay_border_height(t, lgb) + t->box[lgb].mb, bt0 = t->box[b].bt;
+        double extra = lmh > bt0 ? lmh - bt0 : 0;
+        lg_y = (lmh > bt0 ? 0 : (bt0 - lmh) / 2) + t->box[lgb].mt;   /* its border box's top, from the fieldset's */
+        t->box[b].pt += extra;
+        t->box[b].legend = lgb;
+    }
     double cox = k->ox + t->box[b].ml + t->box[b].bl + t->box[b].pl, coy = k->oy + t->box[b].bt + t->box[b].pt;
     if (lx == LX_FLEX) { lay_flex(LARGS, b, el, defh); et.pos = et.neg = eb.pos = eb.neg = 0; *empty = 0; }
     else if (lx == LX_GRID) { lay_grid(LARGS, b, el, defh); et.pos = et.neg = eb.pos = eb.neg = 0; *empty = 0; }
@@ -4018,6 +4231,8 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         if (t->box[b].h < minh) { t->box[b].h = minh; eb.pos = eb.neg = 0; *empty = 0; }
     }
     if (t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb > 0) *empty = 0;
+    /* the legend in its place: from the fieldset's content box, above it */
+    if (lgb) lay_place(t, lgb, t->box[lgb].ml, lg_y - t->box[b].bt - t->box[b].pt);
     *mt = lay_mc_add(lay_mc_of(t->box[b].mt), et);
     *mb = lay_mc_add(lay_mc_of(t->box[b].mb), eb);
     if (s.display == D_LIST_ITEM) lay_marker(LARGS, b, el, &s);
@@ -6016,6 +6231,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (bottom > height) t->box[vp].h = bottom;
     }
     lay_absolute(t, vp, 0, 0);
+    lay_inline_strips(t);
     lay_radii(t);
     /* the sticky boxes, when a style is sticky */
     for (size_t k = 0; k < len(exts); k++)
