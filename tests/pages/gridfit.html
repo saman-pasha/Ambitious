@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Grid: auto-fit, and a grid container shrunk to fit</title><style>
+body { margin: 8px; font: 16px sans-serif; }
+.g { display: grid; gap: 10px; margin-bottom: 10px; }
+.g > div { background: #cde; height: 30px; }
+</style></head><body>
+<div id="g1" class="g" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))"><div id="a1">1</div><div id="a2">2</div></div>
+<div id="g2" class="g" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"><div id="b1">1</div><div id="b2">2</div></div>
+<div id="g3" class="g" style="grid-template-columns: repeat(auto-fit, 100px); justify-content: center"><div id="c1">1</div><div id="c2">2</div></div>
+<div id="g4" class="g" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)) 50px"><div id="d1">1</div><div id="d2">2</div></div>
+<div id="g5" class="g" style="display: inline-grid; grid-template-columns: 80px 80px"><div id="e1">1</div><div id="e2">2</div></div>
+<div style="float: left"><div id="g6" class="g" style="grid-template-columns: auto auto"><div id="f1">wide content here</div><div id="f2">2</div></div></div>
+</body></html>

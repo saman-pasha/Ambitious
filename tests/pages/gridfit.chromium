@@ -1,0 +1,19 @@
+# boxes of tests/pages/gridfit.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+g1 div 8 8 784 30
+a1 div 8 8 387 30
+a2 div 405 8 387 30
+g2 div 8 48 784 30
+b1 div 8 48 188.5 30
+b2 div 206.5 48 188.5 30
+g3 div 8 88 784 30
+c1 div 295 88 100 30
+c2 div 405 88 100 30
+g4 div 8 128 784 30
+d1 div 8 128 357 30
+d2 div 375 128 357 30
+g5 div 153.219 168 170 30
+e1 div 153.219 168 80 30
+e2 div 243.219 168 80 30
+g6 div 8 168 145.219 30
+f1 div 8 168 126.313 30
+f2 div 144.313 168 8.906 30

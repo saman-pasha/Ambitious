@@ -81,8 +81,11 @@
    laid out in them, then the rows from their heights (a percentage row of an auto
    height resolved against it); justify-self, align-self, justify-content and
    align-content. A grid item's box says where it was placed and how (a named
-   area, its lines, automatically). Not done: subgrid, masonry, auto-fit's empty
-   tracks collapsed, baseline alignment in a grid.
+   area, its lines, automatically). An auto-fit repeat's empty tracks collapse,
+   the gutters beside them too, and an automatic repeat counts what the other
+   tracks leave it. A grid container's own min- and max-content widths: its
+   columns, each item in turn along the rows. Not done: subgrid, masonry,
+   baseline alignment in a grid.
 
    Inline layout. White space is collapsed or kept as white-space says. Lines
    break at spaces (and around atomic inlines), never inside a word, a word too
@@ -849,6 +852,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
+static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_seg> *segs, const vector<uint32_t> *items, double *mn, double *mx);
 
 /* the content box of an atomic inline: a replaced element's size, or an inline-block's
    width shrunk to fit within avail */
@@ -1436,6 +1440,12 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
     vector<lay_seg> segs;
     vector<uint32_t> items;
     lay_collect(LARGS, el, &segs, &items);
+    if (LAY_X(el).lx == LX_GRID) {
+        lay_grid_intrinsic(LARGS, el, cw, &segs, &items, mn, mx);
+        *mn += edges;
+        *mx += edges;
+        return;
+    }
     /* a row flex container's items side by side (wrapping: its widest one at least) */
     int side = LAY_X(el).lx == LX_FLEX && LAY_X(el).frow;
     int wraps = LAY_X(el).fwrap != 0;
@@ -4962,7 +4972,8 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
    grid's size not definite (its value, -1 for none) */
 enum { TK_FIXED, TK_AUTO, TK_MINC, TK_MAXC, TK_FR, TK_FIT };
 #define LAY_INF 1e30
-typedef struct lay_track { int mink, maxk, grows, touched; double minv, maxv, base, limit, pos, plan, pct; } lay_track;
+/* fit: 1 a track an auto-fit repeat made, 2 one that collapsed, no item in it */
+typedef struct lay_track { int mink, maxk, grows, touched, fit; double minv, maxv, base, limit, pos, plan, pct; } lay_track;
 
 /* a line's name (its hash) and the line it names, 1 the first line of its list */
 typedef struct lay_lname { uint64_t h; int32_t line; } lay_lname;
@@ -5014,10 +5025,29 @@ static void lay_line_names(const char *s, size_t n, int32_t line, vector<lay_lna
     }
 }
 
+static void lay_tracks_in(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, vector<lay_lname> *names, int depth,
+                          int skip_auto, double rest, long rest_n);
+/* a track's size as an automatic repeat counts it: its maximum when definite, else its minimum when definite */
+static double lay_track_definite(lay_track o) {
+    double v = o.maxk == TK_FIXED ? o.maxv : o.mink == TK_FIXED ? o.minv : 0;
+    if (o.mink == TK_FIXED && o.minv > v) v = o.minv;
+    return v;
+}
 /* a track list (grid-template-columns' or -rows' computed text) into out, and its lines'
    names into names (a list's names name the line before the track after them):
-   repeat() (a count, auto-fill, auto-fit; its names repeated too), minmax(), fit-content() */
+   repeat() (a count, auto-fill, auto-fit; its names repeated too), minmax(), fit-content().
+   An automatic repeat (auto-fill, auto-fit) repeats as often as fits in avail beside the
+   list's other tracks and the gaps (Grid 1, 7.2.3.2): those are measured first */
 static void lay_tracks(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, vector<lay_lname> *names, int depth) {
+    vector<lay_track> other;
+    vector<lay_lname> onames;
+    lay_tracks_in(s, n, avail, gap, &other, &onames, depth, 1, 0, 0);
+    double rest = 0;
+    for (size_t q = 0; q < len(other); q++) rest += lay_track_definite(at(other, q));
+    lay_tracks_in(s, n, avail, gap, out, names, depth, 0, rest, (long)len(other));
+}
+static void lay_tracks_in(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, vector<lay_lname> *names, int depth,
+                          int skip_auto, double rest, long rest_n) {
     size_t i = 0, a, ln, fa, fn;
     while (css_next_part(s, n, &i, &a, &ln)) {
         const char *p = s + a;
@@ -5042,16 +5072,15 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
             lay_tracks(p + fa + la, lnn, avail, gap, &one, &onames, depth + 1);
             if (!len(one)) continue;
             long count = 0;
-            if (lay_is_word(p + fa + ca, cn, "auto-fill") || lay_is_word(p + fa + ca, cn, "auto-fit")) {
+            int fit = lay_is_word(p + fa + ca, cn, "auto-fit");
+            if (fit || lay_is_word(p + fa + ca, cn, "auto-fill")) {
+                if (skip_auto) continue;
                 double each = 0;
-                for (size_t q = 0; q < len(one); q++) {
-                    lay_track o = at(one, q);
-                    double v = o.maxk == TK_FIXED ? o.maxv : o.mink == TK_FIXED ? o.minv : 0;
-                    if (o.mink == TK_FIXED && o.minv > v) v = o.minv;
-                    each += v + gap;
-                }
-                count = each > 0 && avail >= 0 ? (long)((avail + gap) / each) : 1;
+                for (size_t q = 0; q < len(one); q++) each += lay_track_definite(at(one, q)) + gap;
+                double room = avail - rest - gap * (double)(rest_n - 1);
+                count = each > 0 && avail >= 0 ? (long)(room / each) : 1;
                 if (count < 1) count = 1;
+                if (fit) for (size_t q = 0; q < len(one); q++) one[q].fit = 1;
             } else {
                 for (size_t q = 0; q < cn; q++) if (p[fa + ca + q] >= '0' && p[fa + ca + q] <= '9') count = count * 10 + (p[fa + ca + q] - '0');
             }
@@ -5561,6 +5590,78 @@ static lay_track lay_track_at(const vector<lay_track> *tmpl, const vector<lay_tr
    widths (11), the items laid out in their columns, the rows sized from their heights,
    each item in its area by justify-self and align-self; b's content height when defh (its
    definite one) is -1 */
+/* an axis's tracks (axis 0 the columns, 1 the rows) that an auto-fit repeat made and that no item is in: collapsed,
+   fixed at 0px (fit 2); the count of those that did not collapse */
+static size_t lay_collapse(vector<lay_track> *tr, const vector<lay_gp> *gp, int axis) {
+    size_t live = 0;
+    for (size_t c = 0; c < len(*tr); c++) {
+        if (at(*tr, c).fit != 1) { live++; continue; }
+        int used = 0;
+        for (size_t q = 0; q < len(*gp) && !used; q++) {
+            lay_gp g = at(*gp, q);
+            long s0 = axis == 0 ? g.s0 : g.s1, n0 = axis == 0 ? g.n0 : g.n1;
+            if ((long)c >= s0 && (long)c < s0 + n0) used = 1;
+        }
+        if (used) { live++; continue; }
+        lay_track tk = at(*tr, c);
+        tk.mink = TK_FIXED;
+        tk.maxk = TK_FIXED;
+        tk.minv = 0;
+        tk.maxv = 0;
+        tk.fit = 2;
+        (*tr)[c] = tk;
+    }
+    return live;
+}
+
+/* a grid container's min- and max-content widths, its edges aside (Grid 1, 11.5, its width indefinite), as far as
+   this reckons them: its template's columns (one when it has none), its items (segs, items: its children as layout
+   collects them) placed in turn along the rows; a fixed column its size, any other the widest min-content
+   (max-content) of its items; the gaps between */
+static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_seg> *segs, const vector<uint32_t> *items, double *mn, double *mx) {
+    *mn = 0;
+    *mx = 0;
+    lay_ext ge = LAY_X(el);
+    double gg = lay_res(st, ge.cgap, cw);
+    vector<lay_track> tcol;
+    vector<lay_lname> ncol;
+    vector<char> src;
+    amb_span gsp = st->cval[ge.gtc].text;
+    append_range(src, text_ptr(st, gsp), gsp.len);
+    lay_tracks(data(src), len(src), -1, gg, &tcol, &ncol, 0);
+    size_t nc = len(tcol) ? len(tcol) : 1;
+    vector<double> cmn, cmx;
+    resize(&cmn, nc, 0.0);
+    resize(&cmx, nc, 0.0);
+    size_t next = 0;
+    for (size_t k = 0; k < len(*segs); k++) {
+        lay_seg sg = at(*segs, k);
+        double a, bb;
+        if (sg.block == SEG_ABS) continue;
+        if (sg.block) lay_intrinsic(LARGS, sg.node, cw, &a, &bb);
+        else {
+            vector<lay_piece> ps;
+            lay_run_pieces(LARGS, el, items, sg.first, sg.n, cw, &ps);
+            if (!lay_run_shows(&ps)) continue;
+            lay_run_intrinsic(&ps, &a, &bb);
+        }
+        size_t col = next % nc;
+        next++;
+        if (a > at(cmn, col)) cmn[col] = a;
+        if (bb > at(cmx, col)) cmx[col] = bb;
+    }
+    for (size_t c = 0; c < nc; c++) {
+        double lo = at(cmn, c), hi = at(cmx, c);
+        if (c < len(tcol)) {
+            lay_track tk = at(tcol, c);
+            if (tk.mink == TK_FIXED && tk.maxk == TK_FIXED) { lo = tk.maxv; hi = tk.maxv; }
+            else if (tk.mink == TK_FIXED) { if (lo < tk.minv) lo = tk.minv; if (hi < tk.minv) hi = tk.minv; }
+        }
+        *mn += lo + (c ? gg : 0);
+        *mx += hi + (c ? gg : 0);
+    }
+}
+
 static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     lay_ext e = LAY_X(el);
     double W = t->box[b].w;
@@ -5736,6 +5837,9 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     for (long c = 0; c < cnt0; c++) push_back(cols, lay_track_at(&tcol, &acol, c + 1 - lead0));
     for (long r = 0; r < cnt1; r++) push_back(rows, lay_track_at(&trow, &arow, r + 1 - lead1));
     size_t ncols = len(cols), nrows = len(rows);
+    /* an auto-fit repeat's tracks that no item is in collapse (Grid 1, 7.2.3.2): 0px, and the gutters beside them
+       collapse too: a gutter is between two tracks that did not */
+    size_t lcols = lay_collapse(&cols, &gp, 0), lrows = lay_collapse(&rows, &gp, 1);
     /* the columns: from the items' widths, those in tracks of fixed sizes alone not measured */
     vector<lay_gc> gc;
     for (size_t q = 0; q < ni; q++) {
@@ -5772,13 +5876,21 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         push_back(gc, c);
     }
     int jc = e.jc;
-    lay_size_tracks(&cols, &gc, W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
-    double cols_total = ncols ? cgap * (double)(ncols - 1) : 0;
+    double cdrop = cgap * (double)((ncols ? ncols - 1 : 0) - (lcols ? lcols - 1 : 0));   /* the collapsed gutters */
+    lay_size_tracks(&cols, &gc, W >= 0 ? W + cdrop : W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
+    double cols_total = lcols ? cgap * (double)(lcols - 1) : 0;
     for (size_t c = 0; c < ncols; c++) cols_total += at(cols, c).base;
     double cstart = 0, cbetween = 0;
-    if (jc != AJ_NORMAL && jc != AJ_STRETCH) lay_distribute(jc, W - cols_total, ncols, &cstart, &cbetween);
+    if (jc != AJ_NORMAL && jc != AJ_STRETCH) lay_distribute(jc, W - cols_total, lcols, &cstart, &cbetween);
     double x = cstart;
-    for (size_t c = 0; c < ncols; c++) { cols[c].pos = x; x += at(cols, c).base + cgap + cbetween; }
+    int cseen = 0;
+    for (size_t c = 0; c < ncols; c++) {
+        if (at(cols, c).fit == 2) { cols[c].pos = x; continue; }
+        if (cseen) x += cgap + cbetween;
+        cols[c].pos = x;
+        x += at(cols, c).base;
+        cseen = 1;
+    }
     /* the items laid out in their columns: stretched, or shrunk to fit and placed by
        justify-self */
     for (size_t q = 0; q < ni; q++) {
@@ -5824,8 +5936,9 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         push_back(gc, c);
     }
     int ac = e.ac;
-    lay_size_tracks(&rows, &gc, defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
-    double rows_total = nrows ? rgap * (double)(nrows - 1) : 0;
+    double rdrop = rgap * (double)((nrows ? nrows - 1 : 0) - (lrows ? lrows - 1 : 0));
+    lay_size_tracks(&rows, &gc, defh >= 0 ? defh + rdrop : defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
+    double rows_total = lrows ? rgap * (double)(lrows - 1) : 0;
     for (size_t rr = 0; rr < nrows; rr++) rows_total += at(rows, rr).base;
     double grid_h = rows_total;
     if (defh < 0) {
@@ -5835,9 +5948,16 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
             if (at(rows, rr).pct >= 0) { rows_total += grid_h * at(rows, rr).pct / 100 - at(rows, rr).base; rows[rr].base = grid_h * at(rows, rr).pct / 100; }
     }
     double rstart = 0, rbetween = 0;
-    if (defh >= 0 && ac != AJ_NORMAL && ac != AJ_STRETCH) lay_distribute(ac, defh - rows_total, nrows, &rstart, &rbetween);
+    if (defh >= 0 && ac != AJ_NORMAL && ac != AJ_STRETCH) lay_distribute(ac, defh - rows_total, lrows, &rstart, &rbetween);
     double y = rstart;
-    for (size_t rr = 0; rr < nrows; rr++) { rows[rr].pos = y; y += at(rows, rr).base + rgap + rbetween; }
+    int rseen = 0;
+    for (size_t rr = 0; rr < nrows; rr++) {
+        if (at(rows, rr).fit == 2) { rows[rr].pos = y; continue; }
+        if (rseen) y += rgap + rbetween;
+        rows[rr].pos = y;
+        y += at(rows, rr).base;
+        rseen = 1;
+    }
     /* each item in its area: align-self (stretched as tall as its rows, by default); how it was placed */
     for (size_t q = 0; q < ni; q++) {
         lay_gp g = at(gp, q);
