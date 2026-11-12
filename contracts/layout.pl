@@ -147,6 +147,9 @@ layout_contract(fact(layout_positioned(handle, field(position), field(cb), field
 layout_contract(fact(layout_stacking(handle, field(z)), table(box), field(z_auto) == false)).
 layout_contract(fact(layout_float(handle, field(float_side)), table(box), field(float_side) \== unfloated)).
 layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
+%% a box's background colour, RGBA, where it has one; the viewport's is the canvas's: the
+%% Canvas of the scheme the root is used in (CSS Color Adjust 1)
+layout_contract(fact(layout_background(handle, field(background)), table(box), field(background) \== 0)).
 layout_contract(fact(layout_margin(handle, field(mt), field(mr), field(mb), field(ml)), table(box), true)).
 layout_contract(fact(layout_border(handle, field(bt), field(br), field(bb), field(bl)), table(box), true)).
 layout_contract(fact(layout_padding(handle, field(pt), field(pr), field(pb), field(pl)), table(box), true)).

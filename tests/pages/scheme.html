@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html id=root style="color-scheme: light dark">
+<head>
+<title>Color schemes</title>
+<style>
+/* tests/pages/scheme.html: what color-scheme changes -- the system colours, light-dark(),
+   the user agent's links, marks and form controls in the scheme each element is used in,
+   and the canvas. The root takes either scheme, the reader's preference choosing;
+   elements below take their own. tools/bench/scheme.js writes Chromium's under a light
+   preference and a dark one */
+body { margin: 8px }
+#sys1 { color: CanvasText; background-color: Canvas }
+#sys2 { color: LinkText; background-color: ButtonFace; border: 1px solid ButtonBorder }
+#sys3 { color: FieldText; background-color: Field; border: 1px solid GrayText }
+#sys4 { color: VisitedText; background-color: SelectedItem; border: 1px solid AccentColor }
+#sys5 { color: WindowText; background-color: ThreeDFace; border: 1px solid ActiveBorder }
+#ld { color: light-dark(rgb(1, 2, 3), rgb(4, 5, 6)); background: light-dark(rgb(250, 250, 250), Canvas); border: 1px solid light-dark(red, blue) }
+#onlylight { color-scheme: only light }
+#dark { color-scheme: dark }
+#lightfirst { color-scheme: dark light }
+#initial { color: initial }
+</style>
+</head>
+<body>
+<p id=text>Text in the root's colour, <a id=link href="#x">a link</a> and <mark id=mark>a mark</mark>.</p>
+<p><button id=button>button</button> <input id=input value="field"> <select id=select><option>option</select> <textarea id=area>area</textarea></p>
+<fieldset id=fieldset><legend id=legend>legend</legend>a field set</fieldset>
+<p id=sys1>Canvas on CanvasText</p>
+<p id=sys2>LinkText on ButtonFace</p>
+<p id=sys3>FieldText on Field</p>
+<p id=sys4>VisitedText on SelectedItem</p>
+<p id=sys5>the deprecated names</p>
+<div id=ld>light-dark()</div>
+<div id=initial>color: initial</div>
+<div id=onlylight>only light: <button id=button2>button</button> <input id=input2></div>
+<div id=dark>dark: <button id=button3>button</button> <span id=canvastext style="color: CanvasText">CanvasText</span></div>
+<div id=lightfirst>dark light: <button id=button4>button</button></div>
+</body>
+</html>

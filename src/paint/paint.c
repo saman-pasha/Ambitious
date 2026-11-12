@@ -1295,8 +1295,10 @@ static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, 
     clear(c->px);
     resize(&c->px, (size_t)c->w * c->h * 3);
     /* the canvas's background: the root element's, or the body's if the root's is
-       transparent; that box then does not draw it again */
-    uint32_t bg = 0xffffffff, skip = 0;
+       transparent (that box then does not draw it again), over the viewport's: the Canvas
+       of the root's color scheme */
+    uint32_t canvas = vp && (t->box[vp].background & 0xff) == 0xff ? t->box[vp].background : 0xffffffff;
+    uint32_t bg = canvas, skip = 0;
     uint32_t root = vp ? t->box[vp].first_child : 0;
     if (root && (t->box[root].background & 0xff)) { bg = t->box[root].background; skip = root; }
     else if (root) {
@@ -1304,7 +1306,7 @@ static void pt_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c, 
             if (t->box[ch].kind == LAYOUT_BOX_KIND_BLOCK && (t->box[ch].background & 0xff)) { bg = t->box[ch].background; skip = ch; break; }
     }
     c->background = bg | 0xff;
-    if ((bg & 0xff) != 0xff) pt_fill(c, 0, 0, c->w, c->h, 0xffffffff);
+    if ((bg & 0xff) != 0xff) pt_fill(c, 0, 0, c->w, c->h, canvas);
     pt_fill(c, 0, 0, c->w, c->h, bg);
     vector<pt_glyph> entries;
     vector<uint32_t> table;

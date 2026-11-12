@@ -106,6 +106,23 @@ ok   font-family: monospace in a longer list: font_family dejavusansmono
 ok   font-family: cursive, the default face: font_family serif
 ok   font-family: none of the list, the default: font_family serif
 ok   font-family: the UA's monospace: font_family monospace
+ok   color-scheme: kept as written: color_scheme dark light
+ok   color-scheme: only, with a scheme: color_scheme only light
+ok   color-scheme: a comma, dropped: color_scheme normal
+ok   color-scheme: only alone, dropped: color_scheme normal
+ok   color-scheme: inherited: color_scheme dark
+ok   a system colour, light: color rgb(0, 0, 0)
+ok   a system colour in the dark scheme: color rgb(255, 255, 255)
+ok   a deprecated system colour: background_color rgb(107, 107, 107)
+ok   light-dark(), light: color rgb(1, 2, 3)
+ok   light-dark(), dark, a system colour in it: color rgb(158, 158, 255)
+ok   light-dark() in border: border_top_color rgb(0, 0, 255)
+ok   light-dark() in background: background_color rgb(18, 18, 18)
+ok   light-dark() in a shadow: box_shadow 1px 1px rgb(0, 0, 255)
+ok   the root in the dark scheme: CanvasText: color rgb(255, 255, 255)
+ok   a meta's dark scheme, the root normal: color rgb(255, 255, 255)
+ok   a link in a meta's dark scheme: color rgb(158, 158, 255)
+ok   an invalid meta passed over: color rgb(255, 255, 255)
 ok   font-family: inherited, serif at the root: font_family serif
 ok   font: without a size, dropped: font_weight 700
 ok   background: its colour: background_color rgb(255, 255, 0)
@@ -283,4 +300,4 @@ ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-285 of 285 cases
+302 of 302 cases

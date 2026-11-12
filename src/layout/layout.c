@@ -4201,7 +4201,12 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     t->box[vp].h = height;
     t->box[vp].how = LAYOUT_WIDTH_HOW_VIEWPORT;
     t->box[vp].avail = width;
-    t->box[vp].background = 0xffffffff;
+    /* the canvas: the Canvas of the scheme the root is used in (CSS Color Adjust 1, the
+       cascade's color-scheme value's colour), white without a root */
+    uint32_t rsid = root ? at(node_style, root) & LAY_SMASK : 0;
+    uint32_t rc0 = rsid && rsid < len(style_first) ? at(style_first, rsid) : 0;
+    uint32_t canvas = rc0 ? style->cval[rc0 + CSS_PROP_COLOR_SCHEME].color : 0;
+    t->box[vp].background = (canvas & 0xff) == 0xff ? canvas : 0xffffffff;
     if (!root) { t->revision++; return LAYOUT_NO_ROOT; }
     if (lay_display_of(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, root) != D_NONE) {
         lay_mc mt, mb;

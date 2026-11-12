@@ -666,7 +666,11 @@ be built side by side and merged without touching each other's.
     - `calc()` and custom properties, and rem against the root's font size;
     - `@supports`, `@layer`, `@import` and `@font-face`;
     - the pseudo-classes of state (from the event model), `::before` and
-      `::after`, `:has()`.
+      `::after`, `:has()`;
+    - `color-scheme`, a page's `<meta name=color-scheme>`, the system
+      colours and `light-dark()` in the scheme each element is used in, the
+      user agent's links, marks and form controls in them, and the canvas the
+      root's scheme gives (Chromium's values for each scheme).
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning.

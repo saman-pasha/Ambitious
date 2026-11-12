@@ -193,12 +193,15 @@ css_rules_because(N, P, Otherwise, Because) :-
     ).
 
 %% the background an element's text is drawn on: its own, or the nearest
-%% ancestor's that is not transparent, or the canvas's white
+%% ancestor's that is not transparent, or the canvas's -- the viewport's
+%% background, the Canvas of the root's color scheme; white where layout did not run
 css_background_of(N, C, From) :-
     (   css_rgba(N, background_color, C0), C0 /\ 255 =\= 0
     ->  C = C0, From = N
     ;   dom_parent(N, P), dom_element(P, _)
     ->  css_background_of(P, C, From)
+    ;   layout_box(V, _, viewport, _, _, _, _), layout_background(V, C1)
+    ->  C = C1, From = canvas
     ;   C = 0xffffffff, From = canvas
     ).
 

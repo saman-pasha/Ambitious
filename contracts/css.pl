@@ -39,6 +39,7 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     outline_width, outline_style, outline_color, outline_offset,
     letter_spacing, word_spacing, text_indent, text_transform, direction, unicode_bidi, writing_mode, hyphens,
     content, counter_reset, counter_increment, quotes,
+    color_scheme,                      % its colour field the Canvas colour of the scheme it is used in
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is
@@ -103,7 +104,7 @@ css_contract(record(cval, [
     field(num,    f64),
     field(pct,    f64),                % a calc()'s percentage, beside num px
     field(word,   atom(names)),        % a keyword; a custom property's name
-    field(color,  u32),
+    field(color,  u32),                % a colour, RGBA; color-scheme's: the Canvas of the scheme it is used in
     field(text,   span(text)),         % the computed value, as CSS writes it
     field(how,    enum(how)),
     field(winner, ref(decl))           % the declaration that won the cascade, if one applied

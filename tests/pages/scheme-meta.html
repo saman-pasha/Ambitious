@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html id=root>
+<head>
+<title>A page's color scheme</title>
+<!-- tests/pages/scheme-meta.html: a page whose meta says it is dark and whose root says
+     nothing (normal): the root, the canvas and the elements below that say nothing take
+     the page's scheme; an element that says light takes its own -->
+<meta name="color-scheme" content="nonsense, really">
+<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
+</head>
+<body id=body>
+<p id=text>Text, <a id=link href="#x">a link</a>, <button id=button>a button</button>.</p>
+<div id=light style="color-scheme: light">light: <button id=button2>button</button> <span id=canvastext style="color: CanvasText">CanvasText</span></div>
+</body>
+</html>

@@ -125,9 +125,9 @@ static const char css_ua_sheet[] =
     "big { font-size: larger }\n"
     "s, strike, del { text-decoration: line-through }\n"
     "u, ins { text-decoration: underline }\n"
-    "mark { background-color: yellow; color: black }\n"
+    "mark { background-color: Mark; color: MarkText }\n"
     "nobr { white-space: nowrap }\n"
-    ":link { color: #0000ee; text-decoration: underline }\n"
+    ":link { color: LinkText; text-decoration: underline }\n"
     "article, aside, h1, h2, h3, h4, h5, h6, hgroup, nav, section { display: block }\n"
     "h1 { margin-top: 0.67em; margin-bottom: 0.67em; font-size: 2em }\n"
     "h2 { margin-top: 0.83em; margin-bottom: 0.83em; font-size: 1.5em }\n"
@@ -161,11 +161,12 @@ static const char css_ua_sheet[] =
     "table[border] td, table[border] th { border-width: 1px; border-style: inset }\n"
     "th { font-weight: bold; text-align: center }\n"
     "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
-    "fieldset { margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove }\n"
+    "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace }\n"
     "details, summary { display: block }\n"
     "button, input, select, textarea { display: inline-block }\n"
-    "button { padding: 1px 6px; border: 2px solid #767676; background-color: #efefef }\n"
-    "input, textarea, select { padding: 1px 2px; border: 2px solid #767676; background-color: white }\n"
+    "button { padding: 1px 6px; border: 2px solid light-dark(#767676, #858585); color: ButtonText; background-color: ButtonFace }\n"
+    "input, textarea, select { padding: 1px 2px; border: 2px solid light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
+    "select { background-color: ButtonFace }\n"
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
     "input::placeholder, textarea::placeholder { color: #757575 }\n";
@@ -853,6 +854,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "counter-reset", 0, G_TEXT, 0, "none", "none" },
     { "counter-increment", 0, G_TEXT, 0, "none", "none" },
     { "quotes", 1, G_TEXT, 0, "auto none", "auto" },
+    { "color-scheme", 1, G_TEXT, 0, "normal", "normal" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -924,7 +926,7 @@ static int css_valid(css_prop p, css_val *v) {
     int g = d->gram, f = d->flags;
     if (u == CSS_UNIT_AUTO && g != G_LEN && d->words && css_word_in("auto", d->words)) { css_word_val(v, "auto"); return 1; }
     if (u == CSS_UNIT_KEYWORD) {
-        if (g == G_COLOR) return strcmp(v->word, "currentcolor") == 0;
+        if (g == G_COLOR) { uint32_t c; return strcmp(v->word, "currentcolor") == 0 || css_system_color(v->word, strlen(v->word), 0, &c); }
         return d->words && css_kw_of(p, v->word);
     }
     if (g == G_COLOR) return u == CSS_UNIT_COLOR;
@@ -979,7 +981,87 @@ static int css_is_int(const char *s, size_t n, int *out) {
     *out = (int)x;
     return 1;
 }
-static int css_is_color(const char *s, size_t n) { uint32_t c; return css_eq_ci(s, n, "currentcolor") || css_parse_color(s, n, &c); }
+/* ---- the colours that hang on the color scheme (CSS Color 4, 6.2; Color 5, 4) ---- */
+
+/* the Canvas of each scheme: what a color-scheme value's colour holds (contracts/css.pl) */
+#define CSS_CANVAS_LIGHT 0xffffffffu
+#define CSS_CANVAS_DARK 0x121212ffu
+
+/* the system colours in the light scheme and the dark, as Chromium has them (its
+   deprecated names mapped as CSS Color 4, 6.3 maps them) */
+typedef struct css_syscolor { const char *name; uint32_t light, dark; } css_syscolor;
+static const css_syscolor css_syscolors[] = {
+    { "accentcolor", 0x0075ffff, 0x0075ffff }, { "accentcolortext", 0xffffffff, 0xffffffff },
+    { "activeborder", 0x000000ff, 0xffffffff }, { "activecaption", 0xffffffff, 0x121212ff },
+    { "activetext", 0xff0000ff, 0xff0000ff }, { "appworkspace", 0xffffffff, 0x121212ff },
+    { "background", 0xffffffff, 0x121212ff }, { "buttonborder", 0x000000ff, 0xffffffff },
+    { "buttonface", 0xefefefff, 0x6b6b6bff }, { "buttonhighlight", 0xefefefff, 0x6b6b6bff },
+    { "buttonshadow", 0xefefefff, 0x6b6b6bff }, { "buttontext", 0x000000ff, 0xffffffff },
+    { "canvas", 0xffffffff, 0x121212ff }, { "canvastext", 0x000000ff, 0xffffffff },
+    { "captiontext", 0x000000ff, 0xffffffff }, { "field", 0xffffffff, 0x3b3b3bff },
+    { "fieldtext", 0x000000ff, 0xffffffff }, { "graytext", 0x808080ff, 0x808080ff },
+    { "highlight", 0x0041c6cc, 0x0041c6cc }, { "highlighttext", 0xffffffff, 0xffffffff },
+    { "inactiveborder", 0x000000ff, 0xffffffff }, { "inactivecaption", 0xffffffff, 0x121212ff },
+    { "inactivecaptiontext", 0x808080ff, 0x808080ff }, { "infobackground", 0xffffffff, 0x121212ff },
+    { "infotext", 0x000000ff, 0xffffffff }, { "linktext", 0x0000eeff, 0x9e9effff },
+    { "mark", 0xffff00ff, 0xffff00ff }, { "marktext", 0x000000ff, 0x000000ff },
+    { "menu", 0xffffffff, 0x121212ff }, { "menutext", 0x000000ff, 0xffffffff },
+    { "scrollbar", 0xffffffff, 0x121212ff }, { "selecteditem", 0x1967d2ff, 0x99c8ffff },
+    { "selecteditemtext", 0xffffffff, 0x3b3b3bff }, { "threeddarkshadow", 0x000000ff, 0xffffffff },
+    { "threedface", 0xefefefff, 0x6b6b6bff }, { "threedhighlight", 0x000000ff, 0xffffffff },
+    { "threedlightshadow", 0x000000ff, 0xffffffff }, { "threedshadow", 0x000000ff, 0xffffffff },
+    { "visitedtext", 0x551a8bff, 0xd0adf0ff }, { "window", 0xffffffff, 0x121212ff },
+    { "windowframe", 0x000000ff, 0xffffffff }, { "windowtext", 0x000000ff, 0xffffffff } };
+
+/* the system colour w names (any case) in the dark scheme or the light: 1, or 0 for none */
+static int css_system_color(const char *w, size_t n, int dark, uint32_t *rgba) {
+    for (size_t k = 0; k < sizeof css_syscolors / sizeof css_syscolors[0]; k++)
+        if (css_eq_ci(w, n, css_syscolors[k].name)) { *rgba = dark ? css_syscolors[k].dark : css_syscolors[k].light; return 1; }
+    return 0;
+}
+
+/* a colour that hangs on the scheme -- a system colour, or light-dark(a, b): a in the
+   light scheme, b in the dark, each a colour of any kind -- in the scheme dark says: 1,
+   or 0 when s is none (currentcolor in light-dark() is not read) */
+static int css_scheme_color(const char *s, size_t n, int dark, uint32_t *rgba) {
+    while (n && css_ws(*s)) { s++; n--; }
+    while (n && css_ws(s[n - 1])) n--;
+    if (css_system_color(s, n, dark, rgba)) return 1;
+    if (n < 13 || !css_bytes_eq(s, "light-dark(", 11, 1) || s[n - 1] != ')') return 0;
+    size_t comma = css_comma(s, n - 1, 11);
+    if (comma >= n - 1 || css_comma(s, n - 1, comma + 1) < n - 1) return 0;
+    uint32_t c[2];
+    size_t a[2] = { 11, comma + 1 }, e[2] = { comma, n - 1 };
+    for (int k = 0; k < 2; k++) {
+        const char *q = s + a[k];
+        size_t qn = e[k] - a[k];
+        while (qn && css_ws(*q)) { q++; qn--; }
+        while (qn && css_ws(q[qn - 1])) qn--;
+        if (!css_parse_color(q, qn, &c[k]) && !css_scheme_color(q, qn, dark, &c[k])) return 0;
+    }
+    *rgba = c[dark ? 1 : 0];
+    return 1;
+}
+
+static int css_is_color(const char *s, size_t n) {
+    uint32_t c;
+    return css_eq_ci(s, n, "currentcolor") || css_parse_color(s, n, &c) || css_scheme_color(s, n, 0, &c);
+}
+
+/* the scheme a color-scheme value is used in (CSS Color Adjust 1, 2.1): of the schemes it
+   lists, the one the reader prefers, else the first of light and dark; normal, the page's
+   (page_dark: its meta name=color-scheme's), else light. 1 for dark */
+static int css_scheme_of(const char *t, size_t n, int page_dark) {
+    size_t i = 0, st, ln;
+    int light = 0, dark = 0, first = -1;
+    if (css_eq_ci(t, n, "normal")) return page_dark;
+    while (css_next_part(t, n, &i, &st, &ln)) {
+        if (css_eq_ci(t + st, ln, "light")) { light = 1; if (first < 0) first = 0; }
+        else if (css_eq_ci(t + st, ln, "dark")) { dark = 1; if (first < 0) first = 1; }
+    }
+    if (css_pref_dark ? dark : light) return css_pref_dark;
+    return first > 0;
+}
 
 /* an image: url(), or a gradient (its arguments read by paint) */
 static int css_is_image(const char *s, size_t n) {
@@ -1136,6 +1218,21 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
     switch (p) {
+    case CSS_PROP_COLOR_SCHEME: {
+        /* [light | dark | <custom-ident>]+ && only? (CSS Color Adjust 1, 2.1): names a space
+           apart, no comma among them */
+        int only = 0;
+        if (memchr(s, ',', n)) return 0;
+        while (css_next_part(s, n, &i, &st, &ln)) {
+            const char *q = s + st;
+            if (!css_is_ident(q, ln) || css_eq_ci(q, ln, "normal") || css_eq_ci(q, ln, "default") || css_eq_ci(q, ln, "none")) return 0;
+            if (css_eq_ci(q, ln, "only")) { if (only++) return 0; continue; }
+            css_val g;
+            if (css_parse_val(q, ln, &g) && css_is_global(&g)) return 0;
+            parts++;
+        }
+        return parts > 0;
+    }
     case CSS_PROP_GRID_TEMPLATE_COLUMNS: case CSS_PROP_GRID_TEMPLATE_ROWS: return css_is_tracks(s, n, 0);
     case CSS_PROP_GRID_AUTO_COLUMNS: case CSS_PROP_GRID_AUTO_ROWS:
         while (css_next_part(s, n, &i, &st, &ln)) { parts++; if (!css_is_track(s + st, ln)) return 0; }
@@ -1303,6 +1400,15 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
         v->unit = CSS_UNIT_TEXT;
         return 1;
     }
+    if (g == G_COLOR) {
+        /* light-dark(): kept as its text, made a colour by the element's scheme in the cascade */
+        uint32_t c;
+        if (css_parse_val(s, n, v) && css_valid(p, v)) return 1;
+        if (!css_scheme_color(s, n, 0, &c)) return 0;
+        memset(v, 0, sizeof *v);
+        v->unit = CSS_UNIT_TEXT;
+        return 1;
+    }
     return css_parse_val(s, n, v) && css_valid(p, v);
 }
 
@@ -1360,8 +1466,19 @@ static int css_border(int side, const char *val, size_t vn, css_items *it) {
     css_prop wp = side == 4 ? CSS_PROP_OUTLINE_WIDTH : CSS_PROP_BORDER_TOP_WIDTH;
     css_prop sp = side == 4 ? CSS_PROP_OUTLINE_STYLE : CSS_PROP_BORDER_TOP_STYLE;
     for (size_t j = 0; j < k; j++) {
-        if (!css_parse_val(val + st[j], ln[j], &v) || css_is_global(&v)) return 0;
-        if (v.unit == CSS_UNIT_COLOR || css_is_word(&v, "currentcolor")) {
+        uint32_t c;
+        if (!css_parse_val(val + st[j], ln[j], &v)) {
+            /* light-dark(): kept as its text, made a colour by the element's scheme */
+            if (has_color || !css_scheme_color(val + st[j], ln[j], 0, &c)) return 0;
+            memset(&color, 0, sizeof color);
+            color.unit = CSS_UNIT_TEXT;
+            has_color = 1;
+            cj = j;
+            continue;
+        }
+        if (css_is_global(&v)) return 0;
+        if (v.unit == CSS_UNIT_COLOR || css_is_word(&v, "currentcolor") ||
+            (v.unit == CSS_UNIT_KEYWORD && css_system_color(v.word, strlen(v.word), 0, &c))) {
             if (has_color) return 0;
             color = v; has_color = 1; cj = j;
         } else if ((v.unit == CSS_UNIT_KEYWORD || v.unit == CSS_UNIT_AUTO) && css_valid(sp, &v)) {
@@ -1433,6 +1550,7 @@ static int css_background(const char *val, size_t vn, css_items *it) {
     css_val color;
     memset(&color, 0, sizeof color);
     color.unit = CSS_UNIT_COLOR;
+    vector<char> ctext;                                 /* a light-dark() colour's text */
     int layers = 0, any_image = 0, has_color = 0;
     size_t cs = 0, cl = 0, a = 0;
     for (;;) {
@@ -1494,6 +1612,18 @@ static int css_background(const char *val, size_t vn, css_items *it) {
                 has_color = 1;
                 continue;
             }
+            if (css_scheme_color(p, pn, 0, &c)) {
+                /* a system colour (its keyword) or light-dark() (its text), made a colour by the
+                   element's scheme in the cascade */
+                if (has_color) return 0;
+                if (!css_parse_val(p, pn, &color) || color.unit != CSS_UNIT_KEYWORD) {
+                    memset(&color, 0, sizeof color);
+                    color.unit = CSS_UNIT_TEXT;
+                    append_range(ctext, p, pn);
+                }
+                has_color = 1;
+                continue;
+            }
             return 0;
         }
         if (after_slash && !has_size) return 0;
@@ -1508,7 +1638,8 @@ static int css_background(const char *val, size_t vn, css_items *it) {
     }
     (void)cs;
     (void)cl;
-    css_item_add(it, CSS_PROP_BACKGROUND_COLOR, &color, 0, vn);
+    if (color.unit == CSS_UNIT_TEXT) css_item_made(it, CSS_PROP_BACKGROUND_COLOR, &color, data(ctext), len(ctext));
+    else css_item_add(it, CSS_PROP_BACKGROUND_COLOR, &color, 0, vn);
     css_val t, none;
     memset(&t, 0, sizeof t);
     t.unit = CSS_UNIT_TEXT;
@@ -3194,10 +3325,11 @@ static double css_size_keyword(const char *w, double parent, int mono) {
     return css_size_at(k < 0 ? 3 : k, mono ? CSS_FIXED_PX : css_font_px);
 }
 
-/* the text t with every font- and viewport-relative length made px and currentcolor made
-   the colour cur, into out (strings and url()s as they are): what a value kept as text
+/* the text t with every font- and viewport-relative length made px, currentcolor made the
+   colour cur, and the system colours and light-dark() made colours in the dark scheme or
+   the light, into out (strings and url()s as they are): what a value kept as text
    computes to. 1 when it changed anything */
-static int css_absolutize(const char *t, size_t n, double em, double rem, uint32_t cur, vector<char> *out) {
+static int css_absolutize(const char *t, size_t n, double em, double rem, uint32_t cur, int dark, vector<char> *out) {
     int changed = 0;
     size_t i = 0;
     while (i < n) {
@@ -3220,12 +3352,18 @@ static int css_absolutize(const char *t, size_t n, double em, double rem, uint32
         if (word_start && css_is_alpha(c)) {
             size_t e = i;
             while (e < n && css_namechar(t[e])) e++;
-            if (css_eq_ci(t + i, e - i, "currentcolor")) {
+            uint32_t sc = cur;
+            int is_cur = css_eq_ci(t + i, e - i, "currentcolor"), is_sys = !is_cur && css_system_color(t + i, e - i, dark, &sc);
+            if (!is_cur && !is_sys && e < n && t[e] == '(' && css_eq_ci(t + i, e - i, "light-dark")) {
+                size_t close = css_block_end(t, n, e, '(', ')');
+                if (close < n && css_scheme_color(t + i, close + 1 - i, dark, &sc)) { is_sys = 1; e = close + 1; }
+            }
+            if (is_cur || is_sys) {
                 char buf[48];
                 css_val cv;
                 memset(&cv, 0, sizeof cv);
                 cv.unit = CSS_UNIT_COLOR;
-                cv.color = cur;
+                cv.color = sc;
                 size_t bn = css_value_text(&cv, buf, sizeof buf);
                 append_range(out, buf, bn);
                 changed = 1;
@@ -3258,10 +3396,10 @@ static int css_absolutize(const char *t, size_t n, double em, double rem, uint32
 }
 
 /* a value kept as text made computed: its span, or a new one when it changed */
-static void css_text_computed(css_style *s, css_val *v, double em, double rem, uint32_t cur) {
+static void css_text_computed(css_style *s, css_val *v, double em, double rem, uint32_t cur, int dark) {
     vector<char> src, out;
     append_range(src, text_ptr(s, v->tx), v->tx.len);
-    if (css_absolutize(data(src), len(src), em, rem, cur, &out)) v->tx = text_add(s, data(out), len(out));
+    if (css_absolutize(data(src), len(src), em, rem, cur, dark, &out)) v->tx = text_add(s, data(out), len(out));
 }
 
 /* a calc() made computed: px, a percentage, px and a percentage, a number, or (over
@@ -3276,7 +3414,7 @@ static int css_calc_computed(css_style *s, css_prop p, css_val *v, double em, do
     if (l.kind == CSS_CK_NUM && !l.nonlin) { v->unit = CSS_UNIT_NUMBER; v->num = l.num; if (p != CSS_PROP_LINE_HEIGHT && css_pdefs[p].gram == G_LEN) v->unit = CSS_UNIT_PX; return 1; }
     if (l.nonlin) {
         vector<char> out;
-        css_absolutize(data(src), len(src), em, rem, cur, &out);
+        css_absolutize(data(src), len(src), em, rem, cur, 0, &out);
         v->unit = CSS_UNIT_EXPR;
         v->tx = text_add(s, data(out), len(out));
         return 1;
@@ -3291,7 +3429,7 @@ static int css_calc_computed(css_style *s, css_prop p, css_val *v, double em, do
 
 /* the web fonts' families the page declared (src/css: @font-face), and the font sizes the
    cascade is at: the root's, for rem */
-typedef struct css_env { double rem; char faces[1024]; } css_env;
+typedef struct css_env { double rem; int page_dark; char faces[1024]; } css_env;
 
 /* a declared value made computed: pv the parent's computed values, cur the element's
    computed so far (its font size and colour come first) */
@@ -3334,7 +3472,20 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
             memset(v, 0, sizeof *v);
             v->unit = CSS_UNIT_COLOR;
             v->color = p == CSS_PROP_COLOR ? pv->color : color;
+        } else if (v->unit == CSS_UNIT_KEYWORD || v->unit == CSS_UNIT_TEXT) {
+            /* a system colour or light-dark(), in the scheme the element is used in */
+            int dark = cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK;
+            uint32_t c;
+            int ok = v->unit == CSS_UNIT_KEYWORD ? css_system_color(v->word, strlen(v->word), dark, &c)
+                                                  : css_scheme_color(text_ptr(s, v->tx), v->tx.len, dark, &c);
+            if (ok) { memset(v, 0, sizeof *v); v->unit = CSS_UNIT_COLOR; v->color = c; }
         }
+        return;
+    }
+    if (p == CSS_PROP_COLOR_SCHEME) {
+        /* as specified; its colour the Canvas of the scheme it is used in */
+        int dark = v->unit == CSS_UNIT_TEXT ? css_scheme_of(text_ptr(s, v->tx), v->tx.len, env->page_dark) : env->page_dark;
+        v->color = dark ? CSS_CANVAS_DARK : CSS_CANVAS_LIGHT;
         return;
     }
     if (g == G_FAMILY) {
@@ -3362,7 +3513,7 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         return;
     }
     if (g == G_TEXT || g == G_RADIUS) {
-        if (v->unit == CSS_UNIT_TEXT) css_text_computed(s, v, fs, env->rem, color);
+        if (v->unit == CSS_UNIT_TEXT) css_text_computed(s, v, fs, env->rem, color, cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK);
         else if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
         else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
         else if (v->unit == CSS_UNIT_NUMBER) v->unit = CSS_UNIT_PX;
@@ -3595,8 +3746,9 @@ static int css_var_value(css_style *s, uint32_t dc, css_prop p, vector<css_cust>
 enum { CSS_PF_INH = 1, CSS_PF_CC = 2, CSS_PF_BW = 4 };
 static uint8_t css_pf[CSS_NPROPS];
 
-/* the order values are computed in: font-family, then font-size (the em of the others,
-   whose defaults the family reads), then color (their currentcolor), position and float
+/* the order values are computed in: color-scheme (the scheme the colours are taken in),
+   font-family, then font-size (the em of the others, whose defaults the family reads),
+   then color (their currentcolor), position and float
    before display (which they blockify), the border and outline styles before their
    widths (none makes a width 0) */
 static int css_order[CSS_NPROPS];
@@ -3620,7 +3772,8 @@ static void css_order_make(void) {
         }
         css_kwn[p] = (uint8_t)(k > CSS_MAXKW ? CSS_MAXKW + 1 : k);
     }
-    static const int first[] = { CSS_PROP_FONT_FAMILY, CSS_PROP_FONT_SIZE, CSS_PROP_COLOR, CSS_PROP_POSITION, CSS_PROP_FLOAT, CSS_PROP_DISPLAY,
+    static const int first[] = { CSS_PROP_COLOR_SCHEME, CSS_PROP_FONT_FAMILY, CSS_PROP_FONT_SIZE, CSS_PROP_COLOR, CSS_PROP_POSITION,
+                                 CSS_PROP_FLOAT, CSS_PROP_DISPLAY,
                                  CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_BOTTOM_STYLE,
                                  CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_OUTLINE_STYLE };
     int n = 0, nf = (int)(sizeof first / sizeof first[0]);
@@ -3891,7 +4044,7 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
        family, and so its origin */
     uint8_t pfso = ps && ps < len(ss->fsx) ? at(ss->fsx, ps) : (uint8_t)CSS_FS_MEDIUM;
     *fso = pfso;
-    if (!any) return;
+    if (!any && !is_root) return;
     /* the properties a declaration won, in the order they depend on each other; the
        parent's values (the initial ones, at the root) read from its cvals */
     uint32_t pc0 = ps ? at(ss->first, ps) : 0;
@@ -3918,8 +4071,15 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         out[p] = v;
         rec[p] = css_value_rec(s, &v, how, w, vc);
     }
+    /* the root's colour no declaration gave: color's initial value, CanvasText, in the
+       scheme the root is used in (CSS Color 4) -- white in the dark */
+    int root_text = is_root && !win[CSS_PROP_COLOR] && out[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK;
+    if (root_text) {
+        out[CSS_PROP_COLOR].color = 0xffffffff;
+        rec[CSS_PROP_COLOR] = css_value_rec(s, &out[CSS_PROP_COLOR], CSS_HOW_INITIAL, 0, vc);
+    }
     /* what the winners change of the values that hang on them */
-    if (win[CSS_PROP_COLOR])
+    if (win[CSS_PROP_COLOR] || root_text)
         for (int k = 0; k < CSS_NPROPS; k++)
             if ((css_pf[k] & CSS_PF_CC) && !win[k]) { out[k].color = out[CSS_PROP_COLOR].color; rec[k] = css_value_rec(s, &out[k], CSS_HOW_INITIAL, 0, vc); }
     if (win[CSS_PROP_POSITION] && (css_word_is(&out[CSS_PROP_POSITION], "absolute") || css_word_is(&out[CSS_PROP_POSITION], "fixed")) &&
@@ -4235,6 +4395,26 @@ static uint32_t css_style_make(css_style *s, css_env *env, css_styles *ss, vecto
     return sid;
 }
 
+/* the page's color scheme (HTML, 4.2.5.4): the first meta name=color-scheme's content that
+   is a color-scheme value, as normal uses it; 0 light (none, or none valid), 1 dark */
+static int css_page_dark(const dom_document *d) {
+    for (uint32_t x = 1; x < d->node_len; x++) {
+        if (!css_is_named(d, x, "meta") || !d->node[x].parent) continue;
+        uint32_t a = css_attr_of(d, x, "name", 4);
+        if (!a || !css_eq_ci(text_ptr(d, d->attr[a].value), d->attr[a].value.len, "color-scheme")) continue;
+        uint32_t c = css_attr_of(d, x, "content", 7);
+        if (!c) continue;
+        amb_span v = d->attr[c].value;
+        const char *t = text_ptr(d, v);
+        size_t i = 0, e = v.len;
+        while (i < e && css_ws(t[i])) i++;
+        while (e > i && css_ws(t[e - 1])) e--;
+        if (!css_eq_ci(t + i, e - i, "normal") && !css_text_valid(CSS_PROP_COLOR_SCHEME, t + i, e - i)) continue;
+        return css_scheme_of(t + i, e - i, 0);
+    }
+    return 0;
+}
+
 /* the element the URL's fragment names: the page's #id (or an a's name), 0 for none */
 static uint32_t css_url_target(const css_style *s, const dom_document *doc, const net_loader *net) {
     (void)s;
@@ -4309,6 +4489,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     css_env env;
     memset(&env, 0, sizeof env);
     env.rem = css_font_px;
+    env.page_dark = css_page_dark(doc);
     /* the web fonts' families whose font was fetched: each a word of env.faces, lower case
        and without its spaces, as font-family's names are matched */
     for (uint32_t fi = 1; fi < s->face_len; fi++) {
@@ -4347,8 +4528,10 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         irec[k] = css_value_rec(s, &v, CSS_HOW_INITIAL, 0, &vc);
     }
     /* each property's initial value, for the reasoner to derive the values no declaration gave */
+    uint32_t iv_color = 0;
     for (int k = 0; k < CSS_NPROPS; k++) {
         css_initval_h ih = initval_new(s);
+        if (k == CSS_PROP_COLOR) iv_color = ih.index;
         s->initval[ih.index].prop = (css_prop)k;
         s->initval[ih.index].unit = initial[k].unit;
         s->initval[ih.index].color = initial[k].color;
@@ -4466,6 +4649,14 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         uint32_t ps = px ? at(nstyle, px) : 0;
         uint32_t sid = css_style_make(s, &env, &ss, &se, &sslots, &slists, &matched, ps, px == 0, initial, irec, &cust, &vc);
         nstyle[x] = sid;
+        if (px == 0 && s->cval[at(ss.first, sid) + CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK) {
+            /* the root in the dark scheme: color's initial value, CanvasText, is white there,
+               for color: initial below it and for the reasoner's initial values */
+            initial[CSS_PROP_COLOR].color = 0xffffffff;
+            irec[CSS_PROP_COLOR] = css_value_rec(s, &initial[CSS_PROP_COLOR], CSS_HOW_INITIAL, 0, &vc);
+            s->initval[iv_color].color = 0xffffffff;
+            s->initval[iv_color].text = irec[CSS_PROP_COLOR].text;
+        }
         css_estyle_h eh = estyle_new(s);
         s->estyle[eh.index].node = nh;
         s->estyle[eh.index].style = sid;
