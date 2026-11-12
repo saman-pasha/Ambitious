@@ -1,0 +1,35 @@
+<html><head><title>Quirks: a marker's line of its own</title>
+<!-- No DOCTYPE: a quirks-mode page. A list item whose first child is a block-level ul or ol (white space before it aside)
+     has its outside marker on a line of its own above it, as tall as the list item's line (Blink's NeedsOccupyWholeLine,
+     measured); not when the first child is another block, a menu, an inline-block list, a float or an absolutely
+     positioned box, nor without a marker; an inside marker is on a line of its own before any first block, in every
+     mode. The text is transparent: each list's region holds its markers; the boxes held to Chromium's
+     (tests/pages/quirks-lists.chromium), the regions to its drawing (quirks-lists.shot.png) -->
+<style>
+body { margin: 8px; font: 16px sans-serif; }
+ul, ol { margin: 0; width: 200px; background: #f6f6f6; }
+span { color: transparent; }
+.col { position: absolute; left: 400px; top: 0; }
+</style></head><body>
+<ul id="a"><li id="a1"><ul id="a2"><li id="a3"><span id="a4">nested ul</span></li></ul></li></ul>
+<ul id="b"><li id="b1"><ol id="b2"><li id="b3"><span id="b4">nested ol</span></li></ol></li></ul>
+<ul id="c" style="list-style: none"><li id="c1"><ul id="c2"><li id="c3"><span id="c4">none outer</span></li></ul></li></ul>
+<ul id="d"><li id="d1"><div id="d2"><span id="d4">div</span></div></li></ul>
+<ul id="e"><li id="e1" style="font-size: 4px"><ul id="e2" style="font-size: 16px"><li id="e3"><span id="e4">small outer</span></li></ul></li></ul>
+<ul id="f"><li id="f1"><ul id="f2" style="list-style: none"><li id="f3"><span id="f4">none inner</span></li></ul></li></ul>
+<ul id="g"><li id="g1"><div id="g2"><ul id="g3"><li id="g5"><span id="g4">div then ul</span></li></ul></div></li></ul>
+<ul id="h"><li id="h1"><ul id="h2"><li id="h3"><p id="h5" style="margin: 0"><span id="h4">ul li p</span></p></li></ul></li></ul>
+<ul id="i"><li id="i1" style="line-height: 4px"><ul id="i2" style="line-height: normal"><li id="i3"><span id="i4">line height 4px</span></li></ul></li></ul>
+<ul id="j" style="list-style-position: inside"><li id="j1"><ul id="j2"><li id="j3"><span id="j4">inside nested</span></li></ul></li></ul>
+<div class="col">
+<ul id="k"><li id="k1">
+  <ul id="k2"><li id="k3"><span id="k4">white space first</span></li></ul></li></ul>
+<ul id="l"><li id="l1"><div id="l5" style="float: left; width: 20px; height: 10px; background: #ccf"></div><ul id="l2"><li id="l3"><span id="l4">float first</span></li></ul></li></ul>
+<ul id="m"><li id="m1"><ul id="m2" style="display: inline-block; width: auto"><li id="m3"><span id="m4">inline-block ul</span></li></ul></li></ul>
+<ul id="n"><li id="n1"><menu id="n2"><li id="n3"><span id="n4">menu</span></li></menu></li></ul>
+<ul id="o"><li id="o1"><ul id="o2" style="margin-top: 10px"><li id="o3"><span id="o4">margin top</span></li></ul></li></ul>
+<ul id="q"><li id="q1"><div style="position: absolute; left: 700px" id="q5"><span>abs</span></div><ul id="q2"><li id="q3"><span id="q4">abs first</span></li></ul></li></ul>
+<ol id="r"><li id="r1" style="font-size: 30px"><ul id="r2" style="font-size: 16px"><li id="r3"><span id="r4">big decimal</span></li></ul></li></ol>
+<ul id="s" style="list-style-position: inside"><li id="s1"><p id="s2" style="margin: 0"><span id="s3">inside, a p</span></p></li></ul>
+</div>
+</body></html>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Legends wider than their fieldsets</title>
+<style>
+/* tests/pages/legend-wide.html -- a fieldset's legend wider than the fieldset's content box, as Chromium lays it out
+   and draws it: the fieldset's min- and max-content widths take its legend's (a float, an inline-block, a flex item,
+   width: min-content and max-content), the user agent's min-width: min-content holds a fieldset of a declared width
+   as wide as its legend's longest word, a nowrap line or its declared width; with min-width: 0 the legend overflows the
+   border box, from the start (right to left: from the right, past the left edge), the top border not drawn behind it.
+   The legends' text is transparent; the boxes held to Chromium's (tests/pages/legend-wide.chromium), the regions to
+   its drawing (legend-wide.shot.png) */
+body { margin: 8px; font: 16px sans-serif; }
+fieldset { margin: 0 0 4px; border-color: #36c; }
+legend { color: transparent; }
+.col { position: absolute; left: 420px; top: 0; }
+</style></head><body>
+<fieldset id="f1" style="width: 100px"><legend id="l1" style="white-space: nowrap">A nowrap legend wider than the box</legend>x</fieldset>
+<fieldset id="f2" style="width: 100px"><legend id="l2">Supercalifragilistic</legend>x</fieldset>
+<div style="float: left" id="w3"><fieldset id="f3"><legend id="l3">A wide legend in a float</legend><span id="s3">x</span></fieldset></div>
+<div style="clear: both"></div>
+<span style="display: inline-block" id="w4"><fieldset id="f4"><legend id="l4">Inline-block's wide legend</legend>ab</fieldset></span>
+<fieldset id="f5" style="width: min-content"><legend id="l5">Min content legend words</legend>xx</fieldset>
+<fieldset id="f6" style="width: max-content"><legend id="l6">Max content legend</legend>x</fieldset>
+<div style="display: flex" id="w7"><fieldset id="f7"><legend id="l7">Flex item's legend</legend>y</fieldset></div>
+<fieldset id="f8" style="width: 100px; padding: 0 20px"><legend id="l8" style="width: 200px">A legend 200px wide</legend>x</fieldset>
+<div class="col">
+<fieldset id="f9" style="width: 100px; min-width: 0"><legend id="l9" style="width: 200px">200px, min-width 0</legend>x</fieldset>
+<fieldset id="f10" style="width: 100px; min-width: 0"><legend id="l10" style="white-space: nowrap">Nowrap legend, min-width 0</legend>x</fieldset>
+<fieldset id="f11" style="width: 100px; min-width: 0; padding: 0"><legend id="l11" style="white-space: nowrap; margin-left: auto; margin-right: auto">Centred nowrap legend</legend>x</fieldset>
+<div style="width: 120px" id="w12"><fieldset id="f12" style="min-width: 0"><legend id="l12" style="white-space: nowrap; margin-left: auto">Right nowrap legend</legend>x</fieldset></div>
+<fieldset id="f13" style="width: 100px; min-width: 0; direction: rtl; margin-left: 100px"><legend id="l13" style="white-space: nowrap">RTL nowrap legend</legend>x</fieldset>
+<fieldset id="f14" style="width: 200px; direction: rtl"><legend id="l14">RTL legend</legend>x</fieldset>
+<fieldset id="f15" style="width: 200px; direction: rtl"><legend id="l15" style="margin-right: auto">RTL auto right</legend>x</fieldset>
+<fieldset id="f16" style="width: 100px; min-width: 0; border-width: 8px"><legend id="l16" style="white-space: nowrap; border: 2px solid #c63">Bordered, wide</legend>x</fieldset>
+</div>
+</body></html>

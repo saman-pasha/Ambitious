@@ -224,7 +224,7 @@ static const char css_ua_sheet[] =
     "table[border] td, table[border] th { border-width: 1px; border-style: inset }\n"
     "th { font-weight: bold; text-align: center }\n"
     "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
-    "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace }\n"
+    "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace; min-width: min-content }\n"
     "legend { padding-left: 2px; padding-right: 2px }\n"
     "details, summary { display: block }\n"
     /* a details element's summary: a list item with its disclosure triangle inside (HTML 15.5.17, Chromium's sheet) */
@@ -2666,7 +2666,7 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
         v->unit = CSS_UNIT_TEXT;
         return 1;
     }
-    if (p == CSS_PROP_ALIGN_ITEMS || p == CSS_PROP_ALIGN_SELF) {
+    if (p == CSS_PROP_ALIGN_ITEMS || p == CSS_PROP_ALIGN_SELF || p == CSS_PROP_JUSTIFY_ITEMS || p == CSS_PROP_JUSTIFY_SELF) {
         /* first baseline (baseline's other name) and last baseline: the keywords baseline and
            last-baseline, the text kept as written (Box Alignment 3, 4.2) */
         size_t st[3], ln[3];

@@ -130,9 +130,11 @@ layout_contract(record(box, [
     field(grid_row, i32), field(grid_col, i32), field(grid_rows, u32), field(grid_cols, u32),
     field(grid_by,      enum(grid_by)),
     field(grid_area,    span(text)),
-    %% a flex container's first baseline, from its content box's top, which its items give
-    %% it (Flexbox 1, 8.5), when it has one
+    %% a flex or grid container's first baseline, from its content box's top, which its items give
+    %% it (Flexbox 1, 8.5; Grid 1, 10.1), when it has one; and its last baseline likewise, 1 its last
+    %% item's, 2 its items' aligned on their last baselines (which an inline-block takes)
     field(baseline, f64), field(has_baseline, bool),
+    field(lbaseline, f64), field(has_lbaseline, u8),
     %% a fieldset's rendered legend's box (HTML 15.3.13), set on its top border, whose
     %% border box the top border is not drawn behind; none
     field(legend, ref(box))

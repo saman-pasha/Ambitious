@@ -1,0 +1,6 @@
+# boxes of tests/pages/body-overflow.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+html html 0 0 800 166
+body body 10 40 780 120
+d1 div 10 40 780 20
+p2 p 10 76 780 20
+d3 div 10 112 780 150

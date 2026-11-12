@@ -1,0 +1,11 @@
+<html id=html><head><title>Quirks: a body with a min-height</title>
+<!-- No DOCTYPE: a quirks-mode page whose body has a min-height less than the viewport. The body fills the viewport less
+     its margins as they collapsed (the Quirks Mode Standard 3.7), its last child's bottom margin through its bottom as
+     Chromium lets it through though min-height holds the body taller than its content; a min-height past the viewport
+     holds it taller still (the html element's next). The boxes held to Chromium's (tests/pages/quirks-bodymin.chromium) -->
+<style>
+body { font: 16px/20px sans-serif; margin: 20px 10px 6px; background: #eef; min-height: 100px; }
+</style></head><body id=body>
+<div id=d1 style="margin-top: 40px">The first child</div>
+<p id=p2 style="margin-bottom: 30px">The last p: its bottom margin through the body's bottom</p>
+</body></html>

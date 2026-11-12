@@ -1,0 +1,5 @@
+# boxes of tests/pages/quirks-bodymin.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+html html 0 0 800 600
+body body 10 40 780 530
+d1 div 10 40 780 20
+p2 p 10 76 780 20

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html><head><title>Grid baselines</title>
+<style>
+/* tests/pages/grid-baseline.html -- baseline alignment in a grid, as Chromium does it: align-items and align-self
+   baseline (first baseline) and last baseline, a row's items of other sizes, paddings, borders and margins aligned on
+   their first baselines at the start of their row (on their last at its end), the row as tall as its group needs; an
+   item with no baseline its border box's bottom; one spanning rows in its first (last) row's group; items that are
+   flex and grid containers; justify-items baseline and last baseline (start and end: a horizontal item has no baseline
+   across the columns); a grid container's own first and last baselines (Grid 1, 10.1) in a line, as an inline-grid
+   and in an inline-block, and as a flex item; the boxes held to Chromium's (tests/pages/grid-baseline.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.case { height: 100px; }
+.g { display: grid; background: #f4f4f4; width: 480px; grid-template-columns: repeat(4, auto); }
+.g > div, .g > span { background: #cde; }
+.big { font-size: 32px; }
+.small { font-size: 10px; }
+.pad { padding-top: 15px; border-top: 3px solid #888; }
+.box { height: 30px; width: 30px; }
+.ig { display: inline-grid; grid-template-columns: auto auto; background: #eee; }
+.ib { display: inline-block; background: #eee; }
+</style></head><body>
+<div class=case><div class=g style="align-items: baseline" id=a><div id=a1>text</div><div class=big id=a2>Big</div><div class=small id=a3>small</div><div id=a4 class=pad>pad</div></div></div>
+<div class=case><div class=g style="align-items: last baseline" id=b><div id=b1>one<br>two</div><div class=big id=b2>Big</div><div class=small id=b3>small</div><div id=b4 class=box></div></div></div>
+<div class=case><div class=g style="align-items: baseline; grid-template-rows: 80px" id=c><div id=c1>text</div><div class=big id=c2>Big</div><div id=c3 class=box></div><div id=c4 style="align-self: end">end</div></div></div>
+<div class=case style="height: 120px"><div class=g style="align-items: baseline" id=d><div id=d1>r1</div><div class=big id=d2>R1</div><div id=d3>x</div><div id=d4>y</div><div id=d5 class=small>row two</div><div id=d6 class=big>Two</div><div id=d7 style="grid-row: span 2">spans<br>rows</div><div id=d8>z</div></div></div>
+<div class=case><div class=g style="align-items: last baseline; grid-template-columns: auto auto auto" id=e><div id=e1 style="grid-row: span 2">spans<br>two<br>rows</div><div id=e2 class=big>E</div><div id=e3>e</div><div id=e4 class=small>row two</div><div id=e5>tall<br>two</div></div></div>
+<div class=case><div class=g style="grid-template-columns: auto auto auto" id=f><div id=f1 style="align-self: baseline; margin-top: 10px">margin</div><div id=f2 class=big style="align-self: baseline">F</div><div id=f3 style="align-self: last baseline; margin-bottom: 7px">last<br>margin</div><div id=f4 class=big style="align-self: last baseline">L</div><div id=f5 style="align-self: center">mid</div></div></div>
+<div class=case><div class=g style="align-items: baseline; grid-template-columns: auto auto auto" id=h><div id=h1 style="display: flex"><span id=h11>flex</span><span class=big id=h12>Fx</span></div><div id=h2 class=small style="display: grid"><span id=h21>grid</span><span id=h22>two</span></div><div id=h3>plain</div></div></div>
+<div class=case><div class=g style="align-items: last baseline; grid-template-columns: auto auto auto" id=i><div id=i1 style="display: flex; flex-wrap: wrap; width: 80px"><span id=i11 style="width: 50px">a</span><span class=big id=i12 style="width: 50px">B</span></div><div id=i2 style="display: grid"><span id=i21>grid</span><span id=i22 class=big>two</span></div><div id=i3>plain</div></div></div>
+<div class=case><div class=g style="justify-items: baseline" id=j><div id=j1>jb</div><div id=j2 class=big>JB</div><div id=j3>j</div><div id=j4>k</div></div>
+<div class=g style="justify-items: last baseline" id=k><div id=k1>jl</div><div id=k2 class=big>JL</div><div id=k3 style="justify-self: baseline">j</div><div id=k4>k</div></div></div>
+<div class=case><p id=q1>Line <span class=ig id=g1><span id=g11>first</span><span class=big id=g12>second</span><span id=g13>third</span></span> after</p></div>
+<div class=case><p id=q2>Line <span class=ig style="align-items: baseline" id=g2><span id=g21>first</span><span class=big id=g22>second</span><span id=g23>third</span></span> after</p></div>
+<div class=case><p id=q3>Line <span class=ib id=g3><span style="display: grid; grid-template-columns: auto auto" id=g31><span id=g311>first</span><span class=big id=g312>second</span><span id=g313>third</span></span></span> after</p></div>
+<div class=case><p id=q4>Line <span class=ib id=g4><span style="display: grid; grid-template-columns: auto auto; align-items: last baseline" id=g41><span id=g411>p<br>q</span><span class=big id=g412>R</span><span id=g413 class=big>s</span><span id=g414>t<br>u</span></span></span> after</p></div>
+<div class=case><div style="display: flex; align-items: baseline; background: #eee" id=fx><div id=fx1>text</div><div style="display: grid; grid-template-columns: auto auto" id=fx2><span id=fx21 class=big>G</span><span id=fx22>g</span></div><div id=fx3 class=small>small</div></div>
+<div style="display: flex; align-items: last baseline; background: #eee" id=fy><div id=fy1>text</div><div style="display: grid; grid-template-columns: auto" id=fy2><span id=fy21 class=big>G</span><span id=fy22>last</span></div><div id=fy3 class=small>small</div></div></div>
+</body></html>

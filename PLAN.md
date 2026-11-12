@@ -1106,6 +1106,49 @@ be built side by side and merged without touching each other's.
   scripts across frames and realms, read from a file and served over HTTP from two origins, line
   for line (22, 9 and 11 lines); the facts and the diagnostics (`tests/integ/frames.sh`);
   `tests/exec/frames` runs the pages' frames through the pipeline under valgrind.
+- **12x Layout's rest** (`src/layout/layout.c`; a flex or grid container's last baseline in `contracts/layout.pl`, a
+  fieldset's `min-width: min-content` and justify-items' and -self's first and last baseline in `src/css/css.c`), each
+  measured in Chromium first, where it and the specs part Chromium deciding:
+  - list markers: an inside marker begins the list item's first line, or, when its first in-flow box is a block, takes
+    a line of its own before it (Chromium's inline marker box in an anonymous block of its own: docs/limitations.md had
+    Chromium setting it in that block's first line, which measured it does not); an outside one by the first line
+    however deep, a nested list's too, or a flex or grid container's first baseline, a line in a box that clips (or a
+    container's baseline) setting it in a line of the list item's own, unclipped; with no line, at the list item's top,
+    the list item at least that line's height (an empty `<li>`);
+  - a fieldset's legend wider than its content box: the fieldset's min- and max-content widths take the legend's, the
+    user agent's `min-width: min-content` holds a fieldset of a declared width as wide, and with `min-width: 0` the
+    legend overflows the border box from its start (right to left, from the right), the top border left out behind it;
+  - a flex container's last baseline (8.5: its last line's last-baseline items', else its last item's) for an item
+    aligned on its last baseline, and both baselines in the order the lines and items are drawn (a reversed direction
+    or wrap-reverse), as Chromium finds them; an inline-block over a flex or grid container takes that container's
+    first baseline unless its last is its last-baseline items' (measured);
+  - grid: baseline alignment (align-items and -self baseline and last baseline: a row's group sharing a baseline at
+    the row's start, or its end, each item's contribution to its rows with the shift; justify-items and -self's
+    fallbacks start and end) and a grid container's own baselines (10.1); its own min- and max-content widths from its
+    items placed as its layout places them and its columns sized by the track sizing algorithm under a min-content and
+    a max-content constraint (11.5's spans in increasing order, 11.5.4's flexible tracks, 11.7.1's size of an fr), as
+    Chromium runs it -- its items' contributions taken as in a layout, not the spec's limited ones; an item's minimum
+    contribution as Chromium has it (a width of its own, a min-width, a scroll container, the tracks' fixed maximums),
+    min-width and max-width holding its contributions and its stretched width;
+  - a sticky inline element at rest, unscrolled: its fragments' union its box, the block whose lines hold it its
+    containing block, its fragments, text, atomic boxes and strips moved;
+  - the quirks' layout: an inline-block's, a float's met in a line, an inline image's and a block-level image's
+    percentage heights taken of their block's definite height, through the blocks of an auto height up to the body in
+    quirks mode (an inline-block's min-height and max-height too, in every mode); a list item whose first child is a block-level ul or ol has its
+    outside marker on a line of its own (Blink's NeedsOccupyWholeLine, quirks mode alone); a body that fills keeps its
+    last child's bottom margin through its bottom under a min-height; and in every mode the body's overflow is the
+    viewport's when the root's is visible, so a body that clips makes no formatting context and clips nothing.
+
+  Gate: `tests/pages/markers-nested.html` (boxes 82 of 82, from 4; regions 82 of 82, from 56), `legend-wide.html` (37
+  of 37, from 17; regions 37 of 37, from 18), `flex-lastbaseline.html` (126 of 126, from 79), `grid-sizing.html` (490 of
+  490, from 249: twenty track lists, each as a float, an inline-grid, `width: min-content` and `max-content` and a block,
+  items spanning one to three tracks of text and fixed widths; `tools/gen-grid-sizing.py`), `grid-baseline.html` (97 of
+  97, from 63), `sticky-inline.html` (33 of 33, from 22; regions 33 of 33, from 3), `quirks-heights2.html` (27 of 27,
+  from 9), `quirks-lists.html` (92 of 92, from 0; regions 92 of 92, from 80), `quirks-bodyclip.html` (5 of 5, from 1;
+  regions 5 of 5, from 4), `quirks-bodymin.html` (4 of 4, from 3) and `body-overflow.html` (5 of 5, from 0; regions 5
+  of 5, from 2), each held to Chromium's boxes (`tests/integ/boxes.sh`) and drawing (`tests/integ/paintref.sh`); every
+  other page's boxes and regions unmoved; `lists.png` and `geometry.png` of `tests/golden/render/` moved towards
+  Chromium's drawing (an empty list item's marker).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
@@ -1153,7 +1196,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12u merged, each with its own files and gate |
+| 12 The limitations | **in progress**: the packages 12a-12u and 12x merged, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks

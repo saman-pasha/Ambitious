@@ -1,0 +1,6 @@
+# tests/pages/quirks-bodyclip.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+html 0 0 800 600
+body 10 40 790 584
+d1 10 40 790 60
+d2 10 60 790 204
+p3 10 219 790 240

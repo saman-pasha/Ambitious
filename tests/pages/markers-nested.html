@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Markers of list items whose first child is a block</title>
+<style>
+/* tests/pages/markers-nested.html -- a list item's marker when its first child is a block, as Chromium places it: an
+   inside marker on a line of its own before the block (Chromium's inline marker box, in an anonymous block of its
+   own), an outside one by the first line's baseline, however deep, or a nested list's, or by a flex container's
+   baseline; an outside marker by a line in a box that clips (not clipped), and one with no line to hold it at the list
+   item's top, the list item as tall as its line. The text is transparent, so each list's region holds its markers; the boxes held to Chromium's
+   (tests/pages/markers-nested.chromium), the regions to its drawing (markers-nested.shot.png) */
+body { margin: 8px; font: 16px sans-serif; }
+ul, ol { margin: 4px 0; width: 180px; background: #f6f6f6; }
+p { margin: 6px 0; }
+span { color: transparent; }
+.col { position: absolute; top: 0; left: 400px; }
+</style></head><body>
+<ul id="u1" style="list-style-position: inside"><li id="l1"><p id="p1"><span id="t1">Inside, a p</span></p></li></ul>
+<ol id="o2" style="list-style-position: inside"><li id="l2"><p id="p2"><span id="t2">Inside decimal</span></p></li><li id="l3"><div id="d3"><span id="t3">A div</span></div></li></ol>
+<ul id="u4"><li id="l4"><p id="p4"><span id="t4">Outside, a p</span></p></li></ul>
+<ul id="u5" style="list-style-position: inside"><li id="l5"><div id="d5"><div id="d55"><span id="t5">Two divs deep</span></div></div></li></ul>
+<ul id="u6" style="list-style-position: inside"><li id="l6"><ul id="u66" style="width: auto"><li id="l66"><span id="t6">Nested inside</span></li></ul></li></ul>
+<ul id="u7"><li id="l7"><ul id="u77" style="width: auto"><li id="l77"><span id="t7">Nested outside</span></li></ul></li></ul>
+<ol id="o8" style="list-style-position: inside"><li id="l8"><p id="p8" style="text-indent: 20px"><span id="t8">Indented</span></p></li></ol>
+<ul id="u9" style="list-style-position: inside"><li id="l9"><div id="d9" style="display: flex"><span id="t9">Flex</span></div></li></ul>
+<ol id="o10" style="list-style-position: inside; font-size: 24px"><li id="l10"><div id="d10" style="font-size: 16px"><span id="t10">Larger marker</span></div></li></ol>
+<div class="col">
+<ul id="u11"><li id="l11"><div id="d11" style="overflow: hidden"><span id="t11">Overflow hidden</span></div></li></ul>
+<ul id="u12"><li id="l12"></li><li id="l13"><span id="t13">After an empty item</span></li></ul>
+<ol id="o14"><li id="l14"><div id="d14" style="height: 5px; background: #ccf"></div></li><li id="l15"><div id="d15" style="height: 30px; background: #ccf"></div></li></ol>
+<ul id="u16"><li id="l16"><img id="g16" src="logo.png" style="display: block; height: 30px"></li></ul>
+<ul id="u17" style="list-style-position: inside"><li id="l17"></li></ul>
+<ul id="u18"><li id="l18"><div id="d18" style="float: left; width: 20px; height: 10px; background: #ccf"></div><p id="p18"><span id="t18">After a float</span></p></li></ul>
+<ol id="o19"><li id="l19" style="padding-top: 6px"><p id="p19" style="margin-top: 10px"><span id="t19">Padded item</span></p></li></ol>
+<ul id="u20"><li id="l20"><p id="p20" style="margin-top: 20px; font-size: 30px"><span id="t20">Big p</span></p></li></ul>
+<ul id="u21" style="list-style-position: inside"><li id="l21"><p id="p21" style="text-align: center"><span id="t21">Centred</span></p></li></ul>
+<ul id="u22"><li id="l22"><div id="d22" style="display: flex"><img id="g22" src="logo.png" style="height: 30px"><span id="t22">Flex, an image first</span></div></li></ul>
+</div>
+</body></html>

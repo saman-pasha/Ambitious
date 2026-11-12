@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html id=html><head><title>A body that clips its overflow</title>
+<!-- A standards-mode page whose body has overflow: hidden and the root's overflow is visible: the body's overflow is the
+     viewport's (CSS Overflow 3, 3.3), so the body clips nothing and makes no formatting context of its own -- its first
+     child's top margin and its last child's bottom margin collapse through it, and its content past its height is drawn,
+     as Chromium has it. The boxes held to Chromium's (tests/pages/body-overflow.chromium), the regions to its drawing -->
+<style>
+body { font: 16px/20px sans-serif; margin: 20px 10px 6px; background: #eef; overflow: hidden; height: 120px; }
+div, p { color: transparent; }
+</style></head><body id=body>
+<div id=d1 style="margin-top: 40px">The first child: its margin through the body's top</div>
+<p id=p2>A p: its margins collapse with the div's</p>
+<div id=d3 style="height: 150px; background: #c96; margin-bottom: 25px">Past the body's height: drawn, not clipped</div>
+</body></html>

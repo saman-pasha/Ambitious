@@ -1,0 +1,6 @@
+# boxes of tests/pages/quirks-bodyclip.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+html html 0 0 800 600
+body body 10 40 780 544
+d1 div 10 40 780 20
+d2 div 10 60 780 143.5
+p3 p 10 219.5 780 20

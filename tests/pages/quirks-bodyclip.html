@@ -1,0 +1,14 @@
+<html id=html><head><title>Quirks: a body that clips its overflow</title>
+<!-- No DOCTYPE: a quirks-mode page whose body clips its overflow. The root's overflow is visible, so the body's is the
+     viewport's (CSS Overflow 3, 3.3): the body clips nothing and makes no formatting context of its own, and as Chromium
+     has it, its first child's top margin and its last child's bottom margin collapse through it, the body filling the
+     viewport less its margins as they collapsed (the Quirks Mode Standard 3.7), its background drawn there. The boxes
+     held to Chromium's (tests/pages/quirks-bodyclip.chromium), the regions to its drawing -->
+<style>
+body { font: 16px/20px sans-serif; margin: 20px 10px 6px; background: #eef; overflow: hidden; }
+p { color: transparent; }
+</style></head><body id=body>
+<div id=d1 style="margin-top: 40px; color: transparent">The first child: its margin through the body's top</div>
+<div id=d2 style="height: 25%; background: #ccd">25% of the body's fill</div>
+<p id=p3>The last p: its bottom margin through the body's bottom</p>
+</body></html>
