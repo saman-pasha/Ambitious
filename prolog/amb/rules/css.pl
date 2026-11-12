@@ -13,7 +13,7 @@
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
    css_imported/3, css_font_face/5, css_font_face_font/2,
-   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3.
+   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3, css_registered/5.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -98,12 +98,25 @@ css_rules_border_style(border_bottom_width, border_bottom_style).
 css_rules_border_style(border_left_width, border_left_style).
 
 %% CUSTOM PROPERTIES. An element's are its style's own (css_style_custom/5, var()
-%% replaced), and its parent's of every other name: a custom property is inherited
+%% replaced; an unregistered one's initial is no value), and its parent's of every other
+%% name: a custom property is inherited, but one registered (@property) not to inherit,
+%% which has its initial value where the element gives it none, as one registered has at
+%% the root (CSS Properties and Values 1)
 css_custom(N, Name, V) :-
-    css_style_of(N, S), css_style_custom(S, Name, V, How, _), How \== initial.
+    css_style_of(N, S), css_style_custom(S, Name, V, How, _), ( How == initial -> V \== '' ; true ).
 css_custom(N, Name, V) :-
     dom_parent(N, P), dom_element(P, _), css_custom(P, Name, V),
-    \+ ( css_style_of(N, S), css_style_custom(S, Name, _, _, _) ).
+    \+ ( css_style_of(N, S), css_style_custom(S, Name, _, _, _) ),
+    \+ css_rules_registered(Name, _, false, _).
+css_custom(N, Name, V) :-
+    css_style_of(N, S), css_rules_registered(Name, _, Inherits, V),
+    \+ css_style_custom(S, Name, _, _, _),
+    (   Inherits == true -> \+ ( dom_parent(N, P), dom_element(P, _) ) ; true ).
+
+%% a custom property's registration that holds: the last of its name's
+css_rules_registered(Name, Syntax, Inherits, Initial) :-
+    css_registered(R, Name, Syntax, Inherits, Initial),
+    \+ ( css_registered(R2, Name, _, _, _), R2 @> R ).
 
 %% PSEUDO-ELEMENTS. A pseudo-element's style (css_pseudo_style_of/3: a ::before or an
 %% ::after whose content is something, and the others that rules matched) is a style

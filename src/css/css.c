@@ -2730,6 +2730,7 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
    element (css_index_rules leaves it out); a block whose selector this does not read is
    dropped, as the standard has it */
 static void css_parse_block(css_style *s, uint32_t rule, const char *t, size_t n);
+static void css_property_rule(css_style *s, const css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn);
 static void css_keyframes_rule(css_style *s, const css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn) {
     size_t a = css_skip_ws(pre, pn, 0), b = pn;
     while (b > a && css_ws(pre[b - 1])) b--;
@@ -2990,12 +2991,13 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
             cx->ruled = 1;
         } else if (at) {
             /* @media whose query holds, @supports whose condition does: their rules are the
-               sheet's; @font-face's face is fetched; @keyframes' keyframes are rules of their own; @page
-               and the rest: not read */
+               sheet's; @font-face's face is fetched; @keyframes' keyframes are rules of their own;
+               @property registers its custom property; @page and the rest: not read */
             if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
             else if (css_eq_ci(name, nn, "keyframes") || css_eq_ci(name, nn, "-webkit-keyframes")) css_keyframes_rule(s, cx, t + j, k - j, t + k + 1, inner);
+            else if (css_eq_ci(name, nn, "property")) css_property_rule(s, cx, t + j, k - j, t + k + 1, inner);
             cx->ruled = 1;
         } else {
             css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
@@ -4709,20 +4711,20 @@ static void css_list_text(css_style *s, css_prop p, uint32_t w, vector<css_cust>
    transitions' own (a keyframe's animation-timing-function is its easing) */
 static int css_anim_own(css_prop p) { return p >= CSS_PROP_ANIMATION_NAME && p <= CSS_PROP_TRANSITION_BEHAVIOR; }
 
-/* of an animation's keyframes kr (rules, by place), the two that property p's value at
-   progress x lies between and the progress between them, eased (CSS Animations 1, 4;
+/* of an animation's keyframes kr (rules, by place), the two that property p's value (a
+   custom property's, cname its name) at progress x lies between and the progress between them, eased (CSS Animations 1, 4;
    Web Animations 1, 5.3): each place's last declaration of p; at places 0 and 1 the
    element's own value (0) when no keyframe there gives one; a stretch eased by its first
    keyframe's animation-timing-function, else by the animation's (ease) */
-static void css_anim_prop(const css_style *s, const vector<uint32_t> *kr, css_prop p, double x, const char *ease, size_t en, uint32_t *k0,
-                          uint32_t *k1, double *f) {
+static void css_anim_prop(const css_style *s, const vector<uint32_t> *kr, css_prop p, uint32_t cname, double x, const char *ease, size_t en,
+                          uint32_t *k0, uint32_t *k1, double *f) {
     double off[66];
     uint32_t dec[66], er[66];
     int m = 0;
     for (size_t q = 0; q < len(*kr) && m < 64; q++) {
         uint32_t r = at(*kr, q), last = 0;
         for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next)
-            if (s->decl[dc].prop == p && !s->decl[dc].important) last = dc;
+            if (s->decl[dc].prop == p && !s->decl[dc].important && (!cname || s->decl[dc].word == cname)) last = dc;
         if (!last) continue;
         double o = s->rule[r].offset;
         if (m && off[m - 1] == o) { dec[m - 1] = last; er[m - 1] = r; continue; }
@@ -4765,8 +4767,10 @@ static void css_anim_prop(const css_style *s, const vector<uint32_t> *kr, css_pr
    set; a later animation of the list over an earlier one. A property an !important
    declaration gives is left alone: animations come under the important declarations and
    over every other (Cascade 5, 6.1) */
+static void css_anim_custom(css_style *s, const vector<uint32_t> *kr, uint32_t name, double x, const char *ease, size_t en,
+                            vector<css_cust> *cust, double pem, double rem);
 static void css_animate(css_style *s, const uint32_t *win, vector<css_cust> *cust, uint32_t pc0, const css_val *initial, int is_root,
-                        uint32_t *ak0, uint32_t *ak1, double *af, uint8_t *aon) {
+                        double pem, double rem, uint32_t *ak0, uint32_t *ak1, double *af, uint8_t *aon) {
     vector<char> names, durs, eases, dels, its, dirs, fills, plays;
     css_list_text(s, CSS_PROP_ANIMATION_NAME, win[CSS_PROP_ANIMATION_NAME], cust, pc0, initial, is_root, &names);
     css_list_text(s, CSS_PROP_ANIMATION_DURATION, win[CSS_PROP_ANIMATION_DURATION], cust, pc0, initial, is_root, &durs);
@@ -4830,8 +4834,21 @@ static void css_animate(css_style *s, const uint32_t *win, vector<css_cust> *cus
                 if (p >= CSS_NPROPS || seen[p] || s->decl[dc].important || p == CSS_PROP_CUSTOM || css_anim_own(p)) continue;
                 seen[p] = 1;
                 if (win[p] && s->decl[win[p]].important) continue;
-                css_anim_prop(s, &kr, p, prog, data(ease), len(ease), &ak0[p], &ak1[p], &af[p]);
+                css_anim_prop(s, &kr, p, 0, prog, data(ease), len(ease), &ak0[p], &ak1[p], &af[p]);
                 aon[p] = 1;
+            }
+        /* its custom properties: a registered one's ends mixed by its syntax where they pair
+           up, the rest discrete (the first value until halfway) */
+        vector<uint32_t> cseen;
+        for (size_t q = 0; q < len(kr); q++)
+            for (uint32_t dc = s->rule[at(kr, q)].first_decl; dc; dc = s->decl[dc].next) {
+                if (s->decl[dc].prop != CSS_PROP_CUSTOM || s->decl[dc].important) continue;
+                uint32_t name = s->decl[dc].word;
+                int done = 0;
+                for (size_t z = 0; z < len(cseen) && !done; z++) done = at(cseen, z) == name;
+                if (done) continue;
+                push_back(cseen, name);
+                css_anim_custom(s, &kr, name, prog, data(ease), len(ease), cust, pem, rem);
             }
     }
 }
@@ -5027,6 +5044,383 @@ static void css_interp(css_style *s, css_prop p, const css_val *a, const css_val
     *out = f < 0.5 ? *a : *b;
 }
 
+/* ---- registered custom properties (@property, CSS Properties and Values 1) ---- */
+
+static int css_absolutize(const char *t, size_t n, double em, double rem, uint32_t cur, int dark, vector<char> *out);
+
+/* what a registered property's value is computed against: the element's em and rem, its
+   colour, its scheme */
+typedef struct css_senv { double em, rem; uint32_t cur; int dark; } css_senv;
+
+static int css_is_relative_unit(const char *u, size_t un) {
+    static const char *const units = "em rem ex rex ch rch cap rcap ic ric lh rlh vw vh vi vb vmin vmax svw svh lvw lvh dvw dvh cqw cqh cqi cqb cqmin cqmax";
+    char w[8];
+    if (un == 0 || un >= sizeof w) return 0;
+    for (size_t k = 0; k < un; k++) w[k] = css_lower(u[k]);
+    w[un] = 0;
+    return css_word_in(w, units);
+}
+
+/* a value of one type of a registered property's syntax (its name, without its angle
+   brackets) is part p: 1 when it is, its computed text then appended to out when out is
+   given (lengths px, colours rgb(), angles deg, times s, numbers as numbers) */
+static int css_syntax_type(const char *ty, size_t tn, const char *p, size_t pn, const css_senv *e, vector<char> *out) {
+    css_val v;
+    double x;
+    char buf[96];
+    int bn = 0;
+    if (css_eq_ci(ty, tn, "length") || css_eq_ci(ty, tn, "length-percentage")) {
+        int lp = tn > 6;
+        if (!css_parse_val(p, pn, &v)) return 0;
+        int ok = v.unit == CSS_UNIT_PX || v.unit == CSS_UNIT_EM || v.unit == CSS_UNIT_REM || (v.unit == CSS_UNIT_NUMBER && v.num == 0) ||
+                 (v.unit == CSS_UNIT_CALC && (lp ? (v.ck & (CSS_CK_LEN | CSS_CK_PCT)) != 0 : v.ck == CSS_CK_LEN)) || (lp && v.unit == CSS_UNIT_PERCENT);
+        if (!ok) return 0;
+        if (!out) return 1;
+        if (v.unit == CSS_UNIT_NUMBER) bn = snprintf(buf, sizeof buf, "0px");
+        else if (v.unit == CSS_UNIT_PX) bn = snprintf(buf, sizeof buf, "%gpx", v.num);
+        else if (v.unit == CSS_UNIT_EM) bn = snprintf(buf, sizeof buf, "%gpx", v.num * e->em);
+        else if (v.unit == CSS_UNIT_REM) bn = snprintf(buf, sizeof buf, "%gpx", v.num * e->rem);
+        else if (v.unit == CSS_UNIT_PERCENT) bn = snprintf(buf, sizeof buf, "%g%%", v.num);
+        else { css_absolutize(p, pn, e->em, e->rem, e->cur, e->dark, out); return 1; }
+        if (bn > 0) append_range(*out, buf, (size_t)bn);
+        return 1;
+    }
+    if (css_eq_ci(ty, tn, "number") || css_eq_ci(ty, tn, "integer")) {
+        if (css_number(p, pn, &x) != pn) return 0;
+        if (tn == 7 && x != floor(x)) return 0;
+        if (out) { bn = snprintf(buf, sizeof buf, "%g", x); if (bn > 0) append_range(*out, buf, (size_t)bn); }
+        return 1;
+    }
+    if (css_eq_ci(ty, tn, "percentage")) {
+        size_t used = css_number(p, pn, &x);
+        if (!used || used + 1 != pn || p[used] != '%') return 0;
+        if (out) { bn = snprintf(buf, sizeof buf, "%g%%", x); if (bn > 0) append_range(*out, buf, (size_t)bn); }
+        return 1;
+    }
+    if (css_eq_ci(ty, tn, "color")) {
+        if (!css_is_color(p, pn)) return 0;
+        if (!out) return 1;
+        /* currentcolor is its own computed value here (the element's colour is taken where it is used) */
+        if (css_eq_ci(p, pn, "currentcolor")) { append_range(*out, "currentcolor", 12); return 1; }
+        vector<char> t;
+        uint32_t c = 0;
+        css_absolutize(p, pn, e->em, e->rem, e->cur, e->dark, &t);
+        if (!css_parse_color(data(t), len(t), &c)) { append_range(*out, p, pn); return 1; }
+        memset(&v, 0, sizeof v);
+        v.unit = CSS_UNIT_COLOR;
+        v.color = c;
+        size_t cn = css_value_text(&v, buf, sizeof buf);
+        append_range(*out, buf, cn);
+        return 1;
+    }
+    if (css_eq_ci(ty, tn, "angle")) {
+        if (!css_is_angle(p, pn)) return 0;
+        if (!out) return 1;
+        size_t used = css_number(p, pn, &x);
+        const char *u = p + used;
+        size_t un = pn - used;
+        if (css_eq_ci(u, un, "rad")) x = x * 180 / M_PI;
+        else if (css_eq_ci(u, un, "turn")) x *= 360;
+        else if (css_eq_ci(u, un, "grad")) x *= 0.9;
+        bn = snprintf(buf, sizeof buf, "%gdeg", x);
+        if (bn > 0) append_range(*out, buf, (size_t)bn);
+        return 1;
+    }
+    if (css_eq_ci(ty, tn, "time")) {
+        if (!css_time_ms(p, pn, &x)) return 0;
+        if (out) { bn = snprintf(buf, sizeof buf, "%gs", x / 1000); if (bn > 0) append_range(*out, buf, (size_t)bn); }
+        return 1;
+    }
+    int ok = 0;
+    if (css_eq_ci(ty, tn, "resolution")) {
+        size_t used = css_number(p, pn, &x);
+        ok = used && used < pn && (css_eq_ci(p + used, pn - used, "dpi") || css_eq_ci(p + used, pn - used, "dpcm") ||
+                                   css_eq_ci(p + used, pn - used, "dppx") || css_eq_ci(p + used, pn - used, "x"));
+    } else if (css_eq_ci(ty, tn, "custom-ident")) {
+        ok = css_is_ident(p, pn) && !css_eq_ci(p, pn, "default") && !css_eq_ci(p, pn, "initial") && !css_eq_ci(p, pn, "inherit") &&
+             !css_eq_ci(p, pn, "unset") && !css_eq_ci(p, pn, "revert") && !css_eq_ci(p, pn, "revert-layer");
+    } else if (css_eq_ci(ty, tn, "string")) ok = css_is_string(p, pn);
+    else if (css_eq_ci(ty, tn, "url")) ok = css_is_fn(p, pn, "url");
+    else if (css_eq_ci(ty, tn, "image")) ok = css_is_image(p, pn);
+    else if (css_eq_ci(ty, tn, "transform-function")) {
+        size_t i = 0, st, ln;
+        int parts = 0;
+        while (css_next_part(p, pn, &i, &st, &ln)) parts++;
+        ok = parts == 1 && css_is_transform(p, pn);
+    } else if (css_eq_ci(ty, tn, "transform-list")) ok = css_is_transform(p, pn);
+    if (ok && out) css_absolutize(p, pn, e->em, e->rem, e->cur, e->dark, out);
+    return ok;
+}
+
+/* a registered property's syntax (the text of its string) is valid: * alone, or its
+   components (a type in angle brackets that this reads, with + or # after it but for
+   transform-list, or an identifier) with | between them */
+static int css_syntax_ok(const char *syn, size_t sn) {
+    static const char *const types = "length number percentage length-percentage color image url integer angle time resolution "
+                                     "transform-function transform-list custom-ident string";
+    size_t a = css_skip_ws(syn, sn, 0), z = sn;
+    while (z > a && css_ws(syn[z - 1])) z--;
+    if (z - a == 1 && syn[a] == '*') return 1;
+    while (a < z) {
+        size_t b = a;
+        while (b < z && syn[b] != '|') b++;
+        size_t ca = css_skip_ws(syn, b, a), cb = b;
+        while (cb > ca && css_ws(syn[cb - 1])) cb--;
+        if (cb == ca) return 0;
+        if (syn[cb - 1] == '+' || syn[cb - 1] == '#') cb--;
+        if (syn[ca] == '<') {
+            if (cb - ca < 3 || syn[cb - 1] != '>' || cb - ca - 2 >= 24) return 0;
+            char w[24];
+            for (size_t k = 0; k < cb - ca - 2; k++) w[k] = css_lower(syn[ca + 1 + k]);
+            w[cb - ca - 2] = 0;
+            if (!css_word_in(w, types)) return 0;
+            if (strcmp(w, "transform-list") == 0 && cb < b && (syn[cb] == '+' || syn[cb] == '#')) return 0;
+        } else if (!css_is_ident(syn + ca, cb - ca)) return 0;
+        if (b >= z) break;
+        a = b + 1;
+    }
+    return 1;
+}
+
+/* a registered property's value v (its var()s replaced) against its syntax syn: 1 when a
+   component of it takes v (a type, its + list or its # list, or the identifier itself);
+   the value computed into out when out is given; * takes any value, as it is */
+static int css_syntax_match(const char *syn, size_t sn, const char *v, size_t vn, const css_senv *e, vector<char> *out) {
+    size_t va = css_skip_ws(v, vn, 0), vz = vn;
+    while (vz > va && css_ws(v[vz - 1])) vz--;
+    const char *x = v + va;
+    size_t xn = vz - va;
+    size_t a = css_skip_ws(syn, sn, 0), z = sn;
+    while (z > a && css_ws(syn[z - 1])) z--;
+    if (z - a == 1 && syn[a] == '*') { if (out) append_range(*out, x, xn); return 1; }
+    if (xn == 0) return 0;
+    while (a < z) {
+        size_t b = a;
+        while (b < z && syn[b] != '|') b++;
+        size_t ca = css_skip_ws(syn, b, a), cb = b;
+        while (cb > ca && css_ws(syn[cb - 1])) cb--;
+        char mult = cb > ca && (syn[cb - 1] == '+' || syn[cb - 1] == '#') ? syn[cb - 1] : 0;
+        if (mult) cb--;
+        vector<char> got;
+        int ok = 0;
+        if (cb > ca && syn[ca] == '<' && syn[cb - 1] == '>') {
+            const char *ty = syn + ca + 1;
+            size_t tn = cb - ca - 2;
+            if (!mult) ok = css_syntax_type(ty, tn, x, xn, e, out ? &got : 0);
+            else if (mult == '+') {
+                size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
+                size_t k = css_parts(x, xn, st, ln, CSS_MAXPARTS);
+                ok = k > 0;
+                for (size_t j = 0; j < k && ok; j++) {
+                    if (j && out) push_back(got, ' ');
+                    ok = css_syntax_type(ty, tn, x + st[j], ln[j], e, out ? &got : 0);
+                }
+            } else {
+                size_t p = 0;
+                ok = 1;
+                int first = 1;
+                while (p <= xn && ok) {
+                    size_t q = css_comma(x, xn, p), pa = css_skip_ws(x, q, p), pb = q;
+                    while (pb > pa && css_ws(x[pb - 1])) pb--;
+                    if (!first && out) append_range(got, ", ", 2);
+                    first = 0;
+                    ok = pb > pa && css_syntax_type(ty, tn, x + pa, pb - pa, e, out ? &got : 0);
+                    if (q >= xn) break;
+                    p = q + 1;
+                }
+            }
+        } else if (!mult && cb - ca == xn && memcmp(syn + ca, x, xn) == 0) {
+            ok = 1;
+            if (out) append_range(got, x, xn);
+        }
+        if (ok) {
+            if (out) append_range(*out, data(got), len(got));
+            return 1;
+        }
+        if (b >= z) break;
+        a = b + 1;
+    }
+    return 0;
+}
+
+/* the registration of a custom property (its name's atom) that holds: the last of those
+   for it; 0 when it is not registered */
+static uint32_t css_regprop_of(const css_style *s, uint32_t name) {
+    uint32_t best = 0;
+    for (uint32_t r = 1; name && r < s->regprop_len; r++)
+        if (s->regprop[r].live && s->regprop[r].name == name) best = r;
+    return best;
+}
+
+/* an @property rule (CSS Properties and Values 1, 3): its name (a custom property's) and
+   its descriptors: syntax (a string this reads), inherits (true or false), initial-value
+   (which the syntax must take, computationally independent: no font- or viewport-relative
+   length, no var(), no currentcolor; it may be left out for *). A rule without them, or
+   with one this does not take, is dropped */
+static void css_property_rule(css_style *s, const css_pctx *cx, const char *pre, size_t pn, const char *blk, size_t bn) {
+    size_t a = css_skip_ws(pre, pn, 0), b = pn;
+    while (b > a && css_ws(pre[b - 1])) b--;
+    if (b - a < 3 || pre[a] != '-' || pre[a + 1] != '-' || !css_is_ident(pre + a, b - a)) return;
+    long sy0 = -1, sy1 = -1, iv0 = -1, iv1 = -1;
+    int inh = -1;
+    size_t i = 0;
+    while (i < bn) {
+        /* a descriptor: its name, then its value up to the next semicolon outside a string */
+        size_t e = i;
+        while (e < bn && blk[e] != ';') {
+            if (blk[e] == '"' || blk[e] == '\'') { e = css_string_end(blk, bn, e); if (e >= bn) break; }
+            else if (blk[e] == '(') { e = css_block_end(blk, bn, e, '(', ')'); if (e >= bn) break; }
+            e++;
+        }
+        if (e > bn) e = bn;
+        size_t colon = i;
+        while (colon < e && blk[colon] != ':') colon++;
+        if (colon < e) {
+            size_t na = css_skip_ws(blk, colon, i), nb = colon;
+            while (nb > na && css_ws(blk[nb - 1])) nb--;
+            size_t va = css_skip_ws(blk, e, colon + 1), vb = e;
+            while (vb > va && css_ws(blk[vb - 1])) vb--;
+            if (css_eq_ci(blk + na, nb - na, "syntax") && vb - va >= 2 && css_is_string(blk + va, vb - va)) { sy0 = (long)va + 1; sy1 = (long)vb - 1; }
+            else if (css_eq_ci(blk + na, nb - na, "inherits")) inh = css_eq_ci(blk + va, vb - va, "true") ? 1 : css_eq_ci(blk + va, vb - va, "false") ? 0 : -2;
+            else if (css_eq_ci(blk + na, nb - na, "initial-value")) { iv0 = (long)va; iv1 = (long)vb; }
+        }
+        i = e + 1;
+    }
+    if (sy0 < 0 || inh < 0 || !css_syntax_ok(blk + sy0, (size_t)(sy1 - sy0))) return;
+    const char *syn = blk + sy0;
+    size_t sn = (size_t)(sy1 - sy0);
+    int universal = sn == 1 && syn[0] == '*';
+    vector<char> init;
+    if (iv0 < 0) { if (!universal) return; }
+    else {
+        const char *iv = blk + iv0;
+        size_t ivn = (size_t)(iv1 - iv0);
+        /* computationally independent: no relative length, var(), env() or currentcolor */
+        vector<css_tok> tk;
+        css_tokens(iv, ivn, &tk);
+        for (size_t k = 0; k < len(tk); k++) {
+            css_tok t = at(tk, k);
+            if (t.num && css_is_relative_unit(iv + t.u, t.s + t.n - t.u)) return;
+            if (!t.num && (css_eq_ci(iv + t.s, t.n, "var") || css_eq_ci(iv + t.s, t.n, "env") || css_eq_ci(iv + t.s, t.n, "currentcolor"))) return;
+        }
+        css_senv e0 = { 16, 16, 0x000000ff, 0 };
+        if (!css_syntax_match(syn, sn, iv, ivn, &e0, &init)) return;
+    }
+    css_regprop_h h = regprop_new(s);
+    s->regprop[h.index].name = names_intern(s, pre + a, b - a);
+    s->regprop[h.index].syntax = text_add(s, syn, sn);
+    s->regprop[h.index].inherits = inh == 1;
+    s->regprop[h.index].initial = text_add(s, data(init), len(init));
+    s->regprop[h.index].sheet = cx->sheet;
+}
+
+/* custom property name's value at progress x of an animation (its keyframes kr): its two
+   ends (a keyframe's declaration, its var()s replaced, or the element's own value) mixed
+   at the eased progress when it is registered and its syntax takes both (computed
+   against the parent's font size: an em in an end is the parent's), else the first until
+   halfway; how animated, the keyframe its winner. An important declaration of it keeps it */
+static void css_anim_custom(css_style *s, const vector<uint32_t> *kr, uint32_t name, double x, const char *ease, size_t en,
+                            vector<css_cust> *cust, double pem, double rem) {
+    size_t q = 0;
+    while (q < len(*cust) && at(*cust, q).name != name) q++;
+    if (q < len(*cust) && at(*cust, q).winner && s->decl[at(*cust, q).winner].important) return;
+    uint32_t k0, k1;
+    double f;
+    css_anim_prop(s, kr, CSS_PROP_CUSTOM, name, x, ease, en, &k0, &k1, &f);
+    vector<char> t0, t1;
+    for (int e = 0; e < 2; e++) {
+        uint32_t k = e ? k1 : k0;
+        vector<char> *dst = e ? &t1 : &t0;
+        if (k) {
+            vector<char> src;
+            amb_span sp = s->decl[k].text;
+            append_range(src, text_ptr(s, sp), sp.len);
+            if (!css_subst(s, data(src), len(src), cust, 0, dst)) clear(*dst);
+        } else if (q < len(*cust) && at(*cust, q).state == 2) {
+            amb_span sp = at(*cust, q).value;
+            append_range(*dst, text_ptr(s, sp), sp.len);
+        }
+    }
+    vector<char> res;
+    uint32_t r = css_regprop_of(s, name);
+    int mixed = 0;
+    if (r && f > 0 && f < 1) {
+        vector<char> sy, c0, c1;
+        append_range(sy, text_ptr(s, s->regprop[r].syntax), s->regprop[r].syntax.len);
+        css_senv e0 = { pem, rem, 0x000000ff, 0 };
+        if (css_syntax_match(data(sy), len(sy), data(t0), len(t0), &e0, &c0) && css_syntax_match(data(sy), len(sy), data(t1), len(t1), &e0, &c1))
+            mixed = css_interp_tokens(data(c0), len(c0), data(c1), len(c1), f, &res);
+    }
+    if (!mixed) {
+        if (f < 0.5) append_range(res, data(t0), len(t0));
+        else append_range(res, data(t1), len(t1));
+    }
+    css_cust c;
+    memset(&c, 0, sizeof c);
+    c.name = name;
+    c.value = text_add(s, data(res), len(res));
+    c.how = CSS_HOW_ANIMATED;
+    c.winner = f >= 0.5 ? (k1 ? k1 : k0) : (k0 ? k0 : k1);
+    c.state = len(res) ? 2 : 3;
+    if (q < len(*cust)) (*cust)[q] = c;
+    else push_back(*cust, c);
+}
+
+/* an element's registered custom properties (cust) as the cascade leaves them (CSS
+   Properties and Values 1, 2.4): one of its own (declared, or an animation's) whose
+   syntax does not take its value is invalid at computed-value time, the property then
+   unset; one the element has none of, or an unset one, its parent's when it inherits,
+   else its initial value; initial its initial value. The parent's are pf to pf + pn of
+   the styles' pool */
+static void css_register_customs(css_style *s, vector<css_cust> *cust, const css_styles *ss, uint32_t pf, uint32_t pn) {
+    for (uint32_t r = 1; r < s->regprop_len; r++) {
+        if (!s->regprop[r].live) continue;
+        uint32_t name = s->regprop[r].name;
+        if (css_regprop_of(s, name) != r) continue;
+        size_t q = 0;
+        while (q < len(*cust) && at(*cust, q).name != name) q++;
+        int here = q < len(*cust), own = here && at(*cust, q).how != CSS_HOW_INHERITED;
+        uint32_t w = here ? at(*cust, q).winner : 0;
+        if (own && at(*cust, q).state == 2) {
+            vector<char> v, sy;
+            amb_span sp = at(*cust, q).value;
+            append_range(v, text_ptr(s, sp), sp.len);
+            append_range(sy, text_ptr(s, s->regprop[r].syntax), s->regprop[r].syntax.len);
+            css_senv e0 = { 16, 16, 0x000000ff, 0 };
+            if (css_syntax_match(data(sy), len(sy), data(v), len(v), &e0, 0)) continue;   /* computed after the font size */
+        }
+        if (here && !own && at(*cust, q).state == 2) continue;                              /* the parent's, inherited */
+        int kw_initial = w && css_eq_ci(text_ptr(s, s->decl[w].text), s->decl[w].text.len, "initial");
+        css_cust c;
+        memset(&c, 0, sizeof c);
+        c.name = name;
+        c.state = 2;
+        c.winner = w;
+        c.how = CSS_HOW_INITIAL;
+        c.value = s->regprop[r].initial;
+        if (s->regprop[r].inherits && !kw_initial)
+            for (uint32_t z = 0; z < pn; z++)
+                if (at(ss->cpool, pf + z).name == name) { c.value = at(ss->cpool, pf + z).value; c.how = CSS_HOW_INHERITED; }
+        if (here) (*cust)[q] = c;
+        else push_back(*cust, c);
+    }
+}
+
+/* an element's registered custom properties of its own (declared or animated) computed
+   by their syntax, against its font size, the root's and its colour */
+static void css_register_compute(css_style *s, vector<css_cust> *cust, const css_senv *e) {
+    for (size_t q = 0; q < len(*cust); q++) {
+        css_cust c = at(*cust, q);
+        if (c.state != 2 || c.how == CSS_HOW_INHERITED || c.how == CSS_HOW_INITIAL) continue;
+        uint32_t r = css_regprop_of(s, c.name);
+        if (!r) continue;
+        vector<char> v, sy, out;
+        append_range(v, text_ptr(s, c.value), c.value.len);
+        append_range(sy, text_ptr(s, s->regprop[r].syntax), s->regprop[r].syntax.len);
+        if (css_syntax_match(data(sy), len(sy), data(v), len(v), e, &out)) (*cust)[q].value = text_add(s, data(out), len(out));
+    }
+}
+
 /* an element's computed values from its matched rules' declarations under the parent
    style ps (0 at the root, whose parent values are the initial ones): its template, then
    each declaration that won made computed, and what those change of the values that hang
@@ -5049,6 +5443,8 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     vector<uint64_t> crank;
     for (uint32_t q = 0; q < pn; q++) {
         css_cust c = at(ss->cpool, pf + q);
+        uint32_t rg = s->regprop_len > 1 ? css_regprop_of(s, c.name) : 0;
+        if (rg && !s->regprop[rg].inherits) continue;
         c.how = CSS_HOW_INHERITED;
         c.winner = 0;
         push_back(cust, c);
@@ -5106,6 +5502,7 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         (*cust)[q] = c;
     }
     for (uint32_t q = 0; q < (uint32_t)len(*cust); q++) if (at(*cust, q).state == 0) css_resolve_custom(s, cust, q, 0);
+    if (s->regprop_len > 1) css_register_customs(s, cust, ss, pf, pn);
     /* the parent's font size's origin: an element that declares nothing has its size and
        family, and so its origin */
     uint8_t pfso = ps && ps < len(ss->fsx) ? at(ss->fsx, ps) : (uint8_t)CSS_FS_MEDIUM;
@@ -5122,10 +5519,19 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     double af[CSS_NPROPS];
     uint8_t aon[CSS_NPROPS];
     memset(aon, 0, sizeof aon);
-    if (win[CSS_PROP_ANIMATION_NAME]) css_animate(s, win, cust, pc0, initial, is_root, ak0, ak1, af, aon);
+    if (win[CSS_PROP_ANIMATION_NAME]) {
+        css_val pfs;
+        css_val_of(s, pc0, CSS_PROP_FONT_SIZE, initial, &pfs);
+        css_animate(s, win, cust, pc0, initial, is_root, pfs.num, env->rem, ak0, ak1, af, aon);
+    }
     for (int oi = 0; oi < CSS_NPROPS; oi++) {
         css_prop p = (css_prop)css_order[oi];
         uint32_t w = win[p];
+        if (oi > 0 && css_order[oi - 1] == CSS_PROP_COLOR && s->regprop_len > 1) {
+            /* the registered custom properties, now that the font size and colour are known */
+            css_senv se = { out[CSS_PROP_FONT_SIZE].num, env->rem, out[CSS_PROP_COLOR].color, out[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK };
+            css_register_compute(s, cust, &se);
+        }
         if (aon[p]) {
             /* the values at the two keyframes (the element's own where one gives none), mixed */
             css_val ends[2], v;

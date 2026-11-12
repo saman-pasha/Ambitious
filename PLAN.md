@@ -678,6 +678,10 @@ be built side by side and merged without touching each other's.
       declaration but the important ones and explained as the animation's;
       held to Chromium's values and drawing with each animation at 10 s
       (`tests/integ/cssref.sh`, `tests/integ/paintref.sh`).
+    - `@property`: a registered custom property's initial value, its
+      inheritance or not, a value its syntax refuses taken as unset, its value
+      computed by its syntax (lengths px, colours, angles, numbers, lists), and
+      registered ones interpolated in animations (unregistered ones discrete).
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning.

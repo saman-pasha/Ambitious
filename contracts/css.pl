@@ -80,6 +80,10 @@ css_contract(record(rule, [
     field(keyframes,  ref(keyframes)),  % a keyframe's: its @keyframes (it matches no element); none for a style rule
     field(offset,     f64)              % a keyframe's place in its animation, 0 to 1
 ])).
+%% a custom property a sheet registered (@property, CSS Properties and Values 1): its name,
+%% its syntax (as written, its quotes gone), whether it inherits, its initial value (computed)
+css_contract(record(regprop, [field(name, atom(names)), field(syntax, span(text)), field(inherits, bool),
+    field(initial, span(text)), field(sheet, ref(sheet))])).
 %% an @keyframes rule: its name, its sheet, its cascade layer; its keyframes are rules
 css_contract(record(keyframes, [field(name, span(text)), field(sheet, ref(sheet)), field(layer, ref(layer))])).
 %% a cascade layer (Cascade 5): its full name (a.b for b in a; an anonymous one's is
@@ -149,11 +153,12 @@ css_contract(handle(pstyle, ps)).
 css_contract(handle(state, st)).
 css_contract(handle(face, ff)).
 css_contract(handle(keyframes, kf)).
+css_contract(handle(regprop, rg)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 css_contract(store(style, [table(sheet), table(rule), table(decl), table(match), table(cval), table(estyle), table(initval), table(layer),
-    table(face), table(pstyle), table(state), table(keyframes), pool(text), atoms(names)])).
+    table(face), table(pstyle), table(state), table(keyframes), table(regprop), pool(text), atoms(names)])).
 css_contract(owns(style, sheet, store)).
 css_contract(owns(style, rule, store)).
 css_contract(owns(style, decl, store)).
@@ -164,6 +169,7 @@ css_contract(owns(style, estyle, store)).
 css_contract(owns(style, layer, store)).
 css_contract(owns(style, face, store)).
 css_contract(owns(style, keyframes, store)).
+css_contract(owns(style, regprop, store)).
 css_contract(owns(style, pstyle, store)).
 css_contract(owns(style, state, store)).
 css_contract(owns(sheet, rule, list(rules))).
@@ -200,6 +206,7 @@ css_contract(fact(css_rule_layer(handle, field(layer)), table(rule), field(layer
 %% @keyframes and their keyframes: each keyframe a rule of its own, with its place
 css_contract(fact(css_keyframes(handle, field(name), field(sheet)), table(keyframes), true)).
 css_contract(fact(css_keyframe(handle, field(keyframes), field(offset)), table(rule), field(keyframes) \== none)).
+css_contract(fact(css_registered(handle, field(name), field(syntax), field(inherits), field(initial)), table(regprop), true)).
 css_contract(fact(css_layer(handle, field(name), field(rank)), table(layer), true)).
 css_contract(fact(css_font_face(handle, field(family), field(url), field(weight), field(italic)), table(face), true)).
 css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).

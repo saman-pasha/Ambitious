@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Registered properties</title>
+<style>
+/* tests/pages/property.html: custom properties registered by @property (CSS Properties and
+   Values 1), each case an element whose data-check names the values tests/integ/cssref.sh
+   holds to Chromium's (tools/bench/cssref.js --at 10000): an initial value where none is
+   set, a property that does not inherit and one that does, a value the syntax refuses,
+   values computed by their syntax (em to px, an angle in degrees, a colour, a number, a
+   list), a registration dropped (no inherits; a relative initial value), the last of
+   two registrations, var() of one, and one animated (and an unregistered one, discretely) */
+@property --len { syntax: '<length>'; inherits: false; initial-value: 10px; }
+@property --ink { syntax: '<color>'; inherits: true; initial-value: red; }
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@property --num { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --list { syntax: '<length>#'; inherits: false; initial-value: 1px, 2px; }
+@property --ident { syntax: 'small | large | <percentage>'; inherits: false; initial-value: small; }
+@property --any { syntax: '*'; inherits: false; }
+@property --broken { syntax: '<length>'; initial-value: 4px; }
+@property --relative { syntax: '<length>'; inherits: false; initial-value: 2em; }
+@property --twice { syntax: '<length>'; inherits: false; initial-value: 1px; }
+@property --twice { syntax: '<number>'; inherits: false; initial-value: 7; }
+@property --spin { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes turn { to { --spin: 360deg; --flag: on } }
+body { margin: 0; font: 16px sans-serif }
+#parent { --len: 20px; --ink: blue; --num: 2.5; --broken: 9px; --relative: 3px }
+#own { font-size: 10px; --len: 2em; --ang: 0.5turn; --list: 1em, 2px; --ident: 40%; --num: 3.50 }
+#refused { --len: blue; --ink: 12px; --ident: medium }
+#colour { color: green; --ink: currentcolor }
+#used { --len: 30px; width: var(--len); height: 2px }
+#twice { --twice: 3 }
+#animated { --flag: off; animation: turn 20s linear }
+</style>
+</head>
+<body>
+<div id=parent data-check="--len --ink --num --broken --relative">
+  <div id=child data-check="--len --ink --num --ang --list --ident --broken --relative"></div>
+  <div id=own data-check="--len --ang --list --ident --num"></div>
+  <div id=refused data-check="--len --ink --ident"></div>
+  <div id=colour data-check="--ink"></div>
+  <div id=used data-check="width --len"></div>
+  <div id=twice data-check="--twice"></div>
+  <div id=animated data-check="--spin --flag"></div>
+</div>
+</body>
+</html>
