@@ -1,6 +1,6 @@
 /* tests/exec/net_url.c -- URL resolution and origins (src/net/url.h): RFC 3986's
-   examples (5.4.1, 5.4.2) against its base, WHATWG's special cases, origins; and
-   the proxy the environment names for a URL */
+   examples (5.4.1, 5.4.2) against its base, WHATWG's special cases, origins; the
+   proxy the environment names for a URL; and application/x-www-form-urlencoded */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,7 +18,7 @@ static const char *const refs[][2] = {
     { "./../g", "http://a/b/g" }, { "./g/.", "http://a/b/c/g/" }, { "g/./h", "http://a/b/c/g/h" }, { "g/../h", "http://a/b/c/h" },
     { "g;x=1/./y", "http://a/b/c/g;x=1/y" }, { "g;x=1/../y", "http://a/b/c/y" },
     { "  HTTP://Example.COM:80/x\\y ", "http://example.com/x/y" }, { "http://u:p@h:8080/", "http://h:8080/" },
-    { "file:///tmp/a b.html", "file:///tmp/a b.html" }, { "data:text/css,p{}", "data:text/css,p{}" },
+    { "file:///tmp/a b.html", "file:///tmp/a%20b.html" }, { "data:text/css,p{}", "data:text/css,p{}" },
 };
 
 /* hosts as WHATWG URL's host parser makes them, against the same base: IPv6
@@ -120,9 +120,31 @@ static const char *const sites[][2] = {
     { "http://co.uk/", "http://co.uk" }, { "file:///x", "null" }, { "data:text/plain,x", "null" },
 };
 
+/* queries parsed as application/x-www-form-urlencoded and serialized again
+   (URLSearchParams' toString()): web-platform-tests' urlencoded-parser inputs and a
+   few more, each answer node's (new URLSearchParams(q).toString(), node 22) */
+static const char *const forms[][2] = {
+    { "test", "test=" }, { "\xEF\xBB\xBFtest=\xEF\xBB\xBF", "%EF%BB%BFtest=%EF%BB%BF" }, { "%EF%BB%BFtest=%EF%BB%BF", "%EF%BB%BFtest=%EF%BB%BF" },
+    { "%EF%BF%BF=%EF%BF%BF", "%EF%BF%BF=%EF%BF%BF" }, { "%FE%FF", "%EF%BF%BD%EF%BF%BD=" }, { "%FF%FE", "%EF%BF%BD%EF%BF%BD=" },
+    { "\xE2\x80\xA0&\xE2\x80\xA0=x", "%E2%80%A0=&%E2%80%A0=x" }, { "%C2", "%EF%BF%BD=" }, { "%C2x", "%EF%BF%BDx=" },
+    { "_charset_=windows-1252&test=%C2x", "_charset_=windows-1252&test=%EF%BF%BDx" }, { "", "" }, { "a", "a=" }, { "a=b", "a=b" },
+    { "a=", "a=" }, { "=b", "=b" }, { "&", "" }, { "&a", "a=" }, { "a&", "a=" }, { "a&a", "a=&a=" }, { "a&b&c", "a=&b=&c=" },
+    { "a=b&c=d", "a=b&c=d" }, { "a=b&c=d&", "a=b&c=d" }, { "&&&a=b&&&&c=d&", "a=b&c=d" }, { "a=a&a=b&a=c", "a=a&a=b&a=c" },
+    { "a==a", "a=%3Da" }, { "a=a+b+c+d", "a=a+b+c+d" }, { "%=a", "%25=a" }, { "%a=a", "%25a=a" }, { "%a_=a", "%25a_=a" },
+    { "%61=a", "a=a" }, { "%61+%4d%4D=", "a+MM=" }, { "id=0&value=%", "id=0&value=%25" }, { "b=%2sf%2a", "b=%252sf*" },
+    { "b=%2%2af%2a", "b=%252*f*" }, { "b=%%2a", "b=%25*" }, { "a*-._b=~!'()", "a*-._b=%7E%21%27%28%29" },
+    { "%E0%A4%A=x", "%EF%BF%BD%25A=x" }, { "%F0%9F%92%A9", "%F0%9F%92%A9=" }, { "%ED%A0%80=1", "%EF%BF%BD%EF%BF%BD%EF%BF%BD=1" },
+};
+
 int main(void) {
     int bad = 0, n = 0;
     char out[8192];
+    for (size_t i = 0; i < sizeof forms / sizeof forms[0]; i++, n++) {
+        url_form_reserialize(forms[i][0], strlen(forms[i][0]), out, sizeof out);
+        int ok = strcmp(out, forms[i][1]) == 0;
+        bad += !ok;
+        printf("%s form '%s' -> %s%s%s\n", ok ? "ok  " : "FAIL", forms[i][0], out, ok ? "" : ", not ", ok ? "" : forms[i][1]);
+    }
     for (size_t i = 0; i < sizeof refs / sizeof refs[0]; i++, n++) {
         if (!net_url_resolve("http://a/b/c/d;p?q", refs[i][0], out, sizeof out)) snprintf(out, sizeof out, "(not a URL)");
         int ok = strcmp(out, refs[i][1]) == 0;

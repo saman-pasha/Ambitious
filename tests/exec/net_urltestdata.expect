@@ -1,0 +1,905 @@
+ok   <http://example\x09.\x0Aorg> against <http://example.org/foo/bar>
+ok   <http://user:pass@foo:21/bar;par?b#c> against <http://example.org/foo/bar>
+ok   <https://test:@test>
+ok   <https://:@test>
+ok   <non-special://test:@test/x>
+ok   <non-special://:@test/x>
+ok   <http:foo.com> against <http://example.org/foo/bar>
+ok   <\x09   :foo.com   \x0A> against <http://example.org/foo/bar>
+ok   < foo.com  > against <http://example.org/foo/bar>
+ok   <a:\x09 foo.com> against <http://example.org/foo/bar>
+ok   <http://f:21/ b ? d # e > against <http://example.org/foo/bar>
+ok   <lolscheme:x x#x x>
+ok   <http://f:/c> against <http://example.org/foo/bar>
+ok   <http://f:0/c> against <http://example.org/foo/bar>
+ok   <http://f:00000000000000/c> against <http://example.org/foo/bar>
+ok   <http://f:00000000000000000000080/c> against <http://example.org/foo/bar>
+ok   <http://f:b/c> against <http://example.org/foo/bar>
+ok   <http://f: /c> against <http://example.org/foo/bar>
+ok   <http://f:\x0A/c> against <http://example.org/foo/bar>
+ok   <http://f:fifty-two/c> against <http://example.org/foo/bar>
+ok   <http://f:999999/c> against <http://example.org/foo/bar>
+ok   <non-special://f:999999/c> against <http://example.org/foo/bar>
+ok   <http://f: 21 / b ? d # e > against <http://example.org/foo/bar>
+ok   <> against <http://example.org/foo/bar>
+ok   <  \x09> against <http://example.org/foo/bar>
+ok   <:foo.com/> against <http://example.org/foo/bar>
+ok   <:foo.com\> against <http://example.org/foo/bar>
+ok   <:> against <http://example.org/foo/bar>
+ok   <:a> against <http://example.org/foo/bar>
+ok   <:/> against <http://example.org/foo/bar>
+ok   <:\> against <http://example.org/foo/bar>
+ok   <:#> against <http://example.org/foo/bar>
+ok   <#> against <http://example.org/foo/bar>
+ok   <#/> against <http://example.org/foo/bar>
+ok   <#\> against <http://example.org/foo/bar>
+ok   <#;?> against <http://example.org/foo/bar>
+ok   <?> against <http://example.org/foo/bar>
+ok   </> against <http://example.org/foo/bar>
+ok   <:23> against <http://example.org/foo/bar>
+ok   </:23> against <http://example.org/foo/bar>
+ok   <\x> against <http://example.org/foo/bar>
+ok   <\\x\hello> against <http://example.org/foo/bar>
+ok   <::> against <http://example.org/foo/bar>
+ok   <::23> against <http://example.org/foo/bar>
+ok   <foo://> against <http://example.org/foo/bar>
+ok   <http://a:b@c:29/d> against <http://example.org/foo/bar>
+ok   <http://\u{E9}@\u{E9}>
+ok   <http://\u{E9}@example.com>
+ok   <http::@c:29> against <http://example.org/foo/bar>
+ok   <http://&a:foo(b]c@d:2/> against <http://example.org/foo/bar>
+ok   <http://::@c@d:2> against <http://example.org/foo/bar>
+ok   <http://foo.com:b@d/> against <http://example.org/foo/bar>
+ok   <http://foo.com/\@> against <http://example.org/foo/bar>
+ok   <http:\\foo.com\> against <http://example.org/foo/bar>
+ok   <http:\\a\b:c\d@foo.com\> against <http://example.org/foo/bar>
+ok   <http://a:b@c\>
+ok   <ws://a@b\c>
+ok   <foo:/> against <http://example.org/foo/bar>
+ok   <foo:/bar.com/> against <http://example.org/foo/bar>
+ok   <foo://///////> against <http://example.org/foo/bar>
+ok   <foo://///////bar.com/> against <http://example.org/foo/bar>
+ok   <foo:////://///> against <http://example.org/foo/bar>
+ok   <c:/foo> against <http://example.org/foo/bar>
+ok   <//foo/bar> against <http://example.org/foo/bar>
+ok   <http://foo/path;a??e#f#g> against <http://example.org/foo/bar>
+ok   <http://foo/abcd?efgh?ijkl> against <http://example.org/foo/bar>
+ok   <http://foo/abcd#foo?bar> against <http://example.org/foo/bar>
+ok   <[61:24:74]:98> against <http://example.org/foo/bar>
+ok   <http:[61:27]/:foo> against <http://example.org/foo/bar>
+ok   <http://[1::2]:3:4> against <http://example.org/foo/bar>
+ok   <http://2001::1> against <http://example.org/foo/bar>
+ok   <http://2001::1]> against <http://example.org/foo/bar>
+ok   <http://2001::1]:80> against <http://example.org/foo/bar>
+ok   <http://[2001::1]> against <http://example.org/foo/bar>
+ok   <http://[::127.0.0.1]> against <http://example.org/foo/bar>
+ok   <http://[::127.0.0.1.]> against <http://example.org/foo/bar>
+ok   <http://[0:0:0:0:0:0:13.1.68.3]> against <http://example.org/foo/bar>
+ok   <http://[2001::1]:80> against <http://example.org/foo/bar>
+ok   <http:/example.com/> against <http://example.org/foo/bar>
+ok   <http:/> against <http://example.com/>
+ok   <ftp:/example.com/> against <http://example.org/foo/bar>
+ok   <https:/example.com/> against <http://example.org/foo/bar>
+ok   <madeupscheme:/example.com/> against <http://example.org/foo/bar>
+ok   <file:/example.com/> against <http://example.org/foo/bar>
+ok   <file://example:1/>
+ok   <file://example:test/>
+ok   <file://example%/>
+ok   <file://[example]/>
+ok   <ftps:/example.com/> against <http://example.org/foo/bar>
+ok   <gopher:/example.com/> against <http://example.org/foo/bar>
+ok   <ws:/example.com/> against <http://example.org/foo/bar>
+ok   <wss:/example.com/> against <http://example.org/foo/bar>
+ok   <data:/example.com/> against <http://example.org/foo/bar>
+ok   <javascript:/example.com/> against <http://example.org/foo/bar>
+ok   <mailto:/example.com/> against <http://example.org/foo/bar>
+ok   <http:example.com/> against <http://example.org/foo/bar>
+ok   <ftp:example.com/> against <http://example.org/foo/bar>
+ok   <https:example.com/> against <http://example.org/foo/bar>
+ok   <madeupscheme:example.com/> against <http://example.org/foo/bar>
+ok   <ftps:example.com/> against <http://example.org/foo/bar>
+ok   <gopher:example.com/> against <http://example.org/foo/bar>
+ok   <ws:example.com/> against <http://example.org/foo/bar>
+ok   <wss:example.com/> against <http://example.org/foo/bar>
+ok   <data:example.com/> against <http://example.org/foo/bar>
+ok   <javascript:example.com/> against <http://example.org/foo/bar>
+ok   <mailto:example.com/> against <http://example.org/foo/bar>
+ok   </a/b/c> against <http://example.org/foo/bar>
+ok   </a/ /c> against <http://example.org/foo/bar>
+ok   </a%2fc> against <http://example.org/foo/bar>
+ok   </a/%2f/c> against <http://example.org/foo/bar>
+ok   <#\u{3B2}> against <http://example.org/foo/bar>
+ok   <data:text/html,test#test> against <http://example.org/foo/bar>
+ok   <tel:1234567890> against <http://example.org/foo/bar>
+ok   <ssh://example.com/foo/bar.git> against <http://example.org/>
+ok   <file:c:\foo\bar.html> against <file:///tmp/mock/path>
+ok   <  File:c|////foo\bar.html> against <file:///tmp/mock/path>
+ok   <C|/foo/bar> against <file:///tmp/mock/path>
+ok   </C|\foo\bar> against <file:///tmp/mock/path>
+ok   <//C|/foo/bar> against <file:///tmp/mock/path>
+ok   <//server/file> against <file:///tmp/mock/path>
+ok   <\\server\file> against <file:///tmp/mock/path>
+ok   </\server/file> against <file:///tmp/mock/path>
+ok   <file:///foo/bar.txt> against <file:///tmp/mock/path>
+ok   <file:///home/me> against <file:///tmp/mock/path>
+ok   <//> against <file:///tmp/mock/path>
+ok   <///> against <file:///tmp/mock/path>
+ok   <///test> against <file:///tmp/mock/path>
+ok   <file://test> against <file:///tmp/mock/path>
+ok   <file://localhost> against <file:///tmp/mock/path>
+ok   <file://localhost/> against <file:///tmp/mock/path>
+ok   <file://localhost/test> against <file:///tmp/mock/path>
+ok   <test> against <file:///tmp/mock/path>
+ok   <file:test> against <file:///tmp/mock/path>
+ok   <file:///w|m>
+ok   <file:///w||m>
+ok   <file:///w|/m>
+ok   <file:C|/m/>
+ok   <file:C||/m/>
+ok   <http://example.com/././foo>
+ok   <http://example.com/./.foo>
+ok   <http://example.com/foo/.>
+ok   <http://example.com/foo/./>
+ok   <http://example.com/foo/bar/..>
+ok   <http://example.com/foo/bar/../>
+ok   <http://example.com/foo/..bar>
+ok   <http://example.com/foo/bar/../ton>
+ok   <http://example.com/foo/bar/../ton/../../a>
+ok   <http://example.com/foo/../../..>
+ok   <http://example.com/foo/../../../ton>
+ok   <http://example.com/foo/%2e>
+ok   <http://example.com/foo/%2e%2>
+ok   <http://example.com/foo/%2e./%2e%2e/.%2e/%2e.bar>
+ok   <http://example.com////../..>
+ok   <http://example.com/foo/bar//../..>
+ok   <http://example.com/foo/bar//..>
+ok   <http://example.com/foo>
+ok   <http://example.com/%20foo>
+ok   <http://example.com/foo%>
+ok   <http://example.com/foo%2>
+ok   <http://example.com/foo%2zbar>
+ok   <http://example.com/foo%2\u{C2}\u{A9}zbar>
+ok   <http://example.com/foo%41%7a>
+ok   <http://example.com/foo\x09\u{91}%91>
+ok   <http://example.com/foo%00%51>
+ok   <http://example.com/(%28:%3A%29)>
+ok   <http://example.com/%3A%3a%3C%3c>
+ok   <http://example.com/foo\x09bar>
+ok   <http://example.com\\foo\\bar>
+ok   <http://example.com/%7Ffp3%3Eju%3Dduvgw%3Dd>
+ok   <http://example.com/@asdf%40>
+ok   <http://example.com/\u{4F60}\u{597D}\u{4F60}\u{597D}>
+ok   <http://example.com/\u{2025}/foo>
+ok   <http://example.com/\u{FEFF}/foo>
+ok   <http://example.com/\u{202E}/foo/\u{202D}/bar>
+ok   <http://www.google.com/foo?bar=baz#>
+ok   <http://www.google.com/foo?bar=baz# \u{BB}>
+ok   <data:test# \u{BB}>
+ok   <http://www.google.com>
+ok   <http://192.0x00A80001>
+ok   <http://www/foo%2Ehtml>
+ok   <http://www/foo/%2E/html>
+ok   <http://user:pass@/>
+ok   <http://%25DOMAIN:foobar@foodomain.com/>
+ok   <http:\\www.google.com\foo>
+ok   <http://foo:80/>
+ok   <http://foo:81/>
+ok   <httpa://foo:80/>
+ok   <http://foo:-80/>
+ok   <https://foo:443/>
+ok   <https://foo:80/>
+ok   <ftp://foo:21/>
+ok   <ftp://foo:80/>
+ok   <gopher://foo:70/>
+ok   <gopher://foo:443/>
+ok   <ws://foo:80/>
+ok   <ws://foo:81/>
+ok   <ws://foo:443/>
+ok   <ws://foo:815/>
+ok   <wss://foo:80/>
+ok   <wss://foo:81/>
+ok   <wss://foo:443/>
+ok   <wss://foo:815/>
+ok   <http:/example.com/>
+ok   <ftp:/example.com/>
+ok   <https:/example.com/>
+ok   <madeupscheme:/example.com/>
+ok   <file:/example.com/>
+ok   <ftps:/example.com/>
+ok   <gopher:/example.com/>
+ok   <ws:/example.com/>
+ok   <wss:/example.com/>
+ok   <data:/example.com/>
+ok   <javascript:/example.com/>
+ok   <mailto:/example.com/>
+ok   <http:example.com/>
+ok   <ftp:example.com/>
+ok   <https:example.com/>
+ok   <madeupscheme:example.com/>
+ok   <ftps:example.com/>
+ok   <gopher:example.com/>
+ok   <ws:example.com/>
+ok   <wss:example.com/>
+ok   <data:example.com/>
+ok   <javascript:example.com/>
+ok   <mailto:example.com/>
+ok   <https://example.com/aaa/bbb/%2e%2e?query>
+ok   <http:@www.example.com>
+ok   <http:/@www.example.com>
+ok   <http://@www.example.com>
+ok   <http:a:b@www.example.com>
+ok   <http:/a:b@www.example.com>
+ok   <http://a:b@www.example.com>
+ok   <http://@pple.com>
+ok   <http::b@www.example.com>
+ok   <http:/:b@www.example.com>
+ok   <http://:b@www.example.com>
+ok   <http:/:@/www.example.com>
+ok   <http://user@/www.example.com>
+ok   <http:@/www.example.com>
+ok   <http:/@/www.example.com>
+ok   <http://@/www.example.com>
+ok   <https:@/www.example.com>
+ok   <http:a:b@/www.example.com>
+ok   <http:/a:b@/www.example.com>
+ok   <http://a:b@/www.example.com>
+ok   <http::@/www.example.com>
+ok   <http:a:@www.example.com>
+ok   <http:/a:@www.example.com>
+ok   <http://a:@www.example.com>
+ok   <http://www.@pple.com>
+ok   <http:@:www.example.com>
+ok   <http:/@:www.example.com>
+ok   <http://@:www.example.com>
+ok   <http://:@www.example.com>
+ok   </> against <http://www.example.com/test>
+ok   </test.txt> against <http://www.example.com/test>
+ok   <.> against <http://www.example.com/test>
+ok   <..> against <http://www.example.com/test>
+ok   <test.txt> against <http://www.example.com/test>
+ok   <./test.txt> against <http://www.example.com/test>
+ok   <../test.txt> against <http://www.example.com/test>
+ok   <../aaa/test.txt> against <http://www.example.com/test>
+ok   <../../test.txt> against <http://www.example.com/test>
+ok   <\u{4E2D}/test.txt> against <http://www.example.com/test>
+ok   <http://www.example2.com> against <http://www.example.com/test>
+ok   <//www.example2.com> against <http://www.example.com/test>
+ok   <file:...> against <http://www.example.com/test>
+ok   <file:..> against <http://www.example.com/test>
+ok   <file:a> against <http://www.example.com/test>
+ok   <file:.>
+ok   <file:.> against <http://www.example.com/test>
+ok   <http://ExAmPlE.CoM> against <http://other.com/>
+ok   <http://example example.com> against <http://other.com/>
+ok   <http://Goo%20 goo%7C|.com> against <http://other.com/>
+ok   <http://[]> against <http://other.com/>
+ok   <http://[:]> against <http://other.com/>
+ok   <http://GOO\u{A0}\u{3000}goo.com> against <http://other.com/>
+ok   <http://GOO\u{200B}\u{2060}\u{FEFF}goo.com> against <http://other.com/>
+ok   <\x00\x1B\x04\x12 http://example.com/\x1F \x0D >
+ok   <\x7Fhttp://example.com/>
+ok   <\x7Fjavascript:alert(1)> against <http://example.org/foo/bar>
+ok   <http://example.com/\x7F>
+ok   <non-special:opaque  >
+ok   <non-special:opaque  ?hi>
+ok   <non-special:opaque  #hi>
+ok   <non-special:opaque  x?hi>
+ok   <non-special:opaque  x#hi>
+ok   <non-special:opaque \x09\x09  \x09#hi>
+ok   <non-special:opaque \x09\x09  #hi>
+ok   <non-special:opaque\x09\x09  \x0D #hi>
+ok   <http://www.foo\u{3002}bar.com> against <http://other.com/>
+ok   <http://\u{FDD0}zyx.com> against <http://other.com/>
+ok   <http://%ef%b7%90zyx.com> against <http://other.com/>
+ok   <https://\u{FFFD}>
+ok   <https://%EF%BF%BD>
+ok   <https://x/\u{FFFD}?\u{FFFD}#\u{FFFD}>
+ok   <http://a.b.c.xn--pokxncvks>
+ok   <http://10.0.0.xn--pokxncvks>
+ok   <http://a.b.c.XN--pokxncvks>
+ok   <http://a.b.c.Xn--pokxncvks>
+ok   <http://10.0.0.XN--pokxncvks>
+ok   <http://10.0.0.xN--pokxncvks>
+ok   <http://\u{FF27}\u{FF4F}.com> against <http://other.com/>
+ok   <http://\u{FF05}\u{FF14}\u{FF11}.com> against <http://other.com/>
+ok   <http://%ef%bc%85%ef%bc%94%ef%bc%91.com> against <http://other.com/>
+ok   <http://\u{FF05}\u{FF10}\u{FF10}.com> against <http://other.com/>
+ok   <http://%ef%bc%85%ef%bc%90%ef%bc%90.com> against <http://other.com/>
+ok   <http://\u{4F60}\u{597D}\u{4F60}\u{597D}> against <http://other.com/>
+ok   <https://fa\u{DF}.ExAmPlE/>
+ok   <sc://fa\u{DF}.ExAmPlE/>
+ok   <http://%zz%66%a.com> against <http://other.com/>
+ok   <http://%25> against <http://other.com/>
+ok   <http://hello%00> against <http://other.com/>
+ok   <http://%30%78%63%30%2e%30%32%35%30.01> against <http://other.com/>
+ok   <http://%30%78%63%30%2e%30%32%35%30.01%2e> against <http://other.com/>
+ok   <http://192.168.0.257> against <http://other.com/>
+ok   <http://%3g%78%63%30%2e%30%32%35%30%2E.01> against <http://other.com/>
+ok   <http://192.168.0.1 hello> against <http://other.com/>
+ok   <https://x x:12>
+ok   <http://\u{FF10}\u{FF38}\u{FF43}\u{FF10}\u{FF0E}\u{FF10}\u{FF12}\u{FF15}\u{FF10}\u{FF0E}\u{FF10}\u{FF11}> against <http://other.com/>
+ok   <http://./>
+ok   <http://../>
+ok   <h://.>
+ok   <http://[www.google.com]/>
+ok   <http://[google.com]> against <http://other.com/>
+ok   <http://[::1.2.3.4x]> against <http://other.com/>
+ok   <http://[::1.2.3.]> against <http://other.com/>
+ok   <http://[::1.2.]> against <http://other.com/>
+ok   <http://[::.1.2]> against <http://other.com/>
+ok   <http://[::1.]> against <http://other.com/>
+ok   <http://[::.1]> against <http://other.com/>
+ok   <http://[::%31]> against <http://other.com/>
+ok   <http://%5B::1]> against <http://other.com/>
+ok   <http://foo:\u{1F4A9}@example.com/bar> against <http://other.com/>
+ok   <http://\u{1F600}x@host/>
+ok   <http://a:\u{1F600}x@host/>
+ok   <http://\u{1F600}@host/>
+ok   <https://localhost?q=\u{1F525}>
+ok   <https://localhost#\u{1F525}>
+ok   <#> against <test:test>
+ok   <#x> against <mailto:x@x.com>
+ok   <#x> against <data:,>
+ok   <#x> against <about:blank>
+ok   <#x:y> against <about:blank>
+ok   <#> against <test:test?test>
+ok   <https://@test@test@example:800/> against <http://doesnotmatter/>
+ok   <https://@@@example> against <http://doesnotmatter/>
+ok   <http://`{}:`{}@h/`{}?`{}> against <http://doesnotmatter/>
+ok   <http://host/?'>
+ok   <notspecial://host/?'>
+ok   </some/path> against <http://user@example.org/smth>
+ok   <> against <http://user:pass@example.org:21/smth>
+ok   </some/path> against <http://user:pass@example.org:21/smth>
+ok   <i> against <sc:sd>
+ok   <i> against <sc:sd/sd>
+ok   <i> against <sc:/pa/pa>
+ok   <i> against <sc://ho/pa>
+ok   <i> against <sc:///pa/pa>
+ok   <../i> against <sc:sd>
+ok   <../i> against <sc:sd/sd>
+ok   <../i> against <sc:/pa/pa>
+ok   <../i> against <sc://ho/pa>
+ok   <../i> against <sc:///pa/pa>
+ok   </i> against <sc:sd>
+ok   </i> against <sc:sd/sd>
+ok   </i> against <sc:/pa/pa>
+ok   </i> against <sc://ho/pa>
+ok   </i> against <sc:///pa/pa>
+ok   <?i> against <sc:sd>
+ok   <?i> against <sc:sd/sd>
+ok   <?i> against <sc:/pa/pa>
+ok   <?i> against <sc://ho/pa>
+ok   <?i> against <sc:///pa/pa>
+ok   <#i> against <sc:sd>
+ok   <#i> against <sc:sd/sd>
+ok   <#i> against <sc:/pa/pa>
+ok   <#i> against <sc://ho/pa>
+ok   <#i> against <sc:///pa/pa>
+ok   <about:/../>
+ok   <data:/../>
+ok   <javascript:/../>
+ok   <mailto:/../>
+ok   <sc://\u{F1}.test/>
+ok   <sc://%/>
+ok   <sc://@/>
+ok   <sc://te@s:t@/>
+ok   <sc://:/>
+ok   <sc://:12/>
+ok   <x> against <sc://\u{F1}>
+ok   <sc:\../>
+ok   <sc::a@example.net>
+ok   <wow:%NBD>
+ok   <wow:%1G>
+ok   <wow:\u{FFFF}>
+ok   <sc://a\x00b/>
+ok   <sc://a b/>
+ok   <sc://a<b>
+ok   <sc://a>b>
+ok   <sc://a[b/>
+ok   <sc://a\b/>
+ok   <sc://a]b/>
+ok   <sc://a^b>
+ok   <sc://a|b/>
+ok   <foo://ho\x09st/>
+ok   <foo://ho\x0Ast/>
+ok   <foo://ho\x0Dst/>
+ok   <http://a\x00b/>
+ok   <http://a\x01b/>
+ok   <http://a\x02b/>
+ok   <http://a\x03b/>
+ok   <http://a\x04b/>
+ok   <http://a\x05b/>
+ok   <http://a\x06b/>
+ok   <http://a\x07b/>
+ok   <http://a\x08b/>
+ok   <http://a\x0Bb/>
+ok   <http://a\x0Cb/>
+ok   <http://a\x0Eb/>
+ok   <http://a\x0Fb/>
+ok   <http://a\x10b/>
+ok   <http://a\x11b/>
+ok   <http://a\x12b/>
+ok   <http://a\x13b/>
+ok   <http://a\x14b/>
+ok   <http://a\x15b/>
+ok   <http://a\x16b/>
+ok   <http://a\x17b/>
+ok   <http://a\x18b/>
+ok   <http://a\x19b/>
+ok   <http://a\x1Ab/>
+ok   <http://a\x1Bb/>
+ok   <http://a\x1Cb/>
+ok   <http://a\x1Db/>
+ok   <http://a\x1Eb/>
+ok   <http://a\x1Fb/>
+ok   <http://a b/>
+ok   <http://a%b/>
+ok   <http://a<b>
+ok   <http://a>b>
+ok   <http://a[b/>
+ok   <http://a]b/>
+ok   <http://a^b>
+ok   <http://a|b/>
+ok   <http://a\x7Fb/>
+ok   <http://ho\x09st/>
+ok   <http://ho\x0Ast/>
+ok   <http://ho\x0Dst/>
+ok   <http://ho%00st/>
+ok   <http://ho%01st/>
+ok   <http://ho%02st/>
+ok   <http://ho%03st/>
+ok   <http://ho%04st/>
+ok   <http://ho%05st/>
+ok   <http://ho%06st/>
+ok   <http://ho%07st/>
+ok   <http://ho%08st/>
+ok   <http://ho%09st/>
+ok   <http://ho%0Ast/>
+ok   <http://ho%0Bst/>
+ok   <http://ho%0Cst/>
+ok   <http://ho%0Dst/>
+ok   <http://ho%0Est/>
+ok   <http://ho%0Fst/>
+ok   <http://ho%10st/>
+ok   <http://ho%11st/>
+ok   <http://ho%12st/>
+ok   <http://ho%13st/>
+ok   <http://ho%14st/>
+ok   <http://ho%15st/>
+ok   <http://ho%16st/>
+ok   <http://ho%17st/>
+ok   <http://ho%18st/>
+ok   <http://ho%19st/>
+ok   <http://ho%1Ast/>
+ok   <http://ho%1Bst/>
+ok   <http://ho%1Cst/>
+ok   <http://ho%1Dst/>
+ok   <http://ho%1Est/>
+ok   <http://ho%1Fst/>
+ok   <http://ho%20st/>
+ok   <http://ho%23st/>
+ok   <http://ho%25st/>
+ok   <http://ho%2Fst/>
+ok   <http://ho%3Ast/>
+ok   <http://ho%3Cst/>
+ok   <http://ho%3Est/>
+ok   <http://ho%3Fst/>
+ok   <http://ho%40st/>
+ok   <http://ho%5Bst/>
+ok   <http://ho%5Cst/>
+ok   <http://ho%5Dst/>
+ok   <http://ho%7Cst/>
+ok   <http://ho%7Fst/>
+ok   <http://!"$&'()*+,-.;=_`{}~/>
+ok   <sc://\x01\x02\x03\x04\x05\x06\x07\x08\x0B\x0C\x0E\x0F\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F!"$%&'()*+,-.;=_`{}~/>
+ok   <ftp://example.com%80/>
+ok   <ftp://example.com%A0/>
+ok   <https://example.com%80/>
+ok   <https://example.com%A0/>
+ok   <ftp://%e2%98%83>
+ok   <https://%e2%98%83>
+ok   <http://127.0.0.1:10100/relative_import.html>
+ok   <http://facebook.com/?foo=%7B%22abc%22>
+ok   <https://localhost:3000/jqueryui@1.2.3>
+ok   <h\x09t\x0At\x0Dp://h\x09o\x0As\x0Dt:9\x090\x0A0\x0D0/p\x09a\x0At\x0Dh?q\x09u\x0Ae\x0Dry#f\x09r\x0Aa\x0Dg>
+ok   <?a=b&c=d> against <http://example.org/foo/bar>
+ok   <??a=b&c=d> against <http://example.org/foo/bar>
+ok   <http:> against <http://example.org/foo/bar>
+ok   <http:> against <https://example.org/foo/bar>
+ok   <sc:> against <https://example.org/foo/bar>
+ok   <http://foo.bar/baz?qux#foo\x08bar>
+ok   <http://foo.bar/baz?qux#foo"bar>
+ok   <http://foo.bar/baz?qux#foo<bar>
+ok   <http://foo.bar/baz?qux#foo>bar>
+ok   <http://foo.bar/baz?qux#foo`bar>
+ok   <http://1.2.3.4/> against <http://other.com/>
+ok   <http://1.2.3.4./> against <http://other.com/>
+ok   <http://192.168.257> against <http://other.com/>
+ok   <http://192.168.257.> against <http://other.com/>
+ok   <http://192.168.257.com> against <http://other.com/>
+ok   <http://256> against <http://other.com/>
+ok   <http://256.com> against <http://other.com/>
+ok   <http://999999999> against <http://other.com/>
+ok   <http://999999999.> against <http://other.com/>
+ok   <http://999999999.com> against <http://other.com/>
+ok   <http://10000000000> against <http://other.com/>
+ok   <http://10000000000.com> against <http://other.com/>
+ok   <http://4294967295> against <http://other.com/>
+ok   <http://4294967296> against <http://other.com/>
+ok   <http://18446744073709551616> against <http://other.com/>
+ok   <http://18446744075840258049> against <http://other.com/>
+ok   <http://0xffffffff> against <http://other.com/>
+ok   <http://0xffffffff1> against <http://other.com/>
+ok   <http://256.256.256.256> against <http://other.com/>
+ok   <https://0x.0x.0>
+ok   <https://0x.0x.0x.0x>
+ok   <https://00.00.00.00>
+ok   <https://0000000000000000000000000000000000000000177.0.0.1>
+ok   <https://0x100000000/test>
+ok   <https://256.0.0.1/test>
+ok   <file:///C%3A/>
+ok   <file:///C%7C/>
+ok   <file://%43%3A>
+ok   <file://%43%7C>
+ok   <file://%43|>
+ok   <file://C%7C>
+ok   <file://%43%7C/>
+ok   <https://%43%7C/>
+ok   <asdf://%43|/>
+ok   <asdf://%43%7C/>
+ok   <pix/submit.gif> against <file:///C:/Users/Domenic/Dropbox/GitHub/tmpvar/jsdom/test/level2/html/files/anchor.html>
+ok   <..> against <file:///C:/>
+ok   <..> against <file:///>
+ok   </> against <file:///C:/a/b>
+ok   </> against <file://h/C:/a/b>
+ok   </> against <file://h/a/b>
+ok   <//d:> against <file:///C:/a/b>
+ok   <//d:/..> against <file:///C:/a/b>
+ok   <..> against <file:///ab:/>
+ok   <..> against <file:///1:/>
+ok   <> against <file:///test?test#test>
+ok   <file:> against <file:///test?test#test>
+ok   <?x> against <file:///test?test#test>
+ok   <file:?x> against <file:///test?test#test>
+ok   <#x> against <file:///test?test#test>
+ok   <file:#x> against <file:///test?test#test>
+ok   <file:\\//>
+ok   <file:\\\\>
+ok   <file:\\\\?fox>
+ok   <file:\\\\#guppy>
+ok   <file://spider///>
+ok   <file:\\localhost//>
+ok   <file:///localhost//cat>
+ok   <file://\/localhost//cat>
+ok   <file://localhost//a//../..//>
+ok   </////mouse> against <file:///elephant>
+ok   <\//pig> against <file://lion/>
+ok   <\/localhost//pig> against <file://lion/>
+ok   <//localhost//pig> against <file://lion/>
+ok   </..//localhost//pig> against <file://lion/>
+ok   <file://> against <file://ape/>
+ok   </rooibos> against <file://tea/>
+ok   </?chai> against <file://tea/>
+ok   <C|> against <file://host/dir/file>
+ok   <C|> against <file://host/D:/dir1/dir2/file>
+ok   <C|#> against <file://host/dir/file>
+ok   <C|?> against <file://host/dir/file>
+ok   <C|/> against <file://host/dir/file>
+ok   <C|\x0A/> against <file://host/dir/file>
+ok   <C|\> against <file://host/dir/file>
+ok   <C> against <file://host/dir/file>
+ok   <C|a> against <file://host/dir/file>
+ok   </c:/foo/bar> against <file:///c:/baz/qux>
+ok   </c|/foo/bar> against <file:///c:/baz/qux>
+ok   <file:\c:\foo\bar> against <file:///c:/baz/qux>
+ok   </c:/foo/bar> against <file://host/path>
+ok   <..> against <abc://x/y/z/C:/>
+ok   <..> against <file://x/C:/>
+ok   <file://example.net/C:/>
+ok   <file://1.2.3.4/C:/>
+ok   <file://[1::8]/C:/>
+ok   <C|/> against <file://host/>
+ok   </C:/> against <file://host/>
+ok   <file:C:/> against <file://host/>
+ok   <file:/C:/> against <file://host/>
+ok   <//C:/> against <file://host/>
+ok   <file://C:/> against <file://host/>
+ok   <///C:/> against <file://host/>
+ok   <file:///C:/> against <file://host/>
+ok   <file:/C|/>
+ok   <file://C|/>
+ok   <file:>
+ok   <file:?q=v>
+ok   <file:#frag>
+ok   <file:///Y:>
+ok   <file:///Y:/>
+ok   <file:///./Y>
+ok   <file:///./Y:>
+ok   <\\\.\Y:>
+ok   <file:///y:>
+ok   <file:///y:/>
+ok   <file:///./y>
+ok   <file:///./y:>
+ok   <\\\.\y:>
+ok   <file://localhost//a//../..//foo>
+ok   <file://localhost////foo>
+ok   <file:////foo>
+ok   <file:///one/two> against <file:///>
+ok   <file:////one/two> against <file:///>
+ok   <//one/two> against <file:///>
+ok   <///one/two> against <file:///>
+ok   <////one/two> against <file:///>
+ok   <file:///.//> against <file:////>
+ok   <file:.//p>
+ok   <file:/.//p>
+ok   <https://[0:1:2:3:4:5:192.0.02.1]/>
+ok   <https://[192.0.2.1::]/>
+ok   <http://[1:0::]> against <http://example.net/>
+ok   <http://[0:1:2:3:4:5:6:7:8]> against <http://example.net/>
+ok   <https://[0::0::0]>
+ok   <https://[0:.0]>
+ok   <https://[0:0:]>
+ok   <https://[0:1:2:3:4:5:6:7.0.0.0.1]>
+ok   <https://[0:1.00.0.0.0]>
+ok   <https://[0:1.290.0.0.0]>
+ok   <https://[0:1.23.23]>
+ok   <http://?>
+ok   <http://#>
+ok   <http://f:4294967377/c> against <http://example.org/>
+ok   <http://f:18446744073709551697/c> against <http://example.org/>
+ok   <http://f:340282366920938463463374607431768211537/c> against <http://example.org/>
+ok   <sc://\u{F1}>
+ok   <sc://\u{F1}?x>
+ok   <sc://\u{F1}#x>
+ok   <#x> against <sc://\u{F1}>
+ok   <?x> against <sc://\u{F1}>
+ok   <sc://?>
+ok   <sc://#>
+ok   <///> against <sc://x/>
+ok   <////> against <sc://x/>
+ok   <////x/> against <sc://x/>
+ok   <tftp://foobar.com/someconfig;mode=netascii>
+ok   <telnet://user:pass@foobar.com:23/>
+ok   <ut2004://10.10.10.10:7777/Index.ut2>
+ok   <redis://foo:bar@somehost:6379/0?baz=bam&qux=baz>
+ok   <rsync://foo@host:911/sup>
+ok   <git://github.com/foo/bar.git>
+ok   <irc://myserver.com:6999/channel?passwd>
+ok   <dns://fw.example.org:9999/foo.bar.org?type=TXT>
+ok   <ldap://localhost:389/ou=People,o=JNDITutorial>
+ok   <git+https://github.com/foo/bar>
+ok   <urn:ietf:rfc:2648>
+ok   <tag:joe@example.org,2001:foo/bar>
+ok   <non-spec:/.//>
+ok   <non-spec:/..//>
+ok   <non-spec:/a/..//>
+ok   <non-spec:/.//path>
+ok   <non-spec:/..//path>
+ok   <non-spec:/a/..//path>
+ok   </.//path> against <non-spec:/p>
+ok   </..//path> against <non-spec:/p>
+ok   <..//path> against <non-spec:/p>
+ok   <a/..//path> against <non-spec:/p>
+ok   <> against <non-spec:/..//p>
+ok   <path> against <non-spec:/..//p>
+ok   <../path> against <non-spec:/.//p>
+ok   <non-special://%E2%80%A0/>
+ok   <non-special://H%4fSt/path>
+ok   <non-special://[1:2:0:0:5:0:0:0]/>
+ok   <non-special://[1:2:0:0:0:0:0:3]/>
+ok   <non-special://[1:2::3]:80/>
+ok   <non-special://[:80/>
+ok   <blob:https://example.com:443/>
+ok   <blob:http://example.org:88/>
+ok   <blob:d3958f5c-0777-0845-9dcf-2cb28783acaf>
+ok   <blob:>
+ok   <blob:blob:>
+ok   <blob:blob:https://example.org/>
+ok   <blob:about:blank>
+ok   <blob:file://host/path>
+ok   <blob:ftp://host/path>
+ok   <blob:ws://example.org/>
+ok   <blob:wss://example.org/>
+ok   <blob:http%3a//example.org/>
+ok   <http://0x7f.0.0.0x7g>
+ok   <http://0X7F.0.0.0X7G>
+ok   <http://[::127.0.0.0.1]>
+ok   <http://[0:1:0:1:0:1:0:1]>
+ok   <http://[1:0:1:0:1:0:1:0]>
+ok   <http://example.org/test?">
+ok   <http://example.org/test?#>
+ok   <http://example.org/test?<>
+ok   <http://example.org/test?>>
+ok   <http://example.org/test?\u{2323}>
+ok   <http://example.org/test?%23%23>
+ok   <http://example.org/test?%GH>
+ok   <http://example.org/test?a#%EF>
+ok   <http://example.org/test?a#%GH>
+ok   <a>
+ok   <a/>
+ok   <a//>
+ok   <test-a-colon.html> against <a:>
+ok   <test-a-colon-b.html> against <a:b>
+ok   <test-a-colon-slash.html> against <a:/>
+ok   <test-a-colon-slash-slash.html> against <a://>
+ok   <test-a-colon-slash-b.html> against <a:/b>
+ok   <test-a-colon-slash-slash-b.html> against <a://b>
+ok   <http://example.org/test?a#b\x00c>
+ok   <non-spec://example.org/test?a#b\x00c>
+ok   <non-spec:/test?a#b\x00c>
+ok   <10.0.0.7:8080/foo.html> against <file:///some/dir/bar.html>
+ok   <a!@$*=/foo.html> against <file:///some/dir/bar.html>
+ok   <a1234567890-+.:foo/bar> against <http://example.com/dir/file>
+ok   <file://a\u{AD}b/p>
+ok   <file://a%C2%ADb/p>
+ok   <file://loC\u{1D400}\u{1D40B}\u{1D407}\u{1D428}\u{1D42C}\u{1D42D}/usr/bin>
+ok   <file://\u{AD}/p>
+ok   <file://%C2%AD/p>
+ok   <file://xn--/p>
+ok   <#link> against <https://example.org/##link>
+ok   <non-special:cannot-be-a-base-url-\x00\x01\x1F\x1E~\x7F\u{80}>
+ok   <non-special:cannot-be-a-base-url-!"$%&'()*+,-.;<=>@[\]^_`{|}~@/>
+ok   <https://www.example.com/path{\x7Fpath.html?query'\x7F=query#fragment<\x7Ffragment>
+ok   <https://user:pass[\x7F@foo/bar> against <http://example.org>
+ok   <foo:// !"$%&'()*+,-.;<=>@[\]^_`{|}~@host/>
+ok   <wss:// !"$%&'()*+,-.;<=>@[]^_`{|}~@host/>
+ok   <foo://joe: !"$%&'()*+,-.:;<=>@[\]^_`{|}~@host/>
+ok   <wss://joe: !"$%&'()*+,-.:;<=>@[]^_`{|}~@host/>
+ok   <foo://!"$%&'()*+,-.;=_`{}~/>
+ok   <wss://!"$&'()*+,-.;=_`{}~/>
+ok   <foo://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~>
+ok   <wss://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~>
+ok   <foo://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~>
+ok   <wss://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~>
+ok   <foo://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~>
+ok   <wss://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~>
+ok   <abc:rootless> against <abc://host/path>
+ok   <abc:rootless> against <abc:/path>
+ok   <abc:rootless> against <abc:path>
+ok   <abc:/rooted> against <abc://host/path>
+ok   <#>
+ok   <?>
+ok   <http://1.2.3.4.5> against <http://other.com/>
+ok   <http://1.2.3.4.5.> against <http://other.com/>
+ok   <http://0..0x300/>
+ok   <http://0..0x300./>
+ok   <http://256.256.256.256.256> against <http://other.com/>
+ok   <http://256.256.256.256.256.> against <http://other.com/>
+ok   <http://1.2.3.08>
+ok   <http://1.2.3.08.>
+ok   <http://1.2.3.09>
+ok   <http://09.2.3.4>
+ok   <http://09.2.3.4.>
+ok   <http://01.2.3.4.5>
+ok   <http://01.2.3.4.5.>
+ok   <http://0x100.2.3.4>
+ok   <http://0x100.2.3.4.>
+ok   <http://0x1.2.3.4.5>
+ok   <http://0x1.2.3.4.5.>
+ok   <http://foo.1.2.3.4>
+ok   <http://foo.1.2.3.4.>
+ok   <http://foo.2.3.4>
+ok   <http://foo.2.3.4.>
+ok   <http://foo.09>
+ok   <http://foo.09.>
+ok   <http://foo.0x4>
+ok   <http://foo.0x4.>
+ok   <http://foo.09..>
+ok   <http://0999999999999999999/>
+ok   <http://foo.0x>
+ok   <http://foo.0XFfFfFfFfFfFfFfFfFfAcE123>
+ok   <http://\u{1F4A9}.123/>
+ok   <https://\x00y>
+ok   <https://x/\x00y>
+ok   <https://x/?\x00y>
+ok   <https://x/?#\x00y>
+ok   <https://\u{FFFF}y>
+ok   <https://x/\u{FFFF}y>
+ok   <https://x/?\u{FFFF}y>
+ok   <https://x/?#\u{FFFF}y>
+ok   <non-special:\x00y>
+ok   <non-special:x/\x00y>
+ok   <non-special:x/?\x00y>
+ok   <non-special:x/?#\x00y>
+ok   <non-special:\u{FFFF}y>
+ok   <non-special:x/\u{FFFF}y>
+ok   <non-special:x/?\u{FFFF}y>
+ok   <non-special:x/?#\u{FFFF}y>
+ok   <>
+ok   <https://example.com/"quoted">
+ok   <https://a%C2%ADb/>
+ok   <https://\u{AD}/>
+ok   <https://%C2%AD/>
+ok   <https://xn--/>
+ok   <constructor:example>
+ok   <constructor:/example>
+ok   <constructor://HOST:80>
+ok   <data://example.com:8080/pathname?search#hash>
+ok   <data:///test>
+ok   <data://test/a/../b>
+ok   <data://:443>
+ok   <data://test:test>
+ok   <data://[:1]>
+ok   <javascript://example.com:8080/pathname?search#hash>
+ok   <javascript:///test>
+ok   <javascript://test/a/../b>
+ok   <javascript://:443>
+ok   <javascript://test:test>
+ok   <javascript://[:1]>
+ok   <mailto://example.com:8080/pathname?search#hash>
+ok   <mailto:///test>
+ok   <mailto://test/a/../b>
+ok   <mailto://:443>
+ok   <mailto://test:test>
+ok   <mailto://[:1]>
+ok   <intent://example.com:8080/pathname?search#hash>
+ok   <intent:///test>
+ok   <intent://test/a/../b>
+ok   <intent://:443>
+ok   <intent://test:test>
+ok   <intent://[:1]>
+ok   <urn://example.com:8080/pathname?search#hash>
+ok   <urn:///test>
+ok   <urn://test/a/../b>
+ok   <urn://:443>
+ok   <urn://test:test>
+ok   <urn://[:1]>
+ok   <turn://example.com:8080/pathname?search#hash>
+ok   <turn:///test>
+ok   <turn://test/a/../b>
+ok   <turn://:443>
+ok   <turn://test:test>
+ok   <turn://[:1]>
+ok   <stun://example.com:8080/pathname?search#hash>
+ok   <stun:///test>
+ok   <stun://test/a/../b>
+ok   <stun://:443>
+ok   <stun://test:test>
+ok   <stun://[:1]>
+ok   <w://x:0>
+ok   <west://x:0>
+ok   <android://x:0/a>
+ok   <drivefs://x:0/a>
+ok   <chromeos-steam://x:0/a>
+ok   <steam://x:0/a>
+ok   <materialized-view://x:0/a>
+ok   <android-app://x:0>
+ok   <chrome-distiller://x:0>
+ok   <chrome-extension://x:0>
+ok   <chrome-native://x:0>
+ok   <chrome-resource://x:0>
+ok   <chrome-search://x:0>
+ok   <fuchsia-dir://x:0>
+ok   <isolated-app://x:0>
+ok   <///test> against <http://example.org/>
+ok   <///\//\//test> against <http://example.org/>
+ok   <///example.org/path> against <http://example.org/>
+ok   <///example.org/../path> against <http://example.org/>
+ok   <///example.org/../../> against <http://example.org/>
+ok   <///example.org/../path/../../> against <http://example.org/>
+ok   <///example.org/../path/../../path> against <http://example.org/>
+ok   </\/\//example.org/../path> against <http://example.org/>
+ok   <///abcdef/../> against <file:///>
+ok   </\//\/a/../> against <file:///>
+ok   <//a/../> against <file:///>
+ok   <non-special:\\opaque>
+ok   <non-special:\\opaque/path>
+ok   <non-special:\\opaque\path>
+ok   <non-special:\/opaque>
+ok   <non-special:/\path>
+ok   <non-special://host\a>
+ok   <non-special://host/a\b>
+ok   <\a> against <foo://foo/a>
+ok   <\/a> against <foo://foo/a>
+ok   <\\a> against <foo://foo/a>
+ok   <data:text/plain,test#<foo> <bar>>
+ok   <about:blank#<foo> <bar>>
+ok   <data:text/plain,test#\x00\x01\x09\x0A\x0D\x1F !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~\x7F\u{80}\u{81}\u{C9}\u{E9}>
+ok   <about:blank#\x00\x01\x09\x0A\x0D\x1F !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~\x7F\u{80}\u{81}\u{C9}\u{E9}>
+ok   <p> against <git://host?q#r>
+ok   <?q2> against <git://host?q#r>
+ok   <#h> against <git://host?q#r>
+ok   <?q2> against <git:/.//a?q#r>
+ok   <#h> against <git:/.//a?q#r>
+urltestdata: 904 of 904 cases pass

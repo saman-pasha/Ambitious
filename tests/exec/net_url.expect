@@ -1,3 +1,42 @@
+ok   form 'test' -> test=
+ok   form '﻿test=﻿' -> %EF%BB%BFtest=%EF%BB%BF
+ok   form '%EF%BB%BFtest=%EF%BB%BF' -> %EF%BB%BFtest=%EF%BB%BF
+ok   form '%EF%BF%BF=%EF%BF%BF' -> %EF%BF%BF=%EF%BF%BF
+ok   form '%FE%FF' -> %EF%BF%BD%EF%BF%BD=
+ok   form '%FF%FE' -> %EF%BF%BD%EF%BF%BD=
+ok   form '†&†=x' -> %E2%80%A0=&%E2%80%A0=x
+ok   form '%C2' -> %EF%BF%BD=
+ok   form '%C2x' -> %EF%BF%BDx=
+ok   form '_charset_=windows-1252&test=%C2x' -> _charset_=windows-1252&test=%EF%BF%BDx
+ok   form '' -> 
+ok   form 'a' -> a=
+ok   form 'a=b' -> a=b
+ok   form 'a=' -> a=
+ok   form '=b' -> =b
+ok   form '&' -> 
+ok   form '&a' -> a=
+ok   form 'a&' -> a=
+ok   form 'a&a' -> a=&a=
+ok   form 'a&b&c' -> a=&b=&c=
+ok   form 'a=b&c=d' -> a=b&c=d
+ok   form 'a=b&c=d&' -> a=b&c=d
+ok   form '&&&a=b&&&&c=d&' -> a=b&c=d
+ok   form 'a=a&a=b&a=c' -> a=a&a=b&a=c
+ok   form 'a==a' -> a=%3Da
+ok   form 'a=a+b+c+d' -> a=a+b+c+d
+ok   form '%=a' -> %25=a
+ok   form '%a=a' -> %25a=a
+ok   form '%a_=a' -> %25a_=a
+ok   form '%61=a' -> a=a
+ok   form '%61+%4d%4D=' -> a+MM=
+ok   form 'id=0&value=%' -> id=0&value=%25
+ok   form 'b=%2sf%2a' -> b=%252sf*
+ok   form 'b=%2%2af%2a' -> b=%252*f*
+ok   form 'b=%%2a' -> b=%25*
+ok   form 'a*-._b=~!'()' -> a*-._b=%7E%21%27%28%29
+ok   form '%E0%A4%A=x' -> %EF%BF%BD%25A=x
+ok   form '%F0%9F%92%A9' -> %F0%9F%92%A9=
+ok   form '%ED%A0%80=1' -> %EF%BF%BD%EF%BF%BD%EF%BF%BD=1
 ok   'g:h' -> g:h
 ok   'g' -> http://a/b/c/g
 ok   './g' -> http://a/b/c/g
@@ -36,7 +75,7 @@ ok   'g;x=1/./y' -> http://a/b/c/g;x=1/y
 ok   'g;x=1/../y' -> http://a/b/c/y
 ok   '  HTTP://Example.COM:80/x\y ' -> http://example.com/x/y
 ok   'http://u:p@h:8080/' -> http://h:8080/
-ok   'file:///tmp/a b.html' -> file:///tmp/a b.html
+ok   'file:///tmp/a b.html' -> file:///tmp/a%20b.html
 ok   'data:text/css,p{}' -> data:text/css,p{}
 ok   'http://[::1]:8080/x' -> http://[::1]:8080/x
 ok   'http://[0:0:0:0:0:0:0:1]/' -> http://[::1]/
@@ -158,4 +197,4 @@ ok   site of https://Example.COM./: https://example.com
 ok   site of http://co.uk/: http://co.uk
 ok   site of file:///x: null
 ok   site of data:text/plain,x: null
-160 of 160 cases
+199 of 199 cases

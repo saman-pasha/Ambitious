@@ -351,7 +351,62 @@ neighbours.
 24. **An array member sized by an object-like `#define` in an included header
     gets size 0** and the program crashes on its use; an enum constant as the
     bound works (src/paint/font.h's `AMB_MAXFACES` is one for this reason).
+    12m met it too, silently: the struct's array took no room and a test's
+    stack was overwritten, its return address among it; `sizeof` of a global
+    array so declared, used in the `.c`, is refused as `undeclared('M')`:
+
+    ```c
+    /* r.h */
+    #include <stddef.h>
+    #define M 24
+    typedef struct two { int n; size_t a[M]; } two;
+    /* r.c */
+    #include <stdio.h>
+    #include "r.h"
+    int main(void) { printf("%zu\n", sizeof(two)); return 0; }
+    ```
+
+    prints 8, where gcc's build prints 200.
 25. **A `#define` used in an enum's initializer in an included header
     unregisters every prototype after it** in that header. Each of 24 and 25
     reduces to a header with the macro-sized array or the macro-initialized
     enum, and one prototype after it, included by a unit that calls it.
+26. **A type macro's function called in an included header is not made**:
+    `push_back` in a function of a header the unit includes is refused as
+    undeclared, where the same function in the `.c` itself compiles. 12m's URL
+    tests met it with a JSON reader shared by two tests; the work-around is a
+    header that calls no type macro's function (its buffers fixed arrays):
+
+    ```c
+    /* h.h */
+    #include <vector.pl>
+    static void f(vector<char> *out) { push_back(out, (char)97); }
+    /* a.c */
+    #include <stdio.h>
+    #include <vector.pl>
+    #include "h.h"
+    int main(void) { vector<char> v; f(&v); printf("%d\n", (int)len(v)); return 0; }
+    ```
+
+    reports `a.c:2: error: not lowered yet: undeclared(push_back) (function f)`
+    (the line is the header's, the file the unit's).
+27. **A function named as a static table of an included header is accepted, and
+    the name then means the function**: where gcc refuses the redeclaration,
+    cicilang compiles it, and the table's name passed as a pointer is the
+    function's code. 12m's IDNA named its lookups as its tables (`idna_ccc`,
+    `idna_mark`) and read machine code as combining classes; in one file the
+    same is refused, as `not lowered yet: call(id(t))`:
+
+    ```c
+    /* dup.h */
+    static const unsigned t[3] = { 7, 8, 9 };
+    /* dup.c */
+    #include <stdio.h>
+    #include "dup.h"
+    static unsigned look(const unsigned *a, unsigned i) { return a[i]; }
+    static unsigned t(unsigned i) { return look(t, i); }
+    int main(void) { printf("%u\n", t(1)); return 0; }
+    ```
+
+    prints 4294965005 (gcc: `'t' redeclared as different kind of symbol`).
+    The work-around is other names.

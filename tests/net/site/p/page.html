@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>picture and its sources</title>
+<!-- tests/net/site/p/page.html: <picture>'s <source>s, each img's choice held to Chromium's
+     (tests/net/picture.js writes tests/net/picture.chromium; tests/integ/picture.sh compares).
+     Each image has a size of its own, so its box says which was taken. -->
+<style>
+body { margin: 8px; font: 16px/1 sans-serif }
+picture { display: block; margin: 0 0 2px }
+source { display: none }
+</style>
+<!-- media by width: the second source holds in an 800px viewport -->
+<picture><source media="(max-width: 600px)" srcset="narrow.png"><source media="(min-width: 601px)" srcset="wide.png"><img id="width" src="fallback.png" alt=""></picture>
+<!-- no source holds: the img's own src -->
+<picture><source media="(max-width: 300px)" srcset="tiny.png"><source media="print" srcset="print.png"><img id="none" src="own.png" alt=""></picture>
+<!-- types: one not known, then WebP -->
+<picture><source type="image/x-unknown" srcset="unknown.png"><source type="image/webp" srcset="pic.webp"><img id="type" src="fallback.png" alt=""></picture>
+<!-- a type in capitals, with a parameter -->
+<picture><source type="IMAGE/GIF; foo=bar" srcset="still.gif"><img id="typecase" src="fallback.png" alt=""></picture>
+<!-- a source whose srcset is empty, then JPEG by type -->
+<picture><source srcset=""><source type="image/jpeg" srcset="photo.jpg"><img id="jpeg" src="fallback.png" alt=""></picture>
+<!-- densities -->
+<picture><source srcset="d-1x.png 1x, d-2x.png 2x"><img id="density" src="fallback.png" alt=""></picture>
+<!-- widths by the source's own sizes, not the img's -->
+<picture><source srcset="w-400w.png 400w, w-800w.png 800w, w-1600w.png 1600w" sizes="(min-width: 700px) 50vw, 100vw"><img id="sizes" src="fallback.png" sizes="10px" alt=""></picture>
+<!-- a source after the img counts for nothing -->
+<picture><img id="after" src="own2.png" alt=""><source srcset="later.png"></picture>
+<!-- screen and an orientation -->
+<picture><source media="screen and (orientation: portrait)" srcset="portrait.png"><source media="only screen and (orientation: landscape)" srcset="landscape.png"><img id="orient" src="fallback.png" alt=""></picture>
+<!-- not -->
+<picture><source media="not all and (min-width: 500px)" srcset="notwide.png"><source media="not print" srcset="notprint.png"><img id="not" src="fallback.png" alt=""></picture>
+<!-- a list of queries, one of which holds -->
+<picture><source media="print, (min-width: 700px)" srcset="list.png"><img id="list" src="fallback.png" alt=""></picture>
+<!-- no source holds: the img's own srcset -->
+<picture><source media="(min-width: 2000px)" srcset="huge.png"><img id="imgset" srcset="set-1x.png 1x, set-2x.png 2x" src="fallback.png" alt=""></picture>
+<!-- a source whose every candidate is bad -->
+<picture><source srcset="bad.png 2q"><source srcset="good.png"><img id="bad" src="fallback.png" alt=""></picture>
+<!-- resolution -->
+<picture><source media="(min-resolution: 2dppx)" srcset="hires.png"><source media="(max-resolution: 1dppx)" srcset="lores.png"><img id="res" src="fallback.png" alt=""></picture>
+<!-- the light scheme -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="dark.png"><img id="scheme" src="light.png" alt=""></picture>
+<!-- ranges -->
+<picture><source media="(400px <= width <= 700px)" srcset="mid.png"><source media="(width > 700px)" srcset="big.png"><img id="range" src="fallback.png" alt=""></picture>
+<!-- an empty type is any (as Blink reads it) -->
+<picture><source type="" srcset="emptytype.png"><img id="emptytype" src="fallback.png" alt=""></picture>
+<!-- a mouse's hover and pointer -->
+<picture><source media="(hover: hover) and (pointer: fine)" srcset="hover.png"><img id="hover" src="fallback.png" alt=""></picture>
+<!-- types neither decodes, then PNG -->
+<picture><source type="image/jxl" srcset="j.jxl"><source type="image/heic" srcset="h.heic"><source type="image/png" srcset="png.png"><img id="unsupported" src="fallback.png" alt=""></picture>
+<!-- a srcset of white space alone -->
+<picture><source srcset="  "><source srcset="sp.png"><img id="spaces" src="fallback.png" alt=""></picture>
+<!-- a source that is no child of the picture -->
+<picture><div><source srcset="deep.png"></div><img id="nested" src="own3.png" alt=""></picture>
+<!-- an img whose src is empty takes its source -->
+<picture><source srcset="filled.png"><img id="emptysrc" src="" alt=""></picture>

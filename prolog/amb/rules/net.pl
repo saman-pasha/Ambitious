@@ -7,7 +7,7 @@
 :- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3,
            net_failure/2, net_tls/4, net_proxy/2, net_cross_site/1, net_cookie/5, net_cookie_flags/5,
            net_cookie_expires/2, net_cookie_set_by/2, net_cookie_refused/2, net_cookie_sent/2, net_cache/4,
-           net_coding/3, net_srcset/5.
+           net_coding/3, net_srcset/5, net_picture_source/2.
 
 net_page(R) :- net_resource(R, _, document, _, _, _, _), \+ net_asked_by(R, _, _).
 
