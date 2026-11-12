@@ -27,7 +27,7 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 %% box's children
 layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline])).
 %% a form control the theme draws (Chromium's NativeThemeBase), in place of its CSS background and border; css: none, CSS draws it
-layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell])).
+layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell, progress, meter])).
 %% how a box's width was found: the viewport's; filling its containing block; a
 %% length, or a percentage, its style declared; shrunk to fit its content; its
 %% table column's; its content's own (a replaced element's, a form control's);
@@ -99,11 +99,14 @@ layout_contract(record(box, [
     %% and glyphs, each in its viewport's CSS px, which paint draws in its content box
     field(svg, span(text)),
     %% the theme's drawing of a form control (css: its author styled its background or border, or its appearance is
-    %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track; a
-    %% colour well's colour, a drop-down's arrow's
+    %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track, a
+    %% progress bar's (-1 indeterminate), a meter's; a colour well's colour, a drop-down's arrow's
     field(theme, enum(theme)), field(checked, bool), field(fraction, f64), field(swatch, u32),
     %% the state the theme draws the control in: 1 disabled (its own disabled attribute, or a disabled fieldset's),
-    %% 2 in the dark scheme (its color-scheme's)
+    %% 2 in the dark scheme (its color-scheme's); 4 drawn by its CSS, its author having styled it (a progress bar or
+    %% a meter of appearance none too), with what its shadow tree keeps of the theme's drawing: a drop-down's arrow
+    %% (menulist-button), a colour well's swatch, a progress bar's or a meter's bar; a meter's value 8 in its
+    %% suboptimal region, 16 its even less good one; 32 right to left, a gauge's value from the right
     field(tstate, u8),
     %% an img with no image to load (no src, no srcset, no source of its picture chosen): with alt text, its
     %% fallback, a broken image's icon before the text; without, its content box outlined in light grey as

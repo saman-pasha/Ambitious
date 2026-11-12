@@ -1,7 +1,7 @@
-/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:44d12fd2:7206). Do not edit. */
+/* Ambitious: the interface of module layout, generated from contracts/layout.pl (fnv1a32:a4ae46f6:7221). Do not edit. */
 typedef enum layout_status { LAYOUT_OK, LAYOUT_STALE_HANDLE, LAYOUT_WRONG_KIND, LAYOUT_NO_ROOT, LAYOUT_BAD_REQUEST, LAYOUT_NOT_REQUESTABLE, LAYOUT_STALE_REVISION } layout_status;
 typedef enum layout_box_kind { LAYOUT_BOX_KIND_VIEWPORT, LAYOUT_BOX_KIND_BLOCK, LAYOUT_BOX_KIND_ANONYMOUS, LAYOUT_BOX_KIND_LIST_ITEM, LAYOUT_BOX_KIND_INLINE_BLOCK, LAYOUT_BOX_KIND_REPLACED, LAYOUT_BOX_KIND_TABLE, LAYOUT_BOX_KIND_ROW, LAYOUT_BOX_KIND_CELL, LAYOUT_BOX_KIND_FLEX, LAYOUT_BOX_KIND_GRID, LAYOUT_BOX_KIND_INLINE } layout_box_kind;
-typedef enum layout_theme { LAYOUT_THEME_CSS, LAYOUT_THEME_FIELD, LAYOUT_THEME_AREA, LAYOUT_THEME_BUTTON, LAYOUT_THEME_MENULIST, LAYOUT_THEME_LISTBOX, LAYOUT_THEME_CHECKBOX, LAYOUT_THEME_RADIO, LAYOUT_THEME_RANGE, LAYOUT_THEME_COLORWELL } layout_theme;
+typedef enum layout_theme { LAYOUT_THEME_CSS, LAYOUT_THEME_FIELD, LAYOUT_THEME_AREA, LAYOUT_THEME_BUTTON, LAYOUT_THEME_MENULIST, LAYOUT_THEME_LISTBOX, LAYOUT_THEME_CHECKBOX, LAYOUT_THEME_RADIO, LAYOUT_THEME_RANGE, LAYOUT_THEME_COLORWELL, LAYOUT_THEME_PROGRESS, LAYOUT_THEME_METER } layout_theme;
 typedef enum layout_width_how { LAYOUT_WIDTH_HOW_VIEWPORT, LAYOUT_WIDTH_HOW_FILL, LAYOUT_WIDTH_HOW_DECLARED, LAYOUT_WIDTH_HOW_PERCENT, LAYOUT_WIDTH_HOW_SHRINK_TO_FIT, LAYOUT_WIDTH_HOW_COLUMN, LAYOUT_WIDTH_HOW_INTRINSIC, LAYOUT_WIDTH_HOW_MAX_WIDTH, LAYOUT_WIDTH_HOW_MIN_WIDTH, LAYOUT_WIDTH_HOW_FLEX, LAYOUT_WIDTH_HOW_GRID, LAYOUT_WIDTH_HOW_POSITIONED } layout_width_how;
 typedef enum layout_position { LAYOUT_POSITION_STATIC, LAYOUT_POSITION_RELATIVE, LAYOUT_POSITION_ABSOLUTE, LAYOUT_POSITION_FIXED, LAYOUT_POSITION_STICKY } layout_position;
 typedef enum layout_float_side { LAYOUT_FLOAT_SIDE_UNFLOATED, LAYOUT_FLOAT_SIDE_LEFT, LAYOUT_FLOAT_SIDE_RIGHT } layout_float_side;
@@ -96,6 +96,8 @@ const char *layout_theme_name(layout_theme x) {
     case LAYOUT_THEME_RADIO: return "radio";
     case LAYOUT_THEME_RANGE: return "range";
     case LAYOUT_THEME_COLORWELL: return "colorwell";
+    case LAYOUT_THEME_PROGRESS: return "progress";
+    case LAYOUT_THEME_METER: return "meter";
     }
     return "?";
 }
@@ -154,7 +156,7 @@ const char *layout_frag_kind_name(layout_frag_kind x) {
     return "?";
 }
 
-const char layout_fingerprint[] = "fnv1a32:44d12fd2:7206";
+const char layout_fingerprint[] = "fnv1a32:a4ae46f6:7221";
 void layout_init(layout_tree *d, uint32_t id) {
     if (d->box_len != 0) abort();
     d->id = id;

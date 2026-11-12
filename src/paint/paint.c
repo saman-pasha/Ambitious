@@ -1390,12 +1390,14 @@ static int pt_filter_reach(const vector<pt_fop> *ops) {
 }
 
 /* a box's shadows (box-shadow's value s), each, last first. The outer ones (inset 0): its
-   rounded border box offset and spread, blurred, outside the box only. The inset ones
-   (inset 1, drawn over the background): inside the padding box (bw: the border's widths,
-   top right bottom left; prad the padding box's radii), all of it but a hole -- the padding
-   box shrunk by the spread and moved by the offset -- blurred */
+   rounded border box offset and spread, blurred, outside the box only -- outside the box
+   less 1px each way when its background is opaque (Blink's PaintNormalBoxShadow, which
+   clips out that much only, so the shadow shows through a rounded edge's anti-aliasing).
+   The inset ones (inset 1, drawn over the background): inside the padding box (bw: the
+   border's widths, top right bottom left; prad the padding box's radii), all of it but a
+   hole -- the padding box shrunk by the spread and moved by the offset -- blurred */
 static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, double y0, double x1, double y1, const double *rad,
-                           int want_inset, const double *bw, const double *prad) {
+                           int want_inset, const double *bw, const double *prad, int opaque) {
     vector<size_t> starts;
     size_t i = 0, a, ln;
     while (pt_layer(s, n, &i, &a, &ln)) { push_back(starts, a); push_back(starts, ln); }
@@ -1448,6 +1450,8 @@ static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, do
             continue;
         }
         double sx0 = x0 + v[0] - spread, sy0 = y0 + v[1] - spread, sx1 = x1 + v[0] + spread, sy1 = y1 + v[1] + spread;
+        double ins = opaque && x1 - x0 > 2 && y1 - y0 > 2 ? 1 : 0, orad[8];
+        for (int k = 0; k < 8; k++) orad[k] = fmax(0, rad[k] - ins);
         double sr[8];
         for (int k = 0; k < 8; k++) sr[k] = rad[k] > 0 ? fmax(0, rad[k] + spread) : 0;
         int margin = (int)ceil(blur) + 2;
@@ -1469,7 +1473,7 @@ static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, do
                 if (X < kx0 || X >= kx1) continue;
                 double cov = at(m, (size_t)y * mw + x);
                 if (cov <= 0) continue;
-                double inside = pt_rr_cover(X + 0.5, my0 + y + 0.5, x0, y0, x1, y1, rad);
+                double inside = pt_rr_cover(X + 0.5, my0 + y + 0.5, x0 + ins, y0 + ins, x1 - ins, y1 - ins, orad);
                 pt_blend(c, X, Y, col, cov * (1 - inside));
             }
         }
@@ -1927,6 +1931,24 @@ static void pt_theme_field(amb_canvas *c, int x0, int y0, int x1, int y1, uint32
     pt_fill(c, x1 - 1, y0 + 1, x1, y1 - 1, line);
 }
 /* the form control b as the theme draws it, its border box (x, y, w, h) in page px */
+/* a drop-down's arrow: an 8 by 4 chevron stroked 2px wide in its text's colour, 12px before the inner right edge, at the
+   box's middle (ThemePainterDefault::SetupMenuListArrow), the border box (X0, Y0)-(X1, Y1) snapped */
+static void pt_menulist_arrow(const layout_tree *t, uint32_t b, amb_canvas *c, int X0, int Y0, int X1, int Y1, vector<float> *acc) {
+    double ax = X1 - floor(t->box[b].br) - 12, ay = Y0 + floor((Y1 - Y0) / 2);
+    double px[3] = { ax, ax + 4, ax + 8 }, py[3] = { ay - 2, ay + 2, ay - 2 };
+    pt_theme_stroke(c, px, py, 3, 2, t->box[b].swatch & 0xff ? t->box[b].swatch : 0x000000ff, acc);
+}
+/* a colour well's swatch: its content box less 4px above and below and 2px aside (::-webkit-color-swatch-wrapper's
+   padding), a 1px #777777 border round the colour (::-webkit-color-swatch's), in the border box (x, y, w, h) */
+static void pt_colour_swatch(const layout_tree *t, uint32_t b, amb_canvas *c, double x, double y, double w, double h) {
+    double cx0 = x + t->box[b].bl + t->box[b].pl + 2, cy0 = y + t->box[b].bt + t->box[b].pt + 4;
+    double cx1 = x + w - t->box[b].br - t->box[b].pr - 2, cy1 = y + h - t->box[b].bb - t->box[b].pb - 4;
+    if (cx1 - cx0 >= 2 && cy1 - cy0 >= 2) {
+        pt_fill(c, cx0, cy0, cx1, cy1, 0x777777ff);
+        pt_fill(c, cx0 + 1, cy0 + 1, cx1 - 1, cy1 - 1, t->box[b].swatch);
+    }
+}
+
 static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, double y, double w, double h, vector<float> *acc) {
     /* disabled (Chromium's lighten layer, then each part in its disabled colour; measured over a white and a black
        page, each part's colour and alpha solved from the two): the border #767676 at 30% over an interior of #f5f5f5
@@ -1954,9 +1976,7 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
         /* a drop-down: a field's frame on the field's white, and its arrow, an 8 by 4 chevron stroked 2px wide in the
            text's colour, 12px before the inner right edge, at the box's middle (ThemePainterDefault::SetupMenuListArrow) */
         pt_theme_field(c, X0, Y0, X1, Y1, dis ? inner : field, line);
-        double ax = X1 - floor(t->box[b].br) - 12, ay = Y0 + floor((Y1 - Y0) / 2);
-        double px[3] = { ax, ax + 4, ax + 8 }, py[3] = { ay - 2, ay + 2, ay - 2 };
-        pt_theme_stroke(c, px, py, 3, 2, t->box[b].swatch & 0xff ? t->box[b].swatch : 0x000000ff, acc);
+        pt_menulist_arrow(t, b, c, X0, Y0, X1, Y1, acc);
     } else if (th == LAYOUT_THEME_BUTTON || th == LAYOUT_THEME_COLORWELL) {
         /* a button: its background as a rounded rectangle of radius 2, its border 1px inside it (PaintButton);
            disabled, #d8d8d8 at 44% and its border #c0c0c0 at 68% (dark: #363636, its border its fill) */
@@ -1964,15 +1984,7 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
         if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, fill); return; }
         pt_theme_rr(c, X0, Y0, X1, Y1, 2, fill, 0);
         pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, dark ? fill : dis ? 0xc0c0c0ad : line);
-        if (th == LAYOUT_THEME_COLORWELL) {
-            /* the swatch: the content box less 4px above and below and 2px aside, a 1px #777777 border round the colour */
-            double cx0 = x + t->box[b].bl + t->box[b].pl + 2, cy0 = y + t->box[b].bt + t->box[b].pt + 4;
-            double cx1 = x + w - t->box[b].br - t->box[b].pr - 2, cy1 = y + h - t->box[b].bb - t->box[b].pb - 4;
-            if (cx1 - cx0 >= 2 && cy1 - cy0 >= 2) {
-                pt_fill(c, cx0, cy0, cx1, cy1, 0x777777ff);
-                pt_fill(c, cx0 + 1, cy0 + 1, cx1 - 1, cy1 - 1, t->box[b].swatch);
-            }
-        }
+        if (th == LAYOUT_THEME_COLORWELL) pt_colour_swatch(t, b, c, x, y, w, h);
     } else if (th == LAYOUT_THEME_CHECKBOX || th == LAYOUT_THEME_RADIO) {
         /* the largest square in the box, a rounded square (radius 2) or a circle: unchecked, white with a 1px border;
            a check box checked, the accent filled and a white check stroked across it; a radio button checked, its
@@ -1994,6 +2006,55 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
                7.1 in 24) */
             pt_theme_disc(c, sx + s / 2, sy + s / 2, s * 0.28 + 0.36, accent);
         }
+    } else if (th == LAYOUT_THEME_PROGRESS) {
+        /* a progress bar (NativeThemeBase::PaintProgressBar, measured): in its border box snapped, a track half its
+           height across its middle, its ends round, #efefef (dark #3b3b3b); the value from its start (its end, right to
+           left) in the accent, (int)(width x position) wide and at least 2px, clipped by the track; the track's border
+           stroked 1px inside it over both, #767676 at half alpha (dark #858585). Indeterminate: its track alone (Chromium
+           animates its value) */
+        if (X1 <= X0 || Y1 <= Y0) return;
+        double by0 = Y0 + (Y1 - Y0) / 4.0, by1 = Y0 + 3.0 * (Y1 - Y0) / 4.0, rr = (by1 - by0) / 2;
+        double fr = t->box[b].fraction;
+        pt_theme_rr(c, X0, by0, X1, by1, rr, dark ? 0x3b3b3bff : 0xefefefff, 0);
+        int vw = fr > 0 ? (int)((X1 - X0) * fr) : 0;
+        if (vw > 0 && vw < 2) vw = 2;
+        if (vw > 0) {
+            double s0 = c->cx0, s1 = c->cx1;
+            if (t->box[b].tstate & 32) c->cx0 = fmax(c->cx0, X1 - vw);
+            else c->cx1 = fmin(c->cx1, X0 + vw);
+            pt_theme_rr(c, X0, by0, X1, by1, rr, accent, 0);
+            c->cx0 = s0;
+            c->cx1 = s1;
+        }
+        pt_hair_rrect(c, X0 + 0.5, by0 + 0.5, X1 - 0.5, by1 - 0.5, rr - 0.5 > 0 ? rr - 0.5 : 0, dark ? 0x858585ff : 0x76767680);
+    } else if (th == LAYOUT_THEME_METER) {
+        /* a meter: its shadow tree's boxes as Chromium's sheet lays them out and paints them (html.css, read through
+           the inspector): the inner element a grid over the content box, rows 1fr 2fr 1fr; the bar the middle row's
+           (absolute, its height 100%), #efefef (dark #3b3b3b), a thin border rgba(118, 118, 118, 0.3) (dark #858585),
+           its radii 20px fitted to it; the value inside that border, the fraction of its width from its start, clipped
+           by its rounded padding box (overflow: hidden), #107c10 / #ffb900 / #d83b01 by its region (dark #74b374 /
+           #f2c812 / #e98f6d). Each box snapped as Blink snaps a box: its edges rounded */
+        double cx = x + t->box[b].bl + t->box[b].pl, cy = y + t->box[b].bt + t->box[b].pt;
+        double cw = w - t->box[b].bl - t->box[b].pl - t->box[b].pr - t->box[b].br, ch = h - t->box[b].bt - t->box[b].pt - t->box[b].pb - t->box[b].bb;
+        double sx0 = floor(cx + 0.5), sx1 = floor(cx + cw + 0.5), sy0 = floor(cy + ch / 4 + 0.5), sy1 = floor(cy + ch / 4 + ch / 2 + 0.5);
+        if (sx1 <= sx0 || sy1 <= sy0) return;
+        double r = 20 * fmin(1, fmin((sx1 - sx0) / 40, (sy1 - sy0) / 40));
+        /* the dark border opaque: the background inset half of it (Blink's bleed avoidance, kBackgroundBleedShrinkBackground) */
+        if (dark) pt_theme_rr(c, sx0 + 0.5, sy0 + 0.5, sx1 - 0.5, sy1 - 0.5, r - 0.5 > 0 ? r - 0.5 : 0, 0x3b3b3bff, 0);
+        else pt_theme_rr(c, sx0, sy0, sx1, sy1, r, 0xefefefff, 0);
+        double vw = t->box[b].fraction * (cw - 2);
+        int region = t->box[b].tstate & 8 ? 1 : t->box[b].tstate & 16 ? 2 : 0;
+        static const uint32_t gauge[2][3] = { { 0x107c10ffu, 0xffb900ffu, 0xd83b01ffu }, { 0x74b374ffu, 0xf2c812ffu, 0xe98f6dffu } };
+        if (vw > 0 && sx1 - sx0 > 2 && sy1 - sy0 > 2) {
+            double s0 = c->cx0, s1 = c->cx1;
+            double v0 = t->box[b].tstate & 32 ? floor(cx + cw - 1 - vw + 0.5) : sx0 + 1, v1 = t->box[b].tstate & 32 ? sx1 - 1 : floor(cx + 1 + vw + 0.5);
+            c->cx0 = fmax(c->cx0, v0);
+            c->cx1 = fmin(c->cx1, v1);
+            if (c->cx1 > c->cx0) pt_theme_rr(c, sx0 + 1, sy0 + 1, sx1 - 1, sy1 - 1, r - 1 > 0 ? r - 1 : 0, gauge[dark][region], 0);
+            c->cx0 = s0;
+            c->cx1 = s1;
+        }
+        pt_theme_rr(c, sx0, sy0, sx1, sy1, r, dark ? 0x858585ff : 0x7676764du, 1);
     } else if (th == LAYOUT_THEME_RANGE) {
         /* a range: its 8px track across the box's middle, #efefef and the accent up to the thumb, a 1px #767676 border
            at half its alpha, its corners rounded; the thumb a 16px circle of the accent, its centre from 8px in to 8px
@@ -2011,6 +2072,37 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
     }
 }
 
+/* a progress bar or a meter its author styled (or of appearance none): its shadow tree as Chromium's sheet draws it
+   then, in its content box (html.css, read through the inspector). A progress: the bar #808080 over the content box,
+   the value #008000 the fraction of its width from its start (none indeterminate). A meter: the inner element a grid
+   of rows 1fr 2fr 1fr, the bar the middle row's, linear-gradient(#ddd, #eee 20%, #ccc 45%, #ccc 55%, #ddd); its value
+   the fraction of its width, its region's gradient (#ad7, #cea, #7a3; #fe7, #ffc, #db3; #f77, #fcc, #d44). Each box
+   snapped, its edges rounded */
+static void pt_gauge_css(const layout_tree *t, uint32_t b, amb_canvas *c) {
+    double cx = t->box[b].x, cy = t->box[b].y, cw = t->box[b].w, ch = t->box[b].h, fr = t->box[b].fraction;
+    int rtl = (t->box[b].tstate & 32) != 0;
+    double zr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    if (t->box[b].theme == LAYOUT_THEME_PROGRESS) {
+        double x0 = floor(cx + 0.5), x1 = floor(cx + cw + 0.5), y0 = floor(cy + 0.5), y1 = floor(cy + ch + 0.5);
+        pt_fill(c, x0, y0, x1, y1, 0x808080ff);
+        if (fr > 0) {
+            double v0 = rtl ? floor(cx + cw - fr * cw + 0.5) : x0, v1 = rtl ? x1 : floor(cx + fr * cw + 0.5);
+            pt_fill(c, v0, y0, v1, y1, 0x008000ff);
+        }
+        return;
+    }
+    static const char *bar = "linear-gradient(#ddd, #eee 20%, #ccc 45%, #ccc 55%, #ddd)";
+    static const char *val[3] = { "linear-gradient(#ad7, #cea 20%, #7a3 45%, #7a3 55%, #ad7)",
+                                  "linear-gradient(#fe7, #ffc 20%, #db3 45%, #db3 55%, #fe7)",
+                                  "linear-gradient(#f77, #fcc 20%, #d44 45%, #d44 55%, #f77)" };
+    double x0 = floor(cx + 0.5), x1 = floor(cx + cw + 0.5), y0 = floor(cy + ch / 4 + 0.5), y1 = floor(cy + ch / 4 + ch / 2 + 0.5);
+    if (x1 <= x0 || y1 <= y0) return;
+    pt_gradient(c, bar, strlen(bar), x0, y0, x1 - x0, y1 - y0, x0, y0, x1, y1, zr);
+    int region = t->box[b].tstate & 8 ? 1 : t->box[b].tstate & 16 ? 2 : 0;
+    double v0 = rtl ? floor(cx + cw - fr * cw + 0.5) : x0, v1 = rtl ? x1 : floor(cx + fr * cw + 0.5);
+    if (fr > 0 && v1 > v0) pt_gradient(c, val[region], strlen(val[region]), v0, y0, v1 - v0, y1 - y0, v0, y0, v1, y1, zr);
+}
+
 static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
                    vector<uint8_t> *ipx) {
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
@@ -2021,6 +2113,15 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     bh -= lsh;
     double rad[8] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl,
                       t->box[b].rtlv, t->box[b].rtrv, t->box[b].rbrv, t->box[b].rblv };
+    /* a rounded box drawn in its border box snapped to whole pixels, each edge rounded, its radii fitted to that (Blink's
+       RoundedBorderGeometry::PixelSnappedRoundedBorder; a square box's fills round their edges alike): its background,
+       border, shadows and a replaced box's content clip moved with its edges (sd, each edge's move) */
+    double sd[4] = { 0, 0, 0, 0 };
+    if (pt_round(rad)) {
+        double sx0 = floor(bx + 0.5), sy0 = floor(by + 0.5), sx1 = floor(bx + bw + 0.5), sy1 = floor(by + bh + 0.5);
+        sd[0] = sx0 - bx; sd[1] = sy0 - by; sd[2] = sx1 - (bx + bw); sd[3] = sy1 - (by + bh);
+        bx = sx0; by = sy0; bw = sx1 - sx0; bh = sy1 - sy0;
+    }
     pt_fit_radii(bw, bh, rad);
     int round = pt_round(rad);
     double bt = t->box[b].bt, br = t->box[b].br, bb = t->box[b].bb, bl = t->box[b].bl;
@@ -2028,14 +2129,17 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     /* the padding box's radii: each less the border beside it (CSS Backgrounds 5.2) */
     double prad[8] = { fmax(0, rad[0] - bl), fmax(0, rad[1] - br), fmax(0, rad[2] - br), fmax(0, rad[3] - bl),
                        fmax(0, rad[4] - bt), fmax(0, rad[5] - bt), fmax(0, rad[6] - bb), fmax(0, rad[7] - bb) };
+    /* the shadows of the border box snapped, as Blink's are of the snapped rounded border */
+    double qx0 = floor(bx + 0.5), qy0 = floor(by + 0.5), qx1 = floor(bx + bw + 0.5), qy1 = floor(by + bh + 0.5);
+    int opaque_bg = b != skip_bg && (t->box[b].background & 0xff) == 0xff;
     vector<char> sh;
     if (t->box[b].shadows.len) {
         amb_span sp = t->box[b].shadows;
         append_range(sh, text_ptr(t, sp), sp.len);
-        pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 0, bws, prad);
+        pt_box_shadows(c, data(sh), len(sh), qx0, qy0, qx1, qy1, rad, 0, bws, prad, opaque_bg);
     }
     /* a form control the theme draws: its drawing in place of its background and border (its shadows kept) */
-    int themed = t->box[b].theme != LAYOUT_THEME_CSS;
+    int themed = t->box[b].theme != LAYOUT_THEME_CSS && !(t->box[b].tstate & 4);
     if (themed) {
         vector<float> tacc;
         pt_theme(t, b, c, bx, by, bw, bh, &tacc);
@@ -2052,11 +2156,12 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         if (!(cl && pt_is(data(clp) + cs, cl, "text"))) {
             if (cl) pt_area(t, b, data(clp) + cs, cl, rad, ca, cr);
             else pt_area(t, b, "border-box", 10, rad, ca, cr);
+            for (int k = 0; k < 4; k++) ca[k] += sd[k];
             pt_rrect(c, ca[0], ca[1], ca[2], ca[3], cr, t->box[b].background);
         }
     }
     if (t->box[b].bg_image.len && !themed) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
-    if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
+    if (len(sh)) pt_box_shadows(c, data(sh), len(sh), qx0, qy0, qx1, qy1, rad, 1, bws, prad, 0);
     if (themed) bt = br = bb = bl = 0;      /* its border the theme's */
     /* replaced content with rounded corners: held to its content box, rounded as the border box is less the border
        and padding (Blink's ReplacedPainter, the rounded inner rect for content), anti-aliased */
@@ -2066,6 +2171,7 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     double scx0 = c->cx0, scy0 = c->cy0, scx1 = c->cx1, scy1 = c->cy1;
     if (kround) {
         pt_area(t, b, "content-box", 11, rad, ka, kr);
+        for (int k = 0; k < 4; k++) ka[k] += sd[k];
         if (c->cx0 < floor(ka[0])) c->cx0 = floor(ka[0]);
         if (c->cy0 < floor(ka[1] - c->oy) + c->oy) c->cy0 = floor(ka[1] - c->oy) + c->oy;
         if (c->cx1 > ceil(ka[2])) c->cx1 = ceil(ka[2]);
@@ -2187,6 +2293,16 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     if (len(gap)) {
         size_t row = (size_t)(gx1 - gx0) * 3, q = 0;
         for (int y = gy0; y < gy1; y++, q += row) memcpy(data(c->px) + ((size_t)y * c->w + (size_t)gx0) * 3, data(gap) + q, row);
+    }
+    /* a control its author styled, drawn by its CSS, then what of the theme's drawing its shadow tree keeps */
+    if (t->box[b].tstate & 4) {
+        layout_theme th = t->box[b].theme;
+        if (th == LAYOUT_THEME_PROGRESS || th == LAYOUT_THEME_METER) pt_gauge_css(t, b, c);
+        else if (th == LAYOUT_THEME_COLORWELL) pt_colour_swatch(t, b, c, qx0, qy0, qx1 - qx0, qy1 - qy0);
+        else if (th == LAYOUT_THEME_MENULIST) {
+            vector<float> tacc;
+            pt_menulist_arrow(t, b, c, (int)qx0, (int)qy0, (int)qx1, (int)qy1, &tacc);
+        }
     }
 }
 

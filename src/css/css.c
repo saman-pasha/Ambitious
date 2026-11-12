@@ -218,6 +218,8 @@ static const char css_ua_sheet[] =
     "input[type=range i] { margin: 2px; padding: 0; border: 0; color: #9d968e }\n"
     "input[type=color i] { width: 50px; height: 27px; padding: 1px 2px; border: 1px solid ButtonBorder; box-sizing: border-box; background-color: ButtonFace }\n"
     "input[type=file i], input[type=image i] { padding: 0; border: 0; background-color: transparent }\n"
+    "progress { display: inline-block; box-sizing: border-box; width: 10em; height: 1em; vertical-align: -0.2em; appearance: auto }\n"
+    "meter { display: inline-block; box-sizing: border-box; width: 5em; height: 1em; vertical-align: -0.2em; appearance: auto }\n"
     /* a disabled control's colours, as Chromium's sheet gives them (measured in both schemes) */
     "input:disabled, textarea:disabled { color: light-dark(#545454, #aaaaaa); background-color: light-dark(rgba(239, 239, 239, 0.3), "
     "rgba(59, 59, 59, 0.3)); border-color: rgba(118, 118, 118, 0.3) }\n"

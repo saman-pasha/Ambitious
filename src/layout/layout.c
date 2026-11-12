@@ -592,7 +592,8 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->styled_bg = (uint8_t)(lay_author_won(st, c0 + CSS_PROP_BACKGROUND_COLOR) || lay_author_won(st, c0 + CSS_PROP_BACKGROUND_IMAGE));
     for (int k = 0; k < 4; k++)
         if (lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_WIDTH + k) || lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_STYLE + k) ||
-            lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_COLOR + k)) e->styled_border = 1;
+            lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_COLOR + k) || lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_LEFT_RADIUS + k))
+            e->styled_border = 1;     /* a radius too: Chromium's author border (measured: a radius of 0 drops the look) */
     e->styled_shadow = (uint8_t)lay_author_won(st, c0 + CSS_PROP_BOX_SHADOW);
     lay_word_of(st, c0 + CSS_PROP_OBJECT_FIT, w);
     e->ofit = (uint8_t)(lay_w(w, "contain") ? 1 : lay_w(w, "cover") ? 2 : lay_w(w, "none") ? 3 : lay_w(w, "scale-down") ? 4 : 0);
@@ -731,6 +732,7 @@ static int lay_is_svg(const dom_document *d, uint32_t x) {
 static int lay_replaced(const dom_document *d, uint32_t x) {
     return lay_is_named(d, x, "img") || lay_is_named(d, x, "input") || lay_is_named(d, x, "textarea") ||
            lay_is_named(d, x, "select") || lay_is_named(d, x, "iframe") || lay_is_named(d, x, "video") ||
+           lay_is_named(d, x, "progress") || lay_is_named(d, x, "meter") ||
            lay_is_named(d, x, "canvas") || lay_is_named(d, x, "embed") || lay_is_named(d, x, "object") ||
            lay_is_svg(d, x);
 }
@@ -1294,12 +1296,14 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             dh = (double)rows * s->lh;
         } else if (lay_is_named(d, el, "select")) {
             /* a drop-down: its widest option's label ceiled, 4px before it and the arrow's 16 after; a line and 2px
-               high. A list box: the widest label and 4px; its rows, a line and 2px each */
+               high (of appearance none, the label and the line alone: no theme's padding, measured). A list box: the
+               widest label and 4px; its rows, a line and 2px each */
             double widest = 0;
             vector<char> shown;
             long rows = 1;
             /* its text a line of the font's ascent and descent, no line gap (Chromium's drop-down) */
             if (lay_select(LARGS, el, s, &widest, &shown, &rows)) { dw = widest + 4; dh = (double)rows * (s->asc + s->desc + 2); }
+            else if (LAY_X(el).app_none) { dw = ceil(widest - 1e-6); dh = s->asc + s->desc; }
             else { dw = ceil(widest - 1e-6) + 20; dh = s->asc + s->desc + 2; }
         }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
@@ -2145,6 +2149,10 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         return;
     }
     int input = lay_is_named(d, el, "input"), textarea = lay_is_named(d, el, "textarea"), select = lay_is_named(d, el, "select");
+    if (lay_is_named(d, el, "progress") || lay_is_named(d, el, "meter")) {
+        lay_theme(LARGS, b, el);   /* a bar the theme draws; its children, the fallback, not drawn */
+        return;
+    }
     if (!input && !textarea && !select) return;
     /* a control's text is clipped to it, as Chromium's inner editor clips its own */
     t->box[b].clip = 1;
@@ -2196,7 +2204,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
             }
             return;
         }
-        x = 4;
+        x = LAY_X(el).app_none ? 0 : 4;     /* of appearance none, no theme's padding */
     } else if (input && kind != LI_TEXT && kind != LI_PASSWORD) {
         return;
     } else {
@@ -2288,29 +2296,72 @@ static int lay_disabled(const dom_document *d, uint32_t el) {
     return 0;
 }
 
+/* an attribute as a number by HTML's rules for parsing floating-point number values (2.3.4.3), as Chromium reads a
+   progress's or a meter's (measured on 22 values): ASCII whitespace skipped, a sign, digits, a fraction, an exponent,
+   the rest ignored ("0.5x" is 0.5, "5." 5, "0.5e" 0.5); dflt when it is absent or an error (no digits, infinite) */
+static double lay_attr_num(const dom_document *d, uint32_t el, const char *name, double dflt) {
+    uint32_t a = lay_attr(d, el, name);
+    if (!a) return dflt;
+    const char *s = text_ptr(d, d->attr[a].value);
+    size_t n = d->attr[a].value.len, i = 0, o = 0;
+    char buf[96];
+    while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\f' || s[i] == '\r')) i++;
+    if (i < n && (s[i] == '-' || s[i] == '+')) { if (s[i] == '-') buf[o++] = '-'; i++; }
+    int digits = 0;
+    while (i < n && s[i] >= '0' && s[i] <= '9' && o < 80) { buf[o++] = s[i++]; digits = 1; }
+    if (i + 1 < n && s[i] == '.' && s[i + 1] >= '0' && s[i + 1] <= '9') {
+        buf[o++] = s[i++];
+        while (i < n && s[i] >= '0' && s[i] <= '9' && o < 88) { buf[o++] = s[i++]; digits = 1; }
+    }
+    if (!digits) return dflt;
+    size_t e = i, eo = o;
+    if (e < n && (s[e] == 'e' || s[e] == 'E')) {
+        buf[eo++] = 'e';
+        e++;
+        if (e < n && (s[e] == '-' || s[e] == '+')) buf[eo++] = s[e++];
+        if (e < n && s[e] >= '0' && s[e] <= '9') {
+            while (e < n && s[e] >= '0' && s[e] <= '9' && eo < 95) buf[eo++] = s[e++];
+            o = eo;
+        }
+    }
+    buf[o] = 0;
+    double v = strtod(buf, 0);
+    if (!isfinite(v)) return dflt;
+    return v ? v : 0;
+}
+
 static void lay_theme(LCTX, uint32_t b, uint32_t el) {
     lay_ext e = LAY_X(el);
     layout_theme th = LAYOUT_THEME_CSS;
-    int styled = e.styled_bg || e.styled_border;
+    int styled = e.styled_bg || e.styled_border, css_look = 0;
     if (lay_is_named(d, el, "button")) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_BUTTON;
     else if (lay_is_named(d, el, "textarea")) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_AREA;
     else if (lay_is_named(d, el, "select")) {
         int multiple = lay_attr(d, el, "multiple") != 0;
         long size = lay_attr_int(d, el, "size", multiple ? 4 : 1);
-        th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : multiple || size > 1 ? LAYOUT_THEME_LISTBOX : LAYOUT_THEME_MENULIST;
+        th = multiple || size > 1 ? (styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_LISTBOX) : LAYOUT_THEME_MENULIST;
+        css_look = th == LAYOUT_THEME_MENULIST && (styled || e.styled_shadow);   /* menulist-button: its arrow kept */
     } else if (lay_is_named(d, el, "input")) {
         int k = lay_input_kind(d, el);
         if (k == LI_CHECK) th = LAYOUT_THEME_CHECKBOX;
         else if (k == LI_RADIO) th = LAYOUT_THEME_RADIO;
         else if (k == LI_RANGE) th = LAYOUT_THEME_RANGE;
-        else if (k == LI_COLOR) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_COLORWELL;
+        else if (k == LI_COLOR) { th = LAYOUT_THEME_COLORWELL; css_look = styled; }     /* its swatch kept */
         else if (k == LI_BUTTON || k == LI_SUBMIT || k == LI_RESET) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_BUTTON;
         else if (k == LI_TEXT || k == LI_PASSWORD || k == LI_DATE) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_FIELD;
     }
-    if (e.app_none) th = LAYOUT_THEME_CSS;
+    /* a progress bar or a meter styled (or of appearance none) keeps its kind: its shadow tree's CSS look drawn (4) */
+    int gauge = 0;
+    if (lay_is_named(d, el, "progress")) { th = LAYOUT_THEME_PROGRESS; gauge = 1; }
+    else if (lay_is_named(d, el, "meter")) { th = LAYOUT_THEME_METER; gauge = 1; }
+    /* of appearance none: a gauge's bar and a colour well's swatch, their shadow trees', still drawn */
+    if (gauge || th == LAYOUT_THEME_COLORWELL) css_look = css_look || styled || e.app_none;
+    else if (e.app_none) th = LAYOUT_THEME_CSS;
     t->box[b].theme = th;
     t->box[b].checked = lay_attr(d, el, "checked") != 0;
-    t->box[b].tstate = (uint8_t)(th != LAYOUT_THEME_CSS && lay_disabled(d, el));
+    t->box[b].tstate = (uint8_t)(th != LAYOUT_THEME_CSS && !gauge && lay_disabled(d, el));
+    if (th != LAYOUT_THEME_CSS && css_look) t->box[b].tstate |= 4;
+    if (gauge && e.rtl) t->box[b].tstate |= 32;
     /* the scheme it is used in: its color-scheme's colour, the dark Canvas (#121212) */
     if (th != LAYOUT_THEME_CSS && st->cval[e.c0 + CSS_PROP_COLOR_SCHEME].color == 0x121212ffu) t->box[b].tstate |= 2;
     if (th == LAYOUT_THEME_RANGE) {
@@ -2333,6 +2384,39 @@ static void lay_theme(LCTX, uint32_t b, uint32_t el) {
         lay_style s;
         lay_style_of(LARGS, el, &s);
         t->box[b].swatch = s.color;     /* its arrow's colour: its text's */
+    }
+    if (th == LAYOUT_THEME_PROGRESS) {
+        /* its value of its max (HTML 4.10.13: max 1 unless above 0, the value 0 to max); without a value attribute,
+           indeterminate (-1); with one that is no number, 0 (Blink's HTMLProgressElement::position) */
+        double mx = lay_attr_num(d, el, "max", 1), v = lay_attr_num(d, el, "value", 0);
+        if (!(mx > 0)) mx = 1;
+        if (v < 0) v = 0;
+        if (v > mx) v = mx;
+        t->box[b].fraction = lay_attr(d, el, "value") ? v / mx : -1;
+    }
+    if (th == LAYOUT_THEME_METER) {
+        /* HTML 4.10.14's values, each held to the ones before it, and the region the value is in as Blink's
+           HTMLMeterElement::GetGaugeRegion tells it: tstate's 8 the suboptimal one, 16 the even less good */
+        double mn = lay_attr_num(d, el, "min", 0), mx = lay_attr_num(d, el, "max", mn > 1 ? mn : 1);
+        if (mx < mn) mx = mn;
+        double v = lay_attr_num(d, el, "value", 0);
+        if (v < mn) v = mn;
+        if (v > mx) v = mx;
+        double lo = lay_attr_num(d, el, "low", mn);
+        if (lo < mn) lo = mn;
+        if (lo > mx) lo = mx;
+        double hi = lay_attr_num(d, el, "high", mx);
+        if (hi < lo) hi = lo;
+        if (hi > mx) hi = mx;
+        double op = lay_attr_num(d, el, "optimum", (mn + mx) / 2);
+        if (op < mn) op = mn;
+        if (op > mx) op = mx;
+        int region;   /* 0 optimum, 1 suboptimal, 2 even less good */
+        if (op < lo) region = v <= lo ? 0 : v <= hi ? 1 : 2;
+        else if (hi < op) region = hi <= v ? 0 : lo <= v ? 1 : 2;
+        else region = lo <= v && v <= hi ? 0 : 1;
+        t->box[b].fraction = mx > mn ? (v - mn) / (mx - mn) : 0;
+        t->box[b].tstate |= (uint8_t)(region == 1 ? 8 : region == 2 ? 16 : 0);
     }
     if (th == LAYOUT_THEME_COLORWELL) {
         uint32_t a = lay_attr(d, el, "value");

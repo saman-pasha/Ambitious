@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Progress bars and meters</title>
+<style>body { margin: 8px; } div { margin: 0 0 6px; }</style></head>
+<body>
+<div id="l1">a <progress id="p1" value="0">zero</progress> b <progress id="p2" value="0.3">30%</progress> c</div>
+<div><progress id="p3" value="50" max="100"></progress> <progress id="p4" value="100" max="100"></progress> <progress id="p5" value="7" max="5"></progress></div>
+<div><progress id="p6" value="0.5" max="0"></progress> <progress id="p7" value="-3"></progress> <progress id="p8" value="0.75" style="width: 300px; height: 24px"></progress></div>
+<div id="l2">x <meter id="m1" value="0.5">half</meter> y <meter id="m2" value="0.9" low="0.2" high="0.8"></meter> z</div>
+<div><meter id="m3" value="0.1" low="0.3" high="0.7" optimum="0.9"></meter> <meter id="m4" value="0.5" low="0.3" high="0.7" optimum="0.9"></meter> <meter id="m5" value="0.8" low="0.3" high="0.7" optimum="0.9"></meter></div>
+<div><meter id="m6" value="2" min="0" max="10" low="3" high="7" optimum="1"></meter> <meter id="m7" value="5" min="0" max="10" low="3" high="7" optimum="1"></meter> <meter id="m8" value="9" min="0" max="10" low="3" high="7" optimum="1"></meter></div>
+<div><meter id="m9" value="40" min="20" max="60"></meter> <meter id="m10" value="0"></meter> <meter id="m11" value="1"></meter> <meter id="m12" value="0.6" style="width: 200px; height: 30px"></meter></div>
+<div style="font-size: 24px"><progress id="p9" value="0.4"></progress> <meter id="m13" value="0.4"></meter></div>
+<div><progress id="p10" value="0.3" style="background: yellow"></progress> <progress id="p11" value="0.3" style="border: 2px solid blue; padding: 2px"></progress> <progress id="p12" style="background: yellow"></progress> <progress id="p13" value="0.5" style="border-radius: 8px"></progress></div>
+<div><meter id="m14" value="0.5" style="background: yellow"></meter> <meter id="m15" value="0.9" low="0.2" high="0.8" style="border-radius: 4px"></meter> <meter id="m16" value="0.1" low="0.3" high="0.7" optimum="0.9" style="appearance: none"></meter> <meter id="m17" value="0.5" style="padding: 3px; border: 2px solid blue; width: 100px; height: 30px"></meter></div>
+<div style="color-scheme: dark"><progress id="p14" value="0.5"></progress> <meter id="m18" value="0.5"></meter> <meter id="m19" value="0.9" low="0.2" high="0.8"></meter> <meter id="m20" value="0.1" low="0.3" high="0.7" optimum="0.9"></meter></div>
+<div dir="rtl" style="text-align: left"><progress id="p15" value="0.3"></progress> <meter id="m21" value="0.3"></meter> <progress id="p16" value="0.3" style="background: yellow"></progress> <meter id="m22" value="0.3" style="background: yellow"></meter></div>
+<div><progress id="p17" value="0.5" style="padding: 3px 10px"></progress> <meter id="m23" value="0.5" style="padding: 4px 6px; height: 30px"></meter> <progress id="p20" value="0.01"></progress> <meter id="m27" value="0.7" style="width: 33.5px; height: 13px"></meter></div>
+<div><progress id="p18" value=""></progress> <progress id="p19" value=" 0.5"></progress> <meter id="m24" value="0.5x"></meter> <meter id="m25" value="+0.5"></meter> <meter id="m26" min="20" value="25"></meter></div>
+<div><button id="r1" style="border-radius: 6px">OK</button> <input id="r2" value="text" style="border-radius: 6px"> <select id="r3" style="border-radius: 6px"><option>one</option></select> <input id="r4" type="submit" value="Go" style="border-radius: 0"> <input id="r5" type="color" style="border-radius: 6px"></div>
+<div><textarea id="r6" rows="2" style="border-radius: 6px">area</textarea> <button id="r7" style="box-shadow: 0 0 0 2px red">Shadow</button></div>
+<div><input id="n1" type="color" style="appearance: none" value="#ff0000"> <select id="n2" style="appearance: none"><option>one</option></select> <progress id="n3" style="appearance: none" value="0.3"></progress> <meter id="n4" style="appearance: none" value="0.3"></meter> <select id="n5" style="background: #ffe"><option>styled</option></select></div>
+</body></html>
