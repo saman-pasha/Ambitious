@@ -2175,6 +2175,33 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
     }
 }
 
+/* Horspool over the literal prefix pre[0, np) in str[0, n) from i: the first place it is
+   at, else n + 1. The place's last code unit's skip (two a turn), 0 where it may be the
+   prefix's last character, the place then compared; q the place's last unit */
+static uint32_t re_find_prefix(const uint16_t *str, uint32_t n, uint32_t i, const uint32_t *pre, uint32_t np, int icase) {
+    const uint32_t *skips = pre + np;
+    uint32_t shift = skips[256], q = i + np - 1;
+    while (q < n) {
+        uint32_t skip = skips[str[q] & 0xFF];
+        if (skip) {
+            q += skip;
+            if (q >= n) break;
+            skip = skips[str[q] & 0xFF];
+            if (skip) { q += skip; continue; }
+        }
+        uint32_t k = 0, at = q + 1 - np;
+        while (k < np) {
+            uint32_t d = str[at + k];
+            uint32_t fd = icase && d >= 'A' && d <= 'Z' ? d + 32 : d;
+            if (fd != pre[k]) break;
+            k++;
+        }
+        if (k >= np) return at;
+        q += shift;
+    }
+    return n + 1;
+}
+
 /* the regex re run on the string s from index start: 1 a match (the groups' slots in
    vm->re_caps, 2 a group, RE_INF unset), 0 none, -1 the step budget spent (vm->throwing 2) */
 int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start) {
@@ -2196,24 +2223,8 @@ int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start) {
         int icase = (r.flags & RF_I) != 0;
         for (uint32_t i = start; i <= n; i++) {
             if (r.npre && !sticky) {
-                /* Horspool over the literal prefix: the place's last code unit's skip, 0
-                   where it may be the prefix's last character, the place then compared */
-                uint32_t np = r.npre, shift = pre[np + 256];
-                int found_at = 0;
-                while (i + np <= n) {
-                    uint32_t skip = pre[np + (str[i + np - 1] & 0xFF)];
-                    if (skip) { i += skip; continue; }
-                    uint32_t k = 0;
-                    while (k < np) {
-                        uint32_t d = str[i + k];
-                        uint32_t fd = icase && d >= 'A' && d <= 'Z' ? d + 32 : d;
-                        if (fd != pre[k]) break;
-                        k++;
-                    }
-                    if (k >= np) { found_at = 1; break; }
-                    i += shift;
-                }
-                if (!found_at) break;
+                i = re_find_prefix(str, n, i, pre, r.npre, icase);
+                if (i > n) break;
             } else if (r.first && !sticky) {
                 uint32_t ch = r.first - 1;
                 while (i < n && str[i] != ch) i++;
