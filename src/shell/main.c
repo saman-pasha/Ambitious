@@ -237,10 +237,13 @@ static int keep(const session *s, const char *cmd, const char *a1, const char *a
     /* the keeper's sandbox: the reasoner's, writing in the profile's directory alone (a
        private session's keeper writes nowhere: its store is memory). Its address space
        is its own, AMB_KEEPER_MEM or 64 GiB: ZiguratIP maps its store a gigabyte at a time,
-       and a store whose map is refused opens empty, then is written back empty */
+       and a store whose map is refused opens empty, then is written back empty. Its
+       files may grow as large: a keeper stopped by the size of its store's file would
+       stop in the middle of writing it */
     amb_sandbox kb = s->sb;
     const char *km = getenv("AMB_KEEPER_MEM");
     kb.mem = km && *km ? strtoull(km, 0, 10) : 64ull << 30;
+    kb.fsize = kb.mem;
     if (!s->private_mode) {
         mkdir(s->profile, 0700);
         snprintf(kb.dir, sizeof kb.dir, "%s", s->profile);
