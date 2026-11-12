@@ -676,7 +676,13 @@ be built side by side and merged without touching each other's.
     writing modes and bidirectional text; hyphenation; kerning.
   - Paint: border styles, background images, box and text shadows, opacity,
     transforms, clipping; outer and inset shadows, elliptical and
-    percentage radii, `background-clip` and `background-origin`; dashed and
+    percentage radii, `background-clip` and `background-origin`; `filter`
+    and `backdrop-filter` (Blink's colour matrices and transfer functions in
+    sRGB, blur, drop-shadow, a backdrop's blur mirrored at its edges); 3D
+    transforms (4x4 matrices, a parent's perspective, each plane drawn
+    through its homography, backface-visibility as Chromium tests it, the
+    planes of a preserve-3d space drawn far to near) and the individual
+    transforms; dashed and
     dotted borders laid round rounded corners as Blink lays them (its dash
     ratios, its path's start, Skia's arc lengths), and the corners where
     unlike sides meet split along their diagonals (Blink's miters), each

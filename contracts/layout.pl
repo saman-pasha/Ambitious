@@ -67,7 +67,7 @@ layout_contract(record(box, [
     field(clip,         u8),                    % overflow: 1 its content clipped to its padding box (hidden, clip, scroll, auto)
     field(dx, f64), field(dy, f64),             % a relatively positioned box's offset, in its position already
     %% what paint reads of its style: the corners' radii (horizontal, then vertical), its
-    %% opacity, its shadows, backgrounds, transform and outline as CSS computed them
+    %% opacity, its shadows, backgrounds, transform, filters and outline as CSS computed them
     field(rtl, f64), field(rtr, f64), field(rbr, f64), field(rbl, f64),
     field(rtlv, f64), field(rtrv, f64), field(rbrv, f64), field(rblv, f64),
     field(opacity,      f64),
@@ -77,6 +77,10 @@ layout_contract(record(box, [
     field(bg_pos,       span(text)), field(bg_size, span(text)), field(bg_repeat, span(text)),
     field(bg_clip,      span(text)), field(bg_origin, span(text)),   % background-clip, -origin: a box a layer
     field(transform,    span(text)), field(origin, span(text)),
+    field(filter,       span(text)), field(backdrop, span(text)),   % filter, backdrop-filter: their functions
+    field(translate, span(text)), field(rotate, span(text)), field(scale, span(text)),  % the individual transforms
+    field(persp, span(text)), field(porigin, span(text)),       % perspective, perspective-origin: what its children are seen through
+    field(p3d, u8), field(backface, u8),        % transform-style: preserve-3d; backface-visibility: hidden
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64)   % outline: width, style, colour, offset
 ])).
 layout_contract(record(line, [

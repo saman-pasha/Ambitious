@@ -41,6 +41,9 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     content, counter_reset, counter_increment, quotes,
     color_scheme,                      % its colour field the Canvas colour of the scheme it is used in
     background_clip, background_origin,
+    filter, backdrop_filter,           % their functions as text (lengths px, colours computed)
+    perspective, perspective_origin, transform_style, backface_visibility,
+    translate, rotate, scale,          % the individual transforms, before transform's functions
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

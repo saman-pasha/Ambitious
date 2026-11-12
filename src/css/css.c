@@ -857,6 +857,15 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "color-scheme", 1, G_TEXT, 0, "normal", "normal" },
     { "background-clip", 0, G_TEXT, 0, 0, "border-box" },
     { "background-origin", 0, G_TEXT, 0, 0, "padding-box" },
+    { "filter", 0, G_TEXT, 0, "none", "none" },
+    { "backdrop-filter", 0, G_TEXT, 0, "none", "none" },
+    { "perspective", 0, G_TEXT, 0, "none", "none" },
+    { "perspective-origin", 0, G_TEXT, 0, 0, "50% 50%" },
+    { "transform-style", 0, G_KW, 0, "flat preserve-3d", "flat" },
+    { "backface-visibility", 0, G_KW, 0, "visible hidden", "visible" },
+    { "translate", 0, G_TEXT, 0, "none", "none" },
+    { "rotate", 0, G_TEXT, 0, "none", "none" },
+    { "scale", 0, G_TEXT, 0, "none", "none" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1173,9 +1182,10 @@ static int css_is_list(int kind, const char *s, size_t n) {
     return 1;
 }
 
-/* transform's functions, each with the count of arguments it takes */
+/* transform's functions, 2D and 3D */
 static int css_is_transform(const char *s, size_t n) {
-    static const char *const fns = "translate translatex translatey scale scalex scaley rotate skew skewx skewy matrix";
+    static const char *const fns = "translate translatex translatey translatez translate3d scale scalex scaley scalez scale3d rotate rotatex "
+                                   "rotatey rotatez rotate3d skew skewx skewy matrix matrix3d perspective";
     size_t i = 0, st, ln;
     int any = 0;
     while (css_next_part(s, n, &i, &st, &ln)) {
@@ -1190,6 +1200,96 @@ static int css_is_transform(const char *s, size_t n) {
         any = 1;
     }
     return any;
+}
+
+/* an angle: a number with deg, grad, rad or turn, or zero */
+static int css_is_angle(const char *s, size_t n) {
+    double x;
+    size_t used = css_number(s, n, &x);
+    if (!used) return 0;
+    if (used == n) return x == 0;
+    const char *u = s + used;
+    size_t un = n - used;
+    return css_eq_ci(u, un, "deg") || css_eq_ci(u, un, "grad") || css_eq_ci(u, un, "rad") || css_eq_ci(u, un, "turn");
+}
+
+/* filter's and backdrop-filter's functions (Filter Effects 1, 5.1), one or more in turn:
+   blur() a length not negative; brightness(), contrast(), grayscale(), invert(),
+   opacity(), saturate() and sepia() a number or a percentage not negative; hue-rotate()
+   an angle; each of them empty for its default; drop-shadow() two or three lengths (its
+   blur, the third, not negative) and a colour before or after them; url() an SVG
+   filter's. Their arguments are not separated by commas */
+static int css_is_filter(const char *s, size_t n) {
+    static const char *const amounts = "brightness contrast grayscale invert opacity saturate sepia";
+    size_t i = 0, st, ln;
+    int any = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *p = s + st;
+        size_t f = 0;
+        while (f < ln && css_namechar(p[f])) f++;
+        if (f == 0 || f >= ln || p[f] != '(' || p[ln - 1] != ')' || f >= 16) return 0;
+        char w[16];
+        for (size_t k = 0; k < f; k++) w[k] = css_lower(p[k]);
+        w[f] = 0;
+        any = 1;
+        if (strcmp(w, "url") == 0) continue;
+        const char *a = p + f + 1;
+        size_t an = ln - f - 2;
+        if (css_comma(a, an, 0) < an) return 0;
+        if (strcmp(w, "drop-shadow") == 0) {
+            if (!css_is_list_item(2, a, an)) return 0;
+            /* its blur: the third length */
+            size_t j = 0, xs, xl;
+            int lengths = 0;
+            while (css_next_part(a, an, &j, &xs, &xl)) {
+                if (css_is_color(a + xs, xl)) continue;
+                if (++lengths == 3 && !css_is_length(a + xs, xl, 0, 0)) return 0;
+            }
+            continue;
+        }
+        size_t j = 0, xs, xl;
+        if (!css_next_part(a, an, &j, &xs, &xl)) {
+            if (css_word_in(w, amounts) || strcmp(w, "blur") == 0 || strcmp(w, "hue-rotate") == 0) continue;
+            return 0;
+        }
+        const char *x = a + xs;
+        size_t j2 = j, ys, yl;
+        if (css_next_part(a, an, &j2, &ys, &yl)) return 0;
+        if (strcmp(w, "blur") == 0) { if (!css_is_length(x, xl, 0, 0)) return 0; continue; }
+        if (strcmp(w, "hue-rotate") == 0) { if (!css_is_angle(x, xl)) return 0; continue; }
+        if (!css_word_in(w, amounts)) return 0;
+        double v;
+        size_t used = css_number(x, xl, &v);
+        if (!used || v < 0 || !(used == xl || (used + 1 == xl && x[used] == '%'))) return 0;
+    }
+    return any;
+}
+
+/* the individual transforms (CSS Transforms 2, 5): translate's one to three lengths (the
+   third not a percentage); rotate's angle, about an axis named (x, y or z) or given by
+   three numbers; scale's one to three numbers or percentages */
+static int css_is_indiv(css_prop p, const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int parts = 0, nums = 0, angles = 0, axis = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        const char *q = s + st;
+        parts++;
+        if (p == CSS_PROP_TRANSLATE) {
+            if (parts > 3 || !css_is_length(q, ln, parts < 3, 1)) return 0;
+            continue;
+        }
+        double x;
+        size_t used = css_number(q, ln, &x);
+        if (p == CSS_PROP_SCALE) {
+            if (parts > 3 || !used || !(used == ln || (used + 1 == ln && q[used] == '%'))) return 0;
+            continue;
+        }
+        if (css_eq_ci(q, ln, "x") || css_eq_ci(q, ln, "y") || css_eq_ci(q, ln, "z")) { if (axis++ || nums) return 0; continue; }
+        if (used == ln) { if (axis || ++nums > 3) return 0; continue; }
+        if (!css_is_angle(q, ln) || angles++) return 0;
+    }
+    if (p == CSS_PROP_ROTATE) return angles == 1 && (nums == 0 || nums == 3);
+    return parts >= 1;
 }
 
 /* content: strings, attr(), counter(), counters(), the quotes' keywords, url() */
@@ -1262,10 +1362,20 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_BACKGROUND_REPEAT: return css_is_list(5, s, n);
     case CSS_PROP_BACKGROUND_ORIGIN: return css_is_list(7, s, n);
     case CSS_PROP_BACKGROUND_CLIP: return css_is_list(8, s, n);
+    case CSS_PROP_FILTER:
+    case CSS_PROP_BACKDROP_FILTER: return css_is_filter(s, n);
+    case CSS_PROP_PERSPECTIVE: return css_is_length(s, n, 0, 0);
+    case CSS_PROP_TRANSLATE:
+    case CSS_PROP_ROTATE:
+    case CSS_PROP_SCALE: return css_is_indiv(p, s, n);
     case CSS_PROP_BOX_SHADOW: return css_is_list(1, s, n);
     case CSS_PROP_TEXT_SHADOW: return css_is_list(2, s, n);
     case CSS_PROP_TRANSFORM: return css_is_transform(s, n);
     case CSS_PROP_TRANSFORM_ORIGIN:
+    case CSS_PROP_PERSPECTIVE_ORIGIN:
+        if (p == CSS_PROP_PERSPECTIVE_ORIGIN && css_next_part(s, n, &i, &st, &ln) && css_next_part(s, n, &i, &st, &ln) &&
+            css_next_part(s, n, &i, &st, &ln)) return 0;
+        i = 0;
         while (css_next_part(s, n, &i, &st, &ln)) {
             parts++;
             const char *q = s + st;
@@ -3419,6 +3529,35 @@ static int css_absolutize(const char *t, size_t n, double em, double rem, uint32
     return changed;
 }
 
+/* a filter's drop-shadow()s without a colour given currentcolor, which css_text_computed
+   makes the element's colour, as Chromium computes them */
+static void css_filter_colours(css_style *s, css_val *v) {
+    vector<char> src, out;
+    append_range(src, text_ptr(s, v->tx), v->tx.len);
+    const char *t = data(src);
+    size_t n = len(src), i = 0, st, ln;
+    int changed = 0;
+    while (css_next_part(t, n, &i, &st, &ln)) {
+        if (len(out)) push_back(out, ' ');
+        const char *p = t + st;
+        if (css_is_fn(p, ln, "drop-shadow")) {
+            const char *a = p + 12;
+            size_t an = ln - 13, j = 0, xs, xl;
+            int coloured = 0;
+            while (css_next_part(a, an, &j, &xs, &xl)) if (css_is_color(a + xs, xl)) coloured = 1;
+            if (!coloured) {
+                append_range(out, "drop-shadow(currentcolor ", 25);
+                append_range(out, a, an);
+                push_back(out, ')');
+                changed = 1;
+                continue;
+            }
+        }
+        append_range(out, p, ln);
+    }
+    if (changed) v->tx = text_add(s, data(out), len(out));
+}
+
 /* a value kept as text made computed: its span, or a new one when it changed */
 static void css_text_computed(css_style *s, css_val *v, double em, double rem, uint32_t cur, int dark) {
     vector<char> src, out;
@@ -3537,8 +3676,10 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         return;
     }
     if (g == G_TEXT || g == G_RADIUS) {
-        if (v->unit == CSS_UNIT_TEXT) css_text_computed(s, v, fs, env->rem, color, cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK);
-        else if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
+        if (v->unit == CSS_UNIT_TEXT) {
+            if (p == CSS_PROP_FILTER || p == CSS_PROP_BACKDROP_FILTER) css_filter_colours(s, v);
+            css_text_computed(s, v, fs, env->rem, color, cur[CSS_PROP_COLOR_SCHEME].color == CSS_CANVAS_DARK);
+        } else if (v->unit == CSS_UNIT_EM) { v->unit = CSS_UNIT_PX; v->num *= fs; }
         else if (v->unit == CSS_UNIT_REM) { v->unit = CSS_UNIT_PX; v->num *= env->rem; }
         else if (v->unit == CSS_UNIT_NUMBER) v->unit = CSS_UNIT_PX;
         else if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, -1, color);

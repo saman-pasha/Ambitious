@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Transforms</title>
+<style>
+/* tests/pages/transforms.html: 3D transforms, each case in a cell of its own (the cell,
+   which has the id, is the region tests/integ/paintref.sh compares with Chromium's
+   screenshot, tools/bench/shot.js): the 3D functions, a parent's perspective and its
+   origin, backface-visibility, a 3D space kept by transform-style (a cube) and one
+   flattened, the individual transforms, a transform-origin with depth. No text */
+body { margin: 0; background: white }
+.cell { display: inline-block; width: 150px; height: 90px; padding: 25px; margin: 0; vertical-align: top; position: relative }
+.p { perspective: 400px }
+.box { width: 150px; height: 90px; box-sizing: border-box; background: linear-gradient(90deg, #e33 0 25%, #3b3 0 50%, #36e 0 75%, #fc3 0); border: 6px solid #222 }
+.cube { position: absolute; left: 75px; top: 45px; width: 50px; height: 50px; transform-style: preserve-3d; transform: rotateX(-25deg) rotateY(35deg) }
+.face { position: absolute; width: 50px; height: 50px; box-sizing: border-box; border: 3px solid #222 }
+</style>
+</head>
+<body>
+<div class="cell p" id=rotx><div class=box style="transform: rotateX(50deg)"></div></div><div class=cell id=fnpersp><div class=box style="transform: perspective(300px) rotateY(-45deg)"></div></div><div class="cell p" id=transz><div class=box style="width: 100px; height: 60px; margin: 15px 25px; transform: translateZ(80px)"></div></div><div class="cell p" id=rot3d><div class=box style="transform: rotate3d(1, 1, 0, 50deg)"></div></div>
+<div class=cell id=matrix3d><div class=box style="transform: matrix3d(0.9, 0.1, 0, 0.0008, -0.2, 0.8, 0, 0.001, 0, 0, 1, 0, 10, 5, 0, 1)"></div></div><div class=cell id=backface><div class=box style="position: absolute; left: 25px; top: 25px; background: #c3c"></div><div class=box style="position: absolute; left: 25px; top: 25px; transform: rotateY(180deg); backface-visibility: hidden"></div></div><div class=cell id=porigin style="perspective: 300px; perspective-origin: left top"><div class=box style="transform: rotateY(40deg)"></div></div><div class="cell p" id=cube><div class=cube><div class=face style="background: #e33; transform: translateZ(25px)"></div><div class=face style="background: #3b3; transform: rotateY(90deg) translateZ(25px)"></div><div class=face style="background: #36e; transform: rotateX(90deg) translateZ(25px)"></div><div class=face style="background: #fc3; transform: rotateY(180deg) translateZ(25px)"></div><div class=face style="background: #3cc; transform: rotateY(-90deg) translateZ(25px)"></div><div class=face style="background: #c3c; transform: rotateX(-90deg) translateZ(25px)"></div></div></div>
+<div class=cell id=individual><div class=box style="translate: 12px -8px; rotate: 15deg; scale: 0.8"></div></div><div class="cell p" id=rotatey><div class=box style="rotate: y 50deg"></div></div><div class="cell p" id=flat><div style="width: 150px; height: 90px; transform: rotateY(35deg)"><div class=box style="transform: translateZ(60px)"></div></div></div><div class="cell p" id=scalez><div class=box style="transform: rotateY(40deg) scaleZ(3) translateZ(20px)"></div></div>
+<div class="cell p" id=zorigin><div class=box style="transform-origin: 50% 50% -60px; transform: rotateY(40deg)"></div></div><div class="cell p" id=kept><div style="width: 150px; height: 90px; transform-style: preserve-3d; transform: rotateY(35deg)"><div class=box style="transform: translateZ(60px)"></div></div></div><div class="cell p" id=grouped><div style="width: 150px; height: 90px; transform-style: preserve-3d; opacity: 0.99; transform: rotateY(35deg)"><div class=box style="transform: translateZ(60px)"></div></div></div><div class="cell p" id=rotz3><div class=box style="transform: rotateX(25deg) rotateZ(20deg) translate3d(10px, 0, -40px)"></div></div>
+</body>
+</html>

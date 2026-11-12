@@ -213,7 +213,9 @@ typedef struct lay_ext {
        opacity, the cvals of the values kept as text (none: 0), the outline, the image */
     lay_len rad[4];
     double opacity, ow, ooffset;
-    uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres, bgclip, bgorigin;
+    uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres, bgclip, bgorigin, filter, backdrop;
+    uint32_t persp, porigin, translate, rotate, scale;
+    uint8_t p3d, backface;
     int paints;                         /* any of these other than its initial value */
 } lay_ext;
 
@@ -532,11 +534,12 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->ocolor = st->cval[c0 + CSS_PROP_OUTLINE_COLOR].color;
     e->ooffset = st->cval[c0 + CSS_PROP_OUTLINE_OFFSET].num;
     if (e->ow > 0) e->paints = 1;
-    static const int text_props[10] = { CSS_PROP_BOX_SHADOW, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
+    static const int text_props[17] = { CSS_PROP_BOX_SHADOW, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
                                         CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_TEXT_SHADOW,
-                                        CSS_PROP_BACKGROUND_CLIP, CSS_PROP_BACKGROUND_ORIGIN };
-    uint32_t got[10];
-    for (int k = 0; k < 10; k++) {
+                                        CSS_PROP_BACKGROUND_CLIP, CSS_PROP_BACKGROUND_ORIGIN, CSS_PROP_FILTER, CSS_PROP_BACKDROP_FILTER,
+                                        CSS_PROP_PERSPECTIVE, CSS_PROP_PERSPECTIVE_ORIGIN, CSS_PROP_TRANSLATE, CSS_PROP_ROTATE, CSS_PROP_SCALE };
+    uint32_t got[17];
+    for (int k = 0; k < 17; k++) {
         uint32_t c = c0 + (uint32_t)text_props[k];
         lay_word_of(st, c, w);
         int initial = st->cval[c].how == CSS_HOW_INITIAL || lay_w(w, "none");
@@ -552,7 +555,19 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->tshadow = got[7];
     e->bgclip = got[8];
     e->bgorigin = got[9];
-    if (e->shadows || e->bgimg || e->xform || e->tshadow || e->bgclip || e->bgorigin) e->paints = 1;
+    e->filter = got[10];
+    e->backdrop = got[11];
+    e->persp = got[12];
+    e->porigin = got[13];
+    e->translate = got[14];
+    e->rotate = got[15];
+    e->scale = got[16];
+    lay_word_of(st, c0 + CSS_PROP_TRANSFORM_STYLE, w);
+    e->p3d = lay_w(w, "preserve-3d");
+    lay_word_of(st, c0 + CSS_PROP_BACKFACE_VISIBILITY, w);
+    e->backface = lay_w(w, "hidden");
+    if (e->shadows || e->bgimg || e->xform || e->tshadow || e->bgclip || e->bgorigin || e->filter || e->backdrop || e->persp || e->translate ||
+        e->rotate || e->scale || e->p3d || e->backface) e->paints = 1;
 }
 
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
@@ -2851,7 +2866,7 @@ static void lay_radii(layout_tree *t) {
 }
 
 /* what paint reads of a box's style: its radii, opacity, shadows, backgrounds (the image
-   layout_run fetched), transform and outline */
+   layout_run fetched), transforms (3D ones' perspective and context), filters and outline */
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     lay_ext e = at(*xc, si);
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
@@ -2879,6 +2894,15 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].bg_origin = lay_kept(t, st, e.bgorigin);
     t->box[b].transform = lay_kept(t, st, e.xform);
     t->box[b].origin = lay_kept(t, st, e.xorigin);
+    t->box[b].filter = lay_kept(t, st, e.filter);
+    t->box[b].backdrop = lay_kept(t, st, e.backdrop);
+    t->box[b].persp = lay_kept(t, st, e.persp);
+    t->box[b].porigin = lay_kept(t, st, e.porigin);
+    t->box[b].translate = lay_kept(t, st, e.translate);
+    t->box[b].rotate = lay_kept(t, st, e.rotate);
+    t->box[b].scale = lay_kept(t, st, e.scale);
+    t->box[b].p3d = e.p3d;
+    t->box[b].backface = e.backface;
     if (e.bgres) t->box[b].bg_res = resource_handle(nt, e.bgres);
     t->box[b].ow = e.ow;
     t->box[b].ostyle = e.ostyle;

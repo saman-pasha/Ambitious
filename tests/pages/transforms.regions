@@ -1,0 +1,17 @@
+# tests/pages/transforms.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+rotx 0 0 200 140
+fnpersp 200 0 400 140
+transz 400 0 600 140
+rot3d 600 0 800 140
+matrix3d 0 140 200 280
+backface 200 140 400 280
+porigin 400 140 600 280
+cube 600 140 800 280
+individual 0 280 200 420
+rotatey 200 280 400 420
+flat 400 280 600 420
+scalez 600 280 800 420
+zorigin 0 420 200 560
+kept 200 420 400 560
+grouped 400 420 600 560
+rotz3 600 420 800 560

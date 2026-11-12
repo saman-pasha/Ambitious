@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Filters</title>
+<style>
+/* tests/pages/filters.html: filter and backdrop-filter, each case in a cell of its own (the
+   cell, which has the id, is the region tests/integ/paintref.sh compares with Chromium's
+   screenshot, tools/bench/shot.js: a blur and a shadow reach past their box). The colour
+   functions over four stripes of colour; blur and drop-shadow over shapes with edges and
+   holes; a chain; a filter under opacity and under a transform; the backdrop ones over
+   stripes behind a box half transparent. No text */
+body { margin: 0; background: white }
+.cell { display: inline-block; width: 150px; height: 90px; padding: 25px; margin: 0; vertical-align: top }
+.box { width: 150px; height: 90px; box-sizing: border-box }
+.stripes { background: linear-gradient(90deg, #e33 0 25%, #3b3 0 50%, #36e 0 75%, #fc3 0) }
+.back { background: repeating-linear-gradient(45deg, #222 0 10px, #fd4 10px 20px, #3ae 20px 30px); position: relative }
+.glass { position: absolute; left: 35px; top: 30px; width: 130px; height: 80px; background: rgba(255, 255, 255, 0.25); border-radius: 14px }
+</style>
+</head>
+<body>
+<div class=cell id=grayscale><div class="box stripes" style="filter: grayscale(1)"></div></div><div class=cell id=sepia><div class="box stripes" style="filter: sepia(0.8)"></div></div><div class=cell id=saturate><div class="box stripes" style="filter: saturate(3)"></div></div><div class=cell id=hue><div class="box stripes" style="filter: hue-rotate(120deg)"></div></div>
+<div class=cell id=invert><div class="box stripes" style="filter: invert(1)"></div></div><div class=cell id=brightness><div class="box stripes" style="filter: brightness(1.6)"></div></div><div class=cell id=contrast><div class="box stripes" style="filter: contrast(40%)"></div></div><div class=cell id=opacity><div class="box stripes" style="filter: opacity(0.5)"></div></div>
+<div class=cell id=blur><div class=box style="background: #36e; border: 10px solid #fc3; filter: blur(4px)"></div></div><div class=cell id=drop><div class=box style="background: #3b3; border-radius: 30px; filter: drop-shadow(6px 6px 4px rgba(0, 0, 0, 0.6))"></div></div><div class=cell id=ring><div class=box style="color: #c33; border: 10px solid #36e; border-radius: 45px; filter: drop-shadow(5px 5px 0)"></div></div><div class=cell id=chain><div class="box stripes" style="filter: grayscale(0.5) blur(2px) hue-rotate(90deg)"></div></div>
+<div class="cell back" id=backblur><div class=glass style="backdrop-filter: blur(6px)"></div></div><div class="cell back" id=backgray><div class=glass style="backdrop-filter: grayscale(1) brightness(1.3)"></div></div><div class=cell id=underop><div class="box stripes" style="opacity: 0.6; filter: hue-rotate(90deg)"></div></div><div class=cell id=turned><div class="box stripes" style="transform: rotate(10deg); filter: blur(3px)"></div></div>
+</body>
+</html>

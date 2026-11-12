@@ -899,13 +899,14 @@ static void pt_stops(const char *s, size_t n, size_t from, double len0, vector<p
     }
 }
 
-/* the colour at place t along the stops (premultiplied in; RGBA out) */
+/* the colour at place t along the stops (premultiplied in; RGBA out). At a stop's place
+   the stretch that starts there is taken, as Skia takes it: a hard stop's later colour */
 static uint32_t pt_stop_at(const vector<pt_stop> *sv, double t) {
     size_t m = len(*sv);
     pt_stop a = at(*sv, 0), b = a;
-    if (t <= a.pos) b = a;
+    if (t < a.pos) b = a;
     else if (t >= at(*sv, m - 1).pos) { a = at(*sv, m - 1); b = a; }
-    else for (size_t k = 1; k < m; k++) if (t <= at(*sv, k).pos) { a = at(*sv, k - 1); b = at(*sv, k); break; }
+    else for (size_t k = 1; k < m; k++) if (t < at(*sv, k).pos) { a = at(*sv, k - 1); b = at(*sv, k); break; }
     double f = b.pos > a.pos ? (t - a.pos) / (b.pos - a.pos) : 0;
     double al = a.a + (b.a - a.a) * f;
     if (al <= 0) return 0;
@@ -1074,8 +1075,9 @@ static void pt_tile_pos(const char *bp, size_t bn, double aw, double ah, double 
 
 /* ---- shadows: a shape's alpha, blurred ---- */
 
-/* three box blurs of a radius close to sigma's, across and down (a Gaussian's likeness) */
-static void pt_blur(vector<float> *m, int w, int h, double sigma) {
+/* three box blurs of a radius close to sigma's, across and down (a Gaussian's likeness),
+   of the w by h plane of m from off */
+static void pt_blur_at(vector<float> *m, size_t off, int w, int h, double sigma) {
     if (sigma < 0.5) return;
     int rr = (int)floor(sigma * 0.94 + 0.5);
     if (rr < 1) rr = 1;
@@ -1084,27 +1086,195 @@ static void pt_blur(vector<float> *m, int w, int h, double sigma) {
     for (int pass = 0; pass < 3; pass++) {
         for (int y = 0; y < h; y++) {
             double sum = 0;
-            for (int x = -rr; x <= rr; x++) if (x >= 0 && x < w) sum += at(*m, (size_t)y * w + x);
+            for (int x = -rr; x <= rr; x++) if (x >= 0 && x < w) sum += at(*m, off + (size_t)y * w + x);
             for (int x = 0; x < w; x++) {
                 tmp[(size_t)x] = (float)(sum / (2 * rr + 1));
                 int out = x - rr, in = x + rr + 1;
-                if (out >= 0) sum -= at(*m, (size_t)y * w + out);
-                if (in < w) sum += at(*m, (size_t)y * w + in);
+                if (out >= 0) sum -= at(*m, off + (size_t)y * w + out);
+                if (in < w) sum += at(*m, off + (size_t)y * w + in);
             }
-            for (int x = 0; x < w; x++) (*m)[(size_t)y * w + x] = at(tmp, (size_t)x);
+            for (int x = 0; x < w; x++) (*m)[off + (size_t)y * w + x] = at(tmp, (size_t)x);
         }
         for (int x = 0; x < w; x++) {
             double sum = 0;
-            for (int y = -rr; y <= rr; y++) if (y >= 0 && y < h) sum += at(*m, (size_t)y * w + x);
+            for (int y = -rr; y <= rr; y++) if (y >= 0 && y < h) sum += at(*m, off + (size_t)y * w + x);
             for (int y = 0; y < h; y++) {
                 tmp[(size_t)y] = (float)(sum / (2 * rr + 1));
                 int out = y - rr, in = y + rr + 1;
-                if (out >= 0) sum -= at(*m, (size_t)out * w + x);
-                if (in < h) sum += at(*m, (size_t)in * w + x);
+                if (out >= 0) sum -= at(*m, off + (size_t)out * w + x);
+                if (in < h) sum += at(*m, off + (size_t)in * w + x);
             }
-            for (int y = 0; y < h; y++) (*m)[(size_t)y * w + x] = at(tmp, (size_t)y);
+            for (int y = 0; y < h; y++) (*m)[off + (size_t)y * w + x] = at(tmp, (size_t)y);
         }
     }
+}
+static void pt_blur(vector<float> *m, int w, int h, double sigma) { pt_blur_at(m, 0, w, h, sigma); }
+
+/* ---- filters (Filter Effects 1): a drawing through filter's functions ---- */
+
+enum { PF_BLUR, PF_BRIGHTNESS, PF_CONTRAST, PF_GRAYSCALE, PF_HUE, PF_INVERT, PF_OPACITY, PF_SATURATE, PF_SEPIA, PF_DROP };
+/* a function: its kind; its amount (a number, a percentage's fraction; hue-rotate's
+   angle in degrees); a blur's deviation (a drop shadow's too); a shadow's offset and
+   colour */
+typedef struct pt_fop { int kind; double a, x, y, blur; uint32_t col; } pt_fop;
+
+static int pt_is_ci(const char *s, size_t n, const char *w) {
+    if (n != strlen(w)) return 0;
+    for (size_t i = 0; i < n; i++) if ((s[i] | 0x20) != w[i] && s[i] != w[i]) return 0;
+    return 1;
+}
+
+/* the functions of a filter's computed value s into ops, in turn; 0 when one names an SVG
+   filter by url(), which is not drawn (the whole value then ignored, as the standard
+   has one that names no filter) */
+static int pt_filter_ops(const char *s, size_t n, vector<pt_fop> *ops) {
+    size_t i = 0, pa, pl;
+    while (css_next_part(s, n, &i, &pa, &pl)) {
+        const char *fn = s + pa;
+        size_t open = 0;
+        while (open < pl && fn[open] != '(') open++;
+        if (open >= pl || fn[pl - 1] != ')') continue;
+        const char *args = fn + open + 1;
+        size_t al = pl - open - 2, j = 0, xa, xl;
+        pt_fop op;
+        memset(&op, 0, sizeof op);
+        op.a = 1;
+        if (pt_is_ci(fn, open, "url")) return 0;
+        if (pt_is_ci(fn, open, "drop-shadow")) {
+            op.kind = PF_DROP;
+            op.col = 0x000000ff;
+            double v[3] = { 0, 0, 0 };
+            int nv = 0;
+            while (css_next_part(args, al, &j, &xa, &xl)) {
+                uint32_t cc;
+                double x;
+                if (nv < 3 && css_length_eval(args + xa, xl, 0, &x)) v[nv++] = x;
+                else if (css_color_parse(args + xa, xl, &cc)) op.col = cc;
+            }
+            op.x = v[0];
+            op.y = v[1];
+            op.blur = v[2] > 0 ? v[2] : 0;
+            push_back(*ops, op);
+            continue;
+        }
+        /* the one argument: a number, a percentage, a length (px) or an angle */
+        int have = css_next_part(args, al, &j, &xa, &xl);
+        double x = have ? strtod(args + xa, 0) : 0;
+        if (have && xl > 0) {
+            const char *t0 = args + xa;
+            if (t0[xl - 1] == '%') x /= 100;
+            else if (xl > 4 && pt_is_ci(t0 + xl - 4, 4, "turn")) x *= 360;
+            else if (xl > 4 && pt_is_ci(t0 + xl - 4, 4, "grad")) x *= 0.9;
+            else if (xl > 3 && pt_is_ci(t0 + xl - 3, 3, "rad")) x *= 180 / M_PI;
+        }
+        if (pt_is_ci(fn, open, "blur")) { op.kind = PF_BLUR; op.blur = have ? x : 0; }
+        else if (pt_is_ci(fn, open, "hue-rotate")) { op.kind = PF_HUE; op.a = have ? x : 0; }
+        else {
+            static const char *const names[7] = { "brightness", "contrast", "grayscale", "invert", "opacity", "saturate", "sepia" };
+            static const int kinds[7] = { PF_BRIGHTNESS, PF_CONTRAST, PF_GRAYSCALE, PF_INVERT, PF_OPACITY, PF_SATURATE, PF_SEPIA };
+            int k = 0;
+            while (k < 7 && !pt_is_ci(fn, open, names[k])) k++;
+            if (k == 7) continue;
+            op.kind = kinds[k];
+            op.a = have ? x : 1;
+            /* the four whose amount is a share, at most all of it */
+            if ((op.kind == PF_GRAYSCALE || op.kind == PF_INVERT || op.kind == PF_OPACITY || op.kind == PF_SEPIA) && op.a > 1) op.a = 1;
+        }
+        push_back(*ops, op);
+    }
+    return 1;
+}
+
+/* the w by h pixels px (four planes: red, green, blue, alpha, the colours premultiplied,
+   each 0 to 1) through the functions ops in turn, in sRGB, as Chromium applies them: the
+   colour ones Blink's matrices and transfer functions on the colours unpremultiplied,
+   each clamped; blur() a Gaussian of its deviation; drop-shadow() the alpha moved by its
+   offset, blurred, in its colour, under the rest. A drop shadow's third length is its
+   blur's deviation (as the standard has it, and Chromium draws it: not half of it, as a
+   box-shadow's is) */
+static void pt_filter_apply(vector<float> *px, int w, int h, const vector<pt_fop> *ops) {
+    size_t np = (size_t)w * h;
+    for (size_t k = 0; k < len(*ops); k++) {
+        pt_fop op = at(*ops, k);
+        if (op.kind == PF_BLUR) {
+            for (size_t ch = 0; ch < 4; ch++) pt_blur_at(px, ch * np, w, h, op.blur);
+            continue;
+        }
+        if (op.kind == PF_DROP) {
+            vector<float> sh;
+            resize(&sh, np);
+            int dx = (int)floor(op.x + 0.5), dy = (int)floor(op.y + 0.5);
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    int sx = x - dx, sy = y - dy;
+                    sh[(size_t)y * w + x] = sx >= 0 && sy >= 0 && sx < w && sy < h ? at(*px, 3 * np + (size_t)sy * w + sx) : 0.0f;
+                }
+            pt_blur_at(&sh, 0, w, h, op.blur);
+            double ca = (op.col & 0xff) / 255.0, cr = (op.col >> 24) / 255.0, cg = (op.col >> 16 & 0xff) / 255.0, cb = (op.col >> 8 & 0xff) / 255.0;
+            for (size_t q = 0; q < np; q++) {
+                double s = at(sh, q) * ca, a = at(*px, 3 * np + q), under = s * (1 - a);
+                if (under <= 0) continue;
+                (*px)[q] = (float)(at(*px, q) + cr * under);
+                (*px)[np + q] = (float)(at(*px, np + q) + cg * under);
+                (*px)[2 * np + q] = (float)(at(*px, 2 * np + q) + cb * under);
+                (*px)[3 * np + q] = (float)(a + under);
+            }
+            continue;
+        }
+        if (op.kind == PF_OPACITY) {
+            for (size_t q = 0; q < 4 * np; q++) (*px)[q] = (float)(at(*px, q) * op.a);
+            continue;
+        }
+        /* a colour matrix, rows red, green, blue: three factors and an offset each */
+        double m[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+        double a = op.a, o = 1 - a;
+        if (op.kind == PF_BRIGHTNESS) { m[0] = m[5] = m[10] = a; }
+        else if (op.kind == PF_CONTRAST) { m[0] = m[5] = m[10] = a; m[3] = m[7] = m[11] = 0.5 - 0.5 * a; }
+        else if (op.kind == PF_INVERT) { m[0] = m[5] = m[10] = 1 - 2 * a; m[3] = m[7] = m[11] = a; }
+        else if (op.kind == PF_GRAYSCALE) {
+            double g[12] = { 0.2126 + 0.7874 * o, 0.7152 - 0.7152 * o, 0.0722 - 0.0722 * o, 0,
+                             0.2126 - 0.2126 * o, 0.7152 + 0.2848 * o, 0.0722 - 0.0722 * o, 0,
+                             0.2126 - 0.2126 * o, 0.7152 - 0.7152 * o, 0.0722 + 0.9278 * o, 0 };
+            memcpy(m, g, sizeof m);
+        } else if (op.kind == PF_SEPIA) {
+            double g[12] = { 0.393 + 0.607 * o, 0.769 - 0.769 * o, 0.189 - 0.189 * o, 0,
+                             0.349 - 0.349 * o, 0.686 + 0.314 * o, 0.168 - 0.168 * o, 0,
+                             0.272 - 0.272 * o, 0.534 - 0.534 * o, 0.131 + 0.869 * o, 0 };
+            memcpy(m, g, sizeof m);
+        } else if (op.kind == PF_SATURATE) {
+            double g[12] = { 0.213 + 0.787 * a, 0.715 - 0.715 * a, 0.072 - 0.072 * a, 0,
+                             0.213 - 0.213 * a, 0.715 + 0.285 * a, 0.072 - 0.072 * a, 0,
+                             0.213 - 0.213 * a, 0.715 - 0.715 * a, 0.072 + 0.928 * a, 0 };
+            memcpy(m, g, sizeof m);
+        } else if (op.kind == PF_HUE) {
+            double cs = cos(a * M_PI / 180), sn = sin(a * M_PI / 180);
+            double g[12] = { 0.213 + cs * 0.787 - sn * 0.213, 0.715 - cs * 0.715 - sn * 0.715, 0.072 - cs * 0.072 + sn * 0.928, 0,
+                             0.213 - cs * 0.213 + sn * 0.143, 0.715 + cs * 0.285 + sn * 0.140, 0.072 - cs * 0.072 - sn * 0.283, 0,
+                             0.213 - cs * 0.213 - sn * 0.787, 0.715 - cs * 0.715 + sn * 0.715, 0.072 + cs * 0.928 + sn * 0.072, 0 };
+            memcpy(m, g, sizeof m);
+        }
+        for (size_t q = 0; q < np; q++) {
+            double al = at(*px, 3 * np + q);
+            if (al <= 0) continue;
+            double r = at(*px, q) / al, g = at(*px, np + q) / al, b = at(*px, 2 * np + q) / al;
+            for (int row = 0; row < 3; row++) {
+                double v = m[4 * row] * r + m[4 * row + 1] * g + m[4 * row + 2] * b + m[4 * row + 3];
+                v = v < 0 ? 0 : v > 1 ? 1 : v;
+                (*px)[(size_t)row * np + q] = (float)(v * al);
+            }
+        }
+    }
+}
+
+/* how far the functions ops reach past what they are given, in px */
+static int pt_filter_reach(const vector<pt_fop> *ops) {
+    double r = 0;
+    for (size_t k = 0; k < len(*ops); k++) {
+        pt_fop op = at(*ops, k);
+        if (op.kind == PF_BLUR) r += 3 * op.blur + 2;
+        else if (op.kind == PF_DROP) r += fabs(op.x) + fabs(op.y) + 3 * op.blur + 2;
+    }
+    return (int)ceil(r);
 }
 
 /* a box's shadows (box-shadow's value s), each, last first. The outer ones (inset 0): its
@@ -1579,163 +1749,531 @@ static void pt_lines(const layout_tree *t, uint32_t b, amb_canvas *c, const amb_
 static int pt_positioned(const layout_tree *t, uint32_t b) {
     return t->box[b].position != LAYOUT_POSITION_STATIC;
 }
-/* a box that makes a stacking context of its own: a z-index, an opacity, a transform */
+/* a box transformed: by its transform's functions or its individual transforms */
+static int pt_transformed(const layout_tree *t, uint32_t b) {
+    return t->box[b].transform.len || t->box[b].translate.len || t->box[b].rotate.len || t->box[b].scale.len;
+}
+/* a box whose children share its 3D space (transform-style: preserve-3d), unless a
+   property that groups its content flattens it (an opacity, a filter, a clip) */
+static int pt_p3d(const layout_tree *t, uint32_t b) {
+    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip;
+}
+/* a box drawn as a plane of its parent's 3D rendering context: its parent preserves 3D
+   and it is transformed or preserves 3D itself */
+static int pt_in_3d(const layout_tree *t, uint32_t b) {
+    uint32_t p = t->box[b].parent;
+    return p && pt_p3d(t, p) && (pt_transformed(t, b) || pt_p3d(t, b));
+}
+/* a box that makes a stacking context of its own: a z-index, an opacity, a transform, a
+   filter, a perspective, a 3D space of its own */
 static int pt_context(const layout_tree *t, uint32_t b) {
-    return !t->box[b].z_auto || t->box[b].opacity < 1 || t->box[b].transform.len;
+    return !t->box[b].z_auto || t->box[b].opacity < 1 || pt_transformed(t, b) || t->box[b].filter.len || t->box[b].backdrop.len ||
+           t->box[b].persp.len || t->box[b].p3d;
 }
 
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box);
 static void pt_ctx(PCTX, uint32_t b);
 static void pt_effects_plain(PCTX, uint32_t b, int ctx);
+static void pt_effects_draw(PCTX, uint32_t b, int ctx);
 static void pt_order(PCTX, const vector<uint32_t> *list, int neg);
 
-/* a transform's matrix (a b c d e f: x' = a x + c y + e, y' = b x + d y + f) from its
-   functions, about (ox, oy); percentages of the box's w and h */
-static void pt_matrix(const char *s, size_t n, double w, double h, double ox, double oy, double *m) {
-    double a = 1, b = 0, cc = 0, d = 1, e = 0, f = 0;
+/* ---- transforms (CSS Transforms 1 and 2): 4x4 matrices, row by row,
+   (x', y', z', w') = M (x, y, z, 1) ---- */
+
+static void pt_m4_id(double *m) {
+    for (int k = 0; k < 16; k++) m[k] = k % 5 == 0 ? 1 : 0;
+}
+/* out = a b (b applied first) */
+static void pt_m4_mul(const double *a, const double *b, double *out) {
+    double r[16];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) {
+            double s = 0;
+            for (int k = 0; k < 4; k++) s += a[4 * i + k] * b[4 * k + j];
+            r[4 * i + j] = s;
+        }
+    for (int k = 0; k < 16; k++) out[k] = r[k];
+}
+/* m = m T(x, y, z) */
+static void pt_m4_translate(double *m, double x, double y, double z) {
+    double f[16];
+    pt_m4_id(f);
+    f[3] = x;
+    f[7] = y;
+    f[11] = z;
+    pt_m4_mul(m, f, m);
+}
+/* the rotation by a radians about the axis (x, y, z) (CSS Transforms 2, rotate3d()) */
+static void pt_m4_rotation(double x, double y, double z, double a, double *f) {
+    pt_m4_id(f);
+    double l = sqrt(x * x + y * y + z * z);
+    if (l <= 0) return;
+    x /= l;
+    y /= l;
+    z /= l;
+    double sc = sin(a / 2) * cos(a / 2), sq = sin(a / 2) * sin(a / 2);
+    f[0] = 1 - 2 * (y * y + z * z) * sq;
+    f[1] = 2 * (x * y * sq - z * sc);
+    f[2] = 2 * (x * z * sq + y * sc);
+    f[4] = 2 * (x * y * sq + z * sc);
+    f[5] = 1 - 2 * (x * x + z * z) * sq;
+    f[6] = 2 * (y * z * sq - x * sc);
+    f[8] = 2 * (x * z * sq - y * sc);
+    f[9] = 2 * (y * z * sq + x * sc);
+    f[10] = 1 - 2 * (x * x + y * y) * sq;
+}
+
+/* an argument of a transform function: an angle in radians, a percentage of base (of
+   the box's width or height; a scale's of 1), a length in px or a number */
+static double pt_targ(const char *t0, size_t xl, double base) {
+    double x = strtod(t0, 0);
+    if (xl > 3 && pt_is_ci(t0 + xl - 3, 3, "deg")) return x * M_PI / 180;
+    if (xl > 4 && pt_is_ci(t0 + xl - 4, 4, "turn")) return x * 2 * M_PI;
+    if (xl > 4 && pt_is_ci(t0 + xl - 4, 4, "grad")) return x * M_PI / 200;
+    if (xl > 3 && pt_is_ci(t0 + xl - 3, 3, "rad")) return x;
+    if (xl > 0 && t0[xl - 1] == '%') return x / 100 * base;
+    return x;
+}
+
+/* a transform's functions s in turn into m (m = m F1 F2 ...); percentages of the box's
+   w and h */
+static void pt_functions(const char *s, size_t n, double w, double h, double *m) {
     size_t i = 0, pa, pl;
     while (css_next_part(s, n, &i, &pa, &pl)) {
         const char *fn = s + pa;
         size_t open = 0;
         while (open < pl && fn[open] != '(') open++;
         if (open >= pl || fn[pl - 1] != ')') continue;
-        double v[6] = { 0, 0, 0, 0, 0, 0 };
-        int nv = 0;
-        size_t j = 0, xa, xl;
         const char *args = fn + open + 1;
-        size_t al = pl - open - 2;
-        while (nv < 6 && css_next_part(args, al, &j, &xa, &xl)) {
-            const char *t0 = args + xa;
-            double x = strtod(t0, 0);
-            if (xl > 3 && memcmp(t0 + xl - 3, "deg", 3) == 0) x = x * M_PI / 180;
-            else if (xl > 4 && memcmp(t0 + xl - 4, "turn", 4) == 0) x = x * 2 * M_PI;
-            else if (xl > 4 && memcmp(t0 + xl - 4, "grad", 4) == 0) x = x * M_PI / 200;
-            else if (xl > 0 && t0[xl - 1] == '%') x = x / 100 * (nv == 0 ? w : h);
-            v[nv++] = x;
+        size_t al = pl - open - 2, j = 0, xa, xl;
+        int scale = open >= 5 && pt_is_ci(fn, 5, "scale");
+        double v[16];
+        int nv = 0;
+        while (nv < 16 && css_next_part(args, al, &j, &xa, &xl)) {
+            /* a translation's percentages: its first of the width, its second of the height */
+            double base = scale ? 1 : (nv == 0 && !pt_is_ci(fn, open, "translateY")) ? w : h;
+            v[nv++] = pt_targ(args + xa, xl, base);
         }
-        double na = 1, nb = 0, nc = 0, nd = 1, ne = 0, nf = 0;
-        if (pt_is(fn, open, "translate")) { ne = v[0]; nf = nv > 1 ? v[1] : 0; }
-        else if (pt_is(fn, open, "translateX")) ne = v[0];
-        else if (pt_is(fn, open, "translateY")) nf = nv > 0 ? (fn[pl - 2] == '%' ? v[0] * h / w : v[0]) : 0;
-        else if (pt_is(fn, open, "scale")) { na = v[0]; nd = nv > 1 ? v[1] : v[0]; }
-        else if (pt_is(fn, open, "scaleX")) na = v[0];
-        else if (pt_is(fn, open, "scaleY")) nd = v[0];
-        else if (pt_is(fn, open, "rotate")) { na = cos(v[0]); nb = sin(v[0]); nc = -sin(v[0]); nd = cos(v[0]); }
-        else if (pt_is(fn, open, "skew")) { nc = tan(v[0]); nb = nv > 1 ? tan(v[1]) : 0; }
-        else if (pt_is(fn, open, "skewX")) nc = tan(v[0]);
-        else if (pt_is(fn, open, "skewY")) nb = tan(v[0]);
-        else if (pt_is(fn, open, "matrix") && nv == 6) { na = v[0]; nb = v[1]; nc = v[2]; nd = v[3]; ne = v[4]; nf = v[5]; }
+        double f[16];
+        pt_m4_id(f);
+        if (pt_is_ci(fn, open, "translate")) { f[3] = nv > 0 ? v[0] : 0; f[7] = nv > 1 ? v[1] : 0; }
+        else if (pt_is_ci(fn, open, "translateX")) f[3] = nv > 0 ? v[0] : 0;
+        else if (pt_is_ci(fn, open, "translateY")) f[7] = nv > 0 ? v[0] : 0;
+        else if (pt_is_ci(fn, open, "translateZ")) f[11] = nv > 0 ? v[0] : 0;
+        else if (pt_is_ci(fn, open, "translate3d") && nv == 3) { f[3] = v[0]; f[7] = v[1]; f[11] = v[2]; }
+        else if (pt_is_ci(fn, open, "scale") && nv > 0) { f[0] = v[0]; f[5] = nv > 1 ? v[1] : v[0]; }
+        else if (pt_is_ci(fn, open, "scaleX") && nv > 0) f[0] = v[0];
+        else if (pt_is_ci(fn, open, "scaleY") && nv > 0) f[5] = v[0];
+        else if (pt_is_ci(fn, open, "scaleZ") && nv > 0) f[10] = v[0];
+        else if (pt_is_ci(fn, open, "scale3d") && nv == 3) { f[0] = v[0]; f[5] = v[1]; f[10] = v[2]; }
+        else if ((pt_is_ci(fn, open, "rotate") || pt_is_ci(fn, open, "rotateZ")) && nv > 0) pt_m4_rotation(0, 0, 1, v[0], f);
+        else if (pt_is_ci(fn, open, "rotateX") && nv > 0) pt_m4_rotation(1, 0, 0, v[0], f);
+        else if (pt_is_ci(fn, open, "rotateY") && nv > 0) pt_m4_rotation(0, 1, 0, v[0], f);
+        else if (pt_is_ci(fn, open, "rotate3d") && nv == 4) pt_m4_rotation(v[0], v[1], v[2], v[3], f);
+        else if (pt_is_ci(fn, open, "skew") && nv > 0) { f[1] = tan(v[0]); f[4] = nv > 1 ? tan(v[1]) : 0; }
+        else if (pt_is_ci(fn, open, "skewX") && nv > 0) f[1] = tan(v[0]);
+        else if (pt_is_ci(fn, open, "skewY") && nv > 0) f[4] = tan(v[0]);
+        else if (pt_is_ci(fn, open, "matrix") && nv == 6) { f[0] = v[0]; f[4] = v[1]; f[1] = v[2]; f[5] = v[3]; f[3] = v[4]; f[7] = v[5]; }
+        else if (pt_is_ci(fn, open, "matrix3d") && nv == 16) {
+            /* its values column by column */
+            for (int r = 0; r < 4; r++)
+                for (int k = 0; k < 4; k++) f[4 * r + k] = v[4 * k + r];
+        } else if (pt_is_ci(fn, open, "perspective") && nv > 0) f[14] = -1 / (v[0] < 1 ? 1 : v[0]);
         else continue;
-        /* this one after those before it: m = m x n */
-        double ra = a * na + cc * nb, rb = b * na + d * nb, rc = a * nc + cc * nd, rd = b * nc + d * nd;
-        double re = a * ne + cc * nf + e, rf = b * ne + d * nf + f;
-        a = ra; b = rb; cc = rc; d = rd; e = re; f = rf;
+        pt_m4_mul(m, f, m);
     }
-    /* about the origin: T(o) M T(-o) */
-    m[0] = a; m[1] = b; m[2] = cc; m[3] = d;
-    m[4] = e + ox - a * ox - cc * oy;
-    m[5] = f + oy - b * ox - d * oy;
 }
 
-/* a box (with its content) drawn by its effects: through a canvas of its own when it has
-   a transform or an opacity, clipped when it clips its overflow; paint draws it */
-static void pt_effects(PCTX, uint32_t b, int ctx) {
-    double bx0 = t->box[b].x - t->box[b].pl - t->box[b].bl, by0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
-    double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
-    double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+/* the individual transforms (CSS Transforms 2, 5) into m, translate, rotate, then scale */
+static void pt_individual(const layout_tree *t, uint32_t b, double w, double h, double *m) {
+    double v[4];
+    int nv;
+    size_t j, xa, xl;
+    vector<char> tx;
+    amb_span sp = t->box[b].translate;
+    append_range(tx, text_ptr(t, sp), sp.len);
+    for (nv = 0, j = 0; nv < 3 && css_next_part(data(tx), len(tx), &j, &xa, &xl); nv++) v[nv] = pt_targ(data(tx) + xa, xl, nv == 0 ? w : h);
+    if (nv) pt_m4_translate(m, v[0], nv > 1 ? v[1] : 0, nv > 2 ? v[2] : 0);
+    clear(tx);
+    sp = t->box[b].rotate;
+    append_range(tx, text_ptr(t, sp), sp.len);
+    double ax = 0, ay = 0, az = 1, ang = 0;
+    int have = 0;
+    for (nv = 0, j = 0; css_next_part(data(tx), len(tx), &j, &xa, &xl);) {
+        const char *p = data(tx) + xa;
+        if (pt_is_ci(p, xl, "x")) { ax = 1; ay = 0; az = 0; }
+        else if (pt_is_ci(p, xl, "y")) { ax = 0; ay = 1; az = 0; }
+        else if (pt_is_ci(p, xl, "z")) { ax = 0; ay = 0; az = 1; }
+        else if (xl > 0 && (p[xl - 1] | 0x20) >= 'a' && (p[xl - 1] | 0x20) <= 'z') { ang = pt_targ(p, xl, 0); have = 1; }
+        else if (nv < 3) v[nv++] = strtod(p, 0);
+    }
+    if (nv == 3) { ax = v[0]; ay = v[1]; az = v[2]; }
+    if (have) {
+        double f[16];
+        pt_m4_rotation(ax, ay, az, ang, f);
+        pt_m4_mul(m, f, m);
+    }
+    clear(tx);
+    sp = t->box[b].scale;
+    append_range(tx, text_ptr(t, sp), sp.len);
+    for (nv = 0, j = 0; nv < 3 && css_next_part(data(tx), len(tx), &j, &xa, &xl); nv++) v[nv] = pt_targ(data(tx) + xa, xl, 1);
+    if (nv) {
+        double f[16];
+        pt_m4_id(f);
+        f[0] = v[0];
+        f[5] = nv > 1 ? v[1] : v[0];
+        f[10] = nv > 2 ? v[2] : 1;
+        pt_m4_mul(m, f, m);
+    }
+}
+
+/* a box's border box */
+static void pt_border_box(const layout_tree *t, uint32_t b, double *x, double *y, double *w, double *h) {
+    *x = t->box[b].x - t->box[b].pl - t->box[b].bl;
+    *y = t->box[b].y - t->box[b].pt - t->box[b].bt;
+    *w = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
+    *h = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+}
+
+/* an origin's text (transform-origin's, perspective-origin's) over a box w by h: its x and
+   y (the middle when it has none), and its z */
+static void pt_origin(const layout_tree *t, amb_span sp, double w, double h, double *ox, double *oy, double *oz) {
+    *ox = w / 2;
+    *oy = h / 2;
+    *oz = 0;
+    if (!sp.len) return;
+    vector<char> ov;
+    append_range(ov, text_ptr(t, sp), sp.len);
+    pt_tile_pos(data(ov), len(ov), w, h, 0, 0, ox, oy);
+    size_t j = 0, xa, xl;
+    int k = 0;
+    while (css_next_part(data(ov), len(ov), &j, &xa, &xl))
+        if (++k == 3) *oz = strtod(data(ov) + xa, 0);
+}
+
+/* a box's transform in page coordinates into m: about its transform-origin, its individual
+   transforms and then its transform's functions; seen through its parent's perspective
+   about the parent's perspective-origin, when it has one (CSS Transforms 2, 6). 0 when
+   the box is not transformed (m the identity) */
+static int pt_box_matrix(const layout_tree *t, uint32_t b, double *m) {
+    pt_m4_id(m);
+    if (!pt_transformed(t, b)) return 0;
+    double bx, by, bw, bh, ox, oy, oz;
+    pt_border_box(t, b, &bx, &by, &bw, &bh);
+    uint32_t p = t->box[b].parent;
+    if (p && t->box[p].persp.len) {
+        vector<char> pv;
+        amb_span sp = t->box[p].persp;
+        append_range(pv, text_ptr(t, sp), sp.len);
+        double d = strtod(data(pv), 0), px, py, pw, ph, qx, qy, qz;
+        if (d < 1) d = 1;
+        pt_border_box(t, p, &px, &py, &pw, &ph);
+        pt_origin(t, t->box[p].porigin, pw, ph, &qx, &qy, &qz);
+        pt_m4_translate(m, px + qx, py + qy, 0);
+        double f[16];
+        pt_m4_id(f);
+        f[14] = -1 / d;
+        pt_m4_mul(m, f, m);
+        pt_m4_translate(m, -(px + qx), -(py + qy), 0);
+    }
+    pt_origin(t, t->box[b].origin, bw, bh, &ox, &oy, &oz);
+    pt_m4_translate(m, bx + ox, by + oy, oz);
+    pt_individual(t, b, bw, bh, m);
     if (t->box[b].transform.len) {
-        vector<char> tv, ov;
+        vector<char> tv;
         amb_span sp = t->box[b].transform;
         append_range(tv, text_ptr(t, sp), sp.len);
-        sp = t->box[b].origin;
-        append_range(ov, text_ptr(t, sp), sp.len);
-        double ox = bw / 2, oy = bh / 2;
-        if (len(ov)) {
-            double px, py;
-            pt_tile_pos(data(ov), len(ov), bw, bh, 0, 0, &px, &py);
-            ox = px;
-            oy = py;
+        pt_functions(data(tv), len(tv), bw, bh, m);
+    }
+    pt_m4_translate(m, -(bx + ox), -(by + oy), -oz);
+    return 1;
+}
+
+/* a box (with its content) drawn through its matrix m onto its plane: drawn onto black
+   and onto white as it is (its alpha their difference), then each pixel of the canvas
+   sampled from where the plane's homography (m flattened: its plane's z is 0) takes it
+   back, where the plane is in front of the viewer. Not drawn when its back faces the
+   viewer and its backface-visibility is hidden (Chromium's test: the minor of m without
+   z against m's determinant) */
+static void pt_plane_draw(PCTX, uint32_t b, int ctx, const double *m) {
+    double hm[9] = { m[0], m[1], m[3], m[4], m[5], m[7], m[12], m[13], m[15] };
+    double dh = hm[0] * (hm[4] * hm[8] - hm[5] * hm[7]) - hm[1] * (hm[3] * hm[8] - hm[5] * hm[6]) + hm[2] * (hm[3] * hm[7] - hm[4] * hm[6]);
+    if (fabs(dh) < 1e-12) return;
+    if (t->box[b].backface) {
+        /* m's determinant, by its first row's cofactors */
+        double dm = 0;
+        for (int k = 0; k < 4; k++) {
+            double s3[9];
+            int q = 0;
+            for (int r = 1; r < 4; r++)
+                for (int cc = 0; cc < 4; cc++)
+                    if (cc != k) s3[q++] = m[4 * r + cc];
+            double d3 = s3[0] * (s3[4] * s3[8] - s3[5] * s3[7]) - s3[1] * (s3[3] * s3[8] - s3[5] * s3[6]) + s3[2] * (s3[3] * s3[7] - s3[4] * s3[6]);
+            dm += (k % 2 ? -1 : 1) * m[k] * d3;
         }
-        double m[6];
-        pt_matrix(data(tv), len(tv), bw, bh, bx0 + ox, by0 + oy, m);
-        double det = m[0] * m[3] - m[1] * m[2];
-        if (fabs(det) < 1e-9) return;
-        /* the box drawn on black and on white (its alpha their difference), as it is */
-        amb_canvas k0, k1;
-        memset(&k0, 0, sizeof k0);
-        memset(&k1, 0, sizeof k1);
-        defer(k0) { AMB_CANVAS_DROP(k0); }
-        defer(k1) { AMB_CANVAS_DROP(k1); }
-        k0.w = k1.w = c->w;
-        k0.h = k1.h = c->h;
-        k0.oy = k1.oy = c->oy;
-        k0.cx0 = k1.cx0 = 0;
-        k0.cy0 = k1.cy0 = c->oy;
-        k0.cx1 = k1.cx1 = c->w;
-        k0.cy1 = k1.cy1 = c->oy + c->h;
-        resize(&k0.px, (size_t)c->w * c->h * 3);
-        resize(&k1.px, (size_t)c->w * c->h * 3);
-        for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
-        pt_effects_plain(PARGS_C(&k0), b, ctx);
-        pt_effects_plain(PARGS_C(&k1), b, ctx);
-        /* mapped: each pixel of the canvas sampled from where the inverse takes it */
-        double ia = m[3] / det, ib = -m[1] / det, ic = -m[2] / det, id = m[0] / det;
-        double ie = -(ia * m[4] + ic * m[5]), iff = -(ib * m[4] + id * m[5]);
-        /* the transformed box's bounds */
-        double xs[4] = { bx0, bx0 + bw, bx0, bx0 + bw }, ys[4] = { by0, by0, by0 + bh, by0 + bh };
-        double lo_x = 1e18, lo_y = 1e18, hi_x = -1e18, hi_y = -1e18;
-        for (int q = 0; q < 4; q++) {
-            double X = m[0] * xs[q] + m[2] * ys[q] + m[4], Y = m[1] * xs[q] + m[3] * ys[q] + m[5];
-            lo_x = fmin(lo_x, X); hi_x = fmax(hi_x, X); lo_y = fmin(lo_y, Y); hi_y = fmax(hi_y, Y);
-        }
-        /* its overflow too: the whole canvas, which is mapped */
-        int kx0, ky0, kx1, ky1;
-        pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
-        (void)lo_x;
-        (void)hi_x;
-        (void)lo_y;
-        (void)hi_y;
-        for (int y = ky0; y < ky1; y++)
-            for (int x = kx0; x < kx1; x++) {
-                double X = x + 0.5, Y = y + 0.5 + c->oy;
-                double sx = ia * X + ic * Y + ie - 0.5, sy = ib * X + id * Y + iff - 0.5 - c->oy;
-                if (sx < -1 || sy < -1 || sx > (double)c->w || sy > (double)c->h) continue;
-                int x0 = (int)floor(sx), y0 = (int)floor(sy);
-                double fx = sx - x0, fy = sy - y0, col[3] = { 0, 0, 0 }, al = 0;
-                for (int q = 0; q < 4; q++) {
-                    int qx = x0 + (q & 1), qy = y0 + (q >> 1);
-                    double wgt = ((q & 1) ? fx : 1 - fx) * ((q >> 1) ? fy : 1 - fy);
-                    if (qx < 0 || qy < 0 || qx >= (int)c->w || qy >= (int)c->h || wgt <= 0) continue;
-                    size_t pi = ((size_t)qy * c->w + (size_t)qx) * 3;
-                    double a0 = 1 - (at(k1.px, pi) - at(k0.px, pi)) / 255.0;
-                    for (int ch = 0; ch < 3; ch++) col[ch] += at(k0.px, pi + ch) * wgt;
-                    al += a0 * wgt;
-                }
-                if (al <= 0.002) continue;
-                size_t di = ((size_t)y * c->w + (size_t)x) * 3;
-                for (int ch = 0; ch < 3; ch++) {
-                    double v = col[ch] + c->px[di + ch] * (1 - al);
-                    c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
-                }
+        if (dh * dm < 0) return;
+    }
+    /* the inverse homography: the adjugate (its scale does not matter) */
+    double iv[9] = { hm[4] * hm[8] - hm[5] * hm[7], hm[2] * hm[7] - hm[1] * hm[8], hm[1] * hm[5] - hm[2] * hm[4],
+                     hm[5] * hm[6] - hm[3] * hm[8], hm[0] * hm[8] - hm[2] * hm[6], hm[2] * hm[3] - hm[0] * hm[5],
+                     hm[3] * hm[7] - hm[4] * hm[6], hm[1] * hm[6] - hm[0] * hm[7], hm[0] * hm[4] - hm[1] * hm[3] };
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = c->w;
+    k0.h = k1.h = c->h;
+    k0.oy = k1.oy = c->oy;
+    k0.cx0 = k1.cx0 = 0;
+    k0.cy0 = k1.cy0 = c->oy;
+    k0.cx1 = k1.cx1 = c->w;
+    k0.cy1 = k1.cy1 = c->oy + c->h;
+    resize(&k0.px, (size_t)c->w * c->h * 3);
+    resize(&k1.px, (size_t)c->w * c->h * 3);
+    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_effects_plain(PARGS_C(&k0), b, ctx);
+    pt_effects_plain(PARGS_C(&k1), b, ctx);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = ky0; y < ky1; y++)
+        for (int x = kx0; x < kx1; x++) {
+            double X = x + 0.5, Y = y + 0.5 + c->oy;
+            double sw = iv[6] * X + iv[7] * Y + iv[8];
+            /* the sign of the plane's w where it is seen: behind the viewer when not that of det */
+            if (sw * dh <= 0) continue;
+            double sx = (iv[0] * X + iv[1] * Y + iv[2]) / sw - 0.5, sy = (iv[3] * X + iv[4] * Y + iv[5]) / sw - 0.5 - c->oy;
+            if (sx < -1 || sy < -1 || sx > (double)c->w || sy > (double)c->h) continue;
+            int x0 = (int)floor(sx), y0 = (int)floor(sy);
+            double fx = sx - x0, fy = sy - y0, col[3] = { 0, 0, 0 }, al = 0;
+            for (int q = 0; q < 4; q++) {
+                int qx = x0 + (q & 1), qy = y0 + (q >> 1);
+                double wgt = ((q & 1) ? fx : 1 - fx) * ((q >> 1) ? fy : 1 - fy);
+                if (qx < 0 || qy < 0 || qx >= (int)c->w || qy >= (int)c->h || wgt <= 0) continue;
+                size_t pi = ((size_t)qy * c->w + (size_t)qx) * 3;
+                double a0 = 1 - (at(k1.px, pi) - at(k0.px, pi)) / 255.0;
+                for (int ch = 0; ch < 3; ch++) col[ch] += at(k0.px, pi + ch) * wgt;
+                al += a0 * wgt;
             }
+            if (al <= 0.002) continue;
+            size_t di = ((size_t)y * c->w + (size_t)x) * 3;
+            for (int ch = 0; ch < 3; ch++) {
+                double v = col[ch] + c->px[di + ch] * (1 - al);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
+/* a plane of a 3D rendering context: its box, its matrix, its depth (its middle's z) */
+typedef struct pt_plane { uint32_t box; double m[16]; double z; } pt_plane;
+
+/* box b, whose matrix is m, and the planes of the 3D space it shares with its children
+   (when it preserves 3D: each child transformed or preserving 3D, by m and its own
+   matrix), into out */
+static void pt_planes(const layout_tree *t, uint32_t b, const double *m, vector<pt_plane> *out) {
+    pt_plane p;
+    memset(&p, 0, sizeof p);
+    p.box = b;
+    for (int k = 0; k < 16; k++) p.m[k] = m[k];
+    double bx, by, bw, bh;
+    pt_border_box(t, b, &bx, &by, &bw, &bh);
+    p.z = m[8] * (bx + bw / 2) + m[9] * (by + bh / 2) + m[11];
+    push_back(*out, p);
+    if (!pt_p3d(t, b)) return;
+    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) {
+        if (!pt_in_3d(t, ch)) continue;
+        double mc[16], mm[16];
+        pt_box_matrix(t, ch, mc);
+        pt_m4_mul(m, mc, mm);
+        pt_planes(t, ch, mm, out);
+    }
+}
+
+/* a box (with its content) drawn by its effects: in the 3D space it makes for its children
+   when it preserves 3D, each of its planes drawn by its matrix, those farther first (by
+   their middles' depth); else through its matrix when it is transformed; else by its
+   opacity, filters and clip */
+static void pt_effects(PCTX, uint32_t b, int ctx) {
+    double m[16];
+    int moved = pt_box_matrix(t, b, m);
+    if (pt_p3d(t, b)) {
+        vector<pt_plane> planes;
+        pt_planes(t, b, m, &planes);
+        for (size_t k = 1; k < len(planes); k++) {
+            pt_plane x = at(planes, k);
+            size_t q = k;
+            while (q > 0 && at(planes, q - 1).z > x.z) { planes[q] = at(planes, q - 1); q--; }
+            planes[q] = x;
+        }
+        for (size_t k = 0; k < len(planes); k++) {
+            pt_plane x = at(planes, k);
+            if (x.box == b && !moved) pt_effects_plain(PARGS, b, ctx);
+            else pt_plane_draw(PARGS, x.box, x.box == b ? ctx : 1, x.m);
+        }
         return;
     }
+    if (moved) { pt_plane_draw(PARGS, b, ctx, m); return; }
     pt_effects_plain(PARGS, b, ctx);
 }
 
-/* a box drawn with its opacity and clip (no transform): through a copy of what was under
-   it when it has an opacity, blended with it */
-static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
-    double op = t->box[b].opacity;
-    if (op <= 0) return;
-    vector<uint8_t> under;
-    if (op < 1) append_range(under, data(c->px), len(c->px));
+/* a box drawn as it is, with its content: as the stacking context it makes (ctx), else as
+   a box in the flow, and the positioned boxes in it */
+static void pt_effects_draw(PCTX, uint32_t b, int ctx) {
     if (ctx) pt_ctx(PARGS, b);
     else {
         vector<uint32_t> later;
         pt_flow(PARGS, b, &later, 1);
         for (size_t q = 0; q < len(later); q++) pt_ctx(PARGS, at(later, q));
     }
+}
+
+/* a filter's value (a box's span sp) as its functions; none when it has none or names an
+   SVG filter */
+static void pt_filter_of(const layout_tree *t, amb_span sp, vector<pt_fop> *ops) {
+    if (!sp.len) return;
+    vector<char> fv;
+    append_range(fv, text_ptr(t, sp), sp.len);
+    if (!pt_filter_ops(data(fv), len(fv), ops)) clear(*ops);
+}
+
+/* a box and its content drawn through its filter's functions: drawn onto black and onto
+   white (its colours premultiplied and its cover read from the two), the functions
+   applied over what was drawn and as far as they reach, and the result laid on the
+   canvas within its clip */
+static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = c->w;
+    k0.h = k1.h = c->h;
+    k0.oy = k1.oy = c->oy;
+    k0.cx0 = k1.cx0 = 0;
+    k0.cy0 = k1.cy0 = c->oy;
+    k0.cx1 = k1.cx1 = c->w;
+    k0.cy1 = k1.cy1 = c->oy + c->h;
+    resize(&k0.px, (size_t)c->w * c->h * 3);
+    resize(&k1.px, (size_t)c->w * c->h * 3);
+    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_effects_draw(PARGS_C(&k0), b, ctx);
+    pt_effects_draw(PARGS_C(&k1), b, ctx);
+    /* what was drawn: a pixel not black on black or not white on white */
+    int x0 = (int)c->w, y0 = (int)c->h, x1 = -1, y1 = -1;
+    for (int y = 0; y < (int)c->h; y++)
+        for (int x = 0; x < (int)c->w; x++) {
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            if (at(k0.px, i) | at(k0.px, i + 1) | at(k0.px, i + 2) || (at(k1.px, i) & at(k1.px, i + 1) & at(k1.px, i + 2)) != 255) {
+                if (x < x0) x0 = x;
+                if (x > x1) x1 = x;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+        }
+    if (x1 < 0) return;
+    int reach = pt_filter_reach(ops);
+    x0 = x0 - reach < 0 ? 0 : x0 - reach;
+    y0 = y0 - reach < 0 ? 0 : y0 - reach;
+    x1 = x1 + reach + 1 > (int)c->w ? (int)c->w : x1 + reach + 1;
+    y1 = y1 + reach + 1 > (int)c->h ? (int)c->h : y1 + reach + 1;
+    int w = x1 - x0, h = y1 - y0;
+    if ((double)w * h > 4e7) return;
+    size_t np = (size_t)w * h;
+    vector<float> px;
+    resize(&px, 4 * np);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            size_t i = ((size_t)(y0 + y) * c->w + (size_t)(x0 + x)) * 3, q = (size_t)y * w + x;
+            double d = (at(k1.px, i) - at(k0.px, i) + at(k1.px, i + 1) - at(k0.px, i + 1) + at(k1.px, i + 2) - at(k0.px, i + 2)) / 765.0;
+            px[q] = at(k0.px, i) / 255.0f;
+            px[np + q] = at(k0.px, i + 1) / 255.0f;
+            px[2 * np + q] = at(k0.px, i + 2) / 255.0f;
+            px[3 * np + q] = (float)(d < 0 ? 1 : d > 1 ? 0 : 1 - d);
+        }
+    pt_filter_apply(&px, w, h, ops);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = y0 < ky0 ? ky0 : y0; y < y1 && y < ky1; y++)
+        for (int x = x0 < kx0 ? kx0 : x0; x < x1 && x < kx1; x++) {
+            size_t q = (size_t)(y - y0) * w + (size_t)(x - x0), di = ((size_t)y * c->w + (size_t)x) * 3;
+            double al = at(px, 3 * np + q);
+            if (al <= 0.001) continue;
+            if (al > 1) al = 1;
+            for (int ch = 0; ch < 3; ch++) {
+                double v = at(px, (size_t)ch * np + q) * 255 + c->px[di + ch] * (1 - al);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
+/* backdrop-filter: what the canvas holds under a box's border box, through its functions,
+   laid back within the box as its corners round it, before the box is drawn over it. A
+   blur reaches past the box's edges by mirroring what is within them (Chromium blurs a
+   backdrop with its edges mirrored) */
+static void pt_backdrop(const layout_tree *t, uint32_t b, amb_canvas *c) {
+    vector<pt_fop> ops;
+    pt_filter_of(t, t->box[b].backdrop, &ops);
+    if (!len(ops)) return;
+    double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
+    double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
+    double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+    double rad[8] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl,
+                      t->box[b].rtlv, t->box[b].rtrv, t->box[b].rbrv, t->box[b].rblv };
+    pt_fit_radii(bw, bh, rad);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    int x0 = (int)floor(bx), y0 = (int)floor(by - c->oy), x1 = (int)ceil(bx + bw), y1 = (int)ceil(by + bh - c->oy);
+    if (x0 < kx0) x0 = kx0;
+    if (y0 < ky0) y0 = ky0;
+    if (x1 > kx1) x1 = kx1;
+    if (y1 > ky1) y1 = ky1;
+    int iw = x1 - x0, ih = y1 - y0;
+    if (iw <= 0 || ih <= 0) return;
+    int m = pt_filter_reach(&ops), w = iw + 2 * m, h = ih + 2 * m;
+    if ((double)w * h > 4e7) return;
+    size_t np = (size_t)w * h;
+    vector<float> px;
+    resize(&px, 4 * np);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            /* mirrored about the region's edges */
+            int sx = x - m, sy = y - m;
+            while (sx < 0 || sx >= iw) sx = sx < 0 ? -sx - 1 : 2 * iw - sx - 1;
+            while (sy < 0 || sy >= ih) sy = sy < 0 ? -sy - 1 : 2 * ih - sy - 1;
+            size_t i = ((size_t)(y0 + sy) * c->w + (size_t)(x0 + sx)) * 3, q = (size_t)y * w + x;
+            px[q] = c->px[i] / 255.0f;
+            px[np + q] = c->px[i + 1] / 255.0f;
+            px[2 * np + q] = c->px[i + 2] / 255.0f;
+            px[3 * np + q] = 1;
+        }
+    pt_filter_apply(&px, w, h, &ops);
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            double cov = pt_rr_cover(x + 0.5, y + 0.5 + c->oy, bx, by, bx + bw, by + bh, rad);
+            if (cov <= 0) continue;
+            size_t q = (size_t)(y - y0 + m) * w + (size_t)(x - x0 + m), di = ((size_t)y * c->w + (size_t)x) * 3;
+            double al = at(px, 3 * np + q);
+            for (int ch = 0; ch < 3; ch++) {
+                /* the backdrop is opaque: what the functions leave transparent shows white */
+                double f = at(px, (size_t)ch * np + q) * 255 + 255 * (1 - (al > 1 ? 1 : al));
+                double v = f * cov + c->px[di + ch] * (1 - cov);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
+/* a box drawn with its opacity, backdrop and filters: through a copy of what was under it
+   when it has an opacity, blended with it */
+static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
+    double op = t->box[b].opacity;
+    if (op <= 0) return;
+    vector<uint8_t> under;
+    if (op < 1) append_range(under, data(c->px), len(c->px));
+    if (t->box[b].backdrop.len) pt_backdrop(t, b, c);
+    vector<pt_fop> ops;
+    pt_filter_of(t, t->box[b].filter, &ops);
+    if (len(ops)) pt_filtered(PARGS, b, ctx, &ops);
+    else pt_effects_draw(PARGS, b, ctx);
     if (op < 1)
         for (size_t q = 0; q < len(c->px); q++) {
             int o = at(under, q), n0 = c->px[q];
@@ -1757,6 +2295,7 @@ static void pt_order(PCTX, const vector<uint32_t> *list, int neg) {
     }
     for (size_t q = 0; q < len(ord); q++) {
         uint32_t x = at(ord, q);
+        if (pt_in_3d(t, x)) continue;
         if (pt_context(t, x)) pt_effects(PARGS, x, 1);
         else {
             /* positioned, z-index auto: drawn as a context, but what is positioned in it is its parent context's */
@@ -1787,7 +2326,11 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
             else push_back(later, ch);
             continue;
         }
-        if (t->box[ch].opacity < 1 || t->box[ch].transform.len) { pt_effects(PARGS, ch, 0); continue; }
+        if (pt_in_3d(t, ch)) continue;
+        if (t->box[ch].opacity < 1 || pt_transformed(t, ch) || t->box[ch].filter.len || t->box[ch].backdrop.len || t->box[ch].p3d) {
+            pt_effects(PARGS, ch, 0);
+            continue;
+        }
         if (clips) pt_flow(PARGS, ch, &inner, 1);
         else pt_flow(PARGS, ch, later, 1);
     }

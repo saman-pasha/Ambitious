@@ -1,0 +1,17 @@
+# tests/pages/filters.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+grayscale 0 0 200 140
+sepia 200 0 400 140
+saturate 400 0 600 140
+hue 600 0 800 140
+invert 0 140 200 280
+brightness 200 140 400 280
+contrast 400 140 600 280
+opacity 600 140 800 280
+blur 0 280 200 420
+drop 200 280 400 420
+ring 400 280 600 420
+chain 600 280 800 420
+backblur 0 420 200 560
+backgray 200 420 400 560
+underop 400 420 600 560
+turned 600 420 800 560
