@@ -145,6 +145,16 @@ typedef struct js_obj {
                                  value and token, three a cell; the collector holds the targets and tokens
                                  weakly, and for each target that died calls the cleanup with its held
                                  value in a task of its own: src/js/gc.c) */
+/* JO_ELEMPROPS: an array (or an arguments object) with an element of attributes of its
+   own, kept in its shape under its index, the element's dense slot a hole (src/js/vm.c);
+   JO_LENGTH_RO: an array whose length is not writable. (A comment after a #define kept
+   to one line: toolchain/REPORT.md, finding 30.) */
+#define JO_ELEMPROPS 256
+#define JO_LENGTH_RO 512
+/* an array whose elements a write may not take as it finds them: frozen, sealed, not
+   extensible, with elements in its shape, or its length read-only (the interpreter's
+   fast paths want exactly JO_EXTENSIBLE of these) */
+#define JO_ELEM_SLOW (JO_EXTENSIBLE | JO_FROZEN | JO_SEALED | JO_ELEMPROPS | JO_LENGTH_RO)
 
 /* a shape: the key it adds to its parent's, at which slot; its proto, its count */
 typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js_shape;
@@ -162,7 +172,7 @@ typedef struct js_func {
     uint32_t name;                    /* an atom, 0 for none */
     uint32_t ics, nics;               /* its property caches, in vm->ics */
     uint32_t flags, line, script;
-    uint32_t src_off, src_len;        /* its source text's place in its script */
+    uint32_t src_off, src_len;        /* its source text (Function.prototype.toString's) in vm->src; 0 long: none */
     uint32_t arity;                   /* its length: the parameters before a default or a rest */
     uint32_t module;                  /* the module whose code it is, plus one (0: a script's) */
 } js_func;
@@ -180,6 +190,33 @@ typedef struct js_func {
 /* a property access's cache: the receiver's shape, the holder (0: the receiver
    itself), the holder's shape, the slot */
 typedef struct js_ic { uint32_t shape, holder, hshape, slot; } js_ic;
+
+/* a place in the code whose TypeError names an expression as V8 writes it (its call
+   printer): the instruction at pc, the expression's text at [start, end) of vm->src (read
+   again only when the error is thrown), what the error says (JSS_*), and how the
+   expression is named. The compiler appends them in the order of their code */
+typedef struct js_site { uint32_t pc, start, end, kind; } js_site;
+enum {
+    JSS_CALL,          /* a call's callee: "f.reset is not a function" */
+    JSS_NEW,           /* new's: "X is not a constructor" */
+    JSS_ITER,          /* for-of's value, an array literal's spread: "x is not iterable" */
+    JSS_AITER,         /* for await's: "x is not async iterable" */
+    JSS_SPREAD_CALL,   /* a call's spread argument: "Spread syntax requires ...iterable[Symbol.iterator] to be a function" */
+    JSS_DESTRUCT_ARR,  /* an array pattern's value */
+    JSS_DESTRUCT_OBJ,  /* an object pattern's value: "Cannot destructure property 'a' of 'x' as it is undefined." */
+    JSS_YIELD_STAR     /* yield*'s operand */
+};
+#define JSS_KIND 0xFFu
+#define JSS_CALLED 0x100u        /* the expression a call (iterated: "is not a function or its return value is not iterable") */
+#define JSS_PLAIN 0x200u         /* named by its value alone (V8's default: "number 5", "object") */
+#define JSS_DOTFOR 0x400u        /* a for-of's binding, which V8 names ".for" */
+#define JSS_DOTCATCH 0x2000u     /* a catch's binding: ".catch" */
+#define JSS_DEFAULTED 0x800u     /* a parameter's default, which V8 names by three intermediate values */
+#define JSS_INTERMEDIATE 0x1000u /* "(intermediate value)" */
+#define JSS_AWAITED 0x4000u      /* a call for await iterates: "f(...) is not a function or its return value is not async iterable" */
+#define JSS_NOSYM 0x8000u        /* an array pattern within an object pattern: its whole value's text, "(cannot read property ...)" */
+#define JSS_GENERATOR 0x10000u   /* the code's function a generator: yield an operator when the text is read again */
+#define JSS_ASYNC 0x20000u       /* ... async: await one */
 
 typedef struct js_frame {
     uint32_t func, pc, base, env, callee, argc, sp0, flags;
@@ -315,6 +352,9 @@ typedef struct js_vm {
     vector<uint8_t> code;
     vector<uint64_t> consts;                /* the code's constants: numbers and strings */
     vector<js_ic> ics;
+    vector<char> src;                 /* every compiled source's text (UTF-8), appended as it is compiled: the
+                                         functions' own text (toString) and the error sites' expressions */
+    vector<js_site> sites;            /* the code's error sites, by their pc */
     vector<uint64_t> stack;
     vector<js_frame> frames;
     vector<js_handler> handlers;
@@ -386,6 +426,9 @@ typedef struct js_vm {
     void (*host_roots)(js_vm *vm, vector<jv> *out);
     jv exception;                     /* the thrown value, while one is in flight */
     int throwing;
+    /* why an array's [[Set]] or [[Delete]] last refused (JSR_*), the key it names, for strict
+       code's TypeError (src/js/vm.c) */
+    uint32_t refused, refused_key;
     uint64_t steps, step_budget;      /* the bytecodes run; past the budget, a script is stopped */
     double now;                       /* virtual time, ms */
     double real_clock;                /* set: performance.now() reads the real clock (benchmarks) */
@@ -419,7 +462,8 @@ typedef struct js_vm {
     vector_js_big_drop(&(v).bigs); vector_uint32_t_drop(&(v).bigl); vector_js_evalbind_drop(&(v).eval_binds); \
     vector_js_evalsite_drop(&(v).eval_sites); vector_js_evalcache_drop(&(v).eval_cache); \
     vector_js_module_drop(&(v).modules); vector_js_modreq_drop(&(v).mod_reqs); vector_js_modimp_drop(&(v).mod_imps); \
-    vector_js_modexp_drop(&(v).mod_exps); vector_js_modinit_drop(&(v).mod_inits); vector_js_modbind_drop(&(v).mod_binds)
+    vector_js_modexp_drop(&(v).mod_exps); vector_js_modinit_drop(&(v).mod_inits); vector_js_modbind_drop(&(v).mod_binds); \
+    vector_char_drop(&(v).src); vector_js_site_drop(&(v).sites)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -660,10 +704,16 @@ void js_define(js_vm *vm, uint32_t o, uint32_t atom, jv v, uint32_t flags);   /*
 void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv setter, uint32_t flags);
 int js_has(js_vm *vm, uint32_t o, uint32_t atom);                    /* through the prototypes */
 int js_get_own(js_vm *vm, uint32_t o, uint32_t atom, jv *v, uint32_t *flags);
+/* o's shape's entry for a key: 1 when it has one, its flags in *flags and in *live whether
+   it holds a value (a deleted property's entry holds none) */
+int js_shape_entry(js_vm *vm, uint32_t o, uint32_t key, uint32_t *flags, int *live);
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom);
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr);   /* the own string keys, in order, pushed as strings */
 uint32_t js_shape_of(js_vm *vm, uint32_t proto);
 int js_is_callable(js_vm *vm, jv v);
+/* IsConstructor: a closure but an arrow's, a method's, a generator's or an async one's; a
+   native with a prototype of its own (or Proxy); a bound or proxied constructor */
+int js_is_constructor(js_vm *vm, jv v);
 int js_instance_of(js_vm *vm, jv v, jv ctor);
 
 /* conversions */
@@ -689,6 +739,36 @@ jv js_throw_msg(js_vm *vm, uint32_t proto, const char *msg);
 jv js_type_error(js_vm *vm, const char *what, uint32_t name_str);     /* "<name> <what>", name a string or 0 */
 uint32_t js_error_new(js_vm *vm, uint32_t proto, uint32_t msg);
 void js_error_text(js_vm *vm, jv e, vector<char> *out);              /* "TypeError: x is not a function" */
+/* a value as V8 names it where no expression can be (its call printer's default): its
+   type, then a string's text in double quotes, null, a boolean or a number: number 5,
+   string "abc", object null, object, undefined */
+void js_value_name(js_vm *vm, jv v, vector<char> *out);
+/* a value's text without its methods run (V8's NoSideEffectsToString): a primitive's
+   string, a function's source, "Error: x", "#<Object>", "[object Array]" */
+void js_value_text(js_vm *vm, jv v, vector<char> *out);
+/* Function.prototype.toString of a callable object: its source text, or V8's native
+   form ("function push() { [native code] }"); 0 when o is not callable */
+uint32_t js_func_source(js_vm *vm, uint32_t o);
+jv js_not_function(js_vm *vm, jv v);                                  /* "number 5 is not a function" */
+jv js_not_constructor(js_vm *vm, jv v);
+/* a native that calls its receiver (Function.prototype.call, apply) given no function: V8
+   names the script's call of the native ("f.call is not a function"), else the value */
+jv js_caller_not_function(js_vm *vm, jv v);
+/* why an array's write was refused (vm->refused), for strict code's TypeError */
+enum { JSR_NONE, JSR_READONLY, JSR_GETTER, JSR_NOT_EXTENSIBLE, JSR_LENGTH, JSR_DELETE };
+/* the standard's throwing operations, as the natives write through them: Set(O, P, V,
+   true), DeletePropertyOrThrow, CreateDataPropertyOrThrow (the last src/js/proxy.c's):
+   1 done, 0 with a TypeError thrown in V8's words */
+int js_set_throw(js_vm *vm, jv obj, jv key, jv v);
+int js_delete_throw(js_vm *vm, jv obj, jv key);
+int js_create_data_throw(js_vm *vm, jv obj, jv key, jv v);
+/* an array's length set as [[Set]] sets it (elements past it deleted, a non-configurable
+   one stopping it): 1, 2 refused (vm->refused says why), 0 thrown */
+int js_array_set_length_checked(js_vm *vm, uint32_t a, double n);
+/* an error site's expression as V8's call printer writes it (src/js/compile.c): its text
+   read again and printed, a call's own callee alone when callee_only; 0 when it cannot
+   be read (the error names the value instead) */
+int js_site_text(js_vm *vm, js_site s, int callee_only, vector<char> *out);
 
 /* functions made by natives and the host */
 uint32_t js_native_new(js_vm *vm, uint32_t id, uint32_t name, uint32_t nargs);

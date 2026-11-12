@@ -221,18 +221,37 @@ static int px_get_own(js_vm *vm, uint32_t o, uint32_t key, jv *v, uint32_t *f) {
         *f = JS_SHAPE_HIDDEN;
         return 1;
     }
-    if (k == JK_ARRAY && key == A_LENGTH) { *v = jv_num(vm->objs[o].b); *f = JS_SHAPE_HIDDEN; return 1; }
+    if (k == JK_ARRAY && key == A_LENGTH) {
+        *v = jv_num(vm->objs[o].b);
+        *f = JS_SHAPE_HIDDEN | JS_SHAPE_FIXED | ((vm->objs[o].flags & JO_LENGTH_RO) ? JS_SHAPE_READONLY : 0);
+        return 1;
+    }
     if (k == JK_STRING && key == A_LENGTH) { *v = jv_num(vm->strs[jv_idx(vm->objs[o].x)].len); *f = JS_SHAPE_HIDDEN; return 1; }
-    if ((k == JK_ARRAY || k == JK_STRING) && js_atom_index(vm, key, &i)) {
-        jv x = js_get(vm, jv_obj(o), key);
-        if (vm->throwing || x == JV_UNDEF) return 0;
-        if (k == JK_ARRAY && (i >= vm->objs[o].b || vm->slots[vm->objs[o].a + i] == JV_HOLE)) return 0;
-        *v = x;
+    /* an array's or an arguments object's dense element (one with attributes of its own
+       is its shape's, above): the default attributes */
+    if ((k == JK_ARRAY || k == JK_ARGUMENTS) && js_atom_index(vm, key, &i)) {
+        uint32_t st = k == JK_ARGUMENTS ? vm->objs[o].a : o;
+        if (i >= vm->objs[st].b || vm->slots[vm->objs[st].a + i] == JV_HOLE) return 0;
+        *v = vm->slots[vm->objs[st].a + i];
         *f = 0;
         return 1;
     }
+    if (k == JK_STRING && js_atom_index(vm, key, &i)) {
+        if (i >= vm->strs[jv_idx(vm->objs[o].x)].len) return 0;
+        *v = js_get(vm, jv_obj(o), key);
+        *f = 0;
+        return !vm->throwing;
+    }
     return 0;
 }
+
+/* an array's or an arguments object's element i defined (ValidateAndApplyPropertyDescriptor
+   over its element: ArrayDefineOwnProperty's step 3): kept dense while its attributes are
+   the default ones, else in the object's shape with its own; an array's length past it.
+   1 done, 0 refused, -1 thrown */
+static int px_elem_define(js_vm *vm, uint32_t o, uint32_t i, uint32_t key, const px_desc *d);
+/* an array's length defined (ArraySetLength) */
+static int px_length_define(js_vm *vm, uint32_t o, const px_desc *d);
 
 /* OrdinaryGetOwnProperty, with the exotic objects' own: 1 found, 0 none, -1 thrown */
 static int px_ordinary_own(js_vm *vm, uint32_t o, uint32_t key, px_desc *d) {
@@ -320,21 +339,13 @@ static int px_ordinary_define(js_vm *vm, uint32_t o, uint32_t key, const px_desc
         if ((d->has & PD_VALUE) && !js_ta_set(vm, o, i, d->value)) return -1;
         return 1;
     }
+    if (k == JK_ARRAY && key == A_LENGTH) return px_length_define(vm, o, d);
+    if ((k == JK_ARRAY || k == JK_ARGUMENTS) && js_atom_index(vm, key, &i)) return px_elem_define(vm, o, i, key, d);
     px_desc cur;
     int has = px_ordinary_own(vm, o, key, &cur);
     if (has < 0) return -1;
     int ext = (vm->objs[o].flags & JO_EXTENSIBLE) != 0;
     if (!px_compatible(vm, ext, d, &cur, has)) return 0;
-    if (k == JK_ARRAY && (key == A_LENGTH || js_atom_index(vm, key, &i))) {
-        /* an array's elements and length keep no flags of their own: their values set */
-        if (pd_accessor(d) && key != A_LENGTH) {
-            /* an accessor at an index: past the dense elements, as a named property */
-        } else {
-            if (d->has & PD_VALUE) { js_set(vm, jv_obj(o), key, d->value); if (vm->throwing) return -1; }
-            else if (!has) { js_set(vm, jv_obj(o), key, JV_UNDEF); if (vm->throwing) return -1; }
-            return 1;
-        }
-    }
     if (k == JK_STRING && (key == A_LENGTH || js_atom_index(vm, key, &i)) && has) return 1;
     /* the property as it is to be: the descriptor's fields over the current's, else the defaults */
     int acc = pd_accessor(d) || (!pd_data(d) && has && pd_accessor(&cur));
@@ -374,6 +385,87 @@ static int px_ordinary_define(js_vm *vm, uint32_t o, uint32_t key, const px_desc
         return 1;
     }
     px_reshape(vm, o, key, nv, nf);
+    return 1;
+}
+
+static int px_elem_define(js_vm *vm, uint32_t o, uint32_t i, uint32_t key, const px_desc *d) {
+    uint32_t fl = vm->objs[o].flags, st = vm->objs[o].kind == JK_ARGUMENTS ? vm->objs[o].a : o;
+    int arr = vm->objs[o].kind == JK_ARRAY;
+    /* past a length that is not writable: none (ArrayDefineOwnProperty 3.g) */
+    if (arr && i >= vm->objs[o].b && (fl & (JO_LENGTH_RO | JO_FROZEN))) return 0;
+    px_desc cur;
+    int has = px_ordinary_own(vm, o, key, &cur);
+    if (has < 0) return -1;
+    if (!px_compatible(vm, (fl & JO_EXTENSIBLE) != 0, d, &cur, has)) return 0;
+    /* frozen, and compatible with itself: nothing to change */
+    if (fl & JO_FROZEN) return 1;
+    int acc = pd_accessor(d) || (!pd_data(d) && has && pd_accessor(&cur));
+    uint32_t enumerable = (d->has & PD_ENUMERABLE) ? d->enumerable : has ? cur.enumerable : 0;
+    uint32_t configurable = (d->has & PD_CONFIGURABLE) ? d->configurable : has ? cur.configurable : 0;
+    uint32_t writable = 0;
+    jv nv;
+    if (acc) {
+        jv g = (d->has & PD_GET) ? d->get : has && pd_accessor(&cur) ? cur.get : JV_UNDEF;
+        jv s = (d->has & PD_SET) ? d->set : has && pd_accessor(&cur) ? cur.set : JV_UNDEF;
+        uint32_t a = js_obj_new(vm, JK_ACCESSOR, 0);
+        vm->objs[a].x = g;
+        vm->objs[a].a = jv_is_obj(s) ? jv_idx(s) : 0;
+        nv = jv_obj(a);
+    } else {
+        writable = (d->has & PD_WRITABLE) ? d->writable : has && pd_data(&cur) ? cur.writable : 0;
+        nv = (d->has & PD_VALUE) ? d->value : has && pd_data(&cur) ? cur.value : JV_UNDEF;
+    }
+    uint32_t ef = 0;
+    int in_shape = 0;
+    int entry = js_shape_entry(vm, o, key, &ef, &in_shape);
+    /* the default attributes (a sealed object's non-configurable its flag's): a dense element */
+    if (!acc && writable && enumerable && (configurable || (fl & JO_SEALED))) {
+        if (in_shape) js_define(vm, o, key, JV_HOLE, ef);      /* no longer one of its own */
+        if (i >= vm->objs[st].b) js_array_set(vm, st, i, nv);
+        else vm->slots[vm->objs[st].a + i] = nv;
+        return 1;
+    }
+    /* else its own attributes, in the shape: the dense slot a hole, an array's length past it */
+    uint32_t nf = (enumerable ? 0 : JS_SHAPE_HIDDEN) | (configurable ? 0 : JS_SHAPE_FIXED) |
+                  (acc ? JS_SHAPE_ACCESSOR : writable ? 0 : JS_SHAPE_READONLY);
+    if (i < vm->objs[st].b) vm->slots[vm->objs[st].a + i] = JV_HOLE;
+    else if (arr) js_array_set_length(vm, o, i + 1);
+    vm->objs[o].flags |= JO_ELEMPROPS;
+    if (!entry) { js_define(vm, o, key, nv, nf); return 1; }
+    if (ef == nf) {
+        jv old = JV_UNDEF;
+        uint32_t of = 0;
+        if (acc && in_shape && js_get_own(vm, o, key, &old, &of)) {
+            /* the pair in place: its getter and setter given */
+            vm->objs[jv_idx(old)].x = vm->objs[jv_idx(nv)].x;
+            vm->objs[jv_idx(old)].a = vm->objs[jv_idx(nv)].a;
+        } else js_define(vm, o, key, nv, nf);
+        return 1;
+    }
+    /* other flags: the shape made again (a deleted entry is not in it: the element added) */
+    px_reshape(vm, o, key, nv, nf);
+    if (!in_shape) js_define(vm, o, key, nv, nf);
+    return 1;
+}
+
+static int px_length_define(js_vm *vm, uint32_t o, const px_desc *d) {
+    uint32_t fl = vm->objs[o].flags;
+    int ro = (fl & (JO_LENGTH_RO | JO_FROZEN)) != 0;
+    /* a data property, neither enumerable nor configurable, not writable again once not */
+    if (pd_accessor(d) || ((d->has & PD_CONFIGURABLE) && d->configurable) || ((d->has & PD_ENUMERABLE) && d->enumerable)) return 0;
+    if (ro && (d->has & PD_WRITABLE) && d->writable) return 0;
+    int make_ro = (d->has & PD_WRITABLE) && !d->writable;
+    if (d->has & PD_VALUE) {
+        double n = js_to_number(vm, d->value);
+        if (vm->throwing) return -1;
+        if (n != n || n < 0 || n != trunc(n) || n > 4294967295.0) { js_throw_msg(vm, vm->range_error_proto, "Invalid array length"); return -1; }
+        if (ro) return (uint32_t)n == vm->objs[o].b;
+        /* shorter: the elements past it deleted, a non-configurable one stopping it (vm->refused) */
+        int r = js_array_set_length_checked(vm, o, n);
+        if (r == 0) return -1;
+        if (r == 2) { if (make_ro) vm->objs[o].flags |= JO_LENGTH_RO; return 0; }
+    }
+    if (make_ro) vm->objs[o].flags |= JO_LENGTH_RO;
     return 1;
 }
 
@@ -434,6 +526,7 @@ static int px_own(js_vm *vm, uint32_t o, uint32_t key, px_desc *d) {
 
 /* [[DefineOwnProperty]] of any object: 1 done, 0 refused, -1 thrown */
 static int px_define_desc(js_vm *vm, uint32_t o, uint32_t key, const px_desc *d) {
+    vm->refused = JSR_NONE;
     if (vm->objs[o].kind != JK_PROXY) return px_ordinary_define(vm, o, key, d);
     jv t = px_trap(vm, o, "defineProperty");
     if (t == JV_HOLE) return -1;
@@ -561,21 +654,12 @@ static int px_set_proto(js_vm *vm, uint32_t o, jv np) {
     return 1;
 }
 
-/* the keys an object owns, strings (an array's length after its indices) then symbols:
-   OrdinaryOwnPropertyKeys, or the proxy's [[OwnPropertyKeys]] */
+/* the keys an object owns, strings (an array's length after its indices, js_own_keys's)
+   then symbols: OrdinaryOwnPropertyKeys, or the proxy's [[OwnPropertyKeys]] */
 static uint32_t px_own_keys_all(js_vm *vm, uint32_t o) {
     uint32_t arr = js_array_new(vm, 0);
-    uint32_t k = vm->objs[o].kind;
-    if (k == JK_PROXY) { js_proxy_own_keys(vm, o, 1, 1, 0, arr); return arr; }
+    if (vm->objs[o].kind == JK_PROXY) { js_proxy_own_keys(vm, o, 1, 1, 0, arr); return arr; }
     js_own_keys(vm, o, 0, arr);
-    if (k == JK_ARRAY || k == JK_STRING) {
-        /* length after the indices */
-        uint32_t n = vm->objs[arr].b, at = 0, idx;
-        while (at < n && js_atom_index(vm, js_atom(vm, jv_idx(js_array_get(vm, arr, at))), &idx)) at++;
-        js_array_push(vm, arr, JV_UNDEF);
-        for (uint32_t i = n; i > at; i--) js_array_set(vm, arr, i, js_array_get(vm, arr, i - 1));
-        js_array_set(vm, arr, at, jv_str(A_LENGTH));
-    }
     js_own_symbols(vm, o, arr);
     return arr;
 }
@@ -914,6 +998,19 @@ static int px_weak_key(js_vm *vm, jv k) {
 /* Object.defineProperty's refusal, in V8's words: a proxy's trap, or an ordinary object's */
 static jv px_define_refused(js_vm *vm, uint32_t o, uint32_t key) {
     if (vm->objs[o].kind == JK_PROXY) return px_error(vm, "'defineProperty' on proxy: trap returned falsish for property '", key, 1, "'", 0, 0, "");
+    if (vm->refused == JSR_DELETE) {
+        /* an array's length shortened to a non-configurable element: V8's words of the delete */
+        vm->refused = JSR_NONE;
+        vector<char> m;
+        const char *a = "Cannot delete property '";
+        append_range(m, a, strlen(a));
+        px_key_text(vm, vm->refused_key, &m);
+        const char *b = "' of ";
+        append_range(m, b, strlen(b));
+        js_value_text(vm, jv_obj(o), &m);
+        push_back(m, 0);
+        return js_throw_msg(vm, vm->type_error_proto, data(m));
+    }
     if (px_bad_index(vm, o, key)) return js_throw_msg(vm, vm->type_error_proto, "Invalid typed array index");
     px_desc cur;
     int h = px_ordinary_own(vm, o, key, &cur);
@@ -932,11 +1029,13 @@ static int px_integrity(js_vm *vm, uint32_t o, int frozen) {
     if (vm->throwing) return -1;
     for (uint32_t i = 0; i < vm->objs[keys].b; i++) {
         px_desc d;
-        int h = px_own(vm, o, px_key_of(vm, js_array_get(vm, keys, i)), &d);
+        uint32_t key = px_key_of(vm, js_array_get(vm, keys, i));
+        int h = px_own(vm, o, key, &d);
         if (h < 0) return -1;
         if (!h) continue;
         if (d.configurable) return 0;
-        if (frozen && pd_data(&d) && d.writable) return 0;
+        /* V8's: an array's length is not counted writable (its own accessor, to V8) */
+        if (frozen && pd_data(&d) && d.writable && !(key == A_LENGTH && vm->objs[o].kind == JK_ARRAY)) return 0;
     }
     return 1;
 }
@@ -975,15 +1074,28 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         return JV_UNDEF;
     }
     case JPX_R_APPLY: {
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+        if (!js_is_callable(vm, a0)) {
+            /* V8's words: the value's text, then its type with its article */
+            vector<char> m;
+            const char *pre = "Function.prototype.apply was called on ";
+            append_range(m, pre, strlen(pre));
+            js_value_text(vm, a0, &m);
+            const char *mid = a0 == JV_NULL ? ", which is null" : jv_is_obj(a0) ? ", which is an object" : ", which is a ";
+            append_range(m, mid, strlen(mid));
+            if (a0 != JV_NULL && !jv_is_obj(a0)) js_str_to_utf8(vm, js_typeof(vm, a0), &m);
+            const char *post = " and not a function";
+            append_range(m, post, strlen(post));
+            push_back(m, 0);
+            return js_throw_msg(vm, vm->type_error_proto, data(m));
+        }
         vector<jv> av;
         if (!px_list(vm, a2, &av)) return JV_HOLE;
         return js_call(vm, a0, a1, data(av), (uint32_t)len(av));
     }
     case JPX_R_CONSTRUCT: {
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a constructor", js_typeof(vm, a0));
+        if (!js_is_callable(vm, a0)) return js_not_constructor(vm, a0);
         jv nt = argc > 2 ? a2 : a0;
-        if (!js_is_callable(vm, nt)) return js_type_error(vm, "is not a constructor", js_typeof(vm, nt));
+        if (!js_is_callable(vm, nt)) return js_not_constructor(vm, nt);
         vector<jv> av;
         if (!px_list(vm, a1, &av)) return JV_HOLE;
         return js_construct(vm, a0, data(av), (uint32_t)len(av), nt);
@@ -1130,7 +1242,7 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         return vm->throwing ? JV_HOLE : jv_bool(r);
     }
     case JPX_R_SETPROTO: {
-        if (!jv_is_obj(a1) && a1 != JV_NULL) return js_throw_msg(vm, vm->type_error_proto, "Object prototype may only be an Object or null");
+        if (!jv_is_obj(a1) && a1 != JV_NULL) return px_error(vm, "Object prototype may only be an Object or null: ", 0, 0, "", a1, 1, "");
         int r = px_set_proto(vm, jv_idx(a0), a1);
         return r < 0 ? JV_HOLE : jv_bool(r);
     }
@@ -1289,4 +1401,21 @@ void js_proxy_init(js_vm *vm, uint32_t first) {
     px_tag(vm, vm->weakset_proto, "WeakSet");
     px_tag(vm, vm->weakref_proto, "WeakRef");
     px_tag(vm, vm->finreg_proto, "FinalizationRegistry");
+}
+
+int js_create_data_throw(js_vm *vm, jv obj, jv key, jv v) {
+    if (!jv_is_obj(obj)) { js_throw_msg(vm, vm->type_error_proto, "CreateDataProperty called on non-object"); return 0; }
+    int ok = 1;
+    uint32_t k = js_prop_key(vm, key, &ok);
+    if (!ok) return 0;
+    px_desc d;
+    memset(&d, 0, sizeof d);
+    d.get = d.set = JV_UNDEF;
+    d.has = PD_VALUE | PD_WRITABLE | PD_ENUMERABLE | PD_CONFIGURABLE;
+    d.value = v;
+    d.writable = d.enumerable = d.configurable = 1;
+    int r = px_define_desc(vm, jv_idx(obj), k, &d);
+    if (r < 0) return 0;
+    if (!r) { px_define_refused(vm, jv_idx(obj), k); return 0; }
+    return 1;
 }

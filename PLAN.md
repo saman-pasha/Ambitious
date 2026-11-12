@@ -772,6 +772,23 @@ be built side by side and merged without touching each other's.
     scripted page's console and facts held unchanged with a collection at
     every boundary, and memcheck clean so (`tests/integ/script-gc.sh`,
     `tests/exec/script_gc`).
+
+  Then (12p): `Function.prototype.toString` gives a function's source text,
+  the exact slice ECMA-262 2019 has (functions, arrows, methods, getters and
+  setters, classes, async functions and generators, `Function`'s and `eval`'s
+  code; a native's `function name() { [native code] }`, a bound function's
+  `function () { [native code] }`); a TypeError for calling, constructing,
+  iterating, destructuring or reading through what is no function or object
+  names the expression as V8's call printer writes it (each error site's span
+  kept with the code, the span parsed again when it throws: member chains,
+  calls, computed keys, `this`, optional chains, `super`), else the value in
+  V8's words; and an array's or an arguments object's elements keep
+  attributes of their own (`defineProperty`, `freeze`, `seal`,
+  `preventExtensions`, accessors, a non-configurable element stopping
+  `length`, a read-only `length` stopping appends), each built-in that writes
+  elements taking the standard's steps, which throw where V8 throws. Gates:
+  `tests/js/tostring.js`, `errors.js` and `array-attrs.js`, node's output line
+  for line.
 - **12h Scripts** (`src/script/`):
   - live node lists;
   - `getComputedStyle` and `getBoundingClientRect` over a style and layout

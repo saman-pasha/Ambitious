@@ -1,0 +1,172 @@
+desc plain {"value":1,"writable":true,"enumerable":true,"configurable":true}
+desc length {"value":2,"writable":true,"enumerable":false,"configurable":false}
+desc hole undefined
+desc undefined value {"writable":true,"enumerable":true,"configurable":true}
+ro elem [[1,2,3],{"value":2,"writable":false,"enumerable":true,"configurable":true}]
+ro elem strict TypeError: Cannot assign to read only property '1' of object '[object Array]'
+ro elem compound TypeError: Cannot assign to read only property '0' of object '[object Array]'
+ro elem increment [1,2]
+ro elem destructure TypeError: Cannot assign to read only property '1' of object '[object Array]'
+nonenum [["0","2"],"[1,2,3]",{"value":2,"writable":true,"enumerable":false,"configurable":true},false]
+for-in nonenum ["1","2"]
+names order [["0","1","3","5","length","x"],["0","1","5","x"]]
+nonconf delete [false,[1,2,3]]
+nonconf delete strict TypeError: Cannot delete property '1' of [object Array]
+hole then define [["x",1],{"value":"x","writable":false,"enumerable":false,"configurable":false},["1"]]
+redefine nonconf TypeError: Cannot redefine property: 0
+redefine nonconf same [1]
+redefine nonconf diff TypeError: Cannot redefine property: 0
+redefine back to plain [{"value":1,"writable":true,"enumerable":true,"configurable":true},["0","1"],[1,2]]
+defineProperties [["a",null,"c"],3,["2"],{"value":"a","writable":false,"enumerable":false,"configurable":false}]
+getOwnPropertyDescriptors {"0":{"value":1,"writable":true,"enumerable":true,"configurable":true},"1":{"value":2,"writable":false,"enumerable":false,"configurable":false},"length":{"value":2,"writable":true,"enumerable":false,"configurable":false}}
+hasOwnProperty [true,false,true,true,true]
+propertyIsEnumerable [true,false,false,false]
+reflect set ro [false,true,[3]]
+reflect delete nc [false,[1]]
+nonconf length shrink [[1,2],2]
+nonconf length shrink strict TypeError: Cannot delete property '1' of [object Array]
+nonconf defprop length TypeError: Cannot delete property '1' of [object Array]
+len shrink partial [3,["0","1","2"]]
+len shrink partial strict ["Cannot delete property '2' of [object Array]",3]
+length ro [[1,2],2,{"value":2,"writable":false,"enumerable":false,"configurable":false}]
+length ro strict TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro strict len TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro write in [7,2]
+length ro defprop beyond TypeError: Cannot define property 5, object is not extensible
+defprop length grow [[1,null,null],3]
+defprop length bad RangeError: Invalid array length
+defprop length getter TypeError: Cannot redefine property: length
+defprop length ro then rw TypeError: Cannot redefine property: length
+define past length [[1,null,null,4],4]
+getter elem [1,2,2,true,[3,2]]
+setter elem [5,null,[1,null]]
+getter beyond [4,"x",[1,null,null,"x"],["0","3"]]
+getter only strict set TypeError: Cannot set property 0 of [object Array] which has only a getter
+getter this 2
+in operator [false,true,3,true]
+spread getter ["g",2]
+for-of getter [1,"g"]
+destructure getter [1,"g"]
+join getter "1-g"
+indexOf getter [1,1,true]
+slice getter [[1,"g",null,4],false,4]
+concat getter [1,"g",3]
+map getter [20,4]
+reduce getter 33
+apply getter 5
+freeze set [1,2]
+freeze set strict TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze set new strict TypeError: Cannot add property 2, object is not extensible
+freeze length [[1,2],{"value":2,"writable":false,"enumerable":false,"configurable":false},{"value":1,"writable":false,"enumerable":true,"configurable":false}]
+freeze length strict TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+freeze delete [false,[1,2]]
+freeze delete strict TypeError: Cannot delete property '0' of [object Array]
+freeze desc [{"value":1,"writable":false,"enumerable":true,"configurable":false},true,true,false]
+freeze defprop TypeError: Cannot define property 1, object is not extensible
+freeze holes [[1,null,3],false,["0","2"]]
+seal desc [[5,2],{"value":5,"writable":true,"enumerable":true,"configurable":false},{"value":2,"writable":true,"enumerable":false,"configurable":false},false,true]
+seal length [1,2]
+seal length strict TypeError: Cannot delete property '1' of [object Array]
+seal defprop ro [{"value":1,"writable":false,"enumerable":true,"configurable":false},false]
+seal all ro is frozen true
+pe set [7,2]
+pe set strict TypeError: Cannot add property 2, object is not extensible
+pe empty frozen [true,true,true]
+pe all nonconf [true,true]
+assign frozen TypeError: Cannot assign to read only property '0' of object '[object Array]'
+assign ro elem TypeError: Cannot assign to read only property '1' of object '[object Array]'
+length ro push TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro pop TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro shift TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro unshift TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+length ro splice TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+freeze push TypeError: Cannot add property 2, object is not extensible
+freeze push none TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+freeze pop TypeError: Cannot delete property '1' of [object Array]
+freeze shift TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze unshift TypeError: Cannot add property 2, object is not extensible
+freeze splice TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze splice0 TypeError: Cannot assign to read only property 'length' of object '[object Array]'
+freeze sort TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze sort1 [1]
+freeze reverse TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze fill TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze fill empty []
+freeze copyWithin TypeError: Cannot assign to read only property '0' of object '[object Array]'
+freeze copyWithin nothing [1,2,3]
+seal push TypeError: Cannot add property 2, object is not extensible
+seal pop TypeError: Cannot delete property '1' of [object Array]
+seal sort [1,2,3]
+seal reverse [2,1]
+seal fill [0,0]
+seal copyWithin [2,3,3]
+seal splice same size [[2],[1,"x",3]]
+pe push TypeError: Cannot add property 2, object is not extensible
+pe pop [[1],false,false]
+pe unshift TypeError: Cannot add property 2, object is not extensible
+ro reverse TypeError: Cannot assign to read only property '0' of object '[object Array]'
+ro sort TypeError: Cannot assign to read only property '0' of object '[object Array]'
+ro fill TypeError: Cannot assign to read only property '1' of object '[object Array]'
+ro splice TypeError: Cannot assign to read only property '1' of object '[object Array]'
+ro shift TypeError: Cannot assign to read only property '1' of object '[object Array]'
+ro unshift TypeError: Cannot assign to read only property '1' of object '[object Array]'
+ro pop [1,2]
+ro copyWithin TypeError: Cannot assign to read only property '0' of object '[object Array]'
+ro push at [1,2,3,4,5]
+nc pop TypeError: Cannot delete property '2' of [object Array]
+nc shift TypeError: Cannot delete property '2' of [object Array]
+splice nc TypeError: Cannot delete property '2' of [object Array]
+sort ro getter TypeError: Cannot set property 1 of [object Array] which has only a getter
+sort setter [[1],[3,2,3]]
+reverse holes [[null,3,null,1],["1","3"]]
+error leaves done [0,0,3,4]
+from frozen TypeError: Cannot redefine property: 0
+from into frozen TypeError: Cannot define property 0, object is not extensible
+of frozen TypeError: Cannot define property 0, object is not extensible
+of sealed length TypeError: Cannot redefine property: 0
+concat frozen [1,2]
+slice frozen [1,2]
+map frozen [2,3]
+copyWithin [[4,5,3,4,5],[1,1,2,3,5],[1,2,3,1,2],[null,3,3]]
+copyWithin holes [[1,null,null],false]
+splice none [[],[1,2,3]]
+splice holes [[1,null],false,[3,4]]
+like push {"0":"a","1":"b","2":"c","length":3}
+like pop ["b",{"0":"a","length":1}]
+like shift ["a",{"1":"c","length":2}]
+like unshift [3,{"0":"z","1":"a","2":"b","length":3}]
+like splice [["b"],{"0":"a","1":"x","2":"y","3":"c","length":4}]
+like reverse {"0":"c","2":"a","length":3}
+like sort {"0":"a","1":"b","2":"c","length":3}
+like fill {"0":7,"1":7,"length":2}
+like copyWithin {"1":"c","2":"c","length":3}
+like frozen push TypeError: Cannot add property 0, object is not extensible
+like length setter [[2],"x"]
+like indexOf [-1,true]
+like forEach 1
+like find 3
+string slice ["b","c"]
+string forEach ["a","b"]
+holes reduce [4,5,4]
+holes reduce empty TypeError: Reduce of empty array with no initial value
+holes flat [[1,3],[1,2,3]]
+holes findLast 3
+holes lastIndexOf -1
+args ro "Cannot assign to read only property '0' of object '#<Object>'"
+args sloppy ro [1,{"value":1,"writable":false,"enumerable":true,"configurable":true}]
+args freeze [1,1,true,{"value":1,"writable":false,"enumerable":true,"configurable":false},{"value":1,"writable":false,"enumerable":false,"configurable":false}]
+args freeze strict TypeError: Cannot assign to read only property '0' of object '#<Object>'
+args seal [1,{"value":1,"writable":true,"enumerable":true,"configurable":false}]
+args nonenum ["1"]
+args getter ["G",["G",2]]
+args desc [{"value":1,"writable":true,"enumerable":true,"configurable":true},{"value":1,"writable":true,"enumerable":false,"configurable":true},"function"]
+args write [2,1,4]
+args pe [null,false]
+args in [true,false,true,true,true]
+args delete [false,2,["1"]]
+args keys [["0","1","5","x"],["0","1","5","length","callee","x"]]
+args push [3,"c",["a","b","c"]]
+args sort {"0":1,"1":2,"2":3}
+args frozen push TypeError: Cannot add property 1, object is not extensible
+args spread [1,"g"]
+args length ro TypeError: Cannot assign to read only property 'length' of object '#<Object>'

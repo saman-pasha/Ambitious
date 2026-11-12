@@ -1,0 +1,391 @@
+TypeError: f.reset is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a[0] is not a function
+TypeError: obj.a[1.5] is not a function
+TypeError: obj.a[-1] is not a function
+TypeError: obj.a[obj.s] is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a b is not a function
+TypeError: obj.x is not a function
+TypeError: obj[1] is not a function
+TypeError: obj.0 is not a function
+TypeError: obj.s is not a function
+TypeError: obj[a] is not a function
+TypeError: obj[(a + 1)] is not a function
+TypeError: obj[obj.f(...)] is not a function
+TypeError: obj[(1 , 2)] is not a function
+TypeError: obj.a[0] is not a function
+TypeError: obj.a[1e+21] is not a function
+TypeError: obj.a[0.1] is not a function
+TypeError: obj.a[true] is not a function
+TypeError: obj.a[null] is not a function
+TypeError: obj.a[undefined] is not a function
+TypeError: obj.a[{}] is not a function
+TypeError: obj.a[[1]] is not a function
+TypeError: x is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a.c is not a function
+TypeError: Cannot read properties of undefined (reading 'd')
+TypeError: Cannot read properties of undefined (reading 'd')
+TypeError: f.reset is not a function
+TypeError: (intermediate value)(...) is not a function
+TypeError: [1,2][0] is not a function
+TypeError: [1,(intermediate value),2] is not a function
+TypeError: [(...[1])] is not a function
+TypeError: {}.x is not a function
+TypeError: {(intermediate value)(intermediate value)}.x is not a function
+TypeError: {(intermediate value)}.x is not a function
+TypeError: {(intermediate value)}.x is not a function
+TypeError: {(intermediate value)}.x is not a function
+TypeError: "abc" is not a function
+TypeError: "abc".foo is not a function
+TypeError: "a"b" is not a function
+TypeError: "it's" is not a function
+TypeError: "line
+break" is not a function
+TypeError: 5.foo is not a function
+TypeError: 5.foo is not a function
+TypeError: (intermediate value) is not a function
+TypeError: null is not a function
+TypeError: undefined is not a function
+TypeError: true is not a function
+TypeError: /re/g.foo is not a function
+TypeError: /x/gimsuy.foo is not a function
+TypeError: (intermediate value).foo is not a function
+TypeError: (intermediate value)(intermediate value).foo is not a function
+TypeError: (intermediate value).foo is not a function
+TypeError: (intermediate value)(intermediate value).x is not a function
+TypeError: (intermediate value).foo is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a.b is not a function
+TypeError: obj.a.b.c is not a function
+TypeError: x is not a function
+TypeError: xa is not a function
+TypeError: "plain" is not a function
+TypeError: (intermediate value)(intermediate value)(intermediate value) is not a function
+TypeError: obj.a is not a function
+TypeError: (obj.a , obj.num) is not a function
+TypeError: (0 , obj.a.b) is not a function
+TypeError: obj.a.b is not a function
+TypeError: (obj.a.b || obj.a.c) is not a function
+TypeError: (obj.a.b && 1) is not a function
+TypeError: 3 is not a function
+TypeError: ("a" + "b") is not a function
+TypeError: (3 + x) is not a function
+TypeError: (a + b + c) is not a function
+TypeError: (a + b + c) is not a function
+TypeError: (a + (b + c)) is not a function
+TypeError: (a - b - c) is not a function
+TypeError: ((a + b) - c) is not a function
+TypeError: ((a < b) < c) is not a function
+TypeError: (a || b || c) is not a function
+TypeError: ((a && b) || c) is not a function
+TypeError: (a ?? b ?? c) is not a function
+TypeError: (a ** (b ** c)) is not a function
+TypeError: ((a * b) + c) is not a function
+TypeError: (-obj.num) is not a function
+TypeError: -5 is not a function
+TypeError: true is not a function
+TypeError: -2 is not a function
+TypeError: 5 is not a function
+TypeError: (-x) is not a function
+TypeError: (typeof obj) is not a function
+TypeError: (void 0) is not a function
+TypeError: (!obj) is not a function
+TypeError: (obj.num++) is not a function
+TypeError: (++obj.num) is not a function
+TypeError: a is not a function
+TypeError: a is not a function
+TypeError: a is not a function
+TypeError: obj.a.b is not a function
+TypeError: (a , b , c) is not a function
+TypeError: (intermediate value)(intermediate value)(intermediate value) is not a function
+TypeError: (intermediate value)(...) is not a function
+TypeError: (intermediate value)(...) is not a function
+TypeError: this.foo is not a function
+TypeError: this.foo is not a function
+TypeError: Cannot read properties of undefined (reading 'foo')
+TypeError: obj?.a.c is not a function
+TypeError: obj.a?.c is not a function
+TypeError: obj.a?.c is not a function
+no error
+no error
+no error
+TypeError: obj.a?.[0] is not a function
+TypeError: Cannot read properties of undefined (reading 'c')
+no error
+TypeError: Cannot read properties of undefined (reading 'call')
+TypeError: globalThis.u is not a function
+TypeError: obj.u is not a function
+TypeError: Cannot read properties of undefined (reading 'v')
+TypeError: obj.u is not a function
+TypeError: eval is not a function
+TypeError: Cannot read properties of undefined (reading 'y')
+TypeError: Cannot read properties of undefined (reading 'x')
+TypeError: Cannot read properties of null (reading 'x')
+TypeError: Cannot read properties of undefined (reading '0')
+TypeError: Cannot read properties of undefined (reading 'Symbol(q)')
+TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Cannot set properties of undefined (setting 'x')
+TypeError: Cannot set properties of null (setting 'y')
+TypeError: Cannot set properties of undefined (setting '0')
+TypeError: Cannot set properties of undefined (setting 'x')
+ReferenceError: undefinedVar is not defined
+TypeError: Cannot read properties of undefined (reading 'y')
+TypeError: Cannot read properties of undefined (reading 'x')
+TypeError: Cannot read properties of undefined (reading '0')
+TypeError: w is not a function
+TypeError: Cannot read properties of undefined (reading 'x')
+TypeError: Cannot read properties of null (reading 'x')
+TypeError: obj.u is not a function
+TypeError: obj.n is not a function
+TypeError: x is not a constructor
+TypeError: obj.a.b is not a constructor
+TypeError: obj.a.b is not a constructor
+TypeError: obj.a.b is not a constructor
+TypeError: Cannot read properties of undefined (reading 'c')
+TypeError: obj.a is not a constructor
+TypeError: obj.num is not a constructor
+TypeError: (intermediate value) is not a constructor
+TypeError: obj.arr.map is not a constructor
+TypeError: Math.max is not a constructor
+TypeError: obj.a.b is not a function
+TypeError: (intermediate value).m is not a constructor
+TypeError: k.m is not a constructor
+TypeError: g is not a constructor
+TypeError: g is not a constructor
+TypeError: Symbol is not a constructor
+TypeError: BigInt is not a constructor
+TypeError: obj.num is not iterable
+TypeError: obj.o is not iterable
+TypeError: obj.u is not iterable
+TypeError: obj.n is not iterable
+TypeError: 5 is not iterable
+TypeError: obj.a.b is not iterable
+TypeError: obj.f is not a function or its return value is not iterable
+TypeError: obj.g is not a function or its return value is not iterable
+TypeError: obj.o.f is not a function or its return value is not iterable
+TypeError: obj.f is not a constructor
+TypeError: (0 , v) is not iterable
+TypeError: (v + 1) is not iterable
+TypeError: this is not iterable
+TypeError: {} is not iterable
+TypeError: [5][0] is not iterable
+TypeError: obj.num is not iterable
+TypeError: obj.u is not iterable
+TypeError: obj.o is not iterable
+TypeError: 5 is not iterable
+TypeError: obj.f is not a function or its return value is not iterable
+TypeError: obj.g is not a function or its return value is not iterable
+TypeError: v is not iterable
+TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+TypeError: obj.u is not iterable (cannot read property undefined)
+TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+TypeError: obj.n is not iterable (cannot read property null)
+TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+TypeError: obj.g(...) is not iterable (cannot read property undefined)
+TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+TypeError: u is not iterable (cannot read property undefined)
+TypeError: it is not iterable
+TypeError: Result of the Symbol.iterator method is not an object
+TypeError: undefined is not a function
+TypeError: number 5 is not a function
+TypeError: Iterator result 5 is not an object
+TypeError: it is not iterable
+TypeError: Iterator result 5 is not an object
+TypeError: Iterator result 5 is not an object
+TypeError: Result of the Symbol.iterator method is not an object
+TypeError: Result of the Symbol.iterator method is not an object
+TypeError: yield* (intermediate value) is not iterable
+TypeError: yield* (intermediate value) is not iterable
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: yield* (intermediate value) is not iterable
+no error
+no error
+no error
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Iterator value 1 is not an entry object
+TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+no error
+TypeError: number 5 is not a function
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+no error
+TypeError: number 7 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: 5 is not iterable
+TypeError: v is not iterable
+TypeError: u is not iterable
+TypeError: n is not iterable
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: this is not iterable
+TypeError: number 3 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: {} is not iterable
+TypeError: null is not iterable
+TypeError: undefined is not iterable
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 7 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: .for is not iterable
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: number 3 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Cannot destructure property 'p' of 'obj.u' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'obj.n' as it is null.
+TypeError: Cannot destructure property 'p' of 'u' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'n' as it is null.
+TypeError: Cannot destructure property 'p' of 'null' as it is null.
+TypeError: Cannot destructure property 'p' of 'obj.g(...)' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'obj.u' as it is undefined.
+no error
+TypeError: Cannot destructure 'u' as it is undefined.
+TypeError: Cannot destructure 'u' as it is undefined.
+TypeError: Cannot destructure 'u' as it is undefined.
+TypeError: Cannot destructure 'u' as it is undefined.
+TypeError: Cannot destructure 'obj.u' as it is undefined.
+TypeError: Cannot destructure 'null' as it is null.
+TypeError: Cannot destructure property 'p' of 'undefined' as it is undefined.
+no error
+TypeError: Cannot read properties of undefined (reading 'b')
+TypeError: Cannot read properties of null (reading 'b')
+TypeError: Cannot read properties of undefined (reading 'p')
+TypeError: {(intermediate value)} is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Cannot destructure property 'p' of '.for' as it is undefined.
+TypeError: Cannot destructure property 'p' of '.for' as it is null.
+TypeError: Cannot destructure property 'p' of 'u' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'obj.u' as it is undefined.
+TypeError: Cannot destructure 'obj.u' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'undefined' as it is undefined.
+TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Cannot destructure property 'p' of 'object null' as it is null.
+TypeError: Cannot destructure property 'p' of 'undefined' as it is undefined.
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Cannot destructure property 'p' of 'undefined' as it is undefined.
+TypeError: Cannot destructure property 'p' of 'undefined' as it is undefined.
+TypeError: Cannot destructure property 'p' of '(intermediate value)(intermediate value)(intermediate value)' as it is null.
+TypeError: Cannot destructure property 'p' of '.catch' as it is undefined.
+TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+TypeError: Class constructor A cannot be invoked without 'new'
+TypeError: Class constructor A cannot be invoked without 'new'
+TypeError: Class constructor A cannot be invoked without 'new'
+TypeError: Class constructors cannot be invoked without 'new'
+TypeError: Class constructor Q cannot be invoked without 'new'
+TypeError: Class constructor C cannot be invoked without 'new'
+TypeError: Class extends value 7 is not a constructor or null
+TypeError: Class extends value #<Object> is not a constructor or null
+TypeError: Class extends value [object Array] is not a constructor or null
+TypeError: Class extends value abc is not a constructor or null
+TypeError: Class extends value Symbol(q) is not a constructor or null
+TypeError: Class extends value () => 1 is not a constructor or null
+TypeError: Class extends value m() {} is not a constructor or null
+TypeError: Class extends value undefined is not a constructor or null
+TypeError: Class extends value 5 is not a constructor or null
+TypeError: Class extends value Error: x is not a constructor or null
+TypeError: Class extends value #<Object> is not a constructor or null
+TypeError: Class extends value does not have valid prototype property 5
+ReferenceError: Cannot access 'B' before initialization
+TypeError: Super constructor null of A is not a constructor
+TypeError: Super constructor null of anonymous class is not a constructor
+TypeError: Super constructor null of X is not a constructor
+no error
+TypeError: Super constructor #<Object> of A is not a constructor
+TypeError: (intermediate value).foo is not a function
+TypeError: (intermediate value).foo is not a function
+TypeError: (intermediate value).foo is not a function
+TypeError: Cannot read properties of undefined (reading 'bar')
+TypeError: (intermediate value).x is not a function
+TypeError: this.x is not a function
+ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+ReferenceError: Super constructor may only be called once
+ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+TypeError: .new.target is not a function
+TypeError: Cannot use 'in' operator to search for 'x' in 5
+TypeError: Cannot use 'in' operator to search for 'x' in undefined
+TypeError: Cannot use 'in' operator to search for 'x' in null
+TypeError: Cannot use 'in' operator to search for 'x' in abc
+TypeError: Cannot use 'in' operator to search for 'Symbol(s)' in 5
+TypeError: Cannot use 'in' operator to search for '1' in true
+no error
+TypeError: Right-hand side of 'instanceof' is not callable
+TypeError: Right-hand side of 'instanceof' is not an object
+TypeError: Function has non-object prototype 'undefined' in instanceof check
+TypeError: Right-hand side of 'instanceof' is not callable
+TypeError: Right-hand side of 'instanceof' is not an object
+TypeError: Function has non-object prototype 'undefined' in instanceof check
+TypeError: number 5 is not a function
+TypeError: Cannot convert a Symbol value to a string
+TypeError: Assignment to constant variable.
+TypeError: Assignment to constant variable.
+TypeError: Assignment to constant variable.
+TypeError: Assignment to constant variable.
+ReferenceError: Cannot access 'x1' before initialization
+ReferenceError: Cannot access 'x3' before initialization
+ReferenceError: Cannot access 'x5' before initialization
+no error
+TypeError: number 5 is not a function
+TypeError: undefined is not a function
+TypeError: object is not a function
+TypeError: string "abc" is not a function
+TypeError: object null is not a function
+TypeError: number 1 is not a function
+TypeError: Promise resolver 5 is not a function
+TypeError: Promise resolver #<Object> is not a function
+TypeError: Promise resolver undefined is not a function
+TypeError: number 5 is not a function
+TypeError: number 5 is not a function
+TypeError: string "s" is not a function
+TypeError: The comparison function must be either a function or undefined: 5
+TypeError: number 5 is not a function
+TypeError: object is not a function
+TypeError: number 5 is not a function
+TypeError: number 5 is not a function
+TypeError: 5 is not a function
+TypeError: number 5 is not a function
+TypeError: number 5 is not a function
+TypeError: symbol is not a function
+TypeError: bigint is not a function
+TypeError: boolean true is not a function
+TypeError: object is not a function
+TypeError: object is not a function
+TypeError: object is not a function
+TypeError: string "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa<...>" is not a function
+TypeError: number 5 is not a function
+TypeError: Cannot read properties of undefined (reading 'call')
+TypeError: Cannot read properties of undefined (reading 'apply')
+TypeError: Cannot read properties of undefined (reading 'bind')
+TypeError: Function.prototype.call.call is not a function
+TypeError: Function.prototype.apply.call is not a function
+TypeError: Bind must be called on a function
+TypeError: Function.prototype.apply was called on 5, which is a number and not a function
+TypeError: 5 is not a constructor
+TypeError: Invalid value used as weak map key
+TypeError: '5' returned for property 'get' of object '#<Object>' is not a function
+TypeError: String.prototype.replace called on null or undefined
+TypeError: Array.prototype.forEach called on null or undefined
+TypeError: Array.prototype.map called on null or undefined
+TypeError: Array.prototype.concat called on null or undefined
+TypeError: Cannot convert undefined or null to object
+TypeError: Object.defineProperty called on non-object
+TypeError: Property description must be an object: 1
+TypeError: Object prototype may only be an Object or null: 5
+TypeError: Object prototype may only be an Object or null: 5
+TypeError: Object prototype may only be an Object or null: 5
+TypeError: Cannot convert undefined or null to object
+TypeError: Cannot convert undefined or null to object
+TypeError: Cannot convert undefined or null to object
+TypeError: Cannot convert undefined or null to object
+TypeError: Array.prototype.some called on null or undefined
+TypeError: The comparison function must be either a function or undefined: 5
+TypeError: Cannot convert undefined or null to object
+TypeError: Array.prototype.map called on null or undefined
+async 5 is not async iterable
+async2 obj.f(...) is not a function or its return value is not async iterable
+async3 Cannot read properties of undefined (reading 'Symbol(Symbol.asyncIterator)')
+all number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
