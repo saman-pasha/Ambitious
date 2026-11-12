@@ -310,13 +310,14 @@ static jv so_record(js_vm *vm, const sh_mrec *rec) {
     if (rec->type == SO_T_ATTR) {
         /* the local name: the qualified name's part after its prefix */
         size_t nl = names_len(d, rec->name), k = 0;
-        const char *np = names_ptr(d, rec->name);
-        if (rec->ns) for (size_t i = 0; i < nl; i++) if (np[i] == ':') k = i + 1;
-        name = sh_str(vm, np + k, nl - k);
+        vector<char> nb;    /* the name copied first: the document is reached through the vm, which sh_str may grow */
+        append_range(nb, names_ptr(d, rec->name), nl);
+        if (rec->ns) for (size_t i = 0; i < nl; i++) if (at(nb, i) == ':') k = i + 1;
+        name = sh_str(vm, data(nb) + k, nl - k);
         static const char *const spaces[] = { "", "http://www.w3.org/1999/xlink", "http://www.w3.org/XML/1998/namespace", "http://www.w3.org/2000/xmlns/" };
         if (rec->ns && rec->ns < 4) ns = sh_cstr(vm, spaces[rec->ns]);
     }
-    if (rec->had) old = sh_str(vm, text_ptr(d, rec->old), rec->old.len);
+    if (rec->had) old = sh_span(vm, d, rec->old);
     so_def(vm, o, "attributeName", name);
     so_def(vm, o, "attributeNamespace", ns);
     so_def(vm, o, "oldValue", old);

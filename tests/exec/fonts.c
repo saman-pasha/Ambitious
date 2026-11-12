@@ -129,7 +129,7 @@ int main(void) {
         int by;
         uint32_t g = amb_glyph_of(&f, in[k], cps[k], &by);
         printf("U+%04X in face %d: drawn by face %d (its U+%04X), %.4f px; kerning after 'A' %.4f\n", cps[k], in[k], by,
-               g, amb_advance(&f, in[k], cps[k], 16), amb_kern(&f, in[k], 'A', cps[k], 16));
+               g, amb_advance(&f, in[k], cps[k], 16), amb_kerning(&f, in[k], 'A', cps[k], 16));
     }
     /* (the escape ends before the A: "\x85A" would be one escape) */
     printf("'A\u2605A' in face %d: %.4f px\n", AMB_FACE_SANS, amb_text_width(&f, AMB_FACE_SANS, 16, "A\xe2\x98\x85" "A", 5));

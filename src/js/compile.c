@@ -72,7 +72,7 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
    (src/js/js.h's js_site): a call's callee, new's, a spread's operand (N_SPREAD), a
    for-of's value (N_FORIN), a declaration's initializer (N_DECL), an assignment's value
    (N_ASSIGN), from pos to d */
-typedef struct jn { uint16_t k, op; uint32_t a, b, c, d, line, s, pos; double num; } jn;
+typedef struct jnode { uint16_t k, op; uint32_t a, b, c, d, line, s, pos; double num; } jnode;
 
 /* SC_EVAL: an eval's top-level lexical scope, its var and function declarations hoisted
    past it to the scope beneath */
@@ -110,7 +110,7 @@ typedef struct jmimp { uint32_t req, name, decl; } jmimp;
 typedef struct jmexp { uint32_t kind, name, local, req, import; } jmexp;
 
 typedef struct js_cc {
-    vector<jn> nodes;
+    vector<jnode> nodes;
     vector<uint32_t> lists;
     vector<uint32_t> tmp;
     vector<jscope> scopes;
@@ -145,7 +145,7 @@ typedef struct js_cc {
     char errmsg[240];
 } js_cc;
 
-#define JS_CC_DROP(c) vector_jn_drop(&(c).nodes); vector_uint32_t_drop(&(c).lists); vector_uint32_t_drop(&(c).tmp); \
+#define JS_CC_DROP(c) vector_jnode_drop(&(c).nodes); vector_uint32_t_drop(&(c).lists); vector_uint32_t_drop(&(c).tmp); \
     vector_jscope_drop(&(c).scopes); vector_jdecl_drop(&(c).decls); vector_jref_drop(&(c).refs); vector_jfn_drop(&(c).fns); \
     vector_jclass_drop(&(c).classes); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
     vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names)
@@ -530,7 +530,7 @@ static void semi(CC) {
 }
 
 static uint32_t node(js_cc *cc, uint32_t k, uint32_t line) {
-    jn n;
+    jnode n;
     memset(&n, 0, sizeof n);
     n.k = (uint16_t)k;
     n.line = line;
@@ -539,11 +539,14 @@ static uint32_t node(js_cc *cc, uint32_t k, uint32_t line) {
 }
 
 /* a list built on the scratch stack from mark: into the lists, (offset, count) */
-static void list_take(js_cc *cc, size_t mark, uint32_t *off, uint32_t *count) {
-    *off = (uint32_t)len(cc->lists);
-    *count = (uint32_t)(len(cc->tmp) - mark);
+/* the list a parse gathered in cc->tmp from mark on, moved into cc->lists: where it starts there and how long it is
+   (returned, not written through pointers into cc's own stores, which a call that grows them may move) */
+typedef struct jlist { uint32_t off, count; } jlist;
+static jlist list_take(js_cc *cc, size_t mark) {
+    jlist r = { (uint32_t)len(cc->lists), (uint32_t)(len(cc->tmp) - mark) };
     for (size_t i = mark; i < len(cc->tmp); i++) push_back(cc->lists, at(cc->tmp, i));
     resize(cc->tmp, mark);
+    return r;
 }
 
 static uint32_t scope_new(js_cc *cc, uint32_t kind) {
@@ -700,7 +703,9 @@ static void p_params(CC, uint32_t fi) {
     }
     expect_p(CCA, P_RPAREN, "')' after the parameters");
     cc->fns[fi].flags &= ~(uint32_t)FN_PARAMS;
-    list_take(cc, mark, &cc->fns[fi].params, &cc->fns[fi].nparams);
+    jlist pl = list_take(cc, mark);
+    cc->fns[fi].params = pl.off;
+    cc->fns[fi].nparams = pl.count;
     cc->fns[fi].nformal = formal;
 }
 
@@ -719,7 +724,7 @@ static int in_async(js_cc *cc) {
 static void p_statements(CC, uint32_t *off, uint32_t *count) {
     size_t mark = len(cc->tmp);
     while (!is_p(cc, P_RBRACE) && cc->tok.type != T_EOF && !cc->err) push_back(cc->tmp, p_stmt(CCA));
-    list_take(cc, mark, off, count);
+    { jlist tl_ = list_take(cc, mark); *off = tl_.off; *count = tl_.count; }
 }
 
 /* a body's statements to its closing brace (not taken) or the script's end: a
@@ -733,7 +738,7 @@ static void p_body(CC, uint32_t fi, uint32_t *off, uint32_t *count) {
         uint32_t st = p_stmt(CCA);
         push_back(cc->tmp, st);
         if (!prologue) continue;
-        jn sn = cc->nodes[st];
+        jnode sn = cc->nodes[st];
         if (t.type != T_STR || sn.k != N_EXPR || cc->nodes[sn.a].k != N_STR) { prologue = 0; continue; }
         /* the directive as written: no escape, no parentheses */
         const char *ds = "use strict";
@@ -741,7 +746,7 @@ static void p_body(CC, uint32_t fi, uint32_t *off, uint32_t *count) {
         for (uint32_t i = 0; is_strict && i < 10; i++) if (src[t.start + 1 + i] != ds[i]) is_strict = 0;
         if (is_strict) cc->fns[fi].flags |= JF_STRICT;
     }
-    list_take(cc, mark, off, count);
+    { jlist tl_ = list_take(cc, mark); *off = tl_.off; *count = tl_.count; }
 }
 
 static uint32_t fn_new(js_cc *cc, uint32_t name, uint32_t flags, uint32_t line, uint32_t start) {
@@ -843,7 +848,7 @@ static uint32_t p_name_arrow(CC, uint32_t a, uint32_t flags, uint32_t line, uint
     cc->nodes[p].a = ident_node(CCA, a, line);
     size_t mark = len(cc->tmp);
     push_back(cc->tmp, p);
-    list_take(cc, mark, &cc->fns[fi].params, &cc->fns[fi].nparams);
+    { jlist tl_ = list_take(cc, mark); cc->fns[fi].params = tl_.off; cc->fns[fi].nparams = tl_.count; }
     cc->fns[fi].nformal = 1;
     cc->cur_fn = saved_fn;
     cc->cur_scope = saved_scope;
@@ -919,7 +924,7 @@ static uint32_t p_template(CC) {
         lx_template(CCA, cc->tok.start + 1);
         if (cc->err) break;
     }
-    list_take(cc, mark, &cc->nodes[n].a, &cc->nodes[n].b);
+    { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
     return n;
 }
 
@@ -940,7 +945,7 @@ static uint32_t p_array(CC) {
         if (!is_p(cc, P_RBRACK)) expect_p(CCA, P_COMMA, "',' between array elements");
     }
     expect_p(CCA, P_RBRACK, "']'");
-    list_take(cc, mark, &cc->nodes[n].a, &cc->nodes[n].b);
+    { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
     return n;
 }
 
@@ -1013,7 +1018,7 @@ static uint32_t p_object(CC) {
         if (!is_p(cc, P_RBRACE)) expect_p(CCA, P_COMMA, "',' between properties");
     }
     expect_p(CCA, P_RBRACE, "'}'");
-    list_take(cc, mark, &cc->nodes[n].a, &cc->nodes[n].b);
+    { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
     return n;
 }
 
@@ -1043,7 +1048,7 @@ static uint32_t to_pattern(CC, uint32_t e) {
             }
             push_back(cc->tmp, pe);
         }
-        list_take(cc, mark, &cc->nodes[p].a, &cc->nodes[p].b);
+        { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
     if (k == N_OBJECT) {
@@ -1065,7 +1070,7 @@ static uint32_t to_pattern(CC, uint32_t e) {
             } else cc_error(cc, cc->nodes[pr].line, "a method is no destructuring target");
             push_back(cc->tmp, pe);
         }
-        list_take(cc, mark, &cc->nodes[p].a, &cc->nodes[p].b);
+        { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
     if (k == N_PATTERN_ARR || k == N_PATTERN_OBJ || k == N_PELEM) return e;
@@ -1097,7 +1102,7 @@ static uint32_t p_binding(CC, uint32_t kind) {
             if (!is_p(cc, P_RBRACK)) expect_p(CCA, P_COMMA, "',' in an array pattern");
         }
         expect_p(CCA, P_RBRACK, "']'");
-        list_take(cc, mark, &cc->nodes[p].a, &cc->nodes[p].b);
+        { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
     if (is_p(cc, P_LBRACE)) {
@@ -1128,7 +1133,7 @@ static uint32_t p_binding(CC, uint32_t kind) {
             if (!is_p(cc, P_RBRACE)) expect_p(CCA, P_COMMA, "',' in an object pattern");
         }
         expect_p(CCA, P_RBRACE, "'}'");
-        list_take(cc, mark, &cc->nodes[p].a, &cc->nodes[p].b);
+        { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
     cc_error(cc, line, "expected a name or a pattern");
@@ -1152,7 +1157,7 @@ static uint32_t p_args(CC, uint32_t n) {
         if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between arguments");
     }
     expect_p(CCA, P_RPAREN, "')' after the arguments");
-    list_take(cc, mark, &cc->nodes[n].b, &cc->nodes[n].c);
+    { jlist tl_ = list_take(cc, mark); cc->nodes[n].b = tl_.off; cc->nodes[n].c = tl_.count; }
     return n;
 }
 
@@ -1393,7 +1398,7 @@ static uint32_t p_call(CC) {
             size_t mark = len(cc->tmp);
             push_back(cc->tmp, t);
             for (uint32_t i = 1; i < cc->nodes[t].b; i += 2) push_back(cc->tmp, cc->lists[cc->nodes[t].a + i]);
-            list_take(cc, mark, &cc->nodes[n].b, &cc->nodes[n].c);
+            { jlist tl_ = list_take(cc, mark); cc->nodes[n].b = tl_.off; cc->nodes[n].c = tl_.count; }
             e = n;
         } else break;
     }
@@ -1714,7 +1719,7 @@ static uint32_t p_class(CC, int is_decl) {
     uint32_t cend = cc->tok.end;
     expect_p(CCA, P_RBRACE, "'}' after a class's body");
     cc->in_class = saved_in;
-    list_take(cc, mark, &cc->classes[ci].members, &cc->classes[ci].nmembers);
+    { jlist tl_ = list_take(cc, mark); cc->classes[ci].members = tl_.off; cc->classes[ci].nmembers = tl_.count; }
     cc->classes[ci].fields_fn = fields_fn;
     cc->classes[ci].nfields = nfields;
     if (!cc->classes[ci].ctor) {
@@ -1757,7 +1762,7 @@ static uint32_t p_var(CC, uint32_t kind, int no_in, int need_init) {
         if (!is_p(cc, P_COMMA) || cc->err) break;
         lx(CCA);
     }
-    list_take(cc, mark, &cc->nodes[n].a, &cc->nodes[n].b);
+    { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
     return n;
 }
 
@@ -2164,11 +2169,11 @@ static uint32_t p_stmt_in(CC) {
                 expect_p(CCA, P_COLON, "':'");
                 size_t m2 = len(cc->tmp);
                 while (!is_kw(cc, K_CASE) && !is_kw(cc, K_DEFAULT) && !is_p(cc, P_RBRACE) && !cc->err) push_back(cc->tmp, p_stmt(CCA));
-                list_take(cc, m2, &cc->nodes[cs].b, &cc->nodes[cs].c);
+                { jlist tl_ = list_take(cc, m2); cc->nodes[cs].b = tl_.off; cc->nodes[cs].c = tl_.count; }
                 push_back(cc->tmp, cs);
             }
             expect_p(CCA, P_RBRACE, "'}'");
-            list_take(cc, mark, &cc->nodes[n].b, &cc->nodes[n].c);
+            { jlist tl_ = list_take(cc, mark); cc->nodes[n].b = tl_.off; cc->nodes[n].c = tl_.count; }
             cc->cur_scope = saved;
             return n;
         }
@@ -2283,7 +2288,7 @@ static void resolve(js_cc *cc) {
        environment; the innermost function that is not an arrow's arguments made; the
        site's var scope, a sloppy function's, given its eval vars object's cell */
     for (size_t n = 1; n < len(cc->nodes); n++) {
-        jn e = cc->nodes[n];
+        jnode e = cc->nodes[n];
         if (e.k != N_CALL || !(e.op & NF_EVAL)) continue;
         uint32_t vs = var_scope(cc, e.s);
         if (cc->scopes[vs].kind == SC_FUNC && !cc->scopes[vs].synth && !cc->scopes[vs].dyn && !(cc->fns[cc->scopes[vs].fn].flags & JF_STRICT))
@@ -2746,7 +2751,7 @@ static uint32_t local_slot1(js_cc *cc, uint32_t n) {
 }
 /* an integer literal's value (in *k): 1 if the node is one */
 static int int_literal(js_cc *cc, uint32_t n, int32_t *k) {
-    jn r = cc->nodes[n];
+    jnode r = cc->nodes[n];
     if (r.k != N_NUM || r.op != 0) return 0;
     if (!(r.num >= -2147483648.0 && r.num <= 2147483647.0 && r.num == (double)(int32_t)r.num) || (r.num == 0 && signbit(r.num))) return 0;
     *k = (int32_t)r.num;
@@ -2836,7 +2841,7 @@ static void gen_list_array(CC, uint32_t off, uint32_t n, uint32_t skind) {
     for (uint32_t i = 0; i < n; i++) {
         uint32_t e = cc->lists[off + i];
         if (cc->nodes[e].k == N_SPREAD) {
-            jn sp = cc->nodes[e];
+            jnode sp = cc->nodes[e];
             if (skind == JSS_ITER) iter_subject(cc, sp.a, JSS_CALLED);
             gen_expr(CCA, sp.a);
             site_at(vm, cc, skind | (skind == JSS_ITER && is_call(cc, sp.a) ? JSS_CALLED : 0), sp.pos, sp.d);
@@ -2862,7 +2867,7 @@ static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op
 }
 
 static void gen_member(CC, uint32_t n, int keep_obj) {
-    jn m = cc->nodes[n];
+    jnode m = cc->nodes[n];
     gen_expr(CCA, m.a);
     if (m.op & NF_OPTIONAL) cc->chain = chain_add(vm, OP_JNULLISH, cc->chain);
     if (m.op & NF_COMPUTED) { gen_expr(CCA, m.b); emit(vm, keep_obj ? OP_GET_ELEM2 : OP_GET_ELEM); }
@@ -2870,7 +2875,7 @@ static void gen_member(CC, uint32_t n, int keep_obj) {
 }
 
 static void gen_call(CC, uint32_t n) {
-    jn c = cc->nodes[n];
+    jnode c = cc->nodes[n];
     uint32_t callee = c.a;
     uint32_t ck = cc->nodes[callee].k;
     /* a call an iteration takes its value from: its error the iteration's (iter_subject) */
@@ -2918,7 +2923,7 @@ static void gen_object(CC, uint32_t n) {
     uint32_t off = cc->nodes[n].a, cnt = cc->nodes[n].b;
     for (uint32_t i = 0; i < cnt; i++) {
         uint32_t p = cc->lists[off + i];
-        jn pr = cc->nodes[p];
+        jnode pr = cc->nodes[p];
         int computed = pr.d & NF_COMPUTED;
         if (pr.op == PK_SPREAD) { gen_expr(CCA, pr.b); emit(vm, OP_COPY_PROPS); continue; }
         if (pr.op == PK_COVER) { cc_error(cc, pr.line, "an object literal's '=' belongs in a destructuring pattern"); return; }
@@ -2944,7 +2949,7 @@ static void gen_class(CC, uint32_t ci) {
     emit32(vm, k.name);
     for (uint32_t i = 0; i < k.nmembers; i++) {
         uint32_t p = cc->lists[k.members + i];
-        jn pr = cc->nodes[p];
+        jnode pr = cc->nodes[p];
         int is_static = pr.d & NF_STATIC, computed = pr.d & NF_COMPUTED;
         if (pr.op == PK_FIELD && !is_static) continue;
         if (is_static) emit(vm, OP_SWAP);
@@ -2996,7 +3001,7 @@ static int named_init(js_cc *cc, uint32_t n) {
 /* the target of an assignment or a declaration, the value on top taken; the naming its
    caller set (pat_name) its own, a nested pattern's the plain one */
 static void gen_pattern(CC, uint32_t p, int init) {
-    jn t = cc->nodes[p];
+    jnode t = cc->nodes[p];
     uint32_t okind = cc->pat_okind, akind = cc->pat_akind, ps = cc->pat_start, pe = cc->pat_end;
     pat_name(cc, JSS_NONE, JSS_PLAIN, 0, 0);
     if (t.k == N_IDENT) { gen_ident_put(CCA, p, 0, init); return; }
@@ -3033,14 +3038,14 @@ static void gen_pattern(CC, uint32_t p, int init) {
         }
         for (uint32_t i = 0; i < t.b; i++) {
             uint32_t e = cc->lists[t.a + i];
-            jn el = cc->nodes[e];
+            jnode el = cc->nodes[e];
             if (el.op & NF_REST) {
                 emit(vm, OP_DUP);
                 emit(vm, OP_OBJECT);
                 emit(vm, OP_SWAP);
                 emit(vm, OP_COPY_PROPS);
                 for (uint32_t j = 0; j < i; j++) {
-                    jn prev = cc->nodes[cc->lists[t.a + j]];
+                    jnode prev = cc->nodes[cc->lists[t.a + j]];
                     if (prev.op & NF_COMPUTED) continue;
                     emit(vm, OP_DUP);
                     emit(vm, OP_DEL_PROP);
@@ -3073,7 +3078,7 @@ static void gen_pattern(CC, uint32_t p, int init) {
         emit16(vm, rest || t.b >= 0xFFFF ? 0xFFFF : t.b);
         for (uint32_t i = 0; i < t.b; i++) {
             uint32_t e = cc->lists[t.a + i];
-            jn el = cc->nodes[e];
+            jnode el = cc->nodes[e];
             if (!el.a) continue;
             emit(vm, OP_DUP);
             if (el.op & NF_REST) {
@@ -3095,9 +3100,9 @@ static void gen_pattern(CC, uint32_t p, int init) {
 }
 
 static void gen_assign(CC, uint32_t n) {
-    jn as = cc->nodes[n];
+    jnode as = cc->nodes[n];
     uint32_t op = as.op, t = as.a;
-    jn tg = cc->nodes[t];
+    jnode tg = cc->nodes[t];
     if (op == P_ASSIGN) {
         if (tg.k == N_PATTERN_OBJ || tg.k == N_PATTERN_ARR) {
             gen_expr(CCA, as.b);
@@ -3151,10 +3156,10 @@ static void gen_assign(CC, uint32_t n) {
 }
 
 static void gen_update(CC, uint32_t n, int force_prefix) {
-    jn u = cc->nodes[n];
+    jnode u = cc->nodes[n];
     uint32_t t = u.a, step = u.op == P_INC ? OP_INC : OP_DEC;
     int prefix = (u.d & NF_PREFIX) || force_prefix;
-    jn tg = cc->nodes[t];
+    jnode tg = cc->nodes[t];
     if (tg.k == N_IDENT) {
         gen_ident_get(CCA, t);
         if (prefix) { emit(vm, step); gen_ident_put(CCA, t, 1, 0); return; }
@@ -3186,7 +3191,7 @@ static void gen_update(CC, uint32_t n, int force_prefix) {
 
 static void gen_expr(CC, uint32_t n) {
     if (cc->err) return;
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     switch (e.k) {
     case N_NUM:
         if (e.op == 1) emit(vm, OP_NULL);
@@ -3205,7 +3210,7 @@ static void gen_expr(CC, uint32_t n) {
             /* a tag's strings: made once, here, and the same array each time */
             uint32_t cooked = js_array_new(vm, 0), raw = js_array_new(vm, 0);
             for (uint32_t i = 0; i < e.b; i += 2) {
-                jn part = cc->nodes[cc->lists[e.a + i]];
+                jnode part = cc->nodes[cc->lists[e.a + i]];
                 js_array_push(vm, cooked, jv_str(part.s));
                 js_array_push(vm, raw, jv_str(part.b));
             }
@@ -3258,7 +3263,7 @@ static void gen_expr(CC, uint32_t n) {
     case N_CLASS: gen_class(CCA, e.a); return;
     case N_UNARY: {
         if (e.op == 1000) {
-            jn a = cc->nodes[e.a];
+            jnode a = cc->nodes[e.a];
             if (a.k == N_IDENT && cc->ndyn) {
                 /* typeof of a name a dynamic scope may hold: its value's there, else the static one's */
                 uint32_t r = a.a, d = cc->refs[r].decl, sc = cc->refs[r].scope;
@@ -3282,7 +3287,7 @@ static void gen_expr(CC, uint32_t n) {
         }
         if (e.op == 1001) { gen_expr(CCA, e.a); emit(vm, OP_POP); emit(vm, OP_UNDEF); return; }
         if (e.op == 1002) {
-            jn a = cc->nodes[e.a];
+            jnode a = cc->nodes[e.a];
             if (a.k == N_MEMBER) {
                 gen_expr(CCA, a.a);
                 if (a.op & NF_COMPUTED) { gen_expr(CCA, a.b); emit(vm, OP_DEL_ELEM); }
@@ -3396,9 +3401,9 @@ static void gen_expr(CC, uint32_t n) {
 /* an expression whose value is not used: a statement's, a for's update */
 static void gen_void(CC, uint32_t n) {
     if (cc->err) return;
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     if (e.k == N_UPDATE) {
-        jn tg = cc->nodes[e.a];
+        jnode tg = cc->nodes[e.a];
         if (tg.k == N_IDENT) {
             uint32_t d = cc->refs[tg.a].decl;
             if (d && !is_script_decl(cc, d) && !cc->decls[d].captured && cc->decls[d].kind != D_CONST && cc->decls[d].kind != D_SELF &&
@@ -3438,7 +3443,7 @@ static const uint8_t cmp_when_false[8] = { OP_JNLT, OP_JNLE, OP_JNGT, OP_JNGE, O
 /* a condition that jumps when its truth is when: the jump's operand, to be patched
    (a comparison's jump is one instruction) */
 static uint32_t gen_test_jump(CC, uint32_t n, int when) {
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     if (e.k == N_BINARY) {
         int cmp = e.op == P_LT ? 0 : e.op == P_LE ? 1 : e.op == P_GT ? 2 : e.op == P_GE ? 3 : e.op == P_SEQ ? 4 : e.op == P_SNE ? 5 :
                   e.op == P_EQ ? 6 : e.op == P_NE ? 7 : -1;
@@ -3502,9 +3507,9 @@ static void gen_statements(CC, uint32_t off, uint32_t n) {
 }
 
 static void gen_var(CC, uint32_t n) {
-    jn v = cc->nodes[n];
+    jnode v = cc->nodes[n];
     for (uint32_t i = 0; i < v.b; i++) {
-        jn d = cc->nodes[cc->lists[v.a + i]];
+        jnode d = cc->nodes[cc->lists[v.a + i]];
         if (d.b) {
             if (cc->nodes[d.a].k == N_IDENT) name_fn(vm, cc, d.b, cc->nodes[d.a].s);
             if (cc->nodes[d.a].k == N_PATTERN_ARR) iter_subject(cc, d.b, JSS_CALLED);
@@ -3520,7 +3525,7 @@ static void gen_var(CC, uint32_t n) {
 }
 
 static void gen_try(CC, uint32_t n) {
-    jn t = cc->nodes[n];
+    jnode t = cc->nodes[n];
     if (!t.d) {
         uint32_t h = jump_fwd(vm, OP_TRY);
         ctx_push(cc, CX_TRY, 0, 0);
@@ -3592,7 +3597,7 @@ static void gen_loop_ctx(js_cc *cc, uint32_t label_iter, uint32_t cont_pc, int h
 
 /* return c ? a : b: each branch its own return, no jump between them */
 static void gen_return_value(CC, uint32_t v) {
-    jn e = cc->nodes[v];
+    jnode e = cc->nodes[v];
     if (e.k == N_COND) {
         uint32_t els = gen_test_jump(CCA, e.a, 0);
         gen_return_value(CCA, e.b);
@@ -3608,7 +3613,7 @@ static void gen_return_value(CC, uint32_t v) {
 
 static void gen_stmt(CC, uint32_t n) {
     if (cc->err) return;
-    jn s = cc->nodes[n];
+    jnode s = cc->nodes[n];
     if (cc->completion && cc->gen_fn == 0) {
         /* an eval's completion value: each expression statement's; an if's, a loop's,
            a switch's, a try's and a with's undefined unless their statements give one */
@@ -3721,7 +3726,7 @@ static void gen_stmt(CC, uint32_t n) {
             done = jump_fwd(vm, OP_ITER_ARESULT);
         } else done = jump_fwd(vm, OP_ITER_NEXT);
         gen_block_enter(CCA, sc);
-        jn left = cc->nodes[s.a];
+        jnode left = cc->nodes[s.a];
         /* each value V8 holds in a binding of its own, which it names ".for" */
         pat_name(cc, JSS_DOTFOR, JSS_DOTFOR, 0, 0);
         if (left.k == N_VAR) gen_pattern(CCA, cc->nodes[cc->lists[left.a]].a, 1);
@@ -3797,7 +3802,7 @@ static void gen_stmt(CC, uint32_t n) {
         size_t mark = len(cc->tmp);
         uint32_t deflt = 0;
         for (uint32_t i = 0; i < s.c; i++) {
-            jn cs = cc->nodes[cc->lists[s.b + i]];
+            jnode cs = cc->nodes[cc->lists[s.b + i]];
             if (cs.d) { deflt = i + 1; push_back(cc->tmp, 0); continue; }
             emit(vm, OP_GET_LOC);
             emit16(vm, tmp);
@@ -3807,7 +3812,7 @@ static void gen_stmt(CC, uint32_t n) {
         }
         uint32_t to_default = jump_fwd(vm, OP_JMP);
         for (uint32_t i = 0; i < s.c; i++) {
-            jn cs = cc->nodes[cc->lists[s.b + i]];
+            jnode cs = cc->nodes[cc->lists[s.b + i]];
             uint32_t at_pc = here(vm);
             if (cs.d) patch_to(vm, to_default, at_pc);
             else patch_to(vm, at(cc->tmp, mark + i), at_pc);
@@ -3842,7 +3847,7 @@ static void assign_slots(js_cc *cc, uint32_t f) {
    returned. A sloppy direct eval's declarations first: in the global scope the script's
    own, in its caller's function its eval vars object's (or the caller's own binding's
    when it has one of the name) */
-static void gen_eval_body(CC, jn b) {
+static void gen_eval_body(CC, jnode b) {
     if (cc->mode == JS_CC_DIRECT) {
         uint32_t fs = cc->fns[0].scope;
         for (uint32_t d = cc->scopes[0].first; d; d = cc->decls[d].next) {
@@ -3917,7 +3922,7 @@ static void gen_function(CC, uint32_t f) {
                 emit32(vm, x.atom);
             }
         }
-        jn b = cc->nodes[F.body];
+        jnode b = cc->nodes[F.body];
         if (cc->completion) gen_eval_body(CCA, b);
         else {
             gen_statements(CCA, b.a, b.b);
@@ -3927,7 +3932,7 @@ static void gen_function(CC, uint32_t f) {
         /* a module's code: its cells made when it was linked (its environment the closure's),
            its functions made then; a top-level await's makes it an async function */
         if (F.flags & JF_ASYNC) emit(vm, OP_ASYNC_START);
-        jn b = cc->nodes[F.body];
+        jnode b = cc->nodes[F.body];
         gen_statements(CCA, b.a, b.b);
         emit(vm, OP_RETURN_UNDEF);
     } else {
@@ -3961,8 +3966,8 @@ static void gen_function(CC, uint32_t f) {
             }
         /* the parameters' defaults, patterns and rest */
         for (uint32_t i = 0; i < F.nparams; i++) {
-            jn p = cc->nodes[cc->lists[F.params + i]];
-            jn t = cc->nodes[p.a];
+            jnode p = cc->nodes[cc->lists[F.params + i]];
+            jnode t = cc->nodes[p.a];
             if (p.op & NF_REST) { emit(vm, OP_REST); emit16(vm, i); gen_pattern(CCA, p.a, 1); continue; }
             int simple = t.k == N_IDENT && !p.b;
             if (simple) continue;
@@ -3982,7 +3987,7 @@ static void gen_function(CC, uint32_t f) {
         else if (F.flags & FN_FIELDS) {
             jclass k = cc->classes[F.cls - 1];
             for (uint32_t i = 0; i < k.nmembers; i++) {
-                jn pr = cc->nodes[cc->lists[k.members + i]];
+                jnode pr = cc->nodes[cc->lists[k.members + i]];
                 if (pr.op != PK_FIELD || (pr.d & NF_STATIC)) continue;
                 emit(vm, OP_THIS);
                 if (pr.d & NF_COMPUTED) gen_expr(CCA, pr.a);
@@ -4004,7 +4009,7 @@ static void gen_function(CC, uint32_t f) {
             emit(vm, OP_RETURN_UNDEF);
         } else if (cc->completion) gen_eval_body(CCA, cc->nodes[F.body]);
         else {
-            jn b = cc->nodes[F.body];
+            jnode b = cc->nodes[F.body];
             gen_statements(CCA, b.a, b.b);
             emit(vm, OP_RETURN_UNDEF);
         }
@@ -4105,7 +4110,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     defer(ccs) { JS_CC_DROP(ccs); }
     js_cc *cc = &ccs;
     uint32_t srcn = (uint32_t)n;
-    jn n0;
+    jnode n0;
     memset(&n0, 0, sizeof n0);
     push_back(cc->nodes, n0);
     push_back(cc->lists, 0);
@@ -4207,7 +4212,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         cc->nodes[p].a = ident_node(vm, src, srcn, cc, ev, 1);
         size_t mark = len(cc->tmp);
         push_back(cc->tmp, p);
-        list_take(cc, mark, &cc->fns[0].params, &cc->fns[0].nparams);
+        { jlist tl_ = list_take(cc, mark); cc->fns[0].params = tl_.off; cc->fns[0].nparams = tl_.count; }
         cc->fns[0].nformal = 1;
     }
     lx(vm, src, srcn, cc);
@@ -4227,7 +4232,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     }
     if (!cc->err && mode == JS_CC_FUNCTION) {
         /* the Function constructor's source: one statement, the function expression */
-        jn b = cc->nodes[body];
+        jnode b = cc->nodes[body];
         if (b.b != 1 || cc->nodes[cc->lists[b.a]].k != N_EXPR || cc->nodes[cc->nodes[cc->lists[b.a]].a].k != N_FUNC)
             cc_error(cc, 1, "the Function constructor's parameters or body end the function early");
     }
@@ -4300,7 +4305,7 @@ static void pr_number(vector<char> *out, uint32_t *np, double v) {
 
 /* the number a literal folds to in V8's parser (-5, ~1, 1 + 2, 5 % 3): 1 when it does */
 static int pr_num(js_cc *cc, uint32_t n, double *v) {
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     if (e.k == N_NUM && e.op == 0) { *v = e.num; return 1; }
     double x, y;
     if (e.k == N_UNARY && (e.op == P_MINUS || e.op == P_PLUS || e.op == P_TILDE)) {
@@ -4328,7 +4333,7 @@ static int pr_num(js_cc *cc, uint32_t n, double *v) {
 }
 /* the truth of a literal V8's parser folds ! over (!0 is true, !'x' false): 1 when it does */
 static int pr_truth(js_vm *vm, js_cc *cc, uint32_t n, int *t) {
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     double v;
     int x;
     if (pr_num(cc, n, &v)) { *t = v == v && v != 0; return 1; }
@@ -4374,7 +4379,7 @@ static int pr_nary(uint32_t op) {
 }
 /* a key that is a string literal, which V8 prints as a name: its string, else 0 */
 static uint32_t pr_str_key(js_cc *cc, uint32_t n) {
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     if (e.k == N_STR) return e.s;
     if (e.k == N_TEMPLATE && e.op == 0 && e.b == 1) return cc->nodes[cc->lists[e.a]].s;
     return 0;
@@ -4383,7 +4388,7 @@ static uint32_t pr_str_key(js_cc *cc, uint32_t n) {
 static void pr_find(js_vm *vm, js_cc *cc, uint32_t n, int print, vector<char> *out, uint32_t *np);
 
 static void pr_visit(js_vm *vm, js_cc *cc, uint32_t n, vector<char> *out, uint32_t *np) {
-    jn e = cc->nodes[n];
+    jnode e = cc->nodes[n];
     double v;
     int t;
     switch (e.k) {
@@ -4438,7 +4443,7 @@ static void pr_visit(js_vm *vm, js_cc *cc, uint32_t n, vector<char> *out, uint32
         uint32_t k = 0;
         if (f.flags & FN_EXPR) k = 1;
         else if (f.body) {
-            jn b = cc->nodes[f.body];
+            jnode b = cc->nodes[f.body];
             for (uint32_t i = 0; i < b.b; i++) if (cc->nodes[cc->lists[b.a + i]].k != N_FUNCDECL) k++;
         }
         for (uint32_t i = 0; i < k; i++) pr_put(out, np, "(intermediate value)");
@@ -4569,7 +4574,7 @@ int js_site_text(js_vm *vm, js_site s, int callee_only, vector<char> *out) {
     const char *src = data(text);
     uint32_t srcn = (uint32_t)len(text);
     /* read as the code it stands in reads (yield and await operators there), with no scopes */
-    jn n0;
+    jnode n0;
     memset(&n0, 0, sizeof n0);
     push_back(cc->nodes, n0);
     push_back(cc->lists, 0);

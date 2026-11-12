@@ -1161,7 +1161,7 @@ static void si_press(js_vm *vm, const si_key *k, uint32_t mods) {
     if (up && space) sh_click_at(vm, at, EV_TRUSTED);
 }
 /* a key by its name, its modifiers held around it (Shift+A, Control+a): 0 when unknown */
-static int si_key(js_vm *vm, const char *name, size_t n) {
+static int si_key_named(js_vm *vm, const char *name, size_t n) {
     uint32_t mods = 0;
     si_key held[4];
     uint32_t nh = 0;
@@ -1295,9 +1295,9 @@ int script_action(js_vm *vm, uint32_t kind, uint32_t x, const char *text, size_t
         for (size_t i = 0; ok && i < n && !h->navigated; i++) {
             if (((unsigned char)text[i] & 0xC0) == 0x80) continue;
             if ((unsigned char)text[i] >= 0x80) continue;
-            si_key(vm, text + i, 1);
+            si_key_named(vm, text + i, 1);
         }
-    } else if (kind == SCRIPT_ACT_KEY) ok = si_key(vm, text, n);
+    } else if (kind == SCRIPT_ACT_KEY) ok = si_key_named(vm, text, n);
     else ok = 0;
     script_timers_after(vm, horizon);
     return ok;

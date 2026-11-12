@@ -2,7 +2,8 @@
 
 Verified on 2026-11-11 in a fresh Ubuntu 24.04.5 container (x86_64, 4 CPUs,
 15 GB). Every result below comes from a command run on that box. Nothing is
-taken from a README.
+taken from a README. Moved on 2026-11-12 to cicilang 0.301 and cocolog 3.62.3
+(see "The move to 0.301" below), on the same box.
 
 ## The baseline
 
@@ -10,8 +11,8 @@ taken from a README.
 |---|---|---|---|
 | Cicili | `3ba2ca4` | 3.3.0 | SBCL 2.2.9.debian, from the checkout |
 | ZiguratIP | `2a65f81` | 1.0.2 | `make MODE=Release` — 14 libraries, `parsi`, `parsic`, `ziguratip`, the Parsi objects |
-| cocolog | `d4b5564` | 3.62.0 | `make`, `make schema`, `make modules` — 17 modules |
-| cicilang | `2c72459` | 0.284 | `module/build.sh`, `module/build-llvm.sh` |
+| cocolog | `bf956d1` | 3.62.3 | `make`, `make schema`, `make modules` — 17 modules |
+| cicilang | `1b5b6e8` | 0.301 | `module/build.sh`, `module/build-llvm.sh` |
 | LLVM | — | 18.1.3 | Ubuntu's `llvm-18-dev`, embedded through llvm-c |
 | clang | — | 18.1.3 | Ubuntu's, for the neighbours' native builds and the link |
 
@@ -21,11 +22,11 @@ to them and was GREEN at the end of this run:
 ```text
 ok       cicili     .../cicili at 3ba2ca4
 ok       ziguratip  .../ziguratip at 2a65f81
-ok       cocolog    .../cocolog at d4b5564
-ok       cicilang   .../cicilang at 2c72459
-ok       cocolog    cocolog 3.62.0
+ok       cocolog    .../cocolog at bf956d1
+ok       cicilang   .../cicilang at 1b5b6e8
+ok       cocolog    cocolog 3.62.3
 ok       cocolog    answers 42
-ok       cicilang   cicilang 0.284 (cocolog 3.62.0; LLVM 18.1.3)
+ok       cicilang   cicilang 0.301 (cocolog 3.62.3; LLVM 18.1.3)
 ok       cicilang   builds and runs a ccllib program (--no-kb)
 ok       contracts  the DOM contract validates
 GREEN: the toolchain
@@ -89,6 +90,36 @@ re-checked against the same points.
 | `typedef store<tag> name;` inside a macro's C text | makes the type macro's instance; the typedef's objects are autodropped |
 | A type macro's function, called by its short name | made at its first call (asked first with its arity, `rec_at2`, then `rec_at`) |
 | A pointer from a generated `… tie s` accessor, used after a call that may grow the store | refused: `use of a borrow after a call that may replace its owner: 'p' in borrowed_from('d.rec')` |
+
+## The move to 0.301
+
+The toolchain moved from cicilang 0.284 and cocolog 3.62.0 to cicilang 0.301
+(`1b5b6e8`) and cocolog 3.62.3 (`bf956d1`), the commits cicilang's own pins
+name; Cicili and ZiguratIP stay. `NO_PACKAGES=1 sh toolchain/bootstrap.sh`
+checked them out and built them, and `toolchain/check.sh` was GREEN. A clean
+build of Ambitious (`make clean; make`) then met three rules that 0.284 did not
+hold to, each a correction:
+
+- **A typedef and a function of one name** are refused, as C refuses them
+  (one namespace of ordinary identifiers): `amb_kern` (the kerning pair's type
+  and the function that reads a pair's kerning, now `amb_kerning`), the
+  contracts' `dom_detail`, `css_pseudo` and `net_same_site` beside static
+  functions of those names (now `dom_detail_add`, `css_pseudo_holds`,
+  `net_is_same_site`), input.c's `si_key` (`si_key_named`), and compile.c's
+  node type `jn`, which libm's Bessel function `jn` of `<math.h>` already
+  names (now `jnode`).
+- **`own` names no local**: it is the owner's word, so two locals named so
+  (css.c, paint.c) are `mine` and `share`.
+- **A borrow handed to a call that may replace its owner** (0.293, finding 36
+  above closed): a pointer into the document, reached through the script VM,
+  handed to `sh_str` beside the VM whose stores it may grow (now `sh_span` and
+  `sh_name`, which take the document as a parameter of their own); the
+  message in `vm->out` handed to `sh_error_rec`, which writes there (now
+  copied first); and the JS compiler's `list_take`, which wrote a list's
+  place and length through pointers into the node and function stores it
+  may grow (now returned, and written after it).
+
+Every gate was GREEN on 0.301 after these: the eight stages of `make test`.
 
 ## Findings
 

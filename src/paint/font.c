@@ -1244,7 +1244,7 @@ double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size) {
     return amb_gl(f, by, g).advance * size / amb_upem(f, by);
 }
 
-double amb_kern(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size) {
+double amb_kerning(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size) {
     int lb, rb;
     if (amb_ignorable(left) || amb_ignorable(right)) return 0;
     uint32_t a = amb_glyph_at(f, face, left, &lb), b = amb_glyph_at(f, face, right, &rb);

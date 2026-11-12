@@ -5558,7 +5558,7 @@ static int css_within(const dom_document *d, uint32_t x, uint32_t y) {
     return 0;
 }
 
-static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, const char *ps, size_t pn) {
+static int css_pseudo_holds(const dom_document *d, uint32_t x, const css_mstate *ms, const char *ps, size_t pn) {
     if (css_eq_ci(ps, pn, "first-child")) return css_siblings(d, x, 0, 0) == 0;
     if (css_eq_ci(ps, pn, "last-child")) return css_siblings(d, x, 1, 0) == 0;
     if (css_eq_ci(ps, pn, "only-child")) return css_siblings(d, x, 0, 0) == 0 && css_siblings(d, x, 1, 0) == 0;
@@ -5708,14 +5708,14 @@ static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms,
                 continue;
             }
             if (css_eq_ci(ps, pn, "before") || css_eq_ci(ps, pn, "after") || css_eq_ci(ps, pn, "first-line") || css_eq_ci(ps, pn, "first-letter")) return 0;
-            if (!css_pseudo(d, x, ms, ps, pn)) return 0;
+            if (!css_pseudo_holds(d, x, ms, ps, pn)) return 0;
             continue;
         }
         return 0;
     }
     /* the :active and :hover quirk: a compound of them alone, not in a functional pseudo-class's
        argument and with no pseudo-element, holds of a link alone in quirks mode */
-    if (depth == 0 && !ms->pe && (ms->hover || ms->active) && css_doc_quirks(d) && css_bare_hover(s, n) && !css_pseudo(d, x, ms, "any-link", 8))
+    if (depth == 0 && !ms->pe && (ms->hover || ms->active) && css_doc_quirks(d) && css_bare_hover(s, n) && !css_pseudo_holds(d, x, ms, "any-link", 8))
         return 0;
     return 1;
 }
@@ -7932,9 +7932,9 @@ static void css_register_customs(css_style *s, vector<css_cust> *cust, const css
         if (css_regprop_of(s, name) != r) continue;
         size_t q = 0;
         while (q < len(*cust) && at(*cust, q).name != name) q++;
-        int here = q < len(*cust), own = here && at(*cust, q).how != CSS_HOW_INHERITED;
+        int here = q < len(*cust), mine = here && at(*cust, q).how != CSS_HOW_INHERITED;
         uint32_t w = here ? at(*cust, q).winner : 0;
-        if (own && at(*cust, q).state == 2) {
+        if (mine && at(*cust, q).state == 2) {
             vector<char> v, sy;
             amb_span sp = at(*cust, q).value;
             append_range(v, text_ptr(s, sp), sp.len);
@@ -7942,7 +7942,7 @@ static void css_register_customs(css_style *s, vector<css_cust> *cust, const css
             css_senv e0 = { 16, 16, 0x000000ff, 0 };
             if (css_syntax_match(data(sy), len(sy), data(v), len(v), &e0, 0)) continue;   /* computed after the font size */
         }
-        if (here && !own && at(*cust, q).state == 2) continue;                              /* the parent's, inherited */
+        if (here && !mine && at(*cust, q).state == 2) continue;                              /* the parent's, inherited */
         int kw_initial = w && css_eq_ci(text_ptr(s, s->decl[w].text), s->decl[w].text.len, "initial");
         css_cust c;
         memset(&c, 0, sizeof c);

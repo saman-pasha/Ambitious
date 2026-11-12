@@ -1020,7 +1020,7 @@ static void net_site_of(const net_url *u, char *out, size_t cap) {
 }
 
 /* whether a request for u, from a page at pu, is same-site (5.2): their sites the same */
-static int net_same_site(const net_url *u, const net_url *pu) {
+static int net_is_same_site(const net_url *u, const net_url *pu) {
     char a[300], b[300];
     net_site_of(u, a, sizeof a);
     net_site_of(pu, b, sizeof b);
@@ -1840,7 +1840,7 @@ static int net_fetch_site(const net_url *u, const net_url *page) {
     net_origin_text(u, a, sizeof a);
     net_origin_text(page, b, sizeof b);
     if (strcmp(a, b) == 0 && strcmp(a, "null") != 0) return 1;
-    return net_same_site(u, page) ? 2 : 3;
+    return net_is_same_site(u, page) ? 2 : 3;
 }
 
 static void net_line(vector<char> *o, const char *name, const char *value) {
@@ -3101,7 +3101,7 @@ static int net_job_prepare(net_loader *l, net_job *j, const net_url *page, vecto
         }
     }
     /* a navigation is same-site with itself; a page's part is when its site is the page's */
-    j->same = !page || net_same_site(u, page);
+    j->same = !page || net_is_same_site(u, page);
     vector<char> cookie, valid;
     net_cookie_header(l, u, j->same, j->r, &cookie);
     if (j->cached) {
@@ -3265,7 +3265,7 @@ static void net_job_record(net_loader *l, net_job *j, const net_url *page, const
     }
     l->resource[r].proxied = (uint8_t)j->rt.proxied;
     if (j->rt.proxied) l->resource[r].proxy = net_text(l, j->rt.proxy);
-    l->resource[r].cross_site = (uint8_t)(page && !net_same_site(&j->u, page));
+    l->resource[r].cross_site = (uint8_t)(page && !net_is_same_site(&j->u, page));
     l->resource[r].cache = j->cache;
     l->resource[r].cache_age = j->cache_age;
     l->resource[r].cache_lifetime = j->cache_life;

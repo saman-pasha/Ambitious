@@ -133,7 +133,8 @@ int sh_utf8(js_vm *vm, jv v, vector<char> *out) {
     js_str_to_utf8(vm, s, out);
     return 1;
 }
-static jv sh_span(js_vm *vm, const dom_document *d, amb_span sp) { return sh_str(vm, text_ptr(d, sp), sp.len); }
+jv sh_span(js_vm *vm, const dom_document *d, amb_span sp) { return sh_str(vm, text_ptr(d, sp), sp.len); }
+jv sh_name(js_vm *vm, const dom_document *d, uint32_t name) { return sh_str(vm, names_ptr(d, name), names_len(d, name)); }
 
 /* ---- the records ---- */
 
@@ -1515,7 +1516,9 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" :
                            k == DOM_NODE_KIND_FRAGMENT ? "#document-fragment" : "html");
     case HA_TAGNAME: if (el) return sh_tag_name(vm, d, x); break;
-    case HA_LOCALNAME: if (el) return sh_str(vm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name)); break;
+    case HA_LOCALNAME:
+        if (el) return sh_name(vm, d, d->node[x].name);
+        break;
     case HA_NAMESPACEURI:
         if (el) return sh_cstr(vm, d->node[x].ns == DOM_NAMESPACE_SVG ? "http://www.w3.org/2000/svg" :
                                    d->node[x].ns == DOM_NAMESPACE_MATHML ? "http://www.w3.org/1998/Math/MathML" : "http://www.w3.org/1999/xhtml");
@@ -2521,7 +2524,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     case H_ATTR_NAMES: {
         uint32_t a = js_array_new(vm, 0);
         for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
-            jv s = sh_str(vm, names_ptr(d, d->attr[at].name), names_len(d, d->attr[at].name));
+            jv s = sh_name(vm, d, d->attr[at].name);
             js_array_push(vm, a, s);
         }
         return jv_obj(a);
@@ -3443,7 +3446,11 @@ static void sh_run_source(js_vm *vm, uint32_t run, const char *src, size_t n) {
     int rc = js_eval(vm, src, n, "page", h->nscripts);
     script_outcome oc = rc == 0 ? SCRIPT_OUTCOME_RAN : rc == -1 ? SCRIPT_OUTCOME_SYNTAX_ERROR : rc == -3 ? SCRIPT_OUTCOME_STOPPED : SCRIPT_OUTCOME_THREW;
     h->rt->run[run].outcome = oc;
-    if (rc == -1 || rc == -2) sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, data(vm->out), len(vm->out));
+    if (rc == -1 || rc == -2) {
+        vector<char> msg;   /* the message copied first: sh_error_rec may write to vm->out */
+        append_range(msg, data(vm->out), len(vm->out));
+        sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, data(msg), len(msg));
+    }
     if (rc != -3) sh_checkpoint(vm);
 }
 

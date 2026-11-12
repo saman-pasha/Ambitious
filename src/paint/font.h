@@ -154,10 +154,10 @@ uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by);
    for it); the kerning between two code points, which a face's own glyphs have between
    them (none between a glyph of the face and a fallback face's) */
 double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size);
-double amb_kern(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size);
+double amb_kerning(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size);
 
 /* the width of UTF-8 text at a size, in px: its advances and its pairs' kerning, as
-   amb_advance and amb_kern have them */
+   amb_advance and amb_kerning have them */
 double amb_text_width(const amb_fonts *f, int face, double size, const char *s, size_t n);
 
 /* the faces other than face that draw some of UTF-8 text's code points (its fallbacks),

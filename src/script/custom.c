@@ -253,7 +253,7 @@ static void sc_upgrade(js_vm *vm, uint32_t x, uint32_t def) {
     for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
         vector<char> an;
         append_range(an, names_ptr(d, d->attr[at].name), names_len(d, d->attr[at].name));
-        sc_attr_cb(vm, x, data(an), len(an), JV_NULL, sh_str(vm, text_ptr(d, d->attr[at].value), d->attr[at].value.len), JV_NULL);
+        sc_attr_cb(vm, x, data(an), len(an), JV_NULL, sh_span(vm, d, d->attr[at].value), JV_NULL);
     }
     if (sc_connected(d, x)) sc_connected_cb(vm, x);
 }
@@ -328,10 +328,10 @@ void script_custom_flush(js_vm *vm) {
             dom_detail dt = d->detail[e.detail];
             vector<char> an;
             append_range(an, names_ptr(d, dt.name), names_len(d, dt.name));
-            jv old = dt.had ? sh_str(vm, text_ptr(d, dt.old), dt.old.len) : JV_NULL;
+            jv old = dt.had ? sh_span(vm, d, dt.old) : JV_NULL;
             jv now = JV_NULL;
             if (e.op != DOM_OP_REMOVE_ATTRIBUTE && e.other < d->attr_len && d->attr[e.other].live && d->attr[e.other].owner == x)
-                now = sh_str(vm, text_ptr(d, d->attr[e.other].value), d->attr[e.other].value.len);
+                now = sh_span(vm, d, d->attr[e.other].value);
             static const char *const spaces[] = { "", "http://www.w3.org/1999/xlink", "http://www.w3.org/XML/1998/namespace", "http://www.w3.org/2000/xmlns/" };
             jv ns = dt.ns && dt.ns < 4 ? sh_cstr(vm, spaces[dt.ns]) : JV_NULL;
             sc_attr_cb(vm, x, data(an), len(an), old, now, ns);

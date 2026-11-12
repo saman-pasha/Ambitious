@@ -18,9 +18,9 @@ A decision that changes is edited where it stands, and the reason is noted.
 
 | Part | Role in Ambitious | What it provides that the plan depends on |
 |---|---|---|
-| **cicilang** (0.284) | Compiler for every browser module | Safe Modern C (C17/C23) lowered to LLVM IR; the ownership check (`own`, `move`, borrows, `x tie y`); `defer`; `:=`; macros written in cocolog (`#include "m.pl"`, `#cocolog … #end`); **type macros** (`vector<int>`), **C text with holes** (`ccl_c_items/3`), functions made at their first call (`fn_N/3`), calls found by the first argument's type, **autodrop** |
+| **cicilang** (0.301) | Compiler for every browser module | Safe Modern C (C17/C23) lowered to LLVM IR; the ownership check (`own`, `move`, borrows, `x tie y`); `defer`; `:=`; macros written in cocolog (`#include "m.pl"`, `#cocolog … #end`); **type macros** (`vector<int>`), **C text with holes** (`ccl_c_items/3`), functions made at their first call (`fn_N/3`), calls found by the first argument's type, **autodrop** |
 | **ccllib** | The standard library of that C | `vector`, `array`, `deque`, `list`, `forward_list`, `stack`, `queue`, `priority_queue`, `set`/`multiset`, `map`/`multimap`, the four `unordered_*`. Each is a cocolog macro file. |
-| **cocolog** (3.62.0) | Reasoning, contracts, generation | A Prolog in the SWI-Prolog 9.0.4 dialect, with one namespace. It has an MVCC store embedded over ZiguratIP (`--embed DIR`), `library(process)`, `library(html)`/`xml`/`json`, and the flow libraries for charting and debugging Prolog. |
+| **cocolog** (3.62.3) | Reasoning, contracts, generation | A Prolog in the SWI-Prolog 9.0.4 dialect, with one namespace. It has an MVCC store embedded over ZiguratIP (`--embed DIR`), `library(process)`, `library(html)`/`xml`/`json`, and the flow libraries for charting and debugging Prolog. |
 | **ZiguratIP** (1.0.2) | Durable store | MVCC storage engine. It is reached only as cocolog's store, as cicilang reaches it. |
 | **Cicili** (3.3.0) | Builds the toolchain | Transpiles cocolog, ZiguratIP's MVCCS and cicilang's native modules. No browser module is written in it. |
 | **LLVM** (18) | Back end | Embedded in cicilang through llvm-c. |

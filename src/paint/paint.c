@@ -158,7 +158,7 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
     uint32_t prev = 0;
     while (i < n) {
         uint32_t cp = amb_utf8_next(s, n, &i);
-        if (prev) x += amb_kern(f, face, prev, cp, size);       /* the pair's kerning, as layout measured it */
+        if (prev) x += amb_kerning(f, face, prev, cp, size);       /* the pair's kerning, as layout measured it */
         prev = cp;
         /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
         double fx = floor(x + 0.125);
@@ -194,7 +194,7 @@ static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const a
     uint32_t prev = 0;
     while (i < n) {
         uint32_t cp = amb_utf8_next(s, n, &i);
-        if (prev) x += amb_kern(f, face, prev, cp, size);
+        if (prev) x += amb_kerning(f, face, prev, cp, size);
         prev = cp;
         /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
         double fx = floor(x + 0.125);
@@ -700,9 +700,9 @@ static void pt_side_split(amb_canvas *c, double x0, double y0, double x1, double
                 const double *s = sq + 4 * ks[q];
                 double cov = pt_sq_cover(px, py, s[0], s[1], s[2], s[3]);
                 if (cov <= 0) continue;
-                double fh = pt_miter_share(px, py, s[0], s[1], s[2], s[3], ks[q]), own = horiz ? fh : 1 - fh;
-                if (soft[q]) m *= 1 - cov * (1 - own);
-                else if (cov >= 0.5 && own < 0.5) m = 0;
+                double fh = pt_miter_share(px, py, s[0], s[1], s[2], s[3], ks[q]), share = horiz ? fh : 1 - fh;
+                if (soft[q]) m *= 1 - cov * (1 - share);
+                else if (cov >= 0.5 && share < 0.5) m = 0;
             }
             if (m <= 0) continue;
             size_t di = ((size_t)(ay + y) * c->w + (size_t)(ax + x)) * 3;

@@ -34,7 +34,7 @@ dom_status dom_keep_details(dom_document *d) {
 }
 /* a change's details' record (they are kept): its index. DOM_DETAIL asks only while they
    are, so a change costs a comparison until then */
-static uint32_t dom_detail(dom_document *d, uint32_t prev, uint32_t next, uint32_t name, uint32_t ns, amb_span old, int had) {
+static uint32_t dom_detail_add(dom_document *d, uint32_t prev, uint32_t next, uint32_t name, uint32_t ns, amb_span old, int had) {
     dom_detail_h h = detail_new(d);
     d->detail[h.index].prev = prev;
     d->detail[h.index].next = next;
@@ -44,7 +44,7 @@ static uint32_t dom_detail(dom_document *d, uint32_t prev, uint32_t next, uint32
     d->detail[h.index].had = (uint8_t)had;
     return h.index;
 }
-#define DOM_DETAIL(d, prev, next, name, ns, old, had) ((d)->detail_len > 1 ? dom_detail((d), (prev), (next), (name), (ns), (old), (had)) : 0u)
+#define DOM_DETAIL(d, prev, next, name, ns, old, had) ((d)->detail_len > 1 ? dom_detail_add((d), (prev), (next), (name), (ns), (old), (had)) : 0u)
 /* a mutation logged with no more than its target and other node: a node made, a subtree freed */
 static void dom_log(dom_document *d, dom_op op, uint32_t target, uint32_t other) { dom_log_mutation(d, op, target, other, 0); }
 

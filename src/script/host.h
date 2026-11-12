@@ -82,6 +82,10 @@ void sh_view(js_vm *vm);
 void script_ready(js_vm *vm);
 void script_timers_after(js_vm *vm, double horizon);
 jv sh_str(js_vm *vm, const char *p, size_t n);
+/* a span of the document's text, a name of its names, as a string: the document a parameter of its own (a pointer
+   into it reached through the vm and handed to sh_str beside the vm is refused, as the vm's stores may grow there) */
+jv sh_span(js_vm *vm, const dom_document *d, amb_span sp);
+jv sh_name(js_vm *vm, const dom_document *d, uint32_t name);
 jv sh_cstr(js_vm *vm, const char *p);
 jv sh_wrap(js_vm *vm, uint32_t x);
 uint32_t sh_node(js_vm *vm, jv v, int need);

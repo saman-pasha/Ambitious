@@ -1853,11 +1853,11 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             size_t e = w.off + w.len;
             while (e > w.off + 1 && ((unsigned char)tx[e - 1] & 0xC0) == 0x80) e--;
             size_t z = e - 1;
-            kk += amb_kern(f, s->face, amb_utf8_next(tx, w.off + w.len, &z), ' ', s->fs);
+            kk += amb_kerning(f, s->face, amb_utf8_next(tx, w.off + w.len, &z), ' ', s->fs);
         }
         if (k + 1 < len(*ps) && at(*ps, k + 1).kind == P_WORD) {
             size_t z = at(*ps, k + 1).off;
-            kk += amb_kern(f, s->face, ' ', amb_utf8_next(tx, n, &z), s->fs);
+            kk += amb_kerning(f, s->face, ' ', amb_utf8_next(tx, n, &z), s->fs);
         }
         if (kk != 0) { q.w += kk; (*ps)[k] = q; }
     }

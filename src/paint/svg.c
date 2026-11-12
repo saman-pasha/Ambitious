@@ -2589,7 +2589,7 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
         const sv_walk *cw = &cwv;
         int face = sv_face(st, cw);
         double fs = sv_fs(st, cw), a = amb_advance(f, face, ch.cp, fs);
-        if (i + 1 < n && at(cs, i + 1).el == ch.el && !(at(cs, i + 1).set & 1)) a += amb_kern(f, face, ch.cp, at(cs, i + 1).cp, fs);
+        if (i + 1 < n && at(cs, i + 1).el == ch.el && !(at(cs, i + 1).set & 1)) a += amb_kerning(f, face, ch.cp, at(cs, i + 1).cp, fs);
         uint32_t ls = cw->src[SI_LETTER_SPACING];
         if (st->cval[ls].unit == CSS_UNIT_PX) a += st->cval[ls].num;
         uint32_t wsp = cw->src[SI_WORD_SPACING];
