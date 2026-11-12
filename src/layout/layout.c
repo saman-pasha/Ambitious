@@ -184,6 +184,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <vector.pl>
+#include <string.pl>
 #include <amb.pl>
 #include "../paint/font.h"
 
@@ -1168,7 +1169,7 @@ static int lay_input_kind(const dom_document *d, uint32_t el) {
 }
 
 /* the text of x's descendants (a script's passed over), ASCII white space stripped and collapsed: an option's text */
-static void lay_collapsed_text(const dom_document *d, uint32_t x, vector<char> *out, int *sp, int depth) {
+static void lay_collapsed_text(const dom_document *d, uint32_t x, string *out, int *sp, int depth) {
     for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
         if (d->node[c].kind == DOM_NODE_KIND_TEXT) {
             amb_span v = d->node[c].data;
@@ -1183,19 +1184,19 @@ static void lay_collapsed_text(const dom_document *d, uint32_t x, vector<char> *
     }
 }
 /* an option's label (HTML 4.10.10): its label attribute when it is not empty, else its text */
-static void lay_option_label(const dom_document *d, uint32_t opt, vector<char> *out) {
+static void lay_option_label(const dom_document *d, uint32_t opt, string *out) {
     clear(*out);
     uint32_t a = lay_attr(d, opt, "label");
-    if (a && d->attr[a].value.len) { append_range(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
+    if (a && d->attr[a].value.len) { append(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
     int sp = 1;
     lay_collapsed_text(d, opt, out, &sp, 0);
-    while (len(*out) && back(*out) == ' ') pop_back(out);
+    while (len(*out) && back(*out) == ' ') pop_back(*out);
 }
 /* a select's list box or drop-down (HTML 4.10.7): a list box when it has multiple or a size above 1, its rows the
    size (4 for multiple without one); its options' widest label in s's font, in *widest; its selected option's label
    (the last with selected, else the first that is not disabled, else the first) in *shown. The options are its
    children's and its optgroups' children's */
-static int lay_select(LCTX, uint32_t el, const lay_style *s, double *widest, vector<char> *shown, long *rows) {
+static int lay_select(LCTX, uint32_t el, const lay_style *s, double *widest, string *shown, long *rows) {
     int multiple = lay_attr(d, el, "multiple") != 0;
     long size = lay_attr_int(d, el, "size", multiple ? 4 : 1);
     if (size < 1) size = multiple ? 4 : 1;
@@ -1203,7 +1204,7 @@ static int lay_select(LCTX, uint32_t el, const lay_style *s, double *widest, vec
     *widest = 0;
     clear(*shown);
     uint32_t chosen = 0, first = 0, first_enabled = 0;
-    vector<char> label;
+    string label;
     for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
         uint32_t g = lay_is_named(d, c, "optgroup") ? d->node[c].first_child : c, end = lay_is_named(d, c, "optgroup") ? 0 : d->node[c].next_sibling;
         for (uint32_t o = g; o && o != end; o = d->node[o].next_sibling) {
@@ -1234,12 +1235,11 @@ static double lay_char_width(LCTX, const lay_style *s, double *maxw) {
     return fmax(floor(avg + 0.5), avg);
 }
 /* a button input's label: its value, or the default its type has (Chromium's: Submit, Reset, none) */
-static void lay_button_label(const dom_document *d, uint32_t el, int kind, vector<char> *out) {
+static void lay_button_label(const dom_document *d, uint32_t el, int kind, string *out) {
     clear(*out);
     uint32_t a = lay_attr(d, el, "value");
-    if (a) { append_range(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
-    const char *dflt = kind == LI_SUBMIT ? "Submit" : kind == LI_RESET ? "Reset" : "";
-    append_range(*out, dflt, strlen(dflt));
+    if (a) { append(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len); return; }
+    append(*out, kind == LI_SUBMIT ? "Submit" : kind == LI_RESET ? "Reset" : "");
 }
 
 static double lay_attr_num(const dom_document *d, uint32_t el, const char *name, double dflt);
@@ -1547,7 +1547,7 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                 dh = s->lh + 6;
             }
             else if (kind == LI_BUTTON || kind == LI_SUBMIT || kind == LI_RESET) {
-                vector<char> label;
+                string label;
                 lay_button_label(d, el, kind, &label);
                 dw = amb_text_width(f, s->face, s->fs, data(label), len(label)) + s->ls * (double)lay_cps(data(label), len(label));
                 dh = s->lh;
@@ -1592,7 +1592,7 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                high (of appearance none, the label and the line alone: no theme's padding, measured). A list box: the
                widest label and 4px; its rows, a line and 2px each */
             double widest = 0;
-            vector<char> shown;
+            string shown;
             long rows = 1;
             /* its text a line of the font's ascent and descent, no line gap (Chromium's drop-down) */
             if (lay_select(LARGS, el, s, &widest, &shown, &rows)) { dw = widest + 4; dh = (double)rows * (s->asc + s->desc + 2); }
@@ -2464,7 +2464,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         int k = input ? lay_input_kind(d, el) : LI_TEXT;
         double widest = 0;
         long rows = 1;
-        vector<char> unused;
+        string unused;
         lay_leading(es->lh, es->asc, es->desc, &above, &below);
         t->box[b].has_baseline = 1;
         if (textarea) t->box[b].baseline = bottom + t->box[b].mb;
@@ -2475,7 +2475,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         else t->box[b].baseline = (ch - es->lh) / 2 + above;
     }
     lay_style ps = *es;
-    vector<char> txt;
+    string txt;
     int kind = input ? lay_input_kind(d, el) : LI_TEXT, center = 0;
     double x = 0;
     if (input && (kind == LI_BUTTON || kind == LI_SUBMIT || kind == LI_RESET)) {
@@ -2487,7 +2487,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         double widest = 0;
         long rows = 1;
         if (lay_select(LARGS, el, es, &widest, &txt, &rows)) {
-            vector<char> label;
+            string label;
             double y = 0;
             for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
                 uint32_t g = lay_is_named(d, c, "optgroup") ? d->node[c].first_child : c, end = lay_is_named(d, c, "optgroup") ? 0 : d->node[c].next_sibling;
@@ -2550,7 +2550,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         uint32_t v = input ? lay_attr(d, el, "value") : 0;
         if (textarea) {
             for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling)
-                if (d->node[c].kind == DOM_NODE_KIND_TEXT) append_range(txt, text_ptr(d, d->node[c].data), d->node[c].data.len);
+                if (d->node[c].kind == DOM_NODE_KIND_TEXT) append(txt, text_ptr(d, d->node[c].data), d->node[c].data.len);
         } else if (v && d->attr[v].value.len) {
             amb_span vs = d->attr[v].value;
             const char *src = text_ptr(d, vs);
@@ -2576,7 +2576,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
                 push_back(txt, c);
                 sp = 0;
             }
-            while (len(txt) && back(txt) == ' ') pop_back(&txt);
+            while (len(txt) && back(txt) == ' ') pop_back(txt);
         } else if (textarea) {
             /* a textarea's text: its lines, each broken where it reaches the box's width (the scroll bar's 15px its
                intrinsic width keeps is no room taken: Chromium's scroll bars here overlay) */
