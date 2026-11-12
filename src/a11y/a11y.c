@@ -129,13 +129,13 @@ int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
 
 /* the element names, in strcmp order (a name's kind is its index, found by halving) */
 enum { E_NONE, E_A, E_AREA, E_ARTICLE, E_ASIDE, E_AUDIO, E_BASE, E_BLOCKQUOTE, E_BODY, E_BR, E_BUTTON, E_CAPTION, E_CODE,
-       E_DATALIST, E_DD, E_DETAILS, E_DIALOG, E_DT, E_FIELDSET, E_FIGCAPTION, E_FIGURE, E_FOOTER, E_FORM, E_H1, E_H2, E_H3,
+       E_COL, E_COLGROUP, E_DATALIST, E_DD, E_DETAILS, E_DIALOG, E_DT, E_FIELDSET, E_FIGCAPTION, E_FIGURE, E_FOOTER, E_FORM, E_H1, E_H2, E_H3,
        E_H4, E_H5, E_H6, E_HEAD, E_HEADER, E_HR, E_IFRAME, E_IMG, E_INPUT, E_LABEL, E_LEGEND, E_LI, E_LINK, E_MAIN, E_MENU,
        E_META, E_METER, E_NAV, E_NOSCRIPT, E_OL, E_OPTGROUP, E_OPTION, E_OUTPUT, E_P, E_PARAM, E_PROGRESS, E_SCRIPT, E_SEARCH,
        E_SECTION, E_SELECT, E_SOURCE, E_STYLE, E_SUMMARY, E_TABLE, E_TBODY, E_TD, E_TEMPLATE, E_TEXTAREA, E_TFOOT, E_TH,
        E_THEAD, E_TITLE, E_TR, E_TRACK, E_UL, E_VIDEO, E_COUNT };
 static const char *const ax_elements[E_COUNT] = { "", "a", "area", "article", "aside", "audio", "base", "blockquote", "body", "br",
-    "button", "caption", "code", "datalist", "dd", "details", "dialog", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+    "button", "caption", "code", "col", "colgroup", "datalist", "dd", "details", "dialog", "dt", "fieldset", "figcaption", "figure", "footer", "form",
     "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "iframe", "img", "input", "label", "legend", "li", "link", "main",
     "menu", "meta", "meter", "nav", "noscript", "ol", "optgroup", "option", "output", "p", "param", "progress", "script", "search",
     "section", "select", "source", "style", "summary", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead",
@@ -144,7 +144,7 @@ static const char *const ax_elements[E_COUNT] = { "", "a", "area", "article", "a
 /* the attributes: HTML's, then the aria-* ones from A_FIRST, in strcmp order */
 enum { K_NONE, K_ROLE, K_ID, K_HIDDEN, K_TABINDEX, K_DISABLED, K_HREF, K_ALT, K_TITLE, K_TYPE, K_VALUE, K_PLACEHOLDER, K_FOR,
        K_LABEL, K_MULTIPLE, K_SELECTED, K_CHECKED, K_REQUIRED, K_READONLY, K_OPEN, K_NAME, K_LIST, K_MIN, K_MAX, K_STEP, K_SCOPE,
-       K_CONTENTEDITABLE, K_SIZE, K_CONTROLS, K_PATTERN,
+       K_CONTENTEDITABLE, K_SIZE, K_CONTROLS, K_PATTERN, K_SUMMARY, K_RULES, K_HEADERS, K_ABBR, K_AXIS,
        A_ACTIVEDESCENDANT, A_ATOMIC, A_AUTOCOMPLETE, A_BUSY, A_CHECKED, A_COLCOUNT, A_COLINDEX, A_COLSPAN, A_CONTROLS, A_CURRENT,
        A_DESCRIBEDBY, A_DESCRIPTION, A_DETAILS, A_DISABLED, A_DROPEFFECT, A_ERRORMESSAGE, A_EXPANDED, A_FLOWTO, A_GRABBED,
        A_HASPOPUP, A_HIDDEN, A_INVALID, A_KEYSHORTCUTS, A_LABEL, A_LABELLEDBY, A_LEVEL, A_LIVE, A_MODAL, A_MULTILINE,
@@ -154,7 +154,7 @@ enum { K_NONE, K_ROLE, K_ID, K_HIDDEN, K_TABINDEX, K_DISABLED, K_HREF, K_ALT, K_
 #define A_FIRST A_ACTIVEDESCENDANT
 static const char *const ax_attrs[K_COUNT] = { "", "role", "id", "hidden", "tabindex", "disabled", "href", "alt", "title", "type",
     "value", "placeholder", "for", "label", "multiple", "selected", "checked", "required", "readonly", "open", "name", "list", "min",
-    "max", "step", "scope", "contenteditable", "size", "controls", "pattern",
+    "max", "step", "scope", "contenteditable", "size", "controls", "pattern", "summary", "rules", "headers", "abbr", "axis",
     "aria-activedescendant", "aria-atomic", "aria-autocomplete", "aria-busy", "aria-checked", "aria-colcount", "aria-colindex",
     "aria-colspan", "aria-controls", "aria-current", "aria-describedby", "aria-description", "aria-details", "aria-disabled",
     "aria-dropeffect", "aria-errormessage", "aria-expanded", "aria-flowto", "aria-grabbed", "aria-haspopup", "aria-hidden",
@@ -533,6 +533,121 @@ static a11y_role ax_input_role(ACTX, uint32_t x) {
     return A11Y_ROLE_TEXTBOX;
 }
 
+/* ---- tables Chromium takes for layout ---- */
+
+/* x's computed value of prop: its record's index, 0 when it has none */
+static uint32_t ax_cval(ACTX, uint32_t x, uint32_t prop) {
+    if (x >= len(*sx) || !at(*sx, x)) return 0;
+    uint32_t c = at(*sx, x) + prop;
+    if (c >= st->cval_len || st->cval[c].prop != prop) return 0;
+    return c;
+}
+/* a side of x's border drawn: a width above 0 in a style that draws */
+static int ax_border(ACTX, uint32_t x, uint32_t wprop, uint32_t sprop) {
+    uint32_t w = ax_cval(AARGS, x, wprop), s = ax_cval(AARGS, x, sprop);
+    if (!w || !(st->cval[w].num > 0)) return 0;
+    return !s || !st->cval[s].word || (st->cval[s].word != cw[W_NONE] && st->cval[s].word != cw[W_HIDDEN]);
+}
+static uint32_t ax_bg(ACTX, uint32_t x) {
+    uint32_t c = ax_cval(AARGS, x, CSS_PROP_BACKGROUND_COLOR);
+    return c ? st->cval[c].color : 0;
+}
+/* a table's rows, as its rows collection has them: its thead's, then its own and its tbodies' in order, then its
+   tfoot's (the first of each) */
+static void ax_table_rows(ACTX, uint32_t x, vector<uint32_t> *rows) {
+    uint32_t th = ax_child(AARGS, x, E_THEAD), tf = ax_child(AARGS, x, E_TFOOT);
+    for (int pass = 0; pass < 3; pass++)
+        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
+            int ck = ax_kind(AARGS, c);
+            if (pass == 1 && ck == E_TR) { push_back(*rows, c); continue; }
+            if (!((pass == 0 && c == th) || (pass == 1 && ck == E_TBODY) || (pass == 2 && c == tf))) continue;
+            for (uint32_t r = d->node[c].first_child; r; r = d->node[r].next_sibling)
+                if (ax_kind(AARGS, r) == E_TR) push_back(*rows, r);
+        }
+}
+/* Chromium's guess that a table holds data, not layout (Blink's AXNodeObject::IsDataTable, measured on
+   tests/pages/a11y-tables.html): a caption, summary, thead, tfoot, rules or col; 20 rows or more; a th, or a cell
+   with headers, abbr, axis or scope; of the cells drawn, half or more bordered (both sides of an axis, or each on the
+   same side), or of a background of their own other than the table's (the spacing between them taken to be the user
+   agent's: border-spacing is not read), ten of either enough; its first rows' backgrounds alternating. Otherwise, with
+   two cells drawn or fewer, one row of one cell, or no row: layout */
+static int ax_data_table(ACTX, uint32_t x) {
+    if (d->node[x].first_attr && (ax_tok(d, ax_get(AARGS, x, K_SUMMARY), "") != -2 || ax_tok(d, ax_get(AARGS, x, K_RULES), "") != -2)) return 1;
+    if (ax_child(AARGS, x, E_CAPTION) || ax_child(AARGS, x, E_THEAD) || ax_child(AARGS, x, E_TFOOT) || ax_child(AARGS, x, E_COL) ||
+        ax_child(AARGS, x, E_COLGROUP)) return 1;
+    vector<uint32_t> rows;
+    ax_table_rows(AARGS, x, &rows);
+    size_t nr = len(rows);
+    if (nr >= 20) return 1;
+    if (nr == 0) return 0;
+    uint32_t first_cells = 0;
+    for (uint32_t c = d->node[at(rows, 0)].first_child; c; c = d->node[c].next_sibling) {
+        int ck = ax_kind(AARGS, c);
+        if (ck == E_TD || ck == E_TH) first_cells++;
+    }
+    if (nr == 1 && first_cells == 1) return 0;
+    uint32_t tbg = ax_bg(AARGS, x);
+    uint32_t valid = 0, bordered = 0, bgdiff = 0, top = 0, bottom = 0, left = 0, right = 0;
+    uint32_t zebra[5];
+    uint32_t nz = 0;
+    for (size_t ri = 0; ri < nr; ri++) {
+        uint32_t row = at(rows, ri);
+        for (uint32_t c = d->node[row].first_child; c; c = d->node[c].next_sibling) {
+            int ck = ax_kind(AARGS, c);
+            if (ck != E_TD && ck != E_TH) continue;
+            if (ck == E_TH) return 1;
+            if (d->node[c].first_attr && (ax_tok(d, ax_get(AARGS, c, K_HEADERS), "") != -2 || ax_tok(d, ax_get(AARGS, c, K_ABBR), "") != -2 ||
+                                          ax_tok(d, ax_get(AARGS, c, K_AXIS), "") != -2 || ax_tok(d, ax_get(AARGS, c, K_SCOPE), "") != -2)) return 1;
+            /* a cell drawn: neither it nor its row nor its group of display none */
+            if (ax_display_none(AARGS, c) || ax_display_none(AARGS, row) ||
+                (d->node[row].parent != x && ax_display_none(AARGS, d->node[row].parent))) continue;
+            valid++;
+            int bt = ax_border(AARGS, c, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_TOP_STYLE),
+                bb = ax_border(AARGS, c, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_BOTTOM_STYLE),
+                bl = ax_border(AARGS, c, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_LEFT_STYLE),
+                br = ax_border(AARGS, c, CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_RIGHT_STYLE);
+            if ((bt && bb) || (bl && br)) bordered++;
+            top += bt;
+            bottom += bb;
+            left += bl;
+            right += br;
+            uint32_t cbg = ax_bg(AARGS, c);
+            if (cbg != tbg && (cbg & 0xff) != 0) bgdiff++;
+            if (bordered >= 10 || bgdiff >= 10) return 1;
+            if (ri < 5 && ri == nz) zebra[nz++] = ax_bg(AARGS, row);
+        }
+    }
+    if (valid <= 1) return 0;
+    uint32_t need = valid / 2;
+    if (bordered >= need || top >= need || bottom >= need || left >= need || right >= need) return 1;
+    if (bgdiff >= need) return 1;
+    if (nz > 2) {
+        for (uint32_t q = 1; q < nz; q++) {
+            if (q % 2 == 1 && zebra[q] == zebra[0]) return 0;
+            if (q % 2 == 0 && zebra[q] != zebra[0]) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+/* a row's, a cell's or a row group's table, up its rows and groups: 0 when it is in none */
+static uint32_t ax_table_of(ACTX, uint32_t x) {
+    for (uint32_t p = d->node[x].parent; p > 1; p = d->node[p].parent) {
+        int pk = ax_kind(AARGS, p);
+        if (pk == E_TABLE) return p;
+        if (pk != E_TR && pk != E_THEAD && pk != E_TBODY && pk != E_TFOOT) return 0;
+    }
+    return 0;
+}
+static int ax_role_attr(ACTX, uint32_t x, a11y_role *role, size_t *bad_off, size_t *bad_len);
+/* a table of no role attribute's role that Chromium takes for layout */
+static int ax_layout_table(ACTX, uint32_t x) {
+    a11y_role r = A11Y_ROLE_GENERIC;
+    size_t bo = 0, bl = 0;
+    if (!x || (d->node[x].first_attr && ax_role_attr(AARGS, x, &r, &bo, &bl))) return 0;
+    return !ax_data_table(AARGS, x);
+}
+
 /* an element's own role (HTML-AAM) */
 static a11y_role ax_implicit(ACTX, uint32_t x, int k) {
     switch (k) {
@@ -552,10 +667,10 @@ static a11y_role ax_implicit(ACTX, uint32_t x, int k) {
     case E_P: return A11Y_ROLE_PARAGRAPH;
     case E_UL: case E_OL: case E_MENU: return A11Y_ROLE_LIST;
     case E_LI: return A11Y_ROLE_LISTITEM;
-    case E_TABLE: return A11Y_ROLE_TABLE;
+    case E_TABLE: return ax_data_table(AARGS, x) ? A11Y_ROLE_TABLE : A11Y_ROLE_LAYOUT_TABLE;
     case E_CAPTION: return A11Y_ROLE_CAPTION;
-    case E_TR: return A11Y_ROLE_ROW;
-    case E_TD: return A11Y_ROLE_CELL;
+    case E_TR: return ax_layout_table(AARGS, ax_table_of(AARGS, x)) ? A11Y_ROLE_LAYOUT_TABLE_ROW : A11Y_ROLE_ROW;
+    case E_TD: return ax_layout_table(AARGS, ax_table_of(AARGS, x)) ? A11Y_ROLE_LAYOUT_TABLE_CELL : A11Y_ROLE_CELL;
     case E_TH: return ax_tok(d, ax_get(AARGS, x, K_SCOPE), "row") == 0 ? A11Y_ROLE_ROWHEADER : A11Y_ROLE_COLUMNHEADER;
     case E_NAV: return A11Y_ROLE_NAVIGATION;
     case E_MAIN: return A11Y_ROLE_MAIN;
@@ -612,7 +727,8 @@ static a11y_role ax_role_of(ACTX, uint32_t x, int k) {
 }
 
 static int ax_from_content(a11y_role r) {
-    return r == A11Y_ROLE_LINK || r == A11Y_ROLE_BUTTON || r == A11Y_ROLE_HEADING || r == A11Y_ROLE_CELL || r == A11Y_ROLE_COLUMNHEADER ||
+    return r == A11Y_ROLE_LINK || r == A11Y_ROLE_BUTTON || r == A11Y_ROLE_HEADING || r == A11Y_ROLE_CELL || r == A11Y_ROLE_LAYOUT_TABLE_CELL ||
+           r == A11Y_ROLE_COLUMNHEADER ||
            r == A11Y_ROLE_ROWHEADER || r == A11Y_ROLE_GRIDCELL || r == A11Y_ROLE_OPTION || r == A11Y_ROLE_TAB || r == A11Y_ROLE_MENUITEM ||
            r == A11Y_ROLE_MENUITEMCHECKBOX || r == A11Y_ROLE_MENUITEMRADIO || r == A11Y_ROLE_TERM || r == A11Y_ROLE_CHECKBOX ||
            r == A11Y_ROLE_RADIO || r == A11Y_ROLE_SWITCH || r == A11Y_ROLE_TREEITEM || r == A11Y_ROLE_TOOLTIP;
@@ -1365,6 +1481,10 @@ static a11y_name_from ax_name_of(ACTX, const uint32_t *sl, uint32_t x, int k, a1
     if (k == E_TABLE) cap = ax_child(AARGS, x, E_CAPTION);
     else if (k == E_FIGURE) cap = ax_child(AARGS, x, E_FIGCAPTION);
     if (cap) { ax_content(AARGS, cap, 0, 0, out); if (ax_says(out, 0)) return A11Y_NAME_FROM_CAPTION; clear(*out); }
+    if (k == E_TABLE && d->node[x].first_attr) {
+        uint32_t a = ax_get(AARGS, x, K_SUMMARY);
+        if (a && ax_put_attr(d, a, out)) return A11Y_NAME_FROM_SUMMARY;
+    }
     uint32_t leg = k == E_FIELDSET ? ax_child(AARGS, x, E_LEGEND) : 0;
     if (leg) { ax_content(AARGS, leg, 0, 0, out); if (ax_says(out, 0)) return A11Y_NAME_FROM_LEGEND; clear(*out); }
     if (k == E_OPTGROUP || k == E_OPTION) {

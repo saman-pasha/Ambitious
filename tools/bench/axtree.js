@@ -13,7 +13,9 @@
 //   - names and descriptions trimmed, white space collapsed;
 //   - Chromium's own roles mapped to WAI-ARIA's: image is img, a details element's
 //     DisclosureTriangle is the button it is in ARIA, and a label's LabelText and a legend's
-//     Legend are generic, as HTML-AAM gives those elements no role;
+//     Legend are generic, as HTML-AAM gives those elements no role; a table Chromium takes for
+//     layout, its rows and its cells are Ambitious's layout_table, layout_table_row and
+//     layout_table_cell;
 //   - a true-or-false state only when true, but checked, pressed and expanded, whose false says
 //     something; invalid's grammar and spelling are true, as Chromium has them; haspopup false
 //     and autocomplete none are no state;
@@ -29,7 +31,8 @@ const { chromium } = require('playwright');
 const path = require('path');
 
 const RANGE = new Set(['slider', 'spinbutton', 'scrollbar', 'progressbar', 'meter', 'separator']);
-const ROLES = { image: 'img', DisclosureTriangle: 'button', RootWebArea: 'document', LabelText: 'generic', Legend: 'generic' };
+const ROLES = { image: 'img', DisclosureTriangle: 'button', RootWebArea: 'document', LabelText: 'generic', Legend: 'generic',
+  LayoutTable: 'layout_table', LayoutTableRow: 'layout_table_row', LayoutTableCell: 'layout_table_cell' };
 const text = (s) => String(s).replace(/\s+/g, ' ').trim();
 const num = (v) => String(Number(Number(v).toPrecision(6)));
 

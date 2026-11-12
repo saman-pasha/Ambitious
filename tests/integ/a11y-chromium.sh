@@ -1,7 +1,7 @@
 #!/bin/sh
-# tests/integ/a11y-chromium.sh -- the accessibility trees of three fixture pages held to Chromium's
+# tests/integ/a11y-chromium.sh -- the accessibility trees of the fixture pages held to Chromium's
 # own: states and properties (a11y-states), names and descriptions (a11y-names), live regions
-# (a11y-live). Each node whose element has an id is a line, as tools/bench/axtree.js writes
+# (a11y-live), more of each (a11y-more), and tables Chromium takes for layout (a11y-tables). Each node whose element has an id is a line, as tools/bench/axtree.js writes
 # Chromium's tree into tests/pages/NAME.chromium: its role, name, description, level, states and
 # properties, values and live region. Ambitious's lines come from the developer's view (ambitious
 # inspect), less what Chromium's DevTools protocol does not show: where a name or a value came
@@ -21,7 +21,7 @@ tree() {
         -e 's/ invalid=spelling/ invalid=true/' -e 's/ live=off atomic=[a-z]* relevant="[^"]*"//' -e 's/ focusable$//' |
     grep -v '^generic#[^ ]*$'
 }
-for p in a11y-states a11y-names a11y-live a11y-more; do
+for p in a11y-states a11y-names a11y-live a11y-more a11y-tables; do
   echo "-- the $p page's tree, against Chromium's:"
   tree "$pages/$p.html" > "$work/tree.txt"
   n=$(wc -l < "$work/tree.txt" | tr -d ' ')

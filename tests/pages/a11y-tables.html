@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>layout tables and data tables</title>
+<style>
+body { font: 16px serif; }
+table { margin: 4px; }
+.b td { border: 1px solid black; }
+.bb td { border-bottom: 1px solid black; }
+.bg { border-spacing: 2px; background: white; }
+.bg td { background: #eef; }
+.zebra { border-spacing: 0; }
+.zebra tr:nth-child(odd) { background: #eee; }
+.zebra tr:nth-child(even) { background: #fff; }
+</style></head>
+<body>
+<table id="t1"><tr><td>one cell</td></tr></table>
+<table id="t2"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>
+<table id="t3"><caption>Cap</caption><tr><td>a</td><td>b</td></tr></table>
+<table id="t4"><thead><tr><td>h1</td><td>h2</td></tr></thead><tr><td>a</td><td>b</td></tr></table>
+<table id="t5"><tfoot><tr><td>f1</td><td>f2</td></tr></tfoot><tr><td>a</td><td>b</td></tr></table>
+<table id="t6" summary="data"><tr><td>a</td><td>b</td></tr></table>
+<table id="t7" rules="all"><tr><td>a</td><td>b</td></tr></table>
+<table id="t8"><colgroup><col></colgroup><tr><td>a</td><td>b</td></tr></table>
+<table id="t9"><tr><th>head</th><td>b</td></tr></table>
+<table id="t10"><tr><td headers="x">a</td><td>b</td></tr></table>
+<table id="t11"><tr><td abbr="x">a</td><td>b</td></tr></table>
+<table id="t12"><tr><td scope="row">a</td><td>b</td></tr></table>
+<table id="t13" class="b"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>
+<table id="t14" class="bb"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>
+<table id="t15" class="bg"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>
+<table id="t16" class="zebra"><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr><tr><td>e</td><td>f</td></tr><tr><td>g</td><td>h</td></tr></table>
+<table id="t18" role="grid"><tr><td>a</td><td>b</td></tr></table>
+<table id="t19"><tr><td>a</td></tr><tr><td>b</td></tr></table>
+<table id="t20"><tr><td>1</td></tr><tr><td>2</td></tr><tr><td>3</td></tr><tr><td>4</td></tr><tr><td>5</td></tr><tr><td>6</td></tr><tr><td>7</td></tr><tr><td>8</td></tr><tr><td>9</td></tr><tr><td>10</td></tr><tr><td>11</td></tr><tr><td>12</td></tr><tr><td>13</td></tr><tr><td>14</td></tr><tr><td>15</td></tr><tr><td>16</td></tr><tr><td>17</td></tr><tr><td>18</td></tr><tr><td>19</td></tr><tr><td>20</td></tr></table>
+<table id="t21"><tr><td></td><td></td></tr></table>
+<table id="t22" role="presentation"><tr><th>h</th><td>b</td></tr></table>
+<table id="t23" aria-label="named"><tr><td>a</td><td>b</td></tr></table>
+<table id="t24"><tr><td axis="x">a</td><td>b</td></tr></table>
+<table id="t25" class="b"><tr><td>a</td></tr></table>
+<table id="t26"><tbody><tr><td>a</td><td>b</td></tr></tbody></table>
+<table id="t27"><tr id="r27"><td id="c27">a</td><td>b</td></tr></table>
+<table id="t28" summary="sum" title="tit"><tr><td>a</td></tr></table>
+<table id="t29" style="display:none"><tr><td>a</td></tr></table>
+<table id="t30"><tr><td style="display:none">a</td><td>b</td></tr><tr><td>c</td><td style="border-left:2px solid red;border-right:2px solid red">d</td></tr></table>
+</body></html>

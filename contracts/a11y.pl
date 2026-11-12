@@ -28,10 +28,13 @@ a11y_contract(enum(role, [document, generic, presentation, link, button, checkbo
     progressbar, menu, menuitem, tab, tablist, tabpanel, alert, status,
     alertdialog, application, caption, deletion, directory, emphasis, feed, grid, gridcell, insertion, log, marquee, math,
     menubar, menuitemcheckbox, menuitemradio, meter, note, radiogroup, rowgroup, scrollbar, searchbox, spinbutton, strong,
-    subscript, superscript, switch, time, timer, toolbar, tooltip, tree, treegrid, treeitem, unknown])).
+    subscript, superscript, switch, time, timer, toolbar, tooltip, tree, treegrid, treeitem, unknown,
+    layout_table, layout_table_row, layout_table_cell])).
+%% (the last three Chromium's own, after unknown so that no role attribute names them: a table it takes for layout,
+%% its rows and its cells)
 %% where an accessible name came from
 a11y_contract(enum(name_from, [nothing, aria_labelledby, aria_label, alt, label, caption, legend, content, title, placeholder, value,
-    label_attribute])).
+    label_attribute, summary])).
 %% where an accessible description came from
 a11y_contract(enum(desc_from, [nothing, aria_describedby, aria_description, title, caption])).
 %% the attributes that name other elements by their ids
