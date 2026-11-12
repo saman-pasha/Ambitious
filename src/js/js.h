@@ -475,6 +475,9 @@ jv js_coll_op(js_vm *vm, uint32_t op, uint32_t c, jv k, jv v);
 uint32_t js_uni_upper(uint32_t c);
 uint32_t js_uni_lower(uint32_t c);
 uint32_t js_uni_special(uint32_t c, int upper, uint32_t *out);
+/* String.prototype.normalize's work (src/js/normalize.c): s in the form a value names
+   (undefined: NFC), JV_HOLE with a RangeError thrown for an unknown one */
+jv js_str_normalize(js_vm *vm, uint32_t s, jv form);
 
 /* strings */
 uint32_t js_str_new(js_vm *vm, const uint16_t *u, size_t n);

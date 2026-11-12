@@ -2388,7 +2388,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             if (!t) return JV_HOLE;
             return jv_num(js_str_cmp(vm, s, t));
         }
-        case N_SP_NORMALIZE: return jv_str(s);
+        case N_SP_NORMALIZE: return js_str_normalize(vm, s, a0);
         default: break;
         }
     }
@@ -2755,6 +2755,7 @@ void js_builtins_init(js_vm *vm) {
         "slice", "substring", "substr", "toUpperCase", "toLowerCase", "trim", "trimStart", "trimEnd", "padStart", "padEnd", "repeat",
         "split", "replace", "replaceAll", "concat", "at", "localeCompare", "toString", "normalize", "match", "search" };
     for (uint32_t i = 0; i < sizeof sn / sizeof sn[0]; i++) defn(vm, sp, sn[i], N_SP_CHARAT + i, 1);
+    defn(vm, sp, "normalize", N_SP_NORMALIZE, 0);
     defn(vm, sp, "valueOf", N_SP_TOSTRING, 0);
     defn(vm, sp, "toLocaleUpperCase", N_SP_TOUPPER, 0);
     defn(vm, sp, "toLocaleLowerCase", N_SP_TOLOWER, 0);
