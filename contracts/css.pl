@@ -58,6 +58,7 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% fallback; a dash array as text; clip-path's none or url(#id)
     fill, fill_opacity, fill_rule, stroke, stroke_width, stroke_linecap, stroke_linejoin, stroke_miterlimit,
     stroke_dasharray, stroke_dashoffset, stroke_opacity, stop_color, stop_opacity, clip_path, clip_rule, text_anchor,
+    appearance,                        % none, auto or a control's own (CSS UI 4): whether the theme draws it
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

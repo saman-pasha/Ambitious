@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>font-family's computed value, as Chromium serializes the list</title></head><body>
+<div id="f0" data-check="font-family">default</div>
+<div id="f1" data-check="font-family" style="font-family: Arial">x</div>
+<div id="f2" data-check="font-family" style="font-family: 'Arial'">x</div>
+<div id="f3" data-check="font-family" style="font-family: Times New Roman">x</div>
+<div id="f4" data-check="font-family" style="font-family: &quot;My Font&quot;, sans-serif">x</div>
+<div id="f5" data-check="font-family" style="font-family: serif">x</div>
+<div id="f6" data-check="font-family" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto">x</div>
+<div id="f7" data-check="font-family" style="font-family: monospace">x</div>
+<div id="f8" data-check="font-family" style="font-family: MONOSPACE">x</div>
+<div id="f9" data-check="font-family" style="font-family:   Liberation   Sans , serif">x</div>
+<div id="f10" data-check="font-family" style="font-family: 'a b' , &quot;c&quot;">x</div>
+<div id="f11" data-check="font-family" style="font-family: system-ui">x</div>
+<div id="f12" data-check="font-family" style="font-family: font1,font2">x</div>
+<div id="f13" data-check="font-family" style="font-family: 'Font 1', 'serif'">x</div>
+<div style="font-family: Georgia, serif"><span id="f14" data-check="font-family">inherited</span></div>
+<input id="f15" data-check="font-family">
+<textarea id="f16" data-check="font-family"></textarea>
+</body></html>

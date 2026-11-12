@@ -1,0 +1,25 @@
+# tests/pages/theme.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+field 10 10 195 31
+submit 210 10 268 31
+button 290 10 324 31
+menulist 340 10 388 29
+bigmenu 400 10 468 41
+box 14 53 27 66
+boxed 44 53 57 66
+radio 75 53 88 66
+radioed 105 53 118 66
+bigbox 134 53 158 77
+bigradio 175 53 199 77
+range 12 92 141 108
+range0 152 92 281 108
+range30 292 92 421 108
+colour 430 90 480 117
+black 490 90 540 117
+area 10 130 72 166
+listbox 90 130 122 166
+tall 150 130 335 166
+redborder 10 190 193 209
+yellow 210 190 395 211
+flat 410 190 449 211
+plainbox 474 193 487 206
+webkitnone 500 190 685 211

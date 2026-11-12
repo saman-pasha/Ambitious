@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Form controls drawn as Chromium's theme draws them</title><style>
+/* each control in a place of its own; their text not drawn (its fill transparent), so that the regions hold the
+   theme's drawing alone; a select's arrow is drawn in its text's colour, which stays */
+body { margin: 0; background: #fff; }
+div { position: absolute; }
+input, select, button, textarea { -webkit-text-fill-color: transparent; }
+</style></head><body>
+<div style="left: 10px; top: 10px"><input id="field"></div>
+<div style="left: 210px; top: 10px"><input id="submit" type="submit"></div>
+<div style="left: 290px; top: 10px"><button id="button">Go</button></div>
+<div style="left: 340px; top: 10px"><select id="menulist"><option>One</option></select></div>
+<div style="left: 400px; top: 10px"><select id="bigmenu" style="font-size: 24px"><option>One</option></select></div>
+<div style="left: 10px; top: 50px"><input id="box" type="checkbox"></div>
+<div style="left: 40px; top: 50px"><input id="boxed" type="checkbox" checked></div>
+<div style="left: 70px; top: 50px"><input id="radio" type="radio"></div>
+<div style="left: 100px; top: 50px"><input id="radioed" type="radio" checked></div>
+<div style="left: 130px; top: 50px"><input id="bigbox" type="checkbox" checked style="width: 24px; height: 24px"></div>
+<div style="left: 170px; top: 50px"><input id="bigradio" type="radio" checked style="width: 24px; height: 24px"></div>
+<div style="left: 10px; top: 90px"><input id="range" type="range"></div>
+<div style="left: 150px; top: 90px"><input id="range0" type="range" value="0"></div>
+<div style="left: 290px; top: 90px"><input id="range30" type="range" value="30"></div>
+<div style="left: 430px; top: 90px"><input id="colour" type="color" value="#ff0000"></div>
+<div style="left: 490px; top: 90px"><input id="black" type="color"></div>
+<div style="left: 10px; top: 130px"><textarea id="area" rows="2" cols="5"></textarea></div>
+<div style="left: 90px; top: 130px"><select id="listbox" size="2"><option>One</option><option>Two</option></select></div>
+<div style="left: 150px; top: 130px"><input id="tall" style="height: 30px"></div>
+<div style="left: 10px; top: 190px"><input id="redborder" style="border: 1px solid red"></div>
+<div style="left: 210px; top: 190px"><input id="yellow" style="background: yellow"></div>
+<div style="left: 410px; top: 190px"><button id="flat" style="background: #cde">Flat</button></div>
+<div style="left: 470px; top: 190px"><input id="plainbox" type="checkbox" style="appearance: none; width: 13px; height: 13px; border: 1px solid green"></div>
+<div style="left: 500px; top: 190px"><input id="webkitnone" style="-webkit-appearance: none; border: 2px solid blue"></div>
+</body></html>

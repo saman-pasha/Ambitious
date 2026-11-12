@@ -9,7 +9,7 @@
 #include <stddef.h>
 
 /* the properties of a computed style: every value of enum(prop) but custom */
-#define CSS_NPROPS 150
+#define CSS_NPROPS 151
 
 /* a calc(), min(), max() or clamp() whose lengths are px, its percentages taken of
    basis: 1 and the px in *out, or 0 when it is none */

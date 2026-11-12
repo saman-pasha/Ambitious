@@ -1,0 +1,18 @@
+# tests/pages/fontfamily.html in Chromium (tools/bench/cssref.js): id, property, value
+f0 font-family "TimesNewRoman"
+f1 font-family Arial
+f2 font-family Arial
+f3 font-family "TimesNewRoman"
+f4 font-family "MyFont",sans-serif
+f5 font-family serif
+f6 font-family -apple-system,BlinkMacSystemFont,"SegoeUI",Roboto
+f7 font-family monospace
+f8 font-family monospace
+f9 font-family "LiberationSans",serif
+f10 font-family "ab",c
+f11 font-family system-ui
+f12 font-family font1,font2
+f13 font-family "Font1","serif"
+f14 font-family Georgia,serif
+f15 font-family Arial
+f16 font-family monospace

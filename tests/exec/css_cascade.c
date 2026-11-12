@@ -416,6 +416,9 @@ int main(void) {
             if (st.cval[c].prop == cases[i].prop) {
                 amb_span t = st.cval[c].text;
                 snprintf(got, sizeof got, "%.*s", (int)t.len, text_ptr(&st, t));
+                /* font-family: the face it draws with, its word (its text is the list as Chromium serializes it) */
+                if (cases[i].prop == CSS_PROP_FONT_FAMILY && st.cval[c].word)
+                    snprintf(got, sizeof got, "%.*s", (int)names_len(&st, st.cval[c].word), names_ptr(&st, st.cval[c].word));
             }
         int ok = strcmp(got, cases[i].want) == 0;
         if (!ok) bad++;

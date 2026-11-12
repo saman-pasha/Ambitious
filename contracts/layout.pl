@@ -26,6 +26,8 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 %% fragment's part of it lies on the fragment (box-decoration-break: slice), in no
 %% box's children
 layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline])).
+%% a form control the theme draws (Chromium's NativeThemeBase), in place of its CSS background and border; css: none, CSS draws it
+layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell])).
 %% how a box's width was found: the viewport's; filling its containing block; a
 %% length, or a percentage, its style declared; shrunk to fit its content; its
 %% table column's; its content's own (a replaced element's, a form control's);
@@ -96,6 +98,10 @@ layout_contract(record(box, [
     %% an svg element's drawing (src/paint/svg.h): its content's shapes, paints, groups, clips
     %% and glyphs, each in its viewport's CSS px, which paint draws in its content box
     field(svg, span(text)),
+    %% the theme's drawing of a form control (css: its author styled its background or border, or its appearance is
+    %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track; a
+    %% colour well's colour, a drop-down's arrow's
+    field(theme, enum(theme)), field(checked, bool), field(fraction, f64), field(swatch, u32),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,

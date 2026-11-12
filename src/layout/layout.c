@@ -267,6 +267,9 @@ typedef struct lay_ext {
     int paints;                         /* any of these other than its initial value */
     int32_t clamp;                      /* -webkit-line-clamp's lines on a vertical -webkit-box; 0 none */
     uint8_t ellipsis;                   /* text-overflow: ellipsis */
+    /* a form control's theme: appearance none; an author's background (colour or image), border, or box shadow (Blink's
+       LayoutTheme::IsControlStyled leaves a styled field, button or select to CSS) */
+    uint8_t app_none, styled_bg, styled_border, styled_shadow;
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -493,6 +496,14 @@ static int lay_align_of(const char *w) {
     return AJ_NORMAL;
 }
 
+/* whether a declaration of the author's (a sheet's or a style attribute's) won the computed value c */
+static int lay_author_won(const css_style *st, uint32_t c) {
+    uint32_t dcl = st->cval[c].winner;
+    if (!dcl || dcl >= st->decl_len) return 0;
+    uint32_t ru = st->decl[dcl].rule;
+    uint32_t sh = ru && ru < st->rule_len ? st->rule[ru].sheet : 0;
+    return !sh || sh >= st->sheet_len || st->sheet[sh].origin != CSS_ORIGIN_USER_AGENT;
+}
 /* what layout reads of a style besides lay_style, from its computed values (a run from c0) */
 static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     memset(e, 0, sizeof *e);
@@ -550,6 +561,13 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
                (int32_t)st->cval[lc].num : 0;
     lay_word_of(st, c0 + CSS_PROP_TEXT_OVERFLOW, w);
     e->ellipsis = (uint8_t)lay_w(w, "ellipsis");
+    lay_word_of(st, c0 + CSS_PROP_APPEARANCE, w);
+    e->app_none = (uint8_t)lay_w(w, "none");
+    e->styled_bg = (uint8_t)(lay_author_won(st, c0 + CSS_PROP_BACKGROUND_COLOR) || lay_author_won(st, c0 + CSS_PROP_BACKGROUND_IMAGE));
+    for (int k = 0; k < 4; k++)
+        if (lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_WIDTH + k) || lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_STYLE + k) ||
+            lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_COLOR + k)) e->styled_border = 1;
+    e->styled_shadow = (uint8_t)lay_author_won(st, c0 + CSS_PROP_BOX_SHADOW);
     lay_word_of(st, c0 + CSS_PROP_FLEX_DIRECTION, w);
     e->frow = !(lay_w(w, "column") || lay_w(w, "column-reverse"));
     e->frev = lay_w(w, "row-reverse") || lay_w(w, "column-reverse");
@@ -1206,8 +1224,9 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             double widest = 0;
             vector<char> shown;
             long rows = 1;
-            if (lay_select(LARGS, el, s, &widest, &shown, &rows)) { dw = widest + 4; dh = (double)rows * (s->lh + 2); }
-            else { dw = ceil(widest - 1e-6) + 20; dh = s->lh + 2; }
+            /* its text a line of the font's ascent and descent, no line gap (Chromium's drop-down) */
+            if (lay_select(LARGS, el, s, &widest, &shown, &rows)) { dw = widest + 4; dh = (double)rows * (s->asc + s->desc + 2); }
+            else { dw = ceil(widest - 1e-6) + 20; dh = s->asc + s->desc + 2; }
         }
         else if (lay_is_named(d, el, "iframe") || lay_is_named(d, el, "video") || lay_is_named(d, el, "embed") || lay_is_named(d, el, "object")) { dw = 300; dh = 150; }
         else if (lay_is_named(d, el, "canvas") || lay_is_svg(d, el)) { dw = 300; dh = 150; }
@@ -1860,6 +1879,7 @@ static uint32_t lay_nth_line(layout_tree *t, uint32_t b, long *n, double oy, dou
 static void lay_clamp(LCTX, uint32_t b, uint32_t el, const lay_style *s);
 static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw);
 static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps, const char *s, size_t n, double x, double y, int center);
+static void lay_theme(LCTX, uint32_t b, uint32_t el);
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
 static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
 static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh);
@@ -1910,6 +1930,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
     if (!input && !textarea && !select) return;
     /* a control's text is clipped to it, as Chromium's inner editor clips its own */
     t->box[b].clip = 1;
+    lay_theme(LARGS, b, el);
     /* its baseline, from its content box's top, as Chromium places it: a text's (a line high, in the middle of the
        box); a check box's, radio button's or range's border box's bottom; a colour well's 6px above that; a list
        box's 3px above it; a textarea's its margin box's bottom */
@@ -1925,6 +1946,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         else if (input && (k == LI_CHECK || k == LI_RADIO || k == LI_RANGE)) t->box[b].baseline = bottom;
         else if (input && k == LI_COLOR) t->box[b].baseline = bottom - 6;
         else if (select && lay_select(LARGS, el, es, &widest, &unused, &rows)) t->box[b].baseline = bottom - 3;
+        else if (select) t->box[b].baseline = (ch - (es->asc + es->desc)) / 2 + es->asc;
         else t->box[b].baseline = (ch - es->lh) / 2 + above;
     }
     lay_style ps = *es;
@@ -1949,7 +1971,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
                         lay_option_label(d, o, &label);
                         lay_control_line(LARGS, b, el, es, data(label), len(label), o != c ? 2 + 4 * amb_text_width(f, es->face, es->fs, " ", 1) : 2,
                                          y, 0);
-                        y += es->lh + 2;
+                        y += es->asc + es->desc + 2;
                     }
                     if (o == c) break;
                 }
@@ -2023,6 +2045,71 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
     }
     if (len(txt)) lay_control_line(LARGS, b, el, &ps, data(txt), len(txt), x, -1, center);
 }
+/* a hexadecimal digit's value, or -1 */
+static int lay_hex(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+/* what the theme draws of a form control (Chromium's NativeThemeBase), into b: a text field, textarea, list box or
+   drop-down whose author styled no background, border or box shadow; a button (a button element or a button
+   input) without a styled background or border; a check box, radio button, range or colour well; none when its
+   appearance is none. A check box's or radio button's checked attribute; a range's value along its track, from its
+   min, max and value (0, 100, their middle by default); a colour well's #rrggbb value (black by default) */
+static void lay_theme(LCTX, uint32_t b, uint32_t el) {
+    lay_ext e = LAY_X(el);
+    layout_theme th = LAYOUT_THEME_CSS;
+    int styled = e.styled_bg || e.styled_border;
+    if (lay_is_named(d, el, "button")) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_BUTTON;
+    else if (lay_is_named(d, el, "textarea")) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_AREA;
+    else if (lay_is_named(d, el, "select")) {
+        int multiple = lay_attr(d, el, "multiple") != 0;
+        long size = lay_attr_int(d, el, "size", multiple ? 4 : 1);
+        th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : multiple || size > 1 ? LAYOUT_THEME_LISTBOX : LAYOUT_THEME_MENULIST;
+    } else if (lay_is_named(d, el, "input")) {
+        int k = lay_input_kind(d, el);
+        if (k == LI_CHECK) th = LAYOUT_THEME_CHECKBOX;
+        else if (k == LI_RADIO) th = LAYOUT_THEME_RADIO;
+        else if (k == LI_RANGE) th = LAYOUT_THEME_RANGE;
+        else if (k == LI_COLOR) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_COLORWELL;
+        else if (k == LI_BUTTON || k == LI_SUBMIT || k == LI_RESET) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_BUTTON;
+        else if (k == LI_TEXT || k == LI_PASSWORD || k == LI_DATE) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_FIELD;
+    }
+    if (e.app_none) th = LAYOUT_THEME_CSS;
+    t->box[b].theme = th;
+    t->box[b].checked = lay_attr(d, el, "checked") != 0;
+    if (th == LAYOUT_THEME_RANGE) {
+        double lo = 0, hi = 100, v = -1;
+        uint32_t a;
+        char buf[64];
+        if ((a = lay_attr(d, el, "min")) && d->attr[a].value.len < sizeof buf) { snprintf(buf, sizeof buf, "%.*s", (int)d->attr[a].value.len, text_ptr(d, d->attr[a].value)); lo = atof(buf); }
+        if ((a = lay_attr(d, el, "max")) && d->attr[a].value.len < sizeof buf) { snprintf(buf, sizeof buf, "%.*s", (int)d->attr[a].value.len, text_ptr(d, d->attr[a].value)); hi = atof(buf); }
+        if (hi < lo) hi = lo;
+        if ((a = lay_attr(d, el, "value")) && d->attr[a].value.len && d->attr[a].value.len < sizeof buf) {
+            snprintf(buf, sizeof buf, "%.*s", (int)d->attr[a].value.len, text_ptr(d, d->attr[a].value));
+            v = atof(buf);
+        }
+        if (v < 0 && !(lay_attr(d, el, "value") && d->attr[lay_attr(d, el, "value")].value.len)) v = lo + (hi - lo) / 2;
+        if (v < lo) v = lo;
+        if (v > hi) v = hi;
+        t->box[b].fraction = hi > lo ? (v - lo) / (hi - lo) : 0;
+    }
+    if (th == LAYOUT_THEME_MENULIST) {
+        lay_style s;
+        lay_style_of(LARGS, el, &s);
+        t->box[b].swatch = s.color;     /* its arrow's colour: its text's */
+    }
+    if (th == LAYOUT_THEME_COLORWELL) {
+        uint32_t a = lay_attr(d, el, "value");
+        uint32_t rgb = 0;
+        if (a && d->attr[a].value.len == 7 && text_ptr(d, d->attr[a].value)[0] == '#') {
+            const char *v = text_ptr(d, d->attr[a].value);
+            int ok = 1;
+            for (int i = 1; i < 7; i++) if (lay_hex(v[i]) < 0) ok = 0;
+            if (ok) rgb = (uint32_t)(lay_hex(v[1]) * 16 + lay_hex(v[2])) << 16 | (uint32_t)(lay_hex(v[3]) * 16 + lay_hex(v[4])) << 8 |
+                          (uint32_t)(lay_hex(v[5]) * 16 + lay_hex(v[6]));
+        }
+        t->box[b].swatch = rgb << 8 | 0xff;
+    }
+}
 /* one line of a control's text in its content box: at y (-1: in the middle of the box, as a field's or a button's
    inner box is), from x, or in the middle of the box's width when center is set */
 static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps, const char *s, size_t n, double x, double y, int center) {
@@ -2091,6 +2178,7 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     else if (lx == LX_GRID) lay_grid(LARGS, b, el, defh);
     else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, &et, &eb, &empty);
     if (lay_is_named(d, el, "button")) {
+        lay_theme(LARGS, b, el);
         /* a button's content in the middle of a box made taller than it, as Chromium's button centres its anonymous
            box; an empty one's baseline its content box's bottom (Blink's synthesized baseline) */
         double ch = t->box[b].h;

@@ -332,17 +332,22 @@ static uint32_t pt_light(uint32_t rgba) {
     uint32_t R = (uint32_t)fmin(255, r * m * 255.999), G = (uint32_t)fmin(255, g * m * 255.999), B = (uint32_t)fmin(255, b * m * 255.999);
     return R << 24 | G << 16 | B << 8 | (rgba & 0xff);
 }
-static double pt_diff2(uint32_t a, uint32_t b) {
-    double d0 = (double)(a >> 24) - (b >> 24), d1 = (double)(a >> 16 & 0xff) - (b >> 16 & 0xff), d2 = (double)(a >> 8 & 0xff) - (b >> 8 & 0xff);
-    return d0 * d0 + d1 * d1 + d2 * d2;
+/* a colour's relative luminance (sRGB's), as Blink weighs it */
+static double pt_luminance(uint32_t rgba) {
+    double ch[3] = { (rgba >> 24) / 255.0, (rgba >> 16 & 0xff) / 255.0, (rgba >> 8 & 0xff) / 255.0 };
+    for (int k = 0; k < 3; k++) ch[k] = ch[k] <= 0.04045 ? ch[k] / 12.92 : pow((ch[k] + 0.055) / 1.055, 2.4);
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
-/* inset's colour for a side (outset's the other way): the top and left darkened, the
-   bottom and right lightened -- a colour near black not darkened, one near white not
-   lightened (Blink's CalculateBorderStyleColor) */
+/* inset's colour for a side (outset's the other way), as Blink's CalculateBorderStyleColor picks it: the top and left
+   its dark side, the bottom and right its light one. A colour as dark as #202020 or darker is lightened on both (its
+   dark side once, its light side twice); one lighter than #ebebeb is darkened on its dark side and kept on its light;
+   any other darkened and lightened (measured in Chromium on twelve colours) */
 static uint32_t pt_inset(uint32_t col, int side, int inset) {
     int darken = ((side == 0 || side == 3) == (inset != 0));
-    if (darken) return pt_diff2(col, 0x000000ff) > pt_diff2(0x202020ff, 0x000000ff) ? pt_dark(col) : col;
-    return pt_diff2(col, 0xffffffff) > pt_diff2(0xebebebff, 0xffffffff) ? pt_light(col) : col;
+    double lum = pt_luminance(col);
+    if (lum <= 0.014443844 + 1e-9) return darken ? pt_light(col) : pt_light(pt_light(col));
+    if (darken) return pt_dark(col);
+    return lum > 0.83077 + 1e-6 ? col : pt_light(col);
 }
 
 /* the colour of a part of a border of style bs: its side (0 top, 1 right, 2 bottom, 3
@@ -1656,6 +1661,152 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
     }
 }
 
+/* ---- the theme: form controls drawn as Chromium's NativeThemeBase draws them (light scheme) ---- */
+
+static void pt_hair_rrect(amb_canvas *c, double l, double t, double r, double b, double rad, uint32_t col);
+
+/* an anti-aliased rounded rectangle (x0, y0)-(x1, y1), corners of radius r, filled; with ring set, only the band
+   between it and the same rectangle inset by 1px (its radius r - 1): Skia's fill, and its 1px stroke along a path
+   inset half a px */
+static void pt_theme_rr(amb_canvas *c, double x0, double y0, double x1, double y1, double r, uint32_t col, int ring) {
+    double ro[8] = { r, r, r, r, r, r, r, r }, ri[8];
+    double rr = r - 1 > 0 ? r - 1 : 0;
+    for (int k = 0; k < 8; k++) ri[k] = rr;
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int Y = (int)floor(y0); Y < (int)ceil(y1); Y++) {
+        int yy = (int)(Y - c->oy);
+        if (yy < ky0 || yy >= ky1) continue;
+        for (int X = (int)floor(x0); X < (int)ceil(x1); X++) {
+            if (X < kx0 || X >= kx1) continue;
+            double cv = pt_rr_cover(X + 0.5, Y + 0.5, x0, y0, x1, y1, ro);
+            if (ring) cv -= pt_rr_cover(X + 0.5, Y + 0.5, x0 + 1, y0 + 1, x1 - 1, y1 - 1, ri);
+            if (cv > 0.002) pt_blend(c, X, yy, col, cv > 1 ? 1 : cv);
+        }
+    }
+}
+/* a disc of radius r at (cx, cy) filled, each pixel's coverage from 16 by 16 samples */
+static void pt_theme_disc(amb_canvas *c, double cx, double cy, double r, uint32_t col) {
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int Y = (int)floor(cy - r); Y < (int)ceil(cy + r); Y++) {
+        int yy = (int)(Y - c->oy);
+        if (yy < ky0 || yy >= ky1) continue;
+        for (int X = (int)floor(cx - r); X < (int)ceil(cx + r); X++) {
+            if (X < kx0 || X >= kx1) continue;
+            int in = 0;
+            for (int sy = 0; sy < 16; sy++)
+                for (int sx = 0; sx < 16; sx++) {
+                    double dx = X + (sx + 0.5) / 16 - cx, dy = Y + (sy + 0.5) / 16 - cy;
+                    if (dx * dx + dy * dy <= r * r) in++;
+                }
+            if (in) pt_blend(c, X, yy, col, in / 256.0);
+        }
+    }
+}
+/* a polyline of n points stroked w wide, butt ends and mitred joints, anti-aliased: its outline filled */
+static void pt_theme_stroke(amb_canvas *c, const double *px, const double *py, int n, double w, uint32_t col, vector<float> *acc) {
+    vector<double> xs, ys;
+    double h = w / 2;
+    for (int side = 0; side < 2; side++) {
+        for (int k = 0; k < n; k++) {
+            int i = side ? n - 1 - k : k;
+            double nx = 0, ny = 0;
+            /* the normals of the segments meeting at i, their mitre */
+            double ax = 0, ay = 0, bx = 0, by = 0;
+            if (i > 0) { double dx = px[i] - px[i - 1], dy = py[i] - py[i - 1], l = sqrt(dx * dx + dy * dy); ax = -dy / l; ay = dx / l; }
+            if (i < n - 1) { double dx = px[i + 1] - px[i], dy = py[i + 1] - py[i], l = sqrt(dx * dx + dy * dy); bx = -dy / l; by = dx / l; }
+            if (i == 0) { nx = bx; ny = by; }
+            else if (i == n - 1) { nx = ax; ny = ay; }
+            else {
+                double mx = ax + bx, my = ay + by, ml = sqrt(mx * mx + my * my), dot = ml > 0 ? (mx * ax + my * ay) / ml : 1;
+                nx = ml > 0 ? mx / ml / dot : ax;
+                ny = ml > 0 ? my / ml / dot : ay;
+            }
+            double s = side ? -h : h;
+            push_back(xs, px[i] + nx * s);
+            push_back(ys, py[i] + ny * s);
+        }
+    }
+    pt_poly(c, &xs, &ys, col, acc);
+}
+/* a text field's, textarea's, list box's or drop-down's frame: its rectangle less its last row and column filled,
+   and a 1px hairline along the four edges of that rectangle, its corner pixels left out (a rounded rectangle of
+   radius 2, drawn without anti-aliasing: NativeThemeBase::PaintTextField) */
+static void pt_theme_field(amb_canvas *c, int x0, int y0, int x1, int y1, uint32_t fill, uint32_t line) {
+    pt_fill(c, x0, y0, x1 - 1, y1 - 1, fill);
+    pt_fill(c, x0 + 1, y0, x1 - 1, y0 + 1, line);
+    pt_fill(c, x0 + 1, y1 - 1, x1 - 1, y1, line);
+    pt_fill(c, x0, y0 + 1, x0 + 1, y1 - 1, line);
+    pt_fill(c, x1 - 1, y0 + 1, x1, y1 - 1, line);
+}
+/* the form control b as the theme draws it, its border box (x, y, w, h) in page px */
+static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, double y, double w, double h, vector<float> *acc) {
+    const uint32_t line = 0x767676ff, accent = 0x0075ffff, fill = t->box[b].background & 0xff ? t->box[b].background : 0xffffffff;
+    int X0 = (int)floor(x + 0.5), Y0 = (int)floor(y + 0.5), X1 = (int)floor(x + w + 0.5), Y1 = (int)floor(y + h + 0.5);
+    layout_theme th = t->box[b].theme;
+    if (th == LAYOUT_THEME_FIELD || th == LAYOUT_THEME_AREA || th == LAYOUT_THEME_LISTBOX) {
+        pt_theme_field(c, X0, Y0, X1, Y1, fill, line);
+        if (th == LAYOUT_THEME_AREA) {
+            /* the resizer: two diagonals in the bottom right corner */
+            for (int k = 0; k < 7; k++) pt_fill(c, X1 - 4 - k, Y1 - 10 + k, X1 - 3 - k, Y1 - 9 + k, 0x666666ff);
+            for (int k = 0; k < 3; k++) pt_fill(c, X1 - 4 - k, Y1 - 6 + k, X1 - 3 - k, Y1 - 5 + k, 0x666666ff);
+        }
+    } else if (th == LAYOUT_THEME_MENULIST) {
+        /* a drop-down: a field's frame on the field's white, and its arrow, an 8 by 4 chevron stroked 2px wide in the
+           text's colour, 12px before the inner right edge, at the box's middle (ThemePainterDefault::SetupMenuListArrow) */
+        pt_theme_field(c, X0, Y0, X1, Y1, 0xffffffff, line);
+        double ax = X1 - floor(t->box[b].br) - 12, ay = Y0 + floor((Y1 - Y0) / 2);
+        double px[3] = { ax, ax + 4, ax + 8 }, py[3] = { ay - 2, ay + 2, ay - 2 };
+        pt_theme_stroke(c, px, py, 3, 2, t->box[b].swatch & 0xff ? t->box[b].swatch : 0x000000ff, acc);
+    } else if (th == LAYOUT_THEME_BUTTON || th == LAYOUT_THEME_COLORWELL) {
+        /* a button: its background as a rounded rectangle of radius 2, its border 1px inside it (PaintButton) */
+        if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, fill); return; }
+        pt_theme_rr(c, X0, Y0, X1, Y1, 2, fill, 0);
+        pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, line);
+        if (th == LAYOUT_THEME_COLORWELL) {
+            /* the swatch: the content box less 4px above and below and 2px aside, a 1px #777777 border round the colour */
+            double cx0 = x + t->box[b].bl + t->box[b].pl + 2, cy0 = y + t->box[b].bt + t->box[b].pt + 4;
+            double cx1 = x + w - t->box[b].br - t->box[b].pr - 2, cy1 = y + h - t->box[b].bb - t->box[b].pb - 4;
+            if (cx1 - cx0 >= 2 && cy1 - cy0 >= 2) {
+                pt_fill(c, cx0, cy0, cx1, cy1, 0x777777ff);
+                pt_fill(c, cx0 + 1, cy0 + 1, cx1 - 1, cy1 - 1, t->box[b].swatch);
+            }
+        }
+    } else if (th == LAYOUT_THEME_CHECKBOX || th == LAYOUT_THEME_RADIO) {
+        /* the largest square in the box, a rounded square (radius 2) or a circle: unchecked, white with a 1px border;
+           a check box checked, the accent filled and a white check stroked across it; a radio button checked, its
+           border the accent and a dot of it inside (PaintCheckbox, PaintRadio) */
+        double s = w < h ? w : h, sx = x + (w - s) / 2, sy = y + (h - s) / 2, r = th == LAYOUT_THEME_RADIO ? s / 2 : 2;
+        int checked = t->box[b].checked;
+        if (s <= 2) { pt_fill(c, sx, sy, sx + s, sy + s, line); return; }
+        pt_theme_rr(c, sx, sy, sx + s, sy + s, r, th == LAYOUT_THEME_CHECKBOX && checked ? accent : 0xffffffff, 0);
+        if (th == LAYOUT_THEME_CHECKBOX && checked) {
+            double px[3] = { sx + s * 0.2, sx + s * 0.4, sx + s - s * 0.2 }, py[3] = { sy + s / 2, sy + s / 2 + s * 0.2, sy + s * 0.2 };
+            pt_theme_stroke(c, px, py, 3, s * 0.16, 0xffffffff, acc);
+            return;
+        }
+        pt_hair_rrect(c, sx + 0.5, sy + 0.5, sx + s - 0.5, sy + s - 0.5, th == LAYOUT_THEME_RADIO ? (s - 1) / 2 : 2, checked ? accent : line);
+        if (th == LAYOUT_THEME_RADIO && checked) {
+            /* the dot: as Chromium's draws, its radius 0.28 of the box and 0.36px (fitted to its pixels: 4px in 13,
+               7.1 in 24) */
+            pt_theme_disc(c, sx + s / 2, sy + s / 2, s * 0.28 + 0.36, accent);
+        }
+    } else if (th == LAYOUT_THEME_RANGE) {
+        /* a range: its 8px track across the box's middle, #efefef and the accent up to the thumb, a 1px #767676 border
+           at half its alpha, its corners rounded; the thumb a 16px circle of the accent, its centre from 8px in to 8px
+           before the end along the value (PaintSliderTrack, PaintSliderThumb) */
+        double ty0 = y + (h - 8) / 2, ty1 = ty0 + 8, tx0 = x + 1, tx1 = x + w - 1, cxm = x + 8 + floor(t->box[b].fraction * (w - 16) + 0.5);
+        pt_theme_rr(c, tx0, ty0, tx1, ty1, 4, 0xefefefff, 0);
+        double save = c->cx1;
+        c->cx1 = fmin(c->cx1, cxm);
+        pt_theme_rr(c, tx0, ty0, tx1, ty1, 4, accent, 0);
+        c->cx1 = save;
+        pt_hair_rrect(c, tx0 + 0.5, ty0 + 0.5, tx1 - 0.5, ty1 - 0.5, 4, 0x76767680);
+        pt_theme_disc(c, cxm, y + h / 2, 7.4, accent);    /* as Chromium's 16px thumb draws (fitted: 7.4px) */
+    }
+}
+
 static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
                    vector<uint8_t> *ipx) {
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
@@ -1679,7 +1830,13 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         append_range(sh, text_ptr(t, sp), sp.len);
         pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 0, bws, prad);
     }
-    if (b != skip_bg && (t->box[b].background & 0xff)) {
+    /* a form control the theme draws: its drawing in place of its background and border (its shadows kept) */
+    int themed = t->box[b].theme != LAYOUT_THEME_CSS;
+    if (themed) {
+        vector<float> tacc;
+        pt_theme(t, b, c, bx, by, bw, bh, &tacc);
+    }
+    if (b != skip_bg && (t->box[b].background & 0xff) && !themed) {
         /* the background colour, clipped by the bottom layer's background-clip (CSS
            Backgrounds 3.7): the last of its list */
         double ca[4], cr[8];
@@ -1694,8 +1851,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
             pt_rrect(c, ca[0], ca[1], ca[2], ca[3], cr, t->box[b].background);
         }
     }
-    if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
+    if (t->box[b].bg_image.len && !themed) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
     if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
+    if (themed) bt = br = bb = bl = 0;      /* its border the theme's */
     if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && t->box[b].svg.len) {
         /* an svg element: the drawing layout made of its content (src/paint/svg.h) */
         vector<char> scene;
@@ -2011,13 +2169,33 @@ static void pt_hair_conic(amb_canvas *c, const double *x, const double *y, doubl
 }
 /* an oval's hairline as Skia draws one: SkPath::Oval's four conics from its right middle, clockwise (each a quarter,
    its control point the bounds' corner, weight sqrt(2)/2) */
-static void pt_hair_oval(amb_canvas *c, double l, double t, double r, double b, uint32_t col) {
+static void pt_hair_oval_from(amb_canvas *c, double l, double t, double r, double b, int start, uint32_t col) {
     double cx = (l + r) / 2, cy = (t + b) / 2;
     const double ox[4] = { cx, r, cx, l }, oy[4] = { t, cy, b, cy }, rx[4] = { l, r, r, l }, ry[4] = { t, t, b, b };
     for (int i = 0; i < 4; i++) {
-        int from = (1 + i) % 4, to = (2 + i) % 4;
+        int from = (start + i) % 4, to = (start + 1 + i) % 4;
         double x[3] = { ox[from], rx[to], ox[to] }, y[3] = { oy[from], ry[to], oy[to] };
         pt_hair_conic(c, x, y, 0.70710678118654752, -1, col);
+    }
+}
+static void pt_hair_oval(amb_canvas *c, double l, double t, double r, double b, uint32_t col) { pt_hair_oval_from(c, l, t, r, b, 1, col); }
+/* a rounded rectangle's outline (its corners' radius rad) as Skia's hairline draws a 1px stroke of one: SkPath::addRRect's
+   path from its left edge's bottom end, clockwise, each side a line and each corner a conic (a circle's its oval's,
+   from its left middle) */
+static void pt_hair_rrect(amb_canvas *c, double l, double t, double r, double b, double rad, uint32_t col) {
+    if (rad * 2 >= r - l && rad * 2 >= b - t) { pt_hair_oval_from(c, l, t, r, b, 3, col); return; }
+    if (rad > (r - l) / 2) rad = (r - l) / 2;
+    if (rad > (b - t) / 2) rad = (b - t) / 2;
+    /* the eight points where the sides meet the corners (Skia's RRect point iterator), from the left edge's bottom */
+    const double px[8] = { l + rad, r - rad, r, r, r - rad, l + rad, l, l }, py[8] = { t, t, t + rad, b - rad, b, b, b - rad, t + rad };
+    const double cxs[4] = { l, r, r, l }, cys[4] = { t, t, b, b };
+    int at6 = 6;
+    for (int i = 0; i < 4; i++) {
+        int a = (at6 + 2 * i) % 8, m = (a + 1) % 8, e = (a + 2) % 8;
+        pt_hair_line(c, (int)(px[a] * 64), (int)(py[a] * 64), (int)(px[m] * 64), (int)(py[m] * 64), col);
+        int corner = (i + 0) % 4;     /* the corner after the side: top left, top right, bottom right, bottom left */
+        double x[3] = { px[m], cxs[corner], px[e] }, y[3] = { py[m], cys[corner], py[e] };
+        if (rad > 0) pt_hair_conic(c, x, y, 0.70710678118654752, -1, col);
     }
 }
 

@@ -187,19 +187,19 @@ static const char css_ua_sheet[] =
     "dialog { position: absolute; left: 0; right: 0; width: fit-content; height: fit-content; margin: auto; border: solid; padding: 1em; background-color: Canvas; color: CanvasText }\n"
     /* the form controls: -webkit-small-control's font (13.333px Arial on Linux), their own spacing and alignment,
        and each kind's box, as Chromium's sheet gives them */
-    "button, input, select, textarea { display: inline-block; margin: 0; font: 13.333333px Arial; letter-spacing: normal; "
+    "button, input, select, textarea { display: inline-block; appearance: auto; margin: 0; font: 13.333333px Arial; letter-spacing: normal; "
     "word-spacing: normal; line-height: normal; text-transform: none; text-indent: 0; text-shadow: none; text-align: start }\n"
-    "input, textarea, select { padding: 1px 2px; border: 2px solid light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
-    "textarea { font-family: monospace; padding: 2px; border-width: 1px; white-space: pre-wrap; overflow-wrap: break-word }\n"
+    "input, textarea, select { padding: 1px 2px; border: 2px inset light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
+    "textarea { font-family: monospace; padding: 2px; border: 1px solid light-dark(#767676, #858585); white-space: pre-wrap; overflow-wrap: break-word }\n"
     "input[type=date i], input[type=datetime-local i], input[type=month i], input[type=time i], input[type=week i] { font-family: monospace; padding: 0 1px }\n"
-    "button, input[type=button i], input[type=submit i], input[type=reset i] { padding: 1px 6px; border: 2px solid light-dark(#767676, #858585); "
+    "button, input[type=button i], input[type=submit i], input[type=reset i] { padding: 1px 6px; border: 2px outset ButtonBorder; "
     "color: ButtonText; background-color: ButtonFace; text-align: center; box-sizing: border-box }\n"
-    "select { padding: 0; border-width: 1px; background-color: ButtonFace; box-sizing: border-box }\n"
+    "select { padding: 0; border: 1px solid light-dark(#767676, #858585); background-color: ButtonFace; box-sizing: border-box }\n"
     "select[multiple], select[size] { background-color: Field }\n"
     "input[type=checkbox i] { margin: 3px 3px 3px 4px; padding: 0; border: 0; box-sizing: border-box; background-color: transparent }\n"
     "input[type=radio i] { margin: 3px 3px 0 5px; padding: 0; border: 0; box-sizing: border-box; background-color: transparent }\n"
-    "input[type=range i] { margin: 2px; padding: 0; border: 0; background-color: transparent }\n"
-    "input[type=color i] { width: 50px; height: 27px; padding: 1px 2px; border-width: 1px; box-sizing: border-box; background-color: ButtonFace }\n"
+    "input[type=range i] { margin: 2px; padding: 0; border: 0; color: light-dark(#9d968e, #fff); background-color: transparent }\n"
+    "input[type=color i] { width: 50px; height: 27px; padding: 1px 2px; border: 1px solid ButtonBorder; box-sizing: border-box; background-color: ButtonFace }\n"
     "input[type=file i], input[type=image i] { padding: 0; border: 0; background-color: transparent }\n"
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
@@ -937,6 +937,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "clip-path", 0, G_TEXT, 0, "none", "none" },
     { "clip-rule", 1, G_KW, 0, "nonzero evenodd", "nonzero" },
     { "text-anchor", 1, G_KW, 0, "start middle end", "start" },
+    { "appearance", 0, G_KW, 0, "none auto menulist-button textfield button checkbox radio listbox menulist meter progress-bar "
+      "push-button searchfield slider-horizontal square-button textarea", "none" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -971,7 +973,7 @@ static const char *css_short_name(int i);
 /* the properties whose -webkit- prefixed names Chromium keeps as aliases of theirs (of
    those this module has) */
 static const char css_webkit_aliases[] =
-    "align-content align-items align-self animation animation-delay animation-direction animation-duration animation-fill-mode "
+    "align-content align-items align-self appearance animation animation-delay animation-direction animation-duration animation-fill-mode "
     "animation-iteration-count animation-name animation-play-state animation-timing-function backface-visibility background-clip "
     "background-origin background-size border-bottom-left-radius border-bottom-right-radius border-radius border-top-left-radius "
     "border-top-right-radius box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
@@ -1750,6 +1752,67 @@ static int css_family_of(const char *s, size_t n, const char *faces, css_val *v)
     return 0;
 }
 
+
+/* font-family's list as Chromium serializes it, its computed value's text (CSS Fonts 4, 5.1, and Blink's
+   SerializeFontFamily): a generic family's keyword in lower case; a family name that is one identifier as it is, any
+   other in double quotes (an unquoted name's words joined by one space; a quoted generic family's name kept quoted);
+   each after ", " */
+static amb_span css_family_text(css_style *s, const char *src, size_t n) {
+    static const char *const generic = "serif sans-serif cursive fantasy monospace system-ui math emoji fangsong ui-serif ui-sans-serif "
+                                       "ui-monospace ui-rounded";
+    vector<char> out;
+    size_t a = 0;
+    while (a < n) {
+        size_t b = css_comma(src, n, a);
+        size_t i = css_skip_ws(src, b, a), e = b;
+        while (e > i && css_ws(src[e - 1])) e--;
+        a = b + 1;
+        if (e <= i) continue;
+        int quoted = src[i] == '"' || src[i] == '\'';
+        vector<char> name;
+        if (quoted) {
+            char q = src[i];
+            for (size_t j = i + 1; j < e && src[j] != q; j++) {
+                if (src[j] == '\\' && j + 1 < e) j++;
+                push_back(name, src[j]);
+            }
+        } else {
+            int sp = 0;
+            for (size_t j = i; j < e; j++) {
+                if (css_ws(src[j])) { sp = 1; continue; }
+                if (sp && len(name)) push_back(name, ' ');
+                sp = 0;
+                push_back(name, src[j]);
+            }
+        }
+        if (!len(name)) continue;
+        char low[48];
+        size_t k = 0;
+        for (size_t j = 0; j < len(name) && k + 1 < sizeof low; j++) low[k++] = css_lower(at(name, j));
+        low[k] = 0;
+        int is_generic = k == len(name) && css_word_in(low, generic);
+        if (len(out)) { push_back(out, ','); push_back(out, ' '); }
+        if (!quoted && is_generic) { append_range(out, low, k); continue; }
+        /* one identifier: no space, a letter, an underscore, a hyphen or a non-ASCII byte first (a hyphen's not
+           followed by a digit), letters, digits, underscores and hyphens after */
+        int ident = 1;
+        for (size_t j = 0; j < len(name) && ident; j++) {
+            unsigned char c = (unsigned char)at(name, j);
+            int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '-' || c >= 0x80 || (j > 0 && c >= '0' && c <= '9');
+            if (!ok) ident = 0;
+        }
+        if (len(name) > 1 && at(name, 0) == '-' && at(name, 1) >= '0' && at(name, 1) <= '9') ident = 0;
+        if (quoted && (is_generic || (k == len(name) && css_word_in(low, "inherit initial unset default revert revert-layer")))) ident = 0;
+        if (ident) { append_range(out, data(name), len(name)); continue; }
+        push_back(out, '"');
+        for (size_t j = 0; j < len(name); j++) {
+            if (at(name, j) == '"' || at(name, j) == '\\') push_back(out, '\\');
+            push_back(out, at(name, j));
+        }
+        push_back(out, '"');
+    }
+    return text_add(s, data(out), len(out));
+}
 
 /* ---- declarations: a name and a value made longhands ---- */
 
@@ -4401,6 +4464,7 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         vector<char> t;
         append_range(t, text_ptr(s, v->tx), v->tx.len);
         if (!css_family_of(data(t), len(t), env->faces, v)) css_word_val(v, "serif");
+        v->tx = css_family_text(s, data(t), len(t));    /* its text as Chromium serializes the list; its word the face */
         return;
     }
     if ((p == CSS_PROP_COUNTER_RESET || p == CSS_PROP_COUNTER_INCREMENT) && v->unit == CSS_UNIT_TEXT) {
@@ -4891,6 +4955,7 @@ static void css_font_size(css_style *s, const css_env *env, uint32_t w, uint32_t
     if (!w) { w = wfam; how = CSS_HOW_DECLARED; }
     out[p] = v;
     rec[p] = css_value_rec(s, &v, how, w, vc);
+    if (p == CSS_PROP_FONT_FAMILY && v.tx.len) rec[p].text = v.tx;
 }
 
 /* the value declaration dc gives property p of an element (its parent's values pv, its
@@ -5963,6 +6028,7 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         css_how how = css_decl_computed(s, env, p, w, cust, pc0, initial, &pv, out, is_root, &v);
         out[p] = v;
         rec[p] = css_value_rec(s, &v, how, w, vc);
+        if (p == CSS_PROP_FONT_FAMILY && v.tx.len) rec[p].text = v.tx;
     }
     /* the root's colour no declaration gave: color's initial value, CanvasText, in the
        scheme the root is used in (CSS Color 4) -- white in the dark */
@@ -6501,6 +6567,9 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         initial[k] = v;
         irec[k] = css_value_rec(s, &v, CSS_HOW_INITIAL, 0, &vc);
     }
+    /* font-family's initial value: the reader's standard family, Chromium's "Times New Roman" on Linux (its face serif) */
+    irec[CSS_PROP_FONT_FAMILY].text = text_add(s, "\"Times New Roman\"", 17);
+    initial[CSS_PROP_FONT_FAMILY].tx = irec[CSS_PROP_FONT_FAMILY].text;
     /* each property's initial value, for the reasoner to derive the values no declaration gave */
     uint32_t iv_color = 0;
     for (int k = 0; k < CSS_NPROPS; k++) {
