@@ -21,7 +21,7 @@ tree() {
         -e 's/ invalid=spelling/ invalid=true/' -e 's/ live=off atomic=[a-z]* relevant="[^"]*"//' -e 's/ focusable$//' |
     grep -v '^generic#[^ ]*$'
 }
-for p in a11y-states a11y-names a11y-live; do
+for p in a11y-states a11y-names a11y-live a11y-more; do
   echo "-- the $p page's tree, against Chromium's:"
   tree "$pages/$p.html" > "$work/tree.txt"
   n=$(wc -l < "$work/tree.txt" | tr -d ' ')

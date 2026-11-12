@@ -58,6 +58,10 @@ a11y_contract(enum(hidden_how, [display_none, hidden_attribute, aria_hidden])).
 a11y_contract(enum(inside_what, [focusable, live_region])).
 %% a node's properties whose values are texts
 a11y_contract(enum(text_prop, [description, value, placeholder, valuetext])).
+%% the flags of a form control's validity state (HTML's constraint validation), of a page
+%% no one has edited: its value missing, of the wrong type, off its pattern, under its
+%% min, over its max, off its step
+a11y_contract(enum(validity, [value_missing, type_mismatch, pattern_mismatch, range_underflow, range_overflow, step_mismatch])).
 
 %% A NODE is kept small, as every element a reader meets is one: what few nodes have -- a
 %% description and the other texts, a range's values, a live region's settings -- is a
@@ -126,6 +130,9 @@ a11y_contract(record(ahidden, [field(node, xhandle(dom, node)), field(how, enum(
 a11y_contract(record(ahinside, [field(node, xhandle(dom, node)), field(root, xhandle(dom, node)), field(what, enum(inside_what))])).
 %% an element that is no node of the tree, by its role, and has aria-* attributes
 a11y_contract(record(aplain, [field(node, xhandle(dom, node)), field(role, enum(role))])).
+%% a flag of a form control's validity state that holds. Its invalid state is true for
+%% any of them, as Chromium tells it, but a text field's missing value (no one has typed)
+a11y_contract(record(avalid, [field(node, ref(anode)), field(flag, enum(validity))])).
 
 a11y_contract(handle(anode, ax)).
 a11y_contract(handle(atext, axt)).
@@ -137,11 +144,12 @@ a11y_contract(handle(badrole, br)).
 a11y_contract(handle(ahidden, axh)).
 a11y_contract(handle(ahinside, axi)).
 a11y_contract(handle(aplain, axp)).
+a11y_contract(handle(avalid, axv)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 a11y_contract(store(tree, [table(anode), table(atext), table(arange), table(alive), table(astate), table(aref), table(badrole),
-    table(ahidden), table(ahinside), table(aplain), pool(text)])).
+    table(ahidden), table(ahinside), table(aplain), table(avalid), pool(text)])).
 a11y_contract(owns(tree, anode, store)).
 a11y_contract(owns(tree, atext, store)).
 a11y_contract(owns(tree, arange, store)).
@@ -152,6 +160,7 @@ a11y_contract(owns(tree, badrole, store)).
 a11y_contract(owns(tree, ahidden, store)).
 a11y_contract(owns(tree, ahinside, store)).
 a11y_contract(owns(tree, aplain, store)).
+a11y_contract(owns(tree, avalid, store)).
 
 %% ---- OPERATIONS -------------------------------------------------------------
 
@@ -191,6 +200,7 @@ a11y_contract(fact(a11y_hidden(field(node), field(how)), table(ahidden), true)).
 a11y_contract(fact(a11y_hidden_focusable(field(node), field(root)), table(ahinside), field(what) == focusable)).
 a11y_contract(fact(a11y_hidden_live(field(node), field(root)), table(ahinside), field(what) == live_region)).
 a11y_contract(fact(a11y_no_node(field(node), field(role)), table(aplain), true)).
+a11y_contract(fact(a11y_validity(field(node), field(flag)), table(avalid), true)).
 
 a11y_contract(rules('rules/a11y')).
 a11y_contract(derived(a11y_of/2, 'the accessibility node of an element')).

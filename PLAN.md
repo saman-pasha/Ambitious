@@ -671,7 +671,12 @@ be built side by side and merged without touching each other's.
   - states and properties (checked, selected, expanded, pressed, disabled,
     required, invalid, current, values of ranges, ...);
   - live regions;
-  - accname's recursion through embedded controls.
+  - accname's recursion through embedded controls;
+  - visibility from the cascade, `::before` and `::after` content (and its
+    alternative text) in names, HTML's constraint validation
+    (`a11y_validity/2`; a pattern read by the script engine's regular
+    expressions), aria-owns reordering the tree, inherited presentation:
+    `tests/pages/a11y-more.html`'s tree is Chromium's.
 
   With their facts and the rules that find faults in them.
 - **12f Rendering** (`src/css/`, `src/layout/`, `src/paint/paint.c`):

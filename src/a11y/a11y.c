@@ -2,11 +2,16 @@
    accessibility tree of a styled document; and the module's generated
    implementation.
 
-   THE TREE, in document order. An element whose computed display is none, or
-   that is hidden or aria-hidden="true", is not in it, nor is anything inside it;
-   the root of each such subtree is kept, with what inside it still takes focus
-   (inside aria-hidden content, which is drawn) or is a live region. What is never
-   drawn by its nature (head, script, style, template, ...) is passed over. An
+   THE TREE, in document order, but that an element aria-owns takes (an id it
+   lists, of an element not taken already and not above it) is its child after
+   its own children. An element whose computed display is none -- the user agent
+   sheet's for a closed details element's content and a dialog without open --,
+   or that is hidden or aria-hidden="true", is not in it, nor is anything inside
+   it; the root of each such subtree is kept, with what inside it still takes
+   focus (inside aria-hidden content, which is drawn) or is a live region. An
+   element whose computed visibility is hidden or collapse is no node, but its
+   children are walked, as one may be drawn. What is never drawn by its nature
+   (head, script, style, template, ...) is passed over. An
    element's role is its role attribute's first token that is a role, compared
    without case, or else its own (HTML-AAM: a with href a link, img an image --
    presentation when its alt is empty --, input by its type, h1 to h6 headings,
@@ -14,7 +19,9 @@
    with a name a region, output a status, a details element's summary a button,
    ...). role=none is presentation, unless the element takes focus or has a
    global aria-* attribute: then it keeps its own role (WAI-ARIA 1.2's conflict
-   resolution). An element whose role is generic or presentation is no node, and
+   resolution). A list's items, and a table's row groups, rows and cells, whose
+   list or table says presentation are presentation too (inherited presentation,
+   as Chromium has it: whatever the list keeps, unless the item takes focus). An element whose role is generic or presentation is no node, and
    its children join its parent's node; but a generic element that takes focus,
    or that carries a global state or property other than a name (aria-live,
    aria-describedby, aria-current, ...), is a node, as Core-AAM includes it.
@@ -25,15 +32,19 @@
    table's caption, a fieldset's legend, a figure's figcaption, an optgroup's or
    option's label; the content of a role named from content; then title, then a
    field's placeholder; an input button's default. Content is walked through:
-   text, an image's alt, a descendant's aria-labelledby or aria-label, and an
-   embedded control's value -- a textbox its value, a combobox or listbox its
-   chosen options, a range its valuetext or valuenow (one with nothing chosen
-   and no value is read as any element) --; a line break and an element that is
-   not inline set their text off by spaces. As Chromium reads content, a nested
+   text, the ::before and ::after content of each element (its alternative text
+   after a solidus when it has one), an image's alt, a descendant's
+   aria-labelledby or aria-label, and an embedded control's value -- a textbox
+   its value, a combobox or listbox its chosen options, a range its valuetext or
+   valuenow (one with nothing chosen and no value is read as any element) --; a
+   line break, an element that is not inline, and what an element gives whole
+   (an alt, a label, a value, an alternative text) set their text off by spaces,
+   as Chromium sets them. As Chromium reads content, a nested
    container of widgets, a landmark or a live region adds nothing (a tree item's
    group, a menu item's submenu), and a row is named from its content in a grid
-   alone. What is hidden is left out, unless aria-labelledby or aria-describedby
-   names a hidden element: then all of that element's subtree counts. White space
+   alone. What is hidden or drawn as nothing is left out, unless aria-labelledby,
+   aria-describedby or a label names such an element: then all of that element's
+   subtree counts. White space
    collapses, and the name is trimmed.
 
    ITS DESCRIPTION (accname 1.2, HTML-AAM): aria-describedby's elements' text,
@@ -48,7 +59,12 @@
    disabled (its disabled attribute; a disabled fieldset's controls but those in
    its first legend; a disabled optgroup's or select's options; aria-disabled,
    and an aria-disabled element's focusable descendants), required, readonly,
-   invalid, current, busy, haspopup (a select's popup a menu, as Chromium has it;
+   invalid (aria-invalid, false included; else HTML's constraint validation of a
+   page no one has edited, each flag that holds kept: a value missing -- told of
+   all but a text field --, an e-mail or URL of the wrong type, a value off its
+   pattern (the script engine's regular expressions, with the v flag), under its
+   min or over its max, off its step; a disabled or readonly control is barred),
+   current, busy, haspopup (a select's popup a menu, as Chromium has it;
    a combobox's a listbox), orientation (with each role's default),
    multiselectable, modal, autocomplete (an input with a list), multiline. A token
    is compared without case, trimmed; a value that is none of a state's tokens
@@ -57,8 +73,8 @@
    range input's value put on its step), or aria-valuenow, -valuemin and
    -valuemax with the role's defaults (a slider's value half way, a spinbutton's
    or meter's 0), aria-valuenow kept inside the range as Chromium keeps it; and
-   aria-valuetext. A field's value (a password's as bullets), a combobox's chosen
-   option; a field's placeholder.
+   aria-valuetext. A field's value as HTML's value sanitization leaves it (a
+   password's as bullets), a combobox's chosen option; a field's placeholder.
 
    LIVE REGIONS: aria-live, or the role's politeness (alert assertive; status and
    log polite; marquee and timer off), aria-atomic (alert and status atomic) and
@@ -66,7 +82,7 @@
    the innermost one.
 
    LEVELS AND POSITIONS: a heading's level (aria-level, or h1 to h6, or 2), a list
-   item's (the lists it is in), a tree item's (aria-level, or the groups of its
+   item's (the lists it is in, 1 for none), a tree item's (aria-level, or the groups of its
    tree it is in), a row's aria-level. aria-posinset and aria-setsize, or else counted: a
    list's items, a listbox's, select's or optgroup's options, a tablist's tabs, a
    tree's or group's tree items, a menu's items, a radio group's radios (one name
@@ -87,14 +103,16 @@
    when first asked. A node's record is kept small, its rarer facts (texts, a
    range's values, a live region's settings) records of their own.
 
-   Not done, and why: visibility (the cascade does not compute it); the content
-   of a closed details element and a dialog without open (the user agent sheet
-   draws them); CSS generated content; constraint validation (invalid comes from
-   aria-invalid alone); presentational children and inherited presentation;
-   aria-owns reordering the tree. */
+   Not done, and why: Chromium's guess that a table is for layout (it is a table
+   here); a name from content walks the document's children, not the elements
+   aria-owns moved; a counter() in generated content adds nothing, and quotes are
+   the first level's; a field's value too long or too short is never told, as no
+   one has typed; a URL is judged by the network module's parser, which refuses a
+   space in a host that Chromium takes. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <vector.pl>
 #include <amb.pl>
 
@@ -102,6 +120,10 @@ amb_interface(dom);
 amb_interface(net);
 amb_interface(css);
 amb_implementation(a11y);
+#include "../css/css.h"
+#include "../net/url.h"
+/* HTML's pattern attribute, read by the script engine's regular expressions (src/js/js.h) */
+int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
 
 /* ---- the names this module reads, found among the document's atoms when first asked ---- */
 
@@ -110,19 +132,19 @@ enum { E_NONE, E_A, E_AREA, E_ARTICLE, E_ASIDE, E_AUDIO, E_BASE, E_BLOCKQUOTE, E
        E_DATALIST, E_DD, E_DETAILS, E_DIALOG, E_DT, E_FIELDSET, E_FIGCAPTION, E_FIGURE, E_FOOTER, E_FORM, E_H1, E_H2, E_H3,
        E_H4, E_H5, E_H6, E_HEAD, E_HEADER, E_HR, E_IFRAME, E_IMG, E_INPUT, E_LABEL, E_LEGEND, E_LI, E_LINK, E_MAIN, E_MENU,
        E_META, E_METER, E_NAV, E_NOSCRIPT, E_OL, E_OPTGROUP, E_OPTION, E_OUTPUT, E_P, E_PARAM, E_PROGRESS, E_SCRIPT, E_SEARCH,
-       E_SECTION, E_SELECT, E_SOURCE, E_STYLE, E_SUMMARY, E_TABLE, E_TD, E_TEMPLATE, E_TEXTAREA, E_TH, E_TITLE, E_TR, E_TRACK,
-       E_UL, E_VIDEO, E_COUNT };
+       E_SECTION, E_SELECT, E_SOURCE, E_STYLE, E_SUMMARY, E_TABLE, E_TBODY, E_TD, E_TEMPLATE, E_TEXTAREA, E_TFOOT, E_TH,
+       E_THEAD, E_TITLE, E_TR, E_TRACK, E_UL, E_VIDEO, E_COUNT };
 static const char *const ax_elements[E_COUNT] = { "", "a", "area", "article", "aside", "audio", "base", "blockquote", "body", "br",
     "button", "caption", "code", "datalist", "dd", "details", "dialog", "dt", "fieldset", "figcaption", "figure", "footer", "form",
     "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "iframe", "img", "input", "label", "legend", "li", "link", "main",
     "menu", "meta", "meter", "nav", "noscript", "ol", "optgroup", "option", "output", "p", "param", "progress", "script", "search",
-    "section", "select", "source", "style", "summary", "table", "td", "template", "textarea", "th", "title", "tr", "track", "ul",
-    "video" };
+    "section", "select", "source", "style", "summary", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead",
+    "title", "tr", "track", "ul", "video" };
 
 /* the attributes: HTML's, then the aria-* ones from A_FIRST, in strcmp order */
 enum { K_NONE, K_ROLE, K_ID, K_HIDDEN, K_TABINDEX, K_DISABLED, K_HREF, K_ALT, K_TITLE, K_TYPE, K_VALUE, K_PLACEHOLDER, K_FOR,
        K_LABEL, K_MULTIPLE, K_SELECTED, K_CHECKED, K_REQUIRED, K_READONLY, K_OPEN, K_NAME, K_LIST, K_MIN, K_MAX, K_STEP, K_SCOPE,
-       K_CONTENTEDITABLE, K_SIZE, K_CONTROLS,
+       K_CONTENTEDITABLE, K_SIZE, K_CONTROLS, K_PATTERN,
        A_ACTIVEDESCENDANT, A_ATOMIC, A_AUTOCOMPLETE, A_BUSY, A_CHECKED, A_COLCOUNT, A_COLINDEX, A_COLSPAN, A_CONTROLS, A_CURRENT,
        A_DESCRIBEDBY, A_DESCRIPTION, A_DETAILS, A_DISABLED, A_DROPEFFECT, A_ERRORMESSAGE, A_EXPANDED, A_FLOWTO, A_GRABBED,
        A_HASPOPUP, A_HIDDEN, A_INVALID, A_KEYSHORTCUTS, A_LABEL, A_LABELLEDBY, A_LEVEL, A_LIVE, A_MODAL, A_MULTILINE,
@@ -132,7 +154,7 @@ enum { K_NONE, K_ROLE, K_ID, K_HIDDEN, K_TABINDEX, K_DISABLED, K_HREF, K_ALT, K_
 #define A_FIRST A_ACTIVEDESCENDANT
 static const char *const ax_attrs[K_COUNT] = { "", "role", "id", "hidden", "tabindex", "disabled", "href", "alt", "title", "type",
     "value", "placeholder", "for", "label", "multiple", "selected", "checked", "required", "readonly", "open", "name", "list", "min",
-    "max", "step", "scope", "contenteditable", "size", "controls",
+    "max", "step", "scope", "contenteditable", "size", "controls", "pattern",
     "aria-activedescendant", "aria-atomic", "aria-autocomplete", "aria-busy", "aria-checked", "aria-colcount", "aria-colindex",
     "aria-colspan", "aria-controls", "aria-current", "aria-describedby", "aria-description", "aria-details", "aria-disabled",
     "aria-dropeffect", "aria-errormessage", "aria-expanded", "aria-flowto", "aria-grabbed", "aria-haspopup", "aria-hidden",
@@ -151,10 +173,10 @@ static const a11y_ref_attr ax_ref_attrs[8] = { A11Y_REF_ATTR_ARIA_LABELLEDBY, A1
 
 /* an input's type, its type attribute's state (an unknown one is text) */
 enum { IT_TEXT, IT_HIDDEN, IT_CHECKBOX, IT_RADIO, IT_RANGE, IT_NUMBER, IT_BUTTON, IT_SUBMIT, IT_RESET, IT_IMAGE, IT_SEARCH, IT_EMAIL,
-       IT_TEL, IT_URL, IT_PASSWORD, IT_OTHER };
+       IT_TEL, IT_URL, IT_PASSWORD, IT_DATE, IT_MONTH, IT_WEEK, IT_TIME, IT_DTL, IT_COLOR, IT_FILE };
 
-/* the display keywords this module tells apart, as the style's atoms */
-enum { W_NONE, W_INLINE, W_CONTENTS, W_COUNT };
+/* the display and visibility keywords this module tells apart, as the style's atoms */
+enum { W_NONE, W_INLINE, W_CONTENTS, W_HIDDEN, W_COLLAPSE, W_COUNT };
 
 /* the walk of a name's text: inside an aria-labelledby or -describedby walk; all of a hidden element's subtree in it;
    at the element such a walk names, whose own content counts whatever its role */
@@ -162,10 +184,15 @@ enum { T_REF = 1, T_ALL = 2, T_TARGET = 4 };
 
 /* every helper reads the document and its style. What it learns of the document's names is kept for the build: ek an
    element name's kind and ak an aria-* attribute's, by its atom (0xFF not yet known), aid each attribute kind's atom (~0
-   not yet asked); the ids, and the labels with for, are indexed when first asked */
+   not yet asked); the ids, and the labels with for, are indexed when first asked. What the build finds before its walk:
+   gen each element's first pseudo-element style (its place in the style's table, 0 none); owner the element that owns
+   each one by aria-owns (0 none; AX_MET added once the walk has met it there); rmiss each radio button whose group
+   misses a checked button it needs */
 #define ACTX a11y_tree *t, const dom_document *d, const css_style *st, const vector<uint32_t> *sx, vector<uint8_t> *ek, \
-             vector<uint8_t> *ak, uint32_t *aid, const uint32_t *cw, vector<uint32_t> *ids, vector<uint32_t> *labels
-#define AARGS t, d, st, sx, ek, ak, aid, cw, ids, labels
+             vector<uint8_t> *ak, uint32_t *aid, const uint32_t *cw, vector<uint32_t> *ids, vector<uint32_t> *labels, \
+             const vector<uint32_t> *gen, vector<uint32_t> *owner, vector<uint8_t> *rmiss
+#define AARGS t, d, st, sx, ek, ak, aid, cw, ids, labels, gen, owner, rmiss
+#define AX_MET 0x80000000u
 
 /* ---- the DOM and its style, as this module reads them ---- */
 
@@ -321,11 +348,19 @@ static int ax_hidden_how(ACTX, uint32_t x) {
     return -1;
 }
 
+/* x's computed visibility is hidden or collapse: it is drawn as nothing, though a child of it may be drawn */
+static int ax_invisible(ACTX, uint32_t x) {
+    if (x >= len(*sx) || !at(*sx, x)) return 0;
+    uint32_t c = at(*sx, x) + CSS_PROP_VISIBILITY;
+    if (c >= st->cval_len || st->cval[c].prop != CSS_PROP_VISIBILITY) return 0;
+    uint32_t w = st->cval[c].word;
+    return w && (w == cw[W_HIDDEN] || w == cw[W_COLLAPSE]);
+}
+
 static int ax_input_type(ACTX, uint32_t x) {
     int v = ax_tok(d, ax_get(AARGS, x, K_TYPE),
                    "text hidden checkbox radio range number button submit reset image search email tel url password date month week time datetime-local color file");
     if (v < 0) return IT_TEXT;
-    if (v > IT_PASSWORD) return IT_OTHER;
     return v;
 }
 static int ax_text_input(int ty) {
@@ -518,6 +553,7 @@ static a11y_role ax_implicit(ACTX, uint32_t x, int k) {
     case E_UL: case E_OL: case E_MENU: return A11Y_ROLE_LIST;
     case E_LI: return A11Y_ROLE_LISTITEM;
     case E_TABLE: return A11Y_ROLE_TABLE;
+    case E_CAPTION: return A11Y_ROLE_CAPTION;
     case E_TR: return A11Y_ROLE_ROW;
     case E_TD: return A11Y_ROLE_CELL;
     case E_TH: return ax_tok(d, ax_get(AARGS, x, K_SCOPE), "row") == 0 ? A11Y_ROLE_ROWHEADER : A11Y_ROLE_COLUMNHEADER;
@@ -544,6 +580,28 @@ static a11y_role ax_implicit(ACTX, uint32_t x, int k) {
     case E_SUMMARY: return ax_summary_button(AARGS, x) ? A11Y_ROLE_BUTTON : A11Y_ROLE_GENERIC;
     default: return A11Y_ROLE_GENERIC;
     }
+}
+/* an element whose role attribute's role is presentation (none), whatever conflict resolution keeps */
+static int ax_says_none(ACTX, uint32_t x) {
+    a11y_role r = A11Y_ROLE_GENERIC;
+    size_t bo = 0, bl = 0;
+    return d->node[x].first_attr && ax_role_attr(AARGS, x, &r, &bo, &bl) && r == A11Y_ROLE_PRESENTATION;
+}
+/* an element whose own role its context's presentation takes away (WAI-ARIA 1.2's inherited presentation, as Chromium
+   has it): an item of a list, a row group, row or cell of a table, whose list or table says presentation or none */
+static int ax_presented_away(ACTX, uint32_t x, int k) {
+    uint32_t p = d->node[x].parent;
+    if (k == E_LI) {
+        int pk = p > 1 ? ax_kind(AARGS, p) : E_NONE;
+        return (pk == E_UL || pk == E_OL || pk == E_MENU) && ax_says_none(AARGS, p);
+    }
+    if (k != E_TR && k != E_TD && k != E_TH && k != E_THEAD && k != E_TBODY && k != E_TFOOT) return 0;
+    for (; p > 1; p = d->node[p].parent) {
+        int pk = ax_kind(AARGS, p);
+        if (pk == E_TABLE) return ax_says_none(AARGS, p);
+        if (pk != E_TR && pk != E_THEAD && pk != E_TBODY && pk != E_TFOOT) return 0;
+    }
+    return 0;
 }
 /* an element's role, as a name's walk meets it: its role attribute's, or its own */
 static a11y_role ax_role_of(ACTX, uint32_t x, int k) {
@@ -712,7 +770,7 @@ static int ax_refs_text(ACTX, uint32_t a, int flags, uint32_t self, vector<char>
         uint32_t target = ax_by_id(AARGS, p + b, i - b);
         if (!target) continue;
         ax_space(out);
-        int f2 = flags | (ax_hidden_how(AARGS, target) >= 0 ? T_ALL : 0);
+        int f2 = flags | (ax_hidden_how(AARGS, target) >= 0 || ax_invisible(AARGS, target) ? T_ALL : 0);
         if (!ax_part(AARGS, target, ax_kind(AARGS, target), f2 | T_TARGET, self, out)) ax_content(AARGS, target, f2, self, out);
     }
     if (ax_says(out, mark)) return 1;
@@ -726,6 +784,187 @@ static void ax_option_text(ACTX, uint32_t o, vector<char> *out) {
     if (la && ax_put_attr(d, la, out)) return;
     ax_content(AARGS, o, 0, 0, out);
 }
+/* ---- an input's value, as HTML reads it ---- */
+
+/* p[0..n) is a valid floating-point number (HTML 2.3.4.3: no sign but a minus, no white space), finite and inside a
+   float's range as Chromium keeps a number input's (its -0 made 0): 1 and *v */
+static int ax_float(const char *p, size_t n, double *v) {
+    size_t i = 0;
+    if (i < n && p[i] == '-') i++;
+    size_t d0 = i;
+    while (i < n && p[i] >= '0' && p[i] <= '9') i++;
+    size_t di = i - d0, df = 0;
+    if (i < n && p[i] == '.') {
+        i++;
+        size_t f0 = i;
+        while (i < n && p[i] >= '0' && p[i] <= '9') i++;
+        df = i - f0;
+        if (!df) return 0;
+    }
+    if (!di && !df) return 0;
+    if (i < n && (p[i] == 'e' || p[i] == 'E')) {
+        i++;
+        if (i < n && (p[i] == '-' || p[i] == '+')) i++;
+        size_t e0 = i;
+        while (i < n && p[i] >= '0' && p[i] <= '9') i++;
+        if (i == e0) return 0;
+    }
+    if (i != n || n >= 64) return 0;
+    char buf[64];
+    memcpy(buf, p, n);
+    buf[n] = 0;
+    char *end = buf;
+    double x = strtod(buf, &end);
+    if (x != x || x > 3.4028234663852886e38 || x < -3.4028234663852886e38) return 0;
+    *v = x == 0 ? 0 : x;
+    return 1;
+}
+/* the attribute a's value (raw, as HTML reads it) as a valid floating-point number: 1 and *v */
+static int ax_attr_float(const dom_document *d, uint32_t a, double *v) {
+    if (!a) return 0;
+    amb_span s = d->attr[a].value;
+    return ax_float(text_ptr(d, s), s.len, v);
+}
+
+static const int ax_mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+static int ax_leap(long y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
+static int ax_month_days(long y, long m) { return m == 2 && ax_leap(y) ? 29 : ax_mdays[m - 1]; }
+/* the days from 1970-01-01 to y-m-dd of the proleptic Gregorian calendar */
+static long ax_days(long y, long m, long dd) {
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400;
+    long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + dd - 1;
+    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+/* the weekday of a day from 1970-01-01 (a Thursday): 0 Monday ... 6 Sunday */
+static long ax_weekday(long days) { return ((days % 7) + 7 + 3) % 7; }
+/* the weeks of a year (ISO 8601): 53 when it starts on a Thursday, or on a Wednesday in a leap year */
+static long ax_weeks(long y) {
+    long wd = ax_weekday(ax_days(y, 1, 1));
+    return wd == 3 || (wd == 2 && ax_leap(y)) ? 53 : 52;
+}
+/* least to most digits at p[*i] as a number: 1, *v and *i past them */
+static int ax_digits(const char *p, size_t n, size_t *i, size_t least, size_t most, long *v) {
+    size_t b = *i;
+    long x = 0;
+    while (*i < n && *i - b < most && p[*i] >= '0' && p[*i] <= '9') { x = x * 10 + (p[*i] - '0'); (*i)++; }
+    if (*i - b < least) return 0;
+    *v = x;
+    return 1;
+}
+/* a year (four digits or more, above 0), a month, and with want_day a day of it, at p[*i] */
+static int ax_ymd(const char *p, size_t n, size_t *i, long *y, long *m, long *dd, int want_day) {
+    if (!ax_digits(p, n, i, 4, 9, y) || *y < 1 || *i >= n || p[*i] != '-') return 0;
+    (*i)++;
+    if (!ax_digits(p, n, i, 2, 2, m) || *m < 1 || *m > 12) return 0;
+    if (!want_day) return 1;
+    if (*i >= n || p[*i] != '-') return 0;
+    (*i)++;
+    return ax_digits(p, n, i, 2, 2, dd) && *dd >= 1 && *dd <= ax_month_days(*y, *m);
+}
+/* a time, HH:MM with :SS and a fraction of one to three digits or not, at p[*i]: its milliseconds after midnight */
+static int ax_hms(const char *p, size_t n, size_t *i, double *ms) {
+    long h = 0, mi = 0, sec = 0, frac = 0;
+    if (!ax_digits(p, n, i, 2, 2, &h) || h > 23 || *i >= n || p[*i] != ':') return 0;
+    (*i)++;
+    if (!ax_digits(p, n, i, 2, 2, &mi) || mi > 59) return 0;
+    double f = 0;
+    if (*i < n && p[*i] == ':') {
+        (*i)++;
+        if (!ax_digits(p, n, i, 2, 2, &sec) || sec > 59) return 0;
+        if (*i < n && p[*i] == '.') {
+            (*i)++;
+            size_t b = *i;
+            if (!ax_digits(p, n, i, 1, 3, &frac)) return 0;
+            size_t k = *i - b;
+            f = (double)frac * (k == 1 ? 100 : k == 2 ? 10 : 1);
+        }
+    }
+    *ms = (double)((h * 60 + mi) * 60 + sec) * 1000.0 + f;
+    return 1;
+}
+/* a string of an input's type as HTML's algorithm to convert a string to a number reads it: a number's own; a date's,
+   a week's (its Monday's) or a local date and time's milliseconds since the epoch, a time's since midnight; a month's
+   months since 1970-01. 1 and *v; 0 when it is no valid string of the type */
+static int ax_type_number(int ty, const char *p, size_t n, double *v) {
+    size_t i = 0;
+    long y = 0, m = 0, dd = 0, w = 0;
+    double ms = 0;
+    if (ty == IT_NUMBER || ty == IT_RANGE) return ax_float(p, n, v);
+    if (ty == IT_DATE) {
+        if (!ax_ymd(p, n, &i, &y, &m, &dd, 1) || i != n) return 0;
+        *v = (double)ax_days(y, m, dd) * 86400000.0;
+        return 1;
+    }
+    if (ty == IT_MONTH) {
+        if (!ax_ymd(p, n, &i, &y, &m, &dd, 0) || i != n) return 0;
+        *v = (double)((y - 1970) * 12 + m - 1);
+        return 1;
+    }
+    if (ty == IT_WEEK) {
+        if (!ax_digits(p, n, &i, 4, 9, &y) || y < 1 || i + 2 > n || p[i] != '-' || p[i + 1] != 'W') return 0;
+        i += 2;
+        if (!ax_digits(p, n, &i, 2, 2, &w) || i != n || w < 1 || w > ax_weeks(y)) return 0;
+        long jan1 = ax_days(y, 1, 1), wd = ax_weekday(jan1);
+        long mon1 = jan1 - wd + (wd > 3 ? 7 : 0);      /* week 1's Monday: the week of the year's first Thursday */
+        *v = (double)(mon1 + (w - 1) * 7) * 86400000.0;
+        return 1;
+    }
+    if (ty == IT_TIME) {
+        if (!ax_hms(p, n, &i, &ms) || i != n) return 0;
+        *v = ms;
+        return 1;
+    }
+    if (ty == IT_DTL) {
+        if (!ax_ymd(p, n, &i, &y, &m, &dd, 1) || i >= n || (p[i] != 'T' && p[i] != ' ')) return 0;
+        i++;
+        if (!ax_hms(p, n, &i, &ms) || i != n) return 0;
+        *v = (double)ax_days(y, m, dd) * 86400000.0 + ms;
+        return 1;
+    }
+    return 0;
+}
+static int ax_dated(int ty) { return ty >= IT_DATE && ty <= IT_DTL; }
+/* an input's value as its value attribute leaves it through HTML's value sanitization (4.10.5.1): a text field's line
+   breaks gone; an e-mail's and a URL's white space at either end gone too, a list of e-mails (multiple) trimmed each and
+   joined by commas; a number's, a date's or a time's empty unless it is a valid one; any other's as it is */
+static void ax_input_value(ACTX, uint32_t x, int ty, vector<char> *out) {
+    clear(*out);
+    uint32_t va = ax_get(AARGS, x, K_VALUE);
+    if (!va) return;
+    amb_span s = d->attr[va].value;
+    const char *p = text_ptr(d, s);
+    if (ty == IT_EMAIL && ax_get(AARGS, x, K_MULTIPLE)) {
+        size_t i = 0;
+        int first = 1;
+        while (i <= s.len) {
+            size_t b = i;
+            while (i < s.len && p[i] != ',') i++;
+            size_t e = i;
+            while (b < e && ax_white(p[b])) b++;
+            while (e > b && ax_white(p[e - 1])) e--;
+            if (!first) push_back(out, ',');
+            first = 0;
+            for (size_t q = b; q < e; q++) if (p[q] != '\n' && p[q] != '\r') push_back(out, p[q]);
+            i++;
+        }
+        return;
+    }
+    if (ax_text_input(ty)) { for (uint32_t i = 0; i < s.len; i++) if (p[i] != '\n' && p[i] != '\r') push_back(out, p[i]); }
+    else append_range(out, p, s.len);
+    if (ty == IT_EMAIL || ty == IT_URL) {
+        size_t b = 0, e = len(*out);
+        while (b < e && ax_white(at(*out, b))) b++;
+        while (e > b && ax_white(at(*out, e - 1))) e--;
+        if (b) memmove(data(*out), data(*out) + b, e - b);
+        resize(out, e - b);
+    }
+    double v = 0;
+    if ((ty == IT_NUMBER || ax_dated(ty)) && !ax_type_number(ty, data(*out), len(*out), &v)) clear(*out);
+}
+
 /* a range input's value, least and greatest values (HTML: 0 and 100, the value half way, kept in the range and put
    on its step, the nearer step and the greater of two) */
 static void ax_range_input(ACTX, uint32_t x, double *now, double *mn, double *mx) {
@@ -786,9 +1025,9 @@ static int ax_range_values(ACTX, uint32_t x, int k, int ty, a11y_role role, int 
     *from = A11Y_VALUE_FROM_HTML;
     if (k == E_INPUT && ty == IT_RANGE) { ax_range_input(AARGS, x, now, mn, mx); *has_min = 1; *has_max = 1; return 1; }
     if (k == E_INPUT && ty == IT_NUMBER) {
-        *has_min = ax_num(d, ax_get(AARGS, x, K_MIN), mn);
-        *has_max = ax_num(d, ax_get(AARGS, x, K_MAX), mx);
-        return ax_num(d, ax_get(AARGS, x, K_VALUE), now);
+        *has_min = ax_attr_float(d, ax_get(AARGS, x, K_MIN), mn);
+        *has_max = ax_attr_float(d, ax_get(AARGS, x, K_MAX), mx);
+        return ax_attr_float(d, ax_get(AARGS, x, K_VALUE), now);
     }
     if (k == E_PROGRESS || k == E_METER) { *has_min = 1; *has_max = 1; return ax_gauge(AARGS, x, k, now, mn, mx); }
     *has_min = aria && ax_num(d, ax_get(AARGS, x, A_VALUEMIN), mn);
@@ -822,7 +1061,11 @@ static int ax_range_values(ACTX, uint32_t x, int k, int ty, a11y_role role, int 
 static void ax_control_value(ACTX, uint32_t y, int k, a11y_role r, vector<char> *out) {
     int ty = k == E_INPUT ? ax_input_type(AARGS, y) : -1;
     if (r == A11Y_ROLE_TEXTBOX || r == A11Y_ROLE_SEARCHBOX || (r == A11Y_ROLE_COMBOBOX && k == E_INPUT)) {
-        if (k == E_INPUT) { uint32_t va = ax_get(AARGS, y, K_VALUE); if (va && ty != IT_PASSWORD) ax_put_attr(d, va, out); }
+        if (k == E_INPUT && ty != IT_PASSWORD) {
+            vector<char> v;
+            ax_input_value(AARGS, y, ty, &v);
+            ax_put(out, data(v), len(v));
+        }
         else ax_content(AARGS, y, 0, 0, out);
         return;
     }
@@ -905,10 +1148,103 @@ static int ax_part(ACTX, uint32_t y, int k, int flags, uint32_t self, vector<cha
     return 0;
 }
 
-/* the text of root's subtree for a name: what each element gives, or its content walked through; an element that is
-   not inline set off by spaces. What is hidden is left out unless the walk counts all of a hidden subtree; the
+/* a code point into out, in UTF-8 */
+static void ax_utf8(vector<char> *out, uint32_t cp) {
+    if (cp < 0x80) push_back(out, (char)cp);
+    else if (cp < 0x800) { push_back(out, (char)(0xC0 | cp >> 6)); push_back(out, (char)(0x80 | (cp & 0x3F))); }
+    else if (cp < 0x10000) {
+        push_back(out, (char)(0xE0 | cp >> 12));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    } else {
+        push_back(out, (char)(0xF0 | cp >> 18));
+        push_back(out, (char)(0x80 | (cp >> 12 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp >> 6 & 0x3F)));
+        push_back(out, (char)(0x80 | (cp & 0x3F)));
+    }
+}
+/* a CSS string, its quotes s[0] and s[n - 1], into out with its escapes read */
+static void ax_unquote(const char *s, size_t n, vector<char> *out) {
+    if (n < 2) return;
+    for (size_t i = 1; i + 1 < n; i++) {
+        if (s[i] != '\\') { push_back(out, s[i]); continue; }
+        i++;
+        if (i + 1 >= n) break;
+        if (s[i] == '\n') continue;
+        uint32_t cp = 0;
+        size_t k = 0;
+        while (k < 6 && i + 1 < n) {
+            char c = s[i];
+            int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+            if (v < 0) break;
+            cp = cp * 16 + (uint32_t)v;
+            i++;
+            k++;
+        }
+        if (k == 0) { push_back(out, s[i]); continue; }
+        if (i + 1 < n && ax_white(s[i])) i++;
+        i--;
+        if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+        ax_utf8(out, cp);
+    }
+}
+/* the first value of x's pseudo-element pk (::before, ::after) when it generates one, else 0 */
+static uint32_t ax_pseudo(ACTX, uint32_t x, int pk) {
+    if (x >= len(*gen) || !at(*gen, x)) return 0;
+    for (uint32_t i = at(*gen, x); i < st->pstyle_len && st->pstyle[i].node.index == x; i++)
+        if ((int)st->pstyle[i].pseudo == pk) return st->pstyle[i].first;
+    return 0;
+}
+/* the text x's ::before or ::after (pk) adds to a name it is in (accname 1.2, 2F; CSS Content 3): its content's
+   alternative text, after a solidus, when it has one; else its strings, attr()s and quotes (an image or a counter adds
+   nothing). An alternative text, or a pseudo-element drawn as more than inline content, is set off by spaces, as
+   Chromium sets it; one with display none, or drawn as nothing outside a walk that counts all, adds nothing */
+static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) {
+    uint32_t c0 = ax_pseudo(AARGS, x, pk);
+    uint32_t cd = c0 + CSS_PROP_DISPLAY, cv = c0 + CSS_PROP_VISIBILITY, cc = c0 + CSS_PROP_CONTENT;
+    if (!c0 || cd >= st->cval_len || cv >= st->cval_len || cc >= st->cval_len) return;
+    uint32_t dw = st->cval[cd].word, vw = st->cval[cv].word;
+    if (dw && dw == cw[W_NONE]) return;
+    if (!(flags & T_ALL) && vw && (vw == cw[W_HIDDEN] || vw == cw[W_COLLAPSE])) return;
+    if (st->cval[cc].unit != CSS_UNIT_TEXT) return;
+    vector<char> src, piece;
+    amb_span sp = st->cval[cc].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a = 0, n = 0, from = 0;
+    int alt = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n))
+        if (n == 1 && at(src, a) == '/') { alt = 1; from = i; break; }
+    int spaced = alt || (dw && dw != cw[W_INLINE] && dw != cw[W_CONTENTS]);
+    if (spaced) ax_space(out);
+    i = from;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) {
+        const char *q = data(src) + a;
+        if (!alt && n == 1 && q[0] == '/') break;
+        clear(piece);
+        if (q[0] == '"' || q[0] == '\'') ax_unquote(q, n, &piece);
+        else if (ax_word_is(q, n, "open-quote")) append_range(piece, "\xe2\x80\x9c", 3);
+        else if (ax_word_is(q, n, "close-quote")) append_range(piece, "\xe2\x80\x9d", 3);
+        else if (n > 6 && ax_word_is(q, 5, "attr(") && q[n - 1] == ')') {
+            size_t b = 5, e = 5;
+            while (b < n - 1 && ax_white(q[b])) b++;
+            e = b;
+            while (e < n - 1 && !ax_white(q[e]) && q[e] != ',') e++;
+            uint32_t nm = e > b ? names_find(d, q + b, e - b) : 0;
+            for (uint32_t r = nm ? d->node[x].first_attr : 0; r; r = d->attr[r].next)
+                if (d->attr[r].name == nm) { amb_span v = d->attr[r].value; append_range(piece, text_ptr(d, v), v.len); break; }
+        }
+        ax_put(out, data(piece), len(piece));
+    }
+    if (spaced) ax_space(out);
+}
+
+/* the text of root's subtree for a name: its ::before, then what each element gives, or its content walked through
+   (its own ::before and ::after about it), then root's ::after; an element that is not inline set off by spaces, and
+   so is what an element gives whole -- an alt, a label, a control's value --, as Chromium sets it off. What is hidden
+   or drawn as nothing (visibility hidden or collapse) is left out unless the walk counts all of a hidden subtree; the
    element being named (self) adds nothing to its own label. The walk is a loop: a subtree of any depth is read */
 static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<char> *out) {
+    ax_gen_text(AARGS, root, CSS_PSEUDO_BEFORE, flags, out);
     uint32_t x = d->node[root].first_child;
     while (x) {
         int down = 0;
@@ -917,23 +1253,41 @@ static void ax_content(ACTX, uint32_t root, int flags, uint32_t self, vector<cha
         else if (nk == DOM_NODE_KIND_ELEMENT && x != self) {
             int k = ax_kind(AARGS, x);
             if (k == E_SCRIPT || k == E_STYLE || k == E_TEMPLATE) {}
-            else if (!(flags & T_ALL) && ax_hidden_how(AARGS, x) >= 0) {}
+            else if (!(flags & T_ALL) && (ax_hidden_how(AARGS, x) >= 0 || ax_invisible(AARGS, x))) {}
             else if (k == E_BR) ax_space(out);
             else {
                 int block = ax_block(AARGS, x);
                 if (block) ax_space(out);
-                if (!ax_part(AARGS, x, k, flags & ~T_TARGET, self, out) && d->node[x].first_child) down = 1;
-                else if (block) ax_space(out);
+                size_t m0 = len(*out);
+                ax_space(out);
+                size_t m1 = len(*out);
+                if (ax_part(AARGS, x, k, flags & ~T_TARGET, self, out)) {
+                    if (ax_says(out, m1)) ax_space(out);
+                    else resize(out, m0);
+                    if (block) ax_space(out);
+                } else {
+                    resize(out, m0);
+                    ax_gen_text(AARGS, x, CSS_PSEUDO_BEFORE, flags, out);
+                    if (d->node[x].first_child) down = 1;
+                    else {
+                        ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
+                        if (block) ax_space(out);
+                    }
+                }
             }
         }
         if (down) { x = d->node[x].first_child; continue; }
         while (x != root && !d->node[x].next_sibling) {
             x = d->node[x].parent;
-            if (x != root && ax_block(AARGS, x)) ax_space(out);
+            if (x != root) {
+                ax_gen_text(AARGS, x, CSS_PSEUDO_AFTER, flags, out);
+                if (ax_block(AARGS, x)) ax_space(out);
+            }
         }
         if (x == root) break;
         x = d->node[x].next_sibling;
     }
+    ax_gen_text(AARGS, root, CSS_PSEUDO_AFTER, flags, out);
 }
 
 /* the first control a label holds (HTML's labeled control of a label without for) */
@@ -969,7 +1323,7 @@ static int ax_labels_text(ACTX, uint32_t x, vector<char> *out) {
             uint32_t f = ax_get(AARGS, l, K_FOR);
             if (!f || d->attr[f].value.len != idv.len || memcmp(text_ptr(d, d->attr[f].value), text_ptr(d, idv), idv.len) != 0) continue;
             ax_space(out);
-            ax_content(AARGS, l, ax_hidden_how(AARGS, l) >= 0 ? T_ALL : 0, x, out);
+            ax_content(AARGS, l, ax_hidden_how(AARGS, l) >= 0 || ax_invisible(AARGS, l) ? T_ALL : 0, x, out);
         }
     }
     if (!ax_says(out, mark))
@@ -1111,11 +1465,180 @@ typedef struct ax_found { uint8_t state, value, from; } ax_found;
 /* an attribute that is true */
 #define AX_TRUE(a) (ax_tok(d, (a), "true") == 0)
 
+/* ---- constraint validation (HTML 4.10.20.2), of a page no one has edited ---- */
+
+/* the flags of a control's validity state, by bit, and as the contract names them */
+enum { V_MISSING = 1, V_TYPE = 2, V_PATTERN = 4, V_UNDER = 8, V_OVER = 16, V_STEP = 32, V_COUNT = 6 };
+static const a11y_validity ax_validity_flags[V_COUNT] = { A11Y_VALIDITY_VALUE_MISSING, A11Y_VALIDITY_TYPE_MISMATCH,
+    A11Y_VALIDITY_PATTERN_MISMATCH, A11Y_VALIDITY_RANGE_UNDERFLOW, A11Y_VALIDITY_RANGE_OVERFLOW, A11Y_VALIDITY_STEP_MISMATCH };
+
+static int ax_alnum(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+/* p[0..n) is a valid e-mail address (HTML 4.10.5.1.5): a local part of letters, digits and .!#$%&'*+/=?^_`{|}~-, an @,
+   and a domain of labels with dots between, each of 1 to 63 letters, digits and hyphens with no hyphen at either end. A
+   label beyond ASCII is taken as one whose IDNA form is good, as Chromium converts it before it looks */
+static int ax_email_ok(const char *p, size_t n) {
+    size_t a = 0;
+    while (a < n && p[a] != '@') a++;
+    if (a == 0 || a + 1 >= n) return 0;
+    const char *local = ".!#$%&'*+/=?^_`{|}~-";
+    for (size_t i = 0; i < a; i++) {
+        char c = p[i];
+        int ok = ax_alnum(c);
+        for (size_t q = 0; !ok && local[q]; q++) if (local[q] == c) ok = 1;
+        if (!ok) return 0;
+    }
+    size_t i = a + 1;
+    while (i <= n) {
+        size_t b = i;
+        while (i < n && p[i] != '.') {
+            char c = p[i];
+            if (!ax_alnum(c) && c != '-' && !((unsigned char)c & 0x80)) return 0;
+            i++;
+        }
+        if (i == b || i - b > 63 || p[b] == '-' || p[i - 1] == '-') return 0;
+        i++;
+    }
+    return 1;
+}
+/* p[0..n) is a valid absolute URL, as Chromium takes one: a scheme and its colon, then what the URL parser reads */
+static int ax_url_ok(const char *p, size_t n) {
+    if (!n || !((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))) return 0;
+    size_t i = 1;
+    while (i < n && (ax_alnum(p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.')) i++;
+    if (i >= n || p[i] != ':') return 0;
+    vector<char> ref, out;
+    append_range(ref, p, n);
+    push_back(ref, 0);
+    resize(out, 3 * n + 256);
+    return net_url_resolve("about:blank", data(ref), data(out), len(out));
+}
+/* an option's value is empty: its value attribute's, else its text's (white space aside) */
+static int ax_option_empty(ACTX, uint32_t o) {
+    uint32_t va = ax_get(AARGS, o, K_VALUE);
+    if (va) return d->attr[va].value.len == 0;
+    uint32_t x = d->node[o].first_child;
+    while (x) {
+        if (d->node[x].kind == DOM_NODE_KIND_TEXT) {
+            amb_span v = d->node[x].data;
+            const char *q = text_ptr(d, v);
+            for (uint32_t i = 0; i < v.len; i++) if (!ax_white(q[i])) return 0;
+        }
+        if (d->node[x].kind == DOM_NODE_KIND_ELEMENT && ax_kind(AARGS, x) != E_SCRIPT && d->node[x].first_child) { x = d->node[x].first_child; continue; }
+        while (x != o && !d->node[x].next_sibling) x = d->node[x].parent;
+        if (x == o) break;
+        x = d->node[x].next_sibling;
+    }
+    return 1;
+}
+/* the flags of a form control's validity state that hold (HTML 4.10.20.2), as a page no one has edited has them: no
+   field is dirty, so none is too long or too short. 0 for what is barred from constraint validation (a disabled
+   control, a field that is readonly, a button) or is no control. value is the input's value, sanitized */
+static int ax_validity(ACTX, uint32_t x, int k, int ty, int disabled, const vector<char> *value) {
+    if (disabled) return 0;
+    int req = ax_get(AARGS, x, K_REQUIRED) != 0;
+    if (k == E_TEXTAREA) {
+        if (!req || ax_get(AARGS, x, K_READONLY)) return 0;
+        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling)
+            if (d->node[c].kind == DOM_NODE_KIND_TEXT && d->node[c].data.len) return 0;
+        return V_MISSING;
+    }
+    if (k == E_SELECT) {
+        /* missing: no option chosen but its placeholder label option (a single select of one row's first option,
+           its own child, whose value is empty) */
+        if (!req) return 0;
+        vector<uint32_t> opts;
+        vector<uint8_t> how;
+        ax_choose(AARGS, x, &opts, &how);
+        uint32_t ph = 0;
+        if (len(opts) && !ax_select_list(AARGS, x) && d->node[at(opts, 0)].parent == x && ax_option_empty(AARGS, at(opts, 0))) ph = at(opts, 0);
+        for (size_t i = 0; i < len(opts); i++) if (at(how, i) && at(opts, i) != ph) return 0;
+        return V_MISSING;
+    }
+    if (k != E_INPUT || ty == IT_HIDDEN || ax_input_button(ty) || ty == IT_IMAGE) return 0;
+    int field = ax_text_input(ty) || ty == IT_NUMBER || ax_dated(ty);
+    if (field && ax_get(AARGS, x, K_READONLY)) return 0;
+    int f = 0;
+    size_t n = len(*value);
+    if (req && ((field && !n) || ty == IT_FILE || (ty == IT_CHECKBOX && !ax_get(AARGS, x, K_CHECKED)))) f |= V_MISSING;
+    if (ty == IT_RADIO && x < len(*rmiss) && at(*rmiss, x)) f |= V_MISSING;
+    if (!n) return f;
+    const char *p = data(*value);
+    /* the type of an e-mail (each of a list's) and of a URL; a text field's pattern, each of a list's e-mails */
+    uint32_t pa = ax_text_input(ty) ? ax_get(AARGS, x, K_PATTERN) : 0;
+    if (ty == IT_EMAIL || ty == IT_URL || pa) {
+        int each = ty == IT_EMAIL && ax_get(AARGS, x, K_MULTIPLE);
+        size_t i = 0;
+        while (i <= n) {
+            size_t b = i;
+            while (i < n && !(each && p[i] == ',')) i++;
+            if (ty == IT_EMAIL && !ax_email_ok(p + b, i - b)) f |= V_TYPE;
+            if (ty == IT_URL && !ax_url_ok(p + b, i - b)) f |= V_TYPE;
+            if (pa && js_pattern_test(text_ptr(d, d->attr[pa].value), d->attr[pa].value.len, p + b, i - b) == 0) f |= V_PATTERN;
+            i++;
+        }
+    }
+    /* a number's, a date's or a time's range, and its step from its step base: its min (with none, its value
+       attribute, which is its value: on its step) */
+    if (ty == IT_NUMBER || ax_dated(ty)) {
+        double v = 0, lo = 0, hi = 0, sv = 0;
+        if (!ax_type_number(ty, p, n, &v)) return f;
+        uint32_t ma = ax_get(AARGS, x, K_MIN), xa = ax_get(AARGS, x, K_MAX);
+        int has_lo = ma && ax_type_number(ty, text_ptr(d, d->attr[ma].value), d->attr[ma].value.len, &lo);
+        int has_hi = xa && ax_type_number(ty, text_ptr(d, d->attr[xa].value), d->attr[xa].value.len, &hi);
+        if (has_lo && v < lo) f |= V_UNDER;
+        if (has_hi && v > hi) f |= V_OVER;
+        uint32_t sa = ax_get(AARGS, x, K_STEP);
+        if (has_lo && !(sa && ax_tok(d, sa, "any") == 0)) {
+            /* the default step and the step scale factor of the type (HTML 4.10.5.1): a day, a month, a week, a minute */
+            double def = ty == IT_TIME || ty == IT_DTL ? 60 : 1;
+            double scale = ty == IT_DATE ? 86400000.0 : ty == IT_WEEK ? 604800000.0 : ty == IT_TIME || ty == IT_DTL ? 1000.0 : 1;
+            double step = sa && ax_attr_float(d, sa, &sv) && sv > 0 ? sv : def;
+            /* Chromium's rounding: a date's, a month's or a week's step whole, a time's in whole milliseconds */
+            if (ty == IT_DATE || ty == IT_MONTH || ty == IT_WEEK) { step = floor(step + 0.5); if (step < 1) step = 1; }
+            step *= scale;
+            if (ty == IT_TIME || ty == IT_DTL) { step = floor(step + 0.5); if (step < 1) step = 1; }
+            double q = fabs(v - lo), r = q - step * floor(q / step);
+            double err = ty == IT_NUMBER ? step / 16777216.0 : 0;   /* what a float cannot tell apart, as Chromium allows */
+            if (err < r && r < step - err) f |= V_STEP;
+        }
+    }
+    return f;
+}
+/* each radio button whose group (one non-empty name in one form) holds a required button and no checked one: marked
+   in rmiss, as each is missing its value (HTML 4.10.5.1.18) */
+static void ax_radio_groups(ACTX) {
+    resize(rmiss, d->node_len, 0);
+    vector<uint32_t> rs, fm;
+    for (uint32_t x = 1; x < d->node_len; x++) {
+        if (!d->node[x].live || ax_kind(AARGS, x) != E_INPUT || ax_input_type(AARGS, x) != IT_RADIO || !ax_connected(d, x)) continue;
+        uint32_t na = ax_get(AARGS, x, K_NAME);
+        if (!na || !d->attr[na].value.len) continue;
+        uint32_t form = 0;
+        for (uint32_t q = d->node[x].parent; q > 1 && !form; q = d->node[q].parent) if (ax_kind(AARGS, q) == E_FORM) form = q;
+        push_back(rs, x);
+        push_back(fm, form);
+    }
+    for (size_t i = 0; i < len(rs); i++) {
+        uint32_t x = at(rs, i);
+        if (!ax_get(AARGS, x, K_REQUIRED) || at(*rmiss, x)) continue;
+        amb_span nm = d->attr[ax_get(AARGS, x, K_NAME)].value;
+        int checked = 0;
+        for (int pass = 0; pass < 2 && !checked; pass++)
+            for (size_t j = 0; j < len(rs); j++) {
+                uint32_t y = at(rs, j);
+                amb_span ym = d->attr[ax_get(AARGS, y, K_NAME)].value;
+                if (at(fm, j) != at(fm, i) || ym.len != nm.len || memcmp(text_ptr(d, ym), text_ptr(d, nm), nm.len) != 0) continue;
+                if (pass == 0 && ax_get(AARGS, y, K_CHECKED)) { checked = 1; break; }
+                if (pass == 1) (*rmiss)[y] = 1;
+            }
+    }
+}
+
 /* a node's states and properties, in the contract's order. sl holds its aria-* attributes; dis is where its disabled
    state came from (-1 none), dis_by the element it came from, off that it is natively disabled; sel how each option
    of a select is chosen */
 static void ax_states(ACTX, const vector<uint8_t> *sel, const uint32_t *sl, uint32_t a, uint32_t x, int k, int ty, a11y_role role,
-                      int dis, uint32_t dis_by, int off) {
+                      int dis, uint32_t dis_by, int off, int vf) {
     ax_found fs[16];
     int nf = 0, v;
     /* checked: an input's attribute; aria-checked, unchecked without it (no mixed radio or switch) */
@@ -1145,7 +1668,7 @@ static void ax_states(ACTX, const vector<uint8_t> *sel, const uint32_t *sl, uint
     if (dis >= 0) AX_FOUND(A11Y_STATE_DISABLED, A11Y_TOKEN_TRUE, dis);
     /* required, readonly: an input's attribute where its type takes it; aria-required, aria-readonly but on an editing
        host, whose content is edited whatever it says (as Chromium has it) */
-    int texty = k == E_INPUT && (ax_text_input(ty) || ty == IT_NUMBER || ty == IT_OTHER);
+    int texty = k == E_INPUT && (ax_text_input(ty) || ty == IT_NUMBER || ty >= IT_DATE);
     if ((texty || (k == E_INPUT && (ty == IT_CHECKBOX || ty == IT_RADIO)) || k == E_SELECT || k == E_TEXTAREA) && ax_get(AARGS, x, K_REQUIRED))
         AX_FOUND(A11Y_STATE_REQUIRED, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_HTML);
     else if (AX_TRUE(AS(A_REQUIRED))) AX_FOUND(A11Y_STATE_REQUIRED, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_ARIA);
@@ -1153,10 +1676,15 @@ static void ax_states(ACTX, const vector<uint8_t> *sel, const uint32_t *sl, uint
     int editing = ce && ax_tok(d, ce, "false") != 0;
     if ((texty || k == E_TEXTAREA) && ax_get(AARGS, x, K_READONLY)) AX_FOUND(A11Y_STATE_READONLY, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_HTML);
     else if (!editing && AX_TRUE(AS(A_READONLY))) AX_FOUND(A11Y_STATE_READONLY, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_ARIA);
-    /* invalid and current: any value but false is true (WAI-ARIA 1.2) */
+    /* invalid and current: any value but false is true (WAI-ARIA 1.2). Without aria-invalid, invalid is HTML's
+       constraint validation's (vf): a value of the wrong type, off its pattern, outside its range or off its step, or
+       a control missing its value -- but a text field, whose missing value Chromium leaves untold */
     v = ax_tok(d, AS(A_INVALID), "true false grammar spelling");
+    int text_field = (k == E_INPUT && (ax_text_input(ty) || ty == IT_NUMBER)) || k == E_TEXTAREA;
     if (v == 0 || v == -1) AX_FOUND(A11Y_STATE_INVALID, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_ARIA);
     else if (v >= 2) AX_FOUND(A11Y_STATE_INVALID, v == 2 ? A11Y_TOKEN_GRAMMAR : A11Y_TOKEN_SPELLING, A11Y_STATE_FROM_ARIA);
+    else if (v == -2 && ((vf & ~V_MISSING) || ((vf & V_MISSING) && !text_field)))
+        AX_FOUND(A11Y_STATE_INVALID, A11Y_TOKEN_TRUE, A11Y_STATE_FROM_HTML);
     v = ax_tok(d, AS(A_CURRENT), "true false page step location date time");
     if (v == -1) v = 0;
     if (v >= 0 && v != 1) AX_FOUND(A11Y_STATE_CURRENT, ax_current_tokens[v], A11Y_STATE_FROM_ARIA);
@@ -1234,14 +1762,11 @@ static void ax_values(ACTX, const uint32_t *sl, vector<char> *scratch, uint32_t 
     /* a field's value; a select's chosen option; an ARIA textbox's or combobox's content */
     clear(*scratch);
     if (k == E_INPUT && (role == A11Y_ROLE_TEXTBOX || role == A11Y_ROLE_SEARCHBOX || role == A11Y_ROLE_COMBOBOX)) {
-        uint32_t va = ax_get(AARGS, x, K_VALUE);
-        if (va && d->attr[va].value.len) {
-            amb_span s = d->attr[va].value;
-            if (ty == IT_PASSWORD) {
-                const char *p = text_ptr(d, s);
-                for (uint32_t i = 0; i < s.len; i++) if (((unsigned char)p[i] & 0xC0) != 0x80) append_range(scratch, "\xe2\x80\xa2", 3);
-            } else append_range(scratch, text_ptr(d, s), s.len);
-        }
+        vector<char> v;
+        ax_input_value(AARGS, x, ty, &v);
+        if (ty == IT_PASSWORD) {
+            for (size_t i = 0; i < len(v); i++) if (((unsigned char)at(v, i) & 0xC0) != 0x80) append_range(scratch, "\xe2\x80\xa2", 3);
+        } else append_range(scratch, data(v), len(v));
     } else if (k == E_TEXTAREA) {
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling)
             if (d->node[c].kind == DOM_NODE_KIND_TEXT) append_range(scratch, text_ptr(d, d->node[c].data), d->node[c].data.len);
@@ -1362,6 +1887,7 @@ typedef struct ax_frame {
     uint32_t lists, items;    /* the lists its children are inside, and the groups of a tree (a tree item's level) */
     uint32_t in_tree;         /* its children are inside a tree */
     uint32_t form;            /* the form its children are inside */
+    uint32_t oa, op;          /* its aria-owns attribute, and the place in it of the next id whose element it owns */
 } ax_frame;
 /* a radio button with a name, for its group: its node, its form, its name attribute */
 typedef struct ax_radio { uint32_t node, form, name; } ax_radio;
@@ -1385,6 +1911,8 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     g->x = c;
     g->next = d->node[c].first_child;
     g->fs_legend = 0;
+    g->oa = d->node[c].first_attr ? ax_get(AARGS, c, A_OWNS) : 0;
+    g->op = 0;
     if (c == f->fs_legend) { g->fs = f->fs_up; g->fs_up = 0; }
     int has_attrs = d->node[c].first_attr != 0;
     int ty = k == E_INPUT ? ax_input_type(AARGS, c) : -1;
@@ -1411,6 +1939,9 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     int tab = ax_tabbable(AARGS, c, k);
     /* role=none on an element that takes focus or has a global aria-* attribute: its own role is kept */
     if (stated && role == A11Y_ROLE_PRESENTATION && (tab || glob)) { role = ax_implicit(AARGS, c, k); stated = 0; }
+    /* a list's item, a table's row or cell, whose list or table says presentation, is presentation too, unless it
+       takes focus (a global aria-* attribute does not keep it, as Chromium has it) */
+    else if (!stated && !tab && ax_presented_away(AARGS, c, k)) role = A11Y_ROLE_PRESENTATION;
     if (aria) ax_refs(AARGS, sl, c, k);
     else if (k == E_LABEL && has_attrs) ax_refs(AARGS, 0, c, k);
     /* disabled: its own disabled attribute; a disabled fieldset's, optgroup's or select's; aria-disabled, its own or a
@@ -1446,11 +1977,14 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
             if (!pick && at(chosen, i)) pick = at(opts, i);
         }
     }
-    /* no node: a generic or presentational element, unless a generic one takes focus or has a global state */
+    /* no node: a generic or presentational element, unless a generic one takes focus or has a global state; an
+       element drawn as nothing (visibility hidden or collapse), whose children are walked, as one may be drawn */
     int node = role != A11Y_ROLE_GENERIC && role != A11Y_ROLE_PRESENTATION;
     if (role == A11Y_ROLE_GENERIC && (focusable || (glob & 2))) node = 1;
+    int invisible = ax_invisible(AARGS, c);
+    if (invisible) node = 0;
     if (!node) {
-        if (aria) {
+        if (aria && !invisible) {
             a11y_aplain_h ph = aplain_new(t);
             t->aplain[ph.index].node = node_handle(d, c);
             t->aplain[ph.index].role = role;
@@ -1479,19 +2013,30 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     }
     /* states, values and a live region come from aria-* attributes, form controls, the roles of widgets and live
        regions, and a disabled ancestor: a node with none of those (a paragraph, a list item, a cell ...) has none */
-    int live = 0;
+    int live = 0, vf = 0;
+    if (k == E_INPUT || k == E_SELECT || k == E_TEXTAREA) {
+        vector<char> v;
+        if (k == E_INPUT) ax_input_value(AARGS, c, ty, &v);
+        vf = ax_validity(AARGS, c, k, ty, native_dis, &v);
+    }
     if (sl || dis >= 0 || ax_form_control(k) || k == E_OPTION || k == E_OPTGROUP || k == E_SUMMARY || k == E_PROGRESS ||
         k == E_METER || k == E_OUTPUT || ax_stateful(role)) {
-        ax_states(AARGS, sel, sl, a, c, k, ty, role, dis, by, native_dis);
+        ax_states(AARGS, sel, sl, a, c, k, ty, role, dis, by, native_dis, vf);
         ax_values(AARGS, sl, desc, pick, a, c, k, ty, role, focusable);
         live = ax_live(AARGS, sl, a, role);
     }
+    for (int b = 0; b < V_COUNT; b++)
+        if (vf & (1 << b)) {
+            a11y_avalid_h vh = avalid_new(t);
+            t->avalid[vh.index].node = a;
+            t->avalid[vh.index].flag = ax_validity_flags[b];
+        }
     /* its level */
     long lv = 0;
     int given = ax_int(d, AS(A_LEVEL), &lv) && lv >= 1;
     if (role == A11Y_ROLE_HEADING) {
         if (!given) lv = k >= E_H1 && k <= E_H6 ? k - E_H1 + 1 : 2;
-    } else if (role == A11Y_ROLE_LISTITEM) { if (!given) lv = f->lists; }
+    } else if (role == A11Y_ROLE_LISTITEM) { if (!given) lv = f->lists > 1 ? f->lists : 1; }   /* 1 in no list, as Chromium has it */
     else if (role == A11Y_ROLE_TREEITEM) { if (!given) lv = f->items + 1; }
     else if (role != A11Y_ROLE_ROW || !given) lv = 0;
     t->anode[a].level = (uint32_t)(lv > 0 && lv < 100000 ? lv : 0);
@@ -1508,7 +2053,68 @@ static int ax_visit(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     return 1;
 }
 
-/* the walk, in document order: a loop over a stack of frames, so a tree of any depth is walked */
+/* the next element the frame's element owns by aria-owns, from the id at f->op on: met now, so marked; 0 when none
+   is left */
+static uint32_t ax_next_owned(ACTX, ax_frame *f) {
+    if (!f->oa) return 0;
+    amb_span v = d->attr[f->oa].value;
+    const char *p = text_ptr(d, v);
+    size_t i = f->op;
+    while (i < v.len) {
+        while (i < v.len && ax_white(p[i])) i++;
+        size_t b = i;
+        while (i < v.len && !ax_white(p[i])) i++;
+        if (i == b) break;
+        uint32_t y = ax_by_id(AARGS, p + b, i - b);
+        if (y && y < len(*owner) && at(*owner, y) == f->x) {
+            (*owner)[y] |= AX_MET;
+            f->op = (uint32_t)i;
+            return y;
+        }
+    }
+    f->op = (uint32_t)v.len;
+    f->oa = 0;
+    return 0;
+}
+
+/* an element and every element above it are walked: none is hidden, nor never drawn */
+static int ax_walked(ACTX, uint32_t x) {
+    for (uint32_t p = x; p > 1; p = d->node[p].parent)
+        if (d->node[p].kind == DOM_NODE_KIND_ELEMENT && (ax_undrawn(AARGS, p, ax_kind(AARGS, p)) || ax_hidden_how(AARGS, p) >= 0)) return 0;
+    return 1;
+}
+/* who owns what by aria-owns (WAI-ARIA 1.2): in tree order, each id an element's aria-owns lists names an element it
+   takes as a child of its own, after its children, when that element is not taken already, is neither the owner nor
+   above it (the tree as it stands, each owned element under its owner), and both are walked */
+static void ax_owners(ACTX) {
+    resize(owner, d->node_len, 0);
+    uint32_t x = d->node_len > 1 ? d->node[1].first_child : 0;
+    while (x) {
+        uint32_t oa = d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].first_attr ? ax_get(AARGS, x, A_OWNS) : 0;
+        if (oa && ax_walked(AARGS, x)) {
+            amb_span v = d->attr[oa].value;
+            const char *p = text_ptr(d, v);
+            size_t i = 0;
+            while (i < v.len) {
+                while (i < v.len && ax_white(p[i])) i++;
+                size_t b = i;
+                while (i < v.len && !ax_white(p[i])) i++;
+                if (i == b) break;
+                uint32_t y = ax_by_id(AARGS, p + b, i - b);
+                if (!y || y == x || at(*owner, y) || !ax_walked(AARGS, y)) continue;
+                int above = 0;
+                for (uint32_t q = x; q > 1 && !above; q = at(*owner, q) ? at(*owner, q) : d->node[q].parent) if (q == y) above = 1;
+                if (!above) (*owner)[y] = x;
+            }
+        }
+        if (d->node[x].first_child) { x = d->node[x].first_child; continue; }
+        while (x && !d->node[x].next_sibling) x = d->node[x].parent;
+        if (x) x = d->node[x].next_sibling;
+    }
+}
+
+/* the walk, in the tree's order: each element's children, then what it owns by aria-owns; an owned element is met
+   under its owner, not where it is. A loop over a stack of frames, so a tree of any depth is walked */
 static void ax_walk(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector<char> *name, vector<char> *desc, uint32_t root) {
     vector<ax_frame> stack;
     ax_frame f0;
@@ -1518,11 +2124,19 @@ static void ax_walk(ACTX, vector<uint8_t> *sel, vector<ax_radio> *radios, vector
     push_back(stack, f0);
     while (len(stack)) {
         size_t top = len(stack) - 1;
+        uint32_t c = at(stack, top).next;
+        if (c) {
+            stack[top].next = d->node[c].next_sibling;
+            if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
+            if (c < len(*owner) && at(*owner, c)) continue;
+        } else {
+            ax_frame fo = at(stack, top);
+            c = ax_next_owned(AARGS, &fo);
+            stack[top].oa = fo.oa;
+            stack[top].op = fo.op;
+            if (!c) { pop_back(stack); continue; }
+        }
         ax_frame f = at(stack, top);
-        uint32_t c = f.next;
-        if (!c) { pop_back(stack); continue; }
-        stack[top].next = d->node[c].next_sibling;
-        if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
         ax_frame g;
         memset(&g, 0, sizeof g);
         if (ax_visit(AARGS, sel, radios, name, desc, &f, c, &g)) push_back(stack, g);
@@ -1637,16 +2251,28 @@ a11y_status a11y_build(a11y_tree *t, dom_document *d, css_style *st) {
     cw[W_NONE] = names_find(st, "none", 4);
     cw[W_INLINE] = names_find(st, "inline", 6);
     cw[W_CONTENTS] = names_find(st, "contents", 8);
+    cw[W_HIDDEN] = names_find(st, "hidden", 6);
+    cw[W_COLLAPSE] = names_find(st, "collapse", 8);
     vector<uint32_t> ids, labels;
     vector<uint8_t> sel;
     vector<ax_radio> radios;
     vector<char> name, desc;          /* the walk's text, one node at a time */
+    /* each element's first pseudo-element style; who owns what; the radio groups missing a checked button */
+    vector<uint32_t> gen, owner;
+    vector<uint8_t> rmiss;
+    resize(gen, d->node_len, 0);
+    for (uint32_t i = st->pstyle_len; i > 1; i--) {
+        uint32_t x = st->pstyle[i - 1].node.index;
+        if (x < d->node_len) gen[x] = i - 1;
+    }
+    ax_owners(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &gen, &owner, &rmiss);
+    ax_radio_groups(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &gen, &owner, &rmiss);
     /* the root element's children: html itself is no node */
     uint32_t root = 0;
     for (uint32_t c = d->node_len > 1 ? d->node[1].first_child : 0; c; c = d->node[c].next_sibling)
         if (d->node[c].kind == DOM_NODE_KIND_ELEMENT) root = c;
-    if (root) ax_walk(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &sel, &radios, &name, &desc, root);
-    ax_positions(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &radios);
+    if (root) ax_walk(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &gen, &owner, &rmiss, &sel, &radios, &name, &desc, root);
+    ax_positions(t, d, st, &sx, &ek, &ak, aid, cw, &ids, &labels, &gen, &owner, &rmiss, &radios);
     t->revision++;
     return A11Y_OK;
 }

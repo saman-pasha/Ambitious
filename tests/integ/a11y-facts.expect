@@ -88,10 +88,10 @@ Id = 'tip-link', A = ax(1,8,0), Why = title('Back to the top of the page')
 Id = logo, A = ax(1,10,0), Why = title('Ambitious, a browser')
 Id = go, A = ax(1,11,0), Why = title('Starts the search')
 Id = 'named-table', A = ax(1,12,0), Why = caption('Last week\'s scores')
-Id = 'titled-table', A = ax(1,15,0), Why = title('Kept for the record')
-Id = 'self-desc', A = ax(1,18,0), Why = described_by(['self-desc'],'Describes itself')
-Id = 'first-control', A = ax(1,86,0), Why = described_by(['hint-shown'],'Shown text')
-Id = where, A = ax(1,96,0), Why = title('Where to send it')
+Id = 'titled-table', A = ax(1,16,0), Why = title('Kept for the record')
+Id = 'self-desc', A = ax(1,20,0), Why = described_by(['self-desc'],'Describes itself')
+Id = 'first-control', A = ax(1,88,0), Why = described_by(['hint-shown'],'Shown text')
+Id = where, A = ax(1,98,0), Why = title('Where to send it')
 -- the live region each node is inside:
 Id = 'feed-text', A = ax(1,5,0), P = polite, R = ax(1,4,0), In = feed
 Id = 'feed-status', A = ax(1,6,0), P = polite, R = ax(1,4,0), In = feed

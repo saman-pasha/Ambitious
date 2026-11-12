@@ -168,6 +168,13 @@ static const char css_ua_sheet[] =
     "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
     "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace }\n"
     "details, summary { display: block }\n"
+    /* a closed details element shows its first summary alone (HTML 15.5.17; its text
+       directly inside is layout's to pass over); a dialog without open is not drawn, and
+       an open one is Chromium's box: absolutely positioned, centred, its own border and
+       canvas (HTML 15.3.3) */
+    "details:not([open]) > :not(summary:first-of-type) { display: none }\n"
+    "dialog:not([open]) { display: none }\n"
+    "dialog { position: absolute; left: 0; right: 0; width: fit-content; height: fit-content; margin: auto; border: solid; padding: 1em; background-color: Canvas; color: CanvasText }\n"
     "button, input, select, textarea { display: inline-block }\n"
     "button { padding: 1px 6px; border: 2px solid light-dark(#767676, #858585); color: ButtonText; background-color: ButtonFace }\n"
     "input, textarea, select { padding: 1px 2px; border: 2px solid light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
@@ -1454,17 +1461,24 @@ static int css_is_anim_list(css_prop p, const char *s, size_t n) {
 }
 
 /* content: strings, attr(), counter(), counters(), the quotes' keywords, url() */
+/* content's list (Content 3, 2): strings, attr(), counters, images, quotes; then, after a
+   solidus, its alternative text for a reader: strings, attr(), counters */
 static int css_is_content(const char *s, size_t n) {
     size_t i = 0, st, ln;
-    int any = 0;
+    int any = 0, alt = -1;
     while (css_next_part(s, n, &i, &st, &ln)) {
         const char *p = s + st;
+        if (ln == 1 && p[0] == '/') { if (alt >= 0 || !any) return 0; alt = 0; continue; }
+        if (alt >= 0) {
+            if (css_is_string(p, ln) || css_is_fn(p, ln, "attr") || css_is_fn(p, ln, "counter") || css_is_fn(p, ln, "counters")) { alt = 1; continue; }
+            return 0;
+        }
         if (css_is_string(p, ln) || css_is_fn(p, ln, "attr") || css_is_fn(p, ln, "counter") || css_is_fn(p, ln, "counters") ||
             css_is_fn(p, ln, "url") || css_eq_ci(p, ln, "open-quote") || css_eq_ci(p, ln, "close-quote") ||
             css_eq_ci(p, ln, "no-open-quote") || css_eq_ci(p, ln, "no-close-quote")) { any = 1; continue; }
         return 0;
     }
-    return any;
+    return any && alt != 0;
 }
 
 /* a grid line: auto, an integer, span and an integer or a name, a name */

@@ -1,5 +1,5 @@
 == file://ROOT/tests/pages/a11y.html
-123 nodes, 0 parse errors; 3 resources; 172 rules, 384 declarations; 47 boxes, 28 lines
+123 nodes, 0 parse errors; 3 resources; 175 rules, 413 declarations; 47 boxes, 28 lines
 == resources
   document   ok                 file://ROOT/tests/pages/a11y.html
   image      ok                 file://ROOT/tests/pages/logo.png
@@ -34,6 +34,7 @@
       paragraph#dup
       paragraph#dup
       table "Modules and their sizes" (caption)
+        caption
         row
           columnheader "Module" (content)
           columnheader "Lines" (content)
@@ -73,7 +74,7 @@ A = ax(1,19,0), R = button, Why = aria_label('Close')
 A = ax(1,20,0), R = button, Why = 'nothing names it'
 A = ax(1,21,0), R = button, Why = value('Submit')
 A = ax(1,24,0), R = button, Why = its_content('A button inside a link')
-A = ax(1,37,0), R = radio, Why = label(n(1,106,0),'Fast')
+A = ax(1,38,0), R = radio, Why = label(n(1,106,0),'Fast')
 -- the outline:
 A = ax(1,9,0), Level = 1, Name = 'Accessibility, explained'
 A = ax(1,22,0), Level = 3, Name = 'A heading that skips a level'

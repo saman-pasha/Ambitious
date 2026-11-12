@@ -1,0 +1,37 @@
+heading#title "More of the tree" level=1
+button#v-shown "Shown again"
+button#v-visible "Visible button"
+group#d-closed
+button#d-closed-summary "Closed summary" expanded=false
+group#d-open
+button#d-open-summary "Open summary" expanded=true
+button#d-open-content "In open details"
+dialog#dlg-open
+button#dlg-open-btn "In an open dialog"
+button#g-before "★ Save"
+link#g-after "Documentation (opens in a new tab)"
+button#g-alt "Mail: Inbox"
+form#f
+textbox#c-required "Required empty" required=true
+textbox#c-required-filled "Required filled" required=true value="x"
+textbox#c-email "Email" invalid=true value="not an email"
+textbox#c-pattern "Digits" invalid=true value="abc"
+spinbutton#c-min "At least five" invalid=true valuenow=2 valuemin=5
+textbox#c-max "Long" value="abcdef"
+textbox#c-aria "Says invalid" invalid=true value="ok"
+textbox#c-novalidate "No validate" required=true
+form#nv
+button#p-button "Button text icon"
+img#p-button-img "icon"
+img#p-img "A picture"
+tab#p-tab "Tab"
+progressbar#p-progress valuenow=40 valuemin=0 valuemax=100
+list#ip-focus
+listitem#ip-role level=1
+link#ip-link "Link in a cell"
+list#o-list
+listitem#o-near level=1
+listitem#o-far level=1
+group#o-group "Owner"
+button#o-b "B"
+button#o-a "A"

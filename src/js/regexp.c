@@ -2955,3 +2955,24 @@ void js_re_init(js_vm *vm, uint32_t first) {
     static const uint32_t sids[] = { JRE_MATCH, JRE_MATCHALL, JRE_REPLACE, JRE_SEARCH, JRE_SPLIT };
     for (uint32_t i = 0; i < 5; i++) js_define(vm, rp, JS_SYM_KEY | syms[i], jv_obj(js_native_new(vm, first + sids[i], A_EMPTY, i == 2 || i == 4 ? 2 : 1)), JS_SHAPE_HIDDEN);
 }
+
+/* HTML's pattern attribute (4.10.5.3.6): whether the value v[0..vn) matches the pattern
+   p[0..pn), compiled as ^(?:p)$ with the v flag: 1 it does, 0 it does not, -1 the pattern
+   is no regular expression (it then constrains nothing). Both are UTF-8. The machine the
+   pattern is compiled in is made when first asked and kept: a page's patterns are few,
+   and one compiled once is found again */
+static js_vm re_pattern_vm;
+static int re_pattern_ready;
+int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn) {
+    js_vm *vm = &re_pattern_vm;
+    if (!re_pattern_ready) { js_init(vm); re_pattern_ready = 1; }
+    vector<char> src;
+    append_range(src, "^(?:", 4);
+    append_range(src, p, pn);
+    append_range(src, ")$", 2);
+    uint32_t why = 0;
+    uint32_t re = re_compile(vm, js_str_utf8(vm, data(src), len(src)), RF_V, &why);
+    if (!re) return -1;
+    int r = js_re_exec(vm, re, js_str_utf8(vm, v, vn), 0);
+    return r != 0;   /* the step budget spent (-1) counts as a match: no constraint is proved broken */
+}

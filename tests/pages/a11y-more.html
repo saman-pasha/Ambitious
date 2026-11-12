@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Hidden, generated, validated, presentational and owned</title>
+<style>
+.hide { visibility: hidden; }
+.collapse { visibility: collapse; }
+.show { visibility: visible; }
+.star::before { content: "\2605  "; }
+.after::after { content: " (opens in a new tab)"; }
+.icon::before { content: url(missing.png) "Profile"; }
+.alt::before { content: "\1F4E7" / "Mail: "; }
+</style></head>
+<body>
+<h1 id="title">More of the tree</h1>
+<!-- visibility from the cascade -->
+<button id="v-hidden" class="hide">Hidden button</button>
+<button id="v-collapse" class="collapse">Collapsed button</button>
+<div class="hide"><button id="v-inner">Inside hidden</button><button id="v-shown" class="show">Shown again</button></div>
+<button id="v-visible">Visible button</button>
+<!-- a closed details' content, an open one's, a dialog without open and one with it -->
+<details id="d-closed"><summary id="d-closed-summary">Closed summary</summary><p><button id="d-closed-content">In closed details</button></p></details>
+<details id="d-open" open><summary id="d-open-summary">Open summary</summary><p><button id="d-open-content">In open details</button></p></details>
+<dialog id="dlg-closed"><button id="dlg-closed-btn">In a closed dialog</button></dialog>
+<dialog id="dlg-open" open><button id="dlg-open-btn">In an open dialog</button></dialog>
+<!-- CSS generated content in names -->
+<button id="g-before" class="star">Save</button>
+<a id="g-after" class="after" href="/docs">Documentation</a>
+<button id="g-alt" class="alt">Inbox</button>
+<!-- constraint validation -->
+<form id="f">
+<input id="c-required" required aria-label="Required empty">
+<input id="c-required-filled" required value="x" aria-label="Required filled">
+<input id="c-email" type="email" value="not an email" aria-label="Email">
+<input id="c-pattern" pattern="[0-9]+" value="abc" aria-label="Digits">
+<input id="c-min" type="number" min="5" value="2" aria-label="At least five">
+<input id="c-max" maxlength="3" value="abcdef" aria-label="Long">
+<input id="c-aria" aria-invalid="true" value="ok" aria-label="Says invalid">
+<input id="c-novalidate" form="nv" required aria-label="No validate">
+</form>
+<form id="nv" novalidate></form>
+<!-- presentational children -->
+<button id="p-button"><span id="p-button-span">Button text</span><img id="p-button-img" src="missing.png" alt="icon"></button>
+<div id="p-img" role="img" aria-label="A picture"><span id="p-img-span">inside an img</span></div>
+<div id="p-tab" role="tab"><b id="p-tab-b">Tab</b></div>
+<div id="p-progress" role="progressbar" aria-valuenow="40"><span id="p-progress-span">40%</span></div>
+<!-- inherited presentation: a list's items, a table's rows and cells -->
+<ul role="presentation" id="ip-list"><li id="ip-item">Item of a presentational list</li></ul>
+<ul role="none" id="ip-focus" tabindex="0"><li id="ip-focus-item">Item of a focusable one</li></ul>
+<ul role="presentation" id="ip-kept"><li id="ip-labelled" aria-label="Labelled item">Kept</li><li id="ip-role" role="listitem">Its own role</li></ul>
+<table role="presentation" id="ip-table"><tr id="ip-row"><th id="ip-th">Head</th><td id="ip-td">Cell</td></tr><tr id="ip-row2"><td id="ip-td2"><a href="#x" id="ip-link">Link in a cell</a></td></tr></table>
+<!-- aria-owns -->
+<ul id="o-list" aria-owns="o-far"><li id="o-near">Near</li></ul>
+<div><div id="o-far" role="listitem">Far, owned by the list</div></div>
+<div id="o-group" role="group" aria-label="Owner" aria-owns="o-b o-a"></div>
+<button id="o-a">A</button><button id="o-b">B</button>
+</body></html>

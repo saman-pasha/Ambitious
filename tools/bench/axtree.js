@@ -18,7 +18,8 @@
 //     something; invalid's grammar and spelling are true, as Chromium has them; haspopup false
 //     and autocomplete none are no state;
 //   - a range's value, least and greatest values; a spinbutton's least and greatest values of
-//     0 and 0 are Chromium's way of saying it has none;
+//     0 and 0 are Chromium's way of saying it has none, and so is a number input's bound that
+//     its min or max attribute does not give (Chromium's float of an infinite bound, written 0);
 //   - the placeholder from the name's sources, where Chromium gives it;
 //   - live, atomic and relevant of a live region that is not off;
 //   - a generic node with nothing more to say is no line, as Ambitious has no node for it.
@@ -32,7 +33,10 @@ const ROLES = { image: 'img', DisclosureTriangle: 'button', RootWebArea: 'docume
 const text = (s) => String(s).replace(/\s+/g, ' ').trim();
 const num = (v) => String(Number(Number(v).toPrecision(6)));
 
-function line(n, id) {
+// a valid floating-point number (HTML 2.3.4.3), as a number input's min and max are read
+const VALID = /^-?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?$/;
+
+function line(n, id, el) {
   const role = ROLES[n.role.value] || n.role.value;
   const p = {};
   for (const q of n.properties || []) p[q.name] = q.value.value;
@@ -60,9 +64,11 @@ function line(n, id) {
   if (ph) parts.push(` placeholder="${text(ph.value.value)}"`);
   if (RANGE.has(role)) {
     if (value !== undefined) parts.push(` valuenow=${num(value)}`);
-    const none = role === 'spinbutton' && Number(p.valuemin) === 0 && Number(p.valuemax) === 0;
-    if (p.valuemin !== undefined && !none) parts.push(` valuemin=${num(p.valuemin)}`);
-    if (p.valuemax !== undefined && !none) parts.push(` valuemax=${num(p.valuemax)}`);
+    const native = el && el.tag === 'input' && (el.at.type || '').trim().toLowerCase() === 'number';
+    const none = !native && role === 'spinbutton' && Number(p.valuemin) === 0 && Number(p.valuemax) === 0;
+    const bound = (a) => !native || (el.at[a] !== undefined && VALID.test(el.at[a]));
+    if (p.valuemin !== undefined && !none && bound('min')) parts.push(` valuemin=${num(p.valuemin)}`);
+    if (p.valuemax !== undefined && !none && bound('max')) parts.push(` valuemax=${num(p.valuemax)}`);
   }
   if (p.live !== undefined && p.live !== 'off')
     parts.push(` live=${p.live} atomic=${p.atomic === true} relevant="${p.relevant || 'additions text'}"`);
@@ -75,11 +81,15 @@ function line(n, id) {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await page.goto('file://' + path.resolve(process.argv[2]), { waitUntil: 'load' });
   const cdp = await page.context().newCDPSession(page);
-  // each element's id, by its backend node id
+  // each element's id, and its name and attributes, by its backend node id
   const ids = new Map();
+  const els = new Map();
   const walk = (d) => {
     const a = d.attributes || [];
-    for (let i = 0; i < a.length; i += 2) if (a[i] === 'id') ids.set(d.backendNodeId, a[i + 1]);
+    const at = {};
+    for (let i = 0; i < a.length; i += 2) at[a[i]] = a[i + 1];
+    if (at.id !== undefined) ids.set(d.backendNodeId, at.id);
+    els.set(d.backendNodeId, { tag: String(d.nodeName || '').toLowerCase(), at });
     for (const c of d.children || []) walk(c);
   };
   walk((await cdp.send('DOM.getDocument', { depth: -1 })).root);
@@ -88,7 +98,7 @@ function line(n, id) {
   const out = [];
   const visit = (n) => {
     if (!n.ignored && n.backendDOMNodeId && ids.has(n.backendDOMNodeId)) {
-      const l = line(n, ids.get(n.backendDOMNodeId));
+      const l = line(n, ids.get(n.backendDOMNodeId), els.get(n.backendDOMNodeId));
       if (l) out.push(l);
     }
     for (const c of n.childIds || []) if (byId.has(c)) visit(byId.get(c));

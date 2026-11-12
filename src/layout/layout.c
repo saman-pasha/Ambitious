@@ -651,6 +651,12 @@ static int lay_replaced(const dom_document *d, uint32_t x) {
            lay_is_named(d, x, "canvas") || lay_is_named(d, x, "embed") || lay_is_named(d, x, "object") ||
            lay_is_svg(d, x);
 }
+static uint32_t lay_attr(const dom_document *d, uint32_t x, const char *name);
+/* x a details element without open: its text directly inside is not drawn, as its other
+   content is not (the cascade's user agent rule hides its elements but its first summary) */
+static int lay_closed_details(const dom_document *d, uint32_t x) {
+    return !(x & LAY_GEN) && lay_is_named(d, x, "details") && !lay_attr(d, x, "open");
+}
 static uint32_t lay_attr(const dom_document *d, uint32_t x, const char *name) {
     if (x & LAY_GEN) return 0;
     uint32_t a = names_find(d, name, strlen(name));
@@ -762,9 +768,10 @@ static void lay_collect(LCTX, uint32_t parent, vector<lay_seg> *segs, vector<uin
         int64_t g = lay_gen_find(gx, parent, 1);
         if (g >= 0) lay_collect_el(LARGS, LAY_GEN | (uint32_t)g, segs, items);
     }
+    int closed = lay_closed_details(d, parent);
     for (uint32_t c = d->node[parent].first_child; c; c = d->node[c].next_sibling) {
         int kind = d->node[c].kind;
-        if (kind == DOM_NODE_KIND_TEXT) { lay_item(segs, items, c); continue; }
+        if (kind == DOM_NODE_KIND_TEXT) { if (!closed) lay_item(segs, items, c); continue; }
         if (kind != DOM_NODE_KIND_ELEMENT) continue;
         lay_collect_el(LARGS, c, segs, items);
     }
@@ -1255,7 +1262,9 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
             int64_t g = lay_gen_find(gx, node, 1);
             if (g >= 0) lay_node_pieces(LARGS, LAY_GEN | (uint32_t)g, inner, cw, ps, sp, &in);
         }
-        for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling) lay_node_pieces(LARGS, c, inner, cw, ps, sp, &in);
+        int closed = lay_closed_details(d, node);
+        for (uint32_t c = d->node[node].first_child; c; c = d->node[c].next_sibling)
+            if (!closed || d->node[c].kind != DOM_NODE_KIND_TEXT) lay_node_pieces(LARGS, c, inner, cw, ps, sp, &in);
         if (fl0 & LAY_HAS_AFTER) {
             int64_t g = lay_gen_find(gx, node, 2);
             if (g >= 0) lay_node_pieces(LARGS, LAY_GEN | (uint32_t)g, inner, cw, ps, sp, &in);
@@ -4142,6 +4151,7 @@ static void lay_content(const dom_document *d, const css_style *st, uint32_t el,
     size_t i = 0, a, n, fa, fn;
     while (css_next_part(data(src), len(src), &i, &a, &n)) {
         const char *p = data(src) + a;
+        if (n == 1 && p[0] == '/') break;   /* the alternative text for a reader is not drawn */
         if (p[0] == '"' || p[0] == '\'') { lay_unquote(p, n, out); continue; }
         if (lay_is_word(p, n, "open-quote")) { lay_quote(st, qc, *depth, 0, out); (*depth)++; continue; }
         if (lay_is_word(p, n, "close-quote")) { if (*depth > 0) { (*depth)--; lay_quote(st, qc, *depth, 1, out); } continue; }
@@ -5619,9 +5629,10 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         double ml = s.m[3].unit == LAY_AUTO ? 0 : lay_res(st, s.m[3], cbw), mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cbw);
         double eh = s.b[1] + s.b[3] + lay_res(st, s.p[1], cbw) + lay_res(st, s.p[3], cbw);
         double fw = -1;
-        int wdecl = s.width.unit != LAY_AUTO && !lay_content_sized(s.width);
+        int wdecl = s.width.unit != LAY_AUTO && !lay_content_sized(s.width), csized = lay_content_sized(s.width);
         if (wdecl) fw = lay_res(st, s.width, cbw) + (s.border_box ? 0 : eh);
-        else if (!la && !ra) { fw = cbw - L - R - ml - mr; if (fw < 0) fw = 0; }   /* both offsets: what they leave, none when it is less */
+        else if (!la && !ra && !csized) { fw = cbw - L - R - ml - mr; if (fw < 0) fw = 0; }   /* both offsets: what they leave, none when it is less */
+        /* a fit-content (min-, max-content) width shrinks to its content within what the offsets leave */
         if (la && ra) { L = sx0 - px0; la = 0; }
         lay_bk bk;
         bk.ox = 0;
@@ -5644,8 +5655,8 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         t->box[bx].avail = cbw;
         double bw = t->box[bx].w + eh;
         if (la) L = cbw - R - ml - mr - bw;
-        if (!ra && wdecl && s.m[3].unit == LAY_AUTO && s.m[1].unit == LAY_AUTO) {
-            /* auto margins with both offsets and the width: the box in the middle */
+        if (!ra && (wdecl || csized) && s.m[3].unit == LAY_AUTO && s.m[1].unit == LAY_AUTO) {
+            /* auto margins with both offsets and the width (a declared one, a content-sized one): the box in the middle */
             double rest = cbw - L - R - bw;
             if (rest > 0) { ml = rest / 2; mr = rest / 2; }
         }

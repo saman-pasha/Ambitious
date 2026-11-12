@@ -507,6 +507,9 @@ jv js_re_object(js_vm *vm, uint32_t re);
 int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start);
 jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_re_init(js_vm *vm, uint32_t first);
+/* HTML's pattern attribute: whether a value matches a pattern, compiled as ^(?:pattern)$ with
+   the v flag in a machine of its own: 1 it does, 0 it does not, -1 no regular expression */
+int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
 /* proxies (src/js/proxy.c): a proxy's internal methods, each its handler's trap or its
    target's own; Proxy's, Reflect's and the weak collections' natives, after the first's id */
 jv js_proxy_get(js_vm *vm, uint32_t p, uint32_t key, jv receiver);
