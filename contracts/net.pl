@@ -1,7 +1,8 @@
 %% contracts/net.pl -- the network module's contract (docs/contract.md is the format).
 %%
-%% URLs parsed and resolved (a WHATWG subset: IPv6 and IPv4 hosts, IDNA's
-%% lowercasing and Punycode), resources fetched over file:, data:, http: and https:
+%% URLs parsed, resolved and serialized as the URL standard has them (src/net/url.c:
+%% its state machine, its percent-encode sets, IPv4 and IPv6 hosts, opaque hosts and
+%% paths; of IDNA, lowercasing and Punycode), resources fetched over file:, data:, http: and https:
 %% (HTTP/1.1: Content-Length, chunked, redirects within a bound, gzip and deflate;
 %% TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
 %% name verified; a proxy from the environment), and what a page loads -- its

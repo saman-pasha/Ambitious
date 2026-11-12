@@ -36,7 +36,7 @@ ok   'g;x=1/./y' -> http://a/b/c/g;x=1/y
 ok   'g;x=1/../y' -> http://a/b/c/y
 ok   '  HTTP://Example.COM:80/x\y ' -> http://example.com/x/y
 ok   'http://u:p@h:8080/' -> http://h:8080/
-ok   'file:///tmp/a b.html' -> file:///tmp/a b.html
+ok   'file:///tmp/a b.html' -> file:///tmp/a%20b.html
 ok   'data:text/css,p{}' -> data:text/css,p{}
 ok   'http://[::1]:8080/x' -> http://[::1]:8080/x
 ok   'http://[0:0:0:0:0:0:0:1]/' -> http://[::1]/

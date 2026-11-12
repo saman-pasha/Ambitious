@@ -324,3 +324,42 @@ neighbours.
     }
     int main(void) { scribble(); printf("%d\n", in_struct(1)); return 0; }
     ```
+22. **A type macro's function called in an included header is not made**:
+    `push_back` in a function of a header the unit includes is refused as
+    undeclared, where the same function in the `.c` itself compiles. 12m's URL
+    tests met it with a JSON reader shared by two tests; the work-around is a
+    header that calls no type macro's function (its buffers fixed arrays):
+
+    ```c
+    /* h.h */
+    #include <vector.pl>
+    static void f(vector<char> *out) { push_back(out, (char)97); }
+    /* a.c */
+    #include <stdio.h>
+    #include <vector.pl>
+    #include "h.h"
+    int main(void) { vector<char> v; f(&v); printf("%d\n", (int)len(v)); return 0; }
+    ```
+
+    reports `a.c:2: error: not lowered yet: undeclared(push_back) (function f)`
+    (the line is the header's, the file the unit's).
+23. **A macro as an array's size in an included header is not expanded, and the
+    array is laid out with no elements**: silently, so a struct's member array
+    takes no room and whatever writes it overwrites what follows (12m met it as
+    a test's stack overwritten, its return address among it). `sizeof` of a
+    global array so declared, used in the `.c`, is refused as `undeclared('M')`.
+    In the `.c` itself, or as an enum constant in the header, the size is right:
+
+    ```c
+    /* r.h */
+    #include <stddef.h>
+    #define M 24
+    typedef struct two { int n; size_t a[M]; } two;
+    /* r.c */
+    #include <stdio.h>
+    #include "r.h"
+    int main(void) { printf("%zu\n", sizeof(two)); return 0; }
+    ```
+
+    prints 8, where gcc's build prints 200. The work-around is
+    `enum { M = 24 };`.

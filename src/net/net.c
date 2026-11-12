@@ -1,24 +1,17 @@
 /* src/net/net.c -- the network module (contracts/net.pl): URLs, fetches, what a
    page loads; and the module's generated implementation.
 
-   URLs (WHATWG URL, a subset). A scheme, then for the special schemes (http,
-   https, file, ws, wss, ftp) an authority -- user info dropped, the host as the
-   host parser makes it, a default port dropped -- and a path whose dot segments
-   are removed and whose backslashes are slashes; a query; a fragment, which no
-   fetch sends. The host: an IPv6 literal in brackets, written back compressed;
-   else percent-decoded, made ASCII, refused for a forbidden code point, and an
-   IPv4 address in any of its forms (0x hex, 0 octal, fewer than four parts) when
-   its last label is a number. Made ASCII is IDNA in part: UTF-8 decoded, each code
-   point lowercased as UTS #46 maps capitals (Unicode's lowercase mappings,
-   src/net/lower.h), ASCII's fullwidth forms and the ideographic full stops
-   mapped, and each label past ASCII written xn-- and its Punycode (RFC 3492); the
-   rest of the IDNA mapping table, NFC and the bidi and joiner rules are not done.
-   Another scheme's URL is opaque (data:, mailto:). A reference resolves against
-   its base as scheme-relative, path-absolute, query-only, fragment-only or
-   path-relative. No percent-encoding sets beyond what a file: path decodes.
+   URLs are the URL standard's: src/net/url.c parses and serializes them (its own
+   header says what of the standard it does), and a reference resolves against
+   its base as its parser resolves one. The loader keeps a URL serialized without
+   its fragment, which no fetch sends, and without its credentials, which no record
+   keeps; a URL of another scheme than the special ones has an opaque origin (data:,
+   mailto:). A URL whose serialization passes 8 KB, or its host 255 bytes, is not
+   fetched: it is a bad URL here.
 
-   Fetching. file: reads the file (its type from its name); data: decodes its
-   body (base64 or percent-encoded); http: and https: are HTTP/1.1 over a socket
+   Fetching. file: reads the file its path names, percent-decoded (its type from
+   its name); data: decodes its body, the URL past "data:" without its fragment
+   (base64 or percent-encoded); http: and https: are HTTP/1.1 over a socket
    -- GET with Connection: close, interim 1xx answers passed over, the response's
    Content-Length or chunked body or the bytes until close (a body shorter than
    its length, or chunks without their last, is malformed), at most five
@@ -72,7 +65,6 @@
 #include <vector.pl>
 #include <amb.pl>
 #include "url.h"
-#include "lower.h"
 #include "../paint/image.h"
 
 amb_interface(dom);
@@ -142,22 +134,23 @@ void ERR_clear_error(void);
 /* the system's store of certificate authorities, when SSL_CERT_FILE names none */
 #define NET_CA_FILE "/etc/ssl/certs/ca-certificates.crt"
 
-/* ---- URLs ---- */
+/* ---- URLs, as src/net/url.c parses them ---- */
 
+/* a URL as the loader reads it: its serialization and its components' places
+   (url.h's parts), and the components it fetches by copied out. opaque is a URL of
+   a scheme that is not special (data:, mailto:, about:), whose origin is opaque */
 typedef struct net_url {
-    char scheme[16];
-    char host[256];
-    int port;                 /* -1: none written */
-    char path[4096];          /* an opaque URL's whole text after the scheme */
-    char query[2048];
+    char href[8192];
+    url_parts p;
+    char scheme[64];
+    char host[256];           /* the host serialized: an IPv6 address in its brackets; empty for none */
+    int port;                 /* -1: none, or the scheme's default */
+    char path[8192];          /* the path serialized, or the opaque path */
+    char query[8192];
     int has_query, special, opaque;
 } net_url;
 
 static char net_lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
-static int net_special(const char *s) {
-    return strcmp(s, "http") == 0 || strcmp(s, "https") == 0 || strcmp(s, "file") == 0 || strcmp(s, "ws") == 0 ||
-           strcmp(s, "wss") == 0 || strcmp(s, "ftp") == 0;
-}
 static int net_default_port(const char *s) {
     if (strcmp(s, "http") == 0 || strcmp(s, "ws") == 0) return 80;
     if (strcmp(s, "https") == 0 || strcmp(s, "wss") == 0) return 443;
@@ -165,17 +158,7 @@ static int net_default_port(const char *s) {
     return -1;
 }
 
-/* the input as the parser reads it: no leading or trailing control or space, no tab or newline */
-static size_t net_clean(const char *s, char *out, size_t cap) {
-    size_t n = strlen(s), a = 0, b = n, k = 0;
-    while (a < n && (unsigned char)s[a] <= 0x20) a++;
-    while (b > a && (unsigned char)s[b - 1] <= 0x20) b--;
-    for (size_t i = a; i < b && k + 1 < cap; i++) if (s[i] != '\t' && s[i] != '\n' && s[i] != '\r') out[k++] = s[i];
-    out[k] = 0;
-    return k;
-}
-
-/* the scheme's length, when the text begins with one and its colon */
+/* the scheme's length, when the text begins with one and its colon (a proxy's setting may lack one) */
 static size_t net_scheme_len(const char *s) {
     size_t i = 0;
     if (!((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z'))) return 0;
@@ -184,162 +167,58 @@ static size_t net_scheme_len(const char *s) {
     return s[i] == ':' ? i : 0;
 }
 
-/* RFC 3986, 5.2.4: a path's dot segments removed, as the RFC writes the steps */
-static void net_pop_segment(char *out, size_t *k) {
-    while (*k > 0 && out[*k - 1] != '/') (*k)--;
-    if (*k > 0) (*k)--;
-}
-static void net_remove_dots(char *path) {
-    char in[4096], out[4096];
-    snprintf(in, sizeof in, "%s", path);
-    size_t i = 0, n = strlen(in), k = 0;
-    while (i < n) {
-        if (strncmp(in + i, "../", 3) == 0) { i += 3; continue; }                           /* A */
-        if (strncmp(in + i, "./", 2) == 0) { i += 2; continue; }
-        if (strncmp(in + i, "/./", 3) == 0) { i += 2; continue; }                           /* B */
-        if (i + 2 == n && strncmp(in + i, "/.", 2) == 0) { in[i + 1] = 0; n = i + 1; continue; }
-        if (strncmp(in + i, "/../", 4) == 0) { i += 3; net_pop_segment(out, &k); continue; } /* C */
-        if (i + 3 == n && strncmp(in + i, "/..", 3) == 0) { in[i + 1] = 0; n = i + 1; net_pop_segment(out, &k); continue; }
-        if ((i + 1 == n && in[i] == '.') || (i + 2 == n && in[i] == '.' && in[i + 1] == '.')) break;   /* D */
-        if (in[i] == '/' && k + 1 < sizeof out) out[k++] = in[i++];                          /* E */
-        while (i < n && in[i] != '/' && k + 1 < sizeof out) out[k++] = in[i++];
-    }
-    out[k] = 0;
-    snprintf(path, 4096, "%s", out);
-}
-
-static int net_host_parse(const char *s, size_t n, char *out, size_t cap);
-
-/* the authority and the rest of a special URL, after its "//": user info dropped,
-   the host as the host parser makes it, the port (the scheme's default dropped) */
-static int net_parse_authority(const char *s, net_url *u) {
-    size_t e = 0;
-    while (s[e] && s[e] != '/' && s[e] != '\\' && s[e] != '?' && s[e] != '#') e++;
-    /* user info, dropped */
-    size_t a = 0;
-    for (size_t i = 0; i < e; i++) if (s[i] == '@') a = i + 1;
-    /* the host ends at the first colon outside an IPv6 literal's brackets */
-    size_t colon = e;
-    int inside = 0;
-    for (size_t i = a; i < e && colon == e; i++) {
-        if (s[i] == '[') inside = 1;
-        else if (s[i] == ']') inside = 0;
-        else if (s[i] == ':' && !inside) colon = i;
-    }
-    u->host[0] = 0;
-    if (colon > a && !net_host_parse(s + a, colon - a, u->host, sizeof u->host)) return 0;
-    if (strcmp(u->scheme, "file") == 0 && strcmp(u->host, "localhost") == 0) u->host[0] = 0;
-    size_t hn = strlen(u->host);
-    u->port = -1;
-    if (colon < e) {
-        long p = 0;
-        if (colon + 1 == e) p = -1;
-        for (size_t i = colon + 1; i < e; i++) {
-            if (s[i] < '0' || s[i] > '9') return 0;
-            p = p * 10 + (s[i] - '0');
-            if (p > 65535) return 0;
-        }
-        u->port = (int)p;
-    }
-    if (u->port == net_default_port(u->scheme)) u->port = -1;
-    if (hn == 0 && strcmp(u->scheme, "file") != 0) return 0;
-    return (int)e;
-}
-
-/* the path, query and fragment from s: the path its dots removed */
-static void net_parse_tail(const char *s, net_url *u) {
-    size_t i = 0, k = 0;
-    while (s[i] && s[i] != '?' && s[i] != '#' && k + 1 < sizeof u->path) {
-        u->path[k++] = s[i] == '\\' && u->special ? '/' : s[i];
-        i++;
-    }
-    u->path[k] = 0;
-    if (u->special && u->path[0] != '/') {
-        char t[4096];
-        snprintf(t, sizeof t, "/%s", u->path);
-        snprintf(u->path, sizeof u->path, "%s", t);
-    }
-    if (u->special) net_remove_dots(u->path);
-    u->has_query = 0;
+/* a parsed URL's components copied into u: 0 when one does not fit */
+static int net_url_fill(const char *href, const url_parts *p, net_url *u) {
+    if (p->len >= sizeof u->href || p->scheme_end >= sizeof u->scheme || p->host_end - p->host_start >= sizeof u->host) return 0;
+    memcpy(u->href, href, p->len);
+    u->href[p->len] = 0;
+    u->p = *p;
+    memcpy(u->scheme, href, p->scheme_end);
+    u->scheme[p->scheme_end] = 0;
+    memcpy(u->host, href + p->host_start, p->host_end - p->host_start);
+    u->host[p->host_end - p->host_start] = 0;
+    u->port = p->port;
+    memcpy(u->path, href + p->path_start, p->path_end - p->path_start);
+    u->path[p->path_end - p->path_start] = 0;
+    u->has_query = p->query_start != URL_NONE;
     u->query[0] = 0;
-    if (s[i] == '?') {
-        size_t j = i + 1, q = 0;
-        while (s[j] && s[j] != '#' && q + 1 < sizeof u->query) u->query[q++] = s[j++];
-        u->query[q] = 0;
-        u->has_query = 1;
+    if (u->has_query) {
+        memcpy(u->query, href + p->query_start, p->query_end - p->query_start);
+        u->query[p->query_end - p->query_start] = 0;
     }
+    u->special = p->special != 0;
+    u->opaque = !u->special;
+    return 1;
 }
 
+/* an absolute URL parsed */
 static int net_parse_abs(const char *in, net_url *u) {
-    char s[8192];
-    net_clean(in, s, sizeof s);
-    memset(u, 0, sizeof *u);
-    size_t sl = net_scheme_len(s);
-    if (sl == 0 || sl >= sizeof u->scheme) return 0;
-    for (size_t i = 0; i < sl; i++) u->scheme[i] = net_lower(s[i]);
-    u->scheme[sl] = 0;
-    u->port = -1;
-    u->special = net_special(u->scheme);
-    const char *rest = s + sl + 1;
-    if (!u->special) {
-        /* opaque: everything up to the fragment */
-        size_t k = 0;
-        while (rest[k] && rest[k] != '#' && k + 1 < sizeof u->path) { u->path[k] = rest[k]; k++; }
-        u->path[k] = 0;
-        u->opaque = 1;
-        return 1;
-    }
-    if ((rest[0] == '/' || rest[0] == '\\') && (rest[1] == '/' || rest[1] == '\\')) {
-        int e = net_parse_authority(rest + 2, u);
-        if (!e && strcmp(u->scheme, "file") != 0) return 0;
-        net_parse_tail(rest + 2 + e, u);
-        return 1;
-    }
-    if (strcmp(u->scheme, "file") == 0) { net_parse_tail(rest, u); return 1; }
-    return 0;
-}
-
-static size_t net_url_text(const net_url *u, char *out, size_t cap) {
-    int n;
-    if (u->opaque) n = snprintf(out, cap, "%s:%s", u->scheme, u->path);
-    else if (u->port >= 0) n = snprintf(out, cap, "%s://%s:%d%s%s%s", u->scheme, u->host, u->port, u->path, u->has_query ? "?" : "", u->query);
-    else n = snprintf(out, cap, "%s://%s%s%s%s", u->scheme, u->host, u->path, u->has_query ? "?" : "", u->query);
-    if (n < 0) return 0;
-    return (size_t)n < cap ? (size_t)n : cap - 1;
-}
-
-static size_t net_origin_text(const net_url *u, char *out, size_t cap) {
-    int n;
-    if (u->opaque || strcmp(u->scheme, "file") == 0) n = snprintf(out, cap, "null");
-    else if (u->port >= 0) n = snprintf(out, cap, "%s://%s:%d", u->scheme, u->host, u->port);
-    else n = snprintf(out, cap, "%s://%s", u->scheme, u->host);
-    if (n < 0) return 0;
-    return (size_t)n < cap ? (size_t)n : cap - 1;
+    char out[8192];
+    url_parts p;
+    return url_parse(in, strlen(in), 0, 0, out, sizeof out, &p) && net_url_fill(out, &p, u);
 }
 
 /* a reference resolved against a base */
 static int net_resolve(const net_url *base, const char *in, net_url *u) {
-    char s[8192];
-    net_clean(in, s, sizeof s);
-    if (net_scheme_len(s)) return net_parse_abs(s, u);
-    if (base->opaque) return 0;
-    *u = *base;
-    if ((s[0] == '/' || s[0] == '\\') && (s[1] == '/' || s[1] == '\\')) {
-        char t[8192];
-        snprintf(t, sizeof t, "%s:%s", base->scheme, s);
-        return net_parse_abs(t, u);
-    }
-    if (s[0] == '/' || (s[0] == '\\' && base->special)) { net_parse_tail(s, u); return 1; }
-    if (s[0] == '?') { net_parse_tail(s, u); snprintf(u->path, sizeof u->path, "%s", base->path); return 1; }
-    if (s[0] == '#' || s[0] == 0) return 1;
-    /* a path relative to the base's directory */
-    char t[8192];
-    size_t d = strlen(base->path);
-    while (d > 0 && base->path[d - 1] != '/') d--;
-    snprintf(t, sizeof t, "%.*s%s", (int)d, base->path, s);
-    net_parse_tail(t, u);
-    return 1;
+    char out[8192];
+    url_parts p;
+    return url_parse(in, strlen(in), base->href, base->p.len, out, sizeof out, &p) && net_url_fill(out, &p, u);
 }
+
+/* a URL as the loader keeps it: serialized without its fragment, which no fetch
+   sends, and without its credentials, which no record keeps */
+static size_t net_url_text(const net_url *u, char *out, size_t cap) {
+    uint32_t end = u->p.fragment_start != URL_NONE ? u->p.fragment_start - 1 : u->p.len;
+    int n;
+    if (u->p.host_kind != URL_HOST_NULL)
+        n = snprintf(out, cap, "%.*s://%.*s", (int)u->p.scheme_end, u->href, (int)(end - u->p.host_start), u->href + u->p.host_start);
+    else n = snprintf(out, cap, "%.*s", (int)end, u->href);
+    if (n < 0) return 0;
+    return (size_t)n < cap ? (size_t)n : cap - 1;
+}
+
+/* its origin, serialized (4.7): null for an opaque one */
+static size_t net_origin_text(const net_url *u, char *out, size_t cap) { return url_attr(u->href, &u->p, URL_ORIGIN, out, cap); }
 
 int net_url_resolve(const char *base, const char *ref, char *out, size_t cap) {
     net_url b, u;
@@ -471,303 +350,6 @@ static int net_is_address(const char *h) {
     uint16_t v6[8];
     size_t n = strlen(h);
     return net_ipv4_dotted(h, n, &v4) || (strchr(h, ':') && net_ipv6_parse(h, n, v6));
-}
-
-/* an IPv6 address serialized as WHATWG URL does, in brackets: lowercase hex pieces,
-   the first longest run of two or more zero pieces written "::" */
-static void net_ipv6_text(const uint16_t a[8], char *out, size_t cap) {
-    int best = -1, bestlen = 1;
-    for (int i = 0; i < 8;) {
-        if (a[i] != 0) { i++; continue; }
-        int j = i;
-        while (j < 8 && a[j] == 0) j++;
-        if (j - i > bestlen) { best = i; bestlen = j - i; }
-        i = j;
-    }
-    size_t k = 0;
-    int ignore0 = 0;
-    if (cap < 42) { if (cap) out[0] = 0; return; }
-    out[k++] = '[';
-    for (int i = 0; i < 8; i++) {
-        if (ignore0 && a[i] == 0) continue;
-        ignore0 = 0;
-        if (best == i) {
-            out[k++] = ':';
-            if (i == 0) out[k++] = ':';
-            ignore0 = 1;
-            continue;
-        }
-        k += (size_t)snprintf(out + k, cap - k, "%x", a[i]);
-        if (i != 7) out[k++] = ':';
-    }
-    out[k++] = ']';
-    out[k] = 0;
-}
-
-/* an IPv4 address's part (WHATWG URL): 0x and hex, a leading 0 and octal, else
-   decimal; -1 when it is none, and past 2^32 kept just past it */
-static int64_t net_ipv4_number(const char *s, size_t n) {
-    if (n == 0) return -1;
-    int radix = 10;
-    if (n >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { s += 2; n -= 2; radix = 16; }
-    else if (n >= 2 && s[0] == '0') { s++; n--; radix = 8; }
-    int64_t v = 0;
-    for (size_t i = 0; i < n; i++) {
-        int d = net_hexval(s[i]);
-        if (d < 0 || d >= radix) return -1;
-        v = v * radix + d;
-        if (v > 0x100000000ll) v = 0x100000000ll;
-    }
-    return v;
-}
-
-/* the host's labels, a last empty one dropped: where each begins and ends */
-static int net_labels(const char *s, size_t n, size_t *b, size_t *e, int max) {
-    int k = 0;
-    size_t a = 0;
-    for (;;) {
-        size_t c = a;
-        while (c < n && s[c] != '.') c++;
-        if (k == max) return -1;
-        b[k] = a;
-        e[k] = c;
-        k++;
-        if (c >= n) break;
-        a = c + 1;
-    }
-    if (k > 1 && b[k - 1] == e[k - 1]) k--;
-    return k;
-}
-
-/* WHATWG URL's ends-in-a-number: the last label all digits, or 0x and hex */
-static int net_ends_in_number(const char *s, size_t n) {
-    size_t b[130], e[130];
-    int k = net_labels(s, n, b, e, 130);
-    if (k <= 0) return k < 0;
-    const char *t = s + b[k - 1];
-    size_t tn = e[k - 1] - b[k - 1];
-    if (tn == 0) return 0;
-    int digits = 1;
-    for (size_t i = 0; i < tn; i++) if (t[i] < '0' || t[i] > '9') digits = 0;
-    if (digits) return 1;
-    if (tn >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
-        for (size_t i = 2; i < tn; i++) if (net_hexval(t[i]) < 0) return 0;
-        return 1;
-    }
-    return 0;
-}
-
-/* WHATWG URL's IPv4 parser: one to four parts, each but the last a byte, the last
-   filling what the others leave */
-static int net_ipv4_parse(const char *s, size_t n, uint32_t *out) {
-    size_t b[8], e[8];
-    int k = net_labels(s, n, b, e, 8);
-    if (k <= 0 || k > 4) return 0;
-    int64_t v[4];
-    for (int i = 0; i < k; i++) {
-        v[i] = net_ipv4_number(s + b[i], e[i] - b[i]);
-        if (v[i] < 0) return 0;
-        if (i < k - 1 && v[i] > 255) return 0;
-    }
-    if (v[k - 1] >= (int64_t)1 << (8 * (5 - k))) return 0;
-    uint64_t a = (uint64_t)v[k - 1];
-    for (int i = 0; i < k - 1; i++) a += (uint64_t)v[i] << (8 * (3 - i));
-    *out = (uint32_t)a;
-    return 1;
-}
-
-/* ---- IDNA: a host's labels made ASCII ---- */
-
-/* a code point's small letter, as UTS #46 maps a capital: Unicode's simple
-   lowercase mapping, by the runs of src/net/lower.h */
-static uint32_t net_lower_cp(uint32_t c) {
-    int lo = 0, hi = (int)(sizeof net_lower_runs / sizeof net_lower_runs[0]) - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (c < net_lower_runs[mid].first) hi = mid - 1;
-        else if (c > net_lower_runs[mid].last) lo = mid + 1;
-        else if (net_lower_runs[mid].alternating && (c - net_lower_runs[mid].first) % 2) return c;
-        else return (uint32_t)((int32_t)c + net_lower_runs[mid].delta);
-    }
-    return c;
-}
-
-/* UTF-8 decoded into code points; 0 for what is ill-formed (an overlong form, a
-   surrogate, past U+10FFFF, a sequence cut short) or past cap code points */
-static int net_utf8(const char *s, size_t n, uint32_t *cps, size_t cap, size_t *count) {
-    size_t i = 0, k = 0;
-    while (i < n) {
-        uint8_t b = (uint8_t)s[i];
-        uint32_t c;
-        int more;
-        if (b < 0x80) { c = b; more = 0; }
-        else if (b >= 0xC2 && b <= 0xDF) { c = b & 0x1F; more = 1; }
-        else if (b >= 0xE0 && b <= 0xEF) { c = b & 0x0F; more = 2; }
-        else if (b >= 0xF0 && b <= 0xF4) { c = b & 0x07; more = 3; }
-        else return 0;
-        for (int j = 1; j <= more; j++) {
-            if (i + (size_t)j >= n) return 0;
-            uint8_t x = (uint8_t)s[i + (size_t)j];
-            if ((x & 0xC0) != 0x80) return 0;
-            c = c << 6 | (x & 0x3F);
-        }
-        if ((more == 2 && c < 0x800) || (more == 3 && (c < 0x10000 || c > 0x10FFFF)) || (c >= 0xD800 && c <= 0xDFFF)) return 0;
-        if (k >= cap) return 0;
-        cps[k++] = c;
-        i += 1 + (size_t)more;
-    }
-    *count = k;
-    return 1;
-}
-
-/* RFC 3492's bias adaptation */
-static uint32_t net_puny_adapt(uint32_t delta, uint32_t points, int first) {
-    delta = first ? delta / 700 : delta / 2;
-    delta += delta / points;
-    uint32_t k = 0;
-    while (delta > ((36 - 1) * 26) / 2) { delta /= 36 - 1; k += 36; }
-    return k + (36 * delta) / (delta + 38);
-}
-
-/* a label's code points in Punycode (RFC 3492): its ASCII ones in order, a "-"
-   when there are any, then the others as deltas in base 36; 0 on an overflow */
-static int net_punycode(const uint32_t *cp, size_t n, char *out, size_t cap) {
-    size_t k = 0, basic = 0;
-    for (size_t i = 0; i < n; i++)
-        if (cp[i] < 0x80) {
-            if (k + 1 >= cap) return 0;
-            out[k++] = (char)cp[i];
-            basic++;
-        }
-    if (basic) {
-        if (k + 1 >= cap) return 0;
-        out[k++] = '-';
-    }
-    uint32_t next = 0x80, delta = 0, bias = 72;
-    size_t h = basic;
-    while (h < n) {
-        uint32_t m = 0xFFFFFFFFu;
-        for (size_t i = 0; i < n; i++) if (cp[i] >= next && cp[i] < m) m = cp[i];
-        if ((uint64_t)(m - next) * (h + 1) + delta > 0xFFFFFFFFu) return 0;
-        delta += (m - next) * (uint32_t)(h + 1);
-        next = m;
-        for (size_t i = 0; i < n; i++) {
-            if (cp[i] < next && ++delta == 0) return 0;
-            if (cp[i] != next) continue;
-            uint32_t q = delta;
-            for (uint32_t t36 = 36;; t36 += 36) {
-                uint32_t t = t36 <= bias ? 1 : t36 >= bias + 26 ? 26 : t36 - bias;
-                if (q < t) break;
-                uint32_t d = t + (q - t) % (36 - t);
-                if (k + 1 >= cap) return 0;
-                out[k++] = (char)(d < 26 ? 'a' + d : '0' + d - 26);
-                q = (q - t) / (36 - t);
-            }
-            if (k + 1 >= cap) return 0;
-            out[k++] = (char)(q < 26 ? 'a' + q : '0' + q - 26);
-            bias = net_puny_adapt(delta, (uint32_t)h + 1, h == basic);
-            delta = 0;
-            h++;
-        }
-        delta++;
-        next++;
-    }
-    out[k] = 0;
-    return 1;
-}
-
-/* a domain made ASCII as UTS #46 makes a URL's host, in part: its UTF-8 decoded;
-   each code point lowercased (U+0130 to i and U+0307, as Unicode lowercases it),
-   ASCII's fullwidth forms made ASCII and the ideographic full stops "."; then
-   each label holding a code point past ASCII written xn-- and its Punycode. Not
-   done: the rest of the IDNA mapping table (compatibility forms, ignored code
-   points), NFC, the bidi and joiner rules, refusing what the table disallows, and
-   checking an xn-- label's Punycode */
-static int net_domain_ascii(const char *s, size_t n, char *out, size_t cap) {
-    int ascii = 1;
-    for (size_t i = 0; i < n; i++) if ((uint8_t)s[i] >= 0x80) ascii = 0;
-    if (ascii) {
-        if (n >= cap) return 0;
-        for (size_t i = 0; i < n; i++) out[i] = net_lower(s[i]);
-        out[n] = 0;
-        return 1;
-    }
-    uint32_t cps[300], m[320];
-    size_t nc = 0, nm = 0;
-    if (!net_utf8(s, n, cps, 300, &nc)) return 0;
-    for (size_t i = 0; i < nc; i++) {
-        uint32_t c = cps[i];
-        if (nm + 2 > 320) return 0;
-        if (c == 0x3002 || c == 0xFF0E || c == 0xFF61) m[nm++] = '.';
-        else if (c == 0x130) { m[nm++] = 'i'; m[nm++] = 0x307; }
-        else if (c >= 0xFF01 && c <= 0xFF5E) m[nm++] = net_lower_cp(c - 0xFEE0);
-        else m[nm++] = net_lower_cp(c);
-    }
-    size_t k = 0, a = 0;
-    while (a <= nm) {
-        size_t b = a;
-        while (b < nm && m[b] != '.') b++;
-        int wide = 0;
-        for (size_t i = a; i < b; i++) if (m[i] >= 0x80) wide = 1;
-        if (wide) {
-            char p[256];
-            if (!net_punycode(m + a, b - a, p, sizeof p)) return 0;
-            int w = snprintf(out + k, cap - k, "xn--%s", p);
-            if (w < 0 || k + (size_t)w >= cap) return 0;
-            k += (size_t)w;
-        } else {
-            for (size_t i = a; i < b; i++) {
-                if (k + 1 >= cap) return 0;
-                out[k++] = (char)m[i];
-            }
-        }
-        if (b < nm) {
-            if (k + 1 >= cap) return 0;
-            out[k++] = '.';
-        }
-        a = b + 1;
-    }
-    out[k] = 0;
-    return 1;
-}
-
-/* a special URL's host, as WHATWG URL's host parser reads one: an IPv6 literal in
-   brackets, written back compressed; else percent-decoded, made ASCII, holding no
-   forbidden code point, and an IPv4 address in any of its forms when its last label
-   is a number. The host as the URL is serialized with it */
-static int net_host_parse(const char *s, size_t n, char *out, size_t cap) {
-    if (n && s[0] == '[') {
-        uint16_t a[8];
-        if (n < 2 || s[n - 1] != ']' || !net_ipv6_parse(s + 1, n - 2, a)) return 0;
-        net_ipv6_text(a, out, cap);
-        return 1;
-    }
-    char d[1024], ascii[256];
-    size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (k + 1 >= sizeof d) return 0;
-        if (s[i] == '%' && i + 2 < n && net_hexval(s[i + 1]) >= 0 && net_hexval(s[i + 2]) >= 0) {
-            d[k++] = (char)(net_hexval(s[i + 1]) * 16 + net_hexval(s[i + 2]));
-            i += 2;
-        } else d[k++] = s[i];
-        if (d[k - 1] == 0) return 0;
-    }
-    d[k] = 0;
-    if (!net_domain_ascii(d, k, ascii, sizeof ascii) || !ascii[0]) return 0;
-    for (size_t i = 0; ascii[i]; i++) {
-        unsigned char c = (unsigned char)ascii[i];
-        if (c <= 0x20 || c == 0x7f || strchr("#%/:<>?@[\\]^|", c)) return 0;
-    }
-    size_t an = strlen(ascii);
-    if (net_ends_in_number(ascii, an)) {
-        uint32_t v;
-        if (!net_ipv4_parse(ascii, an, &v)) return 0;
-        snprintf(out, cap, "%u.%u.%u.%u", v >> 24, v >> 16 & 255, v >> 8 & 255, v & 255);
-        return 1;
-    }
-    if (an >= cap) return 0;
-    snprintf(out, cap, "%s", ascii);
-    return 1;
 }
 
 /* ---- proxies ---- */
@@ -1030,9 +612,12 @@ static net_outcome net_get_file(const net_url *u, vector<char> *body, char *type
     return NET_OUTCOME_OK;
 }
 
+/* a data: URL's body (Fetch's data: URL processor): the URL serialized without its
+   fragment, past "data:" -- its path and its query */
 static net_outcome net_get_data(const net_url *u, vector<char> *body, char *type, size_t tcap, char *why, size_t wcap) {
-    const char *s = u->path;
-    size_t n = strlen(s), comma = 0;
+    uint32_t end = u->p.fragment_start != URL_NONE ? u->p.fragment_start - 1 : u->p.len;
+    const char *s = u->href + u->p.scheme_end + 1;
+    size_t n = end - u->p.scheme_end - 1, comma = 0;
     while (comma < n && s[comma] != ',') comma++;
     if (comma >= n) { snprintf(why, wcap, "a data: URL without its comma"); return NET_OUTCOME_MALFORMED; }
     int b64 = comma >= 7 && strncmp(s + comma - 7, ";base64", 7) == 0;

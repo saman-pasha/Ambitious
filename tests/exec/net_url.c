@@ -18,7 +18,7 @@ static const char *const refs[][2] = {
     { "./../g", "http://a/b/g" }, { "./g/.", "http://a/b/c/g/" }, { "g/./h", "http://a/b/c/g/h" }, { "g/../h", "http://a/b/c/h" },
     { "g;x=1/./y", "http://a/b/c/g;x=1/y" }, { "g;x=1/../y", "http://a/b/c/y" },
     { "  HTTP://Example.COM:80/x\\y ", "http://example.com/x/y" }, { "http://u:p@h:8080/", "http://h:8080/" },
-    { "file:///tmp/a b.html", "file:///tmp/a b.html" }, { "data:text/css,p{}", "data:text/css,p{}" },
+    { "file:///tmp/a b.html", "file:///tmp/a%20b.html" }, { "data:text/css,p{}", "data:text/css,p{}" },
 };
 
 /* hosts as WHATWG URL's host parser makes them, against the same base: IPv6
