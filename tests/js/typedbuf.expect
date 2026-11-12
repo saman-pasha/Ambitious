@@ -1,0 +1,51 @@
+4 16 true false 4 false
+RangeError: Invalid array buffer max length RangeError: Invalid array buffer max length {} false
+false 8589934592 12
+RangeError: Invalid array buffer length RangeError: Invalid array buffer length 1 3 TypeError: Constructor ArrayBuffer requires 'new'
+4 2 2 2 [1,2,3,4] [513,1027]
+10 10 2 8 5 10 [1,2,3,4,0,0,0,0,0,0] 2
+1 1 0 0 0 0 0   
+TypeError: Cannot perform %TypedArray%.prototype.fill on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.join on a detached ArrayBuffer "1" RangeError: Start offset 2 is outside the bounds of the buffer TypeError: Cannot perform %TypedArray%.prototype.values on a detached ArrayBuffer
+16 2 14 2 [1,0] 0 0
+RangeError: ArrayBuffer.prototype.resize: Invalid length parameter RangeError: ArrayBuffer.prototype.resize: Invalid length parameter TypeError: Method ArrayBuffer.prototype.resize called on incompatible receiver #<ArrayBuffer>  0
+3 3 1 2  2
+[1,0,0]
+6 6 1 0
+2 false 2 [2,3] 2
+1 2
+2 5
+7 1
+1
+1 4 2 8
+2000 1999000
+3 2 1 2
+1 TypeError: Cannot perform get DataView.prototype.byteLength on a detached ArrayBuffer TypeError: Cannot perform get DataView.prototype.byteLength on a detached ArrayBuffer TypeError: Cannot perform get DataView.prototype.byteOffset on a detached ArrayBuffer TypeError: Cannot perform DataView.prototype.getInt8 on a detached ArrayBuffer 0 RangeError: Offset is outside the bounds of the DataView
+8 2 6 0
+1.5 0 RangeError: Offset is outside the bounds of the DataView
+RangeError: Offset is outside the bounds of the DataView RangeError: Offset is outside the bounds of the DataView RangeError: Offset is outside the bounds of the DataView RangeError: Start offset 5 is outside the bounds of the buffer RangeError: Invalid DataView length 4 RangeError: Start offset -1 is outside the bounds of the buffer TypeError: First argument to DataView constructor must be an ArrayBuffer
+RangeError: Offset is outside the bounds of the DataView ["index","value"]
+0 true 4 false [9,8,7,6] 0 0 0  TypeError: Cannot perform %TypedArray%.prototype.fill on a detached ArrayBuffer
+TypeError: Cannot perform ArrayBuffer.prototype.slice on a detached ArrayBuffer TypeError: Cannot perform ArrayBuffer.prototype.transfer on a detached ArrayBuffer TypeError: Method ArrayBuffer.prototype.resize called on incompatible receiver #<ArrayBuffer> TypeError: Cannot perform Construct on a detached ArrayBuffer TypeError: Cannot perform DataView constructor on a detached ArrayBuffer 0 false
+[9,8,7,6,0,0] [9,8] true false
+true 0 false 0 false 3 TypeError: Cannot perform ArrayBuffer.prototype.transfer on a detached ArrayBuffer
+7 8 true
+RangeError: Invalid array buffer length 9 RangeError: Invalid array buffer length
+TypeError: Cannot perform ArrayBuffer.prototype.resize on a detached ArrayBuffer 0 0 true TypeError: Cannot perform ArrayBuffer.prototype.transferToFixedLength on a detached ArrayBuffer
+TypeError: Method ArrayBuffer.prototype.transfer called on incompatible receiver #<Object> TypeError: Method ArrayBuffer.prototype.resize called on incompatible receiver #<Object> TypeError: Method get ArrayBuffer.prototype.detached called on incompatible receiver #<Object>
+TypeError: Method ArrayBuffer.prototype.slice called on incompatible receiver 1 TypeError: Method get ArrayBuffer.prototype.byteLength called on incompatible receiver 1 TypeError: Method get ArrayBuffer.prototype.resizable called on incompatible receiver [object Array] TypeError: Method ArrayBuffer.prototype.transfer called on incompatible receiver [object Uint8Array]
+0 0 1 2
+[object ArrayBuffer] function true
+0 0 0   [] false TypeError: Cannot perform %TypedArray%.prototype.at on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.set on a detached ArrayBuffer
+TypeError: Cannot perform get DataView.prototype.byteLength on a detached ArrayBuffer TypeError: Cannot perform get DataView.prototype.byteOffset on a detached ArrayBuffer TypeError: Cannot perform DataView.prototype.getInt8 on a detached ArrayBuffer TypeError: Cannot perform DataView.prototype.setInt8 on a detached ArrayBuffer 0
+TypeError: Cannot perform %TypedArray%.prototype.indexOf on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.includes on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.forEach on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.map on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.sort on a detached ArrayBuffer
+TypeError: Cannot perform Construct on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.reverse on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.entries on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.values on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.values on a detached ArrayBuffer
+TypeError: Cannot perform Construct on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.values on a detached ArrayBuffer 
+TypeError: Cannot perform Construct on a detached ArrayBuffer RangeError: Start offset 5 is outside the bounds of the buffer RangeError: Invalid typed array length: 4 RangeError: byte length of Uint32Array should be a multiple of 4
+TypeError: Cannot perform %TypedArray%.prototype.set on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.sort on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.with on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.reverse on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.map on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.filter on a detached ArrayBuffer
+TypeError: Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.toSorted on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.toReversed on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.fill on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.at on a detached ArrayBuffer {} TypeError: Cannot perform %TypedArray%.prototype.toLocaleString on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.keys on a detached ArrayBuffer
+TypeError: Cannot perform %TypedArray%.prototype.every on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.some on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.find on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.findIndex on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.findLast on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.findIndexLast on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.lastIndexOf on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.reduce on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.reduceRight on a detached ArrayBuffer
+TypeError: Cannot perform Construct on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.values on a detached ArrayBuffer TypeError: Cannot perform %TypedArray%.prototype.set on a detached ArrayBuffer 0 0 0
+2 2 "0,0" forEach 1 true 1
+0 RangeError: Invalid typed array length: 1 RangeError: Start offset 1 is outside the bounds of the buffer 0 0 RangeError: Start offset 1 is outside the bounds of the buffer
+true true false
+TypeError: Invalid typed array index TypeError: Cannot redefine property: 0 TypeError: Invalid typed array index TypeError: Cannot redefine property: 0 TypeError: Invalid typed array index TypeError: Invalid typed array index 9 false 1

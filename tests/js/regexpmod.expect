@@ -1,0 +1,51 @@
+null ["Ab"]@0 null ["Ab"]@0
+["b"]@2 null ["a\nb"]@0 null null ["a"]@0
+["ABC"]@0 ["ſ"]@0 [""]@0 null ["aA","a"]@0 null ["AA","A"]@0
+null ["X"]@0 ["ABc"]@0 A-C ["a","c","",""]
+["ẞ"]@0 ["K"]@0 null null null ["a"]@0
+["ab"]@0 null ["b"]@1 ["AbC"]@0 null
+["A\nB"]@2 ["A\nB"]@2 null null null
+["aAaA"]@0 ["AbaB"]@0 ["Bc"]@0 null ["xy"]@0 ["Ab","A","b"]@0
+["a"]@0 ["A"]@0 ["C"]@0 ["a"]@0 null ["Xx","X"]@0
+["HeLLo world"]@0 ["hello WORLD"]@0 null ["Hello WORLD"]@0
+["Ax","ax","Ax"] ["ab"] 0 2
+["aaaB"]@0 ["aaB"]@0 ["AAb"]@0 ["12X"]@0 ["a"]@2 ["a"]@0
+["😀X"]@0 ["É"]@0 ["éÉé"]@0 ["À","à"]
+"(?i:a)" ok  | ok u | ok v
+"(?-i:a)" ok  | ok u | ok v
+"(?ims-:a)" ok  | ok u | ok v
+"(?-ims:a)" ok  | ok u | ok v
+"(?i-m:a)" ok  | ok u | ok v
+"(?-:a)" SyntaxError: Invalid regular expression: /(?-:a)/: Invalid flag group | SyntaxError: Invalid regular expression: /(?-:a)/u: Invalid flag group | SyntaxError: Invalid regular expression: /(?-:a)/v: Invalid flag group
+"(?ii:a)" SyntaxError: Invalid regular expression: /(?ii:a)/: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?ii:a)/u: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?ii:a)/v: Repeated flag in flag group
+"(?i-i:a)" SyntaxError: Invalid regular expression: /(?i-i:a)/: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?i-i:a)/u: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?i-i:a)/v: Repeated flag in flag group
+"(?m-m:a)" SyntaxError: Invalid regular expression: /(?m-m:a)/: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?m-m:a)/u: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?m-m:a)/v: Repeated flag in flag group
+"(?x:a)" SyntaxError: Invalid regular expression: /(?x:a)/: Invalid group | SyntaxError: Invalid regular expression: /(?x:a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?x:a)/v: Invalid group
+"(?i" SyntaxError: Invalid regular expression: /(?i/: Invalid group | SyntaxError: Invalid regular expression: /(?i/u: Invalid group | SyntaxError: Invalid regular expression: /(?i/v: Invalid group
+"(?i)" SyntaxError: Invalid regular expression: /(?i)/: Invalid group | SyntaxError: Invalid regular expression: /(?i)/u: Invalid group | SyntaxError: Invalid regular expression: /(?i)/v: Invalid group
+"(?i-)" SyntaxError: Invalid regular expression: /(?i-)/: Invalid group | SyntaxError: Invalid regular expression: /(?i-)/u: Invalid group | SyntaxError: Invalid regular expression: /(?i-)/v: Invalid group
+"(?-)" SyntaxError: Invalid regular expression: /(?-)/: Invalid group | SyntaxError: Invalid regular expression: /(?-)/u: Invalid group | SyntaxError: Invalid regular expression: /(?-)/v: Invalid group
+"(?I:a)" SyntaxError: Invalid regular expression: /(?I:a)/: Invalid group | SyntaxError: Invalid regular expression: /(?I:a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?I:a)/v: Invalid group
+"(?u:a)" SyntaxError: Invalid regular expression: /(?u:a)/: Invalid group | SyntaxError: Invalid regular expression: /(?u:a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?u:a)/v: Invalid group
+"(?g:a)" SyntaxError: Invalid regular expression: /(?g:a)/: Invalid group | SyntaxError: Invalid regular expression: /(?g:a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?g:a)/v: Invalid group
+"(?i-s-m:a)" SyntaxError: Invalid regular expression: /(?i-s-m:a)/: Multiple dashes in flag group | SyntaxError: Invalid regular expression: /(?i-s-m:a)/u: Multiple dashes in flag group | SyntaxError: Invalid regular expression: /(?i-s-m:a)/v: Multiple dashes in flag group
+"(?is-mi:a)" SyntaxError: Invalid regular expression: /(?is-mi:a)/: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?is-mi:a)/u: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?is-mi:a)/v: Repeated flag in flag group
+"(?--i:a)" SyntaxError: Invalid regular expression: /(?--i:a)/: Multiple dashes in flag group | SyntaxError: Invalid regular expression: /(?--i:a)/u: Multiple dashes in flag group | SyntaxError: Invalid regular expression: /(?--i:a)/v: Multiple dashes in flag group
+"(?i:" SyntaxError: Invalid regular expression: /(?i:/: Unterminated group | SyntaxError: Invalid regular expression: /(?i:/u: Unterminated group | SyntaxError: Invalid regular expression: /(?i:/v: Unterminated group
+"(?i:a" SyntaxError: Invalid regular expression: /(?i:a/: Unterminated group | SyntaxError: Invalid regular expression: /(?i:a/u: Unterminated group | SyntaxError: Invalid regular expression: /(?i:a/v: Unterminated group
+"(?iii:a)" SyntaxError: Invalid regular expression: /(?iii:a)/: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?iii:a)/u: Repeated flag in flag group | SyntaxError: Invalid regular expression: /(?iii:a)/v: Repeated flag in flag group
+"(?ims:a)" ok  | ok u | ok v
+"(?s-i:a)" ok  | ok u | ok v
+"(?i-ms:a)" ok  | ok u | ok v
+"(?i-:a)" ok  | ok u | ok v
+"(?-s:.)" ok  | ok u | ok v
+"(?i:a)+" ok  | ok u | ok v
+"(?i:a){2}" ok  | ok u | ok v
+"(?i<n>a)" SyntaxError: Invalid regular expression: /(?i<n>a)/: Invalid group | SyntaxError: Invalid regular expression: /(?i<n>a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?i<n>a)/v: Invalid group
+"(?i=a)" SyntaxError: Invalid regular expression: /(?i=a)/: Invalid group | SyntaxError: Invalid regular expression: /(?i=a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?i=a)/v: Invalid group
+"(?-i=a)" SyntaxError: Invalid regular expression: /(?-i=a)/: Invalid group | SyntaxError: Invalid regular expression: /(?-i=a)/u: Invalid group | SyntaxError: Invalid regular expression: /(?-i=a)/v: Invalid group
+"(?mi:^a)" ok  | ok u | ok v
+"(?i:(?-i:a))" ok  | ok u | ok v
+"(?i:a))" SyntaxError: Invalid regular expression: /(?i:a))/: Unmatched ')' | SyntaxError: Invalid regular expression: /(?i:a))/u: Unmatched ')' | SyntaxError: Invalid regular expression: /(?i:a))/v: Unmatched ')'
+"(?i:a)|(?m:b)" ok  | ok u | ok v
+"(?is:)" ok  | ok u | ok v

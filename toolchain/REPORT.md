@@ -278,3 +278,10 @@ neighbours.
 18. **A unit that includes `<openssl/ssl.h>` takes about 64 s to read**, most
     of a build of `src/net/net.c`, against a few seconds for a unit of the same
     size without it. Ambitious keeps OpenSSL to that one unit.
+19. **A call to a function with no declaration in scope, inside an operand of
+    `?:`, is reported without the callee's name**: `uint32_t e = a ? nowhere(a,
+    2) : 0;` gives `error: not lowered yet: type(unknown) (function uses)`, where
+    the same call as a plain initializer gives `not lowered yet:
+    undeclared(nowhere)`. The work-around is to declare the function first (12g's
+    package met it); the message should name the undeclared callee wherever the
+    call stands.

@@ -1,0 +1,42 @@
+replace TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' "baa" TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+match TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' ["a"] TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+exec TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' ["a"] TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+test TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' true TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+search TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' 1 TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+split ["b","b"] ["b","b"] 3
+subclass TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' ["a"] TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+"baa" ["a"] 1 0
+TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' 2 TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' 2
+TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' 3
+TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]' true
+1 0 object
+0 1
+0 2 -1 2
+-1 9 "xyz" 0 ["a"] 0
+"bonono" 0 ["a","a","a"] 0
+"-a-b-c-" "-😀-x-" "-😀-x-"
+["","","",""] 3 4 null
+"XXba" 0 ["a","a"] "-xabc"
+"aabX" 4
+"aaba" 0
+"aBcb" 7
+"bbb" 3 0
+"a$b$c" "a[.]b[.]c" "aacc" "$$$$$"
+"ab$2$0c" "a<b>c" "ac" "a$<n>c"
+"" "bb" "bababab" "-" ""
+"[a][][a][]" "aundefinedaundefined" "aB1cB3"
+"a_b_c" "a_b_c" "xyz" "bbbbbbbb"
+2000 ["1","22","333"] ["aaa","bbb"]
+RangeError: Invalid string length
+[0,"b",null] [0,"b",null] [0,"ab",null] [0,"ac",null,"a"] [0,"ac",null,"c"]
+[0,"abac","a","a"] [0,"aba","a",null] [0,"aab","aa"] [0,"xyq",null,null,"q"] [0,"abc",null]
+[1,"ac",null,"a"] [0,"abc",null] [0,"a",null,"a"] [0,"c",null,"c"] [0,"a","a"]
+[1,"aaa"] [0,"aaa"] [1,"aaab"] null null [0,""]
+[2,"123"] [2,"23"] [2,"ab"] [2,"abyz"] [0,"a.b+c@"]
+[0,"ab"] [0,"abxcdx"] [0,"ab\nc"] [1," \t "] [2,"ab"] [1,"\u0001\u0002"]
+[0,"12345"] [0,"1234","123","4"] [0,"aaaab"] [0,"singing"] [1,"āſ"]
+[0,"ABC"] [0,"12"] [0,"Aa"] [2,"ſ"] [0,"kK"] [0,"😀x"]
+[4,"QUICK Brown"] [3,"ab"] [3,"abab"] [2,"aaab"] [0,"XYz"] [1,"OO"]
+[0,"aš"] [2,"ša"] [1,"bŢ"] [2,"ba"] [2,"SS"] [9,"foo1"]
+2001 3000 ["a","b","c"]

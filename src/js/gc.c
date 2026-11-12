@@ -31,9 +31,12 @@ typedef struct gc_state {
     vector<uint8_t> om, sm, bm;       /* marks: objects, strings, BigInts */
     vector<uint32_t> ostack, sstack;  /* objects and strings to visit */
     vector<uint32_t> weaks;           /* the weak collections and WeakRefs met */
+    vector<uint32_t> finregs;         /* the FinalizationRegistries met */
+    vector<jv> cleanups;              /* each target that died: its registry's cleanup, its held value */
 } gc_state;
 #define GC_STATE_DROP(g) vector_uint8_t_drop(&(g).om); vector_uint8_t_drop(&(g).sm); vector_uint8_t_drop(&(g).bm); \
-    vector_uint32_t_drop(&(g).ostack); vector_uint32_t_drop(&(g).sstack); vector_uint32_t_drop(&(g).weaks)
+    vector_uint32_t_drop(&(g).ostack); vector_uint32_t_drop(&(g).sstack); vector_uint32_t_drop(&(g).weaks); \
+    vector_uint32_t_drop(&(g).finregs); vector_jv_drop(&(g).cleanups)
 
 static void mark_obj(js_vm *vm, gc_state *g, uint32_t o) {
     if (!o || o >= len(vm->objs) || g->om[o]) return;
@@ -96,6 +99,18 @@ static void visit_obj(js_vm *vm, gc_state *g, uint32_t o) {
     case JK_RECORD: mark_obj(vm, g, x.a); mark_val(vm, g, x.x); break;
     case JK_HOST: break;
     default:
+        if (x.flags & JO_FINREG) {
+            /* a FinalizationRegistry: its cleanup and its cells' held values kept, the cells'
+               array live but not followed, its targets and tokens weak */
+            mark_val(vm, g, x.x);
+            if (x.a && x.a < len(vm->objs) && !g->om[x.a]) {
+                g->om[x.a] = 1;
+                uint32_t base = vm->objs[x.a].a, n = vm->objs[x.a].b;
+                for (uint32_t i = 1; i < n; i += 3) mark_val(vm, g, vm->slots[base + i]);
+            }
+            push_back(g->finregs, o);
+            break;
+        }
         /* a WeakRef's target is weak; any other kind's x a value (a wrapper's, a date's, ...) */
         if (weak_ref(vm, o)) push_back(g->weaks, o);
         else mark_val(vm, g, x.x);
@@ -243,6 +258,51 @@ static void clear_weak(js_vm *vm, gc_state *g) {
         vm->objs[o].b = live;
         vm->objs[o].c = 0;
         vm->objs[o].x = jv_num(0);
+    }
+}
+
+/* each registry's cells whose targets died taken out, their cleanups to be called (after
+   the sweep: nothing is made while marks stand); a token that died, no cell's */
+static void finalize(js_vm *vm, gc_state *g) {
+    for (size_t r = 0; r < len(g->finregs); r++) {
+        uint32_t o = g->finregs[r], cells = vm->objs[o].a;
+        if (!cells) continue;
+        uint32_t base = vm->objs[cells].a, n = vm->objs[cells].b, w = 0;
+        for (uint32_t i = 0; i + 2 < n; i += 3) {
+            jv t = vm->slots[base + i], h = vm->slots[base + i + 1], tk = vm->slots[base + i + 2];
+            if (jv_is_obj(t) && !g->om[jv_idx(t)]) {
+                push_back(g->cleanups, vm->objs[o].x);
+                push_back(g->cleanups, h);
+                continue;
+            }
+            if (jv_is_obj(tk) && !g->om[jv_idx(tk)]) tk = JV_UNDEF;
+            vm->slots[base + w] = t;
+            vm->slots[base + w + 1] = h;
+            vm->slots[base + w + 2] = tk;
+            w += 3;
+        }
+        vm->objs[cells].b = w;
+    }
+}
+
+/* each buffer's chain of views (its c, then each view's x above 32 bits: src/js/typed.c)
+   kept to the views that live: the chain is weak, so that no buffer names a dead view's
+   index, which the sweep frees and a new object takes */
+static void prune_views(js_vm *vm, gc_state *g) {
+    for (uint32_t o = 1; o < len(vm->objs); o++) {
+        if (!g->om[o] || vm->objs[o].kind != JK_ARRAYBUFFER || !vm->objs[o].c) continue;
+        uint32_t prev = 0, v = vm->objs[o].c;
+        for (uint32_t guard = 0; v && v < len(vm->objs) && guard < (1u << 30); guard++) {
+            uint32_t next = (uint32_t)(vm->objs[v].x >> 32);
+            if (g->om[v]) {
+                if (prev) vm->objs[prev].x = (vm->objs[prev].x & 0xffffffffu) | ((uint64_t)v << 32);
+                else vm->objs[o].c = v;
+                prev = v;
+            }
+            v = next;
+        }
+        if (prev) vm->objs[prev].x &= 0xffffffffu;
+        else vm->objs[o].c = 0;
     }
 }
 
@@ -418,7 +478,9 @@ void js_gc(js_vm *vm) {
     mark_roots(vm, &g);
     drain(vm, &g);
     while (mark_ephemerons(vm, &g)) drain(vm, &g);
+    finalize(vm, &g);
     clear_weak(vm, &g);
+    prune_views(vm, &g);
     /* the timers and listeners no longer live let go of their functions */
     for (size_t i = 0; i < len(vm->timers); i++) if (!vm->timers[i].live) { vm->timers[i].fn = JV_UNDEF; vm->timers[i].args = 0; }
     for (size_t i = 0; i < len(vm->listeners); i++) if (!vm->listeners[i].live) vm->listeners[i].fn = 0;
@@ -429,6 +491,24 @@ void js_gc(js_vm *vm) {
     /* the caches that name objects or hold compiled code's sources */
     for (size_t i = 0; i < len(vm->ics); i++) { js_ic z = { 0, 0, 0, 0 }; vm->ics[i] = z; }
     clear(vm->eval_cache);
+    /* each cleanup a FinalizationRegistry owes, a task of its own due now, its held value
+       its argument (as V8 posts them after a collection) */
+    for (size_t i = 0; i + 1 < len(g.cleanups); i += 2) {
+        uint32_t args = js_array_new(vm, 0);
+        js_array_push(vm, args, g.cleanups[i + 1]);
+        js_timer t;
+        memset(&t, 0, sizeof t);
+        t.id = ++vm->timer_id;
+        t.due = vm->now;
+        t.interval = -1;
+        t.fn = g.cleanups[i];
+        t.live = 1;
+        t.seq = ++vm->timer_seq;
+        t.run = vm->cur_run;
+        t.args = args;
+        t.nargs = 1;
+        push_back(vm->timers, t);
+    }
     vm->gc_count++;
     uint64_t lo = 0, ls = 0;
     for (size_t i = 0; i < len(g.om); i++) lo += g.om[i];

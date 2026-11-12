@@ -86,9 +86,11 @@ enum {
     JK_ASYNC,        /* an async function's run: as a generator's, c its promise */
     JK_PROMISE,      /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
     JK_PROXY,        /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
-    JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length (src/js/typed.c) */
-    JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
-    JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
+    JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length, c its first view, x a resizable one's maximum
+                        (a double); resizable and detached in its flags (src/js/typed.c) */
+    JK_TYPEDARRAY,   /* a its buffer, b its length in elements now (0 out of its buffer's bounds), c its first byte
+                        in the buffer, x its declared length and the buffer's next view; its type in its flags */
+    JK_DATAVIEW,     /* a its buffer, b its length in bytes now, c its first byte in the buffer, x as a typed array's */
     JK_BIGINT,       /* a BigInt's wrapper: the value in x */
     JK_ASYNCGEN,     /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
                         mode, value and promise, three a request, the first the one its body answers), x its function */
@@ -134,11 +136,18 @@ typedef struct js_obj {
 #define JO_FASTCALL 16        /* a closure the interpreter calls with a frame of its own: not a class's
                                  constructor, without arguments or a rest parameter */
 #define JO_WEAK 32            /* a WeakMap, a WeakSet or a WeakRef (src/js/proxy.c) */
+#define JO_SEALED 64          /* sealed: every own property not configurable (src/js/proxy.c) */
+#define JO_FINREG 128         /* a FinalizationRegistry: x its cleanup, a its cells (an array of target, held
+                                 value and token, three a cell; the collector holds the targets and tokens
+                                 weakly, and for each target that died calls the cleanup with its held
+                                 value in a task of its own: src/js/gc.c) */
 
 /* a shape: the key it adds to its parent's, at which slot; its proto, its count */
 typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js_shape;
 #define JS_SHAPE_ACCESSOR 1   /* the slot holds an accessor pair */
 #define JS_SHAPE_HIDDEN 2     /* not enumerable */
+#define JS_SHAPE_READONLY 4   /* not writable (Object.defineProperty's; src/js/proxy.c) */
+#define JS_SHAPE_FIXED 8      /* not configurable (the same) */
 
 typedef struct js_str { uint32_t off, len, hash, atom, left, right; uint32_t rope; } js_str;
 
@@ -508,7 +517,10 @@ enum { JPX_PROXY, JPX_REVOCABLE, JPX_REVOKE,
        JPX_R_APPLY, JPX_R_CONSTRUCT, JPX_R_DEFINE, JPX_R_DELETE, JPX_R_GET, JPX_R_GETOWNDESC, JPX_R_GETPROTO, JPX_R_HAS,
        JPX_R_ISEXTENSIBLE, JPX_R_OWNKEYS, JPX_R_PREVENTEXT, JPX_R_SET, JPX_R_SETPROTO,
        JPX_WEAKMAP, JPX_WEAKSET, JPX_WM_GET, JPX_WM_SET, JPX_WM_HAS, JPX_WM_DELETE, JPX_WS_ADD,
-       JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER, JPX_N };
+       JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER,
+       /* Object's functions over the descriptors (builtins.c's Object passes them here) */
+       JPX_OBJ_DEFPROP, JPX_OBJ_DEFPROPS, JPX_OBJ_GETOWNDESC, JPX_OBJ_PREVENTEXT, JPX_OBJ_SEAL, JPX_OBJ_ISSEALED, JPX_OBJ_ISFROZEN,
+       JPX_N };
 jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_proxy_init(js_vm *vm, uint32_t first);
 /* typed arrays (src/js/typed.c): an element read and written (0: the conversion threw; an
@@ -523,9 +535,13 @@ enum { JTN_AB, JTN_AB_ISVIEW, JTN_AB_BYTELENGTH, JTN_AB_SLICE, JTN_AB_RESIZABLE,
        JTN_TOREVERSED, JTN_WITH, JTN_COPYWITHIN,
        JTN_DV, JTN_DV_BUFFER, JTN_DV_BYTELENGTH, JTN_DV_BYTEOFFSET, JTN_DV_GET, JTN_DV_SET,
        JTN_TE, JTN_TD, JTN_TE_ENCODING, JTN_TD_ENCODING, JTN_TD_FATAL, JTN_TD_IGNOREBOM, JTN_TE_ENCODE,
-       JTN_TE_ENCODEINTO, JTN_TD_DECODE, JTN_N };
+       JTN_TE_ENCODEINTO, JTN_TD_DECODE,
+       JTN_AB_RESIZE, JTN_AB_TRANSFER, JTN_AB_TRANSFER_FIXED, JTN_AB_DETACHED, JTN_SHARED, JTN_N };
 jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_typed_init(js_vm *vm, uint32_t first);
+/* the methods the typed arrays share with Array's (builtins.c puts them on %TypedArray%.prototype)
+   wrapped: each first refuses a typed array out of its buffer's bounds, as V8 does */
+void js_typed_shared(js_vm *vm);
 
 /* BigInts (src/js/bigint.c): made, read, compared, written; an operator's result (op one of
    the bytecode's OP_ADD .. OP_SHR); ToBigInt; the natives, after the first's id */
@@ -580,6 +596,9 @@ jv js_coll_op(js_vm *vm, uint32_t op, uint32_t c, jv k, jv v);
 uint32_t js_uni_upper(uint32_t c);
 uint32_t js_uni_lower(uint32_t c);
 uint32_t js_uni_special(uint32_t c, int upper, uint32_t *out);
+/* String.prototype.normalize's work (src/js/normalize.c): s in the form a value names
+   (undefined: NFC), JV_HOLE with a RangeError thrown for an unknown one */
+jv js_str_normalize(js_vm *vm, uint32_t s, jv form);
 
 /* strings */
 uint32_t js_str_new(js_vm *vm, const uint16_t *u, size_t n);

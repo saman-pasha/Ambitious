@@ -449,12 +449,19 @@ int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
     if (vm->objs[o].kind == JK_ARRAY) {
         uint32_t i;
         if (js_atom_index(vm, atom, &i)) {
-            if (i < vm->objs[o].b) vm->slots[vm->objs[o].a + i] = JV_HOLE;
+            if (i < vm->objs[o].b && vm->slots[vm->objs[o].a + i] != JV_HOLE) {
+                if (vm->objs[o].flags & JO_SEALED) return 0;
+                vm->slots[vm->objs[o].a + i] = JV_HOLE;
+            }
             return 1;
         }
     }
     uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
-    if (e) vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
+    if (e && vm->slots[vm->objs[o].slots + vm->shapes[e].slot] != JV_HOLE) {
+        /* a property not configurable (defineProperty's, a sealed object's) stays */
+        if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (vm->objs[o].flags & JO_SEALED)) return 0;
+        vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
+    }
     return 1;
 }
 
@@ -1018,8 +1025,9 @@ static int js_call_setter(js_vm *vm, jv acc, jv receiver, jv v) {
 }
 
 /* obj.atom = v; ic, when not 0, is filled for the next time. 1 set; 0 thrown; 2 refused
-   (a primitive's property, a frozen object's, a new one on an object not extensible, an
-   accessor without a setter), which strict code throws for */
+   (a primitive's property, a frozen object's, a read-only one, own or the nearest up the
+   prototypes, a new one on an object not extensible, an accessor without a setter), which
+   strict code throws for */
 int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
     if (!jv_is_obj(objv)) {
         if (jv_is_nullish(objv) || objv == JV_HOLE) {
@@ -1058,6 +1066,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         uint32_t slot = vm->shapes[e].slot;
         jv cur = vm->slots[vm->objs[o].slots + slot];
         if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { if (cur != JV_HOLE) return js_call_setter(vm, cur, objv, v); }
+        else if ((vm->shapes[e].flags & JS_SHAPE_READONLY) && cur != JV_HOLE) return 2;
         else {
             vm->slots[vm->objs[o].slots + slot] = v;
             /* a host object's writes are not cached: the host sees each one */
@@ -1074,10 +1083,12 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
             if (handled) return ok;
         }
         uint32_t pe = js_shape_find(vm, vm->objs[p].shape, atom);
-        if (pe && (vm->shapes[pe].flags & JS_SHAPE_ACCESSOR)) {
-            jv acc = vm->slots[vm->objs[p].slots + vm->shapes[pe].slot];
-            if (acc != JV_HOLE) return js_call_setter(vm, acc, objv, v);
-        }
+        if (!pe) continue;
+        jv pv = vm->slots[vm->objs[p].slots + vm->shapes[pe].slot];
+        if (pv == JV_HOLE) continue;                       /* deleted: not there */
+        if (vm->shapes[pe].flags & JS_SHAPE_ACCESSOR) return js_call_setter(vm, pv, objv, v);
+        if (vm->shapes[pe].flags & JS_SHAPE_READONLY) return 2;
+        break;                                             /* a data property: the receiver's own is made */
     }
     if (!(vm->objs[o].flags & JO_EXTENSIBLE)) return 2;
     uint32_t ns = js_shape_add(vm, sh, atom, 0);
@@ -1094,8 +1105,44 @@ int js_set(js_vm *vm, jv obj, uint32_t atom, jv v) { return js_set_ic(vm, obj, a
 /* strict code's assignment the object refused: a TypeError naming the property */
 static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
     uint32_t name = js_key_name(vm, key), m;
-    if (!jv_is_obj(obj)) m = js_str_concat(vm, js_str_ascii(vm, "Cannot create property '"), js_str_concat(vm, name, js_str_ascii(vm, "' on a primitive value")));
-    else m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to property '"), js_str_concat(vm, name, js_str_ascii(vm, "': the object is frozen, not extensible, or has only a getter for it")));
+    if (!jv_is_obj(obj)) {
+        /* V8's words: the primitive's type and its text */
+        const char *ty = jv_is_str(obj) ? "' on string '" : jv_is_num(obj) ? "' on number '" : jv_is_big(obj) ? "' on bigint '" :
+                         jv_is_sym(obj) ? "' on symbol '" : "' on boolean '";
+        uint32_t v = jv_is_sym(obj) ? js_sym_text(vm, jv_idx(obj)) : js_to_string(vm, obj);
+        if (vm->throwing) return;
+        m = js_str_concat(vm, js_str_ascii(vm, "Cannot create property '"),
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, ty), js_str_concat(vm, v, js_str_ascii(vm, "'")))));
+        js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+        return;
+    }
+    /* why: the property read-only (own, up the prototypes, or the object frozen), only a
+       getter's, or a new one on an object not extensible -- each in V8's words */
+    uint32_t o = jv_idx(obj);
+    int readonly = (vm->objs[o].flags & JO_FROZEN) != 0, getter = 0;
+    for (uint32_t p = o, depth = 0; p && depth < 10000 && !readonly && !getter; p = vm->objs[p].proto, depth++) {
+        uint32_t e = js_shape_find(vm, vm->objs[p].shape, key);
+        if (!e || vm->slots[vm->objs[p].slots + vm->shapes[e].slot] == JV_HOLE) continue;
+        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) getter = 1;
+        else if (vm->shapes[e].flags & JS_SHAPE_READONLY) readonly = 1;
+        break;
+    }
+    const char *of = vm->objs[o].kind == JK_ARRAY ? "[object Array]" : "#<Object>";
+    if (readonly)
+        m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of object '"), js_str_concat(vm, js_str_ascii(vm, of), js_str_ascii(vm, "'")))));
+    else if (getter)
+        m = js_str_concat(vm, js_str_ascii(vm, "Cannot set property "),
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, " of "), js_str_concat(vm, js_str_ascii(vm, of), js_str_ascii(vm, " which has only a getter")))));
+    else m = js_str_concat(vm, js_str_ascii(vm, "Cannot add property "), js_str_concat(vm, name, js_str_ascii(vm, ", object is not extensible")));
+    js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+}
+
+/* strict code's delete the object refused (a property not configurable): V8's TypeError */
+static void js_delete_refused(js_vm *vm, jv obj, uint32_t key) {
+    uint32_t name = js_key_name(vm, key);
+    const char *of = jv_is_obj(obj) && vm->objs[jv_idx(obj)].kind == JK_ARRAY ? "' of [object Array]" : "' of #<Object>";
+    uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot delete property '"), js_str_concat(vm, name, js_str_ascii(vm, of)));
     js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
 }
 
@@ -1499,7 +1546,12 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     if (mode == JI_STRING) {
         if (i >= vm->strs[src].len) return 0;
         uint16_t c = js_str_at(vm, src, i);
-        uint32_t w = c >= 0xD800 && c <= 0xDBFF && i + 1 < vm->strs[src].len ? 2 : 1;
+        /* a surrogate pair is one code point; a lone surrogate, high or low, one of its own */
+        uint32_t w = 1;
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < vm->strs[src].len) {
+            uint16_t d = js_str_at(vm, src, i + 1);
+            if (d >= 0xDC00 && d <= 0xDFFF) w = 2;
+        }
         *out = jv_str(js_str_sub(vm, src, i, i + w));
         vm->objs[it].b = i + w;
         return 1;
@@ -2546,7 +2598,11 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 if (!kok) break;
             }
             jv ov = stack[sp - 1];
-            { jv rv_ = jv_bool(jv_is_obj(ov) ? js_delete(vm, jv_idx(ov), atom) : 1); RELOAD(); stack[sp - 1] = rv_; }
+            int dr = jv_is_obj(ov) ? js_delete(vm, jv_idx(ov), atom) : 1;
+            RELOAD();
+            if (vm->throwing) break;
+            if (!dr && (funcs[frames[fi].func].flags & JF_STRICT)) { js_delete_refused(vm, ov, atom); RELOAD(); break; }
+            stack[sp - 1] = jv_bool(dr);
             break;
         }
         case OP_IN: {

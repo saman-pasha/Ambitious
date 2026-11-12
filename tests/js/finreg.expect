@@ -1,0 +1,16 @@
+TypeError: FinalizationRegistry.prototype.register: invalid target
+TypeError: FinalizationRegistry.prototype.register: target and holdings must not be same
+TypeError: Invalid unregisterToken ('5')
+TypeError: Invalid unregisterToken ('5')
+false
+TypeError: Method FinalizationRegistry.prototype.register called on incompatible receiver #<Object>
+TypeError: Method FinalizationRegistry.prototype.unregister called on incompatible receiver #<Object>
+TypeError: FinalizationRegistry: cleanup must be callable
+TypeError: Constructor FinalizationRegistry requires 'new'
+TypeError: FinalizationRegistry.prototype.register: invalid target
+[object FinalizationRegistry] function 2 1
+unregister b: true again: false
+the view kept: 28 7 7 x199
+out of bounds: 4 0
+cleaned up: held a, held c, held d
+kept still registered: kept

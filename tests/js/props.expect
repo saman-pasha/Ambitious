@@ -1,0 +1,24 @@
+read-only, sloppy: 1
+TypeError: Cannot assign to read only property 'x' of object '#<Object>'
+Reflect.set: false 1
+defineProperty still changes it: 5
+inherited read-only, sloppy: 5 false
+TypeError: Cannot assign to read only property 'x' of object '#<Object>'
+Reflect.set on the child: false 5
+setter got own on middle
+setter got a data property nearer than the setter
+nearer data property: undefined false
+delete not configurable, sloppy: false 1
+TypeError: Cannot delete property 'z' of #<Object>
+Reflect.deleteProperty: false
+a configurable one goes: true false
+sealed, written: 10 deleted: false 2
+TypeError: Cannot delete property 'b' of #<Object>
+sealed array: false 1
+TypeError: Cannot delete property '1' of [object Array]
+frozen: 1 false false
+TypeError: Cannot delete property 'f' of #<Object>
+TypeError: Cannot add property more, object is not extensible
+TypeError: Cannot set property g of #<Object> which has only a getter
+TypeError: Cannot create property 'x' on string 'abc'
+TypeError: Cannot create property 'x' on number '5'
