@@ -100,4 +100,9 @@ p(ta.length, ta.byteOffset, tr(() => ta.join()), ta.forEach.name, ta.findLastInd
 const fix = new Uint8Array(rab, 0, 1); rab.resize(0);
 p(fix.length, tr(() => new Uint8Array(rab, 0, 1)), tr(() => new Uint8Array(rab, 1)), new Uint8Array(rab).length, new DataView(rab).byteLength, tr(() => new DataView(rab, 1)));
 p(ArrayBuffer.isView(fix), ArrayBuffer.isView(new DataView(rab)), ArrayBuffer.isView(rab));
+const de = new ArrayBuffer(4), dev = new Uint8Array(de); de.transfer();
+p(tr(() => Object.defineProperty(new Uint8Array(2), 5, { value: 1 })), tr(() => Object.defineProperty(new Uint8Array(2), 0, { value: 1, configurable: false })),
+  tr(() => Object.defineProperty(dev, '0', { value: 1 })), tr(() => Object.defineProperty(new Uint8Array(2), 0, { get() {} })),
+  tr(() => Object.defineProperty(new Uint8Array(2), '-0', { value: 1 })), tr(() => Object.defineProperty(new Uint8Array(2), '1.5', { value: 1 })),
+  tr(() => Object.defineProperty(new Uint8Array(2), 1, { value: 9 })[1]), tr(() => Reflect.defineProperty(fix, 'NaN', { value: 1 })), tr(() => Object.defineProperty(fix, 'n', { value: 1 }).n));
 }

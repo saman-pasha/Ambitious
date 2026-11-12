@@ -291,9 +291,27 @@ static void px_reshape(js_vm *vm, uint32_t o, uint32_t key, jv nv, uint32_t nf) 
     }
 }
 
+/* is the key a CanonicalNumericIndexString ("-0", or a number's own string), *num its number? */
+static int px_numeric_key(js_vm *vm, uint32_t key, double *num) {
+    if (js_key_is_sym(key)) return 0;
+    js_str_flatten(vm, key);
+    uint32_t n = vm->strs[key].len, off = vm->strs[key].off;
+    if (n == 2 && vm->units[off] == '-' && vm->units[off + 1] == '0') { *num = -0.0; return 1; }
+    double d = js_str_to_num(vm, key);
+    *num = d;
+    return js_str_eq(vm, js_num_to_str(vm, d), key);
+}
+/* a typed array's numeric key that is no element of it (not an integer, -0, out of its bounds) */
+static int px_bad_index(js_vm *vm, uint32_t o, uint32_t key) {
+    double num = 0;
+    if (vm->objs[o].kind != JK_TYPEDARRAY || !px_numeric_key(vm, key, &num)) return 0;
+    return num != trunc(num) || (num == 0 && signbit(num)) || num < 0 || num >= (double)vm->objs[o].b;
+}
+
 /* OrdinaryDefineOwnProperty (ValidateAndApplyPropertyDescriptor): 1 done, 0 refused, -1 thrown */
 static int px_ordinary_define(js_vm *vm, uint32_t o, uint32_t key, const px_desc *d) {
     uint32_t k = vm->objs[o].kind, i = 0;
+    if (px_bad_index(vm, o, key)) return 0;
     if (k == JK_TYPEDARRAY && js_atom_index(vm, key, &i)) {
         /* a typed array's element: an index within it, a data property writable, enumerable, configurable */
         if (i >= vm->objs[o].b) return 0;
@@ -896,6 +914,7 @@ static int px_weak_key(js_vm *vm, jv k) {
 /* Object.defineProperty's refusal, in V8's words: a proxy's trap, or an ordinary object's */
 static jv px_define_refused(js_vm *vm, uint32_t o, uint32_t key) {
     if (vm->objs[o].kind == JK_PROXY) return px_error(vm, "'defineProperty' on proxy: trap returned falsish for property '", key, 1, "'", 0, 0, "");
+    if (px_bad_index(vm, o, key)) return js_throw_msg(vm, vm->type_error_proto, "Invalid typed array index");
     px_desc cur;
     int h = px_ordinary_own(vm, o, key, &cur);
     vm->throwing = 0;

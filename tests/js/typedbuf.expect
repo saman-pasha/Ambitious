@@ -48,3 +48,4 @@ TypeError: Cannot perform Construct on a detached ArrayBuffer TypeError: Cannot 
 2 2 "0,0" forEach 1 true 1
 0 RangeError: Invalid typed array length: 1 RangeError: Start offset 1 is outside the bounds of the buffer 0 0 RangeError: Start offset 1 is outside the bounds of the buffer
 true true false
+TypeError: Invalid typed array index TypeError: Cannot redefine property: 0 TypeError: Invalid typed array index TypeError: Cannot redefine property: 0 TypeError: Invalid typed array index TypeError: Invalid typed array index 9 false 1
