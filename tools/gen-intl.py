@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """tools/gen-intl.py [SRC] -- writes src/js/intl_data.c and src/js/intl_data.h, the locale
 data src/js/intl.c (ECMA-402, Intl) reads, from CLDR's JSON (the cldr-json packages of
-CLDR 48.0.0, the version node 22's ICU 78 carries):
+CLDR 48.2.0, the data node 22's ICU 78.3 carries):
 
     python3 tools/gen-intl.py          (fetches the packages from the npm registry)
-    python3 tools/gen-intl.py SRC      (SRC holds the packages' tarballs, NAME-48.0.0.tgz)
+    python3 tools/gen-intl.py SRC      (SRC holds the packages' tarballs, NAME-48.2.0.tgz,
+                                        and CLDR 48.2's common/main/root.xml)
 
 The output is a function of the files alone. What it carries:
   - the locales of LANGS, each with every region and script CLDR has for it, ICU's
@@ -13,7 +14,14 @@ The output is a function of the files alone. What it carries:
   - BCP 47's canonicalization: CLDR's language, script, territory and variant aliases,
     the Unicode extension's value aliases, and the likely subtags (all of them, for
     maximize, minimize and a territory alias of several regions);
-  - for each region: its calendars, its hour cycles, its week, its time zones.
+  - for each region: its calendars, its hour cycles, its week, its time zones;
+  - each locale's resources, as records: the symbols and patterns of each numbering
+    system it has (and root's arab and arabext, which ICU's root has and the JSON's und
+    leaves out: they come from root.xml), its compact patterns, its minimum grouping,
+    the currencies' symbols and names, the units' names and patterns. A locale keeps
+    the records that differ from its parent's;
+  - the numbering systems' digits, the currencies' minor units, the plural rules
+    (cardinal and ordinal), compiled.
 
 The C side holds no pointer: the data is one array of bytes packed four to a 32-bit
 word (cicilang reads a table of numbers much faster than a string literal), with the
@@ -26,9 +34,10 @@ import sys
 import tarfile
 import urllib.request
 
-CLDR = "48.0.0"
+CLDR = "48.2.0"
 PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-dates-full", "cldr-units-full",
             "cldr-localenames-full", "cldr-misc-full", "cldr-bcp47"]
+ROOT_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/root.xml"
 
 # the languages carried: the web's most used, as their locales name them
 LANGS = ("en de fr es it pt nl ru pl ja zh ko hi ar he tr sv da nb no fi cs uk el hu ro "
@@ -39,7 +48,9 @@ LANGS = ("en de fr es it pt nl ru pl ja zh ko hi ar he tr sv da nb no fi cs uk e
 ICU_ALIASES = {"zh-TW": "zh-Hant-TW", "zh-HK": "zh-Hant-HK", "zh-MO": "zh-Hant-MO",
                "zh-SG": "zh-Hans-SG", "zh-CN": "zh-Hans-CN",
                "sr-RS": "sr-Cyrl-RS", "sr-ME": "sr-Latn-ME", "sr-BA": "sr-Cyrl-BA",
-               "sr-XK": "sr-Cyrl-XK"}
+               "sr-XK": "sr-Cyrl-XK",
+               # ... and no_NO, the region of no's data (CLDR's default content is nb-NO)
+               "no-NO": "no"}
 # ... and leaves out some of CLDR's: these scripts are filtered from its data, and nb's
 # regions are aliases of no's in ICU 78 (nb-NO resolves to nb)
 ICU_DROPPED = {"el-polyton", "en-Dsrt", "en-Dsrt-US", "en-Shaw", "en-Shaw-GB", "zh-Latn",
@@ -74,6 +85,13 @@ class Source:
                     raw = r.read()
             self.tars[p] = tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz")
         self.cache = {}
+        # CLDR's root.xml: ICU's root has numbering systems' data the JSON's und leaves out
+        if src:
+            with open(os.path.join(src, "root.xml"), "rb") as f:
+                self.root_xml = f.read()
+        else:
+            with urllib.request.urlopen(ROOT_XML) as r:
+                self.root_xml = r.read()
 
     def json(self, package, path):
         key = (package, path)
@@ -288,16 +306,41 @@ def locales(S, B):
         p = parent_of(S, n, set(names))
         assert p is None or p in idx, (n, p)
     B.mark("IDB_LOCALES_N", len(names))
+    # each locale's resources: what differs from its parent's (root's in full), a table
+    # of (key, string) sorted by key
+    res = {n: resources(S, n, set(names)) for n in names}
+    root = resources(S, None, set(names))
     rows = []
     for n in names:
         p = parent_of(S, n, set(names))
         flags = 1 | (2 if n in coll else 0)
-        rows.append((B.string(n), idx[p] if p else 0xFFFF, flags))
+        base = res[p] if p else root
+        diff = sorted((k, v) for k, v in res[n].items() if base.get(k) != v)
+        rows.append((B.string(n), idx[p] if p else 0xFFFF, flags, diff))
+    # the strings first: a table is contiguous
+    for tag, parent, flags, diff in rows:
+        for k, v in diff:
+            B.string(v)
+    for v in root.values():
+        B.string(v)
+    tables = []
+    for tag, parent, flags, diff in rows:
+        tables.append((B.here(), len(diff)))
+        for k, v in diff:
+            B.u32(k)
+            B.u32(B.string(v))
+    B.mark("IDB_ROOT_RES_N", len(root))
+    B.mark("IDB_ROOT_RES")
+    for k, v in sorted(root.items()):
+        B.u32(k)
+        B.u32(B.string(v))
     B.mark("IDB_LOCALES")
-    for tag, parent, flags in rows:
+    for (tag, parent, flags, diff), (off, n) in zip(rows, tables):
         B.u32(tag)
         B.u16(parent)
         B.u16(flags)
+        B.u32(off)
+        B.u32(n)
     # the plural rules' locales, and the collations of each language
     write_pairs(B, "PLURAL_LOCALES", [(p, p) for p in plurals])
     write_pairs(B, "COLLATIONS", [(k, " ".join(sorted(["emoji", "eor"] + v))) for k, v in COLLATIONS.items()])
@@ -316,13 +359,294 @@ def locales(S, B):
 
 def main_data(S, package, name, file, names):
     """a locale's file of a package (its main/NAME/FILE's data), else its parent's: a
-    default content's or an alias's data is its parent's"""
+    default content's or an alias's data is its parent's; None, root's (und)"""
     while name:
         path = "main/%s/%s" % (name, file)
         if S.has(package, path):
             return S.json(package, path)["main"][name]
         name = parent_of(S, name, names)
-    return None
+    path = "main/und/%s" % file
+    return S.json(package, path)["main"]["und"] if S.has(package, path) else None
+
+
+# ---- the resources: a locale's data as records keyed (category << 20 | index), each a
+# string of fields joined by FS ----
+
+FS = "\x1f"
+K_NUM, K_COMPACT, K_MINGROUP, K_CUR, K_UNIT, K_UNITPER = 1, 2, 3, 4, 5, 6
+KEYS = {"IDK_NUM": K_NUM, "IDK_COMPACT": K_COMPACT, "IDK_MINGROUP": K_MINGROUP, "IDK_CUR": K_CUR,
+        "IDK_UNIT": K_UNIT, "IDK_UNITPER": K_UNITPER}
+
+
+def key(cat, i=0):
+    return cat << 20 | i
+
+
+# a numbering system's record: its symbols, its patterns, the currency names' unit patterns
+NUM_SYMBOLS = ["decimal", "group", "percentSign", "plusSign", "minusSign", "approximatelySign", "exponential",
+               "superscriptingExponent", "perMille", "infinity", "nan", "timeSeparator"]
+NUM_PATTERNS = [("decimalFormats", "standard"), ("percentFormats", "standard"), ("currencyFormats", "standard"),
+                ("currencyFormats", "accounting"), ("currencyFormats", "standard-noCurrency"),
+                ("scientificFormats", "standard"), ("miscPatterns", "approximately"), ("miscPatterns", "atLeast"),
+                ("miscPatterns", "atMost"), ("miscPatterns", "range")]
+COUNTS = ["zero", "one", "two", "few", "many", "other"]
+# the compact patterns' plural forms: CLDR's categories, then the explicit 1 ("1000-count-1")
+COMPACT_COUNTS = COUNTS + ["1"]
+COMPACT_STYLES = [("decimalFormats", "short", "decimalFormat"), ("decimalFormats", "long", "decimalFormat"),
+                  ("currencyFormats", "short", "standard")]
+# the numbering systems with data of their own in ICU's root (root.xml's explicit symbols and
+# patterns; every other one's are aliases of the locale's latn): read from CLDR's XML
+ROOT_NS = ("arab", "arabext")
+
+# the currencies carried by name (their symbols and display names); another code is its own symbol
+CURRENCIES = sorted(set(("USD EUR JPY GBP CNY AUD CAD CHF HKD SGD SEK KRW NOK NZD INR MXN TWD ZAR BRL DKK PLN THB "
+                         "ILS IDR CZK AED TRY HUF CLP SAR PHP MYR COP RUB RON PEN BHD BGN ARS EGP KWD NGN PKR QAR "
+                         "UAH VND KZT MAD BDT LKR ISK JOD OMR TND DZD IQD IRR KES GHS XOF XAF ETB UYU BOB PYG CRC "
+                         "DOP GTQ HNL NIO PAB BYN GEL AMD AZN MDL RSD MKD ALL BAM HRK TTD JMD").split()))
+# ECMA-402's sanctioned simple units, and CLDR's names for them; the compound ones CLDR has
+# whole, of two sanctioned units
+UNITS = {"acre": "area-acre", "bit": "digital-bit", "byte": "digital-byte", "celsius": "temperature-celsius",
+         "centimeter": "length-centimeter", "day": "duration-day", "degree": "angle-degree",
+         "fahrenheit": "temperature-fahrenheit", "fluid-ounce": "volume-fluid-ounce", "foot": "length-foot",
+         "gallon": "volume-gallon", "gigabit": "digital-gigabit", "gigabyte": "digital-gigabyte", "gram": "mass-gram",
+         "hectare": "area-hectare", "hour": "duration-hour", "inch": "length-inch", "kilobit": "digital-kilobit",
+         "kilobyte": "digital-kilobyte", "kilogram": "mass-kilogram", "kilometer": "length-kilometer",
+         "liter": "volume-liter", "megabit": "digital-megabit", "megabyte": "digital-megabyte", "meter": "length-meter",
+         "microsecond": "duration-microsecond", "mile": "length-mile", "mile-scandinavian": "length-mile-scandinavian",
+         "milliliter": "volume-milliliter", "millimeter": "length-millimeter", "millisecond": "duration-millisecond",
+         "minute": "duration-minute", "month": "duration-month", "nanosecond": "duration-nanosecond",
+         "ounce": "mass-ounce", "percent": "concentr-percent", "petabyte": "digital-petabyte", "pound": "mass-pound",
+         "second": "duration-second", "stone": "mass-stone", "terabit": "digital-terabit", "terabyte": "digital-terabyte",
+         "week": "duration-week", "yard": "length-yard", "year": "duration-year",
+         "kilometer-per-hour": "speed-kilometer-per-hour", "meter-per-second": "speed-meter-per-second",
+         "mile-per-hour": "speed-mile-per-hour", "liter-per-kilometer": "consumption-liter-per-kilometer",
+         "mile-per-gallon": "consumption-mile-per-gallon"}
+SANCTIONED = sorted(u for u in UNITS if "-per-" not in u)
+UNIT_IDS = sorted(UNITS)
+
+
+def root_numbers(S):
+    """root.xml's explicit symbols and patterns of the ROOT_NS numbering systems"""
+    import xml.etree.ElementTree as ET
+    out = {}
+    root = ET.fromstring(S.root_xml)
+    nums = root.find("numbers")
+    for ns in ROOT_NS:
+        d = {}
+        for el in nums.findall("symbols"):
+            if el.get("numberSystem") == ns and el.find("alias") is None:
+                for c in el:
+                    d["sym-" + c.tag] = c.text
+        for kind in ("decimalFormats", "percentFormats", "currencyFormats", "scientificFormats", "miscPatterns"):
+            for el in nums.findall(kind):
+                if el.get("numberSystem") != ns or el.find("alias") is not None:
+                    continue
+                for pat in el.iter("pattern"):
+                    # a pattern under a format length with no type, of the standard format
+                    alt = pat.get("alt")
+                    parent_types = [x.get("type") for x in el.iter() if pat in list(x)]
+                    t = parent_types[0] if parent_types and parent_types[0] else "standard"
+                    if kind == "miscPatterns":
+                        t = pat.get("type")
+                    if alt:
+                        t = t + "-" + alt
+                    d.setdefault(kind + "/" + t, pat.text)
+        # root's accounting format of a numbering system is an alias of its standard one
+        if "currencyFormats/standard" in d:
+            d.setdefault("currencyFormats/accounting", d["currencyFormats/standard"])
+        out[ns] = d
+    return out
+
+
+def ns_record(numbers, ns, rootns):
+    """a numbering system's record from a locale's numbers (CLDR JSON), its root data under it"""
+    syms = numbers.get("symbols-numberSystem-" + ns)
+    if syms is None and ns not in rootns:
+        return None
+    rd = rootns.get(ns, {})
+    f = []
+    for s in NUM_SYMBOLS:
+        v = (syms or {}).get(s)
+        f.append(v if v is not None else rd.get("sym-" + s, ""))
+    for kind, t in NUM_PATTERNS:
+        sect = numbers.get("%s-numberSystem-%s" % (kind, ns))
+        v = sect.get(t) if sect else None
+        if v is None and syms is None:
+            v = rd.get("%s/%s" % (kind, t))
+        f.append(v or "")
+    cur = numbers.get("currencyFormats-numberSystem-" + ns) or {}
+    for c in COUNTS:
+        f.append(cur.get("unitPattern-count-" + c, ""))
+    return FS.join(f)
+
+
+def compact_record(numbers, ns, style):
+    kind, length, inner = COMPACT_STYLES[style]
+    sect = numbers.get("%s-numberSystem-%s" % (kind, ns))
+    if not sect or length not in sect:
+        return None
+    pats = sect[length][inner] if inner in sect[length] else sect[length]
+    f = []
+    for mag in range(3, 15):
+        base = "1" + "0" * mag
+        for c in COMPACT_COUNTS:
+            f.append(pats.get("%s-count-%s" % (base, c), ""))
+    return FS.join(f)
+
+
+def symbol_flags(s):
+    """whether a currency symbol's last and first code points may take currency spacing
+    (ICU's [[:^S:]&[:^Z:]]: not a symbol, not a separator): 1 the last, 2 the first"""
+    import unicodedata
+    if not s:
+        return "0"
+    ok = lambda ch: unicodedata.category(ch)[0] not in "SZ"
+    return str((1 if ok(s[-1]) else 0) | (2 if ok(s[0]) else 0))
+
+
+def resources(S, name, names):
+    """a locale's resources, resolved (CLDR's JSON is); name None for root"""
+    r = {}
+    numdata = main_data(S, "cldr-numbers-full", name, "numbers.json", names)
+    numbers = numdata["numbers"]
+    rootns = root_numbers(S) if name is None else {}
+    for i, (ns, digits) in enumerate(NUMBERING):
+        rec = ns_record(numbers, ns, rootns)
+        if rec is not None:
+            r[key(K_NUM, i)] = rec
+        for style in range(len(COMPACT_STYLES)):
+            rec = compact_record(numbers, ns, style)
+            if rec is not None:
+                r[key(K_COMPACT, i * 4 + style)] = rec
+    r[key(K_MINGROUP)] = str(numbers.get("minimumGroupingDigits", "1"))
+    curdata = main_data(S, "cldr-numbers-full", name, "currencies.json", names)
+    curs = curdata["numbers"]["currencies"]
+    for i, c in enumerate(CURRENCIES):
+        d = curs.get(c, {})
+        sym = d.get("symbol", c)
+        narrow = d.get("symbol-alt-narrow", sym)
+        f = [sym, narrow, d.get("displayName", c)] + [d.get("displayName-count-" + n, "") for n in COUNTS]
+        f += [symbol_flags(sym), symbol_flags(narrow)]
+        r[key(K_CUR, i)] = FS.join(f)
+    unitdata = main_data(S, "cldr-units-full", name, "units.json", names)
+    units = unitdata["units"]
+    for i, u in enumerate(UNIT_IDS):
+        f = []
+        for width in ("long", "short", "narrow"):
+            d = units[width].get(UNITS[u], {})
+            f += [d.get("displayName", ""), d.get("perUnitPattern", "")] + [d.get("unitPattern-count-" + n, "") for n in COUNTS]
+        r[key(K_UNIT, i)] = FS.join(f)
+    r[key(K_UNITPER)] = FS.join(units[w]["per"]["compoundUnitPattern"] for w in ("long", "short", "narrow"))
+    return r
+
+
+def numbering_systems(S):
+    ns = S.json("cldr-core", "supplemental/numberingSystems.json")["supplemental"]["numberingSystems"]
+    return sorted((k, v["_digits"]) for k, v in ns.items() if v.get("_type") == "numeric")
+
+
+NUMBERING = []
+
+
+def number_tables(S, B):
+    """the numbering systems (each its ten digits; a record's index is its place here), the
+    currencies' digits (ISO 4217's minor units, CLDR's fractions, where not 2), the
+    currencies and units carried (their records' indexes)"""
+    write_pairs(B, "NUMBERING", NUMBERING)
+    fr = S.json("cldr-core", "supplemental/currencyData.json")["supplemental"]["currencyData"]["fractions"]
+    write_pairs(B, "CUR_DIGITS", [(c, v["_digits"]) for c, v in fr.items() if c != "DEFAULT" and v["_digits"] != "2"])
+    write_pairs(B, "CURRENCIES", [(c, c) for c in CURRENCIES])
+    write_pairs(B, "UNITS", [(u, u) for u in UNIT_IDS])
+    for name, k in KEYS.items():
+        B.mark(name, k)
+
+
+# ---- plural rules ----
+
+OPERANDS = "nivwftce"
+
+
+def compile_rule(text):
+    """a CLDR plural rule's condition ("i = 1 and v = 0 @integer ...") as bytes: its or'd
+    groups, each its and'd relations: operand, modulus, negated, its ranges"""
+    cond = text.split("@")[0].strip()
+    out = bytearray()
+    if not cond:
+        out.append(0)
+        return bytes(out)
+    ors = [g.strip() for g in cond.split(" or ")]
+    out.append(len(ors))
+    for g in ors:
+        rels = [r.strip() for r in g.split(" and ")]
+        out.append(len(rels))
+        for rel in rels:
+            neg = "!=" in rel
+            lhs, rhs = rel.split("!=" if neg else "=")
+            lhs = lhs.strip()
+            mod = 0
+            if "%" in lhs:
+                lhs, m = lhs.split("%")
+                mod = int(m)
+                lhs = lhs.strip()
+            assert lhs in OPERANDS, rel
+            ranges = []
+            for part in rhs.split(","):
+                part = part.strip()
+                if ".." in part:
+                    a, b = part.split("..")
+                    ranges.append((int(a), int(b)))
+                else:
+                    ranges.append((int(part), int(part)))
+            out.append(OPERANDS.index(lhs))
+            out += mod.to_bytes(4, "little")
+            out.append(1 if neg else 0)
+            out.append(len(ranges))
+            for a, b in ranges:
+                out += a.to_bytes(4, "little") + b.to_bytes(4, "little")
+    return bytes(out)
+
+
+def plural_tables(S, B):
+    """each plural locale's cardinal and ordinal rule sets: a set is its categories' count,
+    then each category (its index in zero one two few many other) and its condition"""
+    sets = {}
+    rows = []
+    for kind, name in (("cardinal", "plurals.json"), ("ordinal", "ordinals.json")):
+        d = S.json("cldr-core", "supplemental/" + name)["supplemental"]["plurals-type-" + kind]
+        for loc in sorted(d):
+            if loc.split("-")[0] not in LANGS:
+                continue
+            rules = d[loc]
+            cats = [c for c in COUNTS if "pluralRule-count-" + c in rules]
+            blob = bytearray([len(cats)])
+            for c in cats:
+                blob.append(COUNTS.index(c))
+                blob += compile_rule(rules["pluralRule-count-" + c])
+            blob = bytes(blob)
+            if blob not in sets:
+                sets[blob] = None
+            rows.append((kind[0] + ":" + loc, blob))
+    offs = {}
+    B.mark("IDB_PLURAL_SETS")
+    for blob in sets:
+        offs[blob] = B.here()
+        B.b += blob
+    # the table: "c:LOCALE" and "o:LOCALE" to their sets' offsets, written as numbers
+    write_pairs(B, "PLURALS", [(k, str(offs[v])) for k, v in rows])
+    # the plural form of a range from its ends' (CLDR's pluralRanges): 36 characters, the
+    # start's form by six then the end's, each the range's form's index or "-" (other)
+    pr = S.json("cldr-core", "supplemental/pluralRanges.json")["supplemental"]["plurals"]
+    rows = []
+    for loc, d in pr.items():
+        if loc.split("-")[0] not in LANGS:
+            continue
+        s = ""
+        for a in COUNTS:
+            for b in COUNTS:
+                v = d.get("pluralRange-start-%s-end-%s" % (a, b))
+                s += str(COUNTS.index(v)) if v else "-"
+        rows.append((loc, s))
+    write_pairs(B, "PLURAL_RANGES", rows)
 
 
 # ---- output ----
@@ -355,10 +679,13 @@ def main():
     src = sys.argv[1] if len(sys.argv) > 1 else None
     S = Source(src)
     B = Blob()
+    NUMBERING.extend(numbering_systems(S))
     locales(S, B)
     aliases(S, B)
     likely(S, B)
     regions(S, B)
+    number_tables(S, B)
+    plural_tables(S, B)
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     emit(B, os.path.join(root, "src/js/intl_data.c"), os.path.join(root, "src/js/intl_data.h"))
 
