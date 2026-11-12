@@ -1,8 +1,10 @@
-/* tests/exec/fonts.c -- the TrueType reader (src/paint/font.c): the built-in faces, and
-   the fixture pages' web fonts read as a page's are (a TrueType file and a WOFF), each
-   measured -- metrics rounded as Chromium rounds them, advances and kerning -- and a
-   glyph drawn; the families that name built-in faces; the code points a face has no
-   glyph for, drawn by its fallbacks; and bytes that are no font, refused. Every width
+/* tests/exec/fonts.c -- the font reader (src/paint/font.c): the built-in faces, and
+   the fixture pages' web fonts read as a page's are (a TrueType file and a WOFF; CFF,
+   CID-keyed CFF, CFF2 and CFF in WOFF), each measured -- metrics rounded as Chromium
+   rounds them, advances and kerning -- and a glyph drawn; the families that name
+   built-in faces; the code points a face has no glyph for, drawn by its fallbacks; fonts
+   whose CFF tables are broken, read and drawn without a read outside them; and bytes that
+   are no font, refused. Every width
    here is the one tools/gen-font.py's own reader gives from the Liberation and DejaVu
    files, kern table and all; the built-in faces' are Chromium's on a machine with those
    fonts within 0.01 px (tools/bench: 'AVAVAV To. Wa' at 16px is 111.4531 px in
@@ -40,6 +42,61 @@ static void show(const amb_fonts *f, int face, const char *what) {
            amb_advance(f, face, 'A', 16) * 3 + amb_advance(f, face, 'V', 16) * 3 + amb_advance(f, face, ' ', 16) * 2 +
            amb_advance(f, face, 'T', 16) + amb_advance(f, face, 'o', 16) + amb_advance(f, face, '.', 16) + amb_advance(f, face, 'W', 16) +
            amb_advance(f, face, 'a', 16));
+}
+
+/* the largest difference between two masks of a glyph (each w x h, its top left at ox,
+   oy), over the box of both */
+static int mask_diff(const vector<uint8_t> *m1, int w1, int h1, int x1, int y1, const vector<uint8_t> *m2, int w2, int h2, int x2, int y2) {
+    int lx = x1 < x2 ? x1 : x2, ly = y1 < y2 ? y1 : y2;
+    int hx = x1 + w1 > x2 + w2 ? x1 + w1 : x2 + w2, hy = y1 + h1 > y2 + h2 ? y1 + h1 : y2 + h2, worst = 0;
+    for (int y = ly; y < hy; y++)
+        for (int x = lx; x < hx; x++) {
+            int a = x >= x1 && x < x1 + w1 && y >= y1 && y < y1 + h1 ? at(*m1, (size_t)(y - y1) * w1 + (x - x1)) : 0;
+            int b = x >= x2 && x < x2 + w2 && y >= y2 && y < y2 + h2 ? at(*m2, (size_t)(y - y2) * w2 + (x - x2)) : 0;
+            if ((a > b ? a - b : b - a) > worst) worst = a > b ? a - b : b - a;
+        }
+    return worst;
+}
+
+static uint32_t be32(const vector<uint8_t> *b, size_t i) {
+    return (uint32_t)at(*b, i) << 24 | (uint32_t)at(*b, i + 1) << 16 | (uint32_t)at(*b, i + 2) << 8 | at(*b, i + 3);
+}
+
+/* a font's bytes with its table tag broken (from seed: a few bytes set at random, or a run
+   of them), read into fonts of their own, and each ASCII glyph drawn: *read and *glyphs
+   count those that were */
+static void mutate_and_draw(const vector<uint8_t> *src, const char *tag, uint32_t seed, unsigned long *read, unsigned long *glyphs) {
+    vector<uint8_t> b;
+    append_range(b, data(*src), len(*src));
+    uint32_t nt = (uint32_t)at(b, 4) << 8 | at(b, 5), off = 0, ln = 0;
+    for (uint32_t i = 0; i < nt; i++)
+        if (memcmp(data(b) + 12 + 16 * (size_t)i, tag, 4) == 0) { off = be32(&b, 12 + 16 * (size_t)i + 8); ln = be32(&b, 12 + 16 * (size_t)i + 12); }
+    if (!ln || (size_t)off + ln > len(b)) return;
+    uint32_t x = seed * 2654435761u;
+    int n = 1 + (int)(seed % 8);
+    for (int k = 0; k < n; k++) {
+        x = x * 1103515245u + 12345u;
+        size_t p = off + (x >> 8) % ln;
+        x = x * 1103515245u + 12345u;
+        if (seed % 5 == 0)
+            for (size_t j = 0; j < 1 + (x >> 16) % 64 && p + j < (size_t)off + ln; j++) b[p + j] = (uint8_t)(x >> (j % 24));
+        else b[p] = (uint8_t)(x >> 16);
+    }
+    amb_fonts g = {0};
+    defer(g) { AMB_FONTS_DROP(g); }
+    amb_fonts_load(&g);
+    int face = amb_fonts_add(&g, data(b), len(b));
+    if (face < 0) return;
+    (*read)++;
+    vector<float> acc;
+    vector<uint8_t> mask;
+    for (uint32_t c = 0x21; c < 0x7F; c++) {
+        int w, h, ox, oy;
+        if (amb_glyph_mask(&g, face, c, 16, 0, 0, &acc, &mask, &w, &h, &ox, &oy)) (*glyphs)++;
+    }
+    int w, h, ox, oy;
+    for (uint32_t c = 0xE000; c <= 0xE004; c++)
+        if (amb_glyph_mask(&g, face, c, 16, 0, 0, &acc, &mask, &w, &h, &ox, &oy)) (*glyphs)++;
 }
 
 int main(void) {
@@ -150,6 +207,79 @@ int main(void) {
         if (amb_glyph_mask(&f, lface[k], 'l', 40, 0, litalic[k], &acc, &mask, &w, &h, &ox, &oy))
             for (size_t i = 0; i < len(mask); i++) sum += at(mask, i);
         printf("'l' at 40px, %s: %dx%d at %d,%d, coverage %lu\n", lwhat[k], w, h, ox, oy, sum);
+    }
+    /* CFF outlines (Type 2 charstrings): the machine's fonts Chromium falls back to that have
+       them -- Loma for Thai, Inter, Unifont and Unifont Upper (CID-keyed) -- and the
+       fixture pages' web fonts (tools/gen-font.py --web: DejaVu's glyphs as CFF, CID-keyed
+       CFF, CFF2 and CFF in WOFF), whose glyphs are DejaVu's quadratic curves made cubic
+       exactly: drawn as the built-in faces draw them, to a few levels of 255 at an edge
+       (each curve flattened its own way). A web font with CFF outlines is unkerned (its kern
+       table is one Chromium's sanitizer drops). */
+    static const uint32_t cffcp[4] = { 0x0E01, 0x0376, 0x0560, 0x1F321 };
+    for (int k = 0; k < 4; k++) {
+        int by, w, h, ox, oy;
+        uint32_t g = amb_glyph_of(&f, 0, cffcp[k], &by);
+        amb_face fc;
+        amb_face_record(&f, by, &fc);
+        unsigned long sum = 0;
+        if (amb_glyph_mask(&f, 0, cffcp[k], 32, 0, 0, &acc, &mask, &w, &h, &ox, &oy))
+            for (size_t i = 0; i < len(mask); i++) sum += at(mask, i);
+        printf("U+%04X in face 0: drawn by face %d (U+%04X; outlines %d, a font of %u bytes, %u units an em), %.4f px; at 32px %dx%d at %d,%d, coverage %lu\n",
+               cffcp[k], by, g, fc.outlines, fc.size, fc.upem, amb_advance(&f, 0, cffcp[k], 16), w, h, ox, oy, sum);
+    }
+    static const char *const cffpath[4] = { "tests/pages/fonts/sans-cff.otf", "tests/pages/fonts/sans-cid.otf", "tests/pages/fonts/sans-cff2.otf",
+                                            "tests/pages/fonts/serif-cff.woff" };
+    static const char *const cffwhat[4] = { "web CFF", "web CID-keyed CFF", "web CFF2", "web CFF in WOFF" };
+    int cface[4];
+    for (int k = 0; k < 4; k++) {
+        vector<uint8_t> bytes;
+        if (!read_file(cffpath[k], &bytes)) { printf("no fixture font %s\n", cffpath[k]); return 1; }
+        cface[k] = amb_fonts_add(&f, data(bytes), len(bytes));
+        show(&f, cface[k], cffwhat[k]);
+        int same = k == 3 ? AMB_FACE_DV_SERIF : AMB_FACE_DV_SANS, worst = 0, drawn = 0;
+        const char *gs = "gQ&@eS%8";
+        for (int j = 0; gs[j]; j++)
+            for (int sz = 0; sz < 2; sz++) {
+                double size = sz ? 47.5 : 20, dx = sz ? 0.25 : 0;
+                vector<uint8_t> m1;
+                int w1, h1, x1, y1, w2, h2, x2, y2;
+                int d1 = amb_glyph_mask(&f, cface[k], (uint32_t)gs[j], size, dx, 0, &acc, &m1, &w1, &h1, &x1, &y1);
+                int d2 = amb_glyph_mask(&f, same, (uint32_t)gs[j], size, dx, 0, &acc, &mask, &w2, &h2, &x2, &y2);
+                if (!d1 || !d2) { printf("  '%c' at %gpx not drawn\n", gs[j], size); continue; }
+                drawn++;
+                int d = mask_diff(&m1, w1, h1, x1, y1, &mask, w2, h2, x2, y2);
+                if (d > worst) worst = d;
+            }
+        printf("  %d glyphs drawn as the built-in face draws them, within %d of 255\n", drawn, worst);
+    }
+    /* the made glyphs (U+E000 on): two curves that hflex, hflex1, flex1 and flex draw, each
+       closed by lines; frames whose numbers div works out, a bar whose height add would
+       (Chromium's FreeType takes add for an unknown operator: the bar has no area), and one
+       after it -- the same in CFF, CID-keyed CFF and CFF2 (which has no arithmetic glyph) */
+    for (uint32_t cp = 0xE000; cp <= 0xE004; cp++) {
+        printf("U+%04X at 32px:", cp);
+        for (int k = 0; k < 3; k++) {
+            int w, h, ox, oy, by;
+            unsigned long sum = 0;
+            int notdef = amb_glyph_of(&f, cface[k], cp, &by) == 0x110000;
+            if (amb_glyph_mask(&f, cface[k], cp, 32, 0, 0, &acc, &mask, &w, &h, &ox, &oy))
+                for (size_t i = 0; i < len(mask); i++) sum += at(mask, i);
+            printf(" %s %s%dx%d at %d,%d, coverage %lu;", cffwhat[k] + 4, notdef ? "its notdef " : "", w, h, ox, oy, sum);
+        }
+        printf("\n");
+    }
+    /* fonts whose CFF or CFF2 table is broken at random (a few bytes, or a run of them):
+       each read or refused, its glyphs drawn or not, and nothing read outside the font
+       (valgrind) */
+    static const char *const brokenwhat[3] = { "CFF", "CID-keyed CFF", "CFF2" };
+    static const char *const brokentag[3] = { "CFF ", "CFF ", "CFF2" };
+    static const uint32_t brokenmany[3] = { 300, 150, 150 };
+    for (int k = 0; k < 3; k++) {
+        vector<uint8_t> bytes;
+        read_file(cffpath[k], &bytes);
+        unsigned long read = 0, glyphs = 0;
+        for (uint32_t seed = 1; seed <= brokenmany[k]; seed++) mutate_and_draw(&bytes, brokentag[k], seed, &read, &glyphs);
+        printf("%u broken %s fonts: %lu read, %lu glyphs drawn\n", brokenmany[k], brokenwhat[k], read, glyphs);
     }
     /* what is no font: refused, and the faces read before are as they were */
     vector<uint8_t> junk;

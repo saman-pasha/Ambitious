@@ -1,5 +1,5 @@
-/* src/paint/font.c -- the fonts (font.h): TrueType read, measured, and its glyphs
-   drawn as coverage masks.
+/* src/paint/font.c -- the fonts (font.h): TrueType and OpenType read, measured, and
+   their glyphs drawn as coverage masks.
 
    One reader serves every face. The built-in faces' twenty fonts are TrueType subsets
    of the Liberation and DejaVu fonts (font_data.h, tools/gen-font.py), packed (LZ77 in
@@ -15,10 +15,14 @@
    by its index; a missing file passed over), once a process. A page's web font is read
    when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
    code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
-   hhea and OS/2, kerning pairs from kern (format 0, not GPOS's); its outlines (glyf,
-   through loca) are read when a glyph is drawn. OpenType with CFF outlines is no font
-   this reads; colour bitmaps (CBLC, CBDT) are measured in their strike's pixels, and not
-   drawn.
+   hhea and OS/2, kerning pairs from kern (format 0, not GPOS's; none for a web font
+   with CFF outlines, whose kern table Chromium's sanitizer drops); its outlines are read
+   when a glyph is drawn: TrueType's (glyf, through loca), or CFF's and CFF2's Type 2
+   charstrings (amb_cs_run: subroutines, the flex operators, div, blend at the default
+   instance, a CID-keyed font's Private DICT by FDSelect; hints skipped; the other
+   arithmetic operators taken as unknown ones, as Chromium's FreeType takes them; seac's
+   accented characters not composed), their cubic curves flattened as the quadratic ones
+   are. Colour bitmaps (CBLC, CBDT) are measured in their strike's pixels, and not drawn.
 
    Metrics are rounded as Chromium rounds them (SimpleFontData): the ascent, the
    descent and the line gap each to a whole px, a line's normal height their sum.
@@ -154,8 +158,8 @@ typedef struct amb_tables {
 } amb_tables;
 
 /* an sfnt's tables, from its directory at dir (a collection's font's; 0 for a font alone):
-   1 when it has those a face is read from -- cmap, head, hhea, hmtx, maxp, and TrueType
-   outlines or colour bitmaps (CFF's are not read) */
+   1 when it has those a face is read from -- cmap, head, hhea, hmtx, maxp, and outlines
+   (TrueType's, CFF's or CFF2's) or colour bitmaps */
 static int amb_sfnt_tables(const uint8_t *p, size_t n, size_t dir, amb_tables *t) {
     memset(t, 0, sizeof *t);
     uint32_t v = amb_u32(p, n, dir);
@@ -179,7 +183,7 @@ static int amb_sfnt_tables(const uint8_t *p, size_t n, size_t dir, amb_tables *t
         else if (amb_tag(p, n, r, "CBLC")) { t->cblc = off; t->cblc_len = len; }
         else if (amb_tag(p, n, r, "CBDT")) { t->cbdt = off; t->cbdt_len = len; }
     }
-    int outlines = (t->loca && t->glyf) || (t->cblc && t->cbdt);
+    int outlines = (t->loca && t->glyf) || t->cff || t->cff2 || (t->cblc && t->cbdt);
     return t->cmap && t->head && t->hhea && t->hmtx && t->maxp && outlines;
 }
 
@@ -339,7 +343,14 @@ static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, 
     fc->glyf_size = t.glyf_len;
     fc->outlines = AMB_GLYF;
     size_t strike = 0;
-    if (!(t.loca && t.glyf)) {
+    if (!(t.loca && t.glyf) && (t.cff2 || t.cff)) {
+        /* CFF's or CFF2's charstrings (amb_cff_outline reads the table a glyph at a time),
+           in units of head's em, as FreeType scales them (a FontMatrix's scale aside) */
+        fc->outlines = t.cff2 ? AMB_CFF2 : AMB_CFF;
+        fc->loca = 0;
+        fc->glyf = t.cff2 ? t.cff2 : t.cff;
+        fc->glyf_size = t.cff2 ? t.cff2_len : t.cff_len;
+    } else if (!(t.loca && t.glyf)) {
         /* colour bitmaps alone: measured in the pixels of its largest strike, which Skia
            scales to the size -- its advances and its line's ascent and descent the
            strike's (Chromium's emoji) */
@@ -384,9 +395,12 @@ static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, 
         uint32_t cp = at(*gl, fc->first + k).cp;
         if (cp < 128) fc->ascii[cp] = (uint16_t)k;
     }
-    /* kern: its format 0 subtables' horizontal pairs, in order */
+    /* kern: its format 0 subtables' horizontal pairs, in order -- but a web font's with CFF
+       outlines, whose kern table Chromium's sanitizer (OTS) drops: Chromium draws it
+       unkerned */
     fc->kfirst = (uint32_t)len(*kn);
-    if (t.kern && amb_u16(p, n, t.kern) == 0) {
+    int sanitized_away = !builtin && fc->outlines != AMB_GLYF;
+    if (t.kern && amb_u16(p, n, t.kern) == 0 && !sanitized_away) {
         uint32_t ntab = amb_u16(p, n, t.kern + 2);
         size_t r = t.kern + 4;
         for (uint32_t i = 0; i < ntab && r + 6 <= (size_t)t.kern + t.kern_len; i++) {
@@ -986,6 +1000,385 @@ static void amb_outline(const uint8_t *p, size_t n, const amb_face *fc, uint32_t
     }
 }
 
+/* ---- outlines: a glyph's points from CFF's or CFF2's Type 2 charstrings ---- */
+
+/* an INDEX of a CFF table (p, its n bytes) at off: its count, its offsets' size, where its
+   offsets and where its data begin (CFF2's count is 4 bytes, CFF's 2). 0 when it is none */
+static int amb_cff_index(const uint8_t *p, size_t n, size_t off, int cff2, uint32_t *count, uint32_t *osz, size_t *offs, size_t *dat) {
+    size_t h = off + (cff2 ? 4 : 2);
+    if (h > n) return 0;
+    *count = cff2 ? amb_u32(p, n, off) : amb_u16(p, n, off);
+    *osz = 0;
+    *offs = h;
+    *dat = h;
+    if (*count == 0) return 1;
+    if (h >= n || *count >= 0x1000000) return 0;
+    *osz = p[h];
+    if (*osz < 1 || *osz > 4) return 0;
+    *offs = h + 1;
+    *dat = *offs + (size_t)(*count + 1) * *osz - 1;
+    return *dat <= n;
+}
+
+/* an offset of osz bytes at off */
+static uint32_t amb_cff_off(const uint8_t *p, size_t n, size_t off, uint32_t osz) {
+    uint32_t v = 0;
+    for (uint32_t k = 0; k < osz; k++) v = v << 8 | (off + k < n ? p[off + k] : 0);
+    return v;
+}
+
+/* the i-th item of the INDEX at off: its bytes [*a, *b). 0 when it has none */
+static int amb_cff_item(const uint8_t *p, size_t n, size_t off, int cff2, uint32_t i, size_t *a, size_t *b) {
+    uint32_t count, osz;
+    size_t offs, dat;
+    if (!amb_cff_index(p, n, off, cff2, &count, &osz, &offs, &dat) || i >= count) return 0;
+    *a = dat + amb_cff_off(p, n, offs + (size_t)i * osz, osz);
+    *b = dat + amb_cff_off(p, n, offs + (size_t)(i + 1) * osz, osz);
+    return *a <= *b && *b <= n;
+}
+
+/* where the INDEX at off ends */
+static size_t amb_cff_index_end(const uint8_t *p, size_t n, size_t off, int cff2) {
+    uint32_t count, osz;
+    size_t offs, dat;
+    if (!amb_cff_index(p, n, off, cff2, &count, &osz, &offs, &dat)) return n;
+    if (count == 0) return dat;
+    return dat + amb_cff_off(p, n, offs + (size_t)count * osz, osz);
+}
+
+/* the operands (at most 4, into v) of operator op (12 x as 1200 + x) in a DICT, its bytes
+   [a, b): how many, or -1 when the DICT has no op. A real's value is not needed here: 0 */
+static int amb_cff_dict(const uint8_t *p, size_t n, size_t a, size_t b, int op, double *v) {
+    double st[48];
+    int sp = 0;
+    size_t i = a;
+    if (b > n) b = n;
+    while (i < b) {
+        uint32_t c = p[i];
+        if (c <= 27 || c == 31) {                  /* an operator (CFF2's vsindex, blend, vstore among them) */
+            int o = (int)c;
+            i++;
+            if (c == 12) { o = 1200 + (i < b ? p[i] : 0); i++; }
+            if (o == op) {
+                int k = sp < 4 ? sp : 4;
+                for (int j = 0; j < k; j++) v[j] = st[sp - k + j];
+                return k;
+            }
+            sp = 0;
+            continue;
+        }
+        double x;
+        if (c >= 32 && c <= 246) { x = (int)c - 139; i++; }
+        else if (c >= 247 && c <= 250) { if (i + 1 >= b) return -1; x = ((int)c - 247) * 256 + p[i + 1] + 108; i += 2; }
+        else if (c >= 251 && c <= 254) { if (i + 1 >= b) return -1; x = -((int)c - 251) * 256 - p[i + 1] - 108; i += 2; }
+        else if (c == 28) { if (i + 2 >= b) return -1; x = (int16_t)(p[i + 1] << 8 | p[i + 2]); i += 3; }
+        else if (c == 29) { if (i + 4 >= b) return -1; x = (int32_t)amb_u32(p, n, i + 1); i += 5; }
+        else if (c == 30) {
+            x = 0;
+            i++;
+            while (i < b) {
+                uint32_t d = p[i++];
+                if ((d & 0x0f) == 0x0f || (d >> 4) == 0x0f) break;
+            }
+        } else return -1;
+        if (sp < 48) st[sp++] = x;
+    }
+    return -1;
+}
+
+/* what a glyph's charstring needs of its table: whether it is CFF2, its CharStrings and
+   Global Subrs INDEXes, its local Subrs INDEX (0 none: a CID-keyed font's are its Font
+   DICT's, by FDSelect), CFF2's variation store and the Private DICT's vsindex */
+typedef struct amb_cffg {
+    int cff2;
+    size_t cs, gsubrs, lsubrs, vstore;
+    uint32_t vsindex;
+} amb_cffg;
+
+/* a CFF or CFF2 table (p, its n bytes) read for glyph gid: 1, or 0 when it is none this
+   reads */
+static int amb_cff_open(const uint8_t *p, size_t n, int cff2, uint32_t gid, amb_cffg *g) {
+    memset(g, 0, sizeof *g);
+    g->cff2 = cff2;
+    if (n < 5) return 0;
+    size_t hdr = p[2], top_a, top_b, gs;
+    double v[4];
+    if (cff2) {
+        if (p[0] != 2) return 0;
+        top_a = hdr;
+        top_b = hdr + amb_u16(p, n, 3);
+        gs = top_b;
+    } else {
+        if (p[0] != 1) return 0;
+        size_t tops = amb_cff_index_end(p, n, hdr, 0);
+        if (!amb_cff_item(p, n, tops, 0, 0, &top_a, &top_b)) return 0;
+        gs = amb_cff_index_end(p, n, amb_cff_index_end(p, n, tops, 0), 0);
+    }
+    if (top_b > n || gs >= n) return 0;
+    g->gsubrs = gs;
+    if (amb_cff_dict(p, n, top_a, top_b, 17, v) != 1 || v[0] <= 0 || v[0] >= n) return 0;
+    g->cs = (size_t)v[0];
+    if (cff2 && amb_cff_dict(p, n, top_a, top_b, 24, v) == 1 && v[0] > 0 && v[0] < n) g->vstore = (size_t)v[0];
+    /* the Private DICT: the Top DICT's, or that of the glyph's Font DICT (FDSelect's) */
+    size_t pa = 0, pb = 0;
+    if (amb_cff_dict(p, n, top_a, top_b, 1236, v) == 1 && v[0] > 0 && v[0] < n) {
+        size_t fdarray = (size_t)v[0];
+        uint32_t fd = 0;
+        if (amb_cff_dict(p, n, top_a, top_b, 1237, v) == 1 && v[0] > 0 && v[0] < n) {
+            size_t fs = (size_t)v[0];
+            uint32_t fmt = p[fs];
+            if (fmt == 0) fd = fs + 1 + gid < n ? p[fs + 1 + gid] : 0;
+            else if (fmt == 3 || fmt == 4) {
+                /* ranges: each its first glyph and its Font DICT, then a sentinel */
+                uint32_t w = fmt == 3 ? 3 : 6;
+                uint32_t nr = fmt == 3 ? amb_u16(p, n, fs + 1) : amb_u32(p, n, fs + 1);
+                size_t r = fs + (fmt == 3 ? 3 : 5);
+                for (uint32_t k = 0; k < nr && k < 65536; k++) {
+                    size_t e = r + (size_t)k * w;
+                    uint32_t first = fmt == 3 ? amb_u16(p, n, e) : amb_u32(p, n, e);
+                    uint32_t next = fmt == 3 ? amb_u16(p, n, e + w) : amb_u32(p, n, e + w);
+                    if (gid >= first && gid < next) { fd = fmt == 3 ? (e + 2 < n ? p[e + 2] : 0) : amb_u16(p, n, e + 4); break; }
+                }
+            }
+        }
+        size_t fa, fb;
+        if (!amb_cff_item(p, n, fdarray, cff2, fd, &fa, &fb)) return 0;
+        if (amb_cff_dict(p, n, fa, fb, 18, v) == 2) { pb = (size_t)v[0]; pa = (size_t)v[1]; }
+    } else if (amb_cff_dict(p, n, top_a, top_b, 18, v) == 2) { pb = (size_t)v[0]; pa = (size_t)v[1]; }
+    if (pa && pa < n && pb <= n - pa) {
+        pb += pa;
+        if (amb_cff_dict(p, n, pa, pb, 19, v) == 1 && v[0] > 0 && pa + (size_t)v[0] < n) g->lsubrs = pa + (size_t)v[0];
+        if (cff2 && amb_cff_dict(p, n, pa, pb, 22, v) == 1 && v[0] >= 0) g->vsindex = (uint32_t)v[0];
+    }
+    return 1;
+}
+
+/* a subroutine INDEX's bias (by its count, as Type 2 has it) */
+static int32_t amb_cff_bias(const uint8_t *p, size_t n, size_t off, int cff2) {
+    uint32_t count, osz;
+    size_t offs, dat;
+    if (!off || !amb_cff_index(p, n, off, cff2, &count, &osz, &offs, &dat)) return 0;
+    return count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
+}
+
+/* how many regions CFF2's blend takes deltas for: its variation store's data vsindex's */
+static uint32_t amb_cff_regions(const uint8_t *p, size_t n, const amb_cffg *g, uint32_t vsindex) {
+    if (!g->vstore) return 0;
+    size_t vs = g->vstore + 2;                      /* the store, past its length */
+    if (vsindex >= amb_u16(p, n, vs + 6)) return 0;
+    size_t d = vs + amb_u32(p, n, vs + 8 + 4 * (size_t)vsindex);
+    return amb_u16(p, n, d + 4);
+}
+
+/* a Type 2 charstring's interpreter: its operand stack, the pen, the stems declared (for
+   hintmask's bytes), whether the width was read, a contour open, endchar met, CFF2's
+   vsindex */
+typedef struct amb_cs {
+    double st[520];
+    int sp;
+    double x, y;
+    int nstems, width, open, done;
+    uint32_t vsindex;
+} amb_cs;
+
+/* a point of the outline at (x, y), in font units (on: 1 on the curve, 2 a cubic's
+   control) */
+static void amb_cs_pt(vector<amb_pt> *pts, double x, double y, uint8_t on) {
+    if (len(*pts) > 60000) return;
+    amb_pt q;
+    q.x = (int16_t)(x < -32768 ? -32768 : x > 32767 ? 32767 : amb_round(x));
+    q.y = (int16_t)(y < -32768 ? -32768 : y > 32767 ? 32767 : amb_round(y));
+    q.on = on;
+    q.end = 0;
+    push_back(pts, q);
+}
+
+/* the open contour closed: its last point its end */
+static void amb_cs_close(amb_cs *s, vector<amb_pt> *pts) {
+    if (s->open && len(*pts)) (*pts)[len(*pts) - 1].end = 1;
+    s->open = 0;
+}
+
+static void amb_cs_moveto(amb_cs *s, vector<amb_pt> *pts, double dx, double dy) {
+    amb_cs_close(s, pts);
+    s->x += dx;
+    s->y += dy;
+    amb_cs_pt(pts, s->x, s->y, 1);
+    s->open = 1;
+}
+
+static void amb_cs_lineto(amb_cs *s, vector<amb_pt> *pts, double dx, double dy) {
+    if (!s->open) amb_cs_moveto(s, pts, 0, 0);
+    s->x += dx;
+    s->y += dy;
+    amb_cs_pt(pts, s->x, s->y, 1);
+}
+
+static void amb_cs_curveto(amb_cs *s, vector<amb_pt> *pts, double dx1, double dy1, double dx2, double dy2, double dx3, double dy3) {
+    if (!s->open) amb_cs_moveto(s, pts, 0, 0);
+    double x1 = s->x + dx1, y1 = s->y + dy1, x2 = x1 + dx2, y2 = y1 + dy2;
+    s->x = x2 + dx3;
+    s->y = y2 + dy3;
+    amb_cs_pt(pts, x1, y1, 2);
+    amb_cs_pt(pts, x2, y2, 2);
+    amb_cs_pt(pts, s->x, s->y, 1);
+}
+
+/* the first stack-clearing operator met: how many of its operands (extra: 1 or 0) are the
+   glyph's width, which CFF puts first when they are one more than the operator takes
+   (CFF2 has none; hmtx gives the advance) */
+static int amb_cs_width(amb_cs *s, const amb_cffg *g, int extra) {
+    if (s->width || g->cff2) return 0;
+    s->width = 1;
+    return extra;
+}
+
+/* a charstring (its bytes [a, b)) run on s, its outline's points into pts; depth, how
+   many subroutines deep it is. 0 when it is broken */
+static int amb_cs_run(const uint8_t *p, size_t n, amb_cs *s, const amb_cffg *g, size_t a, size_t b, int depth, vector<amb_pt> *pts) {
+    size_t i = a;
+    if (depth > 10 || b > n) return 0;
+    while (i < b && !s->done) {
+        uint32_t c = p[i];
+        if (c >= 32 || c == 28) {
+            double x;
+            if (c == 28) { if (i + 2 >= b) return 0; x = (int16_t)(p[i + 1] << 8 | p[i + 2]); i += 3; }
+            else if (c <= 246) { x = (int)c - 139; i++; }
+            else if (c <= 250) { if (i + 1 >= b) return 0; x = ((int)c - 247) * 256 + p[i + 1] + 108; i += 2; }
+            else if (c <= 254) { if (i + 1 >= b) return 0; x = -((int)c - 251) * 256 - p[i + 1] - 108; i += 2; }
+            else { if (i + 4 >= b) return 0; x = (int32_t)amb_u32(p, n, i + 1) / 65536.0; i += 5; }
+            if (s->sp < 513) s->st[s->sp++] = x;
+            continue;
+        }
+        i++;
+        int k = 0, sp = s->sp;
+        if (c == 1 || c == 3 || c == 18 || c == 23) {                 /* hstem vstem hstemhm vstemhm */
+            k = amb_cs_width(s, g, sp % 2);
+            s->nstems += (sp - k) / 2;
+            s->sp = 0;
+        } else if (c == 19 || c == 20) {                              /* hintmask cntrmask: vstems, then the mask */
+            k = amb_cs_width(s, g, sp % 2);
+            s->nstems += (sp - k) / 2;
+            s->sp = 0;
+            i += (size_t)(s->nstems + 7) / 8;
+        } else if (c == 21) {                                         /* rmoveto */
+            k = amb_cs_width(s, g, sp > 2);
+            if (sp - k >= 2) amb_cs_moveto(s, pts, s->st[k], s->st[k + 1]);
+            s->sp = 0;
+        } else if (c == 22 || c == 4) {                               /* hmoveto vmoveto */
+            k = amb_cs_width(s, g, sp > 1);
+            if (sp - k >= 1) amb_cs_moveto(s, pts, c == 22 ? s->st[k] : 0, c == 22 ? 0 : s->st[k]);
+            s->sp = 0;
+        } else if (c == 5) {                                          /* rlineto */
+            for (; k + 1 < sp; k += 2) amb_cs_lineto(s, pts, s->st[k], s->st[k + 1]);
+            s->sp = 0;
+        } else if (c == 6 || c == 7) {                                /* hlineto vlineto, alternating */
+            int h = c == 6;
+            for (; k < sp; k++, h = !h) amb_cs_lineto(s, pts, h ? s->st[k] : 0, h ? 0 : s->st[k]);
+            s->sp = 0;
+        } else if (c == 8) {                                          /* rrcurveto */
+            for (; k + 5 < sp; k += 6) amb_cs_curveto(s, pts, s->st[k], s->st[k + 1], s->st[k + 2], s->st[k + 3], s->st[k + 4], s->st[k + 5]);
+            s->sp = 0;
+        } else if (c == 24) {                                         /* rcurveline */
+            for (; k + 5 < sp - 2; k += 6) amb_cs_curveto(s, pts, s->st[k], s->st[k + 1], s->st[k + 2], s->st[k + 3], s->st[k + 4], s->st[k + 5]);
+            if (k + 1 < sp) amb_cs_lineto(s, pts, s->st[k], s->st[k + 1]);
+            s->sp = 0;
+        } else if (c == 25) {                                         /* rlinecurve */
+            for (; k + 1 < sp - 6; k += 2) amb_cs_lineto(s, pts, s->st[k], s->st[k + 1]);
+            if (k + 5 < sp) amb_cs_curveto(s, pts, s->st[k], s->st[k + 1], s->st[k + 2], s->st[k + 3], s->st[k + 4], s->st[k + 5]);
+            s->sp = 0;
+        } else if (c == 26) {                                         /* vvcurveto */
+            double dx1 = 0;
+            if (sp % 4 == 1) { dx1 = s->st[0]; k = 1; }
+            for (; k + 3 < sp; k += 4) { amb_cs_curveto(s, pts, dx1, s->st[k], s->st[k + 1], s->st[k + 2], 0, s->st[k + 3]); dx1 = 0; }
+            s->sp = 0;
+        } else if (c == 27) {                                         /* hhcurveto */
+            double dy1 = 0;
+            if (sp % 4 == 1) { dy1 = s->st[0]; k = 1; }
+            for (; k + 3 < sp; k += 4) { amb_cs_curveto(s, pts, s->st[k], dy1, s->st[k + 1], s->st[k + 2], s->st[k + 3], 0); dy1 = 0; }
+            s->sp = 0;
+        } else if (c == 30 || c == 31) {                              /* vhcurveto hvcurveto, alternating */
+            int h = c == 31;
+            for (; k + 3 < sp; k += 4, h = !h) {
+                double last = sp - k == 5 ? s->st[k + 4] : 0;
+                if (h) amb_cs_curveto(s, pts, s->st[k], 0, s->st[k + 1], s->st[k + 2], last, s->st[k + 3]);
+                else amb_cs_curveto(s, pts, 0, s->st[k], s->st[k + 1], s->st[k + 2], s->st[k + 3], last);
+            }
+            s->sp = 0;
+        } else if (c == 10 || c == 29) {                              /* callsubr callgsubr */
+            if (sp < 1) return 0;
+            size_t idx = c == 10 ? g->lsubrs : g->gsubrs;
+            double num = s->st[sp - 1] + amb_cff_bias(p, n, idx, g->cff2);
+            s->sp--;
+            size_t sa, sb;
+            if (!idx || num < 0 || num > 0xffffff || !amb_cff_item(p, n, idx, g->cff2, (uint32_t)num, &sa, &sb)) return 0;
+            if (!amb_cs_run(p, n, s, g, sa, sb, depth + 1, pts)) return 0;
+        } else if (c == 11) {                                         /* return */
+            return 1;
+        } else if (c == 14) {                                         /* endchar (its accented-character form, seac, not read) */
+            amb_cs_width(s, g, 0);
+            amb_cs_close(s, pts);
+            s->done = 1;
+            return 1;
+        } else if (c == 15) {                                         /* vsindex (CFF2) */
+            if (sp >= 1) s->vsindex = (uint32_t)s->st[sp - 1];
+            s->sp = 0;
+        } else if (c == 16) {                                         /* blend (CFF2): its defaults kept, the default instance's */
+            if (sp < 1) return 0;
+            double nb = s->st[sp - 1];
+            double used = nb + nb * amb_cff_regions(p, n, g, s->vsindex);
+            if (nb < 0 || used > sp - 1) return 0;
+            s->sp = sp - 1 - (int)used + (int)nb;
+        } else if (c == 12) {                                         /* escape: the flexes, arithmetic */
+            if (i >= b) return 0;
+            uint32_t e = p[i++];
+            if (e == 35 && sp >= 13) {                                /* flex: two curves (drawn as curves, as FreeType does) */
+                amb_cs_curveto(s, pts, s->st[0], s->st[1], s->st[2], s->st[3], s->st[4], s->st[5]);
+                amb_cs_curveto(s, pts, s->st[6], s->st[7], s->st[8], s->st[9], s->st[10], s->st[11]);
+                s->sp = 0;
+            } else if (e == 34 && sp >= 7) {                          /* hflex */
+                double y0 = s->y;
+                amb_cs_curveto(s, pts, s->st[0], 0, s->st[1], s->st[2], s->st[3], 0);
+                amb_cs_curveto(s, pts, s->st[4], 0, s->st[5], y0 - s->y, s->st[6], 0);
+                s->sp = 0;
+            } else if (e == 36 && sp >= 9) {                          /* hflex1 */
+                double y0 = s->y;
+                amb_cs_curveto(s, pts, s->st[0], s->st[1], s->st[2], s->st[3], s->st[4], 0);
+                amb_cs_curveto(s, pts, s->st[5], 0, s->st[6], s->st[7], s->st[8], y0 - (s->y + s->st[7]));
+                s->sp = 0;
+            } else if (e == 37 && sp >= 11) {                         /* flex1 */
+                double dx = s->st[0] + s->st[2] + s->st[4] + s->st[6] + s->st[8], dy = s->st[1] + s->st[3] + s->st[5] + s->st[7] + s->st[9];
+                int across = fabs(dx) > fabs(dy);
+                amb_cs_curveto(s, pts, s->st[0], s->st[1], s->st[2], s->st[3], s->st[4], s->st[5]);
+                amb_cs_curveto(s, pts, s->st[6], s->st[7], s->st[8], s->st[9], across ? s->st[10] : -dx, across ? -dy : s->st[10]);
+                s->sp = 0;
+            } else if (e == 12 && sp >= 2) {                          /* div */
+                s->st[sp - 2] = s->st[sp - 1] != 0 ? s->st[sp - 2] / s->st[sp - 1] : 0;
+                s->sp--;
+            } else s->sp = 0;                                         /* the other arithmetic operators (and, add, */
+                                                                      /* ifelse, roll, ...) Chromium's FreeType runs */
+                                                                      /* as unknown ones (measured): the stack cleared */
+        } else s->sp = 0;                                             /* reserved: the stack cleared */
+    }
+    return 1;
+}
+
+/* glyph gid of the CFF (or, cff2, CFF2) table at off in a face's bytes (p, n), its len
+   bytes: its outline's contours into pts (their points on the curve, on 1, and a cubic's
+   controls, on 2), in font units. Its hints are skipped, as TrueType's instructions are */
+static void amb_cff_outline(const uint8_t *p, size_t n, size_t off, size_t len, int cff2, uint32_t gid, vector<amb_pt> *pts) {
+    if (off > n || len > n - off) return;
+    amb_cffg g;
+    if (!amb_cff_open(p + off, len, cff2, gid, &g)) return;
+    size_t a, b;
+    if (!amb_cff_item(p + off, len, g.cs, cff2, gid, &a, &b)) return;
+    amb_cs s;
+    memset(&s, 0, sizeof s);
+    s.vsindex = g.vsindex;
+    amb_cs_run(p + off, len, &s, &g, a, b, 0, pts);
+    amb_cs_close(&s, pts);
+}
+
 /* ---- drawing: the signed area of each line, accumulated per pixel (as font-rs does) ---- */
 
 static void amb_acc_line(vector<float> *acc, int W, int H, double x0, double y0, double x1, double y1) {
@@ -1061,6 +1454,27 @@ static void amb_acc_quad(vector<float> *acc, int W, int H, double x0, double y0,
     }
 }
 
+/* a cubic curve (CFF's) flattened as the quadratic ones are, into lines no further than
+   about a seventh of a pixel from it: its error after n even steps is at most 3/4 of its
+   larger second difference over n squared */
+static void amb_acc_cubic(vector<float> *acc, int W, int H, double x0, double y0, double x1, double y1, double x2, double y2,
+                          double x3, double y3) {
+    double ax = x0 - 2 * x1 + x2, ay = y0 - 2 * y1 + y2, bx = x1 - 2 * x2 + x3, by = y1 - 2 * y2 + y3;
+    double devsq = fmax(ax * ax + ay * ay, bx * bx + by * by);
+    if (27.0 * devsq < 1) { amb_acc_line(acc, W, H, x0, y0, x3, y3); return; }
+    int n = 1 + (int)floor(sqrt(sqrt(27.0 * devsq)));
+    if (n > 64) n = 64;
+    double px = x0, py = y0;
+    for (int i = 1; i <= n; i++) {
+        double t = (double)i / n, mt = 1 - t;
+        double a = mt * mt * mt, b = 3 * mt * mt * t, c = 3 * mt * t * t, d = t * t * t;
+        double qx = a * x0 + b * x1 + c * x2 + d * x3, qy = a * y0 + b * y1 + c * y2 + d * y3;
+        amb_acc_line(acc, W, H, px, py, qx, qy);
+        px = qx;
+        py = qy;
+    }
+}
+
 int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, double dx, int italic,
                    vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
     *w = 0;
@@ -1074,9 +1488,12 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     amb_glyph g = amb_gl(f, by, gi);
     amb_face fc;
     amb_rec(f, by, &fc);
-    if (fc.outlines != AMB_GLYF) return 0;                   /* colour bitmaps: not drawn */
+    if (fc.outlines == AMB_BITMAPS) return 0;                /* colour bitmaps: not drawn */
     vector<amb_pt> pts;
-    if (by < AMB_WEBFIRST) amb_outline(data(amb_sb) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    if (fc.outlines != AMB_GLYF) {
+        if (by < AMB_WEBFIRST) amb_cff_outline(data(amb_sb) + fc.base, fc.size, fc.glyf, fc.glyf_size, fc.outlines == AMB_CFF2, g.gid, &pts);
+        else amb_cff_outline(data(f->bytes) + fc.base, fc.size, fc.glyf, fc.glyf_size, fc.outlines == AMB_CFF2, g.gid, &pts);
+    } else if (by < AMB_WEBFIRST) amb_outline(data(amb_sb) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     uint32_t npts = (uint32_t)len(pts);
     if (npts == 0) return 0;
@@ -1101,7 +1518,8 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     clear(*acc);
     resize(acc, (size_t)W * (size_t)gh);
     /* each contour: from an on-curve start (or, every point off the curve, the middle
-       of its last and first), its lines and quadratic curves, back to the start */
+       of its last and first), its lines and curves -- quadratic, or cubic (CFF's: two
+       controls, on 2, then the point they lead to) -- back to the start */
     double ax = dx - x0, ay = (double)-y0;
     uint32_t c0 = 0;
     while (c0 < npts) {
@@ -1109,9 +1527,9 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
         while (c1 + 1 < npts && !at(pts, c1).end) c1++;
         uint32_t n = c1 - c0 + 1, k0 = 0;
         int found = 0;
-        for (uint32_t k = 0; k < n && !found; k++) if (at(pts, c0 + k).on) { k0 = k; found = 1; }
-        double sx, sy, cx, cy, qx = 0, qy = 0, px, py;
-        int ctrl = 0;
+        for (uint32_t k = 0; k < n && !found; k++) if (at(pts, c0 + k).on == 1) { k0 = k; found = 1; }
+        double sx, sy, cx, cy, qx = 0, qy = 0, rx = 0, ry = 0, px, py;
+        int ctrl = 0, cubic = 0;
         if (found) {
             amb_xf(at(pts, c0 + k0), s, slant, ax, ay, &sx, &sy);
             cx = sx;
@@ -1119,12 +1537,18 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
             for (uint32_t j = 1; j <= n; j++) {
                 amb_pt p = at(pts, c0 + (k0 + j) % n);
                 amb_xf(p, s, slant, ax, ay, &px, &py);
-                if (p.on) {
-                    if (ctrl) amb_acc_quad(acc, W, gh, cx, cy, qx, qy, px, py);
+                if (p.on == 2) {
+                    if (cubic) { rx = px; ry = py; }
+                    else { qx = px; qy = py; rx = px; ry = py; }
+                    cubic = 1;
+                } else if (p.on) {
+                    if (cubic) amb_acc_cubic(acc, W, gh, cx, cy, qx, qy, rx, ry, px, py);
+                    else if (ctrl) amb_acc_quad(acc, W, gh, cx, cy, qx, qy, px, py);
                     else amb_acc_line(acc, W, gh, cx, cy, px, py);
                     cx = px;
                     cy = py;
                     ctrl = 0;
+                    cubic = 0;
                 } else {
                     if (ctrl) {
                         double mx = (qx + px) * 0.5, my = (qy + py) * 0.5;

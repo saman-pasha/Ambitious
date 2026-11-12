@@ -17,13 +17,13 @@ dejavuserif: face 16, bold 17, italic 18, bold italic 19
 dejavusansmono: face 20, bold 21, italic 22, bold italic 23
 liberationsans: face -1, bold -1, italic -1, bold italic -1
 georgia: face -1, bold -1, italic -1, bold italic -1
-U+2605 in face 4: drawn by face 12 (its U+2605), 14.3438 px; kerning after 'A' 0.0000
+U+2605 in face 4: drawn by face 24 (its U+2605), 16.7188 px; kerning after 'A' 0.0000
 U+2011 in face 4: drawn by face 4 (its U+2010), 5.3281 px; kerning after 'A' 0.0000
 U+05D0 in face 20: drawn by face 0 (its U+05D0), 9.6016 px; kerning after 'A' 0.0000
 U+25B8 in face 0: drawn by face 12 (its U+25B8), 8.0312 px; kerning after 'A' 0.0000
-U+4E00 in face 4: drawn by face 24 (its U+4E00), 16.0000 px; kerning after 'A' 0.0000
+U+4E00 in face 4: drawn by face 25 (its U+4E00), 16.0000 px; kerning after 'A' 0.0000
 U+2010 in face 4: drawn by face 4 (its U+2010), 5.3281 px; kerning after 'A' 0.0000
-'A★A' in face 4: 35.6875 px
+'A★A' in face 4: 38.0625 px
 'Zażółć gęślą jaźń' at 16px: 111.0469, 130.7109, 163.7578, 163.2266 px in faces 0, 5, 20, 10
 'Tiếng Việt: ẩm thực, phở bò' at 16px: 179.7266, 212.6094, 260.0859, 259.2422 px in faces 0, 5, 20, 10
 'Ξεσκεπάζω την ψυχοφθόρα' at 16px: 177.4375, 211.0547, 221.5547, 220.8359 px in faces 0, 5, 20, 10
@@ -51,18 +51,18 @@ U+2602: in serif by face 12 (U+2602), 14.3438 px; in monospace by face 20 (U+260
 U+2702: in serif by face 12 (U+2702), 13.4062 px; in monospace by face 20 (U+2702), 9.6328 px
 U+0514: in serif by face 12 (U+0514), 18.7031 px; in monospace by face 12 (U+0514), 18.7031 px
 U+1EDF: in serif by face 0 (U+1EDF), 8.4609 px; in monospace by face 20 (U+1EDF), 9.6328 px
-U+4E00 in face 0: drawn by face 24 (U+4E00; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.0000 px
-U+3042 in face 0: drawn by face 24 (U+3042; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.3750 px
-U+AC00 in face 0: drawn by face 24 (U+AC00; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.0000 px
-U+0627 in face 0: drawn by face 25 (U+0627; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 4.4453 px
-U+0531 in face 0: drawn by face 25 (U+0531; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 12.2578 px
-U+10D0 in face 0: drawn by face 25 (U+10D0; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 8.1250 px
-U+0915 in face 0: drawn by face 26 (U+0915; a font of 1844796 bytes, 1000 units an em; at 16px 13 + 3 + 2), 11.9840 px
-U+1200 in face 0: drawn by face 27 (U+1200; a font of 3686360 bytes, 1000 units an em; at 16px 13 + 3 + 2), 8.3680 px
-U+1F600 in face 0: drawn by face 28 (U+1F600; a font of 10788068 bytes, 109 units an em; at 16px 15 + 4 + 0), 19.9633 px
-U+1F3FB in face 0: drawn by face 27 (U+1F3FB; a font of 3686360 bytes, 1000 units an em; at 16px 13 + 3 + 2), 16.0000 px
-U+0250 in face 0: drawn by face 29 (U+0250; a font of 393692 bytes, 2048 units an em; at 16px 14 + 3 + 1), 7.1016 px
-U+0531 in face 20: drawn by face 30 (U+0531; a font of 343140 bytes, 2048 units an em; at 16px 15 + 4 + 0), 9.6328 px
+U+4E00 in face 0: drawn by face 25 (U+4E00; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.0000 px
+U+3042 in face 0: drawn by face 25 (U+3042; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.3750 px
+U+AC00 in face 0: drawn by face 25 (U+AC00; a font of 16791251 bytes, 1024 units an em; at 16px 15 + 5 + 1), 16.0000 px
+U+0627 in face 0: drawn by face 26 (U+0627; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 4.4453 px
+U+0531 in face 0: drawn by face 26 (U+0531; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 12.2578 px
+U+10D0 in face 0: drawn by face 26 (U+10D0; a font of 759720 bytes, 2048 units an em; at 16px 15 + 4 + 0), 8.1250 px
+U+0915 in face 0: drawn by face 27 (U+0915; a font of 1844796 bytes, 1000 units an em; at 16px 13 + 3 + 2), 11.9840 px
+U+1200 in face 0: drawn by face 28 (U+1200; a font of 3686360 bytes, 1000 units an em; at 16px 13 + 3 + 2), 8.3680 px
+U+1F600 in face 0: drawn by face 29 (U+1F600; a font of 10788068 bytes, 109 units an em; at 16px 15 + 4 + 0), 19.9633 px
+U+1F3FB in face 0: drawn by face 28 (U+1F3FB; a font of 3686360 bytes, 1000 units an em; at 16px 13 + 3 + 2), 16.0000 px
+U+0250 in face 0: drawn by face 30 (U+0250; a font of 393692 bytes, 2048 units an em; at 16px 14 + 3 + 1), 7.1016 px
+U+0531 in face 20: drawn by face 31 (U+0531; a font of 343140 bytes, 2048 units an em; at 16px 15 + 4 + 0), 9.6328 px
 U+E000 in face 0: drawn by face 0 (U+110000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 12.4453 px
 U+200D in face 0: drawn by face 0 (U+0000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
 U+FE0F in face 0: drawn by face 0 (U+0000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
@@ -78,5 +78,25 @@ web serif bold (WOFF): face 49, 242 code points, 710 kerning pairs; at 16px asce
 'l' at 40px, serif italic: 10x29 at 2,-28, coverage 24558
 'l' at 40px, serif italic, italic asked: 10x29 at 2,-28, coverage 24558
 'l' at 40px, web serif bold, italic asked: 19x32 at 1,-31, coverage 58913
+U+0E01 in face 0: drawn by face 32 (U+0E01; outlines 1, a font of 50128 bytes, 2048 units an em), 9.6875 px; at 32px 17x19 at 1,-18, coverage 26131
+U+0376 in face 0: drawn by face 24 (U+0376; outlines 1, a font of 605092 bytes, 2048 units an em), 12.0547 px; at 32px 21x25 at 2,-24, coverage 51568
+U+0560 in face 0: drawn by face 33 (U+0560; outlines 1, a font of 5105304 bytes, 64 units an em), 8.0000 px; at 32px 15x17 at 2,-16, coverage 26520
+U+1F321 in face 0: drawn by face 34 (U+1F321; outlines 1, a font of 5857632 bytes, 64 units an em), 16.0000 px; at 32px 11x25 at 10,-24, coverage 36720
+web CFF: face 50, 100 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 126.1172 px (unkerned 126.1172)
+  16 glyphs drawn as the built-in face draws them, within 31 of 255
+web CID-keyed CFF: face 51, 100 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 126.1172 px (unkerned 126.1172)
+  16 glyphs drawn as the built-in face draws them, within 31 of 255
+web CFF2: face 52, 99 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 126.1172 px (unkerned 126.1172)
+  16 glyphs drawn as the built-in face draws them, within 31 of 255
+web CFF in WOFF: face 53, 100 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 130.8750 px (unkerned 130.8750)
+  16 glyphs drawn as the built-in face draws them, within 25 of 255
+U+E000 at 32px: CFF 21x22 at 1,-21, coverage 56705; CID-keyed CFF 21x22 at 1,-21, coverage 56705; CFF2 21x22 at 1,-21, coverage 56705;
+U+E001 at 32px: CFF 21x22 at 1,-21, coverage 65273; CID-keyed CFF 21x22 at 1,-21, coverage 65273; CFF2 21x22 at 1,-21, coverage 65273;
+U+E002 at 32px: CFF 21x22 at 1,-21, coverage 55036; CID-keyed CFF 21x22 at 1,-21, coverage 55036; CFF2 21x22 at 1,-21, coverage 55036;
+U+E003 at 32px: CFF 21x22 at 1,-21, coverage 55981; CID-keyed CFF 21x22 at 1,-21, coverage 55981; CFF2 21x22 at 1,-21, coverage 55981;
+U+E004 at 32px: CFF 27x23 at 1,-22, coverage 83432; CID-keyed CFF 27x23 at 1,-22, coverage 83432; CFF2 its notdef 18x30 at 1,-23, coverage 37086;
+300 broken CFF fonts: 300 read, 29432 glyphs drawn
+150 broken CID-keyed CFF fonts: 150 read, 14840 glyphs drawn
+150 broken CFF2 fonts: 150 read, 14596 glyphs drawn
 a truncated font: -1; text: -1; an empty file: -1
-50 faces
+54 faces

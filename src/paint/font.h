@@ -2,9 +2,9 @@
    font_data.h (tools/gen-font.py: TrueType subsets of the Liberation and DejaVu fonts),
    the system faces (the machine's fonts Chromium falls back to, read from their files
    when a page first needs them) and a page's web fonts (@font-face: TrueType, OpenType
-   with TrueType outlines, WOFF 1), each read by one sfnt reader into an amb_fonts, whose
-   owner drops its vectors (AMB_FONTS_DROP). Layout asks it for advances, kerning and
-   metrics; paint for each glyph's coverage at a size.
+   with TrueType, CFF or CFF2 outlines, WOFF 1), each read by one sfnt reader into an
+   amb_fonts, whose owner drops its vectors (AMB_FONTS_DROP). Layout asks it for advances,
+   kerning and metrics; paint for each glyph's coverage at a size.
 
    The built-in faces are the ones Chromium draws with on a Linux machine whose fonts are
    these: Liberation Serif for serif (the default), Liberation Sans for sans-serif and
@@ -36,17 +36,18 @@
    (gfx::GetFallbackFontForChar: Inter, DejaVu Sans, WenQuanYi Zen Hei for CJK, kana and
    hangul, Loma, IPAGothic, FreeSans for Devanagari, FreeSerif for Ethiopic, ...), the
    first whose cmap has it, for any code point but a private-use one; else the face's
-   notdef. A system font whose file is missing, or that this cannot read (CFF outlines:
-   Inter, Loma, Unifont), is passed over. U+2011 is drawn as U+2010 by a face that has only
-   that (as HarfBuzz draws it), U+00A0 as a space, and a default-ignorable code point as
-   nothing.
+   notdef. A system font whose file is missing, or that this cannot read, is passed over.
+   U+2011 is drawn as U+2010 by a face that has only that (as HarfBuzz draws it), U+00A0
+   as a space, and a default-ignorable code point as nothing.
 
    A glyph's outline is TrueType's (glyf): contours of points on and off the curve,
-   quadratic, a composite glyph's components placed by their transforms.
-   amb_glyph_mask draws one: its contours flattened into lines whose signed area each
-   pixel accumulates (exact coverage, non-zero fill), at any size, at a fraction of a
-   pixel across, upright or, for an italic style a face is not italic in, slanted. A
-   face of colour bitmaps (CBLC and CBDT: Noto Color Emoji) is measured, not drawn. */
+   quadratic, a composite glyph's components placed by their transforms; or CFF's or
+   CFF2's (Inter, Loma, Unifont, web fonts): Type 2 charstrings, run into contours of
+   cubic curves (their controls' points on 2). amb_glyph_mask draws one: its contours
+   flattened into lines whose signed area each pixel accumulates (exact coverage,
+   non-zero fill), at any size, at a fraction of a pixel across, upright or, for an
+   italic style a face is not italic in, slanted. A face of colour bitmaps (CBLC and
+   CBDT: Noto Color Emoji) is measured, not drawn. */
 #ifndef AMB_FONT_H
 #define AMB_FONT_H
 #include <stdint.h>
@@ -78,7 +79,7 @@ enum { AMB_NSYSTEM = 24, AMB_NFACES = 32, AMB_WEBFIRST = AMB_NBUILTIN + AMB_NSYS
    (kfirst, kcount in kerns, from its face's first) */
 typedef struct amb_glyph { uint32_t cp, gid; uint16_t advance, kcount; uint32_t kfirst; } amb_glyph;
 typedef struct amb_kern { uint32_t pair; int32_t value; } amb_kern;     /* left gid << 16 | right gid, in order */
-typedef struct amb_pt { int16_t x, y; uint8_t on, end; } amb_pt;        /* end: the last point of its contour */
+typedef struct amb_pt { int16_t x, y; uint8_t on, end; } amb_pt;        /* on: 1 on the curve, 0 a quadratic's control, 2 a cubic's; end: the last point of its contour */
 /* a face's outlines: TrueType's quadratic contours (glyf), CFF's or CFF2's cubic ones,
    or colour bitmaps (CBLC and CBDT: its advances theirs, its glyphs drawn as nothing) */
 enum { AMB_GLYF, AMB_CFF, AMB_CFF2, AMB_BITMAPS };
@@ -116,8 +117,8 @@ typedef struct amb_fonts {
    read when a face is first asked for, once a process */
 void amb_fonts_load(amb_fonts *f);
 
-/* a web font's bytes (TrueType, OpenType with TrueType outlines, WOFF) read into f as a
-   face: its index, or -1 when they are no font this reads */
+/* a web font's bytes (TrueType, OpenType with TrueType, CFF or CFF2 outlines, WOFF) read
+   into f as a face: its index, or -1 when they are no font this reads */
 int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n);
 
 /* the built-in face a family the cascade computed names (src/css: serif, sans-serif,

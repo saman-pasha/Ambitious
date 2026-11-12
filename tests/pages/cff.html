@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>CFF</title>
+<style>
+/* tests/pages/cff.html -- glyphs with CFF outlines (Type 2 charstrings, their cubic curves
+   flattened as TrueType's quadratic ones are): the machine's fonts Chromium falls back to
+   that have them -- Loma for Thai, Inter for letters and symbols no font before it has,
+   Unifont and Unifont Upper (CID-keyed, FDSelect format 3) for what no other font has --
+   upright and, slanted as Skia slants them, italic; then the fixture pages' web fonts made
+   by tools/gen-font.py --web from DejaVu's: CFF (subroutines local and global, hints,
+   widths, the flex operators, div, and add, at which Chromium's FreeType stops a glyph),
+   CID-keyed CFF (two Font DICTs by FDSelect format 0, subroutine biases of 1,131), CFF2
+   (blends, vsindex, FDSelect format 3: the default instance) and CFF in WOFF 1, at 16px
+   and 48px; a kerning pair of their kern tables, which Chromium's sanitizer drops from a
+   font with CFF outlines, unkerned (w.). Each line's text uses no pair a system font kerns
+   (Ambitious reads no GPOS kerning) and no mark a font's GPOS places. The spans' boxes are
+   held to Chromium's (tests/pages/cff.chromium), their drawing region by region
+   (cff.shot.png, cff.regions). */
+@font-face { font-family: "Web CFF"; src: url(fonts/sans-cff.otf) format("opentype") }
+@font-face { font-family: "Web CID"; src: url(fonts/sans-cid.otf) format("opentype") }
+@font-face { font-family: "Web CFF2"; src: url(fonts/sans-cff2.otf) format("opentype") }
+@font-face { font-family: "Web Woff"; src: url(fonts/serif-cff.woff) format("woff") }
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; }
+span { white-space: nowrap; }
+.i { font-style: italic; }
+.cff { font-family: "Web CFF"; }
+.cid { font-family: "Web CID"; }
+.cff2 { font-family: "Web CFF2"; }
+.woff { font-family: "Web Woff"; }
+.big { font-size: 48px; }
+</style></head>
+<body>
+<p id=text-p-th><span id=text-th>ภาษาไทย ประเทศ ตลาด เวลา นคร</span></p>
+<p id=text-p-inter><span id=text-inter>Ͷ Ϳ ẝ ẟ Ỻ Ⓐ Ⓑ Ⓒ</span></p>
+<p class=i id=text-p-inter-i><span id=text-inter-i>Ͷ Ϳ ẝ ẟ Ⓐ Ⓑ</span></p>
+<p id=text-p-uni><span id=text-uni>ՠ ఐ ఝ ಝ ຠ ཁ ၜ Ⴧ ឈ</span></p>
+<p id=text-p-upper><span id=text-upper>🌡 🌤 🌥 🌦</span></p>
+<p class=cff id=text-p-cff><span id=text-cff>Sphinx of black quartz, judge my vow.</span></p>
+<p class=cff id=text-p-made><span id=text-made>&#xE000; &#xE001; &#xE002; &#xE003; &#xE004;</span></p>
+<p class=cid id=text-p-cid><span id=text-cid>Sphinx of black quartz, judge my vow.</span></p>
+<p class=cff2 id=text-p-cff2><span id=text-cff2>Sphinx of black quartz, judge my vow. &#xE000; &#xE003;</span></p>
+<p class=woff id=text-p-woff><span id=text-woff>Sphinx of black quartz, judge my vow.</span></p>
+<p class="cff big" id=text-p-big><span id=text-big>Quartz &amp; Sphinx</span></p>
+<p class="cff2 big" id=text-p-big2><span id=text-big2>Blend vow</span></p>
+</body></html>

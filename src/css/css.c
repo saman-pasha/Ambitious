@@ -2958,10 +2958,12 @@ static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *
     css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base, cx->scope_host);
 }
 
-/* the bytes begin as a font the painter reads: TrueType, OpenType, WOFF */
+/* the bytes begin as a font the painter reads: TrueType, OpenType (with TrueType or CFF
+   outlines), WOFF */
 static int css_font_magic(const char *b, size_t n) {
     if (n < 4) return 0;
-    return (b[0] == 0 && b[1] == 1 && b[2] == 0 && b[3] == 0) || memcmp(b, "true", 4) == 0 || memcmp(b, "wOFF", 4) == 0;
+    return (b[0] == 0 && b[1] == 1 && b[2] == 0 && b[3] == 0) || memcmp(b, "true", 4) == 0 || memcmp(b, "OTTO", 4) == 0 ||
+           memcmp(b, "wOFF", 4) == 0;
 }
 
 /* @font-face: its family, the first source whose format the painter reads, its weight
