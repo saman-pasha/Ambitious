@@ -7053,9 +7053,11 @@ static uint32_t css_linked_sheet(const net_loader *net, uint32_t x) {
 
 /* ---- the user agent's sheet, read once a process ----
    Its rules and declarations are every page's: read from its text at the first cascade,
-   kept in these tables, and each later page's records made from them, not read again */
-#define CSS_UA_RULES 320
-#define CSS_UA_DECLS 768
+   kept in these tables, and each later page's records made from them, not read again.
+   (Its shorthands expanded, it passed 768 declarations, so that every cascade read it
+   again: a page's frames each run two; the tables hold it now with room to spare) */
+#define CSS_UA_RULES 512
+#define CSS_UA_DECLS 1536
 #define CSS_UA_TEXT 24576
 typedef struct css_uarule { uint32_t sel, sel_len, spec, first, n; } css_uarule;
 typedef struct css_uadecl { uint32_t prop, unit, important, color, text, text_len, word, word_len; double num; } css_uadecl;

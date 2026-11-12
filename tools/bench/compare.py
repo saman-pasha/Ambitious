@@ -24,7 +24,7 @@ AXE = os.path.join(BENCH, "node_modules", "axe-core", "axe.min.js")
 
 def pages():
     os.makedirs(BENCH, exist_ok=True)
-    out = [os.path.join(ROOT, "tests", "pages", p) for p in ("news.html", "layout.html", "style.html", "a11y.html")]
+    out = [os.path.join(ROOT, "tests", "pages", p) for p in ("news.html", "layout.html", "style.html", "a11y.html", "frames.html")]
     for name, sections in (("medium", 20), ("large", 200)):
         path = os.path.join(BENCH, name + ".html")
         with open(path, "w") as f:
@@ -133,6 +133,11 @@ def main():
     w("|---|---|---:|---:|---|")
     for p in ps:
         s, c = amb[p]["stages"], chr_[p]["stages"]
+        # a page with frames: Ambitious times its frames as one stage of their own (each frame's
+        # parse, cascade, layout and paint), which no trace event of Chromium's stands for alone;
+        # the page is held to Chromium by its whole loads, below, which count them
+        if s.get("frames", 0) > 0:
+            continue
         if s.get("scripts", 0) > 0.05 or c.get("script", 0) > 0.05:
             w("| %s | %s | %.2f | %.2f | %s |" % (name(p), "scripts", s["scripts"], c["script"], winner(s["scripts"], c["script"])))
             rows.append((name(p), "scripts", s["scripts"], c["script"]))
@@ -152,7 +157,7 @@ def main():
     w("|---|---|---:|---:|---|")
     for p in ps:
         s, c = amb[p]["stages"], chr_[p]
-        laid = s["fetch the page"] + s["parse"] + s["fetch its resources"] + s.get("scripts", 0) + s["cascade"] + s["layout"]
+        laid = s["fetch the page"] + s["parse"] + s["fetch its resources"] + s.get("scripts", 0) + s["cascade"] + s["layout"] + s.get("frames", 0)
         png = laid + s["paint"] + s["encode the PNG"]
         for label, a, b in (("warm, laid out", laid, c["warm"]["loaded"]),
                             ("warm, to PNG", png, c["warm"]["total"]),

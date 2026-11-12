@@ -1646,19 +1646,20 @@ static int pt_frame_draw(amb_canvas *c, const layout_tree *t, uint32_t b) {
         int ox = (int)floor(t->box[b].x + 0.5), oy = (int)floor(t->box[b].y - c->oy + 0.5);
         int kx0, ky0, kx1, ky1;
         pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
-        for (uint32_t y = 0; y < f.h; y++) {
-            int cy = oy + (int)y;
-            if (cy < ky0 || cy >= ky1) continue;
-            for (uint32_t x = 0; x < f.w; x++) {
-                int cx = ox + (int)x;
-                if (cx < kx0 || cx >= kx1) continue;
-                size_t k = f.off + ((size_t)y * f.w + x) * 3, n = (size_t)f.w * f.h * 3;
-                size_t q = ((size_t)cy * c->w + (size_t)cx) * 3;
-                for (int ch = 0; ch < 3; ch++) {
-                    int lo = at(pt_fpx, k + (size_t)ch), hi = at(pt_fpx, k + n + (size_t)ch), under = c->px[q + (size_t)ch];
-                    int v = lo + ((hi - lo) * under + 127) / 255;
-                    c->px[q + (size_t)ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
-                }
+        /* the rows and columns of the drawing within the clip */
+        int x0 = kx0 > ox ? kx0 - ox : 0, x1 = kx1 - ox < (int)f.w ? kx1 - ox : (int)f.w;
+        int y0 = ky0 > oy ? ky0 - oy : 0, y1 = ky1 - oy < (int)f.h ? ky1 - oy : (int)f.h;
+        if (x1 <= x0 || y1 <= y0) return 1;
+        size_t n = (size_t)f.w * f.h * 3;
+        for (int y = y0; y < y1; y++) {
+            size_t lo = f.off + ((size_t)y * f.w + (size_t)x0) * 3;
+            size_t q = ((size_t)(oy + y) * c->w + (size_t)(ox + x0)) * 3;
+            size_t m = (size_t)(x1 - x0) * 3;
+            for (size_t i = 0; i < m; i++) {
+                int a = pt_fpx[lo + i], z = pt_fpx[lo + n + i];
+                if (a == z) { c->px[q + i] = (uint8_t)a; continue; }      /* opaque there */
+                int v = a + ((z - a) * c->px[q + i] + 127) / 255;
+                c->px[q + i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
             }
         }
         return 1;

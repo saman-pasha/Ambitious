@@ -678,6 +678,19 @@ static void fr_bars(amb_canvas *c, const amb_frame_info *fi) {
     if (fi->vbar && fi->hbar) fr_rect(c, W - FR_BAR, H - FR_BAR, W, H, track);
 }
 
+/* whether a frame's canvas is all its root's (or its body's) background, an opaque one, as
+   paint fills it: then nothing of the page shows through it */
+static int fr_opaque_root(const layout_tree *t) {
+    uint32_t vp = 0;
+    for (uint32_t b = 1; b < t->box_len && !vp; b++) if (t->box[b].live && t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) vp = b;
+    uint32_t root = vp ? t->box[vp].first_child : 0;
+    if (!root) return 0;
+    if (t->box[root].background & 0xff) return (t->box[root].background & 0xff) == 0xff;
+    for (uint32_t ch = t->box[root].first_child; ch; ch = t->box[ch].next)
+        if (t->box[ch].kind == LAYOUT_BOX_KIND_BLOCK && (t->box[ch].background & 0xff)) return (t->box[ch].background & 0xff) == 0xff;
+    return 0;
+}
+
 /* frame k's drawing over the canvas colour under (0xRRGGBBff), at the zoom z: its content
    (its viewport less its bars) then its bars, onto out (W x H) */
 static void fr_draw(amb_frames *fs, uint32_t k, uint32_t under, int transparent, amb_canvas *out) {
@@ -734,15 +747,16 @@ void amb_frames_paint(amb_frames *fs, const css_style *st) {
         defer(b) { AMB_CANVAS_DROP(b); }
         amb_canvas w = {0};
         defer(w) { AMB_CANVAS_DROP(w); }
-        if (transparent) {
+        /* a root (or body) of an opaque background covers the canvas: one drawing is both */
+        if (transparent && !fr_opaque_root(&fs->lt[k - 1])) {
             fr_draw(fs, k, 0x000000ffu, 1, &b);
             fr_draw(fs, k, 0xffffffffu, 1, &w);
+            amb_paint_frame_put(pdoc, fs->tab.f[k].iframe, &b, &w);
         } else {
             uint32_t canvas = fi->scheme_dark ? 0x121212ffu : 0xffffffffu;
-            fr_draw(fs, k, canvas, 0, &b);
-            fr_draw(fs, k, canvas, 0, &w);
+            fr_draw(fs, k, canvas, !transparent ? 0 : 1, &b);
+            amb_paint_frame_put(pdoc, fs->tab.f[k].iframe, &b, &b);
         }
-        amb_paint_frame_put(pdoc, fs->tab.f[k].iframe, &b, &w);
     }
 }
 
