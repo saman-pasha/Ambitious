@@ -51,12 +51,21 @@ reason.
 
 ## 3. The network to the engine
 
-- **Bounds:** 32 MB a body, five redirects, ten seconds a read; a PNG at most
+- **Bounds:** 32 MB a body, five redirects; a connect waited for four
+  minutes, a proxy's tunnel and a TLS handshake 30 seconds each, and an answer
+  as long as the server takes, as Chromium waits (12y: a server that never
+  answers holds the run, as it holds Chromium's tab; `AMB_NET_TIMEOUT`, in ms,
+  caps every wait); a PNG at most
   2^24 pixels, and inflate bounded by the size its image needs. Over HTTP/2
   (12q), the bounds Chromium announces: a frame of 16,384 bytes, a header list
   of 256 KB, HPACK's table of 64 KB, a stream's window of 6 MB; 256 streams
   at once at most. A decoded body, gzip, deflate, br or zstd, stops at 32 MB,
-  and a zstd frame's window at 8 MB (Chromium's limit, RFC 9659's).
+  and a zstd frame's window at 8 MB (Chromium's limit, RFC 9659's). A
+  compression dictionary (12y) is at most 32 MB and 64 of them are kept, each
+  only from a potentially trustworthy URL its page may read, for URLs of its
+  own origin; a dcb or dcz body that names another dictionary's hash fails, and
+  its decoded body stops at 32 MB too. The profile's dictionaries are written
+  readable by its owner alone.
 - **Parsing:** URLs are parsed into fixed buffers that truncate, never
   overflow. An image's size is read only from header bytes that exist. The
   PNG decoder checks every chunk length, colour type, bit depth and filter.

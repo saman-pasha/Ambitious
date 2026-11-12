@@ -1,0 +1,9 @@
+both wide.png 120x24 8,8 100x50
+wonly wide.png 120x24 8,64 60x12
+honly wide.png 120x24 8,81 240x48
+own wide.png 120x24 8,141 30x6
+nottaken own.png 50x16 8,152.203 40x12.797
+percent wide.png 120x24 8,170 392x78.391
+bad wide.png 120x24 8,256.391 77x10
+over wide.png 120x24 8,275.391 90x9
+noneimg own.png 50x16 8,294.391 25x8

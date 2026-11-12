@@ -56,8 +56,13 @@
    error; a URL is shown (4.8) without its credentials and with a domain host in
    Unicode.
 
-   The query is percent-encoded from UTF-8: a document in a legacy encoding does not
-   encode its URLs' queries in its own (the standard's encoding argument). */
+   The encoding argument (url_parse_enc): the query of a special URL but ws: and wss:, when
+   it is a legacy encoding, written in it before it is percent-encoded (percent-encode after
+   encoding, by the Encoding standard's encoders, src/html/encode.h), a character it has not
+   written %26%23N%3B; every other component, and every other URL's query, from UTF-8. A
+   document's URLs are parsed in its encoding, as Chromium parses them (measured in
+   windows-1252 and Shift_JIS pages: an img's, a script's and a sheet's query, a link's href);
+   the URL API's and a fetch's are UTF-8's. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -65,6 +70,7 @@
 #include <vector.pl>
 #include "url.h"
 #include "idna.h"
+#include "../html/encode.h"
 
 #define URL_EOF (-1)
 
@@ -84,6 +90,7 @@ typedef struct url_rec {
     int host_kind;
     int32_t port;
     int query_null, fragment_null, opaque, special;
+    int enc;                  /* the encoding its query is written in: 0 UTF-8, else a legacy one's number */
 } url_rec;
 
 static int url_alpha(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
@@ -132,6 +139,38 @@ static int url_in_set(int set, int c) {
 }
 
 static const char url_hex[] = "0123456789ABCDEF";
+
+static void url_pct(vector<char> *out, int c, int set);
+/* percent-encode after encoding (URL 1.3): the UTF-8 s (n bytes) written by enc's encoder, each
+   byte percent-encoded when in the set (or past ASCII), each character it cannot write as
+   %26%23 its number %3B */
+static void url_pct_encoded(vector<char> *out, const char *s, size_t n, int enc, int set) {
+    int state = 0;
+    size_t i = 0;
+    for (;;) {
+        uint32_t cp = 0xFFFFFFFFu;
+        if (i < n) {
+            uint8_t b = (uint8_t)s[i];
+            size_t need = b < 0x80 ? 0 : b >= 0xF0 ? 3 : b >= 0xE0 ? 2 : b >= 0xC0 ? 1 : 0;
+            cp = need == 3 ? b & 7u : need == 2 ? b & 15u : need == 1 ? b & 31u : b;
+            if (b >= 0x80 && need == 0) cp = 0xFFFD;
+            size_t k = 1;
+            for (; k <= need && i + k < n && ((uint8_t)s[i + k] & 0xC0) == 0x80; k++) cp = cp << 6 | ((uint8_t)s[i + k] & 0x3F);
+            if (k <= need) cp = 0xFFFD;
+            i += k;
+        }
+        uint8_t bytes[8];
+        uint32_t error = 0;
+        size_t got = html_encode_cp(enc, cp, bytes, &state, &error);
+        for (size_t q = 0; q < got; q++) url_pct(out, bytes[q], set);
+        if (error) {
+            char t[32];
+            int k = snprintf(t, sizeof t, "%%26%%23%u%%3B", error);
+            if (k > 0) append_range(out, t, (size_t)k);
+        }
+        if (cp == 0xFFFFFFFFu) break;
+    }
+}
 
 /* the byte c appended to out, percent-encoded when the set holds it */
 static void url_pct(vector<char> *out, int c, int set) {
@@ -1136,7 +1175,12 @@ static int url_basic(const char *in, size_t n, const char *bh, const url_parts *
         } else if (state == URL_ST_QUERY) {
             if ((!override && c == '#') || c == URL_EOF) {
                 int set = special ? URL_SET_SPECIAL_QUERY : URL_SET_QUERY;
-                for (size_t i = 0; i < len(buf); i++) url_pct(query, (uint8_t)buf[i], set);
+                /* the encoding argument: UTF-8 for a URL not special, or of ws: or wss: */
+                int enc = r->enc;
+                if (!special || r->special == 5 || r->special == 6) enc = 0;
+                if (enc) url_pct_encoded(query, data(buf), len(buf), enc, set);
+                else
+                    for (size_t i = 0; i < len(buf); i++) url_pct(query, (uint8_t)buf[i], set);
                 clear(buf);
                 if (c == '#') { clear(frag); r->fragment_null = 0; state = URL_ST_FRAGMENT; }
             } else push_back(buf, (char)c);
@@ -1214,8 +1258,9 @@ static void url_clean(const char *s, size_t n, vector<char> *out) {
     for (size_t i = a; i < b; i++) if (s[i] != '\t' && s[i] != '\n' && s[i] != '\r') push_back(out, s[i]);
 }
 
-/* in parsed against an already parsed base (bh 0 for none), serialized into o */
-static int url_parse_into(const char *in, size_t n, const char *bh, const url_parts *bp, vector<char> *o, url_parts *p) {
+/* in parsed against an already parsed base (bh 0 for none), its query in the encoding enc (0
+   UTF-8), serialized into o */
+static int url_parse_into_enc(const char *in, size_t n, const char *bh, const url_parts *bp, int enc, vector<char> *o, url_parts *p) {
     vector<char> s, scheme, user, pass, host, path, query, frag;
     url_clean(in, n, &s);
     url_rec r;
@@ -1223,17 +1268,29 @@ static int url_parse_into(const char *in, size_t n, const char *bh, const url_pa
     r.host_kind = URL_HOST_NULL;
     r.port = -1;
     r.query_null = r.fragment_null = 1;
+    r.enc = enc;
     if (!url_basic(data(s), len(s), bh, bp, &scheme, &user, &pass, &host, &path, &query, &frag, &r, URL_ST_NONE)) return 0;
     url_serialize(&scheme, &user, &pass, &host, &path, &query, &frag, &r, o, p);
     return 1;
 }
 
+static int url_parse_into(const char *in, size_t n, const char *bh, const url_parts *bp, vector<char> *o, url_parts *p) {
+    return url_parse_into_enc(in, n, bh, bp, 0, o, p);
+}
+
 int url_parse(const char *in, size_t n, const char *base, size_t bn, char *out, size_t cap, url_parts *p) {
+    return url_parse_enc(in, n, base, bn, -1, out, cap, p);
+}
+
+int url_parse_enc(const char *in, size_t n, const char *base, size_t bn, int enc, char *out, size_t cap, url_parts *p) {
     vector<char> bt, o;
     url_parts bp;
     int ok = 0;
-    if (!base) ok = url_parse_into(in, n, 0, 0, &o, p);
-    else if (url_parse_into(base, bn, 0, 0, &bt, &bp)) ok = url_parse_into(in, n, data(bt), &bp, &o, p);
+    /* the output encoding: a legacy one's number, 0 (UTF-8) for UTF-8, UTF-16 and none */
+    int e = html_output_encoding(enc);
+    if (e < 0) e = 0;
+    if (!base) ok = url_parse_into_enc(in, n, 0, 0, e, &o, p);
+    else if (url_parse_into(base, bn, 0, 0, &bt, &bp)) ok = url_parse_into_enc(in, n, data(bt), &bp, e, &o, p);
     if (!ok || len(o) + 1 > cap) {
         if (cap) out[0] = 0;
         return 0;

@@ -3,6 +3,11 @@
    computed values kept with where they came from; and the module's generated
    implementation.
 
+   A fetched sheet is decoded from its encoding (CSS Syntax 3, 3.2: its byte order
+   mark's, its Content-Type's charset, its @charset, else its document's or its
+   importing sheet's), and its URLs' queries are written in that encoding, a style
+   element's in its document's (the URL standard's encoding argument).
+
    Parsing has CSS Syntax 3's shapes: comments, strings, the top level's <!-- and
    -->, at-rules (an @media whose query holds for the viewport, an @supports
    whose condition does, @layer, an @import fetched through the loader,
@@ -131,6 +136,11 @@ amb_interface(net);
 amb_implementation(css);
 #include "css.h"
 #include "../net/url.h"
+
+/* the HTML module's encodings (src/html/encoding.h, whose own declarations need the DOM's and
+   HTML's interfaces): the one a label names (-1 none), and a decoder into UTF-8 */
+int html_enc_of_label(const char *label, size_t n);
+size_t html_decode(int enc, const char *src, size_t n, vector<char> *out);
 
 #define CSS_MAXPARTS 32
 /* the reader's settings the cascade reads (css_set_env, from the profile's preferences):
@@ -3833,9 +3843,10 @@ static uint32_t css_layer_rank(css_style *s, uint32_t parent, uint32_t next) {
    @imports, and whether a rule other than @import has been met */
 /* a sheet being read: its sheet, layer, depth of @import, origin, base URL; the @scope its
    rules are in (scoped; its roots' and limits' selectors) and the element a sheet's @scope
-   without roots is rooted at (a style element's parent) */
+   without roots is rooted at (a style element's parent); the encoding its URLs' queries are
+   written in (the sheet's, css_sheet_encoding; a style element's, its document's) */
 typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; int scoped; amb_span scope, scope_end;
-                          uint32_t scope_host, container; } css_pctx;
+                          uint32_t scope_host, container; int enc; } css_pctx;
 
 static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
 
@@ -4001,21 +4012,73 @@ static int css_url_of(const char *s, size_t n, char *out, size_t cap) {
 /* a URL a sheet names, made absolute against its base, and fetched -- unless a page not
    read from a file names a file (the loader's rule, net.c): the resource, or 0 */
 static uint32_t css_fetch(net_loader *net, const css_pctx *cx, const char *ref, net_kind kind, char *abs, size_t cap) {
-    if (!net || !cx->base[0] || !net_url_resolve(cx->base, ref, abs, cap)) return 0;
+    /* its query in the sheet's encoding, as Chromium resolves a sheet's URLs (measured: a style element's in its
+       document's, a fetched sheet's in its own) */
+    if (!net || !cx->base[0] || !net_url_resolve_enc(cx->base, ref, cx->enc, abs, cap)) return 0;
     if (strncmp(abs, "file:", 5) == 0 && strncmp(cx->base, "file:", 5) != 0) return 0;
+    /* one the loader has fetched already (a cascade made again, as a page's is once its frames
+       have loaded) is that one: Chromium fetches an imported sheet once (measured) */
+    size_t al = strlen(abs);
+    for (uint32_t r = 1; r < net->resource_len; r++)
+        if (net->resource[r].live && net->resource[r].kind == kind && net->resource[r].url.len == al &&
+            memcmp(text_ptr(net, net->resource[r].url), abs, al) == 0)
+            return net->resource[r].outcome == NET_OUTCOME_OK ? r : 0;
     net_resource_h h = net_fetch(net, abs, strlen(abs), kind);
     return net->resource[h.index].outcome == NET_OUTCOME_OK ? h.index : 0;
 }
 
-/* a sheet's text, its comments stripped, read into a new sheet of the store */
+/* a fetched sheet's encoding (CSS Syntax 3, 3.2: decode, and determine the fallback
+   encoding), an encoding's number (src/html/encoding.h; 0 UTF-8): its byte order mark's, else
+   the encoding its Content-Type's charset names, else an @charset rule's at its very start
+   (`@charset "label";', UTF-16BE or LE taken for UTF-8), else its referrer's (the
+   environment encoding: a linked sheet's document's, an imported sheet's importing sheet's),
+   else UTF-8; *bom the mark's length. Measured: of a windows-1252 page, a sheet served with
+   charset=utf-8 writes its URLs' queries in UTF-8, so does one that begins with
+   @charset "utf-8" and a sheet the first imports, and one with neither in windows-1252 */
+static int css_sheet_encoding(const net_loader *net, uint32_t r, int referrer, size_t *bom) {
+    const uint8_t *b = (const uint8_t *)bytes_ptr(net, net->resource[r].body);
+    size_t n = net->resource[r].body.len;
+    *bom = 0;
+    if (n >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) { *bom = 3; return 0; }
+    if (n >= 2 && b[0] == 0xFE && b[1] == 0xFF) { *bom = 2; return html_enc_of_label("utf-16be", 8); }
+    if (n >= 2 && b[0] == 0xFF && b[1] == 0xFE) { *bom = 2; return html_enc_of_label("utf-16le", 8); }
+    amb_span cs = net->resource[r].charset;
+    if (cs.len) {
+        int e = html_enc_of_label(text_ptr(net, cs), cs.len);
+        if (e >= 0) return e;
+    }
+    if (n > 10 && memcmp(b, "@charset \"", 10) == 0) {
+        size_t k = 10;
+        while (k < n && k < 1024 && b[k] != '"') k++;
+        if (k + 1 < n && b[k] == '"' && b[k + 1] == ';') {
+            int e = html_enc_of_label((const char *)b + 10, k - 10);
+            if (e >= 0 && (e == html_enc_of_label("utf-16be", 8) || e == html_enc_of_label("utf-16le", 8))) e = 0;
+            if (e >= 0) return e;
+        }
+    }
+    return referrer >= 0 ? referrer : 0;
+}
+/* a fetched sheet's text in UTF-8: its bytes past their byte order mark, decoded from enc
+   when that is another (UTF-8's are taken as they are) */
+static void css_sheet_text(const net_loader *net, uint32_t r, int enc, size_t bom, vector<char> *out) {
+    const char *b = bytes_ptr(net, net->resource[r].body);
+    size_t n = net->resource[r].body.len;
+    if (bom > n) bom = n;
+    if (enc <= 0) append_range(*out, b + bom, n - bom);
+    else html_decode(enc, b + bom, n - bom, out);
+}
+
+/* a sheet's text, its comments stripped, read into a new sheet of the store; enc the encoding
+   its URLs' queries are written in */
 static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin, const char *src, size_t n, const char *url,
-                               uint32_t parent, uint32_t layer, int depth, const char *base, uint32_t host) {
+                               uint32_t parent, uint32_t layer, int depth, const char *base, uint32_t host, int enc) {
     vector<char> t;
     css_strip_comments(src, n, &t);
     css_sheets_read++;
     css_sheet_h sh = sheet_new(s);
     s->sheet[sh.index].origin = origin;
     s->sheet[sh.index].parent = parent;
+    s->sheet[sh.index].enc = enc;
     if (url) s->sheet[sh.index].url = text_add(s, url, strlen(url));
     css_pctx cx;
     memset(&cx, 0, sizeof cx);
@@ -4024,6 +4087,7 @@ static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin,
     cx.depth = depth;
     cx.origin = origin;
     cx.scope_host = host;
+    cx.enc = enc;
     snprintf(cx.base, sizeof cx.base, "%s", base ? base : "");
     css_rules(s, net, &cx, data(t), len(t));
     s->revision++;
@@ -4059,9 +4123,12 @@ static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *
     char base[4096];
     amb_span fu = net->resource[r].final_url;
     snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
+    /* in its own encoding, else its importing sheet's */
+    size_t bom;
+    int enc = css_sheet_encoding(net, r, cx->enc, &bom);
     vector<char> body;
-    append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base, cx->scope_host);
+    css_sheet_text(net, r, enc, bom, &body);
+    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base, cx->scope_host, enc);
 }
 
 /* the bytes begin as a font the painter reads: TrueType, OpenType (with TrueType or CFF
@@ -5383,7 +5450,7 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
 }
 
 css_status css_parse_sheet(css_style *s, css_origin origin, const char *src, size_t src_len) {
-    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0, 0);
+    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0, 0, 0);
     return CSS_OK;
 }
 
@@ -8357,12 +8424,49 @@ static void css_svg_hints(css_style *s, const dom_document *d, uint32_t x, uint3
     }
 }
 
-static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
+/* the <source> an img took its image from in its picture (the loader's choice, net_picture_source),
+   when that source has a width or a height: the img's dimension attribute source (HTML 4.8.4.3).
+   0 when there is none */
+static uint32_t css_dimension_source(const dom_document *d, const net_loader *net, uint32_t x) {
+    if (!net || !css_is_named(d, x, "img")) return 0;
+    for (uint32_t r = 1; r < net->resource_len; r++) {
+        if (!net->resource[r].live || net->resource[r].elem.index != x || net->resource[r].kind != NET_KIND_IMAGE) continue;
+        uint32_t sc = net->resource[r].picture ? net->resource[r].source.index : 0;
+        if (!sc || sc >= d->node_len || !d->node[sc].live) return 0;
+        return css_attr_of(d, sc, "width", 5) || css_attr_of(d, sc, "height", 6) ? sc : 0;
+    }
+    return 0;
+}
+
+static void css_element_hints(css_style *s, const dom_document *d, const net_loader *net, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
     if (!d->node[x].first_attr) return;             /* no attribute, no hint */
     if (d->node[x].ns == DOM_NAMESPACE_SVG) { css_svg_hints(s, d, x, sheet, matched); return; }
     if (d->node[x].ns != DOM_NAMESPACE_HTML) return;  /* the hints are HTML elements' */
+    /* an img whose picture's source gave its image: that source's width and height in place of
+       its own, as Blink maps them (CollectExtraStyleForPresentationAttribute; measured): one the
+       source has is the source's (one that is no length leaves the img's own), one it has not is
+       none */
+    uint32_t dimsrc = css_dimension_source(d, net, x);
     for (size_t h = 0; h < sizeof css_hints / sizeof css_hints[0]; h++) {
         uint32_t at = css_attr_of(d, x, css_hints[h].attr, strlen(css_hints[h].attr));
+        int dim = dimsrc && (css_hints[h].prop == CSS_PROP_WIDTH || css_hints[h].prop == CSS_PROP_HEIGHT);
+        if (dim) {
+            uint32_t sa = css_attr_of(d, dimsrc, css_hints[h].attr, strlen(css_hints[h].attr));
+            css_val sv;
+            if (!sa) at = 0;
+            else if (css_hint_value(css_hints[h].kind, text_ptr(d, d->attr[sa].value), d->attr[sa].value.len, &sv)) {
+                char what[64], text[160];
+                amb_span sp = d->attr[sa].value;
+                int wn = snprintf(what, sizeof what, "the source's %s attribute", css_hints[h].attr);
+                int tn = snprintf(text, sizeof text, "%s=%.*s", css_hints[h].attr, (int)(sp.len > 100 ? 100 : sp.len), text_ptr(d, sp));
+                if (wn < 0 || tn < 0) continue;
+                if ((size_t)tn >= sizeof text) tn = (int)sizeof text - 1;
+                uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, what, (size_t)wn, 1);
+                css_add_decl(s, r, css_hints[h].prop, &sv, 0, text, (size_t)tn, 0);
+                push_back(matched, r);
+                continue;
+            }
+        }
         if (!at) continue;
         if (!css_word_in(names_ptr(d, d->node[x].name), css_hints[h].elements)) continue;
         amb_span sp = d->attr[at].value;
@@ -9038,9 +9142,12 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             char base[4096];
             amb_span fu = net->resource[r].final_url;
             snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
+            /* in its own encoding, else its document's */
+            size_t bom;
+            int enc = css_sheet_encoding(net, r, net_encoding(), &bom);
             vector<char> body;
-            append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0);
+            css_sheet_text(net, r, enc, bom, &body);
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0, enc);
             continue;
         }
         vector<char> t;
@@ -9048,7 +9155,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
         /* a style element's @scope without roots is rooted at its parent element */
         uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
-        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
+        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host, net_encoding());
     }
     css_quirk_read = 0;
     /* the cascade layers' order, now every sheet has named its layers */
@@ -9247,7 +9354,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             }
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
-        css_element_hints(s, doc, x, &hint_sheet, &matched);
+        css_element_hints(s, doc, net, x, &hint_sheet, &matched);
         css_quirk_read = css_quirks;
         css_style_attr(s, doc, x, &inline_sheet, &matched);
         css_quirk_read = 0;

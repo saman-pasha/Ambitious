@@ -2,7 +2,8 @@
 """tests/net/proxy.py LOG [--deny HOST]... -- an HTTP proxy for the tests on
 127.0.0.1, on a free port, which it prints first. CONNECT HOST:PORT opens a tunnel
 and relays both ways (403 for a denied HOST); a GET in absolute form is sent on to
-its server and the answer relayed. Each request's method and target is appended to
+its server and the answer relayed (localhost and the names under it reached at
+127.0.0.1, as browsers resolve them). Each request's method and target is appended to
 LOG, with its Proxy-Authorization's credentials when it has them."""
 import base64
 import select
@@ -57,8 +58,12 @@ class Handler(socketserver.StreamRequestHandler):
             if host.strip("[]") in DENY:
                 self.wfile.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                 return
+            # localhost and the names under it are the loopback address, as a browser resolves them
+            name = host.strip("[]")
+            if name.lower().rstrip(".") == "localhost" or name.lower().rstrip(".").endswith(".localhost"):
+                name = "127.0.0.1"
             try:
-                up = socket.create_connection((host.strip("[]"), int(port)), timeout=10)
+                up = socket.create_connection((name, int(port)), timeout=10)
             except OSError:
                 self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
                 return

@@ -16,7 +16,12 @@
 // coding by coding: gzip, deflate (zlib's stream), br and zstd, by node's zlib; deflate-raw (no
 // zlib header, sent as deflate), gzip-bad and zstd-bad (a byte of their data changed), br-bad
 // (cut short by two bytes), each sent as its coding; zstd-dict (a zstd frame naming dictionary
-// 7, sent as zstd).
+// 7, sent as zstd). Compression dictionaries (RFC 9842): a response whose headers carry
+// Use-As-Dictionary has its body (before any coding) kept by its SHA-256; dcb and dcz code a body
+// over the dictionary the request's Available-Dictionary names (tools/dict-encode.py's Brotli,
+// node's zstd), its magic number and the dictionary's hash first, and are left out (the body sent
+// without them) when the request names no dictionary kept; dcb-badhash and dcz-badhash write
+// another hash, dcb-bad cuts the Brotli stream short by two bytes, dcz-bad changes a byte of its frame.
 // --date fixes every response's Date.
 //
 // --log FILE appends, for each connection, "conn C PROTOCOL"; for each request, "conn C stream S
@@ -33,6 +38,16 @@
 // --reset PATH CODE answers a request for PATH with RST_STREAM of CODE (REFUSED_STREAM only the
 // first time); --drop-second closes an http/1.1 connection at its second request, unanswered;
 // --stall PATH never answers a request for PATH over h2.
+//
+// For pooling, resumption and waits (tests/integ/net-h2.sh, tests/net/reference.sh): --sni NAME
+// CERT KEY gives a connection whose SNI is NAME that certificate (repeatable), --bind ADDR its
+// address for TLS too; --log-tls writes each TLS connection "conn C PROTOCOL VERSION sni=NAME
+// full|resumed" (no SNI: sni=none) and each h2 stream's or http/1.1 request's line with its
+// authority after it (", from AUTHORITY"); --misdirect PATH answers 421 when the request's host
+// is not its connection's SNI (a request pooled onto another host's connection), --misdirect-always
+// PATH answers 421 always; --tls12 caps TLS at 1.2, --no-ticket issues no tickets (resumption by
+// session ID, from the server's cache); --close closes each http/1.1 connection after its
+// response; --delay PATH MS answers PATH after MS ms.
 'use strict';
 const http2 = require('http2');
 const http = require('http');
@@ -44,7 +59,8 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 
 const a = { stalls: [], bind: '127.0.0.1', roots: [], subs: [], subfiles: [], tls: null, h1: false, plain: false, log: null, headers: false, frames: false, hpack: false, date: null,
-  hold: 0, maxStreams: 0, goaway: 0, resets: [], dropSecond: false };
+  hold: 0, maxStreams: 0, goaway: 0, resets: [], dropSecond: false, sni: [], logTls: false, misdirect: [], misdirectAlways: [], tls12: false,
+  noTicket: false, close: false, delays: [] };
 for (let i = 2; i < process.argv.length; i++) {
   const o = process.argv[i];
   if (o === '--tls') { a.tls = [process.argv[++i], process.argv[++i]]; }
@@ -64,6 +80,14 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (o === '--reset') a.resets.push({ path: process.argv[++i], code: process.argv[++i], done: false });
   else if (o === '--drop-second') a.dropSecond = true;
   else if (o === '--stall') a.stalls.push(process.argv[++i]);
+  else if (o === '--sni') a.sni.push([process.argv[++i], process.argv[++i], process.argv[++i]]);
+  else if (o === '--log-tls') a.logTls = true;
+  else if (o === '--misdirect') a.misdirect.push(process.argv[++i]);
+  else if (o === '--misdirect-always') a.misdirectAlways.push(process.argv[++i]);
+  else if (o === '--tls12') a.tls12 = true;
+  else if (o === '--no-ticket') a.noTicket = true;
+  else if (o === '--close') a.close = true;
+  else if (o === '--delay') a.delays.push([process.argv[++i], +process.argv[++i]]);
   else a.roots.push(path.resolve(o));
 }
 let PORT = 0;
@@ -103,13 +127,44 @@ function fresh(h, headers) {
   return false;
 }
 
+// the dictionaries served, by their SHA-256 as Available-Dictionary writes it
+const dictionaries = new Map();
+const DCB = Buffer.from([0xff, 0x44, 0x43, 0x42]), DCZ = Buffer.from([0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00]);
+function overDictionary(c, body, avail) {
+  const d = dictionaries.get(avail);
+  if (!d) return null;
+  const bad = c.endsWith('-bad'), badhash = c.endsWith('-badhash');
+  const kind = c.slice(0, 3);
+  let coded;
+  if (kind === 'dcz') coded = zlib.zstdCompressSync(body, { dictionary: d, params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 } });
+  else {
+    const f = path.join(require('os').tmpdir(), `h2serve-dict-${process.pid}`);
+    fs.writeFileSync(f, d);
+    coded = require('child_process').execFileSync('python3', ['-I', path.join(__dirname, '../../tools/dict-encode.py'), 'br', f], { input: body });
+    fs.unlinkSync(f);
+  }
+  if (bad && kind === 'dcb') coded = coded.slice(0, coded.length - 2);
+  else if (bad) { coded = Buffer.from(coded); coded[coded.length >> 1] ^= 0x55; }
+  let h = crypto.createHash('sha256').update(d).digest();
+  if (badhash) { h = Buffer.from(h); h[0] ^= 1; }
+  return [kind, Buffer.concat([kind === 'dcz' ? DCZ : DCB, h, coded])];
+}
+
 // the body in the codings its Content-Encoding names, in their order
-function encode(headers, body) {
+function encode(headers, body, avail) {
+  if (headers.find(([k]) => k === 'use-as-dictionary')) dictionaries.set(':' + crypto.createHash('sha256').update(body).digest('base64') + ':', body);
   const out = [];
   for (const [k, v] of headers) {
     if (k !== 'content-encoding') { out.push([k, v]); continue; }
     const names = [];
     for (let c of v.split(',').map((x) => x.trim())) {
+      if (c.startsWith('dcb') || c.startsWith('dcz')) {
+        const r = overDictionary(c, body, avail);
+        if (!r) continue;
+        [c, body] = r;
+        names.push(c);
+        continue;
+      }
       const bad = c.endsWith('-bad');
       if (bad) c = c.slice(0, -4);
       if (c === 'gzip') body = zlib.gzipSync(body);
@@ -129,12 +184,13 @@ function encode(headers, body) {
       else if (bad) { body = Buffer.from(body); body[body.length >> 1] ^= 0x55; }
       names.push(c);
     }
-    out.push([k, names.join(', ')]);
+    if (names.length) out.push([k, names.join(', ')]);
   }
   return [out, body];
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.gif': 'image/gif' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.gif': 'image/gif',
+  '.txt': 'text/plain' };
 // what a request is answered: its status, its headers (lowercase names, in order), its body
 function answer(method, url, h) {
   const rel = decodeURIComponent(url.split('?')[0]).replace(/^\/+/, '');
@@ -156,7 +212,7 @@ function answer(method, url, h) {
     if (fs.existsSync(file + '.304.headers')) headers = sidecar(file + '.304.headers', body);
     return { status: 304, headers: base.concat(headers.filter(([k]) => k !== 'content-type' && k !== 'content-encoding')), body: Buffer.alloc(0) };
   }
-  [headers, body] = encode(headers, body);
+  [headers, body] = encode(headers, body, h['available-dictionary']);
   return { status, headers: base.concat(headers, [['content-length', String(body.length)]]), body };
 }
 
@@ -164,7 +220,13 @@ function answer(method, url, h) {
 
 // the connection a backend's socket is: the front's number for it, by its local port there
 const fronted = new Map();
+// each TLS connection's SNI, by its number (none: '')
+const sniOf = new Map();
 let nconn = 0;
+// --misdirect's and --misdirect-always's 421: a request whose host is not its connection's SNI, or any
+const misdirected = (id, p, authority) => a.misdirectAlways.includes(p) ||
+  (a.misdirect.includes(p) && String(authority || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '') !== (sniOf.get(id) || ''));
+const delayOf = (p) => { const d = a.delays.find(([q]) => q === p); return d ? d[1] : 0; };
 const sessions = new Map();
 
 const h2settings = {};
@@ -184,7 +246,7 @@ h2b.on('stream', (stream, headers, flags, raw) => {
   }
   st.open++;
   stream.on('close', () => { st.open--; });
-  log(`conn ${id} stream ${stream.id} ${headers[':method']} ${headers[':path']}, ${st.open} open`);
+  log(`conn ${id} stream ${stream.id} ${headers[':method']} ${headers[':path']}, ${st.open} open${a.logTls ? ', from ' + headers[':authority'] : ''}`);
   if (a.headers) for (let i = 0; i < raw.length; i += 2) log(`  ${raw[i]}: ${raw[i + 1]}`);
   if (a.hpack) log(`conn ${id} stream ${stream.id} hpack table ${s.state.inflateDynamicTableSize}`);
   const rs = a.resets.find((r) => r.path === headers[':path'] && !(r.code === 'REFUSED_STREAM' && r.done));
@@ -204,9 +266,13 @@ h2b.on('stream', (stream, headers, flags, raw) => {
     log(`conn ${id} GOAWAY, its last stream ${stream.id}`);
     s.goaway(http2.constants.NGHTTP2_NO_ERROR, stream.id);
   }
-  const r = answer(headers[':method'], headers[':path'], headers);
+  const r = misdirected(id, headers[':path'], headers[':authority'])
+    ? { status: 421, headers: [['content-type', 'text/plain']], body: Buffer.from('misdirected\n') }
+    : answer(headers[':method'], headers[':path'], headers);
+  const delay = delayOf(headers[':path']);
   const send = () => {
     if (stream.destroyed) return;
+    if (delay && !r.delayed) { r.delayed = true; setTimeout(send, delay); return; }
     const out = { ':status': r.status };
     for (const [k, v] of r.headers) {
       if (out[k] === undefined) out[k] = v;
@@ -228,18 +294,23 @@ const h1b = http.createServer((req, res) => {
   const sock = req.socket;
   const id = a.plain ? sock._amb : fronted.get(sock.remotePort) || 0;
   sock._n = (sock._n || 0) + 1;
-  log(`conn ${id} request ${sock._n} ${req.method} ${req.url}`);
+  log(`conn ${id} request ${sock._n} ${req.method} ${req.url}${a.logTls ? ', from ' + req.headers.host : ''}`);
   if (a.headers) for (let i = 0; i < req.rawHeaders.length; i += 2) log(`  ${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
   if (a.dropSecond && sock._n === 2) {
     log(`conn ${id} request ${sock._n} dropped, the connection closed unanswered`);
     sock.destroy();
     return;
   }
-  const r = answer(req.method, req.url, req.headers);
+  const r = misdirected(id, req.url, req.headers.host)
+    ? { status: 421, headers: [['content-type', 'text/plain']], body: Buffer.from('misdirected\n') }
+    : answer(req.method, req.url, req.headers);
   const flat = [];
   for (const [k, v] of r.headers) flat.push(k, v);
-  res.writeHead(r.status, flat);
-  res.end(r.body);
+  if (a.close) flat.push('connection', 'close');
+  const send = () => { res.writeHead(r.status, flat); res.end(r.body); };
+  const delay = delayOf(req.url);
+  if (delay) setTimeout(send, delay);
+  else send();
 });
 h1b.keepAliveTimeout = 60000;
 h1b.on('clientError', (e, s) => s.destroy());
@@ -312,12 +383,26 @@ h2b.listen(0, '127.0.0.1', () => h1b.listen(0, '127.0.0.1', () => {
     return;
   }
   const opts = { cert: fs.readFileSync(a.tls[0]), key: fs.readFileSync(a.tls[1]), ALPNProtocols: a.h1 ? ['http/1.1'] : ['h2', 'http/1.1'] };
+  if (a.sni.length) {
+    const ctx = new Map(a.sni.map(([n, c, k]) => [n, tls.createSecureContext({ cert: fs.readFileSync(c), key: fs.readFileSync(k) })]));
+    opts.SNICallback = (name, cb) => cb(null, ctx.get(name) || null);
+  }
+  if (a.tls12) opts.maxVersion = 'TLSv1.2';
+  if (a.noTicket) opts.secureOptions = crypto.constants.SSL_OP_NO_TICKET;
   const f = tls.createServer(opts, (sock) => {
     const id = ++nconn;
     const alpn = sock.alpnProtocol || 'http/1.1';
-    log(`conn ${id} ${alpn}`);
+    sniOf.set(id, sock.servername || '');
+    if (a.logTls) log(`conn ${id} ${alpn} ${sock.getProtocol()} sni=${sock.servername || 'none'} ${sock.isSessionReused() ? 'resumed' : 'full'}`);
+    else log(`conn ${id} ${alpn}`);
     front(sock, alpn, id);
   });
+  if (a.noTicket) {
+    // the server's cache of sessions by ID, which a TLS 1.2 client resumes by
+    const cache = new Map();
+    f.on('newSession', (sid, d, cb) => { cache.set(sid.toString('hex'), d); cb(); });
+    f.on('resumeSession', (sid, cb) => cb(null, cache.get(sid.toString('hex')) || null));
+  }
   f.on('tlsClientError', () => {});
-  f.listen(0, '127.0.0.1', () => { PORT = f.address().port; console.log(PORT); });
+  f.listen(0, a.bind, () => { PORT = f.address().port; console.log(PORT); });
 }));

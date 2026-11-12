@@ -23,6 +23,9 @@ typedef struct net_zstd_stats {
    a window past 8 MB); -1 when it decodes to more than cap. stats, when given, counts
    what was met */
 int net_zstd(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap, char *why, size_t wcap, net_zstd_stats *stats);
+/* the same with a raw dictionary of dn bytes (RFC 9842's dcz; none when dn is 0) */
+int net_zstd_dict(const uint8_t *in, size_t n, const uint8_t *dict, size_t dn, vector<uint8_t> *out, size_t cap, char *why, size_t wcap,
+                  net_zstd_stats *stats);
 
 /* XXH64 of the n bytes at p, from seed: a zstd frame's checksum is its low 32 bits,
    from seed 0 */

@@ -16,7 +16,7 @@
 # Then over HTTP/2: a server that sends GOAWAY at stream 7 (the streams after it, not
 # processed, go again on a new connection); one that lets four streams be open at once; one
 # that resets a stream with INTERNAL_ERROR (it fails) and refuses one with REFUSED_STREAM (it
-# goes again), and never answers another (the read's ten seconds); a server that refuses h2
+# goes again), and never answers another (Chromium waits on: here AMB_NET_TIMEOUT's second); a server that refuses h2
 # (http/1.1 by ALPN, six connections kept alive); redirects from HTTP/2 to HTTP/1.1 and back;
 # a CONNECT proxy, HTTP/2 inside its tunnel; a body over 32 MB; a file: URL a page over
 # HTTP/2 asks for; cookies and the cache, two runs of a profile; br and zstd bodies (node's
@@ -25,8 +25,17 @@
 # its second request (the request goes once again, on a new connection); the fields a host
 # that is not potentially trustworthy is sent.
 #
+# Then HTTP/2's pooling by IP (tests/net/site/t/pool.html at a.localhost, its parts at hosts of the
+# certificate, at other addresses and ports, directly and through a proxy), each server's
+# connections and what each carried against Chromium's (tests/net/pool.chromium); TLS sessions
+# resumed over HTTP/1.1 from servers of TLS 1.3, of TLS 1.2 with tickets and with session IDs, a
+# page's parts at once and a script's requests one after another, against Chromium's counts
+# (tests/net/res.chromium); and the waits, Chromium's: an answer that comes after 11 s taken, a
+# TLS handshake never answered given up after 30 s (both run beside the rest), each wait cut
+# short by AMB_NET_TIMEOUT.
+#
 # The ports are written by name: H2, H1, GOAWAY, FOUR, RESET, PROXY, BIG, CACHE, PLAIN, DROP,
-# FAR.
+# FAR; P and Q for the pooling's and the resumption's servers, D the dictionaries', MUTE and LATE the waits'.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-h2.XXXXXX")
 # the environment's proxies are not the tests': the one test of a proxy names its own
@@ -60,11 +69,30 @@ pyserve() {
 }
 h2=$(serve h2 $tls --hold 30 --log "$work/h2.log" --log-headers --log-frames --log-hpack --sub-file "@H1@=$work/h1.port")
 h1=$(serve h1 $tls --h1 --log "$work/h1.log" --sub-file "@H2@=$work/h2.port")
+# a port that takes connections and never says a word (a TLS handshake, a proxy's CONNECT unanswered)
+mute=$(pyserve mute -c 'import socket
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(16); print(s.getsockname()[1], flush=True)
+held = []
+while True: held.append(s.accept()[0])')
+late=$(serve late $tls --delay /h2/one.html 11000 --sub-file "@MUTE@=$work/mute.port")
 names() {
   sed -e "s/:$h2\b/:H2/g" -e "s/:$h1\b/:H1/g" -e "s/:${goaway:-x}\b/:GOAWAY/g" -e "s/:${reset:-x}\b/:RESET/g" -e "s/:${proxy:-x}\b/:PROXY/g" \
-    -e "s/:${four:-x}\b/:FOUR/g" -e "s/:${big:-x}\b/:BIG/g" -e "s/:${cache:-x}\b/:CACHE/g" -e "s/:${plain:-x}\b/:PLAIN/g" -e "s/:${drop:-x}\b/:DROP/g" -e "s/:${far:-x}\b/:FAR/g"
+    -e "s/:${four:-x}\b/:FOUR/g" -e "s/:${big:-x}\b/:BIG/g" -e "s/:${cache:-x}\b/:CACHE/g" -e "s/:${plain:-x}\b/:PLAIN/g" -e "s/:${drop:-x}\b/:DROP/g" \
+    -e "s/:${mute:-x}\b/:MUTE/g" -e "s/ port ${mute:-x}\b/ port MUTE/g" -e "s/:${late:-x}\b/:LATE/g" -e "s/:${pp:-x}\b/:P/g" -e "s/:${pq:-x}\b/:Q/g" \
+    -e "s/:${dict:-x}\b/:D/g" \
+    -e "s/:${far:-x}\b/:FAR/g"
 }
 amb() { sh "$AMB_ROOT/bin/ambitious" "$@" 2>&1 | names; }
+# the waits Chromium waits, beside the rest of the gate: an answer that comes after 11 s, which
+# Chromium waits for (measured: 150 s), and a TLS handshake never answered, which it gives up
+# after 30 s (measured: ERR_TIMED_OUT at 30.0 s)
+t0=$(date +%s)
+( amb query "https://localhost:$late/h2/one.html" "net_resource(R, U, _, O, S, _, _), (net_failure(R, Why) -> true ; Why = none)" > "$work/late.out"
+  echo $(($(date +%s) - t0)) > "$work/late.time" ) &
+latepid=$!
+( amb query "https://localhost:$late/t/waits.html" "net_resource(R, U, _, O, S, _, _), (net_failure(R, Why) -> true ; Why = none)" > "$work/mute.out"
+  echo $(($(date +%s) - t0)) > "$work/mute.time" ) &
+mutepid=$!
 # conns LOG: each connection of a server's log, its protocol and its streams (or requests),
 # and over h2 the most streams open on it at once
 conns() {
@@ -136,8 +164,8 @@ reset=$(serve reset $tls --reset /h2/reset.css INTERNAL_ERROR --reset /h2/refuse
 amb query "https://localhost:$reset/h2/s.html" "net_resource(R, U, _, O, S, _, _), (net_failure(R, Why) -> true ; Why = none)"
 echo "-- the server's log: the stream reset, the one refused and asked again"
 grep -E '^conn [0-9]+ stream ' "$work/reset.log" | sed 's/, [0-9]* open$//'
-echo "-- a stream the server never answers (tests/net/site/h2/t.html): the read's ten seconds"
-amb query "https://localhost:$reset/h2/t.html" "net_resource(R, U, _, O, S, _, _), (net_failure(R, Why) -> true ; Why = none)"
+echo "-- a stream the server never answers (tests/net/site/h2/t.html): Chromium waits on; here AMB_NET_TIMEOUT=1000 ends the wait"
+AMB_NET_TIMEOUT=1000 amb query "https://localhost:$reset/h2/t.html" "net_resource(R, U, _, O, S, _, _), (net_failure(R, Why) -> true ; Why = none)"
 
 echo "== a server that refuses h2: http/1.1 by ALPN, its connections kept alive"
 : > "$work/h1.log"
@@ -213,6 +241,85 @@ case "$addr" in
     sh "$AMB_ROOT/bin/ambitious" load "http://$addr:$far/h2/one.html" > /dev/null 2>&1
     awk '/^conn 1 request 1 / { p = 1; next } /^conn / { p = 0 } p' "$work/far.log" | sed -e "s/$addr:$far/ADDRESS:FAR/" ;;
 esac
+
+echo "== HTTP/2's pooling by IP (tests/net/site/t/pool.html at a.localhost): each server's connections and what each carried, against Chromium's (tests/net/pool.chromium)"
+pq=$(serve pq --tls "$ca/pool.crt" "$ca/pool.key" --log-tls --log "$work/pq.log")
+pp=$(serve pp --tls "$ca/pool.crt" "$ca/pool.key" --sni c.localhost "$ca/c.crt" "$ca/c.key" --bind 0.0.0.0 --log-tls --log "$work/pp.log" \
+  --misdirect '/top.png?misdirected' --misdirect-always '/top.png?always' --sub-file "@Q@=$work/pq.port")
+purl=https://a.localhost:$pp/t/pool.html
+pproxy=$(pyserve pproxy "$AMB_ROOT/tests/net/proxy.py" "$work/pproxy.log")
+for f in pp pq; do echo "-- 1 $purl" >> "$work/$f.log"; done
+sh "$AMB_ROOT/bin/ambitious" load "$purl" > /dev/null 2>&1
+for f in pp pq; do echo "-- 2 $purl" >> "$work/$f.log"; done
+https_proxy=http://127.0.0.1:$pproxy sh "$AMB_ROOT/bin/ambitious" load "$purl" > /dev/null 2>&1
+for f in pp pq; do names < "$work/$f.log" > "$work/$f.named"; done
+sh "$AMB_ROOT/tests/net/tlscanon.sh" pool "P=$work/pp.named" "Q=$work/pq.named" > "$work/pool.visit"
+if diff "$AMB_ROOT/tests/net/pool.chromium" "$work/pool.visit" > "$work/pool.diff"; then
+  echo "the same, connection by connection: $(grep -c ' sni=' "$work/pool.visit") connections, $(grep -c '^-- ' "$work/pool.visit") visits"
+else
+  cat "$work/pool.diff"
+fi
+echo "-- the facts: each part's connection, the page's (1) by pooling or one of its own"
+amb query "$purl" "net_resource(R, U, image, _, S, _, _), net_http(R, h2, C, _, _), (net_pooled(R) -> How = pooled ; How = own)"
+
+echo "== TLS sessions resumed over HTTP/1.1, each connection closed after its response (tests/net/site/t/res.html, seq.html): how many of each host's connections resumed, against Chromium's (tests/net/res.chromium)"
+: > "$work/res.visit"
+for tlsv in "TLS 1.3:" "TLS 1.2, tickets:--tls12" "TLS 1.2, session IDs:--tls12 --no-ticket"; do
+  opts=${tlsv#*:}
+  n=$(echo "${tlsv%%:*}" | tr -cd 'a-zA-Z0-9')
+  pq=$(serve "rq$n" --tls "$ca/pool.crt" "$ca/pool.key" --h1 --close $opts --log-tls --log "$work/rq$n.log")
+  pp=$(serve "rp$n" --tls "$ca/pool.crt" "$ca/pool.key" --h1 --close $opts --log-tls --log "$work/rp$n.log" --sub-file "@Q@=$work/rq$n.port")
+  echo "== ${tlsv%%:*}" >> "$work/res.visit"
+  for v in "1 res.html" "2 seq.html"; do
+    for f in rp rq; do echo "-- ${v% *} https://a.localhost:$pp/t/${v#* }" >> "$work/$f$n.log"; done
+    sh "$AMB_ROOT/bin/ambitious" load "https://a.localhost:$pp/t/${v#* }" > /dev/null 2>&1
+  done
+  for f in rp rq; do names < "$work/$f$n.log" > "$work/$f$n.named"; done
+  sh "$AMB_ROOT/tests/net/tlscanon.sh" resume "P=$work/rp$n.named" "Q=$work/rq$n.named" >> "$work/res.visit"
+  [ "$n" = "TLS13" ] && amb query "https://a.localhost:$pp/t/res.html" "aggregate_all(count, net_tls_resumed(_), Resumed), aggregate_all(count, net_tls(_, 'TLSv1.3', _, _), Tls13)"
+done
+if diff "$AMB_ROOT/tests/net/res.chromium" "$work/res.visit" > "$work/res.diff"; then
+  echo "the same, host by host: $(grep -c ' connection' "$work/res.visit") hosts' counts"
+else
+  cat "$work/res.diff"
+fi
+
+echo "== compression dictionaries (tests/net/site/dict/): two runs of a profile over HTTP/2, against Chromium's two visits (tests/net/dict.chromium)"
+dict=$(serve dict $tls --log-tls --log "$work/dict.log" --log-headers)
+dprof=$work/dprofile
+echo "-- 1 https://localhost:$dict/dict/page.html" >> "$work/dict.log"
+sh "$AMB_ROOT/bin/ambitious" --profile "$dprof" query "https://localhost:$dict/dict/page.html" "script_console(_, _, T)" > "$work/dict1.out" 2>&1
+echo "-- 2 https://localhost:$dict/dict/again.html" >> "$work/dict.log"
+sh "$AMB_ROOT/bin/ambitious" --profile "$dprof" query "https://localhost:$dict/dict/again.html" "script_console(_, _, T)" > "$work/dict2.out" 2>&1
+{ sed -e "s/:$dict\b/:D/g" "$work/dict.log" | sh "$AMB_ROOT/tests/net/dictcanon.sh"
+  cat "$work/dict1.out" "$work/dict2.out" | sed -n "s/^T = '\(.*\)'$/console: \1/p"; } > "$work/dict.visit"
+# the second page's sheet's colour: Chromium's console wrote it from getComputedStyle, which reads
+# the inline style alone here (docs/limitations.md, Scripts); the cascade's own says it
+grep '^console: rgb' "$AMB_ROOT/tests/net/dict.chromium" > "$work/dict.colour"
+grep -v '^console: rgb' "$work/dict.visit" > "$work/dict.got"
+grep -v '^console: rgb' "$AMB_ROOT/tests/net/dict.chromium" > "$work/dict.want"
+if diff "$work/dict.want" "$work/dict.got" > "$work/dict.diff"; then
+  echo "the same: $(grep -c '^GET' "$work/dict.got") requests' dictionary fields, field by field, and what the pages' scripts got"
+else
+  cat "$work/dict.diff"
+fi
+echo "-- the second page's sheet, coded dcz over the first run's dictionary: its colour (Chromium's $(sed 's/^console: //' "$work/dict.colour"))"
+amb --profile "$dprof" query "https://localhost:$dict/dict/again.html" "dom_attr(N, class, again), css_computed(N, color, C, _)" | sed 's/^N = [^,]*, //'
+echo "-- the facts of the first run: what was kept as a dictionary, what each request offered and the response it was kept from"
+amb query "https://localhost:$dict/dict/page.html" "net_dictionary(R, H, M, I), net_resource(R, U, _, _, _, _, _)" | sed 's/^R = [^,]*, //'
+amb query "https://localhost:$dict/dict/page.html" "net_dictionary_from(R, D), net_resource(R, U, _, O, _, _, _), net_resource(D, DU, _, _, _, _, _), (net_coding(R, C, _) -> true ; C = none)" |
+  sed -e 's/^R = [^,]*, D = [^,]*, //'
+
+echo "== the waits, Chromium's: an answer after 11 s waited for, a TLS handshake given up after 30 s (both run beside the rest)"
+wait "$latepid" "$mutepid"
+cat "$work/late.out"
+[ "$(cat "$work/late.time")" -ge 11 ] && echo "answered after 11 s or more" || echo "answered too soon: $(cat "$work/late.time") s"
+cat "$work/mute.out"
+t=$(cat "$work/mute.time")
+[ "$t" -ge 30 ] && [ "$t" -lt 45 ] && echo "given up after 30 s" || echo "given up after $t s"
+echo "-- AMB_NET_TIMEOUT=1000 cuts each wait short: the handshake; the CONNECT of a proxy there (the page's own host reached directly)"
+AMB_NET_TIMEOUT=1000 amb query "https://localhost:$late/t/waits.html" "net_resource(R, U, _, O, S, _, _), net_failure(R, Why)"
+AMB_NET_TIMEOUT=1000 https_proxy=http://127.0.0.1:$mute no_proxy=localhost amb query "https://localhost:$late/t/waits.html" "net_resource(R, U, _, O, S, _, _), net_failure(R, Why)"
 
 for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
 wait 2> /dev/null

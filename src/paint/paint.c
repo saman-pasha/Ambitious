@@ -1704,9 +1704,14 @@ static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba,
         vector<uint8_t> bytes;
         append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
         int got = amb_image_decode(data(bytes), len(bytes), rgba, w, h);
-        /* its natural size in CSS px: the loader's (a srcset density's share), else its pixels */
+        /* its natural size in CSS px: its pixels over the density a srcset chose it at (unrounded, as
+           layout gives it), else the loader's, else its pixels */
         *nw = nt->resource[r].width > 0 ? nt->resource[r].width : *w;
         *nh = nt->resource[r].height > 0 ? nt->resource[r].height : *h;
+        if (got > 0 && nt->resource[r].srcset && nt->resource[r].density > 0 && *w && *h) {
+            *nw = *w / nt->resource[r].density;
+            *nh = *h / nt->resource[r].density;
+        }
         return got;
     }
     return 0;

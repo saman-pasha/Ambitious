@@ -1,0 +1,54 @@
+-- 1 https://localhost:D/dict/page.html
+GET /dict/compress.txt
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/css/c.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :cR/3dL63PKQWwkyEx8uhJrv5yGReLu6lqkfZrpTp6xI=:
+GET /dict/dict.css
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/dict.js
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/js/a.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:
+  dictionary-id: "v1"
+GET /dict/js/b.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:
+  dictionary-id: "v1"
+GET /dict/js/bad.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:
+  dictionary-id: "v1"
+GET /dict/js/badhash.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:
+  dictionary-id: "v1"
+GET /dict/js/next.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:
+  dictionary-id: "v1"
+GET /dict/nav.js
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/next/x.txt
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :MNZ9Ud46VZuCOK6R0wJEsQKfE123dLqXJ/agREniTuo=:
+GET /dict/none/x.txt
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/page.html
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/z0.js
+  accept-encoding: gzip, deflate, br, zstd
+GET /dict/z0/x.txt
+  accept-encoding: gzip, deflate, br, zstd
+-- 2 https://localhost:D/dict/again.html
+GET /dict/again.html
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :rS5GsvdTtti5Cm1uqzm1OQ5JxfeUiPuNhOoRKO4UZ90=:
+GET /dict/css/again.css
+  accept-encoding: gzip, deflate, br, zstd, dcb, dcz
+  available-dictionary: :cR/3dL63PKQWwkyEx8uhJrv5yGReLu6lqkfZrpTp6xI=:
+console: Failed to load resource: net::ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER
+console: js/a.txt 200 js/a.txt: the quick brown fox jumps over the lazy dog; compression dictionary transport, the script edition, coded dcb | js/b.txt 200 js/b.txt: the quick brown fox jumps over the lazy dog; compression dictionary transport, the script edition, coded dcz | css/c.txt 200 css/c.txt: the quick brown fox jumps over the lazy dog; compression dictionary transport, the stylesheet edition | js/badhash.txt TypeError: Failed to fetch | js/bad.txt 200 js/bad.txt: the quick brown fox jumps over the lazy dog; its Brotli stream cut | none/x.txt 200 none/x.txt: no dictionary is of this path | js/next.txt 200 js/next.txt: kept as the dictionary of /dict/next/, the quick brown fox jumps over the lazy dog, coded dcb itself | next/x.txt 200 next/x.txt: kept as the dictionary of /dict/next/, the quick brown fox jumps over the lazy dog, over the next one | z0/x.txt 200 z0/x.txt: its dictionary was never kept | compress.txt 200 compress.txt: a coding not read, taken as it came
+console: Again, over a dictionary
+console: rgb(40, 50, 60)

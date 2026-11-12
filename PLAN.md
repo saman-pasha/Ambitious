@@ -1149,6 +1149,43 @@ be built side by side and merged without touching each other's.
   of 5, from 2), each held to Chromium's boxes (`tests/integ/boxes.sh`) and drawing (`tests/integ/paintref.sh`); every
   other page's boxes and regions unmoved; `lists.png` and `geometry.png` of `tests/golden/render/` moved towards
   Chromium's drawing (an empty list item's marker).
+- **12y Network's rest** (`src/net/net.c`, `src/net/dict.c` and `dict.h`, `src/net/zstd.c` and `src/paint/brotli.c`
+  over a dictionary, `contracts/net.pl` 0.5.0; the Encoding standard's encoders in `src/html/encoding.c` and
+  `src/html/encode.h`, the URL parser's encoding argument in `src/net/url.c`, the sites that resolve a URL in
+  `src/css/css.c`, `src/layout/layout.c`, `src/script/` and `src/shell/`, a sheet's encoding in `contracts/css.pl`),
+  each measured in Chromium first:
+  - HTTP/2's pooling by IP (SpdySessionPool's aliases): a connection made directly carries another host that resolves
+    to its address and port and that its certificate covers, a name or an address alike, none through a proxy; a 421
+    asked again on the host's own connection, a second its answer; localhost and `*.localhost` resolved as Chromium
+    resolves them (::1, then 127.0.0.1);
+  - TLS sessions resumed as SSLClientSessionCache keeps them: by host and port, two a server, a TLS 1.3 ticket used
+    once, a TLS 1.2 session again and again; a connection closed with its shutdown sent, so that OpenSSL keeps its
+    session good;
+  - the waits Chromium's: a connect four minutes (its source's), a proxy's tunnel and a TLS handshake 30 s each, an
+    answer as long as it takes (measured at 150 s), each capped by `AMB_NET_TIMEOUT` for tests;
+  - Compression Dictionary Transport (RFC 9842): Use-As-Dictionary read as RFC 9651's structured field, a response
+    kept where Chromium keeps one (potentially trustworthy, readable by its page, a pattern of its own origin, fresh),
+    the longest match offered as Available-Dictionary and Dictionary-ID with dcb and dcz, a body checked against the
+    dictionary's SHA-256 and decoded over it, the dictionaries kept in the profile for later runs (the system's
+    libbrotli 1.1.0 has a dictionary API and libzstd no headers: the decoders are the module's own);
+  - a URL's query in its page's legacy encoding (the URL standard's encoding argument): an element's, a background's,
+    a frame's, an XMLHttpRequest's, a navigation's, a form's action and window.open's in the document's, fetch()'s
+    and new URL's in UTF-8, a fetched sheet's in its own (its charset, @charset, its importing sheet's), the sheet now
+    decoded from it, an imported sheet fetched once;
+  - `<picture>`: the source an img takes gives it its width and height (Blink's
+    CollectExtraStyleForPresentationAttribute);
+  - images chosen in the profile's viewport, at the device pixel ratio its zoom makes (the first density at it or
+    past it, else the greatest: measured at 1, 2 and 2.5), its font size for sizes' em, its scheme and reduced motion
+    for a source's media; a density-corrected size laid out unrounded.
+
+  Gate: `tests/integ/net-h2.sh`: 12 connections over 2 visits, connection by connection (`tests/net/pool.chromium`);
+  12 hosts' resumed counts (`tests/net/res.chromium`); 17 requests' dictionary fields and the pages' scripts' results
+  (`tests/net/dict.chromium`); an answer after 11 s waited for, a handshake given up after 30 s, each cut short by
+  `AMB_NET_TIMEOUT`; `tests/exec/net_dict` (SHA-256's known answers, the field and the patterns as measured, 30 vectors
+  of `tools/gen-dict-vectors.py` decoded, 1,200 broken ones decoded or refused, valgrind clean); `tests/integ/net.sh`:
+  36 requests of two legacy pages, target by target (`tests/net/query.chromium`); `tests/integ/picture.sh`: 9 of 9
+  sources' dimensions (`tests/net/picture-dims.chromium`), 15 of 15 images under each of five profiles
+  (`tests/net/env.chromium`).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

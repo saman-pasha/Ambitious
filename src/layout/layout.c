@@ -233,6 +233,7 @@ amb_implementation(layout);
 #include "bidi_data.h"
 #include "../net/url.h"
 #include "../paint/svg.h"
+#include "../paint/image.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run. The cascade's store and
@@ -1534,11 +1535,21 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
         double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
         if (lay_is_named(d, el, "img") && nt) {
             /* its size, as the loader read it from the image's header; one dimension
-               declared, the other kept in proportion */
+               declared, the other kept in proportion. One a srcset chose is its header's size
+               over its density, unrounded, as Blink lays it out (the loader's, like
+               naturalWidth, is floored) */
             for (uint32_t r = 1; r < nt->resource_len; r++)
                 if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE) {
                     dw = nt->resource[r].width;
                     dh = nt->resource[r].height;
+                    if (nt->resource[r].srcset && nt->resource[r].density > 0 && nt->resource[r].outcome == NET_OUTCOME_OK) {
+                        amb_span body = nt->resource[r].body;
+                        uint32_t pw = 0, ph = 0;
+                        if (body.len && amb_image_size((const uint8_t *)bytes_ptr(nt, body), body.len, &pw, &ph) && pw && ph) {
+                            dw = pw / nt->resource[r].density;
+                            dh = ph / nt->resource[r].density;
+                        }
+                    }
                     double sw, sh;
                     svg = (dw <= 0 || dh <= 0) && nt->resource[r].outcome == NET_OUTCOME_OK && amb_svg_size_of(nt, r, &sw, &sh, &ratio);
                 }
@@ -8061,9 +8072,12 @@ static uint32_t lay_image_url(const css_style *st, const net_loader *net, amb_sp
     char ref[2048];
     memcpy(ref, data(v) + i, e - i);
     ref[e - i] = 0;
-    /* the base: the declaration's sheet's URL, or the page's */
+    /* the base: the declaration's sheet's URL, or the page's; the encoding its query is written
+       in, the sheet's (its own, or its referrer's), or the page's (measured: a background's url()
+       as Chromium writes it, of a style element and of a fetched sheet) */
     char base[2048];
     base[0] = 0;
+    int enc = net_encoding();
     if (dcl && dcl < st->decl_len) {
         uint32_t ru = st->decl[dcl].rule;
         uint32_t sh = ru && ru < st->rule_len ? st->rule[ru].sheet : 0;
@@ -8071,6 +8085,7 @@ static uint32_t lay_image_url(const css_style *st, const net_loader *net, amb_sp
             amb_span su = st->sheet[sh].url;
             memcpy(base, text_ptr(st, su), su.len);
             base[su.len] = 0;
+            enc = st->sheet[sh].enc;
         }
     }
     for (uint32_t r = 1; r < net->resource_len && !base[0]; r++)
@@ -8078,7 +8093,7 @@ static uint32_t lay_image_url(const css_style *st, const net_loader *net, amb_sp
             amb_span fu = net->resource[r].final_url.len ? net->resource[r].final_url : net->resource[r].url;
             if (fu.len < sizeof base) { memcpy(base, text_ptr(net, fu), fu.len); base[fu.len] = 0; }
         }
-    if (!base[0] || !net_url_resolve(base, ref, abs_url, cap)) { abs_url[0] = 0; return 0; }
+    if (!base[0] || !net_url_resolve_enc(base, ref, enc, abs_url, cap)) { abs_url[0] = 0; return 0; }
     size_t al = strlen(abs_url);
     for (uint32_t r = 1; r < net->resource_len; r++)
         if (net->resource[r].live && net->resource[r].kind == NET_KIND_IMAGE && net->resource[r].url.len == al &&

@@ -53,6 +53,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "encode.h"
 #include <vector.pl>
 #include <amb.pl>
 
@@ -475,6 +476,216 @@ size_t html_decode(int enc, const char *src, size_t n, vector<char> *out) {
     case HTML_ENC_X_USER_DEFINED: return enc_x_user_defined(src, n, out);
     }
     return enc_utf8(src, n, out);
+}
+
+/* ---- encoders (the standard's, 9 to 14), for a URL's query in its document's encoding ----
+   Each is the standard's encoder for one code point, an index's pointer for it found by
+   reading the index through (a URL's query is short). */
+
+int html_output_encoding(int enc) {
+    if (enc < 0 || enc == HTML_ENC_REPLACEMENT || enc == HTML_ENC_UTF_16BE || enc == HTML_ENC_UTF_16LE) return HTML_ENC_UTF_8;
+    return enc;
+}
+
+/* index jis0208's first pointer for a code point, -1 for none; past 8272..8835 for Shift_JIS's */
+static int32_t enc_jis0208_pointer(uint32_t cp, int shift_jis) {
+    for (uint32_t p = 0; p < 11280; p++) {
+        if (shift_jis && p >= 8272 && p <= 8835) continue;
+        if (html_enc_jis0208[p] == cp) return (int32_t)p;
+    }
+    return -1;
+}
+
+size_t html_encode_cp(int enc, uint32_t cp, uint8_t *out, int *state, uint32_t *error) {
+    *error = 0;
+    /* the end of the queue: ISO-2022-JP back to ASCII, if it left it */
+    if (cp == 0xFFFFFFFFu) {
+        if (enc == HTML_ENC_ISO_2022_JP && *state != 0) {
+            out[0] = 0x1B;
+            out[1] = 0x28;
+            out[2] = 0x42;
+            *state = 0;
+            return 3;
+        }
+        return 0;
+    }
+    uint32_t orig = cp;
+    if (enc < 0 || enc == HTML_ENC_UTF_8 || enc == HTML_ENC_UTF_16BE || enc == HTML_ENC_UTF_16LE || enc == HTML_ENC_REPLACEMENT) {
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        if (cp < 0x800) { out[0] = (uint8_t)(0xC0 | cp >> 6); out[1] = (uint8_t)(0x80 | (cp & 0x3F)); return 2; }
+        if (cp < 0x10000) {
+            out[0] = (uint8_t)(0xE0 | cp >> 12);
+            out[1] = (uint8_t)(0x80 | (cp >> 6 & 0x3F));
+            out[2] = (uint8_t)(0x80 | (cp & 0x3F));
+            return 3;
+        }
+        out[0] = (uint8_t)(0xF0 | cp >> 18);
+        out[1] = (uint8_t)(0x80 | (cp >> 12 & 0x3F));
+        out[2] = (uint8_t)(0x80 | (cp >> 6 & 0x3F));
+        out[3] = (uint8_t)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    if (enc >= HTML_ENC_SINGLE_FIRST && enc <= HTML_ENC_SINGLE_LAST) {
+        /* 9.2 single-byte encoder */
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        for (uint32_t b = 0; b < 128; b++)
+            if (html_enc_single[enc - HTML_ENC_SINGLE_FIRST][b] == cp) { out[0] = (uint8_t)(0x80 + b); return 1; }
+        *error = orig;
+        return 0;
+    }
+    if (enc == HTML_ENC_X_USER_DEFINED) {
+        /* 14.5.2 */
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        if (cp >= 0xF780 && cp <= 0xF7FF) { out[0] = (uint8_t)(cp - 0xF780 + 0x80); return 1; }
+        *error = orig;
+        return 0;
+    }
+    if (enc == HTML_ENC_GBK || enc == HTML_ENC_GB18030) {
+        /* 10.2.2 gb18030 encoder (GBK's when is_gbk) */
+        int gbk = enc == HTML_ENC_GBK;
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        if (cp == 0xE5E5) { *error = orig; return 0; }
+        if (gbk && cp == 0x20AC) { out[0] = 0x80; return 1; }
+        for (uint32_t p = 0; p < 23940; p++)
+            if (html_enc_gb18030[p] == cp) {
+                uint32_t lead = p / 190 + 0x81, trail = p % 190, off = trail < 0x3F ? 0x40 : 0x41;
+                out[0] = (uint8_t)lead;
+                out[1] = (uint8_t)(trail + off);
+                return 2;
+            }
+        if (gbk) { *error = orig; return 0; }
+        /* index gb18030 ranges pointer */
+        uint32_t p;
+        if (cp == 0xE7C7) p = 7457;
+        else {
+            size_t lo = 0;
+            for (size_t k = 0; k < HTML_ENC_GB18030_RANGES; k++)
+                if (html_enc_gb18030_ranges[k][1] <= cp) lo = k;
+            p = html_enc_gb18030_ranges[lo][0] + cp - html_enc_gb18030_ranges[lo][1];
+        }
+        uint32_t b1 = p / (10 * 126 * 10);
+        p %= 10 * 126 * 10;
+        uint32_t b2 = p / (10 * 126);
+        p %= 10 * 126;
+        uint32_t b3 = p / 10, b4 = p % 10;
+        out[0] = (uint8_t)(b1 + 0x81);
+        out[1] = (uint8_t)(b2 + 0x30);
+        out[2] = (uint8_t)(b3 + 0x81);
+        out[3] = (uint8_t)(b4 + 0x30);
+        return 4;
+    }
+    if (enc == HTML_ENC_BIG5) {
+        /* 11.1.2: index Big5 pointer, the last one for a few code points */
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        int last = cp == 0x2550 || cp == 0x255E || cp == 0x2561 || cp == 0x256A || cp == 0x5341 || cp == 0x5345;
+        int32_t ptr = -1;
+        for (uint32_t p = (0xA1 - 0x81) * 157; p < 19782; p++)
+            if (enc_big5_cp(p) == cp) {
+                ptr = (int32_t)p;
+                if (!last) break;
+            }
+        if (ptr < 0) { *error = orig; return 0; }
+        uint32_t lead = (uint32_t)ptr / 157 + 0x81, trail = (uint32_t)ptr % 157, off = trail < 0x3F ? 0x40 : 0x62;
+        out[0] = (uint8_t)lead;
+        out[1] = (uint8_t)(trail + off);
+        return 2;
+    }
+    if (enc == HTML_ENC_EUC_JP || enc == HTML_ENC_SHIFT_JIS) {
+        /* 12.1.2 EUC-JP encoder, 12.3.2 Shift_JIS encoder */
+        int sj = enc == HTML_ENC_SHIFT_JIS;
+        if (cp < 0x80 || (sj && cp == 0x80)) { out[0] = (uint8_t)cp; return 1; }
+        if (cp == 0xA5) { out[0] = 0x5C; return 1; }
+        if (cp == 0x203E) { out[0] = 0x7E; return 1; }
+        if (cp >= 0xFF61 && cp <= 0xFF9F) {
+            if (sj) { out[0] = (uint8_t)(cp - 0xFF61 + 0xA1); return 1; }
+            out[0] = 0x8E;
+            out[1] = (uint8_t)(cp - 0xFF61 + 0xA1);
+            return 2;
+        }
+        if (cp == 0x2212) cp = 0xFF0D;
+        int32_t p = enc_jis0208_pointer(cp, sj);
+        if (p < 0) { *error = orig; return 0; }
+        if (!sj) {
+            out[0] = (uint8_t)(p / 94 + 0xA1);
+            out[1] = (uint8_t)(p % 94 + 0xA1);
+            return 2;
+        }
+        uint32_t lead = (uint32_t)p / 188, lead_off = lead < 0x1F ? 0x81 : 0xC1, trail = (uint32_t)p % 188, off = trail < 0x3F ? 0x40 : 0x41;
+        out[0] = (uint8_t)(lead + lead_off);
+        out[1] = (uint8_t)(trail + off);
+        return 2;
+    }
+    if (enc == HTML_ENC_ISO_2022_JP) {
+        /* 12.2.2: its state 0 ASCII, 1 Roman, 2 jis0208 */
+        size_t k = 0;
+        if ((*state == 0 || *state == 1) && (cp == 0x0E || cp == 0x0F || cp == 0x1B)) { *error = 0xFFFD; return 0; }
+        if (*state == 0 && cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        if (*state == 1 && ((cp < 0x80 && cp != 0x5C && cp != 0x7E) || cp == 0xA5 || cp == 0x203E)) {
+            out[0] = (uint8_t)(cp < 0x80 ? cp : cp == 0xA5 ? 0x5C : 0x7E);
+            return 1;
+        }
+        if (cp < 0x80) {
+            out[k++] = 0x1B;
+            out[k++] = 0x28;
+            out[k++] = 0x42;
+            *state = 0;
+            out[k++] = (uint8_t)cp;
+            return k;
+        }
+        if (cp == 0xA5 || cp == 0x203E) {
+            out[k++] = 0x1B;
+            out[k++] = 0x28;
+            out[k++] = 0x4A;
+            *state = 1;
+            out[k++] = (uint8_t)(cp == 0xA5 ? 0x5C : 0x7E);
+            return k;
+        }
+        if (cp == 0x2212) cp = 0xFF0D;
+        if (cp >= 0xFF61 && cp <= 0xFF9F) {
+            /* index ISO-2022-JP katakana: its code point, by the jis0208 pointer of it */
+            static const uint16_t kana[63] = { 0x3002, 0x300C, 0x300D, 0x3001, 0x30FB, 0x30F2, 0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30E3,
+                                               0x30E5, 0x30E7, 0x30C3, 0x30FC, 0x30A2, 0x30A4, 0x30A6, 0x30A8, 0x30AA, 0x30AB, 0x30AD, 0x30AF,
+                                               0x30B1, 0x30B3, 0x30B5, 0x30B7, 0x30B9, 0x30BB, 0x30BD, 0x30BF, 0x30C1, 0x30C4, 0x30C6, 0x30C8,
+                                               0x30CA, 0x30CB, 0x30CC, 0x30CD, 0x30CE, 0x30CF, 0x30D2, 0x30D5, 0x30D8, 0x30DB, 0x30DE, 0x30DF,
+                                               0x30E0, 0x30E1, 0x30E2, 0x30E4, 0x30E6, 0x30E8, 0x30E9, 0x30EA, 0x30EB, 0x30EC, 0x30ED, 0x30EF,
+                                               0x30F3, 0x309B, 0x309C };
+            cp = kana[cp - 0xFF61];
+        }
+        int32_t p = enc_jis0208_pointer(cp, 0);
+        if (p < 0) {
+            /* back to ASCII first, when in jis0208, then the error */
+            *error = orig;
+            if (*state != 2) return 0;
+            out[k++] = 0x1B;
+            out[k++] = 0x28;
+            out[k++] = 0x42;
+            *state = 0;
+            return k;
+        }
+        if (*state != 2) {
+            out[k++] = 0x1B;
+            out[k++] = 0x24;
+            out[k++] = 0x42;
+            *state = 2;
+        }
+        out[k++] = (uint8_t)(p / 94 + 0x21);
+        out[k++] = (uint8_t)(p % 94 + 0x21);
+        return k;
+    }
+    if (enc == HTML_ENC_EUC_KR) {
+        /* 13.1.2 */
+        if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+        for (uint32_t p = 0; p < 23940; p++)
+            if (html_enc_euc_kr[p] == cp) {
+                out[0] = (uint8_t)(p / 190 + 0x81);
+                out[1] = (uint8_t)(p % 190 + 0x41);
+                return 2;
+            }
+        *error = orig;
+        return 0;
+    }
+    *error = orig;
+    return 0;
 }
 
 /* ---- names and labels ---------------------------------------------------------- */

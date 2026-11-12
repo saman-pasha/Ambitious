@@ -1,0 +1,1 @@
+js/badhash.txt: its header names another dictionary

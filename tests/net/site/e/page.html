@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Images chosen in the profile's viewport</title>
+<!-- tests/net/site/e/page.html: each img's image chosen as HTML's image source selection chooses it in the
+     reader's viewport, at the device pixel ratio the zoom makes it, in the colour scheme and motion the
+     reader prefers (with a value, and a name alone), a font-relative length of sizes of the reader's font
+     size: held to Chromium's under the same settings (tests/net/env.chromium, by tests/net/env.js). Each
+     file is of a size of its own. -->
+<style>
+body { margin: 8px; font: 16px/1 sans-serif }
+img { display: block; margin: 0 0 2px }
+</style>
+<img id="x2" srcset="x2a.png 1x, x2b.png 2x" alt="">
+<img id="x3" srcset="x3a.png 1x, x3b.png 1.5x, x3c.png 3x" alt="">
+<img id="x13" srcset="x13a.png 1x, x13b.png 3x" alt="">
+<img id="x15" srcset="x15a.png 1x, x15b.png 5x" alt="">
+<img id="x23" srcset="x23a.png 1x, x23b.png 2.3x, x23c.png 3x" alt="">
+<img id="w" srcset="wa.png 400w, wb.png 800w, wc.png 1600w" alt="">
+<img id="vw" srcset="va.png 400w, vb.png 800w, vc.png 1600w" sizes="50vw" alt="">
+<img id="em" srcset="ea.png 400w, eb.png 800w, ec.png 1600w" sizes="(max-width: 40em) 100vw, 25em" alt="">
+<img id="vh" srcset="ha.png 400w, hb.png 800w, hc.png 1600w" sizes="50vh" alt="">
+<picture><source media="(max-width: 500px)" srcset="mq-narrow.png"><img id="mq" src="mq-own.png" alt=""></picture>
+<picture><source media="(min-resolution: 2dppx)" srcset="res-hi.png"><img id="res" src="res-own.png" alt=""></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="dark.png"><img id="dark" src="light.png" alt=""></picture>
+<picture><source media="(prefers-reduced-motion: reduce)" srcset="motion.png"><img id="motion" src="motion-own.png" alt=""></picture>
+<picture><source media="(prefers-reduced-motion)" srcset="lone.png"><img id="lone" src="lone-own.png" alt=""></picture>
+<picture><source media="(prefers-color-scheme)" srcset="slone.png"><img id="slone" src="slone-own.png" alt=""></picture>

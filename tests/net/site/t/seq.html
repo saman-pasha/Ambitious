@@ -1,0 +1,7 @@
+<!DOCTYPE html>
+<title>Sessions resumed, one after another</title>
+<!-- tests/net/site/t/seq.html: four requests a script makes one after another, each on a connection of its own (the
+     server closes each after its response), each handshake offering what the last left (tests/net/res.chromium) -->
+<script>
+(async () => { for (const u of ['f1', 'f2', 'f3', 'f4']) await (await fetch('/top.png?' + u)).arrayBuffer(); document.title = 'done'; })();
+</script>

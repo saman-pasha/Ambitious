@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<title>Pooling by IP</title>
+<!-- tests/net/site/t/pool.html: served as https://a.localhost:PORT/t/pool.html by tests/net/h2serve.js over HTTP/2, its
+     certificate covering localhost, a.localhost, b.localhost, 127.0.0.1 and 127.0.0.2, c.localhost given one of its own
+     (SNI); each part rides the page's connection or one of its own as Chromium pools them (tests/net/pool.chromium):
+     a host of the certificate at the same address and port, a name or an address alike, rides it; another address,
+     another port, a host the certificate does not cover, do not; a 421 is asked again with no pooling. -->
+<img src="https://b.localhost:PORT/top.png?b" alt="b">
+<img src="https://localhost:PORT/top.png?localhost" alt="localhost">
+<img src="https://127.0.0.1:PORT/top.png?ip" alt="127.0.0.1">
+<img src="https://c.localhost:PORT/top.png?c" alt="c">
+<img src="https://127.0.0.2:PORT/top.png?ip2" alt="127.0.0.2">
+<img src="https://b.localhost:@Q@/top.png?q" alt="another port">
+<img src="https://b.localhost:PORT/top.png?misdirected" alt="421 when pooled">
+<img src="https://a.localhost:PORT/top.png?always" alt="421 always">
+<img src="https://b.localhost:PORT/top.png?always" alt="421 always, pooled">

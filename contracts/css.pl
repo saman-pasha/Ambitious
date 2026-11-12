@@ -90,7 +90,8 @@ css_contract(enum(state_kind, [hover, focus, focus_visible, active, target])).
 
 css_contract(record(sheet, [field(origin, enum(origin)), field(first_rule, ref(rule)), field(last_rule, ref(rule)),
     field(url,    span(text)),          % where it was fetched from: a linked or imported sheet's
-    field(parent, ref(sheet))           % the sheet whose @import brought it
+    field(parent, ref(sheet)),          % the sheet whose @import brought it
+    field(enc,    i32)                  % a fetched sheet's encoding, its text decoded from it and its URLs' queries written in it: its own (BOM, charset, @charset), else its referrer's (src/html/encoding.h's number; 0 UTF-8)
 ])).
 css_contract(record(rule, [
     field(sheet,      ref(sheet)),

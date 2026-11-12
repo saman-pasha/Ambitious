@@ -1,0 +1,1 @@
+compress.txt: a coding not read, taken as it came

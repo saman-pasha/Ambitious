@@ -608,6 +608,12 @@ static void page_cascade(css_style *st, dom_document *d, net_loader *nt, const a
     page_state(st, d);
     css_cascade(st, d, nt);
 }
+/* the environment the page's images are chosen in: the viewport the zoom leaves, the zoom its
+   device pixel ratio, the reader's font size and scheme, as the cascade's (net_set_env) */
+static void page_net_env(const amb_prefs *pr) {
+    double z = pr && pr->zoom > 0 ? pr->zoom : 1;
+    net_set_env(VIEW_W / z, VIEW_H / z, z, pr ? pr->font_size : 16, pr && pr->color_scheme == AMB_SCHEME_DARK, pr && pr->reduced_motion);
+}
 /* the layout over the viewport in CSS px: the window over the zoom */
 static void page_layout(layout_tree *lt, dom_document *d, css_style *st, net_loader *nt, const amb_prefs *pr) {
     double z = pr && pr->zoom > 0 ? pr->zoom : 1;
@@ -820,6 +826,15 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
             if (strstr(data(kinds), "script")) denied |= 1u << NET_KIND_SCRIPT;
         }
     }
+    /* its parts named in its encoding (their URLs' queries written in it, as Chromium writes
+       them), their images chosen in the profile's viewport, zoom and scheme */
+    int denc = -1;
+    if (p->encoding_len > 1) {
+        amb_span en = p->encoding[p->encoding_len - 1].name;
+        denc = html_enc_of_label(bytes_ptr(p, en), en.len);
+    }
+    net_set_encoding(denc);
+    page_net_env(&s->prefs);
     net_fetch_subresources(nt, d, ph, denied);
     /* the scripts (unless the site's are denied), the clicks asked for, then the page at rest.
        A page with iframes (after its parse's scripts) is laid out, its frames made and loaded

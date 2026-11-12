@@ -22,7 +22,7 @@
 %% iframe's document, where it came from and what became of it, which src/shell/frame.c
 %% makes as it loads them. src/net/net.c says what of each the module does.
 
-net_contract(module(net, '0.4.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where; its frames')).
+net_contract(module(net, '0.5.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where; its frames')).
 
 %% ---- TYPES ------------------------------------------------------------------
 
@@ -60,7 +60,7 @@ net_contract(record(resource, [
     field(origin,    span(text)),            % its origin, serialized: null for an opaque one
     field(from,      ref(resource)),         % the page that asked for it
     field(elem,      xhandle(dom, node)),    % the element that asked for it
-    field(width,     u32),                   % an image's size, from its header (divided by its density, for one from a srcset)
+    field(width,     u32),                   % an image's size, from its header (divided by its density and floored, as naturalWidth is, for one from a srcset)
     field(height,    u32),
     field(reason,    span(text)),            % why its fetch did not end well, in words: the server's, the TLS library's, the proxy's, the system's
     field(tls,       bool),                  % its last exchange went over TLS, its server verified
@@ -78,7 +78,7 @@ net_contract(record(resource, [
     field(encoded_size, u32),                % the body's bytes as they came
     field(srcset,    bool),                  % an image chosen from its element's srcset
     field(descriptor, span(text)),           % the candidate's descriptor as written (2x, 800w), or empty for 1x and src
-    field(density,   f64),                   % its pixel density, for a device pixel ratio of 1
+    field(density,   f64),                   % its candidate's pixel density, chosen at the environment's device pixel ratio (net_set_env)
     field(source_size, f64),                 % the sizes attribute's length in the viewport, px (100vw by default)
     field(candidates, u32),                  % how many candidates there were, src among them when it was one
     field(picture,   bool),                  % an image chosen from a <source> of its img's <picture>
@@ -86,7 +86,15 @@ net_contract(record(resource, [
     field(protocol,  enum(protocol)),        % what its last request went over
     field(connection, u32),                  % the connection that carried it, numbered from 1 in the run
     field(stream,    u32),                   % its HTTP/2 stream; 0 over HTTP/1.1
-    field(reused,    bool)                   % that connection had carried a request before it
+    field(reused,    bool),                  % that connection had carried a request before it
+    field(pooled,    bool),                  % that connection is an HTTP/2 one made for another host at the same address, whose certificate covers this one's (pooling by IP)
+    field(tls_resumed, bool),                % its TLS session was resumed from an earlier connection's to its server (a ticket, a session ID)
+    field(dict_sent, bool),                  % its last request offered a compression dictionary (RFC 9842)
+    field(dict_offered, span(text)),         % that dictionary, as Available-Dictionary named it (its SHA-256, :base64:)
+    field(dict_kept, bool),                  % its response was kept as a compression dictionary (its Use-As-Dictionary)
+    field(dict_hash, span(text)),            % that dictionary's name, as a request offering it names it
+    field(dict_match, span(text)),           % its match, the URL pattern of the URLs it is offered for
+    field(dict_id, span(text))               % its id, or empty
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
@@ -214,6 +222,15 @@ net_contract(fact(net_tls(handle, field(tls_version), field(tls_cipher), field(a
 %% and HTTP/2 stream that carried it, and whether the connection had carried one before
 net_contract(fact(net_http(handle, field(protocol), field(connection), field(stream), field(reused)), table(resource),
     field(protocol) \== unsent)).
+%% a resource carried by an HTTP/2 connection made for another host (pooling by IP: the same
+%% address and port, the connection's certificate covering this one's host, no proxy between)
+net_contract(fact(net_pooled(handle), table(resource), field(pooled) == true)).
+%% a resource whose TLS session was resumed from one an earlier connection to its server left
+net_contract(fact(net_tls_resumed(handle), table(resource), field(tls_resumed) == true)).
+%% a response kept as a compression dictionary (RFC 9842): its name (its SHA-256 as
+%% Available-Dictionary writes it), its match, its id; and the dictionary a request offered
+net_contract(fact(net_dictionary(handle, field(dict_hash), field(dict_match), field(dict_id)), table(resource), field(dict_kept) == true)).
+net_contract(fact(net_dictionary_offered(handle, field(dict_offered)), table(resource), field(dict_sent) == true)).
 net_contract(fact(net_proxy(handle, field(proxy)), table(resource), field(proxied) == true)).
 net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == true)).
 net_contract(fact(net_cache(handle, field(cache), field(cache_age), field(cache_lifetime)), table(resource), field(cache) \== unused)).
@@ -252,6 +269,7 @@ net_contract(derived(net_cookies_sent/2, 'the names of the cookies sent for a re
 net_contract(derived(net_third_party_cookie/2, 'a cookie sent for a resource of another site than the page''s')).
 net_contract(derived(net_from_cache/2, 'a resource the cache answered, fresh or revalidated')).
 net_contract(derived(net_low_density/2, 'an image chosen from a srcset at a density below the screen''s, and that density')).
+net_contract(derived(net_dictionary_from/2, 'a resource whose request offered a compression dictionary, and the resource of the page that kept it')).
 net_contract(derived(net_frame_of/2, 'the frame an iframe element holds')).
 net_contract(derived(net_frame_failed/2, 'a frame whose document did not load, and why: its fetch''s failure, blocked or lazy')).
 net_contract(derived(net_frame_depth/2, 'how deep a frame is: 1 for one of the page''s own iframes')).

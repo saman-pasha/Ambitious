@@ -462,13 +462,15 @@ static int sf_method(js_vm *vm, jv v, vector<char> *out, const char *iface) {
         }
     return 1;
 }
-/* a URL resolved against the page's into out: 0 when it is none */
-static int sf_resolve(js_vm *vm, const vector<char> *ref, char *out, size_t cap) {
+/* a URL resolved against the page's into out: 0 when it is none. XMLHttpRequest's open
+   encoding-parses it (its query in the document's encoding, enc: measured, as Chromium writes
+   it), fetch parses it as UTF-8 (enc -1) */
+static int sf_resolve(js_vm *vm, const vector<char> *ref, int enc, char *out, size_t cap) {
     char base[4200], r[8192];
     sh_page_url(vm, base, sizeof base);
     snprintf(r, sizeof r, "%.*s", (int)len(*ref), data(*ref));
-    if (base[0] && net_url_resolve(base, r, out, cap)) return 1;
-    return sf_scheme(r) && net_url_resolve(r, r, out, cap);
+    if (base[0] && net_url_resolve_enc(base, r, enc, out, cap)) return 1;
+    return sf_scheme(r) && net_url_resolve_enc(r, r, enc, out, cap);
 }
 /* a body as bytes: a string's UTF-8, an ArrayBuffer's or a view's bytes; its default
    content type into ct ("" for none) */
@@ -523,7 +525,7 @@ static int sf_init(js_vm *vm, sh_req *q, jv input, jv init, const char *iface) {
         mode = from.mode;
     } else {
         if (!sh_utf8(vm, input, &url)) return 0;
-        if (!sf_resolve(vm, &url, abs, sizeof abs)) {
+        if (!sf_resolve(vm, &url, -1, abs, sizeof abs)) {
             snprintf(msg, sizeof msg, "Failed to execute '%s': Failed to parse URL from %.*s", iface, (int)len(url), data(url));
             js_throw_msg(vm, vm->type_error_proto, msg);
             return 0;
@@ -685,6 +687,14 @@ static void sf_messages(js_vm *vm, uint32_t id, int late) {
             while (url[sn] && url[sn] != ':') sn++;
             snprintf(msg, sizeof msg, "Fetch API cannot load %s. URL scheme \"%.*s\" is not supported.", url, sn, url);
             sf_console(vm, msg);
+        } else if (q.resource && h->nt->resource[q.resource].outcome == NET_OUTCOME_DECODING_FAILED) {
+            /* a body that did not decode: Chromium's error for it, a dictionary's header that names
+               another its own (measured) */
+            amb_span why = h->nt->resource[q.resource].reason;
+            char wt[700];
+            snprintf(wt, sizeof wt, "%.*s", (int)(why.len < 699 ? why.len : 699), text_ptr(h->nt, why));
+            int dict = strstr(wt, "UNEXPECTED_CONTENT_DICTIONARY_HEADER") != 0;
+            sf_console(vm, dict ? "Failed to load resource: net::ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER" : "Failed to load resource: net::ERR_CONTENT_DECODING_FAILED");
         } else sf_console(vm, "Failed to load resource: net::ERR_FAILED");
         return;
     }
@@ -955,7 +965,7 @@ jv script_fetch_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args,
         if (!sf_method(vm, a0, &method, "open' on 'XMLHttpRequest")) return JV_HOLE;
         if (!sh_utf8(vm, a1, &url)) return JV_HOLE;
         char abs[8192];
-        if (!sf_resolve(vm, &url, abs, sizeof abs)) return sh_dom_error(vm, "SyntaxError", "Failed to execute 'open' on 'XMLHttpRequest': Invalid URL");
+        if (!sf_resolve(vm, &url, vm->host->charset - 1, abs, sizeof abs)) return sh_dom_error(vm, "SyntaxError", "Failed to execute 'open' on 'XMLHttpRequest': Invalid URL");
         jv av = js_arg(vm, args, argc, 2);
         sh_req q = h->reqs[xi];
         q.sync = argc >= 3 && !js_truthy(vm, av);

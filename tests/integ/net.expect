@@ -308,3 +308,22 @@ amb_diag(low_density, rs(1,11,0), 'the image http://127.0.0.1:PORT/s/below-0.5x.
 http://[::1]:V6/logo.png
 -- dialled through getaddrinfo: loaded where the machine has ::1, else refused for its address family
 right for this machine
+== a URL's query in its page's encoding (tests/net/site/q/: windows-1252 and Shift_JIS), each request's target against Chromium's (tests/net/query.chromium)
+the same, request by request (36 of them)
+-- as the loader keeps them: the images, in each page's encoding (a fetched sheet's in its own)
+U = 'http://127.0.0.1:PORT/q/img.png?q=%E9'
+U = 'http://127.0.0.1:PORT/q/lacks.png?q=%26%23937%3B'
+U = 'http://127.0.0.1:PORT/q/p%C3%A9th.png?q=1'
+U = 'http://127.0.0.1:PORT/q/bg.png?q=%E9'
+U = 'http://127.0.0.1:PORT/q/su.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/sc.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/si.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/sn.png?q=%E9'
+U = 'http://127.0.0.1:PORT/q/img.png?q=%93%FA%96{'
+U = 'http://127.0.0.1:PORT/q/lacks.png?q=%26%238364%3B'
+U = 'http://127.0.0.1:PORT/q/p%E6%97%A5%E6%9C%ACth.png?q=1'
+U = 'http://127.0.0.1:PORT/q/bg.png?q=%93%FA%96{'
+U = 'http://127.0.0.1:PORT/q/su.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/sc.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/si.png?q=%C3%A9'
+U = 'http://127.0.0.1:PORT/q/sn.png?q=%93%FA%96{'

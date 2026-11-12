@@ -52,6 +52,10 @@ net_from_cache(R, How) :- net_cache(R, How, _, _), ( How == fresh ; How == reval
 %% than its pixels, and looks blurred
 net_low_density(R, X) :- net_srcset(R, _, X, _, _), X < 1.
 
+%% a resource whose request offered a compression dictionary, and the resource whose response
+%% was kept as it, when one of this run's was (a profile's dictionary may be an earlier run's)
+net_dictionary_from(R, D) :- net_dictionary_offered(R, H), net_dictionary(D, H, _, _).
+
 %% ---- the page's frames (Phase 12u) ----------------------------------------------
 
 %% the frame an iframe element holds

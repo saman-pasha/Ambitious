@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:e05f387e:8104). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:b89fdf42:8794). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
 typedef enum net_cache_use { NET_CACHE_USE_UNUSED, NET_CACHE_USE_STORED, NET_CACHE_USE_FRESH, NET_CACHE_USE_REVALIDATED, NET_CACHE_USE_NOT_STORED } net_cache_use;
@@ -16,7 +16,7 @@ typedef struct net_cookie_h { uint32_t doc, index, gen; } net_cookie_h;
 typedef struct net_sent_h { uint32_t doc, index, gen; } net_sent_h;
 typedef struct net_keeping_h { uint32_t doc, index, gen; } net_keeping_h;
 typedef struct net_frame_h { uint32_t doc, index, gen; } net_frame_h;
-typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; amb_span charset; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; amb_span reason; uint8_t tls; amb_span tls_version; amb_span tls_cipher; amb_span alpn; uint8_t proxied; amb_span proxy; uint8_t cross_site; net_cache_use cache; int64_t cache_age; int64_t cache_lifetime; uint8_t coded; amb_span coding; uint32_t encoded_size; uint8_t srcset; amb_span descriptor; double density; double source_size; uint32_t candidates; uint8_t picture; dom_node_h source; net_protocol protocol; uint32_t connection; uint32_t stream; uint8_t reused; } net_resource;
+typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; amb_span charset; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; amb_span reason; uint8_t tls; amb_span tls_version; amb_span tls_cipher; amb_span alpn; uint8_t proxied; amb_span proxy; uint8_t cross_site; net_cache_use cache; int64_t cache_age; int64_t cache_lifetime; uint8_t coded; amb_span coding; uint32_t encoded_size; uint8_t srcset; amb_span descriptor; double density; double source_size; uint32_t candidates; uint8_t picture; dom_node_h source; net_protocol protocol; uint32_t connection; uint32_t stream; uint8_t reused; uint8_t pooled; uint8_t tls_resumed; uint8_t dict_sent; amb_span dict_offered; uint8_t dict_kept; amb_span dict_hash; amb_span dict_match; amb_span dict_id; } net_resource;
 typedef struct net_hop { uint32_t gen, live, free_next; uint32_t resource; amb_span url; uint32_t status; } net_hop;
 typedef struct net_frame { uint32_t gen, live, free_next; dom_node_h iframe; uint32_t doc; uint32_t parent; amb_span url; net_frame_source source; net_frame_outcome outcome; uint32_t resource; double width; double height; uint8_t vbar; uint8_t hbar; uint8_t sandboxed; uint8_t scripts; uint8_t same_origin; uint8_t quirks; } net_frame;
 typedef struct net_cookie { uint32_t gen, live, free_next; amb_span name; amb_span value; amb_span domain; amb_span path; uint8_t host_only; uint8_t secure; uint8_t http_only; net_same_site same_site; uint8_t persistent; int64_t expires; int64_t created; net_cookie_state state; net_refusal refusal; uint32_t set_by; uint8_t seen; } net_cookie;
@@ -169,7 +169,7 @@ const char *net_refusal_name(net_refusal x) {
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:e05f387e:8104";
+const char net_fingerprint[] = "fnv1a32:b89fdf42:8794";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;
@@ -237,6 +237,10 @@ void net_export(const net_loader *d, FILE *out) {
         if (d->resource[i].outcome != NET_OUTCOME_OK) { fputs("net_failure(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].reason); fputs(").\n", out); }
         if (d->resource[i].tls == 1) { fputs("net_tls(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].tls_version); fputs(",", out); text_put(d, out, d->resource[i].tls_cipher); fputs(",", out); text_put(d, out, d->resource[i].alpn); fputs(").\n", out); }
         if (d->resource[i].protocol != NET_PROTOCOL_UNSENT) { fputs("net_http(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fputs(net_protocol_name(d->resource[i].protocol), out); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].connection); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].stream); fputs(",", out); fputs(d->resource[i].reused ? "true" : "false", out); fputs(").\n", out); }
+        if (d->resource[i].pooled == 1) { fputs("net_pooled(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(").\n", out); }
+        if (d->resource[i].tls_resumed == 1) { fputs("net_tls_resumed(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(").\n", out); }
+        if (d->resource[i].dict_kept == 1) { fputs("net_dictionary(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].dict_hash); fputs(",", out); text_put(d, out, d->resource[i].dict_match); fputs(",", out); text_put(d, out, d->resource[i].dict_id); fputs(").\n", out); }
+        if (d->resource[i].dict_sent == 1) { fputs("net_dictionary_offered(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].dict_offered); fputs(").\n", out); }
         if (d->resource[i].proxied == 1) { fputs("net_proxy(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); text_put(d, out, d->resource[i].proxy); fputs(").\n", out); }
         if (d->resource[i].cross_site == 1) { fputs("net_cross_site(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(").\n", out); }
         if (d->resource[i].cache != NET_CACHE_USE_UNUSED) { fputs("net_cache(", out); amb_put_handle(out, "rs", d->id, i, d->resource[i].gen); fputs(",", out); fputs(net_cache_use_name(d->resource[i].cache), out); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].cache_age); fputs(",", out); fprintf(out, "%lld", (long long)d->resource[i].cache_lifetime); fputs(").\n", out); }

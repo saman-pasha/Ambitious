@@ -47,6 +47,9 @@ typedef struct url_parts {
    with its components' places in *p. 1, or 0 for failure: the input is no URL, the
    base is none, or the serialization does not fit in cap */
 int url_parse(const char *in, size_t n, const char *base, size_t bn, char *out, size_t cap, url_parts *p);
+/* the same with the standard's encoding argument: enc, a document's encoding (its number, as
+   src/html/encoding.h has it; -1 for UTF-8), the one a special URL's query is written in */
+int url_parse_enc(const char *in, size_t n, const char *base, size_t bn, int enc, char *out, size_t cap, url_parts *p);
 
 /* the URL API's getters (6.1), by name: what each answers for the URL href, parsed
    into *p, written into out (NUL-terminated, cut at cap); its length */
@@ -91,6 +94,23 @@ size_t url_form_reserialize(const char *s, size_t n, char *out, size_t cap);
    without its fragment, which no fetch sends, and without its credentials, which
    no record keeps */
 int net_url_resolve(const char *base, const char *ref, char *out, size_t cap);
+/* the same, ref's query in the document's encoding enc (its number; -1 for UTF-8), as a
+   document's URLs are parsed (an element's href, src) */
+int net_url_resolve_enc(const char *base, const char *ref, int enc, char *out, size_t cap);
+
+/* the encoding of the document whose URLs are being parsed (its number, as src/html/encoding.h
+   has it; -1 for UTF-8), set by the shell before a page's or a frame's parts are fetched, its
+   cascade made and its layout run: the URLs its elements and its sheets name (img, script,
+   link, an SVG image, a background) write their queries in it (net_url_resolve_enc) */
+void net_set_encoding(int enc);
+int net_encoding(void);
+
+/* the environment a page's images are chosen in (HTML's image source selection, a picture's
+   media): the viewport in CSS px, the device pixel ratio, the initial font size (an em of
+   sizes), the colour scheme (1 dark) and prefers-reduced-motion (1 reduce); by default 800 by
+   600 at 1, 16px, light, no-preference. The shell sets it from the profile's preferences, as it
+   sets the cascade's */
+void net_set_env(double width, double height, double dpr, double font_px, int dark, int reduced_motion);
 
 /* the origin of an absolute URL, serialized: scheme://host[:port], or null for an opaque one */
 int net_url_origin(const char *url, char *out, size_t cap);
