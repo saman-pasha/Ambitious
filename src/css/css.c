@@ -8396,6 +8396,18 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         rec[CSS_PROP_WEBKIT_BOX_ORIENT] = css_value_rec(s, &out[CSS_PROP_WEBKIT_BOX_ORIENT], rec[CSS_PROP_WEBKIT_BOX_ORIENT].how,
                                                         win[CSS_PROP_WEBKIT_BOX_ORIENT], vc);
     }
+    /* a mask's longhands left at their initial values under a mask-image of more than one layer: an item for each layer,
+       as Chromium computes them (mask-size auto under two layers is auto, auto). getComputedStyle reads these; the
+       snapshot carries no initial value, so rules/css derives the same */
+    if (win[CSS_PROP_MASK_IMAGE] && out[CSS_PROP_MASK_IMAGE].unit == CSS_UNIT_TEXT && memchr(text_ptr(s, out[CSS_PROP_MASK_IMAGE].tx), ',',
+                                                                                           out[CSS_PROP_MASK_IMAGE].tx.len))
+        for (int k = CSS_PROP_MASK_MODE; k <= CSS_PROP_MASK_COMPOSITE; k++) {
+            if (win[k]) continue;
+            css_val mv = initial[k];
+            css_compute(s, env, (css_prop)k, &mv, &pv, out);
+            out[k] = mv;
+            rec[k] = css_value_rec(s, &mv, rec[k].how, 0, vc);
+        }
     css_val pdisplay;
     css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
     if (win[CSS_PROP_DISPLAY] || win[CSS_PROP_FLOAT] || win[CSS_PROP_POSITION])

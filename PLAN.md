@@ -1106,6 +1106,82 @@ be built side by side and merged without touching each other's.
   scripts across frames and realms, read from a file and served over HTTP from two origins, line
   for line (22, 9 and 11 lines); the facts and the diagnostics (`tests/integ/frames.sh`);
   `tests/exec/frames` runs the pages' frames through the pipeline under valgrind.
+- **12w SVG effects on HTML boxes, paint's rest** (`src/paint/paint.c`, `src/paint/svg.c`,
+  `src/paint/svg.h`; a box's effects and a cloned or clipped inline element's boxes in
+  `src/layout/layout.c` and `contracts/layout.pl`: the box fields fx and clone, the fragment field
+  clip; `box-decoration-break` and CSS Masking's longhands in `src/css/css.c` and
+  `contracts/css.pl`, their initial lists in `prolog/amb/rules/css.pl`), each measured in Chromium
+  first:
+  - SVG's filters, clipPaths and masks on an HTML box (`filter`, `clip-path` and `mask` by `url()`):
+    layout writes a box's effects for its border box as svg.c writes a scene's groups
+    (`amb_svg_effects`): its user space from the border box's top left, a CSS px a unit, the border
+    box its bounding box (userSpaceOnUse regions, clips and masks measured landing from the border
+    box's corner, a border included). Paint draws the box on black and on white into a layer as far
+    as its filters reach and through them (`amb_svg_fx`): the filter's list in its order, a run of
+    functions as before and a url()'s filter between them, then the clip, then the mask. A url()
+    naming no filter, and an empty filter, are passed over (`url(#missing) blur(2px)` blurs). A mask
+    naming none masks the box away. A filter's user space has its origin at whole CSS px (the
+    layer's: a box at 20.5 x 20.25 filters from 21 x 20, zoomed 1.5 from 31.5 x 30). A clip on a
+    box is its shapes' union alone, not held to their bounding box as an SVG element's is (an
+    ellipse's top row half covered, not a quarter). On SVG elements a filter's list may mix url()s
+    and functions too, each stage a group inside the next's, a run of functions given the region of
+    the stage before it;
+  - `box-decoration-break: clone` (and its -webkit- name): each fragment of an inline box wrapped in
+    every edge. A line the box continues on starts with its start edges, as text-indent would, and
+    the fragment there ends with its end edges past the content. Chromium's line break makes no room
+    for them (a fragment measured 28.8px past a 240px line). Each fragment's backgrounds, borders,
+    radii and shadows are its own (a gradient restarts, an image is placed in each). Inline fragments
+    are now drawn in the order their elements open, ancestors first: a nested span's background had
+    been hidden under its parent's where both closed on one line;
+  - a background that repeats within its painting area is one pattern (Skia's image shader, Blink's
+    DrawImageTiled): each pixel sampled bilinearly across its tiles' edges (10px gradient tiles at a
+    3.5px offset meet in a pixel half of each), a gradient's tile rasterized as a picture shader's
+    (its size rounded up to whole px), a band along an axis it does not repeat along snapped to whole
+    px, an image drawn smaller from the deepest mip level still at least the tile's size (Chromium's
+    decode cache: a 96 x 32 logo tiled at 24 x 24 from its own pixels, not from the 24 x 8 level);
+  - a basic shape or geometry box in an inline element's `clip-path`: its reference box the element's
+    first fragment's border box, as Chromium's is (inset(0 0 50% 0) on a span over two lines keeps
+    the top half of its first line and nothing of its second); every fragment it holds (its own, a
+    nested element's, its text) drawn together and held to the shape, as a block's stacking context
+    is (a clip box made once for the element, which each fragment names);
+  - CSS Masking's mask layers: `mask` the shorthand of `mask-image`, `-position`, `-size`, `-repeat`,
+    `-origin`, `-clip`, `-composite` and `-mode`, lists with their -webkit- aliases, computed as
+    Chromium serializes them (an item for each layer of mask-image, a longhand left at its initial
+    value too, positions as object-position's, two repeats one keyword, one size's height auto, a
+    mask element's URL quoted). A gradient layer is drawn as a background layer is (the same code,
+    `pt_layer_one`), its alpha or its luminance the mask; a mask element's layer its group's
+    coverage; anything else transparent (a picture is not fetched: Chromium's CORS fetch fails on a
+    file: page too); the layers composited from the lowest, each by its operator (source-over,
+    source-out, source-in, xor);
+  - the planes of a preserve-3d space ordered pixel by pixel, as Chromium's compositor splits them
+    with a BSP tree: each plane drawn onto black and onto white (the rectangle it drew kept), each
+    pixel the planes reach laid from those it shows, the farthest first, by their depths there (z
+    over w at the point the inverse homography finds); a space whose drawings would pass 60 MB drawn
+    plane by plane, by their middles' depth. An untransformed box that preserves 3D is now seen
+    through its parent's perspective, as its children's planes are in Chromium.
+
+  Gates against Chromium: `tests/pages/svgfx-html.html` (regions, 61 of 61) and, zoomed 1.5 and
+  between px, `svgfx-zoom.html` (22 of 22); `clone.html` (boxes 25 of 25, regions 25 of 25) and
+  `clonevals.html` (computed values, 12 of 12); `bgseams.html` (regions, 16 of 16); `clipinline.html`
+  (boxes 28 of 28, regions 28 of 28); `mask-html.html` (regions, 27 of 27), `mask-zoom.html` (10 of
+  10) and `maskvals.html` (computed values, 71 of 71); `planes3d.html` (regions, 10 of 10). Every
+  earlier page's boxes, regions and values are as they were; the golden renders that moved
+  (inline-cb, paint, fracimg, fracimg-zoom, bgtext, animpaint, svgfx-zoom, transforms) moved nearer
+  Chromium's screenshots; the new pages render valgrind clean.
+
+  Cost (callgrind's instructions, `ambitious render`, before and after): the cascade 1.5% more
+  (news 4.42M to 4.49M, layout.html 5.53M to 5.62M, style 4.78M to 4.86M), the eight new
+  properties every style holds (182 values a style, from 174); layout and paint within 0.1%
+  (news's layout 14.33M and its paint 5.87M, both). Wall time, ms, paint (`ambitious bench`, the
+  medians of five rounds of ten runs, the two binaries in turn, on a shared machine): the pages
+  whose effects are now drawn, each box drawn onto black and onto white on canvases of the page's
+  size, about 1.3 ms an effect: `svgfx-html` 7.6, then 45 to 49; `mask-html` 10.2, then 33 to 36;
+  `clipinline` 0.8, then 6.8. The pages that draw less now: `bgseams` 17.2, then 5.9 to 7.1 (a
+  pattern sampled, not tile by tile); `planes3d` 254 to 260, then 20.5 (a plane's rectangle kept,
+  not its canvas). On the way, the black and white canvases are filled at once and what a box drew
+  is found a row at a time, each compared whole first, and a clip-path's pass reads only the rows
+  its context changed, for every box that draws so: `filters` 69, then 54; `clippath` 47, then 14;
+  every page's pixels as they were (163 renders, byte for byte).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

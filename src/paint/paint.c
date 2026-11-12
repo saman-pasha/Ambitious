@@ -1158,7 +1158,7 @@ static void pt_gradient_tile(const char *s, size_t n, double tw, double th, doub
     k0.cy1 = k1.cy1 = *h;
     resize(&k0.px, (size_t)*w * *h * 3);
     resize(&k1.px, (size_t)*w * *h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    memset(data(k1.px), 255, len(k1.px));
     double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     pt_gradient_ex(&k0, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
     pt_gradient_ex(&k1, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
@@ -2909,7 +2909,8 @@ static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb
             if (seen) continue;
             push_back(clipped, cb);
             vector<uint8_t> before;
-            append_range(before, data(c->px), len(c->px));
+            resize(&before, len(c->px));
+            memcpy(data(before), data(c->px), len(c->px));
             for (uint32_t l2 = ln; l2; l2 = t->line[l2].next)
                 for (uint32_t f2 = t->line[l2].first_frag; f2; f2 = t->frag[f2].next)
                     if (t->frag[f2].clip == cb) pt_frag(t, nt, f2, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
@@ -3247,6 +3248,49 @@ static int pt_box_matrix(const layout_tree *t, uint32_t b, double *m) {
     return 1;
 }
 
+/* a canvas the size of c's, to draw a box onto black (white 0) or onto white (1) */
+static void pt_canvas_like(const amb_canvas *c, int white, amb_canvas *k) {
+    k->w = c->w;
+    k->h = c->h;
+    k->oy = c->oy;
+    k->zoom = c->zoom;
+    k->cx0 = 0;
+    k->cy0 = c->oy;
+    k->cx1 = c->w;
+    k->cy1 = c->oy + c->h;
+    resize(&k->px, (size_t)c->w * c->h * 3);
+    if (white) memset(data(k->px), 255, len(k->px));
+}
+
+/* what a box drew onto black (k0) and onto white (k1): the rectangle of its pixels not black on black or not white on
+   white, into r (x0, y0, x1, y1, the last two past it); 0 when it drew none. A row is compared whole first, and a row
+   drawn on read from its ends in, as far as the rectangle has not reached */
+static int pt_drawn(const amb_canvas *k0, const amb_canvas *k1, int *r) {
+    int w = (int)k0->w, h = (int)k0->h;
+    size_t rb = (size_t)w * 3;
+    r[0] = w; r[1] = h; r[2] = -1; r[3] = -1;
+    if (!rb) return 0;
+    vector<uint8_t> zero, white;
+    resize(&zero, rb);
+    resize(&white, rb);
+    memset(data(white), 255, rb);
+    for (int y = 0; y < h; y++) {
+        size_t o = (size_t)y * rb;
+        if (memcmp(data(k0->px) + o, data(zero), rb) == 0 && memcmp(data(k1->px) + o, data(white), rb) == 0) continue;
+        for (int x = 0; x < r[0]; x++) {
+            size_t i = o + (size_t)x * 3;
+            if (at(k0->px, i) | at(k0->px, i + 1) | at(k0->px, i + 2) || (at(k1->px, i) & at(k1->px, i + 1) & at(k1->px, i + 2)) != 255) { r[0] = x; break; }
+        }
+        for (int x = w - 1; x >= r[2] && x >= 0; x--) {
+            size_t i = o + (size_t)x * 3;
+            if (at(k0->px, i) | at(k0->px, i + 1) | at(k0->px, i + 2) || (at(k1->px, i) & at(k1->px, i + 1) & at(k1->px, i + 2)) != 255) { r[2] = x + 1; break; }
+        }
+        if (y < r[1]) r[1] = y;
+        r[3] = y + 1;
+    }
+    return r[2] > r[0];
+}
+
 /* a box (with its content) drawn through its matrix m onto its plane: drawn onto black
    and onto white as it is (its alpha their difference), then each pixel of the canvas
    sampled from where the plane's homography (m flattened: its plane's z is 0) takes it
@@ -3280,17 +3324,8 @@ static void pt_plane_draw(PCTX, uint32_t b, int ctx, const double *m) {
     memset(&k1, 0, sizeof k1);
     defer(k0) { AMB_CANVAS_DROP(k0); }
     defer(k1) { AMB_CANVAS_DROP(k1); }
-    k0.w = k1.w = c->w;
-    k0.h = k1.h = c->h;
-    k0.oy = k1.oy = c->oy;
-    k0.zoom = k1.zoom = c->zoom;
-    k0.cx0 = k1.cx0 = 0;
-    k0.cy0 = k1.cy0 = c->oy;
-    k0.cx1 = k1.cx1 = c->w;
-    k0.cy1 = k1.cy1 = c->oy + c->h;
-    resize(&k0.px, (size_t)c->w * c->h * 3);
-    resize(&k1.px, (size_t)c->w * c->h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
     pt_effects_plain(PARGS_C(&k0), b, ctx);
     pt_effects_plain(PARGS_C(&k1), b, ctx);
     int kx0, ky0, kx1, ky1;
@@ -3350,18 +3385,18 @@ static void pt_planes(const layout_tree *t, uint32_t b, const double *m, vector<
 
 /* the planes of a 3D space drawn together (CSS Transforms 2, 6.1: each plane in its place in the space, as Chromium's
    compositor sorts them with a BSP tree, splitting those that cut through each other): each drawn onto black and onto white
-   as pt_plane_draw draws one, its back hidden as there, and then each pixel of the canvas laid from the planes it shows,
-   the farthest first, by their depths there (a plane's z at the point it shows, its w divided out), the tree's order
-   between two at one depth */
+   as pt_plane_draw draws one, its back hidden as there, what it drew kept (its pixels' rectangle); then each pixel of the
+   canvas the planes reach laid from the planes it shows, the farthest first, by their depths there (a plane's z at the
+   point it shows, its w divided out), the tree's order between two at one depth. Planes too large to keep together are
+   drawn whole, by their middles' depth, as before */
 static void pt_planes_draw(PCTX, uint32_t b, int ctx, const vector<pt_plane> *planes) {
     size_t np = len(*planes), px = (size_t)c->w * (size_t)c->h;
-    if (!np || !px || (double)np * px > 3e7) return;
-    vector<uint8_t> bl, wh;                /* each plane's drawing on black and on white, one after another */
-    vector<double> hv;                     /* each plane's inverse homography (9), its determinant's sign (1), its matrix's z and w rows */
-    vector<uint32_t> live;
-    resize(&bl, np * px * 3);
-    resize(&wh, np * px * 3);
-    for (size_t k = 0; k < np; k++) {
+    if (!np || !px) return;
+    vector<uint8_t> bl, wh;                /* each plane's drawing on black and on white, its rectangle's rows, one after another */
+    vector<double> hv;                     /* each plane's inverse homography (9), its determinant (1), its matrix's z and w rows (6) */
+    vector<int64_t> rect;                  /* each plane's rectangle (x0, y0, x1, y1) and where its pixels begin in bl and wh */
+    int reach[4] = { (int)c->w, (int)c->h, 0, 0 }, whole = 0;
+    for (size_t k = 0; k < np && !whole; k++) {
         pt_plane x = at(*planes, k);
         const double *m = x.m;
         double hm[9] = { m[0], m[1], m[3], m[4], m[5], m[7], m[12], m[13], m[15] };
@@ -3385,22 +3420,23 @@ static void pt_planes_draw(PCTX, uint32_t b, int ctx, const vector<pt_plane> *pl
         memset(&k1, 0, sizeof k1);
         defer(k0) { AMB_CANVAS_DROP(k0); }
         defer(k1) { AMB_CANVAS_DROP(k1); }
-        k0.w = k1.w = c->w;
-        k0.h = k1.h = c->h;
-        k0.oy = k1.oy = c->oy;
-        k0.zoom = k1.zoom = c->zoom;
-        k0.cx0 = k1.cx0 = 0;
-        k0.cy0 = k1.cy0 = c->oy;
-        k0.cx1 = k1.cx1 = c->w;
-        k0.cy1 = k1.cy1 = c->oy + c->h;
-        resize(&k0.px, px * 3);
-        resize(&k1.px, px * 3);
-        for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+        pt_canvas_like(c, 0, &k0);
+        pt_canvas_like(c, 1, &k1);
         int mine = x.box == b ? ctx : 1;
         pt_effects_plain(PARGS_C(&k0), x.box, mine);
         pt_effects_plain(PARGS_C(&k1), x.box, mine);
-        size_t at0 = len(live) * px * 3;
-        for (size_t q = 0; q < px * 3; q++) { bl[at0 + q] = at(k0.px, q); wh[at0 + q] = at(k1.px, q); }
+        /* what it drew */
+        int dr[4];
+        if (!pt_drawn(&k0, &k1, dr)) continue;
+        int r0 = dr[0], r1 = dr[1], r2 = dr[2], r3 = dr[3];
+        size_t rw = (size_t)(r2 - r0), rh = (size_t)(r3 - r1);
+        if ((double)len(bl) + (double)rw * rh * 3 > 6e7) { whole = 1; break; }
+        push_back(rect, r0); push_back(rect, r1); push_back(rect, r2); push_back(rect, r3); push_back(rect, (int64_t)len(bl));
+        for (size_t y = 0; y < rh; y++) {
+            size_t from = (((size_t)r1 + y) * c->w + (size_t)r0) * 3;
+            append_range(bl, data(k0.px) + from, rw * 3);
+            append_range(wh, data(k1.px) + from, rw * 3);
+        }
         double iv[9] = { hm[4] * hm[8] - hm[5] * hm[7], hm[2] * hm[7] - hm[1] * hm[8], hm[1] * hm[5] - hm[2] * hm[4],
                          hm[5] * hm[6] - hm[3] * hm[8], hm[0] * hm[8] - hm[2] * hm[6], hm[2] * hm[3] - hm[0] * hm[5],
                          hm[3] * hm[7] - hm[4] * hm[6], hm[1] * hm[6] - hm[0] * hm[7], hm[0] * hm[4] - hm[1] * hm[3] };
@@ -3408,14 +3444,43 @@ static void pt_planes_draw(PCTX, uint32_t b, int ctx, const vector<pt_plane> *pl
         push_back(hv, dh);
         push_back(hv, m[8]); push_back(hv, m[9]); push_back(hv, m[11]);
         push_back(hv, m[12]); push_back(hv, m[13]); push_back(hv, m[15]);
-        push_back(live, (uint32_t)k);
+        /* where it lands on the canvas: its rectangle's corners through the homography; all of the canvas when a corner
+           lies behind the viewer */
+        for (int q = 0; q < 4; q++) {
+            double X = (q & 1) ? r2 + 1 : r0 - 1, Y = ((q & 2) ? r3 + 1 : r1 - 1) + c->oy;
+            double W = hm[6] * X + hm[7] * Y + hm[8];
+            if (W * dh <= 0 || fabs(W) < 1e-9) { reach[0] = 0; reach[1] = 0; reach[2] = (int)c->w; reach[3] = (int)c->h; continue; }
+            double sx = (hm[0] * X + hm[1] * Y + hm[2]) / W, sy = (hm[3] * X + hm[4] * Y + hm[5]) / W - c->oy;
+            if (!(fabs(sx) < 1e7 && fabs(sy) < 1e7)) { reach[0] = 0; reach[1] = 0; reach[2] = (int)c->w; reach[3] = (int)c->h; continue; }
+            if ((int)floor(sx) - 1 < reach[0]) reach[0] = (int)floor(sx) - 1;
+            if ((int)floor(sy) - 1 < reach[1]) reach[1] = (int)floor(sy) - 1;
+            if ((int)ceil(sx) + 1 > reach[2]) reach[2] = (int)ceil(sx) + 1;
+            if ((int)ceil(sy) + 1 > reach[3]) reach[3] = (int)ceil(sy) + 1;
+        }
     }
-    size_t nl = len(live);
+    if (whole) {
+        /* too much to keep: each plane whole, those farther first by their middles' depth */
+        vector<pt_plane> sorted;
+        append_range(sorted, data(*planes), np);
+        for (size_t k = 1; k < np; k++) {
+            pt_plane x = at(sorted, k);
+            size_t q = k;
+            while (q > 0 && at(sorted, q - 1).z > x.z) { sorted[q] = at(sorted, q - 1); q--; }
+            sorted[q] = x;
+        }
+        for (size_t k = 0; k < np; k++) pt_plane_draw(PARGS, at(sorted, k).box, at(sorted, k).box == b ? ctx : 1, at(sorted, k).m);
+        return;
+    }
+    size_t nl = len(rect) / 5;
     if (!nl) return;
     vector<double> zs, cs;                 /* a pixel's samples: their depth, then colour (3, premultiplied) and alpha */
     vector<uint32_t> ord;
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    if (reach[0] > kx0) kx0 = reach[0];
+    if (reach[1] > ky0) ky0 = reach[1];
+    if (reach[2] < kx1) kx1 = reach[2];
+    if (reach[3] < ky1) ky1 = reach[3];
     for (int y = ky0; y < ky1; y++)
         for (int x = kx0; x < kx1; x++) {
             double X = x + 0.5, Y = y + 0.5 + c->oy;
@@ -3428,14 +3493,16 @@ static void pt_planes_draw(PCTX, uint32_t b, int ctx, const vector<pt_plane> *pl
                 if (sw * iv[9] <= 0) continue;
                 double u = (iv[0] * X + iv[1] * Y + iv[2]) / sw, v = (iv[3] * X + iv[4] * Y + iv[5]) / sw;
                 double sx = u - 0.5, sy = v - 0.5 - c->oy;
-                if (sx < -1 || sy < -1 || sx > (double)c->w || sy > (double)c->h) continue;
+                int64_t q0 = at(rect, 5 * k), q1 = at(rect, 5 * k + 1), q2 = at(rect, 5 * k + 2), q3 = at(rect, 5 * k + 3);
+                if (sx < q0 - 1 || sy < q1 - 1 || sx > (double)q2 || sy > (double)q3) continue;
+                size_t base = (size_t)at(rect, 5 * k + 4), rw = (size_t)(q2 - q0);
                 int x0 = (int)floor(sx), y0 = (int)floor(sy);
                 double fx = sx - x0, fy = sy - y0, col[3] = { 0, 0, 0 }, al = 0;
                 for (int q = 0; q < 4; q++) {
                     int qx = x0 + (q & 1), qy = y0 + (q >> 1);
                     double wgt = ((q & 1) ? fx : 1 - fx) * ((q >> 1) ? fy : 1 - fy);
-                    if (qx < 0 || qy < 0 || qx >= (int)c->w || qy >= (int)c->h || wgt <= 0) continue;
-                    size_t pi = k * px * 3 + ((size_t)qy * c->w + (size_t)qx) * 3;
+                    if (qx < q0 || qy < q1 || qx >= q2 || qy >= q3 || wgt <= 0) continue;
+                    size_t pi = base + ((size_t)(qy - q1) * rw + (size_t)(qx - q0)) * 3;
                     double a0 = 1 - (at(wh, pi) - at(bl, pi)) / 255.0;
                     for (int ch = 0; ch < 3; ch++) col[ch] += at(bl, pi + (size_t)ch) * wgt;
                     al += a0 * wgt;
@@ -3512,37 +3579,18 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
     memset(&k1, 0, sizeof k1);
     defer(k0) { AMB_CANVAS_DROP(k0); }
     defer(k1) { AMB_CANVAS_DROP(k1); }
-    k0.w = k1.w = c->w;
-    k0.h = k1.h = c->h;
-    k0.oy = k1.oy = c->oy;
-    k0.zoom = k1.zoom = c->zoom;
-    k0.cx0 = k1.cx0 = 0;
-    k0.cy0 = k1.cy0 = c->oy;
-    k0.cx1 = k1.cx1 = c->w;
-    k0.cy1 = k1.cy1 = c->oy + c->h;
-    resize(&k0.px, (size_t)c->w * c->h * 3);
-    resize(&k1.px, (size_t)c->w * c->h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
     pt_effects_draw(PARGS_C(&k0), b, ctx);
     pt_effects_draw(PARGS_C(&k1), b, ctx);
     /* what was drawn: a pixel not black on black or not white on white */
-    int x0 = (int)c->w, y0 = (int)c->h, x1 = -1, y1 = -1;
-    for (int y = 0; y < (int)c->h; y++)
-        for (int x = 0; x < (int)c->w; x++) {
-            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
-            if (at(k0.px, i) | at(k0.px, i + 1) | at(k0.px, i + 2) || (at(k1.px, i) & at(k1.px, i + 1) & at(k1.px, i + 2)) != 255) {
-                if (x < x0) x0 = x;
-                if (x > x1) x1 = x;
-                if (y < y0) y0 = y;
-                if (y > y1) y1 = y;
-            }
-        }
-    if (x1 < 0) return;
+    int dr[4];
+    if (!pt_drawn(&k0, &k1, dr)) return;
     int reach = pt_filter_reach(ops);
-    x0 = x0 - reach < 0 ? 0 : x0 - reach;
-    y0 = y0 - reach < 0 ? 0 : y0 - reach;
-    x1 = x1 + reach + 1 > (int)c->w ? (int)c->w : x1 + reach + 1;
-    y1 = y1 + reach + 1 > (int)c->h ? (int)c->h : y1 + reach + 1;
+    int x0 = dr[0] - reach < 0 ? 0 : dr[0] - reach;
+    int y0 = dr[1] - reach < 0 ? 0 : dr[1] - reach;
+    int x1 = dr[2] + reach > (int)c->w ? (int)c->w : dr[2] + reach;
+    int y1 = dr[3] + reach > (int)c->h ? (int)c->h : dr[3] + reach;
     int w = x1 - x0, h = y1 - y0;
     if ((double)w * h > 4e7) return;
     size_t np = (size_t)w * h;
@@ -3685,31 +3733,13 @@ static void pt_fx(PCTX, uint32_t b, int ctx) {
     memset(&k1, 0, sizeof k1);
     defer(k0) { AMB_CANVAS_DROP(k0); }
     defer(k1) { AMB_CANVAS_DROP(k1); }
-    k0.w = k1.w = c->w;
-    k0.h = k1.h = c->h;
-    k0.oy = k1.oy = c->oy;
-    k0.zoom = k1.zoom = c->zoom;
-    k0.cx0 = k1.cx0 = 0;
-    k0.cy0 = k1.cy0 = c->oy;
-    k0.cx1 = k1.cx1 = c->w;
-    k0.cy1 = k1.cy1 = c->oy + c->h;
-    resize(&k0.px, (size_t)c->w * c->h * 3);
-    resize(&k1.px, (size_t)c->w * c->h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
     pt_effects_draw(PARGS_C(&k0), b, ctx);
     pt_effects_draw(PARGS_C(&k1), b, ctx);
     /* what was drawn, then as far as each of the filter's entries may draw */
-    int L[4] = { (int)c->w, (int)c->h, -1, -1 };
-    for (int y = 0; y < (int)c->h; y++)
-        for (int x = 0; x < (int)c->w; x++) {
-            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
-            if (at(k0.px, i) | at(k0.px, i + 1) | at(k0.px, i + 2) || (at(k1.px, i) & at(k1.px, i + 1) & at(k1.px, i + 2)) != 255) {
-                if (x < L[0]) L[0] = x;
-                if (x + 1 > L[2]) L[2] = x + 1;
-                if (y < L[1]) L[1] = y;
-                if (y + 1 > L[3]) L[3] = y + 1;
-            }
-        }
+    int L[4];
+    pt_drawn(&k0, &k1, L);
     size_t i = 0, pa, pl, fe = 0;
     int reach = 0;
     while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
@@ -3815,7 +3845,7 @@ static void pt_fx(PCTX, uint32_t b, int ctx) {
             m0.cy1 = m1.cy1 = m0.oy + h;
             resize(&m0.px, (size_t)c->w * (size_t)h * 3);
             resize(&m1.px, (size_t)c->w * (size_t)h * 3);
-            for (size_t q = 0; q < len(m1.px); q++) m1.px[q] = 255;
+            memset(data(m1.px), 255, len(m1.px));
             double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
             pt_layer_one(t, nt, b, &m0, icache, ipx, nr, data(zi), len(zi), data(zp), len(zp), data(zs), len(zs), data(fx) + ra2, rl2,
                          data(fx) + oa2, ol2, data(fx) + qa2, ql2, 0);
@@ -4102,7 +4132,7 @@ static int pt_clip_shape(const layout_tree *t, uint32_t b, double z, double *rr,
 }
 
 /* a box's stacking context drawn over what was under it (before), held to its clip-path's shape: each pixel moved
-   from what it was by as much of it as the shape covers, anti-aliased */
+   from what it was by as much of it as the shape covers, anti-aliased (a row the context left as it was passed over) */
 static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const vector<uint8_t> *before) {
     double z = c->zoom > 0 ? c->zoom : 1, rr[4] = { 0, 0, 0, 0 }, rad[8];
     vector<double> path;
@@ -4115,7 +4145,9 @@ static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const 
         double m[6] = { 1, 0, 0, 1, 0, -c->oy };
         got = amb_path_coverage(&path, m, evenodd, (int)c->w, (int)c->h, bx, &cov);
     }
-    for (uint32_t y = 0; y < c->h; y++)
+    size_t rb = (size_t)c->w * 3;
+    for (uint32_t y = 0; y < c->h; y++) {
+        if (memcmp(data(c->px) + (size_t)y * rb, data(*before) + (size_t)y * rb, rb) == 0) continue;
         for (uint32_t x = 0; x < c->w; x++) {
             size_t i = ((size_t)y * c->w + (size_t)x) * 3;
             if (c->px[i] == at(*before, i) && c->px[i + 1] == at(*before, i + 1) && c->px[i + 2] == at(*before, i + 2)) continue;
@@ -4129,6 +4161,7 @@ static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const 
                 c->px[i + (size_t)ch] = (uint8_t)(v0 + (c->px[i + (size_t)ch] - v0) * cv + 0.5);
             }
         }
+    }
 }
 
 /* a box drawn with its opacity, backdrop and filters: through a copy of what was under it
@@ -4137,8 +4170,8 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
     double op = t->box[b].opacity;
     if (op <= 0) return;
     vector<uint8_t> under, unclipped;
-    if (op < 1) append_range(under, data(c->px), len(c->px));
-    if (t->box[b].cpath.len) append_range(unclipped, data(c->px), len(c->px));
+    if (op < 1) { resize(&under, len(c->px)); memcpy(data(under), data(c->px), len(c->px)); }
+    if (t->box[b].cpath.len) { resize(&unclipped, len(c->px)); memcpy(data(unclipped), data(c->px), len(c->px)); }
     if (t->box[b].backdrop.len) pt_backdrop(t, b, c);
     vector<pt_fop> ops;
     if (t->box[b].fx.len) pt_fx(PARGS, b, ctx);

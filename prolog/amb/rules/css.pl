@@ -31,7 +31,9 @@ css_declared_rgba(N, P, C) :- css_style_of(N, S), css_style_rgba(S, P, C).
 %% element's, and any other's the initial value: a border's colour and the
 %% outline's being the element's own colour, and a border's width 0 when its
 %% style is none or hidden. So css_computed/4 and css_rgba/3 answer as they did when
-%% every value was a fact, from a snapshot with a sixth as many (PLAN.md 11).
+%% every value was a fact, from a snapshot with a sixth as many (PLAN.md 11). A mask's
+%% longhand left at its initial value under a mask-image of more layers than one is that
+%% value an item for each layer, as Chromium computes it (mask-size: auto, auto).
 %% The elements are those the cascade styled (css_style_of/2): a template's
 %% contents are no part of the document's tree, and have no style.
 css_computed(N, P, V, How) :-
@@ -47,6 +49,8 @@ css_rules_default(N, P, V, How) :-
     ->  css_computed(N, color, V, _), How = initial
     ;   css_rules_border_style(P, S), css_computed(N, S, Style, _), ( Style == none ; Style == hidden )
     ->  V = '0px', How = initial
+    ;   css_rules_mask_list(P), css_declared(N, mask_image, I, _), css_rules_layers(I, K), K > 1
+    ->  css_initial(P, V0), css_rules_items(V0, K, V), How = initial
     ;   css_initial(P, V), How = initial
     ).
 
@@ -119,6 +123,27 @@ css_rules_border_style(border_top_width, border_top_style).
 css_rules_border_style(border_right_width, border_right_style).
 css_rules_border_style(border_bottom_width, border_bottom_style).
 css_rules_border_style(border_left_width, border_left_style).
+css_rules_mask_list(mask_mode).
+css_rules_mask_list(mask_repeat).
+css_rules_mask_list(mask_position).
+css_rules_mask_list(mask_size).
+css_rules_mask_list(mask_origin).
+css_rules_mask_list(mask_clip).
+css_rules_mask_list(mask_composite).
+
+%% a list's items (its commas outside brackets and quotes, a backslash's character passed
+%% over), and an item K times
+css_rules_layers(I, K) :- atom_codes(I, Cs), css_rules_commas(Cs, 0, 0, 1, K).
+css_rules_commas([], _, _, K, K).
+css_rules_commas([92, _|Cs], D, Q, K0, K) :- !, css_rules_commas(Cs, D, Q, K0, K).
+css_rules_commas([C|Cs], D, Q, K0, K) :- Q =\= 0, !, ( C =:= Q -> Q1 = 0 ; Q1 = Q ), css_rules_commas(Cs, D, Q1, K0, K).
+css_rules_commas([C|Cs], D, _, K0, K) :- ( C =:= 34 ; C =:= 39 ), !, css_rules_commas(Cs, D, C, K0, K).
+css_rules_commas([40|Cs], D, _, K0, K) :- !, D1 is D + 1, css_rules_commas(Cs, D1, 0, K0, K).
+css_rules_commas([41|Cs], D, _, K0, K) :- !, D1 is D - 1, css_rules_commas(Cs, D1, 0, K0, K).
+css_rules_commas([44|Cs], 0, _, K0, K) :- !, K1 is K0 + 1, css_rules_commas(Cs, 0, 0, K1, K).
+css_rules_commas([_|Cs], D, Q, K0, K) :- css_rules_commas(Cs, D, Q, K0, K).
+css_rules_items(V, 1, V) :- !.
+css_rules_items(V0, K, V) :- K1 is K - 1, css_rules_items(V0, K1, V1), atomic_list_concat([V0, ', ', V1], V).
 
 %% CUSTOM PROPERTIES. An element's are its style's own (css_style_custom/5, var()
 %% replaced; an unregistered one's initial is no value), and its parent's of every other

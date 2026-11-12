@@ -63,3 +63,10 @@ m24 mask-position 0%0%,calc(100%-10px)0%,20%calc(100%-5px)
 m25 mask-repeat repeat,no-repeat,spaceround
 m26 mask-size 5px6px,7pxauto,5px6px
 m26 mask-mode alpha,alpha,alpha
+m27 mask-size auto,auto
+m27 mask-repeat repeat,repeat
+m27 mask-position 0%0%,0%0%
+m27 mask-origin border-box,border-box
+m27 mask-clip border-box,border-box
+m27 mask-mode match-source,match-source
+m27 mask-composite add,add
