@@ -3,9 +3,10 @@
    url-origin tests run it: the input parsed against its base (none when the base
    is null; a base that fails to parse fails the case), then failure, or else the
    href, protocol, username, password, host, hostname, port, pathname, search and
-   hash the URL API's getters answer, and the origin where the case names one. A
-   line a case, then the totals. The data is tests/net/wpt/urltestdata.json
-   (tests/net/wpt/LICENSE says whence). */
+   hash the URL API's getters answer, the origin where the case names one, and
+   searchParams where it names that (the query parsed and serialized again as
+   application/x-www-form-urlencoded). A line a case, then the totals. The data is
+   tests/net/wpt/urltestdata.json (tests/net/wpt/LICENSE says whence). */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -50,7 +51,7 @@ int main(void) {
                 append_range(why, ", not failure", 13);
             }
         } else if (!ok) append_range(why, " failed to parse", 16);
-        else
+        else {
             for (int a = 0; a < 11; a++) {
                 size_t va, vn;
                 if (json_get(&o, attrs[a], &va, &vn) != 's') continue;
@@ -63,6 +64,20 @@ int main(void) {
                 append_range(why, " not ", 5);
                 append_range(why, json_pool + va, vn);
             }
+            /* searchParams: the query parsed and serialized again as
+               application/x-www-form-urlencoded (URLSearchParams' toString()) */
+            size_t sa, sn;
+            if (json_get(&o, "searchParams", &sa, &sn) == 's') {
+                size_t gn = 0;
+                if (p.query_start != URL_NONE) gn = url_form_reserialize(href + p.query_start, p.query_end - p.query_start, got, sizeof got);
+                if (gn != sn || memcmp(got, json_pool + sa, sn) != 0) {
+                    append_range(why, " searchParams ", 14);
+                    append_range(why, got, gn);
+                    append_range(why, " not ", 5);
+                    append_range(why, json_pool + sa, sn);
+                }
+            }
+        }
         int good = len(why) == 0;
         passed += good;
         printf("%s <", good ? "ok  " : "FAIL");

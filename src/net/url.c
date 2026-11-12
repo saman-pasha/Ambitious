@@ -1,9 +1,12 @@
 /* src/net/url.c -- URLs as the URL standard parses them (url.spec.whatwg.org, the
    living standard of 19 October 2026): the basic URL parser's state machine (4.4),
    the host parser (3.5), the serializers (3.6, 4.5), the URL API's getters (6.1) and
-   origins (4.7), and IDNA as it calls it (3.3): UTS #46's ToASCII and ToUnicode. Its
-   tests are web-platform-tests' urltestdata.json, toascii.json and IdnaTestV2.json,
-   every case (tests/exec/net_urltestdata.c, tests/exec/net_idna.c).
+   origins (4.7), and IDNA as it calls it (3.3): UTS #46's ToASCII and ToUnicode; the
+   API's setters (6.1), each the parser from its state override on the URL's record;
+   application/x-www-form-urlencoded's parser and serializer (5). Its tests are
+   web-platform-tests' urltestdata.json, toascii.json, IdnaTestV2.json and
+   setters_tests.json, every case (tests/exec/net_urltestdata.c, net_idna.c,
+   net_setters.c), and WPT's urlencoded-parser inputs (tests/exec/net_url.c).
 
    The parser reads bytes of UTF-8: every code point it treats apart is ASCII, and
    every percent-encode set holds each code point past U+007E, so a code point past
@@ -1313,4 +1316,193 @@ size_t url_display(const char *in, size_t n, char *out, size_t cap) {
     else append_range(shown, data(o) + p.host_start, p.host_end - p.host_start);
     append_range(shown, data(o) + p.host_end, len(o) - p.host_end);
     return url_out(out, cap, data(shown), len(shown));
+}
+
+/* ---- the setters (6.1) ---- */
+
+/* the URL href, parsed into *p, taken apart into the parser's record */
+static void url_record(const char *href, const url_parts *p, vector<char> *scheme, vector<char> *user, vector<char> *pass,
+                       vector<char> *host, vector<char> *path, vector<char> *query, vector<char> *frag, url_rec *r) {
+    url_take(scheme, href, 0, p->scheme_end);
+    url_take(user, href, p->user_start, p->user_end);
+    url_take(pass, href, p->pass_start, p->pass_end);
+    url_take(host, href, p->host_start, p->host_end);
+    url_take(path, href, p->path_start, p->path_end);
+    memset(r, 0, sizeof *r);
+    r->host_kind = p->host_kind;
+    r->port = p->port;
+    r->opaque = p->opaque;
+    r->special = p->special;
+    r->query_null = p->query_start == URL_NONE;
+    clear(query);
+    if (!r->query_null) url_take(query, href, p->query_start, p->query_end);
+    r->fragment_null = p->fragment_start == URL_NONE;
+    clear(frag);
+    if (!r->fragment_null) url_take(frag, href, p->fragment_start, p->len);
+}
+
+int url_set(const char *href, const url_parts *p, int which, const char *value, size_t vn, char *out, size_t cap, url_parts *np) {
+    vector<char> scheme, user, pass, host, path, query, frag, in, o;
+    url_rec r;
+    if (which == URL_HREF) {
+        if (!url_parse_into(value, vn, 0, 0, &o, np)) return 0;
+    } else {
+        url_record(href, p, &scheme, &user, &pass, &host, &path, &query, &frag, &r);
+        /* the value as the parser reads it with a URL given: no tab or newline */
+        for (size_t i = 0; i < vn; i++) if (value[i] != '\t' && value[i] != '\n' && value[i] != '\r') push_back(in, value[i]);
+        /* a URL that can have a username, a password and a port: a host neither null nor empty, not file: */
+        int creds = r.host_kind != URL_HOST_NULL && r.host_kind != URL_HOST_EMPTY && r.special != 2;
+        if (which == URL_PROTOCOL) {
+            push_back(in, ':');
+            url_basic(data(in), len(in), 0, 0, &scheme, &user, &pass, &host, &path, &query, &frag, &r, URL_ST_SCHEME_START);
+        } else if (which == URL_USERNAME && creds) {
+            clear(user);
+            for (size_t i = 0; i < vn; i++) url_pct(&user, (uint8_t)value[i], URL_SET_USERINFO);
+        } else if (which == URL_PASSWORD && creds) {
+            clear(pass);
+            for (size_t i = 0; i < vn; i++) url_pct(&pass, (uint8_t)value[i], URL_SET_USERINFO);
+        } else if ((which == URL_HOST || which == URL_HOSTNAME) && !r.opaque) {
+            url_basic(data(in), len(in), 0, 0, &scheme, &user, &pass, &host, &path, &query, &frag, &r,
+                      which == URL_HOST ? URL_ST_HOST : URL_ST_HOSTNAME);
+        } else if (which == URL_PORT && creds) {
+            if (vn == 0) r.port = -1;
+            else url_basic(data(in), len(in), 0, 0, &scheme, &user, &pass, &host, &path, &query, &frag, &r, URL_ST_PORT);
+        } else if (which == URL_PATHNAME && !r.opaque) {
+            clear(path);
+            url_basic(data(in), len(in), 0, 0, &scheme, &user, &pass, &host, &path, &query, &frag, &r, URL_ST_PATH_START);
+        } else if (which == URL_SEARCH || which == URL_HASH) {
+            int search = which == URL_SEARCH;
+            if (vn == 0) {
+                if (search) { r.query_null = 1; clear(query); }
+                else { r.fragment_null = 1; clear(frag); }
+            } else {
+                size_t skip = len(in) && in[0] == (search ? '?' : '#') ? 1 : 0;
+                if (search) { clear(query); r.query_null = 0; }
+                else { clear(frag); r.fragment_null = 0; }
+                url_basic(data(in) + skip, len(in) - skip, 0, 0, &scheme, &user, &pass, &host, &path, &query, &frag, &r,
+                          search ? URL_ST_QUERY : URL_ST_FRAGMENT);
+            }
+        }
+        url_serialize(&scheme, &user, &pass, &host, &path, &query, &frag, &r, &o, np);
+    }
+    if (len(o) + 1 > cap) return 0;
+    memcpy(out, data(o), len(o));
+    out[len(o)] = 0;
+    return 1;
+}
+
+/* ---- application/x-www-form-urlencoded (5) ---- */
+
+/* bytes decoded as UTF-8 onto out (as UTF-8), as the Encoding standard's UTF-8
+   decoder does: each maximal ill-formed part U+FFFD */
+static void url_utf8_lossy(const char *s, size_t n, vector<char> *out) {
+    uint32_t cp = 0, need = 0, seen = 0, lower = 0x80, upper = 0xBF;
+    size_t i = 0;
+    while (i < n) {
+        uint32_t b = (uint8_t)s[i];
+        if (need == 0) {
+            i++;
+            if (b <= 0x7F) push_back(out, (char)b);
+            else if (b >= 0xC2 && b <= 0xDF) { need = 1; cp = b & 0x1F; }
+            else if (b >= 0xE0 && b <= 0xEF) {
+                if (b == 0xE0) lower = 0xA0;
+                if (b == 0xED) upper = 0x9F;
+                need = 2;
+                cp = b & 0xF;
+            } else if (b >= 0xF0 && b <= 0xF4) {
+                if (b == 0xF0) lower = 0x90;
+                if (b == 0xF4) upper = 0x8F;
+                need = 3;
+                cp = b & 7;
+            } else url_put_utf8(out, 0xFFFD);
+            continue;
+        }
+        if (b < lower || b > upper) {
+            /* the byte is read again, as the start of what follows */
+            cp = need = seen = 0;
+            lower = 0x80;
+            upper = 0xBF;
+            url_put_utf8(out, 0xFFFD);
+            continue;
+        }
+        i++;
+        lower = 0x80;
+        upper = 0xBF;
+        cp = cp << 6 | (b & 0x3F);
+        if (++seen == need) {
+            url_put_utf8(out, cp);
+            cp = need = seen = 0;
+        }
+    }
+    if (need) url_put_utf8(out, 0xFFFD);
+}
+
+int url_form_next(const char *s, size_t n, size_t *at, size_t *name, size_t *name_len, size_t *value, size_t *value_len) {
+    while (*at < n) {
+        size_t a = *at, b = a;
+        while (b < n && s[b] != '&') b++;
+        *at = b + 1;
+        if (b == a) continue;
+        size_t e = a;
+        while (e < b && s[e] != '=') e++;
+        *name = a;
+        *name_len = e - a;
+        *value = e < b ? e + 1 : b;
+        *value_len = e < b ? b - e - 1 : 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* a name or value decoded onto out: each `+' a space, percent-decoded, then UTF-8
+   decoded without BOM */
+static void url_form_decode_into(const char *s, size_t n, vector<char> *out) {
+    vector<char> bytes;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '+') push_back(bytes, ' ');
+        else if (s[i] == '%' && i + 2 < n && url_hexval((uint8_t)s[i + 1]) >= 0 && url_hexval((uint8_t)s[i + 2]) >= 0) {
+            push_back(bytes, (char)(url_hexval((uint8_t)s[i + 1]) * 16 + url_hexval((uint8_t)s[i + 2])));
+            i += 2;
+        } else push_back(bytes, s[i]);
+    }
+    url_utf8_lossy(data(bytes), len(bytes), out);
+}
+
+/* a name or value encoded onto out (5.2): its UTF-8 percent-encoded in the
+   application/x-www-form-urlencoded set, each space a `+' */
+static void url_form_encode_into(const char *s, size_t n, vector<char> *out) {
+    vector<char> u;
+    url_utf8_lossy(s, n, &u);
+    for (size_t i = 0; i < len(u); i++) {
+        if (u[i] == ' ') push_back(out, '+');
+        else url_pct(out, (uint8_t)u[i], URL_SET_FORM);
+    }
+}
+
+size_t url_form_decode(const char *s, size_t n, char *out, size_t cap) {
+    vector<char> o;
+    url_form_decode_into(s, n, &o);
+    return url_out(out, cap, data(o), len(o));
+}
+
+size_t url_form_encode(const char *s, size_t n, char *out, size_t cap) {
+    vector<char> o;
+    url_form_encode_into(s, n, &o);
+    return url_out(out, cap, data(o), len(o));
+}
+
+size_t url_form_reserialize(const char *s, size_t n, char *out, size_t cap) {
+    vector<char> o, name, value;
+    size_t at = 0, na = 0, nl = 0, va = 0, vl = 0;
+    while (url_form_next(s, n, &at, &na, &nl, &va, &vl)) {
+        clear(name);
+        clear(value);
+        url_form_decode_into(s + na, nl, &name);
+        url_form_decode_into(s + va, vl, &value);
+        if (len(o)) push_back(o, '&');
+        url_form_encode_into(data(name), len(name), &o);
+        push_back(o, '=');
+        url_form_encode_into(data(value), len(value), &o);
+    }
+    return url_out(out, cap, data(o), len(o));
 }

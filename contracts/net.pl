@@ -3,7 +3,8 @@
 %% URLs parsed, resolved and serialized as the URL standard has them (src/net/url.c:
 %% its state machine, its percent-encode sets, IPv4 and IPv6 hosts, opaque hosts and
 %% paths, and IDNA as UTS #46 makes a domain ASCII: the mapping table, NFC, the
-%% validity, joiner and bidi rules, Punycode both ways), resources fetched over file:, data:, http: and https:
+%% validity, joiner and bidi rules, Punycode both ways; the API's setters, and
+%% application/x-www-form-urlencoded), resources fetched over file:, data:, http: and https:
 %% (HTTP/1.1: Content-Length, chunked, redirects within a bound, gzip and deflate;
 %% TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
 %% name verified; a proxy from the environment), and what a page loads -- its

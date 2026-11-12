@@ -3,7 +3,8 @@ The JSON files in this directory are web-platform-tests' url/resources/
 unchanged: urltestdata.json, the URL parser's cases (tests/exec/net_urltestdata.c
 runs each); toascii.json and IdnaTestV2.json, a host's IDNA (tests/exec/net_idna.c
 runs each; IdnaTestV2.json is made by WPT's url/tools/IdnaTestV2-parser.py from
-Unicode's IdnaTestV2.txt of version 18.0.0, the version src/net/idna.h is made from).
+Unicode's IdnaTestV2.txt of version 18.0.0, the version src/net/idna.h is made from);
+setters_tests.json, the URL API's setters (tests/exec/net_setters.c runs each).
 They are under web-platform-tests' licence:
 
 # The 3-Clause BSD License
