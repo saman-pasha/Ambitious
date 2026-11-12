@@ -66,14 +66,16 @@ layout_contract(record(box, [
     field(z_auto,       bool),                  % z-index is auto: the box makes no stacking context of its own
     field(clip,         u8),                    % overflow: 1 its content clipped to its padding box (hidden, clip, scroll, auto)
     field(dx, f64), field(dy, f64),             % a relatively positioned box's offset, in its position already
-    %% what paint reads of its style: the corners' radii, its opacity, its shadows,
-    %% backgrounds, transform and outline as CSS computed them
+    %% what paint reads of its style: the corners' radii (horizontal, then vertical), its
+    %% opacity, its shadows, backgrounds, transform and outline as CSS computed them
     field(rtl, f64), field(rtr, f64), field(rbr, f64), field(rbl, f64),
+    field(rtlv, f64), field(rtrv, f64), field(rbrv, f64), field(rblv, f64),
     field(opacity,      f64),
     field(shadows,      span(text)),            % box-shadow
     field(bg_image,     span(text)),            % background-image: its layers (url(), gradients)
     field(bg_res,       xhandle(net, resource)),% the image its first url() names, fetched; none for none
     field(bg_pos,       span(text)), field(bg_size, span(text)), field(bg_repeat, span(text)),
+    field(bg_clip,      span(text)), field(bg_origin, span(text)),   % background-clip, -origin: a box a layer
     field(transform,    span(text)), field(origin, span(text)),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64)   % outline: width, style, colour, offset
 ])).

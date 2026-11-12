@@ -675,7 +675,13 @@ be built side by side and merged without touching each other's.
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning.
   - Paint: border styles, background images, box and text shadows, opacity,
-    transforms, clipping; the fonts a page asks for (TrueType parsed at
+    transforms, clipping; outer and inset shadows, elliptical and
+    percentage radii, `background-clip` and `background-origin`; dashed and
+    dotted borders laid round rounded corners as Blink lays them (its dash
+    ratios, its path's start, Skia's arc lengths), and the corners where
+    unlike sides meet split along their diagonals (Blink's miters), each
+    held to Chromium's screenshot of a fixture page region by region
+    (`tests/integ/paintref.sh`); the fonts a page asks for (TrueType parsed at
     load); the built-in faces Chromium draws with on Linux (subsets of
     Liberation Serif, Sans and Mono for serif, sans-serif and their
     fontconfig aliases, of DejaVu for monospace and by name), each code point

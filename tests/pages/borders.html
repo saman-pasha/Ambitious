@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Borders</title>
+<style>
+/* tests/pages/borders.html: the corners where a border's sides meet, each case in a cell
+   of its own (its box, which has the id, is the region tests/integ/paintref.sh compares
+   with Chromium's screenshot, tools/bench/shot.js; the outline's cell, which it reaches past its box). Sides alike share a corner; unlike
+   ones (in colour or style; double, groove and ridge; inset and outset where their
+   shades differ) split it along its diagonal. The borders are thick, so that a corner
+   drawn wrong is more than the 1% of its cell the comparison allows. No text */
+body { margin: 0; background: white }
+.cell { display: inline-block; width: 150px; height: 90px; padding: 25px; margin: 0; vertical-align: top }
+.box { width: 150px; height: 90px; box-sizing: border-box; background: #eee }
+</style>
+</head>
+<body>
+<div class=cell><div class=box id=double style="background: none; border: 18px double #345"></div></div><div class=cell><div class=box id=groove style="background: none; border: 16px groove #6a9"></div></div><div class=cell><div class=box id=ridge style="background: none; border: 16px ridge #96a"></div></div><div class=cell><div class=box id=outset style="border: 16px outset #c96"></div></div>
+<div class=cell><div class=box id=inset style="border: 16px inset #69c"></div></div><div class=cell><div class=box id=mixed style="background: #fec; border: 14px solid #c33; border-left: 20px dashed #33c; border-bottom-style: dotted"></div></div><div class=cell><div class=box id=dotdash style="border: 12px dotted #2a7; border-left-style: dashed; border-right-style: dashed"></div></div><div class=cell><div class=box id=insetcolours style="border: 16px inset; border-color: #c33 #3c3 #33c #cc3"></div></div>
+<div class=cell><div class=box id=doublewide style="background: none; border-style: double; border-width: 18px 6px; border-color: #a35"></div></div><div class=cell><div class=box id=dashcolours style="background: none; border: 10px dashed; border-color: #c33 #3c3 #33c #cc3"></div></div><div class=cell><div class=box id=triangle style="width: 0; height: 0; background: none; border-left: 60px solid #c33; border-top: 45px solid transparent; border-bottom: 45px solid transparent"></div></div><div class=cell id=outline><div class=box style="width: 114px; height: 54px; outline: 12px double #a63; outline-offset: 6px"></div></div>
+</body>
+</html>

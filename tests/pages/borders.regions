@@ -1,0 +1,13 @@
+# tests/pages/borders.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+double 25 25 175 115
+groove 225 25 375 115
+ridge 425 25 575 115
+outset 625 25 775 115
+inset 25 165 175 255
+mixed 225 165 375 255
+dotdash 425 165 575 255
+insetcolours 625 165 775 255
+doublewide 25 305 175 395
+dashcolours 225 305 375 395
+triangle 425 305 485 395
+outline 600 280 800 420

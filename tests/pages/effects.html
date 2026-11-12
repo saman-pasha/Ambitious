@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Effects</title>
+<style>
+/* tests/pages/effects.html: what paint draws of a box, each effect in a cell of its own
+   (the cell, which has the id, is the region tests/integ/paintref.sh compares with
+   Chromium's screenshot, tools/bench/shot.js): outer and inset shadows, elliptical
+   corners, background-clip and background-origin, dashed and dotted borders round a
+   corner. No text: glyphs are rasterized differently by each engine */
+body { margin: 0; background: white }
+.cell { display: inline-block; width: 150px; height: 90px; padding: 25px; margin: 0; vertical-align: top }
+.box { width: 150px; height: 90px; background: #3a7bd5 }
+</style>
+</head>
+<body>
+<div class=cell id=outer><div class=box style="box-shadow: 6px 6px 0 #222"></div></div><div class=cell id=outerblur><div class=box style="box-shadow: 0 4px 12px 2px rgba(0, 0, 0, 0.5); border-radius: 12px"></div></div><div class=cell id=inset><div class=box style="box-shadow: inset 0 0 0 8px #e33"></div></div><div class=cell id=insetblur><div class=box style="box-shadow: inset 6px 6px 12px rgba(0, 0, 0, 0.7)"></div></div>
+<div class=cell id=insetround><div class=box style="border-radius: 24px; box-shadow: inset -4px -4px 10px 3px #ffd84a, 4px 4px 0 #111"></div></div><div class=cell id=ellipse><div class=box style="border-radius: 60px / 30px"></div></div><div class=cell id=half><div class=box style="border-radius: 50%; background: #e8902a"></div></div><div class=cell id=corners><div class=box style="border-radius: 10px 30px 50px 70px / 70px 50px 30px 10px; background: #2aa876"></div></div>
+<div class=cell id=ellborder><div class=box style="width: 138px; height: 78px; border: 6px solid #333; border-radius: 40px / 20px"></div></div><div class=cell id=clippad><div class=box style="width: 110px; height: 50px; padding: 10px; border: 10px solid rgba(0, 0, 0, 0.3); background: #f2a03d; background-clip: padding-box"></div></div><div class=cell id=clipcontent><div class=box style="width: 110px; height: 50px; padding: 10px; border: 10px solid rgba(0, 0, 0, 0.3); background: #f2a03d; background-clip: content-box"></div></div><div class=cell id=origin><div class=box style="width: 110px; height: 50px; padding: 10px; border: 10px dashed #555; background: #ddd linear-gradient(#c33, #c33) no-repeat; background-size: 30px 20px; background-origin: content-box"></div></div>
+<div class=cell id=originborder><div class=box style="width: 110px; height: 50px; padding: 10px; border: 10px dashed #555; background: #ddd linear-gradient(#36c, #36c) no-repeat; background-size: 30px 20px; background-position: right bottom; background-origin: border-box"></div></div><div class=cell id=dashround><div class=box style="width: 142px; height: 82px; background: none; border: 4px dashed #0a5; border-radius: 22px"></div></div><div class=cell id=dotround><div class=box style="width: 138px; height: 78px; background: none; border: 6px dotted #a05; border-radius: 30px"></div></div><div class=cell id=clipround><div class=box style="width: 110px; height: 50px; padding: 10px; border: 10px solid rgba(0, 0, 0, 0.3); border-radius: 26px; background: #f2a03d; background-clip: padding-box"></div></div>
+</body>
+</html>

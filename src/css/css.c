@@ -855,6 +855,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "counter-increment", 0, G_TEXT, 0, "none", "none" },
     { "quotes", 1, G_TEXT, 0, "auto none", "auto" },
     { "color-scheme", 1, G_TEXT, 0, "normal", "normal" },
+    { "background-clip", 0, G_TEXT, 0, 0, "border-box" },
+    { "background-origin", 0, G_TEXT, 0, 0, "padding-box" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1143,6 +1145,12 @@ static int css_is_list_item(int kind, const char *s, size_t n) {
             if (!(css_eq_ci(p, ln, "auto") || css_is_length(p, ln, 1, 0))) return 0;
             continue;
         }
+        if (kind == 7 || kind == 8) {
+            /* a box: background-origin's (7), background-clip's (8, text besides) */
+            if (!(css_eq_ci(p, ln, "border-box") || css_eq_ci(p, ln, "padding-box") || css_eq_ci(p, ln, "content-box") ||
+                  (kind == 8 && css_eq_ci(p, ln, "text")))) return 0;
+            continue;
+        }
         if (kind == 5) {
             if ((css_eq_ci(p, ln, "repeat-x") || css_eq_ci(p, ln, "repeat-y")) && parts == 1) continue;
             if (!(css_eq_ci(p, ln, "repeat") || css_eq_ci(p, ln, "no-repeat") || css_eq_ci(p, ln, "space") || css_eq_ci(p, ln, "round"))) return 0;
@@ -1252,6 +1260,8 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_BACKGROUND_POSITION: return css_is_list(3, s, n);
     case CSS_PROP_BACKGROUND_SIZE: return css_is_list(4, s, n);
     case CSS_PROP_BACKGROUND_REPEAT: return css_is_list(5, s, n);
+    case CSS_PROP_BACKGROUND_ORIGIN: return css_is_list(7, s, n);
+    case CSS_PROP_BACKGROUND_CLIP: return css_is_list(8, s, n);
     case CSS_PROP_BOX_SHADOW: return css_is_list(1, s, n);
     case CSS_PROP_TEXT_SHADOW: return css_is_list(2, s, n);
     case CSS_PROP_TRANSFORM: return css_is_transform(s, n);
@@ -1546,7 +1556,7 @@ static int css_font(const char *val, size_t vn, css_items *it) {
    repeat; the last layer's colour. Each list longhand an item a layer; what a layer
    leaves out is its initial value */
 static int css_background(const char *val, size_t vn, css_items *it) {
-    vector<char> img, pos, size, rep;
+    vector<char> img, pos, size, rep, org, clp;
     css_val color;
     memset(&color, 0, sizeof color);
     color.unit = CSS_UNIT_COLOR;
@@ -1567,8 +1577,8 @@ static int css_background(const char *val, size_t vn, css_items *it) {
         }
         size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
         size_t k = css_parts(data(lay), len(lay), st, ln, CSS_MAXPARTS);
-        int has_img = 0, has_size = 0, has_pos = 0, after_slash = 0;
-        vector<char> limg, lpos, lsize, lrep;
+        int has_img = 0, has_size = 0, has_pos = 0, after_slash = 0, boxes = 0;
+        vector<char> limg, lpos, lsize, lrep, lorg, lclp;
         for (size_t j = 0; j < k; j++) {
             const char *p = data(lay) + st[j];
             size_t pn = ln[j];
@@ -1602,8 +1612,17 @@ static int css_background(const char *val, size_t vn, css_items *it) {
                 has_pos = 1;
                 continue;
             }
-            if (css_eq_ci(p, pn, "scroll") || css_eq_ci(p, pn, "fixed") || css_eq_ci(p, pn, "local") || css_eq_ci(p, pn, "border-box") ||
-                css_eq_ci(p, pn, "padding-box") || css_eq_ci(p, pn, "content-box")) continue;
+            if (css_eq_ci(p, pn, "scroll") || css_eq_ci(p, pn, "fixed") || css_eq_ci(p, pn, "local")) continue;
+            if (css_eq_ci(p, pn, "border-box") || css_eq_ci(p, pn, "padding-box") || css_eq_ci(p, pn, "content-box") ||
+                (boxes == 1 && css_eq_ci(p, pn, "text"))) {
+                /* a layer's boxes: the first its origin and its clip, a second its clip */
+                if (boxes == 2) return 0;
+                if (boxes == 0) append_range(lorg, p, pn);
+                clear(lclp);
+                append_range(lclp, p, pn);
+                boxes++;
+                continue;
+            }
             if (css_eq_ci(p, pn, "currentcolor")) { if (has_color) return 0; css_word_val(&color, "currentcolor"); has_color = 1; continue; }
             if (css_parse_color(p, pn, &c)) {
                 if (has_color) return 0;
@@ -1632,6 +1651,9 @@ static int css_background(const char *val, size_t vn, css_items *it) {
         if (has_pos) append_range(pos, data(lpos), len(lpos)); else append_range(pos, "0% 0%", 5);
         if (has_size) append_range(size, data(lsize), len(lsize)); else append_range(size, "auto", 4);
         if (len(lrep)) append_range(rep, data(lrep), len(lrep)); else append_range(rep, "repeat", 6);
+        if (layers) { append_range(org, ", ", 2); append_range(clp, ", ", 2); }
+        if (len(lorg)) append_range(org, data(lorg), len(lorg)); else append_range(org, "padding-box", 11);
+        if (len(lclp)) append_range(clp, data(lclp), len(lclp)); else append_range(clp, "border-box", 10);
         layers++;
         if (b >= vn) break;
         a = b + 1;
@@ -1649,6 +1671,8 @@ static int css_background(const char *val, size_t vn, css_items *it) {
     css_item_made(it, CSS_PROP_BACKGROUND_POSITION, &t, data(pos), len(pos));
     css_item_made(it, CSS_PROP_BACKGROUND_SIZE, &t, data(size), len(size));
     css_item_made(it, CSS_PROP_BACKGROUND_REPEAT, &t, data(rep), len(rep));
+    css_item_made(it, CSS_PROP_BACKGROUND_ORIGIN, &t, data(org), len(org));
+    css_item_made(it, CSS_PROP_BACKGROUND_CLIP, &t, data(clp), len(clp));
     return 1;
 }
 
@@ -1688,8 +1712,8 @@ static const css_short css_shorts[] = {
     { "border-left", 3, { CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_LEFT_COLOR } },
     { "outline", 3, { CSS_PROP_OUTLINE_WIDTH, CSS_PROP_OUTLINE_STYLE, CSS_PROP_OUTLINE_COLOR } },
     { "font", 5, { CSS_PROP_FONT_FAMILY, CSS_PROP_FONT_STYLE, CSS_PROP_FONT_WEIGHT, CSS_PROP_FONT_SIZE, CSS_PROP_LINE_HEIGHT } },
-    { "background", 5, { CSS_PROP_BACKGROUND_COLOR, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
-                         CSS_PROP_BACKGROUND_REPEAT } },
+    { "background", 7, { CSS_PROP_BACKGROUND_COLOR, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
+                         CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_BACKGROUND_ORIGIN, CSS_PROP_BACKGROUND_CLIP } },
     { "list-style", 2, { CSS_PROP_LIST_STYLE_TYPE, CSS_PROP_LIST_STYLE_POSITION } },
     { "text-decoration", 1, { CSS_PROP_TEXT_DECORATION } },
     { "overflow", 2, { CSS_PROP_OVERFLOW_X, CSS_PROP_OVERFLOW_Y } },

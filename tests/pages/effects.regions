@@ -1,0 +1,17 @@
+# tests/pages/effects.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+outer 0 0 200 140
+outerblur 200 0 400 140
+inset 400 0 600 140
+insetblur 600 0 800 140
+insetround 0 140 200 280
+ellipse 200 140 400 280
+half 400 140 600 280
+corners 600 140 800 280
+ellborder 0 280 200 420
+clippad 200 280 400 420
+clipcontent 400 280 600 420
+origin 600 280 800 420
+originborder 0 420 200 560
+dashround 200 420 400 560
+dotround 400 420 600 560
+clipround 600 420 800 560

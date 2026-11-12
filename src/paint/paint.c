@@ -219,8 +219,9 @@ static void pt_blend(amb_canvas *c, int x, int y, uint32_t rgba, double cover) {
 }
 
 /* how much of the pixel at (px, py) (its centre, page coordinates) the rounded rectangle
-   (x0, y0)-(x1, y1) with its corners' radii r (top left, top right, bottom right, bottom
-   left) covers: 0 to 1, its edges and arcs anti-aliased */
+   (x0, y0)-(x1, y1) with its corners' radii r covers: 0 to 1, its edges and arcs
+   anti-aliased. r: the horizontal radii (top left, top right, bottom right, bottom left),
+   then the vertical ones; a corner is round when both of its radii are */
 static double pt_rr_cover(double px, double py, double x0, double y0, double x1, double y1, const double *r) {
     double e = px - x0 + 0.5, cov = e < 1 ? (e > 0 ? e : 0) : 1;
     double e2 = x1 - px + 0.5;
@@ -230,33 +231,43 @@ static double pt_rr_cover(double px, double py, double x0, double y0, double x1,
     double e4 = y1 - py + 0.5;
     if (e4 < cov) cov = e4 < 0 ? 0 : e4;
     if (cov <= 0) return 0;
-    double cx = 0, cy = 0, rr = 0;
-    if (r[0] > 0 && px < x0 + r[0] && py < y0 + r[0]) { cx = x0 + r[0]; cy = y0 + r[0]; rr = r[0]; }
-    else if (r[1] > 0 && px > x1 - r[1] && py < y0 + r[1]) { cx = x1 - r[1]; cy = y0 + r[1]; rr = r[1]; }
-    else if (r[2] > 0 && px > x1 - r[2] && py > y1 - r[2]) { cx = x1 - r[2]; cy = y1 - r[2]; rr = r[2]; }
-    else if (r[3] > 0 && px < x0 + r[3] && py > y1 - r[3]) { cx = x0 + r[3]; cy = y1 - r[3]; rr = r[3]; }
-    if (rr > 0) {
-        double dd = sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-        double k = rr - dd + 0.5;
+    double cx = 0, cy = 0, rx = 0, ry = 0;
+    if (r[0] > 0 && r[4] > 0 && px < x0 + r[0] && py < y0 + r[4]) { cx = x0 + r[0]; cy = y0 + r[4]; rx = r[0]; ry = r[4]; }
+    else if (r[1] > 0 && r[5] > 0 && px > x1 - r[1] && py < y0 + r[5]) { cx = x1 - r[1]; cy = y0 + r[5]; rx = r[1]; ry = r[5]; }
+    else if (r[2] > 0 && r[6] > 0 && px > x1 - r[2] && py > y1 - r[6]) { cx = x1 - r[2]; cy = y1 - r[6]; rx = r[2]; ry = r[6]; }
+    else if (r[3] > 0 && r[7] > 0 && px < x0 + r[3] && py > y1 - r[7]) { cx = x0 + r[3]; cy = y1 - r[7]; rx = r[3]; ry = r[7]; }
+    if (rx > 0) {
+        /* the distance to the arc, as the ellipse's level over its gradient: a circle's
+           radius less the distance to its centre */
+        double dx = (px - cx) / rx, dy = (py - cy) / ry, d = sqrt(dx * dx + dy * dy);
+        double gx = dx / rx, gy = dy / ry, g = sqrt(gx * gx + gy * gy);
+        double k = g > 0 ? (1 - d) * d / g + 0.5 : 1;
         if (k < cov) cov = k < 0 ? 0 : k;
     }
     return cov > 1 ? 1 : cov;
 }
 
-/* radii that fit their box: scaled down together when two of a side's sum more than it (CSS Backgrounds 5.5) */
+/* radii that fit their box: the eight scaled down together when two along a side sum more
+   than it (CSS Backgrounds 5.5): the horizontal ones along the top and bottom, the vertical
+   ones along the left and right */
 static void pt_fit_radii(double w, double h, double *r) {
     double f = 1;
     if (r[0] + r[1] > w && r[0] + r[1] > 0) f = fmin(f, w / (r[0] + r[1]));
     if (r[3] + r[2] > w && r[3] + r[2] > 0) f = fmin(f, w / (r[3] + r[2]));
-    if (r[0] + r[3] > h && r[0] + r[3] > 0) f = fmin(f, h / (r[0] + r[3]));
-    if (r[1] + r[2] > h && r[1] + r[2] > 0) f = fmin(f, h / (r[1] + r[2]));
-    for (int k = 0; k < 4; k++) r[k] = r[k] * f > 0 ? r[k] * f : 0;
+    if (r[4] + r[7] > h && r[4] + r[7] > 0) f = fmin(f, h / (r[4] + r[7]));
+    if (r[5] + r[6] > h && r[5] + r[6] > 0) f = fmin(f, h / (r[5] + r[6]));
+    for (int k = 0; k < 8; k++) r[k] = r[k] * f > 0 ? r[k] * f : 0;
+}
+/* whether any corner of r is round */
+static int pt_round(const double *r) {
+    for (int k = 0; k < 4; k++) if (r[k] > 0 && r[k + 4] > 0) return 1;
+    return 0;
 }
 
 /* a rounded rectangle filled (the clip's part of it) */
 static void pt_rrect(amb_canvas *c, double x0, double y0, double x1, double y1, const double *r, uint32_t rgba) {
     if ((rgba & 0xff) == 0 || x1 <= x0 || y1 <= y0) return;
-    if (r[0] <= 0 && r[1] <= 0 && r[2] <= 0 && r[3] <= 0) { pt_fill(c, x0, y0, x1, y1, rgba); return; }
+    if (!pt_round(r)) { pt_fill(c, x0, y0, x1, y1, rgba); return; }
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
     int ya = (int)floor(y0 - c->oy), yb = (int)ceil(y1 - c->oy), xa = (int)floor(x0), xb = (int)ceil(x1);
@@ -318,10 +329,140 @@ static double pt_dash_gap(double len0, double dash, double gap, long *n) {
     return g1;
 }
 
+/* ---- polygons: each edge's signed area accumulated per pixel along its rows, as
+   src/paint/font.c draws glyphs (font-rs's method), then summed across each row ---- */
+
+static void pt_acc_line(vector<float> *acc, int W, int H, double x0, double y0, double x1, double y1) {
+    if (y0 == y1) return;
+    double dir = 1;
+    if (y0 > y1) {
+        double t = x0; x0 = x1; x1 = t;
+        t = y0; y0 = y1; y1 = t;
+        dir = -1;
+    }
+    double dxdy = (x1 - x0) / (y1 - y0);
+    double x = x0;
+    if (y0 < 0) { x -= y0 * dxdy; y0 = 0; }
+    if (y1 > H) y1 = H;
+    if (y0 >= y1) return;
+    int ys = (int)floor(y0), ye = (int)ceil(y1);
+    for (int y = ys; y < ye; y++) {
+        double dy = fmin((double)(y + 1), y1) - fmax((double)y, y0);
+        double xnext = x + dxdy * dy;
+        double d = dy * dir;
+        double xa = x < xnext ? x : xnext, xb = x < xnext ? xnext : x;
+        if (xa < 0) xa = 0;
+        if (xb < 0) xb = 0;
+        if (xa > W - 2) xa = W - 2;
+        if (xb > W - 2) xb = W - 2;
+        double xaf = floor(xa), xbc = ceil(xb);
+        int xai = (int)xaf, xbi = (int)xbc;
+        size_t row = (size_t)y * (size_t)W;
+        if (xbi <= xai + 1) {
+            double xmf = 0.5 * (xa + xb) - xaf;
+            (*acc)[row + xai] += (float)(d - d * xmf);
+            (*acc)[row + xai + 1] += (float)(d * xmf);
+        } else {
+            double s = 1.0 / (xb - xa);
+            double x0f = xa - xaf;
+            double a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f);
+            double x1f = xb - xbc + 1.0;
+            double am = 0.5 * s * x1f * x1f;
+            (*acc)[row + xai] += (float)(d * a0);
+            if (xbi == xai + 2) (*acc)[row + xai + 1] += (float)(d * (1.0 - a0 - am));
+            else {
+                double a1 = s * (1.5 - x0f);
+                (*acc)[row + xai + 1] += (float)(d * (a1 - a0));
+                for (int xi = xai + 2; xi < xbi - 1; xi++) (*acc)[row + xi] += (float)(d * s);
+                double a2 = a1 + (xbi - xai - 3) * s;
+                (*acc)[row + xbi - 1] += (float)(d * (1.0 - a2 - am));
+            }
+            (*acc)[row + xbi] += (float)(d * am);
+        }
+        x = xnext;
+    }
+}
+
+/* a closed polygon of n points (page coordinates) filled in rgba, non-zero, anti-aliased;
+   acc its scratch */
+static void pt_poly(amb_canvas *c, const vector<double> *xs, const vector<double> *ys, uint32_t rgba, vector<float> *acc) {
+    size_t n = len(*xs);
+    if (n < 3 || (rgba & 0xff) == 0) return;
+    double minx = at(*xs, 0), maxx = minx, miny = at(*ys, 0), maxy = miny;
+    for (size_t k = 1; k < n; k++) {
+        minx = fmin(minx, at(*xs, k)); maxx = fmax(maxx, at(*xs, k));
+        miny = fmin(miny, at(*ys, k)); maxy = fmax(maxy, at(*ys, k));
+    }
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    int ox = (int)floor(minx), oy = (int)floor(miny - c->oy);
+    int W = (int)ceil(maxx) - ox + 2, H = (int)ceil(maxy - c->oy) - oy + 1;
+    if (W <= 2 || H <= 0 || (double)W * H > 4e7) return;
+    clear(*acc);
+    resize(acc, (size_t)W * (size_t)H);
+    for (size_t k = 0; k < n; k++) {
+        size_t j = k + 1 == n ? 0 : k + 1;
+        pt_acc_line(acc, W, H, at(*xs, k) - ox, at(*ys, k) - c->oy - oy, at(*xs, j) - ox, at(*ys, j) - c->oy - oy);
+    }
+    for (int y = 0; y < H; y++) {
+        int Y = oy + y;
+        if (Y < ky0 || Y >= ky1) continue;
+        double sum = 0;
+        for (int x = 0; x < W; x++) {
+            sum += at(*acc, (size_t)y * W + x);
+            int X = ox + x;
+            if (X < kx0 || X >= kx1) continue;
+            double a = fabs(sum);
+            if (a > 0.002) pt_blend(c, X, Y, rgba, a > 1 ? 1 : a);
+        }
+    }
+}
+
+/* how much of the pixel at (px, py) (its centre) the rectangle (x0, y0)-(x1, y1) covers: 0 to 1 */
+static double pt_sq_cover(double px, double py, double x0, double y0, double x1, double y1) {
+    double cov = fmin(fmin(px - x0 + 0.5, x1 - px + 0.5), fmin(py - y0 + 0.5, y1 - py + 0.5));
+    return cov <= 0 ? 0 : cov > 1 ? 1 : cov;
+}
+
+/* a corner of a border, the square (x0, y0)-(x1, y1) where a horizontal and a vertical
+   side meet, split along its diagonal from the box's outer corner (corner 0 top left, 1
+   top right, 2 bottom right, 3 bottom left): the horizontal side's share of the pixel at
+   (px, py), 0 to 1, anti-aliased (the signed distance to the diagonal, positive on the
+   horizontal side's part) */
+static double pt_miter_share(double px, double py, double x0, double y0, double x1, double y1, int corner) {
+    double w = x1 - x0, h = y1 - y0, dl = sqrt(w * w + h * h);
+    double u = corner == 0 || corner == 3 ? px - x0 : x1 - px, v = corner < 2 ? py - y0 : y1 - py;
+    double fh = 0.5 + (u * h - v * w) / dl;
+    return fh < 0 ? 0 : fh > 1 ? 1 : fh;
+}
+
+/* a corner of a solid border: one colour when its sides' agree, else split along its
+   diagonal (pt_miter_share), the horizontal side's colour (ch) on its part, the vertical
+   side's (cv) on the other */
+static void pt_corner(amb_canvas *c, double x0, double y0, double x1, double y1, int corner, uint32_t ch, uint32_t cv) {
+    if (x1 <= x0 || y1 <= y0) return;
+    if (ch == cv) { pt_fill(c, x0, y0, x1, y1, ch); return; }
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    int ya = (int)floor(y0 - c->oy), yb = (int)ceil(y1 - c->oy), xa = (int)floor(x0), xb = (int)ceil(x1);
+    for (int y = ya < ky0 ? ky0 : ya; y < yb && y < ky1; y++)
+        for (int x = xa < kx0 ? kx0 : xa; x < xb && x < kx1; x++) {
+            double px = x + 0.5, py = y + 0.5 + c->oy;
+            double cov = pt_sq_cover(px, py, x0, y0, x1, y1);
+            if (cov <= 0) continue;
+            double fh = pt_miter_share(px, py, x0, y0, x1, y1, corner);
+            if (fh > 0) pt_blend(c, x, y, ch, cov * fh);
+            if (fh < 1) pt_blend(c, x, y, cv, cov * (1 - fh));
+        }
+}
+
 /* one side of a border, w thick, along the rectangle's edge from (x0, y0) to (x1, y1) (its
    inside), drawn in its style: solid, double (two lines of a third), dotted (round dots),
-   dashed (dashes three times as long as it is thick), the shaded halves of groove and ridge */
-static void pt_side(amb_canvas *c, double x0, double y0, double x1, double y1, int side, int bs, uint32_t col) {
+   dashed, the shaded halves of groove and ridge. Dashes and dots are laid along the side's
+   whole length from corner to corner, f0 to f1 along it (Blink's: a dash twice as long as
+   the side is thick and a gap as long, three times and twice under 3px; the gap adjusted
+   so that a dash begins and ends the side), and drawn where the side is */
+static void pt_side(amb_canvas *c, double x0, double y0, double x1, double y1, int side, int bs, uint32_t col, double f0, double f1) {
     double w = (side == 0 || side == 2) ? y1 - y0 : x1 - x0, len0 = (side == 0 || side == 2) ? x1 - x0 : y1 - y0;
     if (w <= 0 || len0 <= 0 || bs <= LAY_BS_HIDDEN) return;
     int horiz = side == 0 || side == 2;
@@ -340,21 +481,338 @@ static void pt_side(amb_canvas *c, double x0, double y0, double x1, double y1, i
         return;
     }
     if (bs == LAY_BS_DOTTED || bs == LAY_BS_DASHED) {
-        double dash = bs == LAY_BS_DOTTED ? w : 3 * w;
+        double full = f1 - f0, lo = horiz ? x0 : y0, hi = horiz ? x1 : y1;
+        double dash = bs == LAY_BS_DOTTED ? w : w >= 3 ? 2 * w : 3 * w;
+        double gap0 = bs == LAY_BS_DOTTED ? w : w >= 3 ? w : 2 * w;
         long n = 1;
-        double gap = pt_dash_gap(len0, dash, dash, &n);
-        if (n < 1) { n = 1; gap = 0; }
+        double gap = 0;
+        if (bs == LAY_BS_DASHED && full <= 2 * dash) { n = 1; dash = full; }            /* no room: solid */
+        else if (bs == LAY_BS_DASHED && full <= 2 * dash + gap0) {
+            double m = full / (2 * dash + gap0);                                          /* two, in proportion */
+            dash *= m;
+            gap = gap0 * m;
+            n = 2;
+        } else {
+            gap = pt_dash_gap(full, dash, gap0, &n);
+            if (n < 1) { n = 1; gap = 0; }
+        }
         for (long k = 0; k < n; k++) {
-            double a = (horiz ? x0 : y0) + k * (dash + gap), z = a + dash;
+            double a = f0 + k * (dash + gap), z = a + dash;
+            if (z <= lo || a >= hi) continue;
             if (bs == LAY_BS_DOTTED && w >= 3) {
-                double rr[4] = { w / 2, w / 2, w / 2, w / 2 };
+                double rr[8] = { w / 2, w / 2, w / 2, w / 2, w / 2, w / 2, w / 2, w / 2 };
                 if (horiz) pt_rrect(c, a, y0, z, y1, rr, col); else pt_rrect(c, x0, a, x1, z, rr, col);
-            } else if (horiz) pt_fill(c, a, y0, z, y1, col);
-            else pt_fill(c, x0, a, x1, z, col);
+            } else {
+                if (a < lo) a = lo;
+                if (z > hi) z = hi;
+                if (horiz) pt_fill(c, a, y0, z, y1, col);
+                else pt_fill(c, x0, a, x1, z, col);
+            }
         }
         return;
     }
     pt_fill(c, x0, y0, x1, y1, pt_side_colour(col, bs, side, 1));
+}
+
+/* whether the corner where sides s and a of a border meet is split along its diagonal,
+   each side drawn on its own part of it, rather than drawn by one of them: both are drawn
+   and they are unlike, in colour or in style; or both are double, groove or ridge (their
+   lines mitred); or both inset or outset where their shades differ, at the top right and
+   bottom left (Blink's ColorsMatchAtCorner and BorderStylesRequireMiter) */
+static int pt_unlike(const double *ws, const int *sts, const uint32_t *cols, int s, int a) {
+    if (ws[s] <= 0 || ws[a] <= 0 || sts[s] <= LAY_BS_HIDDEN || sts[a] <= LAY_BS_HIDDEN) return 0;
+    if (cols[s] != cols[a] || sts[s] != sts[a]) return 1;
+    int st = sts[s];
+    if (st == LAY_BS_DOUBLE || st == LAY_BS_GROOVE || st == LAY_BS_RIDGE) return 1;
+    if (st == LAY_BS_INSET || st == LAY_BS_OUTSET) {
+        int f = 1 << s | 1 << a;
+        return f == (1 << 0 | 1 << 1) || f == (1 << 2 | 1 << 3);
+    }
+    return 0;
+}
+
+/* whether side s's part of a corner it splits with side a is anti-aliased: when their
+   colours differ there (theirs, or an inset, outset, groove or ridge side's shades at the
+   top right and bottom left); else its edge is hard, a pixel its own when its centre is
+   (Blink's soft and hard miters) */
+static int pt_soft(const int *sts, const uint32_t *cols, int s, int a) {
+    if (cols[s] != cols[a]) return 1;
+    int st = sts[s];
+    if (st != LAY_BS_INSET && st != LAY_BS_OUTSET && st != LAY_BS_GROOVE && st != LAY_BS_RIDGE) return 0;
+    int f = 1 << s | 1 << a;
+    return f == (1 << 0 | 1 << 1) || f == (1 << 2 | 1 << 3);
+}
+
+/* a side drawn by pt_side (its rectangle x0, y0 - x1, y1, its dashes laid from f0 to f1)
+   on its own part only of the nk corners it splits with its neighbours: corner ks[q] (0
+   top left to 3 bottom left), whose square is sq[4 ks[q]] to sq[4 ks[q] + 3], split along
+   its diagonal (Blink clips the side to its polygon, ClipBorderSidePolygon), its edge
+   anti-aliased when soft[q]. The side is drawn onto black and onto white, its colour and
+   cover read from the two, and laid on the canvas through its part of each corner */
+static void pt_side_split(amb_canvas *c, double x0, double y0, double x1, double y1, int side, int bs, uint32_t col,
+                          double f0, double f1, const double *sq, const int *ks, const int *soft, int nk) {
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    int ax = (int)floor(x0), ay = (int)floor(y0 - c->oy), zx = (int)ceil(x1), zy = (int)ceil(y1 - c->oy);
+    if (ax < kx0) ax = kx0;
+    if (ay < ky0) ay = ky0;
+    if (zx > kx1) zx = kx1;
+    if (zy > ky1) zy = ky1;
+    if (zx <= ax || zy <= ay) return;
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = (uint32_t)(zx - ax);
+    k0.h = k1.h = (uint32_t)(zy - ay);
+    k0.oy = k1.oy = c->oy + ay;
+    k0.cx0 = k1.cx0 = 0;
+    k0.cx1 = k1.cx1 = k0.w;
+    k0.cy0 = k1.cy0 = k0.oy;
+    k0.cy1 = k1.cy1 = k0.oy + k0.h;
+    resize(&k0.px, (size_t)k0.w * k0.h * 3);
+    resize(&k1.px, (size_t)k1.w * k1.h * 3);
+    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    /* the small canvases' columns start at ax */
+    int horiz = side == 0 || side == 2;
+    pt_side(&k0, x0 - ax, y0, x1 - ax, y1, side, bs, col, horiz ? f0 - ax : f0, horiz ? f1 - ax : f1);
+    pt_side(&k1, x0 - ax, y0, x1 - ax, y1, side, bs, col, horiz ? f0 - ax : f0, horiz ? f1 - ax : f1);
+    for (int y = 0; y < (int)k0.h; y++)
+        for (int x = 0; x < (int)k0.w; x++) {
+            size_t i = ((size_t)y * k0.w + (size_t)x) * 3;
+            double a = 1 - (at(k1.px, i) - at(k0.px, i)) / 255.0;
+            if (a <= 0.002) continue;
+            double px = ax + x + 0.5, py = c->oy + ay + y + 0.5, m = 1;
+            for (int q = 0; q < nk; q++) {
+                const double *s = sq + 4 * ks[q];
+                double cov = pt_sq_cover(px, py, s[0], s[1], s[2], s[3]);
+                if (cov <= 0) continue;
+                double fh = pt_miter_share(px, py, s[0], s[1], s[2], s[3], ks[q]), own = horiz ? fh : 1 - fh;
+                if (soft[q]) m *= 1 - cov * (1 - own);
+                else if (cov >= 0.5 && own < 0.5) m = 0;
+            }
+            if (m <= 0) continue;
+            size_t di = ((size_t)(ay + y) * c->w + (size_t)(ax + x)) * 3;
+            for (int ch = 0; ch < 3; ch++) {
+                double v = at(k0.px, i + ch) * m + c->px[di + ch] * (1 - a * m);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
+/* the four sides of a square-cornered border (its box bx, by, bw by bh; the sides' widths,
+   styles and colours top, right, bottom, left), each in its style and from corner to
+   corner: a corner its two sides share (pt_unlike) drawn by the top or bottom one, a
+   corner they split drawn by each on its own part of it. A side's dashes are laid along
+   its whole length either way */
+static void pt_styled_sides(amb_canvas *c, double bx, double by, double bw, double bh, const double *ws, const int *sts,
+                            const uint32_t *cols) {
+    /* corner k (0 top left, 1 top right, 2 bottom right, 3 bottom left): its square, its
+       horizontal side and its vertical one; a side's corners at its start and its end */
+    double sq[16] = { bx, by, bx + ws[3], by + ws[0],
+                      bx + bw - ws[1], by, bx + bw, by + ws[0],
+                      bx + bw - ws[1], by + bh - ws[2], bx + bw, by + bh,
+                      bx, by + bh - ws[2], bx + ws[3], by + bh };
+    static const int hs[4] = { 0, 0, 2, 2 }, vs[4] = { 3, 1, 1, 3 }, c0[4] = { 0, 1, 3, 0 }, c1[4] = { 1, 2, 2, 3 };
+    int split[4];
+    for (int k = 0; k < 4; k++) split[k] = pt_unlike(ws, sts, cols, hs[k], vs[k]);
+    for (int s = 0; s < 4; s++) {
+        if (ws[s] <= 0 || sts[s] <= LAY_BS_HIDDEN) continue;
+        double x0, y0, x1, y1, f0, f1;
+        if (s == 0 || s == 2) {
+            x0 = bx;
+            x1 = bx + bw;
+            y0 = s == 0 ? by : by + bh - ws[2];
+            y1 = y0 + ws[s];
+            f0 = bx;
+            f1 = bx + bw;
+        } else {
+            x0 = s == 3 ? bx : bx + bw - ws[1];
+            x1 = x0 + ws[s];
+            y0 = split[c0[s]] ? by : by + ws[0];
+            y1 = split[c1[s]] ? by + bh : by + bh - ws[2];
+            f0 = by;
+            f1 = by + bh;
+        }
+        int ks[2], soft[2], nk = 0;
+        for (int e = 0; e < 2; e++) {
+            int k = e ? c1[s] : c0[s];
+            if (!split[k]) continue;
+            ks[nk] = k;
+            soft[nk++] = pt_soft(sts, cols, s, s == hs[k] ? vs[k] : hs[k]);
+        }
+        if (nk) pt_side_split(c, x0, y0, x1, y1, s, sts[s], cols[s], f0, f1, sq, ks, soft, nk);
+        else pt_side(c, x0, y0, x1, y1, s, sts[s], cols[s], f0, f1);
+    }
+}
+
+/* the dash pattern of a path len0 long in style bs, w thick, closed or not (Blink's
+   SetupPaintDashPathEffect and SelectBestDashGap, its ratios as Chromium draws them: a dash
+   twice as long as the line is thick and a gap as long, three times and twice under 3px):
+   the dash (a dot's: 0, its round cap the dot), the period from one dash's start to the
+   next's, their count */
+static void pt_dashes(int bs, double w, double len0, int closed, double *dash, double *period, long *n) {
+    double d = bs == LAY_BS_DOTTED ? w : w >= 3 ? 2 * w : 3 * w;
+    double g = bs == LAY_BS_DOTTED ? w : w >= 3 ? w : 2 * w;
+    *n = 1;
+    if (bs == LAY_BS_DASHED && len0 <= 2 * d) { *dash = len0; *period = len0; return; }
+    if (bs == LAY_BS_DASHED && len0 <= 2 * d + g) {
+        double m = len0 / (2 * d + g);
+        *dash = d * m;
+        *period = (d + g) * m;
+        *n = 2;
+        return;
+    }
+    double avail = closed ? len0 : len0 + g;
+    double mn = floor(avail / (d + g)), mx = mn + 1;
+    double gmn = closed ? mn : mn - 1, gmx = closed ? mx : mx - 1;
+    double g0 = gmn > 0 ? (len0 - mn * d) / gmn : 0, g1 = gmx > 0 ? (len0 - mx * d) / gmx : 0;
+    double gap = g1 <= 0 || fabs(g0 - g) < fabs(g1 - g) ? g0 : g1;
+    *n = (long)(gap == g0 ? mn : mx);
+    if (*n < 1) { *n = 1; gap = 0; }
+    *dash = bs == LAY_BS_DOTTED ? 0 : d;
+    *period = d + gap;
+}
+
+/* the point at length s along a polyline (cum: each point's length from the first) and the
+   unit normal there, to its left */
+static void pt_along(const vector<double> *px, const vector<double> *py, const vector<double> *cum, double s, double *x, double *y,
+                     double *nx, double *ny) {
+    size_t n = len(*px), k = 1;
+    while (k + 1 < n && at(*cum, k) < s) k++;
+    double x0 = at(*px, k - 1), y0 = at(*py, k - 1), x1 = at(*px, k), y1 = at(*py, k);
+    double sl = at(*cum, k) - at(*cum, k - 1), f = sl > 0 ? (s - at(*cum, k - 1)) / sl : 0;
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    *x = x0 + (x1 - x0) * f;
+    *y = y0 + (y1 - y0) * f;
+    double dx = x1 - x0, dy = y1 - y0, dl = sqrt(dx * dx + dy * dy);
+    *nx = dl > 0 ? -dy / dl : 0;
+    *ny = dl > 0 ? dx / dl : 0;
+}
+
+/* the length Skia's path measure gives an arc of an ellipse (radii rx, ry, angles a to b):
+   cut in halves until each half's middle lies within half a px (in x and in y) of its
+   chord's, the chords' lengths summed -- shorter than the arc, as the dashes Chromium lays
+   along it are */
+static double pt_skia_arc(double rx, double ry, double a, double b, int depth) {
+    double xa = rx * cos(a), ya = ry * sin(a), xb = rx * cos(b), yb = ry * sin(b);
+    double m = (a + b) / 2, xm = rx * cos(m), ym = ry * sin(m);
+    if (depth < 10 && (fabs(xm - (xa + xb) / 2) > 0.5 || fabs(ym - (ya + yb) / 2) > 0.5))
+        return pt_skia_arc(rx, ry, a, m, depth + 1) + pt_skia_arc(rx, ry, m, b, depth + 1);
+    return sqrt((xb - xa) * (xb - xa) + (yb - ya) * (yb - ya));
+}
+
+/* a quarter of an ellipse into a polyline: centre (cx, cy), radii (rx, ry), from angle t0
+   on, sixteen segments, each point's length along the line (cum) the arc's as Skia
+   measures it, shared out by angle */
+static void pt_arc(vector<double> *px, vector<double> *py, vector<double> *cum, double cx, double cy, double rx, double ry, double t0) {
+    double arc = pt_skia_arc(rx, ry, t0, t0 + 0.5 * M_PI, 0), s0 = back(*cum);
+    for (int i = 1; i <= 16; i++) {
+        double th = t0 + 0.5 * M_PI * i / 16.0;
+        push_back(px, cx + rx * cos(th));
+        push_back(py, cy + ry * sin(th));
+        push_back(cum, s0 + arc * i / 16.0);
+    }
+}
+/* a straight segment to (x, y), its length along the line */
+static void pt_line_to(vector<double> *px, vector<double> *py, vector<double> *cum, double x, double y) {
+    double dx = x - back(*px), dy = y - back(*py);
+    push_back(px, x);
+    push_back(py, y);
+    push_back(cum, back(*cum) + sqrt(dx * dx + dy * dy));
+}
+
+/* a polyline (px, py; cum each point's length along it) in dashes or dots, w thick, in col:
+   the pattern laid along its length from its start (closed: a closed path's pattern); a
+   dash the band w wide about its stretch, cut square, a dot a circle w across at its
+   period's start (Blink's dots: dashes of no length with round caps) */
+static void pt_dash_path(amb_canvas *c, const vector<double> *px, const vector<double> *py, const vector<double> *cum, int bs, double w,
+                         uint32_t col, int closed, vector<float> *acc) {
+    double total = back(*cum);
+    if (total <= 0) return;
+    double dash, period;
+    long n;
+    pt_dashes(bs, w, total, closed, &dash, &period, &n);
+    vector<double> xs, ys, ss, rx, ry;
+    for (long q = 0; q < n; q++) {
+        double a = q * period, z = a + dash;
+        if (z > total) z = total;
+        clear(xs);
+        clear(ys);
+        double x, y, nx, ny;
+        if (bs == LAY_BS_DOTTED) {
+            pt_along(px, py, cum, a, &x, &y, &nx, &ny);
+            for (int k = 0; k < 24; k++) {
+                double th = 2 * M_PI * k / 24;
+                push_back(xs, x + w / 2 * cos(th));
+                push_back(ys, y + w / 2 * sin(th));
+            }
+        } else {
+            /* the stretch's points (its ends, the line's points between), the band's left
+               edge along them forward, its right edge back */
+            clear(ss);
+            clear(rx);
+            clear(ry);
+            push_back(ss, a);
+            for (size_t i = 1; i + 1 < len(*cum); i++) if (at(*cum, i) > a && at(*cum, i) < z) push_back(ss, at(*cum, i));
+            push_back(ss, z);
+            for (size_t k = 0; k < len(ss); k++) {
+                pt_along(px, py, cum, at(ss, k), &x, &y, &nx, &ny);
+                push_back(xs, x + nx * w / 2);
+                push_back(ys, y + ny * w / 2);
+                push_back(rx, x - nx * w / 2);
+                push_back(ry, y - ny * w / 2);
+            }
+            for (size_t k = len(rx); k-- > 0;) { push_back(xs, at(rx, k)); push_back(ys, at(ry, k)); }
+        }
+        pt_poly(c, &xs, &ys, col, acc);
+    }
+}
+
+/* a rounded border in dashes or dots (Blink's DrawDashedOrDottedBoxSideFromPath), its
+   centre line's rectangle cl (x0 y0 x1 y1) and radii cr. All four sides alike: the whole
+   centre line stroked as one closed path, as Blink's Path::AddRoundedRect makes it -- from
+   the left end of the top edge, clockwise. A side alone (side 0 to 3): its part of the
+   line, from the middle of the corner it starts at to the middle of the one it ends at */
+static void pt_round_side(amb_canvas *c, int side, int bs, uint32_t col, double w, const double *cl, const double *cr, vector<float> *acc) {
+    double cx[4] = { cl[0] + cr[0], cl[2] - cr[1], cl[2] - cr[2], cl[0] + cr[3] };
+    double cy[4] = { cl[1] + cr[4], cl[1] + cr[5], cl[3] - cr[6], cl[3] - cr[7] };
+    vector<double> px, py, cum;
+    if (side < 0) {
+        push_back(px, cl[0] + cr[0]);
+        push_back(py, cl[1]);
+        push_back(cum, 0.0);
+        pt_line_to(&px, &py, &cum, cl[2] - cr[1], cl[1]);
+        pt_arc(&px, &py, &cum, cx[1], cy[1], cr[1], cr[5], 1.5 * M_PI);
+        pt_line_to(&px, &py, &cum, cl[2], cl[3] - cr[6]);
+        pt_arc(&px, &py, &cum, cx[2], cy[2], cr[2], cr[6], 0);
+        pt_line_to(&px, &py, &cum, cl[0] + cr[3], cl[3]);
+        pt_arc(&px, &py, &cum, cx[3], cy[3], cr[3], cr[7], 0.5 * M_PI);
+        pt_line_to(&px, &py, &cum, cl[0], cl[1] + cr[4]);
+        pt_arc(&px, &py, &cum, cx[0], cy[0], cr[0], cr[4], M_PI);
+        pt_dash_path(c, &px, &py, &cum, bs, w, col, 1, acc);
+        return;
+    }
+    int ca = side, cb = (side + 1) % 4;
+    double ta = (1.25 + 0.5 * side) * M_PI, tm = ta + 0.25 * M_PI;
+    for (int i = 0; i <= 16; i++) {
+        int k = i <= 8 ? ca : cb;
+        double th = i <= 8 ? ta + (tm - ta) * i / 8.0 : tm + 0.25 * M_PI * (i - 8) / 8.0;
+        push_back(px, cx[k] + cr[k] * cos(th));
+        push_back(py, cy[k] + cr[k + 4] * sin(th));
+        if (i == 8) {
+            push_back(px, cx[cb] + cr[cb] * cos(tm));
+            push_back(py, cy[cb] + cr[cb + 4] * sin(tm));
+        }
+    }
+    push_back(cum, 0.0);
+    for (size_t k = 1; k < len(px); k++) {
+        double dx = at(px, k) - at(px, k - 1), dy = at(py, k) - at(py, k - 1);
+        push_back(cum, at(cum, k - 1) + sqrt(dx * dx + dy * dy));
+    }
+    pt_dash_path(c, &px, &py, &cum, bs, w, col, 0, acc);
 }
 
 /* ---- backgrounds: gradients and images, a layer at a time ---- */
@@ -649,9 +1107,13 @@ static void pt_blur(vector<float> *m, int w, int h, double sigma) {
     }
 }
 
-/* a box's outer shadows (box-shadow's value s): each, last first, its rounded border box
-   offset and spread, blurred, outside the box only */
-static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, double y0, double x1, double y1, const double *rad) {
+/* a box's shadows (box-shadow's value s), each, last first. The outer ones (inset 0): its
+   rounded border box offset and spread, blurred, outside the box only. The inset ones
+   (inset 1, drawn over the background): inside the padding box (bw: the border's widths,
+   top right bottom left; prad the padding box's radii), all of it but a hole -- the padding
+   box shrunk by the spread and moved by the offset -- blurred */
+static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, double y0, double x1, double y1, const double *rad,
+                           int want_inset, const double *bw, const double *prad) {
     vector<size_t> starts;
     size_t i = 0, a, ln;
     while (pt_layer(s, n, &i, &a, &ln)) { push_back(starts, a); push_back(starts, ln); }
@@ -668,11 +1130,44 @@ static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, do
             else if (nv < 4 && css_length_eval(t + pa, pl, 0, &x)) v[nv++] = x;
             else if (css_color_parse(t + pa, pl, &cc)) col = cc;
         }
-        if (inset || nv < 2 || (col & 0xff) == 0) continue;
+        if (inset != want_inset || nv < 2 || (col & 0xff) == 0) continue;
         double blur = v[2] > 0 ? v[2] : 0, spread = v[3];
+        if (inset) {
+            double px0 = x0 + bw[3], py0 = y0 + bw[0], px1 = x1 - bw[1], py1 = y1 - bw[2];
+            if (px1 <= px0 || py1 <= py0) continue;
+            double hx0 = px0 + v[0] + spread, hy0 = py0 + v[1] + spread, hx1 = px1 + v[0] - spread, hy1 = py1 + v[1] - spread;
+            double hr[8];
+            for (int k = 0; k < 8; k++) hr[k] = prad[k] > 0 ? fmax(0, prad[k] - spread) : 0;
+            int margin = (int)ceil(blur) + 2;
+            int mx0 = (int)floor(px0) - margin, my0 = (int)floor(py0) - margin;
+            int mw = (int)ceil(px1) + margin - mx0, mh = (int)ceil(py1) + margin - my0;
+            if (mw <= 0 || mh <= 0 || (double)mw * mh > 4e7) continue;
+            vector<float> m;
+            resize(&m, (size_t)mw * mh);
+            int hole = hx1 > hx0 && hy1 > hy0;
+            for (int y = 0; y < mh; y++)
+                for (int x = 0; x < mw; x++)
+                    m[(size_t)y * mw + x] = (float)(hole ? 1 - pt_rr_cover(mx0 + x + 0.5, my0 + y + 0.5, hx0, hy0, hx1, hy1, hr) : 1);
+            pt_blur(&m, mw, mh, blur / 2);
+            int kx0, ky0, kx1, ky1;
+            pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+            for (int y = 0; y < mh; y++) {
+                int Y = (int)floor(my0 + y - c->oy + 0.5);
+                if (Y < ky0 || Y >= ky1) continue;
+                for (int x = 0; x < mw; x++) {
+                    int X = mx0 + x;
+                    if (X < kx0 || X >= kx1) continue;
+                    double cov = at(m, (size_t)y * mw + x);
+                    if (cov <= 0) continue;
+                    double inside = pt_rr_cover(X + 0.5, my0 + y + 0.5, px0, py0, px1, py1, prad);
+                    if (inside > 0) pt_blend(c, X, Y, col, cov * inside);
+                }
+            }
+            continue;
+        }
         double sx0 = x0 + v[0] - spread, sy0 = y0 + v[1] - spread, sx1 = x1 + v[0] + spread, sy1 = y1 + v[1] + spread;
-        double sr[4];
-        for (int k = 0; k < 4; k++) sr[k] = rad[k] > 0 ? fmax(0, rad[k] + spread) : 0;
+        double sr[8];
+        for (int k = 0; k < 8; k++) sr[k] = rad[k] > 0 ? fmax(0, rad[k] + spread) : 0;
         int margin = (int)ceil(blur) + 2;
         int mx0 = (int)floor(sx0) - margin, my0 = (int)floor(sy0) - margin;
         int mw = (int)ceil(sx1) + margin - mx0, mh = (int)ceil(sy1) + margin - my0;
@@ -742,21 +1237,37 @@ static int pt_cached_image(const net_loader *nt, uint32_t r, vector<uint32_t> *i
 
 /* a box's background layers (background-image's value, last first): each tile placed by
    background-size, -position and -repeat in its padding box, drawn in its rounded border box */
+/* a box of b's a keyword names -- border-box, padding-box, content-box; another its border
+   box -- into a (x0, y0, x1, y1), and its corners' radii from the border box's rad, each
+   less what lies between (CSS Backgrounds 5.2) into r */
+static void pt_area(const layout_tree *t, uint32_t b, const char *w, size_t wn, const double *rad, double *a, double *r) {
+    layout_box x = t->box[b];
+    double dl = 0, dt = 0, dr = 0, db = 0;
+    if (pt_is(w, wn, "padding-box")) { dl = x.bl; dt = x.bt; dr = x.br; db = x.bb; }
+    else if (pt_is(w, wn, "content-box")) { dl = x.bl + x.pl; dt = x.bt + x.pt; dr = x.br + x.pr; db = x.bb + x.pb; }
+    a[0] = x.x - x.pl - x.bl + dl;
+    a[1] = x.y - x.pt - x.bt + dt;
+    a[2] = x.x + x.w + x.pr + x.br - dr;
+    a[3] = x.y + x.h + x.pb + x.bb - db;
+    r[0] = fmax(0, rad[0] - dl); r[1] = fmax(0, rad[1] - dr); r[2] = fmax(0, rad[2] - dr); r[3] = fmax(0, rad[3] - dl);
+    r[4] = fmax(0, rad[4] - dt); r[5] = fmax(0, rad[5] - dt); r[6] = fmax(0, rad[6] - db); r[7] = fmax(0, rad[7] - db);
+}
+
 static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
                       const double *rad) {
-    vector<char> img, pos, siz, rep;
+    vector<char> img, pos, siz, rep, org, clp;
     amb_span sp = t->box[b].bg_image;
     append_range(img, text_ptr(t, sp), sp.len);
+    sp = t->box[b].bg_origin;
+    append_range(org, text_ptr(t, sp), sp.len);
+    sp = t->box[b].bg_clip;
+    append_range(clp, text_ptr(t, sp), sp.len);
     sp = t->box[b].bg_pos;
     append_range(pos, text_ptr(t, sp), sp.len);
     sp = t->box[b].bg_size;
     append_range(siz, text_ptr(t, sp), sp.len);
     sp = t->box[b].bg_repeat;
     append_range(rep, text_ptr(t, sp), sp.len);
-    double bx0 = t->box[b].x - t->box[b].pl - t->box[b].bl, by0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
-    double bx1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br, by1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb;
-    double ax = t->box[b].x - t->box[b].pl, ay = t->box[b].y - t->box[b].pt;
-    double aw = t->box[b].w + t->box[b].pl + t->box[b].pr, ah = t->box[b].h + t->box[b].pt + t->box[b].pb;
     vector<size_t> layers;
     size_t i = 0, a, ln;
     while (pt_layer(data(img), len(img), &i, &a, &ln)) { push_back(layers, a); push_back(layers, ln); }
@@ -768,6 +1279,19 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         if (len(pos)) pt_nth(data(pos), len(pos), q - 1, &pa, &pl);
         if (len(siz)) pt_nth(data(siz), len(siz), q - 1, &sa, &sl);
         if (len(rep)) pt_nth(data(rep), len(rep), q - 1, &ra, &rl);
+        /* the layer's painting area (background-clip's box) and positioning area
+           (background-origin's: the padding box unless it says otherwise) */
+        size_t oa = 0, ol = 0, ca = 0, cl = 0;
+        if (len(org)) pt_nth(data(org), len(org), q - 1, &oa, &ol);
+        if (len(clp)) pt_nth(data(clp), len(clp), q - 1, &ca, &cl);
+        if (cl && pt_is(data(clp) + ca, cl, "text")) continue;          /* clipped to the text: not drawn */
+        double area[4], ar[8], clip[4], cr[8];
+        if (ol) pt_area(t, b, data(org) + oa, ol, rad, area, ar);
+        else pt_area(t, b, "padding-box", 11, rad, area, ar);
+        if (cl) pt_area(t, b, data(clp) + ca, cl, rad, clip, cr);
+        else pt_area(t, b, "border-box", 10, rad, clip, cr);
+        double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
+        double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
         const char *rp = data(rep) + ra;
         int rx = 1, ry = 1;
         if (rl && pt_is(rp, rl, "no-repeat")) { rx = 0; ry = 0; }
@@ -799,7 +1323,7 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
                     vector<uint8_t> tile;
                     append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
                     pt_image(c, &tile, iw, ih, tx, ty, tw, th);
-                } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, rad);
+                } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, cr);
                 if (!rx) break;
             }
             if (!ry) break;
@@ -816,17 +1340,38 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
     double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
-    double rad[4] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl };
+    double rad[8] = { t->box[b].rtl, t->box[b].rtr, t->box[b].rbr, t->box[b].rbl,
+                      t->box[b].rtlv, t->box[b].rtrv, t->box[b].rbrv, t->box[b].rblv };
     pt_fit_radii(bw, bh, rad);
-    int round = rad[0] > 0 || rad[1] > 0 || rad[2] > 0 || rad[3] > 0;
+    int round = pt_round(rad);
+    double bt = t->box[b].bt, br = t->box[b].br, bb = t->box[b].bb, bl = t->box[b].bl;
+    double bws[4] = { bt, br, bb, bl };
+    /* the padding box's radii: each less the border beside it (CSS Backgrounds 5.2) */
+    double prad[8] = { fmax(0, rad[0] - bl), fmax(0, rad[1] - br), fmax(0, rad[2] - br), fmax(0, rad[3] - bl),
+                       fmax(0, rad[4] - bt), fmax(0, rad[5] - bt), fmax(0, rad[6] - bb), fmax(0, rad[7] - bb) };
+    vector<char> sh;
     if (t->box[b].shadows.len) {
-        vector<char> sh;
         amb_span sp = t->box[b].shadows;
         append_range(sh, text_ptr(t, sp), sp.len);
-        pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad);
+        pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 0, bws, prad);
     }
-    if (b != skip_bg) pt_rrect(c, bx, by, bx + bw, by + bh, rad, t->box[b].background);
+    if (b != skip_bg && (t->box[b].background & 0xff)) {
+        /* the background colour, clipped by the bottom layer's background-clip (CSS
+           Backgrounds 3.7): the last of its list */
+        double ca[4], cr[8];
+        size_t cs = 0, cl = 0;
+        vector<char> clp;
+        amb_span cp = t->box[b].bg_clip;
+        append_range(clp, text_ptr(t, cp), cp.len);
+        if (len(clp)) pt_nth(data(clp), len(clp), 1u << 30, &cs, &cl);
+        if (!(cl && pt_is(data(clp) + cs, cl, "text"))) {
+            if (cl) pt_area(t, b, data(clp) + cs, cl, rad, ca, cr);
+            else pt_area(t, b, "border-box", 10, rad, ca, cr);
+            pt_rrect(c, ca[0], ca[1], ca[2], ca[3], cr, t->box[b].background);
+        }
+    }
     if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad);
+    if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
     if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;
@@ -834,14 +1379,13 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         else if ((t->box[b].background & 0xff) == 0 && t->box[b].bt + t->box[b].bl == 0)
             pt_fill(c, t->box[b].x, t->box[b].y, t->box[b].x + t->box[b].w, t->box[b].y + t->box[b].h, 0xe8e8e8ff);
     }
-    double bt = t->box[b].bt, br = t->box[b].br, bb = t->box[b].bb, bl = t->box[b].bl;
     int st0 = t->box[b].bst, st1 = t->box[b].bsr, st2 = t->box[b].bsb, st3 = t->box[b].bsl;
     int plain = (st0 == LAY_BS_SOLID || st0 <= LAY_BS_HIDDEN) && (st1 == LAY_BS_SOLID || st1 <= LAY_BS_HIDDEN) &&
                 (st2 == LAY_BS_SOLID || st2 <= LAY_BS_HIDDEN) && (st3 == LAY_BS_SOLID || st3 <= LAY_BS_HIDDEN);
     if (round && (bt > 0 || br > 0 || bb > 0 || bl > 0)) {
         /* a rounded border: the ring between the border box and the padding box, each
            pixel its side's colour (the sides meeting along the corners' diagonals) */
-        double ir[4] = { fmax(0, rad[0] - fmax(bt, bl)), fmax(0, rad[1] - fmax(bt, br)), fmax(0, rad[2] - fmax(bb, br)), fmax(0, rad[3] - fmax(bb, bl)) };
+        const double *ir = prad;
         double ix0 = bx + bl, iy0 = by + bt, ix1 = bx + bw - br, iy1 = by + bh - bb;
         int kx0, ky0, kx1, ky1;
         pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
@@ -860,20 +1404,48 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
                 if (dl < m) { side = 3; }
                 uint32_t colv = side == 0 ? t->box[b].bct : side == 1 ? t->box[b].bcr : side == 2 ? t->box[b].bcb : t->box[b].bcl;
                 int sty = side == 0 ? st0 : side == 1 ? st1 : side == 2 ? st2 : st3;
-                if (sty <= LAY_BS_HIDDEN) continue;
+                if (sty <= LAY_BS_HIDDEN || sty == LAY_BS_DASHED || sty == LAY_BS_DOTTED) continue;
                 pt_blend(c, x, y, pt_side_colour(colv, sty, side, 1), cov);
             }
+        /* the dashed and dotted sides, along the border's centre line: the four as one
+           path when they are alike */
+        double ws[4] = { bt, br, bb, bl };
+        int sts[4] = { st0, st1, st2, st3 };
+        uint32_t cols[4] = { t->box[b].bct, t->box[b].bcr, t->box[b].bcb, t->box[b].bcl };
+        vector<float> pacc;
+        int alike = (sts[0] == LAY_BS_DASHED || sts[0] == LAY_BS_DOTTED) && ws[0] > 0;
+        for (int s = 1; s < 4 && alike; s++) if (ws[s] != ws[0] || sts[s] != sts[0] || cols[s] != cols[0]) alike = 0;
+        if (alike) {
+            double hw = ws[0] / 2;
+            double clr[4] = { bx + hw, by + hw, bx + bw - hw, by + bh - hw };
+            double crr[8];
+            for (int k = 0; k < 8; k++) crr[k] = fmax(0, rad[k] - hw);
+            pt_round_side(c, -1, sts[0], cols[0], ws[0], clr, crr, &pacc);
+        }
+        for (int s = 0; s < 4 && !alike; s++) {
+            if (ws[s] <= 0 || (sts[s] != LAY_BS_DASHED && sts[s] != LAY_BS_DOTTED)) continue;
+            double hw = ws[s] / 2;
+            double clr[4] = { bx + hw, by + hw, bx + bw - hw, by + bh - hw };
+            double crr[8];
+            for (int k = 0; k < 8; k++) crr[k] = fmax(0, rad[k] - hw);
+            pt_round_side(c, s, sts[s], cols[s], ws[s], clr, crr, &pacc);
+        }
     } else if (plain) {
-        if (bt > 0) pt_fill(c, bx, by, bx + bw, by + bt, t->box[b].bct);
-        if (bb > 0) pt_fill(c, bx, by + bh - bb, bx + bw, by + bh, t->box[b].bcb);
-        if (bl > 0) pt_fill(c, bx, by, bx + bl, by + bh, t->box[b].bcl);
-        if (br > 0) pt_fill(c, bx + bw - br, by, bx + bw, by + bh, t->box[b].bcr);
+        /* the sides between the corners, each corner drawn once where two meet */
+        uint32_t ct = t->box[b].bct, cr = t->box[b].bcr, cb = t->box[b].bcb, cl = t->box[b].bcl;
+        if (bt > 0) pt_fill(c, bx + bl, by, bx + bw - br, by + bt, ct);
+        if (bb > 0) pt_fill(c, bx + bl, by + bh - bb, bx + bw - br, by + bh, cb);
+        if (bl > 0) pt_fill(c, bx, by + bt, bx + bl, by + bh - bb, cl);
+        if (br > 0) pt_fill(c, bx + bw - br, by + bt, bx + bw, by + bh - bb, cr);
+        pt_corner(c, bx, by, bx + bl, by + bt, 0, ct, cl);
+        pt_corner(c, bx + bw - br, by, bx + bw, by + bt, 1, ct, cr);
+        pt_corner(c, bx + bw - br, by + bh - bb, bx + bw, by + bh, 2, cb, cr);
+        pt_corner(c, bx, by + bh - bb, bx + bl, by + bh, 3, cb, cl);
     } else {
-        /* the styled sides: top and bottom across, left and right between them */
-        if (bt > 0) pt_side(c, bx, by, bx + bw, by + bt, 0, st0, t->box[b].bct);
-        if (bb > 0) pt_side(c, bx, by + bh - bb, bx + bw, by + bh, 2, st2, t->box[b].bcb);
-        if (bl > 0) pt_side(c, bx, by + bt, bx + bl, by + bh - bb, 3, st3, t->box[b].bcl);
-        if (br > 0) pt_side(c, bx + bw - br, by + bt, bx + bw, by + bh - bb, 1, st1, t->box[b].bcr);
+        double ws[4] = { bt, br, bb, bl };
+        int sts[4] = { st0, st1, st2, st3 };
+        uint32_t cols[4] = { t->box[b].bct, t->box[b].bcr, t->box[b].bcb, t->box[b].bcl };
+        pt_styled_sides(c, bx, by, bw, bh, ws, sts, cols);
     }
 }
 
@@ -884,12 +1456,11 @@ static void pt_outline(const layout_tree *t, uint32_t b, amb_canvas *c) {
     double o = t->box[b].ooffset;
     double x0 = t->box[b].x - t->box[b].pl - t->box[b].bl - o - w, y0 = t->box[b].y - t->box[b].pt - t->box[b].bt - o - w;
     double x1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br + o + w, y1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb + o + w;
-    int sty = t->box[b].ostyle;
-    uint32_t col = t->box[b].ocolor;
-    pt_side(c, x0, y0, x1, y0 + w, 0, sty, col);
-    pt_side(c, x0, y1 - w, x1, y1, 2, sty, col);
-    pt_side(c, x0, y0 + w, x0 + w, y1 - w, 3, sty, col);
-    pt_side(c, x1 - w, y0 + w, x1, y1 - w, 1, sty, col);
+    /* drawn as a border is, its four sides alike */
+    double ws[4] = { w, w, w, w };
+    int sts[4] = { t->box[b].ostyle, t->box[b].ostyle, t->box[b].ostyle, t->box[b].ostyle };
+    uint32_t cols[4] = { t->box[b].ocolor, t->box[b].ocolor, t->box[b].ocolor, t->box[b].ocolor };
+    pt_styled_sides(c, x0, y0, x1 - x0, y1 - y0, ws, sts, cols);
 }
 
 /* the face a fragment is drawn in: its built-in one, or its web font's as paint read it

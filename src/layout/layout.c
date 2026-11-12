@@ -213,7 +213,7 @@ typedef struct lay_ext {
        opacity, the cvals of the values kept as text (none: 0), the outline, the image */
     lay_len rad[4];
     double opacity, ow, ooffset;
-    uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres;
+    uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres, bgclip, bgorigin;
     int paints;                         /* any of these other than its initial value */
 } lay_ext;
 
@@ -521,7 +521,7 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     /* paint's: values that are text are kept when they are not their initial ones */
     for (int k = 0; k < 4; k++) {
         e->rad[k] = lay_len_at(st, c0 + CSS_PROP_BORDER_TOP_LEFT_RADIUS + k);
-        if (e->rad[k].unit != LAY_PX || e->rad[k].v != 0) e->paints = 1;
+        if (e->rad[k].unit != LAY_PX || e->rad[k].v != 0 || st->cval[e->rad[k].cv].unit == CSS_UNIT_TEXT) e->paints = 1;
     }
     e->opacity = st->cval[c0 + CSS_PROP_OPACITY].num;
     if (st->cval[c0 + CSS_PROP_OPACITY].unit != CSS_UNIT_NUMBER) e->opacity = 1;
@@ -532,10 +532,11 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->ocolor = st->cval[c0 + CSS_PROP_OUTLINE_COLOR].color;
     e->ooffset = st->cval[c0 + CSS_PROP_OUTLINE_OFFSET].num;
     if (e->ow > 0) e->paints = 1;
-    static const int text_props[8] = { CSS_PROP_BOX_SHADOW, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
-                                       CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_TEXT_SHADOW };
-    uint32_t got[8];
-    for (int k = 0; k < 8; k++) {
+    static const int text_props[10] = { CSS_PROP_BOX_SHADOW, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
+                                        CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_TEXT_SHADOW,
+                                        CSS_PROP_BACKGROUND_CLIP, CSS_PROP_BACKGROUND_ORIGIN };
+    uint32_t got[10];
+    for (int k = 0; k < 10; k++) {
         uint32_t c = c0 + (uint32_t)text_props[k];
         lay_word_of(st, c, w);
         int initial = st->cval[c].how == CSS_HOW_INITIAL || lay_w(w, "none");
@@ -549,7 +550,9 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->xform = got[5];
     e->xorigin = got[6];
     e->tshadow = got[7];
-    if (e->shadows || e->bgimg || e->xform || e->tshadow) e->paints = 1;
+    e->bgclip = got[8];
+    e->bgorigin = got[9];
+    if (e->shadows || e->bgimg || e->xform || e->tshadow || e->bgclip || e->bgorigin) e->paints = 1;
 }
 
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
@@ -2796,21 +2799,84 @@ static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c) {
     return text_add(t, data(v), len(v));
 }
 
-/* what paint reads of a box's style: its radii (against its border box's width), opacity,
-   shadows, backgrounds (the image layout_run fetched), transform and outline */
+/* one radius of text: a percentage as its negative (layout_run takes it of the box's
+   final border box: lay_radii), else px */
+static double lay_radius_part(const char *s, size_t n, double basis) {
+    double x;
+    if (n > 1 && s[n - 1] == '%') {
+        double p;
+        if (css_length_eval(s, n, 100, &p) && p > 0) return -p;
+        return 0;
+    }
+    if (!css_length_eval(s, n, basis, &x) || x < 0) return 0;
+    return x;
+}
+/* a corner's radii: one length (both), or the two of a value kept as text (horizontal,
+   vertical). A percentage, of the border box's width across and of its height down, is
+   kept as its negative until the box's size is final (lay_radii) */
+static void lay_radius(const css_style *st, lay_len l, double bw, double bh, double *h, double *v) {
+    if (l.cv && st->cval[l.cv].unit == CSS_UNIT_TEXT) {
+        vector<char> tx;
+        amb_span sp = st->cval[l.cv].text;
+        append_range(tx, text_ptr(st, sp), sp.len);
+        size_t i = 0, a0 = 0, n0 = 0, a1 = 0, n1 = 0;
+        *h = 0;
+        *v = 0;
+        if (!css_next_part(data(tx), len(tx), &i, &a0, &n0) || !css_next_part(data(tx), len(tx), &i, &a1, &n1)) return;
+        *h = lay_radius_part(data(tx) + a0, n0, bw);
+        *v = lay_radius_part(data(tx) + a1, n1, bh);
+        return;
+    }
+    if (l.unit == LAY_PCT) { *h = l.v > 0 ? -l.v : 0; *v = *h; return; }
+    *h = lay_res(st, l, bw);
+    *v = l.unit == LAY_CALC || l.unit == LAY_EXPR ? lay_res(st, l, bh) : *h;
+}
+
+/* the radii kept as percentages taken of each box's final border box */
+static void lay_radii(layout_tree *t) {
+    for (uint32_t b = 1; b < t->box_len; b++) {
+        if (!t->box[b].live) continue;
+        layout_box x = t->box[b];
+        if (x.rtl >= 0 && x.rtr >= 0 && x.rbr >= 0 && x.rbl >= 0 && x.rtlv >= 0 && x.rtrv >= 0 && x.rbrv >= 0 && x.rblv >= 0) continue;
+        double bw = x.w + x.pl + x.pr + x.bl + x.br, bh = x.h + x.pt + x.pb + x.bt + x.bb;
+        if (x.rtl < 0) t->box[b].rtl = -x.rtl * bw / 100;
+        if (x.rtr < 0) t->box[b].rtr = -x.rtr * bw / 100;
+        if (x.rbr < 0) t->box[b].rbr = -x.rbr * bw / 100;
+        if (x.rbl < 0) t->box[b].rbl = -x.rbl * bw / 100;
+        if (x.rtlv < 0) t->box[b].rtlv = -x.rtlv * bh / 100;
+        if (x.rtrv < 0) t->box[b].rtrv = -x.rtrv * bh / 100;
+        if (x.rbrv < 0) t->box[b].rbrv = -x.rbrv * bh / 100;
+        if (x.rblv < 0) t->box[b].rblv = -x.rblv * bh / 100;
+    }
+}
+
+/* what paint reads of a box's style: its radii, opacity, shadows, backgrounds (the image
+   layout_run fetched), transform and outline */
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     lay_ext e = at(*xc, si);
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
-    t->box[b].rtl = lay_res(st, e.rad[0], bw);
-    t->box[b].rtr = lay_res(st, e.rad[1], bw);
-    t->box[b].rbr = lay_res(st, e.rad[2], bw);
-    t->box[b].rbl = lay_res(st, e.rad[3], bw);
+    double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
+    double rh, rv;
+    lay_radius(st, e.rad[0], bw, bh, &rh, &rv);
+    t->box[b].rtl = rh;
+    t->box[b].rtlv = rv;
+    lay_radius(st, e.rad[1], bw, bh, &rh, &rv);
+    t->box[b].rtr = rh;
+    t->box[b].rtrv = rv;
+    lay_radius(st, e.rad[2], bw, bh, &rh, &rv);
+    t->box[b].rbr = rh;
+    t->box[b].rbrv = rv;
+    lay_radius(st, e.rad[3], bw, bh, &rh, &rv);
+    t->box[b].rbl = rh;
+    t->box[b].rblv = rv;
     t->box[b].opacity = e.opacity;
     t->box[b].shadows = lay_kept(t, st, e.shadows);
     t->box[b].bg_image = lay_kept(t, st, e.bgimg);
     t->box[b].bg_pos = lay_kept(t, st, e.bgpos);
     t->box[b].bg_size = lay_kept(t, st, e.bgsize);
     t->box[b].bg_repeat = lay_kept(t, st, e.bgrepeat);
+    t->box[b].bg_clip = lay_kept(t, st, e.bgclip);
+    t->box[b].bg_origin = lay_kept(t, st, e.bgorigin);
     t->box[b].transform = lay_kept(t, st, e.xform);
     t->box[b].origin = lay_kept(t, st, e.xorigin);
     if (e.bgres) t->box[b].bg_res = resource_handle(nt, e.bgres);
@@ -4230,6 +4296,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (bottom > height) t->box[vp].h = bottom;
     }
     lay_absolute(t, vp, 0, 0);
+    lay_radii(t);
     t->revision++;
     return LAYOUT_OK;
 }
