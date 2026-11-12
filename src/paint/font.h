@@ -96,6 +96,10 @@ typedef struct amb_face {
     uint8_t slope;                            /* its outlines are italic or oblique: no slant is made for them */
     uint8_t style;                            /* a built-in face: the style it stands for, 1 bold | 2 italic */
     uint16_t ascii[128];                      /* each ASCII code point's index in glyphs from first; 0xffff none */
+    /* its layout tables (GSUB, GPOS, GDEF), its advances (hmtx, so many) and kern table, from
+       base; a colour bitmap font's strike (CBLC's record); an id of its font's own (its table
+       directory's checksums), by which shaping keeps its plans */
+    uint32_t gsub, gpos, gdef, hmtx, nhm, kern, kern_len, strike, id;
 } amb_face;
 
 /* a page's fonts: the built-in and system faces (whose tables font.c reads once a
@@ -156,9 +160,36 @@ uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by);
 double amb_advance(const amb_fonts *f, int face, uint32_t cp, double size);
 double amb_kerning(const amb_fonts *f, int face, uint32_t left, uint32_t right, double size);
 
-/* the width of UTF-8 text at a size, in px: its advances and its pairs' kerning, as
-   amb_advance and amb_kerning have them */
+/* the width of UTF-8 text at a size, in px: its glyphs' advances as amb_shape gives them (left
+   to right, ligatures and kerning on) */
 double amb_text_width(const amb_fonts *f, int face, double size, const char *s, size_t n);
+
+/* a glyph a run is drawn with (amb_shape): its glyph in the face that draws it, the byte of the
+   text its cluster begins at, its advance and offset from the pen (y up), in that face's units
+   (amb_face_scale makes them px); AMB_SHAPED_HIDDEN for a default ignorable, which draws
+   nothing */
+typedef struct amb_shaped { uint32_t gid, cluster; int32_t ax, dx, dy; uint16_t face, flags; } amb_shaped;
+enum { AMB_SHAPED_HIDDEN = 1 };
+/* how a run is shaped: right to left (its bidi level odd; the glyphs then given in visual
+   order), ligatures off (liga, clig and calt: letter-spacing, as Blink has it), kerning off */
+enum { AMB_SHAPE_RTL = 1, AMB_SHAPE_NOLIGA = 4, AMB_SHAPE_NOKERN = 8 };
+
+/* UTF-8 text s[from, to) shaped in a face as Chromium shapes it (Blink's run segmenter and
+   font fallback, HarfBuzz's normalizer and its OpenType shapers: src/paint/shape.c), the
+   text before from and after to its context (Arabic joining across an element's edge): its
+   glyphs appended to out, left to right. Each grapheme cluster is drawn by one face: the
+   first of the face's fallbacks (font.h) that has every code point of it (or its canonical
+   decomposition); a system font found for the first code point the face's own fallbacks
+   leave undrawn (Blink's hint) draws every other one it can. The faces' runs are shaped by
+   their GSUB and GPOS (or kern table) for their scripts */
+void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t from, size_t to, int flags, vector<amb_shaped> *out);
+
+/* a face's units at a size, in px (size over its units per em) */
+double amb_face_scale(const amb_fonts *f, int face, double size);
+
+/* whether a face's text is italic by the face (a built-in italic style), which slants the
+   glyphs a face with no italic outlines draws */
+int amb_face_italic(int face);
 
 /* the faces other than face that draw some of UTF-8 text's code points (its fallbacks),
    whose line metrics layout takes for its line: a mask, bit k for face k below AMB_NFACES
@@ -176,6 +207,10 @@ uint32_t amb_utf8_next(const char *s, size_t n, size_t *i);
    rasterizer's scratch. 0 when the glyph draws nothing (a space). */
 int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, double dx, int italic,
                    vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
+/* the same of glyph gid of the face that draws it (amb_shape's), slanted when slant asks and
+   the face's outlines are upright */
+int amb_glyph_mask_id(const amb_fonts *f, int face, uint32_t gid, double size, double dx, int slant,
+                      vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
 
 /* the outline of the glyph of cp at a size (its fallback face's when the face has none), its
    pen at the origin on the baseline, y down, slanted as amb_glyph_mask slants it: path
@@ -183,5 +218,7 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
    points (src/paint/svg.c's, which fills and strokes them under any matrix). 0 when it
    draws nothing */
 int amb_glyph_path(const amb_fonts *f, int face, uint32_t cp, double size, int italic, vector<double> *out);
+/* the same of glyph gid of the face that draws it */
+int amb_glyph_path_id(const amb_fonts *f, int face, uint32_t gid, double size, int slant, vector<double> *out);
 
 #endif
