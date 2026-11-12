@@ -940,8 +940,9 @@ be built side by side and merged without touching each other's.
   Gate: `tests/pages/svg-pattern.html`, `svg-marker.html`, `svg-mask.html`,
   `svg-filter.html`, `svg-embed.html`, `svg-textpath.html`, `svg-props.html` and
   `svg-boxes.html`, each held to Chromium's screenshot region by region
-  (`tests/integ/paintref.sh`: 34, 29, 33, 42, 14, 19, 17 and 23 regions agree); 12o's
-  pages unmoved (37, 40, 9, 11 and 9);
+  (`tests/integ/paintref.sh`: 34, 29, 33, 42, 14, 19, 17 and 23 regions agree), and
+  `svg-zoom2.html`, each kind drawn again at a zoom of 1.5 (17 of 17); 12o's pages
+  unmoved (37, 40, 9, 11 and 9);
   `tests/exec/svg_render` (scenes of each, a pattern's tile, a mask, a filter and a
   hairline drawn, documents of patterns, masks and markers of themselves and of filters
   and text past every bound; valgrind clean).

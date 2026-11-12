@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG zoomed: patterns, markers, masks, filters, images, text on paths</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <pattern id="ph" patternUnits="userSpaceOnUse" width="8" height="8"><rect width="4" height="4" fill="#d07000"/><rect x="4" y="4" width="4" height="4" fill="#0070d0"/></pattern>
+    <pattern id="pc" width="0.5" height="0.5" patternContentUnits="objectBoundingBox"><circle cx="0.25" cy="0.25" r="0.2" fill="#30a030"/></pattern>
+    <marker id="ms" markerWidth="10" markerHeight="10" refX="0" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0 L10 5 L0 10 z" fill="#d02020"/></marker>
+    <marker id="mm" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#20a020"/></marker>
+    <mask id="k1"><circle cx="50" cy="50" r="35" fill="#fff"/><circle cx="50" cy="50" r="15" fill="#888"/></mask>
+    <filter id="f1" x="-20%" y="-20%" width="150%" height="150%"><feDropShadow dx="4" dy="4" stdDeviation="2" flood-color="#402000"/></filter>
+    <filter id="f2"><feGaussianBlur stdDeviation="3"/></filter>
+    <path id="arc" d="M 10 80 Q 50 0 90 80"/>
+  </defs>
+</svg>
+<svg id="z-pattern" style="left:5px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="45" fill="url(#ph)"/><rect x="10" y="50" width="80" height="45" fill="url(#pc)"/></svg>
+<svg id="z-marker" style="left:117px;top:5px" width="100" height="100"><polyline points="10,80 40,20 70,70 90,30" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#ms)"/></svg>
+<svg id="z-mask" style="left:229px;top:5px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#c02020" mask="url(#k1)"/></svg>
+<svg id="z-filter" style="left:341px;top:5px" width="100" height="100"><circle cx="45" cy="45" r="30" fill="#40c040" filter="url(#f1)"/></svg>
+<svg id="z-blur" style="left:5px;top:117px" width="100" height="100"><rect x="20" y="20" width="30" height="60" fill="#e02020" filter="url(#f2)"/><rect x="50" y="20" width="30" height="60" fill="#20e020" filter="url(#f2)"/></svg>
+<svg id="z-image" style="left:117px;top:117px" width="100" height="100"><image href="logo.png" x="2" y="10" width="96" height="32"/><image href="svg-badge.svg" x="10" y="50" width="80" height="40"/></svg>
+<svg id="z-textpath" style="left:229px;top:117px" width="100" height="100"><text font-size="14"><textPath href="#arc">on a curve here</textPath></text></svg>
+<svg id="z-hair" style="left:341px;top:117px" width="100" height="100"><path d="M50 10 L90 50 L50 90 L10 50 Z" fill="none" stroke="#000" stroke-width="0.6"/><text x="20" y="55" font-size="16" stroke="#204080" fill="#e0e0f0" transform="rotate(-15 50 50)">Zoom</text></svg>
+</body>
+</html>
