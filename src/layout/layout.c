@@ -115,6 +115,7 @@ amb_implementation(layout);
 #include "../css/css.h"
 #include "layout.h"
 #include "hyph_data.h"
+#include "../net/url.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run */
@@ -201,12 +202,18 @@ enum { LX_FLOW, LX_FLEX, LX_GRID };
 enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND, AJ_EVENLY, AJ_BASELINE, AJ_AUTO };
 
 typedef struct lay_ext {
-    uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto;
+    uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto, ostyle;
     int32_t z, order;
     lay_len off[4];                     /* top, right, bottom, left */
     lay_len minw, minh, maxh, hraw, valen, basis, rgap, cgap;   /* hraw: height as declared, a percentage kept */
     double grow, shrink;
     uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre;    /* the grid's values, kept as text: their cvals */
+    /* what paint reads: the corners' radii (a percentage of the border box's width), the
+       opacity, the cvals of the values kept as text (none: 0), the outline, the image */
+    lay_len rad[4];
+    double opacity, ow, ooffset;
+    uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres;
+    int paints;                         /* any of these other than its initial value */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -508,6 +515,38 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->gce = c0 + CSS_PROP_GRID_COLUMN_END;
     e->grs = c0 + CSS_PROP_GRID_ROW_START;
     e->gre = c0 + CSS_PROP_GRID_ROW_END;
+    /* paint's: values that are text are kept when they are not their initial ones */
+    for (int k = 0; k < 4; k++) {
+        e->rad[k] = lay_len_at(st, c0 + CSS_PROP_BORDER_TOP_LEFT_RADIUS + k);
+        if (e->rad[k].unit != LAY_PX || e->rad[k].v != 0) e->paints = 1;
+    }
+    e->opacity = st->cval[c0 + CSS_PROP_OPACITY].num;
+    if (st->cval[c0 + CSS_PROP_OPACITY].unit != CSS_UNIT_NUMBER) e->opacity = 1;
+    if (e->opacity < 1) e->paints = 1;
+    lay_word_of(st, c0 + CSS_PROP_OUTLINE_STYLE, w);
+    e->ostyle = (uint8_t)(lay_w(w, "auto") ? LAY_BS_SOLID : lay_border_style(w));
+    e->ow = e->ostyle > LAY_BS_HIDDEN ? st->cval[c0 + CSS_PROP_OUTLINE_WIDTH].num : 0;
+    e->ocolor = st->cval[c0 + CSS_PROP_OUTLINE_COLOR].color;
+    e->ooffset = st->cval[c0 + CSS_PROP_OUTLINE_OFFSET].num;
+    if (e->ow > 0) e->paints = 1;
+    static const int text_props[8] = { CSS_PROP_BOX_SHADOW, CSS_PROP_BACKGROUND_IMAGE, CSS_PROP_BACKGROUND_POSITION, CSS_PROP_BACKGROUND_SIZE,
+                                       CSS_PROP_BACKGROUND_REPEAT, CSS_PROP_TRANSFORM, CSS_PROP_TRANSFORM_ORIGIN, CSS_PROP_TEXT_SHADOW };
+    uint32_t got[8];
+    for (int k = 0; k < 8; k++) {
+        uint32_t c = c0 + (uint32_t)text_props[k];
+        lay_word_of(st, c, w);
+        int initial = st->cval[c].how == CSS_HOW_INITIAL || lay_w(w, "none");
+        got[k] = initial ? 0 : c;
+    }
+    e->shadows = got[0];
+    e->bgimg = got[1];
+    e->bgpos = got[2];
+    e->bgsize = got[3];
+    e->bgrepeat = got[4];
+    e->xform = got[5];
+    e->xorigin = got[6];
+    e->tshadow = got[7];
+    if (e->shadows || e->bgimg || e->xform || e->tshadow) e->paints = 1;
 }
 
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
@@ -1153,6 +1192,7 @@ static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) 
 static uint32_t lay_new_box(LCTX, uint32_t parent, uint32_t el, layout_box_kind kind) {
     layout_box_h h = box_new(t);
     t->box[h.index].kind = kind;
+    t->box[h.index].opacity = 1;
     if (el & LAY_GEN) {
         /* a pseudo-element's box: its element's, and which pseudo-element */
         lay_gen g = at(*gx, el & LAY_GIDX);
@@ -1256,6 +1296,8 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
 static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, lay_mc *et, lay_mc *eb,
                               int *empty);
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
+static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
+static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
 static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh);
 static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh);
 
@@ -1690,6 +1732,10 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].italic = p.italic;
         t->frag[fr].color = p.color;
         t->frag[fr].decoration = p.deco;
+        if (p.elem) {
+            uint32_t ts = LAY_X(p.elem).tshadow;
+            if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
+        }
         frags_append(t, ln, fr);
         k = r;
     }
@@ -2680,6 +2726,41 @@ static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height
         *empty = 0;
     }
 }
+/* a value kept as text, its cval c's, into the tree's pool: the span paint reads (empty for 0) */
+static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c) {
+    amb_span none;
+    memset(&none, 0, sizeof none);
+    if (!c) return none;
+    vector<char> v;
+    amb_span sp = st->cval[c].text;
+    append_range(v, text_ptr(st, sp), sp.len);
+    return text_add(t, data(v), len(v));
+}
+
+/* what paint reads of a box's style: its radii (against its border box's width), opacity,
+   shadows, backgrounds (the image layout_run fetched), transform and outline */
+static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
+    lay_ext e = at(*xc, si);
+    double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
+    t->box[b].rtl = lay_res(st, e.rad[0], bw);
+    t->box[b].rtr = lay_res(st, e.rad[1], bw);
+    t->box[b].rbr = lay_res(st, e.rad[2], bw);
+    t->box[b].rbl = lay_res(st, e.rad[3], bw);
+    t->box[b].opacity = e.opacity;
+    t->box[b].shadows = lay_kept(t, st, e.shadows);
+    t->box[b].bg_image = lay_kept(t, st, e.bgimg);
+    t->box[b].bg_pos = lay_kept(t, st, e.bgpos);
+    t->box[b].bg_size = lay_kept(t, st, e.bgsize);
+    t->box[b].bg_repeat = lay_kept(t, st, e.bgrepeat);
+    t->box[b].transform = lay_kept(t, st, e.xform);
+    t->box[b].origin = lay_kept(t, st, e.xorigin);
+    if (e.bgres) t->box[b].bg_res = resource_handle(nt, e.bgres);
+    t->box[b].ow = e.ow;
+    t->box[b].ostyle = e.ostyle;
+    t->box[b].ocolor = e.ocolor;
+    t->box[b].ooffset = e.ooffset;
+}
+
 /* what a box's style says of it besides its geometry: how it is positioned (a relative
    one's offset), its stacking and its clipping */
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
@@ -2690,6 +2771,7 @@ static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
     t->box[b].z_auto = pos == POS_STATIC || at(*xc, si).zauto;
     t->box[b].z = t->box[b].z_auto ? 0 : at(*xc, si).z;
     t->box[b].clip = at(*xc, si).clip;
+    if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
     if (pos == POS_RELATIVE) {
         double dx, dy;
         lay_ext e = at(*xc, si);
@@ -3901,6 +3983,51 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
     }
 }
 
+/* the image a background-image's first url() names (its cval c), fetched through the
+   loader (once a URL: a resource fetched before is the one): its resource, 0 for none */
+static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c) {
+    vector<char> v;
+    amb_span sp = st->cval[c].text;
+    append_range(v, text_ptr(st, sp), sp.len);
+    push_back(v, 0);
+    const char *u = strstr(data(v), "url(");
+    if (!u) return 0;
+    size_t i = (size_t)(u - data(v)) + 4, n = len(v) - 1;
+    while (i < n && (data(v)[i] == ' ' || data(v)[i] == '"' || data(v)[i] == '\'')) i++;
+    size_t e = i;
+    while (e < n && data(v)[e] != ')' && data(v)[e] != '"' && data(v)[e] != '\'') e++;
+    if (e == i || e - i > 2000) return 0;
+    char ref[2048];
+    memcpy(ref, data(v) + i, e - i);
+    ref[e - i] = 0;
+    /* the base: the declaration's sheet's URL, or the page's */
+    char base[2048];
+    base[0] = 0;
+    uint32_t dcl = st->cval[c].winner;
+    if (dcl && dcl < st->decl_len) {
+        uint32_t ru = st->decl[dcl].rule;
+        uint32_t sh = ru && ru < st->rule_len ? st->rule[ru].sheet : 0;
+        if (sh && sh < st->sheet_len && st->sheet[sh].url.len && st->sheet[sh].url.len < sizeof base) {
+            amb_span su = st->sheet[sh].url;
+            memcpy(base, text_ptr(st, su), su.len);
+            base[su.len] = 0;
+        }
+    }
+    for (uint32_t r = 1; r < net->resource_len && !base[0]; r++)
+        if (net->resource[r].live && net->resource[r].kind == NET_KIND_DOCUMENT) {
+            amb_span fu = net->resource[r].final_url.len ? net->resource[r].final_url : net->resource[r].url;
+            if (fu.len < sizeof base) { memcpy(base, text_ptr(net, fu), fu.len); base[fu.len] = 0; }
+        }
+    char abs_url[4096];
+    if (!base[0] || !net_url_resolve(base, ref, abs_url, sizeof abs_url)) return 0;
+    size_t al = strlen(abs_url);
+    for (uint32_t r = 1; r < net->resource_len; r++)
+        if (net->resource[r].live && net->resource[r].kind == NET_KIND_IMAGE && net->resource[r].url.len == al &&
+            memcmp(text_ptr(net, net->resource[r].url), abs_url, al) == 0) return r;
+    net_resource_h h = net_fetch(net, abs_url, al, NET_KIND_IMAGE);
+    return h.index;
+}
+
 /* ---- page coordinates ---- */
 
 static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy) {
@@ -3991,6 +4118,15 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     }
     vector<lay_abs> abs;
     vector<lay_flt> flts;
+    /* the images the styles' backgrounds name: each url() (the first of its layers)
+       resolved against the sheet its declaration is in (the page for one of its own) and
+       fetched once */
+    for (size_t k = 0; k < len(exts) && net; k++) {
+        uint32_t c = at(exts, k).bgimg;
+        if (!c) continue;
+        uint32_t res = lay_fetch_image(style, net, c);
+        exts[k].bgres = res;
+    }
     /* the text of each ::before and ::after, in tree order */
     if (len(gens) && doc->node_len > 1) {
         vector<lay_ctr> ctr;

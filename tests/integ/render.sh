@@ -8,7 +8,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-render.XXXXXX")
 export AMB_WORK=$work
 amb() { sh "$AMB_ROOT/bin/ambitious" "$@"; }
-for p in news style layout values atrules selectors floats position sizing flex grid text; do
+for p in news style layout values atrules selectors floats position sizing flex grid text paint; do
   printf '%s: ' "$p"
   amb render "$AMB_ROOT/tests/pages/$p.html" "$work/$p.png"
 done

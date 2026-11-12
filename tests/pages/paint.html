@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><title>Paint</title>
+<style>
+/* tests/pages/paint.html -- what paint draws of a box's style: border styles, rounded
+   corners, gradients and a background image (its size, position and repeat), box and
+   text shadows with blur, opacity, transforms, clipping, z-index's stacking order and
+   outlines; tests/golden/render/paint.png is how Ambitious draws it */
+body { font-family: 'DejaVu Sans'; font-size: 14px; margin: 8px; background: #fff; }
+.row { display: flex; gap: 12px; margin-bottom: 14px; }
+.b { width: 70px; height: 40px; border: 6px #48c; padding: 2px; font-size: 11px; }
+.round { width: 120px; height: 60px; background: #fe9; border: 4px solid #c60; border-radius: 16px; }
+.pill { width: 120px; height: 40px; background: #9cf; border-radius: 20px; }
+.lin { width: 160px; height: 60px; background: linear-gradient(to right, #f00, #ff0 50%, #0a0); }
+.ang { width: 160px; height: 60px; background: linear-gradient(135deg, #36c, rgba(255,255,255,0)), #fc6; }
+.rad { width: 120px; height: 60px; background: radial-gradient(circle at 30% 40%, #fff, #33c 70%); }
+.img { width: 160px; height: 60px; border: 1px solid #888; background: url(logo.png) no-repeat center / contain, #eef; }
+.tile { width: 160px; height: 60px; background-image: url(logo.png); background-size: 24px 24px; background-repeat: repeat-x; }
+.shadow { width: 100px; height: 50px; background: #fff; box-shadow: 4px 6px 8px rgba(0,0,0,.5); border-radius: 8px; }
+.spread { width: 100px; height: 50px; background: #dfd; box-shadow: 0 0 0 4px #393, 6px 6px 0 6px #aca; }
+.tsh { font-size: 26px; font-weight: bold; color: #c33; text-shadow: 2px 2px 0 #fc9, 4px 4px 6px #333; }
+.op { width: 100px; height: 50px; background: #c3c; opacity: .4; }
+.rot { width: 80px; height: 40px; background: #3cc; transform: rotate(15deg); }
+.sc { width: 80px; height: 40px; background: #c93; transform: translate(10px, 5px) scale(1.2, .8); transform-origin: left top; }
+.clip { width: 120px; height: 50px; overflow: hidden; background: #eee; position: relative; }
+.clip div { width: 200px; height: 80px; background: #f96; }
+.stack { position: relative; width: 160px; height: 70px; background: #ddd; }
+.stack .p { position: absolute; width: 60px; height: 40px; }
+.z1 { left: 10px; top: 10px; background: #e55; z-index: 2; }
+.z2 { left: 40px; top: 20px; background: #55e; z-index: 1; }
+.zneg { left: 70px; top: 5px; background: #5e5; z-index: -1; }
+.ol { width: 80px; height: 30px; background: #ffd; outline: 3px dashed #c00; outline-offset: 4px; margin: 8px; }
+</style></head>
+<body>
+<div class=row>
+  <div class=b style="border-style: solid">solid</div><div class=b style="border-style: dotted">dotted</div>
+  <div class=b style="border-style: dashed">dashed</div><div class=b style="border-style: double">double</div>
+  <div class=b style="border-style: groove">groove</div><div class=b style="border-style: ridge">ridge</div>
+  <div class=b style="border-style: inset">inset</div><div class=b style="border-style: outset">outset</div>
+</div>
+<div class=row><div class=round></div><div class=pill></div><div class=lin></div><div class=ang></div><div class=rad></div></div>
+<div class=row><div class=img></div><div class=tile></div><div class=shadow></div><div class=spread></div></div>
+<div class=row><div class=tsh>Shadowed</div><div class=op></div><div class=rot></div><div class=sc></div></div>
+<div class=row><div class=clip><div></div></div><div class=stack><div class="p z1"></div><div class="p z2"></div><div class="p zneg"></div></div><div class=ol></div></div>
+</body></html>

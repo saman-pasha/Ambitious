@@ -1,7 +1,7 @@
 news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:f82fd0ba47e7bf6b
 style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
-layout: rendered 800x605: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:abd30e6b81ae1595
-values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:f860a8aab2f8ae18
+layout: rendered 800x605: 32 boxes, 27 lines, 66 text fragments; pixels fnv1a64:9f46d443472e0701
+values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:584f4bcf427af34b
 atrules: rendered 800x600: 9 boxes, 6 lines, 6 text fragments; pixels fnv1a64:c250b6acdc3d4715
 selectors: rendered 800x726: 38 boxes, 30 lines, 27 text fragments; pixels fnv1a64:c1a3f75db3f48041
 floats: rendered 800x600: 24 boxes, 10 lines, 10 text fragments; pixels fnv1a64:5b971eed3df5253d
@@ -10,6 +10,7 @@ sizing: rendered 800x600: 34 boxes, 21 lines, 30 text fragments; pixels fnv1a64:
 flex: rendered 800x674: 47 boxes, 32 lines, 33 text fragments; pixels fnv1a64:120ceb4a70cdc1aa
 grid: rendered 800x600: 34 boxes, 25 lines, 25 text fragments; pixels fnv1a64:8d58df17b6897c1d
 text: rendered 800x600: 9 boxes, 15 lines, 20 text fragments; pixels fnv1a64:edf19a5c4948ccb5
+paint: rendered 800x600: 36 boxes, 9 lines, 9 text fragments; pixels fnv1a64:37d106dc73322829
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
