@@ -68,7 +68,11 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
 #define NF_REST 16
 #define NF_EVAL 32         /* a call of eval by its name: a direct eval, s its site's scope */
 
-typedef struct jn { uint16_t k, op; uint32_t a, b, c, d, line, s; double num; } jn;
+/* pos and, where a node keeps it there, d: the source of an expression an error names
+   (src/js/js.h's js_site): a call's callee, new's, a spread's operand (N_SPREAD), a
+   for-of's value (N_FORIN), a declaration's initializer (N_DECL), an assignment's value
+   (N_ASSIGN), from pos to d */
+typedef struct jn { uint16_t k, op; uint32_t a, b, c, d, line, s, pos; double num; } jn;
 
 /* SC_EVAL: an eval's top-level lexical scope, its var and function declarations hoisted
    past it to the scope beneath */
@@ -128,6 +132,12 @@ typedef struct js_cc {
     uint32_t default_atom;            /* a module's default export's binding */
     uint32_t exporting, tla;          /* an export's declaration being read; a module's top-level await */
     uint32_t completion;              /* an eval's completion value: its slot in function 0, plus one */
+    uint32_t src_base;                /* where the source will be in vm->src (its sites' offsets are from there) */
+    /* how the pattern gen_pattern begins next names its value in V8's errors (pat_name) */
+    uint32_t pat_okind, pat_akind, pat_start, pat_end;
+    /* the call a for-of, an array's spread, an array pattern or a yield* iterates (its
+       node), whose own error V8 words as the iteration's (iter_kind: JSS_ flags) */
+    uint32_t iter_call, iter_kind;
     uint32_t kw[KW_N];
     uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
     int err;
@@ -339,11 +349,15 @@ static void lx(CC) {
             char nb[400];
             uint32_t k = 0;
             int legacy_octal = c == '0' && i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '7';
+            int dot = 0, expo = 0;
             while (i < srcn && k + 2 < sizeof nb) {
                 char d = src[i];
                 if (d == '_') { i++; continue; }
-                if ((d >= '0' && d <= '9') || d == '.') { nb[k++] = d; i++; continue; }
-                if ((d == 'e' || d == 'E') && !legacy_octal) {
+                if (d >= '0' && d <= '9') { nb[k++] = d; i++; continue; }
+                /* one point, before any exponent: 5..toString() is 5. then a member */
+                if (d == '.' && !dot && !expo) { dot = 1; nb[k++] = d; i++; continue; }
+                if ((d == 'e' || d == 'E') && !legacy_octal && !expo) {
+                    expo = 1;
                     nb[k++] = d;
                     i++;
                     if (i < srcn && (src[i] == '+' || src[i] == '-')) nb[k++] = src[i++];
@@ -496,6 +510,9 @@ static void lx_regex(CC, uint32_t start) {
 /* ---- the parser ---- */
 
 static int is_p(js_cc *cc, uint32_t op) { return cc->tok.type == T_PUNCT && cc->tok.op == op; }
+/* where the current token's text begins: a template's at its backquote (its token's start
+   is after it) */
+static uint32_t tok_start(js_cc *cc) { return cc->tok.type == T_TEMPLATE && cc->tok.start ? cc->tok.start - 1 : cc->tok.start; }
 static int is_kw(js_cc *cc, uint32_t k) { return cc->tok.type == T_NAME && cc->tok.str == cc->kw[k] && !cc->tok.aux; }
 
 static void expect_p(CC, uint32_t op, const char *what) {
@@ -630,6 +647,11 @@ static uint32_t p_unary_in(CC);
 static uint32_t p_call(CC);
 
 static int is_name_tok(js_cc *cc) { return cc->tok.type == T_NAME; }
+
+/* a getter's or a setter's name, as SetFunctionName gives it: "get x" */
+static uint32_t accessor_name(js_vm *vm, uint32_t kind, uint32_t key) {
+    return js_atom(vm, js_str_concat(vm, js_str_ascii(vm, kind == PK_GET ? "get " : "set "), key));
+}
 
 /* a property's name in a literal or a class: a node (N_STR of an atom, or an expression with *computed) */
 static uint32_t p_prop_key(CC, int *computed) {
@@ -910,7 +932,9 @@ static uint32_t p_array(CC) {
         if (is_p(cc, P_ELLIPSIS)) {
             uint32_t s = node(cc, N_SPREAD, cc->tok.line);
             lx(CCA);
+            cc->nodes[s].pos = tok_start(cc);
             cc->nodes[s].a = p_assign(CCA, 0);
+            cc->nodes[s].d = cc->prev.end;
             push_back(cc->tmp, s);
         } else push_back(cc->tmp, p_assign(CCA, 0));
         if (!is_p(cc, P_RBRACK)) expect_p(CCA, P_COMMA, "',' between array elements");
@@ -961,7 +985,7 @@ static uint32_t p_object(CC) {
             cc->nodes[p].d = computed ? NF_COMPUTED : 0;
             if (kind == PK_GET || kind == PK_SET) {
                 cc->nodes[p].op = (uint16_t)kind;
-                cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | (kind == PK_GET ? JF_GETTER : 0), 0, line, start);
+                cc->nodes[p].b = p_function(CCA, computed ? 0 : accessor_name(vm, kind, cc->nodes[key].s), JF_METHOD | (kind == PK_GET ? JF_GETTER : 0), 0, line, start);
             } else if (is_p(cc, P_LPAREN)) {
                 cc->nodes[p].op = PK_METHOD;
                 cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | mfl, 0, line, start);
@@ -1120,7 +1144,9 @@ static uint32_t p_args(CC, uint32_t n) {
         if (is_p(cc, P_ELLIPSIS)) {
             uint32_t s = node(cc, N_SPREAD, cc->tok.line);
             lx(CCA);
+            cc->nodes[s].pos = tok_start(cc);
             cc->nodes[s].a = p_assign(CCA, 0);
+            cc->nodes[s].d = cc->prev.end;
             push_back(cc->tmp, s);
         } else push_back(cc->tmp, p_assign(CCA, 0));
         if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between arguments");
@@ -1231,7 +1257,8 @@ static uint32_t p_primary(CC) {
                     return node(cc, N_NEW_TARGET, line);
                 }
                 uint32_t n = node(cc, N_NEW, line);
-                /* the callee: a member expression with no call */
+                /* the callee: a member expression with no call, its source pos to d */
+                uint32_t cstart = tok_start(cc);
                 uint32_t callee = p_primary(CCA);
                 for (;;) {
                     if (is_p(cc, P_DOT)) {
@@ -1253,6 +1280,8 @@ static uint32_t p_primary(CC) {
                     } else break;
                 }
                 cc->nodes[n].a = callee;
+                cc->nodes[n].pos = cstart;
+                cc->nodes[n].d = cc->prev.end;
                 if (is_p(cc, P_LPAREN)) p_args(CCA, n);
                 return n;
             }
@@ -1296,18 +1325,23 @@ static uint32_t p_primary(CC) {
 
 /* member accesses, calls and optional chains after a primary */
 static uint32_t p_call(CC) {
+    /* each call's callee is the source from here to its last token (pos, d) */
+    uint32_t start = tok_start(cc);
     uint32_t e = p_primary(CCA);
     int chain = 0;
     while (!cc->err) {
         uint32_t line = cc->tok.line;
         if (is_p(cc, P_DOT) || is_p(cc, P_OPTCHAIN)) {
             int opt = is_p(cc, P_OPTCHAIN);
+            uint32_t cend = cc->prev.end;
             lx(CCA);
             if (opt) chain = 1;
             if (opt && is_p(cc, P_LPAREN)) {
                 uint32_t n = node(cc, N_CALL, line);
                 cc->nodes[n].a = e;
                 cc->nodes[n].op = NF_OPTIONAL;
+                cc->nodes[n].pos = start;
+                cc->nodes[n].d = cend;
                 e = p_args(CCA, n);
                 continue;
             }
@@ -1339,6 +1373,8 @@ static uint32_t p_call(CC) {
         } else if (is_p(cc, P_LPAREN)) {
             uint32_t n = node(cc, N_CALL, line);
             cc->nodes[n].a = e;
+            cc->nodes[n].pos = start;
+            cc->nodes[n].d = cc->prev.end;
             if (!chain && cc->nodes[e].k == N_IDENT && cc->nodes[e].s == cc->kw[K_EVAL]) {
                 cc->nodes[n].op |= NF_EVAL;
                 cc->nodes[n].s = cc->cur_scope;
@@ -1347,10 +1383,13 @@ static uint32_t p_call(CC) {
         } else if (cc->tok.type == T_TEMPLATE) {
             /* a tagged template: the tag called with the strings (op 1: one frozen array
                for this place in the source, its raw strings beside) and the substitutions */
+            uint32_t tend = cc->prev.end;
             uint32_t t = p_template(CCA);
             cc->nodes[t].op = 1;
             uint32_t n = node(cc, N_CALL, line);
             cc->nodes[n].a = e;
+            cc->nodes[n].pos = start;
+            cc->nodes[n].d = tend;
             size_t mark = len(cc->tmp);
             push_back(cc->tmp, t);
             for (uint32_t i = 1; i < cc->nodes[t].b; i += 2) push_back(cc->tmp, cc->lists[cc->nodes[t].a + i]);
@@ -1550,7 +1589,9 @@ static uint32_t p_assign_in(CC, int no_in) {
         if (op == P_ASSIGN && (lk == N_ARRAY || lk == N_OBJECT)) left = to_pattern(CCA, left);
         else if (lk != N_IDENT && lk != N_MEMBER) cc_error(cc, line, "invalid assignment target");
         cc->nodes[n].a = left;
+        cc->nodes[n].pos = tok_start(cc);
         cc->nodes[n].b = p_assign(CCA, no_in);
+        cc->nodes[n].d = cc->prev.end;
         return n;
     }
     return left;
@@ -1571,7 +1612,7 @@ static uint32_t p_expr(CC, int no_in) {
 /* ---- classes ---- */
 
 static uint32_t p_class(CC, int is_decl) {
-    uint32_t line = cc->tok.line;
+    uint32_t line = cc->tok.line, cstart = cc->tok.start;
     lx(CCA);
     uint32_t name = 0;
     if (cc->tok.type == T_NAME && !is_kw(cc, K_EXTENDS)) { name = cc->tok.str; lx(CCA); }
@@ -1600,7 +1641,7 @@ static uint32_t p_class(CC, int is_decl) {
             uint32_t pos0 = cc->pos, line0 = cc->line;
             lx(CCA);
             if (is_p(cc, P_LPAREN) || is_p(cc, P_ASSIGN) || is_p(cc, P_SEMI) || is_p(cc, P_RBRACE)) { cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0; }
-            else flags |= NF_STATIC;
+            else { flags |= NF_STATIC; mstart = cc->tok.start; }   /* a static method's text begins after static */
             if (is_p(cc, P_LBRACE)) { cc_error(cc, mline, "static blocks are not supported"); break; }
         }
         uint32_t kind = PK_METHOD;
@@ -1634,7 +1675,8 @@ static uint32_t p_class(CC, int is_decl) {
             uint32_t ff = JF_METHOD | JF_STRICT | (kind == PK_GET ? JF_GETTER : 0) | mfl;
             if (ctor && mfl) { cc_error(cc, mline, "a class's constructor cannot be a generator or async"); break; }
             if (ctor) ff = JF_CLASS_CTOR | JF_STRICT | (cc->classes[ci].extends ? JF_DERIVED : 0);
-            uint32_t f = p_function(CCA, computed ? 0 : cc->nodes[key].s, ff, 0, mline, mstart);
+            uint32_t fname = computed ? 0 : kind == PK_GET || kind == PK_SET ? accessor_name(vm, kind, cc->nodes[key].s) : cc->nodes[key].s;
+            uint32_t f = p_function(CCA, fname, ff, 0, mline, mstart);
             if (ctor) { cc->classes[ci].ctor = cc->nodes[f].a; cc->fns[cc->nodes[f].a].name = name; cc->fns[cc->nodes[f].a].cls = ci + 1; continue; }
             cc->nodes[p].op = (uint16_t)kind;
             cc->nodes[p].b = f;
@@ -1669,6 +1711,7 @@ static uint32_t p_class(CC, int is_decl) {
         }
         push_back(cc->tmp, p);
     }
+    uint32_t cend = cc->tok.end;
     expect_p(CCA, P_RBRACE, "'}' after a class's body");
     cc->in_class = saved_in;
     list_take(cc, mark, &cc->classes[ci].members, &cc->classes[ci].nmembers);
@@ -1685,6 +1728,9 @@ static uint32_t p_class(CC, int is_decl) {
         cc->cur_scope = saved_scope;
         cc->classes[ci].ctor = f;
     }
+    /* the constructor's text is the class's own, as toString gives it */
+    cc->fns[cc->classes[ci].ctor].src_start = cstart;
+    cc->fns[cc->classes[ci].ctor].src_end = cend;
     uint32_t n = node(cc, is_decl ? N_CLASSDECL : N_CLASS, line);
     cc->nodes[n].a = ci;
     return n;
@@ -1700,7 +1746,12 @@ static uint32_t p_var(CC, uint32_t kind, int no_in, int need_init) {
     for (;;) {
         uint32_t d = node(cc, N_DECL, cc->tok.line);
         cc->nodes[d].a = p_binding(CCA, kind);
-        if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[d].b = p_assign(CCA, no_in); }
+        if (is_p(cc, P_ASSIGN)) {
+            lx(CCA);
+            cc->nodes[d].pos = tok_start(cc);
+            cc->nodes[d].b = p_assign(CCA, no_in);
+            cc->nodes[d].d = cc->prev.end;
+        }
         else if (need_init && (kind == D_CONST || cc->nodes[cc->nodes[d].a].k != N_IDENT)) cc_error(cc, cc->tok.line, "a const or a pattern needs an initializer");
         push_back(cc->tmp, d);
         if (!is_p(cc, P_COMMA) || cc->err) break;
@@ -2026,9 +2077,11 @@ static uint32_t p_stmt_in(CC) {
                 lx(CCA);
                 if (cc->nodes[init].k != N_VAR) init = to_pattern(CCA, init);
                 cc->nodes[n].a = init;
-                /* the value iterated is read outside the loop's bindings */
+                /* the value iterated is read outside the loop's bindings; its source pos to d */
                 cc->cur_scope = saved;
+                cc->nodes[n].pos = tok_start(cc);
                 cc->nodes[n].b = cc->nodes[n].op ? p_assign(CCA, 0) : p_expr(CCA, 0);
+                cc->nodes[n].d = cc->prev.end;
                 cc->cur_scope = sc;
                 expect_p(CCA, P_RPAREN, "')'");
                 cc->nodes[n].c = p_stmt(CCA);
@@ -2286,6 +2339,20 @@ static void emit_num(js_vm *vm, double d) {
     emit32(vm, (uint32_t)(len(vm->consts) - 1));
 }
 static uint32_t new_slot(js_cc *cc) { return cc->nslots++; }
+
+/* the instruction about to be written an error site (src/js/js.h's js_site): its kind and
+   how it names its expression, which is the source from pos to end (none when end is 0);
+   whether the code's function is a generator or async, so that its text reads again as it
+   was read */
+static void site_at(js_vm *vm, js_cc *cc, uint32_t kind, uint32_t pos, uint32_t end) {
+    uint32_t f = cc->fns[cc->gen_fn].flags;
+    js_site s;
+    s.pc = here(vm);
+    s.start = end > pos ? cc->src_base + pos : 0;
+    s.end = end > pos ? cc->src_base + end : 0;
+    s.kind = kind | ((f & JF_GENERATOR) ? JSS_GENERATOR : 0) | ((f & JF_ASYNC) ? JSS_ASYNC : 0);
+    push_back(vm->sites, s);
+}
 
 static void gen_expr(CC, uint32_t n);
 static void gen_stmt(CC, uint32_t n);
@@ -2720,10 +2787,17 @@ static void gen_binary(CC, uint32_t op, uint32_t lhs, uint32_t rhs) {
     gen_rhs_op(CCA, op, rhs);
 }
 
-/* an anonymous function or class given the name it is bound to */
-static void name_fn(js_cc *cc, uint32_t value, uint32_t atom) {
+/* an anonymous function or class given the name it is bound to: its record's too, which
+   is made before the code is */
+static void name_fn(js_vm *vm, js_cc *cc, uint32_t value, uint32_t atom) {
     if (!value || !atom) return;
-    if (cc->nodes[value].k == N_FUNC && !cc->fns[cc->nodes[value].a].name) cc->fns[cc->nodes[value].a].name = atom;
+    uint32_t f;
+    if (cc->nodes[value].k == N_FUNC) f = cc->nodes[value].a;
+    else if (cc->nodes[value].k == N_CLASS && !cc->classes[cc->nodes[value].a].name) f = cc->classes[cc->nodes[value].a].ctor;
+    else return;
+    if (cc->fns[f].name) return;
+    cc->fns[f].name = atom;
+    vm->funcs[cc->fns[f].id].name = atom;
 }
 
 /* the value on top, if undefined, replaced by the default */
@@ -2743,20 +2817,46 @@ static int has_spread(js_cc *cc, uint32_t off, uint32_t n) {
     for (uint32_t i = 0; i < n; i++) if (cc->nodes[cc->lists[off + i]].k == N_SPREAD) return 1;
     return 0;
 }
-static void gen_list_array(CC, uint32_t off, uint32_t n) {
+/* no error site for the instruction */
+#define JSS_NONE 0xFFu
+/* a call, not an optional one's: what V8 names "f is not a function or its return value ..." */
+static int is_call(js_cc *cc, uint32_t n) { return cc->nodes[n].k == N_CALL && !(cc->nodes[n].op & NF_OPTIONAL); }
+/* the iterated value n is about to be written: a call's own error is then the iteration's */
+static void iter_subject(js_cc *cc, uint32_t n, uint32_t kind) {
+    if (!is_call(cc, n)) return;
+    cc->iter_call = n;
+    cc->iter_kind = kind;
+}
+
+/* the values of a list into an array, its spreads iterated: an array literal's (skind
+   JSS_ITER) or a call's arguments (JSS_SPREAD_CALL), each spread an error site */
+static void gen_list_array(CC, uint32_t off, uint32_t n, uint32_t skind) {
     emit(vm, OP_ARRAY);
     emit32(vm, 0);
     for (uint32_t i = 0; i < n; i++) {
         uint32_t e = cc->lists[off + i];
-        if (cc->nodes[e].k == N_SPREAD) { gen_expr(CCA, cc->nodes[e].a); emit(vm, OP_SPREAD); }
-        else if (cc->nodes[e].k == N_HOLE) emit(vm, OP_APPEND_HOLE);
+        if (cc->nodes[e].k == N_SPREAD) {
+            jn sp = cc->nodes[e];
+            if (skind == JSS_ITER) iter_subject(cc, sp.a, JSS_CALLED);
+            gen_expr(CCA, sp.a);
+            site_at(vm, cc, skind | (skind == JSS_ITER && is_call(cc, sp.a) ? JSS_CALLED : 0), sp.pos, sp.d);
+            emit(vm, OP_SPREAD);
+        } else if (cc->nodes[e].k == N_HOLE) emit(vm, OP_APPEND_HOLE);
         else { gen_expr(CCA, e); emit(vm, OP_APPEND); }
     }
 }
-static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op_arr) {
+/* a call's arguments, then the call, an error site of skind (JSS_NONE: none) naming the
+   source from pos to end */
+static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op_arr, uint32_t skind, uint32_t pos, uint32_t end) {
     /* spread, or more than 64 values (JS_STACK_MARGIN): the arguments an array */
-    if (has_spread(cc, off, n) || n > 64) { gen_list_array(CCA, off, n); emit(vm, op_arr); return; }
+    if (has_spread(cc, off, n) || n > 64) {
+        gen_list_array(CCA, off, n, JSS_SPREAD_CALL);
+        if (skind != JSS_NONE) site_at(vm, cc, skind, pos, end);
+        emit(vm, op_arr);
+        return;
+    }
     for (uint32_t i = 0; i < n; i++) gen_expr(CCA, cc->lists[off + i]);
+    if (skind != JSS_NONE) site_at(vm, cc, skind, pos, end);
     emit(vm, op);
     emit16(vm, n);
 }
@@ -2773,10 +2873,14 @@ static void gen_call(CC, uint32_t n) {
     jn c = cc->nodes[n];
     uint32_t callee = c.a;
     uint32_t ck = cc->nodes[callee].k;
+    /* a call an iteration takes its value from: its error the iteration's (iter_subject) */
+    uint32_t kcall = JSS_CALL;
+    if (n == cc->iter_call) { kcall |= cc->iter_kind; cc->iter_call = 0; }
     if ((c.op & NF_EVAL) && !has_spread(cc, c.b, c.c) && c.c <= 64) {
         /* eval(...): a direct eval when the name holds eval itself, its site's scopes the code's */
         gen_expr(CCA, callee);
         for (uint32_t i = 0; i < c.c; i++) gen_expr(CCA, cc->lists[c.b + i]);
+        site_at(vm, cc, kcall, c.pos, c.d);
         emit(vm, OP_CALL_EVAL);
         emit16(vm, c.c);
         emit32(vm, gen_eval_site(CCA, c.s));
@@ -2788,7 +2892,7 @@ static void gen_call(CC, uint32_t n) {
         uint32_t r = cc->nodes[callee].a;
         gen_get_flags(CCA, cc->nodes[callee].s, cc->refs[r].decl, cc->refs[r].scope, 2);
         if (c.op & NF_OPTIONAL) cc->chain = chain_add(vm, OP_JNULLISH2, cc->chain);
-        gen_args_call(CCA, c.b, c.c, OP_CALL, OP_CALL_ARR);
+        gen_args_call(CCA, c.b, c.c, OP_CALL, OP_CALL_ARR, kcall, c.pos, c.d);
         return;
     }
     if (ck == N_MEMBER) gen_member(CCA, callee, 1);
@@ -2799,14 +2903,14 @@ static void gen_call(CC, uint32_t n) {
     } else if (!(c.op & NF_OPTIONAL) && !has_spread(cc, c.b, c.c) && c.c <= 64) {
         /* a plain call: no this pushed, the callee's own */
         gen_expr(CCA, callee);
-        gen_args_call(CCA, c.b, c.c, OP_CALL0, OP_CALL_ARR);
+        gen_args_call(CCA, c.b, c.c, OP_CALL0, OP_CALL_ARR, kcall, c.pos, c.d);
         return;
     } else {
         emit(vm, OP_UNDEF);
         gen_expr(CCA, callee);
     }
     if (c.op & NF_OPTIONAL) cc->chain = chain_add(vm, OP_JNULLISH2, cc->chain);
-    gen_args_call(CCA, c.b, c.c, OP_CALL, OP_CALL_ARR);
+    gen_args_call(CCA, c.b, c.c, OP_CALL, OP_CALL_ARR, kcall, c.pos, c.d);
 }
 
 static void gen_object(CC, uint32_t n) {
@@ -2818,7 +2922,7 @@ static void gen_object(CC, uint32_t n) {
         int computed = pr.d & NF_COMPUTED;
         if (pr.op == PK_SPREAD) { gen_expr(CCA, pr.b); emit(vm, OP_COPY_PROPS); continue; }
         if (pr.op == PK_COVER) { cc_error(cc, pr.line, "an object literal's '=' belongs in a destructuring pattern"); return; }
-        if (!computed) name_fn(cc, pr.b, cc->nodes[pr.a].s);
+        if (!computed) name_fn(vm, cc, pr.b, cc->nodes[pr.a].s);
         if (pr.op == PK_GET || pr.op == PK_SET) {
             if (computed) gen_expr(CCA, pr.a);
             gen_expr(CCA, pr.b);
@@ -2870,9 +2974,31 @@ static void gen_class(CC, uint32_t ci) {
     }
 }
 
-/* the target of an assignment or a declaration, the value on top taken */
+/* how V8 names the value of the pattern gen_pattern begins next, in its errors: okind for
+   an object pattern (its JSS_ flags; JSS_NONE: no site, a nested one's error a plain
+   property read's), akind for an array pattern, the value's source from pos to end */
+static void pat_name(js_cc *cc, uint32_t okind, uint32_t akind, uint32_t pos, uint32_t end) {
+    cc->pat_okind = okind;
+    cc->pat_akind = akind;
+    cc->pat_start = pos;
+    cc->pat_end = end;
+}
+/* an initializer V8 names by its text when an array pattern of a declaration cannot
+   iterate it (a name, this, a literal): its position is its start, where the error is */
+static int named_init(js_cc *cc, uint32_t n) {
+    uint32_t k = cc->nodes[n].k;
+    if (k == N_IDENT || k == N_THIS || k == N_NUM || k == N_STR || k == N_TEMPLATE || k == N_REGEX || k == N_OBJECT || k == N_ARRAY ||
+        k == N_FUNC || k == N_CLASS) return 1;
+    return k == N_UNARY && cc->nodes[n].op != 1000 && cc->nodes[n].op != 1001 && cc->nodes[n].op != 1002 && named_init(cc, cc->nodes[n].a) &&
+           (cc->nodes[cc->nodes[n].a].k == N_NUM || cc->nodes[cc->nodes[n].a].k == N_UNARY);
+}
+
+/* the target of an assignment or a declaration, the value on top taken; the naming its
+   caller set (pat_name) its own, a nested pattern's the plain one */
 static void gen_pattern(CC, uint32_t p, int init) {
     jn t = cc->nodes[p];
+    uint32_t okind = cc->pat_okind, akind = cc->pat_akind, ps = cc->pat_start, pe = cc->pat_end;
+    pat_name(cc, JSS_NONE, JSS_PLAIN, 0, 0);
     if (t.k == N_IDENT) { gen_ident_put(CCA, p, 0, init); return; }
     if (t.k == N_MEMBER) {
         /* v -> o v (or o k v) -> v -> nothing */
@@ -2891,10 +3017,20 @@ static void gen_pattern(CC, uint32_t p, int init) {
     }
     if (t.k == N_PELEM) {
         gen_default(CCA, t.b);
+        pat_name(cc, okind, akind, ps, pe);
         gen_pattern(CCA, t.a, init);
         return;
     }
     if (t.k == N_PATTERN_OBJ) {
+        /* its value undefined or null: V8's "Cannot destructure ..." at its first key's read,
+           or, the first key computed, a rest or none, at a check of its own */
+        int first_named = t.b && !(cc->nodes[cc->lists[t.a]].op & (NF_REST | NF_COMPUTED));
+        if (!first_named) {
+            emit(vm, OP_DUP);
+            site_at(vm, cc, JSS_DESTRUCT_OBJ | (okind == JSS_NONE ? JSS_PLAIN : okind), ps, pe);
+            emit(vm, OP_TO_OBJECT);
+            emit(vm, OP_POP);
+        }
         for (uint32_t i = 0; i < t.b; i++) {
             uint32_t e = cc->lists[t.a + i];
             jn el = cc->nodes[e];
@@ -2916,8 +3052,13 @@ static void gen_pattern(CC, uint32_t p, int init) {
             }
             emit(vm, OP_DUP);
             if (el.op & NF_COMPUTED) { gen_expr(CCA, el.c); emit(vm, OP_GET_ELEM); }
-            else emit_atom_ic(vm, OP_GET_PROP, cc->nodes[el.c].s);
+            else {
+                if (i == 0 && okind != JSS_NONE) site_at(vm, cc, JSS_DESTRUCT_OBJ | okind, ps, pe);
+                emit_atom_ic(vm, OP_GET_PROP, cc->nodes[el.c].s);
+            }
             gen_default(CCA, el.b);
+            /* an array pattern within one V8 names by this pattern's whole value */
+            if (okind == 0 && cc->nodes[el.a].k == N_PATTERN_ARR) pat_name(cc, JSS_NONE, JSS_NOSYM, ps, pe);
             gen_pattern(CCA, el.a, init);
         }
         emit(vm, OP_POP);
@@ -2927,6 +3068,7 @@ static void gen_pattern(CC, uint32_t p, int init) {
         /* any iterable read as the array of its values the pattern takes */
         int rest = 0;
         for (uint32_t i = 0; i < t.b; i++) if (cc->nodes[cc->lists[t.a + i]].op & NF_REST) rest = 1;
+        site_at(vm, cc, JSS_DESTRUCT_ARR | akind, ps, pe);
         emit(vm, OP_DESTRUCT_ARR);
         emit16(vm, rest || t.b >= 0xFFFF ? 0xFFFF : t.b);
         for (uint32_t i = 0; i < t.b; i++) {
@@ -2957,8 +3099,15 @@ static void gen_assign(CC, uint32_t n) {
     uint32_t op = as.op, t = as.a;
     jn tg = cc->nodes[t];
     if (op == P_ASSIGN) {
-        if (tg.k == N_PATTERN_OBJ || tg.k == N_PATTERN_ARR) { gen_expr(CCA, as.b); emit(vm, OP_DUP); gen_pattern(CCA, t, 0); return; }
-        if (tg.k == N_IDENT) { name_fn(cc, as.b, tg.s); gen_expr(CCA, as.b); gen_ident_put(CCA, t, 1, 0); return; }
+        if (tg.k == N_PATTERN_OBJ || tg.k == N_PATTERN_ARR) {
+            gen_expr(CCA, as.b);
+            emit(vm, OP_DUP);
+            /* V8 names an object pattern's value by its text, an array pattern's by itself */
+            pat_name(cc, 0, JSS_PLAIN, as.pos, as.d);
+            gen_pattern(CCA, t, 0);
+            return;
+        }
+        if (tg.k == N_IDENT) { name_fn(vm, cc, as.b, tg.s); gen_expr(CCA, as.b); gen_ident_put(CCA, t, 1, 0); return; }
         gen_expr(CCA, tg.a);
         if (tg.op & NF_COMPUTED) { gen_expr(CCA, tg.b); gen_expr(CCA, as.b); emit(vm, OP_PUT_ELEM); }
         else { gen_expr(CCA, as.b); emit_atom_ic(vm, OP_PUT_PROP, tg.s); }
@@ -3088,7 +3237,7 @@ static void gen_expr(CC, uint32_t n) {
         else { emit(vm, OP_GET_SUPER); emit32(vm, e.s); }
         return;
     case N_SUPER_CALL:
-        gen_args_call(CCA, e.b, e.c, OP_SUPER_CALL, OP_SUPER_CALL_ARR);
+        gen_args_call(CCA, e.b, e.c, OP_SUPER_CALL, OP_SUPER_CALL_ARR, JSS_NONE, 0, 0);
         emit(vm, OP_INIT_FIELDS);
         return;
     case N_ARRAY: {
@@ -3101,7 +3250,7 @@ static void gen_expr(CC, uint32_t n) {
             for (uint32_t i = 0; i < e.b; i++) gen_expr(CCA, cc->lists[e.a + i]);
             emit(vm, OP_ARRAY);
             emit32(vm, e.b);
-        } else gen_list_array(CCA, e.a, e.b);
+        } else gen_list_array(CCA, e.a, e.b, JSS_ITER);
         return;
     }
     case N_OBJECT: gen_object(CCA, n); return;
@@ -3172,7 +3321,7 @@ static void gen_expr(CC, uint32_t n) {
     case N_CALL: gen_call(CCA, n); return;
     case N_NEW:
         gen_expr(CCA, e.a);
-        gen_args_call(CCA, e.b, e.c, OP_NEW, OP_NEW_ARR);
+        gen_args_call(CCA, e.b, e.c, OP_NEW, OP_NEW_ARR, JSS_NEW, e.pos, e.d);
         return;
     case N_CHAIN: {
         uint32_t saved = cc->chain;
@@ -3191,8 +3340,12 @@ static void gen_expr(CC, uint32_t n) {
             return;
         }
         if (e.op == 1) {
-            /* yield*: each step the inner iterator's, sent what this one was sent */
+            /* yield*: each step the inner iterator's, sent what this one was sent; V8 names
+               a member's or a call's operand an intermediate value, any other by its value */
+            iter_subject(cc, e.a, JSS_INTERMEDIATE);
             gen_expr(CCA, e.a);
+            uint32_t ok = cc->nodes[e.a].k;
+            site_at(vm, cc, JSS_YIELD_STAR | (ok == N_MEMBER || ok == N_CALL ? JSS_INTERMEDIATE : JSS_PLAIN), 0, 0);
             emit(vm, OP_GET_ITER);
             emit(vm, OP_UNDEF);
             emit_num(vm, 0);
@@ -3260,7 +3413,7 @@ static void gen_void(CC, uint32_t n) {
         return;
     }
     if (e.k == N_ASSIGN && e.op == P_ASSIGN && cc->nodes[e.a].k == N_IDENT) {
-        name_fn(cc, e.b, cc->nodes[e.a].s);
+        name_fn(vm, cc, e.b, cc->nodes[e.a].s);
         gen_expr(CCA, e.b);
         gen_ident_put(CCA, e.a, 0, 0);
         return;
@@ -3353,8 +3506,11 @@ static void gen_var(CC, uint32_t n) {
     for (uint32_t i = 0; i < v.b; i++) {
         jn d = cc->nodes[cc->lists[v.a + i]];
         if (d.b) {
-            if (cc->nodes[d.a].k == N_IDENT) name_fn(cc, d.b, cc->nodes[d.a].s);
+            if (cc->nodes[d.a].k == N_IDENT) name_fn(vm, cc, d.b, cc->nodes[d.a].s);
+            if (cc->nodes[d.a].k == N_PATTERN_ARR) iter_subject(cc, d.b, JSS_CALLED);
             gen_expr(CCA, d.b);
+            /* V8 names the initializer by its text, an array pattern's only when it begins it */
+            pat_name(cc, 0, named_init(cc, d.b) ? 0 : JSS_PLAIN, d.pos, d.d);
             gen_pattern(CCA, d.a, 1);
         } else if (v.op != D_VAR) {
             emit(vm, OP_UNDEF);
@@ -3374,7 +3530,7 @@ static void gen_try(CC, uint32_t n) {
         uint32_t end = jump_fwd(vm, OP_JMP);
         patch_to(vm, h, here(vm));
         gen_block_enter(CCA, t.s);
-        if (t.b) gen_pattern(CCA, t.b, 1);
+        if (t.b) { pat_name(cc, JSS_DOTCATCH, JSS_PLAIN, 0, 0); gen_pattern(CCA, t.b, 1); }
         else emit(vm, OP_POP);
         gen_stmt(CCA, t.c);
         gen_block_leave(CCA, t.s);
@@ -3394,7 +3550,7 @@ static void gen_try(CC, uint32_t n) {
         h2 = jump_fwd(vm, OP_TRY);
         ctx_push(cc, CX_FINALLY, t.d, 0);
         gen_block_enter(CCA, t.s);
-        if (t.b) gen_pattern(CCA, t.b, 1);
+        if (t.b) { pat_name(cc, JSS_DOTCATCH, JSS_PLAIN, 0, 0); gen_pattern(CCA, t.b, 1); }
         else emit(vm, OP_POP);
         gen_stmt(CCA, t.c);
         gen_block_leave(CCA, t.s);
@@ -3549,7 +3705,9 @@ static void gen_stmt(CC, uint32_t n) {
         /* for await: each step's result awaited; its iterator closed the async way */
         uint32_t sc = s.s;
         int aw = s.op == 2;
+        if (s.op) iter_subject(cc, s.b, aw ? JSS_CALLED | JSS_AWAITED : JSS_CALLED);
         gen_expr(CCA, s.b);
+        if (s.op) site_at(vm, cc, (aw ? JSS_AITER : JSS_ITER) | (is_call(cc, s.b) ? JSS_CALLED : 0), s.pos, s.d);
         emit(vm, aw ? OP_ITER_ASYNC : s.op ? OP_ITER_OF : OP_ITER_IN);
         uint32_t h = 0;
         if (s.op) { h = jump_fwd(vm, OP_TRY); ctx_push(cc, CX_ITER, 0, (uint32_t)aw); }
@@ -3564,6 +3722,8 @@ static void gen_stmt(CC, uint32_t n) {
         } else done = jump_fwd(vm, OP_ITER_NEXT);
         gen_block_enter(CCA, sc);
         jn left = cc->nodes[s.a];
+        /* each value V8 holds in a binding of its own, which it names ".for" */
+        pat_name(cc, JSS_DOTFOR, JSS_DOTFOR, 0, 0);
         if (left.k == N_VAR) gen_pattern(CCA, cc->nodes[cc->lists[left.a]].a, 1);
         else gen_pattern(CCA, s.a, 0);
         gen_stmt(CCA, s.c);
@@ -3600,7 +3760,7 @@ static void gen_stmt(CC, uint32_t n) {
     case N_CONTINUE: gen_jump(CCA, n, 0); return;
     case N_EXPORT_DEFAULT:
         /* the default binding set where the statement stands; a nameless function's or class's name default */
-        name_fn(cc, s.a, cc->kw[K_DEFAULT]);
+        name_fn(vm, cc, s.a, cc->kw[K_DEFAULT]);
         gen_expr(CCA, s.a);
         gen_put(CCA, cc->default_atom, s.b, 0, 0, 1);
         return;
@@ -3809,6 +3969,9 @@ static void gen_function(CC, uint32_t f) {
             emit(vm, OP_GET_LOC);
             emit16(vm, i);
             gen_default(CCA, p.b);
+            /* V8 names a parameter's value by itself, or, with a default, by three
+               intermediate values (the conditional it reads it as) */
+            pat_name(cc, p.b ? JSS_DEFAULTED : JSS_PLAIN, JSS_PLAIN, 0, 0);
             gen_pattern(CCA, p.a, 1);
         }
         gen_scope_decls(CCA, fs);
@@ -3957,6 +4120,11 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     cc->default_atom = js_atom_ascii(vm, " default");
     cc->script = script;
     cc->mode = (uint32_t)mode;
+    /* the source's place in vm->src, where it goes once compiled: its functions' texts
+       and its error sites' expressions are kept there */
+    cc->src_base = (uint32_t)len(vm->src);
+    size_t sites0 = len(vm->sites);
+    pat_name(cc, JSS_NONE, JSS_PLAIN, 0, 0);
     int is_eval = mode >= JS_CC_EVAL && mode != JS_CC_MODULE;
     int strict = is_eval && eval_is_strict(src, srcn);
     if (mode == JS_CC_DIRECT && (vm->eval_sites[vm->eval_site].flags & JS_EVAL_STRICT)) strict = 1;
@@ -4081,8 +4249,8 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
             jf.flags = F.flags & 0xFFFF;
             jf.line = F.line;
             jf.script = script;
-            jf.src_off = F.src_start;
             jf.src_len = F.src_end > F.src_start ? F.src_end - F.src_start : 0;
+            jf.src_off = jf.src_len ? cc->src_base + F.src_start : 0;
             jf.arity = F.nformal;
             jf.module = mode == JS_CC_MODULE ? vm->mod_compiling : 0;
             push_back(vm->funcs, jf);
@@ -4095,8 +4263,11 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         char m[320];
         int k = snprintf(m, sizeof m, "SyntaxError: %s (line %u)", cc->errmsg, cc->err_line);
         if (k > 0) append_range(err, m, (size_t)k < sizeof m ? (size_t)k : sizeof m - 1);
+        js_site z = { 0, 0, 0, 0 };
+        resize(vm->sites, sites0, z);
         return 0;
     }
+    append_range(vm->src, src, n);
     *func = cc->fns[0].id;
     if (getenv("AMB_JS_DUMP")) {
         /* the functions and their code, for the engine's own debugging */
@@ -4108,4 +4279,324 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         }
     }
     return 1;
+}
+
+/* ---- an error site's expression printed again, as V8's call printer prints it ----
+   (src/js/js.h's js_site). The text is parsed again as one expression and printed by V8's
+   rules: a name, this and a literal as they are (a string in double quotes); a member
+   with its dot ("?." an optional one's), a computed key in brackets but a string's as a
+   name; a call's callee, then "(...)"; an operator's operands in parentheses, a chain of
+   one operator flat ("(a + b + c)"), numbers folded where V8's parser folds them (-5,
+   1 + 2, !0); and "(intermediate value)" for what V8 prints nothing of: a function, an
+   object literal's values, a class's members, new's callee, super, a conditional. */
+
+static void pr_put(vector<char> *out, uint32_t *np, const char *s) { append_range(*out, s, strlen(s)); (*np)++; }
+static void pr_atom(js_vm *vm, vector<char> *out, uint32_t *np, uint32_t atom) { js_str_to_utf8(vm, atom, out); (*np)++; }
+static void pr_number(vector<char> *out, uint32_t *np, double v) {
+    char b[64];
+    js_num_format(v, b, sizeof b);
+    pr_put(out, np, b);
+}
+
+/* the number a literal folds to in V8's parser (-5, ~1, 1 + 2, 5 % 3): 1 when it does */
+static int pr_num(js_cc *cc, uint32_t n, double *v) {
+    jn e = cc->nodes[n];
+    if (e.k == N_NUM && e.op == 0) { *v = e.num; return 1; }
+    double x, y;
+    if (e.k == N_UNARY && (e.op == P_MINUS || e.op == P_PLUS || e.op == P_TILDE)) {
+        if (!pr_num(cc, e.a, &x)) return 0;
+        *v = e.op == P_MINUS ? -x : e.op == P_PLUS ? x : (double)~js_to_int32(x);
+        return 1;
+    }
+    if (e.k != N_BINARY || !pr_num(cc, e.a, &x) || !pr_num(cc, e.b, &y)) return 0;
+    int32_t ix = js_to_int32(x), iy = js_to_int32(y);
+    switch (e.op) {
+    case P_PLUS: *v = x + y; return 1;
+    case P_MINUS: *v = x - y; return 1;
+    case P_STAR: *v = x * y; return 1;
+    case P_SLASH: *v = x / y; return 1;
+    case P_PERCENT: *v = y == 0 || x != x || y != y || x == INFINITY || x == -INFINITY ? NAN : y == INFINITY || y == -INFINITY ? x : fmod(x, y); return 1;
+    case P_POW: *v = y != y ? NAN : y == 0 ? 1 : pow(x, y); return 1;
+    case P_PIPE: *v = (double)(ix | iy); return 1;
+    case P_AMP: *v = (double)(ix & iy); return 1;
+    case P_CARET: *v = (double)(ix ^ iy); return 1;
+    case P_SHL: *v = (double)(int32_t)((uint32_t)ix << (iy & 31)); return 1;
+    case P_SAR: *v = (double)(ix >> (iy & 31)); return 1;
+    case P_SHR: *v = (double)((uint32_t)ix >> (iy & 31)); return 1;
+    default: return 0;
+    }
+}
+/* the truth of a literal V8's parser folds ! over (!0 is true, !'x' false): 1 when it does */
+static int pr_truth(js_vm *vm, js_cc *cc, uint32_t n, int *t) {
+    jn e = cc->nodes[n];
+    double v;
+    int x;
+    if (pr_num(cc, n, &v)) { *t = v == v && v != 0; return 1; }
+    if (e.k == N_NUM && e.op >= 1 && e.op <= 3) { *t = e.op == 2; return 1; }
+    if (e.k == N_STR) { *t = vm->strs[e.s].len > 0; return 1; }
+    if (e.k == N_UNARY && e.op == P_BANG && pr_truth(vm, cc, e.a, &x)) { *t = !x; return 1; }
+    return 0;
+}
+static const char *pr_op(uint32_t op) {
+    switch (op) {
+    case P_PLUS: return "+";
+    case P_MINUS: return "-";
+    case P_STAR: return "*";
+    case P_SLASH: return "/";
+    case P_PERCENT: return "%";
+    case P_POW: return "**";
+    case P_SHL: return "<<";
+    case P_SAR: return ">>";
+    case P_SHR: return ">>>";
+    case P_AMP: return "&";
+    case P_PIPE: return "|";
+    case P_CARET: return "^";
+    case P_AND: return "&&";
+    case P_OR: return "||";
+    case P_NULLISH: return "??";
+    case P_EQ: return "==";
+    case P_NE: return "!=";
+    case P_SEQ: return "===";
+    case P_SNE: return "!==";
+    case P_LT: return "<";
+    case P_GT: return ">";
+    case P_LE: return "<=";
+    case P_GE: return ">=";
+    case P_INSTANCEOF: return "instanceof";
+    case P_IN: return "in";
+    default: return ",";
+    }
+}
+/* the operators V8 makes one n-ary operation of: a chain of one printed flat */
+static int pr_nary(uint32_t op) {
+    return op == P_NULLISH || op == P_OR || op == P_AND || op == P_PIPE || op == P_CARET || op == P_AMP || op == P_SHL || op == P_SAR ||
+           op == P_SHR || op == P_PLUS || op == P_MINUS || op == P_STAR || op == P_SLASH || op == P_PERCENT;
+}
+/* a key that is a string literal, which V8 prints as a name: its string, else 0 */
+static uint32_t pr_str_key(js_cc *cc, uint32_t n) {
+    jn e = cc->nodes[n];
+    if (e.k == N_STR) return e.s;
+    if (e.k == N_TEMPLATE && e.op == 0 && e.b == 1) return cc->nodes[cc->lists[e.a]].s;
+    return 0;
+}
+
+static void pr_find(js_vm *vm, js_cc *cc, uint32_t n, int print, vector<char> *out, uint32_t *np);
+
+static void pr_visit(js_vm *vm, js_cc *cc, uint32_t n, vector<char> *out, uint32_t *np) {
+    jn e = cc->nodes[n];
+    double v;
+    int t;
+    switch (e.k) {
+    case N_IDENT: pr_atom(vm, out, np, e.s); return;
+    case N_THIS: pr_put(out, np, "this"); return;
+    case N_NEW_TARGET: pr_put(out, np, ".new.target"); return;
+    case N_NUM:
+        if (e.op == 0) pr_number(out, np, e.num);
+        else if (e.op == 1) pr_put(out, np, "null");
+        else if (e.op == 2) pr_put(out, np, "true");
+        else if (e.op == 3) pr_put(out, np, "false");
+        return;                                           /* a BigInt's: none */
+    case N_STR: pr_put(out, np, "\""); pr_atom(vm, out, np, e.s); pr_put(out, np, "\""); return;
+    case N_TEMPLATE: {
+        if (e.op == 1) return;                            /* a tag's strings: none */
+        uint32_t s = pr_str_key(cc, n);
+        if (s) { pr_put(out, np, "\""); pr_atom(vm, out, np, s); pr_put(out, np, "\""); return; }
+        for (uint32_t i = 1; i < e.b; i += 2) pr_find(vm, cc, cc->lists[e.a + i], 1, out, np);
+        return;
+    }
+    case N_REGEX: {
+        /* its flags in V8's order */
+        pr_put(out, np, "/");
+        pr_atom(vm, out, np, e.s);
+        pr_put(out, np, "/");
+        vector<char> fl;
+        js_str_to_utf8(vm, e.a, &fl);
+        const char *order = "dgilmsuvy";
+        for (const char *q = order; *q; q++)
+            for (size_t i = 0; i < len(fl); i++)
+                if (fl[i] == *q) { char b[2] = { *q, 0 }; pr_put(out, np, b); break; }
+        return;
+    }
+    case N_ARRAY:
+        pr_put(out, np, "[");
+        for (uint32_t i = 0; i < e.b; i++) {
+            uint32_t el = cc->lists[e.a + i];
+            if (i) pr_put(out, np, ",");
+            if (cc->nodes[el].k == N_SPREAD) { pr_put(out, np, "(..."); pr_find(vm, cc, cc->nodes[el].a, 1, out, np); pr_put(out, np, ")"); }
+            else pr_find(vm, cc, el, 1, out, np);
+        }
+        pr_put(out, np, "]");
+        return;
+    case N_OBJECT:
+        pr_put(out, np, "{");
+        for (uint32_t i = 0; i < e.b; i++) pr_find(vm, cc, cc->lists[e.a + i], 0, out, np);
+        pr_put(out, np, "}");
+        return;
+    case N_FUNC: {
+        /* each statement of its body an intermediate value (a concise arrow's one) */
+        jfn f = cc->fns[e.a];
+        uint32_t k = 0;
+        if (f.flags & FN_EXPR) k = 1;
+        else if (f.body) {
+            jn b = cc->nodes[f.body];
+            for (uint32_t i = 0; i < b.b; i++) if (cc->nodes[cc->lists[b.a + i]].k != N_FUNCDECL) k++;
+        }
+        for (uint32_t i = 0; i < k; i++) pr_put(out, np, "(intermediate value)");
+        return;
+    }
+    case N_CLASS: {
+        jclass c = cc->classes[e.a];
+        if (c.extends) pr_find(vm, cc, c.extends, 0, out, np);
+        for (uint32_t i = 0; i < c.nmembers; i++) pr_put(out, np, "(intermediate value)");
+        return;
+    }
+    case N_UNARY: {
+        if (e.op == P_BANG && pr_truth(vm, cc, n, &t)) { pr_put(out, np, t ? "true" : "false"); return; }
+        if (pr_num(cc, n, &v)) { pr_number(out, np, v); return; }
+        const char *o = e.op == 1000 ? "typeof " : e.op == 1001 ? "void " : e.op == 1002 ? "delete " : e.op == P_MINUS ? "-" :
+                        e.op == P_PLUS ? "+" : e.op == P_BANG ? "!" : "~";
+        pr_put(out, np, "(");
+        pr_put(out, np, o);
+        pr_find(vm, cc, e.a, 1, out, np);
+        pr_put(out, np, ")");
+        return;
+    }
+    case N_UPDATE: {
+        const char *o = e.op == P_INC ? "++" : "--";
+        pr_put(out, np, "(");
+        if (e.d & NF_PREFIX) pr_put(out, np, o);
+        pr_find(vm, cc, e.a, 1, out, np);
+        if (!(e.d & NF_PREFIX)) pr_put(out, np, o);
+        pr_put(out, np, ")");
+        return;
+    }
+    case N_BINARY: case N_LOGICAL: case N_SEQ: {
+        if (e.k == N_BINARY && pr_num(cc, n, &v)) { pr_number(out, np, v); return; }
+        uint32_t op = e.k == N_SEQ ? 0 : e.op;
+        /* (pr_op's text not kept in a local: toolchain/REPORT.md, finding 15) */
+        if (e.k != N_SEQ && !pr_nary(op)) {
+            pr_put(out, np, "(");
+            pr_find(vm, cc, e.a, 1, out, np);
+            pr_put(out, np, " ");
+            pr_put(out, np, pr_op(op));
+            pr_put(out, np, " ");
+            pr_find(vm, cc, e.b, 1, out, np);
+            pr_put(out, np, ")");
+            return;
+        }
+        /* the chain down its left: one flat operation, as V8's parser makes it */
+        vector<uint32_t> items;
+        push_back(items, e.b);
+        uint32_t x = e.a;
+        while (cc->nodes[x].k == e.k && (e.k == N_SEQ || cc->nodes[x].op == e.op) && !(e.k == N_BINARY && pr_num(cc, x, &v))) {
+            push_back(items, cc->nodes[x].b);
+            x = cc->nodes[x].a;
+        }
+        push_back(items, x);
+        pr_put(out, np, "(");
+        for (size_t i = len(items); i-- > 0;) {
+            pr_find(vm, cc, items[i], 1, out, np);
+            if (i) { pr_put(out, np, " "); pr_put(out, np, pr_op(op)); pr_put(out, np, " "); }
+        }
+        pr_put(out, np, ")");
+        return;
+    }
+    case N_COND:
+        pr_find(vm, cc, e.a, 0, out, np);
+        pr_find(vm, cc, e.b, 0, out, np);
+        pr_find(vm, cc, e.c, 0, out, np);
+        return;
+    case N_ASSIGN: pr_find(vm, cc, e.a, 1, out, np); return;
+    case N_MEMBER: {
+        pr_find(vm, cc, e.a, 1, out, np);
+        uint32_t s = (e.op & NF_COMPUTED) ? pr_str_key(cc, e.b) : e.s;
+        if (s) {
+            if (e.op & NF_OPTIONAL) pr_put(out, np, "?");
+            pr_put(out, np, ".");
+            pr_atom(vm, out, np, s);
+            return;
+        }
+        pr_put(out, np, (e.op & NF_OPTIONAL) ? "?.[" : "[");
+        pr_find(vm, cc, e.b, 1, out, np);
+        pr_put(out, np, "]");
+        return;
+    }
+    case N_SUPER_MEMBER: {
+        /* super itself prints nothing */
+        pr_put(out, np, "(intermediate value)");
+        uint32_t s = (e.op & NF_COMPUTED) ? pr_str_key(cc, e.b) : e.s;
+        if (s) { pr_put(out, np, "."); pr_atom(vm, out, np, s); return; }
+        pr_put(out, np, "[");
+        pr_find(vm, cc, e.b, 1, out, np);
+        pr_put(out, np, "]");
+        return;
+    }
+    case N_CALL: pr_find(vm, cc, e.a, 1, out, np); pr_put(out, np, "(...)"); return;
+    case N_SUPER_CALL: pr_put(out, np, "super"); pr_put(out, np, "(...)"); return;
+    case N_NEW: pr_find(vm, cc, e.a, 0, out, np); return;
+    case N_SPREAD: pr_put(out, np, "(..."); pr_find(vm, cc, e.a, 1, out, np); pr_put(out, np, ")"); return;
+    case N_YIELD: case N_AWAIT: case N_CHAIN: pr_find(vm, cc, e.a, 0, out, np); return;
+    case N_IMPORT_CALL:
+        pr_put(out, np, "ImportCall(");
+        pr_find(vm, cc, e.a, 1, out, np);
+        if (e.b) { pr_put(out, np, ", "); pr_find(vm, cc, e.b, 1, out, np); }
+        pr_put(out, np, ")");
+        return;
+    default: return;
+    }
+}
+
+/* V8's Find: printed, when asked and something prints, else "(intermediate value)" */
+static void pr_find(js_vm *vm, js_cc *cc, uint32_t n, int print, vector<char> *out, uint32_t *np) {
+    if (print && n && cc->depth < JS_NEST_MAX) {
+        uint32_t k = *np;
+        cc->depth++;
+        pr_visit(vm, cc, n, out, np);
+        cc->depth--;
+        if (*np != k) return;
+    }
+    pr_put(out, np, "(intermediate value)");
+}
+
+int js_site_text(js_vm *vm, js_site s, int callee_only, vector<char> *out) {
+    if (!s.end || s.end <= s.start || (size_t)s.end > len(vm->src)) return 0;
+    vector<char> text;
+    append_range(text, data(vm->src) + s.start, s.end - s.start);
+    js_cc ccs;
+    memset(&ccs, 0, sizeof ccs);
+    defer(ccs) { JS_CC_DROP(ccs); }
+    js_cc *cc = &ccs;
+    const char *src = data(text);
+    uint32_t srcn = (uint32_t)len(text);
+    /* read as the code it stands in reads (yield and await operators there), with no scopes */
+    jn n0;
+    memset(&n0, 0, sizeof n0);
+    push_back(cc->nodes, n0);
+    push_back(cc->lists, 0);
+    jdecl d0;
+    memset(&d0, 0, sizeof d0);
+    push_back(cc->decls, d0);
+    jref r0 = { 0, 0, 0, 0 };
+    push_back(cc->refs, r0);
+    for (int k = 0; k < KW_N; k++) cc->kw[k] = js_atom_ascii(vm, js_kw_names[k]);
+    jscope s0 = { 0, 0, SC_FUNC, 0, 0, 0, 0, 0 };
+    push_back(cc->scopes, s0);
+    jfn f0;
+    memset(&f0, 0, sizeof f0);
+    f0.flags = ((s.kind & JSS_GENERATOR) ? JF_GENERATOR : 0) | ((s.kind & JSS_ASYNC) ? JF_ASYNC : 0);
+    push_back(cc->fns, f0);
+    pat_name(cc, JSS_NONE, JSS_PLAIN, 0, 0);
+    cc->line = 1;
+    cc->tok.type = T_EOF;
+    lx(vm, src, srcn, cc);
+    uint32_t e = p_expr(vm, src, srcn, cc, 0);
+    if (cc->err || cc->tok.type != T_EOF || !e) return 0;
+    /* an optional chain the expression is: the chain V8 prints is within it */
+    if (cc->nodes[e].k == N_CHAIN) e = cc->nodes[e].a;
+    uint32_t np = 0;
+    size_t n0len = len(*out);
+    cc->depth = 0;
+    if (callee_only && cc->nodes[e].k == N_CALL) pr_find(vm, cc, cc->nodes[e].a, 1, out, &np);
+    else pr_find(vm, cc, e, 1, out, &np);
+    return len(*out) > n0len;
 }

@@ -278,6 +278,9 @@ jv js_module_namespace(js_vm *vm, uint32_t m) {
         uint32_t g = js_native_new(vm, vm->mod_first + JMD_NS_GET, at(keep, i), 0);
         vm->objs[g].x = jv_num(m);
         js_define_accessor(vm, o, at(keep, i), jv_obj(g), JV_HOLE, 0);
+        /* the binding's name, which the getter reads, kept (a native getter is otherwise
+           named "get x", as V8 names its own) */
+        vm->objs[g].c = at(keep, i);
     }
     js_define(vm, o, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Module")), JS_SHAPE_HIDDEN);
     vm->objs[o].flags &= (uint16_t)~JO_EXTENSIBLE;

@@ -2953,7 +2953,10 @@ void js_re_init(js_vm *vm, uint32_t first) {
     }
     static const uint32_t syms[] = { JSYM_MATCH, JSYM_MATCH_ALL, JSYM_REPLACE, JSYM_SEARCH, JSYM_SPLIT };
     static const uint32_t sids[] = { JRE_MATCH, JRE_MATCHALL, JRE_REPLACE, JRE_SEARCH, JRE_SPLIT };
-    for (uint32_t i = 0; i < 5; i++) js_define(vm, rp, JS_SYM_KEY | syms[i], jv_obj(js_native_new(vm, first + sids[i], A_EMPTY, i == 2 || i == 4 ? 2 : 1)), JS_SHAPE_HIDDEN);
+    /* named as V8 names them: "[Symbol.match]" */
+    static const char *const snames[] = { "[Symbol.match]", "[Symbol.matchAll]", "[Symbol.replace]", "[Symbol.search]", "[Symbol.split]" };
+    for (uint32_t i = 0; i < 5; i++)
+        js_define(vm, rp, JS_SYM_KEY | syms[i], jv_obj(js_native_new(vm, first + sids[i], js_atom_ascii(vm, snames[i]), i == 2 || i == 4 ? 2 : 1)), JS_SHAPE_HIDDEN);
 }
 
 /* HTML's pattern attribute (4.10.5.3.6): whether the value v[0..vn) matches the pattern

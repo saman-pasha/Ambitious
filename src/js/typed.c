@@ -938,7 +938,7 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_TYPEDARRAY && vw_oob(vm, jv_idx(a0))) return ta_detached(vm, "%TypedArray%.prototype.values");
             if (!ta_values_of(vm, a0, &vals, "%TypedArray%.prototype.values")) return JV_HOLE;
             if (a1 != JV_UNDEF) {
-                if (!js_is_callable(vm, a1)) return js_type_error(vm, "is not a function", js_typeof(vm, a1));
+                if (!js_is_callable(vm, a1)) return js_not_function(vm, a1);
                 for (size_t i = 0; i < len(vals); i++) {
                     jv av[2] = { vals[i], jv_num((double)i) };
                     jv r = js_call(vm, a1, a2, av, 2);
@@ -1023,7 +1023,7 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
     case JTN_MAP: case JTN_FILTER: {
         uint32_t o = valid_ta(vm, thisv, which == JTN_MAP ? "map" : "filter");
         if (!o) return JV_HOLE;
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+        if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         uint32_t n = vm->objs[o].b;
         vector<jv> vals;
         for (uint32_t i = 0; i < n; i++) {

@@ -1,10 +1,10 @@
-/* src/js/vm.c -- the engine's heart: strings and atoms, shapes and objects, properties,
-   conversions, errors, and the interpreter (src/js/js.h says what each is).
+/* src/js/vm.c -- the engine's heart: strings and atoms, shapes and objects, properties
+   (an array's and an arguments object's elements among them, each with its attributes),
+   conversions, errors in V8's words, and the interpreter (src/js/js.h says what each is).
 
-   What it does not do: symbols, generators, async functions and promises' jobs, proxies,
-   typed arrays, getters on array indexes, property attributes beyond enumerable, and a
-   collector: the page's arena is freed with the page, and a script past the cap ends
-   with a RangeError. */
+   What it does not do is docs/limitations.md's JavaScript row: among it, a sloppy
+   function's arguments object is not mapped to its parameters, and an assignment to a
+   let or const before its declaration is no ReferenceError. */
 #include <stdlib.h>
 #include <math.h>
 #include "js.h"
@@ -412,6 +412,14 @@ int js_get_own(js_vm *vm, uint32_t o, uint32_t atom, jv *v, uint32_t *flags) {
     return 1;
 }
 
+int js_shape_entry(js_vm *vm, uint32_t o, uint32_t key, uint32_t *flags, int *live) {
+    uint32_t e = js_shape_find(vm, vm->objs[o].shape, key);
+    if (!e) return 0;
+    *flags = vm->shapes[e].flags;
+    *live = vm->slots[vm->objs[o].slots + vm->shapes[e].slot] != JV_HOLE;
+    return 1;
+}
+
 void js_define(js_vm *vm, uint32_t o, uint32_t atom, jv v, uint32_t flags) {
     uint32_t sh = vm->objs[o].shape;
     uint32_t e = js_shape_find(vm, sh, atom);
@@ -428,10 +436,26 @@ void js_define(js_vm *vm, uint32_t o, uint32_t atom, jv v, uint32_t flags) {
     vm->slots[vm->objs[o].slots + slot] = v;
 }
 
+/* a native getter's or setter's name as V8 gives it ("get size", "get [Symbol.toStringTag]"),
+   when it was made with its key's own name (or none, under a symbol) */
+static void js_accessor_name(js_vm *vm, jv fn, uint32_t key, int setter) {
+    if (!jv_is_obj(fn) || vm->objs[jv_idx(fn)].kind != JK_NATIVE) return;
+    uint32_t f = jv_idx(fn), nm = vm->objs[f].c;
+    uint32_t t = key;
+    if (js_key_is_sym(key)) {
+        if (nm && nm != A_EMPTY) return;
+        uint32_t d = vm->syms[key & ~JS_SYM_KEY].desc;
+        t = js_str_concat(vm, js_str_ascii(vm, "["), js_str_concat(vm, d ? d : A_EMPTY, js_str_ascii(vm, "]")));
+    } else if (nm != key) return;
+    vm->objs[f].c = js_atom(vm, js_str_concat(vm, js_str_ascii(vm, setter ? "set " : "get "), t));
+}
+
 void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv setter, uint32_t flags) {
     jv cur;
     uint32_t cf;
     uint32_t acc;
+    js_accessor_name(vm, getter, atom, 0);
+    js_accessor_name(vm, setter, atom, 1);
     if (js_get_own(vm, o, atom, &cur, &cf) && (cf & JS_SHAPE_ACCESSOR)) acc = jv_idx(cur);
     else {
         acc = js_obj_new(vm, JK_ACCESSOR, 0);
@@ -443,23 +467,59 @@ void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv sett
     if (setter != JV_HOLE) vm->objs[acc].a = jv_is_obj(setter) ? jv_idx(setter) : 0;
 }
 
+/* ---- an array's (and an arguments object's) elements ----
+   An element is dense, its value in the slots the object's dense array holds (an
+   arguments object's own array, in a), its attributes the default ones (writable,
+   enumerable, configurable) but as the object's being frozen or sealed makes them; or,
+   given attributes of its own (Object.defineProperty's, an accessor), kept in the
+   object's shape under its index as any property is, the dense slot a hole, and the
+   object marked JO_ELEMPROPS. An element is never both. An array's length is past every
+   element of either kind. */
+
+/* an index's atom */
+static uint32_t js_index_atom(js_vm *vm, uint32_t i) { return js_atom(vm, js_num_to_str(vm, (double)i)); }
+/* the array that holds an object's dense elements: an array its own, an arguments object's */
+static uint32_t js_elem_store(js_vm *vm, uint32_t o) { return vm->objs[o].kind == JK_ARGUMENTS ? vm->objs[o].a : o; }
+/* element i kept in o's shape, with attributes of its own: its shape entry, 0 for none */
+static uint32_t js_elem_entry(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
+    if (!(vm->objs[o].flags & JO_ELEMPROPS)) return 0;
+    uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom ? atom : js_index_atom(vm, i));
+    if (!e || vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) return 0;
+    return e;
+}
+/* a refusal and why (vm->refused): 2 */
+static int js_refuse(js_vm *vm, uint32_t why, uint32_t key) {
+    vm->refused = why;
+    vm->refused_key = key;
+    return 2;
+}
+
+/* element i deleted ([[Delete]]): 1, or 0 when it stays (not configurable: its own
+   attribute, or the object sealed or frozen) */
+static int js_elem_delete(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
+    uint32_t st = js_elem_store(vm, o), fl = vm->objs[o].flags;
+    if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) {
+        if (fl & (JO_SEALED | JO_FROZEN)) return 0;
+        vm->slots[vm->objs[st].a + i] = JV_HOLE;
+        return 1;
+    }
+    uint32_t e = js_elem_entry(vm, o, i, atom);
+    if (e) {
+        if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (fl & (JO_SEALED | JO_FROZEN))) return 0;
+        vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
+    }
+    return 1;
+}
+
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
     if (vm->objs[o].kind == JK_PROXY) return js_proxy_delete(vm, o, atom);
-    if (vm->objs[o].flags & JO_FROZEN) return 0;
-    if (vm->objs[o].kind == JK_ARRAY) {
-        uint32_t i;
-        if (js_atom_index(vm, atom, &i)) {
-            if (i < vm->objs[o].b && vm->slots[vm->objs[o].a + i] != JV_HOLE) {
-                if (vm->objs[o].flags & JO_SEALED) return 0;
-                vm->slots[vm->objs[o].a + i] = JV_HOLE;
-            }
-            return 1;
-        }
-    }
+    uint32_t k = vm->objs[o].kind, i;
+    if ((k == JK_ARRAY || k == JK_ARGUMENTS) && js_atom_index(vm, atom, &i)) return js_elem_delete(vm, o, i, atom);
+    if (k == JK_ARRAY && atom == A_LENGTH) return 0;
     uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
     if (e && vm->slots[vm->objs[o].slots + vm->shapes[e].slot] != JV_HOLE) {
-        /* a property not configurable (defineProperty's, a sealed object's) stays */
-        if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (vm->objs[o].flags & JO_SEALED)) return 0;
+        /* a property not configurable (defineProperty's, a sealed or frozen object's) stays */
+        if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (vm->objs[o].flags & (JO_SEALED | JO_FROZEN))) return 0;
         vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
     }
     return 1;
@@ -522,6 +582,23 @@ void js_array_set_length(js_vm *vm, uint32_t a, uint32_t n) {
     vm->objs[a].b = n;
 }
 
+int js_array_set_length_checked(js_vm *vm, uint32_t a, double d) {
+    if (d != d || d < 0 || d != trunc(d) || d > 4294967295.0) { js_throw_msg(vm, vm->range_error_proto, "Invalid array length"); return 0; }
+    uint32_t n = (uint32_t)d, fl = vm->objs[a].flags, cur = vm->objs[a].b;
+    if (fl & (JO_FROZEN | JO_LENGTH_RO)) return js_refuse(vm, JSR_LENGTH, A_LENGTH);
+    if (n < cur && (fl & (JO_SEALED | JO_ELEMPROPS))) {
+        /* the elements past it deleted from the end, a non-configurable one stopping it */
+        for (uint32_t i = cur; i-- > n;) {
+            if (!js_elem_delete(vm, a, i, 0)) {
+                js_array_set_length(vm, a, i + 1);
+                return js_refuse(vm, JSR_DELETE, js_index_atom(vm, i));
+            }
+        }
+    }
+    js_array_set_length(vm, a, n);
+    return 1;
+}
+
 /* ---- errors ---- */
 
 jv js_throw(js_vm *vm, jv v) {
@@ -569,6 +646,317 @@ void js_error_text(js_vm *vm, jv e, vector<char> *out) {
     }
     vm->throwing = was;
     vm->exception = saved;
+}
+
+/* ---- the TypeErrors that name an expression or a value, in V8's words ----
+   V8 names the expression an error is about by printing it again from its syntax (its
+   call printer: f.reset, obj.a[0], this.x, (intermediate value).m); where it cannot, by
+   the value (its default: "number 5", "object"). The compiler records where each such
+   expression stands (vm->sites, src/js/compile.c), and js_site_text prints one again. */
+
+static void js_put(vector<char> *m, const char *s) { append_range(*m, s, strlen(s)); }
+
+static jv js_throw_chars(js_vm *vm, uint32_t proto, vector<char> *m) {
+    if (vm->throwing) return JV_HOLE;
+    uint32_t s = js_str_utf8(vm, data(*m), len(*m));
+    return js_throw(vm, jv_obj(js_error_new(vm, proto, s)));
+}
+
+void js_value_name(js_vm *vm, jv v, vector<char> *out) {
+    js_str_to_utf8(vm, js_typeof(vm, v), out);
+    if (jv_is_str(v)) {
+        uint32_t s = jv_idx(v), n = vm->strs[s].len;
+        js_put(out, " \"");
+        js_str_to_utf8(vm, n > 100 ? js_str_sub(vm, s, 0, 100) : s, out);
+        if (n > 100) js_put(out, "<...>");
+        push_back(*out, '"');
+    } else if (v == JV_NULL) js_put(out, " null");
+    else if (v == JV_TRUE) js_put(out, " true");
+    else if (v == JV_FALSE) js_put(out, " false");
+    else if (jv_is_num(v)) {
+        char b[64];
+        js_num_format(jv_dbl(v), b, sizeof b);
+        push_back(*out, ' ');
+        js_put(out, b);
+    }
+}
+
+jv js_not_function(js_vm *vm, jv v) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    js_value_name(vm, v, &m);
+    js_put(&m, " is not a function");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+jv js_not_constructor(js_vm *vm, jv v) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    js_value_text(vm, v, &m);
+    js_put(&m, " is not a constructor");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+uint32_t js_func_source(js_vm *vm, uint32_t o) {
+    uint32_t k = vm->objs[o].kind;
+    if (k == JK_CLOSURE) {
+        js_func f = vm->funcs[vm->objs[o].a];
+        if (f.src_len && (size_t)f.src_off + f.src_len <= len(vm->src)) {
+            vector<char> t;
+            append_range(t, data(vm->src) + f.src_off, f.src_len);
+            return js_str_utf8(vm, data(t), len(t));
+        }
+    }
+    if (k == JK_NATIVE) {
+        uint32_t name = vm->objs[o].c;
+        return js_str_concat(vm, js_str_ascii(vm, "function "), js_str_concat(vm, name ? name : A_EMPTY, js_str_ascii(vm, "() { [native code] }")));
+    }
+    if (k == JK_CLOSURE || k == JK_BOUND || (k == JK_PROXY && vm->objs[o].c)) return js_str_ascii(vm, "function () { [native code] }");
+    return 0;
+}
+
+/* a property as GetDataProperty reads it: up the prototypes, an accessor's or a proxy's undefined */
+static jv js_data_prop(js_vm *vm, uint32_t o, uint32_t key) {
+    for (uint32_t x = o, d = 0; x && d < 10000; x = vm->objs[x].proto, d++) {
+        if (vm->objs[x].kind == JK_PROXY) return JV_UNDEF;
+        uint32_t e = js_shape_find(vm, vm->objs[x].shape, key);
+        if (!e) continue;
+        jv v = vm->slots[vm->objs[x].slots + vm->shapes[e].slot];
+        if (v == JV_HOLE) continue;
+        return (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) ? JV_UNDEF : v;
+    }
+    return JV_UNDEF;
+}
+
+void js_value_text(js_vm *vm, jv v, vector<char> *out) {
+    if (!jv_is_obj(v)) {
+        int was = vm->throwing;
+        uint32_t s = jv_is_sym(v) ? js_sym_text(vm, jv_idx(v)) : js_to_string(vm, v);
+        vm->throwing = was;
+        if (s) js_str_to_utf8(vm, s, out);
+        return;
+    }
+    uint32_t o = jv_idx(v), k = vm->objs[o].kind;
+    uint32_t fs = js_func_source(vm, o);
+    if (fs) { js_str_to_utf8(vm, fs, out); return; }
+    if (k == JK_ERROR) {
+        jv nm = js_data_prop(vm, o, A_NAME), msg = js_data_prop(vm, o, A_MESSAGE);
+        if (jv_is_str(nm)) js_str_to_utf8(vm, jv_idx(nm), out);
+        else js_put(out, "Error");
+        if (jv_is_str(msg) && vm->strs[jv_idx(msg)].len) { js_put(out, ": "); js_str_to_utf8(vm, jv_idx(msg), out); }
+        return;
+    }
+    /* Object.prototype.toString its toString: #<its constructor's name> */
+    jv ots = JV_UNDEF;
+    uint32_t of = 0;
+    js_get_own(vm, vm->object_proto, A_TOSTRING, &ots, &of);
+    if (k != JK_PROXY && js_data_prop(vm, o, A_TOSTRING) == ots) {
+        jv c = js_data_prop(vm, o, A_CONSTRUCTOR);
+        uint32_t cn = 0;
+        if (jv_is_obj(c) && vm->objs[jv_idx(c)].kind == JK_CLOSURE) cn = vm->funcs[vm->objs[jv_idx(c)].a].name;
+        else if (jv_is_obj(c) && vm->objs[jv_idx(c)].kind == JK_NATIVE) cn = vm->objs[jv_idx(c)].c;
+        if (cn && vm->strs[cn].len) { js_put(out, "#<"); js_str_to_utf8(vm, cn, out); push_back(*out, '>'); return; }
+    }
+    /* else [object its tag], or its kind's class */
+    jv tag = k == JK_PROXY ? JV_UNDEF : js_data_prop(vm, o, JS_SYM_KEY | JSYM_TO_STRING_TAG);
+    js_put(out, "[object ");
+    if (jv_is_str(tag)) js_str_to_utf8(vm, jv_idx(tag), out);
+    else js_put(out, k == JK_ARRAY ? "Array" : k == JK_DATE ? "Date" : k == JK_REGEXP ? "RegExp" : k == JK_ARGUMENTS ? "Arguments" :
+                     k == JK_BOOLEAN ? "Boolean" : k == JK_NUMBER ? "Number" : k == JK_STRING ? "String" : "Object");
+    push_back(*out, ']');
+}
+
+/* an iterator's next gave no object: "Iterator result 5 is not an object" */
+static jv js_result_error(js_vm *vm, jv r) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    js_put(&m, "Iterator result ");
+    js_value_text(vm, r, &m);
+    js_put(&m, " is not an object");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* the site of the instruction at pc, found among vm->sites (in pc order): 1 when there is one */
+static int js_site_at(js_vm *vm, uint32_t pc, js_site *out) {
+    size_t lo = 0, hi = len(vm->sites);
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (vm->sites[mid].pc < pc) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo >= len(vm->sites) || vm->sites[lo].pc != pc) return 0;
+    *out = vm->sites[lo];
+    return 1;
+}
+
+/* the name a site gives its expression: V8's own for the bindings it makes (".for",
+   ".catch"), its text printed again, else the value's default name */
+static void js_site_name(js_vm *vm, js_site s, int have, jv v, int callee_only, vector<char> *out) {
+    if (have && (s.kind & JSS_DOTFOR)) { js_put(out, ".for"); return; }
+    if (have && (s.kind & JSS_DOTCATCH)) { js_put(out, ".catch"); return; }
+    if (have && (s.kind & JSS_DEFAULTED)) { js_put(out, "(intermediate value)(intermediate value)(intermediate value)"); return; }
+    if (have && (s.kind & JSS_INTERMEDIATE)) { js_put(out, "(intermediate value)"); return; }
+    if (have && !(s.kind & JSS_PLAIN) && js_site_text(vm, s, callee_only, out)) return;
+    js_value_name(vm, v, out);
+}
+
+/* a call's (or new's) callee that is no function: "f.reset is not a function" */
+static jv js_call_error(js_vm *vm, uint32_t pc, jv callee, int construct) {
+    if (vm->throwing) return JV_HOLE;
+    js_site s = { 0, 0, 0, 0 };
+    int have = js_site_at(vm, pc, &s);
+    vector<char> m;
+    /* a call an iteration takes its value from: V8 words its error as the iteration's */
+    if (have && !construct && (s.kind & JSS_INTERMEDIATE)) {
+        js_put(&m, "yield* (intermediate value) is not iterable");
+        return js_throw_chars(vm, vm->type_error_proto, &m);
+    }
+    js_site_name(vm, s, have, callee, 0, &m);
+    if (have && !construct && (s.kind & JSS_CALLED) && (s.kind & JSS_AWAITED)) js_put(&m, "(...) is not a function or its return value is not async iterable");
+    else if (have && !construct && (s.kind & JSS_CALLED)) js_put(&m, " is not a function or its return value is not iterable");
+    else js_put(&m, construct ? " is not a constructor" : " is not a function");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+jv js_caller_not_function(js_vm *vm, jv v) {
+    if (vm->throwing) return JV_HOLE;
+    if (vm->nframes) {
+        /* the script's frame, its pc past the call that reached the native */
+        uint32_t pc = vm->frames[vm->nframes - 1].pc, at = 0;
+        if (pc >= 3 && (vm->code[pc - 3] == OP_CALL || vm->code[pc - 3] == OP_CALL0)) at = pc - 3;
+        else if (pc >= 1 && vm->code[pc - 1] == OP_CALL_ARR) at = pc - 1;
+        js_site s = { 0, 0, 0, 0 };
+        if (at && js_site_at(vm, at, &s) && (s.kind & JSS_KIND) == JSS_CALL) return js_call_error(vm, at, v, 0);
+    }
+    return js_not_function(vm, v);
+}
+
+/* a class's constructor called without new: V8 names the class, or says it has none */
+static jv js_class_call_error(js_vm *vm, uint32_t c) {
+    if (vm->throwing) return JV_HOLE;
+    uint32_t name = vm->objs[c].kind == JK_CLOSURE ? vm->funcs[vm->objs[c].a].name : 0;
+    vector<char> m;
+    if (name && vm->strs[name].len) {
+        js_put(&m, "Class constructor ");
+        js_str_to_utf8(vm, name, &m);
+        js_put(&m, " cannot be invoked without 'new'");
+    } else js_put(&m, "Class constructors cannot be invoked without 'new'");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* key in v, v no object: "Cannot use 'in' operator to search for 'x' in 5" */
+static jv js_in_error(js_vm *vm, jv key, jv v) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    js_put(&m, "Cannot use 'in' operator to search for '");
+    js_value_text(vm, key, &m);
+    js_put(&m, "' in ");
+    js_value_text(vm, v, &m);
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* class extends a value that is no constructor (proto 0), or whose prototype is neither an
+   object nor null (proto 1, v that prototype) */
+static jv js_extends_error(js_vm *vm, jv v, int proto) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    js_put(&m, proto ? "Class extends value does not have valid prototype property " : "Class extends value ");
+    js_value_text(vm, v, &m);
+    if (!proto) js_put(&m, " is not a constructor or null");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* super(...) whose parent is no constructor: "Super constructor null of A is not a constructor" */
+static jv js_super_error(js_vm *vm, uint32_t func, jv parent) {
+    if (vm->throwing) return JV_HOLE;
+    uint32_t name = vm->funcs[func].name;
+    vector<char> m;
+    js_put(&m, "Super constructor ");
+    /* V8 names a function by its name (none: null), any other value by its text */
+    uint32_t pk = jv_is_obj(parent) ? vm->objs[jv_idx(parent)].kind : JK_FREE;
+    if (pk == JK_CLOSURE || pk == JK_NATIVE || pk == JK_BOUND) {
+        uint32_t pn = pk == JK_CLOSURE ? vm->funcs[vm->objs[jv_idx(parent)].a].name : pk == JK_NATIVE ? vm->objs[jv_idx(parent)].c : 0;
+        if (pn && vm->strs[pn].len) js_str_to_utf8(vm, pn, &m);
+        else js_put(&m, "null");
+    } else js_value_text(vm, parent, &m);
+    js_put(&m, " of ");
+    if (name && vm->strs[name].len) js_str_to_utf8(vm, name, &m);
+    else js_put(&m, "anonymous class");
+    js_put(&m, " is not a constructor");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* the interpreter's call instruction op that cannot be made, its frame fi's pc past its
+   operands: super(...)'s error, else the call's or new's at the instruction's site. Its
+   arguments few, so that js_run's hot paths keep their registers */
+static void js_call_fail(js_vm *vm, uint32_t op, uint32_t fi, jv callee) {
+    uint32_t pc = vm->frames[fi].pc;
+    if (op == OP_SUPER_CALL || op == OP_SUPER_CALL_ARR) { js_super_error(vm, vm->frames[fi].func, callee); return; }
+    js_call_error(vm, op == OP_CALL_ARR || op == OP_NEW_ARR ? pc - 1 : pc - 3, callee, op == OP_NEW || op == OP_NEW_ARR);
+}
+
+/* a value its site iterates that is not iterable (pc 0: a native's): V8's words for each
+   way to iterate one */
+static jv js_not_iterable(js_vm *vm, jv v, uint32_t pc, int async) {
+    if (vm->throwing) return JV_HOLE;
+    js_site s;
+    int have = pc && js_site_at(vm, pc, &s);
+    uint32_t k = have ? s.kind & JSS_KIND : 0xFFu;
+    vector<char> m;
+    if (k == JSS_SPREAD_CALL) {
+        if (!jv_is_nullish(v)) {
+            js_put(&m, "Spread syntax requires ...iterable[Symbol.iterator] to be a function");
+            return js_throw_chars(vm, vm->type_error_proto, &m);
+        }
+        js_site_name(vm, s, have, v, 0, &m);
+        js_put(&m, v == JV_NULL ? " is not iterable (cannot read property null)" : " is not iterable (cannot read property undefined)");
+        return js_throw_chars(vm, vm->type_error_proto, &m);
+    }
+    if (have && (s.kind & JSS_INTERMEDIATE)) {
+        js_put(&m, "yield* (intermediate value) is not iterable");
+        return js_throw_chars(vm, vm->type_error_proto, &m);
+    }
+    if (have && !(s.kind & JSS_PLAIN)) {
+        size_t n0 = len(m);
+        js_site_name(vm, s, have, v, (s.kind & JSS_CALLED) && !async, &m);
+        if (len(m) > n0) {
+            if (s.kind & JSS_CALLED) js_put(&m, async ? " is not a function or its return value is not async iterable" : " is not a function or its return value is not iterable");
+            else if (s.kind & JSS_NOSYM) js_put(&m, " is not iterable (cannot read property Symbol(Symbol.iterator))");
+            else js_put(&m, async ? " is not async iterable" : " is not iterable");
+            return js_throw_chars(vm, vm->type_error_proto, &m);
+        }
+    }
+    js_value_name(vm, v, &m);
+    js_put(&m, async ? " is not async iterable" : " is not iterable (cannot read property Symbol(Symbol.iterator))");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* an object pattern's value undefined or null, its first key (0: none): "Cannot
+   destructure property 'a' of 'obj.u' as it is undefined." */
+static jv js_destructure_error(js_vm *vm, js_site s, jv v, uint32_t key) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> name, m;
+    js_site_name(vm, s, 1, v, 0, &name);
+    js_put(&m, "Cannot destructure ");
+    if (key) {
+        js_put(&m, "property '");
+        js_str_to_utf8(vm, js_key_name(vm, key), &m);
+        js_put(&m, "' of ");
+    }
+    push_back(m, '\'');
+    append_range(m, data(name), len(name));
+    js_put(&m, v == JV_NULL ? "' as it is null." : "' as it is undefined.");
+    return js_throw_chars(vm, vm->type_error_proto, &m);
+}
+
+/* the interpreter's own: a nullish value read at an object pattern's first key (the read
+   at site_pc) or checked for one (key 0), thrown in V8's words: 1; 0 when the instruction
+   is no pattern's (kept out of js_run, whose registers its hot paths want) */
+static int js_destructure_at(js_vm *vm, uint32_t site_pc, jv v, uint32_t key) {
+    js_site s = { 0, 0, 0, 0 };
+    if (!js_site_at(vm, site_pc, &s) || (s.kind & JSS_KIND) != JSS_DESTRUCT_OBJ) return 0;
+    js_destructure_error(vm, s, v, key);
+    return 1;
 }
 
 /* ---- conversions ---- */
@@ -822,6 +1210,19 @@ int js_is_callable(js_vm *vm, jv v) {
     return k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND || (k == JK_PROXY && vm->objs[jv_idx(v)].c);
 }
 
+int js_is_constructor(js_vm *vm, jv v) {
+    for (int d = 0; d < 10000 && jv_is_obj(v); d++) {
+        uint32_t o = jv_idx(v), k = vm->objs[o].kind;
+        if (k == JK_CLOSURE) return !(vm->funcs[vm->objs[o].a].flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC));
+        /* a native constructor has a prototype of its own (the natives' methods none), Proxy aside */
+        if (k == JK_NATIVE) return vm->objs[o].a == vm->proxy_first + JPX_PROXY || js_shape_find(vm, vm->objs[o].shape, A_PROTOTYPE) != 0;
+        if (k == JK_BOUND) { v = jv_obj(vm->objs[o].a); continue; }
+        if (k == JK_PROXY && vm->objs[o].c) { v = jv_obj(vm->objs[o].a); continue; }
+        return 0;
+    }
+    return 0;
+}
+
 uint32_t js_typeof(js_vm *vm, jv v) {
     if (jv_is_num(v)) return A_NUMBER;
     if (jv_is_str(v)) return A_STRING;
@@ -933,10 +1334,10 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
                 uint32_t i;
                 if (js_atom_index(vm, atom, &i) && i < vm->strs[s].len) return jv_str(js_str_sub(vm, s, i, i + 1));
             } else {
+                /* an arguments object's dense element (its length an ordinary property) */
                 uint32_t arr = vm->objs[x].a;
-                if (atom == A_LENGTH) return jv_num(vm->objs[arr].b);
                 uint32_t i;
-                if (js_atom_index(vm, atom, &i) && i < vm->objs[arr].b) return js_array_get(vm, arr, i);
+                if (js_atom_index(vm, atom, &i) && i < vm->objs[arr].b && vm->slots[vm->objs[arr].a + i] != JV_HOLE) return vm->slots[vm->objs[arr].a + i];
             }
         } else if (k == JK_HOST) {
             int handled = 0;
@@ -980,6 +1381,8 @@ static jv js_get_from(js_vm *vm, jv objv, uint32_t atom, uint32_t *holder, uint3
     uint32_t p = js_proto_of_primitive(vm, objv);
     if (!p) {
         if (vm->throwing) return JV_HOLE;
+        /* V8's: Symbol.iterator read from nothing is an iteration's error */
+        if (atom == JS_KEY_ITERATOR) return js_not_iterable(vm, objv, 0, 0);
         uint32_t m = js_str_concat(vm, js_str_ascii(vm, objv == JV_NULL ? "Cannot read properties of null (reading '" : "Cannot read properties of undefined (reading '"),
                                    js_str_concat(vm, js_key_name(vm, atom), js_str_ascii(vm, "')")));
         return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
@@ -1024,57 +1427,10 @@ static int js_call_setter(js_vm *vm, jv acc, jv receiver, jv v) {
     return !vm->throwing;
 }
 
-/* obj.atom = v; ic, when not 0, is filled for the next time. 1 set; 0 thrown; 2 refused
-   (a primitive's property, a frozen object's, a read-only one, own or the nearest up the
-   prototypes, a new one on an object not extensible, an accessor without a setter), which
-   strict code throws for */
-int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
-    if (!jv_is_obj(objv)) {
-        if (jv_is_nullish(objv) || objv == JV_HOLE) {
-            uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot set properties of undefined (setting '"), js_str_concat(vm, js_key_name(vm, atom), js_str_ascii(vm, "')")));
-            js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
-            return 0;
-        }
-        return 2;
-    }
-    uint32_t o = jv_idx(objv);
-    uint32_t k = vm->objs[o].kind;
-    if (k == JK_PROXY) return js_proxy_set(vm, o, atom, v, objv);
-    if (k == JK_TYPEDARRAY) {
-        uint32_t i;
-        if (js_atom_index(vm, atom, &i)) return js_ta_set(vm, o, i, v);
-    }
-    if (vm->objs[o].flags & JO_FROZEN) return 2;
-    if (k == JK_ARRAY) {
-        uint32_t i;
-        if (atom == A_LENGTH) {
-            double d = js_to_number(vm, v);
-            if (vm->throwing) return 0;
-            if (d != d || d < 0 || d != trunc(d) || d > 4294967295.0) { js_throw_msg(vm, vm->range_error_proto, "Invalid array length"); return 0; }
-            js_array_set_length(vm, o, (uint32_t)d);
-            return 1;
-        }
-        if (js_atom_index(vm, atom, &i) && i < vm->objs[o].b + 1000000u) { js_array_set(vm, o, i, v); return 1; }
-    } else if (k == JK_HOST) {
-        int handled = 0;
-        int ok = js_host_set(vm, o, atom, v, &handled);
-        if (handled) return ok;
-    }
-    uint32_t sh = vm->objs[o].shape;
-    uint32_t e = js_shape_find(vm, sh, atom);
-    if (e) {
-        uint32_t slot = vm->shapes[e].slot;
-        jv cur = vm->slots[vm->objs[o].slots + slot];
-        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { if (cur != JV_HOLE) return js_call_setter(vm, cur, objv, v); }
-        else if ((vm->shapes[e].flags & JS_SHAPE_READONLY) && cur != JV_HOLE) return 2;
-        else {
-            vm->slots[vm->objs[o].slots + slot] = v;
-            /* a host object's writes are not cached: the host sees each one */
-            if (ic && cur != JV_HOLE && k != JK_HOST) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
-            return 1;
-        }
-    }
-    /* a setter up the prototypes, or a host's property there */
+/* a [[Set]] o has no own property for, up its prototypes: a setter there called, a
+   read-only property refusing (2), a proxy's or a host's own; -1 when none decides (the
+   receiver's own property is then made) */
+static int js_proto_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, jv objv) {
     for (uint32_t p = vm->objs[o].proto, depth = 0; p && depth < 10000; p = vm->objs[p].proto, depth++) {
         if (vm->objs[p].kind == JK_PROXY) return js_proxy_set(vm, p, atom, v, objv);
         if (vm->objs[p].kind == JK_HOST) {
@@ -1086,10 +1442,104 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         if (!pe) continue;
         jv pv = vm->slots[vm->objs[p].slots + vm->shapes[pe].slot];
         if (pv == JV_HOLE) continue;                       /* deleted: not there */
-        if (vm->shapes[pe].flags & JS_SHAPE_ACCESSOR) return js_call_setter(vm, pv, objv, v);
-        if (vm->shapes[pe].flags & JS_SHAPE_READONLY) return 2;
-        break;                                             /* a data property: the receiver's own is made */
+        if (vm->shapes[pe].flags & JS_SHAPE_ACCESSOR) {
+            int r = js_call_setter(vm, pv, objv, v);
+            return r == 2 ? js_refuse(vm, JSR_GETTER, atom) : r;
+        }
+        if ((vm->shapes[pe].flags & JS_SHAPE_READONLY) || (vm->objs[p].flags & JO_FROZEN)) return js_refuse(vm, JSR_READONLY, atom);
+        return -1;                                         /* a data property: the receiver's own is made */
     }
+    return -1;
+}
+
+/* element i of an array or an arguments object set, itself the receiver: its dense slot,
+   its own attributes' element (a setter, a read-only one), a prototype's say, else a new
+   element (refused on an object not extensible, past a read-only length): 1 set, 2
+   refused (vm->refused says why), 0 thrown; -1 for an index too far past an array's end
+   for its dense elements (a property of its shape) */
+static int js_elem_set(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom, jv v, jv objv) {
+    uint32_t st = js_elem_store(vm, o), fl = vm->objs[o].flags;
+    if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) {
+        if (fl & JO_FROZEN) return js_refuse(vm, JSR_READONLY, atom);
+        vm->slots[vm->objs[st].a + i] = v;
+        return 1;
+    }
+    uint32_t e = js_elem_entry(vm, o, i, atom);
+    if (e) {
+        jv cur = vm->slots[vm->objs[o].slots + vm->shapes[e].slot];
+        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) {
+            int r = js_call_setter(vm, cur, objv, v);
+            return r == 2 ? js_refuse(vm, JSR_GETTER, atom) : r;
+        }
+        if ((vm->shapes[e].flags & JS_SHAPE_READONLY) || (fl & JO_FROZEN)) return js_refuse(vm, JSR_READONLY, atom);
+        vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = v;
+        return 1;
+    }
+    int r = js_proto_set(vm, o, atom, v, objv);
+    if (r >= 0) return r;
+    if (!(fl & JO_EXTENSIBLE)) return js_refuse(vm, JSR_NOT_EXTENSIBLE, atom);
+    if (vm->objs[o].kind == JK_ARRAY && i >= vm->objs[o].b && (fl & JO_LENGTH_RO)) return js_refuse(vm, JSR_LENGTH, A_LENGTH);
+    if (i >= vm->objs[st].b + 1000000u) return -1;
+    js_array_set(vm, st, i, v);
+    return 1;
+}
+
+/* obj.atom = v; ic, when not 0, is filled for the next time. 1 set; 0 thrown; 2 refused
+   (a primitive's property, a frozen object's, a read-only one, own or the nearest up the
+   prototypes, a new one on an object not extensible, an accessor without a setter), which
+   strict code throws for */
+int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
+    if (!jv_is_obj(objv)) {
+        if (jv_is_nullish(objv) || objv == JV_HOLE) {
+            uint32_t m = js_str_concat(vm, js_str_ascii(vm, objv == JV_NULL ? "Cannot set properties of null (setting '" : "Cannot set properties of undefined (setting '"),
+                                       js_str_concat(vm, js_key_name(vm, atom), js_str_ascii(vm, "')")));
+            js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+            return 0;
+        }
+        return 2;
+    }
+    uint32_t o = jv_idx(objv);
+    uint32_t k = vm->objs[o].kind;
+    vm->refused = JSR_NONE;
+    if (k == JK_PROXY) return js_proxy_set(vm, o, atom, v, objv);
+    if (k == JK_TYPEDARRAY) {
+        uint32_t i;
+        if (js_atom_index(vm, atom, &i)) return js_ta_set(vm, o, i, v);
+    }
+    if (k == JK_ARRAY || k == JK_ARGUMENTS) {
+        uint32_t i;
+        if (k == JK_ARRAY && atom == A_LENGTH) {
+            /* not writable: refused before the value is read */
+            if (vm->objs[o].flags & (JO_FROZEN | JO_LENGTH_RO)) return js_refuse(vm, JSR_LENGTH, A_LENGTH);
+            double d = js_to_number(vm, v);
+            if (vm->throwing) return 0;
+            return js_array_set_length_checked(vm, o, d);
+        }
+        if (js_atom_index(vm, atom, &i)) {
+            int r = js_elem_set(vm, o, i, atom, v, objv);
+            if (r >= 0) return r;
+        }
+    } else if (k == JK_HOST) {
+        int handled = 0;
+        int ok = js_host_set(vm, o, atom, v, &handled);
+        if (handled) return ok;
+    }
+    uint32_t sh = vm->objs[o].shape;
+    uint32_t e = js_shape_find(vm, sh, atom);
+    if (e) {
+        uint32_t slot = vm->shapes[e].slot;
+        jv cur = vm->slots[vm->objs[o].slots + slot];
+        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { if (cur != JV_HOLE) return js_call_setter(vm, cur, objv, v); }
+        else if (((vm->shapes[e].flags & JS_SHAPE_READONLY) || (vm->objs[o].flags & JO_FROZEN)) && cur != JV_HOLE) return 2;
+        else if (cur != JV_HOLE || (vm->objs[o].flags & JO_EXTENSIBLE)) {
+            vm->slots[vm->objs[o].slots + slot] = v;
+            /* a host object's writes are not cached: the host sees each one */
+            if (ic && cur != JV_HOLE && k != JK_HOST) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
+            return 1;
+        }
+    }
+    int pr = js_proto_set(vm, o, atom, v, objv);
+    if (pr >= 0) return pr;
     if (!(vm->objs[o].flags & JO_EXTENSIBLE)) return 2;
     uint32_t ns = js_shape_add(vm, sh, atom, 0);
     uint32_t slot = vm->shapes[ns].slot;
@@ -1116,24 +1566,35 @@ static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
         js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
         return;
     }
-    /* why: the property read-only (own, up the prototypes, or the object frozen), only a
-       getter's, or a new one on an object not extensible -- each in V8's words */
-    uint32_t o = jv_idx(obj);
-    int readonly = (vm->objs[o].flags & JO_FROZEN) != 0, getter = 0;
-    for (uint32_t p = o, depth = 0; p && depth < 10000 && !readonly && !getter; p = vm->objs[p].proto, depth++) {
-        uint32_t e = js_shape_find(vm, vm->objs[p].shape, key);
-        if (!e || vm->slots[vm->objs[p].slots + vm->shapes[e].slot] == JV_HOLE) continue;
-        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) getter = 1;
-        else if (vm->shapes[e].flags & JS_SHAPE_READONLY) readonly = 1;
-        break;
+    /* why: an array's write says (vm->refused); else the property read-only (own, up the
+       prototypes, or the object frozen), only a getter's, or a new one on an object not
+       extensible -- each in V8's words, the object as V8 writes it ([object Array], #<Object>) */
+    uint32_t o = jv_idx(obj), why = vm->refused;
+    if (why) { key = vm->refused_key; name = js_key_name(vm, key); }
+    vm->refused = JSR_NONE;
+    if (!why) {
+        /* the nearest holder of the key says: only a getter, read-only (its own attribute,
+           or the holder frozen); a frozen or non-extensible object's new property else */
+        why = JSR_NOT_EXTENSIBLE;
+        for (uint32_t p = o, depth = 0; p && depth < 10000; p = vm->objs[p].proto, depth++) {
+            uint32_t e = js_shape_find(vm, vm->objs[p].shape, key);
+            if (!e || vm->slots[vm->objs[p].slots + vm->shapes[e].slot] == JV_HOLE) continue;
+            if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) why = JSR_GETTER;
+            else if ((vm->shapes[e].flags & JS_SHAPE_READONLY) || (vm->objs[p].flags & JO_FROZEN)) why = JSR_READONLY;
+            break;
+        }
     }
-    const char *of = vm->objs[o].kind == JK_ARRAY ? "[object Array]" : "#<Object>";
-    if (readonly)
+    vector<char> t;
+    js_value_text(vm, obj, &t);
+    uint32_t of = js_str_utf8(vm, data(t), len(t));
+    if (why == JSR_READONLY || why == JSR_LENGTH)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
-                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of object '"), js_str_concat(vm, js_str_ascii(vm, of), js_str_ascii(vm, "'")))));
-    else if (getter)
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of object '"), js_str_concat(vm, of, js_str_ascii(vm, "'")))));
+    else if (why == JSR_GETTER)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot set property "),
-                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, " of "), js_str_concat(vm, js_str_ascii(vm, of), js_str_ascii(vm, " which has only a getter")))));
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, " of "), js_str_concat(vm, of, js_str_ascii(vm, " which has only a getter")))));
+    else if (why == JSR_DELETE)
+        m = js_str_concat(vm, js_str_ascii(vm, "Cannot delete property '"), js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of "), of)));
     else m = js_str_concat(vm, js_str_ascii(vm, "Cannot add property "), js_str_concat(vm, name, js_str_ascii(vm, ", object is not extensible")));
     js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
 }
@@ -1141,9 +1602,33 @@ static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
 /* strict code's delete the object refused (a property not configurable): V8's TypeError */
 static void js_delete_refused(js_vm *vm, jv obj, uint32_t key) {
     uint32_t name = js_key_name(vm, key);
-    const char *of = jv_is_obj(obj) && vm->objs[jv_idx(obj)].kind == JK_ARRAY ? "' of [object Array]" : "' of #<Object>";
-    uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot delete property '"), js_str_concat(vm, name, js_str_ascii(vm, of)));
+    vector<char> t;
+    js_value_text(vm, obj, &t);
+    uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot delete property '"),
+                               js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of "), js_str_utf8(vm, data(t), len(t)))));
     js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+}
+
+int js_set_throw(js_vm *vm, jv obj, jv key, jv v) {
+    int r = js_set_value(vm, obj, key, v);
+    if (vm->throwing) return 0;
+    if (r != 2) return 1;
+    int ok = 1;
+    uint32_t ka = js_prop_key(vm, key, &ok);
+    if (!ok) return 0;
+    js_set_refused(vm, obj, ka);
+    return 0;
+}
+
+int js_delete_throw(js_vm *vm, jv obj, jv key) {
+    int ok = 1;
+    uint32_t ka = js_prop_key(vm, key, &ok);
+    if (!ok) return 0;
+    if (!jv_is_obj(obj)) return 1;
+    int r = js_delete(vm, jv_idx(obj), ka);
+    if (vm->throwing) return 0;
+    if (!r) { js_delete_refused(vm, obj, ka); return 0; }
+    return 1;
 }
 
 /* a key's atom, or an array index */
@@ -1190,7 +1675,7 @@ int js_set_value(js_vm *vm, jv obj, jv key, jv v) {
     if (!kk) return 0;
     if (kk >= 2 && jv_is_obj(obj)) {
         uint32_t o = jv_idx(obj);
-        if (vm->objs[o].kind == JK_ARRAY && !(vm->objs[o].flags & JO_FROZEN) && index < vm->objs[o].b + 1000000u) {
+        if (vm->objs[o].kind == JK_ARRAY && (vm->objs[o].flags & JO_ELEM_SLOW) == JO_EXTENSIBLE && index < vm->objs[o].b + 1000000u) {
             js_array_set(vm, o, index, v);
             return 1;
         }
@@ -1209,6 +1694,10 @@ int js_has(js_vm *vm, uint32_t o, uint32_t atom) {
         if (k == JK_ARRAY) {
             if (atom == A_LENGTH) return 1;
             if (js_atom_index(vm, atom, &i) && i < vm->objs[x].b && vm->slots[vm->objs[x].a + i] != JV_HOLE) return 1;
+        }
+        if (k == JK_ARGUMENTS) {
+            uint32_t st = vm->objs[x].a;
+            if (js_atom_index(vm, atom, &i) && i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) return 1;
         }
         if (k == JK_STRING && jv_is_str(vm->objs[x].x)) {
             /* a String's wrapper: its length and its indexes */
@@ -1252,17 +1741,6 @@ static void js_sort_u64(vector<uint64_t> *v) {
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
     uint32_t k = vm->objs[o].kind;
     if (k == JK_PROXY) { js_proxy_own_keys(vm, o, 1, 0, enumerable_only, arr); return; }
-    if (k == JK_TYPEDARRAY) for (uint32_t i = 0; i < vm->objs[o].b; i++) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
-    if (k == JK_ARRAY) {
-        for (uint32_t i = 0; i < vm->objs[o].b; i++)
-            if (vm->slots[vm->objs[o].a + i] != JV_HOLE) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
-    } else if (k == JK_STRING) {
-        uint32_t s = jv_idx(vm->objs[o].x);
-        for (uint32_t i = 0; i < vm->strs[s].len; i++) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
-    } else if (k == JK_ARGUMENTS) {
-        uint32_t a = vm->objs[o].a;
-        for (uint32_t i = 0; i < vm->objs[a].b; i++) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
-    }
     /* the shape's entries, newest first: collected, then reversed. The integer keys come
        first, ascending (index << 32 | atom, sorted), then the names as they were added */
     vector<uint32_t> es;
@@ -1275,8 +1753,23 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
         uint32_t i;
         if (js_atom_index(vm, vm->shapes[e].atom, &i)) push_back(ix, (uint64_t)i << 32 | vm->shapes[e].atom);
     }
+    /* the exotic objects' own indices, before the shape's: an array's (an arguments
+       object's) dense elements, merged in order with those its shape keeps */
+    uint32_t n = 0, st = 0;
+    if (k == JK_TYPEDARRAY) n = vm->objs[o].b;
+    else if (k == JK_STRING) n = vm->strs[jv_idx(vm->objs[o].x)].len;
+    else if (k == JK_ARRAY || k == JK_ARGUMENTS) { st = k == JK_ARGUMENTS ? vm->objs[o].a : o; n = vm->objs[st].b; }
+    if (len(ix) && n) {
+        for (uint32_t i = 0; i < n; i++) if (!st || vm->slots[vm->objs[st].a + i] != JV_HOLE) push_back(ix, (uint64_t)i << 32);
+    } else
+        for (uint32_t i = 0; i < n; i++) if (!st || vm->slots[vm->objs[st].a + i] != JV_HOLE) js_array_push(vm, arr, jv_str(js_num_to_str(vm, (double)i)));
     js_sort_u64(&ix);
-    for (size_t q = 0; q < len(ix); q++) js_array_push(vm, arr, jv_str((uint32_t)(at(ix, q) & 0xFFFFFFFFu)));
+    for (size_t q = 0; q < len(ix); q++) {
+        uint32_t atom = (uint32_t)(at(ix, q) & 0xFFFFFFFFu);
+        js_array_push(vm, arr, jv_str(atom ? atom : js_num_to_str(vm, (double)(uint32_t)(at(ix, q) >> 32))));
+    }
+    /* an array's or a String's length, not enumerable, the first of its names */
+    if (!enumerable_only && (k == JK_ARRAY || k == JK_STRING)) js_array_push(vm, arr, jv_str(A_LENGTH));
     for (size_t q = len(es); q > 0; q--) {
         uint32_t e = at(es, q - 1);
         if (vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) continue;
@@ -1306,7 +1799,7 @@ int js_instance_of(js_vm *vm, jv v, jv ctor) {
         jv h = js_get(vm, ctor, JS_SYM_KEY | JSYM_HAS_INSTANCE);
         if (vm->throwing) return 0;
         if (!jv_is_nullish(h)) {
-            if (!js_is_callable(vm, h)) { js_throw_msg(vm, vm->type_error_proto, "Symbol.hasInstance is not a function"); return 0; }
+            if (!js_is_callable(vm, h)) { js_not_function(vm, h); return 0; }
             jv a1[1] = { v };
             jv r = js_call(vm, h, ctor, a1, 1);
             return !vm->throwing && js_truthy(vm, r);
@@ -1316,7 +1809,15 @@ int js_instance_of(js_vm *vm, jv v, jv ctor) {
     if (vm->objs[jv_idx(ctor)].kind == JK_BOUND) ctor = jv_obj(vm->objs[jv_idx(ctor)].a);
     if (!jv_is_obj(v)) return 0;
     jv p = js_get(vm, ctor, A_PROTOTYPE);
-    if (vm->throwing || !jv_is_obj(p)) return 0;
+    if (vm->throwing) return 0;
+    if (!jv_is_obj(p)) {
+        vector<char> m;
+        js_put(&m, "Function has non-object prototype '");
+        js_value_text(vm, p, &m);
+        js_put(&m, "' in instanceof check");
+        js_throw_chars(vm, vm->type_error_proto, &m);
+        return 0;
+    }
     /* up the prototypes, a proxy's its getPrototypeOf's */
     uint32_t x = jv_idx(v);
     for (uint32_t depth = 0; depth < 10000; depth++) {
@@ -1464,13 +1965,17 @@ static uint32_t js_iter_keys(js_vm *vm, jv v) {
     return js_iter_new(vm, keys, JI_KEYS);
 }
 
-jv js_iter_of(js_vm *vm, jv v) {
+/* an iterable's iterator, a TypeError naming it as the site at pc says (0: a native's) */
+static jv js_iter_of_at(js_vm *vm, jv v, uint32_t pc);
+jv js_iter_of(js_vm *vm, jv v) { return js_iter_of_at(vm, v, 0); }
+static jv js_iter_of_at(js_vm *vm, jv v, uint32_t pc) {
     if (jv_is_str(v)) return jv_obj(js_iter_new(vm, jv_idx(v), JI_STRING));
     if (jv_is_obj(v)) {
         uint32_t o = jv_idx(v);
         uint32_t k = vm->objs[o].kind;
         if (k == JK_ARRAY || k == JK_TYPEDARRAY) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
-        if (k == JK_ARGUMENTS) return jv_obj(js_iter_new(vm, vm->objs[o].a, JI_ARRAY));
+        /* an arguments object by its length and its elements, as Array.prototype.values reads one */
+        if (k == JK_ARGUMENTS) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
         if (k == JK_MAP) return jv_obj(js_iter_new(vm, o, JI_MAP));
         if (k == JK_SET) return jv_obj(js_iter_new(vm, o, JI_SET));
         if (k == JK_ITER) return v;
@@ -1493,11 +1998,13 @@ jv js_iter_of(js_vm *vm, jv v) {
             return jv_obj(w);
         }
         /* an array-like host collection: by its length */
-        jv n = js_get(vm, v, A_LENGTH);
-        if (vm->throwing) return JV_HOLE;
-        if (k == JK_HOST && jv_is_num(n)) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
+        if (k == JK_HOST) {
+            jv n = js_get(vm, v, A_LENGTH);
+            if (vm->throwing) return JV_HOLE;
+            if (jv_is_num(n)) return jv_obj(js_iter_new(vm, o, JI_ARRAY));
+        }
     }
-    return js_type_error(vm, "is not iterable", jv_is_obj(v) ? A_OBJECT : js_typeof(vm, v));
+    return js_not_iterable(vm, v, pc, 0);
 }
 
 /* the iterator's next value into *out: 0 when it is done */
@@ -1514,12 +2021,12 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     if (mode == JI_PROTOCOL) {
         if (vm->objs[it].b) return 0;
         jv next = vm->objs[it].x;
-        if (!js_is_callable(vm, next)) { js_throw_msg(vm, vm->type_error_proto, "the iterator's next is not a function"); return 0; }
+        if (!js_is_callable(vm, next)) { js_not_function(vm, next); return 0; }
         /* a next that threw (or gave no object) leaves the iterator done: it is not closed */
         vm->objs[it].b = 1;
         jv r = js_call(vm, next, jv_obj(src), 0, 0);
         if (vm->throwing) return 0;
-        if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return 0; }
+        if (!jv_is_obj(r)) { js_result_error(vm, r); return 0; }
         jv d = js_get(vm, r, A_DONE);
         if (vm->throwing || js_truthy(vm, d)) return 0;
         *out = js_get(vm, r, A_VALUE);
@@ -1530,7 +2037,13 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     if (mode == JI_KEYS || mode == JI_ARRAY) {
         if (vm->objs[src].kind == JK_ARRAY) {
             if (i >= vm->objs[src].b) return 0;
-            *out = js_array_get(vm, src, i);
+            /* a hole read as Get reads it: an element with attributes of its own, a getter's */
+            jv x = vm->slots[vm->objs[src].a + i];
+            if (x == JV_HOLE && (vm->objs[src].flags & JO_ELEMPROPS)) {
+                x = js_get_value(vm, jv_obj(src), jv_num((double)i));
+                if (vm->throwing) return 0;
+            }
+            *out = x == JV_HOLE ? JV_UNDEF : x;
         } else if (vm->objs[src].kind == JK_TYPEDARRAY) {
             if (i >= vm->objs[src].b) return 0;
             *out = js_ta_get(vm, src, i);
@@ -1576,8 +2089,8 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
 /* an array pattern's values from an iterable that is not an array: the first n its
    iterator gives (0xFFFF: all, for a rest element), the iterator closed when the
    pattern leaves it before its end */
-static jv js_iter_take(js_vm *vm, jv v, uint32_t n) {
-    jv it = js_iter_of(vm, v);
+static jv js_iter_take(js_vm *vm, jv v, uint32_t n, uint32_t pc) {
+    jv it = js_iter_of_at(vm, v, pc);
     if (vm->throwing) return JV_HOLE;
     uint32_t arr = js_array_new(vm, 0);
     for (uint32_t k = 0; n == 0xFFFF || k < n; k++) {
@@ -1606,7 +2119,7 @@ void js_iter_close(js_vm *vm, uint32_t it) {
         jv rf = js_get(vm, jv_obj(src), A_RETURN);
         if (!vm->throwing && js_is_callable(vm, rf)) {
             jv r = js_call(vm, rf, jv_obj(src), 0, 0);
-            if (!vm->throwing && !jv_is_obj(r)) js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object");
+            if (!vm->throwing && !jv_is_obj(r)) js_result_error(vm, r);
         }
     }
     if (was) { vm->throwing = was; vm->exception = saved; }
@@ -1642,11 +2155,11 @@ int js_iter_send(js_vm *vm, uint32_t it, int mode, jv arg, int has_arg, jv *valu
             if (vm->throwing) return -1;
             if (jv_is_nullish(m)) return 0;
         }
-        if (!js_is_callable(vm, m)) { js_type_error(vm, "is not a function", js_typeof(vm, m)); return -1; }
+        if (!js_is_callable(vm, m)) { js_not_function(vm, m); return -1; }
         jv a1[1] = { arg };
         jv r = js_call(vm, m, jv_obj(src), a1, has_arg ? 1 : 0);
         if (vm->throwing) return -1;
-        if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return -1; }
+        if (!jv_is_obj(r)) { js_result_error(vm, r); return -1; }
         jv d = js_get(vm, r, A_DONE);
         if (vm->throwing) return -1;
         *done = js_truthy(vm, d);
@@ -1663,17 +2176,21 @@ int js_iter_send(js_vm *vm, uint32_t it, int mode, jv arg, int has_arg, jv *valu
 /* for await's and an async yield*'s iterator (GetIterator, async): a record of the
    value's Symbol.asyncIterator's iterator and its next, else of its sync iterator,
    seen as an async one */
-jv js_aiter_of(js_vm *vm, jv v) {
-    if (jv_is_nullish(v)) return js_type_error(vm, "is not async iterable", js_typeof(vm, v));
+static jv js_aiter_of_at(js_vm *vm, jv v, uint32_t pc);
+jv js_aiter_of(js_vm *vm, jv v) { return js_aiter_of_at(vm, v, 0); }
+static jv js_aiter_of_at(js_vm *vm, jv v, uint32_t pc) {
+    /* V8's: nothing's Symbol.asyncIterator a property read from nothing */
     jv f = js_get(vm, v, JS_KEY_ASYNC_ITERATOR);
     if (vm->throwing) return JV_HOLE;
     if (jv_is_nullish(f)) {
-        if (!jv_is_obj(v) && !jv_is_str(v)) return js_type_error(vm, "is not async iterable", js_typeof(vm, v));
-        jv it = js_iter_of(vm, v);
+        jv sf = jv_is_obj(v) || jv_is_str(v) ? js_get(vm, v, JS_KEY_ITERATOR) : JV_UNDEF;
+        if (vm->throwing) return JV_HOLE;
+        if (!js_is_callable(vm, sf)) return js_not_iterable(vm, v, pc, 1);
+        jv it = js_iter_of_at(vm, v, pc);
         if (vm->throwing) return JV_HOLE;
         return jv_obj(js_iter_new(vm, jv_idx(it), JI_FROM_SYNC));
     }
-    if (!js_is_callable(vm, f)) return js_type_error(vm, "is not a function: its Symbol.asyncIterator", js_typeof(vm, f));
+    if (!js_is_callable(vm, f)) return js_not_iterable(vm, v, pc, 1);
     jv it = js_call(vm, f, v, 0, 0);
     if (vm->throwing) return JV_HOLE;
     if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.asyncIterator method is not an object");
@@ -1807,7 +2324,7 @@ static void js_yield_star(js_vm *vm, jv it, jv recv, int mode, jv *out, int *fin
         res = js_call(vm, m, it, a1, 1);
     }
     if (vm->throwing) return;
-    if (!jv_is_obj(res)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); return; }
+    if (!jv_is_obj(res)) { js_result_error(vm, res); return; }
     jv d = js_get(vm, res, A_DONE);
     if (vm->throwing) return;
     *out = js_get(vm, res, A_VALUE);
@@ -1816,11 +2333,12 @@ static void js_yield_star(js_vm *vm, jv it, jv recv, int mode, jv *out, int *fin
 }
 
 /* an iterable's iterator object (yield*'s): what Symbol.iterator gives; a generator itself */
-static jv js_iterator_object(js_vm *vm, jv v) {
+static jv js_iterator_object(js_vm *vm, jv v, uint32_t pc) {
     if (jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_GENERATOR) return v;
+    if (jv_is_nullish(v)) return js_not_iterable(vm, v, pc, 0);
     jv f = js_get(vm, v, JS_KEY_ITERATOR);
     if (vm->throwing) return JV_HOLE;
-    if (!js_is_callable(vm, f)) return js_type_error(vm, "is not iterable", jv_is_obj(v) ? A_OBJECT : js_typeof(vm, v));
+    if (!js_is_callable(vm, f)) return js_not_iterable(vm, v, pc, 0);
     jv it = js_call(vm, f, v, 0, 0);
     if (vm->throwing) return JV_HOLE;
     if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.iterator method is not an object");
@@ -1920,9 +2438,38 @@ static jv js_call_bound(js_vm *vm, uint32_t b, uint32_t args, uint32_t argc, jv 
     return js_call(vm, target, vm->objs[b].x, data(all), (uint32_t)len(all));
 }
 
+/* a class's heritage (ClassDefinitionEvaluation's): null, or a constructor whose prototype
+   is an object or null. Its prototype object's parent and its constructor's parent into
+   *proto and *ctor: 1; else 0, V8's TypeError thrown (the value as it reads without
+   running it, a function by its source) */
+static int js_class_heritage(js_vm *vm, jv parent, uint32_t *proto, uint32_t *ctor) {
+    if (parent == JV_NULL) { *proto = 0; return 1; }
+    if (!js_is_constructor(vm, parent)) { js_extends_error(vm, parent, 0); return 0; }
+    jv pp = js_get(vm, parent, A_PROTOTYPE);
+    if (vm->throwing) return 0;
+    if (!jv_is_obj(pp) && pp != JV_NULL) { js_extends_error(vm, pp, 1); return 0; }
+    *proto = jv_is_obj(pp) ? jv_idx(pp) : 0;
+    *ctor = jv_idx(parent);
+    return 1;
+}
+
+/* a function constructed by the interpreter's new or super() that is no constructor: the
+   error of the instruction the top frame is at (its pc past the operands; the _ARR forms
+   have none), V8's words naming its expression */
+static jv js_new_fail(js_vm *vm, jv fn) {
+    uint32_t fi = vm->nframes - 1, pc = vm->frames[fi].pc;
+    uint32_t b1 = pc >= 1 ? vm->code[pc - 1] : 0;
+    uint32_t op = b1 == OP_NEW_ARR || b1 == OP_SUPER_CALL_ARR ? b1 : pc >= 3 ? vm->code[pc - 3] : OP_NEW;
+    js_call_fail(vm, op, fi, fn);
+    return JV_HOLE;
+}
+
 /* a call of a function that is not a closure: a native's, or a bound one's */
 static jv js_call_other(js_vm *vm, jv fn, jv thisv, uint32_t args, uint32_t argc, jv newt) {
     uint32_t o = jv_idx(fn);
+    /* constructed (newt given): a constructor only. js_construct has asked already; the
+       interpreter's new and super() ask here, out of js_run's hot path */
+    if (newt != JV_UNDEF && !js_is_constructor(vm, fn)) return js_new_fail(vm, fn);
     if (vm->objs[o].kind == JK_PROXY) return js_proxy_call(vm, o, thisv, args, argc, newt);
     if (vm->objs[o].kind == JK_NATIVE) {
         uint32_t id = vm->objs[o].a;
@@ -1992,7 +2539,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
             return r;
         }
     }
-    if (!js_is_callable(vm, fn)) return js_type_error(vm, "is not a function", js_typeof(vm, fn));
+    if (!js_is_callable(vm, fn)) return js_not_function(vm, fn);
     if (!js_room(vm, sp0 + argc + JS_STACK_MARGIN, vm->nframes + 2)) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
     {
         uint64_t *stack = data(vm->stack);
@@ -2004,7 +2551,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
     uint32_t o = jv_idx(fn);
     jv r;
     if (vm->objs[o].kind == JK_CLOSURE) {
-        if (vm->objs[o].flags & JO_CLASS_CTOR) { vm->sp = sp0; return js_type_error(vm, "cannot be invoked without 'new'", A_FUNCTION); }
+        if (vm->objs[o].flags & JO_CLASS_CTOR) { vm->sp = sp0; return js_class_call_error(vm, o); }
         if (!js_enter(vm, o, thisv, argc, JV_UNDEF, JFR_NATIVE_ENTRY, sp0)) { vm->sp = sp0; return JV_HOLE; }
         vm->depth++;
         r = js_run(vm, vm->nframes - 1);
@@ -2018,7 +2565,7 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
 jv js_construct(js_vm *vm, jv fn, const jv *argv, uint32_t argc, jv newt) {
     if (vm->throwing) return JV_HOLE;
     if (vm->depth >= JS_DEPTH_MAX) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
-    if (!js_is_callable(vm, fn)) return js_type_error(vm, "is not a constructor", js_typeof(vm, fn));
+    if (!js_is_constructor(vm, fn)) return js_not_constructor(vm, fn);
     uint32_t o = jv_idx(fn);
     uint32_t sp0 = vm->sp;
     if (!js_room(vm, sp0 + argc + JS_STACK_MARGIN, vm->nframes + 2)) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
@@ -2028,7 +2575,7 @@ jv js_construct(js_vm *vm, jv fn, const jv *argv, uint32_t argc, jv newt) {
     jv r;
     if (vm->objs[o].kind == JK_CLOSURE) {
         js_func f = vm->funcs[vm->objs[o].a];
-        if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { vm->sp = sp0; return js_type_error(vm, "is not a constructor", A_FUNCTION); }
+        if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { vm->sp = sp0; return js_not_constructor(vm, fn); }
         jv thisv = JV_HOLE;
         if (!(vm->objs[o].flags & JO_DERIVED)) {
             jv p = js_ctor_proto(vm, newt);
@@ -2057,6 +2604,11 @@ static uint32_t js_rd32(const uint8_t *c, uint32_t p) { uint32_t v; memcpy(&v, c
 
 static jv js_ref_error(js_vm *vm, uint32_t atom, const char *what) {
     uint32_t m = js_str_concat(vm, atom, js_str_ascii(vm, what));
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->reference_error_proto, m)));
+}
+/* a let, const, class or import read before its declaration ran (its temporal dead zone) */
+static jv js_tdz_error(js_vm *vm, uint32_t atom) {
+    uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot access '"), js_str_concat(vm, atom, js_str_ascii(vm, "' before initialization")));
     return js_throw(vm, jv_obj(js_error_new(vm, vm->reference_error_proto, m)));
 }
 
@@ -2270,7 +2822,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv v = stack[base + RD16(pc)];
             uint32_t atom = RD32(pc + 2);
             pc += 6;
-            if (v == JV_HOLE) { SYNC(); js_ref_error(vm, atom, " is not initialized: a let or const read before its declaration ran"); RELOAD(); break; }
+            if (v == JV_HOLE) { SYNC(); js_tdz_error(vm, atom); RELOAD(); break; }
             stack[sp++] = v;
             goto next;
         }
@@ -2297,7 +2849,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             uint32_t e = frames[fi].env;
             for (uint32_t d = 0; d < depth; d++) e = objs[e].a;
             jv v = slots[objs[e].slots + idx];
-            if (v == JV_HOLE) { SYNC(); js_ref_error(vm, atom, " is not initialized: a let or const read before its declaration ran"); RELOAD(); break; }
+            if (v == JV_HOLE) { SYNC(); js_tdz_error(vm, atom); RELOAD(); break; }
             stack[sp++] = v;
             goto next;
         }
@@ -2315,7 +2867,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             int found = 0;
             jv v = js_global_get(vm, atom, ic, &found); RELOAD();
             if (vm->throwing) break;
-            if (v == JV_TDZ) { js_ref_error(vm, atom, " is not initialized: a let or const read before its declaration ran"); RELOAD(); break; }
+            if (v == JV_TDZ) { js_tdz_error(vm, atom); RELOAD(); break; }
             if (!found && op == OP_GET_GLOBAL) { js_ref_error(vm, atom, " is not defined"); RELOAD(); break; }
             { jv rv_ = op == OP_TYPEOF_GLOBAL ? jv_str(found ? js_typeof(vm, v) : A_UNDEFINED) : v; RELOAD(); stack[sp++] = rv_; }
             break;
@@ -2331,7 +2883,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             int has_lex = js_get_own(vm, vm->global_lex, atom, &cur, &f);
             RELOAD();
             if (has_lex) {
-                if (cur == JV_TDZ) { js_ref_error(vm, atom, " is not initialized: a let or const read before its declaration ran"); RELOAD(); break; }
+                if (cur == JV_TDZ) { js_tdz_error(vm, atom); RELOAD(); break; }
                 js_define(vm, vm->global_lex, atom, v, 0); RELOAD();
                 break;
             }
@@ -2401,7 +2953,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_APPEND_HOLE: js_array_push(vm, jv_idx(stack[sp - 1]), JV_HOLE); RELOAD(); break;
         case OP_SPREAD: {
             SYNC();
-            jv it = js_iter_of(vm, stack[sp - 1]); RELOAD();
+            jv it = js_iter_of_at(vm, stack[sp - 1], pc - 1); RELOAD();
             if (vm->throwing) break;
             uint32_t arr = jv_idx(stack[sp - 2]);
             jv v;
@@ -2490,6 +3042,8 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 }
             }
             SYNC();
+            /* an object pattern's first key read from nothing: V8's destructuring words */
+            if (jv_is_nullish(ov) && js_destructure_at(vm, pc - 9, ov, atom)) { RELOAD(); break; }
             jv v = js_get_ic(vm, ov, atom, ic); RELOAD();
             if (vm->throwing) break;
             if (op == OP_GET_PROP) stack[sp - 1] = v;
@@ -2563,7 +3117,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (jv_is_obj(ov) && jv_is_num(k)) {
                 uint32_t o = jv_idx(ov);
                 double d = jv_dbl(k);
-                if (objs[o].kind == JK_ARRAY && !(objs[o].flags & JO_FROZEN) && d >= 0 && d <= (double)objs[o].b && d == (double)(uint32_t)d) {
+                if (objs[o].kind == JK_ARRAY && (objs[o].flags & JO_ELEM_SLOW) == JO_EXTENSIBLE && d >= 0 && d <= (double)objs[o].b && d == (double)(uint32_t)d) {
                     js_array_set(vm, o, (uint32_t)d, v); RELOAD();
                     done = 1;
                 } else if (objs[o].kind == JK_TYPEDARRAY && d >= 0 && d < (double)objs[o].b && d == (double)(uint32_t)d) {
@@ -2608,7 +3162,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_IN: {
             jv ov = stack[--sp], k = stack[sp - 1];
             SYNC();
-            if (!jv_is_obj(ov)) { js_throw_msg(vm, vm->type_error_proto, "Cannot use 'in' operator to search for a key in a value that is not an object"); RELOAD(); break; }
+            if (!jv_is_obj(ov)) { js_in_error(vm, k, ov); RELOAD(); break; }
             int kok = 1;
             uint32_t key = js_prop_key(vm, k, &kok); RELOAD();
             if (!kok) break;
@@ -2617,7 +3171,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             int isarr = objs[jv_idx(ov)].kind == JK_ARRAY;
             int isidx = isarr && js_atom_index(vm, key, &idx);
             RELOAD();
-            if (isidx) found = idx < objs[jv_idx(ov)].b && slots[objs[jv_idx(ov)].a + idx] != JV_HOLE;
+            if (isidx && idx < objs[jv_idx(ov)].b && slots[objs[jv_idx(ov)].a + idx] != JV_HOLE) found = 1;
             else found = js_has(vm, jv_idx(ov), key);
             RELOAD();
             stack[sp - 1] = jv_bool(found);
@@ -2730,7 +3284,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (super) {
                 /* super(...): the parent class's constructor, constructing this class's new.target */
                 uint32_t me = frames[fi].callee;
-                callee = jv_obj(objs[me].proto);
+                callee = objs[me].proto ? jv_obj(objs[me].proto) : JV_NULL;
                 for (uint32_t i = 0; i < argc; i++) stack[sp - i] = stack[sp - i - 1];
                 stack[sp - argc] = callee;
                 sp++;
@@ -2740,25 +3294,23 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 if (frames[fi].thisv != JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Super constructor may only be called once"); RELOAD(); break; }
             } else if (construct) { callee = stack[sp0]; thisv = JV_HOLE; newt = callee; }
             else { callee = stack[sp0 + 1]; thisv = stack[sp0]; }
+            /* (the frame's pc past the operands: an error's site is found by it) */
             frames[fi].pc = pc;
             SYNC();
-            if (!CALLABLE(callee)) {
-                js_type_error(vm, construct || super ? "is not a constructor" : "is not a function", js_typeof(vm, callee)); RELOAD();
-                break;
-            }
+            if (!CALLABLE(callee)) { js_call_fail(vm, op, fi, callee); RELOAD(); break; }
             uint32_t o = jv_idx(callee);
             if (objs[o].kind == JK_CLOSURE) {
                 uint32_t flags = 0;
                 if (construct || super) {
                     js_func f = funcs[objs[o].a];
-                    if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { js_type_error(vm, "is not a constructor", A_FUNCTION); RELOAD(); break; }
+                    if (f.flags & (JF_ARROW | JF_METHOD | JF_GENERATOR | JF_ASYNC)) { js_call_fail(vm, op, fi, callee); RELOAD(); break; }
                     flags = JFR_CONSTRUCT | (super ? JFR_NATIVE_ENTRY : 0);
                     if (!(objs[o].flags & JO_DERIVED)) {
                         jv p = js_ctor_proto(vm, newt); RELOAD();
                         if (vm->throwing) break;
                         thisv = jv_obj(js_obj_new(vm, JK_PLAIN, jv_is_obj(p) ? jv_idx(p) : vm->object_proto)); RELOAD();
                     }
-                } else if (objs[o].flags & JO_CLASS_CTOR) { js_type_error(vm, "cannot be invoked without 'new'", A_FUNCTION); RELOAD(); break; }
+                } else if (objs[o].flags & JO_CLASS_CTOR) { js_class_call_error(vm, o); RELOAD(); break; }
                 int entered = js_enter(vm, o, thisv, argc, newt, flags, sp0);
                 RELOAD();
                 if (!entered) break;
@@ -2779,6 +3331,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 sp = vm->sp;
                 break;
             }
+            /* (a native or bound function constructed that is no constructor: js_call_other's error) */
             jv r = js_call_other(vm, callee, thisv, sp0 + (construct || super ? 1 : 2), argc, newt); RELOAD();
             sp = sp0;
             if (vm->throwing) break;
@@ -2814,7 +3367,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 if (rfl & JFR_CONSTRUCT) {
                     if (!jv_is_obj(r)) {
                         jv tv = frames[fi].thisv;
-                        if (tv == JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Must call super constructor in derived class before returning"); RELOAD(); break; }
+                        if (tv == JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Must call super constructor in derived class before accessing 'this' or returning from derived constructor"); RELOAD(); break; }
                         r = tv;
                     }
                 }
@@ -2836,7 +3389,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         }
         case OP_THIS: {
             jv t = frames[fi].thisv;
-            if (t == JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Must call super constructor in derived class before accessing 'this'"); RELOAD(); break; }
+            if (t == JV_HOLE) { SYNC(); js_throw_msg(vm, vm->reference_error_proto, "Must call super constructor in derived class before accessing 'this' or returning from derived constructor"); RELOAD(); break; }
             stack[sp++] = t;
             goto next;
         }
@@ -2845,6 +3398,8 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_ARGUMENTS: {
             uint32_t a = js_obj_new(vm, JK_ARGUMENTS, vm->object_proto); RELOAD();
             { uint32_t aa = frames[fi].args; if (!aa) { aa = js_array_new(vm, 0); RELOAD(); } objs[a].a = aa; }
+            /* its length an ordinary property of its own (writable, configurable), as its callee */
+            js_define(vm, a, A_LENGTH, jv_num(frames[fi].argc), JS_SHAPE_HIDDEN); RELOAD();
             js_define(vm, a, A_CALLEE, jv_obj(frames[fi].callee), JS_SHAPE_HIDDEN); RELOAD();
             stack[sp++] = jv_obj(a);
             break;
@@ -3059,17 +3614,16 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_THROW: SYNC(); js_throw(vm, stack[--sp]); RELOAD(); break;
         case OP_THROW_REF: { uint32_t atom = RD32(pc); pc += 4; SYNC(); js_ref_error(vm, atom, " is not defined"); RELOAD(); break; }
         case OP_THROW_CONST: {
-            uint32_t atom = RD32(pc);
+            /* V8's words name no variable */
             pc += 4;
             SYNC();
-            uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Assignment to constant variable '"), js_str_concat(vm, atom, js_str_ascii(vm, "'"))); RELOAD();
-            js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m))); RELOAD();
+            js_throw_msg(vm, vm->type_error_proto, "Assignment to constant variable."); RELOAD();
             break;
         }
         case OP_ITER_IN: { SYNC(); { jv rv_ = jv_obj(js_iter_keys(vm, stack[sp - 1])); RELOAD(); stack[sp - 1] = rv_; } break; }
         case OP_ITER_OF: {
             SYNC();
-            jv it = js_iter_of(vm, stack[sp - 1]); RELOAD();
+            jv it = js_iter_of_at(vm, stack[sp - 1], pc - 1); RELOAD();
             if (vm->throwing) break;
             stack[sp - 1] = it;
             break;
@@ -3090,19 +3644,15 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             SYNC();
             uint32_t proto_parent = vm->object_proto, ctor_parent = vm->function_proto;
             int derived = parent != JV_HOLE;
-            if (parent == JV_NULL) proto_parent = 0;
-            else if (derived) {
-                if (!CALLABLE(parent)) { js_type_error(vm, "is not a constructor: a class may extend only a class or a function", js_typeof(vm, parent)); RELOAD(); break; }
-                jv pp = js_get(vm, parent, A_PROTOTYPE); RELOAD();
-                if (vm->throwing) break;
-                proto_parent = jv_is_obj(pp) ? jv_idx(pp) : 0;
-                ctor_parent = jv_idx(parent);
+            if (derived) {
+                int ok = js_class_heritage(vm, parent, &proto_parent, &ctor_parent); RELOAD();
+                if (!ok) break;
             }
             uint32_t proto = js_obj_new(vm, JK_PLAIN, proto_parent); RELOAD();
             uint32_t c = js_closure_new(vm, func, frames[fi].env, JV_UNDEF); RELOAD();
             objs[c].proto = ctor_parent;
             { uint32_t cs = js_shape_of(vm, ctor_parent); RELOAD(); objs[c].shape = cs; }
-            objs[c].flags = (uint16_t)((objs[c].flags | JO_CLASS_CTOR | (derived && parent != JV_NULL ? JO_DERIVED : 0)) & ~JO_FASTCALL);
+            objs[c].flags = (uint16_t)((objs[c].flags | JO_CLASS_CTOR | (derived ? JO_DERIVED : 0)) & ~JO_FASTCALL);
             objs[c].c = proto;
             js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN); RELOAD();
             js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN); RELOAD();
@@ -3232,7 +3782,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         }
         case OP_GET_ITER: {
             SYNC();
-            jv it = js_iterator_object(vm, stack[sp - 1]); RELOAD();
+            jv it = js_iterator_object(vm, stack[sp - 1], pc - 1); RELOAD();
             if (vm->throwing) break;
             stack[sp - 1] = it;
             goto next;
@@ -3264,7 +3814,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv v = stack[sp - 1];
             if (jv_is_obj(v) && objs[jv_idx(v)].kind == JK_ARRAY) goto next;
             SYNC();
-            jv r = js_iter_take(vm, v, n); RELOAD();
+            jv r = js_iter_take(vm, v, n, pc - 3); RELOAD();
             if (vm->throwing) break;
             stack[sp - 1] = r;
             goto next;
@@ -3298,7 +3848,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         }
         case OP_ITER_ASYNC: {
             SYNC();
-            jv r = js_aiter_of(vm, stack[sp - 1]); RELOAD();
+            jv r = js_aiter_of_at(vm, stack[sp - 1], pc - 1); RELOAD();
             if (vm->throwing) break;
             stack[sp - 1] = r;
             goto next;
@@ -3318,7 +3868,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             pc = at + 4;
             jv r = stack[sp - 1];
             SYNC();
-            if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            if (!jv_is_obj(r)) { js_result_error(vm, r); RELOAD(); break; }
             jv d = js_get(vm, r, A_DONE); RELOAD();
             if (vm->throwing) break;
             int dn = js_truthy(vm, d); RELOAD();
@@ -3351,7 +3901,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         }
         case OP_ITER_ACHECK: {
             jv r = stack[--sp];
-            if (!jv_is_obj(r)) { SYNC(); js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            if (!jv_is_obj(r)) { SYNC(); js_result_error(vm, r); RELOAD(); break; }
             goto next;
         }
         case OP_AYS_STEP: {
@@ -3387,7 +3937,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             jv r = stack[sp - 1];
             double m = jv_dbl(stack[sp - 2]);
             SYNC();
-            if (!jv_is_obj(r)) { js_throw_msg(vm, vm->type_error_proto, "Iterator result is not an object"); RELOAD(); break; }
+            if (!jv_is_obj(r)) { js_result_error(vm, r); RELOAD(); break; }
             jv d = js_get(vm, r, A_DONE); RELOAD();
             if (vm->throwing) break;
             int dn = js_truthy(vm, d);
@@ -3442,6 +3992,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 stack[sp++] = r;
                 goto next;
             }
+            if (!CALLABLE(callee)) { frames[fi].pc = pc; SYNC(); js_call_error(vm, pc - 7, callee, 0); RELOAD(); break; }
             jv av[64];
             for (uint32_t i = 0; i < argc && i < 64; i++) av[i] = stack[sp0 + 1 + i];
             sp = sp0;
@@ -3515,7 +4066,13 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_TO_OBJECT: {
             jv v = stack[sp - 1];
             if (jv_is_obj(v)) goto next;
-            if (jv_is_nullish(v)) { SYNC(); js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object"); RELOAD(); break; }
+            if (jv_is_nullish(v)) {
+                SYNC();
+                /* an object pattern's value checked (its first key computed, a rest, or none) */
+                if (!js_destructure_at(vm, pc - 1, v, 0)) js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object");
+                RELOAD();
+                break;
+            }
             SYNC();
             jv r = js_to_object(vm, v); RELOAD();
             if (vm->throwing) break;
@@ -3533,7 +4090,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 uint32_t env = vm->modules[mb.module].env;
                 if (env) v = slots[objs[env].slots + mb.cell];
             }
-            if (v == JV_HOLE) { SYNC(); js_ref_error(vm, atom, " is not initialized: an import read before its module's declaration of it ran"); RELOAD(); break; }
+            if (v == JV_HOLE) { SYNC(); js_tdz_error(vm, atom); RELOAD(); break; }
             stack[sp++] = v;
             goto next;
         }

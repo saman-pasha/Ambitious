@@ -29,7 +29,7 @@ enum {
     N_AP_PUSH, N_AP_POP, N_AP_SHIFT, N_AP_UNSHIFT, N_AP_SLICE, N_AP_SPLICE, N_AP_CONCAT, N_AP_JOIN, N_AP_REVERSE, N_AP_INDEXOF,
     N_AP_LASTINDEXOF, N_AP_INCLUDES, N_AP_FIND, N_AP_FINDINDEX, N_AP_FINDLAST, N_AP_FINDLASTINDEX, N_AP_FILTER, N_AP_MAP,
     N_AP_FOREACH, N_AP_REDUCE, N_AP_REDUCERIGHT, N_AP_SOME, N_AP_EVERY, N_AP_SORT, N_AP_FILL, N_AP_KEYS, N_AP_VALUES,
-    N_AP_ENTRIES, N_AP_FLAT, N_AP_FLATMAP, N_AP_AT, N_AP_TOSTRING,
+    N_AP_ENTRIES, N_AP_FLAT, N_AP_FLATMAP, N_AP_AT, N_AP_COPYWITHIN, N_AP_TOSTRING,
     /* String */
     N_STR_FROMCHARCODE, N_STR_FROMCODEPOINT, N_STR_RAW,
     N_SP_CHARAT, N_SP_CHARCODEAT, N_SP_CODEPOINTAT, N_SP_INDEXOF, N_SP_LASTINDEXOF, N_SP_INCLUDES, N_SP_STARTSWITH,
@@ -116,21 +116,23 @@ static uint32_t this_str(js_vm *vm, jv thisv) {
 /* an object's length, and its elements, for the generic array methods */
 /* the object o given the prototype p: its properties moved onto a shape of p's */
 void js_set_proto(js_vm *vm, uint32_t o, uint32_t p) {
-    uint32_t keys = js_array_new(vm, 0);
-    js_own_keys(vm, o, 0, keys);
-    uint32_t vals = js_array_new(vm, 0);
-    for (uint32_t k = 0; k < vm->objs[keys].b; k++) {
-        jv v;
-        uint32_t f;
-        js_get_own(vm, o, js_atom(vm, jv_idx(js_array_get(vm, keys, k))), &v, &f);
-        js_array_push(vm, vals, v);
-        js_array_push(vm, vals, jv_num(f));
+    /* the shape's own entries, oldest first (symbols' among them; an array's dense
+       elements are not the shape's), each defined again on a shape of p's */
+    vector<uint32_t> es, keys, flags;
+    vector<jv> vals;
+    for (uint32_t x = vm->objs[o].shape; x && vm->shapes[x].count; x = vm->shapes[x].parent) push_back(es, x);
+    for (size_t q = len(es); q > 0; q--) {
+        js_shape e = vm->shapes[es[q - 1]];
+        jv v = vm->slots[vm->objs[o].slots + e.slot];
+        if (v == JV_HOLE) continue;
+        push_back(keys, e.atom);
+        push_back(flags, e.flags);
+        push_back(vals, v);
     }
     vm->objs[o].proto = p;
     vm->objs[o].shape = js_shape_of(vm, p);
     vm->objs[o].cap = 0;
-    for (uint32_t k = 0; k < vm->objs[keys].b; k++)
-        js_define(vm, o, js_atom(vm, jv_idx(js_array_get(vm, keys, k))), js_array_get(vm, vals, 2 * k), (uint32_t)jv_dbl(js_array_get(vm, vals, 2 * k + 1)));
+    for (size_t k = 0; k < len(keys); k++) js_define(vm, o, keys[k], vals[k], flags[k]);
 }
 
 static double len_of(js_vm *vm, jv o) {
@@ -141,12 +143,59 @@ static double len_of(js_vm *vm, jv o) {
     return d != d || d < 0 ? 0 : trunc(d);
 }
 static jv elem_of(js_vm *vm, jv o, uint32_t i) {
-    if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) return js_array_get(vm, jv_idx(o), i);
+    if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) {
+        uint32_t a = jv_idx(o);
+        jv v = i < vm->objs[a].b ? vm->slots[vm->objs[a].a + i] : JV_HOLE;
+        if (v != JV_HOLE) return v;
+        /* a hole: an element with attributes of its own (a getter's) is read as Get reads it */
+        if (!(vm->objs[a].flags & JO_ELEMPROPS)) return JV_UNDEF;
+    }
     if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_TYPEDARRAY) return i < vm->objs[jv_idx(o)].b ? js_ta_get(vm, jv_idx(o), i) : JV_UNDEF;
     return js_get_value(vm, o, jv_num((double)i));
 }
 /* an array as the engine keeps one (the natives' fast paths) */
 static int is_array(js_vm *vm, jv v) { return jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_ARRAY; }
+/* an array the natives may write as they find it: its elements dense and of the default
+   attributes, extensible, its length writable (else the standard's own steps, which
+   throw where V8 throws) */
+static int plain_array(js_vm *vm, jv v) { return is_array(vm, v) && (vm->objs[jv_idx(v)].flags & JO_ELEM_SLOW) == JO_EXTENSIBLE; }
+/* HasProperty(ToObject(o), i): an array's (an arguments object's) dense element, a typed
+   array's or a string's index, else as the object and its prototypes say */
+static int has_elem(js_vm *vm, jv o, uint32_t i) {
+    if (jv_is_str(o)) return i < vm->strs[jv_idx(o)].len;
+    if (!jv_is_obj(o)) return 0;
+    uint32_t x = jv_idx(o), k = vm->objs[x].kind;
+    if (k == JK_ARRAY || k == JK_ARGUMENTS) {
+        uint32_t st = k == JK_ARGUMENTS ? vm->objs[x].a : x;
+        if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) return 1;
+    }
+    if (k == JK_TYPEDARRAY) return i < vm->objs[x].b;
+    return js_has(vm, x, js_atom(vm, js_num_to_str(vm, (double)i)));
+}
+/* the same as the read-only natives ask it: an array without elements of attributes of
+   their own by its slot alone (its prototypes' indexes not looked for), else has_elem */
+static int elem_present(js_vm *vm, jv o, uint32_t i) {
+    if (is_array(vm, o) && !(vm->objs[jv_idx(o)].flags & JO_ELEMPROPS)) {
+        uint32_t a = jv_idx(o);
+        return i < vm->objs[a].b && vm->slots[vm->objs[a].a + i] != JV_HOLE;
+    }
+    return has_elem(vm, o, i);
+}
+/* elem_present then elem_of, in one: 1 with the value in *v, 0 not there, -1 thrown (an
+   array's dense element read at once, the walk the methods that skip holes take) */
+static int elem_take(js_vm *vm, jv o, uint32_t i, jv *v) {
+    if (jv_is_obj(o) && vm->objs[jv_idx(o)].kind == JK_ARRAY) {
+        uint32_t a = jv_idx(o);
+        jv x = i < vm->objs[a].b ? vm->slots[vm->objs[a].a + i] : JV_HOLE;
+        if (x != JV_HOLE) { *v = x; return 1; }
+        if (!(vm->objs[a].flags & JO_ELEMPROPS)) return 0;
+    }
+    int has = has_elem(vm, o, i);
+    if (vm->throwing) return -1;
+    if (!has) return 0;
+    *v = elem_of(vm, o, i);
+    return vm->throwing ? -1 : 1;
+}
 /* IsArray: an array, or a proxy whose target is one (through every proxy) */
 static int is_array_spec(js_vm *vm, jv v) {
     for (int d = 0; d < 10000 && jv_is_obj(v); d++) {
@@ -157,6 +206,16 @@ static int is_array_spec(js_vm *vm, jv v) {
         v = jv_obj(vm->objs[o].a);
     }
     return 0;
+}
+
+/* a TypeError of pre, the value's text without its methods run (V8's), then post */
+static jv value_error(js_vm *vm, const char *pre, jv v, const char *post) {
+    if (vm->throwing) return JV_HOLE;
+    vector<char> m;
+    append_range(m, pre, strlen(pre));
+    js_value_text(vm, v, &m);
+    append_range(m, post, strlen(post));
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
 }
 
 static jv callback(js_vm *vm, jv fn, jv thisv, jv a, jv b, jv c) {
@@ -845,7 +904,11 @@ static void merge_sort(js_vm *vm, vector<jv> *v, vector<jv> *tmp, size_t lo, siz
 static void flat_into(js_vm *vm, uint32_t out, jv src, double depth) {
     uint32_t n = (uint32_t)len_of(vm, src);
     for (uint32_t i = 0; i < n && !vm->throwing; i++) {
+        /* what is not there (a hole) is skipped */
+        int has = elem_present(vm, src, i);
+        if (vm->throwing || !has) continue;
         jv v = elem_of(vm, src, i);
+        if (vm->throwing) return;
         if (depth >= 1 && is_array_spec(vm, v)) flat_into(vm, out, v, depth - 1);
         else js_array_push(vm, out, v);
     }
@@ -1231,7 +1294,7 @@ int js_aiter_call(js_vm *vm, uint32_t rec, int kind, jv arg, jv *out) {
         if (vm->throwing) return -1;
         if (jv_is_nullish(m)) return 0;
     }
-    if (!js_is_callable(vm, m)) { js_type_error(vm, "is not a function", js_typeof(vm, m)); return -1; }
+    if (!js_is_callable(vm, m)) { js_not_function(vm, m); return -1; }
     jv a1[1] = { arg };
     *out = js_call(vm, m, it, a1, kind == 3 || kind == 4 ? 0 : 1);
     return vm->throwing ? -1 : 1;
@@ -1267,9 +1330,267 @@ static jv iter_of_coll(js_vm *vm, uint32_t coll, uint32_t mode) {
     return jv_obj(it);
 }
 
+/* a prototype's method called on undefined or null, which it reads as an object: V8's
+   "Array.prototype.join called on null or undefined" */
+static jv called_on_nothing(js_vm *vm, const char *proto, jv callee) {
+    vector<char> m;
+    append_range(m, proto, strlen(proto));
+    if (jv_is_obj(callee) && vm->objs[jv_idx(callee)].kind == JK_NATIVE && vm->objs[jv_idx(callee)].c) js_str_to_utf8(vm, vm->objs[jv_idx(callee)].c, &m);
+    const char *post = " called on null or undefined";
+    append_range(m, post, strlen(post));
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
+}
+
+/* an Array.prototype method called on undefined or null, in V8's words: its callback-taking
+   methods (and concat, indexOf) name themselves; the others are ToObject's */
+static jv array_on_nothing(js_vm *vm, uint32_t id, jv callee) {
+    if (id == N_AP_CONCAT || id == N_AP_INDEXOF || (id >= N_AP_FIND && id <= N_AP_EVERY)) return called_on_nothing(vm, "Array.prototype.", callee);
+    return js_throw_msg(vm, vm->type_error_proto, "Cannot convert undefined or null to object");
+}
+
+/* Array.from's and Array.of's values (an array of them) given to their this when it is a
+   constructor other than Array (ECMA-262 23.1.2.1, 23.1.2.3): its object made (given the
+   count, with_len), each value defined as CreateDataPropertyOrThrow defines one (a
+   frozen or non-extensible object's refusal a TypeError), then its length set */
+static jv into_ctor(js_vm *vm, jv c, uint32_t vals, int with_len) {
+    if (!jv_is_obj(c) || (vm->objs[jv_idx(c)].kind == JK_NATIVE && vm->objs[jv_idx(c)].a == N_ARRAY) || !js_is_constructor(vm, c)) return jv_obj(vals);
+    uint32_t n = vm->objs[vals].b;
+    jv av[1] = { jv_num(n) };
+    jv a = js_construct(vm, c, av, with_len ? 1 : 0, c);
+    if (vm->throwing) return JV_HOLE;
+    for (uint32_t i = 0; i < n; i++)
+        if (!js_create_data_throw(vm, a, jv_num(i), js_array_get(vm, vals, i))) return JV_HOLE;
+    if (!js_set_throw(vm, a, jv_str(A_LENGTH), jv_num(n))) return JV_HOLE;
+    return a;
+}
+
+/* ---- the array methods that write, as the standard has them (ECMA-262 23.1.3) ----
+   For what the fast paths do not take: an array whose elements or length have
+   attributes of their own (frozen, sealed, not extensible, defineProperty's), an
+   arguments object, any array-like. Each write is Set(O, P, V, true) and each removal
+   DeletePropertyOrThrow, so a refusal is a TypeError in V8's words, the caller's code
+   strict or not. Each returns JV_HOLE when one threw. */
+
+/* LengthOfArrayLike(O): -1 when it threw */
+static double ga_len(js_vm *vm, jv o) {
+    if (is_array(vm, o)) return vm->objs[jv_idx(o)].b;
+    jv n = js_get(vm, o, A_LENGTH);
+    if (vm->throwing) return -1;
+    double d = js_to_number(vm, n);
+    if (vm->throwing) return -1;
+    if (d != d || d <= 0) return 0;
+    d = trunc(d);
+    return d > 9007199254740991.0 ? 9007199254740991.0 : d;
+}
+/* HasProperty(O, k) and Get(O, k) at an index that may pass 2^32 - 2 (an array-like's) */
+static int ga_has(js_vm *vm, jv o, double k) {
+    if (k < 4294967295.0) return has_elem(vm, o, (uint32_t)k);
+    return jv_is_obj(o) && js_has(vm, jv_idx(o), js_atom(vm, js_num_to_str(vm, k)));
+}
+static jv ga_get(js_vm *vm, jv o, double k) {
+    if (is_array(vm, o) && k < vm->objs[jv_idx(o)].b) {
+        jv v = vm->slots[vm->objs[jv_idx(o)].a + (uint32_t)k];
+        if (v != JV_HOLE) return v;
+    }
+    return js_get_value(vm, o, jv_num(k));
+}
+/* the element at from moved to to (the shifting loops' step): Set when it is there,
+   else DeletePropertyOrThrow; 0 thrown */
+static int ga_move(js_vm *vm, jv o, double from, double to) {
+    int has = ga_has(vm, o, from);
+    if (vm->throwing) return 0;
+    if (!has) return js_delete_throw(vm, o, jv_num(to));
+    jv v = ga_get(vm, o, from);
+    if (vm->throwing) return 0;
+    return js_set_throw(vm, o, jv_num(to), v);
+}
+static int ga_set_len(js_vm *vm, jv o, double n) { return js_set_throw(vm, o, jv_str(A_LENGTH), jv_num(n)); }
+/* a relative index (from the end when negative) clamped to [0, n] */
+static double ga_rel(double d, double n) {
+    if (d < 0) return n + d < 0 ? 0 : n + d;
+    return d > n ? n : d;
+}
+
+static jv ga_push(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    for (uint32_t i = 0; i < argc; i++)
+        if (!js_set_throw(vm, o, jv_num(n + i), arg(vm, args, argc, i))) return JV_HOLE;
+    if (!ga_set_len(vm, o, n + argc)) return JV_HOLE;
+    return jv_num(n + argc);
+}
+
+static jv ga_pop_shift(js_vm *vm, jv o, int shift) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    if (n == 0) return ga_set_len(vm, o, 0) ? JV_UNDEF : JV_HOLE;
+    jv r = ga_get(vm, o, shift ? 0 : n - 1);
+    if (vm->throwing) return JV_HOLE;
+    if (shift)
+        for (double k = 1; k < n; k++) if (!ga_move(vm, o, k, k - 1)) return JV_HOLE;
+    if (!js_delete_throw(vm, o, jv_num(n - 1))) return JV_HOLE;
+    if (!ga_set_len(vm, o, n - 1)) return JV_HOLE;
+    return r;
+}
+
+static jv ga_unshift(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    if (argc) {
+        for (double k = n; k > 0; k--) if (!ga_move(vm, o, k - 1, k + argc - 1)) return JV_HOLE;
+        for (uint32_t j = 0; j < argc; j++)
+            if (!js_set_throw(vm, o, jv_num(j), arg(vm, args, argc, j))) return JV_HOLE;
+    }
+    if (!ga_set_len(vm, o, n + argc)) return JV_HOLE;
+    return jv_num(n + argc);
+}
+
+/* splice's start and delete count, its arguments' ToIntegerOrInfinity clamped: 0 thrown */
+static int ga_splice_args(js_vm *vm, uint32_t args, uint32_t argc, double n, double *start, double *dc) {
+    double s = int_arg(vm, args, argc, 0, 0);
+    if (vm->throwing) return 0;
+    s = ga_rel(s, n);
+    double d = argc == 0 ? 0 : argc == 1 ? n - s : int_arg(vm, args, argc, 1, 0);
+    if (vm->throwing) return 0;
+    *start = s;
+    *dc = d < 0 ? 0 : d > n - s ? n - s : d;
+    return 1;
+}
+
+static jv ga_splice_at(js_vm *vm, jv o, double n, double start, double dc, uint32_t args, uint32_t argc) {
+    uint32_t ins = argc > 2 ? argc - 2 : 0;
+    /* the removed elements, a new array's (holes kept) */
+    uint32_t removed = js_array_new(vm, 0);
+    for (double k = 0; k < dc; k++) {
+        int has = ga_has(vm, o, start + k);
+        if (vm->throwing) return JV_HOLE;
+        if (!has) continue;
+        jv v = ga_get(vm, o, start + k);
+        if (vm->throwing) return JV_HOLE;
+        js_array_set(vm, removed, (uint32_t)k, v);
+    }
+    js_array_set_length(vm, removed, (uint32_t)dc);
+    if (ins < dc) {
+        for (double k = start; k < n - dc; k++) if (!ga_move(vm, o, k + dc, k + ins)) return JV_HOLE;
+        for (double k = n; k > n - dc + ins; k--) if (!js_delete_throw(vm, o, jv_num(k - 1))) return JV_HOLE;
+    } else if (ins > dc) {
+        for (double k = n - dc; k > start; k--) if (!ga_move(vm, o, k + dc - 1, k + ins - 1)) return JV_HOLE;
+    }
+    for (uint32_t i = 0; i < ins; i++)
+        if (!js_set_throw(vm, o, jv_num(start + i), arg(vm, args, argc, i + 2))) return JV_HOLE;
+    if (!ga_set_len(vm, o, n - dc + ins)) return JV_HOLE;
+    return jv_obj(removed);
+}
+
+static jv ga_splice(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
+    double n = ga_len(vm, o), start = 0, dc = 0;
+    if (n < 0 || !ga_splice_args(vm, args, argc, n, &start, &dc)) return JV_HOLE;
+    return ga_splice_at(vm, o, n, start, dc, args, argc);
+}
+
+static jv ga_reverse(js_vm *vm, jv o) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    double mid = floor(n / 2);
+    for (double lo = 0; lo < mid; lo++) {
+        double up = n - lo - 1;
+        jv lv = JV_UNDEF, uv = JV_UNDEF;
+        int le = ga_has(vm, o, lo);
+        if (vm->throwing) return JV_HOLE;
+        if (le) { lv = ga_get(vm, o, lo); if (vm->throwing) return JV_HOLE; }
+        int ue = ga_has(vm, o, up);
+        if (vm->throwing) return JV_HOLE;
+        if (ue) { uv = ga_get(vm, o, up); if (vm->throwing) return JV_HOLE; }
+        int ok = 1;
+        if (le && ue) ok = js_set_throw(vm, o, jv_num(lo), uv) && js_set_throw(vm, o, jv_num(up), lv);
+        else if (ue) ok = js_set_throw(vm, o, jv_num(lo), uv) && js_delete_throw(vm, o, jv_num(up));
+        else if (le) ok = js_delete_throw(vm, o, jv_num(lo)) && js_set_throw(vm, o, jv_num(up), lv);
+        if (!ok) return JV_HOLE;
+    }
+    return o;
+}
+
+/* the sorted values written back from index 0, the rest of the length deleted */
+static jv ga_sort_store(js_vm *vm, jv o, vector<jv> *v, double n) {
+    double j = 0;
+    for (; j < (double)len(*v); j++) if (!js_set_throw(vm, o, jv_num(j), at(*v, (size_t)j))) return JV_HOLE;
+    for (; j < n; j++) if (!js_delete_throw(vm, o, jv_num(j))) return JV_HOLE;
+    return o;
+}
+
+static jv ga_sort(js_vm *vm, jv o, jv cmp) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    if (n < 2) return o;                        /* V8's: nothing read or written */
+    vector<jv> v, tmp;
+    for (double k = 0; k < n; k++) {
+        int has = ga_has(vm, o, k);
+        if (vm->throwing) return JV_HOLE;
+        if (!has) continue;
+        jv x = ga_get(vm, o, k);
+        if (vm->throwing) return JV_HOLE;
+        push_back(v, x);
+    }
+    resize(tmp, len(v));
+    int err = 0;
+    merge_sort(vm, &v, &tmp, 0, len(v), cmp, &err);
+    if (err || vm->throwing) return JV_HOLE;
+    return ga_sort_store(vm, o, &v, n);
+}
+
+/* fill's start and end, its arguments' ToIntegerOrInfinity relative to n: 0 thrown */
+static int ga_fill_args(js_vm *vm, uint32_t args, uint32_t argc, double n, double *from, double *to) {
+    double s = int_arg(vm, args, argc, 1, 0);
+    if (vm->throwing) return 0;
+    double e = int_arg(vm, args, argc, 2, n);
+    if (vm->throwing) return 0;
+    *from = ga_rel(s, n);
+    *to = ga_rel(e, n);
+    return 1;
+}
+static jv ga_fill_at(js_vm *vm, jv o, double from, double to, jv val) {
+    for (double k = from; k < to; k++) if (!js_set_throw(vm, o, jv_num(k), val)) return JV_HOLE;
+    return o;
+}
+static jv ga_fill(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
+    double n = ga_len(vm, o), from = 0, to = 0;
+    if (n < 0 || !ga_fill_args(vm, args, argc, n, &from, &to)) return JV_HOLE;
+    return ga_fill_at(vm, o, from, to, arg(vm, args, argc, 0));
+}
+
+/* Array.prototype.copyWithin (23.1.3.4): a plain array's slots moved, else element by element */
+static jv ga_copy_within(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
+    double n = ga_len(vm, o);
+    if (n < 0) return JV_HOLE;
+    double to = int_arg(vm, args, argc, 0, 0);
+    if (vm->throwing) return JV_HOLE;
+    double from = int_arg(vm, args, argc, 1, 0);
+    if (vm->throwing) return JV_HOLE;
+    double end = int_arg(vm, args, argc, 2, n);
+    if (vm->throwing) return JV_HOLE;
+    to = ga_rel(to, n);
+    from = ga_rel(from, n);
+    end = ga_rel(end, n);
+    double count = end - from < n - to ? end - from : n - to;
+    if (count <= 0) return o;
+    if (plain_array(vm, o)) {
+        uint32_t a = jv_idx(o), b = vm->objs[a].a, t = (uint32_t)to, f = (uint32_t)from, c = (uint32_t)count;
+        if (f < t && t < f + c) for (uint32_t i = c; i-- > 0;) vm->slots[b + t + i] = vm->slots[b + f + i];
+        else for (uint32_t i = 0; i < c; i++) vm->slots[b + t + i] = vm->slots[b + f + i];
+        return o;
+    }
+    double dir = 1;
+    if (from < to && to < from + count) { dir = -1; from += count - 1; to += count - 1; }
+    for (; count > 0; count--, from += dir, to += dir)
+        if (!ga_move(vm, o, from, to)) return JV_HOLE;
+    return o;
+}
+
 jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
-    (void)callee;
     jv a0 = arg(vm, args, argc, 0), a1 = arg(vm, args, argc, 1);
+    /* (an Array.prototype method's receiver undefined or null: each case's first test,
+       AP_ON_NOTHING, where the standard asks ToObject) */
+#define AP_ON_NOTHING() do { if (jv_is_nullish(thisv) || thisv == JV_HOLE) return array_on_nothing(vm, id, callee); } while (0)
     switch (id) {
     case N_PARSE_INT: {
         uint32_t s = js_to_string(vm, a0);
@@ -1403,7 +1724,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_sym(y);
     }
     case N_SYM_KEYFOR: {
-        if (!jv_is_sym(a0)) return js_type_error(vm, "is not a symbol", js_typeof(vm, a0));
+        if (!jv_is_sym(a0)) return value_error(vm, "", a0, " is not a symbol");
         uint32_t r = vm->syms[jv_idx(a0)].reg;
         return r ? jv_str(r - 1) : JV_UNDEF;
     }
@@ -1473,7 +1794,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     /* ---- Promise ---- */
     case N_PROMISE: {
         if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Promise constructor cannot be invoked without 'new'");
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function: Promise resolver", js_typeof(vm, a0));
+        if (!js_is_callable(vm, a0)) return value_error(vm, "Promise resolver ", a0, " is not a function");
         uint32_t p = js_promise_new(vm);
         jv res, rej;
         promise_resolvers(vm, p, &res, &rej);
@@ -1635,6 +1956,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             for (uint32_t i = 0; i < n && !vm->throwing; i++) {
                 jv v = js_array_get(vm, items, i);
                 if (kind == JK_MAP) {
+                    if (!jv_is_obj(v)) return value_error(vm, "Iterator value ", v, " is not an entry object");
                     jv k = js_get_value(vm, v, jv_num(0)), val = js_get_value(vm, v, jv_num(1));
                     if (vm->throwing) return JV_HOLE;
                     js_coll_op(vm, JCOLL_SET, c, k, val);
@@ -1657,14 +1979,17 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             uint32_t keys = js_array_new(vm, 0);
             js_own_keys(vm, jv_idx(so), 1, keys);
             for (uint32_t k = 0; k < vm->objs[keys].b && !vm->throwing; k++) {
-                uint32_t atom = js_atom(vm, jv_idx(js_array_get(vm, keys, k)));
-                js_set(vm, t, atom, js_get(vm, so, atom));
+                jv key = js_array_get(vm, keys, k);
+                jv v = js_get(vm, so, js_atom(vm, jv_idx(key)));
+                if (vm->throwing) return JV_HOLE;
+                /* Set(to, key, value, true): a refusal a TypeError */
+                if (!js_set_throw(vm, t, key, v)) return JV_HOLE;
             }
         }
-        return t;
+        return vm->throwing ? JV_HOLE : t;
     }
     case N_OBJ_CREATE: {
-        if (!jv_is_obj(a0) && a0 != JV_NULL) return js_throw_msg(vm, vm->type_error_proto, "Object prototype may only be an Object or null");
+        if (!jv_is_obj(a0) && a0 != JV_NULL) return value_error(vm, "Object prototype may only be an Object or null: ", a0, "");
         uint32_t o = js_obj_new(vm, JK_PLAIN, a0 == JV_NULL ? 0 : jv_idx(a0));
         if (jv_is_obj(a1)) {
             uint32_t keys = js_array_new(vm, 0);
@@ -1686,7 +2011,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_OBJ_SETPROTO: {
         if (!jv_is_obj(a0)) return a0;
-        if (!jv_is_obj(a1) && a1 != JV_NULL) return js_throw_msg(vm, vm->type_error_proto, "Object prototype may only be an Object or null");
+        if (!jv_is_obj(a1) && a1 != JV_NULL) return value_error(vm, "Object prototype may only be an Object or null: ", a1, "");
         if (vm->objs[jv_idx(a0)].kind == JK_PROXY) {
             jv r = js_proxy_native(vm, JPX_R_SETPROTO, callee, thisv, args, argc, newt);
             if (vm->throwing) return JV_HOLE;
@@ -1753,7 +2078,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_OBJ_GROUPBY: case N_MAP_GROUPBY: {
         /* each value of the iterable under the key its callback gives: a null-prototype object's arrays, or a Map's */
-        if (!js_is_callable(vm, a1)) return js_type_error(vm, "is not a function", js_typeof(vm, a1));
+        if (!js_is_callable(vm, a1)) return value_error(vm, "", a1, " is not a function");
         uint32_t items = js_array_new(vm, 0);
         if (!iterate_into(vm, a0, items)) return JV_HOLE;
         uint32_t out = id == N_MAP_GROUPBY ? coll_new(vm, JK_MAP, vm->map_proto) : js_obj_new(vm, JK_PLAIN, 0);
@@ -1780,24 +2105,20 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return vm->throwing ? JV_HOLE : jv_obj(out);
     }
     case N_OBJ_FROMENTRIES: {
+        /* the iterable's entries, each an object of a key and a value (V8's words else) */
         uint32_t o = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-        jv src = a0;
-        if (jv_is_obj(src) && vm->objs[jv_idx(src)].kind == JK_MAP) src = jv_obj(vm->objs[jv_idx(src)].a);
-        if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_MAP) {
-            uint32_t arr = vm->objs[jv_idx(a0)].a;
-            for (uint32_t i = 0; i + 1 < vm->objs[arr].b; i += 2) {
-                jv k = vm->slots[vm->objs[arr].a + i];
-                if (k == JV_HOLE) continue;
-                js_set_value(vm, jv_obj(o), k, vm->slots[vm->objs[arr].a + i + 1]);
-            }
-            return jv_obj(o);
+        uint32_t items = js_array_new(vm, 0);
+        if (!iterate_into(vm, a0, items)) return JV_HOLE;
+        for (uint32_t i = 0; i < vm->objs[items].b && !vm->throwing; i++) {
+            jv e = js_array_get(vm, items, i);
+            if (!jv_is_obj(e)) return value_error(vm, "Iterator value ", e, " is not an entry object");
+            jv k = js_get_value(vm, e, jv_num(0));
+            if (vm->throwing) return JV_HOLE;
+            jv v = js_get_value(vm, e, jv_num(1));
+            if (vm->throwing) return JV_HOLE;
+            js_set_value(vm, jv_obj(o), k, v);
         }
-        uint32_t n = (uint32_t)len_of(vm, src);
-        for (uint32_t i = 0; i < n && !vm->throwing; i++) {
-            jv e = elem_of(vm, src, i);
-            js_set_value(vm, jv_obj(o), js_get_value(vm, e, jv_num(0)), js_get_value(vm, e, jv_num(1)));
-        }
-        return jv_obj(o);
+        return vm->throwing ? JV_HOLE : jv_obj(o);
     }
     case N_OBJ_GETOWNDESC: return js_proxy_native(vm, JPX_OBJ_GETOWNDESC, callee, thisv, args, argc, newt);
     case N_OBJ_IS: {
@@ -1809,19 +2130,22 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_bool(js_strict_eq(vm, a0, a1));
     }
     case N_OP_HASOWN: {
+        /* ToPropertyKey, then ToObject (ECMA-262 20.1.3.2); the shape's own first, then what
+           the kind keeps (an array's or arguments object's elements, a string's indexes, a
+           function's name and length): its [[GetOwnProperty]] */
+        int kok = 1;
+        uint32_t atom = js_prop_key(vm, a0, &kok);
+        if (!kok) return JV_HOLE;
         jv o = js_to_object(vm, thisv);
         if (vm->throwing) return JV_HOLE;
-        int kok = 1;
-        uint32_t atom = js_prop_key(vm, a0, &kok), ob = jv_idx(o);
-        if (!kok) return JV_HOLE;
+        uint32_t ob = jv_idx(o);
         jv v;
         uint32_t f;
         if (js_get_own(vm, ob, atom, &v, &f)) return JV_TRUE;
-        uint32_t k = vm->objs[ob].kind;
-        uint32_t i;
-        if (k == JK_ARRAY) return jv_bool(atom == A_LENGTH || (js_atom_index(vm, atom, &i) && i < vm->objs[ob].b && vm->slots[vm->objs[ob].a + i] != JV_HOLE));
-        if (k == JK_STRING) return jv_bool(atom == A_LENGTH || (js_atom_index(vm, atom, &i) && i < vm->strs[jv_idx(vm->objs[ob].x)].len));
-        return JV_FALSE;
+        if (vm->throwing) return JV_HOLE;
+        if (vm->objs[ob].kind == JK_PLAIN || vm->objs[ob].kind == JK_PROXY) return JV_FALSE;
+        int r = js_proxy_get_own(vm, ob, atom, &v, &f);
+        return vm->throwing ? JV_HOLE : jv_bool(r);
     }
     case N_OP_TOSTRING: case N_OP_TOLOCALE: {
         if (thisv == JV_UNDEF) return jv_str(js_str_ascii(vm, "[object Undefined]"));
@@ -1862,24 +2186,28 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_FALSE;
     }
     case N_OP_PROPENUM: {
-        if (!jv_is_obj(thisv)) return JV_FALSE;
+        /* the own property's [[Enumerable]] (an array's length not, its elements as their
+           attributes say, a string's indexes so) */
         int kok = 1;
         uint32_t key = js_prop_key(vm, a0, &kok);
         if (!kok) return JV_HOLE;
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
         jv v;
         uint32_t f;
-        if (js_get_own(vm, jv_idx(thisv), key, &v, &f)) return jv_bool(!(f & JS_SHAPE_HIDDEN));
-        return jv_bool(vm->objs[jv_idx(thisv)].kind == JK_ARRAY);
+        int r = js_proxy_get_own(vm, jv_idx(o), key, &v, &f);
+        if (vm->throwing) return JV_HOLE;
+        return jv_bool(r && !(f & JS_SHAPE_HIDDEN));
     }
     /* ---- Function ---- */
     case N_FP_CALL: {
-        if (!js_is_callable(vm, thisv)) return js_type_error(vm, "is not a function", A_FUNCTION);
+        if (!js_is_callable(vm, thisv)) return js_caller_not_function(vm, thisv);
         vector<jv> av;
         for (uint32_t i = 1; i < argc; i++) push_back(av, arg(vm, args, argc, i));
         return js_call(vm, thisv, a0, data(av), (uint32_t)len(av));
     }
     case N_FP_APPLY: {
-        if (!js_is_callable(vm, thisv)) return js_type_error(vm, "is not a function", A_FUNCTION);
+        if (!js_is_callable(vm, thisv)) return js_caller_not_function(vm, thisv);
         vector<jv> av;
         if (!jv_is_nullish(a1)) {
             uint32_t n = (uint32_t)len_of(vm, a1);
@@ -1889,7 +2217,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return js_call(vm, thisv, a0, data(av), (uint32_t)len(av));
     }
     case N_FP_BIND: {
-        if (!js_is_callable(vm, thisv)) return js_type_error(vm, "is not a function", A_FUNCTION);
+        if (!js_is_callable(vm, thisv)) return js_throw_msg(vm, vm->type_error_proto, "Bind must be called on a function");
         uint32_t b = js_obj_new(vm, JK_BOUND, vm->function_proto);
         vm->objs[b].a = jv_idx(thisv);
         vm->objs[b].x = a0;
@@ -1901,17 +2229,18 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return jv_obj(b);
     }
     case N_FP_TOSTRING: {
-        uint32_t name = A_EMPTY;
-        if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_CLOSURE) name = vm->funcs[vm->objs[jv_idx(thisv)].a].name;
-        else if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_NATIVE) name = vm->objs[jv_idx(thisv)].c;
-        uint32_t s = js_str_concat(vm, js_str_ascii(vm, "function "), js_str_concat(vm, name ? name : A_EMPTY, js_str_ascii(vm, "() { [code] }")));
-        return jv_str(s);
+        /* a function's own source text, as written (ECMA-262 2019): src/js/vm.c's */
+        uint32_t s = jv_is_obj(thisv) ? js_func_source(vm, jv_idx(thisv)) : 0;
+        if (s) return jv_str(s);
+        return js_throw_msg(vm, vm->type_error_proto, "Function.prototype.toString requires that 'this' be a Function");
     }
     /* ---- Array ---- */
     case N_ARR_ISARRAY: return jv_bool(is_array_spec(vm, a0));
     case N_ARR_FROM: {
+        /* its mapper checked first; nothing is an iteration's error, as V8 words it */
+        if (a1 != JV_UNDEF && !js_is_callable(vm, a1)) return js_not_function(vm, a1);
+        if (jv_is_nullish(a0)) { js_iter_of(vm, a0); return JV_HOLE; }
         uint32_t out = js_array_new(vm, 0);
-        if (jv_is_nullish(a0)) return js_throw_msg(vm, vm->type_error_proto, "Array.from needs an iterable or an array-like object");
         jv src = a0;
         if (jv_is_obj(src) && (vm->objs[jv_idx(src)].kind == JK_MAP || vm->objs[jv_idx(src)].kind == JK_SET)) {
             uint32_t c = jv_idx(src);
@@ -1947,32 +2276,84 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             for (uint32_t i = 0; i < n && !vm->throwing; i++) js_array_push(vm, out, elem_of(vm, src, i));
         }
         if (js_is_callable(vm, a1)) {
+            jv ta = arg(vm, args, argc, 2);
             for (uint32_t i = 0; i < vm->objs[out].b && !vm->throwing; i++) {
-                jv r = callback(vm, a1, JV_UNDEF, js_array_get(vm, out, i), jv_num(i), JV_UNDEF);
+                jv av[2] = { js_array_get(vm, out, i), jv_num(i) };
+                jv r = js_call(vm, a1, ta, av, 2);
                 js_array_set(vm, out, i, r);
             }
         }
-        return vm->throwing ? JV_HOLE : jv_obj(out);
+        if (vm->throwing) return JV_HOLE;
+        return into_ctor(vm, thisv, out, js_is_callable(vm, js_get(vm, a0, JS_KEY_ITERATOR)) ? 0 : 1);
     }
     case N_ARR_OF: {
         uint32_t a = js_array_new(vm, 0);
         for (uint32_t i = 0; i < argc; i++) js_array_push(vm, a, arg(vm, args, argc, i));
-        return jv_obj(a);
+        return into_ctor(vm, thisv, a, 1);
     }
-    case N_AP_PUSH: {
-        if (is_array(vm, thisv)) {
+    /* the writing methods: a plain array's slots directly, anything else by the standard's
+       steps (ga_*), whose writes throw where V8's do */
+    case N_AP_PUSH: case N_AP_POP: case N_AP_SHIFT: case N_AP_UNSHIFT: case N_AP_SPLICE: case N_AP_REVERSE: case N_AP_FILL:
+    case N_AP_COPYWITHIN:
+        AP_ON_NOTHING();
+        if (!plain_array(vm, thisv) || id == N_AP_COPYWITHIN) {
+            jv o = js_to_object(vm, thisv);
+            if (vm->throwing) return JV_HOLE;
+            switch (id) {
+            case N_AP_PUSH: return ga_push(vm, o, args, argc);
+            case N_AP_POP: case N_AP_SHIFT: return ga_pop_shift(vm, o, id == N_AP_SHIFT);
+            case N_AP_UNSHIFT: return ga_unshift(vm, o, args, argc);
+            case N_AP_SPLICE: return ga_splice(vm, o, args, argc);
+            case N_AP_REVERSE: return ga_reverse(vm, o);
+            case N_AP_FILL: return ga_fill(vm, o, args, argc);
+            default: return ga_copy_within(vm, o, args, argc);
+            }
+        }
+        switch (id) {
+        case N_AP_PUSH: {
             uint32_t a = jv_idx(thisv);
-            if (vm->objs[a].flags & JO_FROZEN) return js_throw_msg(vm, vm->type_error_proto, "Cannot add property, object is not extensible");
             for (uint32_t i = 0; i < argc; i++) js_array_push(vm, a, arg(vm, args, argc, i));
             return jv_num(vm->objs[a].b);
         }
-        double n = len_of(vm, thisv);
-        for (uint32_t i = 0; i < argc; i++) js_set_value(vm, thisv, jv_num(n + i), arg(vm, args, argc, i));
-        js_set(vm, thisv, A_LENGTH, jv_num(n + argc));
-        return jv_num(n + argc);
-    }
-    case N_AP_POP: case N_AP_SHIFT: {
-        if (!is_array(vm, thisv)) return JV_UNDEF;
+        case N_AP_POP: case N_AP_SHIFT: break;
+        case N_AP_UNSHIFT: {
+            uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
+            js_array_set_length(vm, a, n + argc);
+            for (uint32_t i = n; i > 0; i--) vm->slots[vm->objs[a].a + i - 1 + argc] = vm->slots[vm->objs[a].a + i - 1];
+            for (uint32_t i = 0; i < argc; i++) vm->slots[vm->objs[a].a + i] = arg(vm, args, argc, i);
+            return jv_num(n + argc);
+        }
+        case N_AP_SPLICE: {
+            uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
+            double ds = 0, dc = 0;
+            if (!ga_splice_args(vm, args, argc, n, &ds, &dc)) return JV_HOLE;
+            /* the conversions may have run a valueOf that changed the array */
+            if (!plain_array(vm, thisv) || vm->objs[a].b != n) return ga_splice_at(vm, thisv, n, ds, dc, args, argc);
+            uint32_t start = (uint32_t)ds, del = (uint32_t)dc, ins = argc > 2 ? argc - 2 : 0;
+            uint32_t removed = js_array_new(vm, 0);
+            for (uint32_t i = 0; i < del; i++) js_array_push(vm, removed, vm->slots[vm->objs[a].a + start + i]);
+            vector<jv> tail;
+            for (uint32_t i = start + del; i < n; i++) push_back(tail, vm->slots[vm->objs[a].a + i]);
+            js_array_set_length(vm, a, start + ins + (uint32_t)len(tail));
+            for (uint32_t i = 0; i < ins; i++) vm->slots[vm->objs[a].a + start + i] = arg(vm, args, argc, i + 2);
+            for (size_t i = 0; i < len(tail); i++) vm->slots[vm->objs[a].a + start + ins + i] = at(tail, i);
+            return jv_obj(removed);
+        }
+        case N_AP_REVERSE: {
+            uint32_t a = jv_idx(thisv), n = vm->objs[a].b, o = vm->objs[a].a;
+            for (uint32_t i = 0; i < n / 2; i++) { jv t = vm->slots[o + i]; vm->slots[o + i] = vm->slots[o + n - 1 - i]; vm->slots[o + n - 1 - i] = t; }
+            return thisv;
+        }
+        default: {
+            uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
+            double from = 0, to = 0;
+            if (!ga_fill_args(vm, args, argc, n, &from, &to)) return JV_HOLE;
+            if (!plain_array(vm, thisv) || vm->objs[a].b != n) return ga_fill_at(vm, thisv, from, to, a0);
+            for (uint32_t i = (uint32_t)from; i < (uint32_t)to; i++) vm->slots[vm->objs[a].a + i] = a0;
+            return thisv;
+        }
+        }
+        {
         uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
         if (!n) return JV_UNDEF;
         jv r;
@@ -1983,51 +2364,43 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             vm->objs[a].b = n - 1;
         }
         return r;
-    }
-    case N_AP_UNSHIFT: {
-        if (!is_array(vm, thisv)) return JV_UNDEF;
-        uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
-        js_array_set_length(vm, a, n + argc);
-        for (uint32_t i = n; i > 0; i--) vm->slots[vm->objs[a].a + i - 1 + argc] = vm->slots[vm->objs[a].a + i - 1];
-        for (uint32_t i = 0; i < argc; i++) vm->slots[vm->objs[a].a + i] = arg(vm, args, argc, i);
-        return jv_num(n + argc);
-    }
+        }
     case N_AP_SLICE: {
+        AP_ON_NOTHING();
         double n = len_of(vm, thisv);
-        uint32_t from = rel_index(int_arg(vm, args, argc, 0, 0), (uint32_t)n), to = rel_index(int_arg(vm, args, argc, 1, n), (uint32_t)n);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t from = rel_index(int_arg(vm, args, argc, 0, 0), (uint32_t)n);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t to = rel_index(int_arg(vm, args, argc, 1, n), (uint32_t)n);
+        if (vm->throwing) return JV_HOLE;
         uint32_t out = js_array_new(vm, 0);
-        for (uint32_t i = from; i < to && !vm->throwing; i++) js_array_push(vm, out, elem_of(vm, thisv, i));
-        return jv_obj(out);
-    }
-    case N_AP_SPLICE: {
-        if (!is_array(vm, thisv)) return js_throw_msg(vm, vm->type_error_proto, "splice is only for arrays here");
-        uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
-        uint32_t start = rel_index(int_arg(vm, args, argc, 0, 0), n);
-        double dc = argc < 2 ? (double)(n - start) : int_arg(vm, args, argc, 1, 0);
-        if (dc < 0) dc = 0;
-        if (dc > n - start) dc = n - start;
-        uint32_t del = (uint32_t)dc, ins = argc > 2 ? argc - 2 : 0;
-        uint32_t removed = js_array_new(vm, 0);
-        for (uint32_t i = 0; i < del; i++) js_array_push(vm, removed, js_array_get(vm, a, start + i));
-        vector<jv> tail;
-        for (uint32_t i = start + del; i < n; i++) push_back(tail, vm->slots[vm->objs[a].a + i]);
-        js_array_set_length(vm, a, start + ins + (uint32_t)len(tail));
-        for (uint32_t i = 0; i < ins; i++) vm->slots[vm->objs[a].a + start + i] = arg(vm, args, argc, i + 2);
-        for (size_t i = 0; i < len(tail); i++) vm->slots[vm->objs[a].a + start + ins + i] = at(tail, i);
-        return jv_obj(removed);
+        /* a hole stays one (HasProperty), an element of attributes of its own read as Get reads it */
+        for (uint32_t i = from; i < to && !vm->throwing; i++) {
+            jv v = JV_HOLE;
+            if (elem_take(vm, thisv, i, &v) < 0) break;
+            js_array_push(vm, out, v);
+        }
+        return vm->throwing ? JV_HOLE : jv_obj(out);
     }
     case N_AP_CONCAT: {
+        AP_ON_NOTHING();
         uint32_t out = js_array_new(vm, 0);
         for (uint32_t k = 0; k <= argc && !vm->throwing; k++) {
             jv v = k == 0 ? thisv : arg(vm, args, argc, k - 1);
             if (is_array(vm, v)) {
                 uint32_t n = vm->objs[jv_idx(v)].b;
-                for (uint32_t i = 0; i < n; i++) js_array_push(vm, out, vm->slots[vm->objs[jv_idx(v)].a + i]);
+                for (uint32_t i = 0; i < n && !vm->throwing; i++) {
+                    jv x = i < vm->objs[jv_idx(v)].b ? vm->slots[vm->objs[jv_idx(v)].a + i] : JV_HOLE;
+                    /* a hole stays one; an element of attributes of its own is read as Get reads it */
+                    if (x == JV_HOLE && (vm->objs[jv_idx(v)].flags & JO_ELEMPROPS) && has_elem(vm, v, i)) x = elem_of(vm, v, i);
+                    js_array_push(vm, out, x);
+                }
             } else js_array_push(vm, out, v);
         }
         return jv_obj(out);
     }
     case N_AP_JOIN: case N_AP_TOSTRING: {
+        AP_ON_NOTHING();
         uint32_t sep = A_EMPTY;
         if (id == N_AP_TOSTRING || a0 == JV_UNDEF) sep = js_str_ascii(vm, ",");
         else { sep = js_to_string(vm, a0); if (!sep) return JV_HOLE; }
@@ -2047,29 +2420,31 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (vm->throwing) return JV_HOLE;
         return jv_str(js_str_new(vm, data(out), len(out)));
     }
-    case N_AP_REVERSE: {
-        if (!is_array(vm, thisv)) return thisv;
-        uint32_t a = jv_idx(thisv), n = vm->objs[a].b, o = vm->objs[a].a;
-        for (uint32_t i = 0; i < n / 2; i++) { jv t = vm->slots[o + i]; vm->slots[o + i] = vm->slots[o + n - 1 - i]; vm->slots[o + n - 1 - i] = t; }
-        return thisv;
-    }
     case N_AP_INDEXOF: case N_AP_LASTINDEXOF: case N_AP_INCLUDES: {
+        AP_ON_NOTHING();
         uint32_t n = (uint32_t)len_of(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
         if (id == N_AP_LASTINDEXOF) {
             int64_t from = argc > 1 ? (int64_t)int_arg(vm, args, argc, 1, 0) : (int64_t)n - 1;
+            if (vm->throwing) return JV_HOLE;
             if (from < 0) from += n;
             if (from >= (int64_t)n) from = (int64_t)n - 1;
             for (int64_t i = from; i >= 0; i--) {
-                if (is_array(vm, thisv) && (uint32_t)i < vm->objs[jv_idx(thisv)].b && vm->slots[vm->objs[jv_idx(thisv)].a + (uint32_t)i] == JV_HOLE) continue;
-                if (js_strict_eq(vm, elem_of(vm, thisv, (uint32_t)i), a0)) return jv_num((double)i);
+                int has = elem_present(vm, thisv, (uint32_t)i);
+                if (vm->throwing) return JV_HOLE;
+                if (!has) continue;
+                jv v = elem_of(vm, thisv, (uint32_t)i);
+                if (vm->throwing) return JV_HOLE;
+                if (js_strict_eq(vm, v, a0)) return jv_num((double)i);
             }
             return jv_num(-1);
         }
         uint32_t from = rel_index(int_arg(vm, args, argc, 1, 0), n);
-        if (is_array(vm, thisv)) {
-            uint32_t a = jv_idx(thisv), o = vm->objs[a].a;
-            for (uint32_t i = from; i < n; i++) {
-                jv v = vm->slots[o + i];
+        if (vm->throwing) return JV_HOLE;
+        if (is_array(vm, thisv) && !(vm->objs[jv_idx(thisv)].flags & JO_ELEMPROPS)) {
+            uint32_t a = jv_idx(thisv);
+            for (uint32_t i = from; i < n && i < vm->objs[a].b; i++) {
+                jv v = vm->slots[vm->objs[a].a + i];
                 if (v == JV_HOLE) {
                     if (id != N_AP_INCLUDES) continue;
                     v = JV_UNDEF;
@@ -2078,26 +2453,45 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
                     return id == N_AP_INCLUDES ? JV_TRUE : jv_num(i);
             }
         } else {
+            /* indexOf skips what is not there (HasProperty); includes reads it as undefined */
             for (uint32_t i = from; i < n && !vm->throwing; i++) {
+                if (id != N_AP_INCLUDES) {
+                    int has = elem_present(vm, thisv, i);
+                    if (vm->throwing) return JV_HOLE;
+                    if (!has) continue;
+                }
                 jv v = elem_of(vm, thisv, i);
+                if (vm->throwing) return JV_HOLE;
                 if (id == N_AP_INCLUDES ? js_same_value_zero(vm, v, a0) : js_strict_eq(vm, v, a0)) return id == N_AP_INCLUDES ? JV_TRUE : jv_num(i);
             }
+            if (vm->throwing) return JV_HOLE;
         }
         return id == N_AP_INCLUDES ? JV_FALSE : jv_num(-1);
     }
     case N_AP_FIND: case N_AP_FINDINDEX: case N_AP_FINDLAST: case N_AP_FINDLASTINDEX: case N_AP_FILTER: case N_AP_MAP:
     case N_AP_FOREACH: case N_AP_SOME: case N_AP_EVERY: case N_AP_FLATMAP: {
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+        AP_ON_NOTHING();
+        if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         uint32_t n = (uint32_t)len_of(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
         uint32_t out = id == N_AP_FILTER || id == N_AP_MAP || id == N_AP_FLATMAP ? js_array_new(vm, 0) : 0;
         int last = id == N_AP_FINDLAST || id == N_AP_FINDLASTINDEX;
+        /* the find family visits every index; the others skip what is not there (HasProperty) */
+        int every_index = last || id == N_AP_FIND || id == N_AP_FINDINDEX;
         for (uint32_t q = 0; q < n && !vm->throwing; q++) {
             uint32_t i = last ? n - 1 - q : q;
-            if (is_array(vm, thisv) && (i >= vm->objs[jv_idx(thisv)].b || (vm->slots[vm->objs[jv_idx(thisv)].a + i] == JV_HOLE && id != N_AP_FIND && id != N_AP_FINDINDEX))) {
-                if (id == N_AP_MAP) js_array_push(vm, out, JV_HOLE);
-                continue;
+            jv v = JV_UNDEF;
+            if (!every_index) {
+                int has = elem_take(vm, thisv, i, &v);
+                if (has < 0) return JV_HOLE;
+                if (!has) {
+                    if (id == N_AP_MAP) js_array_push(vm, out, JV_HOLE);
+                    continue;
+                }
+            } else {
+                v = elem_of(vm, thisv, i);
+                if (vm->throwing) return JV_HOLE;
             }
-            jv v = elem_of(vm, thisv, i);
             jv r = callback(vm, a0, a1, v, jv_num(i), thisv);
             if (vm->throwing) return JV_HOLE;
             int t = id == N_AP_MAP || id == N_AP_FOREACH || id == N_AP_FLATMAP ? 0 : js_truthy(vm, r);
@@ -2116,27 +2510,41 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_UNDEF;
     }
     case N_AP_REDUCE: case N_AP_REDUCERIGHT: {
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+        AP_ON_NOTHING();
+        if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         uint32_t n = (uint32_t)len_of(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
         int right = id == N_AP_REDUCERIGHT;
         uint32_t q = 0;
-        jv acc;
-        if (argc > 1) acc = a1;
-        else {
-            if (!n) return js_throw_msg(vm, vm->type_error_proto, "Reduce of empty array with no initial value");
-            acc = elem_of(vm, thisv, right ? n - 1 : 0);
-            q = 1;
+        jv acc = a1;
+        if (argc < 2) {
+            /* the first element there (HasProperty) the accumulator */
+            int found = 0;
+            for (; q < n && !found; q++) {
+                found = elem_take(vm, thisv, right ? n - 1 - q : q, &acc);
+                if (found < 0) return JV_HOLE;
+            }
+            if (!found) return js_throw_msg(vm, vm->type_error_proto, "Reduce of empty array with no initial value");
         }
         for (; q < n && !vm->throwing; q++) {
             uint32_t i = right ? n - 1 - q : q;
-            jv args4[4] = { acc, elem_of(vm, thisv, i), jv_num(i), thisv };
+            jv v = JV_UNDEF;
+            int has = elem_take(vm, thisv, i, &v);
+            if (has < 0) return JV_HOLE;
+            if (!has) continue;
+            jv args4[4] = { acc, v, jv_num(i), thisv };
             acc = js_call(vm, a0, JV_UNDEF, args4, 4);
         }
         return vm->throwing ? JV_HOLE : acc;
     }
     case N_AP_SORT: {
-        if (!is_array(vm, thisv)) return thisv;
-        if (a0 != JV_UNDEF && !js_is_callable(vm, a0)) return js_throw_msg(vm, vm->type_error_proto, "The comparison function must be either a function or undefined");
+        if (a0 != JV_UNDEF && !js_is_callable(vm, a0)) return value_error(vm, "The comparison function must be either a function or undefined: ", a0, "");
+        AP_ON_NOTHING();                      /* after the comparator's test, as the standard has it */
+        if (!plain_array(vm, thisv)) {
+            jv o = js_to_object(vm, thisv);
+            if (vm->throwing) return JV_HOLE;
+            return ga_sort(vm, o, a0);
+        }
         uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
         vector<jv> v;
         vector<jv> tmp;
@@ -2150,18 +2558,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         int err = 0;
         merge_sort(vm, &v, &tmp, 0, len(v), a0, &err);
         if (err || vm->throwing) return JV_HOLE;
+        /* a comparator that froze the array, or changed its length: the standard's writes */
+        if (!plain_array(vm, thisv) || vm->objs[a].b != n) return ga_sort_store(vm, thisv, &v, n);
         for (size_t i = 0; i < len(v); i++) vm->slots[vm->objs[a].a + i] = at(v, i);
         for (uint32_t i = 0; i < holes; i++) vm->slots[vm->objs[a].a + len(v) + i] = JV_HOLE;
         return thisv;
     }
-    case N_AP_FILL: {
-        if (!is_array(vm, thisv)) return thisv;
-        uint32_t a = jv_idx(thisv), n = vm->objs[a].b;
-        uint32_t from = rel_index(int_arg(vm, args, argc, 1, 0), n), to = rel_index(int_arg(vm, args, argc, 2, n), n);
-        for (uint32_t i = from; i < to; i++) vm->slots[vm->objs[a].a + i] = a0;
-        return thisv;
-    }
     case N_AP_KEYS: case N_AP_VALUES: case N_AP_ENTRIES: {
+        AP_ON_NOTHING();
         if (!jv_is_obj(thisv)) return js_throw_msg(vm, vm->type_error_proto, "not an array");
         uint32_t n = (uint32_t)len_of(vm, thisv);
         uint32_t out = js_array_new(vm, 0);
@@ -2178,12 +2582,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return iter_of_coll(vm, out, JI_ARRAY);
     }
     case N_AP_FLAT: {
+        AP_ON_NOTHING();
         double depth = argc ? int_arg(vm, args, argc, 0, 1) : 1;
         uint32_t out = js_array_new(vm, 0);
         flat_into(vm, out, thisv, depth);
         return jv_obj(out);
     }
     case N_AP_AT: {
+        AP_ON_NOTHING();
         uint32_t n = (uint32_t)len_of(vm, thisv);
         double i = int_arg(vm, args, argc, 0, 0);
         if (i < 0) i += n;
@@ -2250,11 +2656,12 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
     if ((id == N_SP_SPLIT || id == N_SP_REPLACE || id == N_SP_REPLACEALL) && jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP) {
-        if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "String.prototype method called on null or undefined");
+        if (jv_is_nullish(thisv)) return called_on_nothing(vm, "String.prototype.", callee);
         uint32_t which = id == N_SP_SPLIT ? JRE_SP_SPLIT : id == N_SP_REPLACE ? JRE_SP_REPLACE : JRE_SP_REPLACEALL;
         return js_re_native(vm, which, callee, thisv, args, argc, newt);
     }
     if (id >= N_SP_CHARAT && id <= N_SP_SEARCH) {
+        if (jv_is_nullish(thisv) || thisv == JV_HOLE) return called_on_nothing(vm, "String.prototype.", callee);
         uint32_t s = this_str(vm, thisv);
         if (!s) return JV_HOLE;
         uint32_t n = vm->strs[s].len;
@@ -2587,7 +2994,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     case N_QUEUE_MICROTASK: {
         /* a microtask, run at the next checkpoint in order with the promises' */
-        if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+        if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         js_job_push(vm, JOB_CALL, 0, a0, JV_UNDEF, JV_UNDEF);
         return JV_UNDEF;
     }
@@ -2611,7 +3018,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (id == N_MP_VALUES || id == N_SETP_VALUES) return iter_of_coll(vm, c, set ? JI_SET : JI_MAP_VALUES);
         if (id == N_MP_ENTRIES || id == N_SETP_ENTRIES) return iter_of_coll(vm, c, set ? JI_SET : JI_ENTRIES);
         if (id == N_MP_FOREACH || id == N_SETP_FOREACH) {
-            if (!js_is_callable(vm, a0)) return js_type_error(vm, "is not a function", js_typeof(vm, a0));
+            if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
             uint32_t step = set ? 1 : 2;
             for (uint32_t i = 0; i < vm->objs[arr].b && !vm->throwing; i += step) {
                 jv k = vm->slots[vm->objs[arr].a + i];
@@ -2742,7 +3149,7 @@ void js_builtins_init(js_vm *vm) {
     uint32_t ap = vm->array_proto;
     static const char *const an[] = { "push", "pop", "shift", "unshift", "slice", "splice", "concat", "join", "reverse", "indexOf",
         "lastIndexOf", "includes", "find", "findIndex", "findLast", "findLastIndex", "filter", "map", "forEach", "reduce", "reduceRight",
-        "some", "every", "sort", "fill", "keys", "values", "entries", "flat", "flatMap", "at", "toString" };
+        "some", "every", "sort", "fill", "keys", "values", "entries", "flat", "flatMap", "at", "copyWithin", "toString" };
     for (uint32_t i = 0; i < sizeof an / sizeof an[0]; i++) defn(vm, ap, an[i], N_AP_PUSH + i, 1);
 
     uint32_t s = ctor(vm, "String", N_STRING, 1, vm->string_proto);
@@ -2758,8 +3165,9 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, sp, "valueOf", N_SP_TOSTRING, 0);
     defn(vm, sp, "toLocaleUpperCase", N_SP_TOUPPER, 0);
     defn(vm, sp, "toLocaleLowerCase", N_SP_TOLOWER, 0);
-    defn(vm, sp, "trimLeft", N_SP_TRIMSTART, 0);
-    defn(vm, sp, "trimRight", N_SP_TRIMEND, 0);
+    /* Annex B's names for trimStart and trimEnd: the same functions (V8's toString names them so) */
+    js_define(vm, sp, js_atom_ascii(vm, "trimLeft"), js_get(vm, jv_obj(sp), js_atom_ascii(vm, "trimStart")), JS_SHAPE_HIDDEN);
+    js_define(vm, sp, js_atom_ascii(vm, "trimRight"), js_get(vm, jv_obj(sp), js_atom_ascii(vm, "trimEnd")), JS_SHAPE_HIDDEN);
 
     uint32_t nm = ctor(vm, "Number", N_NUMBER, 1, vm->number_proto);
     defn(vm, nm, "isInteger", N_NUM_ISINTEGER, 1);
@@ -2899,7 +3307,7 @@ void js_builtins_init(js_vm *vm) {
     defn(vm, syp, "toString", N_SYMP_TOSTRING, 0);
     defn(vm, syp, "valueOf", N_SYMP_VALUEOF, 0);
     js_define_accessor(vm, syp, A_DESCRIPTION, jv_obj(js_native_new(vm, N_SYMP_DESC, A_DESCRIPTION, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
-    js_define(vm, syp, JS_SYM_KEY | JSYM_TO_PRIMITIVE, jv_obj(js_native_new(vm, N_SYMP_VALUEOF, A_EMPTY, 1)), JS_SHAPE_HIDDEN);
+    js_define(vm, syp, JS_SYM_KEY | JSYM_TO_PRIMITIVE, jv_obj(js_native_new(vm, N_SYMP_VALUEOF, js_atom_ascii(vm, "[Symbol.toPrimitive]"), 1)), JS_SHAPE_HIDDEN);
     js_define(vm, syp, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Symbol")), JS_SHAPE_HIDDEN);
     {
         uint32_t oc = jv_idx(js_get(vm, jv_obj(vm->global), js_atom_ascii(vm, "Object")));
