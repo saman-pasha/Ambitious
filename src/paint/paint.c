@@ -15,7 +15,9 @@
    A box: its outer box-shadows (offset, spread, blurred: three box blurs, a
    Gaussian's), its background colour and layers (url() images, linear and
    radial gradients; background-size, -position and -repeat; the last layer
-   first) in its border box, rounded by its corners' radii (a fieldset's from
+   first; a layer whose tiles repeat in its painting area one pattern, each
+   pixel sampled across its tiles' edges, a gradient's from its tile's raster, as
+   Skia's shaders draw them) in its border box, rounded by its corners' radii (a fieldset's from
    its legend's middle, its top border left out behind the legend); its borders, solid,
    dotted, dashed, double, groove, ridge, inset or outset (Chromium's darker
    colour for the shaded sides), round where its corners are. A box with an
@@ -1030,10 +1032,12 @@ static uint32_t pt_stop_at(const vector<pt_stop> *sv, double t) {
            (uint32_t)(al * 255 + 0.5);
 }
 
-/* a linear or radial gradient (s[0, n), its function call) over the tile (x, y, w, h),
-   drawn where the box's rounded border box (bx..., r) and the clip let it */
-static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double y, double w, double h, double bx0, double by0, double bx1,
-                        double by1, const double *rad) {
+/* a linear or radial gradient (s[0, n), its function call) of a tile gw x gh, drawn over the
+   rectangle (x, y, dw, dh) of the canvas (its scale dw / gw across, dh / gh down), where the
+   box's rounded border box (bx..., r) and the clip let it */
+static void pt_gradient_ex(amb_canvas *c, const char *s, size_t n, double x, double y, double dw, double dh, double gw, double gh, double bx0,
+                           double by0, double bx1, double by1, const double *rad) {
+    double w = gw, h = gh, kx = gw / dw, ky = gh / dh;
     int radial = n > 15 && memcmp(s, "radial-gradient", 15) == 0;
     int linear = n > 15 && memcmp(s, "linear-gradient", 15) == 0;
     int rep = n > 25 && memcmp(s, "repeating-", 10) == 0;
@@ -1111,11 +1115,11 @@ static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double
     double period = len(sv) > 1 ? at(sv, len(sv) - 1).pos - at(sv, 0).pos : 0;
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
-    int ya = (int)floor(fmax(y, by0) - c->oy), yb = (int)ceil(fmin(y + h, by1) - c->oy);
-    int xa = (int)floor(fmax(x, bx0)), xb = (int)ceil(fmin(x + w, bx1));
+    int ya = (int)floor(fmax(y, by0) - c->oy), yb = (int)ceil(fmin(y + dh, by1) - c->oy);
+    int xa = (int)floor(fmax(x, bx0)), xb = (int)ceil(fmin(x + dw, bx1));
     for (int py = ya < ky0 ? ky0 : ya; py < yb && py < ky1; py++)
         for (int pxx = xa < kx0 ? kx0 : xa; pxx < xb && pxx < kx1; pxx++) {
-            double X = pxx + 0.5 - x, Y = py + 0.5 + c->oy - y;
+            double X = (pxx + 0.5 - x) * kx, Y = (py + 0.5 + c->oy - y) * ky;
             if (X < 0 || Y < 0 || X > w || Y > h) continue;
             double tt;
             if (linear) tt = glen > 0 ? ((X - w / 2) * dxv + (Y - h / 2) * dyv) / glen + 0.5 : 0;
@@ -1124,6 +1128,127 @@ static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double
             double cov = pt_rr_cover(pxx + 0.5, py + 0.5 + c->oy, bx0, by0, bx1, by1, rad);
             if (cov > 0) pt_blend(c, pxx, py, pt_stop_at(&sv, tt), cov);
         }
+}
+static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double y, double w, double h, double bx0, double by0, double bx1,
+                        double by1, const double *rad) {
+    pt_gradient_ex(c, s, n, x, y, w, h, w, h, bx0, by0, bx1, by1, rad);
+}
+
+/* ---- a background repeated as one pattern ---- */
+
+/* a gradient's tile (s, n) as Skia rasterizes a picture shader's: tw x th rounded up to whole px (in floats, as Skia's
+   matrix reckons the size), the gradient drawn scaled to it, onto black and onto white, as RGBA (not premultiplied:
+   its colour from the drawing on black, its alpha from the two) into rgba; its size into w, h */
+static void pt_gradient_tile(const char *s, size_t n, double tw, double th, double zoom, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+    *w = (uint32_t)ceil((double)(float)tw);
+    *h = (uint32_t)ceil((double)(float)th);
+    clear(*rgba);
+    if (*w < 1 || *h < 1 || (double)*w * *h > 4e6) { *w = *h = 0; return; }
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = *w;
+    k0.h = k1.h = *h;
+    k0.zoom = k1.zoom = zoom;
+    k0.cx1 = k1.cx1 = *w;
+    k0.cy1 = k1.cy1 = *h;
+    resize(&k0.px, (size_t)*w * *h * 3);
+    resize(&k1.px, (size_t)*w * *h * 3);
+    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    pt_gradient_ex(&k0, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
+    pt_gradient_ex(&k1, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
+    resize(rgba, (size_t)*w * *h * 4);
+    for (size_t q = 0; q < (size_t)*w * *h; q++) {
+        double a = 1 - (at(k1.px, 3 * q) - at(k0.px, 3 * q) + at(k1.px, 3 * q + 1) - at(k0.px, 3 * q + 1) + at(k1.px, 3 * q + 2) - at(k0.px, 3 * q + 2)) / 765.0;
+        a = a < 0 ? 0 : a > 1 ? 1 : a;
+        for (size_t ch = 0; ch < 3; ch++) (*rgba)[4 * q + ch] = a > 0 ? (uint8_t)fmin(255, at(k0.px, 3 * q + ch) / a + 0.5) : 0;
+        (*rgba)[4 * q + 3] = (uint8_t)(a * 255 + 0.5);
+    }
+}
+
+/* a background layer's image (w x h px RGBA, not premultiplied) repeated as one pattern over the canvas within its clip,
+   as Skia's image shader draws a repeated background (Blink's DrawImageTiled): its tile tw x th at (x0, y0), each pixel
+   sampled bilinearly at its centre from the image premultiplied, a tile's edge from its own texels and the next tile's
+   (rx, ry: the axes it repeats along; along another its band alone, snapped to whole px and the image mapped onto it,
+   clamped, as Chromium draws it: measured, a 24px band at 530.5 drawn from 531 to 555 with its first texel's colour
+   first); from the deepest mip level still at least the tile's size each way (Chromium's decode cache's, MipMapUtil:
+   an image drawn 20 x 20 from 96 x 32 is sampled from its own pixels). Held to the rounded rectangle area (x0, y0, x1,
+   y1; its corners' radii rad) when its corners are round */
+static void pt_pattern(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double tw, double th, int rx,
+                       int ry, const double *area, const double *rad) {
+    if (w == 0 || h == 0 || !(tw > 0 && th > 0)) return;
+    vector<uint8_t> cur, nxt;
+    resize(cur, len(*rgba));
+    for (size_t q = 0; q + 3 < len(*rgba); q += 4) {
+        uint32_t a = at(*rgba, q + 3);
+        for (size_t k = 0; k < 3; k++) cur[q + k] = (uint8_t)((at(*rgba, q + k) * a + 127) / 255);
+        cur[q + 3] = (uint8_t)a;
+    }
+    uint32_t lw = w, lh = h;
+    double need_w = ceil(tw - 1e-6), need_h = ceil(th - 1e-6);
+    while ((lw > 1 || lh > 1) && (lw > 1 ? lw / 2 : 1) >= need_w && (lh > 1 ? lh / 2 : 1) >= need_h) {
+        uint32_t nw2, nh2;
+        pt_mip_level(&cur, lw, lh, &nxt, &nw2, &nh2);
+        clear(cur);
+        append_range(cur, data(nxt), len(nxt));
+        lw = nw2;
+        lh = nh2;
+    }
+    /* an axis it does not repeat along: its band snapped */
+    if (!rx) {
+        double sx0 = floor(x0 + 0.5), sx1 = floor(x0 + tw + 0.5);
+        if (sx1 <= sx0) return;
+        x0 = sx0;
+        tw = sx1 - sx0;
+    }
+    if (!ry) {
+        double sy0 = floor(y0 + 0.5), sy1 = floor(y0 + th + 0.5);
+        if (sy1 <= sy0) return;
+        y0 = sy0;
+        th = sy1 - sy0;
+    }
+    int round = pt_round(rad);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = ky0; y < ky1; y++) {
+        double py = y + c->oy, cy = 1;
+        if (!ry) {
+            cy = fmin(py + 1, y0 + th) - fmax(py, y0);
+            if (cy <= 0) continue;
+            if (cy > 1) cy = 1;
+        }
+        double v = (py + 0.5 - y0) * lh / th - 0.5, fv = floor(v), ay = v - fv;
+        long v0 = (long)fv, v1 = v0 + 1;
+        if (ry) { v0 = ((v0 % (long)lh) + (long)lh) % (long)lh; v1 = ((v1 % (long)lh) + (long)lh) % (long)lh; }
+        else { v0 = v0 < 0 ? 0 : v0 >= (long)lh ? (long)lh - 1 : v0; v1 = v1 < 0 ? 0 : v1 >= (long)lh ? (long)lh - 1 : v1; }
+        for (int x = kx0; x < kx1; x++) {
+            double cov = cy;
+            if (!rx) {
+                double cx = fmin(x + 1.0, x0 + tw) - fmax((double)x, x0);
+                if (cx <= 0) continue;
+                cov *= cx > 1 ? 1 : cx;
+            }
+            if (round) cov *= pt_rr_cover(x + 0.5, py + 0.5, area[0], area[1], area[2], area[3], rad);
+            if (cov <= 0) continue;
+            double u = (x + 0.5 - x0) * lw / tw - 0.5, fu = floor(u), ax = u - fu;
+            long u0 = (long)fu, u1 = u0 + 1;
+            if (rx) { u0 = ((u0 % (long)lw) + (long)lw) % (long)lw; u1 = ((u1 % (long)lw) + (long)lw) % (long)lw; }
+            else { u0 = u0 < 0 ? 0 : u0 >= (long)lw ? (long)lw - 1 : u0; u1 = u1 < 0 ? 0 : u1 >= (long)lw ? (long)lw - 1 : u1; }
+            double px[4];
+            for (size_t k = 0; k < 4; k++) {
+                double top = at(cur, ((size_t)v0 * lw + (size_t)u0) * 4 + k) * (1 - ax) + at(cur, ((size_t)v0 * lw + (size_t)u1) * 4 + k) * ax;
+                double bot = at(cur, ((size_t)v1 * lw + (size_t)u0) * 4 + k) * (1 - ax) + at(cur, ((size_t)v1 * lw + (size_t)u1) * 4 + k) * ax;
+                px[k] = top * (1 - ay) + bot * ay;
+            }
+            double a = px[3] / 255 * cov;
+            if (a <= 0) continue;
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            for (size_t k = 0; k < 3; k++) c->px[i + k] = (uint8_t)fmin(255, px[k] * cov + c->px[i + k] * (1 - a) + 0.5);
+        }
+    }
 }
 
 /* one value of a pair (background-size's, -position's): a length or percentage of basis */
@@ -1894,7 +2019,24 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         c->cy0 = fmax(c->cy0, by0);
         c->cx1 = fmin(c->cx1, bx1);
         c->cy1 = fmin(c->cy1, by1);
-        for (double ty = sy; ty < by1 && (ry || ty == sy); ty += th) {
+        /* tiles that repeat within the painting area: one pattern, sampled across their edges, as Chromium draws them (a
+           gradient's from its tile's raster); a tile alone there drawn as itself */
+        int many = (rx && (bx0 < x0 - 0.01 || bx1 > x0 + tw + 0.01)) || (ry && (by0 < y0 - 0.01 || by1 > y0 + th + 0.01));
+        if (many) {
+            double clip[4] = { bx0, by0, bx1, by1 };
+            if (svg) pt_pattern(c, &spx, spw, sph, x0, y0, tw, th, rx, ry, clip, cr);
+            else if (is_url) {
+                vector<uint8_t> tile;
+                append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
+                pt_pattern(c, &tile, iw, ih, x0, y0, tw, th, rx, ry, clip, cr);
+            } else {
+                vector<uint8_t> gt;
+                uint32_t gw, gh;
+                pt_gradient_tile(li, ll, tw, th, c->zoom, &gt, &gw, &gh);
+                pt_pattern(c, &gt, gw, gh, x0, y0, tw, th, rx, ry, clip, cr);
+            }
+        }
+        for (double ty = sy; ty < by1 && (ry || ty == sy) && !many; ty += th) {
             if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
             for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
                 if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
