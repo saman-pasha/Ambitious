@@ -1,4 +1,4 @@
-document   ok                 200    1966  file:///ROOT/tests/pages/images.html  text/html
+document   ok                 200    1960  file:///ROOT/tests/pages/images.html  text/html
 image      ok                 200   11953  file:///ROOT/tests/images/j_photo.jpg  image/jpeg  160x120
 image      ok                 200    3219  file:///ROOT/tests/images/j_prog_420.jpg  image/jpeg  77x51
 image      ok                 200    1865  file:///ROOT/tests/images/j_grey.jpg  image/jpeg  61x43
@@ -32,5 +32,5 @@ N = n(1,46,0), A = interlaced, B = bx(1,24,0), X = 140.4453125, Y = 318, W = 42,
 N = n(1,47,0), A = animated, B = bx(1,25,0), X = 188.4453125, Y = 360, W = 90, H = 60
 N = n(1,48,0), A = photograph, B = bx(1,26,0), X = 284.4453125, Y = 380, W = 50, H = 40
 -- drawn:
-rendered 800x600: 26 boxes, 8 lines, 4 text fragments; pixels fnv1a64:2af81248530358f3
+rendered 800x600: 26 boxes, 8 lines, 4 text fragments; pixels fnv1a64:7ee6e101c0f04170
 exit 0

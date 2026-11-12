@@ -13,13 +13,16 @@ GIF. Written by Pillow's encoder and by this script's own: a first frame with a
 local table and offset on its canvas, interlacing at heights 1 to 17, each code
 size, a full LZW table kept without a clear and one cleared, clear codes
 mid-stream, none to begin, no colour table at all, indices past the table,
-animation. Each is checked against Pillow's decoding of the same file, exactly:
-its size, its frames and the FNV-1a 64 of its RGBA8 pixels, in
-tests/exec/gif_decode.expect. A browser composes the first frame onto a
-transparent canvas the logical screen's size, where Pillow fills what the frame
-leaves with an index and grows the canvas to a frame past it: so outside the
-frame the expectation is transparent, and the canvas is the screen's. A fully
-transparent pixel is (0, 0, 0, 0) on both sides.
+animation: every disposal method, transparency over what the last frame left,
+frames past the canvas, loop counts and delays. Each frame is checked exactly, the
+FNV-1a 64 of its RGBA8 canvas in tests/exec/gif_decode.expect, against a model of
+how Chromium composes frames over Pillow's decoding of each frame alone. The model
+was measured, frame by frame, through Chromium's WebCodecs ImageDecoder: the
+canvas is the logical screen and the first frame together, transparent where no
+frame has drawn; disposal 2 clears a frame's rectangle to transparent (not to the
+background colour Pillow fills), 3 and 4 restore it as it was before the frame;
+a file with no colour table at all is drawn black, where Pillow has a grey ramp.
+The frame an animation shows at rest is Chromium's timeline at 10 s (rest_frame).
 
 JPEG. Written by Pillow (libjpeg-turbo) -- each subsampling it writes,
 progressive, restart intervals, grey, CMYK, Adobe's RGB, optimized tables, the
@@ -31,12 +34,12 @@ Pillow's decoding of each (EXIF's orientation applied by ImageOps.exif_transpose
 CMYK made RGB by its convert) is written beside it as NAME.pil.png, which
 tests/exec/jpeg_decode.c compares with its own: every channel within 4, the mean
 error under 1. tests/exec/jpeg_decode.expect names each with Pillow's size.
-
 The hostile files (bad_*): truncated, wrong lengths, sizes past the cap, bad
 Huffman tables, LZW codes out of range, each refused or decoded to a prefix as
 the .expect files say; the tests add mutations of their own.
 
 Run from anywhere: python3 tests/images/gen.py"""
+import io
 import os
 import struct
 import sys
@@ -303,9 +306,10 @@ def interlaced(rows):
     return [rows[y] for y in list(range(0, len(rows), 8)) + list(range(4, len(rows), 8)) + list(range(2, len(rows), 4)) + list(range(1, len(rows), 2))]
 
 
-def gif(w, h, frames, gct=None, version=b"89a"):
+def gif(w, h, frames, gct=None, version=b"89a", loop=None):
     """a GIF of the frames: each (x, y, rows of indices, options): lct, trans, interlace,
-    mcs, and the LZW encoder's options"""
+    mcs, delay, disposal, and the LZW encoder's options; a NETSCAPE2.0 block of the loop
+    count unless loop is None"""
     out = bytearray(b"GIF" + version)
     flags = 0
     table = b""
@@ -314,10 +318,13 @@ def gif(w, h, frames, gct=None, version=b"89a"):
         flags = 0x80 | 0x70 | sz
     out += struct.pack("<HHBBB", w, h, flags, 0, 0)
     out += table
+    if loop is not None:
+        out += b"\x21\xff\x0bNETSCAPE2.0\x03\x01" + struct.pack("<H", loop) + b"\x00"
     for (x, y, rows, opt) in frames:
         trans = opt.get("trans")
-        if trans is not None or opt.get("delay"):
-            out += bytes([0x21, 0xF9, 4, 1 if trans is not None else 0]) + struct.pack("<H", opt.get("delay", 0)) + bytes([trans or 0, 0])
+        if trans is not None or opt.get("delay") or opt.get("disposal"):
+            gce = opt.get("disposal", 0) << 2 | (1 if trans is not None else 0)
+            out += bytes([0x21, 0xF9, 4, gce]) + struct.pack("<H", opt.get("delay", 0)) + bytes([trans or 0, 0])
         fl, lct = 0, b""
         if opt.get("lct") is not None:
             sz, lct = colour_table(opt["lct"])
@@ -399,25 +406,146 @@ def gif_cases():
     path = os.path.join(HERE, "g_pil_photo.gif")
     pil_rgb(photo(50, 40, 3)).save(path)
     cases.append(("g_pil_photo", open(path, "rb").read(), None))
+    # animation, composed as Chromium composes it: a full first frame, then a box whose
+    # centre is its transparent index with each disposal (2 clears its rectangle, 3 and 4
+    # restore what it covered, 1 and 6 keep it), then two frames over what it left, the
+    # last one past the canvas's edge, clipped
+    box = [[0 if 1 < x < 4 and 0 < y < 4 else 1 + (x + y) % 3 for x in range(6)] for y in range(5)]
+    for d in (1, 2, 3, 4, 6):
+        frames = [(0, 0, indices(10, 8, 8, 30), {"mcs": 3, "delay": 50, "disposal": 1}),
+                  (2, 2, box, {"mcs": 3, "trans": 0, "delay": 50, "disposal": d}),
+                  (4, 1, indices(5, 6, 8, 31), {"mcs": 3, "trans": 7, "delay": 50}),
+                  (7, 5, indices(6, 5, 8, 32), {"mcs": 3, "delay": 60, "disposal": 2})]
+        cases.append(("g_dispose%d" % d, gif(10, 8, frames, gct=ramp(8, 30 + d), loop=0), None))
+    # a first frame restored to what was before it (nothing): the next drawn on a clear canvas
+    frames = [(0, 0, indices(10, 8, 8, 33), {"mcs": 3, "delay": 50, "disposal": 3}), (3, 2, box, {"mcs": 3, "trans": 0, "delay": 50})]
+    cases.append(("g_first_restored", gif(10, 8, frames, gct=ramp(8, 36), loop=0), None))
+    # a first frame past the logical screen: the canvas grows to hold it (Chromium's size);
+    # a screen of 0 x 0 takes the first frame's
+    cases.append(("g_first_past", gif(8, 6, [(4, 3, indices(8, 6, 4, 34), {"mcs": 2})], gct=ramp(4, 37)), None))
+    cases.append(("g_zero_screen", gif(0, 0, [(0, 0, indices(5, 4, 4, 35), {"mcs": 2})], gct=ramp(4, 38)), None))
+    # the timeline: four frames of a second, played once (no NETSCAPE2.0 block), twice
+    # (a loop count of 1), three times, for ever; frames of no delay (100 ms each)
+    four = [(0, 0, indices(6, 4, 4, 40 + k), {"mcs": 2, "delay": 100}) for k in range(4)]
+    for name, loop in (("g_loop_none", None), ("g_loop_1", 1), ("g_loop_2", 2), ("g_loop_ever", 0)):
+        cases.append((name, gif(6, 4, four, gct=ramp(4, 39), loop=loop), None))
+    quick = [(0, 0, indices(6, 4, 4, 50 + k), {"mcs": 2, "delay": 1 if k % 2 else 0, "disposal": 1}) for k in range(7)]
+    cases.append(("g_no_delay", gif(6, 4, quick, gct=ramp(4, 41), loop=0), None))
     return cases
 
 
-def gif_expectation(name, b, box):
-    """what Pillow decodes the first frame to, on a transparent canvas the screen's size"""
-    import io
+def gif_parse(b):
+    """a GIF's screen, global table and frames, walked as the decoder walks them: each
+    frame's graphic control (its packed byte, delay and transparent index), rectangle,
+    local table and LZW data; and the first loop count (None without one)"""
+    sw, sh, flags = struct.unpack("<HHB", b[6:11])
+    i, gct = 13, b""
+    if flags & 0x80:
+        gct = b[i:i + 3 * (2 << (flags & 7))]
+        i += len(gct)
+    frames, gce, loop = [], None, None
+    while i < len(b) and b[i] != 0x3B:
+        blk = b[i]
+        i += 1
+        if blk == 0x21:
+            label, subs = b[i], []
+            i += 1
+            while b[i]:
+                subs.append(b[i + 1:i + 1 + b[i]])
+                i += 1 + b[i]
+            i += 1
+            if label == 0xF9:
+                gce = subs[0][:4]
+            if label == 0xFF and loop is None and subs[0] in (b"NETSCAPE2.0", b"ANIMEXTS1.0") and len(subs[1]) == 3 and subs[1][0] == 1:
+                loop = struct.unpack("<H", subs[1][1:3])[0]
+            continue
+        x, y, w, h, fl = struct.unpack("<HHHHB", b[i:i + 9])
+        i += 9
+        lct = b[i:i + 3 * (2 << (fl & 7))] if fl & 0x80 else b""
+        i += len(lct)
+        start = i
+        i += 1
+        while b[i]:
+            i += 1 + b[i]
+        i += 1
+        frames.append({"x": x, "y": y, "w": w, "h": h, "flags": fl, "gce": gce, "lct": lct, "data": b[start:i],
+                       "disposal": gce[0] >> 2 & 7 if gce else 0, "delay": struct.unpack("<H", gce[1:3])[0] if gce else 0})
+        gce = None
+    return sw, sh, gct, frames, loop
+
+
+def rest_frame(ms, plays, at=10000):
+    """the frame Chromium shows at ms at after an animation loaded, measured by
+    screenshots every 100 to 250 ms for 11 s: frame k for its duration (10 ms or less
+    taken as 100 ms) after the frames before it, the frames again from the first, until
+    the animation has played plays times (0: for ever), then the last frame"""
+    d = [100 if v <= 10 else v for v in ms]
+    if len(d) <= 1:
+        return 0
+    if plays and at >= sum(d) * plays:
+        return len(d) - 1
+    t = at % sum(d)
+    for k, v in enumerate(d):
+        if t < v:
+            return k
+        t -= v
+    return len(d) - 1
+
+
+def gif_frames(b):
+    """the canvas after each frame, RGBA8, as Chromium composes them (measured frame by
+    frame through WebCodecs' ImageDecoder): the canvas the screen and the first frame
+    together, transparent; each frame's own pixels Pillow's decoding of that frame alone
+    -- a GIF of it on the canvas -- its transparent index leaving what is under it, every
+    index black when the file has no table at all (Pillow's is a grey ramp); before each
+    frame the last one disposed of: 2 clears its rectangle to transparent, 3 and 4 restore
+    it as it was before that frame, the rest leave it. And the canvas's size, the loop
+    count"""
     from PIL import Image
-    w, h = struct.unpack("<HH", b[6:10])
-    im = Image.open(io.BytesIO(b))
-    frames = im.n_frames
-    im.seek(0)
-    px = im.convert("RGBA")
-    out = bytearray()
-    for y in range(h):
-        for x in range(w):
-            inside = box is None or (box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3])
-            p = px.getpixel((x, y)) if x < px.width and y < px.height else (0, 0, 0, 0)
-            out += bytes(p) if inside and p[3] else bytes(4)
-    return "%s %dx%d, %d frame%s, %016x" % (name, w, h, frames, "" if frames == 1 else "s", fnv(out))
+    sw, sh, gct, frames, loop = gif_parse(b)
+    f0 = frames[0]
+    W, H = max(sw, f0["x"] + f0["w"]), max(sh, f0["y"] + f0["h"])
+    canvas, out, saved, prev = bytearray(W * H * 4), [], None, None
+    flags = 0x80 | 0x70 | ((len(gct) // 3).bit_length() - 2) if gct else 0
+    for f in frames:
+        if prev is not None:
+            for y in range(prev["y"], min(H, prev["y"] + prev["h"])):
+                for x in range(prev["x"], min(W, prev["x"] + prev["w"])):
+                    k = 4 * (y * W + x)
+                    if prev["disposal"] == 2:
+                        canvas[k:k + 4] = bytes(4)
+                    elif prev["disposal"] in (3, 4):
+                        canvas[k:k + 4] = saved[k:k + 4]
+        if f["disposal"] in (3, 4):
+            saved = bytes(canvas)
+        alone = b"GIF89a" + struct.pack("<HHBBB", W, H, flags, 0, 0) + gct
+        if f["gce"] is not None:
+            alone += b"\x21\xf9\x04" + bytes(f["gce"]) + b"\x00"
+        alone += b"\x2c" + struct.pack("<HHHHB", f["x"], f["y"], f["w"], f["h"], f["flags"]) + f["lct"] + f["data"] + b"\x3b"
+        px = Image.open(io.BytesIO(alone)).convert("RGBA")
+        for y in range(f["y"], min(H, f["y"] + f["h"])):
+            for x in range(f["x"], min(W, f["x"] + f["w"])):
+                p = px.getpixel((x, y))
+                if p[3]:
+                    canvas[4 * (y * W + x):4 * (y * W + x) + 4] = bytes(p[:3]) + b"\xff" if gct or f["lct"] else b"\x00\x00\x00\xff"
+        out.append(bytes(canvas))
+        prev = f
+    return W, H, out, [10 * f["delay"] for f in frames], loop
+
+
+def gif_expectation(name, b, box):
+    """the lines tests/exec/gif_decode.c prints of a GIF: its canvas, its frames, the
+    first's pixels; of an animation, each later frame's, the frame it shows at rest and
+    how often it plays (Chromium's count: once without a loop count, its loop count plus
+    one, 0 for ever)"""
+    w, h, frames, ms, loop = gif_frames(b)
+    n = len(frames)
+    lines = ["%s %dx%d, %d frame%s, %016x" % (name, w, h, n, "" if n == 1 else "s", fnv(frames[0]))]
+    if n > 1:
+        plays = 1 if loop is None else 0 if loop == 0 else loop + 1
+        lines += ["  frame %d %016x" % (k, fnv(frames[k])) for k in range(1, n)]
+        lines.append("  at rest frame %d, plays %d" % (rest_frame(ms, plays), plays))
+    return "\n".join(lines)
 
 
 def gif_hostile(cases):

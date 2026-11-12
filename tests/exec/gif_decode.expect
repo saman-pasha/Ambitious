@@ -17,17 +17,82 @@ g_full_kept 128x96, 1 frame, 761054ddd37eccc3
 g_full_cleared 128x96, 1 frame, 761054ddd37eccc3
 g_clears 40x30, 1 frame, ffebe6bea568f6a8
 g_no_first_clear 25x9, 1 frame, d9a5dd9ad0c06f8b
-g_no_table 6x5, 1 frame, 3b5061c442c857da
+g_no_table 6x5, 1 frame, 0429df26c8e8b773
 g_past_table 9x4, 1 frame, ba86d1cd369621c9
-g_clipped 10x8, 1 frame, 782408448017c644
+g_clipped 14x11, 1 frame, 87a44864a775aeb3
 g_one_pixel 1x1, 1 frame, d6e387b7571b8d6b
 g_87a 12x7, 1 frame, a3a6bfdff260fb23
 g_animated 18x14, 3 frames, 1041d6abb0c129a3
+  frame 1 edf4f6e133c3be50
+  frame 2 503352c9d074225e
+  at rest frame 2, plays 1
 g_pil 40x30, 1 frame, c43beae71146c2d8
 g_pil_trans 40x30, 1 frame, d7496b790184cef4
 g_pil_flat 40x30, 1 frame, c43beae71146c2d8
 g_pil_animated 30x20, 4 frames, 9e09e94682dc14fb
+  frame 1 545e2f5cfd1a7daa
+  frame 2 f34d5665e1e73392
+  frame 3 b0c148da0573a816
+  at rest frame 2, plays 0
 g_pil_photo 50x40, 1 frame, 5cbd2d627303e61b
+g_dispose1 10x8, 4 frames, e155cb29ec479446
+  frame 1 03b990ce0a816fd7
+  frame 2 f8e16fcc40384c10
+  frame 3 ecce39a7036f26ac
+  at rest frame 3, plays 0
+g_dispose2 10x8, 4 frames, eb6aa9973de4b4bc
+  frame 1 02ddf82df95fa42f
+  frame 2 2d74641513665142
+  frame 3 8490d55abdefc7ce
+  at rest frame 3, plays 0
+g_dispose3 10x8, 4 frames, c45a680f9239e6ca
+  frame 1 497011f7669281df
+  frame 2 b8b93ae7a6940cee
+  frame 3 c7b66c0b1f59c52a
+  at rest frame 3, plays 0
+g_dispose4 10x8, 4 frames, 83a0d7a35822e874
+  frame 1 2c704ab72473f317
+  frame 2 d7257925d6ff2e4c
+  frame 3 889e18468ffa30d0
+  at rest frame 3, plays 0
+g_dispose6 10x8, 4 frames, 1792bde28c7df1d4
+  frame 1 2c0ce4d7b1aa1887
+  frame 2 d3f1d7b0a4091ee2
+  frame 3 6dcdcf0f14a67596
+  at rest frame 3, plays 0
+g_first_restored 10x8, 2 frames, 153cf9af3c6de7a5
+  frame 1 bc4e91c886fa1d4b
+  at rest frame 0, plays 0
+g_first_past 12x9, 1 frame, 9b559f9d20aeed1f
+g_zero_screen 5x4, 1 frame, 71417fa8d9e300b7
+g_loop_none 6x4, 4 frames, 6906138524664cfc
+  frame 1 03cf20751a94f520
+  frame 2 341e4f85f0394f02
+  frame 3 8bd05b81eeaae687
+  at rest frame 3, plays 1
+g_loop_1 6x4, 4 frames, 6906138524664cfc
+  frame 1 03cf20751a94f520
+  frame 2 341e4f85f0394f02
+  frame 3 8bd05b81eeaae687
+  at rest frame 3, plays 2
+g_loop_2 6x4, 4 frames, 6906138524664cfc
+  frame 1 03cf20751a94f520
+  frame 2 341e4f85f0394f02
+  frame 3 8bd05b81eeaae687
+  at rest frame 2, plays 3
+g_loop_ever 6x4, 4 frames, 6906138524664cfc
+  frame 1 03cf20751a94f520
+  frame 2 341e4f85f0394f02
+  frame 3 8bd05b81eeaae687
+  at rest frame 2, plays 0
+g_no_delay 6x4, 7 frames, cd4247d3bd2f4a1f
+  frame 1 54eb11b25873903f
+  frame 2 d6deee45fd23fc15
+  frame 3 1f24c68f890f8020
+  frame 4 426d5a0bbfe8d2f2
+  frame 5 ab32a4b7681691c5
+  frame 6 b237699fbea49af3
+  at rest frame 2, plays 0
 bad_gif_cut_header: refused
 bad_gif_cut_table: refused
 bad_gif_cut_lzw: a prefix 13x11
