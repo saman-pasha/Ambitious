@@ -631,6 +631,8 @@ static const char *net_type_of_name(const char *path) {
     if (strcmp(e, "jpg") == 0 || strcmp(e, "jpeg") == 0) return "image/jpeg";
     if (strcmp(e, "webp") == 0) return "image/webp";
     if (strcmp(e, "svg") == 0) return "image/svg+xml";
+    if (strcmp(e, "bmp") == 0) return "image/bmp";
+    if (strcmp(e, "ico") == 0) return "image/x-icon";
     if (strcmp(e, "txt") == 0) return "text/plain";
     return "application/octet-stream";
 }
@@ -3928,10 +3930,12 @@ static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset,
 }
 
 /* the image types the painter decodes, by their MIME types and the names Chromium also
-   takes for them: PNG (an APNG's first frame), GIF, JPEG, WebP, and SVG, which it draws
-   (src/paint/svg.c). AVIF and BMP, which Chromium decodes, are not among them */
+   takes for them: PNG (an APNG's first frame), GIF, JPEG, WebP, BMP and ICO, and SVG, which
+   it draws (src/paint/svg.c) -- measured: image/bmp, image/x-icon and image/vnd.microsoft.icon
+   taken, image/x-ms-bmp not. AVIF, which Chromium decodes, is not among them */
 static const char *const net_image_types[] = { "image/png", "image/x-png", "image/apng", "image/gif", "image/jpeg", "image/jpg",
-                                               "image/pjpeg", "image/webp", "image/svg+xml" };
+                                               "image/pjpeg", "image/webp", "image/svg+xml", "image/bmp", "image/x-icon",
+                                               "image/vnd.microsoft.icon" };
 
 /* a <source>'s type, as Blink reads one (its MIME type's essence: white space and
    parameters aside, in any case), one the painter decodes; an empty type is any */

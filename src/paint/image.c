@@ -1722,6 +1722,236 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
     return 1;
 }
 
+/* ---- BMP and ICO ---- */
+
+/* a BMP's DIB (its header, masks, palette and pixels) as Blink's BMPImageReader reads it, measured in Chromium on
+   tools/gen-bmp.py's files: OS/2's 12-byte header and Windows' 40, 52, 56, 108 and 124; 1, 2, 4 and 8 bits a pixel
+   through a palette (4-byte entries, OS/2's 3), 16 (5-5-5), 24 and 32 bits; RLE8 and RLE4, a pixel they skip (a delta,
+   an early end of a line or of the bitmap) opaque black; BI_BITFIELDS and BI_ALPHABITFIELDS, each mask's n bits made
+   8 as round(v x 255 / (2^n - 1)) and more than 8 bits cut to their top 8; rows bottom-up, or top-down by a negative
+   height (not under RLE). A 32-bit BI_RGB pixel's fourth byte is no alpha (opaque) but in an icon; an alpha mask's
+   alpha is honoured, and an image all of whose alpha is 0 is opaque. Rows the data stops short of are transparent.
+   BI_JPEG, BI_PNG and OS/2's Huffman and RLE24 are refused, as Chromium refuses them. In an icon (ico set) the
+   height is the XOR and AND bitmaps' together, and the AND mask (1 bit a pixel) makes a pixel transparent where its
+   image has no alpha of its own. hdr: the header's offset in p; pix: the pixels' offset (0: right after the
+   palette) */
+static uint32_t bmp_le16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
+static uint32_t bmp_le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+static uint32_t bmp_chan(uint32_t px, uint32_t mask) {
+    if (!mask) return 0;
+    int shift = 0, bits = 0;
+    while (!(mask >> shift & 1)) shift++;
+    while (shift + bits < 32 && (mask >> (shift + bits) & 1)) bits++;
+    uint32_t v = (px & mask) >> shift;
+    if (bits >= 8) return v >> (bits - 8);
+    uint32_t mx = (1u << bits) - 1;
+    return (v * 255 + mx / 2) / mx;
+}
+static int bmp_dib(const uint8_t *p, size_t n, size_t hdr, size_t pix, int ico, vector<uint8_t> *rgba, uint32_t *ow, uint32_t *oh) {
+    if (hdr + 16 > n) return 0;
+    uint32_t hs = bmp_le32(p + hdr);
+    int32_t w, h;
+    uint32_t bits, comp = 0, used = 0, entry = 4;
+    if (hs == 12) {
+        w = (int32_t)bmp_le16(p + hdr + 4);
+        h = (int32_t)(int16_t)bmp_le16(p + hdr + 6);
+        bits = bmp_le16(p + hdr + 10);
+        entry = 3;
+    } else if (hs == 16 || hs == 40 || hs == 52 || hs == 56 || hs == 64 || hs == 108 || hs == 124) {
+        if (hdr + hs > n) return 0;
+        w = (int32_t)bmp_le32(p + hdr + 4);
+        h = (int32_t)bmp_le32(p + hdr + 8);
+        bits = bmp_le16(p + hdr + 14);
+        if (hs >= 20) comp = bmp_le32(p + hdr + 16);
+        if (hs >= 36) used = bmp_le32(p + hdr + 32);
+        if ((hs == 16 || hs == 64) && comp >= 3) return 0;    /* OS/2's Huffman 1D and RLE24 */
+    } else return 0;
+    if (ico) h /= 2;
+    int topdown = h < 0;
+    if (topdown) h = -h;
+    if (w <= 0 || h <= 0 || w > 32768 || h > 32768) return 0;
+    if (!(bits == 1 || bits == 2 || bits == 4 || bits == 8 || bits == 16 || bits == 24 || bits == 32)) return 0;
+    if (comp == 1 && bits != 8) return 0;
+    if (comp == 2 && bits != 4) return 0;
+    if ((comp == 3 || comp == 6) && bits != 16 && bits != 32) return 0;
+    if (comp > 3 && comp != 6) return 0;
+    if (topdown && (comp == 1 || comp == 2)) return 0;
+    /* the masks: a V2 header's or later's, else the dwords after a 40-byte header for BI_BITFIELDS */
+    uint32_t mr = 0, mg = 0, mb = 0, ma = 0;
+    size_t after = hdr + hs;
+    if (comp == 3 || comp == 6) {
+        if (hs >= 52) {
+            mr = bmp_le32(p + hdr + 40); mg = bmp_le32(p + hdr + 44); mb = bmp_le32(p + hdr + 48);
+            if (hs >= 56) ma = bmp_le32(p + hdr + 52);
+        } else {
+            size_t k = comp == 6 ? 4 : 3;
+            if (after + 4 * k > n) return 0;
+            mr = bmp_le32(p + after); mg = bmp_le32(p + after + 4); mb = bmp_le32(p + after + 8);
+            if (comp == 6) ma = bmp_le32(p + after + 12);
+            after += 4 * k;
+        }
+    } else if (bits == 16) { mr = 0x7C00; mg = 0x03E0; mb = 0x001F; }
+    else if (bits == 32) { mr = 0xFF0000; mg = 0xFF00; mb = 0xFF; if (ico) ma = 0xFF000000u; }
+    else if (bits == 24) { mr = 0xFF0000; mg = 0xFF00; mb = 0xFF; }
+    /* the palette */
+    uint32_t pal[256];
+    size_t npal = 0;
+    if (bits <= 8) {
+        npal = used && used < (1u << bits) ? used : (size_t)1 << bits;
+        for (size_t k = 0; k < 256; k++) pal[k] = 0x000000ffu;
+        for (size_t k = 0; k < npal && after + k * entry + 3 <= n; k++) {
+            const uint8_t *q = p + after + k * entry;
+            pal[k] = (uint32_t)q[2] << 24 | (uint32_t)q[1] << 16 | (uint32_t)q[0] << 8 | 0xff;
+        }
+        after += npal * entry;
+    }
+    size_t at = pix ? pix : after;
+    if (at > n) return 0;
+    size_t W = (size_t)w, H = (size_t)h;
+    clear(*rgba);
+    resize(*rgba, W * H * 4);
+    for (size_t k = 0; k < W * H * 4; k++) (*rgba)[k] = 0;
+    int alpha_seen = 0, alpha_mask = ma != 0;
+    if (comp == 1 || comp == 2) {
+        /* RLE: what it does not write is opaque black, measured (the frame is not marked as having alpha) */
+        for (size_t k = 0; k < W * H; k++) (*rgba)[k * 4 + 3] = 255;
+        size_t x = 0, y = 0, i = at;
+        while (i + 1 < n && y < H) {
+            uint32_t c = p[i], d = p[i + 1];
+            i += 2;
+            if (c) {
+                for (uint32_t k = 0; k < c && x < W; k++, x++) {
+                    uint32_t idx = comp == 1 ? d : (k & 1 ? d & 15 : d >> 4);
+                    uint32_t col = pal[idx & 255];
+                    size_t o = ((H - 1 - y) * W + x) * 4;
+                    (*rgba)[o] = (uint8_t)(col >> 24); (*rgba)[o + 1] = (uint8_t)(col >> 16); (*rgba)[o + 2] = (uint8_t)(col >> 8);
+                }
+            } else if (d == 0) { x = 0; y++; }
+            else if (d == 1) break;
+            else if (d == 2) {
+                if (i + 1 >= n) break;
+                x += p[i];
+                y += p[i + 1];
+                i += 2;
+            } else {
+                size_t bytes = comp == 1 ? d : (d + 1) / 2;
+                for (uint32_t k = 0; k < d; k++) {
+                    size_t bi = i + (comp == 1 ? k : k / 2);
+                    if (bi >= n) break;
+                    uint32_t idx = comp == 1 ? p[bi] : (k & 1 ? p[bi] & 15 : p[bi] >> 4);
+                    if (x < W && y < H) {
+                        uint32_t col = pal[idx & 255];
+                        size_t o = ((H - 1 - y) * W + x) * 4;
+                        (*rgba)[o] = (uint8_t)(col >> 24); (*rgba)[o + 1] = (uint8_t)(col >> 16); (*rgba)[o + 2] = (uint8_t)(col >> 8);
+                    }
+                    x++;
+                }
+                i += bytes + (bytes & 1);
+            }
+        }
+    } else {
+        size_t stride = ((W * bits + 31) / 32) * 4;
+        for (size_t r = 0; r < H; r++) {
+            size_t row = at + r * stride;
+            if (row + stride > n) break;     /* the rows the data stops short of: transparent */
+            size_t y = topdown ? r : H - 1 - r;
+            for (size_t x = 0; x < W; x++) {
+                uint32_t R, G, B, A = 255;
+                if (bits <= 8) {
+                    size_t bit = x * bits;
+                    uint32_t idx = (p[row + bit / 8] >> (8 - bits - bit % 8)) & ((1u << bits) - 1);
+                    uint32_t col = pal[idx];
+                    R = col >> 24; G = col >> 16 & 255; B = col >> 8 & 255;
+                } else {
+                    const uint8_t *q = p + row + x * (bits / 8);
+                    uint32_t v = bits == 16 ? bmp_le16(q) : bits == 24 ? (uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16 : bmp_le32(q);
+                    R = bmp_chan(v, mr); G = bmp_chan(v, mg); B = bmp_chan(v, mb);
+                    if (alpha_mask) { A = bmp_chan(v, ma); if (A) alpha_seen = 1; }
+                }
+                size_t o = (y * W + x) * 4;
+                (*rgba)[o] = (uint8_t)R; (*rgba)[o + 1] = (uint8_t)G; (*rgba)[o + 2] = (uint8_t)B; (*rgba)[o + 3] = (uint8_t)A;
+            }
+        }
+        /* an alpha mask whose every value is 0: an opaque image (Blink's reading of such encoders') */
+        if (alpha_mask && !alpha_seen)
+            for (size_t r = 0; r < H; r++) {
+                size_t row = at + r * stride;
+                if (row + stride > n) break;
+                size_t y = topdown ? r : H - 1 - r;
+                for (size_t x = 0; x < W; x++) (*rgba)[(y * W + x) * 4 + 3] = 255;
+            }
+        /* an icon's AND mask, after its image: transparent where it is set, but an image with alpha of its own */
+        if (ico && !(alpha_mask && alpha_seen)) {
+            size_t ms = ((W + 31) / 32) * 4, mat = at + H * stride;
+            for (size_t r = 0; r < H; r++) {
+                size_t row = mat + r * ms;
+                if (row + ms > n) break;
+                size_t y = H - 1 - r;
+                for (size_t x = 0; x < W; x++)
+                    if (p[row + x / 8] >> (7 - x % 8) & 1) {
+                        size_t o = (y * W + x) * 4;
+                        (*rgba)[o] = 0; (*rgba)[o + 1] = 0; (*rgba)[o + 2] = 0; (*rgba)[o + 3] = 0;
+                    }
+            }
+        }
+    }
+    *ow = (uint32_t)W;
+    *oh = (uint32_t)H;
+    return 1;
+}
+/* a BMP file: its 14-byte file header ("BM", the pixels' offset) and its DIB */
+static int bmp_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+    if (n < 26 || p[0] != 'B' || p[1] != 'M') return 0;
+    size_t off = bmp_le32(p + 10);
+    return bmp_dib(p, n, 14, off >= 26 && off < n ? off : 0, 0, rgba, w, h);
+}
+/* a BMP's size from its header */
+static int bmp_size(const uint8_t *p, size_t n, size_t hdr, int ico, uint32_t *w, uint32_t *h) {
+    if (hdr + 16 > n) return 0;
+    uint32_t hs = bmp_le32(p + hdr);
+    int32_t W, H;
+    if (hs == 12) { W = (int32_t)bmp_le16(p + hdr + 4); H = (int32_t)(int16_t)bmp_le16(p + hdr + 6); }
+    else if (hdr + 12 <= n) { W = (int32_t)bmp_le32(p + hdr + 4); H = (int32_t)bmp_le32(p + hdr + 8); }
+    else return 0;
+    if (ico) H /= 2;
+    if (H < 0) H = -H;
+    if (W <= 0 || H <= 0) return 0;
+    *w = (uint32_t)W;
+    *h = (uint32_t)H;
+    return 1;
+}
+/* an ICO or CUR file's entry Chromium draws (ICOImageDecoder): the largest, then the deepest; its data a PNG or a DIB */
+static int ico_pick(const uint8_t *p, size_t n, size_t *off, size_t *len) {
+    if (n < 6 || p[0] || p[1] || (p[2] != 1 && p[2] != 2) || p[3]) return 0;
+    uint32_t count = bmp_le16(p + 4), best = 0, bw = 0, bb = 0;
+    int found = 0;
+    for (uint32_t k = 0; k < count && 6 + 16 * (size_t)(k + 1) <= n; k++) {
+        const uint8_t *e = p + 6 + 16 * k;
+        uint32_t ew = e[0] ? e[0] : 256, eh = e[1] ? e[1] : 256, eb = p[2] == 1 ? bmp_le16(e + 6) : 0;
+        size_t sz = bmp_le32(e + 8), at = bmp_le32(e + 12);
+        if (at >= n || sz > n - at) continue;
+        uint32_t area = ew * eh;
+        if (!found || area > bw || (area == bw && eb > bb)) { found = 1; best = k; bw = area; bb = eb; *off = at; *len = sz; }
+    }
+    (void)best;
+    return found;
+}
+static int ico_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+    size_t off = 0, len = 0;
+    if (!ico_pick(p, n, &off, &len)) return 0;
+    const uint8_t *e = p + off;
+    if (len >= 8 && e[0] == 0x89 && e[1] == 'P' && e[2] == 'N' && e[3] == 'G') return amb_png_decode(e, len, rgba, w, h);
+    return bmp_dib(e, len, 0, 0, 1, rgba, w, h);
+}
+static int ico_size(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
+    size_t off = 0, len = 0;
+    if (!ico_pick(p, n, &off, &len)) return 0;
+    const uint8_t *e = p + off;
+    if (len >= 24 && e[0] == 0x89 && e[1] == 'P' && e[2] == 'N' && e[3] == 'G') { *w = png_be32(e + 16); *h = png_be32(e + 20); return 1; }
+    return bmp_size(e, len, 0, 1, w, h);
+}
+static int image_is_ico(const uint8_t *p, size_t n) { return n >= 6 && !p[0] && !p[1] && (p[2] == 1 || p[2] == 2) && !p[3] && (p[4] || p[5]); }
+
 /* ---- any of them ---- */
 
 /* a WebP, as Chromium sniffs one: a RIFF chunk of WEBP whose first chunk is a VP8 one */
@@ -1731,6 +1961,8 @@ int amb_image_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t
     *w = 0;
     *h = 0;
     if (n >= 8 && p[0] == 0x89 && p[1] == 'P' && p[2] == 'N' && p[3] == 'G') return amb_png_decode(p, n, rgba, w, h);
+    if (n >= 2 && p[0] == 'B' && p[1] == 'M') return bmp_decode(p, n, rgba, w, h);
+    if (image_is_ico(p, n)) return ico_decode(p, n, rgba, w, h);
     amb_image_info info;
     int ok = 0;
     if (n >= 6 && p[0] == 'G' && p[1] == 'I' && p[2] == 'F') ok = amb_gif_frame(p, n, AMB_IMAGE_AT_REST, rgba, &info);
@@ -1760,6 +1992,8 @@ int amb_image_size(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
         return 1;
     }
     if (image_is_webp(p, n)) return amb_webp_size(p, n, w, h);
+    if (n >= 26 && p[0] == 'B' && p[1] == 'M') return bmp_size(p, n, 14, 0, w, h);
+    if (image_is_ico(p, n)) return ico_size(p, n, w, h);
     if (n < 4 || p[0] != 0xFF || p[1] != 0xD8) return 0;
     /* a JPEG's markers to its first scan: the frame's size, and the first Exif segment's orientation */
     size_t i = 2;

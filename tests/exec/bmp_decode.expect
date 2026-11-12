@@ -1,0 +1,33 @@
+rgb24.bmp 33x21, its header 33x21, c382676a745812bb
+rgb24-top.bmp 33x21, its header 33x21, c382676a745812bb
+rgb32.bmp 33x21, its header 33x21, c382676a745812bb
+rgba32.bmp 33x21, its header 33x21, c382676a745812bb
+rgb16.bmp 33x21, its header 33x21, fefa4f21425e3d27
+rgb565.bmp 33x21, its header 33x21, 5798c1a14186286e
+v3-alpha.bmp 33x21, its header 33x21, 97f12c3da9f80706
+v5-alpha.bmp 33x21, its header 33x21, 97f12c3da9f80706
+v4-rgb.bmp 33x21, its header 33x21, c382676a745812bb
+pal8.bmp 33x21, its header 33x21, 5ba20df649c2c672
+pal4.bmp 33x21, its header 33x21, c6bb1772a872eabd
+pal1.bmp 33x21, its header 33x21, d45d5edd3cbc2557
+core8.bmp 33x21, its header 33x21, 5ba20df649c2c672
+core24.bmp 33x21, its header 33x21, c382676a745812bb
+rle8.bmp 33x21, its header 33x21, 524064a903c3afe0
+rle4.bmp 33x21, its header 33x21, bb0ebb4276234241
+truncated.bmp 33x21, its header 33x21, 991e6919209dcf5d
+icon.ico 32x32, its header 32x32, be857270b432901c
+icon-png.ico 24x24, its header 24x24, 4aaed714b31273e4
+bad_rle8_overrun 4x4, its header 4x4, 026058c3d4c1f59b
+bad_rle8_absolute_cut 4x4, its header 4x4, 885a7caa0c88ea98
+bad_rle4_runs 3x2, its header 3x2, 7d5e4e965a851871
+bad_pal_index 4x2, its header 4x2, 5d6a0d08dc6941c3
+bad_topdown_rle refused, its header 4x2
+bad_huge refused, its header 100000x100000
+bad_zero_width refused
+bad_bits refused, its header 4x4
+bad_bitfields_cut refused, its header 4x4
+bad_jpeg_inside refused, its header 4x4
+bad_pixels_cut 4x4, its header 4x4, eebe4e4e51c6c683
+bad_ico_entries refused
+bad_ico_count refused
+mutations: 690 decoded, 70 refused, none read past its end

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>BMP and ICO images</title>
+<style>body { margin: 8px; background: #c8e0f0; } img { margin: 0 4px 4px 0; vertical-align: top; } .big img { width: 66px; height: 42px; }</style></head>
+<body>
+<div><img id="b-rgb24" src="bmp/rgb24.bmp"><img id="b-rgb24-top" src="bmp/rgb24-top.bmp"><img id="b-rgb32" src="bmp/rgb32.bmp"><img id="b-rgba32" src="bmp/rgba32.bmp"><img id="b-rgb16" src="bmp/rgb16.bmp"><img id="b-rgb565" src="bmp/rgb565.bmp"><img id="b-v3-alpha" src="bmp/v3-alpha.bmp"><img id="b-v5-alpha" src="bmp/v5-alpha.bmp"><img id="b-v4-rgb" src="bmp/v4-rgb.bmp"><img id="b-pal8" src="bmp/pal8.bmp"><img id="b-pal4" src="bmp/pal4.bmp"><img id="b-pal1" src="bmp/pal1.bmp"><img id="b-core8" src="bmp/core8.bmp"><img id="b-core24" src="bmp/core24.bmp"><img id="b-rle8" src="bmp/rle8.bmp"><img id="b-rle4" src="bmp/rle4.bmp"><img id="b-truncated" src="bmp/truncated.bmp"></div>
+<div><img id="i-ico" src="bmp/icon.ico"><img id="i-icopng" src="bmp/icon-png.ico"><img id="i-ico16" src="bmp/icon.ico" width="16" height="16"></div>
+<div class="big"><img id="z-rgba32" src="bmp/rgba32.bmp"><img id="z-pal4" src="bmp/pal4.bmp"><img id="z-rle8" src="bmp/rle8.bmp"></div>
+<div><picture><source type="image/bmp" srcset="bmp/rgb24.bmp"><img id="p-bmp" src="bmp/source-rgb.png"></picture>
+<picture><source type="image/x-ms-bmp" srcset="bmp/rgb24.bmp"><img id="p-xmsbmp" src="bmp/source-rgb.png"></picture>
+<picture><source type="image/x-icon" srcset="bmp/icon.ico"><img id="p-xicon" src="bmp/source-rgb.png"></picture>
+<picture><source type="image/vnd.microsoft.icon" srcset="bmp/icon.ico"><img id="p-msicon" src="bmp/source-rgb.png"></picture></div>
+<div id="bg" style="width: 120px; height: 50px; background: url(bmp/rgb24.bmp)"></div>
+</body></html>
