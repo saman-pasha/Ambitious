@@ -1,11 +1,14 @@
 /* tests/exec/svg_render.c -- SVG drawn (src/paint/svg.c), piece by piece: path data read
    as SVG 2 reads it (relative and implicit commands, arcs, compact numbers and flags, an
    error ending it); scenes' coverage drawn into small canvases (a rectangle at fractions
-   of a pixel, the fill rules, strokes' caps and joins, dashes, a group's opacity, a clip);
-   SVG documents' natural sizes; pages' inline svg elements laid out, their boxes and the
-   scenes layout made of them (presentation attributes, sheets, use, gradients); hostile
-   documents, which must draw in bounded time and memory; and SVG images that are not
-   well formed, which draw nothing. */
+   of a pixel, the fill rules, strokes' caps and joins, dashes, a group's opacity, a clip,
+   a pattern's tile, a mask, a filter's primitives, a hairline); SVG documents' natural
+   sizes; pages' inline svg elements laid out, their boxes and the scenes layout made of
+   them (presentation attributes, sheets, use, gradients, patterns, markers, masks,
+   filters, image elements, text turned and on a path, geometry from CSS, switch,
+   paint-order, vector-effect); hostile documents, which must draw in bounded time and
+   memory (uses, clips, patterns, masks and markers of themselves, filters and text past
+   every bound); and SVG images that are not well formed, which draw nothing. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -82,6 +85,24 @@ static const char *const pages[] = {
     "<svg id=s width=40 height=20><linearGradient id=g><stop offset=0 stop-color=red /><stop offset=1 stop-color=blue "
     "stop-opacity=.5 /></linearGradient><rect width=40 height=20 fill='url(#g)' /></svg>",
     "<p>an icon <svg id=s height=20 viewBox='0 0 10 5'></svg> inline</p>",
+    /* 12t: a pattern, markers, a mask, a filter, an image, text turned and on a path, geometry from CSS, switch,
+       paint-order and vector-effect */
+    "<svg id=s width=40 height=20><pattern id=p patternUnits=userSpaceOnUse width=10 height=10 patternTransform='rotate(45)'><rect width=5 "
+    "height=5 fill=red /></pattern><rect width=40 height=20 fill='url(#p)' /></svg>",
+    "<svg id=s width=40 height=40><marker id=m markerWidth=4 markerHeight=4 refX=2 refY=2 orient=auto><rect width=4 height=4 /></marker>"
+    "<polyline points='5,35 20,5 35,35' fill=none stroke=black marker-start='url(#m)' marker-mid='url(#m)' marker-end='url(#m)' /></svg>",
+    "<svg id=s width=20 height=20><mask id=k maskUnits=userSpaceOnUse x=0 y=0 width=20 height=20><rect width=10 height=20 fill=white />"
+    "</mask><rect width=20 height=20 mask='url(#k)' /></svg>",
+    "<svg id=s width=20 height=20><filter id=f><feOffset dx=2 dy=2 result=o /><feGaussianBlur in=o stdDeviation=1 /><feMerge><feMergeNode />"
+    "<feMergeNode in=SourceGraphic /></feMerge></filter><rect x=5 y=5 width=10 height=10 filter='url(#f)' /></svg>",
+    "<svg id=s width=20 height=20><image href=nowhere.png x=2 y=3 width=10 height=12 preserveAspectRatio='xMinYMax slice' /></svg>",
+    "<svg id=s width=30 height=30><text x=5 y=20 rotate=15 font-size=10 stroke=blue>I</text></svg>",
+    "<svg id=s width=60 height=30><path id=l d='M5 20 L55 20' /><text font-size=10><textPath href=#l startOffset=10>l</textPath></text></svg>",
+    "<style>circle { r: 5px } .r { width: 4px; x: 1px }</style><svg id=s width=20 height=20><circle cx=10 cy=10 r=2 /><rect class=r y=2 "
+    "width=9 height=3 /><path d='M0 0 L1 1' style=\"d: path('M 2 2 L 8 2')\" stroke=red /></svg>",
+    "<svg id=s width=20 height=20><switch><rect systemLanguage=fr width=5 height=5 /><circle r=3 cx=10 cy=10 /></switch><rect "
+    "requiredExtensions='' width=5 height=5 /></svg>",
+    "<svg id=s width=20 height=20><rect width=10 height=10 fill=green stroke=red paint-order=stroke vector-effect=non-scaling-stroke /></svg>",
 };
 
 /* documents made to break the drawing: each must draw in bounded time and memory */
@@ -108,9 +129,37 @@ static void hostile(vector<char> *out, int which) {
                         "stroke-dasharray='0.0001 0.0001' />"
                         "<circle r=10 stroke=blue stroke-width=3 transform='scale(1e30)' /><text x=1e30 y=5>far</text>";
         append_range(out, t, strlen(t));
-    } else {
+    } else if (which == 2) {
         for (int k = 0; k < 300; k++) append_range(out, "<g opacity=0.9 clip-path=url(#c)>", 33);
         const char *t = "<clipPath id=c clip-path=url(#c)><rect width=40 height=40 /></clipPath><rect width=30 height=30 />";
+        append_range(out, t, strlen(t));
+    } else if (which == 3) {
+        /* patterns of themselves and of each other, twenty deep; a mask masked by itself; markers of markers */
+        const char *t = "<pattern id=me width=10 height=10 patternUnits=userSpaceOnUse><rect width=10 height=10 fill=url(#me) /></pattern>"
+                        "<mask id=k><rect width=50 height=50 fill=white mask=url(#k) /></mask>"
+                        "<marker id=mk markerWidth=9 markerHeight=9><path d='M0 0 L9 9 L0 9' marker-mid=url(#mk) stroke=red /></marker>";
+        append_range(out, t, strlen(t));
+        for (int k = 0; k < 20; k++) {
+            char buf[160];
+            int n = snprintf(buf, sizeof buf, "<pattern id=p%d width=0.5 height=0.5><rect width=9 height=9 fill=url(#p%d) /></pattern>", k, k + 1);
+            append_range(out, buf, (size_t)n);
+        }
+        const char *u = "<rect width=50 height=25 fill=url(#me) stroke=url(#p0) mask=url(#k) /><polyline points='0,0 25,25 50,0' "
+                        "marker-mid=url(#mk) fill=url(#p0) />";
+        append_range(out, u, strlen(u));
+    } else if (which == 4) {
+        /* filters past every bound: a blur of 1e9, sixty-four primitives, an offset of 1e30, a region of 1e30 */
+        const char *t = "<filter id=f x=-1e30 y=-1e30 width=1e31 height=1e31 filterUnits=userSpaceOnUse><feGaussianBlur stdDeviation=1e9 />"
+                        "<feOffset dx=1e30 dy=-1e30 /></filter><filter id=g>";
+        append_range(out, t, strlen(t));
+        for (int k = 0; k < 64; k++) append_range(out, "<feGaussianBlur stdDeviation=3 />", 33);
+        const char *u = "</filter><rect width=50 height=50 filter=url(#f) /><circle cx=25 cy=25 r=20 filter=url(#g) />";
+        append_range(out, u, strlen(u));
+    } else {
+        /* text turned, fitted and set on a path past every bound */
+        const char *t = "<path id=l d='M0 0 L50 50' /><text x=1e30 y=5 rotate='1e30 nan' textLength=1e30>far</text><text font-size=1e5>"
+                        "<textPath href=#l startOffset=-1e30>no</textPath><textPath href=#nosuch>none</textPath></text>"
+                        "<text textLength=-5 lengthAdjust=spacingAndGlyphs font-size=0.001 dominant-baseline=central>tiny</text>";
         append_range(out, t, strlen(t));
     }
     append_range(out, "</svg>", 6);
@@ -166,6 +215,17 @@ int main(void) {
                "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 12 0 L 12 12 L 0 12 Z\ne\n", 12, 12);
     show_scene("a linear gradient, black to transparent",
                "v 10 2 1\nl 1 10 0 0 2 0 0 0 0 1 0 0 2 0 000000ff 1 00000000\np 1 0 0 1 0 0 u 1 1 0 n 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 2 L 0 2 Z\n", 10, 2);
+    show_scene("a pattern: a tile of 2 px, its first px black",
+               "v 8 4 1\nP 1 1 0 0 1 0 0 2 2\np 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 1 0 L 1 1 L 0 1 Z\nE\n"
+               "p 1 0 0 1 0 0 u 1 1 0 n 1 1 0 0 4 0 0 M 0 0 L 8 0 L 8 4 L 0 4 Z\n", 8, 4);
+    show_scene("a mask: its left half white, its region the whole",
+               "v 10 4 1\ng 1 0 0 1 0\nM 0 0 0 10 4 1 0 0 1 0 0\np 1 0 0 1 0 0 c ffffffff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 5 0 L 5 4 L 0 4 Z\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 4 L 0 4 Z\ne\n", 10, 4);
+    show_scene("a filter: the square moved 2 px right, blurred (a deviation of 1)",
+               "v 14 8 1\ng 1 0 0 0 1\nF 0 0 14 8 1 0 0 1 0 0 2\nx 2 -1 -1 1 0 0 14 8 2 0\nx 1 0 0 1 0 0 14 8 1 1\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 3 2 L 7 2 L 7 6 L 3 6 Z\ne\n", 14, 8);
+    show_scene("a hairline, Skia's: a px each column, shared between the two the line passes",
+               "v 10 5 1\np 1 0 0 1 0 0 n 1 0 c 000000ff 1 1 0 0 4 0 0 M 0.5 0.5 L 9.5 4\n", 10, 5);
 
     printf("-- natural sizes\n");
     for (size_t i = 0; i < sizeof docs / sizeof docs[0]; i++) {
@@ -200,8 +260,9 @@ int main(void) {
     }
 
     printf("-- hostile documents\n");
-    static const char *const what[3] = { "uses ten a level, eight deep", "uses of themselves, numbers past floats", "300 groups clipped by a clip of itself" };
-    for (int k = 0; k < 3; k++) {
+    static const char *const what[6] = { "uses ten a level, eight deep", "uses of themselves, numbers past floats", "300 groups clipped by a clip of itself",
+                                         "patterns, masks and markers of themselves", "filters past every bound", "text past every bound" };
+    for (int k = 0; k < 6; k++) {
         vector<char> src;
         hostile(&src, k);
         dom_document d;

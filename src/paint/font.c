@@ -1993,3 +1993,87 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     *oy = y0;
     return 1;
 }
+
+/* a path command into out: its letter as a number, then its points */
+static void amb_path_cmd(vector<double> *out, char c, int n, const double *v) {
+    push_back(out, (double)c);
+    for (int k = 0; k < n; k++) push_back(out, v[k]);
+}
+
+int amb_glyph_path(const amb_fonts *f, int face, uint32_t cp, double size, int italic, vector<double> *out) {
+    int by;
+    if (amb_ignorable(cp)) return 0;
+    uint32_t gi = amb_glyph_at(f, face, cp, &by);
+    if (!amb_ready(f, by)) return 0;
+    amb_glyph g = amb_gl(f, by, gi);
+    amb_face fc;
+    amb_rec(f, by, &fc);
+    if (fc.outlines == AMB_BITMAPS) return 0;
+    vector<amb_pt> pts;
+    if (fc.outlines != AMB_GLYF) {
+        if (by < AMB_WEBFIRST) amb_cff_outline(data(amb_sb) + fc.base, fc.size, fc.glyf, fc.glyf_size, fc.outlines == AMB_CFF2, g.gid, &pts);
+        else amb_cff_outline(data(f->bytes) + fc.base, fc.size, fc.glyf, fc.glyf_size, fc.outlines == AMB_CFF2, g.gid, &pts);
+    } else if (by < AMB_WEBFIRST) amb_outline(data(amb_sb) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    uint32_t npts = (uint32_t)len(pts);
+    if (npts == 0) return 0;
+    int asked = italic || (face < AMB_NBUILTIN && (amb_sf[face].style & 2));
+    double s = size / fc.upem, slant = asked && !fc.slope ? 0.25 : 0;
+    /* each contour as amb_glyph_mask walks it: lines, quadratics (an implied point between two
+       controls) and cubics (CFF's controls on 2), back to its start */
+    uint32_t c0 = 0;
+    while (c0 < npts) {
+        uint32_t c1 = c0;
+        while (c1 + 1 < npts && !at(pts, c1).end) c1++;
+        uint32_t n = c1 - c0 + 1, k0 = 0;
+        int found = 0;
+        for (uint32_t k = 0; k < n && !found; k++) if (at(pts, c0 + k).on == 1) { k0 = k; found = 1; }
+        double v[6], px, py, qx = 0, qy = 0, rx = 0, ry = 0;
+        int ctrl = 0, cubic = 0;
+        if (found) {
+            amb_xf(at(pts, c0 + k0), s, slant, 0, 0, &v[0], &v[1]);
+            amb_path_cmd(out, 'M', 2, v);
+            for (uint32_t j = 1; j <= n; j++) {
+                amb_pt p = at(pts, c0 + (k0 + j) % n);
+                amb_xf(p, s, slant, 0, 0, &px, &py);
+                if (p.on == 2) {
+                    if (cubic) { rx = px; ry = py; }
+                    else { qx = px; qy = py; rx = px; ry = py; }
+                    cubic = 1;
+                } else if (p.on) {
+                    if (cubic) { v[0] = qx; v[1] = qy; v[2] = rx; v[3] = ry; v[4] = px; v[5] = py; amb_path_cmd(out, 'C', 6, v); }
+                    else if (ctrl) { v[0] = qx; v[1] = qy; v[2] = px; v[3] = py; amb_path_cmd(out, 'Q', 4, v); }
+                    else { v[0] = px; v[1] = py; amb_path_cmd(out, 'L', 2, v); }
+                    ctrl = 0;
+                    cubic = 0;
+                } else {
+                    if (ctrl) { v[0] = qx; v[1] = qy; v[2] = (qx + px) * 0.5; v[3] = (qy + py) * 0.5; amb_path_cmd(out, 'Q', 4, v); }
+                    qx = px;
+                    qy = py;
+                    ctrl = 1;
+                }
+            }
+        } else {
+            double lx, ly, sx, sy;
+            amb_xf(at(pts, c0), s, slant, 0, 0, &px, &py);
+            amb_xf(at(pts, c1), s, slant, 0, 0, &lx, &ly);
+            sx = (px + lx) * 0.5;
+            sy = (py + ly) * 0.5;
+            v[0] = sx;
+            v[1] = sy;
+            amb_path_cmd(out, 'M', 2, v);
+            for (uint32_t j = 0; j < n; j++) {
+                amb_xf(at(pts, c0 + j), s, slant, 0, 0, &px, &py);
+                if (ctrl) { v[0] = qx; v[1] = qy; v[2] = (qx + px) * 0.5; v[3] = (qy + py) * 0.5; amb_path_cmd(out, 'Q', 4, v); }
+                qx = px;
+                qy = py;
+                ctrl = 1;
+            }
+            v[0] = qx; v[1] = qy; v[2] = sx; v[3] = sy;
+            amb_path_cmd(out, 'Q', 4, v);
+        }
+        amb_path_cmd(out, 'Z', 0, v);
+        c0 = c1 + 1;
+    }
+    return 1;
+}

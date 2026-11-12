@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: image elements</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.sized { width: 60px; height: 20px }
+</style>
+</head>
+<body>
+<!-- row 1: a raster at its size, made smaller, sliced; an SVG picture stretched to its viewport; preserveAspectRatio's
+     alignments and none; a turned raster -->
+<svg id="i-raster" style="left:5px;top:5px" width="100" height="100"><image href="logo.png" x="2" y="10" width="96" height="32"/><image href="logo.png" x="10.5" y="50.25" width="48" height="16"/><image href="logo.png" x="60" y="45" width="30" height="40" preserveAspectRatio="xMidYMid slice"/></svg>
+<svg id="i-svg" style="left:117px;top:5px" width="100" height="100"><image href="svg-badge.svg" x="0" y="0" width="100" height="100"/></svg>
+<svg id="i-align" style="left:229px;top:5px" width="100" height="100"><image href="logo.png" x="0" y="0" width="100" height="100" preserveAspectRatio="xMaxYMax meet"/><image href="logo.png" x="0" y="60" width="100" height="40" preserveAspectRatio="none"/></svg>
+<svg id="i-turned" style="left:341px;top:5px" width="100" height="100"><image href="logo.png" x="10" y="10" transform="rotate(25 50 50)"/></svg>
+<svg id="i-slice" style="left:453px;top:5px" width="100" height="100"><image href="svg-badge.svg" x="10" y="10" width="80" height="80" preserveAspectRatio="xMinYMin slice"/></svg>
+<svg id="i-scaled" style="left:565px;top:5px" width="100" height="100"><image href="logo.png" x="5" y="5" width="20" height="10"/><image href="logo.png" x="5" y="20" width="200" height="66"/></svg>
+<svg id="i-viewbox" style="left:677px;top:5px" width="100" height="100"><image href="svg-ratio.svg" x="0" y="0" width="100" height="100"/><image href="svg-ratio.svg" x="0" y="70" width="100" height="30" preserveAspectRatio="none"/></svg>
+<!-- row 2: xlink:href, CSS's width and height, a data: URL, an image's opacity and clip, a nested viewport, auto sizes -->
+<svg id="i-xlink" style="left:5px;top:117px" width="100" height="100" xmlns:xlink="http://www.w3.org/1999/xlink"><image xlink:href="svg-tile.svg" x="10" y="10" width="80" height="80"/></svg>
+<svg id="i-css" style="left:117px;top:117px" width="100" height="100"><image class="sized" href="logo.png" x="20" y="40"/></svg>
+<svg id="i-data" style="left:229px;top:117px" width="100" height="100"><image href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='9' fill='%23c04040'/%3E%3C/svg%3E" x="10" y="10" width="80" height="80"/></svg>
+<svg id="i-effects" style="left:341px;top:117px" width="100" height="100"><clipPath id="ic"><circle cx="50" cy="50" r="35"/></clipPath><image href="logo.png" x="0" y="0" width="100" height="100" preserveAspectRatio="none" opacity="0.6" clip-path="url(#ic)"/></svg>
+<svg id="i-nested" style="left:453px;top:117px" width="100" height="100"><svg x="10" y="10" width="80" height="80" viewBox="0 0 40 40"><image href="logo.png" x="-4" y="10" width="48" height="16"/></svg></svg>
+<svg id="i-auto" style="left:565px;top:117px" width="100" height="100"><image href="logo.png" x="0" y="0"/><image href="logo.png" x="0" y="40" width="48"/></svg>
+</body>
+</html>

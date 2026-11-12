@@ -902,6 +902,46 @@ be built side by side and merged without touching each other's.
   and computed values (156 of 156, `:hover` measured with the mouse over the
   page: `tests/pages/NAME.hover`); the mode's facts (`tests/integ/quirks.sh`);
   every standards-mode page unmoved.
+- **12t SVG, the rest of it** (`src/paint/svg.c`, `src/paint/svg.h`; a glyph's
+  outline in `src/paint/font.c`; SVG's new properties in `contracts/css.pl` and
+  `src/css/css.c`; an SVG image element's picture fetched by `src/net/net.c` and drawn
+  through the loader paint passes, `amb_svg_draw_with`), each measured in Chromium
+  first, Blink's and Skia's sources deciding where the specs leave room:
+  - patterns as a fill, stroke or text's paint (patternUnits, patternContentUnits,
+    viewBox and preserveAspectRatio, patternTransform, href inheritance of attributes and
+    content): each tile drawn as Skia rasterizes a picture shader's, at its matrix's
+    scale (reckoned in floats) rounded up to whole px, then sampled bilinearly, repeated;
+  - markers (marker-start, -mid, -end and the marker shorthand; markerUnits, refX and
+    refY, orient's auto, auto-start-reverse and angles, viewBox, markerWidth and
+    markerHeight, overflow) at the places Blink's SVGMarkerDataBuilder finds, a closed
+    subpath's ends bisecting its closing segment and its first, the viewport's clip not
+    anti-aliased; paint-order between fill, stroke and markers;
+  - masks (maskUnits, maskContentUnits, mask-type, CSS's `mask: url()`): the content's
+    Rec. 709 luminance (or alpha) in eight bits, its region a clip Skia rounds to whole px;
+  - image elements: raster pictures (from the mipmap level Chromium's decode cache picks,
+    sampled bilinearly) and SVG ones (laid out in the viewport, a document without a
+    viewBox stretched there from its natural size), preserveAspectRatio, CSS's width and
+    height, data: URLs;
+  - filters (filterUnits, primitiveUnits, regions and subregions rounded out, in, in2 and
+    result, SourceGraphic and SourceAlpha, color-interpolation-filters): feGaussianBlur as
+    Skia's three box passes (SVG's windows, summed whole and divided once), feOffset,
+    feFlood, feComposite (arithmetic too), feMerge, feColorMatrix, feBlend (every mode),
+    feDropShadow and feComponentTransfer, each result kept in eight bits and converted
+    between linearRGB and sRGB as Skia's colour filters convert it;
+  - vector-effect: non-scaling-stroke; the geometry properties from CSS (r, cx, cy, rx,
+    ry, x, y, width, height, `d: path()`); switch's conditions; a text's stroke, its
+    rotate lists, textLength (spacing and spacingAndGlyphs), textPath (href,
+    startOffset, its anchor, glyphs off its ends dropped), dominant-baseline, and runs
+    turned, skewed or stretched drawn as their outlines; strokes no wider than a device
+    px drawn as Skia's anti-aliased hairlines.
+
+  Gate: `tests/pages/svg-pattern.html`, `svg-marker.html`, `svg-mask.html`,
+  `svg-filter.html`, `svg-embed.html`, `svg-textpath.html` and `svg-props.html`, each
+  held to Chromium's screenshot region by region (`tests/integ/paintref.sh`: 34, 29, 33,
+  42, 14, 19 and 17 regions agree); 12o's pages unmoved (37, 40, 9, 11 and 9);
+  `tests/exec/svg_render` (scenes of each, a pattern's tile, a mask, a filter and a
+  hairline drawn, documents of patterns, masks and markers of themselves and of filters
+  and text past every bound; valgrind clean).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: filters</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.css-filter { filter: url(#f1) }
+#f9 { color-interpolation-filters: sRGB }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <filter id="f1"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="f2"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="f3"><feGaussianBlur stdDeviation="1"/></filter>
+    <filter id="f4" x="-20%" y="-20%" width="150%" height="150%"><feOffset in="SourceAlpha" dx="6" dy="6" result="o"/><feGaussianBlur in="o" stdDeviation="3" result="b"/><feFlood flood-color="#4060ff" flood-opacity="0.6"/><feComposite in2="b" operator="in" result="s"/><feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="f5" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="5" dy="4" stdDeviation="2" flood-color="#802000"/></filter>
+    <filter id="f6"><feColorMatrix type="saturate" values="0.3"/></filter>
+    <filter id="f7"><feColorMatrix type="hueRotate" values="90"/></filter>
+    <filter id="f8"><feFlood flood-color="#ffd040" result="fl"/><feBlend in="SourceGraphic" in2="fl" mode="multiply"/></filter>
+    <filter id="f9"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="f10" filterUnits="userSpaceOnUse" x="20" y="20" width="60" height="50"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="f11" primitiveUnits="objectBoundingBox"><feGaussianBlur stdDeviation="0.05"/></filter>
+    <filter id="f12"><feFlood flood-color="#00c0c0" result="fl"/><feComposite in="SourceGraphic" in2="fl" operator="arithmetic" k1="0.5" k2="0.5" k3="0.5" k4="0"/></filter>
+    <filter id="f13"><feGaussianBlur stdDeviation="4 1"/></filter>
+    <filter id="f14"><feColorMatrix type="matrix" values="0 0 1 0 0  1 0 0 0 0  0 1 0 0 0  0 0 0 1 0"/></filter>
+    <filter id="f15"><feColorMatrix type="luminanceToAlpha"/></filter>
+    <filter id="f16"><feComponentTransfer><feFuncR type="table" tableValues="1 0"/><feFuncG type="discrete" tableValues="0 0.5 1"/><feFuncB type="linear" slope="0.5" intercept="0.25"/><feFuncA type="gamma" amplitude="1" exponent="0.5" offset="0"/></feComponentTransfer></filter>
+    <filter id="f17"><feFlood flood-color="#30a030" x="10%" y="10%" width="40%" height="40%" result="a"/><feFlood flood-color="#a03030" x="50%" y="50%" width="40%" height="40%" result="b"/><feComposite in="a" in2="b" operator="xor"/></filter>
+    <filter id="f18"><feFlood flood-color="#ffffff" flood-opacity="0.5" result="w"/><feBlend in="SourceGraphic" in2="w" mode="screen" result="s"/><feComposite in="s" in2="SourceGraphic" operator="atop"/></filter>
+    <filter id="f19"><feOffset dx="-8" dy="5"/><feGaussianBlur stdDeviation="1.5"/></filter>
+    <filter id="f20"><feBlend in="SourceGraphic" in2="BackgroundImage" mode="difference"/></filter>
+  </defs>
+</svg>
+<!-- row 1: blurs, colours' blurs meeting, a drop shadow made of primitives, feDropShadow, matrices -->
+<svg id="f-blur2" style="left:5px;top:5px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#e02020" filter="url(#f1)"/></svg>
+<svg id="f-blur5" style="left:117px;top:5px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#2020e0" filter="url(#f2)"/></svg>
+<svg id="f-meet" style="left:229px;top:5px" width="100" height="100"><rect x="20" y="20" width="30" height="60" fill="#e02020" filter="url(#f3)"/><rect x="50" y="20" width="30" height="60" fill="#20e020" filter="url(#f3)"/></svg>
+<svg id="f-shadow" style="left:341px;top:5px" width="100" height="100"><rect x="15" y="15" width="60" height="60" fill="#f0a000" filter="url(#f4)"/></svg>
+<svg id="f-dropshadow" style="left:453px;top:5px" width="100" height="100"><circle cx="45" cy="45" r="30" fill="#40c040" filter="url(#f5)"/></svg>
+<svg id="f-saturate" style="left:565px;top:5px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#e04080" filter="url(#f6)"/></svg>
+<svg id="f-huerotate" style="left:677px;top:5px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#e04080" filter="url(#f7)"/></svg>
+<!-- row 2: blend, sRGB, a region in user space, primitive units, arithmetic, an uneven blur, a matrix -->
+<svg id="f-blend" style="left:5px;top:117px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#4080e0" filter="url(#f8)"/></svg>
+<svg id="f-srgb" style="left:117px;top:117px" width="100" height="100"><rect x="20" y="20" width="30" height="60" fill="#e02020" filter="url(#f9)"/><rect x="50" y="20" width="30" height="60" fill="#20e020" filter="url(#f9)"/></svg>
+<svg id="f-region" style="left:229px;top:117px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#8040c0" filter="url(#f10)"/></svg>
+<svg id="f-units" style="left:341px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#c08040" filter="url(#f11)"/></svg>
+<svg id="f-arithmetic" style="left:453px;top:117px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#c04040" filter="url(#f12)"/></svg>
+<svg id="f-uneven" style="left:565px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#404040" filter="url(#f13)"/></svg>
+<svg id="f-matrix" style="left:677px;top:117px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#e04080" filter="url(#f14)"/></svg>
+<!-- row 3: luminance to alpha, transfer functions, subregions, screen and atop, an offset blur on a group, CSS's filter, a missing input -->
+<svg id="f-luminance" style="left:5px;top:229px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#e04080" filter="url(#f15)"/></svg>
+<svg id="f-transfer" style="left:117px;top:229px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#40a0c0" fill-opacity="0.6" filter="url(#f16)"/></svg>
+<svg id="f-subregion" style="left:229px;top:229px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#000" filter="url(#f17)"/></svg>
+<svg id="f-screen" style="left:341px;top:229px" width="100" height="100"><circle cx="50" cy="50" r="40" fill="#802080" filter="url(#f18)"/></svg>
+<svg id="f-group" style="left:453px;top:229px" width="100" height="100"><g filter="url(#f19)"><rect x="25" y="20" width="40" height="40" fill="#2080a0"/><circle cx="65" cy="65" r="20" fill="#e0a000"/></g></svg>
+<svg id="f-css" style="left:565px;top:229px" width="100" height="100"><rect class="css-filter" x="20" y="20" width="60" height="60" fill="#208040"/></svg>
+<svg id="f-missing" style="left:677px;top:229px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#a06020" filter="url(#f20)"/><rect x="30" y="30" width="40" height="40" fill="#203060" filter="url(#nosuch)"/></svg>
+</body>
+</html>

@@ -3,16 +3,19 @@
 
    An svg element's subtree is made a SCENE by layout (amb_svg_scene), once its box's size
    is known: text, each line a command -- a path with its paints and stroke, a run of
-   glyphs, a group (its opacity, its clip's shapes) and its end -- every coordinate in its
-   user space and the matrix that maps it into the viewport's CSS px. Shapes and paths
-   become absolute moves, lines and cubic Beziers (arcs and quadratics converted); use
-   elements are expanded (their trees inheriting from the use); gradients and clips are
+   glyphs, an image element, a group (its opacity, its clip's shapes, its mask's and its
+   filter's blocks) and its end, a pattern's block (its tile's own lines) -- every
+   coordinate in its user space and the matrix that maps it into the viewport's CSS px.
+   Shapes and paths become absolute moves, lines and cubic Beziers (arcs and quadratics
+   converted); use elements and markers are expanded (a use's tree inheriting from the use,
+   a marker's content from the marker); gradients, patterns, clips, masks and filters are
    resolved into user space (objectBoundingBox through the element's box). The cascade
    (src/css) gives every value: presentation attributes, style attributes and the page's
-   sheets. Paint draws the scene in the box (amb_svg_draw): its curves flattened at the
-   device's px, strokes made outlines (joins, caps, dashes), each shape's coverage found
-   over sixteen rows a pixel with exact horizontal spans (non-zero or even-odd), groups
-   with an opacity or a clip drawn in a layer of their own.
+   sheets. Paint draws the scene in the box (amb_svg_draw_with, the loader giving image
+   elements' pictures): its curves flattened at the device's px, strokes made outlines
+   (joins, caps, dashes; a thin one Skia's hairline), each shape's coverage found over
+   sixteen rows a pixel with exact horizontal spans (non-zero or even-odd), groups with an
+   opacity, a clip, a mask or a filter drawn in a layer of their own.
 
    An SVG document's bytes (an image's) are read by a small XML parser into a document of
    their own, cascaded, made a scene for their natural size and drawn scaled to the box
@@ -35,8 +38,10 @@ void amb_svg_scene(const dom_document *d, const css_style *st, const vector<uint
                    double vh, vector<char> *out);
 
 /* a scene drawn onto c: its viewport's top left at (x, y) of the page in c's px (rounded to
-   whole px, as Chromium places an svg's content), sx and sy of c's px a CSS px */
+   whole px, as Chromium places an svg's content), sx and sy of c's px a CSS px; its image
+   elements' pictures from the loader nt's resources (amb_svg_draw: none, so they draw nothing) */
 void amb_svg_draw(amb_canvas *c, const char *scene, size_t n, double x, double y, double sx, double sy);
+void amb_svg_draw_with(amb_canvas *c, const net_loader *nt, const char *scene, size_t n, double x, double y, double sx, double sy);
 
 /* the SVG document the loader fetched for the element el (an img), drawn into the rectangle
    (x, y, w, h) of c: 1 when it is one */

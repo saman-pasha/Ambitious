@@ -472,3 +472,37 @@ neighbours.
 
     reports `r.c:2: error: syntax error: could not read this item (gave up
     near line 2)`.
+33. **An array given more initializers than its bound is not refused: the compiler
+    runs on, and in a large unit runs out of stack.** gcc warns (`excess elements in
+    array initializer`) and compiles this; cicilang was stopped after 100 s with nothing
+    said:
+
+    ```c
+    #include <stdio.h>
+    typedef struct pdef { const char *name; int inh; } pdef;
+    static const pdef defs[2] = { { "a", 0 }, { "b", 1 }, { "c", 0 } };
+    int main(void) { printf("%s\n", defs[1].name); return 0; }
+    ```
+
+    12t met it when SVG's properties outgrew `CSS_NPROPS` (src/css/css.h's count of
+    the contract's properties, 153 for a table of 172): after minutes src/css/css.c
+    stopped with `not lowered yet: item(declaration(css_pdefs),raised(error(resource_error(stack),_)))`,
+    naming a line before the table. The work-around is the right bound; the compiler
+    should refuse the extra element at once, at its line.
+34. **A call with fewer arguments than its prototype has is accepted**, the missing ones
+    whatever their registers hold; gcc refuses it (`too few arguments to function`):
+
+    ```c
+    #include <stdio.h>
+    int pick(const char *family, int bold, int italic);
+    int pick(const char *family, int bold, int italic) { return (family[0] == 's') * 4 + bold + 2 * italic; }
+    int main(void) { printf("%d\n", pick("serif", 1)); return 0; }
+    ```
+
+    prints 5 here, by chance. 12o's src/paint/svg.c called `amb_face_named`
+    (src/paint/font.h) with two of its three arguments, the third added by 12l, so SVG
+    text's italic face was chosen by whatever the register held; 12t passes it. The
+    arguments' types are not held to the prototype's either: a call left with an old
+    signature, a pointer where a `double` now is, reached LLVM as `uitofp ptr ... to
+    double` and failed there (`LLVM: ir_parse_failed: ... invalid cast opcode`), naming
+    no line of the source.

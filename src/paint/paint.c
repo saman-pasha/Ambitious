@@ -1976,7 +1976,7 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         vector<char> scene;
         append_range(scene, text_ptr(t, t->box[b].svg), t->box[b].svg.len);
         double z = c->zoom > 0 ? c->zoom : 1;
-        amb_svg_draw(c, data(scene), len(scene), t->box[b].x, t->box[b].y, z, z);
+        amb_svg_draw_with(c, nt, data(scene), len(scene), t->box[b].x, t->box[b].y, z, z);
     } else if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;

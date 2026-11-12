@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: markers</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.all { marker: url(#mm) }
+.ends { marker-start: url(#ms); marker-end: url(#me) }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <marker id="ms" markerWidth="10" markerHeight="10" refX="0" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0 L10 5 L0 10 z" fill="#d02020"/></marker>
+    <marker id="mm" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#20a020"/></marker>
+    <marker id="me" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0 L10 5 L0 10 z" fill="#2020d0"/></marker>
+    <marker id="mr" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto-start-reverse" viewBox="0 0 10 10"><path d="M0 0 L10 5 L0 10 z" fill="#a020a0"/></marker>
+    <marker id="mu" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><circle cx="10" cy="10" r="8" fill="#c08000"/></marker>
+    <marker id="mw" markerWidth="4" markerHeight="4" refX="2" refY="2"><circle cx="2" cy="2" r="2" fill="#008080"/></marker>
+    <marker id="mo" markerWidth="4" markerHeight="4" refX="2" refY="2" overflow="visible"><rect x="-2" y="-2" width="8" height="8" fill="#806000"/></marker>
+    <marker id="mh" markerWidth="4" markerHeight="4" refX="2" refY="2"><rect x="-2" y="-2" width="8" height="8" fill="#806000"/></marker>
+    <marker id="ma" markerWidth="10" markerHeight="10" refX="0" refY="5" orient="45" viewBox="0 0 10 10"><path d="M0 0 L10 5 L0 10 z" fill="#404040"/></marker>
+    <marker id="mp" markerWidth="12" markerHeight="8" refX="6" refY="4" viewBox="0 0 30 10" preserveAspectRatio="xMinYMid meet"><rect width="30" height="10" fill="#e06020"/></marker>
+    <marker id="mg" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto" style="fill:#2060c0"><rect x="1" y="1" width="6" height="6"/><circle cx="6" cy="4" r="1.5" fill="#fff"/></marker>
+    <marker id="mc" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="0.25turn"><path d="M0 0 H5 L2.5 5 Z" fill="#600080"/></marker>
+  </defs>
+</svg>
+<!-- row 1: a polyline's start, mids and end; a path's curves; a polygon closed; reversed starts; units; overflow -->
+<svg id="m-polyline" style="left:5px;top:5px" width="100" height="100"><polyline points="10,80 40,20 70,70 90,30" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-curves" style="left:117px;top:5px" width="100" height="100"><path d="M10 50 C 30 0 70 0 90 50 S 50 100 20 90" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-polygon" style="left:229px;top:5px" width="100" height="100"><polygon points="20,20 80,30 60,80" fill="#eee" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-reverse" style="left:341px;top:5px" width="100" height="100"><path d="M20 30 L80 30 M20 70 L80 70" stroke="#000" stroke-width="2" marker-start="url(#mr)" marker-end="url(#mr)"/></svg>
+<svg id="m-units" style="left:453px;top:5px" width="100" height="100"><polyline points="15,15 50,50 85,15" fill="none" stroke="#000" stroke-width="3" marker-start="url(#mu)" marker-mid="url(#mw)" marker-end="url(#mu)"/></svg>
+<svg id="m-overflow" style="left:565px;top:5px" width="100" height="100"><line x1="20" y1="30" x2="80" y2="30" stroke="#000" stroke-width="3" marker-start="url(#mo)" marker-end="url(#mh)"/><line x1="20" y1="70" x2="80" y2="80" stroke="#000" stroke-width="2" marker-start="url(#ma)" marker-end="url(#mp)"/></svg>
+<svg id="m-shorthand" style="left:677px;top:5px" width="100" height="100"><path class="all" d="M10 10 L50 10 L90 50 L50 90 Z" fill="none" stroke="#000" stroke-width="2"/></svg>
+<!-- row 2: arcs and quadratics; subpaths closed; a point twice; a transformed shape; a close then a line; styles and orient's units -->
+<svg id="m-arcs" style="left:5px;top:117px" width="100" height="100"><path d="M10 50 A 40 30 0 0 1 90 50 Q 50 100 10 50" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-subpaths" style="left:117px;top:117px" width="100" height="100"><path d="M20 20 L80 20 L80 80 Z M30 50 L60 50 L60 70 Z" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-repeat" style="left:229px;top:117px" width="100" height="100"><path d="M20 20 L80 20 L80 20 L80 80" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-transform" style="left:341px;top:117px" width="100" height="100"><g transform="translate(50 50) scale(1.5) rotate(15)"><polyline points="-25,-20 0,10 25,-20" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></g></svg>
+<svg id="m-closeline" style="left:453px;top:117px" width="100" height="100"><path d="M50 10 L90 50 L50 90 L10 50 Z L 50 50" fill="none" stroke="#000" stroke-width="2" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-styled" style="left:565px;top:117px" width="100" height="100"><polyline class="ends" points="15,85 35,25 65,75 85,15" fill="none" stroke="#000" stroke-width="2" marker-mid="url(#mg)"/></svg>
+<svg id="m-turn" style="left:677px;top:117px" width="100" height="100"><polyline points="10,10 40,40 70,10 90,60" fill="none" stroke="#406080" stroke-width="3" marker-mid="url(#mc)" marker-start="url(#mc)" marker-end="url(#mc)" paint-order="markers"/></svg>
+<!-- row 3: thin strokes -->
+<svg id="m-thin" style="left:5px;top:229px" width="100" height="100"><path d="M50 10 L90 50 L50 90 L10 50 Z" fill="none" stroke="#000" marker-start="url(#ms)" marker-mid="url(#mm)" marker-end="url(#me)"/></svg>
+<svg id="m-hairs" style="left:117px;top:229px" width="100" height="100"><polyline points="10,90 30,10 50,90 70,10 90,90" fill="none" stroke="#000" stroke-width="0.5"/><path d="M10 50 Q 50 0 90 50" fill="none" stroke="#c00000" stroke-width="1"/><path d="M10 60 C 30 100 70 20 90 60" fill="none" stroke="#0000c0" stroke-width="1" stroke-linecap="round"/></svg>
+</body>
+</html>

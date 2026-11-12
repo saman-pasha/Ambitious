@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: text stroked, turned, fitted and on paths</title>
+<style>
+body { margin: 0; background: #fff }
+svg { position: absolute }
+.middle { dominant-baseline: middle }
+.order { paint-order: stroke fill }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <path id="arc" d="M 10 80 Q 50 0 90 80"/>
+    <path id="line" d="M 10 50 L 90 50"/>
+    <path id="wave" d="M 0 30 C 20 0 40 0 50 30 S 80 60 100 30" transform="translate(0 20)"/>
+    <linearGradient id="tg"><stop offset="0" stop-color="#d02020"/><stop offset="1" stop-color="#2020d0"/></linearGradient>
+  </defs>
+</svg>
+<!-- row 1: strokes; rotate lists; textLength's two adjustments; text on curves -->
+<svg id="t-stroke" style="left:5px;top:5px" width="100" height="100"><text x="10" y="40" font-size="30" fill="#ffd040" stroke="#202080" stroke-width="2">Ab</text><text x="10" y="85" font-size="30" fill="none" stroke="#a00000" stroke-width="1.5">Ab</text></svg>
+<svg id="t-rotate" style="left:117px;top:5px" width="100" height="100"><text x="10" y="50" font-size="20" rotate="0 20 40 60 80">ABCDE</text><text x="10" y="85" font-size="20" rotate="30">xyz</text></svg>
+<svg id="t-length" style="left:229px;top:5px" width="100" height="100"><text x="5" y="30" font-size="16" textLength="90">spaced</text><text x="5" y="60" font-size="16" textLength="90" lengthAdjust="spacingAndGlyphs">glyphs</text><text x="5" y="90" font-size="16" textLength="40">squeezed</text></svg>
+<svg id="t-path" style="left:341px;top:5px" width="100" height="100"><text font-size="14"><textPath href="#arc">on a curve here</textPath></text></svg>
+<svg id="t-offset" style="left:453px;top:5px" width="100" height="100"><text font-size="16"><textPath href="#line" startOffset="20">offset</textPath></text><text font-size="16" text-anchor="middle"><textPath href="#arc" startOffset="50%">mid</textPath></text></svg>
+<svg id="t-wave" style="left:565px;top:5px" width="100" height="100"><text font-size="13" fill="#204060"><textPath href="#wave" startOffset="4">along a wave too</textPath></text></svg>
+<svg id="t-baseline" style="left:677px;top:5px" width="100" height="100"><line x1="0" y1="30" x2="100" y2="30" stroke="#f00" stroke-width="0.5"/><line x1="0" y1="75" x2="100" y2="75" stroke="#f00" stroke-width="0.5"/><text x="2" y="30" font-size="20" class="middle">Mx</text><text x="50" y="30" font-size="20" dominant-baseline="central">Mx</text><text x="2" y="75" font-size="20" dominant-baseline="hanging">Mx</text><text x="50" y="75" font-size="20" dominant-baseline="mathematical">Mx</text></svg>
+<!-- row 2: baselines; turned, skewed and stretched runs; paint order; dashes, gradients and patterns; tspans' rotations -->
+<svg id="t-baseline2" style="left:5px;top:117px" width="100" height="100"><line x1="0" y1="50" x2="100" y2="50" stroke="#f00" stroke-width="0.5"/><text x="2" y="50" font-size="20" dominant-baseline="ideographic">Mx</text><text x="50" y="50" font-size="20" dominant-baseline="text-before-edge">Mx</text></svg>
+<svg id="t-turned" style="left:117px;top:117px" width="100" height="100"><text x="20" y="40" font-size="20" transform="rotate(30 50 50)">Rotated</text></svg>
+<svg id="t-skewed" style="left:229px;top:117px" width="100" height="100"><text x="10" y="50" font-size="20" transform="skewX(-20)">Skewed</text><text x="10" y="80" font-size="20" transform="scale(1.5 1)">Wide</text></svg>
+<svg id="t-order" style="left:341px;top:117px" width="100" height="100"><text x="10" y="40" font-size="24" fill="#40a040" stroke="#000" stroke-width="3" class="order">Po</text><text x="10" y="80" font-size="24" fill="#40a040" stroke="#000" stroke-width="3">Po</text></svg>
+<svg id="t-dash" style="left:453px;top:117px" width="100" height="100"><text x="10" y="40" font-size="20" stroke="#000" stroke-width="1" stroke-dasharray="2 1" fill="#fff">Dash</text><text x="10" y="80" font-size="20" font-family="sans-serif" font-weight="bold" fill="#c06000" stroke="url(#tg)">Bold</text></svg>
+<svg id="t-tspans" style="left:565px;top:117px" width="100" height="100"><text x="10" y="30" font-size="16">A<tspan rotate="45 90">BC</tspan>D</text><text x="10" y="70" font-size="16" rotate="10 20"><tspan>ab</tspan><tspan rotate="-30">cd</tspan></text></svg>
+<svg id="t-italic" style="left:677px;top:117px" width="100" height="100"><text x="10" y="40" font-size="24" font-style="italic" fill="#600060">Italic</text><text x="10" y="80" font-size="24" font-style="italic" rotate="5" stroke="#000" stroke-width="0.5" fill="#e0c0e0">Slant</text></svg>
+</body>
+</html>

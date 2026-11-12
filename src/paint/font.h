@@ -46,8 +46,9 @@
    cubic curves (their controls' points on 2). amb_glyph_mask draws one: its contours
    flattened into lines whose signed area each pixel accumulates (exact coverage,
    non-zero fill), at any size, at a fraction of a pixel across, upright or, for an
-   italic style a face is not italic in, slanted. A face of colour bitmaps (CBLC and
-   CBDT: Noto Color Emoji) is measured, not drawn. */
+   italic style a face is not italic in, slanted; amb_glyph_path gives its contours as
+   path commands, for SVG text drawn turned or stroked (src/paint/svg.c). A face of colour
+   bitmaps (CBLC and CBDT: Noto Color Emoji) is measured, not drawn. */
 #ifndef AMB_FONT_H
 #define AMB_FONT_H
 #include <stdint.h>
@@ -175,5 +176,12 @@ uint32_t amb_utf8_next(const char *s, size_t n, size_t *i);
    rasterizer's scratch. 0 when the glyph draws nothing (a space). */
 int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, double dx, int italic,
                    vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
+
+/* the outline of the glyph of cp at a size (its fallback face's when the face has none), its
+   pen at the origin on the baseline, y down, slanted as amb_glyph_mask slants it: path
+   commands appended to out, each its letter ('M', 'L', 'Q', 'C', 'Z') as a number, then its
+   points (src/paint/svg.c's, which fills and strokes them under any matrix). 0 when it
+   draws nothing */
+int amb_glyph_path(const amb_fonts *f, int face, uint32_t cp, double size, int italic, vector<double> *out);
 
 #endif
