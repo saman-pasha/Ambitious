@@ -1,0 +1,26 @@
+# tests/pages/clone.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+d-pad 16 16 246 118
+pad 16 17 249 83
+d-pads 16 128 246 196
+pads 16 129 238 195
+d-round 290 16 520 84
+round 290 21 513 79
+d-shadow 550 16 780 84
+shadow 550 22 761 78
+d-grad 16 206 246 274
+grad 16 212 227 268
+d-thick 290 200 520 302
+thick 290 202 525 266
+d-margin 550 200 780 302
+margin 562 206 779 262
+d-img 550 380 750 482
+img 550 385 730 443
+d-right 16 310 246 378
+right 69 314 246 374
+d-center 16 430 246 498
+center 60 434 245 494
+d-nest 290 310 520 378
+outer 290 314 534 374
+inner 300 314 524 374
+d-three 290 440 460 542
+three 290 442 463 540

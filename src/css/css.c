@@ -1084,6 +1084,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
        a container answers to, kept as text (they have case) */
     { "container-type", 0, G_TEXT, 0, "normal size inline-size scroll-state", "normal" },
     { "container-name", 0, G_TEXT, 0, "none", "none" },
+    /* CSS Fragmentation 3, 5.4: an inline box broken over lines as one strip, or each fragment wrapped in its own edges */
+    { "box-decoration-break", 0, G_KW, 0, "slice clone", "slice" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1121,7 +1123,7 @@ static const char css_webkit_aliases[] =
     "align-content align-items align-self appearance animation animation-delay animation-direction animation-duration animation-fill-mode "
     "animation-iteration-count animation-name animation-play-state animation-timing-function backface-visibility background-clip "
     "background-origin background-size border-bottom-left-radius border-bottom-right-radius border-radius border-top-left-radius "
-    "border-top-right-radius box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
+    "border-top-right-radius box-decoration-break box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
     "justify-content order perspective perspective-origin transform transform-origin transform-style transition transition-delay "
     "transition-duration transition-property transition-timing-function";
 

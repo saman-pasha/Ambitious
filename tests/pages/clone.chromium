@@ -1,0 +1,26 @@
+# boxes of tests/pages/clone.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+d-pad div 16 16 230 102
+pad span 16 17 232.156 66
+d-pads div 16 128 230 68
+pads span 16 129 221.156 66
+d-round div 290 16 230 68
+round span 290 21 222.156 58
+d-shadow div 550 16 230 68
+shadow span 550 22 210.156 56
+d-grad div 16 206 230 68
+grad span 16 212 210.156 56
+d-thick div 290 200 230 102
+thick span 290 202 234.156 64
+d-margin div 550 200 230 102
+margin span 562 206 216.156 56
+d-img div 550 380 200 102
+img span 550 385 179.875 58
+d-right div 16 310 230 68
+right span 69.906 314 176.094 60
+d-center div 16 430 230 68
+center span 60.172 434 183.906 60
+d-nest div 290 310 230 68
+outer span 290 314 243.266 60
+inner span 300 314 223.266 60
+d-three div 290 440 170 102
+three span 290 442 172.766 98

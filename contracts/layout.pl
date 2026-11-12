@@ -124,6 +124,9 @@ layout_contract(record(box, [
     %% the SVG effects its filter, clip-path and mask name by url() (src/paint/svg.h, amb_svg_effects): an entry for
     %% each, in its border box's user space, which paint applies to the box's stacking context; none when they name none
     field(fx, span(text)),
+    %% an inline element's box of decorations drawn for its fragment alone (box-decoration-break: clone): the fragment's
+    %% own border box, every edge wrapped about it, not a strip's
+    field(clone, bool),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,

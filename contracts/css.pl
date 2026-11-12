@@ -71,6 +71,7 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% CSS Conditional 5's query containers: container-type (normal, size, inline-size, scroll-state, as a
     %% keyword or kept as text) and container-name (none, or its names kept as text)
     container_type, container_name,
+    box_decoration_break,              % slice or clone: an inline box's fragments as one strip, or each wrapped whole
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

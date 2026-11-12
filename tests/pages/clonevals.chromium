@@ -1,0 +1,13 @@
+# tests/pages/clonevals.html in Chromium (tools/bench/cssref.js): id, property, value
+v1 box-decoration-break slice
+v2 box-decoration-break clone
+v3 box-decoration-break slice
+v4 box-decoration-break clone
+v5 box-decoration-break clone
+v6 box-decoration-break clone
+v7 box-decoration-break clone
+v8 box-decoration-break clone
+v9 box-decoration-break slice
+v10 box-decoration-break slice
+v11 box-decoration-break slice
+v12 box-decoration-break clone
