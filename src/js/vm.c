@@ -335,7 +335,7 @@ static uint32_t js_shape_add(js_vm *vm, uint32_t sh, uint32_t atom, uint32_t fla
 }
 
 /* the where of sh that holds atom, or 0: through a cache of the lookups made */
-static uint32_t js_shape_find(js_vm *vm, uint32_t sh, uint32_t atom) {
+uint32_t js_shape_find(js_vm *vm, uint32_t sh, uint32_t atom) {
     if (vm->shapes[sh].count == 0) return 0;
     size_t k = (js_hash3(sh, atom, 1) & 4095) * 3;
     if (vm->lookup[k] == sh && vm->lookup[k + 1] == atom) return vm->lookup[k + 2];
@@ -737,6 +737,12 @@ void js_value_text(js_vm *vm, jv v, vector<char> *out) {
         return;
     }
     uint32_t o = jv_idx(v), k = vm->objs[o].kind;
+    /* a proxy is its target's text (through every proxy; a revoked one's is null's) */
+    for (int d = 0; k == JK_PROXY && d < 10000; d++) {
+        if (!vm->objs[o].a) { js_put(out, "null"); return; }
+        o = vm->objs[o].a;
+        k = vm->objs[o].kind;
+    }
     uint32_t fs = js_func_source(vm, o);
     if (fs) { js_str_to_utf8(vm, fs, out); return; }
     if (k == JK_ERROR) {
@@ -760,9 +766,15 @@ void js_value_text(js_vm *vm, jv v, vector<char> *out) {
     /* else [object its tag], or its kind's class */
     jv tag = k == JK_PROXY ? JV_UNDEF : js_data_prop(vm, o, JS_SYM_KEY | JSYM_TO_STRING_TAG);
     js_put(out, "[object ");
+    static const char *const ta_names[JTA_N] = { "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
+        "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array" };
+    int weak = (vm->objs[o].flags & JO_WEAK) != 0;
     if (jv_is_str(tag)) js_str_to_utf8(vm, jv_idx(tag), out);
+    else if (k == JK_TYPEDARRAY) js_put(out, ta_names[(((uint32_t)vm->objs[o].flags >> JO_TA_SHIFT) & 15u) % JTA_N]);
     else js_put(out, k == JK_ARRAY ? "Array" : k == JK_DATE ? "Date" : k == JK_REGEXP ? "RegExp" : k == JK_ARGUMENTS ? "Arguments" :
-                     k == JK_BOOLEAN ? "Boolean" : k == JK_NUMBER ? "Number" : k == JK_STRING ? "String" : "Object");
+                     k == JK_BOOLEAN ? "Boolean" : k == JK_NUMBER ? "Number" : k == JK_STRING ? "String" :
+                     k == JK_MAP ? (weak ? "WeakMap" : "Map") : k == JK_SET ? (weak ? "WeakSet" : "Set") : k == JK_ARRAYBUFFER ? "ArrayBuffer" :
+                     k == JK_ERROR ? "Error" : "Object");
     push_back(*out, ']');
 }
 
@@ -2826,6 +2838,25 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             stack[sp++] = v;
             goto next;
         }
+        case OP_PUT_LOC_CHK: case OP_SET_LOC_CHK: {
+            /* an assignment to a let or a class before its declaration ran: V8's ReferenceError */
+            uint32_t slot = RD16(pc), atom = RD32(pc + 2);
+            pc += 6;
+            if (stack[base + slot] == JV_HOLE) { SYNC(); js_tdz_error(vm, atom); RELOAD(); break; }
+            stack[base + slot] = stack[sp - 1];
+            if (op == OP_PUT_LOC_CHK) sp--;
+            goto next;
+        }
+        case OP_PUT_ENV_CHK: case OP_SET_ENV_CHK: {
+            uint32_t depth = code[pc], idx = RD16(pc + 1), atom = RD32(pc + 3);
+            pc += 7;
+            uint32_t e = frames[fi].env;
+            for (uint32_t d = 0; d < depth; d++) e = objs[e].a;
+            if (slots[objs[e].slots + idx] == JV_HOLE) { SYNC(); js_tdz_error(vm, atom); RELOAD(); break; }
+            slots[objs[e].slots + idx] = stack[sp - 1];
+            if (op == OP_PUT_ENV_CHK) sp--;
+            goto next;
+        }
         case OP_GET_ENV: {
             uint32_t depth = code[pc], idx = RD16(pc + 1);
             pc += 3;
@@ -2960,6 +2991,12 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             while (js_iter_step(vm, jv_idx(it), &v)) js_array_push(vm, arr, v); RELOAD();
             sp--;
             break;
+        }
+        case OP_SET_PROTO_LIT: {
+            jv v = stack[--sp];
+            jv o = stack[sp - 1];
+            if (jv_is_obj(v) || v == JV_NULL) { SYNC(); js_set_proto(vm, jv_idx(o), v == JV_NULL ? 0 : jv_idx(v)); RELOAD(); }
+            goto next;
         }
         case OP_DEF_PROP: case OP_DEF_METHOD: {
             uint32_t atom = RD32(pc);
@@ -3398,9 +3435,15 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_ARGUMENTS: {
             uint32_t a = js_obj_new(vm, JK_ARGUMENTS, vm->object_proto); RELOAD();
             { uint32_t aa = frames[fi].args; if (!aa) { aa = js_array_new(vm, 0); RELOAD(); } objs[a].a = aa; }
-            /* its length an ordinary property of its own (writable, configurable), as its callee */
+            /* its length an ordinary property of its own (writable, configurable), as a sloppy function's callee; an
+               unmapped one's (a strict function's, or one whose parameters are not plain names) is %ThrowTypeError%'s
+               accessor, neither enumerable nor configurable */
             js_define(vm, a, A_LENGTH, jv_num(frames[fi].argc), JS_SHAPE_HIDDEN); RELOAD();
-            js_define(vm, a, A_CALLEE, jv_obj(frames[fi].callee), JS_SHAPE_HIDDEN); RELOAD();
+            /* its Symbol.iterator Array.prototype.values itself, an own property */
+            js_define(vm, a, JS_KEY_ITERATOR, jv_obj(vm->array_values), JS_SHAPE_HIDDEN); RELOAD();
+            if (funcs[frames[fi].func].flags & (JF_STRICT | JF_NONSIMPLE)) {
+                js_define_accessor(vm, a, A_CALLEE, jv_obj(vm->throw_te), jv_obj(vm->throw_te), JS_SHAPE_HIDDEN | JS_SHAPE_FIXED); RELOAD();
+            } else { js_define(vm, a, A_CALLEE, jv_obj(frames[fi].callee), JS_SHAPE_HIDDEN); RELOAD(); }
             stack[sp++] = jv_obj(a);
             break;
         }
@@ -4264,9 +4307,16 @@ jv js_eval_code(js_vm *vm, jv code, int mode, uint32_t env, jv thisv, uint32_t h
         js_str_to_utf8(vm, src, &text);
         vector<char> err;
         if (!js_compile(vm, data(text), len(text), vm->script, mode, &func, &err)) {
-            /* the compiler's message, without its own "SyntaxError: " */
+            /* the compiler's message, without its own "SyntaxError: " and its " (line N)" (V8's message names no
+               line: the error's position is the eval's) */
             size_t skip = len(err) > 13 && memcmp(data(err), "SyntaxError: ", 13) == 0 ? 13 : 0;
-            uint32_t m = js_str_utf8(vm, data(err) + skip, len(err) - skip);
+            size_t end = len(err);
+            if (end > skip && err[end - 1] == ')') {
+                size_t q = end - 1;
+                while (q > skip && err[q - 1] >= '0' && err[q - 1] <= '9') q--;
+                if (q >= skip + 7 && q < end - 1 && memcmp(data(err) + q - 7, " (line ", 7) == 0) end = q - 7;
+            }
+            uint32_t m = js_str_utf8(vm, data(err) + skip, end - skip);
             return js_throw(vm, jv_obj(js_error_new(vm, vm->syntax_error_proto, m)));
         }
         if (len(vm->eval_cache) >= JS_EVAL_CACHE_MAX) clear(vm->eval_cache);

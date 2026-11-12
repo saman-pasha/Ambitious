@@ -1,0 +1,258 @@
+"" => Unexpected end of JSON input
+" " => Unexpected end of JSON input
+"{" => Expected property name or '}' in JSON at position 1 (line 1 column 2)
+"[" => Unexpected end of JSON input
+"{\"a\"" => Expected ':' after property name in JSON at position 4 (line 1 column 5)
+"{\"a\":" => Unexpected end of JSON input
+"{\"a\":1" => Expected ',' or '}' after property value in JSON at position 6 (line 1 column 7)
+"{\"a\":1," => Expected double-quoted property name in JSON at position 7 (line 1 column 8)
+"{\"a\" 1}" => Expected ':' after property name in JSON at position 5 (line 1 column 6)
+"{a:1}" => Expected property name or '}' in JSON at position 1 (line 1 column 2)
+"{'a':1}" => Expected property name or '}' in JSON at position 1 (line 1 column 2)
+"{\"a\":1,}" => Expected double-quoted property name in JSON at position 7 (line 1 column 8)
+"[1,]" => Unexpected token ']', "[1,]" is not valid JSON
+"[1 2]" => Expected ',' or ']' after array element in JSON at position 3 (line 1 column 4)
+"[,1]" => Unexpected token ',', "[,1]" is not valid JSON
+"\"abc" => Unterminated string in JSON at position 4 (line 1 column 5)
+"\"a\\x\"" => Bad escaped character in JSON at position 3 (line 1 column 4)
+"\"a\\u12g4\"" => Bad Unicode escape in JSON at position 6 (line 1 column 7)
+"\"a\u0001b\"" => Bad control character in string literal in JSON at position 2 (line 1 column 3)
+"-" => No number after minus sign in JSON at position 1 (line 1 column 2)
+"-a" => No number after minus sign in JSON at position 1 (line 1 column 2)
+"1e" => Exponent part is missing a number in JSON at position 2 (line 1 column 3)
+"1e+" => Exponent part is missing a number in JSON at position 3 (line 1 column 4)
+"01" => Unexpected number in JSON at position 1 (line 1 column 2)
+"1." => Unterminated fractional number in JSON at position 2 (line 1 column 3)
+".5" => Unexpected token '.', ".5" is not valid JSON
+"tru" => Unexpected end of JSON input
+"trux" => Unexpected token 'x', "trux" is not valid JSON
+"nul" => Unexpected end of JSON input
+"falsey" => Unexpected non-whitespace character after JSON at position 5 (line 1 column 6)
+"1 2" => Unexpected non-whitespace character after JSON at position 2 (line 1 column 3)
+"{} x" => Unexpected non-whitespace character after JSON at position 3 (line 1 column 4)
+"x" => Unexpected token 'x', "x" is not valid JSON
+"undefined" => "undefined" is not valid JSON
+"NaN" => "NaN" is not valid JSON
+"\"\\" => Unexpected end of JSON input
+"{\"a\":1}}" => Unexpected non-whitespace character after JSON at position 7 (line 1 column 8)
+"[1]]" => Unexpected non-whitespace character after JSON at position 3 (line 1 column 4)
+"{\"a\":[1,{\"b\":2}],\"c\":tru}" => Unexpected token '}', ..."}],"c":tru}" is not valid JSON
+"abcdefghijklmnopqrstuvwxyz0123456789 is a long string with a bad token at the start" => Unexpected token 'a', "abcdefghij"... is not valid JSON
+"{\"key\": \"value\", \"another\": 12345, \"bad\": x, \"more\": \"stuff after the bad token here\"}" => Unexpected token 'x', ..."5, "bad": x, "more":"... is not valid JSON
+"[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, x]" => Unexpected token 'x', ...", 19, 20, x]" is not valid JSON
+"é" => Unexpected token 'é', "é" is not valid JSON
+"{\"a\":1}\n\n x" => Unexpected non-whitespace character after JSON at position 10 (line 3 column 2)
+"[\n1,\n2,\nx]" => Unexpected token 'x', "[
+1,
+2,
+x]" is not valid JSON
+"{\"\\u00e9\": 1, x}" => Expected double-quoted property name in JSON at position 14 (line 1 column 15)
+"1.5e3.2" => Unexpected non-whitespace character after JSON at position 5 (line 1 column 6)
+"+1" => Unexpected token '+', "+1" is not valid JSON
+"0x10" => Unexpected non-whitespace character after JSON at position 1 (line 1 column 2)
+"Infinity" => "Infinity" is not valid JSON
+"[1,2" => Expected ',' or ']' after array element in JSON at position 4 (line 1 column 5)
+"{\"a\":{\"b\":" => Unexpected end of JSON input
+"\t\n" => Unexpected end of JSON input
+"\"\\u\"" => Bad Unicode escape in JSON at position 3 (line 1 column 4)
+"{\"a\" : 1 , \"b\" : }" => Unexpected token '}', "{"a" : 1 , "b" : }" is not valid JSON
+"0" number arr {"source":"1"} source
+"1" string arr {"source":"\"x\""} source
+"b" boolean object {"source":"true"} source
+"2" object arr {} 
+"a" object object {} 
+"c" object object {"source":"null"} source
+"d" number object {"source":"-1.50e2"} source
+"" object object {} 
+{"a":[2,"x",{"b":true}],"d":-300}
+[1,null,3]
+["",5,[""],5]
+"s"
+12345678901234567890
+{"x":1}
+2 3
+{"a":1}
+{"a":1,"b":"changed"}
+"2:{}"
+in reviver a
+1 __proto__
+{"a":2}
+2 1
+1
+-0 true Infinity -0
+null true 12
+"undefined" is not valid JSON
+"[object Object]" is not valid JSON
+Unexpected token ' ', " 1" is not valid JSON
+Unexpected token ' ', "[1,2, 3]" is not valid JSON
+SyntaxError Unexpected end of JSON input true
+SyntaxError Unexpected end of JSON input
+Method Map.prototype.get called on incompatible receiver 1
+Method Map.prototype.get called on incompatible receiver 1.5
+Method Map.prototype.get called on incompatible receiver 0
+Method Map.prototype.get called on incompatible receiver NaN
+Method Map.prototype.get called on incompatible receiver str
+Method Map.prototype.get called on incompatible receiver 
+Method Map.prototype.get called on incompatible receiver true
+Method Map.prototype.get called on incompatible receiver null
+Method Map.prototype.get called on incompatible receiver undefined
+Method Map.prototype.get called on incompatible receiver Symbol(s)
+Method Map.prototype.get called on incompatible receiver 10
+Method Map.prototype.get called on incompatible receiver [object Array]
+Method Map.prototype.get called on incompatible receiver [object Array]
+Method Map.prototype.get called on incompatible receiver #<Object>
+Method Map.prototype.get called on incompatible receiver #<Foo>
+Method Map.prototype.get called on incompatible receiver function named() {}
+Method Map.prototype.get called on incompatible receiver () => 1
+Method Map.prototype.get called on incompatible receiver class K {}
+Method Map.prototype.get called on incompatible receiver [object Object]
+Method Map.prototype.get called on incompatible receiver Error: boom
+Method Map.prototype.get called on incompatible receiver TypeError: t
+Method Map.prototype.get called on incompatible receiver [object RegExp]
+Method Map.prototype.get called on incompatible receiver [object Date]
+Method Map.prototype.get called on incompatible receiver [object Object]
+Method Map.prototype.get called on incompatible receiver #<Object>
+no throw
+Method Map.prototype.get called on incompatible receiver #<Set>
+Method Map.prototype.get called on incompatible receiver #<Object>
+Method Map.prototype.get called on incompatible receiver #<Object>
+Method Map.prototype.get called on incompatible receiver #<Object>
+Method Map.prototype.get called on incompatible receiver #<Foo>
+Method Map.prototype.get called on incompatible receiver #<Object>
+Method Map.prototype.get called on incompatible receiver [object Uint8Array]
+Method Map.prototype.get called on incompatible receiver #<Promise>
+Method Map.prototype.get called on incompatible receiver #<WeakMap>
+Set.prototype.has Method Set.prototype.has called on incompatible receiver #<Object>
+Map.prototype.size Method get Map.prototype.size called on incompatible receiver #<Object>
+Map.prototype.forEach Method Map.prototype.forEach called on incompatible receiver #<Object>
+Map.prototype.entries Method Map.prototype.entries called on incompatible receiver #<Object>
+Set.prototype.values Method Set.prototype.values called on incompatible receiver #<Object>
+Map.prototype.clear Method Map.prototype.clear called on incompatible receiver #<Object>
+weak get TypeError: Method WeakMap.prototype.get called on incompatible receiver #<Map>
+weakset has TypeError: Method WeakSet.prototype.has called on incompatible receiver #<WeakMap>
+weakset add TypeError: Method WeakSet.prototype.add called on incompatible receiver #<Object>
+map has set TypeError: Method Map.prototype.has called on incompatible receiver #<Set>
+set keys is values true
+map ctor TypeError: Constructor Map requires 'new'
+set ctor TypeError: Constructor Set requires 'new'
+resolve.call(1) TypeError: PromiseResolve called on non-object
+resolve.call(undefined) TypeError: PromiseResolve called on non-object
+resolve.call({}) TypeError: #<Object> is not a constructor
+resolve.call(fn) TypeError: Promise resolve or reject function is not callable
+resolve.call(arrow) TypeError: () => {} is not a constructor
+reject.call(1) TypeError: PromiseReject called on non-object
+reject.call({}) TypeError: #<Object> is not a constructor
+all.call(1) TypeError: Promise.all called on non-object
+all.call({}) TypeError: #<Object> is not a constructor
+race.call(1) TypeError: Promise.race called on non-object
+any.call(1) TypeError: Promise.any called on non-object
+allSettled.call(1) TypeError: Promise.allSettled called on non-object
+withResolvers.call(1) TypeError: Promise.withResolvers called on non-object
+true true true false
+true false
+true false
+then.call(1) TypeError: Method Promise.prototype.then called on incompatible receiver 1
+then.call({}) TypeError: Method Promise.prototype.then called on incompatible receiver #<Object>
+catch.call(1) TypeError: undefined is not a function
+finally.call(1) TypeError: Promise.prototype.finally called on non-object
+catch.call({then}) x
+new Promise(1) TypeError: Promise resolver 1 is not a function
+Promise() TypeError: Promise constructor cannot be invoked without 'new'
+resolve.call(Q) {}
+1
+resolve.call(R) TypeError: Promise resolve or reject function is not callable
+resolve.call(S) TypeError: Promise executor has already been invoked with non-undefined arguments
+species getter get [Symbol.species]:true,get [Symbol.species]:true,get [Symbol.species]:true,get [Symbol.species]:true,get [Symbol.species]:true,get [Symbol.species]:true
+species then false,true
+bad constructor TypeError: The .constructor property is not an object
+bad species TypeError: object.constructor[Symbol.species] is not a constructor
+withResolvers true,function,function,promise,resolve,reject
+sloppy callee true
+strict callee TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+default callee TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+rest callee TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+destructure callee TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+strict desc function,true,false,false,true,0,true,false
+sloppy desc true,true,false,true
+names sloppy 0,1,length,callee
+names strict 0,1,length,callee
+symbols Symbol(Symbol.iterator)
+iter is values true
+tag [object Arguments]
+callee getter same as TTE true
+strict reassign args object
+__proto__ get true
+__proto__ desc function,function,false,true,get __proto__,set __proto__,0,1
+__proto__ set true
+__proto__ set prim true
+__proto__ set null true
+__proto__ on prim true
+__proto__ set on prim ok
+__proto__ cyclic TypeError: Cyclic __proto__ value
+__proto__ nonext TypeError: #<Object> is not extensible
+__proto__ get undefined TypeError: Cannot convert undefined or null to object
+__proto__ set undefined TypeError: set Object.prototype.__proto__ called on null or undefined
+literal __proto__ true,a,false
+literal __proto__ null true
+literal __proto__ prim true
+literal computed true
+literal shorthand true
+literal method true
+literal string key true
+dup SyntaxError: Duplicate __proto__ fields are not allowed in object literals
+dup ok computed object
+in Object.create(null) __proto__
+JSON __proto__ true
+spread true
+assign 1
+tdz assign ReferenceError: Cannot access 'x' before initialization
+tdz assign const ReferenceError: Cannot access 'y' before initialization
+const assign TypeError: Assignment to constant variable.
+tdz compound ReferenceError: Cannot access 'w' before initialization
+tdz closure ReferenceError: Cannot access 'v' before initialization
+tdz class ReferenceError: Cannot access 'C' before initialization
+fn name strict TypeError: Assignment to constant variable.
+fn name sloppy function
+fn name sloppy closure function
+fn name strict closure TypeError: Assignment to constant variable.
+fn name strict compound TypeError: Assignment to constant variable.
+let after ok 3
+loop let 3
+cyclic TypeError: Cyclic __proto__ value
+nonext TypeError: #<Object> is not extensible
+nonext same true
+reflect cyclic false
+reflect nonext false
+immutable TypeError: Immutable prototype object 'Object.prototype' cannot have their prototype set
+immutable same true
+bad proto TypeError: Object prototype may only be an Object or null: 5
+prim target 5
+undef target TypeError: Object.setPrototypeOf called on null or undefined
+M true
+S true
+P true
+E true
+A true
+D true
+R true
+WM true
+U8 true
+AB true
+F true
+B true
+N true
+St true
+Map() TypeError: Constructor Map requires 'new'
+Set() TypeError: Constructor Set requires 'new'
+Promise() TypeError: Promise constructor cannot be invoked without 'new'
+WeakMap() TypeError: Constructor WeakMap requires 'new'
+Uint8Array() TypeError: Constructor Uint8Array requires 'new'
+ArrayBuffer() TypeError: Constructor ArrayBuffer requires 'new'
+DataView() TypeError: Constructor DataView requires 'new'
+Proxy() TypeError: Constructor Proxy requires 'new'
+WeakRef() TypeError: Constructor WeakRef requires 'new'
+Date() string
+Reflect.construct(Map, [], P) true
+Reflect.construct(Date, [0], Object) true
+-0 0 0 true
+ctor | ctor | next 0 | next 1 | next 2 | closed | then 1 | thenable | finally | all rejected: resolve threw | settled rejected,fulfilled | any AggregateError 1,2 | race r | all it 0,1 | all 1,2,3 | after finally f

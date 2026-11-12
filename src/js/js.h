@@ -186,6 +186,7 @@ typedef struct js_func {
 #define JF_GETTER 128
 #define JF_GENERATOR 256
 #define JF_ASYNC 512
+#define JF_NONSIMPLE 1024             /* its parameters not all plain names (a default, a rest, a pattern): its arguments unmapped */
 
 /* a property access's cache: the receiver's shape, the holder (0: the receiver
    itself), the holder's shape, the slot */
@@ -420,6 +421,11 @@ typedef struct js_vm {
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
+    uint32_t throw_te;                /* %ThrowTypeError%: an unmapped arguments object's callee, both its get and its set */
+    uint32_t array_values;            /* %Array.prototype.values%: an arguments object's Symbol.iterator */
+    /* the promise protector (src/js/builtins.c): Promise.prototype's and Promise's shapes as the engine made them, the
+       slots of the constructor and of Symbol.species, the species accessor and its getter, a plain promise's shape */
+    uint32_t pr_proto_shape, pr_ctor_shape, pr_ctor_slot, pr_species_slot, pr_species_acc, pr_species_get, pr_root_shape;
     /* the host's roots: every value the host holds outside the VM's tables (a page's
        prototypes, its records' objects and values: src/script/script.c) appended to out,
        each marked by the collector as a root (src/js/gc.c); 0 with no host */
@@ -573,7 +579,7 @@ jv js_proxy_call(js_vm *vm, uint32_t p, jv thisv, uint32_t args, uint32_t argc, 
 enum { JPX_PROXY, JPX_REVOCABLE, JPX_REVOKE,
        JPX_R_APPLY, JPX_R_CONSTRUCT, JPX_R_DEFINE, JPX_R_DELETE, JPX_R_GET, JPX_R_GETOWNDESC, JPX_R_GETPROTO, JPX_R_HAS,
        JPX_R_ISEXTENSIBLE, JPX_R_OWNKEYS, JPX_R_PREVENTEXT, JPX_R_SET, JPX_R_SETPROTO,
-       JPX_WEAKMAP, JPX_WEAKSET, JPX_WM_GET, JPX_WM_SET, JPX_WM_HAS, JPX_WM_DELETE, JPX_WS_ADD,
+       JPX_WEAKMAP, JPX_WEAKSET, JPX_WM_GET, JPX_WM_SET, JPX_WM_HAS, JPX_WM_DELETE, JPX_WS_ADD, JPX_WS_HAS, JPX_WS_DELETE,
        JPX_WEAKREF, JPX_WR_DEREF, JPX_FINREG, JPX_FR_REGISTER, JPX_FR_UNREGISTER,
        /* Object's functions over the descriptors (builtins.c's Object passes them here) */
        JPX_OBJ_DEFPROP, JPX_OBJ_DEFPROPS, JPX_OBJ_GETOWNDESC, JPX_OBJ_PREVENTEXT, JPX_OBJ_SEAL, JPX_OBJ_ISSEALED, JPX_OBJ_ISFROZEN,
@@ -710,6 +716,7 @@ int js_shape_entry(js_vm *vm, uint32_t o, uint32_t key, uint32_t *flags, int *li
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom);
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr);   /* the own string keys, in order, pushed as strings */
 uint32_t js_shape_of(js_vm *vm, uint32_t proto);
+uint32_t js_shape_find(js_vm *vm, uint32_t sh, uint32_t atom);          /* the shape's entry for atom, 0 for none */
 int js_is_callable(js_vm *vm, jv v);
 /* IsConstructor: a closure but an arrow's, a method's, a generator's or an async one's; a
    native with a prototype of its own (or Proxy); a bound or proxied constructor */
@@ -762,6 +769,8 @@ enum { JSR_NONE, JSR_READONLY, JSR_GETTER, JSR_NOT_EXTENSIBLE, JSR_LENGTH, JSR_D
 int js_set_throw(js_vm *vm, jv obj, jv key, jv v);
 int js_delete_throw(js_vm *vm, jv obj, jv key);
 int js_create_data_throw(js_vm *vm, jv obj, jv key, jv v);
+int js_create_data(js_vm *vm, jv obj, jv key, jv v);
+int js_set_proto_of(js_vm *vm, uint32_t o, jv np);                     /* [[SetPrototypeOf]]: 1, 0 refused, -1 thrown */                 /* CreateDataProperty: 1, 0 refused, -1 thrown */
 /* an array's length set as [[Set]] sets it (elements past it deleted, a non-configurable
    one stopping it): 1, 2 refused (vm->refused says why), 0 thrown */
 int js_array_set_length_checked(js_vm *vm, uint32_t a, double n);
@@ -814,8 +823,10 @@ enum {
     OP_ROT4,         /* a b c d -> d a b c */
     OP_GET_LOC, OP_PUT_LOC, OP_SET_LOC,           /* u16 slot (put pops, set keeps) */
     OP_GET_LOC_CHK,                               /* u16 slot, u32 atom: a let or const read before it is set throws */
+    OP_PUT_LOC_CHK, OP_SET_LOC_CHK,               /* u16 slot, u32 atom: a let assigned before it is set throws */
     OP_GET_ENV, OP_PUT_ENV, OP_SET_ENV,           /* u8 depth, u16 cell */
     OP_GET_ENV_CHK,                               /* u8, u16, u32 atom */
+    OP_PUT_ENV_CHK, OP_SET_ENV_CHK,               /* u8, u16, u32 atom */
     OP_GET_GLOBAL, OP_PUT_GLOBAL, OP_SET_GLOBAL,  /* u32 atom, u32 cache */
     OP_TYPEOF_GLOBAL,                             /* u32 atom: typeof of an undeclared name is "undefined" */
     OP_DEF_VAR, OP_DEF_LEX, OP_DEF_FUNC,          /* u32 atom: a script's var, let or const, function */
@@ -826,6 +837,7 @@ enum {
     OP_APPEND_HOLE,                               /* arr -> arr */
     OP_SPREAD,                                    /* arr iterable -> arr */
     OP_DEF_PROP,                                  /* u32 atom: obj v -> obj */
+    OP_SET_PROTO_LIT,                             /* obj v -> obj: a literal's __proto__: v, its prototype when v is an object or null */
     OP_DEF_ELEM,                                  /* obj key v -> obj */
     OP_DEF_GET, OP_DEF_SET,                       /* u32 atom: obj fn -> obj */
     OP_DEF_GET_ELEM, OP_DEF_SET_ELEM,             /* obj key fn -> obj */

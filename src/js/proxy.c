@@ -625,6 +625,8 @@ static int px_set_proto(js_vm *vm, uint32_t o, jv np) {
     if (vm->objs[o].kind != JK_PROXY) {
         uint32_t p = jv_is_obj(np) ? jv_idx(np) : 0;
         if (vm->objs[o].proto == p) return 1;
+        /* Object.prototype's prototype is immutable (an immutable prototype exotic object) */
+        if (o == vm->object_proto) return 0;
         if (!(vm->objs[o].flags & JO_EXTENSIBLE)) return 0;
         /* no cycle */
         for (uint32_t x = p, d = 0; x && d < 10000; d++) {
@@ -1272,11 +1274,22 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         }
         return mv;
     }
-    case JPX_WM_GET: case JPX_WM_SET: case JPX_WM_HAS: case JPX_WM_DELETE: case JPX_WS_ADD: {
-        uint32_t want = which == JPX_WM_GET || which == JPX_WM_SET ? JK_MAP : which == JPX_WS_ADD ? JK_SET : 0;
-        if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & JO_WEAK) || (want && vm->objs[jv_idx(thisv)].kind != want) ||
-            (vm->objs[jv_idx(thisv)].kind != JK_MAP && vm->objs[jv_idx(thisv)].kind != JK_SET))
-            return js_throw_msg(vm, vm->type_error_proto, "a WeakMap's or a WeakSet's method called on another object");
+    case JPX_WM_GET: case JPX_WM_SET: case JPX_WM_HAS: case JPX_WM_DELETE: case JPX_WS_ADD: case JPX_WS_HAS: case JPX_WS_DELETE: {
+        uint32_t want = which >= JPX_WS_ADD ? JK_SET : JK_MAP;
+        if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & JO_WEAK) || vm->objs[jv_idx(thisv)].kind != want) {
+            static const char *const names[] = { "WeakMap.prototype.get", "WeakMap.prototype.set", "WeakMap.prototype.has",
+                "WeakMap.prototype.delete", "WeakSet.prototype.add", "WeakSet.prototype.has", "WeakSet.prototype.delete" };
+            vector<char> m;
+            const char *pre = "Method ";
+            append_range(m, pre, strlen(pre));
+            append_range(m, names[which - JPX_WM_GET], strlen(names[which - JPX_WM_GET]));
+            const char *mid = " called on incompatible receiver ";
+            append_range(m, mid, strlen(mid));
+            js_value_text(vm, thisv, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+        if (which == JPX_WS_HAS) which = JPX_WM_HAS;
+        else if (which == JPX_WS_DELETE) which = JPX_WM_DELETE;
         if (!px_weak_key(vm, a0)) {
             if (which == JPX_WM_SET) return js_throw_msg(vm, vm->type_error_proto, "Invalid value used as weak map key");
             if (which == JPX_WS_ADD) return js_throw_msg(vm, vm->type_error_proto, "Invalid value used in weak set");
@@ -1392,8 +1405,8 @@ void js_proxy_init(js_vm *vm, uint32_t first) {
     px_def(vm, vm->weakmap_proto, "has", first + JPX_WM_HAS, 1);
     px_def(vm, vm->weakmap_proto, "delete", first + JPX_WM_DELETE, 1);
     px_def(vm, vm->weakset_proto, "add", first + JPX_WS_ADD, 1);
-    px_def(vm, vm->weakset_proto, "has", first + JPX_WM_HAS, 1);
-    px_def(vm, vm->weakset_proto, "delete", first + JPX_WM_DELETE, 1);
+    px_def(vm, vm->weakset_proto, "has", first + JPX_WS_HAS, 1);
+    px_def(vm, vm->weakset_proto, "delete", first + JPX_WS_DELETE, 1);
     px_def(vm, vm->weakref_proto, "deref", first + JPX_WR_DEREF, 0);
     px_def(vm, vm->finreg_proto, "register", first + JPX_FR_REGISTER, 2);
     px_def(vm, vm->finreg_proto, "unregister", first + JPX_FR_UNREGISTER, 1);
@@ -1401,6 +1414,23 @@ void js_proxy_init(js_vm *vm, uint32_t first) {
     px_tag(vm, vm->weakset_proto, "WeakSet");
     px_tag(vm, vm->weakref_proto, "WeakRef");
     px_tag(vm, vm->finreg_proto, "FinalizationRegistry");
+}
+
+int js_set_proto_of(js_vm *vm, uint32_t o, jv np) { return px_set_proto(vm, o, np); }
+
+/* CreateDataProperty: 1 defined, 0 refused, -1 thrown (a key's conversion, a proxy's trap) */
+int js_create_data(js_vm *vm, jv obj, jv key, jv v) {
+    if (!jv_is_obj(obj)) return 0;
+    int ok = 1;
+    uint32_t k = js_prop_key(vm, key, &ok);
+    if (!ok) return -1;
+    px_desc d;
+    memset(&d, 0, sizeof d);
+    d.get = d.set = JV_UNDEF;
+    d.has = PD_VALUE | PD_WRITABLE | PD_ENUMERABLE | PD_CONFIGURABLE;
+    d.value = v;
+    d.writable = d.enumerable = d.configurable = 1;
+    return px_define_desc(vm, jv_idx(obj), k, &d);
 }
 
 int js_create_data_throw(js_vm *vm, jv obj, jv key, jv v) {

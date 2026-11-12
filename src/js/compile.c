@@ -67,6 +67,7 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER };
 #define NF_PREFIX 8
 #define NF_REST 16
 #define NF_EVAL 32         /* a call of eval by its name: a direct eval, s its site's scope */
+#define NF_PROTO 64        /* an object literal's __proto__: v (not computed, not shorthand, not a method): its prototype */
 
 /* pos and, where a node keeps it there, d: the source of an expression an error names
    (src/js/js.h's js_site): a call's callee, new's, a spread's operand (N_SPREAD), a
@@ -686,7 +687,7 @@ static void p_params(CC, uint32_t fi) {
     while (!is_p(cc, P_RPAREN) && !cc->err) {
         uint32_t line = cc->tok.line;
         uint32_t p = node(cc, N_PARAM, line);
-        if (is_p(cc, P_ELLIPSIS)) { lx(CCA); cc->nodes[p].op = NF_REST; cc->fns[fi].flags |= JF_HAS_REST; counting = 0; }
+        if (is_p(cc, P_ELLIPSIS)) { lx(CCA); cc->nodes[p].op = NF_REST; cc->fns[fi].flags |= JF_HAS_REST | JF_NONSIMPLE; counting = 0; }
         uint32_t t;
         if (is_name_tok(cc) && !cc->tok.aux) {
             uint32_t atom = cc->tok.str;
@@ -694,9 +695,12 @@ static void p_params(CC, uint32_t fi) {
             uint32_t d = declare(CCA, atom, D_PARAM, line);
             cc->decls[d].param = (uint32_t)(len(cc->tmp) - mark) + 1;
             t = ident_node(CCA, atom, line);
-        } else t = p_binding(CCA, D_VAR);
+        } else {
+            t = p_binding(CCA, D_VAR);
+            cc->fns[fi].flags |= JF_NONSIMPLE;
+        }
         cc->nodes[p].a = t;
-        if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[p].b = p_assign(CCA, 0); counting = 0; }
+        if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[p].b = p_assign(CCA, 0); counting = 0; cc->fns[fi].flags |= JF_NONSIMPLE; }
         if (counting) formal++;
         push_back(cc->tmp, p);
         if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between parameters");
@@ -998,6 +1002,7 @@ static uint32_t p_object(CC) {
             } else if (is_p(cc, P_COLON)) {
                 lx(CCA);
                 cc->nodes[p].op = PK_INIT;
+                if (!computed && cc->nodes[key].s == js_atom_ascii(vm, "__proto__")) cc->nodes[p].d |= NF_PROTO;
                 cc->nodes[p].b = p_assign(CCA, 0);
             } else if (shorthand_ok && !computed) {
                 cc->nodes[p].op = PK_INIT;
@@ -2497,21 +2502,44 @@ static void gen_put_static(CC, uint32_t atom, uint32_t d, uint32_t scope, int ke
             emit32(vm, atom);
             return;
         }
-        if (d && !init && cc->decls[d].kind == D_CONST) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
+        if (d && !init && cc->decls[d].kind == D_CONST) {
+            /* a const's dead zone read first: a ReferenceError before its declaration, the TypeError after */
+            gen_get_static(CCA, atom, d, scope);
+            emit(vm, OP_POP);
+            emit(vm, OP_THROW_CONST);
+            emit32(vm, atom);
+            return;
+        }
         emit_atom_ic(vm, keep ? OP_SET_GLOBAL : OP_PUT_GLOBAL, atom);
         return;
     }
     jdecl x = cc->decls[d];
-    if ((!init && x.kind == D_CONST) || x.kind == D_IMPORT) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
-    if (x.kind == D_SELF && !x.captured) { if (!keep) emit(vm, OP_POP); return; }
-    if (x.captured) {
-        emit(vm, keep ? OP_SET_ENV : OP_PUT_ENV);
-        emit(vm, env_depth(cc, scope, x.scope));
-        emit16(vm, x.envslot);
+    if (x.kind == D_IMPORT) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
+    if (!init && x.kind == D_CONST) {
+        gen_get_static(CCA, atom, d, scope);
+        emit(vm, OP_POP);
+        emit(vm, OP_THROW_CONST);
+        emit32(vm, atom);
         return;
     }
-    emit(vm, keep ? OP_SET_LOC : OP_PUT_LOC);
+    if (x.kind == D_SELF) {
+        /* a function expression's own name is immutable: strict code's assignment throws, sloppy code's does nothing */
+        if (cc->fns[cc->gen_fn].flags & JF_STRICT) { emit(vm, OP_THROW_CONST); emit32(vm, atom); return; }
+        if (!keep) emit(vm, OP_POP);
+        return;
+    }
+    /* a let's or a class's assignment (not its declaration's) checks its dead zone */
+    int chk = !init && is_lexical(x.kind);
+    if (x.captured) {
+        emit(vm, chk ? (keep ? OP_SET_ENV_CHK : OP_PUT_ENV_CHK) : (keep ? OP_SET_ENV : OP_PUT_ENV));
+        emit(vm, env_depth(cc, scope, x.scope));
+        emit16(vm, x.envslot);
+        if (chk) emit32(vm, atom);
+        return;
+    }
+    emit(vm, chk ? (keep ? OP_SET_LOC_CHK : OP_PUT_LOC_CHK) : (keep ? OP_SET_LOC : OP_PUT_LOC));
     emit16(vm, x.slot);
+    if (chk) emit32(vm, atom);
 }
 
 static void gen_ident_get(CC, uint32_t n) {
@@ -2921,12 +2949,20 @@ static void gen_call(CC, uint32_t n) {
 static void gen_object(CC, uint32_t n) {
     emit(vm, OP_OBJECT);
     uint32_t off = cc->nodes[n].a, cnt = cc->nodes[n].b;
+    int protos = 0;
     for (uint32_t i = 0; i < cnt; i++) {
         uint32_t p = cc->lists[off + i];
         jnode pr = cc->nodes[p];
         int computed = pr.d & NF_COMPUTED;
         if (pr.op == PK_SPREAD) { gen_expr(CCA, pr.b); emit(vm, OP_COPY_PROPS); continue; }
         if (pr.op == PK_COVER) { cc_error(cc, pr.line, "an object literal's '=' belongs in a destructuring pattern"); return; }
+        if (pr.op == PK_INIT && (pr.d & NF_PROTO)) {
+            /* __proto__: v sets the prototype (its value no function's name), once a literal */
+            if (++protos > 1) { cc_error(cc, pr.line, "Duplicate __proto__ fields are not allowed in object literals"); return; }
+            gen_expr(CCA, pr.b);
+            emit(vm, OP_SET_PROTO_LIT);
+            continue;
+        }
         if (!computed) name_fn(vm, cc, pr.b, cc->nodes[pr.a].s);
         if (pr.op == PK_GET || pr.op == PK_SET) {
             if (computed) gen_expr(CCA, pr.a);
