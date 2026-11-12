@@ -18,9 +18,13 @@
 
 :- dynamic dom_node/2, dom_element/2, dom_text/2, dom_comment/2, dom_doctype/2,
            dom_parent/2, dom_next_sibling/2, dom_first_child/2, dom_attr/3,
-           dom_namespace/2, dom_template_content/2, dom_attr_namespace/3.
+           dom_namespace/2, dom_template_content/2, dom_attr_namespace/3, dom_mode/2.
 
 dom_root(N) :- dom_node(N, document).
+
+%% the document's mode: quirks or limited_quirks when dom_mode/2 says so (the HTML
+%% parser's, from its DOCTYPE), else no_quirks
+dom_document_mode(D, M) :- dom_root(D), ( dom_mode(D, M0) -> M = M0 ; M = no_quirks ).
 
 dom_html_element(N, E) :- dom_element(N, E), \+ dom_namespace(N, _).
 

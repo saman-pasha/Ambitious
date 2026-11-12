@@ -55,7 +55,8 @@
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
-   height, align, a table's border; dir, as Chromium maps it) are author rules of specificity 0 before
+   height, align (an image's left or right a float), a table's border, a cell's nowrap; dir,
+   as Chromium maps it) are author rules of specificity 0 before
    every other author rule; so are an SVG element's presentation attributes (SVG 2, 6.6: its
    painting properties, opacity, color, display, visibility, the font's, overflow, ...; a
    bare number a length's px) and the outermost svg element's width and height. SVG's
@@ -69,6 +70,15 @@
    an outline's width under style none is kept (as Chromium keeps it), and a
    computed font family is the family drawn with -- a generic one, or the first
    the list names that the module knows the kind of.
+
+   Quirks mode (the document's mode, which the HTML parser keeps on the document; the
+   Quirks Mode Standard, as Chromium has it): the user agent's sheet's quirks additions
+   (a table resets the text's properties, its colour the body's; a text field's and a
+   textarea's box-sizing border-box; a form's bottom margin; a floated image's 3px), the
+   hashless colours and unitless lengths of an author sheet or a style attribute for the
+   properties that take them (css_quirky), class and id selectors without ASCII case,
+   and :hover or :active alone holding of links alone. Limited-quirks mode changes
+   nothing here (its quirk is layout's).
 
    Speed (PLAN.md 11): the user agent's sheet is read once a process
    (css_ua_load); names and keywords are found by hash; elements under one
@@ -97,6 +107,12 @@ static double css_view_w = 800.0, css_view_h = 600.0, css_font_px = 16.0;
 static int css_pref_dark = 0, css_pref_reduce = 0;
 /* scripting (Media Queries 5, 7.1): whether the page's scripts run; they do, as Chromium's */
 static int css_scripting = 1;
+/* the document's mode, as a cascade has it (contracts/dom.pl's document_mode; the Quirks Mode
+   Standard): css_quirks, the document is in quirks mode, so that class and id selectors and the
+   rules' keys compare without ASCII case; css_quirk_read, an author sheet or a style attribute of
+   such a document is being read, its hashless colours and unitless lengths taken (css_quirky);
+   css_quirk_ua, the quirks sheet is, its -internal-quirk-inherit taken */
+static int css_quirks, css_quirk_read, css_quirk_ua;
 void css_set_scripting(int on) { css_scripting = on != 0; }
 #define CSS_VIEWPORT_W css_view_w
 #define CSS_VIEWPORT_H css_view_h
@@ -206,6 +222,18 @@ static const char css_ua_sheet[] =
     "input::placeholder, textarea::placeholder { color: #757575 }\n"
     "bdi, output { unicode-bidi: isolate }\n"
     "bdo { unicode-bidi: bidi-override }\n";
+
+/* the user agent's sheet's additions in quirks mode (HTML 15.3's quirks rules, as Chromium's
+   quirks.css has them, measured): a floated image's margin, a table that resets the text's
+   properties its ancestors give it (its colour the body's: -internal-quirk-inherit), a text
+   field sized by its border box, a form's bottom margin */
+static const char css_ua_quirks_sheet[] =
+    "img[align=left i] { margin-right: 3px }\n"
+    "img[align=right i] { margin-left: 3px }\n"
+    "table { white-space: normal; line-height: normal; font-weight: normal; font-size: medium; font-style: normal; "
+    "color: -internal-quirk-inherit; text-align: start }\n"
+    "input:not([type=image i]), textarea { box-sizing: border-box }\n"
+    "form { margin-bottom: 1em }\n";
 
 /* ---- reading text ---- */
 
@@ -1025,7 +1053,11 @@ static int css_valid(css_prop p, css_val *v) {
     int g = d->gram, f = d->flags;
     if (u == CSS_UNIT_AUTO && g != G_LEN && d->words && css_word_in("auto", d->words)) { css_word_val(v, "auto"); return 1; }
     if (u == CSS_UNIT_KEYWORD) {
-        if (g == G_COLOR) { uint32_t c; return strcmp(v->word, "currentcolor") == 0 || css_system_color(v->word, strlen(v->word), 0, &c); }
+        if (g == G_COLOR) {
+            uint32_t c;
+            if (p == CSS_PROP_COLOR && css_quirk_ua && strcmp(v->word, "-internal-quirk-inherit") == 0) return 1;
+            return strcmp(v->word, "currentcolor") == 0 || css_system_color(v->word, strlen(v->word), 0, &c);
+        }
         return d->words && css_kw_of(p, v->word);
     }
     if (g == G_COLOR) return u == CSS_UNIT_COLOR;
@@ -1798,6 +1830,81 @@ static int css_is_family(const char *s, size_t n) {
     return 1;
 }
 
+/* ---- quirky values (the Quirks Mode Standard 3.1 and 3.2: CSS Color 4, B; CSS Values 4, C) ----
+   A quirks-mode document's author sheets and style attributes may give some properties a colour
+   without its # and a length without its unit, as Chromium reads them: the colours color,
+   background-color and the border colours (and border-color), the lengths of the margins, the
+   paddings and the border widths (and their shorthands margin, padding, border-width), width,
+   height and their minimums and maximums, the offsets, font-size, letter-spacing, word-spacing,
+   text-indent and vertical-align -- by the property's own name, never through another shorthand
+   (border, background, font, inset) or inside a function. css_quirk_now: the declaration being
+   read may (css_expand sets it) */
+static int css_quirk_now;
+
+static int css_is_hex(char c) { return css_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+static int css_quirky_color_prop(css_prop p) {
+    return p == CSS_PROP_COLOR || p == CSS_PROP_BACKGROUND_COLOR || p == CSS_PROP_BORDER_TOP_COLOR || p == CSS_PROP_BORDER_RIGHT_COLOR ||
+           p == CSS_PROP_BORDER_BOTTOM_COLOR || p == CSS_PROP_BORDER_LEFT_COLOR;
+}
+static int css_quirky_length_prop(css_prop p) {
+    if (p >= CSS_PROP_MARGIN_TOP && p <= CSS_PROP_BORDER_LEFT_WIDTH) return 1;     /* the margins, paddings, border widths */
+    if (p >= CSS_PROP_WIDTH && p <= CSS_PROP_MAX_HEIGHT) return 1;
+    if (p >= CSS_PROP_TOP && p <= CSS_PROP_LEFT) return 1;
+    return p == CSS_PROP_FONT_SIZE || p == CSS_PROP_LETTER_SPACING || p == CSS_PROP_WORD_SPACING || p == CSS_PROP_TEXT_INDENT ||
+           p == CSS_PROP_VERTICAL_ALIGN;
+}
+/* a hashless colour: an identifier of 3 or 6 hex digits; or a number token whose integer flag is
+   set (no fraction, no exponent), alone or with a unit after it, the integer's digits (its + dropped,
+   its leading zeros too; a - makes it none) and the unit, zeros before them to 6 characters, all
+   hex digits. 1 and the colour in *out */
+static int css_quirky_color(const char *s, size_t n, uint32_t *out) {
+    char hex[8];
+    size_t k = 0;
+    if (n == 0) return 0;
+    if (css_is_alpha(s[0]) || s[0] == '_' || s[0] == '-') {
+        if (n != 3 && n != 6) return 0;
+        for (size_t i = 0; i < n; i++) { if (!css_is_hex(s[i])) return 0; hex[k++] = s[i]; }
+    } else {
+        size_t i = 0;
+        if (s[0] == '+' || s[0] == '-') { if (s[0] == '-') return 0; i++; }
+        size_t d0 = i;
+        while (i < n && css_is_digit(s[i])) i++;
+        if (i == d0 || (i < n && s[i] == '.')) return 0;
+        if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+            size_t j = i + 1;
+            if (j < n && (s[j] == '+' || s[j] == '-')) j++;
+            if (j < n && css_is_digit(s[j])) return 0;           /* an exponent: no integer */
+        }
+        size_t z = d0;
+        while (z + 1 < i && s[z] == '0') z++;
+        if (i - z + (n - i) > 6) return 0;
+        for (size_t q = 0; q < 6 - (i - z) - (n - i); q++) hex[k++] = '0';
+        for (size_t q = z; q < n; q++) { if (!css_is_hex(s[q])) return 0; hex[k++] = s[q]; }
+    }
+    char h[9];
+    h[0] = '#';
+    memcpy(h + 1, hex, k);
+    return css_parse_color(h, k + 1, out);
+}
+/* the quirky value of the longhand p from s, into v: 1 when p takes one and s is one */
+static int css_quirky(css_prop p, const char *s, size_t n, css_val *v) {
+    if (css_quirky_color_prop(p)) {
+        uint32_t c;
+        if (!css_quirky_color(s, n, &c)) return 0;
+        memset(v, 0, sizeof *v);
+        v->unit = CSS_UNIT_COLOR;
+        v->color = c;
+        return 1;
+    }
+    if (!css_quirky_length_prop(p)) return 0;
+    double x;
+    if (css_number(s, n, &x) != n) return 0;
+    memset(v, 0, sizeof *v);
+    v->unit = CSS_UNIT_PX;
+    v->num = x;
+    return css_valid(p, v);
+}
+
 /* a value read for the longhand p: a single value, or the text p keeps; 0 when p does not take it */
 static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
     int g = css_pdefs[p].gram;
@@ -1825,7 +1932,7 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
         /* light-dark(): kept as its text, made a colour by the element's scheme in the cascade */
         uint32_t c;
         if (css_parse_val(s, n, v) && css_valid(p, v)) return 1;
-        if (!css_scheme_color(s, n, 0, &c)) return 0;
+        if (!css_scheme_color(s, n, 0, &c)) return css_quirk_now && css_quirky(p, s, n, v);
         memset(v, 0, sizeof *v);
         v->unit = CSS_UNIT_TEXT;
         return 1;
@@ -1839,7 +1946,8 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
             if (css_eq_ci(s + st[0], ln[0], "last")) { css_word_val(v, "last-baseline"); return 1; }
         }
     }
-    return css_parse_val(s, n, v) && css_valid(p, v);
+    if (css_parse_val(s, n, v) && css_valid(p, v)) return 1;
+    return css_quirk_now && css_quirky(p, s, n, v);
 }
 
 static const size_t css_side_of[4][4] = { { 0, 0, 0, 0 }, { 0, 1, 0, 1 }, { 0, 1, 2, 1 }, { 0, 1, 2, 3 } };
@@ -2467,13 +2575,22 @@ static int css_expand(const char *name, size_t nn, const char *val, size_t vn, c
             for (int k = 0; k < css_shorts[sh].n; k++) css_item_add(it, (css_prop)css_shorts[sh].p[k], &g, 0, vn);
             return 1;
         }
-        return css_short_read(sh, val, vn, it);
+        /* quirky values (a quirks-mode document's author sheet): through the four sides' shorthands of
+           the margins, the paddings, the border widths and colours alone */
+        css_quirk_now = css_quirk_read && css_word_in(css_shorts[sh].name, "margin padding border-width border-color");
+        int ok = css_short_read(sh, val, vn, it);
+        css_quirk_now = 0;
+        return ok;
     }
     int p = css_prop_of(name, nn);
     if (p < 0) p = css_alias_of(name, nn);
     if (p < 0) return 0;
     css_val v;
-    if (!css_longhand((css_prop)p, val, vn, &v)) return 0;
+    /* a longhand by its own name may take a quirky value; by another (an alias, a -webkit- one), never */
+    css_quirk_now = css_quirk_read && css_eq_ci(name, nn, css_pdefs[p].name);
+    int ok = css_longhand((css_prop)p, val, vn, &v);
+    css_quirk_now = 0;
+    if (!ok) return 0;
     css_item_add(it, (css_prop)p, &v, 0, vn);
     return 1;
 }
@@ -3458,8 +3575,28 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
 
 /* the page's state the pseudo-classes of state read: the element hovered, focused (and
    whether visibly), active, and the URL's target; 0 for none. scope: the scoping root a
-   scoped rule is matched under (:scope), 0 for none (the root element then) */
-typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target, scope; } css_mstate;
+   scoped rule is matched under (:scope), 0 for none (the root element then). pe: the rule's
+   subject compound is matched with its pseudo-element cut (no :hover quirk for it) */
+typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target, scope, pe; } css_mstate;
+
+/* the document is in quirks mode (contracts/dom.pl: the document node's mode) */
+static int css_doc_quirks(const dom_document *d) { return d->node_len > 1 && d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS; }
+/* a compound of :hover and :active alone (and *), which in quirks mode holds of links alone
+   (the Quirks Mode Standard 4.1): no type, id, class or attribute, no other pseudo-class */
+static int css_bare_hover(const char *s, size_t n) {
+    size_t i = 0;
+    int any = 0;
+    while (i < n) {
+        if (s[i] == '*') { i++; continue; }
+        if (s[i] != ':' || (i + 1 < n && s[i + 1] == ':')) return 0;
+        size_t b = ++i;
+        while (i < n && css_namechar(s[i])) i++;
+        if (i < n && s[i] == '(') return 0;
+        if (!css_eq_ci(s + b, i - b, "hover") && !css_eq_ci(s + b, i - b, "active")) return 0;
+        any = 1;
+    }
+    return any;
+}
 
 static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
 
@@ -3608,8 +3745,10 @@ static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms,
             uint32_t at = css_attr_of(d, x, c == '#' ? "id" : "class", c == '#' ? 2 : 5);
             if (!at || i == b) return 0;
             amb_span v = d->attr[at].value;
-            if (c == '#') { if (v.len != i - b || memcmp(text_ptr(d, v), s + b, v.len) != 0) return 0; }
-            else if (!css_has_token(text_ptr(d, v), v.len, s + b, i - b, 0)) return 0;
+            /* in quirks mode, without ASCII case (DOM 4.2.1, Selectors 4, 6.6) */
+            int ci = css_doc_quirks(d);
+            if (c == '#') { if (v.len != i - b || !css_bytes_eq(text_ptr(d, v), s + b, v.len, ci)) return 0; }
+            else if (!css_has_token(text_ptr(d, v), v.len, s + b, i - b, ci)) return 0;
             continue;
         }
         if (c == '[') {
@@ -3648,6 +3787,10 @@ static int css_compound(const dom_document *d, uint32_t x, const css_mstate *ms,
         }
         return 0;
     }
+    /* the :active and :hover quirk: a compound of them alone, not in a functional pseudo-class's
+       argument and with no pseudo-element, holds of a link alone in quirks mode */
+    if (depth == 0 && !ms->pe && (ms->hover || ms->active) && css_doc_quirks(d) && css_bare_hover(s, n) && !css_pseudo(d, x, ms, "any-link", 8))
+        return 0;
     return 1;
 }
 
@@ -3656,16 +3799,19 @@ static int css_parts_match(const dom_document *d, uint32_t x, const css_mstate *
                            int *budget) {
     if (!css_compound(d, x, ms, s + parts[k - 1].start, parts[k - 1].len, depth, budget)) return 0;
     if (k == 1) return 1;
+    /* the subject's pseudo-element is none of the compounds before it */
+    css_mstate m2 = *ms;
+    m2.pe = 0;
     char comb = parts[k - 1].comb;
-    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
-    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, ms, s, parts, k - 1, depth, budget); }
+    if (comb == '>') { uint32_t y = css_parent_element(d, x); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
+    if (comb == '+') { uint32_t y = css_prev_element(d, x); return y && css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget); }
     if (comb == '~') {
         for (uint32_t y = css_prev_element(d, x); y && *budget >= 0; y = css_prev_element(d, y))
-            if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
+            if (css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget)) return 1;
         return 0;
     }
     for (uint32_t y = css_parent_element(d, x); y && *budget >= 0; y = css_parent_element(d, y))
-        if (css_parts_match(d, y, ms, s, parts, k - 1, depth, budget)) return 1;
+        if (css_parts_match(d, y, &m2, s, parts, k - 1, depth, budget)) return 1;
     return 0;
 }
 
@@ -3789,11 +3935,12 @@ static css_pseudo css_pseudo_of(const char *s, size_t *n) {
     return CSS_PSEUDO_ELEMENT;
 }
 
-/* a key's hash: its kind, then its bytes (a type's and an attribute name's lowered) */
+/* a key's hash: its kind, then its bytes (a type's and an attribute name's lowered; in quirks
+   mode an id's and a class's too, which match without case there) */
 static uint32_t css_key_hash(uint32_t kind, const char *s, size_t n) {
     uint32_t h = 2166136261u ^ kind;
     h *= 16777619u;
-    int lower = kind == CSS_KEY_TYPE || kind == CSS_KEY_ATTR;
+    int lower = kind == CSS_KEY_TYPE || kind == CSS_KEY_ATTR || (css_quirks && (kind == CSS_KEY_ID || kind == CSS_KEY_CLASS));
     for (size_t i = 0; i < n; i++) {
         uint8_t c = (uint8_t)(lower ? css_lower(s[i]) : s[i]);
         h ^= c;
@@ -4032,7 +4179,10 @@ static uint32_t css_rule_matches(const css_style *s, const dom_document *d, uint
     for (uint32_t j = 0; j < np; j++) ps[j] = at(*parts, rx.parts + j);
     int budget = CSS_MATCH_BUDGET;
     amb_span sel = s->rule[r].selector;
-    if (!s->rule[r].scoped) return css_parts_match(d, x, ms, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
+    /* whether the subject compound had a pseudo-element (the :hover quirk spares it) */
+    css_mstate mp = *ms;
+    mp.pe = (rx.nparts >> 8) != 0;
+    if (!s->rule[r].scoped) return css_parts_match(d, x, &mp, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
     /* a scoped rule (Cascade 6, 2.5): under the nearest scoping root it matches below -- x
        or an ancestor that matches the roots' selector (or is the @scope's host, the root
        element when it has none), with no limit at or above x below it -- its proximity
@@ -4043,7 +4193,7 @@ static uint32_t css_rule_matches(const css_style *s, const dom_document *d, uint
         int is_root = st.len ? css_list_matches(d, root, ms, text_ptr(s, st), st.len, 0, &budget)
                              : host ? root == host : d->node[root].parent == 1;
         if (!is_root) continue;
-        css_mstate m2 = *ms;
+        css_mstate m2 = mp;
         m2.scope = root;
         int limited = 0;
         for (uint32_t l = x; et.len && l && l != root && !limited; l = d->node[l].parent)
@@ -4334,7 +4484,9 @@ static int css_calc_computed(css_style *s, css_prop p, css_val *v, double em, do
 
 /* the web fonts' families the page declared (src/css: @font-face), and the font sizes the
    cascade is at: the root's, for rem */
-typedef struct css_env { double rem; int page_dark; char faces[1024]; } css_env;
+/* quirk_color: what -internal-quirk-inherit computes to (the quirks sheet's table colour): the
+   document's body element's colour once it has one, else color's initial value */
+typedef struct css_env { double rem; int page_dark; uint32_t quirk_color; char faces[1024]; } css_env;
 
 /* a declared value made computed: pv the parent's computed values, cur the element's
    computed so far (its font size and colour come first) */
@@ -4372,7 +4524,12 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         return;
     }
     if (g == G_COLOR) {
-        if (css_is_word(v, "currentcolor")) {
+        if (css_is_word(v, "-internal-quirk-inherit")) {
+            /* the quirks sheet's table colour (the Quirks Mode Standard 3.12): the body's */
+            memset(v, 0, sizeof *v);
+            v->unit = CSS_UNIT_COLOR;
+            v->color = env->quirk_color;
+        } else if (css_is_word(v, "currentcolor")) {
             /* color's currentcolor is its parent's colour; another property's is the element's.
                An inherited property keeps the word (CSS Color 4: currentcolor is its own
                computed value), so that a child takes its own colour */
@@ -6057,7 +6214,7 @@ static uint32_t css_own_rule(css_style *s, uint32_t *sheet, css_origin origin, c
 
 /* the presentational hints (HTML 15.3) the module reads: which elements, which attribute, which property */
 typedef struct css_hint { const char *elements; const char *attr; css_prop prop; int kind; } css_hint;
-enum { CSS_HINT_COLOR, CSS_HINT_LENGTH, CSS_HINT_ALIGN, CSS_HINT_FONT_SIZE, CSS_HINT_BORDER };
+enum { CSS_HINT_COLOR, CSS_HINT_LENGTH, CSS_HINT_ALIGN, CSS_HINT_FONT_SIZE, CSS_HINT_BORDER, CSS_HINT_NOWRAP, CSS_HINT_FLOAT };
 static const css_hint css_hints[] = {
     { "body table tr td th thead tbody tfoot", "bgcolor", CSS_PROP_BACKGROUND_COLOR, CSS_HINT_COLOR },
     { "body", "text", CSS_PROP_COLOR, CSS_HINT_COLOR },
@@ -6066,7 +6223,11 @@ static const css_hint css_hints[] = {
     { "table td th col img hr iframe embed object video canvas", "width", CSS_PROP_WIDTH, CSS_HINT_LENGTH },
     { "table tr td th img iframe embed object video canvas", "height", CSS_PROP_HEIGHT, CSS_HINT_LENGTH },
     { "td th tr thead tbody tfoot caption div p h1 h2 h3 h4 h5 h6", "align", CSS_PROP_TEXT_ALIGN, CSS_HINT_ALIGN },
-    { "table", "border", CSS_PROP_BORDER_TOP_WIDTH, CSS_HINT_BORDER } };
+    { "table", "border", CSS_PROP_BORDER_TOP_WIDTH, CSS_HINT_BORDER },
+    /* a cell's nowrap (HTML 15.3.8), whatever its value; an image's align left or right, a float
+       at the line's top (HTML 15.4.3, as Chromium maps it) */
+    { "td th", "nowrap", CSS_PROP_WHITE_SPACE, CSS_HINT_NOWRAP },
+    { "img", "align", CSS_PROP_FLOAT, CSS_HINT_FLOAT } };
 
 /* an attribute's value read as a hint of its kind */
 static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
@@ -6075,7 +6236,13 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
     t += a;
     n = b - a;
     memset(v, 0, sizeof *v);
+    if (kind == CSS_HINT_NOWRAP) { css_word_val(v, "nowrap"); return 1; }
     if (n == 0) return 0;
+    if (kind == CSS_HINT_FLOAT) {
+        if (!css_eq_ci(t, n, "left") && !css_eq_ci(t, n, "right")) return 0;
+        css_word_val(v, css_lower(t[0]) == 'l' ? "left" : "right");
+        return 1;
+    }
     if (kind == CSS_HINT_COLOR) {
         if (css_eq_ci(t, n, "transparent")) return 0;
         if (css_parse_color(t, n, &v->color)) { v->unit = CSS_UNIT_COLOR; return 1; }
@@ -6182,6 +6349,11 @@ static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, u
         if (css_hints[h].kind == CSS_HINT_BORDER)
             for (int side = 0; side < 4; side++) css_add_decl(s, r, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + side), &v, 0, text, (size_t)tn, 0);
         else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
+        if (css_hints[h].kind == CSS_HINT_FLOAT) {
+            css_val top;
+            css_word_val(&top, "top");
+            css_add_decl(s, r, CSS_PROP_VERTICAL_ALIGN, &top, 0, text, (size_t)tn, 0);
+        }
         push_back(matched, r);
     }
     /* dir (HTML 15.3.6), a hint as Chromium maps it: ltr and rtl its direction; and every
@@ -6421,10 +6593,19 @@ css_status css_set_state(css_style *s, dom_document *doc, css_state_kind kind, u
 }
 
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
-    /* the user agent's sheet, then the document's style elements and linked sheets, in tree order */
+    /* the user agent's sheet (and in quirks mode its additions), then the document's style
+       elements and linked sheets, in tree order */
     css_ua_load(s);
+    css_quirks = css_doc_quirks(doc);
+    if (css_quirks) {
+        css_quirk_ua = 1;
+        css_parse_sheet(s, CSS_ORIGIN_USER_AGENT, css_ua_quirks_sheet, sizeof css_ua_quirks_sheet - 1);
+        css_quirk_ua = 0;
+    }
     /* the user agent's rules are the HTML elements' (its sheet is in the HTML namespace) */
     uint32_t ua_end = (uint32_t)s->rule_len;
+    /* a quirks-mode document's own sheets and style attributes are read with its quirky values */
+    css_quirk_read = css_quirks;
     /* the page's URL: the base its style elements' @imports and fonts resolve against */
     char page[4096];
     page[0] = 0;
@@ -6456,6 +6637,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
         css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
     }
+    css_quirk_read = 0;
     /* the cascade layers' order, now every sheet has named its layers */
     css_layer_rank(s, 0, 1);
     uint32_t shared = (uint32_t)s->rule_len;
@@ -6543,6 +6725,9 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     }
     if (!ms.target && net) ms.target = css_url_target(s, doc, net);
     uint32_t hint_sheet = 0, inline_sheet = 0;
+    /* -internal-quirk-inherit: color's initial value until the body's colour is known */
+    int body_seen = 0;
+    env.quirk_color = initial[CSS_PROP_COLOR].color;
     /* the shared rules' index, and each element's filters: its ancestors' keys, its own */
     vector<css_part> parts;
     vector<css_rx> rxs;
@@ -6613,7 +6798,9 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         }
         for (int q = 0; q < 4; q++) { anc[(size_t)x * 4 + q] = am[q]; selfk[(size_t)x * 4 + q] = om[q]; }
         css_element_hints(s, doc, x, &hint_sheet, &matched);
+        css_quirk_read = css_quirks;
         css_style_attr(s, doc, x, &inline_sheet, &matched);
+        css_quirk_read = 0;
         dom_node_h nh = node_handle(doc, x);
         for (size_t k = 0; k < len(matched); k++) {
             css_match_h m = match_new(s);
@@ -6629,9 +6816,16 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             /* the root in the dark scheme: color's initial value, CanvasText, is white there,
                for color: initial below it and for the reasoner's initial values */
             initial[CSS_PROP_COLOR].color = 0xffffffff;
+            if (!body_seen) env.quirk_color = 0xffffffff;
             irec[CSS_PROP_COLOR] = css_value_rec(s, &initial[CSS_PROP_COLOR], CSS_HOW_INITIAL, 0, &vc);
             s->initval[iv_color].color = 0xffffffff;
             s->initval[iv_color].text = irec[CSS_PROP_COLOR].text;
+        }
+        /* the document's body element (the root html element's first body child): its colour
+           the quirks sheet's tables take */
+        if (!body_seen && px && doc->node[px].parent == 1 && css_is_named(doc, px, "html") && css_is_named(doc, x, "body")) {
+            body_seen = 1;
+            env.quirk_color = s->cval[at(ss.first, sid) + CSS_PROP_COLOR].color;
         }
         css_estyle_h eh = estyle_new(s);
         s->estyle[eh.index].node = nh;

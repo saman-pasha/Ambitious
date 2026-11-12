@@ -140,6 +140,17 @@
    vertical-align puts it (its row's or row group's when it has none, the middle
    when none has).
 
+   Quirks mode (the document's mode, which the HTML parser keeps on the document; the Quirks
+   Mode Standard as Blink has it, measured): the line height quirk (in limited-quirks mode
+   too) -- a block's strut counts on a line with text of its own, an inline box's on a line
+   with its text or an edge's border or padding, a list item's on each of its own lines --;
+   Blink's quirky margins, the user agent's of a p, a heading, a list, a blockquote or a pre,
+   left out at a quirky container's (the body's, a cell's) start and end; the html element
+   and the body filling the viewport, and a percentage height taken through blocks of an
+   auto height up to them; a cell's height its border box's; a nowrap cell of a length's
+   width at least that wide; no wrap around an img in a cell's min-content; an empty
+   table's height none; a broken image of a declared size a box of it, its alt text in it.
+
    What is not done: writing modes other than horizontal-tb. Coordinates are
    relative to the parent box's content box while the tree is laid out, and made
    page coordinates at the end. */
@@ -171,6 +182,10 @@ amb_implementation(layout);
 #define LARGS_FL(x) t, d, st, nt, f, sx, sc, gx, xc, ab, (x)
 
 #define LAY_SPACING 2.0
+
+/* the document's mode, for the run (layout_run sets them from the document node's mode): in
+   quirks mode, lay_quirks; in quirks or limited-quirks mode, lay_lhq (the line height quirk) */
+static int lay_quirks, lay_lhq;
 
 /* ---- the computed style of an element, as layout reads it ---- */
 
@@ -267,6 +282,7 @@ typedef struct lay_ext {
     int paints;                         /* any of these other than its initial value */
     int32_t clamp;                      /* -webkit-line-clamp's lines on a vertical -webkit-box; 0 none */
     uint8_t ellipsis;                   /* text-overflow: ellipsis */
+    uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -278,8 +294,9 @@ typedef struct lay_flt { double x, y, w, h; int side; } lay_flt;
 typedef struct lay_inh { double shift, rx, ry; int va; } lay_inh;
 /* how a block-level box is laid out: its margin box's left and top in its block formatting
    context, its containing block's definite height (-1 when it has none), a border-box width
-   it is given (-1 for none), and whether an auto width shrinks to fit */
-typedef struct lay_bk { double ox, oy, ch, fw; int shrink, item; } lay_bk;
+   it is given (-1 for none), and whether an auto width shrinks to fit; qs: its top margin
+   collapses at a quirky container's start, which leaves out quirky margins (quirks mode) */
+typedef struct lay_bk { double ox, oy, ch, fw; int shrink, item, qs; } lay_bk;
 
 /* the style's index of a run's item: a pseudo-element's, or the node's */
 static uint32_t lay_si(const vector<uint32_t> *sx, const vector<lay_gen> *gx, uint32_t x) {
@@ -504,6 +521,7 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->maxh.unit = LAY_AUTO;
     e->hraw.unit = LAY_AUTO;
     for (int k = 0; k < 4; k++) e->off[k].unit = LAY_AUTO;
+    e->c0 = c0;
     if (!c0) return;
     char w[32];
     lay_word_of(st, c0 + CSS_PROP_POSITION, w);
@@ -834,6 +852,8 @@ typedef struct lay_piece {
     uint8_t rtl;                                   /* a word that asks for the bidi algorithm (lay_bidi_hot) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
     uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
+    uint8_t img;                                   /* an img element's atomic box (quirks mode keeps it beside what
+                                                      is next to it in a table cell's min-content) */
     uint32_t node, elem;                           /* the text node, or the element; and the text's element */
     uint32_t bu;                                   /* in a bidi paragraph, its first unit (lay_bu) */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
@@ -970,6 +990,11 @@ static int lay_img_failed(LCTX, uint32_t el) {
             return nt->resource[r].outcome != NET_OUTCOME_OK;
     return 0;
 }
+/* a broken image laid out as a box of its declared size, its alt text in it: in quirks mode, an img with a
+   width or a height declared (Blink's fallback); standards mode's is lay_atomic_size's */
+static int lay_img_sized(LCTX, uint32_t el, const lay_style *s) {
+    return lay_quirks && lay_img_failed(LARGS, el) && (s->width.unit != LAY_AUTO || s->height.unit != LAY_AUTO);
+}
 /* an img's alt text, its white space runs one space and trimmed; 0 when it has no alt attribute, 1 when it has one */
 static int lay_alt_text(const dom_document *d, uint32_t el, vector<char> *out) {
     clear(*out);
@@ -1096,12 +1121,22 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
            16px box unless a size is declared; with an empty alt, nothing but a declared size */
         vector<char> alt;
         int has_alt = lay_alt_text(d, el, &alt);
+        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
+        if (lay_img_sized(LARGS, el, s)) {
+            /* quirks mode (Blink's fallback there, measured): a size declared one way is the other way's too, and the
+               fallback is a box of that size, its alt text inside it */
+            double ww = s->width.unit == LAY_AUTO ? -1 : lay_res(st, s->width, cw) - ew, hh = s->height.unit == LAY_AUTO ? -1 : s->height.v;
+            if (ww < 0) ww = hh;
+            if (hh < 0) hh = ww;
+            *w = ww > 0 ? ww : 0;
+            *h = hh > 0 ? hh : 0;
+            return;
+        }
         if (has_alt && len(alt)) {
             *w = 16 + amb_text_width(f, s->face, s->fs, data(alt), len(alt)) + s->ls * (double)lay_cps(data(alt), len(alt));
             *h = s->lh;
             return;
         }
-        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
         double d0 = has_alt ? 0 : 16;
         *w = s->width.unit == LAY_AUTO ? d0 : lay_res(st, s->width, cw) - ew;
         *h = s->height.unit == LAY_AUTO ? d0 : s->height.v;    /* a border box's height the style made its content's */
@@ -1577,6 +1612,7 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
         double w, h;
         lay_atomic_size(LARGS, node, &s, cw, &w, &h);
         p.kind = P_ATOMIC;
+        p.img = (uint8_t)lay_is_named(d, node, "img");
         p.aw = (float)w;
         p.ah = (float)h;
         p.w = lay_res(st, s.m[3], cw) + s.b[3] + lay_res(st, s.p[3], cw) + w + lay_res(st, s.p[1], cw) + s.b[1] + lay_res(st, s.m[1], cw);
@@ -1645,13 +1681,22 @@ static int lay_run_shows(const vector<lay_piece> *ps) {
 
 /* ---- intrinsic widths: an element's margin box at its min- and max-content ---- */
 
-static void lay_run_intrinsic(const vector<lay_piece> *ps, double *mn, double *mx) {
+/* sticky: the table cell width calculation quirk (quirks mode; the Quirks Mode Standard 3.8): in an
+   auto-width table cell's own lines, no soft wrap opportunity before or after an img */
+static void lay_run_intrinsic(const vector<lay_piece> *ps, double *mn, double *mx, int sticky) {
     double line = 0, chunk = 0, pend = 0;
     *mn = 0;
     *mx = 0;
     int start = 1;
     for (size_t k = 0; k < len(*ps); k++) {
         lay_piece p = at(*ps, k);
+        if (sticky && p.kind == P_ATOMIC && p.img) {
+            line += pend + p.w;
+            pend = 0;
+            chunk += p.w;
+            start = 0;
+            continue;
+        }
         if (p.kind == P_BREAK) {
             if (line > *mx) *mx = line;
             if (chunk > *mn) *mn = chunk;
@@ -1659,7 +1704,7 @@ static void lay_run_intrinsic(const vector<lay_piece> *ps, double *mn, double *m
             continue;
         }
         if (p.kind == P_SPACE) {
-            if (p.brk || !p.keep) { if (chunk > *mn) *mn = chunk; chunk = 0; }
+            if (p.brk) { if (chunk > *mn) *mn = chunk; chunk = 0; }     /* no wrap at a nowrap space */
             if (p.brk) { if (!start) pend += p.w; }
             else { chunk += p.w; line += pend + p.w; pend = 0; }
             continue;
@@ -1724,7 +1769,7 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
         else {
             vector<lay_piece> ps;
             lay_run_pieces(LARGS, el, &items, sg.first, sg.n, cw, &ps);
-            lay_run_intrinsic(&ps, &a, &b);
+            lay_run_intrinsic(&ps, &a, &b, lay_quirks && s.display == D_CELL && s.width.unit == LAY_AUTO);
         }
         if (side) {
             if (nitems++) { *mx += gap; if (!wraps) *mn += gap; }
@@ -1832,10 +1877,72 @@ static void lay_place(layout_tree *t, uint32_t b, double bx, double by) {
 }
 /* ---- margins as they collapse: the largest positive one and the most negative ---- */
 
-typedef struct lay_mc { double pos, neg; } lay_mc;
-static lay_mc lay_mc_of(double m) { lay_mc c; c.pos = m > 0 ? m : 0; c.neg = m < 0 ? m : 0; return c; }
-static lay_mc lay_mc_add(lay_mc a, lay_mc b) { a.pos = a.pos > b.pos ? a.pos : b.pos; a.neg = a.neg < b.neg ? a.neg : b.neg; return a; }
-static double lay_mc_v(lay_mc a) { return a.pos + a.neg; }
+/* margins collapsed into one: the largest positive and the most negative; and, in quirks mode,
+   the largest positive quirky one (Blink's quirky margins: the user agent's sheet's top margin of
+   a p, a heading, a list, a blockquote or a pre, and the bottom one of a p or a pre), which a
+   quirky container (the body, a table cell) leaves out at its start and at its end */
+typedef struct lay_mc { double pos, neg, qpos; } lay_mc;
+static lay_mc lay_mc_of(double m) { lay_mc c; c.pos = m > 0 ? m : 0; c.neg = m < 0 ? m : 0; c.qpos = 0; return c; }
+/* a margin, quirky or not */
+static lay_mc lay_mc_q(double m, int quirky) {
+    lay_mc c = lay_mc_of(m);
+    if (quirky && m > 0) { c.qpos = m; c.pos = 0; }
+    return c;
+}
+static lay_mc lay_mc_add(lay_mc a, lay_mc b) {
+    a.pos = a.pos > b.pos ? a.pos : b.pos;
+    a.neg = a.neg < b.neg ? a.neg : b.neg;
+    a.qpos = a.qpos > b.qpos ? a.qpos : b.qpos;
+    return a;
+}
+static double lay_mc_v(lay_mc a) { return (a.pos > a.qpos ? a.pos : a.qpos) + a.neg; }
+/* what a quirky container's end takes of them: its quirky margins left out */
+static double lay_mc_vq(lay_mc a) { return a.pos + a.neg; }
+
+/* x is an HTML element named one of the words of l (a space between each) */
+static int lay_named_in(const dom_document *d, uint32_t x, const char *l) {
+    if ((x & LAY_GEN) || !x || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML) return 0;
+    size_t i = 0;
+    while (l[i]) {
+        size_t b = i;
+        while (l[i] && l[i] != ' ') i++;
+        if (names_is(d, d->node[x].name, l + b, i - b)) return 1;
+        if (l[i]) i++;
+    }
+    return 0;
+}
+/* el's top margin (side 0) or bottom one (side 2) is quirky (quirks mode; Blink's user agent
+   sheet's __qem margins, measured in table cells): the user agent's sheet gave it, at the top of
+   a p, a heading, a list (ul, ol, dl, menu, dir), a blockquote, a pre, a listing, an xmp or a
+   plaintext, at the bottom of a p, a pre, a listing, an xmp or a plaintext */
+static int lay_quirky_margin(LCTX, uint32_t el, int side) {
+    if (!lay_quirks || !lay_named_in(d, el, side == 0 ? "p h1 h2 h3 h4 h5 h6 ul ol dl menu dir blockquote pre listing xmp plaintext"
+                                                     : "p pre listing xmp plaintext")) return 0;
+    uint32_t c0 = LAY_X(el).c0;
+    if (!c0) return 0;
+    uint32_t dc = st->cval[c0 + (side == 0 ? CSS_PROP_MARGIN_TOP : CSS_PROP_MARGIN_BOTTOM)].winner;
+    uint32_t ru = dc && dc < st->decl_len ? st->decl[dc].rule : 0;
+    uint32_t sh = ru && ru < st->rule_len ? st->rule[ru].sheet : 0;
+    return sh && sh < st->sheet_len && st->sheet[sh].origin == CSS_ORIGIN_USER_AGENT;
+}
+/* el is a quirky container (quirks mode): the body element or a table cell, whose start and
+   end leave out quirky margins */
+static int lay_quirky_container(LCTX, uint32_t el, int display) {
+    return lay_quirks && (display == D_CELL || lay_is_named(d, el, "body"));
+}
+/* el fills the viewport (quirks mode; the Quirks Mode Standard 3.6 and 3.7): the root html
+   element, or the document's body element (the root's first body child) neither positioned
+   absolutely nor floated; an auto height is the size it is given, its margins taken off */
+static int lay_fills(LCTX, uint32_t el, int root) {
+    if (!lay_quirks || (el & LAY_GEN) || !el) return 0;
+    if (root) return lay_is_named(d, el, "html");
+    if (!lay_is_named(d, el, "body")) return 0;
+    uint32_t up = d->node[el].parent;
+    if (!up || d->node[up].parent != 1 || !lay_is_named(d, up, "html")) return 0;
+    for (uint32_t c = d->node[up].first_child; c && c != el; c = d->node[c].next_sibling) if (lay_is_named(d, c, "body")) return 0;
+    int pos = LAY_X(el).pos;
+    return pos != POS_ABSOLUTE && pos != POS_FIXED && !LAY_X(el).flt;
+}
 
 /* ---- lines ---- */
 
@@ -1850,8 +1957,8 @@ static void lay_piece_vert(const lay_piece *p, double *above, double *below) {
 
 static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const vector<uint32_t> *items, uint32_t first, uint32_t n,
                           uint32_t style_el, const lay_bk *k, lay_mc *mt, lay_mc *mb, int *empty);
-static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, lay_mc *et, lay_mc *eb,
-                              int *empty);
+static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et,
+                              lay_mc *eb, int *empty);
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
 static int lay_decorated(LCTX, uint32_t el, const lay_style *es);
 static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls);
@@ -1865,12 +1972,82 @@ static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
 static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh);
 static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh);
 
+/* quirks mode's broken image of a declared size (lay_img_sized): its baseline its content box's bottom (Blink's
+   fallback box, an inline-block that clips, fills it); its alt text in it, as that fallback lays it out (measured)
+   -- in a container of a 1px border and 1px padding (none when the box is under 18px either way, where no icon is
+   drawn), the 16px icon floated left at its start, the words in lines of the image's line height beside the icon
+   (below it when the first does not fit there) and below it, clipped to the box */
+static void lay_alt_box(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
+    /* its baseline its content box's bottom (paint draws such a box's border and icon, its lines' text in it) */
+    t->box[b].has_baseline = 1;
+    t->box[b].baseline = t->box[b].h;
+    vector<char> alt;
+    if (!lay_alt_text(d, el, &alt) || !len(alt)) return;
+    double bw = t->box[b].w, bh = t->box[b].h, above = 0, below = 0;
+    int icon = bw >= 18 && bh >= 18;
+    double in = icon ? 2 : 0, cw = bw - 2 * in, sw = amb_text_width(f, es->face, es->fs, " ", 1) + es->ls + es->wsp;
+    lay_leading(es->lh, es->asc, es->desc, &above, &below);
+    const char *tx = data(alt);
+    size_t n = len(alt), i = 0;
+    double y = in;
+    t->box[b].clip = 1;
+    for (int guard = 0; i < n && y < bh && guard < 1000; guard++) {
+        double fx = icon && y < in + 16 ? 16 : 0, room = cw - fx;
+        /* as many words as fit (the first one whatever its width, but beside the icon only if it fits) */
+        size_t e = i, last = i;
+        double lw = 0;
+        while (e < n) {
+            size_t we = e;
+            while (we < n && tx[we] != ' ') we++;
+            double ww = amb_text_width(f, es->face, es->fs, tx + e, we - e) + es->ls * (double)lay_cps(tx + e, we - e);
+            double add = (last > i ? sw : 0) + ww;
+            if (last > i && lw + add > room + 0.01) break;
+            if (last == i && fx > 0 && ww > room + 0.01) break;
+            lw += add;
+            last = we;
+            e = we < n ? we + 1 : n;
+        }
+        if (last == i) { y = in + 16; continue; }       /* the first word not beside the icon: below it */
+        layout_line_h lh0 = line_new(t);
+        uint32_t ln = lh0.index;
+        t->line[ln].x = in + fx;
+        t->line[ln].y = y;
+        t->line[ln].w = room;
+        t->line[ln].h = es->lh;
+        t->line[ln].baseline = above;
+        lines_append(t, b, ln);
+        layout_frag_h fh = frag_new(t);
+        uint32_t fr = fh.index;
+        t->frag[fr].kind = LAYOUT_FRAG_KIND_GENERATED;
+        t->frag[fr].node = node_handle(d, el);
+        t->frag[fr].text = text_add(t, tx + i, last - i);
+        t->frag[fr].x = 0;                             /* from its line's start */
+        t->frag[fr].y = above - es->asc;
+        t->frag[fr].w = lw;
+        t->frag[fr].h = es->asc + es->desc;
+        t->frag[fr].baseline = above;
+        t->frag[fr].face = (uint8_t)es->face;
+        if (es->font) t->frag[fr].font = resource_handle(nt, es->font);
+        t->frag[fr].size = es->fs;
+        t->frag[fr].spacing = es->ls;
+        t->frag[fr].word_spacing = es->wsp;
+        t->frag[fr].italic = es->italic;
+        t->frag[fr].color = es->color;
+        t->frag[fr].fill = es->fill;
+        frags_append(t, ln, fr);
+        y += es->lh;
+        i = e;
+    }
+}
+
 /* an empty text field's placeholder (its attribute's text, on one line, white space
    collapsed) in its content box, in the style of its ::placeholder: a line of one
    generated fragment, in the middle of an input, at the top of a textarea */
 static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
     if (lay_img_failed(LARGS, el)) {
-        /* a broken image's alt text, after its 16px icon, on its line */
+        /* a broken image's alt text, after its 16px icon, on its line (quirks mode's box of a declared size:
+           drawn as one with no alt text) */
+        if (lay_img_sized(LARGS, el, es)) { lay_alt_box(LARGS, b, el, es); return; }
         vector<char> alt;
         if (!lay_alt_text(d, el, &alt) || !len(alt)) return;
         double tw = amb_text_width(f, es->face, es->fs, data(alt), len(alt)) + es->ls * (double)lay_cps(data(alt), len(alt));
@@ -2089,7 +2266,7 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     int lx = LAY_X(el).lx;
     if (lx == LX_FLEX) lay_flex(LARGS, b, el, defh);
     else if (lx == LX_GRID) lay_grid(LARGS, b, el, defh);
-    else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, &et, &eb, &empty);
+    else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, 0, &et, &eb, &empty);
     if (lay_is_named(d, el, "button")) {
         /* a button's content in the middle of a box made taller than it, as Chromium's button centres its anonymous
            box; an empty one's baseline its content box's bottom (Blink's synthesized baseline) */
@@ -3017,7 +3194,7 @@ static double lay_bidi_finish(LCTX, uint32_t b, const lay_style *bs, const vecto
    elements open at its start, which it leaves as those open at its end. bu: its paragraph's
    bidi units, at level para (empty: no bidi text in it) */
 static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_piece> *ps, size_t a, size_t e, double x0, double w, double y,
-                       int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para) {
+                       int justify_ok, double indent, vector<lay_open> *open, const vector<lay_bu> *bu, int para, uint32_t root, int marker) {
     /* trailing collapsible spaces hang: they take no width */
     size_t end = e;
     while (end > a && at(*ps, end - 1).kind == P_SPACE && !at(*ps, end - 1).keep) end--;
@@ -3028,12 +3205,33 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     vector<double> abase;            /* each atomic box's baseline, from its margin box's top, as its vertical-align has it */
     double x = indent, above, below, max_above, max_below, top_h = 0, bottom_h = 0;
     lay_leading(bs->lh, bs->asc, bs->desc, &max_above, &max_below);
+    /* the line height quirk (quirks and limited-quirks modes; the Quirks Mode Standard 3.3 and 3.4,
+       as Blink has it, measured): no strut -- the block's line height counts on a line with text of
+       its own (a word or a space between words directly in root) and on a list item's own lines; an
+       inline box's on a line with text in it, or a border or padding at its edge there (its margins
+       count for nothing); a forced break's on a line nothing else gives a height. The line is then
+       as tall as what counts reaches, above or below the baseline (nothing: 0) */
+    double strut_above = max_above, strut_below = max_below;
+    int root_text = marker;
+    if (lay_lhq) { max_above = -1e9; max_below = -1e9; }
     int spaces = 0;
     for (size_t k = a; k < end; k++) {
         lay_piece p = at(*ps, k);
         push_back(xs, x);
         if (p.kind == P_SPACE && !p.keep) spaces++;
-        if (p.kind == P_WORD || (p.kind == P_SPACE && p.keep)) {
+        int edge = 0;
+        if (lay_lhq && (p.kind == P_OPEN || p.kind == P_CLOSE)) {
+            lay_style es;
+            lay_style_of(LARGS, p.node, &es);
+            edge = p.kind == P_OPEN ? es.b[3] + lay_res(st, es.p[3], w) > 0 : es.b[1] + lay_res(st, es.p[1], w) > 0;
+            /* a wbr is text (Blink's zero-width break opportunity): its parent's */
+            if (p.kind == P_OPEN && lay_is_named(d, p.node, "wbr")) {
+                if (lay_parent_of(d, gx, p.node) == root) root_text = 1;
+                else edge = 1;
+            }
+        }
+        if (lay_lhq && (p.kind == P_WORD || p.kind == P_SPACE) && p.elem == root) root_text = 1;
+        if (p.kind == P_WORD || (p.kind == P_SPACE && (p.keep || lay_lhq)) || edge) {
             lay_piece_vert(&p, &above, &below);
             if (p.va == VA_TOP) { if (above + below > top_h) top_h = above + below; }
             else if (p.va == VA_BOTTOM) { if (above + below > bottom_h) bottom_h = above + below; }
@@ -3065,6 +3263,21 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         }
         x += p.w;
     }
+    if (lay_lhq && root_text) {
+        if (strut_above > max_above) max_above = strut_above;
+        if (strut_below > max_below) max_below = strut_below;
+    }
+    if (lay_lhq && max_above < -1e8 && e < len(*ps) && at(*ps, e).kind == P_BREAK && top_h == 0 && bottom_h == 0) {
+        /* a line that is a forced break alone: its parent's line height (the block's strut, directly in it) */
+        lay_piece p = at(*ps, e);
+        if (lay_parent_of(d, gx, p.node) == root) { max_above = strut_above; max_below = strut_below; }
+        else {
+            lay_piece_vert(&p, &above, &below);
+            max_above = above - p.shift;
+            max_below = below + p.shift;
+        }
+    }
+    if (lay_lhq && max_above < -1e8) { max_above = 0; max_below = 0; }
     /* a top-aligned piece taller than the rest grows the line downward, a bottom-aligned one upward */
     if (top_h > max_above + max_below) max_below = top_h - max_above;
     if (bottom_h > max_above + max_below) max_above = bottom_h - max_below;
@@ -3286,6 +3499,7 @@ static uint32_t lay_float_box(LCTX, uint32_t b, uint32_t el, double cw, double c
     k.fw = -1;
     k.shrink = 1;
     k.item = 0;
+    k.qs = 0;
     lay_mc mt, mb;
     int empty;
     uint32_t fb = lay_block(LARGS, b, el, cw, 0, 0, 0, 0, &k, &mt, &mb, &empty);
@@ -3659,6 +3873,9 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
        before that line's content */
     double indent = first == 0 ? lay_res(st, bs.indent, w) : 0;
     if (first == 0 && bs.display == D_LIST_ITEM) indent += lay_marker_inside(LARGS, container, &bs);
+    /* a list item's own lines (not an anonymous block's in it): the line height quirk counts its line
+       height on each (measured) */
+    int marker = bs.display == D_LIST_ITEM && !(container & LAY_GEN) && t->box[b].node.index == container;
     while (i < np) {
         while (i < np && at(ps, i).kind == P_SPACE && !at(ps, i).keep) i++;
         if (i >= np) break;
@@ -3737,8 +3954,8 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
-        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
-        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para);
+        if (has_fl) y += lay_line(LARGS, b, &bs1, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
+        else y += lay_line(LARGS, b, &bs, &ps, start, end, lx, lw, y, !last, indent, &open, &bu, para, container, marker);
         indent = 0;
         i = j;
         /* the floats that waited for the line's end */
@@ -4049,6 +4266,19 @@ static void lay_columns(LCTX, vector<lay_cell> *cells, uint32_t ncols, double cw
             if ((pass == 0) != (c.span == 1)) continue;
             double mn, mx;
             lay_intrinsic(LARGS, c.el, cw, &mn, &mx);
+            lay_style ns;
+            lay_style_of(LARGS, c.el, &ns);
+            if (ns.width.unit == LAY_PX) {
+                /* a cell of a declared width (Chromium's automatic layout): its content's min-content its
+                   minimum, the width its maximum unless that is less; in quirks mode a td or th with nowrap
+                   and a width that is not zero at least as wide as that width (the table cell nowrap minimum
+                   width calculation quirk, 3.9) */
+                double cmn, cmx, wd = mn;
+                lay_intrinsic_of(LARGS, c.el, cw, &cmn, &cmx, 0);
+                int nowrap = lay_quirks && ns.width.v > 0 && lay_named_in(d, c.el, "td th") && lay_attr(d, c.el, "nowrap");
+                mn = nowrap && wd > cmn ? wd : cmn;
+                mx = wd > mn ? wd : mn;
+            }
             (*cells)[k].mn = mn;
             (*cells)[k].mx = mx;
             if (c.span == 1) {
@@ -4102,7 +4332,8 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
     double smin = 0, smax = 0;
     for (uint32_t i = 0; i < ncols; i++) { smin += at(cmin, i); smax += at(cmax, i); }
     double edges = t->box[b].bl + t->box[b].br + t->box[b].pl + t->box[b].pr;
-    double spacing = LAY_SPACING * (ncols + 1);
+    /* an empty table (no row, no caption): no spacing either way (Chromium's) */
+    double spacing = ncols == 0 && len(rows) == 0 && len(captions) == 0 ? 0 : LAY_SPACING * (ncols + 1);
     /* the table's width: as declared (its border box), or shrunk to its columns */
     double ml = s->m[3].unit == LAY_AUTO ? 0 : t->box[b].ml, mr = s->m[1].unit == LAY_AUTO ? 0 : t->box[b].mr;
     double bw;
@@ -4145,11 +4376,12 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         bk.shrink = 0;
         bk.item = 0;
     bk.item = 0;
+        bk.qs = 0;
         uint32_t cb = lay_block(LARGS, b, at(captions, k), t->box[b].w, 0, 0, 0, 0, &bk, &cmt, &cmb, &empty);
         lay_place(t, cb, t->box[cb].ml, y + lay_mc_v(cmt));
         y += lay_mc_v(cmt) + lay_border_height(t, cb) + lay_mc_v(cmb);
     }
-    y += LAY_SPACING;
+    if (len(rows)) y += LAY_SPACING;
     /* the rows' boxes, and each cell laid out in its columns */
     size_t nrows = len(rows);
     vector<uint32_t> rboxes;
@@ -4184,8 +4416,11 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         t->box[cb].avail = span_w;
         lay_mc et, eb;
         int empty;
-        lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, &et, &eb, &empty);
-        if (cs.height.unit == LAY_PX && cs.height.v > t->box[cb].h) t->box[cb].h = cs.height.v;
+        lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, 0, &et, &eb, &empty);
+        /* its height; in quirks mode its border box's (the table cell height box sizing quirk, 3.13) */
+        double chv = cs.height.v;
+        if (lay_quirks && !cs.border_box) chv -= t->box[cb].bt + t->box[cb].bb + t->box[cb].pt + t->box[cb].pb;
+        if (cs.height.unit == LAY_PX && chv > t->box[cb].h) t->box[cb].h = chv;
         lay_place(t, cb, x, 0);
         double bh = lay_border_height(t, cb);
         cells[ci].box = cb;
@@ -4232,7 +4467,9 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         if (dy > 0) lay_shift_content(t, cb, dy);
         t->box[cb].h = inner;
     }
-    t->box[b].h = s->height.unit == LAY_PX && s->height.v > y ? s->height.v : y;
+    /* the collapsing table quirk (quirks mode, 3.10): a table of no rows and no caption takes no height */
+    int collapses = lay_quirks && nrows == 0 && len(captions) == 0;
+    t->box[b].h = s->height.unit == LAY_PX && s->height.v > y && !collapses ? s->height.v : y;
 }
 /* ---- block layout ---- */
 
@@ -4242,19 +4479,22 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
 /* the margins that collapse through el's top, as far as can be seen before it is laid
    out: its own, and (no border or padding above it, no formatting context of its own)
    its first in-flow child's -- where floats are placed from, beside its lines */
-static lay_mc lay_peek_mt(LCTX, uint32_t el, double cw, int depth) {
+static lay_mc lay_peek_mt(LCTX, uint32_t el, double cw, int depth, int qs) {
     lay_style s;
     lay_style_of(LARGS, el, &s);
-    lay_mc m = lay_mc_of(s.m[0].unit == LAY_AUTO ? 0 : lay_res(st, s.m[0], cw));
+    /* a quirky margin at a quirky container's start (qs) counts for nothing */
+    int q = lay_quirky_margin(LARGS, el, 0);
+    lay_mc m = qs && q ? lay_mc_of(0) : lay_mc_q(s.m[0].unit == LAY_AUTO ? 0 : lay_res(st, s.m[0], cw), q);
     if (depth > 6 || s.b[0] > 0 || lay_res(st, s.p[0], cw) > 0 || s.bfc || (s.display != D_BLOCK && s.display != D_LIST_ITEM)) return m;
     if (LAY_X(el).clip == 1 || LAY_X(el).lx || LAY_X(el).flt || lay_replaced(d, el)) return m;
     vector<lay_seg> segs;
     vector<uint32_t> items;
     lay_collect(LARGS, el, &segs, &items);
+    int qc = qs || lay_quirky_container(LARGS, el, s.display);
     for (size_t k = 0; k < len(segs); k++) {
         lay_seg sg = at(segs, k);
         if (sg.block == SEG_ABS || sg.block == SEG_FLOAT) continue;
-        if (sg.block == SEG_BLOCK) return lay_mc_add(m, lay_peek_mt(LARGS, sg.node, cw, depth + 1));
+        if (sg.block == SEG_BLOCK) return lay_mc_add(m, lay_peek_mt(LARGS, sg.node, cw, depth + 1, qc));
         return m;
     }
     return m;
@@ -4270,11 +4510,14 @@ static int lay_makes_bfc(LCTX, uint32_t el) {
 
 /* the children of box b (element el's), as blocks or as lines, in b's content box of
    width t->box[b].w, which is at (ox, oy) in the block formatting context; sets b's
-   content height. ch: b's definite height (-1: none). et and eb: the margins that
+   content height. ch: b's definite height (-1: none), what its children's percentages take.
+   qs: b's top margin collapses at a quirky container's start. et and eb: the margins that
    collapsed through b's top and bottom; empty: b holds nothing that takes height */
-static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, lay_mc *et, lay_mc *eb, int *empty) {
+static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et, lay_mc *eb,
+                     int *empty) {
     double w = t->box[b].w;
-    et->pos = et->neg = eb->pos = eb->neg = 0;
+    *et = lay_mc_of(0);
+    *eb = lay_mc_of(0);
     *empty = 0;
     vector<lay_seg> segs;
     vector<uint32_t> items;
@@ -4291,9 +4534,14 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
     }
     int through_top = !bfc && t->box[b].bt == 0 && t->box[b].pt == 0;
     int through_bottom = !bfc && height_auto && t->box[b].bb == 0 && t->box[b].pb == 0;
+    /* quirks mode (Blink's quirky margins): a quirky container (the body, a table cell) leaves out
+       the quirky margins at its start -- its children's, and theirs that collapse with them, up to
+       its first child that is not empty -- and at its end; a box whose top margin collapses at
+       such a start (qs) passes it on to the children whose margins collapse through its top */
+    int quirky = el && !(el & LAY_GEN) && lay_quirky_container(LARGS, el, at(*sc, lay_si(sx, gx, el)).display);
+    int qstart = quirky || (qs && through_top);
     double cursor = 0;
-    lay_mc pending;
-    pending.pos = pending.neg = 0;
+    lay_mc pending = lay_mc_of(0);
     int first = 1;
     vector<uint32_t> waiting;          /* the floats met before the next in-flow box: placed at its top */
     for (size_t k = 0; k < len(segs); k++) {
@@ -4319,14 +4567,15 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
         }
         /* where the child's top will be, margins collapsed as far as can be seen before it is
            laid out (through its first children when floats are about) */
-        lay_mc cm0;
-        cm0.pos = cm0.neg = 0;
+        lay_mc cm0 = lay_mc_of(0);
+        int cq = qstart && first;             /* its top margins collapse at the quirky start */
         if (sg.block == SEG_BLOCK) {
-            if (len(*fl) || len(waiting)) cm0 = lay_peek_mt(LARGS, sg.node, w, 0);
+            if (len(*fl) || len(waiting)) cm0 = lay_peek_mt(LARGS, sg.node, w, 0, cq);
             else {
                 lay_style cs;
                 lay_style_of(LARGS, sg.node, &cs);
-                cm0 = lay_mc_of(cs.m[0].unit == LAY_AUTO ? 0 : lay_res(st, cs.m[0], w));
+                int q = lay_quirky_margin(LARGS, sg.node, 0);
+                cm0 = cq && q ? lay_mc_of(0) : lay_mc_q(cs.m[0].unit == LAY_AUTO ? 0 : lay_res(st, cs.m[0], w), q);
             }
         }
         double est = (first && through_top) ? 0 : cursor + lay_mc_v(lay_mc_add(pending, cm0));
@@ -4362,7 +4611,7 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
         bk.fw = -1;
         bk.shrink = 0;
         bk.item = 0;
-    bk.item = 0;
+        bk.qs = cq;
         if (sg.block == SEG_BLOCK) cb = lay_block(LARGS, b, sg.node, ccw, 0, 0, 0, 0, &bk, &cmt, &cmb, &cempty);
         else cb = lay_block(LARGS, b, 0, w, &items, sg.first, sg.n, el, &bk, &cmt, &cmb, &cempty);
         if (cempty && clear_to < 0) {
@@ -4400,16 +4649,16 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
         return;
     }
     if (through_bottom) { *eb = pending; t->box[b].h = cursor; }
-    else t->box[b].h = cursor + lay_mc_v(pending);
+    else t->box[b].h = cursor + (quirky ? lay_mc_vq(pending) : lay_mc_v(pending));
 }
 
 /* b's children: in the flow b's formatting context is (b's own when bfc: its floats its
    own, its auto height holding them) */
-static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, lay_mc *et, lay_mc *eb,
-                              int *empty) {
-    if (!bfc) { lay_flow(LARGS, b, el, 0, height_auto, ox, oy, ch, et, eb, empty); return; }
+static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et,
+                              lay_mc *eb, int *empty) {
+    if (!bfc) { lay_flow(LARGS, b, el, 0, height_auto, ox, oy, ch, qs, et, eb, empty); return; }
     vector<lay_flt> bfl;
-    lay_flow(LARGS_FL(&bfl), b, el, 1, height_auto, 0, 0, ch, et, eb, empty);
+    lay_flow(LARGS_FL(&bfl), b, el, 1, height_auto, 0, 0, ch, qs, et, eb, empty);
     if (len(bfl)) {
         double bottom = 0;
         for (size_t k = 0; k < len(bfl); k++) if (at(bfl, k).y + at(bfl, k).h > bottom) bottom = at(bfl, k).y + at(bfl, k).h;
@@ -4627,7 +4876,8 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         t->box[b].how = k->fw >= 0 ? LAYOUT_WIDTH_HOW_FLEX : LAYOUT_WIDTH_HOW_FILL;
         t->box[b].avail = cw;
         t->box[b].h = lay_lines(LARGS, b, style_el, items, first, n, t->box[b].w, k->ox, k->oy);
-        mt->pos = mt->neg = mb->pos = mb->neg = 0;
+        *mt = lay_mc_of(0);
+        *mb = lay_mc_of(0);
         *empty = !t->box[b].first_line;
         return b;
     }
@@ -4736,8 +4986,31 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     lay_len mnl = at(*xc, si).minh, mxl = at(*xc, si).maxh;
     if (mnl.unit != LAY_AUTO && !lay_content_sized(mnl) && (mnl.unit == LAY_PX || k->ch >= 0)) minh = lay_res(st, mnl, k->ch) - (s.border_box ? vedges : 0);
     if (mxl.unit != LAY_AUTO && !lay_content_sized(mxl) && (mxl.unit == LAY_PX || k->ch >= 0)) maxh = lay_res(st, mxl, k->ch) - (s.border_box ? vedges : 0);
+    /* the table cell height box sizing quirk (quirks mode; the Quirks Mode Standard 3.13): a table
+       cell's height, min-height and max-height are its border box's */
+    if (lay_quirks && s.display == D_CELL && !s.border_box) {
+        if (defh >= 0) defh = defh > vedges ? defh - vedges : 0;
+        if (minh > 0) minh = minh > vedges ? minh - vedges : 0;
+        if (maxh >= 0) maxh = maxh > vedges ? maxh - vedges : 0;
+    }
     if (defh >= 0 && maxh >= 0 && defh > maxh) defh = maxh;
     if (defh >= 0 && defh < minh) defh = minh;
+    /* quirks mode: the root html element and the document's body element, of an auto height, fill
+       what they are given (3.6, 3.7: the viewport's height, the root's content box's), their margins
+       taken off -- the height their children's percentages take, and the least their own is; and
+       (3.5, the percentage height calculation quirk) another block container of an auto height, not
+       positioned absolutely and no table cell, has its children's percentages taken of what its own
+       are. pch: the children's percentages' basis */
+    double fill = -1, pch = defh;
+    if (lay_quirks && defh < 0 && k->ch >= 0) {
+        if (s.height.unit == LAY_AUTO && lay_fills(LARGS, el, root)) {
+            fill = k->ch - t->box[b].mt - t->box[b].mb - vedges;
+            if (fill < 0) fill = 0;
+            pch = fill;
+            if (maxh >= 0 && pch > maxh) pch = maxh;
+            if (pch < minh) pch = minh;
+        } else if (lx == LX_FLOW && pos != POS_ABSOLUTE && pos != POS_FIXED && s.display != D_CELL) pch = k->ch;
+    }
     lay_mc et, eb;
     /* a fieldset's rendered legend (HTML 15.3.13): shrunk to fit, its auto margins aligning it, set on the top border
        -- its margin box from the border box's top, or centred on a border taller than it --; the content begins
@@ -4752,6 +5025,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         lk.fw = -1;
         lk.shrink = 1;
         lk.item = 0;
+        lk.qs = 0;
         lay_mc lm1, lm2;
         int lempty;
         lgb = lay_block(LARGS, b, lg, t->box[b].w, 0, 0, 0, 0, &lk, &lm1, &lm2, &lempty);
@@ -4769,23 +5043,36 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         t->box[b].legend = lgb;
     }
     double cox = k->ox + t->box[b].ml + t->box[b].bl + t->box[b].pl, coy = k->oy + t->box[b].bt + t->box[b].pt;
-    if (lx == LX_FLEX) { lay_flex(LARGS, b, el, defh); et.pos = et.neg = eb.pos = eb.neg = 0; *empty = 0; }
-    else if (lx == LX_GRID) { lay_grid(LARGS, b, el, defh); et.pos = et.neg = eb.pos = eb.neg = 0; *empty = 0; }
-    else lay_flow_children(LARGS, b, el, bfc, defh < 0, cox, coy, defh, &et, &eb, empty);
+    /* a flex or grid container that fills takes the fill for its definite height */
+    if (lx == LX_FLEX) { lay_flex(LARGS, b, el, fill >= 0 ? pch : defh); et = lay_mc_of(0); eb = lay_mc_of(0); *empty = 0; }
+    else if (lx == LX_GRID) { lay_grid(LARGS, b, el, fill >= 0 ? pch : defh); et = lay_mc_of(0); eb = lay_mc_of(0); *empty = 0; }
+    else lay_flow_children(LARGS, b, el, bfc, defh < 0, cox, coy, pch, k->qs, &et, &eb, empty);
     if (defh >= 0) {
         t->box[b].h = defh;
-        eb.pos = eb.neg = 0;
+        eb = lay_mc_of(0);
         *empty = 0;
     } else {
         if (maxh >= 0 && t->box[b].h > maxh) t->box[b].h = maxh;
-        if (t->box[b].h < minh) { t->box[b].h = minh; eb.pos = eb.neg = 0; *empty = 0; }
+        if (t->box[b].h < minh) { t->box[b].h = minh; eb = lay_mc_of(0); *empty = 0; }
     }
     if (t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb > 0) *empty = 0;
     if (at(*xc, si).clamp > 0 && defh < 0) lay_clamp(LARGS, b, el, &s);
     /* the legend in its place: from the fieldset's content box, above it */
     if (lgb) lay_place(t, lgb, t->box[lgb].ml, lg_y - t->box[b].bt - t->box[b].pt);
-    *mt = lay_mc_add(lay_mc_of(t->box[b].mt), et);
-    *mb = lay_mc_add(lay_mc_of(t->box[b].mb), eb);
+    /* its own margins, quirky ones (quirks mode) left out at a quirky container's start -- an empty
+       box's bottom one too, quirky when its top one is (Blink) */
+    int qt = lay_quirky_margin(LARGS, el, 0), qb = lay_quirky_margin(LARGS, el, 2) || (*empty && qt);
+    lay_mc own_t = k->qs && qt ? lay_mc_of(0) : lay_mc_q(t->box[b].mt, qt);
+    lay_mc own_b = k->qs && *empty && qb ? lay_mc_of(0) : lay_mc_q(t->box[b].mb, qb);
+    if (fill >= 0) {
+        /* a fill's border box: what it is given less its margins as they collapsed -- its top's with its
+           first child's through it, its bottom's with its last child's (measured) */
+        double fh = k->ch - lay_mc_v(lay_mc_add(own_t, et)) - lay_mc_v(lay_mc_add(own_b, eb)) - vedges;
+        if (maxh >= 0 && fh > maxh) fh = maxh;
+        if (fh > t->box[b].h) { t->box[b].h = fh; *empty = 0; }
+    }
+    *mt = lay_mc_add(own_t, et);
+    *mb = lay_mc_add(own_b, eb);
     if (s.display == D_LIST_ITEM) lay_marker(LARGS, b, el, &s);
     return b;
 }
@@ -5108,7 +5395,7 @@ static void lay_item_intrinsic(LCTX, uint32_t el, const lay_fi *it, const vector
     if (it->el) { lay_intrinsic(LARGS, it->el, cw, mn, mx); return; }
     vector<lay_piece> ps;
     lay_run_pieces(LARGS, el, items, it->first, it->n, cw, &ps);
-    lay_run_intrinsic(&ps, mn, mx);
+    lay_run_intrinsic(&ps, mn, mx, 0);
 }
 
 /* an item laid out as a child of b: fw its border box's width (-1: shrunk to fit in cw),
@@ -5121,6 +5408,7 @@ static uint32_t lay_item_box(LCTX, uint32_t b, uint32_t el, const lay_fi *it, co
     bk.fw = fw;
     bk.shrink = fw < 0;
     bk.item = 1;
+    bk.qs = 0;
     lay_mc m1, m2;
     int empty;
     vector<lay_flt> nf;
@@ -6123,7 +6411,7 @@ static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_se
             vector<lay_piece> ps;
             lay_run_pieces(LARGS, el, items, sg.first, sg.n, cw, &ps);
             if (!lay_run_shows(&ps)) continue;
-            lay_run_intrinsic(&ps, &a, &bb);
+            lay_run_intrinsic(&ps, &a, &bb, 0);
         }
         size_t col = next % nc;
         next++;
@@ -6571,6 +6859,7 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         bk.fw = fw >= 0 ? (fw > 0 ? fw : 0) : -1;
         bk.shrink = fw < 0;
         bk.item = 0;
+        bk.qs = 0;
         double avail = cbw - (la ? 0 : L) - (ra ? 0 : R);
         lay_mc m1, m2;
         int empty;
@@ -6839,6 +7128,9 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     }
     vector<lay_abs> abs;
     vector<lay_flt> flts;
+    dom_document_mode mode = doc->node_len > 1 ? doc->node[1].mode : DOM_DOCUMENT_MODE_NO_QUIRKS;
+    lay_quirks = mode == DOM_DOCUMENT_MODE_QUIRKS;
+    lay_lhq = mode != DOM_DOCUMENT_MODE_NO_QUIRKS;
     /* the images the styles' backgrounds name: each url() (the first of its layers)
        resolved against the sheet its declaration is in (the page for one of its own) and
        fetched once */
@@ -6882,6 +7174,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         bk.shrink = 0;
         bk.item = 0;
     bk.item = 0;
+        bk.qs = 0;
         uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, root, width, 0, 0, 0, 0, &bk, &mt,
                                 &mb, &empty);
         lay_place(t, rb, t->box[rb].ml, t->box[rb].mt);

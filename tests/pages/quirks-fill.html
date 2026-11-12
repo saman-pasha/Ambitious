@@ -1,0 +1,14 @@
+<html id=html><head><title>Quirks: the body fills</title>
+<!-- No DOCTYPE: a quirks-mode page whose content is shorter than the viewport. The html element
+     fills the viewport less its margins; the body fills the html element's content box less its
+     margins as they collapse -- here its first child's 40px through its top, and its last p's
+     quirky bottom margin with its own through its bottom; a percentage of the body's fill. The
+     body's background drawn over its filled box (the html element's on the canvas). -->
+<style>
+html { margin: 5px; border: 2px solid #888; padding: 3px; background: #ffe; }
+body { font: 16px/20px sans-serif; margin: 20px 10px 6px; background: #eef; }
+</style></head><body id=body>
+<div id=text-first style="margin-top: 40px">The first child: its margin through the body's top</div>
+<div id=d2 style="height: 25%">25% of the body's fill (its own margins taken off)</div>
+<p id=text-last>The last p: its bottom margin through the body's bottom</p>
+</body></html>

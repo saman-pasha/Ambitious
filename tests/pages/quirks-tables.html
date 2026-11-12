@@ -1,0 +1,53 @@
+<html><head><title>Quirks: tables</title>
+<!-- No DOCTYPE: a quirks-mode page. The Quirks Mode Standard's table quirks, as Chromium lays
+     them out: a cell's height its border box's (3.13); a nowrap cell of a length's width at least
+     as wide as its content (3.9); in an auto-width cell's own lines no wrap before or after an img
+     (3.8, the "images in table cells" quirk), and no strut under an image alone on its line (3.3);
+     a table of no rows takes no height (3.10); a table resets the text its ancestors give it
+     (Chromium's quirks sheet); a floated img's 3px margin. -->
+<style>
+body { font: 16px sans-serif; }
+td { background: #eee; }
+</style></head><body>
+<table id=h1><tr><td id=h1c style="height: 50px; padding: 10px; border: 3px solid">a</td></tr></table>
+<table id=h2><tr><td id=h2c style="height: 50px; padding: 10px; border: 3px solid; box-sizing: content-box">a</td></tr></table>
+<table id=h3><tr><td id=h3c style="height: 50px; padding: 10px; border: 3px solid; box-sizing: border-box">a</td></tr></table>
+<table id=h4><tr><td id=h4c height=50 style="padding: 10px">a</td></tr></table>
+<table id=h5><tr><td id=h5c style="width: 50px; padding: 10px; border: 3px solid">a</td></tr></table>
+<table id=w1 width=100><tr><td id=w1c nowrap width=150>aaa bbb ccc ddd eee fff ggg</td><td id=w1d>x</td></tr></table>
+<table id=w2 width=100><tr><td id=w2c nowrap width=50>aaa bbb ccc ddd eee fff ggg</td><td id=w2d>x</td></tr></table>
+<table id=w3 width=100><tr><td id=w3c nowrap>aaa bbb ccc</td><td id=w3d>x</td></tr></table>
+<table id=w4 width=100><tr><td id=w4c nowrap style="width: 150px">aaa bbb</td><td id=w4d>x</td></tr></table>
+<table id=w5 width=100><tr><td id=w5c nowrap width=150>a</td><td id=w5d>x</td></tr></table>
+<table id=w6><tr><td id=w6c nowrap width=150>aaa</td><td id=w6d>x</td></tr></table>
+<table id=i1><tr><td id=i1c><img id=i1i src="logo.png" width=20 height=20></td></tr></table>
+<table id=i2><tr><td id=i2c><img id=i2i src="logo.png" width=20 height=20><img id=i2j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i3><tr><td id=i3c>x<img id=i3i src="logo.png" width=20 height=20></td></tr></table>
+<table id=i4><tr><td id=i4c><img id=i4i src="logo.png" width=20 height=20> </td></tr></table>
+<table id=i5><tr><td id=i5c><img id=i5i src="logo.png" width=20 height=20 style="vertical-align: middle"></td></tr></table>
+<table id=i6><tr><td id=i6c><span><img id=i6i src="logo.png" width=20 height=20></span></td></tr></table>
+<table id=i7><tr><td id=i7c><img id=i7i src="logo.png" width=20 height=20><br><img id=i7j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i8 width=30><tr><td id=i8c><img id=i8i src="logo.png" width=20 height=20> <img id=i8j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i9 width=30><tr><td id=i9c><img id=i9i src="logo.png" width=20 height=20><img id=i9j src="logo.png" width=20 height=20><img id=i9k src="logo.png" width=20 height=20></td></tr></table>
+<table id=i10 width=30><tr><td id=i10c width=10><img id=i10i src="logo.png" width=20 height=20><img id=i10j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i11 width=30><tr><td id=i11c>a<img id=i11i src="logo.png" width=20 height=20>b<img id=i11j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i12 width=30><tr><td id=i12c><span style="display: inline-block; width: 20px; height: 20px; background: #c00"></span><span style="display: inline-block; width: 20px; height: 20px; background: #c00"></span></td></tr></table>
+<table id=i13 width=30><tr><td id=i13c><img id=i13i src="logo.png" width=20 height=20>&nbsp;<img id=i13j src="logo.png" width=20 height=20></td></tr></table>
+<table id=i14><tr><td id=i14c style="line-height: 40px"><img id=i14i src="logo.png" width=20 height=20></td></tr></table>
+<table id=i15><tr><td id=i15c><div><img id=i15i src="logo.png" width=20 height=20></div></td></tr></table>
+<p id=a1><img id=a1i src="logo.png" width=20 height=20 align=left><span id=a1s>text beside a left-aligned image</span></p>
+<p id=a2><img id=a2i src="logo.png" width=20 height=20 align=right><img id=a2j src="logo.png" width=20 height=20 align=right>two right-aligned</p>
+<div id=e0>before</div>
+<table id=e1 border=3></table>
+<div id=e2>after an empty table</div>
+<table id=e3 border=3 style="height: 40px"></table>
+<div id=e4>after an empty table of a height</div>
+<table id=e5 border=3><colgroup><col></colgroup></table>
+<div id=e6>after a table of a column</div>
+<div id=e7 style="display: table; border: 3px solid; height: 20px"></div>
+<div id=e8>after an empty display: table</div>
+<div style="font: italic bold 30px/50px serif; white-space: nowrap; text-align: center">
+<table id=r1><tr><td id=r1c>a cell whose text the table reset</td></tr></table>
+<table id=r2 style="font-size: inherit; line-height: inherit"><tr><td id=r2c>inherit</td></tr></table>
+</div>
+</body></html>

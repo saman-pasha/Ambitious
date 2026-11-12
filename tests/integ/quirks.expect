@@ -1,0 +1,9 @@
+-- quirks-css:
+D = n(1,1,0), M = quirks
+D = n(1,1,0), M = quirks
+-- quirks-limited:
+D = n(1,1,0), M = limited_quirks
+D = n(1,1,0), M = limited_quirks
+-- layout:
+no
+D = n(1,1,0), M = no_quirks

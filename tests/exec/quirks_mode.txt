@@ -1,0 +1,107 @@
+<!DOCTYPE html PUBLIC "+//Silmaril//dtd html Pro v0r11 19970101//EN">
+<!DOCTYPE html PUBLIC "-//AS//DTD HTML 3.0 asWedit + extensions//">
+<!DOCTYPE html PUBLIC "-//AdvaSoft Ltd//DTD HTML 3.0 asWedit + extensions//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Level 1//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Level 2//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict Level 1//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict Level 2//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0 Strict//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.1E//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.0//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.2 Final//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3.2//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 3//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 0//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 1//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 2//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Level 3//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 0//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 1//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 2//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict Level 3//">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML Strict//EN">
+<!DOCTYPE html PUBLIC "-//IETF//DTD HTML//">
+<!DOCTYPE html PUBLIC "-//Metrius//DTD Metrius Presentational//EN">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 HTML Strict//">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 HTML//EN">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 2.0 Tables//">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 HTML Strict//EN">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 HTML//">
+<!DOCTYPE html PUBLIC "-//Microsoft//DTD Internet Explorer 3.0 Tables//EN">
+<!DOCTYPE html PUBLIC "-//Netscape Comm. Corp.//DTD HTML//">
+<!DOCTYPE html PUBLIC "-//Netscape Comm. Corp.//DTD Strict HTML//EN">
+<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML 2.0//">
+<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML Extended 1.0//EN">
+<!DOCTYPE html PUBLIC "-//O'Reilly and Associates//DTD HTML Extended Relaxed 1.0//">
+<!DOCTYPE html PUBLIC "-//SQ//DTD HTML 2.0 HoTMetaL + extensions//EN">
+<!DOCTYPE html PUBLIC "-//SoftQuad Software//DTD HoTMetaL PRO 6.0::19990601::extensions to HTML 4.0//">
+<!DOCTYPE html PUBLIC "-//SoftQuad//DTD HoTMetaL PRO 4.0::19971010::extensions to HTML 4.0//EN">
+<!DOCTYPE html PUBLIC "-//Spyglass//DTD HTML 2.0 Extended//">
+<!DOCTYPE html PUBLIC "-//Sun Microsystems Corp.//DTD HotJava HTML//EN">
+<!DOCTYPE html PUBLIC "-//Sun Microsystems Corp.//DTD HotJava Strict HTML//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3 1995-03-24//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2 Draft//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2S Draft//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Frameset//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML Experimental 19960712//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML Experimental 970421//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD W3 HTML//">
+<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML 3.0//EN">
+<!DOCTYPE html PUBLIC "-//WebTechs//DTD Mozilla HTML 2.0//">
+<!DOCTYPE html PUBLIC "-//WebTechs//DTD Mozilla HTML//EN">
+<!DOCTYPE HTML PUBLIC "-//w3c//dtd html 4.0 transitional//en">
+<!doctype html public "-//ietf//dtd html//EN" "http://example.com/x.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2">
+<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//">
+<!DOCTYPE html PUBLIC "-//W3O//DTD W3 HTML Strict 3.0//EN//X">
+<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/EN">
+<!DOCTYPE html PUBLIC "-/W3C/DTD HTML 4.0 Transitional/ENX">
+<!DOCTYPE html PUBLIC "HTML">
+<!DOCTYPE html PUBLIC "HTMLX">
+<!DOCTYPE html PUBLIC "html">
+<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd">
+<!DOCTYPE html SYSTEM "HTTP://WWW.IBM.COM/data/dtd/v11/ibmxhtml1-transitional.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd">
+<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd/">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "">
+<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 transitional//en' ''>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "">
+<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 frameset//en' ''>
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">
+<!DOCTYPE html PUBLIC "-//w3c//dtd xhtml 1.0 frameset//">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.0//EN" "http://www.w3.org/TR/xhtml-basic/xhtml-basic10.dtd">
+<!DOCTYPE html>
+<!doctype HTML>
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<!DOCTYPE html SYSTEM "http://example.com/">
+<!DOCTYPE html PUBLIC "">
+<!DOCTYPE html PUBLIC "" "">
+<!DOCTYPE htm>
+<!DOCTYPE xhtml>
+<!DOCTYPE>
+<!DOCTYPE html PUBLIC>
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" bogus>
+<!DOCTYPE html SYSTEM>
+<!DOCTYPE html bogus>
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN
+<!-- a comment first --><!DOCTYPE html>
+   <!DOCTYPE html>
+x<!DOCTYPE html>
+<html><!DOCTYPE html>
+<?xml version="1.0"?><!DOCTYPE html>
+

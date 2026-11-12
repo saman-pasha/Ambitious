@@ -1707,7 +1707,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         uint32_t iw, ih;
         int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
         if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
-        else if (got < 0 && t->box[b].first_line) pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));   /* its icon before its alt text */
+        /* its icon before its alt text; a box of its own (no alt text, or quirks mode's of a declared size, its baseline
+           its content box's bottom: has_baseline) with its border and icon */
+        else if (got < 0 && t->box[b].first_line && !t->box[b].has_baseline) pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
         else amb_svg_image_of(c, nt, t->box[b].node.index, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
     }

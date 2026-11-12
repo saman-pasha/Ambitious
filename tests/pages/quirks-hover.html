@@ -1,0 +1,30 @@
+<html><head><title>Quirks: :hover</title>
+<!-- No DOCTYPE: a quirks-mode page, hovered at #s1 (tests/pages/quirks-hover.hover): the :active
+     and :hover quirk (the Quirks Mode Standard 4.1). A compound of :hover alone (or with *) holds
+     of links alone: not of the div or the span that are hovered, but of the link between them;
+     a type, a class, an attribute, another pseudo-class or a functional pseudo-class's argument
+     lifts it; a compound before a combinator is held to it as the subject is. Held to
+     Chromium's computed values with the mouse over #s1 (tests/integ/cssref.sh). -->
+<style>
+body { font: 16px sans-serif }
+:hover { background-color: rgb(0, 0, 2) }
+*:hover { border-top-color: rgb(0, 0, 3) }
+div:hover { outline-color: rgb(0, 0, 4) }
+.c:hover { border-left-color: rgb(0, 0, 5) }
+[data-x]:hover { border-right-color: rgb(0, 0, 6) }
+:hover:first-child { border-bottom-color: rgb(0, 0, 8) }
+:not(.zz):hover { opacity: 0.5 }
+:is(:hover) { padding-top: 1px }
+body :hover { margin-left: 1px }
+:hover > span { padding-left: 2px }
+:hover span { padding-right: 3px }
+a:hover { margin-right: 4px }
+#d1 :hover:hover { padding-bottom: 5px }
+</style></head><body>
+<div id=d1 class=c data-x data-check="background-color border-top-color outline-color border-left-color border-right-color border-bottom-color opacity padding-top margin-left">
+<a id=a1 href="#t" data-check="background-color border-top-color outline-color border-left-color opacity padding-top margin-left margin-right padding-bottom"><span
+ id=s1 data-check="background-color border-top-color border-left-color opacity padding-top margin-left padding-left padding-right padding-bottom">a link's text</span></a>
+<a id=a2 data-check="background-color margin-left margin-right"><span id=s2 data-check="background-color padding-left padding-right">no href</span></a>
+<p id=p1 data-check="background-color padding-top">not hovered</p>
+</div>
+</body></html>

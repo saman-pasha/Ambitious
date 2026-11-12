@@ -215,3 +215,30 @@ sticky boxes moved in from the viewport's edges, within their blocks (ok, invari
   #b block: content 8,582 784x18; margins 0 0 0 0; width fill of 784
     line 8,582 784x18 baseline 596: [text 8+8 'y']
   #t block: content 8,8 784x200; margins 0 0 0 0; width fill of 784
+quirks: the body's first p's top margin left out, the body filling the viewport (ok, invariants: 0 broken)
+  #a block: content 8,8 784x18; margins 16 0 16 0; width fill of 784
+    line 8,8 784x18 baseline 22: [text 8+11.5547 'A']
+  #b block: content 8,42 784x18; margins 16 0 16 0; width fill of 784
+    line 8,42 784x18 baseline 56: [text 8+10.6719 'B']
+  #t block: content 8,8 784x576; margins 8 8 8 8; width fill of 800
+quirks: a table cell's p's margins left out, its h1's bottom one kept (ok, invariants: 0 broken)
+  #a cell: content 11,11 8x58.44; margins 0 0 0 0; width column of 10
+  #b cell: content 23,11 16x58.44; margins 0 0 0 0; width column of 18
+quirks: an inline-block alone on its line, no strut (ok, invariants: 0 broken)
+  #a block: content 8,8 784x10; margins 0 0 0 0; width fill of 784
+    line 8,8 784x10 baseline 18: [atomic 8+10 '']
+  #b inline_block: content 8,8 10x10; margins 0 0 0 0; width declared of 784
+quirks: a span's own line height, not the block's (ok, invariants: 0 broken)
+  #a block: content 8,8 784x10; margins 0 0 0 0; width fill of 784
+    line 8,8 784x10 baseline 18: [text 8+23.9922 'text']
+quirks: a percentage height through an auto one, to the body's (ok, invariants: 0 broken)
+  #a block: content 8,8 784x292; margins 0 0 0 0; width fill of 784
+    line 8,8 784x18 baseline 22: [text 8+8 'x']
+  #t block: content 8,8 784x292; margins 0 0 0 0; width fill of 784
+quirks: a cell's height its border box's (ok, invariants: 0 broken)
+  #a cell: content 20,20 8x30; margins 0 0 0 0; width column of 28
+    line 20,20 8x18 baseline 34: [text 20+8 'x']
+limited quirks: no strut, but the margins and heights of standards mode (ok, invariants: 0 broken)
+  #a block: content 8,16 784x10; margins 16 0 16 0; width fill of 784
+    line 8,16 784x10 baseline 26: [atomic 8+10 '']
+  #b inline_block: content 8,16 10x10; margins 0 0 0 0; width declared of 784

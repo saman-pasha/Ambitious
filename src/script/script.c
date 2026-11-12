@@ -450,7 +450,8 @@ static uint32_t sh_import(dom_document *to, const dom_document *from, uint32_t x
 }
 
 /* html parsed as a fragment and its nodes inserted into parent before before (0: at the
-   end): the fragment is the body of a document of its own, its nodes copied over */
+   end): the fragment is the body of a document of its own, in quirks mode when the page
+   is (no DOCTYPE), its nodes copied over */
 static void sh_insert_html(js_vm *vm, uint32_t parent, uint32_t before, const char *html, size_t n) {
     dom_document *d = vm->host->d;
     dom_document f;
@@ -458,7 +459,8 @@ static void sh_insert_html(js_vm *vm, uint32_t parent, uint32_t before, const ch
     dom_init(&f, 2);
     html_init(&hp, 2);
     vector<char> src;
-    append_range(src, "<!DOCTYPE html><body>", 21);
+    if (d->node[1].mode != DOM_DOCUMENT_MODE_QUIRKS) append_range(src, "<!DOCTYPE html>", 15);
+    append_range(src, "<body>", 6);
     append_range(src, html, n);
     html_parse(&hp, &f, data(src), len(src));
     uint32_t body = 0;
@@ -1242,13 +1244,22 @@ static void sh_versions(struct js_host *h) {
 }
 
 /* whether an attribute's value (s, n) holds the token (t, tn) among its white-space-separated ones */
-static int sh_has_token_in(const char *s, size_t n, const char *t, size_t tn) {
+/* ci: without ASCII case (a quirks-mode document's classes, DOM 4.2.6) */
+static int sh_has_token_in(const char *s, size_t n, const char *t, size_t tn, int ci) {
     size_t i = 0;
     while (i < n) {
         while (i < n && sh_ws(s[i])) i++;
         size_t b = i;
         while (i < n && !sh_ws(s[i])) i++;
-        if (i > b && i - b == tn && memcmp(s + b, t, tn) == 0) return 1;
+        if (i <= b || i - b != tn) continue;
+        size_t k = 0;
+        for (; k < tn; k++) {
+            char x = s[b + k], y = t[k];
+            if (ci && x >= 'A' && x <= 'Z') x = (char)(x + 32);
+            if (ci && y >= 'A' && y <= 'Z') y = (char)(y + 32);
+            if (x != y) break;
+        }
+        if (k == tn) return 1;
     }
     return 0;
 }
@@ -1286,7 +1297,7 @@ static int sh_lc_holds(const struct js_host *h, const sh_list *l, uint32_t c) {
             size_t b = i;
             while (i < l->klen && !sh_ws(key[i])) i++;
             if (i == b) break;
-            if (!sh_has_token_in(s, sn, key + b, i - b)) return 0;
+            if (!sh_has_token_in(s, sn, key + b, i - b, d->node[1].mode == DOM_DOCUMENT_MODE_QUIRKS)) return 0;
             any = 1;
         }
         return any;
@@ -3677,9 +3688,13 @@ static void sh_write_here(js_vm *vm, uint32_t script) {
     dom_init(&f, 2);
     html_init(&hp, 2);
     if (h->opened) {
+        /* a document opened anew: its mode the written DOCTYPE's */
         html_parse(&hp, &f, data(h->wtext), len(h->wtext));
+        dom_set_mode(d, f.node[1].mode);
         sh_written_copy(vm, &f, 1, 1, 0);
     } else {
+        /* the fragment in the document's mode */
+        dom_set_mode(&f, d->node[1].mode);
         /* the fragment's context: the script's parent, by its name in its namespace */
         uint32_t parent = d->node[script].parent;
         vector<char> ctx;

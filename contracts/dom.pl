@@ -25,6 +25,10 @@ dom_contract(enum(shadow_mode, [open, closed])).
 %% an attribute's namespace: null for no namespace, or one of the three the
 %% HTML parser gives attributes of foreign elements (HTML 13.2.6.1)
 dom_contract(enum(attr_namespace, [null, xlink, xml, xmlns])).
+%% a document's mode (DOM 4.5): no-quirks, or the quirks or limited-quirks mode
+%% the HTML parser sets from its DOCTYPE (HTML 13.2.6.4.1), which CSS, layout and
+%% the selectors read (the Quirks Mode Standard)
+dom_contract(enum(document_mode, [no_quirks, quirks, limited_quirks])).
 
 %% a node: one record of the node table. Links are refs within the store,
 %% never pointers; the record's slot, liveness and generation are the table's.
@@ -44,7 +48,8 @@ dom_contract(record(node, [
     field(host,         ref(node)),        % a fragment's template, or a shadow root's host
     field(public_id,    span(text)),       % a doctype's public identifier ...
     field(system_id,    span(text)),       % ... and its system identifier
-    field(doctype_ids,  u8)                % which of the two the doctype has: 1 public, 2 system
+    field(doctype_ids,  u8),               % which of the two the doctype has: 1 public, 2 system
+    field(mode,         enum(document_mode))   % the document node's mode
 ])).
 
 %% an attribute's name is its qualified name: an attribute in a namespace keeps
@@ -182,6 +187,10 @@ dom_contract(operation(attach_shadow, [param(host, handle(node)), param(mode, en
 %% the details of each change kept from now on (its log entry's detail), for a reader
 %% that needs them; the changes before are not
 dom_contract(operation(keep_details, [], status, [], [], [])).
+%% the document's mode, as the HTML parser decides it from the DOCTYPE (a document is
+%% made in no-quirks mode)
+dom_contract(operation(set_mode, [param(mode, enum(document_mode))], status,
+    [], [sets(node, mode)], [mutates])).
 %% the HTML serialization of a subtree (the document node: the whole document;
 %% a template: its contents)
 dom_contract(operation(serialize, [param(node, handle(node)), param(out, stream)], status,
@@ -234,10 +243,13 @@ dom_contract(fact(dom_template_content(handle, field(content)), table(node), fie
 dom_contract(fact(dom_shadow_root(field(host), field(root), field(mode)), table(shadow), true)).
 %% an attribute's namespace, when it has one (its name in dom_attr/3 has the prefix)
 dom_contract(fact(dom_attr_namespace(field(owner), field(name), field(ns)), table(attr), field(ns) \== null)).
+%% the document's mode, when it is not no-quirks: quirks or limited_quirks
+dom_contract(fact(dom_mode(handle, field(mode)), table(node), (field(kind) == document, field(mode) \== no_quirks))).
 
 %% what the module's rules derive from those facts (prolog/amb/rules/dom.pl)
 dom_contract(rules('rules/dom')).
 dom_contract(derived(dom_root/1, 'the document node')).
+dom_contract(derived(dom_document_mode/2, 'the document''s mode: no_quirks, quirks or limited_quirks')).
 dom_contract(derived(dom_html_element/2, 'N is an element of the HTML namespace named E')).
 dom_contract(derived(dom_in_template/2, 'N is in the contents of the template T')).
 dom_contract(derived(dom_child/2, 'P is the parent of C')).

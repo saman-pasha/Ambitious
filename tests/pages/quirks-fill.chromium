@@ -1,0 +1,6 @@
+# boxes of tests/pages/quirks-fill.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+html html 5 5 790 590
+body body 20 50 760 524
+text-first div 20 50 760 20
+d2 div 20 70 760 138.5
+text-last p 20 224.5 760 20

@@ -300,4 +300,26 @@ ok   [hidden]: display none
 ok   li: display list-item
 ok   td: display table-cell
 ok   span: display inline
-302 of 302 cases
+ok   quirks: a length without its unit, px: margin_top 5px
+ok   quirks: through margin's shorthand: margin_left 4px
+ok   quirks: not through border's: border_top_style none
+ok   quirks: a style attribute's: width 120px
+ok   quirks: a colour without its #: color rgb(255, 0, 0)
+ok   quirks: an integer's digits: color rgb(18, 52, 86)
+ok   quirks: an integer and its unit: background_color rgb(0, 18, 171)
+ok   quirks: no exponent: color rgb(255, 0, 0)
+ok   quirks: not outline's colour: outline_color rgb(0, 0, 0)
+ok   quirks: through border-color: border_right_color rgb(221, 238, 255)
+ok   standards: no colour without its #: color rgb(255, 0, 0)
+ok   quirks: a class without case: color rgb(255, 0, 0)
+ok   quirks: an id without case: color rgb(255, 0, 0)
+ok   quirks: an attribute's value with it: color rgb(0, 0, 0)
+ok   quirks: :hover alone, a link's alone: color rgb(0, 0, 0)
+ok   quirks: :hover with a type: color rgb(255, 0, 0)
+ok   quirks: :hover of a link: color rgb(255, 0, 0)
+ok   quirks: :hover in :is(): color rgb(255, 0, 0)
+ok   quirks: a table's font size reset: font_size 16px
+ok   quirks: a table's colour, the body's: color rgb(0, 128, 0)
+ok   quirks: a text field's box-sizing: box_sizing border-box
+ok   limited quirks: no length without its unit: margin_top 16px
+324 of 324 cases
