@@ -7007,7 +7007,7 @@ static uint32_t intl_ctor(js_vm *vm, uint32_t intl, uint32_t first, uint32_t id,
     uint32_t proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->intl_protos[kind] = proto;
     uint32_t c = native(vm, first, id, name, nargs);
-    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN);
+    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_PROTO);
     js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     js_define(vm, intl, js_atom_ascii(vm, name), jv_obj(c), JS_SHAPE_HIDDEN);
     char tag[48];

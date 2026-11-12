@@ -1,0 +1,32 @@
+const t = (s, f) => { try { const r = f(); console.log(s, typeof r === 'object' && r !== null ? JSON.stringify(r) : String(r)); } catch (e) { console.log(s, e.constructor.name + ': ' + e.message); } };
+const D = (o, k) => { const d = Object.getOwnPropertyDescriptor(o, k); if (!d) return 'none'; return ['value' in d ? (typeof d.value === 'object' && d.value !== null ? 'obj' : typeof d.value === 'function' ? 'fn' : String(d.value)) : 'acc', d.writable, d.enumerable, d.configurable].join('/'); };
+function sl(a, b) {} function st(a) { 'use strict'; } const ar = (a, b, c) => 0; class K { constructor(a) {} m(x) {} static s() {} }
+function* g() {} async function as() {} async function* ag() {} const bo = sl.bind(null, 1); const o = { m() {}, get x() { return 1; } };
+for (const [n, f] of [['sloppy', sl], ['strict', st], ['arrow', ar], ['class', K], ['method', K.prototype.m], ['static', K.s], ['gen', g], ['async', as], ['agen', ag], ['bound', bo], ['objmethod', o.m], ['getter', Object.getOwnPropertyDescriptor(o, 'x').get], ['native', Math.max], ['ctor native', Map], ['Function()', Function('a', 'return a')]])
+  console.log(n, Object.getOwnPropertyNames(f).join(), D(f, 'length'), D(f, 'name'), D(f, 'prototype'), D(f, 'arguments'), D(f, 'caller'));
+t('fp names', () => Object.getOwnPropertyNames(Function.prototype).sort().join());
+t('fp arguments', () => { const d = Object.getOwnPropertyDescriptor(Function.prototype, 'arguments'); return [typeof d.get, d.get === d.set, d.enumerable, d.configurable].join(); });
+t('fp caller same TTE', () => Object.getOwnPropertyDescriptor(Function.prototype, 'caller').get === Object.getOwnPropertyDescriptor(Function.prototype, 'arguments').get);
+t('strict.caller', () => st.caller);
+t('strict.arguments', () => st.arguments);
+t('arrow.caller', () => ar.caller);
+t('class.caller', () => K.caller);
+t('sloppy.caller outside', () => sl.caller);
+t('sloppy.arguments outside', () => sl.arguments);
+t('sloppy.arguments inside', () => { function f(a, b) { return JSON.stringify(Array.from(f.arguments)) + ' ' + (f.arguments === arguments); } return f(1, 2); });
+t('sloppy.caller inside', () => { function inner() { return inner.caller === outer; } function outer() { return inner(); } return outer(); });
+t('caller strict', () => { function inner() { return inner.caller; } function outer() { 'use strict'; return inner(); } return outer(); });
+t('delete length', () => { function f(a) {} delete f.length; return [f.length, Object.hasOwn(f, 'length')].join(); });
+t('delete name', () => { function f(a) {} delete f.name; return [JSON.stringify(f.name), Object.hasOwn(f, 'name')].join(); });
+t('assign length', () => { function f(a) {} f.length = 5; return f.length; });
+t('define length', () => { function f(a) {} Object.defineProperty(f, 'length', { value: 9 }); return f.length; });
+t('keys', () => Object.keys(function () {}).length);
+t('for in', () => { const k = []; for (const x in function () {}) k.push(x); return k.length; });
+t('anon name', () => [(function () {}).name, (() => {}).name, (class {}).name].map(JSON.stringify).join());
+t('prototype lazy', () => { function f() {} const p = f.prototype; return [Object.getOwnPropertyNames(p).join(), p.constructor === f, D(p, 'constructor')].join(' '); });
+t('class proto desc', () => D(K, 'prototype'));
+t('bound name', () => [bo.name, bo.length, sl.bind().name].join());
+t('assign arguments', () => { 'use strict'; try { sl.arguments = 1; return 'ok'; } catch (e) { return e.message; } });
+t('hasOwn caller', () => [Object.hasOwn(sl, 'caller'), Object.hasOwn(st, 'caller'), 'caller' in st].join());
+t('getOwnPropertyNames order', () => Object.getOwnPropertyNames(function f(a) {}).join());
+t('freeze fn', () => { function f() {} Object.freeze(f); return [Object.isFrozen(f), D(f, 'prototype')].join(); });

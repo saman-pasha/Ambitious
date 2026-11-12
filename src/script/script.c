@@ -2581,7 +2581,7 @@ void sh_method(js_vm *vm, uint32_t o, const char *name, uint32_t id, uint32_t na
 uint32_t sh_interface(js_vm *vm, const char *name, uint32_t id, uint32_t p) {
     uint32_t a = js_atom_ascii(vm, name);
     uint32_t f = js_native_new(vm, id, a, 0);
-    js_define(vm, f, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
+    js_define(vm, f, A_PROTOTYPE, jv_obj(p), JS_SHAPE_PROTO);
     js_define(vm, p, A_CONSTRUCTOR, jv_obj(f), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, a, jv_obj(f), JS_SHAPE_HIDDEN);
     return f;

@@ -1,0 +1,41 @@
+sloppy length,name,arguments,caller,prototype 2/false/false/true sl/false/false/true obj/true/false/false null/false/false/false null/false/false/false
+strict length,name,prototype 1/false/false/true st/false/false/true obj/true/false/false none none
+arrow length,name 3/false/false/true ar/false/false/true none none none
+class length,name,prototype,s 1/false/false/true K/false/false/true obj/false/false/false none none
+method length,name 1/false/false/true m/false/false/true none none none
+static length,name 0/false/false/true s/false/false/true none none none
+gen length,name,prototype 0/false/false/true g/false/false/true obj/true/false/false none none
+async length,name 0/false/false/true as/false/false/true none none none
+agen length,name,prototype 0/false/false/true ag/false/false/true obj/true/false/false none none
+bound length,name 1/false/false/true bound sl/false/false/true none none none
+objmethod length,name 0/false/false/true m/false/false/true none none none
+getter length,name 0/false/false/true get x/false/false/true none none none
+native length,name 2/false/false/true max/false/false/true none none none
+ctor native length,name,prototype,groupBy 0/false/false/true Map/false/false/true obj/false/false/false none none
+Function() length,name,arguments,caller,prototype 1/false/false/true anonymous/false/false/true obj/true/false/false null/false/false/false null/false/false/false
+fp names apply,arguments,bind,call,caller,constructor,length,name,toString
+fp arguments function,true,false,true
+fp caller same TTE true
+strict.caller TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+strict.arguments TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+arrow.caller TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+class.caller TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+sloppy.caller outside null
+sloppy.arguments outside null
+sloppy.arguments inside [1,2] false
+sloppy.caller inside true
+caller strict null
+delete length 0,false
+delete name "",false
+assign length 1
+define length 9
+keys 0
+for in 0
+anon name "","",""
+prototype lazy constructor true fn/true/false/true
+class proto desc obj/false/false/false
+bound name bound sl,1,bound sl
+assign arguments Cannot assign to read only property 'arguments' of function 'function sl(a, b) {}'
+hasOwn caller true,false,true
+getOwnPropertyNames order length,name,arguments,caller,prototype
+freeze fn true,obj/false/false/false

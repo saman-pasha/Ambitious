@@ -214,11 +214,12 @@ static int px_get_own(js_vm *vm, uint32_t o, uint32_t key, jv *v, uint32_t *f) {
     /* an array's or a string's element, an array's length; a function's name and length,
        which it makes as it is read, and its prototype, made at its first reading */
     uint32_t k = vm->objs[o].kind, i;
-    if ((k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND) && (key == A_NAME || key == A_LENGTH || key == A_PROTOTYPE)) {
-        jv x = js_get(vm, jv_obj(o), key);
-        if (vm->throwing || x == JV_UNDEF) return 0;
+    if ((k == JK_CLOSURE || k == JK_NATIVE) && js_fn_virtual(vm, o, key)) {
+        jv x;
+        if (!js_fn_lazy(vm, o, key, &x) || vm->throwing) return 0;
+        if (key == A_PROTOTYPE) return js_get_own(vm, o, key, v, f);   /* made, in the shape */
         *v = x;
-        *f = JS_SHAPE_HIDDEN;
+        *f = JS_SHAPE_HIDDEN | JS_SHAPE_READONLY | (key == A_ARGUMENTS || key == A_CALLER ? JS_SHAPE_FIXED : 0);
         return 1;
     }
     if (k == JK_ARRAY && key == A_LENGTH) {
@@ -278,12 +279,6 @@ static int px_ordinary_own(js_vm *vm, uint32_t o, uint32_t key, px_desc *d) {
     if (k == JK_ARRAY && key == A_LENGTH) { d->configurable = 0; d->enumerable = 0; }
     else if (k == JK_STRING && (key == A_LENGTH || index)) { d->writable = 0; d->configurable = 0; d->enumerable = index; }
     else if (k == JK_TYPEDARRAY && index) { d->writable = 1; d->enumerable = 1; d->configurable = 1; }
-    else if ((k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND) && f == JS_SHAPE_HIDDEN) {
-        /* a function's own as the engine makes them: name and length read-only and
-           configurable, prototype not configurable (writable an ordinary function's) */
-        if (key == A_NAME || key == A_LENGTH) { d->writable = 0; d->configurable = !sealed; }
-        else if (key == A_PROTOTYPE) { d->configurable = 0; d->writable = k == JK_CLOSURE && !(of & JO_CLASS_CTOR) && !frozen; }
-    }
     return 1;
 }
 
@@ -347,6 +342,8 @@ static int px_ordinary_define(js_vm *vm, uint32_t o, uint32_t key, const px_desc
     int ext = (vm->objs[o].flags & JO_EXTENSIBLE) != 0;
     if (!px_compatible(vm, ext, d, &cur, has)) return 0;
     if (k == JK_STRING && (key == A_LENGTH || js_atom_index(vm, key, &i)) && has) return 1;
+    /* a sloppy function's arguments and caller: neither writable nor configurable, the engine's, so unchanged */
+    if (has && (key == A_ARGUMENTS || key == A_CALLER) && js_fn_virtual(vm, o, key)) return 1;
     /* the property as it is to be: the descriptor's fields over the current's, else the defaults */
     int acc = pd_accessor(d) || (!pd_data(d) && has && pd_accessor(&cur));
     uint32_t enumerable = (d->has & PD_ENUMERABLE) ? d->enumerable : has ? cur.enumerable : 0;
@@ -1370,7 +1367,7 @@ static uint32_t px_ctor(js_vm *vm, const char *name, uint32_t id, uint32_t nargs
     uint32_t atom = js_atom_ascii(vm, name);
     uint32_t c = js_native_new(vm, id, atom, nargs);
     if (proto) {
-        js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN);
+        js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_PROTO);
         js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     }
     js_define(vm, vm->global, atom, jv_obj(c), JS_SHAPE_HIDDEN);

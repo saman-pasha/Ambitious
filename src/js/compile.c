@@ -57,7 +57,8 @@ enum {
     N_WITH,            /* a its object, b its body, s the body's scope (its object's cell there) */
     N_EXPORT_DEFAULT,  /* a its expression, b the default binding's declaration */
     N_IMPORT_META,
-    N_IMPORT_CALL      /* a the specifier, b the options (0: none) */
+    N_IMPORT_CALL,     /* a the specifier, b the options (0: none) */
+    N_PRIV_NAME        /* #x before in: a its hidden binding's read, s its name */
 };
 /* N_PROP's kinds */
 enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER, PK_BLOCK };
@@ -68,6 +69,8 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER, PK_BLO
 #define NF_REST 16
 #define NF_EVAL 32         /* a call of eval by its name: a direct eval, s its site's scope */
 #define NF_PROTO 64        /* an object literal's __proto__: v (not computed, not shorthand, not a method): its prototype */
+#define NF_PRIVATE 128     /* a member's key a private name (#x), computed from b (its hidden binding's read), s its name;
+                              a class element's: c its private name's record, plus one */
 
 /* pos and, where a node keeps it there, d: the source of an expression an error names
    (src/js/js.h's js_site): a call's callee, new's, a spread's operand (N_SPREAD), a
@@ -101,6 +104,15 @@ typedef struct jfn {
 /* a class: its name, heritage, constructor, members; its fields' function and its static initializer (0: none); its
    declaration's outer binding; its own scope, whose inner binding of its name is immutable */
 typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn; } jclass;
+/* a class's private name (#x): kind its PV_ flags (an accessor's getter and setter one name), its class (plus one), the
+   binding of its class's scope that holds its symbol (a new one each time the class is made: decl, atom hidden), a
+   method's or an accessor's functions' bindings, and for an instance's method or accessor the reads the fields function
+   installs them by (ident nodes of that function) */
+enum { PV_FIELD = 1, PV_METHOD = 2, PV_GET = 4, PV_SET = 8, PV_STATIC = 16 };
+typedef struct jpriv {
+    uint32_t name, cls, kind, decl, hidden, fn_decl, get_decl, set_decl, line;
+    uint32_t isym, ifn, iget, iset;
+} jpriv;
 
 /* the code generator's open contexts, innermost last. A loop's label is 1 when its
    iterator is on the stack (for-in), 2 for a for-of's, whose CX_ITER is just below it:
@@ -123,6 +135,7 @@ typedef struct js_cc {
     vector<jref> refs;
     vector<jfn> fns;
     vector<jclass> classes;
+    vector<jpriv> privs;
     vector<jctx> ctx;
     vector<uint32_t> mreqs;           /* a module's requests' specifiers (strings), each once */
     vector<jmimp> mimps;
@@ -152,7 +165,7 @@ typedef struct js_cc {
 
 #define JS_CC_DROP(c) vector_jnode_drop(&(c).nodes); vector_uint32_t_drop(&(c).lists); vector_uint32_t_drop(&(c).tmp); \
     vector_jscope_drop(&(c).scopes); vector_jdecl_drop(&(c).decls); vector_jref_drop(&(c).refs); vector_jfn_drop(&(c).fns); \
-    vector_jclass_drop(&(c).classes); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
+    vector_jclass_drop(&(c).classes); vector_jpriv_drop(&(c).privs); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
     vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names)
 
 #define CC js_vm *vm, const char *src, uint32_t srcn, js_cc *cc
@@ -644,6 +657,64 @@ static uint32_t ident_node(CC, uint32_t atom, uint32_t line) {
     return n;
 }
 
+/* ---- private names ---- */
+
+/* a name the lexer read with its '#': a private name */
+static int atom_priv(js_vm *vm, uint32_t a) {
+    if (!a || js_key_is_sym(a)) return 0;
+    js_str_flatten(vm, a);
+    return vm->strs[a].len > 1 && vm->units[vm->strs[a].off] == '#';
+}
+/* the hidden binding's name a private name's symbol is held in (a space before it, no source can write it), and its
+   functions' (" #m fn", " #g get", " #g set") */
+static uint32_t priv_hidden(js_vm *vm, uint32_t name, const char *suffix) {
+    uint32_t h = js_str_concat(vm, js_str_ascii(vm, " "), name);
+    if (suffix) h = js_str_concat(vm, h, js_str_ascii(vm, suffix));
+    return js_atom(vm, h);
+}
+/* a read of a private name's symbol where the source names it: resolved, as any name is, to the innermost class
+   declaring it */
+static uint32_t priv_ident(CC, uint32_t name, uint32_t line) { return ident_node(CCA, priv_hidden(vm, name, 0), line); }
+static void priv_error(CC, uint32_t line, const char *a, uint32_t name, const char *b) {
+    vector<char> m;
+    append_range(m, a, strlen(a));
+    js_str_to_utf8(vm, name, &m);
+    append_range(m, b, strlen(b));
+    push_back(m, 0);
+    cc_error(cc, line, data(m));
+}
+/* class ci's private name declared (its kind's): a getter and a setter of one name (both static or neither) one
+   accessor; any other second declaration V8's early error */
+static uint32_t priv_declare(CC, uint32_t ci, uint32_t name, uint32_t kind, int is_static, uint32_t line) {
+    uint32_t st = is_static ? PV_STATIC : 0;
+    for (size_t i = 0; i < len(cc->privs); i++) {
+        jpriv *q = &cc->privs[i];
+        if (q->cls != ci + 1 || q->name != name) continue;
+        if ((kind == PV_GET || kind == PV_SET) && (q->kind & (PV_GET | PV_SET)) && !(q->kind & kind) && (q->kind & PV_STATIC) == st) {
+            q->kind |= kind;
+            uint32_t d = declare(CCA, priv_hidden(vm, name, kind == PV_GET ? " get" : " set"), D_CONST, line);
+            if (kind == PV_GET) cc->privs[i].get_decl = d;
+            else cc->privs[i].set_decl = d;
+            return (uint32_t)i;
+        }
+        priv_error(CCA, line, "Identifier '", name, "' has already been declared");
+        return (uint32_t)i;
+    }
+    jpriv p;
+    memset(&p, 0, sizeof p);
+    p.name = name;
+    p.cls = ci + 1;
+    p.kind = kind | st;
+    p.line = line;
+    p.hidden = priv_hidden(vm, name, 0);
+    p.decl = declare(CCA, p.hidden, D_CONST, line);
+    if (kind == PV_METHOD) p.fn_decl = declare(CCA, priv_hidden(vm, name, " fn"), D_CONST, line);
+    if (kind == PV_GET) p.get_decl = declare(CCA, priv_hidden(vm, name, " get"), D_CONST, line);
+    if (kind == PV_SET) p.set_decl = declare(CCA, priv_hidden(vm, name, " set"), D_CONST, line);
+    push_back(cc->privs, p);
+    return (uint32_t)(len(cc->privs) - 1);
+}
+
 static uint32_t p_expr(CC, int no_in);
 static uint32_t p_assign(CC, int no_in);
 static uint32_t p_stmt(CC);
@@ -993,6 +1064,7 @@ static uint32_t p_object(CC) {
             int computed;
             int shorthand_ok = cc->tok.type == T_NAME;
             uint32_t atom_tok = cc->tok.str;
+            if (shorthand_ok && atom_priv(vm, atom_tok)) priv_error(CCA, line, "Unexpected identifier '", atom_tok, "'");
             uint32_t key = p_prop_key(CCA, &computed);
             cc->nodes[p].a = key;
             cc->nodes[p].d = computed ? NF_COMPUTED : 0;
@@ -1088,10 +1160,16 @@ static uint32_t to_pattern(CC, uint32_t e) {
 }
 
 /* a binding: a name declared as kind, or a pattern of them */
+/* await where a static block's own code would read it as a name: V8's early error (a reserved word there) */
+static void await_reserved(CC, uint32_t atom, uint32_t line) {
+    if (atom == cc->kw[K_AWAIT] && (cc->fns[cc->cur_fn].flags & FN_BLOCK)) cc_error(cc, line, "Unexpected reserved word");
+}
+
 static uint32_t p_binding(CC, uint32_t kind) {
     uint32_t line = cc->tok.line;
     if (cc->tok.type == T_NAME) {
         uint32_t atom = cc->tok.str;
+        await_reserved(CCA, atom, line);
         if (atom == cc->kw[K_LET] && (kind == D_LET || kind == D_CONST)) cc_error(cc, line, "let is no name for a let or const binding");
         lx(CCA);
         declare(CCA, atom, kind, line);
@@ -1261,6 +1339,7 @@ static uint32_t p_primary(CC) {
                 if (is_p(cc, P_DOT)) {
                     lx(CCA);
                     if (cc->tok.type != T_NAME) cc_error(cc, line, "expected a name after super.");
+                    if (atom_priv(vm, cc->tok.str)) cc_error(cc, line, "Unexpected private field");
                     cc->nodes[n].s = cc->tok.str;
                     lx(CCA);
                 } else if (is_p(cc, P_LBRACK)) {
@@ -1290,6 +1369,7 @@ static uint32_t p_primary(CC) {
                         cc->nodes[m].a = callee;
                         cc->nodes[m].s = cc->tok.str;
                         if (cc->tok.type != T_NAME) cc_error(cc, cc->tok.line, "expected a name after '.'");
+                        else if (atom_priv(vm, cc->tok.str)) { cc->nodes[m].op = NF_COMPUTED | NF_PRIVATE; cc->nodes[m].b = priv_ident(CCA, cc->tok.str, cc->tok.line); }
                         lx(CCA);
                         callee = m;
                     } else if (is_p(cc, P_LBRACK)) {
@@ -1336,6 +1416,8 @@ static uint32_t p_primary(CC) {
                 return n;
             }
         }
+        await_reserved(CCA, a, line);
+        if (atom_priv(vm, a)) { priv_error(CCA, line, "Unexpected identifier '", a, "'"); lx(CCA); return node(cc, N_HOLE, line); }
         lx(CCA);
         if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, a, 0, line, start);
         return ident_node(CCA, a, line);
@@ -1383,6 +1465,7 @@ static uint32_t p_call(CC) {
             cc->nodes[m].a = e;
             cc->nodes[m].s = cc->tok.str;
             cc->nodes[m].op = opt ? NF_OPTIONAL : 0;
+            if (atom_priv(vm, cc->tok.str)) { cc->nodes[m].op |= NF_COMPUTED | NF_PRIVATE; cc->nodes[m].b = priv_ident(CCA, cc->tok.str, line); }
             lx(CCA);
             e = m;
         } else if (is_p(cc, P_LBRACK)) {
@@ -1466,6 +1549,8 @@ static uint32_t p_unary_in(CC) {
         uint32_t n = node(cc, N_UNARY, line);
         cc->nodes[n].op = (uint16_t)which;
         cc->nodes[n].a = p_unary(CCA);
+        if (which == 1002 && cc->nodes[cc->nodes[n].a].k == N_MEMBER && (cc->nodes[cc->nodes[n].a].op & NF_PRIVATE))
+            cc_error(cc, line, "Private fields can not be deleted");
         return n;
     }
     if (is_kw(cc, K_AWAIT) && in_async(cc)) {
@@ -1514,7 +1599,16 @@ static int binop_prec(js_cc *cc, int no_in, uint32_t *op) {
 }
 
 static uint32_t p_binary(CC, int min_prec, int no_in) {
-    uint32_t left = p_unary(CCA);
+    uint32_t left;
+    if (min_prec <= 8 && cc->tok.type == T_NAME && atom_priv(vm, cc->tok.str)) {
+        /* #x in o: the private name before in, else none */
+        uint32_t line = cc->tok.line, nm = cc->tok.str;
+        left = node(cc, N_PRIV_NAME, line);
+        cc->nodes[left].s = nm;
+        cc->nodes[left].a = priv_ident(CCA, nm, line);
+        lx(CCA);
+        if (no_in || !is_kw(cc, K_IN)) { priv_error(CCA, line, "Unexpected identifier '", nm, "'"); return left; }
+    } else left = p_unary(CCA);
     for (;;) {
         uint32_t op = 0;
         int prec = binop_prec(cc, no_in, &op);
@@ -1736,7 +1830,9 @@ static uint32_t p_class(CC, int is_decl) {
         if (mfl && !is_p(cc, P_LPAREN)) { cc_error(cc, mline, "expected '(' after a generator's or an async method's name"); break; }
         /* V8's early errors for a class's element names */
         uint32_t kname = computed ? 0 : cc->nodes[key].s;
+        int priv = atom_priv(vm, kname);
         if ((flags & NF_STATIC) && kname == A_PROTOTYPE) { cc_error(cc, mline, "Classes may not have a static property named 'prototype'"); break; }
+        if (priv && is_p(cc, P_LPAREN) && kname == js_atom_ascii(vm, "#constructor")) { cc_error(cc, mline, "Class constructor may not be a private method"); break; }
         if (!is_p(cc, P_LPAREN) && (kname == cc->kw[K_CONSTRUCTOR] || kname == js_atom_ascii(vm, "#constructor"))) {
             cc_error(cc, mline, "Classes may not have a field named 'constructor'");
             break;
@@ -1756,6 +1852,14 @@ static uint32_t p_class(CC, int is_decl) {
             if (ctor) { cc->classes[ci].ctor = cc->nodes[f].a; cc->fns[cc->nodes[f].a].name = name; cc->fns[cc->nodes[f].a].cls = ci + 1; continue; }
             cc->nodes[p].op = (uint16_t)kind;
             cc->nodes[p].b = f;
+            if (priv) {
+                /* a private method or accessor: its function kept in a binding of the class's scope, an instance's
+                   installed on each instance by the fields function (made for it), a static one's on the class */
+                uint32_t pi = priv_declare(CCA, ci, kname, kind == PK_GET ? PV_GET : kind == PK_SET ? PV_SET : PV_METHOD, (flags & NF_STATIC) != 0, mline);
+                cc->nodes[p].d |= NF_PRIVATE;
+                cc->nodes[p].c = pi + 1;
+                if (!(flags & NF_STATIC) && !fields_fn) fields_fn = class_init_fn(CCA, ci, FN_FIELDS, mline, mstart);
+            }
         } else {
             /* a field: its initializer is read in a function of its own, the instances' fields function (run on each
                new instance) or the static initializer (run once, the class its this). A computed key is read when the
@@ -1771,6 +1875,12 @@ static uint32_t p_class(CC, int is_decl) {
                 nfields++;
             }
             uint32_t hidden = 0;
+            if (priv) {
+                uint32_t pi = priv_declare(CCA, ci, kname, PV_FIELD, (flags & NF_STATIC) != 0, mline);
+                cc->nodes[p].d |= NF_PRIVATE;
+                cc->nodes[p].c = pi + 1;
+                hidden = cc->privs[pi].hidden;
+            }
             if (computed) {
                 char hn[48];
                 snprintf(hn, sizeof hn, " class %u key %u", ci, nkeys++);
@@ -1781,7 +1891,7 @@ static uint32_t p_class(CC, int is_decl) {
             uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
             cc->cur_fn = ff;
             cc->cur_scope = cc->fns[ff].scope;
-            if (computed) cc->nodes[p].s = ident_node(CCA, hidden, mline);
+            if (computed || priv) cc->nodes[p].s = ident_node(CCA, hidden, mline);
             if (is_p(cc, P_ASSIGN)) {
                 lx(CCA);
                 cc->nodes[p].b = p_assign(CCA, 0);
@@ -1799,6 +1909,26 @@ static uint32_t p_class(CC, int is_decl) {
     cc->classes[ci].fields_fn = fields_fn;
     cc->classes[ci].static_fn = static_fn;
     cc->classes[ci].nfields = nfields;
+    /* an instance's private methods and accessors: the fields function's reads of their symbols and functions */
+    if (fields_fn) {
+        uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+        cc->cur_fn = fields_fn;
+        cc->cur_scope = cc->fns[fields_fn].scope;
+        for (size_t i = 0; i < len(cc->privs); i++) {
+            jpriv q = cc->privs[i];
+            if (q.cls != ci + 1 || (q.kind & (PV_FIELD | PV_STATIC))) continue;
+            uint32_t isym = ident_node(CCA, q.hidden, q.line), ifn = 0, iget = 0, iset = 0;
+            if (q.kind & PV_METHOD) ifn = ident_node(CCA, priv_hidden(vm, q.name, " fn"), q.line);
+            if (q.kind & PV_GET) iget = ident_node(CCA, priv_hidden(vm, q.name, " get"), q.line);
+            if (q.kind & PV_SET) iset = ident_node(CCA, priv_hidden(vm, q.name, " set"), q.line);
+            cc->privs[i].isym = isym;
+            cc->privs[i].ifn = ifn;
+            cc->privs[i].iget = iget;
+            cc->privs[i].iset = iset;
+        }
+        cc->cur_fn = saved_fn;
+        cc->cur_scope = saved_scope;
+    }
     if (!cc->classes[ci].ctor) {
         /* the constructor not written: an empty one, or super(...args) */
         uint32_t f = fn_new(cc, name, JF_CLASS_CTOR | JF_STRICT | FN_DEFAULT_CTOR | (cc->classes[ci].extends ? JF_DERIVED | JF_HAS_REST : 0), line, 0);
@@ -2295,6 +2425,7 @@ static uint32_t p_stmt_in(CC) {
         uint32_t pos0 = cc->pos, line0 = cc->line;
         lx(CCA);
         if (is_p(cc, P_COLON)) {
+            await_reserved(CCA, a, line);
             lx(CCA);
             uint32_t n = node(cc, N_LABEL, line);
             cc->nodes[n].s = a;
@@ -2972,11 +3103,43 @@ static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op
     emit16(vm, n);
 }
 
+/* the private name a read of its hidden binding (ident node id) reaches: its record, or V8's early error */
+/* (its index, plus one: 0 none) */
+static uint32_t priv_of(CC, uint32_t id, uint32_t name, uint32_t line) {
+    uint32_t d = cc->refs[cc->nodes[id].a].decl;
+    for (size_t i = 0; d && i < len(cc->privs); i++) if (cc->privs[i].decl == d) return (uint32_t)i + 1;
+    priv_error(CCA, line, "Private field '", name, "' must be declared in an enclosing class");
+    return 0;
+}
+static void emit_priv(CC, uint32_t op, jpriv q) {
+    emit(vm, op);
+    emit(vm, q.kind);
+    emit32(vm, q.name);
+    emit32(vm, cc->classes[q.cls - 1].name);
+}
+/* a member's key (its expression, or a private name's symbol: its record's index, plus one), and the element read and
+   write by it */
+static uint32_t gen_mkey(CC, uint32_t n) {
+    jnode m = cc->nodes[n];
+    if (!(m.op & NF_PRIVATE)) { gen_expr(CCA, m.b); return 0; }
+    uint32_t q = priv_of(CCA, m.b, m.s, m.line);
+    if (q) gen_ident_get(CCA, m.b);
+    return q;
+}
+static void emit_mget(CC, uint32_t n, uint32_t q, int keep_obj) {
+    if (cc->nodes[n].op & NF_PRIVATE) { if (q) emit_priv(CCA, keep_obj ? OP_PRIV_GET2 : OP_PRIV_GET, cc->privs[q - 1]); }
+    else emit(vm, keep_obj ? OP_GET_ELEM2 : OP_GET_ELEM);
+}
+static void emit_mput(CC, uint32_t n, uint32_t q) {
+    if (cc->nodes[n].op & NF_PRIVATE) { if (q) emit_priv(CCA, OP_PRIV_PUT, cc->privs[q - 1]); }
+    else emit(vm, OP_PUT_ELEM);
+}
+
 static void gen_member(CC, uint32_t n, int keep_obj) {
     jnode m = cc->nodes[n];
     gen_expr(CCA, m.a);
     if (m.op & NF_OPTIONAL) cc->chain = chain_add(vm, OP_JNULLISH, cc->chain);
-    if (m.op & NF_COMPUTED) { gen_expr(CCA, m.b); emit(vm, keep_obj ? OP_GET_ELEM2 : OP_GET_ELEM); }
+    if (m.op & NF_COMPUTED) { uint32_t q = gen_mkey(CCA, n); emit_mget(CCA, n, q, keep_obj); }
     else emit_atom_ic(vm, keep_obj ? OP_GET_PROP2 : OP_GET_PROP, m.s);
 }
 
@@ -3060,6 +3223,14 @@ static void gen_object(CC, uint32_t n) {
 static void gen_class(CC, uint32_t ci) {
     jclass k = cc->classes[ci];
     gen_block_enter(CCA, k.scope);
+    /* its private names, new ones each time the class is made */
+    for (size_t i = 0; i < len(cc->privs); i++) {
+        jpriv q = cc->privs[i];
+        if (q.cls != ci + 1) continue;
+        emit(vm, OP_PRIV_NEW);
+        emit32(vm, q.name);
+        gen_put(CCA, q.hidden, q.decl, k.scope, 0, 1);
+    }
     if (k.extends) gen_expr(CCA, k.extends);
     else emit(vm, OP_HOLE);
     emit(vm, OP_CLASS);
@@ -3078,6 +3249,17 @@ static void gen_class(CC, uint32_t ci) {
             }
             continue;
         }
+        if (pr.d & NF_PRIVATE) {
+            /* a private method's or accessor's function, its home the prototype (the class, a static one's), kept */
+            jpriv q = cc->privs[pr.c - 1];
+            if (is_static) emit(vm, OP_SWAP);
+            gen_expr(CCA, pr.b);
+            emit(vm, OP_HOME);
+            uint32_t d = pr.op == PK_GET ? q.get_decl : pr.op == PK_SET ? q.set_decl : q.fn_decl;
+            gen_put(CCA, cc->decls[d].atom, d, k.scope, 0, 1);
+            if (is_static) emit(vm, OP_SWAP);
+            continue;
+        }
         if (is_static) emit(vm, OP_SWAP);
         {
             if (computed) gen_expr(CCA, pr.a);
@@ -3092,6 +3274,22 @@ static void gen_class(CC, uint32_t ci) {
         if (is_static) emit(vm, OP_SWAP);
     }
     emit(vm, OP_POP);
+    /* the static private methods and accessors added to the class */
+    for (size_t i = 0; i < len(cc->privs); i++) {
+        jpriv q = cc->privs[i];
+        if (q.cls != ci + 1 || !(q.kind & PV_STATIC) || (q.kind & PV_FIELD)) continue;
+        gen_get(CCA, q.hidden, q.decl, k.scope);
+        if (q.kind & PV_METHOD) {
+            gen_get(CCA, cc->decls[q.fn_decl].atom, q.fn_decl, k.scope);
+            emit_priv(CCA, OP_PRIV_DEFINE, q);
+        } else {
+            if (q.get_decl) gen_get(CCA, cc->decls[q.get_decl].atom, q.get_decl, k.scope);
+            else emit(vm, OP_UNDEF);
+            if (q.set_decl) gen_get(CCA, cc->decls[q.set_decl].atom, q.set_decl, k.scope);
+            else emit(vm, OP_UNDEF);
+            emit_priv(CCA, OP_PRIV_ACCESSOR, q);
+        }
+    }
     if (k.inner) {
         emit(vm, OP_DUP);
         gen_put(CCA, k.name, k.inner, k.scope, 0, 1);
@@ -3139,10 +3337,10 @@ static void gen_pattern(CC, uint32_t p, int init) {
         /* v -> o v (or o k v) -> v -> nothing */
         gen_expr(CCA, t.a);
         if (t.op & NF_COMPUTED) {
-            gen_expr(CCA, t.b);
+            uint32_t q = gen_mkey(CCA, p);
             emit(vm, OP_ROT3);
             emit(vm, OP_ROT3);
-            emit(vm, OP_PUT_ELEM);
+            emit_mput(CCA, p, q);
         } else {
             emit(vm, OP_SWAP);
             emit_atom_ic(vm, OP_PUT_PROP, t.s);
@@ -3244,7 +3442,7 @@ static void gen_assign(CC, uint32_t n) {
         }
         if (tg.k == N_IDENT) { name_fn(vm, cc, as.b, tg.s); gen_expr(CCA, as.b); gen_ident_put(CCA, t, 1, 0); return; }
         gen_expr(CCA, tg.a);
-        if (tg.op & NF_COMPUTED) { gen_expr(CCA, tg.b); gen_expr(CCA, as.b); emit(vm, OP_PUT_ELEM); }
+        if (tg.op & NF_COMPUTED) { uint32_t q = gen_mkey(CCA, t); gen_expr(CCA, as.b); emit_mput(CCA, t, q); }
         else { gen_expr(CCA, as.b); emit_atom_ic(vm, OP_PUT_PROP, tg.s); }
         return;
     }
@@ -3265,13 +3463,14 @@ static void gen_assign(CC, uint32_t n) {
     }
     if (tg.k != N_MEMBER) { cc_error(cc, as.line, "invalid assignment target"); return; }
     int computed = tg.op & NF_COMPUTED;
+    uint32_t q = 0;
     gen_expr(CCA, tg.a);
-    if (computed) { gen_expr(CCA, tg.b); emit(vm, OP_DUP2); emit(vm, OP_GET_ELEM); }
+    if (computed) { q = gen_mkey(CCA, t); emit(vm, OP_DUP2); emit_mget(CCA, t, q, 0); }
     else { emit(vm, OP_DUP); emit_atom_ic(vm, OP_GET_PROP, tg.s); }
     if (logical) {
         uint32_t keep = jump_fwd(vm, jop);
         gen_expr(CCA, as.b);
-        if (computed) emit(vm, OP_PUT_ELEM);
+        if (computed) emit_mput(CCA, t, q);
         else emit_atom_ic(vm, OP_PUT_PROP, tg.s);
         uint32_t end = jump_fwd(vm, OP_JMP);
         patch_to(vm, keep, here(vm));
@@ -3281,7 +3480,7 @@ static void gen_assign(CC, uint32_t n) {
         return;
     }
     gen_rhs_op(CCA, binop_of(op), as.b);
-    if (computed) emit(vm, OP_PUT_ELEM);
+    if (computed) emit_mput(CCA, t, q);
     else emit_atom_ic(vm, OP_PUT_PROP, tg.s);
 }
 
@@ -3301,12 +3500,13 @@ static void gen_update(CC, uint32_t n, int force_prefix) {
     }
     if (tg.k != N_MEMBER) { cc_error(cc, u.line, "invalid target of ++ or --"); return; }
     int computed = tg.op & NF_COMPUTED;
+    uint32_t q = 0;
     gen_expr(CCA, tg.a);
-    if (computed) { gen_expr(CCA, tg.b); emit(vm, OP_DUP2); emit(vm, OP_GET_ELEM); }
+    if (computed) { q = gen_mkey(CCA, t); emit(vm, OP_DUP2); emit_mget(CCA, t, q, 0); }
     else { emit(vm, OP_DUP); emit_atom_ic(vm, OP_GET_PROP, tg.s); }
     if (prefix) {
         emit(vm, step);
-        if (computed) emit(vm, OP_PUT_ELEM);
+        if (computed) emit_mput(CCA, t, q);
         else emit_atom_ic(vm, OP_PUT_PROP, tg.s);
         return;
     }
@@ -3314,7 +3514,7 @@ static void gen_update(CC, uint32_t n, int force_prefix) {
     emit(vm, OP_DUP);
     emit(vm, computed ? OP_ROT4 : OP_ROT3);
     emit(vm, step);
-    if (computed) emit(vm, OP_PUT_ELEM);
+    if (computed) emit_mput(CCA, t, q);
     else emit_atom_ic(vm, OP_PUT_PROP, tg.s);
     emit(vm, OP_POP);
 }
@@ -3433,7 +3633,20 @@ static void gen_expr(CC, uint32_t n) {
         return;
     }
     case N_UPDATE: gen_update(CCA, n, 0); return;
-    case N_BINARY: gen_binary(CCA, binop_of(e.op), e.a, e.b); return;
+    case N_BINARY:
+        if (e.op == P_IN && cc->nodes[e.a].k == N_PRIV_NAME) {
+            /* #x in o: o read, then whether it has the private name (V8's TypeError for a primitive) */
+            jnode pn = cc->nodes[e.a];
+            gen_expr(CCA, e.b);
+            if (!priv_of(CCA, pn.a, pn.s, pn.line)) return;
+            gen_ident_get(CCA, pn.a);
+            emit(vm, OP_PRIV_IN);
+            emit32(vm, pn.s);
+            return;
+        }
+        gen_binary(CCA, binop_of(e.op), e.a, e.b);
+        return;
+    case N_PRIV_NAME: priv_error(CCA, e.line, "Unexpected identifier '", e.s, "'"); return;
     case N_LOGICAL: {
         gen_expr(CCA, e.a);
         uint32_t end = jump_fwd(vm, e.op == P_AND ? OP_JF_KEEP : e.op == P_OR ? OP_JT_KEEP : OP_JNN_KEEP);
@@ -4119,6 +4332,22 @@ static void gen_function(CC, uint32_t f) {
                this: a computed key the one the class read, an anonymous function named by a written key */
             jclass k = cc->classes[F.cls - 1];
             int want_static = (F.flags & FN_STATIC) != 0;
+            if (!want_static)
+                for (size_t i = 0; i < len(cc->privs); i++) {
+                    jpriv q = cc->privs[i];
+                    if (q.cls != F.cls || (q.kind & (PV_FIELD | PV_STATIC)) || !q.isym) continue;
+                    emit(vm, OP_THIS);
+                    gen_ident_get(CCA, q.isym);
+                    if (q.kind & PV_METHOD) { gen_ident_get(CCA, q.ifn); emit_priv(CCA, OP_PRIV_DEFINE, q); }
+                    else {
+                        if (q.iget) gen_ident_get(CCA, q.iget);
+                        else emit(vm, OP_UNDEF);
+                        if (q.iset) gen_ident_get(CCA, q.iset);
+                        else emit(vm, OP_UNDEF);
+                        emit_priv(CCA, OP_PRIV_ACCESSOR, q);
+                    }
+                    emit(vm, OP_POP);
+                }
             for (uint32_t i = 0; i < k.nmembers; i++) {
                 jnode pr = cc->nodes[cc->lists[k.members + i]];
                 if ((pr.op != PK_FIELD && pr.op != PK_BLOCK) || ((pr.d & NF_STATIC) != 0) != want_static) continue;
@@ -4131,11 +4360,12 @@ static void gen_function(CC, uint32_t f) {
                     continue;
                 }
                 emit(vm, OP_THIS);
-                if (pr.d & NF_COMPUTED) gen_ident_get(CCA, pr.s);
-                else if (pr.b) name_fn(vm, cc, pr.b, cc->nodes[pr.a].s);
+                if (pr.d & (NF_COMPUTED | NF_PRIVATE)) gen_ident_get(CCA, pr.s);
+                if (!(pr.d & NF_COMPUTED) && pr.b) name_fn(vm, cc, pr.b, cc->nodes[pr.a].s);
                 if (pr.b) gen_expr(CCA, pr.b);
                 else emit(vm, OP_UNDEF);
-                if (pr.d & NF_COMPUTED) emit(vm, OP_DEF_ELEM);
+                if (pr.d & NF_PRIVATE) emit_priv(CCA, OP_PRIV_DEFINE, cc->privs[pr.c - 1]);
+                else if (pr.d & NF_COMPUTED) emit(vm, OP_DEF_ELEM);
                 else { emit(vm, OP_DEF_PROP); emit32(vm, cc->nodes[pr.a].s); }
                 emit(vm, OP_POP);
             }
@@ -4281,10 +4511,10 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     push_back(cc->scopes, s0);
     jfn f0;
     memset(&f0, 0, sizeof f0);
-    f0.flags = strict ? JF_STRICT : 0;
+    f0.flags = (strict ? JF_STRICT : 0) | (mode == JS_CC_HANDLER ? 0 : JF_TOPLEVEL);
     /* a module's code: strict, its this undefined (an arrow's, of none), await allowed
        at its top level (async only when it awaits there) */
-    if (mode == JS_CC_MODULE) f0.flags = JF_STRICT | JF_ARROW | JF_ASYNC;
+    if (mode == JS_CC_MODULE) f0.flags = JF_STRICT | JF_ARROW | JF_ASYNC | JF_TOPLEVEL;
     push_back(cc->fns, f0);
     cc->cur_fn = 0;
     cc->cur_scope = 0;
@@ -4656,7 +4886,7 @@ static void pr_visit(js_vm *vm, js_cc *cc, uint32_t n, vector<char> *out, uint32
     case N_ASSIGN: pr_find(vm, cc, e.a, 1, out, np); return;
     case N_MEMBER: {
         pr_find(vm, cc, e.a, 1, out, np);
-        uint32_t s = (e.op & NF_COMPUTED) ? pr_str_key(cc, e.b) : e.s;
+        uint32_t s = (e.op & NF_PRIVATE) ? e.s : (e.op & NF_COMPUTED) ? pr_str_key(cc, e.b) : e.s;
         if (s) {
             if (e.op & NF_OPTIONAL) pr_put(out, np, "?");
             pr_put(out, np, ".");

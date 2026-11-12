@@ -1,0 +1,46 @@
+Iterator function 0 Iterator true length,name,prototype,from
+new Iterator TypeError: Abstract class Iterator not directly constructable
+Iterator() TypeError: Constructor Iterator requires 'new'
+subclass true,function
+proto names constructor,drop,every,filter,find,flatMap,forEach,map,reduce,some,take,toArray
+ctor desc function,function,false,true
+tag desc function,function,false,true,Iterator
+map 10,21,32,43
+filter 1,3
+take 1,2
+drop 3,4
+flatMap 1,1,2,2,3,3,4,4
+flatMap str TypeError: Iterator.prototype.flatMap called on non-object
+flatMap bad TypeError: Iterator.prototype.flatMap called on non-object
+reduce 10
+reduce init 110
+reduce empty TypeError: Reduce of a done iterator with no initial value
+forEach 1:0,2:1,3:2,4:3
+some true,false
+every true,false
+find 3,
+toArray 1,2,3,4
+take bad RangeError: -1 must be positive
+take NaN RangeError: NaN must be positive
+drop bad RangeError: -1 must be positive
+map bad TypeError: string "Iterator.prototype.map" is not a function
+map on obj {}
+map on prim TypeError: Iterator.prototype.map called on non-object
+helper tag [object Iterator Helper] next,return true function
+helper return 1 {"done":true}
+helper next on other TypeError: Method Iterator Helper.prototype.next called on incompatible receiver #<Object>
+helper running TypeError: Generator is already running
+from iterable 1,2
+from iterator [object Iterator] 0,1,2 false
+from string a,b
+from bad TypeError: Iterator.from called on non-object
+from wrap proto next,return true
+from inherits true
+lens 1,1,1,1,1,1,0,1,1,1,1 1
+closes on throw 1
+some closes 1
+array iter has map 2,3
+set iter 2
+take 0 closes 1{"done":true}
+ctor setter true 5
+tag setter [object X]

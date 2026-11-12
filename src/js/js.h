@@ -112,7 +112,8 @@ enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES,
        JI_ASYNC, JI_FROM_SYNC,
        JI_ARRAY_KEYS, JI_ARRAY_ENTRIES,  /* an array's (an array-like's) keys and [key, value] pairs, read at each step */
        JI_SET_ENTRIES,                   /* a Set's [value, value] pairs */
-       JI_REGEXP };                      /* matchAll's matches (an array of them in a) */
+       JI_REGEXP,                        /* matchAll's matches (an array of them in a) */
+       JI_HELPER };                      /* an Iterator Helper (map, filter, take, drop, flatMap): its record in a */
 /* a generator's (an async run's) state; an async generator's also suspended at an await
    (executing, to its requests), and awaiting a return's value once done */
 enum { JG_START, JG_YIELD, JG_RUNNING, JG_DONE, JG_AWAIT, JG_AWAIT_RETURN };
@@ -154,6 +155,10 @@ typedef struct js_obj {
    to one line: toolchain/REPORT.md, finding 30.) */
 #define JO_ELEMPROPS 256
 #define JO_LENGTH_RO 512
+/* JO_FN_NOLENGTH, JO_FN_NONAME: a function whose own length (name) was deleted, the engine's no longer its own
+   (src/js/vm.c, js_fn_virtual) */
+#define JO_FN_NOLENGTH 1024
+#define JO_FN_NONAME 2048
 /* an array whose elements a write may not take as it finds them: frozen, sealed, not
    extensible, with elements in its shape, or its length read-only (the interpreter's
    fast paths want exactly JO_EXTENSIBLE of these) */
@@ -165,6 +170,8 @@ typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js
 #define JS_SHAPE_HIDDEN 2     /* not enumerable */
 #define JS_SHAPE_READONLY 4   /* not writable (Object.defineProperty's; src/js/proxy.c) */
 #define JS_SHAPE_FIXED 8      /* not configurable (the same) */
+/* a constructor's prototype as a class's or a native's has it: neither writable, enumerable nor configurable */
+#define JS_SHAPE_PROTO (JS_SHAPE_HIDDEN | JS_SHAPE_READONLY | JS_SHAPE_FIXED)
 
 typedef struct js_str { uint32_t off, len, hash, atom, left, right; uint32_t rope; } js_str;
 
@@ -190,6 +197,7 @@ typedef struct js_func {
 #define JF_GENERATOR 256
 #define JF_ASYNC 512
 #define JF_NONSIMPLE 1024             /* its parameters not all plain names (a default, a rest, a pattern): its arguments unmapped */
+#define JF_TOPLEVEL 2048              /* a script's, a module's or an eval's code: no caller a function's caller can be */
 
 /* a property access's cache: the receiver's shape, the holder (0: the receiver
    itself), the holder's shape, the slot */
@@ -291,6 +299,8 @@ typedef struct js_big { uint32_t neg, off, n; } js_big;
 
 /* a symbol: its description (a string, 0 for none); reg, its key in Symbol.for's registry plus one */
 typedef struct js_sym { uint32_t desc, reg; } js_sym;
+/* a private name's symbol (#x, made each time its class is): its reg; no reflection lists it, no key reaches it */
+#define JS_SYM_PRIVATE 0xFFFFFFFFu
 /* the well-known symbols, made first, in this order */
 enum { JSYM_NONE, JSYM_ITERATOR, JSYM_ASYNC_ITERATOR, JSYM_HAS_INSTANCE, JSYM_IS_CONCAT_SPREADABLE, JSYM_MATCH, JSYM_MATCH_ALL,
        JSYM_REPLACE, JSYM_SEARCH, JSYM_SPECIES, JSYM_SPLIT, JSYM_TO_PRIMITIVE, JSYM_TO_STRING_TAG, JSYM_UNSCOPABLES, JSYM_N };
@@ -430,6 +440,7 @@ typedef struct js_vm {
     /* the iterators' prototypes, each its kind's next and Symbol.toStringTag: arrays', maps', sets', strings',
        matchAll's */
     uint32_t array_iter_proto, map_iter_proto, set_iter_proto, string_iter_proto, regexp_iter_proto;
+    uint32_t helper_proto, wrap_proto, iterator_ctor;   /* %IteratorHelperPrototype%, %WrapForValidIteratorPrototype%, %Iterator% */
     /* the promise protector (src/js/builtins.c): Promise.prototype's and Promise's shapes as the engine made them, the
        slots of the constructor and of Symbol.species, the species accessor and its getter, a plain promise's shape */
     uint32_t pr_proto_shape, pr_ctor_shape, pr_ctor_slot, pr_species_slot, pr_species_acc, pr_species_get, pr_root_shape;
@@ -484,7 +495,7 @@ enum {
     A_GET, A_SET, A_VALUE, A_WRITABLE, A_ENUMERABLE, A_CONFIGURABLE, A_UNDEFINED, A_NULL, A_TRUE, A_FALSE,
     A_OBJECT, A_FUNCTION, A_NUMBER, A_STRING, A_BOOLEAN, A_SYMBOL, A_EMPTY, A_DEFAULT, A_DONE, A_NEXT,
     A_THEN, A_TOJSON, A_INDEX, A_INPUT, A_ARGUMENTS, A_CAUSE, A_LASTINDEX, A_SIZE,
-    A_RETURN, A_THROW, A_DESCRIPTION, A_STATUS, A_REASON, A_FULFILLED, A_REJECTED, A_ERRORS, A_BIGINT,
+    A_RETURN, A_THROW, A_DESCRIPTION, A_STATUS, A_REASON, A_FULFILLED, A_REJECTED, A_ERRORS, A_BIGINT, A_CALLER,
     A_NATOMS
 };
 
@@ -534,6 +545,7 @@ jv js_aiter_of(js_vm *vm, jv v);
 /* an iterable's iterator (for-of's), and its next value: 0 when done */
 jv js_iter_of(js_vm *vm, jv v);
 int js_iter_step(js_vm *vm, uint32_t it, jv *out);
+int js_helper_step(js_vm *vm, uint32_t it, jv *out);   /* an Iterator Helper's next value (src/js/builtins.c): 1, 0 done */
 void js_iter_close(js_vm *vm, uint32_t it);
 /* a sync iterator sent next (mode 0), throw (1) or return (2): its result's value and
    done; 1 sent, 0 no such method, -1 it threw */
@@ -718,6 +730,10 @@ int js_set_value(js_vm *vm, jv obj, jv key, jv v);
 void js_define(js_vm *vm, uint32_t o, uint32_t atom, jv v, uint32_t flags);   /* an own data property, made or replaced */
 void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv setter, uint32_t flags);
 int js_has(js_vm *vm, uint32_t o, uint32_t atom);                    /* through the prototypes */
+/* a function's own property the engine keeps for it, not its shape (length, name, a sloppy function's arguments and
+   caller, a prototype not yet made): 1 when atom is one; its value (the prototype then made, in the shape) */
+int js_fn_virtual(js_vm *vm, uint32_t o, uint32_t atom);
+int js_fn_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out);
 int js_get_own(js_vm *vm, uint32_t o, uint32_t atom, jv *v, uint32_t *flags);
 /* o's shape's entry for a key: 1 when it has one, its flags in *flags and in *live whether
    it holds a value (a deleted property's entry holds none) */
@@ -959,6 +975,16 @@ enum {
                                                      module's binding lives (vm->mod_binds) */
     OP_IMPORT_META,                               /* -> this module's import.meta */
     OP_IMPORT_DYN,                                /* spec options -> import(spec)'s promise */
+    /* a class's private names (src/js/vm.c, js_priv_*): kind the compiler's PV_ flags (field 1, method 2, getter 4,
+       setter 8, static 16), atom the name (#x), class its class's name (0 none), for V8's TypeErrors */
+    OP_PRIV_NEW,                                  /* u32 atom: -> a new private name */
+    OP_PRIV_GET,                                  /* u8 kind, u32 atom, u32 class: obj key -> v */
+    OP_PRIV_GET2,                                 /* u8 kind, u32 atom, u32 class: obj key -> obj v */
+    OP_PRIV_PUT,                                  /* u8 kind, u32 atom, u32 class: obj key v -> v */
+    OP_PRIV_DEFINE,                               /* u8 kind, u32 atom, u32 class: obj key v -> obj (a field's value, a method) */
+    OP_PRIV_ACCESSOR,                             /* u8 kind, u32 atom, u32 class: obj key get set -> obj */
+    OP_PRIV_IN,                                   /* u32 atom: obj key -> bool (#x in obj) */
+    OP_HOME,                                      /* home fn -> home fn: a method's home object home */
     OP_NOP,
     OP_NOPS
 };

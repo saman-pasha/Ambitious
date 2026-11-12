@@ -2974,7 +2974,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
 void js_re_init(js_vm *vm, uint32_t first) {
     uint32_t rp = vm->regexp_proto;
     uint32_t c = js_native_new(vm, first + JRE_CTOR, js_atom_ascii(vm, "RegExp"), 2);
-    js_define(vm, c, A_PROTOTYPE, jv_obj(rp), JS_SHAPE_HIDDEN);
+    js_define(vm, c, A_PROTOTYPE, jv_obj(rp), JS_SHAPE_PROTO);
     js_define(vm, rp, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, js_atom_ascii(vm, "RegExp"), jv_obj(c), JS_SHAPE_HIDDEN);
     static const char *const fns[] = { "exec", "test", "toString" };

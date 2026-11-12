@@ -217,7 +217,7 @@ static jv fr_remote(js_vm *vm, uint32_t k, uint32_t obj) {
         if (js_is_constructor(pv, jv_obj(obj))) {
             jv rp = js_get(pv, jv_obj(obj), A_PROTOTYPE);
             pv->throwing = 0;
-            js_define(vm, t, A_PROTOTYPE, fr_value(vm, pv, k, rp), JS_SHAPE_HIDDEN);
+            js_define(vm, t, A_PROTOTYPE, fr_value(vm, pv, k, rp), JS_SHAPE_PROTO);
         }
     } else if (pv->objs[obj].kind == JK_ARRAY) {
         t = js_array_new(vm, 0);

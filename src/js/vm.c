@@ -516,11 +516,21 @@ int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
     uint32_t k = vm->objs[o].kind, i;
     if ((k == JK_ARRAY || k == JK_ARGUMENTS) && js_atom_index(vm, atom, &i)) return js_elem_delete(vm, o, i, atom);
     if (k == JK_ARRAY && atom == A_LENGTH) return 0;
+    int fnk = (k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND) && (atom == A_LENGTH || atom == A_NAME);
     uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
     if (e && vm->slots[vm->objs[o].slots + vm->shapes[e].slot] != JV_HOLE) {
         /* a property not configurable (defineProperty's, a sealed or frozen object's) stays */
         if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (vm->objs[o].flags & (JO_SEALED | JO_FROZEN))) return 0;
         vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
+        /* a function's length or name gone: not the engine's again */
+        if (fnk) vm->objs[o].flags |= atom == A_LENGTH ? JO_FN_NOLENGTH : JO_FN_NONAME;
+        return 1;
+    }
+    if ((k == JK_CLOSURE || k == JK_NATIVE) && js_fn_virtual(vm, o, atom)) {
+        /* the engine's own: arguments, caller and a prototype not configurable; length and name as a sealed or
+           frozen function's stay */
+        if (!fnk || (vm->objs[o].flags & (JO_SEALED | JO_FROZEN))) return 0;
+        vm->objs[o].flags |= atom == A_LENGTH ? JO_FN_NOLENGTH : JO_FN_NONAME;
     }
     return 1;
 }
@@ -1289,35 +1299,95 @@ int js_loose_eq(js_vm *vm, jv a, jv b) {
 
 /* ---- property access ---- */
 
-/* a closure's lazily made own properties: prototype, length, name */
-static int js_func_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out) {
+/* ---- a function's own properties as the engine keeps them ----
+   A closure's and a native's length and name, a sloppy function's arguments and caller and a constructor's prototype
+   (not yet made) are its own without its shape holding them, as V8's are accessors of the engine's: read (and the
+   prototype made, in the shape, at its first reading) as asked. Length and name are read-only and configurable (a
+   definition puts one in the shape, a deletion marks it gone: JO_FN_NOLENGTH, JO_FN_NONAME); arguments and caller
+   neither writable nor configurable, never in the shape; the prototype writable, not configurable. A bound function
+   has its length and name in its shape from its making. */
+
+/* a function V8 gives arguments and caller of its own: a sloppy function that is neither an arrow, a method, a
+   class's constructor, a generator nor async */
+static int js_fn_sloppy(uint32_t ff) { return !(ff & (JF_STRICT | JF_ARROW | JF_METHOD | JF_CLASS_CTOR | JF_GENERATOR | JF_ASYNC | JF_GETTER | JF_TOPLEVEL)); }
+/* a function with a prototype of its own: a constructor (a class's is made with its own) or a generator */
+static int js_fn_constructs(uint32_t ff) { return (ff & JF_GENERATOR) || !(ff & (JF_ARROW | JF_METHOD | JF_ASYNC)); }
+static int js_shape_live(js_vm *vm, uint32_t o, uint32_t atom) {
+    uint32_t e = js_shape_find(vm, vm->objs[o].shape, atom);
+    return e && vm->slots[vm->objs[o].slots + vm->shapes[e].slot] != JV_HOLE;
+}
+
+int js_fn_virtual(js_vm *vm, uint32_t o, uint32_t atom) {
+    if (atom != A_LENGTH && atom != A_NAME && atom != A_PROTOTYPE && atom != A_ARGUMENTS && atom != A_CALLER) return 0;
+    uint32_t k = vm->objs[o].kind;
+    if (k != JK_CLOSURE && k != JK_NATIVE) return 0;
+    uint32_t ff = k == JK_CLOSURE ? vm->funcs[vm->objs[o].a].flags : 0;
+    if (atom == A_ARGUMENTS || atom == A_CALLER) return k == JK_CLOSURE && js_fn_sloppy(ff);
+    if (js_shape_live(vm, o, atom)) return 0;
+    if (atom == A_LENGTH) return !(vm->objs[o].flags & JO_FN_NOLENGTH);
+    if (atom == A_NAME) return !(vm->objs[o].flags & JO_FN_NONAME);
+    return k == JK_CLOSURE && js_fn_constructs(ff);
+}
+
+/* a sloppy function's arguments or caller (V8's FunctionArgumentsGetter, FunctionCallerGetter): of its newest call
+   running, a new arguments object of what it was given, and the function that called it -- the scripts' code passed
+   over, none when that one is strict; null when it is not running */
+static jv js_fn_frame_prop(js_vm *vm, uint32_t o, uint32_t atom) {
+    for (uint32_t fi = vm->nframes; fi-- > 0;) {
+        if (vm->frames[fi].callee != o || vm->frames[fi].gen) continue;
+        if (atom == A_ARGUMENTS) {
+            js_frame fr = vm->frames[fi];
+            uint32_t arr = js_array_new(vm, 0), n = fr.argc;
+            if (fr.args) for (uint32_t i = 0; i < vm->objs[fr.args].b; i++) js_array_push(vm, arr, js_array_get(vm, fr.args, i));
+            else {
+                /* its parameters' slots (what it was given past them not kept) */
+                uint32_t np = vm->funcs[fr.func].nparams;
+                if (n > np) n = np;
+                for (uint32_t i = 0; i < n; i++) js_array_push(vm, arr, vm->stack[fr.base + i]);
+            }
+            uint32_t a = js_obj_new(vm, JK_ARGUMENTS, vm->object_proto);
+            vm->objs[a].a = arr;
+            js_define(vm, a, A_LENGTH, jv_num(vm->objs[arr].b), JS_SHAPE_HIDDEN);
+            js_define(vm, a, JS_KEY_ITERATOR, jv_obj(vm->array_values), JS_SHAPE_HIDDEN);
+            js_define(vm, a, A_CALLEE, jv_obj(o), JS_SHAPE_HIDDEN);
+            return jv_obj(a);
+        }
+        for (uint32_t ci = fi; ci-- > 0;) {
+            uint32_t cf = vm->frames[ci].callee, ff = vm->funcs[vm->frames[ci].func].flags;
+            if ((ff & JF_TOPLEVEL) || !cf || vm->objs[cf].kind != JK_CLOSURE) continue;
+            return (ff & JF_STRICT) ? JV_NULL : jv_obj(cf);
+        }
+        return JV_NULL;
+    }
+    return JV_NULL;
+}
+
+int js_fn_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out) {
+    if (!js_fn_virtual(vm, o, atom)) return 0;
     uint32_t k = vm->objs[o].kind;
     if (k == JK_CLOSURE) {
         js_func f = vm->funcs[vm->objs[o].a];
-        if (atom == A_PROTOTYPE && (f.flags & JF_GENERATOR)) {
-            uint32_t p = js_obj_new(vm, JK_PLAIN, (f.flags & JF_ASYNC) ? vm->async_generator_proto : vm->generator_proto);
-            js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
-            *out = jv_obj(p);
-            return 1;
-        }
-        if (atom == A_PROTOTYPE && !(f.flags & (JF_ARROW | JF_METHOD | JF_ASYNC))) {
-            uint32_t p = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-            js_define(vm, p, A_CONSTRUCTOR, jv_obj(o), JS_SHAPE_HIDDEN);
-            js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
+        if (atom == A_ARGUMENTS || atom == A_CALLER) { *out = js_fn_frame_prop(vm, o, atom); return 1; }
+        if (atom == A_PROTOTYPE) {
+            uint32_t p;
+            if (f.flags & JF_GENERATOR) p = js_obj_new(vm, JK_PLAIN, (f.flags & JF_ASYNC) ? vm->async_generator_proto : vm->generator_proto);
+            else {
+                p = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+                js_define(vm, p, A_CONSTRUCTOR, jv_obj(o), JS_SHAPE_HIDDEN);
+            }
+            js_define(vm, o, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN | JS_SHAPE_FIXED);
             *out = jv_obj(p);
             return 1;
         }
         if (atom == A_LENGTH) { *out = jv_num(f.arity); return 1; }
-        if (atom == A_NAME) { *out = jv_str(f.name ? f.name : A_EMPTY); return 1; }
-    } else if (k == JK_NATIVE) {
-        if (atom == A_LENGTH) { *out = jv_num(vm->objs[o].b); return 1; }
-        if (atom == A_NAME) { *out = jv_str(vm->objs[o].c ? vm->objs[o].c : A_EMPTY); return 1; }
-    } else if (k == JK_BOUND) {
-        if (atom == A_LENGTH) { *out = jv_num(0); return 1; }
-        if (atom == A_NAME) { *out = jv_str(A_EMPTY); return 1; }
+        *out = jv_str(f.name ? f.name : A_EMPTY);
+        return 1;
     }
-    return 0;
+    if (atom == A_LENGTH) { *out = jv_num(vm->objs[o].b); return 1; }
+    *out = jv_str(vm->objs[o].c ? vm->objs[o].c : A_EMPTY);
+    return 1;
 }
+static int js_func_lazy(js_vm *vm, uint32_t o, uint32_t atom, jv *out) { return js_fn_lazy(vm, o, atom, out); }
 
 static jv js_call_getter(js_vm *vm, jv acc, jv receiver) {
     jv g = vm->objs[jv_idx(acc)].x;
@@ -1371,7 +1441,7 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
             }
         }
         jv lz;
-        if ((k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND) && js_func_lazy(vm, x, atom, &lz)) return lz;
+        if ((k == JK_CLOSURE || k == JK_NATIVE) && js_func_lazy(vm, x, atom, &lz)) return lz;
         x = vm->objs[x].proto;
     }
     return JV_UNDEF;
@@ -1454,6 +1524,8 @@ static int js_proto_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, jv objv) {
             int ok = js_host_set(vm, p, atom, v, &handled);
             if (handled) return ok;
         }
+        if ((vm->objs[p].kind == JK_CLOSURE || vm->objs[p].kind == JK_NATIVE) && js_fn_virtual(vm, p, atom))
+            return atom == A_PROTOTYPE && !(vm->objs[p].flags & JO_FROZEN) ? -1 : js_refuse(vm, JSR_READONLY, atom);
         uint32_t pe = js_shape_find(vm, vm->objs[p].shape, atom);
         if (!pe) continue;
         jv pv = vm->slots[vm->objs[p].slots + vm->shapes[pe].slot];
@@ -1539,6 +1611,11 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         int handled = 0;
         int ok = js_host_set(vm, o, atom, v, &handled);
         if (handled) return ok;
+    } else if ((k == JK_CLOSURE || k == JK_NATIVE) && js_fn_virtual(vm, o, atom)) {
+        /* a function's own the engine keeps: read-only but its prototype, which is made (into the shape) and written */
+        if (atom != A_PROTOTYPE) return js_refuse(vm, JSR_READONLY, atom);
+        jv pv;
+        js_func_lazy(vm, o, atom, &pv);
     }
     uint32_t sh = vm->objs[o].shape;
     uint32_t e = js_shape_find(vm, sh, atom);
@@ -1605,7 +1682,8 @@ static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
     uint32_t of = js_str_utf8(vm, data(t), len(t));
     if (why == JSR_READONLY || why == JSR_LENGTH)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
-                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, "' of object '"), js_str_concat(vm, of, js_str_ascii(vm, "'")))));
+                          js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, js_is_callable(vm, obj) ? "' of function '" : "' of object '"),
+                                                                js_str_concat(vm, of, js_str_ascii(vm, "'")))));
     else if (why == JSR_GETTER)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot set property "),
                           js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, " of "), js_str_concat(vm, of, js_str_ascii(vm, " which has only a getter")))));
@@ -1728,8 +1806,7 @@ int js_has(js_vm *vm, uint32_t o, uint32_t atom) {
         jv v;
         uint32_t f;
         if (js_get_own(vm, x, atom, &v, &f)) return 1;
-        jv lz;
-        if ((k == JK_CLOSURE || k == JK_NATIVE) && js_func_lazy(vm, x, atom, &lz)) return 1;
+        if ((k == JK_CLOSURE || k == JK_NATIVE) && js_fn_virtual(vm, x, atom)) return 1;
     }
     return 0;
 }
@@ -1786,13 +1863,22 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
     }
     /* an array's or a String's length, not enumerable, the first of its names */
     if (!enumerable_only && (k == JK_ARRAY || k == JK_STRING)) js_array_push(vm, arr, jv_str(A_LENGTH));
+    /* a function's length, name, a sloppy one's arguments and caller and its prototype, first and in that order (V8's),
+       whether the engine keeps them or its shape does */
+    int fnk = !enumerable_only && (k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND);
+    if (fnk) {
+        static const uint32_t fn_names[] = { A_LENGTH, A_NAME, A_ARGUMENTS, A_CALLER, A_PROTOTYPE };
+        for (uint32_t q = 0; q < 5; q++)
+            if (js_shape_live(vm, o, fn_names[q]) || js_fn_virtual(vm, o, fn_names[q])) js_array_push(vm, arr, jv_str(fn_names[q]));
+    }
     for (size_t q = len(es); q > 0; q--) {
         uint32_t e = at(es, q - 1);
         if (vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) continue;
         if (enumerable_only && (vm->shapes[e].flags & JS_SHAPE_HIDDEN)) continue;
-        uint32_t i;
-        if (js_key_is_sym(vm->shapes[e].atom) || js_atom_index(vm, vm->shapes[e].atom, &i)) continue;
-        js_array_push(vm, arr, jv_str(vm->shapes[e].atom));
+        uint32_t i, a = vm->shapes[e].atom;
+        if (js_key_is_sym(a) || js_atom_index(vm, a, &i)) continue;
+        if (fnk && (a == A_LENGTH || a == A_NAME || a == A_ARGUMENTS || a == A_CALLER || a == A_PROTOTYPE)) continue;
+        js_array_push(vm, arr, jv_str(a));
     }
 }
 
@@ -1804,7 +1890,7 @@ void js_own_symbols(js_vm *vm, uint32_t o, uint32_t arr) {
         uint32_t e = at(es, q - 1);
         if (vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) continue;
         uint32_t k = vm->shapes[e].atom;
-        if (js_key_is_sym(k)) js_array_push(vm, arr, jv_sym(k & ~JS_SYM_KEY));
+        if (js_key_is_sym(k) && vm->syms[k & ~JS_SYM_KEY].reg != JS_SYM_PRIVATE) js_array_push(vm, arr, jv_sym(k & ~JS_SYM_KEY));
     }
 }
 
@@ -1846,6 +1932,87 @@ int js_instance_of(js_vm *vm, jv v, jv ctor) {
         if (x == jv_idx(p)) return 1;
     }
     return 0;
+}
+
+/* ---- private names (ECMA-262 7.3.31, PrivateGet, PrivateSet, PrivateFieldAdd, PrivateMethodOrAccessorAdd) ----
+   An object's private elements are its own properties under a private name's symbol: found in its own shape alone
+   (no prototype, no proxy's trap, no host's hook), written whether it is frozen or not, added whether it is
+   extensible or not. kind is the compiler's: field 1, method 2, getter 4, setter 8, static 16 */
+#define JPV_FIELD 1
+#define JPV_METHOD 2
+#define JPV_GET 4
+#define JPV_SET 8
+#define JPV_STATIC 16
+static uint32_t js_priv_slot(js_vm *vm, jv ov, jv key, uint32_t *flags) {
+    if (!jv_is_obj(ov) || !jv_is_sym(key)) return 0;
+    uint32_t o = jv_idx(ov), e = js_shape_find(vm, vm->objs[o].shape, JS_SYM_KEY | jv_idx(key));
+    if (!e) return 0;
+    uint32_t s = vm->objs[o].slots + vm->shapes[e].slot;
+    if (vm->slots[s] == JV_HOLE) return 0;
+    *flags = vm->shapes[e].flags;
+    return s + 1;
+}
+/* V8's words: a method's or an accessor's brand missing, a field's member */
+static void js_priv_missing(js_vm *vm, uint32_t kind, uint32_t name, uint32_t cls, int write) {
+    vector<char> m;
+    if (kind & (JPV_METHOD | JPV_GET | JPV_SET)) {
+        js_put(&m, (kind & JPV_STATIC) ? "Receiver must be class " : "Receiver must be an instance of class ");
+        if (cls) js_str_to_utf8(vm, cls, &m);
+        else js_put(&m, "anonymous");
+    } else {
+        js_put(&m, write ? "Cannot write private member " : "Cannot read private member ");
+        js_str_to_utf8(vm, name, &m);
+        js_put(&m, write ? " to an object whose class did not declare it" : " from an object whose class did not declare it");
+    }
+    js_throw_chars(vm, vm->type_error_proto, &m);
+}
+static void js_priv_error(js_vm *vm, const char *a, uint32_t name, const char *b) {
+    vector<char> m;
+    js_put(&m, a);
+    js_str_to_utf8(vm, name, &m);
+    js_put(&m, b);
+    js_throw_chars(vm, vm->type_error_proto, &m);
+}
+static jv js_priv_get(js_vm *vm, jv ov, jv key, uint32_t kind, uint32_t name, uint32_t cls) {
+    uint32_t fl = 0, s = js_priv_slot(vm, ov, key, &fl);
+    if (!s) { js_priv_missing(vm, kind, name, cls, 0); return JV_UNDEF; }
+    jv v = vm->slots[s - 1];
+    if (!(fl & JS_SHAPE_ACCESSOR)) return v;
+    jv g = vm->objs[jv_idx(v)].x;
+    if (!js_is_callable(vm, g)) { js_priv_error(vm, "'", name, "' was defined without a getter"); return JV_UNDEF; }
+    return js_call(vm, g, ov, 0, 0);
+}
+static void js_priv_put(js_vm *vm, jv ov, jv key, jv v, uint32_t kind, uint32_t name, uint32_t cls) {
+    uint32_t fl = 0, s = js_priv_slot(vm, ov, key, &fl);
+    if (!s) { js_priv_missing(vm, kind, name, cls, 1); return; }
+    jv cur = vm->slots[s - 1];
+    if (fl & JS_SHAPE_ACCESSOR) {
+        uint32_t st = vm->objs[jv_idx(cur)].a;
+        if (!st) { js_priv_error(vm, "'", name, "' was defined without a setter"); return; }
+        jv a1[1] = { v };
+        js_call(vm, jv_obj(st), ov, a1, 1);
+        return;
+    }
+    if (fl & JS_SHAPE_READONLY) { js_priv_error(vm, "Private method '", name, "' is not writable"); return; }
+    vm->slots[s - 1] = v;
+}
+/* a field, a method or an accessor added: refused when the object has it (V8's words, a method's naming its class) */
+static void js_priv_add(js_vm *vm, jv ov, jv key, jv v, jv g, jv st, uint32_t kind, uint32_t name, uint32_t cls) {
+    uint32_t fl = 0;
+    if (!jv_is_obj(ov)) { js_priv_missing(vm, kind, name, cls, 1); return; }
+    if (js_priv_slot(vm, ov, key, &fl)) {
+        if (kind & JPV_FIELD) { js_priv_error(vm, "Cannot initialize ", name, " twice on the same object"); return; }
+        vector<char> m;
+        js_put(&m, "Cannot initialize private methods of class ");
+        if (cls) js_str_to_utf8(vm, cls, &m);
+        else js_put(&m, "anonymous");
+        js_put(&m, " twice on the same object");
+        js_throw_chars(vm, vm->type_error_proto, &m);
+        return;
+    }
+    uint32_t o = jv_idx(ov), k = JS_SYM_KEY | jv_idx(key);
+    if (kind & (JPV_GET | JPV_SET)) js_define_accessor(vm, o, k, g, st, JS_SHAPE_HIDDEN | JS_SHAPE_FIXED);
+    else js_define(vm, o, k, v, JS_SHAPE_HIDDEN | JS_SHAPE_FIXED | ((kind & JPV_METHOD) ? JS_SHAPE_READONLY : 0));
 }
 
 /* ---- functions ---- */
@@ -2026,6 +2193,7 @@ static jv js_iter_of_at(js_vm *vm, jv v, uint32_t pc) {
 /* the iterator's next value into *out: 0 when it is done */
 int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
     uint32_t src = vm->objs[it].a, i = vm->objs[it].b, mode = vm->objs[it].c;
+    if (mode == JI_HELPER) return js_helper_step(vm, it, out);
     if (mode == JI_GEN) {
         if (vm->objs[it].b) return 0;
         int done = 0;
@@ -2139,6 +2307,16 @@ static jv js_iter_take(js_vm *vm, jv v, uint32_t n, uint32_t pc) {
 void js_iter_close(js_vm *vm, uint32_t it) {
     if (!it || vm->objs[it].kind != JK_ITER) return;
     uint32_t mode = vm->objs[it].c, src = vm->objs[it].a;
+    if (mode == JI_HELPER) {
+        /* a helper closed through its own return (which closes what it reads) */
+        int hw = vm->throwing;
+        jv hs = vm->exception;
+        vm->throwing = 0;
+        jv rf = js_get(vm, jv_obj(it), A_RETURN);
+        if (!vm->throwing && js_is_callable(vm, rf)) js_call(vm, rf, jv_obj(it), 0, 0);
+        if (hw) { vm->throwing = hw; vm->exception = hs; }
+        return;
+    }
     if ((mode != JI_GEN && mode != JI_PROTOCOL) || vm->objs[it].b) return;
     vm->objs[it].b = 1;
     int was = vm->throwing;
@@ -3739,7 +3917,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             { uint32_t cs = js_shape_of(vm, ctor_parent); RELOAD(); objs[c].shape = cs; }
             objs[c].flags = (uint16_t)((objs[c].flags | JO_CLASS_CTOR | (derived ? JO_DERIVED : 0)) & ~JO_FASTCALL);
             objs[c].c = proto;
-            js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN); RELOAD();
+            js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_PROTO); RELOAD();
             js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN); RELOAD();
             stack[sp - 1] = jv_obj(c);
             stack[sp++] = jv_obj(proto);
@@ -4196,6 +4374,74 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             stack[sp++] = r;
             goto next;
         }
+        case OP_PRIV_NEW: {
+            uint32_t atom = RD32(pc);
+            pc += 4;
+            uint32_t y = js_sym_new(vm, atom); RELOAD();
+            vm->syms[y].reg = JS_SYM_PRIVATE;
+            stack[sp++] = jv_sym(y);
+            break;
+        }
+        case OP_PRIV_GET: case OP_PRIV_GET2: {
+            uint32_t kind = code[pc], atom = RD32(pc + 1), cls = RD32(pc + 5);
+            pc += 9;
+            jv k = stack[sp - 1], ov = stack[sp - 2];
+            SYNC();
+            jv v = js_priv_get(vm, ov, k, kind, atom, cls); RELOAD();
+            if (vm->throwing) break;
+            if (op == OP_PRIV_GET) { sp--; stack[sp - 1] = v; }
+            else stack[sp - 1] = v;
+            break;
+        }
+        case OP_PRIV_PUT: {
+            uint32_t kind = code[pc], atom = RD32(pc + 1), cls = RD32(pc + 5);
+            pc += 9;
+            jv v = stack[sp - 1], k = stack[sp - 2], ov = stack[sp - 3];
+            SYNC();
+            js_priv_put(vm, ov, k, v, kind, atom, cls); RELOAD();
+            if (vm->throwing) break;
+            sp -= 2;
+            stack[sp - 1] = v;
+            break;
+        }
+        case OP_PRIV_DEFINE: case OP_PRIV_ACCESSOR: {
+            uint32_t kind = code[pc], atom = RD32(pc + 1), cls = RD32(pc + 5);
+            pc += 9;
+            int acc = op == OP_PRIV_ACCESSOR;
+            uint32_t base = sp - (acc ? 4 : 3);
+            jv ov = stack[base], k = stack[base + 1];
+            jv v = acc ? JV_UNDEF : stack[base + 2], g = acc ? stack[base + 2] : JV_UNDEF, st = acc ? stack[base + 3] : JV_UNDEF;
+            SYNC();
+            js_priv_add(vm, ov, k, v, g, st, kind, atom, cls); RELOAD();
+            if (vm->throwing) break;
+            sp = base + 1;
+            break;
+        }
+        case OP_PRIV_IN: {
+            uint32_t atom = RD32(pc);
+            pc += 4;
+            jv k = stack[sp - 1], ov = stack[sp - 2];
+            if (!jv_is_obj(ov)) {
+                SYNC();
+                vector<char> m;
+                js_put(&m, "Cannot use 'in' operator to search for '");
+                js_str_to_utf8(vm, atom, &m);
+                js_put(&m, "' in ");
+                js_value_text(vm, ov, &m);
+                js_throw_chars(vm, vm->type_error_proto, &m); RELOAD();
+                break;
+            }
+            uint32_t fl = 0;
+            int has = js_priv_slot(vm, ov, k, &fl) != 0; RELOAD();
+            sp--;
+            stack[sp - 1] = jv_bool(has);
+            goto next;
+        }
+        case OP_HOME: {
+            jv fn = stack[sp - 1], home = stack[sp - 2];
+            if (jv_is_obj(fn) && objs[jv_idx(fn)].kind == JK_CLOSURE && jv_is_obj(home)) objs[jv_idx(fn)].c = jv_idx(home);
+            goto next;
+        }
         case OP_NOP: goto next;
         /* every byte has its case (no default): the switch's jump has no range check */
         OP_UNUSED8(OP_NOPS) OP_UNUSED8(OP_NOPS + 8) OP_UNUSED8(OP_NOPS + 16) OP_UNUSED8(OP_NOPS + 24)
@@ -4281,7 +4527,7 @@ static const char *const js_atom_names[A_NATOMS] = {
     "get", "set", "value", "writable", "enumerable", "configurable", "undefined", "null", "true", "false",
     "object", "function", "number", "string", "boolean", "symbol", "", "default", "done", "next",
     "then", "toJSON", "index", "input", "arguments", "cause", "lastIndex", "size",
-    "return", "throw", "description", "status", "reason", "fulfilled", "rejected", "errors", "bigint" };
+    "return", "throw", "description", "status", "reason", "fulfilled", "rejected", "errors", "bigint", "caller" };
 
 void js_init(js_vm *vm) {
     memset(vm, 0, sizeof *vm);

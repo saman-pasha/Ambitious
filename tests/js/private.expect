@@ -1,0 +1,64 @@
+get 1
+set 2
+undefined field undefined
+method m2
+getter g2
+setter 7
+static field s
+static method sm
+static getter sg
+in true,false,true,false,true,false
+in prim TypeError: Cannot use 'in' operator to search for '#x' in 1
+keys 0 0 0 {} 0
+spread 0
+assign 0
+static keys length,name,prototype,getS,callSm,readSg,has,hasM,hasS,read,write,callOn,getOn,setOn,writeM,writeSg
+read other TypeError: Cannot read private member #x from an object whose class did not declare it
+write other TypeError: Cannot write private member #x to an object whose class did not declare it
+call other TypeError: Receiver must be an instance of class A
+get other TypeError: Receiver must be an instance of class A
+set other TypeError: Receiver must be an instance of class A
+write method TypeError: Private method '#m' is not writable
+write getter only TypeError: '#sg' was defined without a setter
+frozen 9
+proxy false
+proxy read TypeError: Cannot read private member #x from an object whose class did not declare it
+subclass b,1
+twice Cannot initialize #f twice on the same object true
+twice method Cannot initialize private methods of class C twice on the same object
+nested outer
+nested shadow inner | Cannot read private member #p from an object whose class did not declare it
+each eval true,false
+optional 3,
+compound 6
+destructure 42
+call this true
+method identity true
+getter name #m
+typeof function
+static on instance TypeError: Cannot read private member #s from an object whose class did not declare it
+static method other TypeError: Receiver must be class C
+field order a,b,c
+fields see methods mm
+toString true
+undeclared SyntaxError: Private field '#nope' must be declared in an enclosing class
+outside SyntaxError: Private field '#x' must be declared in an enclosing class
+dup SyntaxError: Identifier '#a' has already been declared
+dup method SyntaxError: Identifier '#a' has already been declared
+get set ok ok
+get get SyntaxError: Identifier '#a' has already been declared
+static mix SyntaxError: Identifier '#a' has already been declared
+delete SyntaxError: Private fields can not be deleted
+ctor name SyntaxError: Classes may not have a field named 'constructor'
+ctor method SyntaxError: Class constructor may not be a private method
+in undeclared SyntaxError: Private field '#z' must be declared in an enclosing class
+in bad SyntaxError: Unexpected identifier '#a'
+super private SyntaxError: Unexpected private field
+optional call ok ok
+await ref SyntaxError: Unexpected reserved word
+await var SyntaxError: Unexpected reserved word
+await let SyntaxError: Unexpected reserved word
+await in fn ok
+await in arrow body ok
+await label SyntaxError: Unexpected reserved word
+await expr SyntaxError: Unexpected reserved word

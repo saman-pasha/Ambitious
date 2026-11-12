@@ -71,6 +71,9 @@ enum {
     N_SP_ANCHOR, N_SP_BIG, N_SP_BLINK, N_SP_BOLD, N_SP_FIXED, N_SP_FONTCOLOR, N_SP_FONTSIZE, N_SP_ITALICS, N_SP_LINK, N_SP_SMALL,
     N_SP_STRIKE, N_SP_SUB, N_SP_SUP, N_NP_TOEXPONENTIAL, N_M_ACOSH, N_M_ASINH, N_M_ATANH, N_OP_DEFGETTER, N_OP_DEFSETTER,
     N_OP_LOOKUPGETTER, N_OP_LOOKUPSETTER,
+    N_ITERATOR, N_ITER_FROM, N_WRAP_NEXT, N_WRAP_RETURN, N_ITP_MAP, N_ITP_FILTER, N_ITP_TAKE, N_ITP_DROP, N_ITP_FLATMAP,
+    N_ITP_REDUCE, N_ITP_TOARRAY, N_ITP_FOREACH, N_ITP_SOME, N_ITP_EVERY, N_ITP_FIND, N_ITP_CTOR_GET, N_ITP_CTOR_SET, N_ITP_TAG_GET,
+    N_ITP_TAG_SET, N_HELPER_NEXT, N_HELPER_RETURN,
     /* RegExp's natives (src/js/regexp.c), JRE_N of them; Proxy's, Reflect's and the weak
        collections' (src/js/proxy.c), JPX_N */
     N_RE_FIRST,
@@ -95,7 +98,7 @@ static void defv(js_vm *vm, uint32_t o, const char *name, jv v) { js_define(vm, 
 static uint32_t ctor(js_vm *vm, const char *name, uint32_t id, uint32_t nargs, uint32_t proto) {
     uint32_t atom = js_atom_ascii(vm, name);
     uint32_t c = js_native_new(vm, id, atom, nargs);
-    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN);
+    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_PROTO);
     js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, atom, jv_obj(c), JS_SHAPE_HIDDEN);
     return c;
@@ -2391,6 +2394,221 @@ static jv set_method(js_vm *vm, uint32_t id, jv thisv, jv other) {
     return st < 0 ? JV_HOLE : JV_TRUE;
 }
 
+/* ---- the Iterator global and its helpers (ECMA-262 27.1.3, Iterator Helpers) ----
+   A helper is an iterator object (JI_HELPER) whose record (an array in a) holds: the iterator it reads and its next,
+   the function given it, its counter, what remains to take or drop, flatMap's inner iterator and its next, its kind
+   and its state (0 not started, 1 suspended, 2 running, 3 done) */
+enum { IH_ITER, IH_NEXT, IH_FN, IH_COUNT, IH_REMAIN, IH_INNER, IH_INNER_NEXT, IH_KIND, IH_STATE, IH_N };
+enum { IHK_MAP, IHK_FILTER, IHK_TAKE, IHK_DROP, IHK_FLATMAP };
+
+/* IteratorStepValue: 1 a value in *out, 0 done, -1 thrown */
+static int iter_step_value(js_vm *vm, jv it, jv next, jv *out) {
+    if (!js_is_callable(vm, next)) { js_not_function(vm, next); return -1; }
+    jv r = js_call(vm, next, it, 0, 0);
+    if (vm->throwing) return -1;
+    if (!jv_is_obj(r)) { value_error(vm, "Iterator result ", r, " is not an object"); return -1; }
+    jv d = js_get(vm, r, A_DONE);
+    if (vm->throwing) return -1;
+    if (js_truthy(vm, d)) return 0;
+    *out = js_get(vm, r, A_VALUE);
+    return vm->throwing ? -1 : 1;
+}
+/* IteratorClose: the iterator's return called; with an exception in flight, it stays the one thrown */
+static void iter_close_obj(js_vm *vm, jv it) {
+    int was = vm->throwing;
+    jv saved = vm->exception;
+    vm->throwing = 0;
+    jv rf = js_get(vm, it, A_RETURN);
+    if (!vm->throwing && js_is_callable(vm, rf)) {
+        jv r = js_call(vm, rf, it, 0, 0);
+        if (!vm->throwing && !was && !jv_is_obj(r)) value_error(vm, "Iterator result ", r, " is not an object");
+    }
+    if (was) { vm->throwing = was; vm->exception = saved; }
+}
+static jv ih_get(js_vm *vm, uint32_t rec, uint32_t k) { return js_array_get(vm, rec, k); }
+static void ih_set(js_vm *vm, uint32_t rec, uint32_t k, jv v) { js_array_set(vm, rec, k, v); }
+static jv ih_done(js_vm *vm, uint32_t rec) { ih_set(vm, rec, IH_STATE, jv_num(3)); return JV_UNDEF; }
+
+int js_helper_step(js_vm *vm, uint32_t it, jv *out) {
+    uint32_t rec = vm->objs[it].a;
+    int st = (int)jv_dbl(ih_get(vm, rec, IH_STATE));
+    if (st == 3) return 0;
+    if (st == 2) { js_throw_msg(vm, vm->type_error_proto, "Generator is already running"); return 0; }
+    ih_set(vm, rec, IH_STATE, jv_num(2));
+    jv src = ih_get(vm, rec, IH_ITER), next = ih_get(vm, rec, IH_NEXT), fn = ih_get(vm, rec, IH_FN);
+    int kind = (int)jv_dbl(ih_get(vm, rec, IH_KIND));
+    double count = jv_dbl(ih_get(vm, rec, IH_COUNT));
+    jv v = JV_UNDEF;
+    for (;;) {
+        if (kind == IHK_FLATMAP) {
+            jv inner = ih_get(vm, rec, IH_INNER);
+            if (inner != JV_UNDEF) {
+                int r = iter_step_value(vm, inner, ih_get(vm, rec, IH_INNER_NEXT), &v);
+                if (r < 0) { iter_close_obj(vm, src); ih_done(vm, rec); return 0; }
+                if (r > 0) { ih_set(vm, rec, IH_STATE, jv_num(1)); *out = v; return 1; }
+                ih_set(vm, rec, IH_INNER, JV_UNDEF);
+            }
+        }
+        if (kind == IHK_TAKE) {
+            double rem = jv_dbl(ih_get(vm, rec, IH_REMAIN));
+            if (rem == 0) { iter_close_obj(vm, src); ih_done(vm, rec); return 0; }
+            if (rem != INFINITY) ih_set(vm, rec, IH_REMAIN, jv_num(rem - 1));
+        }
+        if (kind == IHK_DROP) {
+            double rem = jv_dbl(ih_get(vm, rec, IH_REMAIN));
+            while (rem > 0) {
+                if (rem != INFINITY) { rem--; ih_set(vm, rec, IH_REMAIN, jv_num(rem)); }
+                int r = iter_step_value(vm, src, next, &v);
+                if (r <= 0) { ih_done(vm, rec); return 0; }
+            }
+        }
+        int r = iter_step_value(vm, src, next, &v);
+        if (r <= 0) { ih_done(vm, rec); return 0; }
+        if (kind == IHK_TAKE || kind == IHK_DROP) { ih_set(vm, rec, IH_STATE, jv_num(1)); *out = v; return 1; }
+        jv av[2] = { v, jv_num(count) };
+        jv m = js_call(vm, fn, JV_UNDEF, av, 2);
+        if (vm->throwing) { iter_close_obj(vm, src); ih_done(vm, rec); return 0; }
+        count++;
+        ih_set(vm, rec, IH_COUNT, jv_num(count));
+        if (kind == IHK_MAP) { ih_set(vm, rec, IH_STATE, jv_num(1)); *out = m; return 1; }
+        if (kind == IHK_FILTER) {
+            if (js_truthy(vm, m)) { ih_set(vm, rec, IH_STATE, jv_num(1)); *out = v; return 1; }
+            continue;
+        }
+        /* flatMap: the mapped value's own iterator (a string refused), read until done */
+        if (!jv_is_obj(m)) {
+            js_throw_msg(vm, vm->type_error_proto, "Iterator.prototype.flatMap called on non-object");
+            iter_close_obj(vm, src);
+            ih_done(vm, rec);
+            return 0;
+        }
+        jv im = js_get(vm, m, JS_KEY_ITERATOR), inner = m;
+        if (!vm->throwing && !jv_is_nullish(im)) {
+            inner = js_call(vm, im, m, 0, 0);
+            if (!vm->throwing && !jv_is_obj(inner)) js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.iterator method is not an object");
+        }
+        jv inext = vm->throwing ? JV_UNDEF : js_get(vm, inner, A_NEXT);
+        if (vm->throwing) { iter_close_obj(vm, src); ih_done(vm, rec); return 0; }
+        ih_set(vm, rec, IH_INNER, inner);
+        ih_set(vm, rec, IH_INNER_NEXT, inext);
+    }
+}
+
+/* GetIteratorDirect of this for a helper method (V8's "<method> called on non-object") */
+static int iter_direct(js_vm *vm, jv thisv, const char *method, jv *next) {
+    if (!jv_is_obj(thisv)) {
+        char m[96];
+        snprintf(m, sizeof m, "%s called on non-object", method);
+        js_throw_msg(vm, vm->type_error_proto, m);
+        return 0;
+    }
+    *next = js_get(vm, thisv, A_NEXT);
+    return !vm->throwing;
+}
+/* a helper's or a consumer's function argument, V8's words when it is none */
+static int iter_fn_ok(js_vm *vm, jv fn, const char *method) {
+    if (js_is_callable(vm, fn)) return 1;
+    char m[96];
+    snprintf(m, sizeof m, "string \"%s\" is not a function", method);
+    js_throw_msg(vm, vm->type_error_proto, m);
+    return 0;
+}
+static jv iter_helper(js_vm *vm, uint32_t id, jv thisv, jv a0) {
+    static const char *const names[] = { "Iterator.prototype.map", "Iterator.prototype.filter", "Iterator.prototype.take",
+                                         "Iterator.prototype.drop", "Iterator.prototype.flatMap" };
+    int kind = (int)(id - N_ITP_MAP);
+    if (!jv_is_obj(thisv)) return iter_direct(vm, thisv, names[kind], &a0) ? JV_UNDEF : JV_HOLE;
+    double rem = 0;
+    if (kind == IHK_TAKE || kind == IHK_DROP) {
+        double n = js_to_number(vm, a0);
+        if (vm->throwing) return JV_HOLE;
+        if (n != n || trunc(n) < 0) {
+            char b[64], m[96];
+            js_num_format(n, b, sizeof b);
+            snprintf(m, sizeof m, "%s must be positive", b);
+            return js_throw_msg(vm, vm->range_error_proto, m);
+        }
+        rem = trunc(n);
+    } else if (!iter_fn_ok(vm, a0, names[kind])) return JV_HOLE;
+    jv next;
+    if (!iter_direct(vm, thisv, names[kind], &next)) return JV_HOLE;
+    uint32_t rec = js_array_new(vm, 0);
+    for (uint32_t k = 0; k < IH_N; k++) js_array_push(vm, rec, JV_UNDEF);
+    ih_set(vm, rec, IH_ITER, thisv);
+    ih_set(vm, rec, IH_NEXT, next);
+    ih_set(vm, rec, IH_FN, kind == IHK_TAKE || kind == IHK_DROP ? JV_UNDEF : a0);
+    ih_set(vm, rec, IH_COUNT, jv_num(0));
+    ih_set(vm, rec, IH_REMAIN, jv_num(rem));
+    ih_set(vm, rec, IH_KIND, jv_num(kind));
+    ih_set(vm, rec, IH_STATE, jv_num(0));
+    uint32_t h = js_obj_new(vm, JK_ITER, vm->helper_proto);
+    vm->objs[h].a = rec;
+    vm->objs[h].c = JI_HELPER;
+    return jv_obj(h);
+}
+/* reduce, toArray, forEach, some, every, find: the iterator read here and now */
+static jv iter_consume(js_vm *vm, uint32_t id, jv thisv, uint32_t args, uint32_t argc) {
+    static const char *const names[] = { "Iterator.prototype.reduce", "Iterator.prototype.toArray", "Iterator.prototype.forEach",
+                                         "Iterator.prototype.some", "Iterator.prototype.every", "Iterator.prototype.find" };
+    uint32_t k = id - N_ITP_REDUCE;
+    jv fn = arg(vm, args, argc, 0), next;
+    if (!jv_is_obj(thisv)) return iter_direct(vm, thisv, names[k], &next) ? JV_UNDEF : JV_HOLE;
+    if (id != N_ITP_TOARRAY && !iter_fn_ok(vm, fn, names[k])) return JV_HOLE;
+    if (!iter_direct(vm, thisv, names[k], &next)) return JV_HOLE;
+    double count = 0;
+    jv v, acc = JV_UNDEF;
+    int r;
+    uint32_t out = 0;
+    if (id == N_ITP_TOARRAY) out = js_array_new(vm, 0);
+    if (id == N_ITP_REDUCE) {
+        if (argc >= 2) acc = arg(vm, args, argc, 1);
+        else {
+            r = iter_step_value(vm, thisv, next, &acc);
+            if (r < 0) return JV_HOLE;
+            if (r == 0) return js_throw_msg(vm, vm->type_error_proto, "Reduce of a done iterator with no initial value");
+            count = 1;
+        }
+    }
+    while ((r = iter_step_value(vm, thisv, next, &v)) > 0) {
+        if (id == N_ITP_TOARRAY) { js_array_push(vm, out, v); continue; }
+        jv res;
+        if (id == N_ITP_REDUCE) {
+            jv av[3] = { acc, v, jv_num(count) };
+            res = js_call(vm, fn, JV_UNDEF, av, 3);
+        } else {
+            jv av[2] = { v, jv_num(count) };
+            res = js_call(vm, fn, JV_UNDEF, av, 2);
+        }
+        if (vm->throwing) { iter_close_obj(vm, thisv); return JV_HOLE; }
+        count++;
+        if (id == N_ITP_REDUCE) acc = res;
+        else if (id == N_ITP_SOME && js_truthy(vm, res)) { iter_close_obj(vm, thisv); return vm->throwing ? JV_HOLE : JV_TRUE; }
+        else if (id == N_ITP_EVERY && !js_truthy(vm, res)) { iter_close_obj(vm, thisv); return vm->throwing ? JV_HOLE : JV_FALSE; }
+        else if (id == N_ITP_FIND && js_truthy(vm, res)) { iter_close_obj(vm, thisv); return vm->throwing ? JV_HOLE : v; }
+    }
+    if (r < 0) return JV_HOLE;
+    if (id == N_ITP_REDUCE) return acc;
+    if (id == N_ITP_TOARRAY) return jv_obj(out);
+    if (id == N_ITP_SOME) return JV_FALSE;
+    if (id == N_ITP_EVERY) return JV_TRUE;
+    return JV_UNDEF;
+}
+/* SetterThatIgnoresPrototypeProperties (Iterator.prototype's constructor and Symbol.toStringTag) */
+static jv iter_proto_setter(js_vm *vm, jv thisv, uint32_t key, jv v, const char *name) {
+    if (!jv_is_obj(thisv)) return js_throw_msg(vm, vm->type_error_proto, "Iterator.prototype setter called on non-object");
+    if (jv_idx(thisv) == vm->iterator_proto) {
+        char m[128];
+        snprintf(m, sizeof m, "Cannot assign to read only property '%s' of object '[object Iterator]'", name);
+        return js_throw_msg(vm, vm->type_error_proto, m);
+    }
+    jv cur;
+    uint32_t fl;
+    if (!js_get_own(vm, jv_idx(thisv), key, &cur, &fl)) {
+        if (js_create_data(vm, thisv, key == (JS_SYM_KEY | JSYM_TO_STRING_TAG) ? jv_sym(JSYM_TO_STRING_TAG) : jv_str(key), v) < 0) return JV_HOLE;
+    } else js_set(vm, thisv, key, v);
+    return vm->throwing ? JV_HOLE : JV_UNDEF;
+}
+
 /* ---- Number.prototype.toExponential: the digits rounded half up, as the standard picks the larger n ---- */
 static uint32_t num_to_exponential(js_vm *vm, double x, double f, int have_f) {
     char out[160];
@@ -3477,8 +3695,12 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return js_call(vm, thisv, a0, data(av), (uint32_t)len(av));
     }
     case N_FP_BIND: {
+        /* BoundFunctionCreate (its prototype the target's), then its length (the target's own, less what is bound) and
+           its name ("bound " and the target's), read-only and configurable (ECMA-262 20.2.3.2) */
         if (!js_is_callable(vm, thisv)) return js_throw_msg(vm, vm->type_error_proto, "Bind must be called on a function");
-        uint32_t b = js_obj_new(vm, JK_BOUND, vm->function_proto);
+        jv tp = js_proxy_get_proto(vm, jv_idx(thisv));
+        if (tp == JV_HOLE || vm->throwing) return JV_HOLE;
+        uint32_t b = js_obj_new(vm, JK_BOUND, jv_is_obj(tp) ? jv_idx(tp) : 0);
         vm->objs[b].a = jv_idx(thisv);
         vm->objs[b].x = a0;
         uint32_t n = argc > 1 ? argc - 1 : 0;
@@ -3486,6 +3708,32 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         for (uint32_t i = 0; i < n; i++) push_back(vm->slots, arg(vm, args, argc, i + 1));
         vm->objs[b].b = off;
         vm->objs[b].c = n;
+        uint32_t sp0 = vm->sp;
+        if (!js_room(vm, sp0 + 1, vm->nframes)) return js_throw_msg(vm, vm->range_error_proto, "Maximum call stack size exceeded");
+        vm->stack[vm->sp++] = jv_obj(b);
+        double L = 0;
+        jv lv, nv;
+        uint32_t lf;
+        int has = js_proxy_get_own(vm, jv_idx(thisv), A_LENGTH, &lv, &lf);
+        if (vm->throwing) { vm->sp = sp0; return JV_HOLE; }
+        if (has) {
+            lv = js_get(vm, thisv, A_LENGTH);
+            if (vm->throwing) { vm->sp = sp0; return JV_HOLE; }
+            if (jv_is_num(lv)) {
+                double t = jv_dbl(lv);
+                if (t == INFINITY) L = INFINITY;
+                else if (t != -INFINITY) {
+                    t = t != t ? 0 : trunc(t);
+                    L = t - n > 0 ? t - n : 0;
+                }
+            }
+        }
+        nv = js_get(vm, thisv, A_NAME);
+        vm->sp = sp0;
+        if (vm->throwing) return JV_HOLE;
+        uint32_t tn = jv_is_str(nv) ? jv_idx(nv) : A_EMPTY;
+        js_define(vm, b, A_LENGTH, jv_num(L), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
+        js_define(vm, b, A_NAME, jv_str(js_str_concat(vm, js_str_ascii(vm, "bound "), tn)), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
         return jv_obj(b);
     }
     case N_FP_TOSTRING: {
@@ -4412,6 +4660,81 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return JV_UNDEF;
     }
     /* ---- Map and Set ---- */
+    /* ---- Iterator ---- */
+    case N_ITERATOR: {
+        if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Constructor Iterator requires 'new'");
+        if (newt == jv_obj(vm->iterator_ctor)) return js_throw_msg(vm, vm->type_error_proto, "Abstract class Iterator not directly constructable");
+        jv pv = js_get(vm, newt, A_PROTOTYPE);
+        if (vm->throwing) return JV_HOLE;
+        return jv_obj(js_obj_new(vm, JK_PLAIN, jv_is_obj(pv) ? jv_idx(pv) : vm->iterator_proto));
+    }
+    case N_ITER_FROM: {
+        /* GetIteratorFlattenable (strings iterated), then the iterator itself when it is one, else wrapped */
+        jv it;
+        if (jv_is_str(a0)) it = iter_of_coll(vm, jv_idx(a0), JI_STRING);
+        else {
+            if (!jv_is_obj(a0)) return js_throw_msg(vm, vm->type_error_proto, "Iterator.from called on non-object");
+            jv m = js_get(vm, a0, JS_KEY_ITERATOR);
+            if (vm->throwing) return JV_HOLE;
+            it = a0;
+            if (!jv_is_nullish(m)) {
+                if (!js_is_callable(vm, m)) return js_not_function(vm, m);
+                it = js_call(vm, m, a0, 0, 0);
+                if (vm->throwing) return JV_HOLE;
+                if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.iterator method is not an object");
+            }
+        }
+        jv next = js_get(vm, it, A_NEXT);
+        if (vm->throwing) return JV_HOLE;
+        for (uint32_t x = vm->objs[jv_idx(it)].proto, d = 0; x && d < 10000; x = vm->objs[x].proto, d++)
+            if (x == vm->iterator_proto) return it;
+        /* the wrapper: an iterator of the protocol over it, its next kept */
+        uint32_t w = js_obj_new(vm, JK_ITER, vm->wrap_proto);
+        vm->objs[w].a = jv_idx(it);
+        vm->objs[w].c = JI_PROTOCOL;
+        vm->objs[w].x = next;
+        return jv_obj(w);
+    }
+    case N_WRAP_NEXT: case N_WRAP_RETURN: {
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER || vm->objs[jv_idx(thisv)].c != JI_PROTOCOL)
+            return value_error(vm, id == N_WRAP_NEXT ? "Method WrapForValidIteratorPrototype.next called on incompatible receiver " :
+                                   "Method WrapForValidIteratorPrototype.return called on incompatible receiver ", thisv, "");
+        jv it = jv_obj(vm->objs[jv_idx(thisv)].a);
+        if (id == N_WRAP_NEXT) return js_call(vm, vm->objs[jv_idx(thisv)].x, it, 0, 0);
+        jv rf = js_get(vm, it, A_RETURN);
+        if (vm->throwing) return JV_HOLE;
+        if (jv_is_nullish(rf)) return iter_result(vm, JV_UNDEF, 1);
+        return js_call(vm, rf, it, 0, 0);
+    }
+    case N_ITP_MAP: case N_ITP_FILTER: case N_ITP_TAKE: case N_ITP_DROP: case N_ITP_FLATMAP: return iter_helper(vm, id, thisv, a0);
+    case N_ITP_REDUCE: case N_ITP_TOARRAY: case N_ITP_FOREACH: case N_ITP_SOME: case N_ITP_EVERY: case N_ITP_FIND:
+        return iter_consume(vm, id, thisv, args, argc);
+    case N_ITP_CTOR_GET: return jv_obj(vm->iterator_ctor);
+    case N_ITP_CTOR_SET: return iter_proto_setter(vm, thisv, A_CONSTRUCTOR, a0, "constructor");
+    case N_ITP_TAG_GET: return jv_str(js_str_ascii(vm, "Iterator"));
+    case N_ITP_TAG_SET: return iter_proto_setter(vm, thisv, JS_SYM_KEY | JSYM_TO_STRING_TAG, a0, "Symbol(Symbol.toStringTag)");
+    case N_HELPER_NEXT: case N_HELPER_RETURN: {
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER || vm->objs[jv_idx(thisv)].c != JI_HELPER)
+            return value_error(vm, id == N_HELPER_NEXT ? "Method Iterator Helper.prototype.next called on incompatible receiver " :
+                                   "Method Iterator Helper.prototype.return called on incompatible receiver ", thisv, "");
+        uint32_t h = jv_idx(thisv), rec = vm->objs[h].a;
+        if (id == N_HELPER_NEXT) {
+            jv v = JV_UNDEF;
+            int more = js_helper_step(vm, h, &v);
+            if (vm->throwing) return JV_HOLE;
+            return iter_result(vm, more ? v : JV_UNDEF, !more);
+        }
+        int st = (int)jv_dbl(ih_get(vm, rec, IH_STATE));
+        if (st == 2) return js_throw_msg(vm, vm->type_error_proto, "Generator is already running");
+        if (st != 3) {
+            ih_done(vm, rec);
+            jv inner = ih_get(vm, rec, IH_INNER);
+            if (inner != JV_UNDEF) { iter_close_obj(vm, inner); if (vm->throwing) return JV_HOLE; }
+            iter_close_obj(vm, ih_get(vm, rec, IH_ITER));
+            if (vm->throwing) return JV_HOLE;
+        }
+        return iter_result(vm, JV_UNDEF, 1);
+    }
     /* ---- the URI functions, escape, unescape ---- */
     case N_ENCODE_URI: case N_ENCODE_URIC: case N_DECODE_URI: case N_DECODE_URIC: case N_ESCAPE: case N_UNESCAPE: {
         uint32_t s = js_to_string(vm, a0);
@@ -4764,6 +5087,10 @@ void js_builtins_init(js_vm *vm) {
     /* %ThrowTypeError%: no name, no length to count, not extensible */
     vm->throw_te = js_native_new(vm, N_THROW_TE, A_EMPTY, 0);
     vm->objs[vm->throw_te].flags &= (uint16_t)~JO_EXTENSIBLE;
+    vm->objs[vm->throw_te].flags |= JO_SEALED;   /* its length and name not configurable: it is frozen (ECMA-262 10.2.4.1) */
+    /* Function.prototype's arguments and caller (AddRestrictedFunctionProperties): %ThrowTypeError% to get and set */
+    js_define_accessor(vm, vm->function_proto, A_ARGUMENTS, jv_obj(vm->throw_te), jv_obj(vm->throw_te), JS_SHAPE_HIDDEN);
+    js_define_accessor(vm, vm->function_proto, A_CALLER, jv_obj(vm->throw_te), jv_obj(vm->throw_te), JS_SHAPE_HIDDEN);
     defn(vm, op, "hasOwnProperty", N_OP_HASOWN, 1);
     defn(vm, op, "toString", N_OP_TOSTRING, 0);
     defn(vm, op, "toLocaleString", N_OP_TOLOCALE, 0);
@@ -4852,7 +5179,14 @@ void js_builtins_init(js_vm *vm) {
     static const char *const mn[] = { "abs", "floor", "ceil", "round", "trunc", "sign", "max", "min", "pow", "sqrt", "cbrt", "exp", "expm1",
         "log", "log2", "log10", "log1p", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "hypot", "random",
         "fround", "imul", "clz32" };
-    for (uint32_t i = 0; i < sizeof mn / sizeof mn[0]; i++) defn(vm, m, mn[i], N_M_ABS + i, 1);
+    /* each's length V8's: 2 max, min, pow, atan2, hypot and imul, 0 random, else 1 */
+    for (uint32_t i = 0; i < sizeof mn / sizeof mn[0]; i++) {
+        uint32_t nl = 1;
+        if (!strcmp(mn[i], "max") || !strcmp(mn[i], "min") || !strcmp(mn[i], "pow") || !strcmp(mn[i], "atan2") || !strcmp(mn[i], "hypot") ||
+            !strcmp(mn[i], "imul")) nl = 2;
+        else if (!strcmp(mn[i], "random")) nl = 0;
+        defn(vm, m, mn[i], N_M_ABS + i, nl);
+    }
     defn(vm, m, "acosh", N_M_ACOSH, 1);
     defn(vm, m, "asinh", N_M_ASINH, 1);
     defn(vm, m, "atanh", N_M_ATANH, 1);
@@ -5019,6 +5353,30 @@ void js_builtins_init(js_vm *vm) {
 
     /* the iterators' protocol: each iterable's Symbol.iterator, and an iterator its own */
     js_define(vm, vm->iterator_proto, JS_KEY_ITERATOR, jv_obj(js_native_new(vm, N_ITP_SELF, js_str_ascii(vm, "[Symbol.iterator]"), 0)), JS_SHAPE_HIDDEN);
+    {
+        /* %Iterator%, its from, Iterator.prototype's helpers (its constructor and its tag accessors whose setters let an
+           object inheriting them have its own), %IteratorHelperPrototype% and %WrapForValidIteratorPrototype% */
+        uint32_t ic = js_native_new(vm, N_ITERATOR, js_atom_ascii(vm, "Iterator"), 0);
+        js_define(vm, ic, A_PROTOTYPE, jv_obj(vm->iterator_proto), JS_SHAPE_PROTO);
+        js_define(vm, vm->global, js_atom_ascii(vm, "Iterator"), jv_obj(ic), JS_SHAPE_HIDDEN);
+        vm->iterator_ctor = ic;
+        defn(vm, ic, "from", N_ITER_FROM, 1);
+        uint32_t ip = vm->iterator_proto;
+        static const char *const hn[] = { "map", "filter", "take", "drop", "flatMap", "reduce", "toArray", "forEach", "some", "every", "find" };
+        static const uint32_t hl[] = { 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1 };
+        for (uint32_t i = 0; i < 11; i++) defn(vm, ip, hn[i], N_ITP_MAP + i, hl[i]);
+        js_define_accessor(vm, ip, A_CONSTRUCTOR, jv_obj(js_native_new(vm, N_ITP_CTOR_GET, A_CONSTRUCTOR, 0)),
+                           jv_obj(js_native_new(vm, N_ITP_CTOR_SET, A_CONSTRUCTOR, 1)), JS_SHAPE_HIDDEN);
+        js_define_accessor(vm, ip, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_obj(js_native_new(vm, N_ITP_TAG_GET, A_EMPTY, 0)),
+                           jv_obj(js_native_new(vm, N_ITP_TAG_SET, A_EMPTY, 1)), JS_SHAPE_HIDDEN);
+        vm->helper_proto = js_obj_new(vm, JK_PLAIN, ip);
+        defn(vm, vm->helper_proto, "next", N_HELPER_NEXT, 0);
+        defn(vm, vm->helper_proto, "return", N_HELPER_RETURN, 0);
+        js_define(vm, vm->helper_proto, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Iterator Helper")), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
+        vm->wrap_proto = js_obj_new(vm, JK_PLAIN, ip);
+        defn(vm, vm->wrap_proto, "next", N_WRAP_NEXT, 0);
+        defn(vm, vm->wrap_proto, "return", N_WRAP_RETURN, 0);
+    }
     js_define(vm, vm->array_proto, JS_KEY_ITERATOR, js_get(vm, jv_obj(vm->array_proto), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
     vm->array_values = jv_idx(js_get(vm, jv_obj(vm->array_proto), js_atom_ascii(vm, "values")));
     {

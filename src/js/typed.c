@@ -1469,7 +1469,7 @@ static void td_get(js_vm *vm, uint32_t o, const char *name, uint32_t id) {
 static uint32_t td_ctor(js_vm *vm, const char *name, uint32_t id, uint32_t nargs, uint32_t proto) {
     uint32_t atom = js_atom_ascii(vm, name);
     uint32_t c = js_native_new(vm, id, atom, nargs);
-    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_HIDDEN);
+    js_define(vm, c, A_PROTOTYPE, jv_obj(proto), JS_SHAPE_PROTO);
     js_define(vm, proto, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, atom, jv_obj(c), JS_SHAPE_HIDDEN);
     return c;
@@ -1505,7 +1505,7 @@ void js_typed_init(js_vm *vm, uint32_t first) {
     vm->typedarray_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     uint32_t ta = js_native_new(vm, first + JTN_CTOR, js_atom_ascii(vm, "TypedArray"), 0);
     vm->objs[ta].x = jv_num(JTA_UINT8);
-    js_define(vm, ta, A_PROTOTYPE, jv_obj(vm->typedarray_proto), JS_SHAPE_HIDDEN);
+    js_define(vm, ta, A_PROTOTYPE, jv_obj(vm->typedarray_proto), JS_SHAPE_PROTO);
     js_define(vm, vm->typedarray_proto, A_CONSTRUCTOR, jv_obj(ta), JS_SHAPE_HIDDEN);
     td_get(vm, vm->typedarray_proto, "buffer", first + JTN_BUFFER);
     td_get(vm, vm->typedarray_proto, "byteLength", first + JTN_BYTELENGTH);
