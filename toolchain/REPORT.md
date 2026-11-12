@@ -214,3 +214,67 @@ neighbours.
     On the 21 MB snapshot, `advise` fell from 77 s to 11.7 s, all of it now the
     snapshot's reading. One trap on the way: building that clause with
     `findall/3` copies the head's variables, which unlinks the keys.
+14. **A conditional whose arms are a char array and a string literal does not
+    lower:** `invalid cast opcode for cast from 'ptr' to '[8 x i8]'` (a
+    `ptrtoint` to the array's type). Two string literals of different lengths
+    lower fine. The reduction:
+
+    ```c
+    int main(int argc, char **argv) {
+        (void)argv;
+        char buf[8] = "abc";
+        const char *p = argc > 1 ? buf : "none";
+        return p[0];
+    }
+    ```
+
+    Ambitious writes `if`/`else` there, or passes the table to a function.
+15. **A pointer a function returns into a static table is refused as "plain
+    pointer not consumed"** when it is kept in a local, though nothing owns
+    it: `error: plain pointer not consumed: 'p' in return(int(0))`.
+
+    ```c
+    static const int table[4] = { 1, 2, 3, 4 };
+    static const int *row(int i) { return table + i; }
+    int main(void) { const int *p = row(2); return *p; }
+    ```
+
+    Ambitious returns an index instead, or passes the table as a parameter.
+16. **The checker accepts a pointer into a vector's element passed beside the
+    vector to a function that grows it**, which then writes through a pointer
+    into the freed buffer. A borrow of `data(v)` is refused after a call that
+    may grow `v`; an element field's address is not tracked:
+
+    ```c
+    #include <vector.pl>
+    typedef struct item { int a, b; } item;
+    static void grow(vector<item> *v, int *out) {
+        for (int i = 0; i < 1000; i++) { item x = { i, i }; push_back(v, x); }
+        *out = 7;
+    }
+    int main(void) {
+        vector<item> v;
+        item first = { 0, 0 };
+        push_back(v, first);
+        grow(&v, &v[0].b);
+        return v[0].b;
+    }
+    ```
+17. **`-g` crashes the compiler (a segmentation fault) on a static local
+    inside a nested block**; the same function without `-g`, and a file without
+    such a local with it, compile:
+
+    ```c
+    int f(int n) {
+        if (n > 0) {
+            static int count = 0;
+            count += n;
+            return count;
+        }
+        return 0;
+    }
+    int main(void) { return f(1) - 1; }
+    ```
+18. **A unit that includes `<openssl/ssl.h>` takes about 64 s to read**, most
+    of a build of `src/net/net.c`, against a few seconds for a unit of the same
+    size without it. Ambitious keeps OpenSSL to that one unit.
