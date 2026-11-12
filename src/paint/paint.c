@@ -1897,6 +1897,42 @@ static double pt_opos_axis(const char *s, size_t n, double room, double z, doubl
     if (!css_length_eval(s, n, 0, &v0) || !css_length_eval(s, n, 100, &v100)) return dflt;
     return v0 * z + (v100 - v0) * room / 100;
 }
+/* where object-position puts an object of dw x dh (device px) in box b's content box: its rectangle d (x0, y0, x1, y1),
+   snapped to whole pixels in CSS px (as Chromium snaps one under a zoom) */
+static void pt_fit_rect(const amb_canvas *c, const layout_tree *t, uint32_t b, double dw, double dh, double *d) {
+    double x = t->box[b].x, y = t->box[b].y, w = t->box[b].w, h = t->box[b].h;
+    double z = c->zoom > 0 ? c->zoom : 1;
+    double ox = (w - dw) / 2, oy = (h - dh) / 2;
+    if (t->box[b].opos.len) {
+        vector<char> op;
+        append_range(op, text_ptr(t, t->box[b].opos), t->box[b].opos.len);
+        size_t st[2], ln[2], i = 0, k = 0, a, n;
+        while (k < 2 && css_next_part(data(op), len(op), &i, &a, &n)) { st[k] = a; ln[k] = n; k++; }
+        if (k == 2) {
+            ox = pt_opos_axis(data(op) + st[0], ln[0], w - dw, z, ox);
+            oy = pt_opos_axis(data(op) + st[1], ln[1], h - dh, z, oy);
+        }
+    }
+    d[0] = floor((x + ox) / z + 0.5) * z;
+    d[1] = floor((y + oy) / z + 0.5) * z;
+    d[2] = floor((x + ox + dw) / z + 0.5) * z;
+    d[3] = floor((y + oy + dh) / z + 0.5) * z;
+}
+/* the canvas's clip held to box b's content box, snapped as pt_fit_rect snaps; the clip it had into keep */
+static void pt_fit_clip(amb_canvas *c, const layout_tree *t, uint32_t b, double *keep) {
+    double x = t->box[b].x, y = t->box[b].y, w = t->box[b].w, h = t->box[b].h;
+    double z = c->zoom > 0 ? c->zoom : 1;
+    keep[0] = c->cx0;
+    keep[1] = c->cy0;
+    keep[2] = c->cx1;
+    keep[3] = c->cy1;
+    double bx0 = floor(x / z + 0.5) * z, by0 = floor(y / z + 0.5) * z, bx1 = floor((x + w) / z + 0.5) * z, by1 = floor((y + h) / z + 0.5) * z;
+    if (c->cx0 < bx0) c->cx0 = bx0;
+    if (c->cy0 < by0) c->cy0 = by0;
+    if (c->cx1 > bx1) c->cx1 = bx1;
+    if (c->cy1 > by1) c->cy1 = by1;
+}
+
 /* a replaced element's image in its content box, as object-fit and object-position place it (CSS Images 3, 5.5):
    its natural size nw x nh (CSS px) filling the box (fill), fitted in it (contain), covering it (cover), kept (none),
    or the smaller of none and contain (scale-down); at object-position. Snapped to whole pixels and clipped to the
@@ -1920,30 +1956,50 @@ static void pt_fit_image(amb_canvas *c, const layout_tree *t, uint32_t b, const 
         dw *= s;
         dh *= s;
     }
-    double ox = (w - dw) / 2, oy = (h - dh) / 2;
-    if (t->box[b].opos.len) {
-        vector<char> op;
-        append_range(op, text_ptr(t, t->box[b].opos), t->box[b].opos.len);
-        size_t st[2], ln[2], i = 0, k = 0, a, n;
-        while (k < 2 && css_next_part(data(op), len(op), &i, &a, &n)) { st[k] = a; ln[k] = n; k++; }
-        if (k == 2) {
-            ox = pt_opos_axis(data(op) + st[0], ln[0], w - dw, z, ox);
-            oy = pt_opos_axis(data(op) + st[1], ln[1], h - dh, z, oy);
-        }
+    double d[4], keep[4];
+    pt_fit_rect(c, t, b, dw, dh, d);
+    pt_fit_clip(c, t, b, keep);
+    pt_image_ex(c, rgba, iw, ih, d[0], d[1], d[2] - d[0], d[3] - d[1], 1);
+    c->cx0 = keep[0];
+    c->cy0 = keep[1];
+    c->cx1 = keep[2];
+    c->cy1 = keep[3];
+}
+
+/* an SVG image (one of no raster) in its content box, as object-fit and object-position place it: its natural size;
+   with a ratio alone, the largest of that ratio the box holds (contain, and none and scale-down alike: CSS Images 3's
+   default sizing of a ratio within the box) or the smallest covering it (cover); with neither, or fill, the box. Drawn
+   into that rectangle (its viewBox and preserveAspectRatio within it), held to the box */
+static void pt_fit_svg(amb_canvas *c, const net_loader *nt, const layout_tree *t, uint32_t b) {
+    double x = t->box[b].x, y = t->box[b].y, w = t->box[b].w, h = t->box[b].h;
+    uint32_t el = t->box[b].node.index, r = 0;
+    int fit = t->box[b].ofit;
+    for (uint32_t q = 1; nt && q < nt->resource_len && !r; q++)
+        if (nt->resource[q].live && nt->resource[q].elem.index == el && nt->resource[q].kind == NET_KIND_IMAGE) r = q;
+    double nw = 0, nh = 0, ratio = 0;
+    if (fit == 0 || !r || !amb_svg_size_of(nt, r, &nw, &nh, &ratio) || (ratio <= 0 && (nw <= 0 || nh <= 0)) || w <= 0 || h <= 0) {
+        amb_svg_image_of(c, nt, el, x, y, w, h);
+        return;
     }
-    double dx0 = floor((x + ox) / z + 0.5) * z, dy0 = floor((y + oy) / z + 0.5) * z, dx1 = floor((x + ox + dw) / z + 0.5) * z,
-           dy1 = floor((y + oy + dh) / z + 0.5) * z;
-    double cx0 = c->cx0, cy0 = c->cy0, cx1 = c->cx1, cy1 = c->cy1;
-    double bx0 = floor(x / z + 0.5) * z, by0 = floor(y / z + 0.5) * z, bx1 = floor((x + w) / z + 0.5) * z, by1 = floor((y + h) / z + 0.5) * z;
-    if (c->cx0 < bx0) c->cx0 = bx0;
-    if (c->cy0 < by0) c->cy0 = by0;
-    if (c->cx1 > bx1) c->cx1 = bx1;
-    if (c->cy1 > by1) c->cy1 = by1;
-    pt_image_ex(c, rgba, iw, ih, dx0, dy0, dx1 - dx0, dy1 - dy0, 1);
-    c->cx0 = cx0;
-    c->cy0 = cy0;
-    c->cx1 = cx1;
-    c->cy1 = cy1;
+    double z = c->zoom > 0 ? c->zoom : 1, dw, dh;
+    if (nw > 0 && nh > 0) {
+        dw = nw * z;
+        dh = nh * z;
+        if (fit == 1 || fit == 2 || (fit == 4 && (dw > w || dh > h))) {
+            double s = fit == 2 ? fmax(w / dw, h / dh) : fmin(w / dw, h / dh);
+            dw *= s;
+            dh *= s;
+        }
+    } else if ((fit == 2) == (w / h > ratio)) { dw = w; dh = w / ratio; }
+    else { dh = h; dw = h * ratio; }
+    double d[4], keep[4];
+    pt_fit_rect(c, t, b, dw, dh, d);
+    pt_fit_clip(c, t, b, keep);
+    amb_svg_image_of(c, nt, el, d[0], d[1], d[2] - d[0], d[3] - d[1]);
+    c->cx0 = keep[0];
+    c->cy0 = keep[1];
+    c->cx1 = keep[2];
+    c->cy1 = keep[3];
 }
 
 /* an image a box's background names (resource r), decoded once a paint (any format the
@@ -2527,7 +2583,7 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
             pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
         else if (t->box[b].unsourced) pt_unsourced(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
-        else amb_svg_image_of(c, nt, t->box[b].node.index, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else pt_fit_svg(c, nt, t, b);
     }
     if (kround) pt_round_clip(c, kx0, ky0, kx1, ky1, &kept, ka[0], ka[1], ka[2], ka[3], kr);
     c->cx0 = scx0;
