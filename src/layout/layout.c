@@ -25,7 +25,14 @@
    Vertical margins collapse: between siblings; through a parent that has no
    border or padding on that side (and is no new formatting context: the root, a
    cell, an inline-block, a float, a positioned box, a flex or grid item or
-   container, an overflow other than visible); and through an empty box.
+   container, an overflow other than visible -- not the body's, when the root's
+   is visible: it is the viewport's); and through an empty box. A min-width of
+   min-content (the user agent's on a fieldset) is the content's.
+
+   Fieldsets (HTML 15.3.13). The rendered legend is shrunk to fit and set on the
+   top border, its auto margins aligning it (right to left, from the right); a
+   legend wider than the content box overflows the border box from its start, and
+   the fieldset's min- and max-content widths take the legend's.
 
    Floats (9.5). A float is laid out shrunk to fit (unless its width is
    declared) and placed as high as the flow has reached -- a float between
@@ -54,8 +61,10 @@
    nearest scroll container's padding box, else the viewport) inset by its offsets
    past its border box, it is moved inward, as far as its margin box stays in its
    containing block (top and left winning), once the tree has its page coordinates;
-   an inline element's own stickiness is not done. z-index and overflow are kept for
-   paint.
+   a sticky inline element likewise, its box its fragments' union, its containing
+   block the content box of the block whose lines hold it (an anonymous one's
+   parent), its fragments, text and atomic boxes moved. z-index and overflow are
+   kept for paint.
 
    Flex containers (Flexbox 1, 9): the items in order (order, then the tree's),
    their flex base sizes (flex-basis, a declared size, or the content's), min and
@@ -67,9 +76,14 @@
    baselines, each line as tall as the most they rise above it and fall below it
    (9.4, 8); last baseline on their last ones, flush to the line's end; an item with
    no line its border box's bottom; in a column, baseline is start and last baseline
-   the items' end edges shared. A flex container's baseline (8.5) is its first
-   line's baseline items', else its first item's; an inline-block's is its last
-   line's in its flow, however deep, unless its overflow is not visible.
+   the items' end edges shared. A flex container's first baseline (8.5) is its top
+   line's baseline items', else that line's leftmost (topmost) item's; its last
+   baseline its bottom line's last-baseline items', else that line's rightmost
+   (bottommost) item's -- in the order the lines and items are drawn, as Chromium
+   finds them; an inline-block's baseline is its last line's in its flow, however
+   deep (a flex or grid container in it giving its first baseline, unless its
+   last is its items' aligned on their last baselines), unless its overflow is not
+   visible.
 
    Grid containers (Grid 1): the track lists read (px, %, fr,
    auto, min-content, max-content, minmax(), fit-content(), repeat() with a count
@@ -88,9 +102,22 @@
    align-content. A grid item's box says where it was placed and how (a named
    area, its lines, automatically). An auto-fit repeat's empty tracks collapse,
    the gutters beside them too, and an automatic repeat counts what the other
-   tracks leave it. A grid container's own min- and max-content widths: its
-   columns, each item in turn along the rows. Not done: subgrid, masonry,
-   baseline alignment in a grid.
+   tracks leave it. Align-items and align-self baseline and last baseline: a row's
+   items on their first baselines that start in it share one at its start, those on
+   their last that end in it one at its end, each item's contribution to its rows
+   taking what that shifts it by; justify-items and -self baseline fall back to
+   start, last baseline to end. A grid container's first and last baselines (10.1):
+   its first (last) row's baseline-aligned items', else its first (last) item there
+   in grid order. A grid container's own min- and max-content widths: its items
+   placed as its layout places them, its columns sized by the same algorithm under
+   a min-content and then a max-content constraint, its width indefinite, as
+   Chromium sizes them (taking the items' contributions as a layout does, not the
+   limited contributions the spec names for those constraints). An item's minimum
+   contribution is Chromium's: of a width of its own its min-content contribution,
+   of a min-width that, of a scroll container or a span across a flexible track or
+   across no track of an auto minimum its edges, else its min-content contribution
+   held to the fixed maximums of the tracks it spans; min-width and max-width hold
+   its contributions and its stretched width. Not done: subgrid, masonry.
 
    Inline layout. White space is collapsed or kept as white-space says. Lines
    break at spaces (and around atomic inlines), never inside a word, a word too
@@ -141,7 +168,14 @@
    the style's prefix and suffix, outside ending at the content box, as Chromium
    places a marker of text, its right-to-left letters in their order; a disc,
    circle, square or disclosure triangle (or a style extending one) a shape, as
-   before; a string as written. ::first-letter is its block's first letter (the punctuation before
+   before; a string as written. An outside marker is set by the first line in the
+   list item's content, however deep, or a nested list's, or by a flex or grid
+   container's first baseline met first (by a line in a box that clips, or by such
+   a baseline, in a line of the list item's own there, unclipped); with no line,
+   on a line of its own at the content box's top, the list item at least as tall. An
+   inside marker begins the list item's first line, or, when the first in-flow box
+   is a block, takes a line of its own before it (Chromium's inline marker box in
+   an anonymous block of its own). ::first-letter is its block's first letter (the punctuation before
    it too) in its own style; ::first-line the first line's pieces in its style
    where they have their block's, the line broken in it; ::marker the list
    marker's style; ::placeholder an empty field's placeholder text. Not done: a
@@ -170,11 +204,12 @@
    auto height up to them; a cell's height its border box's; a nowrap cell of a length's
    width at least that wide; no wrap around an img in a cell's min-content; an empty
    table's height none; a broken image of a declared size a box of it, its alt text in it.
-   Not done: a percentage height taken through an inline-block, a float met in a line or an
-   inline image (it resolves against nothing there); a list item's line of its own for its
-   marker when its first child is a block (Chromium's, 4px high); a body that clips its
-   overflow or has a min-height keeps its last child's bottom margin in it, where Chromium's
-   lets it through, and fills that much more of the viewport.
+   The percentage heights of what a line holds -- an inline-block's, a float's, an inline
+   image's -- are taken through those blocks too (an inline-block of an auto height passing it
+   on to what it holds); a list item whose first child is a block-level ul or ol has its
+   outside marker on a line of its own, as tall as its line (Blink's NeedsOccupyWholeLine); a
+   body that fills keeps its last child's bottom margin through its bottom though a
+   min-height holds it taller than its content.
 
    What is not done: writing modes other than horizontal-tb. Coordinates are
    relative to the parent box's content box while the tree is laid out, and made
@@ -214,6 +249,10 @@ amb_implementation(layout);
 /* the document's mode, for the run (layout_run sets them from the document node's mode): in
    quirks mode, lay_quirks; in quirks or limited-quirks mode, lay_lhq (the line height quirk) */
 static int lay_quirks, lay_lhq;
+/* the definite height the percentages of the inline content being laid out take: its block container's children's
+   (lay_flow and an anonymous block set it around their lines; -1 for none) -- an inline-block's, a float's met in a
+   line, an inline image's percentage height (in quirks mode taken through blocks of an auto height) */
+static double lay_line_pch = -1;
 
 /* ---- the computed style of an element, as layout reads it ---- */
 
@@ -1011,7 +1050,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
-static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_seg> *segs, const vector<uint32_t> *items, double *mn, double *mx);
+static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
 
 /* an svg attribute's length as an absolute length in px (a number is px; em and ex of the
    font size), or -1 for none: absent, a percentage, auto */
@@ -1966,6 +2005,14 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     }
     if (dsp == D_INLINE_BLOCK || lay_block_level(dsp)) {
         double w, h;
+        /* a percentage height against the line's block's definite height (an image's then sized by it) */
+        lay_len hr = LAY_X(node).hraw;
+        if (s.height.unit == LAY_AUTO && hr.unit != LAY_AUTO && !lay_content_sized(hr) && lay_line_pch >= 0) {
+            double ve = s.b[0] + s.b[2] + lay_res(st, s.p[0], cw) + lay_res(st, s.p[2], cw);
+            s.height.unit = LAY_PX;
+            s.height.v = lay_res(st, hr, lay_line_pch) - (s.border_box ? ve : 0);
+            if (s.height.v < 0) s.height.v = 0;
+        }
         lay_atomic_size(LARGS, node, &s, cw, &w, &h);
         p.kind = P_ATOMIC;
         p.img = (uint8_t)lay_is_named(d, node, "img");
@@ -2083,8 +2130,9 @@ static double lay_edges_px(const css_style *st, const lay_style *s, double cw) {
 
 static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
 
+static lay_len lay_minw_px(LCTX, uint32_t el, const lay_style *s, double cw, lay_len l);
 /* el's margin box at its min- and max-content widths; its declared width's when it has one
-   and own_width, else its content's */
+   and own_width (a min-width its content gives holding it wider), else its content's */
 static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *mx, int own_width) {
     lay_style s;
     lay_style_of(LARGS, el, &s);
@@ -2094,6 +2142,12 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
     if (s.width.unit == LAY_PX && own_width) {
         double box_edges = s.b[1] + s.b[3] + lay_res(st, s.p[1], cw) + lay_res(st, s.p[3], cw);
         *mn = *mx = s.width.v + edges - (s.border_box ? box_edges : 0);
+        lay_len mw = LAY_X(el).minw;
+        if (lay_content_sized(mw)) {
+            mw = lay_minw_px(LARGS, el, &s, cw, mw);
+            double v = mw.v + edges - (s.border_box ? box_edges : 0);
+            if (v > *mn) { *mn = v; *mx = v; }
+        }
         return;
     }
     if (lay_replaced(d, el)) {
@@ -2106,15 +2160,15 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
        Contain 2, 3.2; a table's cells have no containment) */
     if (LAY_X(el).cq && s.display != D_TABLE && s.display != D_CELL && s.display != D_INLINE) { *mn = *mx = edges; return; }
     if (s.display == D_TABLE) { lay_table_intrinsic(LARGS, el, cw, mn, mx); *mn += edges; *mx += edges; return; }
-    vector<lay_seg> segs;
-    vector<uint32_t> items;
-    lay_collect(LARGS, el, &segs, &items);
     if (LAY_X(el).lx == LX_GRID) {
-        lay_grid_intrinsic(LARGS, el, cw, &segs, &items, mn, mx);
+        lay_grid_intrinsic(LARGS, el, cw, mn, mx);
         *mn += edges;
         *mx += edges;
         return;
     }
+    vector<lay_seg> segs;
+    vector<uint32_t> items;
+    lay_collect(LARGS, el, &segs, &items);
     /* a row flex container's items side by side (wrapping: its widest one at least) */
     int side = LAY_X(el).lx == LX_FLEX && LAY_X(el).frow;
     int wraps = LAY_X(el).fwrap != 0;
@@ -2140,11 +2194,39 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
         if (a > *mn) *mn = a;
         if (b > *mx) *mx = b;
     }
+    /* a fieldset's rendered legend, set on its top border above its content: its widths count as a child's do (Chromium's
+       fieldset takes its legend's min- and max-content widths) */
+    uint32_t lg = lay_rendered_legend(LARGS, el);
+    if (lg) {
+        double a, b;
+        lay_intrinsic(LARGS, lg, cw, &a, &b);
+        if (a > *mn) *mn = a;
+        if (b > *mx) *mx = b;
+    }
     *mn += edges;
     *mx += edges;
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) { lay_intrinsic_of(LARGS, el, cw, mn, mx, 1); }
+
+/* a min-width its content gives (min-content, max-content, fit-content; the user agent's min-content of a fieldset),
+   as a px length of the box box-sizing names: of its content's min- or max-content width, its edges' and margins' aside */
+static lay_len lay_minw_px(LCTX, uint32_t el, const lay_style *s, double cw, lay_len l) {
+    if (!lay_content_sized(l)) return l;
+    double mn, mx;
+    lay_intrinsic_of(LARGS, el, cw, &mn, &mx, 0);
+    double m = (s->m[1].unit == LAY_AUTO ? 0 : lay_res(st, s->m[1], cw)) + (s->m[3].unit == LAY_AUTO ? 0 : lay_res(st, s->m[3], cw));
+    double box = s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw);
+    double v = (l.unit == LAY_MAXC ? mx : mn) - m;
+    if (l.unit == LAY_FITC) {
+        v = cw - m > mn - m ? cw - m : mn - m;
+        if (v > mx - m) v = mx - m;
+    }
+    l.unit = LAY_PX;
+    l.v = s->border_box ? v : v - box;
+    l.pct = 0;
+    return l;
+}
 
 /* ---- the store's records ---- */
 
@@ -2301,6 +2383,19 @@ static int lay_fills(LCTX, uint32_t el, int root) {
     for (uint32_t c = d->node[up].first_child; c && c != el; c = d->node[c].next_sibling) if (lay_is_named(d, c, "body")) return 0;
     int pos = LAY_X(el).pos;
     return pos != POS_ABSOLUTE && pos != POS_FIXED && !LAY_X(el).flt;
+}
+
+/* el's overflow as it is used: 1 when it clips its content. The body's, when the root's overflow is visible, is the
+   viewport's, not its own (CSS Overflow 3, 3.3; measured in Chromium, in every mode): the body then clips nothing and
+   makes no formatting context by it, its children's margins collapsing through it */
+static int lay_clip_of(LCTX, uint32_t el) {
+    if (!el) return 0;
+    int clip = at(*xc, lay_si(sx, gx, el)).clip;
+    if (clip != 1 || (el & LAY_GEN) || !lay_is_named(d, el, "body")) return clip;
+    uint32_t up = d->node[el].parent;
+    if (!up || d->node[up].parent != 1 || !lay_is_named(d, up, "html")) return clip;
+    for (uint32_t c = d->node[up].first_child; c && c != el; c = d->node[c].next_sibling) if (lay_is_named(d, c, "body")) return clip;
+    return LAY_X(up).clip == 1 ? clip : 0;
 }
 
 /* ---- lines ---- */
@@ -2832,11 +2927,25 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     }
     lay_mc et, eb;
     int empty;
+    /* its height: as declared, a percentage of its line's block's definite height (lay_line_pch), min-height and
+       max-height holding it; its children's percentages take it, or in quirks mode an auto one's that basis */
+    double pb = lay_line_pch, vedges = t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb;
     double defh = s.height.unit == LAY_PX ? s.height.v : -1;
+    lay_len hraw = LAY_X(el).hraw, mnl = LAY_X(el).minh, mxl = LAY_X(el).maxh;
+    if (defh < 0 && hraw.unit != LAY_AUTO && !lay_content_sized(hraw) && pb >= 0) {
+        defh = lay_res(st, hraw, pb) - (s.border_box ? vedges : 0);
+        if (defh < 0) defh = 0;
+    }
+    double minh = 0, maxh = -1;
+    if (mnl.unit != LAY_AUTO && !lay_content_sized(mnl) && (mnl.unit == LAY_PX || pb >= 0)) minh = lay_res(st, mnl, pb) - (s.border_box ? vedges : 0);
+    if (mxl.unit != LAY_AUTO && !lay_content_sized(mxl) && (mxl.unit == LAY_PX || pb >= 0)) maxh = lay_res(st, mxl, pb) - (s.border_box ? vedges : 0);
+    if (defh >= 0 && maxh >= 0 && defh > maxh) defh = maxh;
+    if (defh >= 0 && defh < minh) defh = minh;
+    double pch = defh >= 0 ? defh : lay_quirks ? pb : -1;
     int lx = LAY_X(el).lx;
     if (lx == LX_FLEX) lay_flex(LARGS, b, el, defh);
     else if (lx == LX_GRID) lay_grid(LARGS, b, el, defh);
-    else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, 0, &et, &eb, &empty);
+    else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, pch, 0, &et, &eb, &empty);
     if (lay_is_named(d, el, "button")) {
         lay_theme(LARGS, b, el);
         /* a button's content in the middle of a box made taller than it, as Chromium's button centres its anonymous
@@ -2853,7 +2962,11 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
         }
     }
     if (defh >= 0) t->box[b].h = defh;
-    else if (LAY_X(el).clamp > 0) lay_clamp(LARGS, b, el, &s);
+    else {
+        if (maxh >= 0 && t->box[b].h > maxh) t->box[b].h = maxh;
+        if (t->box[b].h < minh) t->box[b].h = minh;
+        if (LAY_X(el).clamp > 0) lay_clamp(LARGS, b, el, &s);
+    }
     return b;
 }
 /* a child box out of its parent's flow: positioned absolutely, fixed, or floated */
@@ -2861,10 +2974,10 @@ static int lay_out_of_flow(const layout_tree *t, uint32_t c) {
     return t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED ||
            t->box[c].float_side != LAYOUT_FLOAT_SIDE_UNFLOATED;
 }
-/* the first baseline in b's box subtree, from b's content box's top: a flex container's (its
-   items give it, Flexbox 1, 8.5), its first line's, or its first in-flow child's that has one */
+/* the first baseline in b's box subtree, from b's content box's top: a flex or grid container's (its
+   items give it, Flexbox 1, 8.5; Grid 1, 10.1), its first line's, or its first in-flow child's that has one */
 static int lay_first_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
-    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX || t->box[b].kind == LAYOUT_BOX_KIND_GRID) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
     if (t->box[b].first_line) { *y = t->line[t->box[b].first_line].y + t->line[t->box[b].first_line].baseline; return 1; }
     if (depth > 32) return 0;
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
@@ -2874,10 +2987,16 @@ static int lay_first_baseline(const layout_tree *t, uint32_t b, double *y, int d
     }
     return 0;
 }
-/* the last baseline in b's box subtree, from b's content box's top: a flex container's (its
-   first), its last line's, or its last in-flow child's that has one */
-static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
-    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
+/* the last baseline in b's box subtree, from b's content box's top: a flex or grid container's (its
+   items give it), its last line's, or its last in-flow child's that has one; ib: an inline-block's
+   baseline, which takes a flex or grid container's first baseline unless its last one is its items'
+   aligned on their last baselines (Chromium, measured) */
+static int lay_last_baseline_of(const layout_tree *t, uint32_t b, double *y, int depth, int ib) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX || t->box[b].kind == LAYOUT_BOX_KIND_GRID) {
+        if (ib && t->box[b].has_lbaseline != 2) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
+        *y = t->box[b].lbaseline;
+        return t->box[b].has_lbaseline != 0;
+    }
     uint32_t ln = t->box[b].last_line;
     if (ln) { *y = t->line[ln].y + t->line[ln].baseline; return 1; }
     if (depth > 32) return 0;
@@ -2885,15 +3004,17 @@ static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int de
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
         double cy;
         if (lay_out_of_flow(t, c)) continue;
-        if (lay_last_baseline(t, c, &cy, depth + 1)) { *y = t->box[c].y + cy; found = 1; }
+        if (lay_last_baseline_of(t, c, &cy, depth + 1, ib)) { *y = t->box[c].y + cy; found = 1; }
     }
     return found;
 }
+static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int depth) { return lay_last_baseline_of(t, b, y, depth, 0); }
 
 /* an atomic box's baseline, from its margin box's top (CSS 2.1, 10.8.1): a flex or grid
    container's first one (its items'); a replaced element's placeholder's line's; an
-   inline-block's last line's in its flow, however deep -- its bottom margin edge when it
-   has none, or when its overflow is not visible */
+   inline-block's last line's in its flow, however deep (a flex or grid container in it its
+   first baseline) -- its bottom margin edge when it has none, or when its overflow is not
+   visible */
 static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
     double top = t->box[b].mt + t->box[b].bt + t->box[b].pt, y;
     int kind = t->box[b].kind;
@@ -2903,7 +3024,7 @@ static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
         uint32_t ln = t->box[b].last_line;
         if (ln) return top + t->line[ln].y + t->line[ln].baseline;
     } else if (kind == LAYOUT_BOX_KIND_INLINE_BLOCK && t->box[b].has_baseline) return top + t->box[b].baseline;  /* an empty button's */
-    else if (t->box[b].clip != 1 && lay_last_baseline(t, b, &y, 0)) return top + y;
+    else if (t->box[b].clip != 1 && lay_last_baseline_of(t, b, &y, 0, 1)) return top + y;
     return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
 }
 
@@ -4120,7 +4241,7 @@ static void lay_run_oof(LCTX, uint32_t b, const vector<lay_piece> *ps, double w,
             sa.y = y;
             push_back(ab, sa);
         } else if (p.kind == P_FLOAT) {
-            uint32_t fb = lay_float_box(LARGS, b, p.node, w, -1);
+            uint32_t fb = lay_float_box(LARGS, b, p.node, w, lay_line_pch);
             lay_float_place(LARGS, fb, p.node, w, ox, oy, y);
         }
     }
@@ -4477,7 +4598,7 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
                 /* a float met in the line: placed at its top if it fits beside what the line
                    holds, the line then narrowed; else below the line */
                 uint32_t fel = at(ps, j).node;
-                uint32_t fb = lay_float_box(LARGS, b, fel, w, -1);
+                uint32_t fb = lay_float_box(LARGS, b, fel, w, lay_line_pch);
                 double mw = t->box[fb].ml + t->box[fb].bl + t->box[fb].pl + t->box[fb].w + t->box[fb].pr + t->box[fb].br + t->box[fb].mr;
                 if (mw <= lw - x + 0.01 || x <= indent) {
                     lay_float_place(LARGS, fb, fel, w, ox, oy, y);
@@ -4657,13 +4778,33 @@ static size_t lay_roman(long n, int upper, char *out, size_t cap) {
     return k;
 }
 
-/* the first line in b's box subtree, and its box */
-static uint32_t lay_first_line(const layout_tree *t, uint32_t b, uint32_t *owner) {
-    if (t->box[b].first_line) { *owner = b; return t->box[b].first_line; }
+/* where the list item b's marker is set (Chromium's content alignment baseline): its first line, however deep through the
+   blocks of its flow (ln, and its box in owner); a flex or grid container met first its own first baseline (ln 0); y the
+   baseline, from b's content box's top, clip whether a box on the way clips its overflow. 0 when there is none */
+static int lay_marker_spot(const layout_tree *t, uint32_t b, uint32_t *owner, uint32_t *ln, double *y, int *clip, int depth) {
+    if (t->box[b].first_line) {
+        *owner = b;
+        *ln = t->box[b].first_line;
+        *y = t->line[*ln].y + t->line[*ln].baseline;
+        return 1;
+    }
+    if (depth > 64) return 0;
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
-        if (t->box[c].kind == LAYOUT_BOX_KIND_INLINE_BLOCK || t->box[c].kind == LAYOUT_BOX_KIND_REPLACED) continue;
-        uint32_t ln = lay_first_line(t, c, owner);
-        if (ln) return ln;
+        int k = t->box[c].kind;
+        if (k == LAYOUT_BOX_KIND_INLINE_BLOCK || k == LAYOUT_BOX_KIND_REPLACED || lay_out_of_flow(t, c)) continue;
+        double cy = 0;
+        if (k == LAYOUT_BOX_KIND_FLEX || k == LAYOUT_BOX_KIND_GRID) {
+            if (!t->box[c].has_baseline) continue;
+            *owner = c;
+            *ln = 0;
+            *y = t->box[c].y + t->box[c].baseline;
+            return 1;
+        }
+        if (lay_marker_spot(t, c, owner, ln, &cy, clip, depth + 1)) {
+            *y = t->box[c].y + cy;
+            if (t->box[c].clip == 1) *clip = 1;
+            return 1;
+        }
     }
     return 0;
 }
@@ -4773,14 +4914,74 @@ static int lay_marker_strut(LCTX, uint32_t el, const lay_style *ls, const lay_st
     return 1;
 }
 
+/* a text node of nothing but white space a block collapses away */
+static int lay_blank_text(const dom_document *d, uint32_t x) {
+    amb_span sp = d->node[x].data;
+    const char *s = text_ptr(d, sp);
+    for (uint32_t i = 0; i < sp.len; i++) if (s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r' && s[i] != '\f') return 0;
+    return 1;
+}
+/* a list item el whose marker may take a line of its own, before its first block-level child (lay_flow; measured in
+   Chromium): an inside marker, Chromium's inline box at the list item's start, which an anonymous block of its own
+   wraps when the first in-flow box after it is a block (lay_flow sees whether it is); and in quirks mode an outside
+   marker whose list item's first child is a block-level ul or ol (Blink's NeedsOccupyWholeLine) */
+static int lay_marker_own_line(LCTX, uint32_t el, const lay_style *s) {
+    if ((el & LAY_GEN) || s->display != D_LIST_ITEM || !s->list) return 0;
+    if (s->list_inside) return 1;
+    if (!lay_quirks || (el < len(*sx) && (at(*sx, el) & LAY_HAS_BEFORE))) return 0;
+    for (uint32_t c = d->node[el].first_child; c; c = d->node[c].next_sibling) {
+        int kind = d->node[c].kind;
+        if (kind == DOM_NODE_KIND_TEXT) { if (lay_blank_text(d, c)) continue; return 0; }
+        if (kind != DOM_NODE_KIND_ELEMENT) continue;
+        int dsp = lay_display_of(LARGS, c);
+        if (dsp == D_NONE) continue;
+        uint32_t si = lay_si(sx, gx, c);
+        int pos = at(*xc, si).pos;
+        if (at(*xc, si).flt || pos == POS_ABSOLUTE || pos == POS_FIXED || !lay_block_level(dsp)) return 0;
+        return lay_is_named(d, c, "ul") || lay_is_named(d, c, "ol");
+    }
+    return 0;
+}
+/* that line: an anonymous box w wide in b (its first child when first, else its last), its one line as tall as the list
+   item el's strut (and an inside marker's text, where that reaches past it), which lay_marker sets the marker in */
+static uint32_t lay_marker_box(LCTX, uint32_t b, uint32_t el, double w, int first) {
+    uint32_t mb = lay_new_box(LARGS, first ? 0 : b, 0, LAYOUT_BOX_KIND_ANONYMOUS);
+    if (first) children_insert_before(t, b, mb, t->box[b].first_child);
+    t->box[mb].w = w;
+    t->box[mb].how = LAYOUT_WIDTH_HOW_FILL;
+    t->box[mb].avail = w;
+    lay_style bs;
+    lay_style_of(LARGS, el, &bs);
+    double ma = 0, mbl = 0;
+    if (bs.list == 4 && bs.list_inside && lay_marker_strut(LARGS, el, &bs, &bs, &ma, &mbl)) {
+        bs.asc = ma;
+        bs.desc = mbl;
+        bs.lh = ma + mbl;
+    }
+    vector<lay_piece> none;
+    vector<lay_open> open;
+    vector<lay_bu> bu;
+    t->box[mb].h = lay_line(LARGS, mb, &bs, &none, 0, 0, 0, w, 0, 0, 0, &open, &bu, 0, el, 1);
+    return mb;
+}
+
 static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     if (ls->list == 0 || (el & LAY_GEN)) return;
     /* the marker's style: its ::marker's, or the list item's */
     lay_style sm = *ls;
     lay_pseudo_style(LARGS, el, CSS_PSEUDO_MARKER, &sm);
     sm.list = ls->list;
-    uint32_t owner = 0, ln = lay_first_line(t, b, &owner);
-    if (!ln) return;
+    uint32_t owner = 0, ln = 0;
+    double ly = 0;
+    int clipped = 0;
+    if (!lay_marker_spot(t, b, &owner, &ln, &ly, &clipped, 0)) return;
+    /* a first line in a box that clips its overflow, or a flex or grid container's baseline: the marker set in a line of
+       the list item's own at that baseline, unclipped, as Chromium sets it in the list item's fragment */
+    if (clipped || !ln) {
+        owner = lay_marker_box(LARGS, b, el, t->box[b].w, 1);
+        ln = t->box[owner].first_line;
+        lay_place(t, owner, 0, ly - t->line[ln].baseline);
+    }
     vector<char> tl, tv;
     lay_marker_text(LARGS, el, ls, &tl);
     int rtl = 0;
@@ -5098,7 +5299,7 @@ static lay_mc lay_peek_mt(LCTX, uint32_t el, double cw, int depth, int qs) {
     int q = lay_quirky_margin(LARGS, el, 0);
     lay_mc m = qs && q ? lay_mc_of(0) : lay_mc_q(s.m[0].unit == LAY_AUTO ? 0 : lay_res(st, s.m[0], cw), q);
     if (depth > 6 || s.b[0] > 0 || lay_res(st, s.p[0], cw) > 0 || s.bfc || (s.display != D_BLOCK && s.display != D_LIST_ITEM)) return m;
-    if (LAY_X(el).clip == 1 || LAY_X(el).lx || LAY_X(el).flt || lay_replaced(d, el)) return m;
+    if (lay_clip_of(LARGS, el) == 1 || LAY_X(el).lx || LAY_X(el).flt || lay_replaced(d, el)) return m;
     vector<lay_seg> segs;
     vector<uint32_t> items;
     lay_collect(LARGS, el, &segs, &items);
@@ -5106,6 +5307,8 @@ static lay_mc lay_peek_mt(LCTX, uint32_t el, double cw, int depth, int qs) {
     for (size_t k = 0; k < len(segs); k++) {
         lay_seg sg = at(segs, k);
         if (sg.block == SEG_ABS || sg.block == SEG_FLOAT) continue;
+        /* a list item's marker on a line of its own before its first block: the block's margins stay below it */
+        if (sg.block == SEG_BLOCK && lay_marker_own_line(LARGS, el, &s)) return m;
         if (sg.block == SEG_BLOCK) return lay_mc_add(m, lay_peek_mt(LARGS, sg.node, cw, depth + 1, qc));
         return m;
     }
@@ -5117,7 +5320,7 @@ static lay_mc lay_peek_mt(LCTX, uint32_t el, double cw, int depth, int qs) {
 static int lay_makes_bfc(LCTX, uint32_t el) {
     if (lay_replaced(d, el)) return 1;
     uint32_t si = lay_si(sx, gx, el);
-    return at(*sc, si).bfc || at(*sc, si).display == D_TABLE || at(*xc, si).clip == 1 || at(*xc, si).lx != LX_FLOW;
+    return at(*sc, si).bfc || at(*sc, si).display == D_TABLE || lay_clip_of(LARGS, el) == 1 || at(*xc, si).lx != LX_FLOW;
 }
 
 /* the children of box b (element el's), as blocks or as lines, in b's content box of
@@ -5125,8 +5328,17 @@ static int lay_makes_bfc(LCTX, uint32_t el) {
    content height. ch: b's definite height (-1: none), what its children's percentages take.
    qs: b's top margin collapses at a quirky container's start. et and eb: the margins that
    collapsed through b's top and bottom; empty: b holds nothing that takes height */
+static void lay_flow_in(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et,
+                        lay_mc *eb, int *empty);
 static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et, lay_mc *eb,
                      int *empty) {
+    double keep = lay_line_pch;
+    lay_line_pch = ch;
+    lay_flow_in(LARGS, b, el, bfc, height_auto, ox, oy, ch, qs, et, eb, empty);
+    lay_line_pch = keep;
+}
+static void lay_flow_in(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, double ox, double oy, double ch, int qs, lay_mc *et,
+                        lay_mc *eb, int *empty) {
     double w = t->box[b].w;
     *et = lay_mc_of(0);
     *eb = lay_mc_of(0);
@@ -5156,6 +5368,13 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
     lay_mc pending = lay_mc_of(0);
     int first = 1;
     vector<uint32_t> waiting;          /* the floats met before the next in-flow box: placed at its top */
+    /* a list item's marker on a line of its own, when its first in-flow box is a block (lay_marker_own_line) */
+    int mline = 0;
+    if (el && !(el & LAY_GEN) && at(*sc, lay_si(sx, gx, el)).display == D_LIST_ITEM) {
+        lay_style ls;
+        lay_style_of(LARGS, el, &ls);
+        mline = lay_marker_own_line(LARGS, el, &ls);
+    }
     for (size_t k = 0; k < len(segs); k++) {
         lay_seg sg = at(segs, k);
         if (sg.block == SEG_FLOAT) { push_back(waiting, sg.node); continue; }
@@ -5177,6 +5396,21 @@ static void lay_flow(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto, do
                 continue;
             }
         }
+        if (mline && sg.block == SEG_BLOCK) {
+            /* the marker's line, an anonymous block's before the first block: the floats that waited at its top */
+            uint32_t mb = lay_marker_box(LARGS, b, el, w, 0);
+            double top = (first && through_top) ? 0 : cursor + lay_mc_v(pending);
+            for (size_t q = 0; q < len(waiting); q++) {
+                uint32_t fb = lay_float_box(LARGS, b, at(waiting, q), w, ch);
+                lay_float_place(LARGS, fb, at(waiting, q), w, ox, oy, top);
+            }
+            clear(waiting);
+            lay_place(t, mb, 0, top);
+            cursor = top + t->box[mb].h;
+            pending = lay_mc_of(0);
+            first = 0;
+        }
+        mline = 0;
         /* where the child's top will be, margins collapsed as far as can be seen before it is
            laid out (through its first children when floats are about) */
         lay_mc cm0 = lay_mc_of(0);
@@ -5471,7 +5705,7 @@ static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
                          pos == POS_FIXED ? LAYOUT_POSITION_FIXED : pos == POS_STICKY ? LAYOUT_POSITION_STICKY : LAYOUT_POSITION_STATIC;
     t->box[b].z_auto = pos == POS_STATIC || at(*xc, si).zauto;
     t->box[b].z = t->box[b].z_auto ? 0 : at(*xc, si).z;
-    t->box[b].clip = at(*xc, si).clip;
+    t->box[b].clip = (uint8_t)lay_clip_of(LARGS, el);
     if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
     if (pos == POS_RELATIVE) {
         double dx, dy;
@@ -5490,7 +5724,10 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         t->box[b].w = k->fw >= 0 ? k->fw : cw;
         t->box[b].how = k->fw >= 0 ? LAYOUT_WIDTH_HOW_FLEX : LAYOUT_WIDTH_HOW_FILL;
         t->box[b].avail = cw;
+        double keep = lay_line_pch;
+        lay_line_pch = k->ch;
         t->box[b].h = lay_lines(LARGS, b, style_el, items, first, n, t->box[b].w, k->ox, k->oy);
+        lay_line_pch = keep;
         *mt = lay_mc_of(0);
         *mb = lay_mc_of(0);
         *empty = !t->box[b].first_line;
@@ -5522,6 +5759,15 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
            one's, its margins a block's (auto ones centring it); its width given (a flex or grid item's) or held
            by min-width and max-width, its height kept in proportion when it is auto */
         double w = 0, h = 0;
+        /* a percentage height of its containing block's definite height (in quirks mode taken through blocks of an auto
+           height) */
+        lay_len hr = at(*xc, si).hraw;
+        if (s.height.unit == LAY_AUTO && hr.unit != LAY_AUTO && !lay_content_sized(hr) && k->ch >= 0) {
+            double ve = t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb;
+            s.height.unit = LAY_PX;
+            s.height.v = lay_res(st, hr, k->ch) - (s.border_box ? ve : 0);
+            if (s.height.v < 0) s.height.v = 0;
+        }
         lay_atomic_size(LARGS, el, &s, cw, &w, &h);
         double w0 = w;
         int auto_w = s.width.unit == LAY_AUTO;
@@ -5539,7 +5785,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
                 s.width.unit = LAY_PX;
                 s.width.v = (w > 0 ? w : 0) + (s.border_box ? edges_h : 0);
             }
-            lay_len minw = at(*xc, si).minw;
+            lay_len minw = lay_minw_px(LARGS, el, &s, cw, at(*xc, si).minw);
             lay_block_width(t, st, b, &s, cw, &minw);
             if (auto_w && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_INTRINSIC;
         }
@@ -5575,7 +5821,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
             s.width.unit = LAY_PX;
             s.width.v = (w < 0 ? 0 : w) + (s.border_box ? box : 0);
         }
-        lay_len minw = at(*xc, si).minw;
+        lay_len minw = lay_minw_px(LARGS, el, &s, cw, at(*xc, si).minw);
         lay_block_width(t, st, b, &s, cw, &minw);
         if (content_sized && t->box[b].how == LAYOUT_WIDTH_HOW_DECLARED) t->box[b].how = LAYOUT_WIDTH_HOW_SHRINK_TO_FIT;
     }
@@ -5586,7 +5832,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     }
     int root = !(el & LAY_GEN) && d->node[el].parent == 1;
     int pos = at(*xc, si).pos;
-    int bfc = root || s.bfc || s.display == D_CELL || s.display == D_CAPTION || at(*xc, si).clip == 1 || lx != LX_FLOW ||
+    int bfc = root || s.bfc || s.display == D_CELL || s.display == D_CAPTION || lay_clip_of(LARGS, el) == 1 || lx != LX_FLOW ||
               at(*xc, si).flt || pos == POS_ABSOLUTE || pos == POS_FIXED || k->item;
     /* its definite height, if it has one: declared in px, or a percentage of a definite
        containing block's (the root's: the viewport's) */
@@ -5656,7 +5902,13 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         double lbw = t->box[lgb].w + t->box[lgb].pl + t->box[lgb].pr + t->box[lgb].bl + t->box[lgb].br;
         double rest = t->box[b].w - lbw - t->box[lgb].ml - t->box[lgb].mr;
         int mla = ls.m[3].unit == LAY_AUTO, mra = ls.m[1].unit == LAY_AUTO;
-        if (rest > 0 && mla && mra) { t->box[lgb].ml = rest / 2; t->box[lgb].mr = rest / 2; }
+        if (s.rtl) {
+            /* right to left: from the inline start, the right, as Chromium places it (a legend wider than the content
+               box overflowing the left) */
+            double from = t->box[lgb].mr + (rest > 0 && mra ? (mla ? rest / 2 : rest) : 0);
+            t->box[lgb].mr = from;
+            t->box[lgb].ml = t->box[b].w - lbw - from;
+        } else if (rest > 0 && mla && mra) { t->box[lgb].ml = rest / 2; t->box[lgb].mr = rest / 2; }
         else if (rest > 0 && mla) t->box[lgb].ml = rest;
         double lmh = t->box[lgb].mt + lay_border_height(t, lgb) + t->box[lgb].mb, bt0 = t->box[b].bt;
         double extra = lmh > bt0 ? lmh - bt0 : 0;
@@ -5669,13 +5921,28 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     if (lx == LX_FLEX) { lay_flex(LARGS, b, el, fill >= 0 ? pch : defh); et = lay_mc_of(0); eb = lay_mc_of(0); *empty = 0; }
     else if (lx == LX_GRID) { lay_grid(LARGS, b, el, fill >= 0 ? pch : defh); et = lay_mc_of(0); eb = lay_mc_of(0); *empty = 0; }
     else lay_flow_children(LARGS, b, el, bfc, defh < 0, cox, coy, pch, k->qs, &et, &eb, empty);
+    /* a list item's marker that no line of its content holds: a line of its own at the content box's top, the list item
+       at least as tall (Chromium's marker without line boxes) */
+    if (s.display == D_LIST_ITEM && s.list && lx == LX_FLOW && !(el & LAY_GEN)) {
+        uint32_t owner = 0, mln = 0;
+        double my = 0;
+        int mclip = 0;
+        if (!lay_marker_spot(t, b, &owner, &mln, &my, &mclip, 0)) {
+            uint32_t mb = lay_marker_box(LARGS, b, el, t->box[b].w, 1);
+            lay_place(t, mb, 0, 0);
+            if (t->box[mb].h > t->box[b].h) t->box[b].h = t->box[mb].h;
+            *empty = 0;
+        }
+    }
     if (defh >= 0) {
         t->box[b].h = defh;
         eb = lay_mc_of(0);
         *empty = 0;
     } else {
         if (maxh >= 0 && t->box[b].h > maxh) t->box[b].h = maxh;
-        if (t->box[b].h < minh) { t->box[b].h = minh; eb = lay_mc_of(0); *empty = 0; }
+        /* a box held taller by min-height keeps its last child's bottom margin, but for one that fills (the quirky
+           body's, which Chromium lets through: measured) */
+        if (t->box[b].h < minh) { t->box[b].h = minh; if (fill < 0) eb = lay_mc_of(0); *empty = 0; }
     }
     if (t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb > 0) *empty = 0;
     if (at(*xc, si).clamp > 0 && defh < 0) lay_clamp(LARGS, b, el, &s);
@@ -6076,13 +6343,15 @@ typedef struct lay_fi {
 } lay_fi;
 
 /* the items of a flex or grid container el, in order (order, then the tree's); its
-   positioned children met, their static position its content box's corner */
+   positioned children met, their static position its content box's corner (b 0: the items
+   alone, for el's intrinsic widths, nothing laid out) */
 static void lay_items(LCTX, uint32_t b, uint32_t el, vector<lay_fi> *its, vector<uint32_t> *items) {
     vector<lay_seg> segs;
     lay_collect(LARGS, el, &segs, items);
     for (size_t k = 0; k < len(segs); k++) {
         lay_seg sg = at(segs, k);
         if (sg.block == SEG_ABS) {
+            if (!b) continue;
             lay_abs sa;
             sa.el = sg.node;
             sa.box = b;
@@ -6096,8 +6365,8 @@ static void lay_items(LCTX, uint32_t b, uint32_t el, vector<lay_fi> *its, vector
         it.idx = (uint32_t)k;
         if (sg.block == SEG_RUN) {
             vector<lay_piece> ps;
-            lay_run_pieces(LARGS, el, items, sg.first, sg.n, t->box[b].w, &ps);
-            if (!lay_run_shows(&ps)) { lay_run_oof(LARGS, b, &ps, t->box[b].w, 0, 0, 0); continue; }
+            lay_run_pieces(LARGS, el, items, sg.first, sg.n, b ? t->box[b].w : 0, &ps);
+            if (!lay_run_shows(&ps)) { if (b) lay_run_oof(LARGS, b, &ps, t->box[b].w, 0, 0, 0); continue; }
             it.first = sg.first;
             it.n = sg.n;
             it.shrink = 1;
@@ -6235,6 +6504,7 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
         lay_len mnl = row ? ie.minw : ie.minh, mxl = row ? is.maxw : ie.maxh;
         double pad = row ? eh : ev;
         if (mnl.unit == LAY_AUTO) it.mn = ie.clip ? 0 : (content_min < base || bs.unit != LAY_AUTO ? content_min : base);
+        else if (lay_content_sized(mnl)) it.mn = content_min;      /* min-content (a fieldset's): the content's */
         else it.mn = lay_res(st, mnl, row ? W : (defh >= 0 ? defh : 0)) + (is.border_box ? 0 : pad);
         if (mnl.unit == LAY_AUTO && it.el && row && is.width.unit != LAY_AUTO && !lay_content_sized(is.width)) {
             double spec = lay_res(st, is.width, W) + (is.border_box ? 0 : eh);
@@ -6443,16 +6713,39 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
     }
     if (defh < 0) t->box[b].h = row ? (cy > 0 ? cy - gap_cross - lbetween : 0) : main_size;
     if (row && defh < 0 && t->box[b].h < 0) t->box[b].h = 0;
-    /* the container's first baseline (8.5): that of its first line's items aligned on their
-       first baselines; else its first item's, the bottom of its border box when it has none */
+    /* the container's first baseline (8.5), as Chromium finds it, in the order the lines and items are drawn in (a
+       reversed direction or wrap reversing it): of its top line, its items aligned on their first baselines; else its
+       first item there (the leftmost in a row, the topmost in a column) -- its first baseline, the bottom of its border
+       box when it has none. Its last baseline likewise, of its bottom line: its items aligned on their last baselines,
+       flush to the line's end, else its last item there (the rightmost, the bottommost) and its last baseline */
     if (ni) {
+        size_t lf = 0, ll = 0;
+        for (size_t l = 1; l < nl; l++) {
+            if (at(lpos, l) < at(lpos, lf)) lf = l;
+            if (at(lpos, l) > at(lpos, ll)) ll = l;
+        }
+        uint32_t ib = 0, lb = 0;
+        double ibm = 0, lbm = 0;
+        for (size_t l = 0; l < nl; l++) {
+            if (l != lf && l != ll) continue;
+            for (size_t q = at(lstart, l); q < at(lstart, l + 1); q++) {
+                uint32_t x = at(its, q).box;
+                double m = row ? t->box[x].x - t->box[x].pl - t->box[x].bl : t->box[x].y - t->box[x].pt - t->box[x].bt;
+                if (l == lf && (!ib || m < ibm)) { ib = x; ibm = m; }
+                if (l == ll && (!lb || m >= lbm)) { lb = x; lbm = m; }
+            }
+        }
         double fb, yb;
-        uint32_t ib = at(its, 0).box;
-        if (row && at(lup, 0) > -1e29) fb = at(lpos, 0) + at(lup, 0);
+        if (row && at(lup, lf) > -1e29) fb = at(lpos, lf) + at(lup, lf);
         else if (lay_first_baseline(t, ib, &yb, 0)) fb = t->box[ib].y + yb;
         else fb = t->box[ib].y - t->box[ib].pt - t->box[ib].bt + lay_border_height(t, ib);
         t->box[b].baseline = fb;
         t->box[b].has_baseline = 1;
+        t->box[b].has_lbaseline = 1;
+        if (row && at(ldn, ll) > -1e29) { fb = at(lpos, ll) + at(lcross, ll) - at(ldn, ll); t->box[b].has_lbaseline = 2; }
+        else if (lay_last_baseline(t, lb, &yb, 0)) fb = t->box[lb].y + yb;
+        else fb = t->box[lb].y - t->box[lb].pt - t->box[lb].bt + lay_border_height(t, lb);
+        t->box[b].lbaseline = fb;
     }
 }
 
@@ -6799,16 +7092,19 @@ static double lay_fill(vector<double> *inc, const vector<double> *room, const ve
    max-content one) needs past the sizes of the tracks it spans (the base sizes in steps
    1 to 3, the growth limits in 5 and 6), shared among those of its tracks the step affects
    up to their limits, then past them (11.5.1); each track's size then grows by the most
-   an item asked of it. flex: the flexible tracks alone take space, by their factors (11.5.4) */
+   an item asked of it. flex: the flexible tracks alone take space, by their factors (11.5.4).
+   Under a min- or max-content constraint as in a layout, as Chromium has it: its minimum
+   contributions, not the limited contributions the spec names, and in step 3 the tracks of a
+   max-content minimum alone */
 static void lay_spread(vector<lay_track> *tr, const vector<lay_gc> *gc, const vector<uint32_t> *group, double gap, int step, int flex) {
     size_t n = len(*tr);
     int on_limit = step >= 5;
     for (size_t q = 0; q < n; q++) { (*tr)[q].plan = 0; (*tr)[q].touched = 0; }
     for (size_t g = 0; g < len(*group); g++) {
         lay_gc c = at(*gc, at(*group, g));
+        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
         double want = step == 1 ? c.minc : (step == 2 || step == 5) ? c.mn : c.mx;
         double have = gap * (double)(c.span - 1);
-        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
         vector<double> inc, room, w;
         vector<uint8_t> aff, beyond;
         int naff = 0, nbeyond = 0;
@@ -6922,9 +7218,14 @@ static double lay_fr_size(const vector<lay_track> *tr, size_t a, size_t z, doubl
    limits from the items in them -- those that span one track, then the others by their
    spans, then those that cross a flexible track -- the free space to the growth limits, the
    fr tracks their share of what is left, the auto ones stretched over the rest (stretch).
-   avail: the grid's size along the axis, -1 when it is not definite */
-static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, double avail, double gap, int stretch) {
+   avail: the grid's size along the axis, -1 when it is not definite. mode: 0 the grid laid
+   out; 1 sized under a min-content constraint (no free space shared, an fr 0), 2 under a
+   max-content one (the free space infinite, an fr found as when it is indefinite): the grid
+   container's own min- and max-content widths, Chromium's two runs of its algorithm, which
+   take the items' contributions as a layout does (measured) */
+static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, double avail, double gap, int stretch, int mode) {
     size_t n = len(*tr), ng = len(*gc);
+    if (mode) { avail = -1; stretch = 0; }
     for (size_t q = 0; q < n; q++) {
         lay_track tk = at(*tr, q);
         tk.base = tk.mink == TK_FIXED ? tk.minv : 0;
@@ -6980,10 +7281,12 @@ static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, dou
     if (len(group)) for (int step = 1; step <= 3; step++) lay_spread(tr, gc, &group, gap, step, 1);
     /* 11.5.5: a growth limit still none is the base size */
     for (size_t q = 0; q < n; q++) if (at(*tr, q).limit >= LAY_INF || at(*tr, q).limit < at(*tr, q).base) (*tr)[q].limit = at(*tr, q).base;
-    /* 11.6: the free space to the growth limits, shared equally; with no definite size, each at its limit */
+    /* 11.6: the free space to the growth limits, shared equally; with no definite size, each at its limit; under a
+       min-content constraint there is none */
     double total = gap * (double)(n > 0 ? n - 1 : 0);
     for (size_t q = 0; q < n; q++) total += at(*tr, q).base;
-    if (avail < 0) for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).limit;
+    if (mode == 1) { /* no free space */ }
+    else if (avail < 0) for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).limit;
     else if (avail - total > 0.001) {
         vector<double> inc, room, w;
         vector<uint8_t> open;
@@ -7000,7 +7303,7 @@ static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, dou
        the largest each fr track's base and each item that crosses one asks */
     double frs = 0;
     for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR) frs += at(*tr, q).maxv;
-    if (frs > 0) {
+    if (frs > 0 && mode != 1) {
         double fr = 0;
         if (avail >= 0) fr = lay_fr_size(tr, 0, n, avail, gap);
         else {
@@ -7107,62 +7410,17 @@ static size_t lay_collapse(vector<lay_track> *tr, const vector<lay_gp> *gp, int 
     return live;
 }
 
-/* a grid container's min- and max-content widths, its edges aside (Grid 1, 11.5, its width indefinite), as far as
-   this reckons them: its template's columns (one when it has none), its items (segs, items: its children as layout
-   collects them) placed in turn along the rows; a fixed column its size, any other the widest min-content
-   (max-content) of its items; the gaps between */
-static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_seg> *segs, const vector<uint32_t> *items, double *mn, double *mx) {
-    *mn = 0;
-    *mx = 0;
-    lay_ext ge = LAY_X(el);
-    double gg = lay_res(st, ge.cgap, cw);
-    vector<lay_track> tcol;
-    vector<lay_lname> ncol;
-    vector<char> src;
-    amb_span gsp = st->cval[ge.gtc].text;
-    append_range(src, text_ptr(st, gsp), gsp.len);
-    lay_tracks(data(src), len(src), -1, gg, &tcol, &ncol, 0);
-    size_t nc = len(tcol) ? len(tcol) : 1;
-    vector<double> cmn, cmx;
-    resize(&cmn, nc, 0.0);
-    resize(&cmx, nc, 0.0);
-    size_t next = 0;
-    for (size_t k = 0; k < len(*segs); k++) {
-        lay_seg sg = at(*segs, k);
-        double a, bb;
-        if (sg.block == SEG_ABS) continue;
-        if (sg.block) lay_intrinsic(LARGS, sg.node, cw, &a, &bb);
-        else {
-            vector<lay_piece> ps;
-            lay_run_pieces(LARGS, el, items, sg.first, sg.n, cw, &ps);
-            if (!lay_run_shows(&ps)) continue;
-            lay_run_intrinsic(&ps, &a, &bb, 0);
-        }
-        size_t col = next % nc;
-        next++;
-        if (a > at(cmn, col)) cmn[col] = a;
-        if (bb > at(cmx, col)) cmx[col] = bb;
-    }
-    for (size_t c = 0; c < nc; c++) {
-        double lo = at(cmn, c), hi = at(cmx, c);
-        if (c < len(tcol)) {
-            lay_track tk = at(tcol, c);
-            if (tk.mink == TK_FIXED && tk.maxk == TK_FIXED) { lo = tk.maxv; hi = tk.maxv; }
-            else if (tk.mink == TK_FIXED) { if (lo < tk.minv) lo = tk.minv; if (hi < tk.minv) hi = tk.minv; }
-        }
-        *mn += lo + (c ? gg : 0);
-        *mx += hi + (c ? gg : 0);
-    }
-}
-
-static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
+/* a grid container el's items (its, in order) placed and its tracks made (Grid 1, 7 and 8): the track lists read
+   against its width W and height H (-1 when not definite: a percentage then auto, an automatic repeat once), the
+   areas, each item's lines (8.3), those locked to a row (to a column, in a column flow), then the rest by a cursor
+   moving along the rows (the columns), sparse or dense (8.5), implicit tracks before the explicit grid as well as
+   after it. Each item's place in gp (its first track and span on each axis, the tracks before the explicit grid's
+   first line counted in lead0 and lead1), the columns and the rows, an auto-fit repeat's empty tracks collapsed
+   (7.2.3.2; lcols, lrows: how many did not) */
+static void lay_grid_place(LCTX, uint32_t el, const vector<lay_fi> *its, double W, double H, double cgap, double rgap, vector<lay_gp> *gp,
+                           vector<lay_track> *cols, vector<lay_track> *rows, long *lead0p, long *lead1p, size_t *lcols, size_t *lrows) {
     lay_ext e = LAY_X(el);
-    double W = t->box[b].w;
-    vector<lay_fi> its;
-    vector<uint32_t> items;
-    lay_items(LARGS, b, el, &its, &items);
-    size_t ni = len(its);
-    double cgap = lay_res(st, e.cgap, W), rgap = lay_res(st, e.rgap, defh >= 0 ? defh : 0);
+    size_t ni = len(*its);
     /* the track lists and their lines' names: the columns', the rows', the auto tracks' */
     vector<lay_track> tcol, trow, acol, arow;
     vector<lay_lname> ncol, nrow, nauto;
@@ -7173,7 +7431,7 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     clear(&src);
     sp = st->cval[e.gtr].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &trow, &nrow, 0);
+    lay_tracks(data(src), len(src), H, rgap, &trow, &nrow, 0);
     clear(&src);
     sp = st->cval[e.gac].text;
     append_range(src, text_ptr(st, sp), sp.len);
@@ -7181,7 +7439,7 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     clear(&src);
     sp = st->cval[e.gar].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &arow, &nauto, 0);
+    lay_tracks(data(src), len(src), H, rgap, &arow, &nauto, 0);
     /* the areas: the explicit grid as large as they need, each area's -start and -end lines named */
     vector<lay_area> areas;
     uint32_t arows = 0, acols = 0;
@@ -7214,7 +7472,6 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         }
     }
     /* each item's lines (8.3), and how it is placed */
-    vector<lay_gp> gp;
     for (size_t q = 0; q < ni; q++) {
         lay_gp g;
         memset(&g, 0, sizeof g);
@@ -7223,7 +7480,7 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         ce = cs;
         rs = cs;
         re = cs;
-        uint32_t ie = at(its, q).el;
+        uint32_t ie = at(*its, q).el;
         if (ie) {
             lay_grid_line(st, LAY_X(ie).gcs, &cs);
             lay_grid_line(st, LAY_X(ie).gce, &ce);
@@ -7241,38 +7498,38 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
        need them (lead), then each definite line made a track's index */
     long lead0 = 0, lead1 = 0, cnt0 = nx0, cnt1 = nx1;
     for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         if (g.d0 && 1 - g.s0 > lead0) lead0 = 1 - g.s0;
         if (g.d1 && 1 - g.s1 > lead1) lead1 = 1 - g.s1;
     }
     cnt0 += lead0;
     cnt1 += lead1;
     for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         if (g.d0) { g.s0 += lead0 - 1; if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0; }
         if (g.d1) { g.s1 += lead1 - 1; if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1; }
-        gp[q] = g;
+        (*gp)[q] = g;
     }
     /* the axis the cursor runs along (mi: the columns in a row flow), the one it moves on to
        (the rows); 1: those of each item placed along both */
     int mi = colflow ? 1 : 0;
     vector<uint8_t> placed;
     resize(&placed, ni, (uint8_t)0);
-    for (size_t q = 0; q < ni; q++) if (at(gp, q).d0 && at(gp, q).d1) placed[q] = 1;
+    for (size_t q = 0; q < ni; q++) if (at(*gp, q).d0 && at(*gp, q).d1) placed[q] = 1;
     /* those locked to a row (a column): each in it, at the first place clear of those placed
        (past those this step placed in that row, sparse) */
     vector<long> rowcur;
     for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         int dmi = mi == 0 ? g.d0 : g.d1, dma = mi == 0 ? g.d1 : g.d0;
         if (dmi || !dma) continue;
         long ma0 = mi == 0 ? g.s1 : g.s0, man = mi == 0 ? g.n1 : g.n0, min_ = mi == 0 ? g.n0 : g.n1;
         if ((long)len(rowcur) <= ma0) resize(&rowcur, (size_t)ma0 + 1, 0L);
         long c = dense ? 0 : at(rowcur, (size_t)ma0);
-        while (!lay_gp_clear(&gp, &placed, mi, c, min_, ma0, man) && c < 4000) c++;
+        while (!lay_gp_clear(gp, &placed, mi, c, min_, ma0, man) && c < 4000) c++;
         if (mi == 0) g.s0 = c; else g.s1 = c;
         rowcur[(size_t)ma0] = c + min_;
-        gp[q] = g;
+        (*gp)[q] = g;
         placed[q] = 1;
         if (mi == 0 && c + min_ > cnt0) cnt0 = c + min_;
         if (mi == 1 && c + min_ > cnt1) cnt1 = c + min_;
@@ -7280,7 +7537,7 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     /* the minor axis's tracks: as many as the widest item placed automatically needs too */
     long ncross = mi == 0 ? cnt0 : cnt1;
     for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         long n = mi == 0 ? g.n0 : g.n1;
         if (n > ncross) ncross = n;
     }
@@ -7289,14 +7546,14 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     vector<uint8_t> occ;
     for (size_t q = 0; q < ni; q++) {
         if (!at(placed, q)) continue;
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         if (mi == 0) lay_cells(&occ, ncross, g.s0, g.n0, g.s1, g.n1, 1);
         else lay_cells(&occ, ncross, g.s1, g.n1, g.s0, g.n0, 1);
     }
     long cur_mi = 0, cur_ma = 0;
     for (size_t q = 0; q < ni; q++) {
         if (at(placed, q)) continue;
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         int dmi = mi == 0 ? g.d0 : g.d1;
         long a0 = mi == 0 ? g.s0 : g.s1, an = mi == 0 ? g.n0 : g.n1, bn = mi == 0 ? g.n1 : g.n0;
         if (dmi) {
@@ -7317,27 +7574,34 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         }
         lay_cells(&occ, ncross, a0, an, cur_ma, bn, 1);
         if (mi == 0) { g.s0 = a0; g.s1 = cur_ma; } else { g.s1 = a0; g.s0 = cur_ma; }
-        gp[q] = g;
+        (*gp)[q] = g;
         placed[q] = 1;
     }
     for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
+        lay_gp g = at(*gp, q);
         if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0;
         if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1;
     }
     /* the tracks: the templates', grid-auto-*'s before and after them */
-    vector<lay_track> cols, rows;
     for (long c = 0; c < cnt0; c++) push_back(cols, lay_track_at(&tcol, &acol, c + 1 - lead0));
     for (long r = 0; r < cnt1; r++) push_back(rows, lay_track_at(&trow, &arow, r + 1 - lead1));
-    size_t ncols = len(cols), nrows = len(rows);
     /* an auto-fit repeat's tracks that no item is in collapse (Grid 1, 7.2.3.2): 0px, and the gutters beside them
        collapse too: a gutter is between two tracks that did not */
-    size_t lcols = lay_collapse(&cols, &gp, 0), lrows = lay_collapse(&rows, &gp, 1);
-    /* the columns: from the items' widths, those in tracks of fixed sizes alone not measured */
-    vector<lay_gc> gc;
-    for (size_t q = 0; q < ni; q++) {
-        lay_gp g = at(gp, q);
-        lay_fi it = at(its, q);
+    *lcols = lay_collapse(cols, gp, 0);
+    *lrows = lay_collapse(rows, gp, 1);
+    *lead0p = lead0;
+    *lead1p = lead1;
+}
+
+/* the items' contributions to the columns (11.5; gc, an item's each): its first column and its span, its min- and
+   max-content widths (its margin box's) and its minimum contribution, against W -- those in tracks of fixed sizes
+   alone not measured */
+static void lay_grid_cols_gc(LCTX, uint32_t el, const vector<lay_fi> *its, const vector<uint32_t> *items, const vector<lay_gp> *gp,
+                             const vector<lay_track> *cols, double W, double cgap, vector<lay_gc> *gc) {
+    size_t ncols = len(*cols);
+    for (size_t q = 0; q < len(*its); q++) {
+        lay_gp g = at(*gp, q);
+        lay_fi it = at(*its, q);
         lay_gc c;
         memset(&c, 0, sizeof c);
         c.first = (uint32_t)g.s0;
@@ -7345,32 +7609,92 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         int sized = 0, flexed = 0, fixed_max = 1;
         double maxes = cgap * (double)(g.n0 - 1);
         for (long k = g.s0; k < g.s0 + g.n0 && k < (long)ncols; k++) {
-            lay_track tk = at(cols, (size_t)k);
+            lay_track tk = at(*cols, (size_t)k);
             if (tk.mink != TK_FIXED || tk.maxk != TK_FIXED) sized = 1;
             if (tk.maxk == TK_FR) flexed = 1;
             if (tk.maxk == TK_FIXED) maxes += tk.maxv; else fixed_max = 0;
         }
         if (sized) {
-            lay_item_intrinsic(LARGS, el, &it, &items, W, &c.mn, &c.mx);
+            lay_item_intrinsic(LARGS, el, &it, items, W, &c.mn, &c.mx);
             c.minc = c.mn;
-            /* its minimum contribution: its min-content one, but for a scroll container, a
-               min-width, or a span across a flexible track, its edges alone (and min-width) */
             if (it.el) {
                 lay_style is;
                 lay_style_of(LARGS, it.el, &is);
                 lay_ext ie = LAY_X(it.el);
-                double edges = lay_edges_px(st, &is, W);
-                if (ie.minw.unit != LAY_AUTO && !lay_content_sized(ie.minw))
-                    c.minc = lay_res(st, ie.minw, W) + edges - (is.border_box ? is.b[1] + is.b[3] + lay_res(st, is.p[1], W) + lay_res(st, is.p[3], W) : 0);
-                else if (ie.clip == 1 || (g.n0 > 1 && flexed)) c.minc = edges;
-            }
-            if (fixed_max && c.minc > maxes) c.minc = maxes;
+                double edges = lay_edges_px(st, &is, W), box = is.b[1] + is.b[3] + lay_res(st, is.p[1], W) + lay_res(st, is.p[3], W);
+                /* its contributions held by a max-width and a min-width of px (its margin box's) */
+                if (is.maxw.unit == LAY_PX) {
+                    double v = is.maxw.v + edges - (is.border_box ? box : 0);
+                    if (c.mn > v) c.mn = v;
+                    if (c.mx > v) c.mx = v;
+                }
+                int mwp = ie.minw.unit != LAY_AUTO && !lay_content_sized(ie.minw);
+                double mwv = mwp ? lay_res(st, ie.minw, W) + edges - (is.border_box ? box : 0) : 0;
+                if (mwp && ie.minw.unit == LAY_PX) {
+                    if (c.mn < mwv) c.mn = mwv;
+                    if (c.mx < mwv) c.mx = mwv;
+                }
+                /* its minimum contribution, as Chromium has it: of a width of its own, its min-content contribution;
+                   else of a min-width, that; else, for a scroll container, a span across a flexible track or one across
+                   no track of an auto minimum, its edges alone; else its min-content contribution, held to the tracks'
+                   fixed maximums when it spans no others (the content-based minimum) */
+                int spans_auto = 0;
+                for (long k = g.s0; k < g.s0 + g.n0 && k < (long)ncols; k++) if (at(*cols, (size_t)k).mink == TK_AUTO) spans_auto = 1;
+                if (is.width.unit == LAY_PX) c.minc = c.mn;
+                else if (mwp) c.minc = mwv;
+                else if (ie.clip == 1 || (g.n0 > 1 && flexed) || !spans_auto) c.minc = edges;
+                else if (fixed_max && c.minc > maxes) c.minc = maxes;
+            } else if (fixed_max && c.minc > maxes) c.minc = maxes;
         }
         push_back(gc, c);
     }
+}
+
+/* a grid container's min- and max-content widths, its edges aside (Grid 1, 11; cw its containing block's width): its
+   items placed as its layout places them, its columns sized by the track sizing algorithm under a min-content and then
+   a max-content constraint (lay_size_tracks), as Chromium sizes them, its width indefinite; a percentage gap 0 */
+static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) {
+    lay_ext e = LAY_X(el);
+    vector<lay_fi> its;
+    vector<uint32_t> items;
+    lay_items(LARGS, 0, el, &its, &items);
+    double cgap = lay_res(st, e.cgap, 0), rgap = lay_res(st, e.rgap, 0);
+    vector<lay_gp> gp;
+    vector<lay_track> cols, rows;
+    long lead0 = 0, lead1 = 0;
+    size_t lcols = 0, lrows = 0;
+    lay_grid_place(LARGS, el, &its, -1, -1, cgap, rgap, &gp, &cols, &rows, &lead0, &lead1, &lcols, &lrows);
+    vector<lay_gc> gc;
+    lay_grid_cols_gc(LARGS, el, &its, &items, &gp, &cols, cw, cgap, &gc);
+    for (int mode = 1; mode <= 2; mode++) {
+        lay_size_tracks(&cols, &gc, -1, cgap, 0, mode);
+        double sum = lcols ? cgap * (double)(lcols - 1) : 0;
+        for (size_t c = 0; c < len(cols); c++) sum += at(cols, c).base;
+        if (mode == 1) *mn = sum;
+        else *mx = sum;
+    }
+}
+
+static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
+    lay_ext e = LAY_X(el);
+    double W = t->box[b].w;
+    vector<lay_fi> its;
+    vector<uint32_t> items;
+    lay_items(LARGS, b, el, &its, &items);
+    size_t ni = len(its);
+    double cgap = lay_res(st, e.cgap, W), rgap = lay_res(st, e.rgap, defh >= 0 ? defh : 0);
+    vector<lay_gp> gp;
+    vector<lay_track> cols, rows;
+    long lead0 = 0, lead1 = 0;
+    size_t lcols = 0, lrows = 0;
+    lay_grid_place(LARGS, el, &its, W, defh, cgap, rgap, &gp, &cols, &rows, &lead0, &lead1, &lcols, &lrows);
+    size_t ncols = len(cols), nrows = len(rows);
+    /* the columns: from the items' widths */
+    vector<lay_gc> gc;
+    lay_grid_cols_gc(LARGS, el, &its, &items, &gp, &cols, W, cgap, &gc);
     int jc = e.jc;
     double cdrop = cgap * (double)((ncols ? ncols - 1 : 0) - (lcols ? lcols - 1 : 0));   /* the collapsed gutters */
-    lay_size_tracks(&cols, &gc, W >= 0 ? W + cdrop : W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
+    lay_size_tracks(&cols, &gc, W >= 0 ? W + cdrop : W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH, 0);
     double cols_total = lcols ? cgap * (double)(lcols - 1) : 0;
     for (size_t c = 0; c < ncols; c++) cols_total += at(cols, c).base;
     double cstart = 0, cbetween = 0;
@@ -7400,9 +7724,25 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
             mr = is.m[1].unit == LAY_AUTO ? 0 : lay_res(st, is.m[1], W);
             js = LAY_X(it.el).js == AJ_AUTO || LAY_X(it.el).js == AJ_NORMAL ? e.ji : LAY_X(it.el).js;
             if (js == AJ_NORMAL) js = lay_replaced(d, it.el) ? AJ_START : AJ_STRETCH;
+            /* a baseline across the columns, which a horizontal item has none of: its fallback, start (last baseline: end) */
+            if (js == AJ_BASELINE) js = AJ_START;
+            else if (js == AJ_LBASE) js = AJ_END;
             wauto = is.width.unit == LAY_AUTO;
         }
         double fw = js == AJ_STRETCH && wauto ? aw - ml - mr : -1;
+        if (fw >= 0 && it.el) {
+            /* stretched as far as its max-width and min-width let it */
+            double box = is.b[1] + is.b[3] + lay_res(st, is.p[1], aw) + lay_res(st, is.p[3], aw);
+            lay_len xw = is.maxw, nw = LAY_X(it.el).minw;
+            if (xw.unit != LAY_AUTO && !lay_content_sized(xw)) {
+                double v = lay_res(st, xw, aw) + (is.border_box ? 0 : box);
+                if (fw > v) fw = v;
+            }
+            if (nw.unit != LAY_AUTO && !lay_content_sized(nw)) {
+                double v = lay_res(st, nw, aw) + (is.border_box ? 0 : box);
+                if (fw < v) fw = v;
+            }
+        }
         it.box = lay_item_box(LARGS, b, el, &it, &items, aw - ml - mr, fw, -1);
         t->box[it.box].how = LAYOUT_WIDTH_HOW_GRID;
         double bw = lay_bw(t, it.box);
@@ -7413,7 +7753,39 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         it.cross = t->box[it.box].mt + lay_border_height(t, it.box) + t->box[it.box].mb;
         its[q] = it;
     }
-    /* the rows: from the items' heights (a scroll container's minimum its edges alone) */
+    /* each item's alignment across the rows (align-self; an anonymous item's the container's align-items), and of an
+       item aligned on its first or last baseline, from its margin box's top to that baseline (above): its own, else
+       one synthesized at its border box's bottom */
+    for (size_t q = 0; q < ni; q++) {
+        lay_fi it = at(its, q);
+        int as = e.ai;
+        if (it.el && LAY_X(it.el).as != AJ_AUTO && LAY_X(it.el).as != AJ_NORMAL) as = LAY_X(it.el).as;
+        if (as == AJ_NORMAL) as = it.el && lay_replaced(d, it.el) ? AJ_START : AJ_STRETCH;
+        it.align = as;
+        if (as == AJ_BASELINE || as == AJ_LBASE) {
+            uint32_t ib = it.box;
+            double yb;
+            if (as == AJ_BASELINE ? lay_first_baseline(t, ib, &yb, 0) : lay_last_baseline(t, ib, &yb, 0))
+                it.above = t->box[ib].mt + t->box[ib].bt + t->box[ib].pt + yb;
+            else it.above = t->box[ib].mt + lay_border_height(t, ib);
+        }
+        its[q] = it;
+    }
+    /* the baseline-sharing groups (Box Alignment 3, 9.3): a row's items aligned on their first baselines that start in
+       it, the most any rises above that baseline (brise); its items aligned on their last baselines that end in it, the
+       most any falls below theirs (bfall) */
+    vector<double> brise, bfall;
+    resize(&brise, nrows, -1.0);
+    resize(&bfall, nrows, -1.0);
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        lay_fi it = at(its, q);
+        size_t r0 = (size_t)g.s1, r1 = (size_t)(g.s1 + g.n1 - 1);
+        if (it.align == AJ_BASELINE && r0 < nrows && it.above > at(brise, r0)) brise[r0] = it.above;
+        if (it.align == AJ_LBASE && r1 < nrows && it.cross - it.above > at(bfall, r1)) bfall[r1] = it.cross - it.above;
+    }
+    /* the rows: from the items' heights (a scroll container's minimum its edges alone), an item aligned on a baseline
+       with what its group's baseline shifts it by (Grid 1, 11.5's shim) */
     clear(&gc);
     for (size_t q = 0; q < ni; q++) {
         lay_gp g = at(gp, q);
@@ -7421,16 +7793,19 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         lay_gc c;
         c.first = (uint32_t)g.s1;
         c.span = (uint32_t)g.n1;
-        c.mn = it.cross;
-        c.mx = it.cross;
-        c.minc = it.cross;
+        double shim = 0;
+        if (it.align == AJ_BASELINE && (size_t)g.s1 < nrows) shim = at(brise, (size_t)g.s1) - it.above;
+        if (it.align == AJ_LBASE && (size_t)(g.s1 + g.n1 - 1) < nrows) shim = at(bfall, (size_t)(g.s1 + g.n1 - 1)) - (it.cross - it.above);
+        c.mn = it.cross + shim;
+        c.mx = it.cross + shim;
+        c.minc = it.cross + shim;
         if (it.el && LAY_X(it.el).clip == 1 && LAY_X(it.el).minh.unit == LAY_AUTO)
             c.minc = t->box[it.box].mt + t->box[it.box].bt + t->box[it.box].pt + t->box[it.box].pb + t->box[it.box].bb + t->box[it.box].mb;
         push_back(gc, c);
     }
     int ac = e.ac;
     double rdrop = rgap * (double)((nrows ? nrows - 1 : 0) - (lrows ? lrows - 1 : 0));
-    lay_size_tracks(&rows, &gc, defh >= 0 ? defh + rdrop : defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
+    lay_size_tracks(&rows, &gc, defh >= 0 ? defh + rdrop : defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH), 0);
     double rows_total = lrows ? rgap * (double)(lrows - 1) : 0;
     for (size_t rr = 0; rr < nrows; rr++) rows_total += at(rows, rr).base;
     double grid_h = rows_total;
@@ -7458,12 +7833,10 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         if (g.s1 >= (long)nrows || g.s0 >= (long)ncols) continue;
         double ah = rgap * (double)(g.n1 - 1);
         for (long rr = g.s1; rr < g.s1 + g.n1 && rr < (long)nrows; rr++) ah += at(rows, (size_t)rr).base;
-        int as = AJ_STRETCH, hauto = 1;
+        int as = it.align, hauto = 1;
         if (it.el) {
             lay_style is;
             lay_style_of(LARGS, it.el, &is);
-            as = LAY_X(it.el).as == AJ_AUTO || LAY_X(it.el).as == AJ_NORMAL ? e.ai : LAY_X(it.el).as;
-            if (as == AJ_NORMAL) as = lay_replaced(d, it.el) ? AJ_START : AJ_STRETCH;
             hauto = is.height.unit == LAY_AUTO && LAY_X(it.el).hraw.unit == LAY_AUTO;
         }
         double mt = t->box[it.box].mt, mb = t->box[it.box].mb;
@@ -7476,6 +7849,9 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         double bh = lay_border_height(t, it.box), yoff = mt;
         if (as == AJ_END) yoff = ah - mb - bh;
         else if (as == AJ_CENTER) yoff = mt + (ah - mt - mb - bh) / 2;
+        /* on a baseline: its group's, at the start of its area (a last baseline's at its end) */
+        else if (as == AJ_BASELINE) yoff = mt + at(brise, (size_t)g.s1) - it.above;
+        else if (as == AJ_LBASE) yoff = mt + ah - (at(bfall, (size_t)(g.s1 + g.n1 - 1)) - (it.cross - it.above)) - it.cross;
         lay_place(t, it.box, at(cols, (size_t)g.s0).pos + it.mm0, at(rows, (size_t)g.s1).pos + yoff);
         t->box[it.box].grid_col = (int32_t)(g.s0 + 1 - lead0);
         t->box[it.box].grid_row = (int32_t)(g.s1 + 1 - lead1);
@@ -7485,6 +7861,43 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         if (g.area && it.el) t->box[it.box].grid_area = lay_kept(t, st, LAY_X(it.el).grs);
     }
     if (defh < 0) t->box[b].h = grid_h > 0 ? grid_h : 0;
+    /* its first baseline (Grid 1, 10.1): of its first row with an item in it, its items aligned on their first baselines
+       there, else the first of its items there in grid order (its first baseline, else its border box's bottom); its last
+       likewise, of its last row: its items aligned on their last baselines ending there, else the last of its items there */
+    if (ni) {
+        long r0 = -1, r1 = -1;
+        size_t f0 = 0, f1 = 0;
+        for (size_t q = 0; q < ni; q++) {
+            lay_gp g = at(gp, q);
+            if (g.s1 >= (long)nrows || g.s0 >= (long)ncols) continue;
+            if (r0 < 0 || g.s1 < r0) r0 = g.s1;
+            if (g.s1 + g.n1 - 1 > r1) r1 = g.s1 + g.n1 - 1;
+        }
+        int h0 = 0, h1 = 0;
+        for (size_t q = 0; q < ni && r0 >= 0; q++) {
+            lay_gp g = at(gp, q);
+            if (g.s1 >= (long)nrows || g.s0 >= (long)ncols) continue;
+            if (g.s1 == r0 && (!h0 || g.s0 < at(gp, f0).s0)) { f0 = q; h0 = 1; }
+            if (g.s1 <= r1 && r1 < g.s1 + g.n1 && (!h1 || g.s1 > at(gp, f1).s1 || (g.s1 == at(gp, f1).s1 && g.s0 > at(gp, f1).s0))) { f1 = q; h1 = 1; }
+        }
+        double yb;
+        if (h0) {
+            uint32_t ib = at(its, f0).box;
+            if (at(brise, (size_t)r0) >= 0) t->box[b].baseline = at(rows, (size_t)r0).pos + at(brise, (size_t)r0);
+            else if (lay_first_baseline(t, ib, &yb, 0)) t->box[b].baseline = t->box[ib].y + yb;
+            else t->box[b].baseline = t->box[ib].y - t->box[ib].pt - t->box[ib].bt + lay_border_height(t, ib);
+            t->box[b].has_baseline = 1;
+        }
+        if (h1) {
+            uint32_t ib = at(its, f1).box;
+            t->box[b].has_lbaseline = 1;
+            if (at(bfall, (size_t)r1) >= 0) {
+                t->box[b].lbaseline = at(rows, (size_t)r1).pos + at(rows, (size_t)r1).base - at(bfall, (size_t)r1);
+                t->box[b].has_lbaseline = 2;
+            } else if (lay_last_baseline(t, ib, &yb, 0)) t->box[b].lbaseline = t->box[ib].y + yb;
+            else t->box[b].lbaseline = t->box[ib].y - t->box[ib].pt - t->box[ib].bt + lay_border_height(t, ib);
+        }
+    }
 }
 
 /* ---- absolutely positioned boxes (CSS 2.1 10.3.7, 10.6.4), after the flow ---- */
@@ -7702,13 +8115,77 @@ static void lay_move(layout_tree *t, uint32_t b, double dx, double dy, int depth
     if (depth < 1024) for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_move(t, c, dx, dy, depth + 1);
 }
 
-/* each sticky box where it is at rest, unscrolled: where an inset it has (top, right, bottom,
-   left) puts that edge of its sticky view rectangle -- its scrollport, the nearest scroll
-   container's padding box or the viewport, inset by them -- past its border box's, it moves
-   inward, as far as its margin box stays in its containing block's content box. Bottom and
-   right first, so that top and left win; an outer box before those in it */
-static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
+/* the scrollport of what a sticky box's containing block cb holds: a scroll container's padding box (not the root's,
+   nor the body's when the root's overflow is visible: theirs is the viewport's), else the viewport; into sp (x, y, w, h) */
+static void lay_scrollport(LCTX, uint32_t cb, uint32_t vp, double vw, double vh, double *sp) {
     uint32_t root = t->box[vp].first_child;
+    sp[0] = 0;
+    sp[1] = 0;
+    sp[2] = vw;
+    sp[3] = vh;
+    for (uint32_t a = cb; a && a != vp && a != root; a = t->box[a].parent) {
+        if (t->box[a].clip != 1) continue;
+        if (t->box[a].parent == root && t->box[root].clip != 1 && lay_is_named(d, t->box[a].node.index, "body")) continue;
+        sp[0] = t->box[a].x - t->box[a].pl;
+        sp[1] = t->box[a].y - t->box[a].pt;
+        sp[2] = t->box[a].w + t->box[a].pl + t->box[a].pr;
+        sp[3] = t->box[a].h + t->box[a].pt + t->box[a].pb;
+        break;
+    }
+}
+/* how far a sticky element el moves at rest (CSS Position 3, 3.4): bb its border box (x0, y0, x1, y1), cr its containing
+   block's content box, m its margins (top, right, bottom, left), sp its scrollport. Where an inset it has puts that edge
+   of its sticky view rectangle (the scrollport inset by it) past its border box's, it moves inward, as far as its margin
+   box stays in cr: bottom and right first, so that top and left win */
+static void lay_sticky_shift(LCTX, uint32_t el, const double *bb, const double *cr, const double *m, const double *sp, double *dxp, double *dyp) {
+    lay_ext e = LAY_X(el);
+    double dx = 0, dy = 0, lim, dd, room;
+    if (e.off[2].unit != LAY_AUTO) {
+        lim = sp[1] + sp[3] - lay_res(st, e.off[2], sp[3]);
+        dd = bb[3] - lim;
+        room = bb[1] - m[0] - cr[1];
+        if (dd > room) dd = room;
+        if (dd > 0) dy -= dd;
+    }
+    if (e.off[0].unit != LAY_AUTO) {
+        lim = sp[1] + lay_res(st, e.off[0], sp[3]);
+        dd = lim - (bb[1] + dy);
+        room = cr[3] - (bb[3] + dy + m[2]);
+        if (dd > room) dd = room;
+        if (dd > 0) dy += dd;
+    }
+    if (e.off[1].unit != LAY_AUTO) {
+        lim = sp[0] + sp[2] - lay_res(st, e.off[1], sp[2]);
+        dd = bb[2] - lim;
+        room = bb[0] - m[3] - cr[0];
+        if (dd > room) dd = room;
+        if (dd > 0) dx -= dd;
+    }
+    if (e.off[3].unit != LAY_AUTO) {
+        lim = sp[0] + lay_res(st, e.off[3], sp[2]);
+        dd = lim - (bb[0] + dx);
+        room = cr[2] - (bb[2] + dx + m[1]);
+        if (dd > room) dd = room;
+        if (dd > 0) dx += dd;
+    }
+    *dxp = dx;
+    *dyp = dy;
+}
+
+/* node x is el or in el's subtree (a pseudo-element's text: its element's) */
+static int lay_in_subtree(const dom_document *d, uint32_t x, uint32_t el) {
+    for (int depth = 0; x && depth < 4096; depth++) {
+        if (x == el) return 1;
+        x = d->node[x].parent;
+    }
+    return 0;
+}
+
+/* each sticky box where it is at rest, unscrolled (lay_sticky_shift; its containing block its parent's content box), an
+   outer box before those in it; then each sticky inline element, as Chromium places one: its box the union of its
+   fragments' border boxes, its containing block the content box of the block whose lines hold them (not an anonymous
+   one), its fragments, its text's and its atomic boxes moved */
+static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
     for (uint32_t b = 1; b < t->box_len; b++) {
         if (!t->box[b].live || t->box[b].position != LAYOUT_POSITION_STICKY) continue;
         uint32_t cb = t->box[b].parent, el = t->box[b].node.index;
@@ -7718,60 +8195,71 @@ static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
             if (g < 0) continue;
             el = LAY_GEN | (uint32_t)g;
         }
-        lay_ext e = LAY_X(el);
-        /* the scrollport: a scroll container's padding box (not the root's, nor the body's
-           when the root's overflow is visible: theirs is the viewport's), else the viewport */
-        double spx = 0, spy = 0, spw = vw, sph = vh;
-        for (uint32_t a = cb; a && a != vp && a != root; a = t->box[a].parent) {
-            if (t->box[a].clip != 1) continue;
-            if (t->box[a].parent == root && t->box[root].clip != 1 && lay_is_named(d, t->box[a].node.index, "body")) continue;
-            spx = t->box[a].x - t->box[a].pl;
-            spy = t->box[a].y - t->box[a].pt;
-            spw = t->box[a].w + t->box[a].pl + t->box[a].pr;
-            sph = t->box[a].h + t->box[a].pt + t->box[a].pb;
-            break;
-        }
-        double bx0 = t->box[b].x - t->box[b].pl - t->box[b].bl, by0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
-        double bx1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br, by1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb;
-        double cx0 = t->box[cb].x, cy0 = t->box[cb].y, cx1 = cx0 + t->box[cb].w, cy1 = cy0 + t->box[cb].h;
+        double sp[4], bb[4], cr[4], m[4], dx, dy;
+        lay_scrollport(LARGS, cb, vp, vw, vh, sp);
+        bb[0] = t->box[b].x - t->box[b].pl - t->box[b].bl;
+        bb[1] = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        bb[2] = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br;
+        bb[3] = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb;
+        cr[0] = t->box[cb].x;
+        cr[1] = t->box[cb].y;
+        cr[2] = cr[0] + t->box[cb].w;
+        cr[3] = cr[1] + t->box[cb].h;
         /* its margins as its style has them (auto none: not those an over-constrained width gives) */
         lay_style ss;
         lay_style_of(LARGS, el, &ss);
-        double m[4];
         for (int k = 0; k < 4; k++) m[k] = ss.m[k].unit == LAY_AUTO ? 0 : lay_res(st, ss.m[k], t->box[cb].w);
-        double dx = 0, dy = 0, lim, dd, room;
-        if (e.off[2].unit != LAY_AUTO) {
-            lim = spy + sph - lay_res(st, e.off[2], sph);
-            dd = by1 - lim;
-            room = by0 - m[0] - cy0;
-            if (dd > room) dd = room;
-            if (dd > 0) dy -= dd;
-        }
-        if (e.off[0].unit != LAY_AUTO) {
-            lim = spy + lay_res(st, e.off[0], sph);
-            dd = lim - (by0 + dy);
-            room = cy1 - (by1 + dy + m[2]);
-            if (dd > room) dd = room;
-            if (dd > 0) dy += dd;
-        }
-        if (e.off[1].unit != LAY_AUTO) {
-            lim = spx + spw - lay_res(st, e.off[1], spw);
-            dd = bx1 - lim;
-            room = bx0 - m[3] - cx0;
-            if (dd > room) dd = room;
-            if (dd > 0) dx -= dd;
-        }
-        if (e.off[3].unit != LAY_AUTO) {
-            lim = spx + lay_res(st, e.off[3], spw);
-            dd = lim - (bx0 + dx);
-            room = cx1 - (bx1 + dx + m[1]);
-            if (dd > room) dd = room;
-            if (dd > 0) dx += dd;
-        }
+        lay_sticky_shift(LARGS, el, bb, cr, m, sp, &dx, &dy);
         if (dx == 0 && dy == 0) continue;
         lay_move(t, b, dx, dy, 0);
         t->box[b].dx += dx;
         t->box[b].dy += dy;
+    }
+    vector<uint32_t> seen;
+    for (uint32_t fr = 1; fr < t->frag_len; fr++) {
+        if (!t->frag[fr].live || t->frag[fr].kind != LAYOUT_FRAG_KIND_INLINE) continue;
+        uint32_t el = t->frag[fr].node.index;
+        if (!el || el >= d->node_len || d->node[el].kind != DOM_NODE_KIND_ELEMENT || LAY_X(el).pos != POS_STICKY) continue;
+        int again = 0;
+        for (size_t k = 0; k < len(seen) && !again; k++) again = at(seen, k) == el;
+        if (again) continue;
+        push_back(seen, el);
+        /* its box: its fragments' union; its containing block: the block whose line holds its first, an anonymous one's
+           parent */
+        double bb[4] = { 1e30, 1e30, -1e30, -1e30 }, sp[4], cr[4], m[4], dx, dy;
+        uint32_t cb = t->line[t->frag[fr].line].box;
+        for (uint32_t f2 = fr; f2 < t->frag_len; f2++) {
+            if (!t->frag[f2].live || t->frag[f2].kind != LAYOUT_FRAG_KIND_INLINE || t->frag[f2].node.index != el) continue;
+            if (t->frag[f2].x < bb[0]) bb[0] = t->frag[f2].x;
+            if (t->frag[f2].y < bb[1]) bb[1] = t->frag[f2].y;
+            if (t->frag[f2].x + t->frag[f2].w > bb[2]) bb[2] = t->frag[f2].x + t->frag[f2].w;
+            if (t->frag[f2].y + t->frag[f2].h > bb[3]) bb[3] = t->frag[f2].y + t->frag[f2].h;
+        }
+        while (cb && t->box[cb].kind == LAYOUT_BOX_KIND_ANONYMOUS && t->box[cb].parent) cb = t->box[cb].parent;
+        if (!cb || cb == vp) continue;
+        lay_scrollport(LARGS, cb, vp, vw, vh, sp);
+        cr[0] = t->box[cb].x;
+        cr[1] = t->box[cb].y;
+        cr[2] = cr[0] + t->box[cb].w;
+        cr[3] = cr[1] + t->box[cb].h;
+        /* an inline element's horizontal margins (its vertical ones take no room in a line) */
+        lay_style ss;
+        lay_style_of(LARGS, el, &ss);
+        m[0] = 0;
+        m[2] = 0;
+        m[1] = ss.m[1].unit == LAY_AUTO ? 0 : lay_res(st, ss.m[1], t->box[cb].w);
+        m[3] = ss.m[3].unit == LAY_AUTO ? 0 : lay_res(st, ss.m[3], t->box[cb].w);
+        lay_sticky_shift(LARGS, el, bb, cr, m, sp, &dx, &dy);
+        if (dx == 0 && dy == 0) continue;
+        for (uint32_t f2 = 1; f2 < t->frag_len; f2++) {
+            if (!t->frag[f2].live || t->frag[f2].kind == LAYOUT_FRAG_KIND_MARKER) continue;
+            uint32_t x = t->frag[f2].node.index;
+            if (!x || x >= d->node_len || !lay_in_subtree(d, x, el)) continue;
+            t->frag[f2].x += dx;
+            t->frag[f2].y += dy;
+            t->frag[f2].baseline += dy;
+            if (t->frag[f2].kind == LAYOUT_FRAG_KIND_ATOMIC && t->frag[f2].atomic) lay_move(t, t->frag[f2].atomic, dx, dy, 0);
+        }
     }
 }
 
@@ -7940,11 +8428,12 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (bottom > height) t->box[vp].h = bottom;
     }
     lay_absolute(t, vp, 0, 0);
-    lay_inline_strips(t);
-    lay_radii(t);
-    /* the sticky boxes, when a style is sticky */
+    /* the sticky boxes and inline elements, when a style is sticky: before the inline elements' strips are made from
+       their fragments */
     for (size_t k = 0; k < len(exts); k++)
         if (at(exts, k).pos == POS_STICKY) { lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height); break; }
+    lay_inline_strips(t);
+    lay_radii(t);
     /* each svg element's drawing, made for its content box (src/paint/svg.h) */
     vector<uint32_t> firsts;
     for (uint32_t b = 1; b < t->box_len; b++) {

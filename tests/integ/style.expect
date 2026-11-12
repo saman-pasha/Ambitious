@@ -23,16 +23,16 @@
           <td> display: table-cell color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 1px
             <font> display: inline (initial) color: rgb(128, 0, 0) background: rgba(0, 0, 0, 0) (initial) font-size: 24px weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
     <div> display: block color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
-230 rules, 851 declarations, 61 matches, 4350 computed values (25 styles)
+230 rules, 852 declarations, 61 matches, 4350 computed values (25 styles)
 -- why each paragraph has its colour:
 N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))
 N = n(1,24,0), X = declared('rgb(128, 128, 0)',written(olive),by('the style attribute'),in(inline))
 N = n(1,42,0), X = declared('rgb(200, 200, 200)',written('#c8c8c8'),by('.faint'),in(author))
 -- what lost the intro's colour, and at which step:
-N = n(1,18,0), D = de(1,828,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
-N = n(1,18,0), D = de(1,829,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
-N = n(1,18,0), D = de(1,845,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
+N = n(1,18,0), D = de(1,829,0), Why = origin_or_importance(lost(author),won('important author')), Written = navy
+N = n(1,18,0), D = de(1,830,0), Why = origin_or_importance(lost(author),won('important author')), Written = teal
+N = n(1,18,0), D = de(1,846,0), Why = origin_or_importance(lost('style attribute'),won('important author')), Written = olive
 -- the small print's size, proved:
 dom_element(n(1,47,0),small)   [fact]
 css_explain(n(1,47,0),font_size,declared('12.5px',written(smaller),by(small),in(user_agent)))   because
@@ -74,10 +74,10 @@ F = ff(1,1,0), Fam = 'Web Oblique', U = 'file://ROOT/tests/pages/fonts/oblique.t
 F = ff(1,2,0), Fam = 'Web Serif', U = 'file://ROOT/tests/pages/fonts/serif-bold.woff2', W = 700, I = false
 N = n(1,22,0), X = declared('"Web Oblique", monospace',written('\'Web Oblique\', monospace'),by('.mono'),in(author))
 -- what lost a card's properties: a layer under a later one, under the unlayered rules; order within a layer:
-N = n(1,13,0), P = background_color, D = de(1,811,0), Why = layer(lost(base),won(theme))
-N = n(1,13,0), P = color, D = de(1,809,0), Why = order(211,earlier_than(212))
-N = n(1,13,0), P = border_top_color, D = de(1,819,0), Why = layer(lost(base),won(unlayered))
-N = n(1,13,0), P = border_top_color, D = de(1,834,0), Why = layer(lost(theme),won(unlayered))
+N = n(1,13,0), P = background_color, D = de(1,812,0), Why = layer(lost(base),won(theme))
+N = n(1,13,0), P = color, D = de(1,810,0), Why = order(211,earlier_than(212))
+N = n(1,13,0), P = border_top_color, D = de(1,820,0), Why = layer(lost(base),won(unlayered))
+N = n(1,13,0), P = border_top_color, D = de(1,835,0), Why = layer(lost(theme),won(unlayered))
 -- pseudo-elements' styles: a ::before's colour and content, its own or its element's; the drop cap's size:
 N = n(1,36,0), P = content, V = 'attr(data-label) ": "', H = declared
 N = n(1,36,0), P = font_weight, V = '700', H = declared

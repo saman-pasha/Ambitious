@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html><head><title>Grid track sizing</title>
+<style>
+/* tests/pages/grid-sizing.html (tools/gen-grid-sizing.py: each track list with items spanning one to three of its
+   tracks, of text and of fixed widths, some with a min-width or overflow: hidden; each grid as a float, an
+   inline-grid, width: min-content, width: max-content, and a block 360px wide) -- the grid container's own
+   min- and max-content widths, its items' placements and spans, the fr tracks' shares and the track sizing
+   algorithm as Chromium runs it; the boxes held to Chromium's (tests/pages/grid-sizing.chromium) */
+body { font: 13px 'DejaVu Sans'; margin: 4px; }
+.g { display: grid; background: #eef; margin: 0 0 3px; column-gap: 3px; }
+.g > div { background: #cde; }
+.float { float: left; clear: left; }
+.inline { display: inline-grid; vertical-align: top; }
+.minc { width: min-content; }
+.maxc { width: max-content; }
+.block { width: 360px; }
+.case { height: 64px; display: flow-root; }
+</style></head><body>
+<div class="case"><div class="g float" id="g0" style="grid-template-columns: auto auto; column-gap: 9px">
+<div id="g0-0" style="grid-column: span 2">alpha</div>
+<div id="g0-1">upsilon</div>
+<div id="g0-2">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g1" style="grid-template-columns: auto auto">
+<div id="g1-0">eta</div>
+<div id="g1-1">alpha</div>
+<div id="g1-2" style="grid-column: span 2; width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g2" style="grid-template-columns: auto auto">
+<div id="g2-0" style="grid-column: 2 / span 1">xi omicron pi rho sigma tau</div>
+<div id="g2-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g2-2" style="grid-column: 1 / span 2">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g3" style="grid-template-columns: auto auto; column-gap: 9px">
+<div id="g3-0" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g3-1" style="grid-column: span 2">xi omicron pi rho sigma tau</div>
+<div id="g3-2" style="min-width: 40px">eta</div>
+<div id="g3-3">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g4" style="grid-template-columns: auto auto">
+<div id="g4-0" style="grid-column: span 2">delta epsilon zeta</div>
+<div id="g4-1" style="min-width: 40px">one two three</div>
+<div id="g4-2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g5" style="grid-template-columns: auto auto auto">
+<div id="g5-0" style="grid-column: span 2; min-width: 40px">mu nu</div>
+<div id="g5-1">delta epsilon zeta</div>
+<div id="g5-2" style="grid-column: span 3">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g6" style="grid-template-columns: auto auto auto; column-gap: 9px">
+<div id="g6-0">phi chi psi omega</div>
+<div id="g6-1" style="grid-column: span 2">mu nu</div>
+<div id="g6-2" style="width: 70px">fixed</div>
+<div id="g6-3" style="overflow: hidden">one two three</div>
+<div id="g6-4" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g minc" id="g7" style="grid-template-columns: auto auto auto">
+<div id="g7-0" style="grid-column: span 3">beta gamma</div>
+<div id="g7-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g7-2" style="grid-column: 2 / span 1; overflow: hidden">mu nu</div>
+<div id="g7-3" style="grid-column: 3 / span 1">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g8" style="grid-template-columns: auto auto auto">
+<div id="g8-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g8-1" style="grid-column: 1 / span 2; overflow: hidden">beta gamma</div>
+<div id="g8-2">phi chi psi omega</div>
+<div id="g8-3">mu nu</div>
+</div></div>
+<div class="case"><div class="g block" id="g9" style="grid-template-columns: auto auto auto; column-gap: 9px">
+<div id="g9-0" style="overflow: hidden">upsilon</div>
+<div id="g9-1">theta iota kappa lambda</div>
+<div id="g9-2">beta gamma</div>
+<div id="g9-3" style="grid-column: span 2; min-width: 40px">phi chi psi omega</div>
+<div id="g9-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g10" style="grid-template-columns: min-content auto">
+<div id="g10-0" style="grid-column: 2 / span 1">alpha</div>
+<div id="g10-1" style="grid-column: 1 / span 1">upsilon</div>
+<div id="g10-2" style="grid-column: 1 / span 2; min-width: 40px">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g11" style="grid-template-columns: min-content auto">
+<div id="g11-0" style="grid-column: span 2">eta</div>
+<div id="g11-1" style="grid-column: span 2; min-width: 40px">alpha</div>
+<div id="g11-2" style="width: 70px">fixed</div>
+<div id="g11-3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g minc" id="g12" style="grid-template-columns: min-content auto; column-gap: 9px">
+<div id="g12-0" style="grid-column: span 2; min-width: 40px">xi omicron pi rho sigma tau</div>
+<div id="g12-1" style="width: 70px">fixed</div>
+<div id="g12-2">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g13" style="grid-template-columns: min-content auto">
+<div id="g13-0" style="width: 70px">fixed</div>
+<div id="g13-1">xi omicron pi rho sigma tau</div>
+<div id="g13-2" style="grid-column: span 2">eta</div>
+</div></div>
+<div class="case"><div class="g block" id="g14" style="grid-template-columns: min-content auto">
+<div id="g14-0" style="grid-column: 2 / span 1">delta epsilon zeta</div>
+<div id="g14-1" style="grid-column: 1 / span 1">one two three</div>
+<div id="g14-2" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g15" style="grid-template-columns: max-content auto; column-gap: 9px">
+<div id="g15-0" style="grid-column: span 2">mu nu</div>
+<div id="g15-1" style="grid-column: span 2">delta epsilon zeta</div>
+<div id="g15-2">one two three</div>
+<div id="g15-3" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g inline" id="g16" style="grid-template-columns: max-content auto">
+<div id="g16-0" style="grid-column: span 2">phi chi psi omega</div>
+<div id="g16-1">mu nu</div>
+<div id="g16-2" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g17" style="grid-template-columns: max-content auto">
+<div id="g17-0">beta gamma</div>
+<div id="g17-1" style="width: 70px">fixed</div>
+<div id="g17-2" style="grid-column: span 2; min-width: 40px">mu nu</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g18" style="grid-template-columns: max-content auto; column-gap: 9px">
+<div id="g18-0" style="grid-column: 2 / span 1; width: 70px">fixed</div>
+<div id="g18-1" style="grid-column: 1 / span 1; min-width: 40px">beta gamma</div>
+<div id="g18-2" style="grid-column: 1 / span 2; overflow: hidden">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g19" style="grid-template-columns: max-content auto">
+<div id="g19-0" style="grid-column: span 2; min-width: 40px">upsilon</div>
+<div id="g19-1" style="grid-column: span 2; overflow: hidden">theta iota kappa lambda</div>
+<div id="g19-2">beta gamma</div>
+<div id="g19-3">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g float" id="g20" style="grid-template-columns: min-content max-content auto">
+<div id="g20-0" style="grid-column: span 2; overflow: hidden">alpha</div>
+<div id="g20-1">upsilon</div>
+<div id="g20-2" style="grid-column: span 3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g21" style="grid-template-columns: min-content max-content auto; column-gap: 9px">
+<div id="g21-0">eta</div>
+<div id="g21-1" style="grid-column: span 2">alpha</div>
+<div id="g21-2" style="width: 70px">fixed</div>
+<div id="g21-3">theta iota kappa lambda</div>
+<div id="g21-4" style="grid-column: span 3">beta gamma</div>
+</div></div>
+<div class="case"><div class="g minc" id="g22" style="grid-template-columns: min-content max-content auto">
+<div id="g22-0" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+<div id="g22-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g22-2" style="grid-column: 2 / span 1">alpha</div>
+<div id="g22-3" style="grid-column: 3 / span 1">upsilon</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g23" style="grid-template-columns: min-content max-content auto">
+<div id="g23-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g23-1" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+<div id="g23-2">eta</div>
+<div id="g23-3" style="min-width: 40px">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g24" style="grid-template-columns: min-content max-content auto; column-gap: 9px">
+<div id="g24-0">delta epsilon zeta</div>
+<div id="g24-1">one two three</div>
+<div id="g24-2" style="min-width: 40px">xi omicron pi rho sigma tau</div>
+<div id="g24-3" style="grid-column: span 2">eta</div>
+<div id="g24-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g25" style="grid-template-columns: fit-content(80px) auto">
+<div id="g25-0">mu nu</div>
+<div id="g25-1" style="min-width: 40px">delta epsilon zeta</div>
+<div id="g25-2" style="grid-column: span 2">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g26" style="grid-template-columns: fit-content(80px) auto">
+<div id="g26-0" style="grid-column: 2 / span 1; min-width: 40px">phi chi psi omega</div>
+<div id="g26-1" style="grid-column: 1 / span 1">mu nu</div>
+<div id="g26-2" style="grid-column: 1 / span 2; width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g27" style="grid-template-columns: fit-content(80px) auto; column-gap: 9px">
+<div id="g27-0" style="grid-column: span 2">beta gamma</div>
+<div id="g27-1" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g27-2">mu nu</div>
+<div id="g27-3">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g28" style="grid-template-columns: fit-content(80px) auto">
+<div id="g28-0" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g28-1">beta gamma</div>
+<div id="g28-2">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g29" style="grid-template-columns: fit-content(80px) auto">
+<div id="g29-0">upsilon</div>
+<div id="g29-1">theta iota kappa lambda</div>
+<div id="g29-2" style="grid-column: span 2; overflow: hidden">beta gamma</div>
+</div></div>
+<div class="case"><div class="g float" id="g30" style="grid-template-columns: fit-content(150px) fit-content(50px); column-gap: 9px">
+<div id="g30-0" style="grid-column: 2 / span 1">alpha</div>
+<div id="g30-1" style="grid-column: 1 / span 1; overflow: hidden">upsilon</div>
+<div id="g30-2" style="grid-column: 1 / span 2">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g31" style="grid-template-columns: fit-content(150px) fit-content(50px)">
+<div id="g31-0" style="grid-column: span 2; overflow: hidden">eta</div>
+<div id="g31-1" style="grid-column: span 2">alpha</div>
+<div id="g31-2" style="width: 70px">fixed</div>
+<div id="g31-3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g minc" id="g32" style="grid-template-columns: fit-content(150px) fit-content(50px)">
+<div id="g32-0" style="grid-column: span 2">xi omicron pi rho sigma tau</div>
+<div id="g32-1" style="width: 70px">fixed</div>
+<div id="g32-2">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g33" style="grid-template-columns: fit-content(150px) fit-content(50px); column-gap: 9px">
+<div id="g33-0" style="width: 70px">fixed</div>
+<div id="g33-1">xi omicron pi rho sigma tau</div>
+<div id="g33-2" style="grid-column: span 2">eta</div>
+</div></div>
+<div class="case"><div class="g block" id="g34" style="grid-template-columns: fit-content(150px) fit-content(50px)">
+<div id="g34-0" style="grid-column: 2 / span 1">delta epsilon zeta</div>
+<div id="g34-1" style="grid-column: 1 / span 1">one two three</div>
+<div id="g34-2" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g35" style="grid-template-columns: 1fr auto">
+<div id="g35-0" style="grid-column: span 2">mu nu</div>
+<div id="g35-1" style="grid-column: span 2">delta epsilon zeta</div>
+<div id="g35-2">one two three</div>
+<div id="g35-3" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g inline" id="g36" style="grid-template-columns: 1fr auto; column-gap: 9px">
+<div id="g36-0" style="grid-column: span 2">phi chi psi omega</div>
+<div id="g36-1">mu nu</div>
+<div id="g36-2" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g37" style="grid-template-columns: 1fr auto">
+<div id="g37-0">beta gamma</div>
+<div id="g37-1" style="width: 70px">fixed</div>
+<div id="g37-2" style="grid-column: span 2">mu nu</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g38" style="grid-template-columns: 1fr auto">
+<div id="g38-0" style="grid-column: 2 / span 1; width: 70px">fixed</div>
+<div id="g38-1" style="grid-column: 1 / span 1">beta gamma</div>
+<div id="g38-2" style="grid-column: 1 / span 2; min-width: 40px">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g39" style="grid-template-columns: 1fr auto; column-gap: 9px">
+<div id="g39-0" style="grid-column: span 2">upsilon</div>
+<div id="g39-1" style="grid-column: span 2; min-width: 40px">theta iota kappa lambda</div>
+<div id="g39-2">beta gamma</div>
+<div id="g39-3" style="overflow: hidden">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g float" id="g40" style="grid-template-columns: 1fr 2fr">
+<div id="g40-0" style="grid-column: span 2; min-width: 40px">alpha</div>
+<div id="g40-1">upsilon</div>
+<div id="g40-2" style="overflow: hidden">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g41" style="grid-template-columns: 1fr 2fr">
+<div id="g41-0">eta</div>
+<div id="g41-1" style="overflow: hidden">alpha</div>
+<div id="g41-2" style="grid-column: span 2; width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g42" style="grid-template-columns: 1fr 2fr; column-gap: 9px">
+<div id="g42-0" style="grid-column: 2 / span 1; overflow: hidden">xi omicron pi rho sigma tau</div>
+<div id="g42-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g42-2" style="grid-column: 1 / span 2">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g43" style="grid-template-columns: 1fr 2fr">
+<div id="g43-0" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g43-1" style="grid-column: span 2">xi omicron pi rho sigma tau</div>
+<div id="g43-2">eta</div>
+<div id="g43-3">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g44" style="grid-template-columns: 1fr 2fr">
+<div id="g44-0" style="grid-column: span 2">delta epsilon zeta</div>
+<div id="g44-1">one two three</div>
+<div id="g44-2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g45" style="grid-template-columns: auto 1fr 1fr; column-gap: 9px">
+<div id="g45-0" style="grid-column: span 2">mu nu</div>
+<div id="g45-1">delta epsilon zeta</div>
+<div id="g45-2" style="grid-column: span 3; min-width: 40px">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g46" style="grid-template-columns: auto 1fr 1fr">
+<div id="g46-0">phi chi psi omega</div>
+<div id="g46-1" style="grid-column: span 2; min-width: 40px">mu nu</div>
+<div id="g46-2" style="width: 70px">fixed</div>
+<div id="g46-3">one two three</div>
+<div id="g46-4" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g minc" id="g47" style="grid-template-columns: auto 1fr 1fr">
+<div id="g47-0" style="grid-column: span 3; min-width: 40px">beta gamma</div>
+<div id="g47-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g47-2" style="grid-column: 2 / span 1">mu nu</div>
+<div id="g47-3" style="grid-column: 3 / span 1">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g48" style="grid-template-columns: auto 1fr 1fr; column-gap: 9px">
+<div id="g48-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g48-1" style="grid-column: 1 / span 2">beta gamma</div>
+<div id="g48-2">phi chi psi omega</div>
+<div id="g48-3">mu nu</div>
+</div></div>
+<div class="case"><div class="g block" id="g49" style="grid-template-columns: auto 1fr 1fr">
+<div id="g49-0">upsilon</div>
+<div id="g49-1">theta iota kappa lambda</div>
+<div id="g49-2">beta gamma</div>
+<div id="g49-3" style="grid-column: span 2">phi chi psi omega</div>
+<div id="g49-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g50" style="grid-template-columns: minmax(50px, 1fr) auto">
+<div id="g50-0" style="grid-column: 2 / span 1">alpha</div>
+<div id="g50-1" style="grid-column: 1 / span 1">upsilon</div>
+<div id="g50-2" style="grid-column: 1 / span 2">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g51" style="grid-template-columns: minmax(50px, 1fr) auto; column-gap: 9px">
+<div id="g51-0" style="grid-column: span 2">eta</div>
+<div id="g51-1" style="grid-column: span 2">alpha</div>
+<div id="g51-2" style="width: 70px">fixed</div>
+<div id="g51-3" style="min-width: 40px">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g minc" id="g52" style="grid-template-columns: minmax(50px, 1fr) auto">
+<div id="g52-0" style="grid-column: span 2">xi omicron pi rho sigma tau</div>
+<div id="g52-1" style="width: 70px">fixed</div>
+<div id="g52-2" style="min-width: 40px">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g53" style="grid-template-columns: minmax(50px, 1fr) auto">
+<div id="g53-0" style="width: 70px">fixed</div>
+<div id="g53-1" style="min-width: 40px">xi omicron pi rho sigma tau</div>
+<div id="g53-2" style="grid-column: span 2">eta</div>
+</div></div>
+<div class="case"><div class="g block" id="g54" style="grid-template-columns: minmax(50px, 1fr) auto; column-gap: 9px">
+<div id="g54-0" style="grid-column: 2 / span 1; min-width: 40px">delta epsilon zeta</div>
+<div id="g54-1" style="grid-column: 1 / span 1">one two three</div>
+<div id="g54-2" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g55" style="grid-template-columns: minmax(min-content, 100px) auto">
+<div id="g55-0" style="grid-column: span 2">mu nu</div>
+<div id="g55-1" style="grid-column: span 2">delta epsilon zeta</div>
+<div id="g55-2">one two three</div>
+<div id="g55-3" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g inline" id="g56" style="grid-template-columns: minmax(min-content, 100px) auto">
+<div id="g56-0" style="grid-column: span 2">phi chi psi omega</div>
+<div id="g56-1">mu nu</div>
+<div id="g56-2" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g57" style="grid-template-columns: minmax(min-content, 100px) auto; column-gap: 9px">
+<div id="g57-0">beta gamma</div>
+<div id="g57-1" style="width: 70px">fixed</div>
+<div id="g57-2" style="grid-column: span 2">mu nu</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g58" style="grid-template-columns: minmax(min-content, 100px) auto">
+<div id="g58-0" style="grid-column: 2 / span 1; width: 70px">fixed</div>
+<div id="g58-1" style="grid-column: 1 / span 1">beta gamma</div>
+<div id="g58-2" style="grid-column: 1 / span 2">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g59" style="grid-template-columns: minmax(min-content, 100px) auto">
+<div id="g59-0" style="grid-column: span 2">upsilon</div>
+<div id="g59-1" style="grid-column: span 2">theta iota kappa lambda</div>
+<div id="g59-2" style="min-width: 40px">beta gamma</div>
+<div id="g59-3">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g float" id="g60" style="grid-template-columns: minmax(auto, 60px) minmax(auto, 60px) auto; column-gap: 9px">
+<div id="g60-0" style="grid-column: span 2">alpha</div>
+<div id="g60-1" style="min-width: 40px">upsilon</div>
+<div id="g60-2" style="grid-column: span 3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g61" style="grid-template-columns: minmax(auto, 60px) minmax(auto, 60px) auto">
+<div id="g61-0" style="min-width: 40px">eta</div>
+<div id="g61-1" style="grid-column: span 2">alpha</div>
+<div id="g61-2" style="width: 70px">fixed</div>
+<div id="g61-3" style="overflow: hidden">theta iota kappa lambda</div>
+<div id="g61-4" style="grid-column: span 3">beta gamma</div>
+</div></div>
+<div class="case"><div class="g minc" id="g62" style="grid-template-columns: minmax(auto, 60px) minmax(auto, 60px) auto">
+<div id="g62-0" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+<div id="g62-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g62-2" style="grid-column: 2 / span 1; overflow: hidden">alpha</div>
+<div id="g62-3" style="grid-column: 3 / span 1">upsilon</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g63" style="grid-template-columns: minmax(auto, 60px) minmax(auto, 60px) auto; column-gap: 9px">
+<div id="g63-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g63-1" style="grid-column: 1 / span 2; overflow: hidden">xi omicron pi rho sigma tau</div>
+<div id="g63-2">eta</div>
+<div id="g63-3">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g64" style="grid-template-columns: minmax(auto, 60px) minmax(auto, 60px) auto">
+<div id="g64-0" style="overflow: hidden">delta epsilon zeta</div>
+<div id="g64-1">one two three</div>
+<div id="g64-2">xi omicron pi rho sigma tau</div>
+<div id="g64-3" style="grid-column: span 2">eta</div>
+<div id="g64-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g65" style="grid-template-columns: minmax(max-content, 1fr) 1fr">
+<div id="g65-0">mu nu</div>
+<div id="g65-1">delta epsilon zeta</div>
+<div id="g65-2" style="grid-column: span 2">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g66" style="grid-template-columns: minmax(max-content, 1fr) 1fr; column-gap: 9px">
+<div id="g66-0" style="grid-column: 2 / span 1">phi chi psi omega</div>
+<div id="g66-1" style="grid-column: 1 / span 1">mu nu</div>
+<div id="g66-2" style="grid-column: 1 / span 2; width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g67" style="grid-template-columns: minmax(max-content, 1fr) 1fr">
+<div id="g67-0" style="grid-column: span 2">beta gamma</div>
+<div id="g67-1" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g67-2">mu nu</div>
+<div id="g67-3">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g68" style="grid-template-columns: minmax(max-content, 1fr) 1fr">
+<div id="g68-0" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g68-1">beta gamma</div>
+<div id="g68-2">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g69" style="grid-template-columns: minmax(max-content, 1fr) 1fr; column-gap: 9px">
+<div id="g69-0">upsilon</div>
+<div id="g69-1">theta iota kappa lambda</div>
+<div id="g69-2" style="grid-column: span 2">beta gamma</div>
+</div></div>
+<div class="case"><div class="g float" id="g70" style="grid-template-columns: 100px auto">
+<div id="g70-0" style="grid-column: 2 / span 1">alpha</div>
+<div id="g70-1" style="grid-column: 1 / span 1">upsilon</div>
+<div id="g70-2" style="grid-column: 1 / span 2">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g71" style="grid-template-columns: 100px auto">
+<div id="g71-0" style="grid-column: span 2">eta</div>
+<div id="g71-1" style="grid-column: span 2">alpha</div>
+<div id="g71-2" style="width: 70px">fixed</div>
+<div id="g71-3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g minc" id="g72" style="grid-template-columns: 100px auto; column-gap: 9px">
+<div id="g72-0" style="grid-column: span 2">xi omicron pi rho sigma tau</div>
+<div id="g72-1" style="width: 70px">fixed</div>
+<div id="g72-2">alpha</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g73" style="grid-template-columns: 100px auto">
+<div id="g73-0" style="width: 70px">fixed</div>
+<div id="g73-1">xi omicron pi rho sigma tau</div>
+<div id="g73-2" style="grid-column: span 2; min-width: 40px">eta</div>
+</div></div>
+<div class="case"><div class="g block" id="g74" style="grid-template-columns: 100px auto">
+<div id="g74-0" style="grid-column: 2 / span 1">delta epsilon zeta</div>
+<div id="g74-1" style="grid-column: 1 / span 1; min-width: 40px">one two three</div>
+<div id="g74-2" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g float" id="g75" style="grid-template-columns: 40px auto 40px; column-gap: 9px">
+<div id="g75-0" style="grid-column: span 2; min-width: 40px">mu nu</div>
+<div id="g75-1">delta epsilon zeta</div>
+<div id="g75-2" style="grid-column: span 3">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g76" style="grid-template-columns: 40px auto 40px">
+<div id="g76-0">phi chi psi omega</div>
+<div id="g76-1" style="grid-column: span 2">mu nu</div>
+<div id="g76-2" style="width: 70px">fixed</div>
+<div id="g76-3">one two three</div>
+<div id="g76-4" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g minc" id="g77" style="grid-template-columns: 40px auto 40px">
+<div id="g77-0" style="grid-column: span 3">beta gamma</div>
+<div id="g77-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g77-2" style="grid-column: 2 / span 1">mu nu</div>
+<div id="g77-3" style="grid-column: 3 / span 1">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g78" style="grid-template-columns: 40px auto 40px; column-gap: 9px">
+<div id="g78-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g78-1" style="grid-column: 1 / span 2">beta gamma</div>
+<div id="g78-2">phi chi psi omega</div>
+<div id="g78-3">mu nu</div>
+</div></div>
+<div class="case"><div class="g block" id="g79" style="grid-template-columns: 40px auto 40px">
+<div id="g79-0">upsilon</div>
+<div id="g79-1">theta iota kappa lambda</div>
+<div id="g79-2">beta gamma</div>
+<div id="g79-3" style="grid-column: span 2; min-width: 40px">phi chi psi omega</div>
+<div id="g79-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g80" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+<div id="g80-0" style="grid-column: span 2">alpha</div>
+<div id="g80-1">upsilon</div>
+<div id="g80-2" style="grid-column: span 3; min-width: 40px">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g81" style="grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 9px">
+<div id="g81-0">eta</div>
+<div id="g81-1" style="grid-column: span 2; min-width: 40px">alpha</div>
+<div id="g81-2" style="width: 70px">fixed</div>
+<div id="g81-3">theta iota kappa lambda</div>
+<div id="g81-4" style="grid-column: span 3">beta gamma</div>
+</div></div>
+<div class="case"><div class="g minc" id="g82" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+<div id="g82-0" style="grid-column: span 3; min-width: 40px">xi omicron pi rho sigma tau</div>
+<div id="g82-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g82-2" style="grid-column: 2 / span 1">alpha</div>
+<div id="g82-3" style="grid-column: 3 / span 1">upsilon</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g83" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+<div id="g83-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g83-1" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+<div id="g83-2">eta</div>
+<div id="g83-3" style="overflow: hidden">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g84" style="grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 9px">
+<div id="g84-0">delta epsilon zeta</div>
+<div id="g84-1">one two three</div>
+<div id="g84-2" style="overflow: hidden">xi omicron pi rho sigma tau</div>
+<div id="g84-3" style="grid-column: span 2">eta</div>
+<div id="g84-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g85" style="grid-template-columns: auto minmax(0, 200px)">
+<div id="g85-0">mu nu</div>
+<div id="g85-1" style="overflow: hidden">delta epsilon zeta</div>
+<div id="g85-2" style="grid-column: span 2">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g86" style="grid-template-columns: auto minmax(0, 200px)">
+<div id="g86-0" style="grid-column: 2 / span 1; overflow: hidden">phi chi psi omega</div>
+<div id="g86-1" style="grid-column: 1 / span 1">mu nu</div>
+<div id="g86-2" style="grid-column: 1 / span 2; width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g minc" id="g87" style="grid-template-columns: auto minmax(0, 200px); column-gap: 9px">
+<div id="g87-0" style="grid-column: span 2">beta gamma</div>
+<div id="g87-1" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g87-2" style="min-width: 40px">mu nu</div>
+<div id="g87-3">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g88" style="grid-template-columns: auto minmax(0, 200px)">
+<div id="g88-0" style="grid-column: span 2; width: 70px">fixed</div>
+<div id="g88-1" style="min-width: 40px">beta gamma</div>
+<div id="g88-2">phi chi psi omega</div>
+</div></div>
+<div class="case"><div class="g block" id="g89" style="grid-template-columns: auto minmax(0, 200px)">
+<div id="g89-0" style="min-width: 40px">upsilon</div>
+<div id="g89-1">theta iota kappa lambda</div>
+<div id="g89-2" style="grid-column: span 2">beta gamma</div>
+</div></div>
+<div class="case"><div class="g float" id="g90" style="grid-template-columns: minmax(30px, max-content) fit-content(60px) 1fr; column-gap: 9px">
+<div id="g90-0" style="grid-column: span 2">alpha</div>
+<div id="g90-1">upsilon</div>
+<div id="g90-2" style="grid-column: span 3">theta iota kappa lambda</div>
+</div></div>
+<div class="case"><div class="g inline" id="g91" style="grid-template-columns: minmax(30px, max-content) fit-content(60px) 1fr">
+<div id="g91-0">eta</div>
+<div id="g91-1" style="grid-column: span 2">alpha</div>
+<div id="g91-2" style="width: 70px">fixed</div>
+<div id="g91-3">theta iota kappa lambda</div>
+<div id="g91-4" style="grid-column: span 3">beta gamma</div>
+</div></div>
+<div class="case"><div class="g minc" id="g92" style="grid-template-columns: minmax(30px, max-content) fit-content(60px) 1fr">
+<div id="g92-0" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+<div id="g92-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g92-2" style="grid-column: 2 / span 1">alpha</div>
+<div id="g92-3" style="grid-column: 3 / span 1">upsilon</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g93" style="grid-template-columns: minmax(30px, max-content) fit-content(60px) 1fr; column-gap: 9px">
+<div id="g93-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g93-1" style="grid-column: 1 / span 2">xi omicron pi rho sigma tau</div>
+<div id="g93-2">eta</div>
+<div id="g93-3" style="min-width: 40px">alpha</div>
+</div></div>
+<div class="case"><div class="g block" id="g94" style="grid-template-columns: minmax(30px, max-content) fit-content(60px) 1fr">
+<div id="g94-0">delta epsilon zeta</div>
+<div id="g94-1">one two three</div>
+<div id="g94-2" style="min-width: 40px">xi omicron pi rho sigma tau</div>
+<div id="g94-3" style="grid-column: span 2; overflow: hidden">eta</div>
+<div id="g94-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="g95" style="grid-template-columns: min-content 1fr max-content">
+<div id="g95-0" style="grid-column: span 2">mu nu</div>
+<div id="g95-1" style="min-width: 40px">delta epsilon zeta</div>
+<div id="g95-2" style="grid-column: span 3; overflow: hidden">one two three</div>
+</div></div>
+<div class="case"><div class="g inline" id="g96" style="grid-template-columns: min-content 1fr max-content; column-gap: 9px">
+<div id="g96-0" style="min-width: 40px">phi chi psi omega</div>
+<div id="g96-1" style="grid-column: span 2; overflow: hidden">mu nu</div>
+<div id="g96-2" style="width: 70px">fixed</div>
+<div id="g96-3">one two three</div>
+<div id="g96-4" style="grid-column: span 3">xi omicron pi rho sigma tau</div>
+</div></div>
+<div class="case"><div class="g minc" id="g97" style="grid-template-columns: min-content 1fr max-content">
+<div id="g97-0" style="grid-column: span 3; overflow: hidden">beta gamma</div>
+<div id="g97-1" style="grid-column: 1 / span 1; width: 70px">fixed</div>
+<div id="g97-2" style="grid-column: 2 / span 1">mu nu</div>
+<div id="g97-3" style="grid-column: 3 / span 1">delta epsilon zeta</div>
+</div></div>
+<div class="case"><div class="g maxc" id="g98" style="grid-template-columns: min-content 1fr max-content">
+<div id="g98-0" style="grid-column: 2 / span 2; width: 70px">fixed</div>
+<div id="g98-1" style="grid-column: 1 / span 2">beta gamma</div>
+<div id="g98-2">phi chi psi omega</div>
+<div id="g98-3">mu nu</div>
+</div></div>
+<div class="case"><div class="g block" id="g99" style="grid-template-columns: min-content 1fr max-content; column-gap: 9px">
+<div id="g99-0">upsilon</div>
+<div id="g99-1">theta iota kappa lambda</div>
+<div id="g99-2">beta gamma</div>
+<div id="g99-3" style="grid-column: span 2">phi chi psi omega</div>
+<div id="g99-4" style="width: 70px">fixed</div>
+</div></div>
+<div class="case"><div class="g float" id="x0" style="grid-template-columns: auto auto; column-gap: 10%">
+<div id="x0-0">alpha beta</div>
+<div id="x0-1">gamma</div>
+</div></div>
+<div class="case"><div class="g float" id="x1" style="grid-template-columns: 30% auto">
+<div id="x1-0">percent</div>
+<div id="x1-1">auto track</div>
+</div></div>
+<div class="case"><div class="g float" id="x2" style="grid-template-columns: repeat(auto-fill, 60px)">
+<div id="x2-0">a</div>
+<div id="x2-1">b</div>
+<div id="x2-2">c</div>
+</div></div>
+<div class="case"><div class="g float" id="x3" style="grid-template-columns: repeat(auto-fit, minmax(50px, 1fr))">
+<div id="x3-0">a</div>
+<div id="x3-1">bb</div>
+</div></div>
+<div class="case"><div class="g float" id="x4" style="grid-template-areas: 'x y' 'z z'">
+<div id="x4-0" style="grid-area: x">x item</div>
+<div id="x4-1" style="grid-area: y">y</div>
+<div id="x4-2" style="grid-area: z">z spanning both</div>
+</div></div>
+<div class="case"><div class="g float" id="x5" style="grid-auto-flow: column; grid-template-rows: auto auto">
+<div id="x5-0">one</div>
+<div id="x5-1">two</div>
+<div id="x5-2">three</div>
+</div></div>
+<div class="case"><div class="g float" id="x6" style="grid-template-columns: [a] auto [b] auto [c]">
+<div id="x6-0" style="grid-column: b / c">b to c</div>
+<div id="x6-1" style="grid-column: a">a</div>
+</div></div>
+<div class="case"><div class="g float" id="x7" style="grid-template-columns: auto auto; grid-auto-columns: 40px">
+<div id="x7-0" style="grid-column: -1">neg</div>
+<div id="x7-1" style="grid-column: 4">four</div>
+</div></div>
+</body></html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Sticky inline elements</title>
+<style>
+/* tests/pages/sticky-inline.html -- a sticky inline element at rest, unscrolled, as Chromium places one (CSS Position 3,
+   3.4): its box the union of its fragments' border boxes (one that wraps onto two lines too), its containing block the
+   content box of the block whose lines hold it (not an anonymous block's), its scrollport the nearest scroll
+   container's padding box; where an inset it has (top, bottom, left) puts that edge of the scrollport inset by it past
+   its border box's, moved inward as far as its margin box stays in its containing block: its fragments, its text, its
+   atomic inlines and its background with it. The boxes held to Chromium's (tests/pages/sticky-inline.chromium), the
+   regions to its drawing (sticky-inline.shot.png); the text is transparent */
+body { font: 16px sans-serif; margin: 8px; color: transparent; }
+.sc { overflow: hidden; height: 100px; width: 300px; background: #eef; margin-bottom: 10px; }
+.st { position: sticky; background: #fc9; }
+.tall { height: 300px; }
+.col { position: absolute; left: 400px; top: 0; }
+</style></head><body>
+<div class=sc id=a><div class=tall id=a0><span class=st id=a1 style="top: 30px">top sticky</span> after</div></div>
+<div class=sc id=b><div class=tall id=b0><br><br><br><br><br><br><br><br><br><br><br><br><span class=st id=b1 style="bottom: 10px">bottom sticky</span></div></div>
+<div class=sc id=c><div class=tall id=c0 style="width: 280px"><span class=st id=c1 style="left: 30px">left sticky</span> words</div></div>
+<div class=sc id=d><div class=tall id=d0><span class=st id=d1 style="top: 40px; padding: 4px; border: 2px solid #c63; margin: 0 5px">padded <b id=d2>bold</b> <span id=d3 style="display: inline-block; width: 20px; height: 10px; background: #36c"></span></span></div></div>
+<div class=sc id=e><div id=e0 style="height: 60px"><span class=st id=e1 style="top: 70px">limited by its block</span></div></div>
+<div class=col>
+<div class=sc id=f style="width: 200px"><div class=tall id=f0>word word word <span class=st id=f1 style="top: 20px">a sticky that wraps onto two lines</span></div></div>
+<div class=sc id=g><div class=tall id=g0><span class=st id=g1 style="top: 30px">anonymous run</span><div id=g2>a block after it</div></div></div>
+<div class=sc id=h><div class=tall id=h0><span class=st id=h1 style="top: 30px; margin: 0 10px; padding: 2px 6px; border: 1px solid">margins</span> after</div></div>
+<div class=sc id=i><div id=i0 style="height: 50px; padding-bottom: 20px; background: #dfd">text <span class=st id=i1 style="top: 60px">limited</span></div></div>
+<div class=sc id=j><div class=tall id=j0 style="padding-top: 40px">text <span class=st id=j1 style="bottom: 50px">bottom</span></div></div>
+</div>
+</body></html>

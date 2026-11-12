@@ -1,0 +1,26 @@
+<html><head><title>Quirks: percentage heights in lines</title>
+<!-- No DOCTYPE: a quirks-mode page. The percentage height calculation quirk (the Quirks Mode Standard 3.5) as Blink has
+     it, measured, in a line: an inline-block's, a float's met in a line and an inline image's percentage heights taken
+     through the blocks of an auto height up to the body (which fills the viewport: 600px less its margins), an
+     inline-block of an auto height passing them on to what it holds; min-height and max-height holding an
+     inline-block; a block-level image's percentage height likewise; a percentage of a definite height as in any mode.
+     The boxes held to Chromium's (tests/pages/quirks-heights2.chromium) -->
+<style>
+body { font: 16px sans-serif; }
+.ib { display: inline-block; width: 40px; background: #cde; }
+.fl { float: left; width: 40px; background: #edc; }
+.case { height: 70px; }
+</style></head><body>
+<div class=case><div id=d1><span class=ib id=i1 style="height: 10%"></span> text</div></div>
+<div class=case><div id=d2>text <span class=fl id=f2 style="height: 10%"></span> after</div></div>
+<div class=case style="height: 140px"><div id=d3 style="height: 120px"><span class=ib id=i3 style="height: 25%"></span> text</div></div>
+<div class=case><div id=d4><div id=d44><span class=ib id=i4 style="height: 5%"><span class=ib id=i44 style="height: 50%"></span></span></div></div></div>
+<div class=case><div id=d5><span class=ib id=i5 style="height: 5%; min-height: 50px"></span></div></div>
+<div class=case><div id=d6><span class=ib id=i6 style="height: 10%; max-height: 30px"></span> text</div></div>
+<div class=case><div id=d7 style="display: inline-block"><span class=ib id=i7 style="height: 5%"></span></div></div>
+<div class=case><div id=d8><img id=g8 src="logo.png" style="height: 5%"></div></div>
+<div class=case><div id=d9><img id=g9 src="logo.png" style="height: 8%; width: 30px"> and text</div></div>
+<div class=case><div id=d10 style="padding: 5px; border: 2px solid"><span class=ib id=i10 style="height: 4%; box-sizing: border-box; padding: 3px 0; border: 2px solid"></span> text</div></div>
+<div class=case><div id=d11>text <span class=fl id=f11 style="height: 5%; min-height: 40px"></span><span class=ib id=i11 style="height: 3%"></span></div></div>
+<div class=case><div id=d12><img id=g12 src="logo.png" style="display: block; height: 6%"></div></div>
+</body></html>

@@ -1,0 +1,6 @@
+# tests/pages/body-overflow.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+html 0 0 800 166
+body 10 40 790 160
+d1 10 40 790 60
+p2 10 76 790 96
+d3 10 112 790 262

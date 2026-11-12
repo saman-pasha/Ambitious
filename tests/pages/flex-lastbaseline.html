@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html><head><title>A flex container's last baseline</title>
+<style>
+/* tests/pages/flex-lastbaseline.html -- a flex container's last baseline (Flexbox 1, 8.5), as Chromium has it: its last
+   line's items aligned on their last baselines, else its last item's last baseline (in order), else that item's border
+   box's bottom; met where a container's last baseline is asked for: a flex item that is itself a flex container,
+   aligned by align-items or align-self last baseline (a row, a wrapped row, a column, one aligned on last baselines
+   itself, row-reverse, order, an item with no baseline last), and an inline-block holding a flex container (an
+   inline-block's baseline its last line's); the first baseline as before. The boxes held to Chromium's
+   (tests/pages/flex-lastbaseline.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.case { height: 96px; }
+.f { display: flex; width: 500px; background: #f4f4f4; }
+.f > * { background: #cde; }
+.big { font-size: 32px; }
+.small { font-size: 10px; }
+.lst { align-items: last baseline; }
+.nest { display: flex; }
+.wrap { flex-wrap: wrap; width: 120px; }
+.col { flex-direction: column; }
+.ib { display: inline-block; background: #eee; }
+.box { width: 20px; height: 24px; background: #fc9; }
+.fs { display: flex; align-items: flex-start; background: #e4e4e4; }
+</style></head><body>
+<div class=case><div class="f lst" id=a><div id=a1>one<br>two</div><div class="nest" id=a2><div id=a21>x</div><div class=big id=a22>Y<br>Z</div></div><div class=small id=a3>z</div></div></div>
+<div class=case><div class="f lst" id=b><div id=b1>one</div><div class="nest wrap" id=b2><div id=b21 style="width:60px">aa</div><div id=b22 style="width:60px" class=big>B</div><div id=b23 style="width:80px">last line</div></div></div></div>
+<div class=case><div class="f lst" id=c><div id=c1>one</div><div class="nest col" id=c2><div id=c21>first</div><div id=c22 class=big>second</div></div></div></div>
+<div class=case><div class="f lst" id=d><div id=d1>one</div><div class="nest lst" id=d2><div id=d21>p<br>q</div><div id=d22 class=big>R</div></div></div></div>
+<div class=case><div class="f lst" id=e><div id=e1>one</div><div class="nest" id=e2 style="flex-direction: row-reverse"><div id=e21 class=big>first</div><div id=e22>in<br>order</div></div></div></div>
+<div class=case><div class="f lst" id=g><div id=g1>one</div><div class="nest" id=g2><div id=g21 style="order: 2">ordered<br>last</div><div id=g22 class=big>G</div></div></div></div>
+<div class=case><div class="f lst" id=h><div id=h1>one</div><div class="nest" id=h2><div id=h21 class=big>H</div><div id=h22 class=box></div></div></div></div>
+<div class=case><div class="f" id=i><div id=i1 style="align-self: last baseline">one<br>two</div><div class="nest wrap" id=i2 style="align-self: last baseline; align-items: last baseline"><div id=i21 style="width:60px">aa</div><div id=i22 style="width:60px" class=big>B</div><div id=i23 style="width:50px">c<br>d</div><div id=i24 class=small style="width:50px">e</div></div><div id=i3 style="align-self: baseline" class=big>F</div></div></div>
+<div class=case><p id=q1>Line <span class=ib id=j1><span class="nest wrap" id=j11><span id=j111 style="width:60px">aa</span><span id=j112 style="width:60px" class=big>B</span><span id=j113 style="width:80px">last line</span></span></span> after</p></div>
+<div class=case><p id=q2>Line <span class=ib id=j2><span class="nest col" id=j21><span id=j211>first</span><span id=j212 class=big>second</span></span></span> after</p></div>
+<div class=case><p id=q3>Line <span class=ib id=j3><span class="nest lst" id=j31><span id=j311>p<br>q</span><span id=j312 class=big>R</span></span></span> <span class=big id=q3b>after</span></p></div>
+<div class=case><p id=q4>Line <span class=ib id=j4><span class="nest" id=j41><span id=j411 class=big>X</span><span id=j412 class=box></span></span></span> after</p></div>
+<div class=case><p id=q5>Line <span class=ib id=j5><span class="nest" id=j51 style="align-items: baseline"><span id=j511>p<br>q<br>r</span><span id=j512 class=big>S</span></span></span> after</p></div>
+<!-- the lines and items in the order they are drawn: a reversed direction's first baseline its leftmost (topmost)
+     item's, a wrap-reverse container's its top line's; an inline-block's from a flex or grid container its first
+     baseline, unless its last line's items are aligned on their last baselines -->
+<div class=case><p id=r1>Line <span class=fs style="display: inline-flex; flex-direction: row-reverse" id=k1><span id=k11 class=big>first</span><span id=k12 class=small>second</span></span> after</p></div>
+<div class=case><p id=r2>Line <span class=fs style="display: inline-flex; flex-direction: column-reverse" id=k2><span id=k21 class=small>first</span><span id=k22 class=big>second</span></span> after</p></div>
+<div class=case><p id=r3>Line <span class=fs style="display: inline-flex; flex-wrap: wrap-reverse; width: 80px" id=k3><span id=k31 class=small style="width: 60px">first</span><span id=k32 class=big style="width: 60px">S</span></span> after</p></div>
+<div class=case><p id=r4>Line <span class=ib id=k4><span class=fs style="flex-wrap: wrap; width: 80px" id=k41><span id=k411 class=small style="width: 60px">first</span><span id=k412 class=big style="width: 60px">S</span></span></span> after</p></div>
+<div class=case><p id=r5>Line <span class=ib id=k5><span class=fs id=k51><span id=k511 class=small>a<br>b<br>c</span><span id=k512 class=big>second</span></span></span> after</p></div>
+<div class=case><p id=r6>Line <span class=ib id=k6><span class=fs style="flex-direction: column" id=k61><span id=k611 class=small>first</span><span id=k612 class=big>second</span></span></span> after</p></div>
+<div class=case><p id=r7>Line <span class=ib id=k7><span style="display: grid" id=k71><span id=k711 class=small>first</span><span id=k712 class=big>second</span></span></span> after</p></div>
+<div class=case><div class="f lst" id=m><span id=m1>x</span><div id=m0><span class=fs style="flex-wrap: wrap; width: 80px" id=m01><span id=m011 class=small style="width: 60px">first</span><span id=m012 class=big style="width: 60px">S</span></span></div></div></div>
+<div class=case><div class="f lst" id=n><span id=n1>x</span><div class=fs id=n0 style="flex-direction: column-reverse"><span id=n01 class=big>first</span><span id=n02 class=small>second</span></div></div></div>
+<div class=case><div class="f lst" id=o><span id=o1>x</span><div class=fs id=o0 style="flex-wrap: wrap-reverse; width: 80px"><span id=o01 class=small style="width: 60px">first</span><span id=o02 class=big style="width: 60px">S</span></div></div></div>
+<div class=case><div class=f style="align-items: baseline" id=s><span id=s1>x</span><div id=s0><span class=fs id=s01 style="flex-direction: row-reverse"><span id=s011 class=big>first</span><span id=s012 class=small>second</span></span></div></div></div>
+</body></html>
