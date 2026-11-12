@@ -51,13 +51,23 @@
    the flexible lengths resolved by freezing the items clamped, the items laid
    out at their main sizes, the lines' cross sizes (stretched, align-content),
    justify-content and auto margins along the main axis, align-items and
-   align-self across. Grid containers (Grid 1, 11, simplified): the track lists
-   read (px, %, fr, auto, min-content, max-content, minmax(), fit-content(),
-   repeat() with a count or auto-fill), the items placed by their lines and spans
-   and the rest automatically row by row, the columns sized from the items that
-   span one (then to their growth limits, the fr tracks sharing the rest, auto
-   tracks stretched), the items laid out in their columns, the rows from their
-   heights; justify-self, align-self, justify-content and align-content.
+   align-self across. Grid containers (Grid 1): the track lists read (px, %, fr,
+   auto, min-content, max-content, minmax(), fit-content(), repeat() with a count
+   or auto-fill, the lines' names), grid-template-areas (each area's -start and -end
+   lines named); the items' lines resolved (8.3: by number, by name and its nth
+   line, a span of lines or of a name's lines, an area's name, a name no line has
+   taken by the implicit lines), the rest placed by the auto-placement cursor (8.5:
+   along rows or columns, sparse or dense), implicit tracks before the explicit
+   grid as well as after it (grid-auto-rows and -columns' pattern); the tracks
+   sized (11.4 to 11.8: base sizes and growth limits from the items that span one
+   track, then from the others by their spans and those that cross an fr track,
+   the free space to the growth limits, the fr tracks' share of what is left, of a
+   size not definite too, auto tracks stretched), the columns first, the items
+   laid out in them, then the rows from their heights (a percentage row of an auto
+   height resolved against it); justify-self, align-self, justify-content and
+   align-content. A grid item's box says where it was placed and how (a named
+   area, its lines, automatically). Not done: subgrid, masonry, auto-fit's empty
+   tracks collapsed, baseline alignment in a grid.
 
    Inline layout. White space is collapsed or kept as white-space says. Lines
    break at spaces (and around atomic inlines), never inside a word, a word too
@@ -208,7 +218,7 @@ typedef struct lay_ext {
     lay_len off[4];                     /* top, right, bottom, left */
     lay_len minw, minh, maxh, hraw, valen, basis, rgap, cgap;   /* hraw: height as declared, a percentage kept */
     double grow, shrink;
-    uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre;    /* the grid's values, kept as text: their cvals */
+    uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre, gta;    /* the grid's values, kept as text: their cvals */
     /* what paint reads: the corners' radii (a percentage of the border box's width), the
        opacity, the cvals of the values kept as text (none: 0), the outline, the image */
     lay_len rad[4];
@@ -518,6 +528,7 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->gce = c0 + CSS_PROP_GRID_COLUMN_END;
     e->grs = c0 + CSS_PROP_GRID_ROW_START;
     e->gre = c0 + CSS_PROP_GRID_ROW_END;
+    e->gta = c0 + CSS_PROP_GRID_TEMPLATE_AREAS;
     /* paint's: values that are text are kept when they are not their initial ones */
     for (int k = 0; k < 4; k++) {
         e->rad[k] = lay_len_at(st, c0 + CSS_PROP_BORDER_TOP_LEFT_RADIUS + k);
@@ -3551,15 +3562,29 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
     if (row && defh < 0 && t->box[b].h < 0) t->box[b].h = 0;
 }
 
-/* ---- grid containers (CSS Grid 1, 11, simplified) ---- */
+/* ---- grid containers (CSS Grid 1, 7 to 11) ---- */
 
 /* a track's sizing: its min and its max (fixed px, auto, min-content, max-content, fr,
-   fit-content's limit), its base size and growth limit, its place */
+   fit-content's limit), its base size and growth limit (LAY_INF while it has none), whether
+   that limit may still grow past what an item gave it (11.5's infinitely growable), the
+   increase a step of 11.5 plans for it, its place; pct: a percentage read as auto, the
+   grid's size not definite (its value, -1 for none) */
 enum { TK_FIXED, TK_AUTO, TK_MINC, TK_MAXC, TK_FR, TK_FIT };
-typedef struct lay_track { int mink, maxk; double minv, maxv, base, limit, pos; } lay_track;
+#define LAY_INF 1e30
+typedef struct lay_track { int mink, maxk, grows, touched; double minv, maxv, base, limit, pos, plan, pct; } lay_track;
 
-/* one track size as written (px, %, fr, auto, min-content, max-content): its kind and value */
-static int lay_track_one(const char *s, size_t n, double avail, int *kind, double *v) {
+/* a line's name (its hash) and the line it names, 1 the first line of its list */
+typedef struct lay_lname { uint64_t h; int32_t line; } lay_lname;
+
+/* the hash lay_hash gives a text that goes on from one whose hash is h with s[0, n) */
+static uint64_t lay_hash_cont(uint64_t h, const char *s, size_t n) {
+    for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+/* one track size as written (px, %, fr, auto, min-content, max-content): its kind and value;
+   a percentage of an avail that is not definite auto, its value in *pct */
+static int lay_track_one(const char *s, size_t n, double avail, int *kind, double *v, double *pct) {
     *v = 0;
     if (lay_is_word(s, n, "auto")) { *kind = TK_AUTO; return 1; }
     if (lay_is_word(s, n, "min-content")) { *kind = TK_MINC; return 1; }
@@ -3573,7 +3598,7 @@ static int lay_track_one(const char *s, size_t n, double avail, int *kind, doubl
     if (end == buf) return 0;
     if (strcmp(end, "fr") == 0) { *kind = TK_FR; *v = x; return 1; }
     if (strcmp(end, "%") == 0) {
-        if (avail < 0) { *kind = TK_AUTO; return 1; }
+        if (avail < 0) { *kind = TK_AUTO; *pct = x; return 1; }
         *kind = TK_FIXED;
         *v = avail * x / 100;
         return 1;
@@ -3583,22 +3608,47 @@ static int lay_track_one(const char *s, size_t n, double avail, int *kind, doubl
     return 1;
 }
 
-/* a track list (grid-template-columns' or -rows' computed text) into out: repeat() (a
-   count, auto-fill, auto-fit), minmax(), fit-content(); line names passed over */
-static void lay_tracks(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, int depth) {
+/* the names of a bracketed list, its inside s[0, n), each naming line */
+static void lay_line_names(const char *s, size_t n, int32_t line, vector<lay_lname> *names) {
+    size_t i = 0;
+    while (i < n) {
+        while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n')) i++;
+        size_t b = i;
+        while (i < n && s[i] != ' ' && s[i] != '\t' && s[i] != '\n') i++;
+        if (i == b) continue;
+        lay_lname x;
+        x.h = lay_hash(s + b, i - b);
+        x.line = line;
+        push_back(names, x);
+    }
+}
+
+/* a track list (grid-template-columns' or -rows' computed text) into out, and its lines'
+   names into names (a list's names name the line before the track after them):
+   repeat() (a count, auto-fill, auto-fit; its names repeated too), minmax(), fit-content() */
+static void lay_tracks(const char *s, size_t n, double avail, double gap, vector<lay_track> *out, vector<lay_lname> *names, int depth) {
     size_t i = 0, a, ln, fa, fn;
     while (css_next_part(s, n, &i, &a, &ln)) {
         const char *p = s + a;
-        if (p[0] == '[') continue;
+        if (p[0] == '[') {
+            size_t e = a + 1;
+            while (e < n && s[e] != ']') e++;
+            lay_line_names(s + a + 1, e - a - 1, (int32_t)len(*out) + 1, names);
+            i = e < n ? e + 1 : n;
+            continue;
+        }
         lay_track tk;
         memset(&tk, 0, sizeof tk);
+        tk.pct = -1;
+        double unused = -1;
         if (lay_call(p, ln, "repeat", &fa, &fn) && depth < 2) {
             size_t j = 0, ca, cn, la, lnn;
             if (!lay_arg(p + fa, fn, &j, &ca, &cn) || !lay_arg(p + fa, fn, &j, &la, &lnn)) continue;
             /* the rest of the arguments: the tracks repeated */
             lnn = fn - la;
             vector<lay_track> one;
-            lay_tracks(p + fa + la, lnn, avail, gap, &one, depth + 1);
+            vector<lay_lname> onames;
+            lay_tracks(p + fa + la, lnn, avail, gap, &one, &onames, depth + 1);
             if (!len(one)) continue;
             long count = 0;
             if (lay_is_word(p + fa + ca, cn, "auto-fill") || lay_is_word(p + fa + ca, cn, "auto-fit")) {
@@ -3615,13 +3665,17 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
                 for (size_t q = 0; q < cn; q++) if (p[fa + ca + q] >= '0' && p[fa + ca + q] <= '9') count = count * 10 + (p[fa + ca + q] - '0');
             }
             if (count > 1000) count = 1000;
-            for (long c = 0; c < count; c++) for (size_t q = 0; q < len(one); q++) push_back(out, at(one, q));
+            for (long c = 0; c < count; c++) {
+                int32_t base = (int32_t)len(*out);
+                for (size_t q = 0; q < len(onames); q++) { lay_lname x = at(onames, q); x.line += base; push_back(names, x); }
+                for (size_t q = 0; q < len(one); q++) push_back(out, at(one, q));
+            }
             continue;
         }
         if (lay_call(p, ln, "minmax", &fa, &fn)) {
             size_t j = 0, xa, xn, ya, yn;
             if (!lay_arg(p + fa, fn, &j, &xa, &xn) || !lay_arg(p + fa, fn, &j, &ya, &yn)) continue;
-            if (!lay_track_one(p + fa + xa, xn, avail, &tk.mink, &tk.minv) || !lay_track_one(p + fa + ya, yn, avail, &tk.maxk, &tk.maxv)) continue;
+            if (!lay_track_one(p + fa + xa, xn, avail, &tk.mink, &tk.minv, &unused) || !lay_track_one(p + fa + ya, yn, avail, &tk.maxk, &tk.maxv, &unused)) continue;
             if (tk.mink == TK_FR) tk.mink = TK_AUTO;
             push_back(out, tk);
             continue;
@@ -3629,7 +3683,7 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
         if (lay_call(p, ln, "fit-content", &fa, &fn)) {
             int kk;
             double v;
-            if (!lay_track_one(p + fa, fn, avail, &kk, &v)) continue;
+            if (!lay_track_one(p + fa, fn, avail, &kk, &v, &unused)) continue;
             tk.mink = TK_AUTO;
             tk.maxk = TK_FIT;
             tk.maxv = v;
@@ -3638,7 +3692,7 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
         }
         int kk;
         double v;
-        if (!lay_track_one(p, ln, avail, &kk, &v)) continue;
+        if (!lay_track_one(p, ln, avail, &kk, &v, &tk.pct)) continue;
         tk.mink = kk == TK_FR ? TK_AUTO : kk;
         tk.minv = v;
         tk.maxk = kk;
@@ -3647,108 +3701,475 @@ static void lay_tracks(const char *s, size_t n, double avail, double gap, vector
     }
 }
 
-/* a grid line as written (grid-column-start's computed text): a number (from the end when
-   negative), span n, or auto (0) */
-static void lay_grid_line(const css_style *st, uint32_t c, long *line, long *span) {
-    *line = 0;
-    *span = 0;
+/* a named area of grid-template-areas: its name's hash, its -start and -end lines' names'
+   hashes, its rows [r0, r1) and columns [c0, c1) */
+typedef struct lay_area { uint64_t h, hs, he; uint32_t r0, r1, c0, c1; } lay_area;
+
+/* grid-template-areas' strings s[0, n) (the cascade has checked them) into areas, and the
+   rows and columns they make */
+static void lay_areas(const char *s, size_t n, vector<lay_area> *areas, uint32_t *rows, uint32_t *cols) {
+    size_t i = 0, a, ln;
+    *rows = 0;
+    *cols = 0;
+    while (css_next_part(s, n, &i, &a, &ln)) {
+        const char *q = s + a;
+        if (ln < 2 || (q[0] != '"' && q[0] != '\'')) continue;
+        uint32_t c = 0;
+        size_t k = 1;
+        while (k + 1 < ln) {
+            char ch = q[k];
+            if (ch == ' ' || ch == '\t' || ch == '\n') { k++; continue; }
+            size_t b = k;
+            if (ch == '.') { while (k + 1 < ln && q[k] == '.') k++; c++; continue; }
+            while (k + 1 < ln && q[k] != ' ' && q[k] != '\t' && q[k] != '\n' && q[k] != '.') k++;
+            uint64_t h = lay_hash(q + b, k - b);
+            size_t z = 0;
+            while (z < len(*areas) && at(*areas, z).h != h) z++;
+            if (z == len(*areas)) {
+                lay_area ar;
+                ar.h = h;
+                ar.hs = lay_hash_cont(h, "-start", 6);
+                ar.he = lay_hash_cont(h, "-end", 4);
+                ar.r0 = *rows;
+                ar.r1 = *rows + 1;
+                ar.c0 = c;
+                ar.c1 = c + 1;
+                push_back(areas, ar);
+            } else {
+                lay_area ar = at(*areas, z);
+                if (*rows + 1 > ar.r1) ar.r1 = *rows + 1;
+                if (c + 1 > ar.c1) ar.c1 = c + 1;
+                (*areas)[z] = ar;
+            }
+            c++;
+        }
+        if (c > *cols) *cols = c;
+        (*rows)++;
+    }
+}
+
+/* a grid line as written (grid-column-start's computed text, Grid 1, 8.3): auto; a number
+   (from the end when negative), with a name the nth line of that name; span and a count, or
+   a name; a name alone (an area's -start or -end line, else the first line of the name) */
+enum { GL_AUTO, GL_LINE, GL_SPAN, GL_NAME };
+typedef struct lay_gl { int kind, named; long n; uint64_t h, hs, he; } lay_gl;
+
+static void lay_grid_line(const css_style *st, uint32_t c, lay_gl *g) {
+    memset(g, 0, sizeof *g);
     vector<char> src;
     amb_span sp = st->cval[c].text;
     append_range(src, text_ptr(st, sp), sp.len);
     size_t i = 0, a, n;
-    int is_span = 0;
+    int is_span = 0, digits = 0;
+    long v = 0;
     while (css_next_part(data(src), len(src), &i, &a, &n)) {
-        if (lay_is_word(data(src) + a, n, "span")) { is_span = 1; continue; }
-        long v = 0;
-        int neg = 0, digits = 0;
-        for (size_t q = a; q < a + n; q++) {
-            char ch = data(src)[q];
-            if (ch == '-') neg = 1;
-            else if (ch >= '0' && ch <= '9') { v = v * 10 + (ch - '0'); digits = 1; }
+        const char *p = data(src) + a;
+        if (lay_is_word(p, n, "span")) { is_span = 1; continue; }
+        if (lay_is_word(p, n, "auto")) continue;
+        int sign = p[0] == '-' || p[0] == '+';
+        if ((p[0] >= '0' && p[0] <= '9') || (sign && n > 1 && p[1] >= '0' && p[1] <= '9')) {
+            long x = 0;
+            for (size_t q = sign ? 1 : 0; q < n && p[q] >= '0' && p[q] <= '9'; q++) if (x < 100000) x = x * 10 + (p[q] - '0');
+            v = p[0] == '-' ? -x : x;
+            digits = 1;
+            continue;
         }
-        if (!digits) continue;
-        if (is_span) *span = v;
-        else *line = neg ? -v : v;
+        g->named = 1;
+        g->h = lay_hash(p, n);
+        g->hs = lay_hash_cont(g->h, "-start", 6);
+        g->he = lay_hash_cont(g->h, "-end", 4);
     }
-    if (is_span && *span < 1) *span = 1;
+    if (is_span) { g->kind = GL_SPAN; g->n = digits && v > 0 ? v : 1; return; }
+    if (digits && v != 0) { g->kind = GL_LINE; g->n = v; return; }
+    g->kind = g->named ? GL_NAME : GL_AUTO;
 }
 
-/* an item's area: its first column and span, its first row and span */
-typedef struct lay_ga { uint32_t c0, cs, r0, rs; } lay_ga;
+/* line l has the name h */
+static int lay_named(const vector<lay_lname> *nm, uint64_t h, long l) {
+    for (size_t k = 0; k < len(*nm); k++) if (at(*nm, k).h == h && at(*nm, k).line == l) return 1;
+    return 0;
+}
+/* the nth line of the name h among the explicit grid's lines 1 to L (from its start when
+   n > 0, from its end when n < 0), the implicit lines past them taken to have every name */
+static long lay_nth_named(const vector<lay_lname> *nm, uint64_t h, long n, long L) {
+    long k = 0;
+    if (n > 0) {
+        for (long l = 1; l <= L; l++) if (lay_named(nm, h, l) && ++k == n) return l;
+        return L + (n - k);
+    }
+    for (long l = L; l >= 1; l--) if (lay_named(nm, h, l) && ++k == -n) return l;
+    return 1 - (-n - k);
+}
+/* the line a span reaches from line `from`, ahead (dir 1) or back (-1): its count of lines,
+   or of lines of its name, the implicit lines taken to have the name */
+static long lay_span_to(const vector<lay_lname> *nm, const lay_gl *g, long from, int dir, long L) {
+    if (!g->named) return from + dir * g->n;
+    long k = 0;
+    if (dir > 0) {
+        for (long l = from + 1; l <= L; l++) if (lay_named(nm, g->h, l) && ++k == g->n) return l;
+        return (from > L ? from : L) + (g->n - k);
+    }
+    for (long l = from - 1; l >= 1; l--) if (lay_named(nm, g->h, l) && ++k == g->n) return l;
+    return (from < 1 ? from : 1) - (g->n - k);
+}
+/* the line a start line (end 0) or an end line (end 1) as written names */
+static long lay_line_at(const vector<lay_lname> *nm, const lay_gl *g, int end, long L) {
+    if (g->kind == GL_NAME) {
+        uint64_t hx = end ? g->he : g->hs;
+        for (long l = 1; l <= L; l++) if (lay_named(nm, hx, l)) return l;
+        return lay_nth_named(nm, g->h, 1, L);
+    }
+    if (g->named) return lay_nth_named(nm, g->h, g->n, L);
+    return g->n > 0 ? g->n : L + 1 + g->n;
+}
+/* an item's place along an axis (Grid 1, 8.3, its conflicts handled as 8.3.1 has them): its
+   first line and its span, the explicit grid's lines numbered 1 to L; 0 when it has no
+   definite line on the axis, its span alone found */
+static int lay_place_axis(const vector<lay_lname> *nm, const lay_gl *s0, const lay_gl *e0, long L, long *start, long *span) {
+    lay_gl s = *s0, e = *e0;
+    if (s.kind == GL_SPAN && e.kind == GL_SPAN) e.kind = GL_AUTO;
+    int sl = s.kind == GL_LINE || s.kind == GL_NAME, el = e.kind == GL_LINE || e.kind == GL_NAME;
+    if (!sl && !el) {
+        long k = s.kind == GL_SPAN ? (s.named ? 1 : s.n) : e.kind == GL_SPAN ? (e.named ? 1 : e.n) : 1;
+        *span = k < 1 ? 1 : k > 1000 ? 1000 : k;
+        return 0;
+    }
+    long a = sl ? lay_line_at(nm, &s, 0, L) : 0, z = el ? lay_line_at(nm, &e, 1, L) : 0;
+    if (sl && el) {
+        if (a > z) { long x = a; a = z; z = x; }
+        if (a == z) z = a + 1;
+    } else if (sl) z = e.kind == GL_SPAN ? lay_span_to(nm, &e, a, 1, L) : a + 1;
+    else a = s.kind == GL_SPAN ? lay_span_to(nm, &s, z, -1, L) : z - 1;
+    if (a < -1000) a = -1000;
+    if (z > 2000) z = 2000;
+    if (z <= a) z = a + 1;
+    *start = a;
+    *span = z - a;
+    return 1;
+}
 
-/* the tracks' sizes (11.4-11.7, simplified): their base sizes from the content of the
-   items that span one track, then up to their growth limits in the free space, the fr
-   tracks sharing what is left, the auto ones stretched when nothing else takes it */
-static void lay_size_tracks(vector<lay_track> *tr, const vector<double> *cmin, const vector<double> *cmax, double avail, double gap, int stretch) {
+/* an item's contributions to the tracks it spans along an axis: its first track and span,
+   its min-content and max-content contributions and its minimum contribution (outer sizes) */
+typedef struct lay_gc { uint32_t first, span; double mn, mx, minc; } lay_gc;
+
+static int lay_tk_imin(lay_track k) { return k.mink == TK_AUTO || k.mink == TK_MINC || k.mink == TK_MAXC; }
+static int lay_tk_imax(lay_track k) { return k.maxk == TK_AUTO || k.maxk == TK_MINC || k.maxk == TK_MAXC || k.maxk == TK_FIT; }
+static int lay_tk_maxc(lay_track k) { return k.maxk == TK_AUTO || k.maxk == TK_MAXC || k.maxk == TK_FIT; }
+
+/* space shared among tracks (inc[k] what track k gets, room[k] how much more it may take,
+   w[k] its weight, open[k] whether it takes any): equally by weight, a track that reaches
+   its room taking no more; what is left of the space */
+static double lay_fill(vector<double> *inc, const vector<double> *room, const vector<double> *w, const vector<uint8_t> *open, double space) {
+    size_t n = len(*inc);
+    for (int round = 0; round < 64 && space > 1e-9; round++) {
+        double sw = 0, step = -1;
+        for (size_t k = 0; k < n; k++) {
+            if (!at(*open, k) || at(*inc, k) >= at(*room, k) - 1e-9) continue;
+            sw += at(*w, k);
+            double s = (at(*room, k) - at(*inc, k)) / at(*w, k);
+            if (step < 0 || s < step) step = s;
+        }
+        if (sw <= 0) break;
+        double per = space / sw;
+        if (step >= per) step = per;
+        for (size_t k = 0; k < n; k++) {
+            if (!at(*open, k) || at(*inc, k) >= at(*room, k) - 1e-9) continue;
+            (*inc)[k] = at(*inc, k) + step * at(*w, k);
+        }
+        space -= step * sw;
+    }
+    return space > 0 ? space : 0;
+}
+
+/* a step of 11.5.3 for a group of items (gc's, each an index in group): the space each
+   item's contribution (step 1: its minimum one; 2, 5: its min-content one; 3, 6: its
+   max-content one) needs past the sizes of the tracks it spans (the base sizes in steps
+   1 to 3, the growth limits in 5 and 6), shared among those of its tracks the step affects
+   up to their limits, then past them (11.5.1); each track's size then grows by the most
+   an item asked of it. flex: the flexible tracks alone take space, by their factors (11.5.4) */
+static void lay_spread(vector<lay_track> *tr, const vector<lay_gc> *gc, const vector<uint32_t> *group, double gap, int step, int flex) {
     size_t n = len(*tr);
-    double total = gap * (double)(n > 0 ? n - 1 : 0), frs = 0;
+    int on_limit = step >= 5;
+    for (size_t q = 0; q < n; q++) { (*tr)[q].plan = 0; (*tr)[q].touched = 0; }
+    for (size_t g = 0; g < len(*group); g++) {
+        lay_gc c = at(*gc, at(*group, g));
+        double want = step == 1 ? c.minc : (step == 2 || step == 5) ? c.mn : c.mx;
+        double have = gap * (double)(c.span - 1);
+        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
+        vector<double> inc, room, w;
+        vector<uint8_t> aff, beyond;
+        int naff = 0, nbeyond = 0;
+        double frs = 0;
+        for (uint32_t k = c.first; k < z; k++) {
+            lay_track tk = at(*tr, k);
+            have += on_limit && tk.limit < LAY_INF ? tk.limit : tk.base;
+            int a;
+            if (flex && tk.maxk != TK_FR) a = 0;
+            else if (step == 1) a = lay_tk_imin(tk);
+            else if (step == 2) a = tk.mink == TK_MINC || tk.mink == TK_MAXC;
+            else if (step == 3) a = tk.mink == TK_MAXC;
+            else if (step == 5) a = lay_tk_imax(tk);
+            else a = lay_tk_maxc(tk);
+            /* how far it grows before it meets its limit: a base size its growth limit (a
+               fit-content track's argument too), a growth limit none past a finite one */
+            double r = 0;
+            if (!on_limit) {
+                r = (tk.limit >= LAY_INF ? LAY_INF : tk.limit) - tk.base;
+                if (tk.maxk == TK_FIT && tk.maxv - tk.base < r) r = tk.maxv - tk.base;
+            } else {
+                r = tk.limit >= LAY_INF || tk.grows ? LAY_INF : 0;
+                /* step 6 grows a fit-content track's limit no further than its argument */
+                if (step == 6 && tk.maxk == TK_FIT) {
+                    double cap = tk.maxv - (tk.limit < LAY_INF ? tk.limit : tk.base);
+                    if (cap < r) r = cap;
+                }
+            }
+            if (r < 0) r = 0;
+            /* past the limits: a track whose max is intrinsic (steps 1, 2), max-content (3), any (5, 6) */
+            int bz = !a ? 0 : step <= 2 ? lay_tk_imax(tk) : step == 3 ? lay_tk_maxc(tk) : 1;
+            push_back(inc, 0.0);
+            push_back(room, r);
+            push_back(w, flex ? tk.maxv : 1.0);
+            push_back(aff, (uint8_t)a);
+            push_back(beyond, (uint8_t)bz);
+            naff += a;
+            nbeyond += bz;
+            if (flex && a) frs += tk.maxv;
+            if (a) (*tr)[k].touched = 1;
+        }
+        double space = want - have;
+        if (space <= 0 || !naff) continue;
+        if (flex && frs < 1) for (size_t k = 0; k < len(w); k++) w[k] = 1.0;
+        space = lay_fill(&inc, &room, &w, &aff, space);
+        if (space > 1e-9) {
+            /* past the limits: to the tracks of the step's kind (a fit-content track up to
+               its argument), else to every affected track */
+            vector<double> past;
+            for (size_t k = 0; k < len(room); k++) {
+                lay_track tk = at(*tr, c.first + (uint32_t)k);
+                double r = LAY_INF;
+                if ((step == 3 || step == 6) && tk.maxk == TK_FIT) {
+                    r = tk.maxv - (on_limit && tk.limit < LAY_INF ? tk.limit : tk.base);
+                    if (r < at(inc, k)) r = at(inc, k);
+                }
+                push_back(past, r);
+            }
+            if (nbeyond) space = lay_fill(&inc, &past, &w, &beyond, space);
+            if (space > 1e-9) {
+                /* then to every affected track (a fit-content track's limit, in step 6, still
+                   held at its argument) */
+                for (size_t k = 0; k < len(past); k++)
+                    if (!(step == 6 && at(*tr, c.first + (uint32_t)k).maxk == TK_FIT)) past[k] = LAY_INF;
+                lay_fill(&inc, &past, &w, &aff, space);
+            }
+        }
+        for (size_t k = 0; k < len(inc); k++) {
+            uint32_t tq = c.first + (uint32_t)k;
+            if (at(aff, k) && at(inc, k) > at(*tr, tq).plan) (*tr)[tq].plan = at(inc, k);
+        }
+    }
     for (size_t q = 0; q < n; q++) {
         lay_track tk = at(*tr, q);
-        double mn = at(*cmin, q), mx = at(*cmax, q);
-        tk.base = tk.mink == TK_FIXED ? tk.minv : tk.mink == TK_MAXC ? mx : tk.mink == TK_MINC || tk.mink == TK_AUTO ? mn : 0;
-        tk.limit = tk.maxk == TK_FIXED ? tk.maxv : tk.maxk == TK_MINC ? mn : tk.maxk == TK_FIT ? (mx < tk.maxv ? mx : tk.maxv) : tk.maxk == TK_FR ? tk.base : mx;
-        if (tk.maxk == TK_FIT && tk.limit < mn) tk.limit = mn;
-        if (tk.limit < tk.base) tk.limit = tk.base;
-        if (tk.maxk == TK_FR) frs += tk.maxv;
-        total += tk.base;
+        if (!tk.touched) continue;
+        if (!on_limit) tk.base += tk.plan;
+        else if (tk.limit >= LAY_INF) {
+            tk.limit = tk.base + tk.plan;
+            if (step == 5) tk.grows = 1;
+        } else tk.limit += tk.plan;
         (*tr)[q] = tk;
-    }
-    if (avail < 0) {
-        /* no definite size: each track at its limit, an fr at its share of the largest */
-        for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).maxk == TK_FR ? at(*tr, q).base : at(*tr, q).limit;
-        return;
-    }
-    /* the free space to the growth limits, shared evenly */
-    for (int round = 0; round < 32; round++) {
-        double free = avail - total;
-        int growing = 0;
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk != TK_FR && at(*tr, q).limit > at(*tr, q).base + 0.001) growing++;
-        if (free <= 0.001 || !growing) break;
-        double each = free / growing;
-        for (size_t q = 0; q < n; q++) {
-            lay_track tk = at(*tr, q);
-            if (tk.maxk == TK_FR || tk.limit <= tk.base + 0.001) continue;
-            double add = tk.limit - tk.base < each ? tk.limit - tk.base : each;
-            tk.base += add;
-            total += add;
-            (*tr)[q] = tk;
-        }
-    }
-    /* the fr tracks: what is left, by their factors; one whose base is more keeps it */
-    if (frs > 0) {
-        double fixed = gap * (double)(n > 0 ? n - 1 : 0);
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk != TK_FR) fixed += at(*tr, q).base;
-        vector<uint8_t> out_of;
-        resize(&out_of, n);
-        for (int round = 0; round < 16; round++) {
-            double left = avail - fixed, f = 0;
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR && !at(out_of, q)) f += at(*tr, q).maxv;
-            if (f <= 0) break;
-            double unit = left / (f < 1 ? 1 : f);
-            int changed = 0;
-            for (size_t q = 0; q < n; q++) {
-                if (at(*tr, q).maxk != TK_FR || at(out_of, q)) continue;
-                if (at(*tr, q).base > unit * at(*tr, q).maxv) { out_of[q] = 1; fixed += at(*tr, q).base; changed = 1; }
-            }
-            if (changed) continue;
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR && !at(out_of, q)) (*tr)[q].base = unit * at(*tr, q).maxv > 0 ? unit * at(*tr, q).maxv : 0;
-            break;
-        }
-        return;
-    }
-    /* the auto tracks stretched over what is left */
-    if (stretch) {
-        double free = avail - total;
-        int autos = 0;
-        for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) autos++;
-        if (free > 0 && autos)
-            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) (*tr)[q].base = at(*tr, q).base + free / autos;
     }
 }
 
-/* a grid container's items laid out: placed in its tracks (explicitly, then automatically
-   row by row), the columns sized, the items laid out in them, the rows sized; b's content
-   height when defh (its definite one) is -1 */
+/* the size of an fr among tracks [a, z) to fill space (11.7.1): the space less the tracks
+   that are not flexible and the gaps, over the factors (1 at least), a flexible track whose
+   base size is more than its share taken as one that is not */
+static double lay_fr_size(const vector<lay_track> *tr, size_t a, size_t z, double space, double gap) {
+    if (z <= a) return 0;
+    vector<uint8_t> fixed;
+    resize(&fixed, z - a, (uint8_t)0);
+    for (int round = 0; round < 32; round++) {
+        double left = space - gap * (double)(z - a - 1), f = 0;
+        for (size_t q = a; q < z; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && !at(fixed, q - a)) f += tk.maxv;
+            else left -= tk.base;
+        }
+        double fr = left / (f < 1 ? 1 : f);
+        int again = 0;
+        for (size_t q = a; q < z; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && !at(fixed, q - a) && fr * tk.maxv < tk.base) { fixed[q - a] = 1; again = 1; }
+        }
+        if (!again) return fr > 0 ? fr : 0;
+    }
+    return 0;
+}
+
+/* the tracks' sizes along an axis (Grid 1, 11.4 to 11.8): their base sizes and growth
+   limits from the items in them -- those that span one track, then the others by their
+   spans, then those that cross a flexible track -- the free space to the growth limits, the
+   fr tracks their share of what is left, the auto ones stretched over the rest (stretch).
+   avail: the grid's size along the axis, -1 when it is not definite */
+static void lay_size_tracks(vector<lay_track> *tr, const vector<lay_gc> *gc, double avail, double gap, int stretch) {
+    size_t n = len(*tr), ng = len(*gc);
+    for (size_t q = 0; q < n; q++) {
+        lay_track tk = at(*tr, q);
+        tk.base = tk.mink == TK_FIXED ? tk.minv : 0;
+        tk.limit = tk.maxk == TK_FIXED ? tk.maxv : LAY_INF;
+        if (tk.limit < tk.base) tk.limit = tk.base;
+        tk.grows = 0;
+        (*tr)[q] = tk;
+    }
+    /* 11.5.2: the items that span one track, one that is not flexible */
+    vector<double> lim;
+    resize(&lim, n, -1.0);
+    vector<uint8_t> crosses;
+    resize(&crosses, ng, (uint8_t)0);
+    size_t maxspan = 1;
+    for (size_t g = 0; g < ng; g++) {
+        lay_gc c = at(*gc, g);
+        if (c.first >= n) continue;
+        uint32_t z = c.first + c.span < n ? c.first + c.span : (uint32_t)n;
+        for (uint32_t k = c.first; k < z; k++) if (at(*tr, k).maxk == TK_FR) crosses[g] = 1;
+        if (c.span > maxspan) maxspan = c.span;
+        if (c.span != 1 || at(crosses, g)) continue;
+        lay_track tk = at(*tr, c.first);
+        if (tk.mink == TK_MINC && c.mn > tk.base) tk.base = c.mn;
+        else if (tk.mink == TK_MAXC && c.mx > tk.base) tk.base = c.mx;
+        else if (tk.mink == TK_AUTO && c.minc > tk.base) tk.base = c.minc;
+        double l = tk.maxk == TK_MINC ? c.mn : lay_tk_maxc(tk) ? c.mx : -1;
+        if (tk.maxk == TK_FIT && l > tk.maxv) l = tk.maxv;
+        if (l > at(lim, c.first)) lim[c.first] = l;
+        (*tr)[c.first] = tk;
+    }
+    for (size_t q = 0; q < n; q++) {
+        lay_track tk = at(*tr, q);
+        if (at(lim, q) >= 0) tk.limit = at(lim, q);
+        if (tk.limit < tk.base) tk.limit = tk.base;
+        (*tr)[q] = tk;
+    }
+    /* 11.5.3: the items that span more, by their spans; 11.5.4: those crossing a flexible track */
+    vector<uint32_t> group;
+    for (size_t span = 2; span <= maxspan; span++) {
+        clear(&group);
+        for (size_t g = 0; g < ng; g++) if (at(*gc, g).span == span && at(*gc, g).first < n && !at(crosses, g)) push_back(&group, (uint32_t)g);
+        if (!len(group)) continue;
+        for (int step = 1; step <= 6; step++) {
+            if (step == 4) {
+                for (size_t q = 0; q < n; q++) if (at(*tr, q).limit < at(*tr, q).base) (*tr)[q].limit = at(*tr, q).base;
+                continue;
+            }
+            lay_spread(tr, gc, &group, gap, step, 0);
+        }
+    }
+    clear(&group);
+    for (size_t g = 0; g < ng; g++) if (at(crosses, g)) push_back(&group, (uint32_t)g);
+    if (len(group)) for (int step = 1; step <= 3; step++) lay_spread(tr, gc, &group, gap, step, 1);
+    /* 11.5.5: a growth limit still none is the base size */
+    for (size_t q = 0; q < n; q++) if (at(*tr, q).limit >= LAY_INF || at(*tr, q).limit < at(*tr, q).base) (*tr)[q].limit = at(*tr, q).base;
+    /* 11.6: the free space to the growth limits, shared equally; with no definite size, each at its limit */
+    double total = gap * (double)(n > 0 ? n - 1 : 0);
+    for (size_t q = 0; q < n; q++) total += at(*tr, q).base;
+    if (avail < 0) for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).limit;
+    else if (avail - total > 0.001) {
+        vector<double> inc, room, w;
+        vector<uint8_t> open;
+        for (size_t q = 0; q < n; q++) {
+            push_back(inc, 0.0);
+            push_back(room, at(*tr, q).limit - at(*tr, q).base);
+            push_back(w, 1.0);
+            push_back(open, (uint8_t)1);
+        }
+        lay_fill(&inc, &room, &w, &open, avail - total);
+        for (size_t q = 0; q < n; q++) (*tr)[q].base = at(*tr, q).base + at(inc, q);
+    }
+    /* 11.7: the fr tracks, by the size of an fr: of the free space when it is definite, else
+       the largest each fr track's base and each item that crosses one asks */
+    double frs = 0;
+    for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_FR) frs += at(*tr, q).maxv;
+    if (frs > 0) {
+        double fr = 0;
+        if (avail >= 0) fr = lay_fr_size(tr, 0, n, avail, gap);
+        else {
+            for (size_t q = 0; q < n; q++) {
+                lay_track tk = at(*tr, q);
+                if (tk.maxk != TK_FR) continue;
+                double v = tk.maxv > 1 ? tk.base / tk.maxv : tk.base;
+                if (v > fr) fr = v;
+            }
+            for (size_t g = 0; g < ng; g++) {
+                if (!at(crosses, g)) continue;
+                lay_gc c = at(*gc, g);
+                size_t z = c.first + c.span < n ? c.first + c.span : n;
+                double v = lay_fr_size(tr, c.first, z, c.mx, gap);
+                if (v > fr) fr = v;
+            }
+        }
+        for (size_t q = 0; q < n; q++) {
+            lay_track tk = at(*tr, q);
+            if (tk.maxk == TK_FR && fr * tk.maxv > tk.base) (*tr)[q].base = fr * tk.maxv;
+        }
+    }
+    /* 11.8: the auto tracks stretched over what is left */
+    if (stretch && avail >= 0) {
+        double used = gap * (double)(n > 0 ? n - 1 : 0);
+        int autos = 0;
+        for (size_t q = 0; q < n; q++) { used += at(*tr, q).base; if (at(*tr, q).maxk == TK_AUTO) autos++; }
+        if (avail - used > 0 && autos)
+            for (size_t q = 0; q < n; q++) if (at(*tr, q).maxk == TK_AUTO) (*tr)[q].base = at(*tr, q).base + (avail - used) / autos;
+    }
+}
+
+/* an item's place in the grid: along each axis (0 the columns, 1 the rows) its first line
+   (as the explicit grid numbers them, then its track in the implicit grid) and its span,
+   whether that line was definite, how it was placed, its area (1 + its index) */
+typedef struct lay_gp { long s0, s1, n0, n1; int d0, d1, by; uint32_t area; } lay_gp;
+
+/* the area [a0, a0 + na) x [b0, b0 + nb) (minor, major) is clear of the items of gp placed
+   in both axes (placed: their tracks), mi the minor axis */
+static int lay_gp_clear(const vector<lay_gp> *gp, const vector<uint8_t> *placed, int mi, long a0, long na, long b0, long nb) {
+    for (size_t q = 0; q < len(*gp); q++) {
+        if (!at(*placed, q)) continue;
+        lay_gp g = at(*gp, q);
+        long x0 = mi == 0 ? g.s0 : g.s1, xn = mi == 0 ? g.n0 : g.n1, y0 = mi == 0 ? g.s1 : g.s0, yn = mi == 0 ? g.n1 : g.n0;
+        if (x0 < a0 + na && a0 < x0 + xn && y0 < b0 + nb && b0 < y0 + yn) return 0;
+    }
+    return 1;
+}
+/* the cells of occ (rows of the major axis, cols cells each) the area [a0, a0 + na) x
+   [b0, b0 + nb) covers are free; set: mark them taken, the rows grown as needed */
+static int lay_cells(vector<uint8_t> *occ, long cols, long a0, long na, long b0, long nb, int set) {
+    long rows = cols > 0 ? (long)len(*occ) / cols : 0;
+    if (set && b0 + nb > rows) { resize(occ, (size_t)((b0 + nb) * cols), (uint8_t)0); rows = b0 + nb; }
+    for (long y = b0; y < b0 + nb && y < rows; y++)
+        for (long x = a0; x < a0 + na && x < cols; x++) {
+            if (set) (*occ)[(size_t)(y * cols + x)] = 1;
+            else if (at(*occ, (size_t)(y * cols + x))) return 0;
+        }
+    return 1;
+}
+
+/* a track of the implicit grid, the explicit grid's line `line` its start: a template's
+   track, else grid-auto-*'s pattern, forwards after the template's, backwards before */
+static lay_track lay_track_at(const vector<lay_track> *tmpl, const vector<lay_track> *autos, long line) {
+    lay_track tk;
+    memset(&tk, 0, sizeof tk);
+    tk.mink = TK_AUTO;
+    tk.maxk = TK_AUTO;
+    tk.pct = -1;
+    long nt = (long)len(*tmpl), na = (long)len(*autos);
+    if (line >= 1 && line <= nt) return at(*tmpl, (size_t)(line - 1));
+    if (!na) return tk;
+    if (line > nt) return at(*autos, (size_t)((line - 1 - nt) % na));
+    return at(*autos, (size_t)(na - 1 - (-line) % na));
+}
+
+/* a grid container's items laid out (CSS Grid 1): placed (8.5: those with definite lines,
+   those locked to a row (to a column, in a column flow), then the rest by a cursor moving
+   along the rows (the columns), sparse or dense), the columns sized from the items'
+   widths (11), the items laid out in their columns, the rows sized from their heights,
+   each item in its area by justify-self and align-self; b's content height when defh (its
+   definite one) is -1 */
 static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     lay_ext e = LAY_X(el);
     double W = t->box[b].w;
@@ -3757,126 +4178,211 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     lay_items(LARGS, b, el, &its, &items);
     size_t ni = len(its);
     double cgap = lay_res(st, e.cgap, W), rgap = lay_res(st, e.rgap, defh >= 0 ? defh : 0);
-    vector<lay_track> cols, rows, acol, arow;
+    /* the track lists and their lines' names: the columns', the rows', the auto tracks' */
+    vector<lay_track> tcol, trow, acol, arow;
+    vector<lay_lname> ncol, nrow, nauto;
     vector<char> src;
     amb_span sp = st->cval[e.gtc].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), W, cgap, &cols, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), W, cgap, &tcol, &ncol, 0);
+    clear(&src);
     sp = st->cval[e.gtr].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &rows, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), defh, rgap, &trow, &nrow, 0);
+    clear(&src);
     sp = st->cval[e.gac].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), W, cgap, &acol, 0);
-    clear(src);
+    lay_tracks(data(src), len(src), W, cgap, &acol, &nauto, 0);
+    clear(&src);
     sp = st->cval[e.gar].text;
     append_range(src, text_ptr(st, sp), sp.len);
-    lay_tracks(data(src), len(src), defh, rgap, &arow, 0);
-    lay_track auto_tk;
-    memset(&auto_tk, 0, sizeof auto_tk);
-    auto_tk.mink = TK_AUTO;
-    auto_tk.maxk = TK_AUTO;
-    lay_track col_tk = len(acol) ? at(acol, 0) : auto_tk, row_tk = len(arow) ? at(arow, 0) : auto_tk;
-    size_t ncols = len(cols) ? len(cols) : 1, nrows_x = len(rows);
-    if (!len(cols)) push_back(cols, col_tk);
-    /* the items' areas: lines as written (from the explicit grid's end when negative) */
-    vector<lay_ga> areas;
+    lay_tracks(data(src), len(src), defh, rgap, &arow, &nauto, 0);
+    /* the areas: the explicit grid as large as they need, each area's -start and -end lines named */
+    vector<lay_area> areas;
+    uint32_t arows = 0, acols = 0;
+    if (st->cval[e.gta].unit == CSS_UNIT_TEXT) {
+        clear(&src);
+        sp = st->cval[e.gta].text;
+        append_range(src, text_ptr(st, sp), sp.len);
+        lay_areas(data(src), len(src), &areas, &arows, &acols);
+    }
+    for (size_t z = 0; z < len(areas); z++) {
+        lay_area ar = at(areas, z);
+        lay_lname x;
+        x.h = ar.hs; x.line = (int32_t)ar.c0 + 1; push_back(ncol, x);
+        x.h = ar.he; x.line = (int32_t)ar.c1 + 1; push_back(ncol, x);
+        x.h = ar.hs; x.line = (int32_t)ar.r0 + 1; push_back(nrow, x);
+        x.h = ar.he; x.line = (int32_t)ar.r1 + 1; push_back(nrow, x);
+    }
+    long nx0 = (long)len(tcol) > (long)acols ? (long)len(tcol) : (long)acols;
+    long nx1 = (long)len(trow) > (long)arows ? (long)len(trow) : (long)arows;
+    /* grid-auto-flow */
+    int colflow = 0, dense = 0;
+    {
+        clear(&src);
+        sp = st->cval[e.gflow].text;
+        append_range(src, text_ptr(st, sp), sp.len);
+        size_t i = 0, a, n;
+        while (css_next_part(data(src), len(src), &i, &a, &n)) {
+            if (lay_is_word(data(src) + a, n, "column")) colflow = 1;
+            else if (lay_is_word(data(src) + a, n, "dense")) dense = 1;
+        }
+    }
+    /* each item's lines (8.3), and how it is placed */
+    vector<lay_gp> gp;
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g;
+        lay_gp g;
         memset(&g, 0, sizeof g);
-        g.cs = 1;
-        g.rs = 1;
+        lay_gl cs, ce, rs, re;
+        memset(&cs, 0, sizeof cs);
+        ce = cs;
+        rs = cs;
+        re = cs;
         uint32_t ie = at(its, q).el;
-        long cl0 = 0, cs0 = 0, cl1 = 0, cs1 = 0, rl0 = 0, rs0 = 0, rl1 = 0, rs1 = 0;
         if (ie) {
-            lay_grid_line(st, LAY_X(ie).gcs, &cl0, &cs0);
-            lay_grid_line(st, LAY_X(ie).gce, &cl1, &cs1);
-            lay_grid_line(st, LAY_X(ie).grs, &rl0, &rs0);
-            lay_grid_line(st, LAY_X(ie).gre, &rl1, &rs1);
+            lay_grid_line(st, LAY_X(ie).gcs, &cs);
+            lay_grid_line(st, LAY_X(ie).gce, &ce);
+            lay_grid_line(st, LAY_X(ie).grs, &rs);
+            lay_grid_line(st, LAY_X(ie).gre, &re);
         }
-        if (cl0 < 0) cl0 = (long)ncols + 2 + cl0;
-        if (cl1 < 0) cl1 = (long)ncols + 2 + cl1;
-        if (rl0 < 0) rl0 = (long)nrows_x + 2 + rl0;
-        if (rl1 < 0) rl1 = (long)nrows_x + 2 + rl1;
-        if (cl0 > 0 && cl1 > cl0) g.cs = (uint32_t)(cl1 - cl0);
-        else if (cs0 > 0) g.cs = (uint32_t)cs0;
-        else if (cs1 > 0) g.cs = (uint32_t)cs1;
-        if (rl0 > 0 && rl1 > rl0) g.rs = (uint32_t)(rl1 - rl0);
-        else if (rs0 > 0) g.rs = (uint32_t)rs0;
-        else if (rs1 > 0) g.rs = (uint32_t)rs1;
-        if (cl0 <= 0 && cl1 > 0) cl0 = cl1 - (long)g.cs;
-        if (rl0 <= 0 && rl1 > 0) rl0 = rl1 - (long)g.rs;
-        g.c0 = cl0 > 0 ? (uint32_t)(cl0 - 1) : 0xffffffffu;
-        g.r0 = rl0 > 0 ? (uint32_t)(rl0 - 1) : 0xffffffffu;
-        if (g.cs > 1000) g.cs = 1000;
-        if (g.rs > 1000) g.rs = 1000;
-        push_back(areas, g);
-        if (g.c0 != 0xffffffffu && g.c0 + g.cs > ncols) ncols = g.c0 + g.cs;
-        if (g.cs > ncols) ncols = g.cs;
+        g.d0 = lay_place_axis(&ncol, &cs, &ce, nx0 + 1, &g.s0, &g.n0);
+        g.d1 = lay_place_axis(&nrow, &rs, &re, nx1 + 1, &g.s1, &g.n1);
+        g.by = g.d0 || g.d1 ? LAYOUT_GRID_BY_LINES : LAYOUT_GRID_BY_AUTO;
+        if (cs.kind == GL_NAME && ce.kind == GL_NAME && rs.kind == GL_NAME && re.kind == GL_NAME && cs.h == ce.h && cs.h == rs.h && cs.h == re.h)
+            for (size_t z = 0; z < len(areas); z++) if (at(areas, z).h == cs.h) { g.by = LAYOUT_GRID_BY_AREA; g.area = (uint32_t)z + 1; }
+        push_back(gp, g);
     }
-    while (len(cols) < ncols) push_back(cols, col_tk);
-    /* placed: the items whose row is given first, then the rest in the order of a cursor
-       moving along each row (sparse) */
-    vector<uint8_t> used;              /* rows x ncols */
-    size_t nrows = nrows_x;
-    resize(&used, nrows * ncols);
-    for (int pass = 0; pass < 2; pass++) {
-        size_t cr = 0, cc = 0;
-        for (size_t q = 0; q < ni; q++) {
-            lay_ga g = at(areas, q);
-            if ((pass == 0) != (g.r0 != 0xffffffffu)) continue;
-            if (g.r0 != 0xffffffffu && g.c0 == 0xffffffffu) {
-                /* its row given: the first columns free in it */
-                size_t c = 0;
-                for (; c + g.cs <= ncols; c++) {
-                    int free_here = 1;
-                    for (size_t rr = g.r0; rr < g.r0 + g.rs && free_here; rr++)
-                        for (size_t k = c; k < c + g.cs && free_here; k++) if (rr < nrows && at(used, rr * ncols + k)) free_here = 0;
-                    if (free_here) break;
-                }
-                g.c0 = (uint32_t)(c + g.cs <= ncols ? c : 0);
-            } else if (g.r0 == 0xffffffffu) {
-                /* the cursor's next area that is free */
-                for (;;) {
-                    if (g.c0 != 0xffffffffu) { if (cc > g.c0) cr++; cc = g.c0; }
-                    if (cc + g.cs > ncols) { cc = 0; cr++; continue; }
-                    int free_here = 1;
-                    for (size_t rr = cr; rr < cr + g.rs && free_here; rr++)
-                        for (size_t k = cc; k < cc + g.cs && free_here; k++) if (rr < nrows && at(used, rr * ncols + k)) free_here = 0;
-                    if (free_here) break;
-                    if (g.c0 != 0xffffffffu) { cr++; continue; }
-                    cc++;
-                }
-                g.r0 = (uint32_t)cr;
-                g.c0 = (uint32_t)cc;
-                cc += g.cs;
-            }
-            if (g.r0 + g.rs > nrows) { nrows = g.r0 + g.rs; resize(&used, nrows * ncols); }
-            for (size_t rr = g.r0; rr < g.r0 + g.rs; rr++) for (size_t k = g.c0; k < g.c0 + g.cs && k < ncols; k++) used[rr * ncols + k] = 1;
-            areas[q] = g;
-        }
-    }
-    while (len(rows) < nrows) push_back(rows, row_tk);
-    /* the columns: from the content of the items that span one */
-    vector<double> cmin, cmax;
-    resize(&cmin, ncols);
-    resize(&cmax, ncols);
+    /* the implicit grid: tracks before the explicit grid's first line as the definite lines
+       need them (lead), then each definite line made a track's index */
+    long lead0 = 0, lead1 = 0, cnt0 = nx0, cnt1 = nx1;
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.cs != 1 || g.c0 >= ncols) continue;
-        lay_track tk = at(cols, g.c0);
-        if (tk.mink == TK_FIXED && (tk.maxk == TK_FIXED)) continue;
-        double mn, mx;
+        lay_gp g = at(gp, q);
+        if (g.d0 && 1 - g.s0 > lead0) lead0 = 1 - g.s0;
+        if (g.d1 && 1 - g.s1 > lead1) lead1 = 1 - g.s1;
+    }
+    cnt0 += lead0;
+    cnt1 += lead1;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        if (g.d0) { g.s0 += lead0 - 1; if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0; }
+        if (g.d1) { g.s1 += lead1 - 1; if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1; }
+        gp[q] = g;
+    }
+    /* the axis the cursor runs along (mi: the columns in a row flow), the one it moves on to
+       (the rows); 1: those of each item placed along both */
+    int mi = colflow ? 1 : 0;
+    vector<uint8_t> placed;
+    resize(&placed, ni, (uint8_t)0);
+    for (size_t q = 0; q < ni; q++) if (at(gp, q).d0 && at(gp, q).d1) placed[q] = 1;
+    /* those locked to a row (a column): each in it, at the first place clear of those placed
+       (past those this step placed in that row, sparse) */
+    vector<long> rowcur;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        int dmi = mi == 0 ? g.d0 : g.d1, dma = mi == 0 ? g.d1 : g.d0;
+        if (dmi || !dma) continue;
+        long ma0 = mi == 0 ? g.s1 : g.s0, man = mi == 0 ? g.n1 : g.n0, min_ = mi == 0 ? g.n0 : g.n1;
+        if ((long)len(rowcur) <= ma0) resize(&rowcur, (size_t)ma0 + 1, 0L);
+        long c = dense ? 0 : at(rowcur, (size_t)ma0);
+        while (!lay_gp_clear(&gp, &placed, mi, c, min_, ma0, man) && c < 4000) c++;
+        if (mi == 0) g.s0 = c; else g.s1 = c;
+        rowcur[(size_t)ma0] = c + min_;
+        gp[q] = g;
+        placed[q] = 1;
+        if (mi == 0 && c + min_ > cnt0) cnt0 = c + min_;
+        if (mi == 1 && c + min_ > cnt1) cnt1 = c + min_;
+    }
+    /* the minor axis's tracks: as many as the widest item placed automatically needs too */
+    long ncross = mi == 0 ? cnt0 : cnt1;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        long n = mi == 0 ? g.n0 : g.n1;
+        if (n > ncross) ncross = n;
+    }
+    if (mi == 0) cnt0 = ncross; else cnt1 = ncross;
+    /* the rest, by the cursor: the cells taken so far, then each item in turn */
+    vector<uint8_t> occ;
+    for (size_t q = 0; q < ni; q++) {
+        if (!at(placed, q)) continue;
+        lay_gp g = at(gp, q);
+        if (mi == 0) lay_cells(&occ, ncross, g.s0, g.n0, g.s1, g.n1, 1);
+        else lay_cells(&occ, ncross, g.s1, g.n1, g.s0, g.n0, 1);
+    }
+    long cur_mi = 0, cur_ma = 0;
+    for (size_t q = 0; q < ni; q++) {
+        if (at(placed, q)) continue;
+        lay_gp g = at(gp, q);
+        int dmi = mi == 0 ? g.d0 : g.d1;
+        long a0 = mi == 0 ? g.s0 : g.s1, an = mi == 0 ? g.n0 : g.n1, bn = mi == 0 ? g.n1 : g.n0;
+        if (dmi) {
+            /* its column (row) given: the first row (column) clear there, from the cursor's when sparse */
+            if (dense) cur_ma = 0;
+            else if (a0 < cur_mi) cur_ma++;
+            cur_mi = a0;
+            while (!lay_cells(&occ, ncross, a0, an, cur_ma, bn, 0)) cur_ma++;
+        } else {
+            if (dense) { cur_ma = 0; cur_mi = 0; }
+            for (;;) {
+                while (cur_mi + an <= ncross && !lay_cells(&occ, ncross, cur_mi, an, cur_ma, bn, 0)) cur_mi++;
+                if (cur_mi + an <= ncross) break;
+                cur_ma++;
+                cur_mi = 0;
+            }
+            a0 = cur_mi;
+        }
+        lay_cells(&occ, ncross, a0, an, cur_ma, bn, 1);
+        if (mi == 0) { g.s0 = a0; g.s1 = cur_ma; } else { g.s1 = a0; g.s0 = cur_ma; }
+        gp[q] = g;
+        placed[q] = 1;
+    }
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
+        if (g.s0 + g.n0 > cnt0) cnt0 = g.s0 + g.n0;
+        if (g.s1 + g.n1 > cnt1) cnt1 = g.s1 + g.n1;
+    }
+    /* the tracks: the templates', grid-auto-*'s before and after them */
+    vector<lay_track> cols, rows;
+    for (long c = 0; c < cnt0; c++) push_back(cols, lay_track_at(&tcol, &acol, c + 1 - lead0));
+    for (long r = 0; r < cnt1; r++) push_back(rows, lay_track_at(&trow, &arow, r + 1 - lead1));
+    size_t ncols = len(cols), nrows = len(rows);
+    /* the columns: from the items' widths, those in tracks of fixed sizes alone not measured */
+    vector<lay_gc> gc;
+    for (size_t q = 0; q < ni; q++) {
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        lay_item_intrinsic(LARGS, el, &it, &items, W, &mn, &mx);
-        if (mn > at(cmin, g.c0)) cmin[g.c0] = mn;
-        if (mx > at(cmax, g.c0)) cmax[g.c0] = mx;
+        lay_gc c;
+        memset(&c, 0, sizeof c);
+        c.first = (uint32_t)g.s0;
+        c.span = (uint32_t)g.n0;
+        int sized = 0, flexed = 0, fixed_max = 1;
+        double maxes = cgap * (double)(g.n0 - 1);
+        for (long k = g.s0; k < g.s0 + g.n0 && k < (long)ncols; k++) {
+            lay_track tk = at(cols, (size_t)k);
+            if (tk.mink != TK_FIXED || tk.maxk != TK_FIXED) sized = 1;
+            if (tk.maxk == TK_FR) flexed = 1;
+            if (tk.maxk == TK_FIXED) maxes += tk.maxv; else fixed_max = 0;
+        }
+        if (sized) {
+            lay_item_intrinsic(LARGS, el, &it, &items, W, &c.mn, &c.mx);
+            c.minc = c.mn;
+            /* its minimum contribution: its min-content one, but for a scroll container, a
+               min-width, or a span across a flexible track, its edges alone (and min-width) */
+            if (it.el) {
+                lay_style is;
+                lay_style_of(LARGS, it.el, &is);
+                lay_ext ie = LAY_X(it.el);
+                double edges = lay_edges_px(st, &is, W);
+                if (ie.minw.unit != LAY_AUTO && !lay_content_sized(ie.minw))
+                    c.minc = lay_res(st, ie.minw, W) + edges - (is.border_box ? is.b[1] + is.b[3] + lay_res(st, is.p[1], W) + lay_res(st, is.p[3], W) : 0);
+                else if (ie.clip == 1 || (g.n0 > 1 && flexed)) c.minc = edges;
+            }
+            if (fixed_max && c.minc > maxes) c.minc = maxes;
+        }
+        push_back(gc, c);
     }
     int jc = e.jc;
-    lay_size_tracks(&cols, &cmin, &cmax, W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
-    double cols_total = cgap * (double)(ncols - 1);
+    lay_size_tracks(&cols, &gc, W, cgap, jc == AJ_NORMAL || jc == AJ_STRETCH);
+    double cols_total = ncols ? cgap * (double)(ncols - 1) : 0;
     for (size_t c = 0; c < ncols; c++) cols_total += at(cols, c).base;
     double cstart = 0, cbetween = 0;
     if (jc != AJ_NORMAL && jc != AJ_STRETCH) lay_distribute(jc, W - cols_total, ncols, &cstart, &cbetween);
@@ -3885,10 +4391,10 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
     /* the items laid out in their columns: stretched, or shrunk to fit and placed by
        justify-self */
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        double aw = cgap * (double)(g.cs - 1);
-        for (size_t c = g.c0; c < g.c0 + g.cs && c < ncols; c++) aw += at(cols, c).base;
+        double aw = cgap * (double)(g.n0 - 1);
+        for (long c = g.s0; c < g.s0 + g.n0 && c < (long)ncols; c++) aw += at(cols, (size_t)c).base;
         lay_style is;
         double ml = 0, mr = 0;
         int js = AJ_STRETCH, wauto = 1;
@@ -3911,37 +4417,43 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         it.cross = t->box[it.box].mt + lay_border_height(t, it.box) + t->box[it.box].mb;
         its[q] = it;
     }
-    /* the rows: from the heights of the items that span one */
-    vector<double> rmin;
-    resize(&rmin, nrows);
+    /* the rows: from the items' heights (a scroll container's minimum its edges alone) */
+    clear(&gc);
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.rs != 1 || g.r0 >= nrows) continue;
-        if (at(its, q).cross > at(rmin, g.r0)) rmin[g.r0] = at(its, q).cross;
+        lay_gp g = at(gp, q);
+        lay_fi it = at(its, q);
+        lay_gc c;
+        c.first = (uint32_t)g.s1;
+        c.span = (uint32_t)g.n1;
+        c.mn = it.cross;
+        c.mx = it.cross;
+        c.minc = it.cross;
+        if (it.el && LAY_X(it.el).clip == 1 && LAY_X(it.el).minh.unit == LAY_AUTO)
+            c.minc = t->box[it.box].mt + t->box[it.box].bt + t->box[it.box].pt + t->box[it.box].pb + t->box[it.box].bb + t->box[it.box].mb;
+        push_back(gc, c);
     }
     int ac = e.ac;
-    lay_size_tracks(&rows, &rmin, &rmin, defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
-    /* an item that spans rows: what they lack, to the last of them */
-    for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
-        if (g.rs < 2 || g.r0 + g.rs > nrows) continue;
-        double sum = rgap * (double)(g.rs - 1);
-        for (size_t rr = g.r0; rr < g.r0 + g.rs; rr++) sum += at(rows, rr).base;
-        if (at(its, q).cross > sum) rows[g.r0 + g.rs - 1].base = at(rows, g.r0 + g.rs - 1).base + at(its, q).cross - sum;
-    }
+    lay_size_tracks(&rows, &gc, defh, rgap, defh >= 0 && (ac == AJ_NORMAL || ac == AJ_STRETCH));
     double rows_total = nrows ? rgap * (double)(nrows - 1) : 0;
     for (size_t rr = 0; rr < nrows; rr++) rows_total += at(rows, rr).base;
+    double grid_h = rows_total;
+    if (defh < 0) {
+        /* a percentage row of a grid whose height is not definite: sized as auto, then of
+           the height the grid has so (Grid 1, 7.2) */
+        for (size_t rr = 0; rr < nrows; rr++)
+            if (at(rows, rr).pct >= 0) { rows_total += grid_h * at(rows, rr).pct / 100 - at(rows, rr).base; rows[rr].base = grid_h * at(rows, rr).pct / 100; }
+    }
     double rstart = 0, rbetween = 0;
     if (defh >= 0 && ac != AJ_NORMAL && ac != AJ_STRETCH) lay_distribute(ac, defh - rows_total, nrows, &rstart, &rbetween);
     double y = rstart;
     for (size_t rr = 0; rr < nrows; rr++) { rows[rr].pos = y; y += at(rows, rr).base + rgap + rbetween; }
-    /* each item in its area: align-self (stretched as tall as its rows, by default) */
+    /* each item in its area: align-self (stretched as tall as its rows, by default); how it was placed */
     for (size_t q = 0; q < ni; q++) {
-        lay_ga g = at(areas, q);
+        lay_gp g = at(gp, q);
         lay_fi it = at(its, q);
-        if (g.r0 >= nrows || g.c0 >= ncols) continue;
-        double ah = rgap * (double)(g.rs - 1);
-        for (size_t rr = g.r0; rr < g.r0 + g.rs && rr < nrows; rr++) ah += at(rows, rr).base;
+        if (g.s1 >= (long)nrows || g.s0 >= (long)ncols) continue;
+        double ah = rgap * (double)(g.n1 - 1);
+        for (long rr = g.s1; rr < g.s1 + g.n1 && rr < (long)nrows; rr++) ah += at(rows, (size_t)rr).base;
         int as = AJ_STRETCH, hauto = 1;
         if (it.el) {
             lay_style is;
@@ -3952,16 +4464,23 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh) {
         }
         double mt = t->box[it.box].mt, mb = t->box[it.box].mb;
         if (as == AJ_STRETCH && hauto) {
+            /* stretched: as tall as its area, its content overflowing a shorter one */
             double ve = t->box[it.box].bt + t->box[it.box].bb + t->box[it.box].pt + t->box[it.box].pb;
             double hh = ah - mt - mb - ve;
-            if (hh > t->box[it.box].h) t->box[it.box].h = hh;
+            t->box[it.box].h = hh > 0 ? hh : 0;
         }
         double bh = lay_border_height(t, it.box), yoff = mt;
         if (as == AJ_END) yoff = ah - mb - bh;
         else if (as == AJ_CENTER) yoff = mt + (ah - mt - mb - bh) / 2;
-        lay_place(t, it.box, at(cols, g.c0).pos + it.mm0, at(rows, g.r0).pos + yoff);
+        lay_place(t, it.box, at(cols, (size_t)g.s0).pos + it.mm0, at(rows, (size_t)g.s1).pos + yoff);
+        t->box[it.box].grid_col = (int32_t)(g.s0 + 1 - lead0);
+        t->box[it.box].grid_row = (int32_t)(g.s1 + 1 - lead1);
+        t->box[it.box].grid_cols = (uint32_t)g.n0;
+        t->box[it.box].grid_rows = (uint32_t)g.n1;
+        t->box[it.box].grid_by = (layout_grid_by)g.by;
+        if (g.area && it.el) t->box[it.box].grid_area = lay_kept(t, st, LAY_X(it.el).grs);
     }
-    if (defh < 0) t->box[b].h = rows_total > 0 ? rows_total : 0;
+    if (defh < 0) t->box[b].h = grid_h > 0 ? grid_h : 0;
 }
 
 /* ---- absolutely positioned boxes (CSS 2.1 10.3.7, 10.6.4), after the flow ---- */

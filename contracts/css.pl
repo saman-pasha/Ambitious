@@ -40,6 +40,7 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     letter_spacing, word_spacing, text_indent, text_transform, direction, unicode_bidi, writing_mode, hyphens,
     content, counter_reset, counter_increment, quotes,
     color_scheme,                      % its colour field the Canvas colour of the scheme it is used in
+    grid_template_areas,               % the named areas, kept as their strings
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

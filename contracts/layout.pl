@@ -36,6 +36,9 @@ layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fi
 layout_contract(enum(position, [static, relative, absolute, fixed, sticky])).
 %% the side a box floats to
 layout_contract(enum(float_side, [unfloated, left, right])).
+%% how a grid item was placed (Grid 1, 8): it is no grid item; automatically; by its
+%% lines (a number or a name, on either axis); in a named area (grid-area: NAME)
+layout_contract(enum(grid_by, [ungridded, auto, lines, area])).
 %% what a fragment of a line is: a run of text; an atomic inline's box; a list
 %% item's marker; the part of an inline element on the line (its background)
 layout_contract(enum(frag_kind, [text, atomic, marker, inline, generated])).
@@ -75,7 +78,13 @@ layout_contract(record(box, [
     field(bg_res,       xhandle(net, resource)),% the image its first url() names, fetched; none for none
     field(bg_pos,       span(text)), field(bg_size, span(text)), field(bg_repeat, span(text)),
     field(transform,    span(text)), field(origin, span(text)),
-    field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64)   % outline: width, style, colour, offset
+    field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
+    %% a grid item's area: its first row and column lines (the explicit grid's first line
+    %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,
+    %% and the area's name when it was placed in one
+    field(grid_row, i32), field(grid_col, i32), field(grid_rows, u32), field(grid_cols, u32),
+    field(grid_by,      enum(grid_by)),
+    field(grid_area,    span(text))
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -146,6 +155,10 @@ layout_contract(fact(layout_pseudo(handle, field(pseudo)), table(box), field(pse
 layout_contract(fact(layout_positioned(handle, field(position), field(cb), field(dx), field(dy)), table(box), field(position) \== static)).
 layout_contract(fact(layout_stacking(handle, field(z)), table(box), field(z_auto) == false)).
 layout_contract(fact(layout_float(handle, field(float_side)), table(box), field(float_side) \== unfloated)).
+%% a grid item's area: its first row line and column line, the rows and columns it spans, how it was placed
+layout_contract(fact(layout_grid_item(handle, field(grid_row), field(grid_col), field(grid_rows), field(grid_cols), field(grid_by)), table(box),
+    field(grid_by) \== ungridded)).
+layout_contract(fact(layout_grid_area(handle, field(grid_area)), table(box), field(grid_by) == area)).
 layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
 %% a box's background colour, RGBA, where it has one; the viewport's is the canvas's: the
 %% Canvas of the scheme the root is used in (CSS Color Adjust 1)

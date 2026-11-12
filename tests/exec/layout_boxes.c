@@ -5,7 +5,8 @@
    inline-blocks, alignment, line breaking, white space, inline backgrounds,
    tables, list markers; floats and clearance, positioned boxes, flex and grid
    containers, vertical-align, min and max heights, a percentage height, rowspan,
-   hyphenation, bidirectional text, generated content. */
+   hyphenation, bidirectional text, generated content; grid areas and named lines,
+   a column flow, items spanning tracks. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -58,6 +59,9 @@ static const lcase cases[] = {
     { "a word hyphenated", "<p id=a style='width:100px;hyphens:auto' lang=en>incomprehensible</p>" },
     { "right-to-left text", "<p id=a style='direction:rtl;width:200px'>abc \xd7\x90\xd7\x91\xd7\x92 def</p>" },
     { "generated content and counters", "<style>ol{counter-reset:c}li{counter-increment:c}li::before{content:counter(c) \". \"}</style><ol style='list-style:none'><li id=a>x</li><li id=b>y</li></ol>" },
+    { "a grid's named areas and named lines", "<div id=t style='display:grid;grid-template-areas:\"h h\" \"s m\";grid-template-columns:[l] 100px [c] 1fr;width:300px'><div id=a style='grid-area:m'>m</div><div id=b style='grid-area:h'>h</div><div id=e style='grid-column:l/c'>e</div></div>" },
+    { "a grid's column flow, dense", "<div id=t style='display:grid;grid-auto-flow:column dense;grid-template-rows:20px 20px;grid-auto-columns:50px'><div id=a>1</div><div id=b style='grid-row:span 2'>2</div><div id=e>3</div></div>" },
+    { "a grid item that spans two auto columns", "<div id=t style='display:grid;grid-template-columns:auto auto;justify-content:start;width:300px'><div id=a>a</div><div id=b>bb</div><div id=e style='grid-column:span 2'>a longer spanning item</div></div>" },
 };
 
 static uint32_t find_id(const dom_document *d, const char *id) {

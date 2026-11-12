@@ -163,3 +163,27 @@ generated content and counters (ok, invariants: 0 broken)
     line 48,16 744x18 baseline 30: [generated 48+12 '1.'] [text 64+8 'x']
   #b list_item: content 48,34 744x18; margins 0 0 0 0; width fill of 744
     line 48,34 744x18 baseline 48: [generated 48+12 '2.'] [text 64+8 'y']
+a grid's named areas and named lines (ok, invariants: 0 broken)
+  #a block: content 108,26 200x18; margins 0 0 0 0; width grid of 200
+    line 108,26 200x18 baseline 40: [text 108+12.4453 'm']
+  #b block: content 8,8 300x18; margins 0 0 0 0; width grid of 300
+    line 8,8 300x18 baseline 22: [text 8+8 'h']
+  #e block: content 8,26 100x18; margins 0 0 0 0; width grid of 100
+    line 8,26 100x18 baseline 40: [text 8+7.10156 'e']
+  #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
+a grid's column flow, dense (ok, invariants: 0 broken)
+  #a block: content 8,8 50x20; margins 0 0 0 0; width grid of 50
+    line 8,8 50x18 baseline 22: [text 8+8 '1']
+  #b block: content 58,8 50x40; margins 0 0 0 0; width grid of 50
+    line 58,8 50x18 baseline 22: [text 58+8 '2']
+  #e block: content 8,28 50x20; margins 0 0 0 0; width grid of 50
+    line 8,28 50x18 baseline 42: [text 8+8 '3']
+  #t grid: content 8,8 784x40; margins 0 0 0 0; width fill of 784
+a grid item that spans two auto columns (ok, invariants: 0 broken)
+  #a block: content 8,8 68.6445x18; margins 0 0 0 0; width grid of 68.6445
+    line 8,8 68.6445x18 baseline 22: [text 8+7.10156 'a']
+  #b block: content 76.6445,8 77.543x18; margins 0 0 0 0; width grid of 77.543
+    line 76.6445,8 77.543x18 baseline 22: [text 76.6445+16 'bb']
+  #e block: content 8,26 146.188x18; margins 0 0 0 0; width grid of 146.188
+    line 8,26 146.188x18 baseline 40: [text 8+146.188 'a longer spanning item']
+  #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
