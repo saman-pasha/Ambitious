@@ -70,12 +70,12 @@ quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.ibm.
 no_quirks	<!DOCTYPE html SYSTEM "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd/">
 quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
-limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "">
-limited_quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 transitional//en' ''>
+quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "">
+quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 transitional//en' ''>
 quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN">
 limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "http://www.w3.org/TR/html4/loose.dtd">
-limited_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "">
-limited_quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 frameset//en' ''>
+quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN" "">
+quirks	<!DOCTYPE HTML PUBLIC '-//w3c//dtd html 4.01 frameset//en' ''>
 no_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 no_quirks	<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
 limited_quirks	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">

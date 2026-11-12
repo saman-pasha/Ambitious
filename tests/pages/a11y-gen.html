@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>names from generated content</title><style>
+body { counter-reset: sec; }
+h2 { counter-increment: sec; }
+h2::before { content: counter(sec) ". "; }
+h3 { counter-increment: sub; }
+h3::before { content: counter(sec, upper-roman) "." counter(sub) " "; }
+.q::before { content: open-quote; } .q::after { content: close-quote; }
+.nq::before { content: no-open-quote; } .nq::after { content: no-close-quote; }
+.cq::before { content: close-quote "|"; }
+.fr { quotes: "\00AB" "\00BB" "\2039" "\203A"; }
+.one { quotes: "<" ">"; }
+.none { quotes: none; }
+.hide::before { content: open-quote; display: none; }
+.alt::before { content: "\2605" / "star"; }
+.attr::before { content: attr(data-x) " - "; }
+.up::before { content: "abc "; text-transform: uppercase; }
+.cap::after { content: " the end"; text-transform: capitalize; }
+.blk::before { content: "first"; display: block; }
+</style></head>
+<body>
+<h2 id="h-a">Intro</h2>
+<h3 id="h-b">Part</h3>
+<h2 id="h-c">Next</h2>
+<button id="q1"><span class="q">outer <span class="q">inner <span class="q">deepest</span></span> text</span></button>
+<button id="q2"><span class="q">after</span> <span class="q">siblings</span></button>
+<p><span class="q">left open</span><span class="q" id="q-open-a">a</span></p>
+<button id="q3"><span class="q">continues</span></button>
+<button id="q4" class="fr"><span class="q">fr <span class="q">nested</span></span></button>
+<button id="q5" class="one"><span class="q">one <span class="q">pair</span></span></button>
+<button id="q6" class="none"><span class="q">no quotes</span></button>
+<button id="q7"><span class="nq">silent <span class="q">deeper</span></span></button>
+<button id="q8"><span class="cq">closed first</span></button>
+<button id="q9"><span class="hide">hidden open</span><span class="q">visible</span></button>
+<button id="a1" class="alt">rated</button>
+<button id="t1" class="attr" data-x="tag">attr</button>
+<button id="u1" class="up">case</button>
+<button id="u2" class="cap">story</button>
+<button id="b1" class="blk">second</button>
+</body></html>

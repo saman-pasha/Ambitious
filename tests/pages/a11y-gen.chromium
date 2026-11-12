@@ -1,0 +1,17 @@
+heading#h-a ". Intro" level=2
+heading#h-b ". Part" level=3
+heading#h-c ". Next" level=2
+button#q1 "“outer ‘inner ‘deepest’’ text”"
+button#q2 "“after” “siblings”"
+button#q3 "“continues”"
+button#q4 "«fr ‹nested›»"
+button#q5 "<one <pair>>"
+button#q6 "no quotes"
+button#q7 "silent ‘deeper’"
+button#q8 "|closed first"
+button#q9 "hidden open“visible”"
+button#a1 "star rated"
+button#t1 "tag - attr"
+button#u1 "ABC case"
+button#u2 "story The End"
+button#b1 "first second"

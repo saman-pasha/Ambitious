@@ -33,11 +33,11 @@
    flag, a name other than html, the public and system identifiers the standard lists) or
    there is none; limited-quirks mode for XHTML 1.0's transitional and frameset identifiers
    and HTML 4.01's with a system identifier; kept on the document (dom_set_mode). A fragment
-   is parsed in quirks mode when its document is. Not done as Chromium does it: an empty
-   system identifier is one that is there, as the standard has it, where Blink takes it for a
-   missing one (HTML 4.01's transitional and frameset identifiers with it are quirks mode in
-   Chromium, limited-quirks mode here). An iframe srcdoc document (html_set_srcdoc) is never
-   in quirks mode by its DOCTYPE or its lack of one (Phase 12u).
+   is parsed in quirks mode when its document is. An empty system identifier is a missing
+   one, as Blink takes it (the standard has it there: HTML 4.01's transitional and frameset
+   identifiers with it are quirks mode in Chromium, limited-quirks mode by the standard). An
+   iframe srcdoc document (html_set_srcdoc) is never in quirks mode by its DOCTYPE or its
+   lack of one (Phase 12u).
 
    The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
    run): noscript's content is then raw text. Everything else follows the standard's
@@ -1568,7 +1568,7 @@ static int template_switch(CTX, int mode) {
 
 /* 13.2.6.4.1: the doctype that puts the document in quirks mode (1), or in limited-quirks
    mode (2); 0 for no-quirks. The identifiers compare without ASCII case; an empty system
-   identifier is not a missing one */
+   identifier is a missing one, as Blink reads it (SetCompatibilityModeFromDoctype) */
 static int ci_prefix(const char *s, size_t n, const char *w) {
     size_t k = strlen(w);
     if (n < k) return 0;
@@ -1608,6 +1608,8 @@ static int doctype_quirks(const html_parser *p, uint32_t t) {
         "-//WebTechs//DTD Mozilla HTML 2.0//", "-//WebTechs//DTD Mozilla HTML//" };
     uint8_t ids = p->token[t].ids;
     amb_span pu = p->token[t].public_id, sy = p->token[t].system_id;
+    /* a system identifier that says nothing is none */
+    if ((ids & 2) && sy.len == 0) ids = (uint8_t)(ids & ~2);
     const char *pp = bytes_ptr(p, pu);
     if (p->token[t].force_quirks || !(ids & 4) || !tk_name_is(p, t, "html")) return 1;
     if (ids & 1) {

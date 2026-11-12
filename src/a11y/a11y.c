@@ -1403,10 +1403,97 @@ static uint32_t ax_pseudo(ACTX, uint32_t x, int pk) {
         if ((int)st->pstyle[i].pseudo == pk) return st->pstyle[i].first;
     return 0;
 }
+static int ax_tt(ACTX, uint32_t c);
+static void ax_put_tt(int tt, const char *s, size_t n, vector<char> *out);
+/* a text node's text into out, as it is drawn: its element's text-transform applied */
+static void ax_text_node(ACTX, uint32_t x, vector<char> *out) {
+    uint32_t p = d->node[x].parent;
+    int tt = p ? ax_tt(AARGS, ax_cval(AARGS, p, CSS_PROP_TEXT_TRANSFORM)) : 0;
+    ax_put_tt(tt, text_ptr(d, d->node[x].data), d->node[x].data.len, out);
+}
+
+/* ---- quotes: their depth at each pseudo-element, as layout's walk of generated content has it ---- */
+
+/* the quotes' depth as each element's ::before (2x) and ::after (2x + 1) begins, made at a build's first quote;
+   empty until then (a document whose generated content has no quotes walks nothing for them) */
+static vector<int32_t> ax_qd;
+static int ax_qd_made;
+/* the depth after x's pseudo-element pk's quotes, from *depth: an open quote (drawn or not) one deeper, a close one
+   one shallower, never below 0 */
+static void ax_quote_steps(ACTX, uint32_t x, int pk, int *depth) {
+    uint32_t c0 = ax_pseudo(AARGS, x, pk);
+    uint32_t cd = c0 + CSS_PROP_DISPLAY, cc = c0 + CSS_PROP_CONTENT;
+    if (!c0 || cd >= st->cval_len || cc >= st->cval_len || st->cval[cc].unit != CSS_UNIT_TEXT) return;
+    if (st->cval[cd].word && st->cval[cd].word == cw[W_NONE]) return;
+    vector<char> src;
+    amb_span sp = st->cval[cc].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a, n;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) {
+        const char *q = data(src) + a;
+        if (n == 1 && q[0] == '/') break;
+        if (ax_word_is(q, n, "open-quote") || ax_word_is(q, n, "no-open-quote")) (*depth)++;
+        else if ((ax_word_is(q, n, "close-quote") || ax_word_is(q, n, "no-close-quote")) && *depth > 0) (*depth)--;
+    }
+}
+/* the walk, in tree order (layout's lay_gen_walk): x's ::before, its children drawn (display none's subtrees left
+   out), its ::after */
+static void ax_quote_walk(ACTX, uint32_t x, int *depth, int level) {
+    if (2 * (size_t)x + 1 < len(ax_qd)) ax_qd[2 * (size_t)x] = *depth;
+    ax_quote_steps(AARGS, x, CSS_PSEUDO_BEFORE, depth);
+    if (level < 1024)
+        for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling)
+            if (d->node[c].kind == DOM_NODE_KIND_ELEMENT && !ax_display_none(AARGS, c)) ax_quote_walk(AARGS, c, depth, level + 1);
+    if (2 * (size_t)x + 1 < len(ax_qd)) ax_qd[2 * (size_t)x + 1] = *depth;
+    ax_quote_steps(AARGS, x, CSS_PSEUDO_AFTER, depth);
+}
+/* the depth x's pseudo-element pk's content begins at */
+static int ax_quote_depth(ACTX, uint32_t x, int pk) {
+    if (!ax_qd_made) {
+        ax_qd_made = 1;
+        clear(ax_qd);
+        resize(&ax_qd, 2 * (size_t)d->node_len, 0);
+        int depth = 0;
+        for (uint32_t c = d->node_len > 1 ? d->node[1].first_child : 0; c; c = d->node[c].next_sibling)
+            if (d->node[c].kind == DOM_NODE_KIND_ELEMENT && !ax_display_none(AARGS, c)) ax_quote_walk(AARGS, c, &depth, 0);
+    }
+    size_t k = 2 * (size_t)x + (pk == CSS_PSEUDO_AFTER ? 1 : 0);
+    return k < len(ax_qd) ? at(ax_qd, k) : 0;
+}
+/* the quote of the quotes property's value qc at depth (an open one, or a close one) into out, as layout's
+   lay_quote picks it: auto's English's (double quotes, then single ones), none's none, else the pair of the depth
+   (the last pair past them) */
+static void ax_quote(ACTX, uint32_t qc, int depth, int close, vector<char> *out) {
+    if (qc >= st->cval_len) return;
+    if (st->cval[qc].unit != CSS_UNIT_TEXT) {
+        if (names_is(st, st->cval[qc].word, "none", 4)) return;
+        if (depth == 0 && close) append_range(out, "\xe2\x80\x9d", 3);
+        else if (depth == 0) append_range(out, "\xe2\x80\x9c", 3);
+        else if (close) append_range(out, "\xe2\x80\x99", 3);
+        else append_range(out, "\xe2\x80\x98", 3);
+        return;
+    }
+    vector<char> src;
+    amb_span sp = st->cval[qc].text;
+    append_range(src, text_ptr(st, sp), sp.len);
+    size_t i = 0, a, n, k = 0, pa = 0, pn = 0, total = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) total++;
+    size_t pairs = total / 2;
+    if (pairs == 0) return;
+    size_t want = 2 * ((size_t)depth < pairs ? (size_t)depth : pairs - 1) + (close ? 1 : 0);
+    i = 0;
+    while (css_next_part(data(src), len(src), &i, &a, &n)) {
+        if (k == want) { pa = a; pn = n; }
+        k++;
+    }
+    if (pn) ax_unquote(data(src) + pa, pn, out);
+}
+
 /* the text x's ::before or ::after (pk) adds to a name it is in (accname 1.2, 2F; CSS Content 3): its content's
-   alternative text, after a solidus, when it has one; else its strings, attr()s and quotes (an image or a counter adds
-   nothing). An alternative text, or a pseudo-element drawn as more than inline content, is set off by spaces, as
-   Chromium sets it; one with display none, or drawn as nothing outside a walk that counts all, adds nothing */
+   alternative text, after a solidus, when it has one; else its strings, attr()s and quotes, each quote its depth's
+   (an image or a counter adds nothing, as Chromium names it), in its text-transform. An alternative text, or a
+   pseudo-element drawn as more than inline content, is set off by spaces, as Chromium sets it; one with display
+   none, or drawn as nothing outside a walk that counts all, adds nothing */
 static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) {
     uint32_t c0 = ax_pseudo(AARGS, x, pk);
     uint32_t cd = c0 + CSS_PROP_DISPLAY, cv = c0 + CSS_PROP_VISIBILITY, cc = c0 + CSS_PROP_CONTENT;
@@ -1424,15 +1511,25 @@ static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) 
         if (n == 1 && at(src, a) == '/') { alt = 1; from = i; break; }
     int spaced = alt || (dw && dw != cw[W_INLINE] && dw != cw[W_CONTENTS]);
     if (spaced) ax_space(out);
+    int tt = ax_tt(AARGS, c0 + CSS_PROP_TEXT_TRANSFORM), depth = -1;
     i = from;
     while (css_next_part(data(src), len(src), &i, &a, &n)) {
         const char *q = data(src) + a;
         if (!alt && n == 1 && q[0] == '/') break;
         clear(piece);
+        int open = !alt && (ax_word_is(q, n, "open-quote") || ax_word_is(q, n, "no-open-quote"));
+        int shut = !alt && (ax_word_is(q, n, "close-quote") || ax_word_is(q, n, "no-close-quote"));
+        if ((open || shut) && depth < 0) depth = ax_quote_depth(AARGS, x, pk);
         if (q[0] == '"' || q[0] == '\'') ax_unquote(q, n, &piece);
-        else if (ax_word_is(q, n, "open-quote")) append_range(piece, "\xe2\x80\x9c", 3);
-        else if (ax_word_is(q, n, "close-quote")) append_range(piece, "\xe2\x80\x9d", 3);
-        else if (n > 6 && ax_word_is(q, 5, "attr(") && q[n - 1] == ')') {
+        else if (open) {
+            if (q[0] == 'o' || q[0] == 'O') ax_quote(AARGS, c0 + CSS_PROP_QUOTES, depth, 0, &piece);
+            depth++;
+        } else if (shut) {
+            if (depth > 0) {
+                depth--;
+                if (q[0] == 'c' || q[0] == 'C') ax_quote(AARGS, c0 + CSS_PROP_QUOTES, depth, 1, &piece);
+            }
+        } else if (n > 6 && ax_word_is(q, 5, "attr(") && q[n - 1] == ')') {
             size_t b = 5, e = 5;
             while (b < n - 1 && ax_white(q[b])) b++;
             e = b;
@@ -1441,7 +1538,7 @@ static void ax_gen_text(ACTX, uint32_t x, int pk, int flags, vector<char> *out) 
             for (uint32_t r = nm ? d->node[x].first_attr : 0; r; r = d->attr[r].next)
                 if (d->attr[r].name == nm) { amb_span v = d->attr[r].value; append_range(piece, text_ptr(d, v), v.len); break; }
         }
-        ax_put(out, data(piece), len(piece));
+        ax_put_tt(tt, data(piece), len(piece), out);
     }
     if (spaced) ax_space(out);
 }
@@ -1557,17 +1654,19 @@ static uint32_t ax_math_italic(uint32_t c) {
     default: return c;
     }
 }
-/* a text node's text into out, as it is drawn: its element's text-transform applied as layout applies it, to ASCII's
-   and Latin-1's letters (capitalize: a word's first, a word starting after white space, or after what out ends with);
-   math-auto's italic to a text of one character, as Chromium has it */
-static void ax_text_node(ACTX, uint32_t x, vector<char> *out) {
-    uint32_t p = d->node[x].parent;
-    uint32_t c = p ? ax_cval(AARGS, p, CSS_PROP_TEXT_TRANSFORM) : 0;
-    uint32_t w = c ? st->cval[c].word : 0;
-    int tt = !w ? 0 : w == cw[W_UPPERCASE] ? 1 : w == cw[W_LOWERCASE] ? 2 : w == cw[W_CAPITALIZE] ? 3 : w == cw[W_MATH_AUTO] ? 4 : 0;
-    if (!tt) { ax_put(out, text_ptr(d, d->node[x].data), d->node[x].data.len); return; }
+/* the text-transform of the computed value c (a record's index, 0 for none): 1 uppercase, 2 lowercase, 3 capitalize,
+   4 math-auto, 0 none */
+static int ax_tt(ACTX, uint32_t c) {
+    uint32_t w = c && c < st->cval_len && st->cval[c].prop == CSS_PROP_TEXT_TRANSFORM ? st->cval[c].word : 0;
+    return !w ? 0 : w == cw[W_UPPERCASE] ? 1 : w == cw[W_LOWERCASE] ? 2 : w == cw[W_CAPITALIZE] ? 3 : w == cw[W_MATH_AUTO] ? 4 : 0;
+}
+/* s[0, n) into out as text-transform tt draws it, as layout applies it: ASCII's and Latin-1's letters cased
+   (capitalize: a word's first, a word starting after white space, or after what out ends with); math-auto's italic
+   to a text of one character, as Chromium has it */
+static void ax_put_tt(int tt, const char *s, size_t n, vector<char> *out) {
+    if (!tt) { ax_put(out, s, n); return; }
     vector<char> tx;
-    append_range(tx, text_ptr(d, d->node[x].data), d->node[x].data.len);
+    append_range(tx, s, n);
     if (tt == 4) {
         size_t b = 0, e = len(tx);
         unsigned char c0 = b < e ? (unsigned char)at(tx, b) : 0;
@@ -2644,6 +2743,8 @@ a11y_status a11y_build(a11y_tree *t, dom_document *d, css_style *st) {
     cw[W_LOWERCASE] = names_find(st, "lowercase", 9);
     cw[W_CAPITALIZE] = names_find(st, "capitalize", 10);
     cw[W_MATH_AUTO] = names_find(st, "math-auto", 9);
+    ax_qd_made = 0;
+    clear(ax_qd);
     vector<uint32_t> ids, labels;
     vector<uint8_t> sel;
     vector<ax_radio> radios;

@@ -2,10 +2,10 @@
    DOCTYPE (HTML 13.2.6.4.1): each line of tests/exec/quirks_mode.txt (a DOCTYPE, what comes
    before one, or nothing) parsed as a document's start, and the mode kept on its document
    printed with the line. quirks_mode.expect is Chromium's mode for each line
-   (tools/bench/doctypes.js), but for the four lines whose system identifier is empty: the
-   HTML standard takes an empty system identifier for one that is there, so HTML 4.01's
-   transitional and frameset identifiers put the document in limited-quirks mode, where
-   Blink takes it for a missing one and gives quirks mode. */
+   (tools/bench/doctypes.js), the four lines whose system identifier is empty among them:
+   Blink takes an empty system identifier for a missing one, so HTML 4.01's transitional and
+   frameset identifiers with it give quirks mode (the HTML standard's limited-quirks mode,
+   which takes it for one that is there). */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
