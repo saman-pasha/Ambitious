@@ -215,9 +215,19 @@ static const char css_ua_sheet[] =
     "select[multiple], select[size] { background-color: Field }\n"
     "input[type=checkbox i] { margin: 3px 3px 3px 4px; padding: 0; border: 0; box-sizing: border-box; background-color: transparent }\n"
     "input[type=radio i] { margin: 3px 3px 0 5px; padding: 0; border: 0; box-sizing: border-box; background-color: transparent }\n"
-    "input[type=range i] { margin: 2px; padding: 0; border: 0; color: light-dark(#9d968e, #fff); background-color: transparent }\n"
+    "input[type=range i] { margin: 2px; padding: 0; border: 0; color: #9d968e }\n"
     "input[type=color i] { width: 50px; height: 27px; padding: 1px 2px; border: 1px solid ButtonBorder; box-sizing: border-box; background-color: ButtonFace }\n"
     "input[type=file i], input[type=image i] { padding: 0; border: 0; background-color: transparent }\n"
+    /* a disabled control's colours, as Chromium's sheet gives them (measured in both schemes) */
+    "input:disabled, textarea:disabled { color: light-dark(#545454, #aaaaaa); background-color: light-dark(rgba(239, 239, 239, 0.3), "
+    "rgba(59, 59, 59, 0.3)); border-color: rgba(118, 118, 118, 0.3) }\n"
+    "select:disabled { color: light-dark(#808080, #aaaaaa); border-color: rgba(118, 118, 118, 0.3) }\n"
+    "button:disabled, input[type=button i]:disabled, input[type=submit i]:disabled, input[type=reset i]:disabled, "
+    "input[type=color i]:disabled { color: light-dark(rgba(16, 16, 16, 0.3), rgba(255, 255, 255, 0.3)); background-color: "
+    "light-dark(rgba(239, 239, 239, 0.3), rgba(19, 1, 1, 0.3)); border-color: light-dark(rgba(118, 118, 118, 0.3), rgba(195, 195, 195, 0.3)) }\n"
+    "input[type=checkbox i]:disabled, input[type=radio i]:disabled { background-color: transparent; border-color: currentcolor }\n"
+    "input[type=range i]:disabled { color: #c5c5c5; background-color: transparent }\n"
+    "input[type=file i]:disabled, input[type=image i]:disabled { background-color: transparent }\n"
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
     "input::placeholder, textarea::placeholder { color: #757575 }\n"
@@ -4184,6 +4194,29 @@ static int css_form_control(const dom_document *d, uint32_t x) {
            css_is_named(d, x, "textarea") || css_is_named(d, x, "option") || css_is_named(d, x, "optgroup") || css_is_named(d, x, "fieldset");
 }
 
+/* x is disabled (HTML 4.10.18.5): a button, input, select, textarea or fieldset with the disabled attribute, or inside a
+   fieldset with it and not in that fieldset's first legend; an optgroup with it; an option with it, or in an optgroup
+   with it */
+static int css_disabled(const dom_document *d, uint32_t x) {
+    if (!css_form_control(d, x)) return 0;
+    if (css_attr_of(d, x, "disabled", 8)) return 1;
+    if (css_is_named(d, x, "option")) {
+        uint32_t p = d->node[x].parent;
+        return p && css_is_named(d, p, "optgroup") && css_attr_of(d, p, "disabled", 8);
+    }
+    if (css_is_named(d, x, "optgroup")) return 0;
+    uint32_t child = x;
+    for (uint32_t p = d->node[x].parent; p && p != 1; child = p, p = d->node[p].parent) {
+        if (!css_is_named(d, p, "fieldset") || !css_attr_of(d, p, "disabled", 8)) continue;
+        uint32_t legend = 0;
+        for (uint32_t k = d->node[p].first_child; k && !legend; k = d->node[k].next_sibling)
+            if (d->node[k].kind == DOM_NODE_KIND_ELEMENT && css_is_named(d, k, "legend")) legend = k;
+        if (legend && child == legend) continue;
+        return 1;
+    }
+    return 0;
+}
+
 /* a pseudo-class without arguments holds of x */
 /* y is x or one of x's descendants */
 static int css_within(const dom_document *d, uint32_t x, uint32_t y) {
@@ -4208,8 +4241,8 @@ static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, c
         return (css_is_named(d, x, "a") || css_is_named(d, x, "area") || css_is_svg_named(d, x, "a")) && css_attr_of(d, x, "href", 4);
     if (css_eq_ci(ps, pn, "checked"))
         return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
-    if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
-    if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_attr_of(d, x, "disabled", 8);
+    if (css_eq_ci(ps, pn, "disabled")) return css_disabled(d, x);
+    if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_disabled(d, x);
     if (css_eq_ci(ps, pn, "scope")) return ms->scope ? x == ms->scope : d->node[x].parent == 1;
     /* the state the page is in: :hover and :active hold of the element and its ancestors,
        :focus-within of the focused one and its; :visited of none (no history is read). A

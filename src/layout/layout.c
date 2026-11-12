@@ -2272,6 +2272,22 @@ static int lay_hex(char c) {
    input) without a styled background or border; a check box, radio button, range or colour well; none when its
    appearance is none. A check box's or radio button's checked attribute; a range's value along its track, from its
    min, max and value (0, 100, their middle by default); a colour well's #rrggbb value (black by default) */
+/* a control that is disabled (HTML 4.10.18.5): its disabled attribute, or a disabled fieldset's it is in (not in that
+   fieldset's first legend) */
+static int lay_disabled(const dom_document *d, uint32_t el) {
+    if (lay_attr(d, el, "disabled")) return 1;
+    uint32_t child = el;
+    for (uint32_t p = d->node[el].parent; p && p != 1; child = p, p = d->node[p].parent) {
+        if (!lay_is_named(d, p, "fieldset") || !lay_attr(d, p, "disabled")) continue;
+        uint32_t legend = 0;
+        for (uint32_t k = d->node[p].first_child; k && !legend; k = d->node[k].next_sibling)
+            if (d->node[k].kind == DOM_NODE_KIND_ELEMENT && lay_is_named(d, k, "legend")) legend = k;
+        if (legend && child == legend) continue;
+        return 1;
+    }
+    return 0;
+}
+
 static void lay_theme(LCTX, uint32_t b, uint32_t el) {
     lay_ext e = LAY_X(el);
     layout_theme th = LAYOUT_THEME_CSS;
@@ -2294,6 +2310,7 @@ static void lay_theme(LCTX, uint32_t b, uint32_t el) {
     if (e.app_none) th = LAYOUT_THEME_CSS;
     t->box[b].theme = th;
     t->box[b].checked = lay_attr(d, el, "checked") != 0;
+    t->box[b].tstate = (uint8_t)(th != LAYOUT_THEME_CSS && lay_disabled(d, el));
     if (th == LAYOUT_THEME_RANGE) {
         double lo = 0, hi = 100, v = -1;
         uint32_t a;
