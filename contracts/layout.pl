@@ -106,6 +106,9 @@ layout_contract(record(box, [
     %% fallback, a broken image's icon before the text; without, its content box outlined in light grey as
     %% Chromium's ImagePainter outlines it, when more than 2px each way
     field(unsourced, bool),
+    %% object-fit (0 fill, 1 contain, 2 cover, 3 none, 4 scale-down) and object-position's computed text (none:
+    %% its initial 50% 50%): where a replaced element's image is drawn in its content box
+    field(ofit, u8), field(opos, span(text)),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,

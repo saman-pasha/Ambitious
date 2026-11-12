@@ -1,0 +1,24 @@
+# boxes of tests/pages/objfit.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+f1 img 10 10 60 60
+f2 img 90 10 60 60
+f3 img 170 10 60 60
+f4 img 250 10 60 60
+f5 img 330 10 60 60
+f6 img 410 10 120 60
+f7 img 550 10 60 60
+f8 img 630 10 60 60
+f9 img 10 100 60 60
+f10 img 90 100 60 60
+f11 img 170 100 74 74
+f12 img 260 100 50 50
+f13 img 330 100 70 30
+f14 img 420 100 50 20
+f15 img 490 100 60 60
+f16 img 570 100 60 60
+f17 img 650 100 40 70
+f18 img 10 190 100 100
+f19 img 130 190 60 60
+f20 img 210 190 60 60
+f21 img 290 190 60 60
+f22 img 370 190 60 60
+f23 img 450 190 40 40

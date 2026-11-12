@@ -37,14 +37,14 @@ N = n(1,20,0), T = '0'
 ambitious: the reasoner ended, no answer in 3 s: the engine ended it, asked to query
 > reasoner
 reasoner: not running; 2 start(s), 6 requests: 2 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 0 facts held
-reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1481 added
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1483 added
 reasoner: the last one ended: no answer in 3 s: the engine ended it
 > advise
 amb_diag(unused_rule, ru(1,195,0), 'the rule .done matches no element (at rest: no hover, focus or other state)').
 amb_diag(click_not_focusable, n(1,26,0), 'the <div> \'Reset\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
 > reasoner
-reasoner: running; 3 start(s), 8 requests: 3 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1481 facts held
-reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1481 added
+reasoner: running; 3 start(s), 8 requests: 3 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1483 facts held
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1483 added
 reasoner: the last one ended: no answer in 3 s: the engine ended it
 > quit
 -- advice with the sandbox and without it:

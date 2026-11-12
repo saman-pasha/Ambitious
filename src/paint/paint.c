@@ -1542,7 +1542,8 @@ static void pt_round_clip(amb_canvas *c, int kx0, int ky0, int kx1, int ky1, con
 
 /* the image the loader fetched for an element, decoded into rgba: 1 when it was; -1 when
    its load failed; 0 when there is none or its bytes are no image this decodes */
-static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h, double *nw, double *nh) {
+    *nw = *nh = 0;
     if (!nt) return 0;
     for (uint32_t r = 1; r < nt->resource_len; r++) {
         if (!nt->resource[r].live || nt->resource[r].elem.index != el || nt->resource[r].kind != NET_KIND_IMAGE) continue;
@@ -1550,9 +1551,61 @@ static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba,
         amb_span b = nt->resource[r].body;
         vector<uint8_t> bytes;
         append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
-        return amb_image_decode(data(bytes), len(bytes), rgba, w, h);
+        int got = amb_image_decode(data(bytes), len(bytes), rgba, w, h);
+        /* its natural size in CSS px: the loader's (a srcset density's share), else its pixels */
+        *nw = nt->resource[r].width > 0 ? nt->resource[r].width : *w;
+        *nh = nt->resource[r].height > 0 ? nt->resource[r].height : *h;
+        return got;
     }
     return 0;
+}
+
+/* one axis of object-position's text (a percentage, px, or a calc() of both) as px: its percentage of room (the
+   box less the image, below 0 when the image is the larger), its px at the zoom z */
+static double pt_opos_axis(const char *s, size_t n, double room, double z, double dflt) {
+    double v0, v100;
+    if (!css_length_eval(s, n, 0, &v0) || !css_length_eval(s, n, 100, &v100)) return dflt;
+    return v0 * z + (v100 - v0) * room / 100;
+}
+/* a replaced element's image in its content box, as object-fit and object-position place it (CSS Images 3, 5.5):
+   its natural size nw x nh (CSS px) filling the box (fill), fitted in it (contain), covering it (cover), kept (none),
+   or the smaller of none and contain (scale-down); at object-position. Snapped to whole pixels and clipped to the
+   box, as Blink's ImagePainter draws it (a destination larger than the box drawn from the part of the source the
+   box shows) */
+static void pt_fit_image(amb_canvas *c, const layout_tree *t, uint32_t b, const vector<uint8_t> *rgba, uint32_t iw, uint32_t ih, double nw,
+                         double nh) {
+    double x = t->box[b].x, y = t->box[b].y, w = t->box[b].w, h = t->box[b].h;
+    int fit = t->box[b].ofit;
+    if (fit == 0 || nw <= 0 || nh <= 0) { pt_image(c, rgba, iw, ih, x, y, w, h); return; }
+    double z = c->zoom > 0 ? c->zoom : 1, dw = nw * z, dh = nh * z;
+    if (fit == 1 || fit == 2 || (fit == 4 && (dw > w || dh > h))) {
+        double s = fit == 2 ? fmax(w / dw, h / dh) : fmin(w / dw, h / dh);
+        dw *= s;
+        dh *= s;
+    }
+    double ox = (w - dw) / 2, oy = (h - dh) / 2;
+    if (t->box[b].opos.len) {
+        vector<char> op;
+        append_range(op, text_ptr(t, t->box[b].opos), t->box[b].opos.len);
+        size_t st[2], ln[2], i = 0, k = 0, a, n;
+        while (k < 2 && css_next_part(data(op), len(op), &i, &a, &n)) { st[k] = a; ln[k] = n; k++; }
+        if (k == 2) {
+            ox = pt_opos_axis(data(op) + st[0], ln[0], w - dw, z, ox);
+            oy = pt_opos_axis(data(op) + st[1], ln[1], h - dh, z, oy);
+        }
+    }
+    double dx0 = floor(x + ox + 0.5), dy0 = floor(y + oy + 0.5), dx1 = floor(x + ox + dw + 0.5), dy1 = floor(y + oy + dh + 0.5);
+    double cx0 = c->cx0, cy0 = c->cy0, cx1 = c->cx1, cy1 = c->cy1;
+    double bx0 = floor(x + 0.5), by0 = floor(y + 0.5), bx1 = floor(x + w + 0.5), by1 = floor(y + h + 0.5);
+    if (c->cx0 < bx0) c->cx0 = bx0;
+    if (c->cy0 < by0) c->cy0 = by0;
+    if (c->cx1 > bx1) c->cx1 = bx1;
+    if (c->cy1 > by1) c->cy1 = by1;
+    pt_image(c, rgba, iw, ih, dx0, dy0, dx1 - dx0, dy1 - dy0);
+    c->cx0 = cx0;
+    c->cy0 = cy0;
+    c->cx1 = cx1;
+    c->cy1 = cy1;
 }
 
 /* an image a box's background names (resource r), decoded once a paint (any format the
@@ -1927,8 +1980,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     } else if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;
-        int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
-        if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        double inw, inh;
+        int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih, &inw, &inh);
+        if (got > 0) pt_fit_image(c, t, b, &rgba, iw, ih, inw, inh);
         else if ((got < 0 || t->box[b].unsourced) && t->box[b].first_line)
             pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));   /* its icon before its alt text */
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);

@@ -939,6 +939,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "text-anchor", 1, G_KW, 0, "start middle end", "start" },
     { "appearance", 0, G_KW, 0, "none auto menulist-button textfield button checkbox radio listbox menulist meter progress-bar "
       "push-button searchfield slider-horizontal square-button textarea", "none" },
+    { "object-fit", 0, G_KW, 0, "fill contain cover none scale-down", "fill" },
+    { "object-position", 0, G_TEXT, 0, 0, "50% 50%" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1613,10 +1615,99 @@ static int css_is_dashes(const char *s, size_t n) {
     return parts > 0;
 }
 
+/* one part of a <position> (CSS Values 4, 9.1): a keyword (1 left, 2 center, 3 right, 4 top, 5 bottom) or a
+   <length-percentage> (0, its sum in l); -1 when it is neither */
+static int css_pos_part(const char *s, size_t n, const css_cenv *e, css_lin *l) {
+    memset(l, 0, sizeof *l);
+    if (css_eq_ci(s, n, "left")) return 1;
+    if (css_eq_ci(s, n, "center")) return 2;
+    if (css_eq_ci(s, n, "right")) return 3;
+    if (css_eq_ci(s, n, "top")) return 4;
+    if (css_eq_ci(s, n, "bottom")) return 5;
+    size_t i = 0;
+    if (!css_calc_value(s, n, &i, e, 0, l) || css_skip_ws(s, n, i) != n || l->nonlin || l->open) return -1;
+    if (l->kind == CSS_CK_NUM) {
+        if (l->num != 0) return -1;
+        l->kind = CSS_CK_LEN;
+        l->num = 0;
+    }
+    return 0;
+}
+/* an axis of a position: a keyword's percentage, or a <length-percentage> measured from the far edge when from_end
+   (right, bottom: 100% less it) */
+static void css_pos_axis(int kw, const css_lin *l, int from_end, css_lin *out) {
+    memset(out, 0, sizeof *out);
+    if (kw) {
+        out->pct = kw == 1 || kw == 4 ? 0 : kw == 2 ? 50 : 100;
+        out->kind = CSS_CK_PCT;
+        return;
+    }
+    *out = *l;
+    if (from_end) {
+        out->pct = 100 - l->pct;
+        out->px = -l->px;
+        out->kind |= CSS_CK_PCT;
+    }
+}
+/* a <position> of one, two or four parts (object-position's), each axis made a sum of px and a percentage: 1, or 0
+   when it is none (three parts, two keywords of one axis, an offset with no side) */
+static int css_position_axes(const char *s, size_t n, const css_cenv *e, css_lin *x, css_lin *y) {
+    size_t st[5], ln[5], i = 0, k = 0, a, b;
+    if (memchr(s, ',', n)) return 0;
+    while (k < 5 && css_next_part(s, n, &i, &a, &b)) { st[k] = a; ln[k] = b; k++; }
+    if (k == 0 || k == 3 || k > 4) return 0;
+    css_lin l[4];
+    int kw[4];
+    for (size_t j = 0; j < k; j++)
+        if ((kw[j] = css_pos_part(s + st[j], ln[j], e, &l[j])) < 0) return 0;
+    if (k == 1) {
+        if (kw[0] == 4 || kw[0] == 5) { css_pos_axis(2, &l[0], 0, x); css_pos_axis(kw[0], &l[0], 0, y); }
+        else { css_pos_axis(kw[0], &l[0], 0, x); css_pos_axis(2, &l[0], 0, y); }
+        return 1;
+    }
+    if (k == 2) {
+        int h = kw[0], v = kw[1];
+        if (h == 4 || h == 5 || v == 1 || v == 3) {
+            /* two keywords, the vertical first or the horizontal second: swapped */
+            if (!((h == 4 || h == 5 || h == 2) && (v == 1 || v == 3 || v == 2))) return 0;
+            css_pos_axis(v, &l[1], 0, x);
+            css_pos_axis(h, &l[0], 0, y);
+            return 1;
+        }
+        if (!(h <= 3) || !(v == 0 || v == 2 || v == 4 || v == 5)) return 0;
+        css_pos_axis(h, &l[0], 0, x);
+        css_pos_axis(v, &l[1], 0, y);
+        return 1;
+    }
+    /* four: a side and its offset for each axis, in either order */
+    if (kw[1] != 0 || kw[3] != 0 || kw[0] == 0 || kw[2] == 0 || kw[0] == 2 || kw[2] == 2) return 0;
+    int hi = kw[0] == 1 || kw[0] == 3 ? 0 : 2, vi = 2 - hi;
+    if (!(kw[hi] == 1 || kw[hi] == 3) || !(kw[vi] == 4 || kw[vi] == 5)) return 0;
+    css_pos_axis(0, &l[hi + 1], kw[hi] == 3, x);
+    css_pos_axis(0, &l[vi + 1], kw[vi] == 5, y);
+    return 1;
+}
+/* an axis of a position as Chromium serializes its computed value: a percentage, px, or a calc() of both, the
+   percentage first */
+static void css_pos_text(const css_lin *l, vector<char> *out) {
+    char buf[96];
+    double px = l->px == 0 ? 0 : l->px;
+    int pct = (l->kind & CSS_CK_PCT) != 0, n;
+    if (pct && px != 0) n = snprintf(buf, sizeof buf, "calc(%g%% %c %gpx)", l->pct, px < 0 ? '-' : '+', px < 0 ? -px : px);
+    else if (pct) n = snprintf(buf, sizeof buf, "%g%%", l->pct == 0 ? 0 : l->pct);
+    else n = snprintf(buf, sizeof buf, "%gpx", px);
+    append_range(*out, buf, (size_t)n);
+}
+
 static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
     switch (p) {
+    case CSS_PROP_OBJECT_POSITION: {
+        css_cenv e = { 16, 16, -1 };
+        css_lin x, y;
+        return css_position_axes(s, n, &e, &x, &y);
+    }
     case CSS_PROP_FILL: case CSS_PROP_STROKE: return css_is_paint(s, n);
     case CSS_PROP_STROKE_DASHARRAY: return css_is_dashes(s, n);
     case CSS_PROP_CLIP_PATH: {
@@ -4457,6 +4548,21 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         /* as specified; its colour the Canvas of the scheme it is used in */
         int dark = v->unit == CSS_UNIT_TEXT ? css_scheme_of(text_ptr(s, v->tx), v->tx.len, env->page_dark) : env->page_dark;
         v->color = dark ? CSS_CANVAS_DARK : CSS_CANVAS_LIGHT;
+        return;
+    }
+    if (p == CSS_PROP_OBJECT_POSITION && v->unit == CSS_UNIT_TEXT) {
+        /* each axis as Chromium computes it: a keyword its percentage, a length px, an offset from the right or the
+           bottom 100% less it */
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        css_cenv e = { fs, env->rem, -1 };
+        css_lin x, y;
+        if (css_position_axes(data(src), len(src), &e, &x, &y)) {
+            css_pos_text(&x, &out);
+            push_back(out, ' ');
+            css_pos_text(&y, &out);
+            v->tx = text_add(s, data(out), len(out));
+        }
         return;
     }
     if (g == G_FAMILY) {

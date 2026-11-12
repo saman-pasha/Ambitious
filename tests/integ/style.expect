@@ -23,7 +23,7 @@
           <td> display: table-cell color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 1px
             <font> display: inline (initial) color: rgb(128, 0, 0) background: rgba(0, 0, 0, 0) (initial) font-size: 24px weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
     <div> display: block color: rgb(34, 34, 34) (inherited) background: rgba(0, 0, 0, 0) (initial) font-size: 15px (inherited) weight: 400 (inherited) margin-top: 0px (initial) padding-left: 0px (initial)
-213 rules, 764 declarations, 61 matches, 3775 computed values (25 styles)
+213 rules, 764 declarations, 61 matches, 3825 computed values (25 styles)
 -- why each paragraph has its colour:
 N = n(1,18,0), X = declared('rgb(128, 0, 128)',written(purple),by('#intro'),in(important(author)))
 N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('p.lead'),in(author))

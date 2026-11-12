@@ -270,6 +270,8 @@ typedef struct lay_ext {
     /* a form control's theme: appearance none; an author's background (colour or image), border, or box shadow (Blink's
        LayoutTheme::IsControlStyled leaves a styled field, button or select to CSS) */
     uint8_t app_none, styled_bg, styled_border, styled_shadow;
+    uint8_t ofit;                       /* object-fit: 0 fill, 1 contain, 2 cover, 3 none, 4 scale-down */
+    uint32_t opos;                      /* object-position's cval; 0 at its initial value */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -568,6 +570,10 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
         if (lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_WIDTH + k) || lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_STYLE + k) ||
             lay_author_won(st, c0 + CSS_PROP_BORDER_TOP_COLOR + k)) e->styled_border = 1;
     e->styled_shadow = (uint8_t)lay_author_won(st, c0 + CSS_PROP_BOX_SHADOW);
+    lay_word_of(st, c0 + CSS_PROP_OBJECT_FIT, w);
+    e->ofit = (uint8_t)(lay_w(w, "contain") ? 1 : lay_w(w, "cover") ? 2 : lay_w(w, "none") ? 3 : lay_w(w, "scale-down") ? 4 : 0);
+    e->opos = st->cval[c0 + CSS_PROP_OBJECT_POSITION].how == CSS_HOW_INITIAL ? 0 : c0 + CSS_PROP_OBJECT_POSITION;
+    if (e->ofit || e->opos) e->paints = 1;
     lay_word_of(st, c0 + CSS_PROP_FLEX_DIRECTION, w);
     e->frow = !(lay_w(w, "column") || lay_w(w, "column-reverse"));
     e->frev = lay_w(w, "row-reverse") || lay_w(w, "column-reverse");
@@ -4610,6 +4616,8 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].shadows = lay_kept(t, st, e.shadows);
     t->box[b].bg_image = lay_kept(t, st, e.bgimg);
     t->box[b].bg_pos = lay_kept(t, st, e.bgpos);
+    t->box[b].ofit = e.ofit;
+    t->box[b].opos = lay_kept(t, st, e.opos);
     t->box[b].bg_size = lay_kept(t, st, e.bgsize);
     t->box[b].bg_repeat = lay_kept(t, st, e.bgrepeat);
     t->box[b].bg_clip = lay_kept(t, st, e.bgclip);

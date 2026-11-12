@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>object-fit and object-position: computed values</title>
+<style>
+body { margin: 8px; font: 16px serif; }
+.big { font-size: 20px; }
+</style></head><body>
+<div id="v1" data-check="object-fit object-position">initial</div>
+<div id="v2" data-check="object-fit object-position" style="object-fit:cover">cover</div>
+<div id="v3" data-check="object-fit object-position" style="object-fit:CONTAIN">contain, upper case</div>
+<div id="v4" data-check="object-fit object-position" style="object-fit:scale-down;object-position:left top">scale-down</div>
+<div id="v5" data-check="object-fit object-position" style="object-fit:none;object-position:right 10px bottom 5px">offsets from the far sides</div>
+<div id="v6" data-check="object-position" style="object-position:20px 30%">20px 30%</div>
+<div id="v7" data-check="object-position" style="object-position:center">center</div>
+<div id="v8" data-check="object-position" style="object-position:left">left</div>
+<div id="v9" data-check="object-position" style="object-position:top">top</div>
+<div id="v10" data-check="object-position" style="object-position:bottom right">bottom right</div>
+<div id="v11" data-check="object-position" style="object-position:calc(10% + 5px) 1em">calc and em</div>
+<div id="v12" data-check="object-fit object-position" style="object-fit:bogus;object-position:1px 2px 3px">invalid</div>
+<div id="v13" data-check="object-position" style="object-position:right 10% bottom 20%">percent offsets</div>
+<div id="v14" data-check="object-position" style="object-position:left 10px top 20px">left and top offsets</div>
+<div id="v15" data-check="object-position" style="object-position:right 0px bottom 0px">zero offsets</div>
+<div id="v16" data-check="object-position" style="object-position:right calc(10px + 5%) top 0">calc offset</div>
+<div id="v17" data-check="object-position" style="object-position:top left">top left</div>
+<div id="v18" data-check="object-position" style="object-position:30% top">30% top</div>
+<div id="v19" data-check="object-position" style="object-position:20px">one length</div>
+<div id="v20" data-check="object-position" style="object-position:bottom 10px right 5%">vertical first</div>
+<div id="v21" data-check="object-position" class="big" style="object-position:left 2em top 3em">em offsets</div>
+<div id="v22" data-check="object-position" style="object-position:center left">center left</div>
+<div id="v23" data-check="object-position" style="object-position:right 1.5em top">three parts</div>
+<div id="v24" data-check="object-position" style="object-position:calc(50%) 10px">calc of a percentage</div>
+<div id="v25" data-check="object-position" style="object-position:0 0">zeros</div>
+<div id="v26" data-check="object-position" style="object-position:-10px -20%">negatives</div>
+<div id="v27" data-check="object-position" style="object-position:left left">two lefts</div>
+<div id="v28" data-check="object-position" style="object-position:10px left">a length then left</div>
+<div id="v29" data-check="object-position" style="object-position:left 10px">left then a length</div>
+<div id="v30" data-check="object-position" style="object-position:right -5px bottom -5px">negative offsets</div>
+<div id="v31" data-check="object-position" style="object-position:calc(100% - 3px) 0">calc kept</div>
+<div id="v32" data-check="object-position" style="object-position:right 10px center">center with an offset</div>
+<div id="v33" data-check="object-position" style="object-position:top 10px">top then a length</div>
+<div id="v34" data-check="object-position" style="object-position:center top">center top</div>
+<div id="v35" data-check="object-position" style="object-position:top center">top center</div>
+<div id="v36" data-check="object-fit object-position" style="object-fit:inherit;object-position:inherit">inherit</div>
+<div id="p1" style="object-fit:none;object-position:right top"><span id="v37" data-check="object-fit object-position">not inherited</span><span id="v38" data-check="object-fit object-position" style="object-fit:inherit;object-position:inherit">inherited</span></div>
+<div id="v39" data-check="object-position" style="object-position:LEFT Top">case</div>
+<div id="v40" data-check="object-position" style="object-position:1in 2pt">absolute units</div>
+</body></html>
