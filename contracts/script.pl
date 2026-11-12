@@ -127,6 +127,18 @@ script_contract(record(observer, [
     field(records,      u32),
     field(calls,        u32)
 ])).
+%% a custom element definition (src/script/custom.c): the script that defined it, the
+%% name, how many attributes it observes, which lifecycle callbacks its class has, how
+%% many elements its definition and their insertion upgraded
+script_contract(record(definition, [
+    field(run,               ref(run)),
+    field(name,              span(text)),
+    field(observed,          u32),
+    field(connected,         bool),
+    field(disconnected,      bool),
+    field(attribute_changed, bool),
+    field(upgraded,          u32)
+])).
 %% an observe() call: its observer, the script whose call it was, the node, what it asked for
 script_contract(record(observation, [
     field(observer,       ref(observer)),
@@ -151,11 +163,13 @@ script_contract(handle(navigation, sn)).
 script_contract(handle(form_field, sf)).
 script_contract(handle(observer, sm)).
 script_contract(handle(observation, so)).
+script_contract(handle(definition, sd)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), table(request), table(write),
-    table(navigation), table(form_field), table(observer), table(observation), pool(text)])).
+    table(navigation), table(form_field), table(observer), table(observation), table(definition), pool(text)])).
+script_contract(owns(runtime, definition, store)).
 script_contract(owns(runtime, run, store)).
 script_contract(owns(runtime, console, store)).
 script_contract(owns(runtime, error, store)).
@@ -209,6 +223,15 @@ script_contract(fact(script_observes_attributes(handle, field(filter)), table(ob
 script_contract(fact(script_observes_data(handle), table(observation), field(character_data) == true)).
 script_contract(fact(script_observes_subtree(handle), table(observation), field(subtree) == true)).
 script_contract(fact(script_observes_old_values(handle), table(observation), field(old_value) == true)).
+%% each custom element definition: its name and script; the attributes it observes and the
+%% elements upgraded; the callbacks its class has
+script_contract(fact(script_definition(handle, field(name), field(run)), table(definition), true)).
+script_contract(fact(script_definition_observes(handle, field(observed)), table(definition), true)).
+script_contract(fact(script_definition_upgraded(handle, field(upgraded)), table(definition), true)).
+script_contract(fact(script_defines_connected(handle), table(definition), field(connected) == true)).
+script_contract(fact(script_defines_disconnected(handle), table(definition), field(disconnected) == true)).
+script_contract(fact(script_defines_attribute_changed(handle), table(definition), field(attribute_changed) == true)).
+script_contract(derived(script_custom_undefined/2, 'an element in the document whose name is a custom element\'s that no script defined, and its name')).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).
 script_contract(fact(script_listener(field(target), field(type), field(run)), table(listener), field(on) == node)).

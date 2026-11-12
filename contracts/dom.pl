@@ -20,6 +20,8 @@ dom_contract(enum(node_kind, [document, doctype, element, text, comment, fragmen
 
 %% an element's namespace (Infra's HTML, SVG and MathML namespaces)
 dom_contract(enum(namespace, [html, svg, mathml])).
+%% a shadow root's mode: whether its host's shadowRoot shows it
+dom_contract(enum(shadow_mode, [open, closed])).
 %% an attribute's namespace: null for no namespace, or one of the three the
 %% HTML parser gives attributes of foreign elements (HTML 13.2.6.1)
 dom_contract(enum(attr_namespace, [null, xlink, xml, xmlns])).
@@ -39,7 +41,7 @@ dom_contract(record(node, [
     field(first_attr,   ref(attr)),
     field(data,         span(text)),       % a text or comment node's data
     field(content,      ref(node)),        % an HTML template's contents, a fragment
-    field(host,         ref(node)),        % a fragment's template
+    field(host,         ref(node)),        % a fragment's template, or a shadow root's host
     field(public_id,    span(text)),       % a doctype's public identifier ...
     field(system_id,    span(text)),       % ... and its system identifier
     field(doctype_ids,  u8)                % which of the two the doctype has: 1 public, 2 system
@@ -69,15 +71,25 @@ dom_contract(record(detail, [
     field(had,  bool)
 ])).
 
+%% a shadow root (DOM 4.8): a fragment, the root of a tree of its own, attached to its host
+%% element (the fragment's host link names it too)
+dom_contract(record(shadow, [
+    field(host, ref(node)),
+    field(root, ref(node)),
+    field(mode, enum(shadow_mode))
+])).
+
 %% public handles: {doc, index, generation}; in Prolog n(Doc, Index, Gen)
 dom_contract(handle(node, n)).
 dom_contract(handle(attr, a)).
 dom_contract(handle(detail, md)).
+dom_contract(handle(shadow, ms)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 %% the store: one per document. It owns every record, its text and its names.
-dom_contract(store(document, [table(node), table(attr), pool(text), atoms(names), log(mutation), table(detail)])).
+dom_contract(store(document, [table(node), table(attr), pool(text), atoms(names), log(mutation), table(detail), table(shadow)])).
+dom_contract(owns(document, shadow, store)).
 dom_contract(owns(document, detail, store)).
 
 dom_contract(owns(document, node, store)).
@@ -162,6 +174,11 @@ dom_contract(operation(remove_attribute, [param(element, handle(node)), param(na
 dom_contract(operation(set_data, [param(node, handle(node)), param(data, text)], status,
     [pre(live(node), stale_handle), pre(kind_in(node, [text, comment]), wrong_kind)],
     [sets(node, data)], [mutates, requestable])).
+%% a shadow root attached to an element (the script module checks it may have one): the
+%% root, a fragment whose host is the element; destroying the element destroys its tree
+dom_contract(operation(attach_shadow, [param(host, handle(node)), param(mode, enum(shadow_mode))], handle(node),
+    [pre(live(host), stale_handle), pre(kind_in(host, [element]), wrong_kind)],
+    [creates(node)], [mutates])).
 %% the details of each change kept from now on (its log entry's detail), for a reader
 %% that needs them; the changes before are not
 dom_contract(operation(keep_details, [], status, [], [], [])).
@@ -213,6 +230,8 @@ dom_contract(fact(dom_attr(field(owner), field(name), field(value)), table(attr)
 %% an element's namespace, when it is not HTML's; a template's contents
 dom_contract(fact(dom_namespace(handle, field(ns)), table(node), (field(kind) == element, field(ns) \== html))).
 dom_contract(fact(dom_template_content(handle, field(content)), table(node), field(content) \== none)).
+%% a shadow root: its host, the root (a fragment, its tree's own), the mode
+dom_contract(fact(dom_shadow_root(field(host), field(root), field(mode)), table(shadow), true)).
 %% an attribute's namespace, when it has one (its name in dom_attr/3 has the prefix)
 dom_contract(fact(dom_attr_namespace(field(owner), field(name), field(ns)), table(attr), field(ns) \== null)).
 

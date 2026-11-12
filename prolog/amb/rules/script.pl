@@ -15,7 +15,8 @@
    script_navigation_target/2, script_navigation_resource/2, script_navigation_status/2, script_form_field/3,
    script_observer/2, script_observer_disconnected/1, script_observer_delivered/3, script_observation/4,
    script_observes_children/1, script_observes_attributes/2, script_observes_data/1, script_observes_subtree/1,
-   script_observes_old_values/1.
+   script_observes_old_values/1, script_definition/3, script_definition_observes/2, script_definition_upgraded/2,
+   script_defines_connected/1, script_defines_disconnected/1, script_defines_attribute_changed/1.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -113,6 +114,24 @@ script_observer_unsettled(O, R) :-
     script_observer(O, R), \+ script_observer_disconnected(O),
     script_observation(_, O, _, _), script_unsettled(_, _).
 
+%% an element whose name is a custom element's (a hyphen in it), in the document, that no
+%% script defined: it stays an HTMLElement with none of the behaviour its name promises
+script_custom_undefined(N, Name) :-
+    dom_element(N, Name), sub_atom(Name, _, _, _, '-'), \+ script_rules_kept_name(Name),
+    dom_element(H, html), dom_inside(N, H), \+ script_definition(_, Name, _).
+%% the names with a hyphen SVG and MathML keep, which are no custom element's
+script_rules_kept_name('annotation-xml').
+script_rules_kept_name('color-profile').
+script_rules_kept_name('font-face').
+script_rules_kept_name('font-face-src').
+script_rules_kept_name('font-face-uri').
+script_rules_kept_name('font-face-format').
+script_rules_kept_name('font-face-name').
+script_rules_kept_name('missing-glyph').
+
+script_diag(custom_element_undefined, N, Text) :-
+    script_custom_undefined(N, Name),
+    format(atom(Text), 'the <~w> element\'s name is a custom element\'s, but no script defines it (customElements.define): it stays an HTMLElement with no behaviour of its own', [Name]).
 script_diag(observer_never_disconnected, O, Text) :-
     script_observer_unsettled(O, R), script_rules_where(R, Where),
     format(atom(Text), 'a MutationObserver made by the script ~w is never disconnected, on a page that never comes to rest: each change its timers make runs the observer again', [Where]).

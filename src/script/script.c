@@ -234,6 +234,7 @@ jv sh_wrap(js_vm *vm, uint32_t x) {
     if (w && vm->objs[w].kind == JK_HOST && vm->objs[w].b == d->node[x].gen && vm->objs[w].a == x) return jv_obj(w);
     dom_node_kind k = d->node[x].kind;
     uint32_t p = k == DOM_NODE_KIND_ELEMENT ? HP_ELEMENT : k == DOM_NODE_KIND_DOCUMENT ? HP_DOCUMENT : HP_CHARDATA;
+    if (k == DOM_NODE_KIND_FRAGMENT) p = script_shadow_host(d, x) ? HP_SHADOWROOT : HP_NODE;
     uint32_t o = js_obj_new(vm, JK_HOST, vm->host->protos[p]);
     vm->objs[o].a = x;
     vm->objs[o].b = d->node[x].gen;
@@ -839,21 +840,43 @@ int sh_dispatch(js_vm *vm, uint32_t target, jv ev) {
     uint32_t e = jv_idx(ev);
     vector<uint32_t> path;
     push_back(path, target);
+    int shadows = d->shadow_len > 1;
     if (target != JS_WINDOW && !(target & SH_OBJECT_TARGET) && !(vm->objs[e].a & EV_NOPATH)) {
-        for (uint32_t p = d->node[target].parent; p; p = d->node[p].parent) push_back(path, p);
+        int composed = (vm->objs[e].a & EV_COMPOSED) != 0;
+        if (shadows) for (uint32_t p = script_event_parent(d, target, target, composed); p; p = script_event_parent(d, p, target, composed)) push_back(path, p);
+        else for (uint32_t p = d->node[target].parent; p; p = d->node[p].parent) push_back(path, p);
         /* the window is on the path of an event at a node of the document, load aside */
         uint32_t lt = js_atom_ascii(vm, "load");
         if (path[len(path) - 1] == 1 && vm->objs[e].b != lt) push_back(path, JS_WINDOW);
     }
     js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, target), 0);
-    for (size_t i = len(path); i > 1 && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i--)
+    if (shadows) {
+        /* the path, for composedPath() */
+        uint32_t pa = js_array_new(vm, 0);
+        for (size_t i = 0; i < len(path); i++) js_array_push(vm, pa, sh_this_of(vm, path[i]));
+        js_define(vm, e, js_atom_ascii(vm, "\001path"), jv_obj(pa), JS_SHAPE_HIDDEN);
+    }
+    /* a listener in a tree the target's shadow tree is not part of sees the host it is in */
+#define SH_RETARGET(at) if (shadows) js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, script_retarget(d, target, (at))), 0)
+    for (size_t i = len(path); i > 1 && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i--) {
+        SH_RETARGET(path[i - 1]);
         if (!sh_listeners_at(vm, path[i - 1], ev, 1)) return 1;
+    }
+    SH_RETARGET(target);
     if (!(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)) && !sh_listeners_at(vm, target, ev, 2)) return 1;
     if (vm->objs[e].a & EV_BUBBLES)
-        for (size_t i = 1; i < len(path) && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i++)
+        for (size_t i = 1; i < len(path) && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i++) {
+            SH_RETARGET(path[i]);
             if (!sh_listeners_at(vm, path[i], ev, 3)) return 1;
+        }
+#undef SH_RETARGET
     js_define(vm, e, sh_atom(vm, HA_CURRENTTARGET), JV_NULL, 0);
     js_define(vm, e, sh_atom(vm, HA_EVENTPHASE), jv_num(0), JS_SHAPE_HIDDEN);
+    if (shadows) {
+        /* after the dispatch: the target the document sees, an empty path */
+        js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, script_retarget(d, target, 1)), 0);
+        js_define(vm, e, js_atom_ascii(vm, "\001path"), jv_obj(js_array_new(vm, 0)), JS_SHAPE_HIDDEN);
+    }
     return !(vm->objs[e].a & EV_PREVENTED);
 }
 int sh_fire(js_vm *vm, uint32_t target, const char *type, uint32_t flags) {
@@ -1445,10 +1468,13 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     int el = k == DOM_NODE_KIND_ELEMENT;
     *handled = 1;
     switch (ha) {
-    case HA_NODETYPE: return jv_num(k == DOM_NODE_KIND_ELEMENT ? 1 : k == DOM_NODE_KIND_TEXT ? 3 : k == DOM_NODE_KIND_COMMENT ? 8 : k == DOM_NODE_KIND_DOCUMENT ? 9 : 10);
+    case HA_NODETYPE:
+        return jv_num(k == DOM_NODE_KIND_ELEMENT ? 1 : k == DOM_NODE_KIND_TEXT ? 3 : k == DOM_NODE_KIND_COMMENT ? 8 : k == DOM_NODE_KIND_DOCUMENT ? 9 :
+                      k == DOM_NODE_KIND_FRAGMENT ? 11 : 10);
     case HA_NODENAME:
         if (el) return sh_tag_name(vm, d, x);
-        return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" : "html");
+        return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" :
+                           k == DOM_NODE_KIND_FRAGMENT ? "#document-fragment" : "html");
     case HA_TAGNAME: if (el) return sh_tag_name(vm, d, x); break;
     case HA_LOCALNAME: if (el) return sh_str(vm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name)); break;
     case HA_NAMESPACEURI:
@@ -1472,7 +1498,8 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         }
         break;
     case HA_INNERHTML: case HA_OUTERHTML: {
-        if (!el) break;
+        /* a shadow root's innerHTML too (DOM's ShadowRoot) */
+        if (!el && !(ha == HA_INNERHTML && k == DOM_NODE_KIND_FRAGMENT && script_shadow_host(d, x))) break;
         vector<char> t;
         sh_html_of(d, x, &t, ha == HA_OUTERHTML);
         return sh_str(vm, data(t), len(t));
@@ -1750,10 +1777,10 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
 /* a property set on a host object: its change to the DOM made records, as a call's */
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
     struct js_host *h = vm->host;
-    if (!h || !h->mreg_live) return sh_host_set(vm, o, atom, v, handled);
-    script_observe_flush(vm);
-    int r = sh_host_set(vm, o, atom, v, handled);
+    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_set(vm, o, atom, v, handled);
     if (h->mreg_live) script_observe_flush(vm);
+    int r = sh_host_set(vm, o, atom, v, handled);
+    sh_after_call(vm);
     return r;
 }
 static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
@@ -1825,7 +1852,7 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
             return 1;
         }
         case HA_INNERHTML: {
-            if (!el) return 1;
+            if (!el && !(k == DOM_NODE_KIND_FRAGMENT && script_shadow_host(d, x))) return 1;
             vector<char> t;
             if (!sh_utf8(vm, v, &t)) return 0;
             sh_empty(d, x);
@@ -1946,14 +1973,24 @@ static int sh_arg_nodes(js_vm *vm, uint32_t args, uint32_t argc, vector<uint32_t
 }
 
 static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
+/* the end of a call into the host: its changes made records, the custom elements'
+   reactions to them run (the standard's [CEReactions]), the reactions' changes recorded */
+static void sh_after_call(js_vm *vm) {
+    struct js_host *h = vm->host;
+    if (h->mreg_live) script_observe_flush(vm);
+    if (len(h->cdefs) && !vm->throwing) {
+        script_custom_flush(vm);
+        if (h->mreg_live) script_observe_flush(vm);
+    }
+}
 /* a call into the host: while a MutationObserver observes, the DOM's changes before it
    and its own made records, each its own (src/script/observe.c); else the call alone */
 jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
     struct js_host *h = vm->host;
-    if (!h || !h->mreg_live) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
-    script_observe_flush(vm);
-    jv r = sh_host_call(vm, id, callee, thisv, args, argc, handled);
+    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
     if (h->mreg_live) script_observe_flush(vm);
+    jv r = sh_host_call(vm, id, callee, thisv, args, argc, handled);
+    sh_after_call(vm);
     return r;
 }
 static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
@@ -1964,6 +2001,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     if (id >= SH_FETCH_FIRST && id < SH_FETCH_END) return script_fetch_call(vm, id, callee, thisv, args, argc, JV_UNDEF, handled);
     if (id >= SH_INPUT_FIRST && id < SH_INPUT_END) return script_input_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_OBSERVE_FIRST && id < SH_OBSERVE_END) return script_observe_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_CUSTOM_FIRST && id < SH_CUSTOM_END) return script_custom_call(vm, id, callee, thisv, args, argc, handled);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
     /* location's: its href (a hidden part), navigations by it */
     if (id == H_LOC_STRING || id == H_LOC_HREF_GET || id == H_LOC_HASH_GET) {
@@ -2372,6 +2410,9 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         vector<char> nm;
         if (!sh_utf8(vm, a0, &nm)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
+        /* a custom element's name defined: the element its constructor makes */
+        uint32_t def = len(vm->host->cdefs) ? script_custom_def(vm, data(nm), len(nm)) : 0;
+        if (def) return script_custom_create(vm, def);
         dom_node_h h = dom_create_element(d, data(nm), len(nm));
         if (!h.index) return sh_status(vm, DOM_INVALID_NAME);
         return sh_wrap(vm, h.index);
@@ -2681,6 +2722,8 @@ static void sh_ready(js_vm *vm) {
     script_fetch_setup(vm);
     script_input_setup(vm);
     script_observe_setup(vm);
+    script_custom_setup(vm);
+    sh_method(vm, h->protos[HP_SHADOWROOT], "getElementById", H_BY_ID, 1);
     js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
     js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(h->view_h), JS_SHAPE_HIDDEN);
     /* the viewport does not scroll */

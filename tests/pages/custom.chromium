@@ -1,0 +1,49 @@
+get before: undefined
+-- define
+constructor one true true
+attribute one title null "first" null
+connected one
+constructor two true true
+connected two
+get after: true early: false
+NotSupportedError: Failed to execute 'define' on 'CustomElementRegistry': the name "x-item" has already been used with this registry
+SyntaxError: Failed to execute 'define' on 'CustomElementRegistry': "nohyphen" is not a valid custom element name
+SyntaxError: Failed to execute 'define' on 'CustomElementRegistry': "X-Up" is not a valid custom element name
+SyntaxError: Failed to execute 'define' on 'CustomElementRegistry': "font-face" is not a valid custom element name
+NotSupportedError: Failed to execute 'define' on 'CustomElementRegistry': this constructor has already been used with this registry
+defined x-fn
+TypeError: Failed to execute 'define' on 'CustomElementRegistry': parameter 2 is not of type 'Function'.
+-- made and moved
+constructor x-item false true
+attribute made data-x null "1" null
+connected made
+attribute made title null "t" null
+attribute made title "t" "t" null
+attribute made title "t" null null
+constructor x-item false true
+new: x-item false
+disconnected made
+connected made
+disconnected made
+-- early, upgraded on insertion, and by upgrade()
+constructor early true true
+connected early
+constructor inner false true
+loose: true
+upgraded: true
+connected inner
+-- innerHTML, nested, and a shadow tree
+constructor outer true true
+connected outer
+constructor nested true true
+connected nested
+constructor shadowed false true
+connected shadowed
+TypeError: Failed to construct 'HTMLElement': Illegal constructor
+-- a constructor that throws
+bad: true
+fresh: x-bad false
+whenDefined refused: SyntaxError: Failed to execute 'whenDefined' on 'CustomElementRegistry': "bad name" is not a valid custom element name
+whenDefined: true
+error: Error: no bad
+error: Error: no 

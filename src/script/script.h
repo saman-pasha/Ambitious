@@ -84,6 +84,15 @@ typedef struct sh_mrec {
     uint32_t name, ns, had, noff, nlen, live;
     amb_span old;
 } sh_mrec;
+/* a custom element definition (src/script/custom.c): its constructor and prototype, the
+   run that defined it, its record in the runtime, its lifecycle callbacks (0: none), its
+   name and its observed attributes (each ended by a zero byte) in the host's custom text */
+typedef struct sh_cdef {
+    uint32_t ctor, proto, run, rec, connected, disconnected, adopted, attr_changed;
+    uint32_t noff, nlen, ooff, olen;
+} sh_cdef;
+/* an element's custom element state: the node and its generation, its definition, its state */
+typedef struct sh_cel { uint32_t node, gen, def, state, conn, spare; } sh_cel;
 /* the changes of one call grouped as a record is, while the log is read */
 typedef struct sh_mgroup {
     uint32_t type, target, prev, pgen, next, ngen, name, ns;
@@ -189,6 +198,15 @@ struct js_host {
     vector<uint32_t> mnodes;
     vector<char> mfilter;
     uint32_t mreg_live, mo_pos, mo_queued, mo_fn;
+    /* custom elements: the definitions, the elements' states and each node's place among
+       them, the construction stack, whenDefined's waiting promises (promise, name's atom,
+       settled), the names and observed attributes; how far the DOM's log was read for
+       the reactions, whether reactions are running, the registry object */
+    vector<sh_cdef> cdefs;
+    vector<sh_cel> cels;
+    vector<uint32_t> cmap, cstack, cwait;
+    vector<char> ctext;
+    uint32_t ce_pos, in_reactions, registry, spare5;
     double mouse_x, mouse_y;
     jv click_ev;
     vector<char> fvalue;
@@ -217,6 +235,7 @@ struct js_host {
     vector_char_drop(&(h).wtext); vector_uint32_t_drop(&(h).wnodes); vector_char_drop(&(h).fvalue); vector_sh_fd_drop(&(h).fds); \
     vector_char_drop(&(h).docurl); vector_char_drop(&(h).nav_url); vector_char_drop(&(h).nav_body); \
     vector_char_drop(&(h).nav_ctype); vector_sh_mo_drop(&(h).mos); vector_sh_mreg_drop(&(h).mregs); vector_sh_mrec_drop(&(h).mrecs); \
-    vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter)
+    vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter); vector_sh_cdef_drop(&(h).cdefs); vector_sh_cel_drop(&(h).cels); \
+    vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext)
 
 #endif

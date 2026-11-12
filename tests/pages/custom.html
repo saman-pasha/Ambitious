@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>custom elements</title>
+<!-- Custom elements (src/script/custom.c): define()'s checks, get and whenDefined, the
+     parsed elements upgraded at the definition in order with their observed attributes and
+     connectedCallback, createElement and new, an element made before its definition
+     upgraded when it comes into the document or by upgrade(), attributeChangedCallback,
+     disconnectedCallback, a move, innerHTML's elements, a constructor that throws, nested
+     custom elements' order, one in a shadow tree. A console line each, against Chromium's
+     (tests/pages/custom.chromium). The page's <x-never> is never defined (the reasoner says so). -->
+</head>
+<body>
+<x-item id="one" title="first" lang="en"><x-item id="two"></x-item></x-item>
+<x-never id="lost"></x-never>
+<x-bad id="bad"></x-bad>
+<script>
+  function who(e) { return e.id || e.localName; }
+  var early = document.createElement('x-item');
+  early.id = 'early';
+  class XItem extends HTMLElement {
+    constructor() { super(); console.log('constructor ' + who(this) + ' ' + this.isConnected + ' ' + (this instanceof XItem)); }
+    connectedCallback() { console.log('connected ' + who(this)); }
+    disconnectedCallback() { console.log('disconnected ' + who(this)); }
+    attributeChangedCallback(name, old, now, ns) { console.log('attribute ' + who(this) + ' ' + name + ' ' + JSON.stringify(old) + ' ' + JSON.stringify(now) + ' ' + ns); }
+    static get observedAttributes() { return ['title', 'data-x']; }
+  }
+  console.log('get before: ' + customElements.get('x-item'));
+  customElements.whenDefined('x-item').then(function (c) { console.log('whenDefined: ' + (c === XItem)); });
+  customElements.whenDefined('bad name').catch(function (e) { console.log('whenDefined refused: ' + e.name + ': ' + e.message); });
+  console.log('-- define');
+  customElements.define('x-item', XItem);
+  console.log('get after: ' + (customElements.get('x-item') === XItem) + ' early: ' + (early instanceof XItem));
+  [['x-item', XItem], ['nohyphen', class extends HTMLElement {}], ['X-Up', class extends HTMLElement {}], ['font-face', class extends HTMLElement {}],
+   ['x-other', XItem], ['x-fn', function () {}], ['x-num', 5]].forEach(function (a) {
+    try { customElements.define(a[0], a[1]); console.log('defined ' + a[0]); } catch (e) { console.log(e.name + ': ' + e.message); }
+  });
+  console.log('-- made and moved');
+  var made = document.createElement('x-item');
+  made.id = 'made';
+  made.setAttribute('data-x', '1');
+  made.setAttribute('data-y', '1');
+  document.body.appendChild(made);
+  made.setAttribute('title', 't');
+  made.setAttribute('title', 't');
+  made.removeAttribute('title');
+  var newed = new XItem();
+  console.log('new: ' + newed.localName + ' ' + newed.isConnected);
+  document.getElementById('one').appendChild(made);
+  made.remove();
+  console.log('-- early, upgraded on insertion, and by upgrade()');
+  document.body.appendChild(early);
+  var loose = document.createElement('div');
+  loose.innerHTML = '<x-item id="inner"></x-item>';
+  console.log('loose: ' + (loose.firstChild instanceof XItem));
+  customElements.upgrade(loose);
+  console.log('upgraded: ' + (loose.firstChild instanceof XItem));
+  document.body.appendChild(loose);
+  console.log('-- innerHTML, nested, and a shadow tree');
+  var box = document.createElement('div');
+  document.body.appendChild(box);
+  box.innerHTML = '<x-item id="outer"><x-item id="nested"></x-item></x-item>';
+  var host = document.createElement('div');
+  host.attachShadow({ mode: 'open' }).innerHTML = '<x-item id="shadowed"></x-item>';
+  document.body.appendChild(host);
+  try { new HTMLElement(); } catch (e) { console.log(e.name + ': ' + e.message); }
+  console.log('-- a constructor that throws');
+  class XBad extends HTMLElement { constructor() { super(); throw new Error('no ' + this.id); } }
+  customElements.define('x-bad', XBad);
+  console.log('bad: ' + (document.getElementById('bad') instanceof XBad));
+  var fresh = document.createElement('x-bad');
+  console.log('fresh: ' + fresh.localName + ' ' + (fresh instanceof XBad));
+</script>
+</body></html>

@@ -1,0 +1,27 @@
+-- the root
+true true open 11 #document-fragment true
+innerHTML: 178 first: wrap parent of wrap: #root
+getElementById: inner document sees: null 0
+querySelector: slotA contains: false
+closed: null closed true
+-- attachShadow refused
+NotSupportedError: Failed to execute 'attachShadow' on 'Element': Shadow root cannot be created on a host which already hosts a shadow tree.
+NotSupportedError: Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow
+TypeError: Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': Required member is undefined.
+TypeError: Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': The provided value 'shut' is not a valid enum value of type ShadowRootMode.
+-- slots
+a: [lightA] default: [lightB,"text"] elements: [lightB]
+none: [] flattened: [fallback]
+assignedSlot: slotA slotDefault null
+after the slot attribute: [lightC] [lightC]
+in the closed tree: null
+-- events
+inner: click target inner current inner path [inner,#root,host,body,html,document,window]
+root: click target inner current #root path [inner,#root,host,body,html,document,window]
+host: click target host current host path [inner,#root,host,body,html,document,window]
+body: click target host current body path [inner,#root,host,body,html,document,window]
+lightA: ping target lightA current lightA path [lightA,slotA,wrap,#root,host,body,html,document,window]
+slotA: ping target lightA current slotA path [lightA,slotA,wrap,#root,host,body,html,document,window]
+host: ping target lightA current host path [lightA,slotA,wrap,#root,host,body,html,document,window]
+host: local target host current host path [inner,#root,host,body,html,document,window]
+after the dispatch: host 0

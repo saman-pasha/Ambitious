@@ -169,14 +169,38 @@ static void dom_free_attrs(dom_document *d, uint32_t n) {
     }
 }
 
-/* a template's contents taken in as its last child, for the walk that frees
-   them with it */
+/* a template's contents, and a host's shadow root, taken in as its last children, for
+   the walk that frees them with it */
 static void dom_take_contents(dom_document *d, uint32_t x) {
     uint32_t c = d->node[x].content;
-    if (!c) return;
-    d->node[x].content = 0;
-    d->node[c].host = 0;
-    children_append(d, x, c);
+    if (c) {
+        d->node[x].content = 0;
+        d->node[c].host = 0;
+        children_append(d, x, c);
+    }
+    for (uint32_t s = 1; s < d->shadow_len; s++) {
+        if (!d->shadow[s].live || d->shadow[s].host != x) continue;
+        uint32_t r = d->shadow[s].root;
+        shadow_free(d, shadow_handle(d, s));
+        if (r && d->node[r].live) {
+            d->node[r].host = 0;
+            children_append(d, x, r);
+        }
+    }
+}
+
+dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode) {
+    dom_node_h none = { 0, 0, 0 };
+    if (dom_check_attach_shadow(d, host, mode) != DOM_OK) return none;
+    dom_node_h r = node_new(d);
+    d->node[r.index].kind = DOM_NODE_KIND_FRAGMENT;
+    d->node[r.index].host = host.index;
+    dom_shadow_h s = shadow_new(d);
+    d->shadow[s.index].host = host.index;
+    d->shadow[s.index].root = r.index;
+    d->shadow[s.index].mode = mode;
+    dom_log(d, DOM_OP_ATTACH_SHADOW, host.index, r.index);
+    return r;
 }
 
 /* a detached subtree freed, children before their parent, a template's
