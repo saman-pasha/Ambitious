@@ -410,3 +410,24 @@ neighbours.
 
     prints 4294965005 (gcc: `'t' redeclared as different kind of symbol`).
     The work-around is other names.
+30. **A block comment that spans lines after a `#define` in an included header,
+    with an apostrophe in it, stops the unit that includes it**: the first
+    construct that needs a type macro (a struct with a `vector` member) is
+    `syntax error: could not read this item`, the line the unit's. The same
+    comment on one line compiles, and so does the two-line comment without
+    its apostrophes; gcc compiles all three. 12p met it on a flag of
+    src/js/js.h, whose comment now stands on lines of its own:
+
+    ```c
+    /* r.h */
+    #include <vector.pl>
+    #define FLAG 256   /* an array's (an object's) element: kept
+                          in its shape, the element's slot a hole */
+    /* r.c */
+    #include "r.h"
+    typedef struct holder { vector<int> items; } holder;
+    int main(void) { return FLAG - 256; }
+    ```
+
+    reports `r.c:2: error: syntax error: could not read this item (gave up
+    near line 2)`.
