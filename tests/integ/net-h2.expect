@@ -108,10 +108,10 @@ conn 1 stream 5 reset: INTERNAL_ERROR
 conn 1 stream 7 GET /h2/refused.png
 conn 1 stream 7 reset: REFUSED_STREAM
 conn 1 stream 9 GET /h2/refused.png
--- a stream the server never answers (tests/net/site/h2/t.html): the read's ten seconds
+-- a stream the server never answers (tests/net/site/h2/t.html): Chromium waits on; here AMB_NET_TIMEOUT=1000 ends the wait
 R = rs(1,1,0), U = 'https://localhost:RESET/h2/t.html', O = ok, S = 200, Why = none
 R = rs(1,2,0), U = 'https://localhost:RESET/h2/a.css', O = ok, S = 200, Why = none
-R = rs(1,3,0), U = 'https://localhost:RESET/h2/stall.css', O = malformed, S = 0, Why = 'the server sent nothing for 10 seconds'
+R = rs(1,3,0), U = 'https://localhost:RESET/h2/stall.css', O = malformed, S = 0, Why = 'the server sent nothing for 1 second'
 == a server that refuses h2: http/1.1 by ALPN, its connections kept alive
 Http1 = 31, Reused = 25, OnASeventh = 0
 -- the server's log
@@ -240,3 +240,44 @@ conn 2 request 1 GET /h2/a.css
   User-Agent: Ambitious/0.1
   Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
   Accept-Encoding: gzip, deflate
+== HTTP/2's pooling by IP (tests/net/site/t/pool.html at a.localhost): each server's connections and what each carried, against Chromium's (tests/net/pool.chromium)
+the same, connection by connection: 12 connections, 2 visits
+-- the facts: each part's connection, the page's (1) by pooling or one of its own
+R = rs(1,2,0), U = 'https://b.localhost:P/top.png?b', S = 200, C = 1, How = pooled
+R = rs(1,3,0), U = 'https://localhost:P/top.png?localhost', S = 200, C = 1, How = pooled
+R = rs(1,4,0), U = 'https://127.0.0.1:P/top.png?ip', S = 200, C = 1, How = pooled
+R = rs(1,5,0), U = 'https://c.localhost:P/top.png?c', S = 200, C = 2, How = own
+R = rs(1,6,0), U = 'https://127.0.0.2:P/top.png?ip2', S = 200, C = 3, How = own
+R = rs(1,7,0), U = 'https://b.localhost:Q/top.png?q', S = 200, C = 4, How = own
+R = rs(1,8,0), U = 'https://b.localhost:P/top.png?misdirected', S = 200, C = 5, How = own
+R = rs(1,9,0), U = 'https://a.localhost:P/top.png?always', S = 421, C = 1, How = own
+R = rs(1,10,0), U = 'https://b.localhost:P/top.png?always', S = 421, C = 5, How = own
+== TLS sessions resumed over HTTP/1.1, each connection closed after its response (tests/net/site/t/res.html, seq.html): how many of each host's connections resumed, against Chromium's (tests/net/res.chromium)
+Resumed = 2, Tls13 = 8
+the same, host by host: 12 hosts' counts
+== compression dictionaries (tests/net/site/dict/): two runs of a profile over HTTP/2, against Chromium's two visits (tests/net/dict.chromium)
+the same: 17 requests' dictionary fields, field by field, and what the pages' scripts got
+-- the second page's sheet, coded dcz over the first run's dictionary: its colour (Chromium's rgb(40, 50, 60))
+N = n(1,13,0), C = 'rgb(40, 50, 60)'
+-- the facts of the first run: what was kept as a dictionary, what each request offered and the response it was kept from
+R = rs(1,2,0), H = ':cR/3dL63PKQWwkyEx8uhJrv5yGReLu6lqkfZrpTp6xI=:', M = '/dict/css/*', I = '', U = 'https://localhost:D/dict/dict.css'
+R = rs(1,3,0), H = ':GgvkR7yA9OO5LRXCYrdOSdzdkmgxvnZq69/fdbCiXMA=:', M = '/dict/js/*', I = v1, U = 'https://localhost:D/dict/dict.js'
+R = rs(1,4,0), H = ':rS5GsvdTtti5Cm1uqzm1OQ5JxfeUiPuNhOoRKO4UZ90=:', M = '/dict/again.html', I = '', U = 'https://localhost:D/dict/nav.js'
+R = rs(1,12,0), H = ':MNZ9Ud46VZuCOK6R0wJEsQKfE123dLqXJ/agREniTuo=:', M = '/dict/next/*', I = '', U = 'https://localhost:D/dict/js/next.txt'
+R = rs(1,6,0), D = rs(1,3,0), U = 'https://localhost:D/dict/js/a.txt', O = ok, DU = 'https://localhost:D/dict/dict.js', C = dcb
+R = rs(1,7,0), D = rs(1,3,0), U = 'https://localhost:D/dict/js/b.txt', O = ok, DU = 'https://localhost:D/dict/dict.js', C = dcz
+R = rs(1,8,0), D = rs(1,2,0), U = 'https://localhost:D/dict/css/c.txt', O = ok, DU = 'https://localhost:D/dict/dict.css', C = dcb
+R = rs(1,9,0), D = rs(1,3,0), U = 'https://localhost:D/dict/js/badhash.txt', O = decoding_failed, DU = 'https://localhost:D/dict/dict.js', C = none
+R = rs(1,10,0), D = rs(1,3,0), U = 'https://localhost:D/dict/js/bad.txt', O = ok, DU = 'https://localhost:D/dict/dict.js', C = dcb
+R = rs(1,12,0), D = rs(1,3,0), U = 'https://localhost:D/dict/js/next.txt', O = ok, DU = 'https://localhost:D/dict/dict.js', C = dcb
+R = rs(1,13,0), D = rs(1,12,0), U = 'https://localhost:D/dict/next/x.txt', O = ok, DU = 'https://localhost:D/dict/js/next.txt', C = dcz
+== the waits, Chromium's: an answer after 11 s waited for, a TLS handshake given up after 30 s (both run beside the rest)
+R = rs(1,1,0), U = 'https://localhost:LATE/h2/one.html', O = ok, S = 200, Why = none
+R = rs(1,2,0), U = 'https://localhost:LATE/h2/a.css', O = ok, S = 200, Why = none
+answered after 11 s or more
+R = rs(1,1,0), U = 'https://localhost:LATE/t/waits.html', O = ok, S = 200, Why = none
+R = rs(1,2,0), U = 'https://127.0.0.1:MUTE/never.css', O = tls_handshake_failed, S = 0, Why = '127.0.0.1 port MUTE: no TLS handshake in 30 seconds'
+given up after 30 s
+-- AMB_NET_TIMEOUT=1000 cuts each wait short: the handshake; the CONNECT of a proxy there (the page's own host reached directly)
+R = rs(1,2,0), U = 'https://127.0.0.1:MUTE/never.css', O = tls_handshake_failed, S = 0, Why = '127.0.0.1 port MUTE: no TLS handshake in 1 second'
+R = rs(1,2,0), U = 'https://127.0.0.1:MUTE/never.css', O = proxy_refused, S = 0, Why = 'the proxy did not answer CONNECT in 1 second'

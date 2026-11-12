@@ -1,0 +1,1 @@
+js/bad.txt: the quick brown fox jumps over the lazy dog; its Brotli stream cut short

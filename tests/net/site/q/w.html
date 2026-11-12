@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<meta charset="windows-1252">
+<title>A page in windows-1252</title>
+<!-- tests/net/site/q/: a page in a legacy encoding names its parts with a query in it; each request's target
+     as the server got it, against Chromium's (tests/net/query.chromium): the query written in the page's
+     encoding (a character it lacks %26%23N%3B), the path in UTF-8, a fetch()'s query in UTF-8, an
+     XMLHttpRequest's in the page's; a fetched sheet's URLs in the sheet's own encoding (u.css by its
+     charset, c.css by its @charset, imp.css as the sheet that imports it), else the page's (nw.css) -->
+<style>.bg { background: url(bg.png?q=é) }</style>
+<div class="bg">bg</div>
+<img src="img.png?q=é" alt="">
+<img src="lacks.png?q=&#937;" alt="">
+<img src="péth.png?q=1" alt="">
+<link rel="stylesheet" href="s.css?q=é">
+<link rel="stylesheet" href="u.css"><link rel="stylesheet" href="c.css"><link rel="stylesheet" href="nw.css">
+<div class="u">u</div><div class="c">c</div><div class="i">i</div><div class="n">n</div>
+<script src="s.js?q=é"></script>
+<iframe src="f.html?q=é"></iframe>
+<script>
+fetch("fetch.txt?q=é");
+var x = new XMLHttpRequest(); x.open("GET", "xhr.txt?q=é", false); x.send();
+</script>

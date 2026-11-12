@@ -5,7 +5,8 @@ free port, which it prints first.
 
 Each ROOT's files, the first that has the path; in an .html file each NAME of --sub
 is replaced by its VALUE, then PORT by the server's port. A file's FILE.headers, if
-there is one, holds header lines its response adds (Set-Cookie, Cache-Control ...);
+there is one, holds header lines its response adds (Set-Cookie, Cache-Control ...; a
+Content-Type there in place of the server's own);
 an Expires or Last-Modified written +N or -N is the response's Date plus or less N
 seconds, and an ETag written auto is a hash of the body. A request whose
 If-None-Match holds the file's ETag, or else whose If-Modified-Since is not before
@@ -183,7 +184,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = body.replace(name.encode(), value.encode())
             body = body.replace(b"PORT", str(port).encode())
         types = {".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".png": "image/png"}
-        headers = [("Content-Type", types.get(ext, "application/octet-stream"))] + sidecar(p + ".headers", body)
+        extra = sidecar(p + ".headers", body)
+        # a Content-Type the sidecar gives is the response's, in place of the server's own
+        own = [] if any(k.lower() == "content-type" for k, _ in extra) else [("Content-Type", types.get(ext, "application/octet-stream"))]
+        headers = own + extra
         if fresh_for(self, headers):
             if os.path.isfile(p + ".304.headers"):
                 headers = sidecar(p + ".304.headers", body)

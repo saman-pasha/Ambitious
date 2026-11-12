@@ -1,0 +1,126 @@
+sha256 of no bytes: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+sha256 of abc: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+sha256 of the two-block message: 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1
+sha256 of a million a's: cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0
+field match="/d/a/*": match /d/a/*
+field match="/d/e/*", match-dest=("script" "style"): match /d/e/*, match-dest ("script" "style")
+field match="/d/k/*", match-dest=(""): match /d/k/*, match-dest ("")
+field match="/d/f/*", id="dict-f": match /d/f/*, id dict-f
+field match="/d/ie/*", id="": match /d/ie/*
+field match="/d/h/*", type=other: none
+field match="/d/r/*", type=raw: match /d/r/*
+field match=/d/bad/*: none
+field id="x": none
+field match="/d/x/*", match-dest="script": none
+field match="/d/x/*", match-dest=(): match /d/x/*, match-dest ()
+field match="/d/x/*";p=1, extra=?1, n=-1.5: match /d/x/*
+field match="/d/x/*",: none
+field match="/d/\"q\\/*": match /d/"q\/*
+pattern /d/a/*: kept; https://a.localhost:4443/d/a/x.txt matches
+pattern /d/a/*: kept; https://a.localhost:4443/d/a/x.txt?q=1 matches
+pattern /d/a/*: kept; https://a.localhost:4443/d/b/x.txt does not match
+pattern /d/a/*: kept; https://b.localhost:4443/d/a/x.txt does not match
+pattern /d/m/*.txt: kept; https://a.localhost:4443/d/m/x.txt matches
+pattern /d/m/*.txt: kept; https://a.localhost:4443/d/m/x.js does not match
+pattern /d/n/*?*: kept; https://a.localhost:4443/d/n/x?q=1 matches
+pattern /d/n/*?*: kept; https://a.localhost:4443/d/n/x matches
+pattern /d/s/*?v=1: kept; https://a.localhost:4443/d/s/x?v=1 does not match
+pattern /d/s/*?v=1: kept; https://a.localhost:4443/d/s/x?v=2 does not match
+pattern /d/o/:id: kept; https://a.localhost:4443/d/o/123 matches
+pattern /d/o/:id: kept; https://a.localhost:4443/d/o/1/2 does not match
+pattern /d/l/(\d+): not kept
+pattern /d/g/{x}: not kept
+pattern /d/o/:id?: not kept
+pattern https://a.localhost:4443/d/ab/*: kept; https://a.localhost:4443/d/ab/x.txt matches
+pattern https://b.localhost:4443/d/j/*: not kept
+pattern x/*: kept; https://a.localhost:4443/d/x/y.txt matches
+pattern x/*: kept; https://a.localhost:4443/x/y.txt does not match
+pattern ?q=*: kept; https://a.localhost:4443/d/dict.js?q=7 matches
+pattern /d/h/*#*: kept; https://a.localhost:4443/d/h/x matches
+pattern /d/h/*#top: not kept
+pattern : not kept
+edited-small-q11.br: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+edited-small-q5.br: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+edited-small-q9-w10.br: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+edited-small-q19.zst: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+edited-small-q3.zst: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+edited-small-q9-w10.zst: 3043 bytes, crc32 965c8847
+  without its dictionary: refused
+  with a bound one byte short: refused
+unrelated-small-q11.br: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+unrelated-small-q5.br: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+unrelated-small-q9-w10.br: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+unrelated-small-q19.zst: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+unrelated-small-q3.zst: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+unrelated-small-q9-w10.zst: 2000 bytes, crc32 74aa9da2
+  without its dictionary: decoded
+  with a bound one byte short: refused
+again-small-q11.br: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+again-small-q5.br: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+again-small-q9-w10.br: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+again-small-q19.zst: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+again-small-q3.zst: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+again-small-q9-w10.zst: 18000 bytes, crc32 1da75b77
+  without its dictionary: refused
+  with a bound one byte short: refused
+empty-small-q11.br: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+empty-small-q5.br: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+empty-small-q9-w10.br: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+empty-small-q19.zst: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+empty-small-q3.zst: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+empty-small-q9-w10.zst: 0 bytes, crc32 00000000
+  without its dictionary: decoded
+long-large-q11.br: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+long-large-q5.br: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+long-large-q9-w10.br: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+long-large-q19.zst: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+long-large-q3.zst: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+long-large-q9-w10.zst: 230233 bytes, crc32 bf58bbb4
+  without its dictionary: refused
+  with a bound one byte short: refused
+broken at random: 108 decoded, 1092 refused, of 1200

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<meta charset="Shift_JIS">
+<title>A page in Shift_JIS</title>
+<!-- tests/net/site/q/: a page in a legacy encoding names its parts with a query in it; each request's target
+     as the server got it, against Chromium's (tests/net/query.chromium): the query written in the page's
+     encoding (a character it lacks %26%23N%3B), the path in UTF-8, a fetch()'s query in UTF-8, an
+     XMLHttpRequest's in the page's; a fetched sheet's URLs in the sheet's own encoding (u.css by its
+     charset, c.css by its @charset, imp.css as the sheet that imports it), else the page's (ns.css) -->
+<style>.bg { background: url(bg.png?q=日本) }</style>
+<div class="bg">bg</div>
+<img src="img.png?q=日本" alt="">
+<img src="lacks.png?q=&#8364;" alt="">
+<img src="p日本th.png?q=1" alt="">
+<link rel="stylesheet" href="s.css?q=日本">
+<link rel="stylesheet" href="u.css"><link rel="stylesheet" href="c.css"><link rel="stylesheet" href="ns.css">
+<div class="u">u</div><div class="c">c</div><div class="i">i</div><div class="n">n</div>
+<script src="s.js?q=日本"></script>
+<iframe src="f.html?q=日本"></iframe>
+<script>
+fetch("fetch.txt?q=日本");
+var x = new XMLHttpRequest(); x.open("GET", "xhr.txt?q=日本", false); x.send();
+</script>

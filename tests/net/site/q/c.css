@@ -1,0 +1,3 @@
+@charset "utf-8";
+/* c.css: UTF-8 by its @charset */
+.c { background: url(sc.png?q=é) }

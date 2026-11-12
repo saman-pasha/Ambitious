@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<title>Again, over a dictionary</title>
+<!-- tests/net/site/dict/again.html: the second visit, in the same profile: its navigation offers nav.js's
+     dictionary (a document's), and comes coded dcb over it; its sheet offers dict.css's (a style's) and comes
+     coded dcz. the quick brown fox jumps over the lazy dog -->
+<link rel="stylesheet" href="css/again.css">
+<p class="again">The page again</p>
+<script>addEventListener('load', () => { console.log(document.title); console.log(getComputedStyle(document.querySelector('.again')).color); document.title = 'done'; });</script>

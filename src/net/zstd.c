@@ -20,7 +20,16 @@
    frame's start or past its window, a block past its maximum (the window, at most
    128 KB), a reserved bit or block type, and a size or checksum that is not the
    content's each refuse the whole content. Nothing outside the input is read, nothing
-   past cap written. */
+   past cap written.
+
+   With a raw dictionary (net_zstd_dict: RFC 9842's dcz coding, as Chromium loads one,
+   ZSTD_dct_rawContent), every frame's content follows the dictionary's bytes: a match may
+   reach back into them, past the frame's start (and then on into the content), as far as the
+   dictionary's first byte, whatever the window; the repeat offsets begin as without one. A
+   frame naming a dictionary ID is still refused (the raw dictionary has none, as libzstd
+   refuses it), and the window may then be as large as 1.25 times the dictionary, rounded up
+   to a power of two, from 8 MB to 128 MB (Chromium's ZSTD_d_windowLogMax, clamp(ceil(log2(size
+   * 1.25)), 23, 27)). */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -547,15 +556,24 @@ static int zs_table(const uint8_t *in, size_t *at, size_t end, uint32_t mode, zs
 /* the literals lit[from, ...) and a match of ml bytes off back appended to out, as a
    sequence executes (RFC 8878, 3.1.2.5) */
 static int zs_put(const vector<uint8_t> *lit, size_t from, size_t ll, uint64_t off, size_t ml, zs_frame *fr, size_t block_start,
-                  vector<uint8_t> *out, size_t cap) {
+                  vector<uint8_t> *out, size_t cap, const uint8_t *dict, size_t dn) {
     size_t o = len(*out);
     if (o - block_start + ll + ml > fr->block_max) return ZS_E_BLOCK_SIZE;
     if (o + ll + ml > cap) return ZS_E_CAP;
-    if (ml && (off > o - fr->start + ll || off > fr->window)) return ZS_E_OFFSET;
+    if (ml && (off > o - fr->start + ll + dn || (!dn && off > fr->window))) return ZS_E_OFFSET;
     resize(out, o + ll + ml);
     uint8_t *p = data(*out);
     if (ll) memcpy(p + o, data(*lit) + from, ll);
-    size_t d = o + ll, src = d - (size_t)off;
+    size_t d = o + ll;
+    if (off > d - fr->start) {
+        /* back into the dictionary, then on into the frame's content */
+        for (size_t i = 0; i < ml; i++) {
+            uint64_t at = (uint64_t)(d + i - fr->start);
+            p[d + i] = at >= off ? p[fr->start + (size_t)(at - off)] : dict[dn - (size_t)(off - at)];
+        }
+        return ZS_OK;
+    }
+    size_t src = d - (size_t)off;
     if (off >= ml) {
         if (ml) memcpy(p + d, p + src, ml);
     } else
@@ -566,7 +584,7 @@ static int zs_put(const vector<uint8_t> *lit, size_t from, size_t ll, uint64_t o
 /* a compressed block's sequences section from in[at, end) (RFC 8878, 3.1.1.3.2), each
    sequence executed over the block's literals; then the literals left */
 static int zs_sequences(const uint8_t *in, size_t at, size_t end, zs_frame *fr, const vector<uint8_t> *lit, vector<uint8_t> *out,
-                        size_t cap, net_zstd_stats *st) {
+                        size_t cap, net_zstd_stats *st, const uint8_t *dict, size_t dn) {
     size_t nl = len(*lit), lp = 0, block_start = len(*out);
     if (at >= end) return ZS_E_SEQ_HEADER;
     uint32_t nseq = in[at++];
@@ -633,20 +651,21 @@ static int zs_sequences(const uint8_t *in, size_t at, size_t end, zs_frame *fr, 
             }
             if (b.over) return ZS_E_SEQUENCES;
             if (ll > nl - lp) return ZS_E_SEQUENCES;
-            r = zs_put(lit, lp, ll, off, ml, fr, block_start, out, cap);
+            r = zs_put(lit, lp, ll, off, ml, fr, block_start, out, cap, dict, dn);
             if (r) return r;
             lp += ll;
         }
         if (b.pos || b.over) return ZS_E_SEQUENCES;
         if (st) st->sequences += nseq;
     }
-    return zs_put(lit, lp, nl - lp, 0, 0, fr, block_start, out, cap);
+    return zs_put(lit, lp, nl - lp, 0, 0, fr, block_start, out, cap, dict, dn);
 }
 
-/* the frame at in[*at] (its magic number checked), its blocks decoded into out; *at past
-   it. The dictionary it names and its window in *dict and *window */
+/* the frame at in[*at] (its magic number checked), its blocks decoded into out after the
+   raw dictionary rd (rn bytes; none when 0), its window at most wmax; *at past it. The
+   dictionary it names and its window in *dict and *window */
 static int zs_frame_decode(const uint8_t *in, size_t n, size_t *at, zs_frame *fr, vector<uint8_t> *lit, vector<uint8_t> *out,
-                           size_t cap, net_zstd_stats *st, uint32_t *dict, uint64_t *window) {
+                           size_t cap, net_zstd_stats *st, uint32_t *dict, uint64_t *window, const uint8_t *rd, size_t rn, uint64_t wmax) {
     size_t p = *at + 4;
     if (p >= n) return ZS_E_SHORT;
     uint32_t fhd = in[p++];
@@ -678,7 +697,7 @@ static int zs_frame_decode(const uint8_t *in, size_t n, size_t *at, zs_frame *fr
     *dict = did;
     *window = w;
     if (did) return ZS_E_DICT;
-    if (w > ZS_WINDOW_MAX) return ZS_E_WINDOW;
+    if (w > wmax) return ZS_E_WINDOW;
     if (w < 1024) w = 1024;
     fr->window = w;
     fr->block_max = w < ZS_BLOCK_MAX ? (size_t)w : ZS_BLOCK_MAX;
@@ -717,7 +736,7 @@ static int zs_frame_decode(const uint8_t *in, size_t n, size_t *at, zs_frame *fr
             } else {
                 size_t lu = 0;
                 int r = zs_literals(in, p, p + bsize, fr, lit, &lu, st);
-                if (!r) r = zs_sequences(in, p + lu, p + bsize, fr, lit, out, cap, st);
+                if (!r) r = zs_sequences(in, p + lu, p + bsize, fr, lit, out, cap, st, rd, rn);
                 if (r) return r;
                 if (st) st->compressed_blocks++;
             }
@@ -738,6 +757,21 @@ static int zs_frame_decode(const uint8_t *in, size_t n, size_t *at, zs_frame *fr
 }
 
 int net_zstd(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap, char *why, size_t wcap, net_zstd_stats *stats) {
+    return net_zstd_dict(in, n, 0, 0, out, cap, why, wcap, stats);
+}
+
+int net_zstd_dict(const uint8_t *in, size_t n, const uint8_t *dict, size_t dn, vector<uint8_t> *out, size_t cap, char *why, size_t wcap,
+                  net_zstd_stats *stats) {
+    /* the window's bound: 8 MB, or with a dictionary 1.25 times it, a power of two, to 128 MB */
+    uint64_t wmax = ZS_WINDOW_MAX;
+    if (dn) {
+        uint64_t want = (uint64_t)dn + dn / 4 + (dn % 4 != 0);
+        uint32_t lg = 0;
+        while (lg < 63 && ((uint64_t)1 << lg) < want) lg++;
+        if (lg < 23) lg = 23;
+        if (lg > 27) lg = 27;
+        wmax = (uint64_t)1 << lg;
+    }
     zs_frame fr;
     memset(&fr, 0, sizeof fr);
     vector<uint8_t> lit;
@@ -764,15 +798,17 @@ int net_zstd(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap, char
             r = at ? ZS_E_TRAILING : ZS_E_MAGIC;
             break;
         }
-        uint32_t dict = 0;
+        uint32_t did = 0;
         uint64_t window = 0;
-        r = zs_frame_decode(in, n, &at, &fr, &lit, out, cap, stats, &dict, &window);
+        r = zs_frame_decode(in, n, &at, &fr, &lit, out, cap, stats, &did, &window, dict, dn, wmax);
         if (r == ZS_E_DICT) {
-            snprintf(why, wcap, "the zstd frame needs dictionary %u, and none is used here (nor in Chromium)", dict);
+            snprintf(why, wcap, "the zstd frame needs dictionary %u, and none is used here (nor in Chromium)", did);
             return 0;
         }
         if (r == ZS_E_WINDOW) {
-            snprintf(why, wcap, "the zstd frame's window is %llu bytes, past the 8 MB HTTP's zstd allows", (unsigned long long)window);
+            if (dn) snprintf(why, wcap, "the zstd frame's window is %llu bytes, past the %llu its dictionary allows", (unsigned long long)window,
+                             (unsigned long long)wmax);
+            else snprintf(why, wcap, "the zstd frame's window is %llu bytes, past the 8 MB HTTP's zstd allows", (unsigned long long)window);
             return 0;
         }
     }

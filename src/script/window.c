@@ -143,7 +143,7 @@ static jv sw_push(js_vm *vm, int replace, jv state, jv url) {
     if (!jv_is_nullish(url)) {
         if (!sh_utf8(vm, url, &ref)) return JV_HOLE;
         push_back(ref, 0);
-        if (!net_url_resolve(data(page), data(ref), abs, sizeof abs)) {
+        if (!net_url_resolve_enc(data(page), data(ref), vm->host->charset - 1, abs, sizeof abs)) {
             char msg[600];
             snprintf(msg, sizeof msg, "%sAn invalid URL '%s' was given.", pre[replace], data(ref));
             return sh_dom_error(vm, "SecurityError", msg);

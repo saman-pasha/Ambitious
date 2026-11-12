@@ -829,7 +829,8 @@ void script_navigate(js_vm *vm, uint32_t cause, const char *url, size_t n) {
     char base[4200], ref[8192], abs[8400];
     sh_page_url(vm, base, sizeof base);
     snprintf(ref, sizeof ref, "%.*s", (int)n, url);
-    if (!net_url_resolve(base, ref, abs, sizeof abs)) return;
+    /* encoding-parsed: its query in the document's encoding (a link's, location's, as Chromium's) */
+    if (!net_url_resolve_enc(base, ref, vm->host->charset - 1, abs, sizeof abs)) return;
     /* the fragment kept: net_url_resolve drops it, so it is put back from the reference */
     size_t hn = si_unfrag(ref);
     if (ref[hn] == '#' && strlen(abs) + strlen(ref + hn) < sizeof abs) strcat(abs, ref + hn);
@@ -895,7 +896,8 @@ static void si_submit(js_vm *vm, uint32_t form, uint32_t submitter, int via_subm
     sh_page_url(vm, base, sizeof base);
     if (!si_form_attr(d, form, submitter, "formaction", "action", &action) || !len(action)) { clear(action); append_range(action, base, strlen(base)); }
     snprintf(ref, sizeof ref, "%.*s", (int)len(action), data(action));
-    if (!net_url_resolve(base, ref, abs, sizeof abs)) return;
+    /* the action encoding-parsed, in the document's encoding (measured: form.action) */
+    if (!net_url_resolve_enc(base, ref, vm->host->charset - 1, abs, sizeof abs)) return;
     int post = si_form_attr(d, form, submitter, "formmethod", "method", &method) && si_eq(&method, "post");
     si_form_attr(d, form, submitter, "formtarget", "target", &target);
     push_back(target, 0);
@@ -977,7 +979,7 @@ void script_click_default(js_vm *vm, uint32_t x) {
             sh_page_url(vm, base, sizeof base);
             snprintf(ref, sizeof ref, "%.*s", (int)len(href), data(href));
             if (!target[0] || strcmp(data(target), "_self") == 0) { script_navigate(vm, SCRIPT_NAV_CAUSE_LINK, data(href), len(href)); return; }
-            if (net_url_resolve(base, ref, abs, sizeof abs))
+            if (net_url_resolve_enc(base, ref, vm->host->charset - 1, abs, sizeof abs))
                 si_navigate(vm, SCRIPT_NAV_CAUSE_LINK, "GET", abs, strlen(abs), "", 0, "", 0, 0, data(target), 0);
             return;
         }

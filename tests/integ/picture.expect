@@ -42,3 +42,18 @@ spaces||1|800|1
 emptysrc||1|800|1
 == each img's image, natural size and border box, against Chromium's (tests/net/picture.chromium):
 the same, img by img (22 of them)
+== a source's width and height, its img's when it takes that source (tests/net/site/p/dims.html), against Chromium's (tests/net/picture-dims.chromium):
+9 of 9 images the same
+-- the declarations that sized them: the source's attributes, or the img's own
+Id = both, P = width, X = declared('100px',written('width=100'),by('the source\'s width attribute'),in(author))
+Id = both, P = height, X = declared('50px',written('height=50'),by('the source\'s height attribute'),in(author))
+Id = wonly, P = width, X = declared('60px',written('width=60'),by('the source\'s width attribute'),in(author))
+Id = wonly, P = height, X = initial(auto,'no declaration applies')
+Id = nottaken, P = width, X = declared('40px',written('width=40'),by('the width attribute'),in(author))
+Id = nottaken, P = height, X = initial(auto,'no declaration applies')
+== images chosen in the profile's viewport, zoom, colour scheme, motion and font size (tests/net/site/e/page.html), against Chromium's under the same settings (tests/net/env.chromium):
+defaults: 15 of 15 images the same
+zoom 2: 15 of 15 images the same
+zoom 2.5: 15 of 15 images the same
+dark, reduced motion: 15 of 15 images the same
+font 20: 15 of 15 images the same

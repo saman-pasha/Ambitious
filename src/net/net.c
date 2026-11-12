@@ -14,7 +14,9 @@
    (base64 or percent-encoded). http: and https: are HTTP/1.1, and HTTP/2 over TLS
    when the server's ALPN chooses it (src/net/h2.c, its header blocks by
    src/net/hpack.c): interim 1xx answers passed over, at most five redirects (from
-   one protocol to the other as they come), ten seconds a read, 32 MB a body. The
+   one protocol to the other as they come), 32 MB a body; a connect waited for four
+   minutes, a proxy's tunnel and a TLS handshake 30 seconds each, an answer as long as
+   it takes, as Chromium waits (AMB_NET_TIMEOUT, in ms, caps every wait). The
    request is Chromium's: its fields in its order and case (lowercase over HTTP/2,
    the Cookie in crumbs), client hints and fetch metadata to a potentially
    trustworthy URL alone (https:, a loopback host), the Referer of the default
@@ -29,7 +31,11 @@
    connection to the same origin (through the same proxy) carries the next request
    there, HTTP/1.1's kept alive, up to six to an origin at once; an HTTP/2
    connection is one per origin, its requests concurrent streams within the
-   server's SETTINGS_MAX_CONCURRENT_STREAMS (100 until it says). A page's parts are
+   server's SETTINGS_MAX_CONCURRENT_STREAMS (100 until it says), and one made
+   directly also carries another host that resolves to its address and port and that
+   its certificate covers (Chromium's pooling by IP; a 421 asked again on the host's
+   own connection). TLS sessions are kept and resumed as Chromium's session cache
+   keeps them (below). A page's parts are
    fetched together: each made as the page orders them, its Cookie the jar's then,
    the exchanges carried at once over sockets that do not wait (poll), the answers
    taken in the page's order. A request on a reused connection that closes before
@@ -56,23 +62,28 @@
    that fails has its reason in words.
 
    What a page asks for: <link rel=stylesheet href>, <img src>, <script src>
-   (fetched, never run), an SVG <image href> (or xlink:href), each URL fetched once.
-   An img with a srcset takes the
-   candidate HTML's image source selection gives for an 800x600 viewport at a
-   device pixel ratio of 1: srcset parsed as HTML says, a width descriptor's
-   density by the length of the first entry of sizes whose media condition holds
-   (100vw when none; px, em, vw ... and calc() of them), src a 1x candidate when
-   no candidate is 1x and none has a width, and of the densities sorted the first
-   at 1 or past it, else the greatest, as Blink picks; the image's size is then
-   its header's divided by its density. An img in a <picture> first takes the
+   (fetched, never run), an SVG <image href> (or xlink:href), each URL fetched once,
+   its query written in the page's encoding (net_set_encoding: the URL standard's
+   encoding argument). An img with a srcset takes the candidate HTML's image source
+   selection gives in the environment the shell sets (net_set_env: the profile's
+   viewport, the device pixel ratio its zoom makes, its font size, colour scheme and
+   motion; an 800x600 viewport at 1, 16px, light, by default): srcset parsed as HTML
+   says, a width descriptor's density by the length of the first entry of sizes
+   whose media condition holds (100vw when none; px, em, vw ... and calc() of them),
+   src a 1x candidate when no candidate is 1x and none has a width, and of the
+   densities sorted the first at the device pixel ratio or past it, else the
+   greatest, as Blink picks (measured at ratios of 1, 2 and 2.5); the image's size is
+   then its header's divided by its density, floored as naturalWidth is (layout
+   takes it unrounded). An img in a <picture> first takes the
    first <source> before it, among the picture's children, whose srcset has a
    candidate, whose type (its MIME type's essence, in any case; empty for any) is
    one the painter draws (PNG, GIF, JPEG, WebP, SVG: not AVIF or BMP, which
    Chromium takes) and whose media query list holds (all and screen, not print;
    and, or, not, only; width, height, orientation and resolution, ranges, the
-   colour scheme (light), a mouse's hover and fine pointer, a feature's name
-   alone), by the source's own sizes; the source is a fact. Else its own srcset
-   and src, as above. A source's width and height are not the img's. A
+   colour scheme and reduced motion, a mouse's hover and fine pointer, a feature's
+   name alone), by the source's own sizes; the source is a fact, and its width and
+   height are the img's (the cascade's dimension attribute source). Else its own
+   srcset and src, as above. A
    page served over http: or https: may not load a file: URL: blocked, here in
    C; nor any kind of resource its profile denies its site. An image's size is
    read from its header (PNG, GIF, JPEG); its pixels are not decoded here.
@@ -86,7 +97,8 @@
    Cookies (RFC 6265bis) are kept in a jar, in the file net_keep names (a
    profile's) or for the run alone; the HTTP cache (RFC 9111) in the directory it
    names; gzip and deflate are decoded over the painter's inflate, br over its
-   Brotli decoder (src/paint/brotli.c), zstd by src/net/zstd.c. Each section
+   Brotli decoder (src/paint/brotli.c), zstd by src/net/zstd.c, dcb and dcz over a
+   dictionary kept (Compression Dictionary Transport, RFC 9842). Each section
    below says what of it is done. */
 #include <stdio.h>
 #include <string.h>
@@ -111,6 +123,7 @@
 #include "../paint/brotli.h"
 #include "zstd.h"
 #include "h2.h"
+#include "dict.h"
 
 amb_interface(dom);
 amb_implementation(net);
@@ -172,6 +185,30 @@ void ERR_error_string_n(unsigned long e, char *buf, size_t len);
 void ERR_clear_error(void);
 int SSL_get_error(const SSL *ssl, int ret);
 uint64_t SSL_CTX_set_options(SSL_CTX *ctx, uint64_t op);
+/* the sessions a client keeps to resume (Chromium's SSLClientSessionCache), and the peer's
+   certificate a connection pooled by IP is held to */
+typedef struct ssl_session_st SSL_SESSION;
+typedef struct x509_st X509;
+void SSL_CTX_sess_set_new_cb(SSL_CTX *ctx, int (*cb)(SSL *, own SSL_SESSION *));
+int SSL_set_session(SSL *ssl, SSL_SESSION *session);
+void SSL_SESSION_free(own SSL_SESSION *session);
+int SSL_session_reused(const SSL *s);
+long SSL_SESSION_get_time(const SSL_SESSION *s);
+long SSL_SESSION_get_timeout(const SSL_SESSION *s);
+int SSL_SESSION_get_protocol_version(const SSL_SESSION *s);
+X509 *SSL_get1_peer_certificate(const SSL *s);
+int X509_check_host(X509 *x, const char *chk, size_t chklen, unsigned int flags, char **peername);
+int X509_check_ip_asc(X509 *x, const char *address, unsigned int flags);
+void X509_free(own X509 *a);
+void SSL_set_hostflags(SSL *s, unsigned int flags);
+void SSL_set_shutdown(SSL *ssl, int mode);
+#define NET_SSL_SENT_SHUTDOWN 1
+#define NET_SSL_CTRL_SET_SESS_CACHE_MODE 44
+#define NET_SSL_SESS_CACHE_CLIENT 1
+#define NET_SSL_SESS_CACHE_NO_INTERNAL_STORE 0x200
+#define NET_X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS 4
+#define NET_X509_CHECK_FLAG_NEVER_CHECK_SUBJECT 0x20
+#define NET_TLS1_3_VERSION 0x0304
 #define NET_SSL_CTRL_SET_TLSEXT_HOSTNAME 55
 #define NET_SSL_CTRL_SET_MIN_PROTO_VERSION 123
 #define NET_TLS1_2_VERSION 0x0303
@@ -260,6 +297,19 @@ static int net_resolve(const net_url *base, const char *in, net_url *u) {
     return url_parse(in, strlen(in), base->href, base->p.len, out, sizeof out, &p) && net_url_fill(out, &p, u);
 }
 
+/* the encoding of the document whose URLs are parsed now (net_set_encoding), -1 for UTF-8 */
+static int net_doc_enc = -1;
+void net_set_encoding(int enc) { net_doc_enc = enc; }
+int net_encoding(void) { return net_doc_enc; }
+
+/* a reference resolved against a base, as a document's element names it: its query in the
+   document's encoding (the URL standard's encoding argument) */
+static int net_resolve_enc(const net_url *base, const char *in, int enc, net_url *u) {
+    char out[8192];
+    url_parts p;
+    return url_parse_enc(in, strlen(in), base->href, base->p.len, enc, out, sizeof out, &p) && net_url_fill(out, &p, u);
+}
+
 /* a URL as the loader keeps it: serialized without its fragment, which no fetch
    sends, and without its credentials, which no record keeps */
 static size_t net_url_text(const net_url *u, char *out, size_t cap) {
@@ -278,6 +328,13 @@ static size_t net_origin_text(const net_url *u, char *out, size_t cap) { return 
 int net_url_resolve(const char *base, const char *ref, char *out, size_t cap) {
     net_url b, u;
     if (!net_parse_abs(base, &b) || !net_resolve(&b, ref, &u)) return 0;
+    net_url_text(&u, out, cap);
+    return 1;
+}
+
+int net_url_resolve_enc(const char *base, const char *ref, int enc, char *out, size_t cap) {
+    net_url b, u;
+    if (!net_parse_abs(base, &b) || !net_resolve_enc(&b, ref, enc, &u)) return 0;
     net_url_text(&u, out, cap);
     return 1;
 }
@@ -696,19 +753,28 @@ static net_outcome net_get_data(const net_url *u, vector<char> *body, char *type
 
 /* ---- TLS's context, and what an exchange went over ---- */
 
-/* the TLS client an operation's connections are made by: its context, made at the
-   operation's first https: URL, holds the store of certificate authorities. A connection
-   it made may outlive it in the pool (a session holds its context) */
+/* the TLS client every connection is made by, one for the process as Chromium's is for its
+   network context: its context, made at the first https: URL, holds the store of certificate
+   authorities and hands each new session (a TLS 1.3 ticket, a TLS 1.2 session) to the cache
+   that resumes it (net_session_new, below); the pool frees it as the process ends */
 typedef struct net_tls { own SSL_CTX *ctx; int tried, ok; char why[300]; } net_tls;
+static net_tls net_tls_proc;
+static int net_session_new(SSL *ssl, own SSL_SESSION *sess);
+static void net_pool_kept_once(void);
 
 static int net_tls_ready(net_tls *t) {
     if (t->tried) return t->ok;
     t->tried = 1;
+    net_pool_kept_once();
     const char *env = getenv("SSL_CERT_FILE");
     char ca[1024];
     snprintf(ca, sizeof ca, "%s", env && *env ? env : NET_CA_FILE);
     if (!t->ctx) t->ctx = SSL_CTX_new(TLS_client_method());
     if (!t->ctx) { snprintf(t->why, sizeof t->why, "no TLS context could be made"); return 0; }
+    /* a client's session cache, kept here and not in the library's: each new session handed
+       over (TLS 1.3's after each ticket, TLS 1.2's at its handshake's end) */
+    SSL_CTX_ctrl(t->ctx, NET_SSL_CTRL_SET_SESS_CACHE_MODE, NET_SSL_SESS_CACHE_CLIENT | NET_SSL_SESS_CACHE_NO_INTERNAL_STORE, 0);
+    SSL_CTX_sess_set_new_cb(t->ctx, net_session_new);
     SSL_CTX_ctrl(t->ctx, NET_SSL_CTRL_SET_MIN_PROTO_VERSION, NET_TLS1_2_VERSION, 0);
     if (SSL_CTX_load_verify_locations(t->ctx, ca, 0) != 1) {
         snprintf(t->why, sizeof t->why, "no certificate authority could be read from %s", ca);
@@ -728,7 +794,7 @@ static int net_tls_ready(net_tls *t) {
 
 /* what an exchange went over, recorded on its resource; and why it failed */
 typedef struct net_route {
-    int tls;
+    int tls, resumed;
     char version[32], cipher[96], alpn[32];
     int proxied;
     char proxy[300];
@@ -1725,8 +1791,8 @@ static int net_inflate_body(const uint8_t *p, size_t n, vector<uint8_t> *out, ch
 /* a body decoded from the codings its Content-Encoding lists, the last applied undone
    first; identity is none. gzip and deflate over the painter's inflate, br over its Brotli
    decoder (src/paint/brotli.c), zstd by src/net/zstd.c. The codings into coding;
-   decoding_failed and why for one not read here (compress) or a body that does not
-   decode; too_large for one that decodes past 32 MB */
+   decoding_failed and why for a body that does not decode; too_large for one that decodes
+   past 32 MB. One coding not read here (compress) and the body is taken as it came */
 static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *body, char *coding, size_t ccap, char *why, size_t wcap) {
     char ce[256], names[8][24];
     int nn = 0;
@@ -1748,6 +1814,15 @@ static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *bo
         }
         a = b + 1;
     }
+    /* a coding not read here leaves the body as it came, every coding undone (Chromium's
+       URLRequestHttpJob passes the raw body on: measured, compress, and dcb or dcz with no
+       dictionary offered) */
+    for (int c = 0; c < nn; c++)
+        if (strcmp(names[c], "gzip") != 0 && strcmp(names[c], "x-gzip") != 0 && strcmp(names[c], "deflate") != 0 && strcmp(names[c], "br") != 0 &&
+            strcmp(names[c], "zstd") != 0) {
+            coding[0] = 0;
+            return NET_OUTCOME_OK;
+        }
     for (int c = nn - 1; c >= 0; c--) {
         vector<uint8_t> in, out;
         resize(in, len(*body));
@@ -1769,9 +1844,6 @@ static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *bo
             ok = z == 1;
             too = z < 0;
             if (too) snprintf(why, wcap, "the decoded body passed 32 MB");
-        } else {
-            snprintf(why, wcap, "the content coding %s is not one read here", names[c]);
-            return NET_OUTCOME_DECODING_FAILED;
         }
         if (!ok) return too ? NET_OUTCOME_TOO_LARGE : NET_OUTCOME_DECODING_FAILED;
         clear(*body);
@@ -1808,6 +1880,385 @@ static int net_trustworthy(const net_url *u) {
         return v6[7] == 1;
     }
     return 0;
+}
+
+/* ---- compression dictionaries (RFC 9842), kept and offered as Chromium keeps and offers them ----
+
+   A response is kept as a dictionary when it carries Use-As-Dictionary (src/net/dict.c reads
+   it: a match, a match-dest, an id, the type raw) from a potentially trustworthy URL (https:,
+   a loopback host: measured over http://localhost), when it is readable by its page (of the
+   page's origin, or asked for in CORS mode -- a crossorigin element -- and allowed by its
+   Access-Control-Allow-Origin; measured: a no-cors script of another origin keeps none, a
+   crossorigin one does), when its match is a pattern of its own origin with no regular
+   expression, and when it is fresh: its freshness lifetime (max-age, Expires, or the
+   heuristic of its Last-Modified) more than its age, no no-store, no-cache or Pragma:
+   no-cache (measured: none of max-age=0, no-cache, no-store keeps one; a heuristic lifetime
+   does; a 404 does; a gzipped body is kept decoded). It lives until that lifetime ends. A
+   dictionary of the same origin, match and match-dest replaces the one before it.
+
+   A request offers one when its URL is potentially trustworthy, when it is not a no-cors
+   request of another origin than its page's (measured: an img of another origin offers none,
+   one with crossorigin does), of the dictionaries of its URL's origin that have not expired,
+   whose match-dest is none or holds the request's destination (document, style, image,
+   script, or "" for a script's fetch: measured), and whose pattern matches its URL: the one
+   of the longest match, the latest of equal ones (measured). It is sent as
+   Available-Dictionary (its SHA-256, a byte sequence), with Dictionary-ID when it has an id,
+   and Accept-Encoding offers dcb and dcz after the others.
+
+   A response whose Content-Encoding is dcb or dcz alone, to a request that offered a
+   dictionary, begins with its magic number and the dictionary's SHA-256 (another is
+   ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER, measured: here decoding_failed), then a Brotli
+   stream (src/paint/brotli.c) or a Zstandard frame (src/net/zstd.c) over the dictionary as a
+   raw one. Without a dictionary offered, dcb and dcz are codings not read, and the body is
+   taken as it came (measured), as every coding not read is.
+
+   The dictionaries are the process's, as Chromium's are its profile's: kept in the cache's
+   directory too when there is one (a profile's), an index (dictionaries) and a file of each
+   dictionary's bytes, read at the first fetch that keeps one, so that a later run offers
+   them. */
+static int net_has_token(const char *v, const char *tok);
+#define NET_DICTS 64
+typedef struct net_dictionary {
+    int live;
+    char url[2048], origin[600];
+    net_dict_field f;
+    uint8_t hash[32];
+    char sf[64];                 /* Available-Dictionary's value: :base64: */
+    int64_t expires;
+    uint64_t order;
+    vector<uint8_t> bytes;
+} net_dictionary;
+static net_dictionary net_dicts[NET_DICTS];
+static uint64_t net_dict_clock;
+/* the cache directory whose index was read (once a process) */
+static char net_dict_dir[1100];
+static int net_dict_dir_read;
+
+/* the request's destination, as match-dest names one */
+static const char *net_dict_dest(net_kind kind) {
+    if (kind == NET_KIND_DOCUMENT) return "document";
+    if (kind == NET_KIND_STYLESHEET) return "style";
+    if (kind == NET_KIND_IMAGE) return "image";
+    if (kind == NET_KIND_SCRIPT) return "script";
+    return "";
+}
+
+/* a dictionary's place freed */
+static void net_dict_forget(int k) {
+    vector_uint8_t_drop(&net_dicts[k].bytes);
+    memset(&net_dicts[k], 0, sizeof net_dicts[k]);
+}
+
+/* a dictionary's SHA-256 as hex, and as Available-Dictionary writes it */
+static void net_dict_hex(const uint8_t *h, char *out) {
+    static const char x[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+        out[2 * i] = x[h[i] >> 4];
+        out[2 * i + 1] = x[h[i] & 15];
+    }
+    out[64] = 0;
+}
+static void net_dict_sf(net_dictionary *d) {
+    char b64[64];
+    net_base64_encode((const char *)d->hash, 32, b64, sizeof b64);
+    snprintf(d->sf, sizeof d->sf, ":%s:", b64);
+}
+
+/* a dictionary's field written again, as Use-As-Dictionary would carry it (the index's form) */
+static void net_dict_field_write(const net_dict_field *f, char *out, size_t cap) {
+    vector<char> o;
+    append_range(o, "match=\"", 7);
+    for (size_t i = 0; f->match[i]; i++) {
+        if (f->match[i] == '"' || f->match[i] == '\\') push_back(o, '\\');
+        push_back(o, f->match[i]);
+    }
+    push_back(o, '"');
+    if (f->has_dest) {
+        append_range(o, ", match-dest=(", 14);
+        size_t a = 0, n = strlen(f->dest);
+        int first = 1;
+        while (a < n) {
+            size_t b = a;
+            while (b < n && f->dest[b] != '\n') b++;
+            if (!first) push_back(o, ' ');
+            first = 0;
+            push_back(o, '"');
+            for (size_t i = a; i < b; i++) {
+                if (f->dest[i] == '"' || f->dest[i] == '\\') push_back(o, '\\');
+                push_back(o, f->dest[i]);
+            }
+            push_back(o, '"');
+            a = b + 1;
+        }
+        push_back(o, ')');
+    }
+    if (f->id[0]) {
+        append_range(o, ", id=\"", 6);
+        for (size_t i = 0; f->id[i]; i++) {
+            if (f->id[i] == '"' || f->id[i] == '\\') push_back(o, '\\');
+            push_back(o, f->id[i]);
+        }
+        push_back(o, '"');
+    }
+    snprintf(out, cap, "%.*s", (int)len(o), data(o));
+}
+
+/* the cache's directory made, and the one it is in, as the cache makes them (its owner's alone) */
+static void net_dict_dir_make(const char *dir) {
+    char up[1200];
+    snprintf(up, sizeof up, "%s", dir);
+    size_t n = strlen(up);
+    while (n && up[n - 1] != '/') n--;
+    if (n > 1) {
+        up[n - 1] = 0;
+        mkdir(up, 0700);
+    }
+    mkdir(dir, 0700);
+}
+
+/* the cache directory's index written again: a line a dictionary (its hash, expiry, order, URL
+   and field), each dictionary's bytes in a file of its hash; its owner's alone to read */
+static void net_dict_index_write(const char *dir) {
+    char path[1200], tmp[1210];
+    snprintf(path, sizeof path, "%s/dictionaries", dir);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    mode_t mask = umask(077);
+    own FILE *f = fopen(tmp, "w");
+    umask(mask);
+    if (!f) return;
+    for (int k = 0; k < NET_DICTS; k++) {
+        if (!net_dicts[k].live) continue;
+        char hex[65], field[5000];
+        net_dict_hex(net_dicts[k].hash, hex);
+        net_dict_field_write(&net_dicts[k].f, field, sizeof field);
+        fprintf(f, "%s\t%lld\t%llu\t%s\t%s\n", hex, (long long)net_dicts[k].expires, (unsigned long long)net_dicts[k].order, net_dicts[k].url,
+                field);
+    }
+    fclose(f);
+    rename(tmp, path);
+}
+
+/* the dictionaries the cache directory keeps read, once a process: those not expired, whose
+   bytes are there and are their hash's */
+static void net_dict_index_read(const net_loader *l) {
+    if (l->keeping_len < 2 || l->keeping[1].cache.len == 0) return;
+    char dir[1100];
+    net_span_text(l, l->keeping[1].cache, dir, sizeof dir);
+    if (net_dict_dir_read && strcmp(dir, net_dict_dir) == 0) return;
+    net_dict_dir_read = 1;
+    snprintf(net_dict_dir, sizeof net_dict_dir, "%s", dir);
+    char path[1200];
+    snprintf(path, sizeof path, "%s/dictionaries", dir);
+    vector<char> all;
+    {
+        own FILE *f = fopen(path, "r");
+        if (!f) return;
+        defer(f) { fclose(f); }
+        char buf[4096];
+        size_t got;
+        while ((got = fread(buf, 1, sizeof buf, f)) > 0) append_range(all, buf, got);
+    }
+    int64_t now = net_now();
+    size_t i = 0, n = len(all);
+    while (i < n) {
+        size_t e = i;
+        while (e < n && all[e] != '\n') e++;
+        char line[8000];
+        snprintf(line, sizeof line, "%.*s", (int)(e - i), data(all) + i);
+        i = e + 1;
+        /* its five fields, at the tabs: the hash, the expiry, the order, the URL, the field */
+        size_t ln = strlen(line), at[5], c = 1;
+        at[0] = 0;
+        for (size_t q = 0; q < ln && c < 5; q++)
+            if (line[q] == '\t') {
+                line[q] = 0;
+                at[c++] = q + 1;
+            }
+        if (c < 5) continue;
+        int64_t expires = atoll(line + at[1]);
+        if (expires <= now || strlen(line) != 64 || strlen(line + at[3]) >= sizeof net_dicts[0].url) continue;
+        net_dict_field fd;
+        if (!net_dict_field_read(line + at[4], strlen(line + at[4]), &fd)) continue;
+        int k = -1;
+        for (int q = 0; q < NET_DICTS && k < 0; q++) if (!net_dicts[q].live) k = q;
+        if (k < 0) break;
+        char bpath[1300];
+        snprintf(bpath, sizeof bpath, "%s/dict-%s", dir, line);
+        vector<uint8_t> bytes;
+        {
+            own FILE *bf = fopen(bpath, "rb");
+            if (!bf) continue;
+            defer(bf) { fclose(bf); }
+            uint8_t buf[4096];
+            size_t got;
+            while ((got = fread(buf, 1, sizeof buf, bf)) > 0 && len(bytes) <= NET_MAX_BODY) append_range(bytes, buf, got);
+        }
+        uint8_t h[32];
+        char hex[65];
+        net_sha256(data(bytes), len(bytes), h);
+        net_dict_hex(h, hex);
+        if (strcmp(hex, line) != 0) continue;
+        net_dictionary *d = &net_dicts[k];
+        d->live = 1;
+        snprintf(d->url, sizeof d->url, "%s", line + at[3]);
+        net_url_origin(d->url, d->origin, sizeof d->origin);
+        memcpy(&d->f, &fd, sizeof fd);
+        memcpy(d->hash, h, 32);
+        net_dict_sf(d);
+        d->expires = expires;
+        d->order = (uint64_t)atoll(line + at[2]);
+        if (d->order > net_dict_clock) net_dict_clock = d->order;
+        append_range(d->bytes, data(bytes), len(bytes));
+    }
+}
+
+/* a response kept as a dictionary when it may be (above): its index then, or -1. page is the
+   page that asked (none for a navigation); cors whether it was asked in CORS mode */
+static int net_dict_keep(const net_loader *l, const net_url *u, const net_url *page, int cors, const char *head, size_t hn, const char *body,
+                         size_t bn, int64_t now) {
+    char v[4096];
+    if (!net_header_all(head, hn, "use-as-dictionary", v, sizeof v) || !net_trustworthy(u) || bn > NET_MAX_BODY) return -1;
+    char url[2048], origin[600], porigin[600];
+    if (net_url_text(u, url, sizeof url) >= sizeof url - 1) return -1;
+    net_origin_text(u, origin, sizeof origin);
+    if (page) {
+        net_origin_text(page, porigin, sizeof porigin);
+        if (strcmp(origin, porigin) != 0) {
+            /* of another origin: readable only when asked in CORS mode and allowed */
+            char acao[1024];
+            if (!cors || !net_header_all(head, hn, "access-control-allow-origin", acao, sizeof acao) ||
+                (strcmp(acao, "*") != 0 && strcmp(acao, porigin) != 0))
+                return -1;
+        }
+    }
+    int64_t dv;
+    char pragma[256];
+    if (net_cache_directive(head, hn, "no-store", &dv) || net_cache_directive(head, hn, "no-cache", &dv)) return -1;
+    if (net_header_all(head, hn, "pragma", pragma, sizeof pragma) && net_has_token(pragma, "no-cache")) return -1;
+    int64_t life = net_lifetime(head, hn, now) - net_initial_age(head, hn, now);
+    if (life <= 0) return -1;
+    net_dict_field f;
+    if (!net_dict_field_read(v, strlen(v), &f) || !net_dict_pattern_ok(f.match, url)) return -1;
+    net_dict_index_read(l);
+    /* its place: the one of the same origin, match and match-dest, a free one, or the oldest's */
+    int k = -1, free_at = -1, oldest = -1;
+    for (int q = 0; q < NET_DICTS; q++) {
+        if (!net_dicts[q].live) {
+            if (free_at < 0) free_at = q;
+            continue;
+        }
+        if (k < 0 && strcmp(net_dicts[q].origin, origin) == 0 && strcmp(net_dicts[q].f.match, f.match) == 0 &&
+            net_dicts[q].f.has_dest == f.has_dest && strcmp(net_dicts[q].f.dest, f.dest) == 0)
+            k = q;
+        if (oldest < 0 || net_dicts[q].order < net_dicts[oldest].order) oldest = q;
+    }
+    if (k < 0) k = free_at >= 0 ? free_at : oldest;
+    net_dict_forget(k);
+    net_dictionary *d = &net_dicts[k];
+    d->live = 1;
+    snprintf(d->url, sizeof d->url, "%s", url);
+    snprintf(d->origin, sizeof d->origin, "%s", origin);
+    memcpy(&d->f, &f, sizeof f);
+    append_range(d->bytes, (const uint8_t *)body, bn);
+    net_sha256(data(d->bytes), len(d->bytes), d->hash);
+    net_dict_sf(d);
+    d->expires = now + life;
+    d->order = ++net_dict_clock;
+    if (l->keeping_len >= 2 && l->keeping[1].cache.len) {
+        char dir[1100], hex[65], bpath[1300];
+        net_span_text(l, l->keeping[1].cache, dir, sizeof dir);
+        net_dict_hex(d->hash, hex);
+        snprintf(bpath, sizeof bpath, "%s/dict-%s", dir, hex);
+        net_dict_dir_make(dir);
+        mode_t mask = umask(077);
+        own FILE *bf = fopen(bpath, "wb");
+        umask(mask);
+        if (bf) {
+            fwrite(data(d->bytes), 1, len(d->bytes), bf);
+            fclose(bf);
+        }
+        net_dict_index_write(dir);
+    }
+    return k;
+}
+
+/* the dictionary a request offers (above): its index, or -1. page is the page that asked
+   (none for a navigation), cors whether it is asked in CORS mode */
+static int net_dict_offer(const net_loader *l, const net_url *u, const net_url *page, int cors, net_kind kind, int64_t now) {
+    if (!net_trustworthy(u)) return -1;
+    char url[2048], origin[600], porigin[600];
+    if (net_url_text(u, url, sizeof url) >= sizeof url - 1) return -1;
+    net_origin_text(u, origin, sizeof origin);
+    if (page && !cors) {
+        net_origin_text(page, porigin, sizeof porigin);
+        if (strcmp(origin, porigin) != 0) return -1;
+    }
+    net_dict_index_read(l);
+    const char *dest = net_dict_dest(kind);
+    int best = -1;
+    for (int k = 0; k < NET_DICTS; k++) {
+        const net_dictionary *d = &net_dicts[k];
+        if (!d->live || d->expires <= now || strcmp(d->origin, origin) != 0) continue;
+        if (d->f.has_dest) {
+            int in = 0;
+            size_t a = 0, n = strlen(d->f.dest), dn = strlen(dest);
+            while (a < n && !in) {
+                size_t b = a;
+                while (b < n && d->f.dest[b] != '\n') b++;
+                in = b - a == dn && strncmp(d->f.dest + a, dest, dn) == 0;
+                a = b + 1;
+            }
+            if (!in) continue;
+        }
+        if (!net_dict_pattern_matches(d->f.match, d->url, url)) continue;
+        if (best < 0 || strlen(d->f.match) > strlen(net_dicts[best].f.match) ||
+            (strlen(d->f.match) == strlen(net_dicts[best].f.match) && d->order > net_dicts[best].order))
+            best = k;
+    }
+    return best;
+}
+
+/* a dcb or dcz body (Content-Encoding that alone) over the dictionary its request offered: its
+   header (the magic number, the dictionary's SHA-256) checked, then decoded. ok, or
+   decoding_failed (too_large past 32 MB) with why */
+static net_outcome net_dict_decode(const char *coding, const uint8_t *hash, vector<char> *body, char *why, size_t wcap) {
+    static const uint8_t dcb[4] = { 0xff, 0x44, 0x43, 0x42 }, dcz[8] = { 0x5e, 0x2a, 0x4d, 0x18, 0x20, 0x00, 0x00, 0x00 };
+    int brotli = strcmp(coding, "dcb") == 0;
+    size_t magic = brotli ? 4 : 8;
+    int k = -1;
+    for (int q = 0; q < NET_DICTS && k < 0; q++)
+        if (net_dicts[q].live && memcmp(net_dicts[q].hash, hash, 32) == 0) k = q;
+    if (k < 0) {
+        snprintf(why, wcap, "the %s body's dictionary is no longer kept", coding);
+        return NET_OUTCOME_DECODING_FAILED;
+    }
+    if (len(*body) < magic + 32 || memcmp(data(*body), brotli ? dcb : dcz, magic) != 0 || memcmp(data(*body) + magic, hash, 32) != 0) {
+        snprintf(why, wcap, "the %s body does not begin with its dictionary's header (Chromium's ERR_UNEXPECTED_CONTENT_DICTIONARY_HEADER)", coding);
+        return NET_OUTCOME_DECODING_FAILED;
+    }
+    vector<uint8_t> out;
+    const uint8_t *in = (const uint8_t *)data(*body) + magic + 32;
+    size_t n = len(*body) - magic - 32;
+    int ok, too;
+    if (brotli) {
+        /* a stream cut short is what decoded before the cut (Chromium's decoder hands it on) */
+        int cut = 0;
+        ok = amb_brotli_prefix(in, n, data(net_dicts[k].bytes), len(net_dicts[k].bytes), &out, NET_MAX_BODY + 1, &cut);
+        if (!ok && cut && len(out) <= NET_MAX_BODY) ok = 1;
+        too = !ok && len(out) > NET_MAX_BODY;
+        if (too) snprintf(why, wcap, "the decoded body passed 32 MB");
+        else if (!ok) snprintf(why, wcap, "the dcb body is not a whole Brotli stream over its dictionary");
+    } else {
+        int z = net_zstd_dict(in, n, data(net_dicts[k].bytes), len(net_dicts[k].bytes), &out, NET_MAX_BODY, why, wcap, 0);
+        ok = z == 1;
+        too = z < 0;
+        if (too) snprintf(why, wcap, "the decoded body passed 32 MB");
+    }
+    if (!ok) return too ? NET_OUTCOME_TOO_LARGE : NET_OUTCOME_DECODING_FAILED;
+    clear(*body);
+    resize(body, len(out));
+    if (len(out)) memcpy(data(*body), data(out), len(out));
+    return NET_OUTCOME_OK;
 }
 
 /* the platform sec-ch-ua-platform names, as Chromium names it */
@@ -1928,6 +2379,18 @@ typedef struct net_job {
     int32_t x_first, x_last;       /* its body's pieces */
     uint64_t x_bytes;
     int x_h2;
+    /* the addresses its host (or its proxy) resolved to, looked up once; whether it rides a
+       connection made for another host (pooling by IP), whether it may (not after a 421),
+       whether it was asked again for a 421 */
+    int x_resolved, x_naddr, x_family[8];
+    struct sockaddr_storage x_addr[8];
+    socklen_t x_alen[8];
+    int x_pooled, x_nopool, x_421;
+    /* asked in CORS mode (a crossorigin element); the dictionary it offered (Available-
+       Dictionary's value, its id, its SHA-256), and whether its response was kept as one */
+    int cors, dict, dict_kept;
+    char dict_sf[64], dict_id[1040], kept_sf[64], kept_match[2048], kept_id[1040];
+    uint8_t dict_hash[32];
 } net_job;
 
 /* a piece of a body that came, in the arena; the next piece of the same exchange's */
@@ -1940,24 +2403,34 @@ typedef struct net_piece { size_t off, len; int32_t next; } net_piece;
 /* Chromium's kMaxRetryAttempts: a stream refused, or left unprocessed by a GOAWAY, goes
    again twice at most */
 #define NET_RETRIES 2
-#define NET_READ_MS 10000
 #define NET_IDLE_MS 60000
+/* how long a connection may wait, by what it waits for, as Chromium's: its TCP connect four
+   minutes (TransportConnectJob's 240 s, from its source: no address here leaves a connect
+   unanswered to measure it by), a proxy's tunnel and a TLS handshake 30 s each (measured: a
+   proxy that never answers CONNECT and a server that never answers the ClientHello, each
+   ERR_TIMED_OUT after 30.0 s), an answer for ever (measured: a page answered after 150 s, an
+   HTTP/2 stream after 40 s, a body stalled for 15 s, each waited out and loaded) */
+#define NET_CONNECT_MS 240000
+#define NET_TUNNEL_MS 30000
+#define NET_HANDSHAKE_MS 30000
 
 enum { NC_FREE, NC_CONNECT, NC_TUNNEL, NC_HANDSHAKE, NC_READY };
 
 /* a connection of the pool, kept between fetches for its origin (and the proxy it goes
    through: its key) to carry more: its socket and protocol; the addresses to dial in
-   turn; a tunnel's target and credentials; what it goes over (TLS, ALPN, the proxy); the
-   last byte's time; its number in the run and the requests it carried; over HTTP/1.1 the
-   job it carries; its bytes both ways; over HTTP/2 its frames' state */
+   turn, and the one it reached (peer); a tunnel's target and credentials; the port of its
+   TLS session's server (through a tunnel, the target's); what it goes over (TLS, ALPN, the
+   proxy); when its present wait began (its connect, tunnel or handshake) and the last
+   byte's time; its number in the run and the requests it carried; over HTTP/1.1 the job it
+   carries; its bytes both ways; over HTTP/2 its frames' state */
 typedef struct net_conn {
-    int state, fd, h2, tls, family[8], naddr, at, err, want_write, reusable, busy;
+    int state, fd, h2, tls, family[8], naddr, at, peer, err, want_write, reusable, busy;
     char key[700], host[256], target[300], auth[700];
-    int port;
+    int port, tls_port;
     struct sockaddr_storage addr[8];
     socklen_t alen[8];
     net_route rt;
-    int64_t touched;
+    int64_t began, touched;
     uint32_t number, served;
     vector<uint8_t> in, out;
     h2_conn h;
@@ -1974,9 +2447,14 @@ static int64_t net_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* a slot's connection closed and the slot freed */
+/* a slot's connection closed and the slot freed. Its TLS connection is marked shut down
+   first, the flag alone (no close_notify goes): OpenSSL takes a session freed without it for a
+   bad one and makes it, the very object the session cache keeps, never resumable */
 static void net_conn_close(int i) {
-    if (net_pool_ssl[i]) SSL_free(net_pool_ssl[i]);
+    if (net_pool_ssl[i]) {
+        SSL_set_shutdown(net_pool_ssl[i], NET_SSL_SENT_SHUTDOWN);
+        SSL_free(net_pool_ssl[i]);
+    }
     net_pool_ssl[i] = 0;
     if (net_pool[i].state != NC_FREE && net_pool[i].fd >= 0) close(net_pool[i].fd);
     vector_uint8_t_drop(&net_pool[i].in);
@@ -1985,13 +2463,124 @@ static void net_conn_close(int i) {
     memset(&net_pool[i], 0, sizeof net_pool[i]);
     net_pool[i].fd = -1;
     net_pool[i].busy = -1;
+    net_pool[i].peer = -1;
     net_pool[i].state = NC_FREE;
 }
 
-/* the pool's connections closed as the process ends */
+/* ---- TLS sessions, kept to be resumed ----
+
+   As Chromium's SSLClientSessionCache keeps them: by the server's host and port (the
+   origin's, through a tunnel too), two sessions a server at most, the newest first. A TLS
+   1.3 session (a ticket) is used once: taken from the cache when a handshake offers it, the
+   one after it moving up; a TLS 1.2 one (a session ID, or a ticket) is offered again and
+   again, a newer one replacing it. One past its lifetime is offered no more. Measured
+   against node's TLS servers (tests/net/h2serve.js), which send two tickets after a full TLS
+   1.3 handshake and none after a resumed one: of connections made one after another, the
+   second and third resume and the fourth does not; of five made at once after the first,
+   two resume; over TLS 1.2 every one after the first resumes, by ticket or by session ID.
+   The sessions live as long as the process, as Chromium's live as long as its network
+   context, and are never written down. */
+#define NET_SESSIONS 64
+typedef struct net_sess_key { char key[300]; int live; uint64_t used; } net_sess_key;
+static net_sess_key net_sess_keys[NET_SESSIONS];
+/* each key's two sessions, the newest first. An element is only ever moved out by passing
+   it to an own parameter, which empties it: one copied out by assignment would stay in it,
+   and be freed (by free(), not SSL_SESSION_free) when it is next written (toolchain/REPORT.md,
+   finding 38) */
+static own SSL_SESSION *net_sess[NET_SESSIONS][2];
+static uint64_t net_sess_clock;
+
+static own SSL_SESSION *net_sess_take(own SSL_SESSION *s) { return s; }
+static int net_sess_single(const SSL_SESSION *s) { return SSL_SESSION_get_protocol_version(s) >= NET_TLS1_3_VERSION; }
+static int net_sess_expired(const SSL_SESSION *s, long now) {
+    long t = SSL_SESSION_get_time(s);
+    return now < t || now >= t + SSL_SESSION_get_timeout(s);
+}
+/* a key's two sessions freed, the key forgotten */
+static void net_sess_forget(int e) {
+    if (net_sess[e][0]) SSL_SESSION_free(net_sess[e][0]);
+    if (net_sess[e][1]) SSL_SESSION_free(net_sess[e][1]);
+    net_sess_keys[e].live = 0;
+    net_sess_keys[e].key[0] = 0;
+}
+/* the entry of a key: -1 when it has none (and make is 0); a new one made in a free place,
+   or in the least recently used one's */
+static int net_sess_find(const char *key, int make) {
+    int free_at = -1, oldest = -1;
+    for (int e = 0; e < NET_SESSIONS; e++) {
+        if (net_sess_keys[e].live && strcmp(net_sess_keys[e].key, key) == 0) {
+            net_sess_keys[e].used = ++net_sess_clock;
+            return e;
+        }
+        if (!net_sess_keys[e].live && free_at < 0) free_at = e;
+        if (net_sess_keys[e].live && (oldest < 0 || net_sess_keys[e].used < net_sess_keys[oldest].used)) oldest = e;
+    }
+    if (!make) return -1;
+    int e = free_at >= 0 ? free_at : oldest;
+    if (net_sess_keys[e].live) net_sess_forget(e);
+    snprintf(net_sess_keys[e].key, sizeof net_sess_keys[e].key, "%s", key);
+    net_sess_keys[e].live = 1;
+    net_sess_keys[e].used = ++net_sess_clock;
+    return e;
+}
+/* a new session kept (Chromium's Entry::Push): a single-use newest moves to second place,
+   another is replaced */
+static void net_sess_push(int e, own SSL_SESSION *s) {
+    if (net_sess[e][0] && net_sess_single(net_sess[e][0])) {
+        if (net_sess[e][1]) SSL_SESSION_free(net_sess[e][1]);
+        net_sess[e][1] = net_sess_take(net_sess[e][0]);
+    } else if (net_sess[e][0]) SSL_SESSION_free(net_sess[e][0]);
+    net_sess[e][0] = s;
+}
+/* the key's newest session offered by the handshake to come (Chromium's Lookup: Entry::Pop,
+   then what has expired dropped): taken from the cache if it is single-use */
+static void net_sess_offer(SSL *ssl, int e) {
+    long now = (long)time(0);
+    if (!net_sess[e][0]) return;
+    if (net_sess_single(net_sess[e][0])) {
+        own SSL_SESSION *s = net_sess_take(net_sess[e][0]);
+        net_sess[e][0] = net_sess_take(net_sess[e][1]);
+        if (!net_sess_expired(s, now)) SSL_set_session(ssl, s);
+        SSL_SESSION_free(s);
+    } else if (!net_sess_expired(net_sess[e][0], now)) SSL_set_session(ssl, net_sess[e][0]);
+    if (!net_sess[e][0] || net_sess_expired(net_sess[e][0], now)) net_sess_forget(e);
+    else if (net_sess[e][1] && net_sess_expired(net_sess[e][1], now)) SSL_SESSION_free(net_sess[e][1]);
+}
+/* the key of a connection's TLS sessions: its server's host and port */
+static void net_sess_key_of(int i, char *out, size_t cap) { snprintf(out, cap, "%s:%d", net_pool[i].host, net_pool[i].tls_port); }
+
+/* OpenSSL's hand-over of a new session of one of the pool's connections: kept, by that
+   connection's key */
+static int net_session_new(SSL *ssl, own SSL_SESSION *sess) {
+    int i = -1;
+    for (int k = 0; k < NET_POOL && i < 0; k++)
+        if (net_pool_ssl[k] && net_pool_ssl[k] == ssl) i = k;
+    if (i < 0) {
+        SSL_SESSION_free(sess);
+        return 1;
+    }
+    char key[300];
+    net_sess_key_of(i, key, sizeof key);
+    net_sess_push(net_sess_find(key, 1), sess);
+    return 1;
+}
+
+static void net_dict_forget(int k);
+/* the pool's connections closed as the process ends, the sessions, the TLS context and the
+   dictionaries freed */
 static void net_pool_end(void) {
     for (int i = 0; i < NET_POOL; i++)
         if (net_pool[i].state != NC_FREE) net_conn_close(i);
+    for (int k = 0; k < NET_DICTS; k++) net_dict_forget(k);
+    for (int e = 0; e < NET_SESSIONS; e++) net_sess_forget(e);
+    if (net_tls_proc.ctx) SSL_CTX_free(net_tls_proc.ctx);
+}
+static void net_pool_kept_once(void) {
+    if (net_pool_kept) return;
+    atexit(net_pool_end);
+    net_pool_kept = 1;
+    for (int i = 0; i < NET_POOL; i++)
+        if (net_pool[i].state == NC_FREE) net_pool[i].peer = -1;
 }
 
 /* an idle connection still open: no byte waits on it (over HTTP/2 frames may; over TLS the
@@ -2050,10 +2639,54 @@ static int net_slot(void) {
     return oldest;
 }
 
-/* a new connection begun for the job's key: its host's (or its proxy's) addresses looked
-   up, the first dialled, each address tried in turn. The slot; or -1, the job's outcome and
-   reason set */
-static int net_conn_open(net_job *j) {
+/* localhost, or a name under it: names Chromium resolves itself, to the loopback addresses
+   (net::ResolveLocalHostname), never asking DNS; its final dot and its case aside */
+static int net_localhost_name(const char *h) {
+    char t[256];
+    size_t n = strlen(h);
+    if (n >= sizeof t) return 0;
+    for (size_t i = 0; i < n; i++) t[i] = net_lower(h[i]);
+    t[n] = 0;
+    if (n && t[n - 1] == '.') t[--n] = 0;
+    return strcmp(t, "localhost") == 0 || (n > 10 && strcmp(t + n - 10, ".localhost") == 0);
+}
+
+/* a name's (or an address's) addresses at a port, added to the job's: by getaddrinfo, or
+   numerically for an address. 0 when it does not resolve, its words in the job's reason */
+static int net_job_lookup(net_job *j, const char *host, int port, int numeric) {
+    net_addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = numeric ? 4 : 0;          /* AI_NUMERICHOST */
+    char ps[16];
+    snprintf(ps, sizeof ps, "%d", port);
+    own net_addrinfo *res = 0;
+    int g = getaddrinfo(host, ps, &hints, &res);
+    if (g != 0 || !res) {
+        snprintf(j->rt.reason, sizeof j->rt.reason, "%s: %s", host, gai_strerror(g));
+        freeaddrinfo(res);
+        return 0;
+    }
+    defer(res) { freeaddrinfo(res); }
+    for (const net_addrinfo *a = res; a && j->x_naddr < 8; a = a->ai_next) {
+        if ((size_t)a->ai_addrlen > sizeof j->x_addr[0]) continue;
+        memcpy(&j->x_addr[j->x_naddr], a->ai_addr, a->ai_addrlen);
+        j->x_alen[j->x_naddr] = a->ai_addrlen;
+        j->x_family[j->x_naddr] = a->ai_family;
+        j->x_naddr++;
+    }
+    return 1;
+}
+
+/* the addresses a job's connection would be made to, its host's (or its proxy's), looked up
+   once: localhost and the names under it the loopback addresses, ::1 then 127.0.0.1, as
+   Chromium has them; another name by getaddrinfo. 0 when there are none, the job's outcome
+   and reason set */
+static int net_job_resolve(net_job *j) {
+    if (j->x_resolved) return j->x_naddr > 0;
+    j->x_resolved = 1;
+    j->x_naddr = 0;
     char dhost[256];
     int dport = j->x_port;
     snprintf(dhost, sizeof dhost, "%s", j->x_host);
@@ -2061,44 +2694,43 @@ static int net_conn_open(net_job *j) {
         snprintf(dhost, sizeof dhost, "%s", j->x_px.host);
         dport = j->x_px.port;
     }
-    net_addrinfo hints;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char ps[16];
-    snprintf(ps, sizeof ps, "%d", dport);
-    own net_addrinfo *res = 0;
-    int g = getaddrinfo(dhost, ps, &hints, &res);
-    if (g != 0 || !res) {
-        snprintf(j->rt.reason, sizeof j->rt.reason, "%s: %s", dhost, gai_strerror(g));
-        freeaddrinfo(res);
+    int ok = net_localhost_name(dhost) ? net_job_lookup(j, "::1", dport, 1) + net_job_lookup(j, "127.0.0.1", dport, 1) > 0
+                                       : net_job_lookup(j, dhost, dport, 0);
+    if (!ok || !j->x_naddr) {
+        j->x_naddr = 0;
         j->x_out = NET_OUTCOME_UNREACHABLE;
-        return -1;
+        return 0;
     }
-    defer(res) { freeaddrinfo(res); }
+    return 1;
+}
+
+/* a new connection begun for the job's key: the job's addresses (its host's, or its
+   proxy's), the first dialled, each address tried in turn. The slot; or -1, the job's
+   outcome and reason set */
+static int net_conn_open(net_job *j) {
+    if (!net_job_resolve(j)) return -1;
+    int dport = j->x_via ? j->x_px.port : j->x_port;
     int i = net_slot();
     if (i < 0) {
         snprintf(j->rt.reason, sizeof j->rt.reason, "no connection could be made: all %d are busy", NET_POOL);
         j->x_out = NET_OUTCOME_REFUSED;
         return -1;
     }
-    if (!net_pool_kept) {
-        atexit(net_pool_end);
-        net_pool_kept = 1;
-    }
+    net_pool_kept_once();
     net_conn *c = &net_pool[i];
     c->fd = -1;
     c->busy = -1;
-    for (const net_addrinfo *a = res; a && c->naddr < 8; a = a->ai_next) {
-        if ((size_t)a->ai_addrlen > sizeof c->addr[0]) continue;
-        memcpy(&c->addr[c->naddr], a->ai_addr, a->ai_addrlen);
-        c->alen[c->naddr] = a->ai_addrlen;
-        c->family[c->naddr] = a->ai_family;
+    c->peer = -1;
+    for (int k = 0; k < j->x_naddr; k++) {
+        memcpy(&c->addr[c->naddr], &j->x_addr[k], j->x_alen[k]);
+        c->alen[c->naddr] = j->x_alen[k];
+        c->family[c->naddr] = j->x_family[k];
         c->naddr++;
     }
     snprintf(c->key, sizeof c->key, "%s", j->x_key);
     snprintf(c->host, sizeof c->host, "%s", j->x_host);
     c->port = dport;
+    c->tls_port = j->x_port;
     c->tls = j->x_https;
     c->rt.proxied = j->x_via;
     if (j->x_via) snprintf(c->rt.proxy, sizeof c->rt.proxy, "%s", j->x_px.origin);
@@ -2108,9 +2740,10 @@ static int net_conn_open(net_job *j) {
     }
     c->number = ++net_conns_made;
     c->touched = net_ms();
+    c->began = c->touched;
     c->state = NC_CONNECT;
     if (!net_dial_next(i)) {
-        snprintf(j->rt.reason, sizeof j->rt.reason, "%s port %d: %s", dhost, dport, strerror(c->err));
+        snprintf(j->rt.reason, sizeof j->rt.reason, "%s port %d: %s", j->x_via ? j->x_px.host : j->x_host, dport, strerror(c->err));
         j->x_out = NET_OUTCOME_REFUSED;
         net_conn_close(i);
         return -1;
@@ -2138,8 +2771,16 @@ static int net_tls_begin(int i, net_tls *t) {
     if (net_is_address(name)) X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(net_pool_ssl[i]), name);
     else {
         SSL_ctrl(net_pool_ssl[i], NET_SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, name);
+        /* the name held to the certificate's DNS names alone, a wildcard a whole first label,
+           as Chromium matches one (its subject's common name is never read) */
+        SSL_set_hostflags(net_pool_ssl[i], NET_X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS | NET_X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
         SSL_set1_host(net_pool_ssl[i], name);
     }
+    /* the session this server's last handshake left, offered for resumption */
+    char key[300];
+    net_sess_key_of(i, key, sizeof key);
+    int e = net_sess_find(key, 0);
+    if (e >= 0) net_sess_offer(net_pool_ssl[i], e);
     return 1;
 }
 
@@ -2151,6 +2792,7 @@ static int net_tls_step(int i, net_outcome *o) {
     int r = SSL_connect(net_pool_ssl[i]);
     if (r == 1) {
         c->rt.tls = 1;
+        c->rt.resumed = SSL_session_reused(net_pool_ssl[i]) == 1;
         snprintf(c->rt.version, sizeof c->rt.version, "%s", SSL_get_version(net_pool_ssl[i]));
         /* the cipher's name read at once: a pointer tied to a session of the pool's array,
            kept in a local, is taken for one never consumed (toolchain/REPORT.md, finding 29) */
@@ -2372,6 +3014,7 @@ static void net_piece_add(net_job *j, vector<net_piece> *pieces, vector<char> *a
 /* what the connection goes over, copied to the job it carries */
 static void net_route_of(const net_conn *c, net_job *j) {
     j->rt.tls = c->rt.tls;
+    j->rt.resumed = c->rt.resumed;
     snprintf(j->rt.version, sizeof j->rt.version, "%s", c->rt.version);
     snprintf(j->rt.cipher, sizeof j->rt.cipher, "%s", c->rt.cipher);
     snprintf(j->rt.alpn, sizeof j->rt.alpn, "%s", c->rt.alpn);
@@ -2426,6 +3069,13 @@ static void net_h1_step(int i, vector<net_job> *jobs, vector<char> *arena, vecto
     int status = 0;
     j->x_out = net_parse_response((const char *)data(c->in), end, &status, &head, &body, j->rt.reason, sizeof j->rt.reason);
     j->x_status = status;
+    if (status == 421 && !j->x_421 && j->x_out == NET_OUTCOME_OK) {
+        /* asked once again, its connection not kept (Chromium closes it to resend) */
+        net_job_misdirected(j);
+        c->busy = -1;
+        net_conn_close(i);
+        return;
+    }
     j->x_head = len(*arena);
     j->x_head_n = len(head);
     append_range(arena, data(head), len(head));
@@ -2546,6 +3196,28 @@ static void net_h2_body(int i, net_job *j, const vector<char> *arena) {
                               1, &net_pool[i].out);
 }
 
+/* a job answered 421 Misdirected Request asked once again, as Chromium asks it
+   (HttpNetworkTransaction's retry with IP pooling disabled): on a connection of its own
+   host, made for it if there is none; a second 421 is its answer (measured: a request on a
+   connection pooled by IP is asked again on a new connection to its host; one on its own
+   host's connection, again on that connection) */
+static void net_job_misdirected(net_job *j) {
+    j->x_421 = 1;
+    j->x_nopool = 1;
+    j->x_state = X_WAIT;
+    j->x_conn = -1;
+    j->x_stream = 0;
+    j->x_body_sent = 0;
+    j->x_first = -1;
+    j->x_last = -1;
+    j->x_bytes = 0;
+    j->x_got = 0;
+    j->x_status = 0;
+    j->x_head = 0;
+    j->x_head_n = 0;
+    j->x_pooled = 0;
+}
+
 /* a job on a connection that can carry it no more: again on another, up to limit times,
    when no byte of its answer came (a request the server did not process); else failed */
 static void net_job_again(net_job *j, int limit, net_outcome o, const char *why) {
@@ -2582,7 +3254,10 @@ static void net_h2_step(int i, vector<net_job> *jobs, vector<char> *arena, vecto
         at += used;
         int k = -1;
         if (ev.stream) k = net_job_of_stream(jobs, i, ev.stream);
-        if (ev.kind == H2_EV_HEADERS && k >= 0) {
+        if (ev.kind == H2_EV_HEADERS && k >= 0 && ev.status == 421 && !(*jobs)[k].x_421) {
+            if (!ev.end_stream) h2_reset(&c->h, ev.stream, H2_CANCEL, &c->out);
+            net_job_misdirected(&(*jobs)[k]);
+        } else if (ev.kind == H2_EV_HEADERS && k >= 0) {
             net_job *j = &(*jobs)[k];
             j->x_got = 1;
             if (ev.status) {
@@ -2680,6 +3355,7 @@ static void net_attach(int i, int k, vector<net_job> *jobs, vector<char> *arena)
     j->x_state = X_ON;
     j->x_got = 0;
     j->x_fresh = 0;
+    j->x_pooled = 0;
     if (c->h2) {
         vector<hpack_field> fs;
         vector<uint8_t> fb;
@@ -2697,11 +3373,62 @@ static void net_attach(int i, int k, vector<net_job> *jobs, vector<char> *arena)
     c->touched = net_ms();
 }
 
+/* ---- HTTP/2's pooling by IP ---- */
+
+/* two socket addresses the same: their family, address and port */
+static int net_same_address(const struct sockaddr_storage *a, socklen_t an, const struct sockaddr_storage *b, socklen_t bn) {
+    if (a->ss_family != b->ss_family || an != bn) return 0;
+    if (a->ss_family == AF_INET) {
+        const struct sockaddr_in *x = (const struct sockaddr_in *)a, *y = (const struct sockaddr_in *)b;
+        return x->sin_port == y->sin_port && x->sin_addr.s_addr == y->sin_addr.s_addr;
+    }
+    if (a->ss_family == AF_INET6) {
+        const struct sockaddr_in6 *x = (const struct sockaddr_in6 *)a, *y = (const struct sockaddr_in6 *)b;
+        return x->sin6_port == y->sin6_port && memcmp(&x->sin6_addr, &y->sin6_addr, sizeof x->sin6_addr) == 0;
+    }
+    return 0;
+}
+
+/* the TLS connection's certificate (verified in its handshake) covers the host: a DNS name
+   of it, a wildcard a whole first label, or an address of it, as Chromium's VerifyNameMatch
+   holds a name to a certificate */
+static int net_cert_covers(int i, const char *host) {
+    if (!net_pool_ssl[i]) return 0;
+    own X509 *x = SSL_get1_peer_certificate(net_pool_ssl[i]);
+    if (!x) return 0;
+    int ok;
+    if (net_is_address(host)) ok = X509_check_ip_asc(x, host, 0) == 1;
+    else ok = X509_check_host(x, host, strlen(host), NET_X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS | NET_X509_CHECK_FLAG_NEVER_CHECK_SUBJECT, 0) == 1;
+    X509_free(x);
+    return ok;
+}
+
+/* an HTTP/2 connection made for another host that the job may ride (Chromium's pooling by
+   IP, SpdySessionPool's aliases): made directly, with no proxy between (through one, the
+   address is the proxy's), its session up and not going away, to an address and port the
+   job's host resolves to, its certificate covering the job's host. Measured against node's
+   servers: a host of the certificate at the connection's address and port rides it, a name
+   or an address alike; one the certificate does not cover, one at another address or
+   another port, and every one through a proxy each get a connection of their own. -1 when
+   none */
+static int net_pool_by_ip(const net_job *j) {
+    for (int i = 0; i < NET_POOL; i++) {
+        const net_conn *c = &net_pool[i];
+        if (c->state != NC_READY || !c->h2 || !c->tls || c->rt.proxied || c->h.goaway || c->h.dead || c->peer < 0) continue;
+        int same = 0;
+        for (int a = 0; a < j->x_naddr && !same; a++) same = net_same_address(&j->x_addr[a], j->x_alen[a], &c->addr[c->peer], c->alen[c->peer]);
+        if (same && net_cert_covers(i, j->x_host)) return i;
+    }
+    return -1;
+}
+
 /* the jobs waiting for a connection given one, in order: an HTTP/2 connection of their key
-   with room for a stream; else an idle HTTP/1.1 one still open; else a new one, while fewer
-   than six are open for the key (one only while a TLS connection's protocol is unknown: an
-   HTTP/2 one would carry them all), and none is being made for the job already (as
-   Chromium's pool starts one connect job a request) */
+   with room for a stream; else an idle HTTP/1.1 one still open; else, when the key has no
+   connection at all, an HTTP/2 one made for another host that it may ride (pooling by IP,
+   not after a 421 Misdirected Request); else a new one, while fewer than six are open for
+   the key (one only while a TLS connection's protocol is unknown: an HTTP/2 one would carry
+   them all), and none is being made for the job already (as Chromium's pool starts one
+   connect job a request) */
 static void net_assign(vector<net_job> *jobs, vector<char> *arena) {
     for (size_t k = 0; k < len(*jobs); k++) {
         if ((*jobs)[k].state != J_NET || (*jobs)[k].x_state != X_WAIT) continue;
@@ -2736,6 +3463,21 @@ static void net_assign(vector<net_job> *jobs, vector<char> *arena) {
         if (found >= 0) {
             net_attach(found, (int)k, jobs, arena);
             continue;
+        }
+        if (count == 0 && (*jobs)[k].x_https && !(*jobs)[k].x_via && !(*jobs)[k].x_nopool) {
+            if (!net_job_resolve(&(*jobs)[k])) {
+                (*jobs)[k].x_state = X_DONE;
+                continue;
+            }
+            int p = net_pool_by_ip(&(*jobs)[k]);
+            if (p >= 0) {
+                /* it rides that connection, or waits for room on it */
+                if (h2_can_open(&net_pool[p].h)) {
+                    net_attach(p, (int)k, jobs, arena);
+                    (*jobs)[k].x_pooled = 1;
+                }
+                continue;
+            }
         }
         if (making || waiting_room || (pending && (*jobs)[k].x_https && !known_h1) || count >= NET_PER_ORIGIN) continue;
         int i = net_conn_open(&(*jobs)[k]);
@@ -2779,7 +3521,9 @@ static void net_conn_step(int i, vector<net_job> *jobs, vector<char> *arena, vec
             }
             return;
         }
+        c->peer = c->at - 1;
         c->touched = net_ms();
+        c->began = c->touched;
         if (c->target[0]) {
             char req[1400];
             int n = snprintf(req, sizeof req, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Ambitious/0.1\r\n%s%s%s\r\n", c->target, c->target,
@@ -2825,6 +3569,7 @@ static void net_conn_step(int i, vector<net_job> *jobs, vector<char> *arena, vec
             return;
         }
         c->state = NC_HANDSHAKE;
+        c->began = net_ms();
     }
     if (c->state == NC_HANDSHAKE) {
         net_outcome o = NET_OUTCOME_OK;
@@ -2858,29 +3603,66 @@ static int net_conn_working(int i, const vector<net_job> *jobs) {
     return 0;
 }
 
-/* a connection that waited ten seconds for a byte: its jobs failed, it closed */
+/* AMB_NET_TIMEOUT: the longest any of a connection's waits may last, in ms, for tests that
+   would not wait Chromium's; 0 (unset) for none */
+static int64_t net_wait_cap(void) {
+    const char *v = getenv("AMB_NET_TIMEOUT");
+    long long ms = v && *v ? atoll(v) : 0;
+    return ms > 0 ? (int64_t)ms : 0;
+}
+
+/* how long a connection's present wait may last: its connect's, tunnel's or handshake's
+   (from when it began) Chromium's, an answer's (from the last byte) for ever; each within
+   AMB_NET_TIMEOUT. -1 for ever */
+static int64_t net_conn_limit(int i) {
+    int s = net_pool[i].state;
+    int64_t cap = net_wait_cap(), d = s == NC_CONNECT ? NET_CONNECT_MS : s == NC_TUNNEL ? NET_TUNNEL_MS : s == NC_HANDSHAKE ? NET_HANDSHAKE_MS : -1;
+    if (cap && (d < 0 || cap < d)) d = cap;
+    return d;
+}
+/* when that wait gives out, by the clock of net_ms; -1 never */
+static int64_t net_conn_deadline(int i) {
+    int64_t d = net_conn_limit(i);
+    if (d < 0) return -1;
+    return (net_pool[i].state == NC_READY ? net_pool[i].touched : net_pool[i].began) + d;
+}
+
+/* a wait's length in words */
+static void net_wait_words(int64_t ms, char *out, size_t cap) {
+    if (ms % 1000 == 0) snprintf(out, cap, "%lld second%s", (long long)(ms / 1000), ms == 1000 ? "" : "s");
+    else snprintf(out, cap, "%.1f seconds", (double)ms / 1000);
+}
+
+/* a connection whose wait gave out: its jobs failed, it closed */
 static void net_conn_timeout(int i, vector<net_job> *jobs) {
     net_conn *c = &net_pool[i];
+    char w[48];
+    net_wait_words(net_conn_limit(i), w, sizeof w);
     if (c->state != NC_READY) {
         net_outcome o = NET_OUTCOME_REFUSED;
-        if (c->state == NC_HANDSHAKE) o = NET_OUTCOME_TLS_HANDSHAKE_FAILED;
-        else if (c->state == NC_TUNNEL) o = NET_OUTCOME_PROXY_REFUSED;
-        snprintf(c->rt.reason, sizeof c->rt.reason, "%s port %d: no answer in 10 seconds", c->host, c->port);
+        if (c->state == NC_HANDSHAKE) {
+            o = NET_OUTCOME_TLS_HANDSHAKE_FAILED;
+            snprintf(c->rt.reason, sizeof c->rt.reason, "%s port %d: no TLS handshake in %s", c->host, c->tls_port, w);
+        } else if (c->state == NC_TUNNEL) {
+            o = NET_OUTCOME_PROXY_REFUSED;
+            snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy did not answer CONNECT in %s", w);
+        } else snprintf(c->rt.reason, sizeof c->rt.reason, "%s port %d: no connection in %s", c->host, c->port, w);
         net_conn_fail(i, jobs, o);
         return;
     }
+    char why[120];
     for (size_t k = 0; k < len(*jobs); k++) {
         net_job *j = &(*jobs)[k];
         if (j->state == J_NET && j->x_state == X_ON && j->x_conn == i) {
-            if (j->x_got) net_job_fail(j, NET_OUTCOME_MALFORMED, "the response stopped for 10 seconds");
-            else net_job_fail(j, NET_OUTCOME_MALFORMED, "the server sent nothing for 10 seconds");
+            snprintf(why, sizeof why, j->x_got ? "the response stopped for %s" : "the server sent nothing for %s", w);
+            net_job_fail(j, NET_OUTCOME_MALFORMED, why);
         }
     }
     net_conn_close(i);
 }
 
 /* the batch's exchanges carried until each is answered or failed: the connections polled,
-   each taken a step when its socket is ready, given up when it waited ten seconds */
+   each taken a step when its socket is ready, given up when its wait gave out */
 static void net_run(vector<net_job> *jobs, vector<char> *arena, vector<net_piece> *pieces, net_tls *t) {
     for (;;) {
         net_assign(jobs, arena);
@@ -2889,7 +3671,7 @@ static void net_run(vector<net_job> *jobs, vector<char> *arena, vector<net_piece
         if (!live) return;
         struct pollfd fds[NET_POOL];
         int which[NET_POOL], nf = 0;
-        int64_t now = net_ms(), wait = NET_READ_MS;
+        int64_t now = net_ms(), wait = -1;
         for (int i = 0; i < NET_POOL; i++) {
             if (!net_conn_working(i, jobs)) continue;
             net_conn *c = &net_pool[i];
@@ -2898,8 +3680,8 @@ static void net_run(vector<net_job> *jobs, vector<char> *arena, vector<net_piece
             if (c->state == NC_CONNECT || len(c->out) || c->want_write) fds[nf].events |= POLLOUT;
             fds[nf].revents = 0;
             which[nf++] = i;
-            int64_t left = c->touched + NET_READ_MS - now;
-            if (left < wait) wait = left;
+            int64_t dl = net_conn_deadline(i);
+            if (dl >= 0 && (wait < 0 || dl - now < wait)) wait = dl - now < 0 ? 0 : dl - now;
         }
         if (nf == 0) {
             /* jobs that wait for a connection no one can make (every slot busy) */
@@ -2907,14 +3689,16 @@ static void net_run(vector<net_job> *jobs, vector<char> *arena, vector<net_piece
                 if ((*jobs)[k].state == J_NET && (*jobs)[k].x_state == X_WAIT) net_job_fail(&(*jobs)[k], NET_OUTCOME_REFUSED, "no connection could carry it");
             return;
         }
-        if (wait < 0) wait = 0;
+        /* no deadline: poll waits until a socket is ready, as long as that takes */
+        if (wait > 2000000000) wait = 2000000000;
         poll(fds, (nfds_t)nf, (int)wait);
         now = net_ms();
         for (int f = 0; f < nf; f++) {
             int i = which[f];
             if (net_pool[i].state == NC_FREE) continue;
+            int64_t dl = net_conn_deadline(i);
             if (fds[f].revents) net_conn_step(i, jobs, arena, pieces, t);
-            else if (now - net_pool[i].touched >= NET_READ_MS) net_conn_timeout(i, jobs);
+            else if (dl >= 0 && now >= dl) net_conn_timeout(i, jobs);
         }
     }
 }
@@ -3012,8 +3796,26 @@ static void net_request_build(net_job *j, const net_url *page, const char *cooki
         }
     }
     if (referrer[0]) net_line(&req, "Referer", referrer);
-    net_line(&req, "Accept-Encoding", trust ? "gzip, deflate, br, zstd" : "gzip, deflate");
+    /* with a dictionary offered, dcb and dcz too, and the dictionary's name and id after the
+       Cookie (Chromium's SharedDictionaryNetworkTransaction adds them below the job that sets
+       it; measured over HTTP/2: after accept-encoding, before priority) */
+    net_line(&req, "Accept-Encoding", !trust ? "gzip, deflate" : j->dict ? "gzip, deflate, br, zstd, dcb, dcz" : "gzip, deflate, br, zstd");
     append_range(req, cookie, cookie_n);
+    if (j->dict) {
+        net_line(&req, "Available-Dictionary", j->dict_sf);
+        if (j->dict_id[0]) {
+            char idv[1100];
+            vector<char> q;
+            push_back(q, '"');
+            for (size_t i = 0; j->dict_id[i]; i++) {
+                if (j->dict_id[i] == '"' || j->dict_id[i] == '\\') push_back(q, '\\');
+                push_back(q, j->dict_id[i]);
+            }
+            push_back(q, '"');
+            snprintf(idv, sizeof idv, "%.*s", (int)len(q), data(q));
+            net_line(&req, "Dictionary-ID", idv);
+        }
+    }
     if (j->nav) net_lines_named(&req, data(ex), len(ex), "content-type", 0);
     if (j->x_via && !j->x_https && j->x_px.auth[0]) {
         char pa[800];
@@ -3104,6 +3906,16 @@ static int net_job_prepare(net_loader *l, net_job *j, const net_url *page, vecto
     }
     /* a navigation is same-site with itself; a page's part is when its site is the page's */
     j->same = !page || net_is_same_site(u, page);
+    /* the compression dictionary it offers, if one is kept for it */
+    j->dict = 0;
+    j->dict_kept = 0;
+    int dk = net_dict_offer(l, u, page, j->cors, j->kind, j->now);
+    if (dk >= 0) {
+        j->dict = 1;
+        memcpy(j->dict_hash, net_dicts[dk].hash, 32);
+        snprintf(j->dict_sf, sizeof j->dict_sf, "%s", net_dicts[dk].sf);
+        snprintf(j->dict_id, sizeof j->dict_id, "%s", net_dicts[dk].f.id);
+    }
     vector<char> cookie, valid;
     net_cookie_header(l, u, j->same, j->r, &cookie);
     if (j->cached) {
@@ -3142,6 +3954,11 @@ static int net_job_prepare(net_loader *l, net_job *j, const net_url *page, vecto
     net_request_build(j, page, data(cookie), len(cookie), data(valid), len(valid), arena);
     j->x_state = X_WAIT;
     j->x_conn = -1;
+    j->x_resolved = 0;
+    j->x_naddr = 0;
+    j->x_pooled = 0;
+    j->x_nopool = 0;
+    j->x_421 = 0;
     j->x_retries = 0;
     j->x_fresh = 0;
     j->x_got = 0;
@@ -3161,7 +3978,7 @@ static int net_job_prepare(net_loader *l, net_job *j, const net_url *page, vecto
    copy; a redirect (Fetch 4.4: a 303, or a 301 or 302 of a POST, followed by a GET without
    the body), the next hop; else its body out of its content codings, an HTTP error over 400,
    and kept by the cache when it may be and a lifetime or a validator makes it of use */
-static void net_job_answer(net_loader *l, net_job *j, vector<char> *arena, const vector<net_piece> *pieces) {
+static void net_job_answer(net_loader *l, net_job *j, const net_url *page, vector<char> *arena, const vector<net_piece> *pieces) {
     j->state = J_DONE;
     j->out = j->x_out;
     j->status = j->x_status;
@@ -3218,11 +4035,25 @@ static void net_job_answer(net_loader *l, net_job *j, vector<char> *arena, const
     }
     if (len(body)) {
         size_t came = len(body);
-        j->out = net_decode_body(data(head), len(head), &body, j->coding, sizeof j->coding, j->rt.reason, sizeof j->rt.reason);
+        /* dcb or dcz alone, to a request that offered a dictionary: decoded over it */
+        char ce[256];
+        int dcx = j->dict && net_header_all(data(head), len(head), "content-encoding", ce, sizeof ce) && (net_ci_is(ce, strlen(ce), "dcb") || net_ci_is(ce, strlen(ce), "dcz"));
+        if (dcx) {
+            snprintf(j->coding, sizeof j->coding, "%s", net_lower(ce[2]) == 'b' ? "dcb" : "dcz");
+            j->out = net_dict_decode(j->coding, j->dict_hash, &body, j->rt.reason, sizeof j->rt.reason);
+        } else j->out = net_decode_body(data(head), len(head), &body, j->coding, sizeof j->coding, j->rt.reason, sizeof j->rt.reason);
         if (j->out == NET_OUTCOME_OK && j->coding[0]) {
             j->coded = 1;
             j->encoded = (uint32_t)came;
         }
+    }
+    /* kept as a compression dictionary, when it may be */
+    int kept = j->out == NET_OUTCOME_OK ? net_dict_keep(l, &j->u, page, j->cors, data(head), len(head), data(body), len(body), j->now) : -1;
+    if (kept >= 0) {
+        j->dict_kept = 1;
+        snprintf(j->kept_sf, sizeof j->kept_sf, "%s", net_dicts[kept].sf);
+        snprintf(j->kept_match, sizeof j->kept_match, "%s", net_dicts[kept].f.match);
+        snprintf(j->kept_id, sizeof j->kept_id, "%s", net_dicts[kept].f.id);
     }
     j->body = len(*arena);
     j->body_n = len(body);
@@ -3281,6 +4112,18 @@ static void net_job_record(net_loader *l, net_job *j, const net_url *page, const
         l->resource[r].connection = j->x_number;
         l->resource[r].stream = j->x_h2 ? j->x_stream : 0;
         l->resource[r].reused = (uint8_t)j->x_reused;
+        l->resource[r].pooled = (uint8_t)j->x_pooled;
+    }
+    l->resource[r].tls_resumed = (uint8_t)(j->rt.tls && j->rt.resumed);
+    if (j->dict && j->x_number) {
+        l->resource[r].dict_sent = 1;
+        l->resource[r].dict_offered = net_text(l, j->dict_sf);
+    }
+    if (j->dict_kept) {
+        l->resource[r].dict_kept = 1;
+        l->resource[r].dict_hash = net_text(l, j->kept_sf);
+        l->resource[r].dict_match = net_text(l, j->kept_match);
+        l->resource[r].dict_id = net_text(l, j->kept_id);
     }
     if (j->out == NET_OUTCOME_OK || j->out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(*arena) + j->body, j->body_n);
     if (j->kind == NET_KIND_IMAGE && j->out == NET_OUTCOME_OK) {
@@ -3353,7 +4196,7 @@ static void net_batch(net_loader *l, vector<net_job> *jobs, const net_url *page,
         if (!any) break;
         net_run(jobs, arena, &pieces, t);
         for (size_t k = 0; k < len(*jobs); k++)
-            if ((*jobs)[k].state == J_NET) net_job_answer(l, &(*jobs)[k], arena, &pieces);
+            if ((*jobs)[k].state == J_NET) net_job_answer(l, &(*jobs)[k], page, arena, &pieces);
     }
     for (size_t k = 0; k < len(*jobs); k++)
         if (!(*jobs)[k].recorded) net_job_record(l, &(*jobs)[k], page, arena);
@@ -3381,8 +4224,6 @@ net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len,
     char u[8192], pu[8192];
     snprintf(u, sizeof u, "%.*s", (int)url_len, url);
     dom_node_h none = { 0, 0, 0 };
-    net_tls t = {0};
-    defer(t) { SSL_CTX_free(t.ctx); }
     /* the page that asked: its URL for the same-site rules and for what it may read */
     net_url page;
     int has_page = 0;
@@ -3391,7 +4232,7 @@ net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len,
         snprintf(pu, sizeof pu, "%.*s", (int)fu.len, text_ptr(l, fu));
         has_page = net_parse_abs(pu, &page);
     }
-    uint32_t r = net_get_by(l, u, kind, has_page ? from : 0, none, has_page ? &page : 0, &t, method, sent, sent_n, hdrs, hdrs_n);
+    uint32_t r = net_get_by(l, u, kind, has_page ? from : 0, none, has_page ? &page : 0, &net_tls_proc, method, sent, sent_n, hdrs, hdrs_n);
     net_jar_write(l);
     l->revision++;
     return resource_handle(l, r);
@@ -3401,9 +4242,7 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
     char u[8192];
     snprintf(u, sizeof u, "%.*s", (int)url_len, url);
     dom_node_h none = { 0, 0, 0 };
-    net_tls t = {0};
-    defer(t) { SSL_CTX_free(t.ctx); }
-    uint32_t r = net_get(l, u, kind, 0, none, 0, &t);
+    uint32_t r = net_get(l, u, kind, 0, none, 0, &net_tls_proc);
     net_jar_write(l);
     l->revision++;
     return resource_handle(l, r);
@@ -3414,11 +4253,20 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
 static uint32_t net_attr(const dom_document *d, uint32_t x, const char *name);
 static int net_is(const dom_document *d, uint32_t x, const char *name);
 
-/* the viewport images are chosen for, the cascade's (800 x 600), at a device pixel
-   ratio of 1; a font-relative length in sizes is of the initial 16px */
-#define NET_VIEW_W 800.0
-#define NET_VIEW_H 600.0
-#define NET_EM 16.0
+/* the environment images are chosen in (net_set_env): the viewport, the cascade's (800 x 600 by
+   default, the window over the profile's zoom), its device pixel ratio (the zoom), the initial
+   font size a font-relative length of sizes is of (the reader's), the colour scheme and reduced
+   motion the profile prefers */
+static double net_view_w = 800, net_view_h = 600, net_dpr = 1, net_em = 16;
+static int net_dark, net_reduce;
+void net_set_env(double width, double height, double dpr, double font_px, int dark, int reduced_motion) {
+    net_view_w = width > 0 ? width : 800;
+    net_view_h = height > 0 ? height : 600;
+    net_dpr = dpr > 0 ? dpr : 1;
+    net_em = font_px > 0 ? font_px : 16;
+    net_dark = dark;
+    net_reduce = reduced_motion;
+}
 
 static int net_ascii_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r'; }
 
@@ -3550,7 +4398,8 @@ static double net_length(const char *s, size_t n) {
     const char *u = s + i;
     size_t un = n - i;
     static const char *const units[] = { "px", "em", "rem", "ex", "ch", "vw", "vh", "vmin", "vmax", "in", "cm", "mm", "q", "pt", "pc" };
-    double per[15] = { 1, NET_EM, NET_EM, NET_EM / 2, NET_EM / 2, NET_VIEW_W / 100, NET_VIEW_H / 100, NET_VIEW_H / 100, NET_VIEW_W / 100,
+    double vmin = net_view_w < net_view_h ? net_view_w : net_view_h, vmax = net_view_w < net_view_h ? net_view_h : net_view_w;
+    double per[15] = { 1, net_em, net_em, net_em / 2, net_em / 2, net_view_w / 100, net_view_h / 100, vmin / 100, vmax / 100,
                        96, 96 / 2.54, 96 / 25.4, 96 / 101.6, 96.0 / 72, 16 };
     if (un == 0) return v == 0 ? 0 : -1e300;
     for (int k = 0; k < 15; k++) if (net_ci_is(u, un, units[k])) return v * per[k];
@@ -3637,10 +4486,10 @@ static double net_source_size(const char *s, size_t n) {
 
 /* the features a lone name holds of here, in a boolean context (Media Queries 4, 2.4.1):
    those whose value is other than 0 or none, as Chromium's headless shell answers them
-   (a mouse's hover and fine pointer, colour in sRGB); and what the others are, with a
-   value: the keyword each holds for */
+   (a mouse's hover and fine pointer, colour in sRGB; prefers-color-scheme in either
+   scheme, measured); and what the others are, with a value: the keyword each holds for */
 static const char *const net_mq_on[] = { "width", "height", "aspect-ratio", "color", "color-gamut", "hover", "any-hover", "pointer",
-                                         "any-pointer", "orientation", "resolution", "update", "display-mode" };
+                                         "any-pointer", "orientation", "resolution", "update", "display-mode", "prefers-color-scheme" };
 static const char *const net_mq_name[] = { "hover", "any-hover", "pointer", "any-pointer", "color-gamut", "prefers-contrast",
                                            "forced-colors", "update", "display-mode", "dynamic-range", "prefers-reduced-transparency",
                                            "inverted-colors" };
@@ -3649,9 +4498,9 @@ static const char *const net_mq_value[] = { "hover", "hover", "fine", "fine", "s
 
 /* one media feature in its parentheses: width, height and their min- and max-,
    in a range too ((width >= 600px), (400px < width <= 700px)), orientation,
-   resolution (1dppx, 96dpi), prefers-color-scheme (light), prefers-reduced-motion
-   (no-preference), the pointer's and the screen's (net_mq_name), and a name alone;
-   0 for a feature not known */
+   resolution (1dppx, 96dpi), prefers-color-scheme and prefers-reduced-motion, of the
+   environment net_set_env sets, the pointer's and the screen's (net_mq_name), and a
+   name alone; 0 for a feature not known */
 static int net_media_feature(const char *s, size_t n) {
     while (n && net_ascii_ws(s[n - 1])) n--;
     while (n && net_ascii_ws(s[0])) { s++; n--; }
@@ -3659,7 +4508,8 @@ static int net_media_feature(const char *s, size_t n) {
     while (id < n && ((s[id] >= 'a' && s[id] <= 'z') || (s[id] >= 'A' && s[id] <= 'Z') || s[id] == '-')) id++;
     if (id == n && n > 0) {
         for (size_t k = 0; k < sizeof net_mq_on / sizeof net_mq_on[0]; k++) if (net_ci_is(s, n, net_mq_on[k])) return 1;
-        return 0;   /* monochrome, grid, prefers-reduced-motion, a name not known */
+        if (net_ci_is(s, n, "prefers-reduced-motion")) return net_reduce;   /* reduce (measured) */
+        return 0;   /* monochrome, grid, a name not known */
     }
     size_t colon = 0;
     while (colon < n && s[colon] != ':') colon++;
@@ -3674,13 +4524,13 @@ static int net_media_feature(const char *s, size_t n) {
         static const int fcmp[6] = { 0, 1, -1, 0, 1, -1 };
         for (int k = 0; k < 6; k++)
             if (net_ci_is(s, a, fname[k])) {
-                double have = k < 3 ? NET_VIEW_W : NET_VIEW_H;
+                double have = k < 3 ? net_view_w : net_view_h;
                 if (px < -1e299) return 0;
                 return fcmp[k] == 0 ? have == px : fcmp[k] > 0 ? have >= px : have <= px;
             }
-        if (net_ci_is(s, a, "orientation")) return net_ci_is(v, vn, "landscape");
-        if (net_ci_is(s, a, "prefers-color-scheme")) return net_ci_is(v, vn, "light");
-        if (net_ci_is(s, a, "prefers-reduced-motion")) return net_ci_is(v, vn, "no-preference");
+        if (net_ci_is(s, a, "orientation")) return net_ci_is(v, vn, net_view_h > net_view_w ? "portrait" : "landscape");
+        if (net_ci_is(s, a, "prefers-color-scheme")) return net_ci_is(v, vn, net_dark ? "dark" : "light");
+        if (net_ci_is(s, a, "prefers-reduced-motion")) return net_ci_is(v, vn, net_reduce ? "reduce" : "no-preference");
         for (size_t k = 0; k < sizeof net_mq_name / sizeof net_mq_name[0]; k++)
             if (net_ci_is(s, a, net_mq_name[k])) return net_ci_is(v, vn, net_mq_value[k]);
         if (net_ci_is(s, a, "resolution") || net_ci_is(s, a, "min-resolution") || net_ci_is(s, a, "max-resolution")) {
@@ -3689,7 +4539,7 @@ static int net_media_feature(const char *s, size_t n) {
             else if (vn > 1 && net_ci_is(v + vn - 1, 1, "x")) net_html_float(v, vn - 1, &d);
             else if (vn > 3 && net_ci_is(v + vn - 3, 3, "dpi")) { if (net_html_float(v, vn - 3, &d)) d /= 96; }
             if (d < 0) return 0;
-            return net_ci_prefix(s, a, "min-") ? 1 >= d : net_ci_prefix(s, a, "max-") ? 1 <= d : d == 1;
+            return net_ci_prefix(s, a, "min-") ? net_dpr >= d : net_ci_prefix(s, a, "max-") ? net_dpr <= d : net_dpr == d;
         }
         return 0;
     }
@@ -3709,8 +4559,8 @@ static int net_media_feature(const char *s, size_t n) {
             continue;
         }
         while (i < n && !net_ascii_ws(t[i]) && t[i] != '<' && t[i] != '>' && t[i] != '=') i++;
-        if (net_ci_is(t + b, i - b, "width")) { have = NET_VIEW_W; named = 1; }
-        else if (net_ci_is(t + b, i - b, "height")) { have = NET_VIEW_H; named = 1; }
+        if (net_ci_is(t + b, i - b, "width")) { have = net_view_w; named = 1; }
+        else if (net_ci_is(t + b, i - b, "height")) { have = net_view_h; named = 1; }
         else {
             double v = net_length(t + b, i - b);
             if (v < -1e299) return 0;
@@ -3867,13 +4717,13 @@ static double net_sizes(const char *s, size_t n) {
         }
         a = b + 1;
     }
-    return NET_VIEW_W;
+    return net_view_w;
 }
 
 /* the img's choice: its srcset's candidates, each density found (a width's by the
    source size of sizes), its src a 1x one when no candidate is 1x and none has a
    width; sorted by density, the first of equal ones kept; then as Blink picks at
-   a device pixel ratio of 1, the first density at 1 or past it, else the greatest.
+   the environment's device pixel ratio (net_set_env).
    The URL into url; 0 when the img has no srcset, or no candidate in it */
 typedef struct net_pick { double density, source_size; int candidates; char desc[32]; } net_pick;
 
@@ -3885,7 +4735,7 @@ static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset,
     int k = net_srcset_parse(text, strlen(text), c, 63);
     if (k == 0) return 0;
     uint32_t sz = net_attr(d, x, "sizes");
-    double source = NET_VIEW_W;
+    double source = net_view_w;
     int any_w = 0, any_1x = 0;
     for (int i = 0; i < k; i++) if (c[i].has_w) any_w = 1;
     if (any_w && sz) {
@@ -3916,10 +4766,20 @@ static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset,
         while (j > 0 && density[order[j - 1]] > density[i]) { order[j] = order[j - 1]; j--; }
         order[j] = i;
     }
-    int w = total - 1;
-    for (int i = 0; i < total; i++) if (density[order[i]] >= 1) { w = i; break; }
-    while (w > 0 && density[order[w - 1]] == density[order[w]]) w--;
-    int pick = order[w];
+    /* the densities each once, the first of equal ones; then, as Chromium picks at the device
+       pixel ratio, the first density at it or past it, else the greatest (measured at ratios of
+       2 and 2.5: of 1x, 1.5x and 3x the 3x, of 1x and 5x the 5x, of 1x, 2.3x and 3x at 2.5 the
+       3x -- no density nearer below is taken, none is capped) */
+    int uniq[65], nu = 0;
+    for (int i = 0; i < total; i++)
+        if (nu == 0 || density[order[i]] != density[uniq[nu - 1]]) uniq[nu++] = order[i];
+    int w = nu - 1;
+    for (int i = 0; i < nu; i++)
+        if (density[uniq[i]] >= net_dpr) {
+            w = i;
+            break;
+        }
+    int pick = uniq[w];
     if (pick == k) snprintf(url, cap, "%s", srcurl);
     else snprintf(url, cap, "%.*s", (int)c[pick].url_len, text + c[pick].url);
     pk->density = density[pick];
@@ -3952,7 +4812,7 @@ static int net_image_type(const char *s, size_t n) {
 /* the image an img in a picture takes (HTML's "update the source set", 4.8.4.3): of
    the picture's children before the img, the first source with a srcset of some
    candidate, a type the painter decodes or none, and a media query list that holds
-   (against the 800x600 viewport) or none; its candidate as net_srcset_choose picks
+   (in the environment net_set_env sets) or none; its candidate as net_srcset_choose picks
    one, by the source's own sizes. That source, or 0 when none is taken and the img's
    own srcset and src give its image */
 static uint32_t net_picture_choose(const dom_document *d, uint32_t picture, uint32_t img, char *url, size_t cap, net_pick *pk) {
@@ -4042,8 +4902,6 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
     snprintf(base_text, sizeof base_text, "%.*s", (int)fs.len, text_ptr(l, fs));
     net_url base;
     if (!net_parse_abs(base_text, &base)) return NET_FAILED;
-    net_tls t = {0};
-    defer(t) { SSL_CTX_free(t.ctx); }
     /* the page's parts, in tree order, each its record made as it is met: a fetch of the
        batch, a part the profile denies, an img whose src is empty, or a URL asked for twice
        (its record filled from the first's after) */
@@ -4100,7 +4958,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 l->resource[r].kind = kind;
                 l->resource[r].from = pg;
                 l->resource[r].elem = eh;
-                if (net_resolve(&base, ref, &u)) net_url_text(&u, abs, sizeof abs);
+                if (net_resolve_enc(&base, ref, net_doc_enc, &u)) net_url_text(&u, abs, sizeof abs);
                 else snprintf(abs, sizeof abs, "%s", ref);
                 l->resource[r].url = net_text(l, abs);
                 l->resource[r].final_url = l->resource[r].url;
@@ -4111,7 +4969,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 snprintf(why, sizeof why, "the profile denies the site's %ss", net_kind_name(kind));
                 l->resource[r].reason = net_text(l, why);
                 pt.r = r;
-            } else if (!net_resolve(&base, ref, &u)) {
+            } else if (!net_resolve_enc(&base, ref, net_doc_enc, &u)) {
                 net_job_new(l, &jobs, &arena, ref, kind, pg, eh, "GET", "", 0, "", 0, 0);
                 pt.r = jobs[len(jobs) - 1].r;
             } else {
@@ -4133,6 +4991,9 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                        LOW after an image (Blink's ComputeLoadPriority: its preload scanner
                        meets a script after an image fetch as one at the bottom of the page) */
                     size_t jl = len(jobs) - 1;
+                    /* a crossorigin element asks in CORS mode (its response readable, a
+                       dictionary of another origin then offered and kept) */
+                    jobs[jl].cors = net_attr(doc, x, "crossorigin") != 0;
                     if (kind == NET_KIND_IMAGE) jobs[jl].priority = ++images <= 5 ? 2 : 3;
                     if (kind == NET_KIND_SCRIPT) {
                         if (net_attr(doc, x, "async") || net_attr(doc, x, "defer")) jobs[jl].priority = 3;
@@ -4163,7 +5024,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }
         if (x) x = doc->node[x].next_sibling;
     }
-    net_batch(l, &jobs, &base, &t, &arena);
+    net_batch(l, &jobs, &base, &net_tls_proc, &arena);
     /* then, in order, each part asked for twice given the first's record, and each image's
        choice of a srcset or a picture's source applied */
     for (size_t k = 0; k < len(parts); k++) {

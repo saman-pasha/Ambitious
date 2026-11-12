@@ -1,0 +1,2 @@
+Cache-Control: max-age=3600
+Use-As-Dictionary: match="/dict/again.html", match-dest=("document")

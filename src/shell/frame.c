@@ -244,6 +244,9 @@ static int fr_root_dark(const layout_tree *t) {
 static void fr_env(const amb_frames *fs, uint32_t k, double W, double H) {
     const sh_frame *f = &fs->tab.f[k];
     css_set_env(W, H, fs->tab.font_size > 0 ? fs->tab.font_size : 16, fs->tab.dark, fs->tab.reduced);
+    /* its images chosen in its own viewport (at a device pixel ratio of 1: a frame is drawn
+       unzoomed) */
+    net_set_env(W, H, 1, fs->tab.font_size > 0 ? fs->tab.font_size : 16, fs->tab.dark, fs->tab.reduced);
     css_set_scripting(!(f->sandbox & SH_SANDBOX) || (f->sandbox & SH_SANDBOX_SCRIPTS));
 }
 
@@ -366,7 +369,9 @@ static void fr_load(amb_frames *fs, FR_CX, uint32_t k, uint32_t pk, dom_document
     script_init(&fs->sr[i], id);
     fs->hs[i].view_w = W;
     fs->hs[i].view_h = H;
-    /* where its document comes from */
+    /* where its document comes from; the encoding its parent's URLs are in (the page's, or its
+       parent frame's), which its own replace while its parts are fetched, styled and laid out */
+    int penc = net_encoding();
     char pbase[8400], url[8400], final[8400], type[512];
     fr_base(fs, tnt, page, pk, pbase, sizeof pbase);
     uint32_t sd = fr_attr(pd, x, "srcdoc"), sa = fr_attr(pd, x, "src");
@@ -391,7 +396,8 @@ static void fr_load(amb_frames *fs, FR_CX, uint32_t k, uint32_t pk, dom_document
     } else if (sa && strlen(data(src)) && strcasecmp(data(src), "about:blank") != 0) {
         fi->source = NET_FRAME_SOURCE_SRC;
         char abs[8400];
-        if (!net_url_resolve(pbase, data(src), abs, sizeof abs)) snprintf(abs, sizeof abs, "%s", data(src));
+        /* its src's query in its parent document's encoding (measured: as Chromium writes it) */
+        if (!net_url_resolve_enc(pbase, data(src), penc, abs, sizeof abs)) snprintf(abs, sizeof abs, "%s", data(src));
         snprintf(url, sizeof url, "%s", abs);
         /* a page framing its own URL: once is let be, twice over is blocked (Chromium's
            NavigationRequest::IsSelfReferentialURL), the frame left about:blank */
@@ -452,6 +458,10 @@ static void fr_load(amb_frames *fs, FR_CX, uint32_t k, uint32_t pk, dom_document
         if (fs->p[i].encoding_len > 1 && scripts) {
             amb_span en = fs->p[i].encoding[fs->p[i].encoding_len - 1].name;
             script_charset(&fs->vm[i], bytes_ptr(&fs->p[i], en), en.len);
+        }
+        if (fs->p[i].encoding_len > 1) {
+            amb_span en = fs->p[i].encoding[fs->p[i].encoding_len - 1].name;
+            net_set_encoding(html_enc_of_label(bytes_ptr(&fs->p[i], en), en.len));
         }
     }
     fi->quirks = fs->d[i].node_len > 1 && fs->d[i].node[1].mode == DOM_DOCUMENT_MODE_QUIRKS;
@@ -533,6 +543,7 @@ static void fr_load(amb_frames *fs, FR_CX, uint32_t k, uint32_t pk, dom_document
         script_run_load(&fs->vm[i], -1);
         script_frame_loaded(fs->tab.vm[pk], x);
     }
+    net_set_encoding(penc);
 }
 
 /* the iframes of frame pk's document (0 the page's), in tree order, made frames */

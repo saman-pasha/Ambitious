@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<title>Sessions resumed, at once</title>
+<!-- tests/net/site/t/res.html: five parts of the page's server over HTTP/1.1, each connection closed after its
+     response, so each a TLS handshake of its own as Chromium makes them at once (tests/net/res.chromium); a part of
+     another host and one of another port, whose sessions are their own -->
+<img src="top.png?1" alt="1"><img src="top.png?2" alt="2"><img src="top.png?3" alt="3"><img src="top.png?4" alt="4"><img src="top.png?5" alt="5">
+<img src="https://b.localhost:PORT/top.png?b" alt="b">
+<img src="https://a.localhost:@Q@/top.png?q" alt="q">

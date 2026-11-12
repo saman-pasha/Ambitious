@@ -52,6 +52,13 @@
 # getaddrinfo: loaded from a server on ::1 where the machine has one, else refused for
 # its address family. The line says which held, so either machine prints the same.
 #
+# A URL's query in its page's legacy encoding (tests/net/site/q/, a page in windows-1252
+# and one in Shift_JIS): its parts' URLs (a background, imgs, a sheet, a script, a frame,
+# an XMLHttpRequest) write their queries in it, a character it lacks as %26%23N%3B, a
+# path and a fetch() in UTF-8; a fetched sheet's URLs in the sheet's own encoding (its
+# charset, its @charset, its importing sheet's), else the page's. Each request's target
+# against Chromium's (tests/net/query.chromium).
+#
 # The ports are written by name: PORT, HTTP2, TLS, TLS12, PROXY, CODED, CACHE, V6.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-net.XXXXXX")
@@ -247,6 +254,19 @@ case "$want:$got" in
   refused:*"U = 'http://[::1]:9/logo.png', O = refused, W = '::1 port 9: "*) echo "right for this machine" ;;
   *) echo "WRONG for this machine (want $want): $got" ;;
 esac
+
+echo "== a URL's query in its page's encoding (tests/net/site/q/: windows-1252 and Shift_JIS), each request's target against Chromium's (tests/net/query.chromium)"
+qport=$(serve query "$AMB_ROOT/tests/net/serve.py" --log "$work/query.log" "$nsite")
+for v in "1 w.html" "2 s.html"; do
+  echo "-- ${v% *} http://127.0.0.1:$qport/q/${v#* }" >> "$work/query.log"
+  sh "$AMB_ROOT/bin/ambitious" load "http://127.0.0.1:$qport/q/${v#* }" > /dev/null 2>&1
+done
+sed -e "s/:$qport\b/:PORT/g" "$work/query.log" | sh "$AMB_ROOT/tests/net/canon.sh" > "$work/query.got"
+if diff "$AMB_ROOT/tests/net/query.chromium" "$work/query.got"; then echo "the same, request by request ($(grep -c '^GET' "$work/query.got") of them)"; fi
+echo "-- as the loader keeps them: the images, in each page's encoding (a fetched sheet's in its own)"
+for p in w s; do
+  sh "$AMB_ROOT/bin/ambitious" query "http://127.0.0.1:$qport/q/$p.html" "net_resource(_, U, image, _, _, _, _)" 2>&1 | sed -e "s/:$qport\b/:PORT/g"
+done
 
 for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
 wait 2> /dev/null

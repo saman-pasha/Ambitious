@@ -665,3 +665,42 @@ neighbours.
 
     gives `own.c:2: error: syntax error: could not read this item (gave up near
     line 3)`. Asked for: "`own` is a keyword; it cannot name a variable", at the name.
+
+38. **An `own` element of a static array moved out by assignment is still freed when the
+    element is next written**: the move is not recorded, so the store that replaces the
+    element frees the old value (`if (old) free(old)`), which the variable it was moved
+    to still holds. gcc's reading of the same code (without `own`) is correct; here it is
+    a use after free and a double free:
+
+    ```c
+    #include <stdio.h>
+    #include <stdlib.h>
+    typedef struct thing { int v; } thing;
+    static own thing *slot[2];
+    static own thing *make(int v) {
+        own thing *t = malloc(sizeof *t);
+        if (t) t->v = v;
+        return t;
+    }
+    int main(void) {
+        slot[0] = make(1);
+        own thing *out = slot[0];
+        slot[0] = make(2);
+        if (out) printf("%d\n", out->v);
+        free(out);
+        free(slot[0]);
+        slot[0] = 0;
+        return 0;
+    }
+    ```
+
+    compiles; run, it stops with `free(): double free detected in tcache 2`, and valgrind
+    reports `Invalid read of size 4 ... inside a block of size 4 free'd` at the `printf`.
+    The store's free is also `free()` whatever the type: for an element that holds a
+    library's object (an `SSL_SESSION`, whose own free function must release it) it is the
+    wrong one even when nothing was moved out. 12y's TLS session cache (src/net/net.c,
+    `net_sess`) met it: a session taken from the cache by assignment was freed when the
+    next session was stored in its place. The work-around is to move an element out only
+    by passing it to an `own` parameter, which empties it (`net_sess_take`, a function that
+    returns its argument), and to empty every element (free it with the library's
+    function, then store 0) before a store, so that the store's own free sees a null.

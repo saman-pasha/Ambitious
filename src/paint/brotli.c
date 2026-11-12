@@ -16,7 +16,17 @@
    lengths do not fill its space, a repeated symbol, a length past its meta-block, a
    distance before the start or a word or transform the dictionary has not, padding that
    is not 0, a nibble or a byte more than a length needs, and a read past the input each
-   fail the whole stream; nothing outside the input is read, nothing past cap written. */
+   fail the whole stream; nothing outside the input is read, nothing past cap written.
+
+   A raw dictionary may be attached (amb_brotli_prefix: RFC 9842's dcb coding, as
+   BrotliDecoderAttachDictionary attaches a BROTLI_SHARED_DICTIONARY_RAW one): its bytes lie
+   just before the window's reach, so that a distance past the window by k (1 for the first
+   distance past it) is the dictionary's k-th byte from its end, a copy that must end within
+   it, and that counts among the last distances as a copy back does; the static dictionary's
+   words lie past the attached one, their distances that much further. A stream cut short
+   fails; amb_brotli_prefix says so apart (*cut), the bytes decoded before the cut kept, as
+   Chromium's streaming decoder hands them on (measured: a dcb body cut by two bytes is the
+   text decoded to there, with no error). */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -380,7 +390,7 @@ static void amb_bswitch(const uint8_t *in, amb_bits *b, const vector<amb_hcode> 
 /* a compressed meta-block of mlen bytes, its header from its block types on: its bytes
    appended to out (the stream's from start, its last four distances in last). 1, or 0 */
 static int amb_bmeta(const uint8_t *in, amb_bits *b, vector<uint8_t> *out, size_t start, size_t mlen, size_t cap, size_t maxback,
-                     int64_t *last) {
+                     int64_t *last, const uint8_t *dict, size_t dn) {
     vector<amb_hcode> codes;
     vector<uint16_t> pool;
     uint32_t nbl[3], ttree[3], ctree[3], brb[6], btype[3], blen[3];
@@ -440,7 +450,11 @@ static int amb_bmeta(const uint8_t *in, amb_bits *b, vector<uint8_t> *out, size_
             uint32_t tree = at(cmapl, (btype[0] << 6) + ctx);
             if (tree >= ntreesl) return 0;
             push_back(*out, (uint8_t)amb_hsym(in, b, &codes, lit0 + tree, &pool));
-            if (b->bad) return 0;
+            if (b->bad) {
+                /* a literal whose code ran past the input is none: the stream stops before it */
+                resize(*out, len(*out) - 1);
+                return 0;
+            }
         }
         if (len(*out) == end) break;                     /* the meta-block ends with the literals */
         /* the distance: the last one (the first two cells' commands), or read */
@@ -465,10 +479,22 @@ static int amb_bmeta(const uint8_t *in, amb_bits *b, vector<uint8_t> *out, size_
         }
         if (b->bad || d <= 0) return 0;
         size_t pos = len(*out) - start, maxdist = pos < maxback ? pos : maxback;
-        if ((uint64_t)d > maxdist) {
-            /* past the window: a word of the dictionary, transformed */
+        if ((uint64_t)d > maxdist && (uint64_t)d - maxdist - 1 < dn) {
+            /* past the window, within the attached dictionary: copy bytes from it */
+            if (d > 0x7FFFFFFC) return 0;
+            size_t from = dn - (size_t)((uint64_t)d - maxdist);
+            if (copy > dn - from || copy > end - len(*out)) return 0;
+            if (dc != 0) {
+                last[3] = last[2];
+                last[2] = last[1];
+                last[1] = last[0];
+                last[0] = d;
+            }
+            append_range(*out, dict + from, copy);
+        } else if ((uint64_t)d > maxdist) {
+            /* past the window (and the attached dictionary): a word of the static dictionary, transformed */
             if (d > 0x7FFFFFFC || copy < 4 || copy > 24 || !amb_brotli_word_bits[copy] || !amb_bdict_ready()) return 0;
-            uint64_t id = (uint64_t)d - maxdist - 1;
+            uint64_t id = (uint64_t)d - maxdist - 1 - dn;
             uint32_t wbits = amb_brotli_word_bits[copy];
             uint64_t t = id >> wbits;
             if (t >= 121) return 0;
@@ -493,7 +519,27 @@ static int amb_bmeta(const uint8_t *in, amb_bits *b, vector<uint8_t> *out, size_
     return !b->bad;
 }
 
+static int amb_brotli_run(const uint8_t *in, size_t n, const uint8_t *dict, size_t dn, vector<uint8_t> *out, size_t cap, int *cut);
+/* a stream that failed: whether by running out of input */
+static int amb_bfail(const amb_bits *b, int *cut) {
+    *cut = b->bad;
+    return 0;
+}
+
 int amb_brotli(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
+    int cut = 0;
+    return amb_brotli_prefix(in, n, 0, 0, out, cap, &cut);
+}
+
+int amb_brotli_prefix(const uint8_t *in, size_t n, const uint8_t *dict, size_t dn, vector<uint8_t> *out, size_t cap, int *cut) {
+    *cut = 0;
+    int r = amb_brotli_run(in, n, dict, dn, out, cap, cut);
+    return r;
+}
+
+/* the stream decoded (amb_brotli_prefix): 1, or 0 with *cut 1 when it failed by running out
+   of input (a stream cut short), the bytes whole before that in out */
+static int amb_brotli_run(const uint8_t *in, size_t n, const uint8_t *dict, size_t dn, vector<uint8_t> *out, size_t cap, int *cut) {
     amb_bits b;
     b.n = n;
     b.at = 0;
@@ -506,30 +552,31 @@ int amb_brotli(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
         if (k) wbits = 17 + k;
         else {
             k = amb_bget(in, &b, 3);
-            if (k == 1) return 0;
+            if (k == 1) return amb_bfail(&b, cut);
             wbits = k ? 8 + k : 17;
         }
     }
     size_t maxback = ((size_t)1 << wbits) - 16;
     int64_t last[4] = { 4, 11, 15, 16 };
     for (;;) {
-        if (b.bad) return 0;
+        if (b.bad) return amb_bfail(&b, cut);
         uint32_t islast = amb_bget(in, &b, 1);
         if (islast && amb_bget(in, &b, 1)) break;        /* ISLASTEMPTY */
         uint32_t nib = amb_bget(in, &b, 2);
         if (nib == 3) {
             /* metadata: its length in up to three bytes, skipped */
-            if (amb_bget(in, &b, 1)) return 0;
+            if (amb_bget(in, &b, 1)) return amb_bfail(&b, cut);
             uint32_t nbytes = amb_bget(in, &b, 2);
             size_t skip = 0;
             for (uint32_t i = 0; i < nbytes; i++) {
                 uint32_t v = amb_bget(in, &b, 8);
-                if (i + 1 == nbytes && nbytes > 1 && v == 0) return 0;
+                if (i + 1 == nbytes && nbytes > 1 && v == 0) return amb_bfail(&b, cut);
                 skip |= (size_t)v << (8 * i);
             }
             if (nbytes) skip++;
             amb_balign(in, &b);
-            if (b.bad || skip > n - b.at / 8) return 0;
+            if (!b.bad && skip > n - b.at / 8) b.bad = 1;
+            if (b.bad) return amb_bfail(&b, cut);
             b.at += 8 * skip;
             if (islast) break;
             continue;
@@ -537,20 +584,27 @@ int amb_brotli(const uint8_t *in, size_t n, vector<uint8_t> *out, size_t cap) {
         size_t mlen = 0;
         for (uint32_t i = 0; i < nib + 4; i++) {
             uint32_t v = amb_bget(in, &b, 4);
-            if (i + 1 == nib + 4 && nib > 0 && v == 0) return 0;
+            if (i + 1 == nib + 4 && nib > 0 && v == 0) return amb_bfail(&b, cut);
             mlen |= (size_t)v << (4 * i);
         }
         mlen++;
-        if (len(*out) - start + mlen > cap) return 0;
+        if (len(*out) - start + mlen > cap) return amb_bfail(&b, cut);
         if (!islast && amb_bget(in, &b, 1)) {
             /* uncompressed: its bytes as they are, from the next byte on */
             amb_balign(in, &b);
-            if (b.bad || mlen > n - b.at / 8) return 0;
+            if (b.bad) return amb_bfail(&b, cut);
+            if (mlen > n - b.at / 8) {
+                /* cut short within it: what of it came, then the end */
+                append_range(*out, in + b.at / 8, n - b.at / 8);
+                b.bad = 1;
+                return amb_bfail(&b, cut);
+            }
             append_range(*out, in + b.at / 8, mlen);
             b.at += 8 * mlen;
-        } else if (!amb_bmeta(in, &b, out, start, mlen, cap, maxback, last)) return 0;
+        } else if (!amb_bmeta(in, &b, out, start, mlen, cap, maxback, last, dict, dn)) return amb_bfail(&b, cut);
         if (islast) break;
     }
     amb_balign(in, &b);
-    return !b.bad;
+    if (b.bad) return amb_bfail(&b, cut);
+    return 1;
 }

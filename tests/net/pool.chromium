@@ -1,0 +1,14 @@
+-- 1 https://a.localhost:P/t/pool.html
+P sni=a.localhost: 127.0.0.1:P /top.png?ip, a.localhost:P /t/pool.html, a.localhost:P /top.png?always, a.localhost:P /top.png?always, b.localhost:P /top.png?always, b.localhost:P /top.png?b, b.localhost:P /top.png?misdirected, localhost:P /top.png?localhost
+P sni=b.localhost: b.localhost:P /top.png?always, b.localhost:P /top.png?misdirected
+P sni=c.localhost: c.localhost:P /top.png?c
+P sni=none: 127.0.0.2:P /top.png?ip2
+Q sni=b.localhost: b.localhost:Q /top.png?q
+-- 2 https://a.localhost:P/t/pool.html
+P sni=a.localhost: a.localhost:P /t/pool.html, a.localhost:P /top.png?always, a.localhost:P /top.png?always
+P sni=b.localhost: b.localhost:P /top.png?always, b.localhost:P /top.png?always, b.localhost:P /top.png?b, b.localhost:P /top.png?misdirected
+P sni=c.localhost: c.localhost:P /top.png?c
+P sni=localhost: localhost:P /top.png?localhost
+P sni=none: 127.0.0.1:P /top.png?ip
+P sni=none: 127.0.0.2:P /top.png?ip2
+Q sni=b.localhost: b.localhost:Q /top.png?q

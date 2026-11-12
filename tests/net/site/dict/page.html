@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<title>Compression dictionaries</title>
+<!-- tests/net/site/dict/page.html: Compression Dictionary Transport (RFC 9842) over HTTP/2, against Chromium's
+     (tests/net/dict.chromium). Its parts are dictionaries: dict.css for the paths under /dict/css/ (a style or a
+     fetch), dict.js for those under /dict/js/ (with an id), nav.js for again.html as a document, z0.js one never
+     kept (max-age=0). Once the page has loaded, its script asks for parts one after another: each offers the
+     dictionary it matches, and its server codes it over that one, as dcb or dcz; one whose header names another
+     dictionary and one whose stream is cut short fail; one a dcb response keeps as a dictionary is offered next;
+     a coding not read (compress) is taken as it came. -->
+<link rel="stylesheet" href="dict.css">
+<script src="dict.js"></script>
+<script src="nav.js"></script>
+<script src="z0.js"></script>
+<p class="dict">The dictionaries' page</p>
+<script>
+addEventListener('load', async () => {
+  const out = [];
+  for (const u of ['js/a.txt', 'js/b.txt', 'css/c.txt', 'js/badhash.txt', 'js/bad.txt', 'none/x.txt', 'js/next.txt', 'next/x.txt',
+                   'z0/x.txt', 'compress.txt']) {
+    try { const r = await fetch(u); out.push(u + ' ' + r.status + ' ' + (await r.text()).trim()); } catch (e) { out.push(u + ' ' + e); }
+  }
+  console.log(out.join(' | '));
+  document.title = 'done';
+});
+</script>

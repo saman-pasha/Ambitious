@@ -1,0 +1,21 @@
+== TLS 1.3
+-- 1 https://a.localhost:P/t/res.html
+P a.localhost:P: 6 connections, 2 resumed, 4 full
+P b.localhost:P: 1 connection, 0 resumed, 1 full
+Q a.localhost:Q: 1 connection, 0 resumed, 1 full
+-- 2 https://a.localhost:P/t/seq.html
+P a.localhost:P: 5 connections, 3 resumed, 2 full
+== TLS 1.2, tickets
+-- 1 https://a.localhost:P/t/res.html
+P a.localhost:P: 6 connections, 5 resumed, 1 full
+P b.localhost:P: 1 connection, 0 resumed, 1 full
+Q a.localhost:Q: 1 connection, 0 resumed, 1 full
+-- 2 https://a.localhost:P/t/seq.html
+P a.localhost:P: 5 connections, 4 resumed, 1 full
+== TLS 1.2, session IDs
+-- 1 https://a.localhost:P/t/res.html
+P a.localhost:P: 6 connections, 5 resumed, 1 full
+P b.localhost:P: 1 connection, 0 resumed, 1 full
+Q a.localhost:Q: 1 connection, 0 resumed, 1 full
+-- 2 https://a.localhost:P/t/seq.html
+P a.localhost:P: 5 connections, 4 resumed, 1 full

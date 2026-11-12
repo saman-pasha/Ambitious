@@ -37,11 +37,11 @@ x.br: 1 bytes, crc32 b7b2364b
 xyzzy.br: 5 bytes, crc32 7d192963
 zeros.br: 262144 bytes, crc32 e20eea22
 alice29.txt.br with a cap of 152,088 bytes: refused
-200 broken copies of alice29.txt.br: 13 decoded, 187 refused (13047116 bytes out)
-200 broken copies of oblique-q11-w10.br: 24 decoded, 176 refused (3558757 bytes out)
-200 broken copies of oblique-q0-w10.br: 26 decoded, 174 refused (2970374 bytes out)
-200 broken copies of monkey.br: 23 decoded, 177 refused (105187 bytes out)
-200 broken copies of quickfox_repeated.br: 8 decoded, 192 refused (1456692 bytes out)
+200 broken copies of alice29.txt.br: 13 decoded, 187 refused (13047109 bytes out)
+200 broken copies of oblique-q11-w10.br: 24 decoded, 176 refused (3558737 bytes out)
+200 broken copies of oblique-q0-w10.br: 26 decoded, 174 refused (2970793 bytes out)
+200 broken copies of monkey.br: 23 decoded, 177 refused (105139 bytes out)
+200 broken copies of quickfox_repeated.br: 8 decoded, 192 refused (1456677 bytes out)
 serif-bold.woff2: face 48, an sfnt of 36716 bytes, 11 tables:
   OS/2 86 bytes, crc32 fc46983b
   cmap 1972 bytes, crc32 85f8d62e

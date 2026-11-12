@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>picture: a source's width and height</title>
+<!-- tests/net/site/p/dims.html: a <source>'s width and height, when its picture's img takes it, are the img's
+     dimension attributes in place of its own (HTML's dimension attribute source; Blink's
+     CollectExtraStyleForPresentationAttribute): each given maps to the img's width or height, each not given
+     takes the img's away; a source with neither leaves the img its own. Held to Chromium's boxes
+     (tests/net/picture-dims.chromium, by tests/net/picture.js). wide.png is 120x24, own.png 50x16. -->
+<style>
+body { margin: 8px; font: 16px/1 sans-serif }
+picture { display: block; margin: 0 0 2px }
+</style>
+<picture><source srcset="wide.png" width="100" height="50"><img id="both" src="fallback.png" alt=""></picture>
+<picture><source srcset="wide.png" width="60"><img id="wonly" src="fallback.png" height="20" alt=""></picture>
+<picture><source srcset="wide.png" height="48"><img id="honly" src="fallback.png" width="10" alt=""></picture>
+<picture><source srcset="wide.png"><img id="own" src="fallback.png" width="30" alt=""></picture>
+<picture><source media="print" srcset="wide.png" width="200"><img id="nottaken" src="own.png" width="40" alt=""></picture>
+<picture><source srcset="wide.png" width="50%"><img id="percent" src="fallback.png" alt=""></picture>
+<picture><source srcset="wide.png" width="abc" height="10"><img id="bad" src="fallback.png" width="77" alt=""></picture>
+<picture><source srcset="wide.png" width="90" height="9"><img id="over" src="fallback.png" width="11" height="12" alt=""></picture>
+<picture><img id="noneimg" src="own.png" width="25" alt=""></picture>
