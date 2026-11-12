@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Ellipses: text-overflow and the line clamp</title><style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; width: 300px; margin-bottom: 10px; }
+.t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 250px; margin-bottom: 10px; }
+</style></head><body>
+<div id="c1" class="c">This paragraph is long enough to need several lines in a box three hundred pixels wide, so the clamp cuts it at the second line.</div>
+<div id="c2" class="c" style="-webkit-line-clamp: 3">This one keeps three lines of its text, though it is long enough to need more than three lines in a narrow box like this one.</div>
+<div id="c3" class="c">Short text.</div>
+<div id="c4" class="c" style="-webkit-line-clamp: 1">One line only, with a long text that runs past the end of the box</div>
+<div id="t1" class="t">A single line far too long for its box, cut with an ellipsis at its end</div>
+<div id="t2" class="t">Short line</div>
+<div id="t3" class="t" style="text-overflow: clip">A single line far too long for its box, clipped with no ellipsis at all</div>
+<div id="t4" class="t">With <b id="b4">bold words</b> in the middle of a line that is far too long</div>
+<div id="c5" class="c" style="display: flow-root">A box specified flow-root is not clamped by the old box's line clamp, though its text runs to three lines.</div>
+<span id="c6" class="c" style="display: -webkit-inline-box; width: 200px">An inline box clamped at two lines, its text long enough for more.</span>
+<div id="after">After</div>
+</body></html>

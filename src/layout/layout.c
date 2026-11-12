@@ -259,6 +259,8 @@ typedef struct lay_ext {
     uint32_t persp, porigin, translate, rotate, scale;
     uint8_t p3d, backface;
     int paints;                         /* any of these other than its initial value */
+    int32_t clamp;                      /* -webkit-line-clamp's lines on a vertical -webkit-box; 0 none */
+    uint8_t ellipsis;                   /* text-overflow: ellipsis */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -384,7 +386,8 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     if (lay_w(w, "none") || lay_w(w, "table-column") || lay_w(w, "table-column-group")) s->display = D_NONE;
     else if (lay_w(w, "inline")) s->display = D_INLINE;
     else if (lay_w(w, "list-item")) s->display = D_LIST_ITEM;
-    else if (lay_w(w, "inline-block") || lay_w(w, "inline-flex") || lay_w(w, "inline-grid") || lay_w(w, "inline-table"))
+    else if (lay_w(w, "inline-block") || lay_w(w, "inline-flex") || lay_w(w, "inline-grid") || lay_w(w, "inline-table") ||
+             lay_w(w, "-webkit-inline-box"))
         s->display = D_INLINE_BLOCK;
     else if (lay_w(w, "table")) s->display = D_TABLE;
     else if (lay_w(w, "table-row-group") || lay_w(w, "table-header-group") || lay_w(w, "table-footer-group"))
@@ -395,7 +398,7 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     else if (lay_w(w, "contents")) s->display = D_CONTENTS;
     else {
         s->display = D_BLOCK;
-        s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid");
+        s->bfc = lay_w(w, "flow-root") || lay_w(w, "flex") || lay_w(w, "grid") || lay_w(w, "-webkit-box");
     }
     s->color = st->cval[cv[CSS_PROP_COLOR]].color;
     s->fill = st->cval[cv[CSS_PROP_WEBKIT_TEXT_FILL_COLOR]].color;
@@ -530,6 +533,17 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->hyph = lay_w(w, "auto") ? 2 : lay_w(w, "manual") ? 1 : 0;
     lay_word_of(st, c0 + CSS_PROP_DISPLAY, w);
     e->lx = lay_w(w, "flex") || lay_w(w, "inline-flex") ? LX_FLEX : lay_w(w, "grid") || lay_w(w, "inline-grid") ? LX_GRID : LX_FLOW;
+    int wkbox = lay_w(w, "-webkit-box") || lay_w(w, "-webkit-inline-box");
+    lay_word_of(st, c0 + CSS_PROP_WEBKIT_BOX_ORIENT, w);
+    int wkvert = lay_w(w, "vertical");
+    if (wkbox && !wkvert) e->lx = LX_FLEX;      /* the old -webkit-box: a row of its children */
+    /* -webkit-line-clamp: the lines a vertical -webkit-box keeps (CSS Overflow 4's legacy clamp). The cascade
+       computes such a box flow-root or inline-block, its display's num 1 (the old box specified) */
+    uint32_t lc = c0 + CSS_PROP_WEBKIT_LINE_CLAMP;
+    e->clamp = st->cval[c0 + CSS_PROP_DISPLAY].num == 1 && st->cval[lc].unit == CSS_UNIT_NUMBER && st->cval[lc].num >= 1 ?
+               (int32_t)st->cval[lc].num : 0;
+    lay_word_of(st, c0 + CSS_PROP_TEXT_OVERFLOW, w);
+    e->ellipsis = (uint8_t)lay_w(w, "ellipsis");
     lay_word_of(st, c0 + CSS_PROP_FLEX_DIRECTION, w);
     e->frow = !(lay_w(w, "column") || lay_w(w, "column-reverse"));
     e->frev = lay_w(w, "row-reverse") || lay_w(w, "column-reverse");
@@ -1590,6 +1604,9 @@ static void lay_flow_children(LCTX, uint32_t b, uint32_t el, int bfc, int height
 static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch);
 static int lay_decorated(LCTX, uint32_t el, const lay_style *es);
 static double lay_marker_inside(LCTX, uint32_t el, const lay_style *ls);
+static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, int force);
+static uint32_t lay_nth_line(layout_tree *t, uint32_t b, long *n, double oy, double *bottom, uint32_t *owner);
+static void lay_clamp(LCTX, uint32_t b, uint32_t el, const lay_style *s);
 static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es, double cw);
 static void lay_box_paint(LCTX, uint32_t b, uint32_t si);
 static amb_span lay_kept(layout_tree *t, const css_style *st, uint32_t c);
@@ -1732,6 +1749,7 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     else if (lx == LX_GRID) lay_grid(LARGS, b, el, defh);
     else lay_flow_children(LARGS, b, el, 1, defh < 0, 0, 0, defh, &et, &eb, &empty);
     if (defh >= 0) t->box[b].h = defh;
+    else if (LAY_X(el).clamp > 0) lay_clamp(LARGS, b, el, &s);
     return b;
 }
 /* a child box out of its parent's flow: positioned absolutely, fixed, or floated */
@@ -3233,6 +3251,7 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
     }
     lay_style bs;
     lay_style_of(LARGS, container, &bs);
+    uint32_t ln0 = t->box[b].last_line;     /* the box's last line before these */
     /* the block's ::first-letter and ::first-line, in its first run: the first line laid
        out in the pseudo-element's style (its strut too), the rest as they were */
     lay_style fls, bs1 = bs;
@@ -3373,8 +3392,98 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
             has_fl = 0;
         }
     }
+    /* text-overflow: ellipsis, in a box that clips its overflow: each line past the content box's edge cut, an
+       ellipsis after what stays */
+    if (LAY_X(container).ellipsis && LAY_X(container).clip)
+        for (uint32_t ln = ln0 ? t->line[ln0].next : t->box[b].first_line; ln; ln = t->line[ln].next)
+            lay_ellipsize(LARGS, ln, w - t->line[ln].x, &bs, 0);
     return y;
 }
+/* a line cut for an ellipsis (CSS Overflow 3, text-overflow; the legacy line clamp): when what it holds reaches past
+   limit (or always, when force), its text ends at the last character that leaves the ellipsis room before limit, what is
+   past that is dropped, and the ellipsis, in the block's style bs, follows. Fragments' places are the line's */
+static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, int force) {
+    double right = 0;
+    for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next)
+        if (t->frag[fr].kind != LAYOUT_FRAG_KIND_INLINE && t->frag[fr].x + t->frag[fr].w > right) right = t->frag[fr].x + t->frag[fr].w;
+    if (!force && right <= limit + 0.01) return;
+    const char *dots = "\xe2\x80\xa6";
+    double ew = amb_text_width(f, bs->face, bs->fs, dots, 3);
+    double room = limit - ew, end = 0;
+    uint32_t last = 0;
+    for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+        layout_frag_kind k = t->frag[fr].kind;
+        if (k == LAYOUT_FRAG_KIND_INLINE || k == LAYOUT_FRAG_KIND_MARKER) continue;
+        double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
+        if (x1 <= room + 0.01) { if (x1 > end) end = x1; last = fr; continue; }
+        if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_GENERATED) { t->frag[fr].w = 0; continue; }
+        /* its text to the last character that fits */
+        amb_span sp = t->frag[fr].text;
+        const char *tx = text_ptr(t, sp);
+        size_t keep = 0, i = 0;
+        double kw = 0;
+        while (i < sp.len && x0 < room) {
+            size_t j = i + 1;
+            while (j < sp.len && ((uint8_t)tx[j] & 0xC0) == 0x80) j++;
+            double cw = amb_text_width(f, t->frag[fr].face, t->frag[fr].size, tx, j) + t->frag[fr].spacing * (double)lay_cps(tx, j);
+            if (x0 + cw > room + 0.01) break;
+            keep = j;
+            kw = cw;
+            i = j;
+        }
+        t->frag[fr].text.len = (uint32_t)keep;
+        t->frag[fr].w = kw;
+        if (keep && x0 + kw > end) { end = x0 + kw; last = fr; }
+    }
+    /* the ellipsis, on the line's baseline, after what stays */
+    double base = last ? t->frag[last].baseline : t->line[ln].baseline;
+    amb_span dsp = text_add(t, dots, 3);
+    layout_frag_h fh = frag_new(t);
+    uint32_t fr = fh.index;
+    t->frag[fr].kind = LAYOUT_FRAG_KIND_GENERATED;
+    if (last) t->frag[fr].node = t->frag[last].node;
+    t->frag[fr].text = dsp;
+    t->frag[fr].x = end;
+    t->frag[fr].y = base - bs->asc;
+    t->frag[fr].w = ew;
+    t->frag[fr].h = bs->asc + bs->desc;
+    t->frag[fr].baseline = base;
+    t->frag[fr].face = (uint8_t)bs->face;
+    if (bs->font) t->frag[fr].font = resource_handle(nt, bs->font);
+    t->frag[fr].size = bs->fs;
+    t->frag[fr].color = bs->color;
+    t->frag[fr].fill = bs->fill;
+    frags_append(t, ln, fr);
+}
+/* the nth line (from 1) of b's block flow -- its own lines, then each in-flow child's, in order: *n counts down to 0
+   at it; its bottom from b's content top in *bottom, its box in *owner; 0 when there are fewer */
+static uint32_t lay_nth_line(layout_tree *t, uint32_t b, long *n, double oy, double *bottom, uint32_t *owner) {
+    for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next) {
+        if (--(*n) == 0) { *bottom = oy + t->line[ln].y + t->line[ln].h; *owner = b; return ln; }
+    }
+    for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
+        if (t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED ||
+            t->box[c].float_side != LAYOUT_FLOAT_SIDE_UNFLOATED) continue;
+        uint32_t ln = lay_nth_line(t, c, n, oy + t->box[c].y, bottom, owner);
+        if (ln) return ln;
+    }
+    return 0;
+}
+/* -webkit-line-clamp: a box the cascade computed from a vertical -webkit-box (flow-root) or -webkit-inline-box
+   (inline-block), its height auto, as tall as its first N lines; when more follow, the Nth ends with an ellipsis in
+   s's font (Chromium's legacy clamp) */
+static void lay_clamp(LCTX, uint32_t b, uint32_t el, const lay_style *s) {
+    long n = LAY_X(el).clamp, more = n + 1;
+    if (n <= 0) return;
+    double bottom = 0, b2 = 0;
+    uint32_t owner = 0, o2 = 0;
+    uint32_t ln = lay_nth_line(t, b, &n, 0, &bottom, &owner);
+    if (ln && lay_nth_line(t, b, &more, 0, &b2, &o2)) {
+        t->box[b].h = bottom;
+        lay_ellipsize(LARGS, ln, t->box[owner].w - t->line[ln].x, s, 1);
+    }
+}
+
 /* ---- list markers ---- */
 
 static size_t lay_roman(long n, int upper, char *out, size_t cap) {
@@ -4302,6 +4411,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
         if (t->box[b].h < minh) { t->box[b].h = minh; eb.pos = eb.neg = 0; *empty = 0; }
     }
     if (t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb > 0) *empty = 0;
+    if (at(*xc, si).clamp > 0 && defh < 0) lay_clamp(LARGS, b, el, &s);
     /* the legend in its place: from the fieldset's content box, above it */
     if (lgb) lay_place(t, lgb, t->box[lgb].ml, lg_y - t->box[b].bt - t->box[b].pt);
     *mt = lay_mc_add(lay_mc_of(t->box[b].mt), et);

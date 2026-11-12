@@ -1,0 +1,13 @@
+# boxes of tests/pages/ellipsis.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+c1 div 8 8 300 40
+c2 div 8 58 300 60
+c3 div 8 128 300 20
+c4 div 8 158 300 20
+t1 div 8 188 250 20
+t2 div 8 218 250 20
+t3 div 8 248 250 20
+t4 div 8 278 250 20
+b4 b 44.453 279 85.328 17
+c5 div 8 308 300 60
+c6 span 8 378 200 40
+after div 8 433 784 20

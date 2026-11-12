@@ -33,7 +33,8 @@ def main():
             continue
         ident, prop, want = parts[0], parts[1], parts[2].strip()
         total += 1
-        have = ours.get((ident, prop if prop.startswith("--") else prop.replace("-", "_")))
+        # a property's atom: its name with - as _, a vendor prefix's leading - gone (webkit_line_clamp)
+        have = ours.get((ident, prop if prop.startswith("--") else prop.lstrip("-").replace("-", "_")))
         if have is None:
             print("%s: #%s %s: Ambitious has no value; Chromium %s" % (name, ident, prop, want))
             continue

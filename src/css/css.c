@@ -764,7 +764,7 @@ typedef struct css_pdef { const char *name; uint8_t inh, gram, flags; const char
 static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "display", 0, G_KW, 0, "inline block list-item inline-block none flex inline-flex grid inline-grid flow-root contents table "
       "inline-table table-row table-cell table-row-group table-header-group table-footer-group table-caption table-column "
-      "table-column-group", "inline" },
+      "table-column-group -webkit-box -webkit-inline-box", "inline" },
     { "color", 1, G_COLOR, 0, 0, "black" },
     { "background-color", 0, G_COLOR, 0, 0, "transparent" },
     { "font-size", 1, G_LEN, F_PCT, "xx-small x-small small medium large x-large xx-large xxx-large smaller larger", "16px" },
@@ -899,6 +899,9 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "transition-behavior", 0, G_TEXT, 0, 0, "normal" },
     { "grid-template-areas", 0, G_TEXT, 0, "none", "none" },
     { "-webkit-text-fill-color", 1, G_COLOR, 0, 0, "currentcolor" },
+    { "text-overflow", 0, G_KW, 0, "clip ellipsis", "clip" },
+    { "-webkit-line-clamp", 0, G_NUM, F_INT, "none", "none" },
+    { "-webkit-box-orient", 0, G_KW, 0, "horizontal vertical inline-axis block-axis", "horizontal" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1004,6 +1007,7 @@ static int css_valid(css_prop p, css_val *v) {
         if (u == CSS_UNIT_NUMBER) {
             if ((f & F_INT) && v->num != (double)(long)v->num) return 0;
             if (p == CSS_PROP_FONT_WEIGHT) return v->num >= 1 && v->num <= 1000;
+            if (p == CSS_PROP_WEBKIT_LINE_CLAMP) return v->num >= 1;
             return !neg || (f & F_NEG);
         }
         if (u == CSS_UNIT_PERCENT) return (f & F_PCT) && !neg;
@@ -4621,6 +4625,7 @@ static void css_blockify(css_val *v) {
     if (strcmp(w, "inline-table") == 0) css_word_val(v, "table");
     else if (strcmp(w, "inline-flex") == 0) css_word_val(v, "flex");
     else if (strcmp(w, "inline-grid") == 0) css_word_val(v, "grid");
+    else if (strcmp(w, "-webkit-inline-box") == 0) css_word_val(v, "-webkit-box");
     else if (strcmp(w, "inline") == 0 || strcmp(w, "inline-block") == 0 || strncmp(w, "table-", 6) == 0) css_word_val(v, "block");
 }
 
@@ -4675,7 +4680,12 @@ static void css_snap_width(css_val *v, const css_val *style, int border) {
     else if (v->unit == CSS_UNIT_PX && v->num >= 1) v->num = (double)(long)v->num;
 }
 
-/* display blockified where the element's position, float, root or parent ask it */
+/* display blockified where the element's position, float, root or parent ask it; then the
+   legacy line clamp's (CSS Overflow 4, 4.2): a -webkit-box or -webkit-inline-box whose
+   -webkit-box-orient is vertical and whose -webkit-line-clamp is a number computes to
+   flow-root or inline-block, as Chromium's does. Its num 1 records that the old box was
+   specified (Chromium's IsSpecifiedDisplayWebkitBox): layout clamps such a box alone, not
+   one specified flow-root */
 static int css_display_fix(css_val *v, const css_val *out, const css_val *pdisplay, int is_root) {
     int pflex = !is_root && (css_word_is(pdisplay, "flex") || css_word_is(pdisplay, "inline-flex") || css_word_is(pdisplay, "grid") ||
                              css_word_is(pdisplay, "inline-grid"));
@@ -4683,6 +4693,12 @@ static int css_display_fix(css_val *v, const css_val *out, const css_val *pdispl
     if (is_root && css_word_is(v, "contents")) css_word_val(v, "block");
     if (is_root || pflex || !css_word_is(&out[CSS_PROP_FLOAT], "none") || css_word_is(&out[CSS_PROP_POSITION], "absolute") ||
         css_word_is(&out[CSS_PROP_POSITION], "fixed")) css_blockify(v);
+    int box = css_word_is(v, "-webkit-box"), ibox = css_word_is(v, "-webkit-inline-box");
+    if ((box || ibox) && css_word_is(&out[CSS_PROP_WEBKIT_BOX_ORIENT], "vertical") &&
+        out[CSS_PROP_WEBKIT_LINE_CLAMP].unit == CSS_UNIT_NUMBER) {
+        css_word_val(v, box ? "flow-root" : "inline-block");
+        v->num = 1;
+    }
     return strcmp(b.word, v->word) != 0;
 }
 
@@ -5880,6 +5896,14 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         !css_word_is(&out[CSS_PROP_FLOAT], "none")) {
         css_word_val(&out[CSS_PROP_FLOAT], "none");
         rec[CSS_PROP_FLOAT] = css_value_rec(s, &out[CSS_PROP_FLOAT], rec[CSS_PROP_FLOAT].how, win[CSS_PROP_FLOAT], vc);
+    }
+    /* -webkit-box-orient's logical keywords computed as Chromium computes them: block-axis vertical,
+       inline-axis horizontal */
+    if (win[CSS_PROP_WEBKIT_BOX_ORIENT] && (css_word_is(&out[CSS_PROP_WEBKIT_BOX_ORIENT], "block-axis") ||
+                                            css_word_is(&out[CSS_PROP_WEBKIT_BOX_ORIENT], "inline-axis"))) {
+        css_word_val(&out[CSS_PROP_WEBKIT_BOX_ORIENT], css_word_is(&out[CSS_PROP_WEBKIT_BOX_ORIENT], "block-axis") ? "vertical" : "horizontal");
+        rec[CSS_PROP_WEBKIT_BOX_ORIENT] = css_value_rec(s, &out[CSS_PROP_WEBKIT_BOX_ORIENT], rec[CSS_PROP_WEBKIT_BOX_ORIENT].how,
+                                                        win[CSS_PROP_WEBKIT_BOX_ORIENT], vc);
     }
     css_val pdisplay;
     css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
