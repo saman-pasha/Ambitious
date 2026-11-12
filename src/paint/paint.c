@@ -7,7 +7,9 @@
    order: its shadows, its background, its borders, its lines -- inline
    elements' backgrounds (an element with borders, rounded corners, images
    or shadows drawn from its box of them, the element as one strip sliced
-   at its line breaks), text and its shadows, decorations, list markers --
+   at its line breaks, or each fragment on its own when cloned; the fragments
+   an inline element's clip-path clips drawn together, held to its shape about
+   the element's first fragment), text and its shadows, decorations, list markers --
    its child boxes, its outline), then those with z-index auto or 0 in tree
    order and those with a positive one by z-index. A box that clips its overflow
    clips what is in it to its padding box.
@@ -15,14 +17,19 @@
    A box: its outer box-shadows (offset, spread, blurred: three box blurs, a
    Gaussian's), its background colour and layers (url() images, linear and
    radial gradients; background-size, -position and -repeat; the last layer
-   first) in its border box, rounded by its corners' radii (a fieldset's from
+   first; a layer whose tiles repeat in its painting area one pattern, each
+   pixel sampled across its tiles' edges, a gradient's from its tile's raster, as
+   Skia's shaders draw them) in its border box, rounded by its corners' radii (a fieldset's from
    its legend's middle, its top border left out behind the legend); its borders, solid,
    dotted, dashed, double, groove, ridge, inset or outset (Chromium's darker
    colour for the shaded sides), round where its corners are. A box with an
    opacity is drawn and blended with what was under it; one with a transform
    (translate, scale, rotate, skew, matrix, about its transform-origin) is drawn
    on black and on white, which give its colours and their alpha, and mapped
-   onto the canvas, sampled bilinearly. Glyphs come from font.c at their size and
+   onto the canvas, sampled bilinearly. One whose filter, clip-path or mask names SVG
+   elements by url() (layout's fx, src/paint/svg.h) is drawn into a layer, through its
+   filter's list in turn (a run of functions, a url()'s filter), then its clip and its mask,
+   as svg.c draws a group's. Glyphs come from font.c at their size and
    quarter-pixel position, cached. An image is drawn from the bytes the loader
    fetched for its element (image.c decodes PNG), sampled bilinearly into its
    content box; one whose load failed is Chromium's fallback (its 16px icon,
@@ -1048,10 +1055,12 @@ static uint32_t pt_stop_at(const vector<pt_stop> *sv, double t) {
            (uint32_t)(al * 255 + 0.5);
 }
 
-/* a linear or radial gradient (s[0, n), its function call) over the tile (x, y, w, h),
-   drawn where the box's rounded border box (bx..., r) and the clip let it */
-static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double y, double w, double h, double bx0, double by0, double bx1,
-                        double by1, const double *rad) {
+/* a linear or radial gradient (s[0, n), its function call) of a tile gw x gh, drawn over the
+   rectangle (x, y, dw, dh) of the canvas (its scale dw / gw across, dh / gh down), where the
+   box's rounded border box (bx..., r) and the clip let it */
+static void pt_gradient_ex(amb_canvas *c, const char *s, size_t n, double x, double y, double dw, double dh, double gw, double gh, double bx0,
+                           double by0, double bx1, double by1, const double *rad) {
+    double w = gw, h = gh, kx = gw / dw, ky = gh / dh;
     int radial = n > 15 && memcmp(s, "radial-gradient", 15) == 0;
     int linear = n > 15 && memcmp(s, "linear-gradient", 15) == 0;
     int rep = n > 25 && memcmp(s, "repeating-", 10) == 0;
@@ -1129,11 +1138,11 @@ static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double
     double period = len(sv) > 1 ? at(sv, len(sv) - 1).pos - at(sv, 0).pos : 0;
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
-    int ya = (int)floor(fmax(y, by0) - c->oy), yb = (int)ceil(fmin(y + h, by1) - c->oy);
-    int xa = (int)floor(fmax(x, bx0)), xb = (int)ceil(fmin(x + w, bx1));
+    int ya = (int)floor(fmax(y, by0) - c->oy), yb = (int)ceil(fmin(y + dh, by1) - c->oy);
+    int xa = (int)floor(fmax(x, bx0)), xb = (int)ceil(fmin(x + dw, bx1));
     for (int py = ya < ky0 ? ky0 : ya; py < yb && py < ky1; py++)
         for (int pxx = xa < kx0 ? kx0 : xa; pxx < xb && pxx < kx1; pxx++) {
-            double X = pxx + 0.5 - x, Y = py + 0.5 + c->oy - y;
+            double X = (pxx + 0.5 - x) * kx, Y = (py + 0.5 + c->oy - y) * ky;
             if (X < 0 || Y < 0 || X > w || Y > h) continue;
             double tt;
             if (linear) tt = glen > 0 ? ((X - w / 2) * dxv + (Y - h / 2) * dyv) / glen + 0.5 : 0;
@@ -1142,6 +1151,132 @@ static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double
             double cov = pt_rr_cover(pxx + 0.5, py + 0.5 + c->oy, bx0, by0, bx1, by1, rad);
             if (cov > 0) pt_blend(c, pxx, py, pt_stop_at(&sv, tt), cov);
         }
+}
+static void pt_gradient(amb_canvas *c, const char *s, size_t n, double x, double y, double w, double h, double bx0, double by0, double bx1,
+                        double by1, const double *rad) {
+    pt_gradient_ex(c, s, n, x, y, w, h, w, h, bx0, by0, bx1, by1, rad);
+}
+
+/* ---- a background repeated as one pattern ---- */
+
+/* a gradient's tile (s, n) as Skia rasterizes a picture shader's: tw x th rounded up to whole px (in floats, as Skia's
+   matrix reckons the size), the gradient drawn scaled to it, onto black and onto white, as RGBA (not premultiplied:
+   its colour from the drawing on black, its alpha from the two) into rgba; its size into w, h */
+static void pt_gradient_tile(const char *s, size_t n, double tw, double th, double zoom, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
+    *w = (uint32_t)ceil((double)(float)tw);
+    *h = (uint32_t)ceil((double)(float)th);
+    clear(*rgba);
+    if (*w < 1 || *h < 1 || (double)*w * *h > 4e6) { *w = *h = 0; return; }
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = *w;
+    k0.h = k1.h = *h;
+    k0.zoom = k1.zoom = zoom;
+    k0.cx1 = k1.cx1 = *w;
+    k0.cy1 = k1.cy1 = *h;
+    resize(&k0.px, (size_t)*w * *h * 3);
+    resize(&k1.px, (size_t)*w * *h * 3);
+    memset(data(k1.px), 255, len(k1.px));
+    double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    pt_gradient_ex(&k0, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
+    pt_gradient_ex(&k1, s, n, 0, 0, *w, *h, tw, th, 0, 0, *w, *h, nr);
+    resize(rgba, (size_t)*w * *h * 4);
+    for (size_t q = 0; q < (size_t)*w * *h; q++) {
+        double a = 1 - (at(k1.px, 3 * q) - at(k0.px, 3 * q) + at(k1.px, 3 * q + 1) - at(k0.px, 3 * q + 1) + at(k1.px, 3 * q + 2) - at(k0.px, 3 * q + 2)) / 765.0;
+        a = a < 0 ? 0 : a > 1 ? 1 : a;
+        for (size_t ch = 0; ch < 3; ch++) (*rgba)[4 * q + ch] = a > 0 ? (uint8_t)fmin(255, at(k0.px, 3 * q + ch) / a + 0.5) : 0;
+        (*rgba)[4 * q + 3] = (uint8_t)(a * 255 + 0.5);
+    }
+}
+
+/* a background layer's image (w x h px RGBA, not premultiplied) repeated as one pattern over the canvas within its clip,
+   as Skia's image shader draws a repeated background (Blink's DrawImageTiled): its tile tw x th at (x0, y0), each pixel
+   sampled bilinearly at its centre from the image premultiplied, a tile's edge from its own texels and the next tile's
+   (rx, ry: the axes it repeats along; along another its band alone, snapped to whole px and the image mapped onto it,
+   clamped, as Chromium draws it: measured, a 24px band at 530.5 drawn from 531 to 555 with its first texel's colour
+   first); from the deepest mip level still at least the tile's size each way (Chromium's decode cache's, MipMapUtil:
+   an image drawn 20 x 20 from 96 x 32 is sampled from its own pixels). Under image-rendering pixelated or crisp-edges
+   (c->nearest) each pixel is the texel at its centre, a centre on a texel's edge the one before it, from the image's
+   own pixels (Skia's nearest sampling, as pt_image_ex's). Held to the rounded rectangle area (x0, y0, x1, y1; its
+   corners' radii rad) when its corners are round */
+static void pt_pattern(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double tw, double th, int rx,
+                       int ry, const double *area, const double *rad) {
+    if (w == 0 || h == 0 || !(tw > 0 && th > 0)) return;
+    vector<uint8_t> cur, nxt;
+    resize(cur, len(*rgba));
+    for (size_t q = 0; q + 3 < len(*rgba); q += 4) {
+        uint32_t a = at(*rgba, q + 3);
+        for (size_t k = 0; k < 3; k++) cur[q + k] = (uint8_t)((at(*rgba, q + k) * a + 127) / 255);
+        cur[q + 3] = (uint8_t)a;
+    }
+    uint32_t lw = w, lh = h;
+    int nearest = c->nearest;
+    double need_w = ceil(tw - 1e-6), need_h = ceil(th - 1e-6);
+    while (!nearest && (lw > 1 || lh > 1) && (lw > 1 ? lw / 2 : 1) >= need_w && (lh > 1 ? lh / 2 : 1) >= need_h) {
+        uint32_t nw2, nh2;
+        pt_mip_level(&cur, lw, lh, &nxt, &nw2, &nh2);
+        clear(cur);
+        append_range(cur, data(nxt), len(nxt));
+        lw = nw2;
+        lh = nh2;
+    }
+    /* an axis it does not repeat along: its band snapped */
+    if (!rx) {
+        double sx0 = floor(x0 + 0.5), sx1 = floor(x0 + tw + 0.5);
+        if (sx1 <= sx0) return;
+        x0 = sx0;
+        tw = sx1 - sx0;
+    }
+    if (!ry) {
+        double sy0 = floor(y0 + 0.5), sy1 = floor(y0 + th + 0.5);
+        if (sy1 <= sy0) return;
+        y0 = sy0;
+        th = sy1 - sy0;
+    }
+    int round = pt_round(rad);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = ky0; y < ky1; y++) {
+        double py = y + c->oy, cy = 1;
+        if (!ry) {
+            cy = fmin(py + 1, y0 + th) - fmax(py, y0);
+            if (cy <= 0) continue;
+            if (cy > 1) cy = 1;
+        }
+        double v = (py + 0.5 - y0) * lh / th - 0.5, fv = floor(v), ay = v - fv;
+        long v0 = (long)fv, v1 = v0 + 1;
+        if (nearest) { v0 = v1 = (long)(ceil((py + 0.5 - y0) * lh / th - 1e-9) - 1); ay = 0; }
+        if (ry) { v0 = ((v0 % (long)lh) + (long)lh) % (long)lh; v1 = ((v1 % (long)lh) + (long)lh) % (long)lh; }
+        else { v0 = v0 < 0 ? 0 : v0 >= (long)lh ? (long)lh - 1 : v0; v1 = v1 < 0 ? 0 : v1 >= (long)lh ? (long)lh - 1 : v1; }
+        for (int x = kx0; x < kx1; x++) {
+            double cov = cy;
+            if (!rx) {
+                double cx = fmin(x + 1.0, x0 + tw) - fmax((double)x, x0);
+                if (cx <= 0) continue;
+                cov *= cx > 1 ? 1 : cx;
+            }
+            if (round) cov *= pt_rr_cover(x + 0.5, py + 0.5, area[0], area[1], area[2], area[3], rad);
+            if (cov <= 0) continue;
+            double u = (x + 0.5 - x0) * lw / tw - 0.5, fu = floor(u), ax = u - fu;
+            long u0 = (long)fu, u1 = u0 + 1;
+            if (nearest) { u0 = u1 = (long)(ceil((x + 0.5 - x0) * lw / tw - 1e-9) - 1); ax = 0; }
+            if (rx) { u0 = ((u0 % (long)lw) + (long)lw) % (long)lw; u1 = ((u1 % (long)lw) + (long)lw) % (long)lw; }
+            else { u0 = u0 < 0 ? 0 : u0 >= (long)lw ? (long)lw - 1 : u0; u1 = u1 < 0 ? 0 : u1 >= (long)lw ? (long)lw - 1 : u1; }
+            double px[4];
+            for (size_t k = 0; k < 4; k++) {
+                double top = at(cur, ((size_t)v0 * lw + (size_t)u0) * 4 + k) * (1 - ax) + at(cur, ((size_t)v0 * lw + (size_t)u1) * 4 + k) * ax;
+                double bot = at(cur, ((size_t)v1 * lw + (size_t)u0) * 4 + k) * (1 - ax) + at(cur, ((size_t)v1 * lw + (size_t)u1) * 4 + k) * ax;
+                px[k] = top * (1 - ay) + bot * ay;
+            }
+            double a = px[3] / 255 * cov;
+            if (a <= 0) continue;
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            for (size_t k = 0; k < 3; k++) c->px[i + k] = (uint8_t)fmin(255, px[k] * cov + c->px[i + k] * (1 - a) + 0.5);
+        }
+    }
 }
 
 /* one value of a pair (background-size's, -position's): a length or percentage of basis */
@@ -1824,6 +1959,110 @@ static void pt_area(const layout_tree *t, uint32_t b, const char *w, size_t wn, 
     r[4] = fmax(0, rad[4] - dt); r[5] = fmax(0, rad[5] - dt); r[6] = fmax(0, rad[6] - db); r[7] = fmax(0, rad[7] - db);
 }
 
+/* one layer of a box's background or mask, drawn in box b's areas: its image's text (li: a url(), the box's fetched
+   picture, or a gradient), its position's, size's and repeat's texts, its origin's (the positioning area: the padding box
+   unless it says otherwise; a mask's the border box) and its clip's (the painting area: the border box unless it says
+   otherwise; the box's border box when the layer is clipped to its text, to_text; no-clip none). Each tile placed by the
+   size, position and repeat, as CSS Backgrounds 3 has it, within the painting area */
+static void pt_layer_one(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
+                         const double *rad, const char *li, size_t ll, const char *ps, size_t pn, const char *ss, size_t sn, const char *rs,
+                         size_t rn, const char *os, size_t on, const char *cs, size_t cn, int to_text) {
+    double area[4], ar[8], clip[4], cr[8];
+    if (on) pt_area(t, b, os, on, rad, area, ar);
+    else pt_area(t, b, "padding-box", 11, rad, area, ar);
+    if (cn && !to_text) pt_area(t, b, cs, cn, rad, clip, cr);
+    else pt_area(t, b, "border-box", 10, rad, clip, cr);
+    if (cn && pt_is(cs, cn, "no-clip")) {
+        clip[0] = 0;
+        clip[1] = c->oy;
+        clip[2] = c->w;
+        clip[3] = c->oy + c->h;
+        for (int k = 0; k < 8; k++) cr[k] = 0;
+    }
+    double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
+    double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
+    /* the positioning area moved with the border box's origin snapped to whole pixels, its offsets kept (Blink's
+       BackgroundImageGeometry: a tile at round(box) + offset, resampled there; measured on seven boxes) */
+    {
+        double ox0 = t->box[b].x - t->box[b].pl - t->box[b].bl, oy0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        double zz = c->zoom > 0 ? c->zoom : 1;     /* snapped in CSS px, as Chromium snaps under a zoom */
+        ax += floor(ox0 / zz + 0.5) * zz - ox0;
+        ay += floor(oy0 / zz + 0.5) * zz - oy0;
+    }
+    int rx = 1, ry = 1;
+    if (rn && pt_is(rs, rn, "no-repeat")) { rx = 0; ry = 0; }
+    else if (rn && pt_is(rs, rn, "repeat-x")) ry = 0;
+    else if (rn && pt_is(rs, rn, "repeat-y")) rx = 0;
+    else if (rn && memcmp(rs, "no-repeat", rn < 9 ? rn : 9) == 0) { rx = 0; ry = 0; }
+    int is_url = ll > 4 && memcmp(li, "url(", 4) == 0;
+    size_t off = 0;
+    uint32_t iw = 0, ih = 0;
+    /* an SVG image (src/paint/svg.h): its natural size its tile's (a ratio alone as
+       contain has it, neither the area), drawn at its tile's size */
+    double snw = 0, snh = 0, sr = 0;
+    int svg = is_url && t->box[b].bg_res.index && amb_svg_size_of(nt, t->box[b].bg_res.index, &snw, &snh, &sr);
+    if (svg) {
+        double z = c->zoom > 0 ? c->zoom : 1, cw = aw, ch = ah;
+        if (snw > 0 && snh > 0) { cw = snw * z; ch = snh * z; }
+        else if (sr > 0 && ah > 0) { if (aw / ah > sr) cw = ah * sr; else ch = aw / sr; }
+        iw = (uint32_t)floor(cw + 0.5);
+        ih = (uint32_t)floor(ch + 0.5);
+    } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) return;
+    double tw, th, ox, oy;
+    /* a raster image's natural size in device px: its pixels at the zoom (an SVG's is so already) */
+    double zt = !svg && c->zoom > 0 ? c->zoom : 1;
+    pt_tile_size(ss, sn, iw * zt, ih * zt, aw, ah, &tw, &th);
+    if (tw < 0.5 || th < 0.5) return;
+    vector<uint8_t> spx;
+    uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);
+    if (svg && (spw < 1 || sph < 1 || !amb_svg_raster_of(nt, t->box[b].bg_res.index, spw, sph, &spx))) return;
+    pt_tile_pos(ps, pn, aw, ah, tw, th, &ox, &oy);
+    double x0 = ax + ox, y0 = ay + oy;
+    /* the tiles over the painting area: from the first that reaches it */
+    double sx = x0, sy = y0;
+    if (rx) while (sx > bx0) sx -= tw;
+    if (ry) while (sy > by0) sy -= th;
+    double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
+    c->cx0 = fmax(c->cx0, bx0);
+    c->cy0 = fmax(c->cy0, by0);
+    c->cx1 = fmin(c->cx1, bx1);
+    c->cy1 = fmin(c->cy1, by1);
+    /* tiles that repeat within the painting area: one pattern, sampled across their edges, as Chromium draws them (a
+       gradient's from its tile's raster); a tile alone there drawn as itself */
+    int many = (rx && (bx0 < x0 - 0.01 || bx1 > x0 + tw + 0.01)) || (ry && (by0 < y0 - 0.01 || by1 > y0 + th + 0.01));
+    if (many) {
+        double pclip[4] = { bx0, by0, bx1, by1 };
+        if (svg) pt_pattern(c, &spx, spw, sph, x0, y0, tw, th, rx, ry, pclip, cr);
+        else if (is_url) {
+            vector<uint8_t> tile;
+            append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
+            pt_pattern(c, &tile, iw, ih, x0, y0, tw, th, rx, ry, pclip, cr);
+        } else {
+            vector<uint8_t> gt;
+            uint32_t gw, gh;
+            pt_gradient_tile(li, ll, tw, th, c->zoom, &gt, &gw, &gh);
+            pt_pattern(c, &gt, gw, gh, x0, y0, tw, th, rx, ry, pclip, cr);
+        }
+    }
+    for (double ty = sy; ty < by1 && (ry || ty == sy) && !many; ty += th) {
+        if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
+        for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
+            if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
+            else if (is_url) {
+                vector<uint8_t> tile;
+                append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
+                pt_image(c, &tile, iw, ih, tx, ty, tw, th);
+            } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, cr);
+            if (!rx) break;
+        }
+        if (!ry) break;
+    }
+    c->cx0 = save[0];
+    c->cy0 = save[1];
+    c->cx1 = save[2];
+    c->cy1 = save[3];
+}
+
 static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
                       const double *rad, int text_only) {
     vector<char> img, pos, siz, rep, org, clp;
@@ -1844,8 +2083,6 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
     while (pt_layer(data(img), len(img), &i, &a, &ln)) { push_back(layers, a); push_back(layers, ln); }
     size_t nl = len(layers) / 2;
     for (size_t q = nl; q >= 1; q--) {
-        const char *li = data(img) + at(layers, 2 * q - 2);
-        size_t ll = at(layers, 2 * q - 1);
         size_t pa = 0, pl = 0, sa = 0, sl = 0, ra = 0, rl = 0;
         if (len(pos)) pt_nth(data(pos), len(pos), q - 1, &pa, &pl);
         if (len(siz)) pt_nth(data(siz), len(siz), q - 1, &sa, &sl);
@@ -1858,77 +2095,8 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         /* a layer clipped to the text is drawn by pt_text_bg (text_only), over the border box */
         int to_text = cl && pt_is(data(clp) + ca, cl, "text");
         if (to_text != (text_only != 0)) continue;
-        double area[4], ar[8], clip[4], cr[8];
-        if (ol) pt_area(t, b, data(org) + oa, ol, rad, area, ar);
-        else pt_area(t, b, "padding-box", 11, rad, area, ar);
-        if (cl && !to_text) pt_area(t, b, data(clp) + ca, cl, rad, clip, cr);
-        else pt_area(t, b, "border-box", 10, rad, clip, cr);
-        double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
-        double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
-        /* the positioning area moved with the border box's origin snapped to whole pixels, its offsets kept (Blink's
-           BackgroundImageGeometry: a tile at round(box) + offset, resampled there; measured on seven boxes) */
-        {
-            double ox0 = t->box[b].x - t->box[b].pl - t->box[b].bl, oy0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
-            double zz = c->zoom > 0 ? c->zoom : 1;     /* snapped in CSS px, as Chromium snaps under a zoom */
-            ax += floor(ox0 / zz + 0.5) * zz - ox0;
-            ay += floor(oy0 / zz + 0.5) * zz - oy0;
-        }
-        const char *rp = data(rep) + ra;
-        int rx = 1, ry = 1;
-        if (rl && pt_is(rp, rl, "no-repeat")) { rx = 0; ry = 0; }
-        else if (rl && pt_is(rp, rl, "repeat-x")) ry = 0;
-        else if (rl && pt_is(rp, rl, "repeat-y")) rx = 0;
-        else if (rl && memcmp(rp, "no-repeat", rl < 9 ? rl : 9) == 0) { rx = 0; ry = 0; }
-        int is_url = ll > 4 && memcmp(li, "url(", 4) == 0;
-        size_t off = 0;
-        uint32_t iw = 0, ih = 0;
-        /* an SVG image (src/paint/svg.h): its natural size its tile's (a ratio alone as
-           contain has it, neither the area), drawn at its tile's size */
-        double snw = 0, snh = 0, sr = 0;
-        int svg = is_url && t->box[b].bg_res.index && amb_svg_size_of(nt, t->box[b].bg_res.index, &snw, &snh, &sr);
-        if (svg) {
-            double z = c->zoom > 0 ? c->zoom : 1, cw = aw, ch = ah;
-            if (snw > 0 && snh > 0) { cw = snw * z; ch = snh * z; }
-            else if (sr > 0 && ah > 0) { if (aw / ah > sr) cw = ah * sr; else ch = aw / sr; }
-            iw = (uint32_t)floor(cw + 0.5);
-            ih = (uint32_t)floor(ch + 0.5);
-        } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) continue;
-        double tw, th, ox, oy;
-        /* a raster image's natural size in device px: its pixels at the zoom (an SVG's is so already) */
-        double zt = !svg && c->zoom > 0 ? c->zoom : 1;
-        pt_tile_size(data(siz) + sa, sl, iw * zt, ih * zt, aw, ah, &tw, &th);
-        if (tw < 0.5 || th < 0.5) continue;
-        vector<uint8_t> spx;
-        uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);
-        if (svg && (spw < 1 || sph < 1 || !amb_svg_raster_of(nt, t->box[b].bg_res.index, spw, sph, &spx))) continue;
-        pt_tile_pos(data(pos) + pa, pl, aw, ah, tw, th, &ox, &oy);
-        double x0 = ax + ox, y0 = ay + oy;
-        /* the tiles over the painting area: from the first that reaches it */
-        double sx = x0, sy = y0;
-        if (rx) while (sx > bx0) sx -= tw;
-        if (ry) while (sy > by0) sy -= th;
-        double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
-        c->cx0 = fmax(c->cx0, bx0);
-        c->cy0 = fmax(c->cy0, by0);
-        c->cx1 = fmin(c->cx1, bx1);
-        c->cy1 = fmin(c->cy1, by1);
-        for (double ty = sy; ty < by1 && (ry || ty == sy); ty += th) {
-            if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
-            for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
-                if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
-                else if (is_url) {
-                    vector<uint8_t> tile;
-                    append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
-                    pt_image(c, &tile, iw, ih, tx, ty, tw, th);
-                } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, cr);
-                if (!rx) break;
-            }
-            if (!ry) break;
-        }
-        c->cx0 = save[0];
-        c->cy0 = save[1];
-        c->cx1 = save[2];
-        c->cy1 = save[3];
+        pt_layer_one(t, nt, b, c, icache, ipx, rad, data(img) + at(layers, 2 * q - 2), at(layers, 2 * q - 1), data(pos) + pa, pl, data(siz) + sa,
+                     sl, data(rep) + ra, rl, data(org) + oa, ol, data(clp) + ca, cl, to_text);
     }
 }
 
@@ -2723,35 +2891,64 @@ static int pt_symbol(const layout_tree *t, uint32_t fr, amb_canvas *c) {
     return 1;
 }
 
+/* one fragment of a line drawn: an inline element's decorations, or text (its shadows, glyphs and decorations), a
+   marker */
+static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
+                    vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
+                    vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    layout_frag_kind k = t->frag[fr].kind;
+    if (k == LAYOUT_FRAG_KIND_INLINE) {
+        if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
+        else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
+        return;
+    }
+    if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) return;
+    if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) return;
+    /* a fragment outside the canvas's window: nothing of it to draw */
+    if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) return;
+    amb_span sp = t->frag[fr].text;
+    double size = t->frag[fr].size, base = t->frag[fr].baseline;
+    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
+    pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
+            pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
+    /* the decorations in the text's fill, as Blink resolves their currentcolor */
+    uint8_t deco = t->frag[fr].decoration;
+    double th = floor(size / 16 + 0.5);
+    if (th < 1) th = 1;
+    double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
+    uint32_t dc = t->frag[fr].fill;
+    if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+    if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+    if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+}
+
+static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const vector<uint8_t> *before);
+
+/* a block's lines, fragment by fragment; those an inline element's clip-path clips (each fragment's clip) together,
+   where the first of them is met: drawn over what was there and held to the clip-path's shape about the element's first
+   fragment, as a block's stacking context is (Chromium's inline element with a clip-path) */
 static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
                      vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
                      vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    vector<uint32_t> clipped;
     for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next)
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
-            layout_frag_kind k = t->frag[fr].kind;
-            if (k == LAYOUT_FRAG_KIND_INLINE) {
-                if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
-                else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
+            uint32_t cb = t->frag[fr].clip;
+            if (!cb) {
+                pt_frag(t, nt, fr, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
                 continue;
             }
-            if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
-            if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) continue;
-            /* a fragment outside the canvas's window: nothing of it to draw */
-            if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
-            amb_span sp = t->frag[fr].text;
-            double size = t->frag[fr].size, base = t->frag[fr].baseline;
-            if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
-            pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
-                    pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
-            /* the decorations in the text's fill, as Blink resolves their currentcolor */
-            uint8_t deco = t->frag[fr].decoration;
-            double th = floor(size / 16 + 0.5);
-            if (th < 1) th = 1;
-            double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
-            uint32_t dc = t->frag[fr].fill;
-            if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
-            if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
-            if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+            int seen = 0;
+            for (size_t q = 0; q < len(clipped) && !seen; q++) seen = at(clipped, q) == cb;
+            if (seen) continue;
+            push_back(clipped, cb);
+            vector<uint8_t> before;
+            resize(&before, len(c->px));
+            memcpy(data(before), data(c->px), len(c->px));
+            for (uint32_t l2 = ln; l2; l2 = t->line[l2].next)
+                for (uint32_t f2 = t->line[l2].first_frag; f2; f2 = t->frag[f2].next)
+                    if (t->frag[f2].clip == cb) pt_frag(t, nt, f2, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
+            pt_clip_path(t, cb, c, &before);
         }
 }
 
@@ -2848,9 +3045,9 @@ static int pt_transformed(const layout_tree *t, uint32_t b) {
     return t->box[b].transform.len || t->box[b].translate.len || t->box[b].rotate.len || t->box[b].scale.len;
 }
 /* a box whose children share its 3D space (transform-style: preserve-3d), unless a
-   property that groups its content flattens it (an opacity, a filter, a clip) */
+   property that groups its content flattens it (an opacity, a filter, a clip, a mask) */
 static int pt_p3d(const layout_tree *t, uint32_t b) {
-    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip && !t->box[b].cpath.len;
+    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip && !t->box[b].cpath.len && !t->box[b].fx.len;
 }
 /* a box drawn as a plane of its parent's 3D rendering context: its parent preserves 3D
    and it is transformed or preserves 3D itself */
@@ -2859,10 +3056,10 @@ static int pt_in_3d(const layout_tree *t, uint32_t b) {
     return p && pt_p3d(t, p) && (pt_transformed(t, b) || pt_p3d(t, b));
 }
 /* a box that makes a stacking context of its own: a z-index, an opacity, a transform, a
-   filter, a perspective, a 3D space of its own */
+   filter, a perspective, a 3D space of its own, a clip-path, a mask */
 static int pt_context(const layout_tree *t, uint32_t b) {
     return !t->box[b].z_auto || t->box[b].opacity < 1 || pt_transformed(t, b) || t->box[b].filter.len || t->box[b].backdrop.len ||
-           t->box[b].persp.len || t->box[b].p3d || t->box[b].cpath.len;
+           t->box[b].persp.len || t->box[b].p3d || t->box[b].cpath.len || t->box[b].fx.len;
 }
 
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box);
@@ -3051,10 +3248,12 @@ static void pt_origin(const layout_tree *t, amb_span sp, double w, double h, dou
    the box is not transformed (m the identity) */
 static int pt_box_matrix(const layout_tree *t, uint32_t b, double *m) {
     pt_m4_id(m);
-    if (!pt_transformed(t, b)) return 0;
+    uint32_t p = t->box[b].parent;
+    /* an untransformed box that preserves 3D under a parent's perspective: its space seen through it (its children's
+       planes are, as Chromium draws them) */
+    if (!pt_transformed(t, b) && !(p && t->box[p].persp.len && pt_p3d(t, b))) return 0;
     double bx, by, bw, bh, ox, oy, oz;
     pt_border_box(t, b, &bx, &by, &bw, &bh);
-    uint32_t p = t->box[b].parent;
     if (p && t->box[p].persp.len) {
         vector<char> pv;
         amb_span sp = t->box[p].persp;
@@ -3081,6 +3280,49 @@ static int pt_box_matrix(const layout_tree *t, uint32_t b, double *m) {
     }
     pt_m4_translate(m, -(bx + ox), -(by + oy), -oz);
     return 1;
+}
+
+/* a canvas the size of c's, to draw a box onto black (white 0) or onto white (1) */
+static void pt_canvas_like(const amb_canvas *c, int white, amb_canvas *k) {
+    k->w = c->w;
+    k->h = c->h;
+    k->oy = c->oy;
+    k->zoom = c->zoom;
+    k->cx0 = 0;
+    k->cy0 = c->oy;
+    k->cx1 = c->w;
+    k->cy1 = c->oy + c->h;
+    resize(&k->px, (size_t)c->w * c->h * 3);
+    if (white) memset(data(k->px), 255, len(k->px));
+}
+
+/* what a box drew onto black (k0) and onto white (k1): the rectangle of its pixels not black on black or not white on
+   white, into r (x0, y0, x1, y1, the last two past it); 0 when it drew none. A row is compared whole first, and a row
+   drawn on read from its ends in, as far as the rectangle has not reached */
+static int pt_drawn(const amb_canvas *k0, const amb_canvas *k1, int *r) {
+    int w = (int)k0->w, h = (int)k0->h;
+    size_t rb = (size_t)w * 3;
+    r[0] = w; r[1] = h; r[2] = -1; r[3] = -1;
+    if (!rb) return 0;
+    vector<uint8_t> zero, white;
+    resize(&zero, rb);
+    resize(&white, rb);
+    memset(data(white), 255, rb);
+    for (int y = 0; y < h; y++) {
+        size_t o = (size_t)y * rb;
+        if (memcmp(data(k0->px) + o, data(zero), rb) == 0 && memcmp(data(k1->px) + o, data(white), rb) == 0) continue;
+        for (int x = 0; x < r[0]; x++) {
+            size_t i = o + (size_t)x * 3;
+            if (at(k0->px, i) | at(k0->px, i + 1) | at(k0->px, i + 2) || (at(k1->px, i) & at(k1->px, i + 1) & at(k1->px, i + 2)) != 255) { r[0] = x; break; }
+        }
+        for (int x = w - 1; x >= r[2] && x >= 0; x--) {
+            size_t i = o + (size_t)x * 3;
+            if (at(k0->px, i) | at(k0->px, i + 1) | at(k0->px, i + 2) || (at(k1->px, i) & at(k1->px, i + 1) & at(k1->px, i + 2)) != 255) { r[2] = x + 1; break; }
+        }
+        if (y < r[1]) r[1] = y;
+        r[3] = y + 1;
+    }
+    return r[2] > r[0];
 }
 
 /* a box (with its content) drawn through its matrix m onto its plane: drawn onto black
@@ -3116,17 +3358,8 @@ static void pt_plane_draw(PCTX, uint32_t b, int ctx, const double *m) {
     memset(&k1, 0, sizeof k1);
     defer(k0) { AMB_CANVAS_DROP(k0); }
     defer(k1) { AMB_CANVAS_DROP(k1); }
-    k0.w = k1.w = c->w;
-    k0.h = k1.h = c->h;
-    k0.oy = k1.oy = c->oy;
-    k0.zoom = k1.zoom = c->zoom;
-    k0.cx0 = k1.cx0 = 0;
-    k0.cy0 = k1.cy0 = c->oy;
-    k0.cx1 = k1.cx1 = c->w;
-    k0.cy1 = k1.cy1 = c->oy + c->h;
-    resize(&k0.px, (size_t)c->w * c->h * 3);
-    resize(&k1.px, (size_t)c->w * c->h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
     pt_effects_plain(PARGS_C(&k0), b, ctx);
     pt_effects_plain(PARGS_C(&k1), b, ctx);
     int kx0, ky0, kx1, ky1;
@@ -3184,9 +3417,157 @@ static void pt_planes(const layout_tree *t, uint32_t b, const double *m, vector<
     }
 }
 
+/* the planes of a 3D space drawn together (CSS Transforms 2, 6.1: each plane in its place in the space, as Chromium's
+   compositor sorts them with a BSP tree, splitting those that cut through each other): each drawn onto black and onto white
+   as pt_plane_draw draws one, its back hidden as there, what it drew kept (its pixels' rectangle); then each pixel of the
+   canvas the planes reach laid from the planes it shows, the farthest first, by their depths there (a plane's z at the
+   point it shows, its w divided out), the tree's order between two at one depth. Planes too large to keep together are
+   drawn whole, by their middles' depth, as before */
+static void pt_planes_draw(PCTX, uint32_t b, int ctx, const vector<pt_plane> *planes) {
+    size_t np = len(*planes), px = (size_t)c->w * (size_t)c->h;
+    if (!np || !px) return;
+    vector<uint8_t> bl, wh;                /* each plane's drawing on black and on white, its rectangle's rows, one after another */
+    vector<double> hv;                     /* each plane's inverse homography (9), its determinant (1), its matrix's z and w rows (6) */
+    vector<int64_t> rect;                  /* each plane's rectangle (x0, y0, x1, y1) and where its pixels begin in bl and wh */
+    int reach[4] = { (int)c->w, (int)c->h, 0, 0 }, whole = 0;
+    for (size_t k = 0; k < np && !whole; k++) {
+        pt_plane x = at(*planes, k);
+        const double *m = x.m;
+        double hm[9] = { m[0], m[1], m[3], m[4], m[5], m[7], m[12], m[13], m[15] };
+        double dh = hm[0] * (hm[4] * hm[8] - hm[5] * hm[7]) - hm[1] * (hm[3] * hm[8] - hm[5] * hm[6]) + hm[2] * (hm[3] * hm[7] - hm[4] * hm[6]);
+        if (fabs(dh) < 1e-12) continue;
+        if (t->box[x.box].backface) {
+            double dm = 0;
+            for (int q = 0; q < 4; q++) {
+                double s3[9];
+                int r3 = 0;
+                for (int r = 1; r < 4; r++)
+                    for (int cc = 0; cc < 4; cc++)
+                        if (cc != q) s3[r3++] = m[4 * r + cc];
+                double d3 = s3[0] * (s3[4] * s3[8] - s3[5] * s3[7]) - s3[1] * (s3[3] * s3[8] - s3[5] * s3[6]) + s3[2] * (s3[3] * s3[7] - s3[4] * s3[6]);
+                dm += (q % 2 ? -1 : 1) * m[q] * d3;
+            }
+            if (dh * dm < 0) continue;
+        }
+        amb_canvas k0, k1;
+        memset(&k0, 0, sizeof k0);
+        memset(&k1, 0, sizeof k1);
+        defer(k0) { AMB_CANVAS_DROP(k0); }
+        defer(k1) { AMB_CANVAS_DROP(k1); }
+        pt_canvas_like(c, 0, &k0);
+        pt_canvas_like(c, 1, &k1);
+        int mine = x.box == b ? ctx : 1;
+        pt_effects_plain(PARGS_C(&k0), x.box, mine);
+        pt_effects_plain(PARGS_C(&k1), x.box, mine);
+        /* what it drew */
+        int dr[4];
+        if (!pt_drawn(&k0, &k1, dr)) continue;
+        int r0 = dr[0], r1 = dr[1], r2 = dr[2], r3 = dr[3];
+        size_t rw = (size_t)(r2 - r0), rh = (size_t)(r3 - r1);
+        if ((double)len(bl) + (double)rw * rh * 3 > 6e7) { whole = 1; break; }
+        push_back(rect, r0); push_back(rect, r1); push_back(rect, r2); push_back(rect, r3); push_back(rect, (int64_t)len(bl));
+        for (size_t y = 0; y < rh; y++) {
+            size_t from = (((size_t)r1 + y) * c->w + (size_t)r0) * 3;
+            append_range(bl, data(k0.px) + from, rw * 3);
+            append_range(wh, data(k1.px) + from, rw * 3);
+        }
+        double iv[9] = { hm[4] * hm[8] - hm[5] * hm[7], hm[2] * hm[7] - hm[1] * hm[8], hm[1] * hm[5] - hm[2] * hm[4],
+                         hm[5] * hm[6] - hm[3] * hm[8], hm[0] * hm[8] - hm[2] * hm[6], hm[2] * hm[3] - hm[0] * hm[5],
+                         hm[3] * hm[7] - hm[4] * hm[6], hm[1] * hm[6] - hm[0] * hm[7], hm[0] * hm[4] - hm[1] * hm[3] };
+        for (int q = 0; q < 9; q++) push_back(hv, iv[q]);
+        push_back(hv, dh);
+        push_back(hv, m[8]); push_back(hv, m[9]); push_back(hv, m[11]);
+        push_back(hv, m[12]); push_back(hv, m[13]); push_back(hv, m[15]);
+        /* where it lands on the canvas: its rectangle's corners through the homography; all of the canvas when a corner
+           lies behind the viewer */
+        for (int q = 0; q < 4; q++) {
+            double X = (q & 1) ? r2 + 1 : r0 - 1, Y = ((q & 2) ? r3 + 1 : r1 - 1) + c->oy;
+            double W = hm[6] * X + hm[7] * Y + hm[8];
+            if (W * dh <= 0 || fabs(W) < 1e-9) { reach[0] = 0; reach[1] = 0; reach[2] = (int)c->w; reach[3] = (int)c->h; continue; }
+            double sx = (hm[0] * X + hm[1] * Y + hm[2]) / W, sy = (hm[3] * X + hm[4] * Y + hm[5]) / W - c->oy;
+            if (!(fabs(sx) < 1e7 && fabs(sy) < 1e7)) { reach[0] = 0; reach[1] = 0; reach[2] = (int)c->w; reach[3] = (int)c->h; continue; }
+            if ((int)floor(sx) - 1 < reach[0]) reach[0] = (int)floor(sx) - 1;
+            if ((int)floor(sy) - 1 < reach[1]) reach[1] = (int)floor(sy) - 1;
+            if ((int)ceil(sx) + 1 > reach[2]) reach[2] = (int)ceil(sx) + 1;
+            if ((int)ceil(sy) + 1 > reach[3]) reach[3] = (int)ceil(sy) + 1;
+        }
+    }
+    if (whole) {
+        /* too much to keep: each plane whole, those farther first by their middles' depth */
+        vector<pt_plane> sorted;
+        append_range(sorted, data(*planes), np);
+        for (size_t k = 1; k < np; k++) {
+            pt_plane x = at(sorted, k);
+            size_t q = k;
+            while (q > 0 && at(sorted, q - 1).z > x.z) { sorted[q] = at(sorted, q - 1); q--; }
+            sorted[q] = x;
+        }
+        for (size_t k = 0; k < np; k++) pt_plane_draw(PARGS, at(sorted, k).box, at(sorted, k).box == b ? ctx : 1, at(sorted, k).m);
+        return;
+    }
+    size_t nl = len(rect) / 5;
+    if (!nl) return;
+    vector<double> zs, cs;                 /* a pixel's samples: their depth, then colour (3, premultiplied) and alpha */
+    vector<uint32_t> ord;
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    if (reach[0] > kx0) kx0 = reach[0];
+    if (reach[1] > ky0) ky0 = reach[1];
+    if (reach[2] < kx1) kx1 = reach[2];
+    if (reach[3] < ky1) ky1 = reach[3];
+    for (int y = ky0; y < ky1; y++)
+        for (int x = kx0; x < kx1; x++) {
+            double X = x + 0.5, Y = y + 0.5 + c->oy;
+            clear(zs);
+            clear(cs);
+            clear(ord);
+            for (size_t k = 0; k < nl; k++) {
+                const double *iv = data(hv) + 16 * k;
+                double sw = iv[6] * X + iv[7] * Y + iv[8];
+                if (sw * iv[9] <= 0) continue;
+                double u = (iv[0] * X + iv[1] * Y + iv[2]) / sw, v = (iv[3] * X + iv[4] * Y + iv[5]) / sw;
+                double sx = u - 0.5, sy = v - 0.5 - c->oy;
+                int64_t q0 = at(rect, 5 * k), q1 = at(rect, 5 * k + 1), q2 = at(rect, 5 * k + 2), q3 = at(rect, 5 * k + 3);
+                if (sx < q0 - 1 || sy < q1 - 1 || sx > (double)q2 || sy > (double)q3) continue;
+                size_t base = (size_t)at(rect, 5 * k + 4), rw = (size_t)(q2 - q0);
+                int x0 = (int)floor(sx), y0 = (int)floor(sy);
+                double fx = sx - x0, fy = sy - y0, col[3] = { 0, 0, 0 }, al = 0;
+                for (int q = 0; q < 4; q++) {
+                    int qx = x0 + (q & 1), qy = y0 + (q >> 1);
+                    double wgt = ((q & 1) ? fx : 1 - fx) * ((q >> 1) ? fy : 1 - fy);
+                    if (qx < q0 || qy < q1 || qx >= q2 || qy >= q3 || wgt <= 0) continue;
+                    size_t pi = base + ((size_t)(qy - q1) * rw + (size_t)(qx - q0)) * 3;
+                    double a0 = 1 - (at(wh, pi) - at(bl, pi)) / 255.0;
+                    for (int ch = 0; ch < 3; ch++) col[ch] += at(bl, pi + (size_t)ch) * wgt;
+                    al += a0 * wgt;
+                }
+                if (al <= 0.002) continue;
+                double zz = iv[10] * u + iv[11] * v + iv[12], ww = iv[13] * u + iv[14] * v + iv[15];
+                double depth = fabs(ww) > 1e-12 ? zz / ww : zz;
+                /* by depth, the farthest first; the tree's order between equals */
+                size_t n0 = len(ord), q = n0;
+                push_back(ord, (uint32_t)n0);
+                push_back(zs, depth);
+                push_back(cs, col[0]); push_back(cs, col[1]); push_back(cs, col[2]); push_back(cs, al);
+                while (q > 0 && at(zs, at(ord, q - 1)) > depth + 1e-9) { ord[q] = at(ord, q - 1); q--; }
+                ord[q] = (uint32_t)n0;
+            }
+            if (!len(ord)) continue;
+            size_t di = ((size_t)y * c->w + (size_t)x) * 3;
+            double dst[3] = { c->px[di], c->px[di + 1], c->px[di + 2] };
+            for (size_t q = 0; q < len(ord); q++) {
+                size_t sidx = 4 * (size_t)at(ord, q);
+                double al = at(cs, sidx + 3);
+                if (al > 1) al = 1;
+                for (int ch = 0; ch < 3; ch++) dst[ch] = at(cs, sidx + (size_t)ch) + dst[ch] * (1 - al);
+            }
+            for (int ch = 0; ch < 3; ch++) c->px[di + (size_t)ch] = (uint8_t)(dst[ch] < 0 ? 0 : dst[ch] > 255 ? 255 : dst[ch] + 0.5);
+        }
+}
+
 /* a box (with its content) drawn by its effects: in the 3D space it makes for its children
-   when it preserves 3D, each of its planes drawn by its matrix, those farther first (by
-   their middles' depth); else through its matrix when it is transformed; else by its
+   when it preserves 3D, its planes drawn together, each pixel from those it shows by their
+   depths there (pt_planes_draw); else through its matrix when it is transformed; else by its
    opacity, filters and clip */
 static void pt_effects(PCTX, uint32_t b, int ctx) {
     double m[16];
@@ -3194,17 +3575,8 @@ static void pt_effects(PCTX, uint32_t b, int ctx) {
     if (pt_p3d(t, b)) {
         vector<pt_plane> planes;
         pt_planes(t, b, m, &planes);
-        for (size_t k = 1; k < len(planes); k++) {
-            pt_plane x = at(planes, k);
-            size_t q = k;
-            while (q > 0 && at(planes, q - 1).z > x.z) { planes[q] = at(planes, q - 1); q--; }
-            planes[q] = x;
-        }
-        for (size_t k = 0; k < len(planes); k++) {
-            pt_plane x = at(planes, k);
-            if (x.box == b && !moved) pt_effects_plain(PARGS, b, ctx);
-            else pt_plane_draw(PARGS, x.box, x.box == b ? ctx : 1, x.m);
-        }
+        if (len(planes) == 1 && !moved) pt_effects_plain(PARGS, b, ctx);
+        else pt_planes_draw(PARGS, b, ctx, &planes);
         return;
     }
     if (moved) { pt_plane_draw(PARGS, b, ctx, m); return; }
@@ -3241,37 +3613,18 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
     memset(&k1, 0, sizeof k1);
     defer(k0) { AMB_CANVAS_DROP(k0); }
     defer(k1) { AMB_CANVAS_DROP(k1); }
-    k0.w = k1.w = c->w;
-    k0.h = k1.h = c->h;
-    k0.oy = k1.oy = c->oy;
-    k0.zoom = k1.zoom = c->zoom;
-    k0.cx0 = k1.cx0 = 0;
-    k0.cy0 = k1.cy0 = c->oy;
-    k0.cx1 = k1.cx1 = c->w;
-    k0.cy1 = k1.cy1 = c->oy + c->h;
-    resize(&k0.px, (size_t)c->w * c->h * 3);
-    resize(&k1.px, (size_t)c->w * c->h * 3);
-    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
     pt_effects_draw(PARGS_C(&k0), b, ctx);
     pt_effects_draw(PARGS_C(&k1), b, ctx);
     /* what was drawn: a pixel not black on black or not white on white */
-    int x0 = (int)c->w, y0 = (int)c->h, x1 = -1, y1 = -1;
-    for (int y = 0; y < (int)c->h; y++)
-        for (int x = 0; x < (int)c->w; x++) {
-            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
-            if (at(k0.px, i) | at(k0.px, i + 1) | at(k0.px, i + 2) || (at(k1.px, i) & at(k1.px, i + 1) & at(k1.px, i + 2)) != 255) {
-                if (x < x0) x0 = x;
-                if (x > x1) x1 = x;
-                if (y < y0) y0 = y;
-                if (y > y1) y1 = y;
-            }
-        }
-    if (x1 < 0) return;
+    int dr[4];
+    if (!pt_drawn(&k0, &k1, dr)) return;
     int reach = pt_filter_reach(ops);
-    x0 = x0 - reach < 0 ? 0 : x0 - reach;
-    y0 = y0 - reach < 0 ? 0 : y0 - reach;
-    x1 = x1 + reach + 1 > (int)c->w ? (int)c->w : x1 + reach + 1;
-    y1 = y1 + reach + 1 > (int)c->h ? (int)c->h : y1 + reach + 1;
+    int x0 = dr[0] - reach < 0 ? 0 : dr[0] - reach;
+    int y0 = dr[1] - reach < 0 ? 0 : dr[1] - reach;
+    int x1 = dr[2] + reach > (int)c->w ? (int)c->w : dr[2] + reach;
+    int y1 = dr[3] + reach > (int)c->h ? (int)c->h : dr[3] + reach;
     int w = x1 - x0, h = y1 - y0;
     if ((double)w * h > 4e7) return;
     size_t np = (size_t)w * h;
@@ -3297,6 +3650,277 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
             if (al > 1) al = 1;
             for (int ch = 0; ch < 3; ch++) {
                 double v = at(px, (size_t)ch * np + q) * 255 + c->px[di + ch] * (1 - al);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
+/* ---- SVG's effects on a box (src/paint/svg.h, amb_svg_effects): the filters, clip and mask its url()s name ---- */
+
+/* the entries of a box's effects (fx's text): for each, its kind ('f', 'c' or 'm'), its number, where its lines begin
+   and end, and a mask layer's mode and compositing operator (the line's next two numbers), into ents (PT_FXE a entry) */
+enum { PT_FXE = 6 };
+static void pt_fx_entries(const char *s, size_t n, vector<size_t> *ents) {
+    size_t i = 0;
+    while (i < n) {
+        size_t e = i;
+        while (e < n && s[e] != '\n') e++;
+        if (e - i >= 3 && (s[i] == 'f' || s[i] == 'c' || s[i] == 'm') && s[i + 1] == ' ' && s[i + 2] >= '0' && s[i + 2] <= '9') {
+            if (len(*ents)) (*ents)[len(*ents) - 3] = i;
+            push_back(ents, (size_t)s[i]);
+            push_back(ents, (size_t)(s[i + 2] - '0'));
+            push_back(ents, e < n ? e + 1 : n);
+            push_back(ents, n);
+            push_back(ents, e - i >= 5 && s[i + 4] >= '0' && s[i + 4] <= '9' ? (size_t)(s[i + 4] - '0') : 0);
+            push_back(ents, e - i >= 7 && s[i + 6] >= '0' && s[i + 6] <= '9' ? (size_t)(s[i + 6] - '0') : 0);
+        }
+        i = e < n ? e + 1 : n;
+    }
+}
+
+static void pt_scale_px(const char *s, size_t n, double z, vector<char> *out);
+
+/* a mask layer's line of its own (amb_svg_effects's: its tag t, then its text) within s[from, to): where its text
+   begins, its length; 0 when there is none */
+static size_t pt_fx_line(const char *s, size_t from, size_t to, char t, size_t *a) {
+    size_t i = from;
+    while (i < to) {
+        size_t e = i;
+        while (e < to && s[e] != '\n') e++;
+        if (e - i >= 2 && s[i] == t && s[i + 1] == ' ') { *a = i + 2; return e - i - 2; }
+        i = e < to ? e + 1 : to;
+    }
+    *a = from;
+    return 0;
+}
+
+/* a filter's group's region (its F line: x, y, width and height in the box's user space and the matrix it is in), m mapping
+   that space into the canvas's px: the px it covers, rounded out, into r (x0, y0, x1, y1); 0 when it has none */
+static int pt_fx_region(const char *s, size_t n, const double *m, int *r) {
+    size_t i = 0;
+    while (i + 1 < n && !(s[i] == 'F' && s[i + 1] == ' ' && (i == 0 || s[i - 1] == '\n'))) i++;
+    if (i + 1 >= n) return 0;
+    char line[512];
+    size_t k = 0;
+    for (size_t j = i + 2; j < n && s[j] != '\n' && k + 1 < sizeof line; j++) line[k++] = s[j];
+    line[k] = 0;
+    double v[10];
+    size_t at0 = 0;
+    for (int q = 0; q < 10; q++) {
+        char *end = 0;
+        v[q] = strtod(line + at0, &end);
+        size_t used = (size_t)(end - (line + at0));
+        if (!used) return 0;
+        at0 += used;
+    }
+    double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+    for (int c4 = 0; c4 < 4; c4++) {
+        double x = v[0] + (c4 & 1 ? v[2] : 0), y = v[1] + (c4 & 2 ? v[3] : 0);
+        double ux = v[4] * x + v[6] * y + v[8], uy = v[5] * x + v[7] * y + v[9];
+        double px = m[0] * ux + m[2] * uy + m[4], py = m[1] * ux + m[3] * uy + m[5];
+        lo[0] = fmin(lo[0], px); lo[1] = fmin(lo[1], py); hi[0] = fmax(hi[0], px); hi[1] = fmax(hi[1], py);
+    }
+    if (!(lo[0] > -1e7 && lo[1] > -1e7 && hi[0] < 1e7 && hi[1] < 1e7) || hi[0] <= lo[0] || hi[1] <= lo[1]) return 0;
+    r[0] = (int)floor(lo[0]);
+    r[1] = (int)floor(lo[1]);
+    r[2] = (int)ceil(hi[0]);
+    r[3] = (int)ceil(hi[1]);
+    return 1;
+}
+
+/* the layer's px (w x h, interleaved premultiplied RGBA) through a run of filter functions, as pt_filter_apply draws them */
+static void pt_fx_functions(vector<float> *lay, int w, int h, const vector<pt_fop> *ops) {
+    size_t np = (size_t)w * (size_t)h;
+    vector<float> pl;
+    resize(&pl, 4 * np);
+    for (size_t q = 0; q < np; q++)
+        for (size_t ch = 0; ch < 4; ch++) pl[ch * np + q] = at(*lay, 4 * q + ch);
+    pt_filter_apply(&pl, w, h, ops);
+    for (size_t q = 0; q < np; q++)
+        for (size_t ch = 0; ch < 4; ch++) {
+            float v = at(pl, ch * np + q);
+            (*lay)[4 * q + ch] = v < 0 ? 0.0f : v > 1 ? 1.0f : v;
+        }
+}
+
+/* a box and its content drawn through the SVG effects its url()s name and its filter's functions: drawn onto black and
+   onto white (its colours premultiplied and its cover read from the two, as pt_filtered reads them) into a layer of what it
+   drew and as far as its filters may draw (a filter's region, a function's reach); its filter's list in turn, a run of
+   functions as pt_filter_apply draws them, a url() through its filter's group (one that names none passed over); then its
+   clip's groups and its mask's layers (a mask element's group, a gradient drawn as a background layer is; anything else
+   transparent, masking all away), as Chromium applies them to a box -- filtered, clipped, then masked (CSS Masking 1,
+   3) -- the user space's origin the border box's top left; and the layer laid on the canvas within its clip */
+static void pt_fx(PCTX, uint32_t b, int ctx) {
+    vector<char> fx, fl;
+    append_range(fx, text_ptr(t, t->box[b].fx), t->box[b].fx.len);
+    append_range(fl, text_ptr(t, t->box[b].filter), t->box[b].filter.len);
+    vector<size_t> ents;
+    pt_fx_entries(data(fx), len(fx), &ents);
+    double z = c->zoom > 0 ? c->zoom : 1, bx, by, bw, bh;
+    pt_border_box(t, b, &bx, &by, &bw, &bh);
+    /* the user space in the canvas's px: a filter's with its origin at whole CSS px (the box's layer's, as Chromium places
+       it; measured: a box at 20.5 x 20.25 px filters from 21 x 20, and zoomed 1.5 from 31.5 x 30), a clip's and a mask's
+       where the border box is */
+    double um[6] = { z, 0, 0, z, floor(bx / z + 0.5) * z, floor(by / z + 0.5) * z - c->oy };
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    pt_canvas_like(c, 0, &k0);
+    pt_canvas_like(c, 1, &k1);
+    pt_effects_draw(PARGS_C(&k0), b, ctx);
+    pt_effects_draw(PARGS_C(&k1), b, ctx);
+    /* what was drawn, then as far as each of the filter's entries may draw */
+    int L[4];
+    pt_drawn(&k0, &k1, L);
+    size_t i = 0, pa, pl, fe = 0;
+    int reach = 0;
+    while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
+        if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
+            while (fe + PT_FXE - 1 < len(ents) && at(ents, fe) != 'f') fe += PT_FXE;
+            int r[4];
+            if (fe + PT_FXE - 1 < len(ents) && at(ents, fe + 1) == 1 && pt_fx_region(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), um, r)) {
+                if (L[2] > L[0] && reach) { L[0] -= reach; L[1] -= reach; L[2] += reach; L[3] += reach; }
+                reach = 0;
+                if (r[0] < L[0]) L[0] = r[0];
+                if (r[1] < L[1]) L[1] = r[1];
+                if (r[2] > L[2]) L[2] = r[2];
+                if (r[3] > L[3]) L[3] = r[3];
+            }
+            fe += PT_FXE;
+            continue;
+        }
+        vector<pt_fop> one;
+        if (pt_filter_ops(data(fl) + pa, pl, &one)) reach += pt_filter_reach(&one);
+    }
+    if (L[2] > L[0] && reach) { L[0] -= reach; L[1] -= reach; L[2] += reach; L[3] += reach; }
+    if (L[0] < 0) L[0] = 0;
+    if (L[1] < 0) L[1] = 0;
+    if (L[2] > (int)c->w) L[2] = (int)c->w;
+    if (L[3] > (int)c->h) L[3] = (int)c->h;
+    int w = L[2] - L[0], h = L[3] - L[1];
+    if (w <= 0 || h <= 0 || (double)w * h > 4e7) return;
+    size_t np = (size_t)w * (size_t)h;
+    vector<float> lay;
+    resize(&lay, 4 * np);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            size_t ci = ((size_t)(L[1] + y) * c->w + (size_t)(L[0] + x)) * 3, q = 4 * ((size_t)y * (size_t)w + (size_t)x);
+            double d = (at(k1.px, ci) - at(k0.px, ci) + at(k1.px, ci + 1) - at(k0.px, ci + 1) + at(k1.px, ci + 2) - at(k0.px, ci + 2)) / 765.0;
+            lay[q] = at(k0.px, ci) / 255.0f;
+            lay[q + 1] = at(k0.px, ci + 1) / 255.0f;
+            lay[q + 2] = at(k0.px, ci + 2) / 255.0f;
+            lay[q + 3] = (float)(d < 0 ? 1 : d > 1 ? 0 : 1 - d);
+        }
+    /* the user space in the layer's px: a filter's, then a clip's and a mask's */
+    double fm[6] = { z, 0, 0, z, um[4] - L[0], um[5] - L[1] }, lm[6] = { z, 0, 0, z, bx - L[0], by - c->oy - L[1] };
+    /* the filter's list: a run of functions, then a url()'s group, in turn */
+    vector<pt_fop> ops;
+    i = 0;
+    fe = 0;
+    while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
+        if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
+            if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
+            clear(ops);
+            while (fe + PT_FXE - 1 < len(ents) && at(ents, fe) != 'f') fe += PT_FXE;
+            if (fe + PT_FXE - 1 < len(ents) && at(ents, fe + 1) == 1)
+                amb_svg_fx(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), w, h, fm, nt, &lay);
+            fe += PT_FXE;
+            continue;
+        }
+        vector<pt_fop> one;
+        if (pt_filter_ops(data(fl) + pa, pl, &one)) append_range(ops, data(one), len(one));
+    }
+    if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
+    /* then the clip */
+    for (size_t e = 0; e + PT_FXE - 1 < len(ents); e += PT_FXE)
+        if (at(ents, e) == 'c' && at(ents, e + 1) == 1) amb_svg_fx(data(fx) + at(ents, e + 2), at(ents, e + 3) - at(ents, e + 2), w, h, lm, nt, &lay);
+    /* then the mask: its layers' coverage, each composited onto the layers under it (CSS Masking 1, 7.2: the last layer
+       the lowest; add source-over, subtract source-out, intersect source-in, exclude xor), the layer multiplied by it */
+    vector<float> mk, one;
+    int layers = 0;
+    for (size_t e = len(ents); e >= PT_FXE; e -= PT_FXE) {
+        size_t m = e - PT_FXE;
+        if (at(ents, m) != 'm') continue;
+        clear(one);
+        resize(&one, np);
+        size_t kind = at(ents, m + 1), mode = at(ents, m + 4), from = at(ents, m + 2), to = at(ents, m + 3);
+        if (kind == 1) {
+            /* a mask element's: its group over opaque white, the result's alpha */
+            vector<float> white;
+            resize(&white, 4 * np);
+            for (size_t q = 0; q < 4 * np; q++) white[q] = 1;
+            amb_svg_fx(data(fx) + from, to - from, w, h, lm, nt, &white);
+            for (size_t q = 0; q < np; q++) one[q] = at(white, 4 * q + 3);
+        } else if (kind == 3) {
+            /* an image (a gradient) drawn as a background layer is, onto black and onto white: its alpha, or its luminance */
+            size_t ia, pa2, sa2, ra2, oa2, qa2;
+            size_t il = pt_fx_line(data(fx), from, to, 'i', &ia), pl2 = pt_fx_line(data(fx), from, to, 'p', &pa2);
+            size_t sl2 = pt_fx_line(data(fx), from, to, 's', &sa2), rl2 = pt_fx_line(data(fx), from, to, 'r', &ra2);
+            size_t ol2 = pt_fx_line(data(fx), from, to, 'o', &oa2), ql2 = pt_fx_line(data(fx), from, to, 'q', &qa2);
+            /* its lengths at the zoom, as a background's are (the effects' text is the CSS px of the user space) */
+            vector<char> zi, zp, zs;
+            pt_scale_px(data(fx) + ia, il, z, &zi);
+            pt_scale_px(data(fx) + pa2, pl2, z, &zp);
+            pt_scale_px(data(fx) + sa2, sl2, z, &zs);
+            amb_canvas m0, m1;
+            memset(&m0, 0, sizeof m0);
+            memset(&m1, 0, sizeof m1);
+            defer(m0) { AMB_CANVAS_DROP(m0); }
+            defer(m1) { AMB_CANVAS_DROP(m1); }
+            m0.w = m1.w = c->w;
+            m0.h = m1.h = (uint32_t)h;
+            m0.oy = m1.oy = c->oy + L[1];
+            m0.zoom = m1.zoom = c->zoom;
+            m0.cx0 = m1.cx0 = L[0];
+            m0.cx1 = m1.cx1 = L[2];
+            m0.cy0 = m1.cy0 = m0.oy;
+            m0.cy1 = m1.cy1 = m0.oy + h;
+            resize(&m0.px, (size_t)c->w * (size_t)h * 3);
+            resize(&m1.px, (size_t)c->w * (size_t)h * 3);
+            memset(data(m1.px), 255, len(m1.px));
+            double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+            pt_layer_one(t, nt, b, &m0, icache, ipx, nr, data(zi), len(zi), data(zp), len(zp), data(zs), len(zs), data(fx) + ra2, rl2,
+                         data(fx) + oa2, ol2, data(fx) + qa2, ql2, 0);
+            pt_layer_one(t, nt, b, &m1, icache, ipx, nr, data(zi), len(zi), data(zp), len(zp), data(zs), len(zs), data(fx) + ra2, rl2,
+                         data(fx) + oa2, ol2, data(fx) + qa2, ql2, 0);
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    size_t ci = ((size_t)y * c->w + (size_t)(L[0] + x)) * 3, q = (size_t)y * (size_t)w + (size_t)x;
+                    double d = (at(m1.px, ci) - at(m0.px, ci) + at(m1.px, ci + 1) - at(m0.px, ci + 1) + at(m1.px, ci + 2) - at(m0.px, ci + 2)) / 765.0;
+                    double al = d < 0 ? 1 : d > 1 ? 0 : 1 - d;
+                    /* luminance: Rec. 709's weights on the colour premultiplied, eight bits, as Skia's luma filter takes it */
+                    double lum = (0.2126 * at(m0.px, ci) + 0.7152 * at(m0.px, ci + 1) + 0.0722 * at(m0.px, ci + 2)) / 255;
+                    one[q] = (float)(mode == 2 ? floor(lum * 255 + 0.5) / 255 : al);
+                }
+        }
+        if (!layers) {
+            clear(mk);
+            append_range(mk, data(one), len(one));
+        } else {
+            size_t op = at(ents, m + 5);
+            for (size_t q = 0; q < np; q++) {
+                double sv = at(one, q), dv = at(mk, q);
+                double r = op == 1 ? sv * (1 - dv) : op == 2 ? sv * dv : op == 3 ? sv * (1 - dv) + dv * (1 - sv) : sv + dv - sv * dv;
+                mk[q] = (float)r;
+            }
+        }
+        layers++;
+    }
+    if (layers)
+        for (size_t q = 0; q < np; q++)
+            for (size_t ch = 0; ch < 4; ch++) lay[4 * q + ch] = at(lay, 4 * q + ch) * at(mk, q);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = L[1] < ky0 ? ky0 : L[1]; y < L[3] && y < ky1; y++)
+        for (int x = L[0] < kx0 ? kx0 : L[0]; x < L[2] && x < kx1; x++) {
+            size_t q = 4 * ((size_t)(y - L[1]) * (size_t)w + (size_t)(x - L[0])), di = ((size_t)y * c->w + (size_t)x) * 3;
+            double al = at(lay, q + 3);
+            if (al <= 0.001) continue;
+            if (al > 1) al = 1;
+            for (size_t ch = 0; ch < 3; ch++) {
+                double v = at(lay, q + ch) * 255 + c->px[di + ch] * (1 - al);
                 c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
             }
         }
@@ -3542,7 +4166,7 @@ static int pt_clip_shape(const layout_tree *t, uint32_t b, double z, double *rr,
 }
 
 /* a box's stacking context drawn over what was under it (before), held to its clip-path's shape: each pixel moved
-   from what it was by as much of it as the shape covers, anti-aliased */
+   from what it was by as much of it as the shape covers, anti-aliased (a row the context left as it was passed over) */
 static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const vector<uint8_t> *before) {
     double z = c->zoom > 0 ? c->zoom : 1, rr[4] = { 0, 0, 0, 0 }, rad[8];
     vector<double> path;
@@ -3555,7 +4179,9 @@ static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const 
         double m[6] = { 1, 0, 0, 1, 0, -c->oy };
         got = amb_path_coverage(&path, m, evenodd, (int)c->w, (int)c->h, bx, &cov);
     }
-    for (uint32_t y = 0; y < c->h; y++)
+    size_t rb = (size_t)c->w * 3;
+    for (uint32_t y = 0; y < c->h; y++) {
+        if (memcmp(data(c->px) + (size_t)y * rb, data(*before) + (size_t)y * rb, rb) == 0) continue;
         for (uint32_t x = 0; x < c->w; x++) {
             size_t i = ((size_t)y * c->w + (size_t)x) * 3;
             if (c->px[i] == at(*before, i) && c->px[i + 1] == at(*before, i + 1) && c->px[i + 2] == at(*before, i + 2)) continue;
@@ -3569,6 +4195,7 @@ static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const 
                 c->px[i + (size_t)ch] = (uint8_t)(v0 + (c->px[i + (size_t)ch] - v0) * cv + 0.5);
             }
         }
+    }
 }
 
 /* a box drawn with its opacity, backdrop and filters: through a copy of what was under it
@@ -3577,13 +4204,16 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
     double op = t->box[b].opacity;
     if (op <= 0) return;
     vector<uint8_t> under, unclipped;
-    if (op < 1) append_range(under, data(c->px), len(c->px));
-    if (t->box[b].cpath.len) append_range(unclipped, data(c->px), len(c->px));
+    if (op < 1) { resize(&under, len(c->px)); memcpy(data(under), data(c->px), len(c->px)); }
+    if (t->box[b].cpath.len) { resize(&unclipped, len(c->px)); memcpy(data(unclipped), data(c->px), len(c->px)); }
     if (t->box[b].backdrop.len) pt_backdrop(t, b, c);
     vector<pt_fop> ops;
-    pt_filter_of(t, t->box[b].filter, &ops);
-    if (len(ops)) pt_filtered(PARGS, b, ctx, &ops);
-    else pt_effects_draw(PARGS, b, ctx);
+    if (t->box[b].fx.len) pt_fx(PARGS, b, ctx);
+    else {
+        pt_filter_of(t, t->box[b].filter, &ops);
+        if (len(ops)) pt_filtered(PARGS, b, ctx, &ops);
+        else pt_effects_draw(PARGS, b, ctx);
+    }
     if (op < 1)
         for (size_t q = 0; q < len(c->px); q++) {
             int o = at(under, q), n0 = c->px[q];
@@ -3642,7 +4272,7 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
         }
         if (pt_in_3d(t, ch)) continue;
         if (t->box[ch].opacity < 1 || pt_transformed(t, ch) || t->box[ch].filter.len || t->box[ch].backdrop.len || t->box[ch].p3d ||
-            t->box[ch].cpath.len) {
+            t->box[ch].cpath.len || t->box[ch].fx.len) {
             pt_effects(PARGS, ch, 0);
             continue;
         }

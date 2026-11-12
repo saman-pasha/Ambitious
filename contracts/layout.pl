@@ -123,6 +123,12 @@ layout_contract(record(box, [
     %% clip-path's basic shape or geometry box (its computed text; none, a url() or an SVG element's: none), which
     %% paint clips the box's stacking context to
     field(cpath, span(text)),
+    %% the SVG effects its filter, clip-path and mask name by url() (src/paint/svg.h, amb_svg_effects): an entry for
+    %% each, in its border box's user space, which paint applies to the box's stacking context; none when they name none
+    field(fx, span(text)),
+    %% an inline element's box of decorations drawn for its fragment alone (box-decoration-break: clone): the fragment's
+    %% own border box, every edge wrapped about it, not a strip's
+    field(clone, bool),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,
@@ -166,6 +172,10 @@ layout_contract(record(frag, [
     field(fill,       u32),                     % -webkit-text-fill-color: the colour its glyphs are filled with (color's unless set)
     field(background, u32),                     % an inline fragment's
     field(piece,      ref(box)),                % an inline fragment's box of decorations (borders, rounded corners, images, shadows); none
+    %% a fragment in an inline element whose clip-path (a basic shape or a geometry box) clips it: the box that holds the
+    %% clip-path, its border box that element's first fragment's (Chromium's reference box), which paint clips all the
+    %% fragments it holds to; none
+    field(clip,       ref(box)),
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
     field(shadows,    span(text))               % text-shadow
 ])).

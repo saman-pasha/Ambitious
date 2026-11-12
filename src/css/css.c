@@ -93,10 +93,13 @@
    currentcolor keywords, currentcolor each element's own colour), their opacities, the
    stroke's width, caps, joins, miter limit, dash array and offset, the fill and clip rules,
    stop-color and stop-opacity, clip-path (none or url()), text-anchor; marker-start, -mid and -end (none or url(), the
-   marker shorthand setting the three), paint-order, mask (none or url()) and mask-type, vector-effect,
+   marker shorthand setting the three), paint-order, mask-type, vector-effect,
    dominant-baseline, flood-color and flood-opacity, color-interpolation-filters, and the geometry properties (cx, cy,
    r, rx, ry, x, y; d as path()), which src/paint/svg.c reads over the attributes when a rule declares them; filter
-   is a presentation attribute too. A computed value is as each property's spec has
+   is a presentation attribute too, and so is mask, CSS Masking's shorthand of mask-image (none, or
+   its layers: url()s, a mask element's among them, and gradients), -position, -size, -repeat,
+   -origin, -clip, -composite and -mode, each a list (their -webkit- names Chromium's aliases).
+   A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
    border's width 0 under style none, display blockified for a float, an
    absolute box, the root and a flex or grid item. Two differ from Chromium's:
@@ -1060,7 +1063,7 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "marker-mid", 1, G_TEXT, 0, "none", "none" },
     { "marker-end", 1, G_TEXT, 0, "none", "none" },
     { "paint-order", 1, G_TEXT, 0, "normal", "normal" },
-    { "mask", 0, G_TEXT, 0, "none", "none" },
+    { "mask-image", 0, G_TEXT, 0, "none", "none" },
     { "mask-type", 0, G_KW, 0, "luminance alpha", "luminance" },
     { "vector-effect", 0, G_KW, 0, "none non-scaling-stroke non-scaling-size non-rotation fixed-position", "none" },
     { "dominant-baseline", 1, G_KW, 0, "auto alphabetic ideographic middle central mathematical hanging text-before-edge "
@@ -1086,6 +1089,16 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "container-name", 0, G_TEXT, 0, "none", "none" },
     /* image-rendering (CSS Images 3, 7.5) as Chromium takes it: smooth and high-quality refused (measured) */
     { "image-rendering", 1, G_KW, 0, "auto pixelated crisp-edges -webkit-optimize-contrast", "auto" },
+    /* CSS Fragmentation 3, 5.4: an inline box broken over lines as one strip, or each fragment wrapped in its own edges */
+    { "box-decoration-break", 0, G_KW, 0, "slice clone", "slice" },
+    /* CSS Masking 1, 7: each of a mask's layers' mode, repeat, position, size, boxes and compositing, lists of text */
+    { "mask-mode", 0, G_TEXT, 0, 0, "match-source" },
+    { "mask-repeat", 0, G_TEXT, 0, 0, "repeat" },
+    { "mask-position", 0, G_TEXT, 0, 0, "0% 0%" },
+    { "mask-size", 0, G_TEXT, 0, 0, "auto" },
+    { "mask-origin", 0, G_TEXT, 0, 0, "border-box" },
+    { "mask-clip", 0, G_TEXT, 0, 0, "border-box" },
+    { "mask-composite", 0, G_TEXT, 0, 0, "add" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1123,8 +1136,9 @@ static const char css_webkit_aliases[] =
     "align-content align-items align-self appearance animation animation-delay animation-direction animation-duration animation-fill-mode "
     "animation-iteration-count animation-name animation-play-state animation-timing-function backface-visibility background-clip "
     "background-origin background-size border-bottom-left-radius border-bottom-right-radius border-radius border-top-left-radius "
-    "border-top-right-radius box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
-    "justify-content order perspective perspective-origin transform transform-origin transform-style transition transition-delay "
+    "border-top-right-radius box-decoration-break box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
+    "justify-content mask mask-clip mask-image mask-origin mask-position mask-repeat mask-size order perspective perspective-origin transform "
+    "transform-origin transform-style transition transition-delay "
     "transition-duration transition-property transition-timing-function";
 
 /* the code of a name (as css_name_code holds it), or 0; a -webkit- alias, its property's */
@@ -1371,7 +1385,8 @@ static int css_is_tracks(const char *s, size_t n, int depth) {
 }
 
 /* each item of a comma list holds, by kind: 1 shadow (box), 2 shadow (text), 3 background
-   position, 4 background size, 5 background repeat, 6 image */
+   position, 4 background size, 5 background repeat, 6 image; 7 and 8 a background's origin
+   and clip; a mask's 9 origin, 10 clip, 11 mode, 12 image or none, 13 compositing operator */
 static int css_is_list_item(int kind, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int lengths = 0, colors = 0, insets = 0, parts = 0;
@@ -1379,6 +1394,18 @@ static int css_is_list_item(int kind, const char *s, size_t n) {
         const char *p = s + st;
         parts++;
         if (kind == 6) { if (parts > 1 || !css_is_image(p, ln)) return 0; continue; }
+        if (kind == 12) { if (parts > 1 || !(css_is_image(p, ln) || css_eq_ci(p, ln, "none"))) return 0; continue; }
+        if (kind == 9 || kind == 10) {
+            if (!(css_eq_ci(p, ln, "border-box") || css_eq_ci(p, ln, "padding-box") || css_eq_ci(p, ln, "content-box") ||
+                  css_eq_ci(p, ln, "fill-box") || css_eq_ci(p, ln, "stroke-box") || css_eq_ci(p, ln, "view-box") ||
+                  (kind == 10 && css_eq_ci(p, ln, "no-clip")))) return 0;
+            continue;
+        }
+        if (kind == 11) { if (!(css_eq_ci(p, ln, "match-source") || css_eq_ci(p, ln, "alpha") || css_eq_ci(p, ln, "luminance"))) return 0; continue; }
+        if (kind == 13) {
+            if (!(css_eq_ci(p, ln, "add") || css_eq_ci(p, ln, "subtract") || css_eq_ci(p, ln, "intersect") || css_eq_ci(p, ln, "exclude"))) return 0;
+            continue;
+        }
         if (kind == 1 || kind == 2) {
             if (kind == 1 && css_eq_ci(p, ln, "inset")) { if (insets++) return 0; continue; }
             if (css_is_color(p, ln)) { if (colors++) return 0; continue; }
@@ -2259,7 +2286,15 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     }
     case CSS_PROP_FILL: case CSS_PROP_STROKE: return css_is_paint(s, n);
     case CSS_PROP_STROKE_DASHARRAY: return css_is_dashes(s, n);
-    case CSS_PROP_MARKER_START: case CSS_PROP_MARKER_MID: case CSS_PROP_MARKER_END: case CSS_PROP_MASK: {
+    case CSS_PROP_MASK_IMAGE: return css_is_list(12, s, n);
+    case CSS_PROP_MASK_POSITION: return css_is_list(3, s, n);
+    case CSS_PROP_MASK_SIZE: return css_is_list(4, s, n);
+    case CSS_PROP_MASK_REPEAT: return css_is_list(5, s, n);
+    case CSS_PROP_MASK_ORIGIN: return css_is_list(9, s, n);
+    case CSS_PROP_MASK_CLIP: return css_is_list(10, s, n);
+    case CSS_PROP_MASK_MODE: return css_is_list(11, s, n);
+    case CSS_PROP_MASK_COMPOSITE: return css_is_list(13, s, n);
+    case CSS_PROP_MARKER_START: case CSS_PROP_MARKER_MID: case CSS_PROP_MARKER_END: {
         /* none (its keyword) or a url() alone */
         size_t cs[2], cl[2];
         return css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url");
@@ -2933,6 +2968,122 @@ static int css_background(const char *val, size_t vn, css_items *it) {
     return 1;
 }
 
+/* mask (CSS Masking 1, 7.15): layers, a comma between each, of a mask reference (an image, a gradient, a mask element's
+   url(), none), a position (and / a size), a repeat, a box or two (the first the origin and the clip, a second the clip;
+   no-clip a clip), a compositing operator and a mode; each longhand a list, an item a layer, what a layer leaves out its
+   initial value */
+static int css_mask(const char *val, size_t vn, css_items *it) {
+    vector<char> img, pos, size, rep, org, clp, cmp, mode;
+    int layers = 0, any_image = 0;
+    size_t a = 0;
+    for (;;) {
+        size_t b = css_comma(val, vn, a);
+        /* the layer's parts, a / a part of its own */
+        vector<char> lay;
+        for (size_t i = a; i < b; i++) {
+            char c = val[i];
+            if (c == '(') { size_t e = css_block_end(val, b, i, '(', ')'); size_t stop = e < b ? e + 1 : b; append_range(lay, val + i, stop - i); i = stop - 1; continue; }
+            if (c == '"' || c == '\'') { size_t e = css_string_end(val, b, i); size_t stop = e < b ? e + 1 : b; append_range(lay, val + i, stop - i); i = stop - 1; continue; }
+            if (c == '/') { append_range(lay, " / ", 3); continue; }
+            push_back(lay, c);
+        }
+        size_t st[CSS_MAXPARTS], ln[CSS_MAXPARTS];
+        size_t k = css_parts(data(lay), len(lay), st, ln, CSS_MAXPARTS);
+        int has_img = 0, has_size = 0, has_pos = 0, after_slash = 0, boxes = 0, noclip = 0, has_cmp = 0, has_mode = 0;
+        vector<char> limg, lpos, lsize, lrep, lorg, lclp, lcmp, lmode;
+        for (size_t j = 0; j < k; j++) {
+            const char *p = data(lay) + st[j];
+            size_t pn = ln[j];
+            if (pn == 1 && p[0] == '/') { if (!has_pos || after_slash || has_size) return 0; after_slash = 1; continue; }
+            if (after_slash && (css_eq_ci(p, pn, "cover") || css_eq_ci(p, pn, "contain") || css_eq_ci(p, pn, "auto") || css_is_length(p, pn, 1, 0))) {
+                if (len(lsize)) push_back(lsize, ' ');
+                append_range(lsize, p, pn);
+                has_size = 1;
+                continue;
+            }
+            if (after_slash) { if (!has_size) return 0; after_slash = 0; }
+            if (css_is_image(p, pn) || css_eq_ci(p, pn, "none")) {
+                if (has_img) return 0;
+                has_img = 1;
+                append_range(limg, p, pn);
+                if (!css_eq_ci(p, pn, "none")) any_image = 1;
+                continue;
+            }
+            if (css_eq_ci(p, pn, "repeat-x") || css_eq_ci(p, pn, "repeat-y") || css_eq_ci(p, pn, "repeat") || css_eq_ci(p, pn, "no-repeat") ||
+                css_eq_ci(p, pn, "space") || css_eq_ci(p, pn, "round")) {
+                if (len(lrep)) push_back(lrep, ' ');
+                append_range(lrep, p, pn);
+                continue;
+            }
+            if (css_eq_ci(p, pn, "left") || css_eq_ci(p, pn, "right") || css_eq_ci(p, pn, "top") || css_eq_ci(p, pn, "bottom") ||
+                css_eq_ci(p, pn, "center") || css_is_length(p, pn, 1, 1)) {
+                if (has_size) return 0;
+                if (len(lpos)) push_back(lpos, ' ');
+                append_range(lpos, p, pn);
+                has_pos = 1;
+                continue;
+            }
+            if (css_eq_ci(p, pn, "no-clip")) {
+                if (noclip || boxes == 2) return 0;
+                noclip = 1;
+                clear(lclp);
+                append_range(lclp, p, pn);
+                continue;
+            }
+            if (css_eq_ci(p, pn, "border-box") || css_eq_ci(p, pn, "padding-box") || css_eq_ci(p, pn, "content-box") ||
+                css_eq_ci(p, pn, "fill-box") || css_eq_ci(p, pn, "stroke-box") || css_eq_ci(p, pn, "view-box")) {
+                /* a layer's boxes: the first its origin and its clip, a second its clip */
+                if (boxes == 2 || (boxes == 1 && noclip)) return 0;
+                if (boxes == 0) append_range(lorg, p, pn);
+                if (!noclip) { clear(lclp); append_range(lclp, p, pn); }
+                boxes++;
+                continue;
+            }
+            if (css_eq_ci(p, pn, "add") || css_eq_ci(p, pn, "subtract") || css_eq_ci(p, pn, "intersect") || css_eq_ci(p, pn, "exclude")) {
+                if (has_cmp++) return 0;
+                append_range(lcmp, p, pn);
+                continue;
+            }
+            if (css_eq_ci(p, pn, "match-source") || css_eq_ci(p, pn, "alpha") || css_eq_ci(p, pn, "luminance")) {
+                if (has_mode++) return 0;
+                append_range(lmode, p, pn);
+                continue;
+            }
+            return 0;
+        }
+        if (after_slash && !has_size) return 0;
+        if (layers) {
+            append_range(img, ", ", 2); append_range(pos, ", ", 2); append_range(size, ", ", 2); append_range(rep, ", ", 2);
+            append_range(org, ", ", 2); append_range(clp, ", ", 2); append_range(cmp, ", ", 2); append_range(mode, ", ", 2);
+        }
+        if (has_img) append_range(img, data(limg), len(limg)); else append_range(img, "none", 4);
+        if (has_pos) append_range(pos, data(lpos), len(lpos)); else append_range(pos, "0% 0%", 5);
+        if (has_size) append_range(size, data(lsize), len(lsize)); else append_range(size, "auto", 4);
+        if (len(lrep)) append_range(rep, data(lrep), len(lrep)); else append_range(rep, "repeat", 6);
+        if (len(lorg)) append_range(org, data(lorg), len(lorg)); else append_range(org, "border-box", 10);
+        if (len(lclp)) append_range(clp, data(lclp), len(lclp)); else append_range(clp, "border-box", 10);
+        if (len(lcmp)) append_range(cmp, data(lcmp), len(lcmp)); else append_range(cmp, "add", 3);
+        if (len(lmode)) append_range(mode, data(lmode), len(lmode)); else append_range(mode, "match-source", 12);
+        layers++;
+        if (b >= vn) break;
+        a = b + 1;
+    }
+    css_val t, none;
+    memset(&t, 0, sizeof t);
+    t.unit = CSS_UNIT_TEXT;
+    css_word_val(&none, "none");
+    if (any_image) css_item_made(it, CSS_PROP_MASK_IMAGE, &t, data(img), len(img));
+    else css_item_made(it, CSS_PROP_MASK_IMAGE, &none, "none", 4);
+    css_item_made(it, CSS_PROP_MASK_POSITION, &t, data(pos), len(pos));
+    css_item_made(it, CSS_PROP_MASK_SIZE, &t, data(size), len(size));
+    css_item_made(it, CSS_PROP_MASK_REPEAT, &t, data(rep), len(rep));
+    css_item_made(it, CSS_PROP_MASK_ORIGIN, &t, data(org), len(org));
+    css_item_made(it, CSS_PROP_MASK_CLIP, &t, data(clp), len(clp));
+    css_item_made(it, CSS_PROP_MASK_COMPOSITE, &t, data(cmp), len(cmp));
+    css_item_made(it, CSS_PROP_MASK_MODE, &t, data(mode), len(mode));
+    return 1;
+}
+
 /* the text up to the top-level /s of s: its pieces' bounds, at most max; their count */
 static size_t css_slashes(const char *s, size_t n, size_t *st, size_t *ln, size_t max) {
     size_t k = 0, a = 0;
@@ -2992,6 +3143,8 @@ static const css_short css_shorts[] = {
                          CSS_PROP_TRANSITION_DELAY, CSS_PROP_TRANSITION_BEHAVIOR } },
     { "marker", 3, { CSS_PROP_MARKER_START, CSS_PROP_MARKER_MID, CSS_PROP_MARKER_END } },
     { "container", 2, { CSS_PROP_CONTAINER_NAME, CSS_PROP_CONTAINER_TYPE } },
+    { "mask", 8, { CSS_PROP_MASK_IMAGE, CSS_PROP_MASK_POSITION, CSS_PROP_MASK_SIZE, CSS_PROP_MASK_REPEAT, CSS_PROP_MASK_ORIGIN,
+                   CSS_PROP_MASK_CLIP, CSS_PROP_MASK_COMPOSITE, CSS_PROP_MASK_MODE } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -3307,6 +3460,7 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         } else css_item_reset(it, CSS_PROP_CONTAINER_TYPE);
         return 1;
     }
+    case 33: return css_mask(val, vn, it);
     default: return 0;
     }
 }
@@ -6508,6 +6662,103 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
             return;
         }
     }
+    if (p == CSS_PROP_MASK_IMAGE && v->unit == CSS_UNIT_TEXT) {
+        /* a mask element's url(#id) with its URL in double quotes, as Chromium serializes it; other layers as they were */
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        size_t a = 0, n = len(src);
+        while (a <= n) {
+            size_t b = css_comma(data(src), n, a), i0 = css_skip_ws(data(src), b, a), i1 = b;
+            while (i1 > i0 && css_ws(at(src, i1 - 1))) i1--;
+            if (len(out)) append_range(out, ", ", 2);
+            size_t u0 = i1 > i0 + 5 && css_eq_ci(data(src) + i0, 4, "url(") ? css_skip_ws(data(src), i1 - 1, i0 + 4) : i1, u1 = i1 > i0 ? i1 - 1 : i0;
+            while (u1 > u0 && css_ws(at(src, u1 - 1))) u1--;
+            if (u1 > u0 + 1 && (at(src, u0) == '"' || at(src, u0) == '\'') && at(src, u1 - 1) == at(src, u0)) { u0++; u1--; }
+            if (u0 < u1 && at(src, u0) == '#') {
+                append_range(out, "url(\"", 5);
+                append_range(out, data(src) + u0, u1 - u0);
+                append_range(out, "\")", 2);
+            } else append_range(out, data(src) + i0, i1 - i0);
+            a = b + 1;
+        }
+        v->tx = text_add(s, data(out), len(out));
+        return;
+    }
+    if (p >= CSS_PROP_MASK_MODE && p <= CSS_PROP_MASK_COMPOSITE && (v->unit == CSS_UNIT_TEXT || v->unit == CSS_UNIT_KEYWORD)) {
+        /* a mask's list as Chromium computes it: an item for each of mask-image's layers (the list repeated, or cut short),
+           a position's axes as object-position's, a repeat's two keywords its one where they make one */
+        size_t layers = 1;
+        const css_val *im = &cur[CSS_PROP_MASK_IMAGE];
+        if (im->unit == CSS_UNIT_TEXT) {
+            vector<char> it;
+            append_range(it, text_ptr(s, im->tx), im->tx.len);
+            for (size_t a = 0; (a = css_comma(data(it), len(it), a)) < len(it); a++) layers++;
+        }
+        vector<char> src, out;
+        if (v->unit == CSS_UNIT_TEXT) append_range(src, text_ptr(s, v->tx), v->tx.len);
+        else append_range(src, v->word, strlen(v->word));
+        vector<size_t> items;
+        size_t a = 0, n = len(src);
+        while (a <= n) {
+            size_t b = css_comma(data(src), n, a), i0 = css_skip_ws(data(src), b, a), i1 = b;
+            while (i1 > i0 && css_ws(at(src, i1 - 1))) i1--;
+            push_back(items, i0);
+            push_back(items, i1);
+            a = b + 1;
+        }
+        size_t ni = len(items) / 2;
+        for (size_t k = 0; k < layers && ni; k++) {
+            size_t i0 = at(items, 2 * (k % ni)), i1 = at(items, 2 * (k % ni) + 1);
+            const char *q = data(src) + i0;
+            size_t qn = i1 - i0;
+            if (k) append_range(out, ", ", 2);
+            css_cenv e = { fs, env->rem, -1 };
+            css_lin x, y;
+            size_t pst[4], pln[4];
+            size_t np = css_parts(q, qn, pst, pln, 4);
+            vector<char> four;
+            if (p == CSS_PROP_MASK_POSITION && np == 3) {
+                /* three values (background-position's syntax): the side without an offset given 0% */
+                int off1 = !(css_eq_ci(q + pst[1], pln[1], "left") || css_eq_ci(q + pst[1], pln[1], "right") ||
+                             css_eq_ci(q + pst[1], pln[1], "top") || css_eq_ci(q + pst[1], pln[1], "bottom") || css_eq_ci(q + pst[1], pln[1], "center"));
+                for (size_t j = 0; j < 3; j++) {
+                    if (j) push_back(four, ' ');
+                    append_range(four, q + pst[j], pln[j]);
+                    if (j == 0 && !off1) append_range(four, " 0%", 3);
+                }
+                if (off1) append_range(four, " 0%", 3);
+                q = data(four);
+                qn = len(four);
+            }
+            if (p == CSS_PROP_MASK_POSITION && css_position_axes(q, qn, &e, &x, &y)) {
+                css_pos_text(&x, &out);
+                push_back(out, ' ');
+                css_pos_text(&y, &out);
+                continue;
+            }
+            if (p == CSS_PROP_MASK_SIZE && np == 1 && !css_eq_ci(q, qn, "cover") && !css_eq_ci(q, qn, "contain") && !css_eq_ci(q, qn, "auto")) {
+                /* one size: its height auto, as Chromium writes it */
+                append_range(out, q, qn);
+                append_range(out, " auto", 5);
+                continue;
+            }
+            if (p == CSS_PROP_MASK_REPEAT && np == 2) {
+                int r0 = css_eq_ci(q + pst[0], pln[0], "repeat"), n0 = css_eq_ci(q + pst[0], pln[0], "no-repeat");
+                int r1 = css_eq_ci(q + pst[1], pln[1], "repeat"), n1 = css_eq_ci(q + pst[1], pln[1], "no-repeat");
+                if (r0 && n1) { append_range(out, "repeat-x", 8); continue; }
+                if (n0 && r1) { append_range(out, "repeat-y", 8); continue; }
+                if (pln[0] == pln[1] && memcmp(q + pst[0], q + pst[1], pln[0]) == 0) {
+                    append_range(out, q + pst[0], pln[0]);
+                    continue;
+                }
+            }
+            append_range(out, q, qn);
+        }
+        memset(v, 0, sizeof *v);
+        v->unit = CSS_UNIT_TEXT;
+        v->tx = text_add(s, data(out), len(out));
+        return;
+    }
     if (p == CSS_PROP_OBJECT_POSITION && v->unit == CSS_UNIT_TEXT) {
         /* each axis as Chromium computes it: a keyword its percentage, a length px, an offset from the right or the
            bottom 100% less it */
@@ -8147,6 +8398,18 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         rec[CSS_PROP_WEBKIT_BOX_ORIENT] = css_value_rec(s, &out[CSS_PROP_WEBKIT_BOX_ORIENT], rec[CSS_PROP_WEBKIT_BOX_ORIENT].how,
                                                         win[CSS_PROP_WEBKIT_BOX_ORIENT], vc);
     }
+    /* a mask's longhands left at their initial values under a mask-image of more than one layer: an item for each layer,
+       as Chromium computes them (mask-size auto under two layers is auto, auto). getComputedStyle reads these; the
+       snapshot carries no initial value, so rules/css derives the same */
+    if (win[CSS_PROP_MASK_IMAGE] && out[CSS_PROP_MASK_IMAGE].unit == CSS_UNIT_TEXT && memchr(text_ptr(s, out[CSS_PROP_MASK_IMAGE].tx), ',',
+                                                                                           out[CSS_PROP_MASK_IMAGE].tx.len))
+        for (int k = CSS_PROP_MASK_MODE; k <= CSS_PROP_MASK_COMPOSITE; k++) {
+            if (win[k]) continue;
+            css_val mv = initial[k];
+            css_compute(s, env, (css_prop)k, &mv, &pv, out);
+            out[k] = mv;
+            rec[k] = css_value_rec(s, &mv, rec[k].how, 0, vc);
+        }
     css_val pdisplay;
     css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
     if (win[CSS_PROP_DISPLAY] || win[CSS_PROP_FLOAT] || win[CSS_PROP_POSITION])

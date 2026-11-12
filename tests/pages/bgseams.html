@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Backgrounds repeated at fractional offsets</title>
+<style>
+body { margin: 0; }
+.w { position: absolute; width: 120px; height: 80px; }
+.lg { background-image: linear-gradient(90deg, #d02020, #2040d0); background-size: 10px 10px; }
+.lv { background-image: linear-gradient(#20a040, #f0d020); background-size: 12px 9px; }
+.rg { background-image: radial-gradient(circle, #ffffff 30%, #3060c0 70%); background-size: 16px 16px; }
+.im { background-image: url(logo.png); }
+</style></head>
+<body>
+<div id="g1" class="w lg" style="left:10px;top:10px;background-position:3.5px 0"></div>
+<div id="g2" class="w lg" style="left:140px;top:10px;background-position:3.25px 2.5px"></div>
+<div id="g3" class="w lg" style="left:270px;top:10px;background-size:10.5px 10.5px"></div>
+<div id="g4" class="w lv" style="left:400px;top:10px;background-position:0.5px 0.5px"></div>
+<div id="g5" class="w rg" style="left:530px;top:10px;background-position:4.5px 4.5px"></div>
+<div id="g6" class="w lg" style="left:660px;top:10px;background-position:0.75px 0;background-repeat:repeat-x;height:30px"></div>
+<div id="i1" class="w im" style="left:10px;top:110px;background-size:24px 8px;background-position:0.5px 0"></div>
+<div id="i2" class="w im" style="left:140px;top:110px;background-size:24px 8px;background-position:0.5px 0.5px"></div>
+<div id="i3" class="w im" style="left:270px;top:110px;background-size:30.5px 10px"></div>
+<div id="i4" class="w im" style="left:400px;top:110px;background-position:10.5px 5.5px"></div>
+<div id="i5" class="w im" style="left:530px;top:110px;background-size:24px 8px;background-position:0.5px 0;background-repeat:repeat-y"></div>
+<div id="i6" class="w im" style="left:660.5px;top:110px;background-size:24px 8px"></div>
+<div id="m1" class="w lg" style="left:10px;top:210px;background-size:7.5px 10px;border:3px solid #333"></div>
+<div id="m2" class="w lv" style="left:140px;top:210px;background-position:center;border-radius:12px"></div>
+<div id="m3" class="w lg" style="left:270.25px;top:210.5px;background-position:0.5px 0"></div>
+<div id="m4" class="w im" style="left:400px;top:210px;background-size:20px 20px;background-position:0.5px 0.5px"></div>
+</body></html>

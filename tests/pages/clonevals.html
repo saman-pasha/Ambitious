@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>box-decoration-break: computed values</title>
+<style>body { margin: 8px; font: 10px serif; } .k { box-decoration-break: clone; } .k > .i { box-decoration-break: inherit; }</style></head><body>
+<p><span id="v1" data-check="box-decoration-break">initial</span>
+<span id="v2" data-check="box-decoration-break" style="box-decoration-break:clone">clone</span>
+<span id="v3" data-check="box-decoration-break" style="box-decoration-break:slice">slice</span>
+<span id="v4" data-check="box-decoration-break" style="-webkit-box-decoration-break:clone">-webkit- clone</span>
+<span id="v5" data-check="box-decoration-break" style="box-decoration-break:CLONE">upper case</span>
+<span id="v6" data-check="box-decoration-break" style="box-decoration-break:clone;box-decoration-break:round">invalid kept</span>
+<span id="v7" class="k" data-check="box-decoration-break">from a rule<span id="v8" class="i" data-check="box-decoration-break"> inherited when asked</span></span>
+<span class="k"><span id="v9" data-check="box-decoration-break" style="box-decoration-break:initial">initial</span></span>
+<div class="k"><span id="v10" data-check="box-decoration-break">not inherited</span></div>
+<span id="v11" data-check="box-decoration-break" style="-webkit-box-decoration-break:clone;box-decoration-break:slice">last wins</span>
+<span id="v12" data-check="box-decoration-break" style="box-decoration-break:slice;-webkit-box-decoration-break:clone">alias last</span>
+</p></body></html>

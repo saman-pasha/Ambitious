@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG filters, clips and masks on HTML boxes, zoomed and between px</title>
+<style>
+body { margin: 0; background: #fff }
+.cell { position: absolute; width: 104px; height: 84px }
+.b { position: absolute; left: 20px; top: 14px; width: 60px; height: 50px; background: #2a7fbf }
+.g { background: linear-gradient(90deg, #e03030, #30c030 50%, #3030e0) }
+.k { border: 4px solid #e0a020 }
+</style>
+</head>
+<body>
+<svg id="defs" style="position:absolute;left:0;top:0" width="0" height="0">
+  <defs>
+    <filter id="blur"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="region" filterUnits="userSpaceOnUse" x="10" y="8" width="40" height="30"><feFlood flood-color="#c04040"/></filter>
+    <filter id="shadow" x="-20%" y="-20%" width="160%" height="160%"><feDropShadow dx="4" dy="3" stdDeviation="1.5" flood-color="#603090"/></filter>
+    <clipPath id="circ"><circle cx="30" cy="25" r="21"/></clipPath>
+    <clipPath id="crect"><rect x="10.5" y="8.25" width="40" height="30"/></clipPath>
+    <clipPath id="star" clipPathUnits="objectBoundingBox"><polygon points="0.5 0, 0.62 0.36, 1 0.38, 0.69 0.6, 0.8 1, 0.5 0.75, 0.2 1, 0.31 0.6, 0 0.38, 0.38 0.36"/></clipPath>
+    <mask id="mrect" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200"><rect x="10" y="8" width="40" height="30" fill="white"/></mask>
+    <radialGradient id="glow"><stop offset="0.3" stop-color="white"/><stop offset="1" stop-color="black"/></radialGradient>
+    <mask id="mglow" maskContentUnits="objectBoundingBox"><rect width="1" height="1" fill="url(#glow)"/></mask>
+  </defs>
+</svg>
+<!-- row 1: at whole px -->
+<div id="z-blur" class="cell" style="left:0;top:0"><div class="b" style="filter:url(#blur)"></div></div>
+<div id="z-region" class="cell" style="left:106px;top:0"><div class="b" style="filter:url(#region)"></div></div>
+<div id="z-shadow" class="cell" style="left:212px;top:0"><div class="b k" style="width:50px;height:40px;filter:url(#shadow)"></div></div>
+<div id="z-circle" class="cell" style="left:318px;top:0"><div class="b g" style="clip-path:url(#circ)"></div></div>
+<!-- row 2: between px -->
+<div id="z-region2" class="cell" style="left:0;top:86px"><div class="b" style="left:20.5px;top:14.25px;filter:url(#region)"></div></div>
+<div id="z-rect2" class="cell" style="left:106px;top:86px"><div class="b g" style="left:20.5px;top:14.25px;clip-path:url(#crect)"></div></div>
+<div id="z-mask2" class="cell" style="left:212px;top:86px"><div class="b g" style="left:20.25px;top:14.75px;mask:url(#mrect)"></div></div>
+<div id="z-star" class="cell" style="left:318px;top:86px"><div class="b g" style="left:20.5px;top:14.5px;width:56px;height:48px;clip-path:url(#star)"></div></div>
+<!-- row 3: a mask's gradient, an effect under a transform, and in a line -->
+<div id="z-glow" class="cell" style="left:0;top:172px"><div class="b g" style="mask:url(#mglow)"></div></div>
+<div id="z-turned" class="cell" style="left:106px;top:172px"><div class="b g" style="transform:rotate(12deg);filter:url(#shadow)"></div></div>
+<div id="z-inline" class="cell" style="left:212px;top:172px"><div style="position:absolute;left:10px;top:14px;width:90px;font:16px/20px sans-serif"><span style="display:inline-block;width:40px;height:30px;background:#30a060;clip-path:url(#circ);vertical-align:top"></span><span style="display:inline-block;width:40px;height:30px;background:#a03060;filter:url(#blur);vertical-align:top"></span></div></div>
+<div id="z-scaled" class="cell" style="left:318px;top:172px"><div class="b g" style="transform:scale(0.8);mask:url(#mglow)"></div></div>
+</body>
+</html>

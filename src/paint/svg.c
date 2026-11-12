@@ -37,8 +37,9 @@
    feComposite, feMerge, feColorMatrix, feBlend, feDropShadow, feComponentTransfer: a
    block, F ... E); or CSS's filter functions (blur, drop-shadow, grayscale, sepia, saturate,
    hue-rotate, brightness, contrast, invert, opacity: each its shorthand primitive, in sRGB,
-   the region the bounding box outset by their reach). A reference to no such element is
-   passed over, as Chromium passes it. An element's bounding box (objectBoundingBox units) is
+   the region what they are given outset by their reach); a list of url()s and functions a
+   group for each, chained in its order. A reference to no such element is passed over, as
+   Chromium passes it. An element's bounding box (objectBoundingBox units) is
    its geometry's, a text's glyph cells', an image's viewport, a group's children's.
    Markers: marker-start, -mid and -end on a path, line, polyline or polygon, at the places
    Blink's SVGMarkerDataBuilder finds (an arc one segment, a closed subpath's first and
@@ -89,9 +90,16 @@
    and height (one from the other through its viewBox); it is drawn at that size scaled
    into its box, or, with none, at the box's size (its viewBox fitted into it).
 
-   Not done: foreignObject, SMIL animation, a reference into another document, a filter
-   value mixing a url() and functions (the url() alone is drawn), the filter primitives not
-   named above (each a transparent result), a filter's href, textPath's side, method, spacing and path, a path's
+   SVG'S EFFECTS ON A CSS BOX (amb_svg_effects, amb_svg_fx). The filters, the clipPath and the
+   mask an HTML element's (or an outermost svg's) filter, clip-path and mask name by url() are
+   written for its border box as groups of a scene are -- its user space the border box's,
+   from its top left, a CSS px a unit -- and paint draws the box's layer through them, as a
+   group's layer is drawn (a clip the union of its shapes alone, not held to their bounding
+   box as an SVG element's is: Chromium's on a box, measured).
+
+   Not done: foreignObject, SMIL animation, a reference into another document, the filter
+   primitives not named above (each a transparent result), a filter's href, textPath's side,
+   method, spacing and path, a path's
    pathLength, the vector effects other than non-scaling-stroke, systemLanguage (no tag
    holds, as in the headless Chromium the gates are measured in), a broken picture's icon,
    pictures of image elements in an SVG document drawn as an image (none is fetched), and
@@ -1572,8 +1580,9 @@ static uint32_t sv_fe_colour(const css_style *st, uint32_t c0, int cprop, int op
    (1 linearRGB, color-interpolation-filters' initial value; 0 sRGB), its subregion (the
    union of its inputs' subregions, a source's the region, unless its x, y, width and height
    say: of the bounding box when primitiveUnits is objectBoundingBox) and its values, lengths
-   in the user space -- then E. 0 when it draws nothing (a region of no area, no primitive) */
-static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_walk *w, sv_mat mm) {
+   in the user space -- then E; its region (x0, y0, x1, y1) into reg. 0 when it draws nothing (a region of no area, no
+   primitive) */
+static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_walk *w, sv_mat mm, double *reg) {
     double r[4], fs = sv_fs(st, w), bw = bb[2] - bb[0], bh = bb[3] - bb[1];
     int ubox = !sv_attr_is(d, flt, "filterUnits", "userSpaceOnUse"), pbox = sv_attr_is(d, flt, "primitiveUnits", "objectBoundingBox"), g;
     if ((ubox || pbox) && (!hb || bw <= 0 || bh <= 0)) return 0;
@@ -1740,21 +1749,25 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
     sv_w(out, "\n");
     append_range(out, data(lines), len(lines));
     sv_w(out, "E\n");
+    reg[0] = r[0];
+    reg[1] = r[1];
+    reg[2] = r[0] + r[2];
+    reg[3] = r[1] + r[3];
     return 1;
 }
 
-/* CSS's filter functions on an SVG element (Filter Effects 1, 13: each its shorthand's
-   primitive, in sRGB, as Blink builds them): a filter's block of them, the value's computed
-   text at fcv; its region the bounding box (bb) outset by how far the functions reach (three
-   deviations of a blur and a px, a shadow's offset too), each primitive's subregion the
-   region. 0 when there is none to draw */
+/* a run of CSS's filter functions (the text s, n of a filter's list) on an SVG element (Filter
+   Effects 1, 13: each its shorthand's primitive, in sRGB, as Blink builds them): a filter's
+   block of them; its region what the run is given (ext: x0, y0, x1, y1 -- the bounding box,
+   or the region of the filter before it in the list) outset by how far the functions reach
+   (three deviations of a blur and a px, a shadow's offset too), each primitive's subregion the
+   region, which then is ext. 0 when there is none to draw */
 typedef struct sv_fop { int kind; double v[20]; uint32_t col; } sv_fop;
-static int sv_css_filter_block(const css_style *st, uint32_t fcv, const double *bb, int hb, sv_mat mm, vector<char> *out) {
-    if (!hb || bb[2] < bb[0] || bb[3] < bb[1]) return 0;
-    amb_span sp = st->cval[fcv].text;
+static int sv_css_filter_run(const char *s, size_t n, double *ext, sv_mat mm, vector<char> *out) {
+    if (ext[2] < ext[0] || ext[3] < ext[1]) return 0;
     vector<char> t;
     vector<sv_fop> ops;
-    append_range(t, text_ptr(st, sp), sp.len);
+    append_range(t, s, n);
     size_t i = 0, pa, pl;
     double reach = 0;
     while (css_next_part(data(t), len(t), &i, &pa, &pl) && len(ops) < 64) {
@@ -1833,7 +1846,11 @@ static int sv_css_filter_block(const css_style *st, uint32_t fcv, const double *
         push_back(ops, op);
     }
     if (!len(ops)) return 0;
-    double r[4] = { bb[0] - reach, bb[1] - reach, bb[2] - bb[0] + 2 * reach, bb[3] - bb[1] + 2 * reach };
+    double r[4] = { ext[0] - reach, ext[1] - reach, ext[2] - ext[0] + 2 * reach, ext[3] - ext[1] + 2 * reach };
+    ext[0] = r[0];
+    ext[1] = r[1];
+    ext[2] = r[0] + r[2];
+    ext[3] = r[1] + r[3];
     sv_w(out, "F");
     for (int q = 0; q < 4; q++) sv_n(out, r[q]);
     sv_m(out, mm);
@@ -1878,17 +1895,53 @@ static int sv_css_filter_block(const css_style *st, uint32_t fcv, const double *
 }
 
 /* a group's lines, its opacity, its clip (cp a clipPath, 0 for none), its mask (mk a mask) and
-   its filter (flt a filter element; else fcv, CSS's filter functions' value, or 0): its g
-   line, followed by its clip's shapes, its mask's block and its filter's (a clipPath's own
-   clip-path a group about it). How many groups were written (the caller ends each); -1 when
-   the element draws nothing (its mask masks all of it, its filter has no region) */
-static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt, uint32_t fcv, double op, const sv_walk *pw, const sv_walk *w,
-                         sv_mat mm, int depth) {
-    if (op >= 1 && !cp && !mk && !flt && !fcv) return 0;
+   its filter's list (fcv, the filter's computed value when it is one; else 0): its g line,
+   followed by its clip's shapes, its mask's block and its filter's (a clipPath's own clip-path
+   a group about it). A list of more than one filter -- url()s naming filter elements, runs of
+   CSS's functions -- is a group for each, the first innermost, the last the group's own (each
+   applied to what the one before it made, as Chromium chains them); a url() that names no
+   filter is passed over. How many groups were written (the caller ends each); -1 when the
+   element draws nothing (its mask masks all of it, a filter has no region) */
+static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t fcv, double op, const sv_walk *pw, const sv_walk *w, sv_mat mm,
+                         int depth) {
+    if (op >= 1 && !cp && !mk && !fcv) return 0;
     double bb[4] = { 0, 0, 0, 0 };
     int hb = 0, groups = 0;
     vector<char> v;
-    if ((cp && sv_attr_text(d, cp, "clipPathUnits", &v)) || mk || flt || fcv) hb = sv_bounds(SA, x, pw, sv_id(), bb, depth, 0);
+    if ((cp && sv_attr_text(d, cp, "clipPathUnits", &v)) || mk || fcv) hb = sv_bounds(SA, x, pw, sv_id(), bb, depth, 0);
+    /* the filter's list: its stages' blocks one after another (fblk), where each begins (fat) */
+    vector<char> fblk;
+    vector<size_t> fat;
+    if (fcv) {
+        vector<char> t, run;
+        amb_span sp = st->cval[fcv].text;
+        append_range(t, text_ptr(st, sp), sp.len);
+        /* what each stage is given: the bounding box, then the region of the stage before it */
+        double ext[4] = { bb[0], bb[1], bb[2], bb[3] };
+        size_t i = 0, pa, pl, end;
+        int ok = 1;
+        for (;;) {
+            int more = css_next_part(data(t), len(t), &i, &pa, &pl);
+            int url = more && pl >= 4 && memcmp(data(t) + pa, "url(", 4) == 0;
+            if ((!more || url) && len(run)) {
+                size_t from = len(fblk);
+                if (hb && sv_css_filter_run(data(run), len(run), ext, mm, &fblk)) push_back(fat, from);
+                clear(run);
+            }
+            if (!more) break;
+            if (!url) {
+                if (len(run)) push_back(run, ' ');
+                append_range(run, data(t) + pa, pl);
+                continue;
+            }
+            uint32_t flt = sv_url(d, data(t) + pa, pl, &end);
+            if (!flt || !sv_is(d, flt, "filter")) continue;
+            size_t from = len(fblk);
+            if (!sv_filter_block(d, st, firsts, f, &fblk, ids, uses, work, flt, bb, hb, w, mm, ext)) { ok = 0; break; }
+            push_back(fat, from);
+        }
+        if (!ok) return -1;
+    }
     uint32_t c0 = cp ? sv_first(firsts, cp) : 0;
     uint32_t outer = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
     if (outer && outer != cp) {
@@ -1906,11 +1959,9 @@ static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt,
         for (int q = 0; q < groups; q++) sv_w(out, "e\n");
         return -1;
     }
-    if (flt && !sv_filter_block(d, st, firsts, f, &blocks, ids, uses, work, flt, bb, hb, w, mm)) {
-        for (int q = 0; q < groups; q++) sv_w(out, "e\n");
-        return -1;
-    }
-    int filtered = flt || (fcv && sv_css_filter_block(st, fcv, bb, hb, mm, &blocks));
+    size_t ns = len(fat);
+    int filtered = ns > 0;
+    if (filtered) append_range(blocks, data(fblk) + at(fat, ns - 1), len(fblk) - at(fat, ns - 1));
     if (op >= 1 && !cp && !mk && !filtered) {
         for (int q = 0; q < groups; q++) sv_w(out, "e\n");
         return 0;
@@ -1926,7 +1977,14 @@ static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt,
     sv_w(out, "\n");
     append_range(out, data(lines), len(lines));
     append_range(out, data(blocks), len(blocks));
-    return groups + 1;
+    groups++;
+    /* the list's earlier stages, each a group inside the next's */
+    for (size_t q = ns; q >= 2; q--) {
+        sv_w(out, "g 1 0 0 0 1\n");
+        append_range(out, data(fblk) + at(fat, q - 2), at(fat, q - 1) - at(fat, q - 2));
+        groups++;
+    }
+    return groups;
 }
 
 /* paint-order's computed value (cv) as the order of fill (0), stroke (1) and markers (2): those
@@ -2279,16 +2337,10 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     double op = c0 ? st->cval[c0 + CSS_PROP_OPACITY].num : 1;
     if (op <= 0) return;
     uint32_t cp = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
-    /* its mask and its filter (a url() that names no such element ignored, as Chromium ignores
-       it); CSS's filter functions, when the filter is no url() */
-    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK, "mask") : 0, flt = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_FILTER, "filter") : 0, fcv = 0;
-    if (c0 && !flt && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT) {
-        amb_span fsp = st->cval[c0 + CSS_PROP_FILTER].text;
-        int url = 0;
-        for (size_t q = 0; q + 4 <= fsp.len && !url; q++) url = memcmp(text_ptr(st, fsp) + q, "url(", 4) == 0;
-        if (!url) fcv = c0 + CSS_PROP_FILTER;
-    }
-    int grouped = sv_group_open(SA, x, cp, mk, flt, fcv, op, pw, &w, mm, depth);
+    /* its mask (a url() that names no mask ignored, as Chromium ignores it) and its filter's list */
+    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK_IMAGE, "mask") : 0;
+    uint32_t fcv = c0 && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT ? c0 + CSS_PROP_FILTER : 0;
+    int grouped = sv_group_open(SA, x, cp, mk, fcv, op, pw, &w, mm, depth);
     if (grouped < 0) return;
     if (shape) sv_shape(SA, x, &w, mm, depth);
     else if (group) {
@@ -2852,6 +2904,154 @@ void amb_svg_scene(const dom_document *d, const css_style *st, const vector<uint
     sv_n(out, clip);
     sv_w(out, "\n");
     append_range(out, data(body), len(body));
+}
+
+/* ---- SVG's effects on a CSS box: the filters, clip and mask its url()s name ---- */
+
+/* the number of items of a comma list (a computed value's: commas inside parentheses and quotes not its) */
+static size_t sv_list_count(const char *s, size_t n) {
+    size_t k = 1;
+    int depth = 0;
+    char q = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if (q) { if (c == q) q = 0; continue; }
+        if (c == '"' || c == '\'') q = c;
+        else if (c == '(') depth++;
+        else if (c == ')' && depth > 0) depth--;
+        else if (c == ',' && depth == 0) k++;
+    }
+    return k;
+}
+/* the item k of a comma list, its white space about it left out: where it begins, its length */
+static void sv_list_item(const char *s, size_t n, size_t k, size_t *a, size_t *l) {
+    size_t i = 0, at0 = 0, item = 0;
+    int depth = 0;
+    char q = 0;
+    for (; i <= n; i++) {
+        char c = i < n ? s[i] : ',';
+        if (q) { if (c == q) q = 0; continue; }
+        if (c == '"' || c == '\'') { q = c; continue; }
+        if (c == '(') { depth++; continue; }
+        if (c == ')' && depth > 0) { depth--; continue; }
+        if ((c == ',' && depth == 0) || i == n) {
+            if (item == k) break;
+            item++;
+            at0 = i + 1;
+        }
+    }
+    size_t e = i < n ? i : n, b = at0;
+    while (b < e && sv_ws(s[b])) b++;
+    while (e > b && sv_ws(s[e - 1])) e--;
+    *a = b;
+    *l = e > b ? e - b : 0;
+}
+
+void amb_svg_effects(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t el, double bw,
+                     double bh, vector<char> *out) {
+    if (el >= d->node_len || !(bw >= 0 && bh >= 0)) return;
+    uint32_t c0 = sv_first(firsts, el);
+    sv_walk w;
+    if (!c0 || !sv_root_walk(st, firsts, el, bw, bh, &w)) return;
+    double bb[4] = { 0, 0, bw, bh };
+    int hb = bw > 0 && bh > 0;
+    uint32_t ids = 0, work = 0;
+    vector<uint32_t> uses;
+    sv_mat mm = sv_id();
+    /* the filter's list: each url() in turn (its functions are paint's own) */
+    uint32_t fcv = c0 + CSS_PROP_FILTER;
+    if (st->cval[fcv].unit == CSS_UNIT_TEXT) {
+        vector<char> t;
+        amb_span sp = st->cval[fcv].text;
+        append_range(t, text_ptr(st, sp), sp.len);
+        size_t i = 0, pa, pl, end;
+        while (css_next_part(data(t), len(t), &i, &pa, &pl)) {
+            if (pl < 4 || memcmp(data(t) + pa, "url(", 4) != 0) continue;
+            uint32_t flt = sv_url(d, data(t) + pa, pl, &end);
+            vector<char> blk;
+            double reg[4];
+            int ok = flt && sv_is(d, flt, "filter") && sv_filter_block(d, st, firsts, f, &blk, &ids, &uses, &work, flt, bb, hb, &w, mm, reg);
+            sv_w(out, ok ? "f 1\ng 1 0 0 0 1\n" : "f 0\n");
+            append_range(out, data(blk), len(blk));
+        }
+    }
+    /* the clip-path's clipPath: its own clip-path's shapes a group about its own; their union the clip, not held to its
+       bounding box (Chromium's on a box, measured: an ellipse's top row half covered, not a quarter, as an SVG element's) */
+    uint32_t cp = sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH);
+    if (cp) {
+        uint32_t k0 = sv_first(firsts, cp), outer = k0 ? sv_clip_of(d, st, k0 + CSS_PROP_CLIP_PATH) : 0;
+        vector<char> lines, blk;
+        sv_w(out, "c 1\n");
+        if (outer && outer != cp) {
+            int ko = sv_clip_shapes(d, st, firsts, f, &blk, &ids, &uses, &work, outer, bb, hb, mm, bw, bh, &lines);
+            sv_w(out, "g 1 1");
+            sv_n(out, ko);
+            sv_w(out, "\n");
+            append_range(out, data(lines), len(lines));
+            clear(lines);
+        }
+        int k = sv_clip_shapes(d, st, firsts, f, &blk, &ids, &uses, &work, cp, bb, hb, mm, bw, bh, &lines);
+        sv_w(out, "g 1 1");
+        sv_n(out, k);
+        sv_w(out, "\n");
+        append_range(out, data(lines), len(lines));
+    }
+    /* the mask's layers (CSS Masking 1, 7), each its kind, its mode and how it composites with those under it */
+    uint32_t mcv = c0 + CSS_PROP_MASK_IMAGE;
+    if (st->cval[mcv].unit != CSS_UNIT_TEXT) return;
+    vector<char> img, pos, siz, rep, org, clp, cmp, mod;
+    amb_span sp = st->cval[mcv].text;
+    append_range(img, text_ptr(st, sp), sp.len);
+    const int lists[7] = { CSS_PROP_MASK_POSITION, CSS_PROP_MASK_SIZE, CSS_PROP_MASK_REPEAT, CSS_PROP_MASK_ORIGIN, CSS_PROP_MASK_CLIP,
+                           CSS_PROP_MASK_COMPOSITE, CSS_PROP_MASK_MODE };
+    for (int q = 0; q < 7; q++) {
+        vector<char> *l = q == 0 ? &pos : q == 1 ? &siz : q == 2 ? &rep : q == 3 ? &org : q == 4 ? &clp : q == 5 ? &cmp : &mod;
+        uint32_t cv = c0 + (uint32_t)lists[q];
+        if (st->cval[cv].unit == CSS_UNIT_TEXT) { amb_span lp = st->cval[cv].text; append_range(*l, text_ptr(st, lp), lp.len); }
+        else if (st->cval[cv].unit == CSS_UNIT_KEYWORD && st->cval[cv].word) { const char *wd = names_ptr(st, st->cval[cv].word); append_range(*l, wd, strlen(wd)); }
+    }
+    size_t nl = sv_list_count(data(img), len(img));
+    for (size_t k = 0; k < nl && k < 32; k++) {
+        size_t ia, il, ma, ml, ca, cl;
+        sv_list_item(data(img), len(img), k, &ia, &il);
+        sv_list_item(data(mod), len(mod), k % sv_list_count(data(mod), len(mod)), &ma, &ml);
+        sv_list_item(data(cmp), len(cmp), k % sv_list_count(data(cmp), len(cmp)), &ca, &cl);
+        const char *ms = data(mod) + ma, *cs = data(cmp) + ca, *is = data(img) + ia;
+        int mode = sv_eq_ci(ms, ml, "alpha") ? 1 : sv_eq_ci(ms, ml, "luminance") ? 2 : 0;
+        int comp = sv_eq_ci(cs, cl, "subtract") ? 1 : sv_eq_ci(cs, cl, "intersect") ? 2 : sv_eq_ci(cs, cl, "exclude") ? 3 : 0;
+        int grad = il > 9 && (memcmp(is, "linear-", 7) == 0 || memcmp(is, "radial-", 7) == 0 || memcmp(is, "repeating-", 10) == 0);
+        if (grad) {
+            /* a gradient: its own lines -- its image (i), position (p), size (s), repeat (r), origin (o) and clip (q) --
+               which paint draws as a background layer's */
+            sv_w(out, "m 3");
+            sv_n(out, mode);
+            sv_n(out, comp);
+            sv_w(out, "\ni ");
+            append_range(out, is, il);
+            static const char *const tags[5] = { "\np ", "\ns ", "\nr ", "\no ", "\nq " };
+            for (int q = 0; q < 5; q++) {
+                vector<char> *l = q == 0 ? &pos : q == 1 ? &siz : q == 2 ? &rep : q == 3 ? &org : &clp;
+                size_t la, ll;
+                sv_list_item(data(*l), len(*l), k % sv_list_count(data(*l), len(*l)), &la, &ll);
+                sv_w(out, tags[q]);
+                append_range(out, data(*l) + la, ll);
+            }
+            sv_w(out, "\n");
+            continue;
+        }
+        /* a mask element's url(): its group, its type the mode's when the mode is not match-source; anything else (none, a
+           url() naming no mask, a picture, which is not fetched) a layer of transparent black, which masks all away (7.1) */
+        size_t end;
+        uint32_t mk = il > 4 && memcmp(is, "url(", 4) == 0 ? sv_url(d, is, il, &end) : 0;
+        vector<char> blk;
+        int ok = mk && sv_is(d, mk, "mask") && sv_mask_block(d, st, firsts, f, &blk, &ids, &uses, &work, mk, bb, hb, &w, mm, 0);
+        if (ok && mode && len(blk) > 2) blk[2] = mode == 1 ? '1' : '0';
+        sv_w(out, ok ? "m 1" : "m 2");
+        sv_n(out, mode);
+        sv_n(out, comp);
+        sv_w(out, ok ? "\ng 1 0 0 1 0\n" : "\n");
+        append_range(out, data(blk), len(blk));
+    }
 }
 
 /* ---- the drawing: the scene read ---- */
@@ -4916,6 +5116,42 @@ static void sv_render(const char *s, size_t n, size_t i, int w, int h, sv_mat de
     while (len(lopv)) sv_pop(s, RV);
     clear(*layer);
     append_range(layer, data(layv), len(layv));
+}
+
+/* the groups at the start of s (each g line with its clip's shapes and its blocks) opened over a layer of nothing, the
+   layer given drawn into the innermost, and each closed: the layer through their filters, clips and masks */
+void amb_svg_fx(const char *s, size_t n, int w, int h, const double *m, const net_loader *nt, vector<float> *layer) {
+    size_t px = (size_t)(w > 0 ? w : 0) * (size_t)(h > 0 ? h : 0);
+    if (!px || len(*layer) != px * 4 || (double)px > 3e7) return;
+    sv_dev dvv;
+    dvv.w = w;
+    dvv.h = h;
+    dvv.x0 = 0;
+    dvv.y0 = 0;
+    dvv.depth = 0;
+    dvv.dev = sv_make(m[0], m[1], m[2], m[3], m[4], m[5]);
+    const sv_dev *dv = &dvv;
+    vector<float> layv, masksv, covv, accv, tilesv;
+    vector<double> lopv, grv, pathv, edgesv, ptsv, dpv, dsv, tmpv, clv, xsv;
+    vector<int32_t> lmkv;
+    vector<uint32_t> gixv, subsv, orderv, actv;
+    vector<uint8_t> cornerv, ccfv;
+    vector<sv_mseg> dcfv;
+    resize(layv, px * 4);
+    size_t i = 0, a, k;
+    int groups = 0;
+    while (groups < 8 && sv_tok(s, n, &i, 0, &a, &k)) {
+        if (k == 1 && s[a] == 'g') {
+            sv_push(s, n, &i, RV);
+            groups++;
+        }
+        sv_skip_line(s, n, &i);
+    }
+    if (!groups) return;
+    size_t top = len(layv) - px * 4;
+    for (size_t q = 0; q < px * 4; q++) layv[top + q] = at(*layer, q);
+    while (len(lopv)) sv_pop(s, RV);
+    for (size_t q = 0; q < px * 4; q++) (*layer)[q] = at(layv, q);
 }
 #undef RV
 

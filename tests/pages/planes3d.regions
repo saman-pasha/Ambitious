@@ -1,0 +1,11 @@
+# tests/pages/planes3d.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+s-cross 10 10 170 140
+s-glass 200 10 360 140
+s-floor 390 10 550 140
+s-three 580 10 740 140
+s-tilt 10 170 170 300
+s-borders 200 170 360 300
+s-nested 390 170 550 300
+s-back 580 170 740 300
+s-scene 10 330 170 460
+s-origin 200 330 360 460

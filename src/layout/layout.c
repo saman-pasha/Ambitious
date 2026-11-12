@@ -13,7 +13,9 @@
    none of the flow's. An svg is sized as Chromium sizes one: its width and height
    attributes its CSS width and height (the cascade's presentation attributes), its
    natural size their absolute lengths, its ratio its viewBox's; its subtree is made the
-   box's scene (src/paint/svg.h) once the box's size is known. A container with both block-level and
+   box's scene (src/paint/svg.h) once the box's size is known, as are the SVG filters, clipPath
+   and mask a box's filter, clip-path and mask name by url(), for its border box (its fx). A
+   container with both block-level and
    inline-level children wraps each run of the inline ones that shows anything
    in an anonymous block.
 
@@ -143,8 +145,14 @@
    element's edges going with what they bound (both edges on a line keep its left
    and right edges on its left and right), a right-to-left run's text handed to
    paint reversed, its brackets mirrored (L4); the controls are drawn as nothing.
+   An inline box broken over lines is one strip sliced at its breaks, or, under
+   box-decoration-break: clone, each fragment wrapped in its every edge (CSS
+   Fragmentation 3, 5.4): a line it continues on starts with its start edges, as
+   text-indent would, and its fragment there ends with its end edges past what the
+   line holds, which the line's break does not make room for, as Chromium breaks it.
    Not done: each paragraph a forced break starts its own under plaintext; an
-   inline box's edges on lines after its first in a right-to-left paragraph.
+   inline box's edges on lines after its first in a right-to-left paragraph, and a
+   cloned box's in any paragraph the bidi algorithm lays out (sliced there).
 
    Query containers (CSS Conditional 5): a container of container-type size or
    inline-size makes a formatting context of its own; its content counts for
@@ -355,6 +363,7 @@ typedef struct lay_ext {
     uint8_t app_none, styled_bg, styled_border, styled_shadow;
     uint8_t ofit;                       /* object-fit: 0 fill, 1 contain, 2 cover, 3 none, 4 scale-down */
     uint8_t irender;                    /* image-rendering: 1 pixelated or crisp-edges (nearest), 0 any other */
+    uint8_t clone;                      /* box-decoration-break: clone (an inline box's fragments each wrapped in its edges) */
     uint32_t opos;                      /* object-position's cval; 0 at its initial value */
     uint32_t cpath;                     /* clip-path's cval when it is a basic shape or a geometry box; else 0 */
     uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
@@ -477,6 +486,16 @@ static int lay_cq_kind(const css_style *st, uint32_t c0) {
     amb_span sp = st->cval[c].text;
     const char *t = text_ptr(st, sp);
     return sp.len >= 11 && memcmp(t, "inline-size", 11) == 0 ? 1 : sp.len >= 4 && memcmp(t, "size", 4) == 0 ? 2 : 0;
+}
+
+/* a computed value kept as text that holds a url() (a filter's list, a clip-path, a mask naming an SVG element) */
+static int lay_has_url(const css_style *st, uint32_t c) {
+    if (st->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = st->cval[c].text;
+    const char *t = text_ptr(st, sp);
+    int got = 0;
+    for (size_t q = 0; q + 4 <= sp.len && !got; q++) got = memcmp(t + q, "url(", 4) == 0;
+    return got;
 }
 
 /* a list-style-type's marker (its value c): 0 none; a predefined symbol marker Chromium draws as a shape, or a
@@ -719,6 +738,8 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->irender = (uint8_t)(lay_w(w, "pixelated") || lay_w(w, "crisp-edges"));
     if (e->ofit || e->opos || e->irender) e->paints = 1;
     e->cq = (uint8_t)lay_cq_kind(st, c0);
+    lay_word_of(st, c0 + CSS_PROP_BOX_DECORATION_BREAK, w);
+    e->clone = (uint8_t)lay_w(w, "clone");
     {
         /* clip-path's basic shape or geometry box (an HTML box's; a url() is an SVG element's) */
         uint32_t cc = c0 + CSS_PROP_CLIP_PATH;
@@ -3885,6 +3906,87 @@ static double lay_bidi_finish(LCTX, uint32_t b, const lay_style *bs, const vecto
     return height;
 }
 
+/* an inline element's edge that each of its fragments has when it is cloned (box-decoration-break: clone, CSS
+   Fragmentation 3, 5.4): its margin, border and padding at its start (end 0) or at its end (end 1); 0 when it is sliced */
+static double lay_clone_edge(LCTX, uint32_t el, int end, double cw) {
+    if (!LAY_X(el).clone) return 0;
+    lay_style es;
+    lay_style_of(LARGS, el, &es);
+    if (end) return lay_res(st, es.p[1], cw) + es.b[1] + lay_res(st, es.m[1], cw);
+    return lay_res(st, es.m[3], cw) + es.b[3] + lay_res(st, es.p[3], cw);
+}
+/* the end edges (lay_clone_edge) of the cloned elements open at the end of the pieces [a, end), those in open being open
+   at their start: what a line adds after its content, where Chromium wraps each fragment's end (measured: the edge is no
+   part of where the line breaks; a fragment may reach past the line) */
+static double lay_clone_ends(LCTX, const vector<lay_piece> *ps, size_t a, size_t end, const vector<lay_open> *open, double cw) {
+    vector<uint32_t> stk;
+    for (size_t q = 0; q < len(*open); q++) push_back(stk, at(*open, q).el);
+    for (size_t k = a; k < end; k++) {
+        lay_piece p = at(*ps, k);
+        if (p.kind == P_OPEN) push_back(stk, p.node);
+        else if (p.kind == P_CLOSE && len(stk)) pop_back(&stk);
+    }
+    double sum = 0;
+    for (size_t q = 0; q < len(stk); q++) sum += lay_clone_edge(LARGS, at(stk, q), 1, cw);
+    return sum;
+}
+/* where an inline element open at a line's start (the k-th of open, those before it its ancestors) begins its fragment
+   there: after its ancestors' cloned start edges, and its own margin when it is cloned (at the line's start, shifted by
+   the line's alignment), else at the line's start, as a sliced one continues */
+static double lay_clone_lead(LCTX, const vector<lay_open> *open, size_t k, double cw, double shift) {
+    double lead = 0;
+    for (size_t q = 0; q < k && q < len(*open); q++) lead += lay_clone_edge(LARGS, at(*open, q).el, 0, cw);
+    uint32_t el = at(*open, k).el;
+    int clone = LAY_X(el).clone != 0;
+    if (clone) {
+        lay_style es;
+        lay_style_of(LARGS, el, &es);
+        lead += lay_res(st, es.m[3], cw);
+    }
+    return clone || lead > 0 ? shift + lead : 0;
+}
+
+/* the box that holds an inline element's clip-path (a basic shape or a geometry box: lay_ext's cpath) for its fragments
+   in box b's lines (each fragment's clip): the one a fragment of it there has (made: the line's fragments not yet in
+   it, each key << 32 | fragment), else a new one, in no box's children (as a piece is), its edges the element's; placed
+   on the element's first fragment by lay_inline_clips once every line is where it ends */
+static uint32_t lay_clip_box(LCTX, uint32_t b, uint32_t el, double cw, const vector<uint64_t> *made) {
+    uint32_t node = lay_dom(gx, el);
+    uint8_t ps = (el & LAY_GEN) ? (uint8_t)at(*gx, el & LAY_GIDX).pseudo : 0;
+    for (uint32_t l = t->box[b].first_line; l; l = t->line[l].next)
+        for (uint32_t fr = t->line[l].first_frag; fr; fr = t->frag[fr].next) {
+            uint32_t cb = t->frag[fr].clip;
+            if (cb && t->box[cb].node.index == node && t->box[cb].pseudo == ps) return cb;
+        }
+    for (size_t q = 0; q < len(*made); q++) {
+        uint32_t cb = t->frag[(uint32_t)(at(*made, q) & 0xffffffffu)].clip;
+        if (cb && t->box[cb].node.index == node && t->box[cb].pseudo == ps) return cb;
+    }
+    layout_box_h h = box_new(t);
+    uint32_t nb = h.index;
+    t->box[nb].kind = LAYOUT_BOX_KIND_INLINE;
+    t->box[nb].opacity = 1;
+    t->box[nb].node = node_handle(d, node);
+    t->box[nb].pseudo = ps;
+    lay_style es;
+    lay_style_of(LARGS, el, &es);
+    lay_edges(t, st, nb, &es, cw);
+    t->box[nb].mt = 0;
+    t->box[nb].mr = 0;
+    t->box[nb].mb = 0;
+    t->box[nb].ml = 0;
+    lay_box_paint(LARGS, nb, lay_si(sx, gx, el));
+    t->box[nb].clone = LAY_X(el).clone != 0;
+    return nb;
+}
+/* the innermost of the elements stk holds (the inline elements open, outermost first) whose clip-path clips what is in
+   it: its clip box (lay_clip_box); 0 for none */
+static uint32_t lay_inline_clip_of(LCTX, uint32_t b, const vector<uint32_t> *stk, double cw, const vector<uint64_t> *made) {
+    for (size_t q = len(*stk); q >= 1; q--)
+        if (LAY_X(at(*stk, q - 1)).cpath) return lay_clip_box(LARGS, b, at(*stk, q - 1), cw, made);
+    return 0;
+}
+
 /* one line of pieces [a, e) in box b at y, w wide; returns its height. open: the inline
    elements open at its start, which it leaves as those open at its end. bu: its paragraph's
    bidi units, at level para (empty: no bidi text in it) */
@@ -3979,7 +4081,9 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     /* bidirectional text (UAX #9): the line's visual runs, in their order */
     if (len(*bu) > 0 && end > a)
         return lay_bidi_finish(LARGS, b, bs, ps, a, end, x0, w, y, justify_ok, indent, open, bu, para, &atoms, &abase, max_above, max_below);
-    double line_w = x, free = w - line_w, shift = 0, extra = 0;
+    /* the cloned elements' end edges after the content (a cloned one's start edges are in indent: lay_lines) */
+    double cends = lay_clone_ends(LARGS, ps, a, end, open, w);
+    double line_w = x, free = w - line_w - cends, shift = 0, extra = 0;
     if (bs->align == AL_RIGHT && free > 0) shift = free;
     else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
     else if (bs->align == AL_JUSTIFY && justify_ok && free > 0 && spaces > 0) extra = free / spaces;
@@ -3995,9 +4099,15 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
     /* the inline elements' backgrounds, under the text, and a positioned one's place (which
        makes the containing block of an absolutely positioned box in it): each open one from
        where it is opened (or the line's start) to where it is closed (or the line's end),
-       shifted and offset as its pieces are */
+       shifted and offset as its pieces are; the fragments in the order their elements open (an
+       ancestor's under its descendants', as Chromium paints them), not as they close */
     vector<double> starts;           /* for each open element, where it opens on this line (-1: before the line) */
-    for (size_t k = 0; k < len(*open); k++) push_back(starts, -1.0);
+    vector<uint32_t> okey;           /* and the order it opens in */
+    vector<uint64_t> made;           /* each fragment made, by its element's order: key << 32 | fragment */
+    size_t n0 = len(*open);
+    vector<uint32_t> stk;            /* the elements open as the text runs go: at the line's start, its open ones */
+    for (size_t k = 0; k < n0; k++) push_back(stk, at(*open, k).el);
+    for (size_t k = 0; k < n0; k++) { push_back(starts, -1.0); push_back(okey, (uint32_t)k); }
     double gap = 0;
     for (size_t k = a; k < end; k++) {
         lay_piece p = at(*ps, k);
@@ -4020,17 +4130,28 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             o.ry = p.ry;
             push_back(open, o);
             push_back(starts, px);
+            push_back(okey, (uint32_t)(n0 + (k - a)));
         }
         if (p.kind == P_CLOSE && len(*open)) {
             /* its background, from its start on this line (or the line's start) to here */
             double from = back(starts);
+            uint64_t key = back(okey);
             pop_back(&starts);
+            pop_back(&okey);
             uint32_t elx = back(*open).el;
             pop_back(open);
             lay_style es;
             lay_style_of(LARGS, elx, &es);
-            if ((es.bg & 0xff) != 0 || LAY_X(elx).pos != POS_STATIC || lay_decorated(LARGS, elx, &es)) {
-                double x0b = from < 0 ? 0 : from;
+            if ((es.bg & 0xff) != 0 || LAY_X(elx).pos != POS_STATIC || lay_decorated(LARGS, elx, &es) || LAY_X(elx).cpath) {
+                double x0b = from;
+                if (from < 0) {
+                    lay_open self;
+                    memset(&self, 0, sizeof self);
+                    self.el = elx;
+                    push_back(open, self);
+                    x0b = lay_clone_lead(LARGS, open, len(*open) - 1, w, shift);
+                    pop_back(open);
+                }
                 layout_frag_h fh = frag_new(t);
                 uint32_t fr = fh.index;
                 t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
@@ -4042,7 +4163,13 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 t->frag[fr].baseline = baseline;
                 t->frag[fr].background = es.bg;
                 lay_inline_piece(LARGS, fr, elx, &es, w);
-                frags_append(t, ln, fr);
+                /* the clip of the innermost element about it, itself first, whose clip-path clips */
+                vector<uint32_t> up;
+                for (size_t q = 0; q < len(*open); q++) push_back(up, at(*open, q).el);
+                push_back(up, elx);
+                uint32_t cb = lay_inline_clip_of(LARGS, b, &up, w, &made);
+                if (cb) t->frag[fr].clip = cb;
+                push_back(made, key << 32 | fr);
             }
         }
     }
@@ -4052,23 +4179,37 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         uint32_t elx = o.el;
         lay_style es;
         lay_style_of(LARGS, elx, &es);
-        if ((es.bg & 0xff) == 0 && LAY_X(elx).pos == POS_STATIC && !lay_decorated(LARGS, elx, &es)) continue;
+        if ((es.bg & 0xff) == 0 && LAY_X(elx).pos == POS_STATIC && !lay_decorated(LARGS, elx, &es) && !LAY_X(elx).cpath) continue;
         double from = at(starts, k);
-        double x0b = from < 0 ? 0 : from + lay_res(st, es.m[3], w);
+        double x0b = from < 0 ? lay_clone_lead(LARGS, open, k, w, shift) : from + lay_res(st, es.m[3], w);
+        /* past the content: the end edges of the cloned elements inside it, then its own border and padding */
+        double tail = LAY_X(elx).clone ? lay_res(st, es.p[1], w) + es.b[1] : 0;
+        for (size_t q = k + 1; q < len(*open); q++) tail += lay_clone_edge(LARGS, at(*open, q).el, 1, w);
         double sh = o.shift, orx = o.rx, ory = o.ry;
         layout_frag_h fh = frag_new(t);
         uint32_t fr = fh.index;
         t->frag[fr].kind = LAYOUT_FRAG_KIND_INLINE;
         t->frag[fr].node = node_handle(d, lay_dom(gx, elx));
         t->frag[fr].x = x0b + orx;
-        t->frag[fr].w = line_w + shift + gap - x0b;
+        t->frag[fr].w = line_w + shift + gap - x0b + tail;
         t->frag[fr].y = baseline + sh - es.asc - lay_res(st, es.p[0], w) - es.b[0] + ory;
         t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
         t->frag[fr].baseline = baseline;
         t->frag[fr].background = es.bg;
         lay_inline_piece(LARGS, fr, elx, &es, w);
-        frags_append(t, ln, fr);
+        vector<uint32_t> up;
+        for (size_t q = 0; q <= k; q++) push_back(up, at(*open, q).el);
+        uint32_t cb = lay_inline_clip_of(LARGS, b, &up, w, &made);
+        if (cb) t->frag[fr].clip = cb;
+        push_back(made, (uint64_t)at(okey, k) << 32 | fr);
     }
+    for (size_t q = 1; q < len(made); q++) {
+        uint64_t m = at(made, q);
+        size_t r = q;
+        while (r > 0 && at(made, r - 1) >> 32 > m >> 32) { made[r] = at(made, r - 1); r--; }
+        made[r] = m;
+    }
+    for (size_t q = 0; q < len(made); q++) frags_append(t, ln, (uint32_t)(at(made, q) & 0xffffffffu));
     /* the text runs (a text node's words and spaces, as one fragment unless justified)
        and the atomic boxes */
     size_t k = a, atom = 0;
@@ -4101,6 +4242,8 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         }
         if (p.kind != P_WORD && !(p.kind == P_SPACE && p.keep)) {
             if (p.kind == P_SPACE) gap += extra;
+            if (p.kind == P_OPEN) push_back(stk, p.node);
+            else if (p.kind == P_CLOSE && len(stk)) pop_back(&stk);
             k++;
             continue;
         }
@@ -4149,6 +4292,8 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
             uint32_t ts = LAY_X(p.elem).tshadow;
             if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
         }
+        uint32_t cb = lay_inline_clip_of(LARGS, b, &stk, w, &made);
+        if (cb) t->frag[fr].clip = cb;
         frags_append(t, ln, fr);
         k = r;
     }
@@ -4579,6 +4724,12 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
     while (i < np) {
         while (i < np && at(ps, i).kind == P_SPACE && !at(ps, i).keep) i++;
         if (i >= np) break;
+        /* the start edges of the cloned elements the line continues (box-decoration-break: clone), before its content,
+           as text-indent is (a bidi paragraph's lines keep their elements sliced) */
+        double cstart = 0;
+        if (!len(bu))
+            for (size_t q = 0; q < len(open); q++) cstart += lay_clone_edge(LARGS, at(open, q).el, 0, w);
+        indent += cstart;
         /* the line's band beside the floats, lower when its first chunk does not fit */
         double lx = 0, lw = w;
         if (len(*fl)) {
@@ -5657,11 +5808,13 @@ static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es
     t->box[b].h = t->frag[fr].h > ev ? t->frag[fr].h - ev : 0;
     uint32_t si = lay_si(sx, gx, el);
     if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
+    t->box[b].clone = at(*xc, si).clone != 0;
     t->frag[fr].piece = b;
 }
 /* each decorated inline element's fragments, in the order they were made (line by line), as one strip laid end to end
    (CSS Backgrounds 3, box-decoration-break: slice): each fragment's box is the whole strip, its content box from the
-   strip's start, placed so that the fragment's part of the strip lies on the fragment, its edges at whole pixels */
+   strip's start, placed so that the fragment's part of the strip lies on the fragment, its edges at whole pixels; a
+   cloned element's (box-decoration-break: clone) each its own fragment's, wrapped in every edge */
 static void lay_inline_strips(layout_tree *t) {
     vector<uint32_t> frs;
     for (uint32_t fr = 1; fr < t->frag_len; fr++)
@@ -5679,6 +5832,7 @@ static void lay_inline_strips(layout_tree *t) {
         for (size_t j = i; j < len(frs); j++) {
             uint32_t bj = t->frag[at(frs, j)].piece;
             if (at(done, j) || t->box[bj].node.index != node || t->box[bj].pseudo != ps) continue;
+            if (t->box[b0].clone && j != i) continue;
             done[j] = 1;
             push_back(group, at(frs, j));
             total += t->frag[at(frs, j)].w;
@@ -5697,6 +5851,34 @@ static void lay_inline_strips(layout_tree *t) {
             t->box[b].h = y1 - y0 > ev ? y1 - y0 - ev : 0;
             off += t->frag[fr].w;
         }
+    }
+}
+
+/* each clip box (lay_clip_box) placed: its border box its element's first fragment's, as Chromium takes an inline
+   element's reference box for its clip-path (measured: inset(0 0 50% 0) on a span over two lines keeps the top half of
+   its first line, and nothing of its second); its end edge none when the element goes on past that fragment, sliced */
+static void lay_inline_clips(layout_tree *t) {
+    vector<uint8_t> done;
+    for (uint32_t fr = 1; fr < t->frag_len; fr++) {
+        uint32_t cb = t->frag[fr].clip;
+        if (!t->frag[fr].live || !cb || t->frag[fr].kind != LAYOUT_FRAG_KIND_INLINE || t->box[cb].node.index != t->frag[fr].node.index) continue;
+        if (len(done) <= cb) resize(done, (size_t)cb + 1, 0);
+        if (at(done, cb)) {
+            if (at(done, cb) == 1 && !t->box[cb].clone) {
+                /* a second fragment: the first's end edge none */
+                t->box[cb].w += t->box[cb].pr + t->box[cb].br;
+                t->box[cb].pr = 0;
+                t->box[cb].br = 0;
+            }
+            done[cb] = 2;
+            continue;
+        }
+        done[cb] = 1;
+        double ew = t->box[cb].bl + t->box[cb].pl + t->box[cb].pr + t->box[cb].br, ev = t->box[cb].bt + t->box[cb].pt + t->box[cb].pb + t->box[cb].bb;
+        t->box[cb].x = t->frag[fr].x + t->box[cb].bl + t->box[cb].pl;
+        t->box[cb].y = t->frag[fr].y + t->box[cb].bt + t->box[cb].pt;
+        t->box[cb].w = t->frag[fr].w > ew ? t->frag[fr].w - ew : 0;
+        t->box[cb].h = t->frag[fr].h > ev ? t->frag[fr].h - ev : 0;
     }
 }
 
@@ -8433,29 +8615,47 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     }
     lay_absolute(t, vp, 0, 0);
     /* the sticky boxes and inline elements, when a style is sticky: before the inline elements' strips are made from
-       their fragments */
+       their fragments (and before their clips, which the first fragment places) */
     for (size_t k = 0; k < len(exts); k++)
         if (at(exts, k).pos == POS_STICKY) { lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height); break; }
     lay_inline_strips(t);
+    lay_inline_clips(t);
     lay_radii(t);
-    /* each svg element's drawing, made for its content box (src/paint/svg.h) */
+    /* each svg element's drawing, made for its content box, and each box's SVG effects, for its border box (src/paint/svg.h):
+       those a filter, a clip-path or a mask names by url() */
     vector<uint32_t> firsts;
     for (uint32_t b = 1; b < t->box_len; b++) {
-        if (!t->box[b].live || t->box[b].kind != LAYOUT_BOX_KIND_REPLACED || t->box[b].pseudo) continue;
+        if (!t->box[b].live || t->box[b].pseudo || t->box[b].kind == LAYOUT_BOX_KIND_INLINE || t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) continue;
         uint32_t el = t->box[b].node.index;
-        if (!el || el >= doc->node_len || !lay_is_svg(doc, el)) continue;
+        if (!el || el >= doc->node_len) continue;
+        int svg = t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && lay_is_svg(doc, el);
+        uint32_t sid = at(node_style, el) & LAY_SMASK, c0 = sid < len(style_first) ? at(style_first, sid) : 0;
+        int fx = c0 && (lay_has_url(style, c0 + CSS_PROP_FILTER) || lay_has_url(style, c0 + CSS_PROP_CLIP_PATH) ||
+                        style->cval[c0 + CSS_PROP_MASK_IMAGE].unit == CSS_UNIT_TEXT);
+        if (!svg && !fx) continue;
         if (!len(firsts)) {
             resize(firsts, doc->node_len);
             for (uint32_t x = 1; x < doc->node_len; x++) {
-                uint32_t sid = at(node_style, x) & LAY_SMASK;
-                firsts[x] = sid < len(style_first) ? at(style_first, sid) : 0;
+                uint32_t xs = at(node_style, x) & LAY_SMASK;
+                firsts[x] = xs < len(style_first) ? at(style_first, xs) : 0;
             }
         }
-        vector<char> scene;
-        amb_svg_scene(doc, style, &firsts, &fonts, el, t->box[b].w, t->box[b].h, &scene);
-        if (len(scene)) {
-            amb_span sp = text_add(t, data(scene), len(scene));
-            t->box[b].svg = sp;
+        if (svg) {
+            vector<char> scene;
+            amb_svg_scene(doc, style, &firsts, &fonts, el, t->box[b].w, t->box[b].h, &scene);
+            if (len(scene)) {
+                amb_span sp = text_add(t, data(scene), len(scene));
+                t->box[b].svg = sp;
+            }
+        }
+        if (fx) {
+            vector<char> effects;
+            amb_svg_effects(doc, style, &firsts, &fonts, el, t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br,
+                            t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb, &effects);
+            if (len(effects)) {
+                amb_span sp = text_add(t, data(effects), len(effects));
+                t->box[b].fx = sp;
+            }
         }
     }
     lay_cq_free();
