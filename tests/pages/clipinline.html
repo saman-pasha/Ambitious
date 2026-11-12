@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>clip-path on inline elements</title>
+<style>
+body { margin: 0; font: 20px/30px sans-serif; }
+div { position: absolute; width: 200px; }
+span { background: #fc8; }
+</style></head><body>
+<div id="d1" style="left:10px;top:10px">Lead <span id="s1" style="clip-path:inset(4px 10px)">clipped span</span> end.</div>
+<div id="d2" style="left:10px;top:60px">Lead <span id="s2" style="clip-path:circle(40%)">clipped span</span> end.</div>
+<div id="d3" style="left:10px;top:110px">Lead <span id="s3" style="clip-path:inset(2px 5px);border:3px solid #c60;padding:0 4px">this one wraps over lines</span> end.</div>
+<div id="d4" style="left:260px;top:10px">Lead <span id="s4" style="clip-path:ellipse(50% 30%)">this one wraps over lines</span> end.</div>
+<div id="d5" style="left:260px;top:110px">Lead <span id="s5" style="clip-path:inset(0 0 50% 0)">this one wraps over lines</span> end.</div>
+<div id="d6" style="left:510px;top:10px">Lead <span id="s6" style="clip-path:polygon(0 0, 100% 0, 50% 100%)">clipped span</span> end.</div>
+<div id="d7" style="left:510px;top:60px">Lead <span id="s7" style="clip-path:inset(4px 10px) content-box;padding:0 8px">clipped</span> end.</div>
+<div id="d8" style="left:510px;top:110px">Lead <span id="s8" style="clip-path:inset(5px);color:transparent"><span style="background:#8cf">inner</span> text</span> end.</div>
+<div id="d9" style="left:10px;top:200px">Lead <span id="s9" style="clip-path:padding-box;border:4px solid #36c;border-radius:9px;padding:0 6px">rounded</span> end.</div>
+<div id="d10" style="left:260px;top:200px">Lead <span id="s10" style="clip-path:inset(3px round 6px);background:linear-gradient(90deg,#f66,#66f)">gradient</span> end.</div>
+<div id="d11" style="left:510px;top:200px">Lead <span id="text-s11" style="clip-path:circle(30%);color:#06c;background:none">plain text</span> end.</div>
+<div id="d12" style="left:10px;top:250px;width:150px">Lead <span id="s12" style="clip-path:inset(0 0 0 30%);box-decoration-break:clone;border:2px solid #090;padding:0 4px">cloned and wrapped</span> end.</div>
+<div id="d13" style="left:260px;top:250px">Lead <span id="s13" style="clip-path:polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 20% 20%, 80% 20%, 80% 80%, 20% 80%)">hollow span</span> end.</div>
+<div id="d14" style="left:510px;top:250px">Lead <span id="s14" style="clip-path:xywh(10px 2px 60px 18px)">clipped span</span> end.</div>
+</body></html>

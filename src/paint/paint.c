@@ -7,7 +7,9 @@
    order: its shadows, its background, its borders, its lines -- inline
    elements' backgrounds (an element with borders, rounded corners, images
    or shadows drawn from its box of them, the element as one strip sliced
-   at its line breaks), text and its shadows, decorations, list markers --
+   at its line breaks, or each fragment on its own when cloned; the fragments
+   an inline element's clip-path clips drawn together, held to its shape about
+   the element's first fragment), text and its shadows, decorations, list markers --
    its child boxes, its outline), then those with z-index auto or 0 in tree
    order and those with a positive one by z-index. A box that clips its overflow
    clips what is in it to its padding box.
@@ -2839,35 +2841,63 @@ static int pt_symbol(const layout_tree *t, uint32_t fr, amb_canvas *c) {
     return 1;
 }
 
+/* one fragment of a line drawn: an inline element's decorations, or text (its shadows, glyphs and decorations), a
+   marker */
+static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
+                    vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
+                    vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    layout_frag_kind k = t->frag[fr].kind;
+    if (k == LAYOUT_FRAG_KIND_INLINE) {
+        if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
+        else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
+        return;
+    }
+    if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) return;
+    if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) return;
+    /* a fragment outside the canvas's window: nothing of it to draw */
+    if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) return;
+    amb_span sp = t->frag[fr].text;
+    double size = t->frag[fr].size, base = t->frag[fr].baseline;
+    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
+    pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
+            pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
+    /* the decorations in the text's fill, as Blink resolves their currentcolor */
+    uint8_t deco = t->frag[fr].decoration;
+    double th = floor(size / 16 + 0.5);
+    if (th < 1) th = 1;
+    double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
+    uint32_t dc = t->frag[fr].fill;
+    if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+    if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+    if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+}
+
+static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const vector<uint8_t> *before);
+
+/* a block's lines, fragment by fragment; those an inline element's clip-path clips (each fragment's clip) together,
+   where the first of them is met: drawn over what was there and held to the clip-path's shape about the element's first
+   fragment, as a block's stacking context is (Chromium's inline element with a clip-path) */
 static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
                      vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
                      vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    vector<uint32_t> clipped;
     for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next)
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
-            layout_frag_kind k = t->frag[fr].kind;
-            if (k == LAYOUT_FRAG_KIND_INLINE) {
-                if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
-                else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
+            uint32_t cb = t->frag[fr].clip;
+            if (!cb) {
+                pt_frag(t, nt, fr, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
                 continue;
             }
-            if (k != LAYOUT_FRAG_KIND_TEXT && k != LAYOUT_FRAG_KIND_MARKER && k != LAYOUT_FRAG_KIND_GENERATED) continue;
-            if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) continue;
-            /* a fragment outside the canvas's window: nothing of it to draw */
-            if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) continue;
-            amb_span sp = t->frag[fr].text;
-            double size = t->frag[fr].size, base = t->frag[fr].baseline;
-            if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
-            pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
-                    pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
-            /* the decorations in the text's fill, as Blink resolves their currentcolor */
-            uint8_t deco = t->frag[fr].decoration;
-            double th = floor(size / 16 + 0.5);
-            if (th < 1) th = 1;
-            double x0 = t->frag[fr].x, x1 = x0 + t->frag[fr].w;
-            uint32_t dc = t->frag[fr].fill;
-            if (deco & 1) { double y = floor(base + size * 0.09 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
-            if (deco & 2) { double y = floor(base - size * 0.93 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
-            if (deco & 4) { double y = floor(base - size * 0.3 + 0.5); pt_fill(c, x0, y, x1, y + th, dc); }
+            int seen = 0;
+            for (size_t q = 0; q < len(clipped) && !seen; q++) seen = at(clipped, q) == cb;
+            if (seen) continue;
+            push_back(clipped, cb);
+            vector<uint8_t> before;
+            append_range(before, data(c->px), len(c->px));
+            for (uint32_t l2 = ln; l2; l2 = t->line[l2].next)
+                for (uint32_t f2 = t->line[l2].first_frag; f2; f2 = t->frag[f2].next)
+                    if (t->frag[f2].clip == cb) pt_frag(t, nt, f2, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
+            pt_clip_path(t, cb, c, &before);
         }
 }
 
