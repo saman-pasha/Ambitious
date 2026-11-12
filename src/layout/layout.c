@@ -42,8 +42,13 @@
    containing block -- the padding box of its nearest positioned ancestor's box,
    or the viewport (800 x 600) for fixed or for none -- its width from its
    offsets or shrunk to fit, auto offsets at the static position, and its box is
-   that block's last child. A sticky box is where the flow puts it (as at rest,
-   unscrolled). z-index and overflow are kept for paint.
+   that block's last child. A sticky box is where it is at rest, unscrolled (CSS
+   Position 3, 3.4): where an inset it has puts that edge of its scrollport (the
+   nearest scroll container's padding box, else the viewport) inset by its offsets
+   past its border box, it is moved inward, as far as its margin box stays in its
+   containing block (top and left winning), once the tree has its page coordinates;
+   an inline element's own stickiness is not done. z-index and overflow are kept for
+   paint.
 
    Flex containers (Flexbox 1, 9): the items in order (order, then the tree's),
    their flex base sizes (flex-basis, a declared size, or the content's), min and
@@ -4674,6 +4679,99 @@ static uint32_t lay_fetch_image(const css_style *st, net_loader *net, uint32_t c
     return h.index;
 }
 
+/* ---- sticky boxes, at rest (CSS Position 3, 3.4) ---- */
+
+/* a laid-out box moved by (dx, dy) in page coordinates: it, its lines and their fragments,
+   and every box in it */
+static void lay_move(layout_tree *t, uint32_t b, double dx, double dy, int depth) {
+    t->box[b].x += dx;
+    t->box[b].y += dy;
+    for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next) {
+        t->line[ln].x += dx;
+        t->line[ln].y += dy;
+        t->line[ln].baseline += dy;
+        for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+            t->frag[fr].x += dx;
+            t->frag[fr].y += dy;
+            t->frag[fr].baseline += dy;
+        }
+    }
+    if (depth < 1024) for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_move(t, c, dx, dy, depth + 1);
+}
+
+/* each sticky box where it is at rest, unscrolled: where an inset it has (top, right, bottom,
+   left) puts that edge of its sticky view rectangle -- its scrollport, the nearest scroll
+   container's padding box or the viewport, inset by them -- past its border box's, it moves
+   inward, as far as its margin box stays in its containing block's content box. Bottom and
+   right first, so that top and left win; an outer box before those in it */
+static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
+    uint32_t root = t->box[vp].first_child;
+    for (uint32_t b = 1; b < t->box_len; b++) {
+        if (!t->box[b].live || t->box[b].position != LAYOUT_POSITION_STICKY) continue;
+        uint32_t cb = t->box[b].parent, el = t->box[b].node.index;
+        if (!cb || cb == vp || !el) continue;
+        if (t->box[b].pseudo) {
+            int64_t g = lay_gen_find(gx, el, t->box[b].pseudo);
+            if (g < 0) continue;
+            el = LAY_GEN | (uint32_t)g;
+        }
+        lay_ext e = LAY_X(el);
+        /* the scrollport: a scroll container's padding box (not the root's, nor the body's
+           when the root's overflow is visible: theirs is the viewport's), else the viewport */
+        double spx = 0, spy = 0, spw = vw, sph = vh;
+        for (uint32_t a = cb; a && a != vp && a != root; a = t->box[a].parent) {
+            if (t->box[a].clip != 1) continue;
+            if (t->box[a].parent == root && t->box[root].clip != 1 && lay_is_named(d, t->box[a].node.index, "body")) continue;
+            spx = t->box[a].x - t->box[a].pl;
+            spy = t->box[a].y - t->box[a].pt;
+            spw = t->box[a].w + t->box[a].pl + t->box[a].pr;
+            sph = t->box[a].h + t->box[a].pt + t->box[a].pb;
+            break;
+        }
+        double bx0 = t->box[b].x - t->box[b].pl - t->box[b].bl, by0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        double bx1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br, by1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb;
+        double cx0 = t->box[cb].x, cy0 = t->box[cb].y, cx1 = cx0 + t->box[cb].w, cy1 = cy0 + t->box[cb].h;
+        /* its margins as its style has them (auto none: not those an over-constrained width gives) */
+        lay_style ss;
+        lay_style_of(LARGS, el, &ss);
+        double m[4];
+        for (int k = 0; k < 4; k++) m[k] = ss.m[k].unit == LAY_AUTO ? 0 : lay_res(st, ss.m[k], t->box[cb].w);
+        double dx = 0, dy = 0, lim, dd, room;
+        if (e.off[2].unit != LAY_AUTO) {
+            lim = spy + sph - lay_res(st, e.off[2], sph);
+            dd = by1 - lim;
+            room = by0 - m[0] - cy0;
+            if (dd > room) dd = room;
+            if (dd > 0) dy -= dd;
+        }
+        if (e.off[0].unit != LAY_AUTO) {
+            lim = spy + lay_res(st, e.off[0], sph);
+            dd = lim - (by0 + dy);
+            room = cy1 - (by1 + dy + m[2]);
+            if (dd > room) dd = room;
+            if (dd > 0) dy += dd;
+        }
+        if (e.off[1].unit != LAY_AUTO) {
+            lim = spx + spw - lay_res(st, e.off[1], spw);
+            dd = bx1 - lim;
+            room = bx0 - m[3] - cx0;
+            if (dd > room) dd = room;
+            if (dd > 0) dx -= dd;
+        }
+        if (e.off[3].unit != LAY_AUTO) {
+            lim = spx + lay_res(st, e.off[3], spw);
+            dd = lim - (bx0 + dx);
+            room = cx1 - (bx1 + dx + m[1]);
+            if (dd > room) dd = room;
+            if (dd > 0) dx += dd;
+        }
+        if (dx == 0 && dy == 0) continue;
+        lay_move(t, b, dx, dy, 0);
+        t->box[b].dx += dx;
+        t->box[b].dy += dy;
+    }
+}
+
 /* ---- page coordinates ---- */
 
 static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy) {
@@ -4817,6 +4915,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (bottom > height) t->box[vp].h = bottom;
     }
     lay_absolute(t, vp, 0, 0);
+    lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height);
     t->revision++;
     return LAYOUT_OK;
 }

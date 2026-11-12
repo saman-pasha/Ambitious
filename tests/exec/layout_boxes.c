@@ -6,7 +6,8 @@
    tables, list markers; floats and clearance, positioned boxes, flex and grid
    containers, vertical-align, min and max heights, a percentage height, rowspan,
    hyphenation, bidirectional text, generated content; grid areas and named lines,
-   a column flow, items spanning tracks; flex items and containers on their baselines. */
+   a column flow, items spanning tracks; flex items and containers on their baselines;
+   sticky boxes at rest. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -64,6 +65,7 @@ static const lcase cases[] = {
     { "a grid item that spans two auto columns", "<div id=t style='display:grid;grid-template-columns:auto auto;justify-content:start;width:300px'><div id=a>a</div><div id=b>bb</div><div id=e style='grid-column:span 2'>a longer spanning item</div></div>" },
     { "flex items aligned on their baselines", "<div id=t style='display:flex;align-items:baseline'><div id=a>x</div><div id=b style='font-size:32px'>Y</div><div id=e style='width:20px;height:30px'></div></div>" },
     { "an inline-flex's baseline, its first item's border box's bottom", "<p id=p>x <span id=a style='display:inline-flex'><span id=b style='display:block;width:20px;height:30px'></span><span>y</span></span></p>" },
+    { "sticky boxes moved in from the viewport's edges, within their blocks", "<div id=t style='height:200px'><div id=a style='position:sticky;top:50px'>x</div></div><div style='height:700px'><div style='height:650px'></div><div id=b style='position:sticky;bottom:0'>y</div></div>" },
 };
 
 static uint32_t find_id(const dom_document *d, const char *id) {

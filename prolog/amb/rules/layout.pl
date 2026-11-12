@@ -39,7 +39,8 @@ layout_border_box(B, X, Y, W, H) :-
 %% why a box is where it is: the flow put it there; it floats to a side; it is offset
 %% from where the flow put it (relative), or placed in its containing block (absolute:
 %% the nearest positioned ancestor's, or the viewport's) or the viewport (fixed); sticky
-%% at rest, where the flow put it; a grid item in its area, by the area's name, by its
+%% at rest, where the flow put it, or moved by (DX, DY) to keep the distance its offsets
+%% ask from its scrollport's edges, within its containing block; a grid item in its area, by the area's name, by its
 %% lines, or placed automatically (rows and columns as the explicit grid numbers its
 %% lines: the first line of each, and the line past the last)
 layout_explain_position(B, Why) :-
@@ -58,7 +59,8 @@ layout_rules_grid(lines, _, Rows, Cols, grid_lines(Rows, Cols)).
 layout_rules_grid(auto, _, Rows, Cols, grid_auto(Rows, Cols)).
 
 layout_rules_position(relative, _, DX, DY, offset(DX, DY)).
-layout_rules_position(sticky, _, _, _, sticky(at_rest)).
+layout_rules_position(sticky, _, DX, DY, Why) :-
+    (   DX =:= 0, DY =:= 0 -> Why = sticky(at_rest) ; Why = sticky(at_rest, offset(DX, DY)) ).
 layout_rules_position(fixed, _, _, _, fixed(viewport)).
 layout_rules_position(absolute, CB, _, _, absolute(in(E))) :- layout_rules_named(CB, E).
 

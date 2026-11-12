@@ -32,7 +32,7 @@ layout_contract(enum(width_how, [viewport, fill, declared, percent, shrink_to_fi
     positioned])).
 %% how a box is positioned (CSS 2.1 9.3): in the flow; offset from there; taken
 %% out of it, in its containing block (absolute) or the viewport (fixed); sticky
-%% (at rest, where the flow put it)
+%% (at rest: where the flow put it, moved inward when an offset it has asks)
 layout_contract(enum(position, [static, relative, absolute, fixed, sticky])).
 %% the side a box floats to
 layout_contract(enum(float_side, [unfloated, left, right])).
@@ -68,7 +68,7 @@ layout_contract(record(box, [
     field(z,            i32),                   % z-index, a positioned box's (0 for auto)
     field(z_auto,       bool),                  % z-index is auto: the box makes no stacking context of its own
     field(clip,         u8),                    % overflow: 1 its content clipped to its padding box (hidden, clip, scroll, auto)
-    field(dx, f64), field(dy, f64),             % a relatively positioned box's offset, in its position already
+    field(dx, f64), field(dy, f64),             % a relatively positioned box's offset (a sticky one's at rest), in its position already
     %% what paint reads of its style: the corners' radii, its opacity, its shadows,
     %% backgrounds, transform and outline as CSS computed them
     field(rtl, f64), field(rtr, f64), field(rbr, f64), field(rbl, f64),
