@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Coverage</title>
+<style>
+/* tests/pages/coverage.html -- the letters the built-in faces carry: of languages
+   written in Latin (Latin Extended-A and B, Vietnamese), Greek and Cyrillic, in each
+   family and style, each drawn by the face Chromium draws it with here: the family's own
+   (Liberation's, DejaVu Sans Mono's; a letter a face has no glyph for but has the parts
+   of, as HarfBuzz draws it, of them), Liberation Serif, or DejaVu Sans. The spans' widths
+   are held to Chromium's (tests/pages/coverage.chromium), their drawing region by region
+   (coverage.shot.png, coverage.regions); the symbols are tests/pages/symbols.html. */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 3px; }
+span { white-space: nowrap; }
+.s { font-family: Arial; }
+.m { font-family: monospace; }
+.c { font-family: 'Courier New'; }
+.b { font-weight: bold; }
+.i { font-style: italic; }
+pre { margin: 0 0 3px; line-height: 1; }
+</style></head>
+<body>
+<p><span id=text-exta>Zażółć gęślą jaźń. Příliš žluťoučký kůň. Ĉu ŝi ĝuas? Ĳs ŉ ſ Ŧŧ</span></p>
+<p class=s><span id=text-exta-s>Zażółć gęślą jaźń. Příliš žluťoučký kůň. Ĉu ŝi ĝuas?</span></p>
+<p class=m><span id=text-exta-m>Zażółć gęślą jaźń. Příliš kůň.</span></p>
+<p class=c><span id=text-exta-c class=i>Zażółć gęślą jaźń. Příliš kůň.</span></p>
+<p><span id=text-extb>Știință și țară; ƒ ǅ ǈ ǋ Ǎǎ Ǧǧ Ȩȩ ȷ Ɓ Ɗ Ƙ</span></p>
+<p><span id=text-viet>Tiếng Việt: ẩm thực, phở bò, bánh mì, chả giò, Đà Nẵng</span></p>
+<p class=s><span id=text-viet-sb class=b>Tiếng Việt: ẩm thực, phở bò, bánh mì, chả giò</span></p>
+<p class=m><span id=text-viet-m>Tiếng Việt: ẩm thực, phở bò</span></p>
+<p><span id=text-greek>Ξεσκεπάζω την ψυχοφθόρα βδελυγμία. ϐϑϒϕϖ ϘϙϚϛϜϝ</span></p>
+<p class=s><span id=text-greek-si class=i>Ξεσκεπάζω την ψυχοφθόρα βδελυγμία.</span></p>
+<p class=m><span id=text-greek-m>Ξεσκεπάζω την ψυχοφθόρα. Ϣϣ Ϥϥ</span></p>
+<p><span id=text-cyr>Съешь же ещё этих мягких французских булок, да выпей чаю.</span></p>
+<p><span id=text-cyr2>Ґанок, їжак, єнот. Љубав, њега, ђак, ћуприја, џак. Әке, ғалым, қала, өнер, ұлы, һ.</span></p>
+<p class=s><span id=text-cyr-sbi class="b i">Съешь же ещё этих мягких французских булок.</span></p>
+<p class=c><span id=text-cyr-cb class=b>Съешь же ещё этих мягких булок.</span></p>
+<p class=m><span id=text-cyr-m>Съешь же ещё этих мягких булок.</span></p>
+<p><span id=text-cyrsup>Ԁԁ Ԃԃ Ԇԇ Ԉԉ Ԍԍ Ԑԑ Ԛԛ | Ԕ ԕ Ԟ ԟ Ԡ ԡ</span></p>
+</body></html>

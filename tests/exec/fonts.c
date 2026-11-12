@@ -32,9 +32,11 @@ static int read_file(const char *path, vector<uint8_t> *out) {
 static void show(const amb_fonts *f, int face, const char *what) {
     double asc, desc, gap;
     amb_face_metrics(f, face, 16, &asc, &desc, &gap);
+    amb_face fc;
+    amb_face_record(f, face, &fc);
     const char *s = "AVAVAV To. Wa";
     printf("%s: face %d, %u code points, %u kerning pairs; at 16px ascent %g descent %g gap %g; '%s' %.4f px (unkerned %.4f)\n", what,
-           face, f->face[face].count, f->face[face].kcount, asc, desc, gap, s, amb_text_width(f, face, 16, s, strlen(s)),
+           face, fc.count, fc.kcount, asc, desc, gap, s, amb_text_width(f, face, 16, s, strlen(s)),
            amb_advance(f, face, 'A', 16) * 3 + amb_advance(f, face, 'V', 16) * 3 + amb_advance(f, face, ' ', 16) * 2 +
            amb_advance(f, face, 'T', 16) + amb_advance(f, face, 'o', 16) + amb_advance(f, face, '.', 16) + amb_advance(f, face, 'W', 16) +
            amb_advance(f, face, 'a', 16));
@@ -70,9 +72,30 @@ int main(void) {
         int by;
         uint32_t g = amb_glyph_of(&f, in[k], cps[k], &by);
         printf("U+%04X in face %d: drawn by face %d (its U+%04X), %.4f px; kerning after 'A' %.4f\n", cps[k], in[k], by,
-               at(f.glyphs, g).cp, amb_advance(&f, in[k], cps[k], 16), amb_kern(&f, in[k], 'A', cps[k], 16));
+               g, amb_advance(&f, in[k], cps[k], 16), amb_kern(&f, in[k], 'A', cps[k], 16));
     }
     printf("'A\u2605A' in face %d: %.4f px\n", AMB_FACE_SANS, amb_text_width(&f, AMB_FACE_SANS, 16, "A\xe2\x98\x85A", 5));
+    /* the blocks the built-in faces carry (tests/pages/coverage.html and symbols.html hold
+       them to Chromium): words of Latin Extended-A, Vietnamese, Greek and Cyrillic in a
+       few faces (DejaVu Sans Mono draws the Vietnamese letters with two marks it has no
+       glyph for from their parts, as HarfBuzz does), and which face draws a symbol of each
+       block in serif and in monospace */
+    static const char *const words[5] = { "Za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144", "Ti\u1ebfng Vi\u1ec7t: \u1ea9m th\u1ef1c, ph\u1edf b\u00f2", "\u039e\u03b5\u03c3\u03ba\u03b5\u03c0\u03ac\u03b6\u03c9 \u03c4\u03b7\u03bd \u03c8\u03c5\u03c7\u03bf\u03c6\u03b8\u03cc\u03c1\u03b1",
+                                          "\u0421\u044a\u0435\u0448\u044c \u0436\u0435 \u0435\u0449\u0451 \u044d\u0442\u0438\u0445 \u043c\u044f\u0433\u043a\u0438\u0445 \u0431\u0443\u043b\u043e\u043a", "\u0490\u0430\u043d\u043e\u043a, \u0457\u0436\u0430\u043a, \u0454\u043d\u043e\u0442, \u0452\u0430\u043a" };
+    static const int wface[4] = { AMB_FACE_SERIF, AMB_FACE_SANS_BOLD, AMB_FACE_MONO, AMB_FACE_COURIER_ITALIC };
+    for (int k = 0; k < 5; k++)
+        printf("'%s' at 16px: %.4f, %.4f, %.4f, %.4f px in faces %d, %d, %d, %d\n", words[k],
+               amb_text_width(&f, wface[0], 16, words[k], strlen(words[k])), amb_text_width(&f, wface[1], 16, words[k], strlen(words[k])),
+               amb_text_width(&f, wface[2], 16, words[k], strlen(words[k])), amb_text_width(&f, wface[3], 16, words[k], strlen(words[k])),
+               wface[0], wface[1], wface[2], wface[3]);
+    static const uint32_t syms[22] = { 0x2030, 0x2056, 0x20AC, 0x20BF, 0x2116, 0x2102, 0x212A, 0x2190, 0x21C4, 0x2211, 0x2200, 0x2249,
+                                       0x2500, 0x2501, 0x2588, 0x25B2, 0x25C8, 0x263A, 0x2602, 0x2702, 0x0514, 0x1EDF };
+    for (int k = 0; k < 22; k++) {
+        int bs, bm;
+        uint32_t gs = amb_glyph_of(&f, AMB_FACE_SERIF, syms[k], &bs), gm = amb_glyph_of(&f, AMB_FACE_MONO, syms[k], &bm);
+        printf("U+%04X: in serif by face %d (U+%04X), %.4f px; in monospace by face %d (U+%04X), %.4f px\n", syms[k], bs, gs,
+               amb_advance(&f, AMB_FACE_SERIF, syms[k], 16), bm, gm, amb_advance(&f, AMB_FACE_MONO, syms[k], 16));
+    }
     vector<uint8_t> ttf, woff;
     if (!read_file("tests/pages/fonts/oblique.ttf", &ttf) || !read_file("tests/pages/fonts/serif-bold.woff", &woff)) { printf("no fixture fonts\n"); return 1; }
     int a = amb_fonts_add(&f, data(ttf), len(ttf));

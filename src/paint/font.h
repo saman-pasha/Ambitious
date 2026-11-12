@@ -15,9 +15,17 @@
    face here: their italic is the upright face slanted as Skia slants it (a skew of a
    quarter of the height, the advances the upright's), as Chromium draws it.
 
+   Each carries what its font has of these blocks: Latin-1, Latin Extended-A and B, the
+   spacing accents, Greek and Coptic, Cyrillic and its supplement, Hebrew's letters,
+   Latin Extended Additional (Vietnamese), general punctuation, currency, letterlike
+   symbols, arrows, mathematical operators, box drawing, block elements, geometric shapes,
+   miscellaneous symbols and dingbats; and a code point it has no glyph for but has the
+   canonical decomposition of, as HarfBuzz draws it (its parts, each mark where the
+   font's GPOS puts it: tools/gen-font.py).
+
    A code point a built-in face has no glyph for is drawn by the face Chromium falls back
-   to there (Blink's order, measured face by face, tests/pages/italic.html and
-   families.html): the face of the family itself; then Liberation Serif in the style
+   to there (Blink's order, measured face by face, tests/pages/italic.html,
+   coverage.html, symbols.html and families.html): the face of the family itself; then Liberation Serif in the style
    asked for (the user's standard font); then, for a bold or italic style, the family's
    regular face (its glyph made bold or slanted); then DejaVu Sans, which fontconfig's
    order for no family puts first of the built-in faces (Chromium takes Inter, before it,
@@ -60,7 +68,7 @@ typedef struct amb_face {
     uint32_t upem; int32_t asc, desc, gap;
     uint32_t first, count, fallback;          /* its code points in glyphs, in order; the replacement glyph's */
     uint32_t kfirst, kcount;                  /* its kerning pairs in kerns */
-    uint32_t base, size;                      /* its font's bytes, in bytes or (built-in) in the built-in pool */
+    uint32_t base, size;                      /* its font's bytes, in bytes */
     uint32_t loca, glyf, glyf_size, nglyphs;  /* where its outlines are, from base */
     uint8_t loca_long, builtin;
     uint8_t slope;                            /* its outlines are italic or oblique: no slant is made for them */
@@ -68,8 +76,12 @@ typedef struct amb_face {
     uint16_t ascii[128];                      /* each ASCII code point's index in glyphs from first; 0xffff none */
 } amb_face;
 
-/* the vectors first: `amb_fonts f = {0};' is then cicilang's to lower (an array of
-   structs first, it is not: toolchain/REPORT.md, finding 10) */
+/* a page's fonts: the built-in faces (whose tables font.c reads once a process, when a
+   face is first asked for, and every amb_fonts shares), then the web fonts added to it,
+   whose tables are its own: their code points (glyphs), kerning pairs (kerns), bytes, and
+   each one's record (face, from AMB_NFACES on). The vectors first: `amb_fonts f = {0};'
+   is then cicilang's to lower (an array of structs first, it is not: toolchain/REPORT.md,
+   finding 10) */
 typedef struct amb_fonts {
     vector<amb_glyph> glyphs;
     vector<amb_kern> kerns;
@@ -81,7 +93,8 @@ typedef struct amb_fonts {
 /* the owner of an amb_fonts drops its vectors: a struct's are not autodropped */
 #define AMB_FONTS_DROP(f) vector_amb_glyph_drop(&(f).glyphs); vector_amb_kern_drop(&(f).kerns); vector_uint8_t_drop(&(f).bytes)
 
-/* the built-in faces into f, which is emptied first (read once a process) */
+/* f made the built-in faces alone (its web fonts dropped); the built-in faces' fonts are
+   read when a face is first asked for, once a process */
 void amb_fonts_load(amb_fonts *f);
 
 /* a web font's bytes (TrueType, OpenType with TrueType outlines, WOFF) read into f as a
@@ -93,6 +106,9 @@ int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n);
    italic, which oblique is here): -1 for another family (a web font's) */
 int amb_face_named(const char *family, int bold, int italic);
 
+/* a face's record into *out (a built-in face's font read first): 1, or 0 for no face */
+int amb_face_record(const amb_fonts *f, int face, amb_face *out);
+
 /* a face's x-height, as a share of its size: a built-in face's from its font (OS/2's
    sxHeight; DejaVu's, which has none, its x's height), a web font's taken as half */
 double amb_x_height(int face);
@@ -101,9 +117,10 @@ double amb_x_height(int face);
    px, each rounded to a whole px as Chromium rounds them (its line height is their sum) */
 void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, double *desc, double *gap);
 
-/* the index of the glyph of cp in f->glyphs, and the face whose it is: the face's, a
-   fallback face's (built-in faces fall back as Chromium's do), or the face's
-   replacement glyph */
+/* the code point whose glyph draws cp, and the face whose glyph it is: cp in the face
+   or a fallback face (built-in faces fall back as Chromium's do), the stand-in HarfBuzz
+   takes for it (U+0020 for U+00A0, U+2010 for U+2011), or the replacement glyph --
+   U+FFFD's, or 0x110000 for the face's notdef */
 uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by);
 
 /* the advance of cp at a size, in px (its fallback face's when the face has no glyph

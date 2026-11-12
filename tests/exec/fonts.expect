@@ -1,12 +1,12 @@
-built-in sans: face 4, 277 code points, 188 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 111.4453 px (unkerned 120.0391)
-built-in serif bold: face 1, 277 code points, 158 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 110.4688 px (unkerned 124.0000)
-built-in mono: face 20, 254 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
-built-in courier: face 8, 277 code points, 0 kerning pairs; at 16px ascent 13 descent 5 gap 0; 'AVAVAV To. Wa' 124.8203 px (unkerned 124.8203)
-built-in dejavu sans: face 12, 286 code points, 1348 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
-built-in serif italic: face 2, 277 code points, 150 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 100.8750 px (unkerned 108.8672)
-built-in sans bold italic: face 7, 277 code points, 169 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 116.7422 px (unkerned 123.5625)
-built-in mono italic (oblique): face 22, 250 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
-built-in dejavu sans italic (slanted): face 14, 286 code points, 1348 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
+built-in sans: face 4, 1440 code points, 908 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 111.4453 px (unkerned 120.0391)
+built-in serif bold: face 1, 1433 code points, 865 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 110.4688 px (unkerned 124.0000)
+built-in mono: face 20, 2001 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
+built-in courier: face 8, 1419 code points, 0 kerning pairs; at 16px ascent 13 descent 5 gap 0; 'AVAVAV To. Wa' 124.8203 px (unkerned 124.8203)
+built-in dejavu sans: face 12, 2444 code points, 2558 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
+built-in serif italic: face 2, 1433 code points, 821 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 100.8750 px (unkerned 108.8672)
+built-in sans bold italic: face 7, 1440 code points, 820 kerning pairs; at 16px ascent 14 descent 3 gap 1; 'AVAVAV To. Wa' 116.7422 px (unkerned 123.5625)
+built-in mono italic (oblique): face 22, 1737 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
+built-in dejavu sans italic (slanted): face 14, 2444 code points, 2558 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 116.9766 px (unkerned 126.1172)
 'Hamburgefonstiv AVAVAV To. Wa' at 16px: italic serif 215.0938 px, italic sans 238.6641 px
 serif: face 0, bold 1, italic 2, bold italic 3
 sans-serif: face 4, bold 5, italic 6, bold italic 7
@@ -24,6 +24,33 @@ U+25B8 in face 0: drawn by face 12 (its U+25B8), 8.0312 px; kerning after 'A' 0.
 U+4E00 in face 4: drawn by face 12 (its U+FFFD), 16.4062 px; kerning after 'A' 0.0000
 U+2010 in face 4: drawn by face 4 (its U+2010), 5.3281 px; kerning after 'A' 0.0000
 'A★A' in face 4: 69.6641 px
+'Zażółć gęślą jaźń' at 16px: 111.0469, 130.7109, 163.7578, 163.2266 px in faces 0, 5, 20, 10
+'Tiếng Việt: ẩm thực, phở bò' at 16px: 179.7266, 212.6094, 260.0859, 259.2422 px in faces 0, 5, 20, 10
+'Ξεσκεπάζω την ψυχοφθόρα' at 16px: 177.4375, 211.0547, 221.5547, 220.8359 px in faces 0, 5, 20, 10
+'Съешь же ещё этих мягких булок' at 16px: 227.5234, 264.7109, 288.9844, 288.0469 px in faces 0, 5, 20, 10
+'Ґанок, їжак, єнот, ђак' at 16px: 144.6250, 164.9375, 211.9219, 211.2344 px in faces 0, 5, 20, 10
+U+2030: in serif by face 0 (U+2030), 16.0000 px; in monospace by face 20 (U+2030), 9.6328 px
+U+2056: in serif by face 12 (U+2056), 9.3750 px; in monospace by face 12 (U+2056), 9.3750 px
+U+20AC: in serif by face 0 (U+20AC), 8.0000 px; in monospace by face 20 (U+20AC), 9.6328 px
+U+20BF: in serif by face 0 (U+20BF), 11.0625 px; in monospace by face 0 (U+20BF), 11.0625 px
+U+2116: in serif by face 0 (U+2116), 15.2656 px; in monospace by face 20 (U+2116), 9.6328 px
+U+2102: in serif by face 12 (U+2102), 11.1719 px; in monospace by face 20 (U+2102), 9.6328 px
+U+212A: in serif by face 0 (U+212A), 11.5547 px; in monospace by face 20 (U+212A), 9.6328 px
+U+2190: in serif by face 0 (U+2190), 16.0000 px; in monospace by face 20 (U+2190), 9.6328 px
+U+21C4: in serif by face 12 (U+21C4), 13.4062 px; in monospace by face 20 (U+21C4), 9.6328 px
+U+2211: in serif by face 0 (U+2211), 11.4062 px; in monospace by face 20 (U+2211), 9.6328 px
+U+2200: in serif by face 12 (U+2200), 10.9453 px; in monospace by face 20 (U+2200), 9.6328 px
+U+2249: in serif by face 0 (U+2249), 8.7812 px; in monospace by face 20 (U+2249), 9.6328 px
+U+2500: in serif by face 0 (U+2500), 11.3359 px; in monospace by face 20 (U+2500), 9.6328 px
+U+2501: in serif by face 12 (U+2501), 9.6328 px; in monospace by face 20 (U+2501), 9.6328 px
+U+2588: in serif by face 0 (U+2588), 11.3359 px; in monospace by face 20 (U+2588), 9.6328 px
+U+25B2: in serif by face 0 (U+25B2), 15.8359 px; in monospace by face 20 (U+25B2), 9.6328 px
+U+25C8: in serif by face 12 (U+25C8), 12.3047 px; in monospace by face 20 (U+25C8), 9.6328 px
+U+263A: in serif by face 0 (U+263A), 16.3359 px; in monospace by face 20 (U+263A), 9.6328 px
+U+2602: in serif by face 12 (U+2602), 14.3438 px; in monospace by face 20 (U+2602), 9.6328 px
+U+2702: in serif by face 12 (U+2702), 13.4062 px; in monospace by face 20 (U+2702), 9.6328 px
+U+0514: in serif by face 12 (U+0514), 18.7031 px; in monospace by face 12 (U+0514), 18.7031 px
+U+1EDF: in serif by face 0 (U+1EDF), 8.4609 px; in monospace by face 20 (U+1EDF), 9.6328 px
 web oblique (TrueType): face 24, 242 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
 web serif bold (WOFF): face 25, 242 code points, 710 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 132.6250 px (unkerned 142.1094)
 'g' at 20px in face 4: 11x17 at 0,-11, coverage 16463

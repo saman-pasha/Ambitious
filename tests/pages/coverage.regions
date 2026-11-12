@@ -1,0 +1,18 @@
+# tests/pages/coverage.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-exta 8 8 402 25
+text-exta-s 8 29 373 46
+text-exta-m 8 50 297 69
+text-exta-c 8 72 297 90
+text-extb 8 93 295 110
+text-viet 8 114 368 131
+text-viet-sb 8 135 356 152
+text-viet-m 8 156 269 175
+text-greek 8 178 368 195
+text-greek-si 8 199 285 216
+text-greek-m 8 220 303 239
+text-cyr 8 242 433 259
+text-cyr2 8 263 555 280
+text-cyr-sbi 8 284 398 301
+text-cyr-cb 8 305 306 323
+text-cyr-m 8 326 307 345
+text-cyrsup 8 349 289 366

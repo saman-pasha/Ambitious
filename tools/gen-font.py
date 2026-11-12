@@ -9,13 +9,24 @@ their own names name), each regular and bold, and Sans Mono's oblique and bold
 oblique (Sans and Serif have no italic face on such a machine: Chromium slants their
 upright ones), read from their TrueType files by this script's own reader of the tables
 it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern) and written as C: for each
-face, a TrueType font of the code points the script lists, base64 -- the tables the
-painter reads (cmap format 4, glyf, head, hhea, hmtx, kern format 0, loca, maxp), so
-that src/paint/font.c reads the built-in faces as it reads a page's web fonts.
-Composite glyphs are resolved into their components' points; the kerning pairs are
-the subset's. (Over these code points each face's kern table holds the pairs its
-GPOS kern feature does, which HarfBuzz applies; the faces' GSUB substitutes nothing
-in them by default but DejaVu's ligatures, which Ambitious does not form.)
+face, a TrueType font of the code points the script lists (each face has those its
+file has), packed (lz_pack: LZ77 in LZ4's byte-aligned tokens, which font.c unpacks
+at a few instructions a byte, where deflate's bits cost it some hundred), base64 -- the
+tables the painter reads (cmap format 4,
+glyf, head, hhea, hmtx, kern format 0, loca, maxp), so that src/paint/font.c reads the
+built-in faces as it reads a page's web fonts. A composite glyph stays a composite,
+its components in the subset (none of these faces' glyphs here places one by points).
+A code point a face has no glyph for but has every part of the canonical decomposition
+of, HarfBuzz draws with those parts in that face (hb-ot-shape-normalize: DejaVu Sans
+Mono's Vietnamese with two marks, Liberation's arrows and relations with a stroke, the
+Kelvin and Angstrom signs), so the subset has it: a singleton's as its part's glyph, a
+base and marks as a composite of them, each mark where the face's GPOS mark and mkmk
+lookups attach it (else where HarfBuzz leaves it, past the base), the base's advance
+the glyph's. The kerning pairs are the subset's code points'. (Over these code points each face's
+kern table holds the pairs its GPOS kern feature does, which HarfBuzz applies; the
+faces' GSUB substitutes nothing in them by default but DejaVu's ligatures, which
+Ambitious does not form.) What each block of code points costs the faces is written on
+stderr.
 
     python3 tools/gen-font.py [DEJAVUDIR [LIBERATIONDIR]] > src/paint/font_data.h
     python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.woff FAMILY
@@ -37,6 +48,7 @@ presented under the Reserved Font Names, and the painter answers to none of them
 import base64
 import struct
 import sys
+import unicodedata
 
 # the faces, in src/paint/font.h's order: each family's regular, bold, italic and bold
 # italic (DejaVu Sans and DejaVu Serif have no italic face here: font.c slants their
@@ -64,15 +76,24 @@ FACES = [
     ("mono bold italic", "dejavu", "DejaVuSansMono-BoldOblique.ttf"),
 ]
 
-# Latin-1, Greek's small letters (lower-greek markers), Hebrew's letters (right-to-left
-# text), hyphens, quotes and guillemets, daggers, bullets, a few symbols generated content
-# uses, and the replacement character
-CODEPOINTS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + list(range(0x3B1, 0x3CA)) +
-              list(range(0x5D0, 0x5EB)) + [0x5BE, 0x5C0, 0x5C3, 0x5F3, 0x5F4] +
-              [0x2010, 0x2011, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026, 0x2032, 0x2033,
-               0x20AC, 0x2122, 0x2190, 0x2191, 0x2192, 0x2193, 0x2212, 0x25AA, 0x25B8, 0x25BE, 0x25CB,
-               0x25CF, 0x25E6, 0x201A, 0x201E, 0x2020, 0x2021, 0x2030, 0x2039, 0x203A, 0x2197, 0x2605, 0x2713,
-               0x2714, 0x2717, 0xFFFD])
+# the blocks of code points the faces carry (what each has of them): the letters of the
+# languages written in Latin, Greek and Cyrillic (Vietnamese among them), Hebrew's
+# letters (right-to-left text), the punctuation, currency, letterlike symbols, arrows,
+# mathematical operators, box drawing, block elements, geometric shapes, miscellaneous
+# symbols and dingbats pages use, the spacing accents windows-1252 maps (circumflex,
+# caron, tilde and the rest), and the replacement character
+BLOCKS = [
+    ("Basic Latin", 0x20, 0x7E), ("Latin-1 Supplement", 0xA0, 0xFF), ("Latin Extended-A", 0x100, 0x17F),
+    ("Latin Extended-B", 0x180, 0x24F), ("spacing accents", 0x2C6, 0x2C7), ("spacing accents", 0x2D8, 0x2DD),
+    ("Greek and Coptic", 0x370, 0x3FF), ("Cyrillic", 0x400, 0x4FF), ("Cyrillic Supplement", 0x500, 0x52F),
+    ("Hebrew letters", 0x5D0, 0x5EA), ("Hebrew punctuation", 0x5BE, 0x5BE), ("Hebrew punctuation", 0x5C0, 0x5C0),
+    ("Hebrew punctuation", 0x5C3, 0x5C3), ("Hebrew punctuation", 0x5F3, 0x5F4),
+    ("Latin Extended Additional", 0x1E00, 0x1EFF), ("General Punctuation", 0x2000, 0x206F),
+    ("Currency Symbols", 0x20A0, 0x20CF), ("Letterlike Symbols", 0x2100, 0x214F), ("Arrows", 0x2190, 0x21FF),
+    ("Mathematical Operators", 0x2200, 0x22FF), ("Box Drawing", 0x2500, 0x257F), ("Block Elements", 0x2580, 0x259F),
+    ("Geometric Shapes", 0x25A0, 0x25FF), ("Miscellaneous Symbols", 0x2600, 0x26FF), ("Dingbats", 0x2700, 0x27BF),
+    ("the replacement character", 0xFFFD, 0xFFFD)]
+CODEPOINTS = sorted({c for _, a, b in BLOCKS for c in range(a, b + 1)})
 
 DEJAVU_NOTICE = """Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is
 a trademark of Bitstream, Inc. DejaVu changes are in public domain.
@@ -223,6 +244,7 @@ def source_of(path):
 
 class Font:
     def __init__(self, path):
+        self.path = path
         with open(path, "rb") as f:
             self.d = f.read()
         num = struct.unpack_from(">H", self.d, 4)[0]
@@ -479,29 +501,290 @@ def encode_glyph(contours):
     return bytes(out)
 
 
-def subset(path, web=None):
+def lz_pack(src, chain=64):
+    """src packed by LZ77 in LZ4's byte-aligned tokens: a token byte (the literals' count
+    << 4 | the match's length - 4; 15 in either meaning bytes follow that add to it, 255
+    each, then one less), the literals, then, unless it is the last token, the match's
+    offset back (two bytes, little-endian, 1 to 65535) and its length's further bytes. A
+    match is the longest of the last 64 places its first four bytes were seen."""
+    out, n = bytearray(), len(src)
+    head, prev = {}, [0] * n
+    i = lit = 0
+
+    def put_len(v):
+        while v >= 255:
+            out.append(255)
+            v -= 255
+        out.append(v)
+
+    def emit(start, end, mlen, off):
+        ll = end - start
+        out.append(min(ll, 15) << 4 | (min(mlen - 4, 15) if mlen else 0))
+        if ll >= 15:
+            put_len(ll - 15)
+        out.extend(src[start:end])
+        if mlen:
+            out.extend(struct.pack("<H", off))
+            if mlen - 4 >= 15:
+                put_len(mlen - 4 - 15)
+
+    def seen(p):
+        if p + 4 <= n:
+            key = src[p:p + 4]
+            prev[p] = head.get(key, -1)
+            head[key] = p
+    while i < n:
+        best = off = 0
+        j = head.get(src[i:i + 4], -1) if i + 4 <= n else -1
+        for _ in range(chain):
+            if j < 0 or i - j > 65535:
+                break
+            m = 0
+            while i + m < n and src[j + m] == src[i + m]:
+                m += 1
+            if m > best:
+                best, off = m, i - j
+            j = prev[j]
+        if best >= 4:
+            emit(lit, i, best, off)
+            for p in range(i, i + best):
+                seen(p)
+            i += best
+            lit = i
+        else:
+            seen(i)
+            i += 1
+    emit(lit, n, 0, 0)
+    return bytes(out)
+
+
+def lz_unpack(z):
+    """lz_pack's bytes unpacked (the generator's check of its own output)"""
+    out, i = bytearray(), 0
+    while i < len(z):
+        tok = z[i]
+        i += 1
+        ll = tok >> 4
+        if ll == 15:
+            while z[i] == 255:
+                ll += 255
+                i += 1
+            ll += z[i]
+            i += 1
+        out += z[i:i + ll]
+        i += ll
+        if i >= len(z):
+            break
+        off = z[i] | z[i + 1] << 8
+        i += 2
+        ml = (tok & 15) + 4
+        if tok & 15 == 15:
+            while z[i] == 255:
+                ml += 255
+                i += 1
+            ml += z[i]
+            i += 1
+        for _ in range(ml):
+            out.append(out[-off])
+    return bytes(out)
+
+
+def coverage(d, off):
+    """an OpenType coverage table's glyphs: {glyph: its coverage index}"""
+    fmt, n = struct.unpack_from(">HH", d, off)
+    if fmt == 1:
+        return {g: i for i, g in enumerate(struct.unpack_from(">%dH" % n, d, off + 4))}
+    out = {}
+    for k in range(n):
+        a, b, i = struct.unpack_from(">HHH", d, off + 4 + 6 * k)
+        for g in range(a, b + 1):
+            out[g] = i + g - a
+    return out
+
+
+def anchor(d, off):
+    """an anchor's x and y (any format)"""
+    return struct.unpack_from(">hh", d, off + 2)
+
+
+def gpos_marks(f):
+    """the marks' places GPOS gives (its mark and mkmk features' lookups, types 4 and 6, in
+    their order, through extensions): (to_base, to_mark), each {(base, mark): (dx, dy)},
+    the mark's origin from its base's (or from the earlier mark's), a later lookup's over
+    an earlier's, as HarfBuzz applies them"""
+    to_base, to_mark = {}, {}
+    if "GPOS" not in f.tables:
+        return to_base, to_mark
+    d, g = f.d, f.tables["GPOS"][0]
+    _, _, _, feats, lookups = struct.unpack_from(">HHHHH", d, g)
+    feats += g
+    lookups += g
+    which = set()
+    for k in range(struct.unpack_from(">H", d, feats)[0]):
+        tag, off = struct.unpack_from(">4sH", d, feats + 2 + 6 * k)
+        if tag in (b"mark", b"mkmk"):
+            n = struct.unpack_from(">H", d, feats + off + 2)[0]
+            which.update(struct.unpack_from(">%dH" % n, d, feats + off + 4))
+    for li in sorted(which):
+        lk = lookups + struct.unpack_from(">H", d, lookups + 2 + 2 * li)[0]
+        kind, _, nsub = struct.unpack_from(">HHH", d, lk)
+        for s in range(nsub):
+            st = lk + struct.unpack_from(">H", d, lk + 6 + 2 * s)[0]
+            t = kind
+            if kind == 9:
+                _, t, ext = struct.unpack_from(">HHI", d, st)
+                st += ext
+            if t not in (4, 6):
+                continue
+            _, mcov, bcov, nclass, marr, barr = struct.unpack_from(">HHHHHH", d, st)
+            marks, bases = coverage(d, st + mcov), coverage(d, st + bcov)
+            marr += st
+            barr += st
+            target = to_base if t == 4 else to_mark
+            for b, bi in bases.items():
+                for m, mi in marks.items():
+                    cls, moff = struct.unpack_from(">HH", d, marr + 2 + 4 * mi)
+                    boff = struct.unpack_from(">H", d, barr + 2 + 2 * (bi * nclass + cls))[0]
+                    if not boff:
+                        continue
+                    bx, by = anchor(d, barr + boff)
+                    mx, my = anchor(d, marr + moff)
+                    target[(b, m)] = (bx - mx, by - my)
+    return to_base, to_mark
+
+
+def decomposition(c, cmap):
+    """the code points HarfBuzz draws c with in a font that has no glyph for it but has
+    every part of its canonical decomposition (taken again for a part it has none for): a
+    base and its marks, or None"""
+    d = unicodedata.decomposition(chr(c))
+    if not d or d.startswith("<"):
+        return None
+    out = []
+    for x in d.split():
+        p = int(x, 16)
+        if p in cmap:
+            out.append(p)
+        else:
+            q = decomposition(p, cmap)
+            if q is None:
+                return None
+            out += q
+    return out
+
+
+def components(f, gid):
+    """a composite glyph's components, each (flags, glyph, its arguments and transform's
+    bytes); None for a simple glyph"""
+    off, length = f.glyph_range(gid)
+    if length == 0 or struct.unpack_from(">h", f.d, off)[0] >= 0:
+        return None
+    out, p, more = [], off + 10, True
+    while more:
+        fl, cg = struct.unpack_from(">HH", f.d, p)
+        n = (4 if fl & 1 else 2) + (2 if fl & 8 else 4 if fl & 0x40 else 8 if fl & 0x80 else 0)
+        if not fl & 2:
+            raise SystemExit("gen-font: glyph %d of %s places a component by points" % (gid, f.path))
+        out.append((fl, cg, f.d[p + 4:p + 4 + n]))
+        p += 4 + n
+        more = bool(fl & 0x20)
+    return out
+
+
+def encode_composite(f, gid, newid):
+    """a composite glyph's glyf entry: its header and components, each component's glyph
+    renumbered, no instructions"""
+    off, _ = f.glyph_range(gid)
+    out = bytearray(f.d[off:off + 10])
+    for fl, cg, rest in components(f, gid):
+        out += struct.pack(">HH", fl & ~0x0100, newid[cg]) + rest
+    while len(out) % 4:
+        out.append(0)
+    return bytes(out)
+
+
+def subset(path, web=None, cps_of=None):
     """a TrueType font of the code points the script lists: the tables the painter reads;
-    for the web (web, its family's name), the tables a sanitizer asks for besides"""
+    for the web (web, its family's name), the tables a sanitizer asks for besides. With
+    cps_of, each glyph's bytes are added to the block of the first code point that needs
+    them (cps_of: block of a code point -> its bytes)"""
     f = Font(path)
-    cps = [c for c in CODEPOINTS if c in f.cmap]
-    gids = [0]
+    # a code point the font has no glyph for but has its canonical decomposition, HarfBuzz
+    # draws with the decomposition's glyphs (hb-ot-shape-normalize): a singleton's as its
+    # one part's glyph; a base and its marks as a glyph made of them, each mark where GPOS
+    # attaches it (to the base, or to the mark before it), else where the pen is, past the
+    # base, the base's advance theirs (the marks' are zeroed)
+    cpmap = dict(f.cmap)
+    to_base, to_mark = gpos_marks(f)
+    for c in CODEPOINTS:
+        parts = None if c in f.cmap else decomposition(c, f.cmap)
+        if not parts:
+            continue
+        if len(parts) == 1:
+            cpmap[c] = f.cmap[parts[0]]
+            continue
+        base = f.cmap[parts[0]]
+        marks, prev = [], None
+        for p in parts[1:]:
+            m = f.cmap[p]
+            pos = to_base.get((base, m), (f.advance(base), 0))
+            if prev is not None and (prev[0], m) in to_mark:
+                pos = (prev[1] + to_mark[(prev[0], m)][0], prev[2] + to_mark[(prev[0], m)][1])
+            prev = (m, pos[0], pos[1])
+            marks.append(prev)
+        cpmap[c] = ("made", base, tuple(marks))
+    cps = [c for c in CODEPOINTS if c in cpmap]
+    gids, newid = [0], {0: 0}
+
+    def points(g):
+        if isinstance(g, tuple):
+            return [(x + dx, y + dy, on) for p, dx, dy in [(g[1], 0, 0)] + list(g[2]) for c in f.contours(p) for x, y, on in c]
+        return [pt for c in f.contours(g) for pt in c]
+
+    def encode(g):
+        if isinstance(g, tuple):
+            pts = points(g) or [(0, 0, 1)]
+            out = bytearray(struct.pack(">hhhhh", -1, min(x for x, _, _ in pts), min(y for _, y, _ in pts),
+                                        max(x for x, _, _ in pts), max(y for _, y, _ in pts)))
+            parts = [(g[1], 0, 0)] + list(g[2])
+            for k, (p, dx, dy) in enumerate(parts):
+                fl = 0x0003 | (0x0020 if k + 1 < len(parts) else 0) | (0x0200 if k == 0 else 0)
+                out += struct.pack(">HHhh", fl, newid.get(p, 0), dx, dy)
+            return bytes(out)
+        if components(f, g):
+            return encode_composite(f, g, newid)
+        return encode_glyph([c for c in f.contours(g) if c])
+
+    def add(g):
+        if g in newid:
+            return 0
+        newid[g] = len(gids)
+        gids.append(g)
+        if isinstance(g, tuple):
+            parts = [g[1]] + [m for m, _, _ in g[2]]
+        else:
+            parts = [cg for _, cg, _ in components(f, g) or []]
+        n = len(encode(g)) if not parts or isinstance(g, tuple) else 4 * len(parts) + 10
+        return n + sum(add(p) for p in parts)
     for c in cps:
-        if f.cmap[c] not in gids:
-            gids.append(f.cmap[c])
-    newid = {g: i for i, g in enumerate(gids)}
-    glyphs = [encode_glyph([c for c in f.contours(g) if c]) for g in gids]
+        n = add(cpmap[c])
+        if cps_of is not None:
+            cps_of[c] = cps_of.get(c, 0) + n + 12
+    glyphs = [encode(g) for g in gids]
     # loca (long) and glyf
     loca, glyf = bytearray(), bytearray()
     for g in glyphs:
         loca += struct.pack(">I", len(glyf))
         glyf += g
+        while len(glyf) % 4:
+            glyf.append(0)
     loca += struct.pack(">I", len(glyf))
-    allpts = [pt for g in gids for c in f.contours(g) for pt in c]
+    allpts = [pt for g in gids for pt in points(g)]
     xmin = min(x for x, _, _ in allpts); xmax = max(x for x, _, _ in allpts)
     ymin = min(y for _, y, _ in allpts); ymax = max(y for _, y, _ in allpts)
     head = struct.pack(">IIIIHHqqhhhhHhhhh", 0x00010000, 0x00010000, 0, 0x5F0F3CF5, 0, f.upem, 0, 0,
                        xmin, ymin, xmax, ymax, 0, 8, 2, 1, 0)
-    advances = [f.advance(g) for g in gids]
+    advances = [f.advance(g[1] if isinstance(g, tuple) else g) for g in gids]
     hhea = struct.pack(">IhhhHhhhhhhhhhhhH", 0x00010000, f.ascender, f.descender, f.line_gap, max(advances),
                        0, 0, xmax, 1, 0, 0, 0, 0, 0, 0, 0, len(gids))
     maxp = struct.pack(">IH", 0x00005000, len(gids))
@@ -509,18 +792,27 @@ def subset(path, web=None):
         m = f.tables["maxp"][0]
         maxp = struct.pack(">IH", 0x00010000, len(gids)) + f.d[m + 6:m + 32]
     hmtx = b"".join(struct.pack(">Hh", a, 0) for a in advances)
-    # cmap: format 4, a segment a code point (and the closing one)
-    segs = sorted(set(cps)) + [0xFFFF]
-    segx2 = 2 * len(segs)
-    ends = b"".join(struct.pack(">H", c) for c in segs)
-    starts = ends
-    deltas = b"".join(struct.pack(">H", (newid[f.cmap[c]] - c) % 0x10000) for c in segs[:-1]) + struct.pack(">H", 1)
-    ros = b"\0\0" * len(segs)
-    sub = struct.pack(">HHHHHHH", 4, 0, 0, segx2, *bsearch(len(segs), 2)) + ends + b"\0\0" + starts + deltas + ros
+    # cmap: format 4, a segment for each run of code points whose glyphs run on with them
+    # (and the closing one)
+    runs = []
+    for c in cps:
+        g = newid[cpmap[c]]
+        if runs and runs[-1][1] == c - 1 and (runs[-1][2] + c - runs[-1][0]) % 0x10000 == g:
+            runs[-1][1] = c
+        else:
+            runs.append([c, c, g])
+    segx2 = 2 * (len(runs) + 1)
+    ends = b"".join(struct.pack(">H", e) for _, e, _ in runs) + struct.pack(">H", 0xFFFF)
+    starts = b"".join(struct.pack(">H", s) for s, _, _ in runs) + struct.pack(">H", 0xFFFF)
+    deltas = b"".join(struct.pack(">H", (g - s) % 0x10000) for s, _, g in runs) + struct.pack(">H", 1)
+    ros = b"\0\0" * (len(runs) + 1)
+    sub = struct.pack(">HHHHHHH", 4, 0, 0, segx2, *bsearch(len(runs) + 1, 2)) + ends + b"\0\0" + starts + deltas + ros
     sub = sub[:2] + struct.pack(">H", len(sub)) + sub[4:]
     cmap = struct.pack(">HHHHI", 0, 1, 3, 1, 12) + sub
-    # kern: format 0, the pairs of the subset's glyphs, in order
-    pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items() if l in newid and r in newid and v)
+    # kern: format 0, the pairs of the subset's code points' glyphs, in order
+    mapped = {newid[cpmap[c]] for c in cps}
+    pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items()
+                   if l in newid and r in newid and newid[l] in mapped and newid[r] in mapped and v)
     kbody = struct.pack(">HHHH", len(pairs), *bsearch(len(pairs), 6)) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
     kern = struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody
     tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
@@ -544,8 +836,7 @@ def subset(path, web=None):
         bodies += body
         while len(bodies) % 4:
             bodies.append(0)
-    missing = [c for c in CODEPOINTS if c not in f.cmap]
-    return bytes(out + bodies), len(gids), len(pairs), missing
+    return bytes(out + bodies), len(gids), len(pairs), len(cps)
 
 
 def main():
@@ -556,15 +847,22 @@ def main():
         return
     dirs = {"dejavu": sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu",
             "liberation": sys.argv[2] if len(sys.argv) > 2 else "/usr/share/fonts/truetype/liberation"}
-    faces = [(name, src, file, subset(dirs[src] + "/" + file)) for name, src, file in FACES]
+    cost = {}
+    faces = [(name, src, file, subset(dirs[src] + "/" + file, None, cost)) for name, src, file in FACES]
+    # what each block costs the twenty faces: its code points' glyphs (a component counted
+    # with the first code point that needs it), their cmap entries and advances
+    for title in dict.fromkeys(t for t, _, _ in BLOCKS):
+        n = sum(cost.get(c, 0) for t, a, b in BLOCKS if t == title for c in range(a, b + 1))
+        sys.stderr.write("gen-font: %-26s %8d bytes before packing\n" % (title, n))
     w = sys.stdout.write
     w("/* src/paint/font_data.h -- generated by tools/gen-font.py from the TrueType files of the\n")
     w("   Liberation fonts (Serif, Sans, Mono: regular, bold, italic, bold italic) and the DejaVu\n")
     w("   fonts (Sans, Serif: regular and bold; Sans Mono: regular, bold, oblique, bold oblique): for\n")
     w("   each face a TrueType font of the code points the script lists (cmap, glyf, head, hhea,\n")
-    w("   hmtx, kern, loca, maxp), base64, in pieces of 96 characters (an array of short literals,\n")
-    w("   which cicilang compiles in little memory; one long literal of concatenated pieces it does\n")
-    w("   not: toolchain/REPORT.md, finding 21). Do not edit; run the script. src/paint/font.c reads\n")
+    w("   hmtx, kern, loca, maxp), packed (LZ77 in LZ4's tokens: tools/gen-font.py's lz_pack),\n")
+    w("   base64, in pieces of 96 characters (an array of short literals, which cicilang compiles\n")
+    w("   in little memory; one long literal of concatenated pieces it does not:\n")
+    w("   toolchain/REPORT.md, finding 21). Do not edit; run the script. src/paint/font.c reads\n")
     w("   them as it reads a page's web fonts.\n\n")
     w("   Each face is a copy of part of its Font Software and carries its notice, below: the\n")
     w("   Liberation faces' data is under the SIL Open Font License 1.1, not Ambitious's license;\n")
@@ -576,23 +874,24 @@ def main():
             w(("   " + line).rstrip() + "\n")
         w("\n")
     w("*/\n")
-    # what they decode to, and the code points (each face's and its notdef) and pairs read from them:
-    # the pools src/paint/font.c reads them into
-    w("#define AMB_FONT_BYTES %d\n" % sum(len(blob) for _, _, _, (blob, _, _, _) in faces))
-    w("#define AMB_FONT_GLYPHS %d\n" % sum(len(CODEPOINTS) - len(m) + 1 for _, _, _, (_, _, _, m) in faces))
-    w("#define AMB_FONT_KERNS %d\n" % sum(k for _, _, _, (_, _, k, _) in faces))
     w("#define AMB_FONT_FACES %d\n" % len(faces))
-    w("\n/* the faces' fonts, base64, each face's pieces after its own; amb_font_piece below says\n")
-    w("   where each begins */\n")
+    w("\n/* the faces' fonts, packed, base64, each face's pieces after its own; amb_font_piece\n")
+    w("   below says where each begins */\n")
     w("static const char *const amb_font_b64[] = {\n")
-    starts = []
+    starts, sizes = [], []
     pieces = 0
-    for name, src, file, (blob, n, npairs, missing) in faces:
-        text = base64.b64encode(blob).decode("ascii")
+    total = 0
+    for name, src, file, (blob, n, npairs, ncps) in faces:
+        packed = lz_pack(blob)
+        if lz_unpack(packed) != blob:
+            raise SystemExit("gen-font: %s does not unpack to itself" % file)
+        sizes.append((len(blob), len(packed)))
+        text = base64.b64encode(packed).decode("ascii")
         starts.append(pieces)
-        w("    /* %s, %s (%s's notice): %d glyphs, %d kerning pairs, %d bytes%s */\n" % (name, file,
-          "Liberation" if src == "liberation" else "DejaVu", n, npairs, len(blob),
-          "" if not missing else "; not in the face: " + " ".join("U+%04X" % c for c in missing)))
+        total += len(text)
+        w("    /* %s, %s (%s's notice): %d code points of the %d listed, %d glyphs, %d kerning pairs, %d bytes,\n"
+          "       %d packed */\n" % (name, file, "Liberation" if src == "liberation" else "DejaVu", ncps, len(CODEPOINTS), n,
+                                       npairs, len(blob), len(packed)))
         for i in range(0, len(text), 96):
             w('    "%s",\n' % text[i:i + 96])
             pieces += 1
@@ -600,6 +899,11 @@ def main():
     w("};\n")
     w("\n/* each face's first piece in amb_font_b64, then the end of the last */\n")
     w("static const uint32_t amb_font_piece[%d] = { %s };\n" % (len(starts), ", ".join("%d" % s for s in starts)))
+    w("/* each face's font: its size in bytes, and packed */\n")
+    w("static const uint32_t amb_font_size[%d] = { %s };\n" % (len(faces), ", ".join("%d" % a for a, _ in sizes)))
+    w("static const uint32_t amb_font_packed[%d] = { %s };\n" % (len(faces), ", ".join("%d" % b for _, b in sizes)))
+    sys.stderr.write("gen-font: %d faces, %d bytes, %d packed, %d in base64\n" % (len(faces),
+                     sum(len(blob) for _, _, _, (blob, _, _, _) in faces), total * 3 // 4, total))
 
 
 if __name__ == "__main__":

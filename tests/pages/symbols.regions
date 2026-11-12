@@ -1,0 +1,21 @@
+# tests/pages/symbols.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-punct 8 9 437 26
+text-punct-m 8 30 307 49
+text-curr 8 52 350 69
+text-curr-m 8 73 211 92
+text-letter 8 96 333 113
+text-arrows 8 118 401 135
+text-arrows-m 8 139 230 158
+text-math 8 162 537 179
+text-math-sb 8 184 227 201
+text-math-m 8 205 442 224
+text-box 8 228 409 245
+text-boxes 8 249 792 313
+text-block 8 317 249 334
+text-block-m 8 338 172 357
+text-geom 8 361 454 378
+text-geom-m 8 382 269 401
+text-misc 8 405 649 422
+text-misc-m 8 426 269 445
+text-ding 8 449 492 466
+text-ding-m 8 470 269 489
