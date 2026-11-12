@@ -285,3 +285,33 @@ neighbours.
     undeclared(nowhere)`. The work-around is to declare the function first (12g's
     package met it); the message should name the undeclared callee wherever the
     call stands.
+20. **A local struct with a `vector` member is not zero-initialised, where a
+    `vector` local is**: `vector<int> v; push_back(v, k);` starts empty, but
+    with `typedef struct holder { vector<int> items; int n; } holder;` the
+    local `holder h; push_back(h.items, k);` reads whatever the stack held: it
+    aborts in `push_back`, or appends to an earlier call's elements (12g's Intl
+    package met it as every locale taking the first locale's date formats).
+    The work-around is `memset(&h, 0, sizeof h)` and dropping the members by
+    hand. A struct with an owning member should start zeroed as an owning
+    local does, or the checker should refuse its use before it is
+    initialised:
+
+    ```c
+    #include <stdio.h>
+    #include <string.h>
+    #include <vector.pl>
+    typedef struct holder { vector<int> items; int n; } holder;
+    static void scribble(void) {
+        volatile unsigned char junk[256];
+        for (int i = 0; i < 256; i++) junk[i] = (unsigned char)(0xA5 + i);
+        (void)junk[0];
+    }
+    static int in_struct(int k) {
+        holder h;
+        push_back(h.items, k);
+        int n = (int)len(h.items);
+        vector_int_drop(&h.items);
+        return n;
+    }
+    int main(void) { scribble(); printf("%d\n", in_struct(1)); return 0; }
+    ```

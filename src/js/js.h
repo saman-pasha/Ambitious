@@ -95,6 +95,7 @@ enum {
     JK_ASYNCGEN,     /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
                         mode, value and promise, three a request, the first the one its body answers), x its function */
     JK_RECORD,       /* the engine's own record, never a script's value: a an object it holds, x a value, b and c numbers */
+    JK_INTL,         /* an Intl object (src/js/intl.c): a its kind (JIK_*), x its internal slots (an array, as a value) */
     JK_FREE          /* a record the collector freed: a the next on the free list (src/js/gc.c) */
 };
 /* a typed array's element type, in its flags above JO_TA_SHIFT */
@@ -370,6 +371,8 @@ typedef struct js_vm {
     vector<js_big> bigs;              /* every BigInt (src/js/bigint.c) */
     vector<uint32_t> bigl;            /* their limbs */
     uint32_t bigint_proto;
+    uint32_t intl_protos[16];         /* each Intl constructor's prototype, by its kind (src/js/intl.c) */
+    uint32_t intl_cache;              /* the formatters toLocaleString made for its defaults (an array, 0 none yet) */
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
@@ -586,6 +589,12 @@ jv js_module_namespace(js_vm *vm, uint32_t m);
 enum { JMD_NS_GET, JMD_ASYNC_OK, JMD_ASYNC_ERR, JMD_DYN_RUN, JMD_DYN_DONE, JMD_DYN_FAIL, JMD_META_RESOLVE, JMD_N };
 jv js_module_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_module_init(js_vm *vm, uint32_t first);
+/* Intl (src/js/intl.c, ECMA-402): its natives, JIN_N ids from the first (intl.c numbers
+   them), and the locale-sensitive methods of Number, BigInt, String, Date and Array it
+   gives their prototypes in place of the plain ones */
+#define JIN_N 256
+jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_intl_init(js_vm *vm, uint32_t first);
 
 /* a Map's or a Set's own operations (src/js/builtins.c), which the weak collections use */
 enum { JCOLL_GET, JCOLL_SET, JCOLL_HAS, JCOLL_DELETE, JCOLL_ADD };

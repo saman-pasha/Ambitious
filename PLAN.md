@@ -700,8 +700,11 @@ be built side by side and merged without touching each other's.
     generators;
   - Symbol and the iteration protocol;
   - a regular-expression engine, and the String methods over it;
-  - Proxy and Reflect; typed arrays; weak collections; BigInt; `Intl`'s
-    common formats;
+  - Proxy and Reflect; typed arrays; weak collections; BigInt; `Intl`
+    (Locale, NumberFormat, DateTimeFormat, PluralRules, ListFormat,
+    RelativeTimeFormat, DisplayNames, Segmenter, Collator; the locale-
+    sensitive methods of Number, BigInt, String, Date and Array) over CLDR's
+    data for 29 languages, each test's output node's line for line;
   - modules; `with`; direct `eval`;
   - a garbage collector, run at task boundaries, where no native holds an
     object unrooted.

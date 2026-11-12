@@ -45,7 +45,7 @@ enum {
     N_M_SINH, N_M_COSH, N_M_TANH, N_M_HYPOT, N_M_RANDOM, N_M_FROUND, N_M_IMUL, N_M_CLZ32,
     /* JSON, console, Error, time */
     N_JSON_STRINGIFY, N_JSON_PARSE, N_CON_LOG, N_CON_INFO, N_CON_WARN, N_CON_ERROR, N_CON_DEBUG,
-    N_EP_TOSTRING, N_DATE_NOW, N_DP_GETTIME, N_DP_TOISO, N_DP_GETFULLYEAR, N_DP_GETMONTH, N_DP_GETDATE, N_DP_GETDAY,
+    N_EP_TOSTRING, N_DATE_NOW, N_DATE_UTC, N_DP_GETTIME, N_DP_TOISO, N_DP_GETFULLYEAR, N_DP_GETMONTH, N_DP_GETDATE, N_DP_GETDAY,
     N_DP_GETHOURS, N_DP_GETMINUTES, N_DP_GETSECONDS, N_DP_GETMS, N_DP_TOSTRING, N_PERF_NOW,
     N_SET_TIMEOUT, N_SET_INTERVAL, N_CLEAR_TIMEOUT, N_QUEUE_MICROTASK,
     /* Map, Set, RegExp, iterators */
@@ -66,7 +66,8 @@ enum {
     N_TA_FIRST = N_PX_FIRST + JPX_N,
     N_BG_FIRST = N_TA_FIRST + JTN_N,
     N_MD_FIRST = N_BG_FIRST + JBG_N,
-    N_LAST = N_MD_FIRST + JMD_N
+    N_IN_FIRST = N_MD_FIRST + JMD_N,      /* Intl's (src/js/intl.c), JIN_N */
+    N_LAST = N_IN_FIRST + JIN_N
 };
 
 /* ---- helpers ---- */
@@ -677,6 +678,25 @@ static int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
     unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
     unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + (int64_t)doe - 719468;
+}
+/* the time a date's parts give (the Date constructor's and Date.UTC's arguments: the year,
+   then the month, day, hours, minutes, seconds and ms, their defaults 0, 1 and 0), as
+   MakeDay, MakeTime and TimeClip make it (ECMA-262 21.4.1): each part an integer, a year
+   from 0 to 99 the 1900s', NaN when a part is not finite or the time out of range */
+static double date_from_parts(js_vm *vm, uint32_t args, uint32_t argc) {
+    double v[7] = { NAN, 0, 1, 0, 0, 0, 0 };
+    for (uint32_t i = 0; i < argc && i < 7; i++) v[i] = num_arg(vm, args, argc, i);
+    for (int i = 0; i < 7; i++) {
+        if (v[i] != v[i] || v[i] == INFINITY || v[i] == -INFINITY) return NAN;
+        v[i] = trunc(v[i]);
+    }
+    if (v[0] >= 0 && v[0] <= 99) v[0] += 1900;
+    double ym = v[0] + floor(v[1] / 12), mn = v[1] - floor(v[1] / 12) * 12;
+    if (fabs(ym) > 400000) return NAN;
+    double day = (double)days_from_civil((int64_t)ym, (unsigned)mn + 1, 1) + v[2] - 1;
+    double t = day * 86400000.0 + v[3] * 3600000.0 + v[4] * 60000.0 + v[5] * 1000.0 + v[6];
+    if (t != t || fabs(t) > 8.64e15) return NAN;
+    return t + 0.0;
 }
 static void civil_from_days(int64_t z, int64_t *y, unsigned *m, unsigned *d) {
     z += 719468;
@@ -1592,14 +1612,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_DATE: {
         double t = vm->now;
         if (argc == 1 && jv_is_num(a0)) t = jv_dbl(a0);
-        else if (argc >= 2) {
-            double y = num_arg(vm, args, argc, 0), m = num_arg(vm, args, argc, 1), d = argc > 2 ? num_arg(vm, args, argc, 2) : 1;
-            double h = argc > 3 ? num_arg(vm, args, argc, 3) : 0, mi = argc > 4 ? num_arg(vm, args, argc, 4) : 0, s = argc > 5 ? num_arg(vm, args, argc, 5) : 0;
-            double ms = argc > 6 ? num_arg(vm, args, argc, 6) : 0;
-            int64_t yy = (int64_t)y + (int64_t)floor(m / 12);
-            unsigned mm = (unsigned)((int64_t)m - (int64_t)floor(m / 12) * 12) + 1;
-            t = (double)days_from_civil(yy, mm, 1) * 86400000.0 + (d - 1) * 86400000.0 + h * 3600000.0 + mi * 60000.0 + s * 1000.0 + ms;
-        } else if (argc == 1) t = NAN;
+        else if (argc >= 2) t = date_from_parts(vm, args, argc);
+        else if (argc == 1) t = NAN;
         if (newt == JV_UNDEF || newt == JV_HOLE) {
             char b[64];
             double tt = t;
@@ -2231,6 +2245,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id >= N_TA_FIRST && id < N_TA_FIRST + JTN_N) return js_typed_native(vm, id - N_TA_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_BG_FIRST && id < N_BG_FIRST + JBG_N) return js_big_native(vm, id - N_BG_FIRST, callee, thisv, args, argc, newt);
     if (id >= N_MD_FIRST && id < N_MD_FIRST + JMD_N) return js_module_native(vm, id - N_MD_FIRST, callee, thisv, args, argc, newt);
+    if (id >= N_IN_FIRST && id < N_IN_FIRST + JIN_N) return js_intl_native(vm, id - N_IN_FIRST, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
@@ -2533,6 +2548,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     }
     /* ---- time ---- */
     case N_DATE_NOW: return jv_num(floor(vm->now));
+    case N_DATE_UTC: return jv_num(date_from_parts(vm, args, argc));
     case N_PERF_NOW: {
         if (vm->real_clock) {
             struct timespec ts;
@@ -2814,6 +2830,7 @@ void js_builtins_init(js_vm *vm) {
 
     uint32_t d = ctor(vm, "Date", N_DATE, 7, vm->date_proto);
     defn(vm, d, "now", N_DATE_NOW, 0);
+    defn(vm, d, "UTC", N_DATE_UTC, 7);
     uint32_t dp = vm->date_proto;
     defn(vm, dp, "getTime", N_DP_GETTIME, 0);
     defn(vm, dp, "valueOf", N_DP_GETTIME, 0);
@@ -2938,4 +2955,6 @@ void js_builtins_init(js_vm *vm) {
         defv(vm, vm->aggregate_error_proto, "message", jv_str(A_EMPTY));
         vm->objs[ae].proto = vm->error_ctor;
     }
+    /* Intl, and the locale-sensitive methods it gives the prototypes made above */
+    js_intl_init(vm, N_IN_FIRST);
 }

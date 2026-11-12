@@ -150,6 +150,9 @@ static void mark_roots(js_vm *vm, gc_state *g) {
     for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) mark_obj(vm, g, named[i]);
     for (uint32_t i = 0; i < JTA_N; i++) mark_obj(vm, g, vm->ta_protos[i]);
     for (uint32_t i = 0; i < 16; i++) mark_obj(vm, g, vm->host_protos[i]);
+    /* Intl's prototypes, and the formatters toLocaleString keeps for its defaults (src/js/intl.c) */
+    for (uint32_t i = 0; i < 16; i++) mark_obj(vm, g, vm->intl_protos[i]);
+    mark_obj(vm, g, vm->intl_cache);
     /* every prototype a shape names */
     for (size_t i = 0; i < len(vm->shapes); i++) mark_obj(vm, g, vm->shapes[i].proto);
     /* the code's constants, the stack and its frames */
