@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Kerning</title>
+<style>
+/* tests/pages/shaping-kern.html -- kerning as HarfBuzz applies it for Chromium: a web font's
+   by its GPOS alone (fonts/serif-gpos.ttf, DejaVu Serif's Latin and marks with its layout
+   tables and no kern table: tools/gen-font.py --web DejaVuSerif.ttf serif-gpos.ttf "Kern
+   Serif" gpos 20-7E,A0-FF,300-36F), its ligatures and its marks by GPOS too; a fallback
+   font's (FreeSerif's Ethiopic, its GPOS pairs); Liberation Sans's (GPOS, which it has with a
+   kern table); kerning in text-transform's letters, with word-spacing and with
+   letter-spacing. The spans' boxes are held to Chromium's (tests/pages/shaping-kern.chromium),
+   their drawing region by region, pixel by pixel (shaping-kern.shot.png,
+   shaping-kern.regions). */
+@font-face { font-family: "Kern Serif"; src: url(fonts/serif-gpos.ttf) format("truetype") }
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; white-space: nowrap; }
+.k { font-family: "Kern Serif"; }
+.big { font-size: 40px; line-height: 48px; }
+.red { color: #c00; }
+</style></head>
+<body>
+<p class=k><span id=gpos>AVAVA To. Wa Ty LT P. Yo F, r.</span></p>
+<p class=k><span id=gpos-in>A<span class=red id=gpos-in-b>V</span><span id=gpos-in-x>A T</span><span class=red id=gpos-in-c>o</span></span></p>
+<p class="k big"><span id=gpos-big>AVAT Wo fi fl</span></p>
+<p class="k big"><span id=gpos-marks>q&#x0301;&#x0323; e&#x0301; &#x00E9; a&#x0308;&#x0304;</span></p>
+<p><span id=eth>ሰላም ልዑል ኢትዮጵያ</span></p>
+<p class=big><span id=eth-big>ሰላም ልዑል</span></p>
+<p style="font-family: sans-serif"><span id=sans>AVAVA To. Wa Ty LT P. Yo</span></p>
+<p class="big" style="font-family: sans-serif"><span id=sans-big>AVAT Wo</span></p>
+<p><span id=upper style="text-transform: uppercase">avava to. wa ty</span></p>
+<p><span id=wsp style="word-spacing: 5px">A V A To Wa</span></p>
+<p><span id=lsp style="letter-spacing: 2px">AVAVA To. Wa</span></p>
+<p class=k><span id=lsp-k style="letter-spacing: -1px">AVAVA To. fi</span></p>
+</body></html>

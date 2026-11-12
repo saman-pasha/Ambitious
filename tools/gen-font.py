@@ -8,13 +8,13 @@ the DejaVu fonts (Sans, Serif and Sans Mono: monospace's face there, and the fac
 their own names name), each regular and bold, and Sans Mono's oblique and bold
 oblique (Sans and Serif have no italic face on such a machine: Chromium slants their
 upright ones), read from their TrueType files by this script's own reader of the tables
-it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern) and written as C: for each
-face, a TrueType font of the code points the script lists (each face has those its
-file has), packed (lz_pack: LZ77 in LZ4's byte-aligned tokens, which font.c unpacks
-at a few instructions a byte, where deflate's bits cost it some hundred), base64 -- the
-tables the painter reads (cmap format 4,
-glyf, head, hhea, hmtx, kern format 0, loca, maxp), so that src/paint/font.c reads the
-built-in faces as it reads a page's web fonts. A composite glyph stays a composite,
+it needs (head, hhea, hmtx, maxp, loca, glyf, cmap, kern, GDEF, GSUB, GPOS) and written
+as C: for each face, a TrueType font of the code points the script lists (each face has
+those its file has), packed (lz_pack: LZ77 in LZ4's byte-aligned tokens, which font.c
+unpacks at a few instructions a byte, where deflate's bits cost it some hundred), base64
+-- the tables the painter reads (cmap format 4, glyf, head, hhea, hmtx, kern format 0,
+loca, maxp, and the layout tables GDEF, GSUB and GPOS), so that src/paint/font.c reads
+the built-in faces as it reads a page's web fonts. A composite glyph stays a composite,
 its components in the subset (none of these faces' glyphs here places one by points).
 A code point a face has no glyph for but has every part of the canonical decomposition
 of, HarfBuzz draws with those parts in that face (hb-ot-shape-normalize: DejaVu Sans
@@ -22,19 +22,25 @@ Mono's Vietnamese with two marks, Liberation's arrows and relations with a strok
 Kelvin and Angstrom signs), so the subset has it: a singleton's as its part's glyph, a
 base and marks as a composite of them, each mark where the face's GPOS mark and mkmk
 lookups attach it (else where HarfBuzz leaves it, past the base), the base's advance
-the glyph's. The kerning pairs are the subset's code points'. (Over these code points each face's
-kern table holds the pairs its GPOS kern feature does, which HarfBuzz applies; the
-faces' GSUB substitutes nothing in them by default but DejaVu's ligatures, which
-Ambitious does not form.) What each block of code points costs the faces is written on
-stderr.
+the glyph's. The kerning pairs are the subset's code points' (HarfBuzz applies them to a
+run whose script's GPOS has no kern feature: Liberation's Hebrew). The layout tables keep
+the features HarfBuzz applies by default (src/paint/shape.c applies them as it does) and
+the lookups they use, over the subset's glyphs and those the substitutions can put in their
+place (a ligature, a joining form), which join the subset. What each block of code points
+costs the faces is written on stderr.
 
     python3 tools/gen-font.py [DEJAVUDIR [LIBERATIONDIR]] > src/paint/font_data.h
-    python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.otf|OUT.woff FAMILY [cff|cid|cff2]
+    python3 tools/gen-font.py --web FONT.ttf OUT.ttf|OUT.otf|OUT.woff FAMILY [truetype|layout|gpos|curs|cff|cid|cff2 [HEX-RANGES]]
 
 The second writes a web font for the fixture pages: the same subset of one
 TrueType file as a font Chromium's sanitizer takes (with OS/2, post, name and a
 version 1.0 maxp), named FAMILY, its fonts' notice in its name table; as WOFF 1
-(its tables stored) when OUT ends in .woff. With cff, cid or cff2, its Basic Latin
+(its tables stored) when OUT ends in .woff. HEX-RANGES (20-7E,300-36F) take the code
+points it has instead of the script's list. With layout, its layout tables too (GDEF,
+GSUB, GPOS); with gpos, those and no kern table (its kerning GPOS's alone, as a font
+made today has it); with curs, those and a cursive attachment of the script's own
+(each glyph's entry and exit at heights of its glyph number's), which no font on the
+machine has. With cff, cid or cff2, its Basic Latin
 alone, as OpenType with CFF outlines (name-keyed, or CID-keyed) or CFF2 ones, the
 glyphs DejaVu's quadratic curves made cubic, exactly, written as Type 2 charstrings
 that use what a reader must read (subroutines and their biases, hints and hintmasks,
@@ -748,11 +754,722 @@ def encode_composite(f, gid, newid):
     return bytes(out)
 
 
-def subset(path, web=None, cps_of=None, only=None):
+# ---- the OpenType layout tables (GDEF, GSUB, GPOS): read, kept for a subset's glyphs, written again ----
+
+# the features HarfBuzz applies for Chromium unless a page turns them off (hb-ot-shape.cc's
+# common and horizontal features, the direction's, the automatic fractions', and the Arabic
+# shaper's), which a subset keeps; the rest (dlig, salt, smcp, ...) only a page's
+# font-feature-settings would ask for, which Ambitious does not read
+GSUB_KEEP = {"rvrn", "ltra", "ltrm", "rtla", "rtlm", "frac", "numr", "dnom", "ccmp", "locl", "rlig", "calt", "clig", "liga",
+             "rclt", "isol", "fina", "fin2", "fin3", "medi", "med2", "init", "stch", "mset"}
+GPOS_KEEP = {"kern", "mark", "mkmk", "curs", "dist", "abvm", "blwm"}
+
+
+def ot_u16(d, o):
+    return struct.unpack_from(">H", d, o)[0]
+
+
+def ot_s16(d, o):
+    return struct.unpack_from(">h", d, o)[0]
+
+
+def ot_at(d, base, field):
+    """the table an Offset16 at base + field names, from base: its place, or 0 for a null offset"""
+    off = ot_u16(d, base + field)
+    return base + off if off else 0
+
+
+def ot_coverage(d, o):
+    """a Coverage table's glyphs, in their coverage indexes' order"""
+    fmt, n = struct.unpack_from(">HH", d, o)
+    if fmt == 1:
+        return list(struct.unpack_from(">%dH" % n, d, o + 4))
+    out = []
+    for k in range(n):
+        a, b, _ = struct.unpack_from(">HHH", d, o + 4 + 6 * k)
+        out += range(a, b + 1)
+    return out
+
+
+def ot_classdef(d, o):
+    """a ClassDef table: {glyph: class} for the glyphs of a class but 0 (none for a null offset)"""
+    out = {}
+    if not o:
+        return out
+    fmt = ot_u16(d, o)
+    if fmt == 1:
+        start, n = struct.unpack_from(">HH", d, o + 2)
+        for k, c in enumerate(struct.unpack_from(">%dH" % n, d, o + 6)):
+            if c:
+                out[start + k] = c
+    elif fmt == 2:
+        for k in range(ot_u16(d, o + 2)):
+            a, b, c = struct.unpack_from(">HHH", d, o + 4 + 6 * k)
+            if c:
+                for g in range(a, b + 1):
+                    out[g] = c
+    return out
+
+
+def ot_vsize(fmt):
+    """a ValueRecord's size by its ValueFormat"""
+    return 2 * bin(fmt & 0xFF).count("1")
+
+
+def ot_value(d, o, fmt):
+    """a ValueRecord: its x and y placements and advances (its Device tables' offsets passed over:
+    HarfBuzz reads them only at a pixel size, which Chromium gives no font)"""
+    v, p = [0, 0, 0, 0], o
+    for k in range(4):
+        if fmt & (1 << k):
+            v[k] = ot_s16(d, p)
+            p += 2
+    return tuple(v)
+
+
+def ot_anchor(d, o):
+    """an Anchor's x and y (any format: HarfBuzz takes a format 2 anchor's point only when hinting)"""
+    return struct.unpack_from(">hh", d, o + 2) if o else None
+
+
+def ot_rule(d, r, chain):
+    """a (chained) sequence rule: its backtrack, its input after the first, its lookahead (glyphs
+    or classes), and its sequence lookup records (sequence index, lookup index)"""
+    back, ahead = [], []
+    if chain:
+        nb = ot_u16(d, r)
+        back = list(struct.unpack_from(">%dH" % nb, d, r + 2))
+        p = r + 2 + 2 * nb
+        ni = ot_u16(d, p)
+        inp = list(struct.unpack_from(">%dH" % max(ni - 1, 0), d, p + 2))
+        p += 2 + 2 * max(ni - 1, 0)
+        nl = ot_u16(d, p)
+        ahead = list(struct.unpack_from(">%dH" % nl, d, p + 2))
+        p += 2 + 2 * nl
+        nr = ot_u16(d, p)
+        p += 2
+    else:
+        ni, nr = struct.unpack_from(">HH", d, r)
+        inp = list(struct.unpack_from(">%dH" % max(ni - 1, 0), d, r + 4))
+        p = r + 4 + 2 * max(ni - 1, 0)
+    recs = [struct.unpack_from(">HH", d, p + 4 * k) for k in range(nr)]
+    return (back, inp, ahead, recs)
+
+
+def ot_rulesets(d, o, arr, n, chain):
+    """the rule sets an array of n offsets (at arr, from o) names, each a list of rules"""
+    out = []
+    for k in range(n):
+        s = ot_at(d, o, arr - o + 2 * k)
+        out.append([ot_rule(d, s + ot_u16(d, s + 2 + 2 * j), chain) for j in range(ot_u16(d, s))] if s else [])
+    return out
+
+
+def ot_context(d, o, chain):
+    """a contextual or chained contextual subtable (GSUB 5 and 6, GPOS 7 and 8), any format"""
+    fmt = ot_u16(d, o)
+    sub = {"t": "ctx", "chain": chain, "fmt": fmt}
+    if fmt == 1:
+        cov = ot_coverage(d, o + ot_u16(d, o + 2))
+        sets = ot_rulesets(d, o, o + 6, min(ot_u16(d, o + 4), len(cov)), chain)
+        sub["rules"] = {g: rs for g, rs in zip(cov, sets) if rs}
+    elif fmt == 2:
+        sub["cov"] = ot_coverage(d, o + ot_u16(d, o + 2))
+        if chain:
+            sub["bcd"], sub["icd"], sub["lcd"] = (ot_classdef(d, ot_at(d, o, k)) for k in (4, 6, 8))
+            sub["sets"] = ot_rulesets(d, o, o + 12, ot_u16(d, o + 10), chain)
+        else:
+            sub["bcd"], sub["icd"], sub["lcd"] = {}, ot_classdef(d, ot_at(d, o, 4)), {}
+            sub["sets"] = ot_rulesets(d, o, o + 8, ot_u16(d, o + 6), chain)
+    elif fmt == 3:
+        if chain:
+            p, covs = o + 2, []
+            for _ in range(3):
+                n = ot_u16(d, p)
+                covs.append([ot_coverage(d, o + ot_u16(d, p + 2 + 2 * k)) for k in range(n)])
+                p += 2 + 2 * n
+            nr = ot_u16(d, p)
+            p += 2
+        else:
+            ni, nr = struct.unpack_from(">HH", d, o + 2)
+            covs = [[], [ot_coverage(d, o + ot_u16(d, o + 6 + 2 * k)) for k in range(ni)], []]
+            p = o + 6 + 2 * ni
+        sub["back"], sub["input"], sub["ahead"] = covs
+        sub["records"] = [struct.unpack_from(">HH", d, p + 4 * k) for k in range(nr)]
+    else:
+        return None
+    return sub
+
+
+def ot_gsub_sub(d, o, t):
+    """a GSUB subtable of type t (1 to 6 and 8) as a dict"""
+    fmt = ot_u16(d, o)
+    if t in (5, 6):
+        return ot_context(d, o, t == 6)
+    cov = ot_coverage(d, o + ot_u16(d, o + 2))
+    if t == 1:
+        if fmt == 1:
+            delta = ot_s16(d, o + 4)
+            return {"t": 1, "map": {g: (g + delta) & 0xFFFF for g in cov}}
+        n = ot_u16(d, o + 4)
+        return {"t": 1, "map": dict(zip(cov, struct.unpack_from(">%dH" % n, d, o + 6)))}
+    if t in (2, 3):
+        out = {}
+        for k, g in enumerate(cov[:ot_u16(d, o + 4)]):
+            s = o + ot_u16(d, o + 6 + 2 * k)
+            out[g] = list(struct.unpack_from(">%dH" % ot_u16(d, s), d, s + 2))
+        return {"t": t, "map": out}
+    if t == 4:
+        out = {}
+        for k, g in enumerate(cov[:ot_u16(d, o + 4)]):
+            s = o + ot_u16(d, o + 6 + 2 * k)
+            ligs = []
+            for j in range(ot_u16(d, s)):
+                lg = s + ot_u16(d, s + 2 + 2 * j)
+                glyph, nc = struct.unpack_from(">HH", d, lg)
+                ligs.append((list(struct.unpack_from(">%dH" % max(nc - 1, 0), d, lg + 4)), glyph))
+            out[g] = ligs
+        return {"t": 4, "map": out}
+    if t == 8:
+        p, covs = o + 4, []
+        for _ in range(2):
+            n = ot_u16(d, p)
+            covs.append([ot_coverage(d, o + ot_u16(d, p + 2 + 2 * k)) for k in range(n)])
+            p += 2 + 2 * n
+        subs = struct.unpack_from(">%dH" % ot_u16(d, p), d, p + 2)
+        return {"t": 8, "map": dict(zip(cov, subs)), "back": covs[0], "ahead": covs[1]}
+    return None
+
+
+def ot_gpos_sub(d, o, t):
+    """a GPOS subtable of type t (1 to 8) as a dict"""
+    fmt = ot_u16(d, o)
+    if t in (7, 8):
+        return ot_context(d, o, t == 8)
+    if t == 1:
+        cov, vf = ot_coverage(d, o + ot_u16(d, o + 2)), ot_u16(d, o + 4)
+        if fmt == 1:
+            v = ot_value(d, o + 6, vf)
+            return {"t": 1, "vf": vf, "map": {g: v for g in cov}}
+        return {"t": 1, "vf": vf, "map": {g: ot_value(d, o + 8 + k * ot_vsize(vf), vf) for k, g in enumerate(cov[:ot_u16(d, o + 6)])}}
+    if t == 2:
+        cov = ot_coverage(d, o + ot_u16(d, o + 2))
+        vf1, vf2 = struct.unpack_from(">HH", d, o + 4)
+        s1, s2 = ot_vsize(vf1), ot_vsize(vf2)
+        sub = {"t": 2, "fmt": fmt, "vf1": vf1, "vf2": vf2}
+        if fmt == 1:
+            pairs = {}
+            for k, g in enumerate(cov[:ot_u16(d, o + 8)]):
+                s = o + ot_u16(d, o + 10 + 2 * k)
+                row = {}
+                for j in range(ot_u16(d, s)):
+                    r = s + 2 + j * (2 + s1 + s2)
+                    row.setdefault(ot_u16(d, r), (ot_value(d, r + 2, vf1), ot_value(d, r + 2 + s1, vf2)))
+                pairs[g] = row
+            sub["pairs"] = pairs
+            return sub
+        c1, c2 = struct.unpack_from(">HH", d, o + 12)
+        p, matrix = o + 16, []
+        for _ in range(c1):
+            row = []
+            for _ in range(c2):
+                row.append((ot_value(d, p, vf1), ot_value(d, p + s1, vf2)))
+                p += s1 + s2
+            matrix.append(row)
+        sub.update(cov=cov, cd1=ot_classdef(d, ot_at(d, o, 8)), cd2=ot_classdef(d, ot_at(d, o, 10)), matrix=matrix)
+        return sub
+    if t == 3:
+        cov, m = ot_coverage(d, o + ot_u16(d, o + 2)), {}
+        for k, g in enumerate(cov[:ot_u16(d, o + 4)]):
+            m[g] = (ot_anchor(d, ot_at(d, o, 6 + 4 * k)), ot_anchor(d, ot_at(d, o, 8 + 4 * k)))
+        return {"t": 3, "map": m}
+    if t in (4, 5, 6):
+        mcov, bcov = ot_coverage(d, o + ot_u16(d, o + 2)), ot_coverage(d, o + ot_u16(d, o + 4))
+        nc = ot_u16(d, o + 6)
+        ma, ba = o + ot_u16(d, o + 8), o + ot_u16(d, o + 10)
+        marks, bases = {}, {}
+        for k, g in enumerate(mcov[:ot_u16(d, ma)]):
+            cls = ot_u16(d, ma + 2 + 4 * k)
+            marks[g] = (cls, ot_anchor(d, ot_at(d, ma, 4 + 4 * k)))
+        for k, g in enumerate(bcov[:ot_u16(d, ba)]):
+            if t == 5:
+                la = ot_at(d, ba, 2 + 2 * k)
+                bases[g] = [[ot_anchor(d, ot_at(d, la, 2 + 2 * (c * nc + j))) for j in range(nc)] for c in range(ot_u16(d, la))]
+            else:
+                bases[g] = [ot_anchor(d, ot_at(d, ba, 2 + 2 * (k * nc + j))) for j in range(nc)]
+        return {"t": t, "nclass": nc, "marks": marks, "bases": bases}
+    return None
+
+
+def ot_read(f, tag):
+    """a font's GSUB or GPOS: its scripts ({tag: (default LangSys, {tag: LangSys})}, a LangSys
+    (required feature, [feature indexes])), its features ([(tag, [lookup indexes])]) and its
+    lookups ([(type, flag, mark filtering set, [subtables])], extensions resolved); None when it
+    has none"""
+    if tag not in f.tables:
+        return None
+    d, g = f.d, f.tables[tag][0]
+    sl, fl, ll = g + ot_u16(d, g + 4), g + ot_u16(d, g + 6), g + ot_u16(d, g + 8)
+
+    def langsys(o):
+        if not o:
+            return None
+        req, n = struct.unpack_from(">HH", d, o + 2)
+        return (req, list(struct.unpack_from(">%dH" % n, d, o + 6)))
+    scripts = {}
+    for k in range(ot_u16(d, sl)):
+        st = d[sl + 2 + 6 * k:sl + 6 + 6 * k].decode("latin-1")
+        s = sl + ot_u16(d, sl + 6 + 6 * k)
+        langs = {}
+        for j in range(ot_u16(d, s + 2)):
+            langs[d[s + 4 + 6 * j:s + 8 + 6 * j].decode("latin-1")] = langsys(ot_at(d, s, 8 + 6 * j))
+        scripts[st] = (langsys(ot_at(d, s, 0)), langs)
+    feats = []
+    for k in range(ot_u16(d, fl)):
+        ft = d[fl + 2 + 6 * k:fl + 6 + 6 * k].decode("latin-1")
+        fo = fl + ot_u16(d, fl + 6 + 6 * k)
+        feats.append((ft, list(struct.unpack_from(">%dH" % ot_u16(d, fo + 2), d, fo + 4))))
+    lookups = []
+    for k in range(ot_u16(d, ll)):
+        lk = ll + ot_u16(d, ll + 2 + 2 * k)
+        t, flag, n = struct.unpack_from(">HHH", d, lk)
+        mfs = ot_u16(d, lk + 6 + 2 * n) if flag & 0x10 else None
+        subs, real = [], t
+        for j in range(n):
+            s = lk + ot_u16(d, lk + 6 + 2 * j)
+            if (tag == "GSUB" and t == 7) or (tag == "GPOS" and t == 9):
+                real = ot_u16(d, s + 2)
+                s += struct.unpack_from(">I", d, s + 4)[0]
+            sub = (ot_gsub_sub if tag == "GSUB" else ot_gpos_sub)(d, s, real)
+            if sub is not None:
+                sub["gsub"] = tag == "GSUB"
+                subs.append(sub)
+        lookups.append((real, flag, mfs, subs))
+    return {"scripts": scripts, "features": feats, "lookups": lookups}
+
+
+def ot_read_gdef(f):
+    """a font's GDEF: its glyph classes, mark attachment classes and mark glyph sets"""
+    if "GDEF" not in f.tables:
+        return None
+    d, g = f.d, f.tables["GDEF"][0]
+    minor = ot_u16(d, g + 2)
+    sets = []
+    ms = ot_at(d, g, 12) if minor >= 2 else 0
+    if ms:
+        for k in range(ot_u16(d, ms + 2)):
+            sets.append(ot_coverage(d, ms + struct.unpack_from(">I", d, ms + 4 + 4 * k)[0]))
+    return {"classes": ot_classdef(d, ot_at(d, g, 4)), "attach": ot_classdef(d, ot_at(d, g, 10)), "sets": sets}
+
+
+def ot_used(tab, keep):
+    """the indexes of the lookups the kept features use, and those their contextual rules call"""
+    used = set()
+    for tag, idx in tab["features"]:
+        if tag in keep:
+            used.update(i for i in idx if i < len(tab["lookups"]))
+    todo = list(used)
+    while todo:
+        for sub in tab["lookups"][todo.pop()][3]:
+            if sub["t"] != "ctx":
+                continue
+            recs = sub.get("records", [])
+            for rs in list(sub.get("rules", {}).values()) + sub.get("sets", []):
+                recs = recs + [r for rule in rs for r in rule[3]]
+            for _, li in recs:
+                if li < len(tab["lookups"]) and li not in used:
+                    used.add(li)
+                    todo.append(li)
+    return used
+
+
+def ot_closure(gsub, used, glyphs):
+    """the glyphs grown by every glyph the used GSUB lookups can put in their place, until no more
+    come (a contextual lookup's own lookups taken as if they applied anywhere)"""
+    while True:
+        new = set()
+        for li in used:
+            for sub in gsub["lookups"][li][3]:
+                t, m = sub["t"], sub.get("map", {})
+                if t in (1, 8):
+                    new.update(m[g] for g in glyphs if g in m)
+                elif t in (2, 3):
+                    for g in glyphs:
+                        new.update(m.get(g, ()))
+                elif t == 4:
+                    for g in glyphs:
+                        new.update(lig for comps, lig in m.get(g, ()) if all(c in glyphs for c in comps))
+        if new <= glyphs:
+            return glyphs
+        glyphs |= new
+
+
+def ot_keep(sub, keep):
+    """a subtable's glyphs those of keep alone (a coverage of none: the subtable dropped, None)"""
+    t, gsub = sub["t"], sub["gsub"]
+    out = dict(sub)
+    if t == "ctx":
+        if sub["fmt"] == 1:
+            out["rules"] = {g: [r for r in rs if all(x in keep for x in r[0] + r[1] + r[2])] for g, rs in sub["rules"].items() if g in keep}
+            out["rules"] = {g: rs for g, rs in out["rules"].items() if rs}
+            return out if out["rules"] else None
+        if sub["fmt"] == 2:
+            out["cov"] = [g for g in sub["cov"] if g in keep]
+            for k in ("bcd", "icd", "lcd"):
+                out[k] = {g: c for g, c in sub[k].items() if g in keep}
+            return out if out["cov"] else None
+        for k in ("back", "input", "ahead"):
+            out[k] = [[g for g in cov if g in keep] for cov in sub[k]]
+            if not all(out[k]):
+                return None
+        return out
+    if not gsub and t == 2 and sub["fmt"] == 2:
+        out["cov"] = [g for g in sub["cov"] if g in keep]
+        out["cd1"] = {g: c for g, c in sub["cd1"].items() if g in keep}
+        out["cd2"] = {g: c for g, c in sub["cd2"].items() if g in keep}
+        return out if out["cov"] else None
+    if not gsub and t == 2:
+        out["pairs"] = {g: {h: v for h, v in row.items() if h in keep} for g, row in sub["pairs"].items() if g in keep}
+        out["pairs"] = {g: row for g, row in out["pairs"].items() if row}
+        return out if out["pairs"] else None
+    if not gsub and t in (4, 5, 6):
+        out["marks"] = {g: v for g, v in sub["marks"].items() if g in keep}
+        out["bases"] = {g: v for g, v in sub["bases"].items() if g in keep}
+        return out if out["marks"] and out["bases"] else None
+    m = sub["map"]
+    if gsub and t == 4:
+        out["map"] = {g: [(c, lig) for c, lig in ligs if lig in keep and all(x in keep for x in c)] for g, ligs in m.items() if g in keep}
+        out["map"] = {g: ligs for g, ligs in out["map"].items() if ligs}
+    elif gsub and t in (2, 3):
+        out["map"] = {g: s for g, s in m.items() if g in keep and all(x in keep for x in s)}
+    elif gsub:
+        out["map"] = {g: s for g, s in m.items() if g in keep and s in keep}
+    else:
+        out["map"] = {g: v for g, v in m.items() if g in keep}
+    if gsub and t == 8:
+        out["back"] = [[g for g in cov if g in keep] for cov in sub["back"]]
+        out["ahead"] = [[g for g in cov if g in keep] for cov in sub["ahead"]]
+        if not all(out["back"]) or not all(out["ahead"]):
+            return None
+    return out if out["map"] else None
+
+
+class OTW:
+    """a part of an OpenType table being written: its bytes, and its offsets to fill with where
+    each part it names goes -- after it, in the order named, from its own start"""
+    def __init__(self):
+        self.b = bytearray()
+        self.links = []
+
+    def u16(self, *vs):
+        for v in vs:
+            self.b += struct.pack(">H", v & 0xFFFF)
+        return self
+
+    def tag(self, t):
+        self.b += t.encode("latin-1")
+        return self
+
+    def off(self, part, wide=False):
+        self.links.append((len(self.b), wide, part))
+        self.b += b"\0" * (4 if wide else 2)
+        return self
+
+    def bytes(self):
+        out = bytearray(self.b)
+        for at, wide, part in self.links:
+            if part is None:
+                continue
+            if not wide and len(out) > 0xFFFF:
+                raise SystemExit("gen-font: a layout table's offset is past 64K")
+            struct.pack_into(">I" if wide else ">H", out, at, len(out))
+            out += part.bytes()
+        return bytes(out)
+
+
+def otw_coverage(glyphs):
+    """a Coverage table of glyphs, in its smaller format"""
+    gl = sorted(set(glyphs))
+    runs = []
+    for g in gl:
+        if runs and runs[-1][1] == g - 1:
+            runs[-1][1] = g
+        else:
+            runs.append([g, g])
+    w = OTW()
+    if 6 * len(runs) < 2 * len(gl):
+        w.u16(2, len(runs))
+        k = 0
+        for a, b in runs:
+            w.u16(a, b, k)
+            k += b - a + 1
+    else:
+        w.u16(1, len(gl), *gl)
+    return w
+
+
+def otw_classdef(cd):
+    """a ClassDef table of {glyph: class}, as ranges"""
+    runs = []
+    for g in sorted(cd):
+        if runs and runs[-1][1] == g - 1 and runs[-1][2] == cd[g]:
+            runs[-1][1] = g
+        else:
+            runs.append([g, g, cd[g]])
+    w = OTW().u16(2, len(runs))
+    for a, b, c in runs:
+        w.u16(a, b, c)
+    return w
+
+
+def otw_value(w, v, fmt):
+    """a ValueRecord of fmt: its placements and advances, its Device offsets null"""
+    for k in range(8):
+        if fmt & (1 << k):
+            w.u16(v[k] if k < 4 else 0)
+
+
+def otw_anchor(a):
+    return None if a is None else OTW().u16(1, a[0], a[1])
+
+
+def otw_rule(rule, chain, cls=False):
+    back, inp, ahead, recs = rule
+    w = OTW()
+    if chain:
+        w.u16(len(back), *back).u16(len(inp) + 1, *inp).u16(len(ahead), *ahead).u16(len(recs))
+    else:
+        w.u16(len(inp) + 1, len(recs), *inp)
+    for si, li in recs:
+        w.u16(si, li)
+    return w
+
+
+def otw_ruleset(rules, chain):
+    w = OTW().u16(len(rules))
+    for r in rules:
+        w.off(otw_rule(r, chain))
+    return w
+
+
+def otw_sub(sub, gsub):
+    """a subtable written: GSUB's (gsub) or GPOS's"""
+    t, w = sub["t"], OTW()
+    if t == "ctx":
+        chain = sub["chain"]
+        if sub["fmt"] == 1:
+            gl = sorted(sub["rules"])
+            w.u16(1).off(otw_coverage(gl)).u16(len(gl))
+            for g in gl:
+                w.off(otw_ruleset(sub["rules"][g], chain))
+        elif sub["fmt"] == 2:
+            w.u16(2).off(otw_coverage(sub["cov"]))
+            if chain:
+                w.off(otw_classdef(sub["bcd"])).off(otw_classdef(sub["icd"])).off(otw_classdef(sub["lcd"]))
+            else:
+                w.off(otw_classdef(sub["icd"]))
+            w.u16(len(sub["sets"]))
+            for rs in sub["sets"]:
+                w.off(otw_ruleset(rs, chain) if rs else None)
+        else:
+            w.u16(3)
+            if chain:
+                for k in ("back", "input", "ahead"):
+                    w.u16(len(sub[k]))
+                    for cov in sub[k]:
+                        w.off(otw_coverage(cov))
+                w.u16(len(sub["records"]))
+            else:
+                w.u16(len(sub["input"]), len(sub["records"]))
+                for cov in sub["input"]:
+                    w.off(otw_coverage(cov))
+            for si, li in sub["records"]:
+                w.u16(si, li)
+        return w
+    if gsub:
+        m = sub["map"]
+        gl = sorted(m)
+        if t == 1:
+            w.u16(2).off(otw_coverage(gl)).u16(len(gl), *[m[g] for g in gl])
+        elif t in (2, 3):
+            w.u16(1).off(otw_coverage(gl)).u16(len(gl))
+            for g in gl:
+                w.off(OTW().u16(len(m[g]), *m[g]))
+        elif t == 4:
+            w.u16(1).off(otw_coverage(gl)).u16(len(gl))
+            for g in gl:
+                ls = OTW().u16(len(m[g]))
+                for comps, lig in m[g]:
+                    ls.off(OTW().u16(lig, len(comps) + 1, *comps))
+                w.off(ls)
+        elif t == 8:
+            w.u16(1).off(otw_coverage(gl))
+            for k in ("back", "ahead"):
+                w.u16(len(sub[k]))
+                for cov in sub[k]:
+                    w.off(otw_coverage(cov))
+            w.u16(len(gl), *[m[g] for g in gl])
+        return w
+    if t == 1:
+        m, vf = sub["map"], sub["vf"]
+        gl = sorted(m)
+        w.u16(2).off(otw_coverage(gl)).u16(vf, len(gl))
+        for g in gl:
+            otw_value(w, m[g], vf)
+    elif t == 2 and sub["fmt"] == 1:
+        p = sub["pairs"]
+        gl = sorted(p)
+        w.u16(1).off(otw_coverage(gl)).u16(sub["vf1"], sub["vf2"], len(gl))
+        for g in gl:
+            ps = OTW().u16(len(p[g]))
+            for h in sorted(p[g]):
+                ps.u16(h)
+                otw_value(ps, p[g][h][0], sub["vf1"])
+                otw_value(ps, p[g][h][1], sub["vf2"])
+            w.off(ps)
+    elif t == 2:
+        mx = sub["matrix"]
+        w.u16(2).off(otw_coverage(sub["cov"])).u16(sub["vf1"], sub["vf2"])
+        w.off(otw_classdef(sub["cd1"])).off(otw_classdef(sub["cd2"])).u16(len(mx), len(mx[0]) if mx else 0)
+        for row in mx:
+            for v1, v2 in row:
+                otw_value(w, v1, sub["vf1"])
+                otw_value(w, v2, sub["vf2"])
+    elif t == 3:
+        m = sub["map"]
+        gl = sorted(m)
+        w.u16(1).off(otw_coverage(gl)).u16(len(gl))
+        for g in gl:
+            w.off(otw_anchor(m[g][0])).off(otw_anchor(m[g][1]))
+    elif t in (4, 5, 6):
+        marks, bases, nc = sub["marks"], sub["bases"], sub["nclass"]
+        ml, bl = sorted(marks), sorted(bases)
+        w.u16(1).off(otw_coverage(ml)).off(otw_coverage(bl)).u16(nc)
+        ma = OTW().u16(len(ml))
+        for g in ml:
+            ma.u16(marks[g][0]).off(otw_anchor(marks[g][1]))
+        ba = OTW().u16(len(bl))
+        for g in bl:
+            if t == 5:
+                la = OTW().u16(len(bases[g]))
+                for comp in bases[g]:
+                    for a in comp:
+                        la.off(otw_anchor(a))
+                ba.off(la)
+            else:
+                for a in bases[g]:
+                    ba.off(otw_anchor(a))
+        w.off(ma).off(ba)
+    return w
+
+
+def ot_subset(tab, keep, remap, keep_feats, gsub, lookup_map):
+    """a GSUB or GPOS restricted to the kept features, the lookups they use (renumbered by
+    lookup_map) and the glyphs kept (renumbered by remap): its bytes"""
+    def rg(g):
+        return remap[g]
+
+    def re_sub(sub):
+        """a kept subtable's glyphs (and its rules' lookups) renumbered"""
+        t, out = sub["t"], dict(sub)
+        if t == "ctx":
+            def rule(r, glyphs):
+                back, inp, ahead, recs = r
+                f = (lambda xs: [rg(x) for x in xs]) if glyphs else list
+                return (f(back), f(inp), f(ahead), [(si, lookup_map[li]) for si, li in recs if li in lookup_map])
+            if sub["fmt"] == 1:
+                out["rules"] = {rg(g): [rule(r, True) for r in rs] for g, rs in sub["rules"].items()}
+            elif sub["fmt"] == 2:
+                out["cov"] = [rg(g) for g in sub["cov"]]
+                for k in ("bcd", "icd", "lcd"):
+                    out[k] = {rg(g): c for g, c in sub[k].items()}
+                out["sets"] = [[rule(r, False) for r in rs] for rs in sub["sets"]]
+            else:
+                for k in ("back", "input", "ahead"):
+                    out[k] = [[rg(g) for g in cov] for cov in sub[k]]
+                out["records"] = [(si, lookup_map[li]) for si, li in sub["records"] if li in lookup_map]
+            return out
+        if not gsub and t == 2 and sub["fmt"] == 2:
+            out["cov"] = [rg(g) for g in sub["cov"]]
+            out["cd1"] = {rg(g): c for g, c in sub["cd1"].items()}
+            out["cd2"] = {rg(g): c for g, c in sub["cd2"].items()}
+            return out
+        if not gsub and t == 2:
+            out["pairs"] = {rg(g): {rg(h): v for h, v in row.items()} for g, row in sub["pairs"].items()}
+            return out
+        if t in (4, 5, 6) and not gsub:
+            out["marks"] = {rg(g): v for g, v in sub["marks"].items()}
+            out["bases"] = {rg(g): v for g, v in sub["bases"].items()}
+            return out
+        m = sub["map"]
+        if gsub and t == 4:
+            out["map"] = {rg(g): [([rg(c) for c in comps], rg(lig)) for comps, lig in ligs] for g, ligs in m.items()}
+        elif gsub and t in (2, 3):
+            out["map"] = {rg(g): [rg(x) for x in s] for g, s in m.items()}
+        elif gsub and t in (1, 8):
+            out["map"] = {rg(g): rg(s) for g, s in m.items()}
+        else:
+            out["map"] = {rg(g): v for g, v in m.items()}
+        if t == 8 and gsub:
+            out["back"] = [[rg(g) for g in cov] for cov in sub["back"]]
+            out["ahead"] = [[rg(g) for g in cov] for cov in sub["ahead"]]
+        return out
+    feats, feat_map = [], {}
+    for k, (tag, idx) in enumerate(tab["features"]):
+        if tag in keep_feats:
+            feat_map[k] = len(feats)
+            feats.append((tag, [lookup_map[i] for i in idx if i in lookup_map]))
+
+    def langsys(ls):
+        if ls is None:
+            return None
+        req, idx = ls
+        return OTW().u16(0, feat_map.get(req, 0xFFFF) if req != 0xFFFF else 0xFFFF).u16(
+            len([i for i in idx if i in feat_map]), *[feat_map[i] for i in idx if i in feat_map])
+    sl = OTW().u16(len(tab["scripts"]))
+    for st in sorted(tab["scripts"]):
+        default, langs = tab["scripts"][st]
+        s = OTW().off(langsys(default)).u16(len(langs))
+        for lt in sorted(langs):
+            s.tag(lt).off(langsys(langs[lt]))
+        sl.tag(st).off(s)
+    fl = OTW().u16(len(feats))
+    for tag, idx in feats:
+        fl.tag(tag).off(OTW().u16(0, len(idx), *idx))
+    ll = OTW().u16(len(lookup_map))
+    for li in sorted(lookup_map, key=lambda i: lookup_map[i]):
+        t, flag, mfs, subs = tab["lookups"][li]
+        kept = [re_sub(s) for s in (ot_keep(s, keep) for s in subs) if s is not None]
+        lk = OTW().u16(t, flag, len(kept))
+        for s in kept:
+            lk.off(otw_sub(s, gsub))
+        if flag & 0x10:
+            lk.u16(mfs)
+        ll.off(lk)
+    return OTW().u16(1, 0).off(sl).off(fl).off(ll).bytes()
+
+
+def ot_subset_gdef(gdef, keep, remap):
+    """a GDEF restricted to the glyphs kept, renumbered: its bytes"""
+    def cd(m):
+        return {remap[g]: c for g, c in m.items() if g in keep}
+    w = OTW().u16(1, 2 if gdef["sets"] else 0).off(otw_classdef(cd(gdef["classes"])) if gdef["classes"] else None)
+    w.u16(0, 0).off(otw_classdef(cd(gdef["attach"])) if gdef["attach"] else None)
+    if gdef["sets"]:
+        ms = OTW().u16(1, len(gdef["sets"]))
+        for cov in gdef["sets"]:
+            ms.off(otw_coverage([remap[g] for g in cov if g in keep]), wide=True)
+        w.off(ms)
+    return w.bytes()
+
+
+def subset(path, web=None, cps_of=None, only=None, layout=True, kern=True, curs=False):
     """a TrueType font of the code points the script lists (or only those of only): the
-    tables the painter reads; for the web (web, its family's name), the tables a sanitizer
-    asks for besides. With cps_of, each glyph's bytes are added to the block of the first
-    code point that needs them (cps_of: block of a code point -> its bytes)"""
+    tables the painter reads (the layout tables with layout; no kern table without kern; a
+    cursive attachment of its own with curs); for the web (web, its family's name), the
+    tables a sanitizer asks for besides. With cps_of, each glyph's bytes are added to the
+    block of the first code point that needs them (cps_of: block of a code point -> its
+    bytes)"""
     f = Font(path)
     listed = only or CODEPOINTS
     # a code point the font has no glyph for but has its canonical decomposition, HarfBuzz
@@ -816,6 +1533,15 @@ def subset(path, web=None, cps_of=None, only=None):
         n = add(cpmap[c])
         if cps_of is not None:
             cps_of[c] = cps_of.get(c, 0) + n + 12
+    # the layout tables (layout): the glyphs the features HarfBuzz applies by default can put in
+    # the place of the subset's (a ligature, a contextual alternate, a joining form) join it
+    gsub = ot_read(f, "GSUB") if layout else None
+    gpos = ot_read(f, "GPOS") if layout else None
+    gdef = ot_read_gdef(f) if layout else None
+    if gsub:
+        sub_used = ot_used(gsub, GSUB_KEEP)
+        for g in sorted(ot_closure(gsub, sub_used, {g for g in gids if not isinstance(g, tuple)})):
+            add(g)
     glyphs = [encode(g) for g in gids]
     # loca (long) and glyf
     loca, glyf = bytearray(), bytearray()
@@ -837,16 +1563,47 @@ def subset(path, web=None, cps_of=None, only=None):
     if web:
         m = f.tables["maxp"][0]
         maxp = struct.pack(">IH", 0x00010000, len(gids)) + f.d[m + 6:m + 32]
-    hmtx = b"".join(struct.pack(">Hh", a, 0) for a in advances)
+    # the left side bearings: for the web each glyph's xMin, as a font's are (FreeType places a
+    # TrueType glyph by its bearing, moving its outline by the difference); the built-in faces'
+    # 0, which the painter does not read
+    bearings = [struct.unpack(">h", g[2:4])[0] if web and len(g) >= 10 else 0 for g in glyphs]
+    hmtx = b"".join(struct.pack(">Hh", a, b) for a, b in zip(advances, bearings))
     cmap = cmap4([(c, newid[cpmap[c]]) for c in cps])
-    # kern: format 0, the pairs of the subset's code points' glyphs, in order
+    tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
+              ("loca", bytes(loca)), ("maxp", maxp)]
+    # GSUB, GPOS and GDEF: the kept features, the lookups they use, the glyphs of the subset
+    keep = {g for g in newid if not isinstance(g, tuple)}
+    remap = {g: newid[g] for g in keep}
+    if curs and gpos:
+        # a cursive attachment the font has not (no font on the machine has one): each base
+        # glyph's entry at its advance and its exit at its origin, at heights that step with its
+        # glyph's number, so that a joined run climbs and falls as HarfBuzz chains it (right to
+        # left, the last glyph on the baseline), a feature of every language system
+        classes = gdef["classes"] if gdef else {}
+        anchors = {g: ((f.advance(g), 100 + 150 * (g % 4)), (0, 50 + 120 * (g % 3)))
+                   for g in sorted(keep) if classes.get(g, 1) != 3 and f.advance(g) > 0}
+        gpos["lookups"].append((3, 0x0009, None, [{"t": 3, "map": anchors, "gsub": False}]))
+        gpos["features"].append(("curs", [len(gpos["lookups"]) - 1]))
+        for default, langs in gpos["scripts"].values():
+            for ls in [default] + list(langs.values()):
+                if ls is not None:
+                    ls[1].append(len(gpos["features"]) - 1)
+    if gpos:
+        used = ot_used(gpos, GPOS_KEEP)
+        tables.append(("GPOS", ot_subset(gpos, keep, remap, GPOS_KEEP, False, {li: k for k, li in enumerate(sorted(used))})))
+    if gsub:
+        tables.append(("GSUB", ot_subset(gsub, keep, remap, GSUB_KEEP, True, {li: k for k, li in enumerate(sorted(sub_used))})))
+    if gdef:
+        tables.append(("GDEF", ot_subset_gdef(gdef, keep, remap)))
+    # kern: format 0, the pairs of the subset's code points' glyphs, in order (HarfBuzz applies
+    # them to a run whose script's GPOS features have no kern: Liberation's Hebrew)
     mapped = {newid[cpmap[c]] for c in cps}
     pairs = sorted((newid[l], newid[r], v) for (l, r), v in kern_pairs(f).items()
                    if l in newid and r in newid and newid[l] in mapped and newid[r] in mapped and v)
-    kbody = struct.pack(">HHHH", len(pairs), *bsearch(len(pairs), 6)) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
-    kern = struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody
-    tables = [("cmap", cmap), ("glyf", bytes(glyf)), ("head", head), ("hhea", hhea), ("hmtx", hmtx),
-              ("kern", kern), ("loca", bytes(loca)), ("maxp", maxp)]
+    if (pairs and kern) or not layout:
+        kbody = struct.pack(">HHHH", len(pairs), *bsearch(len(pairs), 6)) + b"".join(struct.pack(">HHh", l, r, v) for l, r, v in pairs)
+        tables.append(("kern", struct.pack(">HHHHH", 0, 1, 0, 6 + len(kbody), 1) + kbody))
+    tables.sort(key=lambda t: t[0])
     if web:
         o = f.tables["OS/2"]
         post = struct.pack(">IIhhIIIII", 0x00030000, 0, -100, 50, 0, 0, 0, 0, 0)
@@ -1360,14 +2117,18 @@ def ucd_ranges(props, minus_props=(), minus=()):
 
 
 def main():
-    if len(sys.argv) in (5, 6) and sys.argv[1] == "--web":
-        kind = sys.argv[5] if len(sys.argv) == 6 else "truetype"
-        if kind not in ("truetype", "cff", "cff2", "cid"):
-            raise SystemExit("gen-font: --web's outlines are truetype, cff, cff2 or cid, not %s" % kind)
-        if kind == "truetype":
-            blob, _, _, _ = subset(sys.argv[2], sys.argv[4])
+    if len(sys.argv) in (5, 6, 7) and sys.argv[1] == "--web":
+        kind = sys.argv[5] if len(sys.argv) >= 6 else "truetype"
+        if kind not in ("truetype", "layout", "gpos", "curs", "cff", "cff2", "cid"):
+            raise SystemExit("gen-font: --web's outlines are truetype, layout, gpos, curs, cff, cff2 or cid, not %s" % kind)
+        only = None
+        if len(sys.argv) == 7:
+            only = sorted({c for r in sys.argv[6].split(",") for c in range(int(r.split("-")[0], 16), int(r.split("-")[-1], 16) + 1)})
+        if kind in ("truetype", "layout", "gpos", "curs"):
+            blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=only, layout=kind != "truetype", kern=kind not in ("gpos", "curs"),
+                                   curs=kind == "curs")
         else:
-            blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=WEB_CODEPOINTS)
+            blob, _, _, _ = subset(sys.argv[2], sys.argv[4], only=WEB_CODEPOINTS, layout=False)
             blob = otf(blob, kind, sys.argv[4], NOTICES[source_of(sys.argv[2])])
         with open(sys.argv[3], "wb") as out:
             out.write(woff(blob) if sys.argv[3].endswith(".woff") else blob)

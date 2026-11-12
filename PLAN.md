@@ -1225,6 +1225,51 @@ be built side by side and merged without touching each other's.
   is found a row at a time, each compared whole first, and a clip-path's pass reads only the rows
   its context changed, for every box that draws so: `filters` 69, then 54; `clippath` 47, then 14;
   every page's pixels as they were (163 renders, byte for byte).
+- **12v Text shaping** (`src/paint/shape.c`, `src/paint/shape.h` and `src/paint/shape_data.h`,
+  which `tools/gen-shape.pl` writes from perl's Unicode tables; the shaper's entry and font
+  fallback in `src/paint/font.c`, its glyph runs in `src/paint/font.h`; the built-in faces'
+  layout tables by `tools/gen-font.py`'s OpenType subsetter in `src/paint/font_data.h`; runs
+  measured and each text fragment's glyphs in `src/layout/layout.c` and `contracts/layout.pl`;
+  the glyphs drawn in `src/paint/paint.c`), measured in Chromium first, HarfBuzz's and Blink's
+  sources deciding where it left room:
+  - text shaped as HarfBuzz shapes it for Chromium: the normalizer (decomposed and composed by
+    the face's cmap, marks ordered by their classes), the plan of each font, script and
+    direction (its features in the shaper's stages: ccmp, locl, the Arabic joining forms,
+    rlig, calt, clig, liga, rclt; kern, mark, mkmk, curs, dist, abvm, blwm), GSUB's eight
+    lookup types and GPOS's nine, GDEF's classes and the lookup flags, the kern table where a
+    run's script has no GPOS kern, Arabic joining from the context about a run, Hebrew's and
+    Thai's own steps; 553 strings in 12 of the machine's fonts and a cursive one of the tests'
+    own shaped as HarfBuzz 15 shapes them, glyph for glyph (`tests/exec/shaping`), a mark
+    taking its base's offset across the line as it is attached (a cursive chain's, if that
+    came first), as HarfBuzz 15 has it;
+  - the built-in faces keep their GDEF, GSUB and GPOS, cut to their glyphs and those their
+    substitutions reach; `--web ... layout`, `gpos` and `curs` write web fonts with them (the
+    last with a cursive attachment of its own, which no font on the machine has);
+  - font fallback as Blink's: a grapheme drawn whole by one face, the family's faces first,
+    then the system font for the first code point of the first hole left (a right-to-left
+    run's holes in visual order: its last first), each taking what it draws; a line's height
+    from the fonts its runs used;
+  - layout measures each run of pieces as Blink's ShapeText shapes it (one font, across an
+    inline element's edge unless a margin, border or padding on that side or its
+    vertical-align breaks it; one direction; in the paragraph's text as context): a pair's
+    kerning across an edge on its first glyph, a ligature across one drawn by its first
+    letter's element, letter-spacing turning ligatures off, the kerning before the space a
+    line ends at dropped; each item of a line (a text node's run) placed at its width
+    rounded up to a 64th of a px, as Blink places its LayoutUnits;
+  - each text fragment keeps its run's glyphs (`frag.glyphs`: glyph, face, pen), which paint
+    draws from a cache keyed by face and glyph at Skia's quarter pixel; a fragment with none
+    (a placeholder's, a marker's, text an ellipsis cut) is shaped by paint.
+
+  Gate: `tests/pages/shaping.html`, `shaping-arabic.html` (with `fonts/cursive.ttf`) and
+  `shaping-kern.html` (with `fonts/serif-gpos.ttf`, kerned by GPOS alone), each held to
+  Chromium: their boxes (33, 21 and 15 of them) and their regions pixel by pixel (33, 21 and
+  15); every page's boxes (1,849 of 1,849) and regions (1,170 of 1,170) within the gates; 31
+  pages' golden drawings moved, 25 nearer Chromium's screenshot and 6 by a quarter pixel
+  where other differences hold them off it; `tests/exec/shaping` (valgrind clean);
+  `tests/exec/layout_boxes`, each text fragment's glyphs against its text shaped alone in its
+  direction, a right-to-left paragraph before left-to-right ones of as many pieces. Its cost
+  (`docs/performance.md`): the large page's layout 15.0 ms before, 53.3 ms after, against
+  Chromium's 202.2 ms; paint unchanged.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
@@ -1272,7 +1317,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12u, 12w and 12x merged, each with its own files and gate |
+| 12 The limitations | **in progress**: the packages 12a-12x merged, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks

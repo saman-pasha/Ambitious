@@ -101,13 +101,13 @@ static void pt_fill(amb_canvas *c, double x0, double y0, double x1, double y1, u
         }
 }
 
-/* ---- glyphs, cached by face, size, code point, quarter pixel and slant ---- */
+/* ---- glyphs, cached by the face that draws them, size, glyph, quarter pixel and slant ---- */
 
 typedef struct pt_glyph { uint64_t key; uint32_t off; int32_t w, h, ox, oy; } pt_glyph;
 
-static uint64_t pt_key(int face, double size, uint32_t cp, int quarter, int italic) {
+static uint64_t pt_key(int face, double size, uint32_t gid, int quarter, int slant) {
     uint64_t sz = (uint64_t)(size * 16 + 0.5) & 0xffff;
-    return (uint64_t)(face & 127) << 57 | (uint64_t)(italic & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(cp & 0x1fffff);
+    return (uint64_t)(face & 127) << 57 | (uint64_t)(slant & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(gid & 0x1fffff);
 }
 
 static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
@@ -117,8 +117,8 @@ static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
 
 /* the cached glyph's index in entries, drawn on its first use */
 static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
-                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t cp, int quarter, int italic) {
-    uint64_t key = pt_key(face, size, cp, quarter, italic);
+                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant) {
+    uint64_t key = pt_key(face, size, gid, quarter, slant);
     uint32_t i = pt_slot(table, key);
     while (at(*table, i)) {
         uint32_t e = at(*table, i) - 1;
@@ -130,7 +130,7 @@ static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vecto
     memset(&g, 0, sizeof g);
     g.key = key;
     g.off = (uint32_t)len(*masks);
-    if (amb_glyph_mask(f, face, cp, size, quarter / 4.0, italic, acc, mask, &w, &h, &ox, &oy)) {
+    if (amb_glyph_mask_id(f, face, gid, size, quarter / 4.0, slant, acc, mask, &w, &h, &ox, &oy)) {
         append_range(masks, data(*mask), len(*mask));
         g.w = w;
         g.h = h;
@@ -154,23 +154,67 @@ static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vecto
     return e;
 }
 
+/* a text fragment's glyphs as it is drawn, into run: layout's (its glyphs, as its width was
+   measured), or else its text shaped here (a fragment layout gave none: a placeholder's, alt
+   text's, a marker's), left to right, letter-spacing after each code point and word-spacing
+   after each space; each glyph's face as paint numbers faces (face: the fragment's own) */
+static void pt_run(const layout_tree *t, uint32_t fr, const amb_fonts *f, int face, vector<amb_rglyph> *run) {
+    amb_span gs = t->frag[fr].glyphs;
+    if (gs.len) {
+        const char *p = glyphs_ptr(t, gs);
+        for (size_t o = 0; o + sizeof(amb_rglyph) <= gs.len; o += sizeof(amb_rglyph)) {
+            amb_rglyph g;
+            memcpy(&g, p + o, sizeof g);
+            if (g.face == AMB_RGLYPH_OWN) g.face = (uint16_t)face;
+            push_back(run, g);
+        }
+        return;
+    }
+    vector<char> tx;
+    amb_span sp = t->frag[fr].text;
+    append_range(tx, text_ptr(t, sp), sp.len);
+    double size = t->frag[fr].size, ls = t->frag[fr].spacing, wsp = t->frag[fr].word_spacing;
+    vector<amb_shaped> gl;
+    if (len(tx)) amb_shape(f, face, data(tx), len(tx), 0, len(tx), ls != 0 ? AMB_SHAPE_NOLIGA : 0, &gl);
+    double x = 0;
+    for (size_t k = 0; k < len(gl); k++) {
+        amb_shaped s = at(gl, k);
+        double sc = amb_face_scale(f, s.face, size);
+        amb_rglyph g;
+        memset(&g, 0, sizeof g);
+        g.gid = s.gid;
+        g.face = s.face;
+        g.flags = s.flags;
+        g.x = x + s.dx * sc;
+        g.y = (float)(-s.dy * sc);
+        push_back(run, g);
+        x += s.ax * sc;
+        if (k + 1 < len(gl) && at(gl, k + 1).cluster == s.cluster) continue;
+        /* the cluster's letters and spaces: to the next one's start */
+        uint32_t next = k + 1 < len(gl) ? at(gl, k + 1).cluster : (uint32_t)len(tx);
+        for (size_t i = s.cluster; i < next && i < len(tx);) {
+            uint32_t cp = amb_utf8_next(data(tx), len(tx), &i);
+            x += ls + (cp == ' ' ? wsp : 0);
+        }
+    }
+}
+
+/* a run of glyphs drawn, its pen at x on the baseline: each at its pen (Skia's subpixel
+   position: an eighth of a px added, then the quarter below it, SkGlyphPositionRoundingSpec;
+   its y rounded to a whole px), slanted when slant asks and its face's outlines are upright */
 static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
-                    vector<float> *acc, vector<uint8_t> *mask, const char *s, size_t n, double x, double baseline,
-                    int face, double size, int italic, double ls, double wsp, uint32_t rgba) {
+                    vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, double x, double baseline,
+                    double size, int slant, uint32_t rgba) {
     uint32_t ca = rgba & 0xff, r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
-    int by = (int)floor(baseline - c->oy + 0.5);
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
-    size_t i = 0;
-    uint32_t prev = 0;
-    while (i < n) {
-        uint32_t cp = amb_utf8_next(s, n, &i);
-        if (prev) x += amb_kerning(f, face, prev, cp, size);       /* the pair's kerning, as layout measured it */
-        prev = cp;
-        /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
-        double fx = floor(x + 0.125);
-        int quarter = (int)((x + 0.125 - fx) * 4);
-        uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
+    for (size_t k = 0; k < len(*run); k++) {
+        amb_rglyph rg = at(*run, k);
+        if (rg.flags & AMB_SHAPED_HIDDEN) continue;
+        double gx = x + rg.x, fx = floor(gx + 0.125);
+        int quarter = (int)((gx + 0.125 - fx) * 4);
+        int by = (int)floor(baseline + rg.y - c->oy + 0.5);
+        uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, slant);
         pt_glyph gl = at(*entries, e);
         for (int yy = 0; yy < gl.h; yy++) {
             int Y = by + gl.oy + yy;
@@ -187,26 +231,21 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
                 c->px[p + 2] = (uint8_t)((b * a + c->px[p + 2] * (255 - a)) / 255);
             }
         }
-        x += amb_advance(f, face, cp, size) + ls + (cp == ' ' ? wsp : 0);
     }
 }
 
-/* a text's glyphs' coverage as pt_text draws it, into the mask m (mw px wide and mh rows,
+/* a run's glyphs' coverage as pt_text draws it, into the mask m (mw px wide and mh rows,
    its first row the page's y my0): each pixel the most any glyph covers of it */
 static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table,
-                         vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask, const char *s, size_t n, double x, double baseline,
-                         int face, double size, int italic, double ls, double wsp) {
-    int by = (int)floor(baseline - my0 + 0.5);
-    size_t i = 0;
-    uint32_t prev = 0;
-    while (i < n) {
-        uint32_t cp = amb_utf8_next(s, n, &i);
-        if (prev) x += amb_kerning(f, face, prev, cp, size);
-        prev = cp;
-        /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
-        double fx = floor(x + 0.125);
-        int quarter = (int)((x + 0.125 - fx) * 4);
-        uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
+                         vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, double x, double baseline,
+                         double size, int slant) {
+    for (size_t k = 0; k < len(*run); k++) {
+        amb_rglyph rg = at(*run, k);
+        if (rg.flags & AMB_SHAPED_HIDDEN) continue;
+        double gx = x + rg.x, fx = floor(gx + 0.125);
+        int quarter = (int)((gx + 0.125 - fx) * 4);
+        int by = (int)floor(baseline + rg.y - my0 + 0.5);
+        uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, slant);
         pt_glyph gl = at(*entries, e);
         for (int yy = 0; yy < gl.h; yy++) {
             int Y = by + gl.oy + yy;
@@ -219,7 +258,6 @@ static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const a
                 if (v > at(*m, q)) (*m)[q] = v;
             }
         }
-        x += amb_advance(f, face, cp, size) + ls + (cp == ' ' ? wsp : 0);
     }
 }
 
@@ -2639,12 +2677,12 @@ static int pt_face_of(const layout_tree *t, uint32_t fr, const vector<uint32_t> 
 /* a text fragment's shadows (text-shadow's value), last first: its text offset in the
    shadow's colour, blurred through a canvas of its own when the shadow has a blur */
 static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
-                            vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask) {
-    vector<char> sh, txt;
+                            vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
+                            const vector<amb_rglyph> *run) {
+    vector<char> sh;
     amb_span sp = t->frag[fr].shadows;
     append_range(sh, text_ptr(t, sp), sp.len);
-    sp = t->frag[fr].text;
-    append_range(txt, text_ptr(t, sp), sp.len);
+    int face = pt_face_of(t, fr, webmap), slant = t->frag[fr].italic || amb_face_italic(face);
     vector<size_t> starts;
     size_t i = 0, a, ln;
     while (pt_layer(data(sh), len(sh), &i, &a, &ln)) { push_back(starts, a); push_back(starts, ln); }
@@ -2663,8 +2701,7 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
         if (nv < 2 || (col & 0xff) == 0) continue;
         double x = t->frag[fr].x + v[0], base = t->frag[fr].baseline + v[1], blur = v[2];
         if (blur <= 0) {
-            pt_text(c, f, entries, table, masks, acc, mask, data(txt), len(txt), x, base, pt_face_of(t, fr, webmap), t->frag[fr].size,
-                    t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, col);
+            pt_text(c, f, entries, table, masks, acc, mask, run, x, base, t->frag[fr].size, slant, col);
             continue;
         }
         /* blurred: the text drawn white on black over its box and the blur's reach, that
@@ -2685,8 +2722,7 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
         m.cx1 = mw;
         m.cy1 = my0 + mh;
         resize(&m.px, (size_t)mw * mh * 3);
-        pt_text(&m, f, entries, table, masks, acc, mask, data(txt), len(txt), x - mx0, base, pt_face_of(t, fr, webmap), t->frag[fr].size,
-                t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, 0xffffffff);
+        pt_text(&m, f, entries, table, masks, acc, mask, run, x - mx0, base, t->frag[fr].size, slant, 0xffffffff);
         vector<float> cov;
         resize(&cov, (size_t)mw * mh);
         for (size_t k = 0; k < (size_t)mw * mh; k++) cov[k] = at(m.px, k * 3) / 255.0f;
@@ -2906,11 +2942,12 @@ static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb
     if (k == LAYOUT_FRAG_KIND_MARKER && (pt_disclosure(t, fr, c, acc) || pt_symbol(t, fr, c))) return;
     /* a fragment outside the canvas's window: nothing of it to draw */
     if (t->frag[fr].y > c->oy + c->h || t->frag[fr].y + t->frag[fr].h < c->oy) return;
-    amb_span sp = t->frag[fr].text;
     double size = t->frag[fr].size, base = t->frag[fr].baseline;
-    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask);
-    pt_text(c, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, base,
-            pt_face_of(t, fr, webmap), size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing, t->frag[fr].fill);
+    int face = pt_face_of(t, fr, webmap);
+    vector<amb_rglyph> run;
+    pt_run(t, fr, f, face, &run);
+    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask, &run);
+    pt_text(c, f, entries, table, masks, acc, mask, &run, t->frag[fr].x, base, size, t->frag[fr].italic || amb_face_italic(face), t->frag[fr].fill);
     /* the decorations in the text's fill, as Blink resolves their currentcolor */
     uint8_t deco = t->frag[fr].decoration;
     double th = floor(size / 16 + 0.5);
@@ -3022,9 +3059,11 @@ static void pt_text_bg(PCTX, uint32_t b) {
             x = t->box[x].parent;
         }
         if (!in) continue;
-        amb_span sp = t->frag[fr].text;
-        pt_text_mask(&m, (int)c->w, k.oy, kh, f, entries, table, masks, acc, mask, text_ptr(t, sp), sp.len, t->frag[fr].x, t->frag[fr].baseline,
-                     pt_face_of(t, fr, webmap), t->frag[fr].size, t->frag[fr].italic, t->frag[fr].spacing, t->frag[fr].word_spacing);
+        int face = pt_face_of(t, fr, webmap);
+        vector<amb_rglyph> run;
+        pt_run(t, fr, f, face, &run);
+        pt_text_mask(&m, (int)c->w, k.oy, kh, f, entries, table, masks, acc, mask, &run, t->frag[fr].x, t->frag[fr].baseline,
+                     t->frag[fr].size, t->frag[fr].italic || amb_face_italic(face));
     }
     /* laid on through it */
     int kx0, ky0, kx1, ky1;
@@ -4499,8 +4538,25 @@ static void pt_zoom_tree(const layout_tree *t, double z, layout_tree *zt) {
     for (uint32_t i = 1; i < t->frag_len; i++) {
         frag_new(zt);
         amb_span sh = pt_zoom_span(zt, t->frag[i].shadows, z);
+        /* its glyphs' places scaled (shaping's positions go as the size goes) */
+        amb_span gs = t->frag[i].glyphs, zg = { 0, 0 };
+        if (gs.len) {
+            vector<char> raw, out;
+            append_range(raw, glyphs_ptr(t, gs), gs.len);
+            for (size_t o = 0; o + sizeof(amb_rglyph) <= len(raw); o += sizeof(amb_rglyph)) {
+                amb_rglyph g;
+                char one[sizeof(amb_rglyph)];
+                memcpy(&g, data(raw) + o, sizeof g);
+                g.x *= z;
+                g.y = (float)(g.y * z);
+                memcpy(one, &g, sizeof g);
+                append_range(out, one, sizeof one);
+            }
+            zg = glyphs_add(zt, data(out), len(out));
+        }
         layout_frag *f = frag_slot(zt, i);
         *f = t->frag[i];
+        f->glyphs = zg;
         f->x *= z;
         f->y *= z;
         f->w *= z;

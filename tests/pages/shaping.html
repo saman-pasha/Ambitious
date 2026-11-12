@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Shaping</title>
+<style>
+/* tests/pages/shaping.html -- text shaped as Chromium shapes it (HarfBuzz's OpenType shaping,
+   src/paint/shape.c): DejaVu's ligatures (fi, fl, ffi, ffl), which letter-spacing turns off;
+   kerning by GPOS, across an inline element's edge where Blink shapes across one (the same
+   font, no margin, border or padding on that side, vertical-align baseline: a colour or a
+   relative offset leaves the pair kerned) and not where it does not; a ligature across an
+   edge drawn by the element its first letter is in, the other's box empty; marks placed by
+   the face's GPOS (mark to base, mark to mark), by the fallback face's where the face has no
+   glyph for the letter; Hebrew's points; a paragraph that wraps where Chromium wraps it. The
+   spans' boxes are held to Chromium's (tests/pages/shaping.chromium), their drawing region
+   by region, pixel by pixel (shaping.shot.png, shaping.regions): each glyph at Chromium's
+   quarter of a pixel, a fragment after another at its width rounded up to a 64th of a px. */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; white-space: nowrap; }
+.dv { font-family: "DejaVu Sans"; }
+.dvs { font-family: "DejaVu Serif"; }
+.big { font-size: 40px; line-height: 48px; }
+.red { color: #c00; }
+.bg { background: #def; }
+</style></head>
+<body>
+<p class=dv><span id=liga>fi fl ffi ffl office afflict</span></p>
+<p class=dv><span id=liga-ls style="letter-spacing: 1px">fi fl ffi office</span></p>
+<p class=dvs><span id=liga-serif>fi fl ffi ffl office</span></p>
+<p class="dv big"><span id=liga-big>fifl ffi</span></p>
+<p class=dv><span id=liga-in>f<span class=red id=liga-in-b>i</span><span id=liga-in-x>x o</span><span class=red id=liga-in-c>ff</span><span id=liga-in-d>ice</span></span></p>
+<p><span id=kern>AVAVA To. Wa Ty LT P.</span></p>
+<p><span id=kern-in>A<span class=red id=kern-in-b>V</span><span id=kern-in-x>A T</span><span class=red id=kern-in-c>o</span></span></p>
+<p class=dv><span id=kern-dv>AVAVA To. Wa Ty LT P.</span></p>
+<p class=dv><span id=kern-dv-in>A<span class=red id=kern-dv-in-b>V</span><span id=kern-dv-in-x>A</span></span></p>
+<p>A<span class=bg id=edge-pad style="padding-left: 1px">V</span>A A<span id=edge-mar style="margin-left: 1px">V</span>A A<span class=bg id=edge-bor style="border-left: 1px solid #00c">V</span>A A<span id=edge-va style="vertical-align: 1px">V</span>A A<span id=edge-rel style="position: relative; left: 0">V</span>A</p>
+<p>A<span class=bg id=edge-pad-r style="padding-right: 1px">V</span>A A<b id=edge-b>V</b>A A<span id=edge-sz style="font-size: 17px">V</span>A A<span id=edge-sub style="vertical-align: sub">V</span>A</p>
+<p class="dv big"><span id=marks>q&#x0301;&#x0323; a&#x0302;&#x0301; e&#x0300; &#x1E69;&#x0307; x&#x0303;&#x0304;</span></p>
+<p class=big><span id=marks-lib>q&#x0301;&#x0323; a&#x0302;&#x0301; e&#x0300; x&#x0303;&#x0304;</span></p>
+<p class=big><span id=marks-fb>&#x0561;&#x0301; &#x0563;&#x0308; &#x0256;&#x0303;</span></p>
+<p class=big><span id=hebrew>&#x05E9;&#x05B8;&#x05C1;&#x05DC;&#x05D5;&#x05B9;&#x05DD; &#x05D1;&#x05BC;&#x05B0;</span></p>
+<p class="dv big"><span id=hebrew-dv>&#x05E9;&#x05B8;&#x05C1;&#x05DC;&#x05D5;&#x05B9;&#x05DD; &#x05D1;&#x05BC;&#x05B0;</span></p>
+<p class=dv id=wrap style="width: 130px; white-space: normal">office affluent fifty Wave Toffee AVAV To effigy offal</p>
+</body></html>

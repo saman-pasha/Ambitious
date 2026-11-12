@@ -63,9 +63,9 @@ U+1F600 in face 0: drawn by face 29 (U+1F600; a font of 10788068 bytes, 109 unit
 U+1F3FB in face 0: drawn by face 28 (U+1F3FB; a font of 3686360 bytes, 1000 units an em; at 16px 13 + 3 + 2), 16.0000 px
 U+0250 in face 0: drawn by face 30 (U+0250; a font of 393692 bytes, 2048 units an em; at 16px 14 + 3 + 1), 7.1016 px
 U+0531 in face 20: drawn by face 31 (U+0531; a font of 343140 bytes, 2048 units an em; at 16px 15 + 4 + 0), 9.6328 px
-U+E000 in face 0: drawn by face 0 (U+110000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 12.4453 px
-U+200D in face 0: drawn by face 0 (U+0000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
-U+FE0F in face 0: drawn by face 0 (U+0000; a font of 119392 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
+U+E000 in face 0: drawn by face 0 (U+110000; a font of 125276 bytes, 2048 units an em; at 16px 14 + 3 + 1), 12.4453 px
+U+200D in face 0: drawn by face 0 (U+0000; a font of 125276 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
+U+FE0F in face 0: drawn by face 0 (U+0000; a font of 125276 bytes, 2048 units an em; at 16px 14 + 3 + 1), 0.0000 px
 'a‍b' 15.1016 px, 'ab' 15.1016 px
 web oblique (TrueType): face 48, 242 code points, 0 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 125.2266 px (unkerned 125.2266)
 web serif bold (WOFF): face 49, 242 code points, 710 kerning pairs; at 16px ascent 15 descent 4 gap 0; 'AVAVAV To. Wa' 132.6250 px (unkerned 142.1094)

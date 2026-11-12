@@ -59,6 +59,9 @@ quirks-tables: 99 of 99 boxes within 1px of Chromium's
 roundimg: 10 of 10 boxes within 1px of Chromium's
 scripts: 22 of 22 boxes within 1px of Chromium's
 selectors: 21 of 21 boxes within 1px of Chromium's
+shaping-arabic: 21 of 21 boxes within 1px of Chromium's
+shaping-kern: 15 of 15 boxes within 1px of Chromium's
+shaping: 33 of 33 boxes within 1px of Chromium's
 sizing: 31 of 31 boxes within 1px of Chromium's
 sticky-inline: 33 of 33 boxes within 1px of Chromium's
 sticky: 41 of 41 boxes within 1px of Chromium's

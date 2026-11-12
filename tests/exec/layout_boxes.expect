@@ -130,9 +130,9 @@ a grid item placed by line and span (ok, invariants: 0 broken)
     line 8,26 100x18 baseline 40: [text 8+8 'b']
   #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
 vertical-align: super and middle (ok, invariants: 0 broken)
-  #b inline_block: content 22.6667,16 10x30; margins 0 0 0 0; width declared of 784
+  #b inline_block: content 22.6719,16 10x30; margins 0 0 0 0; width declared of 784
   #p block: content 8,16 784x30; margins 16 0 16 0; width fill of 784
-    line 8,16 784x30 baseline 34.672: [text 8+8 'x'] [text 16+6.66667 '2'] [atomic 22.6667+10 '']
+    line 8,16 784x30 baseline 34.672: [text 8+8 'x'] [text 16+6.66667 '2'] [atomic 22.6719+10 '']
 min-height and max-height (ok, invariants: 0 broken)
   #a block: content 8,8 784x50; margins 0 0 0 0; width fill of 784
     line 8,8 784x18 baseline 22: [text 8+8 'x']
@@ -157,12 +157,12 @@ a word hyphenated (ok, invariants: 0 broken)
     line 8,34 100x18 baseline 48: [text 8+19.5469 'ble']
 right-to-left text (ok, invariants: 0 broken)
   #a block: content 8,16 200x18; margins 16 584 16 0; width declared of 784
-    line 8,16 200x18 baseline 30: [text 134.773+20.4297 'def'] [text 159.203+22.5938 'גבא'] [text 185.797+22.2031 'abc']
+    line 8,16 200x18 baseline 30: [text 134.766+20.4375 'def'] [text 159.203+22.5938 'גבא'] [text 185.797+22.2031 'abc']
 right-to-left brackets, mirrored; numbers and isolates (ok, invariants: 0 broken)
   #a block: content 8,16 784x18; margins 16 0 16 0; width fill of 784
-    line 8,16 784x18 baseline 30: [text 713.758+16 '12'] [text 733.758+58.2422 '(והד) גבא']
+    line 8,16 784x18 baseline 30: [text 713.75+16 '12'] [text 733.75+58.25 '(והד) גבא']
   #b block: content 8,50 784x18; margins 16 0 16 0; width fill of 784
-    line 8,50 784x18 baseline 64: [text 8+15.1016 'ab'] [text 27.1016+17.3125 'בא'] [text 48.4141+4 ','] [text 52.4141+15.1016 'cd'] [text 71.5156+12.4297 'ef']
+    line 8,50 784x18 baseline 64: [text 8+15.1016 'ab'] [text 27.1094+17.3125 'בא'] [text 48.4219+4 ','] [text 52.4219+15.1094 'cd'] [text 71.5312+12.4375 'ef']
 generated content and counters (ok, invariants: 0 broken)
   #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
     line 48,16 744x18 baseline 30: [generated 48+12 '1.'] [text 64+8 'x']
@@ -242,3 +242,8 @@ limited quirks: no strut, but the margins and heights of standards mode (ok, inv
   #a block: content 8,16 784x10; margins 16 0 16 0; width fill of 784
     line 8,16 784x10 baseline 26: [atomic 8+10 '']
   #b inline_block: content 8,16 10x10; margins 0 0 0 0; width declared of 784
+each text fragment's glyphs, its run's in the run's direction (ok):
+  #a 'אבג דהו': 7 glyphs, as its text shaped alone right to left
+  #b 'abc (de)': 8 glyphs, as its text shaped alone left to right
+  #e 'אבג (דה)': 8 glyphs, as its text shaped alone right to left
+  #p 'ab (cd)': 7 glyphs, as its text shaped alone left to right
