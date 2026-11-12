@@ -8137,7 +8137,8 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         if (!el || el >= doc->node_len) continue;
         int svg = t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && lay_is_svg(doc, el);
         uint32_t sid = at(node_style, el) & LAY_SMASK, c0 = sid < len(style_first) ? at(style_first, sid) : 0;
-        int fx = c0 && (lay_has_url(style, c0 + CSS_PROP_FILTER) || lay_has_url(style, c0 + CSS_PROP_CLIP_PATH) || lay_has_url(style, c0 + CSS_PROP_MASK));
+        int fx = c0 && (lay_has_url(style, c0 + CSS_PROP_FILTER) || lay_has_url(style, c0 + CSS_PROP_CLIP_PATH) ||
+                        style->cval[c0 + CSS_PROP_MASK_IMAGE].unit == CSS_UNIT_TEXT);
         if (!svg && !fx) continue;
         if (!len(firsts)) {
             resize(firsts, doc->node_len);

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>CSS Masking's mask longhands: computed values</title>
+<style>body { margin: 8px; font: 10px serif; } div { height: 2px; overflow: hidden; } .k { mask: linear-gradient(black, black) 4px 2px / 10px 20px no-repeat padding-box luminance subtract; }</style></head><body>
+<div id="m1" data-check="mask-image mask-position mask-size mask-repeat mask-origin mask-clip mask-mode mask-composite">initial</div>
+<div id="m2" data-check="mask-position mask-size mask-repeat mask-origin mask-clip mask-mode mask-composite" style="mask:linear-gradient(black, transparent)">a gradient alone</div>
+<div id="m3" data-check="mask-position mask-size mask-repeat mask-origin mask-clip mask-mode mask-composite" class="k">a rule's shorthand</div>
+<div id="m4" data-check="mask-position mask-size mask-repeat mask-origin mask-clip" style="-webkit-mask:linear-gradient(black, transparent) 1px 2px / 3px 4px repeat-y content-box">-webkit-mask</div>
+<div id="m5" data-check="mask-origin mask-clip" style="mask:linear-gradient(black, transparent) padding-box content-box">two boxes</div>
+<div id="m6" data-check="mask-origin mask-clip" style="mask:linear-gradient(black, transparent) no-clip">no-clip</div>
+<div id="m7" data-check="mask-origin mask-clip" style="mask:linear-gradient(black, transparent) content-box no-clip">a box and no-clip</div>
+<div id="m8" data-check="mask-position mask-size mask-repeat mask-origin mask-clip mask-mode mask-composite" style="mask:linear-gradient(black, transparent), radial-gradient(black, transparent) 5px 6px / 7px 8px space alpha intersect">two layers</div>
+<div id="m9" data-check="mask-size" style="mask-size:contain">contain</div>
+<div id="m10" data-check="mask-size" style="mask-size:10px auto, cover">a list</div>
+<div id="m11" data-check="mask-repeat" style="mask-repeat:no-repeat repeat">two repeats</div>
+<div id="m12" data-check="mask-mode" style="mask-mode:luminance, alpha, match-source">modes</div>
+<div id="m13" data-check="mask-composite" style="mask-composite:exclude, add">composites</div>
+<div id="m14" data-check="mask-origin mask-clip" style="-webkit-mask-origin:content-box;-webkit-mask-clip:padding-box">-webkit- longhands</div>
+<div id="m15" data-check="mask-size mask-position" style="-webkit-mask-size:12px 13px;-webkit-mask-position:3px 4px">-webkit- size, position</div>
+<div id="m16" data-check="mask-mode" style="mask-mode:sideways">invalid mode</div>
+<div id="m17" data-check="mask-composite" style="mask-composite:source-over">-webkit-'s operator, not mask-composite's</div>
+<div id="m18" data-check="mask-image" style="mask:none">none</div>
+<div id="m19" data-check="mask-clip mask-origin" style="mask-clip:no-clip;mask-origin:fill-box">fill-box</div>
+<div id="m20" data-check="mask-repeat mask-size" style="mask:linear-gradient(black, transparent) round / 4px">a size alone</div>
+<div id="m21" data-check="mask-image mask-mode" style="mask:url(#k) alpha">a mask element</div>
+<div id="m22" data-check="mask-image" style="mask-image:url('#k'), url(#j)">two mask elements</div>
+<div id="m23" data-check="mask-position" style="mask:url(#k) center">center</div>
+<div id="m24" data-check="mask-position" style="mask:url(#k), url(#j) right 10px top, left 20% bottom 5px">offsets from the sides</div>
+<div id="m25" data-check="mask-repeat" style="mask:url(#k), url(#j) no-repeat no-repeat, url(#i) space round">repeats</div>
+<div id="m26" data-check="mask-size mask-mode" style="mask-image:url(#k), url(#j), url(#i);mask-size:5px 6px, 7px;mask-mode:alpha">lists repeated</div>
+</body></html>

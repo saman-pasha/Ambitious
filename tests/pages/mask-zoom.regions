@@ -1,0 +1,11 @@
+# tests/pages/mask-zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+m 0 0 0 0
+z-down 0 0 156 126
+z-dot 159 0 315 126
+z-tiles 318 0 474 126
+z-stripes 477 0 633 126
+z-place 0 129 156 255
+z-content 159 129 315 255
+z-svg 318 129 474 255
+z-between 477 129 633 255

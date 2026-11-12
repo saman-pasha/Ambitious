@@ -2338,7 +2338,7 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     if (op <= 0) return;
     uint32_t cp = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
     /* its mask (a url() that names no mask ignored, as Chromium ignores it) and its filter's list */
-    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK, "mask") : 0;
+    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK_IMAGE, "mask") : 0;
     uint32_t fcv = c0 && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT ? c0 + CSS_PROP_FILTER : 0;
     int grouped = sv_group_open(SA, x, cp, mk, fcv, op, pw, &w, mm, depth);
     if (grouped < 0) return;
@@ -2908,6 +2908,45 @@ void amb_svg_scene(const dom_document *d, const css_style *st, const vector<uint
 
 /* ---- SVG's effects on a CSS box: the filters, clip and mask its url()s name ---- */
 
+/* the number of items of a comma list (a computed value's: commas inside parentheses and quotes not its) */
+static size_t sv_list_count(const char *s, size_t n) {
+    size_t k = 1;
+    int depth = 0;
+    char q = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if (q) { if (c == q) q = 0; continue; }
+        if (c == '"' || c == '\'') q = c;
+        else if (c == '(') depth++;
+        else if (c == ')' && depth > 0) depth--;
+        else if (c == ',' && depth == 0) k++;
+    }
+    return k;
+}
+/* the item k of a comma list, its white space about it left out: where it begins, its length */
+static void sv_list_item(const char *s, size_t n, size_t k, size_t *a, size_t *l) {
+    size_t i = 0, at0 = 0, item = 0;
+    int depth = 0;
+    char q = 0;
+    for (; i <= n; i++) {
+        char c = i < n ? s[i] : ',';
+        if (q) { if (c == q) q = 0; continue; }
+        if (c == '"' || c == '\'') { q = c; continue; }
+        if (c == '(') { depth++; continue; }
+        if (c == ')' && depth > 0) { depth--; continue; }
+        if ((c == ',' && depth == 0) || i == n) {
+            if (item == k) break;
+            item++;
+            at0 = i + 1;
+        }
+    }
+    size_t e = i < n ? i : n, b = at0;
+    while (b < e && sv_ws(s[b])) b++;
+    while (e > b && sv_ws(s[e - 1])) e--;
+    *a = b;
+    *l = e > b ? e - b : 0;
+}
+
 void amb_svg_effects(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t el, double bw,
                      double bh, vector<char> *out) {
     if (el >= d->node_len || !(bw >= 0 && bh >= 0)) return;
@@ -2957,13 +2996,60 @@ void amb_svg_effects(const dom_document *d, const css_style *st, const vector<ui
         sv_w(out, "\n");
         append_range(out, data(lines), len(lines));
     }
-    /* the mask: one that names no mask masks the box away (CSS Masking 1, 7.1: a layer of transparent black) */
-    uint32_t mcv = c0 + CSS_PROP_MASK;
-    if (st->cval[mcv].unit == CSS_UNIT_TEXT) {
-        uint32_t mk = sv_ref_of(d, st, mcv, "mask");
+    /* the mask's layers (CSS Masking 1, 7), each its kind, its mode and how it composites with those under it */
+    uint32_t mcv = c0 + CSS_PROP_MASK_IMAGE;
+    if (st->cval[mcv].unit != CSS_UNIT_TEXT) return;
+    vector<char> img, pos, siz, rep, org, clp, cmp, mod;
+    amb_span sp = st->cval[mcv].text;
+    append_range(img, text_ptr(st, sp), sp.len);
+    const int lists[7] = { CSS_PROP_MASK_POSITION, CSS_PROP_MASK_SIZE, CSS_PROP_MASK_REPEAT, CSS_PROP_MASK_ORIGIN, CSS_PROP_MASK_CLIP,
+                           CSS_PROP_MASK_COMPOSITE, CSS_PROP_MASK_MODE };
+    for (int q = 0; q < 7; q++) {
+        vector<char> *l = q == 0 ? &pos : q == 1 ? &siz : q == 2 ? &rep : q == 3 ? &org : q == 4 ? &clp : q == 5 ? &cmp : &mod;
+        uint32_t cv = c0 + (uint32_t)lists[q];
+        if (st->cval[cv].unit == CSS_UNIT_TEXT) { amb_span lp = st->cval[cv].text; append_range(*l, text_ptr(st, lp), lp.len); }
+        else if (st->cval[cv].unit == CSS_UNIT_KEYWORD && st->cval[cv].word) { const char *wd = names_ptr(st, st->cval[cv].word); append_range(*l, wd, strlen(wd)); }
+    }
+    size_t nl = sv_list_count(data(img), len(img));
+    for (size_t k = 0; k < nl && k < 32; k++) {
+        size_t ia, il, ma, ml, ca, cl;
+        sv_list_item(data(img), len(img), k, &ia, &il);
+        sv_list_item(data(mod), len(mod), k % sv_list_count(data(mod), len(mod)), &ma, &ml);
+        sv_list_item(data(cmp), len(cmp), k % sv_list_count(data(cmp), len(cmp)), &ca, &cl);
+        const char *ms = data(mod) + ma, *cs = data(cmp) + ca, *is = data(img) + ia;
+        int mode = sv_eq_ci(ms, ml, "alpha") ? 1 : sv_eq_ci(ms, ml, "luminance") ? 2 : 0;
+        int comp = sv_eq_ci(cs, cl, "subtract") ? 1 : sv_eq_ci(cs, cl, "intersect") ? 2 : sv_eq_ci(cs, cl, "exclude") ? 3 : 0;
+        int grad = il > 9 && (memcmp(is, "linear-", 7) == 0 || memcmp(is, "radial-", 7) == 0 || memcmp(is, "repeating-", 10) == 0);
+        if (grad) {
+            /* a gradient: its own lines -- its image (i), position (p), size (s), repeat (r), origin (o) and clip (q) --
+               which paint draws as a background layer's */
+            sv_w(out, "m 3");
+            sv_n(out, mode);
+            sv_n(out, comp);
+            sv_w(out, "\ni ");
+            append_range(out, is, il);
+            static const char *const tags[5] = { "\np ", "\ns ", "\nr ", "\no ", "\nq " };
+            for (int q = 0; q < 5; q++) {
+                vector<char> *l = q == 0 ? &pos : q == 1 ? &siz : q == 2 ? &rep : q == 3 ? &org : &clp;
+                size_t la, ll;
+                sv_list_item(data(*l), len(*l), k % sv_list_count(data(*l), len(*l)), &la, &ll);
+                sv_w(out, tags[q]);
+                append_range(out, data(*l) + la, ll);
+            }
+            sv_w(out, "\n");
+            continue;
+        }
+        /* a mask element's url(): its group, its type the mode's when the mode is not match-source; anything else (none, a
+           url() naming no mask, a picture, which is not fetched) a layer of transparent black, which masks all away (7.1) */
+        size_t end;
+        uint32_t mk = il > 4 && memcmp(is, "url(", 4) == 0 ? sv_url(d, is, il, &end) : 0;
         vector<char> blk;
-        int ok = mk && sv_mask_block(d, st, firsts, f, &blk, &ids, &uses, &work, mk, bb, hb, &w, mm, 0);
-        sv_w(out, ok ? "m 1\ng 1 0 0 1 0\n" : "m 2\n");
+        int ok = mk && sv_is(d, mk, "mask") && sv_mask_block(d, st, firsts, f, &blk, &ids, &uses, &work, mk, bb, hb, &w, mm, 0);
+        if (ok && mode && len(blk) > 2) blk[2] = mode == 1 ? '1' : '0';
+        sv_w(out, ok ? "m 1" : "m 2");
+        sv_n(out, mode);
+        sv_n(out, comp);
+        sv_w(out, ok ? "\ng 1 0 0 1 0\n" : "\n");
         append_range(out, data(blk), len(blk));
     }
 }

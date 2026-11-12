@@ -1933,6 +1933,110 @@ static void pt_area(const layout_tree *t, uint32_t b, const char *w, size_t wn, 
     r[4] = fmax(0, rad[4] - dt); r[5] = fmax(0, rad[5] - dt); r[6] = fmax(0, rad[6] - db); r[7] = fmax(0, rad[7] - db);
 }
 
+/* one layer of a box's background or mask, drawn in box b's areas: its image's text (li: a url(), the box's fetched
+   picture, or a gradient), its position's, size's and repeat's texts, its origin's (the positioning area: the padding box
+   unless it says otherwise; a mask's the border box) and its clip's (the painting area: the border box unless it says
+   otherwise; the box's border box when the layer is clipped to its text, to_text; no-clip none). Each tile placed by the
+   size, position and repeat, as CSS Backgrounds 3 has it, within the painting area */
+static void pt_layer_one(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
+                         const double *rad, const char *li, size_t ll, const char *ps, size_t pn, const char *ss, size_t sn, const char *rs,
+                         size_t rn, const char *os, size_t on, const char *cs, size_t cn, int to_text) {
+    double area[4], ar[8], clip[4], cr[8];
+    if (on) pt_area(t, b, os, on, rad, area, ar);
+    else pt_area(t, b, "padding-box", 11, rad, area, ar);
+    if (cn && !to_text) pt_area(t, b, cs, cn, rad, clip, cr);
+    else pt_area(t, b, "border-box", 10, rad, clip, cr);
+    if (cn && pt_is(cs, cn, "no-clip")) {
+        clip[0] = 0;
+        clip[1] = c->oy;
+        clip[2] = c->w;
+        clip[3] = c->oy + c->h;
+        for (int k = 0; k < 8; k++) cr[k] = 0;
+    }
+    double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
+    double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
+    /* the positioning area moved with the border box's origin snapped to whole pixels, its offsets kept (Blink's
+       BackgroundImageGeometry: a tile at round(box) + offset, resampled there; measured on seven boxes) */
+    {
+        double ox0 = t->box[b].x - t->box[b].pl - t->box[b].bl, oy0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        double zz = c->zoom > 0 ? c->zoom : 1;     /* snapped in CSS px, as Chromium snaps under a zoom */
+        ax += floor(ox0 / zz + 0.5) * zz - ox0;
+        ay += floor(oy0 / zz + 0.5) * zz - oy0;
+    }
+    int rx = 1, ry = 1;
+    if (rn && pt_is(rs, rn, "no-repeat")) { rx = 0; ry = 0; }
+    else if (rn && pt_is(rs, rn, "repeat-x")) ry = 0;
+    else if (rn && pt_is(rs, rn, "repeat-y")) rx = 0;
+    else if (rn && memcmp(rs, "no-repeat", rn < 9 ? rn : 9) == 0) { rx = 0; ry = 0; }
+    int is_url = ll > 4 && memcmp(li, "url(", 4) == 0;
+    size_t off = 0;
+    uint32_t iw = 0, ih = 0;
+    /* an SVG image (src/paint/svg.h): its natural size its tile's (a ratio alone as
+       contain has it, neither the area), drawn at its tile's size */
+    double snw = 0, snh = 0, sr = 0;
+    int svg = is_url && t->box[b].bg_res.index && amb_svg_size_of(nt, t->box[b].bg_res.index, &snw, &snh, &sr);
+    if (svg) {
+        double z = c->zoom > 0 ? c->zoom : 1, cw = aw, ch = ah;
+        if (snw > 0 && snh > 0) { cw = snw * z; ch = snh * z; }
+        else if (sr > 0 && ah > 0) { if (aw / ah > sr) cw = ah * sr; else ch = aw / sr; }
+        iw = (uint32_t)floor(cw + 0.5);
+        ih = (uint32_t)floor(ch + 0.5);
+    } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) return;
+    double tw, th, ox, oy;
+    /* a raster image's natural size in device px: its pixels at the zoom (an SVG's is so already) */
+    double zt = !svg && c->zoom > 0 ? c->zoom : 1;
+    pt_tile_size(ss, sn, iw * zt, ih * zt, aw, ah, &tw, &th);
+    if (tw < 0.5 || th < 0.5) return;
+    vector<uint8_t> spx;
+    uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);
+    if (svg && (spw < 1 || sph < 1 || !amb_svg_raster_of(nt, t->box[b].bg_res.index, spw, sph, &spx))) return;
+    pt_tile_pos(ps, pn, aw, ah, tw, th, &ox, &oy);
+    double x0 = ax + ox, y0 = ay + oy;
+    /* the tiles over the painting area: from the first that reaches it */
+    double sx = x0, sy = y0;
+    if (rx) while (sx > bx0) sx -= tw;
+    if (ry) while (sy > by0) sy -= th;
+    double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
+    c->cx0 = fmax(c->cx0, bx0);
+    c->cy0 = fmax(c->cy0, by0);
+    c->cx1 = fmin(c->cx1, bx1);
+    c->cy1 = fmin(c->cy1, by1);
+    /* tiles that repeat within the painting area: one pattern, sampled across their edges, as Chromium draws them (a
+       gradient's from its tile's raster); a tile alone there drawn as itself */
+    int many = (rx && (bx0 < x0 - 0.01 || bx1 > x0 + tw + 0.01)) || (ry && (by0 < y0 - 0.01 || by1 > y0 + th + 0.01));
+    if (many) {
+        double pclip[4] = { bx0, by0, bx1, by1 };
+        if (svg) pt_pattern(c, &spx, spw, sph, x0, y0, tw, th, rx, ry, pclip, cr);
+        else if (is_url) {
+            vector<uint8_t> tile;
+            append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
+            pt_pattern(c, &tile, iw, ih, x0, y0, tw, th, rx, ry, pclip, cr);
+        } else {
+            vector<uint8_t> gt;
+            uint32_t gw, gh;
+            pt_gradient_tile(li, ll, tw, th, c->zoom, &gt, &gw, &gh);
+            pt_pattern(c, &gt, gw, gh, x0, y0, tw, th, rx, ry, pclip, cr);
+        }
+    }
+    for (double ty = sy; ty < by1 && (ry || ty == sy) && !many; ty += th) {
+        if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
+        for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
+            if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
+            else if (is_url) {
+                vector<uint8_t> tile;
+                append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
+                pt_image(c, &tile, iw, ih, tx, ty, tw, th);
+            } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, cr);
+            if (!rx) break;
+        }
+        if (!ry) break;
+    }
+    c->cx0 = save[0];
+    c->cy0 = save[1];
+    c->cx1 = save[2];
+    c->cy1 = save[3];
+}
+
 static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx,
                       const double *rad, int text_only) {
     vector<char> img, pos, siz, rep, org, clp;
@@ -1953,8 +2057,6 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
     while (pt_layer(data(img), len(img), &i, &a, &ln)) { push_back(layers, a); push_back(layers, ln); }
     size_t nl = len(layers) / 2;
     for (size_t q = nl; q >= 1; q--) {
-        const char *li = data(img) + at(layers, 2 * q - 2);
-        size_t ll = at(layers, 2 * q - 1);
         size_t pa = 0, pl = 0, sa = 0, sl = 0, ra = 0, rl = 0;
         if (len(pos)) pt_nth(data(pos), len(pos), q - 1, &pa, &pl);
         if (len(siz)) pt_nth(data(siz), len(siz), q - 1, &sa, &sl);
@@ -1967,94 +2069,8 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         /* a layer clipped to the text is drawn by pt_text_bg (text_only), over the border box */
         int to_text = cl && pt_is(data(clp) + ca, cl, "text");
         if (to_text != (text_only != 0)) continue;
-        double area[4], ar[8], clip[4], cr[8];
-        if (ol) pt_area(t, b, data(org) + oa, ol, rad, area, ar);
-        else pt_area(t, b, "padding-box", 11, rad, area, ar);
-        if (cl && !to_text) pt_area(t, b, data(clp) + ca, cl, rad, clip, cr);
-        else pt_area(t, b, "border-box", 10, rad, clip, cr);
-        double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
-        double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
-        /* the positioning area moved with the border box's origin snapped to whole pixels, its offsets kept (Blink's
-           BackgroundImageGeometry: a tile at round(box) + offset, resampled there; measured on seven boxes) */
-        {
-            double ox0 = t->box[b].x - t->box[b].pl - t->box[b].bl, oy0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
-            double zz = c->zoom > 0 ? c->zoom : 1;     /* snapped in CSS px, as Chromium snaps under a zoom */
-            ax += floor(ox0 / zz + 0.5) * zz - ox0;
-            ay += floor(oy0 / zz + 0.5) * zz - oy0;
-        }
-        const char *rp = data(rep) + ra;
-        int rx = 1, ry = 1;
-        if (rl && pt_is(rp, rl, "no-repeat")) { rx = 0; ry = 0; }
-        else if (rl && pt_is(rp, rl, "repeat-x")) ry = 0;
-        else if (rl && pt_is(rp, rl, "repeat-y")) rx = 0;
-        else if (rl && memcmp(rp, "no-repeat", rl < 9 ? rl : 9) == 0) { rx = 0; ry = 0; }
-        int is_url = ll > 4 && memcmp(li, "url(", 4) == 0;
-        size_t off = 0;
-        uint32_t iw = 0, ih = 0;
-        /* an SVG image (src/paint/svg.h): its natural size its tile's (a ratio alone as
-           contain has it, neither the area), drawn at its tile's size */
-        double snw = 0, snh = 0, sr = 0;
-        int svg = is_url && t->box[b].bg_res.index && amb_svg_size_of(nt, t->box[b].bg_res.index, &snw, &snh, &sr);
-        if (svg) {
-            double z = c->zoom > 0 ? c->zoom : 1, cw = aw, ch = ah;
-            if (snw > 0 && snh > 0) { cw = snw * z; ch = snh * z; }
-            else if (sr > 0 && ah > 0) { if (aw / ah > sr) cw = ah * sr; else ch = aw / sr; }
-            iw = (uint32_t)floor(cw + 0.5);
-            ih = (uint32_t)floor(ch + 0.5);
-        } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) continue;
-        double tw, th, ox, oy;
-        /* a raster image's natural size in device px: its pixels at the zoom (an SVG's is so already) */
-        double zt = !svg && c->zoom > 0 ? c->zoom : 1;
-        pt_tile_size(data(siz) + sa, sl, iw * zt, ih * zt, aw, ah, &tw, &th);
-        if (tw < 0.5 || th < 0.5) continue;
-        vector<uint8_t> spx;
-        uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);
-        if (svg && (spw < 1 || sph < 1 || !amb_svg_raster_of(nt, t->box[b].bg_res.index, spw, sph, &spx))) continue;
-        pt_tile_pos(data(pos) + pa, pl, aw, ah, tw, th, &ox, &oy);
-        double x0 = ax + ox, y0 = ay + oy;
-        /* the tiles over the painting area: from the first that reaches it */
-        double sx = x0, sy = y0;
-        if (rx) while (sx > bx0) sx -= tw;
-        if (ry) while (sy > by0) sy -= th;
-        double save[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
-        c->cx0 = fmax(c->cx0, bx0);
-        c->cy0 = fmax(c->cy0, by0);
-        c->cx1 = fmin(c->cx1, bx1);
-        c->cy1 = fmin(c->cy1, by1);
-        /* tiles that repeat within the painting area: one pattern, sampled across their edges, as Chromium draws them (a
-           gradient's from its tile's raster); a tile alone there drawn as itself */
-        int many = (rx && (bx0 < x0 - 0.01 || bx1 > x0 + tw + 0.01)) || (ry && (by0 < y0 - 0.01 || by1 > y0 + th + 0.01));
-        if (many) {
-            double clip[4] = { bx0, by0, bx1, by1 };
-            if (svg) pt_pattern(c, &spx, spw, sph, x0, y0, tw, th, rx, ry, clip, cr);
-            else if (is_url) {
-                vector<uint8_t> tile;
-                append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
-                pt_pattern(c, &tile, iw, ih, x0, y0, tw, th, rx, ry, clip, cr);
-            } else {
-                vector<uint8_t> gt;
-                uint32_t gw, gh;
-                pt_gradient_tile(li, ll, tw, th, c->zoom, &gt, &gw, &gh);
-                pt_pattern(c, &gt, gw, gh, x0, y0, tw, th, rx, ry, clip, cr);
-            }
-        }
-        for (double ty = sy; ty < by1 && (ry || ty == sy) && !many; ty += th) {
-            if (ty + th < c->oy || ty > c->oy + c->h) { if (!ry) break; continue; }
-            for (double tx = sx; tx < bx1 && (rx || tx == sx); tx += tw) {
-                if (svg) pt_image(c, &spx, spw, sph, tx, ty, tw, th);
-                else if (is_url) {
-                    vector<uint8_t> tile;
-                    append_range(tile, data(*ipx) + off, (size_t)iw * ih * 4);
-                    pt_image(c, &tile, iw, ih, tx, ty, tw, th);
-                } else pt_gradient(c, li, ll, tx, ty, tw, th, bx0, by0, bx1, by1, cr);
-                if (!rx) break;
-            }
-            if (!ry) break;
-        }
-        c->cx0 = save[0];
-        c->cy0 = save[1];
-        c->cx1 = save[2];
-        c->cy1 = save[3];
+        pt_layer_one(t, nt, b, c, icache, ipx, rad, data(img) + at(layers, 2 * q - 2), at(layers, 2 * q - 1), data(pos) + pa, pl, data(siz) + sa,
+                     sl, data(rep) + ra, rl, data(org) + oa, ol, data(clp) + ca, cl, to_text);
     }
 }
 
@@ -3450,22 +3466,41 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
 
 /* ---- SVG's effects on a box (src/paint/svg.h, amb_svg_effects): the filters, clip and mask its url()s name ---- */
 
-/* the entries of a box's effects (fx's text): for each, its kind ('f', 'c' or 'm'), its number, and where its groups' lines
-   begin and end, into ents (four a entry) */
+/* the entries of a box's effects (fx's text): for each, its kind ('f', 'c' or 'm'), its number, where its lines begin
+   and end, and a mask layer's mode and compositing operator (the line's next two numbers), into ents (PT_FXE a entry) */
+enum { PT_FXE = 6 };
 static void pt_fx_entries(const char *s, size_t n, vector<size_t> *ents) {
     size_t i = 0;
     while (i < n) {
         size_t e = i;
         while (e < n && s[e] != '\n') e++;
-        if (e - i >= 3 && (s[i] == 'f' || s[i] == 'c' || s[i] == 'm') && s[i + 1] == ' ') {
-            if (len(*ents)) (*ents)[len(*ents) - 1] = i;
+        if (e - i >= 3 && (s[i] == 'f' || s[i] == 'c' || s[i] == 'm') && s[i + 1] == ' ' && s[i + 2] >= '0' && s[i + 2] <= '9') {
+            if (len(*ents)) (*ents)[len(*ents) - 3] = i;
             push_back(ents, (size_t)s[i]);
             push_back(ents, (size_t)(s[i + 2] - '0'));
             push_back(ents, e < n ? e + 1 : n);
             push_back(ents, n);
+            push_back(ents, e - i >= 5 && s[i + 4] >= '0' && s[i + 4] <= '9' ? (size_t)(s[i + 4] - '0') : 0);
+            push_back(ents, e - i >= 7 && s[i + 6] >= '0' && s[i + 6] <= '9' ? (size_t)(s[i + 6] - '0') : 0);
         }
         i = e < n ? e + 1 : n;
     }
+}
+
+static void pt_scale_px(const char *s, size_t n, double z, vector<char> *out);
+
+/* a mask layer's line of its own (amb_svg_effects's: its tag t, then its text) within s[from, to): where its text
+   begins, its length; 0 when there is none */
+static size_t pt_fx_line(const char *s, size_t from, size_t to, char t, size_t *a) {
+    size_t i = from;
+    while (i < to) {
+        size_t e = i;
+        while (e < to && s[e] != '\n') e++;
+        if (e - i >= 2 && s[i] == t && s[i + 1] == ' ') { *a = i + 2; return e - i - 2; }
+        i = e < to ? e + 1 : to;
+    }
+    *a = from;
+    return 0;
 }
 
 /* a filter's group's region (its F line: x, y, width and height in the box's user space and the matrix it is in), m mapping
@@ -3521,16 +3556,15 @@ static void pt_fx_functions(vector<float> *lay, int w, int h, const vector<pt_fo
    onto white (its colours premultiplied and its cover read from the two, as pt_filtered reads them) into a layer of what it
    drew and as far as its filters may draw (a filter's region, a function's reach); its filter's list in turn, a run of
    functions as pt_filter_apply draws them, a url() through its filter's group (one that names none passed over); then its
-   clip's groups and its mask's (a mask that names none: nothing drawn), as Chromium applies them to a box -- filtered,
-   clipped, then masked (CSS Masking 1, 3) -- the user space's origin the border box's top left; and the layer laid on the
-   canvas within its clip */
+   clip's groups and its mask's layers (a mask element's group, a gradient drawn as a background layer is; anything else
+   transparent, masking all away), as Chromium applies them to a box -- filtered, clipped, then masked (CSS Masking 1,
+   3) -- the user space's origin the border box's top left; and the layer laid on the canvas within its clip */
 static void pt_fx(PCTX, uint32_t b, int ctx) {
     vector<char> fx, fl;
     append_range(fx, text_ptr(t, t->box[b].fx), t->box[b].fx.len);
     append_range(fl, text_ptr(t, t->box[b].filter), t->box[b].filter.len);
     vector<size_t> ents;
     pt_fx_entries(data(fx), len(fx), &ents);
-    for (size_t e = 0; e + 3 < len(ents); e += 4) if (at(ents, e) == 'm' && at(ents, e + 1) == 2) return;
     double z = c->zoom > 0 ? c->zoom : 1, bx, by, bw, bh;
     pt_border_box(t, b, &bx, &by, &bw, &bh);
     /* the user space in the canvas's px: a filter's with its origin at whole CSS px (the box's layer's, as Chromium places
@@ -3571,9 +3605,9 @@ static void pt_fx(PCTX, uint32_t b, int ctx) {
     int reach = 0;
     while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
         if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
-            while (fe + 3 < len(ents) && at(ents, fe) != 'f') fe += 4;
+            while (fe + PT_FXE - 1 < len(ents) && at(ents, fe) != 'f') fe += PT_FXE;
             int r[4];
-            if (fe + 3 < len(ents) && at(ents, fe + 1) == 1 && pt_fx_region(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), um, r)) {
+            if (fe + PT_FXE - 1 < len(ents) && at(ents, fe + 1) == 1 && pt_fx_region(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), um, r)) {
                 if (L[2] > L[0] && reach) { L[0] -= reach; L[1] -= reach; L[2] += reach; L[3] += reach; }
                 reach = 0;
                 if (r[0] < L[0]) L[0] = r[0];
@@ -3581,7 +3615,7 @@ static void pt_fx(PCTX, uint32_t b, int ctx) {
                 if (r[2] > L[2]) L[2] = r[2];
                 if (r[3] > L[3]) L[3] = r[3];
             }
-            fe += 4;
+            fe += PT_FXE;
             continue;
         }
         vector<pt_fop> one;
@@ -3616,21 +3650,94 @@ static void pt_fx(PCTX, uint32_t b, int ctx) {
         if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
             if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
             clear(ops);
-            while (fe + 3 < len(ents) && at(ents, fe) != 'f') fe += 4;
-            if (fe + 3 < len(ents) && at(ents, fe + 1) == 1)
+            while (fe + PT_FXE - 1 < len(ents) && at(ents, fe) != 'f') fe += PT_FXE;
+            if (fe + PT_FXE - 1 < len(ents) && at(ents, fe + 1) == 1)
                 amb_svg_fx(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), w, h, fm, nt, &lay);
-            fe += 4;
+            fe += PT_FXE;
             continue;
         }
         vector<pt_fop> one;
         if (pt_filter_ops(data(fl) + pa, pl, &one)) append_range(ops, data(one), len(one));
     }
     if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
-    /* then the clip, then the mask */
-    for (int pass = 0; pass < 2; pass++)
-        for (size_t e = 0; e + 3 < len(ents); e += 4)
-            if (at(ents, e) == (pass ? 'm' : 'c') && at(ents, e + 1) == 1)
-                amb_svg_fx(data(fx) + at(ents, e + 2), at(ents, e + 3) - at(ents, e + 2), w, h, lm, nt, &lay);
+    /* then the clip */
+    for (size_t e = 0; e + PT_FXE - 1 < len(ents); e += PT_FXE)
+        if (at(ents, e) == 'c' && at(ents, e + 1) == 1) amb_svg_fx(data(fx) + at(ents, e + 2), at(ents, e + 3) - at(ents, e + 2), w, h, lm, nt, &lay);
+    /* then the mask: its layers' coverage, each composited onto the layers under it (CSS Masking 1, 7.2: the last layer
+       the lowest; add source-over, subtract source-out, intersect source-in, exclude xor), the layer multiplied by it */
+    vector<float> mk, one;
+    int layers = 0;
+    for (size_t e = len(ents); e >= PT_FXE; e -= PT_FXE) {
+        size_t m = e - PT_FXE;
+        if (at(ents, m) != 'm') continue;
+        clear(one);
+        resize(&one, np);
+        size_t kind = at(ents, m + 1), mode = at(ents, m + 4), from = at(ents, m + 2), to = at(ents, m + 3);
+        if (kind == 1) {
+            /* a mask element's: its group over opaque white, the result's alpha */
+            vector<float> white;
+            resize(&white, 4 * np);
+            for (size_t q = 0; q < 4 * np; q++) white[q] = 1;
+            amb_svg_fx(data(fx) + from, to - from, w, h, lm, nt, &white);
+            for (size_t q = 0; q < np; q++) one[q] = at(white, 4 * q + 3);
+        } else if (kind == 3) {
+            /* an image (a gradient) drawn as a background layer is, onto black and onto white: its alpha, or its luminance */
+            size_t ia, pa2, sa2, ra2, oa2, qa2;
+            size_t il = pt_fx_line(data(fx), from, to, 'i', &ia), pl2 = pt_fx_line(data(fx), from, to, 'p', &pa2);
+            size_t sl2 = pt_fx_line(data(fx), from, to, 's', &sa2), rl2 = pt_fx_line(data(fx), from, to, 'r', &ra2);
+            size_t ol2 = pt_fx_line(data(fx), from, to, 'o', &oa2), ql2 = pt_fx_line(data(fx), from, to, 'q', &qa2);
+            /* its lengths at the zoom, as a background's are (the effects' text is the CSS px of the user space) */
+            vector<char> zi, zp, zs;
+            pt_scale_px(data(fx) + ia, il, z, &zi);
+            pt_scale_px(data(fx) + pa2, pl2, z, &zp);
+            pt_scale_px(data(fx) + sa2, sl2, z, &zs);
+            amb_canvas m0, m1;
+            memset(&m0, 0, sizeof m0);
+            memset(&m1, 0, sizeof m1);
+            defer(m0) { AMB_CANVAS_DROP(m0); }
+            defer(m1) { AMB_CANVAS_DROP(m1); }
+            m0.w = m1.w = c->w;
+            m0.h = m1.h = (uint32_t)h;
+            m0.oy = m1.oy = c->oy + L[1];
+            m0.zoom = m1.zoom = c->zoom;
+            m0.cx0 = m1.cx0 = L[0];
+            m0.cx1 = m1.cx1 = L[2];
+            m0.cy0 = m1.cy0 = m0.oy;
+            m0.cy1 = m1.cy1 = m0.oy + h;
+            resize(&m0.px, (size_t)c->w * (size_t)h * 3);
+            resize(&m1.px, (size_t)c->w * (size_t)h * 3);
+            for (size_t q = 0; q < len(m1.px); q++) m1.px[q] = 255;
+            double nr[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+            pt_layer_one(t, nt, b, &m0, icache, ipx, nr, data(zi), len(zi), data(zp), len(zp), data(zs), len(zs), data(fx) + ra2, rl2,
+                         data(fx) + oa2, ol2, data(fx) + qa2, ql2, 0);
+            pt_layer_one(t, nt, b, &m1, icache, ipx, nr, data(zi), len(zi), data(zp), len(zp), data(zs), len(zs), data(fx) + ra2, rl2,
+                         data(fx) + oa2, ol2, data(fx) + qa2, ql2, 0);
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    size_t ci = ((size_t)y * c->w + (size_t)(L[0] + x)) * 3, q = (size_t)y * (size_t)w + (size_t)x;
+                    double d = (at(m1.px, ci) - at(m0.px, ci) + at(m1.px, ci + 1) - at(m0.px, ci + 1) + at(m1.px, ci + 2) - at(m0.px, ci + 2)) / 765.0;
+                    double al = d < 0 ? 1 : d > 1 ? 0 : 1 - d;
+                    /* luminance: Rec. 709's weights on the colour premultiplied, eight bits, as Skia's luma filter takes it */
+                    double lum = (0.2126 * at(m0.px, ci) + 0.7152 * at(m0.px, ci + 1) + 0.0722 * at(m0.px, ci + 2)) / 255;
+                    one[q] = (float)(mode == 2 ? floor(lum * 255 + 0.5) / 255 : al);
+                }
+        }
+        if (!layers) {
+            clear(mk);
+            append_range(mk, data(one), len(one));
+        } else {
+            size_t op = at(ents, m + 5);
+            for (size_t q = 0; q < np; q++) {
+                double sv = at(one, q), dv = at(mk, q);
+                double r = op == 1 ? sv * (1 - dv) : op == 2 ? sv * dv : op == 3 ? sv * (1 - dv) + dv * (1 - sv) : sv + dv - sv * dv;
+                mk[q] = (float)r;
+            }
+        }
+        layers++;
+    }
+    if (layers)
+        for (size_t q = 0; q < np; q++)
+            for (size_t ch = 0; ch < 4; ch++) lay[4 * q + ch] = at(lay, 4 * q + ch) * at(mk, q);
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
     for (int y = L[1] < ky0 ? ky0 : L[1]; y < L[3] && y < ky1; y++)

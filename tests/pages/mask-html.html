@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CSS Masking's mask layers on HTML boxes</title>
+<style>
+body { margin: 0; background: #fff }
+.cell { position: absolute; width: 120px; height: 100px }
+.b { position: absolute; left: 20px; top: 18px; width: 80px; height: 60px; background: linear-gradient(90deg, #e03030, #30c030 50%, #3030e0) }
+</style>
+</head>
+<body>
+<svg id="defs" style="position:absolute;left:0;top:0" width="0" height="0">
+  <defs>
+    <mask id="m"><rect x="0" y="0" width="40" height="30" fill="white"/></mask>
+    <mask id="grey"><rect x="0" y="0" width="80" height="60" fill="#808080"/><circle cx="40" cy="30" r="20" fill="white"/></mask>
+  </defs>
+</svg>
+<!-- row 1: one gradient layer -->
+<div id="g-down" class="cell" style="left:0;top:0"><div class="b" style="mask-image:linear-gradient(black, transparent)"></div></div>
+<div id="g-webkit" class="cell" style="left:130px;top:0"><div class="b" style="-webkit-mask-image:linear-gradient(90deg, black, transparent)"></div></div>
+<div id="g-dot" class="cell" style="left:260px;top:0"><div class="b" style="mask:radial-gradient(circle, black 40%, transparent 41%) center / 40px 40px no-repeat"></div></div>
+<div id="g-tiles" class="cell" style="left:390px;top:0"><div class="b" style="mask:radial-gradient(circle, black 45%, transparent 50%) 0 0 / 20px 20px"></div></div>
+<div id="g-stripes" class="cell" style="left:520px;top:0"><div class="b" style="mask:repeating-linear-gradient(45deg, black 0 6px, transparent 6px 12px)"></div></div>
+<div id="g-shorthand" class="cell" style="left:650px;top:0"><div class="b" style="-webkit-mask:linear-gradient(black, transparent) 10px 5px / 50% 50% no-repeat"></div></div>
+<!-- row 2: modes, boxes, sizes -->
+<div id="g-lum" class="cell" style="left:0;top:100px"><div class="b" style="mask-image:linear-gradient(white, black);mask-mode:luminance"></div></div>
+<div id="g-lum0" class="cell" style="left:130px;top:100px"><div class="b" style="mask-image:linear-gradient(black, transparent);mask-mode:luminance"></div></div>
+<div id="g-content" class="cell" style="left:260px;top:100px"><div class="b" style="-webkit-mask:linear-gradient(black, transparent) content-box;padding:8px;border:4px solid #333;width:56px;height:36px"></div></div>
+<div id="g-padding" class="cell" style="left:390px;top:100px"><div class="b" style="mask:linear-gradient(90deg, black, transparent) padding-box;padding:6px;border:5px solid #333;width:58px;height:38px"></div></div>
+<div id="g-origin" class="cell" style="left:520px;top:100px"><div class="b" style="mask:radial-gradient(black 50%, transparent 52%) content-box border-box no-repeat;padding:10px;width:60px;height:40px"></div></div>
+<div id="g-repeatx" class="cell" style="left:650px;top:100px"><div class="b" style="mask:linear-gradient(90deg, black, transparent) 0 10px / 20px 30px repeat-x"></div></div>
+<!-- row 3: layers composited, SVG masks among them -->
+<div id="c-intersect" class="cell" style="left:0;top:200px"><div class="b" style="mask:linear-gradient(black, transparent), linear-gradient(90deg, black, transparent);mask-composite:intersect"></div></div>
+<div id="c-add" class="cell" style="left:130px;top:200px"><div class="b" style="mask:url(#m), linear-gradient(transparent, black)"></div></div>
+<div id="c-subtract" class="cell" style="left:260px;top:200px"><div class="b" style="mask:linear-gradient(90deg, black, transparent) subtract, radial-gradient(black 40%, transparent 41%)"></div></div>
+<div id="c-exclude" class="cell" style="left:390px;top:200px"><div class="b" style="mask:linear-gradient(black, black) 0 0 / 50% 100% no-repeat exclude, radial-gradient(black 50%, transparent 51%)"></div></div>
+<div id="c-svglum" class="cell" style="left:520px;top:200px"><div class="b" style="mask:url(#grey) luminance"></div></div>
+<div id="c-svgalpha" class="cell" style="left:650px;top:200px"><div class="b" style="mask:url(#grey) alpha"></div></div>
+<!-- row 4: what masks everything away, and with other effects -->
+<div id="n-picture" class="cell" style="left:0;top:300px"><div class="b" style="mask-image:url(logo.png)"></div></div>
+<div id="n-missing" class="cell" style="left:130px;top:300px"><div class="b" style="mask-image:url(#nowhere), linear-gradient(black, transparent)"></div></div>
+<div id="n-none" class="cell" style="left:260px;top:300px"><div class="b" style="mask:none, linear-gradient(90deg, black, transparent)"></div></div>
+<div id="e-filter" class="cell" style="left:390px;top:300px"><div class="b" style="mask:radial-gradient(black 55%, transparent 60%);filter:blur(2px)"></div></div>
+<div id="e-clip" class="cell" style="left:520px;top:300px"><div class="b" style="mask:linear-gradient(black, transparent);clip-path:circle(40%)"></div></div>
+<div id="e-opacity" class="cell" style="left:650px;top:300px"><div class="b" style="mask:linear-gradient(90deg, black, transparent);opacity:0.5;border-radius:12px"></div></div>
+</body>
+</html>

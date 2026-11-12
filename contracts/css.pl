@@ -59,11 +59,12 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     fill, fill_opacity, fill_rule, stroke, stroke_width, stroke_linecap, stroke_linejoin, stroke_miterlimit,
     stroke_dasharray, stroke_dashoffset, stroke_opacity, stop_color, stop_opacity, clip_path, clip_rule, text_anchor,
     %% markers (none or url(#id), inherited; the marker shorthand sets the three), the order a
-    %% shape's fill, stroke and markers are painted in (inherited), mask (none or url(#id)) and
-    %% a mask element's mask-type, vector-effect, dominant-baseline (inherited), a filter
+    %% shape's fill, stroke and markers are painted in (inherited), mask-image (none, or its layers:
+    %% url()s, a mask element's #id among them, and gradients, as text) and a mask element's
+    %% mask-type, vector-effect, dominant-baseline (inherited), a filter
     %% primitive's flood colour and opacity, the filters' colour space (inherited), and the
     %% geometry properties (cx, cy, r, rx, ry, x, y: lengths a number may be; d: path())
-    marker_start, marker_mid, marker_end, paint_order, mask, mask_type, vector_effect, dominant_baseline,
+    marker_start, marker_mid, marker_end, paint_order, mask_image, mask_type, vector_effect, dominant_baseline,
     flood_color, flood_opacity, color_interpolation_filters, cx, cy, r, rx, ry, x, y, d,
     appearance,                       % none, auto or a control's own (CSS UI 4): whether the theme draws it
     object_fit,                        % fill, contain, cover, none or scale-down (CSS Images 3, 5.5)
@@ -72,6 +73,9 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% keyword or kept as text) and container-name (none, or its names kept as text)
     container_type, container_name,
     box_decoration_break,              % slice or clone: an inline box's fragments as one strip, or each wrapped whole
+    %% CSS Masking 1's mask layers (the mask shorthand sets them with mask-image): each a list, an item a layer, as text --
+    %% its mode, repeat, position, size, origin and clip boxes, and how it composites with the layers under it
+    mask_mode, mask_repeat, mask_position, mask_size, mask_origin, mask_clip, mask_composite,
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is
