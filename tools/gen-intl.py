@@ -5,7 +5,8 @@ CLDR 48.2.0, the data node 22's ICU 78.3 carries):
 
     python3 tools/gen-intl.py          (fetches the packages from the npm registry)
     python3 tools/gen-intl.py SRC      (SRC holds the packages' tarballs, NAME-48.2.0.tgz,
-                                        and CLDR 48.2's common/main/root.xml)
+                                        CLDR 48.2's common/main/root.xml, and in main/
+                                        the common/main XML files of the locales)
 
 The output is a function of the files alone. What it carries:
   - the locales of LANGS, each with every region and script CLDR has for it, ICU's
@@ -21,7 +22,10 @@ The output is a function of the files alone. What it carries:
     the currencies' symbols and names, the units' names and patterns. A locale keeps
     the records that differ from its parent's;
   - the numbering systems' digits, the currencies' minor units, the plural rules
-    (cardinal and ordinal), compiled.
+    (cardinal and ordinal), compiled;
+  - the dates' names and patterns, the day periods' rules, the hour cycles of the
+    regions. The available formats come from the locales' XML files: the JSON resolves
+    them, and ICU's pattern generator adds a locale's own before its parents'.
 
 The C side holds no pointer: the data is one array of bytes packed four to a 32-bit
 word (cicilang reads a table of numbers much faster than a string literal), with the
@@ -32,12 +36,15 @@ import json
 import os
 import sys
 import tarfile
+import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 CLDR = "48.2.0"
 PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-dates-full", "cldr-units-full",
             "cldr-localenames-full", "cldr-misc-full", "cldr-bcp47"]
 ROOT_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/root.xml"
+MAIN_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/%s.xml"
 
 # the languages carried: the web's most used, as their locales name them
 LANGS = ("en de fr es it pt nl ru pl ja zh ko hi ar he tr sv da nb no fi cs uk el hu ro "
@@ -92,6 +99,28 @@ class Source:
         else:
             with urllib.request.urlopen(ROOT_XML) as r:
                 self.root_xml = r.read()
+        self.src = src
+        self.xml_cache = {}
+
+    def main_xml(self, name):
+        """a locale's common/main XML file (its name's dashes underscores), None when CLDR
+        has none (a default content's, an alias's)"""
+        if name not in self.xml_cache:
+            n = name.replace("-", "_")
+            raw = None
+            if self.src:
+                path = os.path.join(self.src, "main", n + ".xml")
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        raw = f.read()
+            else:
+                try:
+                    with urllib.request.urlopen(MAIN_XML % n) as r:
+                        raw = r.read()
+                except urllib.error.HTTPError:
+                    raw = None
+            self.xml_cache[name] = raw
+        return self.xml_cache[name]
 
     def json(self, package, path):
         key = (package, path)
@@ -374,8 +403,13 @@ def main_data(S, package, name, file, names):
 
 FS = "\x1f"
 K_NUM, K_COMPACT, K_MINGROUP, K_CUR, K_UNIT, K_UNITPER = 1, 2, 3, 4, 5, 6
+K_MONTHS, K_DAYS, K_DAYPERIODS, K_ERAS, K_DATEFMT, K_TIMEFMT, K_DTGLUE, K_AVAIL, K_APPEND, K_FIELDNAMES, K_INTERVAL, \
+    K_TZ = range(7, 19)
 KEYS = {"IDK_NUM": K_NUM, "IDK_COMPACT": K_COMPACT, "IDK_MINGROUP": K_MINGROUP, "IDK_CUR": K_CUR,
-        "IDK_UNIT": K_UNIT, "IDK_UNITPER": K_UNITPER}
+        "IDK_UNIT": K_UNIT, "IDK_UNITPER": K_UNITPER, "IDK_MONTHS": K_MONTHS, "IDK_DAYS": K_DAYS,
+        "IDK_DAYPERIODS": K_DAYPERIODS, "IDK_ERAS": K_ERAS, "IDK_DATEFMT": K_DATEFMT, "IDK_TIMEFMT": K_TIMEFMT,
+        "IDK_DTGLUE": K_DTGLUE, "IDK_AVAIL": K_AVAIL, "IDK_APPEND": K_APPEND, "IDK_FIELDNAMES": K_FIELDNAMES,
+        "IDK_INTERVAL": K_INTERVAL, "IDK_TZ": K_TZ}
 
 
 def key(cat, i=0):
@@ -537,7 +571,105 @@ def resources(S, name, names):
             f += [d.get("displayName", ""), d.get("perUnitPattern", "")] + [d.get("unitPattern-count-" + n, "") for n in COUNTS]
         r[key(K_UNIT, i)] = FS.join(f)
     r[key(K_UNITPER)] = FS.join(units[w]["per"]["compoundUnitPattern"] for w in ("long", "short", "narrow"))
+    dates(S, name, names, r)
     return r
+
+
+# the date records: months, days, day periods (by context, format then stand-alone, and
+# width), eras, the date, time and glue patterns, the available formats (pairs of
+# skeleton and pattern, sorted by the skeleton's bytes as ICU's tables are), the append
+# items and field names (by ICU's UDATPG field order), the interval formats (the fallback,
+# then each skeleton and its patterns by greatest difference), the time zone formats
+MONTH_WIDTHS = ["abbreviated", "narrow", "wide"]
+DAY_WIDTHS = ["abbreviated", "narrow", "short", "wide"]
+DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+PERIOD_KEYS = ["am", "pm", "midnight", "noon", "morning1", "morning2", "afternoon1", "afternoon2", "evening1",
+               "evening2", "night1", "night2"]
+STYLES = ["full", "long", "medium", "short"]
+# ICU's UDATPG fields: their append items' and field names' keys
+APPEND_KEYS = ["Era", "Year", "Quarter", "Month", "Week", "", "Day-Of-Week", "", "", "Day", "", "Hour", "Minute",
+               "Second", "", "Timezone"]
+FIELD_KEYS = ["era", "year", "quarter", "month", "week", "weekOfMonth", "weekday", "dayOfYear", "weekdayOfMonth", "day",
+              "dayperiod", "hour", "minute", "second", "", "zone"]
+RS, GS = "\x1e", "\x1d"
+
+
+def dates(S, name, names, r):
+    cal = main_data(S, "cldr-dates-full", name, "ca-gregorian.json", names)["dates"]["calendars"]["gregorian"]
+    for ci, ctx in enumerate(("format", "stand-alone")):
+        for wi, w in enumerate(MONTH_WIDTHS):
+            m = cal["months"][ctx][w]
+            r[key(K_MONTHS, ci * 3 + wi)] = FS.join(m[str(i)] for i in range(1, 13))
+        for wi, w in enumerate(DAY_WIDTHS):
+            d = cal["days"][ctx][w]
+            r[key(K_DAYS, ci * 4 + wi)] = FS.join(d[k] for k in DAY_KEYS)
+        for wi, w in enumerate(MONTH_WIDTHS):
+            d = cal["dayPeriods"][ctx][w]
+            r[key(K_DAYPERIODS, ci * 3 + wi)] = FS.join(d.get(k, "") for k in PERIOD_KEYS)
+    for wi, w in enumerate(("eraAbbr", "eraNarrow", "eraNames")):
+        e = cal["eras"][w]
+        r[key(K_ERAS, wi)] = FS.join((e.get("0", ""), e.get("1", "")))
+    r[key(K_DATEFMT)] = FS.join(cal["dateFormats"][s] for s in STYLES)
+    r[key(K_TIMEFMT)] = FS.join(cal["timeFormats"][s] for s in STYLES)
+    dtf = cal["dateTimeFormats"]
+    r[key(K_DTGLUE, 0)] = FS.join(dtf[s] for s in STYLES)
+    at = cal.get("dateTimeFormats-atTime", {}).get("standard")
+    if at:
+        r[key(K_DTGLUE, 1)] = FS.join(at[s] for s in STYLES)
+    r[key(K_AVAIL)] = FS.join(x for kv in available_formats(S, name, names) for x in kv)
+    ai = dtf["appendItems"]
+    r[key(K_APPEND)] = FS.join(ai.get(k, "") if k else "" for k in APPEND_KEYS)
+    fields = main_data(S, "cldr-dates-full", name, "dateFields.json", names)["dates"]["fields"]
+    r[key(K_FIELDNAMES)] = FS.join(fields.get(k, {}).get("displayName", "") if k else "" for k in FIELD_KEYS)
+    iv = dtf["intervalFormats"]
+    items = [iv["intervalFormatFallback"]]
+    for sk in sorted((k for k in iv if k != "intervalFormatFallback" and "-alt-" not in k), key=lambda k: k.encode("utf-8")):
+        pats = sorted((g, p) for g, p in iv[sk].items() if "-alt-" not in g)
+        items += [sk, RS.join(g + GS + p for g, p in pats)]
+    r[key(K_INTERVAL)] = FS.join(items)
+    tzn = main_data(S, "cldr-dates-full", name, "timeZoneNames.json", names)["dates"]["timeZoneNames"]
+    utc = tzn.get("zone", {}).get("Etc", {}).get("UTC", {})
+    gmt = tzn.get("metazone", {}).get("GMT", {})
+    r[key(K_TZ)] = FS.join((tzn["gmtFormat"], tzn["gmtZeroFormat"], tzn["hourFormat"],
+                            utc.get("long", {}).get("standard", ""), utc.get("short", {}).get("standard", ""),
+                            gmt.get("long", {}).get("standard", ""), gmt.get("short", {}).get("standard", "")))
+
+
+def xml_formats(raw):
+    """the Gregorian available formats a locale's XML gives itself (no alternates, no
+    counted ones, no inheritance markers)"""
+    out = {}
+    if raw is None:
+        return out
+    for cal in ET.fromstring(raw).iter("calendar"):
+        if cal.get("type") != "gregorian":
+            continue
+        for af in cal.iter("availableFormats"):
+            for it in af.findall("dateFormatItem"):
+                v = it.text or ""
+                if it.get("alt") or it.get("count") or v == "\u2191\u2191\u2191":
+                    continue
+                out[it.get("id")] = v
+    return out
+
+
+def available_formats(S, name, names):
+    """the available formats in the order ICU's pattern generator adds them: each locale
+    of the chain, then root, its keys (sorted by bytes) not given below it"""
+    seen, seq = set(), []
+    n = name
+    while n is not None:
+        items = xml_formats(S.main_xml(n))
+        for k in sorted(items, key=lambda k: k.encode("utf-8")):
+            if k not in seen:
+                seen.add(k)
+                seq.append((k, items[k]))
+        n = parent_of(S, n, names)
+    items = xml_formats(S.root_xml)
+    for k in sorted(items, key=lambda k: k.encode("utf-8")):
+        if k not in seen:
+            seq.append((k, items[k]))
+    return seq
 
 
 def numbering_systems(S):
@@ -604,6 +736,28 @@ def compile_rule(text):
             for a, b in ranges:
                 out += a.to_bytes(4, "little") + b.to_bytes(4, "little")
     return bytes(out)
+
+
+def date_tables(S, B):
+    """the day periods' rules of each language (CLDR's dayPeriodRuleSet: a period at a time,
+    "noon@1200", or from one time before another, "morning1:0600-1200"), and the hour
+    cycles' data by region or language_region (timeData: the preferred format, then the
+    allowed ones), as ICU's pattern generator reads them"""
+    dp = S.json("cldr-core", "supplemental/dayPeriods.json")["supplemental"]["dayPeriodRuleSet"]
+    rows = []
+    for lang, rules in dp.items():
+        if lang.split("-")[0] not in LANGS:
+            continue
+        parts = []
+        for name, r in sorted(rules.items()):
+            if "_at" in r:
+                parts.append("%s@%s" % (name, r["_at"].replace(":", "")))
+            else:
+                parts.append("%s:%s-%s" % (name, r["_from"].replace(":", ""), r["_before"].replace(":", "")))
+        rows.append((lang, " ".join(parts)))
+    write_pairs(B, "DAYPERIOD_RULES", rows)
+    td = S.json("cldr-core", "supplemental/timeData.json")["supplemental"]["timeData"]
+    write_pairs(B, "HOURS", [(k, (v.get("_preferred", "") + " " + v.get("_allowed", "")).strip()) for k, v in td.items()])
 
 
 def plural_tables(S, B):
@@ -686,6 +840,7 @@ def main():
     regions(S, B)
     number_tables(S, B)
     plural_tables(S, B)
+    date_tables(S, B)
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     emit(B, os.path.join(root, "src/js/intl_data.c"), os.path.join(root, "src/js/intl_data.h"))
 

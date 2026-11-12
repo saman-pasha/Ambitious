@@ -31,6 +31,9 @@ enum {
     IN_NUMBERFORMAT, IN_NF_FORMAT_GET, IN_NF_FORMAT_BOUND, IN_NF_FORMATTOPARTS, IN_NF_FORMATRANGE,
     IN_NF_FORMATRANGETOPARTS, IN_NF_RESOLVED,
     IN_NUM_TOLOCALE, IN_BIG_TOLOCALE,
+    IN_DATETIMEFORMAT, IN_DTF_FORMAT_GET, IN_DTF_FORMAT_BOUND, IN_DTF_FORMATTOPARTS, IN_DTF_FORMATRANGE,
+    IN_DTF_FORMATRANGETOPARTS, IN_DTF_RESOLVED,
+    IN_DATE_TOLOCALE,                   /* Date.prototype's toLocale*String: x which (0 to 2) */
     IN_COUNT
 };
 _Static_assert(IN_COUNT <= JIN_N, "Intl's natives fit their range");
@@ -3092,7 +3095,7 @@ static jv nf_resolved(js_vm *vm, uint32_t nf) {
 }
 
 /* the formatters toLocaleString keeps for its defaults (no locales, no options), by use */
-enum { IC_NUMBER, IC_N };
+enum { IC_NUMBER, IC_DATE, IC_N = IC_DATE + 3 };
 static uint32_t intl_cache_get(js_vm *vm, uint32_t slot) {
     if (!vm->intl_cache) return 0;
     jv v = js_array_get(vm, vm->intl_cache, slot);
@@ -3128,6 +3131,2152 @@ static jv this_nf(js_vm *vm, jv thisv, const char *method) {
 static jv unwrap_nf(js_vm *vm, jv thisv, const char *method) {
     if (is_intl(vm, thisv, JIK_NUMBERFORMAT)) return thisv;
     if (jv_is_obj(thisv)) return incompatible(vm, "UnwrapNumberFormat", JV_UNDEF);
+    return incompatible(vm, method, thisv);
+}
+
+/* ==== Intl.DateTimeFormat (ECMA-402 11) ==== */
+
+/* ---- the calendar: the proleptic Gregorian (V8 moves ICU's Julian change to the start of
+   ECMAScript's time) ---- */
+
+static int64_t div_floor(int64_t a, int64_t b) {
+    int64_t q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) q--;
+    return q;
+}
+
+/* a time's fields in a zone (its offset in minutes east): the year (0 is 1 BC), the month
+   (1 to 12), the day, the weekday (0 Sunday), the hour, minute, second, millisecond */
+typedef struct dfields { int64_t year; int month, day, wday, hour, minute, second, ms; } dfields;
+static void date_fields(double t, int offset, dfields *f) {
+    int64_t ms = (int64_t)t + (int64_t)offset * 60000;
+    int64_t day = div_floor(ms, 86400000);
+    int64_t rem = ms - day * 86400000;
+    int64_t z = day + 719468;
+    int64_t era = div_floor(z, 146097);
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153;
+    f->day = (int)(doy - (153 * mp + 2) / 5 + 1);
+    if (mp < 10) f->month = (int)(mp + 3);
+    else f->month = (int)(mp - 9);
+    f->year = yoe + era * 400;
+    if (f->month <= 2) f->year++;
+    int64_t w = (day + 4) % 7;
+    if (w < 0) w += 7;
+    f->wday = (int)w;
+    f->hour = (int)(rem / 3600000);
+    f->minute = (int)(rem / 60000 % 60);
+    f->second = (int)(rem / 1000 % 60);
+    f->ms = (int)(rem % 1000);
+}
+
+/* ---- ICU's DateTimePatternGenerator: the best pattern of a skeleton ---- */
+
+/* its fields, in its order (UDATPG_*_FIELD) */
+enum { DF_ERA, DF_YEAR, DF_QUARTER, DF_MONTH, DF_WEEK_OF_YEAR, DF_WEEK_OF_MONTH, DF_WEEKDAY, DF_DAY_OF_YEAR,
+       DF_DAY_OF_WEEK_IN_MONTH, DF_DAY, DF_DAYPERIOD, DF_HOUR, DF_MINUTE, DF_SECOND, DF_FRACTIONAL, DF_ZONE, DF_N };
+#define DT_NUMERIC 0x100
+#define DT_NARROW (-0x101)
+#define DT_SHORTER (-0x102)
+#define DT_SHORT (-0x103)
+#define DT_LONG (-0x104)
+#define DT_DELTA 0x10
+#define DT_EXTRA_FIELD 0x10000
+#define DT_MISSING_FIELD 0x1000
+/* dtTypes: a pattern letter's field, its type and the least length of the row */
+typedef struct dttype { char ch; uint8_t field; int16_t type; uint8_t min_len; } dttype;
+static const dttype dt_types[] = {
+    { 'G', DF_ERA, DT_SHORT, 1 }, { 'G', DF_ERA, DT_LONG, 4 }, { 'G', DF_ERA, DT_NARROW, 5 },
+    { 'y', DF_YEAR, DT_NUMERIC, 1 }, { 'Y', DF_YEAR, DT_NUMERIC + DT_DELTA, 1 }, { 'u', DF_YEAR, DT_NUMERIC + 2 * DT_DELTA, 1 },
+    { 'r', DF_YEAR, DT_NUMERIC + 3 * DT_DELTA, 1 }, { 'U', DF_YEAR, DT_SHORT, 1 }, { 'U', DF_YEAR, DT_LONG, 4 },
+    { 'U', DF_YEAR, DT_NARROW, 5 },
+    { 'Q', DF_QUARTER, DT_NUMERIC, 1 }, { 'Q', DF_QUARTER, DT_SHORT, 3 }, { 'Q', DF_QUARTER, DT_LONG, 4 },
+    { 'Q', DF_QUARTER, DT_NARROW, 5 }, { 'q', DF_QUARTER, DT_NUMERIC + DT_DELTA, 1 }, { 'q', DF_QUARTER, DT_SHORT - DT_DELTA, 3 },
+    { 'q', DF_QUARTER, DT_LONG - DT_DELTA, 4 }, { 'q', DF_QUARTER, DT_NARROW - DT_DELTA, 5 },
+    { 'M', DF_MONTH, DT_NUMERIC, 1 }, { 'M', DF_MONTH, DT_SHORT, 3 }, { 'M', DF_MONTH, DT_LONG, 4 }, { 'M', DF_MONTH, DT_NARROW, 5 },
+    { 'L', DF_MONTH, DT_NUMERIC + DT_DELTA, 1 }, { 'L', DF_MONTH, DT_SHORT - DT_DELTA, 3 }, { 'L', DF_MONTH, DT_LONG - DT_DELTA, 4 },
+    { 'L', DF_MONTH, DT_NARROW - DT_DELTA, 5 }, { 'l', DF_MONTH, DT_NUMERIC + DT_DELTA, 1 },
+    { 'w', DF_WEEK_OF_YEAR, DT_NUMERIC, 1 }, { 'W', DF_WEEK_OF_MONTH, DT_NUMERIC, 1 },
+    { 'E', DF_WEEKDAY, DT_SHORT, 1 }, { 'E', DF_WEEKDAY, DT_LONG, 4 }, { 'E', DF_WEEKDAY, DT_NARROW, 5 },
+    { 'E', DF_WEEKDAY, DT_SHORTER, 6 }, { 'c', DF_WEEKDAY, DT_NUMERIC + 2 * DT_DELTA, 1 }, { 'c', DF_WEEKDAY, DT_SHORT - 2 * DT_DELTA, 3 },
+    { 'c', DF_WEEKDAY, DT_LONG - 2 * DT_DELTA, 4 }, { 'c', DF_WEEKDAY, DT_NARROW - 2 * DT_DELTA, 5 },
+    { 'c', DF_WEEKDAY, DT_SHORTER - 2 * DT_DELTA, 6 }, { 'e', DF_WEEKDAY, DT_NUMERIC + DT_DELTA, 1 },
+    { 'e', DF_WEEKDAY, DT_SHORT - DT_DELTA, 3 }, { 'e', DF_WEEKDAY, DT_LONG - DT_DELTA, 4 }, { 'e', DF_WEEKDAY, DT_NARROW - DT_DELTA, 5 },
+    { 'e', DF_WEEKDAY, DT_SHORTER - DT_DELTA, 6 },
+    { 'd', DF_DAY, DT_NUMERIC, 1 }, { 'g', DF_DAY, DT_NUMERIC + DT_DELTA, 1 },
+    { 'D', DF_DAY_OF_YEAR, DT_NUMERIC, 1 }, { 'F', DF_DAY_OF_WEEK_IN_MONTH, DT_NUMERIC, 1 },
+    { 'a', DF_DAYPERIOD, DT_SHORT, 1 }, { 'a', DF_DAYPERIOD, DT_LONG, 4 }, { 'a', DF_DAYPERIOD, DT_NARROW, 5 },
+    { 'b', DF_DAYPERIOD, DT_SHORT - DT_DELTA, 1 }, { 'b', DF_DAYPERIOD, DT_LONG - DT_DELTA, 4 }, { 'b', DF_DAYPERIOD, DT_NARROW - DT_DELTA, 5 },
+    { 'B', DF_DAYPERIOD, DT_SHORT - 3 * DT_DELTA, 1 }, { 'B', DF_DAYPERIOD, DT_LONG - 3 * DT_DELTA, 4 },
+    { 'B', DF_DAYPERIOD, DT_NARROW - 3 * DT_DELTA, 5 },
+    { 'H', DF_HOUR, DT_NUMERIC + 10 * DT_DELTA, 1 }, { 'k', DF_HOUR, DT_NUMERIC + 11 * DT_DELTA, 1 },
+    { 'h', DF_HOUR, DT_NUMERIC, 1 }, { 'K', DF_HOUR, DT_NUMERIC + DT_DELTA, 1 },
+    { 'J', DF_HOUR, DT_NUMERIC + 5 * DT_DELTA, 1 }, { 'j', DF_HOUR, DT_NUMERIC + 6 * DT_DELTA, 1 },
+    { 'C', DF_HOUR, DT_NUMERIC + 7 * DT_DELTA, 1 },
+    { 'm', DF_MINUTE, DT_NUMERIC, 1 }, { 's', DF_SECOND, DT_NUMERIC, 1 }, { 'A', DF_SECOND, DT_NUMERIC + DT_DELTA, 1 },
+    { 'S', DF_FRACTIONAL, DT_NUMERIC, 1 },
+    { 'v', DF_ZONE, DT_SHORT - 2 * DT_DELTA, 1 }, { 'v', DF_ZONE, DT_LONG - 2 * DT_DELTA, 4 },
+    { 'z', DF_ZONE, DT_SHORT, 1 }, { 'z', DF_ZONE, DT_LONG, 4 },
+    { 'Z', DF_ZONE, DT_NARROW - DT_DELTA, 1 }, { 'Z', DF_ZONE, DT_LONG - DT_DELTA, 4 }, { 'Z', DF_ZONE, DT_SHORT - DT_DELTA, 5 },
+    { 'O', DF_ZONE, DT_SHORT - DT_DELTA, 1 }, { 'O', DF_ZONE, DT_LONG - DT_DELTA, 4 },
+    { 'V', DF_ZONE, DT_SHORT - DT_DELTA, 1 }, { 'V', DF_ZONE, DT_LONG - DT_DELTA, 2 }, { 'V', DF_ZONE, DT_LONG - 1 - DT_DELTA, 3 },
+    { 'V', DF_ZONE, DT_LONG - 2 - DT_DELTA, 4 },
+    { 'X', DF_ZONE, DT_NARROW - DT_DELTA, 1 }, { 'X', DF_ZONE, DT_SHORT - DT_DELTA, 2 }, { 'X', DF_ZONE, DT_LONG - DT_DELTA, 4 },
+    { 'x', DF_ZONE, DT_NARROW - DT_DELTA, 1 }, { 'x', DF_ZONE, DT_SHORT - DT_DELTA, 2 }, { 'x', DF_ZONE, DT_LONG - DT_DELTA, 4 },
+    { 0, DF_N, 0, 0 } };
+
+static int is_letter16(uint32_t c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+
+/* FormatParser::getCanonicalIndex: the row of a run of one letter, -1 for none */
+static int canonical_row(uint32_t ch, int n) {
+    for (int i = 0; dt_types[i].ch; i++) {
+        if ((uint32_t)(uint8_t)dt_types[i].ch != ch) continue;
+        if (dt_types[i + 1].ch != dt_types[i].ch) return i;
+        if (dt_types[i + 1].min_len <= n) continue;
+        return i;
+    }
+    return -1;
+}
+
+/* a skeleton (PtnSkeleton): each field's type, its letter and length as given, its base
+   (the row's letter at the row's least length); whether the default 'a' was added */
+typedef struct dskel { int type[DF_N]; uint8_t ch[DF_N], ln[DF_N], bch[DF_N], bln[DF_N]; int added_a; } dskel;
+
+/* a pattern's tokens (FormatParser): runs of one ASCII letter, or one other unit */
+#define DT_TOKENS 160
+typedef struct dtoks { uint16_t off[DT_TOKENS], len[DT_TOKENS]; uint32_t n; } dtoks;
+static void pattern_tokens(const uint16_t *p, uint32_t n, dtoks *t) {
+    t->n = 0;
+    uint32_t i = 0;
+    while (i < n && t->n < DT_TOKENS) {
+        uint32_t j = i + 1;
+        if (is_letter16(p[i])) while (j < n && p[j] == p[i]) j++;
+        t->off[t->n] = (uint16_t)i;
+        t->len[t->n] = (uint16_t)(j - i);
+        t->n++;
+        i = j;
+    }
+}
+/* the token after a quoted literal's opening quote at i: the index of its closing quote
+   (FormatParser::getQuoteLiteral; '' within it a quote) */
+static uint32_t quote_end(const uint16_t *p, const dtoks *t, uint32_t i) {
+    i++;
+    while (i < t->n) {
+        if (p[t->off[i]] == '\'') {
+            if (i + 1 < t->n && p[t->off[i + 1]] == '\'') { i += 2; continue; }
+            break;
+        }
+        i++;
+    }
+    return i;
+}
+
+static void dskel_field(dskel *s, int f, uint32_t c, int n, int row) {
+    s->ch[f] = (uint8_t)c;
+    s->ln[f] = (uint8_t)n;
+    s->bch[f] = (uint8_t)dt_types[row].ch;
+    s->bln[f] = dt_types[row].min_len;
+    int sub = dt_types[row].type;
+    if (sub > 0) sub += n;
+    s->type[f] = sub;
+}
+
+/* DateTimeMatcher::set */
+static void dskel_set(const uint16_t *p, uint32_t n, dskel *s) {
+    memset(s, 0, sizeof *s);
+    dtoks t;
+    pattern_tokens(p, n, &t);
+    for (uint32_t i = 0; i < t.n; i++) {
+        uint32_t c = p[t.off[i]];
+        if (c == '\'') { i = quote_end(p, &t, i); continue; }
+        if (!is_letter16(c)) continue;
+        int row = canonical_row(c, t.len[i]);
+        if (row >= 0) dskel_field(s, dt_types[row].field, c, t.len[i], row);
+    }
+    /* minutes and fractions without seconds: the seconds forced */
+    if (s->ln[DF_MINUTE] && s->ln[DF_FRACTIONAL] && !s->ln[DF_SECOND]) dskel_field(s, DF_SECOND, 's', 1, canonical_row('s', 1));
+    /* a 12-hour cycle gets the default day period, a 24-hour one loses its own */
+    if (s->ln[DF_HOUR]) {
+        if (s->ch[DF_HOUR] == 'h' || s->ch[DF_HOUR] == 'K') {
+            if (!s->ln[DF_DAYPERIOD]) {
+                dskel_field(s, DF_DAYPERIOD, 'a', 1, canonical_row('a', 1));
+                s->added_a = 1;
+            }
+        } else {
+            s->ch[DF_DAYPERIOD] = 0;
+            s->ln[DF_DAYPERIOD] = 0;
+            s->bch[DF_DAYPERIOD] = 0;
+            s->bln[DF_DAYPERIOD] = 0;
+            s->type[DF_DAYPERIOD] = 0;
+        }
+    }
+}
+
+static int dskel_distance(const dskel *me, const dskel *other, int include, int *missing, int *extra) {
+    int r = 0;
+    *missing = 0;
+    *extra = 0;
+    for (int i = 0; i < DF_N; i++) {
+        int my = 0, ot = other->type[i];
+        if (include & (1 << i)) my = me->type[i];
+        if (my == ot) continue;
+        if (my == 0) { r += DT_EXTRA_FIELD; *extra |= 1 << i; }
+        else if (ot == 0) { r += DT_MISSING_FIELD; *missing |= 1 << i; }
+        else if (my > ot) r += my - ot;
+        else r += ot - my;
+    }
+    return r;
+}
+static int dskel_original_eq(const dskel *a, const dskel *b) {
+    for (int i = 0; i < DF_N; i++) if (a->ch[i] != b->ch[i] || a->ln[i] != b->ln[i]) return 0;
+    return 1;
+}
+static int dskel_base_eq(const dskel *a, const dskel *b) {
+    for (int i = 0; i < DF_N; i++) if (a->bch[i] != b->bch[i] || a->bln[i] != b->bln[i]) return 0;
+    return 1;
+}
+static int dskel_types_eq(const dskel *a, const dskel *b) {
+    for (int i = 0; i < DF_N; i++) if (a->type[i] != b->type[i]) return 0;
+    return 1;
+}
+static int dskel_mask(const dskel *s) {
+    int m = 0;
+    for (int i = 0; i < DF_N; i++) if (s->type[i]) m |= 1 << i;
+    return m;
+}
+/* the base's first letter: the bucket of ICU's PatternMap (A-Z 0-25, a-z 26-51) */
+static int dskel_bucket(const dskel *s) {
+    for (int i = 0; i < DF_N; i++)
+        if (s->bln[i]) {
+            uint32_t c = s->bch[i];
+            if (c >= 'a') return 26 + (int)(c - 'a');
+            return (int)(c - 'A');
+        }
+    return -1;
+}
+/* PtnSkeleton::getSkeleton: the fields as given, in field order, without an added 'a' */
+static void dskel_text(const dskel *s, vector<uint16_t> *out) {
+    for (int i = 0; i < DF_N; i++) {
+        if (i == DF_DAYPERIOD && s->added_a) continue;
+        for (int k = 0; k < s->ln[i]; k++) push_back(*out, (uint16_t)s->ch[i]);
+    }
+}
+
+/* the map: entries (a skeleton, its pattern's place in the text, whether its skeleton was
+   given) in insertion order, searched bucket by bucket as ICU iterates */
+typedef struct dpent { dskel sk; uint32_t off, n; int specified, bucket; } dpent;
+typedef struct dmap { vector<dpent> e; vector<uint16_t> text; } dmap;
+
+/* addPatternWithOptionalSkeleton: a pattern, its skeleton the given one or its own */
+static void dp_add(dmap *m, const uint16_t *pat, uint32_t n, const uint16_t *skel, uint32_t sn, int override) {
+    dskel s;
+    if (skel) dskel_set(skel, sn, &s);
+    else dskel_set(pat, n, &s);
+    int b = dskel_bucket(&s);
+    if (b < 0) return;
+    for (size_t i = 0; i < len(m->e); i++) {
+        if (m->e[i].bucket != b || !dskel_base_eq(&m->e[i].sk, &s)) continue;
+        if ((!m->e[i].specified || (skel && !override)) && !override) return;
+        break;
+    }
+    for (size_t i = 0; i < len(m->e); i++) {
+        if (m->e[i].bucket != b || !dskel_original_eq(&m->e[i].sk, &s)) continue;
+        if (!override || (skel && m->e[i].specified)) return;
+        break;
+    }
+    /* PatternMap::add: the same base and types overwrite the pattern, else appended */
+    uint32_t off = (uint32_t)len(m->text);
+    for (uint32_t i = 0; i < n; i++) push_back(m->text, pat[i]);
+    for (size_t i = 0; i < len(m->e); i++) {
+        if (m->e[i].bucket == b && dskel_base_eq(&m->e[i].sk, &s) && dskel_types_eq(&m->e[i].sk, &s)) {
+            m->e[i].off = off;
+            m->e[i].n = n;
+            m->e[i].specified = skel != 0;
+            return;
+        }
+    }
+    dpent e;
+    e.sk = s;
+    e.off = off;
+    e.n = n;
+    e.specified = skel != 0;
+    e.bucket = b;
+    push_back(m->e, e);
+}
+
+/* a generator: its locale's data, its default hour letter (fDefaultHourFormatChar), its
+   decimal separator, its map */
+typedef struct dgen { int li; uint32_t hour_char; uint16_t decimal[8]; uint32_t ndecimal; dmap m; } dgen;
+
+/* getBestRaw: the entry nearest the skeleton by ICU's distance and order; its missing
+   and extra fields; -1 for none */
+static int dp_best_raw(dgen *g, const dskel *src, int include, int *missing, int *extra) {
+    int best = -1, best_d = 0x7FFFFFFF, best_missing = -1;
+    *missing = 0;
+    *extra = 0;
+    for (int b = 0; b < 52; b++) {
+        for (size_t i = 0; i < len(g->m.e); i++) {
+            if (g->m.e[i].bucket != b) continue;
+            int mi, ex;
+            int d = dskel_distance(src, &g->m.e[i].sk, include, &mi, &ex);
+            if (d < best_d || (d == best_d && best_missing < mi)) {
+                best_d = d;
+                best_missing = mi;
+                best = (int)i;
+                *missing = mi;
+                *extra = ex;
+                if (d == 0) return best;
+            }
+        }
+    }
+    return best;
+}
+
+#define DTPG_FIXFRAC 2
+#define DTPG_MATCH_HOUR 4
+
+/* adjustFieldTypes: a found pattern's fields given the request's lengths and letters (with
+   UDATPG_MATCH_HOUR_FIELD_LENGTH, as V8 asks); spec the entry's given skeleton, if any */
+static void dp_adjust(const dgen *g, const uint16_t *pat, uint32_t n, const dskel *spec, int has_spec, int flags, const dskel *req, vector<uint16_t> *out) {
+    dtoks t;
+    pattern_tokens(pat, n, &t);
+    for (uint32_t i = 0; i < t.n; i++) {
+        uint32_t c0 = pat[t.off[i]];
+        if (c0 == '\'') {
+            uint32_t e = quote_end(pat, &t, i);
+            for (uint32_t k = i; k <= e && k < t.n; k++)
+                for (uint32_t u = 0; u < t.len[k]; u++) push_back(*out, pat[t.off[k] + u]);
+            i = e;
+            continue;
+        }
+        int row = -1;
+        if (is_letter16(c0)) row = canonical_row(c0, t.len[i]);
+        if (row < 0) {
+            for (uint32_t k = 0; k < t.len[i]; k++) push_back(*out, pat[t.off[i] + k]);
+            continue;
+        }
+        int f = dt_types[row].field;
+        if ((flags & DTPG_FIXFRAC) && f == DF_SECOND) {
+            for (uint32_t k = 0; k < t.len[i]; k++) push_back(*out, pat[t.off[i] + k]);
+            for (uint32_t k = 0; k < g->ndecimal; k++) push_back(*out, g->decimal[k]);
+            for (uint32_t k = 0; k < req->ln[DF_FRACTIONAL]; k++) push_back(*out, (uint16_t)req->ch[DF_FRACTIONAL]);
+            continue;
+        }
+        if (req->type[f] == 0) {
+            for (uint32_t k = 0; k < t.len[i]; k++) push_back(*out, pat[t.off[i] + k]);
+            continue;
+        }
+        uint32_t req_ch = req->ch[f];
+        int req_len = req->ln[f];
+        if (req_ch == 'E' && req_len < 3) req_len = 3;
+        int adj = req_len;
+        if ((f == DF_HOUR && !(flags & DTPG_MATCH_HOUR)) || f == DF_MINUTE || f == DF_SECOND) adj = t.len[i];
+        else if (has_spec && req_ch != 'c' && req_ch != 'e') {
+            int skel_len = spec->ln[f];
+            int pat_numeric = dt_types[row].type > 0, skel_numeric = spec->type[f] > 0;
+            if (skel_len == req_len || (pat_numeric && !skel_numeric) || (skel_numeric && !pat_numeric)) adj = t.len[i];
+        }
+        uint32_t c = c0;
+        if (f != DF_HOUR && f != DF_MONTH && f != DF_WEEKDAY && (f != DF_YEAR || req_ch == 'Y')) c = req_ch;
+        if (c == 'E' && adj < 3) c = 'e';
+        if (f == DF_HOUR && g->hour_char) {
+            uint32_t dc = g->hour_char;
+            if (req_ch == dc) c = dc;
+            else if (req_ch == 'h' && dc == 'K') c = 'K';
+            else if (req_ch == 'H' && dc == 'k') c = 'k';
+            else if (req_ch == 'k' && dc == 'H') c = 'H';
+            else if (req_ch == 'K' && dc == 'h') c = 'h';
+        }
+        for (int k = 0; k < adj; k++) push_back(*out, (uint16_t)c);
+    }
+}
+
+/* an entry's pattern adjusted */
+static void dp_adjust_entry(dgen *g, int bi, int flags, const dskel *req, vector<uint16_t> *out) {
+    vector<uint16_t> pat;
+    for (uint32_t k = 0; k < g->m.e[bi].n; k++) push_back(pat, g->m.text[g->m.e[bi].off + k]);
+    dskel spec = g->m.e[bi].sk;
+    dp_adjust(g, data(pat), (uint32_t)len(pat), &spec, g->m.e[bi].specified, flags, req, out);
+}
+
+/* ICU's SimpleFormatter: {0}, {1}, {2} replaced; an apostrophe before a brace or another
+   apostrophe quotes, else it is itself */
+static void simple_format(const uint16_t *pat, uint32_t n, vector<uint16_t> *a0, vector<uint16_t> *a1, vector<uint16_t> *a2, vector<uint16_t> *out) {
+    int in_quote = 0;
+    for (uint32_t i = 0; i < n;) {
+        uint16_t c = pat[i++];
+        if (c == '\'') {
+            if (i < n && pat[i] == '\'') { i++; }
+            else if (in_quote) { in_quote = 0; continue; }
+            else if (i < n && (pat[i] == '{' || pat[i] == '}')) { c = pat[i]; i++; in_quote = 1; }
+        } else if (!in_quote && c == '{' && i + 1 < n && pat[i + 1] == '}' && pat[i] >= '0' && pat[i] <= '2') {
+            uint32_t k = pat[i] - '0';
+            vector<uint16_t> *a = a0;
+            if (k == 1) a = a1;
+            if (k == 2) a = a2;
+            if (a) for (size_t j = 0; j < len(*a); j++) push_back(*out, (*a)[j]);
+            i += 2;
+            continue;
+        }
+        push_back(*out, c);
+    }
+}
+
+/* getTopBitNumber */
+static int top_field(int mask) {
+    if (!mask) return 0;
+    int i = 0;
+    while (mask) { mask >>= 1; i++; }
+    if (i - 1 > DF_ZONE) return DF_ZONE;
+    return i - 1;
+}
+
+/* the append item of a field (its locale's, else ICU's "{0} ├{2}: {1}┤") */
+static uint32_t append_item(const dgen *g, int field, uint16_t *buf, uint32_t cap) {
+    uint32_t n = fld_units(rec_get(g->li, RKEY(IDK_APPEND, 0)), (uint32_t)field, buf, cap);
+    if (n) return n;
+    static const uint16_t def[] = { '{', '0', '}', ' ', 0x251C, '{', '2', '}', ':', ' ', '{', '1', '}', 0x2524 };
+    for (uint32_t i = 0; i < 14; i++) buf[i] = def[i];
+    return 14;
+}
+
+/* getBestAppending: the fields of a mask from the map, each missing one appended with the
+   locale's append items */
+static void dp_best_appending(dgen *g, const dskel *req, int fields, int flags, vector<uint16_t> *out) {
+    if (!fields) return;
+    int missing, extra;
+    int bi = dp_best_raw(g, req, fields, &missing, &extra);
+    if (bi < 0) return;
+    dp_adjust_entry(g, bi, flags, req, out);
+    dskel spec = g->m.e[bi].sk;
+    int has_spec = g->m.e[bi].specified;
+    int last = 0;
+    while (missing) {
+        if (last == missing) break;
+        int sf = (1 << DF_SECOND) | (1 << DF_FRACTIONAL);
+        if ((missing & sf) == (1 << DF_FRACTIONAL) && (fields & sf) == sf) {
+            vector<uint16_t> cur, fixed;
+            for (size_t k = 0; k < len(*out); k++) push_back(cur, (*out)[k]);
+            dp_adjust(g, data(cur), (uint32_t)len(cur), &spec, has_spec, flags | DTPG_FIXFRAC, req, &fixed);
+            clear(*out);
+            for (size_t k = 0; k < len(fixed); k++) push_back(*out, fixed[k]);
+            missing &= ~(1 << DF_FRACTIONAL);
+            continue;
+        }
+        int start = missing;
+        int bj = dp_best_raw(g, req, missing, &missing, &extra);
+        if (bj < 0) break;
+        spec = g->m.e[bj].sk;
+        has_spec = g->m.e[bj].specified;
+        vector<uint16_t> tmp;
+        dp_adjust_entry(g, bj, flags, req, &tmp);
+        int top = top_field(start & ~missing);
+        uint16_t ap[64], nm[64];
+        uint32_t an = append_item(g, top, ap, 64);
+        uint32_t nn = fld_units(rec_get(g->li, RKEY(IDK_FIELDNAMES, 0)), (uint32_t)top, nm, 64);
+        vector<uint16_t> name, res;
+        push_back(name, (uint16_t)'\'');
+        if (nn) { for (uint32_t k = 0; k < nn; k++) push_back(name, nm[k]); }
+        else {
+            push_back(name, (uint16_t)'F');
+            if (top >= 10) push_back(name, (uint16_t)'1');
+            push_back(name, (uint16_t)('0' + top % 10));
+        }
+        push_back(name, (uint16_t)'\'');
+        simple_format(ap, an, out, &tmp, &name, &res);
+        clear(*out);
+        for (size_t k = 0; k < len(res); k++) push_back(*out, res[k]);
+        last = missing;
+    }
+}
+
+/* the locale's default hour letter (getAllowedHourFormats): timeData by language-region,
+   else region (the tag's, else its likely one's), else H; a -u-hc keyword's first */
+static uint32_t default_hour_char(const itag *t) {
+    int kw = find_kw(t, "hc");
+    if (kw >= 0) {
+        if (!strcmp(t->val[kw], "h24")) return 'k';
+        if (!strcmp(t->val[kw], "h23")) return 'H';
+        if (!strcmp(t->val[kw], "h12")) return 'h';
+        if (!strcmp(t->val[kw], "h11")) return 'K';
+    }
+    char lang[9], region[4], key[16];
+    copyz(lang, sizeof lang, t->lang);
+    copyz(region, sizeof region, t->region);
+    if (!lang[0] || !region[0]) {
+        char l2[9], s2[5], r2[4];
+        if (add_likely(t->lang, t->script, t->region, l2, s2, r2)) {
+            copyz(lang, sizeof lang, l2);
+            copyz(region, sizeof region, r2);
+        }
+    }
+    if (!region[0]) copyz(region, sizeof region, "001");
+    key[0] = 0;
+    cat(key, sizeof key, lang);
+    cat(key, sizeof key, "-");
+    cat(key, sizeof key, region);
+    uint32_t v = db_find_z(IDB_HOURS, IDB_HOURS_N, key);
+    if (!v) v = db_find_z(IDB_HOURS, IDB_HOURS_N, region);
+    if (!v) return 'H';
+    uint32_t c = db8(v);
+    if (c == 'h' || c == 'H' || c == 'K' || c == 'k') return c;
+    return 'H';
+}
+
+/* the generator of a locale (ICU's initData): the canonical items, the time and date
+   styles' patterns, the available formats */
+static void dgen_init(dgen *g, int li, uint32_t hour_char, int nsi) {
+    g->li = li;
+    g->hour_char = hour_char;
+    static const char canon[] = "GyQMwWEDFdaHmsSv";
+    for (int i = 0; canon[i]; i++) {
+        uint16_t c = (uint16_t)canon[i];
+        dp_add(&g->m, &c, 1, 0, 0, 0);
+    }
+    for (int k = 0; k < 2; k++) {
+        uint32_t rec;
+        if (k == 0) rec = rec_get(li, RKEY(IDK_TIMEFMT, 0));
+        else rec = rec_get(li, RKEY(IDK_DATEFMT, 0));
+        for (uint32_t s = 0; s < 4; s++) {
+            uint16_t b[160];
+            uint32_t n = fld_units(rec, s, b, 160);
+            if (n) dp_add(&g->m, b, n, 0, 0, 0);
+        }
+    }
+    uint32_t av = rec_get(li, RKEY(IDK_AVAIL, 0));
+    for (uint32_t i = 0;; i += 2) {
+        uint16_t sk[64], pat[160];
+        uint32_t sn = fld_units(av, i, sk, 64);
+        if (!sn) break;
+        uint32_t pn = fld_units(av, i + 1, pat, 160);
+        dp_add(&g->m, pat, pn, sk, sn, 1);
+    }
+    nfo o;
+    memset(&o, 0, sizeof o);
+    o.li = li;
+    o.nsi = nsi;
+    g->ndecimal = ns_field(&o, SY_DECIMAL, g->decimal, 8);
+}
+
+/* getBestPattern(skeleton, flags: DTPG_MATCH_HOUR for UDATPG_MATCH_HOUR_FIELD_LENGTH, as V8
+   asks); the skeleton has no j, C, J */
+static void dp_best_pattern(dgen *g, const uint16_t *skel, uint32_t sn, int flags, vector<uint16_t> *out) {
+    dskel req;
+    dskel_set(skel, sn, &req);
+    int missing, extra;
+    int bi = dp_best_raw(g, &req, -1, &missing, &extra);
+    if (bi >= 0 && !missing && !extra) {
+        dp_adjust_entry(g, bi, flags, &req, out);
+        return;
+    }
+    int needed = dskel_mask(&req);
+    int date_mask = (1 << DF_DAYPERIOD) - 1, time_mask = ((1 << DF_N) - 1) - date_mask;
+    vector<uint16_t> dpat, tpat;
+    dp_best_appending(g, &req, needed & date_mask, flags, &dpat);
+    dp_best_appending(g, &req, needed & time_mask, flags, &tpat);
+    if (!len(dpat)) { for (size_t k = 0; k < len(tpat); k++) push_back(*out, tpat[k]); return; }
+    if (!len(tpat)) { for (size_t k = 0; k < len(dpat); k++) push_back(*out, dpat[k]); return; }
+    /* the glue by the month's width (and a weekday's): the atTime patterns */
+    int style = 3;
+    if (req.bln[DF_MONTH] == 4) {
+        if (req.bln[DF_WEEKDAY]) style = 0;
+        else style = 1;
+    } else if (req.bln[DF_MONTH] == 3) style = 2;
+    uint32_t glue = rec_get(g->li, RKEY(IDK_DTGLUE, 1));
+    if (!glue) glue = rec_get(g->li, RKEY(IDK_DTGLUE, 0));
+    uint16_t gp[64];
+    uint32_t gn = fld_units(glue, (uint32_t)style, gp, 64);
+    simple_format(gp, gn, &tpat, &dpat, 0, out);
+}
+
+/* ---- time zones: UTC, offsets, Etc/GMT's (the IANA database is not carried) ---- */
+
+enum { TZK_UTC, TZK_GMT, TZK_OFFSET };
+
+/* a timeZone option's zone (V8's CreateTimeZone): its kind, offset (minutes east) and
+   resolved name; 0 for one not carried */
+static int tz_parse(js_vm *vm, uint32_t s, int *kind, int *offset, char *name, size_t cap) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len, o = vm->strs[s].off;
+    /* an offset: [+-−]hh(:?mm)? */
+    if (n >= 3) {
+        uint32_t c = vm->units[o];
+        int sign = 0;
+        if (c == '+') sign = 1;
+        else if (c == '-' || c == 0x2212) sign = -1;
+        uint32_t h0 = vm->units[o + 1], h1 = vm->units[o + 2];
+        int ok = (h0 >= '0' && h0 <= '1' && h1 >= '0' && h1 <= '9') || (h0 == '2' && h1 >= '0' && h1 <= '3');
+        if (sign && ok) {
+            int hh = (int)(h0 - '0') * 10 + (int)(h1 - '0'), mm = 0, good = n == 3;
+            if (n > 3) {
+                uint32_t p = 3;
+                if (vm->units[o + 3] == ':') p = 4;
+                if (n - p == 2) {
+                    uint32_t m0 = vm->units[o + p], m1 = vm->units[o + p + 1];
+                    if (m0 >= '0' && m0 <= '5' && m1 >= '0' && m1 <= '9') { mm = (int)(m0 - '0') * 10 + (int)(m1 - '0'); good = 1; }
+                }
+            }
+            if (good) {
+                *offset = sign * (hh * 60 + mm);
+                if (!*offset) { *kind = TZK_GMT; copyz(name, cap, "+00:00"); return 1; }
+                *kind = TZK_OFFSET;
+                char b[8];
+                b[0] = '+';
+                if (sign < 0) b[0] = '-';
+                b[1] = (char)('0' + hh / 10);
+                b[2] = (char)('0' + hh % 10);
+                b[3] = ':';
+                b[4] = (char)('0' + mm / 10);
+                b[5] = (char)('0' + mm % 10);
+                b[6] = 0;
+                copyz(name, cap, b);
+                return 1;
+            }
+        }
+    }
+    /* a name: ASCII, canonicalized as V8 does it */
+    char in[64], up[64], canon[64];
+    if (n == 0 || n >= sizeof in) return 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t c = vm->units[o + i];
+        if (c == 0 || c >= 128) return 0;
+        in[i] = (char)c;
+        up[i] = (char)upper((int)c);
+    }
+    in[n] = 0;
+    up[n] = 0;
+    canon[0] = 0;
+    int done = 0;
+    if (n == 3) {
+        if (!strcmp(up, "GMT")) copyz(canon, sizeof canon, "UTC");
+        else copyz(canon, sizeof canon, up);
+        done = 1;
+    } else if (n > 3 && !strncmp(up, "ETC", 3)) {
+        if (!strcmp(up, "ETC/UTC") || !strcmp(up, "ETC/GMT") || !strcmp(up, "ETC/UCT")) { copyz(canon, sizeof canon, "UTC"); done = 1; }
+        else if (!strncmp(up, "ETC/GMT", 7)) {
+            /* GetGMTTzID */
+            done = 1;
+            if (n == 8 && in[7] == '0') copyz(canon, sizeof canon, "Etc/GMT0");
+            else if (n == 9 && (in[7] == '+' || in[7] == '-') && is_digit(in[8])) { copyz(canon, sizeof canon, "Etc/GMT"); catn(canon, sizeof canon, in + 7, 2); }
+            else if (n == 10 && (in[7] == '+' || in[7] == '-') && in[8] == '1' && in[9] >= '0' && in[9] <= '4') { copyz(canon, sizeof canon, "Etc/GMT"); catn(canon, sizeof canon, in + 7, 3); }
+        }
+    } else if (n > 3 && !strncmp(up, "GMT", 3)) {
+        if (!strcmp(up, "GMT0") || !strcmp(up, "GMT+0") || !strcmp(up, "GMT-0")) { copyz(canon, sizeof canon, "UTC"); done = 1; }
+    }
+    if (!done) {
+        /* ToTitleCaseTimezoneLocation */
+        int word = 0;
+        size_t k = 0;
+        for (uint32_t i = 0; i < n; i++) {
+            int c = in[i];
+            if (is_alpha(c)) {
+                if (word == 0) canon[k++] = (char)upper(c);
+                else canon[k++] = (char)lower(c);
+                word++;
+            } else if (c == '_' || c == '-' || c == '/') {
+                if (word == 2 && ((canon[k - 2] == 'O' && canon[k - 1] == 'f') || (canon[k - 2] == 'E' && canon[k - 1] == 's') ||
+                                  (canon[k - 2] == 'A' && canon[k - 1] == 'u'))) canon[k - 2] = (char)lower(canon[k - 2]);
+                canon[k++] = (char)c;
+                word = 0;
+            } else return 0;
+        }
+        canon[k] = 0;
+    }
+    static const char *const utc_ids[] = { "UTC", "UCT", "Etc/Universal", "Etc/Zulu", "Universal", "Zulu", 0 };
+    static const char *const gmt_ids[] = { "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich", "Greenwich", 0 };
+    for (int i = 0; utc_ids[i]; i++)
+        if (!strcmp(canon, utc_ids[i])) { *kind = TZK_UTC; *offset = 0; copyz(name, cap, "UTC"); return 1; }
+    for (int i = 0; gmt_ids[i]; i++)
+        if (!strcmp(canon, gmt_ids[i])) { *kind = TZK_GMT; *offset = 0; copyz(name, cap, "UTC"); return 1; }
+    if (!strncmp(canon, "Etc/GMT", 7) && (canon[7] == '+' || canon[7] == '-')) {
+        int h = atoi(canon + 8);
+        if (canon[7] == '+' && h >= 1 && h <= 12) { *kind = TZK_OFFSET; *offset = -h * 60; copyz(name, cap, canon); return 1; }
+        if (canon[7] == '-' && h >= 1 && h <= 14) { *kind = TZK_OFFSET; *offset = h * 60; copyz(name, cap, canon); return 1; }
+    }
+    return 0;
+}
+
+/* a number's digits in a numbering system, zero-padded to min (ICU's zeroPaddingNumber: at
+   most ten digits) */
+static void put_digits(int nsi, int64_t v, int min, vector<uint16_t> *tx, vector<uint8_t> *ty, uint32_t type) {
+    if (v < 0) v = -v;
+    char d[24];
+    int n = 0;
+    do { d[n++] = (char)(v % 10); v /= 10; } while (v && n < 10);
+    if (min > 20) min = 20;
+    while (n < min) d[n++] = 0;
+    while (n > 0) put_c(tx, ty, ns_digit(nsi, d[--n]), type);
+}
+
+/* the localized GMT format of an offset (TimeZoneFormat::formatOffsetLocalizedGMT): the
+   short one drops a zero minute and the hour's leading zero */
+static void tz_gmt(int li, int nsi, int offset, int is_short, vector<uint16_t> *tx, vector<uint8_t> *ty, uint32_t type) {
+    uint32_t rec = rec_get(li, RKEY(IDK_TZ, 0));
+    uint16_t gf[48], hf[48];
+    uint32_t gn = fld_units(rec, 0, gf, 48), hn = fld_units(rec, 2, hf, 48);
+    uint32_t semi = hn;
+    for (uint32_t i = 0; i < hn; i++) if (hf[i] == ';') { semi = i; break; }
+    int neg = offset < 0, a = offset;
+    if (neg) a = -offset;
+    int hh = a / 60, mm = a % 60;
+    uint32_t ps = 0, pe = semi;
+    if (neg && semi < hn) { ps = semi + 1; pe = hn; }
+    if (is_short && mm == 0) {
+        /* truncateOffsetPattern: up to the hours before the minutes */
+        uint32_t at = pe;
+        for (uint32_t i = ps; i + 1 < pe; i++) if (hf[i] == 'm' && hf[i + 1] == 'm') { at = i; break; }
+        uint32_t cut = at;
+        for (uint32_t i = at; i > ps; i--) if (hf[i - 1] == 'H') { cut = i; break; }
+        pe = cut;
+    }
+    uint32_t z = gn;
+    for (uint32_t i = 0; i + 2 < gn; i++) if (gf[i] == '{' && gf[i + 1] == '0' && gf[i + 2] == '}') { z = i; break; }
+    put_u(tx, ty, gf, z, type);
+    for (uint32_t i = ps; i < pe;) {
+        if (hf[i] == 'H' || hf[i] == 'm') {
+            uint32_t c = hf[i];
+            while (i < pe && hf[i] == c) i++;
+            if (c == 'H') {
+                if (is_short) put_digits(nsi, hh, 1, tx, ty, type);
+                else put_digits(nsi, hh, 2, tx, ty, type);
+            } else put_digits(nsi, mm, 2, tx, ty, type);
+            continue;
+        }
+        put_c(tx, ty, hf[i], type);
+        i++;
+    }
+    if (z + 3 <= gn) put_u(tx, ty, gf + z + 3, gn - z - 3, type);
+}
+
+/* ---- the pattern's formatting (SimpleDateFormat::subFormat) ---- */
+
+/* the parts' types */
+enum { DP_LITERAL, DP_ERA, DP_YEAR, DP_MONTH, DP_DAY, DP_WEEKDAY, DP_DAYPERIOD, DP_HOUR, DP_MINUTE, DP_SECOND, DP_FRACTION,
+       DP_TZ, DP_N };
+static const char *const dp_names[] = { "literal", "era", "year", "month", "day", "weekday", "dayPeriod", "hour", "minute",
+    "second", "fractionalSecond", "timeZoneName" };
+
+/* the day periods' names (a record's fields) and ICU's periods */
+enum { DPN_AM, DPN_PM, DPN_MIDNIGHT, DPN_NOON, DPN_MORNING1, DPN_MORNING2, DPN_AFTERNOON1, DPN_AFTERNOON2, DPN_EVENING1,
+       DPN_EVENING2, DPN_NIGHT1, DPN_NIGHT2, DPN_N };
+static const char *const dpn_names[DPN_N] = { "am", "pm", "midnight", "noon", "morning1", "morning2", "afternoon1",
+    "afternoon2", "evening1", "evening2", "night1", "night2" };
+
+/* a formatter's context: its data locale, digits, zone; its language's day period rules
+   (each hour's period, -1 none, and whether midnight and noon have one) */
+typedef struct dctx { int li, nsi, tzkind, offset; int hours[24]; int has_rules, has_midnight, has_noon; } dctx;
+
+/* DayPeriodRules of the locale's tag, truncated until CLDR has rules for it */
+static void dp_rules(dctx *c) {
+    for (int h = 0; h < 24; h++) c->hours[h] = -1;
+    c->has_rules = 0;
+    c->has_midnight = 0;
+    c->has_noon = 0;
+    char tag[TAG_MAX + 1];
+    db_copy(db32(IDB_LOCALES + (uint32_t)c->li * LOC_REC), tag, sizeof tag);
+    uint32_t r = 0;
+    for (;;) {
+        r = db_find_z(IDB_DAYPERIOD_RULES, IDB_DAYPERIOD_RULES_N, tag);
+        if (r) break;
+        char *dash = strrchr(tag, '-');
+        if (!dash) return;
+        *dash = 0;
+    }
+    /* "name@HHMM" or "name:HHMM-HHMM", by spaces */
+    while (db8(r)) {
+        char nm[16];
+        size_t k = 0;
+        while (db8(r) && db8(r) != '@' && db8(r) != ':' && k + 1 < sizeof nm) nm[k++] = (char)db8(r++);
+        nm[k] = 0;
+        int idx = -1;
+        for (int i = 0; i < DPN_N; i++) if (!strcmp(nm, dpn_names[i])) idx = i;
+        uint32_t sep = db8(r);
+        r++;
+        int a = (int)(db8(r) - '0') * 10 + (int)(db8(r + 1) - '0');
+        r += 4;
+        if (sep == '@') {
+            if (idx == DPN_MIDNIGHT) c->has_midnight = 1;
+            if (idx == DPN_NOON) c->has_noon = 1;
+        } else {
+            r++;
+            int b = (int)(db8(r) - '0') * 10 + (int)(db8(r + 1) - '0');
+            r += 4;
+            for (int i = a; i != b; ++i) {
+                if (i == 24) i = 0;
+                if (i == b) break;
+                c->hours[i] = idx;
+            }
+        }
+        while (db8(r) == ' ') r++;
+    }
+    c->has_rules = c->hours[0] >= 0;
+}
+
+/* a name of a record's field (by its key's index) appended: 0 when it has none */
+static int put_name(int li, uint32_t key, uint32_t f, vector<uint16_t> *tx, vector<uint8_t> *ty, uint32_t type) {
+    uint16_t b[96];
+    uint32_t n = fld_units(rec_get(li, key), f, b, 96);
+    put_u(tx, ty, b, n, type);
+    return n != 0;
+}
+
+/* the width of a day period's name by its letters' count: abbreviated, narrow, wide */
+static uint32_t dp_width(int count) {
+    if (count <= 3) return 0;
+    if (count == 5) return 1;
+    return 2;
+}
+
+static void dt_field(const dctx *c, uint32_t ch, int count, const dfields *f, int has_m, int has_s, vector<uint16_t> *tx, vector<uint8_t> *ty) {
+    int64_t yoe = f->year;
+    if (yoe <= 0) yoe = 1 - yoe;
+    switch (ch) {
+    case 'G': {
+        uint32_t w = 0;
+        if (count == 5) w = 1;
+        else if (count == 4) w = 2;
+        uint32_t era = f->year > 0;
+        put_name(c->li, RKEY(IDK_ERAS, w), era, tx, ty, DP_ERA);
+        break;
+    }
+    case 'y': case 'Y': case 'u': case 'U': case 'r':
+        if (count == 2) put_digits(c->nsi, yoe % 100, 2, tx, ty, DP_YEAR);
+        else put_digits(c->nsi, yoe, count, tx, ty, DP_YEAR);
+        break;
+    case 'M': case 'L': {
+        uint32_t ctx = ch == 'L';
+        if (count == 5) put_name(c->li, RKEY(IDK_MONTHS, ctx * 3 + 1), (uint32_t)(f->month - 1), tx, ty, DP_MONTH);
+        else if (count == 4) put_name(c->li, RKEY(IDK_MONTHS, ctx * 3 + 2), (uint32_t)(f->month - 1), tx, ty, DP_MONTH);
+        else if (count == 3) put_name(c->li, RKEY(IDK_MONTHS, ctx * 3), (uint32_t)(f->month - 1), tx, ty, DP_MONTH);
+        else put_digits(c->nsi, f->month, count, tx, ty, DP_MONTH);
+        break;
+    }
+    case 'd': put_digits(c->nsi, f->day, count, tx, ty, DP_DAY); break;
+    case 'E': case 'e': case 'c': {
+        if (ch != 'E' && count < 3) {
+            /* the local day of the week: Monday first where the week starts on Monday (not
+               reached by Intl's skeletons); Sunday first here */
+            put_digits(c->nsi, f->wday + 1, 1, tx, ty, DP_WEEKDAY);
+            break;
+        }
+        uint32_t ctx = ch == 'c';
+        uint32_t w = 0;
+        if (count == 5) w = 1;
+        else if (count == 4) w = 3;
+        else if (count == 6) w = 2;
+        put_name(c->li, RKEY(IDK_DAYS, ctx * 4 + w), (uint32_t)f->wday, tx, ty, DP_WEEKDAY);
+        break;
+    }
+    case 'a': {
+        uint32_t w = 0;
+        if (count == 4) w = 2;
+        else if (count == 5) w = 1;
+        uint32_t pm = f->hour >= 12;
+        put_name(c->li, RKEY(IDK_DAYPERIODS, w), pm, tx, ty, DP_DAYPERIOD);
+        break;
+    }
+    case 'b':
+        if (f->hour == 12 && (!has_m || f->minute == 0) && (!has_s || f->second == 0) &&
+            put_name(c->li, RKEY(IDK_DAYPERIODS, dp_width(count)), DPN_NOON, tx, ty, DP_DAYPERIOD)) break;
+        dt_field(c, 'a', count, f, has_m, has_s, tx, ty);
+        break;
+    case 'B': {
+        if (!c->has_rules) { dt_field(c, 'a', count, f, has_m, has_s, tx, ty); break; }
+        int minute = 0, second = 0;
+        if (has_m) minute = f->minute;
+        if (has_s) second = f->second;
+        int period;
+        if (f->hour == 0 && minute == 0 && second == 0 && c->has_midnight) period = DPN_MIDNIGHT;
+        else if (f->hour == 12 && minute == 0 && second == 0 && c->has_noon) period = DPN_NOON;
+        else period = c->hours[f->hour];
+        uint32_t key = RKEY(IDK_DAYPERIODS, dp_width(count));
+        if (period != DPN_AM && period != DPN_PM && period != DPN_MIDNIGHT && period >= 0 && put_name(c->li, key, (uint32_t)period, tx, ty, DP_DAYPERIOD)) break;
+        if (period == DPN_MIDNIGHT || period == DPN_NOON) {
+            period = c->hours[f->hour];
+            if (period != DPN_AM && period != DPN_PM && period >= 0 && put_name(c->li, key, (uint32_t)period, tx, ty, DP_DAYPERIOD)) break;
+        }
+        dt_field(c, 'a', count, f, has_m, has_s, tx, ty);
+        break;
+    }
+    case 'h': {
+        int h = f->hour % 12;
+        if (h == 0) h = 12;
+        put_digits(c->nsi, h, count, tx, ty, DP_HOUR);
+        break;
+    }
+    case 'H': put_digits(c->nsi, f->hour, count, tx, ty, DP_HOUR); break;
+    case 'K': put_digits(c->nsi, f->hour % 12, count, tx, ty, DP_HOUR); break;
+    case 'k': {
+        int h = f->hour;
+        if (h == 0) h = 24;
+        put_digits(c->nsi, h, count, tx, ty, DP_HOUR);
+        break;
+    }
+    case 'm': put_digits(c->nsi, f->minute, count, tx, ty, DP_MINUTE); break;
+    case 's': put_digits(c->nsi, f->second, count, tx, ty, DP_SECOND); break;
+    case 'S': {
+        int v = f->ms, mind = count;
+        if (mind > 3) mind = 3;
+        if (count == 1) v /= 100;
+        else if (count == 2) v /= 10;
+        put_digits(c->nsi, v, mind, tx, ty, DP_FRACTION);
+        if (count > 3) put_digits(c->nsi, 0, count - 3, tx, ty, DP_FRACTION);
+        break;
+    }
+    case 'z': case 'v': case 'O': case 'Z': case 'X': case 'x': case 'V': {
+        int is_long = count >= 4;
+        if (ch == 'v' && count != 1 && count != 4) break;
+        if (ch == 'O' && count != 1 && count != 4) break;
+        if (ch == 'z' || ch == 'v') {
+            uint32_t rec = rec_get(c->li, RKEY(IDK_TZ, 0));
+            uint16_t b[96];
+            uint32_t n = 0;
+            if (c->tzkind == TZK_UTC && ch == 'z') {
+                if (is_long) n = fld_units(rec, 3, b, 96);
+                else n = fld_units(rec, 4, b, 96);
+            } else if (c->tzkind == TZK_GMT) {
+                if (is_long) n = fld_units(rec, 5, b, 96);
+                else n = fld_units(rec, 6, b, 96);
+            }
+            if (n) { put_u(tx, ty, b, n, DP_TZ); break; }
+        }
+        tz_gmt(c->li, c->nsi, c->offset, !is_long, tx, ty, DP_TZ);
+        break;
+    }
+    default: break;
+    }
+}
+
+/* a pattern applied to a time's fields (SimpleDateFormat::format): its units and their
+   parts' types */
+static void dt_render(const dctx *c, const uint16_t *pat, uint32_t pn, const dfields *f, vector<uint16_t> *tx, vector<uint8_t> *ty) {
+    int has_m = 0, has_s = 0, q = 0;
+    for (uint32_t i = 0; i < pn; i++) {
+        if (pat[i] == '\'') q = !q;
+        else if (!q && pat[i] == 'm') has_m = 1;
+        else if (!q && pat[i] == 's') has_s = 1;
+    }
+    int in_quote = 0, count = 0;
+    uint32_t prev = 0;
+    for (uint32_t i = 0; i < pn; i++) {
+        uint32_t ch = pat[i];
+        if (ch != prev && count > 0) {
+            dt_field(c, prev, count, f, has_m, has_s, tx, ty);
+            count = 0;
+        }
+        if (ch == '\'') {
+            if (i + 1 < pn && pat[i + 1] == '\'') { put_c(tx, ty, '\'', DP_LITERAL); i++; }
+            else in_quote = !in_quote;
+        } else if (!in_quote && is_letter16(ch)) {
+            prev = ch;
+            count++;
+        } else put_c(tx, ty, ch, DP_LITERAL);
+    }
+    if (count > 0) dt_field(c, prev, count, f, has_m, has_s, tx, ty);
+}
+
+/* ---- Intl.DateTimeFormat: its options (V8's CreateDateTimeFormat) ---- */
+
+/* the slots */
+enum { DFS_LOCALE, DFS_NU, DFS_NSI, DFS_TZ, DFS_TZKIND, DFS_OFFSET, DFS_HC, DFS_DATESTYLE, DFS_TIMESTYLE, DFS_PATTERN,
+       DFS_DATALOC, DFS_BOUND, DFS_HOURCHAR, DFS_N };
+enum { HC_H11, HC_H12, HC_H23, HC_H24 };
+static const char *const hc_names[] = { "h11", "h12", "h23", "h24", 0 };
+static const char hc_letters[] = "KhHk";
+static const char *const style_names[] = { "full", "long", "medium", "short", 0 };
+/* what toLocaleString and its kin require and default (ECMA-402's required, defaults) */
+enum { DQ_ANY, DQ_DATE, DQ_TIME };
+enum { DD_DATE, DD_TIME, DD_ALL };
+
+static int hc_of_letter(uint32_t c) {
+    if (c == 'K') return HC_H11;
+    if (c == 'h') return HC_H12;
+    if (c == 'k') return HC_H24;
+    return HC_H23;
+}
+/* HourCycleFromPattern: the first unquoted hour letter's cycle, -1 for none */
+static int hc_of_pattern(const uint16_t *p, uint32_t n) {
+    int q = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t c = p[i];
+        if (c == '\'') q = !q;
+        else if (!q && (c == 'K' || c == 'h' || c == 'H' || c == 'k')) return hc_of_letter(c);
+    }
+    return -1;
+}
+/* ReplaceHourCycleInPattern: every hour letter the cycle's (a space before one after a 'd') */
+static void hc_replace(vector<uint16_t> *p, int hc) {
+    if (hc < 0) return;
+    vector<uint16_t> r;
+    int rep = 1;
+    uint32_t last = 0;
+    for (size_t i = 0; i < len(*p); i++) {
+        uint32_t ch = (*p)[i];
+        if (ch == '\'') { rep = !rep; push_back(r, (uint16_t)ch); }
+        else if (ch == 'H' || ch == 'h' || ch == 'K' || ch == 'k') {
+            if (rep && last == 'd') push_back(r, (uint16_t)' ');
+            if (rep) push_back(r, (uint16_t)hc_letters[hc]);
+            else push_back(r, (uint16_t)ch);
+        } else push_back(r, (uint16_t)ch);
+        last = ch;
+    }
+    clear(*p);
+    for (size_t i = 0; i < len(r); i++) push_back(*p, r[i]);
+}
+
+/* the option components: V8's table, by property: its values' skeletons */
+typedef struct dcomp { const char *prop; const char *values[7]; const char *skel[6]; } dcomp;
+static const dcomp dt_comps[] = {
+    { "weekday", { "narrow", "long", "short", 0 }, { "EEEEE", "EEEE", "EEE" } },
+    { "era", { "narrow", "long", "short", 0 }, { "GGGGG", "GGGG", "GGG" } },
+    { "year", { "2-digit", "numeric", 0 }, { "yy", "y" } },
+    { "month", { "narrow", "long", "short", "2-digit", "numeric", 0 }, { "MMMMM", "MMMM", "MMM", "MM", "M" } },
+    { "day", { "2-digit", "numeric", 0 }, { "dd", "d" } },
+    { "dayPeriod", { "narrow", "long", "short", 0 }, { "BBBBB", "BBBB", "B" } },
+    { "hour", { "2-digit", "numeric", 0 }, { "", "" } },
+    { "minute", { "2-digit", "numeric", 0 }, { "mm", "m" } },
+    { "second", { "2-digit", "numeric", 0 }, { "ss", "s" } },
+    { "timeZoneName", { "short", "long", "shortOffset", "longOffset", "shortGeneric", "longGeneric", 0 }, { "z", "zzzz", "O", "OOOO", "v", "vvvv" } } };
+enum { DC_WEEKDAY, DC_ERA, DC_YEAR, DC_MONTH, DC_DAY, DC_DAYPERIOD, DC_HOUR, DC_MINUTE, DC_SECOND, DC_TZNAME, DC_N, DC_FSD = DC_N };
+
+/* the pattern of a date style, a time style or both (DateTimeStylePattern) */
+static void style_pattern(dgen *g, int ds, int ts, int hc, vector<uint16_t> *out) {
+    uint16_t b[200];
+    if (ds >= 0 && ts < 0) {
+        uint32_t n = fld_units(rec_get(g->li, RKEY(IDK_DATEFMT, 0)), (uint32_t)ds, b, 200);
+        for (uint32_t i = 0; i < n; i++) push_back(*out, b[i]);
+        return;
+    }
+    vector<uint16_t> tp, dpt;
+    uint32_t n = fld_units(rec_get(g->li, RKEY(IDK_TIMEFMT, 0)), (uint32_t)ts, b, 200);
+    for (uint32_t i = 0; i < n; i++) push_back(tp, b[i]);
+    if (ds >= 0) {
+        n = fld_units(rec_get(g->li, RKEY(IDK_DATEFMT, 0)), (uint32_t)ds, b, 200);
+        for (uint32_t i = 0; i < n; i++) push_back(dpt, b[i]);
+        uint32_t glue = rec_get(g->li, RKEY(IDK_DTGLUE, 1));
+        if (!glue) glue = rec_get(g->li, RKEY(IDK_DTGLUE, 0));
+        n = fld_units(glue, (uint32_t)ds, b, 200);
+        simple_format(b, n, &tp, &dpt, 0, out);
+    } else for (size_t i = 0; i < len(tp); i++) push_back(*out, tp[i]);
+    if (hc == hc_of_pattern(data(*out), (uint32_t)len(*out))) return;
+    /* the cycle differs: the skeleton's hour letters the cycle's, its day periods dropped */
+    dskel s;
+    dskel_set(data(*out), (uint32_t)len(*out), &s);
+    vector<uint16_t> sk, sk2;
+    dskel_text(&s, &sk);
+    for (size_t i = 0; i < len(sk); i++) {
+        uint32_t c = sk[i];
+        if (c == 'a' || c == 'b' || c == 'B') continue;
+        if (c == 'h' || c == 'H' || c == 'K' || c == 'k') c = (uint32_t)hc_letters[hc];
+        push_back(sk2, (uint16_t)c);
+    }
+    clear(*out);
+    dp_best_pattern(g, data(sk2), (uint32_t)len(sk2), DTPG_MATCH_HOUR, out);
+    hc_replace(out, hc);
+}
+
+/* a -u- keyword kept: its value, valid for its key (ca the Gregorian alone, nu a numeric
+   numbering system, hc a cycle), else empty */
+static void dt_keyword(const itag *t, const char *key, char *out, size_t cap) {
+    out[0] = 0;
+    int kw = find_kw(t, key);
+    if (kw < 0) return;
+    const char *v = t->val[kw];
+    int ok = 0;
+    if (!strcmp(key, "ca")) ok = !strcmp(v, "gregory");
+    else if (!strcmp(key, "nu")) ok = strlen(v) < 16 && numbering_index(v) >= 0;
+    else for (int i = 0; hc_names[i]; i++) if (!strcmp(v, hc_names[i])) ok = 1;
+    if (ok) copyz(out, cap, v);
+}
+
+static jv dtf_new(js_vm *vm, jv locales, jv options, jv newt, int required, int defaults, const char *method) {
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    jv opts = options_object(vm, options, method);
+    if (opts == JV_HOLE) return JV_HOLE;
+    const char *svc = method;
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    /* calendar, numberingSystem */
+    uint32_t cs = 0, nus = 0;
+    char ca_opt[16], nu_opt[16];
+    ca_opt[0] = 0;
+    nu_opt[0] = 0;
+    int ca_given = 0, nu_given = 0;
+    int r = get_option_str(vm, opts, "calendar", 0, svc, &cs);
+    if (r == -2) return JV_HOLE;
+    if (r >= 0) {
+        char b[80];
+        int n = str_ascii(vm, cs, b, sizeof b);
+        if (n < 0 || !is_type(b)) {
+            vector<char> m;
+            const char *a = "Invalid calendar : ";
+            append_range(m, a, strlen(a));
+            js_str_to_utf8(vm, cs, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+        ca_given = 1;
+        if (n < 16) copyz(ca_opt, sizeof ca_opt, b);
+    }
+    r = get_option_str(vm, opts, "numberingSystem", 0, svc, &nus);
+    if (r == -2) return JV_HOLE;
+    if (r >= 0) {
+        char b[80];
+        int n = str_ascii(vm, nus, b, sizeof b);
+        if (n < 0 || !is_type(b)) {
+            vector<char> m;
+            const char *a = "Invalid numberingSystem : ";
+            append_range(m, a, strlen(a));
+            js_str_to_utf8(vm, nus, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+        nu_given = 1;
+        if (n < 16) copyz(nu_opt, sizeof nu_opt, b);
+    }
+    int hour12 = get_option_bool(vm, opts, "hour12");
+    if (hour12 == -2) return JV_HOLE;
+    int hour_cycle = get_option_str(vm, opts, "hourCycle", hc_names, svc, 0);
+    if (hour_cycle == -2) return JV_HOLE;
+    int hour_cycle_given = hour_cycle >= 0;
+    if (hour12 >= 0) hour_cycle = -1;
+    /* the locale and its keywords */
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_GENERAL, found, sizeof found, &t);
+    char kw_ca[16], kw_nu[16], kw_hc[8];
+    dt_keyword(&t, "ca", kw_ca, sizeof kw_ca);
+    dt_keyword(&t, "nu", kw_nu, sizeof kw_nu);
+    dt_keyword(&t, "hc", kw_hc, sizeof kw_hc);
+    if (ca_given && kw_ca[0] && strcmp(kw_ca, ca_opt)) kw_ca[0] = 0;
+    if (nu_given && kw_nu[0] && strcmp(kw_nu, nu_opt)) kw_nu[0] = 0;
+    char nu[16];
+    if (nu_given && nu_opt[0] && numbering_index(nu_opt) >= 0 && strcmp(nu_opt, "native") && strcmp(nu_opt, "traditio") && strcmp(nu_opt, "finance"))
+        copyz(nu, sizeof nu, nu_opt);
+    else if (kw_nu[0]) copyz(nu, sizeof nu, kw_nu);
+    else default_numbering(found, nu, sizeof nu);
+    int li = locale_index(found);
+    if (li < 0) li = locale_index("en");
+    int nsi = numbering_index(nu);
+    /* the generator's hour letter: the data locale's, its kept hc keyword's */
+    itag gt;
+    if (tag_from_text(found, strlen(found), &gt)) tag_clear(&gt);
+    if (kw_hc[0]) set_kw(&gt, "hc", kw_hc);
+    uint32_t hour_char = default_hour_char(&gt);
+    int hc_default = hc_of_letter(hour_char);
+    int hc = -1;
+    if (hour_cycle < 0) {
+        if (kw_hc[0]) for (int i = 0; hc_names[i]; i++) if (!strcmp(kw_hc, hc_names[i])) hc = i;
+    } else hc = hour_cycle;
+    if (hour12 >= 0) {
+        if (hour12) {
+            if (hc_default == HC_H11 || hc_default == HC_H12) hc = hc_default;
+            else if (!strcmp(gt.region, "JP")) hc = HC_H11;
+            else hc = HC_H12;
+        } else {
+            if (hc_default == HC_H23 || hc_default == HC_H24) hc = hc_default;
+            else hc = HC_H23;
+        }
+    } else if (hc < 0) hc = hc_default;
+    /* the time zone */
+    jv tzv = js_get(vm, opts, js_atom_ascii(vm, "timeZone"));
+    if (vm->throwing) return JV_HOLE;
+    int tzkind = TZK_UTC, offset = 0;
+    char tzname[64];
+    copyz(tzname, sizeof tzname, "UTC");
+    if (tzv != JV_UNDEF) {
+        uint32_t ts = js_to_string(vm, tzv);
+        if (!ts) return JV_HOLE;
+        if (!tz_parse(vm, ts, &tzkind, &offset, tzname, sizeof tzname)) {
+            vector<char> m;
+            const char *a = "Invalid time zone specified: ";
+            append_range(m, a, strlen(a));
+            js_str_to_utf8(vm, ts, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+    }
+    /* the components */
+    vector<uint16_t> skel;
+    int explicit_mask = 0, has_hour = 0;
+    for (int i = 0; i < DC_N; i++) {
+        if (i == DC_TZNAME) {
+            int fsd = number_option(vm, js_get(vm, opts, js_atom_ascii(vm, "fractionalSecondDigits")), 1, 3, 0, "fractionalSecondDigits");
+            if (fsd < 0 || vm->throwing) return JV_HOLE;
+            if (fsd > 0) explicit_mask |= 1 << DC_FSD;
+            for (int k = 0; k < fsd; k++) push_back(skel, (uint16_t)'S');
+        }
+        int v = get_option_str(vm, opts, dt_comps[i].prop, dt_comps[i].values, svc, 0);
+        if (v == -2) return JV_HOLE;
+        if (v < 0) continue;
+        explicit_mask |= 1 << i;
+        if (i == DC_HOUR) {
+            has_hour = 1;
+            push_back(skel, (uint16_t)hc_letters[hc]);
+            if (v == 0) push_back(skel, (uint16_t)hc_letters[hc]);
+            continue;
+        }
+        for (size_t k = 0; dt_comps[i].skel[v][k]; k++) push_back(skel, (uint16_t)dt_comps[i].skel[v][k]);
+    }
+    static const char *const fm[] = { "basic", "best fit", 0 };
+    if (get_option_str(vm, opts, "formatMatcher", fm, svc, 0) == -2) return JV_HOLE;
+    int ds = get_option_str(vm, opts, "dateStyle", style_names, svc, 0);
+    if (ds == -2) return JV_HOLE;
+    int ts = get_option_str(vm, opts, "timeStyle", style_names, svc, 0);
+    if (ts == -2) return JV_HOLE;
+    int dtf_hc = -1;
+    if (ts >= 0) dtf_hc = hc;
+    dgen g;
+    memset(&g, 0, sizeof g);
+    defer(g) { vector_dpent_drop(&g.m.e); vector_uint16_t_drop(&g.m.text); }
+    dgen_init(&g, li, hour_char, nsi);
+    vector<uint16_t> pat;
+    if (ds >= 0 || ts >= 0) {
+        if (explicit_mask) return js_throw_msg(vm, vm->type_error_proto, "Invalid option : option");
+        if (required == DQ_DATE && ts >= 0) return js_throw_msg(vm, vm->type_error_proto, "Invalid option : timeStyle");
+        if (required == DQ_TIME && ds >= 0) return js_throw_msg(vm, vm->type_error_proto, "Invalid option : dateStyle");
+        style_pattern(&g, ds, ts, dtf_hc, &pat);
+    } else {
+        int need = 1;
+        int date_bits = (1 << DC_WEEKDAY) | (1 << DC_YEAR) | (1 << DC_MONTH) | (1 << DC_DAY);
+        int time_bits = (1 << DC_DAYPERIOD) | (1 << DC_HOUR) | (1 << DC_MINUTE) | (1 << DC_SECOND) | (1 << DC_FSD);
+        if ((required == DQ_DATE || required == DQ_ANY) && (explicit_mask & date_bits)) need = 0;
+        if ((required == DQ_TIME || required == DQ_ANY) && (explicit_mask & time_bits)) need = 0;
+        if (need && (defaults == DD_DATE || defaults == DD_ALL)) { push_back(skel, (uint16_t)'y'); push_back(skel, (uint16_t)'M'); push_back(skel, (uint16_t)'d'); }
+        if (need && (defaults == DD_TIME || defaults == DD_ALL)) {
+            push_back(skel, (uint16_t)hc_letters[hc]);
+            push_back(skel, (uint16_t)'m');
+            push_back(skel, (uint16_t)'s');
+        }
+        if (has_hour) dtf_hc = hc;
+        dp_best_pattern(&g, data(skel), (uint32_t)len(skel), DTPG_MATCH_HOUR, &pat);
+        hc_replace(&pat, dtf_hc);
+    }
+    /* hour12 and hourCycle drop a keyword's cycle they do not agree with */
+    if ((hour12 >= 0 || hour_cycle_given) && kw_hc[0]) {
+        int k = -1;
+        for (int i = 0; hc_names[i]; i++) if (!strcmp(kw_hc, hc_names[i])) k = i;
+        if (dtf_hc != k) kw_hc[0] = 0;
+    }
+    char loc[TAG_MAX + 1];
+    copyz(loc, sizeof loc, found);
+    if (kw_ca[0] || kw_hc[0] || kw_nu[0]) {
+        cat(loc, sizeof loc, "-u");
+        if (kw_ca[0]) { cat(loc, sizeof loc, "-ca-"); cat(loc, sizeof loc, kw_ca); }
+        if (kw_hc[0]) { cat(loc, sizeof loc, "-hc-"); cat(loc, sizeof loc, kw_hc); }
+        if (kw_nu[0]) { cat(loc, sizeof loc, "-nu-"); cat(loc, sizeof loc, kw_nu); }
+    }
+    jv p = JV_UNDEF;
+    if (jv_is_obj(newt)) {
+        p = js_get(vm, newt, A_PROTOTYPE);
+        if (vm->throwing) return JV_HOLE;
+    }
+    uint32_t pr = vm->intl_protos[JIK_DATETIMEFORMAT];
+    if (jv_is_obj(p)) pr = jv_idx(p);
+    uint32_t o = intl_new(vm, JIK_DATETIMEFORMAT, pr, DFS_N);
+    slot_set(vm, o, DFS_LOCALE, jv_str(js_str_ascii(vm, loc)));
+    slot_set(vm, o, DFS_NU, jv_str(js_str_ascii(vm, nu)));
+    slot_set(vm, o, DFS_NSI, jv_num(nsi));
+    slot_set(vm, o, DFS_TZ, jv_str(js_str_ascii(vm, tzname)));
+    slot_set(vm, o, DFS_TZKIND, jv_num(tzkind));
+    slot_set(vm, o, DFS_OFFSET, jv_num(offset));
+    slot_set(vm, o, DFS_HC, jv_num(dtf_hc));
+    slot_set(vm, o, DFS_DATESTYLE, jv_num(ds));
+    slot_set(vm, o, DFS_TIMESTYLE, jv_num(ts));
+    slot_set(vm, o, DFS_PATTERN, jv_str(js_str_new(vm, data(pat), (uint32_t)len(pat))));
+    slot_set(vm, o, DFS_DATALOC, jv_num(li));
+    slot_set(vm, o, DFS_HOURCHAR, jv_num(hour_char));
+    return jv_obj(o);
+}
+
+/* a DateTimeFormat's pattern into buf: its length */
+static uint32_t dtf_pattern(js_vm *vm, uint32_t o, vector<uint16_t> *buf) {
+    uint32_t s = jv_idx(slot_get(vm, o, DFS_PATTERN));
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len, off = vm->strs[s].off;
+    for (uint32_t i = 0; i < n; i++) push_back(*buf, vm->units[off + i]);
+    return n;
+}
+static void dtf_ctx(js_vm *vm, uint32_t o, dctx *c) {
+    c->li = slot_int(vm, o, DFS_DATALOC);
+    c->nsi = slot_int(vm, o, DFS_NSI);
+    c->tzkind = slot_int(vm, o, DFS_TZKIND);
+    c->offset = slot_int(vm, o, DFS_OFFSET);
+    dp_rules(c);
+}
+
+/* whether units hold an ASCII string */
+static int units_have(const uint16_t *p, uint32_t n, const char *s) {
+    size_t ln = strlen(s);
+    for (uint32_t k = 0; k + ln <= n; k++) {
+        size_t j = 0;
+        while (j < ln && p[k + j] == (uint16_t)(uint8_t)s[j]) j++;
+        if (j == ln) return 1;
+    }
+    return 0;
+}
+
+/* resolvedOptions, in V8's order: the components found in the pattern */
+static jv dtf_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, DFS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "calendar"), jv_str(js_str_ascii(vm, "gregory")), 0);
+    js_define(vm, r, js_atom_ascii(vm, "numberingSystem"), slot_get(vm, o, DFS_NU), 0);
+    js_define(vm, r, js_atom_ascii(vm, "timeZone"), slot_get(vm, o, DFS_TZ), 0);
+    int hc = slot_int(vm, o, DFS_HC);
+    if (hc >= 0) {
+        js_define(vm, r, js_atom_ascii(vm, "hourCycle"), jv_str(js_str_ascii(vm, hc_names[hc])), 0);
+        jv h12 = JV_FALSE;
+        if (hc == HC_H11 || hc == HC_H12) h12 = JV_TRUE;
+        js_define(vm, r, js_atom_ascii(vm, "hour12"), h12, 0);
+    }
+    int ds = slot_int(vm, o, DFS_DATESTYLE), ts = slot_int(vm, o, DFS_TIMESTYLE);
+    if (ds < 0 && ts < 0) {
+        vector<uint16_t> pat;
+        uint32_t pn = dtf_pattern(vm, o, &pat);
+        /* V8's pattern items: a property, its patterns and values (longest first), 0 */
+        static const char *const items[] = {
+            "weekday", "EEEEE", "narrow", "EEEE", "long", "EEE", "short", "ccccc", "narrow", "cccc", "long", "ccc", "short", 0,
+            "era", "GGGGG", "narrow", "GGGG", "long", "GGG", "short", 0,
+            "year", "yy", "2-digit", "y", "numeric", 0,
+            "month", "MMMMM", "narrow", "MMMM", "long", "MMM", "short", "MM", "2-digit", "M", "numeric", "LLLLL", "narrow",
+            "LLLL", "long", "LLL", "short", "LL", "2-digit", "L", "numeric", 0,
+            "day", "dd", "2-digit", "d", "numeric", 0,
+            "dayPeriod", "BBBBB", "narrow", "bbbbb", "narrow", "BBBB", "long", "bbbb", "long", "B", "short", "b", "short", 0,
+            "hour", "HH", "2-digit", "H", "numeric", "hh", "2-digit", "h", "numeric", "kk", "2-digit", "k", "numeric", "KK",
+            "2-digit", "K", "numeric", 0,
+            "minute", "mm", "2-digit", "m", "numeric", 0,
+            "second", "ss", "2-digit", "s", "numeric", 0,
+            "timeZoneName", "zzzz", "long", "z", "short", "OOOO", "longOffset", "O", "shortOffset", "vvvv", "longGeneric", "v",
+            "shortGeneric", 0, 0 };
+        uint32_t k = 0;
+        while (items[k]) {
+            uint32_t name = k++;
+            if (!strcmp(items[name], "timeZoneName")) {
+                int fsd = 0;
+                for (uint32_t i = 0; i < pn && fsd < 3; i++) if (pat[i] == 'S') fsd++;
+                if (fsd) js_define(vm, r, js_atom_ascii(vm, "fractionalSecondDigits"), jv_num(fsd), 0);
+            }
+            int done = 0;
+            for (; items[k]; k += 2) {
+                if (done || !units_have(data(pat), pn, items[k])) continue;
+                js_define(vm, r, js_atom_ascii(vm, items[name]), jv_str(js_str_ascii(vm, items[k + 1])), 0);
+                done = 1;
+            }
+            k++;
+        }
+    }
+
+    if (ds >= 0) js_define(vm, r, js_atom_ascii(vm, "dateStyle"), jv_str(js_str_ascii(vm, style_names[ds])), 0);
+    if (ts >= 0) js_define(vm, r, js_atom_ascii(vm, "timeStyle"), jv_str(js_str_ascii(vm, style_names[ts])), 0);
+    return jv_obj(r);
+}
+
+/* a time value for formatting: undefined now, else ToNumber, TimeClip; NaN a RangeError */
+static int dtf_time(js_vm *vm, jv v, double *t) {
+    double x;
+    if (v == JV_UNDEF) x = floor(vm->now);
+    else {
+        x = js_to_number(vm, v);
+        if (vm->throwing) return 0;
+    }
+    if (x != x || fabs(x) > 8.64e15) {
+        js_throw_msg(vm, vm->range_error_proto, "Invalid time value");
+        return 0;
+    }
+    *t = trunc(x) + 0.0;
+    return 1;
+}
+
+/* a time formatted: its units and their parts' types */
+static void dtf_render(js_vm *vm, uint32_t o, double t, vector<uint16_t> *tx, vector<uint8_t> *ty) {
+    dctx c;
+    dtf_ctx(vm, o, &c);
+    dfields f;
+    date_fields(t, c.offset, &f);
+    vector<uint16_t> pat;
+    uint32_t pn = dtf_pattern(vm, o, &pat);
+    dt_render(&c, data(pat), pn, &f, tx, ty);
+}
+
+/* FormatDateTime (U+202F a space, as V8 reverts ICU 72's change) or FormatDateTimeToParts */
+static jv dtf_format_value(js_vm *vm, uint32_t o, jv v, int to_parts) {
+    double t;
+    if (!dtf_time(vm, v, &t)) return JV_HOLE;
+    vector<uint16_t> tx;
+    vector<uint8_t> ty;
+    dtf_render(vm, o, t, &tx, &ty);
+    if (!to_parts) {
+        for (size_t i = 0; i < len(tx); i++) if (tx[i] == 0x202F) tx[i] = ' ';
+        return jv_str(js_str_new(vm, data(tx), (uint32_t)len(tx)));
+    }
+    vector<uint32_t> pt;
+    size_t i = 0;
+    while (i < len(tx)) {
+        size_t j = i + 1;
+        while (j < len(tx) && ty[j] == ty[i]) j++;
+        push_back(pt, (uint32_t)i);
+        push_back(pt, (uint32_t)j);
+        push_back(pt, (uint32_t)ty[i]);
+        i = j;
+    }
+    return parts_array(vm, &tx, &pt, dp_names, 0);
+}
+
+/* ---- formatRange: ICU's DateIntervalFormat ---- */
+
+/* the interval patterns' indexes (DateIntervalInfo's), their letters and levels */
+enum { IPI_ERA, IPI_YEAR, IPI_MONTH, IPI_DATE, IPI_AM_PM, IPI_HOUR, IPI_MINUTE, IPI_SECOND, IPI_MS, IPI_N };
+static const char ipi_letters[] = "GyMdahmsS";
+static const int ipi_levels[] = { 0, 10, 20, 30, 40, 50, 60, 70, 80 };
+
+/* SimpleDateFormat::getLevelFromChar */
+static int letter_level(uint32_t c) {
+    static const signed char up[] = { 40, -1, -1, 20, 30, 30, 0, 50, -1, -1, 50, 20, 20, -1, 0, -1, 20, -1, 80, -1, 10, 0, 30, 0, 10, 0 };
+    static const signed char lo[] = { 40, -1, 30, 30, 30, -1, 0, 50, -1, -1, 50, 0, 60, -1, -1, -1, 20, 10, 70, -1, 10, 0, 20, 0, 10, 0 };
+    if (c >= 'A' && c <= 'Z') return up[c - 'A'];
+    if (c >= 'a' && c <= 'z') return lo[c - 'a'];
+    return -1;
+}
+/* SimpleDateFormat::isFieldUnitIgnored: no field of the pattern at the level or below */
+static int unit_ignored(const uint16_t *p, uint32_t n, int ipi) {
+    int q = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t c = p[i];
+        if (c == '\'') {
+            if (i + 1 < n && p[i + 1] == '\'') i++;
+            else q = !q;
+        } else if (!q && is_letter16(c) && ipi_levels[ipi] <= letter_level(c)) return 0;
+    }
+    return 1;
+}
+
+#define DI_MAX 200
+typedef struct dipart { uint16_t first[DI_MAX], second[DI_MAX]; uint32_t nf, ns; int later; } dipart;
+/* the interval formatter: its data, fallback, date-time glue, single-date pattern, the
+   date and time patterns of a fallback, its skeleton, its patterns by field */
+typedef struct difmt {
+    uint32_t rec;
+    int later_default;
+    uint16_t fallback[48], glue[48], datefmt[DI_MAX], datep[DI_MAX], timep[DI_MAX], skel[64];
+    uint32_t nfallback, nglue, ndatefmt, ndatep, ntimep, nskel;
+    int has_datep, has_timep;
+    dipart ip[IPI_N];
+} difmt;
+
+static uint32_t vec_to(vector<uint16_t> *v, uint16_t *buf, uint32_t cap) {
+    uint32_t n = (uint32_t)len(*v);
+    if (n > cap) n = cap;
+    for (uint32_t i = 0; i < n; i++) buf[i] = (*v)[i];
+    return n;
+}
+/* DateFormat::getBestPattern (no hour matching) into a buffer */
+static uint32_t di_best_pattern(dgen *g, const uint16_t *sk, uint32_t sn, uint16_t *buf, uint32_t cap) {
+    vector<uint16_t> out;
+    dp_best_pattern(g, sk, sn, 0, &out);
+    return vec_to(&out, buf, cap);
+}
+
+/* the interval data: field 0 the fallback, then each skeleton and its patterns, each its
+   letter, \x1d and the pattern, joined by \x1e */
+static int di_find(uint32_t rec, const uint16_t *sk, uint32_t n) {
+    for (int i = 0;; i++) {
+        uint16_t b[64];
+        uint32_t bn = fld_units(rec, (uint32_t)(1 + 2 * i), b, 64);
+        if (!bn) return -1;
+        if (bn != n) continue;
+        uint32_t k = 0;
+        while (k < n && b[k] == sk[k]) k++;
+        if (k == n) return i;
+    }
+}
+static int di_letter_index(uint32_t c) {
+    if (c == 'G') return IPI_ERA;
+    if (c == 'y') return IPI_YEAR;
+    if (c == 'M') return IPI_MONTH;
+    if (c == 'd') return IPI_DATE;
+    if (c == 'a' || c == 'B') return IPI_AM_PM;
+    if (c == 'h' || c == 'H') return IPI_HOUR;
+    if (c == 'm') return IPI_MINUTE;
+    return -1;
+}
+/* getIntervalPattern: a skeleton's pattern for a field (the first letter's mapping to it,
+   as ICU keeps the first), 0 for none */
+static uint32_t di_pattern(uint32_t rec, int si, int ipi, uint16_t *buf, uint32_t cap) {
+    if (si < 0) return 0;
+    uint16_t b[2048];
+    uint32_t n = fld_units(rec, (uint32_t)(2 + 2 * si), b, 2048);
+    uint32_t i = 0;
+    while (i < n) {
+        uint32_t j = i;
+        while (j < n && b[j] != 0x1E) j++;
+        if (i + 2 <= j && b[i + 1] == 0x1D && di_letter_index(b[i]) == ipi) {
+            uint32_t k = 0;
+            for (uint32_t u = i + 2; u < j && k < cap; u++) buf[k++] = b[u];
+            return k;
+        }
+        i = j + 1;
+    }
+    return 0;
+}
+static uint32_t di_pattern_of(uint32_t rec, const uint16_t *sk, uint32_t sn, int ipi, uint16_t *buf, uint32_t cap) {
+    return di_pattern(rec, di_find(rec, sk, sn), ipi, buf, cap);
+}
+static void sk_widths(const uint16_t *s, uint32_t n, int *w) {
+    for (uint32_t i = 0; i < 58; i++) w[i] = 0;
+    for (uint32_t i = 0; i < n; i++) if (s[i] >= 'A' && s[i] <= 'z') w[s[i] - 'A']++;
+}
+/* getBestSkeleton: the nearest skeleton's index into best, -1 none; *diff 0 the same, 1
+   widths differ, 2 only z/v, h/K, H/k (or a day period) differ, -1 other fields */
+static int di_best(uint32_t rec, const uint16_t *sk, uint32_t n, int *diff, uint16_t *best, uint32_t *bn) {
+    uint16_t cp[64];
+    uint32_t cn = 0;
+    int replaced = 0;
+    for (uint32_t i = 0; i < n && cn < 64; i++) {
+        uint32_t c = sk[i];
+        if (c == 'z' || c == 'k' || c == 'K' || c == 'a' || c == 'b') replaced = 1;
+        if (c == 'z') c = 'v';
+        else if (c == 'k') c = 'H';
+        else if (c == 'K') c = 'h';
+        else if (c == 'a' || c == 'b') continue;
+        cp[cn++] = (uint16_t)c;
+    }
+    int inw[58], w[58];
+    sk_widths(cp, cn, inw);
+    int bi = -1, bd = 0x7FFFFFFF;
+    *diff = 0;
+    for (int i = 0;; i++) {
+        uint16_t b[64];
+        uint32_t m = fld_units(rec, (uint32_t)(1 + 2 * i), b, 64);
+        if (!m) break;
+        sk_widths(b, m, w);
+        int d = 0, fd = 1;
+        for (int k = 0; k < 58; k++) {
+            int a = inw[k], c = w[k];
+            if (a == c) continue;
+            if (a == 0 || c == 0) { fd = -1; d += 0x1000; }
+            else if (k + 'A' == 'M' && ((a <= 2 && c > 2) || (a > 2 && c <= 2))) d += 0x100;
+            else if (a > c) d += a - c;
+            else d += c - a;
+        }
+        if (d < bd) {
+            bi = i;
+            bd = d;
+            *diff = fd;
+            for (uint32_t k = 0; k < m; k++) best[k] = b[k];
+            *bn = m;
+        }
+        if (d == 0) { *diff = 0; break; }
+    }
+    if (replaced && *diff != -1) *diff = 2;
+    return bi;
+}
+
+/* splitPatternInto2Part: where the first repeated letter begins */
+static uint32_t di_split(const uint16_t *p, uint32_t n) {
+    int rep[58];
+    for (int k = 0; k < 58; k++) rep[k] = 0;
+    int q = 0, count = 0, found = 0;
+    uint32_t prev = 0, i;
+    for (i = 0; i < n; ++i) {
+        uint32_t ch = p[i];
+        if (ch != prev && count > 0) {
+            if (!rep[prev - 'A']) rep[prev - 'A'] = 1;
+            else { found = 1; break; }
+            count = 0;
+        }
+        if (ch == '\'') {
+            if (i + 1 < n && p[i + 1] == '\'') ++i;
+            else q = !q;
+        } else if (!q && is_letter16(ch)) { prev = ch; ++count; }
+    }
+    if (count > 0 && !found && !rep[prev - 'A']) count = 0;
+    return i - (uint32_t)count;
+}
+
+/* setPatternInfo: the parts given (a null one kept), the order */
+static void di_info(difmt *d, int ipi, const uint16_t *first, uint32_t nf, const uint16_t *second, uint32_t ns, int later) {
+    dipart *pp = &d->ip[ipi];
+    if (first) { for (uint32_t i = 0; i < nf && i < DI_MAX; i++) pp->first[i] = first[i]; pp->nf = nf; }
+    if (second) { for (uint32_t i = 0; i < ns && i < DI_MAX; i++) pp->second[i] = second[i]; pp->ns = ns; }
+    pp->later = later;
+}
+/* setIntervalPattern(field, pattern, order): a "latestFirst:" or "earliestFirst:" prefix
+   read, the pattern split in two */
+static void di_set(difmt *d, int ipi, const uint16_t *p, uint32_t n, int later) {
+    static const char lf[] = "latestFirst:", ef[] = "earliestFirst:";
+    uint32_t k = 0, off = 0;
+    while (k < 12 && k < n && p[k] == (uint16_t)lf[k]) k++;
+    if (k == 12) { off = 12; later = 1; }
+    else {
+        k = 0;
+        while (k < 14 && k < n && p[k] == (uint16_t)ef[k]) k++;
+        if (k == 14) { off = 14; later = 0; }
+    }
+    uint32_t at = di_split(p + off, n - off);
+    di_info(d, ipi, p + off, at, p + off + at, n - off - at, later);
+}
+
+/* findReplaceInPattern of one letter: its unquoted occurrences replaced */
+static void di_replace(vector<uint16_t> *p, uint32_t from, uint32_t to) {
+    int q = 0;
+    for (size_t i = 0; i < len(*p); i++) {
+        if ((*p)[i] == '\'') q = !q;
+        else if (!q && (*p)[i] == from) (*p)[i] = (uint16_t)to;
+    }
+}
+static int units_has_char(const uint16_t *p, uint32_t n, uint32_t c) {
+    for (uint32_t i = 0; i < n; i++) if (p[i] == c) return 1;
+    return 0;
+}
+/* adjustFieldWidth: the pattern's fields widened to the input skeleton's */
+static void di_adjust_width(const uint16_t *in, uint32_t inn, const uint16_t *best, uint32_t bn, const uint16_t *pat, uint32_t pn, int diff, vector<uint16_t> *out) {
+    vector<uint16_t> a;
+    for (uint32_t i = 0; i < pn; i++) push_back(a, pat[i]);
+    int inw[58], bw[58];
+    sk_widths(in, inn, inw);
+    sk_widths(best, bn, bw);
+    if (diff == 2) {
+        if (units_has_char(in, inn, 'z')) di_replace(&a, 'v', 'z');
+        if (units_has_char(in, inn, 'K')) di_replace(&a, 'h', 'K');
+        if (units_has_char(in, inn, 'k')) di_replace(&a, 'H', 'k');
+        if (units_has_char(in, inn, 'b')) di_replace(&a, 'a', 'b');
+    }
+    if (units_has_char(data(a), (uint32_t)len(a), 'a') && bw['a' - 'A'] == 0) bw['a' - 'A'] = 1;
+    if (units_has_char(data(a), (uint32_t)len(a), 'b') && bw['b' - 'A'] == 0) bw['b' - 'A'] = 1;
+    int q = 0, count = 0;
+    uint32_t prev = 0;
+    for (size_t i = 0; i < len(a); i++) {
+        uint32_t ch = a[i];
+        if (ch != prev && count > 0) {
+            uint32_t sc = prev;
+            if (sc == 'L') sc = 'M';
+            int fc = bw[sc - 'A'], ic = inw[sc - 'A'];
+            if (fc == count && ic > fc) {
+                for (int k = 0; k < ic - fc; k++) push_back(*out, (uint16_t)prev);
+            }
+            count = 0;
+        }
+        push_back(*out, (uint16_t)ch);
+        if (ch == '\'') {
+            if (i + 1 < len(a) && a[i + 1] == '\'') { push_back(*out, a[i + 1]); i++; }
+            else q = !q;
+        } else if (!q && is_letter16(ch)) { prev = ch; ++count; }
+    }
+    if (count > 0) {
+        uint32_t sc = prev;
+        if (sc == 'L') sc = 'M';
+        int fc = bw[sc - 'A'], ic = inw[sc - 'A'];
+        if (fc == count && ic > fc) for (int k = 0; k < ic - fc; k++) push_back(*out, (uint16_t)prev);
+    }
+}
+
+/* setIntervalPattern(field, skeleton, best, diff, extended...): whether the pattern was
+   found by extending the skeleton */
+static int di_set_interval(difmt *d, int ipi, const uint16_t *sk, uint32_t sn, const uint16_t *best0, uint32_t bn0, int diff,
+                           int extend, uint16_t *ext, uint32_t *ext_n, uint16_t *ext_best, uint32_t *ext_bn) {
+    uint16_t pat[DI_MAX], best[64];
+    uint32_t bn = bn0;
+    for (uint32_t i = 0; i < bn; i++) best[i] = best0[i];
+    uint32_t pn = di_pattern_of(d->rec, best, bn, ipi, pat, DI_MAX);
+    if (!pn) {
+        if (unit_ignored(best, bn, ipi)) return 0;
+        if (ipi == IPI_AM_PM) {
+            pn = di_pattern_of(d->rec, best, bn, IPI_HOUR, pat, DI_MAX);
+            if (pn) {
+                vector<uint16_t> adj;
+                di_adjust_width(sk, sn, best, bn, pat, pn, diff, &adj);
+                di_set(d, ipi, data(adj), (uint32_t)len(adj), d->later_default);
+            }
+            return 0;
+        }
+        if (extend) {
+            ext[0] = (uint16_t)ipi_letters[ipi];
+            for (uint32_t i = 0; i < sn; i++) ext[i + 1] = sk[i];
+            *ext_n = sn + 1;
+            ext_best[0] = (uint16_t)ipi_letters[ipi];
+            for (uint32_t i = 0; i < bn; i++) ext_best[i + 1] = best[i];
+            *ext_bn = bn + 1;
+            pn = di_pattern_of(d->rec, ext_best, *ext_bn, ipi, pat, DI_MAX);
+            if (!pn && diff == 0) {
+                uint16_t tb[64];
+                uint32_t tn = 0;
+                int ti = di_best(d->rec, ext_best, *ext_bn, &diff, tb, &tn);
+                if (ti >= 0 && diff != -1) {
+                    pn = di_pattern(d->rec, ti, ipi, pat, DI_MAX);
+                    for (uint32_t i = 0; i < tn; i++) best[i] = tb[i];
+                    bn = tn;
+                }
+            }
+        }
+    }
+    if (pn) {
+        if (diff != 0) {
+            vector<uint16_t> adj;
+            di_adjust_width(sk, sn, best, bn, pat, pn, diff, &adj);
+            di_set(d, ipi, data(adj), (uint32_t)len(adj), d->later_default);
+        } else di_set(d, ipi, pat, pn, d->later_default);
+        if (extend && *ext_n) return 1;
+    }
+    return 0;
+}
+
+/* normalizeHourMetacharacters: the hour field and its day period as the locale's single
+   hour pattern has them */
+static void di_normalize_hour(dgen *g, const uint16_t *sk, uint32_t n, vector<uint16_t> *out) {
+    uint32_t hc = 0, dc = 0;
+    uint32_t hs = 0, hl = 0, ds = 0, dl = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t c = sk[i];
+        if (c == 'j' || c == 'J' || c == 'C' || c == 'h' || c == 'H' || c == 'k' || c == 'K') {
+            if (!hc) { hc = c; hs = i; }
+            hl++;
+        } else if (c == 'a' || c == 'b' || c == 'B') {
+            if (!dc) { dc = c; ds = i; }
+            dl++;
+        } else if (hc && dc) break;
+    }
+    for (uint32_t i = 0; i < n; i++) push_back(*out, sk[i]);
+    if (!hc) return;
+    uint16_t one = (uint16_t)hc;
+    uint16_t cpat[DI_MAX];
+    uint32_t cn = di_best_pattern(g, &one, 1, cpat, DI_MAX);
+    /* the pattern's literals stripped */
+    uint16_t lit[DI_MAX];
+    uint32_t ln = 0;
+    int q = 0;
+    for (uint32_t i = 0; i < cn; i++) {
+        if (cpat[i] == '\'') { q = !q; continue; }
+        if (!q) lit[ln++] = cpat[i];
+    }
+    uint32_t hour = 'H';
+    if (units_has_char(lit, ln, 'h')) hour = 'h';
+    else if (units_has_char(lit, ln, 'K')) hour = 'K';
+    else if (units_has_char(lit, ln, 'k')) hour = 'k';
+    if (units_has_char(lit, ln, 'b')) dc = 'b';
+    else if (units_has_char(lit, ln, 'B')) dc = 'B';
+    else if (!dc) dc = 'a';
+    vector<uint16_t> hd;
+    push_back(hd, (uint16_t)hour);
+    if (hour != 'H' && hour != 'k') {
+        int nl = 1;
+        if (dl >= 5 || hl >= 5) nl = 5;
+        else if (dl >= 3 || hl >= 3) nl = 3;
+        for (int i = 0; i < nl; i++) push_back(hd, (uint16_t)dc);
+    }
+    vector<uint16_t> r;
+    for (uint32_t i = 0; i < hs; i++) push_back(r, sk[i]);
+    for (size_t i = 0; i < len(hd); i++) push_back(r, hd[i]);
+    for (uint32_t i = hs + hl; i < n; i++) push_back(r, sk[i]);
+    if (ds > hs) ds = ds + (uint32_t)len(hd) - hl;
+    clear(*out);
+    for (size_t i = 0; i < len(r); i++) if (i < ds || i >= ds + dl) push_back(*out, r[i]);
+}
+
+/* getDateTimeSkeleton: the date and time skeletons and their normal forms */
+static void di_split_skeleton(const uint16_t *sk, uint32_t n, vector<uint16_t> *date, vector<uint16_t> *ndate, vector<uint16_t> *time, vector<uint16_t> *ntime) {
+    int ec = 0, dc = 0, mc = 0, yc = 0, minc = 0, vc = 0, zc = 0;
+    uint32_t hour = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t ch = sk[i];
+        switch (ch) {
+        case 'E': push_back(*date, (uint16_t)ch); ec++; break;
+        case 'd': push_back(*date, (uint16_t)ch); dc++; break;
+        case 'M': push_back(*date, (uint16_t)ch); mc++; break;
+        case 'y': push_back(*date, (uint16_t)ch); yc++; break;
+        case 'G': case 'Y': case 'u': case 'Q': case 'q': case 'L': case 'l': case 'W': case 'w': case 'D': case 'F': case 'g':
+        case 'e': case 'c': case 'U': case 'r':
+            push_back(*ndate, (uint16_t)ch);
+            push_back(*date, (uint16_t)ch);
+            break;
+        case 'h': case 'H': case 'k': case 'K':
+            push_back(*time, (uint16_t)ch);
+            if (!hour) hour = ch;
+            break;
+        case 'm': push_back(*time, (uint16_t)ch); minc++; break;
+        case 'z': zc++; push_back(*time, (uint16_t)ch); break;
+        case 'v': vc++; push_back(*time, (uint16_t)ch); break;
+        case 'a': case 'V': case 'Z': case 'j': case 's': case 'S': case 'A': case 'b': case 'B':
+            push_back(*time, (uint16_t)ch);
+            push_back(*ntime, (uint16_t)ch);
+            break;
+        default: break;
+        }
+    }
+    for (int i = 0; i < yc; i++) push_back(*ndate, (uint16_t)'y');
+    if (mc) {
+        if (mc < 3) push_back(*ndate, (uint16_t)'M');
+        else for (int j = 0; j < mc && j < 5; j++) push_back(*ndate, (uint16_t)'M');
+    }
+    if (ec) {
+        if (ec <= 3) push_back(*ndate, (uint16_t)'E');
+        else for (int j = 0; j < ec && j < 5; j++) push_back(*ndate, (uint16_t)'E');
+    }
+    if (dc) push_back(*ndate, (uint16_t)'d');
+    if (hour) push_back(*ntime, (uint16_t)hour);
+    if (minc) push_back(*ntime, (uint16_t)'m');
+    if (zc) push_back(*ntime, (uint16_t)'z');
+    if (vc) push_back(*ntime, (uint16_t)'v');
+}
+
+/* setSeparateDateTimePtn */
+static int di_separate(dgen *g, difmt *d, vector<uint16_t> *ndate, vector<uint16_t> *ntime) {
+    uint16_t sk[64], best[64];
+    uint32_t sn, bn = 0;
+    if (len(*ntime)) sn = vec_to(ntime, sk, 64);
+    else sn = vec_to(ndate, sk, 64);
+    int diff = 0;
+    int bi = di_best(d->rec, sk, sn, &diff, best, &bn);
+    if (bi < 0) return 0;
+    if (len(*ndate)) { d->ndatep = di_best_pattern(g, data(*ndate), (uint32_t)len(*ndate), d->datep, DI_MAX); d->has_datep = 1; }
+    if (len(*ntime)) { d->ntimep = di_best_pattern(g, data(*ntime), (uint32_t)len(*ntime), d->timep, DI_MAX); d->has_timep = 1; }
+    if (diff == -1) return 0;
+    uint16_t ext[64], ext_best[64];
+    uint32_t ext_n = 0, ext_bn = 0;
+    if (!len(*ntime)) {
+        di_set_interval(d, IPI_DATE, sk, sn, best, bn, diff, 1, ext, &ext_n, ext_best, &ext_bn);
+        if (di_set_interval(d, IPI_MONTH, sk, sn, best, bn, diff, 1, ext, &ext_n, ext_best, &ext_bn)) {
+            for (uint32_t i = 0; i < ext_bn; i++) best[i] = ext_best[i];
+            bn = ext_bn;
+            for (uint32_t i = 0; i < ext_n; i++) sk[i] = ext[i];
+            sn = ext_n;
+        }
+        di_set_interval(d, IPI_YEAR, sk, sn, best, bn, diff, 1, ext, &ext_n, ext_best, &ext_bn);
+        di_set_interval(d, IPI_ERA, sk, sn, best, bn, diff, 1, ext, &ext_n, ext_best, &ext_bn);
+    } else {
+        di_set_interval(d, IPI_MINUTE, sk, sn, best, bn, diff, 0, ext, &ext_n, ext_best, &ext_bn);
+        di_set_interval(d, IPI_HOUR, sk, sn, best, bn, diff, 0, ext, &ext_n, ext_best, &ext_bn);
+        di_set_interval(d, IPI_AM_PM, sk, sn, best, bn, diff, 0, ext, &ext_n, ext_best, &ext_bn);
+    }
+    return 1;
+}
+
+/* the fallbacks of a time skeleton without a date: yMd's pattern for the date's fields,
+   GyMd's for the era */
+static void di_time_fallbacks(dgen *g, difmt *d, vector<uint16_t> *time) {
+    vector<uint16_t> s;
+    push_back(s, (uint16_t)'y');
+    push_back(s, (uint16_t)'M');
+    push_back(s, (uint16_t)'d');
+    for (size_t i = 0; i < len(*time); i++) push_back(s, (*time)[i]);
+    uint16_t pat[DI_MAX];
+    uint32_t pn = di_best_pattern(g, data(s), (uint32_t)len(s), pat, DI_MAX);
+    di_info(d, IPI_DATE, 0, 0, pat, pn, d->later_default);
+    di_info(d, IPI_MONTH, 0, 0, pat, pn, d->later_default);
+    di_info(d, IPI_YEAR, 0, 0, pat, pn, d->later_default);
+    vector<uint16_t> s2;
+    push_back(s2, (uint16_t)'G');
+    for (size_t i = 0; i < len(s); i++) push_back(s2, s[i]);
+    pn = di_best_pattern(g, data(s2), (uint32_t)len(s2), pat, DI_MAX);
+    di_info(d, IPI_ERA, 0, 0, pat, pn, d->later_default);
+}
+
+/* DateIntervalFormat's construction (createInstance, initializePattern) for a skeleton */
+static void di_init(dgen *g, difmt *d, int li, const uint16_t *skel, uint32_t sn) {
+    memset(d, 0, sizeof *d);
+    d->rec = rec_get(li, RKEY(IDK_INTERVAL, 0));
+    d->nfallback = fld_units(d->rec, 0, d->fallback, 48);
+    /* fFirstDateInPtnIsLaterDate: {1} before {0} in the fallback */
+    uint32_t i0 = d->nfallback, i1 = d->nfallback;
+    for (uint32_t i = 0; i + 2 < d->nfallback; i++) {
+        if (d->fallback[i] == '{' && d->fallback[i + 2] == '}' && d->fallback[i + 1] == '0' && i0 == d->nfallback) i0 = i;
+        if (d->fallback[i] == '{' && d->fallback[i + 2] == '}' && d->fallback[i + 1] == '1' && i1 == d->nfallback) i1 = i;
+    }
+    d->later_default = i0 > i1;
+    for (uint32_t i = 0; i < sn && i < 64; i++) d->skel[i] = skel[i];
+    d->nskel = sn;
+    d->ndatefmt = di_best_pattern(g, skel, sn, d->datefmt, DI_MAX);
+    for (int i = 0; i < IPI_N; i++) d->ip[i].later = d->later_default;
+    vector<uint16_t> conv, date, ndate, time, ntime;
+    di_normalize_hour(g, skel, sn, &conv);
+    di_split_skeleton(data(conv), (uint32_t)len(conv), &date, &ndate, &time, &ntime);
+    if (len(time) && len(date)) {
+        /* DateTimePatterns[kDateTime]: the default (medium) glue */
+        d->nglue = fld_units(rec_get(li, RKEY(IDK_DTGLUE, 0)), 2, d->glue, 48);
+        if (d->nglue < 3) d->nglue = 0;
+    }
+    int found = di_separate(g, d, &ndate, &ntime);
+    if (!found) {
+        if (len(time) && !len(date)) di_time_fallbacks(g, d, &time);
+        return;
+    }
+    if (!len(time)) return;
+    if (!len(date)) { di_time_fallbacks(g, d, &time); return; }
+    /* both: the date's fields' fallbacks, then the date and each time interval */
+    vector<uint16_t> s;
+    for (uint32_t i = 0; i < sn; i++) push_back(s, skel[i]);
+    static const int fields[] = { IPI_DATE, IPI_MONTH, IPI_YEAR, IPI_ERA };
+    for (int k = 0; k < 4; k++) {
+        uint32_t letter = (uint32_t)ipi_letters[fields[k]];
+        if (units_has_char(data(date), (uint32_t)len(date), letter)) continue;
+        vector<uint16_t> s2;
+        push_back(s2, (uint16_t)letter);
+        for (size_t i = 0; i < len(s); i++) push_back(s2, s[i]);
+        clear(s);
+        for (size_t i = 0; i < len(s2); i++) push_back(s, s2[i]);
+        uint16_t pat[DI_MAX];
+        uint32_t pn = di_best_pattern(g, data(s), (uint32_t)len(s), pat, DI_MAX);
+        di_info(d, fields[k], 0, 0, pat, pn, d->later_default);
+    }
+    if (!d->nglue) return;
+    uint16_t dpat[DI_MAX];
+    uint32_t dn = di_best_pattern(g, data(date), (uint32_t)len(date), dpat, DI_MAX);
+    static const int tf[] = { IPI_AM_PM, IPI_HOUR, IPI_MINUTE };
+    for (int k = 0; k < 3; k++) {
+        dipart *pp = &d->ip[tf[k]];
+        if (!pp->nf) continue;
+        vector<uint16_t> tip, dp, comb;
+        for (uint32_t i = 0; i < pp->nf; i++) push_back(tip, pp->first[i]);
+        for (uint32_t i = 0; i < pp->ns; i++) push_back(tip, pp->second[i]);
+        for (uint32_t i = 0; i < dn; i++) push_back(dp, dpat[i]);
+        simple_format(d->glue, d->nglue, &tip, &dp, 0, &comb);
+        di_set(d, tf[k], data(comb), (uint32_t)len(comb), pp->later);
+    }
+}
+
+/* a pattern rendered, appended */
+static void di_render(const dctx *c, const uint16_t *pat, uint32_t pn, const dfields *f, vector<uint16_t> *tx, vector<uint8_t> *ty) {
+    dt_render(c, pat, pn, f, tx, ty);
+}
+/* the text of a SimpleFormatter pattern of two arguments: its literal text and where the
+   arguments go (getTextWithNoArguments) */
+static void di_body(const uint16_t *p, uint32_t n, vector<uint16_t> *body, uint32_t *off0, uint32_t *off1) {
+    vector<uint16_t> a0, a1;
+    push_back(a0, (uint16_t)0xFFFE);
+    push_back(a1, (uint16_t)0xFFFF);
+    vector<uint16_t> out;
+    simple_format(p, n, &a0, &a1, 0, &out);
+    *off0 = 0;
+    *off1 = 0;
+    for (size_t i = 0; i < len(out); i++) {
+        if (out[i] == 0xFFFE) *off0 = (uint32_t)len(*body);
+        else if (out[i] == 0xFFFF) *off1 = (uint32_t)len(*body);
+        else push_back(*body, out[i]);
+    }
+}
+static void put_span(vector<uint16_t> *body, uint32_t a, uint32_t b, vector<uint16_t> *tx, vector<uint8_t> *ty) {
+    for (uint32_t i = a; i < b && i < len(*body); i++) put_c(tx, ty, (*body)[i], DP_LITERAL);
+}
+
+/* fallbackFormatRange: both dates by the pattern in the fallback; *first the index of the
+   date put first */
+static void di_fallback_range(const difmt *d, const dctx *c, const uint16_t *pat, uint32_t pn, const dfields *from, const dfields *to, vector<uint16_t> *tx, vector<uint8_t> *ty, int *first) {
+    vector<uint16_t> body;
+    uint32_t o0, o1;
+    di_body(d->fallback, d->nfallback, &body, &o0, &o1);
+    if (o0 < o1) {
+        *first = 0;
+        put_span(&body, 0, o0, tx, ty);
+        di_render(c, pat, pn, from, tx, ty);
+        put_span(&body, o0, o1, tx, ty);
+        di_render(c, pat, pn, to, tx, ty);
+        put_span(&body, o1, (uint32_t)len(body), tx, ty);
+    } else {
+        *first = 1;
+        put_span(&body, 0, o1, tx, ty);
+        di_render(c, pat, pn, to, tx, ty);
+        put_span(&body, o1, o0, tx, ty);
+        di_render(c, pat, pn, from, tx, ty);
+        put_span(&body, o0, (uint32_t)len(body), tx, ty);
+    }
+}
+/* fallbackFormat: on one day, the date once and the times' range (by the date-time glue) */
+static void di_fallback(const difmt *d, const dctx *c, const uint16_t *pat, uint32_t pn, const dfields *from, const dfields *to, int same_day, vector<uint16_t> *tx, vector<uint8_t> *ty, int *first) {
+    if (same_day && d->has_datep && d->has_timep && d->nglue) {
+        vector<uint16_t> body;
+        uint32_t o0, o1;
+        di_body(d->glue, d->nglue, &body, &o0, &o1);
+        if (o0 < o1) {
+            put_span(&body, 0, o0, tx, ty);
+            di_fallback_range(d, c, d->timep, d->ntimep, from, to, tx, ty, first);
+            put_span(&body, o0, o1, tx, ty);
+            di_render(c, d->datep, d->ndatep, from, tx, ty);
+            put_span(&body, o1, (uint32_t)len(body), tx, ty);
+        } else {
+            put_span(&body, 0, o1, tx, ty);
+            di_render(c, d->datep, d->ndatep, from, tx, ty);
+            put_span(&body, o1, o0, tx, ty);
+            di_fallback_range(d, c, d->timep, d->ntimep, from, to, tx, ty, first);
+            put_span(&body, o0, (uint32_t)len(body), tx, ty);
+        }
+        return;
+    }
+    di_fallback_range(d, c, pat, pn, from, to, tx, ty, first);
+}
+
+/* formatImpl: the range's text and types; *first -1 for a single date (no range), else
+   the index of the date put first */
+static void di_format(const difmt *d, const dctx *c, const dfields *from, const dfields *to, vector<uint16_t> *tx, vector<uint8_t> *ty, int *first) {
+    *first = -1;
+    int64_t ya = from->year, yb = to->year;
+    if (ya <= 0) ya = 1 - ya;
+    if (yb <= 0) yb = 1 - yb;
+    int field = IPI_N;
+    if ((from->year > 0) != (to->year > 0)) field = IPI_ERA;
+    else if (ya != yb) field = IPI_YEAR;
+    else if (from->month != to->month) field = IPI_MONTH;
+    else if (from->day != to->day) field = IPI_DATE;
+    else if ((from->hour >= 12) != (to->hour >= 12)) field = IPI_AM_PM;
+    else if (from->hour % 12 != to->hour % 12) field = IPI_HOUR;
+    else if (from->minute != to->minute) field = IPI_MINUTE;
+    else if (from->second != to->second) field = IPI_SECOND;
+    else if (from->ms != to->ms) field = IPI_MS;
+    if (field == IPI_N) { di_render(c, d->datefmt, d->ndatefmt, from, tx, ty); return; }
+    int same_day = field >= IPI_AM_PM;
+    const dipart *pp = &d->ip[field];
+    if (!pp->nf && !pp->ns) {
+        if (unit_ignored(d->datefmt, d->ndatefmt, field)) { di_render(c, d->datefmt, d->ndatefmt, from, tx, ty); return; }
+        di_fallback(d, c, d->datefmt, d->ndatefmt, from, to, same_day, tx, ty, first);
+        return;
+    }
+    if (!pp->nf) {
+        di_fallback(d, c, pp->second, pp->ns, from, to, same_day, tx, ty, first);
+        return;
+    }
+    if (pp->later) {
+        *first = 1;
+        di_render(c, pp->first, pp->nf, to, tx, ty);
+        if (pp->ns) di_render(c, pp->second, pp->ns, from, tx, ty);
+    } else {
+        *first = 0;
+        di_render(c, pp->first, pp->nf, from, tx, ty);
+        if (pp->ns) di_render(c, pp->second, pp->ns, to, tx, ty);
+    }
+}
+
+/* formatRange and formatRangeToParts */
+static jv dtf_format_range(js_vm *vm, uint32_t o, jv x, jv y, int to_parts) {
+    if (x == JV_UNDEF || y == JV_UNDEF) return js_throw_msg(vm, vm->type_error_proto, "Invalid time value");
+    double a = js_to_number(vm, x);
+    if (vm->throwing) return JV_HOLE;
+    double b = js_to_number(vm, y);
+    if (vm->throwing) return JV_HOLE;
+    if (a != a || fabs(a) > 8.64e15 || b != b || fabs(b) > 8.64e15) return js_throw_msg(vm, vm->range_error_proto, "Invalid time value");
+    a = trunc(a) + 0.0;
+    b = trunc(b) + 0.0;
+    dctx c;
+    dtf_ctx(vm, o, &c);
+    /* the interval formatter of the pattern's skeleton, its locale's hour cycle the format's */
+    vector<uint16_t> pat;
+    uint32_t pn = dtf_pattern(vm, o, &pat);
+    dskel s;
+    dskel_set(data(pat), pn, &s);
+    vector<uint16_t> sk;
+    dskel_text(&s, &sk);
+    int hc = slot_int(vm, o, DFS_HC);
+    uint32_t hour_char = (uint32_t)slot_int(vm, o, DFS_HOURCHAR);
+    if (hc >= 0) hour_char = (uint32_t)hc_letters[hc];
+    dgen g;
+    memset(&g, 0, sizeof g);
+    defer(g) { vector_dpent_drop(&g.m.e); vector_uint16_t_drop(&g.m.text); }
+    dgen_init(&g, c.li, hour_char, c.nsi);
+    difmt d;
+    di_init(&g, &d, c.li, data(sk), (uint32_t)len(sk));
+    dfields from, to;
+    date_fields(a, c.offset, &from);
+    date_fields(b, c.offset, &to);
+    vector<uint16_t> tx;
+    vector<uint8_t> ty;
+    int first;
+    di_format(&d, &c, &from, &to, &tx, &ty, &first);
+    /* the spans: the first and second occurrences of the fields shown twice */
+    vector<uint32_t> runs;
+    size_t i = 0;
+    while (i < len(tx)) {
+        size_t j = i + 1;
+        while (j < len(tx) && ty[j] == ty[i]) j++;
+        if (ty[i] != DP_LITERAL) {
+            push_back(runs, (uint32_t)i);
+            push_back(runs, (uint32_t)j);
+            push_back(runs, (uint32_t)ty[i]);
+        }
+        i = j;
+    }
+    uint32_t s1a = 0xFFFFFFFF, s1b = 0, s2a = 0xFFFFFFFF, s2b = 0;
+    if (first >= 0) {
+        size_t nr = len(runs) / 3;
+        for (size_t p = 0; p < nr; p++)
+            for (size_t q = p + 1; q < nr; q++) {
+                if (runs[q * 3 + 2] != runs[p * 3 + 2]) continue;
+                if (runs[p * 3] < s1a) s1a = runs[p * 3];
+                if (runs[p * 3 + 1] > s1b) s1b = runs[p * 3 + 1];
+                if (runs[q * 3] < s2a) s2a = runs[q * 3];
+                if (runs[q * 3 + 1] > s2b) s2b = runs[q * 3 + 1];
+                break;
+            }
+    }
+    if (s1a == 0xFFFFFFFF) {
+        /* no range: the format's own date */
+        if (!to_parts) return dtf_format_value(vm, o, jv_num(a), 0);
+        vector<uint16_t> t2;
+        vector<uint8_t> y2, src;
+        dtf_render(vm, o, a, &t2, &y2);
+        vector<uint32_t> pt;
+        size_t k = 0;
+        while (k < len(t2)) {
+            size_t j = k + 1;
+            while (j < len(t2) && y2[j] == y2[k]) j++;
+            push_back(pt, (uint32_t)k);
+            push_back(pt, (uint32_t)j);
+            push_back(pt, (uint32_t)y2[k]);
+            k = j;
+        }
+        for (size_t u = 0; u < len(t2); u++) push_back(src, (uint8_t)2);
+        return parts_array(vm, &t2, &pt, dp_names, &src);
+    }
+    if (!to_parts) return jv_str(js_str_new(vm, data(tx), (uint32_t)len(tx)));
+    /* the parts: the fields and the literals between, each its source by the spans (the
+       first date's span is the index first) */
+    uint32_t start0 = s1a, end0 = s1b, start1 = s2a, end1 = s2b;
+    if (first == 1) { start0 = s2a; end0 = s2b; start1 = s1a; end1 = s1b; }
+    vector<uint32_t> pt;
+    vector<uint8_t> src;
+    for (size_t u = 0; u < len(tx); u++) push_back(src, (uint8_t)2);
+    size_t k = 0;
+    while (k < len(tx)) {
+        size_t j = k + 1;
+        while (j < len(tx) && ty[j] == ty[k]) j++;
+        push_back(pt, (uint32_t)k);
+        push_back(pt, (uint32_t)j);
+        push_back(pt, (uint32_t)ty[k]);
+        uint8_t sv = 2;
+        if (start0 <= k && j <= end0) sv = 0;
+        else if (start1 <= k && j <= end1) sv = 1;
+        for (size_t u = k; u < j; u++) src[u] = sv;
+        k = j;
+    }
+    return parts_array(vm, &tx, &pt, dp_names, &src);
+}
+
+/* Date.prototype.toLocaleString, toLocaleDateString, toLocaleTimeString (which 0, 1, 2): a
+   DateTimeFormat of the arguments formats this */
+static jv date_to_locale(js_vm *vm, jv thisv, jv locales, jv options, uint32_t which) {
+    static const char *const names[] = { "Date.prototype.toLocaleString", "Date.prototype.toLocaleDateString",
+        "Date.prototype.toLocaleTimeString" };
+    static const int req[] = { DQ_ANY, DQ_DATE, DQ_TIME }, def[] = { DD_ALL, DD_DATE, DD_TIME };
+    if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATE) return incompatible(vm, names[which], thisv);
+    double t = jv_dbl(vm->objs[jv_idx(thisv)].x);
+    if (t != t) return jv_str(js_str_ascii(vm, "Invalid Date"));
+    uint32_t o = 0;
+    int cache = locales == JV_UNDEF && options == JV_UNDEF;
+    if (cache) o = intl_cache_get(vm, IC_DATE + which);
+    if (!o) {
+        jv f = dtf_new(vm, locales, options, JV_UNDEF, req[which], def[which], names[which]);
+        if (f == JV_HOLE) return JV_HOLE;
+        o = jv_idx(f);
+        if (cache) intl_cache_put(vm, IC_DATE + which, o);
+    }
+    return dtf_format_value(vm, o, jv_num(t), 0);
+}
+
+static jv this_dtf(js_vm *vm, jv thisv, const char *method) {
+    if (!is_intl(vm, thisv, JIK_DATETIMEFORMAT)) return incompatible(vm, method, thisv);
+    return thisv;
+}
+/* V8's UnwrapDateTimeFormat (the format getter's, resolvedOptions'): an object that is not
+   one is reported itself */
+static jv unwrap_dtf(js_vm *vm, jv thisv, const char *method) {
+    if (is_intl(vm, thisv, JIK_DATETIMEFORMAT)) return thisv;
+    if (jv_is_obj(thisv)) return incompatible(vm, "UnwrapDateTimeFormat", thisv);
     return incompatible(vm, method, thisv);
 }
 
@@ -3201,6 +5350,32 @@ jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args,
         if (!jv_is_big(x)) return js_throw_msg(vm, vm->type_error_proto, "BigInt.prototype.toLocaleString requires that 'this' be a BigInt");
         return number_to_locale(vm, x, a0, a1, "BigInt.prototype.toLocaleString");
     }
+    case IN_DATETIMEFORMAT: return dtf_new(vm, a0, a1, newt, DQ_ANY, DD_DATE, "Intl.DateTimeFormat");
+    case IN_DTF_FORMAT_GET: {
+        if (unwrap_dtf(vm, thisv, "get Intl.DateTimeFormat.prototype.format") == JV_HOLE) return JV_HOLE;
+        uint32_t o = jv_idx(thisv);
+        jv b = slot_get(vm, o, DFS_BOUND);
+        if (jv_is_obj(b)) return b;
+        uint32_t first = vm->objs[jv_idx(callee)].a - which;
+        uint32_t f = js_native_new(vm, first + IN_DTF_FORMAT_BOUND, A_EMPTY, 1);
+        vm->objs[f].x = thisv;
+        slot_set(vm, o, DFS_BOUND, jv_obj(f));
+        return jv_obj(f);
+    }
+    case IN_DTF_FORMAT_BOUND: return dtf_format_value(vm, jv_idx(vm->objs[jv_idx(callee)].x), a0, 0);
+    case IN_DTF_FORMATTOPARTS:
+        if (this_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.formatToParts") == JV_HOLE) return JV_HOLE;
+        return dtf_format_value(vm, jv_idx(thisv), a0, 1);
+    case IN_DTF_RESOLVED:
+        if (unwrap_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return dtf_resolved(vm, jv_idx(thisv));
+    case IN_DTF_FORMATRANGE:
+        if (this_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.formatRange") == JV_HOLE) return JV_HOLE;
+        return dtf_format_range(vm, jv_idx(thisv), a0, a1, 0);
+    case IN_DTF_FORMATRANGETOPARTS:
+        if (this_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.formatRangeToParts") == JV_HOLE) return JV_HOLE;
+        return dtf_format_range(vm, jv_idx(thisv), a0, a1, 1);
+    case IN_DATE_TOLOCALE: return date_to_locale(vm, thisv, a0, a1, (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x));
     default: return JV_UNDEF;
     }
 }
@@ -3276,4 +5451,19 @@ void js_intl_init(js_vm *vm, uint32_t first) {
     method(vm, np, first, IN_NF_FORMATRANGETOPARTS, "formatRangeToParts", 2);
     method(vm, vm->number_proto, first, IN_NUM_TOLOCALE, "toLocaleString", 0);
     method(vm, vm->bigint_proto, first, IN_BIG_TOLOCALE, "toLocaleString", 0);
+
+    /* DateTimeFormat, and Date's toLocale*String over it */
+    intl_ctor(vm, intl, first, IN_DATETIMEFORMAT, JIK_DATETIMEFORMAT, "DateTimeFormat", 0, 1);
+    uint32_t dp = vm->intl_protos[JIK_DATETIMEFORMAT];
+    method(vm, dp, first, IN_DTF_RESOLVED, "resolvedOptions", 0);
+    method(vm, dp, first, IN_DTF_FORMATTOPARTS, "formatToParts", 1);
+    getter(vm, dp, first, IN_DTF_FORMAT_GET, "format", 0);
+    method(vm, dp, first, IN_DTF_FORMATRANGE, "formatRange", 2);
+    method(vm, dp, first, IN_DTF_FORMATRANGETOPARTS, "formatRangeToParts", 2);
+    static const char *const dn[] = { "toLocaleString", "toLocaleDateString", "toLocaleTimeString" };
+    for (uint32_t i = 0; i < 3; i++) {
+        uint32_t f = native(vm, first, IN_DATE_TOLOCALE, dn[i], 0);
+        vm->objs[f].x = jv_num(i);
+        js_define(vm, vm->date_proto, js_atom_ascii(vm, dn[i]), jv_obj(f), JS_SHAPE_HIDDEN);
+    }
 }
