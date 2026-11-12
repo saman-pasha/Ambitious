@@ -1,0 +1,3 @@
+Set-Cookie: h2a=1; Path=/; Max-Age=600
+Set-Cookie: h2b=2; Path=/; Secure; Max-Age=600
+Set-Cookie: h2c=3; Path=/h2

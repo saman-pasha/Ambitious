@@ -28,9 +28,11 @@
 #
 # Content codings (tests/net/site/z/), the server's done by Python's gzip and zlib: a
 # page and its parts in gzip, deflate, deflate with no zlib header, gzip then deflate;
-# br, which is not asked for, and a gzip body whose CRC-32 is wrong, each failing with
-# its reason. Each decoded size is its file's; the decoded sheets style the page and
-# the decoded PNG is laid out at its size. Every request asked for gzip and deflate.
+# a br that is no Brotli stream (the server sends the file as it is) and a gzip body
+# whose CRC-32 is wrong, each failing with its reason. Each decoded size is its file's;
+# the decoded sheets style the page and the decoded PNG is laid out at its size. Every
+# request asked for gzip, deflate, br and zstd, as Chromium asks a loopback host (br and
+# zstd themselves: tests/integ/net-h2).
 #
 # The HTTP cache (tests/net/site/k/): three runs of a profile 61 s apart, from a server
 # whose Date stays put, a part for each of max-age, no-cache with an ETag, a max-age
@@ -119,8 +121,8 @@ echo "== proxies:"
 proxy=$(serve proxy "$AMB_ROOT/tests/net/proxy.py" "$work/proxy.log" --deny blocked.test)
 echo "-- https_proxy: every https: fetch through a tunnel"
 https_proxy=http://127.0.0.1:$proxy amb query "$turl" "net_proxy(R, P), net_resource(R, U, _, O, _, _, _)"
-echo "-- what the proxy was asked:"
-names < "$work/proxy.log"
+echo "-- what the proxy was asked (sorted: the parts' tunnels are opened at once; the page's, kept alive, carries a part):"
+names < "$work/proxy.log" | sort
 : > "$work/proxy.log"
 echo "-- no_proxy=localhost: localhost reached directly, the address through the proxy"
 https_proxy=http://127.0.0.1:$proxy no_proxy=localhost amb load "$turl" > /dev/null

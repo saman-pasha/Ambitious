@@ -52,7 +52,11 @@ reason.
 ## 3. The network to the engine
 
 - **Bounds:** 32 MB a body, five redirects, ten seconds a read; a PNG at most
-  2^24 pixels, and inflate bounded by the size its image needs.
+  2^24 pixels, and inflate bounded by the size its image needs. Over HTTP/2
+  (12q), the bounds Chromium announces: a frame of 16,384 bytes, a header list
+  of 256 KB, HPACK's table of 64 KB, a stream's window of 6 MB; 256 streams
+  at once at most. A decoded body, gzip, deflate, br or zstd, stops at 32 MB,
+  and a zstd frame's window at 8 MB (Chromium's limit, RFC 9659's).
 - **Parsing:** URLs are parsed into fixed buffers that truncate, never
   overflow. An image's size is read only from header bytes that exist. The
   PNG decoder checks every chunk length, colour type, bit depth and filter.
@@ -60,7 +64,10 @@ reason.
   URL. A site's denied kinds (the profile's permissions) are blocked by the
   loader before any fetch.
 - **Tested:** `tests/integ/net` (blocked, too_many_redirects, http_error),
-  `tests/exec/png_decode`, and `tests/exec/net_url`.
+  `tests/integ/net-h2` (a body past 32 MB over HTTP/2, a reset stream, a
+  GOAWAY, a stalled stream), `tests/exec/png_decode`, `tests/exec/net_url`,
+  and `tests/exec/net_hpack`, `net_h2` and `net_zstd`, each with blocks,
+  conversations or frames broken at random, under valgrind.
 
 ## 4. The profile
 

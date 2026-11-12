@@ -1,0 +1,160 @@
+stream 1
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /cookie.html
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+sec-ch-ua-platform: "Linux"
+upgrade-insecure-requests: 1
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+sec-fetch-site: none
+sec-fetch-mode: navigate
+sec-fetch-user: ?1
+sec-fetch-dest: document
+accept-encoding: gzip, deflate, br, zstd
+priority: u=0, i
+block 82418ba0e41d139d09b8d34f05df87048960873f531579d34d1f40874148b1275ad1ffb8fe719472505422f4f61e92ff3f7de0fe42db3fcfd29fce93a62854bb60ea93f9fbef07f2f7f3f4a7f37a7b0f49ada7f9fbef07f216d9fe7f408b4148b1275ad1ad49e33505023f30408d4148b1275ad1ad5d034ca7b29f07224c696e7578224092b6b9ac1c8558d520a4b6c2ad617b5a54251f01317ad6d07f66a281b0dae053fafc087ed4ce6aadf2a7979c89c6bfb521aeba0bc8b1e632586d975765c53facd8f7e8cff4a506ea5531149d4ffda98ca39282a117a7b0f49580b6cae05de0040b844a6e1ca3b0cc36cbabb2e753e5497ca589d34d1f43aeba0c41a4c7a98f33a69a3fdf9a68fa1d75d0620d263d4c79a68fbed00177fe8d48e62b03ee697e8d48e62b1e0b1d7f46a4731581d754df5f2c7cfdf6800bbdf43aeba0c41a4c7a9841a6a8b22c5f249c754c5fbef046cfdf6800bbbf408a4148b4a549275906497f83a8f517408a4148b4a549275a93c85f86a87dcd30d25f408a4148b4a549275ad416cf023f31408a4148b4a549275a42a13f8690e4b692d49f50929bd9abfa5242cb40d25fa523b3e94f684c9f4086aec31ec327d785b6007d286f
+stream 3
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /s1.css?c
+sec-ch-ua-platform: "Linux"
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+accept: text/css,*/*;q=0.1
+sec-fetch-site: same-origin
+sec-fetch-mode: no-cors
+sec-fetch-dest: style
+referer: https://localhost:44817/cookie.html
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=0
+block 82ca87048761015c8847f84fc7c5c9c8538e497ca582211f5f2c7cfdf6800b877f058840e92ac7b0d31aaf7f0585a8eb10f6237f0484427d505f73999d29ad1718628390744e7426e34d3c175821cfd4c55e74d347c460821c0160848e38042f60852109032cb37f0703753d30
+stream 5
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /a.png?c
+sec-ch-ua-platform: "Linux"
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+sec-fetch-site: same-origin
+sec-fetch-mode: no-cors
+sec-fetch-dest: image
+referer: https://localhost:44817/cookie.html
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=2, i
+block 82d3870487606bd754dfe13fd0ced2d153b1352398ac0fb9a5fa352398ac782c75fd1a91cc56075d537d1a91cc5611de6ff7e69a3e8d48e62b1f3f5f2c7cfdf6800bbdc6c57f0584352398bfc4cac3c2c17f0185b6017d286f
+stream 7
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /cookie.html
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+sec-ch-ua-platform: "Linux"
+upgrade-insecure-requests: 1
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+sec-fetch-site: none
+sec-fetch-mode: navigate
+sec-fetch-user: ?1
+sec-fetch-dest: document
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=0, i
+block 82d687048960873f531579d34d1fd5d4d3d2d1d0cfcecdcccbc4c3c2ca
+stream 9
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /s1.css?c
+sec-ch-ua-platform: "Linux"
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+accept: text/css,*/*;q=0.1
+sec-fetch-site: same-origin
+sec-fetch-mode: no-cors
+sec-fetch-dest: style
+referer: https://localhost:44817/cookie.html
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=0
+block 82d687048761015c8847f84fd3d1d5d4c9c8c7c6c5cbc4c3c2c1
+stream 11
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /a.png?c
+sec-ch-ua-platform: "Linux"
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+sec-fetch-site: same-origin
+sec-fetch-mode: no-cors
+sec-fetch-dest: image
+referer: https://localhost:44817/cookie.html
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=2, i
+block 82d6870487606bd754dfe13fd3d1d5d4c0c8c7bfc5cbc4c3c2be
+stream 13
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /many.html
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+sec-ch-ua-platform: "Linux"
+upgrade-insecure-requests: 1
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+sec-fetch-site: none
+sec-fetch-mode: navigate
+sec-fetch-user: ?1
+sec-fetch-dest: document
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=0, i
+block 82d68704886291d5e979d34d1fd5d4d3d2d1d0cfcecdcccbc4c3c2ca
+stream 15
+:method: GET
+:authority: localhost:44817
+:scheme: https
+:path: /s1.css
+sec-ch-ua-platform: "Linux"
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36
+sec-ch-ua: "HeadlessChrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"
+sec-ch-ua-mobile: ?0
+accept: text/css,*/*;q=0.1
+sec-fetch-site: same-origin
+sec-fetch-mode: no-cors
+sec-fetch-dest: style
+referer: https://localhost:44817/many.html
+accept-encoding: gzip, deflate, br, zstd
+cookie: a=1
+cookie: bb=22
+cookie: ccc=333
+priority: u=0
+block 82d687048561015c8847d3d1d5d4c9c8c7c673989d29ad1718628390744e7426e34d3c1758a4757a5e74d347ccc5c4c3c2

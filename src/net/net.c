@@ -11,27 +11,49 @@
 
    Fetching. file: reads the file its path names, percent-decoded (its type from
    its name); data: decodes its body, the URL past "data:" without its fragment
-   (base64 or percent-encoded); http: and https: are HTTP/1.1 over a socket
-   -- GET with Connection: close, interim 1xx answers passed over, the response's
-   Content-Length or chunked body or the bytes until close (a body shorter than
-   its length, or chunks without their last, is malformed), at most five
-   redirects, ten seconds a read, 32 MB a body. Each address a name has is tried
-   in turn. https: is TLS 1.2 or 1.3 through the system's OpenSSL, the one part a
-   library gives: SNI (a host name's, never an address's), ALPN offering
-   http/1.1, the server's chain verified against SSL_CERT_FILE or else the
-   system's store (/etc/ssl/certs/ca-certificates.crt), and its certificate
-   against the URL's host, by name or by address. A verification that fails and
-   a handshake that fails are outcomes of their own, each with the library's
-   reason. The TLS context, which holds the store, is made at an operation's
-   first https: URL and shared by its connections. A proxy comes from the
-   environment: https_proxy (or HTTPS_PROXY) for https:, through a CONNECT
-   tunnel; http_proxy for http:, its requests in absolute form (HTTP_PROXY is
-   not read: a CGI program's request can set it); either may carry user info,
-   sent as Basic Proxy-Authorization. no_proxy (or NO_PROXY) names the hosts
-   reached directly: `*', a domain with its subdomains (a leading `.' or `*.'
-   changes nothing), an address or a CIDR block for an address, each with an
-   optional port. A proxy that will not open a tunnel is proxy_refused, with its
-   status line. Every fetch that fails has its reason in words.
+   (base64 or percent-encoded). http: and https: are HTTP/1.1, and HTTP/2 over TLS
+   when the server's ALPN chooses it (src/net/h2.c, its header blocks by
+   src/net/hpack.c): interim 1xx answers passed over, at most five redirects (from
+   one protocol to the other as they come), ten seconds a read, 32 MB a body. The
+   request is Chromium's: its fields in its order and case (lowercase over HTTP/2,
+   the Cookie in crumbs), client hints and fetch metadata to a potentially
+   trustworthy URL alone (https:, a loopback host), the Referer of the default
+   policy, the Accept of each kind (but the image formats the painter cannot draw),
+   Accept-Encoding gzip, deflate, br and zstd to a potentially trustworthy URL,
+   gzip and deflate to any other, and over HTTP/2 its priority (RFC 9218's field
+   and the HEADERS' dependency tree). A response over HTTP/1.1 ends by its
+   Content-Length, its last chunk and trailers, or the connection's close (a body
+   shorter than its length, or chunks without their last, is malformed).
+
+   Connections are kept, as Chromium's pool keeps them, for the process: an idle
+   connection to the same origin (through the same proxy) carries the next request
+   there, HTTP/1.1's kept alive, up to six to an origin at once; an HTTP/2
+   connection is one per origin, its requests concurrent streams within the
+   server's SETTINGS_MAX_CONCURRENT_STREAMS (100 until it says). A page's parts are
+   fetched together: each made as the page orders them, its Cookie the jar's then,
+   the exchanges carried at once over sockets that do not wait (poll), the answers
+   taken in the page's order. A request on a reused connection that closes before
+   a byte of its answer comes goes once again, on a new one; a stream refused
+   (REFUSED_STREAM) goes again, and the streams a GOAWAY says were not processed
+   go again on another connection, twice at most as Chromium's do (its
+   kMaxRetryAttempts). Each address a name has is tried in turn. https:
+   is TLS 1.2 or 1.3 through the system's OpenSSL, the one part a library gives:
+   SNI (a host name's, never an address's), ALPN offering h2 and http/1.1 as
+   Chromium does (the server's choice decides), the server's chain verified
+   against SSL_CERT_FILE or else the system's store
+   (/etc/ssl/certs/ca-certificates.crt), and its certificate against the URL's
+   host, by name or by address. A verification that fails and a handshake that
+   fails are outcomes of their own, each with the library's reason. The TLS
+   context, which holds the store, is made at an operation's first https: URL. A
+   proxy comes from the environment: https_proxy (or HTTPS_PROXY) for https:,
+   through a CONNECT tunnel (HTTP/2 inside it as over any TLS); http_proxy for
+   http:, its requests in absolute form (HTTP_PROXY is not read: a CGI program's
+   request can set it); either may carry user info, sent as Basic
+   Proxy-Authorization. no_proxy (or NO_PROXY) names the hosts reached directly:
+   `*', a domain with its subdomains (a leading `.' or `*.' changes nothing), an
+   address or a CIDR block for an address, each with an optional port. A proxy
+   that will not open a tunnel is proxy_refused, with its status line. Every fetch
+   that fails has its reason in words.
 
    What a page asks for: <link rel=stylesheet href>, <img src>, <script src>
    (fetched, never run), each URL fetched once. An img with a srcset takes the
@@ -56,7 +78,8 @@
 
    Cookies (RFC 6265bis) are kept in a jar, in the file net_keep names (a
    profile's) or for the run alone; the HTTP cache (RFC 9111) in the directory it
-   names; gzip and deflate are decoded over the painter's inflate. Each section
+   names; gzip and deflate are decoded over the painter's inflate, br over its
+   Brotli decoder (src/paint/brotli.c), zstd by src/net/zstd.c. Each section
    below says what of it is done. */
 #include <stdio.h>
 #include <string.h>
@@ -69,11 +92,18 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/utsname.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <fcntl.h>
 #include <vector.pl>
 #include <amb.pl>
 #include "url.h"
 #include "../paint/image.h"
+#include "../paint/brotli.h"
+#include "zstd.h"
+#include "h2.h"
 
 amb_interface(dom);
 amb_implementation(net);
@@ -121,6 +151,7 @@ X509_VERIFY_PARAM *SSL_get0_param(SSL *ssl) tie ssl;
 int X509_VERIFY_PARAM_set1_ip_asc(X509_VERIFY_PARAM *param, const char *ip);
 int SSL_connect(SSL *ssl);
 int SSL_read(SSL *ssl, char *buf, int n);
+int SSL_peek(SSL *ssl, char *buf, int n);
 int SSL_write(SSL *ssl, const char *buf, int n);
 int SSL_shutdown(SSL *ssl);
 long SSL_get_verify_result(const SSL *ssl);
@@ -132,10 +163,19 @@ void SSL_get0_alpn_selected(const SSL *ssl, const unsigned char **data, unsigned
 unsigned long ERR_get_error(void);
 void ERR_error_string_n(unsigned long e, char *buf, size_t len);
 void ERR_clear_error(void);
+int SSL_get_error(const SSL *ssl, int ret);
+uint64_t SSL_CTX_set_options(SSL_CTX *ctx, uint64_t op);
 #define NET_SSL_CTRL_SET_TLSEXT_HOSTNAME 55
 #define NET_SSL_CTRL_SET_MIN_PROTO_VERSION 123
 #define NET_TLS1_2_VERSION 0x0303
 #define NET_SSL_VERIFY_PEER 1
+#define NET_SSL_CTRL_MODE 33
+#define NET_SSL_MODE_PARTIAL_WRITE 1
+#define NET_SSL_MODE_MOVING_BUFFER 2
+#define NET_SSL_OP_IGNORE_UNEXPECTED_EOF ((uint64_t)1 << 7)
+#define NET_SSL_ERROR_WANT_READ 2
+#define NET_SSL_ERROR_WANT_WRITE 3
+#define NET_SSL_ERROR_ZERO_RETURN 6
 
 #define NET_MAX_BODY (32u << 20)
 #define NET_MAX_REDIRECTS 5
@@ -645,57 +685,11 @@ static net_outcome net_get_data(const net_url *u, vector<char> *body, char *type
     return NET_OUTCOME_OK;
 }
 
-/* ---- connections: a socket, a proxy's tunnel, TLS ---- */
+/* ---- TLS's context, and what an exchange went over ---- */
 
-/* a TCP connection to host (bare) and port, each of its addresses tried in turn:
-   the socket, or -2 when the name has no address and -1 when none answered, why in words */
-static int net_dial(const char *host, int port, char *why, size_t cap) {
-    net_addrinfo hints;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char ps[16];
-    snprintf(ps, sizeof ps, "%d", port);
-    own net_addrinfo *res = 0;
-    int g = getaddrinfo(host, ps, &hints, &res);
-    if (g != 0 || !res) { snprintf(why, cap, "%s: %s", host, gai_strerror(g)); freeaddrinfo(res); return -2; }
-    defer(res) { freeaddrinfo(res); }
-    int err = 0;
-    for (const net_addrinfo *a = res; a; a = a->ai_next) {
-        int fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (fd < 0) { err = errno; continue; }
-        struct timeval tv;
-        tv.tv_sec = 10;
-        tv.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) return fd;
-        err = errno;
-        close(fd);
-    }
-    snprintf(why, cap, "%s port %d: %s", host, port, strerror(err));
-    return -1;
-}
-
-/* every byte of p sent, over TLS when there is a session */
-static int net_send_all(int fd, SSL *ssl, const char *p, size_t n) {
-    size_t done = 0;
-    while (done < n) {
-        size_t step = n - done > 65536 ? 65536 : n - done;
-        ssize_t k = ssl ? (ssize_t)SSL_write(ssl, p + done, (int)step) : send(fd, p + done, step, MSG_NOSIGNAL);
-        if (k <= 0) return 0;
-        done += (size_t)k;
-    }
-    return 1;
-}
-
-static ssize_t net_recv(int fd, SSL *ssl, char *buf, size_t n) {
-    if (ssl) return SSL_read(ssl, buf, (int)n);
-    return recv(fd, buf, n, 0);
-}
-
-/* the TLS client an operation's connections share: its context, made at the
-   operation's first https: URL, holds the store of certificate authorities */
+/* the TLS client an operation's connections are made by: its context, made at the
+   operation's first https: URL, holds the store of certificate authorities. A connection
+   it made may outlive it in the pool (a session holds its context) */
 typedef struct net_tls { own SSL_CTX *ctx; int tried, ok; char why[300]; } net_tls;
 
 static int net_tls_ready(net_tls *t) {
@@ -712,8 +706,13 @@ static int net_tls_ready(net_tls *t) {
         return 0;
     }
     SSL_CTX_set_verify(t->ctx, NET_SSL_VERIFY_PEER, 0);
-    static const unsigned char alpn[9] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
-    SSL_CTX_set_alpn_protos(t->ctx, alpn, 9);
+    /* ALPN as Chromium offers it: h2, then http/1.1 */
+    static const unsigned char alpn[12] = { 2, 'h', '2', 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    SSL_CTX_set_alpn_protos(t->ctx, alpn, 12);
+    /* a write the socket takes in part goes on from where it stopped; a server that closes
+       without close_notify ends what it sent, as a browser takes it */
+    SSL_CTX_ctrl(t->ctx, NET_SSL_CTRL_MODE, NET_SSL_MODE_PARTIAL_WRITE | NET_SSL_MODE_MOVING_BUFFER, 0);
+    SSL_CTX_set_options(t->ctx, NET_SSL_OP_IGNORE_UNEXPECTED_EOF);
     t->ok = 1;
     return 1;
 }
@@ -726,79 +725,6 @@ typedef struct net_route {
     char proxy[300];
     char reason[600];
 } net_route;
-
-/* the session over fd: SNI and the name or address to verify from the bare host,
-   the handshake, the server's chain checked by it. OK, or how it failed and why */
-static net_outcome net_tls_start(SSL *ssl, int fd, const char *host, net_route *rt) {
-    char name[256];
-    snprintf(name, sizeof name, "%s", host);
-    SSL_set_fd(ssl, fd);
-    if (net_is_address(name)) X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), name);
-    else {
-        SSL_ctrl(ssl, NET_SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, name);
-        SSL_set1_host(ssl, name);
-    }
-    ERR_clear_error();
-    if (SSL_connect(ssl) != 1) {
-        long v = SSL_get_verify_result(ssl);
-        if (v != 0) {
-            snprintf(rt->reason, sizeof rt->reason, "%s", X509_verify_cert_error_string(v));
-            return NET_OUTCOME_TLS_VERIFY_FAILED;
-        }
-        unsigned long e = ERR_get_error();
-        if (e) {
-            /* error:CODE:LIBRARY:FUNCTION:REASON -- the reason */
-            char buf[256];
-            ERR_error_string_n(e, buf, sizeof buf);
-            const char *r = buf;
-            for (int c = 0; c < 4 && strchr(r, ':'); c++) r = strchr(r, ':') + 1;
-            snprintf(rt->reason, sizeof rt->reason, "%s", r);
-        } else snprintf(rt->reason, sizeof rt->reason, "the server closed the connection in the handshake");
-        return NET_OUTCOME_TLS_HANDSHAKE_FAILED;
-    }
-    rt->tls = 1;
-    snprintf(rt->version, sizeof rt->version, "%s", SSL_get_version(ssl));
-    const SSL_CIPHER *c = SSL_get_current_cipher(ssl);
-    snprintf(rt->cipher, sizeof rt->cipher, "%s", SSL_CIPHER_get_name(c));
-    const unsigned char *ap = 0;
-    unsigned int an = 0;
-    SSL_get0_alpn_selected(ssl, &ap, &an);
-    if (ap && an < sizeof rt->alpn) { memcpy(rt->alpn, ap, an); rt->alpn[an] = 0; }
-    return NET_OUTCOME_OK;
-}
-
-/* a proxy asked for a tunnel to target (host:port): its answer's head read to the
-   blank line, a byte at a time so that nothing of the server's is taken; OK on a
-   2xx, else proxy_refused with the proxy's status line */
-static net_outcome net_tunnel(int fd, const char *target, const char *auth, char *why, size_t cap) {
-    char req[1400];
-    int n = snprintf(req, sizeof req, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Ambitious/0.1\r\n%s%s%s\r\n", target, target,
-                     auth[0] ? "Proxy-Authorization: Basic " : "", auth, auth[0] ? "\r\n" : "");
-    if (n < 0 || (size_t)n >= sizeof req || !net_send_all(fd, 0, req, (size_t)n)) {
-        snprintf(why, cap, "the proxy closed the connection");
-        return NET_OUTCOME_PROXY_REFUSED;
-    }
-    char head[8192];
-    size_t k = 0;
-    while (k + 1 < sizeof head) {
-        char c;
-        if (recv(fd, &c, 1, 0) != 1) break;
-        head[k++] = c;
-        if (k >= 4 && memcmp(head + k - 4, "\r\n\r\n", 4) == 0) break;
-    }
-    head[k] = 0;
-    size_t le = 0;
-    while (le < k && head[le] != '\r' && head[le] != '\n') le++;
-    if (k < 12 || strncmp(head, "HTTP/1.", 7) != 0) {
-        snprintf(why, cap, "the proxy gave no HTTP answer to CONNECT");
-        return NET_OUTCOME_PROXY_REFUSED;
-    }
-    if (head[9] != '2') {
-        snprintf(why, cap, "the proxy answered %.*s", (int)le, head);
-        return NET_OUTCOME_PROXY_REFUSED;
-    }
-    return NET_OUTCOME_OK;
-}
 
 /* ---- HTTP/1.1 ---- */
 
@@ -917,23 +843,6 @@ static int net_chunks(const char *p, size_t n, vector<char> *body) {
     }
 }
 
-/* whether a response's bytes so far are the whole of it, by its framing */
-static int net_complete(const char *p, size_t n) {
-    size_t end = 0, a = net_final_head(p, n, &end);
-    if (!a) return 0;
-    a--;
-    int st = net_status_of(p + a, end - a);
-    if (st == 204 || st == 304) return 1;
-    char v[64];
-    if (net_header(p + a, end - a, "transfer-encoding", v, sizeof v)) {
-        /* chunks: checked only once the bytes end as a last chunk does */
-        if (n < 5 || memcmp(p + n - 5, "0\r\n\r\n", 5) != 0) return 0;
-        return net_chunks(p + end, n - end, 0) == 1;
-    }
-    if (net_header(p + a, end - a, "content-length", v, sizeof v)) return n - end >= (size_t)atoll(v);
-    return 0;
-}
-
 /* a response's bytes parsed: interim heads passed over; the status; the head (its
    status line and headers) into head; the body, framed, into body; the status
    line's reason phrase into why */
@@ -970,106 +879,6 @@ static net_outcome net_parse_response(const char *p, size_t n, int *status, vect
     }
     append_range(body, p + end, take);
     return NET_OUTCOME_OK;
-}
-
-/* one HTTP exchange: the URL asked for by its method (GET, or a script's or a form's
-   POST with its body), directly or through the proxy the environment names, over TLS
-   for https:; extra holds further header lines, each ending in CRLF. Its status, head
-   and body (chunks joined); what it went over in rt */
-static net_outcome net_exchange(const net_url *u, net_tls *t, const char *method, const char *sent, size_t sent_n, const char *extra,
-                                size_t extra_n, int *status, vector<char> *head, vector<char> *body, net_route *rt) {
-    int https = strcmp(u->scheme, "https") == 0;
-    char host[256], authority[300];
-    net_bare_host(u->host, host, sizeof host);
-    int port = u->port >= 0 ? u->port : https ? 443 : 80;
-    if (u->port >= 0) snprintf(authority, sizeof authority, "%s:%d", u->host, u->port);
-    else snprintf(authority, sizeof authority, "%s", u->host);
-    net_proxy_t px;
-    int via = net_proxy_for(u, &px, rt->reason, sizeof rt->reason);
-    if (via < 0) return NET_OUTCOME_PROXY_REFUSED;
-    rt->proxied = via;
-    if (via) snprintf(rt->proxy, sizeof rt->proxy, "%s", px.origin);
-    int fd = via ? net_dial(px.host, px.port, rt->reason, sizeof rt->reason) : net_dial(host, port, rt->reason, sizeof rt->reason);
-    if (fd == -2) return NET_OUTCOME_UNREACHABLE;
-    if (fd < 0) return NET_OUTCOME_REFUSED;
-    own SSL *ssl = 0;
-    defer(ssl) { SSL_free(ssl); }
-    if (https) {
-        net_outcome o = NET_OUTCOME_OK;
-        if (via) {
-            char target[300];
-            snprintf(target, sizeof target, "%s:%d", u->host, port);
-            o = net_tunnel(fd, target, px.auth, rt->reason, sizeof rt->reason);
-        }
-        if (o == NET_OUTCOME_OK && !net_tls_ready(t)) {
-            snprintf(rt->reason, sizeof rt->reason, "%s", t->why);
-            o = NET_OUTCOME_TLS_VERIFY_FAILED;
-        }
-        if (o == NET_OUTCOME_OK) {
-            ssl = SSL_new(t->ctx);
-            if (!ssl) { snprintf(rt->reason, sizeof rt->reason, "no TLS session could be made"); o = NET_OUTCOME_TLS_HANDSHAKE_FAILED; }
-            else o = net_tls_start(ssl, fd, host, rt);
-        }
-        if (o != NET_OUTCOME_OK) { close(fd); return o; }
-    }
-    /* the request: through a proxy, an http: request names its whole URL */
-    vector<char> req;
-    char line[8000], whole[340];
-    /* (no ternary over the char arrays: cicilang lowers one as a cast to the array, toolchain/REPORT.md) */
-    whole[0] = 0;
-    if (via && !https) snprintf(whole, sizeof whole, "%s://%s", u->scheme, authority);
-    int n = snprintf(line, sizeof line, "%s %s%s%s%s HTTP/1.1\r\nHost: %s\r\n", method, whole, u->path, u->has_query ? "?" : "", u->query, authority);
-    if (n > 0 && (size_t)n < sizeof line) append_range(req, line, (size_t)n);
-    n = snprintf(line, sizeof line, "User-Agent: Ambitious/0.1\r\nAccept: */*\r\nAccept-Encoding: gzip, deflate\r\n");
-    append_range(req, line, (size_t)n);
-    if (via && !https && px.auth[0]) {
-        n = snprintf(line, sizeof line, "Proxy-Authorization: Basic %s\r\n", px.auth);
-        append_range(req, line, (size_t)n);
-    }
-    append_range(req, extra, extra_n);
-    if (sent_n || strcmp(method, "GET") != 0) {
-        n = snprintf(line, sizeof line, "Content-Length: %zu\r\n", sent_n);
-        append_range(req, line, (size_t)n);
-    }
-    n = snprintf(line, sizeof line, "Connection: close\r\n\r\n");
-    append_range(req, line, (size_t)n);
-    append_range(req, sent, sent_n);
-    if (!net_send_all(fd, ssl, data(req), len(req))) {
-        snprintf(rt->reason, sizeof rt->reason, "the connection closed before the request was sent");
-        close(fd);
-        return NET_OUTCOME_REFUSED;
-    }
-    /* the response: to its framing's end, or to the connection's close */
-    vector<char> all;
-    char buf[16384];
-    for (;;) {
-        ssize_t k = net_recv(fd, ssl, buf, sizeof buf);
-        if (k <= 0) break;
-        append_range(all, buf, (size_t)k);
-        if (len(all) > NET_MAX_BODY + 65536) {
-            snprintf(rt->reason, sizeof rt->reason, "the response passed 32 MB");
-            close(fd);
-            return NET_OUTCOME_TOO_LARGE;
-        }
-        if (net_complete(data(all), len(all))) break;
-    }
-    if (ssl) SSL_shutdown(ssl);
-    close(fd);
-    return net_parse_response(data(all), len(all), status, head, body, rt->reason, sizeof rt->reason);
-}
-
-/* an exchange with SIGPIPE ignored: a write to a connection the server has closed
-   then fails, where it would end the process (OpenSSL writes with write(2)) */
-static net_outcome net_http(const net_url *u, net_tls *t, const char *method, const char *sent, size_t sent_n, const char *extra,
-                            size_t extra_n, int *status, vector<char> *head, vector<char> *body, net_route *rt) {
-    struct sigaction ign, old;
-    sigemptyset(&ign.sa_mask);
-    ign.sa_flags = 0;
-    ign.sa_handler = SIG_IGN;
-    sigaction(SIGPIPE, &ign, &old);
-    net_outcome o = net_exchange(u, t, method, sent, sent_n, extra, extra_n, status, head, body, rt);
-    sigaction(SIGPIPE, &old, 0);
-    return o;
 }
 
 /* ---- the clock and dates ---- */
@@ -1821,7 +1630,7 @@ static void net_cache_write(const char *path, const char *url, int status, int64
     rename(tmp, path);
 }
 
-/* ---- content codings: gzip and deflate, over the painter's inflate ---- */
+/* ---- content codings: gzip and deflate over the painter's inflate, br over its Brotli decoder, zstd ---- */
 
 static uint32_t net_crc_tab[256];
 
@@ -1904,10 +1713,11 @@ static int net_inflate_body(const uint8_t *p, size_t n, vector<uint8_t> *out, ch
     return 1;
 }
 
-/* a body decoded from the codings its Content-Encoding lists, the last applied
-   undone first; identity is none. The codings into coding; decoding_failed and why
-   for one not read here (br, compress, zstd: none of them asked for) or a body
-   that does not decode */
+/* a body decoded from the codings its Content-Encoding lists, the last applied undone
+   first; identity is none. gzip and deflate over the painter's inflate, br over its Brotli
+   decoder (src/paint/brotli.c), zstd by src/net/zstd.c. The codings into coding;
+   decoding_failed and why for one not read here (compress) or a body that does not
+   decode; too_large for one that decodes past 32 MB */
 static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *body, char *coding, size_t ccap, char *why, size_t wcap) {
     char ce[256], names[8][24];
     int nn = 0;
@@ -1933,14 +1743,28 @@ static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *bo
         vector<uint8_t> in, out;
         resize(in, len(*body));
         if (len(in)) memcpy(data(in), data(*body), len(in));
-        int ok;
-        if (strcmp(names[c], "gzip") == 0 || strcmp(names[c], "x-gzip") == 0) ok = net_gunzip(data(in), len(in), &out, why, wcap);
-        else if (strcmp(names[c], "deflate") == 0) ok = net_inflate_body(data(in), len(in), &out, why, wcap);
-        else {
+        int ok = 0, too = 0;
+        if (strcmp(names[c], "gzip") == 0 || strcmp(names[c], "x-gzip") == 0) {
+            ok = net_gunzip(data(in), len(in), &out, why, wcap);
+            too = !ok && len(out) >= NET_MAX_BODY;
+        } else if (strcmp(names[c], "deflate") == 0) {
+            ok = net_inflate_body(data(in), len(in), &out, why, wcap);
+            too = !ok && len(out) >= NET_MAX_BODY;
+        } else if (strcmp(names[c], "br") == 0) {
+            ok = amb_brotli(data(in), len(in), &out, NET_MAX_BODY + 1);
+            too = !ok && len(out) > NET_MAX_BODY;
+            if (too) snprintf(why, wcap, "the decoded body passed 32 MB");
+            else if (!ok) snprintf(why, wcap, "the br body is not a whole Brotli stream (RFC 7932)");
+        } else if (strcmp(names[c], "zstd") == 0) {
+            int z = net_zstd(data(in), len(in), &out, NET_MAX_BODY, why, wcap, 0);
+            ok = z == 1;
+            too = z < 0;
+            if (too) snprintf(why, wcap, "the decoded body passed 32 MB");
+        } else {
             snprintf(why, wcap, "the content coding %s is not one read here", names[c]);
             return NET_OUTCOME_DECODING_FAILED;
         }
-        if (!ok) return len(out) >= NET_MAX_BODY ? NET_OUTCOME_TOO_LARGE : NET_OUTCOME_DECODING_FAILED;
+        if (!ok) return too ? NET_OUTCOME_TOO_LARGE : NET_OUTCOME_DECODING_FAILED;
         clear(*body);
         resize(body, len(out));
         if (len(out)) memcpy(data(*body), data(out), len(out));
@@ -1952,198 +1776,1591 @@ static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *bo
 
 static amb_span net_text(net_loader *l, const char *s) { return text_add(l, s, strlen(s)); }
 
-/* a fetch, its redirects followed, recorded: the record's index */
-/* a resource fetched by a method of its own (a script's request, a form's submission):
-   its body and header lines (each ending in CRLF) sent with it. A request other than a
-   GET is never answered from the cache nor kept in it; a 303, or a 301 or 302 of a
-   POST, is followed by a GET without the body (Fetch 4.4) */
-static uint32_t net_get_by(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t,
-                           const char *method, const char *sent, size_t sent_n, const char *hdrs, size_t hdrs_n) {
-    char meth[16];
-    snprintf(meth, sizeof meth, "%s", method);
-    size_t body_n = sent_n;
-    net_resource_h h = resource_new(l);
-    uint32_t r = h.index;
-    l->resource[r].kind = kind;
-    l->resource[r].from = from;
-    l->resource[r].elem = elem;
-    l->resource[r].url = net_text(l, url);
-    l->resource[r].final_url = l->resource[r].url;
-    net_url u;
-    char text[8192], type[256], origin[512], charset[64];
-    type[0] = 0;
-    charset[0] = 0;
-    if (!net_parse_abs(url, &u)) {
-        l->resource[r].outcome = NET_OUTCOME_BAD_URL;
-        l->resource[r].origin = net_text(l, "null");
-        l->resource[r].reason = net_text(l, "not a URL");
-        return r;
+/* ---- requests, as Chromium writes them ---- */
+
+/* a URL potentially trustworthy (Secure Contexts 3.1): https: or wss:, a loopback host
+   (localhost or under it, 127.0.0.0/8, ::1), or file:. Chromium asks such a URL's server
+   for br and zstd as well as gzip and deflate, and sends it client hints and fetch
+   metadata; others it sends neither, and asks for gzip and deflate alone (measured) */
+static int net_trustworthy(const net_url *u) {
+    if (strcmp(u->scheme, "https") == 0 || strcmp(u->scheme, "wss") == 0 || strcmp(u->scheme, "file") == 0) return 1;
+    char host[256];
+    net_bare_host(u->host, host, sizeof host);
+    size_t n = strlen(host);
+    if (n && host[n - 1] == '.') host[--n] = 0;
+    for (size_t i = 0; i < n; i++) host[i] = net_lower(host[i]);
+    if (strcmp(host, "localhost") == 0 || (n > 10 && strcmp(host + n - 10, ".localhost") == 0)) return 1;
+    uint32_t v4;
+    if (net_ipv4_dotted(host, n, &v4)) return (v4 >> 24) == 127;
+    uint16_t v6[8];
+    if (strchr(host, ':') && net_ipv6_parse(host, n, v6)) {
+        for (int i = 0; i < 7; i++)
+            if (v6[i]) return 0;
+        return v6[7] == 1;
     }
-    vector<char> body;
-    net_outcome out = NET_OUTCOME_OK;
-    int status = 200;
+    return 0;
+}
+
+/* the platform sec-ch-ua-platform names, as Chromium names it */
+static void net_platform(char *out, size_t cap) {
+    struct utsname un;
+    if (uname(&un) != 0) snprintf(out, cap, "Unknown");
+    else if (strcmp(un.sysname, "Darwin") == 0) snprintf(out, cap, "macOS");
+    else snprintf(out, cap, "%s", un.sysname);
+}
+
+/* the Referer of a request for u from the page at page, by the default referrer policy,
+   strict-origin-when-cross-origin: the page's URL to its own origin; its origin alone to
+   another; none from a page over TLS to a URL that is not potentially trustworthy, nor
+   from a file: or opaque page */
+static void net_referrer(const net_url *u, const net_url *page, char *out, size_t cap) {
+    out[0] = 0;
+    if (!page || page->opaque || strcmp(page->scheme, "file") == 0) return;
+    if (strcmp(page->scheme, "https") == 0 && !net_trustworthy(u)) return;
+    char a[512], b[512];
+    net_origin_text(u, a, sizeof a);
+    net_origin_text(page, b, sizeof b);
+    if (strcmp(a, b) == 0) net_url_text(page, out, cap);
+    else snprintf(out, cap, "%s/", b);
+}
+
+/* how a request's origin stands to its page's, as Sec-Fetch-Site says it: none (no page),
+   same-origin, same-site, cross-site */
+static const char *const net_sites[4] = { "none", "same-origin", "same-site", "cross-site" };
+static int net_fetch_site(const net_url *u, const net_url *page) {
+    if (!page) return 0;
+    char a[512], b[512];
+    net_origin_text(u, a, sizeof a);
+    net_origin_text(page, b, sizeof b);
+    if (strcmp(a, b) == 0 && strcmp(a, "null") != 0) return 1;
+    return net_same_site(u, page) ? 2 : 3;
+}
+
+static void net_line(vector<char> *o, const char *name, const char *value) {
+    append_range(o, name, strlen(name));
+    append_range(o, ": ", 2);
+    append_range(o, value, strlen(value));
+    append_range(o, "\r\n", 2);
+}
+/* the lines of s (n bytes, each ending in CRLF) named name (want 1), or all the others
+   (want 0) */
+static void net_lines_named(vector<char> *o, const char *s, size_t n, const char *name, int want) {
+    size_t i = 0, nl = strlen(name);
+    while (i < n) {
+        size_t e = i;
+        while (e < n && s[e] != '\n') e++;
+        if (e < n) e++;
+        int is = e - i > nl && s[i + nl] == ':' && net_ci_prefix(s + i, e - i, name);
+        if (is == want) append_range(o, s + i, e - i);
+        i = e;
+    }
+}
+static int net_has_line(const char *s, size_t n, const char *name) {
+    size_t i = 0, nl = strlen(name);
+    while (i < n) {
+        size_t e = i;
+        while (e < n && s[e] != '\n') e++;
+        if (e - i > nl && s[i + nl] == ':' && net_ci_prefix(s + i, e - i, name)) return 1;
+        i = e + 1;
+    }
+    return 0;
+}
+
+/* ---- a fetch, step by step ---- */
+
+/* a fetch's state, from its record made to its record filled: J_HOP, its next URL to be
+   asked for; J_NET, an exchange of it on the way; J_DONE */
+enum { J_HOP, J_NET, J_DONE };
+/* an exchange's: waiting for a connection, carried by one, answered (or failed) */
+enum { X_WAIT, X_ON, X_DONE };
+
+/* a fetch of a batch (net_batch): what Fetch's main fetch keeps from hop to hop, and its
+   exchange while one is under way. Text that grows with a page (a request, a head, a cached
+   entry, a body) is in the batch's arena, by place */
+typedef struct net_job {
+    uint32_t r;                    /* its resource */
+    net_kind kind;
+    int nav;                       /* a navigation: a document asked for at the top */
+    int state, hop;
+    net_url u;                     /* where it is now */
+    char meth[16];
+    size_t sent, sent_n;           /* the request's body, in the arena */
+    size_t hdrs, hdrs_n;           /* the caller's header lines, in the arena */
+    uint32_t priority, incremental;   /* Chromium's priority for it: 0 (highest) to 4; RFC 9218's i */
+    int same;                      /* same-site with its page, or a navigation */
+    net_outcome out;
+    int status;
     net_route rt;
-    memset(&rt, 0, sizeof rt);
-    net_cache_use cache = NET_CACHE_USE_UNUSED;
-    int64_t cache_age = 0, cache_life = 0;
-    char coding[200];
-    int coded = 0;
-    uint32_t encoded = 0;
-    coding[0] = 0;
-    for (int hop = 0;; hop++) {
-        memset(&rt, 0, sizeof rt);
-        /* a page served over the network may not read the machine's files */
-        if (page && strcmp(u.scheme, "file") == 0 && strcmp(page->scheme, "file") != 0 && !page->opaque) {
-            out = NET_OUTCOME_BLOCKED;
-            status = 0;
-            snprintf(rt.reason, sizeof rt.reason, "a page served over %s: may not read a file: URL", page->scheme);
-            break;
-        }
-        clear(body);
-        if (strcmp(u.scheme, "file") == 0) { out = net_get_file(&u, &body, type, sizeof type, rt.reason, sizeof rt.reason); status = out == NET_OUTCOME_OK ? 200 : 404; break; }
-        if (strcmp(u.scheme, "data") == 0) { out = net_get_data(&u, &body, type, sizeof type, rt.reason, sizeof rt.reason); status = out == NET_OUTCOME_OK ? 200 : 0; break; }
-        if (strcmp(u.scheme, "http") != 0 && strcmp(u.scheme, "https") != 0) {
-            out = NET_OUTCOME_UNSUPPORTED_SCHEME;
-            status = 0;
-            snprintf(rt.reason, sizeof rt.reason, "%s: is not a scheme fetched here", u.scheme);
-            break;
-        }
-        /* the cache: a fresh copy answers, and no request is made; a stale one with a
-           validator asks the server whether it still holds */
-        char here[8192], cpath[1300];
-        net_url_text(&u, here, sizeof here);
-        vector<char> c_head, c_body;
-        int c_status = 0;
-        int64_t c_rtime = 0, now = net_now(), c_age = 0, c_life = 0;
-        int caching = strcmp(meth, "GET") == 0 && net_cache_path(l, here, cpath, sizeof cpath);
-        int cached = caching && net_cache_read(cpath, here, &c_status, &c_rtime, &c_head, &c_body);
-        if (cached) {
-            c_age = net_initial_age(data(c_head), len(c_head), c_rtime) + (now > c_rtime ? now - c_rtime : 0);
-            c_life = net_lifetime(data(c_head), len(c_head), c_rtime);
-            if (c_life > c_age) {
-                append_range(body, data(c_body), len(c_body));
-                status = c_status;
-                net_type_of_head(data(c_head), len(c_head), type, sizeof type, charset, sizeof charset);
-                cache = NET_CACHE_USE_FRESH;
-                cache_age = c_age;
-                cache_life = c_life;
-                break;
-            }
-        }
-        /* a top-level fetch is a navigation, same-site with itself; a page's part is
-           same-site when its site is the page's */
-        int same = !page || net_same_site(&u, page);
-        vector<char> head, extra;
-        net_cookie_header(l, &u, same, r, &extra);
-        if (cached) {
-            char v[1024], line[1100];
-            if (net_header(data(c_head), len(c_head), "etag", v, sizeof v)) {
-                int n = snprintf(line, sizeof line, "If-None-Match: %s\r\n", v);
-                if (n > 0 && (size_t)n < sizeof line) append_range(extra, line, (size_t)n);
-            }
-            if (net_header(data(c_head), len(c_head), "last-modified", v, sizeof v)) {
-                int n = snprintf(line, sizeof line, "If-Modified-Since: %s\r\n", v);
-                if (n > 0 && (size_t)n < sizeof line) append_range(extra, line, (size_t)n);
-            }
-        }
-        append_range(extra, hdrs, hdrs_n);
-        out = net_http(&u, t, meth, sent, body_n, data(extra), len(extra), &status, &head, &body, &rt);
-        if (out != NET_OUTCOME_OK) { status = 0; break; }
-        net_cookies_from(l, &u, data(head), len(head), same, r);
-        if (status == 304 && cached) {
-            /* revalidated: the stored response answers, its fields brought up to date by the 304's (4.3.4) */
-            net_cache_write(cpath, here, c_status, now, data(head), len(head), data(c_head), len(c_head), data(c_body), len(c_body));
-            clear(body);
-            append_range(body, data(c_body), len(c_body));
-            net_type_of_head(data(c_head), len(c_head), type, sizeof type, charset, sizeof charset);
-            cache = NET_CACHE_USE_REVALIDATED;
-            cache_age = c_age;
-            cache_life = c_life;
-            break;
-        }
-        net_type_of_head(data(head), len(head), type, sizeof type, charset, sizeof charset);
-        char loc[4096];
-        if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308) &&
-            net_header(data(head), len(head), "location", loc, sizeof loc)) {
-            if (hop >= NET_MAX_REDIRECTS) {
-                out = NET_OUTCOME_TOO_MANY_REDIRECTS;
-                snprintf(rt.reason, sizeof rt.reason, "more than %d redirects", NET_MAX_REDIRECTS);
-                break;
-            }
-            net_url next;
-            if (!net_resolve(&u, loc, &next)) { out = NET_OUTCOME_BAD_URL; snprintf(rt.reason, sizeof rt.reason, "a redirect to what is not a URL"); break; }
-            net_url_text(&next, text, sizeof text);
-            net_hop_h hp = hop_new(l);
-            l->hop[hp.index].resource = r;
-            l->hop[hp.index].url = net_text(l, text);
-            l->hop[hp.index].status = (uint32_t)status;
-            u = next;
-            if (status == 303 || ((status == 301 || status == 302) && strcmp(meth, "POST") == 0)) {
-                snprintf(meth, sizeof meth, "GET");
-                body_n = 0;
-            }
+    net_cache_use cache;
+    int64_t cache_age, cache_life, now;
+    int caching, cached, c_status;
+    int64_t c_rtime, c_age, c_life;
+    size_t c_head, c_head_n, c_body, c_body_n;   /* the cached entry, in the arena */
+    char here[8192], cpath[1300];  /* its URL as the cache keys it, and its entry's file */
+    char type[256], charset[64], coding[200];
+    int coded;
+    uint32_t encoded;
+    size_t body, body_n;           /* its body, decoded, in the arena */
+    int recorded;                  /* its record filled already (a URL that is no URL) */
+    /* the exchange: the connection it needs (its key, where it goes, the proxy, a tunnel's
+       target) */
+    int x_state, x_https, x_via, x_port, x_head_only;
+    char x_key[700], x_host[256], x_authority[300], x_tunnel[300];
+    net_proxy_t x_px;
+    size_t x_req, x_req_n;         /* the HTTP/1.1 request, whole, in the arena */
+    size_t x_lines, x_lines_n;     /* its header lines after Connection's, for HTTP/2 */
+    size_t x_target, x_target_n;   /* its request target, for :path */
+    int x_conn, x_retries, x_fresh, x_got, x_reused;
+    uint32_t x_stream, x_number;
+    size_t x_body_sent;
+    int x_status;
+    net_outcome x_out;
+    size_t x_head, x_head_n;       /* the response's head, a status line and fields, in the arena */
+    int32_t x_first, x_last;       /* its body's pieces */
+    uint64_t x_bytes;
+    int x_h2;
+} net_job;
+
+/* a piece of a body that came, in the arena; the next piece of the same exchange's */
+typedef struct net_piece { size_t off, len; int32_t next; } net_piece;
+
+/* ---- connections, kept for reuse ---- */
+
+#define NET_POOL 64
+#define NET_PER_ORIGIN 6
+/* Chromium's kMaxRetryAttempts: a stream refused, or left unprocessed by a GOAWAY, goes
+   again twice at most */
+#define NET_RETRIES 2
+#define NET_READ_MS 10000
+#define NET_IDLE_MS 60000
+
+enum { NC_FREE, NC_CONNECT, NC_TUNNEL, NC_HANDSHAKE, NC_READY };
+
+/* a connection of the pool, kept between fetches for its origin (and the proxy it goes
+   through: its key) to carry more: its socket and protocol; the addresses to dial in
+   turn; a tunnel's target and credentials; what it goes over (TLS, ALPN, the proxy); the
+   last byte's time; its number in the run and the requests it carried; over HTTP/1.1 the
+   job it carries; its bytes both ways; over HTTP/2 its frames' state */
+typedef struct net_conn {
+    int state, fd, h2, tls, family[8], naddr, at, err, want_write, reusable, busy;
+    char key[700], host[256], target[300], auth[700];
+    int port;
+    struct sockaddr_storage addr[8];
+    socklen_t alen[8];
+    net_route rt;
+    int64_t touched;
+    uint32_t number, served;
+    vector<uint8_t> in, out;
+    h2_conn h;
+} net_conn;
+
+static net_conn net_pool[NET_POOL];
+static own SSL *net_pool_ssl[NET_POOL];
+static uint32_t net_conns_made;
+static int net_pool_kept;
+
+static int64_t net_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* a slot's connection closed and the slot freed */
+static void net_conn_close(int i) {
+    if (net_pool_ssl[i]) SSL_free(net_pool_ssl[i]);
+    net_pool_ssl[i] = 0;
+    if (net_pool[i].state != NC_FREE && net_pool[i].fd >= 0) close(net_pool[i].fd);
+    vector_uint8_t_drop(&net_pool[i].in);
+    vector_uint8_t_drop(&net_pool[i].out);
+    H2_CONN_DROP(net_pool[i].h);
+    memset(&net_pool[i], 0, sizeof net_pool[i]);
+    net_pool[i].fd = -1;
+    net_pool[i].busy = -1;
+    net_pool[i].state = NC_FREE;
+}
+
+/* the pool's connections closed as the process ends */
+static void net_pool_end(void) {
+    for (int i = 0; i < NET_POOL; i++)
+        if (net_pool[i].state != NC_FREE) net_conn_close(i);
+}
+
+/* an idle connection still open: no byte waits on it (over HTTP/2 frames may; over TLS the
+   records after the handshake, a session's tickets, are read first, as Chromium's peek
+   reads them), its server has not closed it, it has not idled past a minute */
+static int net_conn_alive(int i) {
+    if (net_ms() - net_pool[i].touched > NET_IDLE_MS) return 0;
+    char b;
+    ssize_t k = recv(net_pool[i].fd, &b, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (k == 0) return 0;
+    if (k > 0 && net_pool[i].h2) return 1;
+    if (k > 0 && !net_pool_ssl[i]) return 0;
+    if (k > 0) {
+        int r = SSL_peek(net_pool_ssl[i], &b, 1);
+        return r <= 0 && SSL_get_error(net_pool_ssl[i], r) == NET_SSL_ERROR_WANT_READ;
+    }
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+}
+
+/* the next of a connection's addresses dialled, without waiting: 0 when none is left */
+static int net_dial_next(int i) {
+    net_conn *c = &net_pool[i];
+    while (c->at < c->naddr) {
+        int k = c->at++;
+        int fd = socket(c->family[k], SOCK_STREAM, 0);
+        if (fd < 0) {
+            c->err = errno;
             continue;
         }
-        /* the body out of its content codings */
-        if (len(body)) {
-            size_t sent = len(body);
-            out = net_decode_body(data(head), len(head), &body, coding, sizeof coding, rt.reason, sizeof rt.reason);
-            if (out != NET_OUTCOME_OK) break;
-            if (coding[0]) { coded = 1; encoded = (uint32_t)sent; }
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+        if (connect(fd, (struct sockaddr *)&c->addr[k], c->alen[k]) == 0 || errno == EINPROGRESS) {
+            c->fd = fd;
+            return 1;
         }
-        if (status >= 400) out = NET_OUTCOME_HTTP_ERROR;
-        /* kept for later when it may be, and when a lifetime or a validator makes it of use */
-        if (caching) {
-            int64_t life = net_lifetime(data(head), len(head), now);
-            char v[1024];
-            int validator = net_header(data(head), len(head), "etag", v, sizeof v) || net_header(data(head), len(head), "last-modified", v, sizeof v);
-            if (net_storable(status, data(head), len(head)) && (life > 0 || validator)) {
-                net_cache_write(cpath, here, status, now, data(head), len(head), "", 0, data(body), len(body));
-                cache = NET_CACHE_USE_STORED;
-                cache_age = net_initial_age(data(head), len(head), now);
-                cache_life = life;
-            } else {
-                if (cached) unlink(cpath);
-                cache = NET_CACHE_USE_NOT_STORED;
+        c->err = errno;
+        close(fd);
+    }
+    c->fd = -1;
+    return 0;
+}
+
+/* a free slot: the least recently used idle connection closed when none is free; -1 when
+   every connection is busy */
+static int net_slot(void) {
+    int oldest = -1;
+    for (int i = 0; i < NET_POOL; i++) {
+        if (net_pool[i].state == NC_FREE) return i;
+        if (net_pool[i].state == NC_READY && net_pool[i].busy < 0 && (!net_pool[i].h2 || !h2_open_streams(&net_pool[i].h)) &&
+            (oldest < 0 || net_pool[i].touched < net_pool[oldest].touched))
+            oldest = i;
+    }
+    if (oldest >= 0) net_conn_close(oldest);
+    return oldest;
+}
+
+/* a new connection begun for the job's key: its host's (or its proxy's) addresses looked
+   up, the first dialled, each address tried in turn. The slot; or -1, the job's outcome and
+   reason set */
+static int net_conn_open(net_job *j) {
+    char dhost[256];
+    int dport = j->x_port;
+    snprintf(dhost, sizeof dhost, "%s", j->x_host);
+    if (j->x_via) {
+        snprintf(dhost, sizeof dhost, "%s", j->x_px.host);
+        dport = j->x_px.port;
+    }
+    net_addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    char ps[16];
+    snprintf(ps, sizeof ps, "%d", dport);
+    own net_addrinfo *res = 0;
+    int g = getaddrinfo(dhost, ps, &hints, &res);
+    if (g != 0 || !res) {
+        snprintf(j->rt.reason, sizeof j->rt.reason, "%s: %s", dhost, gai_strerror(g));
+        freeaddrinfo(res);
+        j->x_out = NET_OUTCOME_UNREACHABLE;
+        return -1;
+    }
+    defer(res) { freeaddrinfo(res); }
+    int i = net_slot();
+    if (i < 0) {
+        snprintf(j->rt.reason, sizeof j->rt.reason, "no connection could be made: all %d are busy", NET_POOL);
+        j->x_out = NET_OUTCOME_REFUSED;
+        return -1;
+    }
+    if (!net_pool_kept) {
+        atexit(net_pool_end);
+        net_pool_kept = 1;
+    }
+    net_conn *c = &net_pool[i];
+    c->fd = -1;
+    c->busy = -1;
+    for (const net_addrinfo *a = res; a && c->naddr < 8; a = a->ai_next) {
+        if ((size_t)a->ai_addrlen > sizeof c->addr[0]) continue;
+        memcpy(&c->addr[c->naddr], a->ai_addr, a->ai_addrlen);
+        c->alen[c->naddr] = a->ai_addrlen;
+        c->family[c->naddr] = a->ai_family;
+        c->naddr++;
+    }
+    snprintf(c->key, sizeof c->key, "%s", j->x_key);
+    snprintf(c->host, sizeof c->host, "%s", j->x_host);
+    c->port = dport;
+    c->tls = j->x_https;
+    c->rt.proxied = j->x_via;
+    if (j->x_via) snprintf(c->rt.proxy, sizeof c->rt.proxy, "%s", j->x_px.origin);
+    if (j->x_via && j->x_https) {
+        snprintf(c->target, sizeof c->target, "%s", j->x_tunnel);
+        snprintf(c->auth, sizeof c->auth, "%s", j->x_px.auth);
+    }
+    c->number = ++net_conns_made;
+    c->touched = net_ms();
+    c->state = NC_CONNECT;
+    if (!net_dial_next(i)) {
+        snprintf(j->rt.reason, sizeof j->rt.reason, "%s port %d: %s", dhost, dport, strerror(c->err));
+        j->x_out = NET_OUTCOME_REFUSED;
+        net_conn_close(i);
+        return -1;
+    }
+    return i;
+}
+
+/* ---- TLS, without waiting ---- */
+
+/* the session begun over the connection's socket: SNI and the name or address to verify
+   from the bare host (net_tls_ready made the context). 0 when no session could be made */
+static int net_tls_begin(int i, net_tls *t) {
+    if (!net_tls_ready(t)) {
+        snprintf(net_pool[i].rt.reason, sizeof net_pool[i].rt.reason, "%s", t->why);
+        return 0;
+    }
+    net_pool_ssl[i] = SSL_new(t->ctx);
+    if (!net_pool_ssl[i]) {
+        snprintf(net_pool[i].rt.reason, sizeof net_pool[i].rt.reason, "no TLS session could be made");
+        return 0;
+    }
+    char name[256];
+    snprintf(name, sizeof name, "%s", net_pool[i].host);
+    SSL_set_fd(net_pool_ssl[i], net_pool[i].fd);
+    if (net_is_address(name)) X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(net_pool_ssl[i]), name);
+    else {
+        SSL_ctrl(net_pool_ssl[i], NET_SSL_CTRL_SET_TLSEXT_HOSTNAME, 0, name);
+        SSL_set1_host(net_pool_ssl[i], name);
+    }
+    return 1;
+}
+
+/* the handshake taken a step: 1 when it is done (its version, cipher and ALPN's choice
+   kept), 0 while it waits, -1 when it failed (its outcome in *o, its reason the library's) */
+static int net_tls_step(int i, net_outcome *o) {
+    net_conn *c = &net_pool[i];
+    ERR_clear_error();
+    int r = SSL_connect(net_pool_ssl[i]);
+    if (r == 1) {
+        c->rt.tls = 1;
+        snprintf(c->rt.version, sizeof c->rt.version, "%s", SSL_get_version(net_pool_ssl[i]));
+        /* the cipher's name read at once: a pointer tied to a session of the pool's array,
+           kept in a local, is taken for one never consumed (toolchain/REPORT.md, finding 29) */
+        snprintf(c->rt.cipher, sizeof c->rt.cipher, "%s", SSL_CIPHER_get_name(SSL_get_current_cipher(net_pool_ssl[i])));
+        const unsigned char *ap = 0;
+        unsigned int an = 0;
+        SSL_get0_alpn_selected(net_pool_ssl[i], &ap, &an);
+        c->rt.alpn[0] = 0;
+        if (ap && an < sizeof c->rt.alpn) {
+            memcpy(c->rt.alpn, ap, an);
+            c->rt.alpn[an] = 0;
+        }
+        c->h2 = strcmp(c->rt.alpn, "h2") == 0;
+        c->want_write = 0;
+        return 1;
+    }
+    int e = SSL_get_error(net_pool_ssl[i], r);
+    if (e == NET_SSL_ERROR_WANT_READ || e == NET_SSL_ERROR_WANT_WRITE) {
+        c->want_write = e == NET_SSL_ERROR_WANT_WRITE;
+        return 0;
+    }
+    long v = SSL_get_verify_result(net_pool_ssl[i]);
+    if (v != 0) {
+        snprintf(c->rt.reason, sizeof c->rt.reason, "%s", X509_verify_cert_error_string(v));
+        *o = NET_OUTCOME_TLS_VERIFY_FAILED;
+        return -1;
+    }
+    unsigned long err = ERR_get_error();
+    if (err) {
+        /* error:CODE:LIBRARY:FUNCTION:REASON -- the reason */
+        char buf[256];
+        ERR_error_string_n(err, buf, sizeof buf);
+        const char *rs = buf;
+        for (int k = 0; k < 4 && strchr(rs, ':'); k++) rs = strchr(rs, ':') + 1;
+        snprintf(c->rt.reason, sizeof c->rt.reason, "%s", rs);
+    } else snprintf(c->rt.reason, sizeof c->rt.reason, "the server closed the connection in the handshake");
+    *o = NET_OUTCOME_TLS_HANDSHAKE_FAILED;
+    return -1;
+}
+
+/* ---- bytes both ways ---- */
+
+/* the connection's out written, as much as the socket takes: 1 all of it, 0 to wait, -1
+   when the connection failed */
+static int net_conn_write(int i) {
+    net_conn *c = &net_pool[i];
+    while (len(c->out)) {
+        size_t n = len(c->out) > 65536 ? 65536 : len(c->out);
+        ssize_t k;
+        if (net_pool_ssl[i]) {
+            ERR_clear_error();
+            int r = SSL_write(net_pool_ssl[i], (const char *)data(c->out), (int)n);
+            if (r <= 0) {
+                int e = SSL_get_error(net_pool_ssl[i], r);
+                c->want_write = e == NET_SSL_ERROR_WANT_WRITE;
+                if (e == NET_SSL_ERROR_WANT_WRITE || e == NET_SSL_ERROR_WANT_READ) return 0;
+                return -1;
+            }
+            k = r;
+        } else {
+            k = send(c->fd, data(c->out), n, MSG_NOSIGNAL);
+            if (k < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    c->want_write = 1;
+                    return 0;
+                }
+                return -1;
             }
         }
-        break;
+        size_t left = len(c->out) - (size_t)k;
+        memmove(data(c->out), data(c->out) + k, left);
+        resize(c->out, left);
     }
-    net_url_text(&u, text, sizeof text);
+    c->want_write = 0;
+    return 1;
+}
+
+/* what waits on the connection read into its in: 1 (some came, or none waited), 0 when the
+   server closed it, -1 when it failed */
+static int net_conn_read(int i) {
+    net_conn *c = &net_pool[i];
+    char buf[65536];
+    for (;;) {
+        if (net_pool_ssl[i]) {
+            ERR_clear_error();
+            int r = SSL_read(net_pool_ssl[i], buf, (int)sizeof buf);
+            if (r > 0) {
+                append_range(c->in, buf, (size_t)r);
+                c->touched = net_ms();
+                continue;
+            }
+            int e = SSL_get_error(net_pool_ssl[i], r);
+            if (e == NET_SSL_ERROR_WANT_READ) return 1;
+            if (e == NET_SSL_ERROR_WANT_WRITE) {
+                c->want_write = 1;
+                return 1;
+            }
+            if (e == NET_SSL_ERROR_ZERO_RETURN) return 0;
+            return -1;
+        }
+        ssize_t k = recv(c->fd, buf, sizeof buf, 0);
+        if (k > 0) {
+            append_range(c->in, buf, (size_t)k);
+            c->touched = net_ms();
+            continue;
+        }
+        if (k == 0) return 0;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 1;
+        return -1;
+    }
+}
+
+/* ---- HTTP/1.1 over a connection kept alive ---- */
+
+/* where a chunked body ends in p: past its last chunk and its trailers' blank line; 0
+   while it has not come, -1 when it is malformed */
+static long long net_chunks_end(const char *p, size_t n) {
+    size_t b = 0;
+    for (;;) {
+        size_t e = b;
+        uint64_t size = 0;
+        int any = 0;
+        while (e < n && net_hexval(p[e]) >= 0) {
+            size = size * 16 + (uint64_t)net_hexval(p[e]);
+            e++;
+            any = 1;
+            if (size > NET_MAX_BODY) return -1;
+        }
+        if (e >= n) return 0;
+        if (!any) return -1;
+        while (e < n && p[e] != '\n') e++;
+        if (e >= n) return 0;
+        e++;
+        if (size == 0)
+            for (;;) {
+                size_t l = e;
+                while (l < n && p[l] != '\n') l++;
+                if (l >= n) return 0;
+                if (l == e || (l == e + 1 && p[e] == '\r')) return (long long)(l + 1);
+                e = l + 1;
+            }
+        if (e + size > n) return 0;
+        b = e + (size_t)size;
+        if (b < n && p[b] == '\r') b++;
+        if (b < n && p[b] == '\n') b++;
+        else if (b >= n) return 0;
+    }
+}
+
+/* a token in a list header's value, its case aside */
+static int net_has_token(const char *v, const char *tok) {
+    size_t n = strlen(v), t = strlen(tok), a = 0;
+    while (a < n) {
+        size_t b = a;
+        while (b < n && v[b] != ',') b++;
+        size_t x = a, y = b;
+        while (x < y && net_wsp(v[x])) x++;
+        while (y > x && net_wsp(v[y - 1])) y--;
+        if (y - x == t && net_ci_prefix(v + x, t, tok)) return 1;
+        a = b + 1;
+    }
+    return 0;
+}
+
+/* where an HTTP/1.1 response ends in p (n bytes), by its framing: its length, or 0 while
+   it has not all come; *keep whether the connection may carry another request after it (an
+   HTTP/1.1 response not marked close, an HTTP/1.0 one marked keep-alive, its body not run
+   to the connection's close) */
+static size_t net_h1_end(const char *p, size_t n, int head_only, int *keep) {
+    size_t end = 0, a = net_final_head(p, n, &end);
+    *keep = 0;
+    if (!a) return 0;
+    a--;
+    int st = net_status_of(p + a, end - a);
+    if (st < 0) return 0;
+    char v[256];
+    int has_conn = net_header(p + a, end - a, "connection", v, sizeof v);
+    if (memcmp(p + a, "HTTP/1.1", 8) == 0) *keep = !(has_conn && net_has_token(v, "close"));
+    else *keep = has_conn && net_has_token(v, "keep-alive");
+    if (head_only || st == 204 || st == 304) return end;
+    if (net_header(p + a, end - a, "transfer-encoding", v, sizeof v)) {
+        if (!strstr(v, "chunked")) {
+            *keep = 0;
+            return 0;
+        }
+        long long r = net_chunks_end(p + end, n - end);
+        if (r < 0) {
+            *keep = 0;
+            return n;
+        }
+        if (r == 0) return 0;
+        return end + (size_t)r;
+    }
+    if (net_header(p + a, end - a, "content-length", v, sizeof v)) {
+        long long cl = atoll(v);
+        if (cl < 0) {
+            *keep = 0;
+            return n;
+        }
+        if ((unsigned long long)(n - end) >= (unsigned long long)cl) return end + (size_t)cl;
+        return 0;
+    }
+    *keep = 0;
+    return 0;
+}
+
+/* a body's bytes kept as the next piece of the job's body */
+static void net_piece_add(net_job *j, vector<net_piece> *pieces, vector<char> *arena, const char *p, size_t n) {
+    net_piece pc = { len(*arena), n, -1 };
+    append_range(arena, p, n);
+    int32_t at = (int32_t)len(*pieces);
+    push_back(pieces, pc);
+    if (j->x_last >= 0) (*pieces)[j->x_last].next = at;
+    else j->x_first = at;
+    j->x_last = at;
+    j->x_bytes += n;
+}
+
+/* what the connection goes over, copied to the job it carries */
+static void net_route_of(const net_conn *c, net_job *j) {
+    j->rt.tls = c->rt.tls;
+    snprintf(j->rt.version, sizeof j->rt.version, "%s", c->rt.version);
+    snprintf(j->rt.cipher, sizeof j->rt.cipher, "%s", c->rt.cipher);
+    snprintf(j->rt.alpn, sizeof j->rt.alpn, "%s", c->rt.alpn);
+    j->rt.proxied = c->rt.proxied;
+    snprintf(j->rt.proxy, sizeof j->rt.proxy, "%s", c->rt.proxy);
+    j->x_number = c->number;
+    j->x_h2 = c->h2;
+}
+
+/* an exchange failed: its outcome and its words */
+static void net_job_fail(net_job *j, net_outcome o, const char *why) {
+    j->x_out = o;
+    snprintf(j->rt.reason, sizeof j->rt.reason, "%s", why);
+    j->x_state = X_DONE;
+}
+
+/* the response of the HTTP/1.1 connection's job, read as far as it has come: when whole,
+   parsed (net_parse_response) into the job, the connection idle again when it may carry
+   another; closed, the connection closed under it. A request on a connection used before
+   that closed before a byte of its answer came goes once again, on a new connection */
+static void net_h1_step(int i, vector<net_job> *jobs, vector<char> *arena, vector<net_piece> *pieces, int closed) {
+    net_conn *c = &net_pool[i];
+    int k = c->busy;
+    if (k < 0) {
+        if (closed) net_conn_close(i);
+        return;
+    }
+    net_job *j = &(*jobs)[k];
+    if (len(c->in)) j->x_got = 1;
+    int keep = 0;
+    size_t end = net_h1_end((const char *)data(c->in), len(c->in), j->x_head_only, &keep);
+    if (!end && !closed) {
+        if (len(c->in) > NET_MAX_BODY + 65536) {
+            net_job_fail(j, NET_OUTCOME_TOO_LARGE, "the response passed 32 MB");
+            net_conn_close(i);
+        }
+        return;
+    }
+    if (!end) {
+        if (!j->x_got && j->x_reused && j->x_retries == 0) {
+            j->x_retries++;
+            j->x_fresh = 1;
+            j->x_state = X_WAIT;
+            j->x_conn = -1;
+            net_conn_close(i);
+            return;
+        }
+        end = len(c->in);
+        keep = 0;
+    }
+    vector<char> head, body;
+    int status = 0;
+    j->x_out = net_parse_response((const char *)data(c->in), end, &status, &head, &body, j->rt.reason, sizeof j->rt.reason);
+    j->x_status = status;
+    j->x_head = len(*arena);
+    j->x_head_n = len(head);
+    append_range(arena, data(head), len(head));
+    if (len(body)) net_piece_add(j, pieces, arena, data(body), len(body));
+    j->x_state = X_DONE;
+    c->served++;
+    c->busy = -1;
+    c->touched = net_ms();
+    if (!keep || closed || end < len(c->in)) net_conn_close(i);
+    else clear(c->in);
+}
+
+/* ---- HTTP/2 ---- */
+
+/* HTTP's reason phrases (RFC 9110, 15), for a status an HTTP/2 response gives alone */
+static const int net_phrase_code[47] = { 200, 201, 202, 203, 204, 205, 206, 300, 301, 302, 303, 304, 305, 307, 308, 400, 401, 402, 403,
+                                         404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 421, 422, 425, 426, 428,
+                                         429, 431, 451, 500, 501, 502, 503, 504, 505 };
+static const char *const net_phrase[47] = { "OK", "Created", "Accepted", "Non-Authoritative Information", "No Content", "Reset Content",
+                                            "Partial Content", "Multiple Choices", "Moved Permanently", "Found", "See Other", "Not Modified",
+                                            "Use Proxy", "Temporary Redirect", "Permanent Redirect", "Bad Request", "Unauthorized",
+                                            "Payment Required", "Forbidden", "Not Found", "Method Not Allowed", "Not Acceptable",
+                                            "Proxy Authentication Required", "Request Timeout", "Conflict", "Gone", "Length Required",
+                                            "Precondition Failed", "Content Too Large", "URI Too Long", "Unsupported Media Type",
+                                            "Range Not Satisfiable", "Expectation Failed", "Misdirected Request", "Unprocessable Content",
+                                            "Too Early", "Upgrade Required", "Precondition Required", "Too Many Requests",
+                                            "Request Header Fields Too Large", "Unavailable For Legal Reasons", "Internal Server Error",
+                                            "Not Implemented", "Bad Gateway", "Service Unavailable", "Gateway Timeout",
+                                            "HTTP Version Not Supported" };
+
+/* a status and its reason phrase, as an HTTP/1.1 status line carries them */
+static void net_status_words(int status, char *out, size_t cap) {
+    for (size_t k = 0; k < 47; k++)
+        if (net_phrase_code[k] == status) {
+            snprintf(out, cap, "%d %s", status, net_phrase[k]);
+            return;
+        }
+    snprintf(out, cap, "%d", status);
+}
+
+/* a job's request as HTTP/2 fields (8.3.1): the pseudo-header fields as Chromium orders
+   them, then its header lines but the connection's own, lowercased, its Cookie in crumbs
+   (as Chromium's encoder splits one), then priority (RFC 9218) */
+static void net_h2_fields(const net_job *j, const vector<char> *arena, vector<hpack_field> *fs, vector<uint8_t> *fb) {
+    static const char *const pseudo[4] = { ":method", ":authority", ":scheme", ":path" };
+    for (int k = 0; k < 4; k++) {
+        hpack_field f = { (uint32_t)len(*fb), (uint32_t)strlen(pseudo[k]), 0, 0, 0 };
+        append_range(fb, pseudo[k], strlen(pseudo[k]));
+        f.value = (uint32_t)len(*fb);
+        if (k == 0) append_range(fb, j->meth, strlen(j->meth));
+        else if (k == 1) append_range(fb, j->x_authority, strlen(j->x_authority));
+        else if (k == 2) append_range(fb, "https", 5);
+        else append_range(fb, data(*arena) + j->x_target, j->x_target_n);
+        f.vlen = (uint32_t)(len(*fb) - f.value);
+        push_back(fs, f);
+    }
+    const char *s = data(*arena) + j->x_lines;
+    size_t n = j->x_lines_n, i = 0;
+    static const char *const skip[7] = { "host", "connection", "proxy-connection", "keep-alive", "transfer-encoding", "upgrade",
+                                         "proxy-authorization" };
+    while (i < n) {
+        size_t e = i;
+        while (e < n && s[e] != '\n') e++;
+        size_t c = i;
+        while (c < e && s[c] != ':') c++;
+        size_t va = c + 1, vb = e;
+        while (va < vb && net_wsp(s[va])) va++;
+        while (vb > va && (s[vb - 1] == '\r' || net_wsp(s[vb - 1]))) vb--;
+        int drop = c >= e;
+        for (int k = 0; k < 7 && !drop; k++) drop = net_ci_is(s + i, c - i, skip[k]);
+        if (!drop) {
+            int cookie = net_ci_is(s + i, c - i, "cookie");
+            size_t a = va;
+            for (;;) {
+                size_t b = vb;
+                if (cookie) {
+                    b = a;
+                    while (b < vb && s[b] != ';') b++;
+                }
+                hpack_field f = { (uint32_t)len(*fb), (uint32_t)(c - i), 0, 0, 0 };
+                for (size_t q = i; q < c; q++) push_back(fb, (uint8_t)net_lower(s[q]));
+                f.value = (uint32_t)len(*fb);
+                append_range(fb, s + a, b - a);
+                f.vlen = (uint32_t)(b - a);
+                push_back(fs, f);
+                if (b >= vb) break;
+                a = b + 1;
+                if (a < vb && s[a] == ' ') a++;
+            }
+        }
+        i = e + 1;
+    }
+    /* priority: its urgency and incremental flag, none when both are RFC 9218's defaults */
+    char pv[16];
+    pv[0] = 0;
+    if (j->priority != 3) snprintf(pv, sizeof pv, "u=%u%s", j->priority, j->incremental ? ", i" : "");
+    else if (j->incremental) snprintf(pv, sizeof pv, "i");
+    if (pv[0]) {
+        hpack_field f = { (uint32_t)len(*fb), 8, 0, (uint32_t)strlen(pv), 0 };
+        append_range(fb, "priority", 8);
+        f.value = (uint32_t)len(*fb);
+        append_range(fb, pv, strlen(pv));
+        push_back(fs, f);
+    }
+}
+
+/* the job carried by stream id of the HTTP/2 connection i, or -1 */
+static int net_job_of_stream(const vector<net_job> *jobs, int i, uint32_t id) {
+    for (size_t k = 0; k < len(*jobs); k++)
+        if ((*jobs)[k].state == J_NET && (*jobs)[k].x_state == X_ON && (*jobs)[k].x_conn == i && (*jobs)[k].x_stream == id) return (int)k;
+    return -1;
+}
+
+/* a job's request body sent on its stream as far as the windows allow */
+static void net_h2_body(int i, net_job *j, const vector<char> *arena) {
+    if (j->x_body_sent >= j->sent_n || j->x_state != X_ON) return;
+    j->x_body_sent += h2_data(&net_pool[i].h, j->x_stream, (const uint8_t *)data(*arena) + j->sent + j->x_body_sent, j->sent_n - j->x_body_sent,
+                              1, &net_pool[i].out);
+}
+
+/* a job on a connection that can carry it no more: again on another, up to limit times,
+   when no byte of its answer came (a request the server did not process); else failed */
+static void net_job_again(net_job *j, int limit, net_outcome o, const char *why) {
+    if (!j->x_got && j->x_retries < limit) {
+        j->x_retries++;
+        j->x_state = X_WAIT;
+        j->x_conn = -1;
+        j->x_stream = 0;
+        j->x_body_sent = 0;
+        j->x_first = -1;
+        j->x_last = -1;
+        j->x_bytes = 0;
+        return;
+    }
+    net_job_fail(j, o, why);
+}
+
+/* the HTTP/2 connection's frames read as far as they have come, each to its stream's job: a
+   head, data, the stream's end; a reset (REFUSED_STREAM goes again); GOAWAY (the streams it
+   did not process go again, on another connection), each twice at most; a window opened
+   (bodies go on); an error, or the connection closed (its jobs that got nothing go again
+   once, the others fail) */
+static void net_h2_step(int i, vector<net_job> *jobs, vector<char> *arena, vector<net_piece> *pieces, int closed) {
+    net_conn *c = &net_pool[i];
+    size_t at = 0;
+    int dead = 0;
+    for (;;) {
+        h2_event ev;
+        vector<hpack_field> fs;
+        vector<uint8_t> fb;
+        size_t used = 0;
+        if (!h2_read(&c->h, data(c->in) + at, len(c->in) - at, &used, &ev, &fs, &fb, &c->out)) break;
+        size_t base = at;
+        at += used;
+        int k = -1;
+        if (ev.stream) k = net_job_of_stream(jobs, i, ev.stream);
+        if (ev.kind == H2_EV_HEADERS && k >= 0) {
+            net_job *j = &(*jobs)[k];
+            j->x_got = 1;
+            if (ev.status) {
+                char line[64];
+                j->x_status = (int)ev.status;
+                j->x_head = len(*arena);
+                int ln = snprintf(line, sizeof line, "HTTP/2 %u\r\n", ev.status);
+                append_range(arena, line, (size_t)ln);
+                for (size_t q = 0; q < len(fs); q++) {
+                    append_range(arena, (const char *)data(fb) + fs[q].name, fs[q].nlen);
+                    append_range(arena, ": ", 2);
+                    append_range(arena, (const char *)data(fb) + fs[q].value, fs[q].vlen);
+                    append_range(arena, "\r\n", 2);
+                }
+                append_range(arena, "\r\n", 2);
+                j->x_head_n = len(*arena) - j->x_head;
+                net_status_words((int)ev.status, j->rt.reason, sizeof j->rt.reason);
+            }
+            if (ev.end_stream) {
+                j->x_out = NET_OUTCOME_OK;
+                j->x_state = X_DONE;
+            }
+        } else if (ev.kind == H2_EV_DATA && k >= 0) {
+            net_job *j = &(*jobs)[k];
+            j->x_got = 1;
+            net_piece_add(j, pieces, arena, (const char *)data(c->in) + base + ev.off, ev.len);
+            if (j->x_bytes > NET_MAX_BODY) {
+                h2_reset(&c->h, ev.stream, H2_CANCEL, &c->out);
+                net_job_fail(j, NET_OUTCOME_TOO_LARGE, "the response passed 32 MB");
+            } else if (ev.end_stream) {
+                j->x_out = NET_OUTCOME_OK;
+                j->x_state = X_DONE;
+            }
+        } else if (ev.kind == H2_EV_RESET && k >= 0) {
+            net_job_again(&(*jobs)[k], ev.code == H2_REFUSED_STREAM ? NET_RETRIES : 0, NET_OUTCOME_RESET, ev.why);
+        } else if (ev.kind == H2_EV_GOAWAY) {
+            for (size_t q = 0; q < len(*jobs); q++) {
+                net_job *j = &(*jobs)[q];
+                if (j->state == J_NET && j->x_state == X_ON && j->x_conn == i && j->x_stream > ev.last) {
+                    j->x_got = 0;
+                    net_job_again(j, NET_RETRIES, NET_OUTCOME_RESET, ev.why);
+                }
+            }
+        } else if (ev.kind == H2_EV_WINDOW) {
+            for (size_t q = 0; q < len(*jobs); q++)
+                if ((*jobs)[q].state == J_NET && (*jobs)[q].x_conn == i) net_h2_body(i, &(*jobs)[q], arena);
+        } else if (ev.kind == H2_EV_ERROR) {
+            for (size_t q = 0; q < len(*jobs); q++) {
+                net_job *j = &(*jobs)[q];
+                if (j->state == J_NET && j->x_state == X_ON && j->x_conn == i) net_job_again(j, 1, NET_OUTCOME_RESET, ev.why);
+            }
+            dead = 1;
+            break;
+        }
+    }
+    size_t left = len(c->in) - at;
+    memmove(data(c->in), data(c->in) + at, left);
+    resize(c->in, left);
+    if (dead) net_conn_write(i);
+    /* a connection gone away carries nothing more once its streams are done */
+    if (!closed && !dead && c->h.goaway && h2_open_streams(&c->h) == 0) {
+        net_conn_write(i);
+        dead = 1;
+    }
+    if (closed || dead) {
+        for (size_t q = 0; q < len(*jobs); q++) {
+            net_job *j = &(*jobs)[q];
+            if (j->state == J_NET && j->x_state == X_ON && j->x_conn == i)
+                net_job_again(j, 1, NET_OUTCOME_RESET, "the server closed the connection before the response ended");
+        }
+        net_conn_close(i);
+    }
+}
+
+/* ---- the connections' loop ---- */
+
+/* a connection that could not be made: the job it was made for failed (with the proxy it
+   went through), the slot freed */
+static void net_conn_fail(int i, vector<net_job> *jobs, net_outcome o) {
+    net_conn *c = &net_pool[i];
+    if (c->busy >= 0) {
+        net_job *j = &(*jobs)[c->busy];
+        j->rt.proxied = c->rt.proxied;
+        snprintf(j->rt.proxy, sizeof j->rt.proxy, "%s", c->rt.proxy);
+        net_job_fail(j, o, c->rt.reason);
+    }
+    net_conn_close(i);
+}
+
+/* a request sent on a ready connection: HTTP/1.1's whole, or a new HTTP/2 stream of it */
+static void net_attach(int i, int k, vector<net_job> *jobs, vector<char> *arena) {
+    net_conn *c = &net_pool[i];
+    net_job *j = &(*jobs)[k];
+    j->x_conn = i;
+    j->x_state = X_ON;
+    j->x_got = 0;
+    j->x_fresh = 0;
+    if (c->h2) {
+        vector<hpack_field> fs;
+        vector<uint8_t> fb;
+        net_h2_fields(j, arena, &fs, &fb);
+        j->x_reused = c->h.next_id > 1;
+        j->x_stream = h2_request(&c->h, data(fs), len(fs), data(fb), j->sent_n == 0, j->priority, &c->out);
+        j->x_body_sent = 0;
+        net_h2_body(i, j, arena);
+    } else {
+        j->x_reused = c->served > 0;
+        c->busy = k;
+        append_range(c->out, data(*arena) + j->x_req, j->x_req_n);
+    }
+    net_route_of(c, j);
+    c->touched = net_ms();
+}
+
+/* the jobs waiting for a connection given one, in order: an HTTP/2 connection of their key
+   with room for a stream; else an idle HTTP/1.1 one still open; else a new one, while fewer
+   than six are open for the key (one only while a TLS connection's protocol is unknown: an
+   HTTP/2 one would carry them all), and none is being made for the job already (as
+   Chromium's pool starts one connect job a request) */
+static void net_assign(vector<net_job> *jobs, vector<char> *arena) {
+    for (size_t k = 0; k < len(*jobs); k++) {
+        if ((*jobs)[k].state != J_NET || (*jobs)[k].x_state != X_WAIT) continue;
+        int found = -1, pending = 0, count = 0, waiting_room = 0, known_h1 = 0, making = 0;
+        for (int i = 0; i < NET_POOL && found < 0; i++) {
+            net_conn *c = &net_pool[i];
+            if (c->state == NC_FREE || strcmp(c->key, (*jobs)[k].x_key) != 0) continue;
+            if (c->state != NC_READY) {
+                count++;
+                pending = 1;
+                if (c->busy == (int)k) making = 1;
+                continue;
+            }
+            if (c->h2) {
+                if (h2_can_open(&c->h)) found = i;
+                else if (!c->h.goaway && !c->h.dead) {
+                    count++;
+                    waiting_room = 1;
+                }
+                continue;
+            }
+            count++;
+            known_h1 = 1;
+            if (c->busy >= 0 || (*jobs)[k].x_fresh) continue;
+            if (!net_conn_alive(i)) {
+                net_conn_close(i);
+                count--;
+                continue;
+            }
+            found = i;
+        }
+        if (found >= 0) {
+            net_attach(found, (int)k, jobs, arena);
+            continue;
+        }
+        if (making || waiting_room || (pending && (*jobs)[k].x_https && !known_h1) || count >= NET_PER_ORIGIN) continue;
+        int i = net_conn_open(&(*jobs)[k]);
+        if (i < 0) {
+            (*jobs)[k].x_state = X_DONE;
+            continue;
+        }
+        net_pool[i].busy = (int)k;
+    }
+}
+
+/* a connection whose setup is done made ready: HTTP/2 begun (its waiting jobs become
+   streams at the next assignment), or HTTP/1.1's request sent for the job it was made for */
+static void net_conn_ready(int i, vector<net_job> *jobs, vector<char> *arena) {
+    net_conn *c = &net_pool[i];
+    c->state = NC_READY;
+    c->touched = net_ms();
+    int k = c->busy;
+    c->busy = -1;
+    if (c->h2) {
+        h2_start(&c->h, &c->out);
+        return;
+    }
+    if (k >= 0 && (*jobs)[k].x_state == X_WAIT) net_attach(i, k, jobs, arena);
+}
+
+/* a connection taken a step on what poll said of its socket */
+static void net_conn_step(int i, vector<net_job> *jobs, vector<char> *arena, vector<net_piece> *pieces, net_tls *t) {
+    net_conn *c = &net_pool[i];
+    if (c->state == NC_CONNECT) {
+        int err = 0;
+        socklen_t el = sizeof err;
+        getsockopt(c->fd, SOL_SOCKET, SO_ERROR, &err, &el);
+        if (err) {
+            close(c->fd);
+            c->err = err;
+            if (!net_dial_next(i)) {
+                if (c->rt.proxied) snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy port %d: %s", c->port, strerror(err));
+                else snprintf(c->rt.reason, sizeof c->rt.reason, "%s port %d: %s", c->host, c->port, strerror(err));
+                net_conn_fail(i, jobs, NET_OUTCOME_REFUSED);
+            }
+            return;
+        }
+        c->touched = net_ms();
+        if (c->target[0]) {
+            char req[1400];
+            int n = snprintf(req, sizeof req, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Ambitious/0.1\r\n%s%s%s\r\n", c->target, c->target,
+                             c->auth[0] ? "Proxy-Authorization: Basic " : "", c->auth, c->auth[0] ? "\r\n" : "");
+            if (n > 0 && (size_t)n < sizeof req) append_range(c->out, req, (size_t)n);
+            c->state = NC_TUNNEL;
+        } else if (c->tls) {
+            if (!net_tls_begin(i, t)) {
+                net_conn_fail(i, jobs, NET_OUTCOME_TLS_HANDSHAKE_FAILED);
+                return;
+            }
+            c->state = NC_HANDSHAKE;
+        } else {
+            net_conn_ready(i, jobs, arena);
+            net_conn_write(i);
+            return;
+        }
+    }
+    if (c->state == NC_TUNNEL) {
+        int w = net_conn_write(i), r = net_conn_read(i);
+        size_t n = len(c->in), end = net_head_end((const char *)data(c->in), n, 0);
+        if (w < 0 || (!end && r <= 0)) {
+            if (n) snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy gave no HTTP answer to CONNECT");
+            else snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy closed the connection");
+            net_conn_fail(i, jobs, NET_OUTCOME_PROXY_REFUSED);
+            return;
+        }
+        if (!end) return;
+        /* its status line copied out: a pointer into the pool's buffers is not kept */
+        size_t le = 0;
+        while (le < end && le < 299 && c->in[le] != '\r' && c->in[le] != '\n') le++;
+        char line[300];
+        snprintf(line, sizeof line, "%.*s", (int)le, (const char *)data(c->in));
+        if (end < 12 || strncmp(line, "HTTP/1.", 7) != 0 || line[9] != '2') {
+            if (end >= 12 && strncmp(line, "HTTP/1.", 7) == 0) snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy answered %s", line);
+            else snprintf(c->rt.reason, sizeof c->rt.reason, "the proxy gave no HTTP answer to CONNECT");
+            net_conn_fail(i, jobs, NET_OUTCOME_PROXY_REFUSED);
+            return;
+        }
+        clear(c->in);
+        if (!net_tls_begin(i, t)) {
+            net_conn_fail(i, jobs, NET_OUTCOME_TLS_HANDSHAKE_FAILED);
+            return;
+        }
+        c->state = NC_HANDSHAKE;
+    }
+    if (c->state == NC_HANDSHAKE) {
+        net_outcome o = NET_OUTCOME_OK;
+        int r = net_tls_step(i, &o);
+        if (r < 0) {
+            net_conn_fail(i, jobs, o);
+            return;
+        }
+        c->touched = net_ms();
+        if (r > 0) {
+            net_conn_ready(i, jobs, arena);
+            net_conn_write(i);
+        }
+        return;
+    }
+    if (c->state != NC_READY) return;
+    int w = net_conn_write(i);
+    int r = net_conn_read(i);
+    if (c->h2) net_h2_step(i, jobs, arena, pieces, w < 0 || r <= 0);
+    else net_h1_step(i, jobs, arena, pieces, w < 0 || r <= 0);
+    if (net_pool[i].state == NC_READY && len(net_pool[i].out)) net_conn_write(i);
+}
+
+/* whether a connection has work: its setup, a job on it, bytes to send */
+static int net_conn_working(int i, const vector<net_job> *jobs) {
+    const net_conn *c = &net_pool[i];
+    if (c->state == NC_FREE) return 0;
+    if (c->state != NC_READY || len(c->out) || c->busy >= 0) return 1;
+    for (size_t k = 0; k < len(*jobs); k++)
+        if ((*jobs)[k].state == J_NET && (*jobs)[k].x_state == X_ON && (*jobs)[k].x_conn == i) return 1;
+    return 0;
+}
+
+/* a connection that waited ten seconds for a byte: its jobs failed, it closed */
+static void net_conn_timeout(int i, vector<net_job> *jobs) {
+    net_conn *c = &net_pool[i];
+    if (c->state != NC_READY) {
+        net_outcome o = NET_OUTCOME_REFUSED;
+        if (c->state == NC_HANDSHAKE) o = NET_OUTCOME_TLS_HANDSHAKE_FAILED;
+        else if (c->state == NC_TUNNEL) o = NET_OUTCOME_PROXY_REFUSED;
+        snprintf(c->rt.reason, sizeof c->rt.reason, "%s port %d: no answer in 10 seconds", c->host, c->port);
+        net_conn_fail(i, jobs, o);
+        return;
+    }
+    for (size_t k = 0; k < len(*jobs); k++) {
+        net_job *j = &(*jobs)[k];
+        if (j->state == J_NET && j->x_state == X_ON && j->x_conn == i) {
+            if (j->x_got) net_job_fail(j, NET_OUTCOME_MALFORMED, "the response stopped for 10 seconds");
+            else net_job_fail(j, NET_OUTCOME_MALFORMED, "the server sent nothing for 10 seconds");
+        }
+    }
+    net_conn_close(i);
+}
+
+/* the batch's exchanges carried until each is answered or failed: the connections polled,
+   each taken a step when its socket is ready, given up when it waited ten seconds */
+static void net_run(vector<net_job> *jobs, vector<char> *arena, vector<net_piece> *pieces, net_tls *t) {
+    for (;;) {
+        net_assign(jobs, arena);
+        int live = 0;
+        for (size_t k = 0; k < len(*jobs) && !live; k++) live = (*jobs)[k].state == J_NET && (*jobs)[k].x_state != X_DONE;
+        if (!live) return;
+        struct pollfd fds[NET_POOL];
+        int which[NET_POOL], nf = 0;
+        int64_t now = net_ms(), wait = NET_READ_MS;
+        for (int i = 0; i < NET_POOL; i++) {
+            if (!net_conn_working(i, jobs)) continue;
+            net_conn *c = &net_pool[i];
+            fds[nf].fd = c->fd;
+            fds[nf].events = POLLIN;
+            if (c->state == NC_CONNECT || len(c->out) || c->want_write) fds[nf].events |= POLLOUT;
+            fds[nf].revents = 0;
+            which[nf++] = i;
+            int64_t left = c->touched + NET_READ_MS - now;
+            if (left < wait) wait = left;
+        }
+        if (nf == 0) {
+            /* jobs that wait for a connection no one can make (every slot busy) */
+            for (size_t k = 0; k < len(*jobs); k++)
+                if ((*jobs)[k].state == J_NET && (*jobs)[k].x_state == X_WAIT) net_job_fail(&(*jobs)[k], NET_OUTCOME_REFUSED, "no connection could carry it");
+            return;
+        }
+        if (wait < 0) wait = 0;
+        poll(fds, (nfds_t)nf, (int)wait);
+        now = net_ms();
+        for (int f = 0; f < nf; f++) {
+            int i = which[f];
+            if (net_pool[i].state == NC_FREE) continue;
+            if (fds[f].revents) net_conn_step(i, jobs, arena, pieces, t);
+            else if (now - net_pool[i].touched >= NET_READ_MS) net_conn_timeout(i, jobs);
+        }
+    }
+}
+
+/* ---- the request a fetch sends ---- */
+
+/* what each kind of request accepts: Chromium's values, but for the image formats the
+   painter cannot draw (AVIF, SVG) and signed exchanges, which are not offered */
+static const char *const net_accepts[5] = { "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                                            "text/css,*/*;q=0.1", "image/webp,image/apng,image/*,*/*;q=0.8", "*/*", "*/*" };
+static const char *const net_dests[5] = { "document", "style", "image", "script", "empty" };
+
+/* the job's request, as Chromium writes one over HTTP/1.1 (its fields' order and case,
+   measured against a server that logs them: tests/net/h2.chromium): Host and Connection
+   (Proxy-Connection to an HTTP proxy), then the fields of a navigation (a GET, or a form's
+   POST with its Content-Length, Cache-Control and Origin) or of a part or a script's
+   request (its own fields after Connection, its Content-Type where Chromium puts it), the
+   client hints and fetch metadata to a potentially trustworthy URL alone, the Referer the
+   default policy gives, Accept-Encoding (br and zstd to a potentially trustworthy URL
+   alone), the Cookie, then the body. Into the arena, its places in the job: the whole, the
+   lines after Connection's (HTTP/2's fields), the target (its :path) */
+static void net_request_build(net_job *j, const net_url *page, const char *cookie, size_t cookie_n, const char *valid, size_t valid_n,
+                              vector<char> *arena) {
+    const net_url *u = &j->u;
+    int trust = net_trustworthy(u), site = net_fetch_site(u, page), kind = (int)j->kind;
+    int post = strcmp(j->meth, "GET") != 0 && strcmp(j->meth, "HEAD") != 0;
+    if (kind > 4) kind = 4;
+    vector<char> ex, req;
+    append_range(ex, data(*arena) + j->hdrs, j->hdrs_n);
+    char referrer[8400], plat[80], origin[512], v[64];
+    net_referrer(u, page, referrer, sizeof referrer);
+    char platform[64];
+    net_platform(platform, sizeof platform);
+    snprintf(plat, sizeof plat, "\"%s\"", platform);
+    snprintf(origin, sizeof origin, "null");
+    if (page) net_origin_text(page, origin, sizeof origin);
+    /* the request line: through an HTTP proxy, an http: request names its whole URL */
+    char whole[340];
+    whole[0] = 0;
+    if (j->x_via && !j->x_https) snprintf(whole, sizeof whole, "%s://%s", u->scheme, j->x_authority);
+    append_range(req, j->meth, strlen(j->meth));
+    push_back(req, ' ');
+    size_t target = len(req);
+    append_range(req, whole, strlen(whole));
+    size_t path = len(req);
+    append_range(req, u->path, strlen(u->path));
+    if (u->has_query) {
+        push_back(req, '?');
+        append_range(req, u->query, strlen(u->query));
+    }
+    size_t target_end = len(req);
+    append_range(req, " HTTP/1.1\r\n", 11);
+    net_line(&req, "Host", j->x_authority);
+    if (j->x_via && !j->x_https) net_line(&req, "Proxy-Connection", "keep-alive");
+    else net_line(&req, "Connection", "keep-alive");
+    size_t lines = len(req);
+    int accept = !net_has_line(data(ex), len(ex), "accept");
+    if (j->sent_n || post) {
+        snprintf(v, sizeof v, "%zu", j->sent_n);
+        net_line(&req, "Content-Length", v);
+    }
+    if (j->nav) {
+        if (post) net_line(&req, "Cache-Control", "max-age=0");
+        if (trust) {
+            net_line(&req, "sec-ch-ua", "\"Ambitious\";v=\"0\"");
+            net_line(&req, "sec-ch-ua-mobile", "?0");
+            net_line(&req, "sec-ch-ua-platform", plat);
+        }
+        net_line(&req, "Upgrade-Insecure-Requests", "1");
+        net_lines_named(&req, data(ex), len(ex), "content-type", 1);
+        net_line(&req, "User-Agent", "Ambitious/0.1");
+        if (post) net_line(&req, "Origin", origin);
+        if (accept) net_line(&req, "Accept", net_accepts[0]);
+        append_range(req, valid, valid_n);
+        if (trust) {
+            net_line(&req, "Sec-Fetch-Site", net_sites[site]);
+            net_line(&req, "Sec-Fetch-Mode", "navigate");
+            if (!page) net_line(&req, "Sec-Fetch-User", "?1");
+            net_line(&req, "Sec-Fetch-Dest", "document");
+        }
+    } else {
+        net_lines_named(&req, data(ex), len(ex), "content-type", 0);
+        if (trust) net_line(&req, "sec-ch-ua-platform", plat);
+        net_line(&req, "User-Agent", "Ambitious/0.1");
+        if (trust) net_line(&req, "sec-ch-ua", "\"Ambitious\";v=\"0\"");
+        net_lines_named(&req, data(ex), len(ex), "content-type", 1);
+        if (trust) net_line(&req, "sec-ch-ua-mobile", "?0");
+        if (accept) net_line(&req, "Accept", net_accepts[kind]);
+        append_range(req, valid, valid_n);
+        if (post) net_line(&req, "Origin", origin);
+        if (trust) {
+            net_line(&req, "Sec-Fetch-Site", net_sites[site]);
+            net_line(&req, "Sec-Fetch-Mode", j->kind == NET_KIND_OTHER ? "cors" : "no-cors");
+            net_line(&req, "Sec-Fetch-Dest", net_dests[kind]);
+        }
+    }
+    if (referrer[0]) net_line(&req, "Referer", referrer);
+    net_line(&req, "Accept-Encoding", trust ? "gzip, deflate, br, zstd" : "gzip, deflate");
+    append_range(req, cookie, cookie_n);
+    if (j->nav) net_lines_named(&req, data(ex), len(ex), "content-type", 0);
+    if (j->x_via && !j->x_https && j->x_px.auth[0]) {
+        char pa[800];
+        snprintf(pa, sizeof pa, "Basic %s", j->x_px.auth);
+        net_line(&req, "Proxy-Authorization", pa);
+    }
+    size_t lines_end = len(req);
+    append_range(req, "\r\n", 2);
+    /* the body after the head, copied out of the arena first: appending grows it */
+    append_range(req, data(*arena) + j->sent, j->sent_n);
+    size_t base = len(*arena);
+    append_range(arena, data(req), len(req));
+    j->x_req = base;
+    j->x_req_n = len(req);
+    j->x_lines = base + lines;
+    j->x_lines_n = lines_end - lines;
+    j->x_target = base + path;
+    j->x_target_n = target_end - path;
+    (void)target;
+}
+
+/* ---- a fetch's hops ---- */
+
+/* its next hop begun: a file: URL a page served over the network may not read refused; a
+   file: or data: URL read; a scheme not fetched here refused; a fresh copy in the cache
+   taken, no request made -- each the fetch's end. Else its request made (its Cookie, a
+   stale copy's validators) for its exchange: 1 */
+static int net_job_prepare(net_loader *l, net_job *j, const net_url *page, vector<char> *arena) {
+    memset(&j->rt, 0, sizeof j->rt);
+    j->body_n = 0;
+    j->state = J_DONE;
+    j->x_number = 0;
+    j->x_stream = 0;
+    j->x_reused = 0;
+    j->x_h2 = 0;
+    const net_url *u = &j->u;
+    if (page && strcmp(u->scheme, "file") == 0 && strcmp(page->scheme, "file") != 0 && !page->opaque) {
+        j->out = NET_OUTCOME_BLOCKED;
+        j->status = 0;
+        snprintf(j->rt.reason, sizeof j->rt.reason, "a page served over %s: may not read a file: URL", page->scheme);
+        return 0;
+    }
+    if (strcmp(u->scheme, "file") == 0 || strcmp(u->scheme, "data") == 0) {
+        vector<char> body;
+        int file = strcmp(u->scheme, "file") == 0;
+        if (file) j->out = net_get_file(u, &body, j->type, sizeof j->type, j->rt.reason, sizeof j->rt.reason);
+        else j->out = net_get_data(u, &body, j->type, sizeof j->type, j->rt.reason, sizeof j->rt.reason);
+        if (file) j->status = j->out == NET_OUTCOME_OK ? 200 : 404;
+        else j->status = j->out == NET_OUTCOME_OK ? 200 : 0;
+        j->body = len(*arena);
+        j->body_n = len(body);
+        append_range(arena, data(body), len(body));
+        return 0;
+    }
+    if (strcmp(u->scheme, "http") != 0 && strcmp(u->scheme, "https") != 0) {
+        j->out = NET_OUTCOME_UNSUPPORTED_SCHEME;
+        j->status = 0;
+        snprintf(j->rt.reason, sizeof j->rt.reason, "%s: is not a scheme fetched here", u->scheme);
+        return 0;
+    }
+    /* the cache: a fresh copy answers, and no request is made; a stale one with a
+       validator asks the server whether it still holds */
+    net_url_text(u, j->here, sizeof j->here);
+    j->now = net_now();
+    vector<char> c_head, c_body;
+    j->caching = strcmp(j->meth, "GET") == 0 && net_cache_path(l, j->here, j->cpath, sizeof j->cpath);
+    j->cached = j->caching && net_cache_read(j->cpath, j->here, &j->c_status, &j->c_rtime, &c_head, &c_body);
+    if (j->cached) {
+        j->c_head = len(*arena);
+        j->c_head_n = len(c_head);
+        append_range(arena, data(c_head), len(c_head));
+        j->c_body = len(*arena);
+        j->c_body_n = len(c_body);
+        append_range(arena, data(c_body), len(c_body));
+        j->c_age = net_initial_age(data(c_head), len(c_head), j->c_rtime) + (j->now > j->c_rtime ? j->now - j->c_rtime : 0);
+        j->c_life = net_lifetime(data(c_head), len(c_head), j->c_rtime);
+        if (j->c_life > j->c_age) {
+            j->body = j->c_body;
+            j->body_n = j->c_body_n;
+            j->status = j->c_status;
+            j->out = NET_OUTCOME_OK;
+            net_type_of_head(data(c_head), len(c_head), j->type, sizeof j->type, j->charset, sizeof j->charset);
+            j->cache = NET_CACHE_USE_FRESH;
+            j->cache_age = j->c_age;
+            j->cache_life = j->c_life;
+            return 0;
+        }
+    }
+    /* a navigation is same-site with itself; a page's part is when its site is the page's */
+    j->same = !page || net_same_site(u, page);
+    vector<char> cookie, valid;
+    net_cookie_header(l, u, j->same, j->r, &cookie);
+    if (j->cached) {
+        char vv[1024], line[1100];
+        if (net_header(data(c_head), len(c_head), "etag", vv, sizeof vv)) {
+            int n = snprintf(line, sizeof line, "If-None-Match: %s\r\n", vv);
+            if (n > 0 && (size_t)n < sizeof line) append_range(valid, line, (size_t)n);
+        }
+        if (net_header(data(c_head), len(c_head), "last-modified", vv, sizeof vv)) {
+            int n = snprintf(line, sizeof line, "If-Modified-Since: %s\r\n", vv);
+            if (n > 0 && (size_t)n < sizeof line) append_range(valid, line, (size_t)n);
+        }
+    }
+    /* where it goes: its host and port, through the proxy the environment names */
+    j->x_https = strcmp(u->scheme, "https") == 0;
+    net_bare_host(u->host, j->x_host, sizeof j->x_host);
+    j->x_port = u->port >= 0 ? u->port : j->x_https ? 443 : 80;
+    if (u->port >= 0) snprintf(j->x_authority, sizeof j->x_authority, "%s:%d", u->host, u->port);
+    else snprintf(j->x_authority, sizeof j->x_authority, "%s", u->host);
+    snprintf(j->x_tunnel, sizeof j->x_tunnel, "%s:%d", u->host, j->x_port);
+    int via = net_proxy_for(u, &j->x_px, j->rt.reason, sizeof j->rt.reason);
+    if (via < 0) {
+        j->out = NET_OUTCOME_PROXY_REFUSED;
+        j->status = 0;
+        return 0;
+    }
+    j->x_via = via;
+    snprintf(j->x_key, sizeof j->x_key, "%s://%s:%d", u->scheme, u->host, j->x_port);
+    if (via) {
+        size_t kn = strlen(j->x_key);
+        snprintf(j->x_key + kn, sizeof j->x_key - kn, " via %s %s", j->x_px.origin, j->x_px.auth);
+        j->rt.proxied = 1;
+        snprintf(j->rt.proxy, sizeof j->rt.proxy, "%s", j->x_px.origin);
+    }
+    j->x_head_only = strcmp(j->meth, "HEAD") == 0;
+    net_request_build(j, page, data(cookie), len(cookie), data(valid), len(valid), arena);
+    j->x_state = X_WAIT;
+    j->x_conn = -1;
+    j->x_retries = 0;
+    j->x_fresh = 0;
+    j->x_got = 0;
+    j->x_body_sent = 0;
+    j->x_status = 0;
+    j->x_out = NET_OUTCOME_OK;
+    j->x_head = 0;
+    j->x_head_n = 0;
+    j->x_first = -1;
+    j->x_last = -1;
+    j->x_bytes = 0;
+    j->state = J_NET;
+    return 1;
+}
+
+/* its exchange answered: the cookies its response set; a 304 that revalidates the stale
+   copy; a redirect (Fetch 4.4: a 303, or a 301 or 302 of a POST, followed by a GET without
+   the body), the next hop; else its body out of its content codings, an HTTP error over 400,
+   and kept by the cache when it may be and a lifetime or a validator makes it of use */
+static void net_job_answer(net_loader *l, net_job *j, vector<char> *arena, const vector<net_piece> *pieces) {
+    j->state = J_DONE;
+    j->out = j->x_out;
+    j->status = j->x_status;
+    if (j->out != NET_OUTCOME_OK) {
+        j->status = 0;
+        return;
+    }
+    vector<char> head, body;
+    append_range(head, data(*arena) + j->x_head, j->x_head_n);
+    for (int32_t p = j->x_first; p >= 0; p = (*pieces)[p].next) append_range(body, data(*arena) + (*pieces)[p].off, (*pieces)[p].len);
+    net_cookies_from(l, &j->u, data(head), len(head), j->same, j->r);
+    if (j->status == 304 && j->cached) {
+        vector<char> ch, cb;
+        append_range(ch, data(*arena) + j->c_head, j->c_head_n);
+        append_range(cb, data(*arena) + j->c_body, j->c_body_n);
+        net_cache_write(j->cpath, j->here, j->c_status, j->now, data(head), len(head), data(ch), len(ch), data(cb), len(cb));
+        j->body = j->c_body;
+        j->body_n = j->c_body_n;
+        net_type_of_head(data(ch), len(ch), j->type, sizeof j->type, j->charset, sizeof j->charset);
+        j->cache = NET_CACHE_USE_REVALIDATED;
+        j->cache_age = j->c_age;
+        j->cache_life = j->c_life;
+        return;
+    }
+    net_type_of_head(data(head), len(head), j->type, sizeof j->type, j->charset, sizeof j->charset);
+    char loc[4096];
+    int st = j->status;
+    if ((st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && net_header(data(head), len(head), "location", loc, sizeof loc)) {
+        if (j->hop >= NET_MAX_REDIRECTS) {
+            j->out = NET_OUTCOME_TOO_MANY_REDIRECTS;
+            snprintf(j->rt.reason, sizeof j->rt.reason, "more than %d redirects", NET_MAX_REDIRECTS);
+            return;
+        }
+        net_url next;
+        if (!net_resolve(&j->u, loc, &next)) {
+            j->out = NET_OUTCOME_BAD_URL;
+            snprintf(j->rt.reason, sizeof j->rt.reason, "a redirect to what is not a URL");
+            return;
+        }
+        char text[8192];
+        net_url_text(&next, text, sizeof text);
+        net_hop_h hp = hop_new(l);
+        l->hop[hp.index].resource = j->r;
+        l->hop[hp.index].url = net_text(l, text);
+        l->hop[hp.index].status = (uint32_t)st;
+        memcpy(&j->u, &next, sizeof next);   /* not j->u = next: toolchain/REPORT.md, finding 31 */
+        if (st == 303 || ((st == 301 || st == 302) && strcmp(j->meth, "POST") == 0)) {
+            snprintf(j->meth, sizeof j->meth, "GET");
+            j->sent_n = 0;
+        }
+        j->hop++;
+        j->state = J_HOP;
+        return;
+    }
+    if (len(body)) {
+        size_t came = len(body);
+        j->out = net_decode_body(data(head), len(head), &body, j->coding, sizeof j->coding, j->rt.reason, sizeof j->rt.reason);
+        if (j->out == NET_OUTCOME_OK && j->coding[0]) {
+            j->coded = 1;
+            j->encoded = (uint32_t)came;
+        }
+    }
+    j->body = len(*arena);
+    j->body_n = len(body);
+    append_range(arena, data(body), len(body));
+    if (j->out != NET_OUTCOME_OK) return;
+    if (j->status >= 400) j->out = NET_OUTCOME_HTTP_ERROR;
+    if (j->caching) {
+        int64_t life = net_lifetime(data(head), len(head), j->now);
+        char vv[1024];
+        int validator = net_header(data(head), len(head), "etag", vv, sizeof vv) || net_header(data(head), len(head), "last-modified", vv, sizeof vv);
+        if (net_storable(j->status, data(head), len(head)) && (life > 0 || validator)) {
+            net_cache_write(j->cpath, j->here, j->status, j->now, data(head), len(head), "", 0, data(body), len(body));
+            j->cache = NET_CACHE_USE_STORED;
+            j->cache_age = net_initial_age(data(head), len(head), j->now);
+            j->cache_life = life;
+        } else {
+            if (j->cached) unlink(j->cpath);
+            j->cache = NET_CACHE_USE_NOT_STORED;
+        }
+    }
+}
+
+/* its record filled from where it ended */
+static void net_job_record(net_loader *l, net_job *j, const net_url *page, const vector<char> *arena) {
+    uint32_t r = j->r;
+    char text[8192], origin[512];
+    net_url_text(&j->u, text, sizeof text);
     l->resource[r].final_url = net_text(l, text);
-    net_origin_text(&u, origin, sizeof origin);
+    net_origin_text(&j->u, origin, sizeof origin);
     l->resource[r].origin = net_text(l, origin);
-    l->resource[r].outcome = out;
-    l->resource[r].status = (uint32_t)status;
-    l->resource[r].type = net_text(l, type);
-    l->resource[r].charset = net_text(l, charset);
-    l->resource[r].size = (uint32_t)len(body);
-    if (out != NET_OUTCOME_OK) l->resource[r].reason = net_text(l, rt.reason);
-    l->resource[r].tls = (uint8_t)rt.tls;
-    if (rt.tls) {
-        l->resource[r].tls_version = net_text(l, rt.version);
-        l->resource[r].tls_cipher = net_text(l, rt.cipher);
-        l->resource[r].alpn = net_text(l, rt.alpn);
+    l->resource[r].outcome = j->out;
+    l->resource[r].status = (uint32_t)j->status;
+    l->resource[r].type = net_text(l, j->type);
+    l->resource[r].charset = net_text(l, j->charset);
+    l->resource[r].size = (uint32_t)j->body_n;
+    if (j->out != NET_OUTCOME_OK) l->resource[r].reason = net_text(l, j->rt.reason);
+    l->resource[r].tls = (uint8_t)j->rt.tls;
+    if (j->rt.tls) {
+        l->resource[r].tls_version = net_text(l, j->rt.version);
+        l->resource[r].tls_cipher = net_text(l, j->rt.cipher);
+        l->resource[r].alpn = net_text(l, j->rt.alpn);
     }
-    l->resource[r].proxied = (uint8_t)rt.proxied;
-    if (rt.proxied) l->resource[r].proxy = net_text(l, rt.proxy);
-    l->resource[r].cross_site = (uint8_t)(page && !net_same_site(&u, page));
-    l->resource[r].cache = cache;
-    l->resource[r].cache_age = cache_age;
-    l->resource[r].cache_lifetime = cache_life;
-    l->resource[r].coded = (uint8_t)coded;
-    if (coded) {
-        l->resource[r].coding = net_text(l, coding);
-        l->resource[r].encoded_size = encoded;
+    l->resource[r].proxied = (uint8_t)j->rt.proxied;
+    if (j->rt.proxied) l->resource[r].proxy = net_text(l, j->rt.proxy);
+    l->resource[r].cross_site = (uint8_t)(page && !net_same_site(&j->u, page));
+    l->resource[r].cache = j->cache;
+    l->resource[r].cache_age = j->cache_age;
+    l->resource[r].cache_lifetime = j->cache_life;
+    l->resource[r].coded = (uint8_t)j->coded;
+    if (j->coded) {
+        l->resource[r].coding = net_text(l, j->coding);
+        l->resource[r].encoded_size = j->encoded;
     }
-    if (out == NET_OUTCOME_OK || out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(body), len(body));
-    if (kind == NET_KIND_IMAGE && out == NET_OUTCOME_OK) {
-        uint32_t w, hh;
-        net_image_size(&body, &w, &hh);
+    if (j->x_number) {
+        l->resource[r].protocol = j->x_h2 ? NET_PROTOCOL_H2 : NET_PROTOCOL_HTTP1;
+        l->resource[r].connection = j->x_number;
+        l->resource[r].stream = j->x_h2 ? j->x_stream : 0;
+        l->resource[r].reused = (uint8_t)j->x_reused;
+    }
+    if (j->out == NET_OUTCOME_OK || j->out == NET_OUTCOME_HTTP_ERROR) l->resource[r].body = bytes_add(l, data(*arena) + j->body, j->body_n);
+    if (j->kind == NET_KIND_IMAGE && j->out == NET_OUTCOME_OK) {
+        uint32_t w = 0, hh = 0;
+        if (j->body_n) net_image_size_of((const uint8_t *)data(*arena) + j->body, j->body_n, &w, &hh);
         l->resource[r].width = w;
         l->resource[r].height = hh;
     }
-    return r;
+}
+
+/* a fetch begun, its record made: its URL parsed (one that is not a URL recorded so at
+   once), the caller's body and header lines kept in the arena, its priority Chromium's for
+   its kind (a part's priority may be set after). The job is made in its place, zeroed by
+   resize: a net_job passed by value (push_back) is a copy of 45 KB that the optimizer
+   takes minutes and gigabytes over (toolchain/REPORT.md, finding 31) */
+static void net_job_new(net_loader *l, vector<net_job> *jobs, vector<char> *arena, const char *url, net_kind kind, uint32_t from, dom_node_h elem,
+                        const char *method, const char *sent, size_t sent_n, const char *hdrs, size_t hdrs_n, int nav) {
+    size_t k = len(*jobs);
+    resize(jobs, k + 1);
+    net_job *j = &(*jobs)[k];
+    net_resource_h h = resource_new(l);
+    j->r = h.index;
+    l->resource[j->r].kind = kind;
+    l->resource[j->r].from = from;
+    l->resource[j->r].elem = elem;
+    l->resource[j->r].url = net_text(l, url);
+    l->resource[j->r].final_url = l->resource[j->r].url;
+    j->kind = kind;
+    j->nav = nav;
+    snprintf(j->meth, sizeof j->meth, "%s", method);
+    j->sent = len(*arena);
+    j->sent_n = sent_n;
+    append_range(arena, sent, sent_n);
+    j->hdrs = len(*arena);
+    j->hdrs_n = hdrs_n;
+    append_range(arena, hdrs, hdrs_n);
+    j->x_conn = -1;
+    j->x_first = -1;
+    j->x_last = -1;
+    static const uint32_t urgency[5] = { 0, 0, 3, 1, 1 }, incr[5] = { 1, 0, 1, 0, 1 };
+    uint32_t kk = (uint32_t)kind < 5 ? (uint32_t)kind : 4;
+    j->priority = urgency[kk];
+    j->incremental = incr[kk];
+    j->state = J_HOP;
+    if (!net_parse_abs(url, &j->u)) {
+        l->resource[j->r].outcome = NET_OUTCOME_BAD_URL;
+        l->resource[j->r].origin = net_text(l, "null");
+        l->resource[j->r].reason = net_text(l, "not a URL");
+        j->state = J_DONE;
+        j->recorded = 1;
+    }
+}
+
+/* a batch of fetches carried together: each round, every fetch whose next hop is to be
+   made begun (in order, so its Cookie and its record are made as a page orders them), the
+   exchanges carried at once over the pool's connections, then each answered in order; then
+   each recorded. A write to a connection the server has closed fails, where it would end
+   the process: SIGPIPE is ignored meanwhile (OpenSSL writes with write(2)) */
+static void net_batch(net_loader *l, vector<net_job> *jobs, const net_url *page, net_tls *t, vector<char> *arena) {
+    struct sigaction ign, old;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    ign.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &ign, &old);
+    vector<net_piece> pieces;
+    for (;;) {
+        int any = 0;
+        for (size_t k = 0; k < len(*jobs); k++)
+            if ((*jobs)[k].state == J_HOP && net_job_prepare(l, &(*jobs)[k], page, arena)) any = 1;
+        if (!any) break;
+        net_run(jobs, arena, &pieces, t);
+        for (size_t k = 0; k < len(*jobs); k++)
+            if ((*jobs)[k].state == J_NET) net_job_answer(l, &(*jobs)[k], arena, &pieces);
+    }
+    for (size_t k = 0; k < len(*jobs); k++)
+        if (!(*jobs)[k].recorded) net_job_record(l, &(*jobs)[k], page, arena);
+    sigaction(SIGPIPE, &old, 0);
+}
+
+/* one fetch, by a method of its own (a script's request, a form's submission): its body
+   and header lines (each ending in CRLF) sent with it. A request other than a GET is never
+   answered from the cache nor kept in it */
+static uint32_t net_get_by(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t,
+                           const char *method, const char *sent, size_t sent_n, const char *hdrs, size_t hdrs_n) {
+    vector<net_job> jobs;
+    vector<char> arena;
+    net_job_new(l, &jobs, &arena, url, kind, from, elem, method, sent, sent_n, hdrs, hdrs_n, kind == NET_KIND_DOCUMENT);
+    net_batch(l, &jobs, page, t, &arena);
+    return jobs[0].r;
 }
 
 static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t) {
@@ -2797,6 +4014,16 @@ static int net_stylesheet_rel(const dom_document *d, uint32_t x) {
     return 0;
 }
 
+/* a part of a page as its element asked for it: its record, the record it shares (a URL
+   asked for twice), the srcset's or the picture's choice that sizes it */
+typedef struct net_part {
+    uint32_t r, dup, source;
+    int picked;
+    net_pick pk;
+    net_kind kind;
+    dom_node_h elem;
+} net_part;
+
 net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource_h page, uint32_t denied) {
     uint32_t pg = page.index;
     char base_text[8192];
@@ -2806,15 +4033,21 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
     if (!net_parse_abs(base_text, &base)) return NET_FAILED;
     net_tls t = {0};
     defer(t) { SSL_CTX_free(t.ctx); }
-    /* the document's elements in tree order */
+    /* the page's parts, in tree order, each its record made as it is met: a fetch of the
+       batch, a part the profile denies, an img whose src is empty, or a URL asked for twice
+       (its record filled from the first's after) */
+    vector<net_job> jobs;
+    vector<char> arena;
+    vector<net_part> parts;
+    uint32_t images = 0;
     uint32_t x = doc->node_len > 1 ? doc->node[1].first_child : 0;
     while (x) {
         net_kind kind = NET_KIND_OTHER;
         uint32_t a = 0;
         char ref[8192], abs[8192];
-        net_pick pk;
-        int picked = 0;
-        uint32_t fetched = 0, source = 0, srcset = 0;
+        net_part pt;
+        memset(&pt, 0, sizeof pt);
+        uint32_t srcset = 0;
         int in_picture = 0;
         if (net_is(doc, x, "link") && net_stylesheet_rel(doc, x)) { kind = NET_KIND_STYLESHEET; a = net_attr(doc, x, "href"); }
         else if (net_is(doc, x, "img")) {
@@ -2824,21 +4057,23 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                outside a picture, an img with a srcset the candidate chosen for the viewport */
             uint32_t pa = doc->node[x].parent;
             if (pa && net_is(doc, pa, "picture")) {
-                source = net_picture_choose(doc, pa, x, ref, sizeof ref, &pk);
+                pt.source = net_picture_choose(doc, pa, x, ref, sizeof ref, &pt.pk);
                 in_picture = 1;
             }
-            picked = source != 0;
+            pt.picked = pt.source != 0;
             uint32_t ss = net_attr(doc, x, "srcset");
             srcset = ss;
-            if (!picked && ss && doc->attr[ss].value.len) picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pk);
+            if (!pt.picked && ss && doc->attr[ss].value.len) pt.picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pt.pk);
         } else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
-        if (picked || (a && doc->attr[a].value.len > 0)) {
-            if (!picked) {
+        if (pt.picked || (a && doc->attr[a].value.len > 0)) {
+            if (!pt.picked) {
                 amb_span v = doc->attr[a].value;
                 snprintf(ref, sizeof ref, "%.*s", (int)v.len, text_ptr(doc, v));
             }
             net_url u;
             dom_node_h eh = node_handle(doc, x);
+            pt.kind = kind;
+            pt.elem = eh;
             if (denied >> kind & 1) {
                 /* the profile denies the site this kind: recorded, not fetched */
                 net_resource_h h = resource_new(l);
@@ -2856,9 +4091,10 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 char why[64];
                 snprintf(why, sizeof why, "the profile denies the site's %ss", net_kind_name(kind));
                 l->resource[r].reason = net_text(l, why);
-                fetched = r;
+                pt.r = r;
             } else if (!net_resolve(&base, ref, &u)) {
-                fetched = net_get(l, ref, kind, pg, eh, &base, &t);
+                net_job_new(l, &jobs, &arena, ref, kind, pg, eh, "GET", "", 0, "", 0, 0);
+                pt.r = jobs[len(jobs) - 1].r;
             } else {
                 net_url_text(&u, abs, sizeof abs);
                 /* each URL fetched once: a second element asking for it shares the first's body */
@@ -2868,33 +4104,24 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                         memcmp(text_ptr(l, l->resource[r].url), abs, strlen(abs)) == 0) same = r;
                 if (same) {
                     net_resource_h h = resource_new(l);
-                    net_resource copy = l->resource[same];
-                    uint32_t gen = l->resource[h.index].gen;
-                    l->resource[h.index] = copy;
-                    l->resource[h.index].gen = gen;
-                    l->resource[h.index].live = 1;
-                    l->resource[h.index].elem = eh;
-                    l->resource[h.index].kind = kind;
-                    fetched = h.index;
-                    /* the first's choice is not this one's: the size again from the header */
-                    l->resource[fetched].srcset = 0;
-                    l->resource[fetched].descriptor = net_text(l, "");
-                    dom_node_h no_source = { 0, 0, 0 };
-                    l->resource[fetched].picture = 0;
-                    l->resource[fetched].source = no_source;
-                    if (kind == NET_KIND_IMAGE && copy.outcome == NET_OUTCOME_OK && copy.body.len) {
-                        uint32_t w = 0, hh = 0;
-                        net_image_size_of((const uint8_t *)bytes_ptr(l, copy.body), copy.body.len, &w, &hh);
-                        l->resource[fetched].width = w;
-                        l->resource[fetched].height = hh;
+                    pt.r = h.index;
+                    pt.dup = same;
+                } else {
+                    net_job_new(l, &jobs, &arena, abs, kind, pg, eh, "GET", "", 0, "", 0, 0);
+                    pt.r = jobs[len(jobs) - 1].r;
+                    /* Chromium's priorities: the first five images LOW, later ones LOWEST,
+                       both incremental; a script async or deferred LOWEST, else MEDIUM, or
+                       LOW after an image (Blink's ComputeLoadPriority: its preload scanner
+                       meets a script after an image fetch as one at the bottom of the page) */
+                    size_t jl = len(jobs) - 1;
+                    if (kind == NET_KIND_IMAGE) jobs[jl].priority = ++images <= 5 ? 2 : 3;
+                    if (kind == NET_KIND_SCRIPT) {
+                        if (net_attr(doc, x, "async") || net_attr(doc, x, "defer")) jobs[jl].priority = 3;
+                        else jobs[jl].priority = images ? 2 : 1;
                     }
-                } else fetched = net_get(l, abs, kind, pg, eh, &base, &t);
+                }
             }
-            if (picked && fetched) net_srcset_size(l, fetched, &pk);
-            if (source && fetched) {
-                l->resource[fetched].picture = 1;
-                l->resource[fetched].source = node_handle(doc, source);
-            }
+            push_back(parts, pt);
         } else if (kind == NET_KIND_IMAGE && (a || srcset || in_picture)) {
             /* an img whose src is empty, or which uses srcset or picture (a srcset attribute, a
                picture parent) with no source chosen and no src: its request is broken at once
@@ -2916,6 +4143,39 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
         if (doc->node[x].first_child) { x = doc->node[x].first_child; continue; }
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }
         if (x) x = doc->node[x].next_sibling;
+    }
+    net_batch(l, &jobs, &base, &t, &arena);
+    /* then, in order, each part asked for twice given the first's record, and each image's
+       choice of a srcset or a picture's source applied */
+    for (size_t k = 0; k < len(parts); k++) {
+        net_part pt = parts[k];
+        uint32_t fetched = pt.r;
+        if (pt.dup) {
+            net_resource copy = l->resource[pt.dup];
+            uint32_t gen = l->resource[fetched].gen;
+            l->resource[fetched] = copy;
+            l->resource[fetched].gen = gen;
+            l->resource[fetched].live = 1;
+            l->resource[fetched].elem = pt.elem;
+            l->resource[fetched].kind = pt.kind;
+            /* the first's choice is not this one's: the size again from the header */
+            l->resource[fetched].srcset = 0;
+            l->resource[fetched].descriptor = net_text(l, "");
+            dom_node_h no_source = { 0, 0, 0 };
+            l->resource[fetched].picture = 0;
+            l->resource[fetched].source = no_source;
+            if (pt.kind == NET_KIND_IMAGE && copy.outcome == NET_OUTCOME_OK && copy.body.len) {
+                uint32_t w = 0, hh = 0;
+                net_image_size_of((const uint8_t *)bytes_ptr(l, copy.body), copy.body.len, &w, &hh);
+                l->resource[fetched].width = w;
+                l->resource[fetched].height = hh;
+            }
+        }
+        if (pt.picked && fetched) net_srcset_size(l, fetched, &pt.pk);
+        if (pt.source && fetched) {
+            l->resource[fetched].picture = 1;
+            l->resource[fetched].source = node_handle(doc, pt.source);
+        }
     }
     net_jar_write(l);
     l->revision++;

@@ -60,6 +60,8 @@ takes 2.1 s over the same page in Chromium.
 | opaque fills written a row at a time | paint 4.0 ms (news.html) | 2.4 ms |
 | the collector runs for pages, between their tasks, its roots the script host's values (Phase 12n): a page whose timer makes 100 rounds of 10,000 records of garbage (`tools/gen-garbage-page.py`), its scripts stage (`ambitious bench`, 5 runs) and its peak memory (one `ambitious script`, its maximum resident set) | 417 to 469 ms; 371 MB | 331 to 358 ms, 12 collections of 6 ms each; 38 MB |
 | the same, on the benchmark's scripted page (2,000 items, `tools/gen-scripted-page.py`), which never makes the 32 MB a first collection waits for: its scripts stage, its click (`--click '#sale'`), its peak memory | 5.3 to 6.9 ms, 3.9 to 4.5 ms; 15.4 MB | 5.4 to 6.6 ms, 4.2 ms; 15.7 MB |
+| connections kept, and a page's parts carried at once (Phase 12q): `ambitious load` of a page of thirty parts over https from a local node server, `tests/net/site/h2/page.html` (`tools/bench/net-load.sh 20`: the median of 20 loads, each a process, the binaries' runs interleaved) | 92 ms: a connection and a TLS handshake a request, one after another (31 a load) | 16 ms over HTTP/2 (one connection, the parts concurrent streams); 25 ms over HTTP/1.1 kept alive (six connections) |
+| `src/net/net.c` built without struct copies by assignment, which the optimizer takes minutes and gigabytes over (REPORT, finding 31) | the unit before 12q, one URL of 25 KB copied so: 44 s and 1.2 GB to build | 7 s and 250 MB with that copy a `memcpy`; 12q's unit, twice the size: 10 s and 285 MB |
 
 ## Hot paths, and what would make them faster
 

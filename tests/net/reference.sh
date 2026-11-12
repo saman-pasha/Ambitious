@@ -1,8 +1,9 @@
 #!/bin/sh
-# tests/net/reference.sh [cookies] [cache] [srcset] [picture] -- Chromium's side of
-# tests/integ/net and tests/integ/picture, made with Playwright's headless shell against
-# the same servers, and written where those tests compare themselves with it (each
-# server's log as tests/net/canon.sh reads it):
+# tests/net/reference.sh [cookies] [cache] [srcset] [picture] [h2] -- Chromium's side of
+# tests/integ/net, tests/integ/net-h2 and tests/integ/picture, made with Playwright's
+# headless shell against the same servers, and written where those tests compare
+# themselves with it (each server's log as tests/net/canon.sh, or for h2
+# tests/net/h2canon.sh, reads it):
 #
 #   cookies  tests/net/cookies.chromium: the five visits of tests/net/cookies.js, and
 #            the Cookie header each request carried
@@ -13,13 +14,19 @@
 #   picture  tests/net/picture.chromium: the image each img of tests/net/site/p/page.html
 #            takes from its picture's sources, its natural size and its box
 #            (tests/net/picture.js), the page read as a file
+#   h2       tests/net/h2.chromium: one visit of tests/net/site/h2/page.html, thirty parts
+#            over HTTP/2 from tests/net/h2serve.js (tests/net/cookies.js makes it), and
+#            each request's HEADERS priority and header block as the server decoded them.
+#            The script's frame may carry MEDIUM's weight (220) where its field says LOW,
+#            when Blink raises the preloaded script before its stream opens: a race (one
+#            run of three here); keep a run whose weight is its field's (183)
 #
 # Each of the first two waits out a lifetime of 60 s between two visits, so a run takes
-# a minute or two. Run by hand when the visits change; all four by default.
+# a minute or two. Run by hand when the visits change; all five by default.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-ref.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
-what=${*:-cookies cache srcset picture}
+what=${*:-cookies cache srcset picture h2}
 serve() {   # serve ARGS...: tests/net/serve.py started, its port echoed
   n=$(($(cat "$work/pids" 2> /dev/null | wc -l) + 1))
   python3 "$AMB_ROOT/tests/net/serve.py" "$@" > "$work/$n.port" &
@@ -52,6 +59,17 @@ for w in $what; do
   picture)
     node "$AMB_ROOT/tests/net/picture.js" "$AMB_ROOT/tests/net/site/p/page.html" > "$AMB_ROOT/tests/net/picture.chromium"
     cat "$AMB_ROOT/tests/net/picture.chromium" ;;
+  h2)
+    [ -f "$work/ca/srv.crt" ] || sh "$AMB_ROOT/tests/net/certs.sh" "$work/ca"
+    node "$AMB_ROOT/tests/net/h2serve.js" --tls "$work/ca/srv.crt" "$work/ca/srv.key" --hold 30 --log "$work/h2.log" --log-headers --log-frames \
+      "$AMB_ROOT/tests/net/site" "$AMB_ROOT/tests/site" > "$work/h2.port" &
+    echo $! >> "$work/pids"
+    i=0
+    while [ ! -s "$work/h2.port" ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
+    hport=$(head -1 "$work/h2.port")
+    node "$AMB_ROOT/tests/net/cookies.js" "$work/h2.log" "https://localhost:$hport/h2/page.html"
+    sed -e "s/:$hport\b/:H2/g" "$work/h2.log" | sh "$AMB_ROOT/tests/net/h2canon.sh" > "$AMB_ROOT/tests/net/h2.chromium"
+    cat "$AMB_ROOT/tests/net/h2.chromium" ;;
   esac
 done
 for p in $(cat "$work/pids" 2> /dev/null); do kill "$p" 2> /dev/null; done

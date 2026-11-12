@@ -642,6 +642,27 @@ be built side by side and merged without touching each other's.
   (`net_picture_source/2`). Gates: WPT's urltestdata (904/904), toascii
   (87/87), IdnaTestV2 (2675/2675) and setters (278/278); a picture page's
   images against Chromium's (22/22).
+
+  Then (12q): HTTP/2 over TLS, offered by ALPN beside http/1.1 as Chromium
+  offers it (`src/net/h2.c`: RFC 9113's frames, flow control both ways, PING,
+  RST_STREAM, GOAWAY and the streams it left unprocessed asked again, padding,
+  Chromium's SETTINGS, window and priority tree; HPACK whole, `src/net/hpack.c`,
+  encoding by Chromium's policy); a page's parts the concurrent streams of one
+  connection an origin; HTTP/1.1 connections kept alive and reused, six to an
+  origin at most, a request on a reused one the server closed asked once again
+  on a new one; br (the painter's Brotli decoder, fuzzed against libbrotli and
+  unchanged) and zstd (`src/net/zstd.c`, RFC 8878) codings, asked for as Chromium
+  asks; each request's fields Chromium's, in its order and case. Gates: RFC
+  7541's examples and Chromium's own header blocks (`tests/exec/net_hpack`),
+  zstd against libzstd's frames and 11,700 broken ones (`tests/exec/net_zstd`),
+  frames and conversations broken at random (`tests/exec/net_h2`), and a page of
+  thirty parts over one connection, its header blocks Chromium's field by
+  field, with GOAWAY, resets, a server that refuses h2, redirects across the
+  protocols, a proxy's tunnel, the cache and cookies, coded and broken bodies
+  and HTTP/1.1 kept alive (`tests/integ/net-h2.sh`). The page loads in 16 ms
+  over HTTP/2 and 25 ms over HTTP/1.1 kept alive, from 92 ms
+  (`docs/performance.md`). HTTP/3 waits for a TLS library with QUIC
+  (`docs/limitations.md`).
 - **12b Encodings** (`src/html/encoding.c`, generated tables): the WHATWG
   Encoding standard's decoders. That is UTF-8, UTF-16LE and BE, the
   single-byte encodings, and Shift_JIS, EUC-JP, ISO-2022-JP, GBK and
