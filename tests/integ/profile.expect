@@ -13,7 +13,7 @@ visits of the page loaded privately: 0
 file: deny image
 image      blocked              0       0  file://ROOT/tests/pages/logo.png  
 -- forgetting removes what it names, and no more:
-forgot file://ROOT/tests/pages/news.html: 3 visit(s), 0 bookmark(s)
+forgot file://ROOT/tests/pages/news.html: 3 visit(s), 0 bookmark(s), 0 page(s) of saved tabs
 1700003600  file://ROOT/tests/pages/style.html  Styles, explained
 file://ROOT/tests/pages/style.html  Styles, kept
 -- visits older than the retention are deleted when the profile is opened:

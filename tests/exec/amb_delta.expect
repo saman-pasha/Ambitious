@@ -1,0 +1,10 @@
+400 random pairs of snapshots: each delta leaves every predicate's facts as the new snapshot's, in order: 400
+  their headers, the new snapshot's: 400; 536 predicates edited, 912 rebuilt; 1584 facts retracted, 2791 added
+the same text: 0 (no delta to send)
+a section more: 2 (the whole snapshot is sent)
+another document: 2
+a module twice: 2
+a line that is no fact: 2
+a revision alone: 1, amb_delta.
+amb_snapshot(dom, 1, 2, 'f').
+amb_end.

@@ -1,0 +1,43 @@
+-- with no profile there are none to keep:
+ambitious: no profile (pass --profile DIR, or set AMB_PROFILE; --private for one in memory)
+-- the defaults, then the reader's, each checked:
+pref(font_size, 16).
+pref(color_scheme, light).
+pref(reduced_motion, no_preference).
+pref(zoom, 1).
+font_size: 20
+color_scheme: dark
+reduced_motion: reduce
+zoom: 1.5
+profile: refused: bad_pref(font_size,'200')
+profile: refused: bad_pref(color_scheme,blue)
+profile: refused: bad_pref(zoom,'0')
+pref(font_size, 20).
+pref(color_scheme, dark).
+pref(reduced_motion, reduce).
+pref(zoom, 1.5).
+no
+-- text drawn under 9 px:
+font_size: 6
+zoom: 0.5
+Px = 3.0, K = small_text, S = prefs, T = 'text at the base font size is drawn 3.0 px high (font_size 6 at zoom 0.5), under 9 px'
+-- a value kept from before values were checked:
+font_size: 18
+zoom: 1
+K = bad_pref, S = pref(zoom), T = 'the preference zoom is 9, which it cannot be: pages are drawn with 1'
+pref(font_size, 18).
+pref(color_scheme, dark).
+pref(reduced_motion, reduce).
+pref(zoom, 1).
+-- what the shell hands the stages, in a session and in a private one:
+> prefs
+the stages are handed: font_size 18 px, color_scheme dark, reduced_motion reduce, zoom 1 (the profile's)
+> quit
+session last saved: 0 tab(s)
+> prefs
+the stages are handed: font_size 16 px, color_scheme light, reduced_motion no_preference, zoom 1 (the defaults)
+> quit
+the session was private: nothing of it is stored
+-- a page drawn with the reader's preferences and with none:
+with:    rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f
+without: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:ae46bbadef89265f

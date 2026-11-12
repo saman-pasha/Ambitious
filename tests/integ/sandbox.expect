@@ -1,0 +1,54 @@
+-- what the sandbox refuses a child:
+limits: address space 4096 MiB, CPU 600 s, 64 open files, files of 256 MiB at most, no core file
+syscall filter: on; a call it does not allow ends the process
+a file written in /tmp: refused
+a new process: refused
+a signal to the engine: refused
+a socket: the process ended by its syscall filter (SIGSYS)
+-- a socket:
+ambitious: the reasoner ended, killed by its syscall filter (SIGSYS): a call the sandbox does not allow (signal 31), asked to query
+-- a file written outside its directory:
+ambitious: the reasoner answered 2 to query:
+reason: error(permission_error(open,source_sink,'ESCAPE'),context(system:open/3,'Permission denied'))
+ESCAPE is not there
+-- a file removed outside its directory:
+ambitious: the reasoner answered 2 to query:
+reason: error(permission_error(delete,file,'WORK/victim.html'),context(system:delete_file/1,'Permission denied'))
+the file is still there
+-- a new process:
+ambitious: the reasoner ended, killed by its syscall filter (SIGSYS): a call the sandbox does not allow (signal 31), asked to query
+-- memory past its limit (300 MiB):
+ambitious: the reasoner answered 2 to query:
+reason: error(resource_error(memory),_)
+-- and the same within the default limit:
+I = _, L = _, N = 120
+-- CPU time past its limit (1 s):
+ambitious: the reasoner ended, killed by its CPU time limit (SIGXCPU) (signal 24), asked to query
+-- in a session: the reasoner ended, then started again; one that does not answer in time:
+> open ROOT/tests/pages/counter.html
+tab 1: file://ROOT/tests/pages/counter.html  'Counter'
+> query dom_attr(N, id, count), dom_text_content(N, T)
+N = n(1,20,0), T = '0'
+> query repeat, fail
+ambitious: the reasoner ended, killed by its CPU time limit (SIGXCPU) (signal 24), asked to query
+> query dom_attr(N, id, count), dom_text_content(N, T)
+N = n(1,20,0), T = '0'
+> query sleep(10)
+ambitious: the reasoner ended, no answer in 3 s: the engine ended it, asked to query
+> reasoner
+reasoner: not running; 2 start(s), 6 requests: 2 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 0 facts held
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1000 added
+reasoner: the last one ended: no answer in 3 s: the engine ended it
+> advise
+amb_diag(unused_rule, ru(1,167,0), 'the rule .done matches no element (at rest: no hover, focus or other state)').
+amb_diag(click_not_focusable, n(1,26,0), 'the <div> \'Reset\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
+> reasoner
+reasoner: running; 3 start(s), 8 requests: 3 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1000 facts held
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1000 added
+reasoner: the last one ended: no answer in 3 s: the engine ended it
+> quit
+-- advice with the sandbox and without it:
+news.html: the same 8 lines
+a11y.html: the same 17 lines
+style.html: the same 4 lines
+layout.html: the same 2 lines

@@ -1,0 +1,94 @@
+-- a session of three tabs, each with its page and its reasoner:
+> open WORK/pages/news.html
+tab 1: file://WORK/pages/news.html  'Ambitious — a reasoning browser'
+> open WORK/pages/style.html
+tab 2: file://WORK/pages/style.html  'Styles, explained'
+> go WORK/pages/cart.html
+tab 2: file://WORK/pages/cart.html  'A cart'
+> click #more
+clicked <button id="more" type="button">; the document is at revision 102
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+L = n(1,40,0), T = 'sale 1'
+L = n(1,42,0), T = 'first 1'
+> open WORK/pages/layout.html
+tab 3: file://WORK/pages/layout.html  'Layout, explained'
+> tabs
+3 tab(s)
+  1  file://WORK/pages/news.html  'Ambitious — a reasoning browser'  page 1 of 1, loaded
+  2  file://WORK/pages/cart.html  'A cart'  page 2 of 2, loaded
+* 3  file://WORK/pages/layout.html  'Layout, explained'  page 1 of 1, loaded
+> tab 1
+tab 1: file://WORK/pages/news.html  'Ambitious — a reasoning browser'
+> query dom_element(N, h1), dom_text_content(N, T)
+N = n(1,15,0), T = 'Front page'
+> tab 2
+tab 2: file://WORK/pages/cart.html  'A cart'
+> echo -- the cart again: its page loaded again, its click made again, its reasoner sent nothing
+-- the cart again: its page loaded again, its click made again, its reasoner sent nothing
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+L = n(1,40,0), T = 'sale 1'
+L = n(1,42,0), T = 'first 1'
+> reasoner
+reasoner: running; 1 start(s), 3 requests: 1 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1108 facts held
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1108 added
+> history
+  1  file://WORK/pages/style.html  'Styles, explained'
+> 2  file://WORK/pages/cart.html  'A cart'
+> back
+tab 2: file://WORK/pages/style.html  'Styles, explained'
+> forward
+tab 2: file://WORK/pages/cart.html  'A cart'
+> query dom_element(L, li), dom_text_content(L, T)
+L = n(1,19,0), T = apple
+L = n(1,21,0), T = banana
+L = n(1,23,0), T = cherry
+> close 3
+closed tab 3; 2 left
+> tabs
+2 tab(s)
+  1  file://WORK/pages/news.html  'Ambitious — a reasoning browser'  page 1 of 1, loaded
+* 2  file://WORK/pages/cart.html  'A cart'  page 2 of 2, loaded
+> quit
+session last saved: 2 tab(s)
+-- the session kept in the profile:
+Pages = ['file://WORK/pages/news.html','file://WORK/pages/cart.html']
+T = 2, Order = 2, At = 2
+T = 2, I = 1, Url = 'file://WORK/pages/style.html', Title = 'Styles, explained'
+T = 2, I = 2, Url = 'file://WORK/pages/cart.html', Title = 'A cart'
+-- restored, after the cart's page was removed:
+restored 2 tab(s) of the session last
+2 tab(s)
+  1  file://WORK/pages/news.html  'Ambitious — a reasoning browser'  page 1 of 1, loaded
+* 2  file://WORK/pages/cart.html  'A cart'  page 2 of 2, loaded
+ambitious: cannot load file://WORK/pages/cart.html: no_such_file (status 404)
+tab 2: file://WORK/pages/cart.html failed to load: no_such_file
+> query dom_element(L, li), dom_text_content(L, T)
+no page: tab 2's failed to load
+> tab 1
+tab 1: file://WORK/pages/news.html  'Ambitious — a reasoning browser'
+> query dom_element(N, h1), dom_text_content(N, T)
+N = n(1,15,0), T = 'Front page'
+> quit
+session last saved: 2 tab(s)
+-- what the profile says is wrong with the session:
+K = restore_failed, S = tab(last,2), T = 'tab 2 shows file://WORK/pages/cart.html, which failed to load when it was restored: no_such_file'
+-- a private session restores no session and stores nothing:
+a private session restores no session
+> open WORK/pages/news.html
+tab 1: file://WORK/pages/news.html  'Ambitious — a reasoning browser'
+> tabs
+1 tab(s)
+* 1  file://WORK/pages/news.html  'Ambitious — a reasoning browser'  page 1 of 1, loaded
+> save
+a private session is never stored
+> quit
+the session was private: nothing of it is stored
+the profile's files are as they were
+-- forgetting the cart's page takes it from the saved tabs:
+forgot file://WORK/pages/cart.html: 3 visit(s), 0 bookmark(s), 1 page(s) of saved tabs
+Pages = ['file://WORK/pages/news.html','file://WORK/pages/style.html']
+no

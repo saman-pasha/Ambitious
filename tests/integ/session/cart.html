@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A cart</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  li.sale { color: #b00; font-weight: bold; }
+  .total { margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Cart</h1>
+<ul id="items"><li>apple</li><li>banana</li><li>cherry</li></ul>
+<p class="total">Total: <span id="n">3</span></p>
+<button id="more" type="button">Change the cart</button>
+<div id="clear" class="fake">Clear</div>
+<script>
+  /* each click: the first item gone, one put on sale at the end, one put first, the count
+     and the heading's title changed; the second click's new nodes take the first's freed slots */
+  var ul = document.getElementById('items');
+  var clicks = 0;
+  document.getElementById('more').addEventListener('click', function () {
+    clicks++;
+    ul.firstElementChild.remove();
+    var li = document.createElement('li');
+    li.textContent = 'sale ' + clicks;
+    li.className = 'sale';
+    ul.appendChild(li);
+    var first = document.createElement('li');
+    first.textContent = 'first ' + clicks;
+    ul.insertBefore(first, ul.firstElementChild);
+    document.getElementById('n').textContent = String(ul.children.length);
+    document.querySelector('h1').setAttribute('title', 'changed ' + clicks + ' time(s)');
+  });
+  document.getElementById('clear').addEventListener('click', function () { ul.textContent = ''; });
+</script>
+</body>
+</html>
