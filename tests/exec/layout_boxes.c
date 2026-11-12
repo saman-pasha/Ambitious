@@ -6,7 +6,7 @@
    tables, list markers; floats and clearance, positioned boxes, flex and grid
    containers, vertical-align, min and max heights, a percentage height, rowspan,
    hyphenation, bidirectional text, generated content; grid areas and named lines,
-   a column flow, items spanning tracks. */
+   a column flow, items spanning tracks; flex items and containers on their baselines. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -62,6 +62,8 @@ static const lcase cases[] = {
     { "a grid's named areas and named lines", "<div id=t style='display:grid;grid-template-areas:\"h h\" \"s m\";grid-template-columns:[l] 100px [c] 1fr;width:300px'><div id=a style='grid-area:m'>m</div><div id=b style='grid-area:h'>h</div><div id=e style='grid-column:l/c'>e</div></div>" },
     { "a grid's column flow, dense", "<div id=t style='display:grid;grid-auto-flow:column dense;grid-template-rows:20px 20px;grid-auto-columns:50px'><div id=a>1</div><div id=b style='grid-row:span 2'>2</div><div id=e>3</div></div>" },
     { "a grid item that spans two auto columns", "<div id=t style='display:grid;grid-template-columns:auto auto;justify-content:start;width:300px'><div id=a>a</div><div id=b>bb</div><div id=e style='grid-column:span 2'>a longer spanning item</div></div>" },
+    { "flex items aligned on their baselines", "<div id=t style='display:flex;align-items:baseline'><div id=a>x</div><div id=b style='font-size:32px'>Y</div><div id=e style='width:20px;height:30px'></div></div>" },
+    { "an inline-flex's baseline, its first item's border box's bottom", "<p id=p>x <span id=a style='display:inline-flex'><span id=b style='display:block;width:20px;height:30px'></span><span>y</span></span></p>" },
 };
 
 static uint32_t find_id(const dom_document *d, const char *id) {

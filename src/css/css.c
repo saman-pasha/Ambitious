@@ -1451,6 +1451,15 @@ static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
         v->unit = CSS_UNIT_TEXT;
         return 1;
     }
+    if (p == CSS_PROP_ALIGN_ITEMS || p == CSS_PROP_ALIGN_SELF) {
+        /* first baseline (baseline's other name) and last baseline: the keywords baseline and
+           last-baseline, the text kept as written (Box Alignment 3, 4.2) */
+        size_t st[3], ln[3];
+        if (css_parts(s, n, st, ln, 3) == 2 && css_eq_ci(s + st[1], ln[1], "baseline")) {
+            if (css_eq_ci(s + st[0], ln[0], "first")) { css_word_val(v, "baseline"); return 1; }
+            if (css_eq_ci(s + st[0], ln[0], "last")) { css_word_val(v, "last-baseline"); return 1; }
+        }
+    }
     return css_parse_val(s, n, v) && css_valid(p, v);
 }
 

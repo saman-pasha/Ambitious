@@ -187,3 +187,15 @@ a grid item that spans two auto columns (ok, invariants: 0 broken)
   #e block: content 8,26 146.188x18; margins 0 0 0 0; width grid of 146.188
     line 8,26 146.188x18 baseline 40: [text 8+146.188 'a longer spanning item']
   #t grid: content 8,8 300x36; margins 0 484 0 0; width declared of 784
+flex items aligned on their baselines (ok, invariants: 0 broken)
+  #a block: content 8,24 8x18; margins 0 0 0 0; width flex of 784
+    line 8,24 8x18 baseline 38: [text 8+8 'x']
+  #b block: content 16,9 23.1094x37; margins 0 0 0 0; width flex of 784
+    line 16,9 23.1094x37 baseline 38: [text 16+23.1094 'Y']
+  #e block: content 39.1094,8 20x30; margins 0 0 0 0; width flex of 784
+  #t flex: content 8,8 784x38; margins 0 0 0 0; width fill of 784
+an inline-flex's baseline, its first item's border box's bottom (ok, invariants: 0 broken)
+  #a flex: content 20,16 28x30; margins 0 0 0 0; width shrink_to_fit of 784
+  #b block: content 20,16 20x30; margins 0 0 0 0; width flex of 28
+  #p block: content 8,16 784x34; margins 16 0 16 0; width fill of 784
+    line 8,16 784x34 baseline 46: [text 8+8 'x'] [atomic 20+28 '']

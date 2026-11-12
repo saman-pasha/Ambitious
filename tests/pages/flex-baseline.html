@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html><head><title>Flex baselines</title>
+<style>
+/* tests/pages/flex-baseline.html -- flex items aligned on their baselines: align-items and
+   align-self baseline (first baseline), items of other sizes, margins, borders and
+   paddings, an item with no line (its border box's bottom), wrapped lines, a nested flex
+   container, a column (as start); last baseline (flush to the line's end, and in a column
+   the items' end edges shared); a flex container's own baseline in a line (its baseline
+   items', else its first item's, synthesized when that has none, or none at all); an
+   inline-block's last line's baseline however deep, its bottom margin edge when it
+   clips; the boxes held to Chromium's (tests/pages/flex-baseline.chromium) */
+body { font-family: 'DejaVu Sans'; font-size: 16px; margin: 8px; }
+.f { display: flex; width: 500px; background: #f4f4f4; margin-bottom: 10px; }
+.f > div { background: #cde; }
+.b { align-items: baseline; }
+.big { font-size: 32px; }
+.small { font-size: 10px; }
+.pad { padding-top: 20px; margin-top: 5px; border-top: 3px solid; }
+.empty { width: 40px; height: 30px; }
+.self > .s { align-self: baseline; }
+.wrap { flex-wrap: wrap; width: 200px; }
+.wrap > div { width: 90px; }
+.col { flex-direction: column; align-items: baseline; }
+.lst { align-items: last baseline; }
+.inl { display: inline-flex; background: #eee; }
+.nest { display: flex; align-items: baseline; }
+.img { width: 30px; height: 40px; display: block; background: #a88; }
+.mt { margin-top: 12px; }
+.h { height: 80px; }
+</style></head><body>
+<div class="f b" id=a><div id=a1>text</div><div class=big id=a2>Big</div><div class=small id=a3>small</div></div>
+<div class="f b" id=p><div id=p1>text</div><div class="big pad" id=p2>Pad</div><div class=empty id=p3></div></div>
+<div class="f self" id=s><div id=s1>start</div><div class="s big" id=s2>Base</div><div class="s small mt" id=s3>base small</div><div id=s4>end</div></div>
+<div class="f b wrap" id=w><div id=w1>a</div><div class=big id=w2>B</div><div class=small id=w3>c</div><div class=big id=w4>D<br>two</div></div>
+<div class="f col" id=c><div id=c1>one</div><div class=big id=c2>two</div></div>
+<div class="f b h" id=hh><div id=hh1>tall line</div><div class="big" id=hh2>Big</div></div>
+<div class="f b" id=n><div class="nest" id=n1><div id=n11>x</div><div class=big id=n12>Y</div></div><div class=small id=n2>z</div></div>
+<div class="f b" id=im><div id=im1>text</div><div class=img id=im2></div><div class=big id=im3>Big</div></div>
+<p id=q>Line <span class=inl id=i1><span id=i11>first</span><span class=big id=i12>second</span></span> after</p>
+<p id=q2>Line <span class=inl id=i2><span class=empty style="display:block" id=i21></span><span id=i22>second</span></span> after</p>
+<p id=q3>Line <span class="inl" style="align-items: baseline" id=i3><span id=i31>first</span><span class=big id=i32>second</span></span> after</p>
+<p id=q4>Line <span class="inl" style="flex-direction: column" id=i4><span id=i41>first</span><span class=big id=i42>second</span></span> after</p>
+<p id=q5>Line <span class="inl" style="width: 50px; height: 30px" id=i5></span> after</p>
+<div class="f lst" id=l><div id=l1>one<br>two</div><div class=big id=l2>Big</div></div>
+<div class="f lst h" id=lh><div id=lh1>one<br>two</div><div class=big id=lh2>Big</div><div class=empty id=lh3></div></div>
+<div class="f col" style="align-items: last baseline" id=lc><div id=lc1>one</div><div class=big id=lc2>two</div></div>
+<div class="f" style="align-items: first baseline" id=fb><div id=fb1>text</div><div class=big id=fb2>Big</div></div>
+<p id=q6>Line <span style="display:inline-block; background:#eee" id=i6><span style="display:block" id=i61>block one</span><span style="display:block" class=big id=i62>two</span></span> after</p>
+<p id=q7>Line <span style="display:inline-block; background:#eee" id=i7><span style="display:flex" id=i71><span id=i711>flex</span><span class=big id=i712>Big</span></span></span> after</p>
+<p id=q8>Line <span style="display:inline-block; overflow:hidden; background:#eee" id=i8>hidden text</span> after</p>
+<p id=q9>Line <span style="display:inline-block; background:#eee" id=i9><span style="display:block" id=i91>one</span><span style="float:left; font-size: 40px" id=i92>F</span></span> after</p>
+</body></html>

@@ -51,7 +51,15 @@
    the flexible lengths resolved by freezing the items clamped, the items laid
    out at their main sizes, the lines' cross sizes (stretched, align-content),
    justify-content and auto margins along the main axis, align-items and
-   align-self across. Grid containers (Grid 1): the track lists read (px, %, fr,
+   align-self across: baseline (first baseline) aligns a row's items on their first
+   baselines, each line as tall as the most they rise above it and fall below it
+   (9.4, 8); last baseline on their last ones, flush to the line's end; an item with
+   no line its border box's bottom; in a column, baseline is start and last baseline
+   the items' end edges shared. A flex container's baseline (8.5) is its first
+   line's baseline items', else its first item's; an inline-block's is its last
+   line's in its flow, however deep, unless its overflow is not visible.
+
+   Grid containers (Grid 1): the track lists read (px, %, fr,
    auto, min-content, max-content, minmax(), fit-content(), repeat() with a count
    or auto-fill, the lines' names), grid-template-areas (each area's -start and -end
    lines named); the items' lines resolved (8.3: by number, by name and its nth
@@ -209,8 +217,9 @@ enum { POS_STATIC, POS_RELATIVE, POS_ABSOLUTE, POS_FIXED, POS_STICKY };
 enum { FL_NONE, FL_LEFT, FL_RIGHT };
 enum { VA_BASELINE, VA_SUB, VA_SUPER, VA_TEXT_TOP, VA_TEXT_BOTTOM, VA_MIDDLE, VA_TOP, VA_BOTTOM, VA_LEN };
 enum { LX_FLOW, LX_FLEX, LX_GRID };
-/* the alignment keywords: justify-content, align-items, align-self, align-content, justify-items, justify-self */
-enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND, AJ_EVENLY, AJ_BASELINE, AJ_AUTO };
+/* the alignment keywords: justify-content, align-items, align-self, align-content, justify-items,
+   justify-self (AJ_BASELINE first baseline, AJ_LBASE last baseline) */
+enum { AJ_NORMAL, AJ_START, AJ_END, AJ_CENTER, AJ_STRETCH, AJ_BETWEEN, AJ_AROUND, AJ_EVENLY, AJ_BASELINE, AJ_AUTO, AJ_LBASE };
 
 typedef struct lay_ext {
     uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto, ostyle;
@@ -439,6 +448,7 @@ static int lay_align_of(const char *w) {
     if (lay_w(w, "space-around")) return AJ_AROUND;
     if (lay_w(w, "space-evenly")) return AJ_EVENLY;
     if (lay_w(w, "baseline")) return AJ_BASELINE;
+    if (lay_w(w, "last-baseline")) return AJ_LBASE;
     if (lay_w(w, "auto")) return AJ_AUTO;
     return AJ_NORMAL;
 }
@@ -1468,31 +1478,52 @@ static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw)
     if (defh >= 0) t->box[b].h = defh;
     return b;
 }
-/* the baseline of a laid-out atomic box, from its margin box's top: its last line's,
-   or its bottom margin edge */
-/* the first baseline in b's box subtree, from b's content box's top: its first line's, or
-   its first child's that has one */
+/* a child box out of its parent's flow: positioned absolutely, fixed, or floated */
+static int lay_out_of_flow(const layout_tree *t, uint32_t c) {
+    return t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED ||
+           t->box[c].float_side != LAYOUT_FLOAT_SIDE_UNFLOATED;
+}
+/* the first baseline in b's box subtree, from b's content box's top: a flex container's (its
+   items give it, Flexbox 1, 8.5), its first line's, or its first in-flow child's that has one */
 static int lay_first_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
     if (t->box[b].first_line) { *y = t->line[t->box[b].first_line].y + t->line[t->box[b].first_line].baseline; return 1; }
     if (depth > 32) return 0;
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
         double cy;
-        if (t->box[c].position == LAYOUT_POSITION_ABSOLUTE || t->box[c].position == LAYOUT_POSITION_FIXED) continue;
+        if (lay_out_of_flow(t, c)) continue;
         if (lay_first_baseline(t, c, &cy, depth + 1)) { *y = t->box[c].y + cy; return 1; }
     }
     return 0;
 }
-
-/* an atomic box's baseline, from its margin box's top: an inline-block's last line's, a
-   flex or grid container's first item's; else its bottom margin edge */
-static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
-    double top = t->box[b].mt + t->box[b].bt + t->box[b].pt;
-    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX || t->box[b].kind == LAYOUT_BOX_KIND_GRID) {
-        double y;
-        if (lay_first_baseline(t, b, &y, 0)) return top + y;
-    }
+/* the last baseline in b's box subtree, from b's content box's top: a flex container's (its
+   first), its last line's, or its last in-flow child's that has one */
+static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int depth) {
+    if (t->box[b].kind == LAYOUT_BOX_KIND_FLEX) { *y = t->box[b].baseline; return t->box[b].has_baseline; }
     uint32_t ln = t->box[b].last_line;
-    if (ln) return top + t->line[ln].y + t->line[ln].baseline;
+    if (ln) { *y = t->line[ln].y + t->line[ln].baseline; return 1; }
+    if (depth > 32) return 0;
+    int found = 0;
+    for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) {
+        double cy;
+        if (lay_out_of_flow(t, c)) continue;
+        if (lay_last_baseline(t, c, &cy, depth + 1)) { *y = t->box[c].y + cy; found = 1; }
+    }
+    return found;
+}
+
+/* an atomic box's baseline, from its margin box's top (CSS 2.1, 10.8.1): a flex or grid
+   container's first one (its items'); a replaced element's placeholder's line's; an
+   inline-block's last line's in its flow, however deep -- its bottom margin edge when it
+   has none, or when its overflow is not visible */
+static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
+    double top = t->box[b].mt + t->box[b].bt + t->box[b].pt, y;
+    int kind = t->box[b].kind;
+    if (kind == LAYOUT_BOX_KIND_FLEX || kind == LAYOUT_BOX_KIND_GRID) { if (lay_first_baseline(t, b, &y, 0)) return top + y; }
+    else if (kind == LAYOUT_BOX_KIND_REPLACED) {
+        uint32_t ln = t->box[b].last_line;
+        if (ln) return top + t->line[ln].y + t->line[ln].baseline;
+    } else if (t->box[b].clip != 1 && lay_last_baseline(t, b, &y, 0)) return top + y;
     return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
 }
 
@@ -3215,6 +3246,7 @@ typedef struct lay_fi {
     uint32_t el, first, n, idx, box;
     int32_t order;
     double base, hypo, mn, mx, size, cross, grow, shrink, mm0, mm1, cm0, cm1;
+    double above;                       /* aligned on a baseline: from its margin box's cross start to it */
     int frozen, auto_m0, auto_m1, auto_c0, auto_c1, align, cross_auto;
 } lay_fi;
 
@@ -3473,18 +3505,41 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
         }
         its[q] = it;
     }
-    /* each line's cross size: its tallest item's (the container's, a single line's when definite) */
-    vector<double> lcross, lpos;
+    /* each line's cross size (9.4, 8): its tallest item's; in a row, the items aligned on
+       their first baselines as tall as the most any rises above that baseline and the most any
+       falls below it (on their last ones likewise); the container's, a single line's when
+       definite. Per line: those first baselines' rise (lup) and the last ones' fall (ldn); in a
+       column, the widest item aligned on its last baseline (which a column has none of: the
+       items share an edge at the end) */
+    vector<double> lcross, lpos, lup, ldn;
     double cross_total = 0;
     double cross_avail = row ? defh : W;
     for (size_t l = 0; l < nl; l++) {
-        double c = 0;
+        double c = 0, up0 = -1e30, dn0 = -1e30, up1 = -1e30, dn1 = -1e30;
         for (size_t q = at(lstart, l); q < at(lstart, l + 1); q++) {
-            double o = at(its, q).cross + at(its, q).cm0 + at(its, q).cm1;
+            lay_fi it = at(its, q);
+            double o = it.cross + it.cm0 + it.cm1;
+            if ((it.align == AJ_BASELINE || it.align == AJ_LBASE) && !it.auto_c0 && !it.auto_c1) {
+                if (!row) { if (it.align == AJ_LBASE && o > dn1) dn1 = o; if (o > c) c = o; continue; }
+                int last = it.align == AJ_LBASE;
+                double rise, yb;
+                if (last ? lay_last_baseline(t, it.box, &yb, 0) : lay_first_baseline(t, it.box, &yb, 0))
+                    rise = it.cm0 + t->box[it.box].bt + t->box[it.box].pt + yb;
+                else rise = it.cm0 + it.cross;
+                it.above = rise;
+                its[q] = it;
+                if (last) { if (rise > up1) up1 = rise; if (o - rise > dn1) dn1 = o - rise; }
+                else { if (rise > up0) up0 = rise; if (o - rise > dn0) dn0 = o - rise; }
+                continue;
+            }
             if (o > c) c = o;
         }
+        if (up0 > -1e29 && up0 + dn0 > c) c = up0 + dn0;
+        if (up1 > -1e29 && up1 + dn1 > c) c = up1 + dn1;
         if (nl == 1 && !e.fwrap && cross_avail >= 0) c = cross_avail;
         push_back(lcross, c);
+        push_back(lup, up0);
+        push_back(ldn, dn1);
         cross_total += c + (l > 0 ? gap_cross : 0);
     }
     /* align-content: the lines in the container's cross size, when it has one */
@@ -3552,6 +3607,8 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
             else if (it.auto_c1) cp = c0;
             else if (it.align == AJ_END) cp = c0 + cfree;
             else if (it.align == AJ_CENTER) cp = c0 + cfree / 2;
+            else if (it.align == AJ_BASELINE && row) cp = c0 + at(lup, l) - it.above;
+            else if (it.align == AJ_LBASE) cp = c0 + (row ? lc - at(ldn, l) - it.above : lc - at(ldn, l));
             cp += at(lpos, l);
             if (row) lay_place(t, it.box, mp, cp);
             else lay_place(t, it.box, cp, mp);
@@ -3560,6 +3617,17 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
     }
     if (defh < 0) t->box[b].h = row ? (cy > 0 ? cy - gap_cross - lbetween : 0) : main_size;
     if (row && defh < 0 && t->box[b].h < 0) t->box[b].h = 0;
+    /* the container's first baseline (8.5): that of its first line's items aligned on their
+       first baselines; else its first item's, the bottom of its border box when it has none */
+    if (ni) {
+        double fb, yb;
+        uint32_t ib = at(its, 0).box;
+        if (row && at(lup, 0) > -1e29) fb = at(lpos, 0) + at(lup, 0);
+        else if (lay_first_baseline(t, ib, &yb, 0)) fb = t->box[ib].y + yb;
+        else fb = t->box[ib].y - t->box[ib].pt - t->box[ib].bt + lay_border_height(t, ib);
+        t->box[b].baseline = fb;
+        t->box[b].has_baseline = 1;
+    }
 }
 
 /* ---- grid containers (CSS Grid 1, 7 to 11) ---- */

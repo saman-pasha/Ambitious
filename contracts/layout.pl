@@ -84,7 +84,10 @@ layout_contract(record(box, [
     %% and the area's name when it was placed in one
     field(grid_row, i32), field(grid_col, i32), field(grid_rows, u32), field(grid_cols, u32),
     field(grid_by,      enum(grid_by)),
-    field(grid_area,    span(text))
+    field(grid_area,    span(text)),
+    %% a flex container's first baseline, from its content box's top, which its items give
+    %% it (Flexbox 1, 8.5), when it has one
+    field(baseline, f64), field(has_baseline, bool)
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
