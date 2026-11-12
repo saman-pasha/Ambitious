@@ -1,0 +1,12 @@
+# tests/pages/ljpeg.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+j1 10 10 74 58
+j2 90 10 154 58
+j3 170 10 234 58
+j4 250 10 314 58
+j5 330 10 394 58
+j6 410 10 474 58
+j7 10 80 74 128
+j8 90 80 154 128
+j9 170 80 234 128
+j10 250 80 314 128
+j11 330 80 394 128

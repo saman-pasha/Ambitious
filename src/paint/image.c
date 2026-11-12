@@ -45,8 +45,12 @@
    refused as Chromium refuses them: it lays out the size their header gives
    (amb_image_size reads it here too) and draws nothing -- measured on files that
    jpegtran -arithmetic and a 12-bit encoder wrote, which Chromium 153 reports
-   loaded, its canvas reading them transparent. Lossless (SOF3, which Chromium
-   decodes) and hierarchical frames are refused too.
+   loaded, its canvas reading them transparent. A lossless frame (SOF3, T.81 Annex H) is
+   decoded as Chromium decodes one, measured on files tools/gen-lossless-jpeg.py writes: of
+   RGB (Adobe's transform 0, or the ids R, G, B) and at most 8 bits, its samples as they
+   are (shifted back by the point transform, not scaled to 8 bits); one of any other colour
+   space or of more bits draws nothing, as libjpeg-turbo converts no colours in lossless
+   mode. Hierarchical frames are refused.
 
    Every image has at most 2^24 pixels; a larger one is refused from its header. */
 #include <stdio.h>
@@ -739,7 +743,7 @@ static const uint8_t jpg_std_ac_chroma[162] = {
    symbol; for the longer codes, by length, the largest code and the offset from a code
    to its symbol's index */
 typedef struct jpg_huff {
-    int32_t defined;
+    int32_t defined, max_sym;           /* max_sym: its largest symbol (a DC table's past 15 only a lossless scan takes) */
     int32_t maxcode[18];
     int32_t valoff[18];
     uint8_t look_len[512];
@@ -775,6 +779,7 @@ enum { JPG_GREY, JPG_YCC, JPG_RGB, JPG_CMYK, JPG_YCCK };
 typedef struct jpg {
     uint32_t w, h, mcux, mcuy;
     int32_t nc, progressive, hmax, vmax, restart, jfif, adobe, transform, orientation, partial, scans;
+    int32_t lossless, prec;                 /* a lossless frame (SOF3) and its samples' precision */
     int32_t ns, ss, se, ah, al, eobrun, rst;
     int32_t sc[4];
     int32_t qdef[4];
@@ -810,8 +815,9 @@ static int jpg_build(jpg_huff *h, const uint8_t *counts, const uint8_t *vals, in
         code <<= 1;
     }
     for (int i = 0; i < nv; i++) {
-        if (dc && vals[i] > 15) return 0;
+        if (dc && vals[i] > 16) return 0;    /* 16: a lossless difference's category; a DCT scan refuses it */
         h->vals[i] = vals[i];
+        if (vals[i] > h->max_sym) h->max_sym = vals[i];
     }
     h->defined = 1;
     return 1;
@@ -983,7 +989,7 @@ static void jpg_idct(const int16_t *in, const uint16_t *q, int ac, const uint8_t
    are no code or run past the block */
 static int jpg_block(const uint8_t *p, size_t n, jpg_bits *b, const jpg_huff *dc, const jpg_huff *ac, int32_t *pred, int16_t *blk) {
     int t = jpg_symbol(p, n, b, dc);
-    if (t < 0) return -1;
+    if (t < 0 || t > 15) return -1;
     int diff = t ? jpg_extend(jpg_get(p, n, b, t), t) : 0;
     *pred = (int32_t)((uint32_t)*pred + (uint32_t)diff);
     blk[0] = (int16_t)*pred;
@@ -1189,13 +1195,81 @@ static void jpg_scan(jpg *j, const uint8_t *p, size_t n, jpg_bits *b, uint8_t *p
     jpg_to_marker(p, n, b);
 }
 
+/* a lossless scan (T.81 Annex H): MCU by MCU, each component's h x v samples (a component alone, one sample a
+   unit), each its difference's category by the DC table (16: 32768) and that many bits, added (mod 2^16) to its
+   prediction: on the first line of the scan and of each restart interval the sample to its left (the line's first
+   2^(P - Pt - 1)), on a later line's start the one above, else by the scan's predictor (1 left, 2 above, 3 above
+   left, 4 a + b - c, 5 a + (b - c) / 2, 6 b + (a - c) / 2, 7 (a + b) / 2: H.1.2.1). rec holds the samples (component
+   ci's from roff[ci]); each is put into its plane shifted back by the point transform, its low 8 bits as libjpeg's
+   8-bit sample takes them */
+static void jpg_scan_lossless(jpg *j, const uint8_t *p, size_t n, jpg_bits *b, uint8_t *planes, uint16_t *rec, const size_t *roff) {
+    int pred = j->ss, pt = j->al;
+    uint32_t across = j->ns == 1 ? j->comp[j->sc[0]].cw : (j->w + (uint32_t)j->hmax - 1) / (uint32_t)j->hmax;
+    uint32_t down = j->ns == 1 ? j->comp[j->sc[0]].ch : (j->h + (uint32_t)j->vmax - 1) / (uint32_t)j->vmax;
+    uint32_t total = across * down, togo = (uint32_t)j->restart, first_row = 0;
+    int dead = 0;
+    j->rst = 0;
+    for (uint32_t m = 0; m < total; m++) {
+        uint32_t mx = m % across, my = m / across;
+        if (j->restart) {
+            if (togo == 0) {
+                dead = !jpg_restart(j, p, n, b);
+                togo = (uint32_t)j->restart;
+                first_row = my;
+            }
+            togo--;
+        }
+        if (dead) {
+            j->partial = 1;
+            continue;
+        }
+        for (int s = 0; s < j->ns && !dead; s++) {
+            int ci = j->sc[s];
+            const jpg_comp *k = &j->comp[ci];
+            int nh = j->ns == 1 ? 1 : k->h, nv = j->ns == 1 ? 1 : k->v;
+            uint16_t *r = rec + roff[ci];
+            size_t W = k->cw, stride = (size_t)k->bw * 8;
+            uint32_t fy = j->ns == 1 ? first_row : first_row * (uint32_t)k->v;
+            for (int v = 0; v < nv && !dead; v++)
+                for (int u = 0; u < nh && !dead; u++) {
+                    int t = jpg_symbol(p, n, b, &j->huff[k->td]);
+                    if (t < 0 || t > 16) {
+                        dead = 1;
+                        break;
+                    }
+                    int diff = t == 16 ? 32768 : t ? jpg_extend(jpg_get(p, n, b, t), t) : 0;
+                    uint32_t x = j->ns == 1 ? mx : mx * (uint32_t)k->h + (uint32_t)u;
+                    uint32_t y = j->ns == 1 ? my : my * (uint32_t)k->v + (uint32_t)v;
+                    if (x >= k->cw || y >= k->ch) continue;     /* an MCU's sample past the image: read, not kept */
+                    int px;
+                    if (y == fy) px = x == 0 ? 1 << (j->prec - pt - 1) : r[(size_t)y * W + x - 1];
+                    else if (x == 0) px = r[(size_t)(y - 1) * W];
+                    else {
+                        int ra = r[(size_t)y * W + x - 1], rb = r[(size_t)(y - 1) * W + x], rc = r[(size_t)(y - 1) * W + x - 1];
+                        px = pred == 1 ? ra : pred == 2 ? rb : pred == 3 ? rc : pred == 4 ? ra + rb - rc : pred == 5 ? ra + ((rb - rc) >> 1) :
+                             pred == 6 ? rb + ((ra - rc) >> 1) : (ra + rb) >> 1;
+                    }
+                    uint16_t val = (uint16_t)((px + diff) & 0xffff);
+                    r[(size_t)y * W + x] = val;
+                    planes[k->poff + (size_t)y * stride + x] = (uint8_t)(((uint32_t)val << pt) & 0xff);
+                }
+        }
+        if (dead || b->cnt < b->fake) {
+            dead = 1;
+            j->partial = 1;
+        }
+    }
+    jpg_to_marker(p, n, b);
+}
+
 /* ---- JPEG: the segments ---- */
 
 /* the frame header (SOF0, 1 or 2): the size, the components and their sampling, the MCU
    grid, and where each component's coefficients and plane lie; 0 when it is not one
    this reads, or the image is past the cap */
 static int jpg_sof(jpg *j, const uint8_t *d, size_t dl) {
-    if (dl < 6 || d[0] != 8) return 0;
+    if (dl < 6 || (j->lossless ? d[0] < 2 || d[0] > 8 : d[0] != 8)) return 0;
+    j->prec = d[0];
     j->h = (uint32_t)d[1] << 8 | d[2];
     j->w = (uint32_t)d[3] << 8 | d[4];
     j->nc = d[5];
@@ -1271,6 +1345,13 @@ static int jpg_sos(jpg *j, const uint8_t *d, size_t dl) {
     j->se = d[2 + 2 * ns];
     j->ah = d[3 + 2 * ns] >> 4;
     j->al = d[3 + 2 * ns] & 15;
+    if (j->lossless) {
+        /* its predictor (1 to 7) in Ss, its point transform in Al below the precision; DC tables alone */
+        if (j->ss < 1 || j->ss > 7 || j->al >= j->prec) return 0;
+        for (int s = 0; s < ns; s++)
+            if (!jpg_table(j, j->comp[j->sc[s]].td)) return 0;
+        return 1;
+    }
     if (!j->progressive) {
         j->ss = 0;
         j->se = 63;
@@ -1282,6 +1363,8 @@ static int jpg_sos(jpg *j, const uint8_t *d, size_t dl) {
     for (int s = 0; s < ns; s++) {
         int ci = j->sc[s];
         if ((!j->progressive || (j->ss == 0 && j->ah == 0)) && !jpg_table(j, j->comp[ci].td)) return 0;
+        /* a DC symbol past 15, which libjpeg refuses as a DCT scan starts */
+        if ((!j->progressive || (j->ss == 0 && j->ah == 0)) && j->huff[j->comp[ci].td].max_sym > 15) return 0;
         if ((!j->progressive || j->ss > 0) && !jpg_table(j, 4 + j->comp[ci].ta)) return 0;
         if (!j->comp[ci].latched) {
             if (!j->qdef[j->comp[ci].tq]) return 0;
@@ -1540,6 +1623,8 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
     for (int k = 0; k < 1024; k++) j.range[k] = (uint8_t)(k < 128 ? k + 128 : k < 512 ? 255 : k < 896 ? 0 : k - 896);
     vector<uint8_t> planes;
     vector<int16_t> coef;
+    vector<uint16_t> rec;               /* a lossless frame's samples, each component's from roff */
+    size_t roff[4] = { 0, 0, 0, 0 };
     jpg_bits b;
     memset(&b, 0, sizeof b);
     size_t i = 2;
@@ -1570,7 +1655,8 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
             if (!frame || !jpg_sos(&j, d, dl)) break;
             memset(&b, 0, sizeof b);
             b.pos = i;
-            jpg_scan(&j, p, n, &b, data(planes), data(coef));
+            if (j.lossless) jpg_scan_lossless(&j, p, n, &b, data(planes), data(rec), roff);
+            else jpg_scan(&j, p, n, &b, data(planes), data(coef));
             j.scans++;
             i = b.pos;
             m = b.marker;
@@ -1578,15 +1664,24 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
             continue;
         }
         if (mk >= 0xC0 && mk <= 0xCF && mk != 0xC4 && mk != 0xC8 && mk != 0xCC) {
-            /* a frame: baseline, extended or progressive Huffman; the others are not read */
+            /* a frame: baseline, extended or progressive Huffman, or lossless; the others are not read */
             if (frame) break;
-            if (mk > 0xC2) return 0;
+            if (mk > 0xC3) return 0;
             j.progressive = mk == 0xC2;
+            j.lossless = mk == 0xC3;
             if (!jpg_sof(&j, d, dl)) return 0;
             size_t blocks = (size_t)j.comp[j.nc - 1].coff / 64 + (size_t)j.comp[j.nc - 1].bw * j.comp[j.nc - 1].bh;
             resize(&planes, blocks * 64);
             memset(data(planes), 128, blocks * 64);
             resize(&coef, j.progressive ? blocks * 64 : 64);
+            if (j.lossless) {
+                size_t all = 0;
+                for (int c = 0; c < j.nc; c++) {
+                    roff[c] = all;
+                    all += (size_t)j.comp[c].cw * j.comp[c].ch;
+                }
+                resize(&rec, all);
+            }
             frame = 1;
             continue;
         }
@@ -1596,6 +1691,8 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
         }
     }
     if (!frame || !j.scans) return 0;
+    /* lossless: of RGB alone, as Chromium (libjpeg-turbo converts no colours in lossless mode) */
+    if (j.lossless && jpg_space(&j) != JPG_RGB) return 0;
     if (!ended) j.partial = 1;
     if (j.progressive) jpg_finish(&j, data(coef), data(planes));
     /* each row: its components upsampled, made colours, placed by the orientation */
