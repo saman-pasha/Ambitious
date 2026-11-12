@@ -48,5 +48,5 @@ N = n(1,61,0), A = 'animated GIF', B = bx(1,35,0), X = 417.4453125, Y = 502, W =
 N = n(1,62,0), A = arithmetic, B = bx(1,36,0), X = 473.4453125, Y = 499, W = 61, H = 43
 N = n(1,63,0), A = '12-bit', B = bx(1,37,0), X = 540.4453125, Y = 499, W = 61, H = 43
 -- drawn:
-rendered 800x600: 37 boxes, 12 lines, 6 text fragments; pixels fnv1a64:39dde9f420d901da
+rendered 800x600: 37 boxes, 12 lines, 6 text fragments; pixels fnv1a64:37fccbb22bc352e8
 exit 0

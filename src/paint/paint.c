@@ -567,6 +567,7 @@ static void pt_side_split(amb_canvas *c, double x0, double y0, double x1, double
     k0.w = k1.w = (uint32_t)(zx - ax);
     k0.h = k1.h = (uint32_t)(zy - ay);
     k0.oy = k1.oy = c->oy + ay;
+    k0.zoom = k1.zoom = c->zoom;
     k0.cx0 = k1.cx0 = 0;
     k0.cx1 = k1.cx1 = k0.w;
     k0.cy0 = k1.cy0 = k0.oy;
@@ -1364,12 +1365,83 @@ static void pt_box_shadows(amb_canvas *c, const char *s, size_t n, double x0, do
     }
 }
 
-/* the image the loader fetched for an element, decoded into rgba: 1 when it was */
+/* the broken-image icon Chromium draws (its IDR_BROKENIMAGE resource, BSD-licensed, as
+   its screenshots show it at one device px a CSS px), each pixel 0xRRGGBBAA */
+static const uint32_t pt_broken_icon[256] = {
+    0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff,
+    0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0x9c9c9c84, 0x00000006, 0x00000000, 0x00000000, 0x00000000,
+    0xa2a2a3ff, 0xdee1e7ff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff,
+    0xf1f6feff, 0xf1f6fdff, 0xb8babcff, 0x9c9c9cff, 0x9e9e9ea3, 0x00000007, 0x00000000, 0x00000000,
+    0xa1a1a2ff, 0xd3dae6ff, 0xdde8fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff,
+    0xdae6fbff, 0xdee9faff, 0xb1b5bbff, 0xcacacaff, 0xdbdbdcff, 0x9f9fa0c1, 0x00000008, 0x00000000,
+    0xa0a0a0ff, 0xcdd6e5ff, 0xd3e2faff, 0xcedef9ff, 0xe0eafbff, 0xffffffff, 0xf8fafeff, 0xcedef9ff,
+    0xcedef9ff, 0xd5e1f8ff, 0xaeb2baff, 0xcacacaff, 0xffffffff, 0xe7e7e7ff, 0x9f9f9fe0, 0x0000000a,
+    0x9e9e9fff, 0xcbd5e5ff, 0xd2e1f9ff, 0xe6eefbff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    0xd3e1f8ff, 0xd4e1f8ff, 0xabafb7ff, 0x919191ff, 0x919191ff, 0x919191ff, 0x929292ff, 0x9e9e9fff,
+    0x9d9d9eff, 0xcbd5e5ff, 0xf1f6feff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
+    0xd1dff8ff, 0xcddbf4ff, 0xdce6f8ff, 0xe9f0fbff, 0xeef3fcff, 0xeff4fcff, 0xe8ebf2ff, 0x9d9d9eff,
+    0x9b9b9cff, 0xcbd4e4ff, 0xcfdef8ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff,
+    0xc9daf5ff, 0xcbdbf5ff, 0xcfdef6ff, 0xd3e1f7ff, 0xd5e2f7ff, 0xd8e4f8ff, 0xdae1f0ff, 0x9b9b9cff,
+    0x9a9a9bff, 0xc9d3e3ff, 0xcdddf7ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff,
+    0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xcadbf6ff, 0xd1dcefff, 0x9a9a9bff,
+    0x989899ff, 0xc8d2e3ff, 0xccdcf6ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff,
+    0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc9daf5ff, 0xd8e6fcdf, 0x00000000,
+    0x969697ff, 0xc7d1e2ff, 0xcadaf6ff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc2d4f2ff, 0xbfd3edff, 0xb1ced4ff,
+    0xb3ced8ff, 0xbfd2ecff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc3d4f3bf, 0x00000000, 0x00000000,
+    0x959596ff, 0xc6d1e2ff, 0xc8d8f4ff, 0xc0d1f0ff, 0xb3ccdaff, 0x8cbe97ff, 0x56a938ff, 0x58ae39ff,
+    0x58ae39ff, 0x67b155ff, 0x98c2aaff, 0xb9cee4ff, 0xc0d0f19f, 0x00000000, 0x00000000, 0x00000000,
+    0x939394ff, 0xc5cfe2ff, 0xc7d7f4ff, 0xa7c8c8ff, 0x7bb979ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff,
+    0x58ae39ff, 0x58ae39ff, 0x5bae3eff, 0x5caf427f, 0x00000000, 0x00000000, 0x9494941f, 0x939394ff,
+    0x929293ff, 0xc5cfe1ff, 0xb2d0cfff, 0x7ab977ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff,
+    0x58ae39ff, 0x58ae39ff, 0x59ae385f, 0x00000000, 0x00000000, 0xd7e7ff3f, 0xcdd9eeff, 0x929293ff,
+    0x909092ff, 0xb9c9d1ff, 0x86c082ff, 0x5baf3fff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff,
+    0x58ae39ff, 0x59ae393f, 0x00000000, 0x00000000, 0x6eb4635f, 0x87bf88ff, 0xcbd8edff, 0x909092ff,
+    0x8f8f90ff, 0x81b279ff, 0x65b44eff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff,
+    0x5aad3a1f, 0x00000000, 0x00000000, 0x58af387f, 0x58ae39ff, 0x65b34dff, 0x8dbe8cff, 0x8d908eff,
+    0x868687ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x828284df, 0x00000000,
+    0x00000000, 0x00000000, 0x8282849f, 0x838384ff, 0x838384ff, 0x838384ff, 0x838484ff, 0x8a8b8bff,
+};
+
+/* an image whose load failed, in its content box at x, y: as Chromium's fallback draws
+   one with no alt text (its shadow tree's container: a 1px silver border, 1px padding,
+   the 16px icon inside, overflow hidden), when the box is 18 CSS px or more each way;
+   else nothing. An image whose bytes were fetched but do not decode draws nothing, as in
+   Chromium */
+static void pt_broken(amb_canvas *c, double x, double y, double w, double h) {
+    double z = c->zoom > 0 ? c->zoom : 1;
+    if (w < 18 * z - 0.01 || h < 18 * z - 0.01) return;
+    uint32_t edge = 0xc0c0c0ff;
+    pt_fill(c, x, y, x + w, y + z, edge);
+    pt_fill(c, x, y + h - z, x + w, y + h, edge);
+    pt_fill(c, x, y + z, x + z, y + h - z, edge);
+    pt_fill(c, x + w - z, y + z, x + w, y + h - z, edge);
+    vector<uint8_t> px;
+    for (int k = 0; k < 256; k++) {
+        uint32_t v = pt_broken_icon[k];
+        push_back(px, (uint8_t)(v >> 24));
+        push_back(px, (uint8_t)(v >> 16));
+        push_back(px, (uint8_t)(v >> 8));
+        push_back(px, (uint8_t)v);
+    }
+    double cx0 = c->cx0, cy0 = c->cy0, cx1 = c->cx1, cy1 = c->cy1;
+    if (c->cx0 < x + z) c->cx0 = x + z;
+    if (c->cy0 < y + z) c->cy0 = y + z;
+    if (c->cx1 > x + w - z) c->cx1 = x + w - z;
+    if (c->cy1 > y + h - z) c->cy1 = y + h - z;
+    pt_image(c, &px, 16, 16, x + 2 * z, y + 2 * z, 16 * z, 16 * z);
+    c->cx0 = cx0;
+    c->cy0 = cy0;
+    c->cx1 = cx1;
+    c->cy1 = cy1;
+}
+
+/* the image the loader fetched for an element, decoded into rgba: 1 when it was; -1 when
+   its load failed; 0 when there is none or its bytes are no image this decodes */
 static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
     if (!nt) return 0;
     for (uint32_t r = 1; r < nt->resource_len; r++) {
         if (!nt->resource[r].live || nt->resource[r].elem.index != el || nt->resource[r].kind != NET_KIND_IMAGE) continue;
-        if (nt->resource[r].outcome != NET_OUTCOME_OK) return 0;
+        if (nt->resource[r].outcome != NET_OUTCOME_OK) return -1;
         amb_span b = nt->resource[r].body;
         vector<uint8_t> bytes;
         append_range(bytes, (const uint8_t *)bytes_ptr(nt, b), b.len);
@@ -1378,8 +1450,9 @@ static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba,
     return 0;
 }
 
-/* an image a box's background names (resource r), decoded once a paint: its pixels' place
-   in the cache's pixels, its size; 0 when it cannot be */
+/* an image a box's background names (resource r), decoded once a paint (any format the
+   painter reads, an animation at the frame it shows at rest): its pixels' place in the
+   cache's pixels, its size; 0 when it cannot be */
 static int pt_cached_image(const net_loader *nt, uint32_t r, vector<uint32_t> *icache, vector<uint8_t> *ipx, size_t *off, uint32_t *w, uint32_t *h) {
     for (size_t k = 0; k + 4 < len(*icache) + 1 && k + 3 < len(*icache); k += 4)
         if (at(*icache, k) == r) {
@@ -1395,7 +1468,7 @@ static int pt_cached_image(const net_loader *nt, uint32_t r, vector<uint32_t> *i
         vector<uint8_t> bytes, rgba;
         amb_span bd = nt->resource[r].body;
         append_range(bytes, (const uint8_t *)bytes_ptr(nt, bd), bd.len);
-        if (amb_png_decode(data(bytes), len(bytes), &rgba, w, h)) append_range(ipx, data(rgba), len(rgba));
+        if (amb_image_decode(data(bytes), len(bytes), &rgba, w, h)) append_range(ipx, data(rgba), len(rgba));
         else { *w = 0; *h = 0; }
     }
     push_back(icache, r);
@@ -1545,9 +1618,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;
-        if (pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih)) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
-        else if ((t->box[b].background & 0xff) == 0 && t->box[b].bt + t->box[b].bl == 0)
-            pt_fill(c, t->box[b].x, t->box[b].y, t->box[b].x + t->box[b].w, t->box[b].y + t->box[b].h, 0xe8e8e8ff);
+        int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
+        if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
     }
     int st0 = t->box[b].bst, st1 = t->box[b].bsr, st2 = t->box[b].bsb, st3 = t->box[b].bsl;
     int plain = (st0 == LAY_BS_SOLID || st0 <= LAY_BS_HIDDEN) && (st1 == LAY_BS_SOLID || st1 <= LAY_BS_HIDDEN) &&
@@ -1685,6 +1758,7 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
         m.w = (uint32_t)mw;
         m.h = (uint32_t)mh;
         m.oy = my0;
+        m.zoom = c->zoom;
         m.cx0 = 0;
         m.cy0 = my0;
         m.cx1 = mw;
@@ -2025,6 +2099,7 @@ static void pt_plane_draw(PCTX, uint32_t b, int ctx, const double *m) {
     k0.w = k1.w = c->w;
     k0.h = k1.h = c->h;
     k0.oy = k1.oy = c->oy;
+    k0.zoom = k1.zoom = c->zoom;
     k0.cx0 = k1.cx0 = 0;
     k0.cy0 = k1.cy0 = c->oy;
     k0.cx1 = k1.cx1 = c->w;
@@ -2149,6 +2224,7 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
     k0.w = k1.w = c->w;
     k0.h = k1.h = c->h;
     k0.oy = k1.oy = c->oy;
+    k0.zoom = k1.zoom = c->zoom;
     k0.cx0 = k1.cx0 = 0;
     k0.cy0 = k1.cy0 = c->oy;
     k0.cx1 = k1.cx1 = c->w;
@@ -2573,12 +2649,19 @@ void amb_paint_zoom(const layout_tree *t, const net_loader *nt, amb_canvas *c, d
     layout_tree zt;
     layout_init(&zt, t->id);
     pt_zoom_tree(t, z, &zt);
+    c->zoom = z;
     pt_paint(&zt, nt, c, y, h > 0 ? h : 16384 * z);
 }
 
-void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) { pt_paint(t, nt, c, 0, 16384); }
+void amb_paint(const layout_tree *t, const net_loader *nt, amb_canvas *c) {
+    c->zoom = 1;
+    pt_paint(t, nt, c, 0, 16384);
+}
 
-void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h) { pt_paint(t, nt, c, y, h); }
+void amb_paint_view(const layout_tree *t, const net_loader *nt, amb_canvas *c, double y, double h) {
+    c->zoom = 1;
+    pt_paint(t, nt, c, y, h);
+}
 
 void amb_canvas_zoom(const amb_canvas *src, amb_canvas *dst, double z) {
     if (z <= 0) z = 1;

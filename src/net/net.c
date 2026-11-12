@@ -3111,6 +3111,20 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 } else fetched = net_get(l, abs, kind, pg, eh, &base, &t);
             }
             if (picked && fetched) net_srcset_size(l, fetched, &pk);
+        } else if (kind == NET_KIND_IMAGE && a) {
+            /* an img whose src is empty: its request is broken at once (HTML's update the
+               image data, step 9), and Chromium draws it broken; recorded, not fetched */
+            net_resource_h h = resource_new(l);
+            uint32_t r = h.index;
+            l->resource[r].kind = kind;
+            l->resource[r].from = pg;
+            l->resource[r].elem = node_handle(doc, x);
+            l->resource[r].url = net_text(l, "");
+            l->resource[r].final_url = l->resource[r].url;
+            l->resource[r].outcome = NET_OUTCOME_BAD_URL;
+            l->resource[r].origin = net_text(l, "null");
+            l->resource[r].type = net_text(l, "");
+            l->resource[r].reason = net_text(l, "the src attribute is empty");
         }
         if (doc->node[x].first_child) { x = doc->node[x].first_child; continue; }
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }

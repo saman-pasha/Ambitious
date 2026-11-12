@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><title>Images that fail, and backgrounds in every format</title>
+<style>
+body { margin: 8px; background: #fff; }
+.row { height: 70px; margin-bottom: 8px; }
+img, canvas { vertical-align: top; margin-right: 12px; }
+.bg { display: inline-block; width: 96px; height: 64px; margin-right: 12px; background-repeat: no-repeat; vertical-align: top; }
+</style></head>
+<body>
+<!-- a load that fails: Chromium's fallback, a silver border and the broken icon, when 18px or more each way -->
+<div class="row">
+<img id="fail-attr" src="missing.png" width="100" height="50"><img id="fail-css" src="missing.png" style="width:60px;height:30px"><img id="fail-empty-alt" src="missing.png" alt="" width="40" height="40"><img id="fail-small" src="missing.png" width="10" height="10"><img id="fail-edge" src="missing.png" width="18" height="18"><img id="empty-src" src="" width="40" height="40">
+</div>
+<!-- bytes that are no image the browser decodes: nothing drawn; a canvas: nothing either -->
+<div class="row">
+<img id="undecodable" src="../images/bad_arithmetic.jpg"><canvas id="canvas" width="100" height="50"></canvas>
+</div>
+<!-- background images in each format the painter reads -->
+<div class="row">
+<div id="bg-png" class="bg" style="background-image:url(../images/rgba8.png); background-size: 96px 64px; image-rendering: pixelated"></div><div id="bg-jpeg" class="bg" style="background-image:url(../images/j_photo.jpg)"></div><div id="bg-gif" class="bg" style="background-image:url(../images/g_pil.gif)"></div><div id="bg-webp" class="bg" style="background-image:url(../images/w_lossy_photo.webp)"></div>
+</div>
+</body></html>
