@@ -5,8 +5,8 @@
    is written with its namespace's designator ("svg ", "math "), an attribute
    with its own ("xlink ", "xml ", "xmlns ") before its local name, and a
    template's contents under "content". Prints a line a file and the totals; -v
-   prints each failing case. Cases that need scripting on, which is not done,
-   are skipped and counted. */
+   prints each failing case. A case marked #script-on is parsed with the scripting
+   flag on (html_set_scripting), the rest with it off. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -15,6 +15,7 @@
 
 amb_interface(dom);
 amb_interface(html);
+#include "../../src/html/encoding.h"
 
 static int read_all(const char *path, vector<char> *out) {
     own FILE *f = fopen(path, "rb");
@@ -177,7 +178,7 @@ int main(int argc, char **argv) {
                 li++;
             }
             while (len(want) && at(want, len(want) - 1) == '\n') pop_back(want);
-            if (script_on) { fskip++; continue; }
+            html_set_scripting(script_on);
             int r = run_case(data(dat), len(dat), data(ctx), len(ctx), fragment, data(want), len(want), verbose, base, no);
             if (r) fpass++; else ffail++;
         }

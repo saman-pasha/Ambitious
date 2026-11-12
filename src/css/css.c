@@ -89,6 +89,9 @@ amb_implementation(css);
    a media query's em); prefers-color-scheme and prefers-reduced-motion */
 static double css_view_w = 800.0, css_view_h = 600.0, css_font_px = 16.0;
 static int css_pref_dark = 0, css_pref_reduce = 0;
+/* scripting (Media Queries 5, 7.1): whether the page's scripts run; they do, as Chromium's */
+static int css_scripting = 1;
+void css_set_scripting(int on) { css_scripting = on != 0; }
 #define CSS_VIEWPORT_W css_view_w
 #define CSS_VIEWPORT_H css_view_h
 
@@ -109,6 +112,7 @@ void css_set_env(double view_w, double view_h, double font_size, int dark, int r
 static const char css_ua_sheet[] =
     "area, base, basefont, datalist, head, link, meta, noembed, noframes, param, rp, script, style, template, title { display: none }\n"
     "[hidden] { display: none }\n"
+    "@media (scripting: enabled) { noscript { display: none !important } }\n"
     "html, body { display: block }\n"
     "body { margin: 8px }\n"
     "address, blockquote, center, dialog, div, figure, figcaption, footer, form, header, hr, legend, listing, main, p, plaintext, pre, search, xmp { display: block; unicode-bidi: isolate }\n"
@@ -2444,7 +2448,8 @@ static int css_media_feature(const char *s, size_t n) {
     const char *name = s + a;
     size_t nn = b - a;
     if (c >= n) return css_eq_ci(name, nn, "color") || css_eq_ci(name, nn, "hover") || css_eq_ci(name, nn, "pointer") ||
-                       css_eq_ci(name, nn, "prefers-color-scheme") || (css_eq_ci(name, nn, "prefers-reduced-motion") && css_pref_reduce);
+                       css_eq_ci(name, nn, "prefers-color-scheme") || (css_eq_ci(name, nn, "prefers-reduced-motion") && css_pref_reduce) ||
+                       (css_eq_ci(name, nn, "scripting") && css_scripting);
     size_t va = css_skip_ws(s, n, c + 1), vb = n;
     while (vb > va && css_ws(s[vb - 1])) vb--;
     css_val v;
@@ -2458,6 +2463,7 @@ static int css_media_feature(const char *s, size_t n) {
     if (css_eq_ci(name, nn, "orientation")) return css_is_word(&v, "landscape");
     if (css_eq_ci(name, nn, "prefers-color-scheme")) return css_is_word(&v, css_pref_dark ? "dark" : "light");
     if (css_eq_ci(name, nn, "prefers-reduced-motion")) return css_is_word(&v, css_pref_reduce ? "reduce" : "no-preference");
+    if (css_eq_ci(name, nn, "scripting")) return css_is_word(&v, css_scripting ? "enabled" : "none");
     return 0;
 }
 

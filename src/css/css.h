@@ -32,6 +32,8 @@ int css_next_part(const char *s, size_t n, size_t *i, size_t *start, size_t *len
    prefers-color-scheme dark (1) and prefers-reduced-motion reduce (1). Unset: 800 x 600,
    16 px, light, no preference */
 void css_set_env(double view_w, double view_h, double font_size, int dark, int reduced_motion);
+/* whether the page's scripts run (the scripting media feature: enabled, or none); on unless set */
+void css_set_scripting(int on);
 
 /* a script's selector list against the element x (src/script): 1 when x matches */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n);

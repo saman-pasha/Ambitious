@@ -16,7 +16,7 @@
    drives stops at each such point, the tokens before it in the table, and goes
    on in the state the tree builder chose (src/html/tokenizer.h); a run that is
    not driven switches as HTML content would and reads CDATA as a bogus comment.
-   Scripting is off, so noscript is not RAWTEXT. U+0000 in the data state is a
+   noscript is RAWTEXT too when the scripting flag is on (html_scripting_flag). U+0000 in the data state is a
    parse error and a character token, which the tree builder drops in HTML
    content and makes U+FFFD in foreign content. */
 #include <stdio.h>
@@ -28,6 +28,9 @@
 amb_interface(dom);
 amb_interface(html);
 #include "tokenizer.h"
+
+/* the scripting flag (13.2.3.5), which html_set_scripting sets (src/html/tree.c) */
+int html_scripting_flag = 0;
 
 enum html_state {
     S_DATA, S_RCDATA, S_RAWTEXT, S_SCRIPT, S_PLAINTEXT, S_TAG_OPEN, S_END_TAG_OPEN, S_TAG_NAME,
@@ -220,7 +223,8 @@ static int html_emit_tag(html_parser *p, html_token_h tok, vector<char> *name, v
     int raw = S_DATA;
     if (html_name_is(name, "title") || html_name_is(name, "textarea")) raw = S_RCDATA;
     else if (html_name_is(name, "style") || html_name_is(name, "xmp") || html_name_is(name, "iframe") ||
-             html_name_is(name, "noembed") || html_name_is(name, "noframes")) raw = S_RAWTEXT;
+             html_name_is(name, "noembed") || html_name_is(name, "noframes") || (html_name_is(name, "noscript") && html_scripting_flag))
+        raw = S_RAWTEXT;
     else if (html_name_is(name, "script")) raw = S_SCRIPT;
     else if (html_name_is(name, "plaintext")) raw = S_PLAINTEXT;
     if (raw != S_DATA && driven) { *stop = 1; return S_DATA; }

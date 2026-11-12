@@ -31,7 +31,7 @@ tests11.dat                                    13 passed    0 failed    0 skippe
 tests12.dat                                     2 passed    0 failed    0 skipped
 tests14.dat                                     7 passed    0 failed    0 skipped
 tests15.dat                                    14 passed    0 failed    0 skipped
-tests16.dat                                   191 passed    0 failed    6 skipped
+tests16.dat                                   197 passed    0 failed    0 skipped
 tests17.dat                                    13 passed    0 failed    0 skipped
 tests18.dat                                    36 passed    0 failed    0 skipped
 tests19.dat                                   103 passed    0 failed    0 skipped
@@ -45,7 +45,7 @@ tests25.dat                                    26 passed    0 failed    0 skippe
 tests26.dat                                    20 passed    0 failed    0 skipped
 tests3.dat                                     24 passed    0 failed    0 skipped
 tests4.dat                                      9 passed    0 failed    0 skipped
-tests5.dat                                     16 passed    0 failed    1 skipped
+tests5.dat                                     17 passed    0 failed    0 skipped
 tests6.dat                                     52 passed    0 failed    0 skipped
 tests7.dat                                     34 passed    0 failed    0 skipped
 tests8.dat                                     10 passed    0 failed    0 skipped
@@ -54,5 +54,5 @@ tests_innerHTML_1.dat                          81 passed    0 failed    0 skippe
 tricky01.dat                                    9 passed    0 failed    0 skipped
 void-in-phrasing.dat                           13 passed    0 failed    0 skipped
 webkit01.dat                                   52 passed    0 failed    0 skipped
-webkit02.dat                                   48 passed    0 failed    1 skipped
-html5lib tree construction: 1784 passed, 0 failed, 8 skipped -- 100.0% of the cases run
+webkit02.dat                                   49 passed    0 failed    0 skipped
+html5lib tree construction: 1792 passed, 0 failed, 0 skipped -- 100.0% of the cases run

@@ -6,7 +6,7 @@ L = n(1,19,0), T = apple
 L = n(1,21,0), T = banana
 L = n(1,23,0), T = cherry
 > advise
-amb_diag(unused_rule, ru(1,168,0), 'the rule li.sale matches no element (at rest: no hover, focus or other state)').
+amb_diag(unused_rule, ru(1,169,0), 'the rule li.sale matches no element (at rest: no hover, focus or other state)').
 amb_diag(click_not_focusable, n(1,34,0), 'the <div> \'Clear\' has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)').
 > click #more
 clicked <button id="more" type="button">; the document is at revision 102
@@ -96,15 +96,15 @@ ok: layout snapshot of document 1 at revision 1
 ok: net snapshot of document 1 at revision 3
 ok: a11y snapshot of document 1 at revision 1
 ok: script snapshot of document 1 at revision 0
-ok: 7 section(s), 1170 facts
+ok: 7 section(s), 1172 facts
 > query member(M, [dom, html, css, layout, net, a11y, script]), amb_reason_schema_decl(M, fact(F/K, _)), functor(G, F, K), call(G)
 > echo -- end
 -- end
 > snapshot WORK/after.pl
 > reasoner
-reasoner: running; 1 start(s), 15 requests: 1 whole snapshot(s), 2 delta(s) (17 predicates edited, 38 rebuilt); 1170 facts held
+reasoner: running; 1 start(s), 15 requests: 1 whole snapshot(s), 2 delta(s) (17 predicates edited, 38 rebuilt); 1172 facts held
 reasoner: the last snapshot that changed reached it as a delta: 59 facts retracted, 84 added
 > quit
 exit 0
 -- the same requests asked of a fresh reasoner over the whole snapshot after the clicks:
-the same 1252 lines, 1170 of them the facts held, in order
+the same 1254 lines, 1172 of them the facts held, in order

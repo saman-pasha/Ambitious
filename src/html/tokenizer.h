@@ -14,6 +14,9 @@
 #ifndef AMBITIOUS_HTML_TOKENIZER_H
 #define AMBITIOUS_HTML_TOKENIZER_H
 
+/* the scripting flag every parse runs with (src/html/tokenizer.c; set by html_set_scripting) */
+extern int html_scripting_flag;
+
 /* the states a tree builder starts the tokenizer in or switches it to */
 enum { HTML_TZ_DATA, HTML_TZ_RCDATA, HTML_TZ_RAWTEXT, HTML_TZ_SCRIPT, HTML_TZ_PLAINTEXT, HTML_TZ_MARKUP };
 /* why a run stopped: the input's end, a start tag's state to choose, a CDATA section to allow or not */

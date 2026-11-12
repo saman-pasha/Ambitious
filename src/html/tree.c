@@ -29,7 +29,9 @@
    modes, select in the default scope, and the start tags of input, select,
    option, optgroup and hr closing or keeping what a select holds.
 
-   Scripting is off. Everything else follows the standard's steps, by its names. */
+   The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
+   run): noscript's content is then raw text. Everything else follows the standard's
+   steps, by its names. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -38,6 +40,9 @@
 amb_interface(dom);
 amb_implementation(html);
 #include "tokenizer.h"
+
+/* the scripting flag (13.2.3.5): the parser of a document whose scripts run */
+void html_set_scripting(int on) { html_scripting_flag = on != 0; }
 
 /* ---- the tags the algorithm names --------------------------------------------- */
 
@@ -958,6 +963,7 @@ static int in_head(CTX) {
         if (IN(tag, T_BASE, T_BASEFONT, T_BGSOUND, T_LINK, T_META)) { insert_element(ARGS, t); st_pop(open); return 0; }
         if (tag == T_TITLE) { generic_text_element(ARGS, t, HTML_TZ_RCDATA); return 0; }
         if (IN(tag, T_NOFRAMES, T_STYLE)) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
+        if (tag == T_NOSCRIPT && html_scripting_flag) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
         if (tag == T_NOSCRIPT) { insert_element(ARGS, t); c->mode = M_IN_HEAD_NOSCRIPT; return 0; }
         if (tag == T_SCRIPT) { generic_text_element(ARGS, t, HTML_TZ_SCRIPT); return 0; }
         if (tag == T_TEMPLATE) {
@@ -1327,7 +1333,7 @@ static int in_body(CTX) {
             return 0;
         }
         if (tag == T_IFRAME) { c->frameset_ok = 0; generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
-        if (tag == T_NOEMBED) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
+        if (tag == T_NOEMBED || (tag == T_NOSCRIPT && html_scripting_flag)) { generic_text_element(ARGS, t, HTML_TZ_RAWTEXT); return 0; }
         if (tag == T_SELECT) {
             if (c->fragment && c->ctx_tag == T_SELECT) { html_terr(ARGS); return 0; }
             if (in_scope(open, T_SELECT, 0, SC_DEFAULT)) { html_terr(ARGS); st_pop_until(open, T_SELECT); return 0; }
@@ -2060,7 +2066,7 @@ html_status html_parse_fragment(html_parser *p, dom_document *d, const char *con
     int ctx_tag = ns == DOM_NAMESPACE_HTML ? html_tag_of(cn, cl) : T_FOREIGN;
     int state = HTML_TZ_DATA;
     if (ctx_tag == T_TITLE || ctx_tag == T_TEXTAREA) state = HTML_TZ_RCDATA;
-    else if (IN(ctx_tag, T_STYLE, T_XMP, T_IFRAME, T_NOEMBED, T_NOFRAMES)) state = HTML_TZ_RAWTEXT;
+    else if (IN(ctx_tag, T_STYLE, T_XMP, T_IFRAME, T_NOEMBED, T_NOFRAMES) || (ctx_tag == T_NOSCRIPT && html_scripting_flag)) state = HTML_TZ_RAWTEXT;
     else if (ctx_tag == T_SCRIPT) state = HTML_TZ_SCRIPT;
     else if (ctx_tag == T_PLAINTEXT) state = HTML_TZ_PLAINTEXT;
     vector<char> norm;

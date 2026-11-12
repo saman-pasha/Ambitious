@@ -750,6 +750,7 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
     else snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(nt, ty));
     /* the bytes decoded in the encoding sniffed from them, the type they were served as
        and whether they are a local file's (src/html/encoding.h) */
+    html_set_scripting(1);   /* the page's scripts run */
     html_parse_bytes(p, d, data(src), len(src), type, strlen(type), strncmp(final, "file:", 5) == 0);
     site_of(final, site, sizeof site);
     session_path(s, "profile.out", answer, sizeof answer);
@@ -918,6 +919,7 @@ static int cmd_bench(const char *page, int n) {
         if (cs.len) snprintf(type, sizeof type, "%.*s;charset=%.*s", (int)ty.len, text_ptr(&nt, ty), (int)cs.len, text_ptr(&nt, cs));
         else snprintf(type, sizeof type, "%.*s", (int)ty.len, text_ptr(&nt, ty));
         int file = fu.len >= 5 && memcmp(text_ptr(&nt, fu), "file:", 5) == 0;
+        html_set_scripting(1);
         html_parse_bytes(&p, &d, data(src), len(src), type, strlen(type), file);
         double c = now_ms();
         net_fetch_subresources(&nt, &d, ph, 0);

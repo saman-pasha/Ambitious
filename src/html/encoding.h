@@ -24,6 +24,9 @@ void html_sniff(const char *src, size_t n, const char *type, size_t type_len, in
    and parsed into doc as html_parse parses them */
 html_status html_parse_bytes(html_parser *p, dom_document *doc, const char *src, size_t src_len,
                              const char *type, size_t type_len, int file);
+/* the scripting flag every parse from now on runs with (13.2.3.5): 1 for a page whose
+   scripts run, its noscript elements' content then raw text; off unless set */
+void html_set_scripting(int on);
 
 /* the encoding a label names (ASCII white space trimmed, ASCII case ignored), or -1 */
 int html_enc_of_label(const char *label, size_t n);
