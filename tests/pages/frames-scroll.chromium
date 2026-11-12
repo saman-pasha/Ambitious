@@ -1,0 +1,10 @@
+# boxes of tests/pages/frames-scroll.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+v iframe 8 8 124 104
+h iframe 140 8 164 84
+both iframe 312 8 144 114
+text iframe 464 8 204 94
+no iframe 8 130 124 84
+hidden iframe 140 130 124 84
+darkbars iframe 272 130 144 104
+fits iframe 424 130 144 104
+tall iframe 576 130 94 224

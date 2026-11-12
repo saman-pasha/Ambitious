@@ -1,4 +1,4 @@
-// tools/bench/shot.js [--zoom Z] [--at MS] PAGE... -- each page drawn by Chromium
+// tools/bench/shot.js [--zoom Z] [--at MS] [--scrollbars] PAGE... -- each page drawn by Chromium
 // (Playwright's headless shell) in an 800x600 viewport at one device pixel per CSS px, or
 // zoomed (Z device px a CSS px, the viewport 800/Z by 600/Z CSS px, as Ambitious's zoom
 // preference leaves it); with --at, each running animation set to MS ms after its start
@@ -6,18 +6,21 @@
 // screenshot, the top of the page, written beside it as tests/pages/NAME.shot.png, and
 // each element with an id's border box (getBoundingClientRect, in device px, rounded out
 // to whole px) as tests/pages/NAME.regions, the parts of the picture
-// tests/integ/paintref.sh holds Ambitious's drawing to.
+// tests/integ/paintref.sh holds Ambitious's drawing to. With --scrollbars, the scroll bars
+// Playwright hides are shown: a frame whose content overflows draws classic ones (the
+// pages of frames, Phase 12u, whose own content never overflows the viewport).
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 (async () => {
-  let args = process.argv.slice(2), zoom = 1, at = null;
+  let args = process.argv.slice(2), zoom = 1, at = null, bars = false;
   for (;;) {
     if (args[0] === '--zoom') { zoom = Number(args[1]); args = args.slice(2); }
     else if (args[0] === '--at') { at = Number(args[1]); args = args.slice(2); }
+    else if (args[0] === '--scrollbars') { bars = true; args = args.slice(1); }
     else break;
   }
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(bars ? { ignoreDefaultArgs: ['--hide-scrollbars'] } : {});
   const page = await browser.newPage({ viewport: { width: Math.round(800 / zoom), height: Math.round(600 / zoom) }, deviceScaleFactor: zoom });
   for (const file of args) {
     await page.goto('file://' + path.resolve(file), { waitUntil: 'load' });

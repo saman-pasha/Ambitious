@@ -7,7 +7,8 @@
 :- dynamic net_resource/7, net_final_url/2, net_origin/2, net_asked_by/3, net_hop/3, net_image_size/3,
            net_failure/2, net_tls/4, net_proxy/2, net_cross_site/1, net_cookie/5, net_cookie_flags/5,
            net_cookie_expires/2, net_cookie_set_by/2, net_cookie_refused/2, net_cookie_sent/2, net_cache/4,
-           net_coding/3, net_srcset/5, net_picture_source/2.
+           net_coding/3, net_srcset/5, net_picture_source/2, net_frame/6, net_frame_parent/2, net_frame_fetch/2,
+           net_frame_viewport/5, net_frame_sandbox/3, net_frame_quirks/1.
 
 net_page(R) :- net_resource(R, _, document, _, _, _, _), \+ net_asked_by(R, _, _).
 
@@ -50,6 +51,32 @@ net_from_cache(R, How) :- net_cache(R, How, _, _), ( How == fresh ; How == reval
 %% an image chosen from a srcset below the screen's density (1): it is drawn larger
 %% than its pixels, and looks blurred
 net_low_density(R, X) :- net_srcset(R, _, X, _, _), X < 1.
+
+%% ---- the page's frames (Phase 12u) ----------------------------------------------
+
+%% the frame an iframe element holds
+net_frame_of(I, F) :- net_frame(F, I, _, _, _, _).
+
+%% a frame whose document did not load, and why: its src's fetch's failure, as net_failed/2
+%% says it; blocked; lazy
+net_frame_failed(F, Why) :- net_frame(F, _, _, _, _, failed), net_frame_fetch(F, R), net_failed(R, Why).
+net_frame_failed(F, blocked) :- net_frame(F, _, _, _, _, blocked).
+net_frame_failed(F, lazy) :- net_frame(F, _, _, _, _, lazy).
+
+%% how deep a frame is: 1 for an iframe of the page's own document, one more for each frame
+%% it is inside
+net_frame_depth(F, 1) :- net_frame(F, _, _, _, _, _), net_frame_parent(F, 1).
+net_frame_depth(F, N) :-
+    net_frame_parent(F, P), P \== 1, net_frame(G, _, P, _, _, _), net_frame_depth(G, M), N is M + 1.
+
+%% a frame whose content overflows its viewport, and the scroll bars drawn in it
+net_frame_scrolls(F, Bars) :-
+    net_frame_viewport(F, _, _, V, H),
+    findall(B, ( ( V == true, B = vertical ) ; ( H == true, B = horizontal ) ), Bars), Bars \== [].
+
+%% an iframe as a reader names it: by its id when it has one
+net_frame_iframe_name(I, Name) :-
+    (   dom_attr(I, id, Id) -> format(atom(Name), '<iframe id="~w">', [Id]) ; Name = '<iframe>' ).
 
 %% a refusal in words
 net_refusal_words(malformed, 'it is malformed').
@@ -98,6 +125,18 @@ net_diag(low_density, R, Text) :-
 net_diag(no_lifetime, R, Text) :-
     net_cache(R, How, _, 0), ( How == stored ; How == revalidated ), net_resource(R, U, K, _, _, _, _),
     format(atom(Text), 'the ~w ~w has no freshness lifetime: each load asks the server for it again', [K, U]).
+net_diag(frame_failed, F, Text) :-
+    net_frame_failed(F, Why), net_frame(F, I, _, U, _, O), O == failed, net_frame_iframe_name(I, Name),
+    format(atom(Text), 'the frame of ~w did not load ~w (~w): it shows nothing, as Chromium''s error page draws nothing', [Name, U, Why]).
+net_diag(frame_blocked, F, Text) :-
+    net_frame(F, I, _, U, _, blocked), net_frame_iframe_name(I, Name),
+    format(atom(Text), 'the frame of ~w did not load ~w: the page framed its own URL inside itself twice over (Chromium lets it once), or it has too many frames; it shows about:blank', [Name, U]).
+net_diag(frame_lazy, F, Text) :-
+    net_frame(F, I, _, U, _, lazy), net_frame_iframe_name(I, Name),
+    format(atom(Text), 'the frame of ~w (~w) loads lazily and is out of the viewport''s reach: not loaded at rest', [Name, U]).
+net_diag(frame_sandboxed_scripts, F, Text) :-
+    net_frame_sandbox(F, false, _), net_frame(F, I, _, U, _, loaded), net_frame_iframe_name(I, Name),
+    format(atom(Text), 'the frame of ~w (~w) is sandboxed without allow-scripts: its scripts do not run', [Name, U]).
 net_diag(third_party_cookie, C, Text) :-
     net_third_party_cookie(C, R), net_cookie(C, N, D, _, _), net_resource(R, U, _, _, _, _, _),
     format(atom(Text), 'the cookie ~q of ~w went with ~w, another site''s', [N, D, U]).

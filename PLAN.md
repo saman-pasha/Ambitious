@@ -967,6 +967,54 @@ be built side by side and merged without touching each other's.
   `tests/exec/svg_render` (scenes of each, a pattern's tile, a mask, a filter and a
   hairline drawn, documents of patterns, masks and markers of themselves and of filters
   and text past every bound; valgrind clean).
+- **12u Frames** (`src/shell/frame.c`, `src/shell/frame.h`, `src/script/frames.c`,
+  `contracts/net.pl`; the iframe's box: its user agent's border in `src/css/css.c`, its drawing
+  in `src/paint/paint.c`'s replaced content, a 3D border of currentcolor in `src/layout/layout.c`;
+  an iframe srcdoc document's mode in `src/html/tree.c`; the run split and the hooks in
+  `src/script/script.c`, the pipeline in `src/shell/main.c`):
+  - each iframe's document: its srcdoc (about:srcdoc, the parent's base URL, UTF-8, never in
+    quirks mode by its DOCTYPE), else its src fetched by the page's loader as a document (its
+    own encoding sniffed, its own mode; an HTTP error's body shown, with Chromium's console
+    line; a failed fetch Chromium's error page, which draws nothing and fires no load), else
+    about:blank (quirks mode); a page framing its own URL let do it once, not twice over
+    (Chromium's self-reference rule); `loading=lazy` over http: and https: beyond 4000px of the
+    viewport left unloaded at rest (Chromium's distance, measured; file: and srcdoc never lazy);
+    its parts fetched by a loader of its own, at any depth, up to 32 frames a page;
+  - styled and laid out in its iframe's content box as its viewport (its own initial
+    containing block, media queries and viewport units), the classic scroll bars its
+    overflowing content makes taking their 15px from it and laid out again until they hold
+    (none for scrolling=no or a root that clips), and drawn into the content box, clipped:
+    twice, over black and over white, so that paint lays it over the page with what it left
+    transparent showing through (a frame's canvas is transparent unless its root's colour
+    scheme is not its iframe's); the scroll bars as Chromium's headless shell draws them with
+    its scroll bars shown (measured: track, arrows, a thumb of round ends 3px in, its length
+    the track's less 6px by the share shown, 17px at least, the dark scheme's colours);
+  - the iframe's own box: the user agent's `border: 2px inset` (an inset, outset, groove or
+    ridge border of currentcolor drawn from #eeeeee, as Blink draws it: the hr's too),
+    frameborder as Blink's ToInt() reads it, width and height;
+  - each document its own VM, realm and window (src/script/frames.c): parent, top, frames,
+    length, the frames by index and by name, frameElement, name, contentWindow and
+    contentDocument; one realm's objects seen in another through a membrane of the engine's
+    proxies whose traps run in the owner's VM; a document of another origin (a file:'s
+    own, a sandbox's without allow-same-origin, another host's) offering only HTML's
+    cross-origin properties, else Chromium's SecurityError; postMessage with a structured
+    clone and its MessageEvent (data, origin, source), a target origin checked as the message
+    is dispatched; sandboxed scripts refused with Chromium's console line, and noscript drawn;
+    the order Chromium runs them in (the page's parse, its DOMContentLoaded, each frame's
+    scripts, load at its window and at its iframe, the page's load, then every frame's timers
+    and tasks as one event loop in virtual time);
+  - the frames as facts (`net_frame/6`, `net_frame_parent/2`, `net_frame_fetch/2`,
+    `net_frame_viewport/5`, `net_frame_sandbox/3`, `net_frame_quirks/1`), the rules over them
+    (`net_frame_of/2`, `net_frame_failed/2`, `net_frame_depth/2`, `net_frame_scrolls/2`), and
+    `advise` naming a frame that failed, was blocked or is lazy, and a sandbox that keeps a
+    frame's scripts off.
+
+  Gate: `tests/pages/frames*.html`, each held to Chromium: the pages' boxes (22 of 22), their
+  regions (22 of 22, the frames' scroll bars shown: `tools/bench/shot.js --scrollbars`), each
+  frame's boxes in its own viewport (53 of 53, `tools/bench/frameboxes.js`), and the consoles of
+  scripts across frames and realms, read from a file and served over HTTP from two origins, line
+  for line (22, 9 and 11 lines); the facts and the diagnostics (`tests/integ/frames.sh`);
+  `tests/exec/frames` runs the pages' frames through the pipeline under valgrind.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

@@ -27,6 +27,9 @@ html_status html_parse_bytes(html_parser *p, dom_document *doc, const char *src,
 /* the scripting flag every parse from now on runs with (13.2.3.5): 1 for a page whose
    scripts run, its noscript elements' content then raw text; off unless set */
 void html_set_scripting(int on);
+/* every parse from now on of an iframe srcdoc document (1), whose DOCTYPE, or its lack,
+   sets no quirks mode and is no parse error (13.2.6.4.1); off unless set */
+void html_set_srcdoc(int on);
 
 /* the encoding a label names (ASCII white space trimmed, ASCII case ignored), or -1 */
 int html_enc_of_label(const char *label, size_t n);

@@ -1,0 +1,11 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+same http child /frames-http-child.html true
+cross null 0 true
+SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "http://127.0.0.1:PORT" from accessing a cross-origin frame.
+gone status 404
+lazy about:blank
+child at localhost got to the other origin http://127.0.0.1:PORT
+Failed to execute 'postMessage' on 'DOMWindow': The target origin provided ('http://example.com') does not match the recipient window's origin ('http://localhost:PORT').
+child at 127.0.0.1 got to the same origin http://127.0.0.1:PORT
+message reply from localhost http://localhost:PORT false
+message reply from 127.0.0.1 http://127.0.0.1:PORT true

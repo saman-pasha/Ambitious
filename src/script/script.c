@@ -215,6 +215,11 @@ void js_console(js_vm *vm, uint32_t level, uint32_t text) {
         vm->host->rt->console[c.index].run = vm->cur_run;
         vm->host->rt->console[c.index].level = level <= 4 ? (script_level)level : SCRIPT_LEVEL_LOG;
         vm->host->rt->console[c.index].text = sp;
+        /* its place in the page's order, among every frame's (src/script/frames.c) */
+        if (vm->host->fr) {
+            if (c.index >= len(vm->host->cseq)) resize(vm->host->cseq, (size_t)c.index + 1, 0u);
+            vm->host->cseq[c.index] = ++vm->host->fr->seq;
+        }
     }
     if (vm->echo) {
         push_back(t, '\n');
@@ -1693,6 +1698,11 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     if (kind == HK_NODE) {
         uint32_t x = sh_node(vm, jv_obj(o), 0);
         if (!x) { *handled = 1; return JV_HOLE; }
+        /* an iframe's frame: its window and document (src/script/frames.c) */
+        if (vm->host->fr && sh_named(vm->host->d, x, "iframe")) {
+            jv fw = script_frames_get(vm, x, atom, handled);
+            if (*handled) return fw;
+        }
         /* a form's controls by their names, before its own properties */
         if (sh_is_form(vm->host, x)) {
             jv el = script_form_named(vm, x, atom, handled);
@@ -2041,6 +2051,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     if (id >= SH_OBSERVE_FIRST && id < SH_OBSERVE_END) return script_observe_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_CUSTOM_FIRST && id < SH_CUSTOM_END) return script_custom_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_WINDOW_FIRST && id < SH_WINDOW_END) return script_window_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_FRAMES_FIRST && id < SH_FRAMES_END) return script_frames_call(vm, id, callee, thisv, args, argc, JV_UNDEF, handled);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
     /* location's: its href (a hidden part), navigations by it */
     if (id == H_LOC_STRING || id == H_LOC_HREF_GET || id == H_LOC_HASH_GET) {
@@ -2076,6 +2087,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         else if (kind == SH_TASK_SCRIPT) sh_run_pending(vm, arg);
         else if (kind == SH_TASK_HASH || kind == SH_TASK_NAV) script_input_task(vm, kind, arg);
         else if (kind == SH_TASK_TRAVERSE) script_window_task(vm, kind, arg);
+        else if (kind == SH_TASK_MESSAGE) script_frames_task(vm, kind, arg);
         return JV_UNDEF;
     }
     /* the window's own */
@@ -2623,6 +2635,7 @@ void script_input_roots(js_vm *vm, vector<jv> *out);
 void script_observe_roots(js_vm *vm, vector<jv> *out);
 void script_custom_roots(js_vm *vm, vector<jv> *out);
 void script_window_roots(js_vm *vm, vector<jv> *out);
+void script_frames_roots(js_vm *vm, vector<jv> *out);
 /* every engine value the page's host holds outside the VM's tables, which the collector
    marks as roots: this unit's (the prototypes, the live collections' objects, the task
    runner, location; and an object a listener of the VM's listens on, which the host fires
@@ -2644,6 +2657,7 @@ static void sh_roots(js_vm *vm, vector<jv> *out) {
     script_observe_roots(vm, out);
     script_custom_roots(vm, out);
     script_window_roots(vm, out);
+    script_frames_roots(vm, out);
 }
 
 /* the VM made for the page: the host's names, its prototypes, window and document */
@@ -2803,6 +2817,7 @@ static void sh_ready(js_vm *vm) {
     script_observe_setup(vm);
     script_custom_setup(vm);
     script_window_setup(vm);
+    if (h->fr) script_frames_setup(vm);
     sh_method(vm, h->protos[HP_SHADOWROOT], "getElementById", H_BY_ID, 1);
     js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
     js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(h->view_h), JS_SHAPE_HIDDEN);
@@ -3824,6 +3839,14 @@ static int sh_has_scripts(const dom_document *d) {
 }
 
 uint32_t script_run_page(js_vm *vm, double horizon) {
+    uint32_t ran = script_run_parse(vm);
+    script_run_load(vm, horizon);
+    return ran;
+}
+
+/* the parse's part of the page's run: its scripts, the deferred ones, DOMContentLoaded, the
+   async ones; a page without scripts makes no VM (a frame's parent may make it later) */
+uint32_t script_run_parse(js_vm *vm) {
     struct js_host *h = vm->host;
     dom_document *d = h->d;
     if (!sh_has_scripts(d)) return 0;
@@ -3938,14 +3961,47 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     vm->throwing = 0;
     sh_between(vm);
     sh_run_pending_all(vm);
+    return ran;
+}
+
+/* the load's part: the document complete, load at the window, then the timers as far as
+   horizon (those due now for 0; none for a horizon below 0: a page with frames runs its
+   frames' timers with its own, script_frames_run). Nothing for a VM never made (a page
+   without scripts, whose window none read) */
+void script_run_load(js_vm *vm, double horizon) {
+    struct js_host *h = vm->host;
+    if (!h->ready) return;
     h->phase = SCRIPT_PHASE_EVENT;
     h->ready = 3;
     sh_fire(vm, JS_WINDOW, "load", 0);
     vm->throwing = 0;
-    js_run_timers(vm, vm->now + horizon, 100000);
+    if (horizon >= 0) js_run_timers(vm, vm->now + horizon, 100000);
     vm->throwing = 0;
     sh_timers_seen(vm);
-    return ran;
+}
+
+/* load at the iframe x of the VM's document: its frame's document loaded */
+void script_frame_loaded(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    if (!h->ready || !sh_named(h->d, x, "iframe")) return;
+    uint32_t ph = h->phase;
+    h->phase = SCRIPT_PHASE_EVENT;
+    sh_fire(vm, x, "load", 0);
+    h->phase = ph;
+    vm->throwing = 0;
+    sh_checkpoint(vm);
+    vm->throwing = 0;
+}
+
+/* each timer recorded as the page comes to rest (script_frames_run's, for each frame) */
+void script_timers_record(js_vm *vm) {
+    if (vm->host && vm->host->ready) sh_timers_seen(vm);
+}
+
+uint32_t script_console_order(const js_vm *vm, uint32_t c) {
+    const struct js_host *h = vm->host;
+    if (!h || c >= len(h->cseq)) return 0;
+    return h->cseq[c];
 }
 
 int script_click(js_vm *vm, uint32_t x, double horizon) { return script_action(vm, SCRIPT_ACT_CLICK, x, "", 0, horizon); }

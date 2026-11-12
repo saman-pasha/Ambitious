@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-realm.html -- a frame's realm seen from its parent through the membrane
+     (Phase 12u, src/script/frames.c): a frame's variables, arrays (Array.isArray sees them),
+     nested objects, functions called with their arguments carried across, a class constructed
+     there (instanceof its own constructor, a getter run there), an error thrown there and
+     caught here, properties set, tested and deleted, Object.keys and JSON over a proxy, a
+     function of the parent's called from the frame's eval, the frame's document, and timers
+     set on either window run in one event loop in their order.
+     Reference: node tools/bench/console.js over this page (tests/pages/frames-realm.chromium). -->
+<html><head><title>p</title></head><body>
+<iframe id="a" srcdoc="<script>
+var list = [1, 2, 3];
+var obj = { n: 1, inner: { s: 'x' } };
+function thrower() { throw new TypeError('from a'); }
+function add(x, y) { return x + y; }
+var K = class { constructor(v) { this.v = v; } get double() { return this.v * 2; } };
+</script>"></iframe>
+<script>
+addEventListener('load', () => {
+  const w = frames[0];
+  console.log('values', w.list.length, w.list.join('+'), w.obj.inner.s, w.add(2, 3), typeof w.add, w.add.length);
+  try { w.thrower(); } catch (e) { console.log('caught', e.name, e.message, typeof e.stack); }
+  const k = new w.K(21);
+  console.log('class', k.v, k.double, k instanceof w.K, Object.keys(w.obj).join(','), JSON.stringify(w.obj));
+  w.obj.n = 5;
+  console.log('set', w.obj.n, 'n' in w.obj, delete w.obj.n, 'n' in w.obj);
+  console.log('arrays', Array.isArray(w.list), w.list.map((x) => x * 10).join(','));
+  w.callback = (x) => 'parent got ' + x;
+  console.log('callback', w.eval('callback(7)'));
+  console.log('document', w.document.body.childNodes.length, w.document.querySelector('script') !== null, w.document.defaultView === w);
+  setTimeout(() => console.log('timer in parent'), 5);
+  w.setTimeout(() => console.log('timer in frame, set by parent'), 1);
+});
+</script>
+</body></html>

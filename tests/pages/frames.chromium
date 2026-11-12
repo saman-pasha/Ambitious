@@ -1,0 +1,12 @@
+# boxes of tests/pages/frames.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+plain iframe 8 8 244 124
+sized iframe 258 8 164 94
+css iframe 428 8 198 88
+noborder iframe 632 8 120 70
+child iframe 8 138 224 114
+quirks iframe 238 138 224 114
+blank iframe 468 138 104 64
+missing iframe 578 138 104 64
+sandboxed iframe 8 258 164 84
+dark iframe 178 258 164 84
+outer iframe 348 258 334 154

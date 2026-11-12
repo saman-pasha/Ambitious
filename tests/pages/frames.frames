@@ -1,0 +1,18 @@
+# frames of tests/pages/frames.html in Chromium (tools/bench/frameboxes.js): frame, id, tag, x, y, width, height
+child c1 h3 5 5 210 22
+child c2 p 5 43 210 36
+child c3 b 5 61 33.766 17
+css p3 p 8 8 164 18
+dark p6 p 8 16 144 18
+noborder p4 p 10 8 100 18
+outer middle iframe 6 24 264 94
+outer o1 p 6 6 318 18
+outer/middle inner iframe 4 22 184 44
+outer/middle m1 p 4 4 252 18
+outer/middle/inner i1 p 8 8 164 18
+plain d1 div 8 50 112 40
+plain p1 p 8 16 224 18
+quirks q1 div 4 4 212 51
+sandboxed ns p 12 8 136 18
+sandboxed s5 p 12 30 136 18
+sized d2 div 4 4 80 45

@@ -130,7 +130,8 @@ names < "$work/proxy.log"
 : > "$work/proxy.log"
 echo "-- a tunnel the proxy refuses:"
 https_proxy=http://127.0.0.1:$proxy amb query "$eurl" "net_failure(R, Why), net_resource(R, U, _, O, _, _, _)"
-names < "$work/proxy.log"
+# the page's parts are fetched side by side: their tunnels in the log's order of arrival, sorted
+names < "$work/proxy.log" | sort
 : > "$work/proxy.log"
 echo "-- http_proxy: the page asked for in absolute form, with the proxy's credentials"
 http_proxy=http://amb:s%40fe@127.0.0.1:$proxy amb query "$eurl" "net_proxy(R, P), net_resource(R, U, _, O, _, _, _)"

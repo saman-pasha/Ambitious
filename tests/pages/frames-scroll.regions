@@ -1,0 +1,10 @@
+# tests/pages/frames-scroll.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+v 8 8 132 112
+h 140 8 304 92
+both 312 8 456 122
+text 464 8 668 102
+no 8 130 132 214
+hidden 140 130 264 214
+darkbars 272 130 416 234
+fits 424 130 568 234
+tall 576 130 670 354

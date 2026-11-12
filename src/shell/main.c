@@ -15,6 +15,8 @@
  *   ambitious parse PAGE          an HTML file parsed: its tree, its parse errors
  *   ambitious style PAGE          the page's elements with their computed styles
  *   ambitious render PAGE PNG     the page laid out in an 800x600 viewport and drawn
+ *   ambitious frames PAGE         each frame's elements with an id and their boxes in its
+ *                                 viewport (src/shell/frame.c: a page's iframes' documents)
  *   ambitious js FILE             a script run by the JavaScript engine with no page
  *   ambitious script PAGE         what the page's scripts did: each script and how it ended,
  *                                 its console and errors, the listeners and timers at rest
@@ -89,6 +91,7 @@ amb_interface(script);
 #include "../html/encoding.h"
 #include "../rt/amb_proc.h"
 #include "../rt/amb_prefs.h"
+#include "frame.h"
 
 /* the viewport a page is laid out in */
 #define VIEW_W 800.0
@@ -564,8 +567,8 @@ static int cmd_snapshot(const char *path) {
    scripts' engine, its host pointed at the stores there (src/script/script.h) */
 #define PAGE_STORES dom_document d; html_parser p; css_style st; layout_tree lt; net_loader nt; a11y_tree ax; \
     script_runtime sr; js_vm vm; struct js_host hs; SCRIPT_HOST(hs, vm, d, nt, sr); defer(vm) { JS_VM_DROP(vm); } \
-    defer(hs) { SCRIPT_HOST_DROP(hs); }
-#define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax, &sr, &vm
+    defer(hs) { SCRIPT_HOST_DROP(hs); } FRAME_STORES(fs, vm, hs); hs.fr = &fs.tab
+#define PAGE_ARGS &d, &p, &st, &lt, &nt, &ax, &sr, &vm, &fs
 /* the virtual time a page's timers run for before it is taken to be at rest, ms */
 #define SCRIPT_HORIZON 10000.0
 /* the reader's preferences, from the profile when there is one (its keeper's prefs):
@@ -765,7 +768,7 @@ static void page_state(css_style *st, dom_document *d) {
 }
 
 static uint32_t load_page(const session *s, const char *page, dom_document *d, html_parser *p, css_style *st, layout_tree *lt, net_loader *nt,
-                          a11y_tree *ax, script_runtime *sr, js_vm *vm) {
+                          a11y_tree *ax, script_runtime *sr, js_vm *vm, amb_frames *fs) {
     char url[4200];
     page_url(page, url, sizeof url);
     dom_init(d, 1);
@@ -818,15 +821,42 @@ static uint32_t load_page(const session *s, const char *page, dom_document *d, h
         }
     }
     net_fetch_subresources(nt, d, ph, denied);
-    /* the scripts (unless the site's are denied), the clicks asked for, then the page at rest */
+    /* the scripts (unless the site's are denied), the clicks asked for, then the page at rest.
+       A page with iframes (after its parse's scripts) is laid out, its frames made and loaded
+       in its iframes' boxes (src/shell/frame.c), then its load and every frame's timers run
+       as one event loop (Phase 12u) */
     vm->host->page = pr;
-    if (!(denied & (1u << NET_KIND_SCRIPT))) {
-        script_run_page(vm, page_horizon());
+    int scripts = !(denied & (1u << NET_KIND_SCRIPT));
+    if (scripts) script_run_parse(vm);
+    int framed = amb_frames_any(d);
+    if (framed) {
+        /* the page laid out for its frames' boxes, in stores of this block's: its own are
+           made once, at rest */
+        {
+            css_style pst;
+            layout_tree plt;
+            css_init(&pst, 1);
+            layout_init(&plt, 1);
+            page_cascade(&pst, d, nt, &s->prefs);
+            page_layout(&plt, d, &pst, nt, &s->prefs);
+            amb_frames_load(fs, d, &plt, nt, pr, s->prefs.font_size, s->prefs.color_scheme == AMB_SCHEME_DARK, s->prefs.reduced_motion, denied,
+                            scripts);
+        }
+        if (scripts) script_run_load(vm, -1);
+        script_frames_run(&fs->tab, page_horizon());
+        if (scripts) page_clicks(d, vm);
+        for (uint32_t k = 0; k < fs->tab.n; k++) script_settle(&fs->vm[k]);
+    } else if (scripts) {
+        script_run_load(vm, page_horizon());
         page_clicks(d, vm);
     }
     script_settle(vm);
     page_cascade(st, d, nt, &s->prefs);
     page_layout(lt, d, st, nt, &s->prefs);
+    if (framed) {
+        amb_frames_layout(fs, lt);
+        amb_frames_record(fs, nt);
+    }
     a11y_build(ax, d, st);
     char title[512], when[32];
     page_title(d, title, sizeof title);
@@ -918,6 +948,7 @@ static int cmd_render(const char *page, const char *png) {
     PAGE_SESSION;
     PAGE_STORES;
     if (!load_page(&s, page, PAGE_ARGS)) return 2;
+    amb_frames_paint(&fs, &st);
     amb_canvas c = {0};
     defer(c) { AMB_CANVAS_DROP(c); }
     page_paint(&lt, &nt, &c, &s.prefs);
@@ -929,6 +960,16 @@ static int cmd_render(const char *page, const char *png) {
     for (uint32_t i = 1; i < lt.frag_len; i++) if (lt.frag[i].live && lt.frag[i].kind == LAYOUT_FRAG_KIND_TEXT) texts++;
     printf("rendered %ux%u: %zu boxes, %zu lines, %zu text fragments; pixels fnv1a64:%016llx\n", c.w, c.h, box_count(lt), line_count(lt),
            texts, (unsigned long long)amb_canvas_hash(&c));
+    return 0;
+}
+
+/* each frame's elements with an id and their boxes, in its own viewport (tests/integ/frames.sh) */
+static int cmd_frames(const char *page) {
+    PAGE_SESSION;
+    PAGE_STORES;
+    if (!load_page(&s, page, PAGE_ARGS)) return 2;
+    amb_frames_print_boxes(&fs, &d, stdout);
+    printf("%u frame(s)\n", fs.tab.n);
     return 0;
 }
 
@@ -945,10 +986,11 @@ static int cmd_bench(const char *page, int n) {
     PAGE_SESSION;
     char url[4200];
     page_url(page, url, sizeof url);
-    double t[12];
+    double t[13];
     memset(t, 0, sizeof t);
-    static const char *const stage[12] = { "fetch the page", "parse", "fetch its resources", "scripts", "click", "cascade", "layout",
-                                           "accessibility tree", "paint", "paint the viewport", "encode the PNG", "export the snapshot" };
+    static const char *const stage[13] = { "fetch the page", "parse", "fetch its resources", "scripts", "click", "cascade", "layout",
+                                           "accessibility tree", "paint", "paint the viewport", "encode the PNG", "export the snapshot",
+                                           "frames" };
     size_t nodes = 0, boxes = 0, bytes = 0, snap_bytes = 0;
     char snap[700];
     session_path(&s, "bench.pl", snap, sizeof snap);
@@ -979,7 +1021,8 @@ static int cmd_bench(const char *page, int n) {
         net_fetch_subresources(&nt, &d, ph, 0);
         double e = now_ms();
         vm.host->page = ph.index;
-        script_run_page(&vm, horizon);
+        script_run_parse(&vm);
+        script_run_load(&vm, horizon);
         double e1 = now_ms();
         page_clicks(&d, &vm);
         double e2 = now_ms();
@@ -989,6 +1032,16 @@ static int cmd_bench(const char *page, int n) {
         double f = now_ms();
         page_layout(&lt, &d, &st, &nt, &s.prefs);
         double g = now_ms();
+        /* a page's frames (Phase 12u): made, loaded, run, laid out and drawn into the paint's
+           registry, as one stage (src/shell/frame.c) */
+        double fr0 = now_ms();
+        if (amb_frames_any(&d)) {
+            amb_frames_load(&fs, &d, &lt, &nt, ph.index, s.prefs.font_size, s.prefs.color_scheme == AMB_SCHEME_DARK, s.prefs.reduced_motion, 0, 1);
+            script_frames_run(&fs.tab, horizon);
+            amb_frames_layout(&fs, &lt);
+            amb_frames_paint(&fs, &st);
+        }
+        double fr1 = now_ms();
         a11y_build(&ax, &d, &st);
         double h = now_ms();
         amb_canvas cv = {0};
@@ -1006,8 +1059,9 @@ static int cmd_bench(const char *page, int n) {
         double j = now_ms();
         write_page_snapshot(&d, &p, &st, &lt, &nt, &ax, &sr, snap);
         double k = now_ms();
-        double dt[12] = { b - a, c - b, e - c, (e1 - e) + (e3 - e2), e2 - e1, f - e3, g - f, h - g, i - h, i2 - i, j - i2, k - j };
-        for (int q = 0; q < 12; q++) t[q] += dt[q];
+        double dt[13] = { b - a, c - b, e - c, (e1 - e) + (e3 - e2), e2 - e1, f - e3, g - f, h - g - (fr1 - fr0), i - h, i2 - i, j - i2, k - j,
+                          fr1 - fr0 };
+        for (int q = 0; q < 13; q++) t[q] += dt[q];
         nodes = node_count(d);
         boxes = box_count(lt);
         bytes = len(src);
@@ -1017,7 +1071,7 @@ static int cmd_bench(const char *page, int n) {
     printf("%s: %zu bytes, %zu nodes, %zu boxes; mean of %d run(s)\n", url, bytes, nodes, boxes, n);
     double total = 0;
     /* the engine's total: every stage but the viewport's paint, which repeats the page's */
-    for (int q = 0; q < 12; q++) { if (q != 9) total += t[q] / n; printf("  %-22s %9.2f ms\n", stage[q], t[q] / n); }
+    for (int q = 0; q < 13; q++) { if (q != 9) total += t[q] / n; printf("  %-22s %9.2f ms\n", stage[q], t[q] / n); }
     printf("  %-22s %9.2f ms\n", "the engine, in all", total);
     /* the reasoner, a process of its own: loading and checking the snapshot, then advising */
     char out[700];
@@ -1103,17 +1157,37 @@ static int cmd_script(const char *page) {
         else print_elem(&d, sr.run[r].elem);
         printf("\n");
     }
+    /* the page's console, and each frame's, in the order their messages came (frame 0 the
+       page's; a frame's messages say its number) */
+    uint32_t next = 1, total = fs.tab.seq;
     for (uint32_t c = 1; c < sr.console_len; c++) {
-        if (!sr.console[c].live) continue;
+        if (!sr.console[c].live || (total && script_console_order(&vm, c))) continue;
         cons++;
         amb_span t = sr.console[c].text;
         printf("console %-5s [%u] %.*s\n", script_level_name(sr.console[c].level), sr.console[c].run, (int)t.len, text_ptr(&sr, t));
     }
-    for (uint32_t e = 1; e < sr.error_len; e++) {
-        if (!sr.error[e].live) continue;
-        errs++;
-        amb_span t = sr.error[e].message;
-        printf("error   %-6s [%u] %.*s\n", script_phase_name(sr.error[e].phase), sr.error[e].run, (int)t.len, text_ptr(&sr, t));
+    for (; next <= total; next++) {
+        for (uint32_t k = 0; k <= fs.tab.n; k++) {
+            const script_runtime *rt = k ? &fs.sr[k - 1] : &sr;
+            const js_vm *v = k ? &fs.vm[k - 1] : &vm;
+            for (uint32_t c = 1; c < rt->console_len; c++) {
+                if (!rt->console[c].live || script_console_order(v, c) != next) continue;
+                cons++;
+                amb_span t = rt->console[c].text;
+                if (k) printf("console %-5s [%u.%u] %.*s\n", script_level_name(rt->console[c].level), k, rt->console[c].run, (int)t.len, text_ptr(rt, t));
+                else printf("console %-5s [%u] %.*s\n", script_level_name(rt->console[c].level), rt->console[c].run, (int)t.len, text_ptr(rt, t));
+            }
+        }
+    }
+    for (uint32_t k = 0; k <= fs.tab.n; k++) {
+        const script_runtime *rt = k ? &fs.sr[k - 1] : &sr;
+        for (uint32_t e = 1; e < rt->error_len; e++) {
+            if (!rt->error[e].live) continue;
+            errs++;
+            amb_span t = rt->error[e].message;
+            if (k) printf("error   %-6s [%u.%u] %.*s\n", script_phase_name(rt->error[e].phase), k, rt->error[e].run, (int)t.len, text_ptr(rt, t));
+            else printf("error   %-6s [%u] %.*s\n", script_phase_name(rt->error[e].phase), rt->error[e].run, (int)t.len, text_ptr(rt, t));
+        }
     }
     for (uint32_t l = 1; l < sr.listener_len; l++) {
         if (!sr.listener[l].live) continue;
@@ -1786,6 +1860,7 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "parse") == 0) return cmd_parse(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "style") == 0) return cmd_style(argv[2]);
     if (argc >= 4 && strcmp(argv[1], "render") == 0) return cmd_render(argv[2], argv[3]);
+    if (argc >= 3 && strcmp(argv[1], "frames") == 0) return cmd_frames(argv[2]);
     if (argc >= 3 && strcmp(argv[1], "bench") == 0) return cmd_bench(argv[2], argc >= 4 ? atoi(argv[3]) > 0 ? atoi(argv[3]) : 1 : 5);
     if (argc >= 3 && strcmp(argv[1], "inspect") == 0)
         return cmd_inspect(argv[2], argc >= 5 && (strcmp(argv[3], "--query") == 0 || strcmp(argv[3], "--why") == 0) ? argv[3] : 0,

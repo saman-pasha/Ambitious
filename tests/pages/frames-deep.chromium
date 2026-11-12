@@ -1,0 +1,3 @@
+# boxes of tests/pages/frames-deep.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+f1 iframe 8 8 344 564
+self iframe 360 8 304 404

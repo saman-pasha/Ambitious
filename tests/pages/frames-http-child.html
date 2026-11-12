@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-http-child.html -- the document tests/pages/frames-http.html frames from
+     both origins: it answers each message to its sender's origin -->
+<html><head><title>http child</title></head><body>
+<p id="x">child</p>
+<script>
+addEventListener('message', (e) => {
+  console.log('child at ' + location.hostname + ' got', e.data, e.origin);
+  e.source.postMessage('reply from ' + location.hostname, e.origin);
+});
+</script>
+</body></html>

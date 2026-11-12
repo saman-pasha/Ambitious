@@ -1611,6 +1611,66 @@ static void pt_round_clip(amb_canvas *c, int kx0, int ky0, int kx1, int ky1, con
         }
 }
 
+/* ---- a page's frames (Phase 12u, src/shell/frame.c) ----
+   Each iframe's drawing, its frame's document drawn at its content box's size over black
+   and over white: its document's number and the iframe's index, its size, its pixels (RGB,
+   the black's then the white's) at off in pt_fpx. Kept until the page's frames are
+   forgotten; dropped when the process exits */
+typedef struct pt_frame { uint32_t doc, node, w, h; size_t off; } pt_frame;
+static vector<pt_frame> pt_frames;
+static vector<uint8_t> pt_fpx;
+static int pt_frames_kept;
+static void pt_frames_drop(void) {
+    vector_pt_frame_drop(&pt_frames);
+    vector_uint8_t_drop(&pt_fpx);
+}
+void amb_paint_frame_put(uint32_t doc, uint32_t node, const amb_canvas *b, const amb_canvas *w) {
+    if (b->w != w->w || b->h != w->h || len(b->px) != (size_t)b->w * b->h * 3 || len(w->px) != len(b->px)) return;
+    if (!pt_frames_kept) {
+        pt_frames_kept = 1;
+        atexit(pt_frames_drop);
+    }
+    pt_frame f = { doc, node, b->w, b->h, len(pt_fpx) };
+    append_range(pt_fpx, data(b->px), len(b->px));
+    append_range(pt_fpx, data(w->px), len(w->px));
+    push_back(pt_frames, f);
+}
+void amb_paint_frames_forget(void) {
+    clear(pt_frames);
+    clear(pt_fpx);
+}
+/* the iframe of box b's frame drawn in its content box, its origin at the whole px nearest,
+   over what is there: what the frame left transparent (its pixel over black and over white
+   apart) shows the page through. 1 when the box has a frame's drawing */
+static int pt_frame_draw(amb_canvas *c, const layout_tree *t, uint32_t b) {
+    uint32_t doc = t->box[b].node.doc, node = t->box[b].node.index;
+    for (size_t i = 0; i < len(pt_frames); i++) {
+        pt_frame f = at(pt_frames, i);
+        if (f.doc != doc || f.node != node) continue;
+        int ox = (int)floor(t->box[b].x + 0.5), oy = (int)floor(t->box[b].y - c->oy + 0.5);
+        int kx0, ky0, kx1, ky1;
+        pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+        /* the rows and columns of the drawing within the clip */
+        int x0 = kx0 > ox ? kx0 - ox : 0, x1 = kx1 - ox < (int)f.w ? kx1 - ox : (int)f.w;
+        int y0 = ky0 > oy ? ky0 - oy : 0, y1 = ky1 - oy < (int)f.h ? ky1 - oy : (int)f.h;
+        if (x1 <= x0 || y1 <= y0) return 1;
+        size_t n = (size_t)f.w * f.h * 3;
+        for (int y = y0; y < y1; y++) {
+            size_t lo = f.off + ((size_t)y * f.w + (size_t)x0) * 3;
+            size_t q = ((size_t)(oy + y) * c->w + (size_t)(ox + x0)) * 3;
+            size_t m = (size_t)(x1 - x0) * 3;
+            for (size_t i = 0; i < m; i++) {
+                int a = pt_fpx[lo + i], z = pt_fpx[lo + n + i];
+                if (a == z) { c->px[q + i] = (uint8_t)a; continue; }      /* opaque there */
+                int v = a + ((z - a) * c->px[q + i] + 127) / 255;
+                c->px[q + i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
 /* the image the loader fetched for an element, decoded into rgba: 1 when it was; -1 when
    its load failed; 0 when there is none or its bytes are no image this decodes */
 static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h, double *nw, double *nh) {
@@ -2226,8 +2286,9 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         vector<uint8_t> rgba;
         uint32_t iw, ih;
         double inw, inh;
-        int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih, &inw, &inh);
-        if (got > 0) pt_fit_image(c, t, b, &rgba, iw, ih, inw, inh);
+        int got = pt_frame_draw(c, t, b) ? 2 : pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih, &inw, &inh);
+        if (got == 2) {}
+        else if (got > 0) pt_fit_image(c, t, b, &rgba, iw, ih, inw, inh);
         /* its icon before its alt text; a box of its own (no alt text, or quirks mode's of a declared size, its baseline
            its content box's bottom: has_baseline) with its border and icon */
         else if ((got < 0 || t->box[b].unsourced) && t->box[b].first_line && !t->box[b].has_baseline)

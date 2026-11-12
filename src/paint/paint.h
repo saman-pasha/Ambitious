@@ -31,6 +31,14 @@ void amb_paint_zoom(const layout_tree *t, const net_loader *nt, amb_canvas *c, d
 /* a page drawn at its CSS px (src) scaled onto dst, z device px each (bilinear) */
 void amb_canvas_zoom(const amb_canvas *src, amb_canvas *dst, double z);
 
+/* a page's frames (src/shell/frame.c, Phase 12u): the drawing of the iframe element node
+   of the document doc, its frame's document drawn at its content box's size over black (b)
+   and over white (w), kept until the frames are forgotten. Paint draws it as the iframe's
+   content, over what lies under its content box: b + (w - b) x under / 255, so what the
+   frame left transparent shows the page through; clipped as replaced content is */
+void amb_paint_frame_put(uint32_t doc, uint32_t node, const amb_canvas *b, const amb_canvas *w);
+void amb_paint_frames_forget(void);
+
 /* the canvas as a PNG (8-bit RGB, deflated); 0 on a write error */
 int amb_png_write(const amb_canvas *c, FILE *out);
 
