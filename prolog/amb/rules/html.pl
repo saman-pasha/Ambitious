@@ -14,12 +14,13 @@ html_diag(parse_error, E, Text) :-
 
 %% the document's encoding (src/html/encoding.c). A page that declares none -- no byte
 %% order mark, no charset from its server, no meta or XML declaration -- and whose
-%% bytes are not all ASCII was read in a guessed encoding: its text depends on it
+%% bytes are not all ASCII was read in a guessed encoding (UTF-8 for a file that is, else
+%% the likeliest by its letters, else windows-1252): its text depends on it
 :- dynamic html_encoding/2, html_decoding/2.
 
 html_diag(undeclared_encoding, Name, Text) :-
     html_encoding(Name, Source),
-    memberchk(Source-How, [default-'the default', detected-'as the file''s bytes suggest']),
+    memberchk(Source-How, [default-'the default', detected-'as its bytes suggest']),
     html_decoding(false, _),
     format(atom(Text), 'the page declares no encoding and is not ASCII: it was decoded as ~w, ~w (<meta charset> declares one)', [Name, How]).
 %% bytes the encoding's decoder found malformed, each sequence now a U+FFFD

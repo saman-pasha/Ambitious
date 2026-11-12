@@ -821,9 +821,15 @@ SNIFF = [
     (0, "", b"</ meta charset=koi8-r>", "windows-1252", "default"),
     (0, "", b"<meta charset=\"koi8-r", "windows-1252", "default"),          # the bytes run out
     (0, "", b"<!-- <meta charset=koi8-r>", "windows-1252", "default"),
-    # the end condition: the first 1024 bytes
-    (0, "", b"<!--" + b"x" * 1012 + b"--><meta charset=koi8-r>", "windows-1252", "default"),
+    # the end condition: the first 1024 bytes; past them, a meta the tree builder meets
+    # while the document is in its head section (Blink's look reads on), not one after a
+    # tag no head holds
+    (0, "", b"<!--" + b"x" * 1012 + b"--><meta charset=koi8-r>", "KOI8-R", "meta"),
     (0, "", b"<!--" + b"x" * 990 + b"--><meta charset=koi8-r>", "KOI8-R", "meta"),
+    (0, "", b"<title>t</title><script>" + b"x" * 1100 + b"</script><meta charset=koi8-r>", "KOI8-R", "meta"),
+    (0, "", b"<script>'<p>'" + b"x" * 1100 + b"</script><meta charset=koi8-r>", "KOI8-R", "meta"),
+    (0, "", b"<body><p>" + b"x" * 1100 + b"<meta charset=koi8-r>", "windows-1252", "default"),
+    (0, "", b"</head>" + b"x" * 1100 + b"<meta charset=koi8-r>", "windows-1252", "default"),
     # XML declarations
     (0, "", b"<?xml version=\"1.0\" encoding=\"windows-1251\"?><p>", "windows-1251", "xml"),
     (0, "", b"<?xml version='1.0' encoding = 'KOI8-R' ?>", "KOI8-R", "xml"),
@@ -835,14 +841,24 @@ SNIFF = [
     (0, "", b"<?xml version=\"1.0\" encoding=\"koi8-r\"?><meta charset=gbk>", "GBK", "meta"),
     (0, "", "<?xml version=\"1.0\"?>".encode("utf-16-le"), "UTF-16LE", "xml"),
     (0, "", "<?xml version=\"1.0\"?>".encode("utf-16-be"), "UTF-16BE", "xml"),
-    # nothing declared: UTF-8 detected in a local file's bytes, else the default
+    # nothing declared: UTF-8 detected in a local file's bytes (ten bytes of its
+    # sequences to a byte in error will do), else the encoding its letters suggest, else
+    # the default
     (1, "", A, "UTF-8", "detected"),
     (0, "", A, "windows-1252", "default"),
     (1, "", L1, "windows-1252", "default"),
     (1, "", b"plain ascii", "windows-1252", "default"),
     (1, "", b"", "windows-1252", "default"),
     (1, "", b"<meta charset=koi8-r>" + A, "KOI8-R", "meta"),
-    (1, "", A + b"\xff", "windows-1252", "default"),
+    (1, "", A + b"\xff", "UTF-8", "detected"),
+    (1, "", b"caf\xe9 and caf\xc3\xa9", "windows-1252", "default"),
+    (0, "", "Это проверка кодировки.".encode("cp1251"), "windows-1251", "detected"),
+    (0, "", "Это проверка кодировки.".encode("koi8_r"), "KOI8-R", "detected"),
+    (0, "", "да".encode("cp1251"), "windows-1251", "detected"),
+    (0, "", "Zażółć gęślą jaźń.".encode("cp1250"), "windows-1250", "detected"),
+    (0, "", "日本語のテキストです。".encode("shift_jis"), "Shift_JIS", "detected"),
+    (0, "", "日本語のテキストです。".encode("iso2022_jp"), "windows-1252", "default"),   # a 7-bit encoding is not guessed
+    (0, "", b"abc \xc3\xa9\xc3\xa8 \xe6\x97\xa5\xe6\x9c\xac\xff", "windows-1252", "default"),    # mojibake: no reading is a text
 ]
 for file, typ, data, name, source in SNIFF:
     sniff(file, typ, data, name, source)

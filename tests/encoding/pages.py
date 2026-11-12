@@ -57,6 +57,53 @@ FIXTURES = [
      page("", "UTF-8", "<h1>UTF-8 with nothing to say so</h1>\n<p>café, naïve, 日本語, 😀.</p>")),
     ("enc-replacement", "ascii",
      page("<meta charset=\"iso-2022-kr\">", "replaced", "<h1>ISO-2022-KR is the replacement encoding</h1>\n<p>every byte</p>")),
+    # a meta past the first 1024 bytes, which the prescan does not reach: the tree builder
+    # meets it while the encoding is tentative, and the parse starts again in its encoding
+    ("enc-late-meta", "cp1251",
+     page("<style>/* " + "a style sheet that is long enough to put the meta after the first 1024 bytes. " * 14 + "*/</style>"
+          "<meta charset=\"windows-1251\">", "Поздно",
+          "<p>Кодировка объявлена поздно, но документ всё равно читается в ней.</p>")),
+]
+# nothing declares the encoding: Chromium's detector guesses it from the bytes. A data:
+# URL, as a page served over HTTP, has no UTF-8 guessed (a file has)
+DETECT = [
+    ("enc-detect-shift_jis", "shift_jis", "日本語のテキストです。これは文字コードの自動判定のための試験用の文書であり、ひらがなとカタカナと漢字を含みます。東京都千代田区。"),
+    ("enc-detect-euc-jp", "euc_jp", "日本語のテキストです。これは文字コードの自動判定のための試験用の文書であり、ひらがなとカタカナと漢字を含みます。東京都千代田区。"),
+    ("enc-detect-euc-kr", "euc_kr", "한국어 텍스트입니다. 이것은 문자 인코딩 자동 감지를 위한 시험용 문서이며 한글과 숫자를 포함합니다. 서울특별시 종로구."),
+    ("enc-detect-gbk", "gbk", "这是中文文本。这是一个用于字符编码自动检测的测试文档，其中包含汉字和标点符号。北京市海淀区中关村大街。"),
+    ("enc-detect-big5", "big5", "這是中文文本。這是一個用於字元編碼自動偵測的測試文件，其中包含漢字和標點符號。臺北市大安區。"),
+    ("enc-detect-windows-1251", "cp1251", "Это проверка автоматического определения кодировки документа. Москва, улица Тверская, дом семь."),
+    ("enc-detect-koi8-r", "koi8_r", "Это проверка автоматического определения кодировки документа. Москва, улица Тверская, дом семь."),
+    ("enc-detect-windows-1252", "cp1252", "Grüße aus Köln, café crème brûlée, naïve façade, déjà vu, señor."),
+    ("enc-detect-windows-1253", "cp1253", "Αυτός είναι ένας έλεγχος της αυτόματης αναγνώρισης της κωδικοποίησης του εγγράφου. Αθήνα, οδός Πανεπιστημίου."),
+    ("enc-detect-windows-1255", "cp1255", "זוהי בדיקה של זיהוי אוטומטי של קידוד המסמך. ירושלים, רחוב יפו, בית מספר שבע."),
+    ("enc-detect-windows-1256", "cp1256", "هذا اختبار للكشف التلقائي عن ترميز المستند. القاهرة، شارع التحرير، المنزل رقم سبعة."),
+    ("enc-detect-windows-874", "cp874", "นี่คือการทดสอบการตรวจหาการเข้ารหัสของเอกสารโดยอัตโนมัติ กรุงเทพมหานคร ถนนสุขุมวิท"),
+    ("enc-detect-windows-1250", "cp1250", "Rząd ogłosił w środę pakiet działań mających zmniejszyć zużycie energii zimą. Szkoły zostaną ponownie otwarte po świętach."),
+    ("enc-detect-iso-8859-2", "iso8859_2", "Zażółć gęślą jaźń. To jest sprawdzenie automatycznego rozpoznawania kodowania dokumentu. Warszawa, ulica Marszałkowska."),
+    ("enc-detect-windows-1254", "cp1254", "Hükümet çarşamba günü kışın enerji tüketimini azaltmaya yönelik bir dizi önlem açıkladı. Okullar bayramdan sonra yeniden açılacak."),
+    ("enc-detect-windows-1257", "cp1257", "Vyriausybė trečiadienį paskelbė priemonių rinkinį, kuriuo siekiama žiemą sumažinti energijos suvartojimą."),
+    ("enc-detect-iso-8859-5", "iso8859_5", "Правительство в среду объявило о ряде мер, направленных на снижение потребления энергии зимой."),
+    ("enc-detect-ibm866", "cp866", "Правительство в среду объявило о ряде мер, направленных на снижение потребления энергии зимой."),
+    ("enc-detect-koi8-u", "koi8_u", "Уряд у середу оголосив низку заходів, спрямованих на зменшення споживання енергії взимку. Їжак і ґанок."),
+    ("enc-detect-greek-tonos", "cp1253", "Άρτα, Έδεσσα, Ήπειρος, Ίος, Όλυμπος, Ύδρα, Ώρα. Αυτός είναι ένας έλεγχος της αυτόματης αναγνώρισης."),
+    ("enc-detect-iso-8859-6", "iso8859_6", "أعلنت الحكومة يوم الأربعاء عن مجموعة من الإجراءات الرامية إلى خفض استهلاك الطاقة خلال فصل الشتاء."),
+    ("enc-detect-capitals-koi8-r", "koi8_r", "ЭТО ПРОВЕРКА АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ КОДИРОВКИ ДОКУМЕНТА."),
+    ("enc-detect-kanji-euc-jp", "euc_jp", "東京都千代田区"),
+    ("enc-detect-punctuation", "cp1252", "It’s a “test” — nothing more…"),
+    ("enc-detect-utf-8", "utf-8", "Grüße aus Köln, café crème brûlée. Это проверка кодировки. 日本語のテキストです。"),
+]
+
+# a meta past the first 1024 bytes: Blink honours it while the document is in its head
+# section (KOI8-R here over windows-1251's bytes, so that the guess would not name it), not
+# once a tag no head holds has started the body
+PAD = "<p>" + "Plain text in the body before any declaration. " * 30 + "</p>"
+RU = "<p>Кодировка объявлена поздно, но документ всё равно читается в ней.</p>"
+LATE = [
+    ("enc-late-head", "<!DOCTYPE html><title>t</title><script>/* " + "x" * 3000 + " */</script><meta charset=\"koi8-r\"><body>" + RU),
+    ("enc-late-text", "<!DOCTYPE html><title>t</title>Some text " + "y" * 1100 + "<meta charset=\"koi8-r\">" + RU),
+    ("enc-late-body", "<!DOCTYPE html><title>t</title><body>" + PAD + "<meta charset=\"koi8-r\">" + RU),
+    ("enc-late-comment", "<!DOCTYPE html><title>t</title><body><div><span></span><!-- " + "z" * 1100 + " --><meta charset=\"koi8-r\">" + RU),
 ]
 
 with open(os.path.join(HERE, "pages.txt"), "w") as manifest:
@@ -76,3 +123,8 @@ with open(os.path.join(HERE, "pages.txt"), "w") as manifest:
     # the transport layer's charset: a data: URL's type (net records it as the resource's type)
     koi = "<!DOCTYPE html><title>КОИ8-Р</title><p>Широкая электрификация южных губерний даст мощный толчок подъёму сельского хозяйства.</p>"
     manifest.write("enc-http-koi8-r data:text/html;charset=KOI8-R,%s\n" % urllib.parse.quote(koi.encode("koi8_r"), safe=""))
+    for name, codec, text in DETECT:
+        body = page("", "t", "<p>" + text + "</p>").encode(codec)
+        manifest.write("%s data:text/html,%s\n" % (name, urllib.parse.quote(body, safe="")))
+    for name, text in LATE:
+        manifest.write("%s data:text/html,%s\n" % (name, urllib.parse.quote(text.encode("cp1251"), safe="")))

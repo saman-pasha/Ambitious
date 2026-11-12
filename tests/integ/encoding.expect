@@ -63,6 +63,11 @@ E = replacement, S = meta, A = true, N = 1
 T = �
 the encoding is Chromium's
 the text is Chromium's: 1 code point
+-- enc-late-meta
+E = 'windows-1251', S = meta, A = false, N = 0
+T = '\nКодировка объявлена поздно, но документ всё равно читается в ней.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 68 code points
 -- enc-utf-8-errors
 E = 'UTF-8', S = meta, A = false, N = 7
 T = '\na�b, cut �, surrogate ���, overlong ��, fine 😀\n\n'
@@ -73,9 +78,154 @@ E = 'KOI8-R', S = http, A = false, N = 0
 T = 'Широкая электрификация южных губерний даст мощный толчок подъёму сельского хозяйства.'
 the encoding is Chromium's
 the text is Chromium's: 85 code points
+-- enc-detect-shift_jis
+E = 'Shift_JIS', S = detected, A = false, N = 0
+T = '\n日本語のテキストです。これは文字コードの自動判定のための試験用の文書であり、ひらがなとカタカナと漢字を含みます。東京都千代田区。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 67 code points
+-- enc-detect-euc-jp
+E = 'EUC-JP', S = detected, A = false, N = 0
+T = '\n日本語のテキストです。これは文字コードの自動判定のための試験用の文書であり、ひらがなとカタカナと漢字を含みます。東京都千代田区。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 67 code points
+-- enc-detect-euc-kr
+E = 'EUC-KR', S = detected, A = false, N = 0
+T = '\n한국어 텍스트입니다. 이것은 문자 인코딩 자동 감지를 위한 시험용 문서이며 한글과 숫자를 포함합니다. 서울특별시 종로구.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 70 code points
+-- enc-detect-gbk
+E = 'GBK', S = detected, A = false, N = 0
+T = '\n这是中文文本。这是一个用于字符编码自动检测的测试文档，其中包含汉字和标点符号。北京市海淀区中关村大街。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 54 code points
+-- enc-detect-big5
+E = 'Big5', S = detected, A = false, N = 0
+T = '\n這是中文文本。這是一個用於字元編碼自動偵測的測試文件，其中包含漢字和標點符號。臺北市大安區。\n\n'
+the encoding is Chromium's
+the text is Chromium's: 49 code points
+-- enc-detect-windows-1251
+E = 'windows-1251', S = detected, A = false, N = 0
+T = '\nЭто проверка автоматического определения кодировки документа. Москва, улица Тверская, дом семь.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 98 code points
+-- enc-detect-koi8-r
+E = 'KOI8-R', S = detected, A = false, N = 0
+T = '\nЭто проверка автоматического определения кодировки документа. Москва, улица Тверская, дом семь.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 98 code points
+-- enc-detect-windows-1252
+E = 'windows-1252', S = default, A = false, N = 0
+T = '\nGrüße aus Köln, café crème brûlée, naïve façade, déjà vu, señor.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 67 code points
+-- enc-detect-windows-1253
+E = 'ISO-8859-7', S = detected, A = false, N = 0
+T = '\nΑυτός είναι ένας έλεγχος της αυτόματης αναγνώρισης της κωδικοποίησης του εγγράφου. Αθήνα, οδός Πανεπιστημίου.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 112 code points
+-- enc-detect-windows-1255
+E = 'windows-1255', S = detected, A = false, N = 0
+T = '\nזוהי בדיקה של זיהוי אוטומטי של קידוד המסמך. ירושלים, רחוב יפו, בית מספר שבע.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 79 code points
+-- enc-detect-windows-1256
+E = 'windows-1256', S = detected, A = false, N = 0
+T = '\nهذا اختبار للكشف التلقائي عن ترميز المستند. القاهرة، شارع التحرير، المنزل رقم سبعة.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 86 code points
+-- enc-detect-windows-874
+E = 'windows-874', S = detected, A = false, N = 0
+T = '\nนี่คือการทดสอบการตรวจหาการเข้ารหัสของเอกสารโดยอัตโนมัติ กรุงเทพมหานคร ถนนสุขุมวิท\n\n'
+the encoding is Chromium's
+the text is Chromium's: 84 code points
+-- enc-detect-windows-1250
+E = 'windows-1250', S = detected, A = false, N = 0
+T = '\nRząd ogłosił w środę pakiet działań mających zmniejszyć zużycie energii zimą. Szkoły zostaną ponownie otwarte po świętach.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 125 code points
+-- enc-detect-iso-8859-2
+E = 'ISO-8859-2', S = detected, A = false, N = 0
+T = '\nZażółć gęślą jaźń. To jest sprawdzenie automatycznego rozpoznawania kodowania dokumentu. Warszawa, ulica Marszałkowska.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 122 code points
+-- enc-detect-windows-1254
+E = 'windows-1254', S = detected, A = false, N = 0
+T = '\nHükümet çarşamba günü kışın enerji tüketimini azaltmaya yönelik bir dizi önlem açıkladı. Okullar bayramdan sonra yeniden açılacak.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 133 code points
+-- enc-detect-windows-1257
+E = 'windows-1257', S = detected, A = false, N = 0
+T = '\nVyriausybė trečiadienį paskelbė priemonių rinkinį, kuriuo siekiama žiemą sumažinti energijos suvartojimą.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 108 code points
+-- enc-detect-iso-8859-5
+E = 'ISO-8859-5', S = detected, A = false, N = 0
+T = '\nПравительство в среду объявило о ряде мер, направленных на снижение потребления энергии зимой.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 97 code points
+-- enc-detect-ibm866
+E = 'IBM866', S = detected, A = false, N = 0
+T = '\nПравительство в среду объявило о ряде мер, направленных на снижение потребления энергии зимой.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 97 code points
+-- enc-detect-koi8-u
+E = 'KOI8-U', S = detected, A = false, N = 0
+T = '\nУряд у середу оголосив низку заходів, спрямованих на зменшення споживання енергії взимку. Їжак і ґанок.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 106 code points
+-- enc-detect-greek-tonos
+E = 'windows-1253', S = detected, A = false, N = 0
+T = '\nΆρτα, Έδεσσα, Ήπειρος, Ίος, Όλυμπος, Ύδρα, Ώρα. Αυτός είναι ένας έλεγχος της αυτόματης αναγνώρισης.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 102 code points
+-- enc-detect-iso-8859-6
+E = 'ISO-8859-6', S = detected, A = false, N = 0
+T = '\nأعلنت الحكومة يوم الأربعاء عن مجموعة من الإجراءات الرامية إلى خفض استهلاك الطاقة خلال فصل الشتاء.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 100 code points
+-- enc-detect-capitals-koi8-r
+E = 'KOI8-R', S = detected, A = false, N = 0
+T = '\nЭТО ПРОВЕРКА АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ КОДИРОВКИ ДОКУМЕНТА.\n\n'
+the encoding is Chromium's
+the text is Chromium's: 64 code points
+-- enc-detect-kanji-euc-jp
+E = 'EUC-JP', S = detected, A = false, N = 0
+T = '\n東京都千代田区\n\n'
+the encoding is Chromium's
+the text is Chromium's: 10 code points
+-- enc-detect-punctuation
+E = 'windows-1252', S = default, A = false, N = 0
+T = '\nIt’s a “test” — nothing more…\n\n'
+the encoding is Chromium's
+the text is Chromium's: 32 code points
+-- enc-detect-utf-8
+E = 'windows-1252', S = default, A = false, N = 0
+T = '\nGrÃ¼ÃŸe aus KÃ¶ln, cafÃ© crÃ¨me brÃ»lÃ©e. Ð\xAD\Ñ‚Ð¾ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° ÐºÐ¾Ð´Ð¸Ñ€Ð¾Ð²ÐºÐ¸. æ—¥æœ¬èªžã\x81\®ãƒ†ã‚\xAD\ã‚¹ãƒˆã\x81\§ã\x81\™ã€‚\n\n'
+the encoding is Chromium's
+the text is Chromium's: 122 code points
+-- enc-late-head
+E = 'KOI8-R', S = meta, A = false, N = 0
+T = 'йНДХПНБЙЮ НАЗЪБКЕМЮ ОНГДМН, МН ДНЙСЛЕМР БЯ╦ ПЮБМН ВХРЮЕРЯЪ Б МЕИ.'
+the encoding is Chromium's
+the text is Chromium's: 65 code points
+-- enc-late-text
+E = 'KOI8-R', S = meta, A = false, N = 0
+T = 'Some text yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyйНДХПНБЙЮ НАЗЪБКЕМЮ ОНГДМН, МН ДНЙСЛЕМР БЯ╦ ПЮБМН ВХРЮЕРЯЪ Б МЕИ.'
+the encoding is Chromium's
+the text is Chromium's: 1175 code points
+-- enc-late-body
+E = 'windows-1251', S = detected, A = false, N = 0
+T = 'Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Plain text in the body before any declaration. Кодировка объявлена поздно, но документ всё равно читается в ней.'
+the encoding is Chromium's
+the text is Chromium's: 1475 code points
+-- enc-late-comment
+E = 'windows-1251', S = detected, A = false, N = 0
+T = 'Кодировка объявлена поздно, но документ всё равно читается в ней.'
+the encoding is Chromium's
+the text is Chromium's: 65 code points
 -- the diagnostics: what declares no encoding, what is malformed
 enc-windows-1252: amb_diag(undeclared_encoding, 'windows-1252', 'the page declares no encoding and is not ASCII: it was decoded as windows-1252, the default (<meta charset> declares one)').
-enc-utf-8-undeclared: amb_diag(undeclared_encoding, 'UTF-8', 'the page declares no encoding and is not ASCII: it was decoded as UTF-8, as the file\'s bytes suggest (<meta charset> declares one)').
+enc-utf-8-undeclared: amb_diag(undeclared_encoding, 'UTF-8', 'the page declares no encoding and is not ASCII: it was decoded as UTF-8, as its bytes suggest (<meta charset> declares one)').
 enc-utf-8-errors: amb_diag(malformed_bytes, 'UTF-8', '7 byte sequence(s) are not UTF-8: each became U+FFFD').
 enc-replacement: amb_diag(replaced_encoding, replacement, 'the page\'s encoding is one the Encoding standard replaces: its text is a single U+FFFD').
 enc-shift_jis: none of the encoding's

@@ -638,7 +638,18 @@ be built side by side and merged without touching each other's.
   single-byte encodings, and Shift_JIS, EUC-JP, ISO-2022-JP, GBK and
   gb18030, Big5 and EUC-KR. The encoding is sniffed from the BOM, the HTTP
   charset, then a meta prescan, else windows-1252. A document is transcoded
-  to UTF-8 before the tokenizer, and its encoding is a fact.
+  to UTF-8 before the tokenizer, and its encoding is a fact. Then:
+  - a meta past the first 1024 bytes counts while the document is in its
+    head section, as Blink's look for one reads on (the tree builder's
+    restart in its encoding, 13.2.3.4);
+  - an encoding nothing declares is guessed from the bytes as Chromium's
+    detector guesses one: Japanese, Korean and Chinese by their commonest
+    characters, sixteen single-byte encodings by the likelihood, in bits, of
+    their letters in the languages each is written in, a misread word
+    counting against one, else windows-1252.
+
+  Gate: Chromium's encoding and text for 45 pages
+  (`tests/integ/encoding.sh`).
 - **12c The tree builder** (`src/html/tree.c`, `contracts/dom.pl`):
   - foreign content: SVG and MathML elements in their namespaces, with the
     adjusted names and the integration points;
