@@ -83,7 +83,7 @@ C = a, N = n(1,18,0), X = declared('rgb(0, 0, 128)',written(navy),by('.a'),in(au
 C = b, N = n(1,21,0), X = declared('rgb(0, 128, 128)',written(teal),by('.b'),in(author))
 C = c, N = n(1,24,0), X = declared('rgb(128, 0, 128)',written(purple),by('.c'),in(author))
 -- drawn over HTTP/2, and over HTTP/1.1 from the server that refuses h2
-rendered 800x600: 34 boxes, 8 lines, 4 text fragments; pixels fnv1a64:3408a72dc775f96f
+rendered 800x600: 34 boxes, 8 lines, 4 text fragments; pixels fnv1a64:326b5ff83a4b9e5f
 the same over HTTP/1.1
 == a server that sends GOAWAY at stream 7: the streams after it, not processed, asked again on a new connection
 Ok = 31, First = 4, Again = 27

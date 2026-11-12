@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Images at fractional positions, zoomed</title>
+<style>
+body { margin: 0; }
+.w { position: absolute; }
+.bg { width: 96px; height: 32px; background: url(logo.png); }
+</style></head>
+<body>
+<img id="i1" class="w" src="logo.png" style="left:10.5px;top:10px">
+<img id="i2" class="w" src="logo.png" style="left:10.25px;top:50px">
+<img id="i3" class="w" src="logo.png" style="left:10.75px;top:90.5px">
+<img id="i4" class="w" src="logo.png" style="left:130.5px;top:10px;width:50.5px;height:17px">
+<img id="i5" class="w" src="logo.png" style="left:130.3px;top:50.6px;width:48px;height:16px">
+<img id="i6" class="w" src="logo.png" style="left:130px;top:90px;transform:translateX(0.5px)">
+<div id="b1" class="w bg" style="left:250.5px;top:10px"></div>
+<div id="b2" class="w bg" style="left:250.25px;top:50px"></div>
+<div id="b3" class="w bg" style="left:250.5px;top:90px;background-position:0.25px 0"></div>
+<div id="b4" class="w bg" style="left:370px;top:10px;background-position:0.5px 0"></div>
+<div class="w bg" style="left:370.75px;top:50.5px;background-position:0.5px 0.5px"></div>
+<div id="b6" class="w bg" style="left:370px;top:90px;background-position:50% 0;padding-left:0.5px"></div>
+<div class="w bg" style="left:490.5px;top:10px;background-size:48px 16px"></div>
+<p class="w" style="left:10px;top:140px;margin:0;font:16px serif">text then <img src="logo.png" style="width:30px;height:10px"> after</p>
+</body></html>

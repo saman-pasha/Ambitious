@@ -220,14 +220,78 @@ static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const a
 
 /* an image's RGBA pixels, w x h, drawn into the rectangle (x0, y0, dw, dh), sampled
    bilinearly and blended by their alpha */
-static void pt_image(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh) {
+/* the next mip level of a premultiplied image (Skia's SkMipmap): half its size each way, floored, at least 1 px; each
+   pixel two taps of the level above it each way (1 1), three where that size is odd (1 2 1), one where it is 1;
+   summed and shifted down, truncating, as Skia's downsamplers do */
+static void pt_mip_level(const vector<uint8_t> *src, uint32_t w, uint32_t h, vector<uint8_t> *dst, uint32_t *ow, uint32_t *oh) {
+    uint32_t nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+    int tx = w == 1 ? 1 : (w & 1) ? 3 : 2, ty = h == 1 ? 1 : (h & 1) ? 3 : 2;
+    int shift = (tx == 3 ? 2 : tx == 2 ? 1 : 0) + (ty == 3 ? 2 : ty == 2 ? 1 : 0);
+    clear(*dst);
+    resize(*dst, (size_t)nw * nh * 4);
+    for (uint32_t y = 0; y < nh; y++)
+        for (uint32_t x = 0; x < nw; x++)
+            for (int k = 0; k < 4; k++) {
+                uint32_t acc = 0;
+                for (int j = 0; j < ty; j++)
+                    for (int i = 0; i < tx; i++) {
+                        uint32_t sx = w == 1 ? 0 : 2 * x + (uint32_t)i, sy = h == 1 ? 0 : 2 * y + (uint32_t)j;
+                        uint32_t wx = tx == 3 && i == 1 ? 2 : 1, wy = ty == 3 && j == 1 ? 2 : 1;
+                        acc += wx * wy * at(*src, ((size_t)sy * w + sx) * 4 + (size_t)k);
+                    }
+                (*dst)[((size_t)y * nw + x) * 4 + (size_t)k] = (uint8_t)(acc >> shift);
+            }
+    *ow = nw;
+    *oh = nh;
+}
+
+/* an image drawn into (x0, y0, dw, dh), bilinear (its edges clamped); with aa, its edge pixels covered by as much of
+   them as the rectangle covers, as Skia draws an image at a fractional place (an img's under a zoom); without, from
+   the nearest whole pixels (a repeated background's tiles, which meet) */
+static void pt_image_ex(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh, int aa) {
     if (dw <= 0 || dh <= 0 || w == 0 || h == 0) return;
+    double s = fmin(dw / w, dh / h);
+    if (s < 0.5) {
+        /* drawn smaller than half its size: from a mip level, as Skia's medium quality draws (Chromium's for an image),
+           the level the nearest to the inverse scale's log2 less Skia's half-level sharpening, its smaller axis's:
+           floor(log2(1 / s)); built from the premultiplied pixels, drawn bilinear from there */
+        int lv = (int)floor(-log2(s));
+        vector<uint8_t> cur, nxt;
+        resize(cur, len(*rgba));
+        for (size_t q = 0; q + 3 < len(*rgba); q += 4) {
+            uint32_t a = at(*rgba, q + 3);
+            for (int k = 0; k < 3; k++) cur[q + (size_t)k] = (uint8_t)((at(*rgba, q + (size_t)k) * a + 127) / 255);
+            cur[q + 3] = (uint8_t)a;
+        }
+        uint32_t lw = w, lh = h;
+        for (int n = 0; n < lv && (lw > 1 || lh > 1); n++) {
+            uint32_t nw2, nh2;
+            pt_mip_level(&cur, lw, lh, &nxt, &nw2, &nh2);
+            clear(cur);
+            append_range(cur, data(nxt), len(nxt));
+            lw = nw2;
+            lh = nh2;
+        }
+        for (size_t q = 0; q + 3 < len(cur); q += 4) {
+            uint32_t a = at(cur, q + 3);
+            for (int k = 0; k < 3; k++) cur[q + (size_t)k] = a ? (uint8_t)(fmin(255, at(cur, q + (size_t)k) * 255.0 / a + 0.5)) : 0;
+        }
+        if (fmin(dw / lw, dh / lh) >= 0.5) { pt_image_ex(c, &cur, lw, lh, x0, y0, dw, dh, aa); return; }
+    }
     y0 -= c->oy;
     int ix0 = (int)floor(x0 + 0.5), iy0 = (int)floor(y0 + 0.5), ix1 = (int)floor(x0 + dw + 0.5), iy1 = (int)floor(y0 + dh + 0.5);
+    if (aa) {
+        ix0 = (int)floor(x0);
+        iy0 = (int)floor(y0);
+        ix1 = (int)ceil(x0 + dw);
+        iy1 = (int)ceil(y0 + dh);
+    }
     int kx0, ky0, kx1, ky1;
     pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
     for (int y = iy0 < ky0 ? ky0 : iy0; y < iy1 && y < ky1; y++)
         for (int x = ix0 < kx0 ? kx0 : ix0; x < ix1 && x < kx1; x++) {
+            double cov = 1;
+            if (aa) cov = fmax(0, fmin(x + 1.0, x0 + dw) - fmax((double)x, x0)) * fmax(0, fmin(y + 1.0, y0 + dh) - fmax((double)y, y0));
             double sx = (x + 0.5 - x0) * w / dw - 0.5, sy = (y + 0.5 - y0) * h / dh - 0.5;
             if (sx < 0) sx = 0;
             if (sy < 0) sy = 0;
@@ -240,10 +304,13 @@ static void pt_image(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uin
                 double bot = at(*rgba, ((size_t)yb * w + xa) * 4 + k) * (1 - fx) + at(*rgba, ((size_t)yb * w + xb) * 4 + k) * fx;
                 px[k] = top * (1 - fy) + bot * fy;
             }
-            double a = px[3] / 255;
+            double a = px[3] / 255 * cov;
             size_t i = ((size_t)y * c->w + (size_t)x) * 3;
             for (int k = 0; k < 3; k++) c->px[i + k] = (uint8_t)(px[k] * a + c->px[i + k] * (1 - a) + 0.5);
         }
+}
+static void pt_image(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh) {
+    pt_image_ex(c, rgba, w, h, x0, y0, dw, dh, 0);
 }
 
 /* a pixel blended with a colour at coverage a (0..1) */
@@ -1576,7 +1643,14 @@ static void pt_fit_image(amb_canvas *c, const layout_tree *t, uint32_t b, const 
                          double nh) {
     double x = t->box[b].x, y = t->box[b].y, w = t->box[b].w, h = t->box[b].h;
     int fit = t->box[b].ofit;
-    if (fit == 0 || nw <= 0 || nh <= 0) { pt_image(c, rgba, iw, ih, x, y, w, h); return; }
+    if (fit == 0 || nw <= 0 || nh <= 0) {
+        /* filling its box: the box snapped to whole pixels, the image mapped across what it covers (Blink's
+           ImagePainter: ToPixelSnappedRect), so an image at a fractional x is drawn crisp */
+        double zs = c->zoom > 0 ? c->zoom : 1;       /* in CSS px, then scaled, as Chromium snaps under a zoom */
+        double sx0 = floor(x / zs + 0.5) * zs, sy0 = floor(y / zs + 0.5) * zs, sx1 = floor((x + w) / zs + 0.5) * zs, sy1 = floor((y + h) / zs + 0.5) * zs;
+        pt_image_ex(c, rgba, iw, ih, sx0, sy0, sx1 - sx0, sy1 - sy0, 1);
+        return;
+    }
     double z = c->zoom > 0 ? c->zoom : 1, dw = nw * z, dh = nh * z;
     if (fit == 1 || fit == 2 || (fit == 4 && (dw > w || dh > h))) {
         double s = fit == 2 ? fmax(w / dw, h / dh) : fmin(w / dw, h / dh);
@@ -1594,14 +1668,15 @@ static void pt_fit_image(amb_canvas *c, const layout_tree *t, uint32_t b, const 
             oy = pt_opos_axis(data(op) + st[1], ln[1], h - dh, z, oy);
         }
     }
-    double dx0 = floor(x + ox + 0.5), dy0 = floor(y + oy + 0.5), dx1 = floor(x + ox + dw + 0.5), dy1 = floor(y + oy + dh + 0.5);
+    double dx0 = floor((x + ox) / z + 0.5) * z, dy0 = floor((y + oy) / z + 0.5) * z, dx1 = floor((x + ox + dw) / z + 0.5) * z,
+           dy1 = floor((y + oy + dh) / z + 0.5) * z;
     double cx0 = c->cx0, cy0 = c->cy0, cx1 = c->cx1, cy1 = c->cy1;
-    double bx0 = floor(x + 0.5), by0 = floor(y + 0.5), bx1 = floor(x + w + 0.5), by1 = floor(y + h + 0.5);
+    double bx0 = floor(x / z + 0.5) * z, by0 = floor(y / z + 0.5) * z, bx1 = floor((x + w) / z + 0.5) * z, by1 = floor((y + h) / z + 0.5) * z;
     if (c->cx0 < bx0) c->cx0 = bx0;
     if (c->cy0 < by0) c->cy0 = by0;
     if (c->cx1 > bx1) c->cx1 = bx1;
     if (c->cy1 > by1) c->cy1 = by1;
-    pt_image(c, rgba, iw, ih, dx0, dy0, dx1 - dx0, dy1 - dy0);
+    pt_image_ex(c, rgba, iw, ih, dx0, dy0, dx1 - dx0, dy1 - dy0, 1);
     c->cx0 = cx0;
     c->cy0 = cy0;
     c->cx1 = cx1;
@@ -1705,6 +1780,14 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         else pt_area(t, b, "border-box", 10, rad, clip, cr);
         double bx0 = clip[0], by0 = clip[1], bx1 = clip[2], by1 = clip[3];
         double ax = area[0], ay = area[1], aw = area[2] - area[0], ah = area[3] - area[1];
+        /* the positioning area moved with the border box's origin snapped to whole pixels, its offsets kept (Blink's
+           BackgroundImageGeometry: a tile at round(box) + offset, resampled there; measured on seven boxes) */
+        {
+            double ox0 = t->box[b].x - t->box[b].pl - t->box[b].bl, oy0 = t->box[b].y - t->box[b].pt - t->box[b].bt;
+            double zz = c->zoom > 0 ? c->zoom : 1;     /* snapped in CSS px, as Chromium snaps under a zoom */
+            ax += floor(ox0 / zz + 0.5) * zz - ox0;
+            ay += floor(oy0 / zz + 0.5) * zz - oy0;
+        }
         const char *rp = data(rep) + ra;
         int rx = 1, ry = 1;
         if (rl && pt_is(rp, rl, "no-repeat")) { rx = 0; ry = 0; }
@@ -1726,7 +1809,9 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
             ih = (uint32_t)floor(ch + 0.5);
         } else if (is_url && !(t->box[b].bg_res.index && pt_cached_image(nt, t->box[b].bg_res.index, icache, ipx, &off, &iw, &ih))) continue;
         double tw, th, ox, oy;
-        pt_tile_size(data(siz) + sa, sl, iw, ih, aw, ah, &tw, &th);
+        /* a raster image's natural size in device px: its pixels at the zoom (an SVG's is so already) */
+        double zt = !svg && c->zoom > 0 ? c->zoom : 1;
+        pt_tile_size(data(siz) + sa, sl, iw * zt, ih * zt, aw, ah, &tw, &th);
         if (tw < 0.5 || th < 0.5) continue;
         vector<uint8_t> spx;
         uint32_t spw = (uint32_t)floor(tw + 0.5), sph = (uint32_t)floor(th + 0.5);

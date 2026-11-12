@@ -1,0 +1,12 @@
+# tests/pages/fracimg-zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+i1 15 15 160 63
+i2 15 75 160 123
+i3 16 135 161 184
+i4 195 15 272 41
+i5 195 75 268 100
+i6 195 135 340 183
+b1 375 15 520 63
+b2 375 75 520 123
+b3 375 135 520 183
+b4 555 15 699 63
+b6 555 135 700 183

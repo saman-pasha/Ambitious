@@ -1,0 +1,16 @@
+# boxes of tests/pages/fracimg.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+i1 img 10.5 10 96 32
+i2 img 10.25 50 96 32
+i3 img 10.75 90.5 96 32
+i4 img 130.5 10 50.5 17
+i5 img 130.297 50.594 48 16
+i6 img 130.5 90 96 32
+b1 div 250.5 10 96 32
+b2 div 250.25 50 96 32
+b3 div 250.5 90 96 32
+b4 div 370 10 96 32
+b5 div 370.75 50.5 96 32
+b6 div 370 90 96.5 32
+b7 div 490.5 10 96 32
+p1 p 10 140 122.859 18
+i7 img 69.547 144 30 10
