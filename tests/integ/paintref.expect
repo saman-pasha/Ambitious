@@ -30,6 +30,7 @@ mask-html: 27 of 27 regions agree with Chromium's drawing
 mask-zoom: 10 of 10 regions agree with Chromium's drawing
 nosrc: 36 of 36 regions agree with Chromium's drawing
 objfit: 23 of 23 regions agree with Chromium's drawing
+planes3d: 10 of 10 regions agree with Chromium's drawing
 quirks-brokenimg: 30 of 30 regions agree with Chromium's drawing
 quirks-fill: 5 of 5 regions agree with Chromium's drawing
 roundimg: 10 of 10 regions agree with Chromium's drawing

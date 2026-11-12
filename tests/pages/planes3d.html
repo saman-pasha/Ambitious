@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>Planes of a 3D space that cut through each other</title>
+<style>
+body { margin: 0; background: #fff; }
+.space { position: absolute; width: 160px; height: 130px; transform-style: preserve-3d; perspective: 400px; }
+.p { position: absolute; left: 30px; top: 25px; width: 100px; height: 80px; }
+</style></head><body>
+<div id="s-cross" class="space" style="left:10px;top:10px">
+  <div class="p" style="background:#d04040;transform:rotateY(40deg)"></div>
+  <div class="p" style="background:#4060d0;transform:rotateY(-40deg)"></div>
+</div>
+<div id="s-glass" class="space" style="left:200px;top:10px">
+  <div class="p" style="background:rgba(208,64,64,0.7);transform:rotateX(50deg)"></div>
+  <div class="p" style="background:rgba(64,96,208,0.7);transform:rotateY(50deg)"></div>
+</div>
+<div id="s-floor" class="space" style="left:390px;top:10px">
+  <div class="p" style="background:#40a040;transform:rotateX(70deg)"></div>
+  <div class="p" style="background:#d0a020;transform:translateZ(10px)"></div>
+</div>
+<div id="s-three" class="space" style="left:580px;top:10px">
+  <div class="p" style="background:#d04040;transform:rotateY(60deg)"></div>
+  <div class="p" style="background:#40a040;transform:rotateY(-20deg) translateZ(5px)"></div>
+  <div class="p" style="background:#4060d0;transform:rotateX(65deg)"></div>
+</div>
+<div id="s-tilt" class="space" style="left:10px;top:170px">
+  <div class="p" style="background:#a040c0;transform:rotateZ(30deg) rotateX(60deg)"></div>
+  <div class="p" style="background:#e08020;transform:rotateY(35deg)"></div>
+</div>
+<div id="s-borders" class="space" style="left:200px;top:170px">
+  <div class="p" style="background:#fff0c0;border:6px solid #806000;width:88px;height:68px;transform:rotateY(45deg)"></div>
+  <div class="p" style="background:linear-gradient(#60c0e0,#2040a0);transform:rotateY(-30deg) rotateX(20deg)"></div>
+</div>
+<div id="s-nested" class="space" style="left:390px;top:170px">
+  <div class="p" style="background:#40a040;transform:rotateY(-35deg);transform-style:preserve-3d">
+    <div style="position:absolute;left:20px;top:10px;width:60px;height:60px;background:#d04040;transform:rotateY(80deg)"></div>
+  </div>
+</div>
+<div id="s-back" class="space" style="left:580px;top:170px">
+  <div class="p" style="background:#4060d0;transform:rotateY(150deg);backface-visibility:hidden"></div>
+  <div class="p" style="background:#d0a020;transform:rotateY(30deg)"></div>
+  <div class="p" style="background:rgba(208,64,64,0.6);transform:rotateY(-30deg)"></div>
+</div>
+<div style="position:absolute;left:10px;top:330px;width:160px;height:130px;perspective:300px">
+  <div id="s-scene" class="space" style="left:0;top:0;perspective:none">
+    <div class="p" style="background:#d04040;transform:rotateY(55deg)"></div>
+    <div class="p" style="background:rgba(64,96,208,0.75);transform:rotateX(-45deg)"></div>
+  </div>
+</div>
+<div style="position:absolute;left:200px;top:330px;width:160px;height:130px;perspective:500px;perspective-origin:20% 30%">
+  <div id="s-origin" class="space" style="left:0;top:0;perspective:none">
+    <div class="p" style="background:#40a040;transform:rotateY(-50deg)"></div>
+    <div class="p" style="background:#d0a020;transform:rotateY(20deg) translateZ(-10px)"></div>
+  </div>
+</div>
+</body></html>
