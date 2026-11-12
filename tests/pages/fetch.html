@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>fetch and XMLHttpRequest</title>
+</head>
+<body>
+<script>
+  /* served by tests/integ/script-serve.py: http://127.0.0.1:PORT/fetch.html; localhost is another origin */
+  function p(name, v) { console.log(name + ': ' + v); }
+  function bare(u) { return String(u).replace(/:\d+\//, ':PORT/'); }
+  var other = 'http://localhost:' + location.port + '/';
+  /* an XMLHttpRequest's run, its events in order */
+  function xhr(method, url, setup, body) {
+    return new Promise(function (resolve) {
+      var x = new XMLHttpRequest(), seen = [];
+      ['readystatechange', 'loadstart', 'progress', 'load', 'error', 'abort', 'loadend'].forEach(function (t) {
+        x.addEventListener(t, function (e) {
+          seen.push(t === 'readystatechange' ? 'rs' + x.readyState : t + (e.loaded !== undefined ? '(' + e.loaded + '/' + e.total + ')' : ''));
+          if (t === 'loadend') resolve({ x: x, seen: seen });
+        });
+      });
+      x.open(method, url);
+      if (setup) setup(x);
+      x.send(body);
+    });
+  }
+  setTimeout(function () { p('a timeout of 0', 'fires before the first response'); }, 0);
+  (async function () {
+    var r = await fetch('fetch-data.json');
+    p('json response', [r.status, r.ok, r.statusText, r.type, bare(r.url), r.redirected, r.bodyUsed, r.headers.get('content-type'), r.headers.get('Content-Length'), r.headers.get('x-none')].join(' | '));
+    var j = await r.json();
+    p('its json', JSON.stringify(j) + ' ' + r.bodyUsed);
+    try { await r.text(); } catch (e) { p('read twice', e.name + ': ' + e.message); }
+    r = await fetch('fetch-text.txt');
+    var c = r.clone();
+    p('text', JSON.stringify(await r.text()) + ' ' + (await c.arrayBuffer()).byteLength);
+    var b = await (await fetch('fetch-text.txt')).arrayBuffer();
+    p('arrayBuffer', (b instanceof ArrayBuffer) + ' ' + b.byteLength + ' ' + new Uint8Array(b)[0] + ' ' + new Uint8Array(b)[10]);
+    r = await fetch('/status/404');
+    p('a 404', [r.status, r.ok, r.statusText, await r.text()].join(' | '));
+    r = await fetch('/status/500');
+    p('a 500', [r.status, r.ok, r.statusText].join(' | '));
+    r = await fetch('/redirect/fetch-text.txt');
+    p('redirected', r.status + ' ' + r.redirected + ' ' + bare(r.url));
+    try { await fetch(other + 'fetch-data.json'); p('another origin', 'fetched'); } catch (e) { p('another origin', e.name + ': ' + e.message); }
+    try { await fetch('/cross/fetch-data.json'); p('a redirect to another origin', 'fetched'); } catch (e) { p('a redirect to another origin', e.name + ': ' + e.message); }
+    r = await fetch(other + 'fetch-data.json', { mode: 'no-cors' });
+    p('no-cors', [r.status, r.ok, r.type, JSON.stringify(r.url), JSON.stringify(await r.text())].join(' | '));
+    try { await fetch(other + 'fetch-data.json', { mode: 'same-origin' }); } catch (e) { p('same-origin mode', e.name); }
+    r = await fetch('data:text/plain,hello%20data');
+    p('a data URL', [r.status, r.ok, r.type, r.headers.get('content-type'), await r.text()].join(' | '));
+    r = await fetch('/echo/post?q=1', { method: 'post', body: 'a=1&b=two', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    p('POST', JSON.stringify(await r.text()));
+    var h = new Headers([['X-Kind', 'put']]);
+    h.append('Content-Type', 'application/json');
+    r = await fetch(new Request('/echo/put', { method: 'PUT', headers: h, body: JSON.stringify({ n: 1 }) }));
+    p('PUT', JSON.stringify(await r.text()));
+    r = await fetch('/echo/text', { method: 'POST', body: 'plain' });
+    p('a string body', JSON.stringify(await r.text()));
+    try { await fetch('/echo', { method: 'GET', body: 'x' }); } catch (e) { p('GET with a body', e.name + ': ' + e.message); }
+    try { await fetch('/echo', { method: 'TRACE' }); } catch (e) { p('TRACE', e.name); }
+
+    var q = new Request('fetch-text.txt', { method: 'head' });
+    p('a Request', [q.method, bare(q.url), q.mode, q.credentials, q.redirect, q instanceof Request, q.clone().method].join(' | '));
+    var made = new Response('made here', { status: 201, statusText: 'Made', headers: { 'X-A': 'b' } });
+    p('a Response', [made.status, made.ok, made.statusText, made.type, made.headers.get('x-a'), made.headers.get('content-type'), JSON.stringify(made.url)].join(' | '));
+    p('its text', await made.text());
+    var err = Response.error();
+    p('Response.error', err.type + ' ' + err.status + ' ' + err.ok);
+    try { new Response('x', { status: 99 }); } catch (e) { p('a status out of range', e.name); }
+    var hs = new Headers({ 'B': '2', 'a': '1' });
+    hs.append('b', '3');
+    hs.set('C', 'x');
+    hs.delete('a');
+    var all = [];
+    hs.forEach(function (v, k) { all.push(k + '=' + v); });
+    p('Headers', all.join(' ') + ' | ' + hs.has('B') + ' ' + hs.has('a') + ' ' + hs.get('b') + ' ' + JSON.stringify([...hs]) + ' ' + [...hs.keys()].join(','));
+    try { (await fetch('fetch-text.txt')).headers.set('x', 'y'); } catch (e) { p('a response\'s headers', e.name + ': ' + e.message); }
+
+    var x = await xhr('GET', 'fetch-text.txt');
+    p('XHR', [x.x.status, x.x.statusText, x.x.readyState, JSON.stringify(x.x.responseText), bare(x.x.responseURL), x.x.getResponseHeader('Content-Type'), x.seen.join(' ')].join(' | '));
+    x = await xhr('GET', 'fetch-data.json', function (r) { r.responseType = 'json'; });
+    p('XHR json', JSON.stringify(x.x.response) + ' ' + x.x.responseType + ' ' + x.seen.join(' '));
+    x = await xhr('GET', 'fetch-text.txt', function (r) { r.responseType = 'arraybuffer'; });
+    p('XHR arraybuffer', (x.x.response instanceof ArrayBuffer) + ' ' + x.x.response.byteLength);
+    x = await xhr('POST', '/echo/xhr', function (r) { r.setRequestHeader('Content-Type', 'text/csv'); }, 'a,b\n1,2');
+    p('XHR POST', JSON.stringify(x.x.responseText));
+    x = await xhr('GET', '/status/404');
+    p('XHR 404', x.x.status + ' ' + x.x.statusText + ' ' + x.seen.join(' '));
+    x = await xhr('GET', other + 'fetch-text.txt');
+    p('XHR to another origin', x.x.status + ' ' + x.x.readyState + ' ' + JSON.stringify(x.x.responseText) + ' ' + x.seen.join(' '));
+    var s = new XMLHttpRequest();
+    var states = [];
+    s.onreadystatechange = function () { states.push(s.readyState); };
+    s.onload = function () { states.push('load'); };
+    s.open('GET', 'fetch-text.txt', false);
+    s.send();
+    p('a synchronous XHR', s.status + ' ' + JSON.stringify(s.responseText) + ' ' + states.join(','));
+    var a = new XMLHttpRequest(), aborted = [];
+    a.onabort = function () { aborted.push('abort ' + a.readyState); };
+    a.onloadend = function () { aborted.push('loadend'); };
+    a.onload = function () { aborted.push('load'); };
+    a.open('GET', 'fetch-text.txt');
+    a.send();
+    a.abort();
+    p('aborted', aborted.join(', ') + ' then ' + a.readyState + ' ' + a.status);
+    var u = new XMLHttpRequest();
+    try { u.send(); } catch (e) { p('send before open', e.name); }
+    try { u.setRequestHeader('a', 'b'); } catch (e) { p('a header before open', e.name); }
+    p('the constants', XMLHttpRequest.DONE + ' ' + u.OPENED + ' ' + u.readyState);
+    await new Promise(function (res) { setTimeout(res, 50); });
+    p('aborted, later', aborted.join(', '));
+  })();
+  p('the script', 'ran to its end');
+</script>
+</body>
+</html>

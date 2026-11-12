@@ -29,13 +29,29 @@ script_contract(enum(phase, [script, event, timer, promise])).
 script_contract(enum(listen_on, [node, window])).
 %% a timer at the end: it fired (a timeout), it was cleared, or it would fire again
 script_contract(enum(timer_state, [fired, cleared, pending])).
+%% how a script came into the document: the parser's, inserted by a script (an element
+%% made and connected), or written by document.write
+script_contract(enum(insertion, [parsed, inserted, written])).
+%% what asked the network for a resource: fetch(), an XMLHttpRequest, an inserted
+%% script's src
+script_contract(enum(api, [fetch, xhr, script])).
+%% how a request ended: a response (ok; http_error, its status 400 or more; opaque, a
+%% no-cors response a script cannot read), none (failed: refused, unreachable, a scheme
+%% not fetched; blocked: another origin's without CORS, or a file: the page may not
+%% read), aborted by the script, or pending when the page came to rest
+script_contract(enum(req_outcome, [ok, http_error, opaque, failed, blocked, aborted, pending])).
+%% when document.write wrote: while its script ran from the parse (the text parsed at
+%% the script's place), after the page loaded (a new document: the old one gone), or
+%% ignored (an asynchronously loaded script's)
+script_contract(enum(write_when, [parsing, after_load, ignored])).
 
 script_contract(record(run, [
     field(elem,    xhandle(dom, node)),     % the <script> element, or the element of the on* attribute
     field(source,  enum(source)),
     field(url,     span(text)),             % an external script's URL, as resolved
     field(outcome, enum(outcome)),
-    field(layouts, u32)                     % the cascades and layouts its code's reads forced (getComputedStyle, a box's size)
+    field(layouts, u32),                    % the cascades and layouts its code's reads forced (getComputedStyle, a box's size)
+    field(insert,  enum(insertion))
 ])).
 script_contract(record(console, [
     field(run,   ref(run)),                 % the script whose code wrote it (its listener's or timer's)
@@ -62,20 +78,43 @@ script_contract(record(timer, [
     field(state,   enum(timer_state))
 ])).
 
+%% what a script asked the network for, and how it ended
+script_contract(record(request, [
+    field(run,      ref(run)),              % the script whose code asked
+    field(api,      enum(api)),
+    field(method,   span(text)),
+    field(url,      span(text)),            % as resolved against the page
+    field(resource, xhandle(net, resource)),% the loader's record of it; none when it was not fetched
+    field(status,   u32),                   % the response's HTTP status, 0 for none
+    field(outcome,  enum(req_outcome)),
+    field(cross,    bool)                   % to another origin than the page's
+])).
+%% a call of document.write or writeln: its script, when, how many bytes it wrote
+script_contract(record(write, [
+    field(run,   ref(run)),
+    field(when,  enum(write_when)),
+    field(bytes, u32)
+])).
+
 script_contract(handle(run, sr)).
 script_contract(handle(console, sc)).
 script_contract(handle(error, se)).
 script_contract(handle(listener, sl)).
 script_contract(handle(timer, st)).
+script_contract(handle(request, sq)).
+script_contract(handle(write, sw)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), pool(text)])).
+script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), table(request), table(write),
+    pool(text)])).
 script_contract(owns(runtime, run, store)).
 script_contract(owns(runtime, console, store)).
 script_contract(owns(runtime, error, store)).
 script_contract(owns(runtime, listener, store)).
 script_contract(owns(runtime, timer, store)).
+script_contract(owns(runtime, request, store)).
+script_contract(owns(runtime, write, store)).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 
@@ -88,6 +127,16 @@ script_contract(fact(script_url(handle, field(url)), table(run), field(source) =
 %% a script whose reads of the page's style or geometry made the cascade and the layout
 %% run, and how many times: each read after a change to the DOM runs them anew
 script_contract(fact(script_forced_layout(handle, field(layouts)), table(run), field(layouts) \== 0)).
+%% a script a script inserted or document.write wrote
+script_contract(fact(script_inserted(handle, field(insert)), table(run), field(insert) \== parsed)).
+%% what each script asked the network for: what asked, by which method, for what URL,
+%% how it ended; who asked, the status, the loader's record, whether it crossed origins
+script_contract(fact(script_request(handle, field(api), field(method), field(url), field(outcome)), table(request), true)).
+script_contract(fact(script_request_by(handle, field(run)), table(request), true)).
+script_contract(fact(script_request_status(handle, field(status)), table(request), field(status) \== 0)).
+script_contract(fact(script_request_resource(handle, field(resource)), table(request), true)).
+script_contract(fact(script_request_cross(handle), table(request), field(cross) == true)).
+script_contract(fact(script_write(handle, field(run), field(when), field(bytes)), table(write), true)).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).
 script_contract(fact(script_listener(field(target), field(type), field(run)), table(listener), field(on) == node)).
@@ -102,10 +151,16 @@ script_contract(derived(script_uncaught/3, 'an error no code caught: the script,
 script_contract(derived(script_click_unfocusable/2, 'an element with a click listener that a keyboard cannot reach, and its name')).
 script_contract(derived(script_unsettled/2, 'a timer still set when the page came to rest, and the script that set it')).
 script_contract(derived(script_listens/3, 'an element, an event it is listened for on, and the script whose listener')).
+script_contract(derived(script_request_blocked/2, 'a request a script made that the browser blocked, and its URL: another origin''s without CORS, or a file: URL')).
+script_contract(derived(script_request_failed/3, 'a request a script made that had no good answer, its URL and how it ended')).
+script_contract(derived(script_insecure_request/2, 'a request over http: from a page served over https:, and its URL')).
+script_contract(derived(script_write_replaced/1, 'a script whose document.write after the page loaded replaced the whole document')).
+script_contract(derived(script_write_ignored/1, 'a script loaded asynchronously whose document.write was ignored')).
 script_contract(derived(script_layout_thrash/2, 'a script whose reads of style or geometry, each after a change, made the cascade and the layout run many times, and how many')).
 
 script_contract(query(errors, script_uncaught(R, P, M), [R, P, M], 'every error no code caught')).
 script_contract(query(listeners, script_listens(N, T, R), [N, T, R], 'every element listened on, for what, by which script')).
+script_contract(query(requests, script_request(Q, A, M, U, O), [Q, A, M, U, O], 'every request the scripts made, and how it ended')).
 
 %% ---- GENERATION -------------------------------------------------------------
 

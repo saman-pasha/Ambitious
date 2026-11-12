@@ -1,0 +1,24 @@
+<!DOCTYPE html><html lang="en"><head>
+<title>Written</title>
+<script>document.write('<meta name="written" content="in the head">');</script><meta name="written" content="in the head">
+</head>
+<body data-ran="yes">
+<div id="box"><script>
+  document.write('<p class="a">one <i>two</i>');
+  document.write(' three</p><table><tr><td>cell</td>');
+  document.write('</tr></table>');
+  document.write('<script>document.write("<span>written by a written script</span>");<\/script><em>after it</em>');
+</script><p class="a">one <i>two</i> three</p><table><tbody><tr><td>cell</td></tr></tbody></table><script>document.write("<span>written by a written script</span>");</script><span>written by a written script</span><em>after it</em><hr></div><section><h2>made</h2><script>document.body.className = "never";</script><script>document.body.setAttribute("data-ran", "yes");</script></section>
+<script>
+  var made = document.createElement('section');
+  made.innerHTML = '<h2>made</h2><script>document.body.className = "never";<\/script>';
+  document.getElementById('box').after(made);
+  var run = document.createElement('script');
+  run.textContent = 'document.body.setAttribute("data-ran", "yes");';
+  made.append(run);
+  document.writeln('<footer>the end</footer>');
+</script><footer>the end</footer>
+
+
+
+</body></html>

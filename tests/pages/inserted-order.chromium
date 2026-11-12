@@ -1,0 +1,4 @@
+the parse: sync,an inline defer, which is no defer
+the defer script: interactive sync,an inline defer, which is no defer
+DOMContentLoaded: sync,an inline defer, which is no defer,defer
+load: sync,an inline defer, which is no defer,defer | the async script ran: true, its write ignored: 0

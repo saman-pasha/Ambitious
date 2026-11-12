@@ -1372,11 +1372,12 @@ static net_outcome net_parse_response(const char *p, size_t n, int *status, vect
     return NET_OUTCOME_OK;
 }
 
-/* one HTTP exchange: GET the URL, directly or through the proxy the environment
-   names, over TLS for https:; extra holds further header lines, each ending in
-   CRLF. Its status, head and body (chunks joined); what it went over in rt */
-static net_outcome net_exchange(const net_url *u, net_tls *t, const char *extra, size_t extra_n, int *status, vector<char> *head,
-                                vector<char> *body, net_route *rt) {
+/* one HTTP exchange: the URL asked for by its method (GET, or a script's or a form's
+   POST with its body), directly or through the proxy the environment names, over TLS
+   for https:; extra holds further header lines, each ending in CRLF. Its status, head
+   and body (chunks joined); what it went over in rt */
+static net_outcome net_exchange(const net_url *u, net_tls *t, const char *method, const char *sent, size_t sent_n, const char *extra,
+                                size_t extra_n, int *status, vector<char> *head, vector<char> *body, net_route *rt) {
     int https = strcmp(u->scheme, "https") == 0;
     char host[256], authority[300];
     net_bare_host(u->host, host, sizeof host);
@@ -1417,7 +1418,7 @@ static net_outcome net_exchange(const net_url *u, net_tls *t, const char *extra,
     /* (no ternary over the char arrays: cicilang lowers one as a cast to the array, toolchain/REPORT.md) */
     whole[0] = 0;
     if (via && !https) snprintf(whole, sizeof whole, "%s://%s", u->scheme, authority);
-    int n = snprintf(line, sizeof line, "GET %s%s%s%s HTTP/1.1\r\nHost: %s\r\n", whole, u->path, u->has_query ? "?" : "", u->query, authority);
+    int n = snprintf(line, sizeof line, "%s %s%s%s%s HTTP/1.1\r\nHost: %s\r\n", method, whole, u->path, u->has_query ? "?" : "", u->query, authority);
     if (n > 0 && (size_t)n < sizeof line) append_range(req, line, (size_t)n);
     n = snprintf(line, sizeof line, "User-Agent: Ambitious/0.1\r\nAccept: */*\r\nAccept-Encoding: gzip, deflate\r\n");
     append_range(req, line, (size_t)n);
@@ -1426,8 +1427,13 @@ static net_outcome net_exchange(const net_url *u, net_tls *t, const char *extra,
         append_range(req, line, (size_t)n);
     }
     append_range(req, extra, extra_n);
+    if (sent_n || strcmp(method, "GET") != 0) {
+        n = snprintf(line, sizeof line, "Content-Length: %zu\r\n", sent_n);
+        append_range(req, line, (size_t)n);
+    }
     n = snprintf(line, sizeof line, "Connection: close\r\n\r\n");
     append_range(req, line, (size_t)n);
+    append_range(req, sent, sent_n);
     if (!net_send_all(fd, ssl, data(req), len(req))) {
         snprintf(rt->reason, sizeof rt->reason, "the connection closed before the request was sent");
         close(fd);
@@ -1454,14 +1460,14 @@ static net_outcome net_exchange(const net_url *u, net_tls *t, const char *extra,
 
 /* an exchange with SIGPIPE ignored: a write to a connection the server has closed
    then fails, where it would end the process (OpenSSL writes with write(2)) */
-static net_outcome net_http(const net_url *u, net_tls *t, const char *extra, size_t extra_n, int *status, vector<char> *head,
-                            vector<char> *body, net_route *rt) {
+static net_outcome net_http(const net_url *u, net_tls *t, const char *method, const char *sent, size_t sent_n, const char *extra,
+                            size_t extra_n, int *status, vector<char> *head, vector<char> *body, net_route *rt) {
     struct sigaction ign, old;
     sigemptyset(&ign.sa_mask);
     ign.sa_flags = 0;
     ign.sa_handler = SIG_IGN;
     sigaction(SIGPIPE, &ign, &old);
-    net_outcome o = net_exchange(u, t, extra, extra_n, status, head, body, rt);
+    net_outcome o = net_exchange(u, t, method, sent, sent_n, extra, extra_n, status, head, body, rt);
     sigaction(SIGPIPE, &old, 0);
     return o;
 }
@@ -2347,7 +2353,15 @@ static net_outcome net_decode_body(const char *head, size_t hn, vector<char> *bo
 static amb_span net_text(net_loader *l, const char *s) { return text_add(l, s, strlen(s)); }
 
 /* a fetch, its redirects followed, recorded: the record's index */
-static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t) {
+/* a resource fetched by a method of its own (a script's request, a form's submission):
+   its body and header lines (each ending in CRLF) sent with it. A request other than a
+   GET is never answered from the cache nor kept in it; a 303, or a 301 or 302 of a
+   POST, is followed by a GET without the body (Fetch 4.4) */
+static uint32_t net_get_by(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t,
+                           const char *method, const char *sent, size_t sent_n, const char *hdrs, size_t hdrs_n) {
+    char meth[16];
+    snprintf(meth, sizeof meth, "%s", method);
+    size_t body_n = sent_n;
     net_resource_h h = resource_new(l);
     uint32_t r = h.index;
     l->resource[r].kind = kind;
@@ -2401,7 +2415,7 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
         vector<char> c_head, c_body;
         int c_status = 0;
         int64_t c_rtime = 0, now = net_now(), c_age = 0, c_life = 0;
-        int caching = net_cache_path(l, here, cpath, sizeof cpath);
+        int caching = strcmp(meth, "GET") == 0 && net_cache_path(l, here, cpath, sizeof cpath);
         int cached = caching && net_cache_read(cpath, here, &c_status, &c_rtime, &c_head, &c_body);
         if (cached) {
             c_age = net_initial_age(data(c_head), len(c_head), c_rtime) + (now > c_rtime ? now - c_rtime : 0);
@@ -2432,7 +2446,8 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
                 if (n > 0 && (size_t)n < sizeof line) append_range(extra, line, (size_t)n);
             }
         }
-        out = net_http(&u, t, data(extra), len(extra), &status, &head, &body, &rt);
+        append_range(extra, hdrs, hdrs_n);
+        out = net_http(&u, t, meth, sent, body_n, data(extra), len(extra), &status, &head, &body, &rt);
         if (out != NET_OUTCOME_OK) { status = 0; break; }
         net_cookies_from(l, &u, data(head), len(head), same, r);
         if (status == 304 && cached) {
@@ -2463,6 +2478,10 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
             l->hop[hp.index].url = net_text(l, text);
             l->hop[hp.index].status = (uint32_t)status;
             u = next;
+            if (status == 303 || ((status == 301 || status == 302) && strcmp(meth, "POST") == 0)) {
+                snprintf(meth, sizeof meth, "GET");
+                body_n = 0;
+            }
             continue;
         }
         /* the body out of its content codings */
@@ -2525,6 +2544,31 @@ static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t 
         l->resource[r].height = hh;
     }
     return r;
+}
+
+static uint32_t net_get(net_loader *l, const char *url, net_kind kind, uint32_t from, dom_node_h elem, const net_url *page, net_tls *t) {
+    return net_get_by(l, url, kind, from, elem, page, t, "GET", "", 0, "", 0);
+}
+
+net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len, net_kind kind, const char *method, const char *sent,
+                                 size_t sent_n, const char *hdrs, size_t hdrs_n, uint32_t from) {
+    char u[8192], pu[8192];
+    snprintf(u, sizeof u, "%.*s", (int)url_len, url);
+    dom_node_h none = { 0, 0, 0 };
+    net_tls t = {0};
+    defer(t) { SSL_CTX_free(t.ctx); }
+    /* the page that asked: its URL for the same-site rules and for what it may read */
+    net_url page;
+    int has_page = 0;
+    if (from && from < l->resource_len && l->resource[from].live) {
+        amb_span fu = l->resource[from].final_url;
+        snprintf(pu, sizeof pu, "%.*s", (int)fu.len, text_ptr(l, fu));
+        has_page = net_parse_abs(pu, &page);
+    }
+    uint32_t r = net_get_by(l, u, kind, has_page ? from : 0, none, has_page ? &page : 0, &t, method, sent, sent_n, hdrs, hdrs_n);
+    net_jar_write(l);
+    l->revision++;
+    return resource_handle(l, r);
 }
 
 net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kind kind) {

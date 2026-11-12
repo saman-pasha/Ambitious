@@ -9,7 +9,9 @@
 %% from settling. No clause here cuts: amb_why/2 proves them clause by clause.
 
 :- dynamic script_run/4, script_url/2, script_console/3, script_error/3, script_listener/3,
-   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2.
+   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2,
+   script_inserted/2, script_request/5, script_request_by/2, script_request_status/2, script_request_resource/2,
+   script_request_cross/1, script_write/4.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -47,6 +49,20 @@ script_rules_short_text(N, T) :- dom_text_content(N, T), atom_length(T, L), L > 
 
 script_unsettled(T, R) :- script_timer(T, _, _, pending), script_timer_of(T, R).
 
+%% a request the browser would not let a script make or read: another origin's answer
+%% without CORS's Access-Control-Allow-Origin, a file: URL
+script_request_blocked(Q, U) :- script_request(Q, _, _, U, blocked).
+%% one that had no good answer: no response at all, or an HTTP error's
+script_request_failed(Q, U, How) :- script_request(Q, _, _, U, How), memberchk(How, [failed, http_error]).
+%% a request over http: from a page served over https: (mixed content)
+script_insecure_request(Q, U) :-
+    script_request(Q, _, _, U, _), sub_atom(U, 0, _, _, 'http:'),
+    net_page(P), net_final_url(P, PU), sub_atom(PU, 0, _, _, 'https:').
+%% document.write after the page loaded opens a new document: the page is gone
+script_write_replaced(R) :- script_write(_, R, after_load, _).
+%% an asynchronously loaded script may not write into the document that is being parsed
+script_write_ignored(R) :- script_write(_, R, ignored, _).
+
 %% a read of style or geometry after a change to the DOM runs the cascade and the layout
 %% again (a forced, synchronous layout): a script that does it many times interleaves its
 %% reads with its writes, where reading first and writing after would run them once
@@ -74,8 +90,25 @@ script_diag(layout_thrash, R, Text) :-
     script_layout_thrash(R, N), script_rules_where(R, Where),
     format(atom(Text), 'the script ~w made the cascade and the layout run ~d times, each read of style or geometry after a change to the page: read first, then write', [Where, N]).
 
+script_diag(request_blocked, Q, Text) :-
+    script_request_blocked(Q, U), script_request_by(Q, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w asked for ~w, which was blocked: another origin answers a script only with CORS''s Access-Control-Allow-Origin, and a page may not read a file: URL', [Where, U]).
+script_diag(request_failed, Q, Text) :-
+    script_request_failed(Q, U, How), script_request_by(Q, R), script_rules_where(R, Where),
+    (   script_request_status(Q, S) -> true ; S = none ),
+    format(atom(Text), 'the script ~w asked for ~w and had no good answer: ~w (status ~w)', [Where, U, How, S]).
+script_diag(insecure_request, Q, Text) :-
+    script_insecure_request(Q, U), script_request_by(Q, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w asked for ~w over http: from a page served over https: (mixed content)', [Where, U]).
+script_diag(write_replaced, R, Text) :-
+    script_write_replaced(R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w called document.write after the page loaded: a new document replaced the whole page', [Where]).
+script_diag(write_ignored, R, Text) :-
+    script_write_ignored(R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w was loaded asynchronously, so its document.write was ignored', [Where]).
+
 %% a script named by its URL, or by its number on the page (its run's index)
 script_rules_where(R, Where) :- script_url(R, U), format(atom(Where), '~w', [U]).
-script_rules_where(R, Where) :- \+ script_url(R, _), R = sr(_, I, _), script_run(R, N, Source, _), dom_element(N, E),
-    (   Source == attribute -> format(atom(Where), '#~d, an on* attribute of a <~w>', [I, E])
+script_rules_where(R, Where) :- \+ script_url(R, _), R = sr(_, I, _), script_run(R, N, Source, _),
+    (   Source == attribute, dom_element(N, E) -> format(atom(Where), '#~d, an on* attribute of a <~w>', [I, E])
     ;   format(atom(Where), '#~d (inline)', [I]) ).

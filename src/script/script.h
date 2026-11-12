@@ -38,6 +38,35 @@ typedef struct sh_vfrag { uint32_t node, line; double x, y, w, h; } sh_vfrag;
    run ended by one of prop ~0 */
 typedef struct sh_vval { uint32_t prop, unit, how, spare; double num; uint32_t off, len; } sh_vval;
 
+/* the network a script reaches (src/script/fetch.c). A request: fetch()'s, an
+   XMLHttpRequest's, a Request object's (not sent); its object (fetch's promise, the
+   XMLHttpRequest), the loader's record of it, XHR's readyState; the response's status,
+   the request's mode and whether it waits (a synchronous XHR); its method, URL, header
+   lines and body in the host's network text; XHR's responseType, its Response, its
+   record in the runtime, how it ended */
+typedef struct sh_req {
+    uint32_t kind, obj, resource, state;
+    uint32_t status, mode, sync, flags;
+    uint32_t moff, mlen, uoff, ulen;
+    uint32_t hoff, hlen, boff, blen;
+    uint32_t rtype, resp, rec, outcome;
+} sh_req;
+/* a Response: its status, its type (basic, cors, opaque, default, error), whether it was
+   redirected and its body read; its URL, body, content type and status text in the
+   network text; its Headers object, made when asked for */
+typedef struct sh_resp {
+    uint32_t status, type, redirected, used;
+    uint32_t uoff, ulen, boff, blen;
+    uint32_t toff, tlen, soff, slen;
+    uint32_t headers, spare;
+} sh_resp;
+/* a header of a Headers object (its object's index): its name lower-cased and value */
+typedef struct sh_hdr { uint32_t owner, noff, nlen, voff, vlen, live; } sh_hdr;
+/* a script waiting to run (HTML 4.12.1.1): an external one a script inserted, or one the
+   parse found async; its element and that node's generation, the loader's record of its
+   src, how it came (script_insertion), whether it has run */
+typedef struct sh_pend { uint32_t node, gen, resource, how, done, spare; } sh_pend;
+
 /* the page's scripts, each <script> in document order (its text, or its src as the
    loader fetched it), then DOMContentLoaded and load, then its timers as far as horizon
    ms of virtual time: the number of scripts run. A page without scripts makes no VM. */
@@ -87,6 +116,24 @@ struct js_host {
     vector<uint32_t> vbox;            /* a node's box in vboxes, plus 1 (0: none) */
     vector<sh_vbox> vboxes;
     vector<sh_vfrag> vfrags;
+    /* the network (src/script/fetch.c): requests, responses, headers, their text; the
+       native function that runs the host's tasks from the timers' queue */
+    vector<sh_req> reqs;
+    vector<sh_resp> resps;
+    vector<sh_hdr> hdrs;
+    vector<char> ntext;
+    uint32_t task_fn;
+    /* the scripts (src/script/script.c): each script element's "already started" (its
+       generation plus one, by index); the scripts waiting to run, and those written to run
+       after their writer; document.write's text so far, its script and the nodes it made
+       there; the script running (document.currentScript); whether the parse's scripts run
+       (an insertion point), how deep external scripts run, whether the document is open */
+    vector<uint32_t> started;
+    vector<sh_pend> pending;
+    vector<uint32_t> wpend;
+    vector<char> wtext;
+    vector<uint32_t> wnodes;
+    uint32_t wscript, cur_script, parsing, ext_run, opened;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -101,6 +148,9 @@ struct js_host {
 /* the host's own vectors freed: a struct's are not autodropped */
 #define SCRIPT_HOST_DROP(h) vector_sh_list_drop(&(h).lists); vector_char_drop(&(h).keys); \
     vector_uint32_t_drop(&(h).vstyle); vector_sh_vval_drop(&(h).vvals); vector_char_drop(&(h).vtext); \
-    vector_uint32_t_drop(&(h).vbox); vector_sh_vbox_drop(&(h).vboxes); vector_sh_vfrag_drop(&(h).vfrags)
+    vector_uint32_t_drop(&(h).vbox); vector_sh_vbox_drop(&(h).vboxes); vector_sh_vfrag_drop(&(h).vfrags); \
+    vector_sh_req_drop(&(h).reqs); vector_sh_resp_drop(&(h).resps); vector_sh_hdr_drop(&(h).hdrs); vector_char_drop(&(h).ntext); \
+    vector_uint32_t_drop(&(h).started); vector_sh_pend_drop(&(h).pending); vector_uint32_t_drop(&(h).wpend); \
+    vector_char_drop(&(h).wtext); vector_uint32_t_drop(&(h).wnodes)
 
 #endif
