@@ -55,7 +55,7 @@
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
-   height, align, a table's border) are author rules of specificity 0 before
+   height, align, a table's border; dir, as Chromium maps it) are author rules of specificity 0 before
    every other author rule. A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
    border's width 0 under style none, display blockified for a float, an
@@ -170,11 +170,8 @@ static const char css_ua_sheet[] =
     "q::before { content: open-quote }\n"
     "q::after { content: close-quote }\n"
     "input::placeholder, textarea::placeholder { color: #757575 }\n"
-    "[dir=ltr] { direction: ltr }\n"
-    "[dir=rtl] { direction: rtl }\n"
-    "bdi, output, [dir] { unicode-bidi: isolate }\n"
-    "bdo, bdo[dir] { unicode-bidi: bidi-override }\n"
-    "textarea[dir=auto], pre[dir=auto] { unicode-bidi: plaintext }\n";
+    "bdi, output { unicode-bidi: isolate }\n"
+    "bdo { unicode-bidi: bidi-override }\n";
 
 /* ---- reading text ---- */
 
@@ -4363,6 +4360,27 @@ static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, u
         else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
         push_back(matched, r);
     }
+    /* dir (HTML 15.3.6), a hint as Chromium maps it: ltr and rtl its direction; and every
+       dir but a bdi's, a bdo's and an output's isolates (auto a pre's or a textarea's
+       plaintext) */
+    uint32_t da = css_attr_of(d, x, "dir", 3);
+    if (!da) return;
+    amb_span dv = d->attr[da].value;
+    int ltr = css_eq_ci(text_ptr(d, dv), dv.len, "ltr"), rtl = css_eq_ci(text_ptr(d, dv), dv.len, "rtl");
+    int autod = css_eq_ci(text_ptr(d, dv), dv.len, "auto");
+    if (!ltr && !rtl && !autod) return;
+    uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, "the dir attribute", 17, 1);
+    css_val v;
+    const char *text = rtl ? "dir=rtl" : ltr ? "dir=ltr" : "dir=auto";
+    if (ltr || rtl) {
+        css_word_val(&v, rtl ? "rtl" : "ltr");
+        css_add_decl(s, r, CSS_PROP_DIRECTION, &v, 0, text, strlen(text), 0);
+    }
+    if (!css_word_in(names_ptr(d, d->node[x].name), "bdi bdo output")) {
+        css_word_val(&v, autod && css_word_in(names_ptr(d, d->node[x].name), "pre textarea") ? "plaintext" : "isolate");
+        css_add_decl(s, r, CSS_PROP_UNICODE_BIDI, &v, 0, text, strlen(text), 0);
+    }
+    push_back(matched, r);
 }
 
 static void css_style_attr(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
