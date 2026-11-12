@@ -1,0 +1,282 @@
+== the client's first bytes, as Chromium's
+  > the preface
+  > SETTINGS flags 0x0 stream 0, 24 bytes [1 = 65536] [2 = 0] [4 = 6291456] [6 = 262144]
+  > WINDOW_UPDATE flags 0x0 stream 0, 4 bytes: 15663105
+== six requests: a page (0), two sheets (0), a script (1), two images (2)
+  > HEADERS flags 0x25 stream 1, 60 bytes: depends on 0 exclusively, weight 256
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /page.html
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  > HEADERS flags 0x25 stream 3, 16 bytes: depends on 1 exclusively, weight 256
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /a.css
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  > HEADERS flags 0x25 stream 5, 17 bytes: depends on 3 exclusively, weight 256
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /b.css
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  > HEADERS flags 0x25 stream 7, 18 bytes: depends on 5 exclusively, weight 220
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /app.js
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  > HEADERS flags 0x25 stream 9, 17 bytes: depends on 7 exclusively, weight 183
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /a.png
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  > HEADERS flags 0x25 stream 11, 17 bytes: depends on 9 exclusively, weight 183
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /b.png
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+6 streams open
+== the server's SETTINGS: a table of 8192, at most 4 streams, frames to 32768
+  < settings, stream 0
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+a stream may open: no (6 open, 4 allowed)
+== stream 1's head in HEADERS (padded, a priority) and two CONTINUATIONs, then DATA padded, its end
+  < headers, stream 1, status 200
+      :status: 200
+      content-type: text/html; charset=utf-8
+      cache-control: max-age=60
+      set-cookie: a=1; Path=/
+      set-cookie: b=2
+  < data, stream 1, 11 bytes "<p>hello</p", the stream's end
+== stream 3: a 103, then its head, DATA in three pieces, trailers
+  < headers, stream 3, status 200
+      :status: 200
+      content-type: text/css
+  < data, stream 3, 6 bytes ".a { }"
+  < data, stream 3, 6 bytes ".a { }"
+  < data, stream 3, 6 bytes ".a { }"
+  < headers, stream 3, status 0, the stream's end
+== stream 5 reset by the server (REFUSED_STREAM); stream 7's head malformed, reset by the client; a PING
+  < reset, stream 5: the server reset the stream (REFUSED_STREAM)
+  < reset, stream 7: the response's head is malformed: a field's name has an uppercase letter (PROTOCOL_ERROR)
+  > RST_STREAM flags 0x0 stream 7, 4 bytes: 1
+  > PING flags 0x1 stream 0, 8 bytes: 70696e6731323334
+2 streams open; a stream may open: yes
+== stream 9: 8 MB of DATA, its window and the connection's given back past half
+  < 501 events, 8192000 bytes of DATA
+  > WINDOW_UPDATE flags 0x0 stream 9, 4 bytes: 3162112
+  > WINDOW_UPDATE flags 0x0 stream 9, 4 bytes: 3162112
+  > WINDOW_UPDATE flags 0x0 stream 0, 4 bytes: 7864355
+== a new request (stream 13), then GOAWAY after stream 9: 11 and 13 were not processed
+  > HEADERS flags 0x25 stream 13, 22 bytes: depends on 11 exclusively, weight 183
+      :method: GET
+      :authority: localhost:8443
+      :scheme: https
+      :path: /late.png
+      user-agent: Ambitious/0.1
+      accept-encoding: gzip, deflate, br, zstd
+  < goaway, stream 0, last 9: the server went away (NO_ERROR) after stream 9
+0 streams open; a stream may open: no
+== a body of 250 bytes within a stream window of 100
+  < settings, stream 0
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+sent 100 of 250, the window 0
+  < window, stream 1
+after a WINDOW_UPDATE of 100: sent 200 of 250
+  < window, stream 1
+after a WINDOW_UPDATE of 100: sent 250 of 250
+  > HEADERS flags 0x24 stream 1, 25 bytes: depends on 0 exclusively, weight 256
+      :method: POST
+      :authority: localhost
+      :scheme: https
+      :path: /form
+      content-length: 250
+  > DATA flags 0x0 stream 1, 100 bytes
+  > DATA flags 0x0 stream 1, 100 bytes
+  > DATA flags 0x1 stream 1, 50 bytes
+== connection errors, each on a fresh connection
+-- the server's first frame a PING
+  < error, stream 0: the server's first frame is not its SETTINGS (PROTOCOL_ERROR)
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a frame of 16385 bytes
+  < settings, stream 0
+  < error, stream 1: the server sent a frame of 16385 bytes, past the 16384 allowed (FRAME_SIZE_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 6
+-- DATA on stream 0
+  < settings, stream 0
+  < error, stream 0: DATA on stream 0 (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- HEADERS on stream 2, which a server may not open
+  < settings, stream 0
+  < error, stream 2: HEADERS on stream 2, which this side never opened (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- HEADERS on stream 9, never opened
+  < settings, stream 0
+  < error, stream 9: HEADERS on stream 9, which this side never opened (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a CONTINUATION with no HEADERS before it
+  < settings, stream 0
+  < error, stream 1: a CONTINUATION with no header block before it (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a header block broken off by a PING
+  < settings, stream 0
+  < error, stream 0: a header block was broken off by another frame (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a PUSH_PROMISE
+  < settings, stream 0
+  < error, stream 1: the server pushed a stream, though push is off (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- SETTINGS on stream 1
+  < settings, stream 0
+  < error, stream 1: a SETTINGS frame on stream 1 of 0 bytes (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- SETTINGS of 7 bytes
+  < settings, stream 0
+  < error, stream 0: a SETTINGS frame on stream 0 of 7 bytes (FRAME_SIZE_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 6
+-- SETTINGS_ENABLE_PUSH of 2
+  < settings, stream 0
+  < error, stream 0: SETTINGS_ENABLE_PUSH of 2 (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- SETTINGS_INITIAL_WINDOW_SIZE of 2^31
+  < settings, stream 0
+  < error, stream 0: SETTINGS_INITIAL_WINDOW_SIZE of 2147483648 (FLOW_CONTROL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 3
+-- SETTINGS_MAX_FRAME_SIZE of 100
+  < settings, stream 0
+  < error, stream 0: SETTINGS_MAX_FRAME_SIZE of 100 (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a WINDOW_UPDATE of the connection by 0
+  < settings, stream 0
+  < error, stream 0: a WINDOW_UPDATE of the connection by 0 (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a WINDOW_UPDATE that takes the connection's window past 2^31-1
+  < settings, stream 0
+  < error, stream 0: a WINDOW_UPDATE of the connection by 2147483647 (FLOW_CONTROL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 3
+-- DATA whose padding is its whole payload
+  < settings, stream 0
+  < headers, stream 1, status 200
+  < error, stream 1: a frame's padding passes its payload (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- a header block that is no HPACK
+  < settings, stream 0
+  < error, stream 1: the server's header block is no HPACK: index 0 is in neither table (COMPRESSION_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 9
+-- RST_STREAM of 3 bytes
+  < settings, stream 0
+  < error, stream 1: RST_STREAM of 3 bytes (FRAME_SIZE_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 6
+-- GOAWAY on stream 1
+  < settings, stream 0
+  < error, stream 1: a GOAWAY on stream 1 of 8 bytes (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 1
+-- PING of 7 bytes
+  < settings, stream 0
+  < error, stream 0: a PING on stream 0 of 7 bytes (FRAME_SIZE_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 6
+-- 11 bytes of DATA past a connection window made 10 bytes
+  < settings, stream 0
+  < headers, stream 1, status 200
+  < error, stream 1: the server's DATA passes the connection's window (FLOW_CONTROL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > GOAWAY flags 0x0 stream 0, 8 bytes: last 0, code 3
+== stream errors: the stream reset, the connection kept
+-- a field named in uppercase
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a field's name has an uppercase letter (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- a head without :status
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: the response has no single :status (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- a head with two :status
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: the response has no single :status (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- :status after a field
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a pseudo-header field comes after a field (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- :path in a response
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a pseudo-header field other than :status (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- a connection field
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: a connection-specific field (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- te: gzip
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: te other than trailers (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- 101
+  < settings, stream 0
+  < reset, stream 1: the response's head is malformed: 101 is not a status HTTP/2 has (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- DATA before the head
+  < settings, stream 0
+  < reset, stream 1: DATA before the response's head (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- DATA after the stream's end: passed over, as Chromium passes over frames of streams it no longer holds
+  < settings, stream 0
+  < headers, stream 1, status 200
+  < data, stream 1, 2 bytes "hi", the stream's end
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+-- trailers with :status
+  < settings, stream 0
+  < headers, stream 1, status 200
+  < reset, stream 1: the response's trailers are malformed: trailers with a pseudo-header field, or that do not end the stream (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+-- 11 bytes of DATA past a stream window made 10 bytes
+  < settings, stream 0
+  < headers, stream 1, status 200
+  < reset, stream 1: the server's DATA passes the stream's window (FLOW_CONTROL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 3
+-- a WINDOW_UPDATE of a stream by 0
+  < settings, stream 0
+  < reset, stream 1: a WINDOW_UPDATE of the stream by 0 (PROTOCOL_ERROR)
+  > SETTINGS flags 0x1 stream 0, 0 bytes
+  > RST_STREAM flags 0x0 stream 1, 4 bytes: 1
+== conversations broken at random
+3000 conversations, 14356 frames read: none 2382 headers 3865 data 3240 reset 96 goaway 276 window 0 settings 2434 error 2063

@@ -1,0 +1,59 @@
+-- the vectors (tests/exec/zstd/), each decoded:
+empty.zst: 0 bytes, crc32 00000000
+byte.zst: 1 bytes, crc32 e8b7be43
+hello.zst: 31 bytes, crc32 f1a38693
+words-1.zst: 200000 bytes, crc32 3f5d4a54
+words-3.zst: 200000 bytes, crc32 3f5d4a54
+words-9.zst: 200000 bytes, crc32 3f5d4a54
+words-19.zst: 200000 bytes, crc32 3f5d4a54
+words-nochecksum.zst: 200000 bytes, crc32 3f5d4a54
+words-nosize.zst: 200000 bytes, crc32 3f5d4a54
+small-text.zst: 900 bytes, crc32 0f2b3a69
+window10.zst: 50000 bytes, crc32 dfffd51f
+run.zst: 200000 bytes, crc32 51bf0272
+noise.zst: 40000 bytes, crc32 e0c25e61
+mixed-2.zst: 161500 bytes, crc32 205f949b
+mixed-9.zst: 161500 bytes, crc32 205f949b
+mixed-16.zst: 161500 bytes, crc32 205f949b
+letters-0-40.zst: 40 bytes, crc32 2814d2ba
+letters-0-300.zst: 300 bytes, crc32 02c33721
+letters-0-3000.zst: 3000 bytes, crc32 f72dca76
+letters-1-40.zst: 40 bytes, crc32 cc366581
+letters-1-300.zst: 300 bytes, crc32 4508ac1d
+letters-1-3000.zst: 3000 bytes, crc32 29fbc4ac
+letters-2-40.zst: 40 bytes, crc32 ab0c3825
+letters-2-300.zst: 300 bytes, crc32 3f9288b6
+letters-2-3000.zst: 3000 bytes, crc32 fd21dbb1
+letters-3-40.zst: 40 bytes, crc32 5654660e
+letters-3-300.zst: 300 bytes, crc32 ddaebc61
+letters-3-3000.zst: 3000 bytes, crc32 6f9a8d38
+letters-4-40.zst: 40 bytes, crc32 70e943b1
+letters-4-300.zst: 300 bytes, crc32 0534c988
+letters-4-3000.zst: 3000 bytes, crc32 7f761555
+ldm.zst: 401000 bytes, crc32 43257216
+frames.zst: 12000 bytes, crc32 00fe6c7c
+dictionary.zst: refused (the zstd frame needs dictionary 305419896, and none is used here (nor in Chromium))
+window24.zst: refused (the zstd frame's window is 16777216 bytes, past the 8 MB HTTP's zstd allows)
+slices.zst: 156133 bytes, crc32 b960eabe
+low-500.zst: 500 bytes, crc32 00bbb1f3
+low-3000.zst: 3000 bytes, crc32 8803107a
+rle.zst: 180 bytes, crc32 09dcf6af
+-- what they reached:
+frames 38, skippable 1; blocks raw 5, RLE 1, compressed 101
+literals raw 19, RLE 1, Huffman 69, treeless 12; in one stream 56, in four 25; weights direct 2, FSE coded 67
+literal lengths: predefined 11, RLE 2, FSE 79, repeat 9
+offsets: predefined 11, RLE 1, FSE 55, repeat 34
+match lengths: predefined 11, RLE 2, FSE 87, repeat 1
+sequences 170255, of them repeat offsets 718; checksums 36
+-- XXH64 of no bytes, seed 0: ef46db3751d8e999 (xxHash's ef46db3751d8e999)
+-- broken by hand:
+words-3 with a bound one byte short of its content: refused, past its bound (the decoded body passed 199999 bytes)
+words-3 with its bound its content: 200000 bytes, crc32 3f5d4a54
+words-3 with a bit of its checksum flipped: refused, corrupt (the zstd frame's checksum is not its content's)
+words-3 cut 5 bytes short: refused, corrupt (the zstd body ends inside a frame)
+words-3 and four bytes after it: refused, corrupt (what follows a zstd frame is no frame)
+words-3 with its magic number's first byte changed: refused, corrupt (the zstd body does not begin as a zstd frame does)
+hello with its content size one more: refused, corrupt (the zstd frame's content size is not its content's)
+hello with its frame header's reserved bit set: refused, corrupt (a zstd frame's reserved bit is set)
+-- each vector broken at random 300 ways, decoded or refused:
+11700 broken contents: 55 decoded, 11645 refused, 416343888 bytes made

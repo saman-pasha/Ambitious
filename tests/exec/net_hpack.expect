@@ -1,0 +1,200 @@
+== C.1 integers
+C.1.1 10, a 5-bit prefix: 0a
+C.1.2 1337, a 5-bit prefix: 1f9a 0a
+C.1.3 42 at an octet's start: 2a
+decoded again: 10 1337 42
+== C.2 header fields, each into an empty table
+-- C.2.1 a literal with indexing
+  custom-key: custom-header
+  [  1] (s =  55) custom-key: custom-header
+  Table size: 55
+  encoded again: the RFC's 26 bytes
+-- C.2.2 a literal without indexing (Chromium's policy)
+  :path: /sample/path
+  Table size: 0
+  encoded again: the RFC's 14 bytes
+-- C.2.3 a literal never indexed
+  password: secret (never indexed)
+  Table size: 0
+  encoded again: the RFC's 17 bytes
+-- C.2.4 an indexed field
+  :method: GET
+  Table size: 0
+  encoded again: the RFC's 1 bytes
+== C.3 requests without Huffman coding
+-- block 1
+  :method: GET
+  :scheme: http
+  :path: /
+  :authority: www.example.com
+  [  1] (s =  57) :authority: www.example.com
+  Table size: 57
+  encoded again: the RFC's 20 bytes
+-- block 2
+  :method: GET
+  :scheme: http
+  :path: /
+  :authority: www.example.com
+  cache-control: no-cache
+  [  1] (s =  53) cache-control: no-cache
+  [  2] (s =  57) :authority: www.example.com
+  Table size: 110
+  encoded again: the RFC's 14 bytes
+-- block 3
+  :method: GET
+  :scheme: https
+  :path: /index.html
+  :authority: www.example.com
+  custom-key: custom-value
+  [  1] (s =  54) custom-key: custom-value
+  [  2] (s =  53) cache-control: no-cache
+  [  3] (s =  57) :authority: www.example.com
+  Table size: 164
+  encoded again: the RFC's 29 bytes
+== C.4 requests with Huffman coding
+-- block 1
+  :method: GET
+  :scheme: http
+  :path: /
+  :authority: www.example.com
+  [  1] (s =  57) :authority: www.example.com
+  Table size: 57
+  encoded again: the RFC's 17 bytes
+-- block 2
+  :method: GET
+  :scheme: http
+  :path: /
+  :authority: www.example.com
+  cache-control: no-cache
+  [  1] (s =  53) cache-control: no-cache
+  [  2] (s =  57) :authority: www.example.com
+  Table size: 110
+  encoded again: the RFC's 12 bytes
+-- block 3
+  :method: GET
+  :scheme: https
+  :path: /index.html
+  :authority: www.example.com
+  custom-key: custom-value
+  [  1] (s =  54) custom-key: custom-value
+  [  2] (s =  53) cache-control: no-cache
+  [  3] (s =  57) :authority: www.example.com
+  Table size: 164
+  encoded again: the RFC's 24 bytes
+== C.5 responses without Huffman coding (SETTINGS_HEADER_TABLE_SIZE 256)
+-- block 1
+  :status: 302
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:21 GMT
+  location: https://www.example.com
+  [  1] (s =  63) location: https://www.example.com
+  [  2] (s =  65) date: Mon, 21 Oct 2013 20:13:21 GMT
+  [  3] (s =  52) cache-control: private
+  [  4] (s =  42) :status: 302
+  Table size: 222
+  encoded again: the RFC's 70 bytes
+-- block 2
+  :status: 307
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:21 GMT
+  location: https://www.example.com
+  [  1] (s =  42) :status: 307
+  [  2] (s =  63) location: https://www.example.com
+  [  3] (s =  65) date: Mon, 21 Oct 2013 20:13:21 GMT
+  [  4] (s =  52) cache-control: private
+  Table size: 222
+  encoded again: the RFC's 8 bytes
+-- block 3
+  :status: 200
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:22 GMT
+  location: https://www.example.com
+  content-encoding: gzip
+  set-cookie: foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1
+  [  1] (s =  98) set-cookie: foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1
+  [  2] (s =  52) content-encoding: gzip
+  [  3] (s =  65) date: Mon, 21 Oct 2013 20:13:22 GMT
+  Table size: 215
+  encoded again: the RFC's 98 bytes
+== C.6 responses with Huffman coding (SETTINGS_HEADER_TABLE_SIZE 256)
+-- block 1
+  :status: 302
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:21 GMT
+  location: https://www.example.com
+  [  1] (s =  63) location: https://www.example.com
+  [  2] (s =  65) date: Mon, 21 Oct 2013 20:13:21 GMT
+  [  3] (s =  52) cache-control: private
+  [  4] (s =  42) :status: 302
+  Table size: 222
+  encoded again: the RFC's 54 bytes
+-- block 2
+  :status: 307
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:21 GMT
+  location: https://www.example.com
+  [  1] (s =  42) :status: 307
+  [  2] (s =  63) location: https://www.example.com
+  [  3] (s =  65) date: Mon, 21 Oct 2013 20:13:21 GMT
+  [  4] (s =  52) cache-control: private
+  Table size: 222
+  encoded again: the RFC's 8 bytes
+-- block 3
+  :status: 200
+  cache-control: private
+  date: Mon, 21 Oct 2013 20:13:22 GMT
+  location: https://www.example.com
+  content-encoding: gzip
+  set-cookie: foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1
+  [  1] (s =  98) set-cookie: foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1
+  [  2] (s =  52) content-encoding: gzip
+  [  3] (s =  65) date: Mon, 21 Oct 2013 20:13:22 GMT
+  Table size: 215
+  encoded again: the RFC's 79 bytes
+== Chromium's blocks, one connection's (tests/exec/hpack/chromium.txt)
+stream 1: 16 fields, Chromium's block 447 bytes; ours the same, its decoding the list
+stream 3: 18 fields, Chromium's block 109 bytes; ours the same, its decoding the list
+stream 5: 18 fields, Chromium's block 89 bytes; ours the same, its decoding the list
+stream 7: 19 fields, Chromium's block 29 bytes; ours the same, its decoding the list
+stream 9: 18 fields, Chromium's block 26 bytes; ours the same, its decoding the list
+stream 11: 18 fields, Chromium's block 26 bytes; ours the same, its decoding the list
+stream 13: 19 fields, Chromium's block 28 bytes; ours the same, its decoding the list
+stream 15: 18 fields, Chromium's block 49 bytes; ours the same, its decoding the list
+8 of 8 blocks encoded as Chromium encoded them, 8 decoded to their lists (803 bytes); the encoder's table 1712 bytes, 26 entries
+== blocks that are no HPACK
+index 0: refused, index 0 is in neither table
+index 62, the dynamic table empty: refused, index 62 is in neither table
+an integer past 2^28: refused, an index is cut short, or past 2^28
+an integer cut short: refused, an index is cut short, or past 2^28
+a size update after a field: refused, a dynamic table size update after a field
+a size update past the limit (4096 allowed, 4097 asked): refused, a dynamic table size update past the 4096 bytes allowed
+two size updates at the start (0, then 4096): decoded
+a string longer than the block: refused, a literal's name is not one (index 0)
+a Huffman string with EOS in it: refused, a literal's value is not one
+a Huffman string padded with 11 bits: refused, a literal's value is not one
+a Huffman string padded with a 0 bit: refused, a literal's value is not one
+a Huffman string padded rightly: decoded
+a literal never indexed: decoded
+== the dynamic table under pressure (a limit of 100)
+three literals indexed: decoded
+  [  1] (s =  38) ccc: 333
+  [  2] (s =  36) bb: 22
+  Table size: 74
+a literal named by entry 63, which its insertion evicts: decoded
+  bb: xxxxxxxx
+  [  1] (s =  42) bb: xxxxxxxx
+  [  2] (s =  38) ccc: 333
+  Table size: 80
+an entry of 105 bytes, larger than the table, which it empties: decoded
+  Table size: 0
+a size update to 68, then a: 1: decoded
+  [  1] (s =  34) a: 1
+  Table size: 34
+== a list past its bound (100 bytes), its table kept in step
+the header list passes 100 bytes; 1 field kept; the table holds 2 entries
+the next block's index 62, the entry the last one added:
+  x-b: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+== lists made at random, encoded and decoded, the tables' sizes changing
+3000 of 3000 blocks (767676 bytes, 53 table size changes) decoded to their lists, both tables the same size after each
+== blocks broken at random, each decoded or refused
+20000 blocks: 2291 decoded, 17682 refused, 27 past their bound
