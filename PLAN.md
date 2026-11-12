@@ -812,6 +812,37 @@ be built side by side and merged without touching each other's.
   - tabs, and sessions restored into them;
   - preferences that change rendering: base font size, colour scheme,
     reduced motion, zoom.
+- **12o SVG** (`src/paint/svg.c`, `src/paint/svg.h`; SVG's properties in
+  `contracts/css.pl`, the box's `svg` scene in `contracts/layout.pl`):
+  - the cascade computes SVG's properties (fill and stroke, their opacities,
+    the stroke's width, caps, joins, miter limit, dashes and offset, the fill
+    and clip rules, stop-color and -opacity, clip-path, text-anchor), reads
+    presentation attributes as author rules of specificity 0 (a bare number a
+    length's px), and the outermost svg's width and height as its box's;
+  - layout sizes an svg as Chromium does (its natural size and its viewBox's
+    ratio; inline, a block or positioned) and makes its subtree a scene in
+    user space: every shape and path command (arcs too), transforms (the
+    attribute's, a declared CSS one's), viewBoxes and preserveAspectRatio,
+    nested svgs, use and symbol (a use's tree inheriting from it), gradients
+    and clips resolved (objectBoundingBox through the element's box), text
+    and tspan placed (x, y, dx, dy lists, text-anchor by chunks);
+  - paint draws a scene as Skia does: curves flattened at the device's px,
+    strokes made outlines (joins with their tangents' miter limit, caps, a
+    hairline's alpha), dashes cut where SkDashPath cuts them over
+    SkContourMeasure's chords, coverage over sixteen rows a pixel under either
+    fill rule, groups with an opacity or a clip drawn in layers (a clip-path's
+    mask times its bounding box's, as Blink's two clips multiply), the svg's
+    content at whole CSS px;
+  - SVG documents as images (img, CSS backgrounds, picture's sources): read
+    by a small XML parser into a document of their own, cascaded with their
+    own style elements, drawn at their natural size scaled into the box (a
+    viewBox alone fitted into it), their natural size the loader's fact.
+
+  Gate: `tests/pages/svg.html`, `svg-paint.html`, `svg-text.html`,
+  `svg-image.html` and, zoomed 1.5, `svg-zoom.html`, each held to Chromium's
+  screenshot region by region (`tests/integ/paintref.sh`: 37, 40, 9, 11 and
+  9 regions agree); `tests/exec/svg_render` (path data, coverage, natural
+  sizes, scenes, hostile documents; valgrind clean).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
@@ -859,7 +890,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12n, each with its own files and gate |
+| 12 The limitations | **in progress**: the packages 12a-12o, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks

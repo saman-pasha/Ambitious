@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- a badge: a natural size of 120 x 60, a gradient, a use and a style sheet of its own -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="60">
+  <style>
+    .frame { fill: none; stroke: #203040; stroke-width: 3 }
+    .dot { fill: #f0c000 }
+  </style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#60a0e0"/>
+      <stop offset="1" stop-color="#204080"/>
+    </linearGradient>
+    <circle id="d" r="8"/>
+  </defs>
+  <rect x="2" y="2" width="116" height="56" rx="10" fill="url(#bg)"/>
+  <rect class="frame" x="2" y="2" width="116" height="56" rx="10"/>
+  <use xlink:href="#d" x="25" y="30" class="dot"/>
+  <use xlink:href="#d" x="60" y="30" class="dot" opacity="0.6"/>
+  <use xlink:href="#d" x="95" y="30" fill="#e04040"/>
+  <![CDATA[ text in CDATA is no drawing ]]>
+</svg>

@@ -1,0 +1,10 @@
+# tests/pages/svg-text.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-basic 10 10 250 70
+text-anchor 270 10 510 110
+text-tspan 530 10 790 110
+text-xlist 10 130 250 210
+text-family 270 130 510 240
+text-scaled 530 130 790 240
+text-paint 10 260 390 340
+tg 0 0 0 0
+text-group 410 260 790 340

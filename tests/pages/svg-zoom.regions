@@ -1,0 +1,10 @@
+# tests/pages/svg-zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+z-shapes 7 7 158 158
+z-paint 175 7 326 158
+zg 0 0 0 0
+zc 0 0 0 0
+z-viewbox 343 7 494 98
+z-dot 0 0 0 0
+z-img 7 175 188 266
+text-z 211 175 497 266
+bg 7 343 158 434

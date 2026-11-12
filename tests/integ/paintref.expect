@@ -11,6 +11,11 @@ inlinedeco: 7 of 7 regions agree with Chromium's drawing
 italic: 24 of 24 regions agree with Chromium's drawing
 legend: 17 of 17 regions agree with Chromium's drawing
 scripts: 22 of 22 regions agree with Chromium's drawing
+svg-image: 11 of 11 regions agree with Chromium's drawing
+svg-paint: 40 of 40 regions agree with Chromium's drawing
+svg-text: 9 of 9 regions agree with Chromium's drawing
+svg-zoom: 9 of 9 regions agree with Chromium's drawing
+svg: 37 of 37 regions agree with Chromium's drawing
 symbols: 20 of 20 regions agree with Chromium's drawing
 transforms: 16 of 16 regions agree with Chromium's drawing
 woff2: 14 of 14 regions agree with Chromium's drawing

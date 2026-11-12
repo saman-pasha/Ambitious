@@ -7,8 +7,13 @@
    its inline children are laid out in its block container's lines, its margins,
    borders and paddings as space at its two ends, and its background drawn
    behind its part of each line. An inline element that holds a block is
-   flattened into its container. inline-block, img, input, button, textarea and
-   select make atomic inline boxes. A container with both block-level and
+   flattened into its container. inline-block, img, svg, input, button, textarea and
+   select make atomic inline boxes; an img or an svg made a block (display: block, a
+   float, a positioned box) is still a replaced box, sized as an inline one, its content
+   none of the flow's. An svg is sized as Chromium sizes one: its width and height
+   attributes its CSS width and height (the cascade's presentation attributes), its
+   natural size their absolute lengths, its ratio its viewBox's; its subtree is made the
+   box's scene (src/paint/svg.h) once the box's size is known. A container with both block-level and
    inline-level children wraps each run of the inline ones that shows anything
    in an anonymous block.
 
@@ -155,6 +160,7 @@ amb_implementation(layout);
 #include "hyph_data.h"
 #include "bidi_data.h"
 #include "../net/url.h"
+#include "../paint/svg.h"
 
 /* the run's context, as parameters: a struct may hold no borrow. sx: each node's style
    (0 for none); sc: each style as layout reads it, made once a run */
@@ -868,6 +874,92 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
 static void lay_grid_intrinsic(LCTX, uint32_t el, double cw, const vector<lay_seg> *segs, const vector<uint32_t> *items, double *mn, double *mx);
 
+/* an svg attribute's length as an absolute length in px (a number is px; em and ex of the
+   font size), or -1 for none: absent, a percentage, auto */
+static double lay_svg_len(const dom_document *d, uint32_t el, const char *name, double fs) {
+    uint32_t a = lay_attr(d, el, name);
+    if (!a) return -1;
+    vector<char> v;
+    append_range(v, text_ptr(d, d->attr[a].value), d->attr[a].value.len);
+    size_t n = len(v), i = 0;
+    while (i < n && (at(v, i) == ' ' || at(v, i) == '\t' || at(v, i) == '\n')) i++;
+    size_t b = i;
+    if (i < n && at(v, i) == '+') i++;
+    double x = 0, frac = 0.1;
+    int digits = 0;
+    while (i < n && at(v, i) >= '0' && at(v, i) <= '9') { x = x * 10 + (at(v, i) - '0'); i++; digits++; }
+    if (i < n && at(v, i) == '.') {
+        i++;
+        while (i < n && at(v, i) >= '0' && at(v, i) <= '9') { x += (at(v, i) - '0') * frac; frac /= 10; i++; digits++; }
+    }
+    if (!digits || i == b) return -1;
+    size_t u = i;
+    while (u < n && at(v, u) >= 'a' && at(v, u) <= 'z') u++;
+    size_t e = u;
+    while (e < n && (at(v, e) == ' ' || at(v, e) == '\t' || at(v, e) == '\n')) e++;
+    if (e != n) return -1;
+    size_t ul = u - i;
+    if (ul == 0) return x;
+    if (ul != 2) return -1;
+    char c0 = at(v, i), c1 = at(v, i + 1);
+    if (c0 == 'p' && c1 == 'x') return x;
+    if (c0 == 'i' && c1 == 'n') return x * 96;
+    if (c0 == 'c' && c1 == 'm') return x * 96 / 2.54;
+    if (c0 == 'm' && c1 == 'm') return x * 96 / 25.4;
+    if (c0 == 'p' && c1 == 't') return x * 4 / 3;
+    if (c0 == 'p' && c1 == 'c') return x * 16;
+    if (c0 == 'e' && c1 == 'm') return x * fs;
+    if (c0 == 'e' && c1 == 'x') return x * fs / 2;
+    return -1;
+}
+/* an svg element's viewBox's ratio, width over height: 0 for none */
+static double lay_svg_ratio(const dom_document *d, uint32_t el) {
+    uint32_t a = lay_attr(d, el, "viewBox");
+    if (!a) return 0;
+    vector<char> v;
+    append_range(v, text_ptr(d, d->attr[a].value), d->attr[a].value.len);
+    push_back(v, 0);
+    double n[4];
+    size_t i = 0;
+    for (int k = 0; k < 4; k++) {
+        while (at(v, i) == ' ' || at(v, i) == ',' || at(v, i) == '\t' || at(v, i) == '\n' || at(v, i) == '\r') i++;
+        size_t b = i;
+        if (at(v, i) == '-' || at(v, i) == '+') i++;
+        while ((at(v, i) >= '0' && at(v, i) <= '9') || at(v, i) == '.' || at(v, i) == 'e' || at(v, i) == 'E' ||
+               ((at(v, i) == '-' || at(v, i) == '+') && i > b && (at(v, i - 1) == 'e' || at(v, i - 1) == 'E'))) i++;
+        if (i == b) return 0;
+        char num[48];
+        size_t nl = i - b < sizeof num - 1 ? i - b : sizeof num - 1;
+        memcpy(num, data(v) + b, nl);
+        num[nl] = 0;
+        n[k] = atof(num);
+    }
+    return n[2] > 0 && n[3] > 0 ? n[2] / n[3] : 0;
+}
+/* an svg element's content box (CSS 2.1, 10.3.2 and 10.6.2, as Chromium sizes one): its
+   width and height attributes are its CSS width and height (presentation attributes, the
+   cascade's); its natural size their absolute lengths, and its ratio its viewBox's (else
+   theirs). Neither declared, a ratio alone fills the containing block's width, and with no
+   ratio nor size it is 300 x 150 */
+static void lay_svg_size(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
+    double nw = lay_svg_len(d, el, "width", s->fs), nh = lay_svg_len(d, el, "height", s->fs), ratio = lay_svg_ratio(d, el);
+    if (ratio <= 0 && nw > 0 && nh > 0) ratio = nw / nh;
+    int wa = s->width.unit == LAY_AUTO, ha = s->height.unit == LAY_AUTO;
+    if (!wa) *w = lay_res(st, s->width, cw);
+    if (!ha) *h = s->height.v;
+    if (wa && ha) {
+        if (nw >= 0) { *w = nw; *h = nh >= 0 ? nh : ratio > 0 ? nw / ratio : 150; }
+        else if (nh >= 0) { *h = nh; *w = ratio > 0 ? nh * ratio : 300; }
+        else if (ratio > 0) {
+            double edges = lay_res(st, s->m[1], cw) + lay_res(st, s->m[3], cw) + s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) +
+                           lay_res(st, s->p[3], cw);
+            *w = cw - edges > 0 ? cw - edges : 0;
+            *h = *w / ratio;
+        } else { *w = 300; *h = 150; }
+    } else if (wa) *w = ratio > 0 ? *h * ratio : nw >= 0 ? nw : 300;
+    else if (ha) *h = ratio > 0 ? *w / ratio : nh >= 0 ? nh : 150;
+}
+
 /* the content box of an atomic inline: a replaced element's size, or an inline-block's
    width shrunk to fit within avail */
 /* an image whose load failed (its request broken: no URL, refused, not found ...) */
@@ -1017,8 +1109,10 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
         if (*h < 0) *h = 0;
         return;
     }
+    if (lay_is_svg(d, el)) { lay_svg_size(LARGS, el, s, cw, w, h); return; }
     if (lay_replaced(d, el)) {
-        double dw = 0, dh = 0;
+        double dw = 0, dh = 0, ratio = 0;
+        int svg = 0;
         /* a declared width of the border box (box-sizing) less its padding and border (a height the style made its content's) */
         double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
         if (lay_is_named(d, el, "img") && nt) {
@@ -1028,6 +1122,8 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                 if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE) {
                     dw = nt->resource[r].width;
                     dh = nt->resource[r].height;
+                    double sw, sh;
+                    svg = (dw <= 0 || dh <= 0) && nt->resource[r].outcome == NET_OUTCOME_OK && amb_svg_size_of(nt, r, &sw, &sh, &ratio);
                 }
             if (dw > 0 && dh > 0) {
                 if (s->width.unit != LAY_AUTO && s->height.unit == LAY_AUTO) {
@@ -1042,6 +1138,20 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
                     *w = *h * dw / dh;
                     return;
                 }
+            } else if (svg) {
+                /* an SVG image with no natural size: its ratio alone (a viewBox's) sizes it as
+                   an svg element's, else the default 300 x 150 */
+                int wa = s->width.unit == LAY_AUTO, ha = s->height.unit == LAY_AUTO;
+                *w = wa ? 300 : lay_res(st, s->width, cw) - ew;
+                *h = ha ? 150 : s->height.v;
+                if (ratio > 0 && wa && ha) {
+                    double edges = lay_res(st, s->m[1], cw) + lay_res(st, s->m[3], cw) + s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) +
+                                   lay_res(st, s->p[3], cw);
+                    *w = cw - edges > 0 ? cw - edges : 0;
+                    *h = *w / ratio;
+                } else if (ratio > 0 && wa) *w = *h * ratio;
+                else if (ratio > 0 && ha) *h = *w / ratio;
+                return;
             }
         }
         if (lay_is_named(d, el, "input")) {
@@ -4574,7 +4684,8 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
             t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
         }
         /* an image's height in proportion to the width it was held to (min-width, max-width, a given width) */
-        if (lay_is_named(d, el, "img") && !alt_block && s.height.unit == LAY_AUTO && w0 > 0 && h > 0 && t->box[b].w != w0) h = h * t->box[b].w / w0;
+        if ((lay_is_named(d, el, "img") || lay_is_svg(d, el)) && !alt_block && s.height.unit == LAY_AUTO && w0 > 0 && h > 0 && t->box[b].w != w0)
+            h = h * t->box[b].w / w0;
         t->box[b].h = h > 0 ? h : 0;
         t->box[b].avail = cw;
         lay_placeholder(LARGS, b, el, &s);
@@ -6786,6 +6897,26 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     /* the sticky boxes, when a style is sticky */
     for (size_t k = 0; k < len(exts); k++)
         if (at(exts, k).pos == POS_STICKY) { lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height); break; }
+    /* each svg element's drawing, made for its content box (src/paint/svg.h) */
+    vector<uint32_t> firsts;
+    for (uint32_t b = 1; b < t->box_len; b++) {
+        if (!t->box[b].live || t->box[b].kind != LAYOUT_BOX_KIND_REPLACED || t->box[b].pseudo) continue;
+        uint32_t el = t->box[b].node.index;
+        if (!el || el >= doc->node_len || !lay_is_svg(doc, el)) continue;
+        if (!len(firsts)) {
+            resize(firsts, doc->node_len);
+            for (uint32_t x = 1; x < doc->node_len; x++) {
+                uint32_t sid = at(node_style, x) & LAY_SMASK;
+                firsts[x] = sid < len(style_first) ? at(style_first, sid) : 0;
+            }
+        }
+        vector<char> scene;
+        amb_svg_scene(doc, style, &firsts, &fonts, el, t->box[b].w, t->box[b].h, &scene);
+        if (len(scene)) {
+            amb_span sp = text_add(t, data(scene), len(scene));
+            t->box[b].svg = sp;
+        }
+    }
     t->revision++;
     return LAYOUT_OK;
 }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG as an image: img and backgrounds</title>
+<style>
+body { margin: 0; background: #fff }
+img, div { position: absolute }
+#b-tile { left: 10px; top: 300px; width: 170px; height: 110px; background: url(svg-tile.svg) }
+#b-sized { left: 200px; top: 300px; width: 200px; height: 110px; background: url(svg-badge.svg) no-repeat 10px 10px; background-size: 180px 90px }
+#b-contain { left: 420px; top: 300px; width: 220px; height: 80px; background: url(svg-ratio.svg) no-repeat center; background-size: contain }
+#b-auto { left: 660px; top: 300px; width: 130px; height: 130px; background: url(svg-ratio.svg) no-repeat }
+</style>
+</head>
+<body>
+<img id="i-badge" src="svg-badge.svg" style="left:10px;top:10px">
+<img id="i-badge2x" src="svg-badge.svg" style="left:150px;top:10px" width="240" height="120">
+<img id="i-stretch" src="svg-badge.svg" style="left:410px;top:10px" width="120" height="120">
+<img id="i-ratio" src="svg-ratio.svg" style="left:550px;top:10px" width="200">
+<img id="i-ratio-box" src="svg-ratio.svg" style="left:10px;top:150px" width="100" height="100">
+<img id="i-ratio-h" src="svg-ratio.svg" style="left:130px;top:150px" height="60">
+<img id="i-tile" src="svg-tile.svg" style="left:300px;top:150px" width="60" height="60">
+<div id="b-tile"></div>
+<div id="b-sized"></div>
+<div id="b-contain"></div>
+<div id="b-auto"></div>
+</body>
+</html>

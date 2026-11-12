@@ -53,6 +53,11 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     text_overflow,                     % clip, or ellipsis where a line overflows a box that clips it
     webkit_line_clamp,                 % -webkit-line-clamp: none, or the lines a vertical -webkit-box keeps
     webkit_box_orient,                 % -webkit-box-orient: horizontal (inline-axis) or vertical (block-axis)
+    %% SVG's (SVG 2, 13 and 14; CSS Masking 1): a paint (fill, stroke) as text -- none,
+    %% currentcolor (a keyword, each element's own colour), a colour, url(#id) and its
+    %% fallback; a dash array as text; clip-path's none or url(#id)
+    fill, fill_opacity, fill_rule, stroke, stroke_width, stroke_linecap, stroke_linejoin, stroke_miterlimit,
+    stroke_dasharray, stroke_dashoffset, stroke_opacity, stop_color, stop_opacity, clip_path, clip_rule, text_anchor,
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

@@ -1,0 +1,12 @@
+# tests/pages/svg-image.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+i-badge 10 10 130 70
+i-badge2x 150 10 390 130
+i-stretch 410 10 530 130
+i-ratio 550 10 750 110
+i-ratio-box 10 150 110 250
+i-ratio-h 130 150 250 210
+i-tile 300 150 360 210
+b-tile 10 300 180 410
+b-sized 200 300 400 410
+b-contain 420 300 640 380
+b-auto 660 300 790 430

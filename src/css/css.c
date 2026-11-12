@@ -56,7 +56,13 @@
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
    height, align, a table's border; dir, as Chromium maps it) are author rules of specificity 0 before
-   every other author rule. A computed value is as each property's spec has
+   every other author rule; so are an SVG element's presentation attributes (SVG 2, 6.6: its
+   painting properties, opacity, color, display, visibility, the font's, overflow, ...; a
+   bare number a length's px) and the outermost svg element's width and height. SVG's
+   properties are longhands as the others are: fill and stroke kept as their text (none and
+   currentcolor keywords, currentcolor each element's own colour), their opacities, the
+   stroke's width, caps, joins, miter limit, dash array and offset, the fill and clip rules,
+   stop-color and stop-opacity, clip-path (none or url()), text-anchor. A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
    border's width 0 under style none, display blockified for a float, an
    absolute box, the root and a flex or grid item. Two differ from Chromium's:
@@ -914,6 +920,23 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "text-overflow", 0, G_KW, 0, "clip ellipsis", "clip" },
     { "-webkit-line-clamp", 0, G_NUM, F_INT, "none", "none" },
     { "-webkit-box-orient", 0, G_KW, 0, "horizontal vertical inline-axis block-axis", "horizontal" },
+    /* SVG's (SVG 2, 13; CSS Masking 1): a length a number may be (a user unit, px) */
+    { "fill", 1, G_TEXT, 0, "none currentcolor", "black" },
+    { "fill-opacity", 1, G_NUM, F_PCT | F_NEG, 0, "1" },
+    { "fill-rule", 1, G_KW, 0, "nonzero evenodd", "nonzero" },
+    { "stroke", 1, G_TEXT, 0, "none currentcolor", "none" },
+    { "stroke-width", 1, G_LEN, F_PCT | F_NUM, 0, "1px" },
+    { "stroke-linecap", 1, G_KW, 0, "butt round square", "butt" },
+    { "stroke-linejoin", 1, G_KW, 0, "miter round bevel miter-clip arcs", "miter" },
+    { "stroke-miterlimit", 1, G_NUM, 0, 0, "4" },
+    { "stroke-dasharray", 1, G_TEXT, 0, "none", "none" },
+    { "stroke-dashoffset", 1, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
+    { "stroke-opacity", 1, G_NUM, F_PCT | F_NEG, 0, "1" },
+    { "stop-color", 0, G_COLOR, 0, 0, "black" },
+    { "stop-opacity", 0, G_NUM, F_PCT | F_NEG, 0, "1" },
+    { "clip-path", 0, G_TEXT, 0, "none", "none" },
+    { "clip-rule", 1, G_KW, 0, "nonzero evenodd", "nonzero" },
+    { "text-anchor", 1, G_KW, 0, "start middle end", "start" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -1557,10 +1580,47 @@ static int css_is_areas(const char *s, size_t n) {
     return rows > 0;
 }
 
+/* a colour as an SVG paint or its fallback writes one: one CSS writes, a system colour,
+   light-dark(), currentcolor */
+static int css_is_colour(const char *s, size_t n) {
+    uint32_t c;
+    return css_parse_color(s, n, &c) || css_system_color(s, n, 0, &c) || css_scheme_color(s, n, 0, &c) || css_eq_ci(s, n, "currentcolor");
+}
+/* an SVG paint (SVG 2, 13.2), beside its keywords none and currentcolor: a colour, or
+   url() and perhaps a fallback, none or a colour */
+static int css_is_paint(const char *s, size_t n) {
+    size_t st[3], ln[3];
+    size_t k = css_parts(s, n, st, ln, 3);
+    if (k == 1) return css_is_fn(s + st[0], ln[0], "url") || css_is_colour(s + st[0], ln[0]);
+    if (k != 2 || !css_is_fn(s + st[0], ln[0], "url")) return 0;
+    return css_eq_ci(s + st[1], ln[1], "none") || css_is_colour(s + st[1], ln[1]);
+}
+/* stroke-dasharray's list (SVG 2, 13.5.6): lengths, percentages or numbers, none negative,
+   a comma or a space between */
+static int css_is_dashes(const char *s, size_t n) {
+    size_t i = 0, st, ln;
+    int parts = 0;
+    while (css_next_part(s, n, &i, &st, &ln)) {
+        css_val v;
+        if (!css_parse_val(s + st, ln, &v)) return 0;
+        int ok = v.unit == CSS_UNIT_NUMBER || v.unit == CSS_UNIT_PX || v.unit == CSS_UNIT_EM || v.unit == CSS_UNIT_REM ||
+                 v.unit == CSS_UNIT_PERCENT;
+        if (!ok || v.num < 0) return 0;
+        parts++;
+    }
+    return parts > 0;
+}
+
 static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
     switch (p) {
+    case CSS_PROP_FILL: case CSS_PROP_STROKE: return css_is_paint(s, n);
+    case CSS_PROP_STROKE_DASHARRAY: return css_is_dashes(s, n);
+    case CSS_PROP_CLIP_PATH: {
+        size_t cs[2], cl[2];
+        return css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url");
+    }
     case CSS_PROP_COLOR_SCHEME: {
         /* [light | dark | <custom-ident>]+ && only? (CSS Color Adjust 1, 2.1): names a space
            apart, no comma among them */
@@ -4376,7 +4436,8 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
     if (g == G_NUM) {
         if (v->unit == CSS_UNIT_CALC) css_calc_computed(s, p, v, fs, env->rem, -1, color);
         if (v->unit == CSS_UNIT_PERCENT) { v->unit = CSS_UNIT_NUMBER; v->num /= 100; }
-        if (p == CSS_PROP_OPACITY && v->unit == CSS_UNIT_NUMBER) v->num = v->num < 0 ? 0 : v->num > 1 ? 1 : v->num;
+        if ((p == CSS_PROP_OPACITY || p == CSS_PROP_FILL_OPACITY || p == CSS_PROP_STROKE_OPACITY || p == CSS_PROP_STOP_OPACITY) &&
+            v->unit == CSS_UNIT_NUMBER) v->num = v->num < 0 ? 0 : v->num > 1 ? 1 : v->num;
         return;
     }
     if (g != G_LEN) return;
@@ -6054,8 +6115,55 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
     return 0;
 }
 
+/* SVG's presentation attributes (SVG 2, 6.6) the module reads, as Chromium maps them */
+static const char css_svg_presentation[] =
+    "fill fill-opacity fill-rule stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray "
+    "stroke-dashoffset stroke-opacity stop-color stop-opacity clip-path clip-rule text-anchor opacity color display visibility "
+    "font-family font-size font-weight font-style letter-spacing word-spacing overflow direction unicode-bidi writing-mode "
+    "transform-origin";
+
+/* an SVG element's presentation attributes, each a declaration of its property in one author
+   rule of specificity 0 before every other (a value the property does not take dropped, as
+   one with a semicolon, a brace or !important is: an attribute is one value; a bare number a
+   length's px, as SVG's attributes write user units); and the outermost svg element's width
+   and height, which size its box */
+static void css_svg_hints(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
+    uint32_t up = d->node[x].parent;
+    int outer = names_is(d, d->node[x].name, "svg", 3) &&
+                !(up && d->node[up].kind == DOM_NODE_KIND_ELEMENT && d->node[up].ns == DOM_NAMESPACE_SVG);
+    uint32_t r = 0;
+    for (uint32_t a = d->node[x].first_attr; a; a = d->attr[a].next) {
+        if (d->attr[a].ns != DOM_ATTR_NAMESPACE_NULL) continue;
+        const char *nm = names_ptr(d, d->attr[a].name);
+        size_t nn = strlen(nm);
+        int sized = outer && ((nn == 5 && memcmp(nm, "width", 5) == 0) || (nn == 6 && memcmp(nm, "height", 6) == 0));
+        if (!sized && !css_word_in(nm, css_svg_presentation)) continue;
+        amb_span sp = d->attr[a].value;
+        vector<char> v;
+        append_range(v, text_ptr(d, sp), sp.len);
+        size_t vn = len(v);
+        if (vn == 0 || vn > 4000 || memchr(data(v), ';', vn) || memchr(data(v), '{', vn) || memchr(data(v), '}', vn) || memchr(data(v), '!', vn))
+            continue;
+        vector<char> t;
+        append_range(t, nm, nn);
+        push_back(t, ':');
+        append_range(t, data(v), vn);
+        int prop = css_prop_of(nm, nn);
+        size_t a0 = css_skip_ws(data(v), vn, 0), b0 = vn;
+        while (b0 > a0 && css_ws(at(v, b0 - 1))) b0--;
+        double num;
+        if (prop >= 0 && css_pdefs[prop].gram == G_LEN && b0 > a0 && css_number(data(v) + a0, b0 - a0, &num) == b0 - a0) append_range(t, "px", 2);
+        if (!r) {
+            r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, "the presentation attributes", 27, 1);
+            push_back(matched, r);
+        }
+        css_parse_block(s, r, data(t), len(t));
+    }
+}
+
 static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, uint32_t *sheet, vector<uint32_t> *matched) {
     if (!d->node[x].first_attr) return;             /* no attribute, no hint */
+    if (d->node[x].ns == DOM_NAMESPACE_SVG) { css_svg_hints(s, d, x, sheet, matched); return; }
     if (d->node[x].ns != DOM_NAMESPACE_HTML) return;  /* the hints are HTML elements' */
     for (size_t h = 0; h < sizeof css_hints / sizeof css_hints[0]; h++) {
         uint32_t at = css_attr_of(d, x, css_hints[h].attr, strlen(css_hints[h].attr));
