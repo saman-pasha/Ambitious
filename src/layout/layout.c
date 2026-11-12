@@ -370,6 +370,7 @@ typedef struct lay_ext {
     uint8_t clone;                      /* box-decoration-break: clone (an inline box's fragments each wrapped in its edges) */
     uint32_t opos;                      /* object-position's cval; 0 at its initial value */
     uint32_t cpath;                     /* clip-path's cval when it is a basic shape or a geometry box; else 0 */
+    uint32_t cssclip;                   /* clip's cval when it is rect(); else 0 */
     uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
     uint8_t cq;                         /* container-type: 1 inline-size, 2 size (a query container; containment) */
 } lay_ext;
@@ -753,6 +754,10 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
         int url = cs.len > 4 && (cq[0] | 32) == 'u' && (cq[1] | 32) == 'r' && (cq[2] | 32) == 'l' && cq[3] == '(';
         e->cpath = st->cval[cc].unit == CSS_UNIT_TEXT && cs.len && !url ? cc : 0;
         if (e->cpath) e->paints = 1;
+        /* clip's rect(), kept for an absolutely positioned box (lay_box_paint) */
+        uint32_t kc = c0 + CSS_PROP_CLIP;
+        e->cssclip = st->cval[kc].unit == CSS_UNIT_TEXT && st->cval[kc].text.len ? kc : 0;
+        if (e->cssclip) e->paints = 1;
     }
     lay_word_of(st, c0 + CSS_PROP_FLEX_DIRECTION, w);
     e->frow = !(lay_w(w, "column") || lay_w(w, "column-reverse"));
@@ -6458,6 +6463,10 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].irender = e.irender;
     t->box[b].opos = lay_kept(t, st, e.opos);
     t->box[b].cpath = lay_kept(t, st, e.cpath);
+    {
+        int abs = t->box[b].position == LAYOUT_POSITION_ABSOLUTE || t->box[b].position == LAYOUT_POSITION_FIXED;
+        t->box[b].cssclip = lay_kept(t, st, abs ? e.cssclip : 0);
+    }
     t->box[b].bg_size = lay_kept(t, st, e.bgsize);
     t->box[b].bg_repeat = lay_kept(t, st, e.bgrepeat);
     t->box[b].bg_clip = lay_kept(t, st, e.bgclip);

@@ -120,7 +120,7 @@
    properties that take them (css_quirky), class and id selectors without ASCII case,
    and :hover or :active alone holding of links alone. Limited-quirks mode changes
    nothing here (its quirk is layout's). Not read: the unitless lengths of
-   background-position, border-spacing and clip.
+   background-position and border-spacing.
 
    Speed (PLAN.md 11): the user agent's sheet is read once a process
    (css_ua_load); names and keywords are found by hash; elements under one
@@ -160,6 +160,8 @@ static int css_scripting = 1;
    such a document is being read, its hashless colours and unitless lengths taken (css_quirky);
    css_quirk_ua, the quirks sheet is, its -internal-quirk-inherit taken */
 static int css_quirks, css_quirk_read, css_quirk_ua;
+/* the declaration being read may be quirky (css_expand sets it; see the quirky values below) */
+static int css_quirk_now;
 /* sheets read, ever: the counter styles read for a store (css_cs_get's cache) are as the sheets were when it read them */
 static uint32_t css_sheets_read;
 void css_set_scripting(int on) { css_scripting = on != 0; }
@@ -1109,6 +1111,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "mask-origin", 0, G_TEXT, 0, 0, "border-box" },
     { "mask-clip", 0, G_TEXT, 0, 0, "border-box" },
     { "mask-composite", 0, G_TEXT, 0, 0, "add" },
+    /* CSS 2.1, 11.1.2: an absolutely positioned box's clip, auto or rect() (css_clip_rect) */
+    { "clip", 0, G_TEXT, 0, "auto", "auto" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -2285,10 +2289,55 @@ static int css_clip_text(const char *s, size_t n, const css_cenv *e, vector<char
     return 1;
 }
 
+/* clip's rect() (CSS 2.1, 11.1.2; CSS Masking 1, 11), s[0, n) the value: four lengths or autos, all a comma apart or
+   all white space apart, as Chromium reads them -- no percentage, a calc() of lengths, a negative one; a number a
+   length of px where quirky (a quirks-mode author declaration's, the Quirks Mode Standard's unitless length; once
+   read, no other value holds one). Into v (px, its em resolved by e) and au (1 for an auto) */
+static int css_clip_rect(const char *s, size_t n, const css_cenv *e, int quirky, double *v, int *au) {
+    size_t i = css_skip_ws(s, n, 0), j = n;
+    while (j > i && css_ws(s[j - 1])) j--;
+    if (j - i < 6 || !css_eq_ci(s + i, 5, "rect(") || s[j - 1] != ')') return 0;
+    const char *a = s + i + 5;
+    size_t an = j - i - 6, st[5], ln[5], k = 0;
+    if (memchr(a, ',', an)) {
+        size_t p = 0;
+        for (;;) {
+            size_t c = css_comma(a, an, p);
+            size_t b0 = css_skip_ws(a, c, p), e0 = c, pst[2], pln[2];
+            while (e0 > b0 && css_ws(a[e0 - 1])) e0--;
+            if (k == 4 || e0 == b0 || css_parts(a + b0, e0 - b0, pst, pln, 2) != 1) return 0;
+            st[k] = b0;
+            ln[k] = e0 - b0;
+            k++;
+            if (c >= an) break;
+            p = c + 1;
+        }
+    } else k = css_parts(a, an, st, ln, 5);
+    if (k != 4) return 0;
+    for (int q = 0; q < 4; q++) {
+        const char *t = a + st[q];
+        double x;
+        v[q] = 0;
+        au[q] = css_eq_ci(t, ln[q], "auto");
+        if (au[q]) continue;
+        if (quirky && css_number(t, ln[q], &x) == ln[q]) { v[q] = x; continue; }
+        css_lin l;
+        if (!css_shape_lp(t, ln[q], e, 1, &l) || (l.kind & CSS_CK_PCT) || l.pct != 0) return 0;
+        v[q] = l.px;
+    }
+    return 1;
+}
+
 static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
     switch (p) {
+    case CSS_PROP_CLIP: {
+        css_cenv e = { 16, 16, -1 };
+        double v[4];
+        int au[4];
+        return css_clip_rect(s, n, &e, css_quirk_now, v, au);
+    }
     case CSS_PROP_OBJECT_POSITION: {
         css_cenv e = { 16, 16, -1 };
         css_lin x, y;
@@ -2611,9 +2660,8 @@ static int css_is_family(const char *s, size_t n) {
    paddings and the border widths (and their shorthands margin, padding, border-width), width,
    height and their minimums and maximums, the offsets, font-size, letter-spacing, word-spacing,
    text-indent and vertical-align -- by the property's own name, never through another shorthand
-   (border, background, font, inset) or inside a function. css_quirk_now: the declaration being
-   read may (css_expand sets it) */
-static int css_quirk_now;
+   (border, background, font, inset) or inside a function -- but clip's rect(), whose lengths may be numbers
+   (css_clip_rect). css_quirk_now (above): the declaration being read may (css_expand sets it) */
 
 static int css_is_hex(char c) { return css_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 static int css_quirky_color_prop(css_prop p) {
@@ -6824,6 +6872,30 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         memset(v, 0, sizeof *v);
         v->unit = CSS_UNIT_TEXT;
         v->tx = text_add(s, data(out), len(out));
+        return;
+    }
+    if (p == CSS_PROP_CLIP && v->unit == CSS_UNIT_TEXT) {
+        /* rect() with its lengths px and its autos kept, a comma and a space apart, as Chromium serializes it (a number
+           is px: a quirky declaration's, as the parse took no other) */
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        css_cenv e = { fs, env->rem, -1 };
+        double r[4];
+        int au[4];
+        if (css_clip_rect(data(src), len(src), &e, 1, r, au)) {
+            append_range(out, "rect(", 5);
+            for (int q = 0; q < 4; q++) {
+                if (q) append_range(out, ", ", 2);
+                if (au[q]) { append_range(out, "auto", 4); continue; }
+                css_lin l;
+                memset(&l, 0, sizeof l);
+                l.kind = CSS_CK_LEN;
+                l.px = r[q];
+                css_pos_text(&l, &out);
+            }
+            push_back(out, ')');
+            v->tx = text_add(s, data(out), len(out));
+        }
         return;
     }
     if (p == CSS_PROP_OBJECT_POSITION && v->unit == CSS_UNIT_TEXT) {

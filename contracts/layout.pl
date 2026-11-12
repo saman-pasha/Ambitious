@@ -123,6 +123,9 @@ layout_contract(record(box, [
     %% clip-path's basic shape or geometry box (its computed text; none, a url() or an SVG element's: none), which
     %% paint clips the box's stacking context to
     field(cpath, span(text)),
+    %% clip's rect() (CSS 2.1, 11.1.2: its computed text) of an absolutely or fixed positioned box; none for auto and
+    %% for any other box. Paint clips the box and all it draws, its positioned descendants too, to it
+    field(cssclip, span(text)),
     %% the SVG effects its filter, clip-path and mask name by url() (src/paint/svg.h, amb_svg_effects): an entry for
     %% each, in its border box's user space, which paint applies to the box's stacking context; none when they name none
     field(fx, span(text)),

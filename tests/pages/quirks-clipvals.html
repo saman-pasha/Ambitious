@@ -1,0 +1,12 @@
+<html><head><meta charset="utf-8"><title>clip's unitless lengths in quirks mode</title>
+<style>body { margin: 8px; font: 10px serif; } div { height: 2px; overflow: hidden; } #qs { position: absolute; clip: rect(5, 6, 7, 8); }</style></head><body>
+<div id="q1" data-check="clip" style="position:absolute;top:0px;clip:rect(1, 2, 3, 4)">rect(1, 2, 3, 4)</div>
+<div id="q2" data-check="clip" style="position:absolute;top:2px;clip:rect(1 2 3 4)">rect(1 2 3 4)</div>
+<div id="q3" data-check="clip" style="position:absolute;top:4px;clip:rect(1px, 2, auto, 4)">rect(1px, 2, auto, 4)</div>
+<div id="q4" data-check="clip" style="position:absolute;top:6px;clip:rect(1.5, 2, 3, 4)">rect(1.5, 2, 3, 4)</div>
+<div id="q5" data-check="clip" style="position:absolute;top:8px;clip:rect(-1, 2, 3, 4)">rect(-1, 2, 3, 4)</div>
+<div id="q6" data-check="clip" style="position:absolute;top:10px;clip:rect(1e1, 2, 3, 4)">rect(1e1, 2, 3, 4)</div>
+<div id="q7" data-check="clip" style="position:absolute;top:12px;clip:rect(1px 2 3px 4px)">rect(1px 2 3px 4px)</div>
+<div id="q8" data-check="clip" style="position:absolute;top:14px;clip:rect(1%, 2, 3, 4)">rect(1%, 2, 3, 4)</div>
+<div id="qs" data-check="clip">sheet</div>
+</body></html>

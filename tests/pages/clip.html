@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>the clip property as Chromium draws it</title>
+<style>
+body { margin: 0; font: 16px serif; }
+.b { position: absolute; width: 80px; height: 60px; background: #c33; border: 4px solid #33c; }
+.kid { position: absolute; left: 50px; top: 40px; width: 60px; height: 50px; background: #3a3; }
+.flow { width: 120px; height: 20px; background: #fc0; }
+</style></head>
+<body>
+<div id="c1" class="b" style="left:10px;top:10px;clip:rect(10px, 60px, 50px, 20px)"></div>
+<div id="c2" class="b" style="left:120px;top:10px;clip:rect(auto, auto, auto, auto)"><div class="kid"></div></div>
+<div id="c3" class="b" style="left:260px;top:10px;clip:rect(0px, auto, auto, 0px)"><div class="flow"></div></div>
+<div id="c4" class="b" style="left:420px;top:10px;clip:rect(0 0 0 0)"></div>
+<div id="c5" class="b" style="left:540px;top:10px;clip:rect(-5px, 100px, 90px, -10px);box-shadow:6px 6px 0 #888"></div>
+<div id="c6" class="b" style="left:10px;top:130px;font-size:10px;clip:rect(1em, 6em, 5em, 2em)">text</div>
+<div id="c7" style="position:relative;left:120px;top:130px;width:80px;height:60px;background:#c33;clip:rect(10px, 40px, 30px, 10px)"></div>
+<div id="c8" class="b" style="left:260px;top:130px;clip:rect(10px, 70px, 50px, 10px)"><div class="kid" style="left:30px;top:20px"></div><span style="position:relative;left:40px">rel</span></div>
+<div id="c9" class="b" style="left:420px;top:130px;clip:rect(auto, 50px, auto, auto);outline:3px solid #0aa"></div>
+<div id="c10" class="b" style="left:540px;top:130px;overflow:hidden;clip:rect(10px, 120px, 40px, 0px)"><div class="kid" style="left:40px;top:10px"></div></div>
+<div id="c11" class="b" style="left:10px;top:260px;clip:rect(calc(5px + 5px), 60px, 40px, 10px)"></div>
+<div id="c12" style="position:fixed;left:120px;top:260px;width:80px;height:60px;background:#c33;clip:rect(0px, 40px, 30px, 0px)"></div>
+</body></html>

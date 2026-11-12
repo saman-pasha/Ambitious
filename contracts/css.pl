@@ -77,6 +77,8 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% CSS Masking 1's mask layers (the mask shorthand sets them with mask-image): each a list, an item a layer, as text --
     %% its mode, repeat, position, size, origin and clip boxes, and how it composites with the layers under it
     mask_mode, mask_repeat, mask_position, mask_size, mask_origin, mask_clip, mask_composite,
+    %% CSS 2.1's clip (CSS Masking 1, 11): auto, or rect() as text
+    clip,
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

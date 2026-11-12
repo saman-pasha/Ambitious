@@ -1,0 +1,13 @@
+# boxes of tests/pages/clip.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+c1 div 10 10 88 68
+c2 div 120 10 88 68
+c3 div 260 10 88 68
+c4 div 420 10 88 68
+c5 div 540 10 88 68
+c6 div 10 130 88 68
+c7 div 120 130 80 60
+c8 div 260 130 88 68
+c9 div 420 130 88 68
+c10 div 540 130 88 68
+c11 div 10 260 88 68
+c12 div 120 260 80 60

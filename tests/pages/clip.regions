@@ -1,0 +1,13 @@
+# tests/pages/clip.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+c1 10 10 98 78
+c2 120 10 208 78
+c3 260 10 348 78
+c4 420 10 508 78
+c5 540 10 628 78
+c6 10 130 98 198
+c7 120 130 200 190
+c8 260 130 348 198
+c9 420 130 508 198
+c10 540 130 628 198
+c11 10 260 98 328
+c12 120 260 200 320

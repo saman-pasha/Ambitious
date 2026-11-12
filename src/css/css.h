@@ -10,7 +10,7 @@
 #include <vector.pl>
 
 /* the properties of a computed style: every value of enum(prop) but custom */
-#define CSS_NPROPS 183
+#define CSS_NPROPS 184
 
 /* a calc(), min(), max() or clamp() whose lengths are px, its percentages taken of
    basis: 1 and the px in *out, or 0 when it is none */

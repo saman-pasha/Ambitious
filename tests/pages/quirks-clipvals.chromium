@@ -1,0 +1,10 @@
+# tests/pages/quirks-clipvals.html in Chromium (tools/bench/cssref.js): id, property, value
+q1 clip rect(1px,2px,3px,4px)
+q2 clip rect(1px,2px,3px,4px)
+q3 clip rect(1px,2px,auto,4px)
+q4 clip rect(1.5px,2px,3px,4px)
+q5 clip rect(-1px,2px,3px,4px)
+q6 clip rect(10px,2px,3px,4px)
+q7 clip rect(1px,2px,3px,4px)
+q8 clip auto
+qs clip rect(5px,6px,7px,8px)

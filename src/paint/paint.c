@@ -3060,6 +3060,35 @@ static void pt_lines(const layout_tree *t, const net_loader *nt, uint32_t b, amb
 static int pt_positioned(const layout_tree *t, uint32_t b) {
     return t->box[b].position != LAYOUT_POSITION_STATIC;
 }
+/* clip's rect() of box b (layout keeps it for an absolutely or fixed positioned box alone), in page px into r (x0, y0,
+   x1, y1): its border box, each side that is not auto moved to its offset from the border box's top left (CSS 2.1,
+   11.1.2, as Blink's LayoutBox::ClipRect has it). 0 when it has none */
+static int pt_css_clip(const layout_tree *t, uint32_t b, double *r) {
+    amb_span sp = t->box[b].cssclip;
+    if (sp.len < 6) return 0;
+    const char *s = text_ptr(t, sp);
+    double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
+    double bw = t->box[b].bl + t->box[b].pl + t->box[b].w + t->box[b].pr + t->box[b].br;
+    double bh = t->box[b].bt + t->box[b].pt + t->box[b].h + t->box[b].pb + t->box[b].bb;
+    double v[4] = { 0, 0, 0, 0 };
+    int au[4] = { 1, 1, 1, 1 };
+    size_t i = 5, n = sp.len - 1;
+    for (int q = 0; q < 4 && i < n; q++) {
+        while (i < n && (s[i] == ' ' || s[i] == ',')) i++;
+        size_t a = i;
+        while (i < n && s[i] != ',') i++;
+        if (i - a >= 4 && memcmp(s + a, "auto", 4) == 0) continue;
+        au[q] = 0;
+        v[q] = strtod(s + a, 0);
+    }
+    r[0] = bx + (au[3] ? 0 : v[3]);
+    r[1] = by + (au[0] ? 0 : v[0]);
+    r[2] = bx + (au[1] ? bw : v[1]);
+    r[3] = by + (au[2] ? bh : v[2]);
+    return 1;
+}
+/* box b has clip's rect(): its positioned descendants are drawn with it, under its clip */
+static int pt_css_clips(const layout_tree *t, uint32_t b) { return t->box[b].cssclip.len != 0; }
 
 /* the box's background clipped to its text (background-clip: text, CSS Backgrounds 4):
    the layers so clipped, and its colour when its bottom layer is, drawn over a copy of
@@ -4337,11 +4366,28 @@ static void pt_order(PCTX, const vector<uint32_t> *list, int neg) {
     for (size_t q = 0; q < len(ord); q++) {
         uint32_t x = at(ord, q);
         if (pt_in_3d(t, x)) continue;
-        if (pt_context(t, x)) pt_effects(PARGS, x, 1);
+        /* clip's rect(): the box and all it draws held to it */
+        double keep[4] = { c->cx0, c->cy0, c->cx1, c->cy1 }, r[4];
+        int cl = pt_css_clip(t, x, r);
+        if (cl) {
+            c->cx0 = fmax(c->cx0, r[0]);
+            c->cy0 = fmax(c->cy0, r[1]);
+            c->cx1 = fmin(c->cx1, r[2]);
+            c->cy1 = fmin(c->cy1, r[3]);
+        }
+        if (cl && (c->cx1 <= c->cx0 || c->cy1 <= c->cy0)) {}
+        else if (pt_context(t, x)) pt_effects(PARGS, x, 1);
         else {
-            /* positioned, z-index auto: drawn as a context, but what is positioned in it is its parent context's */
+            /* positioned, z-index auto: drawn as a context, but what is positioned in it is its parent context's (a
+               clipping one's its own) */
             vector<uint32_t> its;
             pt_flow(PARGS, x, &its, 1);
+        }
+        if (cl) {
+            c->cx0 = keep[0];
+            c->cy0 = keep[1];
+            c->cx1 = keep[2];
+            c->cy1 = keep[3];
         }
     }
 }
@@ -4364,9 +4410,10 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
     }
     pt_lines(t, nt, b, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
     vector<uint32_t> inner;
+    int holds = clips || pt_css_clips(t, b);
     for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) {
         if (pt_positioned(t, ch)) {
-            if (clips) push_back(inner, ch);
+            if (holds) push_back(inner, ch);
             else push_back(later, ch);
             continue;
         }
@@ -4376,7 +4423,7 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
             pt_effects(PARGS, ch, 0);
             continue;
         }
-        if (clips) pt_flow(PARGS, ch, &inner, 1);
+        if (holds) pt_flow(PARGS, ch, &inner, 1);
         else pt_flow(PARGS, ch, later, 1);
     }
     if (len(inner)) {
@@ -4395,8 +4442,8 @@ static void pt_collect(const layout_tree *t, uint32_t b, vector<uint32_t> *later
     for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) {
         if (pt_positioned(t, ch)) {
             push_back(later, ch);
-            /* one of z-index auto: what is positioned in it is this context's too */
-            if (!pt_context(t, ch) && !t->box[ch].clip) pt_collect(t, ch, later);
+            /* one of z-index auto: what is positioned in it is this context's too (but a clipping one's, its own) */
+            if (!pt_context(t, ch) && !t->box[ch].clip && !pt_css_clips(t, ch)) pt_collect(t, ch, later);
             continue;
         }
         if (t->box[ch].clip || pt_context(t, ch)) continue;
