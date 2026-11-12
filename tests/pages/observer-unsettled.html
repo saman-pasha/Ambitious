@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>observer unsettled</title>
+<!-- A MutationObserver never disconnected on a page an interval keeps from coming to rest
+     (the reasoner's observer_never_disconnected), beside one disconnected (no diagnostic).
+     Its console says only that the observer saw a change, as Chromium's does
+     (tests/pages/observer-unsettled.chromium). -->
+</head>
+<body>
+<p id="clock">0</p>
+<script>
+  var n = 0, seen = 0;
+  new MutationObserver(function (r) { if (!seen++) console.log('observed ' + r[0].type + ' ' + r[0].target.id); })
+    .observe(document.getElementById('clock'), { childList: true, characterData: true, subtree: true });
+  setInterval(function () { document.getElementById('clock').textContent = String(++n); }, 100);
+  var done = new MutationObserver(function () { console.log('never'); });
+  done.observe(document.body, { attributes: true });
+  done.disconnect();
+  document.body.setAttribute('class', 'x');
+</script>
+</body></html>

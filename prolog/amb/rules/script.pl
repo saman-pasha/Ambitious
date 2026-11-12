@@ -12,7 +12,10 @@
    script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2,
    script_inserted/2, script_request/5, script_request_by/2, script_request_status/2, script_request_resource/2,
    script_request_cross/1, script_write/4, script_navigation/4, script_navigation_by/2, script_navigation_form/3,
-   script_navigation_target/2, script_navigation_resource/2, script_navigation_status/2, script_form_field/3.
+   script_navigation_target/2, script_navigation_resource/2, script_navigation_status/2, script_form_field/3,
+   script_observer/2, script_observer_disconnected/1, script_observer_delivered/3, script_observation/4,
+   script_observes_children/1, script_observes_attributes/2, script_observes_data/1, script_observes_subtree/1,
+   script_observes_old_values/1.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -104,6 +107,15 @@ script_diag(uncaught_error, R, Text) :-
 script_diag(click_not_focusable, N, Text) :-
     script_click_unfocusable(N, Name), dom_element(N, E),
     format(atom(Text), 'the <~w> ~q has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)', [E, Name]).
+%% a MutationObserver still observing on a page that never comes to rest: each change
+%% the page's timers go on making runs its callback again, for as long as the page is open
+script_observer_unsettled(O, R) :-
+    script_observer(O, R), \+ script_observer_disconnected(O),
+    script_observation(_, O, _, _), script_unsettled(_, _).
+
+script_diag(observer_never_disconnected, O, Text) :-
+    script_observer_unsettled(O, R), script_rules_where(R, Where),
+    format(atom(Text), 'a MutationObserver made by the script ~w is never disconnected, on a page that never comes to rest: each change its timers make runs the observer again', [Where]).
 script_diag(unsettled_timer, T, Text) :-
     script_unsettled(T, R), script_timer(T, Delay, Repeats, _), script_rules_where(R, Where),
     (   Repeats == true

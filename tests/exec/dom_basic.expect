@@ -49,7 +49,7 @@ ok   append the new section: ok
 ok   the invariants hold after destroy and reuse
 serialized: <html><body><h1 title="say &quot;hi&quot; &amp; 'bye'">Fish &amp; &lt;chips&gt;</h1><button type="button">Send</button><section></section></body></html>
 -- snapshot
-amb_snapshot(dom, 1, 28, 'fnv1a32:4815fe18:7612').
+amb_snapshot(dom, 1, 28, 'fnv1a32:7ff8f854:7863').
 dom_node(n(1,1,0),document).
 dom_first_child(n(1,1,0),n(1,2,0)).
 dom_node(n(1,2,0),element).

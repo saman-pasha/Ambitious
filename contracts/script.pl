@@ -118,6 +118,27 @@ script_contract(record(form_field, [
     field(name,       span(text)),
     field(control,    xhandle(dom, node))
 ])).
+%% a MutationObserver a script made (src/script/observe.c): the script; whether
+%% disconnect() ended its observing, no observe() since; the records its callback was
+%% given, and the times it ran
+script_contract(record(observer, [
+    field(run,          ref(run)),
+    field(disconnected, bool),
+    field(records,      u32),
+    field(calls,        u32)
+])).
+%% an observe() call: its observer, the script whose call it was, the node, what it asked for
+script_contract(record(observation, [
+    field(observer,       ref(observer)),
+    field(run,            ref(run)),
+    field(target,         xhandle(dom, node)),
+    field(child_list,     bool),
+    field(attributes,     bool),
+    field(character_data, bool),
+    field(subtree,        bool),
+    field(old_value,      bool),            % attributeOldValue or characterDataOldValue
+    field(filter,         u32)              % the names its attributeFilter holds; 0 for none
+])).
 
 script_contract(handle(run, sr)).
 script_contract(handle(console, sc)).
@@ -128,11 +149,13 @@ script_contract(handle(request, sq)).
 script_contract(handle(write, sw)).
 script_contract(handle(navigation, sn)).
 script_contract(handle(form_field, sf)).
+script_contract(handle(observer, sm)).
+script_contract(handle(observation, so)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 script_contract(store(runtime, [table(run), table(console), table(error), table(listener), table(timer), table(request), table(write),
-    table(navigation), table(form_field), pool(text)])).
+    table(navigation), table(form_field), table(observer), table(observation), pool(text)])).
 script_contract(owns(runtime, run, store)).
 script_contract(owns(runtime, console, store)).
 script_contract(owns(runtime, error, store)).
@@ -142,6 +165,8 @@ script_contract(owns(runtime, request, store)).
 script_contract(owns(runtime, write, store)).
 script_contract(owns(runtime, navigation, store)).
 script_contract(owns(runtime, form_field, store)).
+script_contract(owns(runtime, observer, store)).
+script_contract(owns(runtime, observation, store)).
 
 %% ---- INVARIANTS -------------------------------------------------------------
 
@@ -173,6 +198,17 @@ script_contract(fact(script_navigation_target(handle, field(target)), table(navi
 script_contract(fact(script_navigation_resource(handle, field(resource)), table(navigation), true)).
 script_contract(fact(script_navigation_status(handle, field(status)), table(navigation), field(status) \== 0)).
 script_contract(fact(script_form_field(field(navigation), field(name), field(control)), table(form_field), true)).
+%% each MutationObserver: the script that made it; disconnected; what its callback had.
+%% Each observe(): its observer, the script, the node, and what it watches there
+script_contract(fact(script_observer(handle, field(run)), table(observer), true)).
+script_contract(fact(script_observer_disconnected(handle), table(observer), field(disconnected) == true)).
+script_contract(fact(script_observer_delivered(handle, field(records), field(calls)), table(observer), true)).
+script_contract(fact(script_observation(handle, field(observer), field(target), field(run)), table(observation), true)).
+script_contract(fact(script_observes_children(handle), table(observation), field(child_list) == true)).
+script_contract(fact(script_observes_attributes(handle, field(filter)), table(observation), field(attributes) == true)).
+script_contract(fact(script_observes_data(handle), table(observation), field(character_data) == true)).
+script_contract(fact(script_observes_subtree(handle), table(observation), field(subtree) == true)).
+script_contract(fact(script_observes_old_values(handle), table(observation), field(old_value) == true)).
 script_contract(fact(script_console(field(run), field(level), field(text)), table(console), true)).
 script_contract(fact(script_error(field(run), field(phase), field(message)), table(error), true)).
 script_contract(fact(script_listener(field(target), field(type), field(run)), table(listener), field(on) == node)).
@@ -195,6 +231,7 @@ script_contract(derived(script_write_ignored/1, 'a script loaded asynchronously 
 script_contract(derived(script_form_cross_origin_http/2, 'a form submitted to another origin over http:, and where to')).
 script_contract(derived(script_form_password_http/2, 'a form submitted over http: with a password field, and the field')).
 script_contract(derived(script_form_password_get/2, 'a form whose GET put a password field in its URL, and the field')).
+script_contract(derived(script_observer_unsettled/2, 'a MutationObserver never disconnected on a page that never comes to rest, and the script that made it')).
 script_contract(derived(script_key_unfocusable/2, 'an element with a key listener that neither it nor anything inside it can take focus for, and its name')).
 script_contract(derived(script_layout_thrash/2, 'a script whose reads of style or geometry, each after a change, made the cascade and the layout run many times, and how many')).
 

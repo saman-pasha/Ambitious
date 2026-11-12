@@ -24,6 +24,28 @@ static int dom_name_is(const dom_document *d, uint32_t name, const char *w) {
     return names_is(d, name, w, strlen(w));
 }
 
+/* the details of the changes kept from now on: the details' table begun (its first record
+   says so; a change's record follows its own) */
+dom_status dom_keep_details(dom_document *d) {
+    if (d->detail_len <= 1) detail_new(d);
+    return DOM_OK;
+}
+/* a change's details' record (they are kept): its index. DOM_DETAIL asks only while they
+   are, so a change costs a comparison until then */
+static uint32_t dom_detail(dom_document *d, uint32_t prev, uint32_t next, uint32_t name, uint32_t ns, amb_span old, int had) {
+    dom_detail_h h = detail_new(d);
+    d->detail[h.index].prev = prev;
+    d->detail[h.index].next = next;
+    d->detail[h.index].name = name;
+    d->detail[h.index].ns = ns;
+    d->detail[h.index].old = old;
+    d->detail[h.index].had = (uint8_t)had;
+    return h.index;
+}
+#define DOM_DETAIL(d, prev, next, name, ns, old, had) ((d)->detail_len > 1 ? dom_detail((d), (prev), (next), (name), (ns), (old), (had)) : 0u)
+/* a mutation logged with no more than its target and other node: a node made, a subtree freed */
+static void dom_log(dom_document *d, dom_op op, uint32_t target, uint32_t other) { dom_log_mutation(d, op, target, other, 0); }
+
 /* an element of a namespace; an HTML template, with its contents */
 static dom_node_h dom_new_element(dom_document *d, dom_namespace ns, dom_op op, const char *name, size_t name_len) {
     uint32_t a = names_intern(d, name, name_len);
@@ -37,7 +59,7 @@ static dom_node_h dom_new_element(dom_document *d, dom_namespace ns, dom_op op, 
         d->node[f.index].host = h.index;
         d->node[h.index].content = f.index;
     }
-    dom_log_mutation(d, op, h.index, 0);
+    dom_log(d, op, h.index, 0);
     return h;
 }
 
@@ -59,7 +81,7 @@ static dom_node_h dom_new_data_node(dom_document *d, dom_node_kind kind, dom_op 
     dom_node_h h = node_new(d);
     d->node[h.index].kind = kind;
     d->node[h.index].data = sp;
-    dom_log_mutation(d, op, h.index, 0);
+    dom_log(d, op, h.index, 0);
     return h;
 }
 
@@ -85,7 +107,7 @@ dom_node_h dom_create_doctype(dom_document *d, const char *name, size_t name_len
     d->node[h.index].public_id = pub;
     d->node[h.index].system_id = sys;
     d->node[h.index].doctype_ids = ids;
-    dom_log_mutation(d, DOM_OP_CREATE_DOCTYPE, h.index, 0);
+    dom_log(d, DOM_OP_CREATE_DOCTYPE, h.index, 0);
     return h;
 }
 
@@ -110,7 +132,8 @@ dom_status dom_append_child(dom_document *d, dom_node_h parent, dom_node_h child
     if (st != DOM_OK) return st;
     if (dom_holds_through_template(d, child.index, parent.index)) return DOM_WOULD_CYCLE;
     children_append(d, parent.index, child.index);
-    dom_log_mutation(d, DOM_OP_APPEND_CHILD, parent.index, child.index);
+    amb_span none = { 0, 0 };
+    dom_log_mutation(d, DOM_OP_APPEND_CHILD, parent.index, child.index, DOM_DETAIL(d, d->node[child.index].prev_sibling, 0, 0, 0, none, 0));
     return DOM_OK;
 }
 
@@ -119,15 +142,19 @@ dom_status dom_insert_before(dom_document *d, dom_node_h parent, dom_node_h chil
     if (st != DOM_OK) return st;
     if (dom_holds_through_template(d, child.index, parent.index)) return DOM_WOULD_CYCLE;
     children_insert_before(d, parent.index, child.index, before.index);
-    dom_log_mutation(d, DOM_OP_INSERT_BEFORE, parent.index, child.index);
+    amb_span none = { 0, 0 };
+    dom_log_mutation(d, DOM_OP_INSERT_BEFORE, parent.index, child.index,
+                     DOM_DETAIL(d, d->node[child.index].prev_sibling, d->node[child.index].next_sibling, 0, 0, none, 0));
     return DOM_OK;
 }
 
 dom_status dom_remove_child(dom_document *d, dom_node_h parent, dom_node_h child) {
     dom_status st = dom_check_remove_child(d, parent, child);
     if (st != DOM_OK) return st;
+    uint32_t prev = d->node[child.index].prev_sibling, next = d->node[child.index].next_sibling;
     children_unlink(d, child.index);
-    dom_log_mutation(d, DOM_OP_REMOVE_CHILD, parent.index, child.index);
+    amb_span none = { 0, 0 };
+    dom_log_mutation(d, DOM_OP_REMOVE_CHILD, parent.index, child.index, DOM_DETAIL(d, prev, next, 0, 0, none, 0));
     return DOM_OK;
 }
 
@@ -171,7 +198,7 @@ dom_status dom_destroy(dom_document *d, dom_node_h node) {
         if (x == root) break;
         x = next ? next : up;
     }
-    dom_log_mutation(d, DOM_OP_DESTROY, root, 0);
+    dom_log(d, DOM_OP_DESTROY, root, 0);
     return DOM_OK;
 }
 
@@ -183,8 +210,9 @@ dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *na
     amb_span v = text_add(d, value, value_len);
     for (uint32_t x = d->node[element.index].first_attr; x; x = d->attr[x].next) {
         if (d->attr[x].name == a) {
+            amb_span old = d->attr[x].value;
             d->attr[x].value = v;
-            dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE, element.index, x);
+            dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE, element.index, x, DOM_DETAIL(d, 0, 0, a, (uint32_t)d->attr[x].ns, old, 1));
             return DOM_OK;
         }
     }
@@ -192,7 +220,8 @@ dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *na
     d->attr[h.index].name = a;
     d->attr[h.index].value = v;
     attributes_append(d, element.index, h.index);
-    dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE, element.index, h.index);
+    amb_span none = { 0, 0 };
+    dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE, element.index, h.index, DOM_DETAIL(d, 0, 0, a, 0, none, 0));
     return DOM_OK;
 }
 
@@ -205,8 +234,9 @@ dom_status dom_set_attribute_ns(dom_document *d, dom_node_h element, dom_attr_na
     amb_span v = text_add(d, value, value_len);
     for (uint32_t x = d->node[element.index].first_attr; x; x = d->attr[x].next) {
         if (d->attr[x].name == a && d->attr[x].ns == ns) {
+            amb_span old = d->attr[x].value;
             d->attr[x].value = v;
-            dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE_NS, element.index, x);
+            dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE_NS, element.index, x, DOM_DETAIL(d, 0, 0, a, (uint32_t)ns, old, 1));
             return DOM_OK;
         }
     }
@@ -215,7 +245,8 @@ dom_status dom_set_attribute_ns(dom_document *d, dom_node_h element, dom_attr_na
     d->attr[h.index].ns = ns;
     d->attr[h.index].value = v;
     attributes_append(d, element.index, h.index);
-    dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE_NS, element.index, h.index);
+    amb_span none = { 0, 0 };
+    dom_log_mutation(d, DOM_OP_SET_ATTRIBUTE_NS, element.index, h.index, DOM_DETAIL(d, 0, 0, a, (uint32_t)ns, none, 0));
     return DOM_OK;
 }
 
@@ -226,9 +257,11 @@ dom_status dom_remove_attribute(dom_document *d, dom_node_h element, const char 
     if (a == 0) return DOM_NOT_FOUND;
     for (uint32_t x = d->node[element.index].first_attr; x; x = d->attr[x].next) {
         if (d->attr[x].name == a) {
+            amb_span old = d->attr[x].value;
+            uint32_t ns = (uint32_t)d->attr[x].ns;
             attributes_unlink(d, x);
             attr_free(d, attr_handle(d, x));
-            dom_log_mutation(d, DOM_OP_REMOVE_ATTRIBUTE, element.index, x);
+            dom_log_mutation(d, DOM_OP_REMOVE_ATTRIBUTE, element.index, x, DOM_DETAIL(d, 0, 0, a, ns, old, 1));
             return DOM_OK;
         }
     }
@@ -239,8 +272,9 @@ dom_status dom_set_data(dom_document *d, dom_node_h node, const char *data, size
     dom_status st = dom_check_set_data(d, node, data, data_len);
     if (st != DOM_OK) return st;
     amb_span sp = text_add(d, data, data_len);
+    amb_span old = d->node[node.index].data;
     d->node[node.index].data = sp;
-    dom_log_mutation(d, DOM_OP_SET_DATA, node.index, 0);
+    dom_log_mutation(d, DOM_OP_SET_DATA, node.index, 0, DOM_DETAIL(d, 0, 0, 0, 0, old, 1));
     return DOM_OK;
 }
 

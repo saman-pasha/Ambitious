@@ -11,18 +11,19 @@
 
 /* a host object's kind, in its c slot */
 enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST, HK_COMPUTED, HK_RESPONSE, HK_REQUEST, HK_HEADERS,
-       HK_XHR, HK_FORMDATA };
+       HK_XHR, HK_FORMDATA, HK_OBSERVER };
 /* its prototypes, in the host's protos */
 enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_NODELIST,
        HP_HTMLCOLLECTION, HP_DOMRECT, HP_RECTLIST, HP_RESPONSE, HP_REQUEST, HP_HEADERS, HP_XHR, HP_PROGRESS, HP_UIEVENT,
        HP_MOUSEEVENT, HP_POINTEREVENT, HP_KEYBOARDEVENT, HP_FOCUSEVENT, HP_INPUTEVENT, HP_SUBMITEVENT, HP_FORMDATAEVENT,
-       HP_POPSTATEEVENT, HP_HASHCHANGEEVENT, HP_BEFOREUNLOADEVENT, HP_FORMDATA, HP_N };
+       HP_POPSTATEEVENT, HP_HASHCHANGEEVENT, HP_BEFOREUNLOADEVENT, HP_FORMDATA, HP_MUTATIONOBSERVER, HP_MUTATIONRECORD, HP_N };
 
-/* the natives' numbers: script.c's from JS_HOST_NATIVES (1000), fetch.c's from SH_FETCH_FIRST. A
+/* the natives' numbers: script.c's from JS_HOST_NATIVES (1000), fetch.c's from SH_FETCH_FIRST,
+   input.c's from SH_INPUT_FIRST, observe.c's from SH_OBSERVE_FIRST. A
    literal: in an included header an object-like macro in a declaration is not expanded,
    and the declarations after an enum that used one are not registered (a toolchain
    finding) */
-enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INPUT_END = 1600 };
+enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INPUT_END = 1600, SH_OBSERVE_FIRST = 1600, SH_OBSERVE_END = 1700 };
 
 /* an event's flags, in its a slot */
 #define EV_STOP 1u
@@ -124,6 +125,11 @@ uint32_t script_form_owner(const dom_document *d, uint32_t x);
 /* a user's mouse event's coordinate (EV_LAZYPOINT), its point found now: handled when the
    name is one of them */
 jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled);
+/* ---- observe.c's: MutationObserver ---- */
+void script_observe_setup(js_vm *vm);
+jv script_observe_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
+/* the DOM's log since it was last read made records for the observers it concerns */
+void script_observe_flush(js_vm *vm);
 /* a form's named property: the element it owns of that id or name (handled), else none */
 jv script_form_named(js_vm *vm, uint32_t form, uint32_t atom, int *handled);
 /* the input unit's host tasks: hashchange, a form's planned navigation */

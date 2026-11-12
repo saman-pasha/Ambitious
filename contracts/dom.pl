@@ -55,14 +55,30 @@ dom_contract(record(attr, [
     field(next,  ref(attr))
 ])).
 
+%% what a change was, beyond the log's entry, kept once a reader asks for it
+%% (keep_details; src/script/observe.c's MutationObserver records say it): a child's
+%% insertion or removal, its siblings there (after an insertion, before a removal); an
+%% attribute's change, its name's atom, its namespace and the value it had (had: 0 for
+%% an attribute added); a node's data change, the data it had
+dom_contract(record(detail, [
+    field(prev, u32),
+    field(next, u32),
+    field(name, u32),
+    field(ns,   u32),
+    field(old,  span(text)),
+    field(had,  bool)
+])).
+
 %% public handles: {doc, index, generation}; in Prolog n(Doc, Index, Gen)
 dom_contract(handle(node, n)).
 dom_contract(handle(attr, a)).
+dom_contract(handle(detail, md)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
 %% the store: one per document. It owns every record, its text and its names.
-dom_contract(store(document, [table(node), table(attr), pool(text), atoms(names), log(mutation)])).
+dom_contract(store(document, [table(node), table(attr), pool(text), atoms(names), log(mutation), table(detail)])).
+dom_contract(owns(document, detail, store)).
 
 dom_contract(owns(document, node, store)).
 dom_contract(owns(document, attr, store)).
@@ -146,6 +162,9 @@ dom_contract(operation(remove_attribute, [param(element, handle(node)), param(na
 dom_contract(operation(set_data, [param(node, handle(node)), param(data, text)], status,
     [pre(live(node), stale_handle), pre(kind_in(node, [text, comment]), wrong_kind)],
     [sets(node, data)], [mutates, requestable])).
+%% the details of each change kept from now on (its log entry's detail), for a reader
+%% that needs them; the changes before are not
+dom_contract(operation(keep_details, [], status, [], [], [])).
 %% the HTML serialization of a subtree (the document node: the whole document;
 %% a template: its contents)
 dom_contract(operation(serialize, [param(node, handle(node)), param(out, stream)], status,
@@ -172,10 +191,11 @@ dom_contract(invariant(live_links, 'Every link of a live record names a live rec
     refs_live)).
 
 %% ---- EVENTS -----------------------------------------------------------------
-%% each successful mutating operation logs one, with the revision it made
+%% each successful mutating operation logs one, with the revision it made, and its
+%% details' record once they are kept (keep_details; none before)
 
 dom_contract(event(mutation, [field(op, enum(op)), field(target, ref(node)), field(other, u32),
-                              field(revision, u64)])).
+                              field(detail, ref(detail)), field(revision, u64)])).
 
 %% ---- REASONING --------------------------------------------------------------
 %% fact(Head, Source, Where): Head's arguments say where each value comes from

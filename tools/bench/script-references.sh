@@ -12,7 +12,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 pages=$AMB_ROOT/tests/pages
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-refs.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
-for p in lists geometry thrash inserted inserted-order write-async; do
+for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled; do
   node "$AMB_ROOT/tools/bench/console.js" "$pages/$p.html" > "$pages/$p.chromium" && echo "wrote $p.chromium"
 done
 for p in write-dom; do

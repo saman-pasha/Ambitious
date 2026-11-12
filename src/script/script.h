@@ -69,6 +69,27 @@ typedef struct sh_pend { uint32_t node, gen, resource, how, done, spare; } sh_pe
 /* a FormData's entry (src/script/input.c): its object's index, its name and value in the
    network text, its control (0 for one a script appended), whether it is live */
 typedef struct sh_fd { uint32_t owner, noff, nlen, voff, vlen, control, live, spare; } sh_fd;
+/* MutationObserver (src/script/observe.c). An observer: its object, its callback, the run
+   that made it, its record in the runtime */
+typedef struct sh_mo { uint32_t obj, fn, run, rec; } sh_mo;
+/* an observer's registration at a node (its generation): its options' bits, its
+   attributeFilter's names in the host's filter text; transient: one a removal gave the
+   node, from the registration source (its place plus one) */
+typedef struct sh_mreg { uint32_t mo, node, gen, opts, foff, flen, transient, source, live, spare; } sh_mreg;
+/* a record waiting in its observer's queue: its type, target, siblings (each with its
+   generation), attribute name's atom and namespace, old value (had: one is given), its
+   nodes in the host's list (node, generation pairs; a removed one's bit 31 set) */
+typedef struct sh_mrec {
+    uint32_t mo, type, target, tgen, prev, pgen, next, ngen;
+    uint32_t name, ns, had, noff, nlen, live;
+    amb_span old;
+} sh_mrec;
+/* the changes of one call grouped as a record is, while the log is read */
+typedef struct sh_mgroup {
+    uint32_t type, target, prev, pgen, next, ngen, name, ns;
+    uint32_t had, order, nadd, nrem;
+    amb_span old;
+} sh_mgroup;
 
 /* the page's scripts, each <script> in document order (its text, or its src as the
    loader fetched it), then DOMContentLoaded and load, then its timers as far as horizon
@@ -154,10 +175,20 @@ struct js_host {
        task to come) and its request's URL, body and type; whether beforeunload is being
        fired; the document's encoding (its number plus one: 0 is UTF-8); the element a
        click is at while its events' point is left to be found when read (src/script/input.c);
-       the name form's atom in the document, once one has had it */
-    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm;
+       the name form's atom in the document, once one has had it, and how many names the
+       document had when it was last looked for */
+    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, spare4;
     int charset, spare2;
     vector<char> nav_url, nav_body, nav_ctype;
+    /* the MutationObservers, their registrations (how many live), their records' queues
+       and nodes, the filters' names; how far the DOM's log was read, whether the
+       observers' microtask is queued, its function */
+    vector<sh_mo> mos;
+    vector<sh_mreg> mregs;
+    vector<sh_mrec> mrecs;
+    vector<uint32_t> mnodes;
+    vector<char> mfilter;
+    uint32_t mreg_live, mo_pos, mo_queued, mo_fn;
     double mouse_x, mouse_y;
     jv click_ev;
     vector<char> fvalue;
@@ -185,6 +216,7 @@ struct js_host {
     vector_uint32_t_drop(&(h).started); vector_sh_pend_drop(&(h).pending); vector_uint32_t_drop(&(h).wpend); \
     vector_char_drop(&(h).wtext); vector_uint32_t_drop(&(h).wnodes); vector_char_drop(&(h).fvalue); vector_sh_fd_drop(&(h).fds); \
     vector_char_drop(&(h).docurl); vector_char_drop(&(h).nav_url); vector_char_drop(&(h).nav_body); \
-    vector_char_drop(&(h).nav_ctype)
+    vector_char_drop(&(h).nav_ctype); vector_sh_mo_drop(&(h).mos); vector_sh_mreg_drop(&(h).mregs); vector_sh_mrec_drop(&(h).mrecs); \
+    vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter)
 
 #endif

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>observer</title>
+<!-- MutationObserver (src/script/observe.c): the records of childList, attributes and
+     characterData changes, one call's changes one record, subtree, old values, an
+     attributeFilter, takeRecords, disconnect, observe() again, transient registrations,
+     the observers' order, the notification's place among the microtasks, observe()'s
+     errors. Each step a task of its own; each record a console line, against Chromium's
+     (tests/pages/observer.chromium, written by tools/bench/script-references.sh). -->
+</head>
+<body>
+<div id="root"><p id="a">one</p><p id="b">two</p><p id="c">three</p></div>
+<div id="other"><span id="s">x</span></div>
+<script>
+  function d(n) { return n === null ? 'null' : n.nodeType === 1 ? (n.id || n.nodeName) : n.nodeType === 3 ? JSON.stringify(n.data) : n.nodeName; }
+  function show(r) {
+    var s = r.type + ' ' + d(r.target);
+    if (r.type === 'childList') s += ' +[' + Array.from(r.addedNodes).map(d).join(',') + '] -[' + Array.from(r.removedNodes).map(d).join(',') + '] p=' + d(r.previousSibling) + ' n=' + d(r.nextSibling);
+    else s += ' a=' + r.attributeName + ' ns=' + r.attributeNamespace;
+    return s + ' old=' + JSON.stringify(r.oldValue);
+  }
+  function log(name) { return function (records, obs) { console.log(name + ': ' + records.length + (obs instanceof MutationObserver ? '' : ' (no observer)')); records.forEach(function (r) { console.log('  ' + show(r)); }); }; }
+  var root = document.getElementById('root'), other = document.getElementById('other');
+  var a = document.getElementById('a'), b = document.getElementById('b'), c = document.getElementById('c');
+  var all = new MutationObserver(log('all'));
+  all.observe(root, { childList: true, attributes: true, characterData: true, subtree: true, attributeOldValue: true, characterDataOldValue: true });
+  var upper = new MutationObserver(log('upper'));
+  upper.observe(root, { childList: true });
+  var steps = [
+    function () {
+      console.log('-- appendChild, insertBefore, removeChild, remove');
+      var n = document.createElement('p'); n.id = 'n';
+      root.appendChild(n);
+      var m = document.createElement('p'); m.id = 'm';
+      root.insertBefore(m, b);
+      root.removeChild(a);
+      c.remove();
+    },
+    function () {
+      console.log('-- append and prepend of many, replaceChildren, before, after');
+      var x = document.createElement('i'), y = document.createElement('i'); x.id = 'x'; y.id = 'y';
+      root.append(x, 'text', y);
+      root.prepend(document.createElement('hr'));
+      root.replaceChildren(a, c);
+      a.after(b);
+      c.before(document.createComment('note'));
+    },
+    function () {
+      console.log('-- textContent, innerHTML, replaceChild, a move between parents, one in place');
+      b.textContent = 'TWO';
+      root.innerHTML = '<p id="a2">A</p><p id="b2">B</p>';
+      var q = document.createElement('q'); q.id = 'q';
+      root.replaceChild(q, document.getElementById('a2'));
+      root.appendChild(document.getElementById('s'));
+      root.appendChild(root.lastChild);
+    },
+    function () {
+      console.log('-- attributes, with old values');
+      var q = document.getElementById('q');
+      q.setAttribute('title', 'first');
+      q.setAttribute('title', 'second');
+      q.removeAttribute('title');
+      q.id = 'q2';
+      q.className = 'k';
+      q.classList.add('l');
+      q.toggleAttribute('hidden');
+      q.dataset.fooBar = '1';
+      q.style.color = 'red';
+      q.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#z');
+    },
+    function () {
+      console.log('-- character data, with old values');
+      var t = document.getElementById('b2').firstChild;
+      t.data = 'B1';
+      t.nodeValue = 'B2';
+      t.textContent = 'B3';
+      document.getElementById('b2').firstChild.data += '!';
+    },
+    function () {
+      console.log('-- an attributeFilter, observe() again, takeRecords, disconnect');
+      var f = new MutationObserver(log('filter'));
+      var q = document.getElementById('q2');
+      f.observe(q, { attributeFilter: ['title', 'lang'] });
+      q.setAttribute('title', 't');
+      q.setAttribute('dir', 'rtl');
+      q.setAttribute('lang', 'en');
+      f.observe(q, { attributes: true, attributeOldValue: true });
+      q.setAttribute('dir', 'ltr');
+      var taken = all.takeRecords();
+      console.log('taken: ' + taken.length + ' ' + taken.map(show).join(' | '));
+      upper.disconnect();
+      root.appendChild(document.createElement('br'));
+      upper.observe(root, { childList: true });
+      upper.disconnect();
+    },
+    function () {
+      console.log('-- a removed subtree still observed until the notification');
+      var b2 = document.getElementById('b2');
+      root.removeChild(b2);
+      b2.setAttribute('title', 'gone');
+      b2.appendChild(document.createElement('em'));
+      Promise.resolve().then(function () {
+        b2.setAttribute('title', 'later');
+        console.log('a microtask after the notification');
+      });
+    },
+    function () {
+      console.log('-- the notification among the microtasks, and observers in their order');
+      var first = new MutationObserver(function (r, o) { console.log('first ' + r.length + ' ' + (this === o)); });
+      var second = new MutationObserver(function (r) { console.log('second ' + r.length); });
+      Promise.resolve().then(function () { console.log('a promise queued before the change'); });
+      second.observe(other, { childList: true });
+      first.observe(other, { childList: true });
+      other.appendChild(document.createElement('b'));
+      Promise.resolve().then(function () { console.log('a promise queued after the change'); });
+      other.appendChild(document.createElement('b'));
+    },
+    function () {
+      console.log('-- observe() refused, and the records\' interfaces');
+      var o = new MutationObserver(function () {});
+      [[root, {}], [root, { attributes: false, attributeOldValue: true }], [root, { attributes: false, attributeFilter: [] }],
+       [root, { characterData: false, characterDataOldValue: true }], [{}, { childList: true }]].forEach(function (args) {
+        try { o.observe(args[0], args[1]); console.log('observed'); } catch (e) { console.log(e.name + ': ' + e.message); }
+      });
+      try { new MutationObserver(5); } catch (e) { console.log(e.name + ': ' + e.message); }
+      o.observe(root, { attributeOldValue: true });
+      root.setAttribute('lang', 'fr');
+      var r = o.takeRecords()[0];
+      console.log(typeof MutationRecord + ' ' + (r instanceof MutationRecord) + ' ' + r.type + ' ' + r.oldValue + ' ' + (r.addedNodes instanceof NodeList) + ' ' + r.addedNodes.length);
+      o.disconnect();
+    }
+  ];
+  var i = 0;
+  function next() { if (i < steps.length) { steps[i++](); setTimeout(next, 0); } }
+  setTimeout(next, 0);
+</script>
+</body></html>
