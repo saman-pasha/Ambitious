@@ -22,7 +22,10 @@
    opacity is drawn and blended with what was under it; one with a transform
    (translate, scale, rotate, skew, matrix, about its transform-origin) is drawn
    on black and on white, which give its colours and their alpha, and mapped
-   onto the canvas, sampled bilinearly. Glyphs come from font.c at their size and
+   onto the canvas, sampled bilinearly. One whose filter, clip-path or mask names SVG
+   elements by url() (layout's fx, src/paint/svg.h) is drawn into a layer, through its
+   filter's list in turn (a run of functions, a url()'s filter), then its clip and its mask,
+   as svg.c draws a group's. Glyphs come from font.c at their size and
    quarter-pixel position, cached. An image is drawn from the bytes the loader
    fetched for its element (image.c decodes PNG), sampled bilinearly into its
    content box; one whose load failed is Chromium's fallback (its 16px icon,
@@ -2819,9 +2822,9 @@ static int pt_transformed(const layout_tree *t, uint32_t b) {
     return t->box[b].transform.len || t->box[b].translate.len || t->box[b].rotate.len || t->box[b].scale.len;
 }
 /* a box whose children share its 3D space (transform-style: preserve-3d), unless a
-   property that groups its content flattens it (an opacity, a filter, a clip) */
+   property that groups its content flattens it (an opacity, a filter, a clip, a mask) */
 static int pt_p3d(const layout_tree *t, uint32_t b) {
-    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip && !t->box[b].cpath.len;
+    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip && !t->box[b].cpath.len && !t->box[b].fx.len;
 }
 /* a box drawn as a plane of its parent's 3D rendering context: its parent preserves 3D
    and it is transformed or preserves 3D itself */
@@ -2830,10 +2833,10 @@ static int pt_in_3d(const layout_tree *t, uint32_t b) {
     return p && pt_p3d(t, p) && (pt_transformed(t, b) || pt_p3d(t, b));
 }
 /* a box that makes a stacking context of its own: a z-index, an opacity, a transform, a
-   filter, a perspective, a 3D space of its own */
+   filter, a perspective, a 3D space of its own, a clip-path, a mask */
 static int pt_context(const layout_tree *t, uint32_t b) {
     return !t->box[b].z_auto || t->box[b].opacity < 1 || pt_transformed(t, b) || t->box[b].filter.len || t->box[b].backdrop.len ||
-           t->box[b].persp.len || t->box[b].p3d || t->box[b].cpath.len;
+           t->box[b].persp.len || t->box[b].p3d || t->box[b].cpath.len || t->box[b].fx.len;
 }
 
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box);
@@ -3273,6 +3276,204 @@ static void pt_filtered(PCTX, uint32_t b, int ctx, const vector<pt_fop> *ops) {
         }
 }
 
+/* ---- SVG's effects on a box (src/paint/svg.h, amb_svg_effects): the filters, clip and mask its url()s name ---- */
+
+/* the entries of a box's effects (fx's text): for each, its kind ('f', 'c' or 'm'), its number, and where its groups' lines
+   begin and end, into ents (four a entry) */
+static void pt_fx_entries(const char *s, size_t n, vector<size_t> *ents) {
+    size_t i = 0;
+    while (i < n) {
+        size_t e = i;
+        while (e < n && s[e] != '\n') e++;
+        if (e - i >= 3 && (s[i] == 'f' || s[i] == 'c' || s[i] == 'm') && s[i + 1] == ' ') {
+            if (len(*ents)) (*ents)[len(*ents) - 1] = i;
+            push_back(ents, (size_t)s[i]);
+            push_back(ents, (size_t)(s[i + 2] - '0'));
+            push_back(ents, e < n ? e + 1 : n);
+            push_back(ents, n);
+        }
+        i = e < n ? e + 1 : n;
+    }
+}
+
+/* a filter's group's region (its F line: x, y, width and height in the box's user space and the matrix it is in), m mapping
+   that space into the canvas's px: the px it covers, rounded out, into r (x0, y0, x1, y1); 0 when it has none */
+static int pt_fx_region(const char *s, size_t n, const double *m, int *r) {
+    size_t i = 0;
+    while (i + 1 < n && !(s[i] == 'F' && s[i + 1] == ' ' && (i == 0 || s[i - 1] == '\n'))) i++;
+    if (i + 1 >= n) return 0;
+    char line[512];
+    size_t k = 0;
+    for (size_t j = i + 2; j < n && s[j] != '\n' && k + 1 < sizeof line; j++) line[k++] = s[j];
+    line[k] = 0;
+    double v[10];
+    size_t at0 = 0;
+    for (int q = 0; q < 10; q++) {
+        char *end = 0;
+        v[q] = strtod(line + at0, &end);
+        size_t used = (size_t)(end - (line + at0));
+        if (!used) return 0;
+        at0 += used;
+    }
+    double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+    for (int c4 = 0; c4 < 4; c4++) {
+        double x = v[0] + (c4 & 1 ? v[2] : 0), y = v[1] + (c4 & 2 ? v[3] : 0);
+        double ux = v[4] * x + v[6] * y + v[8], uy = v[5] * x + v[7] * y + v[9];
+        double px = m[0] * ux + m[2] * uy + m[4], py = m[1] * ux + m[3] * uy + m[5];
+        lo[0] = fmin(lo[0], px); lo[1] = fmin(lo[1], py); hi[0] = fmax(hi[0], px); hi[1] = fmax(hi[1], py);
+    }
+    if (!(lo[0] > -1e7 && lo[1] > -1e7 && hi[0] < 1e7 && hi[1] < 1e7) || hi[0] <= lo[0] || hi[1] <= lo[1]) return 0;
+    r[0] = (int)floor(lo[0]);
+    r[1] = (int)floor(lo[1]);
+    r[2] = (int)ceil(hi[0]);
+    r[3] = (int)ceil(hi[1]);
+    return 1;
+}
+
+/* the layer's px (w x h, interleaved premultiplied RGBA) through a run of filter functions, as pt_filter_apply draws them */
+static void pt_fx_functions(vector<float> *lay, int w, int h, const vector<pt_fop> *ops) {
+    size_t np = (size_t)w * (size_t)h;
+    vector<float> pl;
+    resize(&pl, 4 * np);
+    for (size_t q = 0; q < np; q++)
+        for (size_t ch = 0; ch < 4; ch++) pl[ch * np + q] = at(*lay, 4 * q + ch);
+    pt_filter_apply(&pl, w, h, ops);
+    for (size_t q = 0; q < np; q++)
+        for (size_t ch = 0; ch < 4; ch++) {
+            float v = at(pl, ch * np + q);
+            (*lay)[4 * q + ch] = v < 0 ? 0.0f : v > 1 ? 1.0f : v;
+        }
+}
+
+/* a box and its content drawn through the SVG effects its url()s name and its filter's functions: drawn onto black and
+   onto white (its colours premultiplied and its cover read from the two, as pt_filtered reads them) into a layer of what it
+   drew and as far as its filters may draw (a filter's region, a function's reach); its filter's list in turn, a run of
+   functions as pt_filter_apply draws them, a url() through its filter's group (one that names none passed over); then its
+   clip's groups and its mask's (a mask that names none: nothing drawn), as Chromium applies them to a box -- filtered,
+   clipped, then masked (CSS Masking 1, 3) -- the user space's origin the border box's top left; and the layer laid on the
+   canvas within its clip */
+static void pt_fx(PCTX, uint32_t b, int ctx) {
+    vector<char> fx, fl;
+    append_range(fx, text_ptr(t, t->box[b].fx), t->box[b].fx.len);
+    append_range(fl, text_ptr(t, t->box[b].filter), t->box[b].filter.len);
+    vector<size_t> ents;
+    pt_fx_entries(data(fx), len(fx), &ents);
+    for (size_t e = 0; e + 3 < len(ents); e += 4) if (at(ents, e) == 'm' && at(ents, e + 1) == 2) return;
+    double z = c->zoom > 0 ? c->zoom : 1, bx, by, bw, bh;
+    pt_border_box(t, b, &bx, &by, &bw, &bh);
+    /* the user space in the canvas's px: a filter's with its origin at whole CSS px (the box's layer's, as Chromium places
+       it; measured: a box at 20.5 x 20.25 px filters from 21 x 20, and zoomed 1.5 from 31.5 x 30), a clip's and a mask's
+       where the border box is */
+    double um[6] = { z, 0, 0, z, floor(bx / z + 0.5) * z, floor(by / z + 0.5) * z - c->oy };
+    amb_canvas k0, k1;
+    memset(&k0, 0, sizeof k0);
+    memset(&k1, 0, sizeof k1);
+    defer(k0) { AMB_CANVAS_DROP(k0); }
+    defer(k1) { AMB_CANVAS_DROP(k1); }
+    k0.w = k1.w = c->w;
+    k0.h = k1.h = c->h;
+    k0.oy = k1.oy = c->oy;
+    k0.zoom = k1.zoom = c->zoom;
+    k0.cx0 = k1.cx0 = 0;
+    k0.cy0 = k1.cy0 = c->oy;
+    k0.cx1 = k1.cx1 = c->w;
+    k0.cy1 = k1.cy1 = c->oy + c->h;
+    resize(&k0.px, (size_t)c->w * c->h * 3);
+    resize(&k1.px, (size_t)c->w * c->h * 3);
+    for (size_t q = 0; q < len(k1.px); q++) k1.px[q] = 255;
+    pt_effects_draw(PARGS_C(&k0), b, ctx);
+    pt_effects_draw(PARGS_C(&k1), b, ctx);
+    /* what was drawn, then as far as each of the filter's entries may draw */
+    int L[4] = { (int)c->w, (int)c->h, -1, -1 };
+    for (int y = 0; y < (int)c->h; y++)
+        for (int x = 0; x < (int)c->w; x++) {
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            if (at(k0.px, i) | at(k0.px, i + 1) | at(k0.px, i + 2) || (at(k1.px, i) & at(k1.px, i + 1) & at(k1.px, i + 2)) != 255) {
+                if (x < L[0]) L[0] = x;
+                if (x + 1 > L[2]) L[2] = x + 1;
+                if (y < L[1]) L[1] = y;
+                if (y + 1 > L[3]) L[3] = y + 1;
+            }
+        }
+    size_t i = 0, pa, pl, fe = 0;
+    int reach = 0;
+    while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
+        if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
+            while (fe + 3 < len(ents) && at(ents, fe) != 'f') fe += 4;
+            int r[4];
+            if (fe + 3 < len(ents) && at(ents, fe + 1) == 1 && pt_fx_region(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), um, r)) {
+                if (L[2] > L[0] && reach) { L[0] -= reach; L[1] -= reach; L[2] += reach; L[3] += reach; }
+                reach = 0;
+                if (r[0] < L[0]) L[0] = r[0];
+                if (r[1] < L[1]) L[1] = r[1];
+                if (r[2] > L[2]) L[2] = r[2];
+                if (r[3] > L[3]) L[3] = r[3];
+            }
+            fe += 4;
+            continue;
+        }
+        vector<pt_fop> one;
+        if (pt_filter_ops(data(fl) + pa, pl, &one)) reach += pt_filter_reach(&one);
+    }
+    if (L[2] > L[0] && reach) { L[0] -= reach; L[1] -= reach; L[2] += reach; L[3] += reach; }
+    if (L[0] < 0) L[0] = 0;
+    if (L[1] < 0) L[1] = 0;
+    if (L[2] > (int)c->w) L[2] = (int)c->w;
+    if (L[3] > (int)c->h) L[3] = (int)c->h;
+    int w = L[2] - L[0], h = L[3] - L[1];
+    if (w <= 0 || h <= 0 || (double)w * h > 4e7) return;
+    size_t np = (size_t)w * (size_t)h;
+    vector<float> lay;
+    resize(&lay, 4 * np);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            size_t ci = ((size_t)(L[1] + y) * c->w + (size_t)(L[0] + x)) * 3, q = 4 * ((size_t)y * (size_t)w + (size_t)x);
+            double d = (at(k1.px, ci) - at(k0.px, ci) + at(k1.px, ci + 1) - at(k0.px, ci + 1) + at(k1.px, ci + 2) - at(k0.px, ci + 2)) / 765.0;
+            lay[q] = at(k0.px, ci) / 255.0f;
+            lay[q + 1] = at(k0.px, ci + 1) / 255.0f;
+            lay[q + 2] = at(k0.px, ci + 2) / 255.0f;
+            lay[q + 3] = (float)(d < 0 ? 1 : d > 1 ? 0 : 1 - d);
+        }
+    /* the user space in the layer's px: a filter's, then a clip's and a mask's */
+    double fm[6] = { z, 0, 0, z, um[4] - L[0], um[5] - L[1] }, lm[6] = { z, 0, 0, z, bx - L[0], by - c->oy - L[1] };
+    /* the filter's list: a run of functions, then a url()'s group, in turn */
+    vector<pt_fop> ops;
+    i = 0;
+    fe = 0;
+    while (css_next_part(data(fl), len(fl), &i, &pa, &pl)) {
+        if (pl >= 4 && memcmp(data(fl) + pa, "url(", 4) == 0) {
+            if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
+            clear(ops);
+            while (fe + 3 < len(ents) && at(ents, fe) != 'f') fe += 4;
+            if (fe + 3 < len(ents) && at(ents, fe + 1) == 1)
+                amb_svg_fx(data(fx) + at(ents, fe + 2), at(ents, fe + 3) - at(ents, fe + 2), w, h, fm, nt, &lay);
+            fe += 4;
+            continue;
+        }
+        vector<pt_fop> one;
+        if (pt_filter_ops(data(fl) + pa, pl, &one)) append_range(ops, data(one), len(one));
+    }
+    if (len(ops)) pt_fx_functions(&lay, w, h, &ops);
+    /* then the clip, then the mask */
+    for (int pass = 0; pass < 2; pass++)
+        for (size_t e = 0; e + 3 < len(ents); e += 4)
+            if (at(ents, e) == (pass ? 'm' : 'c') && at(ents, e + 1) == 1)
+                amb_svg_fx(data(fx) + at(ents, e + 2), at(ents, e + 3) - at(ents, e + 2), w, h, lm, nt, &lay);
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int y = L[1] < ky0 ? ky0 : L[1]; y < L[3] && y < ky1; y++)
+        for (int x = L[0] < kx0 ? kx0 : L[0]; x < L[2] && x < kx1; x++) {
+            size_t q = 4 * ((size_t)(y - L[1]) * (size_t)w + (size_t)(x - L[0])), di = ((size_t)y * c->w + (size_t)x) * 3;
+            double al = at(lay, q + 3);
+            if (al <= 0.001) continue;
+            if (al > 1) al = 1;
+            for (size_t ch = 0; ch < 3; ch++) {
+                double v = at(lay, q + ch) * 255 + c->px[di + ch] * (1 - al);
+                c->px[di + ch] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5);
+            }
+        }
+}
+
 /* backdrop-filter: what the canvas holds under a box's border box, through its functions,
    laid back within the box as its corners round it, before the box is drawn over it. A
    blur reaches past the box's edges by mirroring what is within them (Chromium blurs a
@@ -3552,9 +3753,12 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
     if (t->box[b].cpath.len) append_range(unclipped, data(c->px), len(c->px));
     if (t->box[b].backdrop.len) pt_backdrop(t, b, c);
     vector<pt_fop> ops;
-    pt_filter_of(t, t->box[b].filter, &ops);
-    if (len(ops)) pt_filtered(PARGS, b, ctx, &ops);
-    else pt_effects_draw(PARGS, b, ctx);
+    if (t->box[b].fx.len) pt_fx(PARGS, b, ctx);
+    else {
+        pt_filter_of(t, t->box[b].filter, &ops);
+        if (len(ops)) pt_filtered(PARGS, b, ctx, &ops);
+        else pt_effects_draw(PARGS, b, ctx);
+    }
     if (op < 1)
         for (size_t q = 0; q < len(c->px); q++) {
             int o = at(under, q), n0 = c->px[q];
@@ -3613,7 +3817,7 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
         }
         if (pt_in_3d(t, ch)) continue;
         if (t->box[ch].opacity < 1 || pt_transformed(t, ch) || t->box[ch].filter.len || t->box[ch].backdrop.len || t->box[ch].p3d ||
-            t->box[ch].cpath.len) {
+            t->box[ch].cpath.len || t->box[ch].fx.len) {
             pt_effects(PARGS, ch, 0);
             continue;
         }

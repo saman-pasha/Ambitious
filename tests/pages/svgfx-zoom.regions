@@ -1,0 +1,23 @@
+# tests/pages/svgfx-zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+blur 0 0 0 0
+region 0 0 0 0
+shadow 0 0 0 0
+circ 0 0 0 0
+crect 0 0 0 0
+star 0 0 0 0
+mrect 0 0 0 0
+glow 0 0 0 0
+mglow 0 0 0 0
+z-blur 0 0 156 126
+z-region 159 0 315 126
+z-shadow 318 0 474 126
+z-circle 477 0 633 126
+z-region2 0 129 156 255
+z-rect2 159 129 315 255
+z-mask2 318 129 474 255
+z-star 477 129 633 255
+z-glow 0 258 156 384
+z-turned 159 258 315 384
+z-inline 318 258 474 384
+z-scaled 477 258 633 384

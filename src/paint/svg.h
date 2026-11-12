@@ -37,6 +37,23 @@
 void amb_svg_scene(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t el, double vw,
                    double vh, vector<char> *out);
 
+/* the SVG effects d's element el (an HTML element's box, or an outermost svg's) names by url() in its computed values (st,
+   firsts as for a scene; f measures a mask's text), as Chromium applies them to a box (Filter Effects 1, CSS Masking 1): in
+   the box's user space -- its border box's top left the origin, a CSS px a unit, the border box (bw x bh) the bounding box
+   and the viewport of percentages. Appended to out, an entry for each, each its first line: "f 1" and a filter's group (its
+   g line and F block) for each url() of the filter's list that names a filter, in the list's order, "f 0" for one that
+   names none (passed over, as Chromium passes it over, an empty filter's too); "c 1" and the clip's groups (a clipPath's own
+   clip-path's first) when the clip-path names a clipPath; "m 1" and the mask's group when the mask names a mask, "m 2" when
+   it names none or one of no area (nothing is drawn) */
+void amb_svg_effects(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t el, double bw,
+                     double bh, vector<char> *out);
+
+/* an entry's groups (s: amb_svg_effects's lines after its f, c or m line) applied to a layer of w x h px (premultiplied
+   RGBA, each 0 to 1, row after row), m mapping the box's user space into the layer's px (x' = m[0] x + m[2] y + m[4],
+   y' = m[1] x + m[3] y + m[5]): the layer drawn through their filters, clips and masks, as a group of a scene is; nt the
+   loader a mask's images come from (or none) */
+void amb_svg_fx(const char *s, size_t n, int w, int h, const double *m, const net_loader *nt, vector<float> *layer);
+
 /* a scene drawn onto c: its viewport's top left at (x, y) of the page in c's px (rounded to
    whole px, as Chromium places an svg's content), sx and sy of c's px a CSS px; its image
    elements' pictures from the loader nt's resources (amb_svg_draw: none, so they draw nothing) */

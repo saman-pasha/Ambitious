@@ -13,7 +13,9 @@
    none of the flow's. An svg is sized as Chromium sizes one: its width and height
    attributes its CSS width and height (the cascade's presentation attributes), its
    natural size their absolute lengths, its ratio its viewBox's; its subtree is made the
-   box's scene (src/paint/svg.h) once the box's size is known. A container with both block-level and
+   box's scene (src/paint/svg.h) once the box's size is known, as are the SVG filters, clipPath
+   and mask a box's filter, clip-path and mask name by url(), for its border box (its fx). A
+   container with both block-level and
    inline-level children wraps each run of the inline ones that shows anything
    in an anonymous block.
 
@@ -437,6 +439,16 @@ static int lay_cq_kind(const css_style *st, uint32_t c0) {
     amb_span sp = st->cval[c].text;
     const char *t = text_ptr(st, sp);
     return sp.len >= 11 && memcmp(t, "inline-size", 11) == 0 ? 1 : sp.len >= 4 && memcmp(t, "size", 4) == 0 ? 2 : 0;
+}
+
+/* a computed value kept as text that holds a url() (a filter's list, a clip-path, a mask naming an SVG element) */
+static int lay_has_url(const css_style *st, uint32_t c) {
+    if (st->cval[c].unit != CSS_UNIT_TEXT) return 0;
+    amb_span sp = st->cval[c].text;
+    const char *t = text_ptr(st, sp);
+    int got = 0;
+    for (size_t q = 0; q + 4 <= sp.len && !got; q++) got = memcmp(t + q, "url(", 4) == 0;
+    return got;
 }
 
 /* a list-style-type's marker (its value c): 0 none; a predefined symbol marker Chromium draws as a shape, or a
@@ -7945,24 +7957,40 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     /* the sticky boxes, when a style is sticky */
     for (size_t k = 0; k < len(exts); k++)
         if (at(exts, k).pos == POS_STICKY) { lay_sticky(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height); break; }
-    /* each svg element's drawing, made for its content box (src/paint/svg.h) */
+    /* each svg element's drawing, made for its content box, and each box's SVG effects, for its border box (src/paint/svg.h):
+       those a filter, a clip-path or a mask names by url() */
     vector<uint32_t> firsts;
     for (uint32_t b = 1; b < t->box_len; b++) {
-        if (!t->box[b].live || t->box[b].kind != LAYOUT_BOX_KIND_REPLACED || t->box[b].pseudo) continue;
+        if (!t->box[b].live || t->box[b].pseudo || t->box[b].kind == LAYOUT_BOX_KIND_INLINE || t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) continue;
         uint32_t el = t->box[b].node.index;
-        if (!el || el >= doc->node_len || !lay_is_svg(doc, el)) continue;
+        if (!el || el >= doc->node_len) continue;
+        int svg = t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && lay_is_svg(doc, el);
+        uint32_t sid = at(node_style, el) & LAY_SMASK, c0 = sid < len(style_first) ? at(style_first, sid) : 0;
+        int fx = c0 && (lay_has_url(style, c0 + CSS_PROP_FILTER) || lay_has_url(style, c0 + CSS_PROP_CLIP_PATH) || lay_has_url(style, c0 + CSS_PROP_MASK));
+        if (!svg && !fx) continue;
         if (!len(firsts)) {
             resize(firsts, doc->node_len);
             for (uint32_t x = 1; x < doc->node_len; x++) {
-                uint32_t sid = at(node_style, x) & LAY_SMASK;
-                firsts[x] = sid < len(style_first) ? at(style_first, sid) : 0;
+                uint32_t xs = at(node_style, x) & LAY_SMASK;
+                firsts[x] = xs < len(style_first) ? at(style_first, xs) : 0;
             }
         }
-        vector<char> scene;
-        amb_svg_scene(doc, style, &firsts, &fonts, el, t->box[b].w, t->box[b].h, &scene);
-        if (len(scene)) {
-            amb_span sp = text_add(t, data(scene), len(scene));
-            t->box[b].svg = sp;
+        if (svg) {
+            vector<char> scene;
+            amb_svg_scene(doc, style, &firsts, &fonts, el, t->box[b].w, t->box[b].h, &scene);
+            if (len(scene)) {
+                amb_span sp = text_add(t, data(scene), len(scene));
+                t->box[b].svg = sp;
+            }
+        }
+        if (fx) {
+            vector<char> effects;
+            amb_svg_effects(doc, style, &firsts, &fonts, el, t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br,
+                            t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb, &effects);
+            if (len(effects)) {
+                amb_span sp = text_add(t, data(effects), len(effects));
+                t->box[b].fx = sp;
+            }
         }
     }
     lay_cq_free();
