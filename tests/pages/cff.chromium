@@ -1,0 +1,25 @@
+# boxes of tests/pages/cff.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-p-th p 8 8 784 25
+text-th span 8 12 239.594 17
+text-p-inter p 8 37 784 20
+text-inter span 8 39 142.422 17
+text-p-inter-i p 8 61 784 20
+text-inter-i span 8 63 100.078 17
+text-p-uni p 8 85 784 18
+text-uni span 8 85 146.281 17
+text-p-upper p 8 107 784 18
+text-upper span 8 107 76 17
+text-p-cff p 8 129 784 19
+text-cff span 8 129 306.578 19
+text-p-made p 8 152 784 19
+text-made span 8 152 78.156 19
+text-p-cid p 8 175 784 19
+text-cid span 8 175 306.578 19
+text-p-cff2 p 8 198 784 19
+text-cff2 span 8 198 338.625 19
+text-p-woff p 8 221 784 19
+text-woff span 8 221 310.141 19
+text-p-big p 8 244 784 56
+text-big span 8 244 392.844 56
+text-p-big2 p 8 304 784 56
+text-big2 span 8 304 248.984 56

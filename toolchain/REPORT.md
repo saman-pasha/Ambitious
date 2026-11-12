@@ -410,3 +410,22 @@ neighbours.
 
     prints 4294965005 (gcc: `'t' redeclared as different kind of symbol`).
     The work-around is other names.
+28. **A string literal of many concatenated pieces takes memory that grows with its
+    square to compile.** 100 KB of base64 as one literal of 96-character pieces
+    (`static const char big[] = "..." "..." ...;`) took 13 s and 4.5 GB; 200 KB
+    passed 6 GB before it was stopped; `src/paint/font_data.h`'s 540 KB, twelve such
+    literals, took 35 s and 10.7 GB, and 2 MB in literals of 48 KB was killed by the
+    machine's memory limit at 13 GB. The same bytes as an array of short literals
+    (`static const char *const big[] = { "...", "...", ... };`) compile in 1 s
+    (100 KB), and in 35 s and 860 MB (2 MB). `tools/gen-font.py` now writes the
+    built-in fonts so, and `src/paint/font.c` decodes them piece by piece. The
+    reduction, `python3 repro.py > big.c`, then `cicilang -c big.c`:
+
+    ```python
+    import base64, os
+    s = base64.b64encode(os.urandom(75000)).decode()
+    print('#include <string.h>\nstatic const char big[] =')
+    for i in range(0, len(s), 96):
+        print('    "%s"' % s[i:i + 96])
+    print('    ;\nint main(void) { return (int)strlen(big) & 1; }')
+    ```

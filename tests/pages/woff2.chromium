@@ -1,0 +1,15 @@
+# boxes of tests/pages/woff2.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-p-serif p 8 8 784 19
+text-serif span 8 8 465.172 19
+text-p-hmtx p 8 31 784 19
+text-hmtx span 8 31 462.375 19
+text-p-null p 8 54 784 19
+text-null span 8 54 462.375 19
+text-p-cff p 8 77 784 19
+text-cff span 8 77 306.578 19
+text-p-next p 8 100 784 19
+text-next span 8 100 298.516 19
+text-p-big p 8 123 784 47
+text-big span 8 123 359.891 47
+text-p-big2 p 8 174 784 46
+text-big2 span 8 174 228.047 46

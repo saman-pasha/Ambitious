@@ -412,13 +412,13 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
        built-in face of the name), else the built-in face it names, else the default */
     lay_word_of(st, cv[CSS_PROP_FONT_FAMILY], w);
     int generic = lay_w(w, "serif") || lay_w(w, "sans-serif") || lay_w(w, "monospace");
-    int builtin = amb_face_named(w, bold), wf;
+    int builtin = amb_face_named(w, bold, s->italic), wf;
     if (!generic && lay_web_face(st, webface, w, weight, s->italic, &wf, &s->font)) {
         s->face = wf;
         /* an italic face is slanted already: no slant made for it */
         for (uint32_t fi = 1; fi < st->face_len && fi < len(*webface); fi++)
             if (at(*webface, fi) == wf && st->face[fi].italic) s->italic = 0;
-    } else s->face = builtin >= 0 ? builtin : bold ? AMB_FACE_SERIF_BOLD : AMB_FACE_SERIF;
+    } else s->face = builtin >= 0 ? builtin : amb_face_named("serif", bold, s->italic);
     double gap;
     amb_face_metrics(f, s->face, s->fs, &s->asc, &s->desc, &gap);
     c = cv[CSS_PROP_LINE_HEIGHT];

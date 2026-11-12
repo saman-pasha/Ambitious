@@ -1,0 +1,18 @@
+# boxes of tests/pages/coverage.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-exta span 8 8 393.984 17
+text-exta-s span 8 29 364.391 17
+text-exta-m span 8 50 288.984 19
+text-exta-c span 8 72 288.047 18
+text-extb span 8 93 286.031 17
+text-viet span 8 114 359.688 17
+text-viet-sb span 8 135 347.734 17
+text-viet-m span 8 156 260.094 19
+text-greek span 8 178 359.125 17
+text-greek-si span 8 199 276.203 17
+text-greek-m span 8 220 294.344 19
+text-cyr span 8 242 424.75 17
+text-cyr2 span 8 263 546.813 17
+text-cyr-sbi span 8 284 389.734 17
+text-cyr-cb span 8 305 297.656 18
+text-cyr-m span 8 326 298.625 19
+text-cyrsup span 8 349 280.641 17

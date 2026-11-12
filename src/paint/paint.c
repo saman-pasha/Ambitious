@@ -98,7 +98,7 @@ typedef struct pt_glyph { uint64_t key; uint32_t off; int32_t w, h, ox, oy; } pt
 
 static uint64_t pt_key(int face, double size, uint32_t cp, int quarter, int italic) {
     uint64_t sz = (uint64_t)(size * 16 + 0.5) & 0xffff;
-    return (uint64_t)(face & 31) << 59 | (uint64_t)(italic & 1) << 58 | (uint64_t)(quarter & 3) << 56 | sz << 40 | (uint64_t)(cp & 0x1fffff);
+    return (uint64_t)(face & 127) << 57 | (uint64_t)(italic & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(cp & 0x1fffff);
 }
 
 static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {

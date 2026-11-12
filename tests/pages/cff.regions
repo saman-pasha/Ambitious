@@ -1,0 +1,25 @@
+# tests/pages/cff.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-p-th 8 8 792 33
+text-th 8 12 248 29
+text-p-inter 8 37 792 57
+text-inter 8 39 151 56
+text-p-inter-i 8 61 792 81
+text-inter-i 8 63 109 80
+text-p-uni 8 85 792 103
+text-uni 8 85 155 102
+text-p-upper 8 107 792 125
+text-upper 8 107 84 124
+text-p-cff 8 129 792 148
+text-cff 8 129 315 148
+text-p-made 8 152 792 171
+text-made 8 152 87 171
+text-p-cid 8 175 792 194
+text-cid 8 175 315 194
+text-p-cff2 8 198 792 217
+text-cff2 8 198 347 217
+text-p-woff 8 221 792 240
+text-woff 8 221 319 240
+text-p-big 8 244 792 300
+text-big 8 244 401 300
+text-p-big2 8 304 792 360
+text-big2 8 304 257 360

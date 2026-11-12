@@ -1,0 +1,99 @@
+10x10y.br: 20 bytes, crc32 afd8538b
+64x.br: 64 bytes, crc32 f22aab7b
+alice29.txt.br: 152089 bytes, crc32 66007dba
+backward65536.br: 65792 bytes, crc32 dc79acdc
+cp1251-utf16le.br: 1554 bytes, crc32 0eb499f7
+cp852-utf8.br: 706 bytes, crc32 b2b979c9
+empty-00.br: 0 bytes, crc32 00000000
+empty-01.br: 0 bytes, crc32 00000000
+empty-02.br: 0 bytes, crc32 00000000
+empty-03.br: 0 bytes, crc32 00000000
+empty-04.br: 0 bytes, crc32 00000000
+empty-05.br: 0 bytes, crc32 00000000
+empty-06.br: 0 bytes, crc32 00000000
+empty-07.br: 0 bytes, crc32 00000000
+empty-08.br: 0 bytes, crc32 00000000
+empty-09.br: 0 bytes, crc32 00000000
+empty-10.br: 0 bytes, crc32 00000000
+empty-11.br: 0 bytes, crc32 00000000
+empty-12.br: 0 bytes, crc32 00000000
+empty-13.br: 0 bytes, crc32 00000000
+empty-14.br: 0 bytes, crc32 00000000
+empty-15.br: 0 bytes, crc32 00000000
+empty-16.br: 0 bytes, crc32 00000000
+empty.br: 0 bytes, crc32 00000000
+monkey.br: 843 bytes, crc32 299d10ec
+oblique-q0-w10.br: 32492 bytes, crc32 edd3adaa
+oblique-q11-w10.br: 32492 bytes, crc32 edd3adaa
+oblique-q5-w18.br: 32492 bytes, crc32 edd3adaa
+quickfox.br: 43 bytes, crc32 414fa339
+quickfox_repeated.br: 176128 bytes, crc32 9ab18ce5
+ukkonooa.br: 119 bytes, crc32 4447121f
+x-00.br: 1 bytes, crc32 b7b2364b
+x-01.br: 1 bytes, crc32 b7b2364b
+x-02.br: 1 bytes, crc32 b7b2364b
+x-03.br: 1 bytes, crc32 b7b2364b
+x.br: 1 bytes, crc32 b7b2364b
+xyzzy.br: 5 bytes, crc32 7d192963
+zeros.br: 262144 bytes, crc32 e20eea22
+alice29.txt.br with a cap of 152,088 bytes: refused
+200 broken copies of alice29.txt.br: 13 decoded, 187 refused (13047116 bytes out)
+200 broken copies of oblique-q11-w10.br: 24 decoded, 176 refused (3558757 bytes out)
+200 broken copies of oblique-q0-w10.br: 26 decoded, 174 refused (2970374 bytes out)
+200 broken copies of monkey.br: 23 decoded, 177 refused (105187 bytes out)
+200 broken copies of quickfox_repeated.br: 8 decoded, 192 refused (1456692 bytes out)
+serif-bold.woff2: face 48, an sfnt of 36716 bytes, 11 tables:
+  OS/2 86 bytes, crc32 fc46983b
+  cmap 1972 bytes, crc32 85f8d62e
+  glyf 23396 bytes, crc32 1adfecaf
+  head 54 bytes, crc32 bcecaf5d
+  hhea 36 bytes, crc32 d8bf8230
+  hmtx 972 bytes, crc32 a59d579d
+  kern 4278 bytes, crc32 076d708c
+  loca 488 bytes, crc32 a9f7320c
+  maxp 32 bytes, crc32 62566099
+  name 5174 bytes, crc32 6655d22f
+  post 32 bytes, crc32 3104895f
+  94 glyphs drawn as serif-bold.woff draws them, within 0 of 255; 'Sphinx of black quartz, judge my vow. AVAVAV To. Wa' 476.8281 px (serif-bold.woff: 476.8281)
+oblique-hmtx.woff2: face 50, an sfnt of 31972 bytes, 11 tables:
+  OS/2 86 bytes, crc32 1543973d
+  cmap 1972 bytes, crc32 85f8d62e
+  glyf 22872 bytes, crc32 b5484bac
+  head 54 bytes, crc32 4b17bd69
+  hhea 36 bytes, crc32 604aceba
+  hmtx 972 bytes, crc32 fb03cf07
+  kern 18 bytes, crc32 9bed2be0
+  loca 488 bytes, crc32 4354dd17
+  maxp 32 bytes, crc32 c00842e5
+  name 5214 bytes, crc32 a0693287
+  post 32 bytes, crc32 3104895f
+  94 glyphs drawn as oblique.ttf draws them, within 0 of 255; 'Sphinx of black quartz, judge my vow. AVAVAV To. Wa' 491.2734 px (oblique.ttf: 491.2734)
+oblique-null.woff2: face 52, an sfnt of 32492 bytes, 11 tables:
+  OS/2 86 bytes, crc32 1543973d
+  cmap 1972 bytes, crc32 85f8d62e
+  glyf 22904 bytes, crc32 dba4db95
+  head 54 bytes, crc32 977e2159
+  hhea 36 bytes, crc32 604aceba
+  hmtx 972 bytes, crc32 fb03cf07
+  kern 18 bytes, crc32 9bed2be0
+  loca 976 bytes, crc32 69009e6c
+  maxp 32 bytes, crc32 c00842e5
+  name 5214 bytes, crc32 a0693287
+  post 32 bytes, crc32 3104895f
+  94 glyphs drawn as oblique.ttf draws them, within 0 of 255; 'Sphinx of black quartz, judge my vow. AVAVAV To. Wa' 491.2734 px (oblique.ttf: 491.2734)
+sans-cff.woff2: face 54, an sfnt of 28876 bytes, 10 tables:
+  CFF  21480 bytes, crc32 a3811eb0
+  OS/2 86 bytes, crc32 e0cc6444
+  cmap 52 bytes, crc32 290df031
+  head 54 bytes, crc32 9788ccf5
+  hhea 36 bytes, crc32 6d0b1764
+  hmtx 404 bytes, crc32 35727548
+  kern 1338 bytes, crc32 d297548f
+  maxp 6 bytes, crc32 47173bd6
+  name 5206 bytes, crc32 7a42053a
+  post 32 bytes, crc32 3104895f
+  94 glyphs drawn as sans-cff.otf draws them, within 0 of 255; 'Sphinx of black quartz, judge my vow. AVAVAV To. Wa' 437.7812 px (sans-cff.otf: 437.7812)
+150 broken copies of serif-bold.woff2: 16 read, 134 refused, 1504 glyphs drawn
+150 broken copies of oblique-hmtx.woff2: 25 read, 125 refused, 2350 glyphs drawn
+150 broken copies of oblique-null.woff2: 20 read, 130 refused, 1880 glyphs drawn
+150 broken copies of sans-cff.woff2: 8 read, 142 refused, 752 glyphs drawn

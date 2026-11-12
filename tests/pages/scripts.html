@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Scripts</title>
+<style>
+/* tests/pages/scripts.html -- what no built-in face has, drawn by the font Chromium draws
+   it with on this machine, read from its file (src/paint/font.c's system faces, in
+   fontconfig's order): Chinese, Japanese and Korean by WenQuanYi Zen Hei, Armenian and
+   Georgian by DejaVu Sans's file, Ethiopic by FreeSerif; IPA and polytonic Greek by
+   Liberation Serif's own file, Armenian in monospace by DejaVu Sans Mono's. Each line's
+   height is its fonts' (line-height: normal). The scripts whose letters need shaping
+   (Arabic's joining, Devanagari's conjuncts) are not here: Ambitious draws them unshaped.
+   The spans' and lines' boxes are held to Chromium's (tests/pages/scripts.chromium), their
+   drawing region by region (scripts.shot.png, scripts.regions). */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; }
+span { white-space: nowrap; }
+.m { font-family: monospace; }
+.s { font-family: Arial; }
+</style></head>
+<body>
+<p id=text-p-zh><span id=text-zh>中文网页：我能吞下玻璃而不伤身体。</span></p>
+<p id=text-p-ja><span id=text-ja>日本語のテキスト、ひらがなとカタカナ。</span></p>
+<p id=text-p-ko><span id=text-ko>한국어 텍스트입니다, 대한민국</span></p>
+<p class=s id=text-p-mix><span id=text-mix>Latin 中文 mixed 日本 text 한국</span></p>
+<p id=text-p-hy><span id=text-hy>Հայերեն տեքստ, Երևան</span></p>
+<p id=text-p-ka><span id=text-ka>ქართული ტექსტი, თბილისი</span></p>
+<p id=text-p-am><span id=text-am>አዲስ አበባ፣ ሰላም</span></p>
+<p id=text-p-ipa><span id=text-ipa>ɪntəˈnæʃənəl fəˈnɛtɪk ˈælfəbɛt</span></p>
+<p id=text-p-grc><span id=text-grc>Ἑλληνικὴ γλῶσσα, ἐν ἀρχῇ ἦν ὁ λόγος</span></p>
+<p class=m id=text-p-mono><span id=text-mono>Հայերեն ɪntəˈnæʃənəl</span></p>
+<p class=m id=text-p-mzh><span id=text-mzh>code 中文 mono</span></p>
+</body></html>

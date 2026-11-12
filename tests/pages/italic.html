@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><title>Italic</title>
+<style>
+/* tests/pages/italic.html -- italic and bold italic in each family the built-in faces
+   draw: Liberation's italic faces and DejaVu Sans Mono's oblique ones, measured with
+   their own advances and drawn unslanted; DejaVu Sans and DejaVu Serif, which have no
+   italic face here, slanted as Skia slants a face (a skew of a quarter), their upright
+   advances kept. The spans' widths are held to Chromium's (tests/pages/italic.chromium),
+   their drawing region by region (italic.shot.png, italic.regions). */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; }
+span { white-space: nowrap; }
+.i { font-style: italic; }
+.o { font-style: oblique; }
+.bi { font-style: italic; font-weight: bold; }
+.big { font-size: 40px; line-height: 48px; }
+</style></head>
+<body>
+<p><span class=i id=text-serif>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p><span class=bi id=text-serifbi>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: sans-serif"><span class=i id=text-sans>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: sans-serif"><span class=bi id=text-sansbi>Hamburgefonstiv AVAVAV To. Wa</span></p>
+<p style="font-family: 'Courier New'"><span class=i id=text-courier>Hamburgefonstiv</span></p>
+<p style="font-family: 'Courier New'"><span class=bi id=text-courierbi>Hamburgefonstiv</span></p>
+<p style="font-family: monospace"><span class=i id=text-mono>Hamburgefonstiv AVAV</span></p>
+<p style="font-family: monospace"><span class=bi id=text-monobi>Hamburgefonstiv AVAV</span></p>
+<p style="font-family: 'DejaVu Sans'"><span class=i id=text-dvsans>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: 'DejaVu Sans'"><span class=bi id=text-dvsansbi>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: 'DejaVu Serif'"><span class=i id=text-dvserif>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: 'DejaVu Serif'"><span class=bi id=text-dvserifbi>Hamburgefonstiv AVAVAV</span></p>
+<p style="font-family: 'DejaVu Sans Mono'"><span class=o id=text-dvmono>Hamburgefonstiv</span></p>
+<p style="font-family: sans-serif"><span class=o id=text-oblique>oblique is italic here</span></p>
+<!-- the elements the user agent's sheet sets in italic, in a line that wraps as the
+     italic advances have it -->
+<p id=text-para style="width: 380px">A <em id=text-em>word stressed</em>, a <i id=text-it>term in italic</i>, a <cite id=text-cite>Cited Title</cite>,
+a <var id=text-var>variable</var> and a <dfn id=text-dfn>defined term</dfn>, set in the italic face, which breaks the line where Chromium does.</p>
+<address id=text-addr>An address, italic as a whole</address>
+<!-- large, where the slant and the shapes show -->
+<p class=big><span class=i id=text-bigserif>fly Qg</span> <span class=i style="font-family: 'DejaVu Sans'" id=text-bigdv>fly Qg</span>
+<span class=i style="font-family: monospace" id=text-bigmono>fly</span></p>
+</body></html>

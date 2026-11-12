@@ -1,0 +1,13 @@
+# boxes of tests/pages/emoji.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+p-face p 8 8 784 19
+face span 8 9 115.828 17
+p-mixed p 8 31 784 19
+mixed span 8 32 228.438 17
+p-sans p 8 54 784 19
+sans span 8 55 193.406 17
+p-mono p 8 77 784 19
+mono span 8 77 125.938 19
+p-big p 8 100 784 28
+big span 8 101 125.938 26
+p-hands p 8 132 784 19
+hands span 8 133 109.219 17

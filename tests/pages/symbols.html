@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Symbols</title>
+<style>
+/* tests/pages/symbols.html -- the symbols the built-in faces carry: punctuation,
+   currency, letterlike symbols, arrows, mathematical operators, box drawing, block
+   elements, geometric shapes, miscellaneous symbols and dingbats, each drawn by the face
+   Chromium draws it with here: the family's own, Liberation Serif, or DejaVu Sans -- only
+   code points no font before DejaVu Sans in fontconfig's order has (Chromium takes Inter's
+   where it has one), and none Chromium draws as an emoji. The spans' widths are held to
+   Chromium's (tests/pages/symbols.chromium), their drawing region by region
+   (symbols.shot.png, symbols.regions). */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 3px; }
+span { white-space: nowrap; }
+.s { font-family: Arial; }
+.m { font-family: monospace; }
+.c { font-family: 'Courier New'; }
+.b { font-weight: bold; }
+.i { font-style: italic; }
+pre { margin: 0 0 3px; line-height: 1; }
+</style></head>
+<body>
+<p><span id=text-punct>‐ ‒ – — ― ‖ ‗ ‘ ’ ‚ ‛ “ ” „ ‟ † ‡ • … ‰ ′ ″ ‴ ‹ › ‼ ‾ ⁄ | ⁖ ⁘ ⁙ ⁚ ⁛ ⁜ ⁝</span></p>
+<p class=m><span id=text-punct-m>– — ‘ ’ “ ” † ‡ • … ‰ ‹ › ‼ ‽ ‣</span></p>
+<p><span id=text-curr>₠ ₡ ₢ ₣ ₤ ₥ ₦ ₧ ₨ ₩ ₪ ₫ € ₭ ₮ ₯ ₰ ₱ ₲ ₳ ₴ ₵ ₿</span></p>
+<p class=m><span id=text-curr-m>₤ ₦ ₩ ₪ € ₱ ₴ ₸ ₹ ₺ ₽</span></p>
+<p><span id=text-letter>℅ ℓ № ℗ ™ Ω K Å ℮ ⅍ | ℂ ℇ ℍ ℕ ℘ ℙ ℚ ℝ ℤ ℵ</span></p>
+<p><span id=text-arrows>← ↑ → ↓ ↔ ↕ ↨ ⇔ | ↜ ↝ ↞ ↟ ↦ ⇄ ⇅ ⇆ ⇑ ⇓ ⇕ ⇖ ⇗ ⇘ ⇙</span></p>
+<p class=m><span id=text-arrows-m>← ↑ → ↓ ↔ ⇐ ⇒ ⇔ ↖ ↗ ↘ ↙</span></p>
+<p><span id=text-math>∂ ∆ ∏ ∑ − √ ∞ ∩ ∫ ≈ ≠ ≡ ≤ ≥ | ∀ ∃ ∇ ∈ ∉ ∗ ∘ ∝ ∠ ∧ ∨ ∪ ∴ ∼ ≅ ⊂ ⊃ ⊆ ⊇ ⊥ ⋅</span></p>
+<p class=s><span id=text-math-sb class=b>∑ √ ∞ ≈ ≠ ≤ ≥ | ∀ ∃ ∈ ∧ ∨ ⊂ ⊃</span></p>
+<p class=m><span id=text-math-m>∀ ∂ ∃ ∅ ∇ ∈ ∏ ∑ − √ ∞ ∧ ∨ ∩ ∪ ∫ ≈ ≠ ≡ ≤ ≥ ⊂ ⊃</span></p>
+<p><span id=text-box>┌ ─ ┐ │ └ ┘ ├ ┤ ┬ ┴ ┼ ═ ║ ╔ ╗ ╚ ╝ | ━ ┃ ┏ ┓ ┗ ┛ ╭ ╮ ╯ ╰</span></p>
+<pre id=text-boxes>┌──┬──┐ ╔══╦══╗ ┏━━┳━━┓
+│ab│cd│ ║ab║cd║ ┃ab┃cd┃
+├──┼──┤ ╠══╬══╣ ┣━━╋━━┫
+└──┴──┘ ╚══╩══╝ ┗━━┻━━┛</pre>
+<p><span id=text-block>▀ ▄ █ ▌ ▐ ░ ▒ ▓ | ▁ ▂ ▃ ▅ ▆ ▇ ▉</span></p>
+<p class=m><span id=text-block-m>▀▄█▌▐░▒▓▁▂▃▅▆▇▉▊▋</span></p>
+<p><span id=text-geom>■ □ ▪ ▫ ▬ ▲ ► ▼ ◄ ◊ ○ ● ◦ | ▣ ▤ ▥ ▸ ▹ ▾ ▿ ◂ ◃ ◈ ◉ ◎ ◢ ◣ ◤ ◥</span></p>
+<p class=m><span id=text-geom-m>■ □ ▲ △ ▶ ▷ ▼ ▽ ◀ ◁ ◆ ◇ ○ ●</span></p>
+<p><span id=text-misc>☺ ☻ ☼ ♀ ♂ ♠ ♣ ♥ ♦ ♪ ♫ | ☁ ☂ ☃ ☎ ☐ ☑ ☒ ☚ ☛ ☜ ☞ ☠ ☢ ☣ ☮ ☯ ♔ ♕ ♖ ♗ ♘ ♙ ⚀ ⚁ ⚂</span></p>
+<p class=m><span id=text-misc-m>☀ ★ ☆ ☎ ☐ ☑ ☒ ☺ ♠ ♣ ♥ ♦ ♪ ♫</span></p>
+<p><span id=text-ding>✁ ✂ ✃ ✄ ✆ ✇ ✈ ✉ ✎ ✏ ✐ ✑ ✒ ✔ ✖ ✘ ✝ ✞ ✠ ✡ ✦ ✧ ❥ ❦ ❧ ➔ ➘ ➙</span></p>
+<p class=m><span id=text-ding-m>✂ ✈ ✉ ✎ ✓ ✔ ✗ ✘ ✝ ✠ ✦ ✧ ❤ ➔</span></p>
+</body></html>

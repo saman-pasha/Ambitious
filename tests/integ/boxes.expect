@@ -2,7 +2,10 @@ atrules: 6 of 6 boxes within 1px of Chromium's
 bidi: 114 of 114 boxes within 1px of Chromium's
 blockimg: 20 of 20 boxes within 1px of Chromium's
 brokenimg: 14 of 14 boxes within 1px of Chromium's
+cff: 24 of 24 boxes within 1px of Chromium's
+coverage: 17 of 17 boxes within 1px of Chromium's
 ellipsis: 12 of 12 boxes within 1px of Chromium's
+emoji: 12 of 12 boxes within 1px of Chromium's
 families: 38 of 38 boxes within 1px of Chromium's
 flex-baseline: 79 of 79 boxes within 1px of Chromium's
 flex: 44 of 44 boxes within 1px of Chromium's
@@ -12,12 +15,16 @@ grid: 31 of 31 boxes within 1px of Chromium's
 gridfit: 18 of 18 boxes within 1px of Chromium's
 images: 34 of 34 boxes within 1px of Chromium's
 inline-cb: 56 of 56 boxes within 1px of Chromium's
+italic: 24 of 24 boxes within 1px of Chromium's
 layout: 25 of 25 boxes within 1px of Chromium's
 legend: 17 of 17 boxes within 1px of Chromium's
 markers: 35 of 35 boxes within 1px of Chromium's
 position: 11 of 11 boxes within 1px of Chromium's
+scripts: 22 of 22 boxes within 1px of Chromium's
 selectors: 21 of 21 boxes within 1px of Chromium's
 sizing: 31 of 31 boxes within 1px of Chromium's
 sticky: 41 of 41 boxes within 1px of Chromium's
+symbols: 20 of 20 boxes within 1px of Chromium's
 text: 9 of 9 boxes within 1px of Chromium's
 values: 14 of 14 boxes within 1px of Chromium's
+woff2: 14 of 14 boxes within 1px of Chromium's

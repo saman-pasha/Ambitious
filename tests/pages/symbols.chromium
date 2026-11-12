@@ -1,0 +1,21 @@
+# boxes of tests/pages/symbols.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-punct span 8 9 428.328 17
+text-punct-m span 8 30 298.625 19
+text-curr span 8 52 341.344 17
+text-curr-m span 8 73 202.297 19
+text-letter span 8 96 324.906 17
+text-arrows span 8 118 392.297 17
+text-arrows-m span 8 139 221.563 19
+text-math span 8 162 528.375 17
+text-math-sb span 8 184 218.656 17
+text-math-m span 8 205 433.484 19
+text-box span 8 228 400.25 17
+text-boxes pre 8 249 784 64
+text-block span 8 317 240.359 17
+text-block-m span 8 338 163.766 19
+text-geom span 8 361 445.109 17
+text-geom-m span 8 382 260.094 19
+text-misc span 8 405 640.234 17
+text-misc-m span 8 426 260.094 19
+text-ding span 8 449 483.375 17
+text-ding-m span 8 470 260.094 19

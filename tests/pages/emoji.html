@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8><title>Emoji</title>
+<style>
+/* tests/pages/emoji.html -- emoji, which Blink falls back for to the emoji font first
+   (Noto Color Emoji here, through fontconfig's und-Zsye): each measured by its colour
+   bitmap's advance in its strike (136 px at 109 px an em), its line as tall as that font's
+   metrics make it. Ambitious draws the colour bitmaps as nothing yet, so only the boxes
+   are held to Chromium's (tests/pages/emoji.chromium); an emoji the family has a glyph for
+   is its own (DejaVu Sans Mono's). */
+body { margin: 8px; font-size: 16px; }
+p { margin: 0 0 4px; }
+span { white-space: nowrap; }
+</style></head>
+<body>
+<p id=p-face><span id=face>😀 😃 😄 😁 😆</span></p>
+<p id=p-mixed><span id=mixed>Launch 🚀 at noon, coffee ☕ after</span></p>
+<p style="font-family: Arial" id=p-sans><span id=sans>Weather: ⛅ 🌈 ⚡ and ⛄</span></p>
+<p style="font-family: monospace" id=p-mono><span id=mono>mono ☕ ⚡ 🚀 ♈</span></p>
+<p style="font-family: serif; font-size: 24px" id=p-big><span id=big>Big 🎉 party</span></p>
+<p id=p-hands><span id=hands>hands ✌ ✍ ☝</span></p>
+</body></html>

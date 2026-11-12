@@ -751,7 +751,22 @@ be built side by side and merged without touching each other's.
     fontconfig aliases, of DejaVu for monospace and by name), each code point
     a face lacks drawn by the face Chromium falls back to, with Chromium's
     line metrics for fallback glyphs, its leading and its monospace default
-    size (13px).
+    size (13px). Then (12l), text:
+    - Liberation's italic faces and DejaVu Sans Mono's obliques, and
+      Chromium's slant where a family has none.
+    - Built-in faces that carry Latin, Greek, Cyrillic and the symbol
+      blocks, 1,419 to 2,444 code points each, packed in arrays of short
+      literals (toolchain finding 28).
+    - What they lack is drawn from the machine's fonts in fontconfig's order,
+      as Chromium falls back: Inter, WenQuanYi, Loma, FreeSans and FreeSerif,
+      Unifont, then Noto Color Emoji for emoji, which is measured but not
+      drawn.
+    - CFF and CFF2 outlines, for system fonts and web fonts, read as
+      Chromium's FreeType and font sanitizer read them.
+    - WOFF2 web fonts, through a Brotli decoder of their own
+      (`src/paint/brotli.c`).
+    - Each held to Chromium's boxes and drawing on its own fixture pages
+      (italic, coverage, symbols, scripts, emoji, cff, woff2).
 - **12g JavaScript** (`src/js/`):
   - Promises and the microtask queue; async functions and `await`;
     generators;
@@ -844,7 +859,7 @@ won.
 | 9 Accessibility and devtools | **done, first slice**: `contracts/a11y.pl` and `src/a11y/a11y.c` build the accessibility tree: HTML-AAM roles, role attributes (unknown ones recorded), and accessible names with their source (aria-labelledby, aria-label, alt, label, caption, legend, content, value, title, placeholder). Hidden content is left out, and every ID reference is kept with its target. The rules find missing names, broken references, heading jumps, nested interactive controls, duplicate ids and unknown roles, and explain each name. `ambitious inspect PAGE [--query|--why GOAL]` shows the page, its resources, the tree and every module's diagnostics. `tests/integ/a11y` is the gate: a fixture with every kind of fault, each found with its node and its rule |
 | 10 Persistence | **done, first slice**: `prolog/amb/profile.pl` keeps the profile in a cocolog store. `--profile DIR` (or AMB_PROFILE) uses `--embed DIR`, ZiguratIP's MVCC store, from one run to the next; `--private` uses `--local`, memory for the run alone; with neither, nothing is kept. The keeper writes six kinds of fact (visits, bookmarks, permissions, preferences, sessions, retention) from named commands. A profile query is checked read-only before it runs. Retention is applied at each opening; forgetting removes what it names (a URL, a site, a time on). A site's permissions reach C as the kinds the loader may not fetch. `tests/integ/profile` is the gate: written by one process and read by the next, a private session leaving the profile's files byte-identical, forgetting, retention, permissions, and the reasoner unable to see the profile |
 | 11 Hardening | **done, first pass**: `docs/performance.md`, `docs/security.md` and `docs/limitations.md` are the gate's measured numbers and documented limitations. `ambitious bench` times each stage and the reasoner. Units are built at `-O2` (2.9x faster, pixels unchanged). The reasoner keys handle facts by integer (on 21 MB, `advise` went from 77 s to 11 s) and streams snapshots past cocolog's 16 MiB read. The audit fixed three crashes, now `tests/exec/hostile`: 100,000-deep markup, 20,000-deep `:is()`, and backtracking descendant chains. `tests/exec/fuzz_pipeline`: 60 hostile documents through the whole pipeline under valgrind |
-| 12 The limitations | **in progress**: the packages 12a-12m, each with its own files and gate |
+| 12 The limitations | **in progress**: the packages 12a-12n, each with its own files and gate |
 | Benchmark | **48 of 48 rows won against Chromium 1243** (§11, `docs/benchmark.md`; the first run won 38). Each lost row changed the implementation, as §11 says: compiled and bucketed selectors, shared computed styles, a streamed snapshot of a third the size, opaque fills by rows. Now **64 of 64**, the scripted page's scripts and its click among them; the JavaScript suite 8 of 8 against QuickJS |
 
 ## 10. Risks
