@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:f8a249ad:2973). Do not edit. */
+/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:c8ec6ee6:9839). Do not edit. */
 typedef enum script_status { SCRIPT_OK, SCRIPT_STALE_HANDLE, SCRIPT_WRONG_KIND, SCRIPT_FAILED, SCRIPT_BAD_REQUEST, SCRIPT_NOT_REQUESTABLE, SCRIPT_STALE_REVISION } script_status;
 typedef enum script_source { SCRIPT_SOURCE_INLINE, SCRIPT_SOURCE_EXTERNAL, SCRIPT_SOURCE_ATTRIBUTE } script_source;
 typedef enum script_outcome { SCRIPT_OUTCOME_RAN, SCRIPT_OUTCOME_THREW, SCRIPT_OUTCOME_SYNTAX_ERROR, SCRIPT_OUTCOME_STOPPED, SCRIPT_OUTCOME_NOT_FETCHED, SCRIPT_OUTCOME_NOT_RUN } script_outcome;
@@ -6,16 +6,39 @@ typedef enum script_level { SCRIPT_LEVEL_LOG, SCRIPT_LEVEL_INFO, SCRIPT_LEVEL_WA
 typedef enum script_phase { SCRIPT_PHASE_SCRIPT, SCRIPT_PHASE_EVENT, SCRIPT_PHASE_TIMER, SCRIPT_PHASE_PROMISE } script_phase;
 typedef enum script_listen_on { SCRIPT_LISTEN_ON_NODE, SCRIPT_LISTEN_ON_WINDOW } script_listen_on;
 typedef enum script_timer_state { SCRIPT_TIMER_STATE_FIRED, SCRIPT_TIMER_STATE_CLEARED, SCRIPT_TIMER_STATE_PENDING } script_timer_state;
+typedef enum script_insertion { SCRIPT_INSERTION_PARSED, SCRIPT_INSERTION_INSERTED, SCRIPT_INSERTION_WRITTEN } script_insertion;
+typedef enum script_api { SCRIPT_API_FETCH, SCRIPT_API_XHR, SCRIPT_API_SCRIPT } script_api;
+typedef enum script_req_outcome { SCRIPT_REQ_OUTCOME_OK, SCRIPT_REQ_OUTCOME_HTTP_ERROR, SCRIPT_REQ_OUTCOME_OPAQUE, SCRIPT_REQ_OUTCOME_FAILED, SCRIPT_REQ_OUTCOME_BLOCKED, SCRIPT_REQ_OUTCOME_ABORTED, SCRIPT_REQ_OUTCOME_PENDING } script_req_outcome;
+typedef enum script_write_when { SCRIPT_WRITE_WHEN_PARSING, SCRIPT_WRITE_WHEN_AFTER_LOAD, SCRIPT_WRITE_WHEN_IGNORED } script_write_when;
+typedef enum script_nav_cause { SCRIPT_NAV_CAUSE_FORM, SCRIPT_NAV_CAUSE_LINK, SCRIPT_NAV_CAUSE_LOCATION, SCRIPT_NAV_CAUSE_RELOAD, SCRIPT_NAV_CAUSE_HISTORY } script_nav_cause;
+typedef enum script_storage_area { SCRIPT_STORAGE_AREA_LOCAL, SCRIPT_STORAGE_AREA_SESSION } script_storage_area;
+typedef enum script_storage_op { SCRIPT_STORAGE_OP_SET, SCRIPT_STORAGE_OP_REMOVE, SCRIPT_STORAGE_OP_CLEAR } script_storage_op;
 typedef struct script_run_h { uint32_t doc, index, gen; } script_run_h;
 typedef struct script_console_h { uint32_t doc, index, gen; } script_console_h;
 typedef struct script_error_h { uint32_t doc, index, gen; } script_error_h;
 typedef struct script_listener_h { uint32_t doc, index, gen; } script_listener_h;
 typedef struct script_timer_h { uint32_t doc, index, gen; } script_timer_h;
-typedef struct script_run { uint32_t gen, live, free_next; dom_node_h elem; script_source source; amb_span url; script_outcome outcome; } script_run;
+typedef struct script_request_h { uint32_t doc, index, gen; } script_request_h;
+typedef struct script_write_h { uint32_t doc, index, gen; } script_write_h;
+typedef struct script_navigation_h { uint32_t doc, index, gen; } script_navigation_h;
+typedef struct script_form_field_h { uint32_t doc, index, gen; } script_form_field_h;
+typedef struct script_observer_h { uint32_t doc, index, gen; } script_observer_h;
+typedef struct script_observation_h { uint32_t doc, index, gen; } script_observation_h;
+typedef struct script_definition_h { uint32_t doc, index, gen; } script_definition_h;
+typedef struct script_storage_h { uint32_t doc, index, gen; } script_storage_h;
+typedef struct script_run { uint32_t gen, live, free_next; dom_node_h elem; script_source source; amb_span url; script_outcome outcome; uint32_t layouts; script_insertion insert; } script_run;
 typedef struct script_console { uint32_t gen, live, free_next; uint32_t run; script_level level; amb_span text; } script_console;
 typedef struct script_error { uint32_t gen, live, free_next; uint32_t run; script_phase phase; amb_span message; } script_error;
 typedef struct script_listener { uint32_t gen, live, free_next; script_listen_on on; dom_node_h target; amb_span type; uint32_t run; uint8_t capture; } script_listener;
 typedef struct script_timer { uint32_t gen, live, free_next; uint32_t run; uint32_t delay; uint8_t repeats; uint32_t fired; script_timer_state state; } script_timer;
+typedef struct script_request { uint32_t gen, live, free_next; uint32_t run; script_api api; amb_span method; amb_span url; net_resource_h resource; uint32_t status; script_req_outcome outcome; uint8_t cross; } script_request;
+typedef struct script_write { uint32_t gen, live, free_next; uint32_t run; script_write_when when; uint32_t bytes; } script_write;
+typedef struct script_navigation { uint32_t gen, live, free_next; uint32_t run; script_nav_cause cause; amb_span method; amb_span url; dom_node_h form; dom_node_h submitter; amb_span target; net_resource_h resource; uint32_t status; uint32_t fields; } script_navigation;
+typedef struct script_form_field { uint32_t gen, live, free_next; uint32_t navigation; amb_span name; dom_node_h control; } script_form_field;
+typedef struct script_observer { uint32_t gen, live, free_next; uint32_t run; uint8_t disconnected; uint32_t records; uint32_t calls; } script_observer;
+typedef struct script_storage { uint32_t gen, live, free_next; uint32_t run; script_storage_area area; script_storage_op op; amb_span key; uint32_t bytes; uint8_t secret; } script_storage;
+typedef struct script_definition { uint32_t gen, live, free_next; uint32_t run; amb_span name; uint32_t observed; uint8_t connected; uint8_t disconnected; uint8_t attribute_changed; uint32_t upgraded; } script_definition;
+typedef struct script_observation { uint32_t gen, live, free_next; uint32_t observer; uint32_t run; dom_node_h target; uint8_t child_list; uint8_t attributes; uint8_t character_data; uint8_t subtree; uint8_t old_value; uint32_t filter; } script_observation;
 typedef struct script_store_tag { char unused; } script_store_tag;
 typedef store<script_store_tag> script_runtime;
 extern const char script_fingerprint[];
@@ -26,6 +49,13 @@ const char *script_level_name(script_level x);
 const char *script_phase_name(script_phase x);
 const char *script_listen_on_name(script_listen_on x);
 const char *script_timer_state_name(script_timer_state x);
+const char *script_insertion_name(script_insertion x);
+const char *script_api_name(script_api x);
+const char *script_req_outcome_name(script_req_outcome x);
+const char *script_write_when_name(script_write_when x);
+const char *script_nav_cause_name(script_nav_cause x);
+const char *script_storage_area_name(script_storage_area x);
+const char *script_storage_op_name(script_storage_op x);
 void script_init(script_runtime *d, uint32_t id);
 uint64_t script_revision(const script_runtime *d);
 int script_check_invariants(const script_runtime *d, FILE *report);
@@ -97,8 +127,69 @@ const char *script_timer_state_name(script_timer_state x) {
     }
     return "?";
 }
+const char *script_insertion_name(script_insertion x) {
+    switch (x) {
+    case SCRIPT_INSERTION_PARSED: return "parsed";
+    case SCRIPT_INSERTION_INSERTED: return "inserted";
+    case SCRIPT_INSERTION_WRITTEN: return "written";
+    }
+    return "?";
+}
+const char *script_api_name(script_api x) {
+    switch (x) {
+    case SCRIPT_API_FETCH: return "fetch";
+    case SCRIPT_API_XHR: return "xhr";
+    case SCRIPT_API_SCRIPT: return "script";
+    }
+    return "?";
+}
+const char *script_req_outcome_name(script_req_outcome x) {
+    switch (x) {
+    case SCRIPT_REQ_OUTCOME_OK: return "ok";
+    case SCRIPT_REQ_OUTCOME_HTTP_ERROR: return "http_error";
+    case SCRIPT_REQ_OUTCOME_OPAQUE: return "opaque";
+    case SCRIPT_REQ_OUTCOME_FAILED: return "failed";
+    case SCRIPT_REQ_OUTCOME_BLOCKED: return "blocked";
+    case SCRIPT_REQ_OUTCOME_ABORTED: return "aborted";
+    case SCRIPT_REQ_OUTCOME_PENDING: return "pending";
+    }
+    return "?";
+}
+const char *script_write_when_name(script_write_when x) {
+    switch (x) {
+    case SCRIPT_WRITE_WHEN_PARSING: return "parsing";
+    case SCRIPT_WRITE_WHEN_AFTER_LOAD: return "after_load";
+    case SCRIPT_WRITE_WHEN_IGNORED: return "ignored";
+    }
+    return "?";
+}
+const char *script_nav_cause_name(script_nav_cause x) {
+    switch (x) {
+    case SCRIPT_NAV_CAUSE_FORM: return "form";
+    case SCRIPT_NAV_CAUSE_LINK: return "link";
+    case SCRIPT_NAV_CAUSE_LOCATION: return "location";
+    case SCRIPT_NAV_CAUSE_RELOAD: return "reload";
+    case SCRIPT_NAV_CAUSE_HISTORY: return "history";
+    }
+    return "?";
+}
+const char *script_storage_area_name(script_storage_area x) {
+    switch (x) {
+    case SCRIPT_STORAGE_AREA_LOCAL: return "local";
+    case SCRIPT_STORAGE_AREA_SESSION: return "session";
+    }
+    return "?";
+}
+const char *script_storage_op_name(script_storage_op x) {
+    switch (x) {
+    case SCRIPT_STORAGE_OP_SET: return "set";
+    case SCRIPT_STORAGE_OP_REMOVE: return "remove";
+    case SCRIPT_STORAGE_OP_CLEAR: return "clear";
+    }
+    return "?";
+}
 
-const char script_fingerprint[] = "fnv1a32:f8a249ad:2973";
+const char script_fingerprint[] = "fnv1a32:c8ec6ee6:9839";
 void script_init(script_runtime *d, uint32_t id) {
     if (d->run_len != 0) abort();
     d->id = id;
@@ -126,6 +217,42 @@ int script_check_invariants(const script_runtime *d, FILE *report) {
             uint32_t r = d->timer[i].run;
             if (d->timer[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->request_len; i++) {
+            uint32_t r = d->request[i].run;
+            if (d->request[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->write_len; i++) {
+            uint32_t r = d->write[i].run;
+            if (d->write[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->navigation_len; i++) {
+            uint32_t r = d->navigation[i].run;
+            if (d->navigation[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->form_field_len; i++) {
+            uint32_t r = d->form_field[i].navigation;
+            if (d->form_field[i].live && r && (r >= d->navigation_len || !d->navigation[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->observer_len; i++) {
+            uint32_t r = d->observer[i].run;
+            if (d->observer[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->observation_len; i++) {
+            uint32_t r = d->observation[i].observer;
+            if (d->observation[i].live && r && (r >= d->observer_len || !d->observer[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->observation_len; i++) {
+            uint32_t r = d->observation[i].run;
+            if (d->observation[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->definition_len; i++) {
+            uint32_t r = d->definition[i].run;
+            if (d->definition[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->storage_len; i++) {
+            uint32_t r = d->storage[i].run;
+            if (d->storage[i].live && r && (r >= d->run_len || !d->run[r].live)) { bad++; amb_report(report, "script", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -135,6 +262,8 @@ void script_export(const script_runtime *d, FILE *out) {
         if (!d->run[i].live) continue;
         if (1) { fputs("script_run(", out); amb_put_handle(out, "sr", d->id, i, d->run[i].gen); fputs(",", out); amb_put_ref(out, "n", d->run[i].elem.doc, d->run[i].elem.index, d->run[i].elem.gen); fputs(",", out); fputs(script_source_name(d->run[i].source), out); fputs(",", out); fputs(script_outcome_name(d->run[i].outcome), out); fputs(").\n", out); }
         if (d->run[i].source == SCRIPT_SOURCE_EXTERNAL) { fputs("script_url(", out); amb_put_handle(out, "sr", d->id, i, d->run[i].gen); fputs(",", out); text_put(d, out, d->run[i].url); fputs(").\n", out); }
+        if (d->run[i].layouts != 0) { fputs("script_forced_layout(", out); amb_put_handle(out, "sr", d->id, i, d->run[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->run[i].layouts); fputs(").\n", out); }
+        if (d->run[i].insert != SCRIPT_INSERTION_PARSED) { fputs("script_inserted(", out); amb_put_handle(out, "sr", d->id, i, d->run[i].gen); fputs(",", out); fputs(script_insertion_name(d->run[i].insert), out); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->console_len; i++) {
         if (!d->console[i].live) continue;
@@ -154,6 +283,61 @@ void script_export(const script_runtime *d, FILE *out) {
         if (!d->timer[i].live) continue;
         if (1) { fputs("script_timer(", out); amb_put_handle(out, "st", d->id, i, d->timer[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->timer[i].delay); fputs(",", out); fputs(d->timer[i].repeats ? "true" : "false", out); fputs(",", out); fputs(script_timer_state_name(d->timer[i].state), out); fputs(").\n", out); }
         if (1) { fputs("script_timer_of(", out); amb_put_handle(out, "st", d->id, i, d->timer[i].gen); fputs(",", out); { uint32_t r = d->timer[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->request_len; i++) {
+        if (!d->request[i].live) continue;
+        if (1) { fputs("script_request(", out); amb_put_handle(out, "sq", d->id, i, d->request[i].gen); fputs(",", out); fputs(script_api_name(d->request[i].api), out); fputs(",", out); text_put(d, out, d->request[i].method); fputs(",", out); text_put(d, out, d->request[i].url); fputs(",", out); fputs(script_req_outcome_name(d->request[i].outcome), out); fputs(").\n", out); }
+        if (1) { fputs("script_request_by(", out); amb_put_handle(out, "sq", d->id, i, d->request[i].gen); fputs(",", out); { uint32_t r = d->request[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->request[i].status != 0) { fputs("script_request_status(", out); amb_put_handle(out, "sq", d->id, i, d->request[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->request[i].status); fputs(").\n", out); }
+        if (1) { fputs("script_request_resource(", out); amb_put_handle(out, "sq", d->id, i, d->request[i].gen); fputs(",", out); amb_put_ref(out, "rs", d->request[i].resource.doc, d->request[i].resource.index, d->request[i].resource.gen); fputs(").\n", out); }
+        if (d->request[i].cross == 1) { fputs("script_request_cross(", out); amb_put_handle(out, "sq", d->id, i, d->request[i].gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->write_len; i++) {
+        if (!d->write[i].live) continue;
+        if (1) { fputs("script_write(", out); amb_put_handle(out, "sw", d->id, i, d->write[i].gen); fputs(",", out); { uint32_t r = d->write[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(",", out); fputs(script_write_when_name(d->write[i].when), out); fputs(",", out); fprintf(out, "%lld", (long long)d->write[i].bytes); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->navigation_len; i++) {
+        if (!d->navigation[i].live) continue;
+        if (1) { fputs("script_navigation(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); fputs(script_nav_cause_name(d->navigation[i].cause), out); fputs(",", out); text_put(d, out, d->navigation[i].method); fputs(",", out); text_put(d, out, d->navigation[i].url); fputs(").\n", out); }
+        if (1) { fputs("script_navigation_by(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); { uint32_t r = d->navigation[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->navigation[i].cause == SCRIPT_NAV_CAUSE_FORM) { fputs("script_navigation_form(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); amb_put_ref(out, "n", d->navigation[i].form.doc, d->navigation[i].form.index, d->navigation[i].form.gen); fputs(",", out); amb_put_ref(out, "n", d->navigation[i].submitter.doc, d->navigation[i].submitter.index, d->navigation[i].submitter.gen); fputs(").\n", out); }
+        if (1) { fputs("script_navigation_target(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); text_put(d, out, d->navigation[i].target); fputs(").\n", out); }
+        if (1) { fputs("script_navigation_resource(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); amb_put_ref(out, "rs", d->navigation[i].resource.doc, d->navigation[i].resource.index, d->navigation[i].resource.gen); fputs(").\n", out); }
+        if (d->navigation[i].status != 0) { fputs("script_navigation_status(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->navigation[i].status); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->form_field_len; i++) {
+        if (!d->form_field[i].live) continue;
+        if (1) { fputs("script_form_field(", out); { uint32_t r = d->form_field[i].navigation; amb_put_ref(out, "sn", d->id, r, r && r < d->navigation_len ? d->navigation[r].gen : 0); } fputs(",", out); text_put(d, out, d->form_field[i].name); fputs(",", out); amb_put_ref(out, "n", d->form_field[i].control.doc, d->form_field[i].control.index, d->form_field[i].control.gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->observer_len; i++) {
+        if (!d->observer[i].live) continue;
+        if (1) { fputs("script_observer(", out); amb_put_handle(out, "sm", d->id, i, d->observer[i].gen); fputs(",", out); { uint32_t r = d->observer[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->observer[i].disconnected == 1) { fputs("script_observer_disconnected(", out); amb_put_handle(out, "sm", d->id, i, d->observer[i].gen); fputs(").\n", out); }
+        if (1) { fputs("script_observer_delivered(", out); amb_put_handle(out, "sm", d->id, i, d->observer[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->observer[i].records); fputs(",", out); fprintf(out, "%lld", (long long)d->observer[i].calls); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->observation_len; i++) {
+        if (!d->observation[i].live) continue;
+        if (1) { fputs("script_observation(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(",", out); { uint32_t r = d->observation[i].observer; amb_put_ref(out, "sm", d->id, r, r && r < d->observer_len ? d->observer[r].gen : 0); } fputs(",", out); amb_put_ref(out, "n", d->observation[i].target.doc, d->observation[i].target.index, d->observation[i].target.gen); fputs(",", out); { uint32_t r = d->observation[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->observation[i].child_list == 1) { fputs("script_observes_children(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(").\n", out); }
+        if (d->observation[i].attributes == 1) { fputs("script_observes_attributes(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->observation[i].filter); fputs(").\n", out); }
+        if (d->observation[i].character_data == 1) { fputs("script_observes_data(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(").\n", out); }
+        if (d->observation[i].subtree == 1) { fputs("script_observes_subtree(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(").\n", out); }
+        if (d->observation[i].old_value == 1) { fputs("script_observes_old_values(", out); amb_put_handle(out, "so", d->id, i, d->observation[i].gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->definition_len; i++) {
+        if (!d->definition[i].live) continue;
+        if (1) { fputs("script_definition(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(",", out); text_put(d, out, d->definition[i].name); fputs(",", out); { uint32_t r = d->definition[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (1) { fputs("script_definition_observes(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->definition[i].observed); fputs(").\n", out); }
+        if (1) { fputs("script_definition_upgraded(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->definition[i].upgraded); fputs(").\n", out); }
+        if (d->definition[i].connected == 1) { fputs("script_defines_connected(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(").\n", out); }
+        if (d->definition[i].disconnected == 1) { fputs("script_defines_disconnected(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(").\n", out); }
+        if (d->definition[i].attribute_changed == 1) { fputs("script_defines_attribute_changed(", out); amb_put_handle(out, "sd", d->id, i, d->definition[i].gen); fputs(").\n", out); }
+    }
+    for (uint32_t i = 1; i < d->storage_len; i++) {
+        if (!d->storage[i].live) continue;
+        if (1) { fputs("script_storage_write(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(",", out); fputs(script_storage_area_name(d->storage[i].area), out); fputs(",", out); fputs(script_storage_op_name(d->storage[i].op), out); fputs(",", out); text_put(d, out, d->storage[i].key); fputs(").\n", out); }
+        if (1) { fputs("script_storage_by(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(",", out); { uint32_t r = d->storage[i].run; amb_put_ref(out, "sr", d->id, r, r && r < d->run_len ? d->run[r].gen : 0); } fputs(").\n", out); }
+        if (d->storage[i].secret == 1) { fputs("script_storage_secret(", out); amb_put_handle(out, "ss", d->id, i, d->storage[i].gen); fputs(").\n", out); }
     }
 }
 script_status script_dispatch(script_runtime *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -193,10 +377,34 @@ typedef struct store_script_store_tag {
     size_t timer_len, timer_cap;
     uint32_t timer_free;
     own script_timer *timer;
+    size_t request_len, request_cap;
+    uint32_t request_free;
+    own script_request *request;
+    size_t write_len, write_cap;
+    uint32_t write_free;
+    own script_write *write;
+    size_t navigation_len, navigation_cap;
+    uint32_t navigation_free;
+    own script_navigation *navigation;
+    size_t form_field_len, form_field_cap;
+    uint32_t form_field_free;
+    own script_form_field *form_field;
+    size_t observer_len, observer_cap;
+    uint32_t observer_free;
+    own script_observer *observer;
+    size_t observation_len, observation_cap;
+    uint32_t observation_free;
+    own script_observation *observation;
+    size_t definition_len, definition_cap;
+    uint32_t definition_free;
+    own script_definition *definition;
+    size_t storage_len, storage_cap;
+    uint32_t storage_free;
+    own script_storage *storage;
     size_t text_len, text_cap;
     own char *text;
 } store_script_store_tag;
-void store_script_store_tag_drop(store_script_store_tag *s) { free(s->run); free(s->console); free(s->error); free(s->listener); free(s->timer); free(s->text); }
+void store_script_store_tag_drop(store_script_store_tag *s) { free(s->run); free(s->console); free(s->error); free(s->listener); free(s->timer); free(s->request); free(s->write); free(s->navigation); free(s->form_field); free(s->observer); free(s->observation); free(s->definition); free(s->storage); free(s->text); }
 static void store_script_store_tag__run_grow(store_script_store_tag *s) {
     size_t c = s->run_cap ? 2 * s->run_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -530,6 +738,542 @@ size_t store_script_store_tag_timer_len(const store_script_store_tag *s) { retur
 size_t store_script_store_tag_timer_count(const store_script_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->timer_len; i++) if (s->timer[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__request_grow(store_script_store_tag *s) {
+    size_t c = s->request_cap ? 2 * s->request_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->request = (script_request *)realloc(s->request, c * sizeof(script_request));
+    if (!s->request) abort();
+    s->request_cap = c;
+}
+script_request_h store_script_store_tag_request_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->request_free) {
+        i = s->request_free;
+        s->request_free = s->request[i].free_next;
+    } else {
+        if (s->request_len == 0) {
+            if (s->request_cap == 0) store_script_store_tag__request_grow(s);
+            memset(&s->request[0], 0, sizeof(script_request));
+            s->request_len = 1;
+        }
+        if (s->request_len == s->request_cap) store_script_store_tag__request_grow(s);
+        i = (uint32_t)s->request_len;
+        s->request_len++;
+        s->request[i].gen = 0;
+    }
+    uint32_t g = s->request[i].gen;
+    memset(&s->request[i], 0, sizeof(script_request));
+    s->request[i].gen = g;
+    s->request[i].live = 1;
+    script_request_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_request_live(const store_script_store_tag *s, script_request_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->request_len && s->request[h.index].live && s->request[h.index].gen == h.gen;
+}
+script_request store_script_store_tag_request_get(const store_script_store_tag *s, script_request_h h) {
+    if (!store_script_store_tag_request_live(s, h)) abort();
+    return s->request[h.index];
+}
+script_request *store_script_store_tag_request_ref(const store_script_store_tag *s, script_request_h h) tie s {
+    if (!store_script_store_tag_request_live(s, h)) abort();
+    return &s->request[h.index];
+}
+script_request *store_script_store_tag_request_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->request_len) abort();
+    return &s->request[i];
+}
+script_request_h store_script_store_tag_request_handle(const store_script_store_tag *s, uint32_t i) {
+    script_request_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->request_len && s->request[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->request[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_request_free(store_script_store_tag *s, script_request_h h) {
+    if (!store_script_store_tag_request_live(s, h)) abort();
+    s->request[h.index].live = 0;
+    s->request[h.index].gen++;
+    s->request[h.index].free_next = s->request_free;
+    s->request_free = h.index;
+}
+size_t store_script_store_tag_request_len(const store_script_store_tag *s) { return s->request_len; }
+size_t store_script_store_tag_request_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->request_len; i++) if (s->request[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__write_grow(store_script_store_tag *s) {
+    size_t c = s->write_cap ? 2 * s->write_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->write = (script_write *)realloc(s->write, c * sizeof(script_write));
+    if (!s->write) abort();
+    s->write_cap = c;
+}
+script_write_h store_script_store_tag_write_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->write_free) {
+        i = s->write_free;
+        s->write_free = s->write[i].free_next;
+    } else {
+        if (s->write_len == 0) {
+            if (s->write_cap == 0) store_script_store_tag__write_grow(s);
+            memset(&s->write[0], 0, sizeof(script_write));
+            s->write_len = 1;
+        }
+        if (s->write_len == s->write_cap) store_script_store_tag__write_grow(s);
+        i = (uint32_t)s->write_len;
+        s->write_len++;
+        s->write[i].gen = 0;
+    }
+    uint32_t g = s->write[i].gen;
+    memset(&s->write[i], 0, sizeof(script_write));
+    s->write[i].gen = g;
+    s->write[i].live = 1;
+    script_write_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_write_live(const store_script_store_tag *s, script_write_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->write_len && s->write[h.index].live && s->write[h.index].gen == h.gen;
+}
+script_write store_script_store_tag_write_get(const store_script_store_tag *s, script_write_h h) {
+    if (!store_script_store_tag_write_live(s, h)) abort();
+    return s->write[h.index];
+}
+script_write *store_script_store_tag_write_ref(const store_script_store_tag *s, script_write_h h) tie s {
+    if (!store_script_store_tag_write_live(s, h)) abort();
+    return &s->write[h.index];
+}
+script_write *store_script_store_tag_write_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->write_len) abort();
+    return &s->write[i];
+}
+script_write_h store_script_store_tag_write_handle(const store_script_store_tag *s, uint32_t i) {
+    script_write_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->write_len && s->write[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->write[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_write_free(store_script_store_tag *s, script_write_h h) {
+    if (!store_script_store_tag_write_live(s, h)) abort();
+    s->write[h.index].live = 0;
+    s->write[h.index].gen++;
+    s->write[h.index].free_next = s->write_free;
+    s->write_free = h.index;
+}
+size_t store_script_store_tag_write_len(const store_script_store_tag *s) { return s->write_len; }
+size_t store_script_store_tag_write_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->write_len; i++) if (s->write[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__navigation_grow(store_script_store_tag *s) {
+    size_t c = s->navigation_cap ? 2 * s->navigation_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->navigation = (script_navigation *)realloc(s->navigation, c * sizeof(script_navigation));
+    if (!s->navigation) abort();
+    s->navigation_cap = c;
+}
+script_navigation_h store_script_store_tag_navigation_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->navigation_free) {
+        i = s->navigation_free;
+        s->navigation_free = s->navigation[i].free_next;
+    } else {
+        if (s->navigation_len == 0) {
+            if (s->navigation_cap == 0) store_script_store_tag__navigation_grow(s);
+            memset(&s->navigation[0], 0, sizeof(script_navigation));
+            s->navigation_len = 1;
+        }
+        if (s->navigation_len == s->navigation_cap) store_script_store_tag__navigation_grow(s);
+        i = (uint32_t)s->navigation_len;
+        s->navigation_len++;
+        s->navigation[i].gen = 0;
+    }
+    uint32_t g = s->navigation[i].gen;
+    memset(&s->navigation[i], 0, sizeof(script_navigation));
+    s->navigation[i].gen = g;
+    s->navigation[i].live = 1;
+    script_navigation_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_navigation_live(const store_script_store_tag *s, script_navigation_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->navigation_len && s->navigation[h.index].live && s->navigation[h.index].gen == h.gen;
+}
+script_navigation store_script_store_tag_navigation_get(const store_script_store_tag *s, script_navigation_h h) {
+    if (!store_script_store_tag_navigation_live(s, h)) abort();
+    return s->navigation[h.index];
+}
+script_navigation *store_script_store_tag_navigation_ref(const store_script_store_tag *s, script_navigation_h h) tie s {
+    if (!store_script_store_tag_navigation_live(s, h)) abort();
+    return &s->navigation[h.index];
+}
+script_navigation *store_script_store_tag_navigation_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->navigation_len) abort();
+    return &s->navigation[i];
+}
+script_navigation_h store_script_store_tag_navigation_handle(const store_script_store_tag *s, uint32_t i) {
+    script_navigation_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->navigation_len && s->navigation[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->navigation[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_navigation_free(store_script_store_tag *s, script_navigation_h h) {
+    if (!store_script_store_tag_navigation_live(s, h)) abort();
+    s->navigation[h.index].live = 0;
+    s->navigation[h.index].gen++;
+    s->navigation[h.index].free_next = s->navigation_free;
+    s->navigation_free = h.index;
+}
+size_t store_script_store_tag_navigation_len(const store_script_store_tag *s) { return s->navigation_len; }
+size_t store_script_store_tag_navigation_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->navigation_len; i++) if (s->navigation[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__form_field_grow(store_script_store_tag *s) {
+    size_t c = s->form_field_cap ? 2 * s->form_field_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->form_field = (script_form_field *)realloc(s->form_field, c * sizeof(script_form_field));
+    if (!s->form_field) abort();
+    s->form_field_cap = c;
+}
+script_form_field_h store_script_store_tag_form_field_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->form_field_free) {
+        i = s->form_field_free;
+        s->form_field_free = s->form_field[i].free_next;
+    } else {
+        if (s->form_field_len == 0) {
+            if (s->form_field_cap == 0) store_script_store_tag__form_field_grow(s);
+            memset(&s->form_field[0], 0, sizeof(script_form_field));
+            s->form_field_len = 1;
+        }
+        if (s->form_field_len == s->form_field_cap) store_script_store_tag__form_field_grow(s);
+        i = (uint32_t)s->form_field_len;
+        s->form_field_len++;
+        s->form_field[i].gen = 0;
+    }
+    uint32_t g = s->form_field[i].gen;
+    memset(&s->form_field[i], 0, sizeof(script_form_field));
+    s->form_field[i].gen = g;
+    s->form_field[i].live = 1;
+    script_form_field_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_form_field_live(const store_script_store_tag *s, script_form_field_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->form_field_len && s->form_field[h.index].live && s->form_field[h.index].gen == h.gen;
+}
+script_form_field store_script_store_tag_form_field_get(const store_script_store_tag *s, script_form_field_h h) {
+    if (!store_script_store_tag_form_field_live(s, h)) abort();
+    return s->form_field[h.index];
+}
+script_form_field *store_script_store_tag_form_field_ref(const store_script_store_tag *s, script_form_field_h h) tie s {
+    if (!store_script_store_tag_form_field_live(s, h)) abort();
+    return &s->form_field[h.index];
+}
+script_form_field *store_script_store_tag_form_field_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->form_field_len) abort();
+    return &s->form_field[i];
+}
+script_form_field_h store_script_store_tag_form_field_handle(const store_script_store_tag *s, uint32_t i) {
+    script_form_field_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->form_field_len && s->form_field[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->form_field[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_form_field_free(store_script_store_tag *s, script_form_field_h h) {
+    if (!store_script_store_tag_form_field_live(s, h)) abort();
+    s->form_field[h.index].live = 0;
+    s->form_field[h.index].gen++;
+    s->form_field[h.index].free_next = s->form_field_free;
+    s->form_field_free = h.index;
+}
+size_t store_script_store_tag_form_field_len(const store_script_store_tag *s) { return s->form_field_len; }
+size_t store_script_store_tag_form_field_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->form_field_len; i++) if (s->form_field[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__observer_grow(store_script_store_tag *s) {
+    size_t c = s->observer_cap ? 2 * s->observer_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->observer = (script_observer *)realloc(s->observer, c * sizeof(script_observer));
+    if (!s->observer) abort();
+    s->observer_cap = c;
+}
+script_observer_h store_script_store_tag_observer_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->observer_free) {
+        i = s->observer_free;
+        s->observer_free = s->observer[i].free_next;
+    } else {
+        if (s->observer_len == 0) {
+            if (s->observer_cap == 0) store_script_store_tag__observer_grow(s);
+            memset(&s->observer[0], 0, sizeof(script_observer));
+            s->observer_len = 1;
+        }
+        if (s->observer_len == s->observer_cap) store_script_store_tag__observer_grow(s);
+        i = (uint32_t)s->observer_len;
+        s->observer_len++;
+        s->observer[i].gen = 0;
+    }
+    uint32_t g = s->observer[i].gen;
+    memset(&s->observer[i], 0, sizeof(script_observer));
+    s->observer[i].gen = g;
+    s->observer[i].live = 1;
+    script_observer_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_observer_live(const store_script_store_tag *s, script_observer_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->observer_len && s->observer[h.index].live && s->observer[h.index].gen == h.gen;
+}
+script_observer store_script_store_tag_observer_get(const store_script_store_tag *s, script_observer_h h) {
+    if (!store_script_store_tag_observer_live(s, h)) abort();
+    return s->observer[h.index];
+}
+script_observer *store_script_store_tag_observer_ref(const store_script_store_tag *s, script_observer_h h) tie s {
+    if (!store_script_store_tag_observer_live(s, h)) abort();
+    return &s->observer[h.index];
+}
+script_observer *store_script_store_tag_observer_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->observer_len) abort();
+    return &s->observer[i];
+}
+script_observer_h store_script_store_tag_observer_handle(const store_script_store_tag *s, uint32_t i) {
+    script_observer_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->observer_len && s->observer[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->observer[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_observer_free(store_script_store_tag *s, script_observer_h h) {
+    if (!store_script_store_tag_observer_live(s, h)) abort();
+    s->observer[h.index].live = 0;
+    s->observer[h.index].gen++;
+    s->observer[h.index].free_next = s->observer_free;
+    s->observer_free = h.index;
+}
+size_t store_script_store_tag_observer_len(const store_script_store_tag *s) { return s->observer_len; }
+size_t store_script_store_tag_observer_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->observer_len; i++) if (s->observer[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__observation_grow(store_script_store_tag *s) {
+    size_t c = s->observation_cap ? 2 * s->observation_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->observation = (script_observation *)realloc(s->observation, c * sizeof(script_observation));
+    if (!s->observation) abort();
+    s->observation_cap = c;
+}
+script_observation_h store_script_store_tag_observation_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->observation_free) {
+        i = s->observation_free;
+        s->observation_free = s->observation[i].free_next;
+    } else {
+        if (s->observation_len == 0) {
+            if (s->observation_cap == 0) store_script_store_tag__observation_grow(s);
+            memset(&s->observation[0], 0, sizeof(script_observation));
+            s->observation_len = 1;
+        }
+        if (s->observation_len == s->observation_cap) store_script_store_tag__observation_grow(s);
+        i = (uint32_t)s->observation_len;
+        s->observation_len++;
+        s->observation[i].gen = 0;
+    }
+    uint32_t g = s->observation[i].gen;
+    memset(&s->observation[i], 0, sizeof(script_observation));
+    s->observation[i].gen = g;
+    s->observation[i].live = 1;
+    script_observation_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_observation_live(const store_script_store_tag *s, script_observation_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->observation_len && s->observation[h.index].live && s->observation[h.index].gen == h.gen;
+}
+script_observation store_script_store_tag_observation_get(const store_script_store_tag *s, script_observation_h h) {
+    if (!store_script_store_tag_observation_live(s, h)) abort();
+    return s->observation[h.index];
+}
+script_observation *store_script_store_tag_observation_ref(const store_script_store_tag *s, script_observation_h h) tie s {
+    if (!store_script_store_tag_observation_live(s, h)) abort();
+    return &s->observation[h.index];
+}
+script_observation *store_script_store_tag_observation_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->observation_len) abort();
+    return &s->observation[i];
+}
+script_observation_h store_script_store_tag_observation_handle(const store_script_store_tag *s, uint32_t i) {
+    script_observation_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->observation_len && s->observation[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->observation[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_observation_free(store_script_store_tag *s, script_observation_h h) {
+    if (!store_script_store_tag_observation_live(s, h)) abort();
+    s->observation[h.index].live = 0;
+    s->observation[h.index].gen++;
+    s->observation[h.index].free_next = s->observation_free;
+    s->observation_free = h.index;
+}
+size_t store_script_store_tag_observation_len(const store_script_store_tag *s) { return s->observation_len; }
+size_t store_script_store_tag_observation_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->observation_len; i++) if (s->observation[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__definition_grow(store_script_store_tag *s) {
+    size_t c = s->definition_cap ? 2 * s->definition_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->definition = (script_definition *)realloc(s->definition, c * sizeof(script_definition));
+    if (!s->definition) abort();
+    s->definition_cap = c;
+}
+script_definition_h store_script_store_tag_definition_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->definition_free) {
+        i = s->definition_free;
+        s->definition_free = s->definition[i].free_next;
+    } else {
+        if (s->definition_len == 0) {
+            if (s->definition_cap == 0) store_script_store_tag__definition_grow(s);
+            memset(&s->definition[0], 0, sizeof(script_definition));
+            s->definition_len = 1;
+        }
+        if (s->definition_len == s->definition_cap) store_script_store_tag__definition_grow(s);
+        i = (uint32_t)s->definition_len;
+        s->definition_len++;
+        s->definition[i].gen = 0;
+    }
+    uint32_t g = s->definition[i].gen;
+    memset(&s->definition[i], 0, sizeof(script_definition));
+    s->definition[i].gen = g;
+    s->definition[i].live = 1;
+    script_definition_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_definition_live(const store_script_store_tag *s, script_definition_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->definition_len && s->definition[h.index].live && s->definition[h.index].gen == h.gen;
+}
+script_definition store_script_store_tag_definition_get(const store_script_store_tag *s, script_definition_h h) {
+    if (!store_script_store_tag_definition_live(s, h)) abort();
+    return s->definition[h.index];
+}
+script_definition *store_script_store_tag_definition_ref(const store_script_store_tag *s, script_definition_h h) tie s {
+    if (!store_script_store_tag_definition_live(s, h)) abort();
+    return &s->definition[h.index];
+}
+script_definition *store_script_store_tag_definition_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->definition_len) abort();
+    return &s->definition[i];
+}
+script_definition_h store_script_store_tag_definition_handle(const store_script_store_tag *s, uint32_t i) {
+    script_definition_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->definition_len && s->definition[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->definition[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_definition_free(store_script_store_tag *s, script_definition_h h) {
+    if (!store_script_store_tag_definition_live(s, h)) abort();
+    s->definition[h.index].live = 0;
+    s->definition[h.index].gen++;
+    s->definition[h.index].free_next = s->definition_free;
+    s->definition_free = h.index;
+}
+size_t store_script_store_tag_definition_len(const store_script_store_tag *s) { return s->definition_len; }
+size_t store_script_store_tag_definition_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->definition_len; i++) if (s->definition[i].live) n++;
+    return n;
+}
+static void store_script_store_tag__storage_grow(store_script_store_tag *s) {
+    size_t c = s->storage_cap ? 2 * s->storage_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->storage = (script_storage *)realloc(s->storage, c * sizeof(script_storage));
+    if (!s->storage) abort();
+    s->storage_cap = c;
+}
+script_storage_h store_script_store_tag_storage_new(store_script_store_tag *s) {
+    uint32_t i;
+    if (s->storage_free) {
+        i = s->storage_free;
+        s->storage_free = s->storage[i].free_next;
+    } else {
+        if (s->storage_len == 0) {
+            if (s->storage_cap == 0) store_script_store_tag__storage_grow(s);
+            memset(&s->storage[0], 0, sizeof(script_storage));
+            s->storage_len = 1;
+        }
+        if (s->storage_len == s->storage_cap) store_script_store_tag__storage_grow(s);
+        i = (uint32_t)s->storage_len;
+        s->storage_len++;
+        s->storage[i].gen = 0;
+    }
+    uint32_t g = s->storage[i].gen;
+    memset(&s->storage[i], 0, sizeof(script_storage));
+    s->storage[i].gen = g;
+    s->storage[i].live = 1;
+    script_storage_h h = { s->id, i, g };
+    return h;
+}
+int store_script_store_tag_storage_live(const store_script_store_tag *s, script_storage_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->storage_len && s->storage[h.index].live && s->storage[h.index].gen == h.gen;
+}
+script_storage store_script_store_tag_storage_get(const store_script_store_tag *s, script_storage_h h) {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    return s->storage[h.index];
+}
+script_storage *store_script_store_tag_storage_ref(const store_script_store_tag *s, script_storage_h h) tie s {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    return &s->storage[h.index];
+}
+script_storage *store_script_store_tag_storage_slot(const store_script_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->storage_len) abort();
+    return &s->storage[i];
+}
+script_storage_h store_script_store_tag_storage_handle(const store_script_store_tag *s, uint32_t i) {
+    script_storage_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->storage_len && s->storage[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->storage[i].gen;
+    }
+    return h;
+}
+void store_script_store_tag_storage_free(store_script_store_tag *s, script_storage_h h) {
+    if (!store_script_store_tag_storage_live(s, h)) abort();
+    s->storage[h.index].live = 0;
+    s->storage[h.index].gen++;
+    s->storage[h.index].free_next = s->storage_free;
+    s->storage_free = h.index;
+}
+size_t store_script_store_tag_storage_len(const store_script_store_tag *s) { return s->storage_len; }
+size_t store_script_store_tag_storage_count(const store_script_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->storage_len; i++) if (s->storage[i].live) n++;
     return n;
 }
 static void store_script_store_tag__text_room(store_script_store_tag *s, size_t n) {

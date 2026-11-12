@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><title>events</title>
+<!-- A user's pointer, focus and keys (src/script/input.c): each event a capturing listener on
+     the window sees, a console line each, in Chromium's order (tests/pages/events.chromium,
+     the actions in tests/integ/script-input.sh). Every box's size is declared, the first one's
+     top margin collapsing through the body so that the pointer's first place is on the root. -->
+<style>
+body { margin: 0; }
+#b { display: block; margin: 20px 0 0 10px; width: 100px; height: 40px; padding: 0; border: 0; }
+#in { display: block; width: 100px; height: 40px; }
+#t { display: block; margin: 20px 0 0 0; width: 200px; height: 20px; padding: 0; border: 0; }
+#l { display: block; width: 50px; height: 20px; }
+#d { width: 60px; height: 30px; }
+#r { display: block; width: 80px; height: 20px; padding: 0; border: 0; }
+</style>
+</head>
+<body>
+<button id="b"><span id="in">press</span></button>
+<input id="t" name="who">
+<a id="l" href="#frag">link</a>
+<div id="d" tabindex="0">div</div>
+<button id="r">report</button>
+<script>
+  function rec(e) {
+    var s = e.type + '@' + (e.target.id || e.target.nodeName);
+    if (e instanceof MouseEvent) s += '(' + e.clientX + ',' + e.clientY + ' b' + e.button + '/' + e.buttons + ' d' + e.detail + (e.relatedTarget ? ' r' + (e.relatedTarget.id || e.relatedTarget.nodeName) : '') + ')';
+    if (e instanceof KeyboardEvent) s += '(' + JSON.stringify(e.key) + ' ' + e.code + ' ' + e.keyCode + ' ' + e.charCode + ' ' + e.which + (e.shiftKey ? ' shift' : '') + (e.repeat ? ' repeat' : '') + ')';
+    if (e instanceof FocusEvent) s += '(' + (e.relatedTarget ? e.relatedTarget.id : 'none') + ')';
+    if (e.type === 'input' || e.type === 'beforeinput') s += '(' + JSON.stringify(e.data) + ' ' + e.inputType + ' ' + JSON.stringify(e.target.value) + ')';
+    if (e.type === 'change') s += '(' + JSON.stringify(e.target.value) + ')';
+    s += ' ' + (e.isTrusted ? 'trusted' : 'untrusted') + (e.cancelable ? ' cancelable' : '') + (e.composed ? ' composed' : '');
+    console.log(s);
+  }
+  ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick',
+   'pointerout', 'pointerleave', 'mouseout', 'mouseleave', 'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'change', 'focus', 'blur', 'focusin', 'focusout', 'submit'].forEach(function (t) {
+    window.addEventListener(t, rec, true);
+  });
+  window.addEventListener('hashchange', function (e) { console.log('hashchange ' + location.hash + ' ' + e.newURL.slice(-5)); });
+  document.getElementById('d').addEventListener('keydown', function (e) { if (e.key === 'x') e.preventDefault(); });
+  document.getElementById('r').addEventListener('click', function () {
+    var a = document.activeElement;
+    console.log('active: ' + (a.id || a.nodeName) + ' value: ' + JSON.stringify(document.getElementById('t').value) + ' hash: ' + location.hash + ' focus: ' + document.hasFocus());
+    document.getElementById('t').focus();
+    console.log('after focus(): ' + document.activeElement.id);
+    document.getElementById('t').blur();
+    console.log('after blur(): ' + document.activeElement.nodeName);
+  });
+</script>
+</body></html>

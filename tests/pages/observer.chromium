@@ -1,0 +1,85 @@
+-- appendChild, insertBefore, removeChild, remove
+all: 4
+  childList root +[n] -[] p=c n=null old=null
+  childList root +[m] -[] p=a n=b old=null
+  childList root +[] -[a] p=null n=m old=null
+  childList root +[] -[c] p=b n=n old=null
+upper: 4
+  childList root +[n] -[] p=c n=null old=null
+  childList root +[m] -[] p=a n=b old=null
+  childList root +[] -[a] p=null n=m old=null
+  childList root +[] -[c] p=b n=n old=null
+-- append and prepend of many, replaceChildren, before, after
+all: 5
+  childList root +[x,"text",y] -[] p=n n=null old=null
+  childList root +[HR] -[] p=null n=m old=null
+  childList root +[a,c] -[HR,m,b,n,x,"text",y] p=null n=null old=null
+  childList root +[b] -[] p=a n=c old=null
+  childList root +[#comment] -[] p=b n=c old=null
+upper: 5
+  childList root +[x,"text",y] -[] p=n n=null old=null
+  childList root +[HR] -[] p=null n=m old=null
+  childList root +[a,c] -[HR,m,b,n,x,"text",y] p=null n=null old=null
+  childList root +[b] -[] p=a n=c old=null
+  childList root +[#comment] -[] p=b n=c old=null
+-- textContent, innerHTML, replaceChild, a move between parents, one in place
+all: 6
+  childList b +["TWO"] -["two"] p=null n=null old=null
+  childList root +[a2,b2] -[a,b,#comment,c] p=null n=null old=null
+  childList root +[q] -[a2] p=null n=b2 old=null
+  childList root +[s] -[] p=b2 n=null old=null
+  childList root +[] -[s] p=b2 n=null old=null
+  childList root +[s] -[] p=b2 n=null old=null
+upper: 5
+  childList root +[a2,b2] -[a,b,#comment,c] p=null n=null old=null
+  childList root +[q] -[a2] p=null n=b2 old=null
+  childList root +[s] -[] p=b2 n=null old=null
+  childList root +[] -[s] p=b2 n=null old=null
+  childList root +[s] -[] p=b2 n=null old=null
+-- attributes, with old values
+all: 10
+  attributes q2 a=title ns=null old=null
+  attributes q2 a=title ns=null old="first"
+  attributes q2 a=title ns=null old="second"
+  attributes q2 a=id ns=null old="q"
+  attributes q2 a=class ns=null old=null
+  attributes q2 a=class ns=null old="k"
+  attributes q2 a=hidden ns=null old=null
+  attributes q2 a=data-foo-bar ns=null old=null
+  attributes q2 a=style ns=null old=null
+  attributes q2 a=href ns=http://www.w3.org/1999/xlink old=null
+-- character data, with old values
+all: 4
+  characterData "B3!" a=null ns=null old="B"
+  characterData "B3!" a=null ns=null old="B1"
+  characterData "B3!" a=null ns=null old="B2"
+  characterData "B3!" a=null ns=null old="B3"
+-- an attributeFilter, observe() again, takeRecords, disconnect
+taken: 4 attributes q2 a=title ns=null old=null | attributes q2 a=dir ns=null old=null | attributes q2 a=lang ns=null old=null | attributes q2 a=dir ns=null old="rtl"
+all: 1
+  childList root +[BR] -[] p=s n=null old=null
+filter: 3
+  attributes q2 a=title ns=null old=null
+  attributes q2 a=lang ns=null old=null
+  attributes q2 a=dir ns=null old="rtl"
+-- a removed subtree still observed until the notification
+all: 3
+  childList root +[] -[b2] p=q2 n=s old=null
+  attributes b2 a=title ns=null old=null
+  childList b2 +[EM] -[] p="B3!" n=null old=null
+a microtask after the notification
+-- the notification among the microtasks, and observers in their order
+a promise queued before the change
+first 2 true
+second 2
+a promise queued after the change
+-- observe() refused, and the records' interfaces
+TypeError: Failed to execute 'observe' on 'MutationObserver': The options object must set at least one of 'attributes', 'characterData', or 'childList' to true.
+TypeError: Failed to execute 'observe' on 'MutationObserver': The options object may only set 'attributeOldValue' to true when 'attributes' is true or not present.
+TypeError: Failed to execute 'observe' on 'MutationObserver': The options object may only set 'attributeFilter' when 'attributes' is true or not present.
+TypeError: Failed to execute 'observe' on 'MutationObserver': The options object may only set 'characterDataOldValue' to true when 'characterData' is true or not present.
+TypeError: Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.
+TypeError: Failed to construct 'MutationObserver': parameter 1 is not of type 'Function'.
+function true attributes null true 0
+all: 1
+  attributes root a=lang ns=null old=null

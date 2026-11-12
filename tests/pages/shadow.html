@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>shadow trees</title>
+<!-- Shadow trees (src/script/custom.c, the DOM's attach_shadow): attachShadow's checks,
+     open and closed roots, host and mode, a root's own tree (innerHTML, getElementById,
+     querySelector, what the document's queries do not see), named and default slots and
+     their assigned nodes (flattened, a slot's fallback), assignedSlot, a slot attribute
+     changed; events: the target retargeted for listeners outside the tree, composedPath,
+     a slotted node's path through its slot, an event not composed staying inside. A
+     console line each, against Chromium's (tests/pages/shadow.chromium). -->
+</head>
+<body>
+<div id="host"><span id="lightA" slot="a">A</span><b id="lightB">B</b>text<i id="lightC" slot="c">C</i></div>
+<p id="closedHost">closed</p>
+<script>
+  function who(n) { return n === null ? 'null' : n === window ? 'window' : n === document ? 'document' : n.nodeType === 11 ? '#root' : n.nodeType === 3 ? JSON.stringify(n.data) : (n.id || n.localName); }
+  function list(ns) { return '[' + Array.from(ns).map(who).join(',') + ']'; }
+  var host = document.getElementById('host');
+  var root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = '<div id="wrap"><slot name="a" id="slotA"></slot><slot id="slotDefault"></slot><slot name="none" id="slotNone"><em id="fallback">fb</em></slot></div><button id="inner">go</button>';
+  console.log('-- the root');
+  console.log((host.shadowRoot === root) + ' ' + (root.host === host) + ' ' + root.mode + ' ' + root.nodeType + ' ' + root.nodeName + ' ' + (root instanceof ShadowRoot));
+  console.log('innerHTML: ' + root.innerHTML.length + ' first: ' + who(root.firstChild) + ' parent of wrap: ' + who(root.getElementById('wrap').parentNode));
+  console.log('getElementById: ' + who(root.getElementById('inner')) + ' document sees: ' + document.getElementById('inner') + ' ' + document.querySelectorAll('slot').length);
+  console.log('querySelector: ' + who(root.querySelector('slot[name=a]')) + ' contains: ' + host.contains(root.getElementById('inner')));
+  var closedHost = document.getElementById('closedHost');
+  var croot = closedHost.attachShadow({ mode: 'closed' });
+  croot.innerHTML = '<span id="secret">s</span><slot></slot>';
+  console.log('closed: ' + closedHost.shadowRoot + ' ' + croot.mode + ' ' + (croot.host === closedHost));
+  console.log('-- attachShadow refused');
+  [[host, { mode: 'open' }], [document.createElement('input'), { mode: 'open' }], [document.createElement('div'), {}], [document.createElement('div'), { mode: 'shut' }]].forEach(function (a) {
+    try { a[0].attachShadow(a[1]); console.log('attached'); } catch (e) { console.log(e.name + ': ' + e.message); }
+  });
+  console.log('-- slots');
+  var slotA = root.getElementById('slotA'), slotDefault = root.getElementById('slotDefault'), slotNone = root.getElementById('slotNone');
+  console.log('a: ' + list(slotA.assignedNodes()) + ' default: ' + list(slotDefault.assignedNodes()) + ' elements: ' + list(slotDefault.assignedElements()));
+  console.log('none: ' + list(slotNone.assignedNodes()) + ' flattened: ' + list(slotNone.assignedNodes({ flatten: true })));
+  console.log('assignedSlot: ' + who(document.getElementById('lightA').assignedSlot) + ' ' + who(document.getElementById('lightB').assignedSlot) + ' ' + who(document.getElementById('lightC').assignedSlot));
+  document.getElementById('lightC').setAttribute('slot', 'none');
+  console.log('after the slot attribute: ' + list(slotNone.assignedNodes()) + ' ' + list(slotNone.assignedNodes({ flatten: true })));
+  console.log('in the closed tree: ' + closedHost.firstChild.assignedSlot);
+  console.log('-- events');
+  function rec(where) { return function (e) { console.log(where + ': ' + e.type + ' target ' + who(e.target) + ' current ' + who(e.currentTarget) + ' path ' + list(e.composedPath())); }; }
+  root.getElementById('inner').addEventListener('click', rec('inner'));
+  root.addEventListener('click', rec('root'));
+  host.addEventListener('click', rec('host'));
+  document.body.addEventListener('click', rec('body'));
+  root.getElementById('inner').click();
+  document.getElementById('lightA').addEventListener('ping', rec('lightA'));
+  slotA.addEventListener('ping', rec('slotA'));
+  host.addEventListener('ping', rec('host'));
+  document.getElementById('lightA').dispatchEvent(new Event('ping', { bubbles: true }));
+  root.getElementById('wrap').addEventListener('local', rec('wrap'));
+  host.addEventListener('local', rec('host'));
+  root.getElementById('inner').dispatchEvent(new Event('local', { bubbles: true }));
+  root.getElementById('inner').dispatchEvent(new Event('local', { bubbles: true, composed: true }));
+  var ev = new Event('after', { bubbles: true, composed: true });
+  root.getElementById('inner').dispatchEvent(ev);
+  console.log('after the dispatch: ' + who(ev.target) + ' ' + ev.composedPath().length);
+</script>
+</body></html>

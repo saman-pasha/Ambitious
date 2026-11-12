@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Inserted scripts and document.write</title>
+<script>var log = []; function p(name, v) { console.log(name + ': ' + v); }</script>
+<script defer src="inserted-defer.js"></script>
+</head>
+<body>
+<p id="first">first</p>
+<script>
+  p('parsing', document.readyState + ' ' + (document.currentScript && document.currentScript.tagName));
+  document.write('<p id="w1">written <b>bold</b></p>');
+  p('written at once', document.getElementById('w1').textContent + ' ' + document.getElementById('w1').previousElementSibling.tagName);
+  document.write('<ul><li>a');
+  document.writeln('</li><li>b</li></ul>');
+  document.write('<script>p("a written script", document.currentScript.parentNode.tagName + " " + (document.getElementById("w1") !== null));<\/script>');
+  p('before the written script', 'runs first');
+  document.write('<script src="inserted-written.js"><\/script>');
+  p('a written external script', 'waits for its writer: ' + log.join(','));
+</script>
+<p id="after">after</p>
+<script>
+  p('the written nodes', Array.prototype.map.call(document.body.children, function (e) { return e.tagName + (e.id ? '#' + e.id : ''); }).join(' '));
+  p('the list', document.querySelectorAll('li').length + ' ' + JSON.stringify(document.querySelector('ul').textContent));
+
+  var s = document.createElement('script');
+  s.textContent = 'p("an inserted inline script", "runs at its insertion"); log.push("inline");';
+  document.body.appendChild(s);
+  p('after its insertion', log.join(','));
+  var e = document.createElement('script');
+  e.src = 'inserted-external.js';
+  e.onload = function () {
+    p('its load event', 'after it ran: ' + log.join(','));
+    var bad = document.createElement('script');
+    bad.src = 'inserted-missing.js';
+    bad.onerror = function (ev) { p('a missing script', ev.type + ' ' + log.join(',')); };
+    document.head.appendChild(bad);
+  };
+  document.head.appendChild(e);
+  p('an inserted external script', 'not yet run: ' + log.join(','));
+  var empty = document.createElement('script');
+  document.body.appendChild(empty);
+  empty.textContent = 'log.push("filled after its insertion");';
+  p('an empty script given its text', log.join(','));
+  var div = document.createElement('div');
+  div.innerHTML = '<script>log.push("innerHTML");<\/script>';
+  document.body.appendChild(div);
+  p('innerHTML\'s script', log.join(',') + ' ' + div.querySelectorAll('script').length);
+  var moved = div.firstChild;
+  document.body.appendChild(moved);
+  p('moved', log.join(','));
+  var again = s.cloneNode(true);
+  document.body.appendChild(again);
+  p('a clone of a script that ran', log.join(','));
+  var text = document.createElement('script');
+  text.type = 'text/plain';
+  text.textContent = 'log.push("text/plain");';
+  document.body.appendChild(text);
+  p('a data block', log.join(','));
+  var frag = document.createElement('div');
+  var inner = document.createElement('script');
+  inner.textContent = 'log.push("in a subtree");';
+  frag.appendChild(inner);
+  p('in a detached subtree', log.join(','));
+  document.body.appendChild(frag);
+  p('connected with its subtree', log.join(','));
+  document.addEventListener('DOMContentLoaded', function () { p('DOMContentLoaded', log.join(',')); });
+  window.addEventListener('load', function () {
+    p('load', log.join(','));
+    setTimeout(function () {
+      document.write('<p id="new">a new document</p>');
+      document.close();
+      console.log('after the write: ' + document.body.innerHTML + ' ' + document.getElementById('first') + ' ' + document.readyState);
+    }, 10);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+-- the fetch page's console, against Chromium's:
+the same 49 lines
+-- its requests that did not end well, as the reasoner has them:
+Q = sq(1,4,0), A = fetch, M = 'GET', U = 'http://127.0.0.1:PORT/status/404', O = http_error
+Q = sq(1,5,0), A = fetch, M = 'GET', U = 'http://127.0.0.1:PORT/status/500', O = http_error
+Q = sq(1,7,0), A = fetch, M = 'GET', U = 'http://localhost:PORT/fetch-data.json', O = blocked
+Q = sq(1,8,0), A = fetch, M = 'GET', U = 'http://127.0.0.1:PORT/cross/fetch-data.json', O = blocked
+Q = sq(1,9,0), A = fetch, M = 'GET', U = 'http://localhost:PORT/fetch-data.json', O = opaque
+Q = sq(1,10,0), A = fetch, M = 'GET', U = 'http://localhost:PORT/fetch-data.json', O = blocked
+Q = sq(1,20,0), A = xhr, M = 'GET', U = 'http://127.0.0.1:PORT/status/404', O = http_error
+Q = sq(1,21,0), A = xhr, M = 'GET', U = 'http://localhost:PORT/fetch-text.txt', O = blocked
+Q = sq(1,23,0), A = xhr, M = 'GET', U = 'http://127.0.0.1:PORT/fetch-text.txt', O = aborted
+F = 15, X = 8, C = 5
+-- what the server was sent:
+POST /echo/post?q=1 | a=1&b=two
+POST /echo/text | plain
+POST /echo/xhr | a,b\n1,2
+PUT /echo/put | {"n":1}
+-- what the reasoner says of them:
+amb_diag(request_blocked, sq(1,10,0), 'the script #1 (inline) asked for http://localhost:PORT/fetch-data.json, which was blocked: another origin answers a script only with CORS\'s Access-Control-Allow-Origin, and a page may not read a file: URL').
+amb_diag(request_blocked, sq(1,21,0), 'the script #1 (inline) asked for http://localhost:PORT/fetch-text.txt, which was blocked: another origin answers a script only with CORS\'s Access-Control-Allow-Origin, and a page may not read a file: URL').
+amb_diag(request_blocked, sq(1,7,0), 'the script #1 (inline) asked for http://localhost:PORT/fetch-data.json, which was blocked: another origin answers a script only with CORS\'s Access-Control-Allow-Origin, and a page may not read a file: URL').
+amb_diag(request_blocked, sq(1,8,0), 'the script #1 (inline) asked for http://127.0.0.1:PORT/cross/fetch-data.json, which was blocked: another origin answers a script only with CORS\'s Access-Control-Allow-Origin, and a page may not read a file: URL').
+amb_diag(request_failed, sq(1,20,0), 'the script #1 (inline) asked for http://127.0.0.1:PORT/status/404 and had no good answer: http_error (status 404)').
+amb_diag(request_failed, sq(1,4,0), 'the script #1 (inline) asked for http://127.0.0.1:PORT/status/404 and had no good answer: http_error (status 404)').
+amb_diag(request_failed, sq(1,5,0), 'the script #1 (inline) asked for http://127.0.0.1:PORT/status/500 and had no good answer: http_error (status 500)').
+-- the inserted page's console, against Chromium's:
+the same 26 lines
+-- the inserted-order page's console, against Chromium's:
+the same 4 lines
+-- the write-async page's console, against Chromium's:
+the same 2 lines
+-- the written page's document, against Chromium's:
+the same 1308 bytes
+-- the scripts inserted and written, and the writes:
+R = sr(1,3,0), How = written, S = inline, O = ran
+R = sr(1,4,0), How = written, S = external, O = ran
+R = sr(1,6,0), How = inserted, S = inline, O = ran
+R = sr(1,7,0), How = inserted, S = inline, O = ran
+R = sr(1,8,0), How = inserted, S = inline, O = ran
+R = sr(1,10,0), How = inserted, S = external, O = ran
+R = sr(1,11,0), How = inserted, S = external, O = not_fetched
+W = sw(1,1,0), R = sr(1,2,0), When = parsing, Bytes = 34
+W = sw(1,2,0), R = sr(1,2,0), When = parsing, Bytes = 9
+W = sw(1,3,0), R = sr(1,2,0), When = parsing, Bytes = 21
+W = sw(1,4,0), R = sr(1,2,0), When = parsing, Bytes = 131
+W = sw(1,5,0), R = sr(1,2,0), When = parsing, Bytes = 43
+W = sw(1,6,0), R = sr(1,5,0), When = after_load, Bytes = 30
+W = sw(1,1,0), R = sr(1,2,0), When = ignored, Bytes = 27
+-- what the reasoner says of them:
+amb_diag(script_failed, sr(1,11,0), 'the script file://ROOT/tests/pages/inserted-missing.js did not run to its end: not_fetched').
+amb_diag(write_replaced, sr(1,5,0), 'the script #5 (inline) called document.write after the page loaded: a new document replaced the whole page').
+amb_diag(write_ignored, sr(1,2,0), 'the script file://ROOT/tests/pages/write-async.js was loaded asynchronously, so its document.write was ignored').

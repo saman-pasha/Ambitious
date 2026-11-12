@@ -1,0 +1,26 @@
+parsing: loading SCRIPT
+written at once: written bold SCRIPT
+a written script: BODY true
+before the written script: runs first
+a written external script: waits for its writer: 
+the written external script: runs after its writer: 
+the written nodes: P#first SCRIPT P#w1 UL SCRIPT SCRIPT P#after SCRIPT
+the list: 2 "ab"
+an inserted inline script: runs at its insertion
+after its insertion: written,inline
+an inserted external script: not yet run: written,inline
+an empty script given its text: written,inline,filled after its insertion
+innerHTML's script: written,inline,filled after its insertion 1
+moved: written,inline,filled after its insertion
+a clone of a script that ran: written,inline,filled after its insertion
+a data block: written,inline,filled after its insertion
+in a detached subtree: written,inline,filled after its insertion
+connected with its subtree: written,inline,filled after its insertion,in a subtree
+the defer script: interactive written,inline,filled after its insertion,in a subtree
+DOMContentLoaded: written,inline,filled after its insertion,in a subtree,defer
+the inserted external script: runs: written,inline,filled after its insertion,in a subtree,defer inserted-external.js
+its load event: after it ran: written,inline,filled after its insertion,in a subtree,defer,external
+Failed to load resource: net::ERR_FILE_NOT_FOUND
+a missing script: error written,inline,filled after its insertion,in a subtree,defer,external
+load: written,inline,filled after its insertion,in a subtree,defer,external
+after the write: <p id="new">a new document</p> null complete

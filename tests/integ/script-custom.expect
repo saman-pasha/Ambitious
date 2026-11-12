@@ -1,0 +1,14 @@
+-- the custom page's console, against Chromium's:
+the same 49 lines
+-- the shadow page's console, against Chromium's:
+the same 27 lines
+-- the definitions: their names, what they observe, the elements upgraded, their callbacks:
+D = sd(1,1,0), Name = 'x-item', R = sr(1,1,0), O = 2, U = 7, C = y, A = y
+D = sd(1,2,0), Name = 'x-fn', R = sr(1,1,0), O = 0, U = 0, C = n, A = n
+D = sd(1,3,0), Name = 'x-bad', R = sr(1,1,0), O = 0, U = 0, C = n, A = n
+-- the shadow roots, each its tree's own:
+H = n(1,14,0), R = n(1,29,0), M = open, Id = host, F = n(1,30,0), E = div
+H = n(1,23,0), R = n(1,38,0), M = closed, Id = closedHost, F = n(1,39,0), E = span
+H = n(1,32,0), R = n(1,33,0), M = open, F = n(1,34,0), Id = shadowed
+-- what the reasoner says of them:
+amb_diag(custom_element_undefined, n(1,17,0), 'the <x-never> element\'s name is a custom element\'s, but no script defines it (customElements.define): it stays an HTMLElement with no behaviour of its own').

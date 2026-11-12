@@ -1,0 +1,106 @@
+pointerover@HTML(0,0 b-1/0 d0) trusted cancelable composed
+mouseover@HTML(0,0 b0/0 d0) trusted cancelable composed
+pointermove@HTML(0,0 b-1/0 d0) trusted cancelable composed
+mousemove@HTML(0,0 b0/0 d0) trusted cancelable composed
+pointerout@HTML(60,40 b-1/0 d0 rin) trusted cancelable composed
+pointerover@in(60,40 b-1/0 d0 rHTML) trusted cancelable composed
+mouseout@HTML(60,40 b0/0 d0 rin) trusted cancelable composed
+mouseover@in(60,40 b0/0 d0 rHTML) trusted cancelable composed
+pointermove@in(60,40 b-1/0 d0) trusted cancelable composed
+mousemove@in(60,40 b0/0 d0) trusted cancelable composed
+pointerdown@in(60,40 b0/1 d0) trusted cancelable composed
+mousedown@in(60,40 b0/1 d1) trusted cancelable composed
+focus@b(none) trusted composed
+focusin@b(none) trusted composed
+pointerup@in(60,40 b0/0 d0) trusted cancelable composed
+mouseup@in(60,40 b0/0 d1) trusted cancelable composed
+click@in(60,40 b0/0 d1) trusted cancelable composed
+pointerout@in(100,90 b-1/0 d0 rt) trusted cancelable composed
+pointerover@t(100,90 b-1/0 d0 rin) trusted cancelable composed
+mouseout@in(100,90 b0/0 d0 rt) trusted cancelable composed
+mouseover@t(100,90 b0/0 d0 rin) trusted cancelable composed
+pointermove@t(100,90 b-1/0 d0) trusted cancelable composed
+mousemove@t(100,90 b0/0 d0) trusted cancelable composed
+pointerdown@t(100,90 b0/1 d0) trusted cancelable composed
+mousedown@t(100,90 b0/1 d1) trusted cancelable composed
+blur@b(t) trusted composed
+focusout@b(t) trusted composed
+focus@t(b) trusted composed
+focusin@t(b) trusted composed
+pointerup@t(100,90 b0/0 d0) trusted cancelable composed
+mouseup@t(100,90 b0/0 d1) trusted cancelable composed
+click@t(100,90 b0/0 d1) trusted cancelable composed
+keydown@t("a" KeyA 65 0 65) trusted cancelable composed
+keypress@t("a" KeyA 97 97 97) trusted cancelable composed
+beforeinput@t("a" insertText "") trusted cancelable composed
+input@t("a" insertText "a") trusted composed
+keyup@t("a" KeyA 65 0 65) trusted cancelable composed
+keydown@t("B" KeyB 66 0 66) trusted cancelable composed
+keypress@t("B" KeyB 66 66 66) trusted cancelable composed
+beforeinput@t("B" insertText "a") trusted cancelable composed
+input@t("B" insertText "aB") trusted composed
+keyup@t("B" KeyB 66 0 66) trusted cancelable composed
+keydown@t("Backspace" Backspace 8 0 8) trusted cancelable composed
+beforeinput@t(null deleteContentBackward "aB") trusted cancelable composed
+input@t(null deleteContentBackward "a") trusted composed
+keyup@t("Backspace" Backspace 8 0 8) trusted cancelable composed
+keydown@t("Tab" Tab 9 0 9) trusted cancelable composed
+change@t("a") trusted
+blur@t(l) trusted composed
+focusout@t(l) trusted composed
+focus@l(t) trusted composed
+focusin@l(t) trusted composed
+keyup@l("Tab" Tab 9 0 9) trusted cancelable composed
+keydown@l("Enter" Enter 13 0 13) trusted cancelable composed
+click@l(0,0 b0/0 d0) trusted cancelable composed
+keyup@l("Enter" Enter 13 0 13) trusted cancelable composed
+hashchange #frag #frag
+pointerout@t(30,135 b-1/0 d0 rd) trusted cancelable composed
+pointerover@d(30,135 b-1/0 d0 rt) trusted cancelable composed
+mouseout@t(30,135 b0/0 d0 rd) trusted cancelable composed
+mouseover@d(30,135 b0/0 d0 rt) trusted cancelable composed
+pointermove@d(30,135 b-1/0 d0) trusted cancelable composed
+mousemove@d(30,135 b0/0 d0) trusted cancelable composed
+pointerdown@d(30,135 b0/1 d0) trusted cancelable composed
+mousedown@d(30,135 b0/1 d1) trusted cancelable composed
+blur@l(d) trusted composed
+focusout@l(d) trusted composed
+focus@d(l) trusted composed
+focusin@d(l) trusted composed
+pointerup@d(30,135 b0/0 d0) trusted cancelable composed
+mouseup@d(30,135 b0/0 d1) trusted cancelable composed
+click@d(30,135 b0/0 d1) trusted cancelable composed
+pointerdown@d(30,135 b0/1 d0) trusted cancelable composed
+mousedown@d(30,135 b0/1 d2) trusted cancelable composed
+pointerup@d(30,135 b0/0 d0) trusted cancelable composed
+mouseup@d(30,135 b0/0 d2) trusted cancelable composed
+click@d(30,135 b0/0 d2) trusted cancelable composed
+dblclick@d(30,135 b0/0 d2) trusted cancelable composed
+keydown@d("x" KeyX 88 0 88) trusted cancelable composed
+keyup@d("x" KeyX 88 0 88) trusted cancelable composed
+keydown@d("Tab" Tab 9 0 9) trusted cancelable composed
+blur@d(r) trusted composed
+focusout@d(r) trusted composed
+focus@r(d) trusted composed
+focusin@r(d) trusted composed
+keyup@r("Tab" Tab 9 0 9) trusted cancelable composed
+pointerout@d(40,160 b-1/0 d0 rr) trusted cancelable composed
+pointerover@r(40,160 b-1/0 d0 rd) trusted cancelable composed
+mouseout@d(40,160 b0/0 d0 rr) trusted cancelable composed
+mouseover@r(40,160 b0/0 d0 rd) trusted cancelable composed
+pointermove@r(40,160 b-1/0 d0) trusted cancelable composed
+mousemove@r(40,160 b0/0 d0) trusted cancelable composed
+pointerdown@r(40,160 b0/1 d0) trusted cancelable composed
+mousedown@r(40,160 b0/1 d1) trusted cancelable composed
+pointerup@r(40,160 b0/0 d0) trusted cancelable composed
+mouseup@r(40,160 b0/0 d1) trusted cancelable composed
+click@r(40,160 b0/0 d1) trusted cancelable composed
+active: r value: "a" hash: #frag focus: true
+blur@r(t) trusted composed
+focusout@r(t) trusted composed
+focus@t(r) trusted composed
+focusin@t(r) trusted composed
+after focus(): t
+blur@t(none) trusted composed
+focusout@t(none) trusted composed
+after blur(): BODY

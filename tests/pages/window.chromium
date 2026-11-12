@@ -1,0 +1,60 @@
+screen [800,600,800,600,0,0,24,24,"landscape-primary",0,false]
+window [800,600,0,0,0,0,1,0,0]
+navigator ["en-US",["en-US"],"Linux x86_64",true,true,"Google Inc.","","Gecko","20030107","Netscape","Mozilla",0,null,false,"string","number"]
+"(min-width: 500px)" true "(min-width: 500px)" true 
+"(max-width: 500px)" false "(max-width: 500px)" true 
+"(width: 800px)" true "(width: 800px)" true 
+"(orientation: landscape)" true "(orientation: landscape)" true 
+"(orientation: portrait)" false "(orientation: portrait)" true 
+"(prefers-color-scheme: dark)" false "(prefers-color-scheme: dark)" true 
+"(prefers-color-scheme: light)" true "(prefers-color-scheme: light)" true 
+"(prefers-reduced-motion: reduce)" false "(prefers-reduced-motion: reduce)" true 
+"(prefers-reduced-motion: no-preference)" true "(prefers-reduced-motion: no-preference)" true 
+"screen" true "screen" true 
+"print" false "print" true 
+"not print" true "not print" true 
+"not screen" false "not screen" true 
+"screen and (min-height: 700px)" false "screen and (min-height: 700px)" true 
+"(min-aspect-ratio: 4/3)" true "(min-aspect-ratio: 4 / 3)" true 
+"(max-aspect-ratio: 1/1)" false "(max-aspect-ratio: 1 / 1)" true 
+"(hover: hover)" true "(hover: hover)" true 
+"(pointer: coarse)" false "(pointer: coarse)" true 
+"(width >= 600px)" true "(width >= 600px)" true 
+"(400px < width < 1000px)" true "(400px < width < 1000px)" true 
+"(width < 400px)" false "(width < 400px)" true 
+"(min-resolution: 1dppx)" true "(min-resolution: 1dppx)" true 
+"(min-resolution: 2dppx)" false "(min-resolution: 2dppx)" true 
+"(color)" true "(color)" true 
+"(monochrome)" false "(monochrome)" true 
+"" true "" true 
+"(min-width: 30em)" true "(min-width: 30em)" true 
+"(max-width: 49em)" false "(max-width: 49em)" true 
+"(prefers-contrast: no-preference)" true "(prefers-contrast: no-preference)" true 
+"(forced-colors: none)" true "(forced-colors: none)" true 
+"(scripting: enabled)" true "(scripting: enabled)" true 
+"(height: 600px)" true "(height: 600px)" true 
+"all and (max-width: 799px), (max-height: 600px)" true "(max-width: 799px), (max-height: 600px)" true 
+"SCREEN AND (MIN-WIDTH:500PX)" true "screen and (min-width: 500px)" true 
+"only screen and (max-width: 1000px)" true "only screen and (max-width: 1000px)" true 
+"(max-width: 799.5px)" false "(max-width: 799.5px)" true 
+"garbage(" false "garbage(" true 
+-- history
+at load 2  auto /window.html
+pushed 3 {"n":1,"list":[1,"two",{"three":3}],"text":"x"} false true /window.html?step=2#two
+replaced 3 "plain" ?step=3 
+pushed a fragment 4  #frag
+SecurityError: Failed to execute 'pushState' on 'History': A history state object with URL 'http://localhost:PORT/other' cannot be created in a document with origin 'http://127.0.0.1:PORT' and URL 'http://127.0.0.1:PORT/window.html?step=3#frag'.
+DataCloneError
+DataCloneError
+popstate "plain" 4 ?step=3 true false false
+popstate null 4  true false false
+popstate "plain" 4 ?step=3 true false false
+-- storage
+empty 0 0   true function
+the first key a 
+set 3 1 string bee see  session
+changed 2 again   
+TypeError: Failed to execute 'setItem' on 'Storage': 2 arguments required, but only 1 present.
+cleared session 0 4
+event storage k  v ""  true
+cleared 0

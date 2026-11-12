@@ -1,0 +1,1 @@
+--focus '#first' --key Tab --key Space --key Tab --type '#ta' 'x' --key Enter --key Shift+Tab --key Shift+Tab --key Shift+Tab --key Enter --key Tab --key Control+a --click '#lab' --key Space --click '#last'

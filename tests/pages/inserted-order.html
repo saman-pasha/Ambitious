@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Script order</title>
+<script>var log = []; function p(name, v) { console.log(name + ': ' + v); }</script>
+<script async src="inserted-async.js"></script>
+<script defer src="inserted-defer.js"></script>
+<script src="inserted-sync.js"></script>
+</head>
+<body>
+<script defer>log.push('an inline defer, which is no defer');</script>
+<script>
+  /* an async script runs when it comes: before load, which waits for it, at no fixed place among the others */
+  p('the parse', log.join(','));
+  document.addEventListener('DOMContentLoaded', function () { p('DOMContentLoaded', log.join(',')); });
+  window.addEventListener('load', function () { p('load', log.join(',') + ' | the async script ran: ' + window.asyncRan + ', its write ignored: ' + document.querySelectorAll('p').length); });
+</script>
+</body>
+</html>

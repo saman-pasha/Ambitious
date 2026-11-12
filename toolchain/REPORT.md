@@ -249,6 +249,8 @@ neighbours.
     ```
 
     reports `error: plain pointer not consumed: 'row' in return(index(id(row),int(0)))`.
+    And of a local `const char *` holding a function's result, on an early
+    return (12h's script units met it).
 16. **The checker accepts a pointer into a vector's element passed beside the
     vector to a function that grows it**, which then writes through a pointer
     into the freed buffer. A borrow of `data(v)` is refused after a call that
@@ -339,3 +341,17 @@ neighbours.
 
     reports `error: owner overwritten while live: 'v->data' in
     assign(=,id(v),id(i))`. The work-around is another name.
+22. **In a header, a prototype declared after a struct with `vector<T>`
+    members is not registered** (a call to it is then an undeclared
+    function); the struct has to come after the prototypes. 12h's script
+    units met it in their own headers.
+23. **A header whose struct has a `vector<T>` member must include
+    `<vector.pl>` itself**, though the unit that includes it already has:
+    else the struct is `not lowered yet`.
+24. **An array member sized by an object-like `#define` in an included header
+    gets size 0** and the program crashes on its use; an enum constant as the
+    bound works (src/paint/font.h's `AMB_MAXFACES` is one for this reason).
+25. **A `#define` used in an enum's initializer in an included header
+    unregisters every prototype after it** in that header. Each of 24 and 25
+    reduces to a header with the macro-sized array or the macro-initialized
+    enum, and one prototype after it, included by a unit that calls it.

@@ -1,0 +1,46 @@
+box: 290,10,220,66,10,510,76,290 | offset 290,10,220,66,BODY | client 3,3,214,60 | rects 1
+box sizes: 200px | 50px | 10px | 282px | 10px | 282px | 5px | 7px | 7px | 3px | 3px
+half: 28,86,392,40,86,420,126,28 | offset 28,86,392,40,BODY | client 2,2,388,36 | rects 1
+half sizes: 392px | 40px | 0px | 0px | 0px | 20px | 4px | 47.0312px | 47.0312px | 2px | 2px
+ib1: 8,126,100,30,126,108,156,8 | offset 8,126,100,30,BODY | client 0,0,100,30 | rects 1
+ib1 sizes: 100px | 30px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+ib2: 108,126,100,30,126,208,156,108 | offset 108,126,100,30,BODY | client 0,0,100,30 | rects 1
+ib2 sizes: 100px | 30px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+em: 48,176,704,10,176,752,186,48 | offset 48,176,704,10,BODY | client 0,0,704,10 | rects 1
+em sizes: 704px | 10px | 20px | 40px | 20px | 40px | 0px | 0px | 0px | 0px | 0px
+outer: 8,206,784,82,206,792,288,8 | offset 8,206,784,82,BODY | client 1,1,782,80 | rects 1
+outer sizes: 762px | 60px | 0px | 0px | 0px | 0px | 10px | 10px | 10px | 1px | 1px
+inner: 34,222,732,20,222,766,242,34 | offset 34,222,732,20,BODY | client 4,0,728,20 | rects 1
+inner sizes: 728px | 20px | 5px | 15px | 5px | 15px | 0px | 0px | 0px | 0px | 4px
+t: 8,288,138,30,288,146,318,8 | offset 8,288,138,30,BODY | client 0,0,138,30 | rects 1
+t sizes: 138px | 30px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+c1: 10,290,66,26,290,76,316,10 | offset 2,2,66,26,t | client 0,0,66,26 | rects 1
+c1 sizes: 60px | 20px | 0px | 0px | 0px | 0px | 3px | 3px | 3px | 0px | 0px
+c2: 78,290,66,26,290,144,316,78 | offset 70,2,66,26,t | client 0,0,66,26 | rects 1
+c2 sizes: 60px | 20px | 0px | 0px | 0px | 0px | 3px | 3px | 3px | 0px | 0px
+list: 8,318,784,20,318,792,338,8 | offset 8,318,784,20,BODY | client 0,0,784,20 | rects 1
+list sizes: 744px | 20px | 0px | 0px | 0px | 0px | 0px | 0px | 40px | 0px | 0px
+li: 48,318,744,20,318,792,338,48 | offset 48,318,744,20,BODY | client 0,0,744,20 | rects 1
+li sizes: 744px | 20px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+font: 8,338,784,30,338,792,368,8 | offset 8,338,784,30,BODY | client 0,0,784,30 | rects 1
+font sizes: 784px | 30px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+mono: 8,368,784,16,368,792,384,8 | offset 8,368,784,16,BODY | client 0,0,784,16 | rects 1
+mono sizes: 784px | 16px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px | 0px
+colours: rgb(51, 51, 51) | rgb(238, 238, 255) | rgb(255, 0, 0) | rgb(255, 0, 0) / rgba(0, 0, 0, 0) | rgb(0, 0, 255)
+fonts: 20px | 700 | italic | 30px | Georgia, "DejaVu Serif", serif
+font shorthand: 12px | 700 | italic | 30px | "Trebuchet MS", Arial, sans-serif
+font family: monospace / Georgia, "DejaVu Serif", serif / Georgia, "DejaVu Serif", serif / "Times New Roman"
+keywords: block | border-box | normal | none | disc | none / list-item | disc / inline-block
+display none: 0,0,0,0,0,0,0,0 | 0,0,0,0, | 0,0,0,0 | 0 | block | auto | 0px
+names: rgb(238, 238, 255) | 10px | 10px | 10px | number | true
+body and root: 8,10,784,374,10,792,384,8 | 0,0,784,374, | 0,0,784,374 | 0,0,800,600 | 0,0,800,392,
+window: 800 600 0 0 0
+a DOMRect: true {"x":290,"y":10,"width":220,"height":66,"top":10,"right":510,"bottom":76,"left":290} {"x":290,"y":10,"width":220,"height":66,"top":10,"right":510,"bottom":76,"left":290}
+detached: "" 0,0,0,0,0,0,0,0 0 null
+after a style change: 300px 320 232px
+after a class change: none 300px 0 8
+after an insertion: 86 25 111 784px
+after a style sheet: 44 44px
+set: NoModificationAllowedError
+setProperty: NoModificationAllowedError
+a text node: TypeError

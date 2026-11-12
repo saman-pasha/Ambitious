@@ -1,0 +1,84 @@
+== - --click '#go'
+the entries: [["who","Ada"],["secret","h1"],["pick","one"],["flag","on"],["size","m"],["sp ace","a&b=c d+e% café"],["color","g"],["many","a"],["many","c"],["note","line one\nline two"],["outside","owned"]]
+get: one ["one"] null true false
+changed: ["who","pick","flag","size","sp ace","color","many","many","note","outside","more"] Grace
+an empty one: [["k","v"]] true
+with a submitter: ["note","go","outside"]
+not a form: TypeError
+submit: submit true true true go true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&go=Send&outside=owned
+== other --click '#other'
+submit: submit true true true act true true
+formdata: 1 true false true
+formdata: 1 true false true
+GET /echo/other?who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&act=other&outside=owned
+== submit --click '#run'
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&outside=owned
+== request --click '#run'
+submit: submit true true true act true true
+formdata: 1 true false true
+formdata: 1 true false true
+GET /echo/other?who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&act=other&outside=owned
+== get --click '#run'
+submit: submit true true true none true true
+formdata: 1 true false true
+GET /echo/form?who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&outside=owned
+== twice --click '#run'
+submit: submit true true true none true true
+formdata: 1 true false true
+submit: submit true true true act true true
+formdata: 1 true false true
+formdata: 1 true false true
+GET /echo/other?who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&act=other&outside=owned
+== multipart --click '#run'
+submit: submit true true true none true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | --BOUNDARY\r\nContent-Disposition: form-data; name="who"\r\n\r\nAda\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="secret"\r\n\r\nh1\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="pick"\r\n\r\none\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="flag"\r\n\r\non\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="size"\r\n\r\nm\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="sp ace"\r\n\r\na&b=c d+e% caf�\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="color"\r\n\r\ng\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="many"\r\n\r\na\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="many"\r\n\r\nc\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="note"\r\n\r\nline one\r\nline two\r\n--BOUNDARY\r\nContent-Disposition: form-data; name="outside"\r\n\r\nowned\r\n--BOUNDARY--\r\n
+== plain --click '#run'
+submit: submit true true true none true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | who=Ada\r\nsecret=h1\r\npick=one\r\nflag=on\r\nsize=m\r\nsp ace=a&b=c d+e% caf�\r\ncolor=g\r\nmany=a\r\nmany=c\r\nnote=line one\r\nline two\r\noutside=owned\r\n
+== prevent --type '#who' 'x' --click '#go' --click '#run'
+submit: submit true true true go true true
+after a prevented submit: Adax
+not a submit button: TypeError
+f.reset is the button: TypeError true Adax 20
+reset: true Adax
+reset: Ada
+== invalid --click '#go' --click '#run'
+invalid: need false true
+invalid: need false true
+valid: false
+== formdata --click '#go'
+submit: submit true true true go true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | who=Ada&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&go=Send&outside=owned&added=yes
+== enter --type '#who' 'x' --key Enter
+submit: submit true true true go true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/form | who=Adax&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&go=Send&outside=owned
+== cross --click '#go'
+submit: submit true true true go true true
+formdata: 1 true false true
+formdata: 1 true false true
+POST /echo/cross | who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&pw=hunter2&go=Send&outside=owned
+== pwget --click '#go'
+submit: submit true true true go true true
+formdata: 1 true false true
+GET /echo/form?who=Ada&secret=h1&pick=one&flag=on&size=m&sp+ace=a%26b%3Dc+d%2Be%25+caf%E9&color=g&many=a&many=c&note=line+one%0D%0Aline+two&pw=hunter2&go=Send&outside=owned
+== - --click '#away'
+the entries: [["who","Ada"],["secret","h1"],["pick","one"],["flag","on"],["size","m"],["sp ace","a&b=c d+e% café"],["color","g"],["many","a"],["many","c"],["note","line one\nline two"],["outside","owned"]]
+get: one ["one"] null true false
+changed: ["who","pick","flag","size","sp ace","color","many","many","note","outside","more"] Grace
+an empty one: [["k","v"]] true
+with a submitter: ["note","go","outside"]
+not a form: TypeError
+GET /echo/away

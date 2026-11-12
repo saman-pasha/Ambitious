@@ -1,0 +1,49 @@
+the script: ran to its end
+a timeout of 0: fires before the first response
+json response: 200 | true | OK | basic | http://127.0.0.1:PORT/fetch-data.json | false | false | application/json | 48 | 
+its json: {"name":"data","list":[1,2,3],"ok":true} true
+read twice: TypeError: Failed to execute 'text' on 'Response': body stream already read
+text: "hello text\n" 11
+arrayBuffer: true 11 104 10
+Failed to load resource: the server responded with a status of 404 (Not Found)
+a 404: 404 | false | Not Found | status 404
+Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+a 500: 500 | false | Internal Server Error
+redirected: 200 true http://127.0.0.1:PORT/fetch-text.txt
+Access to fetch at 'http://localhost:PORT/fetch-data.json' from origin 'http://127.0.0.1:PORT' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+Failed to load resource: net::ERR_FAILED
+another origin: TypeError: Failed to fetch
+Access to fetch at 'http://localhost:PORT/fetch-data.json' (redirected from 'http://127.0.0.1:PORT/cross/fetch-data.json') from origin 'http://127.0.0.1:PORT' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+Failed to load resource: net::ERR_FAILED
+a redirect to another origin: TypeError: Failed to fetch
+no-cors: 0 | false | opaque | "" | ""
+Fetch API cannot load http://localhost:PORT/fetch-data.json. Request mode is "same-origin" but the URL's origin is not same as the request origin http://127.0.0.1:PORT.
+same-origin mode: TypeError
+a data URL: 200 | true | basic | text/plain | hello data
+POST: "POST /echo/post?q=1\ncontent-type: application/x-www-form-urlencoded\n\na=1&b=two"
+PUT: "PUT /echo/put\ncontent-type: application/json\n\n{\"n\":1}"
+a string body: "POST /echo/text\ncontent-type: text/plain;charset=UTF-8\n\nplain"
+GET with a body: TypeError: Failed to execute 'fetch' on 'Window': Request with GET/HEAD method cannot have body.
+TRACE: TypeError
+a Request: HEAD | http://127.0.0.1:PORT/fetch-text.txt | cors | same-origin | follow | true | HEAD
+a Response: 201 | true | Made | default | b | text/plain;charset=UTF-8 | ""
+its text: made here
+Response.error: error 0 false
+a status out of range: RangeError
+Headers: b=2, 3 c=x | true false 2, 3 [["b","2, 3"],["c","x"]] b,c
+a response's headers: TypeError: Failed to execute 'set' on 'Headers': Headers are immutable
+XHR: 200 | OK | 4 | "hello text\n" | http://127.0.0.1:PORT/fetch-text.txt | text/plain | rs1 loadstart(0/0) rs2 rs3 progress(11/11) rs4 load(11/11) loadend(11/11)
+XHR json: {"name":"data","list":[1,2,3],"ok":true} json rs1 loadstart(0/0) rs2 rs3 progress(48/48) rs4 load(48/48) loadend(48/48)
+XHR arraybuffer: true 11
+XHR POST: "POST /echo/xhr\ncontent-type: text/csv\n\na,b\n1,2"
+Failed to load resource: the server responded with a status of 404 (Not Found)
+XHR 404: 404 Not Found rs1 loadstart(0/0) rs2 rs3 progress(10/10) rs4 load(10/10) loadend(10/10)
+Access to XMLHttpRequest at 'http://localhost:PORT/fetch-text.txt' from origin 'http://127.0.0.1:PORT' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+XHR to another origin: 0 4 "" rs1 loadstart(0/0) rs4 error(0/0) loadend(0/0)
+a synchronous XHR: 200 "hello text\n" 1,4,load
+aborted: abort 4, loadend then 0 0
+send before open: InvalidStateError
+a header before open: InvalidStateError
+the constants: 4 1 0
+Failed to load resource: net::ERR_FAILED
+aborted, later: abort 4, loadend

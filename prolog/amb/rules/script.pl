@@ -9,7 +9,15 @@
 %% from settling. No clause here cuts: amb_why/2 proves them clause by clause.
 
 :- dynamic script_run/4, script_url/2, script_console/3, script_error/3, script_listener/3,
-   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2.
+   script_window_listener/2, script_capture/2, script_timer/4, script_timer_of/2, script_forced_layout/2,
+   script_inserted/2, script_request/5, script_request_by/2, script_request_status/2, script_request_resource/2,
+   script_request_cross/1, script_write/4, script_navigation/4, script_navigation_by/2, script_navigation_form/3,
+   script_navigation_target/2, script_navigation_resource/2, script_navigation_status/2, script_form_field/3,
+   script_observer/2, script_observer_disconnected/1, script_observer_delivered/3, script_observation/4,
+   script_observes_children/1, script_observes_attributes/2, script_observes_data/1, script_observes_subtree/1,
+   script_observes_old_values/1, script_definition/3, script_definition_observes/2, script_definition_upgraded/2,
+   script_defines_connected/1, script_defines_disconnected/1, script_defines_attribute_changed/1,
+   script_storage_write/4, script_storage_by/2, script_storage_secret/1.
 
 script_failed(R, How) :- script_run(R, _, _, How), How \== ran, How \== not_run.
 
@@ -47,6 +55,49 @@ script_rules_short_text(N, T) :- dom_text_content(N, T), atom_length(T, L), L > 
 
 script_unsettled(T, R) :- script_timer(T, _, _, pending), script_timer_of(T, R).
 
+%% a request the browser would not let a script make or read: another origin's answer
+%% without CORS's Access-Control-Allow-Origin, a file: URL
+script_request_blocked(Q, U) :- script_request(Q, _, _, U, blocked).
+%% one that had no good answer: no response at all, or an HTTP error's
+script_request_failed(Q, U, How) :- script_request(Q, _, _, U, How), memberchk(How, [failed, http_error]).
+%% a request over http: from a page served over https: (mixed content)
+script_insecure_request(Q, U) :-
+    script_request(Q, _, _, U, _), sub_atom(U, 0, _, _, 'http:'),
+    net_page(P), net_final_url(P, PU), sub_atom(PU, 0, _, _, 'https:').
+%% document.write after the page loaded opens a new document: the page is gone
+script_write_replaced(R) :- script_write(_, R, after_load, _).
+%% an asynchronously loaded script may not write into the document that is being parsed
+script_write_ignored(R) :- script_write(_, R, ignored, _).
+
+%% a form submitted to another origin over http:: its data crosses the network in the clear
+%% to a site that is not the page's
+script_form_cross_origin_http(N, U) :-
+    script_navigation(N, form, _, U), sub_atom(U, 0, _, _, 'http:'),
+    net_page(P), net_origin(P, O), \+ script_rules_of_origin(U, O).
+%% a password a form sends over http:, or puts in a GET's URL (kept by logs and histories)
+script_form_password_http(N, F) :-
+    script_navigation(N, form, _, U), sub_atom(U, 0, _, _, 'http:'),
+    script_form_field(N, _, F), script_rules_password(F).
+script_form_password_get(N, F) :-
+    script_navigation(N, form, 'GET', _), script_form_field(N, _, F), script_rules_password(F).
+script_rules_password(F) :- dom_attr(F, type, T), downcase_atom(T, password).
+%% a URL of an origin: the origin, then its path's slash or nothing
+script_rules_of_origin(U, O) :- atom_length(O, L), sub_atom(U, 0, L, A, O), ( A =:= 0 ; sub_atom(U, L, 1, _, '/') ).
+
+%% a key listener where no key event comes: key events go to the element that has focus
+%% and up from it, so an element that takes none, with nothing inside that does, never
+%% hears one (a page's own containers aside: they hear them all)
+script_key_unfocusable(N, Name) :-
+    script_listener(N, T, _), memberchk(T, [keydown, keyup, keypress]), dom_element(N, E),
+    \+ script_rules_container(E), \+ script_rules_focusable(N),
+    \+ ( dom_descendant(D, N), script_rules_focusable(D) ),
+    script_rules_name(N, Name).
+
+%% a read of style or geometry after a change to the DOM runs the cascade and the layout
+%% again (a forced, synchronous layout): a script that does it many times interleaves its
+%% reads with its writes, where reading first and writing after would run them once
+script_layout_thrash(R, N) :- script_forced_layout(R, N), N >= 10.
+
 %% ---- what the reasoner says of a page's scripts ------------------------------------
 
 script_diag(script_failed, R, Text) :-
@@ -58,6 +109,41 @@ script_diag(uncaught_error, R, Text) :-
 script_diag(click_not_focusable, N, Text) :-
     script_click_unfocusable(N, Name), dom_element(N, E),
     format(atom(Text), 'the <~w> ~q has a click listener but takes no focus: a keyboard cannot use it (a button, or tabindex and a key listener)', [E, Name]).
+%% a MutationObserver still observing on a page that never comes to rest: each change
+%% the page's timers go on making runs its callback again, for as long as the page is open
+script_observer_unsettled(O, R) :-
+    script_observer(O, R), \+ script_observer_disconnected(O),
+    script_observation(_, O, _, _), script_unsettled(_, _).
+
+%% an element whose name is a custom element's (a hyphen in it), in the document, that no
+%% script defined: it stays an HTMLElement with none of the behaviour its name promises
+script_custom_undefined(N, Name) :-
+    dom_element(N, Name), sub_atom(Name, _, _, _, '-'), \+ script_rules_kept_name(Name),
+    dom_element(H, html), dom_inside(N, H), \+ script_definition(_, Name, _).
+%% the names with a hyphen SVG and MathML keep, which are no custom element's
+script_rules_kept_name('annotation-xml').
+script_rules_kept_name('color-profile').
+script_rules_kept_name('font-face').
+script_rules_kept_name('font-face-src').
+script_rules_kept_name('font-face-uri').
+script_rules_kept_name('font-face-format').
+script_rules_kept_name('font-face-name').
+script_rules_kept_name('missing-glyph').
+
+%% a credential kept in Web Storage: every script of the origin reads it, an injected one
+%% too, and localStorage keeps it past the session (an HttpOnly cookie keeps it from scripts)
+script_storage_credential(S, Area, Key) :-
+    script_storage_write(S, Area, set, Key), script_storage_secret(S).
+
+script_diag(storage_credential, S, Text) :-
+    script_storage_credential(S, Area, Key), script_storage_by(S, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w stored a value that looks like a credential in ~wStorage under ~q: every script of the origin can read it there (an HttpOnly cookie keeps it from scripts)', [Where, Area, Key]).
+script_diag(custom_element_undefined, N, Text) :-
+    script_custom_undefined(N, Name),
+    format(atom(Text), 'the <~w> element\'s name is a custom element\'s, but no script defines it (customElements.define): it stays an HTMLElement with no behaviour of its own', [Name]).
+script_diag(observer_never_disconnected, O, Text) :-
+    script_observer_unsettled(O, R), script_rules_where(R, Where),
+    format(atom(Text), 'a MutationObserver made by the script ~w is never disconnected, on a page that never comes to rest: each change its timers make runs the observer again', [Where]).
 script_diag(unsettled_timer, T, Text) :-
     script_unsettled(T, R), script_timer(T, Delay, Repeats, _), script_rules_where(R, Where),
     (   Repeats == true
@@ -65,8 +151,42 @@ script_diag(unsettled_timer, T, Text) :-
     ;   format(atom(Text), 'a timeout of ~d ms set by the script ~w had not fired when the page came to rest', [Delay, Where])
     ).
 
+script_diag(layout_thrash, R, Text) :-
+    script_layout_thrash(R, N), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w made the cascade and the layout run ~d times, each read of style or geometry after a change to the page: read first, then write', [Where, N]).
+
+script_diag(request_blocked, Q, Text) :-
+    script_request_blocked(Q, U), script_request_by(Q, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w asked for ~w, which was blocked: another origin answers a script only with CORS''s Access-Control-Allow-Origin, and a page may not read a file: URL', [Where, U]).
+script_diag(request_failed, Q, Text) :-
+    script_request_failed(Q, U, How), script_request_by(Q, R), script_rules_where(R, Where),
+    (   script_request_status(Q, S) -> true ; S = none ),
+    format(atom(Text), 'the script ~w asked for ~w and had no good answer: ~w (status ~w)', [Where, U, How, S]).
+script_diag(insecure_request, Q, Text) :-
+    script_insecure_request(Q, U), script_request_by(Q, R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w asked for ~w over http: from a page served over https: (mixed content)', [Where, U]).
+script_diag(write_replaced, R, Text) :-
+    script_write_replaced(R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w called document.write after the page loaded: a new document replaced the whole page', [Where]).
+script_diag(write_ignored, R, Text) :-
+    script_write_ignored(R), script_rules_where(R, Where),
+    format(atom(Text), 'the script ~w was loaded asynchronously, so its document.write was ignored', [Where]).
+
+script_diag(form_cross_origin_http, N, Text) :-
+    script_form_cross_origin_http(N, U),
+    format(atom(Text), 'a form was submitted to ~w: another origin, over http:, so what it sends crosses the network unencrypted', [U]).
+script_diag(form_password_http, F, Text) :-
+    script_form_password_http(N, F), script_navigation(N, _, _, U), script_form_field(N, Name, F),
+    format(atom(Text), 'the password field ~q was submitted to ~w over http:, unencrypted', [Name, U]).
+script_diag(form_password_get, F, Text) :-
+    script_form_password_get(N, F), script_form_field(N, Name, F),
+    format(atom(Text), 'the password field ~q was sent in a GET''s URL, where logs and histories keep it', [Name]).
+script_diag(key_not_focusable, N, Text) :-
+    script_key_unfocusable(N, Name), dom_element(N, E),
+    format(atom(Text), 'the <~w> ~q has a key listener but neither it nor anything inside it takes focus: no key event reaches it (tabindex makes it focusable)', [E, Name]).
+
 %% a script named by its URL, or by its number on the page (its run's index)
 script_rules_where(R, Where) :- script_url(R, U), format(atom(Where), '~w', [U]).
-script_rules_where(R, Where) :- \+ script_url(R, _), R = sr(_, I, _), script_run(R, N, Source, _), dom_element(N, E),
-    (   Source == attribute -> format(atom(Where), '#~d, an on* attribute of a <~w>', [I, E])
+script_rules_where(R, Where) :- \+ script_url(R, _), R = sr(_, I, _), script_run(R, N, Source, _),
+    (   Source == attribute, dom_element(N, E) -> format(atom(Where), '#~d, an on* attribute of a <~w>', [I, E])
     ;   format(atom(Where), '#~d (inline)', [I]) ).

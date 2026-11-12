@@ -33,17 +33,28 @@ amb_interface(html);
 amb_interface(net);
 amb_implementation(script);
 #include "../js/js.h"
+#include "../net/url.h"
+#include "host.h"
 #include "script.h"
 
 /* the CSS module's matcher for a script's selector (src/css/css.c) */
 int css_selector_matches(const dom_document *d, uint32_t x, const char *s, size_t n);
+/* the view a script reads, a cascade and a layout run when it asks (src/script/view.c):
+   made up to date; whether an element is rendered; its computed value of a property by
+   CSS's name (0: the cascade computes no such property); its border box, its borders
+   (top, right, bottom, left) and its client rects, in page px; the runs made so far */
+void script_view_update(struct js_host *h);
+int script_view_rendered(struct js_host *h, uint32_t x);
+int script_view_style(struct js_host *h, uint32_t x, const char *name, size_t n, vector<char> *out);
+int script_view_border_box(struct js_host *h, uint32_t x, double *r);
+int script_view_borders(struct js_host *h, uint32_t x, double *r);
+uint32_t script_view_rects(struct js_host *h, uint32_t x, double *r, uint32_t max);
+uint32_t script_view_runs(const struct js_host *h);
+uint32_t script_view_props(void);
 
 /* ---- the host's kinds and names ---- */
 
-/* a host object's kind, in its c slot */
-enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT };
-/* its prototypes, in vm->host_protos */
-enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_N };
+/* the host objects' kinds and their prototypes' numbers, the event flags: host.h */
 
 /* the names the host answers for, interned once (vm->hatoms: these first, then the
    reverse map from an atom to its name's number plus one) */
@@ -57,7 +68,10 @@ enum {
     HA_DEFAULTVIEW, HA_TARGET, HA_CURRENTTARGET, HA_BUBBLES, HA_CANCELABLE, HA_DEFAULTPREVENTED, HA_EVENTPHASE,
     HA_TIMESTAMP, HA_ISTRUSTED, HA_DETAIL, HA_CSSTEXT, HA_SELECTED, HA_HTMLFOR, HA_REL, HA_LENGTH, HA_CAPTURE,
     HA_ONCE, HA_LOCALNAME, HA_WINDOW, HA_DOCUMENT, HA_SELF, HA_READONLY, HA_REQUIRED, HA_ACTION, HA_METHOD,
-    HA_NAMESPACEURI, HA_HASH, HA_VALUE_STATE, HA_N
+    HA_NAMESPACEURI, HA_HASH, HA_VALUE_STATE, HA_FORMS, HA_IMAGES, HA_LINKS, HA_ANCHORS, HA_SCRIPTS, HA_ELEMENTS,
+    HA_OPTIONS, HA_ROWS, HA_CELLS, HA_TBODIES, HA_OFFSETWIDTH, HA_OFFSETHEIGHT, HA_OFFSETTOP, HA_OFFSETLEFT,
+    HA_OFFSETPARENT, HA_CLIENTWIDTH, HA_CLIENTHEIGHT, HA_CLIENTTOP, HA_CLIENTLEFT, HA_SCROLLTOP, HA_SCROLLLEFT,
+    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_CURRENTSCRIPT, HA_ASYNC, HA_DEFER, HA_ACTIVEELEMENT, HA_COMPOSED, HA_N
 };
 static const char *const sh_names[HA_N] = {
     "textContent", "innerHTML", "outerHTML", "innerText", "id", "className", "classList", "tagName",
@@ -69,7 +83,10 @@ static const char *const sh_names[HA_N] = {
     "defaultView", "target", "currentTarget", "bubbles", "cancelable", "defaultPrevented", "eventPhase",
     "timeStamp", "isTrusted", "detail", "cssText", "selected", "htmlFor", "rel", "length", "capture",
     "once", "localName", "window", "document", "self", "readOnly", "required", "action", "method",
-    "namespaceURI", "hash", "\001value" };
+    "namespaceURI", "hash", "\001value", "forms", "images", "links", "anchors", "scripts", "elements",
+    "options", "rows", "cells", "tBodies", "offsetWidth", "offsetHeight", "offsetTop", "offsetLeft",
+    "offsetParent", "clientWidth", "clientHeight", "clientTop", "clientLeft", "scrollTop", "scrollLeft",
+    "scrollWidth", "scrollHeight", "currentScript", "async", "defer", "activeElement", "composed" };
 
 /* the host's natives' numbers, from JS_HOST_NATIVES */
 enum {
@@ -80,17 +97,11 @@ enum {
     H_CREATE_TEXT, H_CREATE_COMMENT, H_CL_ADD, H_CL_REMOVE, H_CL_TOGGLE, H_CL_CONTAINS, H_CL_REPLACE, H_CL_ITEM,
     H_CL_TOSTRING, H_ST_SET, H_ST_GET, H_ST_REMOVE, H_EV_PREVENT, H_EV_STOP, H_EV_STOP_NOW, H_EVENT, H_CUSTOM_EVENT,
     H_RAF, H_CAF, H_COMPUTED, H_ALERT, H_ILLEGAL, H_WIN_ADD, H_WIN_REMOVE, H_WIN_DISPATCH, H_INSERT_ADJ_HTML,
-    H_ADOPT_TEXT
+    H_ADOPT_TEXT, H_LIST_ITEM, H_LIST_NAMED, H_BY_NAME, H_CLIENT_RECTS, H_RECT_JSON, H_TASK, H_LOC_STRING, H_WRITE, H_WRITELN,
+    H_DOC_OPEN, H_DOC_CLOSE, H_LOC_ASSIGN, H_LOC_REPLACE, H_LOC_RELOAD, H_LOC_HREF_GET, H_LOC_HREF_SET, H_LOC_HASH_GET,
+    H_LOC_HASH_SET, H_REPLACE_CHILDREN, H_SET_ATTR_NS, H_GET_ATTR_NS
 };
 
-/* an event's flags, in its a slot */
-#define EV_STOP 1u
-#define EV_STOP_NOW 2u
-#define EV_PREVENTED 4u
-#define EV_CANCELABLE 8u
-#define EV_BUBBLES 16u
-#define EV_TRUSTED 32u
-#define EV_PASSIVE 64u
 
 static uint32_t sh_atom(js_vm *vm, uint32_t ha) { return vm->hatoms[ha]; }
 /* the host's name an atom is, plus one; 0 when none */
@@ -101,10 +112,10 @@ static uint32_t sh_name_of(js_vm *vm, uint32_t atom) {
 
 /* ---- text: the engine's strings and the DOM's UTF-8 ---- */
 
-static jv sh_str(js_vm *vm, const char *p, size_t n) { return jv_str(js_str_utf8(vm, p, n)); }
-static jv sh_cstr(js_vm *vm, const char *p) { return jv_str(js_str_utf8(vm, p, strlen(p))); }
+jv sh_str(js_vm *vm, const char *p, size_t n) { return jv_str(js_str_utf8(vm, p, n)); }
+jv sh_cstr(js_vm *vm, const char *p) { return jv_str(js_str_utf8(vm, p, strlen(p))); }
 /* a value's string as UTF-8 into out (cleared first): 0 when its conversion threw */
-static int sh_utf8(js_vm *vm, jv v, vector<char> *out) {
+int sh_utf8(js_vm *vm, jv v, vector<char> *out) {
     clear(*out);
     uint32_t s = jv_is_str(v) ? jv_idx(v) : js_to_string(vm, v);
     if (!s) return 0;
@@ -171,8 +182,9 @@ void js_report_error(js_vm *vm, jv e, uint32_t phase) {
 
 /* the microtasks, once no script code is on the stack: after a script, a listener a
    user's event ran, a timer */
-static void sh_checkpoint(js_vm *vm) {
+void sh_checkpoint(js_vm *vm) {
     if (vm->nframes != 0 || vm->throwing) return;
+    if (vm->host && vm->host->mreg_live) script_observe_flush(vm);
     uint32_t ph = vm->host ? vm->host->phase : 0;
     if (vm->host) vm->host->phase = JS_PHASE_PROMISE;
     js_run_jobs(vm);
@@ -202,19 +214,19 @@ void js_console(js_vm *vm, uint32_t level, uint32_t text) {
 /* ---- wrappers ---- */
 
 static int sh_is_kind(const dom_document *d, uint32_t x, dom_node_kind k) { return x && x < d->node_len && d->node[x].live && d->node[x].kind == k; }
-static int sh_is_elem(const dom_document *d, uint32_t x) { return sh_is_kind(d, x, DOM_NODE_KIND_ELEMENT); }
+int sh_is_elem(const dom_document *d, uint32_t x) { return sh_is_kind(d, x, DOM_NODE_KIND_ELEMENT); }
 /* the HTML element of that name (an SVG or MathML element of the name is none) */
-static int sh_named(const dom_document *d, uint32_t x, const char *name) {
+int sh_named(const dom_document *d, uint32_t x, const char *name) {
     return sh_is_elem(d, x) && d->node[x].ns == DOM_NAMESPACE_HTML && names_is(d, d->node[x].name, name, strlen(name));
 }
 /* a script element: HTML's, or SVG's, which runs too */
-static int sh_script_elem(const dom_document *d, uint32_t x) {
+int sh_script_elem(const dom_document *d, uint32_t x) {
     return sh_named(d, x, "script") ||
            (sh_is_elem(d, x) && d->node[x].ns == DOM_NAMESPACE_SVG && names_is(d, d->node[x].name, "script", 6));
 }
 
 /* the wrapper of node x, made at its first use: null for none */
-static jv sh_wrap(js_vm *vm, uint32_t x) {
+jv sh_wrap(js_vm *vm, uint32_t x) {
     dom_document *d = vm->host->d;
     if (!x || x >= d->node_len || !d->node[x].live) return JV_NULL;
     if (x >= len(vm->wrappers)) resize(vm->wrappers, (size_t)d->node_len + 64, 0u);
@@ -222,7 +234,8 @@ static jv sh_wrap(js_vm *vm, uint32_t x) {
     if (w && vm->objs[w].kind == JK_HOST && vm->objs[w].b == d->node[x].gen && vm->objs[w].a == x) return jv_obj(w);
     dom_node_kind k = d->node[x].kind;
     uint32_t p = k == DOM_NODE_KIND_ELEMENT ? HP_ELEMENT : k == DOM_NODE_KIND_DOCUMENT ? HP_DOCUMENT : HP_CHARDATA;
-    uint32_t o = js_obj_new(vm, JK_HOST, vm->host_protos[p]);
+    if (k == DOM_NODE_KIND_FRAGMENT) p = script_shadow_host(d, x) ? HP_SHADOWROOT : HP_NODE;
+    uint32_t o = js_obj_new(vm, JK_HOST, vm->host->protos[p]);
     vm->objs[o].a = x;
     vm->objs[o].b = d->node[x].gen;
     vm->objs[o].c = HK_NODE;
@@ -232,7 +245,7 @@ static jv sh_wrap(js_vm *vm, uint32_t x) {
 
 /* the node a value wraps, live: its index; 0 when it wraps none. A stale wrapper throws
    (stale set), as does a value that is no node when need is set */
-static uint32_t sh_node(js_vm *vm, jv v, int need) {
+uint32_t sh_node(js_vm *vm, jv v, int need) {
     if (jv_is_obj(v)) {
         uint32_t o = jv_idx(v);
         if (vm->objs[o].kind == JK_HOST && vm->objs[o].c == HK_NODE) {
@@ -255,7 +268,7 @@ static uint32_t sh_owner(js_vm *vm, uint32_t o) {
     return 0;
 }
 static jv sh_host_obj(js_vm *vm, uint32_t kind, uint32_t proto, uint32_t x) {
-    uint32_t o = js_obj_new(vm, JK_HOST, vm->host_protos[proto]);
+    uint32_t o = js_obj_new(vm, JK_HOST, vm->host->protos[proto]);
     vm->objs[o].a = x;
     vm->objs[o].b = vm->host->d->node[x].gen;
     vm->objs[o].c = kind;
@@ -263,13 +276,13 @@ static jv sh_host_obj(js_vm *vm, uint32_t kind, uint32_t proto, uint32_t x) {
 }
 
 /* a DOMException of a name, with its message */
-static jv sh_dom_error(js_vm *vm, const char *name, const char *msg) {
+jv sh_dom_error(js_vm *vm, const char *name, const char *msg) {
     uint32_t e = js_error_new(vm, vm->error_proto, js_str_ascii(vm, msg));
     js_define(vm, e, A_NAME, sh_cstr(vm, name), JS_SHAPE_HIDDEN);
     return js_throw(vm, jv_obj(e));
 }
 /* a DOM operation's refusal as the exception the DOM standard names */
-static jv sh_status(js_vm *vm, dom_status st) {
+jv sh_status(js_vm *vm, dom_status st) {
     if (st == DOM_OK) return JV_UNDEF;
     if (st == DOM_WOULD_CYCLE || st == DOM_WRONG_KIND || st == DOM_HAS_PARENT)
         return sh_dom_error(vm, "HierarchyRequestError", "the node cannot be inserted there");
@@ -281,16 +294,16 @@ static jv sh_status(js_vm *vm, dom_status st) {
 
 /* ---- the DOM, read ---- */
 
-static uint32_t sh_attr(const dom_document *d, uint32_t x, const char *name, size_t n) {
+uint32_t sh_attr(const dom_document *d, uint32_t x, const char *name, size_t n) {
     uint32_t a = names_find(d, name, n);
     if (!a || !sh_is_elem(d, x)) return 0;
     for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) if (d->attr[at].name == a) return at;
     return 0;
 }
-static uint32_t sh_attr_z(const dom_document *d, uint32_t x, const char *name) { return sh_attr(d, x, name, strlen(name)); }
+uint32_t sh_attr_z(const dom_document *d, uint32_t x, const char *name) { return sh_attr(d, x, name, strlen(name)); }
 
 /* the text of node x's subtree (a text's or a comment's own data), appended to out */
-static void sh_text_of(const dom_document *d, uint32_t x, vector<char> *out) {
+void sh_text_of(const dom_document *d, uint32_t x, vector<char> *out) {
     dom_node_kind k = d->node[x].kind;
     if (k == DOM_NODE_KIND_TEXT || k == DOM_NODE_KIND_COMMENT) {
         append_range(*out, text_ptr(d, d->node[x].data), d->node[x].data.len);
@@ -307,7 +320,7 @@ static void sh_text_of(const dom_document *d, uint32_t x, vector<char> *out) {
     }
 }
 /* the next node after c in tree order, within the subtree of scope */
-static uint32_t sh_next_in(const dom_document *d, uint32_t c, uint32_t scope) {
+uint32_t sh_next_in(const dom_document *d, uint32_t c, uint32_t scope) {
     if (d->node[c].first_child) return d->node[c].first_child;
     while (c && c != scope) {
         if (d->node[c].next_sibling) return d->node[c].next_sibling;
@@ -320,12 +333,12 @@ static uint32_t sh_elem_sibling(const dom_document *d, uint32_t x, int next) {
     while (y && d->node[y].kind != DOM_NODE_KIND_ELEMENT) y = next ? d->node[y].next_sibling : d->node[y].prev_sibling;
     return y;
 }
-static uint32_t sh_elem_child(const dom_document *d, uint32_t x, int last) {
+uint32_t sh_elem_child(const dom_document *d, uint32_t x, int last) {
     uint32_t y = last ? d->node[x].last_child : d->node[x].first_child;
     while (y && d->node[y].kind != DOM_NODE_KIND_ELEMENT) y = last ? d->node[y].prev_sibling : d->node[y].next_sibling;
     return y;
 }
-static int sh_connected(const dom_document *d, uint32_t x) {
+int sh_connected(const dom_document *d, uint32_t x) {
     while (x && x != 1) x = d->node[x].parent;
     return x == 1;
 }
@@ -353,7 +366,7 @@ static jv sh_tag_name(js_vm *vm, const dom_document *d, uint32_t x) {
 /* ---- the DOM, written: each change one of its operations ---- */
 
 /* child out of its parent, if it has one */
-static dom_status sh_detach(dom_document *d, uint32_t child) {
+dom_status sh_detach(dom_document *d, uint32_t child) {
     uint32_t p = d->node[child].parent;
     if (!p) return DOM_OK;
     return dom_remove_child(d, node_handle(d, p), node_handle(d, child));
@@ -427,7 +440,8 @@ static uint32_t sh_import(dom_document *to, const dom_document *from, uint32_t x
 
 /* html parsed as a fragment and its nodes inserted into parent before before (0: at the
    end): the fragment is the body of a document of its own, its nodes copied over */
-static void sh_insert_html(dom_document *d, uint32_t parent, uint32_t before, const char *html, size_t n) {
+static void sh_insert_html(js_vm *vm, uint32_t parent, uint32_t before, const char *html, size_t n) {
+    dom_document *d = vm->host->d;
     dom_document f;
     html_parser hp;
     dom_init(&f, 2);
@@ -442,10 +456,24 @@ static void sh_insert_html(dom_document *d, uint32_t parent, uint32_t before, co
     for (uint32_t c = f.node[body].first_child; c; c = f.node[c].next_sibling) {
         uint32_t y = sh_import(d, &f, c, 1);
         if (!y) continue;
+        /* a script the fragment parser made never runs (HTML 13.4) */
+        sh_start_all(vm->host, y);
         if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
         else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
     }
 }
+
+/* the scripts' machinery (with the page's scripts, below): started flags, a script
+   element prepared, an insertion that prepares what it connected, document.write */
+static void sh_start_all(struct js_host *h, uint32_t x);
+static void sh_start_like(struct js_host *h, uint32_t from, uint32_t to);
+static void sh_prepare(js_vm *vm, uint32_t x, script_insertion how);
+static dom_status sh_insert_vm(js_vm *vm, uint32_t parent, uint32_t child, uint32_t before);
+static jv sh_write(js_vm *vm, uint32_t args, uint32_t argc, int line);
+static void sh_open(js_vm *vm);
+/* the loader's fetch by method (src/net/net.c) */
+net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len, net_kind kind, const char *method, const char *sent,
+                                 size_t sent_n, const char *hdrs, size_t hdrs_n, uint32_t from);
 
 /* ---- the DOM, written as HTML (innerHTML, outerHTML) ---- */
 
@@ -504,7 +532,7 @@ static void sh_html_of(const dom_document *d, uint32_t x, vector<char> *out, int
 
 /* ---- class lists, inline styles, data attributes ---- */
 
-static int sh_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
+int sh_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
 /* the tokens of an attribute's value, as (start, length) pairs */
 static void sh_tokens(const char *s, size_t n, vector<uint32_t> *out) {
     clear(*out);
@@ -584,7 +612,7 @@ static void sh_decls(const char *s, size_t n, vector<uint32_t> *out) {
         i = e + 1;
     }
 }
-static int sh_ci_eq(const char *a, const char *b, size_t n) {
+int sh_ci_eq(const char *a, const char *b, size_t n) {
     for (size_t i = 0; i < n; i++) {
         char x = a[i] >= 'A' && a[i] <= 'Z' ? (char)(a[i] + 32) : a[i];
         char y = b[i] >= 'A' && b[i] <= 'Z' ? (char)(b[i] + 32) : b[i];
@@ -654,6 +682,8 @@ static void sh_data_name(const vector<char> *key, vector<char> *attr) {
 /* the listener record of a listener added, by the script running now */
 static uint32_t sh_listener_rec(js_vm *vm, uint32_t target, uint32_t type, int capture) {
     struct js_host *h = vm->host;
+    /* an object's listener (an XMLHttpRequest's) is no node's: not a fact of the page */
+    if (target != JS_WINDOW && (target & SH_OBJECT_TARGET)) return 0;
     vector<char> t;
     js_str_to_utf8(vm, type, &t);
     amb_span sp = text_add(h->rt, data(t), len(t));
@@ -666,7 +696,7 @@ static uint32_t sh_listener_rec(js_vm *vm, uint32_t target, uint32_t type, int c
     return l.index;
 }
 /* addEventListener(type, fn, options) on target */
-static jv sh_add_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc) {
+jv sh_add_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc) {
     jv tv = js_arg(vm, args, argc, 0), fn = js_arg(vm, args, argc, 1), opt = js_arg(vm, args, argc, 2);
     if (!js_is_callable(vm, fn)) return JV_UNDEF;
     uint32_t ts = js_to_string(vm, tv);
@@ -699,7 +729,7 @@ static void sh_listener_gone(js_vm *vm, size_t i) {
     uint32_t r = vm->listeners[i].rec;
     if (r && vm->host->rt->listener[r].live) listener_free(vm->host->rt, listener_handle(vm->host->rt, r));
 }
-static jv sh_remove_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc) {
+jv sh_remove_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t argc) {
     jv tv = js_arg(vm, args, argc, 0), fn = js_arg(vm, args, argc, 1), opt = js_arg(vm, args, argc, 2);
     if (!jv_is_obj(fn)) return JV_UNDEF;
     uint32_t ts = js_to_string(vm, tv);
@@ -714,24 +744,30 @@ static jv sh_remove_listener(js_vm *vm, uint32_t target, uint32_t args, uint32_t
 }
 
 /* a new event object: its type, its flags, its target set at dispatch */
-static jv sh_event_new(js_vm *vm, uint32_t type, uint32_t flags) {
-    uint32_t e = js_obj_new(vm, JK_HOST, vm->host_protos[HP_EVENT]);
+jv sh_event_new(js_vm *vm, uint32_t type, uint32_t flags) {
+    uint32_t e = js_obj_new(vm, JK_HOST, vm->host->protos[HP_EVENT]);
     vm->objs[e].a = flags;
     vm->objs[e].b = type;
     vm->objs[e].c = HK_EVENT;
-    vm->objs[e].x = JV_NULL;
+    vm->objs[e].x = JV_UNDEF;
     js_define(vm, e, sh_atom(vm, HA_TYPE), jv_str(type), 0);
     js_define(vm, e, sh_atom(vm, HA_TARGET), JV_NULL, 0);
     js_define(vm, e, sh_atom(vm, HA_CURRENTTARGET), JV_NULL, 0);
     js_define(vm, e, sh_atom(vm, HA_TIMESTAMP), jv_num(vm->now), 0);
     return jv_obj(e);
 }
-/* what a listener on node (JS_WINDOW the window) is called with as this */
-static jv sh_this_of(js_vm *vm, uint32_t node) { return node == JS_WINDOW ? jv_obj(vm->global) : sh_wrap(vm, node); }
+/* what a listener on node (JS_WINDOW the window, or an object's target) is called with as this */
+static jv sh_this_of(js_vm *vm, uint32_t node) {
+    if (node == JS_WINDOW) return jv_obj(vm->global);
+    if (node & SH_OBJECT_TARGET) return jv_obj(node & ~SH_OBJECT_TARGET);
+    return sh_wrap(vm, node);
+}
 
 /* fn called as a listener of ev on node: its error recorded, not passed on. 0 when the
    step budget is spent */
 static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run) {
+    /* the changes made before the listener runs, recorded as they were made */
+    if (vm->host && vm->host->mreg_live) script_observe_flush(vm);
     uint32_t saved = vm->cur_run;
     vm->cur_run = run;
     jv args[1] = { ev };
@@ -747,6 +783,7 @@ static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run
 static jv sh_prop_handler(js_vm *vm, uint32_t node, uint32_t type) {
     uint32_t o = 0;
     if (node == JS_WINDOW) o = vm->global;
+    else if (node & SH_OBJECT_TARGET) o = node & ~SH_OBJECT_TARGET;
     else if (node < len(vm->wrappers) && vm->wrappers[node] && vm->objs[vm->wrappers[node]].a == node) o = vm->wrappers[node];
     if (!o) return JV_UNDEF;
     uint32_t on = js_str_concat(vm, js_str_ascii(vm, "on"), type);
@@ -796,39 +833,109 @@ static int sh_listeners_at(js_vm *vm, uint32_t node, jv ev, uint32_t phase) {
     }
     return 1;
 }
-/* ev dispatched at target (JS_WINDOW the window): its path's listeners, in order. 1
-   unless a listener cancelled it */
-static int sh_dispatch(js_vm *vm, uint32_t target, jv ev) {
+/* ev dispatched at target (JS_WINDOW the window, or an object's target, which has no
+   path but itself): its path's listeners, in order. 1 unless a listener cancelled it */
+int sh_dispatch(js_vm *vm, uint32_t target, jv ev) {
     dom_document *d = vm->host->d;
     uint32_t e = jv_idx(ev);
     vector<uint32_t> path;
     push_back(path, target);
-    if (target != JS_WINDOW) {
-        for (uint32_t p = d->node[target].parent; p; p = d->node[p].parent) push_back(path, p);
+    int shadows = d->shadow_len > 1;
+    if (target != JS_WINDOW && !(target & SH_OBJECT_TARGET) && !(vm->objs[e].a & EV_NOPATH)) {
+        int composed = (vm->objs[e].a & EV_COMPOSED) != 0;
+        if (shadows) for (uint32_t p = script_event_parent(d, target, target, composed); p; p = script_event_parent(d, p, target, composed)) push_back(path, p);
+        else for (uint32_t p = d->node[target].parent; p; p = d->node[p].parent) push_back(path, p);
         /* the window is on the path of an event at a node of the document, load aside */
         uint32_t lt = js_atom_ascii(vm, "load");
         if (path[len(path) - 1] == 1 && vm->objs[e].b != lt) push_back(path, JS_WINDOW);
     }
     js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, target), 0);
-    for (size_t i = len(path); i > 1 && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i--)
+    if (shadows) {
+        /* the path, for composedPath() */
+        uint32_t pa = js_array_new(vm, 0);
+        for (size_t i = 0; i < len(path); i++) js_array_push(vm, pa, sh_this_of(vm, path[i]));
+        js_define(vm, e, js_atom_ascii(vm, "\001path"), jv_obj(pa), JS_SHAPE_HIDDEN);
+    }
+    /* a listener in a tree the target's shadow tree is not part of sees the host it is in */
+#define SH_RETARGET(at) if (shadows) js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, script_retarget(d, target, (at))), 0)
+    for (size_t i = len(path); i > 1 && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i--) {
+        SH_RETARGET(path[i - 1]);
         if (!sh_listeners_at(vm, path[i - 1], ev, 1)) return 1;
+    }
+    SH_RETARGET(target);
     if (!(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)) && !sh_listeners_at(vm, target, ev, 2)) return 1;
     if (vm->objs[e].a & EV_BUBBLES)
-        for (size_t i = 1; i < len(path) && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i++)
+        for (size_t i = 1; i < len(path) && !(vm->objs[e].a & (EV_STOP | EV_STOP_NOW)); i++) {
+            SH_RETARGET(path[i]);
             if (!sh_listeners_at(vm, path[i], ev, 3)) return 1;
+        }
+#undef SH_RETARGET
     js_define(vm, e, sh_atom(vm, HA_CURRENTTARGET), JV_NULL, 0);
     js_define(vm, e, sh_atom(vm, HA_EVENTPHASE), jv_num(0), JS_SHAPE_HIDDEN);
+    if (shadows) {
+        /* after the dispatch: the target the document sees, an empty path */
+        js_define(vm, e, sh_atom(vm, HA_TARGET), sh_this_of(vm, script_retarget(d, target, 1)), 0);
+        js_define(vm, e, js_atom_ascii(vm, "\001path"), jv_obj(js_array_new(vm, 0)), JS_SHAPE_HIDDEN);
+    }
     return !(vm->objs[e].a & EV_PREVENTED);
 }
-static int sh_fire(js_vm *vm, uint32_t target, const char *type, uint32_t flags) {
+int sh_fire(js_vm *vm, uint32_t target, const char *type, uint32_t flags) {
     jv ev = sh_event_new(vm, js_atom_ascii(vm, type), flags | EV_TRUSTED);
     return sh_dispatch(vm, target, ev);
 }
 
-/* a click at element x: a checkbox's or radio's checked state changes before it, back
-   after a cancel; a label's control is clicked after it */
-static int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
+/* the other radios of x's group (its name, its form or none) unchecked */
+static void sh_radio_group(dom_document *d, uint32_t x) {
+    uint32_t na = sh_attr_z(d, x, "name");
+    if (!na || !d->attr[na].value.len) return;
+    vector<char> name;
+    append_range(name, text_ptr(d, d->attr[na].value), d->attr[na].value.len);
+    uint32_t form = 0;
+    for (uint32_t y = d->node[x].parent; y && !form; y = d->node[y].parent) if (sh_named(d, y, "form")) form = y;
+    uint32_t root = form ? form : 1;
+    for (uint32_t c = sh_next_in(d, root, root); c; c = sh_next_in(d, c, root)) {
+        if (c == x || !sh_named(d, c, "input") || !sh_attr_z(d, c, "checked")) continue;
+        uint32_t ty = sh_attr_z(d, c, "type"), cn = sh_attr_z(d, c, "name");
+        if (!ty || d->attr[ty].value.len != 5 || !sh_ci_eq(text_ptr(d, d->attr[ty].value), "radio", 5)) continue;
+        if (!cn || d->attr[cn].value.len != len(name) || memcmp(text_ptr(d, d->attr[cn].value), data(name), len(name)) != 0) continue;
+        uint32_t cf = 0;
+        for (uint32_t y = d->node[c].parent; y && !cf; y = d->node[y].parent) if (sh_named(d, y, "form")) cf = y;
+        if (cf == form) dom_remove_attribute(d, node_handle(d, c), "checked", 7);
+    }
+}
+/* a click at element x: the user's click event (the host's click_ev, a pointer event of
+   the input unit's), or a script's; a checkbox's or radio's checked state changes before
+   it (a radio's group unchecked), back after a cancel; a label's control is clicked after
+   it; then the click's default action: a submit or reset button's form, a link */
+static int sh_attr_is(const dom_document *d, uint32_t x, const char *name, const char *v, size_t vn);
+static int sh_input_type_is(const dom_document *d, uint32_t x, const char *t);
+/* a labelable element (HTML 4.10.2): a button, an input but a hidden one, a meter, an
+   output, a progress, a select, a textarea */
+static int sh_labelable(const dom_document *d, uint32_t x) {
+    if (sh_named(d, x, "input")) return !sh_input_type_is(d, x, "hidden");
+    return sh_named(d, x, "button") || sh_named(d, x, "meter") || sh_named(d, x, "output") || sh_named(d, x, "progress") ||
+           sh_named(d, x, "select") || sh_named(d, x, "textarea");
+}
+/* a label's labeled control: the first element in tree order of its for's id when that is
+   labelable, else (no for) its first labelable descendant; 0 when none */
+static uint32_t sh_labeled(const dom_document *d, uint32_t lab) {
+    uint32_t f = sh_attr_z(d, lab, "for");
+    if (!f) {
+        for (uint32_t c = sh_next_in(d, lab, lab); c; c = sh_next_in(d, c, lab)) if (sh_is_elem(d, c) && sh_labelable(d, c)) return c;
+        return 0;
+    }
+    vector<char> id;
+    append_range(id, text_ptr(d, d->attr[f].value), d->attr[f].value.len);
+    if (!len(id)) return 0;
+    for (uint32_t c = sh_next_in(d, 1, 1); c; c = sh_next_in(d, c, 1))
+        if (sh_is_elem(d, c) && sh_attr_is(d, c, "id", data(id), len(id))) return sh_labelable(d, c) ? c : 0;
+    return 0;
+}
+int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
+    struct js_host *h = vm->host;
     dom_document *d = vm->host->d;
+    jv ev = h->click_ev;
+    h->click_ev = JV_UNDEF;
     int box = 0, was = 0;
     if (sh_named(d, x, "input")) {
         uint32_t ty = sh_attr_z(d, x, "type");
@@ -840,8 +947,10 @@ static int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
         was = sh_attr_z(d, x, "checked") != 0;
         if (box == 1 && was) dom_remove_attribute(d, node_handle(d, x), "checked", 7);
         else dom_set_attribute(d, node_handle(d, x), "checked", 7, "", 0);
+        if (box == 2 && !was) sh_radio_group(d, x);
     }
-    int ok = sh_fire(vm, x, "click", EV_BUBBLES | EV_CANCELABLE | trusted);
+    if (!jv_is_obj(ev)) ev = script_click_event(vm, trusted);
+    int ok = sh_dispatch(vm, x, ev);
     if (box && !ok) {
         if (was) dom_set_attribute(d, node_handle(d, x), "checked", 7, "", 0);
         else dom_remove_attribute(d, node_handle(d, x), "checked", 7);
@@ -850,20 +959,19 @@ static int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
         sh_fire(vm, x, "input", EV_BUBBLES | trusted);
         sh_fire(vm, x, "change", EV_BUBBLES | trusted);
     }
-    if (ok && sh_named(d, x, "label")) {
-        uint32_t f = sh_attr_z(d, x, "for"), ctl = 0;
-        if (f) {
-            vector<char> id;
-            append_range(id, text_ptr(d, d->attr[f].value), d->attr[f].value.len);
-            for (uint32_t y = 1; y < d->node_len && !ctl; y++) {
-                if (!d->node[y].live || !sh_is_elem(d, y)) continue;
-                uint32_t ia = sh_attr_z(d, y, "id");
-                if (ia && d->attr[ia].value.len == len(id) && memcmp(text_ptr(d, d->attr[ia].value), data(id), len(id)) == 0 &&
-                    sh_connected(d, y)) ctl = y;
-            }
-        }
-        if (ctl && ctl != x) sh_click_at(vm, ctl, trusted);
+    /* a label's activation (HTML 4.10.4): its control focused, then clicked with the
+       click's own coordinates and detail, unless the click was in the control */
+    uint32_t lab = 0;
+    for (uint32_t y = x; ok && y && y != 1 && !lab; y = d->node[y].parent) if (sh_named(d, y, "label")) lab = y;
+    uint32_t ctl = lab ? sh_labeled(d, lab) : 0;
+    for (uint32_t y = x; ctl && y; y = d->node[y].parent) if (y == ctl) ctl = 0;
+    if (ctl) {
+        script_focus(vm, ctl);
+        h->click_ev = script_click_copy(vm, ev);
+        sh_click_at(vm, ctl, trusted);
+        return ok;
     }
+    if (ok) script_click_default(vm, x);
     return ok;
 }
 
@@ -881,6 +989,45 @@ static void sh_timer_rec(js_vm *vm, size_t i) {
     h->rt->timer[r.index].state = SCRIPT_TIMER_STATE_PENDING;
     vm->timers[i].rec = r.index;
 }
+/* a host task (a network response, an inserted script's run) after delay ms of virtual
+   time, on the timers' queue: a timer of no script's, which no clearTimeout reaches, its
+   native the host's task runner (H_TASK) */
+void sh_task(js_vm *vm, double delay, uint32_t kind, uint32_t arg) {
+    struct js_host *h = vm->host;
+    js_timer t;
+    memset(&t, 0, sizeof t);
+    t.id = 0xFFFFFFFEu;
+    t.due = vm->now + delay;
+    t.interval = -1;
+    t.fn = jv_obj(h->task_fn);
+    uint32_t a = js_array_new(vm, 0);
+    js_array_push(vm, a, jv_num(kind));
+    js_array_push(vm, a, jv_num(arg));
+    t.args = a;
+    t.nargs = 2;
+    t.live = 1;
+    t.seq = ++vm->timer_seq;
+    t.run = vm->cur_run;
+    t.rec = SH_TASK_REC;
+    push_back(vm->timers, t);
+}
+/* the document's URL: the loader's for the page, then as its fragment and history change
+   it (empty with no page) */
+void sh_page_url(js_vm *vm, char *out, size_t cap) {
+    struct js_host *h = vm->host;
+    out[0] = 0;
+    if (len(h->docurl)) { snprintf(out, cap, "%.*s", (int)len(h->docurl), data(h->docurl)); return; }
+    if (!h->page || h->page >= h->nt->resource_len) return;
+    amb_span u = h->nt->resource[h->page].final_url;
+    snprintf(out, cap, "%.*s", (int)u.len, text_ptr(h->nt, u));
+}
+void sh_page_url_v(js_vm *vm, vector<char> *out) {
+    char u[8400];
+    sh_page_url(vm, u, sizeof u);
+    clear(*out);
+    append_range(*out, u, strlen(u));
+}
+
 /* every timer not yet recorded (a microtask is not one), recorded */
 static void sh_timers_seen(js_vm *vm) {
     for (size_t i = 0; i < len(vm->timers); i++) if (!vm->timers[i].rec) sh_timer_rec(vm, i);
@@ -891,7 +1038,7 @@ static void sh_timers_seen(js_vm *vm) {
    uncaught exception in one is recorded (or written to stderr with no page). */
 uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
     uint32_t ran = 0;
-    while (ran < max) {
+    while (ran < max && !(vm->host && vm->host->navigated)) {
         js_gc_maybe(vm);
         if (vm->host) sh_timers_seen(vm);
         int64_t best = -1;
@@ -928,24 +1075,392 @@ uint32_t js_run_timers(js_vm *vm, double until, uint32_t max) {
 
 /* ---- the host's hooks ---- */
 
+/* ---- the view: computed values and geometry (src/script/view.c) ---- */
+
+/* the view made up to date for a script's read: a cascade and a layout it forced are
+   counted to the script whose code reads */
+void sh_view(js_vm *vm) {
+    struct js_host *h = vm->host;
+    uint32_t before = script_view_runs(h);
+    script_view_update(h);
+    uint32_t r = vm->cur_run;
+    if (script_view_runs(h) != before && r && r < h->rt->run_len && h->rt->run[r].live) h->rt->run[r].layouts++;
+}
+/* a DOMRect of x, y, width and height, its top, right, bottom and left derived */
+static jv sh_rect(js_vm *vm, const double *v) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->host->protos[HP_DOMRECT]);
+    static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
+    double x = v[0], y = v[1], w = v[2], hh = v[3];
+    double all[8] = { x, y, w, hh, hh < 0 ? y + hh : y, w < 0 ? x : x + w, hh < 0 ? y : y + hh, w < 0 ? x + w : x };
+    for (size_t i = 0; i < 8; i++) js_define(vm, r, js_atom_ascii(vm, fs[i]), jv_num(all[i] == 0 ? 0 : all[i]), 0);
+    return jv_obj(r);
+}
+/* the bounding rect of an element's client rects (CSSOM View 6.1): zeros for none; the
+   first when every one is empty; else the smallest that holds every one not empty */
+static void sh_bounding(const double *r, uint32_t n, double *out) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (!n) return;
+    int any = 0;
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        const double *q = r + 4 * i;
+        if (q[2] == 0 || q[3] == 0) continue;
+        if (!any || q[0] < x0) x0 = q[0];
+        if (!any || q[1] < y0) y0 = q[1];
+        if (!any || q[0] + q[2] > x1) x1 = q[0] + q[2];
+        if (!any || q[1] + q[3] > y1) y1 = q[1] + q[3];
+        any = 1;
+    }
+    if (!any) { for (int k = 0; k < 4; k++) out[k] = r[k]; return; }
+    out[0] = x0; out[1] = y0; out[2] = x1 - x0; out[3] = y1 - y0;
+}
+#define SH_RECTS_MAX 256
+static double sh_round(double v) { return floor(v + 0.5); }
+/* a length's pixels as an integer property gives them: its end's and its start's rounded */
+static double sh_snap(double at, double size) { return sh_round(at + size) - sh_round(at); }
+
+/* the element's offset parent (CSSOM View 7): none for the root, the body, an element not
+   rendered; else its nearest ancestor that is a td, a th, a table or the body */
+static uint32_t sh_offset_parent(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    if (!script_view_rendered(h, x) || sh_named(d, x, "body") || x == sh_elem_child(d, 1, 0)) return 0;
+    for (uint32_t p = d->node[x].parent; p && p != 1; p = d->node[p].parent)
+        if (sh_named(d, p, "td") || sh_named(d, p, "th") || sh_named(d, p, "table") || sh_named(d, p, "body")) return p;
+    return 0;
+}
+/* offsetLeft, offsetTop, offsetWidth, offsetHeight (which 0 to 3): the first box's border
+   edge, from the offset parent's padding edge (or the page's, for the body or none), and
+   the size of every box's bounds */
+static double sh_offset(js_vm *vm, uint32_t x, uint32_t which) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    double r[4 * SH_RECTS_MAX], b[4];
+    uint32_t n = script_view_rects(h, x, r, SH_RECTS_MAX);
+    if (!n) return 0;
+    if (n > SH_RECTS_MAX) n = SH_RECTS_MAX;
+    sh_bounding(r, n, b);
+    if (which == 2) return sh_snap(b[0], b[2]);
+    if (which == 3) return sh_snap(b[1], b[3]);
+    if (sh_named(d, x, "body")) return 0;
+    uint32_t op = sh_offset_parent(vm, x);
+    double base = 0, pb[4], pbr[4];
+    if (op && !sh_named(d, op, "body") && script_view_border_box(h, op, pb) && script_view_borders(h, op, pbr))
+        base = which == 0 ? pb[0] + pbr[3] : pb[1] + pbr[0];
+    return sh_round((which == 0 ? r[0] : r[1]) - base);
+}
+/* clientLeft, clientTop, clientWidth, clientHeight (which 0 to 3): the borders' widths and
+   the padding box's size; the viewport's for the root element; 0 for an inline element */
+static double sh_client(js_vm *vm, uint32_t x, uint32_t which) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    sh_view(vm);
+    double bb[4], br[4];
+    if (!script_view_border_box(h, x, bb) || !script_view_borders(h, x, br)) return 0;
+    if (x == sh_elem_child(d, 1, 0) && which >= 2) return which == 2 ? h->view_w : h->view_h;
+    if (which == 0) return sh_round(br[3]);
+    if (which == 1) return sh_round(br[0]);
+    if (which == 2) return sh_snap(bb[0] + br[3], bb[2] - br[1] - br[3]);
+    return sh_snap(bb[1] + br[0], bb[3] - br[0] - br[2]);
+}
+
 /* an element's reflected attribute: its value, or "" */
 static jv sh_attr_value(js_vm *vm, const dom_document *d, uint32_t x, const char *name) {
     uint32_t at = sh_attr_z(d, x, name);
     if (!at) return jv_str(A_EMPTY);
     return sh_span(vm, d, d->attr[at].value);
 }
-/* the nodes of an array of node indexes, as an array of wrappers */
+/* a static NodeList (querySelectorAll's): the nodes of an array of node indexes, as an
+   array of their wrappers whose prototype is NodeList's */
 static jv sh_node_array(js_vm *vm, const vector<uint32_t> *xs) {
     uint32_t a = js_array_new(vm, 0);
+    js_set_proto(vm, a, vm->host->protos[HP_NODELIST]);
     for (size_t i = 0; i < len(*xs); i++) { jv w = sh_wrap(vm, (*xs)[i]); js_array_push(vm, a, w); }
     return jv_obj(a);
 }
-static jv sh_children(js_vm *vm, uint32_t x, int elements) {
-    dom_document *d = vm->host->d;
-    vector<uint32_t> xs;
-    for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling)
-        if (!elements || d->node[c].kind == DOM_NODE_KIND_ELEMENT) push_back(xs, c);
-    return sh_node_array(vm, &xs);
+
+/* ---- live collections (DOM 4.2.10, HTML 2.6.2) ----
+   childNodes, children, getElementsByTagName, getElementsByClassName, getElementsByName,
+   and the collections of a document (forms, images, links, anchors, scripts), a form
+   (elements), a select (options), a table (rows, tBodies) and a row (cells). A
+   collection is a host object (HK_LIST) over a record of the host's (h->lists): its
+   root, what it holds, and a cache of its length and of the last item read with its
+   index, so a walk through it in order steps from one item to the next. The cache is
+   valid at the versions of the DOM it was read at: the tree's, which moves with every
+   node inserted or removed, and for a collection an attribute decides (by class, by
+   name, links ...) the attributes', which moves with every attribute set or removed.
+   The versions follow the DOM's own mutation log, read on from where they left it, so
+   a script that sets attributes in a loop over a by-tag collection keeps its cache. A
+   root and a key name one collection, the same object each time it is asked for. */
+
+enum { LC_CHILD_NODES = 1, LC_CHILDREN, LC_BY_TAG, LC_BY_CLASS, LC_BY_NAME, LC_FORMS, LC_IMAGES, LC_LINKS, LC_ANCHORS,
+       LC_SCRIPTS, LC_FORM_ELEMENTS, LC_OPTIONS, LC_ROWS, LC_CELLS, LC_TBODIES };
+/* the collections of a root's own children (the others are of its subtree) */
+static int sh_lc_shallow(uint32_t k) { return k == LC_CHILD_NODES || k == LC_CHILDREN || k == LC_CELLS || k == LC_TBODIES; }
+/* the NodeLists (the others are HTMLCollections) */
+static int sh_lc_nodelist(uint32_t k) { return k == LC_CHILD_NODES || k == LC_BY_NAME; }
+/* those whose items an attribute decides */
+static int sh_lc_by_attr(uint32_t k) {
+    return k == LC_BY_CLASS || k == LC_BY_NAME || k == LC_LINKS || k == LC_ANCHORS || k == LC_FORM_ELEMENTS;
+}
+
+/* the DOM's versions brought up to its mutation log */
+static void sh_versions(struct js_host *h) {
+    dom_document *d = h->d;
+    size_t n = d->mutation_len;
+    int tree = 0, attrs = 0;
+    for (size_t i = h->log_pos; i < n; i++) {
+        dom_op op = d->mutation[i].op;
+        if (op == DOM_OP_APPEND_CHILD || op == DOM_OP_INSERT_BEFORE || op == DOM_OP_REMOVE_CHILD || op == DOM_OP_DESTROY) tree = 1;
+        else if (op == DOM_OP_SET_ATTRIBUTE || op == DOM_OP_SET_ATTRIBUTE_NS || op == DOM_OP_REMOVE_ATTRIBUTE) attrs = 1;
+    }
+    h->log_pos = n;
+    if (tree) h->tree_ver++;
+    if (attrs) h->attr_ver++;
+}
+
+/* whether an attribute's value (s, n) holds the token (t, tn) among its white-space-separated ones */
+static int sh_has_token_in(const char *s, size_t n, const char *t, size_t tn) {
+    size_t i = 0;
+    while (i < n) {
+        while (i < n && sh_ws(s[i])) i++;
+        size_t b = i;
+        while (i < n && !sh_ws(s[i])) i++;
+        if (i > b && i - b == tn && memcmp(s + b, t, tn) == 0) return 1;
+    }
+    return 0;
+}
+static int sh_attr_is(const dom_document *d, uint32_t x, const char *name, const char *v, size_t vn) {
+    uint32_t at = sh_attr_z(d, x, name);
+    return at && d->attr[at].value.len == vn && memcmp(text_ptr(d, d->attr[at].value), v, vn) == 0;
+}
+/* an input whose type is the one given, ASCII case-insensitively */
+static int sh_input_type_is(const dom_document *d, uint32_t x, const char *t) {
+    uint32_t ty = sh_attr_z(d, x, "type");
+    size_t n = strlen(t);
+    return ty && d->attr[ty].value.len == n && sh_ci_eq(text_ptr(d, d->attr[ty].value), t, n);
+}
+
+/* whether the collection l holds the node c, one of its root's children or descendants */
+static int sh_lc_holds(const struct js_host *h, const sh_list *l, uint32_t c) {
+    const dom_document *d = h->d;
+    if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) return l->kind == LC_CHILD_NODES;
+    const char *key = data(h->keys) + l->koff;
+    switch (l->kind) {
+    case LC_CHILD_NODES: case LC_CHILDREN: return 1;
+    case LC_BY_TAG:
+        if (l->klen == 1 && key[0] == '*') return 1;
+        /* an HTML element by its name lower-cased, a foreign one by the name as given */
+        if (d->node[c].ns == DOM_NAMESPACE_HTML) return l->lower && d->node[c].name == l->lower;
+        return l->given && d->node[c].name == l->given;
+    case LC_BY_CLASS: {
+        uint32_t at = sh_attr_z(d, c, "class");
+        if (!at) return 0;
+        const char *s = text_ptr(d, d->attr[at].value);
+        size_t sn = d->attr[at].value.len, i = 0;
+        int any = 0;
+        while (i < l->klen) {
+            while (i < l->klen && sh_ws(key[i])) i++;
+            size_t b = i;
+            while (i < l->klen && !sh_ws(key[i])) i++;
+            if (i == b) break;
+            if (!sh_has_token_in(s, sn, key + b, i - b)) return 0;
+            any = 1;
+        }
+        return any;
+    }
+    case LC_BY_NAME: return d->node[c].ns == DOM_NAMESPACE_HTML && sh_attr_is(d, c, "name", key, l->klen);
+    case LC_FORMS: return sh_named(d, c, "form");
+    case LC_IMAGES: return sh_named(d, c, "img");
+    case LC_LINKS: return (sh_named(d, c, "a") || sh_named(d, c, "area")) && sh_attr_z(d, c, "href");
+    case LC_ANCHORS: return sh_named(d, c, "a") && sh_attr_z(d, c, "name");
+    case LC_SCRIPTS: return sh_named(d, c, "script");
+    case LC_FORM_ELEMENTS:
+        /* a form's: the listed elements it owns, in the document; a fieldset's: those in it */
+        if (!(sh_named(d, c, "button") || sh_named(d, c, "fieldset") || sh_named(d, c, "object") || sh_named(d, c, "output") ||
+              sh_named(d, c, "select") || sh_named(d, c, "textarea") || (sh_named(d, c, "input") && !sh_input_type_is(d, c, "image"))))
+            return 0;
+        return !sh_named(d, l->root, "form") || script_form_owner(d, c) == l->root;
+    case LC_OPTIONS: return sh_named(d, c, "option");
+    case LC_ROWS: {
+        /* a table's rows: its own, and its sections' (the nearest table above a row is the root) */
+        if (!sh_named(d, c, "tr")) return 0;
+        uint32_t p = d->node[c].parent;
+        while (p && p != l->root && !sh_named(d, p, "table")) p = d->node[p].parent;
+        return p == l->root;
+    }
+    case LC_CELLS: return sh_named(d, c, "td") || sh_named(d, c, "th");
+    case LC_TBODIES: return sh_named(d, c, "tbody");
+    default: return 0;
+    }
+}
+
+/* the node before c in tree order within scope (scope itself not): its previous
+   sibling's last descendant, or its parent */
+uint32_t sh_prev_in(const dom_document *d, uint32_t c, uint32_t scope) {
+    if (c == scope) return 0;
+    uint32_t p = d->node[c].prev_sibling;
+    if (!p) { uint32_t up = d->node[c].parent; return up == scope ? 0 : up; }
+    while (d->node[p].last_child) p = d->node[p].last_child;
+    return p;
+}
+/* the subtree a collection's items are found in: its root's, the document's for a form's
+   elements when the form is in it (a control's form attribute names its form from anywhere) */
+static uint32_t sh_lc_scope(const struct js_host *h, const sh_list *l) {
+    return l->kind == LC_FORM_ELEMENTS && sh_named(h->d, l->root, "form") && sh_connected(h->d, l->root) ? 1 : l->root;
+}
+/* the collection's item after c in its order (its first when c is 0), and before c: 0 when none */
+static uint32_t sh_lc_next(const struct js_host *h, const sh_list *l, uint32_t c) {
+    const dom_document *d = h->d;
+    int shallow = sh_lc_shallow(l->kind);
+    uint32_t scope = sh_lc_scope(h, l);
+    for (;;) {
+        if (!c) c = shallow ? d->node[l->root].first_child : sh_next_in(d, scope, scope);
+        else c = shallow ? d->node[c].next_sibling : sh_next_in(d, c, scope);
+        if (!c || sh_lc_holds(h, l, c)) return c;
+    }
+}
+static uint32_t sh_lc_prev(const struct js_host *h, const sh_list *l, uint32_t c) {
+    const dom_document *d = h->d;
+    int shallow = sh_lc_shallow(l->kind);
+    uint32_t scope = sh_lc_scope(h, l);
+    for (;;) {
+        c = shallow ? d->node[c].prev_sibling : sh_prev_in(d, c, scope);
+        if (!c || sh_lc_holds(h, l, c)) return c;
+    }
+}
+
+/* the collection's cache made valid: when the versions it depends on moved, its length
+   and its last item forgotten, and a by-tag key's names found again (an element made
+   since may have brought the name) */
+static void sh_lc_sync(struct js_host *h, uint32_t id) {
+    sh_versions(h);
+    sh_list l = h->lists[id];
+    if (l.tree == h->tree_ver && (!sh_lc_by_attr(l.kind) || l.attrs == h->attr_ver)) return;
+    l.tree = h->tree_ver;
+    l.attrs = h->attr_ver;
+    l.n = ~0u;
+    l.ci = 0;
+    l.cn = 0;
+    if (l.kind == LC_BY_TAG) {
+        const dom_document *d = h->d;
+        vector<char> low;
+        append_range(low, data(h->keys) + l.koff, l.klen);
+        for (size_t i = 0; i < len(low); i++) if (low[i] >= 'A' && low[i] <= 'Z') low[i] = (char)(low[i] + 32);
+        l.lower = names_find(d, data(low), len(low));
+        l.given = names_find(d, data(h->keys) + l.koff, l.klen);
+    }
+    /* a root the page destroyed holds nothing */
+    if (!h->d->node[l.root].live || h->d->node[l.root].gen != l.gen) l.n = 0;
+    h->lists[id] = l;
+}
+
+/* the collection's item i, or 0: stepped to from the last item read, from its first, or
+   back from the last read when that is nearer */
+static uint32_t sh_lc_item(struct js_host *h, uint32_t id, uint32_t i) {
+    sh_lc_sync(h, id);
+    sh_list l = h->lists[id];
+    if (l.n != ~0u && i >= l.n) return 0;
+    uint32_t c = 0, k = 0;
+    if (l.cn && i >= l.ci) { c = l.cn; k = l.ci; }
+    else if (l.cn && l.ci - i < i) {
+        c = l.cn;
+        k = l.ci;
+        while (c && k > i) { c = sh_lc_prev(h, &l, c); k--; }
+        if (!c) { k = 0; c = sh_lc_next(h, &l, 0); }
+    } else c = sh_lc_next(h, &l, 0);
+    while (c && k < i) { c = sh_lc_next(h, &l, c); k++; }
+    if (c) { h->lists[id].ci = k; h->lists[id].cn = c; }
+    else h->lists[id].n = k;
+    return c;
+}
+static uint32_t sh_lc_length(struct js_host *h, uint32_t id) {
+    sh_lc_sync(h, id);
+    sh_list l = h->lists[id];
+    if (l.n != ~0u) return l.n;
+    uint32_t c = l.cn, k = l.cn ? l.ci + 1 : 0;
+    if (!c) { c = sh_lc_next(h, &l, 0); if (c) { k = 1; h->lists[id].ci = 0; h->lists[id].cn = c; } }
+    while (c) { c = sh_lc_next(h, &l, c); if (c) k++; }
+    h->lists[id].n = k;
+    return k;
+}
+/* an HTMLCollection's named item: the first element of the id, or an HTML element of the name */
+static uint32_t sh_lc_named(struct js_host *h, uint32_t id, const char *name, size_t n) {
+    if (!n) return 0;
+    sh_lc_sync(h, id);
+    sh_list l = h->lists[id];
+    if (l.n == 0) return 0;
+    const dom_document *d = h->d;
+    for (uint32_t c = sh_lc_next(h, &l, 0); c; c = sh_lc_next(h, &l, c)) {
+        if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
+        if (sh_attr_is(d, c, "id", name, n)) return c;
+        if (d->node[c].ns == DOM_NAMESPACE_HTML && sh_attr_is(d, c, "name", name, n)) return c;
+    }
+    return 0;
+}
+
+/* the collection of a kind and a key under root: the one made before for them (kept
+   on the root's wrapper, by a hidden name of the kind and the key), or a new one */
+static jv sh_lc_get(js_vm *vm, uint32_t root, uint32_t kind, const char *key, size_t kn) {
+    struct js_host *h = vm->host;
+    jv w = sh_wrap(vm, root);
+    if (!jv_is_obj(w)) return JV_NULL;
+    vector<char> name;
+    push_back(name, '\001');
+    push_back(name, (char)('@' + kind));
+    append_range(name, key, kn);
+    uint32_t atom = js_atom(vm, js_str_utf8(vm, data(name), len(name)));
+    jv had;
+    uint32_t f;
+    if (js_get_own(vm, jv_idx(w), atom, &had, &f) && jv_is_obj(had)) return had;
+    if (!len(h->lists)) { sh_list none; memset(&none, 0, sizeof none); push_back(h->lists, none); }
+    sh_list l;
+    memset(&l, 0, sizeof l);
+    l.root = root;
+    l.gen = h->d->node[root].gen;
+    l.kind = kind;
+    l.koff = (uint32_t)len(h->keys);
+    l.klen = (uint32_t)kn;
+    append_range(h->keys, key, kn);
+    l.n = ~0u;
+    uint32_t id = (uint32_t)len(h->lists);
+    uint32_t o = js_obj_new(vm, JK_HOST, h->protos[sh_lc_nodelist(kind) ? HP_NODELIST : HP_HTMLCOLLECTION]);
+    vm->objs[o].a = id;
+    vm->objs[o].c = HK_LIST;
+    l.obj = o;
+    push_back(h->lists, l);
+    js_define(vm, jv_idx(w), atom, jv_obj(o), JS_SHAPE_HIDDEN);
+    return jv_obj(o);
+}
+/* a collection whose key is a script's value: its text */
+static jv sh_lc_keyed(js_vm *vm, uint32_t root, uint32_t kind, jv arg) {
+    vector<char> key;
+    if (!sh_utf8(vm, arg, &key)) return JV_HOLE;
+    return sh_lc_get(vm, root, kind, data(key), len(key));
+}
+
+/* a collection's property: its length, an item by index, or an HTMLCollection's item by
+   its id or name when no prototype has the name */
+static jv sh_lc_prop(js_vm *vm, uint32_t o, uint32_t atom, uint32_t ha1, int *handled) {
+    struct js_host *h = vm->host;
+    uint32_t id = vm->objs[o].a;
+    *handled = 1;
+    if (ha1 == HA_LENGTH + 1) return jv_num(sh_lc_length(h, id));
+    uint32_t idx;
+    if (js_atom_index(vm, atom, &idx)) {
+        uint32_t c = sh_lc_item(h, id, idx);
+        return c ? sh_wrap(vm, c) : JV_UNDEF;
+    }
+    if (!js_key_is_sym(atom) && !sh_lc_nodelist(h->lists[id].kind) && !js_has(vm, vm->objs[o].proto, atom)) {
+        vector<char> name;
+        js_str_to_utf8(vm, atom, &name);
+        uint32_t c = sh_lc_named(h, id, data(name), len(name));
+        if (c) return sh_wrap(vm, c);
+    }
+    *handled = 0;
+    return JV_UNDEF;
 }
 
 static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
@@ -954,10 +1469,13 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     int el = k == DOM_NODE_KIND_ELEMENT;
     *handled = 1;
     switch (ha) {
-    case HA_NODETYPE: return jv_num(k == DOM_NODE_KIND_ELEMENT ? 1 : k == DOM_NODE_KIND_TEXT ? 3 : k == DOM_NODE_KIND_COMMENT ? 8 : k == DOM_NODE_KIND_DOCUMENT ? 9 : 10);
+    case HA_NODETYPE:
+        return jv_num(k == DOM_NODE_KIND_ELEMENT ? 1 : k == DOM_NODE_KIND_TEXT ? 3 : k == DOM_NODE_KIND_COMMENT ? 8 : k == DOM_NODE_KIND_DOCUMENT ? 9 :
+                      k == DOM_NODE_KIND_FRAGMENT ? 11 : 10);
     case HA_NODENAME:
         if (el) return sh_tag_name(vm, d, x);
-        return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" : "html");
+        return sh_cstr(vm, k == DOM_NODE_KIND_TEXT ? "#text" : k == DOM_NODE_KIND_COMMENT ? "#comment" : k == DOM_NODE_KIND_DOCUMENT ? "#document" :
+                           k == DOM_NODE_KIND_FRAGMENT ? "#document-fragment" : "html");
     case HA_TAGNAME: if (el) return sh_tag_name(vm, d, x); break;
     case HA_LOCALNAME: if (el) return sh_str(vm, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name)); break;
     case HA_NAMESPACEURI:
@@ -981,7 +1499,8 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         }
         break;
     case HA_INNERHTML: case HA_OUTERHTML: {
-        if (!el) break;
+        /* a shadow root's innerHTML too (DOM's ShadowRoot) */
+        if (!el && !(ha == HA_INNERHTML && k == DOM_NODE_KIND_FRAGMENT && script_shadow_host(d, x))) break;
         vector<char> t;
         sh_html_of(d, x, &t, ha == HA_OUTERHTML);
         return sh_str(vm, data(t), len(t));
@@ -996,8 +1515,20 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     case HA_LASTELEMENTCHILD: return sh_wrap(vm, sh_elem_child(d, x, 1));
     case HA_NEXTELEMENTSIBLING: return sh_wrap(vm, sh_elem_sibling(d, x, 1));
     case HA_PREVIOUSELEMENTSIBLING: return sh_wrap(vm, sh_elem_sibling(d, x, 0));
-    case HA_CHILDNODES: return sh_children(vm, x, 0);
-    case HA_CHILDREN: return sh_children(vm, x, 1);
+    case HA_CHILDNODES: return sh_lc_get(vm, x, LC_CHILD_NODES, "", 0);
+    case HA_CHILDREN: return k == DOM_NODE_KIND_ELEMENT || k == DOM_NODE_KIND_DOCUMENT ? sh_lc_get(vm, x, LC_CHILDREN, "", 0) : JV_UNDEF;
+    case HA_FORMS: if (k == DOM_NODE_KIND_DOCUMENT) return sh_lc_get(vm, x, LC_FORMS, "", 0); break;
+    case HA_IMAGES: if (k == DOM_NODE_KIND_DOCUMENT) return sh_lc_get(vm, x, LC_IMAGES, "", 0); break;
+    case HA_LINKS: if (k == DOM_NODE_KIND_DOCUMENT) return sh_lc_get(vm, x, LC_LINKS, "", 0); break;
+    case HA_ANCHORS: if (k == DOM_NODE_KIND_DOCUMENT) return sh_lc_get(vm, x, LC_ANCHORS, "", 0); break;
+    case HA_SCRIPTS: if (k == DOM_NODE_KIND_DOCUMENT) return sh_lc_get(vm, x, LC_SCRIPTS, "", 0); break;
+    case HA_ELEMENTS: if (sh_named(d, x, "form") || sh_named(d, x, "fieldset")) return sh_lc_get(vm, x, LC_FORM_ELEMENTS, "", 0); break;
+    case HA_OPTIONS: if (sh_named(d, x, "select") || sh_named(d, x, "datalist")) return sh_lc_get(vm, x, LC_OPTIONS, "", 0); break;
+    case HA_ROWS:
+        if (sh_named(d, x, "table") || sh_named(d, x, "thead") || sh_named(d, x, "tbody") || sh_named(d, x, "tfoot")) return sh_lc_get(vm, x, LC_ROWS, "", 0);
+        break;
+    case HA_CELLS: if (sh_named(d, x, "tr")) return sh_lc_get(vm, x, LC_CELLS, "", 0); break;
+    case HA_TBODIES: if (sh_named(d, x, "table")) return sh_lc_get(vm, x, LC_TBODIES, "", 0); break;
     case HA_CHILDELEMENTCOUNT: {
         uint32_t n = 0;
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) if (d->node[c].kind == DOM_NODE_KIND_ELEMENT) n++;
@@ -1009,6 +1540,10 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     case HA_HEAD: if (k == DOM_NODE_KIND_DOCUMENT) return sh_wrap(vm, sh_doc_child(d, "head")); break;
     case HA_DOCUMENTELEMENT: if (k == DOM_NODE_KIND_DOCUMENT) return sh_wrap(vm, sh_elem_child(d, 1, 0)); break;
     case HA_DEFAULTVIEW: if (k == DOM_NODE_KIND_DOCUMENT) return jv_obj(vm->global); break;
+    case HA_CURRENTSCRIPT: if (k == DOM_NODE_KIND_DOCUMENT) return sh_wrap(vm, vm->host->cur_script); break;
+    case HA_ACTIVEELEMENT: if (k == DOM_NODE_KIND_DOCUMENT) return sh_wrap(vm, script_active(vm)); break;
+    case HA_ASYNC: if (sh_script_elem(d, x)) return jv_bool(sh_attr_z(d, x, "async") != 0); break;
+    case HA_DEFER: if (sh_script_elem(d, x)) return jv_bool(sh_attr_z(d, x, "defer") != 0); break;
     case HA_READYSTATE: if (k == DOM_NODE_KIND_DOCUMENT) return sh_cstr(vm, vm->host->ready >= 3 ? "complete" : vm->host->ready == 2 ? "interactive" : "loading"); break;
     case HA_TITLE:
         if (k == DOM_NODE_KIND_DOCUMENT) {
@@ -1073,6 +1608,28 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
             return jv_num(f ? 0 : -1);
         }
         break;
+    case HA_OFFSETPARENT: if (el) return sh_wrap(vm, sh_offset_parent(vm, x)); break;
+    case HA_OFFSETLEFT: if (el) return jv_num(sh_offset(vm, x, 0)); break;
+    case HA_OFFSETTOP: if (el) return jv_num(sh_offset(vm, x, 1)); break;
+    case HA_OFFSETWIDTH: if (el) return jv_num(sh_offset(vm, x, 2)); break;
+    case HA_OFFSETHEIGHT: if (el) return jv_num(sh_offset(vm, x, 3)); break;
+    case HA_CLIENTLEFT: if (el) return jv_num(sh_client(vm, x, 0)); break;
+    case HA_CLIENTTOP: if (el) return jv_num(sh_client(vm, x, 1)); break;
+    case HA_CLIENTWIDTH: if (el) return jv_num(sh_client(vm, x, 2)); break;
+    case HA_CLIENTHEIGHT: if (el) return jv_num(sh_client(vm, x, 3)); break;
+    case HA_SCROLLTOP: case HA_SCROLLLEFT: if (el) return jv_num(0); break;
+    case HA_SCROLLWIDTH: case HA_SCROLLHEIGHT:
+        /* the viewport does not scroll: the root's is the page's, at least the viewport's; an
+           element's its padding box's */
+        if (el && x == sh_elem_child(d, 1, 0)) {
+            double bb[4];
+            sh_view(vm);
+            double v = ha == HA_SCROLLWIDTH ? vm->host->view_w : vm->host->view_h;
+            if (script_view_border_box(vm->host, x, bb)) { double e = ha == HA_SCROLLWIDTH ? bb[0] + bb[2] : bb[1] + bb[3]; if (e > v) v = sh_round(e); }
+            return jv_num(v);
+        }
+        if (el) return jv_num(sh_client(vm, x, ha == HA_SCROLLWIDTH ? 2 : 3));
+        break;
     case HA_CLASSLIST: if (el) return sh_host_obj(vm, HK_CLASSLIST, HP_CLASSLIST, x); break;
     case HA_STYLE: if (el) return sh_host_obj(vm, HK_STYLE, HP_STYLE, x); break;
     case HA_DATASET: if (el) return sh_host_obj(vm, HK_DATASET, HP_DATASET, x); break;
@@ -1082,28 +1639,72 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     return JV_UNDEF;
 }
 
+/* whether x is a form element: its name's atom against the one form has (a node's every
+   property read asks, so the name is not compared once its atom is known) */
+static int sh_is_form(struct js_host *h, uint32_t x) {
+    const dom_document *d = h->d;
+    /* the atom looked for again only when the document has new names */
+    if (!h->form_nm && d->names_n != h->names_seen) {
+        h->names_seen = (uint32_t)d->names_n;
+        h->form_nm = names_find(d, "form", 4);
+    }
+    return h->form_nm && d->node[x].name == h->form_nm && d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML;
+}
+
 jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     *handled = 0;
     if (!vm->host || !vm->host->ready) return JV_UNDEF;
     uint32_t kind = vm->objs[o].c;
     uint32_t ha1 = sh_name_of(vm, atom);
+    /* a node's, the most read, first */
+    if (kind == HK_NODE) {
+        uint32_t x = sh_node(vm, jv_obj(o), 0);
+        if (!x) { *handled = 1; return JV_HOLE; }
+        /* a form's controls by their names, before its own properties */
+        if (sh_is_form(vm->host, x)) {
+            jv el = script_form_named(vm, x, atom, handled);
+            if (*handled) return el;
+        }
+        if (!ha1) return JV_UNDEF;
+        return sh_node_get(vm, x, ha1 - 1, handled);
+    }
     if (kind == HK_EVENT) {
         uint32_t f = vm->objs[o].a;
+        if ((f & EV_LAZYPOINT) && !ha1) {
+            jv v = script_event_point(vm, o, atom, handled);
+            if (*handled) return v;
+        }
         *handled = 1;
         if (ha1 == HA_DEFAULTPREVENTED + 1) return jv_bool(f & EV_PREVENTED);
         if (ha1 == HA_BUBBLES + 1) return jv_bool(f & EV_BUBBLES);
         if (ha1 == HA_CANCELABLE + 1) return jv_bool(f & EV_CANCELABLE);
+        if (ha1 == HA_COMPOSED + 1) return jv_bool(f & EV_COMPOSED);
         if (ha1 == HA_ISTRUSTED + 1) return jv_bool(f & EV_TRUSTED);
         if (ha1 == HA_DETAIL + 1) return vm->objs[o].x;
         *handled = 0;
         return JV_UNDEF;
     }
-    if (kind == HK_NODE) {
-        uint32_t x = sh_node(vm, jv_obj(o), 0);
+    if (kind == HK_LIST) return sh_lc_prop(vm, o, atom, ha1, handled);
+    if (kind >= HK_RESPONSE && kind <= HK_XHR) return script_fetch_get(vm, o, atom, handled);
+    if (kind == HK_STORAGE) return script_storage_named(vm, o, atom, handled);
+    if (kind == HK_COMPUTED) {
+        /* a computed style's property: its resolved value, by its name camel-cased or as CSS
+           writes it; the empty string for a property the cascade does not compute */
+        uint32_t x = sh_owner(vm, o);
         if (!x) { *handled = 1; return JV_HOLE; }
-        if (!ha1) return JV_UNDEF;
-        return sh_node_get(vm, x, ha1 - 1, handled);
+        uint32_t idx;
+        if (js_key_is_sym(atom) || js_atom_index(vm, atom, &idx) || js_has(vm, vm->objs[o].proto, atom)) return JV_UNDEF;
+        *handled = 1;
+        if (ha1 == HA_CSSTEXT + 1) return jv_str(A_EMPTY);
+        if (ha1 == HA_LENGTH + 1) return jv_num(script_view_props());
+        vector<char> name, prop, v;
+        js_str_to_utf8(vm, atom, &name);
+        sh_css_name(&name, &prop);
+        sh_view(vm);
+        script_view_style(vm->host, x, data(prop), len(prop), &v);
+        return sh_str(vm, data(v), len(v));
     }
+
     if (kind == HK_CLASSLIST || kind == HK_STYLE || kind == HK_DATASET) {
         uint32_t x = sh_owner(vm, o);
         if (!x) { *handled = 1; return JV_HOLE; }
@@ -1134,7 +1735,7 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         jv ownv;
         uint32_t f;
         if (js_get_own(vm, o, atom, &ownv, &f)) return JV_UNDEF;
-        if (js_has(vm, vm->host_protos[kind == HK_STYLE ? HP_STYLE : HP_DATASET], atom)) return JV_UNDEF;
+        if (js_has(vm, vm->host->protos[kind == HK_STYLE ? HP_STYLE : HP_DATASET], atom)) return JV_UNDEF;
         vector<char> name, prop, v;
         js_str_to_utf8(vm, atom, &name);
         if (kind == HK_STYLE) {
@@ -1176,12 +1777,43 @@ static void sh_set_flag(js_vm *vm, uint32_t x, const char *name, jv v) {
     else dom_remove_attribute(d, node_handle(d, x), name, strlen(name));
 }
 
+static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
+/* a property set on a host object: its change to the DOM made records, as a call's */
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
+    struct js_host *h = vm->host;
+    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_set(vm, o, atom, v, handled);
+    if (h->mreg_live) script_observe_flush(vm);
+    int r = sh_host_set(vm, o, atom, v, handled);
+    sh_after_call(vm);
+    return r;
+}
+static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
     *handled = 0;
     if (!vm->host || !vm->host->ready) return 1;
     uint32_t kind = vm->objs[o].c;
     uint32_t ha1 = sh_name_of(vm, atom);
     dom_document *d = vm->host->d;
+    if (kind >= HK_RESPONSE && kind <= HK_XHR) return script_fetch_set(vm, o, atom, v, handled);
+    /* a computed style is read-only */
+    if (kind == HK_COMPUTED) {
+        uint32_t idx;
+        if (js_key_is_sym(atom) || js_atom_index(vm, atom, &idx) || js_has(vm, vm->objs[o].proto, atom)) return 1;
+        vector<char> name;
+        js_str_to_utf8(vm, atom, &name);
+        push_back(name, 0);
+        char msg[300];
+        snprintf(msg, sizeof msg, "Failed to set the '%s' property on 'CSSStyleDeclaration': These styles are computed, and therefore the '%s' property is read-only.", data(name), data(name));
+        *handled = 1;
+        sh_dom_error(vm, "NoModificationAllowedError", msg);
+        return 0;
+    }
+    if (kind == HK_STORAGE) return script_storage_set(vm, o, atom, v, handled);
+    /* a collection's items and length have no setter: a write to one does nothing */
+    if (kind == HK_LIST) {
+        uint32_t idx;
+        if (ha1 == HA_LENGTH + 1 || js_atom_index(vm, atom, &idx)) *handled = 1;
+        return 1;
+    }
     if (kind == HK_NODE) {
         uint32_t x = sh_node(vm, jv_obj(o), 0);
         if (!x) { *handled = 1; return 0; }
@@ -1221,21 +1853,26 @@ int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
             vector<char> t;
             if (v != JV_NULL && !sh_utf8(vm, v, &t)) return 0;
             sh_set_text(d, x, data(t), len(t));
+            if (sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
             return 1;
         }
         case HA_INNERHTML: {
-            if (!el) return 1;
+            if (!el && !(k == DOM_NODE_KIND_FRAGMENT && script_shadow_host(d, x))) return 1;
             vector<char> t;
             if (!sh_utf8(vm, v, &t)) return 0;
             sh_empty(d, x);
-            sh_insert_html(d, x, 0, data(t), len(t));
+            sh_insert_html(vm, x, 0, data(t), len(t));
             return 1;
         }
         case HA_ID: if (el) return sh_set_attr_v(vm, x, "id", v); break;
         case HA_CLASSNAME: if (el) return sh_set_attr_v(vm, x, "class", v); break;
         case HA_TITLE: if (el) return sh_set_attr_v(vm, x, "title", v); break;
         case HA_HREF: if (el) return sh_set_attr_v(vm, x, "href", v); break;
-        case HA_SRC: if (el) return sh_set_attr_v(vm, x, "src", v); break;
+        case HA_SRC:
+            if (!el) break;
+            if (!sh_set_attr_v(vm, x, "src", v)) return 0;
+            if (sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
+            return 1;
         case HA_ALT: if (el) return sh_set_attr_v(vm, x, "alt", v); break;
         case HA_NAME: if (el) return sh_set_attr_v(vm, x, "name", v); break;
         case HA_TYPE: if (el) return sh_set_attr_v(vm, x, "type", v); break;
@@ -1323,34 +1960,6 @@ static int sh_selector(js_vm *vm, uint32_t args, uint32_t argc, vector<char> *se
     if (depth != 0) { sh_dom_error(vm, "SyntaxError", "the selector is not valid"); return 0; }
     return 1;
 }
-/* the elements by a tag name (* any) or a class names' list, under scope */
-static jv sh_by(js_vm *vm, uint32_t scope, jv arg, int by_class) {
-    dom_document *d = vm->host->d;
-    vector<char> want;
-    if (!sh_utf8(vm, arg, &want)) return JV_HOLE;
-    vector<uint32_t> wt, xs;
-    sh_tokens(data(want), len(want), &wt);
-    /* an HTML element is named by the name lower-cased, a foreign one by the name as given */
-    vector<char> given;
-    append_range(given, data(want), len(want));
-    for (size_t i = 0; i < len(want) && !by_class; i++) if (want[i] >= 'A' && want[i] <= 'Z') want[i] = (char)(want[i] + 32);
-    for (uint32_t c = sh_next_in(d, scope, scope); c; c = sh_next_in(d, c, scope)) {
-        if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
-        if (!by_class) {
-            int html = d->node[c].ns == DOM_NAMESPACE_HTML;
-            if ((len(want) == 1 && want[0] == '*') || (html && names_is(d, d->node[c].name, data(want), len(want))) ||
-                (!html && names_is(d, d->node[c].name, data(given), len(given)))) push_back(xs, c);
-            continue;
-        }
-        if (!len(wt)) continue;
-        vector<char> cls;
-        sh_class_text(d, c, &cls);
-        int all = 1;
-        for (size_t i = 0; i < len(wt) && all; i += 2) if (!sh_has_token(&cls, data(want) + wt[i], wt[i + 1])) all = 0;
-        if (all) push_back(xs, c);
-    }
-    return sh_node_array(vm, &xs);
-}
 /* the nodes of append/prepend/before/after's arguments: a node, or a string as text */
 static int sh_arg_nodes(js_vm *vm, uint32_t args, uint32_t argc, vector<uint32_t> *out) {
     dom_document *d = vm->host->d;
@@ -1368,12 +1977,74 @@ static int sh_arg_nodes(js_vm *vm, uint32_t args, uint32_t argc, vector<uint32_t
     return 1;
 }
 
+static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
+/* the end of a call into the host: its changes made records, the custom elements'
+   reactions to them run (the standard's [CEReactions]), the reactions' changes recorded */
+static void sh_after_call(js_vm *vm) {
+    struct js_host *h = vm->host;
+    if (h->mreg_live) script_observe_flush(vm);
+    if (len(h->cdefs) && !vm->throwing) {
+        script_custom_flush(vm);
+        if (h->mreg_live) script_observe_flush(vm);
+    }
+}
+/* a call into the host: while a MutationObserver observes, the DOM's changes before it
+   and its own made records, each its own (src/script/observe.c); else the call alone */
 jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
+    struct js_host *h = vm->host;
+    if (!h || (!h->mreg_live && !len(h->cdefs))) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
+    if (h->mreg_live) script_observe_flush(vm);
+    jv r = sh_host_call(vm, id, callee, thisv, args, argc, handled);
+    sh_after_call(vm);
+    return r;
+}
+static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
     (void)callee;
     *handled = 1;
     if (!vm->host || !vm->host->ready) { *handled = 0; return JV_UNDEF; }
     dom_document *d = vm->host->d;
+    if (id >= SH_FETCH_FIRST && id < SH_FETCH_END) return script_fetch_call(vm, id, callee, thisv, args, argc, JV_UNDEF, handled);
+    if (id >= SH_INPUT_FIRST && id < SH_INPUT_END) return script_input_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_OBSERVE_FIRST && id < SH_OBSERVE_END) return script_observe_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_CUSTOM_FIRST && id < SH_CUSTOM_END) return script_custom_call(vm, id, callee, thisv, args, argc, handled);
+    if (id >= SH_WINDOW_FIRST && id < SH_WINDOW_END) return script_window_call(vm, id, callee, thisv, args, argc, handled);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
+    /* location's: its href (a hidden part), navigations by it */
+    if (id == H_LOC_STRING || id == H_LOC_HREF_GET || id == H_LOC_HASH_GET) {
+        jv v;
+        uint32_t f;
+        if (js_get_own(vm, vm->host->location, js_atom_ascii(vm, id == H_LOC_HASH_GET ? "\001hash" : "\001href"), &v, &f)) return v;
+        return jv_str(A_EMPTY);
+    }
+    if (id == H_LOC_ASSIGN || id == H_LOC_REPLACE || id == H_LOC_HREF_SET || id == H_LOC_HASH_SET || id == H_LOC_RELOAD) {
+        vector<char> u;
+        if (id == H_LOC_RELOAD) sh_page_url_v(vm, &u);
+        else if (!sh_utf8(vm, a0, &u)) return JV_HOLE;
+        if (id == H_LOC_HASH_SET) {
+            /* the page's URL with the hash given */
+            vector<char> base;
+            sh_page_url_v(vm, &base);
+            size_t cut = 0;
+            while (cut < len(base) && base[cut] != '#') cut++;
+            vector<char> full;
+            append_range(full, data(base), cut);
+            if (!len(u) || u[0] != '#') push_back(full, '#');
+            append_range(full, data(u), len(u));
+            clear(u);
+            append_range(u, data(full), len(full));
+        }
+        script_navigate(vm, id == H_LOC_RELOAD ? SCRIPT_NAV_CAUSE_RELOAD : SCRIPT_NAV_CAUSE_LOCATION, data(u), len(u));
+        return JV_UNDEF;
+    }
+    /* the host's tasks, from the timers' queue */
+    if (id == H_TASK) {
+        uint32_t kind = (uint32_t)js_to_number(vm, a0), arg = (uint32_t)js_to_number(vm, a1);
+        if (kind >= SH_TASK_FETCH && kind <= SH_TASK_NOTE) script_fetch_task(vm, kind, arg);
+        else if (kind == SH_TASK_SCRIPT) sh_run_pending(vm, arg);
+        else if (kind == SH_TASK_HASH || kind == SH_TASK_NAV) script_input_task(vm, kind, arg);
+        else if (kind == SH_TASK_TRAVERSE) script_window_task(vm, kind, arg);
+        return JV_UNDEF;
+    }
     /* the window's own */
     if (id == H_WIN_ADD) return sh_add_listener(vm, JS_WINDOW, args, argc);
     if (id == H_WIN_REMOVE) return sh_remove_listener(vm, JS_WINDOW, args, argc);
@@ -1415,19 +2086,35 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         if (jv_is_obj(a1)) {
             if (js_truthy(vm, js_get(vm, a1, sh_atom(vm, HA_BUBBLES)))) f |= EV_BUBBLES;
             if (js_truthy(vm, js_get(vm, a1, sh_atom(vm, HA_CANCELABLE)))) f |= EV_CANCELABLE;
+            if (js_truthy(vm, js_get(vm, a1, sh_atom(vm, HA_COMPOSED)))) f |= EV_COMPOSED;
         }
         jv ev = sh_event_new(vm, js_atom(vm, ts), f);
-        if (id == H_CUSTOM_EVENT && jv_is_obj(a1)) {
-            jv det = js_get(vm, a1, sh_atom(vm, HA_DETAIL));
-            vm->objs[jv_idx(ev)].x = det;
+        if (id == H_CUSTOM_EVENT) {
+            /* a CustomEvent's detail, null unless given */
+            jv det = jv_is_obj(a1) ? js_get(vm, a1, sh_atom(vm, HA_DETAIL)) : JV_UNDEF;
+            vm->objs[jv_idx(ev)].x = det == JV_UNDEF ? JV_NULL : det;
         }
         return ev;
     }
     if (id == H_COMPUTED) {
-        /* the inline style alone: what a script reads most (display, a color it set) */
-        uint32_t x = sh_node(vm, a0, 1);
-        if (!x) return JV_HOLE;
-        return sh_host_obj(vm, HK_STYLE, HP_STYLE, x);
+        /* the element's resolved values, read when a property is (CSSOM 9.1): live */
+        uint32_t x = sh_node(vm, a0, 0);
+        if (vm->throwing) return JV_HOLE;
+        if (!x || !sh_is_elem(d, x))
+            return js_throw_msg(vm, vm->type_error_proto, "Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.");
+        return sh_host_obj(vm, HK_COMPUTED, HP_STYLE, x);
+    }
+    if (id == H_RECT_JSON) {
+        /* a DOMRect's toJSON: its eight numbers */
+        uint32_t o = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+        static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
+        for (size_t i = 0; i < 8; i++) {
+            uint32_t at = js_atom_ascii(vm, fs[i]);
+            jv v = js_get(vm, thisv, at);
+            if (vm->throwing) return JV_HOLE;
+            js_define(vm, o, at, v, 0);
+        }
+        return jv_obj(o);
     }
     /* an event's */
     if (id == H_EV_PREVENT || id == H_EV_STOP || id == H_EV_STOP_NOW) {
@@ -1495,6 +2182,24 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         return JV_TRUE;
     }
     /* a style's */
+    if ((id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) && jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_HOST &&
+        vm->objs[jv_idx(thisv)].c == HK_COMPUTED) {
+        uint32_t x = sh_owner(vm, jv_idx(thisv));
+        if (!x) return JV_HOLE;
+        vector<char> name, v;
+        if (!sh_utf8(vm, a0, &name)) return JV_HOLE;
+        if (id != H_ST_GET) {
+            push_back(name, 0);
+            char msg[300];
+            snprintf(msg, sizeof msg, "Failed to execute '%s' on 'CSSStyleDeclaration': These styles are computed, and therefore the '%s' property is read-only.",
+                     id == H_ST_SET ? "setProperty" : "removeProperty", data(name));
+            return sh_dom_error(vm, "NoModificationAllowedError", msg);
+        }
+        for (size_t i = 0; i < len(name); i++) if (name[i] >= 'A' && name[i] <= 'Z') name[i] = (char)(name[i] + 32);
+        sh_view(vm);
+        script_view_style(vm->host, x, data(name), len(name), &v);
+        return sh_str(vm, data(v), len(v));
+    }
     if (id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].c != HK_STYLE) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
         uint32_t x = sh_owner(vm, jv_idx(thisv));
@@ -1512,6 +2217,30 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         sh_style_set(d, x, &name, data(v), len(v));
         return JV_UNDEF;
     }
+    /* a collection's: a live one, or querySelectorAll's array of the NodeList prototype */
+    if (id == H_LIST_ITEM || id == H_LIST_NAMED) {
+        if (!argc) return js_throw_msg(vm, vm->type_error_proto, id == H_LIST_ITEM ? "Failed to execute 'item': 1 argument required, but only 0 present."
+                                                                               : "Failed to execute 'namedItem': 1 argument required, but only 0 present.");
+        int live = jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_HOST && vm->objs[jv_idx(thisv)].c == HK_LIST;
+        int fixed = jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_ARRAY;
+        if (!live && !fixed) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
+        if (id == H_LIST_ITEM) {
+            /* WebIDL's unsigned long: the number modulo 2^32 */
+            double n = js_to_number(vm, a0);
+            if (vm->throwing) return JV_HOLE;
+            double m = n != n || n == 1.0 / 0.0 || n == -1.0 / 0.0 ? 0 : fmod(n < 0 ? -floor(-n) : floor(n), 4294967296.0);
+            if (m < 0) m += 4294967296.0;
+            uint32_t i = (uint32_t)m;
+            if (fixed) return i < vm->objs[jv_idx(thisv)].b ? js_array_get(vm, jv_idx(thisv), i) : JV_NULL;
+            uint32_t c = sh_lc_item(vm->host, vm->objs[jv_idx(thisv)].a, i);
+            return c ? sh_wrap(vm, c) : JV_NULL;
+        }
+        vector<char> name;
+        if (!sh_utf8(vm, a0, &name)) return JV_HOLE;
+        if (fixed) return JV_NULL;
+        uint32_t c = sh_lc_named(vm->host, vm->objs[jv_idx(thisv)].a, data(name), len(name));
+        return c ? sh_wrap(vm, c) : JV_NULL;
+    }
     /* a node's, an element's, the document's: this a live node */
     uint32_t x = sh_node(vm, thisv, 0);
     if (!x) {
@@ -1524,7 +2253,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
     case H_APPEND_CHILD: {
         uint32_t c = sh_node(vm, a0, 1);
         if (!c) return JV_HOLE;
-        dom_status st = sh_insert(d, x, c, 0);
+        dom_status st = sh_insert_vm(vm, x, c, 0);
         if (st != DOM_OK) return sh_status(vm, st);
         return a0;
     }
@@ -1533,7 +2262,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         if (!c) return JV_HOLE;
         uint32_t b = jv_is_nullish(a1) ? 0 : sh_node(vm, a1, 1);
         if (vm->throwing) return JV_HOLE;
-        dom_status st = sh_insert(d, x, c, b);
+        dom_status st = sh_insert_vm(vm, x, c, b);
         if (st != DOM_OK) return sh_status(vm, st);
         return a0;
     }
@@ -1555,7 +2284,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         uint32_t next = d->node[old].next_sibling;
         if (next == nw) next = d->node[nw].next_sibling;
         dom_status st = dom_remove_child(d, node_handle(d, x), node_handle(d, old));
-        if (st == DOM_OK) st = sh_insert(d, x, nw, next);
+        if (st == DOM_OK) st = sh_insert_vm(vm, x, nw, next);
         if (st != DOM_OK) return sh_status(vm, st);
         return a1;
     }
@@ -1572,6 +2301,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         vector<char> buf;
         (void)buf;
         uint32_t c = sh_import(d, d, x, js_truthy(vm, a0));
+        if (c) sh_start_like(vm->host, x, c);
         return sh_wrap(vm, c);
     }
     case H_ADD_LISTENER: return sh_add_listener(vm, x, args, argc);
@@ -1598,7 +2328,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
             if (moved) at = d->node[at].next_sibling;
         }
         for (size_t i = 0; i < len(ns); i++) {
-            dom_status st = sh_insert(d, p, ns[i], at);
+            dom_status st = sh_insert_vm(vm, p, ns[i], at);
             if (st != DOM_OK) return sh_status(vm, st);
         }
         if (id == H_REPLACE_WITH) {
@@ -1608,12 +2338,51 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         }
         return JV_UNDEF;
     }
+    case H_REPLACE_CHILDREN: {
+        /* every child replaced by the nodes given (DOM 4.2.6): none of them may hold x */
+        vector<uint32_t> ns;
+        if (!sh_arg_nodes(vm, args, argc, &ns)) return JV_HOLE;
+        for (size_t i = 0; i < len(ns); i++)
+            if (children_inclusive_ancestor(d, ns[i], x)) return sh_status(vm, DOM_WOULD_CYCLE);
+        sh_empty(d, x);
+        for (size_t i = 0; i < len(ns); i++) {
+            dom_status st = sh_insert_vm(vm, x, ns[i], 0);
+            if (st != DOM_OK) return sh_status(vm, st);
+        }
+        return JV_UNDEF;
+    }
+    case H_SET_ATTR_NS: case H_GET_ATTR_NS: {
+        /* an attribute of a namespace (DOM 4.9): XLink's, XML's or XMLNS's by their URLs; no
+           namespace's, or another's, as an attribute of none */
+        if (!el) break;
+        vector<char> nsu, nm, v;
+        if (!jv_is_nullish(a0) && !sh_utf8(vm, a0, &nsu)) return JV_HOLE;
+        if (!sh_utf8(vm, a1, &nm)) return JV_HOLE;
+        static const char *const urls[] = { "", "http://www.w3.org/1999/xlink", "http://www.w3.org/XML/1998/namespace", "http://www.w3.org/2000/xmlns/" };
+        uint32_t ns = 0;
+        for (uint32_t k = 1; k < 4; k++) if (len(nsu) == strlen(urls[k]) && memcmp(data(nsu), urls[k], len(nsu)) == 0) ns = k;
+        if (id == H_GET_ATTR_NS) {
+            /* by its local name: the qualified name's part after the prefix */
+            for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
+                if ((uint32_t)d->attr[at].ns != ns) continue;
+                size_t nl = names_len(d, d->attr[at].name), k = 0;
+                for (size_t i = 0; ns && i < nl; i++) if (names_ptr(d, d->attr[at].name)[i] == ':') k = i + 1;
+                if (nl - k == len(nm) && memcmp(names_ptr(d, d->attr[at].name) + k, data(nm), len(nm)) == 0) return sh_span(vm, d, d->attr[at].value);
+            }
+            return JV_NULL;
+        }
+        if (!sh_utf8(vm, js_arg(vm, args, argc, 2), &v)) return JV_HOLE;
+        dom_status st = ns ? dom_set_attribute_ns(d, node_handle(d, x), (dom_attr_namespace)ns, data(nm), len(nm), data(v), len(v))
+                           : dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
+        if (st != DOM_OK) return sh_status(vm, st);
+        return JV_UNDEF;
+    }
     case H_APPEND: case H_PREPEND: {
         vector<uint32_t> ns;
         if (!sh_arg_nodes(vm, args, argc, &ns)) return JV_HOLE;
         uint32_t at = id == H_PREPEND ? d->node[x].first_child : 0;
         for (size_t i = 0; i < len(ns); i++) {
-            dom_status st = sh_insert(d, x, ns[i], at == ns[i] ? d->node[at].next_sibling : at);
+            dom_status st = sh_insert_vm(vm, x, ns[i], at == ns[i] ? d->node[at].next_sibling : at);
             if (st != DOM_OK) return sh_status(vm, st);
         }
         return JV_UNDEF;
@@ -1626,8 +2395,15 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         if (id == H_QS) return len(xs) ? sh_wrap(vm, xs[0]) : JV_NULL;
         return sh_node_array(vm, &xs);
     }
-    case H_BY_TAG: return sh_by(vm, x, a0, 0);
-    case H_BY_CLASS: return sh_by(vm, x, a0, 1);
+    case H_BY_TAG: if (!el && !doc) break; return sh_lc_keyed(vm, x, LC_BY_TAG, a0);
+    case H_BY_CLASS: if (!el && !doc) break; return sh_lc_keyed(vm, x, LC_BY_CLASS, a0);
+    case H_BY_NAME: if (!doc) break; return sh_lc_keyed(vm, x, LC_BY_NAME, a0);
+    case H_WRITE: case H_WRITELN: if (!doc) break; return sh_write(vm, args, argc, id == H_WRITELN);
+    case H_DOC_OPEN: if (!doc) break; sh_open(vm); return thisv;
+    case H_DOC_CLOSE:
+        if (!doc) break;
+        if (vm->host->opened) { vm->host->opened = 0; vm->host->ready = 3; vm->host->wscript = 0; }
+        return JV_UNDEF;
     case H_BY_ID: {
         vector<char> want;
         if (!sh_utf8(vm, a0, &want)) return JV_HOLE;
@@ -1641,6 +2417,9 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         vector<char> nm;
         if (!sh_utf8(vm, a0, &nm)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
+        /* a custom element's name defined: the element its constructor makes */
+        uint32_t def = len(vm->host->cdefs) ? script_custom_def(vm, data(nm), len(nm)) : 0;
+        if (def) return script_custom_create(vm, def);
         dom_node_h h = dom_create_element(d, data(nm), len(nm));
         if (!h.index) return sh_status(vm, DOM_INVALID_NAME);
         return sh_wrap(vm, h.index);
@@ -1674,6 +2453,7 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
         dom_status st = dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
         if (st != DOM_OK) return sh_status(vm, st);
+        if (len(nm) == 3 && memcmp(data(nm), "src", 3) == 0 && sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
         return JV_UNDEF;
     }
     case H_REMOVE_ATTR: {
@@ -1709,13 +2489,19 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         return JV_NULL;
     }
     case H_CLICK: sh_click_at(vm, x, 0); return JV_UNDEF;
-    case H_FOCUS: case H_BLUR: return JV_UNDEF;
-    case H_RECT: {
-        /* layout runs after the scripts: a box of no size */
-        uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-        static const char *const fs[] = { "x", "y", "width", "height", "top", "right", "bottom", "left" };
-        for (size_t i = 0; i < 8; i++) js_define(vm, r, js_atom_ascii(vm, fs[i]), jv_num(0), 0);
-        return jv_obj(r);
+    case H_FOCUS: script_focus(vm, x); return JV_UNDEF;
+    case H_BLUR: script_blur(vm, x); return JV_UNDEF;
+    case H_RECT: case H_CLIENT_RECTS: {
+        /* the cascade and the layout as the page is now (run if the DOM changed since) */
+        sh_view(vm);
+        double r[4 * SH_RECTS_MAX], b[4];
+        uint32_t n = script_view_rects(vm->host, x, r, SH_RECTS_MAX);
+        if (n > SH_RECTS_MAX) n = SH_RECTS_MAX;
+        if (id == H_RECT) { sh_bounding(r, n, b); return sh_rect(vm, b); }
+        uint32_t a = js_array_new(vm, 0);
+        js_set_proto(vm, a, vm->host->protos[HP_RECTLIST]);
+        for (uint32_t i = 0; i < n; i++) { jv q = sh_rect(vm, r + 4 * i); js_array_push(vm, a, q); }
+        return jv_obj(a);
     }
     case H_INSERT_ADJ_HTML: {
         vector<char> where, html;
@@ -1723,10 +2509,10 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
         for (size_t i = 0; i < len(where); i++) if (where[i] >= 'A' && where[i] <= 'Z') where[i] = (char)(where[i] + 32);
         push_back(where, 0);
         uint32_t p = d->node[x].parent;
-        if (strcmp(data(where), "beforebegin") == 0 && p) sh_insert_html(d, p, x, data(html), len(html));
-        else if (strcmp(data(where), "afterbegin") == 0) sh_insert_html(d, x, d->node[x].first_child, data(html), len(html));
-        else if (strcmp(data(where), "beforeend") == 0) sh_insert_html(d, x, 0, data(html), len(html));
-        else if (strcmp(data(where), "afterend") == 0 && p) sh_insert_html(d, p, d->node[x].next_sibling, data(html), len(html));
+        if (strcmp(data(where), "beforebegin") == 0 && p) sh_insert_html(vm, p, x, data(html), len(html));
+        else if (strcmp(data(where), "afterbegin") == 0) sh_insert_html(vm, x, d->node[x].first_child, data(html), len(html));
+        else if (strcmp(data(where), "beforeend") == 0) sh_insert_html(vm, x, 0, data(html), len(html));
+        else if (strcmp(data(where), "afterend") == 0 && p) sh_insert_html(vm, p, d->node[x].next_sibling, data(html), len(html));
         else return sh_dom_error(vm, "SyntaxError", "insertAdjacentHTML's position is none of beforebegin afterbegin beforeend afterend");
         return JV_UNDEF;
     }
@@ -1738,19 +2524,61 @@ jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint
 
 /* ---- the page's globals and prototypes ---- */
 
-static void sh_method(js_vm *vm, uint32_t o, const char *name, uint32_t id, uint32_t nargs) {
+void sh_method(js_vm *vm, uint32_t o, const char *name, uint32_t id, uint32_t nargs) {
     uint32_t a = js_atom_ascii(vm, name);
     uint32_t f = js_native_new(vm, id, a, nargs);
     js_define(vm, o, a, jv_obj(f), JS_SHAPE_HIDDEN);
 }
 /* a constructor of the page's interfaces (Node, Element ...): its prototype p */
-static uint32_t sh_interface(js_vm *vm, const char *name, uint32_t id, uint32_t p) {
+uint32_t sh_interface(js_vm *vm, const char *name, uint32_t id, uint32_t p) {
     uint32_t a = js_atom_ascii(vm, name);
     uint32_t f = js_native_new(vm, id, a, 0);
     js_define(vm, f, A_PROTOTYPE, jv_obj(p), JS_SHAPE_HIDDEN);
     js_define(vm, p, A_CONSTRUCTOR, jv_obj(f), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, a, jv_obj(f), JS_SHAPE_HIDDEN);
     return f;
+}
+
+/* a location's parts of a URL (HTML 7.2.4): href, protocol, host, hostname, port,
+   pathname, search, hash, origin -- a file: page's origin as Chromium writes it */
+static void sh_location_fill(js_vm *vm, uint32_t loc, const char *url) {
+    size_t n = strlen(url), i = 0;
+    while (i < n && url[i] != ':') i++;
+    size_t scheme = i < n ? i + 1 : 0, at = scheme, host0 = 0, host1 = 0;
+    if (at + 1 < n && url[at] == '/' && url[at + 1] == '/') {
+        at += 2;
+        host0 = at;
+        while (at < n && url[at] != '/' && url[at] != '?' && url[at] != '#') at++;
+        host1 = at;
+        /* the userinfo is no part of the host */
+        for (size_t k = host0; k < host1; k++) if (url[k] == '@') host0 = k + 1;
+    }
+    size_t path0 = at;
+    while (at < n && url[at] != '?' && url[at] != '#') at++;
+    size_t path1 = at, q0 = at;
+    while (at < n && url[at] != '#') at++;
+    size_t q1 = at;
+    size_t colon = host1;
+    for (size_t k = host1; k > host0; k--) {
+        if (url[k - 1] == ']') break;
+        if (url[k - 1] == ':') { colon = k - 1; break; }
+    }
+    char origin[600];
+    if (!net_url_origin(url, origin, sizeof origin)) snprintf(origin, sizeof origin, "null");
+    if (scheme == 5 && memcmp(url, "file:", 5) == 0) snprintf(origin, sizeof origin, "file://");
+    struct { const char *name; size_t off, len; } parts[] = {
+        { "\001href", 0, n }, { "protocol", 0, scheme }, { "host", host0, host1 - host0 }, { "hostname", host0, colon - host0 },
+        { "port", colon < host1 ? colon + 1 : host1, colon < host1 ? host1 - colon - 1 : 0 }, { "pathname", path0, path1 - path0 },
+        { "search", q0, q1 - q0 > 1 ? q1 - q0 : 0 }, { "\001hash", q1, n - q1 > 1 ? n - q1 : 0 } };
+    for (size_t k = 0; k < sizeof parts / sizeof parts[0]; k++)
+        js_define(vm, loc, js_atom_ascii(vm, parts[k].name), sh_str(vm, url + parts[k].off, parts[k].len), 0);
+    js_define(vm, loc, js_atom_ascii(vm, "origin"), sh_cstr(vm, origin), 0);
+}
+void sh_location_set(js_vm *vm, const char *url) {
+    struct js_host *h = vm->host;
+    clear(h->docurl);
+    append_range(h->docurl, url, strlen(url));
+    if (h->location) sh_location_fill(vm, h->location, url);
 }
 
 /* the VM made for the page: the host's names, its prototypes, window and document */
@@ -1770,14 +2598,18 @@ static void sh_ready(js_vm *vm) {
     uint32_t elem = js_obj_new(vm, JK_PLAIN, node);
     uint32_t chr = js_obj_new(vm, JK_PLAIN, node);
     uint32_t docp = js_obj_new(vm, JK_PLAIN, node);
-    vm->host_protos[HP_NODE] = node;
-    vm->host_protos[HP_ELEMENT] = elem;
-    vm->host_protos[HP_CHARDATA] = chr;
-    vm->host_protos[HP_DOCUMENT] = docp;
-    vm->host_protos[HP_CLASSLIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    vm->host_protos[HP_STYLE] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    vm->host_protos[HP_DATASET] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    vm->host_protos[HP_EVENT] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_NODE] = node;
+    vm->host->protos[HP_ELEMENT] = elem;
+    vm->host->protos[HP_CHARDATA] = chr;
+    vm->host->protos[HP_DOCUMENT] = docp;
+    vm->host->protos[HP_CLASSLIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_STYLE] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_DATASET] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_EVENT] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_NODELIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_HTMLCOLLECTION] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_DOMRECT] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->host->protos[HP_RECTLIST] = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->host_kinds = HP_N;
     sh_method(vm, node, "appendChild", H_APPEND_CHILD, 1);
     sh_method(vm, node, "insertBefore", H_INSERT_BEFORE, 2);
@@ -1795,12 +2627,15 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, node, "replaceWith", H_REPLACE_WITH, 0);
     sh_method(vm, node, "append", H_APPEND, 0);
     sh_method(vm, node, "prepend", H_PREPEND, 0);
+    sh_method(vm, node, "replaceChildren", H_REPLACE_CHILDREN, 0);
     sh_method(vm, node, "querySelector", H_QS, 1);
     sh_method(vm, node, "querySelectorAll", H_QSA, 1);
     sh_method(vm, node, "getElementsByTagName", H_BY_TAG, 1);
     sh_method(vm, node, "getElementsByClassName", H_BY_CLASS, 1);
     sh_method(vm, elem, "getAttribute", H_GET_ATTR, 1);
     sh_method(vm, elem, "setAttribute", H_SET_ATTR, 2);
+    sh_method(vm, elem, "setAttributeNS", H_SET_ATTR_NS, 3);
+    sh_method(vm, elem, "getAttributeNS", H_GET_ATTR_NS, 2);
     sh_method(vm, elem, "removeAttribute", H_REMOVE_ATTR, 1);
     sh_method(vm, elem, "hasAttribute", H_HAS_ATTR, 1);
     sh_method(vm, elem, "toggleAttribute", H_TOGGLE_ATTR, 1);
@@ -1811,12 +2646,34 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, elem, "focus", H_FOCUS, 0);
     sh_method(vm, elem, "blur", H_BLUR, 0);
     sh_method(vm, elem, "getBoundingClientRect", H_RECT, 0);
+    sh_method(vm, elem, "getClientRects", H_CLIENT_RECTS, 0);
     sh_method(vm, elem, "insertAdjacentHTML", H_INSERT_ADJ_HTML, 2);
     sh_method(vm, docp, "getElementById", H_BY_ID, 1);
     sh_method(vm, docp, "createElement", H_CREATE_ELEMENT, 1);
     sh_method(vm, docp, "createTextNode", H_CREATE_TEXT, 1);
     sh_method(vm, docp, "createComment", H_CREATE_COMMENT, 1);
-    uint32_t cl = vm->host_protos[HP_CLASSLIST];
+    sh_method(vm, docp, "getElementsByName", H_BY_NAME, 1);
+    sh_method(vm, docp, "write", H_WRITE, 1);
+    sh_method(vm, docp, "writeln", H_WRITELN, 1);
+    sh_method(vm, docp, "open", H_DOC_OPEN, 0);
+    sh_method(vm, docp, "close", H_DOC_CLOSE, 0);
+    /* the collections: item and namedItem their own; a NodeList's forEach and iterators,
+       and an HTMLCollection's iterator, Array.prototype's (WebIDL's indexed iterables) */
+    uint32_t nlp = vm->host->protos[HP_NODELIST], hcp = vm->host->protos[HP_HTMLCOLLECTION];
+    sh_method(vm, nlp, "item", H_LIST_ITEM, 1);
+    sh_method(vm, hcp, "item", H_LIST_ITEM, 1);
+    sh_method(vm, hcp, "namedItem", H_LIST_NAMED, 1);
+    static const char *const iters[] = { "forEach", "entries", "keys", "values" };
+    for (size_t i = 0; i < 4; i++) {
+        uint32_t a = js_atom_ascii(vm, iters[i]);
+        js_define(vm, nlp, a, js_get(vm, jv_obj(vm->array_proto), a), JS_SHAPE_HIDDEN);
+    }
+    jv values = js_get(vm, jv_obj(vm->array_proto), js_atom_ascii(vm, "values"));
+    js_define(vm, nlp, JS_KEY_ITERATOR, values, JS_SHAPE_HIDDEN);
+    js_define(vm, hcp, JS_KEY_ITERATOR, values, JS_SHAPE_HIDDEN);
+    js_define(vm, nlp, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, "NodeList"), JS_SHAPE_HIDDEN);
+    js_define(vm, hcp, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, "HTMLCollection"), JS_SHAPE_HIDDEN);
+    uint32_t cl = vm->host->protos[HP_CLASSLIST];
     sh_method(vm, cl, "add", H_CL_ADD, 1);
     sh_method(vm, cl, "remove", H_CL_REMOVE, 1);
     sh_method(vm, cl, "toggle", H_CL_TOGGLE, 1);
@@ -1824,11 +2681,11 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, cl, "replace", H_CL_REPLACE, 2);
     sh_method(vm, cl, "item", H_CL_ITEM, 1);
     sh_method(vm, cl, "toString", H_CL_TOSTRING, 0);
-    uint32_t sp = vm->host_protos[HP_STYLE];
+    uint32_t sp = vm->host->protos[HP_STYLE];
     sh_method(vm, sp, "setProperty", H_ST_SET, 2);
     sh_method(vm, sp, "getPropertyValue", H_ST_GET, 1);
     sh_method(vm, sp, "removeProperty", H_ST_REMOVE, 1);
-    uint32_t ep = vm->host_protos[HP_EVENT];
+    uint32_t ep = vm->host->protos[HP_EVENT];
     sh_method(vm, ep, "preventDefault", H_EV_PREVENT, 0);
     sh_method(vm, ep, "stopPropagation", H_EV_STOP, 0);
     sh_method(vm, ep, "stopImmediatePropagation", H_EV_STOP_NOW, 0);
@@ -1841,6 +2698,15 @@ static void sh_ready(js_vm *vm) {
     sh_interface(vm, "Document", H_ILLEGAL, docp);
     sh_interface(vm, "DOMTokenList", H_ILLEGAL, cl);
     sh_interface(vm, "CSSStyleDeclaration", H_ILLEGAL, sp);
+    sh_interface(vm, "NodeList", H_ILLEGAL, nlp);
+    /* DOMRect, and getClientRects' list of them: an array of DOMRectList's prototype */
+    uint32_t drp = vm->host->protos[HP_DOMRECT], rlp = vm->host->protos[HP_RECTLIST];
+    sh_method(vm, drp, "toJSON", H_RECT_JSON, 0);
+    sh_method(vm, rlp, "item", H_LIST_ITEM, 1);
+    js_define(vm, rlp, JS_KEY_ITERATOR, values, JS_SHAPE_HIDDEN);
+    sh_interface(vm, "DOMRect", H_ILLEGAL, drp);
+    sh_interface(vm, "DOMRectList", H_ILLEGAL, rlp);
+    sh_interface(vm, "HTMLCollection", H_ILLEGAL, hcp);
     sh_interface(vm, "Event", H_EVENT, ep);
     uint32_t cep = js_obj_new(vm, JK_PLAIN, ep);
     sh_interface(vm, "CustomEvent", H_CUSTOM_EVENT, cep);
@@ -1858,20 +2724,54 @@ static void sh_ready(js_vm *vm) {
     sh_method(vm, g, "cancelAnimationFrame", H_CAF, 1);
     sh_method(vm, g, "getComputedStyle", H_COMPUTED, 1);
     sh_method(vm, g, "alert", H_ALERT, 1);
-    js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(800), JS_SHAPE_HIDDEN);
-    js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(600), JS_SHAPE_HIDDEN);
+    /* the host's task runner, and the network's globals (src/script/fetch.c) */
+    h->task_fn = js_native_new(vm, H_TASK, js_atom_ascii(vm, "task"), 2);
+    script_fetch_setup(vm);
+    script_input_setup(vm);
+    script_observe_setup(vm);
+    script_custom_setup(vm);
+    script_window_setup(vm);
+    sh_method(vm, h->protos[HP_SHADOWROOT], "getElementById", H_BY_ID, 1);
+    js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
+    js_define(vm, g, js_atom_ascii(vm, "innerHeight"), jv_num(h->view_h), JS_SHAPE_HIDDEN);
+    /* the viewport does not scroll */
+    static const char *const scrolls[] = { "scrollX", "scrollY", "pageXOffset", "pageYOffset" };
+    for (size_t i = 0; i < 4; i++) js_define(vm, g, js_atom_ascii(vm, scrolls[i]), jv_num(0), JS_SHAPE_HIDDEN);
     js_define(vm, g, js_atom_ascii(vm, "devicePixelRatio"), jv_num(1), JS_SHAPE_HIDDEN);
-    /* location: the page's URL */
+    /* location: the page's URL and its parts */
     uint32_t loc = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    if (h->page && h->page < h->nt->resource_len) {
-        amb_span u = h->nt->resource[h->page].final_url;
-        jv us = sh_str(vm, text_ptr(h->nt, u), u.len);
-        js_define(vm, loc, sh_atom(vm, HA_HREF), us, 0);
+    char page[4200];
+    sh_page_url(vm, page, sizeof page);
+    sh_location_fill(vm, loc, page);
+    sh_method(vm, loc, "toString", H_LOC_STRING, 0);
+    sh_method(vm, loc, "assign", H_LOC_ASSIGN, 1);
+    sh_method(vm, loc, "replace", H_LOC_REPLACE, 1);
+    sh_method(vm, loc, "reload", H_LOC_RELOAD, 0);
+    static const char *const nav[] = { "href", "hash" };
+    for (int i = 0; i < 2; i++) {
+        uint32_t a = js_atom_ascii(vm, nav[i]);
+        jv get = jv_obj(js_native_new(vm, i ? H_LOC_HASH_GET : H_LOC_HREF_GET, a, 0));
+        jv set = jv_obj(js_native_new(vm, i ? H_LOC_HASH_SET : H_LOC_HREF_SET, a, 1));
+        js_define_accessor(vm, loc, a, get, set, 0);
     }
+    h->location = loc;
     js_define(vm, g, js_atom_ascii(vm, "location"), jv_obj(loc), JS_SHAPE_HIDDEN);
     uint32_t nav = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     js_define(vm, nav, js_atom_ascii(vm, "userAgent"), sh_cstr(vm, "Ambitious/0.1 (a reasoning-native browser)"), 0);
-    js_define(vm, nav, js_atom_ascii(vm, "language"), sh_cstr(vm, "en"), 0);
+    /* Chromium's headless shell's, but its user agent, which is Ambitious's own */
+    js_define(vm, nav, js_atom_ascii(vm, "language"), sh_cstr(vm, "en-US"), 0);
+    uint32_t langs = js_array_new(vm, 0);
+    js_array_push(vm, langs, sh_cstr(vm, "en-US"));
+    js_define(vm, nav, js_atom_ascii(vm, "languages"), jv_obj(langs), 0);
+    static const char *const nk[] = { "platform", "vendor", "vendorSub", "product", "productSub", "appName", "appCodeName" };
+    static const char *const nv[] = { "Linux x86_64", "Google Inc.", "", "Gecko", "20030107", "Netscape", "Mozilla" };
+    for (int i = 0; i < 7; i++) js_define(vm, nav, js_atom_ascii(vm, nk[i]), sh_cstr(vm, nv[i]), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "cookieEnabled"), JV_TRUE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "onLine"), JV_TRUE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "pdfViewerEnabled"), JV_FALSE, 0);
+    js_define(vm, nav, js_atom_ascii(vm, "maxTouchPoints"), jv_num(0), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "hardwareConcurrency"), jv_num(4), 0);
+    js_define(vm, nav, js_atom_ascii(vm, "doNotTrack"), JV_NULL, 0);
     js_define(vm, g, js_atom_ascii(vm, "navigator"), jv_obj(nav), JS_SHAPE_HIDDEN);
 }
 
@@ -1906,7 +2806,339 @@ static void sh_run_source(js_vm *vm, uint32_t run, const char *src, size_t n) {
     h->rt->run[run].outcome = oc;
     if (rc == -1 || rc == -2) sh_error_rec(vm, run, SCRIPT_PHASE_SCRIPT, data(vm->out), len(vm->out));
     if (rc != -3) sh_checkpoint(vm);
-    vm->cur_run = 0;
+}
+
+/* ---- scripts prepared, inserted, written (HTML 4.12.1.1, 8.4.3) ----
+   A script element runs once: its "already started" flag, kept by index and generation,
+   is set when it is prepared. The parse's scripts are the parser's own; another runs when
+   a script connects it (inserted), or document.write writes it, with an src or a text:
+   an inline one at once, an external one fetched now and run as a host task, which the
+   load event waits for, then its load (or error) event. A script made by innerHTML is
+   started, so it never runs; a clone keeps its original's flag. */
+
+static int sh_started(const struct js_host *h, uint32_t x) { return x < len(h->started) && h->started[x] == h->d->node[x].gen + 1; }
+static void sh_start(struct js_host *h, uint32_t x) {
+    if (x >= len(h->started)) resize(h->started, (size_t)h->d->node_len + 64, 0u);
+    h->started[x] = h->d->node[x].gen + 1;
+}
+/* the scripts of x's subtree (x too) started: innerHTML's and insertAdjacentHTML's */
+static void sh_start_all(struct js_host *h, uint32_t x) {
+    const dom_document *d = h->d;
+    if (sh_script_elem(d, x)) sh_start(h, x);
+    for (uint32_t c = sh_next_in(d, x, x); c; c = sh_next_in(d, c, x)) if (sh_script_elem(d, c)) sh_start(h, c);
+}
+/* a clone's scripts started where its original's are: the two subtrees walked in step */
+static void sh_start_like(struct js_host *h, uint32_t from, uint32_t to) {
+    const dom_document *d = h->d;
+    uint32_t a = from, b = to;
+    while (a && b) {
+        if (sh_script_elem(d, a) && sh_started(h, a)) sh_start(h, b);
+        a = sh_next_in(d, a, from);
+        b = sh_next_in(d, b, to);
+    }
+}
+
+/* the console's line for a script whose fetch failed, as Chromium writes it */
+static void sh_fetch_failed(js_vm *vm, uint32_t res) {
+    struct js_host *h = vm->host;
+    char msg[300], reason[64];
+    net_outcome o = res ? h->nt->resource[res].outcome : NET_OUTCOME_BAD_URL;
+    if (o == NET_OUTCOME_HTTP_ERROR) {
+        script_reason(h->nt->resource[res].status, reason, sizeof reason);
+        snprintf(msg, sizeof msg, "Failed to load resource: the server responded with a status of %u (%s)", h->nt->resource[res].status, reason);
+    } else if (o == NET_OUTCOME_NO_SUCH_FILE) snprintf(msg, sizeof msg, "Failed to load resource: net::ERR_FILE_NOT_FOUND");
+    else if (o == NET_OUTCOME_REFUSED) snprintf(msg, sizeof msg, "Failed to load resource: net::ERR_CONNECTION_REFUSED");
+    else snprintf(msg, sizeof msg, "Failed to load resource: net::ERR_FAILED");
+    js_console(vm, 3, js_str_utf8(vm, msg, strlen(msg)));
+}
+
+/* a script's source run as its element's: its record (how it came, its URL for an
+   external one), document.currentScript the element meanwhile, and document.write's
+   state of the script that runs this one kept for it */
+static uint32_t sh_run_elem(js_vm *vm, uint32_t x, script_insertion how, const char *src, size_t n, const char *url, size_t un) {
+    struct js_host *h = vm->host;
+    uint32_t run = sh_run_new(vm, x, un ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, url, un);
+    h->rt->run[run].insert = how;
+    uint32_t saved_cur = h->cur_script, saved_run = vm->cur_run, saved_phase = h->phase, saved_script = vm->script, saved_w = h->wscript;
+    vector<char> wt;
+    vector<uint32_t> wn;
+    append_range(wt, data(h->wtext), len(h->wtext));
+    append_range(wn, data(h->wnodes), len(h->wnodes));
+    h->cur_script = x;
+    if (un) h->ext_run++;
+    sh_run_source(vm, run, src, n);
+    if (un) h->ext_run--;
+    h->cur_script = saved_cur;
+    vm->cur_run = saved_run;
+    h->phase = saved_phase;
+    vm->script = saved_script;
+    h->wscript = saved_w;
+    clear(h->wtext);
+    append_range(h->wtext, data(wt), len(wt));
+    clear(h->wnodes);
+    append_range(h->wnodes, data(wn), len(wn));
+    return run;
+}
+
+/* an inserted or written script's fetch: the loader's record of its src, for the page */
+static uint32_t sh_fetch_script(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    uint32_t sa = sh_attr_z(d, x, "src");
+    char base[4200], ref[4200], abs[8400];
+    sh_page_url(vm, base, sizeof base);
+    snprintf(ref, sizeof ref, "%.*s", (int)d->attr[sa].value.len, text_ptr(d, d->attr[sa].value));
+    if (!net_url_resolve(base, ref, abs, sizeof abs)) return 0;
+    net_resource_h r = net_fetch_request(h->nt, abs, strlen(abs), NET_KIND_SCRIPT, "GET", "", 0, "", 0, h->page);
+    h->nt->resource[r.index].elem = node_handle(h->d, x);
+    return r.index;
+}
+/* an external script to run as a host task, after delay ms */
+static void sh_pend_script(js_vm *vm, uint32_t x, uint32_t res, script_insertion how, double delay) {
+    struct js_host *h = vm->host;
+    sh_pend p;
+    memset(&p, 0, sizeof p);
+    p.node = x;
+    p.gen = h->d->node[x].gen;
+    p.resource = res;
+    p.how = how;
+    push_back(h->pending, p);
+    sh_task(vm, delay, SH_TASK_SCRIPT, (uint32_t)len(h->pending) - 1);
+}
+/* an external script run from what its fetch got, then its load event (an inserted
+   one's); or its error event when the fetch failed. 1 when it ran */
+static int sh_run_fetched(js_vm *vm, uint32_t x, uint32_t res, script_insertion how) {
+    struct js_host *h = vm->host;
+    vector<char> url, src;
+    if (res) append_range(url, text_ptr(h->nt, h->nt->resource[res].url), h->nt->resource[res].url.len);
+    if (!res || h->nt->resource[res].outcome != NET_OUTCOME_OK) {
+        if (!len(url)) {
+            uint32_t sa = sh_attr_z(h->d, x, "src");
+            if (sa) append_range(url, text_ptr(h->d, h->d->attr[sa].value), h->d->attr[sa].value.len);
+        }
+        uint32_t run = sh_run_new(vm, x, SCRIPT_SOURCE_EXTERNAL, data(url), len(url));
+        h->rt->run[run].outcome = SCRIPT_OUTCOME_NOT_FETCHED;
+        h->rt->run[run].insert = how;
+        sh_fetch_failed(vm, res);
+        sh_fire(vm, x, "error", 0);
+        return 0;
+    }
+    append_range(src, bytes_ptr(h->nt, h->nt->resource[res].body), h->nt->resource[res].body.len);
+    sh_run_elem(vm, x, how, data(src), len(src), data(url), len(url));
+    sh_fire(vm, x, "load", 0);
+    return 1;
+}
+/* a waiting script's task: it runs, if its element is still the one it was */
+static void sh_run_pending(js_vm *vm, uint32_t i) {
+    struct js_host *h = vm->host;
+    if (i >= len(h->pending) || h->pending[i].done) return;
+    h->pending[i].done = 1;
+    sh_pend p = h->pending[i];
+    if (!h->d->node[p.node].live || h->d->node[p.node].gen != p.gen) return;
+    h->phase = SCRIPT_PHASE_SCRIPT;
+    sh_run_fetched(vm, p.node, p.resource, (script_insertion)p.how);
+}
+/* the waiting scripts run, in their order, before the load event: it waits for them */
+static void sh_run_pending_all(js_vm *vm) {
+    for (int guard = 0; guard < 100000 && vm->throwing != 2; guard++) {
+        int64_t best = -1;
+        for (size_t i = 0; i < len(vm->timers); i++) {
+            js_timer t = vm->timers[i];
+            if (!t.live || t.rec != SH_TASK_REC || jv_dbl(js_array_get(vm, t.args, 0)) != SH_TASK_SCRIPT) continue;
+            if (best < 0 || t.due < vm->timers[(size_t)best].due || (t.due == vm->timers[(size_t)best].due && t.seq < vm->timers[(size_t)best].seq)) best = (int64_t)i;
+        }
+        if (best < 0) return;
+        js_timer t = vm->timers[(size_t)best];
+        vm->timers[(size_t)best].live = 0;
+        if (t.due > vm->now) vm->now = t.due;
+        uint32_t saved = vm->cur_run;
+        vm->cur_run = t.run;
+        sh_run_pending(vm, (uint32_t)jv_dbl(js_array_get(vm, t.args, 1)));
+        vm->cur_run = saved;
+        vm->throwing = 0;
+        sh_checkpoint(vm);
+    }
+}
+
+/* a script element prepared, as a script's insertion or document.write's connects it:
+   one not started, connected, with an src or a text, of a classic script's type, is
+   started; its text runs now, or its src is fetched and run as a host task */
+static void sh_prepare(js_vm *vm, uint32_t x, script_insertion how) {
+    struct js_host *h = vm->host;
+    dom_document *d = h->d;
+    if (!sh_script_elem(d, x) || sh_started(h, x) || !sh_connected(d, x)) return;
+    uint32_t sa = sh_attr_z(d, x, "src");
+    vector<char> src;
+    if (!sa) {
+        sh_text_of(d, x, &src);
+        if (!len(src)) return;
+    }
+    if (!sh_script_type_ok(d, x)) return;
+    sh_start(h, x);
+    if (sa) {
+        uint32_t res = sh_fetch_script(vm, x);
+        /* a written script waits for its writer to end; an inserted one is async */
+        if (how == SCRIPT_INSERTION_WRITTEN && h->parsing) { push_back(h->wpend, x); push_back(h->wpend, res); }
+        else sh_pend_script(vm, x, res, how, 1);
+        return;
+    }
+    sh_run_elem(vm, x, how, data(src), len(src), "", 0);
+}
+/* the scripts of a subtree a script connected, prepared in tree order */
+static void sh_inserted(js_vm *vm, uint32_t x) {
+    dom_document *d = vm->host->d;
+    if (!sh_connected(d, x)) return;
+    vector<uint32_t> xs;
+    if (sh_script_elem(d, x)) push_back(xs, x);
+    for (uint32_t c = sh_next_in(d, x, x); c; c = sh_next_in(d, c, x)) if (sh_script_elem(d, c)) push_back(xs, c);
+    for (size_t i = 0; i < len(xs); i++) if (d->node[xs[i]].live) sh_prepare(vm, xs[i], SCRIPT_INSERTION_INSERTED);
+}
+/* a node inserted by a script, and the scripts it connected prepared; a script element
+   given a child prepared too */
+static dom_status sh_insert_vm(js_vm *vm, uint32_t parent, uint32_t child, uint32_t before) {
+    dom_document *d = vm->host->d;
+    dom_status st = sh_insert(d, parent, child, before);
+    if (st != DOM_OK) return st;
+    sh_inserted(vm, child);
+    if (sh_script_elem(d, parent)) sh_prepare(vm, parent, SCRIPT_INSERTION_INSERTED);
+    return st;
+}
+
+/* ---- document.write (HTML 8.4.3) ----
+   While a script of the parse runs, its writes are parsed at its place: the text it has
+   written so far is parsed again as a fragment of the script's parent and put after the
+   script, in place of the nodes its earlier writes made (so a tag one write opens another
+   may close), the scripts that already ran among them still started; a written inline
+   script runs at once, a written external one after its writer ends. Once the parse is
+   over, a write opens a new document: the old one's nodes and listeners gone, the text
+   parsed as a whole document in their place. An external script's write when there is
+   no parse to write into is ignored, as Chromium has it, with its warning. What is
+   simplified: a node an earlier write made is a new node after the next write. */
+
+/* the started scripts among the nodes of a list's subtrees, counted */
+static uint32_t sh_count_started(const struct js_host *h, const vector<uint32_t> *ns) {
+    const dom_document *d = h->d;
+    uint32_t k = 0;
+    for (size_t i = 0; i < len(*ns); i++) {
+        uint32_t x = (*ns)[i];
+        if (!d->node[x].live) continue;
+        if (sh_script_elem(d, x) && sh_started(h, x)) k++;
+        for (uint32_t c = sh_next_in(d, x, x); c; c = sh_next_in(d, c, x)) if (sh_script_elem(d, c) && sh_started(h, c)) k++;
+    }
+    return k;
+}
+/* the first k scripts of the written nodes started; the rest prepared, in tree order */
+static void sh_written_scripts(js_vm *vm, uint32_t k) {
+    struct js_host *h = vm->host;
+    const dom_document *d = h->d;
+    vector<uint32_t> xs;
+    for (size_t i = 0; i < len(h->wnodes); i++) {
+        uint32_t x = h->wnodes[i];
+        if (sh_script_elem(d, x)) push_back(xs, x);
+        for (uint32_t c = sh_next_in(d, x, x); c; c = sh_next_in(d, c, x)) if (sh_script_elem(d, c)) push_back(xs, c);
+    }
+    for (size_t i = 0; i < len(xs) && i < k; i++) sh_start(h, xs[i]);
+    for (size_t i = k; i < len(xs); i++) if (d->node[xs[i]].live) sh_prepare(vm, xs[i], SCRIPT_INSERTION_WRITTEN);
+}
+/* the children of a parsed document f's node p, copied into the page under parent
+   before before (0: at the end), each kept among the written nodes */
+static void sh_written_copy(js_vm *vm, const dom_document *f, uint32_t p, uint32_t parent, uint32_t before) {
+    struct js_host *h = vm->host;
+    dom_document *d = h->d;
+    for (uint32_t c = f->node[p].first_child; c; c = f->node[c].next_sibling) {
+        uint32_t y = sh_import(d, f, c, 1);
+        if (!y) continue;
+        if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
+        else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
+        push_back(h->wnodes, y);
+    }
+}
+/* the text written so far parsed in the place of what the earlier writes made */
+static void sh_write_here(js_vm *vm, uint32_t script) {
+    struct js_host *h = vm->host;
+    dom_document *d = h->d;
+    uint32_t k = sh_count_started(h, &h->wnodes);
+    for (size_t i = 0; i < len(h->wnodes); i++) if (d->node[h->wnodes[i]].live) sh_detach(d, h->wnodes[i]);
+    clear(h->wnodes);
+    dom_document f;
+    html_parser hp;
+    dom_init(&f, 2);
+    html_init(&hp, 2);
+    if (h->opened) {
+        html_parse(&hp, &f, data(h->wtext), len(h->wtext));
+        sh_written_copy(vm, &f, 1, 1, 0);
+    } else {
+        /* the fragment's context: the script's parent, by its name in its namespace */
+        uint32_t parent = d->node[script].parent;
+        vector<char> ctx;
+        if (sh_is_elem(d, parent)) {
+            if (d->node[parent].ns == DOM_NAMESPACE_SVG) append_range(ctx, "svg ", 4);
+            if (d->node[parent].ns == DOM_NAMESPACE_MATHML) append_range(ctx, "math ", 5);
+            append_range(ctx, names_ptr(d, d->node[parent].name), names_len(d, d->node[parent].name));
+        } else append_range(ctx, "body", 4);
+        html_parse_fragment(&hp, &f, data(ctx), len(ctx), data(h->wtext), len(h->wtext));
+        sh_written_copy(vm, &f, 1, parent, d->node[script].next_sibling);
+    }
+    sh_written_scripts(vm, k);
+}
+/* document.open (HTML 8.4.1): the document's nodes out, its and the window's listeners gone */
+static void sh_open(js_vm *vm) {
+    struct js_host *h = vm->host;
+    dom_document *d = h->d;
+    sh_empty(d, 1);
+    for (size_t i = 0; i < len(vm->listeners); i++) {
+        js_listener l = vm->listeners[i];
+        if (l.live && (l.target == JS_WINDOW || !(l.target & SH_OBJECT_TARGET))) sh_listener_gone(vm, i);
+    }
+    h->opened = 1;
+    h->ready = 1;
+    clear(h->wtext);
+    clear(h->wnodes);
+    h->wscript = 1;
+}
+/* document.write and writeln: the arguments' text, written as the moment has it */
+static jv sh_write(js_vm *vm, uint32_t args, uint32_t argc, int line) {
+    struct js_host *h = vm->host;
+    vector<char> text, t;
+    for (uint32_t i = 0; i < argc; i++) {
+        if (!sh_utf8(vm, js_arg(vm, args, argc, i), &t)) return JV_HOLE;
+        append_range(text, data(t), len(t));
+    }
+    if (line) push_back(text, '\n');
+    script_write_when when = SCRIPT_WRITE_WHEN_AFTER_LOAD;
+    uint32_t cur = h->cur_script;
+    if (h->parsing && cur && !h->opened) when = SCRIPT_WRITE_WHEN_PARSING;
+    else if (h->ext_run && !h->opened) when = SCRIPT_WRITE_WHEN_IGNORED;
+    script_write_h w = write_new(h->rt);
+    h->rt->write[w.index].run = vm->cur_run;
+    h->rt->write[w.index].when = when;
+    h->rt->write[w.index].bytes = (uint32_t)len(text);
+    if (when == SCRIPT_WRITE_WHEN_IGNORED) {
+        static const char msg[] = "Failed to execute 'write' on 'Document': It isn't possible to write into a document from an asynchronously-loaded external script unless it is explicitly opened.";
+        js_console(vm, 2, js_str_utf8(vm, msg, sizeof msg - 1));
+        return JV_UNDEF;
+    }
+    if (when == SCRIPT_WRITE_WHEN_AFTER_LOAD && !h->opened) sh_open(vm);
+    if (when == SCRIPT_WRITE_WHEN_PARSING && h->wscript != cur) { h->wscript = cur; clear(h->wtext); clear(h->wnodes); }
+    append_range(h->wtext, data(text), len(text));
+    sh_write_here(vm, cur);
+    return JV_UNDEF;
+}
+/* the external scripts the parse's script wrote, run after it, in their order */
+static void sh_run_written(js_vm *vm) {
+    struct js_host *h = vm->host;
+    while (len(h->wpend) >= 2 && vm->throwing != 2) {
+        uint32_t x = h->wpend[0], res = h->wpend[1];
+        vector<uint32_t> rest;
+        for (size_t i = 2; i < len(h->wpend); i++) push_back(rest, h->wpend[i]);
+        clear(h->wpend);
+        append_range(h->wpend, data(rest), len(rest));
+        if (!h->d->node[x].live) continue;
+        h->cur_script = x;
+        sh_run_fetched(vm, x, res, SCRIPT_INSERTION_WRITTEN);
+        h->cur_script = 0;
+        vm->throwing = 0;
+    }
 }
 
 /* the on* attributes of the page's elements: each a handler compiled as a function of
@@ -1968,10 +3200,12 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     if (!sh_has_scripts(d)) return 0;
     sh_ready(vm);
     sh_attr_handlers(vm);
-    /* the scripts there were when the parse ended, in document order */
-    vector<uint32_t> xs;
-    for (uint32_t x = sh_next_in(d, 1, 1); x; x = sh_next_in(d, x, 1)) if (sh_script_elem(d, x)) push_back(xs, x);
+    /* the scripts there were when the parse ended, in document order: the parser's own,
+       started before any runs, so a script that moves a later one does not run it */
+    vector<uint32_t> xs, deferred;
+    for (uint32_t x = sh_next_in(d, 1, 1); x; x = sh_next_in(d, x, 1)) if (sh_script_elem(d, x)) { push_back(xs, x); sh_start(h, x); }
     uint32_t ran = 0;
+    h->parsing = 1;
     for (size_t i = 0; i < len(xs) && vm->throwing != 2; i++) {
         uint32_t x = xs[i];
         if (!d->node[x].live) continue;
@@ -1981,32 +3215,44 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
             h->rt->run[r].outcome = SCRIPT_OUTCOME_NOT_RUN;
             continue;
         }
-        vector<char> src;
         if (sa) {
             /* the loader's fetch of it: the resource this element asked for */
             uint32_t res = 0;
             for (uint32_t r = 1; r < h->nt->resource_len && !res; r++)
                 if (h->nt->resource[r].live && h->nt->resource[r].kind == NET_KIND_SCRIPT && h->nt->resource[r].elem.index == x) res = r;
-            vector<char> url;
-            if (res) append_range(url, text_ptr(h->nt, h->nt->resource[res].url), h->nt->resource[res].url.len);
-            else append_range(url, text_ptr(d, d->attr[sa].value), d->attr[sa].value.len);
-            uint32_t run = sh_run_new(vm, x, SCRIPT_SOURCE_EXTERNAL, data(url), len(url));
-            if (!res || h->nt->resource[res].outcome != NET_OUTCOME_OK) { h->rt->run[run].outcome = SCRIPT_OUTCOME_NOT_FETCHED; continue; }
-            append_range(src, bytes_ptr(h->nt, h->nt->resource[res].body), h->nt->resource[res].body.len);
-            sh_run_source(vm, run, data(src), len(src));
+            /* async: when it comes, before load; defer: after the parse, in order; else now */
+            if (sh_attr_z(d, x, "async")) { sh_pend_script(vm, x, res, SCRIPT_INSERTION_PARSED, 1); continue; }
+            if (sh_attr_z(d, x, "defer")) { push_back(deferred, x); push_back(deferred, res); continue; }
+            h->cur_script = x;
+            sh_run_fetched(vm, x, res, SCRIPT_INSERTION_PARSED);
         } else {
+            vector<char> src;
             sh_text_of(d, x, &src);
-            uint32_t run = sh_run_new(vm, x, SCRIPT_SOURCE_INLINE, "", 0);
-            sh_run_source(vm, run, data(src), len(src));
+            sh_run_elem(vm, x, SCRIPT_INSERTION_PARSED, data(src), len(src), "", 0);
         }
+        h->cur_script = 0;
+        vm->throwing = 0;
+        sh_run_written(vm);
         ran++;
     }
+    h->parsing = 0;
     vm->throwing = 0;
-    /* the page parsed and its scripts run: DOMContentLoaded at the document, load at the window */
+    /* the parse over (interactive): the deferred scripts, then DOMContentLoaded at the
+       document; the waiting scripts, then the document complete and load at the window */
     h->ready = 2;
+    for (size_t i = 0; i + 1 < len(deferred) && vm->throwing != 2; i += 2) {
+        if (!d->node[deferred[i]].live) continue;
+        h->cur_script = deferred[i];
+        sh_run_fetched(vm, deferred[i], deferred[i + 1], SCRIPT_INSERTION_PARSED);
+        h->cur_script = 0;
+        vm->throwing = 0;
+        ran++;
+    }
     h->phase = SCRIPT_PHASE_EVENT;
     sh_fire(vm, 1, "DOMContentLoaded", EV_BUBBLES);
     vm->throwing = 0;
+    sh_run_pending_all(vm);
+    h->phase = SCRIPT_PHASE_EVENT;
     h->ready = 3;
     sh_fire(vm, JS_WINDOW, "load", 0);
     vm->throwing = 0;
@@ -2016,17 +3262,16 @@ uint32_t script_run_page(js_vm *vm, double horizon) {
     return ran;
 }
 
-int script_click(js_vm *vm, uint32_t x, double horizon) {
-    struct js_host *h = vm->host;
-    if (!sh_is_elem(h->d, x)) return 0;
-    if (!h->ready) sh_ready(vm);
-    h->phase = SCRIPT_PHASE_EVENT;
-    sh_click_at(vm, x, EV_TRUSTED);
+int script_click(js_vm *vm, uint32_t x, double horizon) { return script_action(vm, SCRIPT_ACT_CLICK, x, "", 0, horizon); }
+
+/* the VM made for a page whose own scripts made none, for a user's action; and the
+   timers an action set, run for the horizon and recorded */
+void script_ready(js_vm *vm) { if (!vm->host->ready) sh_ready(vm); }
+void script_timers_after(js_vm *vm, double horizon) {
     vm->throwing = 0;
     js_run_timers(vm, vm->now + horizon, 100000);
     vm->throwing = 0;
     sh_timers_seen(vm);
-    return 1;
 }
 
 uint32_t script_select(const dom_document *d, const char *sel, size_t n) {
@@ -2041,7 +3286,7 @@ void script_settle(js_vm *vm) {
     sh_timers_seen(vm);
     for (size_t i = 0; i < len(vm->timers); i++) {
         js_timer t = vm->timers[i];
-        if (!t.rec || t.rec >= 0xFFFFFFFEu || !h->rt->timer[t.rec].live) continue;
+        if (!t.rec || t.rec >= SH_TASK_REC || !h->rt->timer[t.rec].live) continue;
         h->rt->timer[t.rec].fired = t.fired;
         h->rt->timer[t.rec].state = t.live ? SCRIPT_TIMER_STATE_PENDING : (t.fired && t.interval < 0 ? SCRIPT_TIMER_STATE_FIRED : SCRIPT_TIMER_STATE_CLEARED);
     }
@@ -2051,6 +3296,8 @@ void script_settle(js_vm *vm) {
         if (l.attr != 2 || !l.rec || !h->rt->listener[l.rec].live) continue;
         if (sh_prop_handler(vm, l.target, l.type) == JV_UNDEF) listener_free(h->rt, listener_handle(h->rt, l.rec));
     }
+    /* localStorage kept in the profile */
+    script_storage_save(vm);
     /* the nodes no tree holds: destroyed, their subtrees with them */
     dom_document *d = h->d;
     for (uint32_t x = 2; x < d->node_len; x++) {

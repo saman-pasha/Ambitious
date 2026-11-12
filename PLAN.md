@@ -761,6 +761,14 @@ be built side by side and merged without touching each other's.
   - `MutationObserver` from the DOM's mutation log;
   - custom elements and shadow DOM;
   - the window's history, storage, screen and `matchMedia`.
+
+  Done as planned (src/script/view.c, fetch.c, input.c, observe.c,
+  custom.c, window.c): each fixture's console held to Chromium's line for
+  line; a user's actions (`--click`, `--dblclick`, `--focus`, `--type`,
+  `--key`) applied at load; rules over forms sent insecurely, observers
+  never disconnected, custom-element names never defined and credentials
+  written to storage; storage kept in the profile, its values never in
+  the facts.
 - **12i Reasoning and the profile**:
   - a reasoner process kept for a session, which takes snapshot deltas from
     the mutation log;

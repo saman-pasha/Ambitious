@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A form</title>
+<!-- A form's submission (src/script/input.c), served by tests/integ/script-serve.py: the page's
+     query names what its run button does and how its listeners answer, and
+     tests/integ/script-input.sh clicks and types as a user would. The console must be
+     Chromium's and the server sent the same requests (tests/pages/form.chromium, written by
+     tools/bench/script-references.sh). Every control's box is declared. -->
+<style> body { margin: 0; } input, select, textarea, button, fieldset { display: block; margin: 0; padding: 0; border: 0; width: 200px; height: 20px; } </style>
+</head>
+<body>
+<form id="f" action="/echo/form" method="post">
+<input id="who" name="who" value="Ada">
+<input type="hidden" name="secret" value="h1">
+<input type="checkbox" name="pick" value="one" checked>
+<input type="checkbox" name="pick" value="two">
+<input type="checkbox" name="flag" checked>
+<input type="radio" name="size" value="s">
+<input type="radio" name="size" value="m" checked>
+<input name="off" value="x" disabled>
+<input name="" value="no name">
+<input name="sp ace" value="a&amp;b=c d+e% caf&eacute;">
+<select name="color"><option>red</option><option selected value="g">green</option></select>
+<select name="many" multiple><option selected>a</option><option>b</option><option selected>c</option></select>
+<textarea name="note">line one
+line two</textarea>
+<fieldset disabled><input name="fenced" value="no"></fieldset>
+<input type="submit" id="go" name="go" value="Send">
+<button type="button" id="plain" name="plain" value="p">plain</button>
+<button type="reset" id="reset">reset</button>
+<button id="other" name="act" value="other" formaction="/echo/other" formmethod="get">other</button>
+</form>
+<input name="outside" form="f" value="owned">
+<button id="run" type="button">run</button>
+<a id="away" href="/echo/away">away</a>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var mode = location.search.slice(1);
+  var f = document.getElementById('f');
+  if (mode === '') {
+    var fd = new FormData(f);
+    p('the entries', JSON.stringify(Array.from(fd.entries())));
+    p('get', fd.get('pick') + ' ' + JSON.stringify(fd.getAll('pick')) + ' ' + fd.get('nope') + ' ' + fd.has('who') + ' ' + fd.has('go'));
+    fd.append('more', 'm');
+    fd.set('who', 'Grace');
+    fd.delete('secret');
+    p('changed', JSON.stringify([...fd.keys()]) + ' ' + fd.get('who'));
+    var made = new FormData();
+    made.append('k', 'v');
+    p('an empty one', JSON.stringify([...made]) + ' ' + (made instanceof FormData));
+    p('with a submitter', JSON.stringify([...new FormData(f, document.getElementById('go')).keys()].slice(-3)));
+    try { new FormData(document.body); } catch (e) { p('not a form', e.name); }
+  }
+  if (mode === 'cross' || mode === 'pwget') {
+    /* a password field, sent to another origin over http:, or in a GET's URL */
+    var pw = document.createElement('input');
+    pw.setAttribute('type', 'password');
+    pw.setAttribute('name', 'pw');
+    pw.setAttribute('value', 'hunter2');
+    f.insertBefore(pw, document.getElementById('go'));
+    if (mode === 'cross') f.setAttribute('action', 'http://localhost:PORT/echo/cross');
+    else f.setAttribute('method', 'get');
+  }
+  if (mode === 'invalid') {
+    var need = document.createElement('input');
+    need.setAttribute('name', 'need');
+    need.setAttribute('required', '');
+    f.appendChild(need);
+  }
+  f.addEventListener('submit', function (e) {
+    p('submit', e.type + ' ' + e.bubbles + ' ' + e.cancelable + ' ' + e.isTrusted + ' ' + (e.submitter ? e.submitter.name : 'none') + ' ' + (e.target === f) + ' ' + (e instanceof SubmitEvent));
+    if (mode === 'prevent') e.preventDefault();
+  });
+  f.addEventListener('formdata', function (e) {
+    p('formdata', e.formData.getAll('pick').length + ' ' + e.bubbles + ' ' + e.cancelable + ' ' + (e instanceof FormDataEvent));
+    if (mode === 'formdata') { e.formData.append('added', 'yes'); e.formData.delete('secret'); }
+  });
+  f.addEventListener('invalid', function (e) { p('invalid', e.target.name + ' ' + e.bubbles + ' ' + e.cancelable); }, true);
+  f.addEventListener('reset', function (e) { p('reset', e.isTrusted + ' ' + document.getElementById('who').value); });
+  document.getElementById('run').addEventListener('click', function () {
+    if (mode === 'submit') f.submit();
+    if (mode === 'request') f.requestSubmit(document.getElementById('other'));
+    if (mode === 'multipart') { f.setAttribute('enctype', 'multipart/form-data'); f.requestSubmit(); }
+    if (mode === 'plain') { f.setAttribute('enctype', 'text/plain'); f.requestSubmit(); }
+    if (mode === 'get') { f.setAttribute('method', 'get'); f.requestSubmit(); }
+    /* a second submission planned in the same task takes the first one's place */
+    if (mode === 'twice') { f.requestSubmit(); f.requestSubmit(document.getElementById('other')); }
+    if (mode === 'prevent') {
+      p('after a prevented submit', document.getElementById('who').value);
+      try { f.requestSubmit(document.getElementById('plain')); } catch (e) { p('not a submit button', e.name); }
+      /* the reset button's id names the form's property, before its method */
+      try { f.reset(); } catch (e) { p('f.reset is the button', e.name + ' ' + (f.reset === document.getElementById('reset')) + ' ' + f.who.value + ' ' + f.elements.length); }
+      Object.getPrototypeOf(f).reset.call(f);
+      p('reset', document.getElementById('who').value);
+    }
+    if (mode === 'invalid') p('valid', f.checkValidity());
+  });
+</script>
+</body>
+</html>

@@ -1,14 +1,19 @@
-/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:4815fe18:7612). Do not edit. */
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:03379fa7:8324). Do not edit. */
 typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
 typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT, DOM_NODE_KIND_FRAGMENT } dom_node_kind;
 typedef enum dom_namespace { DOM_NAMESPACE_HTML, DOM_NAMESPACE_SVG, DOM_NAMESPACE_MATHML } dom_namespace;
+typedef enum dom_shadow_mode { DOM_SHADOW_MODE_OPEN, DOM_SHADOW_MODE_CLOSED } dom_shadow_mode;
 typedef enum dom_attr_namespace { DOM_ATTR_NAMESPACE_NULL, DOM_ATTR_NAMESPACE_XLINK, DOM_ATTR_NAMESPACE_XML, DOM_ATTR_NAMESPACE_XMLNS } dom_attr_namespace;
-typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_SERIALIZE } dom_op;
+typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_ATTACH_SHADOW, DOM_OP_KEEP_DETAILS, DOM_OP_SERIALIZE } dom_op;
 typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
 typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
+typedef struct dom_detail_h { uint32_t doc, index, gen; } dom_detail_h;
+typedef struct dom_shadow_h { uint32_t doc, index, gen; } dom_shadow_h;
 typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; } dom_node;
 typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; dom_attr_namespace ns; amb_span value; uint32_t next; } dom_attr;
-typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint64_t revision; } dom_mutation;
+typedef struct dom_detail { uint32_t gen, live, free_next; uint32_t prev; uint32_t next; uint32_t name; uint32_t ns; amb_span old; uint8_t had; } dom_detail;
+typedef struct dom_shadow { uint32_t gen, live, free_next; uint32_t host; uint32_t root; dom_shadow_mode mode; } dom_shadow;
+typedef struct dom_mutation { dom_op op; uint32_t target; uint32_t other; uint32_t detail; uint64_t revision; } dom_mutation;
 typedef struct dom_store_tag { char unused; } dom_store_tag;
 typedef store<dom_store_tag> dom_document;
 extern const char dom_fingerprint[];
@@ -16,6 +21,7 @@ const char *dom_status_name(dom_status x);
 const char *dom_op_name(dom_op x);
 const char *dom_node_kind_name(dom_node_kind x);
 const char *dom_namespace_name(dom_namespace x);
+const char *dom_shadow_mode_name(dom_shadow_mode x);
 const char *dom_attr_namespace_name(dom_attr_namespace x);
 void dom_init(dom_document *d, uint32_t id);
 uint64_t dom_revision(const dom_document *d);
@@ -33,6 +39,8 @@ dom_status dom_set_attribute(dom_document *d, dom_node_h element, const char *na
 dom_status dom_set_attribute_ns(dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_remove_attribute(dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_set_data(dom_document *d, dom_node_h node, const char *data, size_t data_len);
+dom_node_h dom_attach_shadow(dom_document *d, dom_node_h host, dom_shadow_mode mode);
+dom_status dom_keep_details(dom_document *d);
 dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len);
 dom_status dom_check_create_element_ns(const dom_document *d, dom_namespace ns, const char *name, size_t name_len);
@@ -47,6 +55,8 @@ dom_status dom_check_set_attribute(const dom_document *d, dom_node_h element, co
 dom_status dom_check_set_attribute_ns(const dom_document *d, dom_node_h element, dom_attr_namespace ns, const char *name, size_t name_len, const char *value, size_t value_len);
 dom_status dom_check_remove_attribute(const dom_document *d, dom_node_h element, const char *name, size_t name_len);
 dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char *data, size_t data_len);
+dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode);
+dom_status dom_check_keep_details(const dom_document *d);
 dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_node_h dom_children_first(const dom_document *d, dom_node_h h);
 dom_node_h dom_children_next(const dom_document *d, dom_node_h h);
@@ -58,7 +68,7 @@ dom_attr_h dom_attributes_first(const dom_document *d, dom_node_h h);
 dom_attr_h dom_attributes_next(const dom_document *d, dom_attr_h h);
 dom_node_h dom_attributes_up(const dom_document *d, dom_attr_h h);
 size_t dom_attributes_count(const dom_document *d, dom_node_h h);
-void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other);
+void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other, uint32_t detail);
 int dom_check_invariants(const dom_document *d, FILE *report);
 void dom_export(const dom_document *d, FILE *out);
 dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report);
@@ -95,6 +105,8 @@ const char *dom_op_name(dom_op x) {
     case DOM_OP_SET_ATTRIBUTE_NS: return "set_attribute_ns";
     case DOM_OP_REMOVE_ATTRIBUTE: return "remove_attribute";
     case DOM_OP_SET_DATA: return "set_data";
+    case DOM_OP_ATTACH_SHADOW: return "attach_shadow";
+    case DOM_OP_KEEP_DETAILS: return "keep_details";
     case DOM_OP_SERIALIZE: return "serialize";
     }
     return "?";
@@ -118,6 +130,13 @@ const char *dom_namespace_name(dom_namespace x) {
     }
     return "?";
 }
+const char *dom_shadow_mode_name(dom_shadow_mode x) {
+    switch (x) {
+    case DOM_SHADOW_MODE_OPEN: return "open";
+    case DOM_SHADOW_MODE_CLOSED: return "closed";
+    }
+    return "?";
+}
 const char *dom_attr_namespace_name(dom_attr_namespace x) {
     switch (x) {
     case DOM_ATTR_NAMESPACE_NULL: return "null";
@@ -128,7 +147,7 @@ const char *dom_attr_namespace_name(dom_attr_namespace x) {
     return "?";
 }
 
-const char dom_fingerprint[] = "fnv1a32:4815fe18:7612";
+const char dom_fingerprint[] = "fnv1a32:03379fa7:8324";
 void dom_init(dom_document *d, uint32_t id) {
     if (d->node_len != 0) abort();
     d->id = id;
@@ -236,6 +255,18 @@ dom_status dom_check_set_data(const dom_document *d, dom_node_h node, const char
     return DOM_OK;
 }
 
+dom_status dom_check_attach_shadow(const dom_document *d, dom_node_h host, dom_shadow_mode mode)
+{
+    if (!node_live(d, host)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[host.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
+    return DOM_OK;
+}
+
+dom_status dom_check_keep_details(const dom_document *d)
+{
+    return DOM_OK;
+}
+
 dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out)
 {
     if (!node_live(d, node)) return DOM_STALE_HANDLE;
@@ -292,9 +323,9 @@ size_t dom_attributes_count(const dom_document *d, dom_node_h h) {
     return attributes_count(d, h.index);
 }
 
-void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other) {
+void dom_log_mutation(dom_document *d, dom_op op, uint32_t target, uint32_t other, uint32_t detail) {
     d->revision++;
-    dom_mutation e = { op, target, other, d->revision };
+    dom_mutation e = { op, target, other, detail, d->revision };
     mutation_push(d, e);
 }
 int dom_check_invariants(const dom_document *d, FILE *report) {
@@ -411,6 +442,14 @@ int dom_check_invariants(const dom_document *d, FILE *report) {
             uint32_t r = d->attr[i].next;
             if (d->attr[i].live && r && (r >= d->attr_len || !d->attr[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->shadow_len; i++) {
+            uint32_t r = d->shadow[i].host;
+            if (d->shadow[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
+        for (uint32_t i = 1; i < d->shadow_len; i++) {
+            uint32_t r = d->shadow[i].root;
+            if (d->shadow[i].live && r && (r >= d->node_len || !d->node[r].live)) { bad++; amb_report(report, "dom", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -433,6 +472,11 @@ void dom_export(const dom_document *d, FILE *out) {
         if (!d->attr[i].live) continue;
         if (1) { fputs("dom_attr(", out); { uint32_t r = d->attr[i].owner; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); names_put(d, out, d->attr[i].name); fputs(",", out); text_put(d, out, d->attr[i].value); fputs(").\n", out); }
         if (d->attr[i].ns != DOM_ATTR_NAMESPACE_NULL) { fputs("dom_attr_namespace(", out); { uint32_t r = d->attr[i].owner; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); names_put(d, out, d->attr[i].name); fputs(",", out); fputs(dom_attr_namespace_name(d->attr[i].ns), out); fputs(").\n", out); }
+    }
+
+    for (uint32_t i = 1; i < d->shadow_len; i++) {
+        if (!d->shadow[i].live) continue;
+        if (1) { fputs("dom_shadow_root(", out); { uint32_t r = d->shadow[i].host; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); { uint32_t r = d->shadow[i].root; amb_put_ref(out, "n", d->id, r, r && r < d->node_len ? d->node[r].gen : 0); } fputs(",", out); fputs(dom_shadow_mode_name(d->shadow[i].mode), out); fputs(").\n", out); }
     }
 }
 dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
@@ -537,7 +581,7 @@ dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch
         amb_result(report, name, dom_status_name(st), d->revision);
         return st;
     }
-    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "attach_shadow") || amb_name_is(name, name_len, "keep_details") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }
@@ -559,8 +603,14 @@ typedef struct store_dom_store_tag {
     own uint32_t *names_slots;
     size_t mutation_len, mutation_cap;
     own dom_mutation *mutation;
+    size_t detail_len, detail_cap;
+    uint32_t detail_free;
+    own dom_detail *detail;
+    size_t shadow_len, shadow_cap;
+    uint32_t shadow_free;
+    own dom_shadow *shadow;
 } store_dom_store_tag;
-void store_dom_store_tag_drop(store_dom_store_tag *s) { free(s->node); free(s->attr); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); free(s->mutation); }
+void store_dom_store_tag_drop(store_dom_store_tag *s) { free(s->node); free(s->attr); free(s->text); free(s->names); free(s->names_at); free(s->names_slots); free(s->mutation); free(s->detail); free(s->shadow); }
 static void store_dom_store_tag__node_grow(store_dom_store_tag *s) {
     size_t c = s->node_cap ? 2 * s->node_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -847,6 +897,140 @@ size_t store_dom_store_tag_mutation_len(const store_dom_store_tag *s) { return s
 dom_mutation store_dom_store_tag_mutation_at(const store_dom_store_tag *s, size_t i) {
     if (i >= s->mutation_len) abort();
     return s->mutation[i];
+}
+static void store_dom_store_tag__detail_grow(store_dom_store_tag *s) {
+    size_t c = s->detail_cap ? 2 * s->detail_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->detail = (dom_detail *)realloc(s->detail, c * sizeof(dom_detail));
+    if (!s->detail) abort();
+    s->detail_cap = c;
+}
+dom_detail_h store_dom_store_tag_detail_new(store_dom_store_tag *s) {
+    uint32_t i;
+    if (s->detail_free) {
+        i = s->detail_free;
+        s->detail_free = s->detail[i].free_next;
+    } else {
+        if (s->detail_len == 0) {
+            if (s->detail_cap == 0) store_dom_store_tag__detail_grow(s);
+            memset(&s->detail[0], 0, sizeof(dom_detail));
+            s->detail_len = 1;
+        }
+        if (s->detail_len == s->detail_cap) store_dom_store_tag__detail_grow(s);
+        i = (uint32_t)s->detail_len;
+        s->detail_len++;
+        s->detail[i].gen = 0;
+    }
+    uint32_t g = s->detail[i].gen;
+    memset(&s->detail[i], 0, sizeof(dom_detail));
+    s->detail[i].gen = g;
+    s->detail[i].live = 1;
+    dom_detail_h h = { s->id, i, g };
+    return h;
+}
+int store_dom_store_tag_detail_live(const store_dom_store_tag *s, dom_detail_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->detail_len && s->detail[h.index].live && s->detail[h.index].gen == h.gen;
+}
+dom_detail store_dom_store_tag_detail_get(const store_dom_store_tag *s, dom_detail_h h) {
+    if (!store_dom_store_tag_detail_live(s, h)) abort();
+    return s->detail[h.index];
+}
+dom_detail *store_dom_store_tag_detail_ref(const store_dom_store_tag *s, dom_detail_h h) tie s {
+    if (!store_dom_store_tag_detail_live(s, h)) abort();
+    return &s->detail[h.index];
+}
+dom_detail *store_dom_store_tag_detail_slot(const store_dom_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->detail_len) abort();
+    return &s->detail[i];
+}
+dom_detail_h store_dom_store_tag_detail_handle(const store_dom_store_tag *s, uint32_t i) {
+    dom_detail_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->detail_len && s->detail[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->detail[i].gen;
+    }
+    return h;
+}
+void store_dom_store_tag_detail_free(store_dom_store_tag *s, dom_detail_h h) {
+    if (!store_dom_store_tag_detail_live(s, h)) abort();
+    s->detail[h.index].live = 0;
+    s->detail[h.index].gen++;
+    s->detail[h.index].free_next = s->detail_free;
+    s->detail_free = h.index;
+}
+size_t store_dom_store_tag_detail_len(const store_dom_store_tag *s) { return s->detail_len; }
+size_t store_dom_store_tag_detail_count(const store_dom_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->detail_len; i++) if (s->detail[i].live) n++;
+    return n;
+}
+static void store_dom_store_tag__shadow_grow(store_dom_store_tag *s) {
+    size_t c = s->shadow_cap ? 2 * s->shadow_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->shadow = (dom_shadow *)realloc(s->shadow, c * sizeof(dom_shadow));
+    if (!s->shadow) abort();
+    s->shadow_cap = c;
+}
+dom_shadow_h store_dom_store_tag_shadow_new(store_dom_store_tag *s) {
+    uint32_t i;
+    if (s->shadow_free) {
+        i = s->shadow_free;
+        s->shadow_free = s->shadow[i].free_next;
+    } else {
+        if (s->shadow_len == 0) {
+            if (s->shadow_cap == 0) store_dom_store_tag__shadow_grow(s);
+            memset(&s->shadow[0], 0, sizeof(dom_shadow));
+            s->shadow_len = 1;
+        }
+        if (s->shadow_len == s->shadow_cap) store_dom_store_tag__shadow_grow(s);
+        i = (uint32_t)s->shadow_len;
+        s->shadow_len++;
+        s->shadow[i].gen = 0;
+    }
+    uint32_t g = s->shadow[i].gen;
+    memset(&s->shadow[i], 0, sizeof(dom_shadow));
+    s->shadow[i].gen = g;
+    s->shadow[i].live = 1;
+    dom_shadow_h h = { s->id, i, g };
+    return h;
+}
+int store_dom_store_tag_shadow_live(const store_dom_store_tag *s, dom_shadow_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->shadow_len && s->shadow[h.index].live && s->shadow[h.index].gen == h.gen;
+}
+dom_shadow store_dom_store_tag_shadow_get(const store_dom_store_tag *s, dom_shadow_h h) {
+    if (!store_dom_store_tag_shadow_live(s, h)) abort();
+    return s->shadow[h.index];
+}
+dom_shadow *store_dom_store_tag_shadow_ref(const store_dom_store_tag *s, dom_shadow_h h) tie s {
+    if (!store_dom_store_tag_shadow_live(s, h)) abort();
+    return &s->shadow[h.index];
+}
+dom_shadow *store_dom_store_tag_shadow_slot(const store_dom_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->shadow_len) abort();
+    return &s->shadow[i];
+}
+dom_shadow_h store_dom_store_tag_shadow_handle(const store_dom_store_tag *s, uint32_t i) {
+    dom_shadow_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->shadow_len && s->shadow[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->shadow[i].gen;
+    }
+    return h;
+}
+void store_dom_store_tag_shadow_free(store_dom_store_tag *s, dom_shadow_h h) {
+    if (!store_dom_store_tag_shadow_live(s, h)) abort();
+    s->shadow[h.index].live = 0;
+    s->shadow[h.index].gen++;
+    s->shadow[h.index].free_next = s->shadow_free;
+    s->shadow_free = h.index;
+}
+size_t store_dom_store_tag_shadow_len(const store_dom_store_tag *s) { return s->shadow_len; }
+size_t store_dom_store_tag_shadow_count(const store_dom_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->shadow_len; i++) if (s->shadow[i].live) n++;
+    return n;
 }
 void store_dom_store_tag_children_append(store_dom_store_tag *s, uint32_t o, uint32_t i) {
     if (o == 0 || i == 0 || o >= s->node_len || i >= s->node_len) abort();
