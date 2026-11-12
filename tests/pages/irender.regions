@@ -1,0 +1,18 @@
+# tests/pages/irender.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+u-auto 8 8 72 56
+u-pix 76 8 140 56
+u-crisp 144 8 208 56
+u-webkit 212 8 276 56
+u-smooth 280 8 344 56
+u-hq 348 8 412 56
+d-auto 8 60 31 77
+d-pix 35 60 58 77
+d-crisp 62 60 85 77
+d-webkit 89 60 112 77
+b-auto 8 81 72 129
+b-pix 76 81 140 129
+b-crisp 144 81 208 129
+inh 8 137 72 185
+frac 76 137 114 158
+bogus 8 189 792 189
+bogus2 8 189 792 189

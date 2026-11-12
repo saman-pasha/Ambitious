@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>image-rendering</title>
+<style>body { margin: 8px; } img { margin: 0 4px 4px 0; vertical-align: top; } .up { width: 64px; height: 48px; } .down { width: 23px; height: 17px; }
+div.bg { display: inline-block; width: 64px; height: 48px; margin: 0 4px 4px 0; background: url(irender/tiny.png) 0 0 / 40px 30px; }</style></head>
+<body>
+<div><img id="u-auto" class="up" src="irender/tiny.png"><img id="u-pix" class="up" src="irender/tiny.png" style="image-rendering: pixelated"><img id="u-crisp" class="up" src="irender/tiny.png" style="image-rendering: crisp-edges"><img id="u-webkit" class="up" src="irender/tiny.png" style="image-rendering: -webkit-optimize-contrast"><img id="u-smooth" class="up" src="irender/tiny.png" style="image-rendering: smooth"><img id="u-hq" class="up" src="irender/tiny.png" style="image-rendering: high-quality"></div>
+<div><img id="d-auto" class="down" src="irender/big.png"><img id="d-pix" class="down" src="irender/big.png" style="image-rendering: pixelated"><img id="d-crisp" class="down" src="irender/big.png" style="image-rendering: crisp-edges"><img id="d-webkit" class="down" src="irender/big.png" style="image-rendering: -webkit-optimize-contrast"></div>
+<div><div class="bg" id="b-auto" style="background-repeat: no-repeat"></div><div class="bg" id="b-pix" style="image-rendering: pixelated"></div><div class="bg" id="b-crisp" style="image-rendering: crisp-edges"></div></div>
+<div style="image-rendering: pixelated"><img id="inh" class="up" src="irender/tiny.png"><img id="frac" src="irender/tiny.png" style="width: 37.5px; height: 21px; margin-left: 0.3px"></div>
+<div id="bogus" style="image-rendering: optimizeSpeed"></div><div id="bogus2" style="image-rendering: optimizeQuality"></div>
+</body></html>

@@ -1,0 +1,18 @@
+# boxes of tests/pages/irender.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+u-auto img 8 8 64 48
+u-pix img 76 8 64 48
+u-crisp img 144 8 64 48
+u-webkit img 212 8 64 48
+u-smooth img 280 8 64 48
+u-hq img 348 8 64 48
+d-auto img 8 60 23 17
+d-pix img 35 60 23 17
+d-crisp img 62 60 23 17
+d-webkit img 89 60 23 17
+b-auto div 8 81 64 48
+b-pix div 76 81 64 48
+b-crisp div 144 81 64 48
+inh img 8 137 64 48
+frac img 76.297 137 37.5 21
+bogus div 8 189 784 0
+bogus2 div 8 189 784 0

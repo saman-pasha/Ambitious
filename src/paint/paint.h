@@ -14,8 +14,9 @@
 
 /* oy: the page's y the canvas's first row shows (0 for the whole page); the clip: the
    rectangle drawing reaches, in page coordinates (overflow's, as paint sets it); zoom:
-   the device px a CSS px the page is drawn at (paint sets it) */
-typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; double oy, cx0, cy0, cx1, cy1, zoom; } amb_canvas;
+   the device px a CSS px the page is drawn at (paint sets it); nearest: images drawn now
+   sampled at the nearest pixel (a box's image-rendering: pixelated, as paint sets it) */
+typedef struct amb_canvas { vector<uint8_t> px; uint32_t w, h, background; double oy, cx0, cy0, cx1, cy1, zoom; int nearest; } amb_canvas;
 #define AMB_CANVAS_DROP(c) vector_uint8_t_drop(&(c).px)
 
 /* the page laid out in t, drawn onto c (sized to the viewport box, at most 16384

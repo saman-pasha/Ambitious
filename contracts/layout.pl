@@ -118,6 +118,8 @@ layout_contract(record(box, [
     %% object-fit (0 fill, 1 contain, 2 cover, 3 none, 4 scale-down) and object-position's computed text (none:
     %% its initial 50% 50%): where a replaced element's image is drawn in its content box
     field(ofit, u8), field(opos, span(text)),
+    %% image-rendering: 1 pixelated or crisp-edges, its images sampled at the nearest pixel; 0 any other
+    field(irender, u8),
     %% clip-path's basic shape or geometry box (its computed text; none, a url() or an SVG element's: none), which
     %% paint clips the box's stacking context to
     field(cpath, span(text)),

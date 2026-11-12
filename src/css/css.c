@@ -1084,6 +1084,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
        a container answers to, kept as text (they have case) */
     { "container-type", 0, G_TEXT, 0, "normal size inline-size scroll-state", "normal" },
     { "container-name", 0, G_TEXT, 0, "none", "none" },
+    /* image-rendering (CSS Images 3, 7.5) as Chromium takes it: smooth and high-quality refused (measured) */
+    { "image-rendering", 1, G_KW, 0, "auto pixelated crisp-edges -webkit-optimize-contrast", "auto" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }

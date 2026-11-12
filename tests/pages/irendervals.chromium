@@ -1,0 +1,14 @@
+# tests/pages/irendervals.html in Chromium (tools/bench/cssref.js): id, property, value
+v-auto image-rendering auto
+v-pix image-rendering pixelated
+v-crisp image-rendering crisp-edges
+v-webkit image-rendering -webkit-optimize-contrast
+v-smooth image-rendering auto
+v-hq image-rendering auto
+v-speed image-rendering auto
+v-quality image-rendering auto
+v-upper image-rendering pixelated
+v-inh image-rendering pixelated
+v-init image-rendering auto
+v-inh2 image-rendering crisp-edges
+v-unset image-rendering crisp-edges

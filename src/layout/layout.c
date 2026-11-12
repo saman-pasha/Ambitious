@@ -315,6 +315,7 @@ typedef struct lay_ext {
        LayoutTheme::IsControlStyled leaves a styled field, button or select to CSS) */
     uint8_t app_none, styled_bg, styled_border, styled_shadow;
     uint8_t ofit;                       /* object-fit: 0 fill, 1 contain, 2 cover, 3 none, 4 scale-down */
+    uint8_t irender;                    /* image-rendering: 1 pixelated or crisp-edges (nearest), 0 any other */
     uint32_t opos;                      /* object-position's cval; 0 at its initial value */
     uint32_t cpath;                     /* clip-path's cval when it is a basic shape or a geometry box; else 0 */
     uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
@@ -675,7 +676,9 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     lay_word_of(st, c0 + CSS_PROP_OBJECT_FIT, w);
     e->ofit = (uint8_t)(lay_w(w, "contain") ? 1 : lay_w(w, "cover") ? 2 : lay_w(w, "none") ? 3 : lay_w(w, "scale-down") ? 4 : 0);
     e->opos = st->cval[c0 + CSS_PROP_OBJECT_POSITION].how == CSS_HOW_INITIAL ? 0 : c0 + CSS_PROP_OBJECT_POSITION;
-    if (e->ofit || e->opos) e->paints = 1;
+    lay_word_of(st, c0 + CSS_PROP_IMAGE_RENDERING, w);
+    e->irender = (uint8_t)(lay_w(w, "pixelated") || lay_w(w, "crisp-edges"));
+    if (e->ofit || e->opos || e->irender) e->paints = 1;
     e->cq = (uint8_t)lay_cq_kind(st, c0);
     {
         /* clip-path's basic shape or geometry box (an HTML box's; a url() is an SVG element's) */
@@ -5364,6 +5367,7 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].bg_image = lay_kept(t, st, e.bgimg);
     t->box[b].bg_pos = lay_kept(t, st, e.bgpos);
     t->box[b].ofit = e.ofit;
+    t->box[b].irender = e.irender;
     t->box[b].opos = lay_kept(t, st, e.opos);
     t->box[b].cpath = lay_kept(t, st, e.cpath);
     t->box[b].bg_size = lay_kept(t, st, e.bgsize);

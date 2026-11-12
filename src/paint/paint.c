@@ -251,6 +251,27 @@ static void pt_mip_level(const vector<uint8_t> *src, uint32_t w, uint32_t h, vec
 static void pt_image_ex(amb_canvas *c, const vector<uint8_t> *rgba, uint32_t w, uint32_t h, double x0, double y0, double dw, double dh, int aa) {
     if (dw <= 0 || dh <= 0 || w == 0 || h == 0) return;
     double s = fmin(dw / w, dh / h);
+    if (c->nearest) {
+        /* image-rendering: pixelated or crisp-edges: each pixel the source's at its centre, a centre on a pixel's edge
+           the one before it (Skia's nearest sampling, measured: up and down, no mip level) */
+        double yy0 = y0 - c->oy;
+        int nx0 = (int)floor(x0 + 0.5), ny0 = (int)floor(yy0 + 0.5), nx1 = (int)floor(x0 + dw + 0.5), ny1 = (int)floor(yy0 + dh + 0.5);
+        if (aa) { nx0 = (int)floor(x0); ny0 = (int)floor(yy0); nx1 = (int)ceil(x0 + dw); ny1 = (int)ceil(yy0 + dh); }
+        int qx0, qy0, qx1, qy1;
+        pt_clip_px(c, &qx0, &qy0, &qx1, &qy1);
+        for (int y = ny0 < qy0 ? qy0 : ny0; y < ny1 && y < qy1; y++)
+            for (int x = nx0 < qx0 ? qx0 : nx0; x < nx1 && x < qx1; x++) {
+                double cov = 1;
+                if (aa) cov = fmax(0, fmin(x + 1.0, x0 + dw) - fmax((double)x, x0)) * fmax(0, fmin(y + 1.0, yy0 + dh) - fmax((double)y, yy0));
+                double fx = ceil((x + 0.5 - x0) * w / dw - 1e-9) - 1, fy = ceil((y + 0.5 - yy0) * h / dh - 1e-9) - 1;
+                uint32_t sx = fx < 0 ? 0 : fx >= w ? w - 1 : (uint32_t)fx, sy = fy < 0 ? 0 : fy >= h ? h - 1 : (uint32_t)fy;
+                size_t q = ((size_t)sy * w + sx) * 4;
+                double a = at(*rgba, q + 3) / 255.0 * cov;
+                size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+                for (int k = 0; k < 3; k++) c->px[i + k] = (uint8_t)(at(*rgba, q + (size_t)k) * a + c->px[i + k] * (1 - a) + 0.5);
+            }
+        return;
+    }
     if (s < 0.5) {
         /* drawn smaller than half its size: from a mip level, as Skia's medium quality draws (Chromium's for an image),
            the level the nearest to the inverse scale's log2 less Skia's half-level sharpening, its smaller axis's:
@@ -2199,8 +2220,8 @@ static void pt_gauge_css(const layout_tree *t, uint32_t b, amb_canvas *c) {
     if (fr > 0 && v1 > v0) pt_gradient(c, val[region], strlen(val[region]), v0, y0, v1 - v0, y1 - y0, v0, y0, v1, y1, zr);
 }
 
-static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
-                   vector<uint8_t> *ipx) {
+static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
+                         vector<uint8_t> *ipx) {
     double bx = t->box[b].x - t->box[b].pl - t->box[b].bl, by = t->box[b].y - t->box[b].pt - t->box[b].bt;
     double bw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
     double bh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
@@ -2414,6 +2435,14 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
             pt_menulist_arrow(t, b, c, (int)qx0, (int)qy0, (int)qx1, (int)qy1, &tacc);
         }
     }
+}
+/* a box drawn: its images (replaced content and backgrounds) sampled as its image-rendering asks */
+static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
+                   vector<uint8_t> *ipx) {
+    int nearest = c->nearest;
+    c->nearest = t->box[b].irender;
+    pt_box_drawn(t, nt, b, c, skip_bg, icache, ipx);
+    c->nearest = nearest;
 }
 
 /* a box's outline: outside its border box by its offset, in its style */
