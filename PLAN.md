@@ -927,7 +927,9 @@ be built side by side and merged without touching each other's.
     Skia's three box passes (SVG's windows, summed whole and divided once), feOffset,
     feFlood, feComposite (arithmetic too), feMerge, feColorMatrix, feBlend (every mode),
     feDropShadow and feComponentTransfer, each result kept in eight bits and converted
-    between linearRGB and sRGB as Skia's colour filters convert it;
+    between linearRGB and sRGB as Skia's colour filters convert it; CSS's filter
+    functions on an SVG element made their shorthand primitives; a text's and an
+    image's bounding boxes for objectBoundingBox units;
   - vector-effect: non-scaling-stroke; the geometry properties from CSS (r, cx, cy, rx,
     ry, x, y, width, height, `d: path()`); switch's conditions; a text's stroke, its
     rotate lists, textLength (spacing and spacingAndGlyphs), textPath (href,
@@ -936,9 +938,10 @@ be built side by side and merged without touching each other's.
     px drawn as Skia's anti-aliased hairlines.
 
   Gate: `tests/pages/svg-pattern.html`, `svg-marker.html`, `svg-mask.html`,
-  `svg-filter.html`, `svg-embed.html`, `svg-textpath.html` and `svg-props.html`, each
-  held to Chromium's screenshot region by region (`tests/integ/paintref.sh`: 34, 29, 33,
-  42, 14, 19 and 17 regions agree); 12o's pages unmoved (37, 40, 9, 11 and 9);
+  `svg-filter.html`, `svg-embed.html`, `svg-textpath.html`, `svg-props.html` and
+  `svg-boxes.html`, each held to Chromium's screenshot region by region
+  (`tests/integ/paintref.sh`: 34, 29, 33, 42, 14, 19, 17 and 23 regions agree); 12o's
+  pages unmoved (37, 40, 9, 11 and 9);
   `tests/exec/svg_render` (scenes of each, a pattern's tile, a mask, a filter and a
   hairline drawn, documents of patterns, masks and markers of themselves and of filters
   and text past every bound; valgrind clean).

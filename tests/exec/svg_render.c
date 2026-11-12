@@ -103,6 +103,9 @@ static const char *const pages[] = {
     "<svg id=s width=20 height=20><switch><rect systemLanguage=fr width=5 height=5 /><circle r=3 cx=10 cy=10 /></switch><rect "
     "requiredExtensions='' width=5 height=5 /></svg>",
     "<svg id=s width=20 height=20><rect width=10 height=10 fill=green stroke=red paint-order=stroke vector-effect=non-scaling-stroke /></svg>",
+    "<svg id=s width=20 height=20><rect width=10 height=10 style='filter: blur(1px) opacity(50%) drop-shadow(1px 2px 0px red)' /></svg>",
+    "<svg id=s width=40 height=20><mask id=k maskContentUnits=objectBoundingBox><rect width=0.5 height=1 fill=white /></mask><text x=2 y=15 "
+    "font-size=10 mask='url(#k)'>Ab</text></svg>",
 };
 
 /* documents made to break the drawing: each must draw in bounded time and memory */

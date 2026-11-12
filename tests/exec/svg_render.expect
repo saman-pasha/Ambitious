@@ -208,6 +208,24 @@ page 14: box 8,8 20x20
 v 20 20 1
 p 1 0 0 1 0 0 n 1 0 c ff0000ff 1 1 0 0 4 0 0 N M 0 0 L 10 0 L 10 10 L 0 10 Z
 p 1 0 0 1 0 0 c 008000ff 1 0 n 1 1 0 0 4 0 0 N M 0 0 L 10 0 L 10 10 L 0 10 Z
+page 15: box 8,8 20x20
+v 20 20 1
+g 1 0 0 0 1
+F -8 -8 26 26 1 0 0 1 0 0 3
+x 1 -1 -1 0 -8 -8 26 26 1 1
+x 9 0 0 0 -8 -8 26 26 0 0 0 0 0 0 1 2 0 0.5
+x 8 1 1 0 -8 -8 26 26 0 0 1 2 ff0000ff
+E
+p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 10 0 L 10 10 L 0 10 Z
+e
+page 16: box 8,8 40x20
+v 40 20 1
+g 1 0 0 1 0
+M 0 0.7778320312 4.9 14.66601562 13.2 1 0 0 1 0 0
+p 12.22167969 0 0 11 2 6 c ffffffff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 0.5 0 L 0.5 1 L 0 1 Z
+E
+t 1 0 0 1 0 0 0 10 0 c 000000ff 1 2 65 2 15 98 9.221679688 15
+e
 -- hostile documents
 uses ten a level, eight deep: 44996 lines, ink 255
 uses of themselves, numbers past floats: 4 lines, ink 637500

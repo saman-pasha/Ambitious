@@ -35,7 +35,11 @@
    filter (filterUnits, primitiveUnits, its region, each primitive's in, in2, result,
    subregion and color-interpolation-filters; feGaussianBlur, feOffset, feFlood,
    feComposite, feMerge, feColorMatrix, feBlend, feDropShadow, feComponentTransfer: a
-   block, F ... E). A reference to no such element is passed over, as Chromium passes it.
+   block, F ... E); or CSS's filter functions (blur, drop-shadow, grayscale, sepia, saturate,
+   hue-rotate, brightness, contrast, invert, opacity: each its shorthand primitive, in sRGB,
+   the region the bounding box outset by their reach). A reference to no such element is
+   passed over, as Chromium passes it. An element's bounding box (objectBoundingBox units) is
+   its geometry's, a text's glyph cells', an image's viewport, a group's children's.
    Markers: marker-start, -mid and -end on a path, line, polyline or polygon, at the places
    Blink's SVGMarkerDataBuilder finds (an arc one segment, a closed subpath's first and
    last place bisecting its closing segment and its first), each marker's content through
@@ -85,9 +89,9 @@
    and height (one from the other through its viewBox); it is drawn at that size scaled
    into its box, or, with none, at the box's size (its viewBox fitted into it).
 
-   Not done: foreignObject, SMIL animation, a reference into another document, CSS's filter
-   functions on an SVG element, the filter primitives not named above (each a transparent
-   result), a filter's href, textPath's side, method, spacing and path, a path's
+   Not done: foreignObject, SMIL animation, a reference into another document, a filter
+   value mixing a url() and functions (the url() alone is drawn), the filter primitives not
+   named above (each a transparent result), a filter's href, textPath's side, method, spacing and path, a path's
    pathLength, the vector effects other than non-scaling-stroke, systemLanguage (no tag
    holds, as in the headless Chromium the gates are measured in), a broken picture's icon,
    pictures of image elements in an SVG document drawn as an image (none is fetched), and
@@ -1340,10 +1344,13 @@ static void sv_paint_words(vector<char> *line, int kind, uint32_t gid, uint32_t 
 /* ---- elements ---- */
 
 static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth);
+static int sv_text_bounds(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t x, const sv_walk *w,
+                          sv_mat mm, double *bb);
 
 /* the bounds an element's content covers under m (with its own transform when withself is 1, as
-   a child's are; without, its user space's: an objectBoundingBox's): a shape's geometry's,
-   a group's or a use's children's together; 0 when none */
+   a child's are; without, its user space's: an objectBoundingBox's): a shape's geometry's, a
+   text's glyph cells', an image's viewport, a group's or a use's children's together; 0 when
+   none */
 static int sv_bounds(SB, uint32_t x, const sv_walk *pw, sv_mat m, double *bb, int depth, int withself) {
     if (depth > 32 || ++*work > SV_WORK || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_SVG) return 0;
     uint32_t c0 = sv_first(firsts, x);
@@ -1353,6 +1360,19 @@ static int sv_bounds(SB, uint32_t x, const sv_walk *pw, sv_mat m, double *bb, in
     sv_mat mm = withself ? sv_mul(m, sv_transform_of(d, st, firsts, x, &w)) : m;
     vector<double> p;
     if (sv_geometry(d, st, firsts, x, &w, &p)) return sv_path_bounds(&p, mm, bb);
+    if (sv_is(d, x, "text")) return sv_text_bounds(d, st, firsts, f, x, &w, mm, bb);
+    if (sv_is(d, x, "image")) {
+        /* an image's viewport, when its width and height are given (an auto one's picture is
+           the loader's, unknown here) */
+        double fs = sv_fs(st, &w);
+        int g, gw, gh;
+        double ix = sv_geo(d, st, firsts, x, CSS_PROP_X, "x", w.vw, fs, 0, &g), iy = sv_geo(d, st, firsts, x, CSS_PROP_Y, "y", w.vh, fs, 0, &g);
+        double iw = sv_geo(d, st, firsts, x, CSS_PROP_WIDTH, "width", w.vw, fs, 0, &gw), ih = sv_geo(d, st, firsts, x, CSS_PROP_HEIGHT, "height", w.vh, fs, 0, &gh);
+        if (!gw || !gh || iw <= 0 || ih <= 0) return 0;
+        sv_put2(&p, SV_M, ix, iy);
+        sv_put2(&p, SV_L, ix + iw, iy + ih);
+        return sv_path_bounds(&p, mm, bb);
+    }
     int any = 0;
     if (sv_is(d, x, "g") || sv_is(d, x, "a") || sv_is(d, x, "switch") || sv_is(d, x, "use")) {
         bb[0] = bb[1] = 1e300;
@@ -1723,18 +1743,152 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
     return 1;
 }
 
+/* CSS's filter functions on an SVG element (Filter Effects 1, 13: each its shorthand's
+   primitive, in sRGB, as Blink builds them): a filter's block of them, the value's computed
+   text at fcv; its region the bounding box (bb) outset by how far the functions reach (three
+   deviations of a blur and a px, a shadow's offset too), each primitive's subregion the
+   region. 0 when there is none to draw */
+typedef struct sv_fop { int kind; double v[20]; uint32_t col; } sv_fop;
+static int sv_css_filter_block(const css_style *st, uint32_t fcv, const double *bb, int hb, sv_mat mm, vector<char> *out) {
+    if (!hb || bb[2] < bb[0] || bb[3] < bb[1]) return 0;
+    amb_span sp = st->cval[fcv].text;
+    vector<char> t;
+    vector<sv_fop> ops;
+    append_range(t, text_ptr(st, sp), sp.len);
+    size_t i = 0, pa, pl;
+    double reach = 0;
+    while (css_next_part(data(t), len(t), &i, &pa, &pl) && len(ops) < 64) {
+        const char *fn = data(t) + pa;
+        size_t open = 0;
+        while (open < pl && fn[open] != '(') open++;
+        if (open >= pl || fn[pl - 1] != ')') continue;
+        const char *args = fn + open + 1;
+        size_t al = pl - open - 2, j = 0, xa, xl;
+        sv_fop op;
+        memset(&op, 0, sizeof op);
+        if (sv_eq_ci(fn, open, "drop-shadow")) {
+            int nv = 0;
+            uint32_t cc;
+            op.kind = SV_FE_SHADOW;
+            op.col = 0x000000ff;
+            while (css_next_part(args, al, &j, &xa, &xl)) {
+                double x;
+                if (nv < 3 && css_length_eval(args + xa, xl, 0, &x)) op.v[nv++] = x;
+                else if (css_color_parse(args + xa, xl, &cc)) op.col = cc;
+            }
+            if (op.v[2] < 0) op.v[2] = 0;
+            reach += fabs(op.v[0]) + fabs(op.v[1]) + 3 * op.v[2] + 1;
+            push_back(ops, op);
+            continue;
+        }
+        /* the one argument: a number, a percentage, a length (px) or an angle (degrees) */
+        double a = 1;
+        int have = css_next_part(args, al, &j, &xa, &xl);
+        if (have) {
+            char num[64];
+            size_t k = xl < 63 ? xl : 63;
+            memcpy(num, args + xa, k);
+            num[k] = 0;
+            a = strtod(num, 0);
+            if (k > 0 && num[k - 1] == '%') a /= 100;
+            else if (k > 4 && sv_eq_ci(num + k - 4, 4, "turn")) a *= 360;
+            else if (k > 4 && sv_eq_ci(num + k - 4, 4, "grad")) a *= 0.9;
+            else if (k > 3 && sv_eq_ci(num + k - 3, 3, "rad")) a *= 180 / M_PI;
+        }
+        double o = 1 - (a > 1 ? 1 : a < 0 ? 0 : a);
+        if (sv_eq_ci(fn, open, "blur")) {
+            op.kind = SV_FE_BLUR;
+            op.v[0] = have && a > 0 ? a : 0;
+            reach += 3 * op.v[0] + 1;
+        } else if (sv_eq_ci(fn, open, "brightness") || sv_eq_ci(fn, open, "contrast") || sv_eq_ci(fn, open, "invert") ||
+                   sv_eq_ci(fn, open, "opacity")) {
+            op.kind = SV_FE_TRANSFER;
+            op.v[0] = sv_eq_ci(fn, open, "brightness") ? 0 : sv_eq_ci(fn, open, "contrast") ? 1 : sv_eq_ci(fn, open, "invert") ? 2 : 3;
+            op.v[1] = op.v[0] >= 2 && a > 1 ? 1 : a;
+        } else {
+            double m[20] = { 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0 };
+            if (sv_eq_ci(fn, open, "grayscale")) {
+                double g[15] = { 0.2126 + 0.7874 * o, 0.7152 - 0.7152 * o, 0.0722 - 0.0722 * o, 0, 0, 0.2126 - 0.2126 * o, 0.7152 + 0.2848 * o,
+                                 0.0722 - 0.0722 * o, 0, 0, 0.2126 - 0.2126 * o, 0.7152 - 0.7152 * o, 0.0722 + 0.9278 * o, 0, 0 };
+                memcpy(m, g, sizeof g);
+            } else if (sv_eq_ci(fn, open, "sepia")) {
+                double g[15] = { 0.393 + 0.607 * o, 0.769 - 0.769 * o, 0.189 - 0.189 * o, 0, 0, 0.349 - 0.349 * o, 0.686 + 0.314 * o, 0.168 - 0.168 * o,
+                                 0, 0, 0.272 - 0.272 * o, 0.534 - 0.534 * o, 0.131 + 0.869 * o, 0, 0 };
+                memcpy(m, g, sizeof g);
+            } else if (sv_eq_ci(fn, open, "saturate")) {
+                double s = a;
+                double g[15] = { 0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0, 0, 0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s,
+                                 0, 0, 0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s, 0, 0 };
+                memcpy(m, g, sizeof g);
+            } else if (sv_eq_ci(fn, open, "hue-rotate")) {
+                double r = (have ? a : 0) * M_PI / 180, cs = cos(r), sn = sin(r);
+                double g[15] = { 0.213 + cs * 0.787 - sn * 0.213, 0.715 - cs * 0.715 - sn * 0.715, 0.072 - cs * 0.072 + sn * 0.928, 0, 0,
+                                 0.213 - cs * 0.213 + sn * 0.143, 0.715 + cs * 0.285 + sn * 0.140, 0.072 - cs * 0.072 - sn * 0.283, 0, 0,
+                                 0.213 - cs * 0.213 - sn * 0.787, 0.715 - cs * 0.715 + sn * 0.715, 0.072 + cs * 0.928 + sn * 0.072, 0, 0 };
+                memcpy(m, g, sizeof g);
+            } else continue;
+            op.kind = SV_FE_MATRIX;
+            memcpy(op.v, m, sizeof m);
+        }
+        push_back(ops, op);
+    }
+    if (!len(ops)) return 0;
+    double r[4] = { bb[0] - reach, bb[1] - reach, bb[2] - bb[0] + 2 * reach, bb[3] - bb[1] + 2 * reach };
+    sv_w(out, "F");
+    for (int q = 0; q < 4; q++) sv_n(out, r[q]);
+    sv_m(out, mm);
+    sv_n(out, (double)len(ops));
+    sv_w(out, "\n");
+    for (size_t k = 0; k < len(ops); k++) {
+        sv_fop op = at(ops, k);
+        int in = k ? (int)k - 1 : SV_IN_SOURCE;
+        sv_w(out, "x");
+        sv_n(out, op.kind);
+        sv_n(out, in);
+        sv_n(out, in);
+        sv_n(out, 0);
+        for (int q = 0; q < 4; q++) sv_n(out, r[q]);
+        if (op.kind == SV_FE_SHADOW) {
+            sv_n(out, op.v[2]);
+            sv_n(out, op.v[2]);
+            sv_n(out, op.v[0]);
+            sv_n(out, op.v[1]);
+            sv_hex(out, op.col);
+        } else if (op.kind == SV_FE_BLUR) {
+            sv_n(out, op.v[0]);
+            sv_n(out, op.v[0]);
+        } else if (op.kind == SV_FE_MATRIX) {
+            for (int q = 0; q < 20; q++) sv_n(out, op.v[q]);
+        } else {
+            /* R, G and B: brightness and contrast linear, invert a table; opacity's alpha a table */
+            int which = (int)op.v[0];
+            double a = op.v[1];
+            for (int ch = 0; ch < 3; ch++) {
+                if (which == 3) sv_w(out, " 0 0");
+                else if (which == 2) { sv_w(out, " 1 2"); sv_n(out, a); sv_n(out, 1 - a); }
+                else { sv_w(out, " 3 2"); sv_n(out, a); sv_n(out, which == 1 ? 0.5 - 0.5 * a : 0); }
+            }
+            if (which == 3) { sv_w(out, " 1 2 0"); sv_n(out, a); }
+            else sv_w(out, " 0 0");
+        }
+        sv_w(out, "\n");
+    }
+    sv_w(out, "E\n");
+    return 1;
+}
+
 /* a group's lines, its opacity, its clip (cp a clipPath, 0 for none), its mask (mk a mask) and
-   its filter (flt a filter): its g line, followed by its clip's shapes, its mask's block and
-   its filter's (a clipPath's own clip-path a group about it). How many groups were written
-   (the caller ends each); -1 when the element draws nothing (its mask masks all of it, its
-   filter has no region) */
-static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt, double op, const sv_walk *pw, const sv_walk *w, sv_mat mm,
-                         int depth) {
-    if (op >= 1 && !cp && !mk && !flt) return 0;
+   its filter (flt a filter element; else fcv, CSS's filter functions' value, or 0): its g
+   line, followed by its clip's shapes, its mask's block and its filter's (a clipPath's own
+   clip-path a group about it). How many groups were written (the caller ends each); -1 when
+   the element draws nothing (its mask masks all of it, its filter has no region) */
+static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt, uint32_t fcv, double op, const sv_walk *pw, const sv_walk *w,
+                         sv_mat mm, int depth) {
+    if (op >= 1 && !cp && !mk && !flt && !fcv) return 0;
     double bb[4] = { 0, 0, 0, 0 };
     int hb = 0, groups = 0;
     vector<char> v;
-    if ((cp && sv_attr_text(d, cp, "clipPathUnits", &v)) || mk || flt) hb = sv_bounds(SA, x, pw, sv_id(), bb, depth, 0);
+    if ((cp && sv_attr_text(d, cp, "clipPathUnits", &v)) || mk || flt || fcv) hb = sv_bounds(SA, x, pw, sv_id(), bb, depth, 0);
     uint32_t c0 = cp ? sv_first(firsts, cp) : 0;
     uint32_t outer = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
     if (outer && outer != cp) {
@@ -1756,13 +1910,18 @@ static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t flt,
         for (int q = 0; q < groups; q++) sv_w(out, "e\n");
         return -1;
     }
+    int filtered = flt || (fcv && sv_css_filter_block(st, fcv, bb, hb, mm, &blocks));
+    if (op >= 1 && !cp && !mk && !filtered) {
+        for (int q = 0; q < groups; q++) sv_w(out, "e\n");
+        return 0;
+    }
     sv_w(out, "g");
     sv_n(out, op);
     sv_n(out, cp ? 2 : 0);
     sv_n(out, k);
-    if (mk || flt) {
+    if (mk || filtered) {
         sv_n(out, mk ? 1 : 0);
-        sv_n(out, flt ? 1 : 0);
+        sv_n(out, filtered ? 1 : 0);
     }
     sv_w(out, "\n");
     append_range(out, data(lines), len(lines));
@@ -2120,9 +2279,16 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     double op = c0 ? st->cval[c0 + CSS_PROP_OPACITY].num : 1;
     if (op <= 0) return;
     uint32_t cp = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
-    /* its mask and its filter (a url() that names no such element ignored, as Chromium ignores it) */
-    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK, "mask") : 0, flt = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_FILTER, "filter") : 0;
-    int grouped = sv_group_open(SA, x, cp, mk, flt, op, pw, &w, mm, depth);
+    /* its mask and its filter (a url() that names no such element ignored, as Chromium ignores
+       it); CSS's filter functions, when the filter is no url() */
+    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK, "mask") : 0, flt = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_FILTER, "filter") : 0, fcv = 0;
+    if (c0 && !flt && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT) {
+        amb_span fsp = st->cval[c0 + CSS_PROP_FILTER].text;
+        int url = 0;
+        for (size_t q = 0; q + 4 <= fsp.len && !url; q++) url = memcmp(text_ptr(st, fsp) + q, "url(", 4) == 0;
+        if (!url) fcv = c0 + CSS_PROP_FILTER;
+    }
+    int grouped = sv_group_open(SA, x, cp, mk, flt, fcv, op, pw, &w, mm, depth);
     if (grouped < 0) return;
     if (shape) sv_shape(SA, x, &w, mm, depth);
     else if (group) {
@@ -2362,17 +2528,18 @@ static uint32_t sv_text_path_of(const dom_document *d, uint32_t e, uint32_t x) {
    and transform; startOffset, a percentage of its length; its anchor), each glyph's middle
    on the path and the glyph turned to its direction there, one past either end not drawn;
    each glyph turned by its rotate (a list's last value holding for the element's later
-   characters) and moved by its dominant-baseline. Runs of one element's characters each a
-   line: upright glyphs (a uniform scale, no turn) filled as the page's text is ('t': its
-   matrix, face, size, slant, paint, opacity, each glyph's code point and place), others
-   filled as their outlines ('p'); a stroke, outlines' too; fill and stroke in the paint-order */
-static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
+   characters) and moved by its dominant-baseline: each character's element (its index in
+   the elements, whose walks are wso), place, advance, turn, scale across, and whether it is
+   dropped or on a path, into the vectors given. 0 when it has no character */
+static int sv_text_layout(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t x, const sv_walk *w,
+                          vector<sv_char> *cso, vector<uint32_t> *elso, vector<sv_walk> *wso, vector<double> *gxo, vector<double> *gyo,
+                          vector<double> *advo, vector<double> *roto, vector<double> *hso, vector<uint8_t> *hideo, vector<uint8_t> *onpatho) {
     vector<sv_char> cs;
     vector<uint32_t> els;
     int space = 1;
     sv_text_chars(d, x, &cs, &els, &space, 0);
     while (len(cs) && at(cs, len(cs) - 1).cp == ' ') resize(cs, len(cs) - 1);
-    if (!len(cs)) return;
+    if (!len(cs)) return 0;
     /* each element's walk, its parent's first */
     size_t ne = len(els);
     vector<sv_walk> ws;
@@ -2509,7 +2676,72 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
         }
         i0 = i1;
     }
-    /* runs of one element's characters, each its lines */
+    /* each character's dominant baseline's shift (its element's): down the page, or across a
+       path's direction */
+    for (size_t q = 0; q < n; q++) {
+        sv_walk cwv = at(ws, at(cs, q).el);
+        double shift = sv_baseline_shift(st, f, &cwv, sv_face(st, &cwv), sv_fs(st, &cwv)), r = at(rot, q) * M_PI / 180;
+        gx[q] = at(gx, q) - shift * sin(r);
+        gy[q] = at(gy, q) + shift * cos(r);
+    }
+    append_range(cso, data(cs), len(cs));
+    append_range(elso, data(els), len(els));
+    append_range(wso, data(ws), len(ws));
+    append_range(gxo, data(gx), n);
+    append_range(gyo, data(gy), n);
+    append_range(advo, data(adv), n);
+    append_range(roto, data(rot), n);
+    append_range(hso, data(hs), n);
+    append_range(hideo, data(hide), n);
+    append_range(onpatho, data(onpath), n);
+    return 1;
+}
+
+/* a text's bounds under mm (its user space's matrix): each drawn character's cell -- its
+   advance across, the face's ascent above its baseline and descent below -- turned as its
+   glyph is: 0 when it has none */
+static int sv_text_bounds(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t x, const sv_walk *w,
+                          sv_mat mm, double *bb) {
+    vector<sv_char> cs;
+    vector<uint32_t> els;
+    vector<sv_walk> ws;
+    vector<double> gx, gy, adv, rot, hs;
+    vector<uint8_t> hide, onpath;
+    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath)) return 0;
+    int any = 0;
+    bb[0] = bb[1] = 1e300;
+    bb[2] = bb[3] = -1e300;
+    for (size_t q = 0; q < len(cs); q++) {
+        if (at(hide, q)) continue;
+        sv_walk cwv = at(ws, at(cs, q).el);
+        double asc, desc, gap, r = at(rot, q) * M_PI / 180, c = cos(r), s = sin(r);
+        amb_face_metrics(f, sv_face(st, &cwv), sv_fs(st, &cwv), &asc, &desc, &gap);
+        double xs[4] = { 0, at(adv, q), at(adv, q), 0 }, ys[4] = { -asc, -asc, desc, desc };
+        for (int k = 0; k < 4; k++) {
+            double ux = at(gx, q) + xs[k] * c - ys[k] * s, uy = at(gy, q) + xs[k] * s + ys[k] * c;
+            double px = sv_ax(mm, ux, uy), py = sv_ay(mm, ux, uy);
+            bb[0] = fmin(bb[0], px);
+            bb[1] = fmin(bb[1], py);
+            bb[2] = fmax(bb[2], px);
+            bb[3] = fmax(bb[3], py);
+            any = 1;
+        }
+    }
+    return any;
+}
+
+/* a text element's glyphs (sv_text_layout's): runs of one element's characters each a line:
+   upright glyphs (a uniform scale, no turn) filled as the page's text is ('t': its matrix,
+   face, size, slant, paint, opacity, each glyph's code point and place), others filled as
+   their outlines ('p'); a stroke, outlines' too; fill and stroke in the paint-order */
+static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
+    vector<sv_char> cs;
+    vector<uint32_t> els;
+    vector<sv_walk> ws;
+    vector<double> gx, gy, adv, rot, hs;
+    vector<uint8_t> hide, onpath;
+    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath)) return;
+    size_t n = len(cs);
     int upright_m = fabs(m.b) < 1e-9 && fabs(m.c) < 1e-9 && m.a > 0 && fabs(m.a - m.d) < 1e-9 * fabs(m.a);
     size_t i = 0;
     while (i < n) {
@@ -2520,16 +2752,10 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
         if (sv_word_is(st, cw->src[SI_VISIBILITY], "hidden") || sv_word_is(st, cw->src[SI_VISIBILITY], "collapse")) { i = j; continue; }
         int face = sv_face(st, cw);
         double fs = sv_fs(st, cw);
-        double asc, desc, gap, shift = sv_baseline_shift(st, f, cw, face, fs);
+        double asc, desc, gap;
         amb_face_metrics(f, face, fs, &asc, &desc, &gap);
         uint32_t sc = cw->src[SI_FONT_STYLE];
         int italic = sv_word_is(st, sc, "italic") || sv_word_is(st, sc, "oblique");
-        /* the dominant baseline's shift: down the page, or across a path's direction */
-        for (size_t q = i; q < j; q++) {
-            double r = at(rot, q) * M_PI / 180;
-            gx[q] = at(gx, q) - shift * sin(r);
-            gy[q] = at(gy, q) + shift * cos(r);
-        }
         double bb[4] = { 1e300, 1e300, -1e300, -1e300 };
         int upright = upright_m;
         for (size_t q = i; q < j; q++) {
