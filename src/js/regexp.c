@@ -2708,6 +2708,34 @@ static jv re_all_results(js_vm *vm, jv rxv, uint32_t re, uint32_t s) {
     return jv_obj(arr);
 }
 
+/* SpeciesConstructor(rx, %RegExp%) and its object, as split and matchAll make their matcher (ECMA-262 22.2.6.9,
+   22.2.6.14): rx's constructor's Symbol.species read, and, when it is another constructor, new C(rx, flags) made (its
+   object, a RegExp, matchAll's matcher in *made); the matching itself by rx's own regex. 0 thrown, else 1 */
+static int re_species(js_vm *vm, jv rxv, jv *made) {
+    *made = JV_UNDEF;
+    if (!jv_is_obj(rxv)) return 1;
+    jv c = js_get(vm, rxv, A_CONSTRUCTOR);
+    if (vm->throwing) return 0;
+    if (c == JV_UNDEF) return 1;
+    if (!jv_is_obj(c)) { js_throw_msg(vm, vm->type_error_proto, "The .constructor property is not an object"); return 0; }
+    jv sp = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
+    if (vm->throwing) return 0;
+    if (jv_is_nullish(sp)) return 1;
+    jv pr = JV_UNDEF;
+    uint32_t f = 0;
+    if (jv_is_obj(sp) && vm->objs[jv_idx(sp)].kind == JK_NATIVE && js_get_own(vm, jv_idx(sp), A_PROTOTYPE, &pr, &f) && pr == jv_obj(vm->regexp_proto)) return 1;
+    if (!js_is_constructor(vm, sp)) { js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor"); return 0; }
+    jv fl = js_get(vm, rxv, js_atom_ascii(vm, "flags"));
+    if (vm->throwing) return 0;
+    uint32_t fs = js_to_string(vm, fl);
+    if (!fs) return 0;
+    jv av[2] = { rxv, jv_str(fs) };
+    jv r = js_construct(vm, sp, av, 2, sp);
+    if (vm->throwing) return 0;
+    if (jv_is_obj(r) && vm->objs[jv_idx(r)].kind == JK_REGEXP) *made = r;
+    return 1;
+}
+
 jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
     (void)callee;
     jv a0 = re_arg(vm, args, argc, 0), a1 = re_arg(vm, args, argc, 1);
@@ -2892,10 +2920,12 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
         }
         if (!re) return JV_HOLE;
-        /* the regex copied, its lastIndex kept: the original's is not moved */
+        jv made;
+        if (!re_species(vm, rxv, &made)) return JV_HOLE;
+        /* the regex copied (the species' matcher when it made one), its lastIndex kept: the original's is not moved */
         jv li = js_get(vm, rxv, A_LASTINDEX);
         if (vm->throwing) return JV_HOLE;
-        jv copy = re_object(vm, re, vm->regexp_proto);
+        jv copy = made != JV_UNDEF ? made : re_object(vm, re, vm->regexp_proto);
         js_set(vm, copy, A_LASTINDEX, jv_num(re_to_length(vm, li)));
         jv all = re_all_results(vm, copy, re, s);
         if (vm->throwing) return JV_HOLE;
@@ -2964,6 +2994,8 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
             re = vm->objs[jv_idx(a0)].a;
         }
+        jv made;
+        if (!re_species(vm, which == JRE_SPLIT ? thisv : a0, &made)) return JV_HOLE;
         return re_split(vm, re, s, lim);
     }
     default: return JV_UNDEF;

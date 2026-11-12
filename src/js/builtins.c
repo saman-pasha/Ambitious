@@ -2758,6 +2758,54 @@ static jv into_ctor(js_vm *vm, jv c, uint32_t vals, int with_len) {
     return a;
 }
 
+/* ---- ArraySpeciesCreate (ECMA-262 10.4.2.3) ----
+   An array method's result made by its array's species: its constructor's Symbol.species when o is an array and that is
+   a constructor other than Array (undefined or null a plain array; anything else not a constructor V8's TypeError). An
+   array of Array.prototype with no constructor of its own, while Array.prototype.constructor is Array and Array's
+   species the engine's getter, is answered without a read */
+static int is_array_ctor_val(js_vm *vm, jv c) { return jv_is_obj(c) && vm->objs[jv_idx(c)].kind == JK_NATIVE && vm->objs[jv_idx(c)].a == N_ARRAY; }
+static int array_species_plain(js_vm *vm, jv o) {
+    uint32_t a = jv_idx(o);
+    if (vm->objs[a].kind != JK_ARRAY || vm->objs[a].proto != vm->array_proto || js_shape_find(vm, vm->objs[a].shape, A_CONSTRUCTOR)) return 0;
+    jv c = JV_UNDEF, s = JV_UNDEF;
+    uint32_t f = 0;
+    if (!js_get_own(vm, vm->array_proto, A_CONSTRUCTOR, &c, &f) || (f & JS_SHAPE_ACCESSOR) || !is_array_ctor_val(vm, c)) return 0;
+    if (!js_get_own(vm, jv_idx(c), JS_SYM_KEY | JSYM_SPECIES, &s, &f) || !(f & JS_SHAPE_ACCESSOR)) return 0;
+    jv g = vm->objs[jv_idx(s)].x;
+    return jv_is_obj(g) && vm->objs[jv_idx(g)].kind == JK_NATIVE && vm->objs[jv_idx(g)].a == N_SPECIES;
+}
+/* 1, *sobj the species' new object (new C(n)); 0 a plain array; -1 thrown */
+static int array_species(js_vm *vm, jv o, double n, jv *sobj) {
+    *sobj = JV_UNDEF;
+    if (!jv_is_obj(o) || array_species_plain(vm, o)) return 0;
+    int arr = is_array_spec(vm, o);
+    if (vm->throwing) return -1;
+    if (!arr) return 0;
+    jv c = js_get(vm, o, A_CONSTRUCTOR);
+    if (vm->throwing) return -1;
+    if (jv_is_obj(c)) {
+        c = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
+        if (vm->throwing) return -1;
+        if (c == JV_NULL) c = JV_UNDEF;
+    }
+    if (c == JV_UNDEF || is_array_ctor_val(vm, c)) return 0;
+    if (!js_is_constructor(vm, c)) { js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor"); return -1; }
+    jv av[1] = { jv_num(n) };
+    *sobj = js_construct(vm, c, av, 1, c);
+    return vm->throwing ? -1 : 1;
+}
+/* what the method gathered (a plain array, its holes passed over) defined on the species' object, then its length set
+   when length is not negative */
+static jv species_fill(js_vm *vm, jv a, uint32_t vals, double length) {
+    for (uint32_t i = 0; i < vm->objs[vals].b; i++) {
+        jv v = vm->slots[vm->objs[vals].a + i];
+        if (v == JV_HOLE) continue;
+        if (!js_create_data_throw(vm, a, jv_num(i), v)) return JV_HOLE;
+    }
+    if (length >= 0 && !js_set_throw(vm, a, jv_str(A_LENGTH), jv_num(length))) return JV_HOLE;
+    return a;
+}
+
 /* ---- the array methods that write, as the standard has them (ECMA-262 23.1.3) ----
    For what the fast paths do not take: an array whose elements or length have
    attributes of their own (frozen, sealed, not extensible, defineProperty's), an
@@ -2853,7 +2901,9 @@ static int ga_splice_args(js_vm *vm, uint32_t args, uint32_t argc, double n, dou
 
 static jv ga_splice_at(js_vm *vm, jv o, double n, double start, double dc, uint32_t args, uint32_t argc) {
     uint32_t ins = argc > 2 ? argc - 2 : 0;
-    /* the removed elements, a new array's (holes kept) */
+    jv sobj;
+    if (array_species(vm, o, dc, &sobj) < 0) return JV_HOLE;
+    /* the removed elements, a new array's (holes kept), the species' when it has one */
     uint32_t removed = js_array_new(vm, 0);
     for (double k = 0; k < dc; k++) {
         int has = ga_has(vm, o, start + k);
@@ -2873,7 +2923,7 @@ static jv ga_splice_at(js_vm *vm, jv o, double n, double start, double dc, uint3
     for (uint32_t i = 0; i < ins; i++)
         if (!js_set_throw(vm, o, jv_num(start + i), arg(vm, args, argc, i + 2))) return JV_HOLE;
     if (!ga_set_len(vm, o, n - dc + ins)) return JV_HOLE;
-    return jv_obj(removed);
+    return sobj != JV_UNDEF ? species_fill(vm, sobj, removed, dc) : jv_obj(removed);
 }
 
 static jv ga_splice(js_vm *vm, jv o, uint32_t args, uint32_t argc) {
@@ -3836,7 +3886,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             double ds = 0, dc = 0;
             if (!ga_splice_args(vm, args, argc, n, &ds, &dc)) return JV_HOLE;
             /* the conversions may have run a valueOf that changed the array */
-            if (!plain_array(vm, thisv) || vm->objs[a].b != n) return ga_splice_at(vm, thisv, n, ds, dc, args, argc);
+            if (!plain_array(vm, thisv) || vm->objs[a].b != n || !array_species_plain(vm, thisv)) return ga_splice_at(vm, thisv, n, ds, dc, args, argc);
             uint32_t start = (uint32_t)ds, del = (uint32_t)dc, ins = argc > 2 ? argc - 2 : 0;
             uint32_t removed = js_array_new(vm, 0);
             for (uint32_t i = 0; i < del; i++) js_array_push(vm, removed, vm->slots[vm->objs[a].a + start + i]);
@@ -3881,6 +3931,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (vm->throwing) return JV_HOLE;
         uint32_t to = rel_index(int_arg(vm, args, argc, 1, n), (uint32_t)n);
         if (vm->throwing) return JV_HOLE;
+        jv sobj;
+        if (array_species(vm, thisv, to > from ? to - from : 0, &sobj) < 0) return JV_HOLE;
         uint32_t out = js_array_new(vm, 0);
         /* a hole stays one (HasProperty), an element of attributes of its own read as Get reads it */
         for (uint32_t i = from; i < to && !vm->throwing; i++) {
@@ -3888,10 +3940,13 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             if (elem_take(vm, thisv, i, &v) < 0) break;
             js_array_push(vm, out, v);
         }
-        return vm->throwing ? JV_HOLE : jv_obj(out);
+        if (vm->throwing) return JV_HOLE;
+        return sobj != JV_UNDEF ? species_fill(vm, sobj, out, to > from ? to - from : 0) : jv_obj(out);
     }
     case N_AP_CONCAT: {
         AP_ON_NOTHING();
+        jv sobj;
+        if (array_species(vm, thisv, 0, &sobj) < 0) return JV_HOLE;
         uint32_t out = js_array_new(vm, 0);
         for (uint32_t k = 0; k <= argc && !vm->throwing; k++) {
             jv v = k == 0 ? thisv : arg(vm, args, argc, k - 1);
@@ -3905,7 +3960,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
                 }
             } else js_array_push(vm, out, v);
         }
-        return jv_obj(out);
+        if (vm->throwing) return JV_HOLE;
+        return sobj != JV_UNDEF ? species_fill(vm, sobj, out, vm->objs[out].b) : jv_obj(out);
     }
     case N_AP_JOIN: case N_AP_TOSTRING: {
         AP_ON_NOTHING();
@@ -3982,6 +4038,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         uint32_t n = (uint32_t)len_of(vm, thisv);
         if (vm->throwing) return JV_HOLE;
+        jv sobj = JV_UNDEF;
+        if ((id == N_AP_FILTER || id == N_AP_MAP || id == N_AP_FLATMAP) && array_species(vm, thisv, id == N_AP_MAP ? n : 0, &sobj) < 0) return JV_HOLE;
         uint32_t out = id == N_AP_FILTER || id == N_AP_MAP || id == N_AP_FLATMAP ? js_array_new(vm, 0) : 0;
         int last = id == N_AP_FINDLAST || id == N_AP_FINDLASTINDEX;
         /* the find family visits every index; the others skip what is not there (HasProperty) */
@@ -4011,7 +4069,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             else if (id == N_AP_SOME && t) return JV_TRUE;
             else if (id == N_AP_EVERY && !t) return JV_FALSE;
         }
-        if (out) return jv_obj(out);
+        if (out) return sobj != JV_UNDEF ? species_fill(vm, sobj, out, -1) : jv_obj(out);
         if (id == N_AP_FINDINDEX || id == N_AP_FINDLASTINDEX) return jv_num(-1);
         if (id == N_AP_SOME) return JV_FALSE;
         if (id == N_AP_EVERY) return JV_TRUE;
@@ -4082,9 +4140,13 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_AP_FLAT: {
         AP_ON_NOTHING();
         double depth = argc ? int_arg(vm, args, argc, 0, 1) : 1;
+        if (vm->throwing) return JV_HOLE;
+        jv sobj;
+        if (array_species(vm, thisv, 0, &sobj) < 0) return JV_HOLE;
         uint32_t out = js_array_new(vm, 0);
         flat_into(vm, out, thisv, depth);
-        return jv_obj(out);
+        if (vm->throwing) return JV_HOLE;
+        return sobj != JV_UNDEF ? species_fill(vm, sobj, out, -1) : jv_obj(out);
     }
     case N_AP_AT: {
         AP_ON_NOTHING();

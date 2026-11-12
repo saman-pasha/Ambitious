@@ -1,0 +1,18 @@
+map T [2,4]
+filter T [1,3]
+slice T [2,3]
+subarray T [2,3]
+toReversed Uint8Array [2,1]
+toSorted Uint8Array [1,2]
+with Uint8Array [9,2]
+plain Uint8Array [2,3]
+species array TypeError: Method %TypedArray%.prototype.map called on incompatible receiver [object Array]
+species small TypeError: Derived TypedArray constructor created an array which was too small
+species other type Float64Array [1.5,2.5]
+species other slice Uint16Array [2,3]
+species bigint TypeError: Cannot convert 1 to a BigInt
+ctor not object TypeError: The .constructor property is not an object
+ctor no species Uint8Array [1]
+species not ctor TypeError: object.constructor[Symbol.species] is not a constructor
+order species,cb,cb,fcb,fcb,species
+subarray args ["buf",1,3]

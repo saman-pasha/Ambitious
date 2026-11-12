@@ -390,8 +390,48 @@ static uint32_t ta_over(js_vm *vm, uint32_t t, uint32_t buf, jv offv, jv lenv, u
 /* the typed array's type from its constructor (a callee whose x holds the type) */
 static uint32_t ctor_type(js_vm *vm, jv callee) { return (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x); }
 
-/* a new typed array like o's (its type), of n elements: a species construction, simplified */
-static uint32_t ta_like(js_vm *vm, uint32_t o, uint32_t n) { return ta_new(vm, ta_type(vm, o), n, 0, 0, vm->objs[o].proto); }
+/* a new typed array of o's type, of n elements (TypedArrayCreateSameType: the type's own constructor's, not a subclass's) */
+static uint32_t ta_like(js_vm *vm, uint32_t o, uint32_t n) { return ta_new(vm, ta_type(vm, o), n, 0, 0, vm->ta_protos[ta_type(vm, o)]); }
+
+static jv incompatible(js_vm *vm, const char *what, jv v);
+/* is s the constructor of type t itself (the native whose prototype is the type's)? */
+static int ta_is_intrinsic(js_vm *vm, jv s, uint32_t t) {
+    if (!jv_is_obj(s) || vm->objs[jv_idx(s)].kind != JK_NATIVE) return 0;
+    jv p = JV_UNDEF;
+    uint32_t f = 0;
+    return js_get_own(vm, jv_idx(s), A_PROTOTYPE, &p, &f) && p == jv_obj(vm->ta_protos[t]);
+}
+/* TypedArraySpeciesCreate (ECMA-262 23.2.4.1) for slice, map and filter (argv: the length) and subarray (the buffer, its
+   offset and length): o's species constructor (its constructor's Symbol.species, the type's own when either is undefined
+   or null); 0 when that is the type's own (the caller makes it, of the type's prototype), 1 with *out another's object,
+   which must be a typed array (V8's receiver error naming the method) of the length at least, -1 thrown */
+static int ta_species(js_vm *vm, uint32_t o, const char *method, const jv *argv, uint32_t argc, uint32_t *out) {
+    uint32_t t = ta_type(vm, o);
+    jv c = js_get(vm, jv_obj(o), A_CONSTRUCTOR);
+    if (vm->throwing) return -1;
+    jv sp = JV_UNDEF;
+    if (c != JV_UNDEF) {
+        if (!jv_is_obj(c)) { js_throw_msg(vm, vm->type_error_proto, "The .constructor property is not an object"); return -1; }
+        sp = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
+        if (vm->throwing) return -1;
+    }
+    if (jv_is_nullish(sp) || ta_is_intrinsic(vm, sp, t)) return 0;
+    if (!js_is_constructor(vm, sp)) { js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor"); return -1; }
+    jv r = js_construct(vm, sp, argv, argc, sp);
+    if (vm->throwing) return -1;
+    if (!jv_is_obj(r) || vm->objs[jv_idx(r)].kind != JK_TYPEDARRAY) {
+        char m[96];
+        snprintf(m, sizeof m, "%%TypedArray%%.prototype.%s", method);
+        incompatible(vm, m, r);
+        return -1;
+    }
+    if (argc == 1 && (double)vm->objs[jv_idx(r)].b < jv_dbl(argv[0])) {
+        js_throw_msg(vm, vm->type_error_proto, "Derived TypedArray constructor created an array which was too small");
+        return -1;
+    }
+    *out = jv_idx(r);
+    return 1;
+}
 
 /* a DataView's place for size bytes at off (GetViewValue's and SetViewValue's checks after
    the value's conversion): 0 with V8's error thrown, its method named by set and the
@@ -424,32 +464,7 @@ static int cmp_num(double x, double y) {
 
 /* a receiver as V8 names it in "called on incompatible receiver": a primitive's text, an
    array's or a typed array's [object ...], any other object's #<its constructor's name> */
-static void recv_text(js_vm *vm, jv v, vector<char> *out) {
-    if (!jv_is_obj(v)) {
-        uint32_t s = jv_is_sym(v) ? js_sym_text(vm, jv_idx(v)) : js_to_string(vm, v);
-        vm->throwing = 0;
-        if (s) js_str_to_utf8(vm, s, out);
-        return;
-    }
-    uint32_t o = jv_idx(v);
-    const char *pre = "[object ";
-    if (vm->objs[o].kind == JK_ARRAY) { const char *t = "[object Array]"; append_range(*out, t, strlen(t)); return; }
-    if (vm->objs[o].kind == JK_TYPEDARRAY) {
-        append_range(*out, pre, strlen(pre));
-        uint32_t t = ta_type(vm, o);
-        append_range(*out, ta_name[t], strlen(ta_name[t]));
-        push_back(*out, ']');
-        return;
-    }
-    push_back(*out, '#');
-    push_back(*out, '<');
-    jv c = js_get(vm, v, A_CONSTRUCTOR);
-    jv nm = vm->throwing || !jv_is_obj(c) ? JV_UNDEF : js_get(vm, c, A_NAME);
-    vm->throwing = 0;
-    if (jv_is_str(nm) && vm->strs[jv_idx(nm)].len) js_str_to_utf8(vm, jv_idx(nm), out);
-    else { const char *t = "Object"; append_range(*out, t, strlen(t)); }
-    push_back(*out, '>');
-}
+static void recv_text(js_vm *vm, jv v, vector<char> *out) { js_value_text(vm, v, out); }
 /* "Method <what> called on incompatible receiver <v>" */
 static jv incompatible(js_vm *vm, const char *what, jv v) {
     vector<char> m;
@@ -993,7 +1008,34 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (ab_detached(vm, o)) return ta_detached(vm, "ArrayBuffer.prototype.slice");
         if (to > vm->objs[o].b) to = vm->objs[o].b;
         uint32_t m = to > from ? to - from : 0;
-        uint32_t r = ab_new(vm, m);
+        /* SpeciesConstructor(O, %ArrayBuffer%): another constructor's buffer, validated as V8 validates it */
+        jv c = js_get(vm, thisv, A_CONSTRUCTOR);
+        if (vm->throwing) return JV_HOLE;
+        jv sp = JV_UNDEF;
+        if (c != JV_UNDEF) {
+            if (!jv_is_obj(c)) return js_throw_msg(vm, vm->type_error_proto, "The .constructor property is not an object");
+            sp = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
+            if (vm->throwing) return JV_HOLE;
+        }
+        jv pr = JV_UNDEF;
+        uint32_t pf = 0, r = 0;
+        int dflt = jv_is_nullish(sp) || (jv_is_obj(sp) && vm->objs[jv_idx(sp)].kind == JK_NATIVE &&
+                                        js_get_own(vm, jv_idx(sp), A_PROTOTYPE, &pr, &pf) && pr == jv_obj(vm->arraybuffer_proto));
+        if (dflt) r = ab_new(vm, m);
+        else {
+            if (!js_is_constructor(vm, sp)) return js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor");
+            jv av[1] = { jv_num(m) };
+            jv nb = js_construct(vm, sp, av, 1, sp);
+            if (vm->throwing) return JV_HOLE;
+            if (!jv_is_obj(nb) || vm->objs[jv_idx(nb)].kind != JK_ARRAYBUFFER) return incompatible(vm, "ArrayBuffer.prototype.slice", nb);
+            if (ab_detached(vm, jv_idx(nb))) return ta_detached(vm, "ArrayBuffer.prototype.slice");
+            if (nb == thisv) return js_throw_msg(vm, vm->type_error_proto, "ArrayBuffer subclass returned this from species constructor");
+            if (vm->objs[jv_idx(nb)].b < m) return js_throw_msg(vm, vm->type_error_proto, "Derived ArrayBuffer constructor created a buffer which was too small");
+            if (ab_detached(vm, o)) return ta_detached(vm, "ArrayBuffer.prototype.slice");
+            r = jv_idx(nb);
+            if (to > vm->objs[o].b) to = vm->objs[o].b;
+            m = to > from ? to - from : 0;
+        }
         uint32_t src = vm->objs[o].a + from, dst = vm->objs[r].a;
         for (uint32_t i = 0; i < m; i++) vm->bytes[dst + i] = vm->bytes[src + i];
         return jv_obj(r);
@@ -1098,7 +1140,12 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         uint32_t t = ta_type(vm, o);
         double begin = (double)vm->objs[o].c + (double)from * ta_size[t];
         jv lenv = vw_declared(vm, o) == TA_TRACK && a1 == JV_UNDEF ? JV_UNDEF : jv_num(m);
-        uint32_t r = ta_over(vm, t, vm->objs[o].a, jv_num(begin), lenv, vm->objs[o].proto);
+        jv sargs[3] = { jv_obj(vm->objs[o].a), jv_num(begin), lenv };
+        uint32_t r = 0;
+        int sp = ta_species(vm, o, "subarray", sargs, lenv == JV_UNDEF ? 2 : 3, &r);
+        if (sp < 0) return JV_HOLE;
+        if (sp) return jv_obj(r);
+        r = ta_over(vm, t, vm->objs[o].a, jv_num(begin), lenv, vm->ta_protos[t]);
         return r ? jv_obj(r) : JV_HOLE;
     }
     case JTN_SLICE: {
@@ -1107,10 +1154,19 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         uint32_t n = vm->objs[o].b, from = rel_index(vm, a0, n, 0), to = rel_index(vm, a1, n, n);
         if (vm->throwing) return JV_HOLE;
         uint32_t m = to > from ? to - from : 0;
-        uint32_t r = ta_like(vm, o, m);
+        jv sargs[1] = { jv_num(m) };
+        uint32_t r = 0;
+        int sp = ta_species(vm, o, "slice", sargs, 1, &r);
+        if (sp < 0) return JV_HOLE;
+        if (!sp) r = ta_like(vm, o, m);
         if (vw_oob(vm, o)) return ta_detached(vm, "%TypedArray%.prototype.slice");
         if (to > vm->objs[o].b) to = vm->objs[o].b;
         uint32_t k = to > from ? to - from : 0;
+        if (ta_type(vm, r) != ta_type(vm, o)) {
+            /* another type's: element by element, each converted */
+            for (uint32_t i = 0; i < k; i++) if (!js_ta_set(vm, r, i, js_ta_get(vm, o, from + i))) return JV_HOLE;
+            return jv_obj(r);
+        }
         uint32_t sz = ta_size[ta_type(vm, o)];
         uint32_t src = ta_at(vm, o, from), dst = ta_at(vm, r, 0);
         for (uint32_t i = 0; i < k * sz; i++) vm->bytes[dst + i] = vm->bytes[src + i];
@@ -1140,6 +1196,14 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (!o) return JV_HOLE;
         if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
         uint32_t n = vm->objs[o].b;
+        /* map's result made first, of the length; filter's after its callbacks, of what they kept */
+        uint32_t made = 0;
+        int sp = 0;
+        if (which == JTN_MAP) {
+            jv sargs[1] = { jv_num(n) };
+            sp = ta_species(vm, o, "map", sargs, 1, &made);
+            if (sp < 0) return JV_HOLE;
+        }
         vector<jv> vals;
         for (uint32_t i = 0; i < n; i++) {
             jv v = i < vm->objs[o].b ? js_ta_get(vm, o, i) : JV_UNDEF;
@@ -1149,7 +1213,14 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             if (which == JTN_MAP) push_back(vals, r);
             else if (js_truthy(vm, r)) push_back(vals, v);
         }
-        return ta_from_values(vm, ta_type(vm, o), &vals, vm->objs[o].proto);
+        if (which == JTN_FILTER) {
+            jv sargs[1] = { jv_num((double)len(vals)) };
+            sp = ta_species(vm, o, "filter", sargs, 1, &made);
+            if (sp < 0) return JV_HOLE;
+        }
+        if (!sp) return ta_from_values(vm, ta_type(vm, o), &vals, vm->ta_protos[ta_type(vm, o)]);
+        for (size_t i = 0; i < len(vals); i++) if (!js_ta_set(vm, made, (uint32_t)i, vals[i])) return JV_HOLE;
+        return jv_obj(made);
     }
     case JTN_SORT: case JTN_TOSORTED: {
         uint32_t o = valid_ta(vm, thisv, which == JTN_SORT ? "sort" : "toSorted");

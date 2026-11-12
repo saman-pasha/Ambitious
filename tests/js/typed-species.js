@@ -1,0 +1,20 @@
+const t = (s, f) => { try { const r = f(); console.log(s, typeof r === 'object' && r !== null ? (r.constructor ? r.constructor.name : 'null-proto') + ' ' + JSON.stringify(Array.from(r)) : String(r)); } catch (e) { console.log(s, e.constructor.name + ': ' + e.message); } };
+class T extends Uint8Array {}
+t('map', () => new T([1, 2]).map(x => x * 2));
+t('filter', () => new T([1, 2, 3]).filter(x => x & 1));
+t('slice', () => new T([1, 2, 3]).slice(1));
+t('subarray', () => new T([1, 2, 3]).subarray(1));
+t('toReversed', () => new T([1, 2]).toReversed());
+t('toSorted', () => new T([2, 1]).toSorted());
+t('with', () => new T([1, 2]).with(0, 9));
+t('plain', () => new Uint8Array([1, 2]).map(x => x + 1));
+t('species array', () => { class S extends Uint8Array { static get [Symbol.species]() { return Array; } } return new S([1, 2]).map(x => x); });
+t('species small', () => { class S extends Uint8Array { static get [Symbol.species]() { return function () { return new Uint8Array(1); }; } } return new S([1, 2]).map(x => x); });
+t('species other type', () => { class S extends Uint8Array { static get [Symbol.species]() { return Float64Array; } } return new S([1, 2]).map(x => x + 0.5); });
+t('species other slice', () => { class S extends Uint8Array { static get [Symbol.species]() { return Uint16Array; } } return new S([1, 2, 3]).slice(1); });
+t('species bigint', () => { class S extends Uint8Array { static get [Symbol.species]() { return BigInt64Array; } } return new S([1, 2]).map(x => x); });
+t('ctor not object', () => { const a = new Uint8Array([1]); a.constructor = 5; return a.map(x => x); });
+t('ctor no species', () => { const a = new Uint8Array([1]); a.constructor = {}; return a.map(x => x); });
+t('species not ctor', () => { const a = new Uint8Array([1]); a.constructor = { [Symbol.species]: 5 }; return a.map(x => x); });
+t('order', () => { const log = []; class S extends Uint8Array { static get [Symbol.species]() { log.push('species'); return Uint8Array; } } new S([1, 2]).map(x => { log.push('cb'); return x; }); new S([1, 2]).filter(x => { log.push('fcb'); return 1; }); return log.join(); });
+t('subarray args', () => { let seen; class S extends Uint8Array { static get [Symbol.species]() { return function (...a) { seen = a.map(x => typeof x === 'object' ? 'buf' : x); return new Uint8Array(a[0], a[1], a[2]); }; } } new S([1, 2, 3, 4]).subarray(1, 3); new S([1, 2, 3, 4]).subarray(1); return JSON.stringify(seen); });

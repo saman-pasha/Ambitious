@@ -1,0 +1,5 @@
+ab slice B
+ab species 1
+ab species bad TypeError: Method ArrayBuffer.prototype.slice called on incompatible receiver [object Number]
+ab species small TypeError: Derived ArrayBuffer constructor created a buffer which was too small
+ab species same TypeError: ArrayBuffer subclass returned this from species constructor

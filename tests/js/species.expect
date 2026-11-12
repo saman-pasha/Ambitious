@@ -1,0 +1,28 @@
+map MyArray [2,4,6,8]
+filter MyArray [1,3]
+slice MyArray [2,3]
+splice MyArray [1,2]
+concat MyArray [1,2,3,4,5]
+flat MyArray [1,2]
+flatMap MyArray [1,2,3,4]
+plain map Array [1,2]
+species null Array [1]
+species undefined Array [1]
+species other Array [1]
+species bad TypeError: object.constructor[Symbol.species] is not a constructor
+ctor bad TypeError: object.constructor[Symbol.species] is not a constructor
+ctor obj no species Array [1]
+ctor fn 2 {"0":1,"1":2,"length":0}
+order species,new 2,cb 1,cb 2
+slice len 2,2,2,3
+filter len 0,,2,3
+concat len 0,3,1,3
+splice len 2,2,2,3
+map holes 3,,false,3
+ta map T
+ta slice T
+ta subarray T
+ta filter T
+ta species bad TypeError: Method %TypedArray%.prototype.map called on incompatible receiver [object Array]
+re split a|b R
+re species 2

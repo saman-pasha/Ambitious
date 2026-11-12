@@ -645,3 +645,23 @@ neighbours.
 
     compiles, and valgrind reports `Invalid read of size 4 ... inside a block of
     size 32 free'd` (by the `realloc` of `push_back`).
+
+37. **A local named `own` is refused with a syntax error that does not name it**:
+    `own` is Safe C's ownership keyword, so `int own = 1;` cannot be read, but the
+    message is "syntax error: could not read this item (gave up near line N)",
+    pointing at the function's start, not at the name, nor saying a keyword stands
+    where a name should. The JavaScript engine met it in `ArrayBuffer.prototype.slice`
+    (`src/js/typed.c`: a flag named `own`, renamed `dflt`); finding the cause took
+    bisecting the function by hand. Repro:
+
+    ```c
+    #include <stdio.h>
+    int main(void) {
+        int own = 1;
+        printf("%d\n", own);
+        return 0;
+    }
+    ```
+
+    gives `own.c:2: error: syntax error: could not read this item (gave up near
+    line 3)`. Asked for: "`own` is a keyword; it cannot name a variable", at the name.
