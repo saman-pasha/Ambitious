@@ -1,7 +1,8 @@
 #!/bin/sh
-# tests/net/reference.sh [cookies] [cache] [srcset] -- Chromium's side of tests/integ/net, made
-# with Playwright's headless shell against the same servers, and written where that
-# test compares itself with it (each server's log as tests/net/canon.sh reads it):
+# tests/net/reference.sh [cookies] [cache] [srcset] [picture] -- Chromium's side of
+# tests/integ/net and tests/integ/picture, made with Playwright's headless shell against
+# the same servers, and written where those tests compare themselves with it (each
+# server's log as tests/net/canon.sh reads it):
 #
 #   cookies  tests/net/cookies.chromium: the five visits of tests/net/cookies.js, and
 #            the Cookie header each request carried
@@ -9,13 +10,16 @@
 #            HTTP cache, and which requests reached the server, with their validators
 #   srcset   tests/net/srcset.chromium: the candidate each img of tests/net/site/s/
 #            page.html takes in an 800x600 viewport at 1x (tests/net/srcset.js)
+#   picture  tests/net/picture.chromium: the image each img of tests/net/site/p/page.html
+#            takes from its picture's sources, its natural size and its box
+#            (tests/net/picture.js), the page read as a file
 #
-# Each waits out a lifetime of 60 s between two visits, so a run takes a minute or
-# two. Run by hand when the visits change; all three by default.
+# Each of the first two waits out a lifetime of 60 s between two visits, so a run takes
+# a minute or two. Run by hand when the visits change; all four by default.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-ref.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
-what=${*:-cookies cache srcset}
+what=${*:-cookies cache srcset picture}
 serve() {   # serve ARGS...: tests/net/serve.py started, its port echoed
   n=$(($(cat "$work/pids" 2> /dev/null | wc -l) + 1))
   python3 "$AMB_ROOT/tests/net/serve.py" "$@" > "$work/$n.port" &
@@ -45,7 +49,10 @@ for w in $what; do
     sport=$(serve "$AMB_ROOT/tests/net/site" "$AMB_ROOT/tests/site")
     node "$AMB_ROOT/tests/net/srcset.js" "http://127.0.0.1:$sport/s/page.html" > "$AMB_ROOT/tests/net/srcset.chromium"
     cat "$AMB_ROOT/tests/net/srcset.chromium" ;;
+  picture)
+    node "$AMB_ROOT/tests/net/picture.js" "$AMB_ROOT/tests/net/site/p/page.html" > "$AMB_ROOT/tests/net/picture.chromium"
+    cat "$AMB_ROOT/tests/net/picture.chromium" ;;
   esac
 done
-for p in $(cat "$work/pids"); do kill "$p" 2> /dev/null; done
+for p in $(cat "$work/pids" 2> /dev/null); do kill "$p" 2> /dev/null; done
 rm -rf "$work"

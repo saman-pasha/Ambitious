@@ -41,7 +41,15 @@
    (100vw when none; px, em, vw ... and calc() of them), src a 1x candidate when
    no candidate is 1x and none has a width, and of the densities sorted the first
    at 1 or past it, else the greatest, as Blink picks; the image's size is then
-   its header's divided by its density. Not done: <picture> and its <source>s. A
+   its header's divided by its density. An img in a <picture> first takes the
+   first <source> before it, among the picture's children, whose srcset has a
+   candidate, whose type (its MIME type's essence, in any case; empty for any) is
+   one the painter decodes (PNG, GIF, JPEG, WebP: not AVIF, SVG or BMP, which
+   Chromium takes) and whose media query list holds (all and screen, not print;
+   and, or, not, only; width, height, orientation and resolution, ranges, the
+   colour scheme (light), a mouse's hover and fine pointer, a feature's name
+   alone), by the source's own sizes; the source is a fact. Else its own srcset
+   and src, as above. A source's width and height are not the img's. A
    page served over http: or https: may not load a file: URL: blocked, here in
    C; nor any kind of resource its profile denies its site. An image's size is
    read from its header (PNG, GIF, JPEG); its pixels are not decoded here.
@@ -2128,6 +2136,7 @@ net_resource_h net_fetch(net_loader *l, const char *url, size_t url_len, net_kin
 /* ---- srcset and sizes: the image source an img takes (HTML 4.8.4.3) ---- */
 
 static uint32_t net_attr(const dom_document *d, uint32_t x, const char *name);
+static int net_is(const dom_document *d, uint32_t x, const char *name);
 
 /* the viewport images are chosen for, the cascade's (800 x 600), at a device pixel
    ratio of 1; a font-relative length in sizes is of the initial 16px */
@@ -2350,13 +2359,32 @@ static double net_source_size(const char *s, size_t n) {
     return v < 0 ? -1 : v;
 }
 
+/* the features a lone name holds of here, in a boolean context (Media Queries 4, 2.4.1):
+   those whose value is other than 0 or none, as Chromium's headless shell answers them
+   (a mouse's hover and fine pointer, colour in sRGB); and what the others are, with a
+   value: the keyword each holds for */
+static const char *const net_mq_on[] = { "width", "height", "aspect-ratio", "color", "color-gamut", "hover", "any-hover", "pointer",
+                                         "any-pointer", "orientation", "resolution", "update", "display-mode" };
+static const char *const net_mq_name[] = { "hover", "any-hover", "pointer", "any-pointer", "color-gamut", "prefers-contrast",
+                                           "forced-colors", "update", "display-mode", "dynamic-range", "prefers-reduced-transparency",
+                                           "inverted-colors" };
+static const char *const net_mq_value[] = { "hover", "hover", "fine", "fine", "srgb", "no-preference", "none", "fast", "browser",
+                                            "standard", "no-preference", "none" };
+
 /* one media feature in its parentheses: width, height and their min- and max-,
    in a range too ((width >= 600px), (400px < width <= 700px)), orientation,
    resolution (1dppx, 96dpi), prefers-color-scheme (light), prefers-reduced-motion
-   (no-preference); 0 for a feature not known */
+   (no-preference), the pointer's and the screen's (net_mq_name), and a name alone;
+   0 for a feature not known */
 static int net_media_feature(const char *s, size_t n) {
     while (n && net_ascii_ws(s[n - 1])) n--;
     while (n && net_ascii_ws(s[0])) { s++; n--; }
+    size_t id = 0;
+    while (id < n && ((s[id] >= 'a' && s[id] <= 'z') || (s[id] >= 'A' && s[id] <= 'Z') || s[id] == '-')) id++;
+    if (id == n && n > 0) {
+        for (size_t k = 0; k < sizeof net_mq_on / sizeof net_mq_on[0]; k++) if (net_ci_is(s, n, net_mq_on[k])) return 1;
+        return 0;   /* monochrome, grid, prefers-reduced-motion, a name not known */
+    }
     size_t colon = 0;
     while (colon < n && s[colon] != ':') colon++;
     if (colon < n) {
@@ -2377,6 +2405,8 @@ static int net_media_feature(const char *s, size_t n) {
         if (net_ci_is(s, a, "orientation")) return net_ci_is(v, vn, "landscape");
         if (net_ci_is(s, a, "prefers-color-scheme")) return net_ci_is(v, vn, "light");
         if (net_ci_is(s, a, "prefers-reduced-motion")) return net_ci_is(v, vn, "no-preference");
+        for (size_t k = 0; k < sizeof net_mq_name / sizeof net_mq_name[0]; k++)
+            if (net_ci_is(s, a, net_mq_name[k])) return net_ci_is(v, vn, net_mq_value[k]);
         if (net_ci_is(s, a, "resolution") || net_ci_is(s, a, "min-resolution") || net_ci_is(s, a, "max-resolution")) {
             double d = -1;
             if (vn > 4 && net_ci_is(v + vn - 4, 4, "dppx")) net_html_float(v, vn - 4, &d);
@@ -2473,6 +2503,62 @@ static int net_media_condition(const char *s, size_t n, int depth) {
     return neg ? !result : result;
 }
 
+/* the next white-space-delimited word of s from *i, up to a parenthesis: its start, and
+   *i past it */
+static size_t net_word(const char *s, size_t n, size_t *i) {
+    while (*i < n && net_ascii_ws(s[*i])) (*i)++;
+    size_t b = *i;
+    while (*i < n && !net_ascii_ws(s[*i]) && s[*i] != '(') (*i)++;
+    return b;
+}
+
+/* a <media-query> (Media Queries 4, 3): a media condition; or `not' or `only', a media
+   type and perhaps `and' a condition. Of the types, all and screen hold here; print,
+   the deprecated ones (tv, handheld ...) and what is none do not */
+static int net_media_query(const char *s, size_t n) {
+    size_t i = 0;
+    size_t b = net_word(s, n, &i);
+    if (b >= n) return 0;
+    if (s[b] == '(') return net_media_condition(s, n, 0);
+    int neg = 0;
+    if (net_ci_is(s + b, i - b, "not") || net_ci_is(s + b, i - b, "only")) {
+        int is_not = net_ci_is(s + b, i - b, "not");
+        size_t j = i;
+        while (j < n && net_ascii_ws(s[j])) j++;
+        if (j < n && s[j] == '(') return is_not ? net_media_condition(s, n, 0) : 0;
+        neg = is_not;
+        b = net_word(s, n, &i);
+    }
+    int holds = net_ci_is(s + b, i - b, "all") || net_ci_is(s + b, i - b, "screen");
+    size_t a = net_word(s, n, &i);
+    if (a < n) {
+        if (!net_ci_is(s + a, i - a, "and")) return 0;
+        holds = holds && net_media_condition(s + i, n - i, 0);
+    }
+    return neg ? !holds : holds;
+}
+
+/* a <media-query-list>, as a <source>'s media is: empty, or one of its queries (split
+   at commas outside parentheses) holds */
+static int net_media_list(const char *s, size_t n) {
+    size_t a = 0;
+    while (a < n && net_ascii_ws(s[a])) a++;
+    if (a >= n) return 1;
+    a = 0;
+    while (a <= n) {
+        size_t b = a;
+        int d = 0;
+        while (b < n && (d || s[b] != ',')) {
+            if (s[b] == '(') d++;
+            else if (s[b] == ')' && d) d--;
+            b++;
+        }
+        if (net_media_query(s + a, b - a)) return 1;
+        a = b + 1;
+    }
+    return 0;
+}
+
 /* HTML's "parse a sizes attribute": the first entry whose media condition holds, or
    that has none, gives its length; 100vw when none does */
 static double net_sizes(const char *s, size_t n) {
@@ -2567,6 +2653,53 @@ static int net_srcset_choose(const dom_document *d, uint32_t x, uint32_t srcset,
     return 1;
 }
 
+/* the image types the painter decodes, by their MIME types and the names Chromium also
+   takes for them: PNG (an APNG's first frame), GIF, JPEG, WebP. AVIF, SVG and BMP,
+   which Chromium decodes, are not among them */
+static const char *const net_image_types[] = { "image/png", "image/x-png", "image/apng", "image/gif", "image/jpeg", "image/jpg",
+                                               "image/pjpeg", "image/webp" };
+
+/* a <source>'s type, as Blink reads one (its MIME type's essence: white space and
+   parameters aside, in any case), one the painter decodes; an empty type is any */
+static int net_image_type(const char *s, size_t n) {
+    while (n && net_ascii_ws(s[0])) { s++; n--; }
+    size_t e = 0;
+    while (e < n && s[e] != ';') e++;
+    while (e && net_ascii_ws(s[e - 1])) e--;
+    if (e == 0) return 1;
+    for (size_t k = 0; k < sizeof net_image_types / sizeof net_image_types[0]; k++) if (net_ci_is(s, e, net_image_types[k])) return 1;
+    return 0;
+}
+
+/* the image an img in a picture takes (HTML's "update the source set", 4.8.4.3): of
+   the picture's children before the img, the first source with a srcset of some
+   candidate, a type the painter decodes or none, and a media query list that holds
+   (against the 800x600 viewport) or none; its candidate as net_srcset_choose picks
+   one, by the source's own sizes. That source, or 0 when none is taken and the img's
+   own srcset and src give its image */
+static uint32_t net_picture_choose(const dom_document *d, uint32_t picture, uint32_t img, char *url, size_t cap, net_pick *pk) {
+    char text[2048];
+    for (uint32_t c = d->node[picture].first_child; c && c != img; c = d->node[c].next_sibling) {
+        if (!net_is(d, c, "source")) continue;
+        uint32_t ss = net_attr(d, c, "srcset");
+        if (!ss || !d->attr[ss].value.len) continue;
+        uint32_t ty = net_attr(d, c, "type");
+        if (ty) {
+            amb_span v = d->attr[ty].value;
+            snprintf(text, sizeof text, "%.*s", (int)v.len, text_ptr(d, v));
+            if (!net_image_type(text, strlen(text))) continue;
+        }
+        uint32_t md = net_attr(d, c, "media");
+        if (md) {
+            amb_span v = d->attr[md].value;
+            snprintf(text, sizeof text, "%.*s", (int)v.len, text_ptr(d, v));
+            if (!net_media_list(text, strlen(text))) continue;
+        }
+        if (net_srcset_choose(d, c, ss, 0, url, cap, pk)) return c;
+    }
+    return 0;
+}
+
 /* an img's size as a srcset choice gives it: its header's size divided by its density */
 static void net_srcset_size(net_loader *l, uint32_t r, const net_pick *pk) {
     l->resource[r].srcset = 1;
@@ -2631,14 +2764,18 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
         char ref[8192], abs[8192];
         net_pick pk;
         int picked = 0;
-        uint32_t fetched = 0;
+        uint32_t fetched = 0, source = 0;
         if (net_is(doc, x, "link") && net_stylesheet_rel(doc, x)) { kind = NET_KIND_STYLESHEET; a = net_attr(doc, x, "href"); }
         else if (net_is(doc, x, "img")) {
             kind = NET_KIND_IMAGE;
             a = net_attr(doc, x, "src");
-            /* an img with a srcset takes the candidate chosen for the viewport */
+            /* an img in a picture takes the first of its sources that holds; else, and
+               outside a picture, an img with a srcset the candidate chosen for the viewport */
+            uint32_t pa = doc->node[x].parent;
+            if (pa && net_is(doc, pa, "picture")) source = net_picture_choose(doc, pa, x, ref, sizeof ref, &pk);
+            picked = source != 0;
             uint32_t ss = net_attr(doc, x, "srcset");
-            if (ss && doc->attr[ss].value.len) picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pk);
+            if (!picked && ss && doc->attr[ss].value.len) picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pk);
         } else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
         if (picked || (a && doc->attr[a].value.len > 0)) {
             if (!picked) {
@@ -2687,6 +2824,9 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                     /* the first's choice is not this one's: the size again from the header */
                     l->resource[fetched].srcset = 0;
                     l->resource[fetched].descriptor = net_text(l, "");
+                    dom_node_h no_source = { 0, 0, 0 };
+                    l->resource[fetched].picture = 0;
+                    l->resource[fetched].source = no_source;
                     if (kind == NET_KIND_IMAGE && copy.outcome == NET_OUTCOME_OK && copy.body.len) {
                         uint32_t w = 0, hh = 0;
                         net_image_size_of((const uint8_t *)bytes_ptr(l, copy.body), copy.body.len, &w, &hh);
@@ -2696,6 +2836,10 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 } else fetched = net_get(l, abs, kind, pg, eh, &base, &t);
             }
             if (picked && fetched) net_srcset_size(l, fetched, &pk);
+            if (source && fetched) {
+                l->resource[fetched].picture = 1;
+                l->resource[fetched].source = node_handle(doc, source);
+            }
         } else if (kind == NET_KIND_IMAGE && a) {
             /* an img whose src is empty: its request is broken at once (HTML's update the
                image data, step 9), and Chromium draws it broken; recorded, not fetched */

@@ -1,0 +1,44 @@
+== the source each img took (its media and type), or its own srcset and src (img):
+width|(min-width: 601px)|-
+none|img|img
+type|-|image/webp
+typecase|-|IMAGE/GIF; foo=bar
+jpeg|-|image/jpeg
+density|-|-
+sizes|-|-
+after|img|img
+orient|only screen and (orientation: landscape)|-
+not|not print|-
+list|print, (min-width: 700px)|-
+imgset|img|img
+bad|-|-
+res|(max-resolution: 1dppx)|-
+scheme|img|img
+range|(width > 700px)|-
+emptytype|-|
+hover|(hover: hover) and (pointer: fine)|-
+unsupported|-|image/png
+spaces|-|-
+nested|img|img
+emptysrc|-|-
+-- and the candidate it chose there: its descriptor, density and source size, of how many:
+width||1|800|1
+type||1|800|1
+typecase||1|800|1
+jpeg||1|800|1
+density|1x|1|800|2
+sizes|400w|1|400|3
+orient||1|800|1
+not||1|800|1
+list||1|800|1
+imgset|1x|1|800|2
+bad||1|800|1
+res||1|800|1
+range||1|800|1
+emptytype||1|800|1
+hover||1|800|1
+unsupported||1|800|1
+spaces||1|800|1
+emptysrc||1|800|1
+== each img's image, natural size and border box, against Chromium's (tests/net/picture.chromium):
+the same, img by img (22 of them)

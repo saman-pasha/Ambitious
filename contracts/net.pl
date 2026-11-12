@@ -7,7 +7,7 @@
 %% (HTTP/1.1: Content-Length, chunked, redirects within a bound, gzip and deflate;
 %% TLS 1.2 and 1.3 through the system's OpenSSL, the certificate chain and the host
 %% name verified; a proxy from the environment), and what a page loads -- its
-%% stylesheets, images (from a srcset where there is one) and scripts -- each with
+%% stylesheets, images (from a picture's source, or a srcset, where there is one) and scripts -- each with
 %% the element and the resource that asked for it, its origin, its redirects, how
 %% its fetch ended and why. The loader keeps a cookie jar (RFC 6265bis) and an HTTP
 %% cache (RFC 9111), in a profile's directory when there is one. Same-origin and
@@ -70,7 +70,9 @@ net_contract(record(resource, [
     field(descriptor, span(text)),           % the candidate's descriptor as written (2x, 800w), or empty for 1x and src
     field(density,   f64),                   % its pixel density, for a device pixel ratio of 1
     field(source_size, f64),                 % the sizes attribute's length in the viewport, px (100vw by default)
-    field(candidates, u32)                   % how many candidates there were, src among them when it was one
+    field(candidates, u32),                  % how many candidates there were, src among them when it was one
+    field(picture,   bool),                  % an image chosen from a <source> of its img's <picture>
+    field(source,    xhandle(dom, node))     % that <source>
 ])).
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
@@ -164,6 +166,9 @@ net_contract(fact(net_cross_site(handle), table(resource), field(cross_site) == 
 net_contract(fact(net_cache(handle, field(cache), field(cache_age), field(cache_lifetime)), table(resource), field(cache) \== unused)).
 net_contract(fact(net_coding(handle, field(coding), field(encoded_size)), table(resource), field(coded) == true)).
 net_contract(fact(net_srcset(handle, field(descriptor), field(density), field(source_size), field(candidates)), table(resource), field(srcset) == true)).
+%% the <source> of a <picture> whose srcset an img took its image from (its media held,
+%% its type is one the painter decodes)
+net_contract(fact(net_picture_source(handle, field(source)), table(resource), field(picture) == true)).
 %% the page's cookies, those its responses set or tried to and those sent for it:
 %% names, domains, paths and flags, never a value
 net_contract(fact(net_cookie(handle, field(name), field(domain), field(path), field(state)), table(cookie), field(seen) == true)).
