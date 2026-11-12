@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Scope</title>
+<style>
+/* tests/pages/scope.html: @scope (Cascade 6, 2.5), each case an element whose data-check
+   names the values tests/integ/cssref.sh holds to Chromium's (tools/bench/cssref.js):
+   rules matched below a scoping root and not the root itself, :scope the root, limits
+   (the limit and what is below it out of scope), a root inside another's limit, the
+   nearer root over a later farther one, specificity over proximity, a scoped rule over
+   an unscoped one of the same specificity, & with no specificity, a style element's own
+   @scope rooted at its parent */
+body { margin: 0 }
+@scope (.a) { .a { color: red } p { color: green } }
+@scope (.lim) to (.b) { .b { color: red } p { color: green } }
+@scope (.lim2) to (:scope > .stop) { span { color: green } }
+@scope (.in) { p { color: green } }
+@scope (.out) { p { color: blue } }
+@scope (.x) { p { color: green } }
+@scope (.x) { :scope p { color: blue } }
+@scope (.spec) { :scope p { color: green } }
+.spec p { color: red }
+@scope (.amp) { & p { color: green } }
+.amp p { color: red }
+@scope (.where) { p { color: green } }
+.where p { color: red }
+.later p.prox2 { color: orange }
+@scope (.outer2) { p.prox2 { color: blue } }
+@scope (.self) { :scope { color: green } }
+@scope (.c) to (.c) { span { color: green } }
+@scope (.d, .e) { em { color: green } }
+@scope (.layered) { p { color: green; background-color: yellow } }
+@layer low { @scope (.layered) { p { color: red } } }
+</style>
+</head>
+<body>
+<div class=a id=root data-check="color"><p id=inroot data-check="color">p</p></div>
+<div class=lim><p class=b id=limit data-check="color">limit</p><div class=b><p id=below data-check="color">below</p></div><p id=inscope data-check="color">in scope</p></div>
+<div class=lim2><div class=stop><span id=stopped data-check="color">s</span></div><div><div class=stop><span id=deeper data-check="color">s</span></div></div></div>
+<div class=out><div class=in><p id=near data-check="color">near</p></div></div>
+<div class=x><div class=x><p id=xx data-check="color">xx</p></div></div>
+<div class=spec><p id=spec data-check="color">spec</p></div>
+<div class=amp><p id=amp data-check="color">amp</p></div>
+<div class=where><p id=where data-check="color">where</p></div>
+<div class="outer2 later"><p class=prox2 id=prox2 data-check="color">prox2</p></div>
+<div class=self id=self data-check="color">self</div>
+<div class=c><span id=climit data-check="color">c</span><div class=c><span id=cnested data-check="color">nested</span></div></div>
+<div class=e><em id=listed data-check="color">e</em></div>
+<div class=layered><p id=layered data-check="color background-color">layered</p></div>
+<div id=host data-check="color"><style>@scope { span { color: green } }</style><span id=implicit data-check="color">implicit</span></div><span id=outside data-check="color">outside</span>
+</body>
+</html>

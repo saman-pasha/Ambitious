@@ -5,7 +5,8 @@
 %% animations < important author < important user agent), the style attribute's
 %% declarations above the rules' within each (element-attached style), then the cascade layer
 %% (@layer: in the layers' order, the unlayered rules last; for !important the
-%% order reversed), then specificity, then the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
+%% order reversed), then specificity, then scope proximity (@scope: a nearer scoping
+%% root over a farther, a scoped rule over an unscoped one), then the order of appearance. The C side (src/css/css.c, css_rank) sorts the same
 %% way; css_lost/4 says, of each declaration that lost, at which of these steps.
 %%
 %% No clause here cuts: amb_why/2 proves these rules clause by clause, and an
@@ -13,7 +14,8 @@
 :- dynamic css_sheet/2, css_rule/5, css_decl/5, css_matched/2, css_style_of/2, css_style_declared/4, css_style_won/3,
    css_style_rgba/3, css_initial/2, css_initial_rgba/2, css_style_custom/5, css_decl_custom/2, css_rule_layer/2, css_layer/3,
    css_imported/3, css_font_face/5, css_font_face_font/2,
-   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3, css_registered/5.
+   css_pseudo_matched/3, css_pseudo_style_of/3, css_state/2, css_keyframes/3, css_keyframe/3, css_registered/5,
+   css_scope/3, css_match_proximity/3.
 
 %% STYLES. Elements whose matched rules are the same, under parents of one style,
 %% share a computed style (src/css/css.c): the snapshot says each element's style,
@@ -181,12 +183,20 @@ css_lost(N, P, D2, Why) :-
     css_won(N, P, D),
     css_matched(N, R2), css_decl(D2, R2, P, _, _), D2 \== D,
     css_rules_rank(D, rank(L1, LR1, S1, O1)), css_rules_rank(D2, rank(L2, LR2, S2, O2)),
+    css_decl(D, R1, _, _, _), css_rules_nearness(N, R1, X1), css_rules_nearness(N, R2, X2),
     (   L2 < L1 -> css_rules_layer_name(L2, W2), css_rules_layer_name(L1, W1), Why = origin_or_importance(lost(W2), won(W1))
     ;   LR2 < LR1 -> css_layer_of(D2, N2), css_layer_of(D, N1), Why = layer(lost(N2), won(N1))
     ;   S2 < S1 -> css_specificity(S2, T2), css_specificity(S1, T1), Why = specificity(T2, lower_than(T1))
+    ;   X2 < X1 -> css_rules_scope_name(X2, W2), css_rules_scope_name(X1, W1), Why = scope_proximity(lost(W2), won(W1))
     ;   O2 < O1 -> Why = order(O2, earlier_than(O1))
     ;   Why = earlier_in_the_same_rule
     ).
+
+%% a matched rule's nearness to an element by its @scope (Cascade 6, 6.1), after
+%% specificity: 256 less its scoping root's proximity (generations above the element,
+%% plus one) for a scoped rule, 0 for an unscoped one; and as said
+css_rules_nearness(N, R, X) :- ( css_match_proximity(N, R, P) -> X is 256 - P ; X = 0 ).
+css_rules_scope_name(X, W) :- ( X =:= 0 -> W = unscoped ; G is 255 - X, W = scoped(generations(G)) ).
 
 %% why an element has its value of a property: the declaration that won (as
 %% written, its rule and where that rule is), or the animation that gave it at

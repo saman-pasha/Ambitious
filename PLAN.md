@@ -682,6 +682,10 @@ be built side by side and merged without touching each other's.
       inheritance or not, a value its syntax refuses taken as unset, its value
       computed by its syntax (lengths px, colours, angles, numbers, lists), and
       registered ones interpolated in animations (unregistered ones discrete).
+    - `@scope`: rules matched below their nearest scoping root (its roots'
+      selectors, or a style element's parent) and above its limits, `:scope`
+      and `&` as Chromium ranks them, and scope proximity in the cascade
+      between specificity and order, which the reasons name.
   - Layout: floats; positioning (relative, absolute, fixed, sticky); flex;
     grid; vertical-align; min/max-height and percentage heights; rowspan;
     writing modes and bidirectional text; hyphenation; kerning.

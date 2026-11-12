@@ -2558,7 +2558,7 @@ static int css_pseudo_known(const char *p, size_t pn, int element, int fn) {
     for (size_t i = 0; i < pn; i++) w[i] = css_lower(p[i]);
     w[pn] = 0;
     return css_word_in(w, "first-child last-child only-child first-of-type last-of-type only-of-type root empty link any-link "
-                          "visited checked disabled enabled hover focus focus-visible focus-within active target before after "
+                          "visited checked disabled enabled hover focus focus-visible focus-within active target scope before after "
                           "first-line first-letter");
 }
 
@@ -2720,9 +2720,96 @@ static uint32_t css_layer_rank(css_style *s, uint32_t parent, uint32_t next) {
 
 /* where a sheet's rules are read: its sheet, its layer, its base URL, how deep in
    @imports, and whether a rule other than @import has been met */
-typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; } css_pctx;
+/* a sheet being read: its sheet, layer, depth of @import, origin, base URL; the @scope its
+   rules are in (scoped; its roots' and limits' selectors) and the element a sheet's @scope
+   without roots is rooted at (a style element's parent) */
+typedef struct css_pctx { uint32_t sheet, layer; int depth, ruled; css_origin origin; char base[2048]; int scoped; amb_span scope, scope_end;
+                          uint32_t scope_host; } css_pctx;
 
 static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t, size_t n);
+
+static int css_selector_ok(const char *s, size_t n, int depth);
+
+/* a selector list each of whose selectors this reads */
+static int css_selector_list_ok(const char *s, size_t n) {
+    size_t a = 0;
+    while (a <= n) {
+        size_t b = css_comma(s, n, a), sa = css_skip_ws(s, b, a), sb = b;
+        while (sb > sa && css_ws(s[sb - 1])) sb--;
+        if (sb == sa || !css_selector_ok(s + sa, sb - sa, 0)) return 0;
+        if (b >= n) break;
+        a = b + 1;
+    }
+    return 1;
+}
+
+/* an @scope's prelude (Cascade 6, 2.5): [(roots)] [to (limits)], each a selector list,
+   into the context its rules are read in; 0 when it is not one */
+static int css_scope_prelude(css_style *s, const char *pre, size_t pn, css_pctx *cx) {
+    size_t i = css_skip_ws(pre, pn, 0);
+    amb_span none = { 0, 0 };
+    cx->scoped = 1;
+    cx->scope = none;
+    cx->scope_end = none;
+    if (i < pn && pre[i] == '(') {
+        size_t e = css_block_end(pre, pn, i, '(', ')');
+        if (e >= pn || !css_selector_list_ok(pre + i + 1, e - i - 1)) return 0;
+        cx->scope = text_add(s, pre + i + 1, e - i - 1);
+        i = css_skip_ws(pre, pn, e + 1);
+    }
+    if (i + 2 <= pn && css_eq_ci(pre + i, 2, "to")) {
+        i = css_skip_ws(pre, pn, i + 2);
+        if (i >= pn || pre[i] != '(') return 0;
+        size_t e = css_block_end(pre, pn, i, '(', ')');
+        if (e >= pn || !css_selector_list_ok(pre + i + 1, e - i - 1)) return 0;
+        cx->scope_end = text_add(s, pre + i + 1, e - i - 1);
+        i = css_skip_ws(pre, pn, e + 1);
+    }
+    return i >= pn;
+}
+
+/* the rules from r0 on, read in an @scope: scoped, their selectors matched below a scoping
+   root -- one without :scope or & as the root's descendant (:where(:scope) before it),
+   & as the root itself with no specificity of its own (:where(:scope)), as Chromium
+   matches and ranks them; the scope's own selectors add none */
+static void css_scope_rules(css_style *s, const css_pctx *cx, uint32_t r0) {
+    for (uint32_t r = r0; r < s->rule_len; r++) {
+        if (!s->rule[r].live || s->rule[r].keyframes) continue;
+        s->rule[r].scoped = 1;
+        s->rule[r].scope = cx->scope;
+        s->rule[r].scope_end = cx->scope_end;
+        s->rule[r].scope_host.index = cx->scope_host;
+        vector<char> sel, out;
+        append_range(sel, text_ptr(s, s->rule[r].selector), s->rule[r].selector.len);
+        const char *t = data(sel);
+        size_t n = len(sel);
+        int amp = 0, scope = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (t[i] == '"' || t[i] == '\'') { i = css_string_end(t, n, i); continue; }
+            if (t[i] == '&') amp = 1;
+            if (t[i] == ':' && i + 6 <= n && css_eq_ci(t + i + 1, 5, "scope") && (i + 6 == n || !css_namechar(t[i + 6]))) scope = 1;
+        }
+        if (amp) {
+            for (size_t i = 0; i < n; i++) {
+                if (t[i] == '"' || t[i] == '\'') {
+                    size_t e = css_string_end(t, n, i);
+                    size_t stop = e < n ? e + 1 : n;
+                    append_range(out, t + i, stop - i);
+                    i = stop - 1;
+                    continue;
+                }
+                if (t[i] == '&') append_range(out, ":where(:scope)", 14);
+                else push_back(out, t[i]);
+            }
+        } else if (scope) append_range(out, t, n);
+        else {
+            append_range(out, ":where(:scope) ", 15);
+            append_range(out, t, n);
+        }
+        s->rule[r].selector = text_add(s, data(out), len(out));
+        s->rule[r].spec = css_spec_complex(data(out), len(out), 0);
+    }
+}
 
 /* an @keyframes rule (CSS Animations 1, 4): its name (an identifier other than none and
    the CSS-wide keywords, or a string) and its keyframes, each selector of a block (from,
@@ -2811,7 +2898,7 @@ static uint32_t css_fetch(net_loader *net, const css_pctx *cx, const char *ref, 
 
 /* a sheet's text, its comments stripped, read into a new sheet of the store */
 static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin, const char *src, size_t n, const char *url,
-                               uint32_t parent, uint32_t layer, int depth, const char *base) {
+                               uint32_t parent, uint32_t layer, int depth, const char *base, uint32_t host) {
     vector<char> t;
     css_strip_comments(src, n, &t);
     css_sheet_h sh = sheet_new(s);
@@ -2824,6 +2911,7 @@ static uint32_t css_sheet_read(css_style *s, net_loader *net, css_origin origin,
     cx.layer = layer;
     cx.depth = depth;
     cx.origin = origin;
+    cx.scope_host = host;
     snprintf(cx.base, sizeof cx.base, "%s", base ? base : "");
     css_rules(s, net, &cx, data(t), len(t));
     s->revision++;
@@ -2861,7 +2949,7 @@ static void css_import(css_style *s, net_loader *net, css_pctx *cx, const char *
     snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
     vector<char> body;
     append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base);
+    css_sheet_read(s, net, cx->origin, data(body), len(body), abs, cx->sheet, layer, cx->depth + 1, base, cx->scope_host);
 }
 
 /* the bytes begin as a font the painter reads: TrueType, OpenType, WOFF */
@@ -2992,15 +3080,22 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
         } else if (at) {
             /* @media whose query holds, @supports whose condition does: their rules are the
                sheet's; @font-face's face is fetched; @keyframes' keyframes are rules of their own;
-               @property registers its custom property; @page and the rest: not read */
+               @property registers its custom property; @scope's rules are scoped (css_scope_rules); @page
+               and the rest: not read */
             if (css_eq_ci(name, nn, "media")) { if (css_media_matches(t + j, k - j)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "supports")) { if (css_supports(t + j, k - j, 0)) css_rules(s, net, cx, t + k + 1, inner); }
             else if (css_eq_ci(name, nn, "font-face")) css_font_face(s, net, cx, t + k + 1, inner);
             else if (css_eq_ci(name, nn, "keyframes") || css_eq_ci(name, nn, "-webkit-keyframes")) css_keyframes_rule(s, cx, t + j, k - j, t + k + 1, inner);
             else if (css_eq_ci(name, nn, "property")) css_property_rule(s, cx, t + j, k - j, t + k + 1, inner);
+            else if (css_eq_ci(name, nn, "scope")) {
+                css_pctx sub = *cx;
+                if (css_scope_prelude(s, t + j, k - j, &sub)) css_rules(s, net, &sub, t + k + 1, inner);
+            }
             cx->ruled = 1;
         } else {
+            uint32_t r0 = (uint32_t)s->rule_len;
             css_style_rule(s, cx->sheet, cx->layer, t + i, k - i, t + k + 1, inner);
+            if (cx->scoped) css_scope_rules(s, cx, r0);
             cx->ruled = 1;
         }
         i = end + 1;
@@ -3008,7 +3103,7 @@ static void css_rules(css_style *s, net_loader *net, css_pctx *cx, const char *t
 }
 
 css_status css_parse_sheet(css_style *s, css_origin origin, const char *src, size_t src_len) {
-    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0);
+    css_sheet_read(s, 0, origin, src, src_len, 0, 0, 0, 0, 0, 0);
     return CSS_OK;
 }
 
@@ -3104,8 +3199,9 @@ static int css_nth(const dom_document *d, uint32_t x, const char *s, size_t n, i
 }
 
 /* the page's state the pseudo-classes of state read: the element hovered, focused (and
-   whether visibly), active, and the URL's target; 0 for none */
-typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target; } css_mstate;
+   whether visibly), active, and the URL's target; 0 for none. scope: the scoping root a
+   scoped rule is matched under (:scope), 0 for none (the root element then) */
+typedef struct css_mstate { uint32_t hover, focus, focus_visible, active, target, scope; } css_mstate;
 
 static int css_complex_matches(const dom_document *d, uint32_t x, const css_mstate *ms, const char *s, size_t n, int depth, int *budget);
 
@@ -3160,6 +3256,7 @@ static int css_pseudo(const dom_document *d, uint32_t x, const css_mstate *ms, c
         return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
     if (css_eq_ci(ps, pn, "disabled")) return css_form_control(d, x) && css_attr_of(d, x, "disabled", 8);
     if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_attr_of(d, x, "disabled", 8);
+    if (css_eq_ci(ps, pn, "scope")) return ms->scope ? x == ms->scope : d->node[x].parent == 1;
     /* the state the page is in: :hover and :active hold of the element and its ancestors,
        :focus-within of the focused one and its; :visited of none (no history is read). A
        page at rest: none of them holds */
@@ -3667,16 +3764,39 @@ static int css_element_keys(const dom_document *d, uint32_t x, uint32_t id_atom,
 /* the rule r matches x (its ancestors' keys in x's filter am, then the matcher): 1, or 1
    and its pseudo-element (shifted 8 up); 0 when it does not */
 static uint32_t css_rule_matches(const css_style *s, const dom_document *d, uint32_t x, const css_mstate *ms, uint32_t r,
-                            const vector<css_part> *parts, const vector<css_rx> *rxs, const uint64_t *am) {
+                            const vector<css_part> *parts, const vector<css_rx> *rxs, const uint64_t *am, uint32_t *prox) {
     css_rx rx = at(*rxs, r);
     uint32_t np = rx.nparts & 0xff;
+    *prox = 0;
     if (np == 0) return 0;
     if ((rx.anc[0] & ~am[0]) | (rx.anc[1] & ~am[1]) | (rx.anc[2] & ~am[2]) | (rx.anc[3] & ~am[3])) return 0;
     css_part ps[CSS_MAXPARTS];
     for (uint32_t j = 0; j < np; j++) ps[j] = at(*parts, rx.parts + j);
     int budget = CSS_MATCH_BUDGET;
     amb_span sel = s->rule[r].selector;
-    return css_parts_match(d, x, ms, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
+    if (!s->rule[r].scoped) return css_parts_match(d, x, ms, text_ptr(s, sel), ps, np, 0, &budget) ? 1 | (rx.nparts & ~0xffu) : 0;
+    /* a scoped rule (Cascade 6, 2.5): under the nearest scoping root it matches below -- x
+       or an ancestor that matches the roots' selector (or is the @scope's host, the root
+       element when it has none), with no limit at or above x below it -- its proximity
+       the generations between them, plus one */
+    amb_span st = s->rule[r].scope, et = s->rule[r].scope_end;
+    uint32_t host = s->rule[r].scope_host.index, gen = 0;
+    for (uint32_t root = x; root && root != 1 && css_is_element(d, root); root = d->node[root].parent, gen++) {
+        int is_root = st.len ? css_list_matches(d, root, ms, text_ptr(s, st), st.len, 0, &budget)
+                             : host ? root == host : d->node[root].parent == 1;
+        if (!is_root) continue;
+        css_mstate m2 = *ms;
+        m2.scope = root;
+        int limited = 0;
+        for (uint32_t l = x; et.len && l && l != root && !limited; l = d->node[l].parent)
+            if (css_list_matches(d, l, &m2, text_ptr(s, et), et.len, 0, &budget)) limited = 1;
+        if (limited) continue;
+        if (css_parts_match(d, x, &m2, text_ptr(s, sel), ps, np, 0, &budget)) {
+            *prox = gen + 1 < 255 ? gen + 1 : 255;
+            return 1 | (rx.nparts & ~0xffu);
+        }
+    }
+    return 0;
 }
 
 /* ---- the cascade ---- */
@@ -5451,13 +5571,20 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         push_back(crank, 0);
     }
     int any = 0;
+    /* a declaration's rank, and after its specificity its rule's scope proximity (Cascade 6,
+       6.1: a nearer scoping root over a farther, a scoped rule over an unscoped one), then
+       its order: rk's high 40 bits, the proximity's key, rk's order */
+    uint32_t bestx[CSS_NPROPS];
+    memset(bestx, 0, sizeof bestx);
     for (size_t k = 0; k < len(*matched); k++) {
-        uint32_t r = at(*matched, k);
+        uint32_t r = at(*matched, k) & 0xffffff, px = at(*matched, k) >> 24;
         for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
             int p = (int)s->decl[dc].prop;
             uint64_t rk = css_rank(s, dc);
             if (p != CSS_PROP_CUSTOM) {
-                if (rk >= best[p]) { best[p] = rk; win[p] = dc; any = 1; }
+                uint64_t hi = rk >> 24, bhi = best[p] >> 24;
+                uint32_t lo = px << 24 | (uint32_t)(rk & 0xffffff), blo = bestx[p] << 24 | (uint32_t)(best[p] & 0xffffff);
+                if (!win[p] || hi > bhi || (hi == bhi && lo >= blo)) { best[p] = rk; bestx[p] = px; win[p] = dc; any = 1; }
                 continue;
             }
             uint32_t name = s->decl[dc].word;
@@ -5960,13 +6087,15 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
             vector<char> body;
             append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base);
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0);
             continue;
         }
         vector<char> t;
         for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
             if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
-        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page);
+        /* a style element's @scope without roots is rooted at its parent element */
+        uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
+        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
     }
     /* the cascade layers' order, now every sheet has named its layers */
     css_layer_rank(s, 0, 1);
@@ -6086,8 +6215,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             for (uint32_t r = first_rule; r < shared; r++)
                 {
                     if (s->rule[r].keyframes) continue;
-                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
-                    if (mk == 1) push_back(matched, r);
+                    uint32_t prox, mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am, &prox);
+                    if (mk == 1) push_back(matched, (prox ? 256 - prox : 0) << 24 | r);
                     else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
                 }
         } else {
@@ -6117,8 +6246,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 if (r == last) continue;
                 last = r;
                 if (r >= first_rule) {
-                    uint32_t mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am);
-                    if (mk == 1) push_back(matched, r);
+                    uint32_t prox, mk = css_rule_matches(s, doc, x, &ms, r, &parts, &rxs, am, &prox);
+                    if (mk == 1) push_back(matched, (prox ? 256 - prox : 0) << 24 | r);
                     else if (mk) push_back(pmatched, (mk >> 8) << 24 | r);
                 }
             }
@@ -6130,7 +6259,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         for (size_t k = 0; k < len(matched); k++) {
             css_match_h m = match_new(s);
             s->match[m.index].node = nh;
-            s->match[m.index].rule = at(matched, k);
+            s->match[m.index].rule = at(matched, k) & 0xffffff;
+            s->match[m.index].proximity = at(matched, k) >> 24 ? 256 - (at(matched, k) >> 24) : 0;
         }
         /* the element's style: the one its matched rules under its parent's style made, or a new one */
         uint32_t ps = px ? at(nstyle, px) : 0;

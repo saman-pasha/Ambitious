@@ -78,7 +78,11 @@ css_contract(record(rule, [
     field(last_decl,  ref(decl)),
     field(layer,      ref(layer)),      % its cascade layer (@layer); none: unlayered
     field(keyframes,  ref(keyframes)),  % a keyframe's: its @keyframes (it matches no element); none for a style rule
-    field(offset,     f64)              % a keyframe's place in its animation, 0 to 1
+    field(offset,     f64),             % a keyframe's place in its animation, 0 to 1
+    field(scoped,     bool),            % in an @scope: its selector matched below a scoping root
+    field(scope,      span(text)),      % the scoping roots' selector list (empty: the style element's parent)
+    field(scope_end,  span(text)),      % the scoping limits' (empty: none)
+    field(scope_host, xhandle(dom, node))   % the root of an @scope without roots' selectors
 ])).
 %% a custom property a sheet registered (@property, CSS Properties and Values 1): its name,
 %% its syntax (as written, its quotes gone), whether it inherits, its initial value (computed)
@@ -106,7 +110,9 @@ css_contract(record(decl, [
     field(text,      span(text))       % the value as written (a custom property's name is its word)
 ])).
 %% a rule that matched an element (or, pseudo, one of its pseudo-elements)
-css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule)), field(pseudo, enum(pseudo))])).
+css_contract(record(match, [field(node, xhandle(dom, node)), field(rule, ref(rule)), field(pseudo, enum(pseudo)),
+    field(proximity, u32)               % a scoped rule's: its scoping root's generations above the node, plus one; 0 unscoped
+])).
 %% a pseudo-element's computed style: its element, which one, its style (whose parent is
 %% the element's), the first of its values
 css_contract(record(pstyle, [field(node, xhandle(dom, node)), field(pseudo, enum(pseudo)), field(style, u32), field(first, ref(cval))])).
@@ -212,6 +218,10 @@ css_contract(fact(css_font_face(handle, field(family), field(url), field(weight)
 css_contract(fact(css_font_face_font(handle, field(font)), table(face), true)).
 css_contract(fact(css_decl(handle, field(rule), field(prop), field(text), field(important)), table(decl), true)).
 css_contract(fact(css_matched(field(node), field(rule)), table(match), field(pseudo) == element)).
+%% a scoped rule (@scope, Cascade 6): its roots' and limits' selectors; a match of one, its
+%% scoping root's distance (generations, plus one), which ranks it over a farther one
+css_contract(fact(css_scope(handle, field(scope), field(scope_end)), table(rule), field(scoped) == true)).
+css_contract(fact(css_match_proximity(field(node), field(rule), field(proximity)), table(match), field(proximity) \== 0)).
 css_contract(fact(css_pseudo_matched(field(node), field(pseudo), field(rule)), table(match), field(pseudo) \== element)).
 css_contract(fact(css_pseudo_style_of(field(node), field(pseudo), field(style)), table(pstyle), true)).
 css_contract(fact(css_state(field(kind), field(node)), table(state), true)).
