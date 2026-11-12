@@ -2814,7 +2814,8 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
         char ref[8192], abs[8192];
         net_pick pk;
         int picked = 0;
-        uint32_t fetched = 0, source = 0;
+        uint32_t fetched = 0, source = 0, srcset = 0;
+        int in_picture = 0;
         if (net_is(doc, x, "link") && net_stylesheet_rel(doc, x)) { kind = NET_KIND_STYLESHEET; a = net_attr(doc, x, "href"); }
         else if (net_is(doc, x, "img")) {
             kind = NET_KIND_IMAGE;
@@ -2822,9 +2823,13 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
             /* an img in a picture takes the first of its sources that holds; else, and
                outside a picture, an img with a srcset the candidate chosen for the viewport */
             uint32_t pa = doc->node[x].parent;
-            if (pa && net_is(doc, pa, "picture")) source = net_picture_choose(doc, pa, x, ref, sizeof ref, &pk);
+            if (pa && net_is(doc, pa, "picture")) {
+                source = net_picture_choose(doc, pa, x, ref, sizeof ref, &pk);
+                in_picture = 1;
+            }
             picked = source != 0;
             uint32_t ss = net_attr(doc, x, "srcset");
+            srcset = ss;
             if (!picked && ss && doc->attr[ss].value.len) picked = net_srcset_choose(doc, x, ss, a, ref, sizeof ref, &pk);
         } else if (net_is(doc, x, "script")) { kind = NET_KIND_SCRIPT; a = net_attr(doc, x, "src"); }
         if (picked || (a && doc->attr[a].value.len > 0)) {
@@ -2890,9 +2895,12 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
                 l->resource[fetched].picture = 1;
                 l->resource[fetched].source = node_handle(doc, source);
             }
-        } else if (kind == NET_KIND_IMAGE && a) {
-            /* an img whose src is empty: its request is broken at once (HTML's update the
-               image data, step 9), and Chromium draws it broken; recorded, not fetched */
+        } else if (kind == NET_KIND_IMAGE && (a || srcset || in_picture)) {
+            /* an img whose src is empty, or which uses srcset or picture (a srcset attribute, a
+               picture parent) with no source chosen and no src: its request is broken at once
+               (HTML's update the image data, steps 9 and 14: no source selected), and Chromium
+               draws it broken; recorded, not fetched. With none of these it has no request, and
+               is drawn as one with no image to load */
             net_resource_h h = resource_new(l);
             uint32_t r = h.index;
             l->resource[r].kind = kind;
@@ -2903,7 +2911,7 @@ net_status net_fetch_subresources(net_loader *l, dom_document *doc, net_resource
             l->resource[r].outcome = NET_OUTCOME_BAD_URL;
             l->resource[r].origin = net_text(l, "null");
             l->resource[r].type = net_text(l, "");
-            l->resource[r].reason = net_text(l, "the src attribute is empty");
+            l->resource[r].reason = net_text(l, a ? "the src attribute is empty" : srcset ? "the srcset attribute names no image" : "no source of its picture holds");
         }
         if (doc->node[x].first_child) { x = doc->node[x].first_child; continue; }
         while (x && !doc->node[x].next_sibling) { x = doc->node[x].parent; if (x == 1) x = 0; }

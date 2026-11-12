@@ -160,8 +160,9 @@ static void pt_text(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries
         uint32_t cp = amb_utf8_next(s, n, &i);
         if (prev) x += amb_kern(f, face, prev, cp, size);       /* the pair's kerning, as layout measured it */
         prev = cp;
-        double fx = floor(x);
-        int quarter = (int)((x - fx) * 4);
+        /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
+        double fx = floor(x + 0.125);
+        int quarter = (int)((x + 0.125 - fx) * 4);
         uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
         pt_glyph gl = at(*entries, e);
         for (int yy = 0; yy < gl.h; yy++) {
@@ -195,8 +196,9 @@ static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const a
         uint32_t cp = amb_utf8_next(s, n, &i);
         if (prev) x += amb_kern(f, face, prev, cp, size);
         prev = cp;
-        double fx = floor(x);
-        int quarter = (int)((x - fx) * 4);
+        /* Skia's subpixel position: an eighth of a px added, then the quarter below it (SkGlyphPositionRoundingSpec) */
+        double fx = floor(x + 0.125);
+        int quarter = (int)((x + 0.125 - fx) * 4);
         uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, face, size, cp, quarter, italic);
         pt_glyph gl = at(*entries, e);
         for (int yy = 0; yy < gl.h; yy++) {
@@ -1492,6 +1494,52 @@ static void pt_broken(amb_canvas *c, double x, double y, double w, double h) {
     c->cy1 = cy1;
 }
 
+/* an img with no image to load and no alt text, in its content box at x, y: Chromium's ImagePainter outlines the
+   box, snapped to whole CSS px, 1 CSS px wide inside it in light grey (Color::kLightGray), when it is more than
+   2 CSS px each way; nothing else (measured zoomed too: the snapping, the width and the 2px in CSS px) */
+static void pt_unsourced(amb_canvas *c, double x, double y, double w, double h) {
+    double z = c->zoom > 0 ? c->zoom : 1;
+    if (w / z <= 2 || h / z <= 2) return;
+    double x0 = floor(x / z + 0.5) * z, y0 = floor(y / z + 0.5) * z, x1 = floor((x + w) / z + 0.5) * z, y1 = floor((y + h) / z + 0.5) * z;
+    if (x1 - x0 < z || y1 - y0 < z) return;
+    uint32_t grey = 0xc0c0c0ff;
+    pt_fill(c, x0, y0, x1, y0 + z, grey);
+    if (y1 - y0 > z) pt_fill(c, x0, y1 - z, x1, y1, grey);
+    if (y1 - y0 > 2 * z) {
+        pt_fill(c, x0, y0 + z, x0 + z, y1 - z, grey);
+        if (x1 - x0 > z) pt_fill(c, x1 - z, y0 + z, x1, y1 - z, grey);
+    }
+}
+
+/* the pixels [x0, x1) x [y0, y1) of the canvas as they are, before replaced content is drawn over them */
+static void pt_keep(const amb_canvas *c, int x0, int y0, int x1, int y1, vector<uint8_t> *out) {
+    clear(*out);
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            push_back(*out, c->px[i]);
+            push_back(*out, c->px[i + 1]);
+            push_back(*out, c->px[i + 2]);
+        }
+}
+/* what was drawn over the pixels pt_keep kept, held to the rounded rectangle (x0, y0)-(x1, y1) with radii r (page
+   coordinates): each pixel moved from what it was by as much of it as the rectangle covers, as an anti-aliased
+   clip lets a drawing through */
+static void pt_round_clip(amb_canvas *c, int kx0, int ky0, int kx1, int ky1, const vector<uint8_t> *was, double x0, double y0, double x1,
+                          double y1, const double *r) {
+    size_t k = 0;
+    for (int y = ky0; y < ky1; y++)
+        for (int x = kx0; x < kx1; x++, k += 3) {
+            double cov = pt_rr_cover(x + 0.5, y + 0.5 + c->oy, x0, y0, x1, y1, r);
+            if (cov >= 1) continue;
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            for (int ch = 0; ch < 3; ch++) {
+                double v0 = at(*was, k + (size_t)ch);
+                c->px[i + (size_t)ch] = (uint8_t)(v0 + (c->px[i + (size_t)ch] - v0) * cov + 0.5);
+            }
+        }
+}
+
 /* the image the loader fetched for an element, decoded into rgba: 1 when it was; -1 when
    its load failed; 0 when there is none or its bytes are no image this decodes */
 static int pt_image_of(const net_loader *nt, uint32_t el, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
@@ -1854,6 +1902,22 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     if (t->box[b].bg_image.len && !themed) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
     if (len(sh)) pt_box_shadows(c, data(sh), len(sh), bx, by, bx + bw, by + bh, rad, 1, bws, prad);
     if (themed) bt = br = bb = bl = 0;      /* its border the theme's */
+    /* replaced content with rounded corners: held to its content box, rounded as the border box is less the border
+       and padding (Blink's ReplacedPainter, the rounded inner rect for content), anti-aliased */
+    double ka[4] = { 0, 0, 0, 0 }, kr[8];
+    vector<uint8_t> kept;
+    int kx0 = 0, ky0 = 0, kx1 = 0, ky1 = 0, kround = t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && round;
+    double scx0 = c->cx0, scy0 = c->cy0, scx1 = c->cx1, scy1 = c->cy1;
+    if (kround) {
+        pt_area(t, b, "content-box", 11, rad, ka, kr);
+        if (c->cx0 < floor(ka[0])) c->cx0 = floor(ka[0]);
+        if (c->cy0 < floor(ka[1] - c->oy) + c->oy) c->cy0 = floor(ka[1] - c->oy) + c->oy;
+        if (c->cx1 > ceil(ka[2])) c->cx1 = ceil(ka[2]);
+        if (c->cy1 > ceil(ka[3] - c->oy) + c->oy) c->cy1 = ceil(ka[3] - c->oy) + c->oy;
+        pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+        if (kx1 > kx0 && ky1 > ky0) pt_keep(c, kx0, ky0, kx1, ky1, &kept);
+        else kround = 0;
+    }
     if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && t->box[b].svg.len) {
         /* an svg element: the drawing layout made of its content (src/paint/svg.h) */
         vector<char> scene;
@@ -1865,10 +1929,17 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
         uint32_t iw, ih;
         int got = pt_image_of(nt, t->box[b].node.index, &rgba, &iw, &ih);
         if (got > 0) pt_image(c, &rgba, iw, ih, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
-        else if (got < 0 && t->box[b].first_line) pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));   /* its icon before its alt text */
+        else if ((got < 0 || t->box[b].unsourced) && t->box[b].first_line)
+            pt_broken_icon_at(c, floor(t->box[b].x + 0.5), floor(t->box[b].y + 0.5));   /* its icon before its alt text */
         else if (got < 0) pt_broken(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
+        else if (t->box[b].unsourced) pt_unsourced(c, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
         else amb_svg_image_of(c, nt, t->box[b].node.index, t->box[b].x, t->box[b].y, t->box[b].w, t->box[b].h);
     }
+    if (kround) pt_round_clip(c, kx0, ky0, kx1, ky1, &kept, ka[0], ka[1], ka[2], ka[3], kr);
+    c->cx0 = scx0;
+    c->cy0 = scy0;
+    c->cx1 = scx1;
+    c->cy1 = scy1;
     /* a fieldset's top border not behind its legend's border box: the band kept as the background left it */
     vector<uint8_t> gap;
     int gx0 = 0, gx1 = 0, gy0 = 0, gy1 = 0;

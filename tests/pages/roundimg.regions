@@ -1,0 +1,11 @@
+# tests/pages/roundimg.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+r1 10 10 70 70
+r2 90 10 164 84
+r3 180 10 276 42
+r4 290 10 350 70
+r5 370 10 442 62
+r6 460 10 540 60
+r7 10 100 70 160
+r8 90 100 154 164
+r9 180 100 220 130
+r10 240 100 300 160

@@ -102,6 +102,10 @@ layout_contract(record(box, [
     %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track; a
     %% colour well's colour, a drop-down's arrow's
     field(theme, enum(theme)), field(checked, bool), field(fraction, f64), field(swatch, u32),
+    %% an img with no image to load (no src, no srcset, no source of its picture chosen): with alt text, its
+    %% fallback, a broken image's icon before the text; without, its content box outlined in light grey as
+    %% Chromium's ImagePainter outlines it, when more than 2px each way
+    field(unsourced, bool),
     field(ow, f64), field(ostyle, u8), field(ocolor, u32), field(ooffset, f64),  % outline: width, style, colour, offset
     %% a grid item's area: its first row and column lines (the explicit grid's first line
     %% is 1, an implicit one before it 0 or less), the tracks it spans, how it was placed,

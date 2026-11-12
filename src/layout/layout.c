@@ -980,13 +980,24 @@ static void lay_svg_size(LCTX, uint32_t el, const lay_style *s, double cw, doubl
 
 /* the content box of an atomic inline: a replaced element's size, or an inline-block's
    width shrunk to fit within avail */
-/* an image whose load failed (its request broken: no URL, refused, not found ...) */
+static int lay_alt_text(const dom_document *d, uint32_t el, vector<char> *out);
+/* an image whose load failed (its request broken: no URL, refused, not found ...); or one with no image to load
+   (no src, no srcset: the loader made no request) and alt text, which Chromium gives its fallback as it gives a
+   broken image's */
 static int lay_img_failed(LCTX, uint32_t el) {
     if (!nt || !lay_is_named(d, el, "img")) return 0;
     for (uint32_t r = 1; r < nt->resource_len; r++)
         if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE)
             return nt->resource[r].outcome != NET_OUTCOME_OK;
-    return 0;
+    vector<char> alt;
+    return lay_alt_text(d, el, &alt) && len(alt) > 0;
+}
+/* an img with no image to load: no src, no srcset, no source of its picture chosen (the loader made no request) */
+static int lay_img_unsourced(LCTX, uint32_t el) {
+    if (!nt || !lay_is_named(d, el, "img")) return 0;
+    for (uint32_t r = 1; r < nt->resource_len; r++)
+        if (nt->resource[r].live && nt->resource[r].elem.index == el && nt->resource[r].kind == NET_KIND_IMAGE) return 0;
+    return 1;
 }
 /* an img's alt text, its white space runs one space and trimmed; 0 when it has no alt attribute, 1 when it has one */
 static int lay_alt_text(const dom_document *d, uint32_t el, vector<char> *out) {
@@ -1110,16 +1121,23 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
     *h = -1;
     if (lay_img_failed(LARGS, el)) {
         /* a broken image is its fallback, as Chromium lays it out (a standards-mode page's): with alt text, its 16px
-           icon and the text inline, at the text's size and line, its declared size passed over; without, the icon's
-           16px box unless a size is declared; with an empty alt, nothing but a declared size */
+           icon and the text, at the text's size and line: inline, its declared size passed over (Blink's fallback
+           is an inline box then), as a block or an inline block its declared size kept (a block flow's); without,
+           the icon's 16px box unless a size is declared; with an empty alt, nothing but a declared size */
         vector<char> alt;
         int has_alt = lay_alt_text(d, el, &alt);
+        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
         if (has_alt && len(alt)) {
             *w = 16 + amb_text_width(f, s->face, s->fs, data(alt), len(alt)) + s->ls * (double)lay_cps(data(alt), len(alt));
             *h = s->lh;
+            if (s->display != D_INLINE) {
+                if (s->width.unit != LAY_AUTO) *w = lay_res(st, s->width, cw) - ew;
+                if (s->height.unit != LAY_AUTO) *h = s->height.v;
+                if (*w < 0) *w = 0;
+                if (*h < 0) *h = 0;
+            }
             return;
         }
-        double ew = s->border_box ? s->b[1] + s->b[3] + lay_res(st, s->p[1], cw) + lay_res(st, s->p[3], cw) : 0;
         double d0 = has_alt ? 0 : 16;
         *w = s->width.unit == LAY_AUTO ? d0 : lay_res(st, s->width, cw) - ew;
         *h = s->height.unit == LAY_AUTO ? d0 : s->height.v;    /* a border box's height the style made its content's */
@@ -1889,12 +1907,14 @@ static void lay_grid(LCTX, uint32_t b, uint32_t el, double defh);
    collapsed) in its content box, in the style of its ::placeholder: a line of one
    generated fragment, in the middle of an input, at the top of a textarea */
 static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
+    int unsourced = lay_img_unsourced(LARGS, el);
+    if (unsourced) t->box[b].unsourced = 1;
     if (lay_img_failed(LARGS, el)) {
-        /* a broken image's alt text, after its 16px icon, on its line */
+        /* a broken image's alt text, after its 16px icon, on its line (the box's first, at its top) */
         vector<char> alt;
         if (!lay_alt_text(d, el, &alt) || !len(alt)) return;
         double tw = amb_text_width(f, es->face, es->fs, data(alt), len(alt)) + es->ls * (double)lay_cps(data(alt), len(alt));
-        double lh = t->box[b].h, base = 0, below = 0;
+        double lh = es->lh, base = 0, below = 0;
         lay_leading(lh, es->asc, es->desc, &base, &below);   /* the baseline a line of the text has */
         layout_line_h alh = line_new(t);
         uint32_t aln = alh.index;

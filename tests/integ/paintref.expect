@@ -10,6 +10,8 @@ imgfail: 12 of 12 regions agree with Chromium's drawing
 inlinedeco: 7 of 7 regions agree with Chromium's drawing
 italic: 24 of 24 regions agree with Chromium's drawing
 legend: 17 of 17 regions agree with Chromium's drawing
+nosrc: 36 of 36 regions agree with Chromium's drawing
+roundimg: 10 of 10 regions agree with Chromium's drawing
 scripts: 22 of 22 regions agree with Chromium's drawing
 svg-image: 11 of 11 regions agree with Chromium's drawing
 svg-paint: 40 of 40 regions agree with Chromium's drawing

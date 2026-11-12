@@ -2638,9 +2638,10 @@ static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fon
         double gx = sv_rnum(s, n, i), gy = sv_rnum(s, n, i);
         double X = sv_ax(full, gx, gy), Y = sv_ay(full, gx, gy);
         if (!(fabs(X) < 1e7 && fabs(Y) < 1e7)) continue;
-        /* as the page's text is set: its pen at a quarter of a px across, its baseline at a whole px */
-        double fx = floor(X);
-        int quarter = (int)((X - fx) * 4);
+        /* as the page's text is set: its pen at the nearest quarter of a px across (Skia's: an eighth added, the
+           quarter below), its baseline at a whole px */
+        double fx = floor(X + 0.125);
+        int quarter = (int)((X + 0.125 - fx) * 4);
         int by = (int)floor(Y + 0.5);
         int w, h, ox, oy;
         if (!amb_glyph_mask(f, face, cp, dsize, quarter / 4.0, italic, &facc, &mask, &w, &h, &ox, &oy)) continue;

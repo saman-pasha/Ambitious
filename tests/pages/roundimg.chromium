@@ -1,0 +1,11 @@
+# boxes of tests/pages/roundimg.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+r1 img 10 10 60 60
+r2 img 90 10 74 74
+r3 img 180 10 96 32
+r4 img 290 10 60 60
+r5 img 370 10 72 52
+r6 img 460 10 80 50
+r7 img 10 100 60 60
+r8 img 90 100 64 64
+r9 img 180 100 40 30
+r10 svg 240 100 60 60
