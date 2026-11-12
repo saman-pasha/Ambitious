@@ -1,9 +1,11 @@
 #!/bin/sh
-# tests/integ/images.sh -- a page of JPEGs and GIFs (tests/pages/images.html, drawn from
+# tests/integ/images.sh -- a page of JPEGs, GIFs and WebPs (tests/pages/images.html, drawn from
 # the decoders' fixtures in tests/images/): loaded, each image with the size the loader
 # read from its header; laid out, each image's box; and drawn, its pixels' checksum,
 # which tests/golden/render/images.png shows (make golden writes it). The pixels of each
-# image are Pillow's (tests/exec/jpeg_decode and gif_decode); here they are drawn.
+# image are Pillow's (tests/exec/jpeg_decode, gif_decode and webp_decode), an animation's
+# the frame it shows at rest; here they are drawn. The arithmetic-coded and 12-bit JPEGs
+# keep the boxes their headers give and are not drawn, as in Chromium.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-images.XXXXXX")
 export AMB_WORK=$work

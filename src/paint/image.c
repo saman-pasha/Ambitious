@@ -1,5 +1,6 @@
 /* src/paint/image.c -- images decoded (image.h): PNG over this file's own inflate,
-   GIF over its own LZW, JPEG over its own Huffman decoder and inverse DCT.
+   GIF over its own LZW, JPEG over its own Huffman decoder and inverse DCT; WebP is
+   src/paint/webp.c's, which this file's dispatch calls.
 
    inflate (RFC 1950 and 1951): zlib's header and Adler-32, deflate's stored,
    fixed and dynamic blocks, decoded as zlib's puff.c does -- a canonical Huffman
@@ -39,6 +40,13 @@
    ends or breaks inside a scan leaves the rest of that restart interval grey,
    and decoding resumes at the next restart marker. EXIF's orientation (1 to 8)
    is applied last.
+
+   Arithmetic-coded frames (baseline and progressive) and 12-bit samples are
+   refused as Chromium refuses them: it lays out the size their header gives
+   (amb_image_size reads it here too) and draws nothing -- measured on files that
+   jpegtran -arithmetic and a 12-bit encoder wrote, which Chromium 153 reports
+   loaded, its canvas reading them transparent. Lossless (SOF3, which Chromium
+   decodes) and hierarchical frames are refused too.
 
    Every image has at most 2^24 pixels; a larger one is refused from its header. */
 #include <stdio.h>
@@ -614,9 +622,9 @@ static void gif_clip(const gif_head *g, const gif_frame *f, uint32_t *r) {
    background colour), 3 and 4 restoring the rectangle as it was before that frame was
    drawn, any other value leaving it. The frames' areas summed are capped
    (AMB_IMAGE_MAX_FRAME_WORK): past it, the frames before are drawn. *broken as
-   gif_draw's, or when the cap stopped it */
-static void gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vector<gif_frame> *frames, uint32_t upto, vector<uint8_t> *rgba,
-                        int *broken) {
+   gif_draw's, or when the cap stopped it. The frame drawn last */
+static uint32_t gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vector<gif_frame> *frames, uint32_t upto, vector<uint8_t> *rgba,
+                            int *broken) {
     clear(*rgba);
     resize(rgba, (size_t)g->cw * g->ch * 4);
     vector<uint8_t> saved;
@@ -626,7 +634,7 @@ static void gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vec
         work += (uint64_t)f.w * f.h + 1;
         if (work > AMB_IMAGE_MAX_FRAME_WORK) {
             *broken = 1;
-            return;
+            return k ? k - 1 : 0;
         }
         uint32_t r[4];
         uint8_t *o = data(*rgba);
@@ -634,10 +642,11 @@ static void gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vec
         if (k > 0) {
             gif_frame pf = at(*frames, k - 1);
             gif_clip(g, &pf, r);
-            if (r[0] < r[2] && pf.disposal == 2)
-                for (uint32_t y = r[1]; y < r[3]; y++) memset(o + y * row + (size_t)r[0] * 4, 0, (size_t)(r[2] - r[0]) * 4);
-            if (r[0] < r[2] && (pf.disposal == 3 || pf.disposal == 4))
-                for (uint32_t y = r[1]; y < r[3]; y++) memcpy(o + y * row + (size_t)r[0] * 4, data(saved) + (size_t)(y - r[1]) * (r[2] - r[0]) * 4, (size_t)(r[2] - r[0]) * 4);
+            size_t span = r[0] < r[2] ? (size_t)(r[2] - r[0]) * 4 : 0;
+            for (uint32_t y = r[1]; y < r[3] && span; y++) {
+                if (pf.disposal == 2) memset(o + y * row + (size_t)r[0] * 4, 0, span);
+                else if (pf.disposal == 3 || pf.disposal == 4) memcpy(o + y * row + (size_t)r[0] * 4, data(saved) + (size_t)(y - r[1]) * span, span);
+            }
         }
         gif_clip(g, &f, r);
         if (f.disposal == 3 || f.disposal == 4) {
@@ -646,6 +655,7 @@ static void gif_compose(const uint8_t *p, size_t n, const gif_head *g, const vec
         }
         gif_draw(p, n, g, &f, data(*rgba), broken);
     }
+    return upto;
 }
 
 int amb_gif_frame(const uint8_t *p, size_t n, uint32_t index, vector<uint8_t> *rgba, amb_image_info *info) {
@@ -664,14 +674,14 @@ int amb_gif_frame(const uint8_t *p, size_t n, uint32_t index, vector<uint8_t> *r
     }
     if (index >= count) return 0;
     int broken = 0;
-    gif_compose(p, n, &g, &frames, index, rgba, &broken);
+    uint32_t drawn = gif_compose(p, n, &g, &frames, index, rgba, &broken);
     info->w = g.cw;
     info->h = g.ch;
     info->frames = count;
     info->orientation = 1;
     info->partial = !g.ended || broken;
     info->loops = g.plays;
-    info->frame = index;
+    info->frame = drawn;
     return 1;
 }
 
@@ -1617,6 +1627,9 @@ int amb_jpeg_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, amb_image
 
 /* ---- any of them ---- */
 
+/* a WebP, as Chromium sniffs one: a RIFF chunk of WEBP whose first chunk is a VP8 one */
+static int image_is_webp(const uint8_t *p, size_t n) { return n >= 16 && memcmp(p, "RIFF", 4) == 0 && memcmp(p + 8, "WEBPVP", 6) == 0; }
+
 int amb_image_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t *w, uint32_t *h) {
     *w = 0;
     *h = 0;
@@ -1625,6 +1638,7 @@ int amb_image_decode(const uint8_t *p, size_t n, vector<uint8_t> *rgba, uint32_t
     int ok = 0;
     if (n >= 6 && p[0] == 'G' && p[1] == 'I' && p[2] == 'F') ok = amb_gif_frame(p, n, AMB_IMAGE_AT_REST, rgba, &info);
     else if (n >= 3 && p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) ok = amb_jpeg_decode(p, n, rgba, &info);
+    else if (image_is_webp(p, n)) ok = amb_webp_frame(p, n, AMB_IMAGE_AT_REST, rgba, &info);
     if (ok) {
         *w = info.w;
         *h = info.h;
@@ -1648,6 +1662,7 @@ int amb_image_size(const uint8_t *p, size_t n, uint32_t *w, uint32_t *h) {
         *h = g.ch;
         return 1;
     }
+    if (image_is_webp(p, n)) return amb_webp_size(p, n, w, h);
     if (n < 4 || p[0] != 0xFF || p[1] != 0xD8) return 0;
     /* a JPEG's markers to its first scan: the frame's size, and the first Exif segment's orientation */
     size_t i = 2;

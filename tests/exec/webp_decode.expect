@@ -1,0 +1,97 @@
+w_ll_photo 61x43, its header 61x43, 9d4062ead7b557b1
+w_ll_fast 61x43, its header 61x43, 9d4062ead7b557b1
+w_ll_best 90x70, its header 90x70, 55ab0044dce060ca
+w_ll_rgba 61x43, its header 61x43, c7db7bbaa64311d4
+w_ll_exact 61x43, its header 61x43, 8692d5b502ce21c4
+w_ll_pal2 40x30, its header 40x30, 4cc5ee8260aee87f
+w_ll_pal4 40x30, its header 40x30, 33b4fcb9eecbe18b
+w_ll_pal16 40x30, its header 40x30, eb0ee0ba865a4553
+w_ll_pal200 40x30, its header 40x30, cf611ba993afb0d1
+w_ll_1x1 1x1, its header 1x1, 43fd18642808a7e2
+w_ll_odd 13x7, its header 13x7, 8c6392c66b3e6dcb
+w_ll_wide 150x2, its header 150x2, acbdde1000e8da32
+w_lossy_photo 64x48, its header 64x48, 0c80e4d4b101b6d3
+w_lossy_q5 64x48, its header 64x48, 6d4a71bc429d2c5d
+w_lossy_q100 64x48, its header 64x48, 27ad75f349dc55d8
+w_lossy_m0 64x48, its header 64x48, 20d95edc4c4d9210
+w_lossy_5x3 5x3, its header 5x3, 87a6c65be4610bc2
+w_lossy_1x1 1x1, its header 1x1, 44671864286343eb
+w_lossy_17x2 17x2, its header 17x2, dd237bb0154e911b
+w_lossy_33x1 33x1, its header 33x1, 95ed6fccd92f2c21
+w_lossy_simple 64x48, its header 64x48, 5880ec7b4db8cd1a
+w_lossy_sharp 64x48, its header 64x48, c4ea0998de277d9d
+w_lossy_seg1 64x48, its header 64x48, d2c1ced0b7f00a68
+w_lossy_nofilter 64x48, its header 64x48, f0541d5110748edd
+w_vpx_parts 64x48, its header 64x48, cdaa8a789c1797b7
+w_vpx_simple 64x48, its header 64x48, 4739961491d6a89d
+w_alpha 61x43, its header 61x43, f07a48fc13866df0
+w_alpha_q50 61x43, its header 61x43, e8896b9d34470cbf
+w_alpha_raw0 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_raw1 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_raw2 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_raw3 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_ll1 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_ll2 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_ll3 61x43, its header 61x43, aa37f96b3b9f4d46
+w_alpha_unflagged 61x43, its header 61x43, c03cfdb4f6e606e5
+w_extended 61x43, its header 61x43, c7db7bbaa64311d4
+w_anim_pil 40x30, its header 40x30, 4 frames, plays 0, at rest frame 1
+  frame 0 cefc3d56e2e0c1c6
+  frame 1 ab6e453376a5af62
+  frame 2 c255218c744ef16d
+  frame 3 b334847cd7c96fce
+w_anim_blend 40x30, its header 40x30, 4 frames, plays 0, at rest frame 2
+  frame 0 a1036c99e694183b
+  frame 1 471a6fea3566f31a
+  frame 2 f7e63da3f0bc62f4
+  frame 3 a94a93bf202bf6e3
+w_anim_dispose 40x30, its header 40x30, 5 frames, plays 0, at rest frame 3
+  frame 0 18d2c9a7a3fa18a0
+  frame 1 28a195364463262b
+  frame 2 5dfc1aae56f7ee54
+  frame 3 45eb52c4640ad835
+  frame 4 25723461545bc94d
+w_anim_keys 40x30, its header 40x30, 5 frames, plays 0, at rest frame 2
+  frame 0 20f0fb504d6c8187
+  frame 1 7a90f54773849443
+  frame 2 77f458cf2c329c4e
+  frame 3 9b63f2c947553b7e
+  frame 4 022b353c4f12db43
+w_anim_lossy 40x30, its header 40x30, 3 frames, plays 0, at rest frame 1
+  frame 0 8874f304fcfc5993
+  frame 1 7abc060aa80d479d
+  frame 2 bd6d54b6e46b2248
+w_anim_once 8x6, its header 8x6, 4 frames, plays 1, at rest frame 3
+  frame 0 ce07b8e6a12eb603
+  frame 1 ba5659aeaf758003
+  frame 2 bf8d3f4228267a03
+  frame 3 82c085b3e2f1e803
+w_anim_twice 8x6, its header 8x6, 4 frames, plays 2, at rest frame 2
+  frame 0 ce07b8e6a12eb603
+  frame 1 ba5659aeaf758003
+  frame 2 bf8d3f4228267a03
+  frame 3 82c085b3e2f1e803
+w_anim_short 8x6, its header 8x6, 7 frames, plays 0, at rest frame 2
+  frame 0 ce07b8e6a12eb603
+  frame 1 ba5659aeaf758003
+  frame 2 bf8d3f4228267a03
+  frame 3 82c085b3e2f1e803
+  frame 4 ce07b8e6a12eb603
+  frame 5 ba5659aeaf758003
+  frame 6 bf8d3f4228267a03
+bad_webp_cut: refused, its header 64x48
+bad_webp_riff_size: refused, no header
+bad_webp_version: refused, no header
+bad_webp_start_code: refused, no header
+bad_webp_huffman: refused, its header 90x70
+bad_webp_huge: refused, its header 4097x4097
+bad_webp_outside: refused, no header
+bad_webp_anmf_first: refused, no header
+bad_webp_alph_vp8l: refused, no header
+bad_webp_flags: refused, no header
+bad_webp_alpha_method: refused, its header 61x43
+bad_webp_partition: refused, no header
+bad_webp_still_size: refused, no header
+bad_webp_interframe: refused, no header
+bad_webp_not_vp8: refused, no header
+mutations of the fixtures: each decoded or refused

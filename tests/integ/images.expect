@@ -1,4 +1,4 @@
-document   ok                 200    1960  file:///ROOT/tests/pages/images.html  text/html
+document   ok                 200    2738  file:///ROOT/tests/pages/images.html  text/html
 image      ok                 200   11953  file:///ROOT/tests/images/j_photo.jpg  image/jpeg  160x120
 image      ok                 200    3219  file:///ROOT/tests/images/j_prog_420.jpg  image/jpeg  77x51
 image      ok                 200    1865  file:///ROOT/tests/images/j_grey.jpg  image/jpeg  61x43
@@ -14,7 +14,15 @@ image      ok                 200      86  file:///ROOT/tests/images/g_local_fir
 image      ok                 200     148  file:///ROOT/tests/images/g_interlace_17.gif  image/gif  7x17
 image      ok                 200    2152  file:///ROOT/tests/images/g_pil_animated.gif  image/gif  30x20
 image      ok                 200    2767  file:///ROOT/tests/images/g_pil_photo.gif  image/gif  50x40
-16 resources
+image      ok                 200    1730  file:///ROOT/tests/images/w_lossy_photo.webp  image/webp  64x48
+image      ok                 200    5440  file:///ROOT/tests/images/w_ll_best.webp  image/webp  90x70
+image      ok                 200    2318  file:///ROOT/tests/images/w_alpha.webp  image/webp  61x43
+image      ok                 200    2796  file:///ROOT/tests/images/w_vpx_parts.webp  image/webp  64x48
+image      ok                 200    3450  file:///ROOT/tests/images/w_anim_dispose.webp  image/webp  40x30
+image      ok                 200     222  file:///ROOT/tests/images/g_dispose3.gif  image/gif  10x8
+image      ok                 200    2841  file:///ROOT/tests/images/bad_arithmetic.jpg  image/jpeg  61x43
+image      ok                 200    2841  file:///ROOT/tests/images/bad_12_bit.jpg  image/jpeg  61x43
+24 resources
 -- the images, as laid out:
 N = n(1,22,0), A = baseline, B = bx(1,7,0), X = 12, Y = 62, W = 160, H = 120
 N = n(1,23,0), A = progressive, B = bx(1,8,0), X = 178, Y = 80, W = 154, H = 102
@@ -31,6 +39,14 @@ N = n(1,44,0), A = 'offset frame', B = bx(1,23,0), X = 64, Y = 375, W = 60, H = 
 N = n(1,46,0), A = interlaced, B = bx(1,24,0), X = 140.4453125, Y = 318, W = 42, H = 102
 N = n(1,47,0), A = animated, B = bx(1,25,0), X = 188.4453125, Y = 360, W = 90, H = 60
 N = n(1,48,0), A = photograph, B = bx(1,26,0), X = 284.4453125, Y = 380, W = 50, H = 40
+N = n(1,54,0), A = lossy, B = bx(1,29,0), X = 12, Y = 494, W = 64, H = 48
+N = n(1,55,0), A = lossless, B = bx(1,30,0), X = 82, Y = 472, W = 90, H = 70
+N = n(1,57,0), A = alpha, B = bx(1,32,0), X = 184, Y = 499, W = 61, H = 43
+N = n(1,59,0), A = libvpx, B = bx(1,33,0), X = 261.4453125, Y = 494, W = 64, H = 48
+N = n(1,60,0), A = 'animated WebP', B = bx(1,34,0), X = 331.4453125, Y = 482, W = 80, H = 60
+N = n(1,61,0), A = 'animated GIF', B = bx(1,35,0), X = 417.4453125, Y = 502, W = 50, H = 40
+N = n(1,62,0), A = arithmetic, B = bx(1,36,0), X = 473.4453125, Y = 499, W = 61, H = 43
+N = n(1,63,0), A = '12-bit', B = bx(1,37,0), X = 540.4453125, Y = 499, W = 61, H = 43
 -- drawn:
-rendered 800x600: 26 boxes, 8 lines, 4 text fragments; pixels fnv1a64:7ee6e101c0f04170
+rendered 800x600: 37 boxes, 12 lines, 6 text fragments; pixels fnv1a64:39dde9f420d901da
 exit 0
