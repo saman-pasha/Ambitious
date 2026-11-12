@@ -2884,6 +2884,7 @@ void js_builtins_init(js_vm *vm) {
         js_define(vm, tp, va, jv_obj(vf), JS_SHAPE_HIDDEN);
         js_define(vm, tp, JS_SYM_KEY | JSYM_ITERATOR, jv_obj(vf), JS_SHAPE_HIDDEN);
         js_define(vm, tp, A_TOSTRING, js_get(vm, jv_obj(vm->array_proto), A_TOSTRING), JS_SHAPE_HIDDEN);
+        js_typed_shared(vm);
     }
 
     /* Symbol: the function, its registry, the well-known ones; its prototype */

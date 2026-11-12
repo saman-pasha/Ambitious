@@ -86,9 +86,11 @@ enum {
     JK_ASYNC,        /* an async function's run: as a generator's, c its promise */
     JK_PROMISE,      /* a its state (JP_*), x its result, b its reactions (an array), c its flags */
     JK_PROXY,        /* a its target, b its handler (0: revoked), c 1 when it can be called (src/js/proxy.c) */
-    JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length (src/js/typed.c) */
-    JK_TYPEDARRAY,   /* a its buffer, b its length in elements, c its first byte in the buffer; its type in its flags */
-    JK_DATAVIEW,     /* a its buffer, b its length in bytes, c its first byte in the buffer */
+    JK_ARRAYBUFFER,  /* a its first byte in vm->bytes, b its length, c its first view, x a resizable one's maximum
+                        (a double); resizable and detached in its flags (src/js/typed.c) */
+    JK_TYPEDARRAY,   /* a its buffer, b its length in elements now (0 out of its buffer's bounds), c its first byte
+                        in the buffer, x its declared length and the buffer's next view; its type in its flags */
+    JK_DATAVIEW,     /* a its buffer, b its length in bytes now, c its first byte in the buffer, x as a typed array's */
     JK_BIGINT,       /* a BigInt's wrapper: the value in x */
     JK_ASYNCGEN      /* an async generator: a its state (JG_*), b its saved frame, c its requests (an array of
                         mode, value and promise, three a request, the first the one its body answers), x its function */
@@ -438,9 +440,13 @@ enum { JTN_AB, JTN_AB_ISVIEW, JTN_AB_BYTELENGTH, JTN_AB_SLICE, JTN_AB_RESIZABLE,
        JTN_TOREVERSED, JTN_WITH, JTN_COPYWITHIN,
        JTN_DV, JTN_DV_BUFFER, JTN_DV_BYTELENGTH, JTN_DV_BYTEOFFSET, JTN_DV_GET, JTN_DV_SET,
        JTN_TE, JTN_TD, JTN_TE_ENCODING, JTN_TD_ENCODING, JTN_TD_FATAL, JTN_TD_IGNOREBOM, JTN_TE_ENCODE,
-       JTN_TE_ENCODEINTO, JTN_TD_DECODE, JTN_N };
+       JTN_TE_ENCODEINTO, JTN_TD_DECODE,
+       JTN_AB_RESIZE, JTN_AB_TRANSFER, JTN_AB_TRANSFER_FIXED, JTN_AB_DETACHED, JTN_SHARED, JTN_N };
 jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
 void js_typed_init(js_vm *vm, uint32_t first);
+/* the methods the typed arrays share with Array's (builtins.c puts them on %TypedArray%.prototype)
+   wrapped: each first refuses a typed array out of its buffer's bounds, as V8 does */
+void js_typed_shared(js_vm *vm);
 
 /* BigInts (src/js/bigint.c): made, read, compared, written; an operator's result (op one of
    the bytecode's OP_ADD .. OP_SHR); ToBigInt; the natives, after the first's id */
