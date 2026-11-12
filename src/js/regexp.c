@@ -2260,12 +2260,16 @@ int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start) {
 
 static jv re_arg(js_vm *vm, uint32_t args, uint32_t argc, uint32_t i) { return js_arg(vm, args, argc, i); }
 
-/* this as a RegExp's regex, or 0 with a TypeError thrown */
+/* this as a RegExp's regex, or 0 with V8's TypeError thrown: "Method <what> called on incompatible receiver <this>" */
 static uint32_t re_this(js_vm *vm, jv thisv, const char *what) {
     if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_REGEXP) return vm->objs[jv_idx(thisv)].a;
-    char m[160];
-    snprintf(m, sizeof m, "%s called on an object that is not a RegExp", what);
-    js_throw_msg(vm, vm->type_error_proto, m);
+    vector<char> m;
+    const char *pre = "Method ", *mid = " called on incompatible receiver ";
+    append_range(m, pre, strlen(pre));
+    append_range(m, what, strlen(what));
+    append_range(m, mid, strlen(mid));
+    js_value_text(vm, thisv, &m);
+    js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
     return 0;
 }
 
@@ -2750,7 +2754,8 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         return re_object(vm, re, proto);
     }
     case JRE_EXEC: case JRE_TEST: {
-        uint32_t re = re_this(vm, thisv, which == JRE_EXEC ? "RegExp.prototype.exec" : "RegExp.prototype.test");
+        /* test of an object that is no RegExp fails in the exec it falls back to, as V8's does */
+        uint32_t re = re_this(vm, thisv, which == JRE_EXEC || jv_is_obj(thisv) ? "RegExp.prototype.exec" : "RegExp.prototype.test");
         if (!re) return JV_HOLE;
         uint32_t s = js_to_string(vm, a0);
         if (!s) return JV_HOLE;
@@ -2760,7 +2765,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         return rc ? re_result(vm, re, s) : JV_NULL;
     }
     case JRE_TOSTRING: {
-        if (!jv_is_obj(thisv)) return js_throw_msg(vm, vm->type_error_proto, "RegExp.prototype.toString called on a value that is not an object");
+        if (!jv_is_obj(thisv)) { re_this(vm, thisv, "RegExp.prototype.toString"); return JV_HOLE; }
         jv src = js_get(vm, thisv, js_atom_ascii(vm, "source"));
         if (vm->throwing) return JV_HOLE;
         jv fl = js_get(vm, thisv, js_atom_ascii(vm, "flags"));
@@ -2774,8 +2779,9 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
     }
     case JRE_SOURCE: {
         if (jv_is_obj(thisv) && jv_idx(thisv) == vm->regexp_proto) return jv_str(js_str_ascii(vm, "(?:)"));
-        uint32_t re = re_this(vm, thisv, "RegExp.prototype.source getter");
-        if (!re) return JV_HOLE;
+        if (!jv_is_obj(thisv)) return re_not_object(vm, "RegExp.prototype.source getter", thisv);
+        if (vm->objs[jv_idx(thisv)].kind != JK_REGEXP) return js_throw_msg(vm, vm->type_error_proto, "RegExp.prototype.source getter called on non-RegExp object");
+        uint32_t re = vm->objs[jv_idx(thisv)].a;
         return jv_str(re_source_text(vm, vm->regexes[re].source));
     }
     case JRE_FLAGS: {
@@ -2818,7 +2824,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
             re = re_of_value(vm, a0, 0, &rxv);
         } else {
-            re = re_this(vm, thisv, "RegExp.prototype[Symbol.match]");
+            re = re_this(vm, thisv, "RegExp.prototype.@@match");
             if (!re) return JV_HOLE;
             s = js_to_string(vm, a0);
             if (!s) return JV_HOLE;
@@ -2848,7 +2854,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
             re = re_of_value(vm, a0, RF_G, &rxv);
         } else {
-            re = re_this(vm, thisv, "RegExp.prototype[Symbol.matchAll]");
+            re = re_this(vm, thisv, "RegExp.prototype.@@matchAll");
             if (!re) return JV_HOLE;
             s = js_to_string(vm, a0);
             if (!s) return JV_HOLE;
@@ -2861,9 +2867,9 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         js_set(vm, copy, A_LASTINDEX, jv_num(re_to_length(vm, li)));
         jv all = re_all_results(vm, copy, re, s);
         if (vm->throwing) return JV_HOLE;
-        uint32_t it = js_obj_new(vm, JK_ITER, vm->iterator_proto);
+        uint32_t it = js_obj_new(vm, JK_ITER, vm->regexp_iter_proto);
         vm->objs[it].a = jv_idx(all);
-        vm->objs[it].c = JI_ARRAY;
+        vm->objs[it].c = JI_REGEXP;
         return jv_obj(it);
     }
     case JRE_REPLACE: case JRE_SP_REPLACE: case JRE_SP_REPLACEALL: {
@@ -2871,7 +2877,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         uint32_t s, re;
         jv rep = a1;
         if (which == JRE_REPLACE) {
-            re = re_this(vm, thisv, "RegExp.prototype[Symbol.replace]");
+            re = re_this(vm, thisv, "RegExp.prototype.@@replace");
             if (!re) return JV_HOLE;
             s = js_to_string(vm, a0);
             if (!s) return JV_HOLE;
@@ -2894,7 +2900,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             if (!s) return JV_HOLE;
             re = re_of_value(vm, a0, 0, &rxv);
         } else {
-            re = re_this(vm, thisv, "RegExp.prototype[Symbol.search]");
+            re = re_this(vm, thisv, "RegExp.prototype.@@search");
             if (!re) return JV_HOLE;
             s = js_to_string(vm, a0);
             if (!s) return JV_HOLE;
@@ -2917,7 +2923,7 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         uint32_t s, re;
         jv lim = a1;
         if (which == JRE_SPLIT) {
-            re = re_this(vm, thisv, "RegExp.prototype[Symbol.split]");
+            re = re_this(vm, thisv, "RegExp.prototype.@@split");
             if (!re) return JV_HOLE;
             s = js_to_string(vm, a0);
             if (!s) return JV_HOLE;

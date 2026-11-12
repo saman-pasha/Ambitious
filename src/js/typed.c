@@ -280,18 +280,26 @@ static uint32_t rel_index(js_vm *vm, jv v, uint32_t n, uint32_t dflt) {
     return (uint32_t)d;
 }
 
+static jv incompatible(js_vm *vm, const char *what, jv v);
+/* this as a typed array, else V8's TypeError: "Method <what> called on incompatible receiver <this>", or with what 0
+   "this is not a typed array." (the methods V8 validates so) */
 static uint32_t this_ta(js_vm *vm, jv thisv, const char *what) {
     if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_TYPEDARRAY) return jv_idx(thisv);
-    char m[160];
-    snprintf(m, sizeof m, "%s called on an object that is not a typed array", what);
-    js_throw_msg(vm, vm->type_error_proto, m);
+    if (what) incompatible(vm, what, thisv);
+    else js_throw_msg(vm, vm->type_error_proto, "this is not a typed array.");
+    return 0;
+}
+/* the methods whose receiver V8 names (the others say "this is not a typed array.") */
+static int ta_names_receiver(const char *name) {
+    static const char *const named[] = { "at", "join", "slice", "sort", "subarray", "toLocaleString", "toReversed", "toSorted" };
+    for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) if (strcmp(named[i], name) == 0) return 1;
     return 0;
 }
 /* this as a typed array in its buffer's bounds (ValidateTypedArray): 0 with V8's TypeError thrown */
 static uint32_t valid_ta(js_vm *vm, jv thisv, const char *name) {
     char what[96];
     snprintf(what, sizeof what, "%%TypedArray%%.prototype.%s", name);
-    uint32_t o = this_ta(vm, thisv, what);
+    uint32_t o = this_ta(vm, thisv, ta_names_receiver(name) ? what : 0);
     if (!o) return 0;
     if (vw_oob(vm, o)) { ta_detached(vm, what); return 0; }
     return o;
@@ -950,7 +958,8 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         return ta_from_values(vm, t, &vals, 0);
     }
     case JTN_BUFFER: case JTN_BYTELENGTH: case JTN_BYTEOFFSET: case JTN_LENGTH: {
-        uint32_t o = this_ta(vm, thisv, "a typed array's getter");
+        uint32_t o = this_ta(vm, thisv, which == JTN_BUFFER ? "get %TypedArray%.prototype.buffer" : which == JTN_LENGTH ? "get TypedArray.prototype.length" :
+                             which == JTN_BYTEOFFSET ? "get TypedArray.prototype.byteOffset" : "get TypedArray.prototype.byteLength");
         if (!o) return JV_HOLE;
         if (which == JTN_BUFFER) return jv_obj(vm->objs[o].a);
         if (which == JTN_LENGTH) return jv_num(vm->objs[o].b);
@@ -961,7 +970,7 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_TYPEDARRAY) return JV_UNDEF;
         return jv_str(js_str_ascii(vm, ta_name[ta_type(vm, jv_idx(thisv))]));
     case JTN_SET: {
-        uint32_t o = this_ta(vm, thisv, "%TypedArray%.prototype.set");
+        uint32_t o = this_ta(vm, thisv, 0);
         if (!o) return JV_HOLE;
         uint32_t off;
         if (!to_index(vm, a1, &off, "offset is out of bounds")) return JV_HOLE;
@@ -1127,6 +1136,15 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
            the method itself (in the callee's x), named in V8's words (its findLastIndex is
            findIndexLast) */
         jv fn = vm->objs[jv_idx(callee)].x;
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_TYPEDARRAY) {
+            vector<char> nm;
+            js_str_to_utf8(vm, vm->objs[jv_idx(callee)].c, &nm);
+            push_back(nm, 0);
+            char what[96];
+            snprintf(what, sizeof what, "%%TypedArray%%.prototype.%s", data(nm));
+            this_ta(vm, thisv, ta_names_receiver(data(nm)) ? what : 0);
+            return JV_HOLE;
+        }
         if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_TYPEDARRAY && vw_oob(vm, jv_idx(thisv))) {
             vector<char> w;
             const char *pre = "%TypedArray%.prototype.";
@@ -1173,14 +1191,23 @@ jv js_typed_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         return jv_obj(o);
     }
     case JTN_DV_BUFFER: case JTN_DV_BYTELENGTH: case JTN_DV_BYTEOFFSET: {
-        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATAVIEW) return js_throw_msg(vm, vm->type_error_proto, "a DataView's getter called on an object that is not one");
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATAVIEW)
+            return incompatible(vm, which == JTN_DV_BUFFER ? "get DataView.prototype.buffer" : which == JTN_DV_BYTELENGTH ? "get DataView.prototype.byteLength" :
+                                "get DataView.prototype.byteOffset", thisv);
         uint32_t o = jv_idx(thisv);
         if (which == JTN_DV_BUFFER) return jv_obj(vm->objs[o].a);
         if (vw_oob(vm, o)) return ta_detached(vm, which == JTN_DV_BYTELENGTH ? "get DataView.prototype.byteLength" : "get DataView.prototype.byteOffset");
         return jv_num(which == JTN_DV_BYTELENGTH ? vm->objs[o].b : vm->objs[o].c);
     }
     case JTN_DV_GET: case JTN_DV_SET: {
-        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATAVIEW) return js_throw_msg(vm, vm->type_error_proto, "a DataView's method called on an object that is not one");
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_DATAVIEW) {
+            vector<char> nm;
+            const char *pre = "DataView.prototype.";
+            append_range(nm, pre, strlen(pre));
+            js_str_to_utf8(vm, vm->objs[jv_idx(callee)].c, &nm);
+            push_back(nm, 0);
+            return incompatible(vm, data(nm), thisv);
+        }
         /* the element type in the callee's x */
         uint32_t t = (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x), dv = jv_idx(thisv);
         uint32_t off, p;

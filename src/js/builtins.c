@@ -64,6 +64,7 @@ enum {
     N_PR_ELEM_OK, N_PR_ELEM_ERR, N_AGGREGATE_ERROR, N_SP_ITER, N_SP_MATCHALL,
     N_OBJ_HASOWN, N_OBJ_ISEXT, N_OBJ_ISSEALED, N_OBJ_GETOWNDESCS, N_OBJ_GROUPBY, N_MAP_GROUPBY,
     N_PR_WITHRESOLVERS, N_PR_CAP_EXEC, N_SPECIES, N_THROW_TE, N_OP_PROTO_GET, N_OP_PROTO_SET,
+    N_MIT_NEXT, N_SIT_NEXT, N_STIT_NEXT, N_RSIT_NEXT, N_SP_VALUEOF,
     /* RegExp's natives (src/js/regexp.c), JRE_N of them; Proxy's, Reflect's and the weak
        collections' (src/js/proxy.c), JPX_N */
     N_RE_FIRST,
@@ -2082,8 +2083,20 @@ static void promise_agg_done(js_vm *vm, uint32_t agg) {
     } else promise_target_settle(vm, vm->objs[agg].x, 0, jv_obj(vm->objs[agg].a));
 }
 
+/* the iterators' kinds (V8's names for them) by mode: 0 an array's, 1 a map's, 2 a set's, 3 a string's, 4 matchAll's */
+static int iter_family(uint32_t mode) {
+    if (mode == JI_ARRAY || mode == JI_ARRAY_KEYS || mode == JI_ARRAY_ENTRIES) return 0;
+    if (mode == JI_MAP || mode == JI_MAP_KEYS || mode == JI_MAP_VALUES || mode == JI_ENTRIES) return 1;
+    if (mode == JI_SET || mode == JI_SET_ENTRIES) return 2;
+    if (mode == JI_STRING) return 3;
+    if (mode == JI_REGEXP) return 4;
+    return -1;
+}
 static jv iter_of_coll(js_vm *vm, uint32_t coll, uint32_t mode) {
-    uint32_t it = js_obj_new(vm, JK_ITER, vm->iterator_proto);
+    int fam = iter_family(mode);
+    uint32_t proto = fam == 0 ? vm->array_iter_proto : fam == 1 ? vm->map_iter_proto : fam == 2 ? vm->set_iter_proto :
+                     fam == 3 ? vm->string_iter_proto : fam == 4 ? vm->regexp_iter_proto : vm->iterator_proto;
+    uint32_t it = js_obj_new(vm, JK_ITER, proto);
     vm->objs[it].a = coll;
     vm->objs[it].c = mode;
     return jv_obj(it);
@@ -2490,7 +2503,10 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_SYMP_TOSTRING: case N_SYMP_VALUEOF: case N_SYMP_DESC: {
         jv y = thisv;
         if (jv_is_obj(y) && vm->objs[jv_idx(y)].kind == JK_SYMBOL) y = vm->objs[jv_idx(y)].x;
-        if (!jv_is_sym(y)) return js_throw_msg(vm, vm->type_error_proto, "this is not a Symbol");
+        if (!jv_is_sym(y))
+            return js_throw_msg(vm, vm->type_error_proto, id == N_SYMP_VALUEOF ? "Symbol.prototype.valueOf requires that 'this' be a Symbol" :
+                                id == N_SYMP_DESC ? "Symbol.prototype.description requires that 'this' be a Symbol" :
+                                "Symbol.prototype.toString requires that 'this' be a Symbol");
         if (id == N_SYMP_VALUEOF) return y;
         if (id == N_SYMP_DESC) { uint32_t d = vm->syms[jv_idx(y)].desc; return d ? jv_str(d) : JV_UNDEF; }
         return jv_str(js_sym_text(vm, jv_idx(y)));
@@ -2506,15 +2522,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_SP_ITER: {
         uint32_t st = js_to_string(vm, thisv);
         if (!st) return JV_HOLE;
-        uint32_t it = js_obj_new(vm, JK_ITER, vm->iterator_proto);
-        vm->objs[it].a = st;
-        vm->objs[it].c = JI_STRING;
-        return jv_obj(it);
+        return iter_of_coll(vm, st, JI_STRING);
     }
     /* ---- generators ---- */
     case N_GEN_NEXT: case N_GEN_RETURN: case N_GEN_THROW: {
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_GENERATOR)
-            return js_throw_msg(vm, vm->type_error_proto, "next, return or throw called on something not a generator");
+            return value_error(vm, id == N_GEN_NEXT ? "Method [Generator].prototype.next called on incompatible receiver " :
+                                   id == N_GEN_RETURN ? "Method [Generator].prototype.return called on incompatible receiver " :
+                                   "Method [Generator].prototype.throw called on incompatible receiver ", thisv, "");
         int done = 0;
         jv r = js_gen_resume(vm, jv_idx(thisv), a0, id == N_GEN_NEXT ? 0 : id == N_GEN_THROW ? 1 : 2, &done);
         if (vm->throwing) return JV_HOLE;
@@ -2524,8 +2539,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_AG_NEXT: case N_AG_RETURN: case N_AG_THROW: {
         uint32_t p = js_promise_new(vm);
         if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ASYNCGEN) {
-            uint32_t m = js_str_ascii(vm, "next, return or throw called on something not an async generator");
-            js_promise_settle(vm, p, 1, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+            /* the TypeError as the request's rejection */
+            value_error(vm, id == N_AG_NEXT ? "Method [AsyncGenerator].prototype.next called on incompatible receiver " :
+                            id == N_AG_RETURN ? "Method [AsyncGenerator].prototype.return called on incompatible receiver " :
+                            "Method [AsyncGenerator].prototype.throw called on incompatible receiver ", thisv, "");
+            jv e = vm->exception;
+            vm->throwing = 0;
+            vm->exception = JV_UNDEF;
+            js_promise_settle(vm, p, 1, e);
             return jv_obj(p);
         }
         ag_request(vm, jv_idx(thisv), id == N_AG_NEXT ? 0 : id == N_AG_THROW ? 1 : 2, a0, p);
@@ -3392,21 +3413,11 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         return thisv;
     }
     case N_AP_KEYS: case N_AP_VALUES: case N_AP_ENTRIES: {
+        /* an Array Iterator over the object itself, its length and elements read at each step */
         AP_ON_NOTHING();
-        if (!jv_is_obj(thisv)) return js_throw_msg(vm, vm->type_error_proto, "not an array");
-        uint32_t n = (uint32_t)len_of(vm, thisv);
-        uint32_t out = js_array_new(vm, 0);
-        for (uint32_t i = 0; i < n && !vm->throwing; i++) {
-            if (id == N_AP_KEYS) js_array_push(vm, out, jv_num(i));
-            else if (id == N_AP_VALUES) js_array_push(vm, out, elem_of(vm, thisv, i));
-            else {
-                uint32_t pair = js_array_new(vm, 0);
-                js_array_push(vm, pair, jv_num(i));
-                js_array_push(vm, pair, elem_of(vm, thisv, i));
-                js_array_push(vm, out, jv_obj(pair));
-            }
-        }
-        return iter_of_coll(vm, out, JI_ARRAY);
+        jv o = js_to_object(vm, thisv);
+        if (vm->throwing) return JV_HOLE;
+        return iter_of_coll(vm, jv_idx(o), id == N_AP_KEYS ? JI_ARRAY_KEYS : id == N_AP_VALUES ? JI_ARRAY : JI_ARRAY_ENTRIES);
     }
     case N_AP_FLAT: {
         AP_ON_NOTHING();
@@ -3463,10 +3474,11 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         }
         return jv_str(js_str_new(vm, data(u), len(u)));
     }
-    case N_SP_TOSTRING: {
+    case N_SP_TOSTRING: case N_SP_VALUEOF: {
         if (jv_is_str(thisv)) return thisv;
         if (jv_is_obj(thisv) && vm->objs[jv_idx(thisv)].kind == JK_STRING) return vm->objs[jv_idx(thisv)].x;
-        return js_throw_msg(vm, vm->type_error_proto, "String.prototype.toString requires that 'this' be a String");
+        return js_throw_msg(vm, vm->type_error_proto, id == N_SP_VALUEOF ? "String.prototype.valueOf requires that 'this' be a String" :
+                            "String.prototype.toString requires that 'this' be a String");
     }
     default: break;
     }
@@ -3636,7 +3648,12 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_NP_VALUEOF: case N_NP_TOSTRING: case N_NP_TOFIXED: case N_NP_TOPRECISION: case N_NP_TOLOCALE: {
         jv tv = thisv;
         if (jv_is_obj(tv) && vm->objs[jv_idx(tv)].kind == JK_NUMBER) tv = vm->objs[jv_idx(tv)].x;
-        if (!jv_is_num(tv)) return js_throw_msg(vm, vm->type_error_proto, "Number.prototype method called on something not a number");
+        if (!jv_is_num(tv))
+            return js_throw_msg(vm, vm->type_error_proto, id == N_NP_VALUEOF ? "Number.prototype.valueOf requires that 'this' be a Number" :
+                                id == N_NP_TOSTRING ? "Number.prototype.toString requires that 'this' be a Number" :
+                                id == N_NP_TOFIXED ? "Number.prototype.toFixed requires that 'this' be a Number" :
+                                id == N_NP_TOPRECISION ? "Number.prototype.toPrecision requires that 'this' be a Number" :
+                                "Number.prototype.toLocaleString requires that 'this' be a Number");
         double d = jv_dbl(tv);
         if (id == N_NP_VALUEOF) return tv;
         if (id == N_NP_TOSTRING) {
@@ -3689,7 +3706,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_BP_TOSTRING: case N_BP_VALUEOF: {
         jv tv = thisv;
         if (jv_is_obj(tv) && vm->objs[jv_idx(tv)].kind == JK_BOOLEAN) tv = vm->objs[jv_idx(tv)].x;
-        if (!jv_is_bool(tv)) return js_throw_msg(vm, vm->type_error_proto, "Boolean.prototype method called on something not a boolean");
+        if (!jv_is_bool(tv))
+            return js_throw_msg(vm, vm->type_error_proto, id == N_BP_VALUEOF ? "Boolean.prototype.valueOf requires that 'this' be a Boolean" :
+                                "Boolean.prototype.toString requires that 'this' be a Boolean");
         return id == N_BP_VALUEOF ? tv : jv_str(tv == JV_TRUE ? A_TRUE : A_FALSE);
     }
     /* ---- Math ---- */
@@ -3798,9 +3817,19 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_CON_ERROR: return console_out(vm, 3, args, argc);
     case N_CON_DEBUG: return console_out(vm, 4, args, argc);
     case N_EP_TOSTRING: {
-        vector<char> t;
-        js_error_text(vm, thisv, &t);
-        return jv_str(js_str_utf8(vm, data(t), len(t)));
+        /* Error.prototype.toString (ECMA-262 20.5.3.4): any object's name and message */
+        if (!jv_is_obj(thisv)) return value_error(vm, "Method Error.prototype.toString called on incompatible receiver ", thisv, "");
+        jv nv = js_get(vm, thisv, A_NAME);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t nm = nv == JV_UNDEF ? js_str_ascii(vm, "Error") : js_to_string(vm, nv);
+        if (!nm) return JV_HOLE;
+        jv mv = js_get(vm, thisv, A_MESSAGE);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t ms = mv == JV_UNDEF ? A_EMPTY : js_to_string(vm, mv);
+        if (!ms) return JV_HOLE;
+        if (!vm->strs[nm].len) return jv_str(ms);
+        if (!vm->strs[ms].len) return jv_str(nm);
+        return jv_str(js_str_concat(vm, js_str_concat(vm, nm, js_str_ascii(vm, ": ")), ms));
     }
     /* ---- time ---- */
     case N_DATE_NOW: return jv_num(floor(vm->now));
@@ -3994,7 +4023,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         }
         if (id == N_MP_KEYS) return iter_of_coll(vm, c, set ? JI_SET : JI_MAP_KEYS);
         if (id == N_MP_VALUES || id == N_SETP_VALUES) return iter_of_coll(vm, c, set ? JI_SET : JI_MAP_VALUES);
-        if (id == N_MP_ENTRIES || id == N_SETP_ENTRIES) return iter_of_coll(vm, c, set ? JI_SET : JI_ENTRIES);
+        if (id == N_MP_ENTRIES || id == N_SETP_ENTRIES) return iter_of_coll(vm, c, set ? JI_SET_ENTRIES : JI_ENTRIES);
         if (id == N_MP_FOREACH || id == N_SETP_FOREACH) {
             if (!js_is_callable(vm, a0)) return js_not_function(vm, a0);
             uint32_t step = set ? 1 : 2;
@@ -4024,8 +4053,15 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
         else coll_append(vm, c, key, a1);
         return thisv;
     }
-    case N_ITP_NEXT: {
-        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER) return js_throw_msg(vm, vm->type_error_proto, "next called on something not an iterator");
+    case N_ITP_NEXT: case N_MIT_NEXT: case N_SIT_NEXT: case N_STIT_NEXT: case N_RSIT_NEXT: {
+        /* each kind's next takes an iterator of its own kind */
+        int fam = id == N_ITP_NEXT ? 0 : id == N_MIT_NEXT ? 1 : id == N_SIT_NEXT ? 2 : id == N_STIT_NEXT ? 3 : 4;
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_ITER || iter_family(vm->objs[jv_idx(thisv)].c) != fam) {
+            static const char *const fn[] = { "Array Iterator", "Map Iterator", "Set Iterator", "String Iterator", "%RegExpStringIterator%" };
+            char pre[96];
+            snprintf(pre, sizeof pre, "Method %s.prototype.next called on incompatible receiver ", fn[fam]);
+            return value_error(vm, pre, thisv, "");
+        }
         jv v = JV_UNDEF;
         int more = js_iter_step(vm, jv_idx(thisv), &v);
         if (vm->throwing) return JV_HOLE;
@@ -4145,7 +4181,7 @@ void js_builtins_init(js_vm *vm) {
         "split", "replace", "replaceAll", "concat", "at", "localeCompare", "toString", "normalize", "match", "search" };
     for (uint32_t i = 0; i < sizeof sn / sizeof sn[0]; i++) defn(vm, sp, sn[i], N_SP_CHARAT + i, 1);
     defn(vm, sp, "normalize", N_SP_NORMALIZE, 0);
-    defn(vm, sp, "valueOf", N_SP_TOSTRING, 0);
+    defn(vm, sp, "valueOf", N_SP_VALUEOF, 0);
     defn(vm, sp, "toLocaleUpperCase", N_SP_TOUPPER, 0);
     defn(vm, sp, "toLocaleLowerCase", N_SP_TOLOWER, 0);
     /* Annex B's names for trimStart and trimEnd: the same functions (V8's toString names them so) */
@@ -4276,7 +4312,22 @@ void js_builtins_init(js_vm *vm) {
     js_define(vm, stp, js_atom_ascii(vm, "keys"), js_get(vm, jv_obj(stp), js_atom_ascii(vm, "values")), JS_SHAPE_HIDDEN);
     defn(vm, stp, "entries", N_SETP_ENTRIES, 0);
     js_define_accessor(vm, stp, A_SIZE, jv_obj(js_native_new(vm, N_SETP_SIZE, A_SIZE, 0)), JV_HOLE, JS_SHAPE_HIDDEN);
-    defn(vm, vm->iterator_proto, "next", N_ITP_NEXT, 0);
+    {
+        /* %ArrayIteratorPrototype% and its kin: each under %IteratorPrototype%, its next and its tag */
+        static const char *const tags[] = { "Array Iterator", "Map Iterator", "Set Iterator", "String Iterator", "RegExp String Iterator" };
+        static const uint32_t nexts[] = { N_ITP_NEXT, N_MIT_NEXT, N_SIT_NEXT, N_STIT_NEXT, N_RSIT_NEXT };
+        uint32_t protos[5];
+        for (uint32_t i = 0; i < 5; i++) {
+            protos[i] = js_obj_new(vm, JK_PLAIN, vm->iterator_proto);
+            defn(vm, protos[i], "next", nexts[i], 0);
+            js_define(vm, protos[i], JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, tags[i])), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
+        }
+        vm->array_iter_proto = protos[0];
+        vm->map_iter_proto = protos[1];
+        vm->set_iter_proto = protos[2];
+        vm->string_iter_proto = protos[3];
+        vm->regexp_iter_proto = protos[4];
+    }
     js_proxy_init(vm, N_PX_FIRST);
     js_big_init(vm, N_BG_FIRST);
     js_module_init(vm, N_MD_FIRST);

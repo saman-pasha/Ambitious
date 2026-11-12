@@ -1310,7 +1310,7 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
     }
     case JPX_WR_DEREF:
         if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & JO_WEAK) || vm->objs[jv_idx(thisv)].proto != vm->weakref_proto)
-            return js_throw_msg(vm, vm->type_error_proto, "WeakRef.prototype.deref called on an object that is not a WeakRef");
+            return px_incompatible(vm, "WeakRef.prototype.deref", thisv);
         return vm->objs[jv_idx(thisv)].x;
     case JPX_FINREG: {
         if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Constructor FinalizationRegistry requires 'new'");
@@ -1417,6 +1417,17 @@ void js_proxy_init(js_vm *vm, uint32_t first) {
 }
 
 int js_set_proto_of(js_vm *vm, uint32_t o, jv np) { return px_set_proto(vm, o, np); }
+
+/* V8's "Method <what> called on incompatible receiver <v>" */
+static jv px_incompatible(js_vm *vm, const char *what, jv v) {
+    vector<char> m;
+    const char *pre = "Method ", *mid = " called on incompatible receiver ";
+    append_range(m, pre, strlen(pre));
+    append_range(m, what, strlen(what));
+    append_range(m, mid, strlen(mid));
+    js_value_text(vm, v, &m);
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
+}
 
 /* CreateDataProperty: 1 defined, 0 refused, -1 thrown (a key's conversion, a proxy's trap) */
 int js_create_data(js_vm *vm, jv obj, jv key, jv v) {

@@ -2050,25 +2050,41 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
         vm->objs[it].b = 0;
         return 1;
     }
-    if (mode == JI_KEYS || mode == JI_ARRAY) {
+    if (mode == JI_KEYS || mode == JI_ARRAY || mode == JI_ARRAY_KEYS || mode == JI_ARRAY_ENTRIES || mode == JI_REGEXP) {
+        /* past the end once, done for good (the array may grow after) */
+        if (i == 0xFFFFFFFFu) return 0;
+        uint32_t n;
+        if (vm->objs[src].kind == JK_ARRAY || vm->objs[src].kind == JK_TYPEDARRAY) n = vm->objs[src].b;
+        else {
+            jv lv = js_get(vm, jv_obj(src), A_LENGTH);
+            if (vm->throwing) return 0;
+            double d = js_to_number(vm, lv);
+            if (vm->throwing) return 0;
+            n = d != d || d <= 0 ? 0 : d >= 4294967295.0 ? 0xFFFFFFFEu : (uint32_t)d;
+        }
+        if (i >= n) { vm->objs[it].b = 0xFFFFFFFFu; return 0; }
+        if (mode == JI_ARRAY_KEYS) { *out = jv_num((double)i); vm->objs[it].b = i + 1; return 1; }
+        jv x;
         if (vm->objs[src].kind == JK_ARRAY) {
-            if (i >= vm->objs[src].b) return 0;
             /* a hole read as Get reads it: an element with attributes of its own, a getter's */
-            jv x = vm->slots[vm->objs[src].a + i];
+            x = vm->slots[vm->objs[src].a + i];
             if (x == JV_HOLE && (vm->objs[src].flags & JO_ELEMPROPS)) {
                 x = js_get_value(vm, jv_obj(src), jv_num((double)i));
                 if (vm->throwing) return 0;
             }
-            *out = x == JV_HOLE ? JV_UNDEF : x;
-        } else if (vm->objs[src].kind == JK_TYPEDARRAY) {
-            if (i >= vm->objs[src].b) return 0;
-            *out = js_ta_get(vm, src, i);
-        } else {
-            jv n = js_get(vm, jv_obj(src), A_LENGTH);
-            if (vm->throwing || !jv_is_num(n) || (double)i >= jv_dbl(n)) return 0;
-            *out = js_get_value(vm, jv_obj(src), jv_num((double)i));
+            if (x == JV_HOLE) x = JV_UNDEF;
+        } else if (vm->objs[src].kind == JK_TYPEDARRAY) x = js_ta_get(vm, src, i);
+        else {
+            x = js_get_value(vm, jv_obj(src), jv_num((double)i));
             if (vm->throwing) return 0;
         }
+        if (mode == JI_ARRAY_ENTRIES) {
+            uint32_t pair = js_array_new(vm, 0);
+            js_array_push(vm, pair, jv_num((double)i));
+            js_array_push(vm, pair, x);
+            x = jv_obj(pair);
+        }
+        *out = x;
         vm->objs[it].b = i + 1;
         return 1;
     }
@@ -2085,17 +2101,17 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
         vm->objs[it].b = i + w;
         return 1;
     }
-    /* a Map's or a Set's live entries: an array of keys and values, the dead holes */
-    uint32_t arr = vm->objs[src].a, step = mode == JI_SET ? 1 : 2;
+    /* a Map's or a Set's live entries: an array of keys and values, the dead holes; past the end, done for good */
+    uint32_t arr = vm->objs[src].a, step = mode == JI_SET || mode == JI_SET_ENTRIES ? 1 : 2;
     while (i < vm->objs[arr].b && vm->slots[vm->objs[arr].a + i] == JV_HOLE) i += step;
-    if (i >= vm->objs[arr].b) { vm->objs[it].b = i; return 0; }
+    if (i >= vm->objs[arr].b) { vm->objs[it].b = 0xFFFFFFFFu; return 0; }
     jv k = vm->slots[vm->objs[arr].a + i];
     if (mode == JI_SET || mode == JI_MAP_KEYS) *out = k;
     else if (mode == JI_MAP_VALUES) *out = vm->slots[vm->objs[arr].a + i + 1];
     else {
         uint32_t pair = js_array_new(vm, 0);
         js_array_push(vm, pair, k);
-        js_array_push(vm, pair, vm->slots[vm->objs[arr].a + i + 1]);
+        js_array_push(vm, pair, mode == JI_SET_ENTRIES ? k : vm->slots[vm->objs[arr].a + i + 1]);
         *out = jv_obj(pair);
     }
     vm->objs[it].b = i + step;

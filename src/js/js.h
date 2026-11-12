@@ -109,7 +109,10 @@ enum { JTA_INT8, JTA_UINT8, JTA_UINT8C, JTA_INT16, JTA_UINT16, JTA_INT32, JTA_UI
    in x, JI_FROM_SYNC's a sync iterator (a JK_ITER) seen as an async one; b is 1 while
    a step is under way, when an error leaves the iterator unclosed */
 enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES, JI_ENTRIES, JI_PROTOCOL, JI_GEN,
-       JI_ASYNC, JI_FROM_SYNC };
+       JI_ASYNC, JI_FROM_SYNC,
+       JI_ARRAY_KEYS, JI_ARRAY_ENTRIES,  /* an array's (an array-like's) keys and [key, value] pairs, read at each step */
+       JI_SET_ENTRIES,                   /* a Set's [value, value] pairs */
+       JI_REGEXP };                      /* matchAll's matches (an array of them in a) */
 /* a generator's (an async run's) state; an async generator's also suspended at an await
    (executing, to its requests), and awaiting a return's value once done */
 enum { JG_START, JG_YIELD, JG_RUNNING, JG_DONE, JG_AWAIT, JG_AWAIT_RETURN };
@@ -423,6 +426,9 @@ typedef struct js_vm {
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t throw_te;                /* %ThrowTypeError%: an unmapped arguments object's callee, both its get and its set */
     uint32_t array_values;            /* %Array.prototype.values%: an arguments object's Symbol.iterator */
+    /* the iterators' prototypes, each its kind's next and Symbol.toStringTag: arrays', maps', sets', strings',
+       matchAll's */
+    uint32_t array_iter_proto, map_iter_proto, set_iter_proto, string_iter_proto, regexp_iter_proto;
     /* the promise protector (src/js/builtins.c): Promise.prototype's and Promise's shapes as the engine made them, the
        slots of the constructor and of Symbol.species, the species accessor and its getter, a plain promise's shape */
     uint32_t pr_proto_shape, pr_ctor_shape, pr_ctor_slot, pr_species_slot, pr_species_acc, pr_species_get, pr_root_shape;
