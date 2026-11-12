@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en"><head><title>clip-path's basic shapes</title>
+<style>
+body { margin: 0; font: 16px serif; }
+.w { position: absolute; }
+.b { width: 80px; height: 80px; background: teal; color: white; }
+</style></head>
+<body>
+<div class="w" style="left:10px;top:10px"><div id="k1" class="b" style="clip-path:circle(40%)">circle</div></div>
+<div class="w" style="left:100px;top:10px"><div id="k2" class="b" style="clip-path:circle(30px at 20px 20px)">at</div></div>
+<div class="w" style="left:190px;top:10px"><div id="k3" class="b" style="clip-path:circle(closest-side at 30% 60%)">closest</div></div>
+<div class="w" style="left:280px;top:10px"><div id="k4" class="b" style="clip-path:circle(farthest-side at 10px 10px)">farthest</div></div>
+<div class="w" style="left:370px;top:10px"><div id="k5" class="b" style="clip-path:ellipse(40px 20px at 50% 50%)">ellipse</div></div>
+<div class="w" style="left:460px;top:10px"><div id="k6" class="b" style="clip-path:ellipse(closest-side farthest-side at 30% 40%)">sides</div></div>
+<div class="w" style="left:550px;top:10px"><div id="k7" class="b" style="clip-path:inset(10px 20px round 10px)">inset</div></div>
+<div class="w" style="left:640px;top:10px"><div id="k8" class="b" style="clip-path:inset(10% 5% 20% 15% round 5px 20px / 10px)">radii</div></div>
+<div class="w" style="left:10px;top:110px"><div id="k9" class="b" style="clip-path:polygon(50% 0, 100% 100%, 0 100%)">tri</div></div>
+<div class="w" style="left:100px;top:110px"><div id="k10" class="b" style="clip-path:polygon(evenodd, 50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)">star</div></div>
+<div class="w" style="left:190px;top:110px"><div id="k11" class="b" style="clip-path:path('M 10 10 L 70 10 L 40 70 Z')">path</div></div>
+<div class="w" style="left:280px;top:110px"><div id="k12" class="b" style="clip-path:circle(50%) content-box;padding:10px;border:5px solid navy;width:50px;height:50px">box</div></div>
+<div class="w" style="left:380px;top:110px"><div id="k13" class="b" style="clip-path:margin-box;margin:6px;border-radius:12px">margin</div></div>
+<div class="w" style="left:480px;top:110px"><div id="k14" class="b" style="clip-path:padding-box;border:6px solid orange;border-radius:20px;width:68px;height:68px">pad</div></div>
+<div class="w" style="left:570px;top:110px"><div id="k15" class="b" style="clip-path:circle(35px);position:relative">kid<div style="position:absolute;left:50px;top:50px;width:60px;height:60px;background:crimson"></div></div></div>
+<div class="w" style="left:680px;top:110px"><div id="k16" class="b" style="clip-path:circle(40%);opacity:0.5">half</div></div>
+<div class="w" style="left:10px;top:210px"><div id="k17" class="b" style="clip-path:xywh(10px 10px 50px 40px round 8px)">xywh</div></div>
+<div class="w" style="left:100px;top:210px"><div id="k18" class="b" style="clip-path:rect(5px 70px 60px 10px)">rect</div></div>
+<div class="w" style="left:190px;top:210px"><div id="k19" class="b" style="clip-path:inset(50%)">gone</div></div>
+<div class="w" style="left:280px;top:210px"><div id="k20" class="b" style="clip-path:circle(45%);background:linear-gradient(red, blue)">grad</div></div>
+<div class="w" style="left:370px;top:210px"><img id="k21" src="logo.png" style="display:block;width:80px;height:80px;clip-path:circle(50%)"></div>
+<div class="w" style="left:460px;top:210px"><div id="k22" class="b" style="clip-path:polygon(calc(10% + 5px) 0, 100% calc(50% - 10px), 0 100%)">calc</div></div>
+<div class="w" style="left:550px;top:210px"><div id="k23" class="b" style="clip-path:path(evenodd, 'M 0 0 H 80 V 80 H 0 Z M 20 20 H 60 V 60 H 20 Z')">hole</div></div>
+<div class="w" style="left:640px;top:210px"><div id="k24" class="b" style="clip-path:ellipse(30% 45%)">ell</div></div>
+</body></html>

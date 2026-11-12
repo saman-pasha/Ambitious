@@ -2667,6 +2667,28 @@ static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fon
     }
 }
 
+int amb_path_coverage(const vector<double> *path, const double *m, int evenodd, int w, int h, int *box, vector<float> *cov) {
+    vector<double> pts, edges, xs;
+    vector<uint8_t> corner;
+    vector<uint32_t> subs, order, act;
+    vector<float> acc;
+    sv_mat full = sv_make(m[0], m[1], m[2], m[3], m[4], m[5]);
+    sv_flatten(path, full, 0.05, &pts, &corner, &subs);
+    for (size_t s = 0; s + 2 < len(subs); s += 3) {
+        uint32_t b = at(subs, s), c = at(subs, s + 1);
+        for (uint32_t j = 0; j < c; j++) {
+            uint32_t l = j + 1 == c ? 0 : j + 1;
+            double x0 = at(pts, 2 * (b + j)), y0 = at(pts, 2 * (b + j) + 1), x1 = at(pts, 2 * (b + l)), y1 = at(pts, 2 * (b + l) + 1);
+            if (y0 == y1) continue;
+            push_back(edges, x0);
+            push_back(edges, y0);
+            push_back(edges, x1);
+            push_back(edges, y1);
+        }
+    }
+    return sv_cover(&edges, evenodd, w, h, box, cov, &xs, &order, &act, &acc);
+}
+
 void amb_svg_coverage(const char *scene, size_t n, uint32_t w, uint32_t h, vector<uint8_t> *out) {
     amb_canvas c = {0};
     defer(c) { AMB_CANVAS_DROP(c); }

@@ -272,6 +272,7 @@ typedef struct lay_ext {
     uint8_t app_none, styled_bg, styled_border, styled_shadow;
     uint8_t ofit;                       /* object-fit: 0 fill, 1 contain, 2 cover, 3 none, 4 scale-down */
     uint32_t opos;                      /* object-position's cval; 0 at its initial value */
+    uint32_t cpath;                     /* clip-path's cval when it is a basic shape or a geometry box; else 0 */
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -574,6 +575,15 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->ofit = (uint8_t)(lay_w(w, "contain") ? 1 : lay_w(w, "cover") ? 2 : lay_w(w, "none") ? 3 : lay_w(w, "scale-down") ? 4 : 0);
     e->opos = st->cval[c0 + CSS_PROP_OBJECT_POSITION].how == CSS_HOW_INITIAL ? 0 : c0 + CSS_PROP_OBJECT_POSITION;
     if (e->ofit || e->opos) e->paints = 1;
+    {
+        /* clip-path's basic shape or geometry box (an HTML box's; a url() is an SVG element's) */
+        uint32_t cc = c0 + CSS_PROP_CLIP_PATH;
+        amb_span cs = st->cval[cc].text;
+        const char *cq = text_ptr(st, cs);
+        int url = cs.len > 4 && (cq[0] | 32) == 'u' && (cq[1] | 32) == 'r' && (cq[2] | 32) == 'l' && cq[3] == '(';
+        e->cpath = st->cval[cc].unit == CSS_UNIT_TEXT && cs.len && !url ? cc : 0;
+        if (e->cpath) e->paints = 1;
+    }
     lay_word_of(st, c0 + CSS_PROP_FLEX_DIRECTION, w);
     e->frow = !(lay_w(w, "column") || lay_w(w, "column-reverse"));
     e->frev = lay_w(w, "row-reverse") || lay_w(w, "column-reverse");
@@ -4618,6 +4628,7 @@ static void lay_box_paint(LCTX, uint32_t b, uint32_t si) {
     t->box[b].bg_pos = lay_kept(t, st, e.bgpos);
     t->box[b].ofit = e.ofit;
     t->box[b].opos = lay_kept(t, st, e.opos);
+    t->box[b].cpath = lay_kept(t, st, e.cpath);
     t->box[b].bg_size = lay_kept(t, st, e.bgsize);
     t->box[b].bg_repeat = lay_kept(t, st, e.bgrepeat);
     t->box[b].bg_clip = lay_kept(t, st, e.bgclip);

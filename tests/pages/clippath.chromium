@@ -1,0 +1,25 @@
+# boxes of tests/pages/clippath.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+k1 div 10 10 80 80
+k2 div 100 10 80 80
+k3 div 190 10 80 80
+k4 div 280 10 80 80
+k5 div 370 10 80 80
+k6 div 460 10 80 80
+k7 div 550 10 80 80
+k8 div 640 10 80 80
+k9 div 10 110 80 80
+k10 div 100 110 80 80
+k11 div 190 110 80 80
+k12 div 280 110 80 80
+k13 div 386 116 80 80
+k14 div 480 110 80 80
+k15 div 570 110 80 80
+k16 div 680 110 80 80
+k17 div 10 210 80 80
+k18 div 100 210 80 80
+k19 div 190 210 80 80
+k20 div 280 210 80 80
+k21 img 370 210 80 80
+k22 div 460 210 80 80
+k23 div 550 210 80 80
+k24 div 640 210 80 80

@@ -2490,7 +2490,7 @@ static int pt_transformed(const layout_tree *t, uint32_t b) {
 /* a box whose children share its 3D space (transform-style: preserve-3d), unless a
    property that groups its content flattens it (an opacity, a filter, a clip) */
 static int pt_p3d(const layout_tree *t, uint32_t b) {
-    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip;
+    return t->box[b].p3d && t->box[b].opacity >= 1 && !t->box[b].filter.len && !t->box[b].clip && !t->box[b].cpath.len;
 }
 /* a box drawn as a plane of its parent's 3D rendering context: its parent preserves 3D
    and it is transformed or preserves 3D itself */
@@ -2502,7 +2502,7 @@ static int pt_in_3d(const layout_tree *t, uint32_t b) {
    filter, a perspective, a 3D space of its own */
 static int pt_context(const layout_tree *t, uint32_t b) {
     return !t->box[b].z_auto || t->box[b].opacity < 1 || pt_transformed(t, b) || t->box[b].filter.len || t->box[b].backdrop.len ||
-           t->box[b].persp.len || t->box[b].p3d;
+           t->box[b].persp.len || t->box[b].p3d || t->box[b].cpath.len;
 }
 
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box);
@@ -2998,13 +2998,227 @@ static void pt_backdrop(const layout_tree *t, uint32_t b, amb_canvas *c) {
         }
 }
 
+/* ---- clip-path's basic shapes (CSS Masking 1, 5.1; CSS Shapes 1, 3) ---- */
+
+/* the reference box of a clip-path (named by w, wn; the border box when none is named) in page coordinates: x0 y0 x1
+   y1 into r, its corners' radii (the border box's, less the border and padding inside it, more the margin outside)
+   into rad */
+static void pt_ref_box(const layout_tree *t, uint32_t b, const char *w, size_t wn, double *r, double *rad) {
+    layout_box x = t->box[b];
+    double brad[8] = { x.rtl, x.rtr, x.rbr, x.rbl, x.rtlv, x.rtrv, x.rbrv, x.rblv };
+    double bw = x.w + x.pl + x.pr + x.bl + x.br, bh = x.h + x.pt + x.pb + x.bt + x.bb;
+    pt_fit_radii(bw, bh, brad);
+    if (pt_is(w, wn, "margin-box")) {
+        r[0] = x.x - x.pl - x.bl - x.ml;
+        r[1] = x.y - x.pt - x.bt - x.mt;
+        r[2] = x.x + x.w + x.pr + x.br + x.mr;
+        r[3] = x.y + x.h + x.pb + x.bb + x.mb;
+        double grow[4] = { x.ml, x.mr, x.mr, x.ml };
+        double growv[4] = { x.mt, x.mt, x.mb, x.mb };
+        for (int k = 0; k < 4; k++) {
+            rad[k] = brad[k] > 0 ? brad[k] + grow[k] : 0;
+            rad[k + 4] = brad[k + 4] > 0 ? brad[k + 4] + growv[k] : 0;
+        }
+        return;
+    }
+    pt_area(t, b, pt_is(w, wn, "padding-box") ? "padding-box" : pt_is(w, wn, "content-box") ? "content-box" : "border-box",
+            pt_is(w, wn, "padding-box") ? 11 : pt_is(w, wn, "content-box") ? 11 : 10, brad, r, rad);
+}
+
+/* a part of a clip-path's text (a <length-percentage> made px, a percentage, or a calc() of both) as device px: its
+   percentage of basis, its px at the zoom z */
+static double pt_clip_lp(const char *s, size_t n, double basis, double z) { return pt_opos_axis(s, n, basis, z, 0); }
+
+/* the text's parts a space or a comma apart (functions kept whole), as css_next_part finds them */
+static size_t pt_clip_parts(const char *s, size_t n, size_t *st, size_t *ln, size_t max) {
+    size_t i = 0, k = 0, a, l;
+    while (k < max && css_next_part(s, n, &i, &a, &l)) { st[k] = a; ln[k] = l; k++; }
+    return k;
+}
+
+/* the shape clip-path's text names for box b (its reference box ref): a rounded rectangle (1: rr x0 y0 x1 y1, radii
+   rad), a path (2: its commands, page coordinates, its rule), or none at all (0: nothing is drawn) */
+static int pt_clip_shape(const layout_tree *t, uint32_t b, double z, double *rr, double *rad, vector<double> *path, int *evenodd) {
+    vector<char> cp;
+    append_range(cp, text_ptr(t, t->box[b].cpath), t->box[b].cpath.len);
+    const char *s = data(cp);
+    size_t n = len(cp), open = 0;
+    while (open < n && s[open] != '(' && s[open] != ' ') open++;
+    size_t close = open, depth = 0;
+    int fn = open < n && s[open] == '(';
+    if (fn) {
+        for (close = open; close < n; close++) {
+            if (s[close] == '"') { close++; while (close < n && s[close] != '"') close++; continue; }
+            if (s[close] == '(') depth++;
+            else if (s[close] == ')' && --depth == 0) break;
+        }
+        if (close >= n) return 0;
+    }
+    /* the reference box: the word after the shape, or the whole text */
+    size_t bs = fn ? close + 1 : 0;
+    while (bs < n && s[bs] == ' ') bs++;
+    double ref[4], brad[8];
+    pt_ref_box(t, b, s + bs, n - bs, ref, brad);
+    double w = ref[2] - ref[0], h = ref[3] - ref[1];
+    for (int k = 0; k < 8; k++) rad[k] = 0;
+    if (!fn) {
+        /* a box alone: its edges, its corners rounded as the box's are */
+        for (int k = 0; k < 4; k++) rr[k] = ref[k];
+        for (int k = 0; k < 8; k++) rad[k] = brad[k];
+        return 1;
+    }
+    const char *a = s + open + 1;
+    size_t an = close - open - 1, st[16], ln[16];
+    if (pt_is(s, open, "inset")) {
+        size_t k = pt_clip_parts(a, an, st, ln, 16), r = k;
+        for (size_t j = 0; j < k; j++) if (pt_is(a + st[j], ln[j], "round")) { r = j; break; }
+        if (r == 0 || r > 4) return 0;
+        double o[4];
+        for (size_t j = 0; j < 4; j++) {
+            size_t q = r == 1 ? 0 : r == 2 ? j % 2 : r == 3 ? (j == 3 ? 1 : j) : j;
+            o[j] = pt_clip_lp(a + st[q], ln[q], j % 2 ? w : h, z);
+        }
+        rr[0] = ref[0] + o[3];
+        rr[1] = ref[1] + o[0];
+        rr[2] = fmax(rr[0], ref[2] - o[1]);
+        rr[3] = fmax(rr[1], ref[3] - o[2]);
+        if (r < k) {
+            /* the radii: border-radius's lists, their percentages of the reference box's size */
+            size_t slash = k;
+            for (size_t j = r + 1; j < k; j++) if (pt_is(a + st[j], ln[j], "/")) { slash = j; break; }
+            for (int side = 0; side < 2; side++) {
+                size_t from = side == 0 ? r + 1 : slash + 1, to = side == 0 ? slash : k;
+                if (side == 1 && slash == k) { for (int q = 0; q < 4; q++) rad[4 + q] = rad[q]; break; }
+                size_t m = to - from;
+                if (m == 0 || m > 4) return 0;
+                for (int q = 0; q < 4; q++) {
+                    size_t pick = m == 1 ? 0 : m == 2 ? (size_t)(q % 2) : m == 3 ? (q == 3 ? 1 : (size_t)q) : (size_t)q;
+                    rad[side * 4 + q] = fmax(0, pt_clip_lp(a + st[from + pick], ln[from + pick], side == 0 ? w : h, z));
+                }
+            }
+            pt_fit_radii(rr[2] - rr[0], rr[3] - rr[1], rad);
+        }
+        return 1;
+    }
+    if (pt_is(s, open, "circle") || pt_is(s, open, "ellipse")) {
+        int ellipse = pt_is(s, open, "ellipse");
+        size_t k = pt_clip_parts(a, an, st, ln, 16), at_i = k;
+        for (size_t j = 0; j < k; j++) if (pt_is(a + st[j], ln[j], "at")) { at_i = j; break; }
+        double cx = ref[0] + w / 2, cy = ref[1] + h / 2;
+        if (at_i + 2 < k) {
+            cx = ref[0] + pt_clip_lp(a + st[at_i + 1], ln[at_i + 1], w, z);
+            cy = ref[1] + pt_clip_lp(a + st[at_i + 2], ln[at_i + 2], h, z);
+        }
+        double dl = fabs(cx - ref[0]), dr = fabs(ref[2] - cx), dt = fabs(cy - ref[1]), db = fabs(ref[3] - cy), rx, ry;
+        if (!ellipse) {
+            int far = at_i >= 1 && pt_is(a + st[0], ln[0], "farthest-side"), lp = at_i >= 1 && !far && !pt_is(a + st[0], ln[0], "closest-side");
+            rx = far ? fmax(fmax(dl, dr), fmax(dt, db)) : fmin(fmin(dl, dr), fmin(dt, db));
+            if (lp) rx = fmax(0, pt_clip_lp(a + st[0], ln[0], sqrt((w * w + h * h) / 2), z));
+            ry = rx;
+        } else {
+            rx = fmin(dl, dr);
+            ry = fmin(dt, db);
+            if (at_i >= 2) {
+                if (pt_is(a + st[0], ln[0], "farthest-side")) rx = fmax(dl, dr);
+                else if (!pt_is(a + st[0], ln[0], "closest-side")) rx = fmax(0, pt_clip_lp(a + st[0], ln[0], w, z));
+                if (pt_is(a + st[1], ln[1], "farthest-side")) ry = fmax(dt, db);
+                else if (!pt_is(a + st[1], ln[1], "closest-side")) ry = fmax(0, pt_clip_lp(a + st[1], ln[1], h, z));
+            }
+        }
+        if (rx <= 0 || ry <= 0) return 0;
+        rr[0] = cx - rx;
+        rr[1] = cy - ry;
+        rr[2] = cx + rx;
+        rr[3] = cy + ry;
+        for (int q = 0; q < 4; q++) { rad[q] = rx; rad[q + 4] = ry; }
+        return 1;
+    }
+    if (pt_is(s, open, "polygon")) {
+        size_t i = 0;
+        int first = 1;
+        clear(*path);
+        while (i < an) {
+            size_t e = i;
+            while (e < an && a[e] != ',') { if (a[e] == '(') { int dp = 0; for (; e < an; e++) { if (a[e] == '(') dp++; else if (a[e] == ')' && --dp == 0) break; } } e++; }
+            if (e > an) e = an;
+            size_t pk = pt_clip_parts(a + i, e - i, st, ln, 3);
+            if (pk == 1 && pt_is(a + i + st[0], ln[0], "evenodd")) *evenodd = 1;
+            else if (pk == 2) {
+                push_back(*path, first ? 'M' : 'L');
+                push_back(*path, ref[0] + pt_clip_lp(a + i + st[0], ln[0], w, z));
+                push_back(*path, ref[1] + pt_clip_lp(a + i + st[1], ln[1], h, z));
+                first = 0;
+            }
+            i = e + 1;
+        }
+        if (first) return 0;
+        push_back(*path, 'Z');
+        return 2;
+    }
+    if (pt_is(s, open, "path")) {
+        size_t q0 = 0;
+        while (q0 < an && a[q0] != '"') q0++;
+        size_t q1 = q0 + 1;
+        while (q1 < an && a[q1] != '"') q1++;
+        if (q1 >= an) return 0;
+        for (size_t j = 0; j < q0; j++) if (a[j] == 'e') { *evenodd = 1; break; }   /* evenodd, before the string */
+        vector<double> raw;
+        clear(*path);
+        if (!amb_svg_path(a + q0 + 1, q1 - q0 - 1, &raw)) return 0;
+        /* its coordinates CSS px from the reference box's top left */
+        for (size_t j = 0; j < len(raw);) {
+            int c = (int)at(raw, j);
+            push_back(*path, at(raw, j));
+            j++;
+            int pts = c == 'M' || c == 'L' ? 1 : c == 'C' ? 3 : 0;
+            for (int q = 0; q < pts && j + 1 < len(raw); q++, j += 2) {
+                push_back(*path, ref[0] + at(raw, j) * z);
+                push_back(*path, ref[1] + at(raw, j + 1) * z);
+            }
+        }
+        return 2;
+    }
+    return 0;
+}
+
+/* a box's stacking context drawn over what was under it (before), held to its clip-path's shape: each pixel moved
+   from what it was by as much of it as the shape covers, anti-aliased */
+static void pt_clip_path(const layout_tree *t, uint32_t b, amb_canvas *c, const vector<uint8_t> *before) {
+    double z = c->zoom > 0 ? c->zoom : 1, rr[4] = { 0, 0, 0, 0 }, rad[8];
+    vector<double> path;
+    int evenodd = 0;
+    int kind = pt_clip_shape(t, b, z, rr, rad, &path, &evenodd);
+    int bx[4] = { 0, 0, 0, 0 };
+    vector<float> cov;
+    int got = 0;
+    if (kind == 2) {
+        double m[6] = { 1, 0, 0, 1, 0, -c->oy };
+        got = amb_path_coverage(&path, m, evenodd, (int)c->w, (int)c->h, bx, &cov);
+    }
+    for (uint32_t y = 0; y < c->h; y++)
+        for (uint32_t x = 0; x < c->w; x++) {
+            size_t i = ((size_t)y * c->w + (size_t)x) * 3;
+            if (c->px[i] == at(*before, i) && c->px[i + 1] == at(*before, i + 1) && c->px[i + 2] == at(*before, i + 2)) continue;
+            double cv = 0;
+            if (kind == 1) cv = pt_rr_cover(x + 0.5, y + 0.5 + c->oy, rr[0], rr[1], rr[2], rr[3], rad);
+            else if (kind == 2 && got && (int)x >= bx[0] && (int)x < bx[2] && (int)y >= bx[1] && (int)y < bx[3])
+                cv = at(cov, (size_t)((int)y - bx[1]) * (size_t)(bx[2] - bx[0]) + (size_t)((int)x - bx[0]));
+            if (cv >= 1) continue;
+            for (int ch = 0; ch < 3; ch++) {
+                double v0 = at(*before, i + (size_t)ch);
+                c->px[i + (size_t)ch] = (uint8_t)(v0 + (c->px[i + (size_t)ch] - v0) * cv + 0.5);
+            }
+        }
+}
+
 /* a box drawn with its opacity, backdrop and filters: through a copy of what was under it
    when it has an opacity, blended with it */
 static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
     double op = t->box[b].opacity;
     if (op <= 0) return;
-    vector<uint8_t> under;
+    vector<uint8_t> under, unclipped;
     if (op < 1) append_range(under, data(c->px), len(c->px));
+    if (t->box[b].cpath.len) append_range(unclipped, data(c->px), len(c->px));
     if (t->box[b].backdrop.len) pt_backdrop(t, b, c);
     vector<pt_fop> ops;
     pt_filter_of(t, t->box[b].filter, &ops);
@@ -3015,6 +3229,7 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
             int o = at(under, q), n0 = c->px[q];
             if (o != n0) c->px[q] = (uint8_t)floor(o + (n0 - o) * op + 0.5);
         }
+    if (t->box[b].cpath.len) pt_clip_path(t, b, c, &unclipped);
 }
 
 /* positioned boxes drawn in stacking order: by z-index (auto as 0), the tree's order among
@@ -3066,7 +3281,8 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
             continue;
         }
         if (pt_in_3d(t, ch)) continue;
-        if (t->box[ch].opacity < 1 || pt_transformed(t, ch) || t->box[ch].filter.len || t->box[ch].backdrop.len || t->box[ch].p3d) {
+        if (t->box[ch].opacity < 1 || pt_transformed(t, ch) || t->box[ch].filter.len || t->box[ch].backdrop.len || t->box[ch].p3d ||
+            t->box[ch].cpath.len) {
             pt_effects(PARGS, ch, 0);
             continue;
         }

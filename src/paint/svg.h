@@ -58,6 +58,12 @@ int amb_svg_image(amb_canvas *c, const uint8_t *p, size_t n, double x, double y,
    a number, then its points' coordinates -- appended to out; how many were read */
 size_t amb_svg_path(const char *s, size_t n, vector<double> *out);
 
+/* the coverage of path data (amb_svg_path's commands) under the matrix m (x' = m[0] x + m[2] y + m[4], y' = m[1] x
+   + m[3] y + m[5]) by the non-zero rule or the even-odd, on a w x h grid, as an SVG fill is covered (sixteen rows a
+   pixel): the rectangle it reaches into box (x0, y0, x1, y1), each of its pixels' coverage (0 to 1, a row the box's
+   width) into cov; 0 when it reaches none */
+int amb_path_coverage(const vector<double> *path, const double *m, int evenodd, int w, int h, int *box, vector<float> *cov);
+
 /* a scene's coverage drawn onto a w x h grey canvas (0 white, 255 the shapes' own ink),
    for tests: each pixel's alpha after the scene is drawn in black at 1 CSS px a px */
 void amb_svg_coverage(const char *scene, size_t n, uint32_t w, uint32_t h, vector<uint8_t> *out);

@@ -1699,6 +1699,406 @@ static void css_pos_text(const css_lin *l, vector<char> *out) {
     append_range(*out, buf, (size_t)n);
 }
 
+/* ---- clip-path's basic shapes and geometry boxes (CSS Shapes 1, 3; CSS Masking 1, 5.1): their computed text as
+   Chromium serializes it ---- */
+
+/* a <length-percentage> of a shape, its px with em resolved: 0 when s[0, n) is none, or a plain negative one where neg
+   does not let it be (a calc() may be: where it is used it is held at 0) */
+static int css_shape_lp(const char *s, size_t n, const css_cenv *e, int neg, css_lin *l) {
+    size_t i = 0;
+    memset(l, 0, sizeof *l);
+    if (!n || !css_calc_value(s, n, &i, e, 0, l) || css_skip_ws(s, n, i) != n || l->nonlin || l->open) return 0;
+    if (l->kind == CSS_CK_NUM) {
+        if (l->num != 0) return 0;
+        l->kind = CSS_CK_LEN;
+        l->num = 0;
+    }
+    if (!neg && !css_is_alpha(s[0]) && (l->px < 0 || l->pct < 0)) return 0;
+    return 1;
+}
+/* a circle's or an ellipse's radius: closest-side (1), farthest-side (2), or a <length-percentage> not below 0 (0, in
+   l); -1 when it is none */
+static int css_shape_radius(const char *s, size_t n, const css_cenv *e, css_lin *l) {
+    memset(l, 0, sizeof *l);
+    if (css_eq_ci(s, n, "closest-side")) return 1;
+    if (css_eq_ci(s, n, "farthest-side")) return 2;
+    return css_shape_lp(s, n, e, 0, l) ? 0 : -1;
+}
+static void css_radius_text(int k, const css_lin *l, vector<char> *out) {
+    if (k == 1) append_range(*out, "closest-side", 12);
+    else if (k == 2) append_range(*out, "farthest-side", 13);
+    else css_pos_text(l, out);
+}
+/* circle() or ellipse()'s arguments: its radius (two for an ellipse; or none) then at and a position. Serialized
+   with closest-side (both, for an ellipse) left out, the position only when one is given */
+static int css_shape_round(const char *s, size_t n, const css_cenv *e, int ellipse, vector<char> *out) {
+    size_t st[8], ln[8];
+    size_t k = css_parts(s, n, st, ln, 8);
+    if (k == 8) return 0;
+    size_t at_i = k;
+    for (size_t j = 0; j < k; j++)
+        if (css_eq_ci(s + st[j], ln[j], "at")) { at_i = j; break; }
+    if (at_i != 0 && at_i != (size_t)(ellipse ? 2 : 1)) return 0;
+    css_lin r0, r1;
+    int k0 = 1, k1 = 1;
+    memset(&r0, 0, sizeof r0);
+    memset(&r1, 0, sizeof r1);
+    if (at_i >= 1 && (k0 = css_shape_radius(s + st[0], ln[0], e, &r0)) < 0) return 0;
+    if (at_i >= 2 && (k1 = css_shape_radius(s + st[1], ln[1], e, &r1)) < 0) return 0;
+    css_lin px, py;
+    int has_pos = at_i < k;
+    if (has_pos) {
+        if (at_i + 1 >= k) return 0;
+        size_t a = st[at_i + 1], b = st[k - 1] + ln[k - 1];
+        if (!css_position_axes(s + a, b - a, e, &px, &py)) return 0;
+    }
+    if (ellipse) append_range(*out, "ellipse(", 8);
+    else append_range(*out, "circle(", 7);
+    int any = 0;
+    if (ellipse ? !(k0 == 1 && k1 == 1) : k0 != 1) {
+        css_radius_text(k0, &r0, out);
+        if (ellipse) {
+            push_back(*out, ' ');
+            css_radius_text(k1, &r1, out);
+        }
+        any = 1;
+    }
+    if (has_pos) {
+        if (any) push_back(*out, ' ');
+        append_range(*out, "at ", 3);
+        css_pos_text(&px, out);
+        push_back(*out, ' ');
+        css_pos_text(&py, out);
+    }
+    push_back(*out, ')');
+    return 1;
+}
+/* a shape's round: border-radius's syntax, up to four <length-percentage>s not below 0, then a slash and up to four
+   more; each list made the four corners' (from the top left) */
+static int css_shape_radii(const char *s, size_t n, const css_cenv *e, css_lin *h, css_lin *v) {
+    size_t slash = n;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '(') { i = css_block_end(s, n, i, '(', ')'); continue; }
+        if (s[i] == '/') { slash = i; break; }
+    }
+    for (int w = 0; w < 2; w++) {
+        if (w == 1 && slash == n) {
+            for (int k = 0; k < 4; k++) v[k] = h[k];
+            break;
+        }
+        const char *q = w == 0 ? s : s + slash + 1;
+        size_t qn = w == 0 ? slash : n - slash - 1;
+        css_lin *x = w == 0 ? h : v;
+        size_t st[5], ln[5];
+        size_t k = css_parts(q, qn, st, ln, 5);
+        if (k == 0 || k > 4) return 0;
+        for (size_t j = 0; j < k; j++)
+            if (!css_shape_lp(q + st[j], ln[j], e, 0, &x[j])) return 0;
+        if (k == 1) x[1] = x[0];
+        if (k <= 2) x[2] = x[0];
+        if (k <= 3) x[3] = x[1];
+    }
+    return 1;
+}
+static int css_vsame(const vector<char> *x, const vector<char> *y) {
+    return len(*x) == len(*y) && (len(*x) == 0 || memcmp(data(*x), data(*y), len(*x)) == 0);
+}
+/* four values (top, right, bottom, left; or the corners from the top left) as their shortest list, as margin's: the
+   last left out while it repeats the one it would be */
+static void css_four_text(const css_lin *x, vector<char> *out) {
+    vector<char> a, b, c, d;
+    css_pos_text(&x[0], &a);
+    css_pos_text(&x[1], &b);
+    css_pos_text(&x[2], &c);
+    css_pos_text(&x[3], &d);
+    int k = 4;
+    if (css_vsame(&d, &b)) {
+        k = 3;
+        if (css_vsame(&c, &a)) {
+            k = 2;
+            if (css_vsame(&b, &a)) k = 1;
+        }
+    }
+    append_range(*out, data(a), len(a));
+    if (k >= 2) { push_back(*out, ' '); append_range(*out, data(b), len(b)); }
+    if (k >= 3) { push_back(*out, ' '); append_range(*out, data(c), len(c)); }
+    if (k >= 4) { push_back(*out, ' '); append_range(*out, data(d), len(d)); }
+}
+/* inset()'s text: its offsets, then round and its radii unless they are all 0 (the vertical ones after a slash when
+   they differ from the horizontal) */
+static void css_inset_text(const css_lin *o, int round, const css_lin *rh, const css_lin *rv, vector<char> *out) {
+    append_range(*out, "inset(", 6);
+    css_four_text(o, out);
+    int zero = 1;
+    for (int k = 0; round && k < 4; k++)
+        if (rh[k].px != 0 || rh[k].pct != 0 || rv[k].px != 0 || rv[k].pct != 0) zero = 0;
+    if (round && !zero) {
+        vector<char> h, v;
+        css_four_text(rh, &h);
+        css_four_text(rv, &v);
+        append_range(*out, " round ", 7);
+        append_range(*out, data(h), len(h));
+        if (!css_vsame(&h, &v)) {
+            append_range(*out, " / ", 3);
+            append_range(*out, data(v), len(v));
+        }
+    }
+    push_back(*out, ')');
+}
+/* inset()'s arguments: one to four offsets (below 0 they may be), then round and the radii */
+static int css_shape_inset(const char *s, size_t n, const css_cenv *e, css_lin *o, css_lin *rh, css_lin *rv, int *round) {
+    size_t st[16], ln[16];
+    size_t k = css_parts(s, n, st, ln, 16);
+    if (k == 0 || k == 16) return 0;
+    size_t r = k;
+    for (size_t j = 0; j < k; j++)
+        if (css_eq_ci(s + st[j], ln[j], "round")) { r = j; break; }
+    if (r == 0 || r > 4) return 0;
+    for (size_t j = 0; j < r; j++)
+        if (!css_shape_lp(s + st[j], ln[j], e, 1, &o[j])) return 0;
+    if (r == 1) o[1] = o[0];
+    if (r <= 2) o[2] = o[0];
+    if (r <= 3) o[3] = o[1];
+    *round = r < k;
+    if (*round) {
+        if (r + 1 >= k) return 0;
+        if (!css_shape_radii(s + st[r + 1], n - st[r + 1], e, rh, rv)) return 0;
+    }
+    return 1;
+}
+/* 100% less a sum (an offset from the far side) */
+static void css_lin_from_end(const css_lin *a, css_lin *out) {
+    *out = *a;
+    out->pct = 100 - a->pct;
+    out->px = -a->px;
+    out->kind |= CSS_CK_PCT;
+}
+/* xywh() and rect() as the inset() they are (CSS Shapes 1, 3.1): xywh's x and y the left and top offsets, 100% less
+   x plus the width and y plus the height the right and bottom; rect's sides from the top left, its right and bottom
+   100% less them, auto the box's own edge */
+static int css_shape_box(const char *s, size_t n, const css_cenv *e, int xywh, css_lin *o, css_lin *rh, css_lin *rv, int *round) {
+    size_t st[16], ln[16];
+    size_t k = css_parts(s, n, st, ln, 16);
+    if (k < 4 || k == 16) return 0;
+    if (k > 4 && !css_eq_ci(s + st[4], ln[4], "round")) return 0;
+    css_lin v[4];
+    for (int j = 0; j < 4; j++) {
+        if (!xywh && css_eq_ci(s + st[j], ln[j], "auto")) {
+            memset(&v[j], 0, sizeof v[j]);
+            v[j].kind = CSS_CK_PCT;
+            v[j].pct = j == 1 || j == 2 ? 100 : 0;
+            continue;
+        }
+        if (!css_shape_lp(s + st[j], ln[j], e, !xywh || j < 2, &v[j])) return 0;
+    }
+    if (xywh) {
+        css_lin sx = v[0], sy = v[1];
+        sx.px += v[2].px; sx.pct += v[2].pct; sx.kind |= v[2].kind;
+        sy.px += v[3].px; sy.pct += v[3].pct; sy.kind |= v[3].kind;
+        o[0] = v[1];
+        o[3] = v[0];
+        css_lin_from_end(&sx, &o[1]);
+        css_lin_from_end(&sy, &o[2]);
+    } else {
+        o[0] = v[0];
+        o[3] = v[3];
+        css_lin_from_end(&v[1], &o[1]);
+        css_lin_from_end(&v[2], &o[2]);
+    }
+    *round = k > 4;
+    if (*round) {
+        if (k == 5) return 0;
+        if (!css_shape_radii(s + st[5], n - st[5], e, rh, rv)) return 0;
+    }
+    return 1;
+}
+/* polygon()'s arguments: a fill rule and a comma, then points, a comma between each two, each two
+   <length-percentage>s. Serialized with nonzero left out, each point's x and y a space apart */
+static int css_shape_polygon(const char *s, size_t n, const css_cenv *e, vector<char> *out) {
+    append_range(*out, "polygon(", 8);
+    size_t a = 0;
+    int first = 1, points = 0;
+    for (;;) {
+        size_t b = css_comma(s, n, a);
+        size_t st[3], ln[3];
+        size_t k = css_parts(s + a, b - a, st, ln, 3);
+        if (first && k == 1 && (css_eq_ci(s + a + st[0], ln[0], "nonzero") || css_eq_ci(s + a + st[0], ln[0], "evenodd"))) {
+            if (css_eq_ci(s + a + st[0], ln[0], "evenodd")) append_range(*out, "evenodd, ", 9);
+        } else {
+            if (k != 2) return 0;
+            css_lin x, y;
+            if (!css_shape_lp(s + a + st[0], ln[0], e, 1, &x) || !css_shape_lp(s + a + st[1], ln[1], e, 1, &y)) return 0;
+            if (points++) append_range(*out, ", ", 2);
+            css_pos_text(&x, out);
+            push_back(*out, ' ');
+            css_pos_text(&y, out);
+        }
+        first = 0;
+        if (b >= n) break;
+        a = b + 1;
+    }
+    if (!points) return 0;
+    push_back(*out, ')');
+    return 1;
+}
+static int css_path_wsp(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
+static void css_path_num(double x, vector<char> *out) {
+    char buf[40];
+    int k = snprintf(buf, sizeof buf, " %g", x == 0 ? 0 : x);
+    append_range(*out, buf, (size_t)k);
+}
+/* path data (SVG 2, 9.3) as Chromium serializes a path()'s: each command made absolute, its letter and its numbers a
+   space apart, a move's later pairs lines; 0 when it has an error anywhere or does not begin with a move */
+static int css_path_norm(const char *s, size_t n, vector<char> *out) {
+    double cx = 0, cy = 0, sx = 0, sy = 0;
+    size_t i = 0;
+    char cmd = 0;
+    int first = 1;
+    for (;;) {
+        while (i < n && css_path_wsp(s[i])) i++;
+        if (i >= n) break;
+        char c = s[i];
+        int letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+        if (letter && c != 'e' && c != 'E') {
+            cmd = c;
+            i++;
+        } else {
+            /* the command again (a move's pairs after its first lines); a comma may come between */
+            if (!cmd || cmd == 'Z' || cmd == 'z') return 0;
+            if (c == ',') {
+                if (first) return 0;
+                i++;
+                while (i < n && css_path_wsp(s[i])) i++;
+            }
+            if (cmd == 'M') cmd = 'L';
+            else if (cmd == 'm') cmd = 'l';
+        }
+        if (first && cmd != 'M' && cmd != 'm') return 0;
+        first = 0;
+        int rel = cmd >= 'a';
+        char up = rel ? (char)(cmd - 32) : cmd;
+        int count = up == 'Z' ? 0 : up == 'H' || up == 'V' ? 1 : up == 'M' || up == 'L' || up == 'T' ? 2 : up == 'S' || up == 'Q' ? 4 :
+                    up == 'C' ? 6 : up == 'A' ? 7 : -1;
+        if (count < 0) return 0;
+        double a[7];
+        for (int k = 0; k < count; k++) {
+            while (i < n && css_path_wsp(s[i])) i++;
+            if (k > 0 && i < n && s[i] == ',') {
+                i++;
+                while (i < n && css_path_wsp(s[i])) i++;
+            }
+            if (i >= n) return 0;
+            if (up == 'A' && (k == 3 || k == 4)) {
+                if (s[i] != '0' && s[i] != '1') return 0;
+                a[k] = s[i] - '0';
+                i++;
+                continue;
+            }
+            size_t used = css_number(s + i, n - i, &a[k]);
+            if (!used) return 0;
+            i += used;
+        }
+        if (len(*out)) push_back(*out, ' ');
+        push_back(*out, up);
+        if (up == 'Z') {
+            cx = sx;
+            cy = sy;
+            continue;
+        }
+        if (up == 'H') { if (rel) a[0] += cx; cx = a[0]; css_path_num(a[0], out); continue; }
+        if (up == 'V') { if (rel) a[0] += cy; cy = a[0]; css_path_num(a[0], out); continue; }
+        if (up == 'A') {
+            if (rel) { a[5] += cx; a[6] += cy; }
+            for (int k = 0; k < 7; k++) css_path_num(a[k], out);
+            cx = a[5];
+            cy = a[6];
+            continue;
+        }
+        /* M L T: one point; S Q: two; C: three */
+        for (int k = 0; k < count; k += 2) {
+            if (rel) { a[k] += cx; a[k + 1] += cy; }
+            css_path_num(a[k], out);
+            css_path_num(a[k + 1], out);
+        }
+        cx = a[count - 2];
+        cy = a[count - 1];
+        if (up == 'M') { sx = cx; sy = cy; }
+    }
+    return len(*out) > 0;
+}
+/* path()'s arguments: a fill rule and a comma, then a string of path data */
+static int css_shape_path(const char *s, size_t n, vector<char> *out) {
+    size_t b = css_comma(s, n, 0), a = 0;
+    int evenodd = 0;
+    if (b < n) {
+        size_t i = css_skip_ws(s, b, 0), e = b;
+        while (e > i && css_ws(s[e - 1])) e--;
+        if (css_eq_ci(s + i, e - i, "evenodd")) evenodd = 1;
+        else if (!css_eq_ci(s + i, e - i, "nonzero")) return 0;
+        a = b + 1;
+    }
+    size_t i = css_skip_ws(s, n, a), e = n;
+    while (e > i && css_ws(s[e - 1])) e--;
+    if (!css_is_string(s + i, e - i)) return 0;
+    vector<char> d;
+    if (!css_path_norm(s + i + 1, e - i - 2, &d)) return 0;
+    append_range(*out, "path(", 5);
+    if (evenodd) append_range(*out, "evenodd, ", 9);
+    push_back(*out, '"');
+    append_range(*out, data(d), len(d));
+    append_range(*out, "\")", 2);
+    return 1;
+}
+/* clip-path's value other than none and url(): a basic shape, a geometry box, or both in either order; serialized
+   the shape first and a border-box after it left out. 0 when it is none */
+static int css_clip_text(const char *s, size_t n, const css_cenv *e, vector<char> *out) {
+    static const char *const boxes[7] = { "border-box", "padding-box", "content-box", "margin-box", "fill-box", "stroke-box", "view-box" };
+    size_t st[3], ln[3];
+    size_t k = css_parts(s, n, st, ln, 3);
+    if (k == 0 || k > 2) return 0;
+    vector<char> shape;
+    int got_shape = 0, box = -1;
+    for (size_t j = 0; j < k; j++) {
+        const char *q = s + st[j];
+        size_t qn = ln[j];
+        int bx = -1;
+        for (int m = 0; m < 7; m++)
+            if (css_eq_ci(q, qn, boxes[m])) bx = m;
+        if (bx >= 0) {
+            if (box >= 0) return 0;
+            box = bx;
+            continue;
+        }
+        if (got_shape) return 0;
+        size_t p = 0;
+        while (p < qn && q[p] != '(') p++;
+        if (p >= qn || q[qn - 1] != ')' || css_block_end(q, qn, p, '(', ')') != qn - 1) return 0;
+        const char *a = q + p + 1;
+        size_t an = qn - p - 2;
+        css_lin o[4], rh[4], rv[4];
+        int round = 0;
+        if (css_eq_ci(q, p, "circle")) { if (!css_shape_round(a, an, e, 0, &shape)) return 0; }
+        else if (css_eq_ci(q, p, "ellipse")) { if (!css_shape_round(a, an, e, 1, &shape)) return 0; }
+        else if (css_eq_ci(q, p, "polygon")) { if (!css_shape_polygon(a, an, e, &shape)) return 0; }
+        else if (css_eq_ci(q, p, "path")) { if (!css_shape_path(a, an, &shape)) return 0; }
+        else if (css_eq_ci(q, p, "inset")) {
+            if (!css_shape_inset(a, an, e, o, rh, rv, &round)) return 0;
+            css_inset_text(o, round, rh, rv, &shape);
+        } else if (css_eq_ci(q, p, "xywh") || css_eq_ci(q, p, "rect")) {
+            if (!css_shape_box(a, an, e, css_eq_ci(q, p, "xywh"), o, rh, rv, &round)) return 0;
+            css_inset_text(o, round, rh, rv, &shape);
+        } else return 0;
+        got_shape = 1;
+    }
+    clear(*out);
+    if (got_shape) append_range(*out, data(shape), len(shape));
+    if (box >= 0 && !(got_shape && box == 0)) {
+        if (got_shape) push_back(*out, ' ');
+        append_range(*out, boxes[box], strlen(boxes[box]));
+    }
+    return 1;
+}
+
 static int css_text_valid(css_prop p, const char *s, size_t n) {
     size_t i = 0, st, ln;
     int parts = 0, k;
@@ -1712,7 +2112,11 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_STROKE_DASHARRAY: return css_is_dashes(s, n);
     case CSS_PROP_CLIP_PATH: {
         size_t cs[2], cl[2];
-        return css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url");
+        if (css_parts(s, n, cs, cl, 2) == 1 && css_is_fn(s + cs[0], cl[0], "url")) return 1;
+        /* a basic shape, a geometry box, or both */
+        css_cenv e = { 16, 16, -1 };
+        vector<char> tmp;
+        return css_clip_text(s, n, &e, &tmp);
     }
     case CSS_PROP_COLOR_SCHEME: {
         /* [light | dark | <custom-ident>]+ && only? (CSS Color Adjust 1, 2.1): names a space
@@ -4549,6 +4953,31 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         int dark = v->unit == CSS_UNIT_TEXT ? css_scheme_of(text_ptr(s, v->tx), v->tx.len, env->page_dark) : env->page_dark;
         v->color = dark ? CSS_CANVAS_DARK : CSS_CANVAS_LIGHT;
         return;
+    }
+    if (p == CSS_PROP_CLIP_PATH && v->unit == CSS_UNIT_TEXT) {
+        /* a basic shape or a geometry box as Chromium serializes it (lengths px, a position's axes as
+           object-position's, inset()'s lists their shortest); url() as it was */
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        css_cenv e = { fs, env->rem, -1 };
+        if (len(src) > 5 && css_eq_ci(data(src), 4, "url(") && at(src, len(src) - 1) == ')') {
+            /* url() with its URL in double quotes, as Chromium serializes it */
+            size_t a = css_skip_ws(data(src), len(src) - 1, 4), b = len(src) - 1;
+            while (b > a && css_ws(at(src, b - 1))) b--;
+            if (b > a + 1 && (at(src, a) == '"' || at(src, a) == '\'') && at(src, b - 1) == at(src, a)) { a++; b--; }
+            append_range(out, "url(\"", 5);
+            for (size_t k = a; k < b; k++) {
+                if (at(src, k) == '"' || at(src, k) == '\\') push_back(out, '\\');
+                push_back(out, at(src, k));
+            }
+            append_range(out, "\")", 2);
+            v->tx = text_add(s, data(out), len(out));
+            return;
+        }
+        if (css_clip_text(data(src), len(src), &e, &out)) {
+            v->tx = text_add(s, data(out), len(out));
+            return;
+        }
     }
     if (p == CSS_PROP_OBJECT_POSITION && v->unit == CSS_UNIT_TEXT) {
         /* each axis as Chromium computes it: a keyword its percentage, a length px, an offset from the right or the
