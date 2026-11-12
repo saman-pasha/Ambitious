@@ -34,6 +34,11 @@ enum {
     IN_DATETIMEFORMAT, IN_DTF_FORMAT_GET, IN_DTF_FORMAT_BOUND, IN_DTF_FORMATTOPARTS, IN_DTF_FORMATRANGE,
     IN_DTF_FORMATRANGETOPARTS, IN_DTF_RESOLVED,
     IN_DATE_TOLOCALE,                   /* Date.prototype's toLocale*String: x which (0 to 2) */
+    IN_PLURALRULES, IN_PR_SELECT, IN_PR_SELECTRANGE, IN_PR_RESOLVED,
+    IN_LISTFORMAT, IN_LF_FORMAT, IN_LF_FORMATTOPARTS, IN_LF_RESOLVED,
+    IN_RELTIMEFORMAT, IN_RT_FORMAT, IN_RT_FORMATTOPARTS, IN_RT_RESOLVED,
+    IN_DISPLAYNAMES, IN_DN_OF, IN_DN_RESOLVED,
+    IN_SEGMENTER, IN_SG_SEGMENT, IN_SG_RESOLVED, IN_SGM_CONTAINING, IN_SGM_ITERATOR, IN_SGI_NEXT,
     IN_COUNT
 };
 _Static_assert(IN_COUNT <= JIN_N, "Intl's natives fit their range");
@@ -945,8 +950,8 @@ static void resolve_locale(js_vm *vm, uint32_t requested, uint32_t av, char *fou
             return;
         }
     }
-    /* the default, its own best match (en-US is available everywhere but plural rules') */
-    if (!best_available(av, DEFAULT_LOCALE, found, cap)) copyn(found, cap, "en", 2);
+    /* the default (V8 gives it when nothing matches, available or not) */
+    copyz(found, cap, DEFAULT_LOCALE);
     tag_clear(t);
 }
 
@@ -2829,6 +2834,94 @@ static int unit_ok(const char *u) {
     return ok_a && ok_b;
 }
 
+/* SetNumberFormatDigitOptions (V8's order): the digit options read and checked into d; 0
+   thrown */
+typedef struct dopts { int mnid, mnfd, mxfd, mnsd, mxsd, rtype, inc, rmode, rprio, tzd; } dopts;
+static int js_throw_msg_0(js_vm *vm, uint32_t proto, const char *m) {
+    js_throw_msg(vm, proto, m);
+    return 0;
+}
+static int digit_options(js_vm *vm, jv opts, const char *svc, int mnfd_def, int mxfd_def, int compact, dopts *d) {
+    int notation = NN_STANDARD;
+    if (compact) notation = NN_COMPACT;
+    int mnid = number_option(vm, js_get(vm, opts, js_atom_ascii(vm, "minimumIntegerDigits")), 1, 21, 1, "minimumIntegerDigits");
+    if (mnid < 0 || vm->throwing) return 0;
+    jv vmnfd = js_get(vm, opts, js_atom_ascii(vm, "minimumFractionDigits"));
+    if (vm->throwing) return 0;
+    jv vmxfd = js_get(vm, opts, js_atom_ascii(vm, "maximumFractionDigits"));
+    if (vm->throwing) return 0;
+    jv vmnsd = js_get(vm, opts, js_atom_ascii(vm, "minimumSignificantDigits"));
+    if (vm->throwing) return 0;
+    jv vmxsd = js_get(vm, opts, js_atom_ascii(vm, "maximumSignificantDigits"));
+    if (vm->throwing) return 0;
+    int inc = number_option(vm, js_get(vm, opts, js_atom_ascii(vm, "roundingIncrement")), 1, 5000, 1, "roundingIncrement");
+    if (inc < 0 || vm->throwing) return 0;
+    static const int incs[] = { 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000 };
+    int inc_ok = 0;
+    for (int k = 0; k < 15; k++) if (incs[k] == inc) inc_ok = 1;
+    if (!inc_ok) return js_throw_msg_0(vm, vm->range_error_proto, "roundingIncrement value is out of range.");
+    int rmode = get_option_str(vm, opts, "roundingMode", rm_names, svc, 0);
+    if (rmode == -2) return 0;
+    if (rmode < 0) rmode = RM_HALFEXPAND;
+    int rprio = get_option_str(vm, opts, "roundingPriority", rp_names, svc, 0);
+    if (rprio == -2) return 0;
+    if (rprio < 0) rprio = RP_AUTO;
+    int tzd = get_option_str(vm, opts, "trailingZeroDisplay", tz_names, svc, 0);
+    if (tzd == -2) return 0;
+    if (tzd < 0) tzd = 0;
+    int has_sd = vmnsd != JV_UNDEF || vmxsd != JV_UNDEF, has_fd = vmnfd != JV_UNDEF || vmxfd != JV_UNDEF;
+    int need_sd = 1, need_fd = 1;
+    if (rprio == RP_AUTO) {
+        need_sd = has_sd;
+        if (need_sd || (!has_fd && notation == NN_COMPACT)) need_fd = 0;
+    }
+    int mnsd = 1, mxsd = 21, mnfd = mnfd_def, mxfd = mxfd_def;
+    if (need_sd && has_sd) {
+        mnsd = number_option(vm, vmnsd, 1, 21, 1, "minimumSignificantDigits");
+        if (mnsd < 0 || vm->throwing) return 0;
+        mxsd = number_option(vm, vmxsd, mnsd, 21, 21, "maximumSignificantDigits");
+        if (mxsd < 0 || vm->throwing) return 0;
+    }
+    if (need_fd && has_fd) {
+        int a = number_option(vm, vmnfd, 0, 100, -2, "minimumFractionDigits");
+        if (a == -1 || vm->throwing) return 0;
+        int b = number_option(vm, vmxfd, 0, 100, -2, "maximumFractionDigits");
+        if (b == -1 || vm->throwing) return 0;
+        if (a == -2) a = mnfd_def < b ? mnfd_def : b;
+        else if (b == -2) b = mxfd_def > a ? mxfd_def : a;
+        else if (a > b) return js_throw_msg_0(vm, vm->range_error_proto, "maximumFractionDigits value is out of range.");
+        mnfd = a;
+        mxfd = b;
+    }
+    int rtype, computed_prio;
+    if (!need_sd && !need_fd) {
+        mnfd = 0; mxfd = 0; mnsd = 1; mxsd = 2;
+        rtype = RT_MORE;
+        computed_prio = RP_MORE;
+    } else if (rprio == RP_AUTO) {
+        rtype = need_sd ? RT_SIGNIFICANT : RT_FRACTION;
+        computed_prio = RP_AUTO;
+    } else {
+        rtype = rprio == RP_MORE ? RT_MORE : RT_LESS;
+        computed_prio = rprio;
+    }
+    if (inc != 1) {
+        if (rtype != RT_FRACTION) return js_throw_msg_0(vm, vm->type_error_proto, "RoundingType is not fractionDigits");
+        if (mxfd != mnfd) return js_throw_msg_0(vm, vm->range_error_proto, "maximumFractionDigits value is out of range.");
+    }
+    d->mnid = mnid;
+    d->mnfd = mnfd;
+    d->mxfd = mxfd;
+    d->mnsd = mnsd;
+    d->mxsd = mxsd;
+    d->rtype = rtype;
+    d->inc = inc;
+    d->rmode = rmode;
+    d->rprio = computed_prio;
+    d->tzd = tzd;
+    return 1;
+}
+
 static jv nf_new(js_vm *vm, jv locales, jv options, jv newt, const char *method) {
     uint32_t req = canonical_list(vm, locales);
     if (!req) return JV_HOLE;
@@ -2924,71 +3017,10 @@ static jv nf_new(js_vm *vm, jv locales, jv options, jv newt, const char *method)
         uint32_t d = db_find_z(IDB_CUR_DIGITS, IDB_CUR_DIGITS_N, cur);
         mnfd_def = mxfd_def = d ? (int)(db8(d) - '0') : 2;
     } else if (style == ST_PERCENT) mxfd_def = 0;
-    int mnid = number_option(vm, js_get(vm, opts, js_atom_ascii(vm, "minimumIntegerDigits")), 1, 21, 1, "minimumIntegerDigits");
-    if (mnid < 0 || vm->throwing) return JV_HOLE;
-    jv vmnfd = js_get(vm, opts, js_atom_ascii(vm, "minimumFractionDigits"));
-    if (vm->throwing) return JV_HOLE;
-    jv vmxfd = js_get(vm, opts, js_atom_ascii(vm, "maximumFractionDigits"));
-    if (vm->throwing) return JV_HOLE;
-    jv vmnsd = js_get(vm, opts, js_atom_ascii(vm, "minimumSignificantDigits"));
-    if (vm->throwing) return JV_HOLE;
-    jv vmxsd = js_get(vm, opts, js_atom_ascii(vm, "maximumSignificantDigits"));
-    if (vm->throwing) return JV_HOLE;
-    int inc = number_option(vm, js_get(vm, opts, js_atom_ascii(vm, "roundingIncrement")), 1, 5000, 1, "roundingIncrement");
-    if (inc < 0 || vm->throwing) return JV_HOLE;
-    static const int incs[] = { 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000 };
-    int inc_ok = 0;
-    for (int k = 0; k < 15; k++) if (incs[k] == inc) inc_ok = 1;
-    if (!inc_ok) return js_throw_msg(vm, vm->range_error_proto, "roundingIncrement value is out of range.");
-    int rmode = get_option_str(vm, opts, "roundingMode", rm_names, svc, 0);
-    if (rmode == -2) return JV_HOLE;
-    if (rmode < 0) rmode = RM_HALFEXPAND;
-    int rprio = get_option_str(vm, opts, "roundingPriority", rp_names, svc, 0);
-    if (rprio == -2) return JV_HOLE;
-    if (rprio < 0) rprio = RP_AUTO;
-    int tzd = get_option_str(vm, opts, "trailingZeroDisplay", tz_names, svc, 0);
-    if (tzd == -2) return JV_HOLE;
-    if (tzd < 0) tzd = 0;
-    int has_sd = vmnsd != JV_UNDEF || vmxsd != JV_UNDEF, has_fd = vmnfd != JV_UNDEF || vmxfd != JV_UNDEF;
-    int need_sd = 1, need_fd = 1;
-    if (rprio == RP_AUTO) {
-        need_sd = has_sd;
-        if (need_sd || (!has_fd && notation == NN_COMPACT)) need_fd = 0;
-    }
-    int mnsd = 1, mxsd = 21, mnfd = mnfd_def, mxfd = mxfd_def;
-    if (need_sd && has_sd) {
-        mnsd = number_option(vm, vmnsd, 1, 21, 1, "minimumSignificantDigits");
-        if (mnsd < 0 || vm->throwing) return JV_HOLE;
-        mxsd = number_option(vm, vmxsd, mnsd, 21, 21, "maximumSignificantDigits");
-        if (mxsd < 0 || vm->throwing) return JV_HOLE;
-    }
-    if (need_fd && has_fd) {
-        int a = number_option(vm, vmnfd, 0, 100, -2, "minimumFractionDigits");
-        if (a == -1 || vm->throwing) return JV_HOLE;
-        int b = number_option(vm, vmxfd, 0, 100, -2, "maximumFractionDigits");
-        if (b == -1 || vm->throwing) return JV_HOLE;
-        if (a == -2) a = mnfd_def < b ? mnfd_def : b;
-        else if (b == -2) b = mxfd_def > a ? mxfd_def : a;
-        else if (a > b) return js_throw_msg(vm, vm->range_error_proto, "maximumFractionDigits value is out of range.");
-        mnfd = a;
-        mxfd = b;
-    }
-    int rtype, computed_prio;
-    if (!need_sd && !need_fd) {
-        mnfd = 0; mxfd = 0; mnsd = 1; mxsd = 2;
-        rtype = RT_MORE;
-        computed_prio = RP_MORE;
-    } else if (rprio == RP_AUTO) {
-        rtype = need_sd ? RT_SIGNIFICANT : RT_FRACTION;
-        computed_prio = RP_AUTO;
-    } else {
-        rtype = rprio == RP_MORE ? RT_MORE : RT_LESS;
-        computed_prio = rprio;
-    }
-    if (inc != 1) {
-        if (rtype != RT_FRACTION) return js_throw_msg(vm, vm->type_error_proto, "RoundingType is not fractionDigits");
-        if (mxfd != mnfd) return js_throw_msg(vm, vm->range_error_proto, "maximumFractionDigits value is out of range.");
-    }
+    dopts dg;
+    if (!digit_options(vm, opts, svc, mnfd_def, mxfd_def, notation == NN_COMPACT, &dg)) return JV_HOLE;
+    int mnid = dg.mnid, mnfd = dg.mnfd, mxfd = dg.mxfd, mnsd = dg.mnsd, mxsd = dg.mxsd, rtype = dg.rtype, inc = dg.inc;
+    int rmode = dg.rmode, computed_prio = dg.rprio, tzd = dg.tzd;
     int compact = get_option_str(vm, opts, "compactDisplay", cpd_names, svc, 0);
     if (compact == -2) return JV_HOLE;
     if (compact < 0) compact = 0;
@@ -5280,6 +5312,1149 @@ static jv unwrap_dtf(js_vm *vm, jv thisv, const char *method) {
     return incompatible(vm, method, thisv);
 }
 
+/* ==== Intl.PluralRules (ECMA-402 16) ==== */
+
+enum { PRS_LOCALE, PRS_TYPE, PRS_SET, PRS_MNID, PRS_MNFD, PRS_MXFD, PRS_MNSD, PRS_MXSD, PRS_RTYPE, PRS_INC, PRS_RMODE,
+       PRS_RPRIO, PRS_TZD, PRS_N };
+static const char *const pr_types[] = { "cardinal", "ordinal", 0 };
+
+/* a new object of a service, its prototype the new target's (else the service's) */
+static uint32_t service_new(js_vm *vm, jv newt, uint32_t kind, uint32_t nslots, int *ok) {
+    jv p = JV_UNDEF;
+    *ok = 1;
+    if (jv_is_obj(newt)) {
+        p = js_get(vm, newt, A_PROTOTYPE);
+        if (vm->throwing) { *ok = 0; return 0; }
+    }
+    uint32_t pr = vm->intl_protos[kind];
+    if (jv_is_obj(p)) pr = jv_idx(p);
+    return intl_new(vm, kind, pr, nslots);
+}
+static jv requires_new(js_vm *vm, const char *name) {
+    char m[96];
+    m[0] = 0;
+    cat(m, sizeof m, "Constructor ");
+    cat(m, sizeof m, name);
+    cat(m, sizeof m, " requires 'new'");
+    return js_throw_msg(vm, vm->type_error_proto, m);
+}
+
+static jv pr_new(js_vm *vm, jv locales, jv options, jv newt) {
+    if (newt == JV_UNDEF || newt == JV_HOLE) return requires_new(vm, "Intl.PluralRules");
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    const char *svc = "Intl.PluralRules";
+    jv opts = options_object(vm, options, svc);
+    if (opts == JV_HOLE) return JV_HOLE;
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    int type = get_option_str(vm, opts, "type", pr_types, svc, 0);
+    if (type == -2) return JV_HOLE;
+    if (type < 0) type = 0;
+    dopts dg;
+    if (!digit_options(vm, opts, svc, 0, 3, 0, &dg)) return JV_HOLE;
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_PLURAL, found, sizeof found, &t);
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_PLURALRULES, PRS_N, &ok);
+    if (!ok) return JV_HOLE;
+    slot_set(vm, o, PRS_LOCALE, jv_str(js_str_ascii(vm, found)));
+    slot_set(vm, o, PRS_TYPE, jv_num(type));
+    slot_set(vm, o, PRS_SET, jv_num(plural_set(found, type)));
+    slot_set(vm, o, PRS_MNID, jv_num(dg.mnid));
+    slot_set(vm, o, PRS_MNFD, jv_num(dg.mnfd));
+    slot_set(vm, o, PRS_MXFD, jv_num(dg.mxfd));
+    slot_set(vm, o, PRS_MNSD, jv_num(dg.mnsd));
+    slot_set(vm, o, PRS_MXSD, jv_num(dg.mxsd));
+    slot_set(vm, o, PRS_RTYPE, jv_num(dg.rtype));
+    slot_set(vm, o, PRS_INC, jv_num(dg.inc));
+    slot_set(vm, o, PRS_RMODE, jv_num(dg.rmode));
+    slot_set(vm, o, PRS_RPRIO, jv_num(dg.rprio));
+    slot_set(vm, o, PRS_TZD, jv_num(dg.tzd));
+    return jv_obj(o);
+}
+
+/* a number's category: its value rounded as the digit options say, then the rules */
+static int pr_category(js_vm *vm, uint32_t o, double d) {
+    dec x;
+    dec_from_double(d, &x);
+    nfo n;
+    memset(&n, 0, sizeof n);
+    n.mnid = slot_int(vm, o, PRS_MNID);
+    n.mnfd = slot_int(vm, o, PRS_MNFD);
+    n.mxfd = slot_int(vm, o, PRS_MXFD);
+    n.mnsd = slot_int(vm, o, PRS_MNSD);
+    n.mxsd = slot_int(vm, o, PRS_MXSD);
+    n.rtype = slot_int(vm, o, PRS_RTYPE);
+    n.increment = slot_int(vm, o, PRS_INC);
+    n.rmode = slot_int(vm, o, PRS_RMODE);
+    n.trailing = slot_int(vm, o, PRS_TZD);
+    int mf;
+    nf_round(&n, &x, &mf);
+    return plural_of((uint32_t)slot_int(vm, o, PRS_SET), &x, mf, 0);
+}
+static jv pr_select(js_vm *vm, uint32_t o, jv v) {
+    double d = js_to_number(vm, v);
+    if (vm->throwing) return JV_HOLE;
+    return jv_str(js_str_ascii(vm, plural_name[pr_category(vm, o, d)]));
+}
+static jv pr_select_range(js_vm *vm, uint32_t o, jv x, jv y) {
+    if (x == JV_UNDEF) return js_throw_msg(vm, vm->type_error_proto, "Invalid startRange : undefined");
+    if (y == JV_UNDEF) return js_throw_msg(vm, vm->type_error_proto, "Invalid endRange : undefined");
+    double a = js_to_number(vm, x);
+    if (vm->throwing) return JV_HOLE;
+    double b = js_to_number(vm, y);
+    if (vm->throwing) return JV_HOLE;
+    if (a != a) return js_throw_msg(vm, vm->range_error_proto, "Invalid startRange : NaN");
+    if (b != b) return js_throw_msg(vm, vm->range_error_proto, "Invalid endRange : NaN");
+    char tag[TAG_MAX + 1];
+    str_ascii(vm, jv_idx(slot_get(vm, o, PRS_LOCALE)), tag, sizeof tag);
+    return jv_str(js_str_ascii(vm, plural_name[plural_range(tag, pr_category(vm, o, a), pr_category(vm, o, b))]));
+}
+/* the categories of a rule set (each condition skipped) */
+static int plural_cats(uint32_t set, int *cats) {
+    if (!set) { cats[0] = PL_OTHER; return 1; }
+    uint32_t p = set, ncat = db8(p++);
+    int n = 0, other = 0;
+    for (uint32_t c = 0; c < ncat; c++) {
+        int cat_ = (int)db8(p++);
+        uint32_t nor = db8(p++);
+        for (uint32_t g = 0; g < nor; g++) {
+            uint32_t nand = db8(p++);
+            for (uint32_t r = 0; r < nand; r++) {
+                uint32_t nr = db8(p + 6);
+                p += 7 + nr * 8;
+            }
+        }
+        if (cat_ == PL_OTHER) other = 1;
+        cats[n++] = cat_;
+    }
+    if (!other) cats[n++] = PL_OTHER;
+    return n;
+}
+static jv pr_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, PRS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "type"), jv_str(js_str_ascii(vm, pr_types[slot_int(vm, o, PRS_TYPE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "minimumIntegerDigits"), slot_get(vm, o, PRS_MNID), 0);
+    /* the digits as V8 reads them back from the skeleton: significant ones when it has
+       any, else fraction ones */
+    if (slot_int(vm, o, PRS_RTYPE) != RT_FRACTION) {
+        js_define(vm, r, js_atom_ascii(vm, "minimumSignificantDigits"), slot_get(vm, o, PRS_MNSD), 0);
+        js_define(vm, r, js_atom_ascii(vm, "maximumSignificantDigits"), slot_get(vm, o, PRS_MXSD), 0);
+    } else {
+        js_define(vm, r, js_atom_ascii(vm, "minimumFractionDigits"), slot_get(vm, o, PRS_MNFD), 0);
+        js_define(vm, r, js_atom_ascii(vm, "maximumFractionDigits"), slot_get(vm, o, PRS_MXFD), 0);
+    }
+    /* the categories as ICU's keywords list them: by name, other last */
+    int cats[8];
+    int n = plural_cats((uint32_t)slot_int(vm, o, PRS_SET), cats);
+    for (int i = 0; i < n; i++) {
+        int best = i;
+        for (int j = i + 1; j < n; j++)
+            if (cats[best] == PL_OTHER || (cats[j] != PL_OTHER && strcmp(plural_name[cats[j]], plural_name[cats[best]]) < 0)) best = j;
+        int keep = cats[i];
+        cats[i] = cats[best];
+        cats[best] = keep;
+    }
+    uint32_t arr = js_array_new(vm, 0);
+    for (int i = 0; i < n; i++) js_array_push(vm, arr, jv_str(js_str_ascii(vm, plural_name[cats[i]])));
+    js_define(vm, r, js_atom_ascii(vm, "pluralCategories"), jv_obj(arr), 0);
+    js_define(vm, r, js_atom_ascii(vm, "roundingIncrement"), slot_get(vm, o, PRS_INC), 0);
+    js_define(vm, r, js_atom_ascii(vm, "roundingMode"), jv_str(js_str_ascii(vm, rm_names[slot_int(vm, o, PRS_RMODE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "roundingPriority"), jv_str(js_str_ascii(vm, rp_names[slot_int(vm, o, PRS_RPRIO)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "trailingZeroDisplay"), jv_str(js_str_ascii(vm, tz_names[slot_int(vm, o, PRS_TZD)])), 0);
+    return jv_obj(r);
+}
+
+/* ==== Intl.ListFormat (ECMA-402 13) ==== */
+
+enum { LFS_LOCALE, LFS_TYPE, LFS_STYLE, LFS_DATALOC, LFS_N };
+static const char *const lf_types[] = { "conjunction", "disjunction", "unit", 0 };
+static const char *const lf_styles[] = { "long", "short", "narrow", 0 };
+
+static jv lf_new(js_vm *vm, jv locales, jv options, jv newt) {
+    if (newt == JV_UNDEF || newt == JV_HOLE) return requires_new(vm, "Intl.ListFormat");
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    jv opts = options_object_strict(vm, options);
+    if (opts == JV_HOLE) return JV_HOLE;
+    const char *svc = "Intl.ListFormat";
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_GENERAL, found, sizeof found, &t);
+    int type = get_option_str(vm, opts, "type", lf_types, svc, 0);
+    if (type == -2) return JV_HOLE;
+    if (type < 0) type = 0;
+    int style = get_option_str(vm, opts, "style", lf_styles, svc, 0);
+    if (style == -2) return JV_HOLE;
+    if (style < 0) style = 0;
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_LISTFORMAT, LFS_N, &ok);
+    if (!ok) return JV_HOLE;
+    int li = locale_index(found);
+    if (li < 0) li = locale_index("en");
+    slot_set(vm, o, LFS_LOCALE, jv_str(js_str_ascii(vm, found)));
+    slot_set(vm, o, LFS_TYPE, jv_num(type));
+    slot_set(vm, o, LFS_STYLE, jv_num(style));
+    slot_set(vm, o, LFS_DATALOC, jv_num(li));
+    return jv_obj(o);
+}
+
+/* ICU's Spanish and Hebrew list handlers: whether the next item changes y to e, o to u,
+   ו to ו- */
+static int starts_ci(const uint16_t *s, uint32_t n, char c) { return n > 0 && (s[0] == (uint16_t)c || s[0] == (uint16_t)upper(c)); }
+static int es_to_e(const uint16_t *s, uint32_t n) {
+    if (!n) return 0;
+    if (starts_ci(s, n, 'h') && n > 1 && (s[1] == 'i' || s[1] == 'I') &&
+        (n == 2 || !(s[2] == 'a' || s[2] == 'A' || s[2] == 'e' || s[2] == 'E'))) return 1;
+    return starts_ci(s, n, 'i');
+}
+static int es_to_u(const uint16_t *s, uint32_t n) {
+    if (!n) return 0;
+    if (starts_ci(s, n, 'o') || s[0] == '8') return 1;
+    if (starts_ci(s, n, 'h') && n > 1 && (s[1] == 'o' || s[1] == 'O')) return 1;
+    if (n >= 2 && s[0] == '1' && s[1] == '1' && (n == 2 || s[2] == ' ')) return 1;
+    return 0;
+}
+static int he_to_dash(const uint16_t *s, uint32_t n) {
+    if (!n) return 0;
+    uint32_t c = s[0];
+    return !((c >= 0x0591 && c <= 0x05F4) || (c >= 0xFB1D && c <= 0xFB4F));
+}
+static int units_eq_ascii(const uint16_t *a, uint32_t n, const uint16_t *b, uint32_t m) {
+    if (n != m) return 0;
+    for (uint32_t i = 0; i < n; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+/* a two or end pattern for the next item, as the language's handler changes it */
+static uint32_t lf_pattern(const char *lang, uint32_t rec, uint32_t f, const uint16_t *next, uint32_t nn, uint16_t *buf, uint32_t cap) {
+    uint32_t n = fld_units(rec, f, buf, cap);
+    static const uint16_t es_y[] = { '{', '0', '}', ' ', 'y', ' ', '{', '1', '}' };
+    static const uint16_t es_o[] = { '{', '0', '}', ' ', 'o', ' ', '{', '1', '}' };
+    static const uint16_t he_vav[] = { '{', '0', '}', ' ', 0x05D5, '{', '1', '}' };
+    if (!strcmp(lang, "es")) {
+        if (units_eq_ascii(buf, n, es_y, 9) && es_to_e(next, nn)) buf[4] = 'e';
+        else if (units_eq_ascii(buf, n, es_o, 9) && es_to_u(next, nn)) buf[4] = 'u';
+    } else if (!strcmp(lang, "he") || !strcmp(lang, "iw")) {
+        if (units_eq_ascii(buf, n, he_vav, 8) && he_to_dash(next, nn) && n + 1 <= cap) {
+            buf[8] = buf[7];
+            buf[7] = buf[6];
+            buf[6] = buf[5];
+            buf[5] = '-';
+            n++;
+        }
+    }
+    return n;
+}
+/* a pattern of {0} and {1} applied to what is built (its {0}) and the next item; the
+   types 0 literal, else an element's (its index's, modulo 255, plus 1) */
+static void lf_apply(const uint16_t *pat, uint32_t pn, vector<uint16_t> *tx, vector<uint8_t> *ty, const uint16_t *item, uint32_t in, uint32_t type) {
+    vector<uint16_t> ot;
+    vector<uint8_t> oy;
+    for (uint32_t i = 0; i < pn; i++) {
+        if (pat[i] == '{' && i + 2 < pn && pat[i + 2] == '}' && (pat[i + 1] == '0' || pat[i + 1] == '1')) {
+            if (pat[i + 1] == '0') {
+                for (size_t k = 0; k < len(*tx); k++) { push_back(ot, (*tx)[k]); push_back(oy, (*ty)[k]); }
+            } else put_u(&ot, &oy, item, in, type);
+            i += 2;
+            continue;
+        }
+        put_c(&ot, &oy, pat[i], 0);
+    }
+    clear(*tx);
+    clear(*ty);
+    for (size_t k = 0; k < len(ot); k++) { push_back(*tx, ot[k]); push_back(*ty, oy[k]); }
+}
+/* a string's units into a vector */
+static void str_units(js_vm *vm, uint32_t s, vector<uint16_t> *out) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len, off = vm->strs[s].off;
+    for (uint32_t i = 0; i < n; i++) push_back(*out, vm->units[off + i]);
+}
+static jv lf_format(js_vm *vm, uint32_t o, jv list, int to_parts) {
+    uint32_t items = js_array_new(vm, 0);
+    if (list != JV_UNDEF) {
+        jv it = js_iter_of(vm, list);
+        if (vm->throwing) return JV_HOLE;
+        jv x;
+        while (js_iter_step(vm, jv_idx(it), &x)) {
+            if (!jv_is_str(x)) {
+                js_iter_close(vm, jv_idx(it));
+                vector<char> m;
+                const char *a = "Iterable yielded ";
+                append_range(m, a, strlen(a));
+                receiver_text(vm, x, &m);
+                const char *b = " which is not a string";
+                append_range(m, b, strlen(b));
+                return js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, js_str_utf8(vm, data(m), len(m)))));
+            }
+            js_array_push(vm, items, x);
+        }
+        if (vm->throwing) return JV_HOLE;
+    }
+    uint32_t n = vm->objs[items].b;
+    int li = slot_int(vm, o, LFS_DATALOC);
+    uint32_t rec = rec_get(li, RKEY(IDK_LIST, (uint32_t)(slot_int(vm, o, LFS_TYPE) * 3 + slot_int(vm, o, LFS_STYLE))));
+    char tag[TAG_MAX + 1], lang[9];
+    db_copy(db32(IDB_LOCALES + (uint32_t)li * LOC_REC), tag, sizeof tag);
+    size_t k = 0;
+    while (tag[k] && tag[k] != '-' && k < 8) { lang[k] = tag[k]; k++; }
+    lang[k] = 0;
+    vector<uint16_t> tx;
+    vector<uint8_t> ty;
+    for (uint32_t i = 0; i < n; i++) {
+        vector<uint16_t> item;
+        str_units(vm, jv_idx(js_array_get(vm, items, i)), &item);
+        uint32_t et = i % 255 + 1;
+        if (i == 0) { put_u(&tx, &ty, data(item), (uint32_t)len(item), et); continue; }
+        uint16_t pat[128];
+        uint32_t pn;
+        if (n == 2) pn = lf_pattern(lang, rec, 3, data(item), (uint32_t)len(item), pat, 128);
+        else if (i == 1) pn = fld_units(rec, 0, pat, 128);
+        else if (i < n - 1) pn = fld_units(rec, 1, pat, 128);
+        else pn = lf_pattern(lang, rec, 2, data(item), (uint32_t)len(item), pat, 128);
+        lf_apply(pat, pn, &tx, &ty, data(item), (uint32_t)len(item), et);
+    }
+    if (!to_parts) return jv_str(js_str_new(vm, data(tx), (uint32_t)len(tx)));
+    static const char *const names[] = { "literal", "element" };
+    vector<uint32_t> pt;
+    size_t i = 0;
+    while (i < len(tx)) {
+        size_t j = i + 1;
+        while (j < len(tx) && ty[j] == ty[i]) j++;
+        push_back(pt, (uint32_t)i);
+        push_back(pt, (uint32_t)j);
+        push_back(pt, (uint32_t)(ty[i] != 0));
+        i = j;
+    }
+    return parts_array(vm, &tx, &pt, names, 0);
+}
+static jv lf_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, LFS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "type"), jv_str(js_str_ascii(vm, lf_types[slot_int(vm, o, LFS_TYPE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "style"), jv_str(js_str_ascii(vm, lf_styles[slot_int(vm, o, LFS_STYLE)])), 0);
+    return jv_obj(r);
+}
+
+/* ==== Intl.RelativeTimeFormat (ECMA-402 17) ==== */
+
+enum { RTS_LOCALE, RTS_STYLE, RTS_NUMERIC, RTS_NU, RTS_NF, RTS_DATALOC, RTS_TAG, RTS_N };
+static const char *const rt_styles[] = { "long", "short", "narrow", 0 };
+static const char *const rt_numerics[] = { "always", "auto", 0 };
+static const char *const rt_units[] = { "year", "quarter", "month", "week", "day", "hour", "minute", "second", 0 };
+
+static jv rt_new(js_vm *vm, jv locales, jv options, jv newt) {
+    if (newt == JV_UNDEF || newt == JV_HOLE) return requires_new(vm, "Intl.RelativeTimeFormat");
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    const char *svc = "Intl.RelativeTimeFormat";
+    jv opts = options_object(vm, options, svc);
+    if (opts == JV_HOLE) return JV_HOLE;
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    uint32_t nus = 0;
+    char nu_opt[16];
+    nu_opt[0] = 0;
+    int r = get_option_str(vm, opts, "numberingSystem", 0, svc, &nus);
+    if (r == -2) return JV_HOLE;
+    if (r >= 0) {
+        char b[80];
+        int n = str_ascii(vm, nus, b, sizeof b);
+        if (n < 0 || !is_type(b)) {
+            vector<char> m;
+            const char *a = "Invalid numberingSystem : ";
+            append_range(m, a, strlen(a));
+            js_str_to_utf8(vm, nus, &m);
+            return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+        }
+        if (n < 16) copyz(nu_opt, sizeof nu_opt, b);
+    }
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_GENERAL, found, sizeof found, &t);
+    char nu[16], kw_nu[16];
+    dt_keyword(&t, "nu", kw_nu, sizeof kw_nu);
+    if (nu_opt[0] && kw_nu[0] && strcmp(nu_opt, kw_nu)) kw_nu[0] = 0;
+    if (nu_opt[0] && numbering_index(nu_opt) >= 0) copyz(nu, sizeof nu, nu_opt);
+    else if (kw_nu[0]) copyz(nu, sizeof nu, kw_nu);
+    else default_numbering(found, nu, sizeof nu);
+    int style = get_option_str(vm, opts, "style", rt_styles, svc, 0);
+    if (style == -2) return JV_HOLE;
+    if (style < 0) style = 0;
+    int numeric = get_option_str(vm, opts, "numeric", rt_numerics, svc, 0);
+    if (numeric == -2) return JV_HOLE;
+    if (numeric < 0) numeric = 0;
+    char loc[TAG_MAX + 1], nftag[TAG_MAX + 1];
+    copyz(loc, sizeof loc, found);
+    if (kw_nu[0]) { cat(loc, sizeof loc, "-u-nu-"); cat(loc, sizeof loc, kw_nu); }
+    copyz(nftag, sizeof nftag, found);
+    cat(nftag, sizeof nftag, "-u-nu-");
+    cat(nftag, sizeof nftag, nu);
+    jv nf = nf_new(vm, jv_str(js_str_ascii(vm, nftag)), JV_UNDEF, JV_UNDEF, svc);
+    if (nf == JV_HOLE) return JV_HOLE;
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_RELATIVETIMEFORMAT, RTS_N, &ok);
+    if (!ok) return JV_HOLE;
+    int li = locale_index(found);
+    if (li < 0) li = locale_index("en");
+    slot_set(vm, o, RTS_LOCALE, jv_str(js_str_ascii(vm, loc)));
+    slot_set(vm, o, RTS_STYLE, jv_num(style));
+    slot_set(vm, o, RTS_NUMERIC, jv_num(numeric));
+    slot_set(vm, o, RTS_NU, jv_str(js_str_ascii(vm, nu)));
+    slot_set(vm, o, RTS_NF, nf);
+    slot_set(vm, o, RTS_DATALOC, jv_num(li));
+    slot_set(vm, o, RTS_TAG, jv_str(js_str_ascii(vm, found)));
+    return jv_obj(o);
+}
+
+/* a relative time field of a unit at a style, else at the wider ones (ICU's fallbacks) */
+static uint32_t rt_field(int li, int unit, int style, uint32_t f, uint16_t *buf, uint32_t cap) {
+    for (int s = style; s >= 0; s--) {
+        uint32_t n = fld_units(rec_get(li, RKEY(IDK_RELTIME, (uint32_t)(unit * 3 + s))), f, buf, cap);
+        if (n) return n;
+    }
+    return 0;
+}
+
+static jv rt_format(js_vm *vm, uint32_t o, jv value, jv unitv, int to_parts) {
+    double v = js_to_number(vm, value);
+    if (vm->throwing) return JV_HOLE;
+    uint32_t us = js_to_string(vm, unitv);
+    if (!us) return JV_HOLE;
+    const char *fn = "Intl.RelativeTimeFormat.prototype.format";
+    if (to_parts) fn = "Intl.RelativeTimeFormat.prototype.formatToParts";
+    if (v != v || v == INFINITY || v == -INFINITY) {
+        char m[160];
+        m[0] = 0;
+        cat(m, sizeof m, "Value need to be finite number for ");
+        cat(m, sizeof m, fn);
+        cat(m, sizeof m, "()");
+        return js_throw_msg(vm, vm->range_error_proto, m);
+    }
+    char ub[16];
+    int un = str_ascii(vm, us, ub, sizeof ub);
+    int unit = -1;
+    for (int i = 0; rt_units[i] && un > 0; i++) {
+        size_t l = strlen(rt_units[i]);
+        if (!strcmp(ub, rt_units[i]) || ((size_t)un == l + 1 && !strncmp(ub, rt_units[i], l) && ub[l] == 's')) unit = i;
+    }
+    if (unit < 0) {
+        vector<char> m;
+        const char *a = "Invalid unit argument for ";
+        append_range(m, a, strlen(a));
+        append_range(m, fn, strlen(fn));
+        append_range(m, "() '", 4);
+        js_str_to_utf8(vm, us, &m);
+        push_back(m, '\'');
+        return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+    }
+    int li = slot_int(vm, o, RTS_DATALOC), style = slot_int(vm, o, RTS_STYLE);
+    uint16_t buf[160];
+    if (slot_int(vm, o, RTS_NUMERIC) == 1 && v > -2.1 && v < 2.1) {
+        /* auto: an offset within 1% of -2 to 2 named, when the locale names it */
+        double x100 = v * 100.0;
+        int io;
+        if (x100 < 0) io = (int)(x100 - 0.5);
+        else io = (int)(x100 + 0.5);
+        int idx = -1;
+        if (io == -200) idx = 0;
+        else if (io == -100) idx = 1;
+        else if (io == 0) idx = 2;
+        else if (io == 100) idx = 3;
+        else if (io == 200) idx = 4;
+        if (idx >= 0 && (unit != 7 || idx == 2)) {
+            uint32_t n = rt_field(li, unit, style, (uint32_t)idx, buf, 160);
+            if (n) {
+                jv s = jv_str(js_str_new(vm, buf, n));
+                if (!to_parts) return s;
+                uint32_t arr = js_array_new(vm, 0);
+                uint32_t po = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+                js_define(vm, po, js_atom_ascii(vm, "type"), jv_str(js_str_ascii(vm, "literal")), 0);
+                js_define(vm, po, js_atom_ascii(vm, "value"), s, 0);
+                js_array_push(vm, arr, jv_obj(po));
+                return jv_obj(arr);
+            }
+        }
+    }
+    /* the number: its sign the direction, its plural the pattern's */
+    int past = signbit(v) != 0;
+    double a = fabs(v);
+    uint32_t nf = jv_idx(slot_get(vm, o, RTS_NF));
+    dec x;
+    dec_from_double(a, &x);
+    nfo n;
+    nfo_read(vm, nf, &n);
+    vector<uint16_t> ntx;
+    vector<uint8_t> nty;
+    nfinfo inf;
+    nf_render(&n, &x, -1, &ntx, &nty, &inf);
+    vector<uint16_t> ot;
+    vector<uint8_t> oy;
+    nf_assemble(&ntx, &nty, &inf, &ot, &oy);
+    dec y;
+    dec_from_double(a, &y);
+    int mf;
+    nf_round(&n, &y, &mf);
+    char tag[TAG_MAX + 1];
+    str_ascii(vm, jv_idx(slot_get(vm, o, RTS_TAG)), tag, sizeof tag);
+    int plural = plural_of(plural_set(tag, 0), &y, mf, 0);
+    uint32_t base = 5;
+    if (past) base = 11;
+    uint32_t pn = rt_field(li, unit, style, base + (uint32_t)plural, buf, 160);
+    if (!pn) pn = rt_field(li, unit, style, base + PL_OTHER, buf, 160);
+    /* the pattern's {0} the number */
+    vector<uint16_t> tx;
+    vector<uint8_t> ty;
+    for (uint32_t i = 0; i < pn; i++) {
+        if (buf[i] == '{' && i + 2 < pn && buf[i + 1] == '0' && buf[i + 2] == '}') {
+            for (size_t k = 0; k < len(ot); k++) { push_back(tx, ot[k]); push_back(ty, (uint8_t)(oy[k] + 1)); }
+            i += 2;
+            continue;
+        }
+        put_c(&tx, &ty, buf[i], 0);
+    }
+    if (!to_parts) return jv_str(js_str_new(vm, data(tx), (uint32_t)len(tx)));
+    /* the parts: the literals, and the number's (with their unit) */
+    uint32_t arr = js_array_new(vm, 0);
+    uint32_t a_type = js_atom_ascii(vm, "type"), a_value = js_atom_ascii(vm, "value"), a_unit = js_atom_ascii(vm, "unit");
+    size_t i = 0;
+    while (i < len(tx)) {
+        size_t j = i + 1;
+        if (ty[i] == 0) {
+            while (j < len(tx) && ty[j] == 0) j++;
+            uint32_t po = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+            js_define(vm, po, a_type, jv_str(js_str_ascii(vm, "literal")), 0);
+            js_define(vm, po, a_value, jv_str(js_str_new(vm, data(tx) + i, (uint32_t)(j - i))), 0);
+            js_array_push(vm, arr, jv_obj(po));
+            i = j;
+            continue;
+        }
+        while (j < len(tx) && ty[j] != 0) j++;
+        vector<uint16_t> nt;
+        vector<uint8_t> ny;
+        for (size_t k = i; k < j; k++) { push_back(nt, tx[k]); push_back(ny, (uint8_t)(ty[k] - 1)); }
+        vector<uint32_t> pt;
+        parts_of(&nt, &ny, 0, &pt);
+        for (size_t q = 0; q + 2 < len(pt); q += 3) {
+            uint32_t s0 = pt[q], s1 = pt[q + 1], tp = pt[q + 2];
+            uint32_t po = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+            js_define(vm, po, a_type, jv_str(js_str_ascii(vm, pt_names[tp])), 0);
+            js_define(vm, po, a_value, jv_str(js_str_new(vm, data(nt) + s0, s1 - s0)), 0);
+            js_define(vm, po, a_unit, jv_str(js_str_ascii(vm, rt_units[unit])), 0);
+            js_array_push(vm, arr, jv_obj(po));
+        }
+        i = j;
+    }
+    return jv_obj(arr);
+}
+static jv rt_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, RTS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "style"), jv_str(js_str_ascii(vm, rt_styles[slot_int(vm, o, RTS_STYLE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "numeric"), jv_str(js_str_ascii(vm, rt_numerics[slot_int(vm, o, RTS_NUMERIC)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "numberingSystem"), slot_get(vm, o, RTS_NU), 0);
+    return jv_obj(r);
+}
+
+/* ==== Intl.DisplayNames (ECMA-402 12) ==== */
+
+enum { DNS_LOCALE, DNS_STYLE, DNS_TYPE, DNS_FALLBACK, DNS_LANGDISPLAY, DNS_DATALOC, DNS_N };
+static const char *const dn_styles[] = { "narrow", "short", "long", 0 };
+static const char *const dn_types[] = { "language", "region", "script", "currency", "calendar", "dateTimeField", 0 };
+static const char *const dn_fallbacks[] = { "code", "none", 0 };
+static const char *const dn_displays[] = { "dialect", "standard", 0 };
+enum { DNT_LANGUAGE, DNT_REGION, DNT_SCRIPT, DNT_CURRENCY, DNT_CALENDAR, DNT_FIELD };
+
+static jv dn_new(js_vm *vm, jv locales, jv options, jv newt) {
+    if (newt == JV_UNDEF || newt == JV_HOLE) return requires_new(vm, "Intl.DisplayNames");
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    jv opts = options_object_strict(vm, options);
+    if (opts == JV_HOLE) return JV_HOLE;
+    const char *svc = "Intl.DisplayNames";
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_GENERAL, found, sizeof found, &t);
+    int style = get_option_str(vm, opts, "style", dn_styles, svc, 0);
+    if (style == -2) return JV_HOLE;
+    if (style < 0) style = 2;
+    int type = get_option_str(vm, opts, "type", dn_types, svc, 0);
+    if (type == -2) return JV_HOLE;
+    int fallback = get_option_str(vm, opts, "fallback", dn_fallbacks, svc, 0);
+    if (fallback == -2) return JV_HOLE;
+    if (fallback < 0) fallback = 0;
+    int display = get_option_str(vm, opts, "languageDisplay", dn_displays, svc, 0);
+    if (display == -2) return JV_HOLE;
+    if (display < 0) display = 0;
+    if (type < 0) return js_throw_msg(vm, vm->type_error_proto, "invalid_argument");
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_DISPLAYNAMES, DNS_N, &ok);
+    if (!ok) return JV_HOLE;
+    int li = locale_index(found);
+    if (li < 0) li = locale_index("en");
+    slot_set(vm, o, DNS_LOCALE, jv_str(js_str_ascii(vm, found)));
+    slot_set(vm, o, DNS_STYLE, jv_num(style));
+    slot_set(vm, o, DNS_TYPE, jv_num(type));
+    slot_set(vm, o, DNS_FALLBACK, jv_num(fallback));
+    slot_set(vm, o, DNS_LANGDISPLAY, jv_num(display));
+    slot_set(vm, o, DNS_DATALOC, jv_num(li));
+    return jv_obj(o);
+}
+static jv dn_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    int type = slot_int(vm, o, DNS_TYPE);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, DNS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "style"), jv_str(js_str_ascii(vm, dn_styles[slot_int(vm, o, DNS_STYLE)])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "type"), jv_str(js_str_ascii(vm, dn_types[type])), 0);
+    js_define(vm, r, js_atom_ascii(vm, "fallback"), jv_str(js_str_ascii(vm, dn_fallbacks[slot_int(vm, o, DNS_FALLBACK)])), 0);
+    if (type == DNT_LANGUAGE)
+        js_define(vm, r, js_atom_ascii(vm, "languageDisplay"), jv_str(js_str_ascii(vm, dn_displays[slot_int(vm, o, DNS_LANGDISPLAY)])), 0);
+    return jv_obj(r);
+}
+
+/* a names record's entry for a code (entries code, GS, name, by FS): its length, 0 none */
+static uint32_t names_find(uint32_t rec, const char *code, uint16_t *buf, uint32_t cap) {
+    size_t cn = strlen(code);
+    uint32_t p = rec;
+    while (db8(p)) {
+        uint32_t q = p;
+        size_t k = 0;
+        while (k < cn && db8(q) == (uint8_t)code[k]) { q++; k++; }
+        if (k == cn && db8(q) == 0x1D) {
+            q++;
+            uint32_t e = q;
+            while (db8(e) && db8(e) != 0x1F) e++;
+            return u8_units(q, e - q, buf, cap);
+        }
+        while (db8(p) && db8(p) != 0x1F) p++;
+        if (db8(p) == 0x1F) p++;
+    }
+    return 0;
+}
+/* a display name: the first of the locale's chain (each its own entries) and root */
+static uint32_t name_of(int li, uint32_t cat_, const char *code, uint16_t *buf, uint32_t cap) {
+    for (int guard = 0; li >= 0 && li != 0xFFFF && guard < 32; guard++) {
+        uint32_t rec = res_in(locale_res((uint32_t)li), locale_nres((uint32_t)li), RKEY(cat_, 0));
+        if (rec) {
+            uint32_t n = names_find(rec, code, buf, cap);
+            if (n) return n;
+        }
+        li = (int)locale_parent((uint32_t)li);
+    }
+    uint32_t rec = res_in(IDB_ROOT_RES, IDB_ROOT_RES_N, RKEY(cat_, 0));
+    if (rec) return names_find(rec, code, buf, cap);
+    return 0;
+}
+/* a name, its short alternative first at the short styles */
+static uint32_t name_styled(int li, uint32_t cat_, const char *code, int is_short, uint16_t *buf, uint32_t cap) {
+    if (is_short) {
+        char alt[64];
+        copyz(alt, sizeof alt, code);
+        cat(alt, sizeof alt, "-alt-short");
+        uint32_t n = name_of(li, cat_, alt, buf, cap);
+        if (n) return n;
+    }
+    return name_of(li, cat_, code, buf, cap);
+}
+/* a region's name, a deprecated code's replacement's when it has none (uloc's) */
+static uint32_t region_name(int li, const char *code, int is_short, uint16_t *buf, uint32_t cap) {
+    uint32_t n = name_styled(li, IDK_REGIONN, code, is_short, buf, cap);
+    if (n) return n;
+    static const char *const dep[] = { "AN", "CW", "BU", "MM", "CS", "RS", "DD", "DE", "DY", "BJ", "FX", "FR", "HV", "BF", "NH", "VU",
+        "RH", "ZW", "SU", "RU", "TP", "TL", "UK", "GB", "VD", "VN", "YD", "YE", "YU", "RS", "ZR", "CD", 0 };
+    for (int i = 0; dep[i]; i += 2)
+        if (!strcmp(code, dep[i])) return name_styled(li, IDK_REGIONN, dep[i + 1], is_short, buf, cap);
+    return 0;
+}
+static void put_units(vector<uint16_t> *out, const uint16_t *b, uint32_t n) { for (uint32_t i = 0; i < n; i++) push_back(*out, b[i]); }
+static void put_ascii(vector<uint16_t> *out, const char *s) { for (size_t i = 0; s[i]; i++) push_back(*out, (uint16_t)(uint8_t)s[i]); }
+
+/* LocaleDisplayNamesImpl::localeDisplayName of a canonical language tag: 1, or 0 for a
+   name the data lacks without the code's fallback */
+static int dn_language(int li, const itag *t, int is_short, int dialect, int subst, vector<uint16_t> *out) {
+    char lang[16];
+    copyz(lang, sizeof lang, t->lang);
+    if (!lang[0] || !strcmp(lang, "und")) copyz(lang, sizeof lang, "root");
+    int has_script = t->script[0] != 0, has_region = t->region[0] != 0;
+    uint16_t buf[256];
+    uint32_t n = 0;
+    if (dialect) {
+        /* ICU's search: the buffer it builds each key in is not cleared between them, so
+           with a script and a region only the three together can match */
+        char key[64];
+        if (has_script && has_region) {
+            copyz(key, sizeof key, lang); cat(key, sizeof key, "-"); cat(key, sizeof key, t->script);
+            cat(key, sizeof key, "-"); cat(key, sizeof key, t->region);
+            n = name_styled(li, IDK_LANGN, key, is_short, buf, 256);
+            if (n) { has_script = 0; has_region = 0; }
+        } else if (has_script) {
+            copyz(key, sizeof key, lang); cat(key, sizeof key, "-"); cat(key, sizeof key, t->script);
+            n = name_styled(li, IDK_LANGN, key, is_short, buf, 256);
+            if (n) has_script = 0;
+        } else if (has_region) {
+            copyz(key, sizeof key, lang); cat(key, sizeof key, "-"); cat(key, sizeof key, t->region);
+            n = name_styled(li, IDK_LANGN, key, is_short, buf, 256);
+            if (n) has_region = 0;
+        }
+    }
+    vector<uint16_t> name;
+    if (n) put_units(&name, buf, n);
+    else {
+        n = name_styled(li, IDK_LANGN, lang, is_short, buf, 256);
+        if (n) put_units(&name, buf, n);
+        else if (subst) put_ascii(&name, lang);
+        else return 0;
+    }
+    uint32_t pat = rec_get(li, RKEY(IDK_LOCPAT, 0));
+    uint16_t lp[48], sp[48];
+    uint32_t lpn = fld_units(pat, 0, lp, 48), spn = fld_units(pat, 1, sp, 48);
+    vector<uint16_t> rem;
+    int any = 0;
+    int kv = find_kw(t, "va"), posix = kv >= 0 && !strcmp(t->val[kv], "posix");
+    for (int part = 0; part < 2 + (int)t->nvar + posix; part++) {
+        vector<uint16_t> item;
+        if (part == 0) {
+            if (!has_script) continue;
+            n = name_styled(li, IDK_SCRIPTN, t->script, is_short, buf, 256);
+            if (n) put_units(&item, buf, n);
+            else if (subst) put_ascii(&item, t->script);
+            else return 0;
+        } else if (part == 1) {
+            if (!has_region) continue;
+            n = region_name(li, t->region, is_short, buf, 256);
+            if (n) put_units(&item, buf, n);
+            else if (subst) put_ascii(&item, t->region);
+            else return 0;
+        } else {
+            char v[16];
+            if (part - 2 < (int)t->nvar) copyz(v, sizeof v, t->var[part - 2]);
+            else copyz(v, sizeof v, "posix");
+            for (size_t k = 0; v[k]; k++) v[k] = (char)upper(v[k]);
+            n = name_of(li, IDK_VARIANTN, v, buf, 256);
+            if (n) put_units(&item, buf, n);
+            else if (subst) put_ascii(&item, v);
+            else return 0;
+        }
+        if (!any) { put_units(&rem, data(item), (uint32_t)len(item)); any = 1; }
+        else {
+            vector<uint16_t> j;
+            simple_format(sp, spn, &rem, &item, 0, &j);
+            clear(rem);
+            put_units(&rem, data(j), (uint32_t)len(j));
+        }
+    }
+    if (!any) { put_units(out, data(name), (uint32_t)len(name)); return 1; }
+    /* the parentheses within the remainder bracketed (fullwidth where the pattern is) */
+    uint16_t op = '(', cp = ')', ob = '[', cb = ']';
+    if (units_has_char(lp, lpn, 0xFF08)) { op = 0xFF08; cp = 0xFF09; ob = 0xFF3B; cb = 0xFF3D; }
+    for (size_t k = 0; k < len(rem); k++) {
+        if (rem[k] == op) rem[k] = ob;
+        else if (rem[k] == cp) rem[k] = cb;
+    }
+    simple_format(lp, lpn, &name, &rem, 0, out);
+    return 1;
+}
+
+static int is_region_code(const char *s, size_t n) { return (n == 2 && all_of(s, 2, 0)) || (n == 3 && all_of(s, 3, 1)); }
+
+static jv dn_of(js_vm *vm, uint32_t o, jv codev) {
+    uint32_t cs = js_to_string(vm, codev);
+    if (!cs) return JV_HOLE;
+    int type = slot_int(vm, o, DNS_TYPE), li = slot_int(vm, o, DNS_DATALOC);
+    int style = slot_int(vm, o, DNS_STYLE), subst = slot_int(vm, o, DNS_FALLBACK) == 0;
+    int is_short = style != 2;
+    char code[TAG_MAX + 1];
+    int n = str_ascii(vm, cs, code, sizeof code);
+    uint16_t buf[256];
+    uint32_t bn = 0;
+    if (type == DNT_LANGUAGE) {
+        /* a unicode_language_id alone (no extension, no private use), then canonical */
+        itag t;
+        int bad = n < 0 || !starts_with_language_id(code, (size_t)n);
+        if (!bad) {
+            char lc[TAG_MAX + 1];
+            for (int k = 0; k < n; k++) lc[k] = (char)lower((unsigned char)code[k]);
+            lc[n] = 0;
+            bad = tag_parse_lc(lc, (size_t)n, &t) != 0;
+        }
+        if (!bad) bad = t.has_u || t.tx[0] || t.next || t.priv[0];
+        if (bad) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        tag_canon(&t);
+        vector<uint16_t> out;
+        if (!dn_language(li, &t, is_short, slot_int(vm, o, DNS_LANGDISPLAY) == 0, subst, &out)) return JV_UNDEF;
+        return jv_str(js_str_new(vm, data(out), (uint32_t)len(out)));
+    }
+    if (type == DNT_REGION) {
+        if (n < 0 || !is_region_code(code, (size_t)n)) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        bn = region_name(li, code, is_short, buf, 256);
+    } else if (type == DNT_SCRIPT) {
+        if (n != 4 || !all_of(code, 4, 0)) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        bn = name_styled(li, IDK_SCRIPTN, code, is_short, buf, 256);
+    } else if (type == DNT_CURRENCY) {
+        if (n != 3 || !all_of(code, 3, 0)) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        char up[4];
+        for (int k = 0; k < 3; k++) up[k] = (char)upper(code[k]);
+        up[3] = 0;
+        bn = name_of(li, IDK_CURN, up, buf, 256);
+    } else if (type == DNT_CALENDAR) {
+        if (n < 0 || !is_type(code)) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        char key[TAG_MAX + 1];
+        copyz(key, sizeof key, code);
+        if (!strcmp(code, "gregory")) copyz(key, sizeof key, "gregorian");
+        else if (!strcmp(code, "ethioaa")) copyz(key, sizeof key, "ethiopic-amete-alem");
+        bn = name_of(li, IDK_CALN, key, buf, 256);
+    } else {
+        static const char *const fields[] = { "era", "year", "quarter", "month", "weekOfYear", "weekday", "day", "dayPeriod",
+            "hour", "minute", "second", "timeZoneName", 0 };
+        int f = -1;
+        for (int k = 0; fields[k] && n > 0; k++) if (!strcmp(code, fields[k])) f = k;
+        if (f < 0) return js_throw_msg(vm, vm->range_error_proto, "invalid_argument");
+        uint32_t w = 0;
+        if (style == 1) w = 1;
+        else if (style == 0) w = 2;
+        for (int k = (int)w; k >= 0 && !bn; k--) bn = fld_units(rec_get(li, RKEY(IDK_DTFIELD, (uint32_t)k)), (uint32_t)f, buf, 256);
+        return jv_str(js_str_new(vm, buf, bn));
+    }
+    if (bn) return jv_str(js_str_new(vm, buf, bn));
+    if (subst) return jv_str(cs);
+    return JV_UNDEF;
+}
+
+/* ==== Intl.Segmenter (ECMA-402 18) ==== */
+
+enum { SGS_LOCALE, SGS_GRANULARITY, SGS_N };
+enum { SGM_SEGMENTER, SGM_STRING, SGM_BOUNDS, SGM_N };
+enum { SGI_SEGMENTS, SGI_POS, SGI_N };
+static const char *const sg_names[] = { "grapheme", "word", "sentence", 0 };
+
+static jv sg_new(js_vm *vm, jv locales, jv options, jv newt) {
+    if (newt == JV_UNDEF || newt == JV_HOLE) return requires_new(vm, "Intl.Segmenter");
+    uint32_t req = canonical_list(vm, locales);
+    if (!req) return JV_HOLE;
+    jv opts = options_object_strict(vm, options);
+    if (opts == JV_HOLE) return JV_HOLE;
+    const char *svc = "Intl.Segmenter";
+    if (get_matcher(vm, opts, svc) == -2) return JV_HOLE;
+    char found[TAG_MAX + 1];
+    itag t;
+    resolve_locale(vm, req, AV_GENERAL, found, sizeof found, &t);
+    int g = get_option_str(vm, opts, "granularity", sg_names, svc, 0);
+    if (g == -2) return JV_HOLE;
+    if (g < 0) g = 0;
+    int ok;
+    uint32_t o = service_new(vm, newt, JIK_SEGMENTER, SGS_N, &ok);
+    if (!ok) return JV_HOLE;
+    slot_set(vm, o, SGS_LOCALE, jv_str(js_str_ascii(vm, found)));
+    slot_set(vm, o, SGS_GRANULARITY, jv_num(g));
+    return jv_obj(o);
+}
+static jv sg_resolved(js_vm *vm, uint32_t o) {
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "locale"), slot_get(vm, o, SGS_LOCALE), 0);
+    js_define(vm, r, js_atom_ascii(vm, "granularity"), jv_str(js_str_ascii(vm, sg_names[slot_int(vm, o, SGS_GRANULARITY)])), 0);
+    return jv_obj(r);
+}
+
+/* a break property: the ranges' value for a code point (0 outside them) */
+static uint32_t break_class(uint32_t table, uint32_t count, uint32_t cp) {
+    uint32_t lo = 0, hi = count;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2, at = table + mid * 9;
+        if (cp < db32(at)) hi = mid;
+        else if (cp > db32(at + 4)) lo = mid + 1;
+        else return db8(at + 8);
+    }
+    return 0;
+}
+/* the grapheme, word and sentence classes (tools/gen-intl.py's lists) */
+enum { GB_OTHER, GB_CR, GB_LF, GB_CONTROL, GB_EXTEND, GB_ZWJ, GB_RI, GB_PREPEND, GB_SPACINGMARK, GB_L, GB_V, GB_T, GB_LV, GB_LVT };
+enum { WB_OTHER, WB_CR, WB_LF, WB_NEWLINE, WB_EXTEND, WB_ZWJ, WB_RI, WB_FORMAT, WB_KATAKANA, WB_HL, WB_ALETTER, WB_SQ, WB_DQ,
+       WB_MIDNUMLET, WB_MIDLETTER, WB_MIDNUM, WB_NUMERIC, WB_ENL, WB_WSEGSPACE };
+enum { SB_OTHER, SB_CR, SB_LF, SB_EXTEND, SB_SEP, SB_FORMAT, SB_SP, SB_LOWER, SB_UPPER, SB_OLETTER, SB_NUMERIC, SB_ATERM,
+       SB_SCONTINUE, SB_STERM, SB_CLOSE };
+
+/* a string's code points and their UTF-16 offsets (the end's last) */
+static void code_points(js_vm *vm, uint32_t s, vector<uint32_t> *cps, vector<uint32_t> *offs) {
+    js_str_flatten(vm, s);
+    uint32_t n = vm->strs[s].len, o = vm->strs[s].off;
+    uint32_t i = 0;
+    while (i < n) {
+        uint32_t c = vm->units[o + i], w = 1;
+        if (c >= 0xD800 && c < 0xDC00 && i + 1 < n && vm->units[o + i + 1] >= 0xDC00 && vm->units[o + i + 1] < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (vm->units[o + i + 1] - 0xDC00);
+            w = 2;
+        }
+        push_back(*cps, c);
+        push_back(*offs, i);
+        i += w;
+    }
+    push_back(*offs, n);
+}
+
+/* UAX #29's extended grapheme clusters: whether there is a break before code point i */
+static void grapheme_bounds(vector<uint32_t> *cps, vector<uint8_t> *brk) {
+    size_t n = len(*cps);
+    int ep = 0, incb = 0, ri = 0;
+    uint32_t prev = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t v = break_class(IDB_GCB, IDB_GCB_N, (*cps)[i]);
+        uint32_t c = v & 15, ext = (v >> 4) & 1, ib = (v >> 5) & 3;
+        int b = 1;
+        if (i == 0) b = 1;
+        else {
+            uint32_t a = prev & 15;
+            if (a == GB_CR && c == GB_LF) b = 0;
+            else if (a == GB_CONTROL || a == GB_CR || a == GB_LF) b = 1;
+            else if (c == GB_CONTROL || c == GB_CR || c == GB_LF) b = 1;
+            else if (a == GB_L && (c == GB_L || c == GB_V || c == GB_LV || c == GB_LVT)) b = 0;
+            else if ((a == GB_LV || a == GB_V) && (c == GB_V || c == GB_T)) b = 0;
+            else if ((a == GB_LVT || a == GB_T) && c == GB_T) b = 0;
+            else if (c == GB_EXTEND || c == GB_ZWJ) b = 0;
+            else if (c == GB_SPACINGMARK) b = 0;
+            else if (a == GB_PREPEND) b = 0;
+            else if (ib == 2 && incb == 2) b = 0;
+            else if (a == GB_ZWJ && ext && ep == 2) b = 0;
+            else if (a == GB_RI && c == GB_RI && (ri & 1)) b = 0;
+        }
+        push_back(*brk, (uint8_t)b);
+        /* the states through this code point */
+        if (ext) ep = 1;
+        else if (ep == 1 && c == GB_EXTEND) ep = 1;
+        else if (ep == 1 && c == GB_ZWJ) ep = 2;
+        else ep = 0;
+        if (ib == 2) incb = 1;
+        else if (incb && ib == 1) incb = 2;
+        else if (incb && ib == 3) { /* kept */ }
+        else incb = 0;
+        if (c == GB_RI) ri++;
+        else ri = 0;
+        prev = v;
+    }
+}
+
+static int ahl(uint32_t c) { return c == WB_ALETTER || c == WB_HL; }
+static int midnumletq(uint32_t c) { return c == WB_MIDNUMLET || c == WB_SQ; }
+static int wb_ignored(uint32_t c) { return c == WB_EXTEND || c == WB_FORMAT || c == WB_ZWJ; }
+
+/* UAX #29's word boundaries */
+static void word_bounds(vector<uint32_t> *cps, vector<uint8_t> *brk, vector<uint8_t> *cls) {
+    size_t n = len(*cps);
+    vector<uint8_t> ep;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t v = break_class(IDB_WB, IDB_WB_N, (*cps)[i]);
+        push_back(*cls, (uint8_t)(v & 31));
+        push_back(ep, (uint8_t)((v >> 5) & 1));
+    }
+    int ri = 0;   /* regional indicators in the run before (WB4's ignored skipped) */
+    for (size_t i = 0; i < n; i++) {
+        uint32_t c = (*cls)[i];
+        int b = 1;
+        if (i > 0) {
+            uint32_t a = (*cls)[i - 1];
+            /* the classes around, Extend, Format and ZWJ skipped (WB4) */
+            int l = (int)i - 1;
+            while (l >= 0 && wb_ignored((*cls)[l])) l--;
+            int ll = l - 1;
+            while (ll >= 0 && wb_ignored((*cls)[ll])) ll--;
+            size_t r2 = i + 1;
+            while (r2 < n && wb_ignored((*cls)[r2])) r2++;
+            uint32_t L = WB_OTHER, LL = WB_OTHER, RR = WB_OTHER;
+            int hasl = l >= 0, hasll = ll >= 0, hasrr = r2 < n;
+            if (hasl) L = (*cls)[l];
+            if (hasll) LL = (*cls)[ll];
+            if (hasrr) RR = (*cls)[r2];
+            if (a == WB_CR && c == WB_LF) b = 0;
+            else if (a == WB_NEWLINE || a == WB_CR || a == WB_LF) b = 1;
+            else if (c == WB_NEWLINE || c == WB_CR || c == WB_LF) b = 1;
+            else if (a == WB_ZWJ && ep[i]) b = 0;
+            else if (a == WB_WSEGSPACE && c == WB_WSEGSPACE) b = 0;
+            else if (wb_ignored(c)) b = 0;
+            else if (!hasl) b = 1;
+            else if (ahl(L) && ahl(c)) b = 0;
+            else if (ahl(L) && (c == WB_MIDLETTER || midnumletq(c)) && hasrr && ahl(RR)) b = 0;
+            else if (hasll && ahl(LL) && (L == WB_MIDLETTER || midnumletq(L)) && ahl(c)) b = 0;
+            else if (L == WB_HL && c == WB_SQ) b = 0;
+            else if (L == WB_HL && c == WB_DQ && hasrr && RR == WB_HL) b = 0;
+            else if (hasll && LL == WB_HL && L == WB_DQ && c == WB_HL) b = 0;
+            else if (L == WB_NUMERIC && c == WB_NUMERIC) b = 0;
+            else if (ahl(L) && c == WB_NUMERIC) b = 0;
+            else if (L == WB_NUMERIC && ahl(c)) b = 0;
+            else if (hasll && LL == WB_NUMERIC && (L == WB_MIDNUM || midnumletq(L)) && c == WB_NUMERIC) b = 0;
+            else if (L == WB_NUMERIC && (c == WB_MIDNUM || midnumletq(c)) && hasrr && RR == WB_NUMERIC) b = 0;
+            else if (L == WB_KATAKANA && c == WB_KATAKANA) b = 0;
+            else if ((ahl(L) || L == WB_NUMERIC || L == WB_KATAKANA || L == WB_ENL) && c == WB_ENL) b = 0;
+            else if (L == WB_ENL && (ahl(c) || c == WB_NUMERIC || c == WB_KATAKANA)) b = 0;
+            else if (L == WB_RI && c == WB_RI && (ri & 1)) b = 0;
+        }
+        push_back(*brk, (uint8_t)b);
+        if (c == WB_RI) ri++;
+        else if (!wb_ignored(c)) ri = 0;
+    }
+}
+
+static int sb_ignored(uint32_t c) { return c == SB_EXTEND || c == SB_FORMAT; }
+static int parasep(uint32_t c) { return c == SB_SEP || c == SB_CR || c == SB_LF; }
+
+/* SB8's look ahead: anything but a letter, a separator or a terminator, then a lower */
+static int sb8_lower(vector<uint8_t> *cls, size_t i) {
+    size_t n = len(*cls), j = i;
+    while (j < n) {
+        uint32_t c = (*cls)[j];
+        if (c == SB_OLETTER || c == SB_UPPER || c == SB_LOWER || parasep(c) || c == SB_ATERM || c == SB_STERM) break;
+        j++;
+    }
+    return j < n && (*cls)[j] == SB_LOWER;
+}
+
+/* UAX #29's sentence boundaries */
+static void sentence_bounds(vector<uint32_t> *cps, vector<uint8_t> *brk) {
+    size_t n = len(*cps);
+    vector<uint8_t> cls;
+    for (size_t i = 0; i < n; i++) push_back(cls, (uint8_t)break_class(IDB_SB, IDB_SB_N, (*cps)[i]));
+    for (size_t i = 0; i < n; i++) {
+        uint32_t c = cls[i];
+        int b = 1;
+        if (i > 0) {
+            uint32_t a = cls[i - 1];
+            int l = (int)i - 1;
+            while (l >= 0 && sb_ignored(cls[l])) l--;
+            int ll = l - 1;
+            while (ll >= 0 && sb_ignored(cls[ll])) ll--;
+            uint32_t L = SB_OTHER, LL = SB_OTHER;
+            if (l >= 0) L = cls[l];
+            if (ll >= 0) LL = cls[ll];
+            /* SATerm Close* Sp* before: its terminator, and whether spaces follow it */
+            int k = l, nsp = 0, term = -1;
+            while (k >= 0 && (cls[k] == SB_SP || sb_ignored(cls[k]))) { if (cls[k] == SB_SP) nsp++; k--; }
+            while (k >= 0 && (cls[k] == SB_CLOSE || sb_ignored(cls[k]))) k--;
+            if (k >= 0 && (cls[k] == SB_ATERM || cls[k] == SB_STERM)) term = cls[k];
+            if (a == SB_CR && c == SB_LF) b = 0;
+            else if (parasep(a)) b = 1;
+            else if (sb_ignored(c)) b = 0;
+            else if (L == SB_ATERM && c == SB_NUMERIC) b = 0;
+            else if ((LL == SB_UPPER || LL == SB_LOWER) && L == SB_ATERM && c == SB_UPPER) b = 0;
+            else if (term == SB_ATERM && sb8_lower(&cls, i)) b = 0;
+            else if (term >= 0 && (c == SB_SCONTINUE || c == SB_ATERM || c == SB_STERM)) b = 0;
+            else if (term >= 0 && nsp == 0 && (c == SB_CLOSE || c == SB_SP || parasep(c))) b = 0;
+            else if (term >= 0 && (c == SB_SP || parasep(c))) b = 0;
+            else if (term >= 0) b = 1;
+            else b = 0;
+        }
+        push_back(*brk, (uint8_t)b);
+    }
+}
+
+/* the boundaries of a string at a granularity (UTF-16 offsets, the end's last), and each
+   segment's word-likeness */
+static void segment_bounds(js_vm *vm, uint32_t s, int g, vector<uint32_t> *bounds, vector<uint8_t> *wordlike) {
+    vector<uint32_t> cps, offs;
+    code_points(vm, s, &cps, &offs);
+    vector<uint8_t> brk, cls;
+    if (g == 0) grapheme_bounds(&cps, &brk);
+    else if (g == 1) word_bounds(&cps, &brk, &cls);
+    else sentence_bounds(&cps, &brk);
+    size_t n = len(cps);
+    vector<uint32_t> starts;
+    for (size_t i = 0; i < n; i++) if (brk[i]) { push_back(*bounds, offs[i]); push_back(starts, (uint32_t)i); }
+    push_back(*bounds, offs[n]);
+    push_back(starts, (uint32_t)n);
+    if (g != 1) return;
+    /* a word: its letters, numbers, kana or ideographs (ICU's rule statuses 100 to 400) */
+    for (size_t k = 0; k + 1 < len(starts); k++) {
+        int like = 0, enl = 0;
+        for (uint32_t i = starts[k]; i < starts[k + 1]; i++) {
+            uint32_t c = cls[i], cp = cps[i];
+            if (ahl(c) || c == WB_NUMERIC || c == WB_KATAKANA || (cp >= 0x3040 && cp <= 0x309F) || (cp >= 0x3400 && cp <= 0x4DBF) ||
+                (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0x20000 && cp <= 0x3FFFF)) like = 1;
+            if (c == WB_ENL) enl++;
+        }
+        push_back(*wordlike, (uint8_t)(like || enl >= 2));
+    }
+}
+
+static jv sg_segment(js_vm *vm, uint32_t o, jv sv) {
+    uint32_t s = js_to_string(vm, sv);
+    if (!s) return JV_HOLE;
+    uint32_t m = intl_new(vm, JIK_SEGMENTS, vm->intl_protos[JIK_SEGMENTS], SGM_N);
+    slot_set(vm, m, SGM_SEGMENTER, jv_obj(o));
+    slot_set(vm, m, SGM_STRING, jv_str(s));
+    return jv_obj(m);
+}
+/* the boundaries of a Segments object (made once): an array of their count, the offsets,
+   then the word-likeness of each segment */
+static uint32_t sg_bounds(js_vm *vm, uint32_t m, int *g) {
+    *g = slot_int(vm, jv_idx(slot_get(vm, m, SGM_SEGMENTER)), SGS_GRANULARITY);
+    jv b = slot_get(vm, m, SGM_BOUNDS);
+    if (jv_is_obj(b)) return jv_idx(b);
+    vector<uint32_t> bounds;
+    vector<uint8_t> wl;
+    segment_bounds(vm, jv_idx(slot_get(vm, m, SGM_STRING)), *g, &bounds, &wl);
+    uint32_t arr = js_array_new(vm, 0);
+    js_array_push(vm, arr, jv_num((double)len(bounds)));
+    for (size_t i = 0; i < len(bounds); i++) js_array_push(vm, arr, jv_num(bounds[i]));
+    for (size_t i = 0; i < len(wl); i++) js_array_push(vm, arr, jv_num(wl[i]));
+    slot_set(vm, m, SGM_BOUNDS, jv_obj(arr));
+    return arr;
+}
+/* the segment data of segment k */
+static jv sg_data(js_vm *vm, uint32_t m, uint32_t arr, int g, uint32_t nb, uint32_t k) {
+    uint32_t a = (uint32_t)jv_dbl(js_array_get(vm, arr, 1 + k)), b = (uint32_t)jv_dbl(js_array_get(vm, arr, 2 + k));
+    uint32_t s = jv_idx(slot_get(vm, m, SGM_STRING));
+    js_str_flatten(vm, s);
+    vector<uint16_t> seg;
+    for (uint32_t i = a; i < b; i++) push_back(seg, vm->units[vm->strs[s].off + i]);
+    uint32_t r = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    js_define(vm, r, js_atom_ascii(vm, "segment"), jv_str(js_str_new(vm, data(seg), b - a)), 0);
+    js_define(vm, r, js_atom_ascii(vm, "index"), jv_num(a), 0);
+    js_define(vm, r, js_atom_ascii(vm, "input"), jv_str(s), 0);
+    if (g == 1) {
+        jv w = JV_FALSE;
+        if (jv_dbl(js_array_get(vm, arr, 1 + nb + k)) != 0) w = JV_TRUE;
+        js_define(vm, r, js_atom_ascii(vm, "isWordLike"), w, 0);
+    }
+    return jv_obj(r);
+}
+static jv sg_containing(js_vm *vm, uint32_t m, jv iv) {
+    double d = js_to_number(vm, iv);
+    if (vm->throwing) return JV_HOLE;
+    if (d != d) d = 0;
+    d = trunc(d);
+    uint32_t s = jv_idx(slot_get(vm, m, SGM_STRING));
+    if (d < 0 || d >= (double)vm->strs[s].len) return JV_UNDEF;
+    int g;
+    uint32_t arr = sg_bounds(vm, m, &g);
+    uint32_t nb = (uint32_t)jv_dbl(js_array_get(vm, arr, 0));
+    uint32_t idx = (uint32_t)d;
+    for (uint32_t k = 0; k + 1 < nb; k++)
+        if ((uint32_t)jv_dbl(js_array_get(vm, arr, 2 + k)) > idx) return sg_data(vm, m, arr, g, nb, k);
+    return JV_UNDEF;
+}
+static jv sg_iterator(js_vm *vm, uint32_t m) {
+    uint32_t it = intl_new(vm, JIK_SEGMENT_ITERATOR, vm->intl_protos[JIK_SEGMENT_ITERATOR], SGI_N);
+    slot_set(vm, it, SGI_SEGMENTS, jv_obj(m));
+    slot_set(vm, it, SGI_POS, jv_num(0));
+    return jv_obj(it);
+}
+static jv sg_next(js_vm *vm, uint32_t it) {
+    uint32_t m = jv_idx(slot_get(vm, it, SGI_SEGMENTS));
+    int g;
+    uint32_t arr = sg_bounds(vm, m, &g);
+    uint32_t nb = (uint32_t)jv_dbl(js_array_get(vm, arr, 0));
+    uint32_t k = (uint32_t)slot_int(vm, it, SGI_POS);
+    if (k + 1 >= nb) return js_iter_result(vm, JV_UNDEF, 1);
+    slot_set(vm, it, SGI_POS, jv_num(k + 1));
+    return js_iter_result(vm, sg_data(vm, m, arr, g, nb, k), 0);
+}
+
+/* a receiver of a service's method: itself, else the TypeError */
+static jv this_of(js_vm *vm, jv thisv, uint32_t kind, const char *method) {
+    if (!is_intl(vm, thisv, kind)) return incompatible(vm, method, thisv);
+    return thisv;
+}
+
 /* ---- the natives ---- */
 
 jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
@@ -5375,6 +6550,59 @@ jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args,
     case IN_DTF_FORMATRANGETOPARTS:
         if (this_dtf(vm, thisv, "Intl.DateTimeFormat.prototype.formatRangeToParts") == JV_HOLE) return JV_HOLE;
         return dtf_format_range(vm, jv_idx(thisv), a0, a1, 1);
+    case IN_PLURALRULES: return pr_new(vm, a0, a1, newt);
+    case IN_PR_SELECT:
+        if (this_of(vm, thisv, JIK_PLURALRULES, "Intl.PluralRules.prototype.select") == JV_HOLE) return JV_HOLE;
+        return pr_select(vm, jv_idx(thisv), a0);
+    case IN_PR_SELECTRANGE:
+        if (this_of(vm, thisv, JIK_PLURALRULES, "Intl.PluralRules.prototype.selectRange") == JV_HOLE) return JV_HOLE;
+        return pr_select_range(vm, jv_idx(thisv), a0, a1);
+    case IN_PR_RESOLVED:
+        if (this_of(vm, thisv, JIK_PLURALRULES, "Intl.PluralRules.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return pr_resolved(vm, jv_idx(thisv));
+    case IN_LISTFORMAT: return lf_new(vm, a0, a1, newt);
+    case IN_LF_FORMAT:
+        if (this_of(vm, thisv, JIK_LISTFORMAT, "Intl.ListFormat.prototype.format") == JV_HOLE) return JV_HOLE;
+        return lf_format(vm, jv_idx(thisv), a0, 0);
+    case IN_LF_FORMATTOPARTS:
+        if (this_of(vm, thisv, JIK_LISTFORMAT, "Intl.ListFormat.prototype.formatToParts") == JV_HOLE) return JV_HOLE;
+        return lf_format(vm, jv_idx(thisv), a0, 1);
+    case IN_LF_RESOLVED:
+        if (this_of(vm, thisv, JIK_LISTFORMAT, "Intl.ListFormat.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return lf_resolved(vm, jv_idx(thisv));
+    case IN_RELTIMEFORMAT: return rt_new(vm, a0, a1, newt);
+    case IN_RT_FORMAT:
+        if (this_of(vm, thisv, JIK_RELATIVETIMEFORMAT, "Intl.RelativeTimeFormat.prototype.format") == JV_HOLE) return JV_HOLE;
+        return rt_format(vm, jv_idx(thisv), a0, a1, 0);
+    case IN_RT_FORMATTOPARTS:
+        if (this_of(vm, thisv, JIK_RELATIVETIMEFORMAT, "Intl.RelativeTimeFormat.prototype.formatToParts") == JV_HOLE) return JV_HOLE;
+        return rt_format(vm, jv_idx(thisv), a0, a1, 1);
+    case IN_RT_RESOLVED:
+        if (this_of(vm, thisv, JIK_RELATIVETIMEFORMAT, "Intl.RelativeTimeFormat.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return rt_resolved(vm, jv_idx(thisv));
+    case IN_DISPLAYNAMES: return dn_new(vm, a0, a1, newt);
+    case IN_DN_OF:
+        if (this_of(vm, thisv, JIK_DISPLAYNAMES, "Intl.DisplayNames.prototype.of") == JV_HOLE) return JV_HOLE;
+        return dn_of(vm, jv_idx(thisv), a0);
+    case IN_DN_RESOLVED:
+        if (this_of(vm, thisv, JIK_DISPLAYNAMES, "Intl.DisplayNames.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return dn_resolved(vm, jv_idx(thisv));
+    case IN_SEGMENTER: return sg_new(vm, a0, a1, newt);
+    case IN_SG_SEGMENT:
+        if (this_of(vm, thisv, JIK_SEGMENTER, "Intl.Segmenter.prototype.segment") == JV_HOLE) return JV_HOLE;
+        return sg_segment(vm, jv_idx(thisv), a0);
+    case IN_SG_RESOLVED:
+        if (this_of(vm, thisv, JIK_SEGMENTER, "Intl.Segmenter.prototype.resolvedOptions") == JV_HOLE) return JV_HOLE;
+        return sg_resolved(vm, jv_idx(thisv));
+    case IN_SGM_CONTAINING:
+        if (this_of(vm, thisv, JIK_SEGMENTS, "%Segments.prototype%.containing") == JV_HOLE) return JV_HOLE;
+        return sg_containing(vm, jv_idx(thisv), a0);
+    case IN_SGM_ITERATOR:
+        if (this_of(vm, thisv, JIK_SEGMENTS, "%Segments.prototype%[@@iterator]") == JV_HOLE) return JV_HOLE;
+        return sg_iterator(vm, jv_idx(thisv));
+    case IN_SGI_NEXT:
+        if (this_of(vm, thisv, JIK_SEGMENT_ITERATOR, "%SegmentIterator.prototype%.next") == JV_HOLE) return JV_HOLE;
+        return sg_next(vm, jv_idx(thisv));
     case IN_DATE_TOLOCALE: return date_to_locale(vm, thisv, a0, a1, (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x));
     default: return JV_UNDEF;
     }
@@ -5466,4 +6694,41 @@ void js_intl_init(js_vm *vm, uint32_t first) {
         vm->objs[f].x = jv_num(i);
         js_define(vm, vm->date_proto, js_atom_ascii(vm, dn[i]), jv_obj(f), JS_SHAPE_HIDDEN);
     }
+
+    intl_ctor(vm, intl, first, IN_PLURALRULES, JIK_PLURALRULES, "PluralRules", 0, 1);
+    uint32_t pp = vm->intl_protos[JIK_PLURALRULES];
+    method(vm, pp, first, IN_PR_RESOLVED, "resolvedOptions", 0);
+    method(vm, pp, first, IN_PR_SELECT, "select", 1);
+    method(vm, pp, first, IN_PR_SELECTRANGE, "selectRange", 2);
+
+    intl_ctor(vm, intl, first, IN_RELTIMEFORMAT, JIK_RELATIVETIMEFORMAT, "RelativeTimeFormat", 0, 1);
+    uint32_t rp = vm->intl_protos[JIK_RELATIVETIMEFORMAT];
+    method(vm, rp, first, IN_RT_RESOLVED, "resolvedOptions", 0);
+    method(vm, rp, first, IN_RT_FORMAT, "format", 2);
+    method(vm, rp, first, IN_RT_FORMATTOPARTS, "formatToParts", 2);
+
+    intl_ctor(vm, intl, first, IN_LISTFORMAT, JIK_LISTFORMAT, "ListFormat", 0, 1);
+    uint32_t lp2 = vm->intl_protos[JIK_LISTFORMAT];
+    method(vm, lp2, first, IN_LF_RESOLVED, "resolvedOptions", 0);
+    method(vm, lp2, first, IN_LF_FORMAT, "format", 1);
+    method(vm, lp2, first, IN_LF_FORMATTOPARTS, "formatToParts", 1);
+
+    intl_ctor(vm, intl, first, IN_DISPLAYNAMES, JIK_DISPLAYNAMES, "DisplayNames", 2, 1);
+    uint32_t dnp = vm->intl_protos[JIK_DISPLAYNAMES];
+    method(vm, dnp, first, IN_DN_RESOLVED, "resolvedOptions", 0);
+    method(vm, dnp, first, IN_DN_OF, "of", 1);
+
+    intl_ctor(vm, intl, first, IN_SEGMENTER, JIK_SEGMENTER, "Segmenter", 0, 1);
+    uint32_t sp = vm->intl_protos[JIK_SEGMENTER];
+    method(vm, sp, first, IN_SG_RESOLVED, "resolvedOptions", 0);
+    method(vm, sp, first, IN_SG_SEGMENT, "segment", 1);
+    /* %SegmentsPrototype% and %SegmentIteratorPrototype% */
+    uint32_t smp = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    vm->intl_protos[JIK_SEGMENTS] = smp;
+    method(vm, smp, first, IN_SGM_CONTAINING, "containing", 1);
+    js_define(vm, smp, JS_KEY_ITERATOR, jv_obj(native(vm, first, IN_SGM_ITERATOR, "[Symbol.iterator]", 0)), JS_SHAPE_HIDDEN);
+    uint32_t sip = js_obj_new(vm, JK_PLAIN, vm->iterator_proto);
+    vm->intl_protos[JIK_SEGMENT_ITERATOR] = sip;
+    method(vm, sip, first, IN_SGI_NEXT, "next", 0);
+    tag_of(vm, sip, "Segmenter String Iterator");
 }

@@ -24,7 +24,13 @@ The output is a function of the files alone. What it carries:
   - the numbering systems' digits, the currencies' minor units, the plural rules
     (cardinal and ordinal), compiled;
   - the dates' names and patterns, the day periods' rules, the hour cycles of the
-    regions. The available formats come from the locales' XML files: the JSON resolves
+    regions;
+  - the list patterns, the relative times, the date fields' names, the display names
+    of languages, regions, scripts, variants, currencies and calendars (each locale
+    the names that differ from its parent's);
+  - Unicode 17's break properties (UAX #29's grapheme, word and sentence classes,
+    Extended_Pictographic, Indic_Conjunct_Break) as ranges, from the UCD (in SRC's
+    ucd/, else fetched). The available formats come from the locales' XML files: the JSON resolves
     them, and ICU's pattern generator adds a locale's own before its parents'.
 
 The C side holds no pointer: the data is one array of bytes packed four to a 32-bit
@@ -45,6 +51,9 @@ PACKAGES = ["cldr-core", "cldr-numbers-full", "cldr-dates-full", "cldr-units-ful
             "cldr-localenames-full", "cldr-misc-full", "cldr-bcp47"]
 ROOT_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/root.xml"
 MAIN_XML = "https://raw.githubusercontent.com/unicode-org/cldr/release-48-2/common/main/%s.xml"
+UCD = "https://www.unicode.org/Public/17.0.0/ucd/%s"
+UCD_FILES = {"GraphemeBreakProperty.txt": "auxiliary/", "WordBreakProperty.txt": "auxiliary/",
+             "SentenceBreakProperty.txt": "auxiliary/", "emoji-data.txt": "emoji/", "DerivedCoreProperties.txt": ""}
 
 # the languages carried: the web's most used, as their locales name them
 LANGS = ("en de fr es it pt nl ru pl ja zh ko hi ar he tr sv da nb no fi cs uk el hu ro "
@@ -101,6 +110,21 @@ class Source:
                 self.root_xml = r.read()
         self.src = src
         self.xml_cache = {}
+
+    def ucd(self, name):
+        """a UCD file's lines, without comments and blank ones"""
+        if self.src:
+            with open(os.path.join(self.src, "ucd", name), "rb") as f:
+                raw = f.read()
+        else:
+            with urllib.request.urlopen(UCD % (UCD_FILES[name] + name)) as r:
+                raw = r.read()
+        out = []
+        for line in raw.decode("utf-8").split("\n"):
+            line = line.split("#")[0].strip()
+            if line:
+                out.append([x.strip() for x in line.split(";")])
+        return out
 
     def main_xml(self, name):
         """a locale's common/main XML file (its name's dashes underscores), None when CLDR
@@ -201,8 +225,9 @@ def parent_of(S, name, names):
 
 
 def plural_locales(S):
+    """every locale with plural rules (ICU's PluralRules offers them all)"""
     p = S.json("cldr-core", "supplemental/plurals.json")["supplemental"]["plurals-type-cardinal"]
-    return sorted(k for k in p if k.split("-")[0] in LANGS)
+    return sorted(p)
 
 
 # ---- canonicalization ----
@@ -339,12 +364,22 @@ def locales(S, B):
     # of (key, string) sorted by key
     res = {n: resources(S, n, set(names)) for n in names}
     root = resources(S, None, set(names))
+    root = {k: (names_record(v) if isinstance(v, dict) else v) for k, v in root.items()}
     rows = []
     for n in names:
         p = parent_of(S, n, set(names))
         flags = 1 | (2 if n in coll else 0)
         base = res[p] if p else root
-        diff = sorted((k, v) for k, v in res[n].items() if base.get(k) != v)
+        diff = []
+        for k, v in res[n].items():
+            b = base.get(k)
+            if isinstance(v, dict):
+                sub = {c: x for c, x in v.items() if (b or {}).get(c) != x}
+                if sub:
+                    diff.append((k, names_record(sub)))
+            elif b != v:
+                diff.append((k, v))
+        diff.sort()
         rows.append((B.string(n), idx[p] if p else 0xFFFF, flags, diff))
     # the strings first: a table is contiguous
     for tag, parent, flags, diff in rows:
@@ -405,11 +440,14 @@ FS = "\x1f"
 K_NUM, K_COMPACT, K_MINGROUP, K_CUR, K_UNIT, K_UNITPER = 1, 2, 3, 4, 5, 6
 K_MONTHS, K_DAYS, K_DAYPERIODS, K_ERAS, K_DATEFMT, K_TIMEFMT, K_DTGLUE, K_AVAIL, K_APPEND, K_FIELDNAMES, K_INTERVAL, \
     K_TZ = range(7, 19)
+K_LIST, K_RELTIME, K_DTFIELD, K_LOCPAT, K_LANGN, K_REGIONN, K_SCRIPTN, K_VARIANTN, K_CURN, K_CALN = range(19, 29)
 KEYS = {"IDK_NUM": K_NUM, "IDK_COMPACT": K_COMPACT, "IDK_MINGROUP": K_MINGROUP, "IDK_CUR": K_CUR,
         "IDK_UNIT": K_UNIT, "IDK_UNITPER": K_UNITPER, "IDK_MONTHS": K_MONTHS, "IDK_DAYS": K_DAYS,
         "IDK_DAYPERIODS": K_DAYPERIODS, "IDK_ERAS": K_ERAS, "IDK_DATEFMT": K_DATEFMT, "IDK_TIMEFMT": K_TIMEFMT,
         "IDK_DTGLUE": K_DTGLUE, "IDK_AVAIL": K_AVAIL, "IDK_APPEND": K_APPEND, "IDK_FIELDNAMES": K_FIELDNAMES,
-        "IDK_INTERVAL": K_INTERVAL, "IDK_TZ": K_TZ}
+        "IDK_INTERVAL": K_INTERVAL, "IDK_TZ": K_TZ, "IDK_LIST": K_LIST, "IDK_RELTIME": K_RELTIME,
+        "IDK_DTFIELD": K_DTFIELD, "IDK_LOCPAT": K_LOCPAT, "IDK_LANGN": K_LANGN, "IDK_REGIONN": K_REGIONN,
+        "IDK_SCRIPTN": K_SCRIPTN, "IDK_VARIANTN": K_VARIANTN, "IDK_CURN": K_CURN, "IDK_CALN": K_CALN}
 
 
 def key(cat, i=0):
@@ -572,7 +610,55 @@ def resources(S, name, names):
         r[key(K_UNIT, i)] = FS.join(f)
     r[key(K_UNITPER)] = FS.join(units[w]["per"]["compoundUnitPattern"] for w in ("long", "short", "narrow"))
     dates(S, name, names, r)
+    misc(S, name, names, r)
     return r
+
+
+# the list patterns (start, middle, end, two of each type), the relative times (each
+# unit and width: the relative days -2 to 2, the future's and the past's patterns by
+# plural count), the date fields' names by width (UDATPG's order of the fields
+# DisplayNames names), the locale display patterns; the display names, dictionaries
+# (a locale keeps the entries that differ from its parent's)
+LIST_TYPES = ["standard", "standard-short", "standard-narrow", "or", "or-short", "or-narrow", "unit", "unit-short",
+              "unit-narrow"]
+RT_UNITS = ["year", "quarter", "month", "week", "day", "hour", "minute", "second"]
+DT_FIELDS = ["era", "year", "quarter", "month", "week", "weekday", "day", "dayperiod", "hour", "minute", "second", "zone"]
+WIDTHS = ["", "-short", "-narrow"]
+
+
+def misc(S, name, names, r):
+    lp = main_data(S, "cldr-misc-full", name, "listPatterns.json", names)["listPatterns"]
+    for i, t in enumerate(LIST_TYPES):
+        d = lp["listPattern-type-" + t]
+        r[key(K_LIST, i)] = FS.join(d[k] for k in ("start", "middle", "end", "2"))
+    fields = main_data(S, "cldr-dates-full", name, "dateFields.json", names)["dates"]["fields"]
+    for ui, u in enumerate(RT_UNITS):
+        for wi, w in enumerate(WIDTHS):
+            d = fields.get(u + w, {})
+            f = [d.get("relative-type-%d" % k, "") for k in (-2, -1, 0, 1, 2)]
+            for t in ("future", "past"):
+                rt = d.get("relativeTime-type-" + t, {})
+                f += [rt.get("relativeTimePattern-count-" + c, "") for c in COUNTS]
+            r[key(K_RELTIME, ui * 3 + wi)] = FS.join(f)
+    for wi, w in enumerate(WIDTHS):
+        r[key(K_DTFIELD, wi)] = FS.join(fields.get(f + w, {}).get("displayName", "") for f in DT_FIELDS)
+    ld = main_data(S, "cldr-localenames-full", name, "localeDisplayNames.json", names)
+    ld = ld["localeDisplayNames"] if ld else {}
+    pat = ld.get("localeDisplayPattern", {})
+    r[key(K_LOCPAT)] = FS.join((pat.get("localePattern", "{0} ({1})"), pat.get("localeSeparator", "{0}, {1}"),
+                                pat.get("localeKeyTypePattern", "{0}: {1}")))
+    for k, file, part in ((K_LANGN, "languages.json", "languages"), (K_REGIONN, "territories.json", "territories"),
+                          (K_SCRIPTN, "scripts.json", "scripts"), (K_VARIANTN, "variants.json", "variants")):
+        d = main_data(S, "cldr-localenames-full", name, file, names)
+        r[key(k)] = dict(d["localeDisplayNames"][part]) if d else {}
+    r[key(K_CALN)] = dict(ld.get("types", {}).get("calendar", {}))
+    cur = main_data(S, "cldr-numbers-full", name, "currencies.json", names)
+    r[key(K_CURN)] = {c: v["displayName"] for c, v in cur["numbers"]["currencies"].items() if "displayName" in v} if cur else {}
+
+
+def names_record(d):
+    """a dictionary of names as a record: code, GS, name, joined by FS, sorted by code"""
+    return FS.join(c + GS + v for c, v in sorted(d.items(), key=lambda kv: kv[0].encode("utf-8")))
 
 
 # the date records: months, days, day periods (by context, format then stand-alone, and
@@ -760,16 +846,88 @@ def date_tables(S, B):
     write_pairs(B, "HOURS", [(k, (v.get("_preferred", "") + " " + v.get("_allowed", "")).strip()) for k, v in td.items()])
 
 
+# ---- the break properties (UAX #29) ----
+
+GCB = ["Other", "CR", "LF", "Control", "Extend", "ZWJ", "Regional_Indicator", "Prepend", "SpacingMark", "L", "V", "T",
+       "LV", "LVT"]
+WB = ["Other", "CR", "LF", "Newline", "Extend", "ZWJ", "Regional_Indicator", "Format", "Katakana", "Hebrew_Letter",
+      "ALetter", "Single_Quote", "Double_Quote", "MidNumLet", "MidLetter", "MidNum", "Numeric", "ExtendNumLet",
+      "WSegSpace"]
+SB = ["Other", "CR", "LF", "Extend", "Sep", "Format", "Sp", "Lower", "Upper", "OLetter", "Numeric", "ATerm",
+      "SContinue", "STerm", "Close"]
+INCB = ["None", "Linker", "Consonant", "Extend"]
+
+
+def code_range(f):
+    if ".." in f:
+        a, b = f.split("..")
+        return int(a, 16), int(b, 16)
+    return int(f, 16), int(f, 16)
+
+
+def write_ranges(B, name, values):
+    """a property's ranges: each (first u32, last u32, value u8), sorted, the default (0)
+    left out, adjacent ranges of one value joined"""
+    runs = []
+    for cp in sorted(values):
+        v = values[cp]
+        if runs and runs[-1][1] == cp - 1 and runs[-1][2] == v:
+            runs[-1][1] = cp
+        else:
+            runs.append([cp, cp, v])
+    B.mark("IDB_%s_N" % name, len(runs))
+    B.mark("IDB_%s" % name)
+    for a, b, v in runs:
+        B.u32(a)
+        B.u32(b)
+        B.u8(v)
+
+
+def break_tables(S, B):
+    """each code point's grapheme class (bits 0-3; Extended_Pictographic bit 4; its
+    Indic_Conjunct_Break, bits 5-6), word class (bits 0-4; Extended_Pictographic bit
+    5), sentence class"""
+    ext = set()
+    for f in S.ucd("emoji-data.txt"):
+        if f[1] == "Extended_Pictographic":
+            a, b = code_range(f[0])
+            ext.update(range(a, b + 1))
+    g, w, sb = {}, {}, {}
+    for f in S.ucd("GraphemeBreakProperty.txt"):
+        a, b = code_range(f[0])
+        for cp in range(a, b + 1):
+            g[cp] = GCB.index(f[1])
+    for f in S.ucd("DerivedCoreProperties.txt"):
+        if f[1] == "InCB":
+            a, b = code_range(f[0])
+            for cp in range(a, b + 1):
+                g[cp] = g.get(cp, 0) | INCB.index(f[2]) << 5
+    for cp in ext:
+        g[cp] = g.get(cp, 0) | 16
+    for f in S.ucd("WordBreakProperty.txt"):
+        a, b = code_range(f[0])
+        for cp in range(a, b + 1):
+            w[cp] = WB.index(f[1])
+    for cp in ext:
+        w[cp] = w.get(cp, 0) | 32
+    for f in S.ucd("SentenceBreakProperty.txt"):
+        a, b = code_range(f[0])
+        for cp in range(a, b + 1):
+            sb[cp] = SB.index(f[1])
+    write_ranges(B, "GCB", g)
+    write_ranges(B, "WB", w)
+    write_ranges(B, "SB", sb)
+
+
 def plural_tables(S, B):
-    """each plural locale's cardinal and ordinal rule sets: a set is its categories' count,
+    """each plural locale's (every language's, as ICU has them all) cardinal and ordinal
+    rule sets: a set is its categories' count,
     then each category (its index in zero one two few many other) and its condition"""
     sets = {}
     rows = []
     for kind, name in (("cardinal", "plurals.json"), ("ordinal", "ordinals.json")):
         d = S.json("cldr-core", "supplemental/" + name)["supplemental"]["plurals-type-" + kind]
         for loc in sorted(d):
-            if loc.split("-")[0] not in LANGS:
-                continue
             rules = d[loc]
             cats = [c for c in COUNTS if "pluralRule-count-" + c in rules]
             blob = bytearray([len(cats)])
@@ -792,8 +950,6 @@ def plural_tables(S, B):
     pr = S.json("cldr-core", "supplemental/pluralRanges.json")["supplemental"]["plurals"]
     rows = []
     for loc, d in pr.items():
-        if loc.split("-")[0] not in LANGS:
-            continue
         s = ""
         for a in COUNTS:
             for b in COUNTS:
@@ -841,6 +997,7 @@ def main():
     number_tables(S, B)
     plural_tables(S, B)
     date_tables(S, B)
+    break_tables(S, B)
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     emit(B, os.path.join(root, "src/js/intl_data.c"), os.path.join(root, "src/js/intl_data.h"))
 
