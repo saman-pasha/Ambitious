@@ -2465,6 +2465,20 @@ static uint32_t args_decl(js_cc *cc, uint32_t f) {
     return id;
 }
 
+/* a sloppy function of plain parameters that uses arguments maps them (ECMA-262 10.4.4): each parameter kept in a cell
+   of the function's environment, which its arguments object's element reads and writes (OP_ARGUMENTS_MAPPED) */
+static int fn_maps_args(js_cc *cc, uint32_t f) {
+    return cc->fns[f].args_decl && !(cc->fns[f].flags & (JF_STRICT | JF_ARROW | JF_NONSIMPLE | JF_HAS_REST));
+}
+static void map_arguments(js_cc *cc) {
+    for (size_t d = 1; d < len(cc->decls); d++) {
+        jdecl x = cc->decls[d];
+        if (x.kind != D_PARAM || !x.param || x.fn == JS_SYNTH_FN || !fn_maps_args(cc, x.fn)) continue;
+        cc->decls[d].captured = 1;
+        cc->scopes[x.scope].has_env = 1;
+    }
+}
+
 static void resolve(js_cc *cc) {
     for (size_t r = 1; r < len(cc->refs); r++) {
         jref ref = cc->refs[r];
@@ -2917,6 +2931,8 @@ static void gen_ayield(CC, uint32_t a) {
 static void gen_ayield_star(CC, uint32_t a) {
     uint32_t nit = stack_iters(cc);
     gen_expr(CCA, a);
+    /* its error site: V8 calls the operand's method that is no function (js_aiter_of_at) */
+    site_at(vm, cc, JSS_YIELD_STAR | JSS_PLAIN, 0, 0);
     emit(vm, OP_ITER_ASYNC);
     emit(vm, OP_UNDEF);
     emit_num(vm, 0);
@@ -4296,7 +4312,17 @@ static void gen_function(CC, uint32_t f) {
                 emit(vm, 0);
                 emit16(vm, x.envslot);
             } else if (x.kind == D_ARGS) {
-                emit(vm, OP_ARGUMENTS);
+                if (fn_maps_args(cc, f)) {
+                    /* each parameter's cell, the last of a name the one it maps (sloppy duplicates) */
+                    emit(vm, OP_ARGUMENTS_MAPPED);
+                    emit16(vm, F.nparams);
+                    for (uint32_t i = 0; i < F.nparams; i++) {
+                        uint32_t cell = 0xFFFF;
+                        for (uint32_t q = cc->scopes[fs].first; q; q = cc->decls[q].next)
+                            if (cc->decls[q].kind == D_PARAM && cc->decls[q].param == i + 1 && cc->decls[q].captured) cell = cc->decls[q].envslot;
+                        emit16(vm, cell);
+                    }
+                } else emit(vm, OP_ARGUMENTS);
                 gen_put(CCA, x.atom, d, fs, 0, 1);
             }
         }
@@ -4610,6 +4636,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     }
     if (!cc->err) {
         resolve(cc);
+        map_arguments(cc);
         if (mode == JS_CC_MODULE) {
             /* a module's top-level bindings live in its environment, which its importers read */
             for (uint32_t d = cc->scopes[0].first; d; d = cc->decls[d].next)

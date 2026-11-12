@@ -1,0 +1,9 @@
+sync num number 5 is not iterable (cannot read property Symbol(Symbol.iterator))
+num TypeError: undefined is not a function
+obj TypeError: undefined is not a function
+null TypeError: Cannot read properties of null (reading 'Symbol(Symbol.asyncIterator)')
+bad iter TypeError: number 5 is not a function
+bad sync TypeError: number 5 is not a function
+iter not obj TypeError: Result of the Symbol.asyncIterator method is not an object
+str {"value":"a","done":false}
+sync iter {"value":1,"done":false}

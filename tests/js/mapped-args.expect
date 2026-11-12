@@ -1,0 +1,22 @@
+write arg [9,2]
+write param [7,2]
+beyond argc [1,null]
+extra args [1,3,2]
+strict 1
+default 1
+rest 1
+delete [1,9]
+delete then param [4,null]
+define value [6,6]
+define nonwritable [3,1]
+define nonwritable value [3,8]
+define accessor [3,"g"]
+freeze [3,1,true]
+desc {"value":2,"writable":true,"enumerable":true,"configurable":true}
+closure "x"
+spread ["p",2]
+slice [1,"q"]
+dup names "z"
+generator "gen"
+eval "ev"
+keys ["0","1"]

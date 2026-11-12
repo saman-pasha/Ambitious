@@ -233,7 +233,8 @@ static int px_get_own(js_vm *vm, uint32_t o, uint32_t key, jv *v, uint32_t *f) {
     if ((k == JK_ARRAY || k == JK_ARGUMENTS) && js_atom_index(vm, key, &i)) {
         uint32_t st = k == JK_ARGUMENTS ? vm->objs[o].a : o;
         if (i >= vm->objs[st].b || vm->slots[vm->objs[st].a + i] == JV_HOLE) return 0;
-        *v = vm->slots[vm->objs[st].a + i];
+        uint32_t cell = js_args_cell(vm, o, i);
+        *v = cell ? vm->slots[cell - 1] : vm->slots[vm->objs[st].a + i];
         *f = 0;
         return 1;
     }
@@ -385,7 +386,24 @@ static int px_ordinary_define(js_vm *vm, uint32_t o, uint32_t key, const px_desc
     return 1;
 }
 
+static int px_elem_define_in(js_vm *vm, uint32_t o, uint32_t i, uint32_t key, const px_desc *d);
 static int px_elem_define(js_vm *vm, uint32_t o, uint32_t i, uint32_t key, const px_desc *d) {
+    /* a mapped arguments object's element (10.4.4.2): made not writable without a value, its parameter's value; then,
+       defined, its parameter given the value, and the element no longer mapped as an accessor or not writable */
+    uint32_t cell = js_args_cell(vm, o, i);
+    if (!cell) return px_elem_define_in(vm, o, i, key, d);
+    px_desc nd = *d;
+    if (pd_data(d) && !(d->has & PD_VALUE) && (d->has & PD_WRITABLE) && !d->writable) { nd.value = vm->slots[cell - 1]; nd.has |= PD_VALUE; }
+    int r = px_elem_define_in(vm, o, i, key, &nd);
+    if (r <= 0) return r;
+    cell = js_args_cell(vm, o, i);
+    if (!cell) return r;
+    if (pd_accessor(d)) { vm->slots[vm->objs[vm->objs[o].c].a + i] = JV_UNDEF; return r; }
+    if (d->has & PD_VALUE) vm->slots[cell - 1] = d->value;
+    if ((d->has & PD_WRITABLE) && !d->writable) js_args_unmap(vm, o, i);
+    return r;
+}
+static int px_elem_define_in(js_vm *vm, uint32_t o, uint32_t i, uint32_t key, const px_desc *d) {
     uint32_t fl = vm->objs[o].flags, st = vm->objs[o].kind == JK_ARGUMENTS ? vm->objs[o].a : o;
     int arr = vm->objs[o].kind == JK_ARRAY;
     /* past a length that is not writable: none (ArrayDefineOwnProperty 3.g) */

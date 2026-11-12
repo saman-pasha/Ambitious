@@ -778,6 +778,11 @@ void js_value_name(js_vm *vm, jv v, vector<char> *out);
 /* a value's text without its methods run (V8's NoSideEffectsToString): a primitive's
    string, a function's source, "Error: x", "#<Object>", "[object Array]" */
 void js_value_text(js_vm *vm, jv v, vector<char> *out);
+/* a mapped arguments object's element i: its parameter's cell in vm->slots, plus one (0 not mapped); unmapped, its
+   element keeping the parameter's value; every element unmapped (src/js/vm.c) */
+uint32_t js_args_cell(js_vm *vm, uint32_t o, uint32_t i);
+void js_args_unmap(js_vm *vm, uint32_t o, uint32_t i);
+void js_args_unmap_all(js_vm *vm, uint32_t o);
 /* Function.prototype.toString of a callable object: its source text, or V8's native
    form ("function push() { [native code] }"); 0 when o is not callable */
 uint32_t js_func_source(js_vm *vm, uint32_t o);
@@ -985,6 +990,9 @@ enum {
     OP_PRIV_ACCESSOR,                             /* u8 kind, u32 atom, u32 class: obj key get set -> obj */
     OP_PRIV_IN,                                   /* u32 atom: obj key -> bool (#x in obj) */
     OP_HOME,                                      /* home fn -> home fn: a method's home object home */
+    OP_ARGUMENTS_MAPPED,                          /* u16 n, n u16 cells: -> a sloppy function's arguments object, its
+                                                     element i its parameter i's cell of the function's environment
+                                                     (0xFFFF: none), while i is less than its count of arguments */
     OP_NOP,
     OP_NOPS
 };

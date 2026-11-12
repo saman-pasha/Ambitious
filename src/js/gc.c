@@ -80,7 +80,7 @@ static void visit_obj(js_vm *vm, gc_state *g, uint32_t o) {
     case JK_CLOSURE: mark_obj(vm, g, x.b); mark_obj(vm, g, x.c); mark_val(vm, g, x.x); break;
     case JK_NATIVE: mark_str(vm, g, x.c); mark_val(vm, g, x.x); break;
     case JK_BOUND: mark_obj(vm, g, x.a); mark_slots(vm, g, x.b, x.c); mark_val(vm, g, x.x); break;
-    case JK_ARGUMENTS: mark_obj(vm, g, x.a); break;
+    case JK_ARGUMENTS: mark_obj(vm, g, x.a); if (x.c) mark_obj(vm, g, x.c); mark_val(vm, g, x.x); break;
     case JK_ENV: mark_obj(vm, g, x.a); break;
     case JK_ACCESSOR: mark_val(vm, g, x.x); mark_obj(vm, g, x.a); break;
     case JK_MAP: case JK_SET:

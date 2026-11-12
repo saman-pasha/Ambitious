@@ -480,6 +480,29 @@ void js_define_accessor(js_vm *vm, uint32_t o, uint32_t atom, jv getter, jv sett
 static uint32_t js_index_atom(js_vm *vm, uint32_t i) { return js_atom(vm, js_num_to_str(vm, (double)i)); }
 /* the array that holds an object's dense elements: an array its own, an arguments object's */
 static uint32_t js_elem_store(js_vm *vm, uint32_t o) { return vm->objs[o].kind == JK_ARGUMENTS ? vm->objs[o].a : o; }
+
+/* a mapped arguments object (ECMA-262 10.4.4, a sloppy function's of plain parameters): c its map, an array of each
+   mapped element's cell in the function's environment (x), undefined where it is not mapped (any more). Its element
+   is then that cell: read, written; deleted, or defined as an accessor or not writable, it is mapped no longer */
+uint32_t js_args_cell(js_vm *vm, uint32_t o, uint32_t i) {
+    if (vm->objs[o].kind != JK_ARGUMENTS) return 0;
+    uint32_t map = vm->objs[o].c;
+    if (!map || i >= vm->objs[map].b) return 0;
+    jv c = vm->slots[vm->objs[map].a + i];
+    if (!jv_is_num(c) || !jv_is_obj(vm->objs[o].x)) return 0;
+    return vm->objs[jv_idx(vm->objs[o].x)].slots + (uint32_t)jv_dbl(c) + 1;
+}
+void js_args_unmap(js_vm *vm, uint32_t o, uint32_t i) {
+    uint32_t cell = js_args_cell(vm, o, i);
+    if (!cell) return;
+    uint32_t st = vm->objs[o].a;
+    if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) vm->slots[vm->objs[st].a + i] = vm->slots[cell - 1];
+    vm->slots[vm->objs[vm->objs[o].c].a + i] = JV_UNDEF;
+}
+void js_args_unmap_all(js_vm *vm, uint32_t o) {
+    uint32_t map = vm->objs[o].kind == JK_ARGUMENTS ? vm->objs[o].c : 0;
+    for (uint32_t i = 0; map && i < vm->objs[map].b; i++) js_args_unmap(vm, o, i);
+}
 /* element i kept in o's shape, with attributes of its own: its shape entry, 0 for none */
 static uint32_t js_elem_entry(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
     if (!(vm->objs[o].flags & JO_ELEMPROPS)) return 0;
@@ -500,6 +523,7 @@ static int js_elem_delete(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
     uint32_t st = js_elem_store(vm, o), fl = vm->objs[o].flags;
     if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) {
         if (fl & (JO_SEALED | JO_FROZEN)) return 0;
+        js_args_unmap(vm, o, i);
         vm->slots[vm->objs[st].a + i] = JV_HOLE;
         return 1;
     }
@@ -1423,7 +1447,10 @@ static jv js_obj_get(js_vm *vm, uint32_t o, uint32_t atom, jv receiver, uint32_t
                 /* an arguments object's dense element (its length an ordinary property) */
                 uint32_t arr = vm->objs[x].a;
                 uint32_t i;
-                if (js_atom_index(vm, atom, &i) && i < vm->objs[arr].b && vm->slots[vm->objs[arr].a + i] != JV_HOLE) return vm->slots[vm->objs[arr].a + i];
+                if (js_atom_index(vm, atom, &i) && i < vm->objs[arr].b && vm->slots[vm->objs[arr].a + i] != JV_HOLE) {
+                    uint32_t cell = js_args_cell(vm, x, i);
+                    return cell ? vm->slots[cell - 1] : vm->slots[vm->objs[arr].a + i];
+                }
             }
         } else if (k == JK_HOST) {
             int handled = 0;
@@ -1550,6 +1577,8 @@ static int js_elem_set(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom, jv v, j
     if (i < vm->objs[st].b && vm->slots[vm->objs[st].a + i] != JV_HOLE) {
         if (fl & JO_FROZEN) return js_refuse(vm, JSR_READONLY, atom);
         vm->slots[vm->objs[st].a + i] = v;
+        uint32_t cell = js_args_cell(vm, o, i);
+        if (cell) vm->slots[cell - 1] = v;
         return 1;
     }
     uint32_t e = js_elem_entry(vm, o, i, atom);
@@ -2389,18 +2418,21 @@ int js_iter_send(js_vm *vm, uint32_t it, int mode, jv arg, int has_arg, jv *valu
 static jv js_aiter_of_at(js_vm *vm, jv v, uint32_t pc);
 jv js_aiter_of(js_vm *vm, jv v) { return js_aiter_of_at(vm, v, 0); }
 static jv js_aiter_of_at(js_vm *vm, jv v, uint32_t pc) {
-    /* V8's: nothing's Symbol.asyncIterator a property read from nothing */
+    /* V8's: nothing's Symbol.asyncIterator a property read from nothing; an async yield*'s method that is no function
+       called all the same ("undefined is not a function"), for await's value not async iterable */
+    js_site ys;
+    int ystar = pc && js_site_at(vm, pc, &ys) && (ys.kind & JSS_KIND) == JSS_YIELD_STAR;
     jv f = js_get(vm, v, JS_KEY_ASYNC_ITERATOR);
     if (vm->throwing) return JV_HOLE;
     if (jv_is_nullish(f)) {
         jv sf = jv_is_obj(v) || jv_is_str(v) ? js_get(vm, v, JS_KEY_ITERATOR) : JV_UNDEF;
         if (vm->throwing) return JV_HOLE;
-        if (!js_is_callable(vm, sf)) return js_not_iterable(vm, v, pc, 1);
+        if (!js_is_callable(vm, sf)) return ystar ? js_not_function(vm, sf) : js_not_iterable(vm, v, pc, 1);
         jv it = js_iter_of_at(vm, v, pc);
         if (vm->throwing) return JV_HOLE;
         return jv_obj(js_iter_new(vm, jv_idx(it), JI_FROM_SYNC));
     }
-    if (!js_is_callable(vm, f)) return js_not_iterable(vm, v, pc, 1);
+    if (!js_is_callable(vm, f)) return ystar ? js_not_function(vm, f) : js_not_iterable(vm, v, pc, 1);
     jv it = js_call(vm, f, v, 0, 0);
     if (vm->throwing) return JV_HOLE;
     if (!jv_is_obj(it)) return js_throw_msg(vm, vm->type_error_proto, "Result of the Symbol.asyncIterator method is not an object");
@@ -4435,6 +4467,26 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             int has = js_priv_slot(vm, ov, k, &fl) != 0; RELOAD();
             sp--;
             stack[sp - 1] = jv_bool(has);
+            goto next;
+        }
+        case OP_ARGUMENTS_MAPPED: {
+            uint32_t np = RD16(pc);
+            uint32_t a = js_obj_new(vm, JK_ARGUMENTS, vm->object_proto); RELOAD();
+            { uint32_t aa = frames[fi].args; if (!aa) { aa = js_array_new(vm, 0); RELOAD(); } objs[a].a = aa; }
+            js_define(vm, a, A_LENGTH, jv_num(frames[fi].argc), JS_SHAPE_HIDDEN); RELOAD();
+            js_define(vm, a, JS_KEY_ITERATOR, jv_obj(vm->array_values), JS_SHAPE_HIDDEN); RELOAD();
+            js_define(vm, a, A_CALLEE, jv_obj(frames[fi].callee), JS_SHAPE_HIDDEN); RELOAD();
+            /* the map: each parameter given an argument, its cell in the function's environment */
+            uint32_t argc = frames[fi].argc, nm = argc < np ? argc : np;
+            uint32_t map = js_array_new(vm, 0); RELOAD();
+            for (uint32_t i = 0; i < nm; i++) {
+                uint32_t cell = RD16(pc + 2 + 2 * i);
+                js_array_push(vm, map, cell == 0xFFFFu ? JV_UNDEF : jv_num((double)cell)); RELOAD();
+            }
+            objs[a].c = map;
+            objs[a].x = jv_obj(frames[fi].env);
+            pc += 2 + 2 * np;
+            stack[sp++] = jv_obj(a);
             goto next;
         }
         case OP_HOME: {

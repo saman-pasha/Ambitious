@@ -3557,6 +3557,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return vm->throwing ? JV_HOLE : a0;
         }
         if (jv_is_obj(a0)) {
+            /* a mapped arguments object frozen: its elements no longer its parameters (each made not writable) */
+            if (id == N_OBJ_FREEZE) js_args_unmap_all(vm, jv_idx(a0));
             vm->objs[jv_idx(a0)].flags &= (uint16_t)~JO_EXTENSIBLE;
             if (id == N_OBJ_FREEZE) vm->objs[jv_idx(a0)].flags |= JO_FROZEN;
         }
