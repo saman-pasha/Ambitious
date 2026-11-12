@@ -27,7 +27,7 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 %% box's children
 layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline])).
 %% a form control the theme draws (Chromium's NativeThemeBase), in place of its CSS background and border; css: none, CSS draws it
-layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell, progress, meter])).
+layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell, progress, meter, file, date])).
 %% how a box's width was found: the viewport's; filling its containing block; a
 %% length, or a percentage, its style declared; shrunk to fit its content; its
 %% table column's; its content's own (a replaced element's, a form control's);
@@ -102,6 +102,9 @@ layout_contract(record(box, [
     %% none): what it is; a check box's or radio button's checked state; a range's value, 0 to 1 along its track, a
     %% progress bar's (-1 indeterminate), a meter's; a colour well's colour, a drop-down's arrow's
     field(theme, enum(theme)), field(checked, bool), field(fraction, f64), field(swatch, u32),
+    %% a control's inner part: a file chooser's button's width; a date or time field's picker, 1 a calendar or 2 a
+    %% clock (a time field's), its icon's size (an em, or a time field's 1.05) in part_w
+    field(part, u8), field(part_w, f64),
     %% the state the theme draws the control in: 1 disabled (its own disabled attribute, or a disabled fieldset's),
     %% 2 in the dark scheme (its color-scheme's); 4 drawn by its CSS, its author having styled it (a progress bar or
     %% a meter of appearance none too), with what its shadow tree keeps of the theme's drawing: a drop-down's arrow

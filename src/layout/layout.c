@@ -1165,6 +1165,210 @@ static void lay_button_label(const dom_document *d, uint32_t el, int kind, vecto
     append_range(*out, dflt, strlen(dflt));
 }
 
+static double lay_attr_num(const dom_document *d, uint32_t el, const char *name, double dflt);
+
+/* a date or time field's kind, by its type attribute: date, datetime-local, month, time, week */
+enum { LD_DATE, LD_DATETIME, LD_MONTH, LD_TIME, LD_WEEK };
+static int lay_date_kind(const dom_document *d, uint32_t el) {
+    static const char *const names[5] = { "date", "datetime-local", "month", "time", "week" };
+    uint32_t a = lay_attr(d, el, "type");
+    if (!a) return LD_DATE;
+    const char *p = text_ptr(d, d->attr[a].value);
+    size_t n = d->attr[a].value.len;
+    for (int k = 0; k < 5; k++) {
+        size_t m = strlen(names[k]), i = 0;
+        if (m != n) continue;
+        while (i < m && (p[i] >= 'A' && p[i] <= 'Z' ? p[i] + 32 : p[i]) == names[k][i]) i++;
+        if (i == m) return k;
+    }
+    return LD_DATE;
+}
+
+/* digits at s[*i], exactly n of them (n 0: at least four, a year's), as a number; -1 when they are not */
+static long lay_digits(const char *s, size_t len, size_t *i, int n) {
+    long v = 0;
+    size_t k = *i;
+    while (k < len && s[k] >= '0' && s[k] <= '9' && (n == 0 || k - *i < (size_t)n)) { v = v * 10 + (s[k] - '0'); k++; if (v > 1000000000L) return -1; }
+    if (n ? k - *i != (size_t)n : k - *i < 4) return -1;
+    *i = k;
+    return v;
+}
+static int lay_days_in(long y, long m) {
+    static const int dm[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    int leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    return m == 2 && leap ? 29 : dm[m - 1];
+}
+/* the weeks of year y (ISO 8601): 53 when it begins on a Thursday, or a leap year on a Wednesday */
+static int lay_weeks_in(long y) {
+    long a = (y - 1) % 400, dow = (1 + 5 * (a % 4) + 4 * (a % 100) + 6 * a) % 7;   /* 1 January: 0 Sunday (Gauss) */
+    int leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    return dow == 4 || (leap && dow == 3) ? 53 : 52;
+}
+
+/* a date or time field's value (HTML 2.3.5): its year, month (or week), day, hour, minute, second and millisecond,
+   -1 each it has not; 1 when the value is one of its kind's strings */
+static int lay_date_value(const char *s, size_t n, int kind, long *v) {
+    for (int k = 0; k < 7; k++) v[k] = -1;
+    size_t i = 0;
+    if (kind != LD_TIME) {
+        long y = lay_digits(s, n, &i, 0);
+        if (y < 1 || i >= n || s[i] != '-') return 0;
+        i++;
+        v[0] = y;
+        if (kind == LD_WEEK) {
+            if (i >= n || s[i] != 'W') return 0;
+            i++;
+            long w = lay_digits(s, n, &i, 2);
+            if (w < 1 || w > lay_weeks_in(y)) return 0;
+            v[1] = w;
+            return i == n;
+        }
+        long m = lay_digits(s, n, &i, 2);
+        if (m < 1 || m > 12) return 0;
+        v[1] = m;
+        if (kind == LD_MONTH) return i == n;
+        if (i >= n || s[i] != '-') return 0;
+        i++;
+        long dd = lay_digits(s, n, &i, 2);
+        if (dd < 1 || dd > lay_days_in(y, m)) return 0;
+        v[2] = dd;
+        if (kind == LD_DATE) return i == n;
+        if (i >= n || (s[i] != 'T' && s[i] != ' ')) return 0;
+        i++;
+    }
+    long hh = lay_digits(s, n, &i, 2);
+    if (hh < 0 || hh > 23 || i >= n || s[i] != ':') return 0;
+    i++;
+    long mm = lay_digits(s, n, &i, 2);
+    if (mm < 0 || mm > 59) return 0;
+    v[3] = hh;
+    v[4] = mm;
+    v[5] = 0;
+    v[6] = 0;
+    if (i < n && s[i] == ':') {
+        i++;
+        long ss = lay_digits(s, n, &i, 2);
+        if (ss < 0 || ss > 59) return 0;
+        v[5] = ss;
+        if (i < n && s[i] == '.') {
+            i++;
+            size_t f0 = i;
+            long ms = 0;
+            while (i < n && s[i] >= '0' && s[i] <= '9' && i - f0 < 3) { ms = ms * 10 + (s[i] - '0'); i++; }
+            if (i == f0) return 0;
+            for (size_t k = i - f0; k < 3; k++) ms *= 10;
+            v[6] = ms;
+        }
+    }
+    return i == n;
+}
+
+/* a date or time field's parts as Chromium's DateTimeEditElement builds them for en-US: its fields, each its value's
+   text or else its placeholder, and the texts between them (month/day/year, hour:minute[:second[.ms]] AM/PM, a month's
+   name and its year, Week ww, yyyy). Each part's text into texts (NUL-separated), whether it is a field into fields;
+   the edit's width: each field the widest of its placeholder, its largest value's text and its value's, and 2px
+   (DateTimeFieldElement::MaximumWidth), the texts between them as they are, ceiled (CustomStyleForLayoutObject) */
+/* a text's width in s's face, size and letter spacing */
+static double lay_dw(LCTX, const lay_style *s, const char *q) {
+    size_t n = strlen(q);
+    return amb_text_width(f, s->face, s->fs, q, n) + s->ls * (double)lay_cps(q, n);
+}
+/* one part of a date field: its text appended to texts (NUL-ended), whether it is a field to fields; its width for the
+   edit's: a field's the widest of its shown text, its placeholder and its largest value's, and 2px */
+static double lay_dpart(LCTX, const lay_style *s, vector<char> *texts, vector<uint8_t> *fields, int field, const char *shown,
+                        const char *ph, const char *mx) {
+    append_range(*texts, shown, strlen(shown));
+    push_back(*texts, (char)0);
+    push_back(*fields, (uint8_t)field);
+    double w = lay_dw(LARGS, s, shown);
+    if (field) w = fmax(w, fmax(lay_dw(LARGS, s, ph), lay_dw(LARGS, s, mx))) + 2;
+    return w;
+}
+static double lay_date_parts(LCTX, uint32_t el, const lay_style *s, vector<char> *texts, vector<uint8_t> *fields) {
+    static const char *const months[12] = { "January", "February", "March", "April", "May", "June", "July", "August",
+                                            "September", "October", "November", "December" };
+    int kind = lay_date_kind(d, el);
+    long v[7];
+    uint32_t a = lay_attr(d, el, "value");
+    int has = a && lay_date_value(text_ptr(d, d->attr[a].value), d->attr[a].value.len, kind, v);
+    if (!has) for (int k = 0; k < 7; k++) v[k] = -1;
+    /* a second's field when the value has seconds or the step is not whole minutes; a millisecond's when the value
+       has them or the step is not whole seconds (Blink's ShouldHaveSecondField, ShouldHaveMillisecondField) */
+    double step = lay_attr_num(d, el, "step", 60);
+    if (!(step > 0)) step = 60;
+    int sec = (has && (v[5] > 0 || v[6] > 0)) || fmod(step, 60) != 0, msf = (has && v[6] > 0) || fmod(step, 1) != 0;
+    char buf[32];
+    double total = 0;
+    clear(*texts);
+    clear(*fields);
+    if (kind == LD_DATE || kind == LD_DATETIME) {
+        if (has) snprintf(buf, sizeof buf, "%02ld", v[1]);
+        else snprintf(buf, sizeof buf, "%s", "mm");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "mm", "12");
+        total += lay_dpart(LARGS, s, texts, fields, 0, "/", "", "");
+        if (has) snprintf(buf, sizeof buf, "%02ld", v[2]);
+        else snprintf(buf, sizeof buf, "%s", "dd");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "dd", "31");
+        total += lay_dpart(LARGS, s, texts, fields, 0, "/", "", "");
+        if (has) snprintf(buf, sizeof buf, "%04ld", v[0]);
+        else snprintf(buf, sizeof buf, "%s", "yyyy");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "yyyy", "275760");
+        if (kind == LD_DATETIME) total += lay_dpart(LARGS, s, texts, fields, 0, ", ", "", "");
+    }
+    if (kind == LD_TIME || kind == LD_DATETIME) {
+        if (has) snprintf(buf, sizeof buf, "%02ld", v[3] % 12 ? v[3] % 12 : 12);
+        else snprintf(buf, sizeof buf, "%s", "--");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "--", "12");
+        total += lay_dpart(LARGS, s, texts, fields, 0, ":", "", "");
+        if (has) snprintf(buf, sizeof buf, "%02ld", v[4]);
+        else snprintf(buf, sizeof buf, "%s", "--");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "--", "59");
+        if (sec) {
+            total += lay_dpart(LARGS, s, texts, fields, 0, ":", "", "");
+            if (has) snprintf(buf, sizeof buf, "%02ld", v[5]);
+            else snprintf(buf, sizeof buf, "%s", "--");
+            total += lay_dpart(LARGS, s, texts, fields, 1, buf, "--", "59");
+            if (msf) {
+                total += lay_dpart(LARGS, s, texts, fields, 0, ".", "", "");
+                if (has) snprintf(buf, sizeof buf, "%03ld", v[6]);
+                else snprintf(buf, sizeof buf, "%s", "---");
+                total += lay_dpart(LARGS, s, texts, fields, 1, buf, "---", "999");
+            }
+        }
+        total += lay_dpart(LARGS, s, texts, fields, 0, " ", "", "");
+        total += lay_dpart(LARGS, s, texts, fields, 1, has ? (v[3] < 12 ? "AM" : "PM") : "--", "--",
+                           lay_dw(LARGS, s, "AM") >= lay_dw(LARGS, s, "PM") ? "AM" : "PM");
+    }
+    if (kind == LD_MONTH) {
+        int wi = 0;
+        for (int k = 1; k < 12; k++) if (lay_dw(LARGS, s, months[k]) > lay_dw(LARGS, s, months[wi])) wi = k;
+        total += lay_dpart(LARGS, s, texts, fields, 1, has ? months[v[1] - 1] : "---------", "---------", months[wi]);
+        total += lay_dpart(LARGS, s, texts, fields, 0, " ", "", "");
+        if (has) snprintf(buf, sizeof buf, "%04ld", v[0]);
+        else snprintf(buf, sizeof buf, "%s", "----");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "----", "275760");
+    }
+    if (kind == LD_WEEK) {
+        total += lay_dpart(LARGS, s, texts, fields, 0, "Week ", "", "");
+        if (has) snprintf(buf, sizeof buf, "%02ld", v[1]);
+        else snprintf(buf, sizeof buf, "%s", "--");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "--", "53");
+        total += lay_dpart(LARGS, s, texts, fields, 0, ", ", "", "");
+        if (has) snprintf(buf, sizeof buf, "%04ld", v[0]);
+        else snprintf(buf, sizeof buf, "%s", "----");
+        total += lay_dpart(LARGS, s, texts, fields, 1, buf, "----", "275760");
+    }
+    return ceil(total - 1e-9);
+}
+/* a date field's picker: its icon's size (an em, a time field's 1.05, as LayoutUnits hold them) and its box's
+   outer width and height (2px of padding about it, a time field's 3px and 8px before it: Chromium's sheet) */
+static void lay_date_picker(const dom_document *d, uint32_t el, const lay_style *s, double *size, double *ow, double *oh) {
+    int clock = lay_date_kind(d, el) == LD_TIME;
+    *size = floor((clock ? 1.05 : 1.0) * s->fs * 64 + 1e-6) / 64;
+    *oh = *size + (clock ? 6 : 4);
+    *ow = *oh + (clock ? 8 : 0);
+}
+
 static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
     *h = -1;
     if (lay_img_failed(LARGS, el)) {
@@ -1257,16 +1461,28 @@ static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, do
             if (kind == LI_CHECK || kind == LI_RADIO) { dw = 13; dh = 13; }
             else if (kind == LI_RANGE) { dw = 129; dh = 16; }
             else if (kind == LI_COLOR) { dw = 44; dh = 23; }
-            else if (kind == LI_FILE) { dw = ceil(34 * amb_text_width(f, s->face, s->fs, "0", 1)); dh = s->lh + 6; }
+            else if (kind == LI_FILE) {
+                /* Blink's LayoutFileUploadControl: 34 "0"s, or its button, 4px and its label if wider */
+                const char *bl = lay_attr(d, el, "multiple") ? "Choose Files" : "Choose File";
+                double bw = amb_text_width(f, s->face, s->fs, bl, strlen(bl)) + s->ls * (double)lay_cps(bl, strlen(bl)) + 16;
+                double lw = amb_text_width(f, s->face, s->fs, "No file chosen", 14) + s->ls * 14;
+                dw = ceil(fmax(34 * amb_text_width(f, s->face, s->fs, "0", 1), bw + 4 + lw) - 1e-9);
+                dh = s->lh + 6;
+            }
             else if (kind == LI_BUTTON || kind == LI_SUBMIT || kind == LI_RESET) {
                 vector<char> label;
                 lay_button_label(d, el, kind, &label);
                 dw = amb_text_width(f, s->face, s->fs, data(label), len(label)) + s->ls * (double)lay_cps(data(label), len(label));
                 dh = s->lh;
             } else if (kind == LI_DATE) {
-                /* its fields' text (mm/dd/yyyy) and its picker's icon */
-                dw = amb_text_width(f, s->face, s->fs, "mm/dd/yyyy", 10) + 39.0625;
-                dh = s->lh + 2.328125;
+                /* its edit (its fields' widest, lay_date_parts) and its picker, side by side in a flex row; as high as
+                   the higher of the edit (a line and its fields' 1px above and below) and the picker */
+                vector<char> pt_;
+                vector<uint8_t> pf_;
+                double ps_, pw_, ph_;
+                lay_date_picker(d, el, s, &ps_, &pw_, &ph_);
+                dw = lay_date_parts(LARGS, el, s, &pt_, &pf_) + pw_;
+                dh = fmax(s->lh + 2, ph_);
             } else {
                 /* size counts for a text, search, url, tel, email or password field; a number field with a min and
                    a max is as wide as the longer of them and its spin button's 15px (Blink's NumberInputType) */
@@ -2205,6 +2421,44 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
             return;
         }
         x = LAY_X(el).app_none ? 0 : 4;     /* of appearance none, no theme's padding */
+    } else if (input && kind == LI_FILE) {
+        /* a file chooser's button ("Choose File", "Choose Files" for a multiple one) at its start, a button's border
+           and padding about its label (2px and 6px aside, 3px above it), its text the button's colour (buttontext;
+           disabled, at 0.3); 4px after it the label, "No file chosen", in the chooser's colour */
+        const char *bl = lay_attr(d, el, "multiple") ? "Choose Files" : "Choose File";
+        double bw = amb_text_width(f, es->face, es->fs, bl, strlen(bl)) + es->ls * (double)lay_cps(bl, strlen(bl)) + 16;
+        t->box[b].part_w = bw;
+        int dark = (t->box[b].tstate & 2) != 0, dis = t->box[b].tstate & 1;
+        lay_style bs = *es;
+        bs.color = dark ? (dis ? 0xffffff4du : 0xffffffffu) : dis ? 0x1010104du : 0x000000ffu;
+        bs.fill = bs.color;     /* the button's -webkit-text-fill-color: its own currentcolor */
+        lay_control_line(LARGS, b, el, &bs, bl, strlen(bl), 8, 3, 0);
+        lay_control_line(LARGS, b, el, es, "No file chosen", 14, bw + 4, 3, 0);
+        return;
+    } else if (input && kind == LI_DATE) {
+        /* a date or time field's parts (lay_date_parts) from its start: a field's text 1px into its 1px padding; on
+           the edit's line, its fields' 1px below its top, the edit in the middle of the box's height (the flex row's
+           align-items: center) */
+        vector<char> texts;
+        vector<uint8_t> fields;
+        lay_date_parts(LARGS, el, es, &texts, &fields);
+        double ps_, pw_, ph_;
+        lay_date_picker(d, el, es, &ps_, &pw_, &ph_);
+        /* the picker hidden (its visibility) when the field is disabled or read-only, its room kept */
+        t->box[b].part = (uint8_t)((t->box[b].tstate & 1) || lay_attr(d, el, "readonly") ? 0 : lay_date_kind(d, el) == LD_TIME ? 2 : 1);
+        t->box[b].part_w = ps_;
+        double ey = (t->box[b].h - (es->lh + 2)) / 2 + 1, px = 0;
+        size_t i = 0;
+        for (size_t k = 0; k < len(fields); k++) {
+            const char *q = data(texts) + i;
+            size_t qn = strlen(q);
+            /* each part's text as wide as LayoutNG holds it: its width ceiled to the 1/64 px grid */
+            double tw = ceil((amb_text_width(f, es->face, es->fs, q, qn) + es->ls * (double)lay_cps(q, qn)) * 64 - 1e-6) / 64;
+            if (qn) lay_control_line(LARGS, b, el, es, q, qn, px + (at(fields, k) ? 1 : 0), ey, 0);
+            px += tw + (at(fields, k) ? 2 : 0);
+            i += qn + 1;
+        }
+        return;
     } else if (input && kind != LI_TEXT && kind != LI_PASSWORD) {
         return;
     } else {
@@ -2348,14 +2602,16 @@ static void lay_theme(LCTX, uint32_t b, uint32_t el) {
         else if (k == LI_RANGE) th = LAYOUT_THEME_RANGE;
         else if (k == LI_COLOR) { th = LAYOUT_THEME_COLORWELL; css_look = styled; }     /* its swatch kept */
         else if (k == LI_BUTTON || k == LI_SUBMIT || k == LI_RESET) th = styled ? LAYOUT_THEME_CSS : LAYOUT_THEME_BUTTON;
-        else if (k == LI_TEXT || k == LI_PASSWORD || k == LI_DATE) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_FIELD;
+        else if (k == LI_TEXT || k == LI_PASSWORD) th = styled || e.styled_shadow ? LAYOUT_THEME_CSS : LAYOUT_THEME_FIELD;
+        else if (k == LI_DATE) { th = LAYOUT_THEME_DATE; css_look = styled || e.styled_shadow; }   /* its picker kept */
+        else if (k == LI_FILE) { th = LAYOUT_THEME_FILE; css_look = 1; }    /* its own box CSS's (none), its button the theme's */
     }
     /* a progress bar or a meter styled (or of appearance none) keeps its kind: its shadow tree's CSS look drawn (4) */
     int gauge = 0;
     if (lay_is_named(d, el, "progress")) { th = LAYOUT_THEME_PROGRESS; gauge = 1; }
     else if (lay_is_named(d, el, "meter")) { th = LAYOUT_THEME_METER; gauge = 1; }
     /* of appearance none: a gauge's bar and a colour well's swatch, their shadow trees', still drawn */
-    if (gauge || th == LAYOUT_THEME_COLORWELL) css_look = css_look || styled || e.app_none;
+    if (gauge || th == LAYOUT_THEME_COLORWELL || th == LAYOUT_THEME_DATE || th == LAYOUT_THEME_FILE) css_look = css_look || styled || e.app_none;
     else if (e.app_none) th = LAYOUT_THEME_CSS;
     t->box[b].theme = th;
     t->box[b].checked = lay_attr(d, el, "checked") != 0;

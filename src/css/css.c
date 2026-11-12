@@ -212,7 +212,7 @@ static const char css_ua_sheet[] =
     "word-spacing: normal; line-height: normal; text-transform: none; text-indent: 0; text-shadow: none; text-align: start }\n"
     "input, textarea, select { padding: 1px 2px; border: 2px inset light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
     "textarea { font-family: monospace; padding: 2px; border: 1px solid light-dark(#767676, #858585); white-space: pre-wrap; overflow-wrap: break-word }\n"
-    "input[type=date i], input[type=datetime-local i], input[type=month i], input[type=time i], input[type=week i] { font-family: monospace; padding: 0 1px }\n"
+    "input[type=date i], input[type=datetime-local i], input[type=month i], input[type=time i], input[type=week i] { font-family: monospace; padding: 0 0 0 1px }\n"
     "button, input[type=button i], input[type=submit i], input[type=reset i] { padding: 1px 6px; border: 2px outset ButtonBorder; "
     "color: ButtonText; background-color: ButtonFace; text-align: center; box-sizing: border-box }\n"
     "select { padding: 0; border: 1px solid light-dark(#767676, #858585); background-color: ButtonFace; box-sizing: border-box }\n"
@@ -222,6 +222,7 @@ static const char css_ua_sheet[] =
     "input[type=range i] { margin: 2px; padding: 0; border: 0; color: #9d968e }\n"
     "input[type=color i] { width: 50px; height: 27px; padding: 1px 2px; border: 1px solid ButtonBorder; box-sizing: border-box; background-color: ButtonFace }\n"
     "input[type=file i], input[type=image i] { padding: 0; border: 0; background-color: transparent }\n"
+    "input[type=file i] { color: inherit; white-space: pre }\n"
     "progress { display: inline-block; box-sizing: border-box; width: 10em; height: 1em; vertical-align: -0.2em; appearance: auto }\n"
     "meter { display: inline-block; box-sizing: border-box; width: 5em; height: 1em; vertical-align: -0.2em; appearance: auto }\n"
     /* a disabled control's colours, as Chromium's sheet gives them (measured in both schemes) */

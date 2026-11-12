@@ -564,3 +564,22 @@ neighbours.
     signature, a pointer where a `double` now is, reached LLVM as `uitofp ptr ... to
     double` and failed there (`LLVM: ir_parse_failed: ... invalid cast opcode`), naming
     no line of the source.
+
+35. **A conditional expression whose operands are a char array and a string literal is
+    lowered with the array as a value**, and LLVM refuses the module (`ir_parse_failed:
+    invalid cast opcode for cast from 'ptr' to '[32 x i8]'`), naming no line of the source;
+    gcc decays the array to a pointer, as C says (6.5.15, 6.3.2.1):
+
+    ```c
+    #include <stdio.h>
+    static int show(const char *p) { return printf("%s\n", p); }
+    int main(int argc, char **argv) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d", argc);
+        show(argc > 1 ? buf : "none");
+        return 0;
+    }
+    ```
+
+    Met in src/layout/layout.c's date fields (a field's value text or its placeholder),
+    which fill the buffer with the placeholder instead.

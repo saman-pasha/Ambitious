@@ -1931,6 +1931,43 @@ static void pt_theme_field(amb_canvas *c, int x0, int y0, int x1, int y1, uint32
     pt_fill(c, x1 - 1, y0 + 1, x1, y1 - 1, line);
 }
 /* the form control b as the theme draws it, its border box (x, y, w, h) in page px */
+/* a button's frame as the theme draws it (PaintButton): its fill a rounded rectangle of radius 2, its border 1px inside
+   it; disabled, #d8d8d8 at 44% and its border #c0c0c0 at 68% (dark: #363636, its border its fill) */
+static void pt_theme_button(amb_canvas *c, int X0, int Y0, int X1, int Y1, uint32_t fill, uint32_t line, int dis, int dark) {
+    if (dis) fill = dark ? 0x363636ff : 0xd8d8d870;
+    if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, fill); return; }
+    pt_theme_rr(c, X0, Y0, X1, Y1, 2, fill, 0);
+    pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, dark ? fill : dis ? 0xc0c0c0ad : line);
+}
+
+/* a date or time field's picker icon (::-webkit-calendar-picker-indicator, Chromium's sheet): a calendar, a time field's
+   clock, an SVG of WindowText (white in the dark scheme) as its background, contained in its content box (background-origin:
+   content-box), the icon's size square, at its top left; its box that and 2px of padding about it (a clock's 3px), at the
+   end of the field's content box (x, y, w, h), in the middle of its height. Disabled, hidden (visibility: hidden) */
+static const char pt_calendar_svg[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"15\" viewBox=\"0 0 24 24\"><path fill=\"%s\" d=\"M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z\"/><path fill=\"none\" d=\"M0 0h24v24H0z\"/></svg>";
+static const char pt_clock_svg[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\"><path fill=\"%s\" d=\"M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z\"/><path d=\"M0 0h24v24H0z\" fill=\"none\"/><path fill=\"%s\" d=\"M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z\"/></svg>";
+static void pt_date_picker(const layout_tree *t, uint32_t b, amb_canvas *c, double x, double y, double w, double h) {
+    int clock = t->box[b].part == 2, dark = (t->box[b].tstate & 2) != 0;
+    double size = t->box[b].part_w, box = size + (clock ? 6 : 4);
+    double cx1 = x + w - t->box[b].br - t->box[b].pr, cy0 = y + t->box[b].bt + t->box[b].pt;
+    double ch = h - t->box[b].bt - t->box[b].pt - t->box[b].pb - t->box[b].bb;
+    if (size <= 0 || cx1 - box < x || t->box[b].part == 0) return;
+    /* contained in its content box snapped (each edge rounded), the tile's size rounded to whole px, at that box's
+       origin, as Chromium rasterizes it (measured: a 13.33px calendar drawn 13 by 12 at whole px, 14 by 13 where the
+       box's edges round outward) */
+    double pad = clock ? 3 : 2, ax = cx1 - box + pad, ay = cy0 + (ch - box) / 2 + pad;
+    double px0 = floor(ax + 0.5), py0 = floor(ay + 0.5), aw = floor(ax + size + 0.5) - px0, ah = floor(ay + size + 0.5) - py0;
+    double nw = clock ? 14 : 16, nh = clock ? 14 : 15, sc = fmin(aw / nw, ah / nh);
+    nw = floor(nw * sc + 0.5);
+    nh = floor(nh * sc + 0.5);
+    sc = 1;
+    char svg[1024];
+    const char *ink = dark ? "#ffffff" : "WindowText";
+    if (clock) snprintf(svg, sizeof svg, pt_clock_svg, ink, ink);
+    else snprintf(svg, sizeof svg, pt_calendar_svg, ink);
+    amb_svg_image(c, (const uint8_t *)svg, strlen(svg), px0, py0, nw * sc, nh * sc);
+}
+
 /* a drop-down's arrow: an 8 by 4 chevron stroked 2px wide in its text's colour, 12px before the inner right edge, at the
    box's middle (ThemePainterDefault::SetupMenuListArrow), the border box (X0, Y0)-(X1, Y1) snapped */
 static void pt_menulist_arrow(const layout_tree *t, uint32_t b, amb_canvas *c, int X0, int Y0, int X1, int Y1, vector<float> *acc) {
@@ -1963,9 +2000,10 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
     uint32_t fill = t->box[b].background & 0xff ? t->box[b].background : field;
     int X0 = (int)floor(x + 0.5), Y0 = (int)floor(y + 0.5), X1 = (int)floor(x + w + 0.5), Y1 = (int)floor(y + h + 0.5);
     layout_theme th = t->box[b].theme;
-    if (th == LAYOUT_THEME_FIELD || th == LAYOUT_THEME_AREA || th == LAYOUT_THEME_LISTBOX) {
+    if (th == LAYOUT_THEME_FIELD || th == LAYOUT_THEME_AREA || th == LAYOUT_THEME_LISTBOX || th == LAYOUT_THEME_DATE) {
         /* a list box keeps its own background disabled (the select's opacity fades it) */
         pt_theme_field(c, X0, Y0, X1, Y1, dis && th != LAYOUT_THEME_LISTBOX ? inner : fill, line);
+        if (th == LAYOUT_THEME_DATE) pt_date_picker(t, b, c, x, y, w, h);
         if (th == LAYOUT_THEME_AREA) {
             /* the resizer: two diagonals in the bottom right corner */
             uint32_t rz = dark ? (dis ? 0x626262ff : 0xb0b0b0ff) : dis ? 0x6666664d : 0x666666ff;
@@ -1980,10 +2018,8 @@ static void pt_theme(const layout_tree *t, uint32_t b, amb_canvas *c, double x, 
     } else if (th == LAYOUT_THEME_BUTTON || th == LAYOUT_THEME_COLORWELL) {
         /* a button: its background as a rounded rectangle of radius 2, its border 1px inside it (PaintButton);
            disabled, #d8d8d8 at 44% and its border #c0c0c0 at 68% (dark: #363636, its border its fill) */
-        if (dis) fill = dark ? 0x363636ff : 0xd8d8d870;
-        if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, fill); return; }
-        pt_theme_rr(c, X0, Y0, X1, Y1, 2, fill, 0);
-        pt_hair_rrect(c, X0 + 0.5, Y0 + 0.5, X1 - 0.5, Y1 - 0.5, 2, dark ? fill : dis ? 0xc0c0c0ad : line);
+        if (X1 - X0 < 5 || Y1 - Y0 < 5) { pt_fill(c, X0, Y0, X1, Y1, dis ? (dark ? 0x363636ff : 0xd8d8d870) : fill); return; }
+        pt_theme_button(c, X0, Y0, X1, Y1, fill, line, dis, dark);
         if (th == LAYOUT_THEME_COLORWELL) pt_colour_swatch(t, b, c, x, y, w, h);
     } else if (th == LAYOUT_THEME_CHECKBOX || th == LAYOUT_THEME_RADIO) {
         /* the largest square in the box, a rounded square (radius 2) or a circle: unchecked, white with a 1px border;
@@ -2297,8 +2333,21 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
     /* a control its author styled, drawn by its CSS, then what of the theme's drawing its shadow tree keeps */
     if (t->box[b].tstate & 4) {
         layout_theme th = t->box[b].theme;
+        /* its border box where layout put it, unsnapped, as the theme's drawing has it */
+        double ux = t->box[b].x - t->box[b].pl - t->box[b].bl, uy = t->box[b].y - t->box[b].pt - t->box[b].bt;
+        double uw = t->box[b].w + t->box[b].pl + t->box[b].pr + t->box[b].bl + t->box[b].br;
+        double uh = t->box[b].h + t->box[b].pt + t->box[b].pb + t->box[b].bt + t->box[b].bb;
         if (th == LAYOUT_THEME_PROGRESS || th == LAYOUT_THEME_METER) pt_gauge_css(t, b, c);
-        else if (th == LAYOUT_THEME_COLORWELL) pt_colour_swatch(t, b, c, qx0, qy0, qx1 - qx0, qy1 - qy0);
+        else if (th == LAYOUT_THEME_COLORWELL) pt_colour_swatch(t, b, c, ux, uy, uw, uh);
+        else if (th == LAYOUT_THEME_DATE) pt_date_picker(t, b, c, ux, uy, uw, uh);
+        else if (th == LAYOUT_THEME_FILE) {
+            /* a file chooser's button: a button's frame (#efefef, dark #6b6b6b) from its content box's start, its
+               width the button's (part_w), the content box's height */
+            int dark = (t->box[b].tstate & 2) != 0, dis = t->box[b].tstate & 1;
+            double fx = t->box[b].x, fy = t->box[b].y;
+            pt_theme_button(c, (int)floor(fx + 0.5), (int)floor(fy + 0.5), (int)floor(fx + t->box[b].part_w + 0.5), (int)floor(fy + t->box[b].h + 0.5),
+                            dark ? 0x6b6b6bff : 0xefefefff, dark ? 0x858585ff : 0x767676ff, dis, dark);
+        }
         else if (th == LAYOUT_THEME_MENULIST) {
             vector<float> tacc;
             pt_menulist_arrow(t, b, c, (int)qx0, (int)qy0, (int)qx1, (int)qy1, &tacc);
