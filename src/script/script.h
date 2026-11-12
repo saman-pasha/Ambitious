@@ -155,6 +155,38 @@ int script_action(js_vm *vm, uint32_t kind, uint32_t x, const char *text, size_t
 /* the encoding the document was decoded with, by its name (the parser's record): its
    forms submit in it, document.characterSet names it. Unset, UTF-8 */
 void script_charset(js_vm *vm, const char *name, size_t n);
+
+/* ---- a page with frames (Phase 12u: src/script/frames.c; src/shell/frame.c makes them) ----
+   Each document of a page has its own VM, its realm and window: the top level's is frame
+   0, its frames' 1 .. in the order they were made. A frame's VM reaches another's through
+   the table every document's host shares (struct sh_frames, below), and one realm's
+   object is seen in another through a proxy of the engine's whose traps run in the VM that
+   owns it (a membrane: the window, its document and their objects, each kept the same
+   object for each look at it); a document of another origin offers only what HTML's
+   cross-origin objects offer, else a SecurityError as Chromium's. */
+struct sh_frames;
+/* the page's scripts in two parts: the parse's (its scripts, the deferred ones,
+   DOMContentLoaded at the document, the async ones), then the document complete, load at
+   the window and its timers as far as horizon (none for a horizon below 0, as a frame's
+   load is, whose timers run with the page's). script_run_page runs both. The parse's: the
+   scripts run */
+uint32_t script_run_parse(js_vm *vm);
+void script_run_load(js_vm *vm, double horizon);
+/* load fired at the iframe element x of the VM's document (its frame loaded) */
+void script_frame_loaded(js_vm *vm, uint32_t x);
+/* the timers and tasks of every frame's VM, one event loop in virtual time, as far as
+   horizon ms past the latest now; then each VM's timers recorded */
+void script_frames_run(struct sh_frames *fr, double horizon);
+/* each frame's console in the page's order: frame k's console record c's place (0: none) */
+uint32_t script_console_order(const js_vm *vm, uint32_t c);
+/* the VM's timers recorded as the page comes to rest */
+void script_timers_record(js_vm *vm);
+/* frame k made in the document of the VM given: its window named on that window (its
+   iframe's name), once that window is made (src/script/frames.c) */
+void script_frame_made(js_vm *vm, uint32_t k);
+/* a console message of the page's own (Chromium's, not a script's: a sandbox's refusal to
+   run scripts) at the level given, in the page's order */
+void script_console_note(js_vm *vm, uint32_t level, const char *text);
 /* where localStorage is kept: the profile's storage file (unset: for the run only) */
 void script_storage_file(js_vm *vm, const char *path);
 
@@ -165,6 +197,31 @@ void script_storage_file(js_vm *vm, const char *path);
    enum, not a #define: an included header's array member sized by an object-like
    macro is laid out with no size (toolchain finding) */
 enum { SCRIPT_PROTOS = 64 };
+
+/* the frames of a page: every document's VM by its frame number (0 the top level's: each
+   set where the page's stores are declared, src/shell/frame.h); and of each its parent's
+   number, its iframe element there (a NODE of the parent's document, and its generation),
+   its state (SH_FRAME_*), its origin's key (one key one origin, an opaque origin a key of
+   its own; 0 none: an error page's) and its serialization ("null" for an opaque one), its
+   sandbox's flags (SH_SANDBOX_*) and its window's name (its iframe's name attribute); the
+   frames made, the page's console order so far, and the reader's settings a cascade a
+   script forces in a frame reads (its viewport its host's). Enums, not #defines, size the
+   arrays (a toolchain finding) */
+enum { SCRIPT_FRAMES = 32, SCRIPT_DOCS = 33 };
+enum { SH_FRAME_NONE, SH_FRAME_BLANK, SH_FRAME_LOADED, SH_FRAME_FAILED };
+enum { SH_SANDBOX = 1, SH_SANDBOX_SCRIPTS = 2, SH_SANDBOX_SAME_ORIGIN = 4 };
+typedef struct sh_frame {
+    uint32_t parent, iframe, iframe_gen, state, origin, sandbox;
+    char origin_text[192];
+    char name[64];
+} sh_frame;
+typedef struct sh_frames {
+    js_vm *vm[SCRIPT_DOCS];
+    sh_frame f[SCRIPT_DOCS];
+    uint32_t n, seq, depth, spare;
+    double font_size;
+    int dark, reduced;
+} sh_frames;
 
 struct js_host {
     dom_document *d;
@@ -270,6 +327,19 @@ struct js_host {
     vector<sh_imap> imap;
     vector<char> imtext;
     vector<char> modfail;
+    /* the page's frames (src/script/frames.c): the table every document's host shares (0 for
+       a page without frames) and this document's number in it; this VM's objects another
+       frame's proxies stand for (ROOTs, kept for the page's life); this VM's proxies of
+       another frame's objects, three numbers a proxy: the frame, the object there, the proxy
+       here (a ROOT); the proxies' handler, a ROOT; each console record's place in the page's
+       order (by the record's number); and a frame's own window's postMessage forwarders and
+       Window objects of the frames it named, by frame (ROOTs: 0 none yet) */
+    struct sh_frames *fr;
+    uint32_t frame, mhandler;
+    vector<uint32_t> exports;
+    vector<uint32_t> remotes;
+    vector<uint32_t> cseq;
+    vector<uint32_t> xwins;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -293,6 +363,7 @@ struct js_host {
     vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter); vector_sh_cdef_drop(&(h).cdefs); vector_sh_cel_drop(&(h).cels); \
     vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext); \
     vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
-    vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail)
+    vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail); \
+    vector_uint32_t_drop(&(h).exports); vector_uint32_t_drop(&(h).remotes); vector_uint32_t_drop(&(h).cseq); vector_uint32_t_drop(&(h).xwins)
 
 #endif

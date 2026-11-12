@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-http.html -- frames served over HTTP (tests/integ/script-serve.py, which
+     writes its port for PORT; http://localhost:PORT is another origin than http://127.0.0.1:PORT):
+     a frame of the page's origin and one of another (its document hidden, Chromium's
+     SecurityError naming the page's origin), postMessage to a target origin that holds and to
+     one that does not (dropped, with Chromium's console error), a frame whose server answers
+     404 (its body the document it shows), and one far below the viewport with loading=lazy
+     (not loaded at rest). The order the frames load in over the network is Chromium's to choose,
+     so nothing is logged before the page's load. Reference: tools/bench/console-actions.js over
+     the served page (tests/pages/frames-http.chromium). -->
+<html><head><title>http parent</title></head><body style="margin:8px">
+<iframe id="same" src="/frames-http-child.html" width="200" height="80"></iframe>
+<iframe id="cross" src="http://localhost:PORT/frames-http-child.html" width="200" height="80"></iframe>
+<iframe id="gone" src="/status/404" width="200" height="80"></iframe>
+<div style="height:6000px"></div>
+<iframe id="lazy" loading="lazy" src="/frames-http-child.html?lazy" width="200" height="80"></iframe>
+<script>
+addEventListener('load', () => {
+  const s = document.getElementById('same'), c = document.getElementById('cross'), g = document.getElementById('gone');
+  console.log('same', s.contentDocument.title, s.contentWindow.location.pathname, s.contentWindow.frameElement === s);
+  console.log('cross', c.contentDocument, c.contentWindow.length, c.contentWindow.parent === window);
+  try { c.contentWindow.document; } catch (e) { console.log(e.name + ': ' + e.message); }
+  console.log('gone', g.contentDocument.body.textContent.trim());
+  console.log('lazy', document.getElementById('lazy').contentDocument.URL);
+  c.contentWindow.postMessage('to the other origin', 'http://localhost:PORT');
+  c.contentWindow.postMessage('to a wrong origin', 'http://example.com');
+  s.contentWindow.postMessage('to the same origin', '/');
+});
+addEventListener('message', (e) => console.log('message', e.data, e.origin, e.source === document.getElementById('same').contentWindow));
+</script>
+</body></html>

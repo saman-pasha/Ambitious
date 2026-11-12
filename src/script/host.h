@@ -29,7 +29,7 @@ enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP
    and the declarations after an enum that used one are not registered (a toolchain
    finding) */
 enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INPUT_END = 1600, SH_OBSERVE_FIRST = 1600, SH_OBSERVE_END = 1700,
-       SH_CUSTOM_FIRST = 1700, SH_CUSTOM_END = 1800, SH_WINDOW_FIRST = 1800, SH_WINDOW_END = 1900 };
+       SH_CUSTOM_FIRST = 1700, SH_CUSTOM_END = 1800, SH_WINDOW_FIRST = 1800, SH_WINDOW_END = 1900, SH_FRAMES_FIRST = 1900, SH_FRAMES_END = 2000 };
 
 /* an event's flags, in its a slot */
 #define EV_STOP 1u
@@ -50,7 +50,8 @@ enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INP
    which is no page's timer */
 #define SH_TASK_REC 0xFFFFFFFDu
 /* the host's tasks */
-enum { SH_TASK_FETCH = 1, SH_TASK_XHR, SH_TASK_BODY, SH_TASK_NOTE, SH_TASK_SCRIPT, SH_TASK_HASH, SH_TASK_NAV, SH_TASK_TRAVERSE };
+enum { SH_TASK_FETCH = 1, SH_TASK_XHR, SH_TASK_BODY, SH_TASK_NOTE, SH_TASK_SCRIPT, SH_TASK_HASH, SH_TASK_NAV, SH_TASK_TRAVERSE,
+       SH_TASK_MESSAGE };
 
 /* ---- script.c's, for the other units ---- */
 /* the DOM read: an element; an HTML element of a name; a script element; an attribute of
@@ -165,5 +166,15 @@ void script_storage_save(js_vm *vm);
 jv script_form_named(js_vm *vm, uint32_t form, uint32_t atom, int *handled);
 /* the input unit's host tasks: hashchange, a form's planned navigation */
 void script_input_task(js_vm *vm, uint32_t kind, uint32_t arg);
+/* ---- frames.c's: a page's frames, their windows and the membrane between their realms ----
+   the window's frame properties (parent, top, frames, length, frameElement, name, postMessage,
+   its frames by index and by name), made once the page has frames; its natives (the
+   proxies' traps, postMessage); an iframe element's contentWindow and contentDocument, and
+   the window's own frame properties read (handled when the name is one); a message's
+   dispatch (SH_TASK_MESSAGE) */
+void script_frames_setup(js_vm *vm);
+jv script_frames_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt, int *handled);
+jv script_frames_get(js_vm *vm, uint32_t x, uint32_t atom, int *handled);
+void script_frames_task(js_vm *vm, uint32_t kind, uint32_t arg);
 
 #endif

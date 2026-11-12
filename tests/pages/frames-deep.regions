@@ -1,0 +1,3 @@
+# tests/pages/frames-deep.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+f1 8 8 352 572
+self 360 8 664 412

@@ -1,0 +1,22 @@
+p: DOMContentLoaded
+a: script true from the parent hello a from parent a first 0 true
+a: realm false false object parent
+a: DOMContentLoaded child a
+a: load
+p: iframe load a
+b: SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+b: SecurityError: Failed to set a named property 'shared' on 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+b: script object true 0 null
+p: iframe load b
+Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.
+p: iframe load c
+p: load 3 true true true
+p: a child a child a true true
+p: a changed changed by the parent
+p: b contentDocument null
+p: SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+p: SecurityError: Failed to set a named property 'foo' on 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+p: b may read function true 0 true
+a: message {"n":1} null true true
+b: message to b null
+p: message {"back":2,"list":[1,"two"]} null true

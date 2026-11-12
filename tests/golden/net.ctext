@@ -1,9 +1,11 @@
-/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:6a285480:6525). Do not edit. */
+/* Ambitious: the interface of module net, generated from contracts/net.pl (fnv1a32:e05f387e:8104). Do not edit. */
 typedef enum net_status { NET_OK, NET_STALE_HANDLE, NET_WRONG_KIND, NET_FAILED, NET_BAD_REQUEST, NET_NOT_REQUESTABLE, NET_STALE_REVISION } net_status;
 typedef enum net_kind { NET_KIND_DOCUMENT, NET_KIND_STYLESHEET, NET_KIND_IMAGE, NET_KIND_SCRIPT, NET_KIND_OTHER } net_kind;
 typedef enum net_cache_use { NET_CACHE_USE_UNUSED, NET_CACHE_USE_STORED, NET_CACHE_USE_FRESH, NET_CACHE_USE_REVALIDATED, NET_CACHE_USE_NOT_STORED } net_cache_use;
 typedef enum net_outcome { NET_OUTCOME_OK, NET_OUTCOME_HTTP_ERROR, NET_OUTCOME_NO_SUCH_FILE, NET_OUTCOME_REFUSED, NET_OUTCOME_UNREACHABLE, NET_OUTCOME_TOO_MANY_REDIRECTS, NET_OUTCOME_UNSUPPORTED_SCHEME, NET_OUTCOME_BAD_URL, NET_OUTCOME_BLOCKED, NET_OUTCOME_TOO_LARGE, NET_OUTCOME_MALFORMED, NET_OUTCOME_TLS_HANDSHAKE_FAILED, NET_OUTCOME_TLS_VERIFY_FAILED, NET_OUTCOME_PROXY_REFUSED, NET_OUTCOME_DECODING_FAILED, NET_OUTCOME_RESET } net_outcome;
 typedef enum net_protocol { NET_PROTOCOL_UNSENT, NET_PROTOCOL_HTTP1, NET_PROTOCOL_H2 } net_protocol;
+typedef enum net_frame_source { NET_FRAME_SOURCE_SRCDOC, NET_FRAME_SOURCE_SRC, NET_FRAME_SOURCE_BLANK } net_frame_source;
+typedef enum net_frame_outcome { NET_FRAME_OUTCOME_LOADED, NET_FRAME_OUTCOME_FAILED, NET_FRAME_OUTCOME_BLOCKED, NET_FRAME_OUTCOME_LAZY } net_frame_outcome;
 typedef enum net_same_site { NET_SAME_SITE_UNSET, NET_SAME_SITE_LAX, NET_SAME_SITE_STRICT, NET_SAME_SITE_NO_RESTRICTION } net_same_site;
 typedef enum net_cookie_state { NET_COOKIE_STATE_KEPT, NET_COOKIE_STATE_REPLACED, NET_COOKIE_STATE_EXPIRED, NET_COOKIE_STATE_REFUSED } net_cookie_state;
 typedef enum net_refusal { NET_REFUSAL_ACCEPTED, NET_REFUSAL_MALFORMED, NET_REFUSAL_TOO_LARGE, NET_REFUSAL_SECURE_OVER_HTTP, NET_REFUSAL_DOMAIN_MISMATCH, NET_REFUSAL_PUBLIC_SUFFIX, NET_REFUSAL_PREFIX, NET_REFUSAL_CROSS_SITE, NET_REFUSAL_NONE_INSECURE, NET_REFUSAL_OVERWRITES_SECURE, NET_REFUSAL_TOO_MANY } net_refusal;
@@ -13,8 +15,10 @@ typedef struct net_hop_h { uint32_t doc, index, gen; } net_hop_h;
 typedef struct net_cookie_h { uint32_t doc, index, gen; } net_cookie_h;
 typedef struct net_sent_h { uint32_t doc, index, gen; } net_sent_h;
 typedef struct net_keeping_h { uint32_t doc, index, gen; } net_keeping_h;
+typedef struct net_frame_h { uint32_t doc, index, gen; } net_frame_h;
 typedef struct net_resource { uint32_t gen, live, free_next; amb_span url; amb_span final_url; net_kind kind; net_outcome outcome; uint32_t status; amb_span type; amb_span charset; uint32_t size; amb_span body; amb_span origin; uint32_t from; dom_node_h elem; uint32_t width; uint32_t height; amb_span reason; uint8_t tls; amb_span tls_version; amb_span tls_cipher; amb_span alpn; uint8_t proxied; amb_span proxy; uint8_t cross_site; net_cache_use cache; int64_t cache_age; int64_t cache_lifetime; uint8_t coded; amb_span coding; uint32_t encoded_size; uint8_t srcset; amb_span descriptor; double density; double source_size; uint32_t candidates; uint8_t picture; dom_node_h source; net_protocol protocol; uint32_t connection; uint32_t stream; uint8_t reused; } net_resource;
 typedef struct net_hop { uint32_t gen, live, free_next; uint32_t resource; amb_span url; uint32_t status; } net_hop;
+typedef struct net_frame { uint32_t gen, live, free_next; dom_node_h iframe; uint32_t doc; uint32_t parent; amb_span url; net_frame_source source; net_frame_outcome outcome; uint32_t resource; double width; double height; uint8_t vbar; uint8_t hbar; uint8_t sandboxed; uint8_t scripts; uint8_t same_origin; uint8_t quirks; } net_frame;
 typedef struct net_cookie { uint32_t gen, live, free_next; amb_span name; amb_span value; amb_span domain; amb_span path; uint8_t host_only; uint8_t secure; uint8_t http_only; net_same_site same_site; uint8_t persistent; int64_t expires; int64_t created; net_cookie_state state; net_refusal refusal; uint32_t set_by; uint8_t seen; } net_cookie;
 typedef struct net_sent { uint32_t gen, live, free_next; uint32_t resource; uint32_t cookie; } net_sent;
 typedef struct net_keeping { uint32_t gen, live, free_next; amb_span jar; amb_span cache; uint8_t dirty; } net_keeping;
@@ -27,6 +31,8 @@ const char *net_kind_name(net_kind x);
 const char *net_cache_use_name(net_cache_use x);
 const char *net_outcome_name(net_outcome x);
 const char *net_protocol_name(net_protocol x);
+const char *net_frame_source_name(net_frame_source x);
+const char *net_frame_outcome_name(net_frame_outcome x);
 const char *net_same_site_name(net_same_site x);
 const char *net_cookie_state_name(net_cookie_state x);
 const char *net_refusal_name(net_refusal x);
@@ -111,6 +117,23 @@ const char *net_protocol_name(net_protocol x) {
     }
     return "?";
 }
+const char *net_frame_source_name(net_frame_source x) {
+    switch (x) {
+    case NET_FRAME_SOURCE_SRCDOC: return "srcdoc";
+    case NET_FRAME_SOURCE_SRC: return "src";
+    case NET_FRAME_SOURCE_BLANK: return "blank";
+    }
+    return "?";
+}
+const char *net_frame_outcome_name(net_frame_outcome x) {
+    switch (x) {
+    case NET_FRAME_OUTCOME_LOADED: return "loaded";
+    case NET_FRAME_OUTCOME_FAILED: return "failed";
+    case NET_FRAME_OUTCOME_BLOCKED: return "blocked";
+    case NET_FRAME_OUTCOME_LAZY: return "lazy";
+    }
+    return "?";
+}
 const char *net_same_site_name(net_same_site x) {
     switch (x) {
     case NET_SAME_SITE_UNSET: return "unset";
@@ -146,7 +169,7 @@ const char *net_refusal_name(net_refusal x) {
     return "?";
 }
 
-const char net_fingerprint[] = "fnv1a32:6a285480:6525";
+const char net_fingerprint[] = "fnv1a32:e05f387e:8104";
 void net_init(net_loader *d, uint32_t id) {
     if (d->resource_len != 0) abort();
     d->id = id;
@@ -195,6 +218,10 @@ int net_check_invariants(const net_loader *d, FILE *report) {
             uint32_t r = d->sent[i].cookie;
             if (d->sent[i].live && r && (r >= d->cookie_len || !d->cookie[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
         }
+        for (uint32_t i = 1; i < d->frame_len; i++) {
+            uint32_t r = d->frame[i].resource;
+            if (d->frame[i].live && r && (r >= d->resource_len || !d->resource[r].live)) { bad++; amb_report(report, "net", "live_links", i); }
+        }
     }
     return bad;
 }
@@ -234,6 +261,15 @@ void net_export(const net_loader *d, FILE *out) {
         if (1) { fputs("net_cookie_sent(", out); { uint32_t r = d->sent[i].resource; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(",", out); { uint32_t r = d->sent[i].cookie; amb_put_ref(out, "ck", d->id, r, r && r < d->cookie_len ? d->cookie[r].gen : 0); } fputs(").\n", out); }
     }
 
+    for (uint32_t i = 1; i < d->frame_len; i++) {
+        if (!d->frame[i].live) continue;
+        if (1) { fputs("net_frame(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(",", out); amb_put_ref(out, "n", d->frame[i].iframe.doc, d->frame[i].iframe.index, d->frame[i].iframe.gen); fputs(",", out); fprintf(out, "%lld", (long long)d->frame[i].doc); fputs(",", out); text_put(d, out, d->frame[i].url); fputs(",", out); fputs(net_frame_source_name(d->frame[i].source), out); fputs(",", out); fputs(net_frame_outcome_name(d->frame[i].outcome), out); fputs(").\n", out); }
+        if (1) { fputs("net_frame_parent(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->frame[i].parent); fputs(").\n", out); }
+        if (d->frame[i].resource != 0) { fputs("net_frame_fetch(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(",", out); { uint32_t r = d->frame[i].resource; amb_put_ref(out, "rs", d->id, r, r && r < d->resource_len ? d->resource[r].gen : 0); } fputs(").\n", out); }
+        if (d->frame[i].outcome == NET_FRAME_OUTCOME_LOADED) { fputs("net_frame_viewport(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(",", out); amb_put_f64(out, d->frame[i].width); fputs(",", out); amb_put_f64(out, d->frame[i].height); fputs(",", out); fputs(d->frame[i].vbar ? "true" : "false", out); fputs(",", out); fputs(d->frame[i].hbar ? "true" : "false", out); fputs(").\n", out); }
+        if (d->frame[i].sandboxed == 1) { fputs("net_frame_sandbox(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(",", out); fputs(d->frame[i].scripts ? "true" : "false", out); fputs(",", out); fputs(d->frame[i].same_origin ? "true" : "false", out); fputs(").\n", out); }
+        if (d->frame[i].quirks == 1) { fputs("net_frame_quirks(", out); amb_put_handle(out, "fm", d->id, i, d->frame[i].gen); fputs(").\n", out); }
+    }
 }
 net_status net_dispatch(net_loader *d, const char *t, size_t n, uint64_t batch_rev, FILE *report) {
     size_t p = 0;
@@ -273,12 +309,15 @@ typedef struct store_net_store_tag {
     size_t keeping_len, keeping_cap;
     uint32_t keeping_free;
     own net_keeping *keeping;
+    size_t frame_len, frame_cap;
+    uint32_t frame_free;
+    own net_frame *frame;
     size_t text_len, text_cap;
     own char *text;
     size_t bytes_len, bytes_cap;
     own char *bytes;
 } store_net_store_tag;
-void store_net_store_tag_drop(store_net_store_tag *s) { free(s->resource); free(s->hop); free(s->cookie); free(s->sent); free(s->keeping); free(s->text); free(s->bytes); }
+void store_net_store_tag_drop(store_net_store_tag *s) { free(s->resource); free(s->hop); free(s->cookie); free(s->sent); free(s->keeping); free(s->frame); free(s->text); free(s->bytes); }
 static void store_net_store_tag__resource_grow(store_net_store_tag *s) {
     size_t c = s->resource_cap ? 2 * s->resource_cap : 16;
     if (c > 0x7FFFFFFF) abort();
@@ -612,6 +651,73 @@ size_t store_net_store_tag_keeping_len(const store_net_store_tag *s) { return s-
 size_t store_net_store_tag_keeping_count(const store_net_store_tag *s) {
     size_t n = 0;
     for (size_t i = 1; i < s->keeping_len; i++) if (s->keeping[i].live) n++;
+    return n;
+}
+static void store_net_store_tag__frame_grow(store_net_store_tag *s) {
+    size_t c = s->frame_cap ? 2 * s->frame_cap : 16;
+    if (c > 0x7FFFFFFF) abort();
+    s->frame = (net_frame *)realloc(s->frame, c * sizeof(net_frame));
+    if (!s->frame) abort();
+    s->frame_cap = c;
+}
+net_frame_h store_net_store_tag_frame_new(store_net_store_tag *s) {
+    uint32_t i;
+    if (s->frame_free) {
+        i = s->frame_free;
+        s->frame_free = s->frame[i].free_next;
+    } else {
+        if (s->frame_len == 0) {
+            if (s->frame_cap == 0) store_net_store_tag__frame_grow(s);
+            memset(&s->frame[0], 0, sizeof(net_frame));
+            s->frame_len = 1;
+        }
+        if (s->frame_len == s->frame_cap) store_net_store_tag__frame_grow(s);
+        i = (uint32_t)s->frame_len;
+        s->frame_len++;
+        s->frame[i].gen = 0;
+    }
+    uint32_t g = s->frame[i].gen;
+    memset(&s->frame[i], 0, sizeof(net_frame));
+    s->frame[i].gen = g;
+    s->frame[i].live = 1;
+    net_frame_h h = { s->id, i, g };
+    return h;
+}
+int store_net_store_tag_frame_live(const store_net_store_tag *s, net_frame_h h) {
+    return h.doc == s->id && h.index != 0 && h.index < s->frame_len && s->frame[h.index].live && s->frame[h.index].gen == h.gen;
+}
+net_frame store_net_store_tag_frame_get(const store_net_store_tag *s, net_frame_h h) {
+    if (!store_net_store_tag_frame_live(s, h)) abort();
+    return s->frame[h.index];
+}
+net_frame *store_net_store_tag_frame_ref(const store_net_store_tag *s, net_frame_h h) tie s {
+    if (!store_net_store_tag_frame_live(s, h)) abort();
+    return &s->frame[h.index];
+}
+net_frame *store_net_store_tag_frame_slot(const store_net_store_tag *s, uint32_t i) tie s {
+    if (i == 0 || i >= s->frame_len) abort();
+    return &s->frame[i];
+}
+net_frame_h store_net_store_tag_frame_handle(const store_net_store_tag *s, uint32_t i) {
+    net_frame_h h = { 0, 0, 0 };
+    if (i != 0 && i < s->frame_len && s->frame[i].live) {
+        h.doc = s->id;
+        h.index = i;
+        h.gen = s->frame[i].gen;
+    }
+    return h;
+}
+void store_net_store_tag_frame_free(store_net_store_tag *s, net_frame_h h) {
+    if (!store_net_store_tag_frame_live(s, h)) abort();
+    s->frame[h.index].live = 0;
+    s->frame[h.index].gen++;
+    s->frame[h.index].free_next = s->frame_free;
+    s->frame_free = h.index;
+}
+size_t store_net_store_tag_frame_len(const store_net_store_tag *s) { return s->frame_len; }
+size_t store_net_store_tag_frame_count(const store_net_store_tag *s) {
+    size_t n = 0;
+    for (size_t i = 1; i < s->frame_len; i++) if (s->frame[i].live) n++;
     return n;
 }
 static void store_net_store_tag__text_room(store_net_store_tag *s, size_t n) {

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-scroll.html -- frames whose content overflows them (Phase 12u): the classic
+     scroll bars Chromium draws in them (a vertical one, a horizontal one, both with their corner,
+     one beside wrapped text, which its lines make room for, and the dark scheme's), and the
+     frames that draw none (scrolling=no, a root that hides its overflow, content that fits).
+     References: node tools/bench/boxes.js, node tools/bench/shot.js --scrollbars and
+     node tools/bench/frameboxes.js, each over this page. -->
+<html><head><style>
+  body { margin: 8px; background: #f4f4f4 }
+  iframe { vertical-align: top; margin: 0 8px 8px 0 }
+</style></head><body>
+<iframe id="v" width="120" height="100" srcdoc="<body style='margin:0'><div id=v1 style='height:300px;background:#9cf'></div></body>"></iframe><iframe id="h" width="160" height="80" srcdoc="<body style='margin:0'><div id=h1 style='width:400px;height:30px;background:#c9c'></div></body>"></iframe><iframe id="both" width="140" height="110" srcdoc="<body style='margin:0'><div id=b1 style='width:300px;height:300px;background:#fc9'></div></body>"></iframe><iframe id="text" width="200" height="90" srcdoc="<p id=t1>A frame of text that runs past its bottom edge, so that a scroll bar shows beside its lines, which wrap to its width less the bar.</p>"></iframe><br>
+<iframe id="no" scrolling="no" width="120" height="80" srcdoc="<body style='margin:0'><div id=n1 style='width:300px;height:300px;background:#9c9'></div></body>"></iframe><iframe id="hidden" width="120" height="80" srcdoc="<html style='overflow:hidden'><body style='margin:0'><div id=x1 style='width:300px;height:300px;background:#99c'></div></body></html>"></iframe><iframe id="darkbars" width="140" height="100" srcdoc="<html style='color-scheme:dark'><body style='margin:0'><div id=k1 style='width:300px;height:300px;background:#363'></div></body></html>"></iframe><iframe id="fits" width="140" height="100" srcdoc="<p id=f1 style='margin:0'>fits</p>"></iframe><iframe id="tall" width="90" height="220" srcdoc="<body style='margin:0'><div id=l1 style='height:2000px;background:#ccc'></div></body>"></iframe>
+</body></html>

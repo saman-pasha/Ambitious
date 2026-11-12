@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-script.html -- scripts across frames (Phase 12u): each frame's realm and
+     window; parent, top, frames, frameElement, name, contentWindow and contentDocument; a
+     function of the parent's called from a frame; load at each frame's window and at its iframe,
+     in Chromium's order; postMessage both ways with its message event's data, origin and source;
+     a sandboxed frame with scripts (of an opaque origin of its own: Chromium's SecurityError
+     either way, and what it may still read), and one without (its scripts refused).
+     Reference: node tools/bench/console.js over this page (tests/pages/frames-script.chromium). -->
+<html><head><title>parent</title></head><body>
+<iframe id="a" name="first" srcdoc="<title>child a</title><p id=x>child a</p><script>
+console.log('a: script', parent === top, parent.shared, parent.greet('a'), frameElement.id, window.name, frames.length, self === window);
+console.log('a: realm', parent.Array === Array, [] instanceof parent.Array, typeof parent.document, parent.document.title);
+document.addEventListener('DOMContentLoaded', () => console.log('a: DOMContentLoaded', document.title));
+addEventListener('load', () => console.log('a: load'));
+addEventListener('message', (e) => { console.log('a: message', JSON.stringify(e.data), e.origin, e.source === parent, e instanceof MessageEvent); e.source.postMessage({ back: e.data.n + 1, list: [1, 'two'] }, '*'); });
+</script>"></iframe>
+<iframe id="b" sandbox="allow-scripts" srcdoc="<script>
+try { parent.document.title; } catch (e) { console.log('b: ' + e.name + ': ' + e.message); }
+try { parent.shared = 2; } catch (e) { console.log('b: ' + e.name + ': ' + e.message); }
+console.log('b: script', typeof parent, parent === top, frames.length, frameElement);
+addEventListener('message', (e) => console.log('b: message', e.data, e.origin));
+</script>"></iframe>
+<iframe id="c" sandbox srcdoc="<script>console.log('c: never')</script><p>sandboxed</p>"></iframe>
+<script>
+var shared = 'from the parent';
+function greet(who) { return 'hello ' + who + ' from ' + document.title; }
+document.addEventListener('DOMContentLoaded', () => console.log('p: DOMContentLoaded'));
+for (const id of ['a', 'b', 'c']) document.getElementById(id).addEventListener('load', () => console.log('p: iframe load', id));
+addEventListener('load', () => {
+  console.log('p: load', frames.length, frames[0] === document.getElementById('a').contentWindow, frames.first === frames[0], window.frames === window);
+  var a = document.getElementById('a');
+  console.log('p: a', a.contentDocument.title, a.contentWindow.document.getElementById('x').textContent, a.contentWindow.frameElement === a, a.contentWindow.parent === window);
+  a.contentWindow.document.getElementById('x').textContent = 'changed by the parent';
+  console.log('p: a changed', a.contentDocument.body.textContent.trim().slice(0, 21));
+  var b = document.getElementById('b');
+  console.log('p: b contentDocument', b.contentDocument);
+  try { b.contentWindow.document; } catch (e) { console.log('p: ' + e.name + ': ' + e.message); }
+  try { b.contentWindow.foo = 1; } catch (e) { console.log('p: ' + e.name + ': ' + e.message); }
+  console.log('p: b may read', typeof b.contentWindow.postMessage, b.contentWindow.parent === window, b.contentWindow.length, b.contentWindow.top === window);
+  frames[0].postMessage({ n: 1 }, '*');
+  b.contentWindow.postMessage('to b', '*');
+});
+addEventListener('message', (e) => console.log('p: message', JSON.stringify(e.data), e.origin, e.source === frames[0]));
+</script>
+</body></html>

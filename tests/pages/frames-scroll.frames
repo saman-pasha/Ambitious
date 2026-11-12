@@ -1,0 +1,10 @@
+# frames of tests/pages/frames-scroll.html in Chromium (tools/bench/frameboxes.js): frame, id, tag, x, y, width, height
+both b1 div 0 0 300 300
+darkbars k1 div 0 0 300 300
+fits f1 p 8 8 124 18
+h h1 div 0 0 400 30
+hidden x1 div 0 0 300 300
+no n1 div 0 0 300 300
+tall l1 div 0 0 75 2000
+text t1 p 8 16 169 108
+v v1 div 0 0 105 300

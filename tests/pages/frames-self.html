@@ -1,0 +1,5 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames-self.html -- a page that frames itself: Chromium lets a page be inside itself
+     once, and not twice over (NavigationRequest::IsSelfReferentialURL), so its frame's frame shows
+     about:blank. tests/pages/frames-deep.html frames it. -->
+<html><body style="margin:4px;background:#eef"><p id="s1" style="margin:0 0 4px;font:12px sans-serif">framing itself</p><iframe id="again" width="240" height="160" src="frames-self.html" style="display:block"></iframe></body></html>

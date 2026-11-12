@@ -204,6 +204,7 @@ static const char css_ua_sheet[] =
     "dialog { position: absolute; left: 0; right: 0; width: fit-content; height: fit-content; margin: auto; border: solid; padding: 1em; background-color: Canvas; color: CanvasText }\n"
     /* the form controls: -webkit-small-control's font (13.333px Arial on Linux), their own spacing and alignment,
        and each kind's box, as Chromium's sheet gives them */
+    "iframe { border: 2px inset }\n"
     "button, input, select, textarea { display: inline-block; appearance: auto; margin: 0; font: 13.333333px Arial; letter-spacing: normal; "
     "word-spacing: normal; line-height: normal; text-transform: none; text-indent: 0; text-shadow: none; text-align: start }\n"
     "input, textarea, select { padding: 1px 2px; border: 2px inset light-dark(#767676, #858585); color: FieldText; background-color: Field }\n"
@@ -6849,7 +6850,8 @@ static uint32_t css_own_rule(css_style *s, uint32_t *sheet, css_origin origin, c
 
 /* the presentational hints (HTML 15.3) the module reads: which elements, which attribute, which property */
 typedef struct css_hint { const char *elements; const char *attr; css_prop prop; int kind; } css_hint;
-enum { CSS_HINT_COLOR, CSS_HINT_LENGTH, CSS_HINT_ALIGN, CSS_HINT_FONT_SIZE, CSS_HINT_BORDER, CSS_HINT_NOWRAP, CSS_HINT_FLOAT };
+enum { CSS_HINT_COLOR, CSS_HINT_LENGTH, CSS_HINT_ALIGN, CSS_HINT_FONT_SIZE, CSS_HINT_BORDER, CSS_HINT_NOWRAP, CSS_HINT_FLOAT,
+       CSS_HINT_FRAMEBORDER };
 static const css_hint css_hints[] = {
     { "body table tr td th thead tbody tfoot", "bgcolor", CSS_PROP_BACKGROUND_COLOR, CSS_HINT_COLOR },
     { "body", "text", CSS_PROP_COLOR, CSS_HINT_COLOR },
@@ -6862,7 +6864,10 @@ static const css_hint css_hints[] = {
     /* a cell's nowrap (HTML 15.3.8), whatever its value; an image's align left or right, a float
        at the line's top (HTML 15.4.3, as Chromium maps it) */
     { "td th", "nowrap", CSS_PROP_WHITE_SPACE, CSS_HINT_NOWRAP },
-    { "img", "align", CSS_PROP_FLOAT, CSS_HINT_FLOAT } };
+    { "img", "align", CSS_PROP_FLOAT, CSS_HINT_FLOAT },
+    /* an iframe's frameborder whose integer is 0 (Blink's ToInt(): a value that is no integer is
+       0 too) takes its border away: its border-width 0 (Phase 12u) */
+    { "iframe", "frameborder", CSS_PROP_BORDER_TOP_WIDTH, CSS_HINT_FRAMEBORDER } };
 
 /* an attribute's value read as a hint of its kind */
 static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
@@ -6872,6 +6877,19 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
     n = b - a;
     memset(v, 0, sizeof *v);
     if (kind == CSS_HINT_NOWRAP) { css_word_val(v, "nowrap"); return 1; }
+    if (kind == CSS_HINT_FRAMEBORDER) {
+        /* String::ToInt(): an optional sign and digits, the whole value; anything else 0 */
+        size_t i = n && (t[0] == '+' || t[0] == '-') ? 1 : 0;
+        int digits = i < n, nonzero = 0;
+        for (; i < n; i++) {
+            if (t[i] < '0' || t[i] > '9') { digits = 0; break; }
+            if (t[i] != '0') nonzero = 1;
+        }
+        if (digits && nonzero) return 0;
+        v->unit = CSS_UNIT_PX;
+        v->num = 0;
+        return 1;
+    }
     if (n == 0) return 0;
     if (kind == CSS_HINT_FLOAT) {
         if (!css_eq_ci(t, n, "left") && !css_eq_ci(t, n, "right")) return 0;
@@ -6981,7 +6999,7 @@ static void css_element_hints(css_style *s, const dom_document *d, uint32_t x, u
         if ((size_t)tn >= sizeof text) tn = (int)sizeof text - 1;
         /* author-level, specificity 0, before every other author rule: order 0 */
         uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, what, (size_t)wn, 1);
-        if (css_hints[h].kind == CSS_HINT_BORDER)
+        if (css_hints[h].kind == CSS_HINT_BORDER || css_hints[h].kind == CSS_HINT_FRAMEBORDER)
             for (int side = 0; side < 4; side++) css_add_decl(s, r, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + side), &v, 0, text, (size_t)tn, 0);
         else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
         if (css_hints[h].kind == CSS_HINT_FLOAT) {

@@ -76,6 +76,12 @@
    C; nor any kind of resource its profile denies its site. An image's size is
    read from its header (PNG, GIF, JPEG); its pixels are not decoded here.
 
+   A page's frames (Phase 12u): an iframe's src is fetched as a document by the shell
+   (src/shell/frame.c, through net_fetch: its redirects followed, asked for by the iframe, of
+   the page), once the page is laid out and its iframes' boxes are known (a lazy one's reach
+   is the viewport's and 4000px), and each frame's own parts by a loader of its own; the
+   page's frames, at any depth, are this store's frame records, which the shell fills.
+
    Cookies (RFC 6265bis) are kept in a jar, in the file net_keep names (a
    profile's) or for the run alone; the HTTP cache (RFC 9111) in the directory it
    names; gzip and deflate are decoded over the painter's inflate, br over its

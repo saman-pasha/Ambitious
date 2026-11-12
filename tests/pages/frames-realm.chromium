@@ -1,0 +1,9 @@
+values 3 1+2+3 x 5 function 2
+caught TypeError from a string
+class 21 42 true n,inner {"n":1,"inner":{"s":"x"}}
+set 5 true true false
+arrays true 10,20,30
+callback parent got 7
+document 0 true true
+timer in frame, set by parent
+timer in parent

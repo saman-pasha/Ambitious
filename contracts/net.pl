@@ -18,9 +18,11 @@
 %% dependency graph, the origins, what each fetch rode on (its TLS, its protocol, the
 %% connection and stream that carried it), the page's cookies (never
 %% a value) and what the cache did, and says what failed, what crossed origins and
-%% which cookies were refused. src/net/net.c says what of each the module does.
+%% which cookies were refused. The page's frames are records here too (Phase 12u): each
+%% iframe's document, where it came from and what became of it, which src/shell/frame.c
+%% makes as it loads them. src/net/net.c says what of each the module does.
 
-net_contract(module(net, '0.3.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where')).
+net_contract(module(net, '0.4.0', 'Networking: URLs resolved, resources fetched over file:, data:, http: and https:, what a page loaded, why, and from where; its frames')).
 
 %% ---- TYPES ------------------------------------------------------------------
 
@@ -89,6 +91,39 @@ net_contract(record(resource, [
 %% a redirect taken on the way to a resource
 net_contract(record(hop, [field(resource, ref(resource)), field(url, span(text)), field(status, u32)])).
 
+%% a frame's document came from: its iframe's srcdoc (about:srcdoc, its parent's base URL),
+%% its src fetched, or none of them (about:blank)
+net_contract(enum(frame_source, [srcdoc, src, blank])).
+%% what became of a frame (Phase 12u): its document loaded; its src's fetch failed (Chromium's
+%% error page, which draws nothing); blocked (a page that frames its own URL twice over, or
+%% past the frames a page has here); lazy (loading=lazy and out of the viewport's reach: not
+%% loaded, as Chromium leaves it at rest)
+net_contract(enum(frame_outcome, [loaded, failed, blocked, lazy])).
+%% a frame of the page (an iframe's document), at any depth: its iframe element (a node of
+%% its parent document); its own document's number and its parent's (the page's is 1); its
+%% URL; where its document came from and what became of it; the fetch of its src, in the
+%% page's loader (none for srcdoc and about:blank); its viewport (the iframe's content box,
+%% less any scroll bar its content made: classic ones, 15px); its sandbox (an iframe's
+%% sandbox attribute), whether its scripts may run there, and whether its origin is its
+%% parent's; its document's mode
+net_contract(record(frame, [
+    field(iframe,    xhandle(dom, node)),
+    field(doc,       u32),
+    field(parent,    u32),
+    field(url,       span(text)),
+    field(source,    enum(frame_source)),
+    field(outcome,   enum(frame_outcome)),
+    field(resource,  ref(resource)),
+    field(width,     f64),
+    field(height,    f64),
+    field(vbar,      bool),
+    field(hbar,      bool),
+    field(sandboxed, bool),
+    field(scripts,   bool),
+    field(same_origin, bool),
+    field(quirks,    bool)
+])).
+
 %% a cookie's SameSite: unset (taken as Lax), lax, strict, or no_restriction for
 %% SameSite=None (none is the empty ref's word)
 net_contract(enum(same_site, [unset, lax, strict, no_restriction])).
@@ -135,10 +170,12 @@ net_contract(handle(hop, hp)).
 net_contract(handle(cookie, ck)).
 net_contract(handle(sent, sn)).
 net_contract(handle(keeping, kp)).
+net_contract(handle(frame, fm)).
 
 %% ---- OWNERSHIP --------------------------------------------------------------
 
-net_contract(store(loader, [table(resource), table(hop), table(cookie), table(sent), table(keeping), pool(text), pool(bytes)])).
+net_contract(store(loader, [table(resource), table(hop), table(cookie), table(sent), table(keeping), table(frame), pool(text), pool(bytes)])).
+net_contract(owns(loader, frame, store)).
 net_contract(owns(loader, resource, store)).
 net_contract(owns(loader, hop, store)).
 net_contract(owns(loader, cookie, store)).
@@ -193,6 +230,15 @@ net_contract(fact(net_cookie_expires(handle, field(expires)), table(cookie), (fi
 net_contract(fact(net_cookie_set_by(handle, field(set_by)), table(cookie), field(set_by) \== none)).
 net_contract(fact(net_cookie_refused(handle, field(refusal)), table(cookie), field(state) == refused)).
 net_contract(fact(net_cookie_sent(field(resource), field(cookie)), table(sent), true)).
+%% the page's frames: each with its iframe, its document's number, its URL, where its
+%% document came from and what became of it; its parent document's number; the fetch of its
+%% src; its viewport and the scroll bars drawn in it; its sandbox; its document's mode
+net_contract(fact(net_frame(handle, field(iframe), field(doc), field(url), field(source), field(outcome)), table(frame), true)).
+net_contract(fact(net_frame_parent(handle, field(parent)), table(frame), true)).
+net_contract(fact(net_frame_fetch(handle, field(resource)), table(frame), field(resource) \== none)).
+net_contract(fact(net_frame_viewport(handle, field(width), field(height), field(vbar), field(hbar)), table(frame), field(outcome) == loaded)).
+net_contract(fact(net_frame_sandbox(handle, field(scripts), field(same_origin)), table(frame), field(sandboxed) == true)).
+net_contract(fact(net_frame_quirks(handle), table(frame), field(quirks) == true)).
 
 net_contract(rules('rules/net')).
 net_contract(derived(net_page/1, 'a document fetched as a page')).
@@ -206,10 +252,15 @@ net_contract(derived(net_cookies_sent/2, 'the names of the cookies sent for a re
 net_contract(derived(net_third_party_cookie/2, 'a cookie sent for a resource of another site than the page''s')).
 net_contract(derived(net_from_cache/2, 'a resource the cache answered, fresh or revalidated')).
 net_contract(derived(net_low_density/2, 'an image chosen from a srcset at a density below the screen''s, and that density')).
+net_contract(derived(net_frame_of/2, 'the frame an iframe element holds')).
+net_contract(derived(net_frame_failed/2, 'a frame whose document did not load, and why: its fetch''s failure, blocked or lazy')).
+net_contract(derived(net_frame_depth/2, 'how deep a frame is: 1 for one of the page''s own iframes')).
+net_contract(derived(net_frame_scrolls/2, 'a frame whose content overflows its viewport, and the scroll bars drawn in it')).
 
 net_contract(query(loaded, (net_resource(R, U, K, O, S, _, _)), [R, U, K, O, S], 'every resource, what it is and how its fetch ended')).
 net_contract(query(cookies, (net_cookie(C, N, D, P, S)), [C, N, D, P, S], 'the page''s cookies: name, domain, path, and what became of each')).
 net_contract(query(cached, (net_from_cache(R, How)), [R, How], 'every resource the HTTP cache answered, and how')).
+net_contract(query(frames, (net_frame(F, I, D, U, S, O)), [F, I, D, U, S, O], 'every frame: its iframe, its document, its URL, where it came from, what became of it')).
 
 net_contract(generate([c_types, c_store, c_accessors, c_checks, c_exporter, c_invariants, schema, doc])).
 net_contract(test(integ, 'tests/integ/net')).

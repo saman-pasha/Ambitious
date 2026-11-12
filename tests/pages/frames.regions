@@ -1,0 +1,12 @@
+# tests/pages/frames.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+plain 8 8 252 132
+sized 258 8 422 102
+css 428 8 626 96
+noborder 632 8 752 78
+child 8 138 232 252
+quirks 238 138 462 252
+blank 468 138 572 202
+missing 578 138 682 202
+sandboxed 8 258 172 342
+dark 178 258 342 342
+outer 348 258 682 412

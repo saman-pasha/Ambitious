@@ -1,0 +1,125 @@
+frames.html: 13 frame(s)
+  frame 2 of 1: about:srcdoc srcdoc loaded, viewport 240x120
+  frame 3 of 1: about:srcdoc srcdoc loaded, viewport 160x90
+  frame 4 of 1: about:srcdoc srcdoc loaded, viewport 180x70
+  frame 5 of 1: about:srcdoc srcdoc loaded, viewport 120x70
+  frame 6 of 1: frames-child.html src loaded, viewport 220x110
+  frame 7 of 1: frames-quirks.html src loaded, viewport 220x110
+  frame 8 of 1: about:blank blank loaded, viewport 100x60
+  frame 9 of 1: frames-missing.html src failed, viewport 100x60
+  frame 10 of 1: about:srcdoc srcdoc loaded, viewport 160x80, sandboxed
+  frame 11 of 1: about:srcdoc srcdoc loaded, viewport 160x80
+  frame 12 of 1: about:srcdoc srcdoc loaded, viewport 330x150
+  frame 13 of 12: about:srcdoc srcdoc loaded, viewport 260x90
+  frame 14 of 13: about:srcdoc srcdoc loaded, viewport 180x40
+plain p1 p 8 16 224 18
+plain d1 div 8 50 112 40
+sized d2 div 4 4 80 45
+css p3 p 8 8 164 18
+noborder p4 p 10 8 100 18
+child c1 h3 5 5 210 22
+child c2 p 5 43 210 36
+child c3 b 5 61 33.7656 17
+quirks q1 div 4 4 212 51
+sandboxed ns p 12 8 136 18
+sandboxed s5 p 12 30 136 18
+dark p6 p 8 16 144 18
+outer o1 p 6 6 318 18
+outer middle iframe 6 24 264 94
+outer/middle m1 p 4 4 252 18
+outer/middle inner iframe 4 22 184 44
+outer/middle/inner i1 p 8 8 164 18
+  drawn 800x600, pixels fnv1a64:5506a83fe350bd0b
+frames-scroll.html: 9 frame(s)
+  frame 2 of 1: about:srcdoc srcdoc loaded, viewport 105x100, a vertical bar
+  frame 3 of 1: about:srcdoc srcdoc loaded, viewport 160x65, a horizontal bar
+  frame 4 of 1: about:srcdoc srcdoc loaded, viewport 125x95, a vertical bar, a horizontal bar
+  frame 5 of 1: about:srcdoc srcdoc loaded, viewport 185x90, a vertical bar
+  frame 6 of 1: about:srcdoc srcdoc loaded, viewport 120x80
+  frame 7 of 1: about:srcdoc srcdoc loaded, viewport 120x80
+  frame 8 of 1: about:srcdoc srcdoc loaded, viewport 125x85, a vertical bar, a horizontal bar
+  frame 9 of 1: about:srcdoc srcdoc loaded, viewport 140x100
+  frame 10 of 1: about:srcdoc srcdoc loaded, viewport 75x220, a vertical bar
+v v1 div 0 0 105 300
+h h1 div 0 0 400 30
+both b1 div 0 0 300 300
+text t1 p 8 16 169 108
+no n1 div 0 0 300 300
+hidden x1 div 0 0 300 300
+darkbars k1 div 0 0 300 300
+fits f1 p 8 8 124 18
+tall l1 div 0 0 75 2000
+  drawn 800x600, pixels fnv1a64:f133cb2102d1c619
+frames-script.html: 3 frame(s)
+  frame 2 of 1: about:srcdoc srcdoc loaded, viewport 300x150
+  frame 3 of 1: about:srcdoc srcdoc loaded, viewport 300x150, sandboxed
+  frame 4 of 1: about:srcdoc srcdoc loaded, viewport 300x150, sandboxed
+  console [0] p: DOMContentLoaded
+  console [1] a: script true from the parent hello a from parent a first 0 true
+  console [1] a: realm false false object parent
+  console [1] a: DOMContentLoaded child a
+  console [1] a: load
+  console [0] p: iframe load a
+  console [2] b: SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+  console [2] b: SecurityError: Failed to set a named property 'shared' on 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+  console [2] b: script object true 0 null
+  console [0] p: iframe load b
+  console [3] Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.
+  console [0] p: iframe load c
+  console [0] p: load 3 true true true
+  console [0] p: a child a child a true true
+  console [0] p: a changed changed by the parent
+  console [0] p: b contentDocument null
+  console [0] p: SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+  console [0] p: SecurityError: Failed to set a named property 'foo' on 'Window': Blocked a frame with origin "null" from accessing a cross-origin frame.
+  console [0] p: b may read function true 0 true
+  console [1] a: message {"n":1} null true true
+  console [2] b: message to b null
+  console [0] p: message {"back":2,"list":[1,"two"]} null true
+a x p 8 16 284 18
+  drawn 800x600, pixels fnv1a64:e1b932c3d427c622
+frames-deep.html: 15 frame(s)
+  frame 2 of 1: about:srcdoc srcdoc loaded, viewport 340x560
+  frame 3 of 2: about:srcdoc srcdoc loaded, viewport 324x482
+  frame 4 of 3: about:srcdoc srcdoc loaded, viewport 318x444
+  frame 5 of 4: about:srcdoc srcdoc loaded, viewport 312x406
+  frame 6 of 5: about:srcdoc srcdoc loaded, viewport 306x368
+  frame 7 of 6: about:srcdoc srcdoc loaded, viewport 300x330
+  frame 8 of 7: about:srcdoc srcdoc loaded, viewport 294x292
+  frame 9 of 8: about:srcdoc srcdoc loaded, viewport 288x254
+  frame 10 of 9: about:srcdoc srcdoc loaded, viewport 282x216
+  frame 11 of 10: about:srcdoc srcdoc loaded, viewport 276x178
+  frame 12 of 11: about:srcdoc srcdoc loaded, viewport 270x140
+  frame 13 of 12: about:srcdoc srcdoc loaded, viewport 264x102
+  frame 14 of 1: frames-self.html src loaded, viewport 300x400
+  frame 15 of 14: frames-self.html src loaded, viewport 225x145, a vertical bar, a horizontal bar
+  frame 16 of 15: frames-self.html src blocked, viewport 240x160
+f1 d1 p 2 2 336 12
+f1 f2 iframe 2 14 326 484
+f1/f2 d2 p 2 2 320 12
+f1/f2 f3 iframe 2 14 320 446
+f1/f2/f3 d3 p 2 2 314 12
+f1/f2/f3 f4 iframe 2 14 314 408
+f1/f2/f3/f4 d4 p 2 2 308 12
+f1/f2/f3/f4 f5 iframe 2 14 308 370
+f1/f2/f3/f4/f5 d5 p 2 2 302 12
+f1/f2/f3/f4/f5 f6 iframe 2 14 302 332
+f1/f2/f3/f4/f5/f6 d6 p 2 2 296 12
+f1/f2/f3/f4/f5/f6 f7 iframe 2 14 296 294
+f1/f2/f3/f4/f5/f6/f7 d7 p 2 2 290 12
+f1/f2/f3/f4/f5/f6/f7 f8 iframe 2 14 290 256
+f1/f2/f3/f4/f5/f6/f7/f8 d8 p 2 2 284 12
+f1/f2/f3/f4/f5/f6/f7/f8 f9 iframe 2 14 284 218
+f1/f2/f3/f4/f5/f6/f7/f8/f9 d9 p 2 2 278 12
+f1/f2/f3/f4/f5/f6/f7/f8/f9 f10 iframe 2 14 278 180
+f1/f2/f3/f4/f5/f6/f7/f8/f9/f10 d10 p 2 2 272 12
+f1/f2/f3/f4/f5/f6/f7/f8/f9/f10 f11 iframe 2 14 272 142
+f1/f2/f3/f4/f5/f6/f7/f8/f9/f10/f11 d11 p 2 2 266 12
+f1/f2/f3/f4/f5/f6/f7/f8/f9/f10/f11 f12 iframe 2 14 266 104
+f1/f2/f3/f4/f5/f6/f7/f8/f9/f10/f11/f12 d12 p 8 8 248 12
+self s1 p 4 4 292 14
+self again iframe 4 22 244 164
+self/again s1 p 4 4 217 14
+self/again again iframe 4 22 244 164
+  drawn 800x600, pixels fnv1a64:e0da05eebcd5de8a
+4 of 4 pages run with their frames

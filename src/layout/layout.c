@@ -402,6 +402,15 @@ static int lay_web_face(const css_style *st, const vector<int32_t> *webface, con
 
 /* a style as layout reads it, from its computed values: a run from c0 in enum(prop)'s
    order (src/css/css.c) */
+/* a border colour that is currentcolor: declared so (or as its initial value), or never
+   declared (the computed value keeps the colour alone) */
+static int lay_currentcolor(const css_style *st, uint32_t c) {
+    uint32_t dcl = st->cval[c].winner;
+    if (!dcl || dcl >= st->decl_len) return 1;
+    uint32_t w = st->decl[dcl].word;
+    if (!w) return 0;
+    return names_is(st, w, "currentcolor", 12) || names_is(st, w, "initial", 7) || names_is(st, w, "unset", 5);
+}
 static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
@@ -492,6 +501,11 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
         s->bc[k] = st->cval[cv[CSS_PROP_BORDER_TOP_COLOR + k]].color;
         lay_word_of(st, cv[CSS_PROP_BORDER_TOP_STYLE + k], w);
         s->bs[k] = (uint8_t)lay_border_style(w);
+        /* an inset, outset, groove or ridge side whose colour is currentcolor (declared so, or
+           never declared: an iframe's border, the user agent's 2px inset) is drawn from #eeeeee
+           whatever the colour, as Blink draws it (measured in Chromium, Phase 12u) */
+        if ((s->bs[k] == LAY_BS_INSET || s->bs[k] == LAY_BS_OUTSET || s->bs[k] == LAY_BS_GROOVE || s->bs[k] == LAY_BS_RIDGE) &&
+            lay_currentcolor(st, cv[CSS_PROP_BORDER_TOP_COLOR + k])) s->bc[k] = 0xeeeeeeffu;
     }
     s->width = lay_len_at(st, cv[CSS_PROP_WIDTH]);
     s->height = lay_len_at(st, cv[CSS_PROP_HEIGHT]);

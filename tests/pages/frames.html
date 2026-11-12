@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<!-- tests/pages/frames.html -- iframes as Chromium draws them (Phase 12u): documents from srcdoc
+     and from src (a file beside this one, and one in quirks mode), about:blank, a src that fails,
+     a sandboxed frame (its noscript drawn), a frame whose root is in the dark scheme (its canvas
+     opaque), frames sized by their attributes and by CSS, frameborder 0, and frames three deep.
+     References: node tools/bench/boxes.js, node tools/bench/shot.js --scrollbars and
+     node tools/bench/frameboxes.js, each over this page. -->
+<html><head><title>frames</title>
+<style>
+  body { margin: 8px; background: #fff8e8; font: 16px serif }
+  iframe { vertical-align: top; margin: 0 6px 6px 0 }
+</style></head><body>
+<iframe id="plain" width="240" height="120" srcdoc="<p id=p1>A frame from srcdoc.</p><div id=d1 style='width:50%;height:40px;background:#9cf'></div>"></iframe><iframe id="sized" width="160" height="90" srcdoc="<body style='margin:4px;background:#efe'><div id=d2 style='width:50vw;height:50vh;background:#c9c'></div></body>"></iframe><iframe id="css" style="width:180px;height:70px;border:4px solid #36c;padding:5px" srcdoc="<p id=p3 style='margin:0'>Sized by CSS</p>"></iframe><iframe id="noborder" frameborder="0" width="120" height="70" srcdoc="<p id=p4 style='margin:2px'>frameborder 0</p>"></iframe><br>
+<iframe id="child" src="frames-child.html" width="220" height="110"></iframe><iframe id="quirks" src="frames-quirks.html" width="220" height="110"></iframe><iframe id="blank" width="100" height="60"></iframe><iframe id="missing" src="frames-missing.html" width="100" height="60"></iframe><br>
+<iframe id="sandboxed" sandbox width="160" height="80" srcdoc="<noscript><p id=ns style='margin:4px'>noscript drawn</p></noscript><p id=s5 style='margin:4px'>sandboxed</p>"></iframe><iframe id="dark" width="160" height="80" srcdoc="<html style='color-scheme:dark'><p id=p6>dark root</p></html>"></iframe><iframe id="outer" width="330" height="150" srcdoc="<body style='margin:6px'><p id=o1 style='margin:0'>outer</p><iframe id=middle width=260 height=90 srcdoc=&quot;<body style='margin:4px;background:#fee'><p id=m1 style='margin:0'>middle</p><iframe id=inner width=180 height=40 srcdoc='<p id=i1 style=margin:0>inner</p>'></iframe>&quot;></iframe>"></iframe>
+</body></html>

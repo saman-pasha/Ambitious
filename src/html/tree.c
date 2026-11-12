@@ -36,8 +36,8 @@
    is parsed in quirks mode when its document is. Not done as Chromium does it: an empty
    system identifier is one that is there, as the standard has it, where Blink takes it for a
    missing one (HTML 4.01's transitional and frameset identifiers with it are quirks mode in
-   Chromium, limited-quirks mode here); and no document is an iframe's srcdoc document (no
-   iframes are read).
+   Chromium, limited-quirks mode here). An iframe srcdoc document (html_set_srcdoc) is never
+   in quirks mode by its DOCTYPE or its lack of one (Phase 12u).
 
    The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
    run): noscript's content is then raw text. Everything else follows the standard's
@@ -53,6 +53,9 @@ amb_implementation(html);
 
 /* the scripting flag (13.2.3.5): the parser of a document whose scripts run */
 void html_set_scripting(int on) { html_scripting_flag = on != 0; }
+/* an iframe srcdoc document's parse (13.2.6.4.1): its DOCTYPE, or the lack of one, sets no mode */
+static int html_srcdoc_flag = 0;
+void html_set_srcdoc(int on) { html_srcdoc_flag = on != 0; }
 
 /* ---- the tags the algorithm names --------------------------------------------- */
 
@@ -1641,14 +1644,16 @@ static int process(CTX, int mode) {
                                                bytes_ptr(p, pu), pu.len, bytes_ptr(p, sy), sy.len, (uint8_t)(ids & 3));
             if (!dt.index && named) dt = dom_create_doctype(d, "", 0, bytes_ptr(p, pu), pu.len, bytes_ptr(p, sy), sy.len, (uint8_t)(ids & 3));
             if (dt.index) dom_append_child(d, dom_root(d), dt);
-            int qm = doctype_quirks(p, t);
+            int qm = html_srcdoc_flag ? 0 : doctype_quirks(p, t);
             if (qm == 1) set_quirks(ARGS);
             else if (qm == 2) dom_set_mode(d, DOM_DOCUMENT_MODE_LIMITED_QUIRKS);
             c->mode = M_BEFORE_HTML;
             return 0;
         }
-        html_terr(ARGS);
-        set_quirks(ARGS);
+        if (!html_srcdoc_flag) {
+            html_terr(ARGS);
+            set_quirks(ARGS);
+        }
         c->mode = M_BEFORE_HTML;
         return 1;
     case M_BEFORE_HTML:
