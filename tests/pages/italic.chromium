@@ -1,0 +1,25 @@
+# boxes of tests/pages/italic.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-serif span 8 8 215.094 17
+text-serifbi span 8 30 225.828 17
+text-sans span 8 52 238.672 17
+text-sansbi span 8 74 252.172 17
+text-courier span 8 96 144.031 18
+text-courierbi span 8 118 144.031 18
+text-mono span 8 140 192.656 19
+text-monobi span 8 163 192.656 19
+text-dvsans span 8 186 203.75 19
+text-dvsansbi span 8 209 230.766 19
+text-dvserif span 8 232 211.078 19
+text-dvserifbi span 8 255 230.078 19
+text-dvmono span 8 278 144.5 19
+text-oblique span 8 301 140.531 17
+text-para p 8 323 380 54
+text-em em 22.672 323 87.266 17
+text-it i 129.047 323 82.656 17
+text-cite cite 230.813 323 67.125 17
+text-var var 317.047 323 53.328 17
+text-dfn dfn 46.203 341 80.422 17
+text-addr address 8 381 784 18
+text-bigserif span 8 401 98.875 45
+text-bigdv span 116.875 400 118.469 46
+text-bigmono span 245.344 400 72.25 46

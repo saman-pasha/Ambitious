@@ -9,7 +9,10 @@
    sans-serif, 110.4688 in bold serif, 125.2344 in monospace, 124.8281 in Courier New,
    116.9844 in DejaVu Sans; U+2011 as wide as U+2010, two Hebrew letters in monospace
    17.3125, U+25B8 in serif 8.0313), but for the stars and checks it takes from Inter
-   where that is installed (U+2605 16.7188 px there). */
+   where that is installed (U+2605 16.7188 px there). The italic faces are measured by
+   their own advances ('Hamburgefonstiv AVAVAV To. Wa' at 16px: 215.0938 px in italic
+   serif, 238.6719 in italic sans-serif, tests/pages/italic.chromium); DejaVu Sans's
+   italic, which has no face of its own, by its upright one's, its glyphs slanted. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -46,10 +49,19 @@ int main(void) {
     show(&f, AMB_FACE_MONO, "built-in mono");
     show(&f, AMB_FACE_COURIER, "built-in courier");
     show(&f, AMB_FACE_DV_SANS, "built-in dejavu sans");
-    /* the families that name built-in faces, and one that names none */
+    show(&f, AMB_FACE_SERIF_ITALIC, "built-in serif italic");
+    show(&f, AMB_FACE_SANS_BOLD_ITALIC, "built-in sans bold italic");
+    show(&f, AMB_FACE_MONO_ITALIC, "built-in mono italic (oblique)");
+    show(&f, AMB_FACE_DV_SANS_ITALIC, "built-in dejavu sans italic (slanted)");
+    printf("'Hamburgefonstiv AVAVAV To. Wa' at 16px: italic serif %.4f px, italic sans %.4f px\n",
+           amb_text_width(&f, AMB_FACE_SERIF_ITALIC, 16, "Hamburgefonstiv AVAVAV To. Wa", 29),
+           amb_text_width(&f, AMB_FACE_SANS_ITALIC, 16, "Hamburgefonstiv AVAVAV To. Wa", 29));
+    /* the families that name built-in faces, and one that names none: each style's face */
     static const char *const fams[9] = { "serif", "sans-serif", "monospace", "couriernew", "dejavusans", "dejavuserif",
                                          "dejavusansmono", "liberationsans", "georgia" };
-    for (int k = 0; k < 9; k++) printf("%s: face %d, bold %d\n", fams[k], amb_face_named(fams[k], 0), amb_face_named(fams[k], 1));
+    for (int k = 0; k < 9; k++)
+        printf("%s: face %d, bold %d, italic %d, bold italic %d\n", fams[k], amb_face_named(fams[k], 0, 0), amb_face_named(fams[k], 1, 0),
+               amb_face_named(fams[k], 0, 1), amb_face_named(fams[k], 1, 1));
     /* what a face has no glyph for, drawn by its fallbacks: each code point's face, its
        advance at 16px, and the kerning beside a letter of the face's own */
     static const uint32_t cps[6] = { 0x2605, 0x2011, 0x05D0, 0x25B8, 0x4E00, 0x2010 };
@@ -77,6 +89,20 @@ int main(void) {
         if (amb_glyph_mask(&f, faces[k], 'g', 20, 0, 0, &acc, &mask, &w, &h, &ox, &oy))
             for (size_t i = 0; i < len(mask); i++) sum += at(mask, i);
         printf("'g' at 20px in face %d: %dx%d at %d,%d, coverage %lu\n", faces[k], w, h, ox, oy, sum);
+    }
+    /* an 'l' at 40px: upright; DejaVu Sans's italic, slanted (a quarter of its height to
+       the right at its top, its coverage the same); the italic serif face, drawn as it is
+       (asked for italic or not); a web font asked for italic, slanted */
+    static const char *const lwhat[6] = { "dejavu sans", "dejavu sans italic", "dejavu sans, italic asked", "serif italic",
+                                          "serif italic, italic asked", "web serif bold, italic asked" };
+    static const int litalic[6] = { 0, 0, 1, 0, 1, 1 };
+    int lface[6] = { AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_ITALIC, AMB_FACE_DV_SANS, AMB_FACE_SERIF_ITALIC, AMB_FACE_SERIF_ITALIC, b };
+    for (int k = 0; k < 6; k++) {
+        int w, h, ox, oy;
+        unsigned long sum = 0;
+        if (amb_glyph_mask(&f, lface[k], 'l', 40, 0, litalic[k], &acc, &mask, &w, &h, &ox, &oy))
+            for (size_t i = 0; i < len(mask); i++) sum += at(mask, i);
+        printf("'l' at 40px, %s: %dx%d at %d,%d, coverage %lu\n", lwhat[k], w, h, ox, oy, sum);
     }
     /* what is no font: refused, and the faces read before are as they were */
     vector<uint8_t> junk;

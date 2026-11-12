@@ -1,0 +1,25 @@
+# tests/pages/italic.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-serif 8 8 224 25
+text-serifbi 8 30 234 47
+text-sans 8 52 247 69
+text-sansbi 8 74 261 91
+text-courier 8 96 153 114
+text-courierbi 8 118 153 136
+text-mono 8 140 201 159
+text-monobi 8 163 201 182
+text-dvsans 8 186 212 205
+text-dvsansbi 8 209 239 228
+text-dvserif 8 232 220 251
+text-dvserifbi 8 255 239 274
+text-dvmono 8 278 153 297
+text-oblique 8 301 149 318
+text-para 8 323 388 377
+text-em 22 323 110 340
+text-it 129 323 212 340
+text-cite 230 323 298 340
+text-var 317 323 371 340
+text-dfn 46 341 127 358
+text-addr 8 381 792 399
+text-bigserif 8 401 107 446
+text-bigdv 116 400 236 446
+text-bigmono 245 400 318 446

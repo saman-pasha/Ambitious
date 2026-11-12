@@ -1,10 +1,12 @@
 /* src/paint/font.c -- the fonts (font.h): TrueType read, measured, and its glyphs
    drawn as coverage masks.
 
-   One reader serves every face. The built-in twelve are TrueType subsets of the
-   Liberation and DejaVu fonts (font_data.h, tools/gen-font.py), decoded from base64
-   and read once a process into static tables, which each amb_fonts_load copies; each
-   names the face it falls back to for a code point it has no glyph for (font.h). A page's web font is read
+   One reader serves every face. The built-in faces' twenty fonts are TrueType subsets
+   of the Liberation and DejaVu fonts (font_data.h, tools/gen-font.py), decoded from
+   base64 and read once a process into static tables, which each amb_fonts_load copies;
+   DejaVu Sans's and DejaVu Serif's italic styles are their upright fonts again, which
+   amb_glyph_mask slants. Each face falls back for a code point it has no glyph for as
+   Chromium's does (font.h). A page's web font is read
    when it is added: its sfnt's tables found (a WOFF 1 file's rebuilt first), its
    code points from cmap (format 4 or 12), advances from hmtx, metrics from head,
    hhea and OS/2, kerning pairs from kern (format 0); its outlines (glyf, through
@@ -56,21 +58,23 @@ static int amb_b64(char c) {
     return -1;
 }
 
-/* a built-in face's base64 decoded into the pool: where it starts */
-static uint32_t amb_pool_add(const char *s) {
+/* a built-in font's base64 (its pieces of amb_font_b64, from first to last) decoded into
+   the pool: where it starts */
+static uint32_t amb_pool_add(uint32_t first, uint32_t last) {
     uint32_t start = amb_pool_len, acc = 0;
     int bits = 0;
-    for (size_t i = 0; s[i]; i++) {
-        int v = amb_b64(s[i]);
-        if (v < 0) continue;
-        acc = acc << 6 | (uint32_t)v;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            if (amb_pool_len == AMB_POOL) abort();
-            amb_pool[amb_pool_len++] = (uint8_t)(acc >> bits & 0xff);
+    for (uint32_t p = first; p < last; p++)
+        for (size_t i = 0; amb_font_b64[p][i]; i++) {
+            int v = amb_b64(amb_font_b64[p][i]);
+            if (v < 0) continue;
+            acc = acc << 6 | (uint32_t)v;
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                if (amb_pool_len == AMB_POOL) abort();
+                amb_pool[amb_pool_len++] = (uint8_t)(acc >> bits & 0xff);
+            }
         }
-    }
     return start;
 }
 
@@ -293,21 +297,30 @@ static int amb_woff(const uint8_t *p, size_t n, vector<uint8_t> *sf) {
 
 /* ---- loading ---- */
 
+/* each built-in face's font in font_data.h (a family's four styles, but DejaVu Sans's and
+   DejaVu Serif's italics, which are their upright fonts) */
+static const uint8_t amb_font_of[AMB_NFACES] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 14, 15, 16, 17, 18, 19 };
+
 void amb_fonts_load(amb_fonts *f) {
     clear(f->glyphs);
     clear(f->kerns);
     clear(f->bytes);
     memset(f->face, 0, sizeof f->face);
     if (!amb_bi_ready) {
-        /* the first load: the twelve decoded, read, and their tables kept */
-        static const char *const which[AMB_NFACES] = { amb_font_serif, amb_font_serif_bold, amb_font_sans, amb_font_sans_bold,
-                                                      amb_font_courier, amb_font_courier_bold, amb_font_dv_sans, amb_font_dv_sans_bold,
-                                                      amb_font_dv_serif, amb_font_dv_serif_bold, amb_font_mono, amb_font_mono_bold };
+        /* the first load: the fonts decoded, read, and their tables kept; each face the
+           style it stands for, and whether its font is italic itself */
+        if (AMB_FONT_FACES != 20) abort();
         vector<amb_glyph> gl;
         vector<amb_kern> kn;
+        amb_face font[20];
+        for (uint32_t k = 0; k < 20; k++) {
+            uint32_t base = amb_pool_add(amb_font_piece[k], amb_font_piece[k + 1]);
+            if (!amb_sfnt_face(amb_pool + base, amb_pool_len - base, base, 1, &gl, &kn, &font[k])) abort();
+        }
         for (int k = 0; k < AMB_NFACES; k++) {
-            uint32_t base = amb_pool_add(which[k]);
-            if (!amb_sfnt_face(amb_pool + base, amb_pool_len - base, base, 1, &gl, &kn, &amb_bi_face[k])) abort();
+            amb_bi_face[k] = font[amb_font_of[k]];
+            amb_bi_face[k].style = (uint8_t)(k & 3);
+            amb_bi_face[k].slope = (uint8_t)((k & 2) && amb_font_of[k] != amb_font_of[k & ~2]);
         }
         if (len(gl) > AMB_BI_GLYPHS || len(kn) > AMB_BI_KERNS) abort();
         for (size_t i = 0; i < len(gl); i++) amb_bi_glyphs[i] = at(gl, i);
@@ -336,24 +349,19 @@ int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
     return (int)f->nfaces - 1;
 }
 
-int amb_face_named(const char *family, int bold) {
+int amb_face_named(const char *family, int bold, int italic) {
     static const char *const names[6] = { "serif", "sans-serif", "couriernew", "dejavusans", "dejavuserif", "monospace" };
+    int style = (bold ? 1 : 0) + (italic ? 2 : 0);
     for (int k = 0; k < 6; k++)
-        if (strcmp(family, names[k]) == 0) return 2 * k + (bold ? 1 : 0);
-    if (strcmp(family, "dejavusansmono") == 0) return bold ? AMB_FACE_MONO_BOLD : AMB_FACE_MONO;
+        if (strcmp(family, names[k]) == 0) return 4 * k + style;
+    if (strcmp(family, "dejavusansmono") == 0) return AMB_FACE_MONO + style;
     return -1;
 }
 
-/* the face each built-in face falls back to for a code point it has no glyph for (-1
-   none), as Chromium's do on a machine with these fonts: Liberation's to DejaVu Sans,
-   DejaVu Serif's and DejaVu Sans Mono's to Liberation Serif (then on to DejaVu Sans) */
-static const int8_t amb_next_face[AMB_NFACES] = {
-    AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD, AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD, AMB_FACE_DV_SANS, AMB_FACE_DV_SANS_BOLD,
-    -1, -1, AMB_FACE_SERIF, AMB_FACE_SERIF_BOLD, AMB_FACE_SERIF, AMB_FACE_SERIF_BOLD };
-
 double amb_x_height(int face) {
-    static const double xh[AMB_NFACES] = { 0.4590, 0.4590, 0.5283, 0.5283, 0.5283, 0.5283, 0.547, 0.547, 0.519, 0.519, 0.545, 0.545 };
-    return face >= 0 && face < AMB_NFACES ? xh[face] : 0.5;
+    /* each family's (its styles share their x-heights) */
+    static const double xh[6] = { 0.4590, 0.5283, 0.5283, 0.547, 0.519, 0.545 };
+    return face >= 0 && face < AMB_NFACES ? xh[face / 4] : 0.5;
 }
 
 /* ---- measuring ---- */
@@ -388,15 +396,26 @@ static int amb_own_glyph(const amb_fonts *f, int face, uint32_t cp, uint32_t *g)
     return 0;
 }
 
+/* the faces a face falls back to, in Blink's order, as Chromium's do on a machine with
+   these fonts (font.h): Liberation Serif in the style the face stands for (the standard
+   font, after the family), the family's regular face for a bold or an italic style, and
+   DejaVu Sans; a web font's, Liberation Serif and DejaVu Sans. The k-th, or -1 */
+static int amb_fallback(int face, int k) {
+    int style = face < AMB_NFACES ? (face & 3) : 0;
+    if (k == 0) return AMB_FACE_SERIF + style;
+    if (k == 1) return style && face < AMB_NFACES ? (face & ~3) : -1;
+    if (k == 2) return AMB_FACE_DV_SANS;
+    return -1;
+}
+
 uint32_t amb_glyph_of(const amb_fonts *f, int face, uint32_t cp, int *drawn_by) {
     uint32_t g;
     *drawn_by = face;
     if (amb_own_glyph(f, face, cp, &g)) return g;
-    /* the fallbacks, a built-in face's, at most so many */
-    int fc = face < AMB_NFACES ? amb_next_face[face] : -1;
-    for (int hop = 0; hop < 4 && fc >= 0; hop++) {
+    for (int k = 0; k < 3; k++) {
+        int fc = amb_fallback(face, k);
+        if (fc < 0 || fc == face) continue;
         if (amb_own_glyph(f, fc, cp, &g)) { *drawn_by = fc; return g; }
-        fc = amb_next_face[fc];
     }
     /* none has it: the replacement glyph, U+FFFD's from the face or its fallbacks */
     if (cp != 0xFFFD) {
@@ -654,7 +673,10 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, g.gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     uint32_t npts = (uint32_t)len(pts);
     if (npts == 0) return 0;
-    double s = size / fc.upem, slant = italic ? 0.2 : 0;
+    /* italic asked for, of a face whose outlines are upright: Skia's skew, a quarter of
+       the height (Chromium's synthetic italic) */
+    int asked = italic || (face < AMB_NFACES && (f->face[face].style & 2));
+    double s = size / fc.upem, slant = asked && !fc.slope ? 0.25 : 0;
     /* the box of the points, in px from the pen (y down) */
     double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
     for (uint32_t k = 0; k < npts; k++) {
