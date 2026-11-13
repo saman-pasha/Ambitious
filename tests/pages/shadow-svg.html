@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>references by id in shadow trees</title>
+<!-- SVG's references by id in shadow trees (PLAN.md 12z): a url(#id) or an href names the element of
+     that id in the tree of the element whose value or attribute it is (CSS Scoping 1's tree-scoped
+     references, as Chromium looks): two components' gradients of one id, each its own, and the
+     document's; a shadow tree's url() of the document's gradient, and the document's of a shadow
+     tree's, naming nothing (a fallback colour drawn instead); a use of its tree's symbol; an HTML
+     box's clip-path in a shadow tree; a ::part() rule of the document's, looked up in the part's
+     tree; a shadow tree's style rule; an id in a template's contents; a nested tree's url() of its
+     outer tree's gradient. Each cell (its host's or its svg's id) a region of Chromium's screenshot
+     (tests/pages/shadow-svg.shot.png and .regions, from tools/bench/shot.js; the document's
+     definitions' ids regions of no size). -->
+<style>
+body { margin: 8px }
+.row { display: flex; gap: 8px; margin-bottom: 8px; height: 60px }
+.row > * { width: 120px; height: 60px; outline: 1px solid #ccc }
+svg { display: block }
+#h8::part(p) { fill: url(#pg) }
+</style>
+</head><body>
+<svg width="0" height="0" style="position: absolute"><defs>
+<linearGradient id="g"><stop offset="0" stop-color="blue"/><stop offset="1" stop-color="yellow"/></linearGradient>
+<linearGradient id="dg"><stop offset="0" stop-color="orange"/><stop offset="1" stop-color="purple"/></linearGradient>
+<linearGradient id="pg"><stop offset="0" stop-color="lime"/><stop offset="1" stop-color="navy"/></linearGradient>
+<clipPath id="c" clipPathUnits="objectBoundingBox"><rect width="0.25" height="0.5"/></clipPath>
+<symbol id="m" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></symbol>
+</defs></svg>
+<template><svg><linearGradient id="tg"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="black"/></linearGradient></svg></template>
+<div class="row">
+<div id="h1"><template shadowrootmode="open"><svg width="120" height="60"><defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="green"/></linearGradient></defs><rect width="120" height="60" fill="url(#g)"/></svg></template></div>
+<div id="h2"><template shadowrootmode="open"><svg width="120" height="60"><defs><linearGradient id="g"><stop offset="0" stop-color="black"/><stop offset="1" stop-color="white"/></linearGradient></defs><rect width="120" height="60" fill="url(#g)"/></svg></template></div>
+<svg id="s3" width="120" height="60"><rect width="120" height="60" fill="url(#g)"/></svg>
+</div>
+<div class="row">
+<div id="h4"><template shadowrootmode="open"><svg width="120" height="60"><defs><linearGradient id="sg"><stop offset="0" stop-color="pink"/><stop offset="1" stop-color="brown"/></linearGradient></defs><rect width="120" height="60" fill="url(#dg)"/></svg></template></div>
+<svg id="s5" width="120" height="60"><rect width="120" height="60" fill="url(#sg)"/></svg>
+<div id="h5"><template shadowrootmode="open"><svg width="120" height="60"><rect width="120" height="60" fill="url(#dg) teal"/></svg></template></div>
+</div>
+<div class="row">
+<div id="h6"><template shadowrootmode="open"><svg width="120" height="60"><defs><symbol id="m" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="green"/></symbol></defs><use href="#m" width="60" height="60"/></svg></template></div>
+<svg id="s6" width="120" height="60"><use href="#m" width="60" height="60"/></svg>
+<div id="h7"><template shadowrootmode="open"><svg width="0" height="0" style="position: absolute"><clipPath id="c" clipPathUnits="objectBoundingBox"><circle cx="0.5" cy="0.5" r="0.4"/></clipPath></svg><div style="width: 120px; height: 60px; background: purple; clip-path: url(#c)"></div></template></div>
+</div>
+<div class="row">
+<div id="h8"><template shadowrootmode="open"><svg width="120" height="60"><rect part="p" width="120" height="60" fill="gray"/></svg></template></div>
+<div id="h9"><template shadowrootmode="open"><style>rect { fill: url(#g) }</style><svg width="120" height="60"><defs><linearGradient id="g"><stop offset="0" stop-color="cyan"/><stop offset="1" stop-color="magenta"/></linearGradient></defs><rect width="120" height="60"/></svg></template></div>
+<div id="h10" style="clip-path: url(#c); background: olive"></div>
+</div>
+<div class="row">
+<svg id="s11" width="120" height="60"><rect width="120" height="60" fill="url(#tg)"/></svg>
+<div id="h12"><template shadowrootmode="open"><svg width="0" height="0" style="position: absolute"><linearGradient id="og"><stop offset="0" stop-color="gold"/><stop offset="1" stop-color="teal"/></linearGradient></svg><x-in><template shadowrootmode="open"><svg width="120" height="60"><defs><linearGradient id="ig"><stop offset="0" stop-color="coral"/><stop offset="1" stop-color="indigo"/></linearGradient></defs><rect width="60" height="60" fill="url(#og)"/><rect x="60" width="60" height="60" fill="url(#ig)"/></svg></template></x-in></template></div>
+</div>
+</body></html>

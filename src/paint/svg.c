@@ -39,7 +39,10 @@
    hue-rotate, brightness, contrast, invert, opacity: each its shorthand primitive, in sRGB,
    the region what they are given outset by their reach); a list of url()s and functions a
    group for each, chained in its order. A reference to no such element is passed over, as
-   Chromium passes it. An element's bounding box (objectBoundingBox units) is
+   Chromium passes it. A url(#id) or an href names the element of that id in the tree of the
+   element whose value or attribute it is, the document's or a shadow tree's (a ::part() rule
+   of the document's looks in the part's tree), as Chromium looks; never in a template's
+   contents. An element's bounding box (objectBoundingBox units) is
    its geometry's, a text's glyph cells', an image's viewport, a group's children's.
    Markers: marker-start, -mid and -end on a path, line, polyline or polygon, at the places
    Blink's SVGMarkerDataBuilder finds (an arc one segment, a closed subpath's first and
@@ -122,6 +125,7 @@ amb_interface(net);
 #include "image.h"
 #include "svg.h"
 #include "../css/css.h"
+#include "../dom/dom.h"
 
 /* ---- matrices: x' = a x + c y + e, y' = b x + d y + f ---- */
 
@@ -621,33 +625,39 @@ static int sv_attr_text(const dom_document *d, uint32_t x, const char *name, vec
     append_range(v, text_ptr(d, d->attr[q].value), d->attr[q].value.len);
     return 1;
 }
-/* the element whose id is id[0, n) (the first in the document's order), or 0 */
-static uint32_t sv_by_id(const dom_document *d, const char *id, size_t n) {
+/* the element whose id is id[0, n) in the tree the element x is in (the document's, or a
+   shadow tree's: CSS Scoping 1's tree-scoped references, as Chromium looks), the first in the
+   document's order, or 0 */
+static uint32_t sv_by_id(const dom_document *d, uint32_t x, const char *id, size_t n) {
     uint32_t ida = names_find(d, "id", 2);
-    if (!ida || n == 0) return 0;
-    for (uint32_t x = 1; x < d->node_len; x++) {
-        if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT) continue;
-        for (uint32_t q = d->node[x].first_attr; q; q = d->attr[q].next)
-            if (d->attr[q].name == ida && d->attr[q].value.len == n && memcmp(text_ptr(d, d->attr[q].value), id, n) == 0) return x;
+    if (!ida || n == 0 || x >= d->node_len) return 0;
+    uint32_t tree = dom_tree_root(d, x);
+    for (uint32_t y = 1; y < d->node_len; y++) {
+        if (!d->node[y].live || d->node[y].kind != DOM_NODE_KIND_ELEMENT) continue;
+        for (uint32_t q = d->node[y].first_attr; q; q = d->attr[q].next)
+            if (d->attr[q].name == ida && d->attr[q].value.len == n && memcmp(text_ptr(d, d->attr[q].value), id, n) == 0) {
+                if (dom_tree_root(d, y) == tree) return y;
+                break;
+            }
     }
     return 0;
 }
-/* the element an IRI names (#id, white space about it): 0 for none */
-static uint32_t sv_iri(const dom_document *d, const char *s, size_t n) {
+/* the element an IRI that the element x makes names (#id, white space about it): 0 for none */
+static uint32_t sv_iri(const dom_document *d, uint32_t x, const char *s, size_t n) {
     size_t a = sv_skip_ws(s, n, 0), b = n;
     while (b > a && sv_ws(s[b - 1])) b--;
     if (b > a + 1 && (s[a] == '"' || s[a] == '\'') && s[b - 1] == s[a]) { a++; b--; }
     if (b <= a + 1 || s[a] != '#') return 0;
-    return sv_by_id(d, s + a + 1, b - a - 1);
+    return sv_by_id(d, x, s + a + 1, b - a - 1);
 }
 /* the element a use's or a gradient's href names (SVG 2's href over xlink:href) */
 static uint32_t sv_href(const dom_document *d, uint32_t x) {
     vector<char> v;
     if (!sv_attr_text(d, x, "href", &v) && !sv_attr_text(d, x, "xlink:href", &v)) return 0;
-    return sv_iri(d, data(v), len(v));
+    return sv_iri(d, x, data(v), len(v));
 }
-/* the element a url() at s names, and where the url() ends */
-static uint32_t sv_url(const dom_document *d, const char *s, size_t n, size_t *end) {
+/* the element a url() at s, a value of the element x, names, and where the url() ends */
+static uint32_t sv_url(const dom_document *d, uint32_t x, const char *s, size_t n, size_t *end) {
     size_t i = sv_skip_ws(s, n, 0);
     *end = i;
     if (i + 4 > n || memcmp(s + i, "url(", 4) != 0) return 0;
@@ -655,7 +665,7 @@ static uint32_t sv_url(const dom_document *d, const char *s, size_t n, size_t *e
     while (j < n && s[j] != ')') j++;
     if (j >= n) return 0;
     *end = j + 1;
-    return sv_iri(d, s + i + 4, j - i - 4);
+    return sv_iri(d, x, s + i + 4, j - i - 4);
 }
 
 /* a length an attribute writes, in user units: a number, px or another absolute unit, em
@@ -1104,7 +1114,8 @@ static int sv_colour(const char *s, size_t n, uint32_t cur, uint32_t *rgba) {
     if (sv_eq_ci(s + a, b - a, "currentcolor")) { *rgba = cur; return 1; }
     return css_color_parse(s + a, b - a, rgba);
 }
-static void sv_paint_of(const dom_document *d, const css_style *st, uint32_t cv, uint32_t cur, sv_paint *p) {
+/* the paint the value cv gives the element x */
+static void sv_paint_of(const dom_document *d, const css_style *st, uint32_t x, uint32_t cv, uint32_t cur, sv_paint *p) {
     memset(p, 0, sizeof *p);
     css_unit u = st->cval[cv].unit;
     if (u == CSS_UNIT_KEYWORD) {
@@ -1117,7 +1128,7 @@ static void sv_paint_of(const dom_document *d, const css_style *st, uint32_t cv,
     vector<char> t;
     append_range(t, text_ptr(st, sp), sp.len);
     size_t end = 0;
-    uint32_t ref = sv_url(d, data(t), len(t), &end);
+    uint32_t ref = sv_url(d, x, data(t), len(t), &end);
     if (end > 0 && len(t) >= 4 && memcmp(data(t) + sv_skip_ws(data(t), len(t), 0), "url(", 4) == 0) {
         p->kind = SV_PAINT_URL;
         p->ref = ref;
@@ -1453,18 +1464,18 @@ static int sv_clip_shapes(SB, uint32_t cp, const double *bb, int hasbb, sv_mat m
     return count;
 }
 
-/* the element a url() value (cv) names, when it is one named name: else 0 */
-static uint32_t sv_ref_of(const dom_document *d, const css_style *st, uint32_t cv, const char *name) {
+/* the element a url() value (cv) of the element x names, when it is one named name: else 0 */
+static uint32_t sv_ref_of(const dom_document *d, const css_style *st, uint32_t x, uint32_t cv, const char *name) {
     if (st->cval[cv].unit != CSS_UNIT_TEXT) return 0;
     amb_span sp = st->cval[cv].text;
     vector<char> t;
     append_range(t, text_ptr(st, sp), sp.len);
     size_t end;
-    uint32_t e = sv_url(d, data(t), len(t), &end);
+    uint32_t e = sv_url(d, x, data(t), len(t), &end);
     return e && sv_is(d, e, name) ? e : 0;
 }
-/* the clipPath a clip-path value (cv) names: 0 for none, or one that is no clipPath */
-static uint32_t sv_clip_of(const dom_document *d, const css_style *st, uint32_t cv) { return sv_ref_of(d, st, cv, "clipPath"); }
+/* the clipPath a clip-path value (cv) of the element x names: 0 for none, or one that is no clipPath */
+static uint32_t sv_clip_of(const dom_document *d, const css_style *st, uint32_t x, uint32_t cv) { return sv_ref_of(d, st, x, cv, "clipPath"); }
 
 /* a mask's region (SVG 2's mask element, CSS Masking 1, 7.1): x, y, width and height (-10%,
    -10%, 120%, 120% when not given) of the bounding box bb unless its maskUnits is
@@ -1934,7 +1945,7 @@ static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t fcv,
                 append_range(run, data(t) + pa, pl);
                 continue;
             }
-            uint32_t flt = sv_url(d, data(t) + pa, pl, &end);
+            uint32_t flt = sv_url(d, x, data(t) + pa, pl, &end);
             if (!flt || !sv_is(d, flt, "filter")) continue;
             size_t from = len(fblk);
             if (!sv_filter_block(d, st, firsts, f, &fblk, ids, uses, work, flt, bb, hb, w, mm, ext)) { ok = 0; break; }
@@ -1943,7 +1954,7 @@ static int sv_group_open(SB, uint32_t x, uint32_t cp, uint32_t mk, uint32_t fcv,
         if (!ok) return -1;
     }
     uint32_t c0 = cp ? sv_first(firsts, cp) : 0;
-    uint32_t outer = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
+    uint32_t outer = c0 ? sv_clip_of(d, st, cp, c0 + CSS_PROP_CLIP_PATH) : 0;
     if (outer && outer != cp) {
         vector<char> ol;
         int ok = sv_clip_shapes(SA, outer, bb, hb, mm, w->vw, w->vh, &ol);
@@ -2053,8 +2064,8 @@ static void sv_shape(SB, uint32_t x, const sv_walk *w, sv_mat m, int depth) {
     if (!sv_path_bounds(&p, sv_id(), bb)) return;
     uint32_t cur = st->cval[w->src[SI_COLOR]].color;
     sv_paint fp, spt;
-    sv_paint_of(d, st, w->src[SI_FILL], cur, &fp);
-    sv_paint_of(d, st, w->src[SI_STROKE], cur, &spt);
+    sv_paint_of(d, st, x, w->src[SI_FILL], cur, &fp);
+    sv_paint_of(d, st, x, w->src[SI_STROKE], cur, &spt);
     uint32_t fg = 0, frgba = 0, sg = 0, srgba = 0;
     int fk = sv_is(d, x, "line") ? 0 : sv_resolve(SA, &fp, bb, w, &fg, &frgba);
     int sk = sv_resolve(SA, &spt, bb, w, &sg, &srgba);
@@ -2163,7 +2174,7 @@ static void sv_marker(SB, uint32_t me, int type, double px, double py, double an
    marker its marker-start, -mid or -end names for the place's kind (its stroke's width sw) */
 static void sv_markers(SB, uint32_t x, const sv_walk *w, sv_mat m, const vector<double> *p, double sw, int depth) {
     uint32_t mk[3];
-    for (int k = 0; k < 3; k++) mk[k] = sv_ref_of(d, st, w->src[SI_MARKER_START + k], "marker");
+    for (int k = 0; k < 3; k++) mk[k] = sv_ref_of(d, st, x, w->src[SI_MARKER_START + k], "marker");
     if (!mk[0] && !mk[1] && !mk[2]) return;
     vector<double> feat, pos;
     vector<char> v;
@@ -2336,9 +2347,9 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     sv_mat mm = sv_mul(m, sv_transform_of(d, st, firsts, x, &w));
     double op = c0 ? st->cval[c0 + CSS_PROP_OPACITY].num : 1;
     if (op <= 0) return;
-    uint32_t cp = c0 ? sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH) : 0;
+    uint32_t cp = c0 ? sv_clip_of(d, st, x, c0 + CSS_PROP_CLIP_PATH) : 0;
     /* its mask (a url() that names no mask ignored, as Chromium ignores it) and its filter's list */
-    uint32_t mk = c0 ? sv_ref_of(d, st, c0 + CSS_PROP_MASK_IMAGE, "mask") : 0;
+    uint32_t mk = c0 ? sv_ref_of(d, st, x, c0 + CSS_PROP_MASK_IMAGE, "mask") : 0;
     uint32_t fcv = c0 && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT ? c0 + CSS_PROP_FILTER : 0;
     int grouped = sv_group_open(SA, x, cp, mk, fcv, op, pw, &w, mm, depth);
     if (grouped < 0) return;
@@ -2821,8 +2832,8 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
         if (bb[0] > bb[2]) { i = j; continue; }
         uint32_t cur = st->cval[cw->src[SI_COLOR]].color;
         sv_paint fp, spt;
-        sv_paint_of(d, st, cw->src[SI_FILL], cur, &fp);
-        sv_paint_of(d, st, cw->src[SI_STROKE], cur, &spt);
+        sv_paint_of(d, st, x, cw->src[SI_FILL], cur, &fp);
+        sv_paint_of(d, st, x, cw->src[SI_STROKE], cur, &spt);
         uint32_t fg = 0, frgba = 0, sg = 0, srgba = 0;
         int fk = sv_resolve(SA, &fp, bb, cw, &fg, &frgba);
         int sk = sv_resolve(SA, &spt, bb, cw, &sg, &srgba);
@@ -2967,7 +2978,7 @@ void amb_svg_effects(const dom_document *d, const css_style *st, const vector<ui
         size_t i = 0, pa, pl, end;
         while (css_next_part(data(t), len(t), &i, &pa, &pl)) {
             if (pl < 4 || memcmp(data(t) + pa, "url(", 4) != 0) continue;
-            uint32_t flt = sv_url(d, data(t) + pa, pl, &end);
+            uint32_t flt = sv_url(d, el, data(t) + pa, pl, &end);
             vector<char> blk;
             double reg[4];
             int ok = flt && sv_is(d, flt, "filter") && sv_filter_block(d, st, firsts, f, &blk, &ids, &uses, &work, flt, bb, hb, &w, mm, reg);
@@ -2977,9 +2988,9 @@ void amb_svg_effects(const dom_document *d, const css_style *st, const vector<ui
     }
     /* the clip-path's clipPath: its own clip-path's shapes a group about its own; their union the clip, not held to its
        bounding box (Chromium's on a box, measured: an ellipse's top row half covered, not a quarter, as an SVG element's) */
-    uint32_t cp = sv_clip_of(d, st, c0 + CSS_PROP_CLIP_PATH);
+    uint32_t cp = sv_clip_of(d, st, el, c0 + CSS_PROP_CLIP_PATH);
     if (cp) {
-        uint32_t k0 = sv_first(firsts, cp), outer = k0 ? sv_clip_of(d, st, k0 + CSS_PROP_CLIP_PATH) : 0;
+        uint32_t k0 = sv_first(firsts, cp), outer = k0 ? sv_clip_of(d, st, cp, k0 + CSS_PROP_CLIP_PATH) : 0;
         vector<char> lines, blk;
         sv_w(out, "c 1\n");
         if (outer && outer != cp) {
@@ -3042,7 +3053,7 @@ void amb_svg_effects(const dom_document *d, const css_style *st, const vector<ui
         /* a mask element's url(): its group, its type the mode's when the mode is not match-source; anything else (none, a
            url() naming no mask, a picture, which is not fetched) a layer of transparent black, which masks all away (7.1) */
         size_t end;
-        uint32_t mk = il > 4 && memcmp(is, "url(", 4) == 0 ? sv_url(d, is, il, &end) : 0;
+        uint32_t mk = il > 4 && memcmp(is, "url(", 4) == 0 ? sv_url(d, el, is, il, &end) : 0;
         vector<char> blk;
         int ok = mk && sv_is(d, mk, "mask") && sv_mask_block(d, st, firsts, f, &blk, &ids, &uses, &work, mk, bb, hb, &w, mm, 0);
         if (ok && mode && len(blk) > 2) blk[2] = mode == 1 ? '1' : '0';

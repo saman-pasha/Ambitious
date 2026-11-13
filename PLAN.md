@@ -1274,9 +1274,10 @@ be built side by side and merged without touching each other's.
   `contracts/dom.pl`: a host's root, each slot's assigned and manually assigned nodes, a shadow
   root's options; a sheet's tree and depth in `src/css/css.c` and `contracts/css.pl`; the flat
   tree walked in `src/layout/layout.c` and `src/a11y/a11y.c`; declarative shadow roots in
-  `src/html/tree.c`, their parts fetched in `src/net/net.c`; slots, `slotchange` and
-  `composedPath()` in `src/script/custom.c`; inheritance and the context's step in
-  `prolog/amb/rules/`), each measured in Chromium first, the specs deciding where it left room:
+  `src/html/tree.c`, their parts fetched in `src/net/net.c`; references by id in
+  `src/paint/svg.c`; slots, `slotchange` and `composedPath()` in `src/script/custom.c`;
+  inheritance and the context's step in `prolog/amb/rules/`), each measured in Chromium first,
+  the specs deciding where it left room:
   - the flat tree (DOM 4.2.2, CSS Scoping 1, 2.2): the DOM finds each slot's assigned nodes
     (named: a host's element and text children by their slot attribute, each to the first slot
     of its name in its tree's order; manual: those `assign()` gave, in its order, while they are
@@ -1306,6 +1307,10 @@ be built side by side and merged without touching each other's.
     attribute), the inner an important one (`:host { color: red !important }` over the host's
     important style attribute); a tree's elements' hints and style attributes in sheets of its
     depth; `css_lost/4` names the step (`context(lost(shadow_tree(depth(1))), won(document))`);
+    an SVG's `url(#id)` or `href` (an HTML box's `clip-path`, `mask` and `filter` too) names the
+    element of that id in the tree of the element whose value or attribute it is, as Chromium
+    looks (a `::part()` rule of the document's in the part's tree), never in a template's
+    contents;
   - declarative shadow DOM (HTML 13.2.6.4.4): a template whose `shadowrootmode` is open or
     closed, in any case, in a document parsed whole, attaches its parent's shadow root when the
     parent may host one and hosts none, with `shadowrootdelegatesfocus`, `shadowrootclonable` and
@@ -1326,9 +1331,11 @@ be built side by side and merged without touching each other's.
   from 9: `tools/bench/cssref.js --shadow`, which reads the open trees' elements too),
   `shadow-layout.html` (boxes 45 of 45, from 0; regions 32 of 32, from 0:
   `tools/bench/boxes.js --shadow`), `shadow-dsd.html` (boxes 29 of 29, from 0; regions 19 of 19,
-  from 0), `shadow-slots.html` (its console, 54 lines, Chromium's line for line, from 1 of them:
-  the first script stopped at a declarative root's absence) and `a11y-shadow.html` (its
-  accessibility tree, 12 lines, from 3; `tools/bench/axtree.js` reading the shadow trees' ids);
+  from 0), `shadow-svg.html` (regions 19 of 19, from 10; five of them the document's
+  definitions', of no size), `shadow-slots.html` (its console, 54 lines, Chromium's line for
+  line, from 1 of them: the first script stopped at a declarative root's absence) and
+  `a11y-shadow.html` (its accessibility tree, 12 lines, from 3; `tools/bench/axtree.js` reading
+  the shadow trees' ids);
   the reasoner's flat tree and a root's options (`tests/integ/script-custom.sh`); every other
   page's boxes, regions, values, consoles and trees as they were; the new pages render, and their
   scripts run, valgrind clean. Its cost (`docs/performance.md`; callgrind, and `ambitious bench`
