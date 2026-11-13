@@ -706,3 +706,25 @@ neighbours.
     by passing it to an `own` parameter, which empties it (`net_sess_take`, a function that
     returns its argument), and to empty every element (free it with the library's
     function, then store 0) before a store, so that the store's own free sees a null.
+39. **A local declared twice in one block is accepted**: the second declaration shadows the
+    first, as one in a nested block would, where C refuses it (gcc: `redefinition of 'k'`):
+
+    ```c
+    #include <stdio.h>
+    #include <stdint.h>
+    int main(void) {
+        uint32_t total = 0;
+        for (uint32_t i = 0; i < 3; i++) {
+            uint32_t k = i * 10;
+            if (k == 10) continue;
+            uint32_t k = 1;
+            total += k;
+        }
+        printf("%u\n", total);
+        return 0;
+    }
+    ```
+
+    compiles and prints 2. A unit that leans on it builds with cicilang alone, and a slip
+    that reuses a name goes unseen. 12aj met it in `src/js/regexp.c`'s `rp_prop_find`
+    (the property's kind, then an alias's place, both `k`), now two names.

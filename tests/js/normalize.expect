@@ -73,7 +73,12 @@ Error form
 TypeError Cannot convert a Symbol value to a string
 x 123 2
 NFC 1120 3096614953
-NFD 13233 4190609954
-NFKC 4928 123890835
-NFKD 17029 1752994407
+NFD 13253 3461640583
+NFKC 4965 1539397683
+NFKD 17086 4175337474
 sequences 21296 1628896656
+NFC(NFD) 13253 114452247
+NFKC(NFKD) 17086 4001602415
+NFC(NFKD) 17086 4001602415
+NFD(NFKC) 4965 1212412561
+d818 dd26 | d818 dd1e d818 dd1e d818 dd1f | d818 dd26 | d818 dd1e d818 dd1e d818 dd1f / d81b dd6a | d81b dd63 d81b dd67 d81b dd67 | d81b dd6a | d81b dd63 d81b dd67 d81b dd67 / d804 df83 | d804 df82 d804 dfc9 | d804 df83 | d804 df82 d804 dfc9 / d804 dfc5 d804 dfb8 | d804 dfc2 d804 dfc2 d804 dfb8 | d804 dfc5 d804 dfb8 | d804 dfc2 d804 dfc2 d804 dfb8 / d801 ddc9 | d801 ddd2 307 | d801 ddc9 | d801 ddd2 307 / d818 dd1e 300 d818 dd1e | d818 dd1e 300 d818 dd1e | d818 dd1e 300 d818 dd1e | d818 dd1e 300 d818 dd1e / d81b dd68 d81b dd67 | d81b dd67 d81b dd67 d81b dd67 | d81b dd68 d81b dd67 | d81b dd67 d81b dd67 d81b dd67

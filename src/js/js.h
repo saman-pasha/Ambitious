@@ -722,6 +722,12 @@ jv js_coll_op(js_vm *vm, uint32_t op, uint32_t c, jv k, jv v);
 uint32_t js_uni_upper(uint32_t c);
 uint32_t js_uni_lower(uint32_t c);
 uint32_t js_uni_special(uint32_t c, int upper, uint32_t *out);
+/* the binary properties toLowerCase's final sigma reads (Cased, Case_Ignorable), and an
+   identifier's characters beyond ASCII: its first ID_Start, the rest ID_Continue or ZWNJ or ZWJ */
+int js_uni_cased(uint32_t c);
+int js_uni_case_ignorable(uint32_t c);
+int js_uni_id_start(uint32_t c);
+int js_uni_id_part(uint32_t c);
 /* String.prototype.normalize's work (src/js/normalize.c): s in the form a value names
    (undefined: NFC), JV_HOLE with a RangeError thrown for an unknown one */
 jv js_str_normalize(js_vm *vm, uint32_t s, jv form);

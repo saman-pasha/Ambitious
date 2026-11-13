@@ -1,8 +1,7 @@
 // tests/js/normalize.js -- String.prototype.normalize, each line against V8's (normalize.expect):
 // NFC, NFD, NFKC and NFKD by Unicode's algorithm (decomposition, canonical ordering,
 // composition with its exclusions, Hangul's arithmetic), the form's RangeError, and every
-// code point of Unicode 15.0 in each form (the ranges new in 16.0 and 17.0 left out: the
-// engine's tables are perl's Unicode 15.0, node's ICU has 17.0).
+// code point in each form, at Unicode 17.0.
 
 const p = (...a) => console.log(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' '));
 const hex = s => { let r = []; for (let i = 0; i < s.length; i++) r.push(s.charCodeAt(i).toString(16)); return r.join(' '); };
@@ -31,12 +30,10 @@ p('x'.normalize({ toString() { return 'NFKC'; } }), String.prototype.normalize.c
 
 // every code point in each form: how many each changes, and a checksum of what it gives
 {
-const skip = c => c === 0xA7F1 || (c >= 0x105C0 && c <= 0x105FF) || (c >= 0x11380 && c <= 0x113FF) || (c >= 0x16100 && c <= 0x1613F) ||
-                  (c >= 0x16D40 && c <= 0x16D7F) || (c >= 0x1CC00 && c <= 0x1CEBF);
 for (const f of forms) {
   let changed = 0, h = 0;
   for (let c = 0; c < 0x110000; c++) {
-    if ((c >= 0xD800 && c <= 0xDFFF) || skip(c)) continue;
+    if (c >= 0xD800 && c <= 0xDFFF) continue;
     const s = String.fromCodePoint(c), t = s.normalize(f);
     if (t === s) continue;
     changed++;
@@ -54,4 +51,29 @@ for (const b of bases) for (const m1 of marks) for (const m2 of marks) for (cons
   for (const f of forms) { const t = s.normalize(f); n++; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; h = (h * 31 + t.length) >>> 0; }
 }
 p('sequences', n, h);
+}
+
+// every code point's decompositions composed again: the primary composites (16.0's and 17.0's
+// among them: Tulu-Tigalari's, Gurung Khema's and Kirat Rai's vowel signs, two starters that
+// join), and the exclusions, which do not come back. A form a timer, so that the collector runs
+// between them
+{
+const queue = [];
+const next = () => { const f = queue.shift(); if (f) { f(); setTimeout(next, 0); } };
+for (const [f, g] of [['NFC', 'NFD'], ['NFKC', 'NFKD'], ['NFC', 'NFKD'], ['NFD', 'NFKC']]) queue.push(() => {
+  let n = 0, h = 0;
+  for (let c = 0; c < 0x110000; c++) {
+    if (c >= 0xD800 && c <= 0xDFFF) continue;
+    const s = String.fromCodePoint(c), d = s.normalize(g);
+    if (d === s) continue;
+    const t = d.normalize(f);
+    n++;
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+    h = (h * 31 + c) >>> 0;
+  }
+  p(f + '(' + g + ')', n, h);
+});
+queue.push(() => p(['\u{1611E}\u{1611E}\u{1611F}', '\u{16D63}\u{16D67}\u{16D67}', '\u{11382}\u{113C9}', '\u{113C2}\u{113C2}\u{113B8}', '\u{105D2}\u0307',
+   '\u{1611E}\u0300\u{1611E}', '\u{16D67}\u{16D67}\u{16D67}'].map(each).join(' / ')));
+setTimeout(next, 0);
 }

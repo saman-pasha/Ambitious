@@ -394,14 +394,20 @@ uint32_t js_big_to_string(js_vm *vm, jv v, uint32_t radix) {
     return js_str_utf8(vm, data(out), len(out));
 }
 
+/* StrWhiteSpaceChar: white space (the space separators, U+FEFF) and the line terminators */
+static int big_space(uint32_t c) {
+    return c == ' ' || (c >= 9 && c <= 13) || c == 0xA0 || c == 0xFEFF || c == 0x2028 || c == 0x2029 || (c >= 0x2000 && c <= 0x200A) ||
+           c == 0x3000 || c == 0x1680 || c == 0x202F || c == 0x205F;
+}
+
 /* the text (code units o..o+n of vm->units) as a BigInt: JV_HOLE when it is not one (no
    exception thrown). literal: a source literal (its n gone, _ separators allowed, no sign) */
 static jv big_parse_units(js_vm *vm, uint32_t o, uint32_t n, int literal) {
     uint32_t i = 0;
     if (!literal) {
-        /* StringToBigInt: white space trimmed, a sign for decimal digits only */
-        while (i < n && (vm->units[o + i] == ' ' || (vm->units[o + i] >= 9 && vm->units[o + i] <= 13) || vm->units[o + i] == 0xA0 || vm->units[o + i] == 0xFEFF || vm->units[o + i] == 0x2028 || vm->units[o + i] == 0x2029 || (vm->units[o + i] >= 0x2000 && vm->units[o + i] <= 0x200A) || vm->units[o + i] == 0x3000 || vm->units[o + i] == 0x1680 || vm->units[o + i] == 0x202F || vm->units[o + i] == 0x205F)) i++;
-        while (n > i && (vm->units[o + n - 1] == ' ' || (vm->units[o + n - 1] >= 9 && vm->units[o + n - 1] <= 13) || vm->units[o + n - 1] == 0xA0 || vm->units[o + n - 1] == 0xFEFF)) n--;
+        /* StringToBigInt: white space trimmed at both ends, a sign for decimal digits only */
+        while (i < n && big_space(vm->units[o + i])) i++;
+        while (n > i && big_space(vm->units[o + n - 1])) n--;
     }
     int neg = 0;
     uint32_t radix = 10;
