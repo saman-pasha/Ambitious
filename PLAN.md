@@ -1458,8 +1458,9 @@ be built side by side and merged without touching each other's.
   - a user's click's coordinates where the pointer was as it began, whatever its listeners move: the document
     copied a buffer at a time before the first change after the click began, that copy laid out only when a
     coordinate is read after a change; an event's offsets from its target's box when first read, then kept; a
-    release found again once a press's listener changed the page, the click at the press's and the release's
-    nearest common ancestor; a script's `click()` during a user's click without a position;
+    release found again once a press's listener changed the page, the boundary events first when the pointer
+    is over another element, the click at the press's and the release's nearest common ancestor; a script's
+    `click()` during a user's click without a position;
   - customized built-in elements (`extends`, `is=`, `createElement`'s `is`, a class's `new` and its checks, the
     `is` value serialized) over the HTML element interfaces (69 constructors and Chromium's prototype chain, made
     when a script first names one), and form-associated custom elements (`attachInternals`, ElementInternals'
@@ -1469,7 +1470,7 @@ be built side by side and merged without touching each other's.
     EUC-JP, Big5, ISO-2022-JP, windows-1252), a character the encoding lacks as `&#N;`.
 
   Gate: each page's console against Chromium's, line for line: `tests/pages/validity.html` (123 lines),
-  `checked.html` (36), `click-point.html` (13), `unload.html` (63, ten ways), `form-sjis.html`, `form-euckr.html`
+  `checked.html` (36), `click-point.html` (25), `unload.html` (63, ten ways), `form-sjis.html`, `form-euckr.html`
   and `form-gbk.html` (36), `modules-inserted.html` (17) and `modules.html` over file: (21), `custom-forms.html`
   (44) (`tests/integ/script-input.sh`, `script-modules.sh` and `script-custom.sh`); the accessibility tree's
   checked states after the clicks; every accessibility gate's output as it was.

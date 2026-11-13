@@ -11,6 +11,7 @@
   #k { position: absolute; left: 400px; top: 300px; margin: 0; width: 20px; height: 20px; }
   #k:checked { margin-left: 40px; }
   #e { position: absolute; left: 100px; top: 400px; width: 100px; height: 40px; }
+  #f { position: absolute; left: 100px; top: 500px; width: 100px; height: 40px; }
 </style>
 </head>
 <body>
@@ -19,6 +20,7 @@
 <button id="d"><span>d</span></button>
 <input id="k" type="checkbox">
 <button id="e">e</button>
+<button id="f">f</button>
 <script>
   /* a click's coordinates are where the pointer was when it began, whatever its listeners
      move; its offsets are from the target's box as it is when first read, then kept */
@@ -47,18 +49,26 @@
   k.addEventListener('click', function (e) {
     console.log('k click', k.checked, e.clientX, e.clientY, e.offsetX, e.offsetY);
   });
-  /* a press's listener moving its target away: the release, and the click, where the
-     pointer is then (the click at the press's and the release's common ancestor) */
-  var e = document.getElementById('e');
-  e.addEventListener('pointerdown', function () {
-    e.style.left = '600px';
-    ['mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (t) {
-      document.addEventListener(t, function f(ev) {
-        console.log('e ' + t, ev.target.id || ev.target.tagName, ev.clientX, ev.clientY);
-        document.removeEventListener(t, f);
+  /* a press's listener moving its target away: the boundary events, the release and the
+     click where the pointer is then (the click at the press's and the release's common
+     ancestor); e's moves heard by no listener as its click begins, f's by one (e's press
+     adds it) */
+  var moved = ['mousedown', 'pointerout', 'pointerover', 'mouseout', 'mouseover', 'pointerup', 'mouseup', 'click'];
+  function away(el, left, then) {
+    el.addEventListener('pointerdown', function () {
+      el.style.left = left;
+      if (then) then();
+      moved.forEach(function (t) {
+        document.addEventListener(t, function g(ev) {
+          console.log(el.id + ' ' + t, ev.target.id || ev.target.tagName, ev.clientX, ev.clientY);
+          document.removeEventListener(t, g);
+        });
       });
     });
-  });
+  }
+  var f = document.getElementById('f');
+  away(document.getElementById('e'), '600px', function () { f.addEventListener('mouseover', function () {}); });
+  away(f, '600px');
 </script>
 </body>
 </html>

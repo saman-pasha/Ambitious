@@ -22,8 +22,9 @@
 #   click-point.html: a click's coordinates where the pointer was as it began, whatever its
 #     listeners move (an element moved by a press's listener, then by the click's; a box's
 #     :checked moving it), read at once and in a later task; its offsets from the target's
-#     box when first read, then kept; a release and its click where the pointer is once a
-#     press's listener moved the element away;
+#     box when first read, then kept; the boundary events, a release and its click where the
+#     pointer is once a press's listener moved the element away (with no listener of the
+#     pointer's moves as the click began, and with one);
 #   form.html, served by tests/integ/script-serve.py, once for each line of form.actions:
 #     the console and the requests the server had (a submit button's click, a submitter's
 #     formaction and formmethod, submit() and requestSubmit(), GET, multipart and

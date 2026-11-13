@@ -493,10 +493,12 @@ static int si_in(const vector<uint32_t> *chain, uint32_t x) {
 }
 /* the pointer moved to a point: the boundary events from the element under it to the
    one there, then a move */
-static void si_move(js_vm *vm, double x, double y) {
+/* the boundary events of the pointer at (x, y) coming onto the element to from the one it
+   was over: a move's, and a release's whose element a press's listener changed */
+static void si_boundary(js_vm *vm, double x, double y, uint32_t to) {
     struct js_host *h = vm->host;
     const dom_document *d = h->d;
-    uint32_t to = si_hit(vm, x, y), from = h->mouse_in ? h->hover : 0;
+    uint32_t from = h->mouse_in ? h->hover : 0;
     if (from && (!d->node[from].live || !sh_connected(d, from))) from = 0;
     if (to != from) {
         vector<uint32_t> oc, nc;
@@ -519,6 +521,11 @@ static void si_move(js_vm *vm, double x, double y) {
         }
         h->hover = to;
     }
+}
+static void si_move(js_vm *vm, double x, double y) {
+    struct js_host *h = vm->host;
+    uint32_t to = si_hit(vm, x, y);
+    si_boundary(vm, x, y, to);
     h->mouse_in = 1;
     h->mouse_x = x;
     h->mouse_y = y;
@@ -1475,7 +1482,7 @@ static int si_click(js_vm *vm, uint32_t x, int count) {
             int md = pd && si_mouse(vm, t, "mousedown", 0, 0, 0, 1, k, 0);
             if (md) si_press_focus(vm, t);
             uint32_t u = si_lazy_hit(vm, x);
-            h->hover = u;
+            if (u != t) si_boundary(vm, 0, 0, u);
             si_mouse(vm, u, "pointerup", 0, 0, 0, 0, 0, 0);
             si_mouse(vm, u, "mouseup", 0, 0, 0, 0, k, 0);
             at = si_common(h->d, t, u);
@@ -1516,8 +1523,10 @@ static int si_click(js_vm *vm, uint32_t x, int count) {
         int md = pd && si_mouse(vm, t, "mousedown", cx, cy, 0, 1, k, 0);
         if (md) si_press_focus(vm, t);
         /* the release where the layout puts the point now, when a press's listener changed
-           the page; the click at the nearest common ancestor of the two */
+           the page (the boundary events first, the pointer now over another element); the
+           click at the nearest common ancestor of the two */
         uint32_t u = dom_revision(h->d) == rev ? t : si_hit(vm, cx, cy);
+        if (u != t) si_boundary(vm, cx, cy, u);
         si_mouse(vm, u, "pointerup", cx, cy, 0, 0, 0, 0);
         si_mouse(vm, u, "mouseup", cx, cy, 0, 0, k, 0);
         at = si_common(h->d, t, u);
