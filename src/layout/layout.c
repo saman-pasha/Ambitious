@@ -8639,7 +8639,17 @@ static void lay_flow_in(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto,
             vector<lay_piece> rps;
             lay_run_pieces(LARGS, el, &items, sg.first, sg.n, w, &rps);
             if (!lay_run_shows(&rps)) {
-                lay_run_oof(LARGS, b, &rps, w, ox, oy, cursor + lay_mc_v(pending));
+                /* a run that shows nothing (white space and floats): the floats that waited before it placed first,
+                   where its own go, so that floats keep the document's order (CSS 2.1, 9.5.1, rule 5). They waited for
+                   the next in-flow box, and the run's own went before them: the first of a row last (Chromium's,
+                   measured) */
+                double ry = cursor + lay_mc_v(pending);
+                for (size_t q = 0; q < len(waiting); q++) {
+                    uint32_t fb = lay_float_box(LARGS, b, at(waiting, q), w, ch);
+                    lay_float_place(LARGS, fb, at(waiting, q), w, ox, oy, ry);
+                }
+                clear(waiting);
+                lay_run_oof(LARGS, b, &rps, w, ox, oy, ry);
                 continue;
             }
         }

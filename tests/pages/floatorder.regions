@@ -1,0 +1,14 @@
+# tests/pages/floatorder.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+c1 5 5 190 140
+c2 200 5 385 140
+c3 395 5 580 140
+c4 590 5 775 140
+c5 5 150 190 285
+e1 5 333 190 373
+e2 200 333 385 373
+g1 5 413 190 453
+g2 200 413 385 453
+d1 405 295 590 335
+d2 405 345 590 385
+d3 405 395 590 435
+d4 405 445 590 485

@@ -1,0 +1,32 @@
+<!doctype html>
+<title>floats in order</title>
+<!-- tests/pages/floatorder.html -- floats placed in document order (CSS 2.1, 9.5.1, rule 5) when white space between
+     them makes a run that shows nothing (white space and floats alone): the floats before such a run, met where no
+     inline content had begun, waited for the next in-flow box while the run's own floats were placed, and so came after
+     them. Each block here begins with a float. The task's five, 185 by 135 with 5px margins, four to a row of 800px (the
+     first was the second row's); two between blocks whose margins collapse, after the first block's margin; two at the
+     start of a block whose top margin collapses through it, at its first child's top; four of clear: left, a line feed
+     after the second, stacked in order. tests/integ/paintref.sh holds the drawing to Chromium's (floatorder.shot.png,
+     floatorder.regions: tools/bench/shot.js) -->
+<style>
+  body { margin: 0; }
+  b { float: left; margin: 5px; width: 185px; height: 135px; }
+  .short b { height: 40px; }
+  .r { background: #c33; } .g { background: #3a3; } .u { background: #36c; } .o { background: #e90; } .p { background: #839; }
+</style>
+<div style="display: flow-root"><b id=c1 class=r></b>
+<b id=c2 class=g></b>
+<b id=c3 class=u></b>
+<b id=c4 class=o></b>
+<b id=c5 class=p></b>
+</div>
+<div class=short style="display: flow-root; width: 400px"><div style="height: 18px; margin-bottom: 20px; background: #ddd"></div><b id=e1 class=r></b>
+<b id=e2 class=g></b>
+<div style="margin-top: 30px; height: 10px"></div>
+</div>
+<div class=short style="width: 400px"><b id=g1 class=u></b>
+<b id=g2 class=o></b>
+<div style="margin-top: 30px; height: 10px"></div>
+</div>
+<div class=short style="position: absolute; left: 400px; top: 290px; width: 400px"><b id=d1 class=r style="clear: left"></b><b id=d2 class=g style="clear: left"></b>
+<b id=d3 class=u style="clear: left"></b><b id=d4 class=o style="clear: left"></b></div>
