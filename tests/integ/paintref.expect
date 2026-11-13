@@ -70,6 +70,7 @@ wm-combine: 29 of 29 regions agree with Chromium's drawing
 wm-flex: 30 of 30 regions agree with Chromium's drawing
 wm-ortho: 32 of 32 regions agree with Chromium's drawing
 wm-root: 12 of 12 regions agree with Chromium's drawing
+wm-shadow: 9 of 9 regions agree with Chromium's drawing
 wm-text: 15 of 15 regions agree with Chromium's drawing
 woff2: 14 of 14 regions agree with Chromium's drawing
 zoom: 9 of 9 regions agree with Chromium's drawing

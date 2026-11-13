@@ -1,0 +1,10 @@
+# tests/pages/wm-shadow.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+a 8 8 48 128
+b 52 8 92 128
+c 96 8 136 128
+text-d 140 8 180 128
+text-e 184 8 224 128
+text-f 228 8 268 128
+g 272 8 312 128
+h 316 8 356 128
+i 360 8 400 128

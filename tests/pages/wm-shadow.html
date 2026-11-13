@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: text shadows</title>
+<style>
+/* tests/pages/wm-shadow.html -- text-shadow in vertical lines (CSS Writing Modes 4, CSS Text Decoration 3), as
+   Chromium draws it: a turned glyph's shadow offset turned with the glyph (clockwise in vertical-rl and vertical-lr,
+   anticlockwise in sideways-lr: its x down the line), an upright glyph's and a combined text's offset as it is, a
+   blurred shadow blurred about it, two shadows the first on top. Held to Chromium's boxes (wm-shadow.chromium) and
+   drawing (wm-shadow.shot.png, .regions): the columns pixel by pixel where Ambitious sets their glyphs as Chromium
+   does, the text- ones by their ink (each column padded so that its shadows fall in its region) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { float: left; height: 120px; padding: 0 10px; margin-right: 4px; writing-mode: vertical-rl; }
+</style></head>
+<body>
+<div id="a" class="c" style="text-shadow: 6px 0 #c00">Hello</div>
+<div id="b" class="c" style="text-shadow: 0 6px #c00">Hello</div>
+<div id="c" class="c" style="writing-mode: vertical-lr; text-shadow: 6px 3px #c00">Hello</div>
+<div id="text-d" class="c" style="writing-mode: sideways-lr; text-shadow: 6px 3px #c00">Hello</div>
+<div id="text-e" class="c" style="text-shadow: 4px 4px 3px #00c">かなカナ</div>
+<div id="text-f" class="c" style="text-orientation: upright; text-shadow: 5px 2px #0a0">ABC</div>
+<div id="g" class="c" style="text-shadow: 3px 2px #c00">x<span style="text-combine-upright: all">12</span>y</div>
+<div id="h" class="c" style="text-shadow: 2px 3px #c00, -3px -1px #0a0">Hello</div>
+<div id="i" class="c" style="text-shadow: 2px 2px 2px #c00">blur</div>
+</body></html>

@@ -1314,10 +1314,11 @@ be built side by side and merged without touching each other's.
     the line's decorations running along it;
   - paint draws a vertical line's turned glyphs a quarter turned (clockwise; sideways-lr's anticlockwise) on its
     alphabetic baseline, Skia's subpixel axis along the line; upright ones centred on its central baseline (half the
-    font's unrounded height below the line's over edge, Blink's FixedAscent); each
-    line's text set from its first text fragment's start (or that of the decorated inline box it is in) snapped to
-    a whole pixel, as Chromium sets it; an underline and an overline outside the text's under and over edges, a
-    sideways line's turned with its glyphs; an inline box's decorations along the line;
+    font's unrounded height below the line's over edge, Blink's FixedAscent); each line's text set from its first text
+    fragment's start (or that of the decorated inline box it is in) snapped to a whole pixel, as Chromium sets it; its
+    text-shadows, a turned glyph's offset turned with it, an upright or combined one's as it is (measured); an
+    underline and an overline outside the text's under and over edges, a sideways line's turned with its glyphs; an
+    inline box's decorations along the line;
   - CSS Logical 1: the flow-relative margins, paddings, borders (their widths, styles and colours; the shorthands of an
     axis and of a side), insets, sizes (inline-size, block-size, their minimums and maximums) and corners' radii, and
     Chromium's old `-webkit-` names of them, kept as declared and taken by the cascade for the physical property the
@@ -1326,18 +1327,19 @@ be built side by side and merged without touching each other's.
     clear's inline-start and inline-end by their containing block's direction; getComputedStyle and the reasoner's
     css_computed/4 give a flow-relative property its physical one's value.
 
-  Gate: `tests/pages/wm-blocks.html` (boxes 30 of 30, from 1 before; regions 30 of 30, from 3), `wm-root.html` (12
-  of 12, from 0; regions 12 of 12, from 0), `wm-text.html` (15 of 15, from 0; regions 15 of 15, from 8),
+  Gate: `tests/pages/wm-blocks.html` (boxes 30 of 30, from 1 before; regions 30 of 30, from 3), `wm-root.html` (12 of
+  12, from 0; regions 12 of 12, from 0), `wm-text.html` (15 of 15, from 0; regions 15 of 15, from 8),
   `wm-logical.html` (42 of 42, from 0), `wm-flex.html` (flex, grid and a table in vertical modes: 30 of 30, from 0;
-  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2), `wm-combine.html` (29 of
-  29, from 0, and 16 with writing modes but not combined text; regions 29 of 29, from 2 and 14) and `wmvals.html`
-  (computed values 126 of 126, from 25), each held to Chromium; every earlier page's boxes, regions and values as
-  they were, and its drawing byte for byte (180 renders); the new pages render valgrind clean, their leaks checked. Its cost
-  (`docs/performance.md`): on horizontal pages, none past the timings' noise (the large page's layout 67.5 ms before,
-  68.1 after; news.html's 0.54 and 0.45) -- by callgrind, the large page's layout 485.7 million instructions before,
-  487.8 after (+0.4%), its paint +0.3% and its cascade +0.3%: the box and fragment records no bigger (the new fields
-  in their padding), a horizontal run shaped, measured and packed on its old paths (a vertical run in loops of its
-  own), an upright run's glyphs set apart after its shaping.
+  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2), `wm-combine.html` (combined
+  text: 29 of 29, from 0, and 16 with writing modes but not combined text; regions 29 of 29, from 2 and 14),
+  `wm-shadow.html` (text shadows in vertical lines: 9 of 9, from 0; regions 9 of 9, from 2, and 0 with writing modes
+  but no vertical shadows) and `wmvals.html` (computed values 126 of 126, from 25), each held to Chromium; every
+  earlier page's boxes, regions and values as they were, and its drawing byte for byte (180 renders); the new pages
+  render valgrind clean, their leaks checked. Its cost (`docs/performance.md`): on horizontal pages, none past the
+  timings' noise (the large page's layout 67.5 ms before, 68.1 after; news.html's 0.54 and 0.45) -- by callgrind, the
+  large page's layout 485.7 million instructions before, 487.8 after (+0.4%), its paint +0.3% and its cascade +0.3%:
+  the box and fragment records no bigger (the new fields in their padding), a horizontal run shaped, measured and
+  packed on its old paths (a vertical run in loops of its own), an upright run's glyphs set apart after its shaping.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

@@ -1,0 +1,10 @@
+# boxes of tests/pages/wm-shadow.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+a div 8 8 40 120
+b div 52 8 40 120
+c div 96 8 40 120
+text-d div 140 8 40 120
+text-e div 184 8 40 120
+text-f div 228 8 40 120
+g div 272 8 40 120
+h div 316 8 40 120
+i div 360 8 40 120
