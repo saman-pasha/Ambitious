@@ -320,10 +320,11 @@ typedef struct lay_style {
        1 mixed, 2 upright (their baseline the central one: asc and desc its halves, Blink's kCentralBaseline: LAY_VC),
        3 sideways (every glyph turned, on the alphabetic baseline), 4 combined (text-combine-upright: all, in
        vertical-rl or vertical-lr: each text node set across the line in an em, on the baseline its orientation
-       gives). (Here, in the padding before fs, a style is no
+       gives). hidden: its visibility hidden or collapse, which paint draws none of (the fragments' hidden). (Here, in
+       the padding before fs, a style is no
        bigger for them; at its end, the bigger style's copies, which layout makes often, became calls to memcpy, and
        each field here makes each copy longer: measured) */
-    uint8_t wm, orient;
+    uint8_t wm, orient, hidden;
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
     int list_inside;                /* list-style-position: inside */
@@ -402,6 +403,7 @@ typedef struct lay_ext {
     uint32_t ocolor, shadows, bgimg, bgpos, bgsize, bgrepeat, xform, xorigin, tshadow, bgres, bgclip, bgorigin, filter, backdrop;
     uint32_t persp, porigin, translate, rotate, scale;
     uint8_t p3d, backface;
+    uint8_t hidden;                     /* visibility: hidden or collapse (the box's hidden) */
     int paints;                         /* any of these other than its initial value */
     int32_t clamp;                      /* -webkit-line-clamp's lines on a vertical -webkit-box; 0 none */
     uint8_t ellipsis;                   /* text-overflow: ellipsis */
@@ -659,6 +661,8 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
     s->color = st->cval[cv[CSS_PROP_COLOR]].color;
     s->fill = st->cval[cv[CSS_PROP_WEBKIT_TEXT_FILL_COLOR]].color;
     s->bg = st->cval[cv[CSS_PROP_BACKGROUND_COLOR]].color;
+    lay_word_of(st, cv[CSS_PROP_VISIBILITY], w);
+    s->hidden = (uint8_t)(lay_w(w, "hidden") || lay_w(w, "collapse"));
     s->fs = st->cval[cv[CSS_PROP_FONT_SIZE]].num;
     double weight = st->cval[cv[CSS_PROP_FONT_WEIGHT]].num;
     int bold = weight >= 600;
@@ -990,6 +994,8 @@ static void lay_ext_make(const css_style *st, uint32_t c0, int fwm, lay_ext *e) 
     e->p3d = lay_w(w, "preserve-3d");
     lay_word_of(st, c0 + CSS_PROP_BACKFACE_VISIBILITY, w);
     e->backface = lay_w(w, "hidden");
+    lay_word_of(st, c0 + CSS_PROP_VISIBILITY, w);
+    e->hidden = (uint8_t)(lay_w(w, "hidden") || lay_w(w, "collapse"));
     if (e->shadows || e->bgimg || e->xform || e->tshadow || e->bgclip || e->bgorigin || e->filter || e->backdrop || e->persp || e->translate ||
         e->rotate || e->scale || e->p3d || e->backface) e->paints = 1;
 }
@@ -1213,6 +1219,8 @@ typedef struct lay_piece {
     uint8_t lbf;                                   /* a word ending in a soft hyphen it breaks after (LBF_SHY: a hyphen
                                                       shown when a line ends there); one an overflowing line may break
                                                       anywhere (LBF_EMERG: overflow-wrap) */
+    uint8_t hidden;                                /* its style's visibility hidden or collapse (lay_style's; in the
+                                                      padding before ls too) */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
     double w, size, lh, asc, desc;
@@ -1269,6 +1277,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->color = s->color;
     p->fill = s->fill;
     p->orient = s->orient;
+    p->hidden = s->hidden;
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
@@ -3847,6 +3856,7 @@ static void lay_alt_box(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
         t->frag[fr].italic = es->italic;
         t->frag[fr].color = es->color;
         t->frag[fr].fill = es->fill;
+        t->frag[fr].hidden = es->hidden != 0;
         frags_append(t, ln, fr);
         y += es->lh;
         i = e;
@@ -3895,6 +3905,7 @@ static void lay_placeholder(LCTX, uint32_t b, uint32_t el, const lay_style *es) 
         t->frag[afr].italic = es->italic;
         t->frag[afr].color = es->color;
         t->frag[afr].fill = es->fill;
+        t->frag[afr].hidden = es->hidden != 0;
         frags_append(t, aln, afr);
         return;
     }
@@ -4256,6 +4267,7 @@ static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps,
     t->frag[fr].italic = ps->italic;
     t->frag[fr].color = ps->color;
     t->frag[fr].fill = ps->fill;
+    t->frag[fr].hidden = ps->hidden != 0;
     frags_append(t, ln, fr);
 }
 
@@ -5060,6 +5072,7 @@ static uint32_t lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char 
     t->frag[fr].italic = p->italic;
     t->frag[fr].color = p->color;
     t->frag[fr].fill = p->fill;
+    t->frag[fr].hidden = p->hidden != 0;
     t->frag[fr].decoration = p->deco;
     t->frag[fr].orient = p->orient;
     if (p->elem) {
@@ -5155,6 +5168,7 @@ static void lay_bidi_frags(LCTX, uint32_t b, uint32_t ln, const vector<lay_piece
             t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
             t->frag[fr].baseline = baseline;
             t->frag[fr].background = es.bg;
+            t->frag[fr].hidden = es.hidden != 0;
             lay_inline_piece(LARGS, fr, en.el, &es, w);
             frags_append(t, ln, fr);
             q = e2;
@@ -5604,6 +5618,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
                 t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
                 t->frag[fr].baseline = baseline;
                 t->frag[fr].background = es.bg;
+                t->frag[fr].hidden = es.hidden != 0;
                 lay_inline_piece(LARGS, fr, elx, &es, w);
                 /* the clip of the innermost element about it, itself first, whose clip-path clips */
                 vector<uint32_t> up;
@@ -5638,6 +5653,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].h = es.asc + es.desc + lay_res(st, es.p[0], w) + lay_res(st, es.p[2], w) + es.b[0] + es.b[2];
         t->frag[fr].baseline = baseline;
         t->frag[fr].background = es.bg;
+        t->frag[fr].hidden = es.hidden != 0;
         lay_inline_piece(LARGS, fr, elx, &es, w);
         vector<uint32_t> up;
         for (size_t q = 0; q <= k; q++) push_back(up, at(*open, q).el);
@@ -5729,6 +5745,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].italic = p.italic;
         t->frag[fr].color = p.color;
         t->frag[fr].fill = p.fill;
+        t->frag[fr].hidden = p.hidden != 0;
         t->frag[fr].decoration = p.deco;
         t->frag[fr].orient = p.orient;
         if (p.elem) {
@@ -6616,6 +6633,7 @@ static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, 
     t->frag[fr].size = bs->fs;
     t->frag[fr].color = bs->color;
     t->frag[fr].fill = bs->fill;
+    t->frag[fr].hidden = bs->hidden != 0;
     frags_append(t, ln, fr);
 }
 /* the nth line (from 1) of b's block flow -- its own lines, then each in-flow child's, in order: *n counts down to 0
@@ -6910,6 +6928,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     t->frag[fr].size = sm.fs;
     t->frag[fr].color = sm.color;
     t->frag[fr].fill = sm.fill;
+    t->frag[fr].hidden = sm.hidden != 0;
     t->frag[fr].orient = LAY_NOCOMB(sm.orient);
     frags_append(t, ln, fr);
 }
@@ -8887,6 +8906,7 @@ static void lay_inline_piece(LCTX, uint32_t fr, uint32_t el, const lay_style *es
     uint32_t si = lay_si(sx, gx, el);
     if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
     t->box[b].clone = at(*xc, si).clone != 0;
+    t->box[b].hidden = at(*xc, si).hidden != 0;
     t->frag[fr].piece = b;
 }
 /* each decorated inline element's fragments, in the order they were made (line by line), as one strip laid end to end
@@ -8994,6 +9014,7 @@ static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
     t->box[b].z_auto = pos == POS_STATIC || at(*xc, si).zauto;
     t->box[b].z = t->box[b].z_auto ? 0 : at(*xc, si).z;
     t->box[b].clip = (uint8_t)lay_clip_of(LARGS, el);
+    t->box[b].hidden = at(*xc, si).hidden != 0;
     if (at(*xc, si).paints) lay_box_paint(LARGS, b, si);
     if (pos == POS_RELATIVE) {
         double dx, dy;

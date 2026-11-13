@@ -2660,19 +2660,23 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
     /* the shadows of the border box snapped, as Blink's are of the snapped rounded border */
     double qx0 = floor(bx + 0.5), qy0 = floor(by + 0.5), qx1 = floor(bx + bw + 0.5), qy1 = floor(by + bh + 0.5);
     int opaque_bg = b != skip_bg && (t->box[b].background & 0xff) == 0xff;
+    /* visibility: hidden or collapse (its hidden): nothing of the box's own drawn (CSS 2.1, 11.2), but the canvas's
+       background, which the root's or the body's is (skip_bg: its image layers drawn all the same), and an svg
+       element's drawing, whose elements have each their own visibility (Chromium's, measured) */
+    int shown = !t->box[b].hidden;
     vector<char> sh;
-    if (t->box[b].shadows.len) {
+    if (shown && t->box[b].shadows.len) {
         amb_span sp = t->box[b].shadows;
         append_range(sh, text_ptr(t, sp), sp.len);
         pt_box_shadows(c, data(sh), len(sh), qx0, qy0, qx1, qy1, rad, 0, bws, prad, opaque_bg);
     }
     /* a form control the theme draws: its drawing in place of its background and border (its shadows kept) */
     int themed = t->box[b].theme != LAYOUT_THEME_CSS && !(t->box[b].tstate & 4);
-    if (themed) {
+    if (themed && shown) {
         vector<float> tacc;
         pt_theme(t, b, c, bx, by, bw, bh, &tacc);
     }
-    if (b != skip_bg && (t->box[b].background & 0xff) && !themed) {
+    if (shown && b != skip_bg && (t->box[b].background & 0xff) && !themed) {
         /* the background colour, clipped by the bottom layer's background-clip (CSS
            Backgrounds 3.7): the last of its list */
         double ca[4], cr[8];
@@ -2688,7 +2692,7 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
             pt_rrect(c, ca[0], ca[1], ca[2], ca[3], cr, t->box[b].background);
         }
     }
-    if (t->box[b].bg_image.len && !themed) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
+    if (t->box[b].bg_image.len && !themed && (shown || b == skip_bg)) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
     if (len(sh)) pt_box_shadows(c, data(sh), len(sh), qx0, qy0, qx1, qy1, rad, 1, bws, prad, 0);
     if (themed) bt = br = bb = bl = 0;      /* its border the theme's */
     /* replaced content with rounded corners: held to its content box, rounded as the border box is less the border
@@ -2714,7 +2718,7 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
         append_range(scene, text_ptr(t, t->box[b].svg), t->box[b].svg.len);
         double z = c->zoom > 0 ? c->zoom : 1;
         amb_svg_draw_with(c, nt, data(scene), len(scene), t->box[b].x, t->box[b].y, z, z);
-    } else if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED) {
+    } else if (t->box[b].kind == LAYOUT_BOX_KIND_REPLACED && shown) {
         vector<uint8_t> rgba;
         uint32_t iw, ih;
         double inw, inh;
@@ -2734,6 +2738,7 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
     c->cy0 = scy0;
     c->cx1 = scx1;
     c->cy1 = scy1;
+    if (!shown) return;       /* its borders and its theme's parts its own too */
     /* a fieldset's top border not behind its legend's border box: the band kept as the background left it */
     vector<uint8_t> gap;
     int gx0 = 0, gx1 = 0, gy0 = 0, gy1 = 0;
@@ -2867,7 +2872,7 @@ static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_c
 /* a box's outline: outside its border box by its offset, in its style */
 static void pt_outline(const layout_tree *t, uint32_t b, amb_canvas *c) {
     double w = t->box[b].ow;
-    if (w <= 0 || (t->box[b].ocolor & 0xff) == 0) return;
+    if (w <= 0 || (t->box[b].ocolor & 0xff) == 0 || t->box[b].hidden) return;
     double o = t->box[b].ooffset;
     double x0 = t->box[b].x - t->box[b].pl - t->box[b].bl - o - w, y0 = t->box[b].y - t->box[b].pt - t->box[b].bt - o - w;
     double x1 = t->box[b].x + t->box[b].w + t->box[b].pr + t->box[b].br + o + w, y1 = t->box[b].y + t->box[b].h + t->box[b].pb + t->box[b].bb + o + w;
@@ -3163,6 +3168,7 @@ static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb
                     vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
                     vector<uint32_t> *icache, vector<uint8_t> *ipx) {
     layout_frag_kind k = t->frag[fr].kind;
+    if (t->frag[fr].hidden) return;     /* its element's visibility hidden: none of it drawn */
     if (k == LAYOUT_FRAG_KIND_INLINE) {
         if (t->frag[fr].piece) pt_inline_piece(t, nt, fr, c, icache, ipx);
         else pt_fill(c, t->frag[fr].x, t->frag[fr].y, t->frag[fr].x + t->frag[fr].w, t->frag[fr].y + t->frag[fr].h, t->frag[fr].background);
@@ -3326,7 +3332,7 @@ static int pt_css_clips(const layout_tree *t, uint32_t b) { return t->box[b].css
    glyphs of its text and of its in-flow and floated descendants' (not a positioned
    one's). Drawn after the box's borders, which glyphs seldom reach */
 static void pt_text_bg(PCTX, uint32_t b) {
-    if (!t->box[b].bg_clip.len) return;
+    if (!t->box[b].bg_clip.len || t->box[b].hidden) return;
     vector<char> clp;
     amb_span cs = t->box[b].bg_clip;
     append_range(clp, text_ptr(t, cs), cs.len);
@@ -3369,7 +3375,7 @@ static void pt_text_bg(PCTX, uint32_t b) {
     resize(&m, (size_t)c->w * (size_t)kh);
     for (uint32_t fr = 1; fr < t->frag_len; fr++) {
         layout_frag_kind kd = t->frag[fr].kind;
-        if (kd != LAYOUT_FRAG_KIND_TEXT && kd != LAYOUT_FRAG_KIND_GENERATED) continue;
+        if ((kd != LAYOUT_FRAG_KIND_TEXT && kd != LAYOUT_FRAG_KIND_GENERATED) || t->frag[fr].hidden) continue;
         if (t->frag[fr].y > k.oy + kh || t->frag[fr].y + t->frag[fr].h < k.oy) continue;
         uint32_t x = t->line[t->frag[fr].line].box;
         int in = 0;
@@ -4589,6 +4595,8 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
    the cell's border box, its layers placed in the part's own box, held to the cell's */
 static void pt_part_in_cell(const layout_tree *t, const net_loader *nt, uint32_t b, uint32_t cell, amb_canvas *c, vector<uint32_t> *icache,
                             vector<uint8_t> *ipx) {
+    /* drawn as the cell's visibility says, whatever the part's (Chromium's, measured) */
+    if (t->box[cell].hidden) return;
     double x0 = t->box[cell].x - t->box[cell].pl - t->box[cell].bl, y0 = t->box[cell].y - t->box[cell].pt - t->box[cell].bt;
     double x1 = t->box[cell].x + t->box[cell].w + t->box[cell].pr + t->box[cell].br, y1 = t->box[cell].y + t->box[cell].h + t->box[cell].pb + t->box[cell].bb;
     double keep[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
@@ -4887,7 +4895,8 @@ static void pt_table_flow(PCTX, uint32_t b, vector<uint32_t> *list) {
             }
         }
     }
-    if (t->box[b].cborders.len) pt_cborders(t, b, c);
+    /* drawn as the table's visibility says, whatever its cells' (Chromium's, measured) */
+    if (t->box[b].cborders.len && !t->box[b].hidden) pt_cborders(t, b, c);
     for (uint32_t g = t->box[b].first_child; g; g = t->box[g].next) {
         if (t->box[g].kind != LAYOUT_BOX_KIND_ROW_GROUP) continue;
         if (!pt_plain(t, g)) { pt_child(PARGS, g, list); continue; }

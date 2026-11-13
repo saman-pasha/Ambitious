@@ -1,0 +1,20 @@
+# tests/pages/vishidden.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+imgabs 10 10 106 42
+imgvis 10 60 106 92
+svgabs 205 10 325 70
+svgvis 205 80 325 140
+flow 400 10 580 140
+boxwrap 595 10 775 140
+parent 10 155 200 295
+child 15 160 105 225
+text 205 155 385 285
+inline 400 150 497 189
+lists 595 155 775 285
+controls 10 300 190 430
+svgin 205 300 385 430
+rowbg 400 300 524 384
+cbcell 595 300 737 354
+cbtable 10 445 84 499
+collapse 205 445 385 575
+frame 400 445 580 575
+bgclip 595 445 775 575

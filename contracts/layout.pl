@@ -169,7 +169,13 @@ layout_contract(record(box, [
     field(cborders, span(text)),
     %% a table cell that empty-cells: hide leaves undrawn (separated borders, no content in its flow):
     %% its own background and borders (its row's, row group's and columns' backgrounds are drawn in it)
-    field(cell_hidden, bool)
+    field(cell_hidden, bool),
+    %% visibility: hidden or collapse (CSS 2.1, 11.2; collapse as hidden, a table's rows and columns kept): paint draws
+    %% nothing of the box's own -- its background, borders, outline, shadows, replaced content (an image, a frame, a
+    %% control's theme), a cell's row's, row group's and columns' backgrounds, a table's collapsed borders -- and what
+    %% is in it as its own visibility says (an svg element's drawing as its elements' own). The canvas's background, the
+    %% root's or the body's, is drawn all the same, as Chromium draws it. (In the record's padding: a box is no bigger)
+    field(hidden, bool)
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -208,6 +214,9 @@ layout_contract(record(frag, [
     %% glyph turned: a quarter clockwise, sideways-lr's anticlockwise), 4 combined (text-combine-upright: all, its
     %% fragment an em down the line: its text set across it, scaled to fit)
     field(orient,     u8),
+    %% its element's visibility hidden or collapse (CSS 2.1, 11.2): paint draws none of a text's, a marker's or
+    %% generated content's glyphs, decorations and shadows, nor an inline element's background and decorations
+    field(hidden,     bool),
     field(shadows,    span(text)),              % text-shadow
     %% a text fragment's glyphs as layout shaped them (src/paint/font.h's amb_rglyph each, packed: its
     %% glyph, its face, its pen from the fragment's start), which paint draws; none: paint shapes the text
@@ -215,7 +224,7 @@ layout_contract(record(frag, [
     %% a vertical line's text fragment: the fragment whose start, moved to its whole pixel, paint sets its glyphs from,
     %% the rest set from there (Chromium's snap, measured): the decorated inline box it is in (an inline fragment of
     %% an element that draws a background, a border, ...), else its line's first text fragment; none, a horizontal
-    %% line's. (orient and vref in the record's padding: a fragment is no bigger for them)
+    %% line's. (orient, hidden and vref in the record's padding: a fragment is no bigger for them)
     field(vref,       ref(frag))
 ])).
 

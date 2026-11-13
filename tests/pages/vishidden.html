@@ -1,0 +1,65 @@
+<!doctype html>
+<title>visibility: hidden</title>
+<!-- tests/pages/vishidden.html -- what visibility: hidden (and collapse) leaves undrawn, as Chromium leaves it: an
+     image's content, an absolutely positioned one's and one in the flow, an SVG image's; a box's background, border,
+     shadow and outline; text, its decorations and shadows; an inline element's background and border; a list item's
+     marker; form controls; a frame's content. What a hidden element holds that is visible is drawn (a child, an svg
+     element's shape); a row's background in its visible cells alone; a table's collapsed borders as the table's
+     visibility says, whatever its cells'. tests/integ/paintref.sh holds the drawing to Chromium's (vishidden.shot.png,
+     vishidden.regions: tools/bench/shot.js) -->
+<style>
+  body { margin: 0; font: 16px/1 sans-serif; }
+  .c { position: absolute; width: 180px; height: 130px; }
+  .h { visibility: hidden; }
+  td { width: 60px; height: 40px; }
+</style>
+<!-- the images: hidden, then visible; absolutely positioned -->
+<img id=imgabs class=h src="logo.png" alt="" style="position: absolute; left: 10px; top: 10px">
+<img id=imgvis src="logo.png" alt="" style="position: absolute; left: 10px; top: 60px">
+<img id=svgabs class=h src="svg-badge.svg" alt="" style="position: absolute; left: 205px; top: 10px">
+<img id=svgvis src="svg-badge.svg" alt="" style="position: absolute; left: 205px; top: 80px">
+<!-- images in the flow -->
+<div id=flow class=c style="left: 400px; top: 10px"><img class=h src="logo.png" alt=""><img class=h src="svg-badge.svg" alt=""></div>
+<!-- a box's background, border, shadow and outline -->
+<div id=boxwrap class=c style="left: 595px; top: 10px">
+  <div class=h style="margin: 20px; width: 120px; height: 70px; background: red; border: 4px solid blue; box-shadow: 10px 10px green; outline: 3px solid orange"></div>
+</div>
+<!-- a hidden box's visible child -->
+<div id=parent class="c h" style="left: 10px; top: 155px; background: red; border: 5px solid blue">
+  <div id=child style="visibility: visible; width: 90px; height: 65px; background: #0a0"></div>
+</div>
+<!-- text, its underline (its block's) and its shadow -->
+<div id=text class=c style="left: 205px; top: 155px; font-size: 30px; color: red; text-decoration: underline">
+  <span class=h>Hidden text</span><br><span class=h style="text-shadow: 3px 3px blue">shadowed</span>
+</div>
+<!-- an inline element's background and border -->
+<div class=c style="left: 400px; top: 155px; font-size: 30px; color: red"><span id=inline class=h style="background: red; border: 3px solid blue">hidden</span></div>
+<!-- list items: one hidden (no marker), one whose text is hidden (its marker drawn) -->
+<ul id=lists class=c style="left: 595px; top: 155px; width: 140px; margin: 0; padding: 0 0 0 40px; font-size: 30px; color: #036"><li class=h>hidden</li><li><span class=h>text</span></li></ul>
+<!-- form controls -->
+<div id=controls class="c h" style="left: 10px; top: 300px">
+  <input value="hidden field"><br><button>button</button><br><select><option>option</option></select><input type=checkbox checked><input type=range>
+</div>
+<!-- an svg element hidden, a shape of it visible -->
+<svg id=svgin class=h width=180 height=130 style="position: absolute; left: 205px; top: 300px; background: red">
+  <rect width=90 height=65 fill=red />
+  <rect x=90 y=65 width=90 height=65 fill="#0a0" visibility=visible />
+</svg>
+<!-- a row's background in its cells: a hidden row's in its visible cell, a visible row's not in its hidden cell -->
+<table id=rowbg style="position: absolute; left: 400px; top: 300px; border-spacing: 0">
+  <tr class=h style="background: red"><td style="visibility: visible"></td><td></td></tr>
+  <tr style="background: blue"><td class=h></td><td></td></tr>
+</table>
+<!-- collapsed borders: a hidden cell's drawn; a hidden table's not, its visible cell's background drawn -->
+<table id=cbcell style="position: absolute; left: 595px; top: 300px; border-collapse: collapse">
+  <tr><td class=h style="border: 6px solid red"></td><td style="border: 6px solid blue"></td></tr>
+</table>
+<table id=cbtable class=h style="position: absolute; left: 10px; top: 445px; border-collapse: collapse">
+  <tr><td style="visibility: visible; background: #0a0; border: 6px solid red"></td></tr>
+</table>
+<!-- visibility: collapse, as hidden on a block -->
+<div id=collapse class=c style="left: 205px; top: 445px; background: red; visibility: collapse"></div>
+<!-- a frame's content -->
+<iframe id=frame class=h srcdoc="<body style='background: red'>" style="position: absolute; left: 400px; top: 445px; width: 180px; height: 130px; border: 0"></iframe>
+<!-- a background clipped to text that is hidden -->
+<div id=bgclip class=c style="left: 595px; top: 445px; font-size: 60px; background: red; -webkit-background-clip: text; background-clip: text; color: transparent"><span class=h>Hid</span></div>
