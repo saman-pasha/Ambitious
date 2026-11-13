@@ -109,11 +109,13 @@ css_rules_inherited(marker_end).
 css_rules_inherited(paint_order).
 css_rules_inherited(dominant_baseline).
 css_rules_inherited(color_interpolation_filters).
+css_rules_inherited(color_interpolation).
 css_rules_inherited(image_rendering).
 css_rules_colour(color).
 css_rules_colour(background_color).
 css_rules_colour(stop_color).
 css_rules_colour(flood_color).
+css_rules_colour(lighting_color).
 css_rules_colour(P) :- css_rules_currentcolor(P).
 css_rules_currentcolor(border_top_color).
 css_rules_currentcolor(border_right_color).

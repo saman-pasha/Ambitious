@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: the filter primitives feTurbulence, feMorphology, feConvolveMatrix, feDisplacementMap, feTile, feImage</title>
+<style>
+/* tests/pages/svg-fe.html -- the filter primitives as Chromium draws them (Skia's image filters):
+   feTurbulence's noise (turbulence and fractalNoise, its octaves, seed and frequencies across and
+   down, stitched tiles, in linearRGB and in sRGB), feMorphology's erode and dilate (radii across
+   and down, rounded in device px, a negative one none), feConvolveMatrix's kernels (order,
+   divisor, bias, target, the three edge modes, preserveAlpha), feDisplacementMap's channels and
+   scale, feTile's tiles from where their input is, and feImage's pictures (an element of the
+   document, moved to its subregion's corner; a PNG and an SVG file by preserveAspectRatio). Each
+   cell held to Chromium's screenshot region by region (svg-fe.shot.png, svg-fe.regions). */
+body { margin: 0; background: #fff }
+svg { position: absolute }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <filter id="turb" x="0" y="0" width="1" height="1"><feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" seed="1"/></filter>
+    <filter id="fractal" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.03 0.08" numOctaves="3" seed="5"/></filter>
+    <filter id="stitch" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence baseFrequency="0.07" numOctaves="2" seed="3" stitchTiles="stitch" x="10" y="10" width="40" height="40" result="t"/><feTile in="t"/></filter>
+    <filter id="turbmask" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency="0.1" numOctaves="2" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2 1.6" result="a"/><feComposite in="SourceGraphic" in2="a" operator="in"/></filter>
+    <filter id="turbobb" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB"><feTurbulence baseFrequency="0.04" numOctaves="1" seed="9" x="0.1" y="0.1" width="0.8" height="0.5"/></filter>
+    <filter id="turb0" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="0"/></filter>
+    <filter id="clouds" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="4" seed="7" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0.3  0 0 0 0 0.5  0 0 0 0 0.9  0 0 0 2 -0.6"/></filter>
+    <filter id="erode"><feMorphology operator="erode" radius="5"/></filter>
+    <filter id="dilate"><feMorphology operator="dilate" radius="4"/></filter>
+    <filter id="dilatexy"><feMorphology operator="dilate" radius="2 7"/></filter>
+    <filter id="outline" x="-0.1" y="-0.3" width="1.2" height="1.6"><feMorphology in="SourceAlpha" operator="dilate" radius="2" result="d"/><feFlood flood-color="#204080"/><feComposite in2="d" operator="in" result="o"/><feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="erodehalf"><feMorphology operator="erode" radius="2.5"/></filter>
+    <filter id="morphneg"><feMorphology operator="dilate" radius="-3 4"/></filter>
+    <filter id="morphobb" primitiveUnits="objectBoundingBox"><feMorphology operator="dilate" radius="0.05 0.1"/></filter>
+    <filter id="cblur" color-interpolation-filters="sRGB"><feConvolveMatrix order="3" kernelMatrix="1 2 1 2 4 2 1 2 1"/></filter>
+    <filter id="cedge" color-interpolation-filters="sRGB"><feConvolveMatrix order="3" kernelMatrix="-1 -1 -1 -1 8 -1 -1 -1 -1" preserveAlpha="true"/></filter>
+    <filter id="cemboss" color-interpolation-filters="sRGB"><feConvolveMatrix order="3" kernelMatrix="-2 -1 0 -1 1 1 0 1 2" bias="0.3"/></filter>
+    <filter id="cwrap" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feConvolveMatrix order="5 1" kernelMatrix="1 0 0 0 0" targetX="0" edgeMode="wrap"/></filter>
+    <filter id="cdup" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feConvolveMatrix order="1 9" kernelMatrix="1 0 0 0 0 0 0 0 0" targetY="0"/></filter>
+    <filter id="cnone" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feConvolveMatrix order="9 1" kernelMatrix="1 1 1 1 1 1 1 1 1" edgeMode="none"/></filter>
+    <filter id="clin"><feConvolveMatrix order="3 2" kernelMatrix="1 0 -1 2 0 -2" divisor="0.5" targetX="2" targetY="1" preserveAlpha="true"/></filter>
+    <filter id="dflood" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(255,64,0)" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="20" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="dturb" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.05" seed="2" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="25" xChannelSelector="R" yChannelSelector="B"/></filter>
+    <filter id="dlin" x="0" y="0" width="1" height="1"><feTurbulence type="turbulence" baseFrequency="0.04" numOctaves="2" seed="6" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="18" xChannelSelector="G" yChannelSelector="A"/></filter>
+    <filter id="dobb" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(255,255,0)" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="0.2" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="tflood" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#c03030" x="13" y="17" width="20" height="10" result="a"/><feOffset in="a" dx="5" dy="0" result="b"/><feTile in="b"/></filter>
+    <filter id="tsource" x="0" y="0" width="1" height="1"><feOffset in="SourceGraphic" dx="0" dy="0" x="20" y="20" width="23.5" height="17.5" result="b"/><feTile in="b"/></filter>
+    <filter id="tsub" x="0" y="0" width="1" height="1"><feFlood flood-color="#30a030" x="30" y="30" width="15" height="12" result="a"/><feOffset in="a" dx="3" dy="2" result="b"/><feTile in="b" x="10" y="10" width="60" height="50"/></filter>
+    <circle id="dot" cx="20" cy="20" r="15" fill="#c04040"/>
+    <g id="grp"><rect x="5" y="5" width="30" height="20" fill="#4040c0"/><circle cx="35" cy="30" r="10" fill="#40a040"/></g>
+    <filter id="iel" x="0" y="0" width="1" height="1"><feImage href="#dot"/></filter>
+    <filter id="ioff"><feImage href="#dot" x="30" y="10"/></filter>
+    <filter id="igrp" x="0" y="0" width="1" height="1"><feImage href="#grp" x="20" y="20" width="40" height="40"/></filter>
+    <filter id="ipng" x="0" y="0" width="1" height="1"><feImage href="logo.png"/></filter>
+    <filter id="islice" x="0" y="0" width="1" height="1"><feImage href="logo.png" x="10" y="20" width="60" height="50" preserveAspectRatio="xMinYMax slice"/></filter>
+    <filter id="isvg" x="0" y="0" width="1" height="1"><feImage href="svg-badge.svg" preserveAspectRatio="none"/></filter>
+    <filter id="iblur" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feImage href="#dot" result="d"/><feGaussianBlur in="d" stdDeviation="3" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
+  </defs>
+</svg>
+<!-- row 1: feTurbulence -->
+<svg id="fe-turb" style="left:5px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#turb)"/></svg>
+<svg id="fe-fractal" style="left:117px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#fractal)"/></svg>
+<svg id="fe-stitch" style="left:229px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#stitch)"/></svg>
+<svg id="fe-turbmask" style="left:341px;top:5px" width="100" height="100"><circle cx="50" cy="50" r="45" fill="#2060c0" filter="url(#turbmask)"/></svg>
+<svg id="fe-turbobb" style="left:453px;top:5px" width="100" height="100"><rect x="10" y="10" width="80" height="80" fill="#eee" filter="url(#turbobb)"/></svg>
+<svg id="fe-turb0" style="left:565px;top:5px" width="100" height="100"><rect x="10" y="10" width="80" height="80" filter="url(#turb0)"/></svg>
+<svg id="fe-clouds" style="left:677px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#clouds)"/></svg>
+<!-- row 2: feMorphology -->
+<svg id="fe-erode" style="left:5px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" rx="10" fill="#c03030" filter="url(#erode)"/></svg>
+<svg id="fe-dilate" style="left:117px;top:117px" width="100" height="100"><g filter="url(#dilate)"><circle cx="35" cy="50" r="20" fill="#e04040" fill-opacity="0.7"/><circle cx="65" cy="50" r="20" fill="#4040e0" fill-opacity="0.5"/></g></svg>
+<svg id="fe-dilatexy" style="left:229px;top:117px" width="100" height="100"><rect x="25" y="25" width="50" height="50" fill="#3080c0" filter="url(#dilatexy)"/></svg>
+<svg id="fe-outline" style="left:341px;top:117px" width="100" height="100"><text x="8" y="62" font-family="sans-serif" font-size="36" font-weight="bold" fill="#f0c000" filter="url(#outline)">Ab</text></svg>
+<svg id="fe-erodehalf" style="left:453px;top:117px" width="100" height="100"><g transform="scale(1.5)"><rect x="15" y="15" width="30" height="30" fill="#c06030" filter="url(#erodehalf)"/></g></svg>
+<svg id="fe-morphneg" style="left:565px;top:117px" width="100" height="100"><rect x="30" y="30" width="40" height="40" fill="#30a060" filter="url(#morphneg)"/></svg>
+<svg id="fe-morphobb" style="left:677px;top:117px" width="100" height="100"><rect x="20" y="30" width="60" height="40" fill="#a030a0" filter="url(#morphobb)"/></svg>
+<!-- row 3: feConvolveMatrix -->
+<svg id="fe-cblur" style="left:5px;top:229px" width="100" height="100"><g filter="url(#cblur)"><rect x="20" y="20" width="30" height="60" fill="#c03030"/><rect x="50" y="20" width="30" height="60" fill="#3030c0" fill-opacity="0.5"/></g></svg>
+<svg id="fe-cedge" style="left:117px;top:229px" width="100" height="100"><g filter="url(#cedge)"><rect x="20" y="20" width="30" height="60" fill="#c03030"/><rect x="50" y="20" width="30" height="60" fill="#3030c0" fill-opacity="0.5"/></g></svg>
+<svg id="fe-cemboss" style="left:229px;top:229px" width="100" height="100"><g filter="url(#cemboss)"><circle cx="50" cy="50" r="30" fill="#808080"/><rect x="35" y="35" width="30" height="30" fill="#e0e0e0"/></g></svg>
+<svg id="fe-cwrap" style="left:341px;top:229px" width="100" height="100"><g filter="url(#cwrap)"><rect x="10" y="10" width="80" height="80" fill="#e0e0e0"/><rect x="10" y="10" width="20" height="80" fill="#c03030"/><rect x="70" y="10" width="20" height="80" fill="#3030c0"/></g></svg>
+<svg id="fe-cdup" style="left:453px;top:229px" width="100" height="100"><g filter="url(#cdup)"><rect x="10" y="10" width="80" height="80" fill="#e0e0e0"/><rect x="10" y="10" width="80" height="20" fill="#c03030"/><rect x="10" y="70" width="80" height="20" fill="#3030c0"/></g></svg>
+<svg id="fe-cnone" style="left:565px;top:229px" width="100" height="100"><g filter="url(#cnone)"><rect x="10" y="10" width="80" height="80" fill="#e0e0e0"/><rect x="10" y="10" width="20" height="80" fill="#c03030"/><rect x="70" y="10" width="20" height="80" fill="#3030c0"/></g></svg>
+<svg id="fe-clin" style="left:677px;top:229px" width="100" height="100"><g filter="url(#clin)"><rect x="15" y="15" width="70" height="70" fill="#40a0c0"/><rect x="35" y="35" width="30" height="30" fill="#f0f0a0" fill-opacity="0.7"/></g></svg>
+<!-- row 4: feDisplacementMap and feTile -->
+<svg id="fe-dflood" style="left:5px;top:341px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="url(#chk)" filter="url(#dflood)"/></svg>
+<svg id="fe-dturb" style="left:117px;top:341px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#chk)" filter="url(#dturb)"/></svg>
+<svg id="fe-dlin" style="left:229px;top:341px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="url(#chk)" filter="url(#dlin)"/></svg>
+<svg id="fe-dobb" style="left:341px;top:341px" width="100" height="100"><rect x="20" y="20" width="60" height="40" fill="url(#chk)" filter="url(#dobb)"/></svg>
+<svg id="fe-tflood" style="left:453px;top:341px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#tflood)"/></svg>
+<svg id="fe-tsource" style="left:565px;top:341px" width="100" height="100"><g filter="url(#tsource)"><rect x="0" y="0" width="100" height="100" fill="#f8f0e0"/><polygon points="30,21 39,30 30,39 21,30" fill="#2060c0"/></g></svg>
+<svg id="fe-tsub" style="left:677px;top:341px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#tsub)"/></svg>
+<!-- row 5: feImage -->
+<svg id="fe-iel" style="left:5px;top:453px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#iel)"/></svg>
+<svg id="fe-ioff" style="left:117px;top:453px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#eee" filter="url(#ioff)"/></svg>
+<svg id="fe-igrp" style="left:229px;top:453px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#igrp)"/></svg>
+<svg id="fe-ipng" style="left:341px;top:453px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#ipng)"/></svg>
+<svg id="fe-islice" style="left:453px;top:453px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#islice)"/></svg>
+<svg id="fe-isvg" style="left:565px;top:453px" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#isvg)"/></svg>
+<svg id="fe-iblur" style="left:677px;top:453px" width="100" height="100"><g transform="translate(10,10) scale(0.8)"><rect x="0" y="0" width="100" height="100" fill="#eee" filter="url(#iblur)"/></g></svg>
+<svg id="chkdefs" style="left:0;top:0" width="0" height="0"><defs><pattern id="chk" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#202080"/><rect x="5" y="5" width="5" height="5" fill="#202080"/></pattern></defs></svg>
+</body>
+</html>

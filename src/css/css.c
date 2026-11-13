@@ -99,7 +99,8 @@
    stroke's width, caps, joins, miter limit, dash array and offset, the fill and clip rules,
    stop-color and stop-opacity, clip-path (none or url()), text-anchor; marker-start, -mid and -end (none or url(), the
    marker shorthand setting the three), paint-order, mask-type, vector-effect,
-   dominant-baseline, flood-color and flood-opacity, color-interpolation-filters, and the geometry properties (cx, cy,
+   dominant-baseline, flood-color and flood-opacity, color-interpolation-filters, lighting-color, color-interpolation,
+   and the geometry properties (cx, cy,
    r, rx, ry, x, y; d as path()), which src/paint/svg.c reads over the attributes when a rule declares them; filter
    is a presentation attribute too, and so is mask, CSS Masking's shorthand of mask-image (none, or
    its layers: url()s, a mask element's among them, and gradients), -position, -size, -repeat,
@@ -1075,12 +1076,15 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "paint-order", 1, G_TEXT, 0, "normal", "normal" },
     { "mask-image", 0, G_TEXT, 0, "none", "none" },
     { "mask-type", 0, G_KW, 0, "luminance alpha", "luminance" },
-    { "vector-effect", 0, G_KW, 0, "none non-scaling-stroke non-scaling-size non-rotation fixed-position", "none" },
+    /* vector-effect's values as Chromium takes them: none and non-scaling-stroke (SVG 2's others refused: measured) */
+    { "vector-effect", 0, G_KW, 0, "none non-scaling-stroke", "none" },
     { "dominant-baseline", 1, G_KW, 0, "auto alphabetic ideographic middle central mathematical hanging text-before-edge "
       "text-after-edge use-script no-change reset-size", "auto" },
     { "flood-color", 0, G_COLOR, 0, 0, "black" },
     { "flood-opacity", 0, G_NUM, F_PCT | F_NEG, 0, "1" },
     { "color-interpolation-filters", 1, G_KW, 0, "auto srgb linearrgb", "linearrgb" },
+    { "lighting-color", 0, G_COLOR, 0, 0, "white" },
+    { "color-interpolation", 1, G_KW, 0, "auto srgb linearrgb", "srgb" },
     { "cx", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
     { "cy", 0, G_LEN, F_NEG | F_PCT | F_NUM, 0, "0px" },
     { "r", 0, G_LEN, F_PCT | F_NUM, 0, "0px" },
@@ -8646,7 +8650,7 @@ static const char css_svg_presentation[] =
     "stroke-dashoffset stroke-opacity stop-color stop-opacity clip-path clip-rule text-anchor opacity color display visibility "
     "font-family font-size font-weight font-style letter-spacing word-spacing overflow direction unicode-bidi writing-mode "
     "transform-origin marker-start marker-mid marker-end paint-order mask mask-type vector-effect dominant-baseline filter "
-    "flood-color flood-opacity color-interpolation-filters";
+    "flood-color flood-opacity color-interpolation-filters lighting-color color-interpolation";
 
 /* an SVG element's presentation attributes, each a declaration of its property in one author
    rule of specificity 0 before every other (a value the property does not take dropped, as

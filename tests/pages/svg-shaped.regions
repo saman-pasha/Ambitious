@@ -1,0 +1,19 @@
+# tests/pages/svg-shaped.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+s-liga 0 0 400 60
+s-kern 400 0 800 60
+s-marks 0 60 400 120
+s-hebrew 400 60 800 120
+s-arabic 0 120 400 180
+s-xlist 400 120 800 180
+s-dx 0 180 400 240
+s-rotate 400 180 800 240
+s-tspan 0 240 400 300
+s-spacing 400 240 800 300
+s-anchor 0 300 400 360
+s-path 400 300 800 400
+pp 410 330 790 380
+s-length 0 360 400 420
+s-kernspan 400 400 800 460
+s-mixed 0 420 400 480
+s-end 400 460 800 520
+s-stroke 0 480 400 540

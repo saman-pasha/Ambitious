@@ -62,10 +62,11 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% shape's fill, stroke and markers are painted in (inherited), mask-image (none, or its layers:
     %% url()s, a mask element's #id among them, and gradients, as text) and a mask element's
     %% mask-type, vector-effect, dominant-baseline (inherited), a filter
-    %% primitive's flood colour and opacity, the filters' colour space (inherited), and the
+    %% primitive's flood colour and opacity, the filters' colour space (inherited), a lighting
+    %% primitive's light colour, the colour space a mask's content is in (inherited), and the
     %% geometry properties (cx, cy, r, rx, ry, x, y: lengths a number may be; d: path())
     marker_start, marker_mid, marker_end, paint_order, mask_image, mask_type, vector_effect, dominant_baseline,
-    flood_color, flood_opacity, color_interpolation_filters, cx, cy, r, rx, ry, x, y, d,
+    flood_color, flood_opacity, color_interpolation_filters, lighting_color, color_interpolation, cx, cy, r, rx, ry, x, y, d,
     appearance,                       % none, auto or a control's own (CSS UI 4): whether the theme draws it
     object_fit,                        % fill, contain, cover, none or scale-down (CSS Images 3, 5.5)
     object_position,                   % each axis a percentage, px, or a calc() of both, the percentage first

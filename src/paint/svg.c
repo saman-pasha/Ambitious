@@ -11,7 +11,8 @@
    viewport its width and height make), rect (rx, ry), circle, ellipse, line, polyline,
    polygon, path (every command; an arc made cubics, its centre found as SVG 2's appendix B
    finds it, a quarter turn a cubic at most), image (its viewport, preserveAspectRatio, the
-   loader's picture placed when drawn). The geometry properties (cx, cy, r, rx, ry, x, y,
+   loader's picture placed when drawn; in an SVG document drawn as an image, which fetches
+   nothing, a data: URL's bytes carried in its line). The geometry properties (cx, cy, r, rx, ry, x, y,
    width, height, d) are a rule's declaration of them where there is one, else the
    attribute. An element whose systemLanguage or requiredExtensions fails is not drawn.
    Never drawn of themselves: defs, symbol, clipPath, mask, marker, pattern, filter, the
@@ -21,8 +22,10 @@
    transform-origin 0 0 as Chromium's sheet has it for SVG elements. Paints: none, a
    colour, currentcolor (each element's own colour). Strokes: stroke-width (a percentage
    of the viewport's normalized diagonal), linecap, linejoin (miter-clip and arcs drawn as
-   miter), miterlimit, dasharray and dashoffset, vector-effect: non-scaling-stroke (an N
-   in its line). Opacity: a group of its own. Fill, stroke and markers in the paint-order.
+   miter), miterlimit, dasharray and dashoffset (scaled by the shape's pathLength, as Blink
+   scales them), vector-effect: non-scaling-stroke (an N in its line; its other values
+   Chromium does not read). Opacity: a group of its own. Fill, stroke and markers in the
+   paint-order.
    Paints also: url(#id) of a linearGradient or radialGradient (gradientUnits,
    gradientTransform, spreadMethod, its stops' offsets, stop-color and stop-opacity, every
    attribute and the stops inherited through href), or of a pattern (patternUnits,
@@ -31,11 +34,18 @@
    tile's content), and a fallback. Clip-path: url(#id) of a clipPath (clipPathUnits, its
    transform, its shapes' and uses' clip-rule, a clip-path on the clipPath itself), a
    group of its own. Mask: url(#id) of a mask (maskUnits, maskContentUnits, x, y, width,
-   height, mask-type: a block, M ... E, after its group's clip). Filter: url(#id) of a
-   filter (filterUnits, primitiveUnits, its region, each primitive's in, in2, result,
-   subregion and color-interpolation-filters; feGaussianBlur, feOffset, feFlood,
-   feComposite, feMerge, feColorMatrix, feBlend, feDropShadow, feComponentTransfer: a
-   block, F ... E); or CSS's filter functions (blur, drop-shadow, grayscale, sepia, saturate,
+   height, mask-type: a block, M ... E, after its group's clip; a shape, text or image of its
+   content whose color-interpolation is linearRGB a group made linear as it ends, as Blink
+   paints it). Filter: url(#id) of a filter (filterUnits, primitiveUnits, its region, each
+   primitive's in, in2, result, subregion and color-interpolation-filters; feGaussianBlur,
+   feOffset, feFlood, feComposite, feMerge, feColorMatrix, feBlend, feDropShadow,
+   feComponentTransfer, feTurbulence, feMorphology, feConvolveMatrix, feDisplacementMap,
+   feTile, feImage (an element of the document drawn as a use draws it, moved to the
+   subregion's corner as Blink moves it, or the loader's picture of its href: a block, I ...
+   E), feDiffuseLighting and feSpecularLighting (lighting-color, the first light element in
+   them): a block, F ... E; a filter's href, which Chromium does not follow, and
+   feGaussianBlur's edgeMode, which it does not read, are not read); or CSS's filter
+   functions (blur, drop-shadow, grayscale, sepia, saturate,
    hue-rotate, brightness, contrast, invert, opacity: each its shorthand primitive, in sRGB,
    the region what they are given outset by their reach); a list of url()s and functions a
    group for each, chained in its order. A reference to no such element is passed over, as
@@ -47,11 +57,17 @@
    its viewBox, orient, markerUnits and refX, refY, clipped (not anti-aliased) unless its
    overflow is visible.
    Text: text, tspan and textPath (x, y, dx, dy and rotate lists, textLength and
-   lengthAdjust, text-anchor by chunks, a textPath's href and startOffset, dominant-baseline,
-   font-size, -family, -weight, -style, letter- and word-spacing, fill, stroke), its glyphs
-   placed by the built-in faces' advances and kerning: upright glyphs drawn as the page's
+   lengthAdjust, text-anchor by chunks, a textPath's path attribute (over its href), href
+   (a path element's alone, as Blink takes it) and startOffset (scaled by its path's
+   pathLength), dominant-baseline, font-size, -family,
+   -weight, -style, letter- and word-spacing, fill, stroke), shaped as Blink shapes it
+   (src/paint/shape.c: ligatures, kerning, marks, Arabic's joining; runs split at an
+   absolutely placed character, a textPath's edge and a change of face, size,
+   letter-spacing or direction, a right-to-left run's clusters in visual order), each
+   cluster's glyphs drawn by the character it begins at: upright glyphs drawn as the page's
    text is, others (turned, scaled across, on a path, under a matrix that is no uniform
-   scale) and every stroke as their outlines.
+   scale) and every stroke as their outlines. textPath's side, method and spacing Chromium
+   does not read.
 
    THE DRAWING (amb_svg_draw). Every coordinate is mapped to the device's px, an svg's
    content placed at whole CSS px as Chromium places it. Curves are flattened at the
@@ -72,13 +88,19 @@
    sampled bilinearly, repeated) and blended over what its layer holds. A group with an
    opacity, a clip, a mask or a filter is drawn in a layer of its own and blended down:
    first through its filter (each primitive in its colour space, eight bits a channel as
-   Skia's image filters keep them, Gaussian blurs as Skia's three box passes, results
-   cropped to their subregions), then by its clip's shapes' coverage (their union: a
+   Skia's image filters keep them, Gaussian blurs as Skia's three box passes; turbulence as
+   Skia's SkPerlinNoiseShader makes it, in the filter's user space at each px's centre half
+   a unit on; morphology's radii rounded in device px; convolution's kernel turned about,
+   bias added, its edge mode about the subregion; displacement's nearest px; a tile from
+   the px inside its input's subregion; lighting's normals by Sobel's kernels, the bounds'
+   edge px repeated, as Skia's lighting filter finds them; results cropped to their
+   subregions), then by its clip's shapes' coverage (their union: a
    clip-path's times its bounding box's, as Blink clips by both and Skia multiplies the two;
    a rectangle along the axes clips as itself alone) and its mask's (its content's
    luminance or alpha within its region, the region rounded to whole px), and its opacity.
    An image element's raster is sampled bilinearly from the mipmap level Chromium's decode
-   cache picks; an SVG picture is drawn as its own scene.
+   cache picks; an SVG picture is drawn as its own scene; a picture that fails to load or
+   decode is Blink's broken image (14 x 16 px), drawn as a raster is.
    Glyphs are drawn from font.c's masks at their device size, placed as the page's text is
    (a quarter of a px across, a whole px down), or filled and stroked as their outlines.
 
@@ -97,13 +119,11 @@
    group's layer is drawn (a clip the union of its shapes alone, not held to their bounding
    box as an SVG element's is: Chromium's on a box, measured).
 
-   Not done: foreignObject, SMIL animation, a reference into another document, the filter
-   primitives not named above (each a transparent result), a filter's href, textPath's side,
-   method, spacing and path, a path's
-   pathLength, the vector effects other than non-scaling-stroke, systemLanguage (no tag
-   holds, as in the headless Chromium the gates are measured in), a broken picture's icon,
-   pictures of image elements in an SVG document drawn as an image (none is fetched), and
-   fonts other than the built-in faces in SVG text. */
+   Not done: foreignObject, SMIL animation, a reference into another document, an feImage
+   element whose lengths are percentages (Blink maps its viewport into the subregion),
+   systemLanguage (no tag holds, as in the headless Chromium the gates are measured in), bidi
+   in SVG text beyond a right-to-left script's runs in a left-to-right chunk, and web fonts
+   in SVG text (the built-in faces and the machine's fonts they fall back to alone). */
 
 #include <stdio.h>
 #include <string.h>
@@ -112,6 +132,7 @@
 #include <vector.pl>
 #include <amb.pl>
 #include "font.h"
+#include "shape.h"
 
 amb_interface(dom);
 amb_interface(css);
@@ -1521,8 +1542,13 @@ static int sv_mask_block(SB, uint32_t mk, const double *bb, int hb, const sv_wal
 
 /* a filter primitive's kind (the scene's numbers): one this does not draw (transparent black),
    feGaussianBlur, feOffset, feFlood, feComposite, feMerge, feColorMatrix, feBlend,
-   feDropShadow, feComponentTransfer */
-enum { SV_FE_NONE, SV_FE_BLUR, SV_FE_OFFSET, SV_FE_FLOOD, SV_FE_COMPOSITE, SV_FE_MERGE, SV_FE_MATRIX, SV_FE_BLEND, SV_FE_SHADOW, SV_FE_TRANSFER };
+   feDropShadow, feComponentTransfer, feTurbulence, feMorphology, feConvolveMatrix,
+   feDisplacementMap, feTile, feImage, feDiffuseLighting, feSpecularLighting */
+enum { SV_FE_NONE, SV_FE_BLUR, SV_FE_OFFSET, SV_FE_FLOOD, SV_FE_COMPOSITE, SV_FE_MERGE, SV_FE_MATRIX, SV_FE_BLEND, SV_FE_SHADOW, SV_FE_TRANSFER,
+       SV_FE_TURBULENCE, SV_FE_MORPHOLOGY, SV_FE_CONVOLVE, SV_FE_DISPLACE, SV_FE_TILE, SV_FE_IMAGE, SV_FE_DIFFUSE, SV_FE_SPECULAR };
+static const char *const sv_fe_names[18] = { "", "feGaussianBlur", "feOffset", "feFlood", "feComposite", "feMerge", "feColorMatrix", "feBlend",
+                                             "feDropShadow", "feComponentTransfer", "feTurbulence", "feMorphology", "feConvolveMatrix",
+                                             "feDisplacementMap", "feTile", "feImage", "feDiffuseLighting", "feSpecularLighting" };
 /* a primitive's input: SourceGraphic, SourceAlpha, none (transparent black: a primitive this
    does not draw, or one not yet made); else an earlier primitive's result, by its index */
 enum { SV_IN_SOURCE = -1, SV_IN_ALPHA = -2, SV_IN_NONE = -3 };
@@ -1563,6 +1589,8 @@ static int sv_num_list(const dom_document *d, uint32_t x, const char *name, doub
     }
     return k;
 }
+static void sv_par_of(const dom_document *d, uint32_t x, int *ax, int *ay, int *slice, int *none);
+
 /* a primitive's colour from a colour property and an opacity one of its computed values,
    RGBA */
 static uint32_t sv_fe_colour(const css_style *st, uint32_t c0, int cprop, int oprop) {
@@ -1607,12 +1635,11 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
     double sx = pbox ? bw : 1, sy = pbox ? bh : 1;
     for (size_t k = 0; k < len(prims); k++) {
         uint32_t fe = at(prims, k), c0 = sv_first(firsts, fe);
-        int kind = sv_is(d, fe, "feGaussianBlur") ? SV_FE_BLUR : sv_is(d, fe, "feOffset") ? SV_FE_OFFSET : sv_is(d, fe, "feFlood") ? SV_FE_FLOOD :
-                   sv_is(d, fe, "feComposite") ? SV_FE_COMPOSITE : sv_is(d, fe, "feMerge") ? SV_FE_MERGE : sv_is(d, fe, "feColorMatrix") ? SV_FE_MATRIX :
-                   sv_is(d, fe, "feBlend") ? SV_FE_BLEND : sv_is(d, fe, "feDropShadow") ? SV_FE_SHADOW :
-                   sv_is(d, fe, "feComponentTransfer") ? SV_FE_TRANSFER : SV_FE_NONE;
+        int kind = SV_FE_NONE;
+        for (int q = 1; q < 18 && kind == SV_FE_NONE; q++) if (sv_is(d, fe, sv_fe_names[q])) kind = q;
         int in1 = sv_fe_input(d, fe, "in", &prims, (int)k), in2 = sv_fe_input(d, fe, "in2", &prims, (int)k);
-        int two = kind == SV_FE_COMPOSITE || kind == SV_FE_BLEND, none_in = kind == SV_FE_FLOOD || kind == SV_FE_NONE;
+        int two = kind == SV_FE_COMPOSITE || kind == SV_FE_BLEND || kind == SV_FE_DISPLACE;
+        int none_in = kind == SV_FE_FLOOD || kind == SV_FE_NONE || kind == SV_FE_TURBULENCE || kind == SV_FE_IMAGE;
         vector<int32_t> merged;
         if (kind == SV_FE_MERGE)
             for (uint32_t mn = d->node[fe].first_child; mn; mn = d->node[mn].next_sibling)
@@ -1622,7 +1649,8 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
         int ins[66], nin = 0;
         if (!none_in && kind != SV_FE_MERGE) { ins[nin++] = in1; if (two) ins[nin++] = in2; }
         for (size_t q = 0; q < len(merged); q++) ins[nin++] = at(merged, q);
-        if (nin == 0) { u[0] = r[0]; u[1] = r[1]; u[2] = r[0] + r[2]; u[3] = r[1] + r[3]; }
+        /* (feTile's the region, as Blink resets it) */
+        if (nin == 0 || kind == SV_FE_TILE) { u[0] = r[0]; u[1] = r[1]; u[2] = r[0] + r[2]; u[3] = r[1] + r[3]; nin = 0; }
         for (int q = 0; q < nin; q++) {
             double e0 = r[0], e1 = r[1], e2 = r[0] + r[2], e3 = r[1] + r[3];
             if (ins[q] >= 0) { e0 = at(subs, 4 * (size_t)ins[q]); e1 = at(subs, 4 * (size_t)ins[q] + 1); e2 = e0 + at(subs, 4 * (size_t)ins[q] + 2); e3 = e1 + at(subs, 4 * (size_t)ins[q] + 3); }
@@ -1639,7 +1667,9 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
         val = sv_len_attr(d, fe, "height", pbox ? 1 : w->vh, fs, 0, &given);
         if (given) sr[3] = pbox ? val * bh : val;
         for (int q = 0; q < 4; q++) push_back(subs, sr[q]);
-        int linear = !(c0 && (sv_word_is(st, c0 + CSS_PROP_COLOR_INTERPOLATION_FILTERS, "srgb") || sv_word_is(st, c0 + CSS_PROP_COLOR_INTERPOLATION_FILTERS, "auto")));
+        /* (feImage's result its picture's, sRGB, whatever space it is asked in) */
+        int linear = kind != SV_FE_IMAGE &&
+                     !(c0 && (sv_word_is(st, c0 + CSS_PROP_COLOR_INTERPOLATION_FILTERS, "srgb") || sv_word_is(st, c0 + CSS_PROP_COLOR_INTERPOLATION_FILTERS, "auto")));
         sv_w(&lines, "x");
         sv_n(&lines, kind);
         sv_n(&lines, in1);
@@ -1738,6 +1768,147 @@ static int sv_filter_block(SB, uint32_t flt, const double *bb, int hb, const sv_
                 sv_n(&lines, type);
                 sv_n(&lines, cnt);
                 for (int q = 0; q < cnt; q++) sv_n(&lines, tv[q]);
+            }
+        } else if (kind == SV_FE_TURBULENCE) {
+            /* its type (1 turbulence, the initial one; 0 fractalNoise), base frequencies (a
+               negative one 0, as Chromium takes it: measured), octaves, seed and stitching */
+            double bf[2] = { 0, 0 };
+            int k2 = sv_num_list(d, fe, "baseFrequency", bf, 2);
+            if (k2 == 1) bf[1] = bf[0];
+            if (bf[0] < 0 || bf[1] < 0) bf[0] = bf[1] = 0;
+            sv_n(&lines, sv_attr_is(d, fe, "type", "fractalNoise") ? 0 : 1);
+            sv_n(&lines, bf[0]);
+            sv_n(&lines, bf[1]);
+            double no = floor(sv_num_attr(d, fe, "numOctaves", 1));
+            sv_n(&lines, no < -1 ? -1 : no > 1000 ? 1000 : no);
+            sv_n(&lines, sv_num_attr(d, fe, "seed", 0));
+            sv_n(&lines, sv_attr_is(d, fe, "stitchTiles", "stitch"));
+        } else if (kind == SV_FE_MORPHOLOGY) {
+            /* its operator (0 erode, the initial one; 1 dilate) and radii, a negative one 0
+               (measured: Chromium's) */
+            double rad[2] = { 0, 0 };
+            int k2 = sv_num_list(d, fe, "radius", rad, 2);
+            if (k2 == 1) rad[1] = rad[0];
+            sv_n(&lines, sv_attr_is(d, fe, "operator", "dilate"));
+            sv_n(&lines, rad[0] > 0 ? rad[0] * sx : 0);
+            sv_n(&lines, rad[1] > 0 ? rad[1] * sy : 0);
+        } else if (kind == SV_FE_CONVOLVE) {
+            /* its order, target, divisor (the kernel's sum, 1 for none), bias, edge mode (0
+               duplicate, the initial one; 1 wrap; 2 none), preserveAlpha, and its kernel's
+               values; an order of none, a kernel of another size, a target outside it or a
+               divisor of 0 draw transparent black, as Blink's ParametersValid has it (order 0) */
+            double ord[2] = { 3, 3 }, kv[400];
+            int k2 = sv_num_list(d, fe, "order", ord, 2);
+            if (k2 == 1) ord[1] = ord[0];
+            int ox = ord[0] >= 1 && ord[0] <= 20 ? (int)ord[0] : 0, oy = ord[1] >= 1 && ord[1] <= 20 ? (int)ord[1] : 0;
+            int nk = sv_num_list(d, fe, "kernelMatrix", kv, 400);
+            double tx = sv_attr(d, fe, "targetX") ? floor(sv_num_attr(d, fe, "targetX", 0)) : ox / 2;
+            double ty = sv_attr(d, fe, "targetY") ? floor(sv_num_attr(d, fe, "targetY", 0)) : oy / 2;
+            double sum = 0;
+            for (int q = 0; q < nk; q++) sum += kv[q];
+            double div = sv_attr(d, fe, "divisor") ? sv_num_attr(d, fe, "divisor", 1) : sum != 0 ? sum : 1;
+            if (!ox || !oy || nk != ox * oy || tx < 0 || tx >= ox || ty < 0 || ty >= oy || div == 0) {
+                ox = oy = 0;
+                tx = ty = 0;
+            }
+            int mode = 0;
+            if (sv_attr_is(d, fe, "edgeMode", "wrap")) mode = 1;
+            else if (sv_attr_is(d, fe, "edgeMode", "none")) mode = 2;
+            sv_n(&lines, ox);
+            sv_n(&lines, oy);
+            sv_n(&lines, tx);
+            sv_n(&lines, ty);
+            sv_n(&lines, div);
+            sv_n(&lines, sv_num_attr(d, fe, "bias", 0));
+            sv_n(&lines, mode);
+            sv_n(&lines, sv_attr_is(d, fe, "preserveAlpha", "true"));
+            for (int q = 0; q < ox * oy; q++) sv_n(&lines, kv[q]);
+        } else if (kind == SV_FE_DISPLACE) {
+            /* its scale (a box's width's share for objectBoundingBox, both ways: Blink scales it
+               horizontally alone) and channels (0 R, 1 G, 2 B, 3 A, the initial one) */
+            static const char *const chans[4] = { "R", "G", "B", "A" };
+            int sel[2] = { 3, 3 };
+            for (int a = 0; a < 2; a++)
+                for (int q = 0; q < 4; q++) if (sv_attr_is(d, fe, a ? "yChannelSelector" : "xChannelSelector", chans[q])) sel[a] = q;
+            sv_n(&lines, sv_num_attr(d, fe, "scale", 0) * sx);
+            sv_n(&lines, sel[0]);
+            sv_n(&lines, sel[1]);
+        } else if (kind == SV_FE_TILE) {
+            /* the tile: its input's subregion (a source's the region) */
+            double t0 = r[0], t1 = r[1], t2 = r[2], t3 = r[3];
+            if (in1 >= 0) { t0 = at(subs, 4 * (size_t)in1); t1 = at(subs, 4 * (size_t)in1 + 1); t2 = at(subs, 4 * (size_t)in1 + 2); t3 = at(subs, 4 * (size_t)in1 + 3); }
+            sv_n(&lines, t0);
+            sv_n(&lines, t1);
+            sv_n(&lines, t2);
+            sv_n(&lines, t3);
+        } else if (kind == SV_FE_IMAGE) {
+            /* its picture: an element of the document drawn as a use draws it, in the user space
+               moved to the subregion's corner (as Blink's FEImage places one), or the loader's
+               picture of its href in the subregion by its preserveAspectRatio; a block, I ... E */
+            uint32_t ref = sv_href(d, fe);
+            int ext = !ref && (sv_attr_text(d, fe, "href", &v) || sv_attr_text(d, fe, "xlink:href", &v)) && len(v) > 0 && at(v, 0) != '#';
+            sv_w(&lines, "\nI\n");
+            if (ref && len(*uses) < 16 && !sv_is(d, ref, "filter")) {
+                int self = 0;
+                for (size_t q = 0; q < len(*uses); q++) if (at(*uses, q) == ref) self = 1;
+                for (uint32_t a = d->node[fe].parent; a; a = d->node[a].parent) if (a == ref) self = 1;
+                sv_walk rw;
+                if (!self && sv_root_walk(st, firsts, d->node[ref].parent ? d->node[ref].parent : ref, w->vw, w->vh, &rw)) {
+                    push_back(uses, ref);
+                    sv_node(d, st, firsts, f, &lines, ids, uses, work, ref, &rw, sv_mul(mm, sv_make(1, 0, 0, 1, sr[0], sr[1])), 1);
+                    resize(uses, len(*uses) - 1);
+                }
+            } else if (ext) {
+                int ax, ay, slice, none;
+                sv_par_of(d, fe, &ax, &ay, &slice, &none);
+                sv_w(&lines, "i");
+                sv_m(&lines, mm);
+                for (int q = 0; q < 4; q++) sv_n(&lines, sr[q]);
+                sv_w(&lines, " 0 0");
+                sv_n(&lines, ax);
+                sv_n(&lines, ay);
+                sv_n(&lines, slice);
+                sv_n(&lines, none);
+                sv_w(&lines, " 2");
+                sv_n(&lines, fe);
+                sv_w(&lines, "\n");
+            }
+            sv_w(&lines, "E");
+        } else if (kind == SV_FE_DIFFUSE || kind == SV_FE_SPECULAR) {
+            /* its surface scale, constant, specular exponent (1 to 128, as Blink clamps it),
+               lighting-color, and its light, the first light element in it (none draws
+               transparent black): 1 distant (azimuth, elevation), 2 point (x, y, z), 3 spot
+               (x, y, z, its pointsAt, its specular exponent, its cone's angle, 90 for none or
+               one past 90), each place of the primitives' units */
+            int spec = kind == SV_FE_SPECULAR;
+            double ex = spec ? sv_num_attr(d, fe, "specularExponent", 1) : 1;
+            sv_n(&lines, sv_num_attr(d, fe, "surfaceScale", 1));
+            sv_n(&lines, sv_num_attr(d, fe, spec ? "specularConstant" : "diffuseConstant", 1));
+            sv_n(&lines, ex < 1 ? 1 : ex > 128 ? 128 : ex);
+            sv_hex(&lines, c0 ? st->cval[c0 + CSS_PROP_LIGHTING_COLOR].color : 0xffffffffu);
+            uint32_t lt = 0;
+            for (uint32_t q = d->node[fe].first_child; q && !lt; q = d->node[q].next_sibling)
+                if (sv_is(d, q, "feDistantLight") || sv_is(d, q, "fePointLight") || sv_is(d, q, "feSpotLight")) lt = q;
+            double zk = pbox ? sqrt((bw * bw + bh * bh) / 2) : 1;
+            if (!lt) sv_w(&lines, " 0");
+            else if (sv_is(d, lt, "feDistantLight")) {
+                sv_w(&lines, " 1");
+                sv_n(&lines, sv_num_attr(d, lt, "azimuth", 0));
+                sv_n(&lines, sv_num_attr(d, lt, "elevation", 0));
+            } else {
+                int spot = sv_is(d, lt, "feSpotLight");
+                static const char *const at3[6] = { "x", "y", "z", "pointsAtX", "pointsAtY", "pointsAtZ" };
+                sv_w(&lines, spot ? " 3" : " 2");
+                for (int q = 0; q < (spot ? 6 : 3); q++) {
+                    double p = sv_num_attr(d, lt, at3[q], 0);
+                    if (pbox) p = q % 3 == 0 ? bb[0] + p * bw : q % 3 == 1 ? bb[1] + p * bh : p * zk;
+                    sv_n(&lines, p);
+                }
+                if (spot) {
+                    double se = sv_num_attr(d, lt, "specularExponent", 1), cone = sv_num_attr(d, lt, "limitingConeAngle", 0);
+                    sv_n(&lines, se < 1 ? 1 : se > 128 ? 128 : se);
+                    sv_n(&lines, cone == 0 || cone > 90 || cone < -90 ? 90 : cone);
+                }
             }
         }
         sv_w(&lines, "\n");
@@ -2011,8 +2182,9 @@ static void sv_markers(SB, uint32_t x, const sv_walk *w, sv_mat m, const vector<
 
 /* a stroke's words in a path's line, after its paint: its opacity, width (sw), cap, join, miter
    limit, dash offset, and its dashes (none, or the list, a percentage of the viewport's
-   diagonal, its count first) */
-static void sv_stroke_words(const css_style *st, const sv_walk *w, double sw, vector<char> *sline) {
+   diagonal, its count first), the offset and dashes scaled by dk (a shape's pathLength's: none
+   when 0, a solid stroke) */
+static void sv_stroke_words(const css_style *st, const sv_walk *w, double sw, double dk, vector<char> *sline) {
     sv_n(sline, st->cval[w->src[SI_STROKE_OPACITY]].num);
     sv_n(sline, sw);
     uint32_t lc = w->src[SI_LINECAP], lj = w->src[SI_LINEJOIN];
@@ -2020,7 +2192,7 @@ static void sv_stroke_words(const css_style *st, const sv_walk *w, double sw, ve
     sv_n(sline, sv_word_is(st, lj, "round") ? 1 : sv_word_is(st, lj, "bevel") ? 2 : 0);
     double ml = st->cval[w->src[SI_MITER]].num;
     sv_n(sline, ml >= 1 ? ml : 4);
-    sv_n(sline, sv_css_len(st, w->src[SI_DASHOFFSET], sv_diag(w)));
+    sv_n(sline, sv_css_len(st, w->src[SI_DASHOFFSET], sv_diag(w)) * dk);
     vector<double> dash;
     uint32_t dc = w->src[SI_DASHARRAY];
     if (st->cval[dc].unit == CSS_UNIT_TEXT) {
@@ -2035,11 +2207,30 @@ static void sv_stroke_words(const css_style *st, const sv_walk *w, double sw, ve
             if (!sv_number(data(t), len(t), &i, &v)) { clear(dash); break; }
             if (i < len(t) && at(t, i) == '%') { v = v * sv_diag(w) / 100; i++; }
             else if (i + 1 < len(t) && at(t, i) == 'p' && at(t, i + 1) == 'x') i += 2;
-            push_back(dash, v);
+            push_back(dash, v * dk);
         }
     }
+    if (dk == 0) clear(dash);
     sv_n(sline, (double)len(dash));
     for (size_t k = 0; k < len(dash); k++) sv_n(sline, at(dash, k));
+}
+
+static double sv_measure(const vector<double> *p, double tol, vector<double> *cv, vector<sv_mseg> *ms);
+
+/* what a shape's pathLength scales its dashes and a textPath's offset by (SVG 2, 9.4, as Blink's
+   PathLengthScaleFactor has it): its length (known, or p's measured as Skia's SkPathMeasure
+   measures it, every contour) over pathLength; 1 without one or for a negative one, 0 for 0 */
+static double sv_path_scale(const dom_document *d, uint32_t x, const vector<double> *p, double known) {
+    vector<char> v;
+    if (!sv_attr_text(d, x, "pathLength", &v)) return 1;
+    size_t i = sv_skip_ws(data(v), len(v), 0);
+    double pl;
+    if (!sv_number(data(v), len(v), &i, &pl) || sv_skip_ws(data(v), len(v), i) != len(v) || pl < 0) return 1;
+    if (pl == 0) return 0;
+    if (known >= 0) return known / pl;
+    vector<double> cv;
+    vector<sv_mseg> ms;
+    return sv_measure(p, 0.5, &cv, &ms) / pl;
 }
 
 /* a shape's lines (SVG 2, 13.3): its fill and its stroke, each its matrix, paints, stroke and
@@ -2067,7 +2258,7 @@ static void sv_shape(SB, uint32_t x, const sv_walk *w, sv_mat m, int depth) {
     int fixed = c0 && sv_word_is(st, c0 + CSS_PROP_VECTOR_EFFECT, "non-scaling-stroke");
     /* the stroke's words: its paint's after the fill's */
     vector<char> sline;
-    sv_stroke_words(st, w, sw, &sline);
+    sv_stroke_words(st, w, sw, sk ? sv_path_scale(d, x, &p, -1) : 1, &sline);
     if (fixed) sv_w(&sline, " N");
     for (int q = 0; q < 3; q++) {
         int what = order[q];
@@ -2321,6 +2512,17 @@ static void sv_image(SB, uint32_t x, const sv_walk *w, sv_mat m) {
     sv_w(out, "\n");
 }
 
+/* the walk is drawing a mask's content: of the elements it is expanding, the last mask, pattern
+   or marker is a mask (a pattern's tile in a mask is its own drawing, its shape the mask's) */
+static int sv_in_mask(const dom_document *d, const vector<uint32_t> *uses) {
+    for (size_t k = len(*uses); k > 0; k--) {
+        uint32_t u = at(*uses, k - 1);
+        if (sv_is(d, u, "mask")) return 1;
+        if (sv_is(d, u, "pattern") || sv_is(d, u, "marker")) return 0;
+    }
+    return 0;
+}
+
 static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     if (depth > 64 || ++*work > SV_WORK || d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_SVG) return;
     uint32_t c0 = sv_first(firsts, x);
@@ -2342,6 +2544,14 @@ static void sv_node(SB, uint32_t x, const sv_walk *pw, sv_mat m, int depth) {
     uint32_t fcv = c0 && st->cval[c0 + CSS_PROP_FILTER].unit == CSS_UNIT_TEXT ? c0 + CSS_PROP_FILTER : 0;
     int grouped = sv_group_open(SA, x, cp, mk, fcv, op, pw, &w, mm, depth);
     if (grouped < 0) return;
+    /* in a mask's content, a shape, text or image whose color-interpolation is linearRGB is
+       painted in linearRGB: a group of its own made linear as it ends (as Blink paints a mask's
+       content, its paint's colours made linear; measured, element by element) */
+    int lin = (shape || text || image) && c0 && sv_word_is(st, c0 + CSS_PROP_COLOR_INTERPOLATION, "linearrgb") && sv_in_mask(d, uses);
+    if (lin) {
+        sv_w(out, "g 1 0 0 0 0 1\n");
+        grouped++;
+    }
     if (shape) sv_shape(SA, x, &w, mm, depth);
     else if (group) {
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling) {
@@ -2527,14 +2737,19 @@ static int sv_pos_tan(const vector<double> *cv, const vector<sv_mseg> *ms, doubl
     return 1;
 }
 
-/* a glyph's outline (amb_glyph_path's) placed in the text's space: its pen at (gx, gy), turned
-   by rot degrees about it, scaled across by hs; appended to p */
-static void sv_glyph_outline(const amb_fonts *f, int face, uint32_t cp, double fs, int italic, double gx, double gy, double rot, double hs,
+/* a shaped glyph of a character (amb_shape's): its glyph and the face that draws it, its flags,
+   and its pen's offset from the character's place (across, and down from the baseline) */
+typedef struct sv_sglyph { uint32_t gid; uint16_t face, flags; double ox, oy; } sv_sglyph;
+
+/* a glyph's outline (amb_glyph_path_id's) placed in the text's space: its character's pen at
+   (gx, gy), the glyph at its offset from it, turned by rot degrees about the pen, scaled across
+   by hs; appended to p */
+static void sv_glyph_outline(const amb_fonts *f, const sv_sglyph *sg, double fs, int italic, double gx, double gy, double rot, double hs,
                              vector<double> *p) {
     vector<double> g;
-    if (!amb_glyph_path(f, face, cp, fs, italic, &g)) return;
+    if ((sg->flags & AMB_SHAPED_HIDDEN) || !amb_glyph_path_id(f, sg->face, sg->gid, fs, italic, &g)) return;
     double r = rot * M_PI / 180, c = cos(r), s = sin(r);
-    sv_mat t = sv_mul(sv_make(c, s, -s, c, gx, gy), sv_make(hs, 0, 0, 1, 0, 0));
+    sv_mat t = sv_mul(sv_make(c, s, -s, c, gx, gy), sv_make(hs, 0, 0, 1, sg->ox * hs, sg->oy));
     size_t i = 0;
     while (i < len(g)) {
         int cmd = (int)at(g, i);
@@ -2583,9 +2798,134 @@ static uint32_t sv_text_path_of(const dom_document *d, uint32_t e, uint32_t x) {
    characters) and moved by its dominant-baseline: each character's element (its index in
    the elements, whose walks are wso), place, advance, turn, scale across, and whether it is
    dropped or on a path, into the vectors given. 0 when it has no character */
+static void sv_utf8(vector<char> *out, uint32_t cp);
+
+/* a text's characters shaped (as Blink shapes an SVG text's runs: HarfBuzz's shaping for
+   Chromium, amb_shape): runs of one face, size, letter-spacing and direction (a right-to-left
+   script's letters, and the neutral characters between two of them, right to left), none across
+   an absolutely placed character (a chunk's start, where Blink splits its items) or a textPath's
+   edge, in the whole text as context; each cluster's glyphs given to the character it begins at
+   (gl, from gf[i]), its advance theirs and the spacing's -- each of its code points' letter-
+   spacing, a space's word-spacing -- the others (a ligature's later letters, marks) none; a
+   right-to-left run's clusters in visual order, each character's offset from the run's left
+   (vo) and the run's width (rw, at its first character) */
+static void sv_text_shape(const css_style *st, const amb_fonts *f, const vector<sv_char> *cs, const vector<sv_walk> *ws, const vector<uint32_t> *tp,
+                          vector<double> *adv, vector<sv_sglyph> *gl, vector<uint32_t> *gf, vector<uint32_t> *gn, vector<uint8_t> *rtl,
+                          vector<double> *vo, vector<double> *rw, vector<uint8_t> *rs) {
+    size_t n = len(*cs);
+    vector<char> tx;
+    vector<uint32_t> bo, bchar;
+    for (size_t i = 0; i < n; i++) {
+        push_back(bo, (uint32_t)len(tx));
+        sv_utf8(&tx, at(*cs, i).cp);
+    }
+    push_back(bo, (uint32_t)len(tx));
+    resize(bchar, len(tx) + 1);
+    for (size_t i = 0; i < n; i++) bchar[at(bo, i)] = (uint32_t)i;
+    /* each character's direction: strong (a script's letter; a mark its base's), or a neutral's
+       between two right-to-left ones */
+    vector<uint8_t> strong;
+    resize(strong, n);
+    clear(*rtl);
+    resize(rtl, n);
+    for (size_t i = 0; i < n; i++) {
+        int sc = amb_script_of(at(*cs, i).cp);
+        strong[i] = sc == AMB_SC_INHERITED ? (i ? at(strong, i - 1) : 2) : sc == AMB_SC_COMMON || sc == 0 ? 2 : amb_script_rtl(sc) ? 1 : 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (at(strong, i) != 2) { (*rtl)[i] = at(strong, i); continue; }
+        size_t a = i, b = i;
+        while (b < n && at(strong, b) == 2) b++;
+        int r = a > 0 && at(strong, a - 1) == 1 && b < n && at(strong, b) == 1;
+        for (size_t q = a; q < b; q++) (*rtl)[q] = (uint8_t)r;
+        i = b - 1;
+    }
+    clear(*adv);
+    clear(*vo);
+    clear(*rw);
+    clear(*gf);
+    clear(*gn);
+    resize(adv, n);
+    resize(vo, n);
+    resize(rw, n);
+    resize(gf, n);
+    resize(gn, n);
+    clear(*rs);
+    resize(rs, n);
+    vector<uint8_t> start;
+    resize(start, n);
+    vector<amb_shaped> sh;
+    size_t a = 0;
+    while (a < n) {
+        sv_walk wa = at(*ws, at(*cs, a).el);
+        int face = sv_face(st, &wa);
+        double fs = sv_fs(st, &wa), ls = st->cval[wa.src[SI_LETTER_SPACING]].unit == CSS_UNIT_PX ? st->cval[wa.src[SI_LETTER_SPACING]].num : 0;
+        size_t b = a + 1;
+        while (b < n) {
+            sv_walk wb = at(*ws, at(*cs, b).el);
+            double lb = st->cval[wb.src[SI_LETTER_SPACING]].unit == CSS_UNIT_PX ? st->cval[wb.src[SI_LETTER_SPACING]].num : 0;
+            if ((at(*cs, b).set & 3) || at(*tp, b) != at(*tp, a) || at(*rtl, b) != at(*rtl, a) || sv_face(st, &wb) != face || sv_fs(st, &wb) != fs ||
+                lb != ls)
+                break;
+            b++;
+        }
+        clear(sh);
+        int flags = (at(*rtl, a) ? AMB_SHAPE_RTL : 0) | (ls != 0 ? AMB_SHAPE_NOLIGA : 0);
+        amb_shape(f, face, data(tx), len(tx), at(bo, a), at(bo, b), flags, &sh);
+        /* the clusters' starts first, so that each knows its characters */
+        for (size_t k = 0; k < len(sh); k++) {
+            uint32_t cl = at(sh, k).cluster;
+            size_t c = cl < len(bchar) ? at(bchar, cl) : a;
+            start[c >= a && c < b ? c : a] = 1;
+        }
+        start[a] = 1;
+        /* each cluster in the order shaped (visual): its glyphs, from the pen at its start */
+        double pen = 0;
+        size_t k = 0;
+        while (k < len(sh)) {
+            uint32_t cl = at(sh, k).cluster;
+            size_t c = cl < len(bchar) ? at(bchar, cl) : a;
+            if (c < a || c >= b) c = a;
+            double p0 = pen;
+            (*gf)[c] = (uint32_t)len(*gl);
+            while (k < len(sh) && at(sh, k).cluster == cl) {
+                amb_shaped g = at(sh, k);
+                double sc = amb_face_scale(f, g.face, fs);
+                sv_sglyph sg;
+                sg.gid = g.gid;
+                sg.face = g.face;
+                sg.flags = g.flags;
+                sg.ox = pen - p0 + g.dx * sc;
+                sg.oy = -g.dy * sc;
+                push_back(gl, sg);
+                pen += g.ax * sc;
+                k++;
+            }
+            (*gn)[c] = (uint32_t)(len(*gl) - at(*gf, c));
+            /* its spacing: its characters', to the next cluster's start (logically) */
+            double sp = 0;
+            for (size_t q = c; q < b && (q == c || !at(start, q)); q++) {
+                sv_walk wq = at(*ws, at(*cs, q).el);
+                sp += ls;
+                if (at(*cs, q).cp == ' ' && st->cval[wq.src[SI_WORD_SPACING]].unit == CSS_UNIT_PX) sp += st->cval[wq.src[SI_WORD_SPACING]].num;
+            }
+            (*adv)[c] = at(*adv, c) + pen - p0 + sp;
+            (*vo)[c] = p0;
+            pen += sp;
+        }
+        /* a cluster's later characters at its start's offset; the run's width at its first */
+        for (size_t q = a + 1; q < b; q++)
+            if (!at(start, q)) (*vo)[q] = at(*vo, q - 1);
+        (*rw)[a] = pen;
+        (*rs)[a] = 1;
+        a = b;
+    }
+}
+
 static int sv_text_layout(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t x, const sv_walk *w,
                           vector<sv_char> *cso, vector<uint32_t> *elso, vector<sv_walk> *wso, vector<double> *gxo, vector<double> *gyo,
-                          vector<double> *advo, vector<double> *roto, vector<double> *hso, vector<uint8_t> *hideo, vector<uint8_t> *onpatho) {
+                          vector<double> *advo, vector<double> *roto, vector<double> *hso, vector<uint8_t> *hideo, vector<uint8_t> *onpatho,
+                          vector<sv_sglyph> *glo, vector<uint32_t> *gfo, vector<uint32_t> *gno) {
     vector<sv_char> cs;
     vector<uint32_t> els;
     int space = 1;
@@ -2626,6 +2966,21 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
     resize(hs, n);
     resize(hide, n);
     resize(onpath, n);
+    /* each character's textPath (none: 0), and the text shaped (sv_text_shape) */
+    vector<uint32_t> tps, gf, gn;
+    vector<sv_sglyph> gl;
+    vector<uint8_t> rtl, rs;
+    vector<double> vo, rw;
+    for (size_t i = 0; i < n; i++) push_back(tps, sv_text_path_of(d, at(els, at(cs, i).el), x));
+    sv_text_shape(st, f, &cs, &ws, &tps, &adv, &gl, &gf, &gn, &rtl, &vo, &rw, &rs);
+    /* a cluster's later characters (a ligature's, marks) are no typographic characters of their
+       own: placed with it, never drawn */
+    vector<uint8_t> mid;
+    resize(mid, n);
+    for (size_t i = 1; i < n; i++) mid[i] = at(gn, i) == 0 && at(adv, i) == 0 && !at(rs, i);
+    /* the pen: a left-to-right run's characters one after another, a right-to-left run's each
+       at its cluster's offset from where the run begins, the run's width on after it; dx and dy
+       moving the pen at every character */
     double px = 0, py = 0;
     for (size_t i = 0; i < n; i++) {
         sv_char ch = at(cs, i);
@@ -2633,22 +2988,21 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
         if (ch.set & 2) py = ch.y;
         if (ch.set & 4) px += ch.dx;
         if (ch.set & 8) py += ch.dy;
-        gx[i] = px;
+        int r1 = at(rtl, i);
+        gx[i] = px + (r1 ? at(vo, i) : 0);
         gy[i] = py;
         rot[i] = (ch.set & 16) ? ch.rot : 0;
         hs[i] = 1;
-        sv_walk cwv = at(ws, ch.el);
-        const sv_walk *cw = &cwv;
-        int face = sv_face(st, cw);
-        double fs = sv_fs(st, cw), a = amb_advance(f, face, ch.cp, fs);
-        if (i + 1 < n && at(cs, i + 1).el == ch.el && !(at(cs, i + 1).set & 1)) a += amb_kerning(f, face, ch.cp, at(cs, i + 1).cp, fs);
-        uint32_t ls = cw->src[SI_LETTER_SPACING];
-        if (st->cval[ls].unit == CSS_UNIT_PX) a += st->cval[ls].num;
-        uint32_t wsp = cw->src[SI_WORD_SPACING];
-        if (ch.cp == ' ' && st->cval[wsp].unit == CSS_UNIT_PX) a += st->cval[wsp].num;
-        adv[i] = a;
-        px += a;
+        if (!r1) px += at(adv, i);
+        else if (i + 1 >= n || at(rs, i + 1)) {
+            /* the run's end: its width on from its first character */
+            size_t a0 = i;
+            while (a0 > 0 && !at(rs, a0)) a0--;
+            px += at(rw, a0);
+        }
     }
+    /* a middle character takes its cluster's turn */
+    for (size_t i = 1; i < n; i++) if (at(mid, i)) rot[i] = at(rot, i - 1);
     /* each element's textLength, the outer's first: its characters' run made that long, the
        characters after it in their chunk moved on by the difference */
     for (size_t k = 0; k < ne; k++) {
@@ -2664,19 +3018,30 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
             if (mine) { if (a == n) a = i; b = i; }
         }
         if (a == n) continue;
-        double natural = at(gx, b) + at(adv, b) - at(gx, a), delta = tl - natural;
+        double lo = 1e300, hi = -1e300;
+        for (size_t i = a; i <= b; i++) { lo = fmin(lo, at(gx, i)); hi = fmax(hi, at(gx, i) + at(adv, i)); }
+        double natural = hi - lo, delta = tl - natural;
         if (sv_attr_is(d, e, "lengthAdjust", "spacingAndGlyphs")) {
             double k2 = natural > 0 ? tl / natural : 1;
             for (size_t i = a; i <= b; i++) {
-                gx[i] = at(gx, a) + (at(gx, i) - at(gx, a)) * k2;
+                gx[i] = lo + (at(gx, i) - lo) * k2;
                 adv[i] = at(adv, i) * k2;
                 hs[i] = at(hs, i) * k2;
             }
-        } else if (b > a) for (size_t i = a; i <= b; i++) gx[i] = at(gx, i) + (double)(i - a) * delta / (double)(b - a);
+        } else {
+            /* the difference spread between its typographic characters (a ligature one) */
+            size_t m = 0, kk = 0;
+            double add = 0;
+            for (size_t i = a; i <= b; i++) if (!at(mid, i)) m++;
+            for (size_t i = a; i <= b; i++) {
+                if (!at(mid, i)) { add = m > 1 ? (double)kk * delta / (double)(m - 1) : 0; kk++; }
+                gx[i] = at(gx, i) + add;
+            }
+        }
         for (size_t i = b + 1; i < n && !(at(cs, i).set & 1); i++) gx[i] = at(gx, i) + delta;
     }
-    /* the chunks, each moved by its anchor (its first character's element's); a textPath's
-       characters are anchored along their path */
+    /* the chunks, each moved by its anchor (its first character's element's): its extent's
+       middle or end at where it begins; a textPath's characters are anchored along their path */
     size_t chunk = 0;
     for (size_t i = 1; i <= n; i++) {
         if (i < n && !(at(cs, i).set & 3)) continue;
@@ -2684,7 +3049,9 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
         sv_walk aw = at(ws, at(cs, chunk).el);
         int an = sv_word_is(st, aw.src[SI_ANCHOR], "middle") ? 1 : sv_word_is(st, aw.src[SI_ANCHOR], "end") ? 2 : 0;
         if (an && !tp) {
-            double x0 = at(gx, chunk), x1 = at(gx, i - 1) + at(adv, i - 1), shift = an == 1 ? (x1 - x0) / 2 : x1 - x0;
+            double x0 = at(gx, chunk) - (at(rtl, chunk) ? at(vo, chunk) : 0), lo = 1e300, hi = -1e300;
+            for (size_t q = chunk; q < i; q++) { lo = fmin(lo, at(gx, q)); hi = fmax(hi, at(gx, q) + at(adv, q)); }
+            double shift = an == 1 ? (lo + hi) / 2 - x0 : hi - x0;
             for (size_t q = chunk; q < i; q++) gx[q] = at(gx, q) - shift;
         }
         chunk = i;
@@ -2698,24 +3065,35 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
         size_t i1 = i0 + 1;
         while (i1 < n && sv_text_path_of(d, at(els, at(cs, i1).el), x) == tp) i1++;
         if (tp) {
-            uint32_t pe = sv_href(d, tp);
-            vector<double> pp, mp;
-            sv_walk pw2;
-            int ok = pe && sv_root_walk(st, firsts, pe, w->vw, w->vh, &pw2) && sv_geometry(d, st, firsts, pe, &pw2, &pp);
-            double plen = 0;
-            if (ok) {
-                sv_path_map(&pp, sv_transform_of(d, st, firsts, pe, &pw2), &mp);
-                plen = sv_measure(&mp, 0.5, &cvv, &msv);
+            /* its path: its own path attribute's (in the text's space; Chromium's over its href,
+               measured), else the path element its href names (another shape none, as Blink's
+               LayoutSVGTextPath takes it: measured), under that element's transform */
+            uint32_t pe = 0;
+            vector<double> pp, mp, feat;
+            vector<char> pa;
+            int ok = 0;
+            if (sv_attr_text(d, tp, "path", &pa) && sv_path_data(data(pa), len(pa), &mp, &feat) && len(mp)) ok = 1;
+            else {
+                clear(mp);
+                pe = sv_href(d, tp);
+                sv_walk pw2;
+                ok = pe && sv_is(d, pe, "path") && sv_root_walk(st, firsts, pe, w->vw, w->vh, &pw2) && sv_geometry(d, st, firsts, pe, &pw2, &pp);
+                if (ok) sv_path_map(&pp, sv_transform_of(d, st, firsts, pe, &pw2), &mp);
             }
-            /* its start: startOffset (a percentage of the path's length), its anchor's shift */
+            double plen = ok ? sv_measure(&mp, 0.5, &cvv, &msv) : 0;
+            /* its start: startOffset (a percentage of the path's length; a length scaled by the
+               path's pathLength, as Blink's LayoutSVGTextPath scales it), its anchor's shift */
             size_t tpi = 0;
             for (size_t k = 0; k < ne; k++) if (at(els, k) == tp) tpi = k;
             sv_walk tw = at(ws, tpi);
             int g;
             double so = sv_len_attr(d, tp, "startOffset", plen, sv_fs(st, &tw), 0, &g);
+            vector<char> sov;
+            if (pe && ok && sv_attr_text(d, tp, "startOffset", &sov) && len(sov) && at(sov, len(sov) - 1) != '%') so *= sv_path_scale(d, pe, &pp, plen);
             int an = sv_word_is(st, tw.src[SI_ANCHOR], "middle") ? 1 : sv_word_is(st, tw.src[SI_ANCHOR], "end") ? 2 : 0;
-            double x0 = at(gx, i0), width = at(gx, i1 - 1) + at(adv, i1 - 1) - x0;
-            double base = so - (an == 1 ? width / 2 : an == 2 ? width : 0);
+            double x0 = 1e300, x1 = -1e300;
+            for (size_t i = i0; i < i1; i++) { x0 = fmin(x0, at(gx, i)); x1 = fmax(x1, at(gx, i) + at(adv, i)); }
+            double width = x1 - x0, base = so - (an == 1 ? width / 2 : an == 2 ? width : 0);
             for (size_t i = i0; i < i1; i++) {
                 double mid = base + at(gx, i) - x0 + at(adv, i) / 2, qx, qy, ang;
                 if (!ok || plen <= 0 || mid < 0 || mid > plen || !sv_pos_tan(&cvv, &msv, mid, &qx, &qy, &ang)) { hide[i] = 1; continue; }
@@ -2746,6 +3124,9 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
     append_range(hso, data(hs), n);
     append_range(hideo, data(hide), n);
     append_range(onpatho, data(onpath), n);
+    append_range(glo, data(gl), len(gl));
+    append_range(gfo, data(gf), n);
+    append_range(gno, data(gn), n);
     return 1;
 }
 
@@ -2755,11 +3136,12 @@ static int sv_text_layout(const dom_document *d, const css_style *st, const vect
 static int sv_text_bounds(const dom_document *d, const css_style *st, const vector<uint32_t> *firsts, const amb_fonts *f, uint32_t x, const sv_walk *w,
                           sv_mat mm, double *bb) {
     vector<sv_char> cs;
-    vector<uint32_t> els;
+    vector<uint32_t> els, gf, gn;
     vector<sv_walk> ws;
     vector<double> gx, gy, adv, rot, hs;
     vector<uint8_t> hide, onpath;
-    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath)) return 0;
+    vector<sv_sglyph> gl;
+    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath, &gl, &gf, &gn)) return 0;
     int any = 0;
     bb[0] = bb[1] = 1e300;
     bb[2] = bb[3] = -1e300;
@@ -2782,17 +3164,19 @@ static int sv_text_bounds(const dom_document *d, const css_style *st, const vect
     return any;
 }
 
-/* a text element's glyphs (sv_text_layout's): runs of one element's characters each a line:
-   upright glyphs (a uniform scale, no turn) filled as the page's text is ('t': its matrix,
-   face, size, slant, paint, opacity, each glyph's code point and place), others filled as
-   their outlines ('p'); a stroke, outlines' too; fill and stroke in the paint-order */
+/* a text element's glyphs (sv_text_layout's): runs of one element's characters each a line,
+   each character's shaped glyphs (a ligature's and a mark's drawn by the character its
+   cluster begins at): upright glyphs (a uniform scale, no turn) filled as the page's text is
+   ('t': its matrix, face, size, slant, paint, opacity, each glyph's id, face and place), others
+   filled as their outlines ('p'); a stroke, outlines' too; fill and stroke in the paint-order */
 static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
     vector<sv_char> cs;
-    vector<uint32_t> els;
+    vector<uint32_t> els, gf, gn;
     vector<sv_walk> ws;
     vector<double> gx, gy, adv, rot, hs;
     vector<uint8_t> hide, onpath;
-    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath)) return;
+    vector<sv_sglyph> gl;
+    if (!sv_text_layout(d, st, firsts, f, x, w, &cs, &els, &ws, &gx, &gy, &adv, &rot, &hs, &hide, &onpath, &gl, &gf, &gn)) return;
     size_t n = len(cs);
     int upright_m = fabs(m.b) < 1e-9 && fabs(m.c) < 1e-9 && m.a > 0 && fabs(m.a - m.d) < 1e-9 * fabs(m.a);
     size_t i = 0;
@@ -2832,8 +3216,11 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
         vector<double> outline;
         if (sk || (fk && !upright))
             for (size_t q = i; q < j; q++)
-                if (!at(hide, q) && at(cs, q).cp != ' ')
-                    sv_glyph_outline(f, face, at(cs, q).cp, fs, italic, at(gx, q), at(gy, q), at(rot, q), at(hs, q), &outline);
+                if (!at(hide, q))
+                    for (uint32_t g = at(gf, q); g < at(gf, q) + at(gn, q); g++) {
+                        sv_sglyph sgl = at(gl, g);
+                        sv_glyph_outline(f, &sgl, fs, italic, at(gx, q), at(gy, q), at(rot, q), at(hs, q), &outline);
+                    }
         int order[3];
         sv_paint_order(st, cw->src[SI_PAINT_ORDER], order);
         for (int o = 0; o < 3; o++) {
@@ -2847,13 +3234,20 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
                 sv_paint_words(&line, fk, fg, frgba);
                 sv_n(&line, st->cval[cw->src[SI_FILL_OPACITY]].num);
                 size_t count = 0;
-                for (size_t q = i; q < j; q++) if (at(cs, q).cp != ' ' && !at(hide, q)) count++;
+                for (size_t q = i; q < j; q++)
+                    if (!at(hide, q))
+                        for (uint32_t g = at(gf, q); g < at(gf, q) + at(gn, q); g++) count += !(at(gl, g).flags & AMB_SHAPED_HIDDEN);
                 sv_n(&line, (double)count);
                 for (size_t q = i; q < j; q++) {
-                    if (at(cs, q).cp == ' ' || at(hide, q)) continue;
-                    sv_n(&line, at(cs, q).cp);
-                    sv_n(&line, at(gx, q));
-                    sv_n(&line, at(gy, q));
+                    if (at(hide, q)) continue;
+                    for (uint32_t g = at(gf, q); g < at(gf, q) + at(gn, q); g++) {
+                        sv_sglyph sgl = at(gl, g);
+                        if (sgl.flags & AMB_SHAPED_HIDDEN) continue;
+                        sv_n(&line, sgl.gid);
+                        sv_n(&line, sgl.face);
+                        sv_n(&line, at(gx, q) + sgl.ox);
+                        sv_n(&line, at(gy, q) + sgl.oy);
+                    }
                 }
             } else if ((order[o] == 0 && fk) || (order[o] == 1 && sk)) {
                 if (!len(outline)) continue;
@@ -2864,7 +3258,7 @@ static void sv_text(SB, uint32_t x, const sv_walk *w, sv_mat m) {
                 sv_n(&line, st->cval[cw->src[SI_FILL_OPACITY]].num);
                 sv_n(&line, 0);
                 sv_paint_words(&line, fill ? 0 : sk, sg, srgba);
-                sv_stroke_words(st, cw, sw, &line);
+                sv_stroke_words(st, cw, sw, 1, &line);
                 sv_path_out(&line, &outline);
             } else continue;
             sv_w(&line, "\n");
@@ -4234,7 +4628,7 @@ static void sv_block(const char *s, size_t n, size_t *i, size_t *from, size_t *t
         size_t ls = p;
         char c = s[p];
         int one = p + 1 >= n || s[p + 1] == ' ' || s[p + 1] == '\n';
-        if (one && (c == 'P' || c == 'M' || c == 'F')) depth++;
+        if (one && (c == 'P' || c == 'M' || c == 'F' || c == 'I')) depth++;
         while (p < n && s[p] != '\n') p++;
         if (one && c == 'E' && --depth == 0) {
             *to = ls;
@@ -4369,10 +4763,29 @@ static void sv_mask_apply(const char *s, size_t n, size_t *i, RC, int32_t *mk) {
 static double sv_to_lin(double c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
 static double sv_to_srgb(double c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055; }
 
-/* an image (np px of RGBA premultiplied from off) into the other colour space (to 1: linearRGB
-   from sRGB; 0: back), as Skia's colour filter takes it: each colour unpremultiplied through
-   the transfer function, premultiplied again, kept in eight bits */
+/* a colour c (premultiplied) at alpha a into the other colour space (to 1: linearRGB from sRGB;
+   0: back), as Skia's colour filter takes it: unpremultiplied through the transfer function,
+   premultiplied again, kept in eight bits */
+static float sv_space1(float c, float a, int to_linear) {
+    double u = c / a;
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    return sv_q8((to_linear ? sv_to_lin(u) : sv_to_srgb(u)) * a);
+}
+/* sv_space1 of each eight-bit colour at each eight-bit alpha, either way (sv_lut[to_linear][a * 256 + c],
+   c and a of 255), made the first time it is asked for, once a process: a filter's images are of eight
+   bits, so that converting one is a lookup a channel, not a power */
+static float sv_lut[2][65536];
+static uint8_t sv_lut_ready[2];
+
+/* an image (np px of RGBA premultiplied from off) into the other colour space (sv_space1 each
+   colour; transparent black where it is transparent) */
 static void sv_space(vector<float> *img, size_t off, size_t np, int to_linear) {
+    int t = to_linear ? 1 : 0;
+    if (!sv_lut_ready[t]) {
+        for (int ka = 1; ka < 256; ka++)
+            for (int kc = 0; kc < 256; kc++) sv_lut[t][ka * 256 + kc] = sv_space1((float)(kc / 255.0), (float)(ka / 255.0), t);
+        sv_lut_ready[t] = 1;
+    }
     for (size_t p = 0; p < np; p++) {
         size_t q = off + 4 * p;
         float a = at(*img, q + 3);
@@ -4380,10 +4793,14 @@ static void sv_space(vector<float> *img, size_t off, size_t np, int to_linear) {
             (*img)[q] = (*img)[q + 1] = (*img)[q + 2] = 0;
             continue;
         }
+        /* an alpha and colours of eight bits (sv_q8's) by the table, any other by the function */
+        int ka = a < 1.0001f ? (int)(a * 255 + 0.5f) : 256;
+        int byte = ka >= 1 && ka <= 255 && (float)(ka / 255.0) == a;
         for (int c = 0; c < 3; c++) {
-            double u = at(*img, q + (size_t)c) / a;
-            u = u < 0 ? 0 : u > 1 ? 1 : u;
-            (*img)[q + (size_t)c] = sv_q8((to_linear ? sv_to_lin(u) : sv_to_srgb(u)) * a);
+            float v = at(*img, q + (size_t)c);
+            int kc = v >= 0 && v < 1.0001f ? (int)(v * 255 + 0.5f) : -1;
+            if (byte && kc >= 0 && kc <= 255 && (float)(kc / 255.0) == v) (*img)[q + (size_t)c] = sv_lut[t][ka * 256 + kc];
+            else (*img)[q + (size_t)c] = sv_space1(v, a, t);
         }
     }
 }
@@ -4564,6 +4981,146 @@ static void sv_offset_img(const vector<float> *in, int w, int h, double dx, doub
         }
 }
 
+/* feTurbulence's noise (Filter Effects 1, 15.21's reference code, as Skia's SkPerlinNoiseShader
+   keeps it): the lattice selector and each channel's gradients, permuted by the selector,
+   normalized and kept in sixteen bits */
+typedef struct sv_perlin { int lat[256]; double grad[4][256][2]; } sv_perlin;
+static long sv_rand(long s) {
+    long r = 16807 * (s % 127773) - 2836 * (s / 127773);
+    return r <= 0 ? r + 2147483647 : r;
+}
+static void sv_perlin_init(sv_perlin *pn, double seed) {
+    /* the seed truncated, as the spec's setup_seed takes it */
+    double t = trunc(seed);
+    long s = t > 2147483646 ? 2147483646 : t < -2147483646 ? -2147483646 : (long)t;
+    if (s <= 0) s = -(s % 2147483646) + 1;
+    int noise[4][256][2];
+    for (int ch = 0; ch < 4; ch++)
+        for (int i = 0; i < 256; i++) {
+            pn->lat[i] = i;
+            s = sv_rand(s);
+            noise[ch][i][0] = (int)(s % 512);
+            s = sv_rand(s);
+            noise[ch][i][1] = (int)(s % 512);
+        }
+    for (int i = 255; i > 0; i--) {
+        int k = pn->lat[i];
+        s = sv_rand(s);
+        int j = (int)(s % 256);
+        pn->lat[i] = pn->lat[j];
+        pn->lat[j] = k;
+    }
+    for (int ch = 0; ch < 4; ch++)
+        for (int i = 0; i < 256; i++) {
+            double gx = (noise[ch][pn->lat[i]][0] - 256) / 256.0, gy = (noise[ch][pn->lat[i]][1] - 256) / 256.0, l = sqrt(gx * gx + gy * gy);
+            if (l > 0) { gx /= l; gy /= l; }
+            pn->grad[ch][i][0] = floor((gx + 1) * 32767.5 + 0.5) * (2.0 / 65535) - 1;
+            pn->grad[ch][i][1] = floor((gy + 1) * 32767.5 + 0.5) * (2.0 / 65535) - 1;
+        }
+}
+/* the noise of a channel at (vx, vy), its lattice wrapped at the stitch's width and height when
+   st is given (st[0] the width, st[1] the height, each the tile's at the octave) */
+static double sv_noise2(const sv_perlin *pn, int ch, double vx, double vy, const double *st) {
+    if (!(fabs(vx) < 1e15 && fabs(vy) < 1e15)) return 0;
+    double fx = floor(vx), fy = floor(vy), rx0 = vx - fx, ry0 = vy - fy;
+    long bx0 = (long)fx, by0 = (long)fy, bx1 = bx0 + 1, by1 = by0 + 1;
+    if (st) {
+        if (bx0 >= st[0]) bx0 -= (long)st[0];
+        if (bx1 >= st[0]) bx1 -= (long)st[0];
+        if (by0 >= st[1]) by0 -= (long)st[1];
+        if (by1 >= st[1]) by1 -= (long)st[1];
+    }
+    int i = pn->lat[bx0 & 255], j = pn->lat[bx1 & 255];
+    int b00 = (int)((i + by0) & 255), b10 = (int)((j + by0) & 255), b01 = (int)((i + by1) & 255), b11 = (int)((j + by1) & 255);
+    double sx = rx0 * rx0 * (3 - 2 * rx0), sy = ry0 * ry0 * (3 - 2 * ry0);
+    const double *q = pn->grad[ch][b00];
+    double u = rx0 * q[0] + ry0 * q[1];
+    q = pn->grad[ch][b10];
+    double v = (rx0 - 1) * q[0] + ry0 * q[1], a = u + sx * (v - u);
+    q = pn->grad[ch][b01];
+    u = rx0 * q[0] + (ry0 - 1) * q[1];
+    q = pn->grad[ch][b11];
+    v = (rx0 - 1) * q[0] + (ry0 - 1) * q[1];
+    double b = u + sx * (v - u);
+    return a + sy * (b - a);
+}
+
+/* a row (or column) of n values eroded or dilated: each the least (or greatest) of the window of
+   2r + 1 about it, outside the row 0 (transparent), as van Herk and Gil and Werman find them
+   (the window's blocks' running extremes from either side); into out */
+static void sv_morph_run(const float *v, int n, int r, int dilate, float *out, vector<float> *g, vector<float> *hh) {
+    int k = 2 * r + 1, m = n + 2 * r, nb = (m + k - 1) / k, len2 = nb * k;
+    clear(*g);
+    clear(*hh);
+    resize(g, (size_t)len2);
+    resize(hh, (size_t)len2);
+    /* the padded row: r of 0 each side, then 0 to whole blocks */
+    for (int b = 0; b < nb; b++) {
+        int base = b * k;
+        for (int q = 0; q < k; q++) {
+            int x = base + q - r;
+            float val = x >= 0 && x < n ? v[x] : 0;
+            float prev = q ? at(*g, (size_t)(base + q - 1)) : val;
+            (*g)[(size_t)(base + q)] = q == 0 ? val : dilate ? fmaxf(prev, val) : fminf(prev, val);
+        }
+        for (int q = k - 1; q >= 0; q--) {
+            int x = base + q - r;
+            float val = x >= 0 && x < n ? v[x] : 0;
+            float next = q < k - 1 ? at(*hh, (size_t)(base + q + 1)) : val;
+            (*hh)[(size_t)(base + q)] = q == k - 1 ? val : dilate ? fmaxf(next, val) : fminf(next, val);
+        }
+    }
+    /* the window of x (padded x .. x + 2r): h at its start, g at its end */
+    for (int x = 0; x < n; x++) {
+        float a = at(*hh, (size_t)x), b = at(*g, (size_t)(x + 2 * r));
+        out[x] = dilate ? fmaxf(a, b) : fminf(a, b);
+    }
+}
+/* an image (w x h px of RGBA) eroded or dilated by rx across and ry down, each channel alone */
+static void sv_morph_img(vector<float> *img, int w, int h, int rx, int ry, int dilate) {
+    int longest = w > h ? w : h;
+    vector<float> v, o, g, hh;
+    resize(v, (size_t)longest);
+    resize(o, (size_t)longest);
+    for (int axis = 0; axis < 2; axis++) {
+        int r = axis == 0 ? rx : ry;
+        if (r <= 0) continue;
+        int lines = axis == 0 ? h : w, n = axis == 0 ? w : h;
+        for (int ln = 0; ln < lines; ln++)
+            for (int c = 0; c < 4; c++) {
+                for (int k = 0; k < n; k++)
+                    v[(size_t)k] = at(*img, 4 * (axis == 0 ? (size_t)ln * (size_t)w + (size_t)k : (size_t)k * (size_t)w + (size_t)ln) + (size_t)c);
+                sv_morph_run(data(v), n, r, dilate, data(o), &g, &hh);
+                for (int k = 0; k < n; k++)
+                    (*img)[4 * (axis == 0 ? (size_t)ln * (size_t)w + (size_t)k : (size_t)k * (size_t)w + (size_t)ln) + (size_t)c] = at(o, (size_t)k);
+            }
+    }
+}
+
+/* a pixel's surface normal for the lighting primitives (Filter Effects 1, 15.10, as Skia's
+   lighting filter finds it): Sobel's kernels over the alpha (0 to 255) about (x, y), a px
+   outside the bounds b (x0, y0, x1, y1) the nearest inside (Skia's clamp, where the spec has
+   kernels of its own at the edges: measured), a quarter of each difference; the normal
+   (-ss Nx, -ss Ny, 1) made of length 1 into n, ss the surface scale over 255 */
+static void sv_light_normal(const vector<float> *in, int w, const int *b, int x, int y, double ss, double *n) {
+    double m[3][3];
+    for (int j = -1; j <= 1; j++)
+        for (int i = -1; i <= 1; i++) {
+            int xx = x + i, yy = y + j;
+            if (xx < b[0]) xx = b[0];
+            if (xx >= b[2]) xx = b[2] - 1;
+            if (yy < b[1]) yy = b[1];
+            if (yy >= b[3]) yy = b[3] - 1;
+            m[j + 1][i + 1] = floor(at(*in, 4 * ((size_t)yy * (size_t)w + (size_t)xx) + 3) * 255 + 0.5);
+        }
+    double sx = (m[0][2] + 2 * m[1][2] + m[2][2]) - (m[0][0] + 2 * m[1][0] + m[2][0]);
+    double sy = (m[2][0] + 2 * m[2][1] + m[2][2]) - (m[0][0] + 2 * m[0][1] + m[0][2]);
+    double nx = -ss * sx / 4, ny = -ss * sy / 4, len = sqrt(nx * nx + ny * ny + 1);
+    n[0] = nx / len;
+    n[1] = ny / len;
+    n[2] = 1 / len;
+}
+
 /* a filter's block (from its F line to its E) drawn: the group's layer at top through its
    primitives, in the layer's px (Filter Effects 1, as Blink builds them into Skia's image
    filters): the layer is the source graphic, kept in eight bits, its alpha the source alpha;
@@ -4601,6 +5158,9 @@ static void sv_filter_apply(const char *s, size_t from, size_t to, RC, size_t to
         push_back(spaces, linear);
         if (i1 >= p) i1 = SV_IN_NONE;
         if (i2 >= p) i2 = SV_IN_NONE;
+        /* the subregion's px (rounded out), which crops the result */
+        int sub[4];
+        if (!sv_rect_px(dv, full, sr[0], sr[1], sr[2], sr[3], sub)) sub[0] = sub[1] = sub[2] = sub[3] = 0;
         if (kind == SV_FE_BLUR || kind == SV_FE_SHADOW) {
             double sdx = sv_rnum(s, to, &i) * sxs, sdy = sv_rnum(s, to, &i) * sys;
             sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
@@ -4759,11 +5319,277 @@ static void sv_filter_apply(const char *s, size_t from, size_t to, RC, size_t to
                 for (int c = 0; c < 3; c++) res[base + 4 * q + (size_t)c] = sv_q8(u[c] * u[3]);
                 res[base + 4 * q + 3] = sv_q8(u[3]);
             }
+        } else if (kind == SV_FE_TURBULENCE) {
+            /* the noise in the filter's user space, each px's at its centre mapped there and half a
+               unit on (Skia's perlin_noise stage), each channel's turbulence (or fractal sum) of
+               its octaves; stitched, the tile the subregion's size (in whole units) from the
+               space's origin, as Skia stitches it; premultiplied, in eight bits */
+            int type = (int)sv_rnum(s, to, &i);
+            double bfx = sv_rnum(s, to, &i), bfy = sv_rnum(s, to, &i);
+            int oct = (int)sv_rnum(s, to, &i);
+            double seed = sv_rnum(s, to, &i);
+            int stitch = (int)sv_rnum(s, to, &i);
+            sv_mat inv;
+            if (oct > 0 && sv_inv(full, &inv)) {
+                /* (past 24 octaves a term is below what eight bits keep) */
+                if (oct > 24) oct = 24;
+                sv_perlin pn;
+                sv_perlin_init(&pn, seed);
+                double st0[2] = { 0, 0 };
+                if (stitch) {
+                    double tw = floor(sr[2]), th = floor(sr[3]);
+                    if (bfx != 0 && tw > 0) {
+                        double lo = floor(tw * bfx) / tw, hi = ceil(tw * bfx) / tw;
+                        bfx = (lo > 0 ? bfx / lo : 1e300) < hi / bfx ? lo : hi;
+                    }
+                    if (bfy != 0 && th > 0) {
+                        double lo = floor(th * bfy) / th, hi = ceil(th * bfy) / th;
+                        bfy = (lo > 0 ? bfy / lo : 1e300) < hi / bfy ? lo : hi;
+                    }
+                    st0[0] = floor(tw * bfx + 0.5);
+                    st0[1] = floor(th * bfy + 0.5);
+                }
+                for (int y = sub[1]; y < sub[3]; y++)
+                    for (int x = sub[0]; x < sub[2]; x++) {
+                        double ux = sv_ax(inv, x + 0.5, y + 0.5) + 0.5, uy = sv_ay(inv, x + 0.5, y + 0.5) + 0.5, cv[4];
+                        for (int ch = 0; ch < 4; ch++) {
+                            double sum = 0, ratio = 1, vx = ux * bfx, vy = uy * bfy, st[2] = { st0[0], st0[1] };
+                            for (int o2 = 0; o2 < oct; o2++) {
+                                double nv = sv_noise2(&pn, ch, vx, vy, stitch ? st : 0);
+                                sum += (type ? fabs(nv) : nv) / ratio;
+                                vx *= 2;
+                                vy *= 2;
+                                ratio *= 2;
+                                st[0] *= 2;
+                                st[1] *= 2;
+                            }
+                            if (!type) sum = (sum + 1) / 2;
+                            cv[ch] = sum < 0 ? 0 : sum > 1 ? 1 : sum;
+                        }
+                        size_t q = base + 4 * ((size_t)y * (size_t)W + (size_t)x);
+                        for (int c = 0; c < 3; c++) res[q + (size_t)c] = sv_q8(cv[c] * cv[3]);
+                        res[q + 3] = sv_q8(cv[3]);
+                    }
+            } else if (oct <= 0 && !type) {
+                /* no octave: a fractal sum of nothing, a half grey half opaque */
+                for (int y = sub[1]; y < sub[3]; y++)
+                    for (int x = sub[0]; x < sub[2]; x++)
+                        for (int c = 0; c < 4; c++) res[base + 4 * ((size_t)y * (size_t)W + (size_t)x) + (size_t)c] = sv_q8(c < 3 ? 0.25 : 0.5);
+            }
+        } else if (kind == SV_FE_MORPHOLOGY) {
+            /* each channel the least (erode) or greatest (dilate) about the px, its radii mapped
+               into the layer and rounded (Skia's), outside the image transparent; radii of none
+               the input itself */
+            int dil = (int)sv_rnum(s, to, &i);
+            double rxu = sv_rnum(s, to, &i), ryu = sv_rnum(s, to, &i), rxd = floor(rxu * sxs + 0.5), ryd = floor(ryu * sys + 0.5);
+            int mrx = rxd > 1000 ? 1000 : rxd > 0 ? (int)rxd : 0, mry = ryd > 1000 ? 1000 : ryd > 0 ? (int)ryd : 0;
+            sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
+            sv_morph_img(&in1, W, H, mrx, mry, dil);
+            for (size_t q = 0; q < NP * 4; q++) res[base + q] = at(in1, q);
+        } else if (kind == SV_FE_CONVOLVE) {
+            /* the kernel over the input about each px (Filter Effects 1, 15.11, as Skia's matrix
+               convolution: the kernel turned about, its target the px), divided, the bias added;
+               the colours premultiplied, or, preserving alpha, unpremultiplied and the alpha the
+               px's own; the edge mode's px for those outside the subregion (repeated, wrapped
+               about it, or transparent) */
+            int ox = (int)sv_rnum(s, to, &i), oy = (int)sv_rnum(s, to, &i), tx = (int)sv_rnum(s, to, &i), ty = (int)sv_rnum(s, to, &i);
+            double div = sv_rnum(s, to, &i), bias = sv_rnum(s, to, &i);
+            int mode = (int)sv_rnum(s, to, &i), keep = (int)sv_rnum(s, to, &i);
+            double kv[400];
+            if (ox < 0 || oy < 0 || ox * oy > 400) ox = oy = 0;
+            for (int q = 0; q < ox * oy; q++) kv[q] = sv_rnum(s, to, &i);
+            if (ox > 0 && oy > 0 && div != 0 && sub[2] > sub[0] && sub[3] > sub[1]) {
+                sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
+                if (keep)
+                    for (size_t q = 0; q < NP; q++) {
+                        float al = at(in1, 4 * q + 3);
+                        for (int c = 0; c < 3; c++) in1[4 * q + (size_t)c] = al > 0 ? at(in1, 4 * q + (size_t)c) / al : 0;
+                    }
+                int bw = sub[2] - sub[0], bh = sub[3] - sub[1];
+                for (int y = sub[1]; y < sub[3]; y++)
+                    for (int x = sub[0]; x < sub[2]; x++) {
+                        double sum[4] = { 0, 0, 0, 0 };
+                        for (int ky = 0; ky < oy; ky++)
+                            for (int kx = 0; kx < ox; kx++) {
+                                double kval = kv[(oy - 1 - ky) * ox + (ox - 1 - kx)];
+                                if (kval == 0) continue;
+                                int px = x - tx + kx, py = y - ty + ky;
+                                if (px < sub[0] || px >= sub[2] || py < sub[1] || py >= sub[3]) {
+                                    if (mode == 2) continue;
+                                    if (mode == 1) {
+                                        px = sub[0] + ((px - sub[0]) % bw + bw) % bw;
+                                        py = sub[1] + ((py - sub[1]) % bh + bh) % bh;
+                                    } else {
+                                        px = px < sub[0] ? sub[0] : px >= sub[2] ? sub[2] - 1 : px;
+                                        py = py < sub[1] ? sub[1] : py >= sub[3] ? sub[3] - 1 : py;
+                                    }
+                                }
+                                const float *pp = data(in1) + 4 * ((size_t)py * (size_t)W + (size_t)px);
+                                for (int c = 0; c < 4; c++) sum[c] += kval * pp[c];
+                            }
+                        size_t q = base + 4 * ((size_t)y * (size_t)W + (size_t)x);
+                        if (keep) {
+                            double al = at(in1, 4 * ((size_t)y * (size_t)W + (size_t)x) + 3);
+                            for (int c = 0; c < 3; c++) {
+                                double v = sum[c] / div + bias;
+                                v = v < 0 ? 0 : v > 1 ? 1 : v;
+                                res[q + (size_t)c] = sv_q8(v * al);
+                            }
+                            res[q + 3] = sv_q8(al);
+                        } else {
+                            double al = sum[3] / div + bias;
+                            al = al < 0 ? 0 : al > 1 ? 1 : al;
+                            for (int c = 0; c < 3; c++) {
+                                double v = sum[c] / div + bias;
+                                res[q + (size_t)c] = sv_q8(v < 0 ? 0 : v > al ? al : v);
+                            }
+                            res[q + 3] = sv_q8(al);
+                        }
+                    }
+            }
+        } else if (kind == SV_FE_DISPLACE) {
+            /* each px the input's at the px moved by the map's channels (unpremultiplied, less a
+               half) times the scale in the layer's px: the nearest px to where it lands (one just
+               on an edge the one before it, as Skia samples it), transparent outside the image */
+            double scale = sv_rnum(s, to, &i);
+            int selx = (int)sv_rnum(s, to, &i), sely = (int)sv_rnum(s, to, &i);
+            if (selx < 0 || selx > 3) selx = 3;
+            if (sely < 0 || sely > 3) sely = 3;
+            sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
+            sv_fe_input_img(&src, &res, &spaces, i2, linear, NP, &in2);
+            double kx = scale * sxs, ky = scale * sys;
+            for (int y = sub[1]; y < sub[3]; y++)
+                for (int x = sub[0]; x < sub[2]; x++) {
+                    const float *dp = data(in2) + 4 * ((size_t)y * (size_t)W + (size_t)x);
+                    double al = dp[3], cx = selx == 3 ? al : al > 0 ? dp[selx] / al : 0, cy = sely == 3 ? al : al > 0 ? dp[sely] / al : 0;
+                    double fx = x + 0.5 + kx * (cx - 0.5), fy = y + 0.5 + ky * (cy - 0.5);
+                    if (!(fabs(fx) < 1e9 && fabs(fy) < 1e9)) continue;
+                    long ix = (long)ceil(fx) - 1, iy = (long)ceil(fy) - 1;
+                    if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
+                    size_t q = base + 4 * ((size_t)y * (size_t)W + (size_t)x), r2 = 4 * ((size_t)iy * (size_t)W + (size_t)ix);
+                    for (int c = 0; c < 4; c++) res[q + (size_t)c] = at(in1, r2 + (size_t)c);
+                }
+        } else if (kind == SV_FE_TILE) {
+            /* the input's tile (its subregion, its whole px within it) repeated over the subregion
+               from where it is */
+            double t0 = sv_rnum(s, to, &i), t1 = sv_rnum(s, to, &i), t2 = sv_rnum(s, to, &i), t3 = sv_rnum(s, to, &i);
+            sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
+            /* the tile's px: those inside its rectangle (Skia's rounded in), wherever they are (a part
+               outside the layer transparent) */
+            double xs4[2] = { sv_ax(full, t0, t1), sv_ax(full, t0 + t2, t1 + t3) }, ys4[2] = { sv_ay(full, t0, t1), sv_ay(full, t0 + t2, t1 + t3) };
+            double ex0 = ceil(fmin(xs4[0], xs4[1]) - 1e-6), ey0 = ceil(fmin(ys4[0], ys4[1]) - 1e-6);
+            double ex1 = floor(fmax(xs4[0], xs4[1]) + 1e-6), ey1 = floor(fmax(ys4[0], ys4[1]) + 1e-6);
+            if (ex1 > ex0 && ey1 > ey0 && fabs(ex0) < 1e8 && fabs(ey0) < 1e8 && ex1 - ex0 < 1e8 && ey1 - ey0 < 1e8) {
+                long tx0 = (long)ex0, ty0 = (long)ey0, tw = (long)(ex1 - ex0), th = (long)(ey1 - ey0);
+                for (int y = sub[1]; y < sub[3]; y++)
+                    for (int x = sub[0]; x < sub[2]; x++) {
+                        long px = tx0 + ((x - tx0) % tw + tw) % tw, py = ty0 + ((y - ty0) % th + th) % th;
+                        if (px < 0 || py < 0 || px >= W || py >= H) continue;
+                        size_t q = base + 4 * ((size_t)y * (size_t)W + (size_t)x), r2 = 4 * ((size_t)py * (size_t)W + (size_t)px);
+                        for (int c = 0; c < 4; c++) res[q + (size_t)c] = at(in1, r2 + (size_t)c);
+                    }
+            }
+        } else if (kind == SV_FE_IMAGE) {
+            /* its picture: its block drawn into a layer of its own, as a mask's content is */
+            sv_skip_line(s, to, &i);
+            size_t ia, ik, bf, bt;
+            if (sv_tok(s, to, &i, 0, &ia, &ik) && ik == 1 && s[ia] == 'I') {
+                sv_block(s, to, &i, &bf, &bt);
+                vector<float> pic;
+                if (dv->depth < 8 && bt > bf) sv_render(s, bt, bf, W, H, dv->dev, dv->depth + 1, nt, &pic);
+                if (len(pic) == NP * 4)
+                    for (size_t q = 0; q < NP * 4; q++) res[base + q] = sv_q8(at(pic, q));
+            }
+        } else if (kind == SV_FE_DIFFUSE || kind == SV_FE_SPECULAR) {
+            /* the input's alpha a surface, lit (Filter Effects 1, 15.10 and 15.22, as Skia lights
+               one): each px's normal (sv_light_normal) within the subregion, the light's direction
+               from the px to its place (mapped into the layer: its z by the average of the scales)
+               or a distant one's, its colour (in the primitive's space, a spot's falling off
+               within its cone, Skia's 0.016 of a cosine smoothing its edge); diffuse kd N.L times
+               it, opaque; specular ks (N.H)^exponent times it, its alpha its greatest channel */
+            double ss = sv_rnum(s, to, &i), kc = sv_rnum(s, to, &i), ex = sv_rnum(s, to, &i);
+            uint32_t col = sv_rhex(s, to, &i);
+            int lt = (int)sv_rnum(s, to, &i);
+            double lp[6] = { 0, 0, 0, 0, 0, 0 }, sexp = 1, cone = 90;
+            if (lt == 1) { lp[0] = sv_rnum(s, to, &i); lp[1] = sv_rnum(s, to, &i); }
+            else if (lt == 2 || lt == 3)
+                for (int q = 0; q < (lt == 3 ? 6 : 3); q++) lp[q] = sv_rnum(s, to, &i);
+            if (lt == 3) { sexp = sv_rnum(s, to, &i); cone = sv_rnum(s, to, &i); }
+            if (lt >= 1 && lt <= 3 && sub[2] > sub[0] && sub[3] > sub[1]) {
+                sv_fe_input_img(&src, &res, &spaces, i1, linear, NP, &in1);
+                double lc[3];
+                for (int c = 0; c < 3; c++) {
+                    double u = (col >> (24 - 8 * c) & 0xff) / 255.0;
+                    lc[c] = floor((linear ? sv_to_lin(u) : u) * 255 + 0.5);
+                }
+                double dir[3] = { 0, 0, 1 }, pos[3] = { 0, 0, 0 }, aim[3] = { 0, 0, 0 }, sdir[3] = { 0, 0, 0 };
+                if (lt == 1) {
+                    double az = lp[0] * M_PI / 180, el = lp[1] * M_PI / 180;
+                    dir[0] = cos(az) * cos(el);
+                    dir[1] = sin(az) * cos(el);
+                    dir[2] = sin(el);
+                } else {
+                    double zk = ((full.a + full.c) + (full.b + full.d)) / 2;
+                    pos[0] = sv_ax(full, lp[0], lp[1]);
+                    pos[1] = sv_ay(full, lp[0], lp[1]);
+                    pos[2] = lp[2] * zk;
+                    if (lt == 3) {
+                        aim[0] = sv_ax(full, lp[3], lp[4]);
+                        aim[1] = sv_ay(full, lp[3], lp[4]);
+                        aim[2] = lp[5] * zk;
+                        double sl = 0;
+                        for (int c = 0; c < 3; c++) { sdir[c] = aim[c] - pos[c]; sl += sdir[c] * sdir[c]; }
+                        sl = sqrt(sl);
+                        for (int c = 0; c < 3; c++) sdir[c] = sl > 0 ? sdir[c] / sl : 0;
+                    }
+                }
+                double cos_out = cos(cone * M_PI / 180), cos_in = cos_out + 0.016;
+                for (int y = sub[1]; y < sub[3]; y++)
+                    for (int x = sub[0]; x < sub[2]; x++) {
+                        double nrm[3], L[3], k = 1;
+                        sv_light_normal(&in1, W, sub, x, y, ss / 255, nrm);
+                        double z = floor(at(in1, 4 * ((size_t)y * (size_t)W + (size_t)x) + 3) * 255 + 0.5) * ss / 255;
+                        if (lt == 1) for (int c = 0; c < 3; c++) L[c] = dir[c];
+                        else {
+                            /* from the px's centre (Skia's shader's coordinate) */
+                            L[0] = pos[0] - (x + 0.5);
+                            L[1] = pos[1] - (y + 0.5);
+                            L[2] = pos[2] - z;
+                            double ll = sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+                            for (int c = 0; c < 3; c++) L[c] = ll > 0 ? L[c] / ll : 0;
+                            if (lt == 3) {
+                                double ca = -(L[0] * sdir[0] + L[1] * sdir[1] + L[2] * sdir[2]);
+                                k = 0;
+                                if (ca >= cos_out) {
+                                    k = pow(ca, sexp);
+                                    if (ca < cos_in) k *= (ca - cos_out) / 0.016;
+                                }
+                            }
+                        }
+                        double f;
+                        if (kind == SV_FE_DIFFUSE) f = kc * (nrm[0] * L[0] + nrm[1] * L[1] + nrm[2] * L[2]);
+                        else {
+                            double hv[3] = { L[0], L[1], L[2] + 1 }, hl = sqrt(hv[0] * hv[0] + hv[1] * hv[1] + hv[2] * hv[2]);
+                            double nh = hl > 0 ? (nrm[0] * hv[0] + nrm[1] * hv[1] + nrm[2] * hv[2]) / hl : 0;
+                            f = kc * pow(nh < 0 ? 0 : nh, ex);
+                        }
+                        double o[3], mx = 0;
+                        for (int c = 0; c < 3; c++) {
+                            double v = lc[c] * k * f;
+                            if (v > mx) mx = v;
+                            v = floor(v + 0.5);
+                            o[c] = v < 0 ? 0 : v > 255 ? 255 : v;
+                        }
+                        double oa = kind == SV_FE_DIFFUSE ? 255 : floor(mx + 0.5);
+                        if (oa > 255) oa = 255;
+                        size_t q = base + 4 * ((size_t)y * (size_t)W + (size_t)x);
+                        for (int c = 0; c < 3; c++) res[q + (size_t)c] = (float)(o[c] / 255);
+                        res[q + 3] = (float)(oa / 255);
+                    }
+            }
         }
         sv_skip_line(s, to, &i);
         /* the result cropped to the subregion */
-        int sub[4];
-        if (!sv_rect_px(dv, full, sr[0], sr[1], sr[2], sr[3], sub)) sub[0] = sub[1] = sub[2] = sub[3] = 0;
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++)
                 if (x < sub[0] || x >= sub[2] || y < sub[1] || y >= sub[3])
@@ -4788,6 +5614,7 @@ static void sv_filter_apply(const char *s, size_t from, size_t to, RC, size_t to
 static void sv_push(const char *s, size_t n, size_t *i, RC) {
     double op = sv_rnum(s, n, i);
     int hasclip = (int)sv_rnum(s, n, i), nk = (int)sv_rnum(s, n, i), hasmask = (int)sv_rnum(s, n, i), hasfilter = (int)sv_rnum(s, n, i);
+    int lin = (int)sv_rnum(s, n, i);
     sv_skip_line(s, n, i);
     size_t px = (size_t)dv->w * (size_t)dv->h;
     int32_t mk = -1;
@@ -4856,20 +5683,24 @@ static void sv_push(const char *s, size_t n, size_t *i, RC) {
     push_back(lop, op);
     push_back(lop, ffrom);
     push_back(lop, fto);
+    push_back(lop, (double)lin);
     push_back(lmk, mk);
 }
 
 static void sv_filter_apply(const char *s, size_t from, size_t to, RC, size_t top);
 
-/* a group's end: its layer through its filter, then blended into the one under it, by its
-   opacity and its clip's and mask's coverage */
+/* a group's end: its layer through its filter (or made linearRGB, a mask's content's group whose
+   color-interpolation asks it), then blended into the one under it, by its opacity and its
+   clip's and mask's coverage */
 static void sv_pop(const char *s, RC) {
     size_t px = (size_t)dv->w * (size_t)dv->h;
-    if (len(*lop) < 3 || len(*lay) < 2 * px * 4) return;
-    double op = at(*lop, len(*lop) - 3);
-    size_t ffrom = (size_t)at(*lop, len(*lop) - 2), fto = (size_t)at(*lop, len(*lop) - 1);
+    if (len(*lop) < 4 || len(*lay) < 2 * px * 4) return;
+    double op = at(*lop, len(*lop) - 4);
+    size_t ffrom = (size_t)at(*lop, len(*lop) - 3), fto = (size_t)at(*lop, len(*lop) - 2);
+    int lin = at(*lop, len(*lop) - 1) != 0;
     int32_t mk = at(*lmk, len(*lmk) - 1);
     if (fto > ffrom) sv_filter_apply(s, ffrom, fto, RA, len(*lay) - px * 4);
+    if (lin) sv_space(lay, len(*lay) - px * 4, px, 1);
     size_t top = len(*lay) - px * 4, under = top - px * 4, mo = mk >= 0 ? (size_t)mk * px : 0;
     float o = (float)(op < 0 ? 0 : op > 1 ? 1 : op);
     for (size_t p = 0; p < px; p++) {
@@ -4884,7 +5715,7 @@ static void sv_pop(const char *s, RC) {
         (*lay)[u + 3] = a + at(*lay, u + 3) * keep;
     }
     resize(lay, top);
-    resize(lop, len(*lop) - 3);
+    resize(lop, len(*lop) - 4);
     resize(lmk, len(*lmk) - 1);
     if (mk >= 0) resize(masks, mo);
 }
@@ -4893,6 +5724,81 @@ static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fon
 static int sv_doc_scene(const uint8_t *bytes, size_t n, double vw, double vh, vector<char> *scene);
 static int sv_head(const char *s, size_t n, double *vw, double *vh, int *clip, size_t *i);
 static int sv_doc_viewbox(const uint8_t *bytes, size_t n);
+
+/* the picture Chromium draws for an SVG image element whose picture fails to load or decode
+   (Blink's broken image resource, as its screenshots show it drawn at its natural size, 14 x 16
+   px), each pixel 0xRRGGBBAA */
+static const uint32_t sv_broken_px[224] = {
+    0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0xa3a3a3ff, 0x0000000a, 0x00000000, 0x00000000, 0x00000000,
+    0xa2a2a3ff, 0xf3f7feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf1f6feff, 0xf2f6fdff, 0x969696ff, 0xa2a2a3ff, 0x0000000a, 0x00000000, 0x00000000,
+    0xa1a1a2ff, 0xe4edfdff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xdae6fbff, 0xe0eafaff, 0x969696ff, 0xffffffff, 0xa1a1a2ff, 0x0000000a, 0x00000000,
+    0xa0a0a0ff, 0xdce9fdff, 0xcedef9ff, 0xcedef9ff, 0xffffffff, 0xffffffff, 0xcedef9ff, 0xcedef9ff, 0xd8e3f8ff, 0x969696ff, 0xffffffff, 0xffffffff, 0xa0a0a0ff, 0x0000000a,
+    0x9e9e9fff, 0xdbe8fdff, 0xcdddf8ff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xcdddf8ff, 0xd7e3f8ff, 0x919191ff, 0x919191ff, 0x919191ff, 0x919191ff, 0x9e9e9fff,
+    0x9d9d9eff, 0xdbe8fdff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xcbdbf7ff, 0xcedbf3ff, 0xe5edfbff, 0xeef3fcff, 0xeef3fcff, 0xf3f7feff, 0x9d9d9eff,
+    0x9b9b9cff, 0xdbe7fdff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xc9daf5ff, 0xccdcf6ff, 0xd2e0f7ff, 0xd5e2f7ff, 0xd5e2f7ff, 0xe3ecfdff, 0x9b9b9cff,
+    0x9a9a9bff, 0xd9e6fcff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xc6d8f4ff, 0xd9e6fcff, 0x9a9a9bff,
+    0x989899ff, 0xd8e6fcff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xc5d6f3ff, 0xd8e6fcff, 0x00000000,
+    0x969697ff, 0xd8e5fcff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc2d4f1ff, 0xb1ced4ff, 0xb4cfd9ff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc3d4f3ff, 0xc3d4f3ff, 0x00000000, 0x00000000,
+    0x959596ff, 0xd7e5fcff, 0xc0d1f0ff, 0xc0d1f0ff, 0x9fc6b7ff, 0x56a938ff, 0x58ae39ff, 0x58ae39ff, 0x6db35fff, 0xb2ccd8ff, 0xc0d1f0ff, 0x00000000, 0x00000000, 0x00000000,
+    0x939394ff, 0xd6e4fcff, 0xbed0f0ff, 0x91c1a0ff, 0x58ae3aff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x5dae42ff, 0x00000000, 0x00000000, 0x00000000, 0x939394ff,
+    0x929293ff, 0xd6e4fcff, 0x9dc4b4ff, 0x58ae3aff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x00000000, 0x00000000, 0x00000000, 0xd6e4fcff, 0x929293ff,
+    0x909092ff, 0xc7dde6ff, 0x5fb046ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x00000000, 0x00000000, 0x00000000, 0x6eb463ff, 0xd4e3faff, 0x909092ff,
+    0x8f8f90ff, 0x7dbe72ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x58ae39ff, 0x00000000, 0x00000000, 0x00000000, 0x58ae39ff, 0x58ae39ff, 0x8dc58cff, 0x8d908eff,
+    0x868687ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x00000000, 0x00000000, 0x00000000, 0x838384ff, 0x838384ff, 0x838384ff, 0x838384ff, 0x8a8b8bff,
+};
+
+static int sv_hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+
+/* base64 (RFC 4648's alphabet): bytes appended as its text, and its text's bytes appended
+   (white space and anything else passed over, '=' ending it) */
+static const char sv_b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static void sv_b64_put(vector<char> *out, const uint8_t *p, size_t n) {
+    for (size_t k = 0; k < n; k += 3) {
+        uint32_t v = (uint32_t)p[k] << 16 | (k + 1 < n ? (uint32_t)p[k + 1] << 8 : 0) | (k + 2 < n ? p[k + 2] : 0);
+        push_back(out, sv_b64[v >> 18 & 63]);
+        push_back(out, sv_b64[v >> 12 & 63]);
+        push_back(out, k + 1 < n ? sv_b64[v >> 6 & 63] : '=');
+        push_back(out, k + 2 < n ? sv_b64[v & 63] : '=');
+    }
+}
+static void sv_b64_get(const char *s, size_t n, vector<uint8_t> *out) {
+    uint32_t acc = 0;
+    int bits = 0;
+    for (size_t k = 0; k < n && s[k] != '='; k++) {
+        char c = s[k];
+        int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 : c == '+' || c == '-' ? 62 :
+                c == '/' || c == '_' ? 63 : -1;
+        if (v < 0) continue;
+        acc = acc << 6 | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            push_back(out, (uint8_t)(acc >> bits & 0xff));
+        }
+    }
+}
+/* a data: URL's body (Fetch's data: URL processor: its data percent-decoded, then base64-decoded
+   when its type says ;base64): 1, or 0 for no data: URL */
+static int sv_data_url(const char *s, size_t n, vector<uint8_t> *out) {
+    size_t a = sv_skip_ws(s, n, 0);
+    if (a + 5 > n || !sv_eq_ci(s + a, 5, "data:")) return 0;
+    size_t comma = a + 5;
+    while (comma < n && s[comma] != ',') comma++;
+    if (comma >= n) return 0;
+    int b64 = comma >= a + 12 && sv_eq_ci(s + comma - 7, 7, ";base64");
+    vector<uint8_t> raw;
+    for (size_t k = comma + 1; k < n; k++) {
+        int hi, lo;
+        if (s[k] == '%' && k + 2 < n && (hi = sv_hexval(s[k + 1])) >= 0 && (lo = sv_hexval(s[k + 2])) >= 0) {
+            push_back(raw, (uint8_t)(hi << 4 | lo));
+            k += 2;
+        } else push_back(raw, (uint8_t)s[k]);
+    }
+    clear(*out);
+    if (b64) sv_b64_get((const char *)data(raw), len(raw), out);
+    else append_range(out, data(raw), len(raw));
+    return 1;
+}
 
 /* a raster's mipmap level k (Skia's: each level half the last, rounded down, of its 2 x 2
    px's sum shifted down two bits; the colours premultiplied, eight bits): its pixels into
@@ -4941,21 +5847,51 @@ static void sv_draw_image(const char *s, size_t n, size_t *i, RC) {
     int slice = (int)sv_rnum(s, n, i), none = (int)sv_rnum(s, n, i), clip = (int)sv_rnum(s, n, i);
     uint32_t el = (uint32_t)sv_rnum(s, n, i);
     (void)clip;
-    if (!nt || dv->depth >= 8 || el == 0) return;
-    uint32_t r = 0;
-    for (uint32_t q = 1; q < nt->resource_len && !r; q++)
-        if (nt->resource[q].live && nt->resource[q].elem.index == el && nt->resource[q].kind == NET_KIND_IMAGE) r = q;
-    if (!r || nt->resource[r].outcome != NET_OUTCOME_OK) return;
-    amb_span bsp = nt->resource[r].body;
+    /* the picture: the bytes the scene carries (a data: URL's, in an SVG document drawn as an
+       image, which fetches nothing else), else the loader's for the element */
     vector<uint8_t> bytes, rgba;
-    append_range(bytes, (const uint8_t *)bytes_ptr(nt, bsp), bsp.len);
+    int given = 0, broken = 0;
+    double rw0 = 0, rh0 = 0;
+    {
+        size_t a, k, save = *i;
+        if (sv_tok(s, n, i, 1, &a, &k) && k == 1 && s[a] == 'd' && sv_tok(s, n, i, 1, &a, &k)) {
+            sv_b64_get(s + a, k, &bytes);
+            given = 1;
+        } else *i = save;
+    }
+    if (dv->depth >= 8 || el == 0 || (!given && !nt)) return;
+    if (!given) {
+        uint32_t r = 0;
+        for (uint32_t q = 1; q < nt->resource_len && !r; q++)
+            if (nt->resource[q].live && nt->resource[q].elem.index == el && nt->resource[q].kind == NET_KIND_IMAGE) r = q;
+        if (!r) return;
+        if (nt->resource[r].outcome != NET_OUTCOME_OK) broken = 1;
+        else {
+            amb_span bsp = nt->resource[r].body;
+            append_range(bytes, (const uint8_t *)bytes_ptr(nt, bsp), bsp.len);
+            rw0 = nt->resource[r].width;
+            rh0 = nt->resource[r].height;
+        }
+    }
     double nw = 0, nh = 0, ratio = 0;
     uint32_t pw = 0, ph = 0;
-    int svg = amb_svg_size(data(bytes), len(bytes), &nw, &nh, &ratio);
+    int svg = !broken && amb_svg_size(data(bytes), len(bytes), &nw, &nh, &ratio);
     if (!svg) {
-        if (!amb_image_decode(data(bytes), len(bytes), &rgba, &pw, &ph) || !pw || !ph) return;
-        nw = nt->resource[r].width > 0 ? nt->resource[r].width : pw;
-        nh = nt->resource[r].height > 0 ? nt->resource[r].height : ph;
+        if (broken || !amb_image_decode(data(bytes), len(bytes), &rgba, &pw, &ph) || !pw || !ph) {
+            /* a picture that failed to load or decode: Chromium's broken image (14 x 16 px, of no
+               natural size for an auto width or height, which draws nothing; nor under
+               preserveAspectRatio none, whose viewport Blink's SVGImagePainter makes empty for a
+               broken picture; measured) */
+            if (given || autow || autoh || none) return;
+            clear(rgba);
+            for (int q = 0; q < 224; q++)
+                for (int c = 0; c < 4; c++) push_back(rgba, (uint8_t)(sv_broken_px[q] >> (24 - 8 * c)));
+            pw = 14;
+            ph = 16;
+            rw0 = rh0 = 0;
+        }
+        nw = rw0 > 0 ? rw0 : pw;
+        nh = rh0 > 0 ? rh0 : ph;
         ratio = nw / nh;
     } else {
         /* an SVG document's concrete size (CSS Images 3's default sizing): its natural size; one
@@ -4984,9 +5920,12 @@ static void sv_draw_image(const char *s, size_t n, size_t *i, RC) {
        viewBox fitted there by its own, a document with none stretched to it from its natural
        size */
     double dx = ix, dy = iy, dw = iw, dh = ih;
-    int fitted = svg && !none && sv_doc_viewbox(data(bytes), len(bytes));
+    /* (an feImage's picture, clip 2, an SVG one too, from its natural size by its
+       preserveAspectRatio, as Blink's FEImage draws one: measured) */
+    int fe = clip == 2;
+    int fitted = svg && !fe && !none && sv_doc_viewbox(data(bytes), len(bytes));
     if (fitted) { nw = iw; nh = ih; }
-    if (!none && !svg) {
+    if (!none && (!svg || fe)) {
         double k = slice ? fmax(iw / nw, ih / nh) : fmin(iw / nw, ih / nh);
         dw = nw * k;
         dh = nh * k;
@@ -5242,7 +6181,8 @@ static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fon
     vector<float> facc;
     vector<uint8_t> mask;
     for (int g = 0; g < count; g++) {
-        uint32_t cp = (uint32_t)sv_rnum(s, n, i);
+        uint32_t gid = (uint32_t)sv_rnum(s, n, i);
+        int gface = (int)sv_rnum(s, n, i);
         double gx = sv_rnum(s, n, i), gy = sv_rnum(s, n, i);
         double X = sv_ax(full, gx, gy), Y = sv_ay(full, gx, gy);
         if (!(fabs(X) < 1e7 && fabs(Y) < 1e7)) continue;
@@ -5252,7 +6192,7 @@ static void sv_draw_glyphs(const char *s, size_t n, size_t *i, RC, const amb_fon
         int quarter = (int)((X + 0.125 - fx) * 4);
         int by = (int)floor(Y + 0.5);
         int w, h, ox, oy;
-        if (!amb_glyph_mask(f, face, cp, dsize, quarter / 4.0, italic, &facc, &mask, &w, &h, &ox, &oy)) continue;
+        if (!amb_glyph_mask_id(f, gface, gid, dsize, quarter / 4.0, italic, &facc, &mask, &w, &h, &ox, &oy)) continue;
         for (int yy = 0; yy < h; yy++) {
             int py = by + oy + yy;
             if (py < 0 || py >= dv->h) continue;
@@ -5701,7 +6641,35 @@ static int sv_doc_scene(const uint8_t *bytes, size_t n, double vw, double vh, ve
     amb_fonts f = {0};
     defer(f) { AMB_FONTS_DROP(f); }
     amb_fonts_load(&f);
-    amb_svg_scene(&d, &st, &firsts, &f, root, vw, vh, scene);
+    vector<char> sc;
+    amb_svg_scene(&d, &st, &firsts, &f, root, vw, vh, &sc);
+    /* a document drawn as an image fetches nothing (Chromium's, measured): an image element's (or
+       an feImage's) picture is drawn when its href is a data: URL, whose bytes its line then
+       carries, as base64 after a d; any other draws nothing, not even the broken image */
+    size_t i = 0, n2 = len(sc);
+    while (i < n2) {
+        size_t e = i;
+        while (e < n2 && at(sc, e) != '\n') e++;
+        append_range(scene, data(sc) + i, e - i);
+        if (e - i > 2 && at(sc, i) == 'i' && at(sc, i + 1) == ' ') {
+            size_t b = e;
+            while (b > i && at(sc, b - 1) != ' ') b--;
+            char num[24];
+            size_t k = e - b < 23 ? e - b : 23;
+            memcpy(num, data(sc) + b, k);
+            num[k] = 0;
+            uint32_t el = (uint32_t)strtoul(num, 0, 10);
+            vector<char> v;
+            vector<uint8_t> bytes;
+            if (el > 0 && el < d.node_len && (sv_attr_text(&d, el, "href", &v) || sv_attr_text(&d, el, "xlink:href", &v)) &&
+                sv_data_url(data(v), len(v), &bytes) && len(bytes)) {
+                sv_w(scene, " d ");
+                sv_b64_put(scene, data(bytes), len(bytes));
+            }
+        }
+        if (e < n2) push_back(scene, '\n');
+        i = e + 1;
+    }
     return 1;
 }
 

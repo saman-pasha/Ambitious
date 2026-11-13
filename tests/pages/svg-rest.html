@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: masks in linearRGB, textPath's path, pathLength, and what Chromium leaves out</title>
+<style>
+/* tests/pages/svg-rest.html -- as Chromium draws them, each measured: a mask's content painted in
+   linearRGB element by element where its color-interpolation (inherited) says so, its luminance
+   then taken (an attribute, a CSS rule, inherited from a group or the mask, overridden by a
+   shape, under an opacity, with mask-type alpha, a gradient); textPath's path attribute (over its
+   href; a shape that is no path named by its href none) and a path's pathLength (startOffset's
+   lengths and a stroke's dashes scaled by it, its percentages not; 0 a solid stroke, a negative
+   one none); and what Chromium does not draw:
+   textPath's side, method and spacing, vector-effect's values but non-scaling-stroke, a filter's
+   href (neither its attributes nor its primitives inherited) and feGaussianBlur's edgeMode. Held
+   to Chromium's screenshot region by region (svg-rest.shot.png, svg-rest.regions). */
+body { margin: 0; background: #fff }
+svg { position: absolute }
+text { font: 16px sans-serif }
+#ci-rule { color-interpolation: linearRGB }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <mask id="m-srgb" maskContentUnits="userSpaceOnUse"><rect width="100" height="100" fill="#808080"/></mask>
+    <mask id="m-lin" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="100" height="100" fill="#808080"/></mask>
+    <mask id="m-rule" maskContentUnits="userSpaceOnUse"><rect id="ci-rule" width="100" height="100" fill="#808080"/></mask>
+    <mask id="m-group" maskContentUnits="userSpaceOnUse"><g color-interpolation="linearRGB"><rect width="50" height="100" fill="#808080"/></g><rect x="50" width="50" height="100" fill="#808080"/></mask>
+    <mask id="m-over" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="50" height="100" fill="#808080" color-interpolation="sRGB"/><rect x="50" width="50" height="100" fill="#808080"/></mask>
+    <mask id="m-opacity" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="100" height="100" fill="#808080" opacity="0.5"/></mask>
+    <mask id="m-alpha" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB" style="mask-type: alpha"><rect width="100" height="100" fill="#808080" fill-opacity="0.5"/></mask>
+    <mask id="m-mix" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="100" height="100" fill="#ff0000"/><rect x="25" y="25" width="50" height="50" fill="#00ff00" fill-opacity="0.5"/></mask>
+    <linearGradient id="g-bw"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
+    <mask id="m-grad" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="100" height="100" fill="url(#g-bw)"/></mask>
+    <mask id="m-gradsrgb" maskContentUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#g-bw)"/></mask>
+    <path id="arc" d="M 10 60 Q 50 0 90 60"/>
+    <path id="arcl" d="M 10 60 Q 50 0 90 60" pathLength="10"/>
+    <path id="linel" d="M 10 50 L 90 50" pathLength="200"/>
+    <filter id="base" x="0" y="0" width="1" height="1"><feFlood flood-color="#30a030"/></filter>
+    <filter id="href-only" href="#base"/>
+    <filter id="href-own" href="#base"><feFlood flood-color="#a03030"/></filter>
+    <filter id="blur-dup" x="0" y="0" width="1" height="1"><feGaussianBlur stdDeviation="5" edgeMode="duplicate"/></filter>
+    <filter id="blur-wrap" x="0" y="0" width="1" height="1"><feGaussianBlur stdDeviation="5" edgeMode="wrap"/></filter>
+  </defs>
+</svg>
+<!-- row 1: masks' color-interpolation -->
+<svg id="k-srgb" style="left:5px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-srgb)"/></svg>
+<svg id="k-lin" style="left:117px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-lin)"/></svg>
+<svg id="k-rule" style="left:229px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-rule)"/></svg>
+<svg id="k-group" style="left:341px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-group)"/></svg>
+<svg id="k-over" style="left:453px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-over)"/></svg>
+<svg id="k-opacity" style="left:565px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-opacity)"/></svg>
+<svg id="k-alpha" style="left:677px;top:5px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-alpha)"/></svg>
+<!-- row 2: more masks; textPath's path and pathLength -->
+<svg id="k-mix" style="left:5px;top:117px" width="100" height="100"><rect width="100" height="100" fill="#204080" mask="url(#m-mix)"/></svg>
+<svg id="k-grad" style="left:117px;top:117px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-grad)"/></svg>
+<svg id="k-gradsrgb" style="left:229px;top:117px" width="100" height="100"><rect width="100" height="100" fill="#000" mask="url(#m-gradsrgb)"/></svg>
+<svg id="p-path" style="left:341px;top:117px" width="100" height="100"><text><textPath path="M 10 80 Q 50 20 90 80">Text on</textPath></text></svg>
+<svg id="p-pathhref" style="left:453px;top:117px" width="100" height="100"><text><textPath href="#arc" path="M 10 80 Q 50 20 90 80">Text on</textPath></text></svg>
+<svg id="p-offset" style="left:565px;top:117px" width="100" height="100"><text><textPath href="#arcl" startOffset="5">Text on</textPath></text></svg>
+<svg id="p-offpct" style="left:677px;top:117px" width="100" height="100"><text><textPath href="#linel" startOffset="50%">Text</textPath></text></svg>
+<!-- row 3: dashes scaled by pathLength -->
+<svg id="d-path" style="left:5px;top:229px" width="100" height="100"><path d="M 10 50 L 90 50" pathLength="200" stroke="#000" stroke-width="4" stroke-dasharray="20 20"/></svg>
+<svg id="d-offset" style="left:117px;top:229px" width="100" height="100"><path d="M 10 50 L 90 50" pathLength="200" stroke="#000" stroke-width="4" stroke-dasharray="20 20" stroke-dashoffset="10"/></svg>
+<svg id="d-rect" style="left:229px;top:229px" width="100" height="100"><rect x="10" y="10" width="80" height="80" pathLength="100" stroke="#000" stroke-width="4" stroke-dasharray="25 25" fill="none"/></svg>
+<svg id="d-poly" style="left:341px;top:229px" width="100" height="100"><polyline points="10,90 50,10 90,90" pathLength="9" stroke="#2060c0" stroke-width="5" stroke-dasharray="1 1" fill="none"/></svg>
+<svg id="d-zero" style="left:453px;top:229px" width="100" height="100"><path d="M 10 50 L 90 50" pathLength="0" stroke="#000" stroke-width="4" stroke-dasharray="20 20"/></svg>
+<svg id="d-neg" style="left:565px;top:229px" width="100" height="100"><path d="M 10 50 L 90 50" pathLength="-5" stroke="#000" stroke-width="4" stroke-dasharray="20 20"/></svg>
+<svg id="d-use" style="left:677px;top:229px" width="100" height="100"><use href="#linel" stroke="#000" stroke-width="4" stroke-dasharray="20 20"/></svg>
+<!-- row 4: what Chromium leaves out -->
+<svg id="x-side" style="left:5px;top:341px" width="100" height="100"><text><textPath href="#arc" side="right" method="stretch" spacing="auto">Text on</textPath></text></svg>
+<svg id="x-size" style="left:117px;top:341px" width="100" height="100"><g transform="scale(2)"><rect x="10" y="10" width="20" height="20" fill="none" stroke="#000" stroke-width="4" vector-effect="non-scaling-size"/></g></svg>
+<svg id="x-rot" style="left:229px;top:341px" width="100" height="100"><g transform="rotate(20 50 50)"><rect x="25" y="25" width="50" height="50" fill="none" stroke="#000" stroke-width="4" vector-effect="non-rotation"/></g></svg>
+<svg id="x-fixed" style="left:341px;top:341px" width="100" height="100"><g transform="translate(20,20)"><rect x="10" y="10" width="20" height="20" fill="#000" vector-effect="fixed-position"/></g></svg>
+<svg id="x-href" style="left:453px;top:341px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#000" filter="url(#href-only)"/><rect x="5" y="5" width="10" height="10" fill="#888"/></svg>
+<svg id="x-hrefown" style="left:565px;top:341px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#000" filter="url(#href-own)"/></svg>
+<svg id="x-blurdup" style="left:677px;top:341px" width="100" height="100"><g filter="url(#blur-dup)"><rect x="10" y="10" width="80" height="80" fill="#e0e0e0"/><rect x="10" y="10" width="20" height="80" fill="#c03030"/><rect x="70" y="10" width="20" height="80" fill="#3030c0"/></g></svg>
+<svg id="x-shapes" style="left:117px;top:453px" width="100" height="100"><circle id="tp-circle" cx="50" cy="50" r="35" fill="none" stroke="#ccc"/><rect id="tp-rect" x="10" y="20" width="80" height="60" fill="none" stroke="#ccc"/><text><textPath href="#tp-circle">around the circle</textPath><textPath href="#tp-rect">around the rect</textPath></text></svg>
+<svg id="x-blurwrap" style="left:5px;top:453px" width="100" height="100"><g filter="url(#blur-wrap)"><rect x="10" y="10" width="80" height="80" fill="#e0e0e0"/><rect x="10" y="10" width="80" height="20" fill="#c03030"/><rect x="10" y="70" width="80" height="20" fill="#3030c0"/></g></svg>
+</body>
+</html>
