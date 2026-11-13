@@ -96,15 +96,15 @@ ok: layout snapshot of document 1 at revision 1
 ok: net snapshot of document 1 at revision 3
 ok: a11y snapshot of document 1 at revision 1
 ok: script snapshot of document 1 at revision 0
-ok: 7 section(s), 1751 facts
+ok: 7 section(s), 1762 facts
 > query member(M, [dom, html, css, layout, net, a11y, script]), amb_reason_schema_decl(M, fact(F/K, _)), functor(G, F, K), call(G)
 > echo -- end
 -- end
 > snapshot WORK/after.pl
 > reasoner
-reasoner: running; 1 start(s), 15 requests: 1 whole snapshot(s), 2 delta(s) (17 predicates edited, 38 rebuilt); 1751 facts held
+reasoner: running; 1 start(s), 15 requests: 1 whole snapshot(s), 2 delta(s) (17 predicates edited, 38 rebuilt); 1762 facts held
 reasoner: the last snapshot that changed reached it as a delta: 59 facts retracted, 84 added
 > quit
 exit 0
 -- the same requests asked of a fresh reasoner over the whole snapshot after the clicks:
-the same 1833 lines, 1751 of them the facts held, in order
+the same 1844 lines, 1762 of them the facts held, in order

@@ -52,14 +52,14 @@ an inline element's background and padding (ok, invariants: 0 broken)
 a table's columns (ok, invariants: 0 broken)
   #a cell: content 11,11 32x18; margins 0 0 0 0; width column of 34
     line 11,11 32x18 baseline 25: [text 11+32 'short']
-  #b cell: content 47,11 118.617x18; margins 0 0 0 0; width column of 120.617
-    line 47,11 118.617x18 baseline 25: [text 47+118.617 'a much longer cell']
-  #t table: content 8,8 160.617x24; margins 0 623.383 0 0; width shrink_to_fit of 784
+  #b cell: content 47,11 118.625x18; margins 0 0 0 0; width column of 120.625
+    line 47,11 118.625x18 baseline 25: [text 47+118.617 'a much longer cell']
+  #t table: content 8,8 160.625x24; margins 0 623.375 0 0; width shrink_to_fit of 784
 a table's declared width, shared (ok, invariants: 0 broken)
-  #a cell: content 11,11 45.7489x18; margins 0 0 0 0; width column of 47.7489
-    line 11,11 45.7489x18 baseline 25: [text 11+7.10156 'a']
-  #b cell: content 60.7489,11 344.251x18; margins 0 0 0 0; width column of 346.251
-    line 60.7489,11 344.251x18 baseline 25: [text 60.7489+64 'bbbbbbbb']
+  #a cell: content 11,11 45.7812x18; margins 0 0 0 0; width column of 47.7812
+    line 11,11 45.7812x18 baseline 25: [text 11+7.10156 'a']
+  #b cell: content 60.7812,11 344.219x18; margins 0 0 0 0; width column of 346.219
+    line 60.7812,11 344.219x18 baseline 25: [text 60.7812+64 'bbbbbbbb']
   #t table: content 8,8 400x24; margins 0 384 0 0; width declared of 784
 a list item's marker (ok, invariants: 0 broken)
   #a list_item: content 48,16 744x18; margins 0 0 0 0; width fill of 744
@@ -222,8 +222,8 @@ quirks: the body's first p's top margin left out, the body filling the viewport 
     line 8,42 784x18 baseline 56: [text 8+10.6719 'B']
   #t block: content 8,8 784x576; margins 8 8 8 8; width fill of 800
 quirks: a table cell's p's margins left out, its h1's bottom one kept (ok, invariants: 0 broken)
-  #a cell: content 11,11 8x58.44; margins 0 0 0 0; width column of 10
-  #b cell: content 23,11 16x58.44; margins 0 0 0 0; width column of 18
+  #a cell: content 11,11 8x58.4375; margins 0 0 0 0; width column of 10
+  #b cell: content 23,11 16x58.4375; margins 0 0 0 0; width column of 18
 quirks: an inline-block alone on its line, no strut (ok, invariants: 0 broken)
   #a block: content 8,8 784x10; margins 0 0 0 0; width fill of 784
     line 8,8 784x10 baseline 18: [atomic 8+10 '']
@@ -237,7 +237,7 @@ quirks: a percentage height through an auto one, to the body's (ok, invariants: 
   #t block: content 8,8 784x292; margins 0 0 0 0; width fill of 784
 quirks: a cell's height its border box's (ok, invariants: 0 broken)
   #a cell: content 20,20 8x30; margins 0 0 0 0; width column of 28
-    line 20,20 8x18 baseline 34: [text 20+8 'x']
+    line 20,26 8x18 baseline 40: [text 20+8 'x']
 limited quirks: no strut, but the margins and heights of standards mode (ok, invariants: 0 broken)
   #a block: content 8,16 784x10; margins 16 0 16 0; width fill of 784
     line 8,16 784x10 baseline 26: [atomic 8+10 '']

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: computed values</title>
+<!-- the table properties' computed values as Chromium gives them: border-collapse, border-spacing's
+     two lengths (-webkit-border-horizontal-spacing and -vertical-spacing: whole px, Blink's shorts:
+     a hundredth added and truncated, one past a short's range 0), empty-cells and caption-side, all
+     inherited, and table-layout, not; the user agent's 2px; the cellspacing attribute (a dimension's
+     digits, no percentage); values Chromium refuses (a percentage, a negative length, three lengths,
+     caption-side: left). -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { border-collapse: collapse; empty-cells: hide; caption-side: bottom; table-layout: fixed; border-spacing: 3px 7px; }
+</style></head><body>
+<table id=v1 data-check="border-collapse -webkit-border-horizontal-spacing -webkit-border-vertical-spacing empty-cells table-layout caption-side"><tr><td id=v1a data-check="border-collapse -webkit-border-horizontal-spacing empty-cells table-layout">a</td></tr></table>
+<table id=v2 class=c data-check="border-collapse -webkit-border-horizontal-spacing -webkit-border-vertical-spacing empty-cells table-layout caption-side"><caption id=v2c data-check="caption-side table-layout">c</caption><tr><td id=v2a data-check="border-collapse -webkit-border-horizontal-spacing -webkit-border-vertical-spacing empty-cells table-layout">a</td></tr></table>
+<table id=v3 style="border-spacing: 1em" data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v4 style="border-spacing: 2.7px 3.99px" data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v5 style="border-spacing: 0.4em 40000px" data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v6 style="border-spacing: 10%" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v7 style="border-spacing: 4px -2px" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v8 style="border-spacing: 1px 2px 3px" data-check="-webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v9 style="-webkit-border-horizontal-spacing: 9px" data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v10 cellspacing=7 data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing"><tr><td>a</td></tr></table>
+<table id=v11 cellspacing="9.9" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v12 cellspacing="10%" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v13 cellspacing=".5" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v14 cellspacing="3em" style="border-spacing: 5px" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+<table id=v15 style="caption-side: left; empty-cells: none; table-layout: none; border-collapse: none" data-check="caption-side empty-cells table-layout border-collapse"><tr><td>a</td></tr></table>
+<div id=v16 style="border-spacing: 4px 6px; caption-side: bottom" data-check="-webkit-border-horizontal-spacing -webkit-border-vertical-spacing caption-side"><span id=v16s data-check="-webkit-border-vertical-spacing caption-side">inherited</span></div>
+<table id=v17 style="border-spacing: calc(2px + 0.5em)" data-check="-webkit-border-horizontal-spacing"><tr><td>a</td></tr></table>
+</body></html>

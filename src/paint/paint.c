@@ -12,7 +12,13 @@
    the element's first fragment), text and its shadows, decorations, list markers --
    its child boxes, its outline), then those with z-index auto or 0 in tree
    order and those with a positive one by z-index. A box that clips its overflow
-   clips what is in it to its padding box.
+   clips what is in it to its padding box. A table's columns, row groups and rows
+   draw their backgrounds in their cells' border boxes, each placed in the part's
+   own box (Blink's table painters), under each cell's own; an empty cell that
+   empty-cells: hide leaves undrawn draws neither its background nor its borders
+   (its parts' backgrounds are drawn in it all the same); a collapsing table's
+   edges (layout's cborders) are drawn over its cells, each a box side as Blink
+   draws one, snapped to whole pixels.
 
    A box: its outer box-shadows (offset, spread, blurred: three box blurs, a
    Gaussian's), its background colour and layers (url() images, linear and
@@ -2706,9 +2712,17 @@ static void pt_box_drawn(const layout_tree *t, const net_loader *nt, uint32_t b,
         }
     }
 }
-/* a box drawn: its images (replaced content and backgrounds) sampled as its image-rendering asks */
+static void pt_table_part(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx);
+/* a box drawn: its images (replaced content and backgrounds) sampled as its image-rendering asks; a table's row group's,
+   row's or column's background in its cells instead, and an empty cell empty-cells: hide leaves undrawn not at all */
 static void pt_box(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, uint32_t skip_bg, vector<uint32_t> *icache,
                    vector<uint8_t> *ipx) {
+    layout_box_kind k = t->box[b].kind;
+    if (k == LAYOUT_BOX_KIND_ROW_GROUP || k == LAYOUT_BOX_KIND_ROW || k == LAYOUT_BOX_KIND_COLUMN) {
+        pt_table_part(t, nt, b, c, icache, ipx);
+        return;
+    }
+    if (k == LAYOUT_BOX_KIND_CELL && t->box[b].cell_hidden) return;
     int nearest = c->nearest;
     c->nearest = t->box[b].irender;
     pt_box_drawn(t, nt, b, c, skip_bg, icache, ipx);
@@ -3195,6 +3209,7 @@ static int pt_context(const layout_tree *t, uint32_t b) {
 }
 
 static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box);
+static void pt_table_flow(PCTX, uint32_t b, vector<uint32_t> *list);
 static void pt_ctx(PCTX, uint32_t b);
 static void pt_effects_plain(PCTX, uint32_t b, int ctx);
 static void pt_effects_draw(PCTX, uint32_t b, int ctx);
@@ -4354,6 +4369,187 @@ static void pt_effects_plain(PCTX, uint32_t b, int ctx) {
     if (t->box[b].cpath.len) pt_clip_path(t, b, c, &unclipped);
 }
 
+/* ---- tables' parts and collapsed borders ---- */
+
+/* a table part's background (a row group's, a row's, a column's: CSS 2.1, 17.5.1, as Blink's TableRowPainter,
+   TableSectionPainter and TableRowPainter::PaintColumnsBackground paint it) drawn in one of its cells: its colour over
+   the cell's border box, its layers placed in the part's own box, held to the cell's */
+static void pt_part_in_cell(const layout_tree *t, const net_loader *nt, uint32_t b, uint32_t cell, amb_canvas *c, vector<uint32_t> *icache,
+                            vector<uint8_t> *ipx) {
+    double x0 = t->box[cell].x - t->box[cell].pl - t->box[cell].bl, y0 = t->box[cell].y - t->box[cell].pt - t->box[cell].bt;
+    double x1 = t->box[cell].x + t->box[cell].w + t->box[cell].pr + t->box[cell].br, y1 = t->box[cell].y + t->box[cell].h + t->box[cell].pb + t->box[cell].bb;
+    double keep[4] = { c->cx0, c->cy0, c->cx1, c->cy1 };
+    c->cx0 = fmax(c->cx0, x0);
+    c->cy0 = fmax(c->cy0, y0);
+    c->cx1 = fmin(c->cx1, x1);
+    c->cy1 = fmin(c->cy1, y1);
+    if (c->cx1 > c->cx0 && c->cy1 > c->cy0) {
+        if (t->box[b].background & 0xff) pt_fill(c, x0, y0, x1, y1, t->box[b].background);
+        double rad[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+        if (t->box[b].bg_image.len) pt_layers(t, nt, b, c, icache, ipx, rad, 0);
+    }
+    c->cx0 = keep[0];
+    c->cy0 = keep[1];
+    c->cx1 = keep[2];
+    c->cy1 = keep[3];
+}
+/* a table part's background in its cells: a row's in its own, a row group's in its rows', a column's or column group's
+   in the cells that begin in its columns (their border boxes' left edges in its box) */
+static void pt_table_part(const layout_tree *t, const net_loader *nt, uint32_t b, amb_canvas *c, vector<uint32_t> *icache, vector<uint8_t> *ipx) {
+    if (!(t->box[b].background & 0xff) && !t->box[b].bg_image.len) return;
+    layout_box_kind k = t->box[b].kind;
+    if (k == LAYOUT_BOX_KIND_ROW) {
+        for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next)
+            if (t->box[ch].kind == LAYOUT_BOX_KIND_CELL) pt_part_in_cell(t, nt, b, ch, c, icache, ipx);
+        return;
+    }
+    if (k == LAYOUT_BOX_KIND_ROW_GROUP) {
+        for (uint32_t r = t->box[b].first_child; r; r = t->box[r].next)
+            for (uint32_t ch = t->box[r].first_child; ch; ch = t->box[ch].next)
+                if (t->box[ch].kind == LAYOUT_BOX_KIND_CELL) pt_part_in_cell(t, nt, b, ch, c, icache, ipx);
+        return;
+    }
+    uint32_t tb = t->box[b].parent;
+    while (tb && t->box[tb].kind != LAYOUT_BOX_KIND_TABLE) tb = t->box[tb].parent;
+    if (!tb) return;
+    double cx0 = t->box[b].x, cx1 = t->box[b].x + t->box[b].w;
+    for (uint32_t g = t->box[tb].first_child; g; g = t->box[g].next) {
+        if (t->box[g].kind != LAYOUT_BOX_KIND_ROW_GROUP) continue;
+        for (uint32_t r = t->box[g].first_child; r; r = t->box[r].next)
+            for (uint32_t ch = t->box[r].first_child; ch; ch = t->box[ch].next) {
+                if (t->box[ch].kind != LAYOUT_BOX_KIND_CELL) continue;
+                double lx = t->box[ch].x - t->box[ch].pl - t->box[ch].bl;
+                if (lx >= cx0 - 0.01 && lx < cx1 - 0.01) pt_part_in_cell(t, nt, b, ch, c, icache, ipx);
+            }
+    }
+}
+
+/* a horizontal (along x: horiz) or vertical band [a0, a1) of the canvas from b0 to b1 across it, its ends' pixels
+   covered as far as the band reaches (anti-aliased, as Skia draws a dash's butt ends), in col */
+static void pt_band(amb_canvas *c, double a0, double a1, double b0, double b1, int horiz, uint32_t col) {
+    if (a1 <= a0 || b1 <= b0) return;
+    int ia0 = (int)floor(a0), ia1 = (int)ceil(a1);
+    for (int i = ia0; i < ia1; i++) {
+        double cov = fmin(a1, i + 1.0) - fmax(a0, (double)i);
+        if (cov <= 0) continue;
+        if (cov >= 0.999) {
+            if (horiz) pt_fill(c, i, b0, i + 1, b1, col);
+            else pt_fill(c, b0, i, b1, i + 1, col);
+            continue;
+        }
+        int kx0, ky0, kx1, ky1;
+        pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+        int j0 = (int)floor(b0 + 0.5), j1 = (int)floor(b1 + 0.5);
+        for (int j = j0; j < j1; j++) {
+            int x = horiz ? i : j, y = (int)((horiz ? j : i) - c->oy);
+            if (x < kx0 || x >= kx1 || y < ky0 || y >= ky1) continue;
+            pt_blend(c, x, y, col, cov);
+        }
+    }
+}
+/* a collapsed edge drawn as Blink's BoxBorderPainter::DrawBoxSide draws one (DrawLineForBoxSide, no adjacent widths): the
+   snapped rectangle (x1, y1)-(x2, y2) as a top side (0, a row's edge) or a left side (3, a column's), in its style --
+   solid; double, a third (rounded up) at each end; groove and ridge, two halves of inset and outset (the first half the
+   larger); inset and outset shaded as a box's top or left side; dashed and dotted along the band's middle, Blink's
+   dashes of 2 (3 under 3px) its width with gaps of 1 (2), spread to fit, as DrawLineWithStyle strokes them -- a double
+   under 3px or a groove or ridge under 2px solid */
+static void pt_cedge(amb_canvas *c, int x1, int y1, int x2, int y2, int side, int bs, uint32_t col) {
+    int horiz = side == 0;
+    int thick = horiz ? y2 - y1 : x2 - x1, len0 = horiz ? x2 - x1 : y2 - y1;
+    if (len0 <= 0 || thick <= 0 || bs <= LAY_BS_HIDDEN) return;
+    if (bs == LAY_BS_DOUBLE && thick < 3) bs = LAY_BS_SOLID;
+    if ((bs == LAY_BS_GROOVE || bs == LAY_BS_RIDGE) && thick < 2) bs = LAY_BS_SOLID;
+    if (bs == LAY_BS_DASHED || bs == LAY_BS_DOTTED) {
+        double w = thick;
+        double dash = bs == LAY_BS_DOTTED ? w : w >= 3 ? 2 * w : 3 * w, gap = bs == LAY_BS_DOTTED ? w : w >= 3 ? w : 2 * w;
+        double a = horiz ? x1 : y1, z = horiz ? x2 : y2;
+        /* the line's middle across the band: a pixel's middle when the width is odd */
+        double mid = (horiz ? y1 : x1) + thick / 2 + (thick % 2 ? 0.5 : 0), b0 = mid - w / 2, b1 = mid + w / 2;
+        if (len0 <= 2 * dash) { pt_band(c, a, z, b0, b1, horiz, col); return; }
+        if (len0 <= 2 * dash + gap) {
+            double m = len0 / (2 * dash + gap);
+            pt_band(c, a, a + dash * m, b0, b1, horiz, col);
+            pt_band(c, a + (dash + gap) * m, a + (2 * dash + gap) * m, b0, b1, horiz, col);
+            return;
+        }
+        long n = 0;
+        if (bs == LAY_BS_DASHED) gap = pt_dash_gap(len0, dash, gap, &n);
+        for (double s0 = a; s0 < z; s0 += dash + gap) pt_band(c, s0, fmin(s0 + dash, z), b0, b1, horiz, col);
+        return;
+    }
+    if (bs == LAY_BS_DOUBLE) {
+        int t3 = (thick + 1) / 3;
+        if (horiz) { pt_fill(c, x1, y1, x2, y1 + t3, col); pt_fill(c, x1, y2 - t3, x2, y2, col); }
+        else { pt_fill(c, x1, y1, x1 + t3, y2, col); pt_fill(c, x2 - t3, y1, x2, y2, col); }
+        return;
+    }
+    if (bs == LAY_BS_GROOVE || bs == LAY_BS_RIDGE) {
+        int s1 = bs == LAY_BS_GROOVE ? LAY_BS_INSET : LAY_BS_OUTSET, s2 = bs == LAY_BS_GROOVE ? LAY_BS_OUTSET : LAY_BS_INSET;
+        if (horiz) {
+            int m = (y1 + y2 + 1) / 2;
+            pt_cedge(c, x1, y1, x2, m, side, s1, col);
+            pt_cedge(c, x1, m, x2, y2, side, s2, col);
+        } else {
+            int m = (x1 + x2 + 1) / 2;
+            pt_cedge(c, x1, y1, m, y2, side, s1, col);
+            pt_cedge(c, m, y1, x2, y2, side, s2, col);
+        }
+        return;
+    }
+    if (bs == LAY_BS_INSET || bs == LAY_BS_OUTSET) col = pt_inset(col, side, bs == LAY_BS_INSET);
+    pt_fill(c, x1, y1, x2, y2, col);
+}
+/* the number at s[*i] (a sign, digits, a point and digits; a px after it passed over), *i past it: 1, or 0 for none */
+static int pt_cnum(const char *s, size_t n, size_t *i, double *v) {
+    size_t k = *i;
+    while (k < n && s[k] == ' ') k++;
+    double sign = 1, x = 0, scale = 0;
+    if (k < n && s[k] == '-') { sign = -1; k++; }
+    size_t d0 = k;
+    for (; k < n && ((s[k] >= '0' && s[k] <= '9') || (s[k] == '.' && scale == 0)); k++) {
+        if (s[k] == '.') { scale = 1; continue; }
+        x = x * 10 + (s[k] - '0');
+        if (scale > 0) scale *= 10;
+    }
+    if (k == d0) return 0;
+    if (k + 1 < n && s[k] == 'p' && s[k + 1] == 'x') k += 2;
+    *v = sign * (scale > 0 ? x / scale : x);
+    *i = k;
+    return 1;
+}
+/* a collapsing table's edges (layout's cborders: each `x y w h side style colour' from its border box's top left), each
+   snapped to whole pixels as Blink's ToPixelSnappedRect snaps it and drawn in turn */
+static void pt_cborders(const layout_tree *t, uint32_t b, amb_canvas *c) {
+    vector<char> s;
+    amb_span sp = t->box[b].cborders;
+    append_range(s, text_ptr(t, sp), sp.len);
+    double ox = t->box[b].x - t->box[b].pl - t->box[b].bl, oy = t->box[b].y - t->box[b].pt - t->box[b].bt;
+    size_t i = 0, n = len(s);
+    while (i < n) {
+        size_t e = i;
+        while (e < n && at(s, e) != '\n') e++;
+        double v[6];
+        size_t k = i;
+        int ok = 1;
+        for (int q = 0; q < 6 && ok; q++) ok = pt_cnum(data(s), e, &k, &v[q]);
+        while (k < e && at(s, k) == ' ') k++;
+        uint32_t col = 0;
+        if (ok && k < e && at(s, k) == '#')
+            for (k++; k < e; k++) {
+                char h = at(s, k);
+                int dv = h >= '0' && h <= '9' ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10 : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1;
+                if (dv < 0) break;
+                col = col << 4 | (uint32_t)dv;
+            }
+        else ok = 0;
+        i = e + 1;
+        if (!ok) continue;
+        int x1 = (int)floor(ox + v[0] + 0.5), y1 = (int)floor(oy + v[1] + 0.5);
+        int x2 = (int)floor(ox + v[0] + v[2] + 0.5), y2 = (int)floor(oy + v[1] + v[3] + 0.5);
+        pt_cedge(c, x1, y1, x2, y2, (int)v[4], (int)v[5], col);
+    }
+}
+
 /* positioned boxes drawn in stacking order: by z-index (auto as 0), the tree's order among
    equals; those below zero (neg 1) or the rest */
 static void pt_order(PCTX, const vector<uint32_t> *list, int neg) {
@@ -4414,6 +4610,10 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
     pt_lines(t, nt, b, c, f, webmap, entries, table, masks, acc, mask, icache, ipx);
     vector<uint32_t> inner;
     int holds = clips || pt_css_clips(t, b);
+    if (t->box[b].kind == LAYOUT_BOX_KIND_TABLE) {
+        if (holds) pt_table_flow(PARGS, b, &inner);
+        else pt_table_flow(PARGS, b, later);
+    } else
     for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next) {
         if (pt_positioned(t, ch)) {
             if (holds) push_back(inner, ch);
@@ -4438,6 +4638,57 @@ static void pt_flow(PCTX, uint32_t b, vector<uint32_t> *later, int with_box) {
     c->cx1 = save[2];
     c->cy1 = save[3];
     if (with_box) pt_outline(t, b, c);
+}
+
+/* a part of a table drawn in the two passes: neither positioned nor drawn through an effect */
+static int pt_plain(const layout_tree *t, uint32_t x) {
+    return !pt_positioned(t, x) && !pt_in_3d(t, x) && t->box[x].opacity >= 1 && !pt_transformed(t, x) && !t->box[x].filter.len &&
+           !t->box[x].backdrop.len && !t->box[x].p3d && !t->box[x].cpath.len && !t->box[x].fx.len;
+}
+/* a child of a flow drawn in its place: one positioned kept in list for its stacking context, one of an effect through
+   it, else its flow */
+static void pt_child(PCTX, uint32_t ch, vector<uint32_t> *list) {
+    if (pt_positioned(t, ch)) { push_back(list, ch); return; }
+    if (pt_in_3d(t, ch)) return;
+    if (!pt_plain(t, ch)) { pt_effects(PARGS, ch, 0); return; }
+    pt_flow(PARGS, ch, list, 1);
+}
+/* a table's children (CSS 2.1, Appendix E; Blink's table painters, BoxFragmentPainter::PaintObject): its captions and
+   columns in their order; then its row groups', rows' and cells' decorations (a part's background in its cells, a cell's
+   own); then a collapsing table's edges, after the backgrounds; then the cells' content, so that a cell's text runs over
+   its neighbours' backgrounds, as a stacking context's block backgrounds precede its inline content. A part positioned
+   or drawn through an effect is drawn whole, in its place, in the last pass; positioned ones kept in list */
+static void pt_table_flow(PCTX, uint32_t b, vector<uint32_t> *list) {
+    for (uint32_t ch = t->box[b].first_child; ch; ch = t->box[ch].next)
+        if (t->box[ch].kind != LAYOUT_BOX_KIND_ROW_GROUP) pt_child(PARGS, ch, list);
+    for (uint32_t g = t->box[b].first_child; g; g = t->box[g].next) {
+        if (t->box[g].kind != LAYOUT_BOX_KIND_ROW_GROUP || !pt_plain(t, g)) continue;
+        pt_box(t, nt, g, c, skip_bg, icache, ipx);
+        for (uint32_t r = t->box[g].first_child; r; r = t->box[r].next) {
+            if (!pt_plain(t, r)) continue;
+            pt_box(t, nt, r, c, skip_bg, icache, ipx);
+            for (uint32_t ce = t->box[r].first_child; ce; ce = t->box[ce].next) {
+                if (!pt_plain(t, ce)) continue;
+                pt_box(t, nt, ce, c, skip_bg, icache, ipx);
+                pt_text_bg(PARGS, ce);
+            }
+        }
+    }
+    if (t->box[b].cborders.len) pt_cborders(t, b, c);
+    for (uint32_t g = t->box[b].first_child; g; g = t->box[g].next) {
+        if (t->box[g].kind != LAYOUT_BOX_KIND_ROW_GROUP) continue;
+        if (!pt_plain(t, g)) { pt_child(PARGS, g, list); continue; }
+        for (uint32_t r = t->box[g].first_child; r; r = t->box[r].next) {
+            if (!pt_plain(t, r)) { pt_child(PARGS, r, list); continue; }
+            for (uint32_t ce = t->box[r].first_child; ce; ce = t->box[ce].next) {
+                if (!pt_plain(t, ce)) { pt_child(PARGS, ce, list); continue; }
+                pt_flow(PARGS, ce, list, 0);
+                pt_outline(t, ce, c);
+            }
+            pt_outline(t, r, c);
+        }
+        pt_outline(t, g, c);
+    }
 }
 
 /* the positioned boxes in b's flow: those its stacking context draws */
@@ -4620,9 +4871,9 @@ static void pt_zoom_tree(const layout_tree *t, double z, layout_tree *zt) {
         b->ow *= z; b->ooffset *= z;
     }
     for (uint32_t i = 1; i < t->box_len; i++) {
-        amb_span sp[11] = { t->box[i].shadows, t->box[i].bg_image, t->box[i].bg_pos, t->box[i].bg_size, t->box[i].transform, t->box[i].origin,
-                            t->box[i].filter, t->box[i].backdrop, t->box[i].translate, t->box[i].persp, t->box[i].porigin };
-        for (int k = 0; k < 11; k++) sp[k] = pt_zoom_span(zt, sp[k], z);
+        amb_span sp[12] = { t->box[i].shadows, t->box[i].bg_image, t->box[i].bg_pos, t->box[i].bg_size, t->box[i].transform, t->box[i].origin,
+                            t->box[i].filter, t->box[i].backdrop, t->box[i].translate, t->box[i].persp, t->box[i].porigin, t->box[i].cborders };
+        for (int k = 0; k < 12; k++) sp[k] = pt_zoom_span(zt, sp[k], z);
         layout_box *b = box_slot(zt, i);
         b->shadows = sp[0];
         b->bg_image = sp[1];
@@ -4635,6 +4886,9 @@ static void pt_zoom_tree(const layout_tree *t, double z, layout_tree *zt) {
         b->translate = sp[8];
         b->persp = sp[9];
         b->porigin = sp[10];
+        b->cborders = sp[11];
+        b->cap_top *= z;
+        b->cap_bottom *= z;
     }
     for (uint32_t i = 1; i < t->line_len; i++) {
         line_new(zt);

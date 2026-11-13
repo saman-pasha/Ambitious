@@ -80,6 +80,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     mask_mode, mask_repeat, mask_position, mask_size, mask_origin, mask_clip, mask_composite,
     %% CSS 2.1's clip (CSS Masking 1, 11): auto, or rect() as text
     clip,
+    %% CSS 2.1's tables (17): border-collapse (inherited); border-spacing's two lengths, horizontal and vertical
+    %% (inherited; Chromium's -webkit- longhands, which the border-spacing shorthand sets); empty-cells (inherited),
+    %% table-layout, caption-side (inherited)
+    border_collapse, webkit_border_horizontal_spacing, webkit_border_vertical_spacing, empty_cells, table_layout, caption_side,
     custom])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is

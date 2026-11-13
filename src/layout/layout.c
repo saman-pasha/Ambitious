@@ -195,15 +195,29 @@
    from start and value (not reversed, nor list-item's counter-reset or
    counter-increment); a ::marker's content is not read.
 
-   Tables, in the automatic layout. Each column's minimum and maximum widths come
-   from its cells' content (colspan shared out), a declared cell width fixing
-   them. The table fills its declared width, or shrinks to its columns'
-   maximums, and the columns share the width as the minimums and maximums have
-   it, a spanning cell's excess shared as its columns' widths are. A rowspan
-   holds its columns in the rows below; what its rows lack is shared as their
-   heights are. border-spacing is 2px; a cell's content sits where its
-   vertical-align puts it (its row's or row group's when it has none, the middle
-   when none has).
+   Tables (CSS 2.1, 17; CSS Tables 3), as Blink's TablesNG lays them out, in its
+   LayoutUnits. The parts grouped: captions, col and colgroup elements, the row
+   groups (the first head first, the first foot last; rows directly in the table an
+   anonymous group). Borders separated, border-spacing between the cells and about
+   them inside the padding; or collapsed (17.6.2): each edge's border by Blink's
+   conflict resolution -- hidden, then the wider, then the style, then the cell over
+   its row, row group, column, column group and table, then the earlier --, half of it
+   in each cell beside it, the table's border half its widest outer edges, its padding
+   none, the edges drawn by paint as Blink joins them (cborders). The columns'
+   constraints from the col elements' widths and the cells' min- and max-content widths,
+   widths, min-widths, max-widths and percentages (the fixed layout: the first row's
+   alone), the spanning cells shared out, a column no cell begins in merged; the
+   table's width (its own, or fit-content between its grid's min- and max-content
+   widths, at least its captions' min-content) shared among them by CSS Tables 3's
+   guesses (the fixed layout: the fixed columns, then the percentages, then the rest
+   evenly). The rows as tall as their cells and heights ask, a rowspan's lack and the
+   table's height shared out as Blink shares them; captions at the table's border-box
+   width above or below its border box (caption-side); a cell empty-cells: hide leaves
+   empty without its background and borders (cell_hidden: its row's, row group's and
+   columns' backgrounds are drawn in it); a cell's content where its vertical-align puts
+   it (its row's or row group's when it has none, the middle when none has). Not done:
+   right to left (columns from the left), visibility: collapse, baseline alignment in
+   rows, percentage heights of rows and row groups.
 
    Quirks mode (the document's mode, which the HTML parser keeps on the document; the Quirks
    Mode Standard as Blink has it, measured): the line height quirk (in limited-quirks mode
@@ -257,7 +271,6 @@ amb_implementation(layout);
 /* the context with another block formatting context's floats */
 #define LARGS_FL(x) t, d, st, nt, f, sx, sc, gx, xc, ab, (x)
 
-#define LAY_SPACING 2.0
 
 /* the document's mode, for the run (layout_run sets them from the document node's mode): in
    quirks mode, lay_quirks; in quirks or limited-quirks mode, lay_lhq (the line height quirk) */
@@ -377,6 +390,11 @@ typedef struct lay_ext {
     uint32_t cssclip;                   /* clip's cval when it is rect(); else 0 */
     uint32_t c0;                        /* the style's first value: where its values came from (quirky margins) */
     uint8_t cq;                         /* container-type: 1 inline-size, 2 size (a query container; containment) */
+    /* a table's and its parts': a column (1, display table-column) or column group (2); a row group's kind (0 a body, 1 a
+       head, 2 a foot); border-collapse: collapse; empty-cells: hide; table-layout: fixed; caption-side: bottom; and
+       border-spacing's two lengths, px */
+    uint8_t tcol, tgroup, collapse, ehide, tfixed, capb;
+    double hs, vs;
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -722,6 +740,18 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->hyph = lay_w(w, "auto") ? 2 : lay_w(w, "manual") ? 1 : 0;
     lay_word_of(st, c0 + CSS_PROP_DISPLAY, w);
     e->lx = lay_w(w, "flex") || lay_w(w, "inline-flex") ? LX_FLEX : lay_w(w, "grid") || lay_w(w, "inline-grid") ? LX_GRID : LX_FLOW;
+    e->tcol = (uint8_t)(lay_w(w, "table-column") ? 1 : lay_w(w, "table-column-group") ? 2 : 0);
+    e->tgroup = (uint8_t)(lay_w(w, "table-header-group") ? 1 : lay_w(w, "table-footer-group") ? 2 : 0);
+    lay_word_of(st, c0 + CSS_PROP_BORDER_COLLAPSE, w);
+    e->collapse = (uint8_t)lay_w(w, "collapse");
+    lay_word_of(st, c0 + CSS_PROP_EMPTY_CELLS, w);
+    e->ehide = (uint8_t)lay_w(w, "hide");
+    lay_word_of(st, c0 + CSS_PROP_TABLE_LAYOUT, w);
+    e->tfixed = (uint8_t)lay_w(w, "fixed");
+    lay_word_of(st, c0 + CSS_PROP_CAPTION_SIDE, w);
+    e->capb = (uint8_t)lay_w(w, "bottom");
+    e->hs = st->cval[c0 + CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING].num;
+    e->vs = st->cval[c0 + CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING].num;
     int wkbox = lay_w(w, "-webkit-box") || lay_w(w, "-webkit-inline-box");
     lay_word_of(st, c0 + CSS_PROP_WEBKIT_BOX_ORIENT, w);
     int wkvert = lay_w(w, "vertical");
@@ -2800,7 +2830,14 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
     /* a query container's content counts for nothing in its inline size (size and inline-size containment: CSS
        Contain 2, 3.2; a table's cells have no containment) */
     if (LAY_X(el).cq && s.display != D_TABLE && s.display != D_CELL && s.display != D_INLINE) { *mn = *mx = edges; return; }
-    if (s.display == D_TABLE) { lay_table_intrinsic(LARGS, el, cw, mn, mx); *mn += edges; *mx += edges; return; }
+    if (s.display == D_TABLE) {
+        /* a table's border box's widths (its borders a collapsing table's halves of its edges), its margins about them */
+        double mg = (s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw)) + (s.m[3].unit == LAY_AUTO ? 0 : lay_res(st, s.m[3], cw));
+        lay_table_intrinsic(LARGS, el, cw, mn, mx);
+        *mn += mg;
+        *mx += mg;
+        return;
+    }
     if (LAY_X(el).lx == LX_GRID) {
         lay_grid_intrinsic(LARGS, el, cw, mn, mx);
         *mn += edges;
@@ -2947,15 +2984,17 @@ static void lay_block_width(layout_tree *t, const css_style *st, uint32_t b, con
     t->box[b].mr = mr;
 }
 
+/* a box's border box's height; a table's, its wrapper's: its captions above and below it too */
 static double lay_border_height(const layout_tree *t, uint32_t b) {
-    return t->box[b].bt + t->box[b].pt + t->box[b].h + t->box[b].pb + t->box[b].bb;
+    return t->box[b].cap_top + t->box[b].bt + t->box[b].pt + t->box[b].h + t->box[b].pb + t->box[b].bb + t->box[b].cap_bottom;
 }
 
-/* a child placed in its parent's content box, its border box's top-left at (bx, by) */
+/* a child placed in its parent's content box, its border box's top-left at (bx, by) (a table's wrapper's, its captions
+   above its border box) */
 static void lay_place(layout_tree *t, uint32_t b, double bx, double by) {
     /* a relatively positioned box: its offset too */
     t->box[b].x = bx + t->box[b].bl + t->box[b].pl + t->box[b].dx;
-    t->box[b].y = by + t->box[b].bt + t->box[b].pt + t->box[b].dy;
+    t->box[b].y = by + t->box[b].cap_top + t->box[b].bt + t->box[b].pt + t->box[b].dy;
 }
 /* ---- margins as they collapse: the largest positive one and the most negative ---- */
 
@@ -5896,106 +5935,1192 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     frags_append(t, ln, fr);
 }
 
-/* ---- tables ---- */
+/* ---- tables ----
+   As Blink's TablesNG lays them out (CSS 2.1, 17; CSS Tables 3; table_layout_algorithm.cc, table_layout_utils.cc,
+   table_borders.cc), its LayoutUnits mirrored: sizes in 64ths of a px, a float's LayoutUnit truncated, MulDiv's quotient
+   truncated, a remainder left to the last of what shares it. */
 
-typedef struct lay_cell { uint32_t el, row, col, span, rspan, box; double mn, mx, h; } lay_cell;
+typedef int64_t lay_lu;
+static lay_lu lay_lu_f(float v) { return (lay_lu)(v * 64.0f); }
+static lay_lu lay_lu_d(double v) { return (lay_lu)(v * 64.0); }
+static lay_lu lay_lu_ceil(double v) { return (lay_lu)ceil(v * 64.0 - 1e-6); }
+static double lay_lu_px(lay_lu u) { return (double)u / 64.0; }
+static float lay_lu_fl(lay_lu u) { return (float)u / 64.0f; }
+static lay_lu lay_lu_muldiv(lay_lu a, lay_lu b, lay_lu c) { return c ? a * b / c : 0; }
+static lay_lu lay_lu_max(lay_lu a, lay_lu b) { return a > b ? a : b; }
+static lay_lu lay_lu_min(lay_lu a, lay_lu b) { return a < b ? a : b; }
+/* the largest inline size a table takes, Blink's kTableMaxInlineSize */
+#define LAY_TMAX ((lay_lu)1000000 * 64)
 
-/* the table's rows (in its row groups too) and their cells, each cell's column and span */
-static void lay_table_cells(LCTX, uint32_t table, vector<uint32_t> *rows, vector<lay_cell> *cells, vector<uint32_t> *captions, uint32_t *ncols) {
-    *ncols = 0;
-    vector<uint32_t> busy;            /* each column: the rows a rowspan above still holds it for */
+/* a column's constraints, or a cell's (Blink's TableTypes::Column and CellInlineConstraint): its min and max inline sizes
+   (has_mn, has_mx: given), its percentage (has_pct) and the border and padding a fixed table adds to it, a fixed length
+   sizing it (constrained), whether it may merge (no cell begins in it, no width of its own), its table's layout fixed */
+typedef struct lay_tcon { lay_lu mn, mx, pbp; float pct; uint8_t has_mn, has_mx, has_pct, constrained, mergeable, fixed; } lay_tcon;
+/* a cell spanning columns: its constraint, its first column and its span */
+typedef struct lay_tspan { lay_tcon c; uint32_t col, span; } lay_tspan;
+/* a table's cell: its element, its row group (an index of the groups), its row and column, its spans (its rowspan held to
+   its group's rows, its colspan to the table's columns), its box, its border box's height laid out, its borders (top,
+   right, bottom, left: a collapsing table's halves of the edges about it, else its own) */
+typedef struct lay_cell { uint32_t el, sec, row, col, span, rspan, box; lay_lu h; lay_lu b[4]; } lay_cell;
+/* a row group: its element (0: rows directly in the table, an anonymous group of them), its first row and its rows'
+   count, its box, whether it is a body (no head or foot) and whether a height of its own constrains it, its offset in
+   the table's content box and its height */
+typedef struct lay_tsec { uint32_t el, row0, nrows, box; uint8_t body, constrained; lay_lu y, h; } lay_tsec;
+/* a row: its element, its group, its box, its height, its offset in its group, whether a fixed height or a cell's
+   constrains it, whether a cell spanning rows begins in it */
+typedef struct lay_trow { uint32_t el, sec, box; lay_lu h, y; uint8_t constrained, rspan_start; } lay_trow;
+/* a col or colgroup element, in the table's order: its element, its first column and its span (not held to the table's
+   columns), its colgroup's index among them (-1: none), a colgroup (1; 2 one with col children), its box */
+typedef struct lay_tcol { uint32_t el, col0, span, box; int32_t group; uint8_t is_group; } lay_tcol;
+/* a collapsing table's edge (Blink's TableBorders::Edge): the border on it, its width, style (Blink's order, collapsed:
+   0 none, 1 hidden, 2 inset, 3 groove, 4 outset, 5 ridge, 6 dotted, 7 dashed, 8 solid, 9 double) and colour, the order
+   of the box it came from; set: a border is on it; nofill: inside a spanning cell, where none may be */
+typedef struct lay_tedge { lay_lu w; uint32_t color, order; uint8_t st, set, nofill; } lay_tedge;
+/* what a table's layout keeps beside its lists: its rows and columns, its edges a row of them (two a column, two more),
+   whether it collapses its borders and is laid out fixed, its spacing, its borders and paddings (top, right, bottom,
+   left) */
+typedef struct lay_tinfo { uint32_t nrows, ncols, epr; int collapse, fixed; lay_lu hs, vs; lay_lu tb[4], tp[4]; } lay_tinfo;
+
+/* the parts of a table's layout, as parameters */
+#define LTM vector<uint32_t> *caps, vector<lay_tcol> *tcols, vector<lay_tsec> *secs, vector<lay_trow> *rows, vector<lay_cell> *cells, \
+    vector<lay_tcon> *con, vector<lay_tedge> *edges, lay_tinfo *ti
+#define LTA caps, tcols, secs, rows, cells, con, edges, ti
+
+/* an HTML element's non-negative integer attribute held between lo and hi (the rules for parsing non-negative integers:
+   white space, a +, digits), dflt when it has none */
+static uint32_t lay_attr_clamped(const dom_document *d, uint32_t x, const char *name, uint32_t lo, uint32_t hi, uint32_t dflt) {
+    uint32_t a = lay_attr(d, x, name);
+    if (!a) return dflt;
+    amb_span v = d->attr[a].value;
+    const char *p = text_ptr(d, v);
+    size_t i = 0;
+    while (i < v.len && (p[i] == ' ' || p[i] == '\t' || p[i] == '\n' || p[i] == '\f' || p[i] == '\r')) i++;
+    if (i < v.len && p[i] == '+') i++;
+    uint64_t n = 0;
+    int any = 0;
+    for (; i < v.len && p[i] >= '0' && p[i] <= '9'; i++) { if (n < 100000000) n = n * 10 + (uint64_t)(p[i] - '0'); any = 1; }
+    if (!any) return dflt;
+    return n < lo ? lo : n > hi ? hi : (uint32_t)n;
+}
+
+/* the table's parts, grouped as Blink's TableGroupedChildren has them: its captions; its col and colgroup elements;
+   its row groups -- the first head, the bodies (row groups, other heads and feet, the rows directly in it as anonymous
+   ones) in order, the first foot --, their rows, and the rows' cells, each in its row and column (a cell spanning rows
+   holding its columns in the rows below, within its group). The columns' count: the col elements' that may not merge,
+   and in the automatic layout each cell's first column, in the fixed layout every column it spans (Blink's
+   ComputeMaxColumn) */
+static void lay_table_parts(LCTX, uint32_t table, LTM) {
+    ti->nrows = 0;
+    ti->ncols = 0;
+    /* the row groups in the table's order: an element, or a run of rows (its first row, an anonymous group) */
+    vector<uint32_t> groups;
+    vector<uint8_t> runs;            /* each group: a run of rows (an anonymous group), 1 */
+    uint32_t head = 0, foot = 0;
+    int in_run = 0;
     for (uint32_t c = d->node[table].first_child; c; c = d->node[c].next_sibling) {
         int dsp = lay_display_of(LARGS, c);
-        if (dsp == D_CAPTION) { push_back(captions, c); continue; }
-        uint32_t g0 = dsp == D_ROW_GROUP ? d->node[c].first_child : c;
-        for (uint32_t r = g0; r; r = dsp == D_ROW_GROUP ? d->node[r].next_sibling : 0) {
-            if (lay_display_of(LARGS, r) != D_ROW) continue;
-            uint32_t col = 0, ri = (uint32_t)len(*rows);
-            push_back(rows, r);
-            for (uint32_t cell = d->node[r].first_child; cell; cell = d->node[cell].next_sibling) {
-                int cd = lay_display_of(LARGS, cell);
-                if (cd != D_CELL) continue;
-                while (col < len(busy) && at(busy, col) > 0) col++;
-                lay_cell lc;
-                memset(&lc, 0, sizeof lc);
-                lc.el = cell;
-                lc.row = ri;
-                lc.col = col;
-                long span = lay_attr_int(d, cell, "colspan", 1);
-                lc.span = (uint32_t)(span < 1 ? 1 : span > 100 ? 100 : span);
-                long rspan = lay_attr_int(d, cell, "rowspan", 1);
-                lc.rspan = (uint32_t)(rspan < 1 ? 1 : rspan > 1000 ? 1000 : rspan);
-                if (lc.rspan > 1) {
-                    if (len(busy) < col + lc.span) resize(&busy, col + lc.span);
-                    for (uint32_t q = col; q < col + lc.span; q++) if (at(busy, q) < lc.rspan) busy[q] = lc.rspan;
+        if (dsp == D_CAPTION) { push_back(caps, c); in_run = 0; continue; }
+        if (dsp == D_NONE && d->node[c].kind == DOM_NODE_KIND_ELEMENT && LAY_X(c).tcol) {
+            /* a column group with its col children, or a col */
+            int is_group = LAY_X(c).tcol == 2;
+            lay_tcol tc;
+            memset(&tc, 0, sizeof tc);
+            tc.el = c;
+            tc.group = -1;
+            tc.is_group = (uint8_t)is_group;
+            int32_t gi = (int32_t)len(*tcols);
+            push_back(tcols, tc);
+            if (is_group)
+                for (uint32_t k = d->node[c].first_child; k; k = d->node[k].next_sibling) {
+                    if (d->node[k].kind != DOM_NODE_KIND_ELEMENT || lay_display_of(LARGS, k) != D_NONE || LAY_X(k).tcol != 1) continue;
+                    lay_tcol kc;
+                    memset(&kc, 0, sizeof kc);
+                    kc.el = k;
+                    kc.group = gi;
+                    push_back(tcols, kc);
+                    (*tcols)[(size_t)gi].is_group = 2;
                 }
-                col += lc.span;
-                push_back(cells, lc);
-            }
-            for (size_t q = 0; q < len(busy); q++) if (at(busy, q) > 0) busy[q] = at(busy, q) - 1;
-            if (col > *ncols) *ncols = col;
+            in_run = 0;
+            continue;
+        }
+        if (dsp == D_ROW_GROUP) {
+            int g = LAY_X(c).tgroup;
+            if (g == 1 && !head) head = c;
+            else if (g == 2 && !foot) foot = c;
+            else { push_back(groups, c); push_back(runs, 0); }
+            in_run = 0;
+            continue;
+        }
+        if (dsp == D_ROW) {
+            if (!in_run) { push_back(groups, c); push_back(runs, 1); }
+            in_run = 1;
+            continue;
         }
     }
-}
-/* the columns' minimum and maximum widths, from their cells' */
-static void lay_columns(LCTX, vector<lay_cell> *cells, uint32_t ncols, double cw, vector<double> *cmin, vector<double> *cmax) {
-    resize(cmin, ncols);
-    resize(cmax, ncols);
-    for (int pass = 0; pass < 2; pass++)
-        for (size_t k = 0; k < len(*cells); k++) {
-            lay_cell c = at(*cells, k);
-            if ((pass == 0) != (c.span == 1)) continue;
-            double mn, mx;
-            lay_intrinsic(LARGS, c.el, cw, &mn, &mx);
-            lay_style ns;
-            lay_style_of(LARGS, c.el, &ns);
-            if (ns.width.unit == LAY_PX) {
-                /* a cell of a declared width (Chromium's automatic layout): its content's min-content its
-                   minimum, the width its maximum unless that is less; in quirks mode a td or th with nowrap
-                   and a width that is not zero at least as wide as that width (the table cell nowrap minimum
-                   width calculation quirk, 3.9) */
-                double cmn, cmx, wd = mn;
-                lay_intrinsic_of(LARGS, c.el, cw, &cmn, &cmx, 0);
-                int nowrap = lay_quirks && ns.width.v > 0 && lay_named_in(d, c.el, "td th") && lay_attr(d, c.el, "nowrap");
-                mn = nowrap && wd > cmn ? wd : cmn;
-                mx = wd > mn ? wd : mn;
+    /* each group's rows and their cells */
+    for (int pass = 0; pass < 3; pass++) {
+        size_t ng = pass == 1 ? len(groups) : 1;
+        for (size_t gk = 0; gk < ng; gk++) {
+            uint32_t g = pass == 0 ? head : pass == 2 ? foot : at(groups, gk);
+            if (!g) continue;
+            int an = pass == 1 && at(runs, gk);
+            lay_tsec sg;
+            memset(&sg, 0, sizeof sg);
+            sg.el = an ? 0 : g;
+            sg.row0 = (uint32_t)len(*rows);
+            sg.body = (uint8_t)(pass == 1);
+            uint32_t si = (uint32_t)len(*secs);
+            /* the group's rows: an element's row children; an anonymous group's run of rows, to the next group or caption */
+            vector<uint32_t> grow;
+            for (uint32_t r = an ? g : d->node[g].first_child; r; r = d->node[r].next_sibling) {
+                int rd = lay_display_of(LARGS, r);
+                if (an && (rd == D_ROW_GROUP || rd == D_CAPTION || (rd == D_NONE && d->node[r].kind == DOM_NODE_KIND_ELEMENT && LAY_X(r).tcol))) break;
+                if (rd == D_ROW) push_back(grow, r);
             }
-            (*cells)[k].mn = mn;
-            (*cells)[k].mx = mx;
-            if (c.span == 1) {
-                if (mn > (*cmin)[c.col]) (*cmin)[c.col] = mn;
-                if (mx > (*cmax)[c.col]) (*cmax)[c.col] = mx;
-                continue;
-            }
-            /* a spanning cell: what its columns lack, shared out as their widths are (evenly
-               among columns of none) */
-            double smin = LAY_SPACING * (c.span - 1), smax = smin, wmin = 0, wmax = 0;
-            for (uint32_t i = c.col; i < c.col + c.span && i < ncols; i++) {
-                smin += (*cmin)[i];
-                smax += (*cmax)[i];
-                wmin += (*cmin)[i];
-                wmax += (*cmax)[i];
-            }
-            double lmin = mn - smin, lmax = mx - smax;
-            for (uint32_t i = c.col; i < c.col + c.span && i < ncols; i++) {
-                if (lmin > 0) (*cmin)[i] += wmin > 0 ? lmin * (*cmin)[i] / wmin : lmin / c.span;
-                if (lmax > 0) (*cmax)[i] += wmax > 0 ? lmax * (*cmax)[i] / wmax : lmax / c.span;
+            sg.nrows = (uint32_t)len(grow);
+            push_back(secs, sg);
+            vector<uint32_t> busy;            /* each column: the rows a cell spanning rows above still holds it for */
+            for (size_t rk = 0; rk < len(grow); rk++) {
+                uint32_t r = at(grow, rk);
+                lay_trow tr;
+                memset(&tr, 0, sizeof tr);
+                tr.el = r;
+                tr.sec = si;
+                uint32_t ri = (uint32_t)len(*rows);
+                push_back(rows, tr);
+                uint32_t col = 0;
+                for (uint32_t cell = d->node[r].first_child; cell; cell = d->node[cell].next_sibling) {
+                    if (lay_display_of(LARGS, cell) != D_CELL) continue;
+                    while (col < len(busy) && at(busy, col) > 0) col++;
+                    lay_cell lc;
+                    memset(&lc, 0, sizeof lc);
+                    lc.el = cell;
+                    lc.sec = si;
+                    lc.row = ri;
+                    lc.col = col;
+                    lc.span = lay_attr_clamped(d, cell, "colspan", 1, 1000, 1);
+                    /* rowspan: 0 to the group's end (Blink's kMaxRowSpan), held to the group's rows */
+                    uint32_t rs = lay_attr_clamped(d, cell, "rowspan", 0, 65534, 1);
+                    if (rs == 0) rs = 65534;
+                    uint32_t left = (uint32_t)(len(grow) - rk);
+                    lc.rspan = rs < left ? rs : left;
+                    if (lc.rspan > 1) {
+                        if (len(busy) < col + lc.span) resize(&busy, col + lc.span);
+                        for (uint32_t q = col; q < col + lc.span; q++) if (at(busy, q) < lc.rspan) busy[q] = lc.rspan;
+                        (*rows)[ri].rspan_start = 1;
+                    }
+                    uint32_t maxc = ti->fixed ? col + lc.span : col + 1;
+                    if (maxc > ti->ncols) ti->ncols = maxc;
+                    col += lc.span;
+                    push_back(cells, lc);
+                }
+                for (size_t q = 0; q < len(busy); q++) if (at(busy, q) > 0) busy[q] = at(busy, q) - 1;
             }
         }
-    for (uint32_t i = 0; i < ncols; i++) if ((*cmax)[i] < (*cmin)[i]) (*cmax)[i] = (*cmin)[i];
+    }
+    ti->nrows = (uint32_t)len(*rows);
+    /* the col elements' columns: each col's span, a colgroup's its cols' or (with none) its own */
+    uint32_t next = 0;
+    for (size_t k = 0; k < len(*tcols); k++) {
+        lay_tcol tc = at(*tcols, k);
+        if (tc.is_group == 2) { (*tcols)[k].col0 = next; continue; }
+        uint32_t span = lay_attr_clamped(d, tc.el, "span", 1, 1000, 1);
+        if (tc.is_group == 0 && tc.group >= 0) {
+            /* a col of a colgroup: the group's span grows by it */
+            (*tcols)[k].col0 = next;
+            (*tcols)[k].span = span;
+            (*tcols)[(size_t)tc.group].span += span;
+        } else {
+            (*tcols)[k].col0 = next;
+            (*tcols)[k].span = span;
+        }
+        next += span;
+    }
 }
 
-static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) {
-    vector<uint32_t> rows, captions;
-    vector<lay_cell> cells;
-    vector<double> cmin, cmax;
-    uint32_t ncols;
-    lay_table_cells(LARGS, el, &rows, &cells, &captions, &ncols);
-    lay_columns(LARGS, &cells, ncols, cw, &cmin, &cmax);
-    *mn = LAY_SPACING * (ncols + 1);
-    *mx = *mn;
-    for (uint32_t i = 0; i < ncols; i++) { *mn += at(cmin, i); *mx += at(cmax, i); }
+/* ---- a table's borders ---- */
+
+/* a border style (src/layout/layout.h) in Blink's order, collapsed (inset drawn as ridge, outset as groove) */
+static uint8_t lay_cstyle(int bs) {
+    static const uint8_t m[10] = { 0, 1, 6, 7, 8, 9, 3, 5, 5, 3 };
+    return bs >= 0 && bs < 10 ? m[bs] : 0;
 }
+/* Blink's order's style as layout.h has it */
+static uint8_t lay_cstyle_bs(int cs) {
+    static const uint8_t m[10] = { LAY_BS_NONE, LAY_BS_HIDDEN, LAY_BS_INSET, LAY_BS_GROOVE, LAY_BS_OUTSET, LAY_BS_RIDGE, LAY_BS_DOTTED,
+                                   LAY_BS_DASHED, LAY_BS_SOLID, LAY_BS_DOUBLE };
+    return cs >= 0 && cs < 10 ? m[cs] : LAY_BS_NONE;
+}
+/* a border of style st and width w is more specific than the edge e's (Blink's IsSourceMoreSpecificThanEdge, CSS Tables 3's
+   conflict resolution): hidden wins outright, then the wider, then the style later in Blink's order; a tie keeps e's */
+static int lay_tedge_wins(uint8_t st, lay_lu w, lay_tedge e) {
+    if (e.nofill) return 0;
+    if (!e.set || st == 1) return 1;
+    if (e.st == 1) return 0;
+    if (w < e.w) return 0;
+    if (w > e.w) return 1;
+    return st > e.st;
+}
+static void lay_tedge_put(vector<lay_tedge> *edges, size_t i, uint8_t st, lay_lu w, uint32_t color, uint32_t order) {
+    if (i >= len(*edges) || !lay_tedge_wins(st, w, at(*edges, i))) return;
+    lay_tedge e = at(*edges, i);
+    e.set = 1;
+    e.st = st;
+    e.w = w;
+    e.color = color;
+    e.order = order;
+    (*edges)[i] = e;
+}
+/* a box's borders merged into the edges about rows r .. r + rspan and columns c .. c + span (Blink's MergeBorders): its
+   top and bottom along the row axis, its left and right along the column axis; a cell spanning more than one row or
+   column leaves no edge inside it to be filled */
+static void lay_tmerge(vector<lay_tedge> *edges, const lay_tinfo *ti, const lay_style *s, uint32_t r, uint32_t c, uint32_t rspan, uint32_t span,
+                       int is_cell, uint32_t order) {
+    if (!rspan || !span || c >= ti->ncols) return;
+    if (span > ti->ncols - c) span = ti->ncols - c;
+    uint32_t epr = ti->epr;
+    uint8_t cs[4];
+    lay_lu w[4];
+    for (int k = 0; k < 4; k++) {
+        cs[k] = lay_cstyle(s->bs[k]);
+        w[k] = cs[k] <= 1 ? 0 : lay_lu_d(s->b[k]);
+    }
+    for (int k = 0; k < 4; k += 2) {
+        if (!cs[k]) continue;
+        uint32_t row = k == 0 ? r : r + rspan;
+        for (uint32_t q = c; q < c + span; q++) lay_tedge_put(edges, (size_t)row * epr + 2 * q + 1, cs[k], w[k], s->bc[k], order);
+    }
+    for (int k = 1; k < 4; k += 2) {
+        if (!cs[k]) continue;
+        uint32_t col = k == 3 ? c : c + span;
+        for (uint32_t q = r; q < r + rspan; q++) lay_tedge_put(edges, (size_t)q * epr + 2 * col, cs[k], w[k], s->bc[k], order);
+    }
+    if (!is_cell || (rspan < 2 && span < 2)) return;
+    /* MarkInnerBordersAsDoNotFill: the column edges inside, then the row edges inside */
+    for (uint32_t q = r; q < r + rspan; q++)
+        for (uint32_t cc = c + 1; cc < c + span; cc++) {
+            size_t i = (size_t)q * epr + 2 * cc;
+            if (i < len(*edges) && !at(*edges, i).set) (*edges)[i].nofill = 1;
+        }
+    for (uint32_t q = r + 1; q < r + rspan; q++)
+        for (uint32_t cc = c; cc < c + span; cc++) {
+            size_t i = (size_t)q * epr + 2 * cc + 1;
+            if (i < len(*edges) && !at(*edges, i).set) (*edges)[i].nofill = 1;
+        }
+}
+/* an edge is drawn: a border on it of a style that draws, wider than nothing (Blink's CanPaint) */
+static int lay_tedge_paints(const vector<lay_tedge> *edges, int64_t i) {
+    if (i < 0 || (size_t)i >= len(*edges)) return 0;
+    lay_tedge e = at(*edges, (size_t)i);
+    return e.set && e.st > 1 && e.w > 0;
+}
+static lay_lu lay_tedge_w(const vector<lay_tedge> *edges, int64_t i) {
+    if (i < 0 || (size_t)i >= len(*edges)) return 0;
+    lay_tedge e = at(*edges, (size_t)i);
+    return e.set ? e.w : 0;
+}
+/* the borders of the cell at rows r .. r + rspan, columns c .. c + span of a collapsing table (Blink's GetCellBorders): on
+   each side the widest edge drawn there, halved */
+static void lay_tcell_borders(const vector<lay_tedge> *edges, const lay_tinfo *ti, uint32_t r, uint32_t c, uint32_t rspan, uint32_t span, lay_lu *b) {
+    for (int k = 0; k < 4; k++) b[k] = 0;
+    uint32_t epr = ti->epr;
+    if (!epr || c * 2 >= epr || r > ti->nrows) return;
+    if (span > ti->ncols - c) span = ti->ncols - c;
+    for (uint32_t i = 0; i < rspan; i++) {
+        int64_t s0 = (int64_t)(r + i) * epr + 2 * c, s1 = s0 + 2 * span;
+        if (lay_tedge_paints(edges, s0)) b[3] = lay_lu_max(b[3], lay_tedge_w(edges, s0));
+        if ((size_t)s0 >= len(*edges)) break;
+        if (lay_tedge_paints(edges, s1)) b[1] = lay_lu_max(b[1], lay_tedge_w(edges, s1));
+    }
+    for (uint32_t i = 0; i < span; i++) {
+        uint32_t ci = 2 * (c + i) + 1;
+        if (ci >= epr) break;
+        int64_t s0 = (int64_t)r * epr + ci, s1 = s0 + (int64_t)rspan * epr;
+        if (lay_tedge_paints(edges, s0)) b[0] = lay_lu_max(b[0], lay_tedge_w(edges, s0));
+        if (lay_tedge_paints(edges, s1)) b[2] = lay_lu_max(b[2], lay_tedge_w(edges, s1));
+    }
+    for (int k = 0; k < 4; k++) b[k] /= 2;
+}
+/* the borders: a collapsing table's edges (Blink's ComputeTableBorders: its cells' borders in their order, then its rows',
+   its row groups', its cols' and colgroups' and its own, a tie kept by the earlier), each cell's half of the edges about
+   it and the table's of its outer ones; a separating table's cells their own, the table its own and its paddings */
+static void lay_table_borders(LCTX, const lay_style *ts, double cw, LTM) {
+    if (!ti->collapse) {
+        for (int k = 0; k < 4; k++) { ti->tb[k] = lay_lu_d(ts->b[k]); ti->tp[k] = lay_lu_d(lay_res(st, ts->p[k], cw)); }
+        for (size_t k = 0; k < len(*cells); k++) {
+            lay_style cs;
+            lay_style_of(LARGS, at(*cells, k).el, &cs);
+            for (int q = 0; q < 4; q++) (*cells)[k].b[q] = lay_lu_d(cs.b[q]);
+        }
+        return;
+    }
+    for (int k = 0; k < 4; k++) { ti->tb[k] = 0; ti->tp[k] = 0; }
+    ti->epr = 2 * (ti->ncols + 1);
+    clear(*edges);
+    resize(edges, (size_t)(ti->nrows + 1) * ti->epr);
+    if (!ti->ncols) { ti->epr = 0; clear(*edges); return; }
+    uint32_t order = 0;
+    for (size_t k = 0; k < len(*cells); k++) {
+        lay_cell c = at(*cells, k);
+        lay_style cs;
+        lay_style_of(LARGS, c.el, &cs);
+        lay_tmerge(edges, ti, &cs, c.row, c.col, c.rspan, c.span, 1, ++order);
+    }
+    for (size_t k = 0; k < len(*rows); k++) {
+        lay_style rs;
+        lay_style_of(LARGS, at(*rows, k).el, &rs);
+        lay_tmerge(edges, ti, &rs, (uint32_t)k, 0, 1, ti->ncols, 0, ++order);
+    }
+    for (size_t k = 0; k < len(*secs); k++) {
+        lay_tsec sg = at(*secs, k);
+        if (!sg.el) { ++order; continue; }
+        lay_style gs;
+        lay_style_of(LARGS, sg.el, &gs);
+        lay_tmerge(edges, ti, &gs, sg.row0, 0, sg.nrows, ti->ncols, 0, ++order);
+    }
+    /* the cols (each column of a col's span on its own), one order for all; then the colgroups', another */
+    uint32_t col_order = ++order, group_order = ++order;
+    for (int pass = 0; pass < 2; pass++)
+        for (size_t k = 0; k < len(*tcols); k++) {
+            lay_tcol tc = at(*tcols, k);
+            if ((pass == 0) != (tc.is_group == 0) || tc.col0 >= ti->ncols) continue;
+            uint32_t span = tc.span < ti->ncols - tc.col0 ? tc.span : ti->ncols - tc.col0;
+            lay_style ks;
+            lay_style_of(LARGS, tc.el, &ks);
+            if (pass == 0) for (uint32_t q = 0; q < span; q++) lay_tmerge(edges, ti, &ks, 0, tc.col0 + q, ti->nrows, 1, 0, col_order);
+            else lay_tmerge(edges, ti, &ks, 0, tc.col0, ti->nrows, span, 0, group_order);
+        }
+    lay_tmerge(edges, ti, ts, 0, 0, ti->nrows, ti->ncols, 0, ++order);
+    lay_lu tb[4];
+    lay_tcell_borders(edges, ti, 0, 0, ti->nrows, ti->ncols, tb);
+    for (int k = 0; k < 4; k++) ti->tb[k] = tb[k];
+    for (size_t k = 0; k < len(*cells); k++) {
+        lay_cell c = at(*cells, k);
+        lay_lu b[4];
+        lay_tcell_borders(edges, ti, c.row, c.col, c.rspan, c.span, b);
+        for (int q = 0; q < 4; q++) (*cells)[k].b[q] = b[q];
+    }
+}
+
+/* ---- a table's columns ---- */
+
+/* a column a col or colgroup makes (Blink's CreateColumn): its width a fixed length's (else the colgroup's, for a col of
+   one in the automatic layout), min-width holding it, its percentage; it may merge, in the automatic layout, with no
+   width and no percentage */
+static lay_tcon lay_tcol_con(LCTX, uint32_t el, int has_def, lay_lu def, int fixed) {
+    lay_tcon c;
+    memset(&c, 0, sizeof c);
+    lay_style s;
+    lay_style_of(LARGS, el, &s);
+    lay_len mnl = LAY_X(el).minw;
+    int has_w = s.width.unit == LAY_PX, has_min = mnl.unit == LAY_PX;
+    lay_lu w = has_w ? lay_lu_d(s.width.v) : 0, mn = has_min ? lay_lu_d(mnl.v) : 0;
+    if (s.width.unit == LAY_PCT || (s.width.unit == LAY_CALC && s.width.v == 0)) { c.has_pct = 1; c.pct = (float)(s.width.unit == LAY_PCT ? s.width.v : s.width.pct); }
+    if (!has_w && has_def) { has_w = 1; w = def; }
+    if (has_min && has_w && mn > w) w = mn;
+    c.constrained = (uint8_t)has_w;
+    if (c.has_pct && c.pct == 0.0f) c.has_pct = 0;
+    c.fixed = (uint8_t)fixed;
+    c.mergeable = (uint8_t)(!fixed && (has_w ? w : 0) == 0 && (c.has_pct ? c.pct : 0.0f) == 0.0f);
+    c.has_mn = 1;
+    c.mn = mn;
+    c.has_mx = (uint8_t)has_w;
+    c.mx = w;
+    return c;
+}
+/* the columns the col elements make (Blink's ComputeColumnElementConstraints): a col's span of its constraint, a
+   colgroup's of its own when it has no cols */
+static void lay_tcol_cons(LCTX, LTM) {
+    clear(*con);
+    lay_tcon group;
+    memset(&group, 0, sizeof group);
+    for (size_t k = 0; k < len(*tcols); k++) {
+        lay_tcol tc = at(*tcols, k);
+        if (tc.is_group) {
+            group = lay_tcol_con(LARGS, tc.el, 0, 0, ti->fixed);
+            if (tc.is_group == 1) for (uint32_t q = 0; q < tc.span; q++) push_back(con, group);
+            continue;
+        }
+        int in_group = tc.group >= 0;
+        lay_tcon c = lay_tcol_con(LARGS, tc.el, !ti->fixed && in_group && group.has_mx, group.mx, ti->fixed);
+        for (uint32_t q = 0; q < tc.span; q++) push_back(con, c);
+    }
+    /* the table's columns: at least to the last of theirs that may not merge */
+    size_t last = len(*con);
+    while (last > 0 && at(*con, last - 1).mergeable) last--;
+    if (last > ti->ncols) ti->ncols = (uint32_t)last;
+}
+/* a cell's inline constraint (Blink's CreateCellInlineConstraint): its content's min- and max-content widths (each a
+   LayoutUnit up to a 64th of a px) with its borders (b, its inline sum) and paddings, its width, min-width and
+   max-width when they are lengths (box-sizing as they ask), its percentage; in the fixed layout no min-content; in quirks
+   mode a nowrap cell's width its minimum (the Quirks Mode Standard 3.9) */
+static lay_tcon lay_tcell_con(LCTX, uint32_t el, int fixed, lay_lu bd, double cw) {
+    lay_tcon c;
+    memset(&c, 0, sizeof c);
+    lay_style s;
+    lay_style_of(LARGS, el, &s);
+    lay_lu bp = bd + lay_lu_d(lay_res(st, s.p[1], 0) + lay_res(st, s.p[3], 0));
+    int bb = s.border_box;
+    int has_w = s.width.unit == LAY_PX, has_min = LAY_X(el).minw.unit == LAY_PX, has_max = s.maxw.unit == LAY_PX;
+    lay_lu w = 0, mn = 0, mx = 0;
+    if (has_w) { w = lay_lu_d(s.width.v); w = bb ? lay_lu_max(w, bp) : w + bp; }
+    if (has_min) { mn = lay_lu_d(LAY_X(el).minw.v); mn = bb ? lay_lu_max(mn, bp) : mn + bp; }
+    if (has_max) { mx = lay_lu_d(s.maxw.v); mx = bb ? lay_lu_max(mx, bp) : mx + bp; if (has_min) mx = lay_lu_max(mn, mx); }
+    if (s.width.unit == LAY_PCT || (s.width.unit == LAY_CALC && s.width.v == 0)) { c.has_pct = 1; c.pct = (float)(s.width.unit == LAY_PCT ? s.width.v : s.width.pct); }
+    if (c.has_pct && s.maxw.unit == LAY_PCT && (float)s.maxw.v < c.pct) c.pct = (float)s.maxw.v;
+    /* the content's widths: the margin box's less its own edges */
+    double cmn, cmx;
+    lay_intrinsic_of(LARGS, el, cw, &cmn, &cmx, 0);
+    double edges = lay_edges_px(st, &s, cw);
+    lay_lu min_content = lay_lu_ceil(cmn - edges > 0 ? cmn - edges : 0) + bp, max_content = lay_lu_ceil(cmx - edges > 0 ? cmx - edges : 0) + bp;
+    lay_lu rmin = 0;
+    if (!fixed) {
+        rmin = lay_lu_max(min_content, has_min ? mn : 0);
+        if (has_w && lay_quirks && lay_attr(d, el, "nowrap")) rmin = lay_lu_max(rmin, w);
+    }
+    lay_lu cmax = has_w ? w : max_content;
+    if (has_max) { cmax = lay_lu_min(cmax, mx); rmin = lay_lu_min(rmin, mx); }
+    c.mn = rmin;
+    c.mx = lay_lu_max(rmin, cmax);
+    c.has_mn = c.has_mx = 1;
+    c.constrained = (uint8_t)has_w;
+    c.pbp = fixed && c.has_pct && !bb ? bp : 0;
+    return c;
+}
+/* the constraint of a column's cells, another cell's taken in (Blink's CellInlineConstraint::Encompass) */
+static void lay_tcell_encompass(lay_tcon *c, lay_tcon o) {
+    if (o.mn > c->mn) c->mn = o.mn;
+    if (c->constrained == o.constrained) c->mx = lay_lu_max(c->mx, o.mx);
+    else if (c->constrained) c->mx = lay_lu_max(c->mx, o.mn);
+    else c->mx = lay_lu_max(c->mn, o.mx);
+    c->constrained = (uint8_t)(c->constrained || o.constrained);
+    if (o.has_pct && (!c->has_pct || o.pct > c->pct)) { c->has_pct = 1; c->pct = o.pct; c->pbp = o.pbp; }
+}
+/* a column's constraint, its cells' taken in (Blink's Column::Encompass): a fixed table's column of a width of its own
+   keeps it; a cell makes an automatic table's column one that may not merge */
+static void lay_tcol_encompass(lay_tcon *c, lay_tcon o) {
+    if (c->constrained && c->fixed) return;
+    if (!c->fixed) c->mergeable = 0;
+    if (c->has_mn) {
+        if (c->mn < o.mn) c->mn = o.mn;
+        if (c->constrained) c->mx = lay_lu_max(c->mx, o.constrained ? o.mx : o.mn);
+        else c->mx = lay_lu_max(c->has_mx ? c->mx : 0, o.mx);
+        c->has_mx = 1;
+    } else {
+        c->mn = o.mn;
+        c->mx = o.mx;
+        c->has_mn = c->has_mx = 1;
+    }
+    if (c->mx < c->mn) c->mx = c->mn;
+    if (o.has_pct && (!c->has_pct || o.pct > c->pct)) { c->has_pct = 1; c->pct = o.pct; c->pbp = o.pbp; }
+    c->constrained = (uint8_t)(c->constrained || o.constrained);
+}
+/* a percentage column's size of the target (Blink's ResolvePercentInlineSize): its percentage of it with the border and
+   padding a fixed table adds, never under its minimum */
+static lay_lu lay_tpct(lay_tcon c, lay_lu target) {
+    return lay_lu_max(c.has_mn ? c.mn : 0, lay_lu_f(c.pct * lay_lu_fl(target) / 100.0f) + c.pbp);
+}
+static int lay_tis_fixed(lay_tcon c) { return c.constrained && !c.has_pct && c.has_mx; }
+
+/* the target shared among the n columns from c0 by CSS Tables 3's guesses, as Blink's
+   DistributeInlineSizeToComputedInlineSizeAuto shares it: the minimums; the percentage columns to their percentages; the
+   fixed ones to their widths; the automatic ones to their maximums; past them, the automatic ones (or else, when the
+   target constrains them, the fixed ones; or else the percentage ones) in proportion to their maximums. Merging columns
+   take nothing. Into out (n sizes) */
+static void lay_tdist_auto(lay_lu target, const vector<lay_tcon> *cols, size_t c0, size_t n, int constrained_target, vector<lay_lu> *out) {
+    clear(*out);
+    resize(out, n);
+    uint32_t npct = 0, nfixed = 0, nauto = 0;
+    lay_lu g[4] = { 0, 0, 0, 0 }, inc[4] = { 0, 0, 0, 0 }, auto_max = 0, fixed_max = 0;
+    float total_pct = 0;
+    for (size_t i = c0; i < c0 + n; i++) {
+        lay_tcon c = at(*cols, i);
+        if (c.mergeable) continue;
+        if (c.has_pct) {
+            npct++;
+            total_pct += c.pct;
+            lay_lu p = lay_tpct(c, target);
+            g[0] += c.mn; g[1] += p; g[2] += p; g[3] += p;
+            inc[1] += p - c.mn;
+        } else if (c.constrained) {
+            nfixed++;
+            fixed_max += c.mx;
+            g[0] += c.mn; g[1] += c.mn; g[2] += c.mx; g[3] += c.mx;
+            inc[2] += c.mx - c.mn;
+        } else {
+            nauto++;
+            auto_max += c.mx;
+            g[0] += c.mn; g[1] += c.mn; g[2] += c.mn; g[3] += c.mx;
+            inc[3] += c.mx - c.mn;
+        }
+    }
+    if (target < g[0]) target = g[0];
+    int guess = 4;
+    for (int k = 0; k < 4; k++) if (g[k] >= target) { guess = k; break; }
+    lay_lu dist, rest;
+    int64_t last = -1;
+    switch (guess) {
+    case 0:
+        for (size_t i = 0; i < n; i++) if (!at(*cols, c0 + i).mergeable) (*out)[i] = at(*cols, c0 + i).mn;
+        break;
+    case 1:
+        dist = target - g[0];
+        rest = dist;
+        for (size_t i = 0; i < n; i++) {
+            lay_tcon c = at(*cols, c0 + i);
+            if (c.mergeable) continue;
+            if (c.has_pct) {
+                last = (int64_t)i;
+                lay_lu up = lay_tpct(c, target) - c.mn;
+                lay_lu delta = inc[1] > 0 ? lay_lu_muldiv(dist, up, inc[1]) : dist / npct;
+                rest -= delta;
+                (*out)[i] = c.mn + delta;
+            } else (*out)[i] = c.mn;
+        }
+        if (rest && last >= 0) (*out)[(size_t)last] = at(*out, (size_t)last) + rest;
+        break;
+    case 2:
+        dist = target - g[1];
+        rest = dist;
+        for (size_t i = 0; i < n; i++) {
+            lay_tcon c = at(*cols, c0 + i);
+            if (c.mergeable) continue;
+            if (c.has_pct) (*out)[i] = lay_tpct(c, target);
+            else if (c.constrained) {
+                last = (int64_t)i;
+                lay_lu delta = inc[2] > 0 ? lay_lu_muldiv(dist, c.mx - c.mn, inc[2]) : dist / nfixed;
+                rest -= delta;
+                (*out)[i] = c.mn + delta;
+            } else (*out)[i] = c.mn;
+        }
+        if (rest && last >= 0) (*out)[(size_t)last] = at(*out, (size_t)last) + rest;
+        break;
+    case 3: {
+        dist = target - g[2];
+        /* an exact match (an automatic width, the columns at their maximums): those, not the shares, as Blink keeps them */
+        int exact = target == g[3];
+        rest = exact ? 0 : dist;
+        for (size_t i = 0; i < n; i++) {
+            lay_tcon c = at(*cols, c0 + i);
+            if (c.mergeable) continue;
+            if (c.has_pct) (*out)[i] = lay_tpct(c, target);
+            else if (c.constrained || exact) (*out)[i] = c.mx;
+            else {
+                last = (int64_t)i;
+                lay_lu delta = inc[3] > 0 ? lay_lu_muldiv(dist, c.mx - c.mn, inc[3]) : dist / nauto;
+                rest -= delta;
+                (*out)[i] = c.mn + delta;
+            }
+        }
+        if (rest && last >= 0) (*out)[(size_t)last] = at(*out, (size_t)last) + rest;
+        break;
+    }
+    default:
+        dist = target - g[3];
+        rest = dist;
+        if (nauto > 0) {
+            for (size_t i = 0; i < n; i++) {
+                lay_tcon c = at(*cols, c0 + i);
+                if (c.mergeable) continue;
+                if (c.has_pct) (*out)[i] = lay_tpct(c, target);
+                else if (c.constrained) (*out)[i] = c.mx;
+                else {
+                    last = (int64_t)i;
+                    lay_lu delta = auto_max > 0 ? lay_lu_muldiv(dist, c.mx, auto_max) : dist / nauto;
+                    rest -= delta;
+                    (*out)[i] = c.mx + delta;
+                }
+            }
+        } else if (nfixed > 0 && constrained_target) {
+            for (size_t i = 0; i < n; i++) {
+                lay_tcon c = at(*cols, c0 + i);
+                if (c.mergeable) continue;
+                if (c.has_pct) (*out)[i] = lay_tpct(c, target);
+                else if (c.constrained) {
+                    last = (int64_t)i;
+                    lay_lu delta = fixed_max > 0 ? lay_lu_muldiv(dist, c.mx, fixed_max) : dist / nfixed;
+                    rest -= delta;
+                    (*out)[i] = c.mx + delta;
+                }
+            }
+        } else if (npct > 0) {
+            for (size_t i = 0; i < n; i++) {
+                lay_tcon c = at(*cols, c0 + i);
+                if (c.mergeable || !c.has_pct) continue;
+                last = (int64_t)i;
+                lay_lu delta = total_pct != 0.0f ? lay_lu_f(lay_lu_fl(dist) * c.pct / total_pct) : dist / npct;
+                rest -= delta;
+                (*out)[i] = lay_tpct(c, target) + delta;
+            }
+            /* Blink's test of the last column's index as a truth: the first column keeps its rounding */
+            if (rest && last > 0) (*out)[(size_t)last] = at(*out, (size_t)last) + rest;
+            rest = 0;
+        }
+        if (rest && last >= 0) (*out)[(size_t)last] = at(*out, (size_t)last) + rest;
+        break;
+    }
+}
+
+/* the target shared among a fixed table's columns (Blink's SynchronizeAssignableTableInlineSizeAndColumnsFixed): the
+   fixed ones their widths (scaled down to the target, or up to what the percentages leave when no column is automatic),
+   then the percentage ones theirs (scaled likewise), then the automatic ones what is left, evenly (a column of width 0
+   one of them, unless all are); the last column given takes what rounding left */
+static void lay_tsync_fixed(lay_lu target, const vector<lay_tcon> *cols, vector<lay_lu> *out) {
+    size_t n = len(*cols);
+    clear(*out);
+    resize(out, n);
+    uint32_t npct = 0, nauto = 0, nfixed = 0, nzero = 0;
+    lay_lu total_pct = 0, total_fixed = 0, given = 0;
+    for (size_t i = 0; i < n; i++) {
+        lay_tcon c = at(*cols, i);
+        if (c.has_pct) { npct++; total_pct += lay_tpct(c, target); }
+        else if (lay_tis_fixed(c) && c.mx != 0) { nfixed++; total_fixed += c.mx; }
+        else if (c.constrained && c.has_mx && c.mx == 0) nzero++;
+        else nauto++;
+    }
+    int64_t last = -1;
+    if (nfixed > 0) {
+        float scale = 1.0f;
+        int scalable = 1;
+        lay_lu tfix = target - total_pct > 0 ? target - total_pct : 0;
+        int up = total_fixed < tfix && nauto == 0, down = total_fixed > target;
+        if (up || down) {
+            if (total_fixed != 0) scale = lay_lu_fl(tfix) / lay_lu_fl(total_fixed);
+            else scalable = 0;
+        }
+        for (size_t i = 0; i < n; i++) {
+            lay_tcon c = at(*cols, i);
+            if (!(lay_tis_fixed(c) && c.mx != 0)) continue;
+            last = (int64_t)i;
+            (*out)[i] = scalable ? lay_lu_f(scale * lay_lu_fl(c.mx)) : lay_lu_f(lay_lu_fl(target) / (float)nfixed);
+            given += at(*out, i);
+        }
+    }
+    if (given >= target) return;
+    if (npct > 0) {
+        float scale = 1.0f;
+        int scalable = 1;
+        int up = total_pct < target - given && nauto == 0, down = total_pct > target - given;
+        if (up || down) {
+            if (total_pct != 0) scale = lay_lu_fl(target - given) / lay_lu_fl(total_pct);
+            else scalable = 0;
+        }
+        for (size_t i = 0; i < n; i++) {
+            lay_tcon c = at(*cols, i);
+            if (!c.has_pct) continue;
+            last = (int64_t)i;
+            (*out)[i] = scalable ? lay_lu_f(scale * lay_lu_fl(lay_tpct(c, target))) : lay_lu_f(lay_lu_fl(target - given) / (float)npct);
+            given += at(*out, i);
+        }
+    }
+    lay_lu share = target - given;
+    int zero_all = nzero == n;
+    for (size_t i = 0; i < n; i++) {
+        lay_tcon c = at(*cols, i);
+        if (c.has_pct || (lay_tis_fixed(c) && c.mx != 0)) continue;
+        int zero = c.constrained && c.has_mx && c.mx == 0;
+        if (zero && !zero_all) continue;
+        last = (int64_t)i;
+        (*out)[i] = lay_lu_f(lay_lu_fl(share) / (float)(zero_all ? nzero : nauto));
+        given += at(*out, i);
+    }
+    if (last >= 0) (*out)[(size_t)last] = at(*out, (size_t)last) + (target - given);
+}
+
+/* a cell spanning columns shared among them (Blink's DistributeColspanCellToColumnsAuto and -Fixed): its widths less the
+   spacing between them; in the automatic layout its percentage over the columns of none by their maximums, then its
+   minimum and its maximum shared as the table's width is; in the fixed layout evenly, to columns that have none */
+static void lay_tspan_share(lay_tspan sp, lay_lu hs, int fixed, vector<lay_tcon> *cols) {
+    size_t n = len(*cols);
+    if (!n || sp.col >= n) return;
+    size_t span = sp.span < n - sp.col ? sp.span : n - sp.col;
+    lay_lu inner = 0;
+    int first = 1;
+    uint32_t eff = 0;
+    for (size_t i = sp.col; i < sp.col + span; i++) {
+        if (at(*cols, i).mergeable) continue;
+        eff++;
+        if (!first) inner += hs;
+        first = 0;
+    }
+    if (fixed) {
+        lay_lu cmin = sp.c.constrained ? lay_lu_max(sp.c.mn - inner, 0) : 0, cmax = lay_lu_max(sp.c.mx - inner, 0);
+        lay_lu rmin = cmin, rmax = cmax;
+        if (!eff) return;
+        lay_lu nmin = lay_lu_f(lay_lu_fl(cmin) / (float)eff), nmax = lay_lu_f(lay_lu_fl(cmax) / (float)eff);
+        int64_t last = -1;
+        for (size_t i = sp.col; i < sp.col + span; i++) {
+            lay_tcon c = at(*cols, i);
+            if (c.mergeable) continue;
+            last = (int64_t)i;
+            rmin -= nmin;
+            rmax -= nmax;
+            if (!c.has_mn) { c.constrained = (uint8_t)(c.constrained || sp.c.constrained); c.mn = nmin; c.has_mn = 1; }
+            if (!c.has_mx) { c.constrained = (uint8_t)(c.constrained || sp.c.constrained); c.mx = nmax; c.has_mx = 1; }
+            if (!c.has_pct && !c.constrained && sp.c.has_pct) { c.has_pct = 1; c.pct = sp.c.pct / (float)eff; }
+            (*cols)[i] = c;
+        }
+        if (last >= 0) {
+            lay_tcon c = at(*cols, (size_t)last);
+            c.mn += rmin;
+            c.mx += rmax;
+            (*cols)[(size_t)last] = c;
+        }
+        return;
+    }
+    lay_lu cmin = lay_lu_max(sp.c.mn - inner, 0), cmax = lay_lu_max(sp.c.mx - inner, 0);
+    if (sp.c.has_pct) {
+        float cols_pct = 0;
+        uint32_t nall = 0, npct = 0, nnon = 0;
+        lay_lu non_max = 0;
+        for (size_t i = sp.col; i < sp.col + span; i++) {
+            lay_tcon c = at(*cols, i);
+            if (!c.has_mx) { c.mx = 0; c.has_mx = 1; }
+            if (!c.has_mn) { c.mn = 0; c.has_mn = 1; }
+            (*cols)[i] = c;
+            if (c.mergeable) continue;
+            nall++;
+            if (c.has_pct) { npct++; cols_pct += c.pct; }
+            else { nnon++; non_max += c.mx; }
+        }
+        float surplus = sp.c.pct - cols_pct;
+        if (surplus > 0.0f && nall > npct)
+            for (size_t i = sp.col; i < sp.col + span; i++) {
+                lay_tcon c = at(*cols, i);
+                if (c.has_pct || c.mergeable) continue;
+                c.pct = non_max != 0 ? surplus * lay_lu_fl(c.mx) / lay_lu_fl(non_max) : surplus / (float)nnon;
+                c.has_pct = 1;
+                (*cols)[i] = c;
+            }
+    }
+    for (size_t i = sp.col; i < sp.col + span; i++) {
+        lay_tcon c = at(*cols, i);
+        if (!c.has_mn) { c.mn = 0; c.has_mn = 1; }
+        if (!c.has_mx) { c.mx = 0; c.has_mx = 1; }
+        (*cols)[i] = c;
+    }
+    vector<lay_lu> sizes;
+    lay_tdist_auto(cmin, cols, sp.col, span, 1, &sizes);
+    for (size_t i = 0; i < span; i++) {
+        lay_tcon c = at(*cols, sp.col + i);
+        c.mn = lay_lu_max(c.mn, at(sizes, i));
+        (*cols)[sp.col + i] = c;
+    }
+    lay_tdist_auto(cmax, cols, sp.col, span, sp.c.constrained, &sizes);
+    for (size_t i = 0; i < span; i++) {
+        lay_tcon c = at(*cols, sp.col + i);
+        c.mx = lay_lu_max(lay_lu_max(c.mn, c.mx), at(sizes, i));
+        (*cols)[sp.col + i] = c;
+    }
+}
+
+/* the table's columns' constraints (Blink's ComputeColumnConstraints): the col elements' columns, its cells' (in the
+   fixed layout its first row's alone), a column for each the cells need, those the col elements add past them that
+   may merge cut off, a column that may not merge in each spanning cell's span, each column taking its cells in, the
+   spanning cells shared out (the narrower first, then by their first columns), the percentages held to 100% (in the
+   automatic layout each to what those before it leave; in the fixed layout all scaled) */
+static void lay_table_columns(LCTX, double cw, LTM) {
+    vector<lay_tcon> per;           /* each column's cells of span 1 together */
+    vector<uint8_t> has;
+    vector<lay_tspan> spans;
+    resize(&per, ti->ncols);
+    resize(&has, ti->ncols);
+    uint32_t first_sec = 0xffffffffu;
+    for (size_t k = 0; k < len(*secs); k++) if (at(*secs, k).nrows && first_sec == 0xffffffffu) first_sec = (uint32_t)k;
+    for (size_t k = 0; k < len(*cells); k++) {
+        lay_cell c = at(*cells, k);
+        if (c.col >= ti->ncols) continue;
+        if (ti->fixed && (c.sec != first_sec || c.row != at(*secs, c.sec).row0)) continue;
+        lay_tcon cc = lay_tcell_con(LARGS, c.el, ti->fixed, c.b[1] + c.b[3], cw);
+        if (c.span == 1) {
+            if (at(has, c.col)) { lay_tcon m = at(per, c.col); lay_tcell_encompass(&m, cc); per[c.col] = m; }
+            else { per[c.col] = cc; has[c.col] = 1; }
+        } else {
+            lay_tspan sp;
+            sp.c = cc;
+            sp.col = c.col;
+            sp.span = c.span;
+            push_back(spans, sp);
+        }
+    }
+    /* columns for the cells: the defaults past the col elements', or those past the cells that may merge cut off */
+    if (len(*con) < ti->ncols) {
+        lay_tcon dc;
+        memset(&dc, 0, sizeof dc);
+        dc.fixed = (uint8_t)ti->fixed;
+        dc.mergeable = (uint8_t)!ti->fixed;
+        while (len(*con) < ti->ncols) push_back(con, dc);
+    } else if (len(*con) > ti->ncols) {
+        size_t last = len(*con);
+        while (last > ti->ncols && at(*con, last - 1).mergeable) last--;
+        resize(con, last);
+        ti->ncols = (uint32_t)last;
+        resize(&per, ti->ncols);
+        resize(&has, ti->ncols);
+    }
+    /* a column that may not merge in each spanning cell's span: its first (Blink's EnsureDistributableColumnExists) */
+    for (size_t k = 0; k < len(spans); k++) {
+        lay_tspan sp = at(spans, k);
+        if (sp.col < len(*con)) (*con)[sp.col].mergeable = 0;
+    }
+    for (uint32_t i = 0; i < ti->ncols && i < len(per); i++) {
+        if (!at(has, i)) continue;
+        lay_tcon c = at(*con, i);
+        lay_tcol_encompass(&c, at(per, i));
+        (*con)[i] = c;
+    }
+    /* the spanning cells by span, then by first column (stably) */
+    for (size_t k = 1; k < len(spans); k++) {
+        lay_tspan x = at(spans, k);
+        size_t q = k;
+        while (q > 0 && (at(spans, q - 1).span > x.span || (at(spans, q - 1).span == x.span && at(spans, q - 1).col > x.col))) {
+            spans[q] = at(spans, q - 1);
+            q--;
+        }
+        spans[q] = x;
+    }
+    for (size_t k = 0; k < len(spans); k++) {
+        lay_tspan sp = at(spans, k);
+        if (sp.span < 2 || sp.col >= ti->ncols) continue;
+        lay_tspan_share(sp, ti->hs, ti->fixed, con);
+    }
+    float total = 0;
+    for (size_t i = 0; i < len(*con); i++) {
+        lay_tcon c = at(*con, i);
+        if (c.has_pct) {
+            if (!ti->fixed && c.pct + total > 100.0f) c.pct = 100.0f - total;
+            total += c.pct;
+        }
+        if (!c.has_mn) { c.mn = 0; c.has_mn = 1; }
+        if (!c.has_mx) { c.mx = 0; c.has_mx = 1; }
+        (*con)[i] = c;
+    }
+    if (ti->fixed && total > 100.0f)
+        for (size_t i = 0; i < len(*con); i++) if (at(*con, i).has_pct) (*con)[i].pct = at(*con, i).pct * 100.0f / total;
+}
+
+/* the space no column takes: the table's borders and paddings, and the spacing before each column that does not merge
+   and after the last (Blink's ComputeUndistributableTableSpace) */
+static lay_lu lay_tundist(const vector<lay_tcon> *con, const lay_tinfo *ti) {
+    uint32_t spaces = 2;
+    int first = 1;
+    for (size_t i = 0; i < len(*con); i++) {
+        if (at(*con, i).mergeable) continue;
+        if (first) first = 0;
+        else spaces++;
+    }
+    return ti->tb[1] + ti->tb[3] + ti->tp[1] + ti->tp[3] + (lay_lu)spaces * ti->hs;
+}
+/* the grid's min- and max-content widths (Blink's ComputeGridInlineMinMax): the columns' sums (a fixed table's fixed
+   column its width), the maximum grown to what the percentages ask, the space no column takes about each */
+static void lay_tgrid_minmax(const vector<lay_tcon> *con, lay_lu undist, int fixed, int allow_pct, lay_lu *mn, lay_lu *mx) {
+    lay_lu a = 0, b = 0, estimate = 0, non_pct = 0;
+    float pct_sum = 0;
+    for (size_t i = 0; i < len(*con); i++) {
+        lay_tcon c = at(*con, i);
+        if (c.has_mn) {
+            a += fixed && lay_tis_fixed(c) ? c.mx : c.mn;
+            if (c.has_pct && c.pct > 0) {
+                if (c.mx > 0) estimate = lay_lu_max(estimate, lay_lu_f(100.0f / c.pct * lay_lu_fl(c.mx - c.pbp)));
+            } else non_pct += c.mx;
+        }
+        if (c.has_mx) b += c.mx;
+        if (c.has_pct) pct_sum += c.pct;
+    }
+    if (pct_sum > 100.0f) pct_sum = 100.0f;
+    if (pct_sum > 0 && allow_pct) {
+        lay_lu from = 0;
+        if (non_pct != 0) from = pct_sum == 100.0f ? LAY_TMAX : lay_lu_f((100.0f / (100.0f - pct_sum)) * lay_lu_fl(non_pct));
+        b = lay_lu_max(b, from);
+        b = lay_lu_max(b, estimate);
+    }
+    b = lay_lu_max(a, b);
+    *mn = a + undist;
+    *mx = b + undist;
+}
+/* the table's captions' widest min-content width, their margins about it (Blink's ComputeCaptionConstraint) */
+static lay_lu lay_tcaps_min(LCTX, const vector<uint32_t> *caps, double cw) {
+    lay_lu m = 0;
+    for (size_t k = 0; k < len(*caps); k++) {
+        double a, b;
+        lay_intrinsic(LARGS, at(*caps, k), cw, &a, &b);
+        m = lay_lu_max(m, lay_lu_ceil(a));
+    }
+    return m;
+}
+/* a table's parts, its borders and its columns' constraints */
+static void lay_table_model(LCTX, uint32_t el, const lay_style *s, double cw, LTM) {
+    memset(ti, 0, sizeof *ti);
+    lay_ext te = LAY_X(el);
+    ti->collapse = te.collapse;
+    ti->fixed = te.tfixed && s->width.unit != LAY_AUTO && !lay_content_sized(s->width);
+    ti->hs = ti->collapse ? 0 : lay_lu_d(te.hs);
+    ti->vs = ti->collapse ? 0 : lay_lu_d(te.vs);
+    lay_table_parts(LARGS, el, LTA);
+    lay_tcol_cons(LARGS, LTA);
+    lay_table_borders(LARGS, s, cw, LTA);
+    lay_table_columns(LARGS, cw, LTA);
+}
+
+/* a table's border-box min- and max-content widths (Blink's TableLayoutAlgorithm::ComputeMinMaxSizes): its grid's, at
+   least its captions'; a fixed table of a percentage width's maximum the largest a table takes */
+static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) {
+    lay_style s;
+    lay_style_of(LARGS, el, &s);
+    vector<uint32_t> caps_v;
+    vector<lay_tcol> tcols_v;
+    vector<lay_tsec> secs_v;
+    vector<lay_trow> rows_v;
+    vector<lay_cell> cells_v;
+    vector<lay_tcon> con_v;
+    vector<lay_tedge> edges_v;
+    lay_tinfo info;
+    lay_table_model(LARGS, el, &s, cw, &caps_v, &tcols_v, &secs_v, &rows_v, &cells_v, &con_v, &edges_v, &info);
+    /* percentages count in a table's own widths, but not inside a cell, a flex or a grid container (Blink's
+       AllowColumnPercentages) */
+    int allow = 1;
+    for (uint32_t p = d->node[el].parent; p > 1 && allow; p = d->node[p].parent) {
+        if (d->node[p].kind != DOM_NODE_KIND_ELEMENT) continue;
+        if (lay_display_of(LARGS, p) == D_CELL || LAY_X(p).lx != LX_FLOW) allow = 0;
+    }
+    lay_lu a, b;
+    lay_tgrid_minmax(&con_v, lay_tundist(&con_v, &info), info.fixed, allow, &a, &b);
+    lay_lu cap = lay_tcaps_min(LARGS, &caps_v, cw);
+    a = lay_lu_max(a, cap);
+    b = lay_lu_max(b, cap);
+    if (info.fixed && s.width.unit == LAY_PCT) b = LAY_TMAX;
+    *mn = lay_lu_px(a);
+    *mx = lay_lu_px(b);
+}
+
+/* ---- a table's rows ---- */
+
+/* what rows r0 .. r0 + n lack of size shared out to them (Blink's DistributeExcessBlockSizeToRows): to the rows a cell
+   spanning rows begins in (a rowspan's share, but its first row), else to the rows of a size their cells give them in
+   proportion to it, else to the empty ones (all of them empty, or the others constrained; a rowspan's to the last
+   empty one), else to all in proportion */
+static void lay_trows_grow(vector<lay_trow> *rows, uint32_t r0, uint32_t n, lay_lu want, int rowspan, lay_lu vs) {
+    if (!n) return;
+    lay_lu total = 0, unc_total = 0;
+    uint32_t nconstrained = 0;
+    vector<uint32_t> spans, unc, empty, nonempty, unc_empty;
+    for (uint32_t i = r0; i < r0 + n; i++) {
+        lay_trow r = at(*rows, i);
+        total += r.h;
+        if (rowspan && i != r0 && r.rspan_start) push_back(spans, i);
+        if (r.h == 0) { push_back(empty, i); if (!r.constrained) push_back(unc_empty, i); }
+        else {
+            push_back(nonempty, i);
+            if (r.constrained) nconstrained++;
+            else { push_back(unc, i); unc_total += r.h; }
+        }
+    }
+    lay_lu dist = (want - vs * (lay_lu)(n - 1)) - total;
+    if (dist <= 0) return;
+    lay_lu rest = dist;
+    if (len(spans)) {
+        for (size_t k = 0; k < len(spans); k++) {
+            lay_lu delta = dist / (lay_lu)len(spans);
+            (*rows)[at(spans, k)].h = at(*rows, at(spans, k)).h + delta;
+            rest -= delta;
+        }
+        uint32_t last = at(spans, len(spans) - 1);
+        (*rows)[last].h = lay_lu_max(at(*rows, last).h + rest, 0);
+        return;
+    }
+    if (len(unc)) {
+        for (size_t k = 0; k < len(unc); k++) {
+            lay_lu delta = lay_lu_muldiv(dist, at(*rows, at(unc, k)).h, unc_total);
+            (*rows)[at(unc, k)].h = at(*rows, at(unc, k)).h + delta;
+            rest -= delta;
+        }
+        uint32_t last = at(unc, len(unc) - 1);
+        (*rows)[last].h = at(*rows, last).h + rest;
+        return;
+    }
+    if (len(empty)) {
+        int only_empty = len(empty) == n;
+        if (rowspan) {
+            if (only_empty) {
+                uint32_t last = at(empty, len(empty) - 1);
+                (*rows)[last].h = at(*rows, last).h + dist;
+                return;
+            }
+        } else if (only_empty || len(empty) + nconstrained == n) {
+            int use_unc = len(unc_empty) > 0;
+            size_t ng = use_unc ? len(unc_empty) : len(empty);
+            for (size_t k = 0; k < ng; k++) {
+                uint32_t i = use_unc ? at(unc_empty, k) : at(empty, k);
+                lay_lu delta = dist / (lay_lu)ng;
+                (*rows)[i].h = delta;
+                rest -= delta;
+            }
+            uint32_t last = use_unc ? at(unc_empty, ng - 1) : at(empty, ng - 1);
+            (*rows)[last].h = at(*rows, last).h + rest;
+            return;
+        }
+    }
+    if (len(nonempty)) {
+        for (size_t k = 0; k < len(nonempty); k++) {
+            lay_lu delta = lay_lu_muldiv(dist, at(*rows, at(nonempty, k)).h, total);
+            (*rows)[at(nonempty, k)].h = at(*rows, at(nonempty, k)).h + delta;
+            rest -= delta;
+        }
+        uint32_t last = at(nonempty, len(nonempty) - 1);
+        (*rows)[last].h = at(*rows, last).h + rest;
+    }
+}
+
+/* a table's height shared among its row groups (Blink's DistributeTableBlockSizeToSections): what is left after the
+   spacing about them, the bodies first (else the head and foot), the automatic ones (else the fixed, else the
+   percentage ones; percentages are not read here) in proportion to their heights, each one's share then its rows' */
+static void lay_tsecs_grow(vector<lay_tsec> *secs, vector<lay_trow> *rows, lay_lu height, lay_lu vs) {
+    size_t n = len(*secs);
+    if (!n) return;
+    lay_lu avail = height - (lay_lu)(n + 1) * vs;
+    if (avail < 0) avail = 0;
+    lay_lu minsum = 0;
+    int bodies = 0;
+    for (size_t k = 0; k < n; k++) { minsum += at(*secs, k).h; if (at(*secs, k).body) bodies = 1; }
+    if (avail <= minsum) return;
+    /* the sections that grow: the bodies (when there are any) of an automatic height, else those of a height of their own */
+    vector<uint32_t> grow;
+    lay_lu gsum = 0;
+    for (int pass = 0; pass < 2 && !len(grow); pass++)
+        for (size_t k = 0; k < n; k++) {
+            lay_tsec sg = at(*secs, k);
+            if ((bodies && !sg.body) || (pass == 0 && sg.constrained)) continue;
+            push_back(grow, (uint32_t)k);
+            gsum += sg.h;
+        }
+    lay_lu dist = avail - minsum, rest = dist;
+    vector<uint8_t> grew;
+    resize(&grew, n);
+    for (size_t q = 0; q < len(grow); q++) {
+        uint32_t k = at(grow, q);
+        lay_lu delta = gsum > 0 ? lay_lu_muldiv(dist, at(*secs, k).h, gsum) : dist / (lay_lu)len(grow);
+        (*secs)[k].h = at(*secs, k).h + delta;
+        rest -= delta;
+        grew[k] = 1;
+    }
+    if (len(grow)) {
+        uint32_t last = at(grow, len(grow) - 1);
+        (*secs)[last].h = at(*secs, last).h + rest;
+    }
+    for (size_t k = 0; k < n; k++) {
+        if (!at(grew, k)) continue;
+        lay_tsec sg = at(*secs, k);
+        lay_trows_grow(rows, sg.row0, sg.nrows, sg.h, 0, vs);
+    }
+}
+
+/* a box's height as a LayoutUnit (to the nearest 64th) */
+static lay_lu lay_lu_round(double v) { return (lay_lu)floor(v * 64.0 + 0.5); }
+
+/* ---- a collapsing table's edges, drawn as Blink's TablePainter::PaintCollapsedBorders draws them ---- */
+
+/* which of two edges (by index; out of the grid: none) draws a joint they share (Blink's CompareForPaint): 1 a, -1 b, 0
+   both: the one drawn, then the wider, then the style later in Blink's order, then the earlier box */
+static int lay_tjoint_cmp(const vector<lay_tedge> *edges, int64_t a, int64_t b) {
+    if (a == b) return 0;
+    int ap = lay_tedge_paints(edges, a), bp = lay_tedge_paints(edges, b);
+    if (ap && bp) {
+        lay_tedge ea = at(*edges, (size_t)a), eb = at(*edges, (size_t)b);
+        if (ea.w > eb.w) return 1;
+        if (ea.w < eb.w) return -1;
+        if (ea.st == eb.st) return ea.order < eb.order ? 1 : ea.order > eb.order ? -1 : 0;
+        if (eb.st == 1) return 1;
+        if (ea.st == 1) return -1;
+        return ea.st > eb.st ? 1 : -1;
+    }
+    if (!ap && !bp) return 0;
+    return ap ? 1 : -1;
+}
+/* the joints at an edge's two ends (Blink's ComputeEdgeJoints): the inline and block sizes of each, and whether the edge
+   draws it */
+static void lay_tjoints(const vector<lay_tedge> *edges, int64_t e, int64_t epr, int inl, lay_lu *sj, lay_lu *ej, int *sw, int *ew) {
+    int64_t n = (int64_t)len(*edges);
+    int64_t bs, as, os, us, be, ae, oe, ue;
+    if (inl) { bs = e - 2; as = e; os = e - (epr + 1); us = e - 1; be = e; ae = e + 2; oe = e - (epr - 1); ue = e + 1; }
+    else { bs = e - 1; as = e + 1; os = e - epr; us = e; be = e + epr - 1; ae = e + epr + 1; oe = e; ue = e + epr; }
+    int64_t ids[8] = { bs, as, os, us, be, ae, oe, ue };
+    for (int k = 0; k < 8; k++) if (ids[k] < 0 || ids[k] >= n) ids[k] = -1;
+    bs = ids[0]; as = ids[1]; os = ids[2]; us = ids[3]; be = ids[4]; ae = ids[5]; oe = ids[6]; ue = ids[7];
+    /* sj, ej: [0] the joint's inline size, [1] its block size */
+    int ic = lay_tjoint_cmp(edges, bs, as);
+    sj[1] = ic == 1 ? lay_tedge_w(edges, bs) : lay_tedge_w(edges, as);
+    int bc = lay_tjoint_cmp(edges, os, us);
+    sj[0] = bc == 1 ? lay_tedge_w(edges, os) : lay_tedge_w(edges, us);
+    int ivb = lay_tjoint_cmp(edges, ic == 1 ? bs : as, bc == 1 ? os : us);
+    *sw = inl ? (ivb != -1 && ic != 1) : (ivb != 1 && bc != 1);
+    ic = lay_tjoint_cmp(edges, be, ae);
+    ej[1] = ic == 1 ? lay_tedge_w(edges, be) : lay_tedge_w(edges, ae);
+    bc = lay_tjoint_cmp(edges, oe, ue);
+    ej[0] = bc == 1 ? lay_tedge_w(edges, oe) : lay_tedge_w(edges, ue);
+    ivb = lay_tjoint_cmp(edges, ic == 1 ? be : ae, bc == 1 ? oe : ue);
+    *ew = inl ? (ivb != -1 && ic != -1) : (ivb != 1 && bc != -1);
+}
+/* the edges' rectangles, in the order Blink draws them (its row groups in turn, each its rows' edges, a row's column
+   edge and row edge by column; an edge between two groups the first's), each from the table's border box's top left
+   (cx: the columns' lines from the content box's left; the content box at bl, bt in it), its side, style and colour:
+   the table box's cborders */
+static void lay_table_cborders(LCTX, uint32_t b, const vector<lay_tedge> *edges, const lay_tinfo *ti, const vector<lay_tsec> *secs,
+                               const vector<lay_trow> *rows, const vector<lay_lu> *cx) {
+    vector<char> out;
+    int64_t epr = ti->epr, ne = (int64_t)len(*edges);
+    if (!epr || !ne) return;
+    int64_t painted = -1;
+    for (size_t k = 0; k < len(*secs); k++) {
+        lay_tsec sg = at(*secs, k);
+        if (!sg.nrows) continue;
+        /* the group's rows' offsets in it, and its end */
+        vector<lay_lu> ro;
+        for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) push_back(ro, at(*rows, r).y);
+        push_back(ro, sg.h);
+        for (int64_t e = (int64_t)sg.row0 * epr; e < ne; e++) {
+            int64_t trow = e / epr, tcol = e % epr / 2, frow = trow - (int64_t)sg.row0;
+            if (frow >= (int64_t)len(ro)) { painted = trow - 1; break; }
+            if (!lay_tedge_paints(edges, e)) continue;
+            lay_tedge ed = at(*edges, (size_t)e);
+            int inl = e % epr % 2 != 0;
+            lay_lu x0, y0, w0, h0, sj[2], ej[2];
+            int sw, ew;
+            if (inl) {
+                if (tcol + 1 >= (int64_t)len(*cx)) continue;
+                if (painted >= 0 && painted == trow) continue;
+                x0 = at(*cx, (size_t)tcol);
+                w0 = at(*cx, (size_t)tcol + 1) - x0;
+                y0 = at(ro, (size_t)frow) - ed.w / 2;
+                h0 = ed.w;
+                lay_tjoints(edges, e, epr, 1, sj, ej, &sw, &ew);
+                if (sw) { x0 -= sj[0] / 2; w0 += sj[0] / 2; }
+                else { x0 += sj[0] / 2; w0 -= sj[0] / 2; }
+                if (ew) w0 += ej[0] / 2;
+                else w0 -= ej[0] / 2;
+            } else {
+                if (frow + 1 >= (int64_t)len(ro)) continue;
+                y0 = at(ro, (size_t)frow);
+                h0 = at(ro, (size_t)frow + 1) - y0;
+                x0 = at(*cx, (size_t)tcol) - ed.w / 2;
+                w0 = ed.w;
+                lay_tjoints(edges, e, epr, 0, sj, ej, &sw, &ew);
+                if (sw) { y0 -= sj[1] / 2; h0 += sj[1] / 2; }
+                else { y0 += sj[1] / 2; h0 -= sj[1] / 2; }
+                if (ew) h0 += ej[1] / 2;
+                else h0 -= ej[1] / 2;
+            }
+            /* from the border box: the group at the content box's left, its offset down it */
+            double px = lay_lu_px(x0 + ti->tb[3]), py = lay_lu_px(y0 + sg.y + ti->tb[0]);
+            char line[160];
+            int ln = snprintf(line, sizeof line, "%.10gpx %.10gpx %.10gpx %.10gpx %d %d #%08x\n", px, py, lay_lu_px(w0), lay_lu_px(h0),
+                              inl ? 0 : 3, (int)lay_cstyle_bs(ed.st), ed.color);
+            if (ln > 0 && (size_t)ln < sizeof line) append_range(out, line, (size_t)ln);
+        }
+    }
+    if (len(out)) t->box[b].cborders = text_add(t, data(out), len(out));
+}
+
+/* ---- a table laid out ---- */
 
 /* shift a laid-out box's content down by dy: its lines and child boxes */
 static void lay_shift_content(layout_tree *t, uint32_t b, double dy) {
@@ -6003,154 +7128,388 @@ static void lay_shift_content(layout_tree *t, uint32_t b, double dy) {
     for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) t->box[c].y += dy;
 }
 
+/* the table's parts' boxes laid out: its width (Blink's ComputeAssignableTableInlineSize: its own, else fit-content
+   between its grid's min- and max-content widths, held by min-width and max-width, at least its captions' and its
+   grid's min-content) shared among its columns and the spacing; its captions laid out at its border box's width, the
+   top ones above it and the bottom ones below; its cols' and colgroups' boxes over the row groups; each row group's,
+   row's and cell's box, a cell at its columns' width (its borders a collapsing table's halves of its edges) and its
+   rows as tall as their cells and their own heights ask, a cell spanning rows sharing out what they lack, the table's
+   height its groups' bodies'; a cell's content where its vertical-align puts it; a collapsing table's edges for paint */
 static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double cw) {
-    vector<uint32_t> rows, captions;
-    vector<lay_cell> cells;
-    vector<double> cmin, cmax, widths;
-    uint32_t ncols;
-    lay_table_cells(LARGS, el, &rows, &cells, &captions, &ncols);
-    lay_columns(LARGS, &cells, ncols, cw, &cmin, &cmax);
-    double smin = 0, smax = 0;
-    for (uint32_t i = 0; i < ncols; i++) { smin += at(cmin, i); smax += at(cmax, i); }
-    double edges = t->box[b].bl + t->box[b].br + t->box[b].pl + t->box[b].pr;
-    /* an empty table (no row, no caption): no spacing either way (Chromium's) */
-    double spacing = ncols == 0 && len(rows) == 0 && len(captions) == 0 ? 0 : LAY_SPACING * (ncols + 1);
-    /* the table's width: as declared (its border box), or shrunk to its columns */
+    vector<uint32_t> caps_v;
+    vector<lay_tcol> tcols_v;
+    vector<lay_tsec> secs_v;
+    vector<lay_trow> rows_v;
+    vector<lay_cell> cells_v;
+    vector<lay_tcon> con_v;
+    vector<lay_tedge> edges_v;
+    lay_tinfo info;
+    lay_table_model(LARGS, el, s, cw, &caps_v, &tcols_v, &secs_v, &rows_v, &cells_v, &con_v, &edges_v, &info);
+    if (info.collapse) {
+        /* its borders the halves of its outer edges, none drawn (paint draws the edges); no padding */
+        t->box[b].bt = lay_lu_px(info.tb[0]);
+        t->box[b].br = lay_lu_px(info.tb[1]);
+        t->box[b].bb = lay_lu_px(info.tb[2]);
+        t->box[b].bl = lay_lu_px(info.tb[3]);
+        t->box[b].pt = t->box[b].pr = t->box[b].pb = t->box[b].pl = 0;
+        t->box[b].bst = t->box[b].bsr = t->box[b].bsb = t->box[b].bsl = LAY_BS_NONE;
+        t->box[b].bct = t->box[b].bcr = t->box[b].bcb = t->box[b].bcl = 0;
+    }
+    lay_lu bpi = info.tb[1] + info.tb[3] + info.tp[1] + info.tp[3];
+    lay_lu undist = lay_tundist(&con_v, &info), gmin, gmax;
+    lay_tgrid_minmax(&con_v, undist, info.fixed, s->width.unit != LAY_MAXC, &gmin, &gmax);
+    lay_lu capmin = lay_tcaps_min(LARGS, &caps_v, cw);
+    /* the table's used border-box width */
     double ml = s->m[3].unit == LAY_AUTO ? 0 : t->box[b].ml, mr = s->m[1].unit == LAY_AUTO ? 0 : t->box[b].mr;
-    double bw;
-    if (s->width.unit != LAY_AUTO) {
-        bw = lay_res(st, s->width, cw);
+    lay_lu used;
+    int specified = s->width.unit != LAY_AUTO && !lay_content_sized(s->width);
+    if (specified) {
+        double wv = lay_res(st, s->width, cw) + (s->border_box ? 0 : lay_lu_px(bpi));
+        used = lay_lu_d(wv);
         t->box[b].how = s->width.unit != LAY_PX ? LAYOUT_WIDTH_HOW_PERCENT : LAYOUT_WIDTH_HOW_DECLARED;
     } else {
-        double avail = cw - ml - mr;
-        bw = smax + spacing + edges;
-        if (bw > avail) bw = avail;
+        lay_lu avail = lay_lu_d(cw - ml - mr);
+        used = s->width.unit == LAY_MINC ? gmin : s->width.unit == LAY_MAXC ? gmax : lay_lu_min(lay_lu_max(avail, gmin), gmax);
         t->box[b].how = LAYOUT_WIDTH_HOW_SHRINK_TO_FIT;
     }
-    if (bw < smin + spacing + edges) bw = smin + spacing + edges;
-    double colw = bw - spacing - edges;
-    resize(&widths, ncols);
-    for (uint32_t i = 0; i < ncols; i++) {
-        double v;
-        if (smax <= colw) v = at(cmax, i) + (smax > 0 ? (colw - smax) * at(cmax, i) / smax : (colw - smax) / ncols);
-        else if (smin >= colw) v = at(cmin, i);
-        else v = at(cmin, i) + (smax > smin ? (colw - smin) * (at(cmax, i) - at(cmin, i)) / (smax - smin) : 0);
-        widths[i] = v;
+    if (s->maxw.unit == LAY_PX || s->maxw.unit == LAY_PCT || s->maxw.unit == LAY_CALC) {
+        lay_lu mw = lay_lu_d(lay_res(st, s->maxw, cw) + (s->border_box ? 0 : lay_lu_px(bpi)));
+        if (used > mw) { used = mw; t->box[b].how = LAYOUT_WIDTH_HOW_MAX_WIDTH; }
     }
-    t->box[b].w = bw - edges;
+    lay_len mnl = LAY_X(el).minw;
+    if (mnl.unit == LAY_PX || mnl.unit == LAY_PCT || mnl.unit == LAY_CALC) {
+        lay_lu mw = lay_lu_d(lay_res(st, mnl, cw) + (s->border_box ? 0 : lay_lu_px(bpi)));
+        if (used < mw) { used = mw; t->box[b].how = LAYOUT_WIDTH_HOW_MIN_WIDTH; }
+    }
+    used = lay_lu_max(used, gmin);
+    used = lay_lu_max(used, capmin);
+    lay_lu assignable = used - undist > 0 ? used - undist : 0;
+    /* the columns' sizes and places (Blink's ComputeLocationsFromColumns: an empty column that may merge takes no spacing) */
+    vector<lay_lu> sizes, coff, csz;
+    size_t nc = len(con_v);
+    if (nc) {
+        if (info.fixed) lay_tsync_fixed(assignable, &con_v, &sizes);
+        else lay_tdist_auto(assignable, &con_v, 0, nc, 1, &sizes);
+    }
+    lay_lu off = info.hs;
+    int first = 1;
+    for (size_t i = 0; i < nc; i++) {
+        lay_lu sz = at(sizes, i);
+        if (at(con_v, i).mergeable && sz == 0) { push_back(coff, off); push_back(csz, 0); continue; }
+        if (!first) off += info.hs;
+        first = 0;
+        push_back(coff, off);
+        push_back(csz, sz);
+        off += sz;
+    }
+    lay_lu tw;
+    if (nc) tw = lay_lu_max(off + bpi + info.hs, capmin);
+    else if (specified || mnl.unit != LAY_AUTO) tw = assignable + undist;
+    else if (capmin) tw = lay_lu_max(capmin, bpi);
+    else tw = info.collapse ? 0 : assignable + bpi;
+    /* a grid with no columns has no spacing */
+    lay_lu hs = nc ? info.hs : 0, vs = nc ? info.vs : 0;
+    double bw = lay_lu_px(tw);
+    t->box[b].w = bw - lay_lu_px(bpi) > 0 ? bw - lay_lu_px(bpi) : 0;
     double rest = cw - bw;
     if (s->m[3].unit == LAY_AUTO && s->m[1].unit == LAY_AUTO && rest > 0) { ml = rest / 2; mr = rest / 2; }
     else if (s->m[3].unit == LAY_AUTO) ml = rest - mr;
     else mr = rest - ml;
     t->box[b].ml = ml;
     t->box[b].mr = mr;
-    /* captions above */
-    double y = 0;
-    for (size_t k = 0; k < len(captions); k++) {
+    double cbw = t->box[b].w;                      /* the content box's width: what the cells' percentages take */
+    /* the captions: the top ones now, above the border box */
+    double top = 0;
+    vector<uint32_t> capb;                         /* each caption's box */
+    for (size_t k = 0; k < len(caps_v); k++) {
+        uint32_t cap = at(caps_v, k);
+        if (LAY_X(cap).capb) { push_back(capb, 0u); continue; }
         lay_mc cmt, cmb;
         int empty;
         lay_bk bk;
-        bk.ox = 0;
-        bk.oy = 0;
+        memset(&bk, 0, sizeof bk);
         bk.ch = -1;
         bk.fw = -1;
-        bk.shrink = 0;
-        bk.item = 0;
-    bk.item = 0;
-        bk.qs = 0;
-        uint32_t cb = lay_block(LARGS, b, at(captions, k), t->box[b].w, 0, 0, 0, 0, &bk, &cmt, &cmb, &empty);
-        lay_place(t, cb, t->box[cb].ml, y + lay_mc_v(cmt));
-        y += lay_mc_v(cmt) + lay_border_height(t, cb) + lay_mc_v(cmb);
+        uint32_t cb = lay_block(LARGS, b, cap, bw, 0, 0, 0, 0, &bk, &cmt, &cmb, &empty);
+        push_back(capb, cb);
+        top += t->box[cb].mt + lay_border_height(t, cb) + t->box[cb].mb;
     }
-    if (len(rows)) y += LAY_SPACING;
-    /* the rows' boxes, and each cell laid out in its columns */
-    size_t nrows = len(rows);
-    vector<uint32_t> rboxes;
-    vector<double> rh;
-    for (size_t r = 0; r < nrows; r++) {
-        uint32_t row_el = at(rows, r);
-        uint32_t rb = lay_new_box(LARGS, b, row_el, LAYOUT_BOX_KIND_ROW);
-        lay_style rs;
-        lay_style_of(LARGS, row_el, &rs);
-        t->box[rb].background = rs.bg;
-        t->box[rb].w = t->box[b].w;
-        t->box[rb].how = LAYOUT_WIDTH_HOW_FILL;
-        t->box[rb].avail = t->box[b].w;
-        push_back(rboxes, rb);
-        push_back(rh, rs.height.unit == LAY_PX ? rs.height.v : 0.0);
+    t->box[b].cap_top = top;
+    /* the cols' and colgroups' boxes (their places once the groups have theirs) */
+    for (size_t k = 0; k < len(tcols_v); k++) {
+        lay_tcol tc = at(tcols_v, k);
+        if (tc.col0 >= nc) continue;
+        uint32_t parent = tc.group >= 0 ? at(tcols_v, (size_t)tc.group).box : b;
+        if (!parent) continue;
+        lay_style ks;
+        lay_style_of(LARGS, tc.el, &ks);
+        uint32_t kb = lay_new_box(LARGS, parent, tc.el, LAYOUT_BOX_KIND_COLUMN);
+        t->box[kb].background = ks.bg;
+        lay_box_style(LARGS, kb, tc.el, cbw, -1);
+        t->box[kb].how = LAYOUT_WIDTH_HOW_COLUMN;
+        tcols_v[k].box = kb;
     }
-    for (size_t ci = 0; ci < len(cells); ci++) {
-        lay_cell c = at(cells, ci);
-        double x = LAY_SPACING;
-        for (uint32_t i = 0; i < c.col && i < ncols; i++) x += at(widths, i) + LAY_SPACING;
-        double span_w = LAY_SPACING * (c.span - 1);
-        for (uint32_t i = c.col; i < c.col + c.span && i < ncols; i++) span_w += at(widths, i);
+    /* the row groups', rows' and cells' boxes; each cell laid out in its columns, its height measured */
+    for (size_t k = 0; k < len(secs_v); k++) {
+        lay_tsec sg = at(secs_v, k);
+        uint32_t gb = lay_new_box(LARGS, b, sg.el, LAYOUT_BOX_KIND_ROW_GROUP);
+        if (sg.el) {
+            lay_style gs;
+            lay_style_of(LARGS, sg.el, &gs);
+            t->box[gb].background = gs.bg;
+            lay_box_style(LARGS, gb, sg.el, cbw, -1);
+            lay_len gh = LAY_X(sg.el).hraw;
+            secs_v[k].constrained = (uint8_t)(gh.unit == LAY_PX || gh.unit == LAY_PCT);
+        }
+        t->box[gb].how = LAYOUT_WIDTH_HOW_FILL;
+        secs_v[k].box = gb;
+        for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) {
+            uint32_t row_el = at(rows_v, r).el;
+            uint32_t rb = lay_new_box(LARGS, gb, row_el, LAYOUT_BOX_KIND_ROW);
+            lay_style rs;
+            lay_style_of(LARGS, row_el, &rs);
+            t->box[rb].background = rs.bg;
+            lay_box_style(LARGS, rb, row_el, cbw, -1);
+            t->box[rb].how = LAYOUT_WIDTH_HOW_FILL;
+            rows_v[r].box = rb;
+            /* a row's own fixed height (a percentage's is not read) */
+            lay_len rh = LAY_X(row_el).hraw;
+            if (rh.unit == LAY_PX) { rows_v[r].h = lay_lu_d(rh.v); rows_v[r].constrained = 1; }
+            else if (rh.unit == LAY_PCT) rows_v[r].constrained = 1;
+        }
+    }
+    /* each rowspan cell: its first row, its rows, the least height it asks */
+    vector<uint32_t> spanned;
+    vector<lay_lu> span_min;
+    for (size_t ci = 0; ci < len(cells_v); ci++) {
+        lay_cell c = at(cells_v, ci);
+        size_t endc = c.col + c.span - 1 < nc ? c.col + c.span - 1 : (nc ? nc - 1 : 0);
+        lay_lu span_w = nc ? at(coff, endc) + at(csz, endc) - at(coff, c.col) : 0;
         lay_style cs;
         lay_style_of(LARGS, c.el, &cs);
-        uint32_t cb = lay_new_box(LARGS, at(rboxes, c.row), c.el, LAYOUT_BOX_KIND_CELL);
-        lay_edges(t, st, cb, &cs, t->box[b].w);
-        lay_box_style(LARGS, cb, c.el, t->box[b].w, -1);
+        uint32_t cb = lay_new_box(LARGS, at(rows_v, c.row).box, c.el, LAYOUT_BOX_KIND_CELL);
+        lay_edges(t, st, cb, &cs, cbw);
+        lay_box_style(LARGS, cb, c.el, cbw, -1);
         t->box[cb].mt = t->box[cb].mr = t->box[cb].mb = t->box[cb].ml = 0;
-        t->box[cb].w = span_w - t->box[cb].bl - t->box[cb].br - t->box[cb].pl - t->box[cb].pr;
+        t->box[cb].bt = lay_lu_px(c.b[0]);
+        t->box[cb].br = lay_lu_px(c.b[1]);
+        t->box[cb].bb = lay_lu_px(c.b[2]);
+        t->box[cb].bl = lay_lu_px(c.b[3]);
+        if (info.collapse) {
+            t->box[cb].bst = t->box[cb].bsr = t->box[cb].bsb = t->box[cb].bsl = LAY_BS_NONE;
+            t->box[cb].bct = t->box[cb].bcr = t->box[cb].bcb = t->box[cb].bcl = 0;
+        }
+        double sw = lay_lu_px(span_w);
+        t->box[cb].w = sw - t->box[cb].bl - t->box[cb].br - t->box[cb].pl - t->box[cb].pr;
         if (t->box[cb].w < 0) t->box[cb].w = 0;
         t->box[cb].how = LAYOUT_WIDTH_HOW_COLUMN;
-        t->box[cb].avail = span_w;
+        t->box[cb].avail = sw;
         lay_mc et, eb;
         int empty;
         lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, 0, &et, &eb, &empty);
-        /* its height; in quirks mode its border box's (the table cell height box sizing quirk, 3.13) */
-        double chv = cs.height.v;
-        if (lay_quirks && !cs.border_box) chv -= t->box[cb].bt + t->box[cb].bb + t->box[cb].pt + t->box[cb].pb;
-        if (cs.height.unit == LAY_PX && chv > t->box[cb].h) t->box[cb].h = chv;
-        lay_place(t, cb, x, 0);
-        double bh = lay_border_height(t, cb);
-        cells[ci].box = cb;
-        cells[ci].h = bh;
-        if (c.rspan == 1 && bh > at(rh, c.row)) rh[c.row] = bh;
+        /* empty-cells: hide, separated borders, nothing in its flow (no line, no box, no element but one of display none
+           or out of the flow: an empty inline element counts, as it makes Blink a line): its own decorations not drawn
+           (Blink's HideTableCellIfEmpty) */
+        int hide = !info.collapse && LAY_X(c.el).ehide && !t->box[cb].first_line && !t->box[cb].first_child;
+        for (uint32_t k = dom_flat_first(d, c.el); k && hide; k = dom_flat_next(d, k)) {
+            if (d->node[k].kind != DOM_NODE_KIND_ELEMENT || lay_display_of(LARGS, k) == D_NONE) continue;
+            int kp = LAY_X(k).pos;
+            if (kp != POS_ABSOLUTE && kp != POS_FIXED) hide = 0;
+        }
+        t->box[cb].cell_hidden = (uint8_t)hide;
+        cells_v[ci].box = cb;
+        lay_lu vbp = lay_lu_d(t->box[cb].bt + t->box[cb].bb + t->box[cb].pt + t->box[cb].pb);
+        lay_lu cell_h = lay_lu_round(t->box[cb].h) + vbp;
+        /* its own height: a length's border box (its border box's in quirks mode, the table cell height box sizing quirk,
+           the Quirks Mode Standard 3.13) */
+        lay_len chl = LAY_X(c.el).hraw;
+        lay_lu css_h = 0;
+        int css_fixed = chl.unit == LAY_PX, css_pct = chl.unit == LAY_PCT;
+        if (css_fixed) {
+            lay_lu hv = lay_lu_d(chl.v);
+            css_h = lay_quirks || cs.border_box ? lay_lu_max(vbp, hv) : vbp + hv;
+        }
+        lay_lu need = lay_lu_max(cell_h, css_h);
+        cells_v[ci].h = need;
+        if (c.rspan == 1) {
+            if (css_fixed || css_pct) rows_v[c.row].constrained = 1;
+            if (need > at(rows_v, c.row).h) rows_v[c.row].h = need;
+        } else {
+            push_back(spanned, (uint32_t)ci);
+            push_back(span_min, need);
+        }
     }
-    /* a cell its rowspan holds: what its rows lack, shared out as their heights are
-       (evenly among rows of none) */
-    for (size_t ci = 0; ci < len(cells); ci++) {
-        lay_cell c = at(cells, ci);
-        if (c.rspan < 2) continue;
-        size_t lastr = c.row + c.rspan - 1 < nrows ? c.row + c.rspan - 1 : nrows - 1;
-        double sum = LAY_SPACING * (double)(lastr - c.row), rows_h = 0;
-        for (size_t r = c.row; r <= lastr; r++) { sum += at(rh, r); rows_h += at(rh, r); }
-        if (c.h <= sum) continue;
-        double lack = c.h - sum;
-        for (size_t r = c.row; r <= lastr; r++)
-            rh[r] = at(rh, r) + (rows_h > 0 ? lack * at(rh, r) / rows_h : lack / (double)(lastr - c.row + 1));
+    /* the cells spanning rows, in Blink's order (a cell inside another's rows first; else the lower), each sharing out what
+       its rows lack */
+    for (size_t k = 1; k < len(spanned); k++) {
+        uint32_t x = at(spanned, k);
+        lay_lu xm = at(span_min, k);
+        size_t q = k;
+        while (q > 0) {
+            lay_cell a = at(cells_v, at(spanned, q - 1)), c = at(cells_v, x);
+            int before;   /* c sorts before a */
+            if (a.row == c.row && a.rspan == c.rspan) before = xm > at(span_min, q - 1);
+            else if (c.row >= a.row && c.row + c.rspan <= a.row + a.rspan) before = 1;
+            else if (a.row >= c.row && a.row + a.rspan <= c.row + c.rspan) before = 0;
+            else before = c.row < a.row;
+            if (!before) break;
+            spanned[q] = at(spanned, q - 1);
+            span_min[q] = at(span_min, q - 1);
+            q--;
+        }
+        spanned[q] = x;
+        span_min[q] = xm;
     }
-    /* the rows placed; each cell as tall as its rows, its content where its vertical-align
-       puts it: the cell's, else its row's, else its row group's (as the user agent's sheet
-       has them inherit), else the middle; the top for baseline */
-    vector<double> ry;
-    for (size_t r = 0; r < nrows; r++) {
-        uint32_t rb = at(rboxes, r);
-        t->box[rb].h = at(rh, r);
-        t->box[rb].x = 0;
-        t->box[rb].y = y;
-        push_back(ry, y);
-        y += at(rh, r) + LAY_SPACING;
+    for (size_t k = 0; k < len(spanned); k++) {
+        lay_cell c = at(cells_v, at(spanned, k));
+        lay_trows_grow(&rows_v, c.row, c.rspan, at(span_min, k), 1, vs);
     }
-    for (size_t ci = 0; ci < len(cells); ci++) {
-        lay_cell c = at(cells, ci);
+    /* each group's height: its rows' and the spacing between them; a fixed height of its own shared to them */
+    lay_lu min_total = 0;
+    for (size_t k = 0; k < len(secs_v); k++) {
+        lay_tsec sg = at(secs_v, k);
+        lay_lu h = 0;
+        for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) h += at(rows_v, r).h;
+        if (sg.nrows > 1) h += vs * (lay_lu)(sg.nrows - 1);
+        lay_len gh;
+        gh.unit = LAY_AUTO;
+        if (sg.el) gh = LAY_X(sg.el).hraw;
+        if (gh.unit == LAY_PX && lay_lu_d(gh.v) > h) {
+            lay_trows_grow(&rows_v, sg.row0, sg.nrows, lay_lu_d(gh.v), 0, vs);
+            h = lay_lu_d(gh.v);
+        }
+        secs_v[k].h = h;
+        min_total += h;
+    }
+    /* the table's own height: its border box's, shared to its groups (quirks mode: a table of no row groups takes none) */
+    lay_lu bpb = info.tb[0] + info.tb[2] + info.tp[0] + info.tp[2], minimal = 0;
+    lay_len thl = LAY_X(el).hraw;
+    int no_groups = len(secs_v) == 0;
+    if (thl.unit == LAY_PX && !(lay_quirks && no_groups)) {
+        lay_lu hv = lay_lu_d(thl.v);
+        minimal = s->border_box ? lay_lu_max(hv, bpb) : hv + bpb;
+        lay_lu dist = minimal - bpb > 0 ? minimal - bpb : 0;
+        if (dist > min_total) {
+            lay_tsecs_grow(&secs_v, &rows_v, dist, vs);
+            for (size_t k = 0; k < len(secs_v); k++) {
+                lay_tsec sg = at(secs_v, k);
+                lay_lu h = 0;
+                for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) h += at(rows_v, r).h;
+                if (sg.nrows > 1) h += vs * (lay_lu)(sg.nrows - 1);
+                if (h > sg.h) secs_v[k].h = h;
+            }
+        }
+    }
+    /* the groups placed down the content box, the spacing before each that holds rows (an empty one where the last
+       ended) and after the last; the rows down their group */
+    lay_lu y = 0, after = 0;
+    for (size_t k = 0; k < len(secs_v); k++) {
+        lay_tsec sg = at(secs_v, k);
+        lay_lu at_y = y;
+        if (sg.nrows) { y += vs; at_y = y; }
+        after = vs;
+        secs_v[k].y = at_y;
+        lay_lu ry = 0;
+        for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) {
+            rows_v[r].y = ry;
+            ry += at(rows_v, r).h + vs;
+        }
+        y = at_y + (sg.nrows ? sg.h : 0);
+    }
+    lay_lu grid = y + after;
+    if (len(secs_v) == 0) grid = 0;
+    /* the grid's height: at least the table's own */
+    lay_lu content_h = grid;
+    if (minimal - bpb > content_h) content_h = minimal - bpb;
+    t->box[b].h = lay_lu_px(content_h);
+    /* the boxes in their places: a group at the spacing's inset, its rows across it, each cell at its column */
+    double gw = cbw - 2 * lay_lu_px(hs) > 0 ? cbw - 2 * lay_lu_px(hs) : 0;
+    for (size_t k = 0; k < len(secs_v); k++) {
+        lay_tsec sg = at(secs_v, k);
+        uint32_t gb = sg.box;
+        t->box[gb].w = gw;
+        t->box[gb].avail = cbw;
+        t->box[gb].h = sg.nrows ? lay_lu_px(sg.h) : 0;
+        lay_place(t, gb, lay_lu_px(hs), lay_lu_px(sg.y));
+        for (uint32_t r = sg.row0; r < sg.row0 + sg.nrows; r++) {
+            uint32_t rb = at(rows_v, r).box;
+            t->box[rb].w = gw;
+            t->box[rb].avail = gw;
+            t->box[rb].h = lay_lu_px(at(rows_v, r).h);
+            lay_place(t, rb, 0, lay_lu_px(at(rows_v, r).y));
+        }
+    }
+    for (size_t ci = 0; ci < len(cells_v); ci++) {
+        lay_cell c = at(cells_v, ci);
         uint32_t cb = c.box;
-        size_t lastr = c.row + c.rspan - 1 < nrows ? c.row + c.rspan - 1 : nrows - 1;
-        double full = at(ry, lastr) + at(rh, lastr) - at(ry, c.row);
-        double inner = full - t->box[cb].bt - t->box[cb].pt - t->box[cb].pb - t->box[cb].bb;
+        lay_lu full = 0;
+        for (uint32_t r = c.row; r < c.row + c.rspan; r++) { full += at(rows_v, r).h; if (r != c.row) full += vs; }
+        double inner = lay_lu_px(full) - t->box[cb].bt - t->box[cb].pt - t->box[cb].pb - t->box[cb].bb;
+        /* its content where its vertical-align puts it: its own, else its row's, else its row group's (as the user agent's
+           sheet has them inherit), else the middle; the top for baseline */
         int va = LAY_X(c.el).va;
-        uint32_t row_el = at(rows, c.row);
+        uint32_t row_el = at(rows_v, c.row).el;
         if (va == VA_BASELINE) va = LAY_X(row_el).va;
         if (va == VA_BASELINE && lay_display_of(LARGS, d->node[row_el].parent) == D_ROW_GROUP) va = LAY_X(d->node[row_el].parent).va;
         if (va == VA_BASELINE) va = VA_MIDDLE;
         double dy = va == VA_BOTTOM ? inner - t->box[cb].h : va == VA_TOP ? 0 : (inner - t->box[cb].h) / 2;
         if (dy > 0) lay_shift_content(t, cb, dy);
-        t->box[cb].h = inner;
+        t->box[cb].h = inner > 0 ? inner : 0;
+        lay_place(t, cb, lay_lu_px(at(coff, c.col) - hs), 0);
     }
-    /* the collapsing table quirk (quirks mode, 3.10): a table of no rows and no caption takes no height */
-    int collapses = lay_quirks && nrows == 0 && len(captions) == 0;
-    t->box[b].h = s->height.unit == LAY_PX && s->height.v > y && !collapses ? s->height.v : y;
+    /* the cols' and colgroups' places: their columns across the groups that hold rows */
+    lay_lu gy0 = -1, gy1 = 0;
+    for (size_t k = 0; k < len(secs_v); k++) {
+        lay_tsec sg = at(secs_v, k);
+        if (!sg.nrows || !sg.h) continue;
+        if (gy0 < 0) gy0 = sg.y;
+        gy1 = sg.y + sg.h;
+    }
+    if (gy0 < 0) gy0 = gy1 = 0;
+    for (size_t k = 0; k < len(tcols_v); k++) {
+        lay_tcol tc = at(tcols_v, k);
+        if (!tc.box) continue;
+        size_t c0 = tc.col0, c1 = tc.col0 + (tc.span ? tc.span : 1) - 1;
+        if (c1 >= nc) c1 = nc - 1;
+        double x = lay_lu_px(at(coff, c0)), w = lay_lu_px(at(coff, c1) + at(csz, c1) - at(coff, c0));
+        uint32_t kb = tc.box;
+        t->box[kb].w = w;
+        t->box[kb].avail = cbw;
+        t->box[kb].h = lay_lu_px(gy1 - gy0);
+        if (tc.group >= 0) lay_place(t, kb, x - lay_lu_px(at(coff, at(tcols_v, (size_t)tc.group).col0)), 0);
+        else lay_place(t, kb, x, lay_lu_px(gy0));
+    }
+    /* the captions: the bottom ones now, below the border box; then each in its place */
+    double below = 0, gbot = t->box[b].h + t->box[b].pb + t->box[b].bb;
+    for (size_t k = 0; k < len(caps_v); k++) {
+        uint32_t cap = at(caps_v, k);
+        if (!LAY_X(cap).capb) continue;
+        lay_mc cmt, cmb;
+        int empty;
+        lay_bk bk;
+        memset(&bk, 0, sizeof bk);
+        bk.ch = -1;
+        bk.fw = -1;
+        uint32_t cb = lay_block(LARGS, b, cap, bw, 0, 0, 0, 0, &bk, &cmt, &cmb, &empty);
+        capb[k] = cb;
+        lay_place(t, cb, t->box[cb].ml - t->box[b].bl - t->box[b].pl, gbot + below + t->box[cb].mt);
+        below += t->box[cb].mt + lay_border_height(t, cb) + t->box[cb].mb;
+    }
+    t->box[b].cap_bottom = below;
+    double yt = 0;
+    for (size_t k = 0; k < len(caps_v); k++) {
+        uint32_t cb = at(capb, k);
+        if (!cb || LAY_X(at(caps_v, k)).capb) continue;
+        lay_place(t, cb, t->box[cb].ml - t->box[b].bl - t->box[b].pl, yt + t->box[cb].mt - top - t->box[b].bt - t->box[b].pt);
+        yt += t->box[cb].mt + lay_border_height(t, cb) + t->box[cb].mb;
+    }
+    /* a collapsing table's edges, from its columns' lines and its groups' rows */
+    if (info.collapse && info.epr) {
+        vector<lay_lu> cx;
+        for (size_t i = 0; i < nc; i++) push_back(cx, at(coff, i));
+        if (nc) push_back(cx, at(coff, nc - 1) + at(csz, nc - 1));
+        lay_table_cborders(LARGS, b, &edges_v, &info, &secs_v, &rows_v, &cx);
+    }
 }
 /* ---- block layout ---- */
 

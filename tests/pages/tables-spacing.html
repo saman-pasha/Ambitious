@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: border-spacing</title>
+<!-- border-spacing as Chromium lays tables out (CSS 2.1, 17.6.1): one length or two, horizontal
+     then vertical, between the cells and about them inside the table's padding; the cellspacing
+     attribute; a row group's and a row's box spanning their cells, inside the outer spacing; the
+     sections in their order (the head first, the foot last); a section with no rows taking no
+     spacing; spanning cells taking the spacing they cross; a row's and a section's background
+     drawn in their cells alone, the spacing showing the table's. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { background: #fd8; margin: 0 0 6px 0; }
+td { background: #8bd; }
+.r { background: #9c6; }
+.g { background: #c9e; }
+</style></head><body>
+<table id=t1 style="border-spacing: 10px"><tr id=t1r><td id=t1a>a</td><td id=t1b>bb</td><td id=t1c>ccc</td></tr></table>
+<table id=t2 style="border-spacing: 12px 4px; border: 3px solid #333; padding: 5px"><tr id=t2r class=r><td id=t2a>a</td><td id=t2b class=r style="background: none">bb</td></tr><tr id=t2s><td id=t2c>c</td><td id=t2d>d</td></tr></table>
+<table id=t3 cellspacing=7><tr><td id=t3a>cellspacing</td><td id=t3b>7</td></tr></table>
+<table id=t4 style="border-spacing: 0"><tr><td id=t4a>no</td><td id=t4b>spacing</td></tr><tr><td id=t4c>at</td><td id=t4d>all</td></tr></table>
+<table id=t5 style="border-spacing: 0.5em 1em; font-size: 12px"><tr><td id=t5a>em</td><td id=t5b>lengths</td></tr></table>
+<table id=t6 style="border-spacing: 6px 8px">
+<tfoot id=t6f class=g><tr id=t6fr><td id=t6fa>foot</td><td id=t6fb>last</td></tr></tfoot>
+<tbody id=t6b><tr id=t6br><td id=t6ba>body</td><td id=t6bb>one</td></tr><tr><td id=t6bc>body</td><td id=t6bd>two</td></tr></tbody>
+<tbody id=t6e></tbody>
+<thead id=t6h class=g><tr id=t6hr><td id=t6ha>head</td><td id=t6hb>first</td></tr></thead>
+</table>
+<table id=t7 style="border-spacing: 9px 5px"><tr><td id=t7a rowspan=2>two rows</td><td id=t7b colspan=2>two columns</td></tr><tr><td id=t7c>x</td><td id=t7d>y</td></tr></table>
+<table id=t8 style="border-spacing: 4px; width: 300px"><tr><td id=t8a>fills</td><td id=t8b>a width</td></tr></table>
+<div id=d1 style="display: table; border-spacing: 5px 3px; background: #fd8"><div id=d1r style="display: table-row"><div id=d1a style="display: table-cell; background: #8bd">css</div><div id=d1b style="display: table-cell; background: #8bd">table</div></div></div>
+<table id=t9 style="border-spacing: 8px"><tr><td id=t9a><table id=t9i><tr><td id=t9ia>nested 2px</td></tr></table></td></tr></table>
+</body></html>

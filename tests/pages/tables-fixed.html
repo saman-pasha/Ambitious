@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: the fixed layout</title>
+<!-- table-layout: fixed as Chromium lays it out (CSS 2.1, 17.5.2.1; Blink's
+     SynchronizeAssignableTableInlineSizeAndColumnsFixed): a table of a width of its own takes its
+     columns' widths from its col elements and its first row's cells alone (a later row's are not
+     read, nor anyone's content), the fixed ones first, then the percentages, the rest shared out
+     evenly; a spanning cell's width shared among its columns; widths past the table's scaled down
+     to it, or up to it when no column is automatic; a table of an automatic width laid out as in
+     the automatic layout; content wider than its column overflowing it. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { table-layout: fixed; margin: 0 0 6px 0; background: #fd8; }
+td { background: #8bd; }
+</style></head><body>
+<table id=f1 style="width: 300px"><tr><td id=f1a style="width: 50px">fifty</td><td id=f1b>rest</td><td id=f1c>shared</td></tr>
+<tr><td id=f1d style="width: 200px">later rows are not read at all</td><td id=f1e>x</td><td id=f1f>y</td></tr></table>
+<table id=f2 style="width: 400px"><col id=f2c1 style="width: 120px"><col id=f2c2><tr><td id=f2a style="width: 10px">col wins</td><td id=f2b>b</td><td id=f2d>c</td></tr></table>
+<table id=f3 style="width: 300px"><tr><td id=f3a style="width: 25%">quarter</td><td id=f3b style="width: 50px">fifty</td><td id=f3c>auto</td></tr></table>
+<table id=f4 style="width: 200px"><tr><td id=f4a style="width: 100px">a</td><td id=f4b style="width: 150px">b</td></tr></table>
+<table id=f5 style="width: 500px"><tr><td id=f5a style="width: 100px">only</td><td id=f5b style="width: 100px">fixed</td></tr></table>
+<table id=f6 style="width: 360px"><tr><td id=f6a colspan=2 style="width: 200px">spanning two</td><td id=f6b>c</td></tr><tr><td id=f6c>d</td><td id=f6d>e</td><td id=f6e>f</td></tr></table>
+<table id=f7 style="width: 150px"><tr><td id=f7a>averylongwordthatoverflowsitscolumn</td><td id=f7b>b</td></tr></table>
+<table id=f8><tr><td id=f8a style="width: 30px">automatic width</td><td id=f8b>b</td></tr></table>
+<table id=f9 style="width: 300px; border-spacing: 6px; border: 2px solid #333; padding: 3px"><tr><td id=f9a style="width: 80px; padding: 5px">padded</td><td id=f9b style="border: 4px solid #36c">bordered</td></tr></table>
+<table id=f10 style="width: 240px"><tr><td id=f10a style="width: 0">zero</td><td id=f10b>auto</td><td id=f10c>auto</td></tr></table>
+</body></html>

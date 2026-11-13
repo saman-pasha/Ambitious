@@ -117,6 +117,11 @@ css_rules_inherited(dominant_baseline).
 css_rules_inherited(color_interpolation_filters).
 css_rules_inherited(color_interpolation).
 css_rules_inherited(image_rendering).
+css_rules_inherited(border_collapse).
+css_rules_inherited(webkit_border_horizontal_spacing).
+css_rules_inherited(webkit_border_vertical_spacing).
+css_rules_inherited(empty_cells).
+css_rules_inherited(caption_side).
 css_rules_colour(color).
 css_rules_colour(background_color).
 css_rules_colour(stop_color).

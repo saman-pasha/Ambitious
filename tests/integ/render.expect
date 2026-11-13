@@ -1,12 +1,12 @@
-news: rendered 800x600: 17 boxes, 9 lines, 13 text fragments; pixels fnv1a64:ff52ebfa639d967a
-style: rendered 800x600: 18 boxes, 12 lines, 15 text fragments; pixels fnv1a64:dc69e786e87463b3
-layout: rendered 800x600: 32 boxes, 27 lines, 75 text fragments; pixels fnv1a64:8b80f0d2a952cbea
+news: rendered 800x600: 18 boxes, 9 lines, 13 text fragments; pixels fnv1a64:ff52ebfa639d967a
+style: rendered 800x600: 19 boxes, 12 lines, 15 text fragments; pixels fnv1a64:dc69e786e87463b3
+layout: rendered 800x600: 33 boxes, 27 lines, 75 text fragments; pixels fnv1a64:cb18f4da602edf43
 values: rendered 800x600: 17 boxes, 4 lines, 3 text fragments; pixels fnv1a64:88f05749015c0940
 atrules: rendered 800x600: 9 boxes, 6 lines, 6 text fragments; pixels fnv1a64:f350b2ac9726df6c
 selectors: rendered 800x722: 38 boxes, 30 lines, 27 text fragments; pixels fnv1a64:75d1dd5f208510ea
 floats: rendered 800x600: 24 boxes, 10 lines, 10 text fragments; pixels fnv1a64:26787f4c36c3e984
 position: rendered 800x600: 13 boxes, 8 lines, 11 text fragments; pixels fnv1a64:60ee297c2a847c88
-sizing: rendered 800x600: 34 boxes, 21 lines, 30 text fragments; pixels fnv1a64:dd589ebe8d78a9f1
+sizing: rendered 800x600: 35 boxes, 21 lines, 30 text fragments; pixels fnv1a64:3912c507bcf3ecf0
 flex: rendered 800x674: 47 boxes, 32 lines, 33 text fragments; pixels fnv1a64:7dc994e51c1e23db
 grid: rendered 800x600: 34 boxes, 25 lines, 25 text fragments; pixels fnv1a64:0060abb015710a5d
 text: rendered 800x600: 9 boxes, 15 lines, 19 text fragments; pixels fnv1a64:63b433bf6e00273c
@@ -14,9 +14,9 @@ paint: rendered 800x600: 36 boxes, 9 lines, 9 text fragments; pixels fnv1a64:668
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
 E = div, N = n(1,26,0), B = bx(1,5,0), Why = declared(600,declared('600px',written('600px'),by('.wrap'),in(author)))
-E = div, N = n(1,97,0), B = bx(1,32,0), Why = declared(200,declared('200px',written('200px'),by('the style attribute'),in(inline)))
+E = div, N = n(1,97,0), B = bx(1,33,0), Why = declared(200,declared('200px',written('200px'),by('the style attribute'),in(inline)))
 E = h2, N = n(1,28,0), B = bx(1,6,0), Why = fills(600,of(600),less(margins(0,0),borders(0,0),paddings(0,0)))
-E = table, N = n(1,65,0), B = bx(1,16,0), Why = shrink_to_fit(459.953125,within(600))
+E = table, N = n(1,65,0), B = bx(1,16,0), Why = shrink_to_fit(459.96875,within(600))
 E = span, N = n(1,47,0), B = bx(1,9,0), Why = shrink_to_fit(58.71875,within(600))
 E = span, N = n(1,50,0), B = bx(1,10,0), Why = shrink_to_fit(56.0390625,within(600))
 -- what is at (150, 240), and at (400, 120):
@@ -71,5 +71,5 @@ I = a2, N = n(1,16,0), B = bx(1,6,0), Why = grid_area(160,within(160))
 I = b1, N = n(1,24,0), B = bx(1,10,0), Why = grid_area(398,within(398))
 -- the reasoner's diagnostics:
 amb_diag(missing_attribute, n(1,3,0), '<html> lacks the lang attribute').
-amb_diag(text_overflow, bx(1,32,0), 'text in <div> runs 95.3px past its 200.0px content box').
+amb_diag(text_overflow, bx(1,33,0), 'text in <div> runs 95.3px past its 200.0px content box').
 exit 0

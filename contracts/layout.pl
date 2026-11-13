@@ -6,7 +6,9 @@
 %% at rest), flex and grid containers, inline layout (white space processed,
 %% lines broken around floats, aligned, vertical-align, bidirectional text
 %% reordered), atomic inlines (inline-blocks, replaced elements, form controls)
-%% shrunk to fit, tables in their automatic layout (rowspan too), list markers.
+%% shrunk to fit, tables (their automatic and fixed layouts, rowspan and colspan, the
+%% spacing between cells or their borders collapsed, captions above and below, columns),
+%% list markers.
 %% Every box keeps how its width was found and from what, so the reasoner can say
 %% why a box is as wide as it is; and how it is positioned, floated, stacked and
 %% clipped, which paint reads.
@@ -24,8 +26,12 @@ layout_contract(status([ok, stale_handle, wrong_kind, no_root])).
 %% element's decorations, a box a fragment (its piece) draws them from: the element
 %% as one unbroken strip, its fragments laid end to end, placed so that the
 %% fragment's part of it lies on the fragment (box-decoration-break: slice), in no
-%% box's children
-layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline])).
+%% box's children; a table's row group (its rows' box, inside the spacing about
+%% them); a table's column or column group (a col's or colgroup's: its columns
+%% across the row groups, whose background its cells draw), the table's children
+%% before its row groups
+layout_contract(enum(box_kind, [viewport, block, anonymous, list_item, inline_block, replaced, table, row, cell, flex, grid, inline,
+    row_group, column])).
 %% a form control the theme draws (Chromium's NativeThemeBase), in place of its CSS background and border; css: none, CSS draws it
 layout_contract(enum(theme, [css, field, area, button, menulist, listbox, checkbox, radio, range, colorwell, progress, meter, file, date])).
 %% how a box's width was found: the viewport's; filling its containing block; a
@@ -146,7 +152,18 @@ layout_contract(record(box, [
     field(lbaseline, f64), field(has_lbaseline, u8),
     %% a fieldset's rendered legend's box (HTML 15.3.13), set on its top border, whose
     %% border box the top border is not drawn behind; none
-    field(legend, ref(box))
+    field(legend, ref(box)),
+    %% a table's captions' extents above and below its border box (CSS 2.1, 17.4: the table's wrapper
+    %% box holds them, and its border box with its borders and background is the grid's alone)
+    field(cap_top, f64), field(cap_bottom, f64),
+    %% a table's collapsed borders (CSS 2.1, 17.6.2, as Blink resolves and joins them), which paint draws
+    %% over its cells: an edge a line, `x y w h side style colour' -- its rectangle in px from the table's
+    %% border box's top left, as Blink snaps it, drawn as a top (0) or a left (3) side of its style
+    %% (src/layout/layout.h), its colour RGBA in hex; none
+    field(cborders, span(text)),
+    %% a table cell that empty-cells: hide leaves undrawn (separated borders, no content in its flow):
+    %% its own background and borders (its row's, row group's and columns' backgrounds are drawn in it)
+    field(cell_hidden, bool)
 ])).
 layout_contract(record(line, [
     field(box,        ref(box)),
@@ -233,6 +250,9 @@ layout_contract(fact(layout_grid_item(handle, field(grid_row), field(grid_col), 
     field(grid_by) \== ungridded)).
 layout_contract(fact(layout_grid_area(handle, field(grid_area)), table(box), field(grid_by) == area)).
 layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
+%% a table's captions: the extents they take above and below its border box, which its wrapper box (the
+%% reasoner's border box of it, as getBoundingClientRect has it) holds
+layout_contract(fact(layout_captions(handle, field(cap_top), field(cap_bottom)), table(box), field(kind) == table)).
 %% a box's background colour, RGBA, where it has one; the viewport's is the canvas's: the
 %% Canvas of the scheme the root is used in (CSS Color Adjust 1)
 layout_contract(fact(layout_background(handle, field(background)), table(box), field(background) \== 0)).

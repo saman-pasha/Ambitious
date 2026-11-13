@@ -663,10 +663,11 @@ static void ax_table_rows(ACTX, uint32_t x, vector<uint32_t> *rows) {
 }
 /* Chromium's guess that a table holds data, not layout (Blink's AXNodeObject::IsDataTable, measured on
    tests/pages/a11y-tables.html): a caption, summary, thead, tfoot, rules or col; 20 rows or more; a th, or a cell
-   with headers, abbr, axis or scope; of the cells drawn, half or more bordered (both sides of an axis, or each on the
-   same side), or of a background of their own other than the table's (the spacing between them taken to be the user
-   agent's: border-spacing is not read), ten of either enough; its first rows' backgrounds alternating. Otherwise, with
-   two cells drawn or fewer, one row of one cell, or no row: layout */
+   with headers, abbr, axis or scope; a cell drawn whose empty-cells is hide; of the cells drawn, half or more
+   bordered (both sides of an axis, or each on the same side), or of a background of their own other than the table's
+   when its border-spacing spaces them on both axes (its computed lengths, whatever its border-collapse), ten of either
+   enough; its first rows' backgrounds alternating. Otherwise, with two cells drawn or fewer, one row of one cell, or no
+   row: layout */
 static int ax_data_table(ACTX, uint32_t x) {
     if (d->node[x].first_attr && (ax_tok(d, ax_get(AARGS, x, K_SUMMARY), "") != -2 || ax_tok(d, ax_get(AARGS, x, K_RULES), "") != -2)) return 1;
     if (ax_child(AARGS, x, E_CAPTION) || ax_child(AARGS, x, E_THEAD) || ax_child(AARGS, x, E_TFOOT) || ax_child(AARGS, x, E_COL) ||
@@ -683,6 +684,8 @@ static int ax_data_table(ACTX, uint32_t x) {
     }
     if (nr == 1 && first_cells == 1) return 0;
     uint32_t tbg = ax_bg(AARGS, x);
+    uint32_t hsp = ax_cval(AARGS, x, CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING), vsp = ax_cval(AARGS, x, CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING);
+    int spaced = hsp && vsp && st->cval[hsp].num > 0 && st->cval[vsp].num > 0;
     uint32_t valid = 0, bordered = 0, bgdiff = 0, top = 0, bottom = 0, left = 0, right = 0;
     uint32_t zebra[5];
     uint32_t nz = 0;
@@ -698,6 +701,8 @@ static int ax_data_table(ACTX, uint32_t x) {
             if (ax_display_none(AARGS, c) || ax_display_none(AARGS, row) ||
                 (d->node[row].parent != x && ax_display_none(AARGS, d->node[row].parent))) continue;
             valid++;
+            uint32_t ec = ax_cval(AARGS, c, CSS_PROP_EMPTY_CELLS);
+            if (ec && st->cval[ec].word && names_is(st, st->cval[ec].word, "hide", 4)) return 1;
             int bt = ax_border(AARGS, c, CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_TOP_STYLE),
                 bb = ax_border(AARGS, c, CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_BOTTOM_STYLE),
                 bl = ax_border(AARGS, c, CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_LEFT_STYLE),
@@ -708,7 +713,7 @@ static int ax_data_table(ACTX, uint32_t x) {
             left += bl;
             right += br;
             uint32_t cbg = ax_bg(AARGS, c);
-            if (cbg != tbg && (cbg & 0xff) != 0) bgdiff++;
+            if (spaced && cbg != tbg && (cbg & 0xff) != 0) bgdiff++;
             if (bordered >= 10 || bgdiff >= 10) return 1;
             if (ri < 5 && ri == nz) zebra[nz++] = ax_bg(AARGS, row);
         }

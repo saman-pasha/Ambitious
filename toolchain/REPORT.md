@@ -706,3 +706,26 @@ neighbours.
     by passing it to an `own` parameter, which empties it (`net_sess_take`, a function that
     returns its argument), and to empty every element (free it with the library's
     function, then store 0) before a store, so that the store's own free sees a null.
+39. **A variable named `anon` cannot be declared**: cicilang's syntax tree marks a
+    declarator with no name by the atom `anon` (`library/ccl_check.pl`, `ccl_syntax.pl`:
+    `N == anon`, `Tag == anon`), so a declaration of a variable of that name reads as one
+    of no name. In a small function the reader gives up with "syntax error: could not
+    read this item (gave up near line N)", at the function, as finding 37's `own` does;
+    in a long one it read on, and lowering stopped at the declaration's line with
+    "not lowered yet: undeclared(vector)", naming the declaration's type, not its name.
+    12ac met it in `src/layout/layout.c` (`lay_table_parts`: a vector of flags named
+    `anon`, renamed `runs`). Repro:
+
+    ```c
+    #include <stdio.h>
+    int main(void) {
+        int anon = 1;
+        printf("%d\n", anon);
+        return 0;
+    }
+    ```
+
+    gives `anon.c:2: error: syntax error: could not read this item (gave up near line 3)`;
+    with `vector<int> anon;` (and `#include <vector.pl>`) the same, at the function. Asked for:
+    a name the language does not reserve kept apart from the tree's marker (a marker no
+    identifier can spell), or the name refused as a reserved one, at the name.

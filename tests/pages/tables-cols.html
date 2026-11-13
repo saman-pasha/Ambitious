@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: columns</title>
+<!-- col and colgroup as Chromium lays them out and draws them (CSS 2.1, 17.3 and 17.5.1; Blink's
+     ColumnConstraintsBuilder and TablePainter): a col's width a fixed width for its columns (its
+     colgroup's, when it has none), a colgroup with no cols its own for each column of its span;
+     the span attribute (1 to 1000, 1 for what is no number); a column's and a column group's box
+     across the row groups; their backgrounds drawn in the cells that begin in their columns, the
+     colgroup's under the col's, a row group's and a row's over them, a cell's own over all;
+     a background image placed in the part's own box, across its cells; the width and bgcolor
+     attributes of col and colgroup. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { margin: 0 0 6px 0; background: #fd8; }
+</style></head><body>
+<table id=g1 style="width: 400px"><col id=g1c1 style="width: 100px; background: #c9e"><col id=g1c2 span=2 style="background: #9c6"><tr><td id=g1a>one</td><td id=g1b>two</td><td id=g1d>three</td><td id=g1e>four</td></tr><tr><td id=g1f>a</td><td id=g1g>b</td><td id=g1h>c</td><td id=g1i>d</td></tr></table>
+<table id=g2 style="border-spacing: 5px"><colgroup id=g2g span=2 style="background: #e99"></colgroup><colgroup id=g2h style="background: #9cf"><col id=g2c1><col id=g2c2 span="x" style="background: #ff9"></colgroup>
+<tr><td id=g2a>a</td><td id=g2b>b</td><td id=g2d>c</td><td id=g2e>d</td></tr></table>
+<table id=g3 style="width: 300px"><colgroup id=g3g style="width: 80px"><col id=g3c1><col id=g3c2 style="width: 40px"></colgroup><tr><td id=g3a>x</td><td id=g3b>y</td><td id=g3d>z</td></tr></table>
+<table id=g4 style="border-spacing: 4px"><col id=g4c1 style="background: #c9e"><tbody style="background: #9c6"><tr><td id=g4a>under the group</td><td id=g4b>b</td></tr></tbody><tbody><tr style="background: #e99"><td id=g4d>under the row</td><td id=g4e style="background: #8bd">own</td></tr></tbody></table>
+<table id=g5 style="border-spacing: 0"><col id=g5c1 span=2 style="background: linear-gradient(to right, #36c, #c33)"><tr><td id=g5a>a gradient</td><td id=g5b>across its span</td></tr><tr><td id=g5d colspan=2>a cell of two</td></tr></table>
+<table id=g6><col id=g6c1 width=60><col id=g6c2 width="25%"><tr><td id=g6a>sixty</td><td id=g6b>quarter</td><td id=g6d>rest</td></tr></table>
+<table id=g7><colgroup id=g7g width=50 bgcolor="#9cf"><col id=g7c1 bgcolor="#c9e"><col id=g7c2></colgroup><colgroup id=g7h span=2 width=30 bgcolor="#e99"></colgroup><tr><td id=g7a>a</td><td id=g7b>b</td><td id=g7d>c</td><td id=g7e>d</td></tr></table>
+</body></html>

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: empty cells</title>
+<!-- empty-cells: hide as Chromium draws it (CSS 2.1, 17.6.1.1; Blink's HideTableCellIfEmpty): in
+     the separated borders model a cell with nothing in its flow (no text, no line, no box: white
+     space alone, or nothing) draws neither its borders nor its background, though its row's, its
+     row group's and its column's are drawn in it; a cell holding a no-break space, a line break or
+     an empty box is drawn; empty-cells: show draws an empty one; a collapsing table draws every
+     cell; the property inherits, from the table to its cells. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { margin: 0 0 6px 0; background: #fd8; border-spacing: 4px; }
+td { background: #8bd; border: 3px solid #36c; width: 30px; height: 20px; }
+.r { background: #9c6; }
+</style></head><body>
+<table id=e1 style="empty-cells: hide"><tr><td id=e1a></td><td id=e1b>text</td><td id=e1c> </td></tr></table>
+<table id=e2 style="empty-cells: hide"><tr><td id=e2a>&nbsp;</td><td id=e2b><br></td><td id=e2c><div></div></td><td id=e2d><span></span></td></tr></table>
+<table id=e3><tr><td id=e3a style="empty-cells: hide"></td><td id=e3b></td></tr></table>
+<table id=e4 style="empty-cells: hide"><tr class=r><td id=e4a></td><td id=e4b>row</td><td id=e4c style="background: none"></td></tr></table>
+<table id=e5 style="empty-cells: hide"><colgroup><col style="background: #c9e"><col></colgroup><tbody style="background: #e99"><tr><td id=e5a style="background: none"></td><td id=e5b style="background: none"></td></tr><tr><td id=e5c style="background: none">col</td><td id=e5d style="background: none">group</td></tr></tbody></table>
+<table id=e6 style="empty-cells: hide; border-collapse: collapse"><tr><td id=e6a></td><td id=e6b>collapsed</td></tr></table>
+<table id=e7 style="empty-cells: hide"><tr><td id=e7a style="empty-cells: show"></td><td id=e7b><img style="display: none"></td></tr></table>
+<table id=e8 style="empty-cells: hide"><col style="background: #c9e"><tr><td id=e8a style="background: none"></td><td id=e8b>col</td></tr></table>
+</body></html>

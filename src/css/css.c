@@ -89,7 +89,7 @@
    The cascade (Cascade 4): origin and importance, element-attached style over
    rules, specificity, order of appearance; then inheritance and initial
    values. Presentational hints (HTML 15.3: bgcolor, text, color, size, width,
-   height, align (an image's left or right a float), a table's border, a cell's nowrap; dir,
+   height, align (an image's left or right a float), a table's border and cellspacing, a cell's nowrap; dir,
    as Chromium maps it) are author rules of specificity 0 before
    every other author rule; so are an SVG element's presentation attributes (SVG 2, 6.6: its
    painting properties, opacity, color, display, visibility, the font's, overflow, ...; a
@@ -107,7 +107,8 @@
    -origin, -clip, -composite and -mode, each a list (their -webkit- names Chromium's aliases).
    A computed value is as each property's spec has
    it: lengths px, percentages kept for layout, currentcolor the colour, a
-   border's width 0 under style none, display blockified for a float, an
+   border's width 0 under style none, border-spacing's lengths whole px (Blink
+   keeps a short each), display blockified for a float, an
    absolute box, the root and a flex or grid item. Two differ from Chromium's:
    an outline's width under style none is kept (as Chromium keeps it), and a
    computed font family is the family drawn with -- a generic one, or the first
@@ -120,7 +121,7 @@
    hashless colours and unitless lengths of an author sheet or a style attribute for the
    properties that take them (css_quirky), class and id selectors without ASCII case,
    and :hover or :active alone holding of links alone. Limited-quirks mode changes
-   nothing here (its quirk is layout's). Not read: the unitless lengths of border-spacing.
+   nothing here (its quirk is layout's).
 
    Shadow trees (CSS Scoping 1, CSS Shadow Parts 1; PLAN.md 12z): the cascade styles the
    flat tree's elements (src/dom/dom.h), each under its parent there, which it inherits from;
@@ -237,7 +238,7 @@ static const char css_ua_sheet[] =
     "dir, menu, ul { list-style-type: disc }\n"
     ":is(dir, menu, ol, ul) :is(dir, menu, ul) { list-style-type: circle }\n"
     ":is(dir, menu, ol, ul) :is(dir, menu, ol, ul) :is(dir, menu, ul) { list-style-type: square }\n"
-    "table { display: table }\n"
+    "table { display: table; border-collapse: separate; border-spacing: 2px; box-sizing: border-box; text-indent: initial }\n"
     "caption { display: table-caption; text-align: center }\n"
     "colgroup { display: table-column-group }\n"
     "col { display: table-column }\n"
@@ -1131,6 +1132,15 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "mask-composite", 0, G_TEXT, 0, 0, "add" },
     /* CSS 2.1, 11.1.2: an absolutely positioned box's clip, auto or rect() (css_clip_rect) */
     { "clip", 0, G_TEXT, 0, "auto", "auto" },
+    /* CSS 2.1, 17: a table's borders separated or collapsed, the spacing between its cells (border-spacing's horizontal
+       and vertical lengths, Chromium's longhands: no percentage, none negative), an empty cell's borders and
+       background, the fixed layout, a caption's side (top and bottom alone, as Chromium reads it: measured) */
+    { "border-collapse", 1, G_KW, 0, "separate collapse", "separate" },
+    { "-webkit-border-horizontal-spacing", 1, G_LEN, 0, 0, "0px" },
+    { "-webkit-border-vertical-spacing", 1, G_LEN, 0, 0, "0px" },
+    { "empty-cells", 1, G_KW, 0, "show hide", "show" },
+    { "table-layout", 0, G_KW, 0, "auto fixed", "auto" },
+    { "caption-side", 1, G_KW, 0, "top bottom", "top" },
 };
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
@@ -2744,7 +2754,7 @@ static int css_quirky_length_prop(css_prop p) {
     if (p >= CSS_PROP_WIDTH && p <= CSS_PROP_MAX_HEIGHT) return 1;
     if (p >= CSS_PROP_TOP && p <= CSS_PROP_LEFT) return 1;
     return p == CSS_PROP_FONT_SIZE || p == CSS_PROP_LETTER_SPACING || p == CSS_PROP_WORD_SPACING || p == CSS_PROP_TEXT_INDENT ||
-           p == CSS_PROP_VERTICAL_ALIGN;
+           p == CSS_PROP_VERTICAL_ALIGN || p == CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING || p == CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING;
 }
 /* a hashless colour: an identifier of 3 or 6 hex digits; or a number token whose integer flag is
    set (no fraction, no exponent), alone or with a unit after it, the integer's digits (its + dropped,
@@ -3274,6 +3284,7 @@ static const css_short css_shorts[] = {
     { "container", 2, { CSS_PROP_CONTAINER_NAME, CSS_PROP_CONTAINER_TYPE } },
     { "mask", 8, { CSS_PROP_MASK_IMAGE, CSS_PROP_MASK_POSITION, CSS_PROP_MASK_SIZE, CSS_PROP_MASK_REPEAT, CSS_PROP_MASK_ORIGIN,
                    CSS_PROP_MASK_CLIP, CSS_PROP_MASK_COMPOSITE, CSS_PROP_MASK_MODE } },
+    { "border-spacing", 2, { CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING, CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -3406,8 +3417,8 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         if (!line) { css_word_val(&w, "none"); css_item_add(it, CSS_PROP_TEXT_DECORATION, &w, 0, vn); }
         return 1;
     }
-    case 17: case 19: case 20: case 21: case 22: case 23: case 24: {
-        /* two longhands: one value for both (place-*, overflow, gap) or two; flex-flow's in any order */
+    case 17: case 19: case 20: case 21: case 22: case 23: case 24: case 34: {
+        /* two longhands: one value for both (place-*, overflow, gap, border-spacing) or two; flex-flow's in any order */
         k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
         if (k == 0 || k > 2) return 0;
         if (sh == 19) {
@@ -3608,8 +3619,8 @@ static int css_expand(const char *name, size_t nn, const char *val, size_t vn, c
             return 1;
         }
         /* quirky values (a quirks-mode document's author sheet): through the four sides' shorthands of
-           the margins, the paddings, the border widths and colours alone */
-        css_quirk_now = css_quirk_read && css_word_in(css_shorts[sh].name, "margin padding border-width border-color");
+           the margins, the paddings, the border widths and colours alone, and border-spacing's lengths */
+        css_quirk_now = css_quirk_read && css_word_in(css_shorts[sh].name, "margin padding border-width border-color border-spacing");
         int ok = css_short_read(sh, val, vn, it);
         css_quirk_now = 0;
         return ok;
@@ -7662,6 +7673,13 @@ static css_how css_decl_computed(css_style *s, const css_env *env, css_prop p, u
     if (how == CSS_HOW_INITIAL && (css_pf[p] & CSS_PF_CC)) v->color = out[CSS_PROP_COLOR].color;
     if (css_pf[p] & CSS_PF_BW) { if (v->unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, v, pv, out); css_snap_width(v, &out[p + 4], 1); }
     if (p == CSS_PROP_OUTLINE_WIDTH) { if (v->unit == CSS_UNIT_KEYWORD) css_compute(s, env, p, v, pv, out); css_snap_width(v, 0, 0); }
+    /* border-spacing's lengths as Blink keeps them, a short each (RoundForImpreciseConversion): a hundredth added and
+       the px truncated, one past a short's range 0 (measured: 2.7px is 2px, 3.99px 4px, 40000px 0px) */
+    if ((p == CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING || p == CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING) && v->unit == CSS_UNIT_PX) {
+        /* (a billionth more: the number as this module reads it, digit by digit, may fall a bit short of Blink's) */
+        double x = v->num + 0.01 + 1e-9;
+        v->num = x > 32767 ? 0 : floor(x);
+    }
     return how;
 }
 
@@ -8851,13 +8869,16 @@ static uint32_t css_own_rule(css_style *s, uint32_t *sheet, css_origin origin, c
 /* the presentational hints (HTML 15.3) the module reads: which elements, which attribute, which property */
 typedef struct css_hint { const char *elements; const char *attr; css_prop prop; int kind; } css_hint;
 enum { CSS_HINT_COLOR, CSS_HINT_LENGTH, CSS_HINT_ALIGN, CSS_HINT_FONT_SIZE, CSS_HINT_BORDER, CSS_HINT_NOWRAP, CSS_HINT_FLOAT,
-       CSS_HINT_FRAMEBORDER };
+       CSS_HINT_FRAMEBORDER, CSS_HINT_SPACING };
 static const css_hint css_hints[] = {
-    { "body table tr td th thead tbody tfoot", "bgcolor", CSS_PROP_BACKGROUND_COLOR, CSS_HINT_COLOR },
+    { "body table tr td th thead tbody tfoot col colgroup", "bgcolor", CSS_PROP_BACKGROUND_COLOR, CSS_HINT_COLOR },
     { "body", "text", CSS_PROP_COLOR, CSS_HINT_COLOR },
     { "font", "color", CSS_PROP_COLOR, CSS_HINT_COLOR },
     { "font", "size", CSS_PROP_FONT_SIZE, CSS_HINT_FONT_SIZE },
-    { "table td th col img hr iframe embed object video canvas", "width", CSS_PROP_WIDTH, CSS_HINT_LENGTH },
+    { "table td th col colgroup img hr iframe embed object video canvas", "width", CSS_PROP_WIDTH, CSS_HINT_LENGTH },
+    /* a table's cellspacing: its two border-spacing lengths, a dimension's digits (no percentage; Blink's
+       AddHTMLLengthToStyle) */
+    { "table", "cellspacing", CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING, CSS_HINT_SPACING },
     { "table tr td th img iframe embed object video canvas", "height", CSS_PROP_HEIGHT, CSS_HINT_LENGTH },
     { "td th tr thead tbody tfoot caption div p h1 h2 h3 h4 h5 h6", "align", CSS_PROP_TEXT_ALIGN, CSS_HINT_ALIGN },
     { "table", "border", CSS_PROP_BORDER_TOP_WIDTH, CSS_HINT_BORDER },
@@ -8909,6 +8930,13 @@ static int css_hint_value(int kind, const char *t, size_t n, css_val *v) {
     }
     double x;
     size_t used = css_number(t, n, &x);
+    if (kind == CSS_HINT_SPACING) {
+        /* the rules for parsing dimension values: a digit first, a percentage refused, what follows the number passed over */
+        if (!used || t[0] < '0' || t[0] > '9' || (used < n && t[used] == '%')) return 0;
+        v->num = x;
+        v->unit = CSS_UNIT_PX;
+        return 1;
+    }
     if (kind == CSS_HINT_LENGTH || kind == CSS_HINT_BORDER) {
         if (!used || x < 0 || t[0] == '+' || t[0] == '-') return 0;
         v->num = x;
@@ -9039,7 +9067,10 @@ static void css_element_hints(css_style *s, const dom_document *d, const net_loa
         uint32_t r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, what, (size_t)wn, 1);
         if (css_hints[h].kind == CSS_HINT_BORDER || css_hints[h].kind == CSS_HINT_FRAMEBORDER)
             for (int side = 0; side < 4; side++) css_add_decl(s, r, (css_prop)(CSS_PROP_BORDER_TOP_WIDTH + side), &v, 0, text, (size_t)tn, 0);
-        else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
+        else if (css_hints[h].kind == CSS_HINT_SPACING) {
+            css_add_decl(s, r, CSS_PROP_WEBKIT_BORDER_HORIZONTAL_SPACING, &v, 0, text, (size_t)tn, 0);
+            css_add_decl(s, r, CSS_PROP_WEBKIT_BORDER_VERTICAL_SPACING, &v, 0, text, (size_t)tn, 0);
+        } else css_add_decl(s, r, css_hints[h].prop, &v, 0, text, (size_t)tn, 0);
         if (css_hints[h].kind == CSS_HINT_FLOAT) {
             css_val top;
             css_word_val(&top, "top");
