@@ -1301,11 +1301,20 @@ be built side by side and merged without touching each other's.
     carries the property, which tools/gen-shape.pl writes into shape_data.h). Upright runs are shaped top to bottom as
     HarfBuzz shapes them for Blink: the common features and vert (found under any script), or, for a font with no vert,
     Unicode's vertical presentation forms the font has (hb_vert_char_for: WenQuanYi Zen Hei's brackets); each glyph
-    advancing by its vmtx advance (WenQuanYi's ideographs by 0, as in Chromium), or by the font's height where the font
-    has none, from its vertical origin (VORG's, vmtx's top side bearing above the glyph's top, or the ascent); turned
-    runs are shaped as a horizontal line's;
+    advancing by its vmtx advance (WenQuanYi's ideographs by 0, as in Chromium; a mark by none, as HarfBuzz has it), or
+    by the font's height where the font has none, from its vertical origin (VORG's; vmtx's top side bearing above the
+    glyph's top, that top rounded up to a whole px as Blink's glyph bounds are; or the ascent); turned runs are shaped
+    as a horizontal line's;
+  - `text-combine-upright: all` in vertical-rl and vertical-lr (whatever the text's orientation; not in the sideways
+    modes, as Chromium has it): each text node one piece an em down its line, its white space at its ends dropped, no
+    break between it and the letters about it, its run shaped alone as a horizontal one, its box where its text would
+    be (the font's height across the line); paint sets its text across the line, centred, or squeezed across into 1.1em
+    (an em under an underline or overline) when it is wider, as Blink's LayoutTextCombine does (its scale_x; the
+    machine's fonts have none of the width variants it tries first), on the baseline Blink's line of an em gives it,
+    the line's decorations running along it;
   - paint draws a vertical line's turned glyphs a quarter turned (clockwise; sideways-lr's anticlockwise) on its
-    alphabetic baseline, Skia's subpixel axis along the line; upright ones centred on its central baseline; each
+    alphabetic baseline, Skia's subpixel axis along the line; upright ones centred on its central baseline (half the
+    font's unrounded height below the line's over edge, Blink's FixedAscent); each
     line's text set from its first text fragment's start (or that of the decorated inline box it is in) snapped to
     a whole pixel, as Chromium sets it; an underline and an overline outside the text's under and over edges, a
     sideways line's turned with its glyphs; an inline box's decorations along the line;
@@ -1320,13 +1329,15 @@ be built side by side and merged without touching each other's.
   Gate: `tests/pages/wm-blocks.html` (boxes 30 of 30, from 1 before; regions 30 of 30, from 3), `wm-root.html` (12
   of 12, from 0; regions 12 of 12, from 0), `wm-text.html` (15 of 15, from 0; regions 15 of 15, from 8),
   `wm-logical.html` (42 of 42, from 0), `wm-flex.html` (flex, grid and a table in vertical modes: 30 of 30, from 0;
-  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2) and `wmvals.html`
+  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2), `wm-combine.html` (29 of
+  29, from 0, and 16 with writing modes but not combined text; regions 29 of 29, from 2 and 14) and `wmvals.html`
   (computed values 126 of 126, from 25), each held to Chromium; every earlier page's boxes, regions and values as
-  they were, and its drawing byte for byte (180 renders); the new pages render valgrind clean. Its cost
-  (`docs/performance.md`): on horizontal pages, none past the timings' noise -- by callgrind, the large page's layout
-  485.7 million instructions before, 487.6 after (+0.4%), its paint +0.15% and its cascade +0.3%; the box and
-  fragment records no bigger (the new fields in their padding), a horizontal run shaped and measured on its old
-  paths, an upright run's glyphs set apart, after its shaping.
+  they were, and its drawing byte for byte (180 renders); the new pages render valgrind clean, their leaks checked. Its cost
+  (`docs/performance.md`): on horizontal pages, none past the timings' noise (the large page's layout 67.5 ms before,
+  68.1 after; news.html's 0.54 and 0.45) -- by callgrind, the large page's layout 485.7 million instructions before,
+  487.8 after (+0.4%), its paint +0.3% and its cascade +0.3%: the box and fragment records no bigger (the new fields
+  in their padding), a horizontal run shaped, measured and packed on its old paths (a vertical run in loops of its
+  own), an upright run's glyphs set apart after its shaping.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

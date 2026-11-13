@@ -225,8 +225,9 @@
    formatting context of its own laid out in its frame and set in its parent's (lay_wm_root), an orthogonal one's
    available inline size its parent's definite block size or the viewport's (7.3); the root's mode (its body's, the
    principal one) the initial containing block's. A vertical line's baseline is the central one (the sideways modes'
-   the alphabetic one); its text set upright or turned as text-orientation and UAX #50 have it (src/paint/font.c).
-   Not done: text-combine-upright (its text set as any other), a vertical form control (sized as a horizontal one).
+   the alphabetic one); its text set upright or turned as text-orientation and UAX #50 have it (src/paint/font.c), a
+   text node of text-combine-upright: all one piece an em down the line, set across it (lay_chars; paint's pt_ctext).
+   Not done: a vertical form control (sized as a horizontal one).
 
    Coordinates are relative to the parent box's content box while the tree is laid out, and made page coordinates at
    the end. */
@@ -291,7 +292,9 @@ typedef struct lay_style {
     /* the writing mode (CSS_WM_*), whose frame (lay_frame) the edges and sizes below are in: a vertical style's are
        its box's turned, width its inline size (height), m[0] its block-start margin, ...; orient, a vertical text's:
        1 mixed, 2 upright (their baseline the central one: asc and desc its halves, Blink's kCentralBaseline: LAY_VC),
-       3 sideways (every glyph turned, on the alphabetic baseline). (Here, in the padding before fs, a style is no
+       3 sideways (every glyph turned, on the alphabetic baseline), 4 combined (text-combine-upright: all, in
+       vertical-rl or vertical-lr: each text node set across the line in an em, on the baseline its orientation
+       gives). (Here, in the padding before fs, a style is no
        bigger for them; at its end, the bigger style's copies, which layout makes often, became calls to memcpy, and
        each field here makes each copy longer: measured) */
     uint8_t wm, orient;
@@ -563,8 +566,12 @@ static int lay_currentcolor(const css_style *st, uint32_t c) {
    vertical-rl and sideways-rl (block-start the right, line-left the top); 2 vertical-lr (the left and the top; its
    lines' over side their right, their content mirrored in them); 3 sideways-lr (the left; line-left the bottom) */
 static int lay_frame(int wm) { return wm == CSS_WM_VRL || wm == CSS_WM_SRL ? 1 : wm == CSS_WM_VLR ? 2 : wm == CSS_WM_SLR ? 3 : 0; }
-/* a text of a vertical style's orientation (lay_style's orient) set on the central baseline: mixed or upright */
+/* a text of a vertical style's orientation (lay_style's orient) set on the central baseline: mixed or upright (a
+   combined text's box takes no line of its fonts': lay_shape_pieces) */
 #define LAY_VC(o) ((o) == 1 || (o) == 2)
+/* a fragment's orientation drawn from a style's (lay_style's orient) for text that is not combined (a marker's, alt
+   text's, ...): a combined style's text mixed */
+#define LAY_NOCOMB(o) ((uint8_t)((o) == 4 ? 1 : (o)))
 /* the physical side (0 top, 1 right, 2 bottom, 3 left) a frame's side k is, and the frame's side a physical one is */
 static int lay_tside(int f, int k) { return f == 1 ? (k + 1) & 3 : f == 2 ? 3 - k : f == 3 ? (k + 3) & 3 : k; }
 static int lay_pside(int f, int p) { return f == 1 ? (p + 3) & 3 : f == 2 ? 3 - p : f == 3 ? (p + 1) & 3 : p; }
@@ -701,6 +708,13 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
             double hh = s->asc + s->desc;
             s->desc = floor(hh / 2);
             s->asc = hh - s->desc;
+        }
+        /* text-combine-upright: all (vertical-rl's and vertical-lr's, whatever the text's orientation; the sideways
+           modes' none, as Chromium has it): each text node set across the line in an em, its box where its text's would
+           be (lay_chars) */
+        if (s->wm == CSS_WM_VRL || s->wm == CSS_WM_VLR) {
+            lay_word_of(st, cv[CSS_PROP_TEXT_COMBINE_UPRIGHT], w);
+            if (lay_w(w, "all")) s->orient = 4;
         }
     }
     lay_word_of(st, cv[CSS_PROP_BOX_SIZING], w);
@@ -1901,6 +1915,9 @@ static int lay_bidi_hot(const char *s, size_t n, size_t i) {
     return c == BC_R || c == BC_AL || c == BC_AN || (c >= BC_LRE && c <= BC_PDI);
 }
 
+/* white space, as text's pieces are cut by it */
+static int lay_ws(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\n'; }
+
 /* the pieces of text tx[0, n): a text node's (node), or a pseudo-element's content (node
    LAY_GEN | LAY_GTEXT and its index), in the style s of its element pe */
 static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, const char *tx, size_t n, int deco, vector<lay_piece> *ps, int *sp,
@@ -1916,6 +1933,23 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     p.rx = (float)ih->rx;
     p.ry = (float)ih->ry;
     p.va = (uint8_t)ih->va;
+    if (s->orient == 4) {
+        /* text-combine-upright: all in a vertical line (CSS Writing Modes 4, 9.1): the text one piece, an em down the
+           line (lay_shape_pieces), set across it (Blink's LayoutTextCombine, an inline-block of its own): no letter- or
+           word-spacing, the white space at its ends dropped, as its own line's is (the rest kept as it is) */
+        size_t a = 0, b = n;
+        while (a < b && lay_ws(tx[a])) a++;
+        while (b > a && lay_ws(tx[b - 1])) b--;
+        if (a == b) return;
+        p.kind = P_WORD;
+        p.off = (uint32_t)a;
+        p.len = (uint32_t)(b - a);
+        p.ls = 0;
+        p.wsp = 0;
+        push_back(ps, p);
+        *sp = 0;
+        return;
+    }
     /* a space: its advance, with letter-spacing and word-spacing */
     double space = amb_advance(f, s->face, ' ', s->fs) + s->ls + s->wsp;
     int collapse = s->ws == WS_NORMAL || s->ws == WS_NOWRAP || s->ws == WS_PRE_LINE;
@@ -2021,7 +2055,8 @@ static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr);
 /* two text pieces of one shaping run: one font (face, web font, size, letter- and word-spacing,
    style: Blink's FontDescription) */
 static int lay_same_font(lay_piece a, lay_piece b) {
-    return a.face == b.face && a.font == b.font && a.size == b.size && a.ls == b.ls && a.wsp == b.wsp && a.italic == b.italic;
+    return a.face == b.face && a.font == b.font && a.size == b.size && a.ls == b.ls && a.wsp == b.wsp && a.italic == b.italic &&
+           a.orient == b.orient;
 }
 
 /* an inline element's edge a run is shaped across (Blink's ShouldBreakShapingBefore/AfterBox):
@@ -2076,6 +2111,7 @@ static int lay_word_dir(LCTX, const vector<lay_piece> *ps, size_t k) {
 static size_t lay_run_end(LCTX, const vector<lay_piece> *ps, size_t k, size_t end, int *rtl) {
     lay_piece p0 = at(*ps, k);
     int dir = p0.sdir == 1 ? 0 : p0.sdir == 2 ? 1 : lay_word_dir(LARGS, ps, k);
+    if (p0.orient == 4) { *rtl = dir == 1; return k + 1; }   /* a combined text: its own box's */
     size_t e = k + 1, last = k + 1;
     while (e < end) {
         lay_piece q = at(*ps, e);
@@ -2151,7 +2187,8 @@ static void lay_ctx_after(LCTX, const vector<lay_piece> *ps, size_t k, vector<ch
    the glyphs into gl, visual order (their clusters in order, the other way right to left) */
 static void lay_run_shape(LCTX, const vector<lay_piece> *ps, size_t a, size_t b, int rtl, vector<char> *tx, vector<uint32_t> *at0,
                           vector<amb_shaped> *gl) {
-    lay_ctx_before(LARGS, ps, a, tx);
+    int comb = at(*ps, a).orient == 4;      /* a combined text, alone in its box */
+    if (!comb) lay_ctx_before(LARGS, ps, a, tx);
     for (size_t k = a; k < b; k++) {
         push_back(at0, (uint32_t)len(*tx));
         lay_piece q = at(*ps, k);
@@ -2159,7 +2196,7 @@ static void lay_run_shape(LCTX, const vector<lay_piece> *ps, size_t a, size_t b,
     }
     push_back(at0, (uint32_t)len(*tx));
     size_t from = at(*at0, 0), to = len(*tx);
-    lay_ctx_after(LARGS, ps, b - 1, tx);
+    if (!comb) lay_ctx_after(LARGS, ps, b - 1, tx);
     lay_piece p0 = at(*ps, a);
     int flags = (rtl ? AMB_SHAPE_RTL : 0) | (p0.ls != 0 ? AMB_SHAPE_NOLIGA : 0) |
                 (p0.orient == 1 ? AMB_SHAPE_VMIXED : p0.orient == 2 ? AMB_SHAPE_VUPRIGHT : 0);
@@ -2385,6 +2422,16 @@ static void lay_shape_pieces(LCTX, vector<lay_piece> *ps, size_t start) {
             (*ps)[j].run = (uint32_t)k + 1;
             (*ps)[j].rrtl = (uint8_t)rtl;
         }
+        if (p.orient == 4) {
+            /* a combined text (a run of its own: lay_run_end): an em down the line, whatever its glyphs' advances; its
+               fonts' lines its box's alone (its glyphs shaped when its fragment takes them) */
+            lay_piece q = at(*ps, k);
+            q.w = q.size;
+            q.fb = 0;
+            (*ps)[k] = q;
+            k = b;
+            continue;
+        }
         lay_sce en = lay_run_cached(LARGS, ps, k, b, rtl);
         size_t n = b - k, ng = en.gln;
         /* each piece's advances: its own face's in its units, the others' in px; and the
@@ -2506,6 +2553,55 @@ static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr) {
     t->frag[fr].glyphs = glyphs_add(t, data(*out), len(*out));
 }
 
+/* lay_pack_glyphs's loop for a vertical line's run (p its first piece; the glyphs gl[g0, g1) of those to ge, their
+   clusters' starts with letter- or word-spacing starts): each glyph packed onto out from o, the pen at *x moved on;
+   an upright one's (AMB_SHAPED_UPRIGHT) from its vertical origin, half its horizontal advance before the central
+   baseline, its advance down the line (amb_shaped_pen's and amb_shaped_advance's). How many it packed */
+static size_t lay_pack_vrun(const amb_fonts *f, const lay_piece *pp, const vector<char> *tx, size_t txo, const vector<amb_shaped> *gl,
+                            size_t ge, size_t g0, size_t g1, uint32_t b0, uint32_t b1, const vector<uint32_t> *starts, double *px,
+                            vector<char> *out, size_t o) {
+    lay_piece p = *pp;
+    double x = *px, sc = p.size / amb_face_upem(f, p.face);
+    size_t w = 0;
+    for (size_t g = g0; g < g1; g++) {
+        amb_shaped s = at(*gl, g);
+        if (s.cluster < b0 || s.cluster >= b1) continue;
+        double gs = s.face == p.face ? sc : p.size / amb_face_upem(f, s.face);
+        amb_rglyph rg;
+        memset(&rg, 0, sizeof rg);
+        rg.gid = s.gid;
+        rg.face = s.face == p.face ? (uint16_t)AMB_RGLYPH_OWN : s.face;
+        rg.flags = s.flags;
+        rg.x = x + s.dx * gs;
+        rg.y = (float)(-s.dy * gs);
+        double adv = s.ax * gs;
+        if (s.flags & AMB_SHAPED_UPRIGHT) {
+            double along, across;
+            amb_shaped_pen(f, &s, p.size, &along, &across);
+            rg.x = x + along;
+            rg.y = (float)across;
+            adv = amb_shaped_advance(f, &s, p.size);
+        }
+        memcpy(data(*out) + o + w * sizeof(amb_rglyph), &rg, sizeof rg);
+        w++;
+        x += adv;
+        if (g + 1 < ge && at(*gl, g + 1).cluster == s.cluster) continue;
+        if (p.ls == 0 && p.wsp == 0) continue;
+        /* the cluster's bytes: to the next cluster's start */
+        size_t lo = 0, hi = len(*starts);
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (at(*starts, mid) <= s.cluster) lo = mid + 1; else hi = mid;
+        }
+        uint32_t next = lo < len(*starts) ? at(*starts, lo) : b1;
+        size_t spaces = 0;
+        for (uint32_t q = s.cluster; q < next; q++) if (at(*tx, txo + q) == ' ') spaces++;
+        x += p.ls * (double)lay_cps(data(*tx) + txo + s.cluster, next - s.cluster) + p.wsp * (double)spaces;
+    }
+    *px = x;
+    return w;
+}
+
 /* the glyphs gl[gb, gb + gn) of a run whose clusters are in [b0, b1) of its text (tx from txo)
    packed onto out (in the style of piece p), the first's pen at *x, which they move on: after
    each cluster (its last glyph in visual order) its letter-spacing for each of its code points
@@ -2565,6 +2661,13 @@ static void lay_pack_glyphs(LCTX, const lay_piece *pp, const vector<char> *tx, s
     double x = *px, sc = p.size / amb_face_upem(f, p.face);
     size_t o = len(*out), w = 0;
     resize(out, o + (g1 - g0) * sizeof(amb_rglyph));
+    if (p.orient == 1 || p.orient == 2) {
+        /* a vertical line's run, which may set glyphs upright (a loop of its own: a horizontal run's is as it was) */
+        w = lay_pack_vrun(f, &p, tx, txo, gl, gb + gn, g0, g1, b0, b1, &starts, &x, out, o);
+        resize(out, o + w * sizeof(amb_rglyph));
+        *px = x;
+        return;
+    }
     for (size_t g = g0; g < g1; g++) {
         amb_shaped s = at(*gl, g);
         if (s.cluster < b0 || s.cluster >= b1) continue;
@@ -2576,22 +2679,9 @@ static void lay_pack_glyphs(LCTX, const lay_piece *pp, const vector<char> *tx, s
         rg.flags = s.flags;
         rg.x = x + s.dx * gs;
         rg.y = (float)(-s.dy * gs);
-        double adv = s.ax * gs;
-        if (s.flags & AMB_SHAPED_UPRIGHT) {
-            /* upright in a vertical line: its pen from its vertical origin, half its horizontal advance before the
-               central baseline, its advance down the line (amb_shaped_pen and amb_shaped_advance's, here so that the
-               horizontal glyph's way is the one it was) */
-            rg.y = (float)(-s.dy * gs / 2);
-            if (s.flags & AMB_SHAPED_VFALLBACK) {
-                double fa, fd, fg;
-                amb_face_metrics(f, s.face, p.size, &fa, &fd, &fg);
-                rg.x = x + fa;
-                adv = (s.flags & AMB_SHAPED_VZERO) ? 0 : fa + fd;
-            }
-        }
         memcpy(data(*out) + o + w * sizeof(amb_rglyph), &rg, sizeof rg);
         w++;
-        x += adv;
+        x += s.ax * gs;
         if (g + 1 < gb + gn && at(*gl, g + 1).cluster == s.cluster) continue;
         if (p.ls == 0 && p.wsp == 0) continue;
         /* the cluster's bytes: to the next cluster's start */
@@ -3237,7 +3327,7 @@ static void lay_alt_box(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
         t->frag[fr].h = es->asc + es->desc;
         t->frag[fr].baseline = above;
         t->frag[fr].face = (uint8_t)es->face;
-        t->frag[fr].orient = es->orient;
+        t->frag[fr].orient = LAY_NOCOMB(es->orient);
         if (es->font) t->frag[fr].font = resource_handle(nt, es->font);
         t->frag[fr].size = es->fs;
         t->frag[fr].spacing = es->ls;
@@ -3646,7 +3736,7 @@ static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps,
     t->frag[fr].h = ps->asc + ps->desc;
     t->frag[fr].baseline = base;
     t->frag[fr].face = (uint8_t)ps->face;
-    t->frag[fr].orient = ps->orient;
+    t->frag[fr].orient = LAY_NOCOMB(ps->orient);
     if (ps->font) t->frag[fr].font = resource_handle(nt, ps->font);
     t->frag[fr].size = ps->fs;
     t->frag[fr].spacing = ps->ls;
@@ -5736,7 +5826,7 @@ static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, 
     t->frag[fr].h = bs->asc + bs->desc;
     t->frag[fr].baseline = base;
     t->frag[fr].face = (uint8_t)bs->face;
-    t->frag[fr].orient = bs->orient;
+    t->frag[fr].orient = LAY_NOCOMB(bs->orient);
     if (bs->font) t->frag[fr].font = resource_handle(nt, bs->font);
     t->frag[fr].size = bs->fs;
     t->frag[fr].color = bs->color;
@@ -6035,7 +6125,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     t->frag[fr].size = sm.fs;
     t->frag[fr].color = sm.color;
     t->frag[fr].fill = sm.fill;
-    t->frag[fr].orient = sm.orient;
+    t->frag[fr].orient = LAY_NOCOMB(sm.orient);
     frags_append(t, ln, fr);
 }
 
@@ -9642,11 +9732,12 @@ static void lay_vshifts(layout_tree *t, const dom_document *d) {
         if (!b || b >= t->box_len || !lay_frame(t->box[b].wm)) continue;
         uint32_t first = 0;
         for (uint32_t fr = t->line[ln].first_frag; fr && !first; fr = t->frag[fr].next)
-            if (t->frag[fr].kind == LAYOUT_FRAG_KIND_TEXT || t->frag[fr].kind == LAYOUT_FRAG_KIND_GENERATED) first = fr;
+            if ((t->frag[fr].kind == LAYOUT_FRAG_KIND_TEXT || t->frag[fr].kind == LAYOUT_FRAG_KIND_GENERATED) && t->frag[fr].orient != 4) first = fr;
         if (!first) continue;
         uint32_t holder = t->box[b].node.index;
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
-            if (t->frag[fr].kind != LAYOUT_FRAG_KIND_TEXT && t->frag[fr].kind != LAYOUT_FRAG_KIND_GENERATED) continue;
+            /* (a combined text is set in its own box, an atomic inline's in Blink) */
+            if ((t->frag[fr].kind != LAYOUT_FRAG_KIND_TEXT && t->frag[fr].kind != LAYOUT_FRAG_KIND_GENERATED) || t->frag[fr].orient == 4) continue;
             uint32_t ref = first;
             uint32_t x = t->frag[fr].node.index;
             int found = 0, depth = 0;

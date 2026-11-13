@@ -33,7 +33,8 @@
    quarter-pixel position, cached; a vertical line's (CSS Writing Modes 4) turned a
    quarter on its alphabetic baseline (their quarter pixel along the line) or upright
    on its central one, each line's text from its start snapped as Chromium snaps it
-   (pt_vtext). An image is drawn from the bytes the loader
+   (pt_vtext); a combined text (text-combine-upright) across its line in an em, squeezed
+   across into it when it is wider (pt_ctext). An image is drawn from the bytes the loader
    fetched for its element (image.c decodes PNG), sampled bilinearly into its
    content box; one whose load failed is Chromium's fallback (its 16px icon,
    before its alt text or in a box of its own size). The PNG is
@@ -108,10 +109,10 @@ static void pt_fill(amb_canvas *c, double x0, double y0, double x1, double y1, u
 
 typedef struct pt_glyph { uint64_t key; uint32_t off; int32_t w, h, ox, oy; } pt_glyph;
 
-static uint64_t pt_key(int face, double size, uint32_t gid, int quarter, int slant, int rot) {
+static uint64_t pt_key(int face, double size, uint32_t gid, int quarter, int slant, int rot, uint32_t xq) {
     uint64_t sz = (uint64_t)(size * 16 + 0.5) & 0xffff;
     return (uint64_t)(face & 127) << 57 | (uint64_t)(slant & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(rot & 3) << 36 |
-           (uint64_t)(gid & 0x1fffff);
+           (uint64_t)(xq & 0x3fff) << 22 | (uint64_t)(gid & 0x1fffff);
 }
 
 static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
@@ -120,16 +121,19 @@ static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
 }
 
 /* the cached glyph's index in entries, drawn on its first use (turned a quarter when rot asks: a vertical line's
-   sideways glyph, quarter then its pen's subpixel step down) */
-static uint32_t pt_glyph_rot(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
-                             vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot);
+   sideways glyph, quarter then its pen's subpixel step down; squeezed across to xq / 16384 when xq asks, 0 < xq < 16384:
+   a combined text's) */
+static uint32_t pt_glyph_xf(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot,
+                            uint32_t xq);
 static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
                             vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant) {
-    return pt_glyph_rot(f, entries, table, masks, acc, mask, face, size, gid, quarter, slant, 0);
+    return pt_glyph_xf(f, entries, table, masks, acc, mask, face, size, gid, quarter, slant, 0, 0);
 }
-static uint32_t pt_glyph_rot(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
-                             vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot) {
-    uint64_t key = pt_key(face, size, gid, quarter, slant, rot);
+static uint32_t pt_glyph_xf(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot,
+                            uint32_t xq) {
+    uint64_t key = pt_key(face, size, gid, quarter, slant, rot, xq);
     uint32_t i = pt_slot(table, key);
     while (at(*table, i)) {
         uint32_t e = at(*table, i) - 1;
@@ -142,7 +146,8 @@ static uint32_t pt_glyph_rot(const amb_fonts *f, vector<pt_glyph> *entries, vect
     g.key = key;
     g.off = (uint32_t)len(*masks);
     if (rot ? amb_glyph_mask_rot(f, face, gid, size, quarter / 4.0, rot, acc, mask, &w, &h, &ox, &oy) :
-              amb_glyph_mask_id(f, face, gid, size, quarter / 4.0, slant, acc, mask, &w, &h, &ox, &oy)) {
+        xq ? amb_glyph_mask_xs(f, face, gid, size, quarter / 4.0, xq / 16384.0, slant, acc, mask, &w, &h, &ox, &oy) :
+             amb_glyph_mask_id(f, face, gid, size, quarter / 4.0, slant, acc, mask, &w, &h, &ox, &oy)) {
         append_range(masks, data(*mask), len(*mask));
         g.w = w;
         g.h = h;
@@ -328,9 +333,41 @@ static void pt_vtext(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entrie
         double fy = floor(gy + 0.125);
         int quarter = (int)((gy + 0.125 - fy) * 4);
         int bx = (int)floor((up ? alpha + rg.y : alpha - rg.y) + 0.5);
-        uint32_t e = pt_glyph_rot(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, 0, up ? 3 : 1);
+        uint32_t e = pt_glyph_xf(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, 0, up ? 3 : 1, 0);
         pt_glyph gl = at(*entries, e);
         pt_glyph_blit(c, masks, gl, bx + gl.ox, (int)fy + gl.oy, rgba);
+    }
+}
+
+/* a combined text (CSS Writing Modes 4, 9.1: text-combine-upright: all; a fragment of orient 4, an em down its
+   vertical line) drawn across the line as Blink's LayoutTextCombine draws it (measured): its box (bx, by) the font's
+   height (asc + desc, its rounded ascent and descent) across the line and an em down it; its text, tw wide, centred
+   across the box, or, wider than 1.1em (an em under an underline or overline: Blink's DesiredWidth), squeezed across
+   to that width about its start (Blink's scale_x: none of the machine's fonts has the width variants, hwid, twid and
+   qwid, Blink tries first); its baseline the ascent down the box less what the font's height passes the em by, the
+   larger half of it (the leading of its line, an em high), rounded as a horizontal line's is */
+static void pt_ctext(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                     vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, double tw, double bx, double by, double size,
+                     double asc, double desc, int under, int slant, uint32_t rgba) {
+    double hh = asc + desc, want = under ? size : size * 1.1, xs = 1, x0;
+    /* the widths as Blink's LayoutUnits hold them, in 64ths of a px */
+    double tl = ceil(tw * 64) / 64, wl = floor(want * 64) / 64;
+    if (tw > want && tw > 0) {
+        xs = want / tw;
+        x0 = bx + floor((hh - wl) * 32) / 64;
+    } else x0 = bx + floor((hh - tl) * 32) / 64;
+    uint32_t xq = xs < 1 ? (uint32_t)(xs * 16384 + 0.5) : 0;
+    if (xq >= 16384) xq = 0;
+    double lead = size - hh, base = by + asc + (lead - floor(lead / 2));
+    for (size_t k = 0; k < len(*run); k++) {
+        amb_rglyph rg = at(*run, k);
+        if (rg.flags & AMB_SHAPED_HIDDEN) continue;
+        double gx = x0 + rg.x * xs, fx = floor(gx + 0.125);
+        int quarter = (int)((gx + 0.125 - fx) * 4);
+        int gy = (int)floor(base + rg.y - c->oy + 0.5);
+        uint32_t e = pt_glyph_xf(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, slant, 0, xq);
+        pt_glyph gl = at(*entries, e);
+        pt_glyph_blit(c, masks, gl, (int)fx + gl.ox, gy + gl.oy, rgba);
     }
 }
 
@@ -3036,10 +3073,12 @@ static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb
         /* a vertical line's text: its over side its right, sideways-lr's its left (the line's box's writing mode) */
         uint32_t ln = t->frag[fr].line, lb = ln ? t->line[ln].box : 0;
         int up = lb && t->box[lb].wm == 4;
-        double asc, desc, gap;
+        double asc, desc, gap, fa, fd;
         amb_face_metrics(f, face, size, &asc, &desc, &gap);
-        /* the central baseline an upright glyph is centred on: the middle of the font's height (measured) */
-        double hh = asc + desc, casc = hh / 2;
+        /* the central baseline an upright glyph is centred on: half the font's height below the over edge, of its
+           ascent and descent unrounded (Blink's FixedAscent for the central baseline, a LayoutUnit: measured) */
+        amb_face_metrics_exact(f, face, size, &fa, &fd);
+        double casc = floor((fa + fd) / 2 * 64 + 0.5) / 64;
         double ox = up ? t->frag[fr].x : t->frag[fr].x + t->frag[fr].w;
         /* its start along the line, snapped as layout found Chromium snaps it: as its vref's start moves to its whole
            pixel */
@@ -3049,8 +3088,15 @@ static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb
             double i0 = up ? t->frag[vr].y + t->frag[vr].h : t->frag[vr].y;
             y0 += floor(i0 + 0.5) - i0;
         }
-        pt_vtext(c, f, entries, table, masks, acc, mask, &run, y0, ox, up, asc, casc, size, t->frag[fr].italic || amb_face_italic(face),
-                 t->frag[fr].fill);
+        if (t->frag[fr].orient == 4) {
+            /* a combined text (text-combine-upright: all) across the line, in its em */
+            amb_span ts = t->frag[fr].text;
+            double tw = ts.len ? amb_text_width(f, face, size, text_ptr(t, ts), ts.len) : 0;
+            pt_ctext(c, f, entries, table, masks, acc, mask, &run, tw, t->frag[fr].x, t->frag[fr].y, size, asc, desc,
+                     (t->frag[fr].decoration & 3) != 0, t->frag[fr].italic || amb_face_italic(face), t->frag[fr].fill);
+        } else
+            pt_vtext(c, f, entries, table, masks, acc, mask, &run, y0, ox, up, asc, casc, size, t->frag[fr].italic || amb_face_italic(face),
+                     t->frag[fr].fill);
         /* its decorations, along it: a vertical line's underline outside its text's under edge (its left) and its
            overline outside its over edge, as Chromium draws them; a sideways one's (and a line-through) as a horizontal
            line's turned with its glyphs (measured) */

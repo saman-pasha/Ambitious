@@ -46,8 +46,8 @@
    cubic curves (their controls' points on 2). amb_glyph_mask draws one: its contours
    flattened into lines whose signed area each pixel accumulates (exact coverage,
    non-zero fill), at any size, at a fraction of a pixel across, upright or, for an
-   italic style a face is not italic in, slanted, or turned a quarter (a vertical line's
-   sideways glyph); amb_glyph_path gives its contours as
+   italic style a face is not italic in, slanted, turned a quarter (a vertical line's
+   sideways glyph) or squeezed across (a combined text's); amb_glyph_path gives its contours as
    path commands, for SVG text drawn turned or stroked (src/paint/svg.c). A face of colour
    bitmaps (CBLC and CBDT: Noto Color Emoji) is measured, not drawn. */
 #ifndef AMB_FONT_H
@@ -149,6 +149,9 @@ double amb_x_height(int face);
 /* a face's ascent, descent (positive, below the baseline) and line gap at a size, in
    px, each rounded to a whole px as Chromium rounds them (its line height is their sum) */
 void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, double *desc, double *gap);
+/* its ascent and descent at a size, in px, as its font has them, not rounded (Blink's float ascent and descent: a vertical
+   line's central baseline, which its glyphs are drawn on, is half their sum below its over edge) */
+void amb_face_metrics_exact(const amb_fonts *f, int face, double size, double *asc, double *desc);
 /* the widths a text control is sized by (Blink's text field and textarea), the face at size: its average
    character's, OS/2's, unrounded (0 when it has none), and its glyphs' horizontal extent, head's xMax - xMin,
    rounded (Skia's fXMax - fXMin, Blink's MaxCharWidth). A built-in face's are its font file's */
@@ -178,10 +181,12 @@ typedef struct amb_shaped { uint32_t gid, cluster; int32_t ax, dx, dy, base; uin
 /* a glyph set upright in a vertical line (AMB_SHAPED_UPRIGHT): its ax its advance down the line, its dx its vertical
    origin (from the top of its advance to its baseline) and its dy half its horizontal advance (its pen's x the central
    baseline less that), each in its face's units -- but for a face with no vmtx (AMB_SHAPED_VFALLBACK), whose advance
-   is its height and whose origin its ascent at the size, each rounded (Blink's OpenTypeVerticalData); a mark's
-   advance none (AMB_SHAPED_VZERO: HarfBuzz zeroes a mark's advance down the line too): amb_shaped_advance and
-   amb_shaped_pen give them in px */
-enum { AMB_SHAPED_HIDDEN = 1, AMB_SHAPED_UPRIGHT = 2, AMB_SHAPED_VFALLBACK = 4, AMB_SHAPED_VZERO = 8 };
+   is its height and whose origin its ascent at the size, each rounded (Blink's OpenTypeVerticalData); a face with
+   vmtx and no VORG (AMB_SHAPED_VTSB) its origin vmtx's top side bearing (dx) over the glyph's top (base), that top
+   rounded up to a whole px at the size (Blink's glyph bounds, Skia's rounded out); a mark's advance none
+   (AMB_SHAPED_VZERO: HarfBuzz zeroes a mark's advance down the line too): amb_shaped_advance and amb_shaped_pen give
+   them in px */
+enum { AMB_SHAPED_HIDDEN = 1, AMB_SHAPED_UPRIGHT = 2, AMB_SHAPED_VFALLBACK = 4, AMB_SHAPED_VZERO = 8, AMB_SHAPED_VTSB = 16 };
 /* how a run is shaped: right to left (its bidi level odd; the glyphs then given in visual
    order), ligatures off (liga, clig and calt: letter-spacing, as Blink has it), kerning off; in a
    vertical line, each grapheme upright as its first code point's Vertical_Orientation (UAX #50) has
@@ -248,6 +253,10 @@ int amb_glyph_mask_id(const amb_fonts *f, int face, uint32_t gid, double size, d
    vertical one */
 int amb_glyph_mask_rot(const amb_fonts *f, int face, uint32_t gid, double size, double dy, int rot,
                        vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
+/* the same, upright, the outline scaled across by xs about the pen (0 < xs < 1: a combined text's, CSS
+   text-combine-upright, squeezed into its em, as Skia draws it under Blink's horizontal scale), its pen at x = dx */
+int amb_glyph_mask_xs(const amb_fonts *f, int face, uint32_t gid, double size, double dx, double xs, int slant,
+                      vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
 
 /* the outline of the glyph of cp at a size (its fallback face's when the face has none), its
    pen at the origin on the baseline, y down, slanted as amb_glyph_mask slants it: path

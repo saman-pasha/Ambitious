@@ -185,7 +185,8 @@ layout_contract(record(frag, [
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
     %% a fragment in a vertical line (its line's box's wm): 0 none, horizontal; 1 its text-orientation mixed (each
     %% glyph upright or turned as its character's Vertical_Orientation has it, UAX #50), 2 upright, 3 sideways (every
-    %% glyph turned: a quarter clockwise, sideways-lr's anticlockwise)
+    %% glyph turned: a quarter clockwise, sideways-lr's anticlockwise), 4 combined (text-combine-upright: all, its
+    %% fragment an em down the line: its text set across it, scaled to fit)
     field(orient,     u8),
     field(shadows,    span(text)),              % text-shadow
     %% a text fragment's glyphs as layout shaped them (src/paint/font.h's amb_rglyph each, packed: its

@@ -1148,6 +1148,16 @@ void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, do
     *gap = amb_round(fc.gap * s);
 }
 
+void amb_face_metrics_exact(const amb_fonts *f, int face, double size, double *asc, double *desc) {
+    amb_face fc;
+    *asc = *desc = 0;
+    if (!amb_ready(f, face)) return;
+    amb_rec(f, face, &fc);
+    double s = size / fc.upem;
+    *asc = fc.asc * s;
+    *desc = fc.desc * s;
+}
+
 void amb_face_widths(const amb_fonts *f, int face, double size, double *avg, double *maxw) {
     amb_face fc;
     *avg = *maxw = 0;
@@ -1842,23 +1852,27 @@ static void amb_upright(const amb_fonts *f, int face, const amb_face *fc, const 
         o.flags = AMB_SHAPED_UPRIGHT | (mark ? AMB_SHAPED_VZERO : 0);
         o.dy = g.ax;
         o.dx = 0;
+        o.base = 0;
         if (vm.nvm) {
             size_t r = vm.vmtx + 4 * (size_t)(g.gid < vm.nvm ? g.gid : vm.nvm - 1u);
             o.ax = mark ? 0 : (int32_t)amb_u16(fp, fc->size, r);
             int32_t tsb = g.gid < vm.nvm ? amb_s16(fp, fc->size, r + 2) : amb_s16(fp, fc->size, vm.vmtx + 4 * (size_t)vm.nvm + 2 * (size_t)(g.gid - vm.nvm));
-            int32_t org = 0;
             if (vm.vorg) {
                 uint32_t nv = amb_u16(fp, fc->size, vm.vorg + 6);
-                org = amb_s16(fp, fc->size, vm.vorg + 4);
+                int32_t org = amb_s16(fp, fc->size, vm.vorg + 4);
                 for (uint32_t k = 0; k < nv; k++)
                     if (amb_u16(fp, fc->size, vm.vorg + 8 + 4 * (size_t)k) == g.gid) { org = amb_s16(fp, fc->size, vm.vorg + 10 + 4 * (size_t)k); break; }
-            } else org = tsb + amb_glyph_ymax(f, face, fc, g.gid);
-            o.dx = org;
+                o.dx = org;
+            } else {
+                /* the bearing, and the glyph's top, which is rounded at the size (amb_shaped_pen) */
+                o.flags |= AMB_SHAPED_VTSB;
+                o.dx = tsb;
+                o.base = amb_glyph_ymax(f, face, fc, g.gid);
+            }
         } else {
             o.flags |= AMB_SHAPED_VFALLBACK;
             o.ax = 0;
         }
-        o.base = o.ax;
         (*out)[o0 + q] = o;
     }
 }
@@ -1954,6 +1968,7 @@ void amb_shaped_pen(const amb_fonts *f, const amb_shaped *g, double size, double
     if (!(g->flags & AMB_SHAPED_UPRIGHT)) { *along = g->dx * sc; *across = -g->dy * sc; return; }
     /* upright: half its horizontal advance before the central baseline; its vertical origin down the line */
     *across = -g->dy * sc / 2;
+    if (g->flags & AMB_SHAPED_VTSB) { *along = g->dx * sc + ceil(g->base * sc - 1e-6); return; }
     if (!(g->flags & AMB_SHAPED_VFALLBACK)) { *along = g->dx * sc; return; }
     double asc, desc, gap;
     amb_face_metrics(f, g->face, size, &asc, &desc, &gap);
@@ -2627,19 +2642,29 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     return amb_glyph_mask_id(f, by, g.gid, size, dx, italic || (face < AMB_NBUILTIN && (amb_sf[face].style & 2)), acc, mask, w, h, ox, oy);
 }
 
-static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, int asked, int rot,
+static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, double xs, int asked, int rot,
                        vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
 int amb_glyph_mask_id(const amb_fonts *f, int by, uint32_t gid, double size, double dx, int asked,
                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
-    return amb_mask_xf(f, by, gid, size, dx, 0, asked, 0, acc, mask, w, h, ox, oy);
+    return amb_mask_xf(f, by, gid, size, dx, 0, 1, asked, 0, acc, mask, w, h, ox, oy);
 }
 int amb_glyph_mask_rot(const amb_fonts *f, int by, uint32_t gid, double size, double dy, int rot,
                        vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
-    return amb_mask_xf(f, by, gid, size, 0, dy, 0, rot, acc, mask, w, h, ox, oy);
+    return amb_mask_xf(f, by, gid, size, 0, dy, 1, 0, rot, acc, mask, w, h, ox, oy);
+}
+int amb_glyph_mask_xs(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double xs, int asked,
+                      vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
+    return amb_mask_xf(f, by, gid, size, dx, 0, xs, asked, 0, acc, mask, w, h, ox, oy);
+}
+/* a point of an outline, as amb_xf places it, its x scaled across by xs about the pen */
+static void amb_xfs(amb_pt p, double s, double xs, double slant, double ax, double ay, double *x, double *y) {
+    *x = (p.x + slant * p.y) * s * xs + ax;
+    *y = -p.y * s + ay;
 }
 /* a glyph's mask, its pen at (dx, dy) from a whole pixel, its outline turned a quarter about the pen first when rot asks
-   (1 clockwise: a vertical line's sideways glyph, its top to the right; 3 anticlockwise, sideways-lr's) */
-static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, int asked, int rot,
+   (1 clockwise: a vertical line's sideways glyph, its top to the right; 3 anticlockwise, sideways-lr's), scaled across
+   by xs (1: as it is) */
+static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, double xs, int asked, int rot,
                        vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
     *w = 0;
     *h = 0;
@@ -2672,7 +2697,7 @@ static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, do
     double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
     for (uint32_t k = 0; k < npts; k++) {
         amb_pt p = at(pts, k);
-        double X = (p.x + slant * p.y) * s + dx, Y = -p.y * s + dy;
+        double X = (p.x + slant * p.y) * s * xs + dx, Y = -p.y * s + dy;
         if (X < minx) minx = X;
         if (X > maxx) maxx = X;
         if (Y < miny) miny = Y;
@@ -2698,12 +2723,12 @@ static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, do
         double sx, sy, cx, cy, qx = 0, qy = 0, rx = 0, ry = 0, px, py;
         int ctrl = 0, cubic = 0;
         if (found) {
-            amb_xf(at(pts, c0 + k0), s, slant, ax, ay, &sx, &sy);
+            amb_xfs(at(pts, c0 + k0), s, xs, slant, ax, ay, &sx, &sy);
             cx = sx;
             cy = sy;
             for (uint32_t j = 1; j <= n; j++) {
                 amb_pt p = at(pts, c0 + (k0 + j) % n);
-                amb_xf(p, s, slant, ax, ay, &px, &py);
+                amb_xfs(p, s, xs, slant, ax, ay, &px, &py);
                 if (p.on == 2) {
                     if (cubic) { rx = px; ry = py; }
                     else { qx = px; qy = py; rx = px; ry = py; }
@@ -2730,14 +2755,14 @@ static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, do
             }
         } else {
             double lx, ly;
-            amb_xf(at(pts, c0), s, slant, ax, ay, &px, &py);
-            amb_xf(at(pts, c1), s, slant, ax, ay, &lx, &ly);
+            amb_xfs(at(pts, c0), s, xs, slant, ax, ay, &px, &py);
+            amb_xfs(at(pts, c1), s, xs, slant, ax, ay, &lx, &ly);
             sx = (px + lx) * 0.5;
             sy = (py + ly) * 0.5;
             cx = sx;
             cy = sy;
             for (uint32_t j = 0; j < n; j++) {
-                amb_xf(at(pts, c0 + j), s, slant, ax, ay, &px, &py);
+                amb_xfs(at(pts, c0 + j), s, xs, slant, ax, ay, &px, &py);
                 if (ctrl) {
                     double mx = (qx + px) * 0.5, my = (qy + py) * 0.5;
                     amb_acc_quad(acc, W, gh, cx, cy, qx, qy, mx, my);
