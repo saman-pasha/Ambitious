@@ -45,13 +45,21 @@ typedef struct amb_otf { uint32_t gsub, gpos, gdef, kern, kern_len, hmtx, nhm, n
 /* how a run is shaped: right to left (the run's direction asked for), its buffer reversed to
    the script's own direction (HarfBuzz's hb_ensure_native_direction: the buffer then right to
    left when RTL alone is not), ligatures off (letter-spacing: liga, clig and calt, as Blink
-   turns them off), kerning off */
-enum { AMB_SH_RTL = 1, AMB_SH_BACKWARD = 2, AMB_SH_NOLIGA = 4, AMB_SH_NOKERN = 8 };
+   turns them off), kerning off; vertical (HarfBuzz's top-to-bottom direction: an upright run of a vertical line,
+   the common features and vert alone) */
+enum { AMB_SH_RTL = 1, AMB_SH_BACKWARD = 2, AMB_SH_NOLIGA = 4, AMB_SH_NOKERN = 8, AMB_SH_VERT = 16 };
+
+/* a code point's vertical orientation (UAX #50's Vertical_Orientation): 0 R, 1 U, 2 Tu, 3 Tr */
+int amb_vo_of(uint32_t cp);
 
 /* what a run's plan says of it (amb_ot_plan_info): the Arabic shaper takes it; the Hebrew
    one; GPOS has a mark feature for it (HarfBuzz composes Hebrew's presentation forms only
-   without one); a code point that has no glyph of its own may be decomposed */
-enum { AMB_PI_ARABIC = 1, AMB_PI_HEBREW = 2, AMB_PI_GPOS_MARK = 4 };
+   without one); a code point that has no glyph of its own may be decomposed; a vertical run's font has a vert
+   feature (without one HarfBuzz takes Unicode's vertical presentation forms the font has, hb_vert_char_for) */
+enum { AMB_PI_ARABIC = 1, AMB_PI_HEBREW = 2, AMB_PI_GPOS_MARK = 4, AMB_PI_VERT = 8 };
+/* the vertical presentation form HarfBuzz takes for a code point in a vertical run whose font has no vert feature
+   (hb_vert_char_for), or the code point itself */
+uint32_t amb_vert_char(uint32_t cp);
 
 /* the character properties: the combining class as HarfBuzz modifies it; a mark's kind (1
    Mn, 2 Mc, 3 Me; 0 none); the canonical decomposition of one level (1, its parts into *a and

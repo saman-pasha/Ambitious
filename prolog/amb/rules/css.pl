@@ -48,6 +48,15 @@ css_computed(N, P, V, How) :-
     css_style_of(N, _), css_initial(P, _), \+ css_declared(N, P, _, _),
     css_rules_default(N, P, V, How).
 
+%% a flow-relative property (CSS Logical 1: margin-inline-start, block-size, ...) has no
+%% value of its own: an element's is the physical property's its writing mode and direction
+%% make it, as getComputedStyle gives it
+css_computed(N, P, V, How) :-
+    css_rules_logical(P, Group, Kind), css_style_of(N, _),
+    css_computed(N, writing_mode, WM, _), css_computed(N, direction, D, _),
+    css_rules_flow(Kind, WM, D, I), css_rules_nth(Group, I, Q),
+    css_computed(N, Q, V, How).
+
 css_rules_default(N, P, V, How) :-
     (   css_rules_inherited(P), dom_flat_parent(N, Par), css_style_of(Par, _)
     ->  css_computed(Par, P, V, _), How = inherited
@@ -117,6 +126,8 @@ css_rules_inherited(dominant_baseline).
 css_rules_inherited(color_interpolation_filters).
 css_rules_inherited(color_interpolation).
 css_rules_inherited(image_rendering).
+css_rules_inherited(text_orientation).
+css_rules_inherited(text_combine_upright).
 css_rules_colour(color).
 css_rules_colour(background_color).
 css_rules_colour(stop_color).
@@ -139,6 +150,64 @@ css_rules_mask_list(mask_size).
 css_rules_mask_list(mask_origin).
 css_rules_mask_list(mask_clip).
 css_rules_mask_list(mask_composite).
+
+%% the flow-relative properties: each one's group of physical properties (the sides top,
+%% right, bottom, left; the corners top-left, top-right, bottom-right, bottom-left; width,
+%% height) and what it is in it (src/css/css.c's css_ldefs): a side (0 block-start, 1
+%% block-end, 2 inline-start, 3 inline-end), a corner (4 start-start, 5 start-end, 6
+%% end-start, 7 end-end), a size (8 inline, 9 block)
+css_rules_logical(P, G, K) :- css_rules_lgroup(Ps, G), css_rules_nth(Ps, K0, P), css_rules_lkind(Ps, K0, K).
+css_rules_lgroup([margin_block_start, margin_block_end, margin_inline_start, margin_inline_end],
+                 [margin_top, margin_right, margin_bottom, margin_left]).
+css_rules_lgroup([padding_block_start, padding_block_end, padding_inline_start, padding_inline_end],
+                 [padding_top, padding_right, padding_bottom, padding_left]).
+css_rules_lgroup([border_block_start_width, border_block_end_width, border_inline_start_width, border_inline_end_width],
+                 [border_top_width, border_right_width, border_bottom_width, border_left_width]).
+css_rules_lgroup([border_block_start_style, border_block_end_style, border_inline_start_style, border_inline_end_style],
+                 [border_top_style, border_right_style, border_bottom_style, border_left_style]).
+css_rules_lgroup([border_block_start_color, border_block_end_color, border_inline_start_color, border_inline_end_color],
+                 [border_top_color, border_right_color, border_bottom_color, border_left_color]).
+css_rules_lgroup([inset_block_start, inset_block_end, inset_inline_start, inset_inline_end], [top, right, bottom, left]).
+css_rules_lgroup([border_start_start_radius, border_start_end_radius, border_end_start_radius, border_end_end_radius],
+                 [border_top_left_radius, border_top_right_radius, border_bottom_right_radius, border_bottom_left_radius]).
+css_rules_lgroup([inline_size, block_size], [width, height]).
+css_rules_lgroup([min_inline_size, min_block_size], [min_width, min_height]).
+css_rules_lgroup([max_inline_size, max_block_size], [max_width, max_height]).
+css_rules_lkind([_, _], K0, K) :- K is K0 + 8.
+css_rules_lkind([border_start_start_radius|_], K0, K) :- K is K0 + 4.
+css_rules_lkind([P|_], K, K) :- P \== border_start_start_radius, P \== inline_size, P \== min_inline_size, P \== max_inline_size.
+css_rules_nth([X|_], 0, X).
+css_rules_nth([_|Xs], K, X) :- css_rules_nth(Xs, K0, X), K is K0 + 1.
+%% the physical side a box's block-start and inline-start are on (0 top, 1 right, 2 bottom, 3 left)
+css_rules_block_start('horizontal-tb', 0).
+css_rules_block_start('vertical-rl', 1).
+css_rules_block_start('sideways-rl', 1).
+css_rules_block_start('vertical-lr', 3).
+css_rules_block_start('sideways-lr', 3).
+css_rules_inline_start('horizontal-tb', ltr, 3).
+css_rules_inline_start('horizontal-tb', rtl, 1).
+css_rules_inline_start('vertical-rl', ltr, 0).
+css_rules_inline_start('vertical-rl', rtl, 2).
+css_rules_inline_start('vertical-lr', ltr, 0).
+css_rules_inline_start('vertical-lr', rtl, 2).
+css_rules_inline_start('sideways-rl', ltr, 0).
+css_rules_inline_start('sideways-rl', rtl, 2).
+css_rules_inline_start('sideways-lr', ltr, 2).
+css_rules_inline_start('sideways-lr', rtl, 0).
+%% a flow-relative property's place in its group, for a writing mode and a direction
+css_rules_flow(K, WM, _, I) :- K < 2, css_rules_block_start(WM, B), I is (B + 2 * K) mod 4.
+css_rules_flow(K, WM, D, I) :- K >= 2, K < 4, css_rules_inline_start(WM, D, S), I is (S + 2 * (K - 2)) mod 4.
+css_rules_flow(K, WM, D, I) :-
+    K >= 4, K < 8, css_rules_block_start(WM, B0), css_rules_inline_start(WM, D, S0),
+    B is (B0 + 2 * ((K - 4) // 2)) mod 4, S is (S0 + 2 * ((K - 4) mod 2)) mod 4,
+    css_rules_corner(B, S, I).
+css_rules_flow(8, WM, _, I) :- ( WM == 'horizontal-tb' -> I = 0 ; I = 1 ).
+css_rules_flow(9, WM, _, I) :- ( WM == 'horizontal-tb' -> I = 1 ; I = 0 ).
+%% the corner two sides meet at
+css_rules_corner(A, B, I) :-
+    (   ( A == 0 ; B == 0 ) -> ( ( A == 3 ; B == 3 ) -> I = 0 ; I = 1 )
+    ;   ( ( A == 3 ; B == 3 ) -> I = 3 ; I = 2 )
+    ).
 
 %% a list's items (its commas outside brackets and quotes, a backslash's character passed
 %% over), and an item K times

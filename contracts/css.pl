@@ -80,7 +80,21 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     mask_mode, mask_repeat, mask_position, mask_size, mask_origin, mask_clip, mask_composite,
     %% CSS 2.1's clip (CSS Masking 1, 11): auto, or rect() as text
     clip,
-    custom])).
+    %% CSS Writing Modes 4: a vertical line's glyphs' orientation (mixed, upright or sideways) and text-combine-upright
+    %% (none, or all: the text set in one em across the line), both inherited
+    text_orientation, text_combine_upright,
+    custom,
+    %% CSS Logical 1's flow-relative properties, after custom: no computed style holds them. A declaration of one is
+    %% kept as such; the cascade takes it for the physical property its element's writing-mode and direction map it
+    %% to, in its place in the cascade's order among that property's own declarations (Chromium's)
+    margin_block_start, margin_block_end, margin_inline_start, margin_inline_end,
+    padding_block_start, padding_block_end, padding_inline_start, padding_inline_end,
+    border_block_start_width, border_block_end_width, border_inline_start_width, border_inline_end_width,
+    border_block_start_style, border_block_end_style, border_inline_start_style, border_inline_end_style,
+    border_block_start_color, border_block_end_color, border_inline_start_color, border_inline_end_color,
+    inset_block_start, inset_block_end, inset_inline_start, inset_inline_end,
+    inline_size, block_size, min_inline_size, min_block_size, max_inline_size, max_block_size,
+    border_start_start_radius, border_start_end_radius, border_end_start_radius, border_end_end_radius])).
 %% a value: a keyword, a length in px (em and rem as declared), a percentage, a colour
 %% (RGBA), auto, a number; a calc() that is num px plus pct percent, or one that is
 %% no such sum (min(), max(), clamp() over percentages), kept as its text with every

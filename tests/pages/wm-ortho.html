@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: orthogonal flows</title>
+<style>
+/* tests/pages/wm-ortho.html -- boxes whose writing mode is orthogonal to their parent's (CSS Writing Modes 4, 7.3), as
+   Chromium lays them out: an inline-block of the other axis in a line (its block size its width there, its baseline
+   its margin box's bottom), a float that shrinks to fit in its parent's definite block size or else the viewport's,
+   a box's min- and max-content contributions to its parent its block size laid out, positioned boxes whose offsets are
+   their containing block's sides, an absolutely positioned box in a vertical containing block; an inline element of
+   another writing mode (an inline-block, as Blink makes it), a table cell and a grid item of the other axis, an image
+   in a vertical line (its natural width across the line). Held to Chromium's boxes (wm-ortho.chromium) and drawing
+   (wm-ortho.shot.png, .regions) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.v { writing-mode: vertical-rl; }
+.l { writing-mode: vertical-lr; }
+.h { writing-mode: horizontal-tb; }
+.b { background: #e6eef8; }
+.y { background: #fd8; }
+.t { color: transparent; }
+</style></head>
+<body>
+<div id="a" class="b t" style="width: 400px">before <div id="a1" class="v y" style="display: inline-block">vertical inline-block</div> after the inline-block, and on.</div>
+<div id="b" class="v b t" style="height: 200px; float: left; margin-top: 10px">before <div id="b1" class="h y" style="display: inline-block">across</div> after it</div>
+<div id="c" class="v b t" style="height: 150px; width: 120px; float: left; margin: 10px 0 0 10px"><div id="c1" class="h y" style="float: left">a float across</div><div id="c2" class="h y" style="float: right; width: 30px">fixed</div></div>
+<div id="d" class="b t" style="float: left; margin: 10px 0 0 10px"><div id="d1" class="v y">its block size</div><div id="d2" class="l y" style="margin-left: 5px; padding: 2px">its contribution</div></div>
+<div id="e" class="b" style="position: relative; float: left; width: 200px; height: 150px; margin: 10px 0 0 10px"><div id="e1" class="v y t" style="position: absolute; top: 10px; left: 20px">absolutely</div><div id="e2" class="v y t" style="position: absolute; bottom: 5px; right: 5px; height: 60px">from the end</div></div>
+<div id="f" class="v b" style="position: relative; float: left; height: 150px; width: 120px; margin: 10px 0 0 10px"><div id="f1" class="y" style="position: absolute; top: 10px; right: 20px; width: 30px; height: 40px"></div><div id="f2" class="y" style="position: absolute; bottom: 10px; left: 10px; width: 20px; height: 30px"></div><div id="f3" class="y t" style="position: absolute; top: 60px; left: 50px">static</div></div>
+<div id="g" class="b t" style="clear: both; display: flex; width: 300px; margin-top: 10px"><div id="g1" class="y">an item</div><div id="g2" class="v y">vertical item</div><div id="g3" class="y" style="flex-grow: 1">grows</div></div>
+<div id="h" class="v b t" style="float: left; height: 160px; margin-top: 10px">text <span id="h1" class="h y">across</span> more</div>
+<table id="i" class="b t" style="float: left; margin: 10px 0 0 10px"><tr><td id="i1" class="v y">cell</td><td id="i2">plain</td></tr></table>
+<div id="j" class="b t" style="float: left; display: grid; grid-template-columns: 50px 50px; margin: 10px 0 0 10px"><div id="j1" class="v y">grid item</div><div id="j2">two</div></div>
+<div id="k" class="l b" style="float: left; height: 120px; margin: 10px 0 0 10px"><span id="k1" class="t" style="vertical-align: super; font-size: 12px">sup</span> <img id="k2" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='30'/%3E" style="background: #c33"> <span class="t">img</span></div>
+</body></html>

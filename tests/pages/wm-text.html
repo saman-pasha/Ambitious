@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: text</title>
+<style>
+/* tests/pages/wm-text.html -- text in vertical lines (CSS Writing Modes 4, 5), as Chromium sets and draws it:
+   text-orientation mixed (a character upright or turned as UAX #50's Vertical_Orientation has it: Latin turned a
+   quarter clockwise, kana upright, the punctuation of a font with no vert feature its Unicode vertical forms, as
+   HarfBuzz takes them), upright (every glyph upright, a font with no vmtx advancing by its height) and sideways
+   (every glyph turned); the sideways modes (sideways-lr's glyphs turned anticlockwise, its lines from the bottom);
+   the central baseline (a vertical line's): fonts of two sizes centred on one line; vertical-lr's lines, whose over
+   side is their right. The upright glyphs of WenQuanYi Zen Hei advance by its vmtx (its kana by more than an em).
+   Held to Chromium's boxes (wm-text.chromium) and its drawing, the text- regions by their ink */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { float: left; height: 260px; margin-right: 10px; background: #eef; }
+.v { writing-mode: vertical-rl; }
+</style></head>
+<body>
+<div id="text-a" class="c v">Hello <span id="a1">vertical</span> world</div>
+<div id="text-b" class="c v">かなカナ、「かぎ」（かっこ）ABC</div>
+<div id="text-c" class="c v" style="text-orientation: upright">Upright AB12</div>
+<div id="text-d" class="c v" style="text-orientation: sideways">Sideways かな</div>
+<div id="text-e" class="c" style="writing-mode: sideways-rl">Sideways rl</div>
+<div id="text-f" class="c" style="writing-mode: sideways-lr">Sideways lr</div>
+<div id="text-g" class="c" style="writing-mode: vertical-lr">Vertical lr text that wraps</div>
+<div id="text-h" class="c v" style="font-size: 24px; line-height: 30px">Big <span id="h1" style="font-size: 12px">small</span> big</div>
+<div id="text-i" class="c v" style="font-family: serif; font-size: 20px">Serif かな ABC</div>
+<div id="text-j" class="c v" style="text-orientation: upright; font-family: 'DejaVu Sans'">DejaVu</div>
+<div id="text-k" class="c v" style="line-height: 30px"><span id="k1" style="background: #fd8">an inline</span> box's <span id="k2" style="background: #8df">background</span></div>
+</body></html>

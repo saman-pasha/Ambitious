@@ -1381,6 +1381,76 @@ be built side by side and merged without touching each other's.
   the smaller pages' cascades within 0.4%; the reasoner's `advise` over the large page 4%
   (1,024 ms to 1,069 ms), the flat tree's parent asked first as the DOM's in a document without
   shadow roots.
+- **12aa Writing modes** (`src/layout/layout.c`: each box laid out in its writing mode's frame; the box field wm and
+  the fragment fields orient and vref in `contracts/layout.pl`; writing-mode, text-orientation,
+  text-combine-upright and CSS Logical 1's flow-relative properties in `src/css/css.c`, `src/css/css.h` and
+  `contracts/css.pl`, their computed values in `prolog/amb/rules/css.pl`; vertical runs shaped in
+  `src/paint/font.c` and `src/paint/shape.c`, UAX #50's Vertical_Orientation in `src/paint/shape_data.h` from
+  `tools/gen-shape.pl`; vertical lines drawn in `src/paint/paint.c`), each measured in Chromium first:
+  - `writing-mode` (horizontal-tb, vertical-rl, vertical-lr, sideways-rl, sideways-lr; SVG 1.1's tb, tb-rl, lr,
+    lr-tb, rl and rl-tb and `-webkit-writing-mode` computed as Chromium computes them): a box is laid out in its
+    mode's frame, as a horizontal box is with its axes turned -- its style's edges and sizes read turned (a vertical
+    box's height its inline size, its right margin vertical-rl's block-start one), its boxes, lines and fragments
+    turned back once laid out -- so that its lines stack along the block axis (right to left, or left to right),
+    each a column of text; percentages are taken of the right axis, margins collapse along the block axis, a float's
+    left and right are a vertical line's top and bottom; vertical-lr's lines, whose over side is their right, have
+    what they hold mirrored in them. A box whose writing mode is not its parent's makes a formatting context of its
+    own (3.1): laid out in its own frame, then set in its parent's, its edges turned. An orthogonal one's available
+    inline size is its parent's definite block size, else the viewport's (7.3, as Chromium has it), a percentage of
+    its inline size taken of that too; its auto inline size fits its content in it; its auto margins along its
+    parent's inline axis share what is left; its min- and max-content contributions to its parent are its block size
+    laid out; an inline-block of the other axis is laid out before its line, its baseline its margin box's bottom (in
+    a vertical line, whose baseline is the central one, its middle), an inline element of another mode an inline-block
+    (Blink's StyleAdjuster); a positioned box's offsets are read in its containing block's frame. The root's writing
+    mode -- its body's when it has one (8: the principal writing mode, propagated as Chromium does) -- is the initial
+    containing block's: a vertical-rl page set from the viewport's right edge, its inline size the viewport's height.
+    The user agent's sheet's margins and paddings are flow-relative, as Chromium's html.css has them;
+  - text in vertical lines: their dominant baseline the central one (a font's height halved, the descent's half
+    floored, as Blink's FontMetrics has it), the alphabetic one under the sideways modes; text-orientation (mixed,
+    upright, sideways; sideways-right and vertical-right Chromium's other names): in mixed each grapheme upright or
+    turned as its first code point's Vertical_Orientation has it (UAX #50: U, Tu and Tr upright; perl's Unicode::UCD
+    carries the property, which tools/gen-shape.pl writes into shape_data.h). Upright runs are shaped top to bottom as
+    HarfBuzz shapes them for Blink: the common features and vert (found under any script), or, for a font with no vert,
+    Unicode's vertical presentation forms the font has (hb_vert_char_for: WenQuanYi Zen Hei's brackets); each glyph
+    advancing by its vmtx advance (WenQuanYi's ideographs by 0, as in Chromium; a mark by none, as HarfBuzz has it), or
+    by the font's height where the font has none, from its vertical origin (VORG's; vmtx's top side bearing above the
+    glyph's top, that top rounded up to a whole px as Blink's glyph bounds are; or the ascent); turned runs are shaped
+    as a horizontal line's;
+  - `text-combine-upright: all` in vertical-rl and vertical-lr (whatever the text's orientation; not in the sideways
+    modes, as Chromium has it): each text node one piece an em down its line, its white space at its ends dropped, no
+    break between it and the letters about it, its run shaped alone as a horizontal one, its box where its text would
+    be (the font's height across the line); paint sets its text across the line, centred, or squeezed across into 1.1em
+    (an em under an underline or overline) when it is wider, as Blink's LayoutTextCombine does (its scale_x; the
+    machine's fonts have none of the width variants it tries first), on the baseline Blink's line of an em gives it,
+    the line's decorations running along it;
+  - paint draws a vertical line's turned glyphs a quarter turned (clockwise; sideways-lr's anticlockwise) on its
+    alphabetic baseline, Skia's subpixel axis along the line; upright ones centred on its central baseline (half the
+    font's unrounded height below the line's over edge, Blink's FixedAscent); each line's text set from its first text
+    fragment's start (or that of the decorated inline box it is in) snapped to a whole pixel, as Chromium sets it; its
+    text-shadows, a turned glyph's offset turned with it, an upright or combined one's as it is (measured); an
+    underline and an overline outside the text's under and over edges, a sideways line's turned with its glyphs; an
+    inline box's decorations along the line;
+  - CSS Logical 1: the flow-relative margins, paddings, borders (their widths, styles and colours; the shorthands of an
+    axis and of a side), insets, sizes (inline-size, block-size, their minimums and maximums) and corners' radii, and
+    Chromium's old `-webkit-` names of them, kept as declared and taken by the cascade for the physical property the
+    element's writing mode and direction make each, in its place in the cascade's order among that property's
+    declarations (the writing mode and direction the element inherits, or, when it sets its own, those); float and
+    clear's inline-start and inline-end by their containing block's direction; getComputedStyle and the reasoner's
+    css_computed/4 give a flow-relative property its physical one's value.
+
+  Gate: `tests/pages/wm-blocks.html` (boxes 30 of 30, from 1 before; regions 30 of 30, from 3), `wm-root.html` (12 of
+  12, from 0; regions 12 of 12, from 0), `wm-text.html` (15 of 15, from 0; regions 15 of 15, from 8),
+  `wm-logical.html` (42 of 42, from 0), `wm-flex.html` (flex, grid and a table in vertical modes: 30 of 30, from 0;
+  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2), `wm-combine.html` (combined
+  text: 29 of 29, from 0, and 16 with writing modes but not combined text; regions 29 of 29, from 2 and 14),
+  `wm-shadow.html` (text shadows in vertical lines: 9 of 9, from 0; regions 9 of 9, from 2, and 0 with writing modes
+  but no vertical shadows) and `wmvals.html` (computed values 126 of 126, from 25), each held to Chromium; every
+  earlier page's boxes, regions and values as they were, and its drawing byte for byte (180 renders); the new pages
+  render valgrind clean, their leaks checked. Its cost (`docs/performance.md`): on horizontal pages, none past the
+  timings' noise (the large page's layout 67.5 ms before, 68.1 after; news.html's 0.54 and 0.45) -- by callgrind, the
+  large page's layout 485.7 million instructions before, 487.8 after (+0.4%), its paint +0.3% and its cascade +0.3%:
+  the box and fragment records no bigger (the new fields in their padding), a horizontal run shaped, measured and
+  packed on its old paths (a vertical run in loops of its own), an upright run's glyphs set apart after its shaping.
 - **12ab SVG's rest** (`src/paint/svg.c`; `lighting-color` and `color-interpolation` in `contracts/css.pl`,
   `src/css/css.c` and `prolog/amb/rules/css.pl`; an feImage's picture fetched by `src/net/net.c`), each measured in
   Chromium first, Skia's and Blink's sources deciding where the measurements left room:

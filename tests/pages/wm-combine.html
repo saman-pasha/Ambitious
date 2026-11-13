@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: combined text</title>
+<style>
+/* tests/pages/wm-combine.html -- text-combine-upright: all (CSS Writing Modes 4, 9.1), as Chromium lays it out and
+   draws it: each text node of a vertical-rl or vertical-lr line set across the line in an em of it (Blink's
+   LayoutTextCombine): its box the font's height across the line, an em down it, where its text would be; its text
+   centred across it, its white space at its ends dropped, squeezed across into 1.1em when it is wider (an em under an
+   underline or an overline); no break between it and the letters about it; the line's decorations along it; in a
+   sideways mode, set as any other text. Held to Chromium's boxes (wm-combine.chromium) and its drawing
+   (wm-combine.shot.png, .regions): the spans by their boxes (their text transparent, but a1's, g1's and n1's), the
+   text- columns by their ink. (a1, its glyphs held pixel by pixel, first in its line, has no background: Chromium
+   paints an inline box's background after the text before it, over a glyph that reaches past its advance, as a kana
+   of WenQuanYi Zen Hei does, where Ambitious paints a line's backgrounds first) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { float: left; height: 120px; margin-right: 10px; background: #eef; writing-mode: vertical-rl; }
+.u { text-combine-upright: all; background: #fd8; }
+.t { color: transparent; }
+</style></head>
+<body>
+<div id="text-a" class="c"><span id="a1" style="text-combine-upright: all">20</span>ねん<span style="text-combine-upright: all">12</span>がつ</div>
+<div id="b" class="c t">x<span id="b1" class="u">1</span>y<span id="b2" class="u">12</span>z<span id="b3" class="u">1234</span>w</div>
+<div id="c" class="c t" style="font-size: 13px">x<span id="c1" class="u">12</span>y</div>
+<div id="d" class="c t" style="font-size: 24px; line-height: 30px">x<span id="d1" class="u">10</span>y</div>
+<div id="e" class="c t" style="writing-mode: vertical-lr">x<span id="e1" class="u">12</span>y</div>
+<div id="f" class="c t">x<span id="f1" class="u"> 1 </span>y</div>
+<div id="g" class="c" style="text-decoration: underline">x<span id="g1" class="u">123</span>y</div>
+<div id="h" class="c t">x<span id="h1" class="u" style="padding: 0 3px; border: 1px solid #c33">12</span>y</div>
+<div id="i" class="c t" style="height: 40px">ab cd<span id="i1" class="u">12</span> ef</div>
+<div id="j" class="c t" style="text-orientation: upright">AB<span id="j1" class="u">12</span>CD</div>
+<div id="k" class="c t" style="writing-mode: sideways-rl">x<span id="k1" class="u">12</span>y</div>
+<div id="text-l" class="c"><span class="u">1</span><span class="u">23</span><span class="u">456</span><span class="u">7890</span></div>
+<div id="m" class="c t" style="text-combine-upright: all">ab cd</div>
+<div id="text-n" class="c" style="text-orientation: sideways">x<span id="n1" class="u">12</span>y</div>
+<div id="text-o" class="c" style="font-size: 24px; line-height: 30px; text-decoration: line-through">x<span class="u">88</span>y</div>
+</body></html>

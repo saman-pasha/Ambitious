@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: logical properties</title>
+<style>
+/* tests/pages/wm-logical.html -- CSS Logical 1's flow-relative properties, each the physical one its element's
+   writing mode and direction make it (margin-block-start, padding-inline, border-block-end, inset-inline-start,
+   inline-size, block-size, min- and max-inline-size, ...), in the order of the cascade with the physical ones
+   (the later declaration winning); float and clear's inline-start and inline-end, and text-align's start and end,
+   as the direction and writing mode have them. Held to Chromium's boxes (wm-logical.chromium) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+div > div { background: #e6eef8; }
+.v { writing-mode: vertical-rl; }
+.l { writing-mode: vertical-lr; }
+.sl { writing-mode: sideways-lr; }
+.rtl { direction: rtl; }
+.lg { margin-block-start: 7px; margin-inline-start: 11px; margin-block-end: 3px; margin-inline-end: 5px;
+      padding-block: 2px 4px; padding-inline: 6px 8px; border-block-start: 3px solid #369; border-inline-end: 5px solid #963;
+      inline-size: 60px; block-size: 40px; }
+.w { display: flow-root; border: 1px solid #999; margin-bottom: 6px; }
+</style></head>
+<body>
+<div class="w" id="w1"><div id="a" class="lg">htb</div></div>
+<div class="w" id="w2"><div id="b" class="lg rtl">htb rtl</div></div>
+<div class="w" id="w3" style="float: left"><div id="c" class="lg v">vrl</div></div>
+<div class="w" id="w4" style="float: left"><div id="d" class="lg l rtl">vlr rtl</div></div>
+<div class="w" id="w5" style="float: left"><div id="e" class="lg sl">slr</div></div>
+<div class="w" id="w6" style="float: left"><div id="f" class="lg sl rtl">slr rtl</div></div>
+<div class="w" id="w7" style="clear: both"><div id="g" style="margin-left: 10px; margin-inline-start: 20px; inline-size: 100px; width: 50px">later wins</div><div id="h" style="inline-size: 100px; width: 50px; margin-inline-start: 20px; margin-left: 10px">physical later</div></div>
+<div class="w" id="w8" style="width: 300px"><div id="i" style="min-inline-size: 200px; inline-size: 100px; max-block-size: 10px">min wins</div><div id="j" class="v" style="max-inline-size: 50px; min-block-size: 30px">max inline size</div></div>
+<div class="w" id="w9" style="width: 300px; height: 60px; position: relative"><div id="k" style="position: absolute; inset-inline-start: 30px; inset-block-start: 10px; inline-size: 40px; block-size: 20px"></div><div id="m" class="rtl" style="position: absolute; inset-inline-start: 30px; inset-block-end: 5px; inline-size: 40px; block-size: 20px"></div><div id="n" style="position: relative; inset-inline: 10px 0; inset-block: 4px 0; inline-size: 40px; block-size: 20px"></div></div>
+<div class="w" id="w10" style="width: 300px"><div id="o" style="float: inline-start; width: 40px; height: 20px"></div><div id="p" class="rtl" style="float: inline-start; width: 40px; height: 20px"></div><div id="q" class="rtl" style="float: inline-end; width: 40px; height: 20px"></div><div id="r" class="rtl" style="clear: inline-start; width: 60px; height: 10px"></div></div>
+<div class="w" id="w11" style="width: 300px"><div id="s" class="rtl" style="text-align: start"><span id="s1">start in rtl</span></div><div id="t" style="text-align: end"><span id="t1">end in ltr</span></div></div>
+<div class="w" id="w12" style="float: left; height: 120px"><div id="u" class="v" style="height: 100%; text-align: end"><span id="u1">end in vrl</span></div></div>
+<div class="w" id="w13" style="float: left; height: 120px"><div id="x" class="v rtl" style="height: 100%; text-align: start"><span id="x1">start</span></div></div>
+<div class="w" id="w14" style="float: left; height: 120px"><div id="y" class="v" style="height: 100%"><div id="y1" style="float: inline-end; width: 20px; height: 30px"></div><div id="y2" style="float: left; width: 20px; height: 20px; background: #fd8"></div></div></div>
+</body></html>

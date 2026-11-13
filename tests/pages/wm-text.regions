@@ -1,0 +1,16 @@
+# tests/pages/wm-text.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-a 8 8 28 268
+a1 10 48 27 100
+text-b 38 8 58 268
+text-c 68 8 88 268
+text-d 98 8 118 268
+text-e 128 8 148 268
+text-f 158 8 178 268
+text-g 188 8 208 268
+text-h 218 8 248 268
+h1 226 49 240 78
+text-i 258 8 278 268
+text-j 288 8 308 268
+text-k 318 8 348 268
+k1 325 8 342 68
+k2 325 113 342 197

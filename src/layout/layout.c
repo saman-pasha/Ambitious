@@ -222,9 +222,18 @@
    body that fills keeps its last child's bottom margin through its bottom though a
    min-height holds it taller than its content.
 
-   What is not done: writing modes other than horizontal-tb. Coordinates are
-   relative to the parent box's content box while the tree is laid out, and made
-   page coordinates at the end. */
+   Writing modes (CSS Writing Modes 4: horizontal-tb, vertical-rl, vertical-lr, sideways-rl, sideways-lr): a box is
+   laid out in its writing mode's frame, as a horizontal box is with its axes turned (lay_frame), its style read
+   turned and its boxes, lines and fragments turned back at the end; a box whose mode is not its parent's is a
+   formatting context of its own laid out in its frame and set in its parent's (lay_wm_root), an orthogonal one's
+   available inline size its parent's definite block size or the viewport's (7.3); the root's mode (its body's, the
+   principal one) the initial containing block's. A vertical line's baseline is the central one (the sideways modes'
+   the alphabetic one); its text set upright or turned as text-orientation and UAX #50 have it (src/paint/font.c), a
+   text node of text-combine-upright: all one piece an em down the line, set across it (lay_chars; paint's pt_ctext).
+   Not done: a vertical form control (sized as a horizontal one).
+
+   Coordinates are relative to the parent box's content box while the tree is laid out, and made page coordinates at
+   the end. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -288,6 +297,15 @@ enum { TT_MID = 0x10 };
 typedef struct lay_style {
     int display, bfc;
     uint32_t color, fill, bg, bc[4];
+    /* the writing mode (CSS_WM_*), whose frame (lay_frame) the edges and sizes below are in: a vertical style's are
+       its box's turned, width its inline size (height), m[0] its block-start margin, ...; orient, a vertical text's:
+       1 mixed, 2 upright (their baseline the central one: asc and desc its halves, Blink's kCentralBaseline: LAY_VC),
+       3 sideways (every glyph turned, on the alphabetic baseline), 4 combined (text-combine-upright: all, in
+       vertical-rl or vertical-lr: each text node set across the line in an em, on the baseline its orientation
+       gives). (Here, in the padding before fs, a style is no
+       bigger for them; at its end, the bigger style's copies, which layout makes often, became calls to memcpy, and
+       each field here makes each copy longer: measured) */
+    uint8_t wm, orient;
     double fs, lh, asc, desc;
     int face, italic, align, ws, deco, list, border_box, tt, rtl;
     int list_inside;                /* list-style-position: inside */
@@ -341,7 +359,9 @@ static uint32_t lay_dom(const vector<lay_gen> *gx, uint32_t x) {
    vertical-align, min and max sizes, flex and grid; read in place, by the style's index ---- */
 
 enum { POS_STATIC, POS_RELATIVE, POS_ABSOLUTE, POS_FIXED, POS_STICKY };
-enum { FL_NONE, FL_LEFT, FL_RIGHT };
+/* a float's side: left, right (the line's: a vertical line's top and bottom), or inline-start, inline-end (its containing
+   block's direction's, CSS Logical 1, 2.1: lay_float_side) */
+enum { FL_NONE, FL_LEFT, FL_RIGHT, FL_ISTART, FL_IEND };
 enum { VA_BASELINE, VA_SUB, VA_SUPER, VA_TEXT_TOP, VA_TEXT_BOTTOM, VA_MIDDLE, VA_TOP, VA_BOTTOM, VA_LEN };
 enum { LX_FLOW, LX_FLEX, LX_GRID };
 /* the alignment keywords: justify-content, align-items, align-self, align-content, justify-items,
@@ -352,7 +372,8 @@ typedef struct lay_ext {
     uint8_t pos, flt, clr, clip, va, rtl, hyph, lx, frow, frev, fwrap, jc, ai, as, ac, ji, js, zauto, ostyle;
     uint8_t ubidi, astart;              /* unicode-bidi (UB_); text-align start 1, end 2, other 0 */
     int32_t z, order;
-    lay_len off[4];                     /* top, right, bottom, left */
+    lay_len off[4];                     /* top, right, bottom, left: its frame's (lay_frame), turned as its edges are
+                                           (the physical ones: lay_offp) */
     lay_len minw, minh, maxh, hraw, valen, basis, rgap, cgap;   /* hraw: height as declared, a percentage kept */
     double grow, shrink;
     uint32_t gtc, gtr, gac, gar, gflow, gcs, gce, grs, gre, gta;    /* the grid's values, kept as text: their cvals */
@@ -544,7 +565,37 @@ static int lay_currentcolor(const css_style *st, uint32_t c) {
     if (!w) return 0;
     return names_is(st, w, "currentcolor", 12) || names_is(st, w, "initial", 7) || names_is(st, w, "unset", 5);
 }
-static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, lay_style *s) {
+/* ---- writing modes (CSS Writing Modes 4) ----
+   A box is laid out in its writing mode's frame: as a horizontal box is, its axes turned. A vertical box's inline
+   axis is the turned box's horizontal one (its x down the page, sideways-lr's up it), its block axis the vertical
+   one (its y to the left, vertical-lr's and sideways-lr's to the right), so that the code that lays out a
+   horizontal box lays out a vertical one, its style read turned (lay_style_make) and its boxes, lines and fragments
+   turned back at the end (lay_absolute). A box whose writing mode is not its parent's is laid out in its own frame
+   as a formatting context of its own (lay_wm_root), and set in its parent's turned. Frames: 0 horizontal-tb; 1
+   vertical-rl and sideways-rl (block-start the right, line-left the top); 2 vertical-lr (the left and the top; its
+   lines' over side their right, their content mirrored in them); 3 sideways-lr (the left; line-left the bottom) */
+static int lay_frame(int wm) { return wm == CSS_WM_VRL || wm == CSS_WM_SRL ? 1 : wm == CSS_WM_VLR ? 2 : wm == CSS_WM_SLR ? 3 : 0; }
+/* a text of a vertical style's orientation (lay_style's orient) set on the central baseline: mixed or upright (a
+   combined text's box takes no line of its fonts': lay_shape_pieces) */
+#define LAY_VC(o) ((o) == 1 || (o) == 2)
+/* a fragment's orientation drawn from a style's (lay_style's orient) for text that is not combined (a marker's, alt
+   text's, ...): a combined style's text mixed */
+#define LAY_NOCOMB(o) ((uint8_t)((o) == 4 ? 1 : (o)))
+/* the physical side (0 top, 1 right, 2 bottom, 3 left) a frame's side k is, and the frame's side a physical one is */
+static int lay_tside(int f, int k) { return f == 1 ? (k + 1) & 3 : f == 2 ? 3 - k : f == 3 ? (k + 3) & 3 : k; }
+static int lay_pside(int f, int p) { return f == 1 ? (p + 3) & 3 : f == 2 ? 3 - p : f == 3 ? (p + 1) & 3 : p; }
+/* box b's edges of frame cf made frame pf's, and with them its size and offset (below) */
+static void lay_turn_sides(layout_tree *t, uint32_t b, int cf, int pf);
+static void lay_turn_edges(layout_tree *t, uint32_t b, int cf, int pf);
+/* a style's writing mode, from its values (c0's) */
+static int lay_wm_at(const css_style *st, uint32_t c0) {
+    if (!c0) return CSS_WM_HTB;
+    uint32_t w = st->cval[c0 + CSS_PROP_WRITING_MODE].word;
+    return names_is(st, w, "vertical-rl", 11) ? CSS_WM_VRL : names_is(st, w, "vertical-lr", 11) ? CSS_WM_VLR :
+           names_is(st, w, "sideways-rl", 11) ? CSS_WM_SRL : names_is(st, w, "sideways-lr", 11) ? CSS_WM_SLR : CSS_WM_HTB;
+}
+
+static void lay_style_make(const css_style *st, const amb_fonts *f, const vector<int32_t> *webface, uint32_t c0, int fwm, lay_style *s) {
     memset(s, 0, sizeof *s);
     s->color = 0x000000ff;
     s->fill = 0x000000ff;
@@ -639,11 +690,46 @@ static void lay_style_make(const css_style *st, const amb_fonts *f, const vector
         if ((s->bs[k] == LAY_BS_INSET || s->bs[k] == LAY_BS_OUTSET || s->bs[k] == LAY_BS_GROOVE || s->bs[k] == LAY_BS_RIDGE) &&
             lay_currentcolor(st, cv[CSS_PROP_BORDER_TOP_COLOR + k])) s->bc[k] = 0xeeeeeeffu;
     }
-    s->width = lay_len_at(st, cv[CSS_PROP_WIDTH]);
-    s->height = lay_len_at(st, cv[CSS_PROP_HEIGHT]);
+    s->wm = (uint8_t)(fwm >= 0 ? fwm : lay_wm_at(st, c0));
+    int fr = lay_frame(s->wm);
+    s->width = lay_len_at(st, cv[fr ? CSS_PROP_HEIGHT : CSS_PROP_WIDTH]);
+    s->height = lay_len_at(st, cv[fr ? CSS_PROP_WIDTH : CSS_PROP_HEIGHT]);
+    if (fr) {
+        /* the edges turned: each side the frame's */
+        lay_len m2[4], p2[4];
+        double b2[4];
+        uint32_t c2[4];
+        uint8_t s2[4];
+        for (int k = 0; k < 4; k++) {
+            int q = lay_tside(fr, k);
+            m2[k] = s->m[q];
+            p2[k] = s->p[q];
+            b2[k] = s->b[q];
+            c2[k] = s->bc[q];
+            s2[k] = s->bs[q];
+        }
+        for (int k = 0; k < 4; k++) { s->m[k] = m2[k]; s->p[k] = p2[k]; s->b[k] = b2[k]; s->bc[k] = c2[k]; s->bs[k] = s2[k]; }
+        /* text-orientation; the sideways modes set every glyph turned, on the alphabetic baseline */
+        lay_word_of(st, cv[CSS_PROP_TEXT_ORIENTATION], w);
+        s->orient = (uint8_t)(s->wm == CSS_WM_SRL || s->wm == CSS_WM_SLR || lay_w(w, "sideways") ? 3 : lay_w(w, "upright") ? 2 : 1);
+        if (s->orient != 3) {
+            /* the central baseline: the font's height (its rounded ascent and descent) halved, the descent the half
+               floored (Blink's FontMetrics for kCentralBaseline, measured) */
+            double hh = s->asc + s->desc;
+            s->desc = floor(hh / 2);
+            s->asc = hh - s->desc;
+        }
+        /* text-combine-upright: all (vertical-rl's and vertical-lr's, whatever the text's orientation; the sideways
+           modes' none, as Chromium has it): each text node set across the line in an em, its box where its text's would
+           be (lay_chars) */
+        if (s->wm == CSS_WM_VRL || s->wm == CSS_WM_VLR) {
+            lay_word_of(st, cv[CSS_PROP_TEXT_COMBINE_UPRIGHT], w);
+            if (lay_w(w, "all")) s->orient = 4;
+        }
+    }
     lay_word_of(st, cv[CSS_PROP_BOX_SIZING], w);
     s->border_box = lay_w(w, "border-box");
-    c = cv[CSS_PROP_MAX_WIDTH];
+    c = cv[fr ? CSS_PROP_MAX_HEIGHT : CSS_PROP_MAX_WIDTH];
     if (st->cval[c].unit != CSS_UNIT_KEYWORD) s->maxw = lay_len_at(st, c);
     if (s->border_box) {
         /* a declared height is its border box's: the content's is what is left */
@@ -676,7 +762,7 @@ static int lay_author_won(const css_style *st, uint32_t c) {
     return !sh || sh >= st->sheet_len || st->sheet[sh].origin != CSS_ORIGIN_USER_AGENT;
 }
 /* what layout reads of a style besides lay_style, from its computed values (a run from c0) */
-static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
+static void lay_ext_make(const css_style *st, uint32_t c0, int fwm, lay_ext *e) {
     memset(e, 0, sizeof *e);
     e->zauto = 1;
     e->shrink = 1;
@@ -689,14 +775,19 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->c0 = c0;
     if (!c0) return;
     char w[32];
+    /* its frame (lay_frame): the offsets and the sizes below turned as lay_style_make turns the edges */
+    int fr = lay_frame(fwm >= 0 ? fwm : lay_wm_at(st, c0));
     lay_word_of(st, c0 + CSS_PROP_POSITION, w);
     e->pos = lay_w(w, "relative") ? POS_RELATIVE : lay_w(w, "absolute") ? POS_ABSOLUTE : lay_w(w, "fixed") ? POS_FIXED :
              lay_w(w, "sticky") ? POS_STICKY : POS_STATIC;
-    for (int k = 0; k < 4; k++) e->off[k] = lay_len_at(st, c0 + CSS_PROP_TOP + k);
+    for (int k = 0; k < 4; k++) e->off[k] = lay_len_at(st, c0 + CSS_PROP_TOP + lay_tside(fr, k));
+    /* float and clear: left and right the line's (a vertical one's top and bottom), inline-start and inline-end its
+       containing block's direction's, found where it is placed (CSS Logical 1, 2.1; clear's 4 and 5) */
     lay_word_of(st, c0 + CSS_PROP_FLOAT, w);
-    e->flt = lay_w(w, "left") || lay_w(w, "inline-start") ? FL_LEFT : lay_w(w, "right") || lay_w(w, "inline-end") ? FL_RIGHT : FL_NONE;
+    e->flt = lay_w(w, "left") ? FL_LEFT : lay_w(w, "right") ? FL_RIGHT : lay_w(w, "inline-start") ? FL_ISTART :
+             lay_w(w, "inline-end") ? FL_IEND : FL_NONE;
     lay_word_of(st, c0 + CSS_PROP_CLEAR, w);
-    e->clr = lay_w(w, "left") || lay_w(w, "inline-start") ? 1 : lay_w(w, "right") || lay_w(w, "inline-end") ? 2 : lay_w(w, "both") ? 3 : 0;
+    e->clr = lay_w(w, "left") ? 1 : lay_w(w, "right") ? 2 : lay_w(w, "both") ? 3 : lay_w(w, "inline-start") ? 4 : lay_w(w, "inline-end") ? 5 : 0;
     uint32_t c = c0 + CSS_PROP_Z_INDEX;
     if (st->cval[c].unit == CSS_UNIT_NUMBER) { e->z = (int32_t)st->cval[c].num; e->zauto = 0; }
     for (int k = 0; k < 2; k++) {
@@ -793,11 +884,11 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
         if (st->cval[c].unit == CSS_UNIT_KEYWORD) { g.unit = LAY_PX; g.v = 0; }
         if (k == 0) e->rgap = g; else e->cgap = g;
     }
-    e->minw = lay_len_at(st, c0 + CSS_PROP_MIN_WIDTH);
-    e->minh = lay_len_at(st, c0 + CSS_PROP_MIN_HEIGHT);
-    c = c0 + CSS_PROP_MAX_HEIGHT;
+    e->minw = lay_len_at(st, c0 + (fr ? CSS_PROP_MIN_HEIGHT : CSS_PROP_MIN_WIDTH));
+    e->minh = lay_len_at(st, c0 + (fr ? CSS_PROP_MIN_WIDTH : CSS_PROP_MIN_HEIGHT));
+    c = c0 + (fr ? CSS_PROP_MAX_WIDTH : CSS_PROP_MAX_HEIGHT);
     if (st->cval[c].unit != CSS_UNIT_KEYWORD) e->maxh = lay_len_at(st, c);
-    e->hraw = lay_len_at(st, c0 + CSS_PROP_HEIGHT);
+    e->hraw = lay_len_at(st, c0 + (fr ? CSS_PROP_WIDTH : CSS_PROP_HEIGHT));
     e->gtc = c0 + CSS_PROP_GRID_TEMPLATE_COLUMNS;
     e->gtr = c0 + CSS_PROP_GRID_TEMPLATE_ROWS;
     e->gac = c0 + CSS_PROP_GRID_AUTO_COLUMNS;
@@ -856,6 +947,15 @@ static void lay_ext_make(const css_style *st, uint32_t c0, lay_ext *e) {
     e->backface = lay_w(w, "hidden");
     if (e->shadows || e->bgimg || e->xform || e->tshadow || e->bgclip || e->bgorigin || e->filter || e->backdrop || e->persp || e->translate ||
         e->rotate || e->scale || e->p3d || e->backface) e->paints = 1;
+}
+/* the physical offset k (0 top, 1 right, 2 bottom, 3 left) of a style (its values from c0, lay_ext's) as lay_ext_make
+   reads it, unturned: auto with no style */
+static lay_len lay_offp(const css_style *st, uint32_t c0, int k) {
+    lay_len l;
+    if (c0) return lay_len_at(st, c0 + CSS_PROP_TOP + k);
+    memset(&l, 0, sizeof l);
+    l.unit = LAY_AUTO;
+    return l;
 }
 
 static void lay_style_of(LCTX, uint32_t x, lay_style *s) {
@@ -1061,6 +1161,8 @@ typedef struct lay_piece {
     uint32_t run;                                  /* the shaping run it was measured in (lay_shape_pieces): that
                                                       run's first piece's index then, + 1; 0 none */
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
+    uint8_t orient;                                /* its style's (lay_style) vertical text's orientation (in the padding
+                                                      before ls: a piece is no bigger for it) */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
     double w, size, lh, asc, desc;
@@ -1094,6 +1196,7 @@ static void lay_piece_style(lay_piece *p, const lay_style *s) {
     p->lhn = (uint8_t)s->lhn;
     p->color = s->color;
     p->fill = s->fill;
+    p->orient = s->orient;
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx);
@@ -1532,7 +1635,25 @@ static void lay_date_picker(const dom_document *d, uint32_t el, const lay_style 
     *ow = *oh + (clock ? 8 : 0);
 }
 
+static void lay_atomic_size_in(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h);
+static void lay_style_turned(lay_style *s, int cf, int pf);
+/* an atomic inline's content size, in its own frame: a picture's (an img's, an svg's, a video's, a canvas's, an
+   iframe's ...) in a vertical one sized as in a horizontal one -- its natural width across the line -- and turned */
 static void lay_atomic_size(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
+    int fr = lay_frame(s->wm);
+    if (fr && lay_replaced(d, el) && !lay_is_named(d, el, "input") && !lay_is_named(d, el, "textarea") && !lay_is_named(d, el, "select") &&
+        !lay_is_named(d, el, "progress") && !lay_is_named(d, el, "meter")) {
+        lay_style ps = *s;
+        lay_style_turned(&ps, fr, 0);
+        double pw, ph;
+        lay_atomic_size_in(LARGS, el, &ps, cw, &pw, &ph);
+        *w = ph;
+        *h = pw;
+        return;
+    }
+    lay_atomic_size_in(LARGS, el, s, cw, w, h);
+}
+static void lay_atomic_size_in(LCTX, uint32_t el, const lay_style *s, double cw, double *w, double *h) {
     *h = -1;
     if (lay_img_failed(LARGS, el)) {
         /* a broken image is its fallback, as Chromium lays it out (a standards-mode page's): with alt text, its 16px
@@ -1899,6 +2020,9 @@ static int lay_bidi_hot(const char *s, size_t n, size_t i) {
     return c == BC_R || c == BC_AL || c == BC_AN || (c >= BC_LRE && c <= BC_PDI);
 }
 
+/* white space, as text's pieces are cut by it */
+static int lay_ws(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\n'; }
+
 /* the pieces of text tx[0, n): a text node's (node), or a pseudo-element's content (node
    LAY_GEN | LAY_GTEXT and its index), in the style s of its element pe */
 static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, const char *tx, size_t n, int deco, vector<lay_piece> *ps, int *sp,
@@ -1916,6 +2040,23 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     p.rx = (float)ih->rx;
     p.ry = (float)ih->ry;
     p.va = (uint8_t)ih->va;
+    if (s->orient == 4) {
+        /* text-combine-upright: all in a vertical line (CSS Writing Modes 4, 9.1): the text one piece, an em down the
+           line (lay_shape_pieces), set across it (Blink's LayoutTextCombine, an inline-block of its own): no letter- or
+           word-spacing, the white space at its ends dropped, as its own line's is (the rest kept as it is) */
+        size_t a = 0, b = n;
+        while (a < b && lay_ws(tx[a])) a++;
+        while (b > a && lay_ws(tx[b - 1])) b--;
+        if (a == b) return;
+        p.kind = P_WORD;
+        p.off = (uint32_t)a;
+        p.len = (uint32_t)(b - a);
+        p.ls = 0;
+        p.wsp = 0;
+        push_back(ps, p);
+        *sp = 0;
+        return;
+    }
     /* a space: its advance, with letter-spacing and word-spacing */
     double space = amb_advance(f, s->face, ' ', s->fs) + s->ls + s->wsp;
     int collapse = s->ws == WS_NORMAL || s->ws == WS_NOWRAP || s->ws == WS_PRE_LINE;
@@ -2022,7 +2163,8 @@ static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr);
 /* two text pieces of one shaping run: one font (face, web font, size, letter- and word-spacing,
    style: Blink's FontDescription) */
 static int lay_same_font(lay_piece a, lay_piece b) {
-    return a.face == b.face && a.font == b.font && a.size == b.size && a.ls == b.ls && a.wsp == b.wsp && a.italic == b.italic;
+    return a.face == b.face && a.font == b.font && a.size == b.size && a.ls == b.ls && a.wsp == b.wsp && a.italic == b.italic &&
+           a.orient == b.orient;
 }
 
 /* an inline element's edge a run is shaped across (Blink's ShouldBreakShapingBefore/AfterBox):
@@ -2077,6 +2219,7 @@ static int lay_word_dir(LCTX, const vector<lay_piece> *ps, size_t k) {
 static size_t lay_run_end(LCTX, const vector<lay_piece> *ps, size_t k, size_t end, int *rtl) {
     lay_piece p0 = at(*ps, k);
     int dir = p0.sdir == 1 ? 0 : p0.sdir == 2 ? 1 : lay_word_dir(LARGS, ps, k);
+    if (p0.orient == 4) { *rtl = dir == 1; return k + 1; }   /* a combined text: its own box's */
     size_t e = k + 1, last = k + 1;
     while (e < end) {
         lay_piece q = at(*ps, e);
@@ -2152,7 +2295,8 @@ static void lay_ctx_after(LCTX, const vector<lay_piece> *ps, size_t k, vector<ch
    the glyphs into gl, visual order (their clusters in order, the other way right to left) */
 static void lay_run_shape(LCTX, const vector<lay_piece> *ps, size_t a, size_t b, int rtl, vector<char> *tx, vector<uint32_t> *at0,
                           vector<amb_shaped> *gl) {
-    lay_ctx_before(LARGS, ps, a, tx);
+    int comb = at(*ps, a).orient == 4;      /* a combined text, alone in its box */
+    if (!comb) lay_ctx_before(LARGS, ps, a, tx);
     for (size_t k = a; k < b; k++) {
         push_back(at0, (uint32_t)len(*tx));
         lay_piece q = at(*ps, k);
@@ -2160,9 +2304,10 @@ static void lay_run_shape(LCTX, const vector<lay_piece> *ps, size_t a, size_t b,
     }
     push_back(at0, (uint32_t)len(*tx));
     size_t from = at(*at0, 0), to = len(*tx);
-    lay_ctx_after(LARGS, ps, b - 1, tx);
+    if (!comb) lay_ctx_after(LARGS, ps, b - 1, tx);
     lay_piece p0 = at(*ps, a);
-    int flags = (rtl ? AMB_SHAPE_RTL : 0) | (p0.ls != 0 ? AMB_SHAPE_NOLIGA : 0);
+    int flags = (rtl ? AMB_SHAPE_RTL : 0) | (p0.ls != 0 ? AMB_SHAPE_NOLIGA : 0) |
+                (p0.orient == 1 ? AMB_SHAPE_VMIXED : p0.orient == 2 ? AMB_SHAPE_VUPRIGHT : 0);
     if (to > from) amb_shape(f, p0.face, data(*tx), len(*tx), from, to, flags, gl);
 }
 
@@ -2267,7 +2412,7 @@ static lay_sce lay_run_cached(LCTX, const vector<lay_piece> *ps, size_t a, size_
     k.face = p0.face;
     k.font = p0.font;
     k.tt = (uint32_t)p0.tt << 8 | p1.tt;
-    k.rtl = (uint32_t)rtl;
+    k.rtl = (uint32_t)rtl | (uint32_t)p0.orient << 1;
     k.size = p0.size;
     k.ls = p0.ls;
     k.wsp = p0.wsp;
@@ -2330,6 +2475,38 @@ static size_t lay_run_piece(size_t a0, size_t np, uint32_t c, size_t j) {
     return j;
 }
 
+/* lay_shape_pieces's measure of a vertical line's run (en, its n pieces, rtl as it was shaped; p its first): each
+   glyph's piece (gp) and each piece's advances, its own face's in its units and the others' in px, an upright glyph's
+   down the line in px (amb_shaped_advance's: vmtx's, or the face's height; a mark's none); the faces other than its own
+   that draw some of it (fbm); its last cluster with an advance of its own face's (lastc) */
+static void lay_shape_vrun(LCTX, const lay_piece *pp, lay_sce en, size_t n, int rtl, vector<int64_t> *units, vector<double> *other,
+                           vector<uint32_t> *fbm, vector<uint32_t> *gp, vector<uint32_t> *lastc) {
+    lay_piece p = *pp;
+    size_t jj = rtl ? n - 1 : 0;
+    for (size_t g = 0; g < en.gln; g++) {
+        amb_shaped s = at(lay_ar_gl, en.gl0 + g);
+        size_t j = lay_run_piece(en.at0, n, s.cluster, jj);
+        jj = j;
+        (*gp)[g] = (uint32_t)j;
+        if (s.flags & AMB_SHAPED_UPRIGHT) {
+            if ((s.flags & AMB_SHAPED_VFALLBACK) && !(s.flags & AMB_SHAPED_VZERO)) {
+                double fa, fd, fg;
+                amb_face_metrics(f, s.face, p.size, &fa, &fd, &fg);
+                (*other)[j] += fa + fd;
+            } else (*other)[j] += s.ax * (p.size / amb_face_upem(f, s.face));
+            int by = amb_metrics_face(s.face);
+            if (s.face != p.face && by != p.face && by < AMB_NFACES) (*fbm)[j] |= 1u << by;
+        } else if (s.face == p.face) {
+            (*units)[j] += s.ax;
+            if (s.ax != 0 && s.cluster + 1 > at(*lastc, j)) (*lastc)[j] = s.cluster + 1;
+        } else {
+            (*other)[j] += s.ax * p.size / amb_face_upem(f, s.face);
+            int by = amb_metrics_face(s.face);
+            if (by != p.face && by < AMB_NFACES) (*fbm)[j] |= 1u << by;
+        }
+    }
+}
+
 /* the text pieces of ps from start measured by their runs' shaping, as Chromium measures them:
    each its glyphs' advances (a glyph's its cluster's piece's: a kerning pair's to its first,
    a ligature across an element's edge to the piece its first letter is in), its letter-spacing
@@ -2353,6 +2530,16 @@ static void lay_shape_pieces(LCTX, vector<lay_piece> *ps, size_t start) {
             (*ps)[j].run = (uint32_t)k + 1;
             (*ps)[j].rrtl = (uint8_t)rtl;
         }
+        if (p.orient == 4) {
+            /* a combined text (a run of its own: lay_run_end): an em down the line, whatever its glyphs' advances; its
+               fonts' lines its box's alone (its glyphs shaped when its fragment takes them) */
+            lay_piece q = at(*ps, k);
+            q.w = q.size;
+            q.fb = 0;
+            (*ps)[k] = q;
+            k = b;
+            continue;
+        }
         lay_sce en = lay_run_cached(LARGS, ps, k, b, rtl);
         size_t n = b - k, ng = en.gln;
         /* each piece's advances: its own face's in its units, the others' in px; and the
@@ -2371,25 +2558,29 @@ static void lay_shape_pieces(LCTX, vector<lay_piece> *ps, size_t start) {
         resize(gp, ng);
         double upem = amb_face_upem(f, p.face);
         size_t jj = rtl ? n - 1 : 0;
-        for (size_t g = 0; g < ng; g++) {
-            amb_shaped s = at(lay_ar_gl, en.gl0 + g);
-            size_t j = lay_run_piece(en.at0, n, s.cluster, jj);
-            jj = j;
-            gp[g] = (uint32_t)j;
-            if (s.face == p.face) {
-                units[j] += s.ax;
-                if (s.ax != 0 && s.cluster + 1 > at(lastc, j)) lastc[j] = s.cluster + 1;
-            } else {
-                other[j] += s.ax * p.size / amb_face_upem(f, s.face);
-                int by = amb_metrics_face(s.face);
-                if (by != p.face && by < AMB_NFACES) fbm[j] |= 1u << by;
+        if (p.orient == 1 || p.orient == 2)
+            /* a vertical line's run, which may set glyphs upright (a loop of its own: a horizontal run's is as it was) */
+            lay_shape_vrun(LARGS, &p, en, n, rtl, &units, &other, &fbm, &gp, &lastc);
+        else
+            for (size_t g = 0; g < ng; g++) {
+                amb_shaped s = at(lay_ar_gl, en.gl0 + g);
+                size_t j = lay_run_piece(en.at0, n, s.cluster, jj);
+                jj = j;
+                gp[g] = (uint32_t)j;
+                if (s.face == p.face) {
+                    units[j] += s.ax;
+                    if (s.ax != 0 && s.cluster + 1 > at(lastc, j)) lastc[j] = s.cluster + 1;
+                } else {
+                    other[j] += s.ax * p.size / amb_face_upem(f, s.face);
+                    int by = amb_metrics_face(s.face);
+                    if (by != p.face && by < AMB_NFACES) fbm[j] |= 1u << by;
+                }
             }
-        }
-        /* a word's last letter's kerning with the space after it, of its own text: the space's */
+        /* a word's last letter's kerning with the space after it, of its own text: the space's (not an upright glyph's) */
         for (size_t g = 0; g < ng; g++) {
             amb_shaped s = at(lay_ar_gl, en.gl0 + g);
             size_t j = at(gp, g);
-            if (s.ax == 0 || s.face != p.face || j + 1 >= n || s.cluster + 1 != at(lastc, j)) continue;
+            if (s.ax == 0 || s.face != p.face || j + 1 >= n || s.cluster + 1 != at(lastc, j) || (s.flags & AMB_SHAPED_UPRIGHT)) continue;
             lay_piece w = at(*ps, k + j), sp = at(*ps, k + j + 1);
             if (w.kind != P_WORD || sp.kind != P_SPACE || sp.node != w.node) continue;
             units[j] -= s.ax - s.base;
@@ -2410,6 +2601,7 @@ static void lay_shape_pieces(LCTX, vector<lay_piece> *ps, size_t start) {
                 if (!(m >> z & 1)) continue;
                 double fa, fd, fg, up, dn;
                 amb_face_metrics(f, z, q.size, &fa, &fd, &fg);
+                if (LAY_VC(q.orient)) { double hh = fa + fd; fd = floor(hh / 2); fa = hh - fd; }
                 lay_leading(fa + fd + fg, fa, fd, &up, &dn);
                 if (!q.fb || up > q.fa) q.fa = (float)up;
                 if (!q.fb || dn > q.fd) q.fd = (float)dn;
@@ -2467,6 +2659,55 @@ static void lay_put_glyphs(layout_tree *t, vector<char> *out, uint32_t fr) {
         append_range(out, raw, sizeof raw);
     }
     t->frag[fr].glyphs = glyphs_add(t, data(*out), len(*out));
+}
+
+/* lay_pack_glyphs's loop for a vertical line's run (p its first piece; the glyphs gl[g0, g1) of those to ge, their
+   clusters' starts with letter- or word-spacing starts): each glyph packed onto out from o, the pen at *x moved on;
+   an upright one's (AMB_SHAPED_UPRIGHT) from its vertical origin, half its horizontal advance before the central
+   baseline, its advance down the line (amb_shaped_pen's and amb_shaped_advance's). How many it packed */
+static size_t lay_pack_vrun(const amb_fonts *f, const lay_piece *pp, const vector<char> *tx, size_t txo, const vector<amb_shaped> *gl,
+                            size_t ge, size_t g0, size_t g1, uint32_t b0, uint32_t b1, const vector<uint32_t> *starts, double *px,
+                            vector<char> *out, size_t o) {
+    lay_piece p = *pp;
+    double x = *px, sc = p.size / amb_face_upem(f, p.face);
+    size_t w = 0;
+    for (size_t g = g0; g < g1; g++) {
+        amb_shaped s = at(*gl, g);
+        if (s.cluster < b0 || s.cluster >= b1) continue;
+        double gs = s.face == p.face ? sc : p.size / amb_face_upem(f, s.face);
+        amb_rglyph rg;
+        memset(&rg, 0, sizeof rg);
+        rg.gid = s.gid;
+        rg.face = s.face == p.face ? (uint16_t)AMB_RGLYPH_OWN : s.face;
+        rg.flags = s.flags;
+        rg.x = x + s.dx * gs;
+        rg.y = (float)(-s.dy * gs);
+        double adv = s.ax * gs;
+        if (s.flags & AMB_SHAPED_UPRIGHT) {
+            double along, across;
+            amb_shaped_pen(f, &s, p.size, &along, &across);
+            rg.x = x + along;
+            rg.y = (float)across;
+            adv = amb_shaped_advance(f, &s, p.size);
+        }
+        memcpy(data(*out) + o + w * sizeof(amb_rglyph), &rg, sizeof rg);
+        w++;
+        x += adv;
+        if (g + 1 < ge && at(*gl, g + 1).cluster == s.cluster) continue;
+        if (p.ls == 0 && p.wsp == 0) continue;
+        /* the cluster's bytes: to the next cluster's start */
+        size_t lo = 0, hi = len(*starts);
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (at(*starts, mid) <= s.cluster) lo = mid + 1; else hi = mid;
+        }
+        uint32_t next = lo < len(*starts) ? at(*starts, lo) : b1;
+        size_t spaces = 0;
+        for (uint32_t q = s.cluster; q < next; q++) if (at(*tx, txo + q) == ' ') spaces++;
+        x += p.ls * (double)lay_cps(data(*tx) + txo + s.cluster, next - s.cluster) + p.wsp * (double)spaces;
+    }
+    *px = x;
+    return w;
 }
 
 /* the glyphs gl[gb, gb + gn) of a run whose clusters are in [b0, b1) of its text (tx from txo)
@@ -2528,6 +2769,13 @@ static void lay_pack_glyphs(LCTX, const lay_piece *pp, const vector<char> *tx, s
     double x = *px, sc = p.size / amb_face_upem(f, p.face);
     size_t o = len(*out), w = 0;
     resize(out, o + (g1 - g0) * sizeof(amb_rglyph));
+    if (p.orient == 1 || p.orient == 2) {
+        /* a vertical line's run, which may set glyphs upright (a loop of its own: a horizontal run's is as it was) */
+        w = lay_pack_vrun(f, &p, tx, txo, gl, gb + gn, g0, g1, b0, b1, &starts, &x, out, o);
+        resize(out, o + w * sizeof(amb_rglyph));
+        *px = x;
+        return;
+    }
     for (size_t g = g0; g < g1; g++) {
         amb_shaped s = at(*gl, g);
         if (s.cluster < b0 || s.cluster >= b1) continue;
@@ -2609,6 +2857,41 @@ static void lay_inline_shift(LCTX, uint32_t el, const lay_style *es, double cw, 
     }
 }
 
+/* the boxes of the inline-blocks laid out in their own frames (lay_wm_atomic), by node (lay_wm_slot): each laid out once
+   a run */
+static vector<uint32_t> lay_wm_boxes;
+/* a node's slot in lay_wm_boxes: an element's twice its index, a generated box's (LAY_GEN) twice its own and one */
+static size_t lay_wm_slot(uint32_t node) { return node & LAY_GEN ? 2 * (size_t)(node & LAY_GIDX) + 1 : 2 * (size_t)node; }
+/* the box an inline-block of another frame than its line's was laid out as (lay_wm_atomic), 0 none */
+static uint32_t lay_wm_box_of(uint32_t node) {
+    size_t sl = lay_wm_slot(node);
+    return sl < len(lay_wm_boxes) ? at(lay_wm_boxes, sl) : 0;
+}
+/* margins as they collapse (below, lay_mc_of) */
+typedef struct lay_mc { double pos, neg, qpos; } lay_mc;
+static uint32_t lay_wm_root(LCTX, uint32_t parent, uint32_t el, double cw, const lay_bk *k, lay_mc *mt, lay_mc *mb, int *empty, int pf, int cf);
+/* an inline-block of frame cf in a line of frame pf: laid out as a writing-mode root (its available inline size the
+   line's block's definite size, else the viewport's), its box set in pf, not yet in the tree; once a run */
+static uint32_t lay_wm_atomic(LCTX, uint32_t node, int pf, int cf, double cw) {
+    uint32_t had = lay_wm_box_of(node);
+    if (had) return had;
+    lay_bk k;
+    k.ox = 0;
+    k.oy = 0;
+    k.ch = lay_line_pch;
+    k.fw = -1;
+    k.shrink = 1;
+    k.item = 0;
+    k.qs = 0;
+    lay_mc mt, mb;
+    int empty;
+    uint32_t b = lay_wm_root(LARGS, 0, node, cw, &k, &mt, &mb, &empty, pf, cf);
+    size_t sl = lay_wm_slot(node);
+    if (sl >= len(lay_wm_boxes)) resize(&lay_wm_boxes, sl + 1);
+    lay_wm_boxes[sl] = b;
+    return b;
+}
+
 static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay_piece> *ps, int *sp, const lay_inh *ih) {
     if (node & LAY_GTEXT) { lay_text_pieces(LARGS, node, deco, ps, sp, ih); return; }
     if (!(node & LAY_GEN)) {
@@ -2644,6 +2927,20 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     }
     if (dsp == D_INLINE_BLOCK || lay_block_level(dsp)) {
         double w, h;
+        uint32_t par = lay_parent_of(d, gx, node);
+        int pf = par ? lay_frame(data(*sc)[lay_si(sx, gx, par)].wm) : 0, cf = lay_frame(s.wm);
+        if (pf != cf && !lay_replaced(d, node)) {
+            /* an inline-block of another writing mode's frame than its line's: laid out now, in its own frame, as a
+               formatting context of its own (lay_wm_root), its box kept for the line */
+            uint32_t ob = lay_wm_atomic(LARGS, node, pf, cf, cw);
+            p.kind = P_ATOMIC;
+            p.aw = (float)t->box[ob].w;
+            p.ah = (float)t->box[ob].h;
+            p.w = t->box[ob].ml + t->box[ob].bl + t->box[ob].pl + t->box[ob].w + t->box[ob].pr + t->box[ob].br + t->box[ob].mr;
+            push_back(ps, p);
+            *sp = 0;
+            return;
+        }
         /* a percentage height against the line's block's definite height (an image's then sized by it) */
         lay_len hr = LAY_X(node).hraw;
         if (s.height.unit == LAY_AUTO && hr.unit != LAY_AUTO && !lay_content_sized(hr) && lay_line_pch >= 0) {
@@ -2774,6 +3071,8 @@ static void lay_table_intrinsic(LCTX, uint32_t el, double cw, double *mn, double
 static lay_len lay_minw_px(LCTX, uint32_t el, const lay_style *s, double cw, lay_len l);
 /* el's margin box at its min- and max-content widths; its declared width's when it has one
    and own_width (a min-width its content gives holding it wider), else its content's */
+static double lay_wm_extent(LCTX, uint32_t el, double cw, int pf, int cf);
+static void lay_child_intrinsic(LCTX, uint32_t el, uint32_t c, double cw, double *mn, double *mx);
 static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *mx, int own_width) {
     lay_style s;
     lay_style_of(LARGS, el, &s);
@@ -2819,7 +3118,7 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
         lay_seg sg = at(segs, k);
         double a, b;
         if (sg.block == SEG_ABS) continue;
-        if (sg.block) lay_intrinsic(LARGS, sg.node, cw, &a, &b);
+        if (sg.block) lay_child_intrinsic(LARGS, el, sg.node, cw, &a, &b);
         else {
             vector<lay_piece> ps;
             lay_run_pieces(LARGS, el, &items, sg.first, sg.n, cw, &ps);
@@ -2849,6 +3148,17 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
 }
 
 static void lay_intrinsic(LCTX, uint32_t el, double cw, double *mn, double *mx) { lay_intrinsic_of(LARGS, el, cw, mn, mx, 1); }
+/* a child's contributions to its container's (el's) min- and max-content inline sizes: a box orthogonal to it (CSS
+   Writing Modes 4, 7.3) contributes its block size laid out, its margin box's across el's inline axis (Chromium's) */
+static void lay_child_intrinsic(LCTX, uint32_t el, uint32_t c, double cw, double *mn, double *mx) {
+    uint32_t ci = lay_si(sx, gx, c);
+    int pf = lay_frame(data(*sc)[lay_si(sx, gx, el)].wm), cf = lay_frame(data(*sc)[ci].wm), cdisp = data(*sc)[ci].display;
+    if ((pf == 0) != (cf == 0) && !lay_replaced(d, c) && cdisp != D_INLINE && cdisp != D_NONE) {
+        *mn = *mx = lay_wm_extent(LARGS, c, cw, pf, cf);
+        return;
+    }
+    lay_intrinsic(LARGS, c, cw, mn, mx);
+}
 
 /* a min-width its content gives (min-content, max-content, fit-content; the user agent's min-content of a fieldset),
    as a px length of the box box-sizing names: of its content's min- or max-content width, its edges' and margins' aside */
@@ -2875,6 +3185,8 @@ static uint32_t lay_new_box(LCTX, uint32_t parent, uint32_t el, layout_box_kind 
     layout_box_h h = box_new(t);
     t->box[h.index].kind = kind;
     t->box[h.index].opacity = 1;
+    /* the writing mode its content is laid out in: its style's, an anonymous box's its parent's */
+    t->box[h.index].wm = el ? data(*sc)[lay_si(sx, gx, el)].wm : parent ? t->box[parent].wm : 0;
     if (el & LAY_GEN) {
         /* a pseudo-element's box: its element's, and which pseudo-element */
         lay_gen g = at(*gx, el & LAY_GIDX);
@@ -2963,7 +3275,6 @@ static void lay_place(layout_tree *t, uint32_t b, double bx, double by) {
    the largest positive quirky one (Blink's quirky margins: the user agent's sheet's top margin of
    a p, a heading, a list, a blockquote or a pre, and the bottom one of a p or a pre), which a
    quirky container (the body, a table cell) leaves out at its start and at its end */
-typedef struct lay_mc { double pos, neg, qpos; } lay_mc;
 static lay_mc lay_mc_of(double m) { lay_mc c; c.pos = m > 0 ? m : 0; c.neg = m < 0 ? m : 0; c.qpos = 0; return c; }
 /* a margin, quirky or not */
 static lay_mc lay_mc_q(double m, int quirky) {
@@ -3125,6 +3436,7 @@ static void lay_alt_box(LCTX, uint32_t b, uint32_t el, const lay_style *es) {
         t->frag[fr].h = es->asc + es->desc;
         t->frag[fr].baseline = above;
         t->frag[fr].face = (uint8_t)es->face;
+        t->frag[fr].orient = LAY_NOCOMB(es->orient);
         if (es->font) t->frag[fr].font = resource_handle(nt, es->font);
         t->frag[fr].size = es->fs;
         t->frag[fr].spacing = es->ls;
@@ -3533,6 +3845,7 @@ static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps,
     t->frag[fr].h = ps->asc + ps->desc;
     t->frag[fr].baseline = base;
     t->frag[fr].face = (uint8_t)ps->face;
+    t->frag[fr].orient = LAY_NOCOMB(ps->orient);
     if (ps->font) t->frag[fr].font = resource_handle(nt, ps->font);
     t->frag[fr].size = ps->fs;
     t->frag[fr].spacing = ps->ls;
@@ -3546,7 +3859,12 @@ static void lay_control_line(LCTX, uint32_t b, uint32_t el, const lay_style *ps,
 /* an atomic inline's box, laid out: a replaced element's content, or an inline-block's
    children as a new formatting context */
 static uint32_t lay_atomic(LCTX, uint32_t parent, const lay_piece *p, double cw) {
-    uint32_t el = p->node;
+    uint32_t el = p->node, ob = lay_wm_box_of(el);
+    if (ob) {
+        /* laid out in its own frame already (lay_wm_atomic): put in the line's box */
+        if (!t->box[ob].parent) children_append(t, parent, ob);
+        return ob;
+    }
     lay_style s;
     lay_style_of(LARGS, el, &s);
     int replaced = lay_replaced(d, el), alx = LAY_X(el).lx;
@@ -3659,6 +3977,14 @@ static int lay_last_baseline(const layout_tree *t, uint32_t b, double *y, int de
 static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
     double top = t->box[b].mt + t->box[b].bt + t->box[b].pt, y;
     int kind = t->box[b].kind;
+    uint32_t pb = t->box[b].parent;
+    if (pb && lay_frame(t->box[b].wm) != lay_frame(t->box[pb].wm)) {
+        /* of another writing mode's frame than its line's: synthesized from its margin box, its bottom (an alphabetic
+           baseline's), or its middle in a vertical line, whose baseline is the central one (measured) */
+        double mh = t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
+        int pw = t->box[pb].wm;
+        return pw == CSS_WM_VRL || pw == CSS_WM_VLR ? mh / 2 : mh;
+    }
     if (kind == LAYOUT_BOX_KIND_FLEX || kind == LAYOUT_BOX_KIND_GRID) { if (lay_first_baseline(t, b, &y, 0)) return top + y; }
     else if (kind == LAYOUT_BOX_KIND_REPLACED) {
         if (t->box[b].has_baseline) return top + t->box[b].baseline;     /* a form control's (lay_placeholder) */
@@ -3666,7 +3992,9 @@ static double lay_atomic_baseline(const layout_tree *t, uint32_t b) {
         if (ln) return top + t->line[ln].y + t->line[ln].baseline;
     } else if (kind == LAYOUT_BOX_KIND_INLINE_BLOCK && t->box[b].has_baseline) return top + t->box[b].baseline;  /* an empty button's */
     else if (t->box[b].clip != 1 && lay_last_baseline_of(t, b, &y, 0, 1)) return top + y;
-    return t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
+    /* none: synthesized from its margin box, its bottom; in a vertical line (the central baseline) its middle */
+    double mh = t->box[b].mt + lay_border_height(t, b) + t->box[b].mb;
+    return pb && (t->box[pb].wm == CSS_WM_VRL || t->box[pb].wm == CSS_WM_VLR) ? mh / 2 : mh;
 }
 
 /* a word's (or kept spaces') bytes tx[off, off + ln) of its text tx[0, n), as laid out
@@ -4330,6 +4658,7 @@ static uint32_t lay_text_frag(LCTX, uint32_t ln, const lay_piece *p, const char 
     t->frag[fr].color = p->color;
     t->frag[fr].fill = p->fill;
     t->frag[fr].decoration = p->deco;
+    t->frag[fr].orient = p->orient;
     if (p->elem) {
         uint32_t ts = LAY_X(p->elem).tshadow;
         if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
@@ -4994,6 +5323,7 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         t->frag[fr].color = p.color;
         t->frag[fr].fill = p.fill;
         t->frag[fr].decoration = p.deco;
+        t->frag[fr].orient = p.orient;
         if (p.elem) {
             uint32_t ts = LAY_X(p.elem).tshadow;
             if (ts) t->frag[fr].shadows = lay_kept(t, st, ts);
@@ -5038,6 +5368,18 @@ static double lay_clear_y(const vector<lay_flt> *fl, int clr) {
 
 /* a float's box, laid out as a child of b in b's content box cw wide: its width shrunk
    to fit unless declared, its content a formatting context of its own */
+/* a float's side, or a clear's (1 left, 2 right, 3 both; 4 inline-start, 5 inline-end), its logical ones made left or
+   right by its containing block's direction (its parent element's) */
+static int lay_float_side(LCTX, uint32_t el, int v) {
+    if (v != FL_ISTART && v != FL_IEND) return v;
+    uint32_t par = lay_parent_of(d, gx, el);
+    int rtl = par ? data(*sc)[lay_si(sx, gx, par)].rtl : 0;
+    return (v == FL_ISTART) != (rtl != 0) ? FL_LEFT : FL_RIGHT;
+}
+static int lay_clear_of(LCTX, uint32_t el) {
+    int c = LAY_X(el).clr;
+    return c == 4 ? lay_float_side(LARGS, el, FL_ISTART) : c == 5 ? lay_float_side(LARGS, el, FL_IEND) : c;
+}
 static uint32_t lay_float_box(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
     lay_bk k;
     k.ox = 0;
@@ -5050,7 +5392,7 @@ static uint32_t lay_float_box(LCTX, uint32_t b, uint32_t el, double cw, double c
     lay_mc mt, mb;
     int empty;
     uint32_t fb = lay_block(LARGS, b, el, cw, 0, 0, 0, 0, &k, &mt, &mb, &empty);
-    t->box[fb].float_side = LAY_X(el).flt == FL_RIGHT ? LAYOUT_FLOAT_SIDE_RIGHT : LAYOUT_FLOAT_SIDE_LEFT;
+    t->box[fb].float_side = lay_float_side(LARGS, el, LAY_X(el).flt) == FL_RIGHT ? LAYOUT_FLOAT_SIDE_RIGHT : LAYOUT_FLOAT_SIDE_LEFT;
     return fb;
 }
 
@@ -5064,7 +5406,7 @@ static void lay_float_place(LCTX, uint32_t fb, uint32_t el, double cw, double ox
     double mh = t->box[fb].mt + lay_border_height(t, fb) + t->box[fb].mb;
     double fy = oy + y;
     for (size_t k = 0; k < len(*fl); k++) if (at(*fl, k).y > fy) fy = at(*fl, k).y;
-    int clr = LAY_X(el).clr;
+    int clr = lay_clear_of(LARGS, el);
     if (clr) { double cy = lay_clear_y(fl, clr); if (cy > fy) fy = cy; }
     double fx = 0;
     for (int guard = 0; guard < 200; guard++) {
@@ -5595,6 +5937,7 @@ static void lay_ellipsize(LCTX, uint32_t ln, double limit, const lay_style *bs, 
     t->frag[fr].h = bs->asc + bs->desc;
     t->frag[fr].baseline = base;
     t->frag[fr].face = (uint8_t)bs->face;
+    t->frag[fr].orient = LAY_NOCOMB(bs->orient);
     if (bs->font) t->frag[fr].font = resource_handle(nt, bs->font);
     t->frag[fr].size = bs->fs;
     t->frag[fr].color = bs->color;
@@ -5893,6 +6236,7 @@ static void lay_marker(LCTX, uint32_t b, uint32_t el, const lay_style *ls) {
     t->frag[fr].size = sm.fs;
     t->frag[fr].color = sm.color;
     t->frag[fr].fill = sm.fill;
+    t->frag[fr].orient = LAY_NOCOMB(sm.orient);
     frags_append(t, ln, fr);
 }
 
@@ -5946,10 +6290,12 @@ static void lay_columns(LCTX, vector<lay_cell> *cells, uint32_t ncols, double cw
             lay_cell c = at(*cells, k);
             if ((pass == 0) != (c.span == 1)) continue;
             double mn, mx;
-            lay_intrinsic(LARGS, c.el, cw, &mn, &mx);
+            uint32_t crow = lay_parent_of(d, gx, c.el);
+            if (crow) lay_child_intrinsic(LARGS, crow, c.el, cw, &mn, &mx);
+            else lay_intrinsic(LARGS, c.el, cw, &mn, &mx);
             lay_style ns;
             lay_style_of(LARGS, c.el, &ns);
-            if (ns.width.unit == LAY_PX) {
+            if (ns.width.unit == LAY_PX && lay_frame(ns.wm) == lay_frame(crow ? data(*sc)[lay_si(sx, gx, crow)].wm : ns.wm)) {
                 /* a cell of a declared width (Chromium's automatic layout): its content's min-content its
                    minimum, the width its maximum unless that is less; in quirks mode a td or th with nowrap
                    and a width that is not zero at least as wide as that width (the table cell nowrap minimum
@@ -6097,7 +6443,21 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         t->box[cb].avail = span_w;
         lay_mc et, eb;
         int empty;
-        lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, 0, &et, &eb, &empty);
+        int cf = lay_frame(cs.wm), tf = lay_frame(t->box[b].wm);
+        if ((cf == 0) != (tf == 0)) {
+            /* a cell of the other axis (CSS Writing Modes 4, 7.3): laid out in its own frame, its inline size its
+               content's fitted in the viewport's, its block size its column's width; its edges turned into the table's */
+            double mn, mx, ie = t->box[cb].bl + t->box[cb].br + t->box[cb].pl + t->box[cb].pr;
+            lay_intrinsic(LARGS, c.el, cf ? lay_icb_h : lay_icb_w, &mn, &mx);
+            double avail = (cf ? lay_icb_h : lay_icb_w) - ie, iw = mx - ie;
+            if (iw > avail) iw = avail > mn - ie ? avail : mn - ie;
+            t->box[cb].w = iw > 0 ? iw : 0;
+            lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, 0, &et, &eb, &empty);
+            double bs = span_w - t->box[cb].bt - t->box[cb].pt - t->box[cb].pb - t->box[cb].bb;
+            t->box[cb].h = bs > 0 ? bs : 0;
+            lay_turn_edges(t, cb, cf, tf);
+            t->box[cb].how = LAYOUT_WIDTH_HOW_COLUMN;
+        } else lay_flow_children(LARGS, cb, c.el, 1, 1, 0, 0, -1, 0, &et, &eb, &empty);
         /* its height; in quirks mode its border box's (the table cell height box sizing quirk, 3.13) */
         double chv = cs.height.v;
         if (lay_quirks && !cs.border_box) chv -= t->box[cb].bt + t->box[cb].bb + t->box[cb].pt + t->box[cb].pb;
@@ -6145,7 +6505,9 @@ static void lay_table(LCTX, uint32_t b, uint32_t el, const lay_style *s, double 
         if (va == VA_BASELINE && lay_display_of(LARGS, d->node[row_el].parent) == D_ROW_GROUP) va = LAY_X(d->node[row_el].parent).va;
         if (va == VA_BASELINE) va = VA_MIDDLE;
         double dy = va == VA_BOTTOM ? inner - t->box[cb].h : va == VA_TOP ? 0 : (inner - t->box[cb].h) / 2;
-        if (dy > 0) lay_shift_content(t, cb, dy);
+        /* (a cell of the other axis keeps its content at its start: its children are in its own frame) */
+        int ortho = (lay_frame(t->box[cb].wm) == 0) != (lay_frame(t->box[b].wm) == 0);
+        if (dy > 0 && !ortho) lay_shift_content(t, cb, dy);
         t->box[cb].h = inner;
     }
     /* the collapsing table quirk (quirks mode, 3.10): a table of no rows and no caption takes no height */
@@ -6301,7 +6663,7 @@ static void lay_flow_in(LCTX, uint32_t b, uint32_t el, int bfc, int height_auto,
         clear(waiting);
         /* clearance: below the floats it clears (those just placed too) */
         double clear_to = -1;
-        int clr = sg.block == SEG_BLOCK ? LAY_X(sg.node).clr : 0;
+        int clr = sg.block == SEG_BLOCK ? lay_clear_of(LARGS, sg.node) : 0;
         if (clr && len(*fl)) {
             double cy = lay_clear_y(fl, clr) - oy;
             if (cy > est) { est = cy; clear_to = cy; }
@@ -6556,6 +6918,30 @@ static void lay_inline_strips(layout_tree *t) {
             total += t->frag[at(frs, j)].w;
         }
         double off = 0;
+        uint32_t ln0 = t->frag[at(group, 0)].line, lb0 = ln0 ? t->line[ln0].box : 0;
+        int vf = lb0 ? lay_frame(t->box[lb0].wm) : 0;
+        if (vf) {
+            /* in a vertical line: its edges turned (laid out in its line's frame), its strip down the line (sideways-lr's up
+               it), its fragments laid end to end along it */
+            if (vf == 3) total = 0;
+            for (size_t q = 0; q < len(group); q++) {
+                uint32_t fr = at(group, q), b = t->frag[fr].piece;
+                lay_turn_sides(t, b, vf, 0);
+                double top = t->box[b].bt + t->box[b].pt, ev = top + t->box[b].pb + t->box[b].bb;
+                double left = t->box[b].bl + t->box[b].pl, ew = left + t->box[b].pr + t->box[b].br;
+                double len0 = 0;
+                for (size_t z = 0; z < len(group); z++) len0 += t->frag[at(group, z)].h;
+                double y0 = vf == 3 ? floor(t->frag[fr].y + t->frag[fr].h + off - len0 + 0.5) : floor(t->frag[fr].y - off + 0.5);
+                double y1 = y0 + floor(len0 + 0.5);
+                double x0 = floor(t->frag[fr].x + 0.5), x1 = floor(t->frag[fr].x + t->frag[fr].w + 0.5);
+                t->box[b].x = x0 + left;
+                t->box[b].y = y0 + top;
+                t->box[b].w = x1 - x0 > ew ? x1 - x0 - ew : 0;
+                t->box[b].h = y1 - y0 > ev ? y1 - y0 - ev : 0;
+                off += t->frag[fr].h;
+            }
+            continue;
+        }
         for (size_t q = 0; q < len(group); q++) {
             uint32_t fr = at(group, q), b = t->frag[fr].piece;
             double left = t->box[b].bl + t->box[b].pl, ew = left + t->box[b].pr + t->box[b].br;
@@ -6620,8 +7006,174 @@ static void lay_box_style(LCTX, uint32_t b, uint32_t el, double cw, double ch) {
     }
 }
 
+/* the initial containing block's size (the viewport's), which an orthogonal flow's available inline size falls back to;
+   and the element lay_block lays out in its own frame though its parent's is another (lay_wm_root's) */
+static double lay_icb_w = 800, lay_icb_h = 600;
+static uint32_t lay_wm_own;
+static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const vector<uint32_t> *items, uint32_t first, uint32_t n,
+                          uint32_t style_el, const lay_bk *k, lay_mc *mt, lay_mc *mb, int *empty);
+/* a vector (x, y) of frame f made physical, and a physical one made frame f's */
+static void lay_vec_out(int f, double x, double y, double *px, double *py) {
+    if (f == 1) { *px = -y; *py = x; } else if (f == 2) { *px = y; *py = x; } else if (f == 3) { *px = y; *py = -x; } else { *px = x; *py = y; }
+}
+static void lay_vec_in(int f, double px, double py, double *x, double *y) {
+    if (f == 1) { *x = py; *y = -px; } else if (f == 2) { *x = py; *y = px; } else if (f == 3) { *x = -py; *y = px; } else { *x = px; *y = py; }
+}
+/* box b's own edges, laid out in frame cf, made frame pf's (through the physical sides); its size turned when the two
+   are orthogonal, and its relative offset */
+static void lay_turn_sides(layout_tree *t, uint32_t b, int cf, int pf) {
+    double m[4] = { t->box[b].mt, t->box[b].mr, t->box[b].mb, t->box[b].ml }, bw[4] = { t->box[b].bt, t->box[b].br, t->box[b].bb, t->box[b].bl };
+    double pd[4] = { t->box[b].pt, t->box[b].pr, t->box[b].pb, t->box[b].pl };
+    uint32_t bc[4] = { t->box[b].bct, t->box[b].bcr, t->box[b].bcb, t->box[b].bcl };
+    uint8_t bs[4] = { t->box[b].bst, t->box[b].bsr, t->box[b].bsb, t->box[b].bsl };
+    double m2[4], b2[4], p2[4];
+    uint32_t c2[4];
+    uint8_t s2[4];
+    for (int k = 0; k < 4; k++) {
+        int q = lay_pside(cf, lay_tside(pf, k));
+        m2[k] = m[q]; b2[k] = bw[q]; p2[k] = pd[q]; c2[k] = bc[q]; s2[k] = bs[q];
+    }
+    t->box[b].mt = m2[0]; t->box[b].mr = m2[1]; t->box[b].mb = m2[2]; t->box[b].ml = m2[3];
+    t->box[b].bt = b2[0]; t->box[b].br = b2[1]; t->box[b].bb = b2[2]; t->box[b].bl = b2[3];
+    t->box[b].pt = p2[0]; t->box[b].pr = p2[1]; t->box[b].pb = p2[2]; t->box[b].pl = p2[3];
+    t->box[b].bct = c2[0]; t->box[b].bcr = c2[1]; t->box[b].bcb = c2[2]; t->box[b].bcl = c2[3];
+    t->box[b].bst = s2[0]; t->box[b].bsr = s2[1]; t->box[b].bsb = s2[2]; t->box[b].bsl = s2[3];
+}
+static void lay_turn_edges(layout_tree *t, uint32_t b, int cf, int pf) {
+    lay_turn_sides(t, b, cf, pf);
+    if ((cf == 0) != (pf == 0)) { double w = t->box[b].w; t->box[b].w = t->box[b].h; t->box[b].h = w; }
+    double px, py, x, y;
+    lay_vec_out(cf, t->box[b].dx, t->box[b].dy, &px, &py);
+    lay_vec_in(pf, px, py, &x, &y);
+    t->box[b].dx = x;
+    t->box[b].dy = y;
+}
+/* a style's edges and sizes, of frame cf, made frame pf's */
+static void lay_style_turned(lay_style *s, int cf, int pf) {
+    lay_len m2[4], p2[4];
+    double b2[4];
+    for (int k = 0; k < 4; k++) {
+        int q = lay_pside(cf, lay_tside(pf, k));
+        m2[k] = s->m[q];
+        p2[k] = s->p[q];
+        b2[k] = s->b[q];
+    }
+    for (int k = 0; k < 4; k++) { s->m[k] = m2[k]; s->p[k] = p2[k]; s->b[k] = b2[k]; }
+    if ((cf == 0) != (pf == 0)) { lay_len w = s->width; s->width = s->height; s->height = w; }
+}
+/* a block-level element whose writing mode's frame is not its parent's (CSS Writing Modes 4, 3.1: it makes an
+   independent formatting context): laid out in its own frame, then set in its parent's, its edges turned. An
+   orthogonal one's available inline size is its parent's definite block size, else the initial containing block's
+   along its inline axis (7.3, Chromium: the viewport's), which a percentage of its inline size is of too; its auto
+   inline size fits its content in that (fit-content), and its block size's percentages are of its parent's inline
+   size. In its parent's flow its auto margins of its parent's inline axis share what is left, as a block's do */
+static uint32_t lay_wm_root(LCTX, uint32_t parent, uint32_t el, double cw, const lay_bk *k, lay_mc *mt, lay_mc *mb, int *empty, int pf, int cf) {
+    int orth = (pf == 0) != (cf == 0);
+    lay_bk k2 = *k;
+    k2.ox = 0;
+    k2.oy = 0;
+    k2.qs = 0;
+    double ai = cw;
+    if (orth) {
+        ai = k->ch >= 0 ? k->ch : cf ? lay_icb_h : lay_icb_w;
+        k2.ch = cw;
+        k2.fw = -1;
+        k2.shrink = 1;
+    }
+    lay_mc cmt, cmb;
+    int cempty;
+    lay_wm_own = el;
+    uint32_t b = lay_block(LARGS, parent, el, ai, 0, 0, 0, 0, &k2, &cmt, &cmb, &cempty);
+    if (orth && k->fw >= 0) {
+        /* a border-box width it is given along its parent's inline axis (a stretched grid item's, a flex item's): its
+           block size */
+        double bh = k->fw - t->box[b].bt - t->box[b].pt - t->box[b].pb - t->box[b].bb;
+        t->box[b].h = bh > 0 ? bh : 0;
+    }
+    lay_turn_edges(t, b, cf, pf);
+    if (orth && !k->shrink && !k->item && !LAY_X(el).flt && k->fw < 0) {
+        /* auto margins of the parent's inline axis (its frame's left and right) */
+        lay_style s;
+        lay_style_of(LARGS, el, &s);
+        int la = s.m[lay_pside(cf, lay_tside(pf, 3))].unit == LAY_AUTO, ra = s.m[lay_pside(cf, lay_tside(pf, 1))].unit == LAY_AUTO;
+        double bw = t->box[b].bl + t->box[b].pl + t->box[b].w + t->box[b].pr + t->box[b].br;
+        double rest = cw - bw - (la ? 0 : t->box[b].ml) - (ra ? 0 : t->box[b].mr);
+        if (la && ra) { t->box[b].ml = rest > 0 ? rest / 2 : 0; t->box[b].mr = rest > 0 ? rest / 2 : rest; }
+        else if (la) t->box[b].ml = rest;
+        else if (ra) t->box[b].mr = rest;
+    }
+    if (orth) {
+        lay_style s;
+        lay_style_of(LARGS, el, &s);
+        if (s.m[lay_pside(cf, lay_tside(pf, 0))].unit == LAY_AUTO) t->box[b].mt = 0;
+        if (s.m[lay_pside(cf, lay_tside(pf, 2))].unit == LAY_AUTO) t->box[b].mb = 0;
+    }
+    *mt = lay_mc_of(t->box[b].mt);
+    *mb = lay_mc_of(t->box[b].mb);
+    *empty = 0;
+    return b;
+}
+
+/* a box laid out to be measured, freed: its lines and fragments, the boxes its fragments drew from, its children */
+static void lay_free_subtree(layout_tree *t, uint32_t b, int depth) {
+    if (!b || b >= t->box_len || !t->box[b].live || depth > 200) return;
+    for (uint32_t c = t->box[b].first_child; c;) {
+        uint32_t nx = t->box[c].next;
+        lay_free_subtree(t, c, depth + 1);
+        c = nx;
+    }
+    for (uint32_t ln = t->box[b].first_line; ln;) {
+        uint32_t nl = t->line[ln].next;
+        for (uint32_t fr = t->line[ln].first_frag; fr;) {
+            uint32_t nf = t->frag[fr].next;
+            uint32_t pc = t->frag[fr].piece, cb = t->frag[fr].clip;
+            if (pc && pc < t->box_len && t->box[pc].live) box_free(t, box_handle(t, pc));
+            if (cb && cb < t->box_len && t->box[cb].live && !t->box[cb].parent) box_free(t, box_handle(t, cb));
+            frag_free(t, frag_handle(t, fr));
+            fr = nf;
+        }
+        line_free(t, line_handle(t, ln));
+        ln = nl;
+    }
+    if (t->box[b].legend && t->box[b].legend < t->box_len && t->box[b].legend != b) lay_free_subtree(t, t->box[b].legend, depth + 1);
+    if (b < t->box_len && t->box[b].live) box_free(t, box_handle(t, b));
+}
+/* the extent across its parent's inline axis of a box orthogonal to it, its margin box's: the box laid out in its own
+   frame as a writing-mode root (its available inline size the viewport's), measured, and freed -- the positioned boxes
+   and inline-blocks its layout met forgotten */
+static double lay_wm_extent(LCTX, uint32_t el, double cw, int pf, int cf) {
+    size_t nab = len(*ab), nwb = len(lay_wm_boxes);
+    vector<uint32_t> keep;
+    for (size_t q = 0; q < nwb; q++) push_back(keep, at(lay_wm_boxes, q));
+    lay_bk k;
+    k.ox = 0;
+    k.oy = 0;
+    k.ch = -1;
+    k.fw = -1;
+    k.shrink = 1;
+    k.item = 0;
+    k.qs = 0;
+    lay_mc mt, mb;
+    int empty;
+    vector<lay_flt> mfl;
+    uint32_t b = lay_wm_root(LARGS_FL(&mfl), 0, el, cw, &k, &mt, &mb, &empty, pf, cf);
+    double w = t->box[b].ml + t->box[b].bl + t->box[b].pl + t->box[b].w + t->box[b].pr + t->box[b].br + t->box[b].mr;
+    lay_free_subtree(t, b, 0);
+    resize(ab, nab);
+    clear(lay_wm_boxes);
+    for (size_t q = 0; q < nwb; q++) push_back(lay_wm_boxes, at(keep, q));
+    return w;
+}
+
 static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const vector<uint32_t> *items, uint32_t first, uint32_t n,
                           uint32_t style_el, const lay_bk *k, lay_mc *mt, lay_mc *mb, int *empty) {
+    if (el && parent && el != lay_wm_own) {
+        int cf = lay_frame(data(*sc)[lay_si(sx, gx, el)].wm), pf = lay_frame(t->box[parent].wm);
+        if (cf != pf) return lay_wm_root(LARGS, parent, el, cw, k, mt, mb, empty, pf, cf);
+    }
+    /* a writing-mode root lay_wm_root lays out in its own frame: a formatting context of its own */
+    int wmroot = el && el == lay_wm_own;
+    if (wmroot) lay_wm_own = 0;
     if (!el) {
         /* an anonymous block: the inline run, as lines; no margins of its own */
         uint32_t b = lay_new_box(LARGS, parent, 0, LAYOUT_BOX_KIND_ANONYMOUS);
@@ -6652,6 +7204,12 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     if (s.m[2].unit == LAY_AUTO) t->box[b].mb = 0;
     if (s.display == D_TABLE) {
         lay_table(LARGS, b, el, &s, cw);
+        if (k->shrink || k->item || at(*xc, si).flt) {
+            /* a float's, a positioned box's, an item's: its margins as they are, auto ones 0 (not the containing block's
+               rest, a block-level table's) */
+            t->box[b].ml = s.m[3].unit == LAY_AUTO ? 0 : lay_res(st, s.m[3], cw);
+            t->box[b].mr = s.m[1].unit == LAY_AUTO ? 0 : lay_res(st, s.m[1], cw);
+        }
         *mt = lay_mc_of(t->box[b].mt);
         *mb = lay_mc_of(t->box[b].mb);
         *empty = 0;
@@ -6737,7 +7295,7 @@ static uint32_t lay_block(LCTX, uint32_t parent, uint32_t el, double cw, const v
     int root = !(el & LAY_GEN) && d->node[el].parent == 1;
     int pos = at(*xc, si).pos;
     int bfc = root || s.bfc || s.display == D_CELL || s.display == D_CAPTION || lay_clip_of(LARGS, el) == 1 || lx != LX_FLOW ||
-              at(*xc, si).flt || pos == POS_ABSOLUTE || pos == POS_FIXED || k->item;
+              at(*xc, si).flt || pos == POS_ABSOLUTE || pos == POS_FIXED || k->item || wmroot || (parent && s.wm != t->box[parent].wm);
     /* its definite height, if it has one: declared in px, or a percentage of a definite
        containing block's (the root's: the viewport's) */
     double vedges = t->box[b].bt + t->box[b].bb + t->box[b].pt + t->box[b].pb;
@@ -7141,6 +7699,9 @@ static void lay_cq_free(void) {
     shrink_to_fit(&lay_ar_at);
     shrink_to_fit(&lay_ar_gl);
     shrink_to_fit(&lay_ar_slot);
+    /* and the inline-blocks laid out in their own frames */
+    clear(lay_wm_boxes);
+    shrink_to_fit(&lay_wm_boxes);
 }
 
 static void lay_cq_save(uint32_t x, const vector<lay_ctr> *ctr, int depth) {
@@ -7201,10 +7762,10 @@ static void lay_cq_style(LCTX, uint32_t sid, uint32_t c0) {
     if (sid >= len(*sc)) resize(sc, (size_t)sid + 1);
     if (sid >= len(*xc)) resize(xc, (size_t)sid + 1);
     lay_style ls;
-    lay_style_make(st, f, &lay_cq_wf, c0, &ls);
+    lay_style_make(st, f, &lay_cq_wf, c0, -1, &ls);
     (*sc)[sid] = ls;
     lay_ext le;
-    lay_ext_make(st, c0, &le);
+    lay_ext_make(st, c0, -1, &le);
     if (le.bgimg && nt) le.bgres = lay_image_known(st, nt, le.bgimg);
     (*xc)[sid] = le;
 }
@@ -7298,7 +7859,7 @@ static void lay_items(LCTX, uint32_t b, uint32_t el, vector<lay_fi> *its, vector
 
 /* an item's max- and min-content widths (its margin box's): an anonymous one's text's */
 static void lay_item_intrinsic(LCTX, uint32_t el, const lay_fi *it, const vector<uint32_t> *items, double cw, double *mn, double *mx) {
-    if (it->el) { lay_intrinsic(LARGS, it->el, cw, mn, mx); return; }
+    if (it->el) { lay_child_intrinsic(LARGS, el, it->el, cw, mn, mx); return; }
     vector<lay_piece> ps;
     lay_run_pieces(LARGS, el, items, it->first, it->n, cw, &ps);
     lay_run_intrinsic(&ps, mn, mx, 0);
@@ -7365,7 +7926,7 @@ static void lay_flex(LCTX, uint32_t b, uint32_t el, double defh) {
         else { memset(&is, 0, sizeof is); is.width.unit = LAY_AUTO; is.height.unit = LAY_AUTO; is.maxw.unit = LAY_AUTO; for (int k = 0; k < 4; k++) { is.m[k].unit = LAY_PX; is.p[k].unit = LAY_PX; } }
         lay_ext ie;
         if (it.el) ie = LAY_X(it.el);
-        else lay_ext_make(st, 0, &ie);
+        else lay_ext_make(st, 0, -1, &ie);
         /* margins: main axis start and end, cross start and end */
         int m0 = row ? 3 : 0, m1 = row ? 1 : 2, c0 = row ? 0 : 3, c1 = row ? 2 : 1;
         it.auto_m0 = is.m[m0].unit == LAY_AUTO;
@@ -8883,13 +9444,34 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         } else {
             for (uint32_t x = a.box; x && x != cb && x != vp; x = t->box[x].parent) { sx0 += t->box[x].x; sy0 += t->box[x].y; }
             if (cb != vp) {
-                px0 = -t->box[cb].pl;
-                py0 = -t->box[cb].pt;
-                cbw = t->box[cb].w + t->box[cb].pl + t->box[cb].pr;
-                cbh = t->box[cb].h + t->box[cb].pt + t->box[cb].pb;
+                /* its padding box in its own frame: a writing-mode root's record is its parent's frame's, turned back */
+                uint32_t cpar = t->box[cb].parent;
+                int of = lay_frame(t->box[cb].wm), pf0 = cpar ? lay_frame(t->box[cpar].wm) : of;
+                double pd[4] = { t->box[cb].pt, t->box[cb].pr, t->box[cb].pb, t->box[cb].pl }, cwv = t->box[cb].w, chv = t->box[cb].h;
+                if (of != pf0) {
+                    double q[4];
+                    for (int k = 0; k < 4; k++) q[k] = pd[lay_pside(pf0, lay_tside(of, k))];
+                    for (int k = 0; k < 4; k++) pd[k] = q[k];
+                    if ((of == 0) != (pf0 == 0)) { cwv = t->box[cb].h; chv = t->box[cb].w; }
+                }
+                px0 = -pd[3];
+                py0 = -pd[0];
+                cbw = cwv + pd[3] + pd[1];
+                cbh = chv + pd[0] + pd[2];
             }
         }
         lay_len o0 = at(*xc, si).off[0], o1 = at(*xc, si).off[1], o2 = at(*xc, si).off[2], o3 = at(*xc, si).off[3];
+        int cbf = lay_frame(t->box[cb].wm), elf = lay_frame(s.wm), turned = cbf != elf;
+        if (turned) {
+            /* a box of another frame than its containing block's: its edges, sizes and offsets read in that one (it is
+               laid out in its own, lay_wm_root) */
+            lay_style_turned(&s, elf, cbf);
+            uint32_t ec0 = at(*xc, si).c0;
+            o0 = lay_offp(st, ec0, lay_tside(cbf, 0));
+            o1 = lay_offp(st, ec0, lay_tside(cbf, 1));
+            o2 = lay_offp(st, ec0, lay_tside(cbf, 2));
+            o3 = lay_offp(st, ec0, lay_tside(cbf, 3));
+        }
         int la = o3.unit == LAY_AUTO, ra = o1.unit == LAY_AUTO, ta = o0.unit == LAY_AUTO, ba = o2.unit == LAY_AUTO;
         double L = la ? 0 : lay_res(st, o3, cbw), R = ra ? 0 : lay_res(st, o1, cbw);
         double T = ta ? 0 : lay_res(st, o0, cbh), B = ba ? 0 : lay_res(st, o2, cbh);
@@ -8934,7 +9516,7 @@ static void lay_positioned(LCTX, uint32_t vp, double vw, double vh) {
         /* its height: from both offsets when it is auto, else its content's */
         double mtv = t->box[bx].mt, mbv = t->box[bx].mb;
         double ve = t->box[bx].bt + t->box[bx].bb + t->box[bx].pt + t->box[bx].pb;
-        if (s.height.unit == LAY_AUTO && at(*xc, si).hraw.unit == LAY_AUTO && !ta && !ba && !repl) {
+        if (s.height.unit == LAY_AUTO && at(*xc, si).hraw.unit == LAY_AUTO && !ta && !ba && !repl && !turned) {
             double h = cbh - T - B - mtv - mbv - ve;
             t->box[bx].h = h > 0 ? h : 0;
         }
@@ -9055,6 +9637,7 @@ static void lay_scrollport(LCTX, uint32_t cb, uint32_t vp, double vw, double vh,
    box stays in cr: bottom and right first, so that top and left win */
 static void lay_sticky_shift(LCTX, uint32_t el, const double *bb, const double *cr, const double *m, const double *sp, double *dxp, double *dyp) {
     lay_ext e = LAY_X(el);
+    for (int k = 0; k < 4; k++) e.off[k] = lay_offp(st, e.c0, k);
     double dx = 0, dy = 0, lim, dd, room;
     if (e.off[2].unit != LAY_AUTO) {
         lim = sp[1] + sp[3] - lay_res(st, e.off[2], sp[3]);
@@ -9182,22 +9765,116 @@ static void lay_sticky(LCTX, uint32_t vp, double vw, double vh) {
 
 /* ---- page coordinates ---- */
 
-static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy) {
+/* A box's record is in its parent's frame (lay_frame), relative to the parent's content box; its lines and children in
+   its own. Each is made physical against the content box it is in (W x H in its frame: W the inline size), then
+   placed at that box's corner (ox, oy): a frame's rect (x, y, w, h) is vertical-rl's (1) at H - y - h across and x
+   down, vertical-lr's (2) at y and x, sideways-lr's (3) at y and W - x - w; a vertical line's baseline is an x */
+static void lay_rect_out(int f, double W, double H, double *x, double *y, double *w, double *h) {
+    double x0 = *x, y0 = *y, w0 = *w, h0 = *h;
+    if (f == 1) { *x = H - y0 - h0; *y = x0; *w = h0; *h = w0; }
+    else if (f == 2) { *x = y0; *y = x0; *w = h0; *h = w0; }
+    else if (f == 3) { *x = y0; *y = W - x0 - w0; *w = h0; *h = w0; }
+}
+static double lay_base_out(int f, double H, double y) { return f == 1 ? H - y : y; }
+/* a line of a vertical-lr box: its over side is its right, its block-start's other side (CSS Writing Modes 4, 6.2):
+   what it holds mirrored in it, its fragments, their baselines and its atomic boxes */
+static void lay_line_mirror(layout_tree *t, uint32_t ln) {
+    double lh = t->line[ln].h, ly = t->line[ln].y;
+    t->line[ln].baseline = lh - t->line[ln].baseline;
+    for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+        t->frag[fr].y = lh - t->frag[fr].y - t->frag[fr].h;
+        t->frag[fr].baseline = lh - t->frag[fr].baseline;
+        uint32_t a = t->frag[fr].atomic;
+        if (t->frag[fr].kind != LAYOUT_FRAG_KIND_ATOMIC || !a || a >= t->box_len) continue;
+        double top = t->box[a].y - t->box[a].pt - t->box[a].bt - t->box[a].mt;
+        double bot = t->box[a].y + t->box[a].h + t->box[a].pb + t->box[a].bb + t->box[a].mb;
+        t->box[a].y += (2 * ly + lh - bot) - top;
+    }
+}
+static void lay_absolute(layout_tree *t, uint32_t b, double ox, double oy, int pf, double pw, double ph) {
+    if (pf) {
+        lay_rect_out(pf, ph, pw, &t->box[b].x, &t->box[b].y, &t->box[b].w, &t->box[b].h);
+        lay_turn_sides(t, b, pf, 0);
+        double dx, dy;
+        lay_vec_out(pf, t->box[b].dx, t->box[b].dy, &dx, &dy);
+        t->box[b].dx = dx;
+        t->box[b].dy = dy;
+    }
     t->box[b].x += ox;
     t->box[b].y += oy;
     double cx = t->box[b].x, cy = t->box[b].y;
+    int bf = lay_frame(t->box[b].wm);
+    /* its content box in its own frame: the viewport's block size the viewport's width, however far its content
+       reaches (a vertical-rl page's overflow goes left, where it is not scrolled to) */
+    double W = bf ? t->box[b].h : t->box[b].w, H = bf ? t->box[b].w : t->box[b].h;
     for (uint32_t ln = t->box[b].first_line; ln; ln = t->line[ln].next) {
+        if (!bf) {
+            t->line[ln].x += cx;
+            t->line[ln].y += cy;
+            double lx = t->line[ln].x, ly = t->line[ln].y;
+            t->line[ln].baseline += ly;
+            for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+                t->frag[fr].x += lx;
+                t->frag[fr].y += ly;
+                t->frag[fr].baseline += ly;
+            }
+            continue;
+        }
+        if (bf == 2) lay_line_mirror(t, ln);
+        double lx = t->line[ln].x, ly = t->line[ln].y;
+        for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
+            double fx = lx + t->frag[fr].x, fy = ly + t->frag[fr].y, fw = t->frag[fr].w, fh = t->frag[fr].h;
+            lay_rect_out(bf, W, H, &fx, &fy, &fw, &fh);
+            t->frag[fr].x = cx + fx;
+            t->frag[fr].y = cy + fy;
+            t->frag[fr].w = fw;
+            t->frag[fr].h = fh;
+            t->frag[fr].baseline = cx + lay_base_out(bf, H, ly + t->frag[fr].baseline);
+        }
+        t->line[ln].baseline = cx + lay_base_out(bf, H, ly + t->line[ln].baseline);
+        lay_rect_out(bf, W, H, &t->line[ln].x, &t->line[ln].y, &t->line[ln].w, &t->line[ln].h);
         t->line[ln].x += cx;
         t->line[ln].y += cy;
-        double lx = t->line[ln].x, ly = t->line[ln].y;
-        t->line[ln].baseline += ly;
+    }
+    double cw = t->box[b].w, ch = t->box[b].h;
+    if (bf && t->box[b].kind == LAYOUT_BOX_KIND_VIEWPORT) { cw = lay_icb_w; ch = lay_icb_h; }
+    for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_absolute(t, c, cx, cy, bf, cw, ch);
+}
+
+/* each vertical line's text fragments' snap (vref): paint sets a fragment's glyphs from the start of the decorated
+   inline box it is in (an inline fragment of its line, of an element its text is in: one that draws itself, Blink's
+   inline box fragment that is not culled), else from its line's first text fragment's, that start moved to the whole
+   pixel nearest it (measured in Chromium) */
+static void lay_vshifts(layout_tree *t, const dom_document *d) {
+    for (uint32_t ln = 1; ln < t->line_len; ln++) {
+        if (!t->line[ln].live) continue;
+        uint32_t b = t->line[ln].box;
+        if (!b || b >= t->box_len || !lay_frame(t->box[b].wm)) continue;
+        uint32_t first = 0;
+        for (uint32_t fr = t->line[ln].first_frag; fr && !first; fr = t->frag[fr].next)
+            if ((t->frag[fr].kind == LAYOUT_FRAG_KIND_TEXT || t->frag[fr].kind == LAYOUT_FRAG_KIND_GENERATED) && t->frag[fr].orient != 4) first = fr;
+        if (!first) continue;
+        uint32_t holder = t->box[b].node.index;
         for (uint32_t fr = t->line[ln].first_frag; fr; fr = t->frag[fr].next) {
-            t->frag[fr].x += lx;
-            t->frag[fr].y += ly;
-            t->frag[fr].baseline += ly;
+            /* (a combined text is set in its own box, an atomic inline's in Blink) */
+            if ((t->frag[fr].kind != LAYOUT_FRAG_KIND_TEXT && t->frag[fr].kind != LAYOUT_FRAG_KIND_GENERATED) || t->frag[fr].orient == 4) continue;
+            uint32_t ref = first;
+            uint32_t x = t->frag[fr].node.index;
+            int found = 0, depth = 0;
+            uint32_t e = 0;
+            if (x && x < d->node_len) e = t->frag[fr].kind == LAYOUT_FRAG_KIND_GENERATED ? x : d->node[x].parent;
+            while (e && e < d->node_len && e != holder && depth < 64 && !found) {
+                for (uint32_t f2 = t->line[ln].first_frag; f2 && !found; f2 = t->frag[f2].next) {
+                    if (t->frag[f2].kind != LAYOUT_FRAG_KIND_INLINE || t->frag[f2].node.index != e) continue;
+                    ref = f2;
+                    found = 1;
+                }
+                e = d->node[e].parent;
+                depth++;
+            }
+            t->frag[fr].vref = ref;
         }
     }
-    for (uint32_t c = t->box[b].first_child; c; c = t->box[c].next) lay_absolute(t, c, cx, cy);
 }
 
 layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, net_loader *net, double width, double height) {
@@ -9268,14 +9945,18 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     resize(exts, len(style_first));
     for (size_t k = 0; k < len(style_first); k++) {
         lay_style ls;
-        lay_style_make(style, &fonts, &webface, at(style_first, k), &ls);
+        lay_style_make(style, &fonts, &webface, at(style_first, k), -1, &ls);
         styles[k] = ls;
         lay_ext le;
-        lay_ext_make(style, at(style_first, k), &le);
+        lay_ext_make(style, at(style_first, k), -1, &le);
         exts[k] = le;
     }
     vector<lay_abs> abs;
     vector<lay_flt> flts;
+    lay_icb_w = width;
+    lay_icb_h = height;
+    lay_wm_own = 0;
+    clear(lay_wm_boxes);
     dom_document_mode mode = doc->node_len > 1 ? doc->node[1].mode : DOM_DOCUMENT_MODE_NO_QUIRKS;
     lay_quirks = mode == DOM_DOCUMENT_MODE_QUIRKS;
     lay_lhq = mode != DOM_DOCUMENT_MODE_NO_QUIRKS;
@@ -9314,7 +9995,30 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     uint32_t root = 0;
     for (uint32_t c = doc->node_len > 1 ? doc->node[1].first_child : 0; c; c = doc->node[c].next_sibling)
         if (doc->node[c].kind == DOM_NODE_KIND_ELEMENT) root = c;
+    /* the root's writing mode, which the initial containing block takes: an html root's body's, when it has a body
+       child (CSS Writing Modes 4, 8: the principal writing mode; Chromium's, measured), its own style made again in it */
+    int rwm = 0;
+    if (root) {
+        uint32_t rs = at(node_style, root) & LAY_SMASK, wsrc = root;
+        if (doc->node[root].ns == DOM_NAMESPACE_HTML && lay_is_named(doc, root, "html"))
+            for (uint32_t c = doc->node[root].first_child; c; c = doc->node[c].next_sibling)
+                if (doc->node[c].kind == DOM_NODE_KIND_ELEMENT && lay_is_named(doc, c, "body")) { wsrc = c; break; }
+        uint32_t ws = at(node_style, wsrc) & LAY_SMASK;
+        rwm = ws < len(styles) ? at(styles, ws).wm : 0;
+        if (rs < len(styles) && rwm != at(styles, rs).wm) {
+            lay_style ls;
+            lay_style_make(style, &fonts, &webface, at(style_first, rs), rwm, &ls);
+            styles[rs] = ls;
+            lay_ext le;
+            lay_ext_make(style, at(style_first, rs), rwm, &le);
+            le.bgres = at(exts, rs).bgres;
+            exts[rs] = le;
+        }
+    }
+    int rf = lay_frame(rwm), has_vertical = 0;
+    for (size_t k = 0; k < len(styles) && !has_vertical; k++) if (at(styles, k).wm) has_vertical = 1;
     uint32_t vp = lay_new_box(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, 0, 0, LAYOUT_BOX_KIND_VIEWPORT);
+    t->box[vp].wm = (uint8_t)rwm;
     t->box[vp].w = width;
     t->box[vp].h = height;
     t->box[vp].how = LAYOUT_WIDTH_HOW_VIEWPORT;
@@ -9333,22 +10037,21 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
         lay_bk bk;
         bk.ox = 0;
         bk.oy = 0;
-        bk.ch = height;
+        bk.ch = rf ? width : height;      /* the initial containing block in the root's frame: a vertical one turned */
         bk.fw = -1;
         bk.shrink = 0;
         bk.item = 0;
-    bk.item = 0;
         bk.qs = 0;
-        uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, root, width, 0, 0, 0, 0, &bk, &mt,
-                                &mb, &empty);
+        uint32_t rb = lay_block(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, root, rf ? height : width,
+                                0, 0, 0, 0, &bk, &mt, &mb, &empty);
         lay_place(t, rb, t->box[rb].ml, t->box[rb].mt);
         double bottom = t->box[rb].mt + lay_border_height(t, rb) + t->box[rb].mb;
         /* the floats the root holds */
         for (size_t k = 0; k < len(flts); k++) if (at(flts, k).y + at(flts, k).h > bottom) bottom = at(flts, k).y + at(flts, k).h;
-        lay_positioned(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, width, height);
-        if (bottom > height) t->box[vp].h = bottom;
+        lay_positioned(t, doc, style, net, &fonts, &node_style, &styles, &gens, &exts, &abs, &flts, vp, rf ? height : width, rf ? width : height);
+        if (!rf && bottom > height) t->box[vp].h = bottom;
     }
-    lay_absolute(t, vp, 0, 0);
+    lay_absolute(t, vp, 0, 0, 0, 0, 0);
     /* the sticky boxes and inline elements, when a style is sticky: before the inline elements' strips are made from
        their fragments (and before their clips, which the first fragment places) */
     for (size_t k = 0; k < len(exts); k++)
@@ -9356,6 +10059,7 @@ layout_status layout_run(layout_tree *t, dom_document *doc, css_style *style, ne
     lay_inline_strips(t);
     lay_inline_clips(t);
     lay_radii(t);
+    if (lay_frame(t->box[vp].wm) || has_vertical) lay_vshifts(t, doc);
     /* each svg element's drawing, made for its content box, and each box's SVG effects, for its border box (src/paint/svg.h):
        those a filter, a clip-path or a mask names by url() */
     vector<uint32_t> firsts;

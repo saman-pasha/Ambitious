@@ -30,7 +30,12 @@
    elements by url() (layout's fx, src/paint/svg.h) is drawn into a layer, through its
    filter's list in turn (a run of functions, a url()'s filter), then its clip and its mask,
    as svg.c draws a group's. Glyphs come from font.c at their size and
-   quarter-pixel position, cached. An image is drawn from the bytes the loader
+   quarter-pixel position, cached; a vertical line's (CSS Writing Modes 4) turned a
+   quarter on its alphabetic baseline (their quarter pixel along the line) or upright
+   on its central one, each line's text from its start snapped as Chromium snaps it
+   (pt_vtext); a combined text (text-combine-upright) across its line in an em, squeezed
+   across into it when it is wider (pt_ctext); their shadows moved as Chromium moves them,
+   a turned glyph's offset turned with it (pt_vrun). An image is drawn from the bytes the loader
    fetched for its element (image.c decodes PNG), sampled bilinearly into its
    content box; one whose load failed is Chromium's fallback (its 16px icon,
    before its alt text or in a box of its own size). The PNG is
@@ -105,9 +110,10 @@ static void pt_fill(amb_canvas *c, double x0, double y0, double x1, double y1, u
 
 typedef struct pt_glyph { uint64_t key; uint32_t off; int32_t w, h, ox, oy; } pt_glyph;
 
-static uint64_t pt_key(int face, double size, uint32_t gid, int quarter, int slant) {
+static uint64_t pt_key(int face, double size, uint32_t gid, int quarter, int slant, int rot, uint32_t xq) {
     uint64_t sz = (uint64_t)(size * 16 + 0.5) & 0xffff;
-    return (uint64_t)(face & 127) << 57 | (uint64_t)(slant & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(gid & 0x1fffff);
+    return (uint64_t)(face & 127) << 57 | (uint64_t)(slant & 1) << 56 | (uint64_t)(quarter & 3) << 54 | sz << 38 | (uint64_t)(rot & 3) << 36 |
+           (uint64_t)(xq & 0x3fff) << 22 | (uint64_t)(gid & 0x1fffff);
 }
 
 static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
@@ -115,10 +121,20 @@ static uint32_t pt_slot(const vector<uint32_t> *table, uint64_t key) {
     return (uint32_t)(h >> 40) & (uint32_t)(len(*table) - 1);
 }
 
-/* the cached glyph's index in entries, drawn on its first use */
+/* the cached glyph's index in entries, drawn on its first use (turned a quarter when rot asks: a vertical line's
+   sideways glyph, quarter then its pen's subpixel step down; squeezed across to xq / 16384 when xq asks, 0 < xq < 16384:
+   a combined text's) */
+static uint32_t pt_glyph_xf(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot,
+                            uint32_t xq);
 static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
                             vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant) {
-    uint64_t key = pt_key(face, size, gid, quarter, slant);
+    return pt_glyph_xf(f, entries, table, masks, acc, mask, face, size, gid, quarter, slant, 0, 0);
+}
+static uint32_t pt_glyph_xf(const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                            vector<float> *acc, vector<uint8_t> *mask, int face, double size, uint32_t gid, int quarter, int slant, int rot,
+                            uint32_t xq) {
+    uint64_t key = pt_key(face, size, gid, quarter, slant, rot, xq);
     uint32_t i = pt_slot(table, key);
     while (at(*table, i)) {
         uint32_t e = at(*table, i) - 1;
@@ -130,7 +146,9 @@ static uint32_t pt_glyph_of(const amb_fonts *f, vector<pt_glyph> *entries, vecto
     memset(&g, 0, sizeof g);
     g.key = key;
     g.off = (uint32_t)len(*masks);
-    if (amb_glyph_mask_id(f, face, gid, size, quarter / 4.0, slant, acc, mask, &w, &h, &ox, &oy)) {
+    if (rot ? amb_glyph_mask_rot(f, face, gid, size, quarter / 4.0, rot, acc, mask, &w, &h, &ox, &oy) :
+        xq ? amb_glyph_mask_xs(f, face, gid, size, quarter / 4.0, xq / 16384.0, slant, acc, mask, &w, &h, &ox, &oy) :
+             amb_glyph_mask_id(f, face, gid, size, quarter / 4.0, slant, acc, mask, &w, &h, &ox, &oy)) {
         append_range(masks, data(*mask), len(*mask));
         g.w = w;
         g.h = h;
@@ -175,20 +193,24 @@ static void pt_run(const layout_tree *t, uint32_t fr, const amb_fonts *f, int fa
     append_range(tx, text_ptr(t, sp), sp.len);
     double size = t->frag[fr].size, ls = t->frag[fr].spacing, wsp = t->frag[fr].word_spacing;
     vector<amb_shaped> gl;
-    if (len(tx)) amb_shape(f, face, data(tx), len(tx), 0, len(tx), ls != 0 ? AMB_SHAPE_NOLIGA : 0, &gl);
+    int orient = t->frag[fr].orient;
+    if (len(tx))
+        amb_shape(f, face, data(tx), len(tx), 0, len(tx), (ls != 0 ? AMB_SHAPE_NOLIGA : 0) |
+                  (orient == 1 ? AMB_SHAPE_VMIXED : orient == 2 ? AMB_SHAPE_VUPRIGHT : 0), &gl);
     double x = 0;
     for (size_t k = 0; k < len(gl); k++) {
         amb_shaped s = at(gl, k);
-        double sc = amb_face_scale(f, s.face, size);
         amb_rglyph g;
         memset(&g, 0, sizeof g);
         g.gid = s.gid;
         g.face = s.face;
         g.flags = s.flags;
-        g.x = x + s.dx * sc;
-        g.y = (float)(-s.dy * sc);
+        double along, across;
+        amb_shaped_pen(f, &s, size, &along, &across);
+        g.x = x + along;
+        g.y = (float)across;
         push_back(run, g);
-        x += s.ax * sc;
+        x += amb_shaped_advance(f, &s, size);
         if (k + 1 < len(gl) && at(gl, k + 1).cluster == s.cluster) continue;
         /* the cluster's letters and spaces: to the next one's start */
         uint32_t next = k + 1 < len(gl) ? at(gl, k + 1).cluster : (uint32_t)len(tx);
@@ -259,6 +281,119 @@ static void pt_text_mask(vector<uint8_t> *m, int mw, double my0, int mh, const a
             }
         }
     }
+}
+
+/* a glyph's coverage laid on the canvas, its mask's top-left pixel at (X0, Y0) */
+static void pt_glyph_blit(amb_canvas *c, const vector<uint8_t> *masks, pt_glyph gl, int X0, int Y0, uint32_t rgba) {
+    uint32_t ca = rgba & 0xff, r = rgba >> 24, g = rgba >> 16 & 0xff, b = rgba >> 8 & 0xff;
+    int kx0, ky0, kx1, ky1;
+    pt_clip_px(c, &kx0, &ky0, &kx1, &ky1);
+    for (int yy = 0; yy < gl.h; yy++) {
+        int Y = Y0 + yy;
+        if (Y < ky0 || Y >= ky1) continue;
+        for (int xx = 0; xx < gl.w; xx++) {
+            int X = X0 + xx;
+            if (X < kx0 || X >= kx1) continue;
+            uint32_t m = at(*masks, gl.off + (size_t)yy * gl.w + xx);
+            if (!m) continue;
+            uint32_t a = m * ca / 255;
+            size_t q = ((size_t)Y * c->w + (size_t)X) * 3;
+            c->px[q] = (uint8_t)((r * a + c->px[q] * (255 - a)) / 255);
+            c->px[q + 1] = (uint8_t)((g * a + c->px[q + 1] * (255 - a)) / 255);
+            c->px[q + 2] = (uint8_t)((b * a + c->px[q + 2] * (255 - a)) / 255);
+        }
+    }
+}
+
+/* a run of glyphs in a vertical line (CSS Writing Modes 4, 5): the fragment's box (x, y, w, h) on the page, its inline
+   axis down it (up it, sideways-lr: up 1); over its over side's edge (ox: its right, or its left when up) the ascent of
+   the run's font (asc) and its central baseline's (casc); its start along the line y0 (its edge there moved as Chromium
+   snaps it: as the fragment's vref's start moves to its whole pixel, src/layout/layout.c's lay_vshifts). A sideways
+   glyph is drawn turned a quarter, clockwise (its top to
+   the right; anticlockwise when up), its pen on the alphabetic baseline, as Blink rotates the canvas for it: its pen's
+   step along the line Skia's subpixel axis, across it rounded; an upright one (AMB_SHAPED_UPRIGHT) unturned, its pen's
+   x from the central baseline and its y down the line (Blink's vertical origin). A turned glyph moved by (tx, ty), an
+   upright one by (ux, uy) (a text-shadow's offsets: pt_vtext_shadows) */
+static void pt_vtext(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                     vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, double y0, double ox, int up,
+                     double asc, double casc, double size, int slant, uint32_t rgba, double tx, double ty, double ux, double uy) {
+    double alpha = (up ? ox + asc : ox - asc) + tx, central = (up ? ox + casc : ox - casc) + ux;
+    for (size_t k = 0; k < len(*run); k++) {
+        amb_rglyph rg = at(*run, k);
+        if (rg.flags & AMB_SHAPED_HIDDEN) continue;
+        double gy = (up ? y0 - rg.x : y0 + rg.x) - c->oy;
+        if (rg.flags & AMB_SHAPED_UPRIGHT) {
+            gy += uy;
+            double gx = central + rg.y, fx = floor(gx + 0.125);
+            int quarter = (int)((gx + 0.125 - fx) * 4);
+            int by = (int)floor(gy + 0.5);
+            uint32_t e = pt_glyph_of(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, slant);
+            pt_glyph gl = at(*entries, e);
+            pt_glyph_blit(c, masks, gl, (int)fx + gl.ox, by + gl.oy, rgba);
+            continue;
+        }
+        /* turned: the pen's y along the line, its x on the alphabetic baseline (the glyph's own y offset across it) */
+        gy += ty;
+        double fy = floor(gy + 0.125);
+        int quarter = (int)((gy + 0.125 - fy) * 4);
+        int bx = (int)floor((up ? alpha + rg.y : alpha - rg.y) + 0.5);
+        uint32_t e = pt_glyph_xf(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, 0, up ? 3 : 1, 0);
+        pt_glyph gl = at(*entries, e);
+        pt_glyph_blit(c, masks, gl, bx + gl.ox, (int)fy + gl.oy, rgba);
+    }
+}
+
+/* a combined text (CSS Writing Modes 4, 9.1: text-combine-upright: all; a fragment of orient 4, an em down its
+   vertical line) drawn across the line as Blink's LayoutTextCombine draws it (measured): its box (bx, by) the font's
+   height (asc + desc, its rounded ascent and descent) across the line and an em down it; its text, tw wide, centred
+   across the box, or, wider than 1.1em (an em under an underline or overline: Blink's DesiredWidth), squeezed across
+   to that width about its start (Blink's scale_x: none of the machine's fonts has the width variants, hwid, twid and
+   qwid, Blink tries first); its baseline the ascent down the box less what the font's height passes the em by, the
+   larger half of it (the leading of its line, an em high), rounded as a horizontal line's is */
+static void pt_ctext(amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks,
+                     vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, double tw, double bx, double by, double size,
+                     double asc, double desc, int under, int slant, uint32_t rgba) {
+    double hh = asc + desc, want = under ? size : size * 1.1, xs = 1, x0;
+    /* the widths as Blink's LayoutUnits hold them, in 64ths of a px */
+    double tl = ceil(tw * 64) / 64, wl = floor(want * 64) / 64;
+    if (tw > want && tw > 0) {
+        xs = want / tw;
+        x0 = bx + floor((hh - wl) * 32) / 64;
+    } else x0 = bx + floor((hh - tl) * 32) / 64;
+    uint32_t xq = xs < 1 ? (uint32_t)(xs * 16384 + 0.5) : 0;
+    if (xq >= 16384) xq = 0;
+    double lead = size - hh, base = by + asc + (lead - floor(lead / 2));
+    for (size_t k = 0; k < len(*run); k++) {
+        amb_rglyph rg = at(*run, k);
+        if (rg.flags & AMB_SHAPED_HIDDEN) continue;
+        double gx = x0 + rg.x * xs, fx = floor(gx + 0.125);
+        int quarter = (int)((gx + 0.125 - fx) * 4);
+        int gy = (int)floor(base + rg.y - c->oy + 0.5);
+        uint32_t e = pt_glyph_xf(f, entries, table, masks, acc, mask, rg.face, size, rg.gid, quarter, slant, 0, xq);
+        pt_glyph gl = at(*entries, e);
+        pt_glyph_blit(c, masks, gl, (int)fx + gl.ox, gy + gl.oy, rgba);
+    }
+}
+
+/* a vertical line's text fragment as pt_frag draws it: its start along the line (y0), its over edge (ox) and which
+   way it runs (up: sideways-lr's), its font's ascent and descent (rounded) and its central baseline below the over edge
+   (casc), its orientation (the fragment's orient: 4 combined, its text tw wide, under an underline or overline) */
+typedef struct pt_vgeo { double y0, ox, asc, desc, casc, tw; int up, orient, under; } pt_vgeo;
+
+/* a vertical line's text fragment's run drawn onto c (its x origin cx: a layer's), moved by (sx, sy): its turned glyphs
+   by the offset turned with them (clockwise; sideways-lr's anticlockwise), its upright and combined ones by the offset
+   as it is (a text-shadow's, as Chromium moves them: measured) */
+static void pt_vrun(const layout_tree *t, uint32_t fr, amb_canvas *c, const amb_fonts *f, vector<pt_glyph> *entries, vector<uint32_t> *table,
+                    vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask, const vector<amb_rglyph> *run, const pt_vgeo *vg,
+                    int slant, double sx, double sy, double cx, uint32_t rgba) {
+    double size = t->frag[fr].size;
+    if (vg->orient == 4) {
+        pt_ctext(c, f, entries, table, masks, acc, mask, run, vg->tw, t->frag[fr].x + sx - cx, t->frag[fr].y + sy, size, vg->asc, vg->desc,
+                 vg->under, slant, rgba);
+        return;
+    }
+    pt_vtext(c, f, entries, table, masks, acc, mask, run, vg->y0, vg->ox - cx, vg->up, vg->asc, vg->casc, size, slant, rgba,
+             vg->up ? sy : -sy, vg->up ? -sx : sx, sx, sy);
 }
 
 /* ---- the boxes ---- */
@@ -2742,7 +2877,7 @@ static int pt_face_of(const layout_tree *t, uint32_t fr, const vector<uint32_t> 
    shadow's colour, blurred through a canvas of its own when the shadow has a blur */
 static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, const amb_fonts *f, const vector<uint32_t> *webmap,
                             vector<pt_glyph> *entries, vector<uint32_t> *table, vector<uint8_t> *masks, vector<float> *acc, vector<uint8_t> *mask,
-                            const vector<amb_rglyph> *run) {
+                            const vector<amb_rglyph> *run, const pt_vgeo *vg) {
     vector<char> sh;
     amb_span sp = t->frag[fr].shadows;
     append_range(sh, text_ptr(t, sp), sp.len);
@@ -2765,13 +2900,16 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
         if (nv < 2 || (col & 0xff) == 0) continue;
         double x = t->frag[fr].x + v[0], base = t->frag[fr].baseline + v[1], blur = v[2];
         if (blur <= 0) {
-            pt_text(c, f, entries, table, masks, acc, mask, run, x, base, t->frag[fr].size, slant, col);
+            if (vg) pt_vrun(t, fr, c, f, entries, table, masks, acc, mask, run, vg, slant, v[0], v[1], 0, col);
+            else pt_text(c, f, entries, table, masks, acc, mask, run, x, base, t->frag[fr].size, slant, col);
             continue;
         }
         /* blurred: the text drawn white on black over its box and the blur's reach, that
-           coverage blurred, the colour laid by it */
+           coverage blurred, the colour laid by it (a vertical line's box about the fragment's,
+           as far again as its offset, turned or not, reaches) */
         int margin = (int)ceil(blur) + 2;
-        int mx0 = (int)floor(x) - margin, my0 = (int)floor(t->frag[fr].y + v[1]) - margin;
+        if (vg) margin += (int)ceil(fabs(v[0]) + fabs(v[1]));
+        int mx0 = (int)floor(vg ? t->frag[fr].x : x) - margin, my0 = (int)floor(t->frag[fr].y + (vg ? 0 : v[1])) - margin;
         int mw = (int)ceil(t->frag[fr].w) + 2 * margin + 4, mh = (int)ceil(t->frag[fr].h) + 2 * margin + 4;
         if (mw <= 0 || mh <= 0 || (double)mw * mh > 4e6) continue;
         amb_canvas m;
@@ -2786,7 +2924,8 @@ static void pt_text_shadows(const layout_tree *t, uint32_t fr, amb_canvas *c, co
         m.cx1 = mw;
         m.cy1 = my0 + mh;
         resize(&m.px, (size_t)mw * mh * 3);
-        pt_text(&m, f, entries, table, masks, acc, mask, run, x - mx0, base, t->frag[fr].size, slant, 0xffffffff);
+        if (vg) pt_vrun(t, fr, &m, f, entries, table, masks, acc, mask, run, vg, slant, v[0], v[1], mx0, 0xffffffff);
+        else pt_text(&m, f, entries, table, masks, acc, mask, run, x - mx0, base, t->frag[fr].size, slant, 0xffffffff);
         vector<float> cov;
         resize(&cov, (size_t)mw * mh);
         for (size_t k = 0; k < (size_t)mw * mh; k++) cov[k] = at(m.px, k * 3) / 255.0f;
@@ -2965,8 +3104,21 @@ static int pt_symbol(const layout_tree *t, uint32_t fr, amb_canvas *c) {
                s[0] == 0xE2 && s[1] == 0x96 && s[2] == 0xAA ? 3 : 0;
     if (!kind) return 0;
     int ai = (int)floor(t->frag[fr].baseline - t->frag[fr].y + 0.5), off = ai * 2 / 3, bw = (off + 1) / 2;
-    if (bw <= 0) return 1;
     double x0 = floor(t->frag[fr].x + 1 + 0.5), y0 = floor(t->frag[fr].baseline - ai + 0.5) + 3 * (ai - off) / 2;
+    if (t->frag[fr].orient) {
+        /* in a vertical line: the same square turned with the line (its over side the right, sideways-lr's the left;
+           its start the fragment's top, sideways-lr's bottom) */
+        uint32_t ln = t->frag[fr].line, lb = ln ? t->line[ln].box : 0;
+        int up = lb && t->box[lb].wm == 4;
+        double over = up ? t->frag[fr].x : t->frag[fr].x + t->frag[fr].w;
+        ai = (int)floor((up ? t->frag[fr].baseline - over : over - t->frag[fr].baseline) + 0.5);
+        off = ai * 2 / 3;
+        bw = (off + 1) / 2;
+        double across = floor((up ? t->frag[fr].baseline - ai : t->frag[fr].baseline + ai) + 0.5);
+        x0 = up ? across + 3 * (ai - off) / 2 : across - 3 * (ai - off) / 2 - bw;
+        y0 = up ? floor(t->frag[fr].y + t->frag[fr].h - 1 + 0.5) - bw : floor(t->frag[fr].y + 1 + 0.5);
+    }
+    if (bw <= 0) return 1;
     uint32_t col = t->frag[fr].fill;
     if (kind == 3) { pt_fill(c, x0, y0, x0 + bw, y0 + bw, col); return 1; }
     if (kind == 2) { pt_hair_oval(c, x0, y0, x0 + bw, y0 + bw, col); return 1; }
@@ -3010,7 +3162,68 @@ static void pt_frag(const layout_tree *t, const net_loader *nt, uint32_t fr, amb
     int face = pt_face_of(t, fr, webmap);
     vector<amb_rglyph> run;
     pt_run(t, fr, f, face, &run);
-    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask, &run);
+    if (t->frag[fr].orient) {
+        /* a vertical line's text: its over side its right, sideways-lr's its left (the line's box's writing mode) */
+        uint32_t ln = t->frag[fr].line, lb = ln ? t->line[ln].box : 0;
+        int up = lb && t->box[lb].wm == 4;
+        double asc, desc, gap, fa, fd;
+        amb_face_metrics(f, face, size, &asc, &desc, &gap);
+        /* the central baseline an upright glyph is centred on: half the font's height below the over edge, of its
+           ascent and descent unrounded (Blink's FixedAscent for the central baseline, a LayoutUnit: measured) */
+        amb_face_metrics_exact(f, face, size, &fa, &fd);
+        double casc = floor((fa + fd) / 2 * 64 + 0.5) / 64;
+        double ox = up ? t->frag[fr].x : t->frag[fr].x + t->frag[fr].w;
+        /* its start along the line, snapped as layout found Chromium snaps it: as its vref's start moves to its whole
+           pixel */
+        double y0 = up ? t->frag[fr].y + t->frag[fr].h : t->frag[fr].y;
+        uint32_t vr = t->frag[fr].vref;
+        if (vr && vr < t->frag_len && t->frag[vr].live) {
+            double i0 = up ? t->frag[vr].y + t->frag[vr].h : t->frag[vr].y;
+            y0 += floor(i0 + 0.5) - i0;
+        }
+        pt_vgeo vg;
+        memset(&vg, 0, sizeof vg);
+        vg.y0 = y0;
+        vg.ox = ox;
+        vg.up = up;
+        vg.asc = asc;
+        vg.desc = desc;
+        vg.casc = casc;
+        vg.orient = t->frag[fr].orient;
+        vg.under = (t->frag[fr].decoration & 3) != 0;
+        if (vg.orient == 4) {
+            /* a combined text (text-combine-upright: all) across the line, in its em */
+            amb_span ts = t->frag[fr].text;
+            vg.tw = ts.len ? amb_text_width(f, face, size, text_ptr(t, ts), ts.len) : 0;
+        }
+        if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask, &run, &vg);
+        pt_vrun(t, fr, c, f, entries, table, masks, acc, mask, &run, &vg, t->frag[fr].italic || amb_face_italic(face), 0, 0, 0, t->frag[fr].fill);
+        /* its decorations, along it: a vertical line's underline outside its text's under edge (its left) and its
+           overline outside its over edge, as Chromium draws them; a sideways one's (and a line-through) as a horizontal
+           line's turned with its glyphs (measured) */
+        uint8_t vd = t->frag[fr].decoration;
+        if (vd) {
+            double vth = floor(size / 16 + 0.5), ya = t->frag[fr].y, yb = ya + t->frag[fr].h;
+            if (vth < 1) vth = 1;
+            double alpha = floor(up ? ox + asc : ox - asc);
+            uint32_t vdc = t->frag[fr].fill;
+            for (int q = 0; q < 3; q++) {
+                if (!(vd & (1 << q))) continue;
+                double x0;
+                if (q < 2 && t->frag[fr].orient != 3) {
+                    double under = up ? t->frag[fr].x + t->frag[fr].w : t->frag[fr].x, over = up ? t->frag[fr].x : t->frag[fr].x + t->frag[fr].w;
+                    x0 = q == 0 ? (up ? floor(under + 0.5) : floor(under + 0.5) - vth) : (up ? floor(over + 0.5) - vth : floor(over + 0.5));
+                } else {
+                    /* the horizontal line's offset below the baseline (underline +, overline and line-through -), turned */
+                    double yr = q == 0 ? floor(size * 0.09 + 0.5) : q == 1 ? floor(-size * 0.93 + 0.5) : floor(-size * 0.3 + 0.5);
+                    x0 = up ? alpha + yr : alpha - yr - vth;
+                }
+                pt_fill(c, x0, ya, x0 + vth, yb, vdc);
+            }
+        }
+        return;
+    }
+    if (t->frag[fr].shadows.len) pt_text_shadows(t, fr, c, f, webmap, entries, table, masks, acc, mask, &run, 0);
     pt_text(c, f, entries, table, masks, acc, mask, &run, t->frag[fr].x, base, size, t->frag[fr].italic || amb_face_italic(face), t->frag[fr].fill);
     /* the decorations in the text's fill, as Blink resolves their currentcolor */
     uint8_t deco = t->frag[fr].decoration;

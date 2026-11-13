@@ -144,6 +144,12 @@ layout_contract(record(box, [
     %% item's, 2 its items' aligned on their last baselines (which an inline-block takes)
     field(baseline, f64), field(has_baseline, bool),
     field(lbaseline, f64), field(has_lbaseline, u8),
+    %% the writing mode its content is laid out in (CSS Writing Modes 4; src/css/css.h's CSS_WM_*: 0 horizontal-tb,
+    %% 1 vertical-rl, 2 vertical-lr, 3 sideways-rl, 4 sideways-lr): its lines' and its children's. A vertical box's lines
+    %% are stacked right to left (vertical-rl, sideways-rl) or left to right, its text set down them (sideways-lr's up
+    %% them), its glyphs turned or upright as paint draws them (frag field orient). The viewport's is the root's.
+    %% (Here, before legend, in the record's padding: a box is no bigger for it)
+    field(wm, u8),
     %% a fieldset's rendered legend's box (HTML 15.3.13), set on its top border, whose
     %% border box the top border is not drawn behind; none
     field(legend, ref(box))
@@ -180,10 +186,20 @@ layout_contract(record(frag, [
     %% fragments it holds to; none
     field(clip,       ref(box)),
     field(decoration, u8),                      % underline 1, overline 2, line-through 4
+    %% a fragment in a vertical line (its line's box's wm): 0 none, horizontal; 1 its text-orientation mixed (each
+    %% glyph upright or turned as its character's Vertical_Orientation has it, UAX #50), 2 upright, 3 sideways (every
+    %% glyph turned: a quarter clockwise, sideways-lr's anticlockwise), 4 combined (text-combine-upright: all, its
+    %% fragment an em down the line: its text set across it, scaled to fit)
+    field(orient,     u8),
     field(shadows,    span(text)),              % text-shadow
     %% a text fragment's glyphs as layout shaped them (src/paint/font.h's amb_rglyph each, packed: its
     %% glyph, its face, its pen from the fragment's start), which paint draws; none: paint shapes the text
-    field(glyphs,     span(glyphs))
+    field(glyphs,     span(glyphs)),
+    %% a vertical line's text fragment: the fragment whose start, moved to its whole pixel, paint sets its glyphs from,
+    %% the rest set from there (Chromium's snap, measured): the decorated inline box it is in (an inline fragment of
+    %% an element that draws a background, a border, ...), else its line's first text fragment; none, a horizontal
+    %% line's. (orient and vref in the record's padding: a fragment is no bigger for them)
+    field(vref,       ref(frag))
 ])).
 
 layout_contract(handle(box, bx)).
@@ -233,6 +249,9 @@ layout_contract(fact(layout_grid_item(handle, field(grid_row), field(grid_col), 
     field(grid_by) \== ungridded)).
 layout_contract(fact(layout_grid_area(handle, field(grid_area)), table(box), field(grid_by) == area)).
 layout_contract(fact(layout_clips(handle), table(box), field(clip) \== 0)).
+%% a box whose content is laid out in a vertical writing mode (its wm, CSS_WM_*: 1 vertical-rl, 2 vertical-lr,
+%% 3 sideways-rl, 4 sideways-lr)
+layout_contract(fact(layout_writing_mode(handle, field(wm)), table(box), field(wm) \== 0)).
 %% a box's background colour, RGBA, where it has one; the viewport's is the canvas's: the
 %% Canvas of the scheme the root is used in (CSS Color Adjust 1)
 layout_contract(fact(layout_background(handle, field(background)), table(box), field(background) \== 0)).

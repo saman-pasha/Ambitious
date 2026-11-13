@@ -46,7 +46,8 @@
    cubic curves (their controls' points on 2). amb_glyph_mask draws one: its contours
    flattened into lines whose signed area each pixel accumulates (exact coverage,
    non-zero fill), at any size, at a fraction of a pixel across, upright or, for an
-   italic style a face is not italic in, slanted; amb_glyph_path gives its contours as
+   italic style a face is not italic in, slanted, turned a quarter (a vertical line's
+   sideways glyph) or squeezed across (a combined text's); amb_glyph_path gives its contours as
    path commands, for SVG text drawn turned or stroked (src/paint/svg.c). A face of colour
    bitmaps (CBLC and CBDT: Noto Color Emoji) is measured, not drawn. */
 #ifndef AMB_FONT_H
@@ -102,6 +103,10 @@ typedef struct amb_face {
     uint32_t gsub, gpos, gdef, hmtx, nhm, kern, kern_len, strike, id;
 } amb_face;
 
+/* a face's vertical metrics (vmtx, so many of its long records; VORG), from its font's base: an upright glyph's
+   advance and origin; 0 none. Kept beside its record, not in it, so that a record is no bigger for them */
+typedef struct amb_vmet { uint32_t vmtx, nvm, vorg; } amb_vmet;
+
 /* a page's fonts: the built-in and system faces (whose tables font.c reads once a
    process, when a face is first asked for, and every amb_fonts shares), then the web
    fonts added to it, whose tables are its own: their code points (glyphs), kerning pairs
@@ -114,6 +119,7 @@ typedef struct amb_fonts {
     vector<uint8_t> bytes;                    /* the web fonts' bytes, each an sfnt */
     uint32_t nfaces;                          /* the next web font's face */
     amb_face face[AMB_MAXWEB];
+    amb_vmet vmet[AMB_MAXWEB];                /* each one's vertical metrics */
 } amb_fonts;
 
 /* the owner of an amb_fonts drops its vectors: a struct's are not autodropped */
@@ -143,6 +149,9 @@ double amb_x_height(int face);
 /* a face's ascent, descent (positive, below the baseline) and line gap at a size, in
    px, each rounded to a whole px as Chromium rounds them (its line height is their sum) */
 void amb_face_metrics(const amb_fonts *f, int face, double size, double *asc, double *desc, double *gap);
+/* its ascent and descent at a size, in px, as its font has them, not rounded (Blink's float ascent and descent: a vertical
+   line's central baseline, which its glyphs are drawn on, is half their sum below its over edge) */
+void amb_face_metrics_exact(const amb_fonts *f, int face, double size, double *asc, double *desc);
 /* the widths a text control is sized by (Blink's text field and textarea), the face at size: its average
    character's, OS/2's, unrounded (0 when it has none), and its glyphs' horizontal extent, head's xMax - xMin,
    rounded (Skia's fXMax - fXMin, Blink's MaxCharWidth). A built-in face's are its font file's */
@@ -169,10 +178,24 @@ double amb_text_width(const amb_fonts *f, int face, double size, const char *s, 
    (amb_face_scale makes them px), and its advance before positioning (what kerning added is
    the difference); AMB_SHAPED_HIDDEN for a default ignorable, which draws nothing */
 typedef struct amb_shaped { uint32_t gid, cluster; int32_t ax, dx, dy, base; uint16_t face, flags; } amb_shaped;
-enum { AMB_SHAPED_HIDDEN = 1 };
+/* a glyph set upright in a vertical line (AMB_SHAPED_UPRIGHT): its ax its advance down the line, its dx its vertical
+   origin (from the top of its advance to its baseline) and its dy half its horizontal advance (its pen's x the central
+   baseline less that), each in its face's units -- but for a face with no vmtx (AMB_SHAPED_VFALLBACK), whose advance
+   is its height and whose origin its ascent at the size, each rounded (Blink's OpenTypeVerticalData); a face with
+   vmtx and no VORG (AMB_SHAPED_VTSB) its origin vmtx's top side bearing (dx) over the glyph's top (base), that top
+   rounded up to a whole px at the size (Blink's glyph bounds, Skia's rounded out); a mark's advance none
+   (AMB_SHAPED_VZERO: HarfBuzz zeroes a mark's advance down the line too): amb_shaped_advance and amb_shaped_pen give
+   them in px */
+enum { AMB_SHAPED_HIDDEN = 1, AMB_SHAPED_UPRIGHT = 2, AMB_SHAPED_VFALLBACK = 4, AMB_SHAPED_VZERO = 8, AMB_SHAPED_VTSB = 16 };
 /* how a run is shaped: right to left (its bidi level odd; the glyphs then given in visual
-   order), ligatures off (liga, clig and calt: letter-spacing, as Blink has it), kerning off */
-enum { AMB_SHAPE_RTL = 1, AMB_SHAPE_NOLIGA = 4, AMB_SHAPE_NOKERN = 8 };
+   order), ligatures off (liga, clig and calt: letter-spacing, as Blink has it), kerning off; in a
+   vertical line, each grapheme upright as its first code point's Vertical_Orientation (UAX #50) has
+   it, U, Tu and Tr (text-orientation mixed, Blink's OrientationIterator), or every one (upright):
+   those runs shaped top to bottom (vert, the vertical metrics), the rest as a horizontal line's */
+enum { AMB_SHAPE_RTL = 1, AMB_SHAPE_NOLIGA = 4, AMB_SHAPE_NOKERN = 8, AMB_SHAPE_VMIXED = 16, AMB_SHAPE_VUPRIGHT = 32 };
+/* a shaped glyph's advance at a size, in px; its pen's offset (along the line, and across it down) */
+double amb_shaped_advance(const amb_fonts *f, const amb_shaped *g, double size);
+void amb_shaped_pen(const amb_fonts *f, const amb_shaped *g, double size, double *dx, double *dy);
 
 /* UTF-8 text s[from, to) shaped in a face as Chromium shapes it (Blink's run segmenter and
    font fallback, HarfBuzz's normalizer and its OpenType shapers: src/paint/shape.c), the
@@ -189,6 +212,8 @@ void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t fro
    its AMB_SHAPED_* flags, its pen's x from the fragment's start and its y from the baseline
    (down), in px */
 typedef struct amb_rglyph { uint32_t gid; uint16_t face, flags; float y; uint32_t pad; double x; } amb_rglyph;
+/* a vertical line's glyph drawn upright (its AMB_SHAPED_UPRIGHT): its x then its pen's place down the line (its top there
+   plus its vertical origin: the glyph's baseline), its y its pen's from the line's central baseline across it */
 enum { AMB_RGLYPH_OWN = 0xFFFF };
 
 /* a face's units at a size, in px (size over its units per em); its units per em (0: no face) */
@@ -221,6 +246,16 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
 /* the same of glyph gid of the face that draws it (amb_shape's), slanted when slant asks and
    the face's outlines are upright */
 int amb_glyph_mask_id(const amb_fonts *f, int face, uint32_t gid, double size, double dx, int slant,
+                      vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
+
+/* the same, the outline turned a quarter about the pen (rot 1 clockwise: a vertical line's sideways glyph, its top to
+   the right; 3 anticlockwise, sideways-lr's), its pen at y = dy (0 <= dy < 1): Skia's subpixel axis is then the
+   vertical one */
+int amb_glyph_mask_rot(const amb_fonts *f, int face, uint32_t gid, double size, double dy, int rot,
+                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
+/* the same, upright, the outline scaled across by xs about the pen (0 < xs < 1: a combined text's, CSS
+   text-combine-upright, squeezed into its em, as Skia draws it under Blink's horizontal scale), its pen at x = dx */
+int amb_glyph_mask_xs(const amb_fonts *f, int face, uint32_t gid, double size, double dx, double xs, int slant,
                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
 
 /* the outline of the glyph of cp at a size (its fallback face's when the face has none), its
