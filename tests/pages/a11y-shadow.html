@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>accessibility through shadow trees</title>
+<!-- The accessibility tree over the flat tree (PLAN.md 12z): a shadow tree's nodes under their
+     host, slotted nodes under their slot's place (a list's items, a button's label), a name from
+     content read through a host's shadow tree and a slot's assigned nodes, a slot's fallback named
+     when nothing is assigned it, a host's child no slot takes left out. Each node whose element has
+     an id, the open trees' too, held to Chromium's tree (tests/pages/a11y-shadow.chromium:
+     tools/bench/axtree.js). -->
+</head>
+<body>
+<x-button id="xb"><template shadowrootmode="open"><button id="sb">Do: <slot></slot></button></template><span id="xbl">Save</span></x-button>
+<x-list id="xl"><template shadowrootmode="open"><ul id="sul"><slot></slot></ul></template><li id="li1">one</li><li id="li2">two</li></x-list>
+<x-head id="xh"><template shadowrootmode="open"><h2 id="sh2">Shadow <slot name="w"></slot> heading</h2></template><a id="xhw" href="#n" slot="w">named</a></x-head>
+<x-region id="xr"><template shadowrootmode="open"><div id="sreg" role="region" aria-label="The region"><p id="sp">inside</p></div></template></x-region>
+<x-only id="xo"><template shadowrootmode="open"><p id="sop">only the shadow tree</p></template><p id="xop">never slotted</p></x-only>
+<x-fall id="xf"><template shadowrootmode="open"><nav id="snav"><slot><a id="sfa" href="#top">fallback link</a></slot></nav></template></x-fall>
+<a id="lnk" href="#x"><x-in><template shadowrootmode="open">from the <slot></slot> tree</template>link's</x-in></a>
+<x-closed id="xc"><template shadowrootmode="closed"><button>closed <slot></slot></button></template><b id="xcb">bold</b></x-closed>
+</body></html>

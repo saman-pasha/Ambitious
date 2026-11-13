@@ -60,6 +60,8 @@ quirks-tables: 99 of 99 boxes within 1px of Chromium's
 roundimg: 10 of 10 boxes within 1px of Chromium's
 scripts: 22 of 22 boxes within 1px of Chromium's
 selectors: 21 of 21 boxes within 1px of Chromium's
+shadow-dsd: 29 of 29 boxes within 1px of Chromium's
+shadow-layout: 45 of 45 boxes within 1px of Chromium's
 shaping-arabic: 21 of 21 boxes within 1px of Chromium's
 shaping-kern: 15 of 15 boxes within 1px of Chromium's
 shaping: 33 of 33 boxes within 1px of Chromium's

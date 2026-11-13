@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>shadow trees laid out</title>
+<!-- Shadow trees rendered (PLAN.md 12z): the flat tree laid out and drawn. A host's children are
+     its shadow root's; a slot takes its assigned nodes (named slots placing them in another order
+     than the light tree's), or else its fallback; a slot is display: contents, so a flex or grid
+     host's slotted children are its items; text slotted into an inline host flows in its line;
+     a component in another's shadow tree takes the slots the outer one forwards; a host's child no
+     slot takes is not drawn. Each element with an id, the open shadow trees' too, held to
+     Chromium's boxes (tests/pages/shadow-layout.chromium: tools/bench/boxes.js --shadow) and its
+     drawing (shadow-layout.shot.png and .regions: tools/bench/shot.js). -->
+<style>
+body { margin: 8px; font: 16px/20px serif; }
+.w { width: 420px; margin: 0 0 8px 0; }
+x-card { display: block; border: 2px solid #345; }
+x-tabs { background: #f4f4f4; }
+p { margin: 0; }
+</style>
+</head>
+<body>
+<div class="w" id="w1"><x-card id="c1"><p id="c1b">Body one, with words enough to wrap once in the card.</p><span id="c1a" slot="title">Title A</span><p id="c1c">Body two</p><em slot="none">never drawn</em></x-card></div>
+<div class="w" id="w2"><x-flex id="f1"><span id="f1a">one</span><span id="f1b">two two</span><span id="f1c">three</span></x-flex></div>
+<div class="w" id="w3"><x-grid id="g1"><b id="g1s" slot="side">Side</b><i id="g1m">Main cell, its text long enough to wrap in its column.</i><i id="g1n">Second</i></x-grid></div>
+<div class="w" id="w4"><p id="p1">Before <x-inline id="i1">light text <b id="i1b">bold</b></x-inline> after, and more words after that to wrap the line in the box.</p></div>
+<div class="w" id="w5"><x-outer id="o1"><span id="o1t" slot="t">Outer title</span><span id="o1b">Outer body text</span></x-outer></div>
+<div class="w" id="w6"><x-fall id="fb1"></x-fall><x-fall id="fb2"><span id="fb2a">given</span></x-fall></div>
+<div class="w" id="w7"><x-tabs id="t1"><span id="t1a" slot="tab">Tab one</span><span id="t1b" slot="tab">Tab two</span><div id="t1p">Panel</div></x-tabs></div>
+<script>
+function shadow(id, html) { var r = document.getElementById(id).attachShadow({ mode: 'open' }); r.innerHTML = html; return r; }
+shadow('c1', '<style>:host { padding: 6px; background: #eef; } header { background: #335; color: white; padding: 4px; } .body { border-top: 1px solid #99c; padding: 2px 4px; } footer { font-size: 12px; color: #666; height: 16px; }</style>' +
+  '<header id="c1h"><slot name="title">Untitled</slot></header><div class="body" id="c1body"><slot></slot></div><footer id="c1f"><slot name="foot">no footer</slot></footer>');
+shadow('f1', '<style>:host { display: flex; gap: 6px; } ::slotted(*) { flex: 1; padding: 4px; background: #fd8; } .lead { width: 40px; background: #8c8; }</style>' +
+  '<div class="lead" id="f1lead">L</div><slot></slot>');
+shadow('g1', '<style>:host { display: grid; grid-template-columns: 100px 1fr; column-gap: 8px; background: #def; } .side { background: #bcd; padding: 2px; }</style>' +
+  '<div class="side" id="g1side"><slot name="side"></slot></div><slot></slot>');
+shadow('i1', '<span id="i1x" style="color: #a00">[</span><slot></slot><span id="i1y" style="color: #a00">]</span>');
+var or = shadow('o1', '<style>:host { display: block; } x-frame { display: block; border: 1px solid #a60; padding: 3px; }</style><x-frame id="o1f"><slot name="t" slot="title"></slot><slot></slot></x-frame>');
+or.getElementById('o1f').attachShadow({ mode: 'open' }).innerHTML =
+  '<style>.t { background: #fc9; font-weight: bold; } .b { padding-left: 20px; }</style><div class="t" id="o1ft"><slot name="title"></slot></div><div class="b" id="o1fb"><slot></slot></div>';
+shadow('fb1', '<style>:host { display: block; } slot { display: block; border: 1px solid #080; padding: 2px; }</style><slot><span id="fb1x">fallback</span> text</slot>');
+shadow('fb2', '<style>:host { display: block; } slot { display: block; border: 1px solid #080; padding: 2px; }</style><slot><span>fallback</span> text</slot>');
+shadow('t1', '<style>:host { display: block; padding: 4px; } .tabs { display: flex; gap: 4px; } ::slotted([slot=tab]) { border: 1px solid #888; padding: 2px 6px; background: white; } .panel { margin-top: 4px; border: 1px solid #888; padding: 6px; }</style>' +
+  '<div class="tabs" id="t1tabs"><slot name="tab"></slot></div><div class="panel" id="t1panel"><slot></slot></div>');
+</script>
+</body></html>

@@ -369,6 +369,8 @@ static void so_notify(js_vm *vm) {
         }
         vm->cur_run = saved;
     }
+    /* then the slots signalled, each its slotchange (DOM 4.3.3, notify mutation observers) */
+    script_slots_fire(vm);
 }
 
 /* ---- observe() ---- */

@@ -24,7 +24,13 @@
    elements, the foreign elements of the special category and of the scopes.
    Template contents: a template's children go to its contents, the fragment
    the DOM makes with it, by the appropriate place for inserting a node; the
-   "in template" insertion mode and the stack of template insertion modes. The
+   "in template" insertion mode and the stack of template insertion modes. A template
+   whose shadowrootmode is open or closed (in any case), in a document parsed whole (not a
+   fragment: innerHTML's), whose adjusted current node may host a shadow root and hosts none,
+   is a declarative shadow root (13.2.6.4.4): the root attached to that node with the
+   template's shadowrootdelegatesfocus, shadowrootclonable and shadowrootserializable, and the
+   template pushed onto the stack alone, its contents the root, never in the document; any
+   other is a template as before. The
    select element is parsed by the rules of 2025: no "in select" insertion
    modes, select in the default scope, and the start tags of input, select,
    option, optgroup and hr closing or keeping what a select holds.
@@ -972,6 +978,59 @@ static void generic_text_element(CTX, uint32_t t, int tz_state) {
 }
 
 /* in head, for the tags it shares with in body and in table */
+/* ---- declarative shadow roots (HTML 13.2.6.4.4, a template start tag in head) ---- */
+
+/* an element that may host a shadow root (DOM 4.2.14, attach a shadow root): an HTML element whose name is
+   a valid custom element name, or one of the names the DOM lists */
+static int html_shadow_host_ok(const dom_document *d, uint32_t x) {
+    if (d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML) return 0;
+    const char *s = names_ptr(d, d->node[x].name);
+    size_t n = names_len(d, d->node[x].name);
+    static const char *const ok[] = { "article", "aside", "blockquote", "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+                                      "header", "main", "nav", "p", "section", "span" };
+    for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) if (n == strlen(ok[i]) && memcmp(s, ok[i], n) == 0) return 1;
+    if (!n || s[0] < 'a' || s[0] > 'z') return 0;
+    int hyphen = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch >= 'A' && ch <= 'Z') return 0;
+        if (ch == '-') hyphen = 1;
+        if (ch < 0x80 && !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' || ch == '_')) return 0;
+    }
+    static const char *const kept[] = { "annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format",
+                                        "font-face-name", "missing-glyph" };
+    for (size_t i = 0; i < sizeof kept / sizeof kept[0]; i++) if (n == strlen(kept[i]) && memcmp(s, kept[i], n) == 0) return 0;
+    return hyphen;
+}
+/* a template's shadowrootmode (open or closed, ASCII case-insensitive), when a document parsed whole (not a
+   fragment: innerHTML's) has it on a template whose adjusted current node is not the topmost element, and
+   that node may host a shadow root and hosts none: its shadow root attached, declarative, with the
+   template's shadowrootdelegatesfocus, shadowrootclonable and shadowrootserializable; the template is pushed
+   onto the stack of open elements alone, its contents the root, so that what it holds goes into the shadow
+   tree, and is never in the document. 1 when it was so; 0, a template inserted as any other */
+static int declarative_shadow(CTX, uint32_t t) {
+    uint32_t ma = tk_attr(p, t, "shadowrootmode");
+    if (!ma || c->fragment || st_len(open) < 2) return 0;
+    int opened = tk_attr_value_is_ci(p, ma, "open"), closed = tk_attr_value_is_ci(p, ma, "closed");
+    if (!opened && !closed) return 0;
+    html_open ac = adjusted_current(c);
+    uint32_t host = ac.node.index;
+    if (!host || ac.ns != DOM_NAMESPACE_HTML || !html_shadow_host_ok(d, host) || d->node[host].shadow) return 0;
+    dom_node_h r = dom_attach_shadow(d, ac.node, opened ? DOM_SHADOW_MODE_OPEN : DOM_SHADOW_MODE_CLOSED, DOM_SLOT_ASSIGNMENT_NAMED,
+                                     tk_attr(p, t, "shadowrootdelegatesfocus") != 0, tk_attr(p, t, "shadowrootclonable") != 0,
+                                     tk_attr(p, t, "shadowrootserializable") != 0, 1);
+    if (!r.index) return 0;
+    html_open o;
+    o.node = r;
+    o.tag = T_TEMPLATE;
+    o.atom = names_intern(d, "template", 8);
+    o.token = t;
+    o.ns = DOM_NAMESPACE_HTML;
+    o.flags = html_flags(T_TEMPLATE);
+    push_back(open, o);
+    return 1;
+}
+
 static int in_head(CTX) {
     uint32_t t = c->tok;
     html_token_kind k = tk_kind(p, t);
@@ -991,7 +1050,7 @@ static int in_head(CTX) {
             c->frameset_ok = 0;
             c->mode = M_IN_TEMPLATE;
             push_back(tmodes, M_IN_TEMPLATE);
-            insert_element(ARGS, t);
+            if (!declarative_shadow(ARGS, t)) insert_element(ARGS, t);
             return 0;
         }
         if (tag == T_HEAD) { html_terr(ARGS); return 0; }

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>declarative shadow roots</title>
+<!-- Declarative shadow DOM (HTML 13.2.6.4.4, PLAN.md 12z): a template with shadowrootmode open or
+     closed (in any case) attaches its parent's shadow root as the parser meets it, its content the
+     root's, never in the document; styles in it apply in its tree alone; a template in one nests a
+     shadow root in the host it is in; a second one on a host, one of a mode no one knows, and one an
+     innerHTML parses are templates as any other, drawn as nothing; a host's light children slotted;
+     a root's linked sheet and image fetched and applied in it.
+     No script: the page as the parser leaves it. Each element with an id, the open trees' too, held
+     to Chromium's boxes (tests/pages/shadow-dsd.chromium: tools/bench/boxes.js --shadow) and its
+     drawing (shadow-dsd.shot.png and .regions: tools/bench/shot.js). -->
+<style>
+body { margin: 8px; font: 16px/20px serif; }
+.w { width: 380px; margin: 0 0 8px 0; }
+p { margin: 0; }
+span.badge { color: rgb(0, 0, 255); }
+</style>
+</head>
+<body>
+<div class="w" id="w1"><div id="d1"><template shadowrootmode="open"><style>:host { display: block; border: 2px solid #357; padding: 4px; } h2 { margin: 0; font-size: 18px; background: #ccd; } ::slotted(span) { color: #a00; }</style><h2 id="d1h">Declared</h2><slot></slot><p id="d1p">after the slot</p></template><span id="d1a">light one</span> <span id="d1b" class="badge">light two</span></div></div>
+<div class="w" id="w2"><div id="d2"><template shadowrootmode="closed"><style>:host { display: block; background: #efe; padding: 6px; } b { color: #070; }</style><b>closed tree</b> <slot></slot></template><span id="d2a">closed light</span></div></div>
+<div class="w" id="w3"><div id="d3"><template shadowrootmode="Open"><style>div { border: 1px solid #a60; padding: 2px; }</style><div id="d3o">outer tree<x-n id="d3n"><template shadowrootmode="open"><style>:host { display: block; margin: 4px; background: #fda; } i { font-size: 14px; }</style><i id="d3i">nested tree</i> <slot></slot></template><span id="d3l">nested light</span></x-n></div></template></div></div>
+<div class="w" id="w4"><div id="d4"><template shadowrootmode="open"><p id="d4p" style="background: #ddf">first root</p></template><template shadowrootmode="open"><p>second, a template</p></template></div></div>
+<div class="w" id="w5"><div id="d5"><template shadowrootmode="nope"><p>no mode: a template</p></template><p id="d5p">the light child, drawn</p></div></div>
+<div class="w" id="w6"><p id="d6">An <span id="d6h"><template shadowrootmode="open"><b id="d6b" style="color: #060">inline root</b></template>unslotted</span> host in a line.</p></div>
+<div class="w" id="w7"><div id="d7"><template shadowrootmode="open"><link rel="stylesheet" href="import/colors.css"><p class="card" id="d7p">a linked sheet's, and an image:</p><img id="d7i" src="logo.png" alt="logo"></template></div></div>
+</body></html>

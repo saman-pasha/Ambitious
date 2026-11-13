@@ -157,6 +157,10 @@ jv script_custom_create(js_vm *vm, uint32_t def);
 uint32_t script_shadow_host(const dom_document *d, uint32_t x);
 uint32_t script_event_parent(const dom_document *d, uint32_t x, uint32_t target, int composed);
 uint32_t script_retarget(const dom_document *d, uint32_t a, uint32_t b);
+/* the slots whose assigned nodes changed since they were last looked at, signalled (their slotchange
+   queued for the observers' microtask); and the slotchange events fired there, after the observers' */
+void script_slots_check(js_vm *vm);
+void script_slots_fire(js_vm *vm);
 /* ---- window.c's: history, storage, screen, matchMedia ---- */
 void script_window_setup(js_vm *vm);
 jv script_window_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);

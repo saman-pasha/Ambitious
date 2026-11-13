@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>slots and their events</title>
+<!-- Shadow trees' slots and events (PLAN.md 12z): declarative shadow roots as the parser makes
+     them (open, closed, OPEN in any case, nested, their delegatesfocus and clonable read back),
+     a clonable root cloned with its host; attachShadow's options and its refusal of a slot
+     assignment it does not know; slotchange as Chromium fires it (after the change's task, a
+     slot an event, in the order the changes reached them: a slot attribute changed, the old slot
+     first; a text node, white space alone, assigned; a comment not; a slot with nothing assigned
+     given fallback), manual assignment (assign():
+     its order, a node not the host's child waiting until it is one, its refusal of a value no
+     Element or Text, the slotchange it makes); composedPath() hiding a closed tree's nodes from
+     the listeners outside it, a nested open tree's too. A console line each, against Chromium's
+     (tests/pages/shadow-slots.chromium, from tools/bench/console.js). -->
+</head>
+<body>
+<div id="host"><span id="a" slot="a">A</span><b id="b">B</b></div>
+<div id="dsd"><template shadowrootmode="open" shadowrootdelegatesfocus shadowrootclonable><style>p { color: red }</style><p id="inside">in</p><slot></slot></template>light</div>
+<div id="dsdc"><template shadowrootmode="closed"><slot></slot></template>closed light</div>
+<div id="dsdu"><template shadowrootmode="OPEN"><b>u</b></template></div>
+<div id="dsdn"><template shadowrootmode="open"><x-in id="xin"><template shadowrootmode="open" shadowrootserializable><i id="deep">deep</i><slot></slot></template>inner light</x-in></template></div>
+<script>
+function who(n) { return n === null ? 'null' : n === undefined ? 'undefined' : n === window ? 'window' : n === document ? 'document' : n.nodeType === 11 ? '#root' : n.nodeType === 3 ? JSON.stringify(n.data) : (n.id || n.localName); }
+function list(ns) { return '[' + Array.from(ns).map(who).join(',') + ']'; }
+function opts(r) { return r.mode + ' delegates ' + r.delegatesFocus + ' clonable ' + r.clonable + ' serializable ' + r.serializable + ' slotAssignment ' + r.slotAssignment; }
+console.log('-- declarative');
+var dsd = document.getElementById('dsd');
+console.log('dsd: ' + opts(dsd.shadowRoot) + ' children ' + list(dsd.childNodes) + ' root ' + list(dsd.shadowRoot.childNodes));
+console.log('closed: ' + document.getElementById('dsdc').shadowRoot + ' ' + list(document.getElementById('dsdc').childNodes));
+console.log('OPEN: ' + document.getElementById('dsdu').shadowRoot.mode + ' ' + list(document.getElementById('dsdu').shadowRoot.childNodes));
+var xin = document.getElementById('dsdn').shadowRoot.getElementById('xin');
+console.log('nested: ' + list(xin.childNodes) + ' ' + list(xin.shadowRoot.childNodes) + ' ' + opts(xin.shadowRoot));
+console.log('slot of the nested: ' + list(xin.shadowRoot.querySelector('slot').assignedNodes()));
+console.log('-- cloned');
+var deep = dsd.cloneNode(true), shallow = dsd.cloneNode(false);
+console.log('deep: ' + list(deep.childNodes) + ' ' + (deep.shadowRoot && list(deep.shadowRoot.childNodes)) + ' ' + (deep.shadowRoot && opts(deep.shadowRoot)));
+console.log('shallow: ' + list(shallow.childNodes) + ' ' + (shallow.shadowRoot && list(shallow.shadowRoot.childNodes)));
+console.log('not clonable: ' + document.getElementById('dsdn').cloneNode(true).shadowRoot);
+console.log('-- attachShadow options');
+var r2 = document.createElement('div').attachShadow({ mode: 'open', delegatesFocus: true, slotAssignment: 'manual', clonable: true, serializable: true });
+console.log(opts(r2));
+console.log(opts(document.createElement('span').attachShadow({ mode: 'closed' })));
+try { document.createElement('div').attachShadow({ mode: 'open', slotAssignment: 'bogus' }); } catch (e) { console.log(e.name + ': ' + e.message); }
+console.log('-- slotchange');
+var host = document.getElementById('host');
+var root = host.attachShadow({ mode: 'open' });
+root.addEventListener('slotchange', function (e) { console.log('slotchange at ' + who(e.target) + ' bubbles ' + e.bubbles + ' composed ' + e.composed + ' cancelable ' + e.cancelable + ' path ' + list(e.composedPath()) + ' assigned ' + list(e.target.assignedNodes())); });
+root.innerHTML = '<slot name="a" id="sa"></slot><slot id="sd"></slot><slot name="c" id="sc"></slot>';
+console.log('after innerHTML, before its microtask');
+Promise.resolve().then(function () {
+  console.log('microtask 1');
+  var c = document.createElement('i'); c.id = 'c'; c.slot = 'c';
+  host.appendChild(c);
+  document.getElementById('b').slot = 'a';
+  console.log('b.slot is ' + document.getElementById('b').slot + ', c.slot is ' + c.slot);
+  return Promise.resolve();
+}).then(function () {
+  console.log('microtask 2');
+  host.removeChild(document.getElementById('a'));
+  root.getElementById('sc').name = 'zz';
+  host.appendChild(document.createTextNode('   '));
+  host.appendChild(document.createComment('x'));
+}).then(function () {
+  console.log('microtask 3');
+  var s = document.createElement('slot'); s.id = 'snew'; s.name = 'zz';
+  root.insertBefore(s, root.firstChild);
+}).then(function () {
+  console.log('microtask 4: a slot no node is assigned to given fallback, and one that has nodes');
+  root.getElementById('sc').appendChild(document.createTextNode('fb'));
+  root.getElementById('sd').appendChild(document.createTextNode('fb'));
+});
+setTimeout(function () {
+  console.log('-- composedPath and closed trees');
+  var ch = document.createElement('div'); ch.id = 'ch';
+  document.body.appendChild(ch);
+  var cr = ch.attachShadow({ mode: 'closed' });
+  cr.innerHTML = '<div id="cw"><button id="cb">x</button><slot id="cs"></slot></div>';
+  var lt = document.createElement('em'); lt.id = 'lt'; ch.appendChild(lt);
+  function rec(where) { return function (e) { console.log(where + ': target ' + who(e.target) + ' path ' + list(e.composedPath())); }; }
+  cr.getElementById('cb').addEventListener('ping', rec('cb'));
+  cr.addEventListener('ping', rec('closed root'));
+  ch.addEventListener('ping', rec('ch'));
+  document.body.addEventListener('ping', rec('body'));
+  cr.getElementById('cb').dispatchEvent(new Event('ping', { bubbles: true, composed: true }));
+  lt.addEventListener('pong', rec('lt'));
+  cr.getElementById('cs').addEventListener('pong', rec('cs'));
+  cr.getElementById('cw').addEventListener('pong', rec('cw'));
+  ch.addEventListener('pong', rec('ch'));
+  document.body.addEventListener('pong', rec('body'));
+  lt.dispatchEvent(new Event('pong', { bubbles: true }));
+  var inner = document.createElement('div'); inner.id = 'inner';
+  cr.getElementById('cw').appendChild(inner);
+  var ir = inner.attachShadow({ mode: 'open' });
+  ir.innerHTML = '<span id="dp">d</span>';
+  ir.getElementById('dp').addEventListener('zip', rec('dp'));
+  inner.addEventListener('zip', rec('inner'));
+  ch.addEventListener('zip', rec('ch'));
+  ir.getElementById('dp').dispatchEvent(new Event('zip', { bubbles: true, composed: true }));
+  console.log('-- manual assignment');
+  var mh = document.createElement('div'); mh.id = 'mh';
+  document.body.appendChild(mh);
+  var m1 = document.createElement('span'); m1.id = 'm1'; mh.appendChild(m1);
+  var m2 = document.createElement('span'); m2.id = 'm2'; mh.appendChild(m2);
+  var m3 = document.createElement('span'); m3.id = 'm3'; m3.slot = 'x'; mh.appendChild(m3);
+  var mr = mh.attachShadow({ mode: 'open', slotAssignment: 'manual' });
+  mr.innerHTML = '<slot id="ms1"></slot><slot id="ms2" name="x"></slot>';
+  mr.addEventListener('slotchange', function (e) { console.log('manual slotchange at ' + who(e.target) + ' ' + list(e.target.assignedNodes())); });
+  var ms1 = mr.getElementById('ms1'), ms2 = mr.getElementById('ms2');
+  console.log('before assign: ' + list(ms1.assignedNodes()) + ' ' + list(ms2.assignedNodes()) + ' ' + who(m3.assignedSlot));
+  ms1.assign(m2, m1);
+  console.log('after assign: ' + list(ms1.assignedNodes()) + ' ' + list(ms1.assignedElements()) + ' ' + who(m1.assignedSlot) + ' ' + who(m2.assignedSlot));
+  ms2.assign(m1);
+  console.log('moved: ' + list(ms1.assignedNodes()) + ' ' + list(ms2.assignedNodes()));
+  var stray = document.createElement('b'); stray.id = 'stray';
+  ms2.assign(stray, m3);
+  console.log('stray: ' + list(ms2.assignedNodes()) + ' ' + who(stray.assignedSlot));
+  mh.appendChild(stray);
+  console.log('stray in: ' + list(ms2.assignedNodes()) + ' ' + who(stray.assignedSlot));
+  try { ms1.assign('x'); } catch (e) { console.log(e.name + ': ' + e.message); }
+  setTimeout(function () {
+    console.log('-- after');
+    console.log(list(ms1.assignedNodes()) + ' ' + list(ms2.assignedNodes()));
+  }, 10);
+}, 10);
+</script>
+</body></html>

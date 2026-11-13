@@ -1,0 +1,54 @@
+-- declarative
+dsd: open delegates true clonable true serializable false slotAssignment named children ["light"] root [style,inside,slot]
+closed: null ["closed light"]
+OPEN: open [b]
+nested: ["inner light"] [deep,slot] open delegates false clonable false serializable true slotAssignment named
+slot of the nested: ["inner light"]
+-- cloned
+deep: ["light"] [style,inside,slot] open delegates true clonable true serializable false slotAssignment named
+shallow: [] [style,inside,slot]
+not clonable: null
+-- attachShadow options
+open delegates true clonable true serializable true slotAssignment manual
+closed delegates false clonable false serializable false slotAssignment named
+TypeError: Failed to execute 'attachShadow' on 'Element': Failed to read the 'slotAssignment' property from 'ShadowRootInit': The provided value 'bogus' is not a valid enum value of type SlotAssignmentMode.
+-- slotchange
+after innerHTML, before its microtask
+slotchange at sa bubbles true composed false cancelable false path [sa,#root] assigned [a]
+slotchange at sd bubbles true composed false cancelable false path [sd,#root] assigned [b]
+microtask 1
+b.slot is a, c.slot is c
+slotchange at sc bubbles true composed false cancelable false path [sc,#root] assigned [c]
+slotchange at sd bubbles true composed false cancelable false path [sd,#root] assigned []
+slotchange at sa bubbles true composed false cancelable false path [sa,#root] assigned [a,b]
+microtask 2
+slotchange at sa bubbles true composed false cancelable false path [sa,#root] assigned [b]
+slotchange at sc bubbles true composed false cancelable false path [sc,#root] assigned []
+slotchange at sd bubbles true composed false cancelable false path [sd,#root] assigned ["   "]
+microtask 3
+microtask 4: a slot no node is assigned to given fallback, and one that has nodes
+slotchange at sc bubbles true composed false cancelable false path [sc,#root] assigned []
+-- composedPath and closed trees
+cb: target cb path [cb,cw,#root,ch,body,html,document,window]
+closed root: target cb path [cb,cw,#root,ch,body,html,document,window]
+ch: target ch path [ch,body,html,document,window]
+body: target ch path [ch,body,html,document,window]
+lt: target lt path [lt,ch,body,html,document,window]
+cs: target lt path [lt,cs,cw,#root,ch,body,html,document,window]
+cw: target lt path [lt,cs,cw,#root,ch,body,html,document,window]
+ch: target lt path [lt,ch,body,html,document,window]
+body: target lt path [lt,ch,body,html,document,window]
+dp: target dp path [dp,#root,inner,cw,#root,ch,body,html,document,window]
+inner: target inner path [dp,#root,inner,cw,#root,ch,body,html,document,window]
+ch: target ch path [ch,body,html,document,window]
+-- manual assignment
+before assign: [] [] null
+after assign: [m2,m1] [m2,m1] ms1 ms1
+moved: [m2] [m1]
+stray: [m3] null
+stray in: [stray,m3] ms2
+TypeError: Failed to execute 'assign' on 'HTMLSlotElement': The provided value is not of type '(Element or Text)'.
+manual slotchange at ms1 [m2]
+manual slotchange at ms2 [stray,m3]
+-- after
+[m2] [stray,m3]

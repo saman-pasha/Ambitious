@@ -12,7 +12,7 @@ dom_contract(module(dom, '0.1.0', 'Document Object Model: documents, elements in
 
 %% what an operation answers: ok, or why it refused; ok is first
 dom_contract(status([ok, stale_handle, wrong_kind, has_parent, not_a_child, would_cycle,
-                     invalid_name, not_found, out_of_memory])).
+                     invalid_name, not_found, out_of_memory, has_shadow])).
 
 %% a fragment is a template's contents: a tree of its own, no node's child,
 %% which only its template holds (DOM 4.7, HTML 4.12.3)
@@ -22,6 +22,9 @@ dom_contract(enum(node_kind, [document, doctype, element, text, comment, fragmen
 dom_contract(enum(namespace, [html, svg, mathml])).
 %% a shadow root's mode: whether its host's shadowRoot shows it
 dom_contract(enum(shadow_mode, [open, closed])).
+%% how a shadow root's slots find their nodes (DOM 4.2.2.3): by the slot attribute's name,
+%% or as a script assigned them (slotAssignment manual, HTMLSlotElement's assign())
+dom_contract(enum(slot_assignment, [named, manual])).
 %% an attribute's namespace: null for no namespace, or one of the three the
 %% HTML parser gives attributes of foreign elements (HTML 13.2.6.1)
 dom_contract(enum(attr_namespace, [null, xlink, xml, xmlns])).
@@ -49,7 +52,21 @@ dom_contract(record(node, [
     field(public_id,    span(text)),       % a doctype's public identifier ...
     field(system_id,    span(text)),       % ... and its system identifier
     field(doctype_ids,  u8),               % which of the two the doctype has: 1 public, 2 system
-    field(mode,         enum(document_mode))   % the document node's mode
+    field(mode,         enum(document_mode)),  % the document node's mode
+    %% THE FLAT TREE (DOM 4.2.2, CSS Scoping 1, 2.2), which the cascade, layout and
+    %% accessibility walk (src/dom/dom.h): a host's shadow root; the slot a node is
+    %% assigned to, a slot's assigned nodes in order (found again by flatten when the
+    %% document has changed since: flat, the document node's, is the revision they were
+    %% found at, plus one); the slot a script assigned a node to, a slot's manually
+    %% assigned nodes in the order assign() gave them
+    field(shadow,         ref(node)),
+    field(slot,           ref(node)),
+    field(assigned_first, ref(node)),
+    field(assigned_next,  ref(node)),
+    field(manual,         ref(node)),
+    field(manual_first,   ref(node)),
+    field(manual_next,    ref(node)),
+    field(flat,           u64)
 ])).
 
 %% an attribute's name is its qualified name: an attribute in a namespace keeps
@@ -77,11 +94,19 @@ dom_contract(record(detail, [
 ])).
 
 %% a shadow root (DOM 4.8): a fragment, the root of a tree of its own, attached to its host
-%% element (the fragment's host link names it too)
+%% element (the fragment's host link names it too, and the host's shadow link the root):
+%% its mode, how its slots are assigned, whether focusing its host delegates the focus to
+%% it, whether a clone of its host clones it, whether its host's getHTML() may write it,
+%% and whether the HTML parser made it from a template (shadowrootmode)
 dom_contract(record(shadow, [
     field(host, ref(node)),
     field(root, ref(node)),
-    field(mode, enum(shadow_mode))
+    field(mode, enum(shadow_mode)),
+    field(assignment,      enum(slot_assignment)),
+    field(delegates_focus, bool),
+    field(clonable,        bool),
+    field(serializable,    bool),
+    field(declarative,     bool)
 ])).
 
 %% public handles: {doc, index, generation}; in Prolog n(Doc, Index, Gen)
@@ -110,6 +135,10 @@ dom_contract(tie(handle(attr), document)).
 dom_contract(list(children,   node, node, [first(first_child), last(last_child), next(next_sibling),
                                            prev(prev_sibling), up(parent)])).
 dom_contract(list(attributes, node, attr, [first(first_attr), next(next), up(owner)])).
+%% a slot's assigned nodes (the flat tree's, which flatten finds) and the nodes a script
+%% assigned it (assign_slot): lists of nodes no slot owns
+dom_contract(list(assigned, node, node, [first(assigned_first), next(assigned_next), up(slot)])).
+dom_contract(list(manual, node, node, [first(manual_first), next(manual_next), up(manual)])).
 
 %% the document node: the store's root, made with the store
 dom_contract(root(node, kind, document)).
@@ -179,11 +208,29 @@ dom_contract(operation(remove_attribute, [param(element, handle(node)), param(na
 dom_contract(operation(set_data, [param(node, handle(node)), param(data, text)], status,
     [pre(live(node), stale_handle), pre(kind_in(node, [text, comment]), wrong_kind)],
     [sets(node, data)], [mutates, requestable])).
-%% a shadow root attached to an element (the script module checks it may have one): the
-%% root, a fragment whose host is the element; destroying the element destroys its tree
-dom_contract(operation(attach_shadow, [param(host, handle(node)), param(mode, enum(shadow_mode))], handle(node),
-    [pre(live(host), stale_handle), pre(kind_in(host, [element]), wrong_kind)],
+%% a shadow root attached to an element (the script module, or the HTML parser for a
+%% template's shadowrootmode, checks it may have one): the root, a fragment whose host is
+%% the element, with its options; destroying the element destroys its tree
+dom_contract(operation(attach_shadow, [param(host, handle(node)), param(mode, enum(shadow_mode)),
+                                       param(assignment, enum(slot_assignment)), param(delegates_focus, bool),
+                                       param(clonable, bool), param(serializable, bool), param(declarative, bool)], handle(node),
+    [pre(live(host), stale_handle), pre(kind_in(host, [element]), wrong_kind), pre(unset(host, shadow), has_shadow)],
     [creates(node)], [mutates])).
+%% the flat tree's assignment found again (DOM 4.2.2.3: each slot's assigned nodes, by
+%% name or as a script assigned them), when the document has changed since it was last
+%% found: what a walk of the flat tree reads (src/dom/dom.h). It changes no node of the
+%% tree, so it logs nothing
+dom_contract(operation(flatten, [], status, [], [], [])).
+%% a node appended to a slot's manually assigned nodes, taken from the slot it was
+%% assigned to before (HTMLSlotElement's assign(), DOM 4.2.2.6), and a slot's manually
+%% assigned nodes emptied: a shadow root of manual slot assignment's slots take them
+dom_contract(operation(assign_slot, [param(slot, handle(node)), param(node, handle(node))], status,
+    [pre(live(slot), stale_handle), pre(live(node), stale_handle), pre(kind_in(slot, [element]), wrong_kind),
+     pre(kind_in(node, [element, text]), wrong_kind)],
+    [], [mutates])).
+dom_contract(operation(clear_slot, [param(slot, handle(node))], status,
+    [pre(live(slot), stale_handle), pre(kind_in(slot, [element]), wrong_kind)],
+    [], [mutates])).
 %% the details of each change kept from now on (its log entry's detail), for a reader
 %% that needs them; the changes before are not
 dom_contract(operation(keep_details, [], status, [], [], [])).
@@ -215,6 +262,10 @@ dom_contract(invariant(attr_owners, 'Only elements have attributes',
     owner_kinds(attributes, kind, [element]))).
 dom_contract(invariant(live_links, 'Every link of a live record names a live record',
     refs_live)).
+dom_contract(invariant(assigned_links, 'A node is assigned to one slot at most, and listed once by it',
+    list_consistent(assigned))).
+dom_contract(invariant(manual_links, 'A node a script assigned is listed once, by its slot',
+    list_consistent(manual))).
 
 %% ---- EVENTS -----------------------------------------------------------------
 %% each successful mutating operation logs one, with the revision it made, and its
@@ -239,8 +290,18 @@ dom_contract(fact(dom_attr(field(owner), field(name), field(value)), table(attr)
 %% an element's namespace, when it is not HTML's; a template's contents
 dom_contract(fact(dom_namespace(handle, field(ns)), table(node), (field(kind) == element, field(ns) \== html))).
 dom_contract(fact(dom_template_content(handle, field(content)), table(node), field(content) \== none)).
-%% a shadow root: its host, the root (a fragment, its tree's own), the mode
+%% a shadow root: its host, the root (a fragment, its tree's own), the mode; its slots'
+%% assignment, and whether it delegates focus, is clonable, serializable and declarative
 dom_contract(fact(dom_shadow_root(field(host), field(root), field(mode)), table(shadow), true)).
+dom_contract(fact(dom_shadow_options(field(root), field(assignment), field(delegates_focus), field(clonable), field(serializable),
+                                     field(declarative)), table(shadow), true)).
+%% the flat tree: the slot a node is assigned to, and the slot a script assigned it to
+%% (manual assignment, which holds while the node is its host's child)
+dom_contract(fact(dom_assigned_slot(handle, field(slot)), table(node), field(slot) \== none)).
+dom_contract(fact(dom_manual_slot(handle, field(manual)), table(node), field(manual) \== none)).
+%% a slot's assigned nodes in their order: the first, and each one's next
+dom_contract(fact(dom_slot_first(handle, field(assigned_first)), table(node), field(assigned_first) \== none)).
+dom_contract(fact(dom_slot_next(handle, field(assigned_next)), table(node), field(assigned_next) \== none)).
 %% an attribute's namespace, when it has one (its name in dom_attr/3 has the prefix)
 dom_contract(fact(dom_attr_namespace(field(owner), field(name), field(ns)), table(attr), field(ns) \== null)).
 %% the document's mode, when it is not no-quirks: quirks or limited_quirks
@@ -262,6 +323,10 @@ dom_contract(derived(dom_text_content/2, 'the concatenated text of a subtree')).
 dom_contract(derived(dom_accessible_name/2, 'a control''s accessible name, from aria-label, alt, title or content')).
 dom_contract(derived(dom_missing_attribute/2, 'an HTML element lacks an attribute it requires')).
 dom_contract(derived(dom_removal_effect/2, 'what removing N takes with it')).
+dom_contract(derived(dom_flat_parent/2, 'P is the parent of N in the flat tree: its slot, a shadow root''s host, or its parent')).
+dom_contract(derived(dom_flat_child/2, 'C is a child of P in the flat tree')).
+dom_contract(derived(dom_flat_children/2, 'the children of P in the flat tree, in order')).
+dom_contract(derived(dom_shadow_tree_of/2, 'N is in the shadow tree whose root is R')).
 
 dom_contract(query(buttons, (dom_element(N, button), dom_accessible_name(N, Name)), [N, Name],
     'every button and its accessible name')).
