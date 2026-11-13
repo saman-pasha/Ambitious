@@ -71,6 +71,23 @@ uint32_t js_uni_special(uint32_t c, int upper, uint32_t *out) {
     return uni_special_in(uni_lower_special, UNI_LOWER_SPECIAL_N, c, out);
 }
 
+/* is c in the property at uni_props[i]? */
+static int uni_has(uint32_t i, uint32_t c) {
+    uint32_t lo = 0, hi = uni_props[i].n, off = uni_props[i].off;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        if (uni_ranges[2 * (off + mid) + 1] < c) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < uni_props[i].n && uni_ranges[2 * (off + lo)] <= c;
+}
+int js_uni_cased(uint32_t c) { return uni_has(UNI_P_CASED, c); }
+int js_uni_case_ignorable(uint32_t c) { return uni_has(UNI_P_CASE_IGNORABLE, c); }
+/* an identifier's characters beyond ASCII (ECMA-262's UnicodeIDStart and UnicodeIDContinue,
+   ZWNJ and ZWJ the latter's too) */
+int js_uni_id_start(uint32_t c) { return uni_has(UNI_P_ID_START, c); }
+int js_uni_id_part(uint32_t c) { return c == 0x200C || c == 0x200D || uni_has(UNI_P_ID_CONTINUE, c); }
+
 /* the next member of c's case orbit, c itself when it has none */
 static uint32_t re_orbit_in(const uint32_t *t, uint32_t n, uint32_t c) {
     uint32_t lo = 0, hi = n;
@@ -294,16 +311,16 @@ static int64_t rp_prop_find(re_parser *p, uint32_t from, uint32_t to) {
     for (uint32_t i = 0; i < UNI_NPROPS; i++) {
         uint32_t k = uni_props[i].kind;
         if (eq ? (int)k != kind : (k != 0 && k != 3)) continue;
-        /* its aliases, | between them */
-        uint32_t k = 0;
+        /* its aliases, | between them (the name's place a, not k again: REPORT, finding 39) */
+        uint32_t a = 0;
         for (;;) {
             uint32_t l = 0;
-            while (uni_props[i].names[k + l] && uni_props[i].names[k + l] != '|') l++;
+            while (uni_props[i].names[a + l] && uni_props[i].names[a + l] != '|') l++;
             int same = l == wl;
-            for (uint32_t j = 0; same && j < l; j++) if (uni_props[i].names[k + j] != want[j]) same = 0;
+            for (uint32_t j = 0; same && j < l; j++) if (uni_props[i].names[a + j] != want[j]) same = 0;
             if (same) return i;
-            if (!uni_props[i].names[k + l]) break;
-            k += l + 1;
+            if (!uni_props[i].names[a + l]) break;
+            a += l + 1;
         }
     }
     return -1;
@@ -446,8 +463,15 @@ static int rp_group_name(re_parser *p, uint32_t *off, uint32_t *n) {
             c = rp_unicode_escape(p);
             p->flags = saved;
             if (c < 0) return 0;
-        } else p->pos++;
-        int ok = c == '$' || c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80 || (k > 0 && re_digit(c));
+        } else {
+            p->pos++;
+            /* a pair of code units is one code point, with u or without */
+            int64_t d = rp_at(p, 0);
+            if (c >= 0xD800 && c <= 0xDBFF && d >= 0xDC00 && d <= 0xDFFF) { c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00); p->pos++; }
+        }
+        /* an identifier's: ID_Start first, then ID_Continue */
+        int ok = c == '$' || c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (k > 0 && re_digit(c)) ||
+                 (c >= 0x80 && (k > 0 ? js_uni_id_part((uint32_t)c) : js_uni_id_start((uint32_t)c)));
         if (!ok) return 0;
         if (c > 0xFFFF) { push_back(p->namech, (uint32_t)(0xD800 + ((c - 0x10000) >> 10))); push_back(p->namech, (uint32_t)(0xDC00 + ((c - 0x10000) & 0x3FF))); k += 2; }
         else { push_back(p->namech, (uint32_t)c); k++; }
@@ -1522,7 +1546,11 @@ static int rf_node(re_parser *p, uint32_t n, re_first *f, uint32_t depth) {
             if (icase && hi >= 128) f->any = 1;      /* a character beyond ASCII may take an ASCII one's case */
             for (uint32_t c = lo; c <= hi && c < 128; c++) {
                 rf_add(f, c);
-                if (icase && ((c | 0x20) >= 'a' && (c | 0x20) <= 'z')) { rf_add(f, c | 0x20); rf_add(f, c & ~0x20u); }
+                if (!icase) continue;
+                /* the other members of its orbit: with u, s's and k's take U+017F and U+212A */
+                uint32_t y = c;
+                for (int k = 0; k < 8; k++) { y = re_orbit_next(y, uni); if (y == c) break; rf_add(f, y); }
+                if ((c | 0x20) >= 'a' && (c | 0x20) <= 'z') { rf_add(f, c | 0x20); rf_add(f, c & ~0x20u); }
             }
         }
         return 0;
@@ -1875,6 +1903,31 @@ static int re_is_word(const uint16_t *s, uint32_t n, int64_t i, int iu) {
     return re_word_char(c) || (iu && (c == 0x17F || c == 0x212A));
 }
 
+/* the code point at s[i], a pair whole when it ends before end; *w its width */
+static uint32_t re_cp_within(const uint16_t *s, uint32_t i, uint32_t end, uint32_t *w) {
+    uint32_t c = s[i];
+    *w = 1;
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < end && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF) {
+        *w = 2;
+        return 0x10000 + ((c - 0xD800) << 10) + (s[i + 1] - 0xDC00u);
+    }
+    return c;
+}
+/* do the l units at x and at y match as a back reference compares them: alike, or with i
+   by their canonical forms, code point by code point with u (no simple case folding leaves
+   the BMP or enters it, so a pair matches a pair) */
+static int re_ref_eq(const uint16_t *s, uint32_t x, uint32_t y, uint32_t l, int icase, int uni) {
+    uint32_t k = 0;
+    while (k < l) {
+        uint32_t wa = 1, wb = 1, a = s[x + k], b = s[y + k];
+        if (icase && uni) { a = re_cp_within(s, x + k, x + l, &wa); b = re_cp_within(s, y + k, y + l, &wb); }
+        if (wa != wb) return 0;
+        if (a != b && (!icase || re_rep(a, uni) != re_rep(b, uni))) return 0;
+        k += wa;
+    }
+    return 1;
+}
+
 #define RE_STEP_CHUNK 4096u
 
 /* the program at prog[0] run on s[0, n) from pos0: 1 a match, 0 none, -1 the budget spent.
@@ -1947,17 +2000,11 @@ static int re_run(const uint32_t *prog, const uint16_t *s, uint32_t n, uint32_t 
                 if (back) {
                     if (pos < l) goto fail;
                     uint32_t from = pos - l;
-                    for (uint32_t k = 0; k < l; k++) {
-                        uint32_t x = s[a + k], y = s[from + k];
-                        if (x != y && (!(w & RB_ICASE) || re_rep(x, uni) != re_rep(y, uni))) goto fail;
-                    }
+                    if (!re_ref_eq(s, a, from, l, (w & RB_ICASE) != 0, uni)) goto fail;
                     pos = from;
                 } else {
                     if (pos + l > n) goto fail;
-                    for (uint32_t k = 0; k < l; k++) {
-                        uint32_t x = s[a + k], y = s[pos + k];
-                        if (x != y && (!(w & RB_ICASE) || re_rep(x, uni) != re_rep(y, uni))) goto fail;
-                    }
+                    if (!re_ref_eq(s, a, pos, l, (w & RB_ICASE) != 0, uni)) goto fail;
                     pos += l;
                 }
                 goto next;

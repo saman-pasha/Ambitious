@@ -182,7 +182,8 @@ static void cc_error(js_cc *cc, uint32_t line, const char *m) {
 
 /* ---- the lexer ---- */
 
-static int lx_idstart(uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '$' || c == '_' || c >= 0x80 || c == '\\'; }
+/* an identifier's ASCII characters (a backslash begins an escape); beyond ASCII lx_id_at */
+static int lx_idstart(uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '$' || c == '_' || c == '\\'; }
 static int lx_idchar(uint8_t c) { return lx_idstart(c) || (c >= '0' && c <= '9'); }
 static int lx_hex(uint8_t c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
 
@@ -191,6 +192,16 @@ static void lx_push_cp(vector<uint16_t> *u, uint32_t cp) {
         push_back(u, (uint16_t)(0xD800 + ((cp - 0x10000) >> 10)));
         push_back(u, (uint16_t)(0xDC00 + ((cp - 0x10000) & 0x3FF)));
     } else push_back(u, (uint16_t)cp);
+}
+/* a code point as UTF-8 */
+static void lx_put_utf8(vector<char> *b, uint32_t cp) {
+    if (cp < 0x80) { push_back(b, (char)cp); return; }
+    if (cp < 0x800) { push_back(b, (char)(0xC0 | cp >> 6)); push_back(b, (char)(0x80 | (cp & 0x3F))); return; }
+    if (cp < 0x10000) { push_back(b, (char)(0xE0 | cp >> 12)); push_back(b, (char)(0x80 | (cp >> 6 & 0x3F))); push_back(b, (char)(0x80 | (cp & 0x3F))); return; }
+    push_back(b, (char)(0xF0 | cp >> 18));
+    push_back(b, (char)(0x80 | (cp >> 12 & 0x3F)));
+    push_back(b, (char)(0x80 | (cp >> 6 & 0x3F)));
+    push_back(b, (char)(0x80 | (cp & 0x3F)));
 }
 
 /* one UTF-8 character at src[i]: its code point, its length in *k */
@@ -205,6 +216,20 @@ static uint32_t lx_utf8(const char *src, uint32_t srcn, uint32_t i, uint32_t *k)
         return (c & 0x07) << 18 | ((uint8_t)src[i + 1] & 0x3F) << 12 | ((uint8_t)src[i + 2] & 0x3F) << 6 | ((uint8_t)src[i + 3] & 0x3F);
     }
     return 0xFFFD;
+}
+
+/* WhiteSpace beyond ASCII: U+FEFF and the space separators (Zs, unchanged since Unicode 6.3) */
+static int lx_space(uint32_t cp) {
+    return cp == 0xA0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) || cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
+}
+/* does an identifier begin (part: go on) with the character at src[i]? Beyond ASCII its code
+   point's ID_Start (ID_Continue, ZWNJ, ZWJ), src/js/unicode.h's; *k its length */
+static int lx_id_at(const char *src, uint32_t srcn, uint32_t i, int part, uint32_t *k) {
+    uint8_t c = (uint8_t)src[i];
+    *k = 1;
+    if (c < 0x80) return part ? lx_idchar(c) : lx_idstart(c);
+    uint32_t cp = lx_utf8(src, srcn, i, k);
+    return part ? js_uni_id_part(cp) : js_uni_id_start(cp);
 }
 
 /* an escape after a backslash at src[i] (the character after it): into u; the index after it */
@@ -291,11 +316,11 @@ static void lx(CC) {
     int nl = 0;
     while (i < srcn) {
         uint8_t c = (uint8_t)src[i];
+        uint32_t k = 1;
         if (c == '\n') { nl = 1; cc->line++; i++; }
         else if (c == ' ' || c == '\t' || c == '\r' || c == 0x0B || c == 0x0C) i++;
-        else if (c == 0xC2 && i + 1 < srcn && (uint8_t)src[i + 1] == 0xA0) i += 2;
-        else if (c == 0xEF && i + 2 < srcn && (uint8_t)src[i + 1] == 0xBB && (uint8_t)src[i + 2] == 0xBF) i += 3;
         else if (c == 0xE2 && i + 2 < srcn && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9)) { nl = 1; cc->line++; i += 3; }
+        else if (c >= 0x80 && lx_space(lx_utf8(src, srcn, i, &k))) i += k;
         else if (c == '/' && i + 1 < srcn && src[i + 1] == '/') { while (i < srcn && src[i] != '\n') i++; }
         else if (c == '/' && i + 1 < srcn && src[i + 1] == '*') {
             i += 2;
@@ -317,34 +342,43 @@ static void lx(CC) {
         return;
     }
     uint8_t c = (uint8_t)src[i];
-    if (lx_idstart(c) || c == '#') {
-        /* a name: its characters (escapes read) as UTF-8, then its atom */
+    uint32_t idk = 1;
+    if ((c < 0x80 ? lx_idstart(c) : lx_id_at(src, srcn, i, 0, &idk)) || c == '#') {
+        /* a name: its characters (escapes read) as UTF-8, then its atom. Each is an
+           identifier's, escaped or not: ID_Start first, ID_Continue after (ASCII's here,
+           the rest by lx_id_at) */
         vector<char> b;
+        uint32_t nc = 0;
         if (c == '#') { push_back(b, '#'); i++; }
-        while (i < srcn && lx_idchar((uint8_t)src[i])) {
-            if (src[i] == '\\') {
+        while (i < srcn) {
+            uint8_t ch = (uint8_t)src[i];
+            if (ch < 0x80 && ch != '\\') {
+                if (!(nc ? lx_idchar(ch) : lx_idstart(ch))) break;
+                push_back(b, src[i]);
+                i++;
+                nc++;
+                continue;
+            }
+            if (ch == '\\') {
                 vector<uint16_t> u;
                 if (i + 1 >= srcn || src[i + 1] != 'u') { cc_error(cc, cc->line, "an invalid escape in a name"); break; }
                 i = lx_escape(CCA, i + 1, &u);
-                for (size_t q = 0; q < len(u); q++) {
-                    uint32_t cp = at(u, q);
-                    if (cp < 0x80) push_back(b, (char)cp);
-                    else if (cp < 0x800) { push_back(b, (char)(0xC0 | cp >> 6)); push_back(b, (char)(0x80 | (cp & 0x3F))); }
-                    else { push_back(b, (char)(0xE0 | cp >> 12)); push_back(b, (char)(0x80 | (cp >> 6 & 0x3F))); push_back(b, (char)(0x80 | (cp & 0x3F))); }
-                }
+                if (cc->err) break;
+                /* its code point (a pair whole) */
+                uint32_t cp = len(u) ? at(u, 0) : 0;
+                if (len(u) == 2) cp = 0x10000 + ((cp - 0xD800) << 10) + (at(u, 1) - 0xDC00u);
+                int ok = cp < 0x80 ? cp != '\\' && (nc ? lx_idchar((uint8_t)cp) : lx_idstart((uint8_t)cp)) : nc ? js_uni_id_part(cp) : js_uni_id_start(cp);
+                if (!ok) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); break; }
+                lx_put_utf8(&b, cp);
+                nc++;
                 t.aux = 1;
                 continue;
             }
-            if ((uint8_t)src[i] >= 0x80) {
-                uint32_t k;
-                uint32_t cp = lx_utf8(src, srcn, i, &k);
-                if (cp == 0xA0 || cp == 0x2028 || cp == 0x2029 || cp == 0xFEFF || (cp >= 0x2000 && cp <= 0x200A) || cp == 0x3000) break;
-                for (uint32_t q = 0; q < k; q++) push_back(b, src[i + q]);
-                i += k;
-                continue;
-            }
-            push_back(b, src[i]);
-            i++;
+            uint32_t k = 1;
+            if (!lx_id_at(src, srcn, i, nc > 0, &k)) break;
+            for (uint32_t q = 0; q < k; q++) push_back(b, src[i + q]);
+            i += k;
+            nc++;
         }
         t.type = T_NAME;
         t.str = js_atom(vm, js_str_utf8(vm, data(b), len(b)));
@@ -404,8 +438,8 @@ static void lx(CC) {
                 else { t.aux = 1; t.str = jv_idx(b); }
             }
             i++;
-            if (i < srcn && lx_idstart((uint8_t)src[i])) cc_error(cc, cc->line, "an identifier starts right after a number");
-        } else if (i < srcn && lx_idstart((uint8_t)src[i])) cc_error(cc, cc->line, "an identifier starts right after a number");
+            if (i < srcn && lx_id_at(src, srcn, i, 0, &idk)) cc_error(cc, cc->line, "an identifier starts right after a number");
+        } else if (i < srcn && lx_id_at(src, srcn, i, 0, &idk)) cc_error(cc, cc->line, "an identifier starts right after a number");
     } else if (c == '"' || c == '\'') {
         vector<uint16_t> u;
         uint32_t j = i + 1;
@@ -478,7 +512,9 @@ static void lx(CC) {
         }
         if (!op) {
             char m[64];
-            snprintf(m, sizeof m, "an unexpected character '%c'", c >= 32 && c < 127 ? c : '?');
+            /* beyond ASCII, a character no token begins with (not ID_Start, not white space): V8's words */
+            if (c >= 0x80) snprintf(m, sizeof m, "Invalid or unexpected token");
+            else snprintf(m, sizeof m, "an unexpected character '%c'", c >= 32 && c < 127 ? c : '?');
             cc_error(cc, cc->line, m);
             t.type = T_EOF;
         }
@@ -517,7 +553,9 @@ static void lx_regex(CC, uint32_t start) {
     uint32_t pend = i;
     i++;
     uint32_t fstart = i;
-    while (i < srcn && lx_idchar((uint8_t)src[i])) i++;
+    /* the flags: what an identifier goes on with (the engine refuses all but its letters) */
+    uint32_t k = 1;
+    while (i < srcn && lx_id_at(src, srcn, i, 1, &k)) i += k;
     jtok t = cc->tok;
     t.type = T_REGEX;
     t.str = js_str_utf8(vm, src + start + 1, pend > start + 1 ? pend - start - 1 : 0);

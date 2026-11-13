@@ -1434,6 +1434,60 @@ be built side by side and merged without touching each other's.
   colour conversions every filter makes (sRGB to linearRGB and back, a power a channel) are now looked up in a
   table of every eight-bit colour at every alpha, made once a process: feGaussianBlur's element was 143 ms,
   svg-filter.html's paint 34.9 ms, then 26.4; every page's pixels as they were (186 renders, byte for byte).
+- **12aj The script engine's Unicode at 17.0** (`tools/gen-unicode.py`, which replaces `tools/gen-unicode.pl` and
+  reads the Unicode Character Database's own files, `https://www.unicode.org/Public/17.0.0/`'s, kept out of the
+  repository; `src/js/unicode.h` and `src/js/normalize.h`, which it writes; the final sigma in `src/js/builtins.c`;
+  the lexer's names and white space in `src/js/compile.c`; a group's name, the first-character filter and back
+  references in `src/js/regexp.c`), each line held to node 22 (V8 12.4 over ICU 78, Unicode 17.0):
+  - the generator reads UnicodeData.txt, Scripts.txt, ScriptExtensions.txt, the property and value aliases,
+    PropList.txt, the derived properties, CaseFolding.txt, SpecialCasing.txt and emoji-data.txt, and writes the
+    headers in their layout. Given the 15.0 files it writes perl's Unicode::UCD's headers again but for four
+    aliases perl capitalizes (`Cntrl`, `Digit`, `Punct`, `Space`, which V8 refuses for the database's `cntrl`,
+    `digit`, `punct`, `space`) and the places of the four properties below the engine reads besides `\p`;
+  - every property ECMA-262's tables 67 to 70 name at 17.0: 38 general categories, 175 scripts and their
+    extensions (16.0's Garay, Gurung_Khema, Kirat_Rai, Ol_Onal, Sunuwar, Todhri and Tulu_Tigalari, 17.0's
+    Beria_Erfe, Sidetic, Tai_Yo and Tolong_Siki, by their short names too), 53 binary properties, the
+    properties of strings (Emoji 17.0 already); Katakana_Or_Hiragana, no code point's script, and Chisoi, not
+    yet encoded, refused as V8 refuses them;
+  - case at 17.0: the mappings (Garay's, Beria Erfe's, Latin's new capitals, Cyrillic's TJE) and simple case
+    folding's new pairs (U+1FD3 and U+0390, U+1FE3 and U+03B0, U+FB05 and U+FB06); toLowerCase's final sigma
+    from its context as ICU reads it, code point by code point, a Case_Ignorable character skipped and a Cased
+    one deciding (before, a code unit on either side, cased when it had a mapping); with `u`, a back reference
+    compares code points (a letter beyond the BMP, Deseret's to Adlam's, matched no other case of itself) and
+    `[a-z]` takes U+017F and U+212A, which the first-character filter had dropped;
+  - normalization at 17.0: the new decompositions and the 20 new primary composites (Todhri's, Tulu-Tigalari's,
+    Gurung Khema's and Kirat Rai's, two of whose vowel signs, both starters, join);
+  - identifiers by ID_Start and ID_Continue (and ZWNJ, ZWJ) at 17.0, escaped or not, in the lexer and in a
+    group's name (a surrogate pair one code point there without `u` too), V8's "Invalid or unexpected token" for
+    a character no token begins with; an escape beyond the BMP (`\u{1D49C}`) a code point whole; every space
+    separator white space (before, U+1680, U+2000 to U+200A, U+202F, U+205F and U+3000 were none, and one at a
+    token's start was read as an empty name again and again, without end); StringToBigInt trims every
+    StrWhiteSpaceChar from its end too (ASCII's, U+00A0 and U+FEFF alone before);
+  - what needs no table of its own: `\s`, `trim` and the lexer's white space (Zs, unchanged since 6.3), `\w`
+    with `i` and `u` (U+017F and U+212A still all that fold into it), `isWellFormed`, Intl.Segmenter's breaks
+    (`tools/gen-intl.py`'s, at 17.0 already), the currency symbols' spacing (Python's 15.1 categories, where no
+    symbol of CLDR's is 16.0's or 17.0's). Layout's and paint's tables (`tools/gen-bidi.pl`,
+    `tools/gen-shape.pl`) read perl's 15.0 still: other packages'.
+
+  Gate, node's output line for line: `tests/js/uniprops.js` (961 lines: each property's members over every code
+  point, their count, ranges and hash, with `i` and with `v`; each name and alias V8 takes, and 162 names and
+  spellings it refuses, the properties of strings but with `v`; 231 lines differed before), `unicase.js` (274: every
+  code point's upper and lower case, the final sigma's context around every code point, every orbit under `i`, `iu`
+  and `iv`, back references, ranges closed under case, `\w` and `\b`; 88 differed), `uniident.js` (98: every code
+  point of the BMP and every assigned one beyond it tried as a name's first and later character and as white space,
+  by the lexer and by a group's name; every ID_Start and ID_Continue character at once; white space where a string
+  is read as a number, a BigInt, a date or JSON, or trimmed; the old lexer never finished it) and `normalize.js` (84
+  lines, from 79: the 16.0 and 17.0 ranges no longer left out, its NFD, NFKC and NFKD lines node's now, and every
+  decomposition composed again).
+
+  Cost (`docs/performance.md`; callgrind's instructions of each loop, its setup's subtracted, against main's build):
+  1.2M `\p{L}` tests and 40 global matches 6,486M instructions, then 6,439M; toUpperCase and toLowerCase over 30 MB
+  7,139M, then 7,123M (a sigma's ASCII neighbours read without a lookup, `cp_at` kept inline in the loop);
+  normalize's four forms 9,445M, then 9,470M (+0.3%); eight compiles of a 2 MB script 2,994M, then 3,239M (+8.2%:
+  half of them with names beyond ASCII, each such character looked up), its ASCII four 1,500M, then 1,524M (+1.6%).
+  The tables: `unicode.h` 505 KB, then 523 KB; `normalize.h` 183 KB, then 186 KB. The js stage 39 s longer (the new
+  pages 18.6, 9.6 and 8.6 s, normalize.js 3.1 s from 2.0), no page's peak resident size past 300 MB: their loops run
+  a timer at a time, the collector between them.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

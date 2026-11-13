@@ -1,0 +1,98 @@
+tried 97049
+lexer neither 28052 1117929667 80 81 82 83 84 85
+lexer begins (white space) 17 461408596 a0 1680 2000 2001 2002 2003
+lexer goes on 3312 3614707616 b7 300 301 302 303 304
+lexer begins and goes on 65668 1405912338 aa b5 ba c0 c1 c2
+group names /u 28071 0 3312 65666 3207789376 0 3614707616 1632722449
+group names / 28071 0 3312 65666 3207789376 0 3614707616 1632722449
+ID_Start 145864 1 1
+ID_Continue 149177 1 1
+white space 19 1111111111111111111 0000000000000110000
+names as values function 3
+string 9 12 12 1.5 7 true 2 2 1577923200000 1577923200000 1
+string a 12 12 1.5 7 true 2 2 1577923200000 1577923200000 1
+string b 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string c 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string d 12 12 1.5 7 true 2 2 1577923200000 1577923200000 1
+string 20 12 12 1.5 7 true 2 2 1577923200000 1577923200000 1
+string 85 SyntaxError NaN NaN NaN false 3 3 NaN NaN SyntaxError
+string a0 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 1680 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 180e SyntaxError NaN NaN NaN false 3 3 NaN NaN SyntaxError
+string 2000 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 2005 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 200a 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 200b SyntaxError NaN NaN NaN false 3 3 NaN NaN SyntaxError
+string 2028 12 12 1.5 7 true 2 2 NaN NaN SyntaxError
+string 2029 12 12 1.5 7 true 2 2 NaN NaN SyntaxError
+string 202f 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 205f 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string 3000 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+string feff 12 12 1.5 7 true 2 2 1577923200000 1577923200000 SyntaxError
+"var \\u0061 = 1; return a" ok 1
+"var \\u{61}b = 2; return ab" ok 2
+"var a\\u0030 = 3; return a0" ok 3
+"var \\u0030a = 1" SyntaxError
+"var \\u2603 = 1" SyntaxError
+"var a\\u2603 = 1" SyntaxError
+"var \\u00aa = 4; return ª" ok 4
+"var \\u{1d49c} = 5; return 𝒜" ok 5
+"var 𝒜\\u{1d49c} = 6; return 𝒜𝒜" ok 6
+"var \\ud835\\udc9c = 1" SyntaxError
+"var a\\u200c = 7; return a‌" ok 7
+"var \\u200c = 1" SyntaxError
+"var a\\u200d\\u0300 = 8; return a‍̀" ok 8
+"var \\u0024 = 9; return $" ok 9
+"var \\u005f = 10; return _" ok 10
+"var \\u005c = 1" SyntaxError
+"var \\u{10d50} = 11; return 𐵐" ok 11
+"var \\u{16eba} = 1" SyntaxError
+"var \\u{1e5f0} = 12; return 𞗰" ok 12
+"return 1ª" SyntaxError
+"return 1　+2" ok 3
+"return 1 +2" ok 3
+"return 1𐵐" SyntaxError
+"return 0x1g" SyntaxError
+"return 1n +2n" ok 3
+"var a﻿b = 1" SyntaxError
+"return 1﻿+﻿1" ok 2
+"class A { #ª = 13; m() { return this.#ª; } } return new A().m()" ok 13
+"class A { #𐵐 = 14; m() { return this.#𐵐; } } return new A().m()" ok 14
+"class A { #☃ = 1 }" SyntaxError
+"return /a/ª" SyntaxError
+"return /a/gª" SyntaxError
+"return /a/　.source" ok a
+"var x = { ª: 15, 𐵐: 16 }; return x.ª + x.𐵐" ok 31
+"var ゛ = 17; return ゛" ok 17
+"var ℘ = 18; return ℘" ok 18
+"var a· = 19; return a·" ok 19
+"var ·a = 1" SyntaxError
+"var a፩ = 20; return a፩" ok 20
+"var ፩a = 1" SyntaxError
+"var a󠄀 = 21; return a󠄀" ok 21
+"var 󠄀a = 1" SyntaxError
+"var aⸯ = 1" SyntaxError
+"var ⸯ = 1" SyntaxError
+"var a・ = 22; return a・" ok 22
+"var a･ = 23; return a･" ok 23
+"var ・ = 1" SyntaxError
+"var a༺ = 1" SyntaxError
+"var a᠎ = 1" SyntaxError
+"var a​ = 1" SyntaxError
+"var a­ = 1" SyntaxError
+"(?<𝒜>.)" 1 1 1
+"(?<a𝒜>.)" 1 1 1
+"(?<\\u{1d49c}>.)" 1 1 1
+"(?<\\ud835\\udc9c>.)" 1 1 1
+"(?<a\\ud835\\udc9c>.)" 1 1 1
+"(?<\ud835>.)" 0 0 0
+"(?<a‌>.)" 1 1 1
+"(?<‌>.)" 0 0 0
+"(?<$_>.)" 1 1 1
+"(?<a1>.)" 1 1 1
+"(?<1a>.)" 0 0 0
+"(?<ª>.)" 1 1 1
+"(?<𐵐>.)" 1 1 1
+"(?<a·>.)" 1 1 1
+"(?<·>.)" 0 0 0
+"(?<a󠄀>.)" 1 1 1

@@ -309,7 +309,36 @@ static uint32_t cp_at(js_vm *vm, uint32_t o, uint32_t n, uint32_t i, uint32_t *w
     }
     return c;
 }
-static int cased(uint32_t c) { return js_uni_lower(c) != c || js_uni_upper(c) != c; }
+/* is a cased letter before the unit at i (dir < 0), or at i or after it (dir > 0), the
+   case-ignorable characters between skipped? SpecialCasing's Final_Sigma as ICU reads it:
+   by code points, and a character both case-ignorable and cased is skipped. (Its pairs
+   are read here, not by cp_at, which str_case's loop keeps inline as its one caller.) */
+static int sigma_cased_near(js_vm *vm, uint32_t o, uint32_t n, uint32_t i, int dir) {
+    for (;;) {
+        uint32_t c;
+        if (dir < 0) {
+            if (i == 0) return 0;
+            c = vm->units[o + --i];
+            if (c >= 0xDC00 && c <= 0xDFFF && i > 0 && vm->units[o + i - 1] >= 0xD800 && vm->units[o + i - 1] <= 0xDBFF) {
+                i--;
+                c = 0x10000 + ((vm->units[o + i] - 0xD800u) << 10) + (c - 0xDC00);
+            }
+        } else {
+            if (i >= n) return 0;
+            c = vm->units[o + i++];
+            if (c >= 0xD800 && c <= 0xDBFF && i < n && vm->units[o + i] >= 0xDC00 && vm->units[o + i] <= 0xDFFF) {
+                c = 0x10000 + ((c - 0xD800) << 10) + (vm->units[o + i] - 0xDC00u);
+                i++;
+            }
+        }
+        /* ASCII's: the letters cased, ' . : ^ ` case-ignorable */
+        if (c < 0x80) {
+            if (c == '\'' || c == '.' || c == ':' || c == '^' || c == '`') continue;
+            return (c | 0x20) >= 'a' && (c | 0x20) <= 'z';
+        }
+        if (!js_uni_case_ignorable(c)) return js_uni_cased(c);
+    }
+}
 
 /* toUpperCase and toLowerCase: Unicode's full mappings (SpecialCasing's that hold
    everywhere), and a final sigma lowercased as one */
@@ -332,12 +361,8 @@ static uint32_t str_case(js_vm *vm, uint32_t s, int upper) {
         if (!k) {
             out[0] = upper ? js_uni_upper(c) : js_uni_lower(c);
             k = 1;
-            if (!upper && c == 0x3A3) {
-                /* a capital sigma after a cased letter and before none is a word's final one */
-                int before = i > 0 && cased(vm->units[o + i - 1]);
-                int after = i + 1 < n && cased(vm->units[o + i + 1]);
-                if (before && !after) out[0] = 0x3C2;
-            }
+            /* a capital sigma after a cased letter and before none is a word's final one */
+            if (!upper && c == 0x3A3 && sigma_cased_near(vm, o, n, i, -1) && !sigma_cased_near(vm, o, n, i + 1, 1)) out[0] = 0x3C2;
         }
         for (uint32_t j = 0; j < k; j++) put_cp(&u, out[j]);
         i += w - 1;

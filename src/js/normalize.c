@@ -5,7 +5,8 @@
    order, each run of non-starters sorted by class, stably; then for NFC and NFKC the
    canonical composition joins each character to the last starter unless something
    between blocks it, into the primary composites alone (the exclusions never made).
-   The tables are src/js/normalize.h, from perl's Unicode::Normalize.
+   The tables are src/js/normalize.h, from the Unicode Character Database 17.0
+   (tools/gen-unicode.py --normalize).
 
    A quick check comes first (UAX #15's): a string whose every code point is in the form
    already, its marks in order, is the result as it is, nothing allocated. ASCII, and
