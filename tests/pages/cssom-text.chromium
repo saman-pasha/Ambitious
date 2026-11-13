@@ -1,0 +1,330 @@
+"DIV" -> "div"
+"div>p" -> "div > p"
+"a:HOVER" -> "a:hover"
+"*.a" -> ".a"
+"*" -> "*"
+"* > *" -> "* > *"
+"[A=b]" -> "[a=\"b\"]"
+"[a=\"b\" i]" -> "[a=\"b\" i]"
+"[a='b']" -> "[a=\"b\"]"
+"[a|=b]" -> "[a|=\"b\"]"
+"a:not(.b,.c)" -> "a:not(.b, .c)"
+"a:is(.b , .c)" -> "a:is(.b, .c)"
+"p::BEFORE" -> "p::before"
+"p:before" -> "p::before"
+"p::first-line" -> "p::first-line"
+"p:first-letter" -> "p::first-letter"
+"li:nth-child(2N+1)" -> "li:nth-child(2n+1)"
+"li:nth-child( odd )" -> "li:nth-child(2n+1)"
+"li:nth-child(even)" -> "li:nth-child(2n)"
+"li:nth-child(+5)" -> "li:nth-child(5)"
+"li:nth-child(-n+3)" -> "li:nth-child(-n+3)"
+"li:nth-of-type(2n)" -> "li:nth-of-type(2n)"
+"li:nth-child(2n+1 of .x)" -> "li:nth-child(2n+1 of .x)"
+"#ID.Cls" -> "#ID.Cls"
+"svg|rect" threw SyntaxError
+"*|*" -> "*"
+"|a" -> "|a"
+"a:where(.b)" -> "a:where(.b)"
+"a:has(> img)" -> "a:has(> img)"
+"a:has(+ b)" -> "a:has(+ b)"
+":root" -> ":root"
+"a::after:hover" threw SyntaxError
+".a\\:b" -> ".a\\:b"
+".\\31 23" -> ".\\31 23"
+"div ~ p" -> "div ~ p"
+"div   p" -> "div p"
+"a:lang(en)" -> "a:lang(en)"
+"a:dir(rtl)" -> "a:dir(rtl)"
+"input:checked" -> "input:checked"
+":host" -> ":host"
+":host(.a)" -> ":host(.a)"
+"::slotted(span)" -> "::slotted(span)"
+"::part(foo)" -> "::part(foo)"
+":host-context(.dark)" -> ":host-context(.dark)"
+"a:foo" threw SyntaxError
+"a::foo" threw SyntaxError
+"::-webkit-scrollbar" -> "::-webkit-scrollbar"
+"a:-webkit-any(b)" -> "a:-webkit-any(b)"
+"a," threw SyntaxError
+",a" threw SyntaxError
+"" threw SyntaxError
+".a .b, .c > .d" -> ".a .b, .c > .d"
+"a:focus-visible" -> "a:focus-visible"
+"a:nth-last-child(3)" -> "a:nth-last-child(3)"
+"a:only-child" -> "a:only-child"
+"html|div" threw SyntaxError
+":is()" -> ":is()"
+":where()" -> ":where()"
+"a:not()" threw SyntaxError
+"&" -> "&"
+".a &" -> ".a &"
+"a b c d e" -> "a b c d e"
+"A[HREF$=\".PDF\"]" -> "a[href$=\".PDF\"]"
+"a[href^=http]" -> "a[href^=\"http\"]"
+"a[href*=\"x\"]" -> "a[href*=\"x\"]"
+"[data-x]" -> "[data-x]"
+"ns|*" threw SyntaxError
+"p:empty" -> "p:empty"
+"a:link" -> "a:link"
+"a:visited" -> "a:visited"
+"a:any-link" -> "a:any-link"
+"option:default" -> "option:default"
+"input:placeholder-shown" -> "input:placeholder-shown"
+"input::placeholder" -> "input::placeholder"
+"li::marker" -> "li::marker"
+"::selection" -> "::selection"
+"::backdrop" -> "::backdrop"
+"dialog:modal" -> "dialog:modal"
+"p:first-child" -> "p:first-child"
+"td:last-of-type" -> "td:last-of-type"
+":is(a, b) c" -> ":is(a, b) c"
+":not(:hover)" -> ":not(:hover)"
+"svg|rect { }" -> "svg|rect { }"
+"*|rect { }" -> "rect { }"
+"svg|* { }" -> "svg|* { }"
+"|rect { }" -> "|rect { }"
+".a { .b { color: red } }" -> ".a {\n  & .b { color: red; }\n}"
+".a { > .b { color: red } }" -> ".a {\n  & > .b { color: red; }\n}"
+".a { + .b { } ~ .c { } }" -> ".a {\n  & + .b { }\n  & ~ .c { }\n}"
+".a { color: red; .b { } margin: 0 }" -> ".a {\n  color: red;\n  & .b { }\n  margin: 0px;\n}"
+".a { @media screen { color: red } }" -> ".a {\n  @media screen {\n  color: red;\n}\n}"
+".a { @media screen { .b { color: red } } }" -> ".a {\n  @media screen {\n  & .b { color: red; }\n}\n}"
+".a { .b, .c & { } }" -> ".a {\n  & .b, .c & { }\n}"
+".a { &.b { } }" -> ".a {\n  &.b { }\n}"
+".a { div & { } }" -> ".a {\n  div & { }\n}"
+".a { :hover { } }" -> ".a {\n  & :hover { }\n}"
+".a { color: red; @supports (display: grid) { display: grid } }" -> ".a {\n  color: red;\n  @supports (display: grid) {\n  display: grid;\n}\n}"
+"@media screen { @media print { .a { color: red } } }" -> "@media screen {\n  @media print {\n  .a { color: red; }\n}\n}"
+"@media screen { @supports (x: y) { } }" -> "@media screen {\n  @supports (x: y) {\n}\n}"
+"@media SCREEN AND (MIN-WIDTH:100PX) { }" -> "@media screen and (min-width: 100px) {\n}"
+"@media (min-width:100px) and (max-width : 200px) { }" -> "@media (min-width: 100px) and (max-width: 200px) {\n}"
+"@media not screen { }" -> "@media not screen {\n}"
+"@media only screen { }" -> "@media only screen {\n}"
+"@media (width >= 600px) { }" -> "@media (width >= 600px) {\n}"
+"@media (400px<=width<=700px) { }" -> "@media (400px <= width <= 700px) {\n}"
+"@media (orientation:landscape) { }" -> "@media (orientation: landscape) {\n}"
+"@media screen, print and (color) { }" -> "@media screen, print and (color) {\n}"
+"@media (min-resolution: 2dppx) { }" -> "@media (min-resolution: 2dppx) {\n}"
+"@media (prefers-color-scheme: dark) { }" -> "@media (prefers-color-scheme: dark) {\n}"
+"@media garbage(x) { }" -> "@media garbage(x) {\n}"
+"@media (foo: bar) { }" -> "@media (foo: bar) {\n}"
+"@media screen and { }" -> "@media not all {\n}"
+"@media { }" -> "@media  {\n}"
+"@media all { }" -> "@media all {\n}"
+"@media (hover) and (pointer: fine) { }" -> "@media (hover) and (pointer: fine) {\n}"
+"@media not (color) { }" -> "@media not (color) {\n}"
+"@media (color) or (hover) { }" -> "@media (color) or (hover) {\n}"
+"@media (min-aspect-ratio: 16/9) { }" -> "@media (min-aspect-ratio: 16 / 9) {\n}"
+"@media (min-width: calc(1px + 2px)) { }" -> "@media (min-width: calc(3px)) {\n}"
+"@supports (display:grid) AND (color:red) { }" -> "@supports (display:grid) AND (color:red) {\n}"
+"@supports not (display: grid) { }" -> "@supports not (display: grid) {\n}"
+"@supports (display: grid) or (display: flex) { }" -> "@supports (display: grid) or (display: flex) {\n}"
+"@supports selector(a > b) { }" -> "@supports selector(a > b) {\n}"
+"@supports font-tech(color-COLRv1) { }" -> "@supports font-tech(color-COLRv1) {\n}"
+"@supports (--x: 1) { }" -> "@supports (--x: 1) {\n}"
+"@supports ( display : grid ) { }" -> "@supports ( display : grid ) {\n}"
+"@supports display: grid { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@supports display: grid { }'.
+"@supports (foo: bar) { }" -> "@supports (foo: bar) {\n}"
+"@supports ((display: grid)) { }" -> "@supports ((display: grid)) {\n}"
+"@supports (display: grid) and (display: flex) or (x: y) { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@supports (display: grid) and (display: flex) or (x: y) { }'.
+"@container (min-width:400px) { }" -> "@container (min-width: 400px) {\n}"
+"@container card { }" -> "@container card {\n}"
+"@container card (width>400px) { }" -> "@container card (width > 400px) {\n}"
+"@container style(--x: 1) { }" -> "@container style(--x: 1) {\n}"
+"@container (min-width: 400px) and (max-width: 800px) { }" -> "@container (min-width: 400px) and (max-width: 800px) {\n}"
+"@container not (width < 10px) { }" -> "@container not (width < 10px) {\n}"
+"@container a, b (width > 1px) { }" -> "@container a, b (width > 1px) {\n}"
+"@layer a { }" -> "@layer a {\n}"
+"@layer a.b { }" -> "@layer a.b {\n}"
+"@layer A , B ;" -> "@layer A, B;"
+"@layer a b { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@layer a b { }'.
+"@layer;" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@layer;'.
+"@scope (.a) to (.b) { }" -> "@scope (.a) to (.b) {\n}"
+"@scope (.a, .b) { }" -> "@scope (.a, .b) {\n}"
+"@scope to (.b) { }" -> "@scope to (.b) {\n}"
+"@scope (div > p) { p { color: red } }" -> "@scope (div > p) {\n  p { color: red; }\n}"
+"@scope (.x) { :scope { color: red } & { color: blue } }" -> "@scope (.x) {\n  :scope { color: red; }\n  & { color: blue; }\n}"
+"@keyframes a { FROM { } 0% { } 50.5% { } 100% { } }" -> "@keyframes a { \n  0% { }\n  0% { }\n  50.5% { }\n  100% { }\n}"
+"@keyframes a { 101% { } }" -> "@keyframes a { \n}"
+"@keyframes a { from, to { color: red } }" -> "@keyframes a { \n  0%, 100% { color: red; }\n}"
+"@keyframes a { entry 10% { } }" -> "@keyframes a { \n  entry 10% { }\n}"
+"@keyframes \"a b\" { }" -> "@keyframes a\\ b { \n}"
+"@keyframes none { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@keyframes none { }'.
+"@keyframes \"none\" { }" -> "@keyframes none { \n}"
+"@keyframes a {}" -> "@keyframes a { \n}"
+"@-webkit-keyframes a { from { color: red } }" -> "@-webkit-keyframes a { \n  0% { color: red; }\n}"
+"@font-face { src: url(a.woff); font-family: \"My Font\"; font-weight: 100 900; font-style: oblique 10deg; }" -> "@font-face { src: url(\"a.woff\"); font-family: \"My Font\"; font-weight: 100 900; font-style: oblique 10deg; }"
+"@font-face { font-display: block; font-family: x }" -> "@font-face { font-display: block; font-family: x; }"
+"@font-face { color: red }" -> "@font-face { }"
+"@page :first:left { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@page :first:left { }'.
+"@page :RIGHT { margin: 0 }" -> "@page :right { margin: 0px; }"
+"@page { @top-left { content: \"x\" } }" -> "@page { @top-left { content: \"x\"; } }"
+"@page a { size: A4 }" -> "@page a { size: a4; }"
+"@property --a { inherits: false; syntax: \"<color>\"; initial-value: RED }" -> "@property --a { syntax: \"<color>\"; inherits: false; initial-value: RED; }"
+"@property --a { syntax: \"<length>\" }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@property --a { syntax: "<length>" }'.
+"@property a { syntax: \"*\" }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@property a { syntax: "*" }'.
+"@counter-style a { symbols: \"*\"; system: cyclic }" -> "@counter-style a { system: cyclic; symbols: \"*\"; }"
+"@counter-style none { system: cyclic; symbols: x }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@counter-style none { system: cyclic; symbols: x }'.
+"@counter-style A { additive-symbols: 10 X, 5 V, 1 I; system: additive }" -> "@counter-style A { system: additive; additive-symbols: 10 X, 5 V, 1 I; }"
+"@namespace foo \"http://x\";" -> "@namespace foo url(\"http://x\");"
+"@import \"a.css\" print;" threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+"@import url(a.css) supports(display:grid);" threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+"@import url(a.css) layer(a.b) (min-width: 1px);" threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+"@unknown { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@unknown { }'.
+"@media screen { garbage }" -> "@media screen {\n}"
+"div { color: red } garbage" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'div { color: red } garbage'.
+"::-webkit-foo { }" -> "::-webkit-foo { }"
+"::-webkit-scrollbar-thumb:hover { }" -> "::-webkit-scrollbar-thumb:hover { }"
+"a::-webkit-search-cancel-button { }" -> "a::-webkit-search-cancel-button { }"
+"::-moz-selection { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '::-moz-selection { }'.
+":-webkit-any(a, b) { }" -> ":-webkit-any(a, b) { }"
+"a:nth-child(n) { }" -> "a:nth-child(n) { }"
+"a:nth-child(0n+5) { }" -> "a:nth-child(5) { }"
+"a:nth-child(-2n-1) { }" -> "a:nth-child(-2n-1) { }"
+"a:nth-child(1n) { }" -> "a:nth-child(n) { }"
+"a:nth-child(-n) { }" -> "a:nth-child(-n) { }"
+"a:nth-child(+n+2) { }" -> "a:nth-child(n+2) { }"
+"a:nth-child(3 of .x, .y) { }" -> "a:nth-child(3 of .x, .y) { }"
+"a:lang(en, \"fr\") { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'a:lang(en, "fr") { }'.
+":state(foo) { }" -> ":state(foo) { }"
+":is(:not(.a), .b) { }" -> ":is(:not(.a), .b) { }"
+"a:not(b c) { }" -> "a:not(b c) { }"
+"a || b { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'a || b { }'.
+"a:has(:has(b)) { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'a:has(:has(b)) { }'.
+"a::before::after { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'a::before::after { }'.
+"a::part(x y) { }" -> "a::part(x y) { }"
+"::slotted(.a) { }" -> "::slotted(.a) { }"
+":host(.a) .b { }" -> ":host(.a) .b { }"
+".a\\.b { }" -> ".a\\.b { }"
+"#\\31 a { }" -> "#\\31 a { }"
+"[data-x=\"a\\\"b\"] { }" -> "[data-x=\"a\\\"b\"] { }"
+"[ a = b ] { }" -> "[a=\"b\"] { }"
+"[a=\"x\" s] { }" threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '[a="x" s] { }'.
+"[a~=b] { }" -> "[a~=\"b\"] { }"
+"a#b.c[d]:hover::before { }" -> "a#b.c[d]:hover::before { }"
+"*::before { }" -> "::before { }"
+"*:hover { }" -> ":hover { }"
+"* .a { }" -> "* .a { }"
+"a  >  b { }" -> "a > b { }"
+"a\n\tb { }" -> "a b { }"
+"outline: none" -> "outline: none;" [outline-color=initial; outline-style=none; outline-width=initial]
+"outline: medium none" -> "outline: none medium;" [outline-color=initial; outline-style=none; outline-width=medium]
+"outline: none currentcolor" -> "outline: currentcolor none;" [outline-color=currentcolor; outline-style=none; outline-width=initial]
+"outline: medium" -> "outline: medium;" [outline-color=initial; outline-style=initial; outline-width=medium]
+"outline: auto" -> "outline: auto;" [outline-color=initial; outline-style=auto; outline-width=initial]
+"outline: medium none auto" -> "" []
+"outline: thin" -> "outline: thin;" [outline-color=initial; outline-style=initial; outline-width=thin]
+"outline-color: auto; outline-style: none; outline-width: medium" -> "outline-style: none; outline-width: medium;" [outline-style=none; outline-width=medium]
+"border-top: none" -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+"border-top: solid" -> "border-top: solid;" [border-top-width=medium; border-top-style=solid; border-top-color=currentcolor]
+"border-top: currentcolor" -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+"border-top: medium" -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+"border-top: medium solid" -> "border-top: solid;" [border-top-width=medium; border-top-style=solid; border-top-color=currentcolor]
+"border-top: 1px none" -> "border-top: 1px;" [border-top-width=1px; border-top-style=none; border-top-color=currentcolor]
+"border-top-width: medium; border-top-style: none; border-top-color: red" -> "border-top: red;" [border-top-width=medium; border-top-style=none; border-top-color=red]
+"border-top-width: 1px; border-top-style: none; border-top-color: currentcolor" -> "border-top: 1px;" [border-top-width=1px; border-top-style=none; border-top-color=currentcolor]
+"column-rule: none" -> "column-rule: medium;" [column-rule-width=medium; column-rule-style=none; column-rule-color=currentcolor]
+"column-rule: medium" -> "column-rule: medium;" [column-rule-width=medium; column-rule-style=none; column-rule-color=currentcolor]
+"column-rule: red" -> "column-rule: red;" [column-rule-width=medium; column-rule-style=none; column-rule-color=red]
+"border: medium" -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor]
+"border: none red" -> "border: red;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=red]
+"border: 1px none" -> "border: 1px;" [border-top-width=1px; border-right-width=1px; border-bottom-width=1px; border-left-width=1px; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor]
+"border: medium none currentcolor" -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor]
+"border-width: medium; border-style: none; border-color: currentcolor; border-image: none" -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor]
+"list-style: none none" -> "list-style: none none;" [list-style-position=initial; list-style-image=none; list-style-type=none]
+"list-style: outside none disc" -> "list-style: outside none disc;" [list-style-position=outside; list-style-image=none; list-style-type=disc]
+"list-style: inside" -> "list-style: inside;" [list-style-position=inside; list-style-image=initial; list-style-type=initial]
+"list-style-position: outside; list-style-image: none; list-style-type: disc" -> "list-style: outside none disc;" [list-style-position=outside; list-style-image=none; list-style-type=disc]
+"text-decoration: none solid currentcolor" -> "text-decoration: none;" [text-decoration-line=none; text-decoration-thickness=initial; text-decoration-style=solid; text-decoration-color=currentcolor]
+"text-decoration-line: none; text-decoration-thickness: auto; text-decoration-style: solid; text-decoration-color: currentcolor" -> "text-decoration: none;" [text-decoration-line=none; text-decoration-thickness=auto; text-decoration-style=solid; text-decoration-color=currentcolor]
+"text-decoration: auto" -> "text-decoration: none;" [text-decoration-line=initial; text-decoration-thickness=auto; text-decoration-style=initial; text-decoration-color=initial]
+"flex-flow: row nowrap" -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+"flex-flow: nowrap" -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+"flex-flow: column-reverse wrap-reverse" -> "flex-flow: column-reverse wrap-reverse;" [flex-direction=column-reverse; flex-wrap=wrap-reverse]
+"flex-direction: row; flex-wrap: nowrap" -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+"transition: all 0s ease 0s" -> "transition: all;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=all]
+"transition: opacity" -> "transition: opacity;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=opacity]
+"transition: opacity 1s ease 2s" -> "transition: opacity 1s 2s;" [transition-behavior=normal; transition-duration=1s; transition-timing-function=ease; transition-delay=2s; transition-property=opacity]
+"transition: opacity 0s 2s" -> "transition: opacity 2s;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=2s; transition-property=opacity]
+"transition: 1s 2s" -> "transition: 1s 2s;" [transition-behavior=normal; transition-duration=1s; transition-timing-function=ease; transition-delay=2s; transition-property=all]
+"transition-property: all; transition-duration: 0s; transition-timing-function: ease; transition-delay: 0s; transition-behavior: normal" -> "transition: all;" [transition-property=all; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-behavior=normal]
+"transition: color 1s allow-discrete" -> "transition: color 1s allow-discrete;" [transition-behavior=allow-discrete; transition-duration=1s; transition-timing-function=ease; transition-delay=0s; transition-property=color]
+"transition: margin 1s cubic-bezier(0.1, 0.2, 0.3, 0.4), color steps(4, end)" -> "transition: margin 1s cubic-bezier(0.1, 0.2, 0.3, 0.4), color steps(4);" [transition-behavior=normal, normal; transition-duration=1s, 0s; transition-timing-function=cubic-bezier(0.1, 0.2, 0.3, 0.4), steps(4); transition-delay=0s, 0s; transition-property=margin, color]
+"animation: a 1s 2s" -> "animation: 1s ease 2s 1 normal none running a;" [animation-duration=1s; animation-timing-function=ease; animation-delay=2s; animation-iteration-count=1; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=a; animation-timeline=auto]
+"animation: a 1s ease-in-out 2s 3 reverse both paused" -> "animation: 1s ease-in-out 2s 3 reverse both paused a;" [animation-duration=1s; animation-timing-function=ease-in-out; animation-delay=2s; animation-iteration-count=3; animation-direction=reverse; animation-fill-mode=both; animation-play-state=paused; animation-name=a; animation-timeline=auto]
+"animation-name: a; animation-duration: 1s" -> "animation-name: a; animation-duration: 1s;" [animation-name=a; animation-duration=1s]
+"container: a b / size" -> "container: a b / size;" [container-name=a b; container-type=size]
+"container: none" -> "container: none;" [container-name=none; container-type=normal]
+"container-name: none; container-type: normal" -> "container: none;" [container-name=none; container-type=normal]
+"columns: 3" -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+"columns: 3 auto" -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+"columns: auto 3" -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+"column-width: auto; column-count: auto" -> "column-width: auto; column-count: auto;" [column-width=auto; column-count=auto]
+"gap: 1px 1px" -> "gap: 1px;" [row-gap=1px; column-gap=1px]
+"place-content: center start" -> "place-content: center start;" [align-content=center; justify-content=start]
+"place-content: center center" -> "place-content: center;" [align-content=center; justify-content=center]
+"place-content: stretch" -> "place-content: stretch;" [align-content=stretch; justify-content=stretch]
+"place-self: start end" -> "place-self: start end;" [align-self=start; justify-self=end]
+"grid-row: a" -> "grid-row: a;" [grid-row-start=a; grid-row-end=a]
+"grid-row: a / a" -> "grid-row: a;" [grid-row-start=a; grid-row-end=a]
+"grid-row: 1 / auto" -> "grid-row: 1;" [grid-row-start=1; grid-row-end=auto]
+"grid-row: auto / 2" -> "grid-row: auto / 2;" [grid-row-start=auto; grid-row-end=2]
+"grid-column: span 2 / span 2" -> "grid-column: span 2 / span 2;" [grid-column-start=span 2; grid-column-end=span 2]
+"grid-area: 1" -> "grid-area: 1;" [grid-row-start=1; grid-column-start=auto; grid-row-end=auto; grid-column-end=auto]
+"grid-area: 1 / 2" -> "grid-area: 1 / 2;" [grid-row-start=1; grid-column-start=2; grid-row-end=auto; grid-column-end=auto]
+"grid-area: 1 / 2 / 3" -> "grid-area: 1 / 2 / 3;" [grid-row-start=1; grid-column-start=2; grid-row-end=3; grid-column-end=auto]
+"grid-area: a / b / c" -> "grid-area: a / b / c;" [grid-row-start=a; grid-column-start=b; grid-row-end=c; grid-column-end=b]
+"grid-area: auto" -> "grid-area: auto;" [grid-row-start=auto; grid-column-start=auto; grid-row-end=auto; grid-column-end=auto]
+"font: 12px serif" -> "font: 12px serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font: normal normal 400 12px serif" -> "font: 400 12px serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font: bold 12px/30px \"Times New Roman\"" -> "font: bold 12px / 30px \"Times New Roman\";" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font: 1.2em Georgia, serif" -> "font: 1.2em Georgia, serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font: italic small-caps bold condensed 16px/2 cursive" -> "font: italic small-caps bold condensed 16px / 2 cursive;" [font-style=italic; font-variant-caps=small-caps; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font: 12px" -> "" []
+"font: serif" -> "" []
+"font: 12px a b c" -> "font: 12px \"a b c\";" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto]
+"font-style: italic; font-variant-caps: normal; font-weight: bold; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif" -> "font-style: italic; font-variant-caps: normal; font-weight: bold; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif;" [font-style=italic; font-variant-caps=normal; font-weight=bold; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif]
+"font: 12px serif; font-kerning: none" -> "font-style: normal; font-variant: normal; font-size-adjust: none; font-language-override: normal; font-optical-sizing: auto; font-feature-settings: normal; font-variation-settings: normal; font-weight: normal; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif; font-kerning: none;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-optical-sizing=auto]
+"font-variant: normal" -> "font-variant: normal;" [font-variant-ligatures=normal; font-variant-caps=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+"font-variant: none" -> "font-variant: none;" [font-variant-ligatures=none; font-variant-caps=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+"font-variant: all-small-caps oldstyle-nums" -> "font-variant: all-small-caps oldstyle-nums;" [font-variant-ligatures=normal; font-variant-numeric=oldstyle-nums; font-variant-east-asian=normal; font-variant-caps=all-small-caps; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+"font-synthesis: weight style" -> "font-synthesis: weight style;" [font-synthesis-weight=auto; font-synthesis-style=auto; font-synthesis-small-caps=none]
+"white-space: nowrap" -> "white-space: nowrap;" [white-space-collapse=collapse; text-wrap-mode=nowrap]
+"white-space: pre-line" -> "white-space: pre-line;" [white-space-collapse=preserve-breaks; text-wrap-mode=wrap]
+"white-space: break-spaces" -> "white-space: break-spaces;" [white-space-collapse=break-spaces; text-wrap-mode=wrap]
+"white-space-collapse: preserve; text-wrap-mode: nowrap" -> "white-space: pre;" [white-space-collapse=preserve; text-wrap-mode=nowrap]
+"white-space-collapse: break-spaces; text-wrap-mode: nowrap" -> "white-space: break-spaces nowrap;" [white-space-collapse=break-spaces; text-wrap-mode=nowrap]
+"text-wrap: wrap" -> "text-wrap: wrap;" [text-wrap-mode=wrap; text-wrap-style=initial]
+"text-wrap: nowrap" -> "text-wrap: nowrap;" [text-wrap-mode=nowrap; text-wrap-style=initial]
+"text-wrap: pretty" -> "text-wrap: pretty;" [text-wrap-mode=initial; text-wrap-style=pretty]
+"text-wrap: nowrap balance" -> "text-wrap: nowrap balance;" [text-wrap-mode=nowrap; text-wrap-style=balance]
+"background: url(a.png) center" -> "background: url(\"a.png\") center center;" [background-image=url("a.png"); background-position-x=center; background-position-y=center; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) left top" -> "background: url(\"a.png\") left top;" [background-image=url("a.png"); background-position-x=left; background-position-y=top; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) 0 0" -> "background: url(\"a.png\") 0px 0px;" [background-image=url("a.png"); background-position-x=0px; background-position-y=0px; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) 50%" -> "background: url(\"a.png\") 50% center;" [background-image=url("a.png"); background-position-x=50%; background-position-y=center; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) right 10px top 5px" -> "background: url(\"a.png\") right 10px top 5px;" [background-image=url("a.png"); background-position-x=right 10px; background-position-y=top 5px; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) repeat no-repeat" -> "background: url(\"a.png\") repeat-x;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=repeat-x; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) repeat repeat" -> "background: url(\"a.png\") repeat;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=repeat; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: url(a.png) / 10px" -> "" []
+"background: 0 0 / auto" -> "background: 0px 0px / auto;" [background-image=initial; background-position-x=0px; background-position-y=0px; background-size=auto; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+"background: none repeat scroll 0% 0% / auto padding-box border-box transparent" -> "background: none 0% 0% / auto repeat scroll padding-box border-box transparent;" [background-image=none; background-position-x=0%; background-position-y=0%; background-size=auto; background-repeat=repeat; background-attachment=scroll; background-origin=padding-box; background-clip=border-box; background-color=transparent]
+"background: url(a.png) border-box" -> "background: url(\"a.png\") border-box border-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=border-box; background-clip=border-box; background-color=initial]
+"background: url(a.png) border-box border-box" -> "background: url(\"a.png\") border-box border-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=border-box; background-clip=border-box; background-color=initial]
+"background: url(a.png) padding-box padding-box" -> "background: url(\"a.png\") padding-box padding-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=padding-box; background-clip=padding-box; background-color=initial]
+"background-image: none; background-position: 0% 0%; background-size: auto; background-repeat: repeat; background-attachment: scroll; background-origin: padding-box; background-clip: border-box; background-color: transparent" -> "background: none 0% 0% / auto repeat scroll padding-box border-box transparent;" [background-image=none; background-position-x=0%; background-position-y=0%; background-size=auto; background-repeat=repeat; background-attachment=scroll; background-origin=padding-box; background-clip=border-box; background-color=transparent]
+"background-color: red; background-image: url(a.png); background-repeat: no-repeat; background-position: center; background-size: auto; background-attachment: scroll; background-origin: padding-box; background-clip: border-box" -> "background: url(\"a.png\") center center / auto no-repeat scroll padding-box border-box red;" [background-color=red; background-image=url("a.png"); background-repeat=no-repeat; background-position-x=center; background-position-y=center; background-size=auto; background-attachment=scroll; background-origin=padding-box; background-clip=border-box]
+"background-position: left 10px top" -> "background-position: left 10px top;" [background-position-x=left 10px; background-position-y=top]
+"background-position: right bottom" -> "background-position: right bottom;" [background-position-x=right; background-position-y=bottom]
+"background-position: 10% 20%, center" -> "background-position: 10% 20%, center center;" [background-position-x=10%, center; background-position-y=20%, center]
+"background-position-x: left; background-position-y: top" -> "background-position: left top;" [background-position-x=left; background-position-y=top]
+"border-radius: 1px 2px / 3px" -> "border-radius: 1px 2px / 3px;" [border-top-left-radius=1px 3px; border-top-right-radius=2px 3px; border-bottom-right-radius=1px 3px; border-bottom-left-radius=2px 3px]
+"border-top-left-radius: 1px 2px" -> "border-top-left-radius: 1px 2px;" [border-top-left-radius=1px 2px]
+"border-top-left-radius: 1px 1px" -> "border-top-left-radius: 1px;" [border-top-left-radius=1px]
+"inset: 0 auto" -> "inset: 0px auto;" [top=0px; right=auto; bottom=0px; left=auto]
+"overflow: clip" -> "overflow: clip;" [overflow-x=clip; overflow-y=clip]
+"overflow-x: scroll" -> "overflow-x: scroll;" [overflow-x=scroll]
+"marker: none" -> "marker: none;" [marker-start=none; marker-mid=none; marker-end=none]
+"text-emphasis: none" -> "text-emphasis: none;" [text-emphasis-style=none; text-emphasis-color=initial]
+"border-spacing: 0" -> "border-spacing: 0px;" [-webkit-border-horizontal-spacing=0px; -webkit-border-vertical-spacing=0px]
+"contain-intrinsic-size: auto 10px" -> "contain-intrinsic-size: auto 10px;" [contain-intrinsic-width=auto 10px; contain-intrinsic-height=auto 10px]

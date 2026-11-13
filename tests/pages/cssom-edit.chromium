@@ -1,0 +1,78 @@
+start -> rgb(255, 0, 0) rgb(0, 0, 255) rgb(0, 0, 0)
+insertRule bad -> 0
+insertRule garbage threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule 'garbage'.
+insertRule empty threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule ''.
+insertRule two threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '.x {} .y {}'.
+insertRule index big threw IndexSizeError: Failed to execute 'insertRule' on 'CSSStyleSheet': The index provided (5) is larger than the maximum index (3).
+insertRule index neg threw IndexSizeError: Failed to execute 'insertRule' on 'CSSStyleSheet': The index provided (4294967295) is larger than the maximum index (3).
+insertRule index float -> 1
+insertRule index string -> 1
+insertRule no index -> 0 rgb(0, 128, 0) 4
+insertRule import after threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+insertRule import at 0 -> 0
+insertRule namespace threw InvalidStateError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule
+insertRule charset threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '@charset "utf-8";'.
+insertRule no args threw TypeError: Failed to execute 'insertRule' on 'CSSStyleSheet': 1 argument required, but only 0 present.
+after inserts -> @import url("cssom/b.css"); || .c { color: rgb(0, 128, 0); } || .x { } || .a { color: rgb(255, 0, 0); } || @media screen { .b { color: rgb(0, 0, 255); } }
+deleteRule big threw IndexSizeError: Failed to execute 'deleteRule' on 'CSSStyleSheet': The index provided (10) is larger than the maximum index (4).
+deleteRule neg threw IndexSizeError: Failed to execute 'deleteRule' on 'CSSStyleSheet': The index provided (4294967295) is larger than the maximum index (4).
+deleteRule no args threw TypeError: Failed to execute 'deleteRule' on 'CSSStyleSheet': 1 argument required, but only 0 present.
+deleteRule 0 -> .c { color: rgb(0, 128, 0); } || .x { } || .a { color: rgb(255, 0, 0); } || @media screen { .b { color: rgb(0, 0, 255); } } rgb(0, 128, 0)
+rules -> 4 true
+addRule -> -1
+addRule2 -> -1
+addRule3 -> -1
+addRule4 -> -1
+addRule bad -> -1
+addRule index threw IndexSizeError: Failed to execute 'addRule' on 'CSSStyleSheet': The index provided (99) is larger than the maximum index (9).
+after add -> .c { color: rgb(0, 128, 0); } || .z { color: green; } || .x { } || .a { color: rgb(255, 0, 0); } || @media screen { .b { color: rgb(0, 0, 255); } } || .z2 { color: green; } || .z3 { } || undefined { } || .z5 { }
+removeRule -> undefined
+removeRule none -> undefined
+removeRule big threw IndexSizeError: Failed to execute 'removeRule' on 'CSSStyleSheet': The index provided (50) is larger than the maximum index (6).
+after remove -> .x { } || .a { color: rgb(255, 0, 0); } || @media screen { .b { color: rgb(0, 0, 255); } } || .z2 { color: green; } || .z3 { } || undefined { } || .z5 { }
+m.insertRule bad -> 0
+m.insertRule import threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSGroupingRule': '@import' rules cannot be inserted inside a group rule.
+m.insertRule ns threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSGroupingRule': '@namespace' rules cannot be inserted inside a group rule.
+m.insertRule charset threw SyntaxError: Failed to execute 'insertRule' on 'CSSGroupingRule': the rule '@charset "x";' is invalid and cannot be parsed.
+m.insertRule big threw IndexSizeError: Failed to execute 'insertRule' on 'CSSGroupingRule': the index 9 must be less than or equal to the length of the rule list.
+m.insertRule ok -> 1 rgb(1, 1, 1)
+m.insertRule noindex -> 0
+m.insertRule media -> 0
+m.insertRule none threw TypeError: Failed to execute 'insertRule' on 'CSSGroupingRule': 1 argument required, but only 0 present.
+m.deleteRule big threw IndexSizeError: Failed to execute 'deleteRule' on 'CSSGroupingRule': the index 9 is greated than the length of the rule list.
+m.deleteRule none threw TypeError: Failed to execute 'deleteRule' on 'CSSGroupingRule': 1 argument required, but only 0 present.
+m.deleteRule -> 4 rgb(0, 0, 0)
+m.cssText -> "@media screen {\n  @media print {\n  .c { color: red; }\n}\n  .q0 { color: red; }\n  .x { }\n  .b { color: rgb(0, 0, 255); }\n}"
+style rule insert -> 0 1 ".a {\n  color: rgb(255, 0, 0);\n  & .x { color: red; }\n}"
+style rule insert decl -> 0
+style rule insert import threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleRule': '@import' rules cannot be inserted inside a group rule.
+style rule insert big threw IndexSizeError: Failed to execute 'insertRule' on 'CSSStyleRule': the index 7 must be less than or equal to the length of the rule list.
+style rule insert media -> 1 ".a {\n  color: rgb(255, 0, 0);\n  color: blue;\n  @media screen {\n  color: rgb(0, 0, 9);\n}\n  & .x { color: red; }\n}"
+style rule delete big threw IndexSizeError: Failed to execute 'deleteRule' on 'CSSStyleRule': the index 9 is greated than the length of the rule list.
+style rule delete -> 1 rgb(255, 0, 0)
+s2 rules -> @import url("cssom/b.css"); || @namespace svg url("http://www.w3.org/2000/svg"); || @layer x; || .q { color: red; }
+s2 import before ns -> 1
+s2 import after ns -> 2
+s2 ns after rules threw InvalidStateError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule
+s2 ns among threw InvalidStateError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule
+s2 rule before import threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+s2 layer before import -> 0
+s2 layer block before import threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+s2 rule between threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+s2 delete ns -> undefined
+s2 delete import -> @import url("cssom/b.css"); || @import url("cssom/b.css"); || @namespace svg url("http://www.w3.org/2000/svg"); || @layer x; || .q { color: red; }
+s2 delete ns now -> undefined
+s2 delete rules then ns threw InvalidStateError: Failed to execute 'deleteRule' on 'CSSStyleSheet': Failed to delete rule
+s3 layer at 0 threw HierarchyRequestError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule.
+s3 import at 0 -> 0 @import url("cssom/b.css"); || @layer one, two;
+s3 layer then import -> 0 @layer three; || @import url("cssom/b.css"); || @layer one, two;
+s3 ns threw InvalidStateError: Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to insert the rule
+selectorText -> .z5 #c rgb(0, 0, 0)
+selectorText bad -> #c
+style change -> rgb(7, 7, 7) #c { color: rgb(7, 7, 7); }
+style priority -> rgb(8, 8, 8) #c { color: rgb(8, 8, 8) !important; }
+media change -> rgb(8, 8, 8) rgb(0, 0, 0)
+text then rules -> rgb(0, 9, 0) 1 false rgb(0, 0, 0)
+old sheet edit -> rgb(0, 9, 0) 9 null
+new sheet edit -> rgb(0, 0, 9)
+many -> 150px 202

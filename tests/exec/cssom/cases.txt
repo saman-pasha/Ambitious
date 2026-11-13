@@ -1,0 +1,528 @@
+sheet: @charset "utf-8"; @import url("imp.css") screen; @namespace svg url(http://www.w3.org/2000/svg); .a { color: red; margin: 1px 2px; } div>p , span+em { background: blue !important; } @media (min-width: 100px) { .b { color: green } } @supports (display: grid) { .c { display: grid } } @container card (min-width: 400px) { .d { padding: 1em } } @layer base, theme; @layer base { .e { color: #FF0000 } } @font-face { font-family: "Foo"; src: url(foo.woff2) format("woff2"); font-weight: bold; } @keyframes spin { from { transform: rotate(0deg) } 50% { opacity: .5 } to { transform: rotate(360deg) } } @page :first { margin: 1in; } @property --x { syntax: '<length>'; inherits: false; initial-value: 0px; } @counter-style thumbs { system: cyclic; symbols: "X"; suffix: " "; } @scope (.card) to (.content) { img { border: 1px solid black } }
+sheet: @import url("imp.css") layer(base) supports(display: grid) screen and (min-width: 1px); @import "imp.css"; @import url(imp.css) layer; @namespace url(http://www.w3.org/1999/xhtml); @namespace svg url("http://www.w3.org/2000/svg"); .a { color: red; & .b { color: blue; } &:hover { color: green } .c & { margin: 0 } } @media screen and (min-width: 100px), print { .m { color: red } } @supports (display: grid) and (not (display: inline-grid)) { .s { color: red } } @container card (min-width: 400px) and (orientation: landscape) { .c { color: red } } @container (width > 10px) { .c2 { color: red } } @layer A.B, C; @layer D { .l { color: red } } @layer { .anon { color: red } } @keyframes Spin { 0% { opacity: 0 } 50%, 75% { opacity: .5 } TO { opacity: 1 } } @keyframes "quoted" { from { color: red } } @page { margin: 1cm } @page :left { margin-left: 2cm } @page wide:first { size: landscape } @property --len { syntax: "<length>"; inherits: true; initial-value: 10px } @property --any { syntax: "*"; inherits: false } @counter-style foo { system: fixed 3; symbols: a b c; suffix: ") "; prefix: "("; negative: "-"; range: 1 10; pad: 2 "0"; fallback: decimal; speak-as: numbers } @scope (.x) { .y { color: red } } @scope { .z { color: red } } @scope (.p) to (.q, .r) { .t { color: red } } @font-face { font-family: Bar; src: local(Arial), url(x.woff) format(woff); unicode-range: U+0000-00FF, U+0131; font-display: swap } @starting-style { .st { opacity: 0 } } @font-feature-values Foo { @styleset { nice: 2 } } @font-palette-values --pal { font-family: Bar; base-palette: 1 } @view-transition { navigation: auto } @position-try --top { top: anchor(bottom) }
+rule: DIV {}
+rule: div>p {}
+rule: a:HOVER {}
+rule: *.a {}
+rule: * {}
+rule: * > * {}
+rule: [A=b] {}
+rule: [a="b" i] {}
+rule: [a='b'] {}
+rule: [a|=b] {}
+rule: a:not(.b,.c) {}
+rule: a:is(.b , .c) {}
+rule: p::BEFORE {}
+rule: p:before {}
+rule: p::first-line {}
+rule: p:first-letter {}
+rule: li:nth-child(2N+1) {}
+rule: li:nth-child( odd ) {}
+rule: li:nth-child(even) {}
+rule: li:nth-child(+5) {}
+rule: li:nth-child(-n+3) {}
+rule: li:nth-of-type(2n) {}
+rule: li:nth-child(2n+1 of .x) {}
+rule: #ID.Cls {}
+rule: svg|rect {}
+rule: *|* {}
+rule: |a {}
+rule: a:where(.b) {}
+rule: a:has(> img) {}
+rule: a:has(+ b) {}
+rule: :root {}
+rule: a::after:hover {}
+rule: .a\:b {}
+rule: .\31 23 {}
+rule: div ~ p {}
+rule: div   p {}
+rule: a:lang(en) {}
+rule: a:dir(rtl) {}
+rule: input:checked {}
+rule: :host {}
+rule: :host(.a) {}
+rule: ::slotted(span) {}
+rule: ::part(foo) {}
+rule: :host-context(.dark) {}
+rule: a:foo {}
+rule: a::foo {}
+rule: ::-webkit-scrollbar {}
+rule: a:-webkit-any(b) {}
+rule: a, {}
+rule: ,a {}
+rule: .a .b, .c > .d {}
+rule: a:focus-visible {}
+rule: :is() {}
+rule: :where() {}
+rule: a:not() {}
+rule: & {}
+rule: .a & {}
+rule: A[HREF$=".PDF"] {}
+rule: a[href^=http] {}
+rule: ns|* {}
+rule: li::marker {}
+rule: ::selection {}
+rule: :is(a, b) c {}
+rule: :not(:hover) {}
+rule: .a { .b { color: red } }
+rule: .a { > .b { color: red } }
+rule: .a { + .b { } ~ .c { } }
+rule: .a { color: red; .b { } margin: 0 }
+rule: .a { @media screen { color: red } }
+rule: .a { @media screen { .b { color: red } } }
+rule: .a { .b, .c & { } }
+rule: .a { &.b { } }
+rule: .a { div & { } }
+rule: .a { :hover { } }
+rule: @media screen { @media print { .a { color: red } } }
+rule: @media SCREEN AND (MIN-WIDTH:100PX) { }
+rule: @media (min-width:100px) and (max-width : 200px) { }
+rule: @media not screen { }
+rule: @media only screen { }
+rule: @media (width >= 600px) { }
+rule: @media (400px<=width<=700px) { }
+rule: @media screen, print and (color) { }
+rule: @media garbage(x) { }
+rule: @media (foo: bar) { }
+rule: @media screen and { }
+rule: @media { }
+rule: @media not (color) { }
+rule: @media (color) or (hover) { }
+rule: @media (min-aspect-ratio: 16/9) { }
+rule: @media (min-width: calc(1px + 2px)) { }
+rule: @supports (display:grid) AND (color:red) { }
+rule: @supports ( display : grid ) { }
+rule: @supports display: grid { }
+rule: @supports (display: grid) and (display: flex) or (x: y) { }
+rule: @container (min-width:400px) { }
+rule: @container card { }
+rule: @container card (width>400px) { }
+rule: @container style(--x: 1) { }
+rule: @container not (width < 10px) { }
+rule: @container a, b (width > 1px) { }
+rule: @layer A , B ;
+rule: @layer a b { }
+rule: @layer;
+rule: @scope to (.b) { }
+rule: @keyframes a { FROM { } 0% { } 50.5% { } 100% { } }
+rule: @keyframes a { 101% { } }
+rule: @keyframes a { from, to { color: red } }
+rule: @keyframes a { entry 10% { } }
+rule: @keyframes "a b" { }
+rule: @keyframes none { }
+rule: @keyframes "none" { }
+rule: @-webkit-keyframes a { from { color: red } }
+rule: @font-face { src: url(a.woff); font-family: "My Font"; font-weight: 100 900; font-style: oblique 10deg; }
+rule: @font-face { color: red }
+rule: @page :first:left { }
+rule: @page :RIGHT { margin: 0 }
+rule: @page { @top-left { content: "x" } }
+rule: @page a { size: A4 }
+rule: @property --a { inherits: false; syntax: "<color>"; initial-value: RED }
+rule: @property --a { syntax: "<length>" }
+rule: @counter-style a { symbols: "*"; system: cyclic }
+rule: @counter-style none { system: cyclic; symbols: x }
+rule: @namespace foo "http://x";
+rule: @unknown { }
+rule: @media screen { garbage }
+rule: div { color: red } garbage
+rule: .x {
+rule: garbage
+rule: @charset "utf-8";
+decl: color: RED
+decl: color: #F00
+decl: color: #ff000080
+decl: color: rgb(255,0,0)
+decl: color: rgb(255 0 0 / 50%)
+decl: color: rgba(255, 0, 0, .5)
+decl: color: hsl(120, 100%, 50%)
+decl: color: hsla(120 100% 50% / 0.25)
+decl: color: transparent
+decl: color: currentColor
+decl: color: Canvas
+decl: color: foo
+decl: color: rgb(300, -5, 0)
+decl: color: #abc
+decl: color: lab(50% 40 59.5)
+decl: color: color-mix(in srgb, red, blue)
+decl: color: inherit
+decl: color: INITIAL
+decl: color: unset
+decl: color: revert
+decl: color: revert-layer
+decl: width: 10PX
+decl: width: 0
+decl: width: 1.50em
+decl: width: 50%
+decl: width: auto
+decl: width: calc(1px + 2px)
+decl: width: calc(100% - 10px)
+decl: width: calc(2 * 3px)
+decl: width: calc(10px * 2 + 5%)
+decl: width: min(10px, 5%)
+decl: width: max(1px,2px)
+decl: width: clamp(1px, 50%, 10px)
+decl: width: -5px
+decl: width: 1e2px
+decl: width: .5px
+decl: width: 10
+decl: width: fit-content
+decl: width: min-content
+decl: width: 100vw
+decl: width: 3Q
+decl: width: 1.23456789px
+decl: margin: 0
+decl: margin: 1px 2px
+decl: margin: 1px 2px 3px
+decl: margin: 1px 2px 3px 4px
+decl: margin: 1px 1px 1px 1px
+decl: margin: auto
+decl: margin: 1px !important
+decl: margin-top: 1px
+decl: padding: 1px 2px
+decl: opacity: .5
+decl: opacity: 50%
+decl: opacity: 1.0
+decl: z-index: +3
+decl: z-index: auto
+decl: line-height: 1.0
+decl: line-height: 0
+decl: line-height: normal
+decl: line-height: 20px
+decl: display: BLOCK
+decl: display: inline flex
+decl: display: flex
+decl: display: block flow
+decl: display: grid
+decl: display: inline-block
+decl: font-family: "Foo"
+decl: font-family: 'Times New Roman', serif
+decl: font-family: Arial , sans-serif
+decl: font-family: ARIAL
+decl: font-family: "sans-serif"
+decl: font-family: a  b
+decl: font: 12px/1.5 Arial
+decl: font: bold italic 12px Arial
+decl: font: 12px Arial
+decl: font-weight: bold
+decl: font-weight: 700
+decl: font-size: larger
+decl: font-size: 12PX
+decl: background: blue
+decl: background: url(a.png) no-repeat
+decl: background: red url("a.png") center / cover
+decl: background-color: red
+decl: background-image: url(a.png)
+decl: background-image: none
+decl: background-image: linear-gradient(red, blue)
+decl: background-image: linear-gradient(to right, #fff 0%, rgba(0,0,0,.5) 100%)
+decl: background-position: center
+decl: background-position: 10px 20px
+decl: background-size: cover
+decl: background-repeat: repeat-x
+decl: border: 1px solid red
+decl: border: none
+decl: border: 2px
+decl: border-top: 1px solid
+decl: border-width: 1px 2px
+decl: border-style: solid
+decl: border-color: red blue
+decl: border-radius: 5px
+decl: border-radius: 5px 10px
+decl: border-radius: 5px / 10px
+decl: border-left: thin dotted
+decl: outline: 1px solid red
+decl: flex: 1
+decl: flex: 1 1 0
+decl: flex: none
+decl: flex: auto
+decl: flex-flow: row wrap
+decl: gap: 10px
+decl: gap: 10px 20px
+decl: grid-template-columns: repeat(2, 1fr)
+decl: grid-area: a
+decl: grid-column: 1 / 3
+decl: grid-row: span 2
+decl: transform: rotate(45DEG)
+decl: transform: translate(10px,20px) scale(2)
+decl: transform: none
+decl: transition: opacity .3s ease-in
+decl: transition: all 1s
+decl: animation: spin 1s linear infinite
+decl: animation-name: Spin
+decl: animation-duration: 500ms
+decl: content: "a"
+decl: content: 'b'
+decl: content: none
+decl: content: counter(x)
+decl: content: attr(data-x)
+decl: content: "\201C"
+decl: quotes: "a" "b"
+decl: text-decoration: underline
+decl: text-decoration: underline red wavy
+decl: overflow: hidden
+decl: overflow: hidden auto
+decl: list-style: square inside
+decl: list-style: none
+decl: inset: 0
+decl: position: absolute
+decl: top: 0
+decl: box-shadow: 0 0 5px red
+decl: box-shadow: inset 1px 2px 3px 4px rgba(0,0,0,.5)
+decl: text-shadow: 1px 1px
+decl: cursor: pointer
+decl: cursor: url(a.cur), auto
+decl: --x: 1px
+decl: --Y:  a  b 
+decl: --z:
+decl: --w: {a}
+decl: width: var(--x)
+decl: margin: var(--x) 2px
+decl: color: var(--c, red)
+decl: filter: blur(2px)
+decl: will-change: transform
+decl: user-select: none
+decl: -webkit-user-select: none
+decl: appearance: none
+decl: -webkit-appearance: none
+decl: colr: red
+decl: COLOR: red
+decl: color : red
+decl: color: red;;
+decl: color: red !IMPORTANT
+decl: color: red ! important
+decl: color: red !important foo
+decl: aspect-ratio: 16/9
+decl: aspect-ratio: 1
+decl: object-fit: cover
+decl: white-space: nowrap
+decl: text-align: center
+decl: vertical-align: middle
+decl: float: left
+decl: visibility: hidden
+decl: box-sizing: border-box
+decl: pointer-events: none
+decl: scroll-behavior: smooth
+decl: contain: layout
+decl: container: card / inline-size
+decl: container-type: inline-size
+decl: margin: inherit
+decl: margin-top: inherit; margin-right: inherit; margin-bottom: inherit; margin-left: inherit
+decl: margin-top: inherit; margin-right: initial; margin-bottom: inherit; margin-left: inherit
+decl: font: inherit
+decl: background: initial
+decl: border: inherit
+decl: border-left: initial
+decl: margin: var(--a)
+decl: margin: var(--a); margin-top: 1px
+decl: margin-top: var(--a); margin-right: var(--a); margin-bottom: var(--a); margin-left: var(--a)
+decl: flex: var(--a)
+decl: --a: 1px; margin: 0 var(--a)
+decl: margin: 1px 2px; margin-top: var(--b)
+decl: padding: 0 !important; padding: 1px
+decl: padding: 0; padding: 1px !important
+decl: padding: 1px; padding-top: 2px !important
+decl: columns: 2 10px
+decl: columns: auto
+decl: column-rule: 1px solid red
+decl: text-emphasis: dot red
+decl: place-items: center
+decl: place-items: center start
+decl: place-content: center
+decl: place-self: auto
+decl: inset-block: 1px 2px
+decl: inset-inline: 1px
+decl: margin-block: 1px
+decl: margin-inline: 1px 2px
+decl: padding-block: 0
+decl: overscroll-behavior: contain
+decl: scroll-margin: 1px 2px
+decl: scroll-padding: 1px
+decl: border-block: 1px solid red
+decl: border-inline-start: 1px solid
+decl: border-spacing: 1px 2px
+decl: border-spacing: 1px
+decl: marker: url(#m)
+decl: grid-area: 1 / 2 / 3 / 4
+decl: grid-area: a / b
+decl: grid-row: 1
+decl: grid-column: 2 / span 3
+decl: gap: normal
+decl: font-variant: small-caps
+decl: font-synthesis: none
+decl: text-wrap: balance
+decl: white-space: pre
+decl: white-space: pre-wrap
+decl: white-space: normal
+decl: container: card
+decl: contain-intrinsic-size: 10px
+decl: border-image: url(a.png) 30 round
+decl: border-image: none
+decl: list-style: url(a.png)
+decl: list-style: disc
+decl: list-style: outside
+decl: text-decoration: none
+decl: text-decoration: line-through 2px
+decl: outline: none
+decl: outline: auto
+decl: outline: 0
+decl: flex-flow: column
+decl: flex-flow: row
+decl: flex: 2
+decl: flex: 0 0 100px
+decl: flex: 10px
+decl: flex: 1 2
+decl: transition: none
+decl: transition: color 1s, opacity 2s linear 1s
+decl: transition: 0s
+decl: animation: none
+decl: animation: foo 2s
+decl: animation: 1s
+decl: background: none
+decl: background: red
+decl: background: url(a.png) 10px 20px repeat-y fixed padding-box content-box
+decl: background: url(a.png), url(b.png) red
+decl: background: linear-gradient(red, blue) no-repeat
+decl: background: center / 50% auto
+decl: background: content-box
+decl: background: padding-box border-box
+decl: font: 700 1em/2 "A B", serif
+decl: font: small-caps 16px serif
+decl: font: condensed 12px serif
+decl: font: caption
+decl: font: italic 400 12px/normal serif
+decl: border: 1px dashed
+decl: border: solid red
+decl: border-top: 3px
+decl: border-color: red
+decl: border-color: red green blue
+decl: border-color: red green blue yellow
+decl: border-style: dotted dashed
+decl: border-width: thin medium thick
+decl: border-radius: 1px 2px 3px 4px / 5px 6px
+decl: border-radius: 1px 1px 1px 1px / 2px 2px 2px 2px
+decl: overflow: visible clip
+decl: overflow: auto auto
+decl: inset: 1px 2px 1px 2px
+decl: inset: auto
+decl: margin: -1px +2px 0.0px 1E1px
+decl: outline: none
+decl: outline: medium none
+decl: outline: none currentcolor
+decl: outline: medium
+decl: outline: auto
+decl: outline: medium none auto
+decl: outline: thin
+decl: outline-color: auto; outline-style: none; outline-width: medium
+decl: border-top: none
+decl: border-top: solid
+decl: border-top: currentcolor
+decl: border-top: medium
+decl: border-top: medium solid
+decl: border-top: 1px none
+decl: border-top-width: medium; border-top-style: none; border-top-color: red
+decl: border-top-width: 1px; border-top-style: none; border-top-color: currentcolor
+decl: column-rule: none
+decl: column-rule: medium
+decl: column-rule: red
+decl: border: medium
+decl: border: none red
+decl: border: 1px none
+decl: border: medium none currentcolor
+decl: border-width: medium; border-style: none; border-color: currentcolor; border-image: none
+decl: list-style: none none
+decl: list-style: outside none disc
+decl: list-style: inside
+decl: list-style-position: outside; list-style-image: none; list-style-type: disc
+decl: text-decoration: none solid currentcolor
+decl: text-decoration-line: none; text-decoration-thickness: auto; text-decoration-style: solid; text-decoration-color: currentcolor
+decl: text-decoration: auto
+decl: flex-flow: row nowrap
+decl: flex-flow: nowrap
+decl: flex-flow: column-reverse wrap-reverse
+decl: flex-direction: row; flex-wrap: nowrap
+decl: transition: all 0s ease 0s
+decl: transition: opacity
+decl: transition: opacity 1s ease 2s
+decl: transition: opacity 0s 2s
+decl: transition: 1s 2s
+decl: transition-property: all; transition-duration: 0s; transition-timing-function: ease; transition-delay: 0s; transition-behavior: normal
+decl: transition: color 1s allow-discrete
+decl: transition: margin 1s cubic-bezier(0.1, 0.2, 0.3, 0.4), color steps(4, end)
+decl: animation: a 1s 2s
+decl: animation: a 1s ease-in-out 2s 3 reverse both paused
+decl: animation-name: a; animation-duration: 1s
+decl: container: a b / size
+decl: container: none
+decl: container-name: none; container-type: normal
+decl: columns: 3
+decl: columns: 3 auto
+decl: columns: auto 3
+decl: column-width: auto; column-count: auto
+decl: gap: 1px 1px
+decl: place-content: center start
+decl: place-content: center center
+decl: place-content: stretch
+decl: place-self: start end
+decl: grid-row: a
+decl: grid-row: a / a
+decl: grid-row: 1 / auto
+decl: grid-row: auto / 2
+decl: grid-column: span 2 / span 2
+decl: grid-area: 1
+decl: grid-area: 1 / 2
+decl: grid-area: 1 / 2 / 3
+decl: grid-area: a / b / c
+decl: grid-area: auto
+decl: font: 12px serif
+decl: font: normal normal 400 12px serif
+decl: font: bold 12px/30px "Times New Roman"
+decl: font: 1.2em Georgia, serif
+decl: font: italic small-caps bold condensed 16px/2 cursive
+decl: font: 12px
+decl: font: serif
+decl: font: 12px a b c
+decl: font-style: italic; font-variant-caps: normal; font-weight: bold; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif
+decl: font: 12px serif; font-kerning: none
+decl: font-variant: normal
+decl: font-variant: none
+decl: font-variant: all-small-caps oldstyle-nums
+decl: font-synthesis: weight style
+decl: white-space: nowrap
+decl: white-space: pre-line
+decl: white-space: break-spaces
+decl: white-space-collapse: preserve; text-wrap-mode: nowrap
+decl: white-space-collapse: break-spaces; text-wrap-mode: nowrap
+decl: text-wrap: wrap
+decl: text-wrap: nowrap
+decl: text-wrap: pretty
+decl: text-wrap: nowrap balance
+decl: background: url(a.png) center
+decl: background: url(a.png) left top
+decl: background: url(a.png) 0 0
+decl: background: url(a.png) 50%
+decl: background: url(a.png) right 10px top 5px
+decl: background: url(a.png) repeat no-repeat
+decl: background: url(a.png) repeat repeat
+decl: background: url(a.png) / 10px
+decl: background: 0 0 / auto
+decl: background: none repeat scroll 0% 0% / auto padding-box border-box transparent
+decl: background: url(a.png) border-box
+decl: background: url(a.png) border-box border-box
+decl: background: url(a.png) padding-box padding-box
+decl: background-image: none; background-position: 0% 0%; background-size: auto; background-repeat: repeat; background-attachment: scroll; background-origin: padding-box; background-clip: border-box; background-color: transparent
+decl: background-color: red; background-image: url(a.png); background-repeat: no-repeat; background-position: center; background-size: auto; background-attachment: scroll; background-origin: padding-box; background-clip: border-box
+decl: background-position: left 10px top
+decl: background-position: right bottom
+decl: background-position: 10% 20%, center
+decl: background-position-x: left; background-position-y: top
+decl: border-radius: 1px 2px / 3px
+decl: border-top-left-radius: 1px 2px
+decl: border-top-left-radius: 1px 1px
+decl: inset: 0 auto
+decl: overflow: clip
+decl: overflow-x: scroll
+decl: marker: none
+decl: text-emphasis: none
+decl: border-spacing: 0
+decl: contain-intrinsic-size: auto 10px

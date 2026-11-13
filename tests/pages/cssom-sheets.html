@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: the sheets</title>
+<link rel="stylesheet" href="cssom/a.css" id="l1" title="Linked" media="screen and (min-width: 100px)">
+<style id="s1" media="print">.a { color: red; }</style>
+<style id="s2" type="text/foo">.a { color: blue; }</style>
+<style id="s3" title="Third">@import url(cssom/b.css) screen; .b { color: green }</style>
+<style id="s4" type=" TEXT/CSS ">.t { color: rgb(1, 2, 3) }</style>
+<link rel="preload" href="cssom/b.css" as="style" id="l2">
+</head><body>
+<div class="a" id="da">x</div>
+<div class="t" id="dt">t</div>
+<svg width="10" height="10"><style id="s5">.c { fill: red }</style></svg>
+<div id="host"><template shadowrootmode="open"><style id="h1">p { color: rgb(9, 9, 9) }</style><p id="hp">in</p><link rel="stylesheet" href="cssom/b.css" id="h2"></template></div>
+<script>
+function p(s) { console.log(s); }
+function t(label, f) { try { var r = f(); p(label + ' -> ' + r); } catch (e) { p(label + ' threw ' + e.name + ': ' + e.message); } }
+function ids(list) { var o = []; for (var i = 0; i < list.length; i++) o.push(list[i].ownerNode ? list[i].ownerNode.id : String(list[i].ownerNode)); return o.join(','); }
+function col(id) { return getComputedStyle(document.getElementById(id)).color; }
+var ss = document.styleSheets;
+p('length ' + ss.length + ' ' + (ss === document.styleSheets) + ' ' + (ss[0] === ss.item(0)) + ' ' + ss.item(99) + ' ' + ss[99] + ' ' + Object.prototype.toString.call(ss));
+p('order ' + ids(ss));
+for (var i = 0; i < ss.length; i++) {
+  var s = ss[i];
+  p(i + ' ' + s.ownerNode.id + ' ' + Object.prototype.toString.call(s) + ' href=' + (s.href ? s.href.replace(/^.*\/pages\//, '') : s.href) + ' title=' + s.title + ' media=' + JSON.stringify(s.media.mediaText) +
+    ' disabled=' + s.disabled + ' type=' + s.type + ' parent=' + s.parentStyleSheet + ' ownerRule=' + s.ownerRule + ' media.length=' + s.media.length + ' same=' + (s.ownerNode.sheet === s));
+}
+t('instanceof', function () { return [ss instanceof StyleSheetList, ss[0] instanceof CSSStyleSheet, ss[0] instanceof StyleSheet, ss[0].media instanceof MediaList, Object.getPrototypeOf(CSSStyleSheet.prototype) === StyleSheet.prototype].join(' '); });
+t('iterate', function () { var o = []; for (var x of document.styleSheets) o.push(x.ownerNode.id); return o.join(',') + ' ' + Array.from(ss).length; });
+t('item()', function () { return ss.item.length + ' ' + typeof ss.item(0) + ' ' + ss.item('1').ownerNode.id + ' ' + ss.item(-1); });
+t('no item arg', function () { return ss.item(); });
+t('s2 sheet', function () { return document.getElementById('s2').sheet; });
+t('s4 sheet', function () { return document.getElementById('s4').sheet && document.getElementById('s4').sheet.cssRules.length; });
+t('l2 sheet', function () { return document.getElementById('l2').sheet; });
+t('div sheet', function () { return document.getElementById('da').sheet; });
+t('svg sheet', function () { var x = document.getElementById('s5').sheet; return x.cssRules[0].cssText + ' ' + x.ownerNode.namespaceURI; });
+t('linked rules', function () { return document.getElementById('l1').sheet.cssRules.length; });
+t('linked insert', function () { return document.getElementById('l1').sheet.insertRule('.z {}', 0); });
+t('linked delete', function () { return document.getElementById('l1').sheet.deleteRule(0); });
+var s3 = document.getElementById('s3').sheet, imp = s3.cssRules[0];
+t('import', function () { return imp.constructor.name + ' ' + imp.href + ' ' + imp.media.mediaText + ' ' + imp.layerName + ' ' + imp.supportsText + ' ' + (imp.styleSheet === imp.styleSheet); });
+t('import sheet', function () { var x = imp.styleSheet; return x.href.replace(/^.*\/pages\//, '') + ' ' + (x.parentStyleSheet === s3) + ' ' + (x.ownerRule === imp) + ' ' + x.ownerNode + ' ' + x.title + ' ' + x.media.mediaText; });
+t('import rules', function () { return imp.styleSheet.cssRules.length; });
+var host = document.getElementById('host'), sr = host.shadowRoot;
+t('shadow', function () { var x = sr.styleSheets; return x.length + ' ' + ids(x) + ' ' + (x === sr.styleSheets) + ' ' + (x === document.styleSheets) + ' ' + Object.prototype.toString.call(x) + ' ' + x[0].cssRules[0].cssText; });
+t('shadow sheet', function () { var x = sr.styleSheets[0]; return x.title + ' ' + x.media.mediaText + ' ' + (x.ownerNode.parentNode === sr) + ' ' + col('da'); });
+t('shadow link', function () { var x = sr.styleSheets[1]; return x.href.replace(/^.*\/pages\//, '') + ' ' + (x.ownerNode === sr.getElementById('h2')); });
+var m = document.getElementById('l1').sheet.media;
+t('medialist', function () { return m.length + ' ' + m.item(0) + ' ' + m[0] + ' ' + m.item(5) + ' ' + m[5] + ' ' + m + ' ' + Object.prototype.toString.call(m) + ' ' + (m === document.getElementById('l1').sheet.media); });
+t('append', function () { m.appendMedium('print'); return m.mediaText + ' / ' + document.getElementById('l1').getAttribute('media'); });
+t('append again', function () { m.appendMedium('print'); return m.mediaText + ' ' + m.length; });
+t('append bad', function () { m.appendMedium('garbage('); return m.mediaText + ' ' + m.length; });
+t('delete', function () { m.deleteMedium('print'); return m.mediaText; });
+t('delete none', function () { m.deleteMedium('tv'); return m.mediaText; });
+t('delete no arg', function () { m.deleteMedium(); return m.mediaText; });
+t('set text', function () { m.mediaText = 'screen, (max-width: 10px), garbage, (foo)'; return m.mediaText + ' ' + m.length; });
+t('set text case', function () { m.mediaText = 'SCREEN AND (MIN-WIDTH:100PX),PRINT'; return m.mediaText; });
+t('set text empty', function () { m.mediaText = ''; return JSON.stringify(m.mediaText) + ' ' + m.length + ' ' + m.item(0); });
+t('set text null', function () { m.mediaText = null; return JSON.stringify(m.mediaText) + ' ' + m.length; });
+var s1 = document.getElementById('s1');
+t('media attr change', function () { var a = s1.sheet; s1.media = 'screen'; return (a === s1.sheet) + ' ' + s1.sheet.media.mediaText + ' ' + col('da'); });
+t('media attr case', function () { s1.media = 'SCREEN AND (MIN-WIDTH:100PX),PRINT'; return s1.sheet.media.mediaText + ' ' + col('da'); });
+t('disable', function () { var e = s1.sheet; e.disabled = true; var r = e.disabled + ' ' + col('da') + ' ' + document.styleSheets.length; e.disabled = 0; return r + ' ' + e.disabled + ' ' + col('da'); });
+t('disable no attr', function () { var e = s1.sheet; e.disabled = true; var r = s1.hasAttribute('disabled') + ' ' + s1.outerHTML.slice(0, 40); e.disabled = false; return r; });
+t('sheet media', function () { var e = s1.sheet; e.media.mediaText = 'print'; var r = col('da') + ' ' + s1.getAttribute('media'); e.media.mediaText = 'all'; return r + ' ' + col('da'); });
+t('text change', function () { var a = s1.sheet; s1.textContent = '.a { color: rgb(0, 0, 128) }'; var b = s1.sheet; return (a === b) + ' ' + a.ownerNode + ' ' + a.cssRules.length + ' ' + b.cssRules[0].cssText + ' ' + JSON.stringify(b.media.mediaText) + ' ' + col('da'); });
+t('same text', function () { var a = s1.sheet; s1.textContent = s1.textContent; return (a === s1.sheet); });
+t('append empty text', function () { var a = s1.sheet; s1.appendChild(document.createTextNode('')); return (a === s1.sheet); });
+t('text node data', function () { var a = s1.sheet; s1.firstChild.data = '.a { color: rgb(0, 0, 64) }'; return (a === s1.sheet) + ' ' + col('da'); });
+t('remove', function () { var a = s1.sheet; s1.remove(); var r = s1.sheet + ' ' + a.ownerNode + ' ' + document.styleSheets.length + ' ' + col('da'); document.head.appendChild(s1); return r + ' ' + (s1.sheet === a) + ' ' + document.styleSheets.length + ' ' + col('da'); });
+t('move', function () { var a = s1.sheet; document.head.appendChild(s1); return (s1.sheet === a) + ' ' + ids(document.styleSheets); });
+t('created style', function () { var e = document.createElement('style'); e.textContent = '.n {}'; var r = e.sheet; document.body.appendChild(e); var q = r + ' ' + e.sheet.cssRules.length + ' ' + document.styleSheets.length; e.remove(); return q + ' ' + document.styleSheets.length; });
+t('type change', function () { var e = document.getElementById('s4'); var a = e.sheet; e.type = 'text/plain'; var r = (a === null) + ' ' + e.sheet + ' ' + col('dt'); e.type = 'text/css'; return r + ' ' + (e.sheet !== null) + ' ' + col('dt'); });
+t('order after', function () { return ids(document.styleSheets); });
+t('title', function () { return [ss[0].title, document.getElementById('s3').sheet.title, JSON.stringify(s1.sheet.title)].join(' | '); });
+t('title live', function () { var e = document.getElementById('s3'), x = e.sheet; e.title = 'Changed'; var a = x.title; e.setAttribute('title', ''); return a + ' ' + x.title + ' ' + (e.sheet === x); });
+t('media attr after list', function () { var e = document.getElementById('s3'), x = e.sheet; x.media.mediaText = 'print'; var a = x.media.mediaText + ' ' + e.getAttribute('media'); e.media = 'screen'; return a + ' | ' + x.media.mediaText + ' ' + (e.sheet === x) + ' ' + getComputedStyle(document.getElementById('da')).color; });
+t('disabled not own', function () { return Object.getOwnPropertyNames(StyleSheet.prototype).sort().join(',') + ' | ' + Object.getOwnPropertyNames(CSSStyleSheet.prototype).sort().join(','); });
+t('illegal', function () { return Object.getOwnPropertyDescriptor(StyleSheet.prototype, 'title').get.call({}); });
+t('new StyleSheet', function () { return new StyleSheet(); });
+t('new StyleSheetList', function () { return new StyleSheetList(); });
+t('new MediaList', function () { return new MediaList(); });
+</script>
+</body></html>

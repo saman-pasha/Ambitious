@@ -82,7 +82,7 @@ enum {
     HA_NAMESPACEURI, HA_HASH, HA_VALUE_STATE, HA_FORMS, HA_IMAGES, HA_LINKS, HA_ANCHORS, HA_SCRIPTS, HA_ELEMENTS,
     HA_OPTIONS, HA_ROWS, HA_CELLS, HA_TBODIES, HA_OFFSETWIDTH, HA_OFFSETHEIGHT, HA_OFFSETTOP, HA_OFFSETLEFT,
     HA_OFFSETPARENT, HA_CLIENTWIDTH, HA_CLIENTHEIGHT, HA_CLIENTTOP, HA_CLIENTLEFT, HA_SCROLLTOP, HA_SCROLLLEFT,
-    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_CURRENTSCRIPT, HA_ASYNC, HA_DEFER, HA_ACTIVEELEMENT, HA_COMPOSED, HA_N
+    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_CURRENTSCRIPT, HA_ASYNC, HA_DEFER, HA_ACTIVEELEMENT, HA_COMPOSED, HA_MEDIA, HA_N
 };
 static const char *const sh_names[HA_N] = {
     "textContent", "innerHTML", "outerHTML", "innerText", "id", "className", "classList", "tagName",
@@ -97,7 +97,7 @@ static const char *const sh_names[HA_N] = {
     "namespaceURI", "hash", "\001value", "forms", "images", "links", "anchors", "scripts", "elements",
     "options", "rows", "cells", "tBodies", "offsetWidth", "offsetHeight", "offsetTop", "offsetLeft",
     "offsetParent", "clientWidth", "clientHeight", "clientTop", "clientLeft", "scrollTop", "scrollLeft",
-    "scrollWidth", "scrollHeight", "currentScript", "async", "defer", "activeElement", "composed" };
+    "scrollWidth", "scrollHeight", "currentScript", "async", "defer", "activeElement", "composed", "media" };
 
 /* the host's natives' numbers, from JS_HOST_NATIVES */
 enum {
@@ -623,26 +623,6 @@ static void sh_css_name(const vector<char> *js, vector<char> *css) {
         else push_back(*css, c);
     }
 }
-/* the declarations of x's style attribute: (name start, name length, value start, value length) */
-static void sh_decls(const char *s, size_t n, vector<uint32_t> *out) {
-    clear(*out);
-    size_t i = 0;
-    while (i < n) {
-        size_t e = i;
-        while (e < n && s[e] != ';') e++;
-        size_t c = i;
-        while (c < e && s[c] != ':') c++;
-        if (c < e) {
-            size_t a = i, b = c, v = c + 1, w = e;
-            while (a < b && sh_ws(s[a])) a++;
-            while (b > a && sh_ws(s[b - 1])) b--;
-            while (v < w && sh_ws(s[v])) v++;
-            while (w > v && sh_ws(s[w - 1])) w--;
-            if (b > a) { push_back(*out, (uint32_t)a); push_back(*out, (uint32_t)(b - a)); push_back(*out, (uint32_t)v); push_back(*out, (uint32_t)(w - v)); }
-        }
-        i = e + 1;
-    }
-}
 int sh_ci_eq(const char *a, const char *b, size_t n) {
     for (size_t i = 0; i < n; i++) {
         char x = a[i] >= 'A' && a[i] <= 'Z' ? (char)(a[i] + 32) : a[i];
@@ -650,52 +630,6 @@ int sh_ci_eq(const char *a, const char *b, size_t n) {
         if (x != y) return 0;
     }
     return 1;
-}
-/* x's inline value of the CSS property name into v: 1 when it has one */
-static int sh_style_get(const dom_document *d, uint32_t x, const vector<char> *name, vector<char> *v) {
-    clear(*v);
-    uint32_t at = sh_attr_z(d, x, "style");
-    if (!at) return 0;
-    vector<char> s;
-    append_range(s, text_ptr(d, d->attr[at].value), d->attr[at].value.len);
-    vector<uint32_t> ds;
-    sh_decls(data(s), len(s), &ds);
-    int found = 0;
-    for (size_t i = 0; i < len(ds); i += 4)
-        if (ds[i + 1] == len(*name) && sh_ci_eq(data(s) + ds[i], data(*name), len(*name))) {
-            clear(*v);
-            append_range(*v, data(s) + ds[i + 2], ds[i + 3]);
-            found = 1;
-        }
-    return found;
-}
-/* x's inline value of the CSS property name set (an empty value takes it out) */
-static void sh_style_set(dom_document *d, uint32_t x, const vector<char> *name, const char *val, size_t vn) {
-    vector<char> s, out;
-    uint32_t at = sh_attr_z(d, x, "style");
-    if (at) append_range(s, text_ptr(d, d->attr[at].value), d->attr[at].value.len);
-    vector<uint32_t> ds;
-    sh_decls(data(s), len(s), &ds);
-    int done = 0;
-    for (size_t i = 0; i < len(ds); i += 4) {
-        int same = ds[i + 1] == len(*name) && sh_ci_eq(data(s) + ds[i], data(*name), len(*name));
-        if (same && (done || !vn)) continue;
-        if (len(out)) push_back(out, ' ');
-        append_range(out, data(s) + ds[i], ds[i + 1]);
-        append_range(out, ": ", 2);
-        if (same) { append_range(out, val, vn); done = 1; }
-        else append_range(out, data(s) + ds[i + 2], ds[i + 3]);
-        push_back(out, ';');
-    }
-    if (!done && vn) {
-        if (len(out)) push_back(out, ' ');
-        append_range(out, data(*name), len(*name));
-        append_range(out, ": ", 2);
-        append_range(out, val, vn);
-        push_back(out, ';');
-    }
-    if (len(out)) dom_set_attribute(d, node_handle(d, x), "style", 5, data(out), len(out));
-    else if (at) dom_remove_attribute(d, node_handle(d, x), "style", 5);
 }
 /* a dataset key's attribute: fooBar to data-foo-bar */
 static void sh_data_name(const vector<char> *key, vector<char> *attr) {
@@ -1620,6 +1554,8 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
     case HA_LANG: if (el) return sh_attr_value(vm, d, x, "lang"); break;
     case HA_DIR: if (el) return sh_attr_value(vm, d, x, "dir"); break;
     case HA_REL: if (el) return sh_attr_value(vm, d, x, "rel"); break;
+    /* a style's, a link's and a source's media attribute (HTML's reflection) */
+    case HA_MEDIA: if (sh_named(d, x, "style") || sh_named(d, x, "link") || sh_named(d, x, "source")) return sh_attr_value(vm, d, x, "media"); break;
     case HA_HTMLFOR: if (el) return sh_attr_value(vm, d, x, "for"); break;
     case HA_ACTION: if (el) return sh_attr_value(vm, d, x, "action"); break;
     case HA_METHOD: if (el) return sh_attr_value(vm, d, x, "method"); break;
@@ -1686,7 +1622,7 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         if (el) return jv_num(sh_client(vm, x, ha == HA_SCROLLWIDTH ? 2 : 3));
         break;
     case HA_CLASSLIST: if (el) return sh_host_obj(vm, HK_CLASSLIST, HP_CLASSLIST, x); break;
-    case HA_STYLE: if (el) return sh_host_obj(vm, HK_STYLE, HP_STYLE, x); break;
+    case HA_STYLE: if (el) return script_cssom_inline_style(vm, x); break;
     case HA_DATASET: if (el) return sh_host_obj(vm, HK_DATASET, HP_DATASET, x); break;
     default: break;
     }
@@ -1745,6 +1681,8 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         return JV_UNDEF;
     }
     if (kind == HK_LIST) return sh_lc_prop(vm, o, atom, ha1, handled);
+    /* an element's style, and the CSS Object Model's objects (src/script/cssom.c) */
+    if (kind == HK_STYLE || (kind >= HK_SHEET && kind <= HK_SHEETS)) return script_cssom_get(vm, o, atom, handled);
     if (kind >= HK_RESPONSE && kind <= HK_XHR) return script_fetch_get(vm, o, atom, handled);
     if (kind == HK_STORAGE) return script_storage_named(vm, o, atom, handled);
     if (kind == HK_COMPUTED) {
@@ -1765,7 +1703,7 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         return sh_str(vm, data(v), len(v));
     }
 
-    if (kind == HK_CLASSLIST || kind == HK_STYLE || kind == HK_DATASET) {
+    if (kind == HK_CLASSLIST || kind == HK_DATASET) {
         uint32_t x = sh_owner(vm, o);
         if (!x) { *handled = 1; return JV_HOLE; }
         dom_document *d = vm->host->d;
@@ -1791,29 +1729,13 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
             }
             return JV_UNDEF;
         }
-        /* a style's property, or a dataset's key: the name read, its value found */
+        /* a dataset's key: the name read, its value found */
         jv ownv;
         uint32_t f;
         if (js_get_own(vm, o, atom, &ownv, &f)) return JV_UNDEF;
-        if (js_has(vm, vm->host->protos[kind == HK_STYLE ? HP_STYLE : HP_DATASET], atom)) return JV_UNDEF;
-        vector<char> name, prop, v;
+        if (js_has(vm, vm->host->protos[HP_DATASET], atom)) return JV_UNDEF;
+        vector<char> name, prop;
         js_str_to_utf8(vm, atom, &name);
-        if (kind == HK_STYLE) {
-            if (ha1 == HA_CSSTEXT + 1) { *handled = 1; return sh_attr_value(vm, d, x, "style"); }
-            if (ha1 == HA_LENGTH + 1) {
-                uint32_t at = sh_attr_z(d, x, "style");
-                vector<char> s;
-                if (at) append_range(s, text_ptr(d, d->attr[at].value), d->attr[at].value.len);
-                vector<uint32_t> ds;
-                sh_decls(data(s), len(s), &ds);
-                *handled = 1;
-                return jv_num((double)(len(ds) / 4));
-            }
-            sh_css_name(&name, &prop);
-            *handled = 1;
-            sh_style_get(d, x, &prop, &v);
-            return sh_str(vm, data(v), len(v));
-        }
         sh_data_name(&name, &prop);
         uint32_t at = sh_attr(d, x, data(prop), len(prop));
         *handled = 1;
@@ -1854,6 +1776,8 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
     uint32_t ha1 = sh_name_of(vm, atom);
     dom_document *d = vm->host->d;
     if (kind >= HK_RESPONSE && kind <= HK_XHR) return script_fetch_set(vm, o, atom, v, handled);
+    /* an element's style and a rule's (src/script/cssom.c) */
+    if (kind == HK_STYLE || kind == HK_DECL) return script_cssom_set(vm, o, atom, v, handled);
     /* a computed style is read-only */
     if (kind == HK_COMPUTED) {
         uint32_t idx;
@@ -1912,6 +1836,12 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
             if ((ha == HA_NODEVALUE || ha == HA_DATA) && el) return 1;
             vector<char> t;
             if (v != JV_NULL && !sh_utf8(vm, v, &t)) return 0;
+            /* an element's one text child already of the text: nothing done (Chromium's
+               Node::setTextContent, so a style element keeps its sheet) */
+            uint32_t c1 = el && ha == HA_TEXTCONTENT ? d->node[x].first_child : 0;
+            if (c1 && len(t) && !d->node[c1].next_sibling && d->node[c1].kind == DOM_NODE_KIND_TEXT && d->node[c1].data.len == len(t) &&
+                memcmp(text_ptr(d, d->node[c1].data), data(t), len(t)) == 0)
+                return 1;
             sh_set_text(d, x, data(t), len(t));
             if (sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
             return 1;
@@ -1940,6 +1870,7 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
         case HA_LANG: if (el) return sh_set_attr_v(vm, x, "lang", v); break;
         case HA_DIR: if (el) return sh_set_attr_v(vm, x, "dir", v); break;
         case HA_REL: if (el) return sh_set_attr_v(vm, x, "rel", v); break;
+        case HA_MEDIA: if (sh_named(d, x, "style") || sh_named(d, x, "link") || sh_named(d, x, "source")) return sh_set_attr_v(vm, x, "media", v); break;
         case HA_HTMLFOR: if (el) return sh_set_attr_v(vm, x, "for", v); break;
         case HA_TABINDEX: if (el) return sh_set_attr_v(vm, x, "tabindex", v); break;
         case HA_VALUE:
@@ -1973,15 +1904,13 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
         *handled = 0;
         return 1;
     }
-    if (kind == HK_STYLE || kind == HK_DATASET) {
+    if (kind == HK_DATASET) {
         uint32_t x = sh_owner(vm, o);
         if (!x) { *handled = 1; return 0; }
         vector<char> name, prop, t;
         js_str_to_utf8(vm, atom, &name);
         *handled = 1;
-        if (kind == HK_STYLE && ha1 == HA_CSSTEXT + 1) return sh_set_attr_v(vm, x, "style", v);
         if (v != JV_NULL && !sh_utf8(vm, v, &t)) return 0;
-        if (kind == HK_STYLE) { sh_css_name(&name, &prop); sh_style_set(d, x, &prop, data(t), len(t)); return 1; }
         sh_data_name(&name, &prop);
         dom_set_attribute(d, node_handle(d, x), data(prop), len(prop), data(t), len(t));
         return 1;
@@ -2071,6 +2000,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
     if (id >= SH_CUSTOM_FIRST && id < SH_CUSTOM_END) return script_custom_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_WINDOW_FIRST && id < SH_WINDOW_END) return script_window_call(vm, id, callee, thisv, args, argc, handled);
     if (id >= SH_FRAMES_FIRST && id < SH_FRAMES_END) return script_frames_call(vm, id, callee, thisv, args, argc, JV_UNDEF, handled);
+    if (id >= SH_CSSOM_FIRST && id < SH_CSSOM_END) return script_cssom_call(vm, id, callee, thisv, args, argc, handled);
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
     /* location's: its href (a hidden part), navigations by it */
     if (id == H_LOC_STRING || id == H_LOC_HREF_GET || id == H_LOC_HASH_GET) {
@@ -2264,23 +2194,8 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         script_view_style(vm->host, x, data(name), len(name), &v);
         return sh_str(vm, data(v), len(v));
     }
-    if (id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) {
-        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].c != HK_STYLE) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
-        uint32_t x = sh_owner(vm, jv_idx(thisv));
-        if (!x) return JV_HOLE;
-        vector<char> name, v;
-        if (!sh_utf8(vm, a0, &name)) return JV_HOLE;
-        if (id == H_ST_GET) { sh_style_get(d, x, &name, &v); return sh_str(vm, data(v), len(v)); }
-        if (id == H_ST_REMOVE) {
-            sh_style_get(d, x, &name, &v);
-            jv old = sh_str(vm, data(v), len(v));
-            sh_style_set(d, x, &name, "", 0);
-            return old;
-        }
-        if (a1 != JV_NULL && a1 != JV_UNDEF && !sh_utf8(vm, a1, &v)) return JV_HOLE;
-        sh_style_set(d, x, &name, data(v), len(v));
-        return JV_UNDEF;
-    }
+    /* an element's style's and a rule's (src/script/cssom.c) */
+    if (id == H_ST_SET || id == H_ST_GET || id == H_ST_REMOVE) return script_cssom_style(vm, id == H_ST_GET ? 0 : id == H_ST_SET ? 1 : 2, thisv, args, argc);
     /* a collection's: a live one, or querySelectorAll's array of the NodeList prototype */
     if (id == H_LIST_ITEM || id == H_LIST_NAMED) {
         if (!argc) return js_throw_msg(vm, vm->type_error_proto, id == H_LIST_ITEM ? "Failed to execute 'item': 1 argument required, but only 0 present."
@@ -2655,6 +2570,7 @@ void script_observe_roots(js_vm *vm, vector<jv> *out);
 void script_custom_roots(js_vm *vm, vector<jv> *out);
 void script_window_roots(js_vm *vm, vector<jv> *out);
 void script_frames_roots(js_vm *vm, vector<jv> *out);
+void script_cssom_roots(js_vm *vm, vector<jv> *out);
 /* every engine value the page's host holds outside the VM's tables, which the collector
    marks as roots: this unit's (the prototypes, the live collections' objects, the task
    runner, location; and an object a listener of the VM's listens on, which the host fires
@@ -2677,6 +2593,7 @@ static void sh_roots(js_vm *vm, vector<jv> *out) {
     script_custom_roots(vm, out);
     script_window_roots(vm, out);
     script_frames_roots(vm, out);
+    script_cssom_roots(vm, out);
 }
 
 /* the VM made for the page: the host's names, its prototypes, window and document */
@@ -2840,6 +2757,7 @@ static void sh_ready(js_vm *vm) {
     script_observe_setup(vm);
     script_custom_setup(vm);
     script_window_setup(vm);
+    script_cssom_setup(vm);
     if (h->fr) script_frames_setup(vm);
     sh_method(vm, h->protos[HP_SHADOWROOT], "getElementById", H_BY_ID, 1);
     js_define(vm, g, js_atom_ascii(vm, "innerWidth"), jv_num(h->view_w), JS_SHAPE_HIDDEN);
@@ -3988,6 +3906,8 @@ uint32_t script_run_parse(js_vm *vm) {
     vm->throwing = 0;
     sh_between(vm);
     sh_run_pending_all(vm);
+    /* the sheets the parse's scripts changed, as the page's next cascade sees them */
+    script_cssom_sync(h);
     return ran;
 }
 
@@ -4079,4 +3999,6 @@ void script_settle(js_vm *vm) {
         dom_node_h t = h->rt->listener[l].target;
         if (t.index >= d->node_len || !d->node[t.index].live || d->node[t.index].gen != t.gen) listener_free(h->rt, listener_handle(h->rt, l));
     }
+    /* the sheets the scripts changed, as the page's cascade at rest sees them */
+    script_cssom_sync(h);
 }

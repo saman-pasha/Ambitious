@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: changes the cascade sees</title>
+<link rel="stylesheet" href="cssom/a.css" data-s="link">
+<style data-s="base">
+body { margin: 8px; }
+div.box { height: 10px; width: 10px; margin: 2px 0; background: rgb(0, 128, 0); }
+#o1 { width: 20px; }
+#o4 { width: 40px; }
+.linked { height: 15px; }
+</style>
+<style data-s="off">#o2 { width: 200px; }</style>
+<style data-s="media">#o3 { width: 300px; }</style>
+<style data-s="edit">#o5 { width: 50px; } .nobody { width: 60px; }</style>
+<style data-s="text">#o11 { width: 110px; }</style>
+<style data-s="groups">@media screen { #o13 { width: 13px; } } @layer a { #o14 { width: 140px; } }</style>
+</head><body>
+<div class="box" id="o1"></div>
+<div class="box" id="o2"></div>
+<div class="box" id="o3"></div>
+<div class="box" id="o4"></div>
+<div class="box" id="o5"></div>
+<div class="box" id="o6"></div>
+<div class="box" id="o7"></div>
+<div class="box" id="o8"></div>
+<div id="sh1"><template shadowrootmode="open"><style>#i1 { width: 91px; height: 9px; } #i2 { width: 92px; height: 9px; }</style><div id="i1"></div><div id="i2"></div></template></div>
+<div id="sh2"><template shadowrootmode="open"><style>:host { display: block; height: 12px; }</style><div id="i3"></div></template></div>
+<div class="box" id="o11"></div>
+<div class="box" id="o12"></div>
+<div class="box" id="o13"></div>
+<div class="box" id="o14"></div>
+<div class="box linked" id="o15"></div>
+<script>
+var S = function (id) { return document.querySelector("[data-s=" + id + "]").sheet; };
+/* a later rule inserted wins; a rule deleted no longer applies */
+S('base').insertRule('#o1 { width: 21px; }', S('base').cssRules.length);
+S('base').deleteRule(4);
+/* a disabled sheet and a sheet of other media stop applying */
+S('off').disabled = true;
+S('media').media.mediaText = 'print';
+/* a rule's declarations changed, a rule's selector changed */
+S('edit').cssRules[0].style.width = '55px';
+S('edit').cssRules[0].style.setProperty('height', '5px', 'important');
+S('edit').cssRules[1].selectorText = '#o6';
+/* constructed sheets adopted after the document's own */
+var c1 = new CSSStyleSheet();
+c1.replaceSync('#o7 { width: 70px; } #o8 { width: 80px; } #o1 { height: 4px; }');
+S('base').insertRule('#o8 { width: 81px !important; }', 0);
+var c2 = new CSSStyleSheet({ media: 'print' });
+c2.replaceSync('#o12 { width: 120px; }');
+document.adoptedStyleSheets = [c1, c2];
+/* in a shadow tree: its adopted sheets after its own; one sizing its host */
+var r1 = document.getElementById('sh1').shadowRoot, r2 = document.getElementById('sh2').shadowRoot;
+var c3 = new CSSStyleSheet();
+c3.replaceSync('#i1 { width: 93px; } :host { display: block; border-left: 3px solid; }');
+r1.adoptedStyleSheets = [c3];
+var c4 = new CSSStyleSheet();
+c4.replaceSync(':host { height: 24px; width: 240px; } #i3 { height: 6px; }');
+r2.adoptedStyleSheets.push(c4);
+/* a sheet shared by two trees, changed after it was adopted */
+r2.adoptedStyleSheets = [c4, c1];
+c1.insertRule('#i3 { width: 33px; }', 0);
+/* a style element's text set anew: the CSSOM changes before it gone with its old sheet */
+S('text').insertRule('#o11 { width: 111px; height: 11px; }', 1);
+document.querySelector("[data-s=text]").textContent = '#o11 { width: 112px; }';
+/* a grouping rule's own insertRule; a rule outside the layers beats one in a layer */
+S('groups').cssRules[0].insertRule('#o13 { height: 13px; }', 1);
+S('groups').insertRule('#o14 { width: 141px; }', 0);
+/* a linked sheet's rules are not readable here, but it is disabled */
+S('link').disabled = true;
+</script>
+</body></html>

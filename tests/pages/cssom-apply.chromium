@@ -1,0 +1,19 @@
+# boxes of tests/pages/cssom-apply.html in Chromium (tools/bench/boxes.js --shadow): id, tag, x, y, width, height
+o1 div 8 8 21 4
+o2 div 8 14 10 10
+o3 div 8 26 10 10
+o4 div 8 38 40 10
+o5 div 8 50 55 5
+o6 div 8 57 60 10
+o7 div 8 69 70 10
+o8 div 8 81 81 10
+sh1 div 8 93 784 18
+i1 div 11 93 93 9
+i2 div 11 102 92 9
+sh2 div 8 111 240 24
+i3 div 8 111 33 6
+o11 div 8 137 112 10
+o12 div 8 149 10 10
+o13 div 8 161 13 13
+o14 div 8 176 141 10
+o15 div 8 188 10 10

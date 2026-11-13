@@ -156,6 +156,7 @@ amb_implementation(css);
 #include "css.h"
 #include "../dom/dom.h"
 #include "../net/url.h"
+#include "cssom.h"
 
 /* the HTML module's encodings (src/html/encoding.h, whose own declarations need the DOM's and
    HTML's interfaces): the one a label names (-1 none), and a decoder into UTF-8 */
@@ -10054,6 +10055,47 @@ css_status css_set_state(css_style *s, dom_document *doc, css_state_kind kind, u
     return CSS_OK;
 }
 
+/* what the page's scripts made of x's sheet (the CSS Object Model's, src/css/cssom.h's registry):
+   bits of CSS_OMS_SKIP, it is disabled or of media that do not match; CSS_OMS_MEDIA, its media
+   are the registry's (matched); CSS_OMS_TEXT, its rules' text is t, read in place of its own */
+enum { CSS_OMS_SKIP = 1, CSS_OMS_MEDIA = 2, CSS_OMS_TEXT = 4 };
+static int css_om_sheet_of(const dom_document *doc, uint32_t x, vector<char> *t) {
+    uint32_t flags = 0;
+    vector<char> media;
+    if (!css_om_reg_owner(doc, x, doc->node[x].gen, &flags, &media, t)) return 0;
+    if (flags & CSS_OMR_DISABLED) return CSS_OMS_SKIP;
+    int r = 0;
+    if (flags & CSS_OMR_MEDIA) {
+        if (len(media) && !css_media_matches(data(media), len(media))) return CSS_OMS_SKIP;
+        r |= CSS_OMS_MEDIA;
+    }
+    if (flags & CSS_OMR_TEXT) r |= CSS_OMS_TEXT;
+    return r;
+}
+/* whether a style element's type is CSS's (HTML 4.2.6, update a style block): absent, empty or
+   text/css ASCII case-insensitively, as it is written; another type's text is no sheet */
+static int css_style_type_ok(const dom_document *doc, uint32_t x) {
+    uint32_t ta = css_attr_of(doc, x, "type", 4);
+    if (!ta) return 1;
+    amb_span v = doc->attr[ta].value;
+    return v.len == 0 || css_eq_ci(text_ptr(doc, v), v.len, "text/css");
+}
+/* the sheets a tree adopted (a document's, tree 1; a shadow root's, its node), in their order
+   after the tree's own (CSS Cascade 5, 6.1): each enabled one whose media match, read as the
+   tree's, its URLs against its base URL */
+static void css_om_adopted_read(css_style *s, net_loader *net, const dom_document *doc, uint32_t tree) {
+    uint32_t n = css_om_reg_adopted_count(doc, tree);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t flags = 0;
+        vector<char> media, base, t;
+        css_om_reg_adopted_at(doc, tree, i, &flags, &media, &base, &t);
+        if (flags & CSS_OMR_DISABLED) continue;
+        if (len(media) && !css_media_matches(data(media), len(media))) continue;
+        push_back(base, 0);
+        css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), data(base), 0, 0, 0, data(base), 0, net_encoding());
+    }
+}
+
 css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
     /* the user agent's sheet (and in quirks mode its additions), then the document's style
        elements and linked sheets, in tree order */
@@ -10076,11 +10118,17 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             amb_span fu = net->resource[r].final_url;
             snprintf(page, sizeof page, "%.*s", (int)fu.len, text_ptr(net, fu));
         }
+    /* what the page's scripts changed of its sheets, when they changed any */
+    int om_any = css_om_reg_any(doc);
     for (uint32_t x = css_next_in_tree(doc, 1); x; x = css_next_in_tree(doc, x)) {
         int link = css_is_named(doc, x, "link");
         if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
+        if (!link && !css_style_type_ok(doc, x)) continue;
+        vector<char> omt;
+        int om = om_any ? css_om_sheet_of(doc, x, &omt) : 0;
+        if (om & CSS_OMS_SKIP) continue;
         uint32_t ma = css_attr_of(doc, x, "media", 5);
-        if (ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
+        if (!(om & CSS_OMS_MEDIA) && ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
         if (link) {
             uint32_t r = net ? css_linked_sheet(net, x) : 0;
             if (!r) continue;
@@ -10091,17 +10139,21 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             size_t bom;
             int enc = css_sheet_encoding(net, r, net_encoding(), &bom);
             vector<char> body;
-            css_sheet_text(net, r, enc, bom, &body);
+            if (om & CSS_OMS_TEXT) append_range(body, data(omt), len(omt));
+            else css_sheet_text(net, r, enc, bom, &body);
             css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0, enc);
             continue;
         }
         vector<char> t;
-        for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
-            if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
+        if (om & CSS_OMS_TEXT) append_range(t, data(omt), len(omt));
+        else
+            for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
+                if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
         /* a style element's @scope without roots is rooted at its parent element */
         uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
         css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host, net_encoding());
     }
+    if (om_any) css_om_adopted_read(s, net, doc, 1);
     /* each connected shadow tree's style elements and linked sheets, in its tree's order, read as its own */
     dom_flatten(doc);
     for (uint32_t sr = 1; sr < doc->shadow_len; sr++) {
@@ -10114,8 +10166,12 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         for (uint32_t x = css_next_under(doc, root, root); x; x = css_next_under(doc, x, root)) {
             int link = css_is_named(doc, x, "link");
             if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
+            if (!link && !css_style_type_ok(doc, x)) continue;
+            vector<char> omt;
+            int om = om_any ? css_om_sheet_of(doc, x, &omt) : 0;
+            if (om & CSS_OMS_SKIP) continue;
             uint32_t ma = css_attr_of(doc, x, "media", 5);
-            if (ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
+            if (!(om & CSS_OMS_MEDIA) && ma && !css_media_matches(text_ptr(doc, doc->attr[ma].value), doc->attr[ma].value.len)) continue;
             if (link) {
                 uint32_t r = net ? css_linked_sheet(net, x) : 0;
                 if (!r) continue;
@@ -10123,16 +10179,20 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
                 amb_span fu = net->resource[r].final_url;
                 snprintf(base, sizeof base, "%.*s", (int)fu.len, text_ptr(net, fu));
                 vector<char> body;
-                append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
-                css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0);
+                if (om & CSS_OMS_TEXT) append_range(body, data(omt), len(omt));
+                else append_range(body, bytes_ptr(net, net->resource[r].body), net->resource[r].body.len);
+                css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(body), len(body), base, 0, 0, 0, base, 0, net_encoding());
                 continue;
             }
             vector<char> t;
-            for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
-                if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
+            if (om & CSS_OMS_TEXT) append_range(t, data(omt), len(omt));
+            else
+                for (uint32_t ch = doc->node[x].first_child; ch; ch = doc->node[ch].next_sibling)
+                    if (doc->node[ch].kind == DOM_NODE_KIND_TEXT) append_range(t, text_ptr(doc, doc->node[ch].data), doc->node[ch].data.len);
             uint32_t host = doc->node[x].parent && css_is_element(doc, doc->node[x].parent) ? doc->node[x].parent : 0;
-            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host);
+            css_sheet_read(s, net, CSS_ORIGIN_AUTHOR, data(t), len(t), 0, 0, 0, 0, page, host, net_encoding());
         }
+        if (om_any) css_om_adopted_read(s, net, doc, root);
     }
     dom_node_h no_tree = { 0, 0, 0 };
     css_read_tree = no_tree;

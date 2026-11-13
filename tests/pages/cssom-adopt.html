@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: constructed sheets, adopted</title>
+<style id="s1">#a { color: rgb(255, 0, 0); } #b { color: rgb(255, 0, 0); }</style>
+</head><body>
+<div id="a">a</div><div id="b">b</div><div id="h"></div>
+<div id="dh"><template shadowrootmode="open"><style>#din { color: rgb(1, 0, 0) } #din2 { color: rgb(2, 0, 0) }</style><span id="din">in</span><span id="din2">in2</span></template></div>
+<iframe id="f" srcdoc="<p>x</p>"></iframe>
+<script>
+function p(s) { console.log(s); }
+function t(label, f) { try { var r = f(); p(label + ' -> ' + r); } catch (e) { p(label + ' threw ' + e.name + ': ' + e.message); } }
+function col(id) { return getComputedStyle(document.getElementById(id)).color; }
+function texts(x) { var o = []; for (var i = 0; i < x.cssRules.length; i++) o.push(x.cssRules[i].cssText); return o.join(' || '); }
+var c = new CSSStyleSheet();
+t('ctor', function () { return [c.cssRules.length, c.href, c.ownerNode, c.title, JSON.stringify(c.media.mediaText), c.disabled, c.type, c.parentStyleSheet, c.ownerRule, Object.prototype.toString.call(c)].join(' | '); });
+t('ctor opts', function () { var x = new CSSStyleSheet({ media: 'print, SCREEN', disabled: true, baseURL: 'http://example.com/a/' }); return x.media.mediaText + ' | ' + x.disabled + ' | ' + x.href; });
+t('ctor media list', function () { var x = new CSSStyleSheet({ media: ['print'] }); return x.media.mediaText; });
+t('ctor media obj', function () { var x = new CSSStyleSheet({ media: document.getElementById('s1').sheet.media }); return JSON.stringify(x.media.mediaText); });
+t('ctor undefined', function () { var x = new CSSStyleSheet(undefined); return x.cssRules.length; });
+t('ctor call', function () { return CSSStyleSheet(); });
+t('replaceSync', function () { c.replaceSync('.a { color: red } garbage { } .b {'); return c.cssRules.length + ' ' + texts(c); });
+t('replaceSync import', function () { c.replaceSync('@import url(cssom/b.css); .a { color: red }'); return c.cssRules.length + ' ' + texts(c); });
+t('replaceSync none', function () { c.replaceSync(); return c.cssRules.length + ' ' + texts(c); });
+t('replaceSync null', function () { c.replaceSync(null); return c.cssRules.length + ' ' + texts(c); });
+t('insertRule import', function () { return c.insertRule('@import url(cssom/b.css);', 0); });
+t('insertRule', function () { return c.insertRule('.c { color: blue }', 0) + ' ' + texts(c); });
+var own = document.getElementById('s1').sheet;
+t('own replaceSync', function () { return own.replaceSync('.a {}'); });
+t('own replace', function () { var r = own.replace('.a {}'); r.catch(function () {}); return Object.prototype.toString.call(r); });
+own.replace('.a{}').then(function () { p('own replace then'); }, function (e) { p('own replace rejected ' + e.name + ': ' + e.message); });
+c.replace('@import url(cssom/b.css); .x { color: blue }').then(function (r) { p('replace resolved ' + (r === c) + ' ' + c.cssRules.length + ' ' + c.cssRules[0].cssText); }, function (e) { p('replace rejected ' + e.name + ': ' + e.message); });
+t('replace sync part', function () { return texts(c); });
+var c1 = new CSSStyleSheet(), c2 = new CSSStyleSheet();
+c1.replaceSync('#a { color: rgb(0, 0, 255) } #b { color: rgb(0, 0, 255) }');
+c2.replaceSync('#a { color: rgb(0, 128, 0) }');
+t('own sheet before', function () { return col('a') + ' ' + col('b'); });
+var A = document.adoptedStyleSheets;
+t('identity', function () { return (A === document.adoptedStyleSheets) + ' ' + A.length + ' ' + Array.isArray(A) + ' ' + (A instanceof Array) + ' ' + Object.prototype.toString.call(A); });
+document.adoptedStyleSheets = [c1];
+t('after set', function () { return (A === document.adoptedStyleSheets) + ' ' + A.length + ' ' + col('a') + ' ' + col('b') + ' ' + document.styleSheets.length; });
+document.adoptedStyleSheets.push(c2);
+t('after push', function () { return document.adoptedStyleSheets.length + ' ' + col('a') + ' ' + col('b'); });
+document.adoptedStyleSheets = [];
+t('emptied', function () { return col('a') + ' ' + col('b'); });
+document.adoptedStyleSheets = [c2, c1];
+t('the other order', function () { return col('a') + ' ' + col('b') + ' ' + (document.adoptedStyleSheets[0] === c2); });
+document.adoptedStyleSheets.splice(0, 1);
+t('splice', function () { return document.adoptedStyleSheets.length + ' ' + col('a') + ' ' + (document.adoptedStyleSheets[0] === c1); });
+document.adoptedStyleSheets[1] = c2;
+t('index set', function () { return document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('index set bad', function () { document.adoptedStyleSheets[0] = 5; return 'ok'; });
+t('index set own', function () { document.adoptedStyleSheets[0] = own; return 'ok'; });
+t('index set far', function () { 'use strict'; document.adoptedStyleSheets[5] = c1; return document.adoptedStyleSheets.length; });
+t('index set far sloppy', function () { document.adoptedStyleSheets[5] = c1; return document.adoptedStyleSheets.length; });
+t('length grow', function () { 'use strict'; document.adoptedStyleSheets.length = 9; return document.adoptedStyleSheets.length; });
+t('pop', function () { var x = document.adoptedStyleSheets.pop(); return (x === c2) + ' ' + document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('dup', function () { document.adoptedStyleSheets = [c1, c1, c2, c1]; return document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('length 0', function () { document.adoptedStyleSheets.length = 0; return document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('set own', function () { document.adoptedStyleSheets = [own]; return 'ok'; });
+t('set mixed', function () { document.adoptedStyleSheets = [c1, own, 5]; return 'ok'; });
+t('set number', function () { document.adoptedStyleSheets = 5; return 'ok'; });
+t('set null', function () { document.adoptedStyleSheets = null; return 'ok'; });
+t('set obj', function () { document.adoptedStyleSheets = {}; return 'ok'; });
+t('set set', function () { document.adoptedStyleSheets = new Set([c2]); return document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('push bad', function () { document.adoptedStyleSheets.push(own); return 'ok'; });
+t('push obj', function () { document.adoptedStyleSheets.push({}); return 'ok'; });
+t('after errors', function () { return document.adoptedStyleSheets.length + ' ' + col('a'); });
+t('disabled', function () { c1.disabled = true; document.adoptedStyleSheets = [c1]; var x = col('a'); c1.disabled = false; return x + ' ' + col('a'); });
+t('media', function () { c1.media.mediaText = 'print'; var x = col('a'); c1.media.mediaText = ''; return x + ' ' + col('a'); });
+t('ctor media', function () { var x = new CSSStyleSheet({ media: 'print' }); x.replaceSync('#b { color: orange }'); document.adoptedStyleSheets = [x]; return col('b'); });
+t('modify adopted', function () { document.adoptedStyleSheets = [c1]; c1.insertRule('#b { color: rgb(128, 0, 128) }', 2); return col('b') + ' ' + c1.cssRules.length; });
+t('delete in adopted', function () { c1.deleteRule(2); return col('b'); });
+t('replace adopted', function () { c1.replaceSync('#b { color: rgb(0, 1, 2) }'); return col('a') + ' ' + col('b'); });
+t('owner of adopted', function () { return c1.ownerNode + ' ' + c1.parentStyleSheet + ' ' + c1.href + ' ' + c1.title + ' ' + document.styleSheets.length; });
+t('important own vs adopted', function () { c1.replaceSync('#a { color: rgb(3, 3, 3) }'); own.insertRule('#a { color: rgb(4, 4, 4) !important }', 0); var x = col('a'); own.deleteRule(0); return x + ' ' + col('a'); });
+var host = document.getElementById('h'), sr = host.attachShadow({ mode: 'open' });
+sr.innerHTML = '<style>#in { color: rgb(255, 0, 0) }</style><span id="in">in</span>';
+function scol(r, id) { return getComputedStyle(r.getElementById(id)).color; }
+t('shadow', function () { return sr.styleSheets.length + ' ' + (sr.adoptedStyleSheets === sr.adoptedStyleSheets) + ' ' + (sr.adoptedStyleSheets === document.adoptedStyleSheets) + ' ' + sr.adoptedStyleSheets.length + ' ' + scol(sr, 'in'); });
+var c3 = new CSSStyleSheet(); c3.replaceSync('#in { color: rgb(0, 128, 128) } #a { color: rgb(0, 0, 128) } :host { color: rgb(5, 5, 5) }');
+sr.adoptedStyleSheets = [c3];
+t('shadow adopted', function () { return scol(sr, 'in') + ' ' + col('a') + ' ' + col('h'); });
+document.adoptedStyleSheets = [c3];
+t('two trees', function () { return scol(sr, 'in') + ' ' + col('a') + ' ' + document.adoptedStyleSheets.length + ' ' + sr.adoptedStyleSheets.length; });
+t('change shared', function () { c3.insertRule('#in { color: rgb(6, 6, 6) }', 3); return scol(sr, 'in'); });
+t('remove from one', function () { document.adoptedStyleSheets = []; return scol(sr, 'in') + ' ' + col('a'); });
+var dsr = document.getElementById('dh').shadowRoot;
+t('declarative', function () { return dsr.styleSheets.length + ' ' + dsr.adoptedStyleSheets.length + ' ' + scol(dsr, 'din') + ' ' + scol(dsr, 'din2'); });
+var c4 = new CSSStyleSheet(); c4.replaceSync('#din { color: rgb(7, 7, 7) }');
+var c5 = new CSSStyleSheet(); c5.replaceSync('#din { color: rgb(8, 8, 8) } #din2 { color: rgb(9, 9, 9) }');
+dsr.adoptedStyleSheets = [c4, c5];
+t('declarative adopted', function () { return scol(dsr, 'din') + ' ' + scol(dsr, 'din2'); });
+dsr.adoptedStyleSheets = [c4];
+t('declarative one', function () { return scol(dsr, 'din') + ' ' + scol(dsr, 'din2'); });
+dsr.adoptedStyleSheets = [c5, c4];
+t('declarative order', function () { return scol(dsr, 'din') + ' ' + scol(dsr, 'din2'); });
+dsr.adoptedStyleSheets.splice(1, 1);
+t('declarative splice', function () { return scol(dsr, 'din') + ' ' + scol(dsr, 'din2') + ' ' + dsr.adoptedStyleSheets.length; });
+t('own after adopted', function () { dsr.styleSheets[0].insertRule('#din2 { color: rgb(10, 10, 10) }', 2); return scol(dsr, 'din2'); });
+window.addEventListener('load', function () {
+t('frame sheet', function () { var F = document.getElementById('f').contentWindow; var x = new F.CSSStyleSheet(); document.adoptedStyleSheets = [x]; return 'ok'; });
+t('frame sheet push', function () { var F = document.getElementById('f').contentWindow; var x = new F.CSSStyleSheet(); document.adoptedStyleSheets.push(x); return 'ok'; });
+t('to frame', function () { var F = document.getElementById('f').contentWindow; F.document.adoptedStyleSheets = [c1]; return 'ok'; });
+t('frame own', function () { var F = document.getElementById('f').contentWindow; var x = new F.CSSStyleSheet(); x.replaceSync('p { color: rgb(11, 11, 11) }'); F.document.adoptedStyleSheets = [x]; return F.getComputedStyle(F.document.querySelector('p')).color; });
+t('end', function () { return document.adoptedStyleSheets.length + ' ' + col('a') + ' ' + col('b'); });
+});
+</script>
+</body></html>

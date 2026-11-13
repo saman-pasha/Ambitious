@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: the rules</title>
+<style id="s1">
+@charset "utf-8";
+@import url("cssom/b.css") layer(base) supports(display: grid) screen and (min-width: 1px);
+@import "cssom/b.css";
+@import url(cssom/b.css) layer;
+@namespace url(http://www.w3.org/1999/xhtml);
+@namespace svg url("http://www.w3.org/2000/svg");
+.a { color: red; & .b { color: blue; } &:hover { color: green } .c & { margin: 0 } }
+@media screen and (min-width: 100px), print { .m { color: red } }
+@supports (display: grid) and (not (display: inline-grid)) { .s { color: red } }
+@container card (min-width: 400px) and (orientation: landscape) { .c { color: red } }
+@container (width > 10px) { .c2 { color: red } }
+@layer A.B, C;
+@layer D { .l { color: red } }
+@layer { .anon { color: red } }
+@keyframes Spin { 0% { opacity: 0 } 50%, 75% { opacity: .5 } TO { opacity: 1 } }
+@keyframes "quoted" { from { color: red } }
+@page { margin: 1cm }
+@page :left { margin-left: 2cm; @top-left { content: "x" } }
+@page wide:first { size: landscape }
+@property --len { syntax: "<length>"; inherits: true; initial-value: 10px }
+@property --any { syntax: "*"; inherits: false }
+@counter-style foo { system: fixed 3; symbols: a b c; suffix: ") "; prefix: "("; negative: "-"; range: 1 10; pad: 2 "0"; fallback: decimal; speak-as: numbers }
+@scope (.x) { .y { color: red } }
+@scope { .z { color: red } }
+@scope (.p) to (.q, .r) { .t { color: red } }
+@font-face { font-family: Bar; src: local(Arial), url(x.woff) format(woff); unicode-range: U+0000-00FF, U+0131; font-display: swap }
+@starting-style { .st { opacity: 0 } }
+@font-feature-values Foo { @styleset { nice: 2 } }
+@font-palette-values --pal { font-family: Bar; base-palette: 1 }
+@view-transition { navigation: auto }
+@position-try --top { top: anchor(bottom) }
+div>p , span+em { background: blue !important; }
+</style>
+<style id="s9">
+@font-feature-values Foo, "Bar Baz" { @styleset { nice: 2; fancy: 3 5 } @swash { s: 1 } @swash { t: 1 2 } @bogus { x: 1 } @styleset { nice: 4 } }
+@font-palette-values --pal { font-family: Bar, "Q R"; base-palette: 1; override-colors: 0 red, 1 #00ff00 }
+@view-transition { navigation: auto; types: a b }
+@view-transition { navigation: none }
+@position-try --top { top: anchor(bottom); margin: 1px }
+@starting-style { .st { opacity: 0 } }
+</style>
+</head><body>
+<script>
+function p(s) { console.log(s); }
+function t(label, f) { try { var r = f(); p(label + ' -> ' + r); } catch (e) { p(label + ' threw ' + e.name + ': ' + e.message); } }
+var s = document.getElementById('s1').sheet, R = s.cssRules;
+p('rules ' + R.length + ' ' + Object.prototype.toString.call(R) + ' ' + (R === s.cssRules) + ' ' + (s.rules === R) + ' ' + (R.item(0) === R[0]) + ' ' + R.item(99) + ' ' + R[99]);
+for (var i = 0; i < R.length; i++) p(i + ' ' + R[i].constructor.name + ' ' + R[i].type + ' ' + Object.prototype.toString.call(R[i]) + ' ' + JSON.stringify(R[i].cssText) + ' ' + (R[i].parentStyleSheet === s) + ' ' + R[i].parentRule);
+var imp = R[0];
+t('import', function () { return [imp.href, imp.media.mediaText, imp.layerName, imp.supportsText, imp.styleSheet ? 'sheet' : 'none'].join(' | '); });
+t('import2', function () { return [R[1].href, JSON.stringify(R[1].media.mediaText), R[1].layerName, R[1].supportsText].join(' | '); });
+t('import3', function () { return [R[2].href, JSON.stringify(R[2].layerName)].join(' | '); });
+t('ns', function () { return [R[3].namespaceURI, JSON.stringify(R[3].prefix), R[4].namespaceURI, R[4].prefix].join(' | '); });
+var st = R[5];
+t('nest', function () { return st.cssRules.length + ' ' + st.cssRules[0].constructor.name + ' ' + st.cssRules[0].selectorText + ' ' + (st.cssRules[0].parentRule === st) + ' ' + (st.cssRules[0].parentStyleSheet === s) + ' ' + st.cssRules[1].selectorText + ' ' + st.cssRules[2].selectorText + ' ' + st.selectorText; });
+t('nest text', function () { return JSON.stringify(st.cssRules[0].cssText) + ' ' + JSON.stringify(st.cssRules[2].cssText); });
+t('style', function () { return st.style.cssText + ' | ' + (st.style.parentRule === st) + ' ' + (st.style === st.style) + ' ' + (R[5] === R[5]) + ' ' + (s.cssRules === s.cssRules); });
+var m = R[6];
+t('media', function () { return [m.conditionText, m.media.mediaText, m.media.length, m.cssRules.length, m.parentRule, m.parentStyleSheet === s, m.media === m.media].join(' | '); });
+t('media child', function () { var c = m.cssRules[0]; return [c.selectorText, c.parentRule === m, c.parentStyleSheet === s, JSON.stringify(c.cssText)].join(' | '); });
+t('supports', function () { return [R[7].conditionText, R[7].cssRules.length].join(' | '); });
+t('container', function () { return [R[8].conditionText, R[8].containerName, R[8].containerQuery, JSON.stringify(R[9].containerName), R[9].containerQuery, R[9].conditionText].join(' | '); });
+t('layer stmt', function () { return JSON.stringify(R[10].nameList) + ' ' + Array.isArray(R[10].nameList) + ' ' + Object.isFrozen(R[10].nameList); });
+t('layer block', function () { return JSON.stringify(R[11].name) + ' ' + JSON.stringify(R[12].name) + ' ' + R[11].cssRules.length; });
+var k = R[13];
+t('keyframes', function () { return [k.name, k.cssRules.length, k.length, k[0].keyText, k[1].keyText, k[2].keyText, k.cssRules[0].style.cssText, k.cssRules[0].constructor.name, R[14].name, k[0].parentRule === k, k[3]].join(' | '); });
+t('findRule', function () { return [k.findRule('0%') && k.findRule('0%').keyText, k.findRule('from') && k.findRule('from').keyText, k.findRule('50%,75%') && k.findRule('50%,75%').keyText, k.findRule('to'), k.findRule('100%') && 'x', k.findRule('bad')].join(' | '); });
+t('appendRule', function () { k.appendRule('25% { opacity: .25 }'); return k.length + ' ' + k[3].cssText; });
+t('appendRule bad', function () { k.appendRule('bad { opacity: .25 }'); return k.length; });
+t('appendRule bad2', function () { k.appendRule('.x { }'); return k.length; });
+t('appendRule none', function () { k.appendRule(); return k.length; });
+t('deleteRule', function () { k.deleteRule('50%, 75%'); return k.length + ' ' + JSON.stringify(k.cssText); });
+t('deleteRule none', function () { k.deleteRule('33%'); return k.length; });
+t('keyText set', function () { k[0].keyText = 'from'; var a = k[0].keyText; k[0].keyText = 'garbage'; return a + ' ' + k[0].keyText; });
+t('keyText set multi', function () { k[0].keyText = '10%, 20%'; return k[0].keyText + ' ' + JSON.stringify(k[0].cssText); });
+t('name set', function () { k.name = 'Other'; var a = k.name; k.name = 'none'; var b = k.name; k.name = ''; return a + ' ' + b + ' ' + JSON.stringify(k.name) + ' ' + JSON.stringify(k.cssText.slice(0, 20)); });
+t('page', function () { return [R[15].selectorText, JSON.stringify(R[15].cssText), R[16].selectorText, R[17].selectorText, R[15].style.cssText, R[15].constructor.name, R[16].cssRules.length].join(' | '); });
+t('margin rule', function () { var x = R[16].cssRules[0]; return [x.constructor.name, x.type, x.name, x.style.cssText, JSON.stringify(x.cssText), x.parentRule === R[16]].join(' | '); });
+t('page set', function () { R[15].selectorText = ':right'; var a = R[15].selectorText; R[15].selectorText = 'bad selector here'; return a + ' ' + R[15].selectorText; });
+t('property', function () { var q = R[18]; return [q.name, q.syntax, q.inherits, q.initialValue, R[19].syntax, R[19].inherits, R[19].initialValue].join(' | '); });
+t('counter', function () { var c = R[20]; return [c.name, c.system, c.symbols, c.additiveSymbols, c.negative, c.prefix, c.suffix, c.range, c.pad, c.speakAs, c.fallback].join(' | '); });
+t('counter set', function () { var c = R[20]; c.suffix = '"]"'; c.name = 'bar'; return c.suffix + ' ' + c.name + ' ' + JSON.stringify(c.cssText); });
+t('counter set bad', function () { var c = R[20]; c.name = 'none'; c.system = 'bogus'; return c.name + ' ' + c.system; });
+t('scope', function () { return [R[21].start, R[21].end, R[22].start, R[22].end, R[23].start, R[23].end, R[21].cssRules.length].join(' | '); });
+t('fontface', function () { var f = R[24].style; return [f.length, f.getPropertyValue('font-family'), f.getPropertyValue('src'), f.getPropertyValue('unicode-range'), f.getPropertyValue('font-display'), f[0], f.cssText].join(' | '); });
+t('rest', function () { var o = []; for (var i = 25; i < R.length; i++) o.push(R[i].constructor.name + ':' + R[i].type); return o.join(', '); });
+t('rest names', function () { return [R[27].name, R[29].name, JSON.stringify(R[29].style.cssText), R[25].cssRules.length].join(' | '); });
+t('consts', function () { return [CSSRule.STYLE_RULE, CSSRule.CHARSET_RULE, CSSRule.IMPORT_RULE, CSSRule.MEDIA_RULE, CSSRule.FONT_FACE_RULE, CSSRule.PAGE_RULE, CSSRule.KEYFRAMES_RULE, CSSRule.KEYFRAME_RULE, CSSRule.MARGIN_RULE, CSSRule.NAMESPACE_RULE, CSSRule.COUNTER_STYLE_RULE, CSSRule.SUPPORTS_RULE, CSSRule.FONT_FEATURE_VALUES_RULE, st.STYLE_RULE, CSSRule.prototype.MEDIA_RULE].join(','); });
+t('protos', function () { return [Object.getPrototypeOf(CSSStyleRule.prototype) === CSSGroupingRule.prototype, Object.getPrototypeOf(CSSStyleRule.prototype) === CSSRule.prototype, Object.getPrototypeOf(CSSMediaRule.prototype) === CSSConditionRule.prototype, Object.getPrototypeOf(CSSConditionRule.prototype) === CSSGroupingRule.prototype, Object.getPrototypeOf(CSSGroupingRule.prototype) === CSSRule.prototype, Object.getPrototypeOf(CSSStyleSheet.prototype) === StyleSheet.prototype, Object.getPrototypeOf(CSSPageRule.prototype) === CSSGroupingRule.prototype, Object.getPrototypeOf(CSSKeyframesRule.prototype) === CSSRule.prototype, Object.getPrototypeOf(CSSLayerBlockRule.prototype) === CSSGroupingRule.prototype, Object.getPrototypeOf(CSSScopeRule.prototype) === CSSGroupingRule.prototype, Object.getPrototypeOf(CSSContainerRule.prototype) === CSSConditionRule.prototype, Object.getPrototypeOf(CSSSupportsRule.prototype) === CSSConditionRule.prototype, Object.getPrototypeOf(CSSStyleRule) === CSSRule].join(','); });
+t('own names', function () { return [CSSRule, CSSGroupingRule, CSSKeyframesRule, CSSMediaRule, CSSImportRule, CSSConditionRule, CSSKeyframeRule].map(function (c) { return Object.getOwnPropertyNames(c.prototype).sort().join(','); }).join(' | '); });
+t('tostring', function () { return [String(s), String(R), String(R[5]), String(R[5].style), String(s.media), String(document.styleSheets)].join(' | '); });
+t('selectorText set', function () { st.selectorText = 'DIV > P'; var a = st.selectorText; st.selectorText = 'a:foo'; var b = st.selectorText; st.selectorText = ''; return a + ' | ' + b + ' | ' + st.selectorText + ' | ' + st.cssRules[0].selectorText; });
+t('cssText set', function () { st.cssText = '.zz { color: red }'; return JSON.stringify(st.cssText.slice(0, 20)); });
+t('conditionText set', function () { m.conditionText = 'print'; return m.conditionText; });
+t('media set', function () { m.media.mediaText = 'print'; return m.conditionText + ' ' + JSON.stringify(m.cssText.slice(0, 20)); });
+t('media append', function () { m.media.appendMedium('tv'); return m.conditionText + ' ' + m.media.length; });
+t('delete group', function () { m.deleteRule(0); return m.cssRules.length + ' ' + JSON.stringify(m.cssText); });
+t('deleted rule', function () { var r = R[7]; s.deleteRule(7); return r.parentStyleSheet + ' ' + r.parentRule + ' ' + JSON.stringify(r.cssText) + ' ' + r.cssRules.length + ' ' + (r.cssRules[0].parentStyleSheet) + ' ' + r.cssRules[0].parentRule.constructor.name; });
+t('new CSSRule', function () { return new CSSRule(); });
+t('new CSSStyleRule', function () { return new CSSStyleRule(); });
+t('call CSSRule', function () { return CSSRule(); });
+t('new CSSRuleList', function () { return new CSSRuleList(); });
+t('illegal', function () { return Object.getOwnPropertyDescriptor(CSSRule.prototype, 'cssText').get.call(s); });
+var R9 = document.getElementById('s9').sheet.cssRules;
+t('s9', function () { var o = []; for (var i = 0; i < R9.length; i++) o.push(R9[i].constructor.name + ' ' + JSON.stringify(R9[i].cssText)); return o.join(' || '); });
+t('ffv', function () { return JSON.stringify(R9[0].fontFamily); });
+t('fpv', function () { var r = R9[1]; return [r.name, JSON.stringify(r.fontFamily), JSON.stringify(r.basePalette), JSON.stringify(r.overrideColors)].join(' | '); });
+t('vt', function () { var r = R9[2]; return [JSON.stringify(r.navigation), JSON.stringify(r.types), Object.isFrozen(r.types), JSON.stringify(R9[3].types), JSON.stringify(R9[3].navigation)].join(' | '); });
+t('pt', function () { var r = R9[4]; return [r.name, r.style.cssText, r.style.length, r.style.marginTop].join(' | '); });
+t('ss', function () { var r = R9[5]; return [r.cssRules.length, r.cssRules[0].selectorText, JSON.stringify(r.cssText)].join(' | '); });
+</script>
+</body></html>

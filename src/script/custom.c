@@ -43,8 +43,8 @@
    closed tree's nodes hidden from a listener outside it (DOM 2.9).
 
    What is not done: customized built-in elements (extends, is=); form-associated custom
-   elements; adoptedStyleSheets (there are no constructable style sheets); focus is not
-   delegated (delegatesFocus is kept and read back). */
+   elements; focus is not delegated (delegatesFocus is kept and read back). A shadow root's
+   styleSheets and adoptedStyleSheets are src/script/cssom.c's. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

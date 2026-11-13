@@ -40,6 +40,8 @@ amb_interface(script);
 #include "../js/js.h"
 #include "script.h"
 
+void script_cssom_sync(struct js_host *h);
+
 /* the cascade's property of a CSS name (background-color): its number, or -1. The CSS
    module names a property by its enum's word (background_color), each border side's
    colour its own */
@@ -106,6 +108,8 @@ static void sv_family(const char *s, size_t n, vector<char> *out) {
 
 void script_view_update(struct js_host *h) {
     dom_document *d = h->d;
+    /* the sheets the scripts changed told the cascade (src/script/cssom.c) */
+    script_cssom_sync(h);
     if (h->view_ok && h->view_rev == dom_revision(d)) return;
     css_style st;
     layout_tree lt;

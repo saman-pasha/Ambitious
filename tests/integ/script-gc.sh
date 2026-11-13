@@ -19,7 +19,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-sgc.XXXXXX")
 export AMB_WORK=$work
 echo "-- each gate of the pages' scripts, a collection at every moment between tasks, against its .expect:"
-for g in script script-custom script-input script-modules script-net script-observe script-view script-window foreign; do
+for g in script script-cssom script-custom script-input script-modules script-net script-observe script-view script-window foreign; do
   AMB_GC_STRESS=1 sh "$AMB_ROOT/tests/integ/$g.sh" > "$work/$g.out" 2>&1 < /dev/null
   if cmp -s "$AMB_ROOT/tests/integ/$g.expect" "$work/$g.out"; then echo "$g: as its .expect"
   else echo "$g differs from its .expect:"; diff "$AMB_ROOT/tests/integ/$g.expect" "$work/$g.out" | head -20; fi

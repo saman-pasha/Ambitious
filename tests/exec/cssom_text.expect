@@ -1,0 +1,688 @@
+sheet: @charset "utf-8"; @import url("imp.css") screen; @namespace svg url(http://www.w3.org/2000/svg); .a { color: red; margin: 1px 2px; } div>p , span+em { background: blue !important; } @media (min-width: 100px) { .b { color: green } } @supports (display: grid) { .c { display: grid } } @container card (min-width: 400px) { .d { padding: 1em } } @layer base, theme; @layer base { .e { color: #FF0000 } } @font-face { font-family: "Foo"; src: url(foo.woff2) format("woff2"); font-weight: bold; } @keyframes spin { from { transform: rotate(0deg) } 50% { opacity: .5 } to { transform: rotate(360deg) } } @page :first { margin: 1in; } @property --x { syntax: '<length>'; inherits: false; initial-value: 0px; } @counter-style thumbs { system: cyclic; symbols: "X"; suffix: " "; } @scope (.card) to (.content) { img { border: 1px solid black } }
+  0: @import url("imp.css") screen;
+  1: @namespace svg url("http://www.w3.org/2000/svg");
+  2: .a { color: red; margin: 1px 2px; }
+  3: div > p, span + em { background: blue !important; }
+  4: @media (min-width: 100px) {
+  .b { color: green; }
+}
+  5: @supports (display: grid) {
+  .c { display: grid; }
+}
+  6: @container card (min-width: 400px) {
+  .d { padding: 1em; }
+}
+  7: @layer base, theme;
+  8: @layer base {
+  .e { color: rgb(255, 0, 0); }
+}
+  9: @font-face { font-family: Foo; src: url("foo.woff2") format("woff2"); font-weight: bold; }
+  10: @keyframes spin { 
+  0% { transform: rotate(0deg); }
+  50% { opacity: 0.5; }
+  100% { transform: rotate(360deg); }
+}
+  11: @page :first { margin: 1in; }
+  12: @property --x { syntax: "<length>"; inherits: false; initial-value: 0px; }
+  13: @counter-style thumbs { system: cyclic; symbols: "X"; suffix: " "; }
+  14: @scope (.card) to (.content) {
+  img { border: 1px solid black; }
+}
+sheet: @import url("imp.css") layer(base) supports(display: grid) screen and (min-width: 1px); @import "imp.css"; @import url(imp.css) layer; @namespace url(http://www.w3.org/1999/xhtml); @namespace svg url("http://www.w3.org/2000/svg"); .a { color: red; & .b { color: blue; } &:hover { color: green } .c & { margin: 0 } } @media screen and (min-width: 100px), print { .m { color: red } } @supports (display: grid) and (not (display: inline-grid)) { .s { color: red } } @container card (min-width: 400px) and (orientation: landscape) { .c { color: red } } @container (width > 10px) { .c2 { color: red } } @layer A.B, C; @layer D { .l { color: red } } @layer { .anon { color: red } } @keyframes Spin { 0% { opacity: 0 } 50%, 75% { opacity: .5 } TO { opacity: 1 } } @keyframes "quoted" { from { color: red } } @page { margin: 1cm } @page :left { margin-left: 2cm } @page wide:first { size: landscape } @property --len { syntax: "<length>"; inherits: true; initial-value: 10px } @property --any { syntax: "*"; inherits: false } @counter-style foo { system: fixed 3; symbols: a b c; suffix: ") "; prefix: "("; negative: "-"; range: 1 10; pad: 2 "0"; fallback: decimal; speak-as: numbers } @scope (.x) { .y { color: red } } @scope { .z { color: red } } @scope (.p) to (.q, .r) { .t { color: red } } @font-face { font-family: Bar; src: local(Arial), url(x.woff) format(woff); unicode-range: U+0000-00FF, U+0131; font-display: swap } @starting-style { .st { opacity: 0 } } @font-feature-values Foo { @styleset { nice: 2 } } @font-palette-values --pal { font-family: Bar; base-palette: 1 } @view-transition { navigation: auto } @position-try --top { top: anchor(bottom) }
+  0: @import url("imp.css") layer(base) supports(display: grid) screen and (min-width: 1px);
+  1: @import url("imp.css");
+  2: @import url("imp.css") layer;
+  3: @namespace url("http://www.w3.org/1999/xhtml");
+  4: @namespace svg url("http://www.w3.org/2000/svg");
+  5: .a {
+  color: red;
+  & .b { color: blue; }
+  &:hover { color: green; }
+  .c & { margin: 0px; }
+}
+  6: @media screen and (min-width: 100px), print {
+  .m { color: red; }
+}
+  7: @supports (display: grid) and (not (display: inline-grid)) {
+  .s { color: red; }
+}
+  8: @container card (min-width: 400px) and (orientation: landscape) {
+  .c { color: red; }
+}
+  9: @container (width > 10px) {
+  .c2 { color: red; }
+}
+  10: @layer A.B, C;
+  11: @layer D {
+  .l { color: red; }
+}
+  12: @layer {
+  .anon { color: red; }
+}
+  13: @keyframes Spin { 
+  0% { opacity: 0; }
+  50%, 75% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+  14: @keyframes quoted { 
+  0% { color: red; }
+}
+  15: @page { margin: 1cm; }
+  16: @page :left { margin-left: 2cm; }
+  17: @page wide:first { size: landscape; }
+  18: @property --len { syntax: "<length>"; inherits: true; initial-value: 10px; }
+  19: @property --any { syntax: "*"; inherits: false; }
+  20: @counter-style foo { system: fixed 3; symbols: a b c; negative: "-"; prefix: "("; suffix: ") "; pad: 2 "0"; range: 1 10; fallback: decimal; speak-as: numbers; }
+  21: @scope (.x) {
+  .y { color: red; }
+}
+  22: @scope {
+  .z { color: red; }
+}
+  23: @scope (.p) to (.q, .r) {
+  .t { color: red; }
+}
+  24: @font-face { font-family: Bar; src: local("Arial"), url("x.woff") format("woff"); unicode-range: U+0-FF, U+131; font-display: swap; }
+  25: @starting-style {
+  .st { opacity: 0; }
+}
+  26: @font-feature-values Foo { @styleset { nice: 2; } }
+  27: @font-palette-values --pal { font-family: Bar; base-palette: 1; }
+  28: @view-transition { navigation: auto; }
+  29: @position-try --top { top: anchor(bottom); }
+rule: DIV {} -> 0 div { }
+rule: div>p {} -> 0 div > p { }
+rule: a:HOVER {} -> 0 a:hover { }
+rule: *.a {} -> 0 .a { }
+rule: * {} -> 0 * { }
+rule: * > * {} -> 0 * > * { }
+rule: [A=b] {} -> 0 [a="b"] { }
+rule: [a="b" i] {} -> 0 [a="b" i] { }
+rule: [a='b'] {} -> 0 [a="b"] { }
+rule: [a|=b] {} -> 0 [a|="b"] { }
+rule: a:not(.b,.c) {} -> 0 a:not(.b, .c) { }
+rule: a:is(.b , .c) {} -> 0 a:is(.b, .c) { }
+rule: p::BEFORE {} -> 0 p::before { }
+rule: p:before {} -> 0 p::before { }
+rule: p::first-line {} -> 0 p::first-line { }
+rule: p:first-letter {} -> 0 p::first-letter { }
+rule: li:nth-child(2N+1) {} -> 0 li:nth-child(2n+1) { }
+rule: li:nth-child( odd ) {} -> 0 li:nth-child(2n+1) { }
+rule: li:nth-child(even) {} -> 0 li:nth-child(2n) { }
+rule: li:nth-child(+5) {} -> 0 li:nth-child(5) { }
+rule: li:nth-child(-n+3) {} -> 0 li:nth-child(-n+3) { }
+rule: li:nth-of-type(2n) {} -> 0 li:nth-of-type(2n) { }
+rule: li:nth-child(2n+1 of .x) {} -> 0 li:nth-child(2n+1 of .x) { }
+rule: #ID.Cls {} -> 0 #ID.Cls { }
+rule: svg|rect {} -> ERR 
+rule: *|* {} -> 0 * { }
+rule: |a {} -> 0 |a { }
+rule: a:where(.b) {} -> 0 a:where(.b) { }
+rule: a:has(> img) {} -> 0 a:has(> img) { }
+rule: a:has(+ b) {} -> 0 a:has(+ b) { }
+rule: :root {} -> 0 :root { }
+rule: a::after:hover {} -> ERR 
+rule: .a\:b {} -> 0 .a\:b { }
+rule: .\31 23 {} -> 0 .\31 23 { }
+rule: div ~ p {} -> 0 div ~ p { }
+rule: div   p {} -> 0 div p { }
+rule: a:lang(en) {} -> 0 a:lang(en) { }
+rule: a:dir(rtl) {} -> 0 a:dir(rtl) { }
+rule: input:checked {} -> 0 input:checked { }
+rule: :host {} -> 0 :host { }
+rule: :host(.a) {} -> 0 :host(.a) { }
+rule: ::slotted(span) {} -> 0 ::slotted(span) { }
+rule: ::part(foo) {} -> 0 ::part(foo) { }
+rule: :host-context(.dark) {} -> 0 :host-context(.dark) { }
+rule: a:foo {} -> ERR 
+rule: a::foo {} -> ERR 
+rule: ::-webkit-scrollbar {} -> 0 ::-webkit-scrollbar { }
+rule: a:-webkit-any(b) {} -> 0 a:-webkit-any(b) { }
+rule: a, {} -> ERR 
+rule: ,a {} -> ERR 
+rule: .a .b, .c > .d {} -> 0 .a .b, .c > .d { }
+rule: a:focus-visible {} -> 0 a:focus-visible { }
+rule: :is() {} -> 0 :is() { }
+rule: :where() {} -> 0 :where() { }
+rule: a:not() {} -> ERR 
+rule: & {} -> 0 & { }
+rule: .a & {} -> 0 .a & { }
+rule: A[HREF$=".PDF"] {} -> 0 a[href$=".PDF"] { }
+rule: a[href^=http] {} -> 0 a[href^="http"] { }
+rule: ns|* {} -> ERR 
+rule: li::marker {} -> 0 li::marker { }
+rule: ::selection {} -> 0 ::selection { }
+rule: :is(a, b) c {} -> 0 :is(a, b) c { }
+rule: :not(:hover) {} -> 0 :not(:hover) { }
+rule: .a { .b { color: red } } -> 0 .a {
+  & .b { color: red; }
+}
+rule: .a { > .b { color: red } } -> 0 .a {
+  & > .b { color: red; }
+}
+rule: .a { + .b { } ~ .c { } } -> 0 .a {
+  & + .b { }
+  & ~ .c { }
+}
+rule: .a { color: red; .b { } margin: 0 } -> 0 .a {
+  color: red;
+  & .b { }
+  margin: 0px;
+}
+rule: .a { @media screen { color: red } } -> 0 .a {
+  @media screen {
+  color: red;
+}
+}
+rule: .a { @media screen { .b { color: red } } } -> 0 .a {
+  @media screen {
+  & .b { color: red; }
+}
+}
+rule: .a { .b, .c & { } } -> 0 .a {
+  & .b, .c & { }
+}
+rule: .a { &.b { } } -> 0 .a {
+  &.b { }
+}
+rule: .a { div & { } } -> 0 .a {
+  div & { }
+}
+rule: .a { :hover { } } -> 0 .a {
+  & :hover { }
+}
+rule: @media screen { @media print { .a { color: red } } } -> 0 @media screen {
+  @media print {
+  .a { color: red; }
+}
+}
+rule: @media SCREEN AND (MIN-WIDTH:100PX) { } -> 0 @media screen and (min-width: 100px) {
+}
+rule: @media (min-width:100px) and (max-width : 200px) { } -> 0 @media (min-width: 100px) and (max-width: 200px) {
+}
+rule: @media not screen { } -> 0 @media not screen {
+}
+rule: @media only screen { } -> 0 @media only screen {
+}
+rule: @media (width >= 600px) { } -> 0 @media (width >= 600px) {
+}
+rule: @media (400px<=width<=700px) { } -> 0 @media (400px <= width <= 700px) {
+}
+rule: @media screen, print and (color) { } -> 0 @media screen, print and (color) {
+}
+rule: @media garbage(x) { } -> 0 @media garbage(x) {
+}
+rule: @media (foo: bar) { } -> 0 @media (foo: bar) {
+}
+rule: @media screen and { } -> 0 @media not all {
+}
+rule: @media { } -> 0 @media  {
+}
+rule: @media not (color) { } -> 0 @media not (color) {
+}
+rule: @media (color) or (hover) { } -> 0 @media (color) or (hover) {
+}
+rule: @media (min-aspect-ratio: 16/9) { } -> 0 @media (min-aspect-ratio: 16 / 9) {
+}
+rule: @media (min-width: calc(1px + 2px)) { } -> 0 @media (min-width: calc(3px)) {
+}
+rule: @supports (display:grid) AND (color:red) { } -> 0 @supports (display:grid) AND (color:red) {
+}
+rule: @supports ( display : grid ) { } -> 0 @supports ( display : grid ) {
+}
+rule: @supports display: grid { } -> ERR 
+rule: @supports (display: grid) and (display: flex) or (x: y) { } -> ERR 
+rule: @container (min-width:400px) { } -> 0 @container (min-width: 400px) {
+}
+rule: @container card { } -> 0 @container card {
+}
+rule: @container card (width>400px) { } -> 0 @container card (width > 400px) {
+}
+rule: @container style(--x: 1) { } -> 0 @container style(--x: 1) {
+}
+rule: @container not (width < 10px) { } -> 0 @container not (width < 10px) {
+}
+rule: @container a, b (width > 1px) { } -> 0 @container a, b (width > 1px) {
+}
+rule: @layer A , B ; -> 0 @layer A, B;
+rule: @layer a b { } -> ERR 
+rule: @layer; -> ERR 
+rule: @scope to (.b) { } -> 0 @scope to (.b) {
+}
+rule: @keyframes a { FROM { } 0% { } 50.5% { } 100% { } } -> 0 @keyframes a { 
+  0% { }
+  0% { }
+  50.5% { }
+  100% { }
+}
+rule: @keyframes a { 101% { } } -> 0 @keyframes a { 
+}
+rule: @keyframes a { from, to { color: red } } -> 0 @keyframes a { 
+  0%, 100% { color: red; }
+}
+rule: @keyframes a { entry 10% { } } -> 0 @keyframes a { 
+  entry 10% { }
+}
+rule: @keyframes "a b" { } -> 0 @keyframes a\ b { 
+}
+rule: @keyframes none { } -> ERR 
+rule: @keyframes "none" { } -> 0 @keyframes none { 
+}
+rule: @-webkit-keyframes a { from { color: red } } -> 0 @-webkit-keyframes a { 
+  0% { color: red; }
+}
+rule: @font-face { src: url(a.woff); font-family: "My Font"; font-weight: 100 900; font-style: oblique 10deg; } -> 0 @font-face { src: url("a.woff"); font-family: "My Font"; font-weight: 100 900; font-style: oblique 10deg; }
+rule: @font-face { color: red } -> 0 @font-face { }
+rule: @page :first:left { } -> ERR 
+rule: @page :RIGHT { margin: 0 } -> 0 @page :right { margin: 0px; }
+rule: @page { @top-left { content: "x" } } -> 0 @page { @top-left { content: "x"; } }
+rule: @page a { size: A4 } -> 0 @page a { size: a4; }
+rule: @property --a { inherits: false; syntax: "<color>"; initial-value: RED } -> 0 @property --a { syntax: "<color>"; inherits: false; initial-value: RED; }
+rule: @property --a { syntax: "<length>" } -> ERR 
+rule: @counter-style a { symbols: "*"; system: cyclic } -> 0 @counter-style a { system: cyclic; symbols: "*"; }
+rule: @counter-style none { system: cyclic; symbols: x } -> ERR 
+rule: @namespace foo "http://x"; -> 0 @namespace foo url("http://x");
+rule: @unknown { } -> ERR 
+rule: @media screen { garbage } -> 0 @media screen {
+}
+rule: div { color: red } garbage -> ERR 
+rule: .x { -> 0 .x { }
+rule: garbage -> ERR 
+rule: @charset "utf-8"; -> ERR 
+decl: color: RED -> "color: red;" [color=red]
+decl: color: #F00 -> "color: rgb(255, 0, 0);" [color=rgb(255, 0, 0)]
+decl: color: #ff000080 -> "color: rgba(255, 0, 0, 0.5);" [color=rgba(255, 0, 0, 0.5)]
+decl: color: rgb(255,0,0) -> "color: rgb(255, 0, 0);" [color=rgb(255, 0, 0)]
+decl: color: rgb(255 0 0 / 50%) -> "color: rgba(255, 0, 0, 0.5);" [color=rgba(255, 0, 0, 0.5)]
+decl: color: rgba(255, 0, 0, .5) -> "color: rgba(255, 0, 0, 0.5);" [color=rgba(255, 0, 0, 0.5)]
+decl: color: hsl(120, 100%, 50%) -> "color: rgb(0, 255, 0);" [color=rgb(0, 255, 0)]
+decl: color: hsla(120 100% 50% / 0.25) -> "color: rgba(0, 255, 0, 0.25);" [color=rgba(0, 255, 0, 0.25)]
+decl: color: transparent -> "color: transparent;" [color=transparent]
+decl: color: currentColor -> "color: currentcolor;" [color=currentcolor]
+decl: color: Canvas -> "color: canvas;" [color=canvas]
+decl: color: foo -> "" []
+decl: color: rgb(300, -5, 0) -> "color: rgb(255, 0, 0);" [color=rgb(255, 0, 0)]
+decl: color: #abc -> "color: rgb(170, 187, 204);" [color=rgb(170, 187, 204)]
+decl: color: lab(50% 40 59.5) -> "color: lab(50 40 59.5);" [color=lab(50 40 59.5)]
+decl: color: color-mix(in srgb, red, blue) -> "color: color-mix(in srgb, red, blue);" [color=color-mix(in srgb, red, blue)]
+decl: color: inherit -> "color: inherit;" [color=inherit]
+decl: color: INITIAL -> "color: initial;" [color=initial]
+decl: color: unset -> "color: unset;" [color=unset]
+decl: color: revert -> "color: revert;" [color=revert]
+decl: color: revert-layer -> "color: revert-layer;" [color=revert-layer]
+decl: width: 10PX -> "width: 10px;" [width=10px]
+decl: width: 0 -> "width: 0px;" [width=0px]
+decl: width: 1.50em -> "width: 1.5em;" [width=1.5em]
+decl: width: 50% -> "width: 50%;" [width=50%]
+decl: width: auto -> "width: auto;" [width=auto]
+decl: width: calc(1px + 2px) -> "width: calc(3px);" [width=calc(3px)]
+decl: width: calc(100% - 10px) -> "width: calc(100% - 10px);" [width=calc(100% - 10px)]
+decl: width: calc(2 * 3px) -> "width: calc(6px);" [width=calc(6px)]
+decl: width: calc(10px * 2 + 5%) -> "width: calc(5% + 20px);" [width=calc(5% + 20px)]
+decl: width: min(10px, 5%) -> "width: min(10px, 5%);" [width=min(10px, 5%)]
+decl: width: max(1px,2px) -> "width: calc(2px);" [width=calc(2px)]
+decl: width: clamp(1px, 50%, 10px) -> "width: clamp(1px, 50%, 10px);" [width=clamp(1px, 50%, 10px)]
+decl: width: -5px -> "" []
+decl: width: 1e2px -> "width: 100px;" [width=100px]
+decl: width: .5px -> "width: 0.5px;" [width=0.5px]
+decl: width: 10 -> "" []
+decl: width: fit-content -> "width: fit-content;" [width=fit-content]
+decl: width: min-content -> "width: min-content;" [width=min-content]
+decl: width: 100vw -> "width: 100vw;" [width=100vw]
+decl: width: 3Q -> "width: 3q;" [width=3q]
+decl: width: 1.23456789px -> "width: 1.23457px;" [width=1.23457px]
+decl: margin: 0 -> "margin: 0px;" [margin-top=0px; margin-right=0px; margin-bottom=0px; margin-left=0px]
+decl: margin: 1px 2px -> "margin: 1px 2px;" [margin-top=1px; margin-right=2px; margin-bottom=1px; margin-left=2px]
+decl: margin: 1px 2px 3px -> "margin: 1px 2px 3px;" [margin-top=1px; margin-right=2px; margin-bottom=3px; margin-left=2px]
+decl: margin: 1px 2px 3px 4px -> "margin: 1px 2px 3px 4px;" [margin-top=1px; margin-right=2px; margin-bottom=3px; margin-left=4px]
+decl: margin: 1px 1px 1px 1px -> "margin: 1px;" [margin-top=1px; margin-right=1px; margin-bottom=1px; margin-left=1px]
+decl: margin: auto -> "margin: auto;" [margin-top=auto; margin-right=auto; margin-bottom=auto; margin-left=auto]
+decl: margin: 1px !important -> "margin: 1px !important;" [margin-top=1px!; margin-right=1px!; margin-bottom=1px!; margin-left=1px!]
+decl: margin-top: 1px -> "margin-top: 1px;" [margin-top=1px]
+decl: padding: 1px 2px -> "padding: 1px 2px;" [padding-top=1px; padding-right=2px; padding-bottom=1px; padding-left=2px]
+decl: opacity: .5 -> "opacity: 0.5;" [opacity=0.5]
+decl: opacity: 50% -> "opacity: 0.5;" [opacity=0.5]
+decl: opacity: 1.0 -> "opacity: 1;" [opacity=1]
+decl: z-index: +3 -> "z-index: 3;" [z-index=3]
+decl: z-index: auto -> "z-index: auto;" [z-index=auto]
+decl: line-height: 1.0 -> "line-height: 1;" [line-height=1]
+decl: line-height: 0 -> "line-height: 0;" [line-height=0]
+decl: line-height: normal -> "line-height: normal;" [line-height=normal]
+decl: line-height: 20px -> "line-height: 20px;" [line-height=20px]
+decl: display: BLOCK -> "display: block;" [display=block]
+decl: display: inline flex -> "display: inline-flex;" [display=inline-flex]
+decl: display: flex -> "display: flex;" [display=flex]
+decl: display: block flow -> "display: block;" [display=block]
+decl: display: grid -> "display: grid;" [display=grid]
+decl: display: inline-block -> "display: inline-block;" [display=inline-block]
+decl: font-family: "Foo" -> "font-family: Foo;" [font-family=Foo]
+decl: font-family: 'Times New Roman', serif -> "font-family: "Times New Roman", serif;" [font-family="Times New Roman", serif]
+decl: font-family: Arial , sans-serif -> "font-family: Arial, sans-serif;" [font-family=Arial, sans-serif]
+decl: font-family: ARIAL -> "font-family: ARIAL;" [font-family=ARIAL]
+decl: font-family: "sans-serif" -> "font-family: "sans-serif";" [font-family="sans-serif"]
+decl: font-family: a  b -> "font-family: "a b";" [font-family="a b"]
+decl: font: 12px/1.5 Arial -> "font: 12px / 1.5 Arial;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=12px; line-height=1.5; font-family=Arial]
+decl: font: bold italic 12px Arial -> "font: italic bold 12px Arial;" [font-style=italic; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=bold; font-stretch=normal; font-size=12px; line-height=normal; font-family=Arial]
+decl: font: 12px Arial -> "font: 12px Arial;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=12px; line-height=normal; font-family=Arial]
+decl: font-weight: bold -> "font-weight: bold;" [font-weight=bold]
+decl: font-weight: 700 -> "font-weight: 700;" [font-weight=700]
+decl: font-size: larger -> "font-size: larger;" [font-size=larger]
+decl: font-size: 12PX -> "font-size: 12px;" [font-size=12px]
+decl: background: blue -> "background: blue;" [background-image=initial; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=blue]
+decl: background: url(a.png) no-repeat -> "background: url("a.png") no-repeat;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=no-repeat; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: red url("a.png") center / cover -> "background: url("a.png") center center / cover red;" [background-image=url("a.png"); background-position-x=center; background-position-y=center; background-size=cover; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=red]
+decl: background-color: red -> "background-color: red;" [background-color=red]
+decl: background-image: url(a.png) -> "background-image: url("a.png");" [background-image=url("a.png")]
+decl: background-image: none -> "background-image: none;" [background-image=none]
+decl: background-image: linear-gradient(red, blue) -> "background-image: linear-gradient(red, blue);" [background-image=linear-gradient(red, blue)]
+decl: background-image: linear-gradient(to right, #fff 0%, rgba(0,0,0,.5) 100%) -> "background-image: linear-gradient(to right, rgb(255, 255, 255) 0%, rgba(0, 0, 0, 0.5) 100%);" [background-image=linear-gradient(to right, rgb(255, 255, 255) 0%, rgba(0, 0, 0, 0.5) 100%)]
+decl: background-position: center -> "background-position: center center;" [background-position-x=center; background-position-y=center]
+decl: background-position: 10px 20px -> "background-position: 10px 20px;" [background-position-x=10px; background-position-y=20px]
+decl: background-size: cover -> "background-size: cover;" [background-size=cover]
+decl: background-repeat: repeat-x -> "background-repeat: repeat-x;" [background-repeat=repeat-x]
+decl: border: 1px solid red -> "border: 1px solid red;" [border-top-width=1px; border-right-width=1px; border-bottom-width=1px; border-left-width=1px; border-top-style=solid; border-right-style=solid; border-bottom-style=solid; border-left-style=solid; border-top-color=red; border-right-color=red; border-bottom-color=red; border-left-color=red; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: none -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: 2px -> "border: 2px;" [border-top-width=2px; border-right-width=2px; border-bottom-width=2px; border-left-width=2px; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border-top: 1px solid -> "border-top: 1px solid;" [border-top-width=1px; border-top-style=solid; border-top-color=currentcolor]
+decl: border-width: 1px 2px -> "border-width: 1px 2px;" [border-top-width=1px; border-right-width=2px; border-bottom-width=1px; border-left-width=2px]
+decl: border-style: solid -> "border-style: solid;" [border-top-style=solid; border-right-style=solid; border-bottom-style=solid; border-left-style=solid]
+decl: border-color: red blue -> "border-color: red blue;" [border-top-color=red; border-right-color=blue; border-bottom-color=red; border-left-color=blue]
+decl: border-radius: 5px -> "border-radius: 5px;" [border-top-left-radius=5px; border-top-right-radius=5px; border-bottom-right-radius=5px; border-bottom-left-radius=5px]
+decl: border-radius: 5px 10px -> "border-radius: 5px 10px;" [border-top-left-radius=5px; border-top-right-radius=10px; border-bottom-right-radius=5px; border-bottom-left-radius=10px]
+decl: border-radius: 5px / 10px -> "border-radius: 5px / 10px;" [border-top-left-radius=5px 10px; border-top-right-radius=5px 10px; border-bottom-right-radius=5px 10px; border-bottom-left-radius=5px 10px]
+decl: border-left: thin dotted -> "border-left: thin dotted;" [border-left-width=thin; border-left-style=dotted; border-left-color=currentcolor]
+decl: outline: 1px solid red -> "outline: red solid 1px;" [outline-color=red; outline-style=solid; outline-width=1px]
+decl: flex: 1 -> "flex: 1 1 0%;" [flex-grow=1; flex-shrink=1; flex-basis=0%]
+decl: flex: 1 1 0 -> "flex: 1 1 0px;" [flex-grow=1; flex-shrink=1; flex-basis=0px]
+decl: flex: none -> "flex: 0 0 auto;" [flex-grow=0; flex-shrink=0; flex-basis=auto]
+decl: flex: auto -> "flex: 1 1 auto;" [flex-grow=1; flex-shrink=1; flex-basis=auto]
+decl: flex-flow: row wrap -> "flex-flow: wrap;" [flex-direction=row; flex-wrap=wrap]
+decl: gap: 10px -> "gap: 10px;" [row-gap=10px; column-gap=10px]
+decl: gap: 10px 20px -> "gap: 10px 20px;" [row-gap=10px; column-gap=20px]
+decl: grid-template-columns: repeat(2, 1fr) -> "grid-template-columns: repeat(2, 1fr);" [grid-template-columns=repeat(2, 1fr)]
+decl: grid-area: a -> "grid-area: a;" [grid-row-start=a; grid-column-start=a; grid-row-end=a; grid-column-end=a]
+decl: grid-column: 1 / 3 -> "grid-column: 1 / 3;" [grid-column-start=1; grid-column-end=3]
+decl: grid-row: span 2 -> "grid-row: span 2;" [grid-row-start=span 2; grid-row-end=auto]
+decl: transform: rotate(45DEG) -> "transform: rotate(45deg);" [transform=rotate(45deg)]
+decl: transform: translate(10px,20px) scale(2) -> "transform: translate(10px, 20px) scale(2);" [transform=translate(10px, 20px) scale(2)]
+decl: transform: none -> "transform: none;" [transform=none]
+decl: transition: opacity .3s ease-in -> "transition: opacity 0.3s ease-in;" [transition-behavior=normal; transition-duration=0.3s; transition-timing-function=ease-in; transition-delay=0s; transition-property=opacity]
+decl: transition: all 1s -> "transition: 1s;" [transition-behavior=normal; transition-duration=1s; transition-timing-function=ease; transition-delay=0s; transition-property=all]
+decl: animation: spin 1s linear infinite -> "animation: 1s linear 0s infinite normal none running spin;" [animation-duration=1s; animation-timing-function=linear; animation-delay=0s; animation-iteration-count=infinite; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=spin; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: animation-name: Spin -> "animation-name: Spin;" [animation-name=Spin]
+decl: animation-duration: 500ms -> "animation-duration: 500ms;" [animation-duration=500ms]
+decl: content: "a" -> "content: "a";" [content="a"]
+decl: content: 'b' -> "content: "b";" [content="b"]
+decl: content: none -> "content: none;" [content=none]
+decl: content: counter(x) -> "content: counter(x);" [content=counter(x)]
+decl: content: attr(data-x) -> "content: attr(data-x);" [content=attr(data-x)]
+decl: content: "\201C" -> "content: "“";" [content="“"]
+decl: quotes: "a" "b" -> "quotes: "a" "b";" [quotes="a" "b"]
+decl: text-decoration: underline -> "text-decoration: underline;" [text-decoration-line=underline; text-decoration-thickness=initial; text-decoration-style=initial; text-decoration-color=initial]
+decl: text-decoration: underline red wavy -> "text-decoration: underline wavy red;" [text-decoration-line=underline; text-decoration-thickness=initial; text-decoration-style=wavy; text-decoration-color=red]
+decl: overflow: hidden -> "overflow: hidden;" [overflow-x=hidden; overflow-y=hidden]
+decl: overflow: hidden auto -> "overflow: hidden auto;" [overflow-x=hidden; overflow-y=auto]
+decl: list-style: square inside -> "list-style: inside square;" [list-style-position=inside; list-style-image=initial; list-style-type=square]
+decl: list-style: none -> "list-style: none;" [list-style-position=initial; list-style-image=initial; list-style-type=none]
+decl: inset: 0 -> "inset: 0px;" [top=0px; right=0px; bottom=0px; left=0px]
+decl: position: absolute -> "position: absolute;" [position=absolute]
+decl: top: 0 -> "top: 0px;" [top=0px]
+decl: box-shadow: 0 0 5px red -> "box-shadow: red 0px 0px 5px;" [box-shadow=red 0px 0px 5px]
+decl: box-shadow: inset 1px 2px 3px 4px rgba(0,0,0,.5) -> "box-shadow: rgba(0, 0, 0, 0.5) 1px 2px 3px 4px inset;" [box-shadow=rgba(0, 0, 0, 0.5) 1px 2px 3px 4px inset]
+decl: text-shadow: 1px 1px -> "text-shadow: 1px 1px;" [text-shadow=1px 1px]
+decl: cursor: pointer -> "cursor: pointer;" [cursor=pointer]
+decl: cursor: url(a.cur), auto -> "cursor: url("a.cur"), auto;" [cursor=url("a.cur"), auto]
+decl: --x: 1px -> "--x: 1px;" [--x=1px]
+decl: --Y:  a  b  -> "--Y: a  b;" [--Y=a  b]
+decl: --z: -> "--z: ;" [--z=]
+decl: --w: {a} -> "--w: {a};" [--w={a}]
+decl: width: var(--x) -> "width: var(--x);" [width=var(--x)]
+decl: margin: var(--x) 2px -> "margin: var(--x) 2px;" [margin-top=; margin-right=; margin-bottom=; margin-left=]
+decl: color: var(--c, red) -> "color: var(--c, red);" [color=var(--c, red)]
+decl: filter: blur(2px) -> "filter: blur(2px);" [filter=blur(2px)]
+decl: will-change: transform -> "will-change: transform;" [will-change=transform]
+decl: user-select: none -> "user-select: none;" [user-select=none]
+decl: -webkit-user-select: none -> "user-select: none;" [user-select=none]
+decl: appearance: none -> "appearance: none;" [appearance=none]
+decl: -webkit-appearance: none -> "appearance: none;" [appearance=none]
+decl: colr: red -> "" []
+decl: COLOR: red -> "color: red;" [color=red]
+decl: color : red -> "color: red;" [color=red]
+decl: color: red;; -> "color: red;" [color=red]
+decl: color: red !IMPORTANT -> "color: red !important;" [color=red!]
+decl: color: red ! important -> "color: red !important;" [color=red!]
+decl: color: red !important foo -> "" []
+decl: aspect-ratio: 16/9 -> "aspect-ratio: 16 / 9;" [aspect-ratio=16 / 9]
+decl: aspect-ratio: 1 -> "aspect-ratio: 1 / 1;" [aspect-ratio=1 / 1]
+decl: object-fit: cover -> "object-fit: cover;" [object-fit=cover]
+decl: white-space: nowrap -> "white-space: nowrap;" [white-space-collapse=collapse; text-wrap-mode=nowrap]
+decl: text-align: center -> "text-align: center;" [text-align=center]
+decl: vertical-align: middle -> "vertical-align: middle;" [vertical-align=middle]
+decl: float: left -> "float: left;" [float=left]
+decl: visibility: hidden -> "visibility: hidden;" [visibility=hidden]
+decl: box-sizing: border-box -> "box-sizing: border-box;" [box-sizing=border-box]
+decl: pointer-events: none -> "pointer-events: none;" [pointer-events=none]
+decl: scroll-behavior: smooth -> "scroll-behavior: smooth;" [scroll-behavior=smooth]
+decl: contain: layout -> "contain: layout;" [contain=layout]
+decl: container: card / inline-size -> "container: card / inline-size;" [container-name=card; container-type=inline-size]
+decl: container-type: inline-size -> "container-type: inline-size;" [container-type=inline-size]
+decl: margin: inherit -> "margin: inherit;" [margin-top=inherit; margin-right=inherit; margin-bottom=inherit; margin-left=inherit]
+decl: margin-top: inherit; margin-right: inherit; margin-bottom: inherit; margin-left: inherit -> "margin: inherit;" [margin-top=inherit; margin-right=inherit; margin-bottom=inherit; margin-left=inherit]
+decl: margin-top: inherit; margin-right: initial; margin-bottom: inherit; margin-left: inherit -> "margin-top: inherit; margin-right: initial; margin-bottom: inherit; margin-left: inherit;" [margin-top=inherit; margin-right=initial; margin-bottom=inherit; margin-left=inherit]
+decl: font: inherit -> "font: inherit;" [font-style=inherit; font-variant-ligatures=inherit; font-variant-caps=inherit; font-variant-numeric=inherit; font-variant-east-asian=inherit; font-variant-alternates=inherit; font-variant-position=inherit; font-variant-emoji=inherit; font-weight=inherit; font-stretch=inherit; font-size=inherit; line-height=inherit; font-family=inherit; font-optical-sizing=inherit; font-size-adjust=inherit; font-kerning=inherit; font-feature-settings=inherit; font-variation-settings=inherit; font-language-override=inherit]
+decl: background: initial -> "background: initial;" [background-image=initial; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: border: inherit -> "border: inherit;" [border-top-color=inherit; border-top-style=inherit; border-top-width=inherit; border-right-color=inherit; border-right-style=inherit; border-right-width=inherit; border-bottom-color=inherit; border-bottom-style=inherit; border-bottom-width=inherit; border-left-color=inherit; border-left-style=inherit; border-left-width=inherit; border-image-source=inherit; border-image-slice=inherit; border-image-width=inherit; border-image-outset=inherit; border-image-repeat=inherit]
+decl: border-left: initial -> "border-left: initial;" [border-left-width=initial; border-left-style=initial; border-left-color=initial]
+decl: margin: var(--a) -> "margin: var(--a);" [margin-top=; margin-right=; margin-bottom=; margin-left=]
+decl: margin: var(--a); margin-top: 1px -> "margin-right: ; margin-bottom: ; margin-left: ; margin-top: 1px;" [margin-right=; margin-bottom=; margin-left=; margin-top=1px]
+decl: margin-top: var(--a); margin-right: var(--a); margin-bottom: var(--a); margin-left: var(--a) -> "margin-top: var(--a); margin-right: var(--a); margin-bottom: var(--a); margin-left: var(--a);" [margin-top=var(--a); margin-right=var(--a); margin-bottom=var(--a); margin-left=var(--a)]
+decl: flex: var(--a) -> "flex: var(--a);" [flex-grow=; flex-shrink=; flex-basis=]
+decl: --a: 1px; margin: 0 var(--a) -> "--a: 1px; margin: 0 var(--a);" [--a=1px; margin-top=; margin-right=; margin-bottom=; margin-left=]
+decl: margin: 1px 2px; margin-top: var(--b) -> "margin-right: 2px; margin-bottom: 1px; margin-left: 2px; margin-top: var(--b);" [margin-right=2px; margin-bottom=1px; margin-left=2px; margin-top=var(--b)]
+decl: padding: 0 !important; padding: 1px -> "padding: 0px !important;" [padding-top=0px!; padding-right=0px!; padding-bottom=0px!; padding-left=0px!]
+decl: padding: 0; padding: 1px !important -> "padding: 1px !important;" [padding-top=1px!; padding-right=1px!; padding-bottom=1px!; padding-left=1px!]
+decl: padding: 1px; padding-top: 2px !important -> "padding-right: 1px; padding-bottom: 1px; padding-left: 1px; padding-top: 2px !important;" [padding-right=1px; padding-bottom=1px; padding-left=1px; padding-top=2px!]
+decl: columns: 2 10px -> "columns: 10px 2;" [column-width=10px; column-count=2; column-height=auto; column-wrap=auto]
+decl: columns: auto -> "columns: auto;" [column-width=auto; column-count=auto; column-height=auto; column-wrap=auto]
+decl: column-rule: 1px solid red -> "column-rule: 1px solid red;" [column-rule-width=1px; column-rule-style=solid; column-rule-color=red]
+decl: text-emphasis: dot red -> "text-emphasis: dot red;" [text-emphasis-style=dot; text-emphasis-color=red]
+decl: place-items: center -> "place-items: center;" [align-items=center; justify-items=center]
+decl: place-items: center start -> "place-items: center start;" [align-items=center; justify-items=start]
+decl: place-content: center -> "place-content: center;" [align-content=center; justify-content=center]
+decl: place-self: auto -> "place-self: auto;" [align-self=auto; justify-self=auto]
+decl: inset-block: 1px 2px -> "inset-block: 1px 2px;" [inset-block-start=1px; inset-block-end=2px]
+decl: inset-inline: 1px -> "inset-inline: 1px;" [inset-inline-start=1px; inset-inline-end=1px]
+decl: margin-block: 1px -> "margin-block: 1px;" [margin-block-start=1px; margin-block-end=1px]
+decl: margin-inline: 1px 2px -> "margin-inline: 1px 2px;" [margin-inline-start=1px; margin-inline-end=2px]
+decl: padding-block: 0 -> "padding-block: 0px;" [padding-block-start=0px; padding-block-end=0px]
+decl: overscroll-behavior: contain -> "overscroll-behavior: contain;" [overscroll-behavior-x=contain; overscroll-behavior-y=contain]
+decl: scroll-margin: 1px 2px -> "scroll-margin: 1px 2px;" [scroll-margin-top=1px; scroll-margin-right=2px; scroll-margin-bottom=1px; scroll-margin-left=2px]
+decl: scroll-padding: 1px -> "scroll-padding: 1px;" [scroll-padding-top=1px; scroll-padding-right=1px; scroll-padding-bottom=1px; scroll-padding-left=1px]
+decl: border-block: 1px solid red -> "border-block: 1px solid red;" [border-block-start-width=1px; border-block-end-width=1px; border-block-start-style=solid; border-block-end-style=solid; border-block-start-color=red; border-block-end-color=red]
+decl: border-inline-start: 1px solid -> "border-inline-start: 1px solid;" [border-inline-start-width=1px; border-inline-start-style=solid; border-inline-start-color=initial]
+decl: border-spacing: 1px 2px -> "border-spacing: 1px 2px;" [-webkit-border-horizontal-spacing=1px; -webkit-border-vertical-spacing=2px]
+decl: border-spacing: 1px -> "border-spacing: 1px;" [-webkit-border-horizontal-spacing=1px; -webkit-border-vertical-spacing=1px]
+decl: marker: url(#m) -> "marker: url("#m");" [marker-start=url("#m"); marker-mid=url("#m"); marker-end=url("#m")]
+decl: grid-area: 1 / 2 / 3 / 4 -> "grid-area: 1 / 2 / 3 / 4;" [grid-row-start=1; grid-column-start=2; grid-row-end=3; grid-column-end=4]
+decl: grid-area: a / b -> "grid-area: a / b;" [grid-row-start=a; grid-column-start=b; grid-row-end=a; grid-column-end=b]
+decl: grid-row: 1 -> "grid-row: 1;" [grid-row-start=1; grid-row-end=auto]
+decl: grid-column: 2 / span 3 -> "grid-column: 2 / span 3;" [grid-column-start=2; grid-column-end=span 3]
+decl: gap: normal -> "gap: normal;" [row-gap=normal; column-gap=normal]
+decl: font-variant: small-caps -> "font-variant: small-caps;" [font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-caps=small-caps; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+decl: font-synthesis: none -> "font-synthesis: none;" [font-synthesis-weight=none; font-synthesis-style=none; font-synthesis-small-caps=none]
+decl: text-wrap: balance -> "text-wrap: balance;" [text-wrap-mode=initial; text-wrap-style=balance]
+decl: white-space: pre -> "white-space: pre;" [white-space-collapse=preserve; text-wrap-mode=nowrap]
+decl: white-space: pre-wrap -> "white-space: pre-wrap;" [white-space-collapse=preserve; text-wrap-mode=wrap]
+decl: white-space: normal -> "white-space: normal;" [white-space-collapse=collapse; text-wrap-mode=wrap]
+decl: container: card -> "container: card;" [container-name=card; container-type=normal]
+decl: contain-intrinsic-size: 10px -> "contain-intrinsic-size: 10px;" [contain-intrinsic-width=10px; contain-intrinsic-height=10px]
+decl: border-image: url(a.png) 30 round -> "border-image: url("a.png") 30 / 1 / 0 round;" [border-image-source=url("a.png"); border-image-slice=30; border-image-width=1; border-image-outset=0; border-image-repeat=round]
+decl: border-image: none -> "border-image: none;" [border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: list-style: url(a.png) -> "list-style: url("a.png");" [list-style-position=initial; list-style-image=url("a.png"); list-style-type=initial]
+decl: list-style: disc -> "list-style: disc;" [list-style-position=initial; list-style-image=initial; list-style-type=disc]
+decl: list-style: outside -> "list-style: outside;" [list-style-position=outside; list-style-image=initial; list-style-type=initial]
+decl: text-decoration: none -> "text-decoration: none;" [text-decoration-line=none; text-decoration-thickness=initial; text-decoration-style=initial; text-decoration-color=initial]
+decl: text-decoration: line-through 2px -> "text-decoration: line-through 2px;" [text-decoration-line=line-through; text-decoration-thickness=2px; text-decoration-style=initial; text-decoration-color=initial]
+decl: outline: none -> "outline: none;" [outline-color=initial; outline-style=none; outline-width=initial]
+decl: outline: auto -> "outline: auto;" [outline-color=initial; outline-style=auto; outline-width=initial]
+decl: outline: 0 -> "outline: 0px;" [outline-color=initial; outline-style=initial; outline-width=0px]
+decl: flex-flow: column -> "flex-flow: column;" [flex-direction=column; flex-wrap=nowrap]
+decl: flex-flow: row -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+decl: flex: 2 -> "flex: 2 1 0%;" [flex-grow=2; flex-shrink=1; flex-basis=0%]
+decl: flex: 0 0 100px -> "flex: 0 0 100px;" [flex-grow=0; flex-shrink=0; flex-basis=100px]
+decl: flex: 10px -> "flex: 1 1 10px;" [flex-grow=1; flex-shrink=1; flex-basis=10px]
+decl: flex: 1 2 -> "flex: 1 2 0%;" [flex-grow=1; flex-shrink=2; flex-basis=0%]
+decl: transition: none -> "transition: none;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=none]
+decl: transition: color 1s, opacity 2s linear 1s -> "transition: color 1s, opacity 2s linear 1s;" [transition-behavior=normal, normal; transition-duration=1s, 2s; transition-timing-function=ease, linear; transition-delay=0s, 1s; transition-property=color, opacity]
+decl: transition: 0s -> "transition: all;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=all]
+decl: animation: none -> "animation: auto ease 0s 1 normal none running none;" [animation-duration=auto; animation-timing-function=ease; animation-delay=0s; animation-iteration-count=1; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=none; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: animation: foo 2s -> "animation: 2s ease 0s 1 normal none running foo;" [animation-duration=2s; animation-timing-function=ease; animation-delay=0s; animation-iteration-count=1; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=foo; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: animation: 1s -> "animation: 1s ease 0s 1 normal none running none;" [animation-duration=1s; animation-timing-function=ease; animation-delay=0s; animation-iteration-count=1; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=none; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: background: none -> "background: none;" [background-image=none; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: red -> "background: red;" [background-image=initial; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=red]
+decl: background: url(a.png) 10px 20px repeat-y fixed padding-box content-box -> "background: url("a.png") 10px 20px repeat-y fixed padding-box content-box;" [background-image=url("a.png"); background-position-x=10px; background-position-y=20px; background-size=initial; background-repeat=repeat-y; background-attachment=fixed; background-origin=padding-box; background-clip=content-box; background-color=initial]
+decl: background: url(a.png), url(b.png) red -> "background: url("a.png"), url("b.png") red;" [background-image=url("a.png"), url("b.png"); background-position-x=initial, initial; background-position-y=initial, initial; background-size=initial, initial; background-repeat=initial, initial; background-attachment=initial, initial; background-origin=initial, initial; background-clip=initial, initial; background-color=red]
+decl: background: linear-gradient(red, blue) no-repeat -> "background: linear-gradient(red, blue) no-repeat;" [background-image=linear-gradient(red, blue); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=no-repeat; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: center / 50% auto -> "background: center center / 50% auto;" [background-image=initial; background-position-x=center; background-position-y=center; background-size=50% auto; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: content-box -> "background: content-box content-box;" [background-image=initial; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=content-box; background-clip=content-box; background-color=initial]
+decl: background: padding-box border-box -> "background: padding-box border-box;" [background-image=initial; background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=padding-box; background-clip=border-box; background-color=initial]
+decl: font: 700 1em/2 "A B", serif -> "font: 700 1em / 2 "A B", serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=700; font-stretch=normal; font-size=1em; line-height=2; font-family="A B", serif]
+decl: font: small-caps 16px serif -> "font: small-caps 16px serif;" [font-style=normal; font-variant-caps=small-caps; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=16px; line-height=normal; font-family=serif]
+decl: font: condensed 12px serif -> "font: condensed 12px serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=condensed; font-size=12px; line-height=normal; font-family=serif]
+decl: font: caption -> "font: caption;" [font-style=; font-variant-ligatures=; font-variant-caps=; font-variant-numeric=; font-variant-east-asian=; font-variant-alternates=; font-variant-position=; font-variant-emoji=; font-weight=; font-stretch=; font-size=; line-height=; font-family=; font-optical-sizing=; font-size-adjust=; font-kerning=; font-feature-settings=; font-variation-settings=; font-language-override=]
+decl: font: italic 400 12px/normal serif -> "font: italic 400 12px serif;" [font-style=italic; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=400; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif]
+decl: border: 1px dashed -> "border: 1px dashed;" [border-top-width=1px; border-right-width=1px; border-bottom-width=1px; border-left-width=1px; border-top-style=dashed; border-right-style=dashed; border-bottom-style=dashed; border-left-style=dashed; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: solid red -> "border: solid red;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=solid; border-right-style=solid; border-bottom-style=solid; border-left-style=solid; border-top-color=red; border-right-color=red; border-bottom-color=red; border-left-color=red; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border-top: 3px -> "border-top: 3px;" [border-top-width=3px; border-top-style=none; border-top-color=currentcolor]
+decl: border-color: red -> "border-color: red;" [border-top-color=red; border-right-color=red; border-bottom-color=red; border-left-color=red]
+decl: border-color: red green blue -> "border-color: red green blue;" [border-top-color=red; border-right-color=green; border-bottom-color=blue; border-left-color=green]
+decl: border-color: red green blue yellow -> "border-color: red green blue yellow;" [border-top-color=red; border-right-color=green; border-bottom-color=blue; border-left-color=yellow]
+decl: border-style: dotted dashed -> "border-style: dotted dashed;" [border-top-style=dotted; border-right-style=dashed; border-bottom-style=dotted; border-left-style=dashed]
+decl: border-width: thin medium thick -> "border-width: thin medium thick;" [border-top-width=thin; border-right-width=medium; border-bottom-width=thick; border-left-width=medium]
+decl: border-radius: 1px 2px 3px 4px / 5px 6px -> "border-radius: 1px 2px 3px 4px / 5px 6px;" [border-top-left-radius=1px 5px; border-top-right-radius=2px 6px; border-bottom-right-radius=3px 5px; border-bottom-left-radius=4px 6px]
+decl: border-radius: 1px 1px 1px 1px / 2px 2px 2px 2px -> "border-radius: 1px / 2px;" [border-top-left-radius=1px 2px; border-top-right-radius=1px 2px; border-bottom-right-radius=1px 2px; border-bottom-left-radius=1px 2px]
+decl: overflow: visible clip -> "overflow: visible clip;" [overflow-x=visible; overflow-y=clip]
+decl: overflow: auto auto -> "overflow: auto;" [overflow-x=auto; overflow-y=auto]
+decl: inset: 1px 2px 1px 2px -> "inset: 1px 2px;" [top=1px; right=2px; bottom=1px; left=2px]
+decl: inset: auto -> "inset: auto;" [top=auto; right=auto; bottom=auto; left=auto]
+decl: margin: -1px +2px 0.0px 1E1px -> "margin: -1px 2px 0px 10px;" [margin-top=-1px; margin-right=2px; margin-bottom=0px; margin-left=10px]
+decl: outline: none -> "outline: none;" [outline-color=initial; outline-style=none; outline-width=initial]
+decl: outline: medium none -> "outline: none medium;" [outline-color=initial; outline-style=none; outline-width=medium]
+decl: outline: none currentcolor -> "outline: currentcolor none;" [outline-color=currentcolor; outline-style=none; outline-width=initial]
+decl: outline: medium -> "outline: medium;" [outline-color=initial; outline-style=initial; outline-width=medium]
+decl: outline: auto -> "outline: auto;" [outline-color=initial; outline-style=auto; outline-width=initial]
+decl: outline: medium none auto -> "" []
+decl: outline: thin -> "outline: thin;" [outline-color=initial; outline-style=initial; outline-width=thin]
+decl: outline-color: auto; outline-style: none; outline-width: medium -> "outline-style: none; outline-width: medium;" [outline-style=none; outline-width=medium]
+decl: border-top: none -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+decl: border-top: solid -> "border-top: solid;" [border-top-width=medium; border-top-style=solid; border-top-color=currentcolor]
+decl: border-top: currentcolor -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+decl: border-top: medium -> "border-top-width: medium; border-top-style: none; border-top-color: currentcolor;" [border-top-width=medium; border-top-style=none; border-top-color=currentcolor]
+decl: border-top: medium solid -> "border-top: solid;" [border-top-width=medium; border-top-style=solid; border-top-color=currentcolor]
+decl: border-top: 1px none -> "border-top: 1px;" [border-top-width=1px; border-top-style=none; border-top-color=currentcolor]
+decl: border-top-width: medium; border-top-style: none; border-top-color: red -> "border-top: red;" [border-top-width=medium; border-top-style=none; border-top-color=red]
+decl: border-top-width: 1px; border-top-style: none; border-top-color: currentcolor -> "border-top: 1px;" [border-top-width=1px; border-top-style=none; border-top-color=currentcolor]
+decl: column-rule: none -> "column-rule: medium;" [column-rule-width=medium; column-rule-style=none; column-rule-color=currentcolor]
+decl: column-rule: medium -> "column-rule: medium;" [column-rule-width=medium; column-rule-style=none; column-rule-color=currentcolor]
+decl: column-rule: red -> "column-rule: red;" [column-rule-width=medium; column-rule-style=none; column-rule-color=red]
+decl: border: medium -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: none red -> "border: red;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=red; border-right-color=red; border-bottom-color=red; border-left-color=red; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: 1px none -> "border: 1px;" [border-top-width=1px; border-right-width=1px; border-bottom-width=1px; border-left-width=1px; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border: medium none currentcolor -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: border-width: medium; border-style: none; border-color: currentcolor; border-image: none -> "border-width: medium; border-style: none; border-color: currentcolor; border-image: none;" [border-top-width=medium; border-right-width=medium; border-bottom-width=medium; border-left-width=medium; border-top-style=none; border-right-style=none; border-bottom-style=none; border-left-style=none; border-top-color=currentcolor; border-right-color=currentcolor; border-bottom-color=currentcolor; border-left-color=currentcolor; border-image-source=none; border-image-slice=100%; border-image-width=1; border-image-outset=0; border-image-repeat=stretch]
+decl: list-style: none none -> "list-style: none none;" [list-style-position=initial; list-style-image=none; list-style-type=none]
+decl: list-style: outside none disc -> "list-style: outside none disc;" [list-style-position=outside; list-style-image=none; list-style-type=disc]
+decl: list-style: inside -> "list-style: inside;" [list-style-position=inside; list-style-image=initial; list-style-type=initial]
+decl: list-style-position: outside; list-style-image: none; list-style-type: disc -> "list-style: outside none disc;" [list-style-position=outside; list-style-image=none; list-style-type=disc]
+decl: text-decoration: none solid currentcolor -> "text-decoration: none;" [text-decoration-line=none; text-decoration-thickness=initial; text-decoration-style=solid; text-decoration-color=currentcolor]
+decl: text-decoration-line: none; text-decoration-thickness: auto; text-decoration-style: solid; text-decoration-color: currentcolor -> "text-decoration: none;" [text-decoration-line=none; text-decoration-thickness=auto; text-decoration-style=solid; text-decoration-color=currentcolor]
+decl: text-decoration: auto -> "text-decoration: none;" [text-decoration-line=initial; text-decoration-thickness=auto; text-decoration-style=initial; text-decoration-color=initial]
+decl: flex-flow: row nowrap -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+decl: flex-flow: nowrap -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+decl: flex-flow: column-reverse wrap-reverse -> "flex-flow: column-reverse wrap-reverse;" [flex-direction=column-reverse; flex-wrap=wrap-reverse]
+decl: flex-direction: row; flex-wrap: nowrap -> "flex-flow: row;" [flex-direction=row; flex-wrap=nowrap]
+decl: transition: all 0s ease 0s -> "transition: all;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=all]
+decl: transition: opacity -> "transition: opacity;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-property=opacity]
+decl: transition: opacity 1s ease 2s -> "transition: opacity 1s 2s;" [transition-behavior=normal; transition-duration=1s; transition-timing-function=ease; transition-delay=2s; transition-property=opacity]
+decl: transition: opacity 0s 2s -> "transition: opacity 2s;" [transition-behavior=normal; transition-duration=0s; transition-timing-function=ease; transition-delay=2s; transition-property=opacity]
+decl: transition: 1s 2s -> "transition: 1s 2s;" [transition-behavior=normal; transition-duration=1s; transition-timing-function=ease; transition-delay=2s; transition-property=all]
+decl: transition-property: all; transition-duration: 0s; transition-timing-function: ease; transition-delay: 0s; transition-behavior: normal -> "transition: all;" [transition-property=all; transition-duration=0s; transition-timing-function=ease; transition-delay=0s; transition-behavior=normal]
+decl: transition: color 1s allow-discrete -> "transition: color 1s allow-discrete;" [transition-behavior=allow-discrete; transition-duration=1s; transition-timing-function=ease; transition-delay=0s; transition-property=color]
+decl: transition: margin 1s cubic-bezier(0.1, 0.2, 0.3, 0.4), color steps(4, end) -> "transition: margin 1s cubic-bezier(0.1, 0.2, 0.3, 0.4), color steps(4);" [transition-behavior=normal, normal; transition-duration=1s, 0s; transition-timing-function=cubic-bezier(0.1, 0.2, 0.3, 0.4), steps(4); transition-delay=0s, 0s; transition-property=margin, color]
+decl: animation: a 1s 2s -> "animation: 1s ease 2s 1 normal none running a;" [animation-duration=1s; animation-timing-function=ease; animation-delay=2s; animation-iteration-count=1; animation-direction=normal; animation-fill-mode=none; animation-play-state=running; animation-name=a; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: animation: a 1s ease-in-out 2s 3 reverse both paused -> "animation: 1s ease-in-out 2s 3 reverse both paused a;" [animation-duration=1s; animation-timing-function=ease-in-out; animation-delay=2s; animation-iteration-count=3; animation-direction=reverse; animation-fill-mode=both; animation-play-state=paused; animation-name=a; animation-timeline=auto; animation-range-start=normal; animation-range-end=normal]
+decl: animation-name: a; animation-duration: 1s -> "animation-name: a; animation-duration: 1s;" [animation-name=a; animation-duration=1s]
+decl: container: a b / size -> "container: a b / size;" [container-name=a b; container-type=size]
+decl: container: none -> "container: none;" [container-name=none; container-type=normal]
+decl: container-name: none; container-type: normal -> "container: none;" [container-name=none; container-type=normal]
+decl: columns: 3 -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+decl: columns: 3 auto -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+decl: columns: auto 3 -> "columns: 3;" [column-width=auto; column-count=3; column-height=auto; column-wrap=auto]
+decl: column-width: auto; column-count: auto -> "column-width: auto; column-count: auto;" [column-width=auto; column-count=auto]
+decl: gap: 1px 1px -> "gap: 1px;" [row-gap=1px; column-gap=1px]
+decl: place-content: center start -> "place-content: center start;" [align-content=center; justify-content=start]
+decl: place-content: center center -> "place-content: center;" [align-content=center; justify-content=center]
+decl: place-content: stretch -> "place-content: stretch;" [align-content=stretch; justify-content=stretch]
+decl: place-self: start end -> "place-self: start end;" [align-self=start; justify-self=end]
+decl: grid-row: a -> "grid-row: a;" [grid-row-start=a; grid-row-end=a]
+decl: grid-row: a / a -> "grid-row: a;" [grid-row-start=a; grid-row-end=a]
+decl: grid-row: 1 / auto -> "grid-row: 1;" [grid-row-start=1; grid-row-end=auto]
+decl: grid-row: auto / 2 -> "grid-row: auto / 2;" [grid-row-start=auto; grid-row-end=2]
+decl: grid-column: span 2 / span 2 -> "grid-column: span 2 / span 2;" [grid-column-start=span 2; grid-column-end=span 2]
+decl: grid-area: 1 -> "grid-area: 1;" [grid-row-start=1; grid-column-start=auto; grid-row-end=auto; grid-column-end=auto]
+decl: grid-area: 1 / 2 -> "grid-area: 1 / 2;" [grid-row-start=1; grid-column-start=2; grid-row-end=auto; grid-column-end=auto]
+decl: grid-area: 1 / 2 / 3 -> "grid-area: 1 / 2 / 3;" [grid-row-start=1; grid-column-start=2; grid-row-end=3; grid-column-end=auto]
+decl: grid-area: a / b / c -> "grid-area: a / b / c;" [grid-row-start=a; grid-column-start=b; grid-row-end=c; grid-column-end=b]
+decl: grid-area: auto -> "grid-area: auto;" [grid-row-start=auto; grid-column-start=auto; grid-row-end=auto; grid-column-end=auto]
+decl: font: 12px serif -> "font: 12px serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif]
+decl: font: normal normal 400 12px serif -> "font: 400 12px serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=400; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif]
+decl: font: bold 12px/30px "Times New Roman" -> "font: bold 12px / 30px "Times New Roman";" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=bold; font-stretch=normal; font-size=12px; line-height=30px; font-family="Times New Roman"]
+decl: font: 1.2em Georgia, serif -> "font: 1.2em Georgia, serif;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=1.2em; line-height=normal; font-family=Georgia, serif]
+decl: font: italic small-caps bold condensed 16px/2 cursive -> "font: italic small-caps bold condensed 16px / 2 cursive;" [font-style=italic; font-variant-caps=small-caps; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=bold; font-stretch=condensed; font-size=16px; line-height=2; font-family=cursive]
+decl: font: 12px -> "" []
+decl: font: serif -> "" []
+decl: font: 12px a b c -> "font: 12px "a b c";" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-kerning=auto; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=12px; line-height=normal; font-family="a b c"]
+decl: font-style: italic; font-variant-caps: normal; font-weight: bold; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif -> "font-style: italic; font-variant-caps: normal; font-weight: bold; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif;" [font-style=italic; font-variant-caps=normal; font-weight=bold; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif]
+decl: font: 12px serif; font-kerning: none -> "font-style: normal; font-variant: normal; font-size-adjust: none; font-language-override: normal; font-optical-sizing: auto; font-feature-settings: normal; font-variation-settings: normal; font-weight: normal; font-stretch: normal; font-size: 12px; line-height: normal; font-family: serif; font-kerning: none;" [font-style=normal; font-variant-caps=normal; font-variant-ligatures=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-size-adjust=none; font-language-override=normal; font-optical-sizing=auto; font-feature-settings=normal; font-variation-settings=normal; font-variant-position=normal; font-variant-emoji=normal; font-weight=normal; font-stretch=normal; font-size=12px; line-height=normal; font-family=serif; font-kerning=none]
+decl: font-variant: normal -> "font-variant: normal;" [font-variant-ligatures=normal; font-variant-caps=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+decl: font-variant: none -> "font-variant: none;" [font-variant-ligatures=none; font-variant-caps=normal; font-variant-numeric=normal; font-variant-east-asian=normal; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+decl: font-variant: all-small-caps oldstyle-nums -> "font-variant: all-small-caps oldstyle-nums;" [font-variant-ligatures=normal; font-variant-numeric=oldstyle-nums; font-variant-east-asian=normal; font-variant-caps=all-small-caps; font-variant-alternates=normal; font-variant-position=normal; font-variant-emoji=normal]
+decl: font-synthesis: weight style -> "font-synthesis: weight style;" [font-synthesis-weight=auto; font-synthesis-style=auto; font-synthesis-small-caps=none]
+decl: white-space: nowrap -> "white-space: nowrap;" [white-space-collapse=collapse; text-wrap-mode=nowrap]
+decl: white-space: pre-line -> "white-space: pre-line;" [white-space-collapse=preserve-breaks; text-wrap-mode=wrap]
+decl: white-space: break-spaces -> "white-space: break-spaces;" [white-space-collapse=break-spaces; text-wrap-mode=wrap]
+decl: white-space-collapse: preserve; text-wrap-mode: nowrap -> "white-space: pre;" [white-space-collapse=preserve; text-wrap-mode=nowrap]
+decl: white-space-collapse: break-spaces; text-wrap-mode: nowrap -> "white-space: break-spaces nowrap;" [white-space-collapse=break-spaces; text-wrap-mode=nowrap]
+decl: text-wrap: wrap -> "text-wrap: wrap;" [text-wrap-mode=wrap; text-wrap-style=initial]
+decl: text-wrap: nowrap -> "text-wrap: nowrap;" [text-wrap-mode=nowrap; text-wrap-style=initial]
+decl: text-wrap: pretty -> "text-wrap: pretty;" [text-wrap-mode=initial; text-wrap-style=pretty]
+decl: text-wrap: nowrap balance -> "text-wrap: nowrap balance;" [text-wrap-mode=nowrap; text-wrap-style=balance]
+decl: background: url(a.png) center -> "background: url("a.png") center center;" [background-image=url("a.png"); background-position-x=center; background-position-y=center; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) left top -> "background: url("a.png") left top;" [background-image=url("a.png"); background-position-x=left; background-position-y=top; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) 0 0 -> "background: url("a.png") 0px 0px;" [background-image=url("a.png"); background-position-x=0px; background-position-y=0px; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) 50% -> "background: url("a.png") 50% center;" [background-image=url("a.png"); background-position-x=50%; background-position-y=center; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) right 10px top 5px -> "background: url("a.png") right 10px top 5px;" [background-image=url("a.png"); background-position-x=right 10px; background-position-y=top 5px; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) repeat no-repeat -> "background: url("a.png") repeat-x;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=repeat-x; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) repeat repeat -> "background: url("a.png") repeat;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=repeat; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: url(a.png) / 10px -> "" []
+decl: background: 0 0 / auto -> "background: 0px 0px / auto;" [background-image=initial; background-position-x=0px; background-position-y=0px; background-size=auto; background-repeat=initial; background-attachment=initial; background-origin=initial; background-clip=initial; background-color=initial]
+decl: background: none repeat scroll 0% 0% / auto padding-box border-box transparent -> "background: none 0% 0% / auto repeat scroll padding-box border-box transparent;" [background-image=none; background-position-x=0%; background-position-y=0%; background-size=auto; background-repeat=repeat; background-attachment=scroll; background-origin=padding-box; background-clip=border-box; background-color=transparent]
+decl: background: url(a.png) border-box -> "background: url("a.png") border-box border-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=border-box; background-clip=border-box; background-color=initial]
+decl: background: url(a.png) border-box border-box -> "background: url("a.png") border-box border-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=border-box; background-clip=border-box; background-color=initial]
+decl: background: url(a.png) padding-box padding-box -> "background: url("a.png") padding-box padding-box;" [background-image=url("a.png"); background-position-x=initial; background-position-y=initial; background-size=initial; background-repeat=initial; background-attachment=initial; background-origin=padding-box; background-clip=padding-box; background-color=initial]
+decl: background-image: none; background-position: 0% 0%; background-size: auto; background-repeat: repeat; background-attachment: scroll; background-origin: padding-box; background-clip: border-box; background-color: transparent -> "background: none 0% 0% / auto repeat scroll padding-box border-box transparent;" [background-image=none; background-position-x=0%; background-position-y=0%; background-size=auto; background-repeat=repeat; background-attachment=scroll; background-origin=padding-box; background-clip=border-box; background-color=transparent]
+decl: background-color: red; background-image: url(a.png); background-repeat: no-repeat; background-position: center; background-size: auto; background-attachment: scroll; background-origin: padding-box; background-clip: border-box -> "background: url("a.png") center center / auto no-repeat scroll padding-box border-box red;" [background-color=red; background-image=url("a.png"); background-repeat=no-repeat; background-position-x=center; background-position-y=center; background-size=auto; background-attachment=scroll; background-origin=padding-box; background-clip=border-box]
+decl: background-position: left 10px top -> "background-position: left 10px top;" [background-position-x=left 10px; background-position-y=top]
+decl: background-position: right bottom -> "background-position: right bottom;" [background-position-x=right; background-position-y=bottom]
+decl: background-position: 10% 20%, center -> "background-position: 10% 20%, center center;" [background-position-x=10%, center; background-position-y=20%, center]
+decl: background-position-x: left; background-position-y: top -> "background-position: left top;" [background-position-x=left; background-position-y=top]
+decl: border-radius: 1px 2px / 3px -> "border-radius: 1px 2px / 3px;" [border-top-left-radius=1px 3px; border-top-right-radius=2px 3px; border-bottom-right-radius=1px 3px; border-bottom-left-radius=2px 3px]
+decl: border-top-left-radius: 1px 2px -> "border-top-left-radius: 1px 2px;" [border-top-left-radius=1px 2px]
+decl: border-top-left-radius: 1px 1px -> "border-top-left-radius: 1px;" [border-top-left-radius=1px]
+decl: inset: 0 auto -> "inset: 0px auto;" [top=0px; right=auto; bottom=0px; left=auto]
+decl: overflow: clip -> "overflow: clip;" [overflow-x=clip; overflow-y=clip]
+decl: overflow-x: scroll -> "overflow-x: scroll;" [overflow-x=scroll]
+decl: marker: none -> "marker: none;" [marker-start=none; marker-mid=none; marker-end=none]
+decl: text-emphasis: none -> "text-emphasis: none;" [text-emphasis-style=none; text-emphasis-color=initial]
+decl: border-spacing: 0 -> "border-spacing: 0px;" [-webkit-border-horizontal-spacing=0px; -webkit-border-vertical-spacing=0px]
+decl: contain-intrinsic-size: auto 10px -> "contain-intrinsic-size: auto 10px;" [contain-intrinsic-width=auto 10px; contain-intrinsic-height=auto 10px]
