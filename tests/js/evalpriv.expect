@@ -1,0 +1,28 @@
+1
+5
+method 5
+getter 5
+7
+true
+false
+8
+18
+static field
+static method
+static field
+18
+method 18
+TypeError: Cannot read private member #x from an object whose class did not declare it
+TypeError: Cannot read private member #x from an object whose class did not declare it
+SyntaxError: Private field '#nope' must be declared in an enclosing class
+18
+18
+20
+TypeError: Private method '#m' is not writable
+SyntaxError: Private fields can not be deleted
+SyntaxError: Private field '#x' must be declared in an enclosing class
+SyntaxError: Private field '#x' must be declared in an enclosing class
+outer inner
+42
+number
+undefined

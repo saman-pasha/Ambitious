@@ -246,7 +246,9 @@ typedef struct js_handler { uint32_t frame, pc, sp, env; } js_handler;
    bindings the code sees (first..first+n in vm->eval_binds: each one's atom, kind (the
    compiler's), environment depth from the site's and cell), whether the caller is strict
    and whether the site stands in a function (a sloppy eval's vars go to that function) */
-typedef struct js_evalbind { uint32_t atom, kind, depth, slot; } js_evalbind;
+/* pkind: a private name's PV_ flags plus one (0: no private name), pcls its class's name -- for the eval's code to
+   name the private names of the classes around its site, as V8's does */
+typedef struct js_evalbind { uint32_t atom, kind, depth, slot, pkind, pcls; } js_evalbind;
 typedef struct js_evalsite { uint32_t first, n, flags; } js_evalsite;
 /* an eval's code compiled: by its mode, its site and its source (a string), the function */
 typedef struct js_evalcache { uint32_t mode, site, src, func; } js_evalcache;

@@ -2693,7 +2693,14 @@ static uint32_t gen_eval_site(CC, uint32_t site) {
         for (uint32_t d = cc->scopes[s].first; d; d = cc->decls[d].next) {
             jdecl x = cc->decls[d];
             if (!x.captured || x.kind == D_EVALVAR) continue;
-            js_evalbind b = { x.atom, x.kind, env_depth(cc, site, x.scope), x.envslot };
+            js_evalbind b = { x.atom, x.kind, env_depth(cc, site, x.scope), x.envslot, 0, 0 };
+            /* a private name's binding: its kind and its class's name with it */
+            for (size_t i = 0; i < len(cc->privs); i++)
+                if (cc->privs[i].decl == d) {
+                    b.pkind = cc->privs[i].kind + 1;
+                    b.pcls = cc->classes[cc->privs[i].cls - 1].name;
+                    break;
+                }
             push_back(vm->eval_binds, b);
             es.n++;
         }
@@ -4603,6 +4610,23 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
                 cc->decls[x].next = id;
             }
             if (b.kind == D_EV || b.kind == D_WITH) { cc->scopes[ls].dyn = id; cc->ndyn++; }
+            if (b.pkind) {
+                /* a private name of a class around the site: its record (and its class's, for V8's words), so that the
+                   code's references to it are to that class's, not V8's early error */
+                jclass k;
+                memset(&k, 0, sizeof k);
+                k.name = b.pcls;
+                push_back(cc->classes, k);
+                jpriv q;
+                memset(&q, 0, sizeof q);
+                js_str_flatten(vm, b.atom);
+                q.name = js_atom(vm, js_str_sub(vm, b.atom, 1, vm->strs[b.atom].len));
+                q.cls = (uint32_t)len(cc->classes);
+                q.kind = b.pkind - 1;
+                q.decl = id;
+                q.hidden = b.atom;
+                push_back(cc->privs, q);
+            }
             /* the eval vars' level: the caller's function scope */
             if (b.kind == D_EV) cc->scopes[ls].kind = SC_FUNC;
         }
