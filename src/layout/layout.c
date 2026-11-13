@@ -265,6 +265,7 @@ amb_implementation(layout);
 #include "layout.h"
 #include "hyph_data.h"
 #include "bidi_data.h"
+#include "linebreak.h"
 #include "../net/url.h"
 #include "../paint/svg.h"
 #include "../paint/image.h"
@@ -280,6 +281,10 @@ amb_implementation(layout);
 /* the context with another block formatting context's floats */
 #define LARGS_FL(x) t, d, st, nt, f, sx, sc, gx, xc, ab, (x)
 
+/* what a line's content may reach past its width and still fit it: a LayoutUnit, a 64th of a px (Blink's
+   LineBreaker::AvailableWidthToFit, the width's AddEpsilon; measured: break-all's "nt", 13.34375px, fits a line of
+   13.328125px), and a float's rounding */
+#define LAY_FIT (1.0 / 64 + 1e-7)
 
 /* the document's mode, for the run (layout_run sets them from the document node's mode): in
    quirks mode, lay_quirks; in quirks or limited-quirks mode, lay_lhq (the line height quirk) */
@@ -416,6 +421,10 @@ typedef struct lay_ext {
        border-spacing's two lengths, px */
     uint8_t tcol, tgroup, collapse, ehide, tfixed, capb;
     double hs, vs;
+    /* line breaking (CSS Text 3, 5): word-break (0 normal, 1 break-all, 2 keep-all, 3 break-word, 4 auto-phrase),
+       line-break (0 auto and -webkit-line-break's after-white-space, 1 loose, 2 normal, 3 strict, 4 anywhere),
+       overflow-wrap (0 normal, 1 break-word, 2 anywhere) */
+    uint8_t wbrk, lbrk, owrap;
 } lay_ext;
 
 /* an absolutely positioned element the flow met: its static position, in the content box of box */
@@ -829,6 +838,12 @@ static void lay_ext_make(const css_style *st, uint32_t c0, int fwm, lay_ext *e) 
     e->astart = (uint8_t)(lay_w(w, "start") ? 1 : lay_w(w, "end") ? 2 : 0);
     lay_word_of(st, c0 + CSS_PROP_HYPHENS, w);
     e->hyph = lay_w(w, "auto") ? 2 : lay_w(w, "manual") ? 1 : 0;
+    lay_word_of(st, c0 + CSS_PROP_WORD_BREAK, w);
+    e->wbrk = (uint8_t)(lay_w(w, "break-all") ? 1 : lay_w(w, "keep-all") ? 2 : lay_w(w, "break-word") ? 3 : lay_w(w, "auto-phrase") ? 4 : 0);
+    lay_word_of(st, c0 + CSS_PROP_LINE_BREAK, w);
+    e->lbrk = (uint8_t)(lay_w(w, "loose") ? 1 : lay_w(w, "normal") ? 2 : lay_w(w, "strict") ? 3 : lay_w(w, "anywhere") ? 4 : 0);
+    lay_word_of(st, c0 + CSS_PROP_OVERFLOW_WRAP, w);
+    e->owrap = (uint8_t)(lay_w(w, "break-word") ? 1 : lay_w(w, "anywhere") ? 2 : 0);
     lay_word_of(st, c0 + CSS_PROP_DISPLAY, w);
     e->lx = lay_w(w, "flex") || lay_w(w, "inline-flex") ? LX_FLEX : lay_w(w, "grid") || lay_w(w, "inline-grid") ? LX_GRID : LX_FLOW;
     e->tcol = (uint8_t)(lay_w(w, "table-column") ? 1 : lay_w(w, "table-column-group") ? 2 : 0);
@@ -1174,7 +1189,7 @@ typedef struct lay_piece {
     uint8_t kind, face, italic, deco, brk, keep;   /* brk: a space a line may break at; keep: a kept (pre) space */
     uint8_t tt;                                    /* text-transform */
     uint8_t va;                                    /* VA_TOP, VA_BOTTOM: aligned with the line box; an atomic's own */
-    uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it */
+    uint8_t hy;                                    /* a word broken by a hyphen: the hyphen after it (1 Liang's, shaped with the word; 2 a soft hyphen's, shaped apart: lay_frag_glyphs) */
     uint8_t rtl;                                   /* a word that asks for the bidi algorithm (lay_bidi_hot) */
     uint8_t soft;                                  /* a word with soft hyphens in it */
     uint8_t fb;                                    /* a word some of whose code points fallback faces draw */
@@ -1193,6 +1208,11 @@ typedef struct lay_piece {
     uint32_t font;                                 /* a web font's resource, 0 for a built-in face */
     uint8_t orient;                                /* its style's (lay_style) vertical text's orientation (in the padding
                                                       before ls: a piece is no bigger for it) */
+    uint8_t bb;                                    /* the break opportunities before it (lay_break_pieces): AMB_BRK_LINE
+                                                      a line may break there, AMB_BRK_MIN the min-content width does */
+    uint8_t lbf;                                   /* a word ending in a soft hyphen it breaks after (LBF_SHY: a hyphen
+                                                      shown when a line ends there); one an overflowing line may break
+                                                      anywhere (LBF_EMERG: overflow-wrap) */
     double ls, wsp;                                /* letter-spacing, word-spacing */
     uint32_t off, len;                             /* a word's (or a kept space's) bytes of its text node */
     double w, size, lh, asc, desc;
@@ -1202,6 +1222,28 @@ typedef struct lay_piece {
                                                       normal (fb) */
     float shift, rx, ry;                           /* its baseline's shift (vertical-align), its relative offset */
 } lay_piece;
+/* a word's lbf: LBF_SHY, LBF_EMERG (lay_break_pieces); LBF_HOT, a byte of it ASCII's line breaking breaks about or
+   one past ASCII (lay_chars: a run with none, nor another of lay_lb_marks's marks, is not broken again); LBF_HANG,
+   a run of ideographic spaces (U+3000), which hang at a line's end as spaces do (Blink's IsOtherSpaceSeparator: a
+   line's width to fit and to align leaves them out, measured) */
+enum { LBF_SHY = 1, LBF_EMERG = 2, LBF_HOT = 4, LBF_HANG = 8 };
+/* each byte's class as lay_chars scans a word: LAY_BC_SPACE a space that ends it (space, tab, CR, FF, LF),
+   LAY_BC_HOT an ASCII byte line breaking breaks about (LBF_HOT: ( - < ? [ {), LAY_BC_HIGH one past ASCII (LBF_HOT
+   too); made once a process */
+enum { LAY_BC_SPACE = 1, LAY_BC_HOT = 2, LAY_BC_HIGH = 4 };
+/* a count of what a run's line breaking must look at (lay_break_pieces), bumped as pieces are made: a word LBF_HOT,
+   a text in a style whose word-break, line-break or overflow-wrap is not its initial value (lay_chars), a wbr
+   (lay_node_pieces); lay_run_pieces breaks a run's words where it moved while the run's pieces were made */
+static uint32_t lay_lb_marks;
+static uint8_t lay_bytecls[256];
+static int lay_bytecls_ready;
+static void lay_bytecls_make(void) {
+    static const char *const sp = " \t\r\f\n", *const hot = "(-<?[{";
+    for (size_t q = 0; sp[q]; q++) lay_bytecls[(unsigned char)sp[q]] = LAY_BC_SPACE;
+    for (size_t q = 0; hot[q]; q++) lay_bytecls[(unsigned char)hot[q]] = LAY_BC_HOT;
+    for (size_t c = 0x80; c < 256; c++) lay_bytecls[c] = LAY_BC_HIGH;
+    lay_bytecls_ready = 1;
+}
 
 /* the leading a line height leaves about a font's ascent and descent, split as Chromium
    splits it (CalculateLeadingSpace): above, half of it floored to a whole px; below, the
@@ -2070,6 +2112,11 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
     p.rx = (float)ih->rx;
     p.ry = (float)ih->ry;
     p.va = (uint8_t)ih->va;
+    if (!lay_bytecls_ready) lay_bytecls_make();
+    if (s->orient != 4) {
+        const lay_ext *x = data(*xc) + lay_si(sx, gx, pe);
+        if (x->wbrk || x->lbrk || x->owrap) lay_lb_marks++;
+    }
     if (s->orient == 4) {
         /* text-combine-upright: all in a vertical line (CSS Writing Modes 4, 9.1): the text one piece, an em down the
            line (lay_shape_pieces), set across it (Blink's LayoutTextCombine, an inline-block of its own): no letter- or
@@ -2134,12 +2181,15 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
             continue;
         }
         size_t j = i;
-        int soft = 0, rtl = 0;
-        while (j < n && !(tx[j] == ' ' || tx[j] == '\t' || tx[j] == '\r' || tx[j] == '\f' || tx[j] == '\n')) {
-            unsigned char c0 = (unsigned char)tx[j];
-            if (c0 >= 0xC2) {
+        int soft = 0, rtl = 0, hot = 0;
+        while (j < n) {
+            uint8_t cl = lay_bytecls[(unsigned char)tx[j]];
+            if (cl & LAY_BC_SPACE) break;
+            if (cl) {
+                hot = 1;
+                unsigned char c0 = (unsigned char)tx[j];
                 if (c0 == 0xC2 && j + 1 < n && (unsigned char)tx[j + 1] == 0xAD) soft = 1;
-                else if (!rtl && lay_bidi_hot(tx, n, j)) rtl = 1;
+                else if (c0 >= 0xC2 && !rtl && lay_bidi_hot(tx, n, j)) rtl = 1;
             }
             j++;
         }
@@ -2148,6 +2198,8 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         p.len = (uint32_t)(j - i);
         p.rtl = (uint8_t)rtl;
         p.soft = (uint8_t)soft;
+        p.lbf = (uint8_t)(hot ? LBF_HOT : 0);
+        if (hot) lay_lb_marks++;
         /* its width, and the lines of the faces other than its own that draw some of it: its
            run's shaping's (lay_shape_pieces) */
         p.w = 0;
@@ -2156,6 +2208,7 @@ static void lay_chars(LCTX, const lay_style *s, uint32_t node, uint32_t pe, cons
         push_back(ps, p);
         p.rtl = 0;
         p.soft = 0;
+        p.lbf = 0;
         *sp = 0;
         i = j;
     }
@@ -2219,6 +2272,8 @@ static void lay_shape_bytes(LCTX, const vector<lay_piece> *ps, size_t k, vector<
     if (p.kind == P_SPACE && !p.keep) { push_back(out, ' '); return; }
     size_t from = len(*out);
     lay_piece_text(t, d, gx, ps, k, k + 1, out);
+    /* a soft hyphen's hyphen (hy 2) is shaped apart, as Blink shapes it (lay_frag_glyphs) */
+    if (p.kind == P_WORD && p.hy == 2 && len(*out) > from) pop_back(out);
     if (p.kind == P_WORD && p.rtl) {
         vector<char> w;
         for (size_t q = from; q < len(*out); q++) push_back(w, at(*out, q));
@@ -2674,6 +2729,28 @@ static void lay_frag_glyphs(LCTX, const vector<lay_piece> *ps, size_t k, size_t 
         lay_pack_glyphs(LARGS, &p, &lay_ar_tx, en.tx0, &lay_ar_gl, en.gl0, en.gln, at(lay_ar_at, en.at0 + i - c0), at(lay_ar_at, en.at0 + e - c0), &x,
                         &out);
     }
+    /* a line broken after a soft hyphen: the hyphen, shaped alone after the text (Blink's item result's hyphen) */
+    lay_piece lp = at(*ps, r - 1);
+    if (lp.kind == P_WORD && lp.hy == 2 && lp.run) {
+        vector<amb_shaped> hg;
+        amb_shape(f, lp.face, "-", 1, 0, 1, 0, &hg);
+        double sc = lp.size / amb_face_upem(f, lp.face);
+        for (size_t g = 0; g < len(hg); g++) {
+            amb_shaped s = at(hg, g);
+            double gs = s.face == lp.face ? sc : lp.size / amb_face_upem(f, s.face);
+            amb_rglyph rg;
+            memset(&rg, 0, sizeof rg);
+            rg.gid = s.gid;
+            rg.face = s.face == lp.face ? (uint16_t)AMB_RGLYPH_OWN : s.face;
+            rg.flags = s.flags;
+            rg.x = x + s.dx * gs;
+            rg.y = (float)(-s.dy * gs);
+            char raw[sizeof(amb_rglyph)];
+            memcpy(raw, &rg, sizeof rg);
+            append_range(out, raw, sizeof raw);
+            x += s.ax * gs;
+        }
+    }
     lay_put_glyphs(t, &out, fr);
 }
 
@@ -3009,6 +3086,7 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     p.bg = s.bg;
     p.w = lay_res(st, s.m[3], cw) + s.b[3] + lay_res(st, s.p[3], cw);
     push_back(ps, p);
+    if (lay_is_named(d, node, "wbr")) lay_lb_marks++;
     if (node & LAY_GEN) lay_node_pieces(LARGS, node | LAY_GTEXT, inner, cw, ps, sp, &in);
     else {
         /* its children, after its ::before and before its ::after */
@@ -3029,6 +3107,259 @@ static void lay_node_pieces(LCTX, uint32_t node, int deco, double cw, vector<lay
     p.w = lay_res(st, s.p[1], cw) + s.b[1] + lay_res(st, s.m[1], cw);
     push_back(ps, p);
 }
+/* ---- line breaking: the break opportunities in a run's words (src/layout/linebreak.h) ---- */
+
+/* the language of an element as line breaking reads it (its lang attribute, or its nearest ancestor's, a shadow
+   tree's host's beyond its root): 0 none (or empty), 1 Japanese, 2 Chinese (zh and Chinese's other macrolanguage
+   tags), 3 Korean, 4 any other */
+/* the language of an element (its lang attribute, or its nearest ancestor's, a shadow tree's host's beyond its
+   root), lower-cased into buf (cap bytes, a NUL after it): its length, 0 for none or an empty one */
+static size_t lay_lang_of(const dom_document *d, uint32_t el, char *buf, size_t cap) {
+    buf[0] = 0;
+    if (!names_find(d, "lang", 4)) return 0;
+    for (uint32_t x = el, steps = 0; x && steps <= d->node_len; steps++) {
+        if (d->node[x].kind == DOM_NODE_KIND_ELEMENT) {
+            uint32_t a = lay_attr(d, x, "lang");
+            if (a) {
+                amb_span v = d->attr[a].value;
+                const char *s = text_ptr(d, v);
+                size_t n = 0;
+                while (n < v.len && n + 1 < cap) {
+                    char c = s[n];
+                    buf[n] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c == '_' ? '-' : c);
+                    n++;
+                }
+                buf[n] = 0;
+                return n;
+            }
+        }
+        uint32_t p = d->node[x].parent;
+        uint32_t h = dom_shadow_root_host(d, p);
+        x = h ? h : p;
+    }
+    return 0;
+}
+static int lay_lang_class(const dom_document *d, uint32_t el) {
+    char l[64];
+    size_t ln = lay_lang_of(d, el, l, sizeof l);
+    if (!ln) return 0;
+    size_t n = 0;
+    while (n < ln && l[n] != '-') n++;
+    if (n == 2 && l[0] == 'j' && l[1] == 'a') return 1;
+    if (n == 2 && l[0] == 'k' && l[1] == 'o') return 3;
+    if (n == 2 && l[0] == 'z' && l[1] == 'h') return 2;
+    if (n == 3) {
+        /* Chinese's macrolanguage tags (Blink's IsMacrolanguageChinese; ICU takes them as zh) */
+        static const char *const zh3 = "cdo cjy cmn cnp cpx csp czh czo gan hak hnm hsn luh lzh mnp nan sjc wuu yue";
+        for (size_t q = 0; zh3[q]; q += 4)
+            if (zh3[q] == l[0] && zh3[q + 1] == l[1] && zh3[q + 2] == l[2]) return 2;
+    }
+    return 4;
+}
+/* the hyphenation dictionary of an element's language, as Blink's HyphenationMinikin::MapLocale picks Chromium's:
+   0 en-US's patterns (en itself, en-US and the English of the US's territories), 1 en-GB's (every other English);
+   -1 none (no language, or one whose patterns Chromium has but not this module: German, French and some 50 more) */
+static int lay_hyph_dict(const dom_document *d, uint32_t el) {
+    char l[64];
+    size_t ln = lay_lang_of(d, el, l, sizeof l);
+    if (ln == 2) return l[0] == 'e' && l[1] == 'n' ? 0 : -1;
+    if (ln < 4 || l[0] != 'e' || l[1] != 'n' || l[2] != '-') return -1;
+    static const char *const us = "us as gu mh mp pr um vi";
+    if (ln == 5 || l[5] == '-')
+        for (size_t q = 0; us[q]; q += 3)
+            if (us[q] == l[3] && us[q + 1] == l[4]) return 0;
+    return 1;
+}
+
+/* a style's line breaking (amb_lbstyle) as Blink's LineBreaker::SetCurrentStyle sets its break iterator: the
+   rules its locale and line-break pick (no locale, Chromium's default rules whatever line-break says; Japanese and
+   Korean auto line_normal, Chinese line_normal_cj; strict line, loose line_loose, or Chinese's and Japanese's
+   _cj ones, normal theirs; Korean's strict, whose rules Chromium lacks, the default), break-all and keep-all,
+   line-break: anywhere every grapheme; overflow-wrap: anywhere and word-break: break-word every grapheme for the
+   min-content width */
+static amb_lbstyle lay_lb_style(const lay_ext *x, int ws, int lang) {
+    amb_lbstyle s;
+    memset(&s, 0, sizeof s);
+    s.wrap = (uint8_t)(ws == WS_NORMAL || ws == WS_PRE_WRAP || ws == WS_PRE_LINE);
+    s.shy = (uint8_t)(x->hyph != 0);
+    s.loose = (uint8_t)(x->lbrk == 1);
+    if (x->lbrk == 4) s.type = AMB_LBT_BREAK_CHAR;
+    else if (x->wbrk == 1) s.type = AMB_LBT_BREAK_ALL;
+    else if (x->wbrk == 2) s.type = AMB_LBT_KEEP_ALL;
+    s.mintype = s.type;
+    if (s.type != AMB_LBT_BREAK_CHAR && (x->owrap == 2 || x->wbrk == 3)) s.mintype = AMB_LBT_BREAK_CHAR;
+    int r = AMB_LBR_NORMAL;
+    if (lang && x->lbrk != 4) {
+        int lb = x->lbrk;
+        if (lb == 3) r = lang == 3 ? AMB_LBR_NORMAL : AMB_LBR_STRICT;
+        else if (lb == 1) r = lang == 4 ? AMB_LBR_LOOSE : AMB_LBR_LOOSE_CJ;
+        else if (lb == 2) r = lang == 4 ? AMB_LBR_NORMAL : AMB_LBR_NORMAL_CJ;
+        else r = lang == 2 ? AMB_LBR_NORMAL_CJ : AMB_LBR_NORMAL;
+    }
+    s.rules = (uint8_t)r;
+    return s;
+}
+
+static void lay_src_bytes(LCTX, uint32_t node, uint32_t off, uint32_t n, vector<char> *out);
+/* the bytes of word piece p as line breaking reads them: text-transform's letters (each the length it was), soft
+   hyphens kept */
+static void lay_lb_bytes(LCTX, lay_piece p, vector<char> *out) {
+    vector<char> raw;
+    lay_src_bytes(LARGS, p.node, p.off, p.len, &raw);
+    if (p.tt && p.kind == P_WORD) {
+        vector<char> tw;
+        lay_transform(data(raw), len(raw), p.tt, &tw);
+        if (len(tw) == len(raw)) { append_range(out, data(tw), len(tw)); return; }
+    }
+    append_range(out, data(raw), len(raw));
+}
+
+/* two styles' line breaking the same */
+static int lay_lbs_eq(amb_lbstyle a, amb_lbstyle b) {
+    return a.type == b.type && a.mintype == b.mintype && a.rules == b.rules && a.loose == b.loose && a.shy == b.shy && a.wrap == b.wrap;
+}
+
+/* the run's pieces from `from`, their words split where a line may break inside them (Blink's break iterator over
+   the run's text: src/layout/linebreak.c), each piece a break opportunity is before marked (bb: before the inline
+   elements opened before it, as Blink's line takes their open tags); a word ending in a soft hyphen it breaks after
+   marked LBF_SHY, one of overflow-wrap's emergency breaks LBF_EMERG. The text a run's line breaking reads: each word
+   (its letters as laid out), a space each collapsed space, a kept space's own, a forced break's line feed, an
+   atomic box's (a float's, an absolutely positioned box's) U+FFFC, a wbr's zero-width space (U+200B). A run of
+   ASCII words with no character ASCII breaks about (lay_chars's LBF_HOT), in styles that break as normal and with
+   no wbr, is passed over (lay_run_pieces: lay_lb_marks): its opportunities are its spaces. A break after a space
+   (the spaces' own), at an atomic box's edge and at a float is laid out as it was */
+static void lay_break_pieces(LCTX, vector<lay_piece> *ps, size_t from) {
+    size_t np = len(*ps);
+    /* the run's text: its code points, each one's piece and byte in it, and its style's line breaking */
+    vector<uint32_t> cps, cpk, cpo;
+    vector<uint8_t> cps_st, flags;
+    vector<amb_lbstyle> styles;
+    uint32_t last_el = 0xffffffffu;
+    uint8_t last_si = 0;
+    for (size_t k = from; k < np; k++) {
+        lay_piece p = at(*ps, k);
+        uint32_t el = p.kind == P_WORD || p.kind == P_SPACE ? p.elem : p.node;
+        if (el != last_el) {
+            uint32_t si = lay_si(sx, gx, el);
+            int ws = data(*sc)[si].ws;
+            amb_lbstyle s = lay_lb_style(data(*xc) + si, ws, lay_lang_class(d, lay_dom(gx, el)));
+            size_t q = 0;
+            while (q < len(styles) && !lay_lbs_eq(at(styles, q), s)) q++;
+            if (q == len(styles)) {
+                if (len(styles) >= 250) q = 0;
+                else push_back(styles, s);
+            }
+            last_el = el;
+            last_si = (uint8_t)q;
+        }
+        if (p.kind == P_WORD) {
+            vector<char> b;
+            lay_lb_bytes(LARGS, p, &b);
+            size_t z = 0;
+            while (z < len(b)) {
+                size_t z0 = z;
+                uint32_t cp = (unsigned char)at(b, z) < 0x80 ? (uint32_t)(unsigned char)at(b, z++) : amb_utf8_next(data(b), len(b), &z);
+                push_back(cps, cp);
+                push_back(cpk, (uint32_t)k);
+                push_back(cpo, (uint32_t)z0);
+                push_back(cps_st, last_si);
+            }
+            continue;
+        }
+        uint32_t c = 0;
+        uint32_t count = 1;
+        if (p.kind == P_SPACE) { c = ' '; if (p.keep) count = p.len; }
+        else if (p.kind == P_BREAK) c = '\n';
+        else if (p.kind == P_ATOMIC || p.kind == P_FLOAT || p.kind == P_ABS) c = 0xFFFC;
+        else if (p.kind == P_OPEN && lay_is_named(d, p.node, "wbr")) c = 0x200B;
+        else continue;
+        for (uint32_t q = 0; q < count; q++) {
+            push_back(cps, c);
+            push_back(cpk, (uint32_t)k);
+            push_back(cpo, q);
+            push_back(cps_st, last_si);
+        }
+    }
+    size_t n = len(cps);
+    if (n < 2) return;
+    amb_line_breaks(&cps, &cps_st, &styles, &flags);
+    /* the pieces again, the words split at their opportunities and the flags set */
+    vector<lay_piece> out;
+    reserve(out, np - from + 16);
+    size_t i = 0;                       /* the code point the next piece begins at */
+    for (size_t k = from; k < np; k++) {
+        lay_piece p = at(*ps, k);
+        p.bb = 0;
+        p.lbf = 0;
+        size_t c0 = i;
+        while (i < n && at(cpk, i) == (uint32_t)k) i++;
+        if (p.kind != P_WORD || c0 == i) { push_back(out, p); continue; }
+        uint8_t emerg = (uint8_t)(LAY_X(p.elem).owrap || LAY_X(p.elem).wbrk == 3 ? LBF_EMERG : 0);
+        /* a break before the word, after a word or a wbr: before the inline elements opened since the last one
+           closed before it (their open tags go to the next line in Blink, its close tags stay) */
+        uint8_t f0 = 0;
+        if (c0 > 0) {
+            int pk = at(*ps, at(cpk, c0 - 1)).kind;
+            if (pk == P_WORD || pk == P_OPEN) f0 = (uint8_t)(at(flags, c0) & (AMB_BRK_LINE | AMB_BRK_MIN));
+        }
+        if (f0) {
+            size_t tgt = len(out);
+            while (tgt > 0 && at(out, tgt - 1).kind == P_OPEN && !lay_is_named(d, at(out, tgt - 1).node, "wbr")) tgt--;
+            if (tgt < len(out)) {
+                lay_piece o = at(out, tgt);
+                o.bb = f0;
+                out[tgt] = o;
+            } else p.bb = f0;
+        }
+        /* the word cut at each opportunity inside it */
+        vector<char> raw;
+        lay_src_bytes(LARGS, p.node, p.off, p.len, &raw);
+        uint32_t start = 0;
+        uint8_t bb = p.bb;
+        uint8_t tt0 = (uint8_t)(p.tt & ~TT_MID);
+        for (size_t c = c0 + 1; c <= i; c++) {
+            uint8_t fl = c < i ? (uint8_t)(at(flags, c) & (AMB_BRK_LINE | AMB_BRK_MIN)) : 0;
+            /* cut too where a run of ideographic spaces begins or ends (LBF_HANG) */
+            int edge = c < i && ((at(cps, c) == 0x3000) != (at(cps, c - 1) == 0x3000));
+            if (c < i && !fl && !edge) continue;
+            uint32_t end = c < i ? at(cpo, c) : p.len;
+            if (end > len(raw)) end = (uint32_t)len(raw);
+            lay_piece q = p;
+            q.off = p.off + start;
+            q.len = end - start;
+            q.bb = bb;
+            q.lbf = emerg;
+            q.rtl = 0;
+            q.soft = 0;
+            for (uint32_t z = start; z < end; z++) {
+                unsigned char b0 = (unsigned char)at(raw, z);
+                if (b0 == 0xC2 && z + 1 < end && (unsigned char)at(raw, z + 1) == 0xAD) q.soft = 1;
+                else if (b0 >= 0xC2 && !q.rtl && lay_bidi_hot(data(raw), len(raw), z)) q.rtl = 1;
+            }
+            /* a soft hyphen it ends in, a break after it */
+            uint8_t fend = c < n ? (uint8_t)(at(flags, c) & (AMB_BRK_LINE | AMB_BRK_MIN)) : 0;
+            if (end >= start + 2 && (unsigned char)at(raw, end - 2) == 0xC2 && (unsigned char)at(raw, end - 1) == 0xAD && fend) q.lbf |= LBF_SHY;
+            /* a run of ideographic spaces alone */
+            int ideo = end > start && (end - start) % 3 == 0;
+            for (uint32_t z = start; z + 3 <= end && ideo; z += 3)
+                ideo = (unsigned char)at(raw, z) == 0xE3 && (unsigned char)at(raw, z + 1) == 0x80 && (unsigned char)at(raw, z + 2) == 0x80;
+            if (ideo) q.lbf |= LBF_HANG;
+            /* capitalize: a part after the first goes on with the word when a letter or a digit ends the part before */
+            if (start > 0 && tt0 == TT_CAPITALIZE) {
+                size_t zz = start - 1, bl;
+                while (zz > 0 && ((unsigned char)at(raw, zz) & 0xC0) == 0x80) zz--;
+                int cl = lay_word_class(data(raw), start, zz, &bl);
+                q.tt = (uint8_t)(cl >= 1 && cl <= 3 ? (tt0 | TT_MID) : tt0);
+            }
+            if (q.len) push_back(out, q);
+            start = end;
+            bb = fl;
+        }
+    }
+    resize(ps, from);
+    append_range(ps, data(out), len(out));
+}
+
 static void lay_run_pieces(LCTX, uint32_t container, const vector<uint32_t> *items, uint32_t first, uint32_t n, double cw, vector<lay_piece> *ps) {
     lay_style s;
     lay_style_of(LARGS, container, &s);
@@ -3036,7 +3367,9 @@ static void lay_run_pieces(LCTX, uint32_t container, const vector<uint32_t> *ite
     lay_inh ih;
     memset(&ih, 0, sizeof ih);
     size_t from = len(*ps);
+    uint32_t marks = lay_lb_marks;
     for (uint32_t k = first; k < first + n; k++) lay_node_pieces(LARGS, at(*items, k), s.deco, cw, ps, &sp, &ih);
+    if (lay_lb_marks != marks) lay_break_pieces(LARGS, ps, from);
     lay_shape_pieces(LARGS, ps, from);
 }
 /* a run shows something: a word, a kept space, an atomic box, a break, or an inline
@@ -3054,13 +3387,44 @@ static int lay_run_shows(const vector<lay_piece> *ps) {
 
 /* sticky: the table cell width calculation quirk (quirks mode; the Quirks Mode Standard 3.8): in an
    auto-width table cell's own lines, no soft wrap opportunity before or after an img */
-static void lay_run_intrinsic(const vector<lay_piece> *ps, double *mn, double *mx, int sticky) {
+static int lay_hyph_parts(LCTX, const vector<lay_piece> *ps, size_t k, double *first, double *mid, double *last);
+static void lay_run_intrinsic(LCTX, const vector<lay_piece> *ps, double *mn, double *mx, int sticky) {
     double line = 0, chunk = 0, pend = 0;
     *mn = 0;
     *mx = 0;
     int start = 1;
+    uint32_t hy_el = 0xffffffffu;       /* the element whose hyphens were looked at last, and whether they are auto */
+    int hy_on = 0;
     for (size_t k = 0; k < len(*ps); k++) {
         lay_piece p = at(*ps, k);
+        if ((p.bb & AMB_BRK_MIN) && !start) {
+            /* a break opportunity inside a word, or between words with no space (lay_break_pieces): the chunk ends,
+               a word ending in a soft hyphen before it with its hyphen (Blink's FastMinTextContext) */
+            double hy = 0;
+            size_t q = k;
+            while (q > 0 && (at(*ps, q - 1).kind == P_CLOSE || at(*ps, q - 1).kind == P_OPEN)) q--;
+            if (q > 0 && at(*ps, q - 1).kind == P_WORD && (at(*ps, q - 1).lbf & LBF_SHY)) {
+                lay_piece h = at(*ps, q - 1);
+                hy = amb_text_width(f, h.face, h.size, "-", 1) + h.ls;
+            }
+            if (chunk + hy > *mn) *mn = chunk + hy;
+            chunk = 0;
+        }
+        double h1, hm, hl;
+        if (p.kind == P_WORD && p.elem != hy_el) {
+            hy_el = p.elem;
+            hy_on = LAY_X(p.elem).hyph == 2;
+        }
+        if (p.kind == P_WORD && hy_on && lay_hyph_parts(LARGS, ps, k, &h1, &hm, &hl)) {
+            /* hyphens: auto: the word's first part ends the chunk before it, its last begins the next */
+            if (chunk + h1 > *mn) *mn = chunk + h1;
+            if (hm > *mn) *mn = hm;
+            chunk = hl;
+            line += pend + p.w;
+            pend = 0;
+            start = 0;
+            continue;
+        }
         if (sticky && p.kind == P_ATOMIC && p.img) {
             line += pend + p.w;
             pend = 0;
@@ -3159,7 +3523,7 @@ static void lay_intrinsic_of(LCTX, uint32_t el, double cw, double *mn, double *m
         else {
             vector<lay_piece> ps;
             lay_run_pieces(LARGS, el, &items, sg.first, sg.n, cw, &ps);
-            lay_run_intrinsic(&ps, &a, &b, lay_quirks && s.display == D_CELL && s.width.unit == LAY_AUTO);
+            lay_run_intrinsic(LARGS, &ps, &a, &b, lay_quirks && s.display == D_CELL && s.width.unit == LAY_AUTO);
         }
         if (side) {
             if (nitems++) { *mx += gap; if (!wraps) *mn += gap; }
@@ -5157,7 +5521,11 @@ static double lay_line(LCTX, uint32_t b, const lay_style *bs, const vector<lay_p
         return lay_bidi_finish(LARGS, b, bs, ps, a, end, x0, w, y, justify_ok, indent, open, bu, para, &atoms, &abase, max_above, max_below);
     /* the cloned elements' end edges after the content (a cloned one's start edges are in indent: lay_lines) */
     double cends = lay_clone_ends(LARGS, ps, a, end, open, w);
-    double line_w = x, free = w - line_w - cends, shift = 0, extra = 0;
+    /* the ideographic spaces the line ends in hang: no part of the width it is aligned by (lay_break_pieces) */
+    double hang = 0;
+    for (size_t q = end; q > a && (at(*ps, q - 1).kind == P_CLOSE || (at(*ps, q - 1).kind == P_WORD && (at(*ps, q - 1).lbf & LBF_HANG))); q--)
+        if (at(*ps, q - 1).kind == P_WORD) hang += at(*ps, q - 1).w;
+    double line_w = x, free = w - line_w - cends + hang, shift = 0, extra = 0;
     if (bs->align == AL_RIGHT && free > 0) shift = free;
     else if (bs->align == AL_CENTER && free > 0) shift = free / 2;
     else if (bs->align == AL_JUSTIFY && justify_ok && free > 0 && spaces > 0) extra = free / spaces;
@@ -5488,82 +5856,114 @@ static double lay_first_chunk(const vector<lay_piece> *ps, size_t i) {
     double w = 0;
     size_t c = i;
     while (c < len(*ps) && at(*ps, c).kind != P_SPACE && at(*ps, c).kind != P_BREAK) {
-        if (c > i && (at(*ps, c).kind == P_ATOMIC || at(*ps, c - 1).kind == P_ATOMIC)) break;
+        if (c > i && (at(*ps, c).kind == P_ATOMIC || at(*ps, c - 1).kind == P_ATOMIC || (at(*ps, c).bb & AMB_BRK_LINE))) break;
         w += at(*ps, c).w;
         c++;
     }
     return w;
 }
-/* ---- hyphenation (Liang's algorithm over TeX's American English patterns) ---- */
+/* ---- hyphenation (Liang's algorithm over the English patterns Chromium has) ---- */
 
-/* the patterns, found by their letters' hash: each slot a pattern's offset in
-   amb_hyph_patterns, plus one (0 an empty slot); made once a process */
+/* a dictionary's patterns and exceptions (g: 0 American English, 1 British) */
+static const char *lay_hyph_pats(int g) { return g ? amb_hyph_gb_patterns : amb_hyph_patterns; }
+static size_t lay_hyph_npats(int g) { return g ? sizeof amb_hyph_gb_patterns - 1 : sizeof amb_hyph_patterns - 1; }
+static const char *lay_hyph_excs(int g) { return g ? amb_hyph_gb_exceptions : amb_hyph_exceptions; }
+static size_t lay_hyph_nexcs(int g) { return g ? sizeof amb_hyph_gb_exceptions - 1 : sizeof amb_hyph_exceptions - 1; }
+
+/* each dictionary's patterns, found by their letters' hash: each slot a pattern's offset in
+   its string, plus one (0 an empty slot); the exceptions likewise, by their letters' hash;
+   made once a process */
 #define LAY_HYPH_SLOTS 16384
-static uint32_t lay_hyph_slot[LAY_HYPH_SLOTS];
-static int lay_hyph_ready;
+#define LAY_HYPH_XSLOTS 4096
+static uint32_t lay_hyph_slot[2][LAY_HYPH_SLOTS];
+static uint32_t lay_hyph_xslot[2][LAY_HYPH_XSLOTS];
+static int lay_hyph_ready[2];
 
 static uint32_t lay_hyph_hash(const char *s, size_t n) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 16777619u; }
     return h & (LAY_HYPH_SLOTS - 1);
 }
+/* an exception's letters' hash, its hyphens passed over */
+static uint32_t lay_hyph_xhash(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) if (s[i] != '-') { h ^= (unsigned char)s[i]; h *= 16777619u; }
+    return h & (LAY_HYPH_XSLOTS - 1);
+}
 static int lay_digit(char c) { return c >= '0' && c <= '9'; }
-static void lay_hyph_load(void) {
-    if (lay_hyph_ready) return;
-    lay_hyph_ready = 1;
-    size_t i = 0, n = sizeof amb_hyph_patterns - 1;
+static void lay_hyph_load(int g) {
+    if (lay_hyph_ready[g]) return;
+    lay_hyph_ready[g] = 1;
+    const char *pats = lay_hyph_pats(g), *excs = lay_hyph_excs(g);
+    size_t i = 0, n = lay_hyph_npats(g);
     while (i < n) {
         size_t b = i, e = i;
-        while (i < n && amb_hyph_patterns[i] != ' ') i++;
-        while (e < i && !lay_digit(amb_hyph_patterns[e])) e++;
-        uint32_t h = lay_hyph_hash(amb_hyph_patterns + b, e - b);
-        while (lay_hyph_slot[h]) h = (h + 1) & (LAY_HYPH_SLOTS - 1);
-        lay_hyph_slot[h] = (uint32_t)b + 1;
+        while (i < n && pats[i] != ' ') i++;
+        while (e < i && !lay_digit(pats[e])) e++;
+        uint32_t h = lay_hyph_hash(pats + b, e - b);
+        while (lay_hyph_slot[g][h]) h = (h + 1) & (LAY_HYPH_SLOTS - 1);
+        lay_hyph_slot[g][h] = (uint32_t)b + 1;
+        i++;
+    }
+    i = 0;
+    n = lay_hyph_nexcs(g);
+    while (i < n) {
+        size_t b = i;
+        while (i < n && excs[i] != ' ') i++;
+        if (i > b) {
+            uint32_t h = lay_hyph_xhash(excs + b, i - b);
+            while (lay_hyph_xslot[g][h]) h = (h + 1) & (LAY_HYPH_XSLOTS - 1);
+            lay_hyph_xslot[g][h] = (uint32_t)b + 1;
+        }
         i++;
     }
 }
 
-/* the places a word of lower-case letters w[0, n) may be broken at (CSS hyphens: auto):
-   ok[i] is 1 where a hyphen may come before letter i -- an exception's hyphens, or the odd
-   values Liang's patterns give, two letters at least on each side */
-static void lay_hyph_points(const char *w, size_t n, uint8_t *ok) {
+/* the places a word of lower-case letters w[0, n) may be broken at (CSS hyphens: auto) by
+   dictionary g, as Chromium's hyphenator (Android's minikin) finds them: ok[i] is 1 where a
+   hyphen may come before letter i -- an exception's hyphens, or the odd values Liang's
+   patterns give -- two letters at least before it and three after, in a word of 5 to 62
+   letters */
+static void lay_hyph_points(int g, const char *w, size_t n, uint8_t *ok) {
     memset(ok, 0, n + 1);
-    if (n < 5 || n > 60) return;
+    if (n < 5 || n > 62) return;
+    lay_hyph_load(g);
+    const char *pats = lay_hyph_pats(g), *excs = lay_hyph_excs(g);
     /* an exception: its hyphens as written */
-    size_t i = 0, en = sizeof amb_hyph_exceptions - 1;
-    while (i < en) {
-        size_t b = i;
-        while (i < en && amb_hyph_exceptions[i] != ' ') i++;
-        size_t k = 0, q = b;
+    uint32_t xh = lay_hyph_xhash(w, n);
+    while (lay_hyph_xslot[g][xh]) {
+        size_t b = lay_hyph_xslot[g][xh] - 1, q = b, k = 0;
         int same = 1;
-        for (; q < i && same; q++) {
-            if (amb_hyph_exceptions[q] == '-') continue;
-            if (k >= n || amb_hyph_exceptions[q] != w[k]) same = 0;
+        for (; excs[q] != ' ' && same; q++) {
+            if (excs[q] == '-') continue;
+            if (k >= n || excs[q] != w[k]) same = 0;
             else k++;
         }
         if (same && k == n) {
             k = 0;
-            for (q = b; q < i; q++) { if (amb_hyph_exceptions[q] == '-') ok[k] = 1; else k++; }
+            for (q = b; excs[q] != ' '; q++) {
+                if (excs[q] != '-') k++;
+                else if (k >= 2 && k + 3 <= n) ok[k] = 1;
+            }
             return;
         }
-        i++;
+        xh = (xh + 1) & (LAY_HYPH_XSLOTS - 1);
     }
-    lay_hyph_load();
-    char s0[64];
+    char s0[66];
     s0[0] = '.';
     memcpy(s0 + 1, w, n);
     s0[n + 1] = '.';
-    size_t m = n + 2;
-    uint8_t vals[64];
+    size_t m = n + 2, longest = g ? AMB_HYPH_GB_LONGEST : AMB_HYPH_LONGEST;
+    uint8_t vals[68];
     memset(vals, 0, sizeof vals);
     for (size_t a = 0; a < m; a++)
-        for (size_t k = 1; k <= AMB_HYPH_LONGEST && a + k <= m; k++) {
+        for (size_t k = 1; k <= longest && a + k <= m; k++) {
             uint32_t h = lay_hyph_hash(s0 + a, k);
-            while (lay_hyph_slot[h]) {
-                uint32_t off = lay_hyph_slot[h] - 1;
-                if (memcmp(amb_hyph_patterns + off, s0 + a, k) == 0 && lay_digit(amb_hyph_patterns[off + k])) {
+            while (lay_hyph_slot[g][h]) {
+                uint32_t off = lay_hyph_slot[g][h] - 1;
+                if (memcmp(pats + off, s0 + a, k) == 0 && lay_digit(pats[off + k])) {
                     for (size_t q = 0; q <= k; q++) {
-                        uint8_t v = (uint8_t)(amb_hyph_patterns[off + k + q] - '0');
+                        uint8_t v = (uint8_t)(pats[off + k + q] - '0');
                         if (v > vals[a + q]) vals[a + q] = v;
                     }
                     break;
@@ -5572,53 +5972,118 @@ static void lay_hyph_points(const char *w, size_t n, uint8_t *ok) {
             }
         }
     /* vals[j]: the value before s0[j]; letter i of w is s0[i + 1] */
-    for (size_t q = 2; q + 2 <= n; q++) ok[q] = (uint8_t)(vals[q + 1] & 1);
+    for (size_t q = 2; q + 3 <= n; q++) ok[q] = (uint8_t)(vals[q + 1] & 1);
 }
 
-/* where a word piece p can be broken by a hyphen, the part before it and the hyphen
-   fitting in room: its last soft hyphen that fits (hyph 1 or 2), else (hyph 2) the last of
-   Liang's points; the bytes its part keeps (*keep), where its rest begins (*rest) and the
-   part's width (*pw); 0 when it has no such place */
-static int lay_hyph_split(LCTX, const vector<lay_piece> *ps, size_t k, int hyph, double room, uint32_t *keep, uint32_t *rest, double *pw) {
-    lay_piece p = at(*ps, k);
-    vector<char> raw;
-    if (p.node & LAY_GEN) { amb_span g = at(*gx, p.node & LAY_GIDX).text; if (p.off + p.len <= g.len) append_range(raw, text_ptr(t, g) + p.off, p.len); }
-    else { amb_span sp = d->node[p.node].data; if (p.off + p.len <= sp.len) append_range(raw, text_ptr(d, sp) + p.off, p.len); }
-    if (len(raw) != p.len || p.len < 2) return 0;
-    double hw = amb_text_width(f, p.face, p.size, "-", 1) + p.ls;
-    /* the candidates: soft hyphens, else Liang's points in the word's run of letters */
-    vector<uint32_t> cuts;           /* each: the part's bytes, then the rest's start */
-    for (uint32_t q = 1; q + 1 < p.len; q++)
-        if ((unsigned char)at(raw, q) == 0xC2 && (unsigned char)at(raw, q + 1) == 0xAD) { push_back(cuts, q); push_back(cuts, q + 2); }
-    if (!len(cuts) && hyph == 2) {
-        uint32_t a = 0, z = p.len;
-        while (a < z && !((at(raw, a) >= 'a' && at(raw, a) <= 'z') || (at(raw, a) >= 'A' && at(raw, a) <= 'Z'))) a++;
-        while (z > a && !((at(raw, z - 1) >= 'a' && at(raw, z - 1) <= 'z') || (at(raw, z - 1) >= 'A' && at(raw, z - 1) <= 'Z'))) z--;
-        char lw[64];
-        int letters = z - a < 61;
-        for (uint32_t q = a; q < z && letters; q++) {
-            char c = at(raw, q);
-            if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
-            if (c < 'a' || c > 'z') letters = 0;
-            else lw[q - a] = c;
-        }
-        if (letters && z > a) {
-            uint8_t ok[64];
-            lay_hyph_points(lw, z - a, ok);
-            for (uint32_t q = 1; q < z - a; q++) if (ok[q]) { push_back(cuts, a + q); push_back(cuts, a + q); }
-        }
+/* a code point Blink's WordToHyphenate takes off a word's end: a space separator, punctuation or a control
+   (general category Zs, P or Cc; past Latin-1, the common ones) */
+static int lay_hyph_trail(uint32_t cp) {
+    if (cp < 0x80) {
+        if (cp <= 0x20 || cp == 0x7F) return 1;
+        static const char *const punct = "!\"#%&'()*,-./:;?@[\\]_{}";
+        for (size_t q = 0; punct[q]; q++) if ((uint32_t)(unsigned char)punct[q] == cp) return 1;
+        return 0;
     }
-    /* the last that fits */
-    for (size_t c = len(cuts); c >= 2; c -= 2) {
-        uint32_t kb = at(cuts, c - 2);
-        vector<char> part;
-        if (p.tt) lay_transform(data(raw), kb, p.tt, &part);
-        else append_range(part, data(raw), kb);
-        lay_strip_soft(&part);
-        double w = amb_text_width(f, p.face, p.size, data(part), len(part)) + p.ls * (double)lay_cps(data(part), len(part)) + hw;
-        if (w <= room + 0.01) { *keep = kb; *rest = at(cuts, c - 1); *pw = w; return 1; }
+    if (cp <= 0xA1 || cp == 0xA7 || cp == 0xB6 || cp == 0xB7 || cp == 0xBF) return 1;
+    uint32_t g = (amb_lb_props(cp) & AMB_LBP_GC) >> 8;
+    if (g == AMB_LBG_PI || g == AMB_LBG_PF) return 1;
+    return (cp >= 0x2000 && cp <= 0x200A) || (cp >= 0x2010 && cp <= 0x2027) || cp == 0x202F || (cp >= 0x2030 && cp <= 0x2043) ||
+           cp == 0x205F || (cp >= 0x3000 && cp <= 0x3003) || (cp >= 0x3008 && cp <= 0x3011);
+}
+
+/* the word a piece of text tw[0, n) is hyphenated as (Blink's HyphenationMinikin::WordToHyphenate): past the
+   spaces, opening punctuation and quotation marks before it (class OP, QU) and the spaces, punctuation and
+   controls after it, its bytes [*a, *z), its letters in lower case into lw (64 bytes); 0 when Chromium does not
+   hyphenate it: a letter of it not one of a to z (en-US's alphabet: a soft hyphen in it too), 5 to 62 letters
+   not, or a capital first (Blink hyphenates no capitalized word of English) */
+static int lay_hyph_word(const char *tw, size_t n, uint32_t *a, uint32_t *z, char *lw) {
+    size_t b = 0;
+    while (b < n) {
+        size_t q = b;
+        uint32_t cp = (unsigned char)tw[q] < 0x80 ? (uint32_t)(unsigned char)tw[q++] : amb_utf8_next(tw, n, &q);
+        uint32_t cls = amb_lb_props(cp) & AMB_LBP_CLASS;
+        if (!(cp == ' ' || cp == '\t' || cp == '\n' || cp == 0xA0 || cls == AMB_LBC_OP || cls == AMB_LBC_QU)) break;
+        b = q;
+    }
+    size_t e = n;
+    while (e > b) {
+        size_t q = e - 1;
+        while (q > b && ((unsigned char)tw[q] & 0xC0) == 0x80) q--;
+        size_t q2 = q;
+        uint32_t cp = (unsigned char)tw[q2] < 0x80 ? (uint32_t)(unsigned char)tw[q2] : amb_utf8_next(tw, n, &q2);
+        if (!lay_hyph_trail(cp)) break;
+        e = q;
+    }
+    if (e - b < 5 || e - b > 62 || (tw[b] >= 'A' && tw[b] <= 'Z')) return 0;
+    for (size_t q = b; q < e; q++) {
+        char c = tw[q];
+        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+        if (c < 'a' || c > 'z') return 0;
+        lw[q - b] = c;
+    }
+    *a = (uint32_t)b;
+    *z = (uint32_t)e;
+    return 1;
+}
+
+static double lay_hyphen_width(LCTX, lay_piece p);
+static double lay_part_width(LCTX, lay_piece p, uint32_t a, uint32_t b);
+/* where a word piece p can be broken by a hyphen (hyphens: auto), the part before it and the hyphen fitting in
+   room: the last of Liang's points that fits (Blink's LastHyphenLocation), else, where first (the word begins its
+   line), the first (FirstHyphenLocation: the line overflows by less); the bytes its part keeps (*keep), where its
+   rest begins (*rest) and the part's width (*pw); 0 when it has no such place. A part after the first is a word of
+   its own (lay_hyph_apply), its points its own, as Blink hyphenates the rest of a word a line begins in. g: the
+   dictionary (lay_hyph_dict) */
+static int lay_hyph_split(LCTX, const vector<lay_piece> *ps, size_t k, int g, double room, int first, uint32_t *keep, uint32_t *rest, double *pw) {
+    lay_piece p = at(*ps, k);
+    vector<char> tw;
+    lay_lb_bytes(LARGS, p, &tw);
+    char lw[64];
+    uint32_t a, z;
+    if (len(tw) != p.len || !lay_hyph_word(data(tw), len(tw), &a, &z, lw)) return 0;
+    uint8_t ok[64];
+    lay_hyph_points(g, lw, z - a, ok);
+    vector<uint32_t> cuts;
+    for (uint32_t q = 1; q < z - a; q++) if (ok[q]) push_back(cuts, a + q);
+    double hw = lay_hyphen_width(LARGS, p);
+    for (size_t c = len(cuts); c >= 1; c--) {
+        uint32_t kb = at(cuts, c - 1);
+        double w = lay_part_width(LARGS, p, 0, kb) + hw;
+        if (w <= room + LAY_FIT || (first && c == 1)) { *keep = kb; *rest = kb; *pw = w; return 1; }
     }
     return 0;
+}
+
+/* hyphens: auto's parts of word piece k for the min-content width (Blink's FastMinTextContext::AddHyphenated: each
+   part between the points of the whole word, all but the last with a hyphen): the first's width into *first, the
+   widest of the others but the last into *mid, the last's into *last; 0 when the word has no point (or is in a
+   language not hyphenated here) */
+static int lay_hyph_parts(LCTX, const vector<lay_piece> *ps, size_t k, double *first, double *mid, double *last) {
+    lay_piece p = at(*ps, k);
+    if (p.kind != P_WORD || LAY_X(p.elem).hyph != 2) return 0;
+    int g = lay_hyph_dict(d, lay_dom(gx, p.elem));
+    if (g < 0) return 0;
+    vector<char> tw;
+    lay_lb_bytes(LARGS, p, &tw);
+    char lw[64];
+    uint32_t a, z;
+    if (len(tw) != p.len || !lay_hyph_word(data(tw), len(tw), &a, &z, lw)) return 0;
+    uint8_t ok[64];
+    lay_hyph_points(g, lw, z - a, ok);
+    vector<uint32_t> cuts;
+    push_back(cuts, 0);
+    for (uint32_t q = 1; q < z - a; q++) if (ok[q]) push_back(cuts, a + q);
+    if (len(cuts) < 2) return 0;
+    push_back(cuts, (uint32_t)len(tw));
+    double hw = lay_hyphen_width(LARGS, p);
+    *mid = 0;
+    for (size_t c = 0; c + 1 < len(cuts); c++) {
+        double w = lay_part_width(LARGS, p, at(cuts, c), at(cuts, c + 1));
+        if (c + 2 == len(cuts)) *last = w;
+        else if (c == 0) *first = w + hw;
+        else if (w + hw > *mid) *mid = w + hw;
+    }
+    return 1;
 }
 
 /* a word piece broken at a hyphenation point: its part (keep bytes, pw wide, the hyphen
@@ -5644,6 +6109,108 @@ static void lay_hyph_apply(LCTX, vector<lay_piece> *ps, size_t k, uint32_t keep,
     push_back(ps, q);
     for (size_t z = len(*ps) - 1; z > k + 1; z--) (*ps)[z] = at(*ps, z - 1);
     (*ps)[k + 1] = q;
+}
+
+/* the word a line [start, end) ends in, but for the inline elements' edges after it, when it ends in a soft hyphen it
+   breaks after (LBF_SHY); len(ps) for none */
+static size_t lay_shy_end(const vector<lay_piece> *ps, size_t start, size_t end) {
+    size_t q = end;
+    while (q > start && (at(*ps, q - 1).kind == P_CLOSE || at(*ps, q - 1).kind == P_OPEN)) q--;
+    if (q > start && at(*ps, q - 1).kind == P_WORD && (at(*ps, q - 1).lbf & LBF_SHY)) return q - 1;
+    return len(*ps);
+}
+/* a chunk [k, c) of a paragraph's pieces is its last word but not its only one: nothing after it but spaces,
+   forced breaks and inline elements' edges, something before it (Blink's ShouldHyphenate leaves such a word
+   unhyphenated when the line has something before it; a wbr is text, U+200B, a float or an absolutely positioned
+   box U+FFFC) */
+static int lay_hyph_blank(const dom_document *d, lay_piece p) {
+    return p.kind == P_SPACE || p.kind == P_BREAK || p.kind == P_CLOSE || (p.kind == P_OPEN && !lay_is_named(d, p.node, "wbr"));
+}
+static int lay_hyph_last(const dom_document *d, const vector<lay_piece> *ps, size_t k, size_t c) {
+    for (size_t q = c; q < len(*ps); q++) if (!lay_hyph_blank(d, at(*ps, q))) return 0;
+    for (size_t q = 0; q < k; q++) if (!lay_hyph_blank(d, at(*ps, q))) return 1;
+    return 0;
+}
+
+/* the width of the hyphen a word broken at a soft hyphen ends in, its letter-spacing after it */
+static double lay_hyphen_width(LCTX, lay_piece p) { return amb_text_width(f, p.face, p.size, "-", 1) + p.ls; }
+
+/* a word piece's width as laid out, measured alone: its bytes [a, b) (text-transform's letters, soft hyphens out),
+   letter-spacing after each code point */
+static double lay_part_width(LCTX, lay_piece p, uint32_t a, uint32_t b) {
+    vector<char> raw;
+    lay_src_bytes(LARGS, p.node, p.off + a, b - a, &raw);
+    vector<char> tw;
+    if (p.tt) lay_transform(data(raw), len(raw), p.tt, &tw);
+    else append_range(tw, data(raw), len(raw));
+    lay_strip_soft(&tw);
+    return amb_text_width(f, p.face, p.size, data(tw), len(tw)) + p.ls * (double)lay_cps(data(tw), len(tw));
+}
+
+/* word piece q of ps cut at its byte a: its part before (w1 wide) and its rest, the next piece, measured alone */
+static void lay_piece_cut(LCTX, vector<lay_piece> *ps, size_t q, uint32_t a, double w1) {
+    lay_piece p = at(*ps, q), r = p;
+    p.len = a;
+    p.w = w1;
+    p.lbf = (uint8_t)(p.lbf & ~LBF_SHY);
+    r.off = p.off + a;
+    r.len = at(*ps, q).len - a;
+    r.bb = 0;
+    if ((r.tt & ~TT_MID) == TT_CAPITALIZE) r.tt |= TT_MID;
+    r.w = lay_part_width(LARGS, r, 0, r.len);
+    (*ps)[q] = p;
+    push_back(ps, r);
+    for (size_t z = len(*ps) - 1; z > q + 1; z--) (*ps)[z] = at(*ps, z - 1);
+    (*ps)[q + 1] = r;
+}
+
+/* overflow-wrap's emergency break of a line's first chunk, the pieces [k, c) of ps, too wide for room (Blink's
+   overflowing line broken again with a break at every grapheme cluster: LineBreaker's override_break_anywhere_): the
+   chunk cut after the most of its graphemes that fit, one at least, a word cut there into two pieces; the line's end
+   (a piece's index) into *cut and the width it keeps into *kw. 0 when the chunk has no word to cut */
+static int lay_emerg_split(LCTX, vector<lay_piece> *ps, size_t k, size_t c, double room, size_t *cut, double *kw) {
+    double acc = 0;
+    for (size_t q = k; q < c; q++) {
+        lay_piece p = at(*ps, q);
+        if (p.kind != P_WORD) { acc += p.w; continue; }
+        if (acc + p.w <= room + LAY_FIT) { acc += p.w; continue; }
+        /* the piece's graphemes: the longest run of them from its start that fits */
+        vector<char> raw;
+        lay_src_bytes(LARGS, p.node, p.off, p.len, &raw);
+        vector<uint32_t> cps, cpo;
+        size_t z = 0;
+        while (z < len(raw)) {
+            push_back(cpo, (uint32_t)z);
+            push_back(cps, amb_utf8_next(data(raw), len(raw), &z));
+        }
+        push_back(cpo, (uint32_t)len(raw));
+        vector<uint8_t> gb;
+        amb_lb_graphemes(&cps, &gb);
+        uint32_t best = 0;
+        double bw = 0;
+        for (size_t g = 1; g < len(cps); g++) {
+            if (!at(gb, g)) continue;
+            double w = lay_part_width(LARGS, p, 0, at(cpo, g));
+            if (acc + w > room + LAY_FIT) {
+                if (!best && acc == 0) { best = at(cpo, g); bw = w; }
+                break;
+            }
+            best = at(cpo, g);
+            bw = w;
+        }
+        if (!best) {
+            /* not one grapheme of it fits after what does: the line ends before it */
+            if (q == k) return 0;
+            *cut = q;
+            *kw = acc;
+            return 1;
+        }
+        lay_piece_cut(LARGS, ps, q, best, bw);
+        *cut = q + 1;
+        *kw = acc + bw;
+        return 1;
+    }
+    return 0;
 }
 
 /* the end of the first letter of text s[0, n): the punctuation before it and the letter
@@ -5836,6 +6403,11 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
         size_t start = i, j = i, end = i;
         double x = indent;
         int forced = 0;
+        /* the line as it stood at the last break opportunity it went past: where a line ending in a soft hyphen whose
+           hyphen does not fit breaks instead (Blink's retry with the hyphen's width less) */
+        size_t bk_j = 0, bk_end = 0;
+        double bk_x = 0;
+        int ends_at_break = 0;
         while (j < np) {
             if (at(ps, j).kind == P_BREAK) { end = j; j++; forced = 1; break; }
             if (at(ps, j).kind == P_FLOAT) {
@@ -5867,31 +6439,94 @@ static double lay_lines(LCTX, uint32_t b, uint32_t container, const vector<uint3
             size_t c = k;
             double cw = 0;
             int atomic_edge = at(ps, k).kind == P_ATOMIC || (k > start && at(ps, k - 1).kind == P_ATOMIC);
+            /* a chunk: to the next space, forced break or float, atomic box's edge, or break opportunity
+               (lay_break_pieces) */
             while (c < np && at(ps, c).kind != P_SPACE && at(ps, c).kind != P_BREAK && at(ps, c).kind != P_FLOAT) {
-                if (c > k && (at(ps, c).kind == P_ATOMIC || at(ps, c - 1).kind == P_ATOMIC)) break;
+                if (c > k && (at(ps, c).kind == P_ATOMIC || at(ps, c - 1).kind == P_ATOMIC || (at(ps, c).bb & AMB_BRK_LINE))) break;
                 cw += at(ps, c).w;
                 c++;
             }
-            int can_break = (breakable || atomic_edge) && end > start;
-            if (!has_fl && x + sw + cw > lw + 0.01 && c == k + 1 && at(ps, k).kind == P_WORD) {
-                /* a word too wide for what is left: broken by a hyphen where it may be */
-                int hyph = LAY_X(at(ps, k).elem).hyph;
-                if (hyph == 1 && !at(ps, k).soft) hyph = 0;
+            int can_break = (breakable || atomic_edge || (at(ps, k).bb & AMB_BRK_LINE)) && end > start;
+            /* the ideographic spaces the chunk ends in, which hang where the line ends after them (looked for when the
+               chunk does not fit without them) */
+            double hang = 0;
+            if (x + sw + cw > lw + LAY_FIT)
+                for (size_t q = c; q > k && (at(ps, q - 1).kind == P_CLOSE || (at(ps, q - 1).kind == P_WORD && (at(ps, q - 1).lbf & LBF_HANG))); q--)
+                    if (at(ps, q - 1).kind == P_WORD) hang += at(ps, q - 1).w;
+            /* the chunk's one word, the inline elements' edges before it (none: it has another word, or none), when
+               it does not fit */
+            size_t hw_k = np;
+            double hw_pre = 0;
+            if (!has_fl && x + sw + cw > lw + LAY_FIT)
+                for (size_t q = k; q < c; q++) {
+                    int kd = at(ps, q).kind;
+                    if (kd == P_WORD) {
+                        if (hw_k < np) { hw_k = np; break; }
+                        hw_k = q;
+                    } else if (kd != P_OPEN && kd != P_CLOSE) { hw_k = np; break; }
+                    else if (hw_k == np) hw_pre += at(ps, q).w;
+                }
+            if (hw_k < np) {
+                /* a word too wide for what is left: broken by a hyphen where Liang's points let it (hyphens: auto, in
+                   English, by the patterns Chromium has for it; a soft hyphen is a break opportunity of its own), but
+                   for the paragraph's last word after the line's first (Blink's ShouldHyphenate) */
+                int hyph = LAY_X(at(ps, hw_k).elem).hyph;
+                int dict = hyph == 2 ? lay_hyph_dict(d, lay_dom(gx, at(ps, hw_k).elem)) : -1;
                 uint32_t keep, rst;
                 double pw;
-                if (hyph && lay_hyph_split(LARGS, &ps, k, hyph, lw - x - sw, &keep, &rst, &pw)) {
-                    lay_hyph_apply(LARGS, &ps, k, keep, rst, pw);
+                if (dict >= 0 && (end == start || !lay_hyph_last(d, &ps, k, c)) &&
+                    lay_hyph_split(LARGS, &ps, hw_k, dict, lw - x - sw - hw_pre, end == start, &keep, &rst, &pw)) {
+                    lay_hyph_apply(LARGS, &ps, hw_k, keep, rst, pw);
                     np = len(ps);
-                    x += sw + pw;
-                    end = k + 1;
-                    j = k + 1;
+                    x += sw + hw_pre + pw;
+                    end = hw_k + 1;
+                    j = hw_k + 1;
                     break;
                 }
             }
-            if (can_break && x + sw + cw > lw + 0.01) { j = k; break; }
+            if (can_break && x + sw + cw - hang > lw + LAY_FIT) { j = k; ends_at_break = 1; break; }
+            int emerg = 0;
+            if (!can_break && end == start && x + sw + cw - hang > lw + LAY_FIT)
+                for (size_t q = k; q < c && !emerg; q++) emerg = at(ps, q).kind == P_WORD && (at(ps, q).lbf & LBF_EMERG);
+            if (emerg) {
+                /* the line's first chunk too wide for it, under overflow-wrap (or word-break: break-word): cut after the
+                   most of its graphemes that fit, one at least (Blink's line broken again at every grapheme) */
+                size_t cut;
+                double kw;
+                if (lay_emerg_split(LARGS, &ps, k, c, lw - x - sw, &cut, &kw)) {
+                    np = len(ps);
+                    x += sw + kw;
+                    end = cut;
+                    j = cut;
+                    break;
+                }
+            }
+            if (can_break) { bk_j = k; bk_end = end; bk_x = x; }
             x += sw + cw;
             end = c;
             j = c;
+        }
+        /* a line ending at a break after a soft hyphen: its hyphen drawn, the line's width with it; where it does not fit,
+           the line broken at the opportunity before (its own soft hyphen's hyphen then shown, fitting or not) */
+        if (ends_at_break) {
+            size_t q = lay_shy_end(&ps, start, end);
+            if (q < np) {
+                double hw = lay_hyphen_width(LARGS, at(ps, q));
+                if (x + hw > lw + LAY_FIT && bk_end > start) {
+                    end = bk_end;
+                    j = bk_j;
+                    x = bk_x;
+                    q = lay_shy_end(&ps, start, end);
+                    hw = q < np ? lay_hyphen_width(LARGS, at(ps, q)) : 0;
+                }
+                if (q < np) {
+                    lay_piece hp = at(ps, q);
+                    hp.hy = 2;
+                    hp.w += hw;
+                    ps[q] = hp;
+                    x += hw;
+                }
+            }
         }
         if (j >= np && !forced) end = np;
         int last = j >= np || forced;
@@ -9225,7 +9860,7 @@ static void lay_item_intrinsic(LCTX, uint32_t el, const lay_fi *it, const vector
     if (it->el) { lay_child_intrinsic(LARGS, el, it->el, cw, mn, mx); return; }
     vector<lay_piece> ps;
     lay_run_pieces(LARGS, el, items, it->first, it->n, cw, &ps);
-    lay_run_intrinsic(&ps, mn, mx, 0);
+    lay_run_intrinsic(LARGS, &ps, mn, mx, 0);
 }
 
 /* an item laid out as a child of b: fw its border box's width (-1: shrunk to fit in cw),

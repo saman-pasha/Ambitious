@@ -1746,6 +1746,62 @@ be built side by side and merged without touching each other's.
   the database's takes once a golden zone is asked for). Their units build in 11 s (`intl_tz.c`, 375 MB) and
   2 s (`tz_data.c`); `intl.c`'s own build, 245 s before and 251 s after on the loaded machine, is near the
   Makefile's 300 s cap, which one build under a heavier load passed.
+- **12ai Line breaking** (`src/layout/linebreak.c` and `linebreak.h`, over `linebreak_data.h`, which
+  `tools/gen-linebreak.py` writes from the UCD of Unicode 17, the version Chromium 153's ICU 78 carries; the break
+  opportunities taken in `src/layout/layout.c`'s pieces, lines and min- and max-content widths; `word-break`,
+  `line-break` and `overflow-wrap` in `contracts/css.pl`, `src/css/css.c` and `prolog/amb/rules/css.pl`; English's
+  hyphenation patterns in `src/layout/hyph_data.h`, which `tools/gen-hyph.py` writes from Android's), each measured
+  in Chromium first, ICU's rules and Blink's `text_break_iterator.cc`, `line_breaker.cc` and
+  `shaping_line_breaker.cc` deciding where the measurements left room:
+  - UAX #14 as Chromium's ICU 78 breaks: the line_normal rules (Chromium's default), line (strict), line_loose,
+    line_normal_cj and line_loose_cj, each code point's class from the UCD (LB1's resolutions, the tailorings'
+    sets), ICU's readings of LB20a and LB25; held to an oracle that runs Chromium's own line*.brk (from its
+    icudtl.dat) through ICU 4C, itself held to Chromium's lines on 35,000 strings in 18 configurations: no
+    difference on 300,000 random strings, the UCD's LineBreakTest and every pair of Latin-1, in each rule set;
+  - Blink's iterator over them (LazyLineBreakIterator::NextBreakablePosition): no break before a space and one
+    after a run of them; between two characters of Latin-1 its fast table (ICU's answer for the pair alone, ASCII's
+    rows and columns as LineBreakData::FillAscii sets them, a hyphen before a digit breakable after a letter or a
+    digit alone); word-break: break-all's table of classes (and line-break: loose's break before U+2010 and
+    U+2013) and keep-all's rule; the soft hyphen no break under hyphens: none; a line's positions each on its own,
+    the min-content width's a scan from each break with ICU's text begun again there (HandleTextForFastMinContent);
+    a break inside a cluster HarfBuzz shapes as one taken at its end;
+  - the rules each style breaks by, as LayoutLocale picks them: no language, Chromium's default whatever
+    line-break says; Japanese's and Korean's auto line_normal, Chinese's line_normal_cj; strict line (Korean's
+    line_normal: its line_cj is missing), loose line_loose or the _cj one; `line-break: anywhere` a break at every
+    grapheme (UAX #29 of Unicode 17);
+  - `word-break`: break-all, keep-all, break-word (normal with overflow-wrap: anywhere), auto-phrase (as normal);
+    `overflow-wrap`: anywhere and break-word, a word too wide for its line cut after the most graphemes that fit,
+    one at least, anywhere lowering the min-content width and break-word not; a line's room to fit within a
+    LayoutUnit (AvailableWidthToFit);
+  - the soft hyphen a break that shows a hyphen, shaped alone after the line's text, where a line breaks there,
+    the line broken at the opportunity before when the hyphen does not fit (Blink's retry with less room); its
+    hyphen in the min-content width;
+  - `hyphens: auto` as Chromium hyphenates English: the patterns of Android's en-US and en-GB (the files Chromium's
+    hyph-en-us.hyb and hyph-en-gb.hyb are made from: each hyb read by minikin's algorithm and the files by Liang's
+    agree on 33,893 words), minikin's limits (two letters before a hyphen, three after, 5 to 62 letters), the
+    language mapped as HyphenationMinikin::MapLocale maps it (en, en-US and the US's territories American, every
+    other English British), no capitalized word hyphenated, nor the paragraph's last word after a line's first,
+    the rest of a word a line begins in hyphenated as a word of its own, the first point taken where none fits,
+    the punctuation and quotation marks about a word left out of it (WordToHyphenate); the min-content width of each
+    word's parts (AddHyphenated);
+  - ideographic spaces hanging at a line's end; CJK punctuation at a line's ends as Chromium 153 sets it by
+    default (measured: with the machine's CJK face, no bracket trimmed);
+  - `word-break`, `line-break` and `overflow-wrap` properties (inherited; `word-wrap`, `-epub-word-break` and
+    `-webkit-line-break` their aliases), their values Chromium's.
+
+  Gate: `tests/pages/lb-cjk.html` (boxes 21 of 21, regions 21 of 21), `lb-latin.html` (20, 20), `lb-wordbreak.html`
+  (25, 25), `lb-intrinsic.html` (floats, width: min-content, table cells, flex items and inline blocks: 35, 35),
+  `lb-punct.html` (34, 34), `lb-vertical.html` (vertical CJK columns: 8, 8), `lb-emoji.html` (14 boxes) and
+  `lb-hyphens.html` (26, 26), each held to Chromium; `linebreakvals.html`'s computed values (48 of 48); every
+  earlier page's boxes, regions and values as they were (the wm-*.html pages' too), and its drawing byte for byte
+  (214 of 216 renders) but two that now set Chromium's lines: `text.html` (its hyphenated paragraph's last word
+  whole on the last line, not hyphenated) and `enc-shift_jis.html` (its Japanese broken between characters);
+  `tests/exec/linebreak` (50 strings in ICU's five rule sets, ten configurations of Blink's iterator and grapheme
+  clusters: 1,350 lines, the oracle's and ICU 78.3's; valgrind clean). Its cost (`docs/performance.md`): a page of
+  ASCII text breaks as before, at its spaces (the large page's layout 494.1M instructions, then 496.3M, +0.45%);
+  a page of Japanese and Chinese is broken between its characters (`tools/gen-cjk-page.py 100`, 41,500 code
+  points: 352.3M, where main breaks none of its paragraphs, then 491.9M, of which line breaking 75.3M); the fast table's pairs past
+  ASCII are asked of the rules as they are met (made whole at once, a page's first break cost 47M).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

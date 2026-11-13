@@ -1,0 +1,21 @@
+# tests/pages/lb-latin.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-a 8 8 98 88
+a1 8 49 87 86
+text-b 8 94 58 154
+text-c 8 160 128 200
+text-d 8 206 58 346
+text-e 8 352 98 392
+text-f 8 398 58 458
+text-g 8 464 58 564
+text-h 8 570 58 670
+text-i 8 676 58 756
+text-j 8 762 58 842
+j1 8 803 48 840
+text-k 8 848 58 888
+text-l 8 894 58 974
+text-m 8 980 58 1060
+text-n 8 1066 128 1106
+n1 29 1067 56 1084
+n2 37 1087 70 1104
+text-o 8 1112 58 1192
+text-p 8 1198 58 1278

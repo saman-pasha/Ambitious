@@ -1,0 +1,26 @@
+# tests/pages/lb-wordbreak.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-a 8 8 88 88
+text-b 8 94 88 174
+text-c 8 180 88 260
+text-d 8 266 88 326
+text-e 8 332 88 412
+text-f 8 418 88 498
+text-g 8 504 88 584
+text-h 8 590 88 690
+text-i 8 696 88 736
+text-j 8 742 88 822
+text-k 8 828 88 888
+text-l 8 894 88 954
+l1 8 895 86 932
+nar 8 960 48 1502
+f1 8 960 42 1060
+f2 8 1066 155 1086
+f3 8 1092 42 1192
+f4 8 1198 42 1298
+f5 8 1304 42 1404
+f6 8 1410 42 1470
+f7 8 1476 105 1496
+text-m 8 1508 48 1668
+m1 8 1528 48 1588
+m2 8 1608 54 1648
+text-n 8 1674 108 1734

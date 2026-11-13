@@ -87,6 +87,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% (inherited; Chromium's -webkit- longhands, which the border-spacing shorthand sets); empty-cells (inherited),
     %% table-layout, caption-side (inherited)
     border_collapse, webkit_border_horizontal_spacing, webkit_border_vertical_spacing, empty_cells, table_layout, caption_side,
+    %% CSS Text 3's line breaking, each inherited: word-break (normal, break-all, keep-all, break-word, auto-phrase),
+    %% line-break (auto, loose, normal, strict, anywhere; -webkit-line-break's after-white-space) and overflow-wrap
+    %% (normal, break-word, anywhere; word-wrap its other name)
+    word_break, line_break, overflow_wrap,
     custom,
     %% CSS Logical 1's flow-relative properties, after custom: no computed style holds them. A declaration of one is
     %% kept as such; the cascade takes it for the physical property its element's writing-mode and direction map it

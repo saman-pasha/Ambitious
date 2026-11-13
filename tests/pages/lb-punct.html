@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: CJK punctuation at a line's ends</title>
+<style>
+/* tests/pages/lb-punct.html -- CJK punctuation at a line's ends, as Chromium 153 sets it by default (its
+   text-spacing-trim's initial value, which the machine's CJK font, WenQuanYi Zen Hei, gives no halt or chws to
+   act on): a closing bracket, a full stop or a comma that does not fit takes the ideograph before it to the next
+   line (no break before them), full width, neither squeezed nor hung; an opening bracket goes to the next line
+   with what follows it; ideographic spaces (U+3000) hang at a line's end, left out of its width to fit and to
+   align (Blink's other space separators), as the spaces before a break do. Held to Chromium's boxes
+   (lb-punct.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px sans-serif; }
+div { width: 80px; background: #eef; margin-bottom: 4px; }
+span { background: #fd8; }
+</style></head>
+<body>
+<div id="text-a">一二三四<span id="a1">」</span>五六七八九十</div>
+<div id="text-b">一二三四五<span id="b1">」</span>六七八九十</div>
+<div id="text-c">一二三四五<span id="c1">。</span>六七八九十</div>
+<div id="text-d">一二三四<span id="d1">「</span>五六七八九十</div>
+<div id="text-e"><span id="e1">「</span>一二三四五六七八九十</div>
+<div id="text-f">一二三四五<span id="f1">、</span>六七八九十</div>
+<div id="text-g">一二三四五<span id="g1">）』</span>六七八九十</div>
+<div id="text-h" style="text-spacing-trim: space-all">一二三四五<span id="h1">」</span>六七八九十</div>
+<div id="text-i">一二三四五<span id="i1">　</span>六七八九十</div>
+<div id="text-j">一二三四五<span id="j1">　　</span>六七八九十</div>
+<div id="text-k" style="text-align: right">一二三四五<span id="k1">　</span>六七八九十</div>
+<div id="text-l" style="text-align: center">一二三<span id="l1">　</span>四五六七八九十</div>
+<div id="text-m">一二三四<span id="m1">五　</span></div>
+<div id="text-n" style="width: min-content">一二<span id="n1">　</span>三四</div>
+<div id="text-o" style="white-space: pre-wrap">一二三四五<span id="o1">　</span>六七八九十</div>
+<div id="text-p">あいうえ<span id="p1">ー</span>おかきくけ</div>
+<div id="text-q">あいうえお<span id="p2">ゃ</span>かきくけ</div>
+</body></html>

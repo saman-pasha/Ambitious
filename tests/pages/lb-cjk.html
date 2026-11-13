@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: CJK text</title>
+<style>
+/* tests/pages/lb-cjk.html -- Chinese, Japanese and Korean text broken into lines as Chromium breaks it (UAX #14 over
+   ICU 78's line rules): a break between any two ideographs or kana, none before closing punctuation, small kana
+   or the prolonged sound mark under strict, none after opening punctuation; Hangul syllables breakable between,
+   words of Hangul kept by keep-all; Latin words and numbers inside CJK text kept whole; the rules a lang picks
+   (ja and zh, line-break normal, loose and strict). Held to Chromium's boxes (lb-cjk.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px sans-serif; }
+div { margin: 0 0 6px; background: #eef; }
+.w1 { width: 100px; } .w2 { width: 130px; } .w3 { width: 75px; } .w4 { width: 61px; }
+span { background: #fd8; }
+</style></head>
+<body>
+<div id="text-a" class="w1">日本語の文章は単語の間に空白がないので文字の間で改行される。</div>
+<div id="text-b" class="w2">東京は日本の首都です。人口は<span id="b1">約1400万人</span>で、世界有数の大都市です。</div>
+<div id="text-c" class="w1">「かぎかっこ」や（丸括弧）の前後、句読点、。の<span id="c1">位置</span>。</div>
+<div id="text-d" class="w3">ちょっとまって、コーヒーをのみませんか？</div>
+<div id="text-e" class="w3" lang="ja" style="line-break: strict">ちょっとまって、コーヒーをのみませんか？</div>
+<div id="text-f" class="w3" lang="ja" style="line-break: loose">々ゝ時々ゝ繰り返し記号々々ゝゞ</div>
+<div id="text-g" class="w2">中文的段落也没有空格，汉字之间可以换行。“引号”和《书名号》要注意。</div>
+<div id="text-h" class="w2" lang="zh">中文的段落也没有空格，汉字之间可以换行。“引号”和《书名号》要注意。</div>
+<div id="text-i" class="w1">한국어는 띄어쓰기를 합니다. 음절 사이에서도 줄을 바꿀 수 있습니다.</div>
+<div id="text-j" class="w1" style="word-break: keep-all">한국어는 띄어쓰기를 합니다. 음절 사이에서도 줄을 바꿀 수 있습니다.</div>
+<div id="text-k" class="w2">CSSの<span id="k1">line-break</span>プロパティとHTML5、JavaScriptで<span id="k2">2024年</span>に書いた。</div>
+<div id="text-l" class="w4">価格は¥1,980（税込）、送料は$12.50です。</div>
+<div id="text-m" class="w3">ラーメン、チャーハン、ギョーザ！</div>
+<div id="text-n" class="w3" lang="ja" style="line-break: strict">ラーメン、チャーハン、ギョーザ！</div>
+<div id="text-o" class="w1" lang="ja" style="line-break: normal">〜から〜まで゠イコール゠です</div>
+<div id="text-p" class="w1" style="word-break: keep-all">日本語の文章は単語の間に空白がないので<span id="p1">keep-all</span>で一続き。</div>
+</body></html>

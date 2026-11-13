@@ -1152,6 +1152,11 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "empty-cells", 1, G_KW, 0, "show hide", "show" },
     { "table-layout", 0, G_KW, 0, "auto fixed", "auto" },
     { "caption-side", 1, G_KW, 0, "top bottom", "top" },
+    /* CSS Text 3, 5.2 to 5.5: line breaking's keywords, each inherited (line-break's after-white-space -webkit-line-break's
+       alone: css_expand) */
+    { "word-break", 1, G_KW, 0, "normal break-all keep-all break-word auto-phrase", "normal" },
+    { "line-break", 1, G_KW, 0, "auto loose normal strict anywhere after-white-space", "auto" },
+    { "overflow-wrap", 1, G_KW, 0, "normal break-word anywhere", "normal" },
 };
 
 /* ---- the flow-relative properties (CSS Logical 1), after custom in enum(prop): each read by the grammar of the
@@ -3424,6 +3429,11 @@ static int css_short_of(const char *name, size_t nn) {
 static int css_alias_of(const char *name, size_t nn) {
     if (css_eq_ci(name, nn, "grid-row-gap")) return CSS_PROP_ROW_GAP;
     if (css_eq_ci(name, nn, "grid-column-gap")) return CSS_PROP_COLUMN_GAP;
+    /* word-wrap and -epub-word-break, Chromium's other names of overflow-wrap and word-break; -webkit-line-break's
+       values are read in css_expand */
+    if (css_eq_ci(name, nn, "word-wrap")) return CSS_PROP_OVERFLOW_WRAP;
+    if (css_eq_ci(name, nn, "-epub-word-break")) return CSS_PROP_WORD_BREAK;
+    if (css_eq_ci(name, nn, "-webkit-line-break")) return CSS_PROP_LINE_BREAK;
     return -1;
 }
 
@@ -3785,6 +3795,15 @@ static int css_expand(const char *name, size_t nn, const char *val, size_t vn, c
         css_item_add(it, cp, &cv, 0, vn);
         return 1;
     }
+    if (nn == 18 && css_eq_ci(name, nn, "-webkit-line-break")) {
+        /* Chromium's old name of line-break: its keywords but anywhere, and after-white-space, which line-break by its own
+           name refuses (measured) */
+        css_val cv;
+        if (css_eq_ci(val, vn, "anywhere") || !css_longhand(CSS_PROP_LINE_BREAK, val, vn, &cv)) return 0;
+        css_item_add(it, CSS_PROP_LINE_BREAK, &cv, 0, vn);
+        return 1;
+    }
+    if (nn == 10 && css_eq_ci(name, nn, "line-break") && css_eq_ci(val, vn, "after-white-space")) return 0;
     int p = css_prop_of(name, nn);
     if (p < 0) p = css_alias_of(name, nn);
     if (p < 0) return 0;

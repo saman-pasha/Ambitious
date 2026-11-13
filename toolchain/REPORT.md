@@ -805,8 +805,8 @@ neighbours.
     ```
 
 43. **A call to a function defined further down is accepted with any arguments**: with no
-    declaration in scope, cicilang takes the call as C89's implicit declaration did, and
-    checks it neither against the definition that follows nor at all, where gcc and clang
+    declaration in scope, the call is lowered with the arguments it has; the definition that
+    follows is found (finding 44) but its parameters are not checked, where gcc and clang
     refuse it (`implicit declaration of function 'later'`, then `static declaration of
     'later' follows non-static declaration`):
 
@@ -823,3 +823,36 @@ neighbours.
     place of one the call kept passing one, so every module with an `export` crashed in
     it. Asked for: a call with no prototype in scope refused, as C99 does, or at least
     checked against the definition in the same unit.
+
+44. **A call of a function the unit defines later is refused when its first argument is an
+    instance's object**, with a diagnostic that names the instance's type macro, not the
+    function: a generic call by name (`push_back(v, 1)` for `vector_int_push_back`) is
+    tried first, and a name the unit has not declared yet is taken for one of the
+    instance's. The same call with an `int` first argument compiles and runs (a function
+    defined later in the unit is found, as cicilang reads the whole unit), so only the
+    type of the first argument decides whether a forward call is accepted. Repro:
+
+    ```c
+    #include <stdio.h>
+    #include <vector.pl>
+    static int first(vector<int> *v) { return count(v) + 1; }
+    static int count(vector<int> *v) { return (int)len(*v); }
+    int main(void) {
+        vector<int> v;
+        push_back(v, 1);
+        printf("%d\n", first(&v));
+        return 0;
+    }
+    ```
+
+    gives `t39d.c:3: error: macro: vector_int has no function count: its type macro
+    defines no vector_int_count`; with `static int count(vector<int> *v);` before `first`
+    it prints 2, and with `int` parameters in place of the vectors it prints the right
+    answer with no prototype at all. 12ai's layout met it as `macro:
+    store_layout_store_tag has no function lay_src_bytes` (`src/layout/layout.c`: every
+    layout function's first parameter is the layout tree, a store's instance); the
+    work-around is a prototype before the first call. Asked for: the unit's own function
+    found before the instance's (ccl_inst_call_own/2 asks only what is declared so far),
+    or, failing that, "count is called before it is declared" at the call. Finding 43 is
+    the other half: a later function found for a call is not checked against its
+    parameters.

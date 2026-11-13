@@ -1,0 +1,26 @@
+# boxes of tests/pages/lb-wordbreak.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-a div 8 8 80 80
+text-b div 8 94 80 80
+text-c div 8 180 80 80
+text-d div 8 266 80 60
+text-e div 8 332 80 80
+text-f div 8 418 80 80
+text-g div 8 504 80 80
+text-h div 8 590 80 100
+text-i div 8 696 80 40
+text-j div 8 742 80 80
+text-k div 8 828 80 60
+text-l div 8 894 80 60
+l1 span 8 895 77.391 37
+nar div 8 960 40 542
+f1 div 8 960 34 100
+f2 div 8 1066 146.75 20
+f3 div 8 1092 34 100
+f4 div 8 1198 34 100
+f5 div 8 1304 34 100
+f6 div 8 1410 34 60
+f7 div 8 1476 96.375 20
+text-m div 8 1508 40 160
+m1 span 8 1528 40 60
+m2 span 8 1608 45.359 40
+text-n div 8 1674 100 60

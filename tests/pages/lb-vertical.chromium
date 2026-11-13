@@ -1,0 +1,9 @@
+# boxes of tests/pages/lb-vertical.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-a div 8 8 80 100
+text-b div 96 8 60 100
+text-c div 164 8 80 100
+text-d div 252 8 60 100
+text-e div 320 8 60 100
+text-f div 388 8 20 100
+text-g div 416 8 40 100
+text-h div 464 8 20 64

@@ -1,0 +1,9 @@
+# tests/pages/lb-vertical.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-a 8 8 88 108
+text-b 96 8 156 108
+text-c 164 8 244 108
+text-d 252 8 312 108
+text-e 320 8 380 108
+text-f 388 8 408 108
+text-g 416 8 456 108
+text-h 464 8 484 72

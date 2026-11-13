@@ -9,7 +9,7 @@ position: rendered 800x600: 13 boxes, 8 lines, 11 text fragments; pixels fnv1a64
 sizing: rendered 800x600: 35 boxes, 21 lines, 30 text fragments; pixels fnv1a64:3912c507bcf3ecf0
 flex: rendered 800x674: 47 boxes, 32 lines, 33 text fragments; pixels fnv1a64:7dc994e51c1e23db
 grid: rendered 800x600: 34 boxes, 25 lines, 25 text fragments; pixels fnv1a64:0060abb015710a5d
-text: rendered 800x600: 9 boxes, 15 lines, 19 text fragments; pixels fnv1a64:63b433bf6e00273c
+text: rendered 800x600: 9 boxes, 15 lines, 19 text fragments; pixels fnv1a64:9a88ad585ebe1f8a
 paint: rendered 800x600: 36 boxes, 9 lines, 9 text fragments; pixels fnv1a64:6689b2e2dbdaa095
 -- why the boxes are as wide as they are:
 E = div, N = n(1,13,0), B = bx(1,4,0), Why = fills(784,of(800),less(margins(0,0),borders(0,0),paddings(8,8)))
@@ -59,8 +59,8 @@ I = i1, N = n(1,48,0), B = bx(1,19,0), Why = floated(left)
 P = n(1,13,0), T = n(1,14,0), Text = 'Extraordinarily', X = 8, Y = 8
 P = n(1,13,0), T = n(1,14,0), Text = 'incomprehen-', X = 8, Y = 27
 P = n(1,13,0), T = n(1,14,0), Text = 'sible charac-', X = 8, Y = 46
-P = n(1,13,0), T = n(1,14,0), Text = 'teristics of hy-', X = 8, Y = 65
-P = n(1,13,0), T = n(1,14,0), Text = phenation, X = 8, Y = 84
+P = n(1,13,0), T = n(1,14,0), Text = 'teristics of', X = 8, Y = 65
+P = n(1,13,0), T = n(1,14,0), Text = hyphenation, X = 8, Y = 84
 N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = world, X = 179.09375
 N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = םלוע, X = 228.25
 N = n(1,27,0), B = bx(1,8,0), L = ln(1,14,0), Text = 'Hello', X = 267.4375

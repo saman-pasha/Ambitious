@@ -133,6 +133,9 @@ css_rules_inherited(webkit_border_horizontal_spacing).
 css_rules_inherited(webkit_border_vertical_spacing).
 css_rules_inherited(empty_cells).
 css_rules_inherited(caption_side).
+css_rules_inherited(word_break).
+css_rules_inherited(line_break).
+css_rules_inherited(overflow_wrap).
 css_rules_colour(color).
 css_rules_colour(background_color).
 css_rules_colour(stop_color).
