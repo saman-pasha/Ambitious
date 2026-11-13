@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: the lighting filter primitives</title>
+<style>
+/* tests/pages/svg-light.html -- feDiffuseLighting and feSpecularLighting as Chromium draws them
+   (Skia's lighting filter): a surface the input's alpha makes (surfaceScale, Sobel's kernels, the
+   bounds' edge px repeated), lit by feDistantLight (azimuth, elevation), fePointLight (x, y, z) and
+   feSpotLight (pointsAt, its specularExponent, limitingConeAngle's cone and its smoothed edge, none
+   for no angle), diffuseConstant, specularConstant, specularExponent, lighting-color (an attribute
+   and a CSS rule, in linearRGB or sRGB), lights in objectBoundingBox units, under a transform, and
+   the usual "lit button" made of them. Held to Chromium's screenshot region by region
+   (svg-light.shot.png, svg-light.regions). */
+body { margin: 0; background: #fff }
+svg { position: absolute }
+#lc-css { lighting-color: #ffb060 }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <filter id="dist" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feDiffuseLighting in="b" surfaceScale="5" diffuseConstant="1" lighting-color="#ffffff"><feDistantLight azimuth="45" elevation="30"/></feDiffuseLighting></filter>
+    <filter id="spec" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feSpecularLighting in="b" surfaceScale="5" specularConstant="1" specularExponent="20" lighting-color="#ffffff"><feDistantLight azimuth="45" elevation="30"/></feSpecularLighting></filter>
+    <filter id="point" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="3" result="b"/><feDiffuseLighting in="b" surfaceScale="3" diffuseConstant="0.8" lighting-color="#ffe0a0"><fePointLight x="20" y="20" z="40"/></feDiffuseLighting></filter>
+    <filter id="pspec" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="3" result="b"/><feSpecularLighting in="b" surfaceScale="3" specularConstant="1.2" specularExponent="10" lighting-color="#a0c0ff"><fePointLight x="70" y="30" z="50"/></feSpecularLighting></filter>
+    <filter id="spot" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#000" flood-opacity="0.5" result="f"/><feDiffuseLighting in="f" lighting-color="#ffffff"><feSpotLight x="50" y="10" z="60" pointsAtX="50" pointsAtY="60" pointsAtZ="0" limitingConeAngle="30" specularExponent="2"/></feDiffuseLighting></filter>
+    <filter id="spotnc" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#000" flood-opacity="0.5" result="f"/><feDiffuseLighting in="f" lighting-color="#ffffff"><feSpotLight x="10" y="10" z="40" pointsAtX="60" pointsAtY="60" pointsAtZ="0"/></feDiffuseLighting></filter>
+    <filter id="linear" x="0" y="0" width="1" height="1"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feDiffuseLighting in="b" surfaceScale="5" diffuseConstant="1" lighting-color="#80c0ff"><feDistantLight azimuth="135" elevation="45"/></feDiffuseLighting></filter>
+    <filter id="bump" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence baseFrequency="0.08" numOctaves="2" seed="4" result="t"/><feDiffuseLighting in="t" surfaceScale="4" lighting-color="#fff"><feDistantLight azimuth="0" elevation="40"/></feDiffuseLighting></filter>
+    <filter id="button" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feSpecularLighting in="b" surfaceScale="5" specularConstant="1" specularExponent="20" lighting-color="#ffffff" result="s"><feDistantLight azimuth="45" elevation="30"/></feSpecularLighting><feComposite in="s" in2="SourceGraphic" operator="in" result="s2"/><feComposite in="SourceGraphic" in2="s2" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/></filter>
+    <filter id="source" color-interpolation-filters="sRGB"><feDiffuseLighting in="SourceGraphic" surfaceScale="10" lighting-color="#fff"><feDistantLight azimuth="30" elevation="50"/></feDiffuseLighting></filter>
+    <filter id="obb" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB" primitiveUnits="objectBoundingBox"><feGaussianBlur in="SourceAlpha" stdDeviation="0.05" result="b"/><feSpecularLighting in="b" surfaceScale="4" specularExponent="8" lighting-color="#fff"><fePointLight x="0.3" y="0.3" z="0.5"/></feSpecularLighting></filter>
+    <filter id="deep" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feDiffuseLighting in="b" surfaceScale="-5" lighting-color="#fff"><feDistantLight azimuth="45" elevation="30"/></feDiffuseLighting></filter>
+    <filter id="shiny" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="2" result="b"/><feSpecularLighting in="b" surfaceScale="3" specularConstant="1" specularExponent="200" lighting-color="#fff"><feDistantLight azimuth="45" elevation="60"/></feSpecularLighting></filter>
+    <filter id="nolight" x="0" y="0" width="1" height="1"><feDiffuseLighting in="SourceAlpha" surfaceScale="4"/></filter>
+    <filter id="lcrule" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="3" result="b"/><feDiffuseLighting id="lc-css" in="b" surfaceScale="4"><fePointLight x="70" y="70" z="30"/></feDiffuseLighting></filter>
+    <filter id="spot2" x="0" y="0" width="1" height="1"><feGaussianBlur in="SourceAlpha" stdDeviation="2" result="b"/><feSpecularLighting in="b" surfaceScale="2" specularExponent="4" lighting-color="#ff8080"><feSpotLight x="80" y="20" z="50" pointsAtX="30" pointsAtY="70" pointsAtZ="0" limitingConeAngle="20" specularExponent="4"/></feSpecularLighting></filter>
+  </defs>
+</svg>
+<svg id="l-dist" style="left:5px;top:5px" width="100" height="100"><circle cx="50" cy="50" r="30" fill="#c00" filter="url(#dist)"/></svg>
+<svg id="l-spec" style="left:117px;top:5px" width="100" height="100"><g filter="url(#spec)"><rect width="100" height="100" fill="none"/><circle cx="50" cy="50" r="30" fill="#c00"/></g></svg>
+<svg id="l-point" style="left:229px;top:5px" width="100" height="100"><g filter="url(#point)"><rect width="100" height="100" fill="none"/><text x="10" y="70" font-size="60" font-weight="bold" font-family="sans-serif">Ab</text></g></svg>
+<svg id="l-pspec" style="left:341px;top:5px" width="100" height="100"><g filter="url(#pspec)"><rect width="100" height="100" fill="none"/><rect x="20" y="20" width="60" height="60" rx="15"/></g></svg>
+<svg id="l-spot" style="left:453px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#spot)"/></svg>
+<svg id="l-spotnc" style="left:565px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#spotnc)"/></svg>
+<svg id="l-linear" style="left:677px;top:5px" width="100" height="100"><g filter="url(#linear)"><rect width="100" height="100" fill="none"/><circle cx="50" cy="50" r="30" fill="#c00"/></g></svg>
+<svg id="l-bump" style="left:5px;top:117px" width="100" height="100"><rect width="100" height="100" filter="url(#bump)"/></svg>
+<svg id="l-button" style="left:117px;top:117px" width="100" height="100"><g filter="url(#button)"><rect width="100" height="100" fill="none"/><rect x="15" y="25" width="70" height="50" rx="12" fill="#2080c0"/></g></svg>
+<svg id="l-source" style="left:229px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#000" fill-opacity="0.8" filter="url(#source)"/></svg>
+<svg id="l-obb" style="left:341px;top:117px" width="100" height="100"><rect x="10" y="10" width="80" height="80" rx="20" filter="url(#obb)"/></svg>
+<svg id="l-deep" style="left:453px;top:117px" width="100" height="100"><g filter="url(#deep)"><rect width="100" height="100" fill="none"/><circle cx="50" cy="50" r="30" fill="#c00"/></g></svg>
+<svg id="l-shiny" style="left:565px;top:117px" width="100" height="100"><g filter="url(#shiny)"><rect width="100" height="100" fill="none"/><circle cx="50" cy="50" r="30" fill="#c00"/></g></svg>
+<svg id="l-nolight" style="left:677px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#0a0" filter="url(#nolight)"/><rect x="5" y="5" width="10" height="10" fill="#888"/></svg>
+<svg id="l-lcrule" style="left:5px;top:229px" width="100" height="100"><g filter="url(#lcrule)"><rect width="100" height="100" fill="none"/><path d="M 20 20 L 80 20 L 50 80 Z"/></g></svg>
+<svg id="l-scaled" style="left:117px;top:229px" width="100" height="100"><g transform="translate(5,5) scale(0.9)"><g filter="url(#pspec)"><rect width="100" height="100" fill="none"/><rect x="20" y="20" width="60" height="60" rx="15"/></g></g></svg>
+<svg id="l-spot2" style="left:229px;top:229px" width="100" height="100"><g filter="url(#spot2)"><rect width="100" height="100" fill="none"/><rect x="10" y="10" width="80" height="80" rx="30"/></g></svg>
+</body>
+</html>

@@ -106,6 +106,17 @@ static const char *const pages[] = {
     "<svg id=s width=20 height=20><rect width=10 height=10 style='filter: blur(1px) opacity(50%) drop-shadow(1px 2px 0px red)' /></svg>",
     "<svg id=s width=40 height=20><mask id=k maskContentUnits=objectBoundingBox><rect width=0.5 height=1 fill=white /></mask><text x=2 y=15 "
     "font-size=10 mask='url(#k)'>Ab</text></svg>",
+    "<svg id=s width=40 height=40><filter id=f primitiveUnits=objectBoundingBox><feTurbulence type=fractalNoise baseFrequency='0.1 0.2' "
+    "numOctaves=3 seed=4.5 stitchTiles=stitch result=t /><feMorphology in=t radius='0.1 -1' operator=dilate /><feConvolveMatrix "
+    "order='3 2' kernelMatrix='1 2 3 4 5 6' targetY=1 bias=0.5 edgeMode=wrap preserveAlpha=true /><feDisplacementMap in2=t scale=0.5 "
+    "xChannelSelector=G /><feTile x=0.25 /><feImage href=#r x=0.5 /><feImage href=logo.png preserveAspectRatio='xMinYMax slice' />"
+    "<feSpecularLighting lighting-color=red specularExponent=200><feSpotLight x=0.5 y=0.5 z=1 pointsAtZ=-1 limitingConeAngle=30 />"
+    "</feSpecularLighting><feDiffuseLighting diffuseConstant=2><feDistantLight azimuth=30 /></feDiffuseLighting></filter>"
+    "<rect id=r x=10 y=10 width=20 height=10 filter=url(#f) /></svg>",
+    "<svg id=s width=60 height=30><mask id=k color-interpolation=linearRGB><rect width=30 height=30 fill=gray /><rect x=30 width=30 "
+    "height=30 fill=gray color-interpolation=sRGB /></mask><path id=p d='M0 20 L60 20' pathLength=30 /><rect width=60 height=30 "
+    "mask=url(#k) /><use href=#p stroke=red stroke-dasharray='3 2' /><text font-family='DejaVu Sans' font-size=10><textPath href=#p "
+    "startOffset=5>office</textPath><textPath path='M0 10 L60 10'>fi</textPath></text></svg>",
 };
 
 /* documents made to break the drawing: each must draw in bounded time and memory */
@@ -158,6 +169,23 @@ static void hostile(vector<char> *out, int which) {
         for (int k = 0; k < 64; k++) append_range(out, "<feGaussianBlur stdDeviation=3 />", 33);
         const char *u = "</filter><rect width=50 height=50 filter=url(#f) /><circle cx=25 cy=25 r=20 filter=url(#g) />";
         append_range(out, u, strlen(u));
+    } else if (which == 6) {
+        /* the filter primitives of 12ab past every bound: noise of a billion octaves at a frequency of 1e30, radii,
+           kernels, scales and exponents of 1e30, a tile of no area, an feImage of the element filtered and of
+           itself, a light at infinity; a mask in linearRGB of itself; a textPath of an empty path */
+        const char *t = "<filter id=f><feTurbulence baseFrequency=1e30 numOctaves=1000000000 seed=-1e30 stitchTiles=stitch />"
+                        "<feMorphology radius=1e30 operator=dilate /><feConvolveMatrix order=20 kernelMatrix='1e30 -1e30' divisor=1e-30 />"
+                        "<feConvolveMatrix order='3 3' kernelMatrix='1 1 1 1 1 1 1 1 1' targetX=1e9 bias=1e30 />"
+                        "<feDisplacementMap in2=SourceGraphic scale=1e30 /><feTile x=5 y=5 width=0 height=0 /><feTile />"
+                        "<feImage href=#me /><feImage href=#f /><feImage href='data:image/png;base64,!!' />"
+                        "<feSpecularLighting surfaceScale=1e30 specularExponent=1e9 specularConstant=1e30>"
+                        "<feSpotLight x=1e30 y=-1e30 z=1e30 pointsAtX=nan limitingConeAngle=1e30 specularExponent=-5 /></feSpecularLighting>"
+                        "<feDiffuseLighting><fePointLight z=-1e30 /></feDiffuseLighting></filter>"
+                        "<mask id=k color-interpolation=linearRGB><rect width=50 height=50 fill=white mask=url(#k) color-interpolation=linearRGB />"
+                        "</mask><g id=me filter=url(#f)><rect width=40 height=40 fill=blue mask=url(#k) /></g>"
+                        "<text><textPath path='' startOffset=1e30>x</textPath><textPath path='M 0 0' pathLength=0>y</textPath></text>"
+                        "<path d='M 0 0 L 50 50' pathLength=1e-300 stroke=red stroke-dasharray='1 1' />";
+        append_range(out, t, strlen(t));
     } else {
         /* text turned, fitted and set on a path past every bound */
         const char *t = "<path id=l d='M0 0 L50 50' /><text x=1e30 y=5 rotate='1e30 nan' textLength=1e30>far</text><text font-size=1e5>"
@@ -227,6 +255,24 @@ int main(void) {
     show_scene("a filter: the square moved 2 px right, blurred (a deviation of 1)",
                "v 14 8 1\ng 1 0 0 0 1\nF 0 0 14 8 1 0 0 1 0 0 2\nx 2 -1 -1 1 0 0 14 8 2 0\nx 1 0 0 1 0 0 14 8 1 1\nE\n"
                "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 3 2 L 7 2 L 7 6 L 3 6 Z\ne\n", 14, 8);
+    show_scene("a filter: the square dilated 1 px across and 2 down",
+               "v 14 10 1\ng 1 0 0 0 1\nF 0 0 14 10 1 0 0 1 0 0 1\nx 11 -1 -1 0 0 0 14 10 1 1 2\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 4 3 L 8 3 L 8 7 L 4 7 Z\ne\n", 14, 10);
+    show_scene("a filter: the square eroded 1 px each way",
+               "v 14 10 1\ng 1 0 0 0 1\nF 0 0 14 10 1 0 0 1 0 0 1\nx 11 -1 -1 0 0 0 14 10 0 1 1\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 3 2 L 9 2 L 9 8 L 3 8 Z\ne\n", 14, 10);
+    show_scene("a filter: a kernel of 3 x 1 (0 0 1, its target the middle) moving the square 1 px right, halved",
+               "v 14 8 1\ng 1 0 0 0 1\nF 0 0 14 8 1 0 0 1 0 0 1\nx 12 -1 -1 0 0 0 14 8 3 1 1 0 2 0 0 0 0 0 1\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 3 2 L 7 2 L 7 6 L 3 6 Z\ne\n", 14, 8);
+    show_scene("a filter: a 3 px tile of the square's first 3 px, repeated over the region",
+               "v 14 4 1\ng 1 0 0 0 1\nF 0 0 14 4 1 0 0 1 0 0 2\nx 2 -1 -1 0 0 0 3 4 0 0\nx 14 0 0 0 0 0 14 4 0 0 3 4\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 1 0 L 2 0 L 2 4 L 1 4 Z\ne\n", 14, 4);
+    show_scene("a filter: fractal noise's red, seed 1, 2 octaves at 0.2, in sRGB",
+               "v 16 4 1\ng 1 0 0 0 1\nF 0 0 16 4 1 0 0 1 0 0 1\nx 10 -3 -3 0 0 0 16 4 0 0.2 0.2 2 1 0\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 0 0 L 16 0 L 16 4 L 0 4 Z\ne\n", 16, 4);
+    show_scene("a filter: the square lit from straight above, a distant light (its flat top white, its edges darker)",
+               "v 12 8 1\ng 1 0 0 0 1\nF 0 0 12 8 1 0 0 1 0 0 1\nx 16 -2 -2 0 0 0 12 8 4 1 1 ffffffff 1 0 90\nE\n"
+               "p 1 0 0 1 0 0 c 000000ff 1 0 n 1 1 0 0 4 0 0 M 3 2 L 9 2 L 9 6 L 3 6 Z\ne\n", 12, 8);
     show_scene("a hairline, Skia's: a px each column, shared between the two the line passes",
                "v 10 5 1\np 1 0 0 1 0 0 n 1 0 c 000000ff 1 1 0 0 4 0 0 M 0.5 0.5 L 9.5 4\n", 10, 5);
 
@@ -263,9 +309,10 @@ int main(void) {
     }
 
     printf("-- hostile documents\n");
-    static const char *const what[6] = { "uses ten a level, eight deep", "uses of themselves, numbers past floats", "300 groups clipped by a clip of itself",
-                                         "patterns, masks and markers of themselves", "filters past every bound", "text past every bound" };
-    for (int k = 0; k < 6; k++) {
+    static const char *const what[7] = { "uses ten a level, eight deep", "uses of themselves, numbers past floats", "300 groups clipped by a clip of itself",
+                                         "patterns, masks and markers of themselves", "filters past every bound", "text past every bound",
+                                         "12ab's primitives past every bound" };
+    for (int k = 0; k < 7; k++) {
         vector<char> src;
         hostile(&src, k);
         dom_document d;

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG image elements whose picture fails, and the pictures of an SVG drawn as an image</title>
+<style>
+/* tests/pages/svg-broken.html -- as Chromium draws them, measured: an SVG image element whose picture
+   fails to load or to decode drawn as Blink's broken image (its own 14 x 16 px picture, placed by
+   preserveAspectRatio and sampled as a raster is; nothing for an auto width or height, an empty or
+   missing href, or preserveAspectRatio none); and SVG documents drawn as images (an img, a CSS
+   background), which fetch nothing: an image element's or an feImage's data: URL drawn (a raster, an
+   SVG document), any other picture not, nor its broken image; the filter primitives drawn in them as
+   inline. Held to Chromium's screenshot region by region (svg-broken.shot.png, svg-broken.regions). */
+body { margin: 0; background: #fff }
+svg, img, div { position: absolute }
+#bg-inner { left: 230px; top: 330px; width: 200px; height: 100px; background: url(svg-inner.svg) }
+</style>
+</head>
+<body>
+<svg id="b-viewport" style="left:5px;top:5px" width="100" height="100"><image href="missing.png" x="10" y="10" width="80" height="60"/></svg>
+<svg id="b-small" style="left:117px;top:5px" width="100" height="100"><image href="missing.png" x="30.5" y="20.25" width="10" height="10"/></svg>
+<svg id="b-turned" style="left:229px;top:5px" width="100" height="100"><image href="missing.png" x="10" y="10" width="80" height="60" transform="rotate(20 50 40)"/></svg>
+<svg id="b-scaled" style="left:341px;top:5px" width="100" height="100"><image href="missing.png" x="10" y="10" width="40" height="40" transform="scale(2)"/></svg>
+<svg id="b-auto" style="left:453px;top:5px" width="100" height="100"><image href="missing.png" x="10" y="10"/><rect x="5" y="5" width="10" height="10" fill="#888"/></svg>
+<svg id="b-empty" style="left:565px;top:5px" width="100" height="100"><image href="" x="10" y="10" width="80" height="60"/><image x="10" y="10" width="80" height="60"/><rect x="5" y="5" width="10" height="10" fill="#888"/></svg>
+<svg id="b-opacity" style="left:677px;top:5px" width="100" height="100"><image href="missing.png" x="10" y="10" width="80" height="60" opacity="0.5"/></svg>
+<svg id="b-undecodable" style="left:5px;top:117px" width="100" height="100"><image href="fetch-text.txt" x="10" y="10" width="80" height="60"/></svg>
+<svg id="b-tiny" style="left:117px;top:117px" width="100" height="100"><image href="missing.png" x="5" y="5" width="12" height="12"/><image href="missing.png" x="30" y="5" width="14" height="16"/><image href="missing.png" x="50" y="5" width="32" height="32"/></svg>
+<svg id="b-viewbox" style="left:229px;top:117px" width="100" height="100" viewBox="0 0 50 50"><image href="missing.png" x="5" y="5" width="20" height="20"/></svg>
+<svg id="b-wide" style="left:341px;top:117px" width="200" height="100"><image href="missing.png" x="0" y="0" width="200" height="40" preserveAspectRatio="xMinYMin meet"/><image href="missing.png" x="0" y="50" width="200" height="40" preserveAspectRatio="xMaxYMax meet"/></svg>
+<svg id="b-tall" style="left:565px;top:117px" width="100" height="200"><image href="missing.png" x="0" y="0" width="40" height="200" preserveAspectRatio="xMinYMid meet"/><image href="missing.png" x="50" y="0" width="40" height="200" preserveAspectRatio="xMidYMin slice"/></svg>
+<svg id="b-none" style="left:677px;top:117px" width="100" height="100"><image href="missing.png" x="10" y="10" width="80" height="80" preserveAspectRatio="none"/><rect x="5" y="5" width="10" height="10" fill="#888"/></svg>
+<img id="i-inner" src="svg-inner.svg" style="left:5px;top:330px" width="200" height="100">
+<div id="bg-inner"></div>
+<img id="i-inner2" src="svg-inner2.svg" style="left:455px;top:330px" width="200" height="100">
+<img id="i-inner-big" src="svg-inner.svg" style="left:5px;top:440px" width="300" height="150">
+</body>
+</html>

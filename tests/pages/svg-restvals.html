@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>SVG's lighting-color, color-interpolation and vector-effect: computed values</title>
+<style>
+/* tests/pages/svg-restvals.html -- the computed values of 12ab's SVG properties as Chromium gives them
+   (tests/pages/svg-restvals.chromium, tools/bench/cssref.js): lighting-color (white at first, not
+   inherited, currentcolor its colour), color-interpolation (sRGB at first, inherited, auto, linearRGB in
+   any case), and vector-effect, whose values but none and non-scaling-stroke Chromium refuses. */
+body { margin: 8px }
+#v-rule { lighting-color: rgb(10 20 30) }
+#c-rule { color-interpolation: LinearRGB }
+</style></head>
+<body>
+<svg width="200" height="20">
+  <feDiffuseLighting id="l-init" data-check="lighting-color"/>
+  <feDiffuseLighting id="l-attr" data-check="lighting-color" lighting-color="#40c080"/>
+  <feDiffuseLighting id="v-rule" data-check="lighting-color"/>
+  <feDiffuseLighting id="l-current" data-check="lighting-color" lighting-color="currentcolor" style="color: #123456"/>
+  <g lighting-color="red"><rect id="l-inherit" data-check="lighting-color" width="1" height="1"/></g>
+  <feSpecularLighting id="l-bad" data-check="lighting-color" lighting-color="nosuch"/>
+  <rect id="c-init" data-check="color-interpolation" width="1" height="1"/>
+  <rect id="c-attr" data-check="color-interpolation" color-interpolation="linearRGB" width="1" height="1"/>
+  <rect id="c-rule" data-check="color-interpolation" width="1" height="1"/>
+  <g color-interpolation="linearRGB"><rect id="c-inherit" data-check="color-interpolation" width="1" height="1"/></g>
+  <rect id="c-auto" data-check="color-interpolation" color-interpolation="auto" width="1" height="1"/>
+  <rect id="c-bad" data-check="color-interpolation" color-interpolation="linear" width="1" height="1"/>
+  <rect id="e-stroke" data-check="vector-effect" vector-effect="non-scaling-stroke" width="1" height="1"/>
+  <rect id="e-size" data-check="vector-effect" vector-effect="non-scaling-size" width="1" height="1"/>
+  <rect id="e-rotation" data-check="vector-effect" vector-effect="non-rotation" width="1" height="1"/>
+  <rect id="e-fixed" data-check="vector-effect" vector-effect="fixed-position" width="1" height="1"/>
+  <rect id="e-css" data-check="vector-effect" style="vector-effect: non-scaling-size" width="1" height="1"/>
+  <rect id="e-two" data-check="vector-effect" vector-effect="non-scaling-stroke non-scaling-size" width="1" height="1"/>
+  <g vector-effect="non-scaling-stroke"><rect id="e-inherit" data-check="vector-effect" width="1" height="1"/></g>
+</svg>
+</body></html>

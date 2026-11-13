@@ -1307,6 +1307,59 @@ be built side by side and merged without touching each other's.
   36 requests of two legacy pages, target by target (`tests/net/query.chromium`); `tests/integ/picture.sh`: 9 of 9
   sources' dimensions (`tests/net/picture-dims.chromium`), 15 of 15 images under each of five profiles
   (`tests/net/env.chromium`).
+- **12ab SVG's rest** (`src/paint/svg.c`; `lighting-color` and `color-interpolation` in `contracts/css.pl`,
+  `src/css/css.c` and `prolog/amb/rules/css.pl`; an feImage's picture fetched by `src/net/net.c`), each measured in
+  Chromium first, Skia's and Blink's sources deciding where the measurements left room:
+  - the filter primitives Skia draws for Chromium: feTurbulence as SkPerlinNoiseShader makes it (the spec's lattice
+    and gradients, kept in sixteen bits; each device px's centre mapped into the filter's user space and half a unit
+    on; a seed truncated, the stitched tile the subregion's size from the space's origin, a negative frequency 0),
+    turbulence and fractalNoise matched value for value; feMorphology (radii mapped to device px and rounded, a
+    negative one none, outside the image transparent); feConvolveMatrix (the kernel turned about its target, the
+    divisor, the bias added to premultiplied colours or, preserving alpha, to unpremultiplied ones, the edge modes
+    about the subregion, an invalid order, kernel, target or divisor transparent); feDisplacementMap (its map
+    unpremultiplied, the scale horizontal alone under objectBoundingBox as Blink takes it, the nearest px);
+    feTile (the px inside its input's subregion, from where they are; feTile's own subregion the region, as Blink
+    resets it); feImage (an element drawn as a use draws it, moved to the subregion's corner as Blink moves it; a
+    picture the loader fetches, a PNG or an SVG document placed by preserveAspectRatio from its natural size, in
+    sRGB); feDiffuseLighting and feSpecularLighting with fePointLight, feSpotLight (its cone's edge smoothed as
+    Skia's) and feDistantLight, surfaceScale, the constants, specularExponent and lighting-color (a property now),
+    Sobel's kernels with the bounds' edge px repeated and each px lit at its centre, as Skia's lighting filter;
+  - a mask's content painted in linearRGB element by element where its `color-interpolation` (inherited, a property
+    now) says so, as Chromium paints it (measured: an element's own value counts, the mask's inherited);
+  - textPath's `path` attribute (over its href; its href a path element's alone, another shape drawing nothing,
+    as Blink's LayoutSVGTextPath takes it), and a path's `pathLength` scaling a stroke's dashes and a textPath's
+    startOffset (not its percentages; 0 a solid stroke, a negative one none);
+  - SVG text shaped (`src/paint/shape.c`): runs split where Blink splits SVG text's items (an absolutely placed
+    character, a textPath's edge) and at a change of face, size, letter-spacing or direction; ligatures, kerning
+    across tspans, marks and Arabic's joining; a cluster's glyphs drawn by the character it begins at, its later
+    characters (a ligature's, marks) with no place of their own (their dx moving the pen, their rotate none);
+    textLength spread between typographic characters; a right-to-left script's run set in its visual order;
+  - an `<image>` whose picture fails to load or decode drawn as Blink's broken image (its own 14 x 16 px picture,
+    measured), by preserveAspectRatio as a raster is (none for an auto width or height, or under
+    preserveAspectRatio none); an SVG document drawn as an image draws its image elements' and feImages' data:
+    URLs (rasters and SVG documents) and fetches nothing else, not even a broken image;
+  - measured and left as Chromium has them: textPath's side, method and spacing, a filter's href and
+    feGaussianBlur's edgeMode, none of which Chromium reads; `vector-effect`'s values but none and
+    non-scaling-stroke, which its parser refuses, now refused by the cascade too.
+
+  Gate: `tests/pages/svg-fe.html` (75 regions), `svg-light.html` (35), `svg-rest.html` (53), `svg-shaped.html`
+  (18), `svg-broken.html` (17, with `svg-inner.svg` and `svg-inner2.svg` drawn as images) and, zoomed 1.5,
+  `svgfe-zoom.html` (26), each held to Chromium's screenshot region by region (`tests/integ/paintref.sh`): all
+  agree, from 41, 22, 36, 4, 4 and 15; every earlier page's regions as they were (SVG text's pages too, now
+  shaped), and no earlier golden render moved; `svg-restvals.html`'s computed values of lighting-color,
+  color-interpolation and vector-effect (19 of 19, from 3; `tests/integ/cssref.sh`); `tests/exec/svg_render`
+  (the primitives' scenes and drawings, a page of every new attribute, and a hostile document of them past every
+  bound; valgrind clean).
+
+  Cost (`docs/performance.md`): a page without them as before (news.html's render 213.94M instructions, then
+  213.95M: the cascade 0.2% more for the two properties every style holds); SVG text's scenes shaped,
+  svg-text.html's layout 21.3M instructions, then 23.7M, svg-textpath.html's 33.5M, then 34.5M. Each primitive
+  over an 800 x 600 element, paint (`ambitious bench`, the medians of three rounds of five runs): feTurbulence
+  (4 octaves) 130 ms, feMorphology 80, feConvolveMatrix (5 x 5) 75, feDisplacementMap over a turbulence 99,
+  feTile 60, feImage 36, feSpecularLighting 109, against feGaussianBlur's 90 and the element unfiltered 19. The
+  colour conversions every filter makes (sRGB to linearRGB and back, a power a channel) are now looked up in a
+  table of every eight-bit colour at every alpha, made once a process: feGaussianBlur's element was 143 ms,
+  svg-filter.html's paint 34.9 ms, then 26.4; every page's pixels as they were (186 renders, byte for byte).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

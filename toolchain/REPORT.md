@@ -577,7 +577,9 @@ neighbours.
     the contract's properties, 153 for a table of 172): after minutes src/css/css.c
     stopped with `not lowered yet: item(declaration(css_pdefs),raised(error(resource_error(stack),_)))`,
     naming a line before the table. The work-around is the right bound; the compiler
-    should refuse the extra element at once, at its line.
+    should refuse the extra element at once, at its line. 12ab met it again, adding
+    lighting-color and color-interpolation (a table of 185 under a bound of 183): the
+    same error after about four minutes, at line 886.
 34. **A call with fewer arguments than its prototype has is accepted**, the missing ones
     whatever their registers hold; gcc refuses it (`too few arguments to function`):
 

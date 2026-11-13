@@ -1,0 +1,18 @@
+# tests/pages/svg-broken.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+b-viewport 5 5 105 105
+b-small 117 5 217 105
+b-turned 229 5 329 105
+b-scaled 341 5 441 105
+b-auto 453 5 553 105
+b-empty 565 5 665 105
+b-opacity 677 5 777 105
+b-undecodable 5 117 105 217
+b-tiny 117 117 217 217
+b-viewbox 229 117 329 217
+b-wide 341 117 541 217
+b-tall 565 117 665 317
+b-none 677 117 777 217
+i-inner 5 330 205 430
+bg-inner 230 330 430 430
+i-inner2 455 330 655 430
+i-inner-big 5 440 305 590

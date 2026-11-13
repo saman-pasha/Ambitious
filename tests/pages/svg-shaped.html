@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG: text shaped as Chromium shapes it</title>
+<style>
+/* tests/pages/svg-shaped.html -- SVG text set through the shaper (src/paint/shape.c, HarfBuzz's
+   shaping for Chromium) as Blink sets it: DejaVu's ligatures, broken where a character is placed
+   absolutely (each x a chunk of its own) and off under letter-spacing, a ligature across a tspan
+   drawn by its first letter's element and kept whole by dx, rotate, textLength and a textPath;
+   kerning by Liberation's pairs, across a tspan of the same font; marks placed by GPOS; Hebrew's
+   points and Arabic's joined forms, right to left, beside left-to-right words. Held to Chromium's
+   screenshot region by region (svg-shaped.shot.png, svg-shaped.regions). */
+body { margin: 0; background: #fff }
+svg { position: absolute }
+</style>
+</head>
+<body>
+<svg id="s-liga" style="left:0;top:0" width="400" height="60"><text x="5" y="40" font-family="DejaVu Sans" font-size="30">fi fl ffi office</text></svg>
+<svg id="s-kern" style="left:400px;top:0" width="400" height="60"><text x="5" y="40" font-family="serif" font-size="30">AVAVA To. Wa Ty</text></svg>
+<svg id="s-marks" style="left:0;top:60px" width="400" height="60"><text x="5" y="45" font-family="DejaVu Sans" font-size="36">q&#x0301;&#x0323; a&#x0302;&#x0301; e&#x0300; x&#x0303;&#x0304;</text></svg>
+<svg id="s-hebrew" style="left:400px;top:60px" width="400" height="60"><text x="5" y="45" font-size="36">&#x05E9;&#x05B8;&#x05C1;&#x05DC;&#x05D5;&#x05B9;&#x05DD; &#x05D1;&#x05BC;&#x05B0;</text></svg>
+<svg id="s-arabic" style="left:0;top:120px" width="400" height="60"><text x="5" y="45" font-size="36">&#x0645;&#x0631;&#x062D;&#x0628;&#x0627; &#x0628;&#x0643;</text></svg>
+<svg id="s-xlist" style="left:400px;top:120px" width="400" height="60"><text x="5 40 80 120" y="40" font-family="DejaVu Sans" font-size="30">fifi office</text></svg>
+<svg id="s-dx" style="left:0;top:180px" width="400" height="60"><text x="5" dx="0 10 0 10 0 10" y="40" font-family="DejaVu Sans" font-size="30">fifi office</text></svg>
+<svg id="s-rotate" style="left:400px;top:180px" width="400" height="60"><text x="5" rotate="0 20 0 -20 0 20 0 10" y="40" font-family="DejaVu Sans" font-size="30">fifi office</text></svg>
+<svg id="s-tspan" style="left:0;top:240px" width="400" height="60"><text x="5" y="40" font-family="DejaVu Sans" font-size="30">f<tspan fill="#c00">i</tspan>x o<tspan fill="#c00">ff</tspan>ice</text></svg>
+<svg id="s-spacing" style="left:400px;top:240px" width="400" height="60"><text x="5" y="40" font-family="DejaVu Sans" font-size="30" letter-spacing="2">fi fl office</text></svg>
+<svg id="s-anchor" style="left:0;top:300px" width="400" height="60"><text x="200" y="40" font-family="DejaVu Sans" font-size="30" text-anchor="middle">office afflict</text></svg>
+<svg id="s-path" style="left:400px;top:300px" width="400" height="100"><path id="pp" d="M 10 80 Q 200 -20 390 80" fill="none"/><text font-family="DejaVu Sans" font-size="30"><textPath href="#pp">office afflict AVA</textPath></text></svg>
+<svg id="s-length" style="left:0;top:360px" width="400" height="60"><text x="5" y="40" font-family="DejaVu Sans" font-size="30" textLength="300">office fi</text></svg>
+<svg id="s-kernspan" style="left:400px;top:400px" width="400" height="60"><text x="5" y="40" font-family="serif" font-size="30">A<tspan fill="#c00">V</tspan>A T<tspan font-weight="bold">o</tspan></text></svg>
+<svg id="s-mixed" style="left:0;top:420px" width="400" height="60"><text x="5" y="40" font-size="30">abc &#x05D0;&#x05D1;&#x05D2; def</text></svg>
+<svg id="s-end" style="left:400px;top:460px" width="400" height="60"><text x="390" y="40" font-size="30" text-anchor="end">&#x0645;&#x0631;&#x062D;&#x0628;&#x0627; office</text></svg>
+<svg id="s-stroke" style="left:0;top:480px" width="400" height="60"><text x="5" y="45" font-family="DejaVu Sans" font-size="40" fill="#ffd040" stroke="#204080" stroke-width="1.5">office fi</text></svg>
+</body>
+</html>

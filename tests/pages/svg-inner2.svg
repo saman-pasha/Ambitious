@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- an SVG document drawn as an image (tests/pages/svg-broken.html): a data: URL's picture by
+     xlink:href, stretched; an SVG document of a data: URL drawn as its own; another file's SVG
+     document (svg-badge.svg) not fetched -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="100">
+  <rect width="200" height="100" fill="#ddd"/>
+  <image xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAKklEQVR4nGPU0Djxn4GBgWEBQwIDAwMDAxMDGmA8oaHxH1kARUVCBUMjAAe8Bo6g1IhoAAAAAElFTkSuQmCC" x="10" y="10" width="80" height="80" preserveAspectRatio="none"/>
+  <image href="svg-badge.svg" x="100" y="10" width="90" height="45"/>
+  <image href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='20'%3E%3Crect width='40' height='20' rx='5' fill='%2340a060'/%3E%3Ccircle cx='20' cy='10' r='6' fill='%23fff'/%3E%3C/svg%3E" x="110" y="60" width="80" height="30"/>
+</svg>

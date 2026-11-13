@@ -1,0 +1,27 @@
+# tests/pages/svgfe-zoom.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+defs 0 0 0 0
+turb 0 0 0 0
+stitch 0 0 0 0
+dilatexy 0 0 0 0
+erode 0 0 0 0
+tflood 0 0 0 0
+dot 0 0 0 0
+ioff 0 0 0 0
+ipng 0 0 0 0
+spec 0 0 0 0
+point 0 0 0 0
+spot 0 0 0 0
+m-mix 0 0 0 0
+z-turb 7 7 158 158
+z-stitch 175 7 326 158
+z-dilatexy 343 7 494 158
+z-erode 511 7 662 158
+z-tflood 7 175 158 326
+z-ioff 175 175 326 326
+z-ipng 343 175 494 326
+z-spec 511 175 662 326
+z-point 7 343 158 494
+z-spot 175 343 326 494
+z-mask 343 343 494 494
+z-broken 511 343 662 494
+z-shaped 7 511 608 587

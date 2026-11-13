@@ -1,0 +1,20 @@
+# tests/pages/svg-restvals.html in Chromium (tools/bench/cssref.js): id, property, value
+l-init lighting-color rgb(255,255,255)
+l-attr lighting-color rgb(64,192,128)
+v-rule lighting-color rgb(10,20,30)
+l-current lighting-color rgb(18,52,86)
+l-inherit lighting-color rgb(255,255,255)
+l-bad lighting-color rgb(255,255,255)
+c-init color-interpolation srgb
+c-attr color-interpolation linearrgb
+c-rule color-interpolation linearrgb
+c-inherit color-interpolation linearrgb
+c-auto color-interpolation auto
+c-bad color-interpolation srgb
+e-stroke vector-effect non-scaling-stroke
+e-size vector-effect none
+e-rotation vector-effect none
+e-fixed vector-effect none
+e-css vector-effect none
+e-two vector-effect none
+e-inherit vector-effect none

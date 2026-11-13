@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inline SVG zoomed: noise, morphology, tiles, pictures, lights, masks in linearRGB, shaped text, broken images</title>
+<style>
+/* tests/pages/svgfe-zoom.html, drawn at a zoom of 1.5 (svgfe-zoom.zoom) -- 12ab's primitives and the rest of
+   it between device px: feTurbulence's noise in the user space (each device px's centre mapped there), the
+   radii, tiles, pictures and lights mapped into the device's px, a mask's content made linearRGB, shaped
+   text, and the broken image. Held to Chromium's screenshot at the same zoom region by region
+   (svgfe-zoom.shot.png, svgfe-zoom.regions). */
+body { margin: 0; background: #fff }
+svg { position: absolute }
+</style>
+</head>
+<body>
+<svg id="defs" style="left:0;top:0" width="0" height="0">
+  <defs>
+    <filter id="turb" x="0" y="0" width="1" height="1"><feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" seed="1"/></filter>
+    <filter id="stitch" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feTurbulence baseFrequency="0.07" numOctaves="2" seed="3" stitchTiles="stitch" x="10" y="10" width="40" height="40" result="t"/><feTile in="t"/></filter>
+    <filter id="dilatexy"><feMorphology operator="dilate" radius="2 7"/></filter>
+    <filter id="erode"><feMorphology operator="erode" radius="2.5"/></filter>
+    <filter id="tflood" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#c03030" x="13" y="17" width="20" height="10" result="a"/><feOffset in="a" dx="5" dy="0" result="b"/><feTile in="b"/></filter>
+    <circle id="dot" cx="20" cy="20" r="15" fill="#c04040"/>
+    <filter id="ioff"><feImage href="#dot" x="30" y="10"/></filter>
+    <filter id="ipng" x="0" y="0" width="1" height="1"><feImage href="logo.png"/></filter>
+    <filter id="spec" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b"/><feSpecularLighting in="b" surfaceScale="5" specularConstant="1" specularExponent="20" lighting-color="#ffffff"><feDistantLight azimuth="45" elevation="30"/></feSpecularLighting></filter>
+    <filter id="point" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="3" result="b"/><feDiffuseLighting in="b" surfaceScale="3" diffuseConstant="0.8" lighting-color="#ffe0a0"><fePointLight x="20" y="20" z="40"/></feDiffuseLighting></filter>
+    <filter id="spot" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feFlood flood-color="#000" flood-opacity="0.5" result="f"/><feDiffuseLighting in="f" lighting-color="#ffffff"><feSpotLight x="50" y="10" z="60" pointsAtX="50" pointsAtY="60" pointsAtZ="0" limitingConeAngle="30" specularExponent="2"/></feDiffuseLighting></filter>
+    <mask id="m-mix" maskContentUnits="userSpaceOnUse" color-interpolation="linearRGB"><rect width="100" height="100" fill="#ff0000"/><rect x="25" y="25" width="50" height="50" fill="#00ff00" fill-opacity="0.5"/></mask>
+  </defs>
+</svg>
+<svg id="z-turb" style="left:5px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#turb)"/></svg>
+<svg id="z-stitch" style="left:117px;top:5px" width="100" height="100"><rect width="100" height="100" filter="url(#stitch)"/></svg>
+<svg id="z-dilatexy" style="left:229px;top:5px" width="100" height="100"><rect x="25" y="25" width="50" height="50" fill="#3080c0" filter="url(#dilatexy)"/></svg>
+<svg id="z-erode" style="left:341px;top:5px" width="100" height="100"><g transform="scale(1.5)"><rect x="15" y="15" width="30" height="30" fill="#c06030" filter="url(#erode)"/></g></svg>
+<svg id="z-tflood" style="left:5px;top:117px" width="100" height="100"><rect width="100" height="100" fill="#eee" filter="url(#tflood)"/></svg>
+<svg id="z-ioff" style="left:117px;top:117px" width="100" height="100"><rect x="20" y="20" width="60" height="60" fill="#eee" filter="url(#ioff)"/></svg>
+<svg id="z-ipng" style="left:229px;top:117px" width="100" height="100"><rect width="100" height="100" fill="#eee" filter="url(#ipng)"/></svg>
+<svg id="z-spec" style="left:341px;top:117px" width="100" height="100"><g filter="url(#spec)"><rect width="100" height="100" fill="none"/><circle cx="50" cy="50" r="30" fill="#c00"/></g></svg>
+<svg id="z-point" style="left:5px;top:229px" width="100" height="100"><g filter="url(#point)"><rect width="100" height="100" fill="none"/><rect x="20" y="20" width="60" height="60" rx="15"/></g></svg>
+<svg id="z-spot" style="left:117px;top:229px" width="100" height="100"><rect width="100" height="100" filter="url(#spot)"/></svg>
+<svg id="z-mask" style="left:229px;top:229px" width="100" height="100"><rect width="100" height="100" fill="#204080" mask="url(#m-mix)"/></svg>
+<svg id="z-broken" style="left:341px;top:229px" width="100" height="100"><image href="missing.png" x="10" y="10" width="80" height="60"/></svg>
+<svg id="z-shaped" style="left:5px;top:341px" width="400" height="50"><text x="5" y="35" font-family="DejaVu Sans" font-size="24">office afflict AVA q&#x0301;&#x0323;</text></svg>
+</body>
+</html>
