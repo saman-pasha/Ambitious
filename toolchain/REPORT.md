@@ -728,3 +728,23 @@ neighbours.
     compiles and prints 2. A unit that leans on it builds with cicilang alone, and a slip
     that reuses a name goes unseen. 12aj met it in `src/js/regexp.c`'s `rp_prop_find`
     (the property's kind, then an alias's place, both `k`), now two names.
+40. **A constant array's initializer takes about 2.2 KB of memory and 0.09 ms an element
+    to compile**, linearly: an array of 50,000 `uint32_t` words, eight a line, took 5.2 s
+    and 172 MB, one of 200,000 19 s and 505 MB, where clang -O2 takes 2.2 s and 118 MB
+    and gcc -O2 0.6 s and 24 MB; `src/js/intl_data.c`'s 647,000 words take 48 s and
+    1.5 GB. 12ao's time zone names, 147,000 words more, would have taken that unit to
+    57 s and 1.9 GB: they are a unit of their own, `src/js/intl_tz.c` (11 s, 375 MB),
+    beside it. The reduction, `python3 repro.py 200000 > big.c`, then `cicilang -c big.c`:
+
+    ```python
+    import random, sys
+    n = int(sys.argv[1])
+    random.seed(1)
+    w = [random.getrandbits(32) for _ in range(n)]
+    print("#include <stdint.h>\n#include <stdio.h>\n")
+    print("const uint32_t big[%d] = {" % n)
+    for i in range(0, n, 8):
+        print("    " + ", ".join("0x%08xu" % x for x in w[i:i + 8]) + ",")
+    print("};")
+    print('int main(void) { printf("%%u\\n", big[%d]); return 0; }' % (n // 2))
+    ```
