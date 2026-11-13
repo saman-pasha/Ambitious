@@ -1527,8 +1527,11 @@ be built side by side and merged without touching each other's.
     type or rel changed, each a new sheet, as Chromium makes one (the same text set again by
     textContent, a no-op now as in Chromium, keeps it). A file: page's linked and imported sheets
     are not readable (Chromium's SecurityError, each message its). On the way: a style element of
-    another type than CSS's (`type="text/foo"`, `" text/css "`) is no sheet to the cascade either,
-    and a style's, a link's and a source's `media` reflect their attribute;
+    another type than CSS's (`type="text/less"`, `" text/css "`) is no sheet to the cascade either,
+    until its type is set to CSS's (Less's browser build relies on both); a style's, a link's and a
+    source's `media` reflect their attribute, a style's set by script applying at once; a style
+    element's `disabled` is its sheet's flag, a link's its attribute, under which it has no sheet
+    and the cascade reads none;
   - `cssRules` (and `rules`), a live CSSRuleList, of Chromium's classes: CSSStyleRule (selectorText
     writable, style, its nested rules), CSSImportRule (href, media, layerName, supportsText,
     styleSheet), CSSMediaRule, CSSSupportsRule, CSSContainerRule (containerName, containerQuery),
@@ -1563,10 +1566,10 @@ be built side by side and merged without touching each other's.
     object each read, its declarations kept in their order as Chromium's inline style keeps them
     (an important one where it was set) while its style attribute is the text they were written as.
 
-  Gate: `tests/integ/script-cssom.sh`, six pages' consoles against Chromium's line for line
+  Gate: `tests/integ/script-cssom.sh`, seven pages' consoles against Chromium's line for line
   (`cssom-sheets.html` 57 lines, `cssom-rules.html` 89, `cssom-text.html` 330, `cssom-edit.html` 78,
-  `cssom-adopt.html` 68, `cssom-decl.html` 334: 956 in all), again with a collection at every chance
-  (`tests/integ/script-gc.sh`); `cssom-apply.html`'s boxes, a page whose script inserts, deletes and
+  `cssom-adopt.html` 68, `cssom-decl.html` 334, `cssom-styletype.html` 8: 964 in all), again with a
+  collection at every chance (`tests/integ/script-gc.sh`); `cssom-apply.html`'s boxes, a page whose script inserts, deletes and
   edits rules, disables a sheet, changes a sheet's media, sets a style element's text anew and adopts
   sheets in the document and in declarative shadow trees (18 of 18 within 1px of Chromium's,
   `tests/integ/boxes.sh`); `tests/exec/cssom_text`, 528 sheets, rules and declarations parsed and

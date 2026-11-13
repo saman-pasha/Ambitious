@@ -1,0 +1,8 @@
+rgb(0, 0, 0) | rgb(1, 2, 3) | rgb(4, 5, 6) | 0px | 3px | 0px | 7px | 0px
+start rgb(0, 128, 0) 2px true null false true
+link off rgb(0, 0, 0) 0px null true 4
+link on 2px false false
+style off 1px true true false
+style attr 5px false true
+new style false 9px
+back to less rgb(0, 0, 0) null

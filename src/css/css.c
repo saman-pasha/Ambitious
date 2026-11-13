@@ -10124,6 +10124,8 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
         int link = css_is_named(doc, x, "link");
         if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
         if (!link && !css_style_type_ok(doc, x)) continue;
+        /* a link that is disabled has no sheet (Chromium drops it the moment the attribute is set) */
+        if (link && css_attr_of(doc, x, "disabled", 8)) continue;
         vector<char> omt;
         int om = om_any ? css_om_sheet_of(doc, x, &omt) : 0;
         if (om & CSS_OMS_SKIP) continue;
@@ -10167,6 +10169,7 @@ css_status css_cascade(css_style *s, dom_document *doc, net_loader *net) {
             int link = css_is_named(doc, x, "link");
             if (!css_is_named(doc, x, "style") && !css_is_svg_named(doc, x, "style") && !link) continue;
             if (!link && !css_style_type_ok(doc, x)) continue;
+            if (link && css_attr_of(doc, x, "disabled", 8)) continue;
             vector<char> omt;
             int om = om_any ? css_om_sheet_of(doc, x, &omt) : 0;
             if (om & CSS_OMS_SKIP) continue;

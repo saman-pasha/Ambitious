@@ -22,7 +22,10 @@
 #   cssom-decl.html: CSSStyleDeclaration, a rule's and an element's: getPropertyValue,
 #     getPropertyPriority, setProperty (important), removeProperty, cssText, length, item(),
 #     custom properties, values and shorthands as Chromium writes them, an element's style
-#     attribute after each change.
+#     attribute after each change;
+#   cssom-styletype.html: a style element of another type than CSS's (Less's text/less) no sheet
+#     until its type is CSS's, a style's media set by script, a style's disabled (its sheet's
+#     flag) and a link's (its attribute: no sheet then), as the next rendering's styles show them.
 # Then the boxes of a page whose sheets its script changes (cssom-apply.html) are held to
 # Chromium's by tests/integ/boxes.sh (tests/pages/cssom-apply.chromium).
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -32,7 +35,7 @@ amb() { sh "$AMB_ROOT/bin/ambitious" "$@" < /dev/null 2>&1 | sed "s|$AMB_ROOT|RO
 pages="$AMB_ROOT/tests/pages"
 # a page's console as Chromium's is written: its messages, then its uncaught errors
 console() { amb script "$1" > "$work/s.txt"; sed -n -e 's/^console [a-z]* *\[[0-9]*\] //p' "$work/s.txt"; sed -n -e 's/^error *[a-z]* *\[[0-9]*\] /error: /p' "$work/s.txt"; }
-for p in cssom-sheets cssom-rules cssom-text cssom-edit cssom-adopt cssom-decl; do
+for p in cssom-sheets cssom-rules cssom-text cssom-edit cssom-adopt cssom-decl cssom-styletype; do
   echo "-- the $p page's console, against Chromium's:"
   console "$pages/$p.html" > "$work/c.txt"
   if cmp -s "$pages/$p.chromium" "$work/c.txt"; then echo "the same $(wc -l < "$work/c.txt" | tr -d ' ') lines"

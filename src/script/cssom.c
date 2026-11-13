@@ -1395,6 +1395,18 @@ static uint32_t co_inline(js_vm *vm, uint32_t x, int make) {
     m->inl_at[x] = (uint32_t)len(m->inl);
     return (uint32_t)len(m->inl);
 }
+/* a style element's disabled (HTML's HTMLStyleElement.disabled, no attribute's): its sheet's
+   flag, false when it has none; set (set 0 or 1) only when it has one. The flag after it */
+int script_cssom_sheet_disabled(js_vm *vm, uint32_t x, int set) {
+    struct js_host *h = vm->host;
+    uint32_t s = co_owned(vm, x);
+    if (!s) return 0;
+    if (set >= 0 && h->om.sheets[s].disabled != (uint32_t)set) {
+        h->om.sheets[s].disabled = (uint32_t)set;
+        co_changed(h);
+    }
+    return h->om.sheets[s].disabled != 0;
+}
 /* element x's style: its CSSStyleDeclaration, the same one each read ([SameObject]) */
 jv script_cssom_inline_style(js_vm *vm, uint32_t x) {
     struct js_host *h = vm->host;

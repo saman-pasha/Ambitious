@@ -292,6 +292,8 @@ static jv sh_host_obj(js_vm *vm, uint32_t kind, uint32_t proto, uint32_t x) {
     return jv_obj(o);
 }
 
+/* a style element's sheet's disabled flag, read (set -1) or set (src/script/cssom.c) */
+int script_cssom_sheet_disabled(js_vm *vm, uint32_t x, int set);
 /* a DOMException of a name, with its message */
 jv sh_dom_error(js_vm *vm, const char *name, const char *msg) {
     uint32_t e = js_error_new(vm, vm->error_proto, js_str_ascii(vm, msg));
@@ -1586,7 +1588,11 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         break;
     case HA_CHECKED: if (el) return jv_bool(sh_attr_z(d, x, "checked") != 0); break;
     case HA_SELECTED: if (el) return jv_bool(sh_attr_z(d, x, "selected") != 0); break;
-    case HA_DISABLED: if (el) return jv_bool(sh_attr_z(d, x, "disabled") != 0); break;
+    case HA_DISABLED:
+        /* a style element's its sheet's (src/script/cssom.c), no attribute's */
+        if (el && sh_named(d, x, "style")) return jv_bool(script_cssom_sheet_disabled(vm, x, -1));
+        if (el) return jv_bool(sh_attr_z(d, x, "disabled") != 0);
+        break;
     case HA_HIDDEN: if (el) return jv_bool(sh_attr_z(d, x, "hidden") != 0); break;
     case HA_READONLY: if (el) return jv_bool(sh_attr_z(d, x, "readonly") != 0); break;
     case HA_REQUIRED: if (el) return jv_bool(sh_attr_z(d, x, "required") != 0); break;
@@ -1885,7 +1891,10 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
             break;
         case HA_CHECKED: if (el) { sh_set_flag(vm, x, "checked", v); return 1; } break;
         case HA_SELECTED: if (el) { sh_set_flag(vm, x, "selected", v); return 1; } break;
-        case HA_DISABLED: if (el) { sh_set_flag(vm, x, "disabled", v); return 1; } break;
+        case HA_DISABLED:
+            if (el && sh_named(d, x, "style")) { script_cssom_sheet_disabled(vm, x, js_truthy(vm, v) ? 1 : 0); return 1; }
+            if (el) { sh_set_flag(vm, x, "disabled", v); return 1; }
+            break;
         case HA_HIDDEN: if (el) { sh_set_flag(vm, x, "hidden", v); return 1; } break;
         case HA_READONLY: if (el) { sh_set_flag(vm, x, "readonly", v); return 1; } break;
         case HA_REQUIRED: if (el) { sh_set_flag(vm, x, "required", v); return 1; } break;
