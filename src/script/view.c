@@ -211,6 +211,14 @@ int script_view_rendered(struct js_host *h, uint32_t x) {
     return x && x < len(h->vstyle) && h->vstyle[x];
 }
 
+/* x's computed visibility is visible (not hidden, not collapse): what takes focus must be,
+   as Chromium's IsFocusable has it */
+int script_view_visible(struct js_host *h, uint32_t x) {
+    script_view_update(h);
+    uint32_t v = sv_val(h, x, CSS_PROP_VISIBILITY);
+    return v == ~0u || !(sv_val_is(h, v, "hidden") || sv_val_is(h, v, "collapse"));
+}
+
 /* the element's box of its own, in vboxes plus 1: 0 for an inline element or one not
    rendered */
 static uint32_t sv_box(struct js_host *h, uint32_t x) {

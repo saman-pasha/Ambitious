@@ -1,0 +1,10 @@
+prevent,timer
+rv,timer
+rvtrue,timer
+ret,timer
+retempty,timer
+retnull,timer
+rvempty,timer
+none,timer
+prevent --click '#away'
+ret --click '#away'

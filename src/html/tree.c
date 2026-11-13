@@ -46,8 +46,10 @@
    lack of one (Phase 12u).
 
    The scripting flag is off unless html_set_scripting turns it on (a page whose scripts
-   run): noscript's content is then raw text. Everything else follows the standard's
-   steps, by its names. */
+   run): noscript's content is then raw text. A document parsed whole has its radio
+   button groups as Chromium's insertions leave them (src/html/forms.c: each group's last
+   checked radio its checked one). Everything else follows the standard's steps, by its
+   names. */
 #include <stdio.h>
 #include <string.h>
 #include <vector.pl>
@@ -56,6 +58,8 @@
 amb_interface(dom);
 amb_implementation(html);
 #include "tokenizer.h"
+#include "../dom/dom.h"
+#include "forms.h"
 
 /* the scripting flag (13.2.3.5): the parser of a document whose scripts run */
 void html_set_scripting(int on) { html_scripting_flag = on != 0; }
@@ -2141,6 +2145,8 @@ html_status html_parse(html_parser *p, dom_document *d, const char *src, size_t 
     html_tz_start(&z, HTML_TZ_DATA, 1);
     if (copied) build_driven(p, d, &tb, data(norm), n, &z);
     else build_driven(p, d, &tb, src, n, &z);
+    /* the radio button groups as the parser's insertions leave them: each one's last checked radio (src/html/forms.c) */
+    form_parsed(d);
     return HTML_OK;
 }
 

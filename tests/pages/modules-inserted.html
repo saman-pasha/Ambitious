@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html><head><title>Module scripts a script inserts</title>
+<!-- Module scripts a script inserts (HTML 8.1.5, 4.12.1.1; src/script/script.c), served by
+     tests/integ/script-serve.py: an inline one, run after its inserting script, in a task of
+     its own (document.currentScript null); then, each inserted when the one before has run, an
+     external one importing a module (its load event after it ran), one whose evaluation throws
+     (its load event all the same, its error the page's), a missing one (its fetch's console
+     line, its error event), an inline import map merged and a module its mapping resolves, an
+     external import map (its error event: Chromium 153 writes no console line for it), and a
+     module whose specifier no map maps. The console must be Chromium's line for line
+     (modules-inserted.chromium, written by tools/bench/script-references.sh). -->
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  function insert(attrs, text, onload, onerror) {
+    var s = document.createElement('script');
+    s.type = 'module';
+    for (var k in attrs) s.setAttribute(k, attrs[k]);
+    if (text) s.textContent = text;
+    if (onload) s.onload = onload;
+    if (onerror) s.onerror = onerror;
+    document.head.appendChild(s);
+    return s;
+  }
+  document.addEventListener('DOMContentLoaded', function () { p('DOMContentLoaded', document.readyState); });
+  window.addEventListener('load', function () { p('load', document.readyState); });
+  insert({}, 'p("an inline module", document.currentScript + " " + import.meta.url.replace(/^http:\\/\\/[^/]*/, "")); window.next();',
+         function () { p('an inline module', 'its load event'); });
+  p('after its insertion', 'not run yet');
+  window.next = function () {
+    insert({ src: 'mod/ins.js' }, '', function (e) {
+      p('ins.js', 'its load event ' + e.type);
+      insert({ src: 'mod/ins-bad.js' }, '', function () {
+        p('ins-bad.js', 'its load event, its error the page\'s');
+        insert({ src: 'mod/missing.js' }, '', function () { p('missing.js', 'loaded?'); }, function (e) {
+          p('missing.js', 'its error event ' + e.type);
+          var m = document.createElement('script');
+          m.type = 'importmap';
+          m.textContent = '{ "imports": { "mapped": "./mod/lib2.js" } }';
+          document.head.appendChild(m);
+          insert({}, 'import { name } from "mapped"; p("a mapped import", name); window.last();');
+        });
+      });
+    }, function () { p('ins.js', 'error?'); });
+  };
+  window.last = function () {
+    var x = document.createElement('script');
+    x.type = 'importmap';
+    x.src = 'mod/map.json';
+    x.onerror = function (e) {
+      p('an external import map', 'its error event ' + e.type);
+      insert({}, 'import "never"; p("never", "run");');
+    };
+    document.head.appendChild(x);
+  };
+</script>
+<script>p('a classic script', 'after the first');</script>
+</head><body><p>Module scripts a script inserts</p></body></html>

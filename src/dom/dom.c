@@ -19,6 +19,10 @@
    document's mode (DOM 4.5: no-quirks, quirks or limited-quirks), which the HTML parser
    sets from the DOCTYPE.
 
+   An input's checkedness and dirty checkedness flag are its node's (the checked field,
+   set_checked's), which HTML's form controls set (src/html/forms.c) and the cascade,
+   layout and accessibility read (src/dom/dom.h's dom_checkedness).
+
    A shadow root (DOM 4.8) is a fragment too, its host's (the host's shadow link names it),
    with its options. The flat tree (src/dom/dom.h) is the DOM's: dom_flatten finds each slot's
    assigned nodes when the document changed since they were last found -- a host's element
@@ -66,6 +70,17 @@ dom_status dom_set_mode(dom_document *d, dom_document_mode mode) {
     if (d->node[1].mode == mode) return DOM_OK;
     d->node[1].mode = mode;
     dom_log(d, DOM_OP_SET_MODE, 1, 0);
+    return DOM_OK;
+}
+
+/* an input's checkedness and dirty checkedness flag, as HTML's form controls set them
+   (src/html/forms.c): kept on its node; a change logged, none when it is already that */
+dom_status dom_set_checked(dom_document *d, dom_node_h element, uint8_t state) {
+    dom_status st = dom_check_set_checked(d, element, state);
+    if (st != DOM_OK) return st;
+    if (d->node[element.index].checked == state) return DOM_OK;
+    d->node[element.index].checked = state;
+    dom_log(d, DOM_OP_SET_CHECKED, element.index, 0);
     return DOM_OK;
 }
 

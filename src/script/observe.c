@@ -28,8 +28,9 @@
    each observer with records, in the order they were made, called with them and itself.
 
    What is not done: a script made before the parse ended sees none of the parser's own
-   insertions (the page is parsed whole before its scripts run); a box's or radio's
-   checkedness is its checked attribute, so a user's click on one is an attribute's change. */
+   insertions (the page is parsed whole before its scripts run). A box's or radio's
+   checkedness is no attribute (the DOM's state, src/html/forms.c), so a click on one makes
+   no record, as in Chromium. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

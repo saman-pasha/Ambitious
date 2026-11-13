@@ -76,4 +76,15 @@ static inline uint32_t dom_tree_root(const dom_document *d, uint32_t x) {
     return x;
 }
 
+/* AN INPUT'S CHECKEDNESS (HTML 4.10.5.4), what the cascade's :checked, layout's check box,
+   accessibility and a form's submission read: the state its node keeps once its dirty
+   checkedness flag is set (a click, the checked IDL attribute, its radio group, a form's
+   reset: src/html/forms.c), else its checked attribute's presence, has_attr, the caller's to
+   find. The node's checked field: DOM_CHECKED_DIRTY the flag, DOM_CHECKED_ON the state */
+enum { DOM_CHECKED_DIRTY = 1, DOM_CHECKED_ON = 2 };
+static inline int dom_checkedness(const dom_document *d, uint32_t x, int has_attr) {
+    uint8_t c = d->node[x].checked;
+    return (c & DOM_CHECKED_DIRTY) ? (c & DOM_CHECKED_ON) != 0 : has_attr;
+}
+
 #endif

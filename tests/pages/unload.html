@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Leaving a page</title>
+<!-- beforeunload (HTML 7.4.2.4; src/script/input.c), served by tests/integ/script-serve.py:
+     the page's query names how its listener answers (cancelled, a returnValue given, an
+     onbeforeunload handler's return value, none), and unload.actions how it is left: a timer's
+     navigation, which no user's gesture came before, or a link a user clicks. Chromium asks to
+     stay only on a page a gesture has activated, and otherwise writes its console's error; the
+     navigation goes on either way (as it does in Chromium once Playwright accepts the dialog).
+     The console and the requests must be Chromium's (unload.chromium, written by
+     tools/bench/script-references.sh). Every box is declared. -->
+<style> body { margin: 0; } a { display: block; width: 200px; height: 20px; } </style>
+</head>
+<body>
+<a id="away" href="/echo/away">away</a>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var mode = location.search.slice(1).split(',');
+  function has(m) { return mode.indexOf(m) >= 0; }
+  if (has('ret')) window.onbeforeunload = function (e) { p('handler', JSON.stringify(e.returnValue)); return 'leave?'; };
+  if (has('retnull')) window.onbeforeunload = function () { return null; };
+  if (has('retempty')) window.onbeforeunload = function () { return ''; };
+  window.addEventListener('beforeunload', function (e) {
+    p('beforeunload', e.type + ' ' + e.cancelable + ' ' + e.isTrusted + ' ' + JSON.stringify(e.returnValue) + ' ' + e.defaultPrevented + ' ' + (e instanceof BeforeUnloadEvent));
+    if (has('prevent')) e.preventDefault();
+    if (has('rv')) e.returnValue = 'sure?';
+    if (has('rvtrue')) e.returnValue = true;
+    if (has('rvempty')) e.returnValue = '';
+    p('after its listener', JSON.stringify(e.returnValue) + ' ' + e.defaultPrevented);
+  });
+  if (has('timer')) setTimeout(function () { p('a timer', 'navigates'); location.href = '/echo/timer'; p('after', 'location set'); }, 50);
+</script>
+</body>
+</html>

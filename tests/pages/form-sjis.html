@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="Shift_JIS">
+<title>A form in Shift_JIS</title>
+<!-- A form sent in a legacy multi-byte encoding (src/script/input.c, the Encoding standard's
+     encoders of src/html/encoding.c), served by tests/integ/script-serve.py: a field holding
+     characters the encoding has, has differently (U+00A5, U+2212, U+FF5E) and lacks (U+20AC,
+     U+00E9, U+D55C, an emoji, U+E5E5), sent as a GET's query and as a POST's urlencoded,
+     multipart and text/plain bodies; each character it lacks written &#N;, as Chromium writes
+     it (tests/pages/form-legacy.chromium, written by tools/bench/script-references.sh; its
+     siblings form-euckr.html and form-gbk.html the same in EUC-KR and GBK). Every box is
+     declared. -->
+<style> body { margin: 0; } input { display: block; margin: 0; padding: 0; border: 0; width: 200px; height: 20px; } </style>
+</head>
+<body>
+<form id="f" action="/echo/legacy">
+<input id="a" name="a">
+<input type="submit" id="go">
+</form>
+<script>
+  var cps = [0x41, 0xa5, 0x203e, 0x2212, 0xff5e, 0x20ac, 0xe9, 0x65e5, 0xd55c, 0x4e2d, 0x1f600, 0xac02, 0xb7, 0x2014, 0x3000, 0xe000, 0x80,
+             0xfa11, 0x4e28, 0xe5e5, 0x26, 0x23, 0x3b];
+  document.getElementById('a').value = cps.map(function (c) { return String.fromCodePoint(c); }).join('|');
+  var mode = location.search.slice(1);
+  var f = document.getElementById('f');
+  if (mode !== 'get') f.setAttribute('method', 'post');
+  if (mode === 'multipart') f.setAttribute('enctype', 'multipart/form-data');
+  if (mode === 'plain') f.setAttribute('enctype', 'text/plain');
+  console.log(document.characterSet + ' ' + mode);
+</script>
+</body>
+</html>

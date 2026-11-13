@@ -3351,7 +3351,7 @@ static int lay_hex(char c) {
 /* what the theme draws of a form control (Chromium's NativeThemeBase), into b: a text field, textarea, list box or
    drop-down whose author styled no background, border or box shadow; a button (a button element or a button
    input) without a styled background or border; a check box, radio button, range or colour well; none when its
-   appearance is none. A check box's or radio button's checked attribute; a range's value along its track, from its
+   appearance is none. A check box's or radio button's checkedness; a range's value along its track, from its
    min, max and value (0, 100, their middle by default); a colour well's #rrggbb value (black by default) */
 /* a control that is disabled (HTML 4.10.18.5): its disabled attribute, or a disabled fieldset's it is in (not in that
    fieldset's first legend) */
@@ -3433,7 +3433,7 @@ static void lay_theme(LCTX, uint32_t b, uint32_t el) {
     if (gauge || th == LAYOUT_THEME_COLORWELL || th == LAYOUT_THEME_DATE || th == LAYOUT_THEME_FILE) css_look = css_look || styled || e.app_none;
     else if (e.app_none) th = LAYOUT_THEME_CSS;
     t->box[b].theme = th;
-    t->box[b].checked = lay_attr(d, el, "checked") != 0;
+    t->box[b].checked = dom_checkedness(d, el, lay_attr(d, el, "checked") != 0);   /* its checkedness (src/dom/dom.h) */
     t->box[b].tstate = (uint8_t)(th != LAYOUT_THEME_CSS && !gauge && lay_disabled(d, el));
     if (th != LAYOUT_THEME_CSS && css_look) t->box[b].tstate |= 4;
     if (gauge && e.rtl) t->box[b].tstate |= 32;

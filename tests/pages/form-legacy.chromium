@@ -1,0 +1,36 @@
+== form-sjis get
+Shift_JIS get
+GET /echo/legacy?a=A%7C%5C%7C%7E%7C%81%7C%7C%81%60%7C%26%238364%3B%7C%26%23233%3B%7C%93%FA%7C%26%2354620%3B%7C%92%86%7C%26%23128512%3B%7C%26%2344034%3B%7C%26%23183%3B%7C%26%238212%3B%7C%81%40%7C%26%2357344%3B%7C%80%7C%FA%B1%7C%FAh%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-sjis post
+Shift_JIS post
+POST /echo/legacy | a=A%7C%5C%7C%7E%7C%81%7C%7C%81%60%7C%26%238364%3B%7C%26%23233%3B%7C%93%FA%7C%26%2354620%3B%7C%92%86%7C%26%23128512%3B%7C%26%2344034%3B%7C%26%23183%3B%7C%26%238212%3B%7C%81%40%7C%26%2357344%3B%7C%80%7C%FA%B1%7C%FAh%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-sjis multipart
+Shift_JIS multipart
+POST /echo/legacy | --BOUNDARY\r\nContent-Disposition: form-data; name="a"\r\n\r\nA|\|~|�||�`|&#8364;|&#233;|��|&#54620;|��|&#128512;|&#44034;|&#183;|&#8212;|�@|&#57344;|�|��|�h|&#58853;|&|#|;\r\n--BOUNDARY--\r\n
+== form-sjis plain
+Shift_JIS plain
+POST /echo/legacy | a=A|\|~|�||�`|&#8364;|&#233;|��|&#54620;|��|&#128512;|&#44034;|&#183;|&#8212;|�@|&#57344;|�|��|�h|&#58853;|&|#|;\r\n
+== form-euckr get
+EUC-KR get
+GET /echo/legacy?a=A%7C%26%23165%3B%7C%26%238254%3B%7C%26%238722%3B%7C%A2%A6%7C%A2%E6%7C%26%23233%3B%7C%EC%ED%7C%C7%D1%7C%F1%E9%7C%26%23128512%3B%7C%81A%7C%A1%A4%7C%26%238212%3B%7C%A1%A1%7C%26%2357344%3B%7C%26%23128%3B%7C%26%2364017%3B%7C%26%2320008%3B%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-euckr post
+EUC-KR post
+POST /echo/legacy | a=A%7C%26%23165%3B%7C%26%238254%3B%7C%26%238722%3B%7C%A2%A6%7C%A2%E6%7C%26%23233%3B%7C%EC%ED%7C%C7%D1%7C%F1%E9%7C%26%23128512%3B%7C%81A%7C%A1%A4%7C%26%238212%3B%7C%A1%A1%7C%26%2357344%3B%7C%26%23128%3B%7C%26%2364017%3B%7C%26%2320008%3B%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-euckr multipart
+EUC-KR multipart
+POST /echo/legacy | --BOUNDARY\r\nContent-Disposition: form-data; name="a"\r\n\r\nA|&#165;|&#8254;|&#8722;|��|��|&#233;|��|��|��|&#128512;|�A|��|&#8212;|��|&#57344;|&#128;|&#64017;|&#20008;|&#58853;|&|#|;\r\n--BOUNDARY--\r\n
+== form-euckr plain
+EUC-KR plain
+POST /echo/legacy | a=A|&#165;|&#8254;|&#8722;|��|��|&#233;|��|��|��|&#128512;|�A|��|&#8212;|��|&#57344;|&#128;|&#64017;|&#20008;|&#58853;|&|#|;\r\n
+== form-gbk get
+GBK get
+GET /echo/legacy?a=A%7C%26%23165%3B%7C%26%238254%3B%7C%26%238722%3B%7C%A1%AB%7C%80%7C%A8%A6%7C%C8%D5%7C%26%2354620%3B%7C%D6%D0%7C%26%23128512%3B%7C%26%2344034%3B%7C%A1%A4%7C%A1%AA%7C%A1%A1%7C%AA%A1%7C%26%23128%3B%7C%FED%7C%D8%AD%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-gbk post
+GBK post
+POST /echo/legacy | a=A%7C%26%23165%3B%7C%26%238254%3B%7C%26%238722%3B%7C%A1%AB%7C%80%7C%A8%A6%7C%C8%D5%7C%26%2354620%3B%7C%D6%D0%7C%26%23128512%3B%7C%26%2344034%3B%7C%A1%A4%7C%A1%AA%7C%A1%A1%7C%AA%A1%7C%26%23128%3B%7C%FED%7C%D8%AD%7C%26%2358853%3B%7C%26%7C%23%7C%3B
+== form-gbk multipart
+GBK multipart
+POST /echo/legacy | --BOUNDARY\r\nContent-Disposition: form-data; name="a"\r\n\r\nA|&#165;|&#8254;|&#8722;|��|�|��|��|&#54620;|��|&#128512;|&#44034;|��|��|��|��|&#128;|�D|ح|&#58853;|&|#|;\r\n--BOUNDARY--\r\n
+== form-gbk plain
+GBK plain
+POST /echo/legacy | a=A|&#165;|&#8254;|&#8722;|��|�|��|��|&#54620;|��|&#128512;|&#44034;|��|��|��|��|&#128;|�D|ح|&#58853;|&|#|;\r\n

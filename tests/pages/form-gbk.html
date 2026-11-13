@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="GBK">
+<title>A form in GBK</title>
+<!-- tests/pages/form-sjis.html's page in GBK (form-legacy.chromium). -->
+<style> body { margin: 0; } input { display: block; margin: 0; padding: 0; border: 0; width: 200px; height: 20px; } </style>
+</head>
+<body>
+<form id="f" action="/echo/legacy">
+<input id="a" name="a">
+<input type="submit" id="go">
+</form>
+<script>
+  var cps = [0x41, 0xa5, 0x203e, 0x2212, 0xff5e, 0x20ac, 0xe9, 0x65e5, 0xd55c, 0x4e2d, 0x1f600, 0xac02, 0xb7, 0x2014, 0x3000, 0xe000, 0x80,
+             0xfa11, 0x4e28, 0xe5e5, 0x26, 0x23, 0x3b];
+  document.getElementById('a').value = cps.map(function (c) { return String.fromCodePoint(c); }).join('|');
+  var mode = location.search.slice(1);
+  var f = document.getElementById('f');
+  if (mode !== 'get') f.setAttribute('method', 'post');
+  if (mode === 'multipart') f.setAttribute('enctype', 'multipart/form-data');
+  if (mode === 'plain') f.setAttribute('enctype', 'text/plain');
+  console.log(document.characterSet + ' ' + mode);
+</script>
+</body>
+</html>

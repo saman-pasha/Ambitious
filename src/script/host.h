@@ -14,13 +14,13 @@
 
 /* a host object's kind, in its c slot */
 enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST, HK_COMPUTED, HK_RESPONSE, HK_REQUEST, HK_HEADERS,
-       HK_XHR, HK_FORMDATA, HK_OBSERVER, HK_STORAGE, HK_MQL };
+       HK_XHR, HK_FORMDATA, HK_OBSERVER, HK_STORAGE, HK_MQL, HK_VALIDITY };
 /* its prototypes, in the host's protos */
 enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_NODELIST,
        HP_HTMLCOLLECTION, HP_DOMRECT, HP_RECTLIST, HP_RESPONSE, HP_REQUEST, HP_HEADERS, HP_XHR, HP_PROGRESS, HP_UIEVENT,
        HP_MOUSEEVENT, HP_POINTEREVENT, HP_KEYBOARDEVENT, HP_FOCUSEVENT, HP_INPUTEVENT, HP_SUBMITEVENT, HP_FORMDATAEVENT,
        HP_POPSTATEEVENT, HP_HASHCHANGEEVENT, HP_BEFOREUNLOADEVENT, HP_FORMDATA, HP_MUTATIONOBSERVER, HP_MUTATIONRECORD, HP_SHADOWROOT,
-       HP_STORAGE, HP_STORAGEEVENT, HP_MEDIAQUERYLIST, HP_N };
+       HP_STORAGE, HP_STORAGEEVENT, HP_MEDIAQUERYLIST, HP_VALIDITYSTATE, HP_N };
 
 /* the natives' numbers: script.c's from JS_HOST_NATIVES (1000), fetch.c's from SH_FETCH_FIRST,
    input.c's from SH_INPUT_FIRST, observe.c's from SH_OBSERVE_FIRST, custom.c's from
@@ -139,6 +139,15 @@ uint32_t script_form_owner(const dom_document *d, uint32_t x);
 /* a user's mouse event's coordinate (EV_LAZYPOINT), its point found now: handled when the
    name is one of them */
 jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled);
+/* constraint validation (HTML 4.10.20): x is a listed element (button, fieldset, input,
+   object, output, select, textarea); its ValidityState object (one an element, its flags
+   read live); its validationMessage */
+int script_listed(const dom_document *d, uint32_t x);
+/* a beforeunload handler's return value: one but null or undefined cancels its event and,
+   while its returnValue is empty, is it */
+void script_unload_returned(js_vm *vm, jv ev, jv r);
+jv script_validity_object(js_vm *vm, uint32_t x);
+jv script_validation_message(js_vm *vm, uint32_t x);
 /* ---- observe.c's: MutationObserver ---- */
 void script_observe_setup(js_vm *vm);
 jv script_observe_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);

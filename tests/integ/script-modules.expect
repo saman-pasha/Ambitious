@@ -2,7 +2,9 @@
 the same 16 lines
 -- the modules-cross page's console, against Chromium's:
 the same 5 lines
--- the modules page read from its file, against Chromium's, in any order:
+-- the modules-inserted page's console, against Chromium's:
+the same 17 lines
+-- the modules page read from its file, against Chromium's:
 the same 21 lines
 -- the module scripts' runs, as the reasoner has them:
 Ran = 9, Threw = 2, NotRun = 1

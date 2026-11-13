@@ -10,15 +10,33 @@
 #   keys.html: the sequential focus order (positive tabindex first), Shift+Tab, Space and
 #     Enter on a box and a button, a textarea's line break, Control+a, a label's click,
 #     focus() of what takes none;
+#   validity.html: constraint validation (src/html/forms.c): each control's flags,
+#     willValidate and validationMessage, custom validity, checkValidity() and
+#     reportValidity() on a control and a form, their invalid events and focus, the console's
+#     errors for what cannot take focus; then the user's edits' too long, too short and bad
+#     input, a field's maxlength and a number field's characters as typing keeps them;
+#   checked.html: checkedness: the parse's radio groups, the checked IDL attribute's dirty
+#     flag, defaultChecked, a group's button unchecked, a click's and a cancelled one's, a
+#     form's reset, a clone, an insertion, :checked and FormData reading the state, a user's
+#     clicks;
 #   form.html, served by tests/integ/script-serve.py, once for each line of form.actions:
 #     the console and the requests the server had (a submit button's click, a submitter's
 #     formaction and formmethod, submit() and requestSubmit(), GET, multipart and
 #     text/plain, a submission cancelled, constraint validation, formdata's listener,
 #     Enter's implicit submission, a second submission in place of the first, a link,
-#     the page's windows-1252 in what it sends).
-# Then the facts the reasoner has of the navigations and the fields they sent, and its
-# diagnostics: a form sent to another origin over http:, a password over http: and in a
-# GET's URL, a key listener no key reaches. The served pages' port is written PORT.
+#     the page's windows-1252 in what it sends);
+#   unload.html, served, once for each line of unload.actions: beforeunload cancelled, a
+#     returnValue given, a handler's return value, or none, and the page left by a timer (no
+#     user's gesture: Chromium's console error) or a user's click on a link, the navigation
+#     made either way;
+#   form-sjis.html, form-euckr.html, form-gbk.html, served: a form in Shift_JIS, EUC-KR and
+#     GBK sent as a GET and as urlencoded, multipart and text/plain POSTs, what the encoding
+#     lacks written &#N; (tests/pages/form-legacy.chromium).
+# Then the facts the reasoner has of the navigations and the fields they sent (and of one
+# whose beforeunload asked to stay), the accessibility tree's checked states after a user's
+# clicks, and its diagnostics: a form sent to another origin over http:, a password over
+# http: and in a GET's URL, a key listener no key reaches. The served pages' port is written
+# PORT.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-sinput.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
@@ -42,7 +60,7 @@ same() {
   if cmp -s "$1" "$2"; then echo "the same $(wc -l < "$2" | tr -d ' ') lines"
   else diff "$1" "$2"; fi
 }
-for p in events keys; do
+for p in events keys validity checked; do
   echo "-- the $p page's console after its actions, against Chromium's:"
   eval "set -- $(cat "$pages/$p.actions")"
   console "$@" script "$pages/$p.html" > "$work/c.txt"
@@ -61,12 +79,39 @@ while read -r q acts; do
   grep -v 'favicon\|^GET /form.html' "$work/req.log" | norm >> "$work/form.txt"
 done < "$pages/form.actions"
 same "$pages/form.chromium" "$work/form.txt"
+echo "-- leaving a page, each way, its console and requests, against Chromium's:"
+: > "$work/unload.txt"
+while read -r q acts; do
+  : > "$work/req.log"
+  echo "== $q $acts" >> "$work/unload.txt"
+  eval "set -- $acts"
+  console "$@" script "http://127.0.0.1:$port/unload.html?$q" >> "$work/unload.txt"
+  grep -v 'favicon\|^GET /unload.html' "$work/req.log" | norm >> "$work/unload.txt"
+done < "$pages/unload.actions"
+same "$pages/unload.chromium" "$work/unload.txt"
+echo "-- forms in Shift_JIS, EUC-KR and GBK, what each sends, against Chromium's:"
+: > "$work/legacy.txt"
+for pg in form-sjis form-euckr form-gbk; do
+  for q in get post multipart plain; do
+    : > "$work/req.log"
+    echo "== $pg $q" >> "$work/legacy.txt"
+    console --click '#go' script "http://127.0.0.1:$port/$pg.html?$q" >> "$work/legacy.txt"
+    grep -v "favicon\|^GET /$pg.html" "$work/req.log" | norm >> "$work/legacy.txt"
+  done
+done
+same "$pages/form-legacy.chromium" "$work/legacy.txt"
 echo "-- the navigations, as the reasoner has them: the form's, the field names it sent:"
 amb --click '#go' query "$url" "script_navigation(N, C, M, U), script_navigation_form(N, F, S), dom_attr(F, id, Fi), dom_attr(S, id, Si), script_navigation_status(N, St)"
 amb --click '#go' query "$url" "script_form_field(N, Name, _)"
 echo "-- a planned one that another took the place of, and a link's:"
 amb --click '#run' query "$url?twice" "script_navigation(N, C, M, U), ( script_navigation_status(N, St) -> true ; St = none )"
 amb --click '#away' query "$url" "script_navigation(N, C, M, U), script_navigation_status(N, St)"
+echo "-- one whose beforeunload asked to stay, and one whose did not:"
+amb query "http://127.0.0.1:$port/unload.html?prevent,timer" "script_navigation(N, C, M, U), ( script_navigation_asked(N) -> A = asked ; A = not_asked )"
+amb query "http://127.0.0.1:$port/unload.html?none,timer" "script_navigation(N, C, M, U), ( script_navigation_asked(N) -> A = asked ; A = not_asked )"
+echo "-- the accessibility tree's checked states, the user's clicks read (checked.actions):"
+eval "set -- $(cat "$pages/checked.actions")"
+amb "$@" query "$pages/checked.html" "dom_attr(N, id, I), ( I = c1 ; I = c3 ; I = r2 ; I = n1 ; I = o3 ), a11y_node(A, N, _, _, _), a11y_state(A, checked, V)"
 echo "-- what the reasoner says of them:"
 amb --click '#go' advise "$url?cross" | grep -E '^amb_diag\(form_'
 amb --click '#go' advise "$url?pwget" | grep -E '^amb_diag\(form_'

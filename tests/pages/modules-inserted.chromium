@@ -1,0 +1,17 @@
+after its insertion: not run yet
+a classic script: after the first
+DOMContentLoaded: interactive
+an inline module: null /modules-inserted.html
+lib evaluated
+ins.js evaluated lib null /mod/ins.js
+ins.js: its load event load
+ins-bad.js evaluated
+ins-bad.js: its load event, its error the page's
+Failed to load resource: the server responded with a status of 404 (Not Found)
+missing.js: its error event error
+lib2 evaluated
+a mapped import: lib2
+an external import map: its error event error
+load: complete
+error: Error: an inserted module throws
+error: TypeError: Failed to resolve module specifier "never". Relative references must start with either "/", "./", or "../".

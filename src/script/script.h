@@ -280,8 +280,9 @@ struct js_host {
        document's encoding (its number plus one: 0 is UTF-8); the element a click is at
        while its events' point is left to be found when read (a NODE); the name form's
        name in the document's names, once one has had it, and how many names the document
-       had when it was last looked for */
-    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, spare4;
+       had when it was last looked for; whether a user's gesture (a click, a key) has
+       activated the page (HTML's sticky activation, which beforeunload's question needs) */
+    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, activated;
     int charset, spare2;
     vector<char> nav_url, nav_body, nav_ctype;
     /* the MutationObservers, their registrations (how many live), their records' queues

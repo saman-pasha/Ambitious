@@ -54,7 +54,8 @@
    not the name and says something else.
 
    ITS STATES AND PROPERTIES (WAI-ARIA 1.2, HTML-AAM), each with where it came
-   from: checked (an input's checked attribute; aria-checked, an ARIA checkbox,
+   from: checked (an input's checkedness, the DOM's state, which a click or a script
+   set, else its checked attribute; aria-checked, an ARIA checkbox,
    radio or switch without it unchecked), selected (an option's selectedness, a
    select's first enabled option when none is selected; aria-selected), expanded
    (a details element's summary; a select is closed; aria-expanded), pressed,
@@ -62,10 +63,11 @@
    its first legend; a disabled optgroup's or select's options; aria-disabled,
    and an aria-disabled element's focusable descendants), required, readonly,
    invalid (aria-invalid, false included; else HTML's constraint validation of a
-   page no one has edited, each flag that holds kept: a value missing -- told of
-   all but a text field --, an e-mail or URL of the wrong type, a value off its
-   pattern (the script engine's regular expressions, with the v flag), under its
-   min or over its max, off its step; a disabled or readonly control is barred),
+   page no one has edited, src/html/forms.c's, the scripts' own, each flag of a
+   candidate that holds kept: a value missing -- told of all but a text field --,
+   an e-mail or URL of the wrong type, a value off its pattern, under its min or
+   over its max, off its step; a disabled control, a readonly input or textarea,
+   one in a datalist and a button are barred),
    current, busy, haspopup (a select's popup a menu, as Chromium has it;
    a combobox's a listbox), orientation (with each role's default),
    multiselectable, modal, autocomplete (an input with a list), multiline. A token
@@ -123,10 +125,13 @@ amb_interface(net);
 amb_interface(css);
 amb_implementation(a11y);
 #include "../css/css.h"
-#include "../net/url.h"
 #include "../dom/dom.h"
-/* HTML's pattern attribute, read by the script engine's regular expressions (src/js/js.h) */
-int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
+/* HTML's form controls, the one account the scripts share (src/html/forms.c): a value sanitized, a select's options
+   chosen, the radio groups that miss a checked button, constraint validation's flags */
+#include "../html/forms.h"
+void form_sanitize(const dom_document *d, uint32_t x, const char *raw, size_t n, vector<char> *out);
+void form_options(const dom_document *d, uint32_t s, vector<uint32_t> *opts, vector<uint8_t> *how);
+void form_radios_missing(const dom_document *d, vector<uint8_t> *miss);
 
 /* ---- the names this module reads, found among the document's atoms when first asked ---- */
 
@@ -934,33 +939,8 @@ static int ax_scan(ACTX, uint32_t x, uint32_t *sl, int *aria) {
 /* ---- selects ---- */
 
 /* a select's options in tree order (its own and its optgroups'), each with how it is chosen: 0 not, 1 by its
-   selected attribute, 2 by default (HTML's selectedness setting: a single select keeps the last option selected,
-   and one that shows a single option chooses its first enabled one when none is) */
-static void ax_choose(ACTX, uint32_t s, vector<uint32_t> *opts, vector<uint8_t> *how) {
-    clear(*opts);
-    clear(*how);
-    for (uint32_t c = d->node[s].first_child; c; c = d->node[c].next_sibling) {
-        int k = ax_kind(AARGS, c);
-        if (k == E_OPTION) push_back(opts, c);
-        else if (k == E_OPTGROUP)
-            for (uint32_t o = d->node[c].first_child; o; o = d->node[o].next_sibling) if (ax_kind(AARGS, o) == E_OPTION) push_back(opts, o);
-    }
-    int last = -1;
-    for (size_t i = 0; i < len(*opts); i++) {
-        uint8_t h = ax_get(AARGS, at(*opts, i), K_SELECTED) ? 1 : 0;
-        push_back(how, h);
-        if (h) last = (int)i;
-    }
-    if (ax_get(AARGS, s, K_MULTIPLE)) return;
-    for (size_t i = 0; i < len(*how); i++) if ((int)i != last) (*how)[i] = 0;
-    if (last >= 0 || ax_select_list(AARGS, s)) return;
-    for (size_t i = 0; i < len(*opts); i++) {
-        uint32_t o = at(*opts, i);
-        uint32_t p = d->node[o].parent;
-        int off = ax_get(AARGS, o, K_DISABLED) || (ax_kind(AARGS, p) == E_OPTGROUP && ax_get(AARGS, p, K_DISABLED));
-        if (!off) { (*how)[i] = 2; return; }
-    }
-}
+   selected attribute, 2 by default (HTML's selectedness setting, src/html/forms.c's) */
+static void ax_choose(ACTX, uint32_t s, vector<uint32_t> *opts, vector<uint8_t> *how) { form_options(d, s, opts, how); }
 
 /* ---- names ---- */
 
@@ -996,187 +976,31 @@ static void ax_option_text(ACTX, uint32_t o, vector<char> *out) {
     if (la && ax_put_attr(d, la, out)) return;
     ax_content(AARGS, o, 0, 0, out);
 }
-/* ---- an input's value, as HTML reads it ---- */
+/* ---- an input's value, as HTML reads it (src/html/forms.c's) ---- */
 
-/* p[0..n) is a valid floating-point number (HTML 2.3.4.3: no sign but a minus, no white space), finite and inside a
-   float's range as Chromium keeps a number input's (its -0 made 0): 1 and *v */
-static int ax_float(const char *p, size_t n, double *v) {
-    size_t i = 0;
-    if (i < n && p[i] == '-') i++;
-    size_t d0 = i;
-    while (i < n && p[i] >= '0' && p[i] <= '9') i++;
-    size_t di = i - d0, df = 0;
-    if (i < n && p[i] == '.') {
-        i++;
-        size_t f0 = i;
-        while (i < n && p[i] >= '0' && p[i] <= '9') i++;
-        df = i - f0;
-        if (!df) return 0;
-    }
-    if (!di && !df) return 0;
-    if (i < n && (p[i] == 'e' || p[i] == 'E')) {
-        i++;
-        if (i < n && (p[i] == '-' || p[i] == '+')) i++;
-        size_t e0 = i;
-        while (i < n && p[i] >= '0' && p[i] <= '9') i++;
-        if (i == e0) return 0;
-    }
-    if (i != n || n >= 64) return 0;
-    char buf[64];
-    memcpy(buf, p, n);
-    buf[n] = 0;
-    char *end = buf;
-    double x = strtod(buf, &end);
-    if (x != x || x > 3.4028234663852886e38 || x < -3.4028234663852886e38) return 0;
-    *v = x == 0 ? 0 : x;
-    return 1;
-}
+/* p[0..n) is a valid floating-point number (HTML 2.3.4.3), in a float's range as Chromium keeps a number input's */
+static int ax_float(const char *p, size_t n, double *v) { return form_float(p, n, v); }
 /* the attribute a's value (raw, as HTML reads it) as a valid floating-point number: 1 and *v */
 static int ax_attr_float(const dom_document *d, uint32_t a, double *v) {
     if (!a) return 0;
     amb_span s = d->attr[a].value;
+    if (!s.len) return 0;
     return ax_float(text_ptr(d, s), s.len, v);
 }
-
-static const int ax_mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-static int ax_leap(long y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
-static int ax_month_days(long y, long m) { return m == 2 && ax_leap(y) ? 29 : ax_mdays[m - 1]; }
-/* the days from 1970-01-01 to y-m-dd of the proleptic Gregorian calendar */
-static long ax_days(long y, long m, long dd) {
-    y -= m <= 2;
-    long era = (y >= 0 ? y : y - 399) / 400;
-    long yoe = y - era * 400;
-    long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + dd - 1;
-    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
-/* the weekday of a day from 1970-01-01 (a Thursday): 0 Monday ... 6 Sunday */
-static long ax_weekday(long days) { return ((days % 7) + 7 + 3) % 7; }
-/* the weeks of a year (ISO 8601): 53 when it starts on a Thursday, or on a Wednesday in a leap year */
-static long ax_weeks(long y) {
-    long wd = ax_weekday(ax_days(y, 1, 1));
-    return wd == 3 || (wd == 2 && ax_leap(y)) ? 53 : 52;
-}
-/* least to most digits at p[*i] as a number: 1, *v and *i past them */
-static int ax_digits(const char *p, size_t n, size_t *i, size_t least, size_t most, long *v) {
-    size_t b = *i;
-    long x = 0;
-    while (*i < n && *i - b < most && p[*i] >= '0' && p[*i] <= '9') { x = x * 10 + (p[*i] - '0'); (*i)++; }
-    if (*i - b < least) return 0;
-    *v = x;
-    return 1;
-}
-/* a year (four digits or more, above 0), a month, and with want_day a day of it, at p[*i] */
-static int ax_ymd(const char *p, size_t n, size_t *i, long *y, long *m, long *dd, int want_day) {
-    if (!ax_digits(p, n, i, 4, 9, y) || *y < 1 || *i >= n || p[*i] != '-') return 0;
-    (*i)++;
-    if (!ax_digits(p, n, i, 2, 2, m) || *m < 1 || *m > 12) return 0;
-    if (!want_day) return 1;
-    if (*i >= n || p[*i] != '-') return 0;
-    (*i)++;
-    return ax_digits(p, n, i, 2, 2, dd) && *dd >= 1 && *dd <= ax_month_days(*y, *m);
-}
-/* a time, HH:MM with :SS and a fraction of one to three digits or not, at p[*i]: its milliseconds after midnight */
-static int ax_hms(const char *p, size_t n, size_t *i, double *ms) {
-    long h = 0, mi = 0, sec = 0, frac = 0;
-    if (!ax_digits(p, n, i, 2, 2, &h) || h > 23 || *i >= n || p[*i] != ':') return 0;
-    (*i)++;
-    if (!ax_digits(p, n, i, 2, 2, &mi) || mi > 59) return 0;
-    double f = 0;
-    if (*i < n && p[*i] == ':') {
-        (*i)++;
-        if (!ax_digits(p, n, i, 2, 2, &sec) || sec > 59) return 0;
-        if (*i < n && p[*i] == '.') {
-            (*i)++;
-            size_t b = *i;
-            if (!ax_digits(p, n, i, 1, 3, &frac)) return 0;
-            size_t k = *i - b;
-            f = (double)frac * (k == 1 ? 100 : k == 2 ? 10 : 1);
-        }
-    }
-    *ms = (double)((h * 60 + mi) * 60 + sec) * 1000.0 + f;
-    return 1;
-}
-/* a string of an input's type as HTML's algorithm to convert a string to a number reads it: a number's own; a date's,
-   a week's (its Monday's) or a local date and time's milliseconds since the epoch, a time's since midnight; a month's
-   months since 1970-01. 1 and *v; 0 when it is no valid string of the type */
-static int ax_type_number(int ty, const char *p, size_t n, double *v) {
-    size_t i = 0;
-    long y = 0, m = 0, dd = 0, w = 0;
-    double ms = 0;
-    if (ty == IT_NUMBER || ty == IT_RANGE) return ax_float(p, n, v);
-    if (ty == IT_DATE) {
-        if (!ax_ymd(p, n, &i, &y, &m, &dd, 1) || i != n) return 0;
-        *v = (double)ax_days(y, m, dd) * 86400000.0;
-        return 1;
-    }
-    if (ty == IT_MONTH) {
-        if (!ax_ymd(p, n, &i, &y, &m, &dd, 0) || i != n) return 0;
-        *v = (double)((y - 1970) * 12 + m - 1);
-        return 1;
-    }
-    if (ty == IT_WEEK) {
-        if (!ax_digits(p, n, &i, 4, 9, &y) || y < 1 || i + 2 > n || p[i] != '-' || p[i + 1] != 'W') return 0;
-        i += 2;
-        if (!ax_digits(p, n, &i, 2, 2, &w) || i != n || w < 1 || w > ax_weeks(y)) return 0;
-        long jan1 = ax_days(y, 1, 1), wd = ax_weekday(jan1);
-        long mon1 = jan1 - wd + (wd > 3 ? 7 : 0);      /* week 1's Monday: the week of the year's first Thursday */
-        *v = (double)(mon1 + (w - 1) * 7) * 86400000.0;
-        return 1;
-    }
-    if (ty == IT_TIME) {
-        if (!ax_hms(p, n, &i, &ms) || i != n) return 0;
-        *v = ms;
-        return 1;
-    }
-    if (ty == IT_DTL) {
-        if (!ax_ymd(p, n, &i, &y, &m, &dd, 1) || i >= n || (p[i] != 'T' && p[i] != ' ')) return 0;
-        i++;
-        if (!ax_hms(p, n, &i, &ms) || i != n) return 0;
-        *v = (double)ax_days(y, m, dd) * 86400000.0 + ms;
-        return 1;
-    }
-    return 0;
-}
-static int ax_dated(int ty) { return ty >= IT_DATE && ty <= IT_DTL; }
-/* an input's value as its value attribute leaves it through HTML's value sanitization (4.10.5.1): a text field's line
-   breaks gone; an e-mail's and a URL's white space at either end gone too, a list of e-mails (multiple) trimmed each and
-   joined by commas; a number's, a date's or a time's empty unless it is a valid one; any other's as it is */
+/* a string of an input's type as HTML's algorithm to convert a string to a number reads it */
+static int ax_type_number(int ty, const char *p, size_t n, double *v) { return form_type_number(ty, p, n, v); }
+static int ax_dated(int ty) { return form_dated(ty); }
+/* an input's value as its value attribute leaves it through HTML's value sanitization (4.10.5.1) */
 static void ax_input_value(ACTX, uint32_t x, int ty, vector<char> *out) {
+    (void)ty;
     clear(*out);
     uint32_t va = ax_get(AARGS, x, K_VALUE);
-    if (!va) return;
+    if (!va || !d->attr[va].value.len) return;
     amb_span s = d->attr[va].value;
-    const char *p = text_ptr(d, s);
-    if (ty == IT_EMAIL && ax_get(AARGS, x, K_MULTIPLE)) {
-        size_t i = 0;
-        int first = 1;
-        while (i <= s.len) {
-            size_t b = i;
-            while (i < s.len && p[i] != ',') i++;
-            size_t e = i;
-            while (b < e && ax_white(p[b])) b++;
-            while (e > b && ax_white(p[e - 1])) e--;
-            if (!first) push_back(out, ',');
-            first = 0;
-            for (size_t q = b; q < e; q++) if (p[q] != '\n' && p[q] != '\r') push_back(out, p[q]);
-            i++;
-        }
-        return;
-    }
-    if (ax_text_input(ty)) { for (uint32_t i = 0; i < s.len; i++) if (p[i] != '\n' && p[i] != '\r') push_back(out, p[i]); }
-    else append_range(out, p, s.len);
-    if (ty == IT_EMAIL || ty == IT_URL) {
-        size_t b = 0, e = len(*out);
-        while (b < e && ax_white(at(*out, b))) b++;
-        while (e > b && ax_white(at(*out, e - 1))) e--;
-        if (b) memmove(data(*out), data(*out) + b, e - b);
-        resize(out, e - b);
-    }
-    double v = 0;
-    if ((ty == IT_NUMBER || ax_dated(ty)) && !ax_type_number(ty, data(*out), len(*out), &v)) clear(*out);
+    vector<char> raw;
+    append_range(raw, text_ptr(d, s), s.len);
+    form_sanitize(d, x, data(raw), len(raw), out);
 }
-
 /* a range input's value, least and greatest values (HTML: 0 and 100, the value half way, kept in the range and put
    on its step, the nearer step and the greater of two) */
 static void ax_range_input(ACTX, uint32_t x, double *now, double *mn, double *mx) {
@@ -1955,193 +1779,41 @@ typedef struct ax_found { uint8_t state, value, from; } ax_found;
 /* an attribute that is true */
 #define AX_TRUE(a) (ax_tok(d, (a), "true") == 0)
 
-/* ---- constraint validation (HTML 4.10.20.2), of a page no one has edited ---- */
+/* ---- constraint validation (HTML 4.10.20.2), of a page no one has edited: src/html/forms.c's ---- */
 
 /* the flags of a control's validity state, by bit, and as the contract names them */
 enum { V_MISSING = 1, V_TYPE = 2, V_PATTERN = 4, V_UNDER = 8, V_OVER = 16, V_STEP = 32, V_COUNT = 6 };
 static const a11y_validity ax_validity_flags[V_COUNT] = { A11Y_VALIDITY_VALUE_MISSING, A11Y_VALIDITY_TYPE_MISMATCH,
     A11Y_VALIDITY_PATTERN_MISMATCH, A11Y_VALIDITY_RANGE_UNDERFLOW, A11Y_VALIDITY_RANGE_OVERFLOW, A11Y_VALIDITY_STEP_MISMATCH };
 
-static int ax_alnum(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
-/* p[0..n) is a valid e-mail address (HTML 4.10.5.1.5): a local part of letters, digits and .!#$%&'*+/=?^_`{|}~-, an @,
-   and a domain of labels with dots between, each of 1 to 63 letters, digits and hyphens with no hyphen at either end. A
-   label beyond ASCII is taken as one whose IDNA form is good, as Chromium converts it before it looks */
-static int ax_email_ok(const char *p, size_t n) {
-    size_t a = 0;
-    while (a < n && p[a] != '@') a++;
-    if (a == 0 || a + 1 >= n) return 0;
-    const char *local = ".!#$%&'*+/=?^_`{|}~-";
-    for (size_t i = 0; i < a; i++) {
-        char c = p[i];
-        int ok = ax_alnum(c);
-        for (size_t q = 0; !ok && local[q]; q++) if (local[q] == c) ok = 1;
-        if (!ok) return 0;
-    }
-    size_t i = a + 1;
-    while (i <= n) {
-        size_t b = i;
-        while (i < n && p[i] != '.') {
-            char c = p[i];
-            if (!ax_alnum(c) && c != '-' && !((unsigned char)c & 0x80)) return 0;
-            i++;
-        }
-        if (i == b || i - b > 63 || p[b] == '-' || p[i - 1] == '-') return 0;
-        i++;
-    }
-    return 1;
-}
-/* p[0..n) is a valid absolute URL, as Chromium takes one: a scheme and its colon, then what the URL parser reads */
-static int ax_url_ok(const char *p, size_t n) {
-    if (!n || !((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))) return 0;
-    size_t i = 1;
-    while (i < n && (ax_alnum(p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.')) i++;
-    if (i >= n || p[i] != ':') return 0;
-    vector<char> ref, out;
-    /* a space in a special scheme's host, written or as %20, Chromium's parser takes (it escapes it), where the URL
-       standard refuses it: the host is judged without its spaces (measured on tests/pages/a11y-url.html) */
-    int special = (i == 4 && (ax_word_is(p, 4, "http") || ax_word_is(p, 4, "file"))) || (i == 5 && ax_word_is(p, 5, "https")) ||
-                  (i == 3 && ax_word_is(p, 3, "ftp")) || (i == 2 && ax_word_is(p, 2, "ws")) || (i == 3 && ax_word_is(p, 3, "wss"));
-    size_t hb = n, he = n;
-    if (special && i + 2 < n && p[i + 1] == '/' && p[i + 2] == '/') {
-        hb = i + 3;
-        he = hb;
-        while (he < n && p[he] != '/' && p[he] != '?' && p[he] != '#' && p[he] != '\\') he++;
-        for (size_t k = hb; k < he; k++) if (p[k] == '@') hb = k + 1;
-        if (hb < he && p[hb] == '[') hb = he;   /* an IPv6 address keeps its spaces, which Chromium refuses too */
-    }
-    for (size_t k = 0; k < n; k++) {
-        if (k >= hb && k < he) {
-            if (p[k] == ' ') continue;
-            if (p[k] == '%' && k + 2 < he && p[k + 1] == '2' && p[k + 2] == '0') { k += 2; continue; }
-        }
-        push_back(ref, p[k]);
-    }
-    push_back(ref, 0);
-    resize(out, 3 * n + 256);
-    return net_url_resolve("about:blank", data(ref), data(out), len(out));
-}
-/* an option's value is empty: its value attribute's, else its text's (white space aside) */
-static int ax_option_empty(ACTX, uint32_t o) {
-    uint32_t va = ax_get(AARGS, o, K_VALUE);
-    if (va) return d->attr[va].value.len == 0;
-    uint32_t x = d->node[o].first_child;
-    while (x) {
-        if (d->node[x].kind == DOM_NODE_KIND_TEXT) {
-            amb_span v = d->node[x].data;
-            const char *q = text_ptr(d, v);
-            for (uint32_t i = 0; i < v.len; i++) if (!ax_white(q[i])) return 0;
-        }
-        if (d->node[x].kind == DOM_NODE_KIND_ELEMENT && ax_kind(AARGS, x) != E_SCRIPT && d->node[x].first_child) { x = d->node[x].first_child; continue; }
-        while (x != o && !d->node[x].next_sibling) x = d->node[x].parent;
-        if (x == o) break;
-        x = d->node[x].next_sibling;
-    }
-    return 1;
-}
-/* the flags of a form control's validity state that hold (HTML 4.10.20.2), as a page no one has edited has them: no
-   field is dirty, so none is too long or too short. 0 for what is barred from constraint validation (a disabled
-   control, a field that is readonly, a button) or is no control. value is the input's value, sanitized */
+/* the flags of a form control's validity state that hold, as a page no one has edited has them (no field is dirty, so
+   none is too long or too short): those of a candidate for constraint validation alone, as Chromium's tree reads them
+   (0 for what is barred: a disabled control, a readonly input or textarea, one in a datalist, a button). value is the
+   input's value, sanitized */
 static int ax_validity(ACTX, uint32_t x, int k, int ty, int disabled, const vector<char> *value) {
-    if (disabled) return 0;
-    int req = ax_get(AARGS, x, K_REQUIRED) != 0;
+    (void)ty;
+    if (disabled || !form_will_validate(d, x)) return 0;
+    uint32_t how = FORM_HOW_GROUP_KNOWN | (x < len(*rmiss) && at(*rmiss, x) ? FORM_HOW_GROUP_MISSING : 0);
+    uint32_t f = 0;
     if (k == E_TEXTAREA) {
-        if (!req || ax_get(AARGS, x, K_READONLY)) return 0;
+        /* its value is its default, its text */
+        vector<char> v;
         for (uint32_t c = d->node[x].first_child; c; c = d->node[c].next_sibling)
-            if (d->node[c].kind == DOM_NODE_KIND_TEXT && d->node[c].data.len) return 0;
-        return V_MISSING;
-    }
-    if (k == E_SELECT) {
-        /* missing: no option chosen but its placeholder label option (a single select of one row's first option,
-           its own child, whose value is empty) */
-        if (!req) return 0;
-        vector<uint32_t> opts;
-        vector<uint8_t> how;
-        ax_choose(AARGS, x, &opts, &how);
-        uint32_t ph = 0;
-        if (len(opts) && !ax_select_list(AARGS, x) && d->node[at(opts, 0)].parent == x && ax_option_empty(AARGS, at(opts, 0))) ph = at(opts, 0);
-        for (size_t i = 0; i < len(opts); i++) if (at(how, i) && at(opts, i) != ph) return 0;
-        return V_MISSING;
-    }
-    if (k != E_INPUT || ty == IT_HIDDEN || ax_input_button(ty) || ty == IT_IMAGE) return 0;
-    int field = ax_text_input(ty) || ty == IT_NUMBER || ax_dated(ty);
-    if (field && ax_get(AARGS, x, K_READONLY)) return 0;
-    int f = 0;
-    size_t n = len(*value);
-    if (req && ((field && !n) || ty == IT_FILE || (ty == IT_CHECKBOX && !ax_get(AARGS, x, K_CHECKED)))) f |= V_MISSING;
-    if (ty == IT_RADIO && x < len(*rmiss) && at(*rmiss, x)) f |= V_MISSING;
-    if (!n) return f;
-    const char *p = data(*value);
-    /* the type of an e-mail (each of a list's) and of a URL; a text field's pattern, each of a list's e-mails */
-    uint32_t pa = ax_text_input(ty) ? ax_get(AARGS, x, K_PATTERN) : 0;
-    if (ty == IT_EMAIL || ty == IT_URL || pa) {
-        int each = ty == IT_EMAIL && ax_get(AARGS, x, K_MULTIPLE);
-        size_t i = 0;
-        while (i <= n) {
-            size_t b = i;
-            while (i < n && !(each && p[i] == ',')) i++;
-            if (ty == IT_EMAIL && !ax_email_ok(p + b, i - b)) f |= V_TYPE;
-            if (ty == IT_URL && !ax_url_ok(p + b, i - b)) f |= V_TYPE;
-            if (pa && js_pattern_test(text_ptr(d, d->attr[pa].value), d->attr[pa].value.len, p + b, i - b) == 0) f |= V_PATTERN;
-            i++;
-        }
-    }
-    /* a number's, a date's or a time's range, and its step from its step base: its min (with none, its value
-       attribute, which is its value: on its step) */
-    if (ty == IT_NUMBER || ax_dated(ty)) {
-        double v = 0, lo = 0, hi = 0, sv = 0;
-        if (!ax_type_number(ty, p, n, &v)) return f;
-        uint32_t ma = ax_get(AARGS, x, K_MIN), xa = ax_get(AARGS, x, K_MAX);
-        int has_lo = ma && ax_type_number(ty, text_ptr(d, d->attr[ma].value), d->attr[ma].value.len, &lo);
-        int has_hi = xa && ax_type_number(ty, text_ptr(d, d->attr[xa].value), d->attr[xa].value.len, &hi);
-        if (has_lo && v < lo) f |= V_UNDER;
-        if (has_hi && v > hi) f |= V_OVER;
-        uint32_t sa = ax_get(AARGS, x, K_STEP);
-        if (has_lo && !(sa && ax_tok(d, sa, "any") == 0)) {
-            /* the default step and the step scale factor of the type (HTML 4.10.5.1): a day, a month, a week, a minute */
-            double def = ty == IT_TIME || ty == IT_DTL ? 60 : 1;
-            double scale = ty == IT_DATE ? 86400000.0 : ty == IT_WEEK ? 604800000.0 : ty == IT_TIME || ty == IT_DTL ? 1000.0 : 1;
-            double step = sa && ax_attr_float(d, sa, &sv) && sv > 0 ? sv : def;
-            /* Chromium's rounding: a date's, a month's or a week's step whole, a time's in whole milliseconds */
-            if (ty == IT_DATE || ty == IT_MONTH || ty == IT_WEEK) { step = floor(step + 0.5); if (step < 1) step = 1; }
-            step *= scale;
-            if (ty == IT_TIME || ty == IT_DTL) { step = floor(step + 0.5); if (step < 1) step = 1; }
-            double q = fabs(v - lo), r = q - step * floor(q / step);
-            double err = ty == IT_NUMBER ? step / 16777216.0 : 0;   /* what a float cannot tell apart, as Chromium allows */
-            if (err < r && r < step - err) f |= V_STEP;
-        }
-    }
-    return f;
+            if (d->node[c].kind == DOM_NODE_KIND_TEXT && d->node[c].data.len) append_range(v, text_ptr(d, d->node[c].data), d->node[c].data.len);
+        f = form_validity(d, x, data(v), len(v), how);
+    } else f = form_validity(d, x, data(*value), len(*value), how);
+    int out = 0;
+    if (f & FORM_V_MISSING) out |= V_MISSING;
+    if (f & FORM_V_TYPE) out |= V_TYPE;
+    if (f & FORM_V_PATTERN) out |= V_PATTERN;
+    if (f & FORM_V_UNDER) out |= V_UNDER;
+    if (f & FORM_V_OVER) out |= V_OVER;
+    if (f & FORM_V_STEP) out |= V_STEP;
+    return out;
 }
-/* each radio button whose group (one non-empty name in one form) holds a required button and no checked one: marked
-   in rmiss, as each is missing its value (HTML 4.10.5.1.18) */
-static void ax_radio_groups(ACTX) {
-    resize(rmiss, d->node_len, 0);
-    vector<uint32_t> rs, fm;
-    for (uint32_t x = 1; x < d->node_len; x++) {
-        if (!d->node[x].live || ax_kind(AARGS, x) != E_INPUT || ax_input_type(AARGS, x) != IT_RADIO || !ax_connected(d, x)) continue;
-        uint32_t na = ax_get(AARGS, x, K_NAME);
-        if (!na || !d->attr[na].value.len) continue;
-        uint32_t form = 0;
-        for (uint32_t q = d->node[x].parent; q > 1 && !form; q = d->node[q].parent) if (ax_kind(AARGS, q) == E_FORM) form = q;
-        push_back(rs, x);
-        push_back(fm, form);
-    }
-    for (size_t i = 0; i < len(rs); i++) {
-        uint32_t x = at(rs, i);
-        if (!ax_get(AARGS, x, K_REQUIRED) || at(*rmiss, x)) continue;
-        amb_span nm = d->attr[ax_get(AARGS, x, K_NAME)].value;
-        int checked = 0;
-        for (int pass = 0; pass < 2 && !checked; pass++)
-            for (size_t j = 0; j < len(rs); j++) {
-                uint32_t y = at(rs, j);
-                amb_span ym = d->attr[ax_get(AARGS, y, K_NAME)].value;
-                if (at(fm, j) != at(fm, i) || ym.len != nm.len || memcmp(text_ptr(d, ym), text_ptr(d, nm), nm.len) != 0) continue;
-                if (pass == 0 && ax_get(AARGS, y, K_CHECKED)) { checked = 1; break; }
-                if (pass == 1) (*rmiss)[y] = 1;
-            }
-    }
-}
-
+/* each radio button whose group holds a required button and no checked one: marked in rmiss, as each is missing its
+   value (HTML 4.10.5.1.18) */
+static void ax_radio_groups(ACTX) { form_radios_missing(d, rmiss); }
 /* a node's states and properties, in the contract's order. sl holds its aria-* attributes; dis is where its disabled
    state came from (-1 none), dis_by the element it came from, off that it is natively disabled; sel how each option
    of a select is chosen */
@@ -2149,9 +1821,11 @@ static void ax_states(ACTX, const vector<uint8_t> *sel, const uint32_t *sl, uint
                       int dis, uint32_t dis_by, int off, int vf) {
     ax_found fs[16];
     int nf = 0, v;
-    /* checked: an input's attribute; aria-checked, unchecked without it (no mixed radio or switch) */
+    /* checked: an input's checkedness (src/dom/dom.h: its state, else its attribute); aria-checked, unchecked without it
+       (no mixed radio or switch) */
     if (k == E_INPUT && (ty == IT_CHECKBOX || ty == IT_RADIO))
-        AX_FOUND(A11Y_STATE_CHECKED, ax_get(AARGS, x, K_CHECKED) ? A11Y_TOKEN_TRUE : A11Y_TOKEN_FALSE, A11Y_STATE_FROM_HTML);
+        AX_FOUND(A11Y_STATE_CHECKED, dom_checkedness(d, x, ax_get(AARGS, x, K_CHECKED) != 0) ? A11Y_TOKEN_TRUE : A11Y_TOKEN_FALSE,
+                 A11Y_STATE_FROM_HTML);
     else if (role == A11Y_ROLE_CHECKBOX || role == A11Y_ROLE_RADIO || role == A11Y_ROLE_SWITCH || role == A11Y_ROLE_MENUITEMCHECKBOX ||
              role == A11Y_ROLE_MENUITEMRADIO) {
         v = ax_tok(d, AS(A_CHECKED), "true false mixed");

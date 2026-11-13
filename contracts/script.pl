@@ -113,7 +113,8 @@ script_contract(record(navigation, [
     field(target,    span(text)),           % the browsing context named (_blank ...), empty for the page's own
     field(resource,  xhandle(net, resource)),  % the loader's fetch of it; none when it was not fetched here
     field(status,    u32),
-    field(fields,    u32)                   % the form data set's entries
+    field(fields,    u32),                  % the form data set's entries
+    field(asked,     bool)                  % its beforeunload asked to stay: a listener cancelled it or gave it a returnValue
 ])).
 %% a field a form's submission sent: its name and its control, never its value
 script_contract(record(form_field, [
@@ -228,6 +229,10 @@ script_contract(fact(script_navigation_target(handle, field(target)), table(navi
 script_contract(fact(script_navigation_resource(handle, field(resource)), table(navigation), true)).
 script_contract(fact(script_navigation_status(handle, field(status)), table(navigation), field(status) \== 0)).
 script_contract(fact(script_form_field(field(navigation), field(name), field(control)), table(form_field), true)).
+%% a navigation the page's beforeunload asked the user to confirm (a listener cancelled the
+%% event, or gave its returnValue a text): Chromium asks only after a user's gesture, and the
+%% navigation went on, as Chromium's does once its dialog is accepted
+script_contract(fact(script_navigation_asked(handle), table(navigation), field(asked) == true)).
 %% each MutationObserver: the script that made it; disconnected; what its callback had.
 %% Each observe(): its observer, the script, the node, and what it watches there
 script_contract(fact(script_observer(handle, field(run)), table(observer), true)).

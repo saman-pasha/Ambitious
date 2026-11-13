@@ -21,7 +21,14 @@
 
    MODULE SCRIPTS (HTML 8.1.5). A script of type module is run after the parse, in order
    with the deferred scripts (an async one as soon as its graph is fetched); its graph
-   is fetched as the parse ends, after import()'s tasks then due. A specifier resolves
+   is fetched as the parse ends, after import()'s tasks then due, the external ones' own
+   files first where no network answers their refusal (a file:'s), as Chromium's preload
+   scanner asks for them before the parser reaches an inline module's imports. One a
+   script inserts, inline or external, runs in a task of its own once its graph is
+   fetched (an external one's load event after it, even when its evaluation threw), and
+   an inline import map a script inserts is merged into the page's (the first mapping of
+   a specifier kept); an external import map is not read, its error event queued, as
+   Chromium 153 has it (with no console line). A specifier resolves
    through the import maps the page gave (each scope its URL's, the longest first, then
    the top level) or as a URL-like one; each module is fetched through the loader as
    Chromium's would be: of the document's origin or a data: URL (another origin's and a
@@ -29,6 +36,11 @@
    written to the console once a URL. A specifier that resolves to nothing, and a
    module that throws, are the script's errors; a fetch that failed fires its error
    event; import() rejects with Chromium's TypeError. nomodule scripts are passed over.
+
+   FORM CONTROLS. An input's checkedness is the DOM's state (src/html/forms.c): the
+   checked IDL attribute sets it and its dirty flag, defaultChecked is the attribute, and
+   a script's attribute change, insertion and clone keep a radio button group as Chromium
+   keeps one; a field's value reads as HTML's value sanitization leaves it.
 
    THE RECORDS. What ran, what the console was given, what was thrown and caught by
    nothing, the listeners and the timers are this module's records (its facts): the
@@ -45,6 +57,8 @@ amb_interface(net);
 amb_implementation(script);
 #include "../js/js.h"
 #include "../net/url.h"
+#include "../dom/dom.h"
+#include "../html/forms.h"
 #include "host.h"
 #include "script.h"
 
@@ -58,6 +72,10 @@ void script_view_update(struct js_host *h);
 int script_view_rendered(struct js_host *h, uint32_t x);
 int script_view_style(struct js_host *h, uint32_t x, const char *name, size_t n, vector<char> *out);
 int script_view_border_box(struct js_host *h, uint32_t x, double *r);
+/* HTML's form controls (src/html/forms.c), the helpers that take vectors; a field's value as typed or set, its validity
+   state's object and message (src/script/input.c) */
+void form_sanitize(const dom_document *d, uint32_t x, const char *raw, size_t n, vector<char> *out);
+int script_field_raw(js_vm *vm, uint32_t x, vector<char> *out);
 int script_view_borders(struct js_host *h, uint32_t x, double *r);
 uint32_t script_view_rects(struct js_host *h, uint32_t x, double *r, uint32_t max);
 uint32_t script_view_runs(const struct js_host *h);
@@ -82,7 +100,8 @@ enum {
     HA_NAMESPACEURI, HA_HASH, HA_VALUE_STATE, HA_FORMS, HA_IMAGES, HA_LINKS, HA_ANCHORS, HA_SCRIPTS, HA_ELEMENTS,
     HA_OPTIONS, HA_ROWS, HA_CELLS, HA_TBODIES, HA_OFFSETWIDTH, HA_OFFSETHEIGHT, HA_OFFSETTOP, HA_OFFSETLEFT,
     HA_OFFSETPARENT, HA_CLIENTWIDTH, HA_CLIENTHEIGHT, HA_CLIENTTOP, HA_CLIENTLEFT, HA_SCROLLTOP, HA_SCROLLLEFT,
-    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_CURRENTSCRIPT, HA_ASYNC, HA_DEFER, HA_ACTIVEELEMENT, HA_COMPOSED, HA_N
+    HA_SCROLLWIDTH, HA_SCROLLHEIGHT, HA_CURRENTSCRIPT, HA_ASYNC, HA_DEFER, HA_ACTIVEELEMENT, HA_COMPOSED, HA_DEFAULTCHECKED,
+    HA_VALIDITY, HA_WILLVALIDATE, HA_VALIDATIONMESSAGE, HA_N
 };
 static const char *const sh_names[HA_N] = {
     "textContent", "innerHTML", "outerHTML", "innerText", "id", "className", "classList", "tagName",
@@ -97,7 +116,8 @@ static const char *const sh_names[HA_N] = {
     "namespaceURI", "hash", "\001value", "forms", "images", "links", "anchors", "scripts", "elements",
     "options", "rows", "cells", "tBodies", "offsetWidth", "offsetHeight", "offsetTop", "offsetLeft",
     "offsetParent", "clientWidth", "clientHeight", "clientTop", "clientLeft", "scrollTop", "scrollLeft",
-    "scrollWidth", "scrollHeight", "currentScript", "async", "defer", "activeElement", "composed" };
+    "scrollWidth", "scrollHeight", "currentScript", "async", "defer", "activeElement", "composed", "defaultChecked",
+    "validity", "willValidate", "validationMessage" };
 
 /* the host's natives' numbers, from JS_HOST_NATIVES */
 enum {
@@ -491,6 +511,7 @@ static void sh_insert_html(js_vm *vm, uint32_t parent, uint32_t before, const ch
         sh_start_all(vm->host, y);
         if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
         else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
+        form_inserted(d, y);
     }
 }
 
@@ -794,9 +815,9 @@ static jv sh_this_of(js_vm *vm, uint32_t node) {
     return sh_wrap(vm, node);
 }
 
-/* fn called as a listener of ev on node: its error recorded, not passed on. 0 when the
-   step budget is spent */
-static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run) {
+/* fn called as a listener of ev on node (an on* handler when handler is set): its error
+   recorded, not passed on. 0 when the step budget is spent */
+static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run, int handler) {
     /* the changes made before the listener runs, recorded as they were made */
     if (vm->host && vm->host->mreg_live) script_observe_flush(vm);
     uint32_t saved = vm->cur_run;
@@ -805,8 +826,11 @@ static int sh_call_listener(js_vm *vm, jv fn, uint32_t node, jv ev, uint32_t run
     jv r = js_call(vm, fn, sh_this_of(vm, node), args, 1);
     vm->cur_run = saved;
     if (vm->throwing && sh_uncaught(vm, run, SCRIPT_PHASE_EVENT) == 2) return 0;
-    /* an on* handler's false cancels the event */
-    if (r == JV_FALSE && (vm->objs[jv_idx(ev)].a & EV_CANCELABLE)) vm->objs[jv_idx(ev)].a |= EV_PREVENTED;
+    /* an on* handler's return value (HTML 8.1.8.1): false cancels the event; a beforeunload
+       handler's any but null or undefined, its returnValue then too (src/script/input.c). A
+       listener's is nothing */
+    if (handler && vm->objs[jv_idx(ev)].b == js_atom_ascii(vm, "beforeunload")) script_unload_returned(vm, ev, r);
+    else if (handler && r == JV_FALSE && (vm->objs[jv_idx(ev)].a & EV_CANCELABLE)) vm->objs[jv_idx(ev)].a |= EV_PREVENTED;
     sh_checkpoint(vm);
     return vm->throwing != 2;
 }
@@ -834,13 +858,13 @@ static int sh_listeners_at(js_vm *vm, uint32_t node, jv ev, uint32_t phase) {
         jv ph = sh_prop_handler(vm, node, type);
         int attr_done = 0;
         if (ph != JV_UNDEF) {
-            if (!sh_call_listener(vm, ph, node, ev, vm->cur_run)) return 0;
+            if (!sh_call_listener(vm, ph, node, ev, vm->cur_run, 1)) return 0;
             attr_done = 1;
         }
         for (size_t i = 0; i < len(vm->listeners) && !attr_done; i++) {
             js_listener l = vm->listeners[i];
             if (l.live && l.attr && l.target == node && l.type == type) {
-                if (!sh_call_listener(vm, jv_obj(l.fn), node, ev, l.run)) return 0;
+                if (!sh_call_listener(vm, jv_obj(l.fn), node, ev, l.run, 1)) return 0;
                 attr_done = 1;
             }
         }
@@ -859,7 +883,7 @@ static int sh_listeners_at(js_vm *vm, uint32_t node, jv ev, uint32_t phase) {
         js_listener l = vm->listeners[now[k]];
         if (!l.live) continue;
         if (l.once) sh_listener_gone(vm, now[k]);
-        if (!sh_call_listener(vm, jv_obj(l.fn), node, ev, l.run)) return 0;
+        if (!sh_call_listener(vm, jv_obj(l.fn), node, ev, l.run, 0)) return 0;
         if (vm->objs[e].a & EV_STOP_NOW) return 1;
     }
     return 1;
@@ -917,28 +941,18 @@ int sh_fire(js_vm *vm, uint32_t target, const char *type, uint32_t flags) {
     return sh_dispatch(vm, target, ev);
 }
 
-/* the other radios of x's group (its name, its form or none) unchecked */
-static void sh_radio_group(dom_document *d, uint32_t x) {
-    uint32_t na = sh_attr_z(d, x, "name");
-    if (!na || !d->attr[na].value.len) return;
-    vector<char> name;
-    append_range(name, text_ptr(d, d->attr[na].value), d->attr[na].value.len);
-    uint32_t form = 0;
-    for (uint32_t y = d->node[x].parent; y && !form; y = d->node[y].parent) if (sh_named(d, y, "form")) form = y;
-    uint32_t root = form ? form : 1;
-    for (uint32_t c = sh_next_in(d, root, root); c; c = sh_next_in(d, c, root)) {
-        if (c == x || !sh_named(d, c, "input") || !sh_attr_z(d, c, "checked")) continue;
-        uint32_t ty = sh_attr_z(d, c, "type"), cn = sh_attr_z(d, c, "name");
-        if (!ty || d->attr[ty].value.len != 5 || !sh_ci_eq(text_ptr(d, d->attr[ty].value), "radio", 5)) continue;
-        if (!cn || d->attr[cn].value.len != len(name) || memcmp(text_ptr(d, d->attr[cn].value), data(name), len(name)) != 0) continue;
-        uint32_t cf = 0;
-        for (uint32_t y = d->node[c].parent; y && !cf; y = d->node[y].parent) if (sh_named(d, y, "form")) cf = y;
-        if (cf == form) dom_remove_attribute(d, node_handle(d, c), "checked", 7);
-    }
+/* x and y have the same attribute of that name, the same value */
+static int sh_same_attr(const dom_document *d, uint32_t x, uint32_t y, const char *name) {
+    uint32_t a = sh_attr_z(d, x, name), b = sh_attr_z(d, y, name);
+    if (!a || !b) return !a && !b;
+    amb_span p = d->attr[a].value, q = d->attr[b].value;
+    return p.len == q.len && (!p.len || memcmp(text_ptr(d, p), text_ptr(d, q), p.len) == 0);
 }
 /* a click at element x: the user's click event (the host's click_ev, a pointer event of
-   the input unit's), or a script's; a checkbox's or radio's checked state changes before
-   it (a radio's group unchecked), back after a cancel; a label's control is clicked after
+   the input unit's), or a script's; a checkbox's or radio's checkedness changes before it
+   (HTML's legacy-pre-activation behavior: a radio checked takes its group, src/html/forms.c),
+   and back after a cancel (a radio's group's old checked button checked again, while it is a
+   radio of x's name and form owner, as Chromium has it); a label's control is clicked after
    it; then the click's default action: a submit or reset button's form, a link */
 static int sh_attr_is(const dom_document *d, uint32_t x, const char *name, const char *v, size_t vn);
 static int sh_input_type_is(const dom_document *d, uint32_t x, const char *t);
@@ -970,23 +984,28 @@ int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
     jv ev = h->click_ev;
     h->click_ev = JV_UNDEF;
     int box = 0, was = 0;
+    uint32_t old = 0;
     if (sh_named(d, x, "input")) {
-        uint32_t ty = sh_attr_z(d, x, "type");
-        if (ty && (d->attr[ty].value.len == 8 && sh_ci_eq(text_ptr(d, d->attr[ty].value), "checkbox", 8))) box = 1;
-        if (ty && (d->attr[ty].value.len == 5 && sh_ci_eq(text_ptr(d, d->attr[ty].value), "radio", 5))) box = 2;
+        int ty = form_input_type(d, x);
+        if (ty == FORM_CHECKBOX) box = 1;
+        if (ty == FORM_RADIO) box = 2;
     }
     if (sh_attr_z(d, x, "disabled") && (sh_named(d, x, "button") || sh_named(d, x, "input"))) return 0;
     if (box) {
-        was = sh_attr_z(d, x, "checked") != 0;
-        if (box == 1 && was) dom_remove_attribute(d, node_handle(d, x), "checked", 7);
-        else dom_set_attribute(d, node_handle(d, x), "checked", 7, "", 0);
-        if (box == 2 && !was) sh_radio_group(d, x);
+        was = form_checked(d, x);
+        /* the group's checked button before the click, x itself when it was checked (Chromium's ClickHandlingState) */
+        if (box == 2) old = was ? x : form_group_checked(d, x);
+        form_set_checked(d, x, box == 1 ? !was : 1);
     }
     if (!jv_is_obj(ev)) ev = script_click_event(vm, trusted);
     int ok = sh_dispatch(vm, x, ev);
-    if (box && !ok) {
-        if (was) dom_set_attribute(d, node_handle(d, x), "checked", 7, "", 0);
-        else dom_remove_attribute(d, node_handle(d, x), "checked", 7);
+    if (box == 1 && !ok) form_set_checked(d, x, was);
+    if (box == 2 && !ok) {
+        /* the old checked button checked again while it is a radio of x's name and form owner; none, x unchecked */
+        if (!old) form_set_checked(d, x, 0);
+        else if (d->node[old].live && sh_named(d, old, "input") && form_input_type(d, old) == FORM_RADIO &&
+                 form_owner(d, old) == form_owner(d, x) && sh_same_attr(d, old, x, "name"))
+            form_set_checked(d, old, 1);
     }
     if (box && ok && (box == 1 || !was)) {
         sh_fire(vm, x, "input", EV_BUBBLES | trusted);
@@ -1632,23 +1651,34 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         break;
     case HA_VALUE:
         if (el) {
-            /* a field's value as typed or set, apart from its default (the attribute, the content) */
-            if ((sh_named(d, x, "input") || sh_named(d, x, "textarea")) && x < len(vm->wrappers) && vm->wrappers[x]) {
-                jv cur;
-                uint32_t f;
-                if (js_get_own(vm, vm->wrappers[x], sh_atom(vm, HA_VALUE_STATE), &cur, &f)) return cur;
-            }
-            if (sh_named(d, x, "textarea")) { vector<char> t; sh_text_of(d, x, &t); return sh_str(vm, data(t), len(t)); }
-            if (sh_named(d, x, "input") && (sh_attr_z(d, x, "type") == 0 || !sh_attr_z(d, x, "value"))) {
-                uint32_t ty = sh_attr_z(d, x, "type");
-                int box = ty && ((d->attr[ty].value.len == 8 && sh_ci_eq(text_ptr(d, d->attr[ty].value), "checkbox", 8)) ||
-                                 (d->attr[ty].value.len == 5 && sh_ci_eq(text_ptr(d, d->attr[ty].value), "radio", 5)));
-                if (box && !sh_attr_z(d, x, "value")) return sh_cstr(vm, "on");
+            /* a field's value as typed or set, apart from its default (the attribute, the content); an input's as HTML's
+               value sanitization leaves it (src/html/forms.c), a check box's or radio button's on without its attribute */
+            if (sh_named(d, x, "input") || sh_named(d, x, "textarea")) {
+                vector<char> raw, v;
+                if (!script_field_raw(vm, x, &raw)) {
+                    if (sh_named(d, x, "textarea")) sh_text_of(d, x, &raw);
+                    else {
+                        int ty = form_input_type(d, x);
+                        uint32_t va = sh_attr_z(d, x, "value");
+                        if ((ty == FORM_CHECKBOX || ty == FORM_RADIO) && !va) return sh_cstr(vm, "on");
+                        if (va && d->attr[va].value.len) append_range(raw, text_ptr(d, d->attr[va].value), d->attr[va].value.len);
+                    }
+                }
+                if (sh_named(d, x, "textarea")) return sh_str(vm, data(raw), len(raw));
+                form_sanitize(d, x, data(raw), len(raw), &v);
+                return sh_str(vm, data(v), len(v));
             }
             return sh_attr_value(vm, d, x, "value");
         }
         break;
-    case HA_CHECKED: if (el) return jv_bool(sh_attr_z(d, x, "checked") != 0); break;
+    /* an input's checkedness, the DOM's state (src/html/forms.c); its checked attribute, the default */
+    case HA_CHECKED: if (sh_named(d, x, "input")) return jv_bool(form_checked(d, x)); break;
+    case HA_DEFAULTCHECKED: if (sh_named(d, x, "input")) return jv_bool(sh_attr_z(d, x, "checked") != 0); break;
+    /* constraint validation (src/script/input.c): a listed element's validity state, whether it is a candidate, its
+       message */
+    case HA_VALIDITY: if (script_listed(d, x)) return script_validity_object(vm, x); break;
+    case HA_WILLVALIDATE: if (script_listed(d, x)) return jv_bool(form_will_validate(d, x)); break;
+    case HA_VALIDATIONMESSAGE: if (script_listed(d, x)) return script_validation_message(vm, x); break;
     case HA_SELECTED: if (el) return jv_bool(sh_attr_z(d, x, "selected") != 0); break;
     case HA_DISABLED: if (el) return jv_bool(sh_attr_z(d, x, "disabled") != 0); break;
     case HA_HIDDEN: if (el) return jv_bool(sh_attr_z(d, x, "hidden") != 0); break;
@@ -1823,18 +1853,46 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     return JV_UNDEF;
 }
 
-/* an attribute of x set to v's string */
+/* an attribute of x set to v's string, what an input's form state does then (src/html/forms.c) */
 static int sh_set_attr_v(js_vm *vm, uint32_t x, const char *name, jv v) {
     vector<char> t;
     if (!sh_utf8(vm, v, &t)) return 0;
     dom_document *d = vm->host->d;
+    int had = sh_attr_z(d, x, name) != 0;
     dom_set_attribute(d, node_handle(d, x), name, strlen(name), data(t), len(t));
+    form_attr_changed(d, x, name, strlen(name), had);
     return 1;
 }
 static void sh_set_flag(js_vm *vm, uint32_t x, const char *name, jv v) {
     dom_document *d = vm->host->d;
+    int had = sh_attr_z(d, x, name) != 0;
     if (js_truthy(vm, v)) dom_set_attribute(d, node_handle(d, x), name, strlen(name), "", 0);
     else dom_remove_attribute(d, node_handle(d, x), name, strlen(name));
+    form_attr_changed(d, x, name, strlen(name), had);
+}
+
+/* a clone's inputs given their originals' state (HTML's cloning steps for input: the value and its dirty flag, the
+   checkedness and its): the two subtrees walked in step */
+static void sh_clone_state(js_vm *vm, uint32_t from, uint32_t to) {
+    dom_document *d = vm->host->d;
+    uint32_t a = from, b = to;
+    static const char *const kept[] = { "\001value", "\001edited" };
+    while (a && b) {
+        if (sh_named(d, a, "input") || sh_named(d, a, "textarea")) {
+            if (d->node[a].checked) dom_set_checked(d, node_handle(d, b), d->node[a].checked);
+            for (int k = 0; k < 2; k++) {
+                if (a >= len(vm->wrappers) || !vm->wrappers[a]) break;
+                jv cur;
+                uint32_t f;
+                uint32_t atom = js_atom_ascii(vm, kept[k]);
+                if (!js_get_own(vm, vm->wrappers[a], atom, &cur, &f)) continue;
+                jv wb = sh_wrap(vm, b);
+                if (jv_is_obj(wb)) js_define(vm, jv_idx(wb), atom, cur, JS_SHAPE_HIDDEN);
+            }
+        }
+        a = sh_next_in(d, a, from);
+        b = sh_next_in(d, b, to);
+    }
 }
 
 static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
@@ -1944,15 +2002,19 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
         case HA_TABINDEX: if (el) return sh_set_attr_v(vm, x, "tabindex", v); break;
         case HA_VALUE:
             if (el && (sh_named(d, x, "input") || sh_named(d, x, "textarea"))) {
-                /* the field's own value, not its default: the attribute is left as it was */
+                /* the field's own value, not its default: the attribute is left as it was; the last change a script's, not
+                   the user's edit (which constraint validation's too long and too short wait for) */
                 uint32_t s0 = jv_is_str(v) ? jv_idx(v) : js_to_string(vm, v);
                 if (!s0) return 0;
                 js_define(vm, o, sh_atom(vm, HA_VALUE_STATE), jv_str(s0), JS_SHAPE_HIDDEN);
+                js_delete(vm, o, js_atom_ascii(vm, "\001edited"));
                 return 1;
             }
             if (el) return sh_set_attr_v(vm, x, "value", v);
             break;
-        case HA_CHECKED: if (el) { sh_set_flag(vm, x, "checked", v); return 1; } break;
+        /* the checked IDL attribute sets the checkedness and its dirty flag, the attribute left as it was */
+        case HA_CHECKED: if (sh_named(d, x, "input")) { form_set_checked(d, x, js_truthy(vm, v)); return 1; } break;
+        case HA_DEFAULTCHECKED: if (sh_named(d, x, "input")) { sh_set_flag(vm, x, "checked", v); return 1; } break;
         case HA_SELECTED: if (el) { sh_set_flag(vm, x, "selected", v); return 1; } break;
         case HA_DISABLED: if (el) { sh_set_flag(vm, x, "disabled", v); return 1; } break;
         case HA_HIDDEN: if (el) { sh_set_flag(vm, x, "hidden", v); return 1; } break;
@@ -2366,6 +2428,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         (void)buf;
         uint32_t c = sh_import(d, d, x, js_truthy(vm, a0));
         if (c) sh_start_like(vm->host, x, c);
+        if (c) sh_clone_state(vm, x, c);
         return sh_wrap(vm, c);
     }
     case H_ADD_LISTENER: return sh_add_listener(vm, x, args, argc);
@@ -2436,9 +2499,11 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
             return JV_NULL;
         }
         if (!sh_utf8(vm, js_arg(vm, args, argc, 2), &v)) return JV_HOLE;
+        int had = !ns && sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_status st = ns ? dom_set_attribute_ns(d, node_handle(d, x), (dom_attr_namespace)ns, data(nm), len(nm), data(v), len(v))
                            : dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
         if (st != DOM_OK) return sh_status(vm, st);
+        if (!ns) form_attr_changed(d, x, data(nm), len(nm), had);
         return JV_UNDEF;
     }
     case H_APPEND: case H_PREPEND: {
@@ -2515,8 +2580,10 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         vector<char> nm, v;
         if (!sh_utf8(vm, a0, &nm) || !sh_utf8(vm, a1, &v)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
+        int had = sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_status st = dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
         if (st != DOM_OK) return sh_status(vm, st);
+        form_attr_changed(d, x, data(nm), len(nm), had);
         if (len(nm) == 3 && memcmp(data(nm), "src", 3) == 0 && sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
         return JV_UNDEF;
     }
@@ -2524,7 +2591,9 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         vector<char> nm;
         if (!sh_utf8(vm, a0, &nm)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
+        int had = sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_remove_attribute(d, node_handle(d, x), data(nm), len(nm));
+        form_attr_changed(d, x, data(nm), len(nm), had);
         return JV_UNDEF;
     }
     case H_TOGGLE_ATTR: {
@@ -2535,6 +2604,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         int want = argc > 1 ? js_truthy(vm, a1) : !has;
         if (want && !has) dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), "", 0);
         if (!want && has) dom_remove_attribute(d, node_handle(d, x), data(nm), len(nm));
+        if (want != has) form_attr_changed(d, x, data(nm), len(nm), has);
         return jv_bool(want);
     }
     case H_ATTR_NAMES: {
@@ -2600,6 +2670,9 @@ uint32_t sh_interface(js_vm *vm, const char *name, uint32_t id, uint32_t p) {
     js_define(vm, f, A_PROTOTYPE, jv_obj(p), JS_SHAPE_PROTO);
     js_define(vm, p, A_CONSTRUCTOR, jv_obj(f), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, a, jv_obj(f), JS_SHAPE_HIDDEN);
+    /* an event interface's prototype names it to Object.prototype.toString, as WebIDL's do */
+    size_t n = strlen(name);
+    if (n >= 5 && strcmp(name + n - 5, "Event") == 0) js_define(vm, p, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, name), JS_SHAPE_HIDDEN);
     return f;
 }
 
@@ -3310,6 +3383,23 @@ static int sh_mod_get(js_vm *vm, const char *url, uint32_t res, vector<char> *bo
     return 1;
 }
 
+/* a parse-time external module script's own file asked for early, as Chromium's preload
+   scanner asks for it: a refusal no network answers (a file:'s, a scheme's that is not
+   fetched) has its console lines written now, once a URL; one an answer refuses (another
+   origin's, a MIME type's) is told when its graph is fetched, as Chromium tells it when the
+   answer comes (measured: an async inline module runs before another origin's refusal) */
+static void sh_module_preload(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    uint32_t sa = sh_attr_z(h->d, x, "src");
+    char url[8400], page[8400], ref[8400];
+    sh_page_url(vm, page, sizeof page);
+    snprintf(ref, sizeof ref, "%.*s", (int)h->d->attr[sa].value.len, h->d->attr[sa].value.len ? text_ptr(h->d, h->d->attr[sa].value) : "");
+    if (!net_url_resolve(page, ref, url, sizeof url)) return;
+    if (strncmp(url, "http:", 5) == 0 || strncmp(url, "https:", 6) == 0 || strncmp(url, "data:", 5) == 0) return;
+    vector<char> body, final;
+    sh_mod_get(vm, url, 0, &body, &final);
+}
+
 /* the engine's module loader for a page (vm->load_module): the specifier resolved from its
    referrer (a module's URL; 0: the document's), then fetched; a fetch that failed throws
    SH_MOD_FAILED, a specifier that resolves to nothing Chromium's TypeError */
@@ -3384,14 +3474,14 @@ static uint32_t sh_module_fetch(js_vm *vm, uint32_t x, uint32_t res, vector<char
    reported as uncaught, a failed fetch's error event fired; else its module evaluated,
    document.currentScript null meanwhile, and its evaluation's rejection reported as an
    uncaught error of its own (as Chromium reports a module's, not a promise's) */
-static void sh_module_run(js_vm *vm, uint32_t x, uint32_t res, uint32_t m, const char *err, size_t en) {
+static void sh_module_run(js_vm *vm, uint32_t x, uint32_t res, uint32_t m, const char *err, size_t en, script_insertion how) {
     struct js_host *h = vm->host;
     uint32_t sa = sh_attr_z(h->d, x, "src");
     vector<char> url;
     if (sa && res) append_range(url, text_ptr(h->nt, h->nt->resource[res].url), h->nt->resource[res].url.len);
     else if (sa) append_range(url, text_ptr(h->d, h->d->attr[sa].value), h->d->attr[sa].value.len);
     uint32_t run = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, data(url), len(url));
-    h->rt->run[run].insert = SCRIPT_INSERTION_PARSED;
+    h->rt->run[run].insert = how;
     if (!m && !en) {
         h->rt->run[run].outcome = SCRIPT_OUTCOME_NOT_FETCHED;
         sh_fire(vm, x, "error", 0);
@@ -3555,8 +3645,11 @@ static uint32_t sh_fetch_script(js_vm *vm, uint32_t x) {
     h->nt->resource[r.index].elem = node_handle(h->d, x);
     return r.index;
 }
-/* an external script to run as a host task, after delay ms */
-static void sh_pend_script(js_vm *vm, uint32_t x, uint32_t res, script_insertion how, double delay) {
+/* what waits to run as a host task: an external classic script, a module script (its graph
+   fetched then: one a script inserted, which runs as soon as it can), an external import map's
+   error event (its kind, in a sh_pend's spare) */
+enum { SH_PEND_CLASSIC, SH_PEND_MODULE, SH_PEND_MAP_ERROR };
+static void sh_pend_kind(js_vm *vm, uint32_t x, uint32_t res, script_insertion how, double delay, uint32_t kind) {
     struct js_host *h = vm->host;
     sh_pend p;
     memset(&p, 0, sizeof p);
@@ -3564,8 +3657,13 @@ static void sh_pend_script(js_vm *vm, uint32_t x, uint32_t res, script_insertion
     p.gen = h->d->node[x].gen;
     p.resource = res;
     p.how = how;
+    p.spare = kind;
     push_back(h->pending, p);
     sh_task(vm, delay, SH_TASK_SCRIPT, (uint32_t)len(h->pending) - 1);
+}
+/* an external script to run as a host task, after delay ms */
+static void sh_pend_script(js_vm *vm, uint32_t x, uint32_t res, script_insertion how, double delay) {
+    sh_pend_kind(vm, x, res, how, delay, SH_PEND_CLASSIC);
 }
 /* an external script run from what its fetch got, then its load event (an inserted
    one's); or its error event when the fetch failed. 1 when it ran */
@@ -3598,6 +3696,18 @@ static void sh_run_pending(js_vm *vm, uint32_t i) {
     sh_pend p = h->pending[i];
     if (!h->d->node[p.node].live || h->d->node[p.node].gen != p.gen) return;
     h->phase = SCRIPT_PHASE_SCRIPT;
+    if (p.spare == SH_PEND_MAP_ERROR) { sh_fire(vm, p.node, "error", 0); return; }
+    if (p.spare == SH_PEND_MODULE) {
+        /* its graph fetched, then run; an external one's load event after it ran (its evaluation's
+           error, if any, its own), its error event when the fetch failed (sh_module_run's) */
+        vector<char> err;
+        uint32_t m = sh_module_fetch(vm, p.node, p.resource, &err);
+        vm->throwing = 0;
+        sh_module_run(vm, p.node, p.resource, m, data(err), len(err), (script_insertion)p.how);
+        vm->throwing = 0;
+        if (m && sh_attr_z(h->d, p.node, "src") && h->d->node[p.node].live) sh_fire(vm, p.node, "load", 0);
+        return;
+    }
     sh_run_fetched(vm, p.node, p.resource, (script_insertion)p.how);
 }
 /* the waiting scripts run, in their order, before the load event: it waits for them */
@@ -3636,6 +3746,24 @@ static void sh_prepare(js_vm *vm, uint32_t x, script_insertion how) {
         sh_text_of(d, x, &src);
         if (!len(src)) return;
     }
+    int kind = sh_script_kind(d, x);
+    if (kind == 2 || kind == 3) {
+        /* a module script a script inserted: run as soon as its graph is fetched, in a task of
+           its own (async, as HTML's non-parser-inserted module scripts are); an import map: an
+           inline one's map merged now (the first map's mappings kept, Chromium 153's), an
+           external one's error event queued */
+        sh_start(h, x);
+        uint32_t r = 0;
+        if (kind == 3) {
+            r = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, "", 0);
+            h->rt->run[r].insert = how;
+            if (sa || !sh_importmap(vm, x)) h->rt->run[r].outcome = SCRIPT_OUTCOME_SYNTAX_ERROR;
+            if (sa) sh_pend_kind(vm, x, 0, how, 1, SH_PEND_MAP_ERROR);
+            return;
+        }
+        sh_pend_kind(vm, x, 0, how, 1, SH_PEND_MODULE);
+        return;
+    }
     if (!sh_script_type_ok(d, x)) return;
     sh_start(h, x);
     if (sa) {
@@ -3662,6 +3790,8 @@ static dom_status sh_insert_vm(js_vm *vm, uint32_t parent, uint32_t child, uint3
     dom_document *d = vm->host->d;
     dom_status st = sh_insert(d, parent, child, before);
     if (st != DOM_OK) return st;
+    /* its checked radio buttons take their groups (src/html/forms.c) */
+    form_inserted(d, child);
     sh_inserted(vm, child);
     if (sh_script_elem(d, parent)) sh_prepare(vm, parent, SCRIPT_INSERTION_INSERTED);
     return st;
@@ -3713,6 +3843,7 @@ static void sh_written_copy(js_vm *vm, const dom_document *f, uint32_t p, uint32
         if (!y) continue;
         if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
         else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
+        form_inserted(d, y);
         push_back(h->wnodes, y);
     }
 }
@@ -3898,10 +4029,12 @@ uint32_t script_run_parse(js_vm *vm) {
         for (uint32_t r = 1; sa && r < h->nt->resource_len && !res; r++)
             if (h->nt->resource[r].live && h->nt->resource[r].kind == NET_KIND_SCRIPT && h->nt->resource[r].elem.index == x) res = r;
         if (kind == 3) {
-            /* an import map, read now: an external one is not read, as in Chromium */
+            /* an import map, read now: an external one is not read, its error event queued
+               (Chromium 153 writes no console line for it: measured) */
             uint32_t r = sh_run_new(vm, x, sa ? SCRIPT_SOURCE_EXTERNAL : SCRIPT_SOURCE_INLINE, "", 0);
             h->rt->run[r].insert = SCRIPT_INSERTION_PARSED;
             if (sa || !sh_importmap(vm, x)) h->rt->run[r].outcome = SCRIPT_OUTCOME_SYNTAX_ERROR;
+            if (sa) sh_pend_kind(vm, x, 0, SCRIPT_INSERTION_PARSED, 1, SH_PEND_MAP_ERROR);
             continue;
         }
         if (kind == 2) {
@@ -3930,6 +4063,11 @@ uint32_t script_run_parse(js_vm *vm) {
     }
     h->parsing = 0;
     vm->throwing = 0;
+    /* the parse's external module scripts' own files first, in document order, as Chromium's
+       preload scanner asks for them before the parser reaches an inline module's imports (so
+       a refused one's console lines come first: measured over file:) */
+    for (size_t i = 0; i < len(xs); i++)
+        if (d->node[xs[i]].live && sh_script_kind(d, xs[i]) == 2 && sh_attr_z(d, xs[i], "src")) sh_module_preload(vm, xs[i]);
     /* the modules as the parse ends: import()'s tasks due, the async module scripts (each
        run as its graph comes), then the deferred module scripts' graphs fetched, in order */
     sh_module_tasks(vm);
@@ -3938,7 +4076,7 @@ uint32_t script_run_parse(js_vm *vm) {
         if (!d->node[amods[i]].live) continue;
         vector<char> err;
         uint32_t m = sh_module_fetch(vm, amods[i], amods[i + 1], &err);
-        sh_module_run(vm, amods[i], amods[i + 1], m, data(err), len(err));
+        sh_module_run(vm, amods[i], amods[i + 1], m, data(err), len(err), SCRIPT_INSERTION_PARSED);
         vm->throwing = 0;
         ran++;
         sh_between(vm);
@@ -3966,7 +4104,7 @@ uint32_t script_run_parse(js_vm *vm) {
         if (!d->node[deferred[i]].live) continue;
         if (dmod[k]) {
             /* (a module's number outlives a collection: the engine keeps every module) */
-            sh_module_run(vm, deferred[i], deferred[i + 1], dm[k], data(derr) + deoff[k], delen[k]);
+            sh_module_run(vm, deferred[i], deferred[i + 1], dm[k], data(derr) + deoff[k], delen[k], SCRIPT_INSERTION_PARSED);
             vm->throwing = 0;
             ran++;
             sh_between(vm);
