@@ -1,0 +1,383 @@
+"a b" SyntaxError: Unexpected identifier 'b'
+"a 1" SyntaxError: Unexpected number
+"a \"s\"" SyntaxError: Unexpected string
+"a `t`" ReferenceError: a is not defined
+"a /r/" SyntaxError: Unexpected end of input
+"a if" SyntaxError: Unexpected token 'if'
+"a true" SyntaxError: Unexpected token 'true'
+"a null" SyntaxError: Unexpected token 'null'
+"a this" SyntaxError: Unexpected token 'this'
+"a async" SyntaxError: Unexpected token 'async'
+"a of" SyntaxError: Unexpected token 'of'
+"a get" SyntaxError: Unexpected token 'get'
+"a let" SyntaxError: Unexpected identifier 'let'
+"\"use strict\"; a let" SyntaxError: Unexpected strict mode reserved word
+"a static" SyntaxError: Unexpected identifier 'static'
+"\"use strict\"; a static" SyntaxError: Unexpected strict mode reserved word
+"a yield" SyntaxError: Unexpected identifier 'yield'
+"\"use strict\"; a yield" SyntaxError: Unexpected strict mode reserved word
+"a implements" SyntaxError: Unexpected identifier 'undefined'
+"\"use strict\"; a implements" SyntaxError: Unexpected strict mode reserved word
+"a enum" SyntaxError: Unexpected reserved word
+"a await" SyntaxError: Unexpected reserved word
+"a \\u0069f" SyntaxError: Keyword must not contain escaped characters
+"a #x" SyntaxError: Unexpected identifier '#x'
+"a )" SyntaxError: Unexpected token ')'
+"a ]" SyntaxError: Unexpected token ']'
+"a }" SyntaxError: Unexpected token '}'
+"a =>" SyntaxError: Unexpected end of input
+"a ..." SyntaxError: Unexpected token '...'
+"a ?." SyntaxError: Unexpected end of input
+"a @" SyntaxError: Invalid or unexpected token
+"[1 2]" SyntaxError: Unexpected number
+"[1 a]" SyntaxError: Unexpected identifier 'a'
+"[1" SyntaxError: Unexpected end of input
+"({a 1})" SyntaxError: Unexpected number
+"({a: 1 b})" SyntaxError: Unexpected identifier 'b'
+"({a" SyntaxError: Unexpected end of input
+"f(1 2)" SyntaxError: missing ) after argument list
+"f(1" SyntaxError: missing ) after argument list
+"f(a b)" SyntaxError: missing ) after argument list
+"if (1 2) ;" SyntaxError: Unexpected number
+"if 1" SyntaxError: Unexpected number
+"while 1" SyntaxError: Unexpected number
+"for (a b)" SyntaxError: Unexpected identifier 'b'
+"for (;;" SyntaxError: Unexpected end of input
+"var 1" SyntaxError: Unexpected number
+"var a 1" SyntaxError: Unexpected number
+"let 1" SyntaxError: Unexpected number
+"const 1" SyntaxError: Unexpected number
+"function 1() {}" SyntaxError: Unexpected number
+"function f 1" SyntaxError: Unexpected number
+"function f(1) {}" SyntaxError: Unexpected number
+"function f() 1" SyntaxError: Unexpected number
+"class 1 {}" SyntaxError: Unexpected number
+"class A 1" SyntaxError: Unexpected number
+"class A { 1 2 }" SyntaxError: Unexpected number
+"x = {" SyntaxError: Unexpected end of input
+"x = [" SyntaxError: Unexpected end of input
+"x = (" SyntaxError: Unexpected end of input
+"(1 2)" SyntaxError: Unexpected number
+"(a, 1 2)" SyntaxError: Unexpected number
+"a.1" SyntaxError: Unexpected number
+"a." SyntaxError: Unexpected end of input
+"a?.1" SyntaxError: Unexpected end of input
+"new.foo" SyntaxError: Unexpected identifier 'foo'
+"import.foo" SyntaxError: Unexpected identifier 'foo'
+"switch (1) { foo }" SyntaxError: Unexpected identifier 'foo'
+"try {}" SyntaxError: Missing catch or finally after try
+"try {} catch" SyntaxError: Unexpected end of input
+"do ; while" SyntaxError: Unexpected end of input
+"do ; while 1" SyntaxError: Unexpected number
+"throw" SyntaxError: Unexpected end of input
+"return" SyntaxError: Illegal return statement
+"break 1" SyntaxError: Unexpected number
+"continue 1" SyntaxError: Unexpected number
+"1 = 2" SyntaxError: Invalid left-hand side in assignment
+"a + = 2" SyntaxError: Unexpected token '='
+"a ? b" SyntaxError: Unexpected end of input
+"a ? b c" SyntaxError: Unexpected identifier 'c'
+"a => 1 2" SyntaxError: Unexpected number
+"() => {} 1" SyntaxError: Unexpected number
+"async 1" SyntaxError: Unexpected number
+"async function 1() {}" SyntaxError: Unexpected number
+"function* f() { yield 1 2 }" SyntaxError: Unexpected number
+"label: 1 2" SyntaxError: Unexpected number
+"`${1 2}`" SyntaxError: Missing } in template expression
+"`${1" SyntaxError: Missing } in template expression
+"x = 1 2" SyntaxError: Unexpected number
+"let [a b] = 1" SyntaxError: Unexpected identifier 'b'
+"let {a b} = 1" SyntaxError: Unexpected identifier 'b'
+"let a = 1 2" SyntaxError: Unexpected number
+"await 1" SyntaxError: await is only valid in async functions and the top level bodies of modules
+"a\n++\nb c" SyntaxError: Unexpected identifier 'c'
+"a ++ b" SyntaxError: Unexpected identifier 'b'
+"typeof" SyntaxError: Unexpected end of input
+"delete" SyntaxError: Unexpected end of input
+"void" SyntaxError: Unexpected end of input
+"+" SyntaxError: Unexpected end of input
+"a +" SyntaxError: Unexpected end of input
+"a ," SyntaxError: Unexpected end of input
+"," SyntaxError: Unexpected token ','
+";;;)" SyntaxError: Unexpected token ')'
+"class A extends {" SyntaxError: Unexpected end of input
+"class A { get 1 2 }" SyntaxError: Unexpected number
+"class A { static 1 2 }" SyntaxError: Unexpected number
+"(a, b) => 1 2" SyntaxError: Unexpected number
+"new" SyntaxError: Unexpected end of input
+"new 1 2" SyntaxError: Unexpected number
+"super" SyntaxError: 'super' keyword unexpected here
+"a in" SyntaxError: Unexpected end of input
+"a instanceof" SyntaxError: Unexpected end of input
+"obj?.[1 2]" SyntaxError: Unexpected number
+"\"use strict\"; let = 1" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; let" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; let + 1" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; yield = 1" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; static = 1" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; var let = 1" SyntaxError: Unexpected strict mode reserved word
+"\"use strict\"; implements = 1" SyntaxError: Unexpected strict mode reserved word
+"enum = 1" SyntaxError: Unexpected reserved word
+"var enum" SyntaxError: Unexpected reserved word
+"07.5" SyntaxError: Unexpected number
+"1 2" SyntaxError: Unexpected number
+"1\n2 3" SyntaxError: Unexpected number
+"'\\" SyntaxError: Invalid or unexpected token
+"'\\x1'" SyntaxError: Invalid hexadecimal escape sequence
+"'\\x1g'" SyntaxError: Invalid hexadecimal escape sequence
+"'\\u{110000}'" SyntaxError: Undefined Unicode code-point
+"'\\u{g}'" SyntaxError: Invalid Unicode escape sequence
+"'\\u12'" SyntaxError: Invalid Unicode escape sequence
+"'\\u{}'" SyntaxError: Invalid Unicode escape sequence
+"`abc" SyntaxError: Unexpected end of input
+"`a${1}b" SyntaxError: Unexpected end of input
+"/* abc" SyntaxError: Invalid or unexpected token
+"a\\x" SyntaxError: Invalid or unexpected token
+"\\u0030a" SyntaxError: Invalid or unexpected token
+"a\\u0030" ReferenceError: a0 is not defined
+"1.5n" SyntaxError: Invalid or unexpected token
+"1e3n" SyntaxError: Invalid or unexpected token
+"0x1.5n" SyntaxError: Invalid or unexpected token
+"01n" SyntaxError: Invalid or unexpected token
+"/abc" SyntaxError: Invalid regular expression: missing /
+"/abc\n/" SyntaxError: Invalid regular expression: missing /
+"({,})" SyntaxError: Unexpected token ','
+"({async foo: 1})" SyntaxError: Unexpected token ':'
+"({*foo: 1})" SyntaxError: Unexpected token ':'
+"({get a: 1})" SyntaxError: Unexpected token ':'
+"({a() {}} = 1)" SyntaxError: Invalid destructuring assignment target
+"[1] = 1" SyntaxError: Invalid destructuring assignment target
+"1 = 1" SyntaxError: Invalid left-hand side in assignment
+"a + 1 = 2" SyntaxError: Invalid left-hand side in assignment
+"({a: 1} = 1)" SyntaxError: Invalid destructuring assignment target
+"[a + 1] = []" SyntaxError: Invalid destructuring assignment target
+"({a: b + 1} = {})" SyntaxError: Invalid destructuring assignment target
+"++1" SyntaxError: Invalid left-hand side expression in prefix operation
+"1++" SyntaxError: Invalid left-hand side expression in postfix operation
+"for (1 in o);" SyntaxError: Invalid left-hand side in for-loop
+"for (1 of o);" SyntaxError: Invalid left-hand side in for-loop
+"let {a 1} = 1" SyntaxError: Unexpected number
+"let {a: } = 1" SyntaxError: Unexpected token '}'
+"/(/" SyntaxError: Invalid regular expression: /(/: Unterminated group
+"/a/gg" SyntaxError: Invalid regular expression flags
+"/a/x" SyntaxError: Invalid regular expression flags
+"super.1" SyntaxError: 'super' keyword unexpected here
+"super.#x" SyntaxError: 'super' keyword unexpected here
+"x = super" SyntaxError: 'super' keyword unexpected here
+"function f() { super(); }" SyntaxError: 'super' keyword unexpected here
+"new.target" SyntaxError: new.target expression is not allowed here
+"function f() { new.foo }" SyntaxError: Unexpected identifier 'foo'
+"function* g() { 1 + yield; }" SyntaxError: Unexpected identifier 'yield'
+"function* g() { yield\n* 1 }" SyntaxError: Unexpected token '*'
+"async function f(a = await 1) {}" SyntaxError: Illegal await-expression in formal parameters of async function
+"function* g(a = yield) {}" SyntaxError: Yield expression not allowed in formal parameter
+"class {}" SyntaxError: Unexpected token '{'
+"class A { async foo }" SyntaxError: Unexpected token '}'
+"class A { *foo }" SyntaxError: Unexpected token '}'
+"const a;" SyntaxError: Missing initializer in const declaration
+"let [a];" SyntaxError: Missing initializer in destructuring declaration
+"var {a};" SyntaxError: Missing initializer in destructuring declaration
+"const a = 1, b;" SyntaxError: Missing initializer in const declaration
+"function () {}" SyntaxError: Function statements require a function name
+"async function () {}" SyntaxError: Function statements require a function name
+"function* () {}" SyntaxError: Function statements require a function name
+"do ; 1" SyntaxError: Unexpected number
+"do ; while (0) 1" ok
+"for await (x of y);" SyntaxError: Unexpected reserved word
+"async function f() { for await (x in y); }" SyntaxError: Unexpected token 'in'
+"if (1) return" SyntaxError: Illegal return statement
+"{ return }" SyntaxError: Illegal return statement
+"throw\n1" SyntaxError: Illegal newline after throw
+"try {} 1" SyntaxError: Missing catch or finally after try
+"switch (1) { 1 }" SyntaxError: Unexpected number
+"switch (1) { case 1: default: default: }" SyntaxError: More than one default clause in switch statement
+"({a = 1})" SyntaxError: Invalid shorthand property initializer
+"x = ({a = 1})" SyntaxError: Invalid shorthand property initializer
+"...a" SyntaxError: Unexpected token '...'
+"f(...)" SyntaxError: Unexpected token ')'
+"(...a)" SyntaxError: Unexpected token '...'
+"(...a) + 1" SyntaxError: Unexpected token '...'
+"(a, ...b)" SyntaxError: Unexpected token '...'
+"x = ...a" SyntaxError: Unexpected token '...'
+"[...]" SyntaxError: Unexpected token ']'
+"label: label: ;" SyntaxError: Label 'label' has already been declared
+"a\n=> 1" SyntaxError: Unexpected token '=>'
+"async\na => 1" ReferenceError: async is not defined
+"(a) \n => 1" SyntaxError: Unexpected token '=>'
+"(a) = 1" ok
+"(a.b) = 1" ok
+"((a)) = 1" ok
+"`${}`" SyntaxError: Unexpected token '}'
+"`${`" SyntaxError: Unexpected end of input
+"a?.b = 1" SyntaxError: Invalid left-hand side in assignment
+"a?.b++" SyntaxError: Invalid left-hand side expression in postfix operation
+"new a?.b" SyntaxError: Invalid optional chain from new expression
+"a?.`x`" SyntaxError: Invalid tagged template on optional chain
+"import()" SyntaxError: import() requires a specifier
+"import(1, 2, 3)" SyntaxError: Unexpected number
+"import('a' 1)" SyntaxError: Unexpected number
+"class A { #x; m() { delete this.#x } }" SyntaxError: Private fields can not be deleted
+"class A { #x; #x }" SyntaxError: Identifier '#x' has already been declared
+"class A { m() { this.#y } }" SyntaxError: Private field '#y' must be declared in an enclosing class
+"#x in {}" SyntaxError: Private field '#x' must be declared in an enclosing class
+"class A { constructor() {} constructor() {} }" SyntaxError: A class may only have one constructor
+"'use strict'; with (a) ;" SyntaxError: Strict mode code may not include a with statement
+"'use strict'; var interface" SyntaxError: Unexpected strict mode reserved word
+"let a; let a;" SyntaxError: Identifier 'a' has already been declared
+"const a = 1; a = 2; 1" TypeError: Assignment to constant variable.
+"a\n?.5:1" ok
+"a ?. 5" SyntaxError: Unexpected number
+"x = 1 ++ 2" SyntaxError: Invalid left-hand side expression in postfix operation
+"!a = 1" SyntaxError: Invalid left-hand side in assignment
+"typeof a = 1" SyntaxError: Invalid left-hand side in assignment
+"a ** b ** c" ReferenceError: b is not defined
+"(-a) ** 2" ok
+"() => new.target" SyntaxError: new.target expression is not allowed here
+"yield" ReferenceError: yield is not defined
+"function* g() { var yield; }" SyntaxError: Unexpected identifier 'yield'
+"async function f() { var await; }" SyntaxError: Unexpected reserved word
+"async () => await" SyntaxError: Unexpected end of input
+"function f() { break; }" SyntaxError: Illegal break statement
+"x: while (0) { function f() { break x; } }" SyntaxError: Undefined label 'x'
+"0++" SyntaxError: Invalid left-hand side expression in postfix operation
+"this = 1" SyntaxError: Invalid left-hand side in assignment
+"this++" SyntaxError: Invalid left-hand side expression in postfix operation
+"arguments = 1" ok
+"eval++" ok
+"\\u00" SyntaxError: Invalid Unicode escape sequence
+"a\\u00" SyntaxError: Invalid Unicode escape sequence
+"\\u{}" SyntaxError: Invalid Unicode escape sequence
+"a\\u0020" SyntaxError: Invalid or unexpected token
+"\\u{110000}" SyntaxError: Undefined Unicode code-point
+"var \\u{61} = 1" ok
+"'\\u{12'" SyntaxError: Invalid Unicode escape sequence
+"'\\u{12" SyntaxError: Invalid Unicode escape sequence
+"'\\u" SyntaxError: Invalid Unicode escape sequence
+"a \\u0061sync" SyntaxError: Unexpected token 'async'
+"a l\\u0065t" SyntaxError: Keyword must not contain escaped characters
+"a \\u0061wait" SyntaxError: Unexpected reserved word
+"a \\u0079ield" SyntaxError: Unexpected identifier 'yield'
+"a st\\u0061tic" SyntaxError: Keyword must not contain escaped characters
+"a \\u0065num" SyntaxError: Keyword must not contain escaped characters
+"a \\u0067et" SyntaxError: Unexpected token 'get'
+"a \\u006ff" SyntaxError: Unexpected token 'of'
+"a \\u0062" SyntaxError: Unexpected identifier 'b'
+"a \\u0074rue" SyntaxError: Keyword must not contain escaped characters
+"a impl\\u0065ments" SyntaxError: Keyword must not contain escaped characters
+"'use strict'; a impl\\u0065ments" SyntaxError: Keyword must not contain escaped characters
+"a eval" SyntaxError: Unexpected identifier 'eval'
+"a arguments" SyntaxError: Unexpected identifier 'arguments'
+"a target" SyntaxError: Unexpected identifier 'target'
+"a meta" SyntaxError: Unexpected identifier 'meta'
+"a as" SyntaxError: Unexpected identifier 'as'
+"a from" SyntaxError: Unexpected identifier 'from'
+"a constructor" SyntaxError: Unexpected identifier 'constructor'
+"a using" SyntaxError: Unexpected token 'using'
+"a accessor" SyntaxError: Unexpected identifier 'accessor'
+"a interface" SyntaxError: Unexpected identifier 'undefined'
+"a package" SyntaxError: Unexpected identifier 'undefined'
+"a private" SyntaxError: Unexpected identifier 'undefined'
+"a protected" SyntaxError: Unexpected identifier 'undefined'
+"a public" SyntaxError: Unexpected identifier 'undefined'
+"'use strict'; a interface" SyntaxError: Unexpected strict mode reserved word
+"a undefined" SyntaxError: Unexpected identifier 'undefined'
+"a NaN" SyntaxError: Unexpected identifier 'NaN'
+"a typeof" SyntaxError: Unexpected token 'typeof'
+"a new" SyntaxError: Unexpected token 'new'
+"a .5" SyntaxError: Unexpected number
+"a 1n" SyntaxError: Unexpected number
+"a 0x1" SyntaxError: Unexpected number
+"a >>>= 1" ok
+"a = >>>= 1" SyntaxError: Unexpected token '>>>='
+"a = **" SyntaxError: Unexpected token '**'
+"a = ?." SyntaxError: Unexpected token '?.'
+"a = ??" SyntaxError: Unexpected token '??'
+"a = ??=" SyntaxError: Unexpected token '??='
+"a = &&=" SyntaxError: Unexpected token '&&='
+"a = =>" SyntaxError: Unexpected token '=>'
+"a = #" SyntaxError: Invalid or unexpected token
+"a = @" SyntaxError: Invalid or unexpected token
+"a = \\" SyntaxError: Invalid or unexpected token
+"a = '\\u{g}'" SyntaxError: Invalid Unicode escape sequence
+"x = { get }" ReferenceError: get is not defined
+"x = { set a }" SyntaxError: Unexpected token '}'
+"x = { async *a: 1 }" SyntaxError: Unexpected token ':'
+"class A { a b }" SyntaxError: Unexpected identifier 'b'
+"class A { a = 1 b = 2 }" SyntaxError: Unexpected identifier 'b'
+"class A { static }" ok
+"class A { static\na }" ok
+"if (1) function f() {} else ;" ok
+"label: function f() {}" ok
+"for (a = 1 in o);" SyntaxError: Invalid left-hand side in for-loop
+"for ((a) in {});" ok
+"for ([a, 1] of [[]]);" SyntaxError: Invalid destructuring assignment target
+"for ({a: 1} of [{}]);" SyntaxError: Invalid destructuring assignment target
+"a.await b" SyntaxError: await is only valid in async functions and the top level bodies of modules
+"var x = {await: 1}; x.await 1" SyntaxError: await is only valid in async functions and the top level bodies of modules
+"[...[a]] = [[]]" ok
+"({a: 1})" ok
+"({get a() {}} = {})" SyntaxError: Invalid destructuring assignment target
+"[a, b] += 1" SyntaxError: Invalid left-hand side in assignment
+"({a} += 1)" SyntaxError: Invalid left-hand side in assignment
+"[a] = [1]; a" ok
+"({a}) => 1" ok
+"([a]) => 1" ok
+"(a, ...b) => 1" ok
+"x = if" SyntaxError: Unexpected token 'if'
+"x = enum" SyntaxError: Unexpected reserved word
+"x = while" SyntaxError: Unexpected token 'while'
+"x = default" SyntaxError: Unexpected token 'default'
+"'use strict'; x = implements" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; x = let" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; x = static" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; x = yield" SyntaxError: Unexpected strict mode reserved word
+"function* g() { x = yield }" ok
+"x = await" ReferenceError: await is not defined
+"async function f() { x = await }" SyntaxError: Unexpected token '}'
+"'use strict'; var let" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; var static" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; var yield" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; let implements" SyntaxError: Unexpected strict mode reserved word
+"let enum" SyntaxError: Unexpected reserved word
+"function enum() {}" SyntaxError: Unexpected reserved word
+"function f(enum) {}" SyntaxError: Unexpected reserved word
+"'use strict'; function f(let) {}" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; function let() {}" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; (function static() {})" SyntaxError: Unexpected strict mode reserved word
+"class let {}" SyntaxError: Unexpected strict mode reserved word
+"class static {}" SyntaxError: Unexpected strict mode reserved word
+"class yield {}" SyntaxError: Unexpected strict mode reserved word
+"class enum {}" SyntaxError: Unexpected reserved word
+"'use strict'; try {} catch (let) {}" SyntaxError: Unexpected strict mode reserved word
+"label: enum" SyntaxError: Unexpected reserved word
+"enum: ;" SyntaxError: Unexpected reserved word
+"'use strict'; let: ;" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; yield: ;" SyntaxError: Unexpected strict mode reserved word
+"yield: ;" ok
+"let: ;" ok
+"await: ;" ok
+"async function f() { await: ; }" SyntaxError: Unexpected token ':'
+"function* g() { yield: ; }" SyntaxError: Unexpected token ':'
+"x = { enum }" SyntaxError: Unexpected reserved word
+"x = { if }" SyntaxError: Unexpected token 'if'
+"x = { let }" ReferenceError: let is not defined
+"'use strict'; x = { let }" SyntaxError: Unexpected strict mode reserved word
+"x = { implements }" ReferenceError: implements is not defined
+"'use strict'; x = { implements }" SyntaxError: Unexpected strict mode reserved word
+"({ if } = {})" SyntaxError: Unexpected token 'if'
+"({ enum: 1 })" ok
+"x.enum" ReferenceError: x is not defined
+"x.if" ReferenceError: x is not defined
+"x = { if: 1 }" ok
+"'use strict'; let = 1" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; let" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; let + 1" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; let\n[a] = [1]" ok
+"'use strict'; let\nx = 1" ok
+"'use strict'; for (let in {});" SyntaxError: Unexpected strict mode reserved word
+"for (let in {});" ok
+"for (let of []);" SyntaxError: Unexpected token '['
+"for (let.x of []);" SyntaxError: The left-hand side of a for-of loop may not start with 'let'.
+"for (let\nof []);" SyntaxError: Unexpected token '['
+"'use strict'; let [a] = [1]; a" ok
+"let\nlet = 1" SyntaxError: let is disallowed as a lexically bound name

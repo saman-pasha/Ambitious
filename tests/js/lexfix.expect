@@ -1,0 +1,86 @@
+var n = 0; b: while (n++ < 2) { continue <CR> a; } n 3
+var n = 0; b: while (n++ < 2) { continue /*<PS>*/ a; } n 3
+var n = 0; b: while (n++ < 2) { continue /*<LS>*/ a; } n 3
+var n = 0; b: while (n++ < 2) { continue /*<CR>*/ a; } n 3
+[1<LF>2<CR>3<LS>4<PS>5].length SyntaxError: Unexpected number
+{1<LF>2<CR>3<LS>4<PS>5} 5
+1 // c<CR>+ 2 3
+var s = 'a<CR>b' SyntaxError: Invalid or unexpected token
+1 /* <CR><LF> */ + 1 2
+018 18
+019.5 19.5
+09e1 90
+08e1 80
+01.a undefined
+00 0
+0..toString() "0"
+5..x undefined
+1.e5 100000
+.5e-1 0.05
+07.5 SyntaxError: Unexpected number
+0_1 SyntaxError: Numeric separator can not be used after leading 0.
+1_000 1000
+1__0 SyntaxError: Only one underscore is allowed as numeric separator
+1_ SyntaxError: Numeric separators are not allowed at the end of numeric literals
+0.1_2 0.12
+1e1_0 10000000000
+0x_1 SyntaxError: Invalid or unexpected token
+0x1_ SyntaxError: Numeric separators are not allowed at the end of numeric literals
+0x1__2 SyntaxError: Only one underscore is allowed as numeric separator
+0b12 SyntaxError: Invalid or unexpected token
+0o9 SyntaxError: Invalid or unexpected token
+08n SyntaxError: Invalid or unexpected token
+0n TypeError: Do not know how to serialize a BigInt
+1_0n TypeError: Do not know how to serialize a BigInt
+00n SyntaxError: Invalid or unexpected token
+1.e SyntaxError: Invalid or unexpected token
+3e- SyntaxError: Invalid or unexpected token
+09.a SyntaxError: Invalid or unexpected token
+07e1 SyntaxError: Invalid or unexpected token
+0b1.a undefined
+'\1'.charCodeAt(0) 1
+'\101' "A"
+'\033'.length + ',' + '\033'.charCodeAt(0) "1,27"
+'\08'.length 2
+'\400' " 0"
+'\377'.charCodeAt(0) 255
+'\8\9' "89"
+'\12345' "S45"
+'use strict'; 01 SyntaxError: Octal literals are not allowed in strict mode.
+'use strict'; 08 SyntaxError: Decimals with leading zeros are not allowed in strict mode.
+'use strict'; '\01' SyntaxError: Octal escape sequences are not allowed in strict mode.
+'use strict'; '\8' SyntaxError: \8 and \9 are not allowed in strict mode.
+'use strict'; '\0'.length 1
+`\0`.length 1
+var let = 1; let 1
+let = 2; let 2
+var let = { let: 3 }; let.let 3
+var let = () => 4; let() 4
+var let = 5; let++; let 6
+var let = 6; let + 1 7
+var let = {}; for (let in { a: 1 }); let "a"
+var let = 0; for (let;;) break; 'ok' "ok"
+var let = { x: 1 }; for (let.x in { y: 1 }); let.x "y"
+if (1) let <LF> var q = 1; 'ok' "ok"
+let <LF> [z] = [7]; z 7
+let let = 1 SyntaxError: let is disallowed as a lexically bound name
+'use strict'; let = 1 SyntaxError: Unexpected strict mode reserved word
+let [a, b] = [1, 2]; a + b 3
+let { c } = { c: 3 }; c 3
+let yield = 1; yield 1
+let async = 2; async 2
+let of = 3; of 3
+var n = 0; a: c: b: while (n++ < 3) { continue a; } n 4
+var n = 0; a: b: while (n++ < 3) { continue a; } n 4
+a: b: for (var i = 0; i < 3; i++) { if (i) break a; } i 1
+b: while (0) { continue a; } SyntaxError: Undefined label 'a'
+continue; SyntaxError: Illegal continue statement: no surrounding iteration statement
+break; SyntaxError: Illegal break statement
+a: { continue a; } SyntaxError: Illegal continue statement: 'a' does not denote an iteration statement
+while (0) { break q; } SyntaxError: Undefined label 'q'
+a: a: ; SyntaxError: Label 'a' has already been declared
+a: { a: ; } SyntaxError: Label 'a' has already been declared
+x: function f() { x: ; } 'ok' "ok"
+a: { b: while (0) { continue a; } } SyntaxError: Illegal continue statement: 'a' does not denote an iteration statement
+a: { break a; } 'ok' "ok"
+a: if (1) break a; 'ok' "ok"

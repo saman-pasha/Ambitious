@@ -14,6 +14,10 @@
 #include <math.h>
 #include "js.h"
 
+/* a compile's mode beside js.h's JS_CC_*: a site's source read again to print it (js_site_text), code that parsed in
+   its own place, so that no check of where it stands (super, new.target) refuses it */
+#define JS_CC_SITE 99
+
 /* ---- tokens ---- */
 
 enum { T_EOF, T_NAME, T_NUM, T_STR, T_TEMPLATE, T_REGEX, T_PUNCT };
@@ -40,8 +44,15 @@ static const char *const js_kw_names[KW_N] = {
     "new", "null", "of", "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof",
     "var", "void", "while", "with", "yield", "async", "await", "get", "set", "target", "constructor",
     "arguments", "slice", "enum", "eval", "as", "from", "meta", "assert" };
+/* the reserved words among them: never a binding's name, even in sloppy code */
+static const uint8_t js_kw_reserved[] = { K_BREAK, K_CASE, K_CATCH, K_CLASS, K_CONST, K_CONTINUE, K_DEBUGGER, K_DEFAULT,
+    K_DELETE, K_DO, K_ELSE, K_EXPORT, K_EXTENDS, K_FALSE, K_FINALLY, K_FOR, K_FUNCTION, K_IF, K_IMPORT, K_IN, K_INSTANCEOF,
+    K_NEW, K_NULL, K_RETURN, K_SUPER, K_SWITCH, K_THIS, K_THROW, K_TRUE, K_TRY, K_TYPEOF, K_VAR, K_VOID, K_WHILE, K_WITH,
+    K_ENUM };
 
-typedef struct jtok { uint32_t type, op, start, end, line, nl, str, aux; double num; } jtok;
+/* oct: a number or a string strict code refuses (JL_*) */
+typedef struct jtok { uint32_t type, op, start, end, line, nl, str, aux, oct; double num; } jtok;
+enum { JL_NONE, JL_OCTAL, JL_ZERO_DECIMAL, JL_OCTAL_ESCAPE, JL_8_9 };
 
 /* ---- the AST ---- */
 
@@ -149,6 +160,7 @@ typedef struct js_cc {
     vector<jmimp> mimps;
     vector<jmexp> mexps;
     vector<uint32_t> export_names;    /* the names an export's declaration declares */
+    vector<uint32_t> plabels;         /* the labels the parser is inside: each its name, then its function */
     /* the indexes that keep the compile linear: the scopes' names (open addressing, at most half full: ndkeys of
        them held), each function's declarations in their order (fn_decl[f] its first, decl_next the next), each
        scope's class (plus one: the first whose scope it is) */
@@ -172,6 +184,7 @@ typedef struct js_cc {
     uint32_t iter_call, iter_kind;
     uint32_t kw[KW_N];
     uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
+    uint32_t lex_oct;                 /* the escapes a string literal had (JL_*): the worst so far */
     int err;
     uint32_t err_line;
     char errmsg[240];
@@ -182,7 +195,7 @@ typedef struct js_cc {
     vector_jclass_drop(&(c).classes); vector_jpriv_drop(&(c).privs); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
     vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names); \
     vector_jdkey_drop(&(c).dkeys); vector_uint32_t_drop(&(c).fn_decl); vector_uint32_t_drop(&(c).decl_next); \
-    vector_uint32_t_drop(&(c).scope_cls)
+    vector_uint32_t_drop(&(c).scope_cls); vector_uint32_t_drop(&(c).plabels)
 
 #define CC js_vm *vm, const char *src, uint32_t srcn, js_cc *cc
 #define CCA vm, src, srcn, cc
@@ -247,8 +260,8 @@ static int lx_id_at(const char *src, uint32_t srcn, uint32_t i, int part, uint32
 }
 
 /* an escape after a backslash at src[i] (the character after it): into u; the index after it */
-static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u) {
-    if (i >= srcn) { cc_error(cc, cc->line, "an escape at the end of the script"); return i; }
+static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u, int str) {
+    if (i >= srcn) { cc_error(cc, cc->line, "Invalid or unexpected token"); return i; }
     char c = src[i];
     if (c == 'n') { push_back(u, (uint16_t)'\n'); return i + 1; }
     if (c == 't') { push_back(u, (uint16_t)'\t'); return i + 1; }
@@ -257,29 +270,45 @@ static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u) {
     if (c == 'f') { push_back(u, (uint16_t)'\f'); return i + 1; }
     if (c == 'v') { push_back(u, (uint16_t)0x0B); return i + 1; }
     if (c == '0' && !(i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '9')) { push_back(u, (uint16_t)0); return i + 1; }
+    if (str && c >= '0' && c <= '7') {
+        /* a legacy octal escape: \0 to \377, up to three digits after a 0 to 3, two after a 4 to 7 */
+        uint32_t v = (uint32_t)(c - '0'), j = i + 1, nd = 1, max = c <= '3' ? 3 : 2;
+        while (nd < max && j < srcn && src[j] >= '0' && src[j] <= '7') { v = v * 8 + (uint32_t)(src[j] - '0'); j++; nd++; }
+        push_back(u, (uint16_t)v);
+        cc->lex_oct = JL_OCTAL_ESCAPE;
+        return j;
+    }
+    if (str && (c == '8' || c == '9')) {
+        push_back(u, (uint16_t)c);
+        if (cc->lex_oct != JL_OCTAL_ESCAPE) cc->lex_oct = JL_8_9;
+        return i + 1;
+    }
     if (c == 'x') {
         int h1 = i + 1 < srcn ? lx_hex((uint8_t)src[i + 1]) : -1, h2 = i + 2 < srcn ? lx_hex((uint8_t)src[i + 2]) : -1;
-        if (h1 < 0 || h2 < 0) { cc_error(cc, cc->line, "an invalid \\x escape"); return i + 1; }
+        if (h1 < 0 || h2 < 0) { cc_error(cc, cc->line, "Invalid hexadecimal escape sequence"); return i + 1; }
         push_back(u, (uint16_t)(h1 * 16 + h2));
         return i + 3;
     }
     if (c == 'u') {
         uint32_t cp = 0;
         if (i + 1 < srcn && src[i + 1] == '{') {
+            /* V8's words: a digit missing, or no } before the end, an invalid sequence; past U+10FFFF none defined */
             uint32_t j = i + 2;
             while (j < srcn && src[j] != '}') {
                 int h = lx_hex((uint8_t)src[j]);
-                if (h < 0 || cp > 0x10FFFF) { cc_error(cc, cc->line, "an invalid \\u{} escape"); return j; }
+                if (h < 0) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return j; }
+                if (cp > 0x10FFFF) { cc_error(cc, cc->line, "Undefined Unicode code-point"); return j; }
                 cp = cp * 16 + (uint32_t)h;
                 j++;
             }
-            if (cp > 0x10FFFF) { cc_error(cc, cc->line, "an invalid \\u{} escape"); return j; }
+            if (j >= srcn || j == i + 2) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return j; }
+            if (cp > 0x10FFFF) { cc_error(cc, cc->line, "Undefined Unicode code-point"); return j; }
             lx_push_cp(u, cp);
             return j + 1;
         }
         for (uint32_t j = 1; j <= 4; j++) {
             int h = i + j < srcn ? lx_hex((uint8_t)src[i + j]) : -1;
-            if (h < 0) { cc_error(cc, cc->line, "an invalid \\u escape"); return i + j; }
+            if (h < 0) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return i + j; }
             cp = cp * 16 + (uint32_t)h;
         }
         push_back(u, (uint16_t)cp);
@@ -294,6 +323,19 @@ static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u) {
     return i + k;
 }
 
+/* a line terminator at i (LF, CR, and U+2028 and U+2029 in UTF-8): one for automatic semicolons, a comment's end and
+   a string's, as LF is */
+static int lx_line_term(const char *src, uint32_t srcn, uint32_t i) {
+    if (src[i] == '\n' || src[i] == '\r') return 1;
+    return (uint8_t)src[i] == 0xE2 && i + 2 < srcn && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9);
+}
+
+/* a single-line comment's end from i: its line terminator's place (not past it) */
+static uint32_t lx_line_end(const char *src, uint32_t srcn, uint32_t i) {
+    while (i < srcn && !lx_line_term(src, srcn, i)) i++;
+    return i;
+}
+
 /* a template's characters from i to its next ` or ${: the token's string; aux 1 when it ends the template */
 static void lx_template(CC, uint32_t i) {
     jtok t;
@@ -303,11 +345,11 @@ static void lx_template(CC, uint32_t i) {
     t.line = cc->line;
     vector<uint16_t> u;
     for (;;) {
-        if (i >= srcn) { cc_error(cc, t.line, "an unterminated template literal"); break; }
+        if (i >= srcn) { cc_error(cc, t.line, "Unexpected end of input"); break; }
         char c = src[i];
         if (c == '`') { t.aux = 1; i++; break; }
         if (c == '$' && i + 1 < srcn && src[i + 1] == '{') { t.aux = 0; i += 2; break; }
-        if (c == '\\') { i = lx_escape(CCA, i + 1, &u); continue; }
+        if (c == '\\') { i = lx_escape(CCA, i + 1, &u, 0); continue; }
         if (c == '\r') { push_back(u, (uint16_t)'\n'); if (i + 1 < srcn && src[i + 1] == '\n') i++; cc->line++; i++; continue; }
         if (c == '\n') cc->line++;
         uint32_t k;
@@ -332,17 +374,23 @@ static void lx(CC) {
         uint8_t c = (uint8_t)src[i];
         uint32_t k = 1;
         if (c == '\n') { nl = 1; cc->line++; i++; }
-        else if (c == ' ' || c == '\t' || c == '\r' || c == 0x0B || c == 0x0C) i++;
-        else if (c == 0xE2 && i + 2 < srcn && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9)) { nl = 1; cc->line++; i += 3; }
+        else if (c == '\r') { nl = 1; cc->line++; i++; if (i < srcn && src[i] == '\n') i++; }
+        else if (c == ' ' || c == '\t' || c == 0x0B || c == 0x0C) i++;
+        else if (c == 0xE2 && lx_line_term(src, srcn, i)) { nl = 1; cc->line++; i += 3; }
         else if (c >= 0x80 && lx_space(lx_utf8(src, srcn, i, &k))) i += k;
-        else if (c == '/' && i + 1 < srcn && src[i + 1] == '/') { while (i < srcn && src[i] != '\n') i++; }
+        else if (c == '/' && i + 1 < srcn && src[i + 1] == '/') i = lx_line_end(src, srcn, i);
         else if (c == '/' && i + 1 < srcn && src[i + 1] == '*') {
+            /* a line terminator inside makes the comment one (CR LF one line) */
             i += 2;
-            while (i + 1 < srcn && !(src[i] == '*' && src[i + 1] == '/')) { if (src[i] == '\n') { nl = 1; cc->line++; } i++; }
-            if (i + 1 >= srcn) { cc_error(cc, cc->line, "an unterminated comment"); i = srcn; break; }
+            while (i + 1 < srcn && !(src[i] == '*' && src[i + 1] == '/')) {
+                if (src[i] == '\n' || (src[i] == '\r' && src[i + 1] != '\n')) { nl = 1; cc->line++; }
+                else if ((uint8_t)src[i] == 0xE2 && lx_line_term(src, srcn, i)) { nl = 1; cc->line++; i += 2; }
+                i++;
+            }
+            if (i + 1 >= srcn) { cc_error(cc, cc->line, "Invalid or unexpected token"); i = srcn; break; }
             i += 2;
-        } else if (c == '<' && i + 3 < srcn && src[i + 1] == '!' && src[i + 2] == '-' && src[i + 3] == '-') { while (i < srcn && src[i] != '\n') i++; }
-        else if (c == '-' && (nl || cc->tok.type == T_EOF) && i + 2 < srcn && src[i + 1] == '-' && src[i + 2] == '>') { while (i < srcn && src[i] != '\n') i++; }
+        } else if (c == '<' && i + 3 < srcn && src[i + 1] == '!' && src[i + 2] == '-' && src[i + 3] == '-') i = lx_line_end(src, srcn, i);
+        else if (c == '-' && (nl || cc->tok.type == T_EOF) && i + 2 < srcn && src[i + 1] == '-' && src[i + 2] == '>') i = lx_line_end(src, srcn, i);
         else break;
     }
     t.start = i;
@@ -375,14 +423,14 @@ static void lx(CC) {
             }
             if (ch == '\\') {
                 vector<uint16_t> u;
-                if (i + 1 >= srcn || src[i + 1] != 'u') { cc_error(cc, cc->line, "an invalid escape in a name"); break; }
-                i = lx_escape(CCA, i + 1, &u);
+                if (i + 1 >= srcn || src[i + 1] != 'u') { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
+                i = lx_escape(CCA, i + 1, &u, 0);
                 if (cc->err) break;
                 /* its code point (a pair whole) */
                 uint32_t cp = len(u) ? at(u, 0) : 0;
                 if (len(u) == 2) cp = 0x10000 + ((cp - 0xD800) << 10) + (at(u, 1) - 0xDC00u);
                 int ok = cp < 0x80 ? cp != '\\' && (nc ? lx_idchar((uint8_t)cp) : lx_idstart((uint8_t)cp)) : nc ? js_uni_id_part(cp) : js_uni_id_start(cp);
-                if (!ok) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); break; }
+                if (!ok) { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
                 lx_put_utf8(&b, cp);
                 nc++;
                 t.aux = 1;
@@ -405,64 +453,98 @@ static void lx(CC) {
             int digits = 0;
             i += 2;
             while (i < srcn) {
-                if (src[i] == '_') { i++; continue; }
+                if (src[i] == '_') {
+                    int after = i + 1 < srcn && lx_hex((uint8_t)src[i + 1]) >= 0 && lx_hex((uint8_t)src[i + 1]) < base;
+                    if (!digits) { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
+                    if (i + 1 < srcn && src[i + 1] == '_') { cc_error(cc, cc->line, "Only one underscore is allowed as numeric separator"); break; }
+                    if (!after) { cc_error(cc, cc->line, "Numeric separators are not allowed at the end of numeric literals"); break; }
+                    i++;
+                    continue;
+                }
                 int d = lx_hex((uint8_t)src[i]);
                 if (d < 0 || d >= base) break;
                 v = v * base + d;
                 digits++;
                 i++;
             }
-            if (!digits) cc_error(cc, cc->line, "a number with no digits");
+            if (!digits) cc_error(cc, cc->line, "Invalid or unexpected token");
             t.num = v;
         } else {
+            /* 0 then digits: a legacy octal literal when they are 0 to 7 (017: its value octal, never a fraction or
+               an exponent, so 01.a is (01).a), else a decimal with a leading zero (018 is 18, 019.5 is 19.5); in
+               neither a separator. Else a decimal literal, a separator between two digits alone */
             char nb[400];
             uint32_t k = 0;
-            int legacy_octal = c == '0' && i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '7';
-            int dot = 0, expo = 0;
-            while (i < srcn && k + 2 < sizeof nb) {
-                char d = src[i];
-                if (d == '_') { i++; continue; }
-                if (d >= '0' && d <= '9') { nb[k++] = d; i++; continue; }
-                /* one point, before any exponent: 5..toString() is 5. then a member */
-                if (d == '.' && !dot && !expo) { dot = 1; nb[k++] = d; i++; continue; }
-                if ((d == 'e' || d == 'E') && !legacy_octal && !expo) {
-                    expo = 1;
-                    nb[k++] = d;
-                    i++;
-                    if (i < srcn && (src[i] == '+' || src[i] == '-')) nb[k++] = src[i++];
-                    continue;
-                }
-                break;
+            int lead0 = c == '0' && i + 1 < srcn && ((src[i + 1] >= '0' && src[i + 1] <= '9') || src[i + 1] == '_');
+            int octal = 0;
+            if (lead0) {
+                if (src[i + 1] == '_') cc_error(cc, cc->line, "Numeric separator can not be used after leading 0.");
+                octal = 1;
+                for (uint32_t q = i + 1; q < srcn && src[q] >= '0' && src[q] <= '9'; q++) if (src[q] >= '8') octal = 0;
+                t.oct = octal ? JL_OCTAL : JL_ZERO_DECIMAL;
             }
-            nb[k] = 0;
-            if (legacy_octal) {
+            if (octal) {
                 double v = 0;
-                for (uint32_t q = 0; q < k; q++) v = v * 8 + (nb[q] - '0');
+                i++;
+                while (i < srcn && src[i] >= '0' && src[i] <= '7') { v = v * 8 + (src[i] - '0'); i++; }
                 t.num = v;
-            } else t.num = strtod(nb, 0);
+                if (i < srcn && src[i] == '_') cc_error(cc, cc->line, "Invalid or unexpected token");
+            } else {
+                int dot = 0, expo = 0;
+                while (i < srcn && k + 2 < sizeof nb) {
+                    char d = src[i];
+                    if (d == '_') {
+                        int before = k > 0 && nb[k - 1] >= '0' && nb[k - 1] <= '9';
+                        int after = i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '9';
+                        if (i + 1 < srcn && src[i + 1] == '_') { cc_error(cc, cc->line, "Only one underscore is allowed as numeric separator"); break; }
+                        if (!after) { cc_error(cc, cc->line, "Numeric separators are not allowed at the end of numeric literals"); break; }
+                        if (!before || lead0) { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
+                        i++;
+                        continue;
+                    }
+                    if (d >= '0' && d <= '9') { nb[k++] = d; i++; continue; }
+                    /* one point, before any exponent: 5..toString() is 5. then a member */
+                    if (d == '.' && !dot && !expo) { dot = 1; nb[k++] = d; i++; continue; }
+                    if ((d == 'e' || d == 'E') && !expo) {
+                        /* an exponent's digits: none is V8's error (1.e, 3e-) */
+                        uint32_t q = i + 1;
+                        if (q < srcn && (src[q] == '+' || src[q] == '-')) q++;
+                        if (!(q < srcn && src[q] >= '0' && src[q] <= '9')) { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
+                        expo = 1;
+                        nb[k++] = d;
+                        i++;
+                        if (i < srcn && (src[i] == '+' || src[i] == '-')) nb[k++] = src[i++];
+                        continue;
+                    }
+                    break;
+                }
+                nb[k] = 0;
+                t.num = strtod(nb, 0);
+            }
         }
         if (i < srcn && src[i] == 'n') {
             /* a BigInt literal: integer digits in any radix, no fraction, exponent or legacy octal */
             int ok = 1;
             for (uint32_t q = t.start; q < i; q++) if (src[q] == '.' || ((src[q] == 'e' || src[q] == 'E') && !(i - t.start > 1 && (src[t.start + 1] == 'x' || src[t.start + 1] == 'X')))) ok = 0;
             if (src[t.start] == '0' && i - t.start > 1 && src[t.start + 1] >= '0' && src[t.start + 1] <= '9') ok = 0;
-            if (!ok) cc_error(cc, cc->line, "an invalid BigInt literal");
+            if (!ok) cc_error(cc, cc->line, "Invalid or unexpected token");
             else {
                 jv b = js_big_literal(vm, src + t.start, i - t.start);
                 if (b == JV_HOLE) cc_error(cc, cc->line, "an invalid BigInt literal");
                 else { t.aux = 1; t.str = jv_idx(b); }
             }
             i++;
-            if (i < srcn && lx_id_at(src, srcn, i, 0, &idk)) cc_error(cc, cc->line, "an identifier starts right after a number");
-        } else if (i < srcn && lx_id_at(src, srcn, i, 0, &idk)) cc_error(cc, cc->line, "an identifier starts right after a number");
+            if (i < srcn && (lx_id_at(src, srcn, i, 0, &idk) || (src[i] >= '0' && src[i] <= '9'))) cc_error(cc, cc->line, "Invalid or unexpected token");
+        } else if (i < srcn && (lx_id_at(src, srcn, i, 0, &idk) || (src[i] >= '0' && src[i] <= '9'))) cc_error(cc, cc->line, "Invalid or unexpected token");
     } else if (c == '"' || c == '\'') {
         vector<uint16_t> u;
         uint32_t j = i + 1;
+        cc->lex_oct = JL_NONE;
         for (;;) {
-            if (j >= srcn || src[j] == '\n') { cc_error(cc, cc->line, "an unterminated string"); break; }
+            if (j >= srcn || src[j] == '\n' || src[j] == '\r') { cc_error(cc, cc->line, "Invalid or unexpected token"); break; }
             char d = src[j];
             if (d == (char)c) { j++; break; }
-            if (d == '\\') { j = lx_escape(CCA, j + 1, &u); continue; }
+            if (d == '\\') { j = lx_escape(CCA, j + 1, &u, 1); continue; }
             uint32_t k;
             uint32_t cp = lx_utf8(src, srcn, j, &k);
             lx_push_cp(&u, cp);
@@ -470,6 +552,7 @@ static void lx(CC) {
         }
         t.type = T_STR;
         t.str = js_str_new(vm, data(u), len(u));
+        t.oct = cc->lex_oct;
         i = j;
     } else if (c == '`') {
         cc->pos = i + 1;
@@ -526,11 +609,8 @@ static void lx(CC) {
         default: break;
         }
         if (!op) {
-            char m[64];
-            /* beyond ASCII, a character no token begins with (not ID_Start, not white space): V8's words */
-            if (c >= 0x80) snprintf(m, sizeof m, "Invalid or unexpected token");
-            else snprintf(m, sizeof m, "an unexpected character '%c'", c >= 32 && c < 127 ? c : '?');
-            cc_error(cc, cc->line, m);
+            /* a character no token begins with (@, a lone \, beyond ASCII one not ID_Start nor white space): V8's words */
+            cc_error(cc, cc->line, "Invalid or unexpected token");
             t.type = T_EOF;
         }
         t.op = op;
@@ -541,22 +621,16 @@ static void lx(CC) {
     cc->pos = i;
 }
 
-/* a regular expression literal, its slash at start: re-read as one */
-/* a line terminator at i (LF, CR, and U+2028 and U+2029 in UTF-8), which no regular
-   expression literal holds */
-static int lx_line_term(const char *src, uint32_t srcn, uint32_t i) {
-    if (src[i] == '\n' || src[i] == '\r') return 1;
-    return (uint8_t)src[i] == 0xE2 && i + 2 < srcn && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9);
-}
+/* a regular expression literal, its slash at start: re-read as one (no line terminator in it) */
 
 static void lx_regex(CC, uint32_t start) {
     uint32_t i = start + 1;
     int cls = 0;
     for (;;) {
-        if (i >= srcn || lx_line_term(src, srcn, i)) { cc_error(cc, cc->line, "an unterminated regular expression"); break; }
+        if (i >= srcn || lx_line_term(src, srcn, i)) { cc_error(cc, cc->line, "Invalid regular expression: missing /"); break; }
         char c = src[i];
         if (c == '\\') {
-            if (i + 1 >= srcn || lx_line_term(src, srcn, i + 1)) { cc_error(cc, cc->line, "an unterminated regular expression"); break; }
+            if (i + 1 >= srcn || lx_line_term(src, srcn, i + 1)) { cc_error(cc, cc->line, "Invalid regular expression: missing /"); break; }
             i += 2;
             continue;
         }
@@ -588,18 +662,75 @@ static int is_p(js_cc *cc, uint32_t op) { return cc->tok.type == T_PUNCT && cc->
 static uint32_t tok_start(js_cc *cc) { return cc->tok.type == T_TEMPLATE && cc->tok.start ? cc->tok.start - 1 : cc->tok.start; }
 static int is_kw(js_cc *cc, uint32_t k) { return cc->tok.type == T_NAME && cc->tok.str == cc->kw[k] && !cc->tok.aux; }
 
-static void expect_p(CC, uint32_t op, const char *what) {
-    if (is_p(cc, op)) { lx(CCA); return; }
-    char m[120];
-    snprintf(m, sizeof m, "expected %s", what);
-    cc_error(cc, cc->tok.line, m);
+/* strict code: a strict function's, and a class's from its heritage on */
+static int cc_strict(js_cc *cc) { return (cc->fns[cc->cur_fn].flags & JF_STRICT) || cc->in_class; }
+
+/* the words strict code reserves beside let, static and yield, which V8 names by no text of theirs */
+static int lx_future_strict(const char *s) {
+    return !strcmp(s, "implements") || !strcmp(s, "interface") || !strcmp(s, "package") || !strcmp(s, "private") ||
+           !strcmp(s, "protected") || !strcmp(s, "public");
 }
 
-/* the end of a statement: a semicolon, or one the grammar supplies (ASI) */
+/* a token the grammar does not take where it stands, reported as V8 reports it (ParserBase::ReportUnexpectedTokenAt):
+   by its kind; a name by what it spells, a keyword as a token, a word strict code reserves as one in strict code;
+   an escaped keyword as such */
+static void unexpected_tok(CC, jtok t) {
+    if (cc->err) return;
+    const char *m = 0;
+    if (t.type == T_EOF) m = "Unexpected end of input";
+    else if (t.type == T_NUM) m = "Unexpected number";
+    else if (t.type == T_STR) m = "Unexpected string";
+    else if (t.type == T_TEMPLATE) m = "Unexpected template string";
+    else if (t.type == T_REGEX) m = "Unexpected regular expression";
+    if (m) { cc_error(cc, t.line, m); return; }
+    vector<char> b;
+    if (t.type == T_PUNCT) {
+        append_range(b, "Unexpected token '", 18);
+        append_range(b, src + t.start, t.end > t.start ? t.end - t.start : 0);
+        push_back(b, '\'');
+        push_back(b, 0);
+        cc_error(cc, t.line, data(b));
+        return;
+    }
+    vector<char> s;
+    js_str_to_utf8(vm, t.str, &s);
+    push_back(s, 0);
+    const char *nm = data(s);
+    int kw = 0;
+    for (uint32_t i = 0; i < sizeof js_kw_reserved; i++) if (t.str == cc->kw[js_kw_reserved[i]]) kw = 1;
+    int sr = t.str == cc->kw[K_LET] || t.str == cc->kw[K_STATIC] || t.str == cc->kw[K_YIELD];
+    int fsr = lx_future_strict(nm);
+    if (t.aux && (kw || (sr && t.str != cc->kw[K_YIELD]) || fsr)) m = "Keyword must not contain escaped characters";
+    else if (t.str == cc->kw[K_ENUM] || t.str == cc->kw[K_AWAIT]) m = "Unexpected reserved word";
+    else if ((sr || fsr) && cc_strict(cc)) m = "Unexpected strict mode reserved word";
+    else if (fsr) m = "Unexpected identifier 'undefined'";
+    if (m) { cc_error(cc, t.line, m); return; }
+    int ctx = kw || t.str == cc->kw[K_ASYNC] || t.str == cc->kw[K_GET] || t.str == cc->kw[K_SET] || t.str == cc->kw[K_OF] ||
+              !strcmp(nm, "using");
+    if (ctx && !sr) append_range(b, "Unexpected token '", 18);
+    else append_range(b, "Unexpected identifier '", 23);
+    append_range(b, nm, strlen(nm));
+    push_back(b, '\'');
+    push_back(b, 0);
+    cc_error(cc, t.line, data(b));
+}
+static void unexpected(CC) { unexpected_tok(CCA, cc->tok); }
+
+/* the token op, or V8's report of the one that stands there (what: the grammar's want, for the reader) */
+static void expect_p(CC, uint32_t op, const char *what) {
+    (void)what;
+    if (is_p(cc, op)) { lx(CCA); return; }
+    unexpected(CCA);
+}
+
+/* the end of a statement: a semicolon, or one the grammar supplies (ASI); V8's ExpectSemicolon, await read as a
+   name where it is none (a script's top level, a function not async) named so */
 static void semi(CC) {
     if (is_p(cc, P_SEMI)) { lx(CCA); return; }
     if (is_p(cc, P_RBRACE) || cc->tok.type == T_EOF || cc->tok.nl) return;
-    cc_error(cc, cc->tok.line, "expected ';' or a line break between two statements");
+    if (cc->prev.type == T_NAME && cc->prev.str == cc->kw[K_AWAIT] && !cc->prev.aux)
+        cc_error(cc, cc->tok.line, "await is only valid in async functions and the top level bodies of modules");
+    else unexpected(CCA);
 }
 
 static uint32_t node(js_cc *cc, uint32_t k, uint32_t line) {
@@ -829,6 +960,7 @@ static uint32_t p_binding(CC, uint32_t kind);
 static uint32_t p_unary(CC);
 static uint32_t p_unary_in(CC);
 static uint32_t p_call(CC);
+static int name_refused(CC, jtok t, int strict);
 
 static int is_name_tok(js_cc *cc) { return cc->tok.type == T_NAME; }
 
@@ -852,7 +984,7 @@ static uint32_t p_prop_key(CC, int *computed) {
     if (cc->tok.type == T_NAME || cc->tok.type == T_STR) cc->nodes[n].s = js_atom(vm, cc->tok.str);
     else if (cc->tok.type == T_NUM && cc->tok.aux == 1) cc->nodes[n].s = js_atom(vm, js_big_to_string(vm, jv_big(cc->tok.str), 10));
     else if (cc->tok.type == T_NUM) cc->nodes[n].s = js_atom(vm, js_num_to_str(vm, cc->tok.num));
-    else { cc_error(cc, line, "expected a property name"); return n; }
+    else { unexpected(CCA); return n; }
     lx(CCA);
     return n;
 }
@@ -871,6 +1003,7 @@ static void p_params(CC, uint32_t fi) {
         uint32_t t;
         if (is_name_tok(cc) && !cc->tok.aux) {
             uint32_t atom = cc->tok.str;
+            if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); break; }
             lx(CCA);
             uint32_t d = declare(CCA, atom, D_PARAM, line);
             cc->decls[d].param = (uint32_t)(len(cc->tmp) - mark) + 1;
@@ -903,6 +1036,24 @@ static int in_async(js_cc *cc) {
     uint32_t f = cc->fns[cc->cur_fn].flags;
     return !(f & JF_ASYNC) ? 0 : (f & FN_PARAMS) ? 2 : 1;
 }
+
+/* a word that names nothing where it stands (V8's early errors; unexpected_tok says why): a reserved word, escaped
+   or not; in strict code (strict: a class's name is) let, static, yield and the future reserved words; yield in a
+   generator; await in an async function or a module */
+static int name_refused_as(CC, jtok t, int strict, int gen, int asy) {
+    if (t.type != T_NAME) return 0;
+    for (uint32_t i = 0; i < sizeof js_kw_reserved; i++) if (t.str == cc->kw[js_kw_reserved[i]]) return 1;
+    strict = strict || cc_strict(cc);
+    if (t.str == cc->kw[K_YIELD]) return strict || gen;
+    if (t.str == cc->kw[K_AWAIT]) return asy || cc->mode == JS_CC_MODULE;
+    if (!strict) return 0;
+    if (t.str == cc->kw[K_LET] || t.str == cc->kw[K_STATIC]) return 1;
+    vector<char> b;
+    js_str_to_utf8(vm, t.str, &b);
+    push_back(b, 0);
+    return lx_future_strict(data(b));
+}
+static int name_refused(CC, jtok t, int strict) { return name_refused_as(CCA, t, strict, in_generator(cc) != 0, in_async(cc) != 0); }
 
 /* statements to a closing brace (not taken): a list */
 static void p_statements(CC, uint32_t *off, uint32_t *count) {
@@ -963,7 +1114,7 @@ static uint32_t p_function(CC, uint32_t name, uint32_t flags, int is_decl, uint3
     cc->cur_scope = fs;
     cc->fns[fi].scope = fs;
     p_params(CCA, fi);
-    if (!is_p(cc, P_LBRACE)) { cc_error(cc, cc->tok.line, "expected '{' before a function's body"); }
+    if (!is_p(cc, P_LBRACE)) unexpected(CCA);
     lx(CCA);
     uint32_t b = node(cc, N_BLOCK, cc->tok.line);
     { uint32_t so, sn; p_body(CCA, fi, &so, &sn); cc->nodes[b].a = so; cc->nodes[b].b = sn; }
@@ -1104,7 +1255,7 @@ static uint32_t p_template(CC) {
         if (cc->tok.aux) { lx(CCA); break; }
         lx(CCA);
         push_back(cc->tmp, p_expr(CCA, 0));
-        if (!is_p(cc, P_RBRACE)) { cc_error(cc, cc->tok.line, "expected '}' to close a template's substitution"); break; }
+        if (!is_p(cc, P_RBRACE)) { cc_error(cc, cc->tok.line, "Missing } in template expression"); break; }
         lx_template(CCA, cc->tok.start + 1);
         if (cc->err) break;
     }
@@ -1169,6 +1320,7 @@ static uint32_t p_object(CC) {
             int computed;
             int shorthand_ok = cc->tok.type == T_NAME;
             uint32_t atom_tok = cc->tok.str;
+            jtok ktok = cc->tok;
             if (shorthand_ok && atom_priv(vm, atom_tok)) priv_error(CCA, line, "Unexpected identifier '", atom_tok, "'");
             uint32_t key = p_prop_key(CCA, &computed);
             cc->nodes[p].a = key;
@@ -1179,13 +1331,14 @@ static uint32_t p_object(CC) {
             } else if (is_p(cc, P_LPAREN)) {
                 cc->nodes[p].op = PK_METHOD;
                 cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | mfl, 0, line, start);
-            } else if (mfl) { cc_error(cc, line, "expected '(' after a generator's or an async method's name"); break;
+            } else if (mfl) { unexpected(CCA); break;
             } else if (is_p(cc, P_COLON)) {
                 lx(CCA);
                 cc->nodes[p].op = PK_INIT;
                 if (!computed && cc->nodes[key].s == js_atom_ascii(vm, "__proto__")) cc->nodes[p].d |= NF_PROTO;
                 cc->nodes[p].b = p_assign(CCA, 0);
             } else if (shorthand_ok && !computed) {
+                if (name_refused(CCA, ktok, 0)) { unexpected_tok(CCA, ktok); break; }
                 cc->nodes[p].op = PK_INIT;
                 uint32_t id = ident_node(CCA, atom_tok, line);
                 if (is_p(cc, P_ASSIGN)) {
@@ -1198,7 +1351,7 @@ static uint32_t p_object(CC) {
                     cc->nodes[p].op = PK_COVER;
                     cc->nodes[p].b = as;
                 } else cc->nodes[p].b = id;
-            } else { cc_error(cc, line, "expected ':' after a property name"); break; }
+            } else { unexpected(CCA); break; }
         }
         push_back(cc->tmp, p);
         if (!is_p(cc, P_RBRACE)) expect_p(CCA, P_COMMA, "',' between properties");
@@ -1253,14 +1406,14 @@ static uint32_t to_pattern(CC, uint32_t e) {
                     cc->nodes[pe].a = to_pattern(CCA, cc->nodes[v].a);
                     cc->nodes[pe].b = cc->nodes[v].b;
                 } else cc->nodes[pe].a = to_pattern(CCA, v);
-            } else cc_error(cc, cc->nodes[pr].line, "a method is no destructuring target");
+            } else cc_error(cc, cc->nodes[pr].line, "Invalid destructuring assignment target");
             push_back(cc->tmp, pe);
         }
         { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
     if (k == N_PATTERN_ARR || k == N_PATTERN_OBJ || k == N_PELEM) return e;
-    cc_error(cc, cc->nodes[e].line, "invalid assignment target");
+    cc_error(cc, cc->nodes[e].line, "Invalid destructuring assignment target");
     return e;
 }
 
@@ -1274,8 +1427,9 @@ static uint32_t p_binding(CC, uint32_t kind) {
     uint32_t line = cc->tok.line;
     if (cc->tok.type == T_NAME) {
         uint32_t atom = cc->tok.str;
+        if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); lx(CCA); return node(cc, N_HOLE, line); }
         await_reserved(CCA, atom, line);
-        if (atom == cc->kw[K_LET] && (kind == D_LET || kind == D_CONST)) cc_error(cc, line, "let is no name for a let or const binding");
+        if (atom == cc->kw[K_LET] && (kind == D_LET || kind == D_CONST)) cc_error(cc, line, "let is disallowed as a lexically bound name");
         lx(CCA);
         declare(CCA, atom, kind, line);
         return ident_node(CCA, atom, line);
@@ -1311,14 +1465,16 @@ static uint32_t p_binding(CC, uint32_t kind) {
                 int computed;
                 int shorthand = cc->tok.type == T_NAME;
                 uint32_t atom = cc->tok.str, kline = cc->tok.line;
+                jtok ktok = cc->tok;
                 uint32_t key = p_prop_key(CCA, &computed);
                 cc->nodes[pe].c = key;
                 cc->nodes[pe].op = computed ? NF_COMPUTED : 0;
                 if (is_p(cc, P_COLON)) { lx(CCA); cc->nodes[pe].a = p_binding(CCA, kind); }
                 else if (shorthand && !computed) {
+                    if (name_refused(CCA, ktok, 0)) { unexpected_tok(CCA, ktok); break; }
                     declare(CCA, atom, kind, kline);
                     cc->nodes[pe].a = ident_node(CCA, atom, kline);
-                } else cc_error(cc, kline, "expected ':' in an object pattern");
+                } else unexpected(CCA);
                 if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[pe].b = p_assign(CCA, 0); }
             }
             push_back(cc->tmp, pe);
@@ -1328,7 +1484,7 @@ static uint32_t p_binding(CC, uint32_t kind) {
         { jlist tl_ = list_take(cc, mark); cc->nodes[p].a = tl_.off; cc->nodes[p].b = tl_.count; }
         return p;
     }
-    cc_error(cc, line, "expected a name or a pattern");
+    unexpected(CCA);
     lx(CCA);
     return node(cc, N_HOLE, line);
 }
@@ -1346,16 +1502,29 @@ static uint32_t p_args(CC, uint32_t n) {
             cc->nodes[s].d = cc->prev.end;
             push_back(cc->tmp, s);
         } else push_back(cc->tmp, p_assign(CCA, 0));
-        if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between arguments");
+        /* after an argument a comma or the ), else V8's own words for it (ParseArguments) */
+        if (is_p(cc, P_RPAREN) || cc->err) break;
+        if (!is_p(cc, P_COMMA)) { cc_error(cc, cc->tok.line, "missing ) after argument list"); break; }
+        lx(CCA);
     }
     expect_p(CCA, P_RPAREN, "')' after the arguments");
     { jlist tl_ = list_take(cc, mark); cc->nodes[n].b = tl_.off; cc->nodes[n].c = tl_.count; }
     return n;
 }
 
+/* a number's or a string's form strict code refuses, as V8 words it */
+static void strict_literal(CC, jtok t) {
+    if (!t.oct || !(cc->fns[cc->cur_fn].flags & JF_STRICT)) return;
+    cc_error(cc, t.line, t.oct == JL_OCTAL ? "Octal literals are not allowed in strict mode." :
+                         t.oct == JL_ZERO_DECIMAL ? "Decimals with leading zeros are not allowed in strict mode." :
+                         t.oct == JL_OCTAL_ESCAPE ? "Octal escape sequences are not allowed in strict mode." :
+                         "\\8 and \\9 are not allowed in strict mode.");
+}
+
 static uint32_t p_primary(CC) {
     uint32_t line = cc->tok.line, start = cc->tok.start;
     jtok t = cc->tok;
+    strict_literal(CCA, t);
     if (t.type == T_NUM) {
         uint32_t n = node(cc, N_NUM, line);
         cc->nodes[n].num = t.num;
@@ -1403,7 +1572,13 @@ static uint32_t p_primary(CC) {
                 uint32_t fl = 0;
                 if (is_p(cc, P_STAR)) { lx(CCA); fl = JF_GENERATOR; }
                 uint32_t name = 0;
-                if (cc->tok.type == T_NAME) { name = cc->tok.str; lx(CCA); }
+                if (cc->tok.type == T_NAME) {
+                    /* the name is the function's own, read as its code reads: yield a name in a function, not in a
+                       generator */
+                    if (name_refused_as(CCA, cc->tok, 0, (fl & JF_GENERATOR) != 0, 0)) { unexpected(CCA); return node(cc, N_HOLE, line); }
+                    name = cc->tok.str;
+                    lx(CCA);
+                }
                 return p_function(CCA, name, fl, 0, line, start);
             }
             if (a == cc->kw[K_CLASS]) return p_class(CCA, 0);
@@ -1430,36 +1605,52 @@ static uint32_t p_primary(CC) {
             }
             if (a == cc->kw[K_SUPER]) {
                 lx(CCA);
-                if (is_p(cc, P_LPAREN)) {
-                    /* super() in a field's initializer, a static block or a method: V8's early error */
-                    uint32_t f = cc->cur_fn;
-                    while (f && (cc->fns[f].flags & JF_ARROW)) f = cc->fns[f].parent;
-                    if (f && ((cc->fns[f].flags & (FN_FIELDS | FN_STATIC | FN_BLOCK)) ||
-                              ((cc->fns[f].flags & JF_METHOD) && !(cc->fns[f].flags & JF_CLASS_CTOR))))
-                        cc_error(cc, line, "'super' keyword unexpected here");
+                /* where super stands, V8's early error before what follows it: its function the nearest not an
+                   arrow; super() a derived class's constructor's, super.x and super[x] a method's (a class's
+                   field initializers and static blocks are); a direct eval's code takes its site's word for it */
+                uint32_t f = cc->cur_fn;
+                while (f && (cc->fns[f].flags & JF_ARROW)) f = cc->fns[f].parent;
+                uint32_t ff = cc->fns[f].flags;
+                int call = is_p(cc, P_LPAREN);
+                int ok = f ? (call ? (ff & JF_CLASS_CTOR) && (ff & JF_DERIVED) : (ff & (JF_METHOD | JF_CLASS_CTOR)) != 0)
+                           : cc->mode == JS_CC_DIRECT || cc->mode == JS_CC_SITE;
+                if (!ok || !(call || is_p(cc, P_DOT) || is_p(cc, P_LBRACK))) {
+                    cc_error(cc, line, "'super' keyword unexpected here");
+                    return node(cc, N_HOLE, line);
+                }
+                if (call) {
                     uint32_t n = node(cc, N_SUPER_CALL, line);
                     return p_args(CCA, n);
                 }
                 uint32_t n = node(cc, N_SUPER_MEMBER, line);
                 if (is_p(cc, P_DOT)) {
                     lx(CCA);
-                    if (cc->tok.type != T_NAME) cc_error(cc, line, "expected a name after super.");
-                    if (atom_priv(vm, cc->tok.str)) cc_error(cc, line, "Unexpected private field");
+                    if (cc->tok.type != T_NAME) unexpected(CCA);
+                    else if (atom_priv(vm, cc->tok.str)) cc_error(cc, line, "Unexpected private field");
                     cc->nodes[n].s = cc->tok.str;
                     lx(CCA);
-                } else if (is_p(cc, P_LBRACK)) {
+                } else {
                     lx(CCA);
                     cc->nodes[n].b = p_expr(CCA, 0);
                     cc->nodes[n].op = NF_COMPUTED;
                     expect_p(CCA, P_RBRACK, "']'");
-                } else cc_error(cc, line, "super must be called or have a member read");
+                }
                 return n;
             }
             if (a == cc->kw[K_NEW]) {
                 lx(CCA);
                 if (is_p(cc, P_DOT)) {
                     lx(CCA);
-                    if (!is_kw(cc, K_TARGET)) cc_error(cc, line, "expected new.target");
+                    if (!is_kw(cc, K_TARGET)) { unexpected(CCA); return node(cc, N_HOLE, line); }
+                    /* in a function (an arrow's its function's); a Function constructor's body is one; a direct
+                       eval's code where its site is */
+                    uint32_t f = cc->cur_fn;
+                    while (f && (cc->fns[f].flags & JF_ARROW)) f = cc->fns[f].parent;
+                    if (!f && cc->mode != JS_CC_FUNCTION && cc->mode != JS_CC_SITE &&
+                        !(cc->mode == JS_CC_DIRECT && (vm->eval_sites[vm->eval_site].flags & JS_EVAL_INFN))) {
+                        cc_error(cc, line, "new.target expression is not allowed here");
+                        return node(cc, N_HOLE, line);
+                    }
                     lx(CCA);
                     return node(cc, N_NEW_TARGET, line);
                 }
@@ -1473,7 +1664,7 @@ static uint32_t p_primary(CC) {
                         uint32_t m = node(cc, N_MEMBER, cc->tok.line);
                         cc->nodes[m].a = callee;
                         cc->nodes[m].s = cc->tok.str;
-                        if (cc->tok.type != T_NAME) cc_error(cc, cc->tok.line, "expected a name after '.'");
+                        if (cc->tok.type != T_NAME) unexpected(CCA);
                         else if (atom_priv(vm, cc->tok.str)) { cc->nodes[m].op = NF_COMPUTED | NF_PRIVATE; cc->nodes[m].b = priv_ident(CCA, cc->tok.str, cc->tok.line); }
                         lx(CCA);
                         callee = m;
@@ -1485,6 +1676,9 @@ static uint32_t p_primary(CC) {
                         cc->nodes[m].op = NF_COMPUTED;
                         expect_p(CCA, P_RBRACK, "']'");
                         callee = m;
+                    } else if (is_p(cc, P_OPTCHAIN)) {
+                        cc_error(cc, cc->tok.line, "Invalid optional chain from new expression");
+                        break;
                     } else break;
                 }
                 cc->nodes[n].a = callee;
@@ -1495,20 +1689,21 @@ static uint32_t p_primary(CC) {
             }
             /* yield and await: names outside generators and async functions; in one,
                an operator only where an assignment (a unary for await) may stand */
-            if (a == cc->kw[K_YIELD] && in_generator(cc)) { cc_error(cc, line, "a yield stands where only an assignment's whole expression may (put it in parentheses)"); lx(CCA); return node(cc, N_HOLE, line); }
+            if (a == cc->kw[K_YIELD] && in_generator(cc)) { unexpected(CCA); lx(CCA); return node(cc, N_HOLE, line); }
             if (a == cc->kw[K_IMPORT]) {
                 /* import(specifier[, options]): a module loaded, its namespace's promise;
                    import.meta: a module's own */
                 lx(CCA);
                 if (is_p(cc, P_DOT)) {
                     lx(CCA);
-                    if (!(cc->tok.type == T_NAME && cc->tok.str == cc->kw[K_META])) { cc_error(cc, line, "expected import.meta"); return node(cc, N_HOLE, line); }
+                    if (!(cc->tok.type == T_NAME && cc->tok.str == cc->kw[K_META])) { unexpected(CCA); return node(cc, N_HOLE, line); }
                     if (cc->mode != JS_CC_MODULE) { cc_error(cc, line, "Cannot use 'import.meta' outside a module"); return node(cc, N_HOLE, line); }
                     lx(CCA);
                     return node(cc, N_IMPORT_META, line);
                 }
                 uint32_t n = node(cc, N_IMPORT_CALL, line);
                 expect_p(CCA, P_LPAREN, "'(' after import");
+                if (is_p(cc, P_RPAREN)) { cc_error(cc, line, "import() requires a specifier"); return n; }
                 cc->nodes[n].a = p_assign(CCA, 0);
                 if (is_p(cc, P_COMMA)) {
                     lx(CCA);
@@ -1521,6 +1716,8 @@ static uint32_t p_primary(CC) {
                 return n;
             }
         }
+        /* a reference: no reserved word (if, enum), nor in strict code a word it reserves */
+        if (name_refused(CCA, t, 0)) { unexpected_tok(CCA, t); lx(CCA); return node(cc, N_HOLE, line); }
         await_reserved(CCA, a, line);
         if (atom_priv(vm, a)) {
             if (cc->in_class) priv_error(CCA, line, "Unexpected identifier '", a, "'");
@@ -1532,8 +1729,7 @@ static uint32_t p_primary(CC) {
         if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, a, 0, line, start);
         return ident_node(CCA, a, line);
     }
-    if (t.type == T_EOF) cc_error(cc, line, "the script ends in the middle of an expression");
-    else cc_error(cc, line, "an unexpected token where an expression should be");
+    unexpected_tok(CCA, t);
     lx(CCA);
     return node(cc, N_HOLE, line);
 }
@@ -1570,7 +1766,8 @@ static uint32_t p_call(CC) {
                 e = m;
                 continue;
             }
-            if (cc->tok.type != T_NAME) { cc_error(cc, line, "expected a name after '.'"); break; }
+            if (cc->tok.type == T_TEMPLATE && opt) { cc_error(cc, line, "Invalid tagged template on optional chain"); break; }
+            if (cc->tok.type != T_NAME) { unexpected(CCA); break; }
             uint32_t m = node(cc, N_MEMBER, line);
             cc->nodes[m].a = e;
             cc->nodes[m].s = cc->tok.str;
@@ -1598,7 +1795,9 @@ static uint32_t p_call(CC) {
             e = p_args(CCA, n);
         } else if (cc->tok.type == T_TEMPLATE) {
             /* a tagged template: the tag called with the strings (op 1: one frozen array
-               for this place in the source, its raw strings beside) and the substitutions */
+               for this place in the source, its raw strings beside) and the substitutions;
+               none in an optional chain (V8's early error) */
+            if (chain) { cc_error(cc, line, "Invalid tagged template on optional chain"); break; }
             uint32_t tend = cc->prev.end;
             uint32_t t = p_template(CCA);
             cc->nodes[t].op = 1;
@@ -1621,9 +1820,16 @@ static uint32_t p_call(CC) {
     return e;
 }
 
+/* an update's or an assignment's simple target: a name, a member (none in an optional chain), super's */
+static int simple_target(js_cc *cc, uint32_t e) {
+    uint32_t k = cc->nodes[e].k;
+    return k == N_IDENT || k == N_MEMBER || k == N_SUPER_MEMBER;
+}
+
 static uint32_t p_postfix(CC) {
     uint32_t e = p_call(CCA);
     if ((is_p(cc, P_INC) || is_p(cc, P_DEC)) && !cc->tok.nl) {
+        if (!simple_target(cc, e)) { cc_error(cc, cc->tok.line, "Invalid left-hand side expression in postfix operation"); return e; }
         uint32_t n = node(cc, N_UPDATE, cc->tok.line);
         cc->nodes[n].op = (uint16_t)cc->tok.op;
         cc->nodes[n].a = e;
@@ -1643,6 +1849,7 @@ static uint32_t p_unary_in(CC) {
             cc->nodes[n].op = (uint16_t)op;
             cc->nodes[n].d = NF_PREFIX;
             cc->nodes[n].a = p_unary(CCA);
+            if (!simple_target(cc, cc->nodes[n].a)) cc_error(cc, line, "Invalid left-hand side expression in prefix operation");
             return n;
         }
         if (op == P_PLUS || op == P_MINUS || op == P_BANG || op == P_TILDE) {
@@ -1665,7 +1872,7 @@ static uint32_t p_unary_in(CC) {
     }
     if (is_kw(cc, K_AWAIT) && in_async(cc)) {
         /* await in an async function (outside one, a name) */
-        if (in_async(cc) == 2) { cc_error(cc, line, "await in an async function's parameters"); return node(cc, N_HOLE, line); }
+        if (in_async(cc) == 2) { cc_error(cc, line, "Illegal await-expression in formal parameters of async function"); return node(cc, N_HOLE, line); }
         lx(CCA);
         uint32_t n = node(cc, N_AWAIT, line);
         if (cc->cur_fn == 0) cc->tla = 1;
@@ -1803,7 +2010,7 @@ static int yield_bare(js_cc *cc) {
 static uint32_t p_assign_in(CC, int no_in) {
     if (is_kw(cc, K_YIELD) && in_generator(cc)) {
         uint32_t line = cc->tok.line;
-        if (in_generator(cc) == 2) { cc_error(cc, line, "yield in a generator's parameters"); return node(cc, N_HOLE, line); }
+        if (in_generator(cc) == 2) { cc_error(cc, line, "Yield expression not allowed in formal parameter"); return node(cc, N_HOLE, line); }
         lx(CCA);
         uint32_t n = node(cc, N_YIELD, line);
         if (!cc->tok.nl && is_p(cc, P_STAR)) { lx(CCA); cc->nodes[n].op = 1; cc->nodes[n].a = p_assign(CCA, no_in); }
@@ -1818,7 +2025,7 @@ static uint32_t p_assign_in(CC, int no_in) {
         cc->nodes[n].op = (uint16_t)op;
         uint32_t lk = cc->nodes[left].k;
         if (op == P_ASSIGN && (lk == N_ARRAY || lk == N_OBJECT)) left = to_pattern(CCA, left);
-        else if (lk != N_IDENT && lk != N_MEMBER && lk != N_SUPER_MEMBER) cc_error(cc, line, "invalid assignment target");
+        else if (lk != N_IDENT && lk != N_MEMBER && lk != N_SUPER_MEMBER) cc_error(cc, line, "Invalid left-hand side in assignment");
         cc->nodes[n].a = left;
         cc->nodes[n].pos = tok_start(cc);
         cc->nodes[n].b = p_assign(CCA, no_in);
@@ -1859,8 +2066,19 @@ static uint32_t p_class(CC, int is_decl) {
     uint32_t line = cc->tok.line, cstart = cc->tok.start;
     lx(CCA);
     uint32_t name = 0;
-    if (cc->tok.type == T_NAME && !is_kw(cc, K_EXTENDS)) { name = cc->tok.str; lx(CCA); }
-    else if (is_decl) cc_error(cc, line, "a class declaration needs a name");
+    if (cc->tok.type == T_NAME && !is_kw(cc, K_EXTENDS)) {
+        if (name_refused(CCA, cc->tok, 1)) {
+            /* a class's name is strict code's, and named so */
+            uint32_t sin = cc->in_class;
+            cc->in_class = 1;
+            unexpected_tok(CCA, cc->tok);
+            cc->in_class = sin;
+            return node(cc, N_HOLE, line);
+        }
+        name = cc->tok.str;
+        lx(CCA);
+    }
+    else if (is_decl) unexpected(CCA);
     jclass k;
     memset(&k, 0, sizeof k);
     k.name = name;
@@ -1946,7 +2164,7 @@ static uint32_t p_class(CC, int is_decl) {
         uint32_t key = p_prop_key(CCA, &computed);
         cc->nodes[p].a = key;
         cc->nodes[p].d = flags | (computed ? NF_COMPUTED : 0);
-        if (mfl && !is_p(cc, P_LPAREN)) { cc_error(cc, mline, "expected '(' after a generator's or an async method's name"); break; }
+        if (mfl && !is_p(cc, P_LPAREN)) { unexpected(CCA); break; }
         /* V8's early errors for a class's element names */
         uint32_t kname = computed ? 0 : cc->nodes[key].s;
         int priv = atom_priv(vm, kname);
@@ -2085,7 +2303,9 @@ static uint32_t p_var(CC, uint32_t kind, int no_in, int need_init) {
             cc->nodes[d].b = p_assign(CCA, no_in);
             cc->nodes[d].d = cc->prev.end;
         }
-        else if (need_init && (kind == D_CONST || cc->nodes[cc->nodes[d].a].k != N_IDENT)) cc_error(cc, cc->tok.line, "a const or a pattern needs an initializer");
+        else if (need_init && (kind == D_CONST || cc->nodes[cc->nodes[d].a].k != N_IDENT))
+            cc_error(cc, cc->tok.line, cc->nodes[cc->nodes[d].a].k != N_IDENT ? "Missing initializer in destructuring declaration" :
+                                                                               "Missing initializer in const declaration");
         push_back(cc->tmp, d);
         if (!is_p(cc, P_COMMA) || cc->err) break;
         lx(CCA);
@@ -2112,7 +2332,12 @@ static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start) {
         lx(CCA);
         flags |= JF_GENERATOR;
     }
-    if (cc->tok.type != T_NAME) { cc_error(cc, line, "a function declaration needs a name"); return node(cc, N_EMPTY, line); }
+    if (cc->tok.type != T_NAME) {
+        if (is_p(cc, P_LPAREN)) cc_error(cc, line, "Function statements require a function name");
+        else unexpected(CCA);
+        return node(cc, N_EMPTY, line);
+    }
+    if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); return node(cc, N_EMPTY, line); }
     uint32_t name = cc->tok.str;
     lx(CCA);
     uint32_t d = declare(CCA, name, D_FUNC, line);
@@ -2136,7 +2361,7 @@ static uint32_t mod_request(CC, uint32_t spec) {
 
 /* a specifier, then its import attributes (with { type: 'json' }), read and passed over */
 static uint32_t p_specifier(CC) {
-    if (cc->tok.type != T_STR) { cc_error(cc, cc->tok.line, "expected a module's specifier (a string)"); return 0; }
+    if (cc->tok.type != T_STR) { unexpected(CCA); return 0; }
     uint32_t r = mod_request(CCA, cc->tok.str);
     lx(CCA);
     if ((is_kw(cc, K_WITH) || is_name(cc, K_ASSERT)) && !cc->tok.nl) {
@@ -2148,7 +2373,7 @@ static uint32_t p_specifier(CC) {
     return r;
 }
 static uint32_t p_from(CC) {
-    if (!is_name(cc, K_FROM)) { cc_error(cc, cc->tok.line, "expected 'from' and a module's specifier"); return 0; }
+    if (!is_name(cc, K_FROM)) { unexpected(CCA); return 0; }
     lx(CCA);
     return p_specifier(CCA);
 }
@@ -2158,7 +2383,7 @@ static uint32_t p_export_name(CC) {
     uint32_t a = 0;
     if (cc->tok.type == T_NAME) a = cc->tok.str;
     else if (cc->tok.type == T_STR) a = js_atom(vm, cc->tok.str);
-    else { cc_error(cc, cc->tok.line, "expected a name to import or export"); return 0; }
+    else { unexpected(CCA); return 0; }
     lx(CCA);
     return a;
 }
@@ -2180,20 +2405,20 @@ static uint32_t p_import_decl(CC, uint32_t line) {
     lx(CCA);
     if (cc->tok.type == T_STR) { p_specifier(CCA); semi(CCA); return node(cc, N_EMPTY, line); }
     size_t mark = len(cc->mimps);
-    int more = 1;
+    int more = 1, comma = 0;
     if (cc->tok.type == T_NAME) {
         /* the default export's local name */
         uint32_t local = cc->tok.str;
         lx(CCA);
         mod_import_binding(CCA, local, cc->kw[K_DEFAULT], line);
-        if (is_p(cc, P_COMMA)) lx(CCA);
+        if (is_p(cc, P_COMMA)) { lx(CCA); comma = 1; }
         else more = 0;
     }
     if (more && is_p(cc, P_STAR)) {
         lx(CCA);
-        if (!is_name(cc, K_AS)) { cc_error(cc, line, "expected 'as' after import *"); return node(cc, N_EMPTY, line); }
+        if (!is_name(cc, K_AS)) { unexpected(CCA); return node(cc, N_EMPTY, line); }
         lx(CCA);
-        if (cc->tok.type != T_NAME) { cc_error(cc, line, "expected the namespace's name"); return node(cc, N_EMPTY, line); }
+        if (cc->tok.type != T_NAME) { unexpected(CCA); return node(cc, N_EMPTY, line); }
         uint32_t local = cc->tok.str;
         lx(CCA);
         mod_import_binding(CCA, local, 0, line);
@@ -2204,16 +2429,21 @@ static uint32_t p_import_decl(CC, uint32_t line) {
             uint32_t name = p_export_name(CCA), local = name;
             if (is_name(cc, K_AS)) {
                 lx(CCA);
-                if (cc->tok.type != T_NAME) { cc_error(cc, line, "expected a local name after as"); break; }
+                if (cc->tok.type != T_NAME) { unexpected(CCA); break; }
                 local = cc->tok.str;
                 lx(CCA);
-            } else if (str) { cc_error(cc, line, "a string imported needs 'as' and a local name"); break; }
+            } else if (str) { cc_error(cc, line, "Unexpected reserved word"); break; }
             mod_import_binding(CCA, local, name, line);
             if (!is_p(cc, P_COMMA)) break;
             lx(CCA);
         }
         expect_p(CCA, P_RBRACE, "'}'");
-    } else if (more) { cc_error(cc, line, "expected what to import"); return node(cc, N_EMPTY, line); }
+    } else if (more) {
+        /* V8 names the comma after a default's name, else what stands there */
+        if (comma) cc_error(cc, line, "Unexpected token ','");
+        else unexpected(CCA);
+        return node(cc, N_EMPTY, line);
+    }
     uint32_t req = p_from(CCA);
     for (size_t i = mark; i < len(cc->mimps); i++) cc->mimps[i].req = req;
     semi(CCA);
@@ -2313,8 +2543,9 @@ static uint32_t p_export_decl(CC, uint32_t line, uint32_t start) {
         return n;
     }
     /* a declaration: each name it declares exported as itself */
-    if (!is_decl_start(cc) && !is_kw(cc, K_FUNCTION) && !is_kw(cc, K_ASYNC) && !is_kw(cc, K_CLASS)) {
-        cc_error(cc, line, "expected a declaration, a default or a list after export");
+    if (!is_decl_start(CCA) && !is_kw(cc, K_FUNCTION) && !is_kw(cc, K_ASYNC) && !is_kw(cc, K_CLASS)) {
+        /* V8 names the export (its parser's current token), not what follows it */
+        cc_error(cc, line, "Unexpected token 'export'");
         return node(cc, N_EMPTY, line);
     }
     (void)start;
@@ -2327,8 +2558,36 @@ static uint32_t p_export_decl(CC, uint32_t line, uint32_t start) {
     return n;
 }
 
-static int is_decl_start(js_cc *cc) {
-    return is_kw(cc, K_VAR) || is_kw(cc, K_CONST) || is_kw(cc, K_LET);
+/* a reserved word (never a binding's name, even in sloppy code) */
+static int kw_reserved(js_cc *cc, uint32_t atom) {
+    for (uint32_t i = 0; i < sizeof js_kw_reserved; i++) if (atom == cc->kw[js_kw_reserved[i]]) return 1;
+    return 0;
+}
+
+/* let at a statement's start (or a for's head) begins a lexical declaration where a binding follows it: [, {, a name
+   that is no reserved word (in strict code none it reserves), as V8's IsNextLetKeyword reads it. Else it is the name
+   let (let = 1, let.x, let(), for (let in o)), which strict code refuses */
+static int let_decl(CC) {
+    int strict = cc_strict(cc);
+    jtok t0 = cc->tok, p0 = cc->prev;
+    uint32_t pos0 = cc->pos, line0 = cc->line;
+    lx(CCA);
+    int d = is_p(cc, P_LBRACK) || is_p(cc, P_LBRACE);
+    if (!d && cc->tok.type == T_NAME && !kw_reserved(cc, cc->tok.str)) {
+        d = 1;
+        if (strict) {
+            vector<char> b;
+            js_str_to_utf8(vm, cc->tok.str, &b);
+            push_back(b, 0);
+            d = !lx_future_strict(data(b));
+        }
+    }
+    cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+    return d;
+}
+
+static int is_decl_start(CC) {
+    return is_kw(cc, K_VAR) || is_kw(cc, K_CONST) || (is_kw(cc, K_LET) && let_decl(CCA));
 }
 
 static uint32_t p_stmt_in(CC) {
@@ -2338,7 +2597,7 @@ static uint32_t p_stmt_in(CC) {
     if (is_p(cc, P_SEMI)) { lx(CCA); return node(cc, N_EMPTY, line); }
     if (cc->tok.type == T_NAME && !cc->tok.aux) {
         uint32_t a = cc->tok.str;
-        if (a == cc->kw[K_VAR] || a == cc->kw[K_CONST] || a == cc->kw[K_LET]) {
+        if (a == cc->kw[K_VAR] || a == cc->kw[K_CONST] || (a == cc->kw[K_LET] && let_decl(CCA))) {
             uint32_t kind = a == cc->kw[K_VAR] ? D_VAR : a == cc->kw[K_CONST] ? D_CONST : D_LET;
             uint32_t n = p_var(CCA, kind, 0, 1);
             semi(CCA);
@@ -2376,7 +2635,7 @@ static uint32_t p_stmt_in(CC) {
             lx(CCA);
             uint32_t n = node(cc, N_DO, line);
             cc->nodes[n].a = p_stmt(CCA);
-            if (!is_kw(cc, K_WHILE)) cc_error(cc, cc->tok.line, "expected while after do's body");
+            if (!is_kw(cc, K_WHILE)) unexpected(CCA);
             lx(CCA);
             expect_p(CCA, P_LPAREN, "'('");
             cc->nodes[n].b = p_expr(CCA, 0);
@@ -2388,7 +2647,7 @@ static uint32_t p_stmt_in(CC) {
             lx(CCA);
             int aw = 0;
             if (is_kw(cc, K_AWAIT)) {
-                if (in_async(cc) != 1) { cc_error(cc, line, "for await outside an async function"); return node(cc, N_EMPTY, line); }
+                if (in_async(cc) != 1) { cc_error(cc, line, "Unexpected reserved word"); return node(cc, N_EMPTY, line); }
                 lx(CCA);
                 aw = 1;
                 if (cc->cur_fn == 0) cc->tla = 1;
@@ -2398,17 +2657,24 @@ static uint32_t p_stmt_in(CC) {
             uint32_t sc = scope_new(cc, SC_BLOCK);
             cc->cur_scope = sc;
             uint32_t init = 0;
-            if (is_decl_start(cc)) {
+            int let_start = 0;
+            if (is_decl_start(CCA)) {
                 uint32_t kind = is_kw(cc, K_VAR) ? D_VAR : is_kw(cc, K_CONST) ? D_CONST : D_LET;
                 init = p_var(CCA, kind, 1, 0);
-            } else if (!is_p(cc, P_SEMI)) init = p_expr(CCA, 1);
-            if (aw && !is_kw(cc, K_OF)) { cc_error(cc, line, "for await needs of"); return node(cc, N_EMPTY, line); }
+            } else if (!is_p(cc, P_SEMI)) { let_start = is_kw(cc, K_LET); init = p_expr(CCA, 1); }
+            if (let_start && is_kw(cc, K_OF)) { cc_error(cc, line, "The left-hand side of a for-of loop may not start with 'let'."); return node(cc, N_EMPTY, line); }
+            if (aw && !is_kw(cc, K_OF)) { unexpected(CCA); return node(cc, N_EMPTY, line); }
             if (is_kw(cc, K_OF) || is_kw(cc, K_IN)) {
                 uint32_t n = node(cc, N_FORIN, line);
                 /* 0 for-in, 1 for-of, 2 for await */
                 cc->nodes[n].op = is_kw(cc, K_OF) ? (aw ? 2 : 1) : 0;
                 lx(CCA);
-                if (cc->nodes[init].k != N_VAR) init = to_pattern(CCA, init);
+                if (cc->nodes[init].k != N_VAR) {
+                    /* a pattern, or a simple target (V8's words for any other) */
+                    uint32_t ik = cc->nodes[init].k;
+                    if (ik == N_ARRAY || ik == N_OBJECT) init = to_pattern(CCA, init);
+                    else if (!simple_target(cc, init)) cc_error(cc, line, "Invalid left-hand side in for-loop");
+                }
                 cc->nodes[n].a = init;
                 /* the value iterated is read outside the loop's bindings; its source pos to d */
                 cc->cur_scope = saved;
@@ -2435,7 +2701,10 @@ static uint32_t p_stmt_in(CC) {
             return n;
         }
         if (a == cc->kw[K_RETURN]) {
-            if (cc->fns[cc->cur_fn].flags & FN_BLOCK) cc_error(cc, line, "Illegal return statement");
+            /* in a function: a static block is none, a script's, a module's and an eval's code none (an event
+               handler's attribute is a function's body) */
+            if ((cc->fns[cc->cur_fn].flags & FN_BLOCK) || (cc->cur_fn == 0 && cc->mode != JS_CC_HANDLER))
+                cc_error(cc, line, "Illegal return statement");
             lx(CCA);
             uint32_t n = node(cc, N_RETURN, line);
             if (!is_p(cc, P_SEMI) && !is_p(cc, P_RBRACE) && cc->tok.type != T_EOF && !cc->tok.nl) cc->nodes[n].a = p_expr(CCA, 0);
@@ -2451,7 +2720,7 @@ static uint32_t p_stmt_in(CC) {
         }
         if (a == cc->kw[K_THROW]) {
             lx(CCA);
-            if (cc->tok.nl) cc_error(cc, line, "a line break after throw");
+            if (cc->tok.nl) cc_error(cc, line, "Illegal newline after throw");
             uint32_t n = node(cc, N_THROW, line);
             cc->nodes[n].a = p_expr(CCA, 0);
             semi(CCA);
@@ -2476,7 +2745,7 @@ static uint32_t p_stmt_in(CC) {
                 cc->cur_scope = saved;
             }
             if (is_kw(cc, K_FINALLY)) { lx(CCA); cc->nodes[n].d = p_block(CCA); }
-            if (!cc->nodes[n].c && !cc->nodes[n].d) cc_error(cc, line, "a try needs a catch or a finally");
+            if (!cc->nodes[n].c && !cc->nodes[n].d) cc_error(cc, line, "Missing catch or finally after try");
             return n;
         }
         if (a == cc->kw[K_SWITCH]) {
@@ -2490,11 +2759,16 @@ static uint32_t p_stmt_in(CC) {
             cc->cur_scope = scope_new(cc, SC_BLOCK);
             cc->nodes[n].s = cc->cur_scope;
             size_t mark = len(cc->tmp);
+            int ndef = 0;
             while (!is_p(cc, P_RBRACE) && !cc->err) {
                 uint32_t cs = node(cc, N_CASE, cc->tok.line);
                 if (is_kw(cc, K_CASE)) { lx(CCA); cc->nodes[cs].a = p_expr(CCA, 0); }
-                else if (is_kw(cc, K_DEFAULT)) { lx(CCA); cc->nodes[cs].d = 1; }
-                else { cc_error(cc, cc->tok.line, "expected case or default"); break; }
+                else if (is_kw(cc, K_DEFAULT)) {
+                    if (ndef++) { cc_error(cc, cc->tok.line, "More than one default clause in switch statement"); break; }
+                    lx(CCA);
+                    cc->nodes[cs].d = 1;
+                }
+                else { unexpected(CCA); break; }
                 expect_p(CCA, P_COLON, "':'");
                 size_t m2 = len(cc->tmp);
                 while (!is_kw(cc, K_CASE) && !is_kw(cc, K_DEFAULT) && !is_p(cc, P_RBRACE) && !cc->err) push_back(cc->tmp, p_stmt(CCA));
@@ -2535,21 +2809,32 @@ static uint32_t p_stmt_in(CC) {
                 cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
             }
             if (decl) {
+                /* at a module's top level alone; elsewhere V8 names export, and reads import as an import
+                   expression, which the token after it ends */
+                int top = cc->mode == JS_CC_MODULE && cc->cur_fn == 0 && cc->cur_scope == 0;
+                if (!top && a == cc->kw[K_EXPORT]) { cc_error(cc, line, "Unexpected token 'export'"); return node(cc, N_EMPTY, line); }
                 if (cc->mode != JS_CC_MODULE) { cc_error(cc, line, "Cannot use import statement outside a module"); return node(cc, N_EMPTY, line); }
-                if (cc->cur_fn != 0 || cc->cur_scope != 0) { cc_error(cc, line, "an import or an export stands at a module's top level alone"); return node(cc, N_EMPTY, line); }
+                if (!top) { lx(CCA); unexpected(CCA); return node(cc, N_EMPTY, line); }
                 return a == cc->kw[K_EXPORT] ? p_export_decl(CCA, line, start) : p_import_decl(CCA, line);
             }
         }
-        /* a label */
+        /* a label (none of a refused word: the statement then reads it, and V8's words follow) */
         jtok t0 = cc->tok, p0 = cc->prev;
         uint32_t pos0 = cc->pos, line0 = cc->line;
         lx(CCA);
-        if (is_p(cc, P_COLON)) {
+        if (is_p(cc, P_COLON) && !name_refused(CCA, t0, 0)) {
             await_reserved(CCA, a, line);
+            for (size_t q = 0; q + 1 < len(cc->plabels); q += 2)
+                if (cc->plabels[q] == a && cc->plabels[q + 1] == cc->cur_fn) { priv_error(CCA, line, "Label '", a, "' has already been declared"); return node(cc, N_EMPTY, line); }
             lx(CCA);
             uint32_t n = node(cc, N_LABEL, line);
             cc->nodes[n].s = a;
-            cc->nodes[n].a = p_stmt(CCA);
+            size_t lmark = len(cc->plabels);
+            push_back(cc->plabels, a);
+            push_back(cc->plabels, cc->cur_fn);
+            uint32_t body = p_stmt(CCA);
+            resize(cc->plabels, lmark);
+            cc->nodes[n].a = body;
             return n;
         }
         cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
@@ -3347,7 +3632,7 @@ static void gen_object(CC, uint32_t n) {
         jnode pr = cc->nodes[p];
         int computed = pr.d & NF_COMPUTED;
         if (pr.op == PK_SPREAD) { gen_expr(CCA, pr.b); emit(vm, OP_COPY_PROPS); continue; }
-        if (pr.op == PK_COVER) { cc_error(cc, pr.line, "an object literal's '=' belongs in a destructuring pattern"); return; }
+        if (pr.op == PK_COVER) { cc_error(cc, pr.line, "Invalid shorthand property initializer"); return; }
         if (pr.op == PK_INIT && (pr.d & NF_PROTO)) {
             /* __proto__: v sets the prototype (its value no function's name), once a literal */
             if (++protos > 1) { cc_error(cc, pr.line, "Duplicate __proto__ fields are not allowed in object literals"); return; }
@@ -3609,7 +3894,7 @@ static void gen_pattern(CC, uint32_t p, int init) {
         emit(vm, OP_POP);
         return;
     }
-    cc_error(cc, t.line, "invalid destructuring target");
+    cc_error(cc, t.line, "Invalid destructuring assignment target");
 }
 
 static void gen_assign(CC, uint32_t n) {
@@ -3672,7 +3957,7 @@ static void gen_assign(CC, uint32_t n) {
         else { emit(vm, OP_PUT_SUPER); emit32(vm, tg.s); }
         return;
     }
-    if (tg.k != N_MEMBER) { cc_error(cc, as.line, "invalid assignment target"); return; }
+    if (tg.k != N_MEMBER) { cc_error(cc, as.line, "Invalid left-hand side in assignment"); return; }
     int computed = tg.op & NF_COMPUTED;
     uint32_t q = 0;
     gen_expr(CCA, tg.a);
@@ -3725,7 +4010,7 @@ static void gen_update(CC, uint32_t n, int force_prefix) {
         if (!prefix) emit(vm, OP_POP);
         return;
     }
-    if (tg.k != N_MEMBER) { cc_error(cc, u.line, "invalid target of ++ or --"); return; }
+    if (tg.k != N_MEMBER) { cc_error(cc, u.line, (u.d & NF_PREFIX) ? "Invalid left-hand side expression in prefix operation" : "Invalid left-hand side expression in postfix operation"); return; }
     int computed = tg.op & NF_COMPUTED;
     uint32_t q = 0;
     gen_expr(CCA, tg.a);
@@ -3966,7 +4251,7 @@ static void gen_expr(CC, uint32_t n) {
         else emit(vm, OP_UNDEF);
         emit(vm, OP_IMPORT_DYN);
         return;
-    case N_SPREAD: cc_error(cc, e.line, "'...' only spreads in a call, an array or an object"); return;
+    case N_SPREAD: cc_error(cc, e.line, "Unexpected token '...'"); return;
     case N_HOLE: emit(vm, OP_UNDEF); return;
     case N_PATTERN_OBJ: case N_PATTERN_ARR: cc_error(cc, e.line, "a destructuring pattern where a value should be"); return;
     default: cc_error(cc, e.line, "an expression the compiler does not know"); return;
@@ -4055,18 +4340,24 @@ static void gen_jump(CC, uint32_t n, int is_break) {
         if (label) {
             if (c.kind == CX_LABEL && c.label == label) {
                 if (is_break) { found = 1; break; }
-                /* continue label: the loop the label names, just inside it (a for-of's
-                   handler between them) */
-                size_t u = t;
-                if (u < len(cc->ctx) && cc->ctx[u].kind == CX_ITER) u++;
-                if (u < len(cc->ctx) && cc->ctx[u].kind == CX_LOOP) { t = u + 1; found = 1; break; }
-                cc_error(cc, cc->nodes[n].line, "continue's label names no loop");
+                /* continue label: the loop the label's chain names (a: b: while), the first just inside it (the
+                   chain's labels, a for-of's handler between them) */
+                if (c.has_cont) {
+                    size_t u = t;
+                    while (u < len(cc->ctx) && cc->ctx[u].kind != CX_LOOP) u++;
+                    if (u < len(cc->ctx)) { t = u + 1; found = 1; break; }
+                }
+                priv_error(CCA, cc->nodes[n].line, "Illegal continue statement: '", label, "' does not denote an iteration statement");
                 return;
             }
         } else if (c.kind == CX_LOOP || (is_break && c.kind == CX_SWITCH)) { found = 1; break; }
         t--;
     }
-    if (!found) { cc_error(cc, cc->nodes[n].line, is_break ? "break outside a loop or a switch" : "continue outside a loop"); return; }
+    if (!found) {
+        if (label) priv_error(CCA, cc->nodes[n].line, "Undefined label '", label, "'");
+        else cc_error(cc, cc->nodes[n].line, is_break ? "Illegal break statement" : "Illegal continue statement: no surrounding iteration statement");
+        return;
+    }
     unwind_to(CCA, t, 0);
     jctx c = cc->ctx[t - 1];
     if (is_break) {
@@ -4362,6 +4653,10 @@ static void gen_stmt(CC, uint32_t n) {
     case N_LABEL: {
         ctx_push(cc, CX_LABEL, 0, s.s);
         size_t me = len(cc->ctx) - 1;
+        uint32_t lb = s.a;
+        while (cc->nodes[lb].k == N_LABEL) lb = cc->nodes[lb].a;
+        uint32_t lk = cc->nodes[lb].k;
+        cc->ctx[me].has_cont = lk == N_FOR || lk == N_FORIN || lk == N_WHILE || lk == N_DO;
         gen_stmt(CCA, s.a);
         chain_end(vm, cc->ctx[me].brk, here(vm));
         pop_back(cc->ctx);
@@ -4882,7 +5177,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     {
         uint32_t so = 0, sn = 0;
         p_body(vm, src, srcn, cc, 0, &so, &sn);
-        if (!cc->err && cc->tok.type != T_EOF) cc_error(cc, cc->tok.line, "unexpected text after the script's end");
+        if (!cc->err && cc->tok.type != T_EOF) unexpected(CCA);
         cc->nodes[body].a = so;
         cc->nodes[body].b = sn;
     }
@@ -4896,7 +5191,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         /* the Function constructor's source: one statement, the function expression */
         jnode b = cc->nodes[body];
         if (b.b != 1 || cc->nodes[cc->lists[b.a]].k != N_EXPR || cc->nodes[cc->nodes[cc->lists[b.a]].a].k != N_FUNC)
-            cc_error(cc, 1, "the Function constructor's parameters or body end the function early");
+            cc_error(cc, 1, "Single function literal required");
     }
     if (!cc->err) {
         resolve(cc);
@@ -5235,6 +5530,7 @@ int js_site_text(js_vm *vm, js_site s, int callee_only, vector<char> *out) {
     memset(&ccs, 0, sizeof ccs);
     defer(ccs) { JS_CC_DROP(ccs); }
     js_cc *cc = &ccs;
+    cc->mode = JS_CC_SITE;
     const char *src = data(text);
     uint32_t srcn = (uint32_t)len(text);
     /* read as the code it stands in reads (yield and await operators there), with no scopes */

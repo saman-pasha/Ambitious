@@ -803,3 +803,23 @@ neighbours.
     print("};")
     print('int main(void) { printf("%%u\\n", big[%d]); return 0; }' % (n // 2))
     ```
+
+43. **A call to a function defined further down is accepted with any arguments**: with no
+    declaration in scope, cicilang takes the call as C89's implicit declaration did, and
+    checks it neither against the definition that follows nor at all, where gcc and clang
+    refuse it (`implicit declaration of function 'later'`, then `static declaration of
+    'later' follows non-static declaration`):
+
+    ```c
+    #include <stdio.h>
+    static int caller(int x) { return later(x); }
+    static int later(int a, int b, int c, int d) { return a + b + c + d; }
+    int main(void) { printf("%d\n", caller(1)); return 0; }
+    ```
+
+    compiles with no diagnostic and prints whatever the three registers held (1 here).
+    The JS parser met it (`src/js/compile.c`): `p_export_decl` called `is_decl_start`,
+    which is defined below it, and when that function took the lexer's four arguments in
+    place of one the call kept passing one, so every module with an `export` crashed in
+    it. Asked for: a call with no prototype in scope refused, as C99 does, or at least
+    checked against the definition in the same unit.
