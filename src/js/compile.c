@@ -83,14 +83,18 @@ typedef struct jnode { uint16_t k, op; uint32_t a, b, c, d, line, s, pos; double
 enum { SC_SCRIPT, SC_FUNC, SC_BLOCK, SC_SELF, SC_EVAL };
 /* dyn: a with's object or a sloppy function's eval vars, the cell's declaration (names
    passing the scope are looked for there first); synth: a scope of a direct eval's caller,
-   its cells the caller's (the site's bindings) */
-typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth; } jscope;
+   its cells the caller's (the site's bindings); first and last: its declarations' list, in their order (decls'
+   next) */
+typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth, last; } jscope;
 /* D_EV: a sloppy function's eval vars object; D_WITH: a with's object; D_EVALVAR: a var or
    function a sloppy direct eval's code declares in its caller's function (that object's) */
 enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS, D_EV, D_WITH, D_EVALVAR,
        D_IMPORT };                       /* an imported name: param its binding (vm->mod_binds) */
 #define JS_SYNTH_FN 0xFFFFFFFFu            /* a synthetic declaration's function: none of this unit's */
-typedef struct jdecl { uint32_t scope, atom, kind, captured, slot, next, fn, param, init, envslot; } jdecl;
+/* priv: the private name (plus one) whose symbol the declaration holds */
+typedef struct jdecl { uint32_t scope, atom, kind, captured, slot, next, fn, param, init, envslot, priv; } jdecl;
+/* the scopes' names: the scope whose list holds a declaration, its name, the first such declaration (0: a free entry) */
+typedef struct jdkey { uint32_t scope, atom, decl; } jdkey;
 typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
 #define FN_EXPR 0x10000            /* a concise arrow's body: an expression */
 #define FN_FIELDS 0x20000          /* a class's field initializer */
@@ -104,8 +108,9 @@ typedef struct jfn {
 /* a class: its name, heritage, constructor, members; its fields' function and its static initializer (0: none); its
    declaration's outer binding; its own scope, whose inner binding of its name is immutable */
 /* h_first, h_end: the references its heritage made (refs h_first up to h_end), which see its scope's inner name but not
-   its private names: the heritage is read in the enclosing class's private environment */
-typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn, h_first, h_end; } jclass;
+   its private names: the heritage is read in the enclosing class's private environment; pfirst and plast: its private
+   names (each plus one), chained by their pnext */
+typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn, h_first, h_end, pfirst, plast; } jclass;
 /* a class's private name (#x): kind its PV_ flags (an accessor's getter and setter one name), its class (plus one), the
    binding of its class's scope that holds its symbol (a new one each time the class is made: decl, atom hidden), a
    method's or an accessor's functions' bindings, and for an instance's method or accessor the reads the fields function
@@ -114,6 +119,7 @@ enum { PV_FIELD = 1, PV_METHOD = 2, PV_GET = 4, PV_SET = 8, PV_STATIC = 16 };
 typedef struct jpriv {
     uint32_t name, cls, kind, decl, hidden, fn_decl, get_decl, set_decl, line;
     uint32_t isym, ifn, iget, iset;
+    uint32_t pnext;                   /* its class's next private name, plus one (0: the last) */
 } jpriv;
 
 /* the code generator's open contexts, innermost last. A loop's label is 1 when its
@@ -143,6 +149,12 @@ typedef struct js_cc {
     vector<jmimp> mimps;
     vector<jmexp> mexps;
     vector<uint32_t> export_names;    /* the names an export's declaration declares */
+    /* the indexes that keep the compile linear: the scopes' names (open addressing, at most half full: ndkeys of
+       them held), each function's declarations in their order (fn_decl[f] its first, decl_next the next), each
+       scope's class (plus one: the first whose scope it is) */
+    vector<jdkey> dkeys;
+    vector<uint32_t> fn_decl, decl_next, scope_cls;
+    uint32_t ndkeys;
     jtok tok, prev;
     uint32_t pos, line, cur_fn, cur_scope, script, gen_fn, nslots, chain, in_class, in_fields;
     uint32_t mode;                    /* JS_CC_*: what is read */
@@ -168,7 +180,9 @@ typedef struct js_cc {
 #define JS_CC_DROP(c) vector_jnode_drop(&(c).nodes); vector_uint32_t_drop(&(c).lists); vector_uint32_t_drop(&(c).tmp); \
     vector_jscope_drop(&(c).scopes); vector_jdecl_drop(&(c).decls); vector_jref_drop(&(c).refs); vector_jfn_drop(&(c).fns); \
     vector_jclass_drop(&(c).classes); vector_jpriv_drop(&(c).privs); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
-    vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names)
+    vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names); \
+    vector_jdkey_drop(&(c).dkeys); vector_uint32_t_drop(&(c).fn_decl); vector_uint32_t_drop(&(c).decl_next); \
+    vector_uint32_t_drop(&(c).scope_cls)
 
 #define CC js_vm *vm, const char *src, uint32_t srcn, js_cc *cc
 #define CCA vm, src, srcn, cc
@@ -608,7 +622,7 @@ static jlist list_take(js_cc *cc, size_t mark) {
 }
 
 static uint32_t scope_new(js_cc *cc, uint32_t kind) {
-    jscope s = { cc->cur_scope, cc->cur_fn, kind, 0, 0, 0, 0, 0 };
+    jscope s = { cc->cur_scope, cc->cur_fn, kind, 0, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s);
     return (uint32_t)(len(cc->scopes) - 1);
 }
@@ -619,24 +633,76 @@ static uint32_t var_scope(js_cc *cc, uint32_t s) {
     return s;
 }
 
+/* the scopes' names indexed, so that a scope's first declaration of a name is found without walking its list (a
+   function of 40,000 vars compiled in linear time): the table's place of a scope's name */
+static uint32_t dk_hash(uint32_t sc, uint32_t atom) {
+    uint32_t h = sc * 0x9E3779B1u ^ atom * 0x85EBCA77u;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return h;
+}
+/* scope sc's first declaration of atom (0: none) */
+static uint32_t scope_find(js_cc *cc, uint32_t sc, uint32_t atom) {
+    size_t cap = len(cc->dkeys);
+    if (!cap) return 0;
+    size_t m = cap - 1;
+    for (size_t i = dk_hash(sc, atom) & m;; i = (i + 1) & m) {
+        jdkey k = cc->dkeys[i];
+        if (!k.decl) return 0;
+        if (k.scope == sc && k.atom == atom) return k.decl;
+    }
+}
+static void dk_insert(js_cc *cc, jdkey k) {
+    size_t m = len(cc->dkeys) - 1;
+    for (size_t i = dk_hash(k.scope, k.atom) & m;; i = (i + 1) & m) {
+        jdkey e = cc->dkeys[i];
+        if (!e.decl) { cc->dkeys[i] = k; cc->ndkeys++; return; }
+        if (e.scope == k.scope && e.atom == k.atom) return;     /* the scope's first declaration of the name stays */
+    }
+}
+/* declaration id appended to scope sc's list (at its last), and indexed */
+static void scope_append(js_cc *cc, uint32_t sc, uint32_t id) {
+    cc->decls[id].next = 0;
+    if (!cc->scopes[sc].first) cc->scopes[sc].first = id;
+    else {
+        uint32_t x = cc->scopes[sc].last;
+        cc->decls[x].next = id;
+    }
+    cc->scopes[sc].last = id;
+    if ((size_t)cc->ndkeys * 2 + 2 > len(cc->dkeys)) {
+        /* the table doubled, its keys put again */
+        size_t cap = len(cc->dkeys) ? len(cc->dkeys) * 2 : 64;
+        vector<jdkey> old;
+        for (size_t i = 0; i < len(cc->dkeys); i++) if (cc->dkeys[i].decl) push_back(old, cc->dkeys[i]);
+        clear(cc->dkeys);
+        jdkey z = { 0, 0, 0 };
+        for (size_t i = 0; i < cap; i++) push_back(cc->dkeys, z);
+        cc->ndkeys = 0;
+        for (size_t i = 0; i < len(old); i++) dk_insert(cc, old[i]);
+    }
+    jdkey k = { sc, cc->decls[id].atom, id };
+    dk_insert(cc, k);
+}
+
 static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     uint32_t sc = kind == D_VAR || (kind == D_FUNC && cc->scopes[cc->cur_scope].kind == SC_EVAL) ? var_scope(cc, cc->cur_scope) : cc->cur_scope;
     if (cc->exporting && sc == 0) push_back(cc->export_names, atom);
-    for (uint32_t d = cc->scopes[sc].first; d; d = cc->decls[d].next) {
-        if (cc->decls[d].atom != atom) continue;
-        uint32_t dk = cc->decls[d].kind;
+    uint32_t e = scope_find(cc, sc, atom);
+    if (e) {
+        uint32_t dk = cc->decls[e].kind;
         if ((kind == D_VAR || kind == D_FUNC) && (dk == D_VAR || dk == D_FUNC || dk == D_PARAM)) {
-            if (kind == D_FUNC) cc->decls[d].kind = dk == D_PARAM ? D_PARAM : D_FUNC;
-            return d;
+            if (kind == D_FUNC) cc->decls[e].kind = dk == D_PARAM ? D_PARAM : D_FUNC;
+            return e;
         }
-        if (kind == D_PARAM && dk == D_PARAM) return d;
+        if (kind == D_PARAM && dk == D_PARAM) return e;
         vector<char> m;
         append_range(m, "Identifier '", 12);
         js_str_to_utf8(vm, atom, &m);
         append_range(m, "' has already been declared", 27);
         push_back(m, 0);
         cc_error(cc, line, data(m));
-        return d;
+        return e;
     }
     jdecl d;
     memset(&d, 0, sizeof d);
@@ -647,17 +713,10 @@ static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     /* a sloppy direct eval's var (or function) its caller has no binding for: its caller's
        eval vars object's */
     if (cc->scopes[sc].synth) { d.kind = D_EVALVAR; d.fn = JS_SYNTH_FN; }
-    d.next = cc->scopes[sc].first;
     push_back(cc->decls, d);
     uint32_t id = (uint32_t)(len(cc->decls) - 1);
     /* the scope's list in declaration order: appended at its end */
-    if (!cc->scopes[sc].first) cc->scopes[sc].first = id;
-    else {
-        cc->decls[id].next = 0;
-        uint32_t x = cc->scopes[sc].first;
-        while (cc->decls[x].next) x = cc->decls[x].next;
-        cc->decls[x].next = id;
-    }
+    scope_append(cc, sc, id);
     return id;
 }
 
@@ -672,12 +731,7 @@ static uint32_t dyn_decl(js_cc *cc, uint32_t sc, uint32_t kind, uint32_t atom) {
     d.captured = 1;
     push_back(cc->decls, d);
     uint32_t id = (uint32_t)(len(cc->decls) - 1);
-    if (!cc->scopes[sc].first) cc->scopes[sc].first = id;
-    else {
-        uint32_t x = cc->scopes[sc].first;
-        while (cc->decls[x].next) x = cc->decls[x].next;
-        cc->decls[x].next = id;
-    }
+    scope_append(cc, sc, id);
     cc->scopes[sc].dyn = id;
     cc->scopes[sc].has_env = 1;
     cc->ndyn++;
@@ -727,9 +781,10 @@ static void priv_error(CC, uint32_t line, const char *a, uint32_t name, const ch
    accessor; any other second declaration V8's early error */
 static uint32_t priv_declare(CC, uint32_t ci, uint32_t name, uint32_t kind, int is_static, uint32_t line) {
     uint32_t st = is_static ? PV_STATIC : 0;
-    for (size_t i = 0; i < len(cc->privs); i++) {
+    for (uint32_t pi = cc->classes[ci].pfirst; pi; pi = cc->privs[pi - 1].pnext) {
+        size_t i = pi - 1;
         jpriv *q = &cc->privs[i];
-        if (q->cls != ci + 1 || q->name != name) continue;
+        if (q->name != name) continue;
         if ((kind == PV_GET || kind == PV_SET) && (q->kind & (PV_GET | PV_SET)) && !(q->kind & kind) && (q->kind & PV_STATIC) == st) {
             q->kind |= kind;
             uint32_t d = declare(CCA, priv_hidden(vm, name, kind == PV_GET ? " get" : " set"), D_CONST, line);
@@ -752,7 +807,16 @@ static uint32_t priv_declare(CC, uint32_t ci, uint32_t name, uint32_t kind, int 
     if (kind == PV_GET) p.get_decl = declare(CCA, priv_hidden(vm, name, " get"), D_CONST, line);
     if (kind == PV_SET) p.set_decl = declare(CCA, priv_hidden(vm, name, " set"), D_CONST, line);
     push_back(cc->privs, p);
-    return (uint32_t)(len(cc->privs) - 1);
+    uint32_t pi = (uint32_t)len(cc->privs);
+    cc->decls[p.decl].priv = pi;
+    /* the class's private names in their order */
+    if (!cc->classes[ci].pfirst) cc->classes[ci].pfirst = pi;
+    else {
+        uint32_t x = cc->classes[ci].plast;
+        cc->privs[x - 1].pnext = pi;
+    }
+    cc->classes[ci].plast = pi;
+    return pi - 1;
 }
 
 static uint32_t p_expr(CC, int no_in);
@@ -1959,9 +2023,10 @@ static uint32_t p_class(CC, int is_decl) {
         uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
         cc->cur_fn = fields_fn;
         cc->cur_scope = cc->fns[fields_fn].scope;
-        for (size_t i = 0; i < len(cc->privs); i++) {
+        for (uint32_t pi = cc->classes[ci].pfirst; pi; pi = cc->privs[pi - 1].pnext) {
+            size_t i = pi - 1;
             jpriv q = cc->privs[i];
-            if (q.cls != ci + 1 || (q.kind & (PV_FIELD | PV_STATIC))) continue;
+            if (q.kind & (PV_FIELD | PV_STATIC)) continue;
             uint32_t isym = ident_node(CCA, q.hidden, q.line), ifn = 0, iget = 0, iset = 0;
             if (q.kind & PV_METHOD) ifn = ident_node(CCA, priv_hidden(vm, q.name, " fn"), q.line);
             if (q.kind & PV_GET) iget = ident_node(CCA, priv_hidden(vm, q.name, " get"), q.line);
@@ -2499,12 +2564,7 @@ static uint32_t args_decl(js_cc *cc, uint32_t f) {
     d.fn = f;
     push_back(cc->decls, d);
     uint32_t id = (uint32_t)(len(cc->decls) - 1);
-    if (!cc->scopes[sc].first) cc->scopes[sc].first = id;
-    else {
-        uint32_t x = cc->scopes[sc].first;
-        while (cc->decls[x].next) x = cc->decls[x].next;
-        cc->decls[x].next = id;
-    }
+    scope_append(cc, sc, id);
     cc->fns[f].args_decl = id;
     cc->fns[f].flags |= JF_ARGUMENTS;
     return id;
@@ -2527,20 +2587,23 @@ static void map_arguments(js_cc *cc) {
 /* a reference ref made in the heritage of the class whose scope s is: that scope's declaration d hidden from it unless
    d is the class's inner name (its private names belong to the class's body) */
 static int heritage_hides(js_cc *cc, uint32_t s, uint32_t ref, uint32_t d) {
-    if (cc->scopes[s].kind != SC_BLOCK) return 0;
-    for (size_t i = 0; i < len(cc->classes); i++) {
-        if (cc->classes[i].scope != s) continue;
-        return ref >= cc->classes[i].h_first && ref < cc->classes[i].h_end && d != cc->classes[i].inner;
-    }
-    return 0;
+    if (cc->scopes[s].kind != SC_BLOCK || s >= len(cc->scope_cls) || !cc->scope_cls[s]) return 0;
+    jclass k = cc->classes[cc->scope_cls[s] - 1];
+    return ref >= k.h_first && ref < k.h_end && d != k.inner;
 }
 static void resolve(js_cc *cc) {
+    /* each scope's class, the first whose scope it is */
+    clear(cc->scope_cls);
+    for (size_t s = 0; s < len(cc->scopes); s++) push_back(cc->scope_cls, 0);
+    for (size_t i = len(cc->classes); i > 0; i--) {
+        uint32_t s = cc->classes[i - 1].scope;
+        cc->scope_cls[s] = (uint32_t)i;
+    }
     for (size_t r = 1; r < len(cc->refs); r++) {
         jref ref = cc->refs[r];
         uint32_t s = ref.scope, found = 0;
         for (;;) {
-            for (uint32_t d = cc->scopes[s].first; d; d = cc->decls[d].next)
-                if (cc->decls[d].atom == ref.atom) { found = d; break; }
+            found = scope_find(cc, s, ref.atom);
             if (found && heritage_hides(cc, s, (uint32_t)r, found)) found = 0;
             if (found) break;
             if (cc->scopes[s].kind == SC_FUNC && ref.atom == cc->kw[K_ARGUMENTS]) {
@@ -2733,12 +2796,11 @@ static uint32_t gen_eval_site(CC, uint32_t site) {
             if (!x.captured || x.kind == D_EVALVAR) continue;
             js_evalbind b = { x.atom, x.kind, env_depth(cc, site, x.scope), x.envslot, 0, 0 };
             /* a private name's binding: its kind and its class's name with it */
-            for (size_t i = 0; i < len(cc->privs); i++)
-                if (cc->privs[i].decl == d) {
-                    b.pkind = cc->privs[i].kind + 1;
-                    b.pcls = cc->classes[cc->privs[i].cls - 1].name;
-                    break;
-                }
+            if (x.priv) {
+                jpriv q = cc->privs[x.priv - 1];
+                b.pkind = q.kind + 1;
+                b.pcls = cc->classes[q.cls - 1].name;
+            }
             push_back(vm->eval_binds, b);
             es.n++;
         }
@@ -3186,7 +3248,7 @@ static void gen_args_call(CC, uint32_t off, uint32_t n, uint32_t op, uint32_t op
 /* (its index, plus one: 0 none) */
 static uint32_t priv_of(CC, uint32_t id, uint32_t name, uint32_t line) {
     uint32_t d = cc->refs[cc->nodes[id].a].decl;
-    for (size_t i = 0; d && i < len(cc->privs); i++) if (cc->privs[i].decl == d) return (uint32_t)i + 1;
+    if (d && cc->decls[d].priv) return cc->decls[d].priv;
     priv_error(CCA, line, "Private field '", name, "' must be declared in an enclosing class");
     return 0;
 }
@@ -3303,9 +3365,8 @@ static void gen_class(CC, uint32_t ci) {
     jclass k = cc->classes[ci];
     gen_block_enter(CCA, k.scope);
     /* its private names, new ones each time the class is made */
-    for (size_t i = 0; i < len(cc->privs); i++) {
-        jpriv q = cc->privs[i];
-        if (q.cls != ci + 1) continue;
+    for (uint32_t pi = k.pfirst; pi; pi = cc->privs[pi - 1].pnext) {
+        jpriv q = cc->privs[pi - 1];
         emit(vm, OP_PRIV_NEW);
         emit32(vm, q.name);
         gen_put(CCA, q.hidden, q.decl, k.scope, 0, 1);
@@ -3354,9 +3415,9 @@ static void gen_class(CC, uint32_t ci) {
     }
     emit(vm, OP_POP);
     /* the static private methods and accessors added to the class */
-    for (size_t i = 0; i < len(cc->privs); i++) {
-        jpriv q = cc->privs[i];
-        if (q.cls != ci + 1 || !(q.kind & PV_STATIC) || (q.kind & PV_FIELD)) continue;
+    for (uint32_t pi = k.pfirst; pi; pi = cc->privs[pi - 1].pnext) {
+        jpriv q = cc->privs[pi - 1];
+        if (!(q.kind & PV_STATIC) || (q.kind & PV_FIELD)) continue;
         gen_get(CCA, q.hidden, q.decl, k.scope);
         if (q.kind & PV_METHOD) {
             gen_get(CCA, cc->decls[q.fn_decl].atom, q.fn_decl, k.scope);
@@ -4251,12 +4312,33 @@ static void gen_stmt(CC, uint32_t n) {
     }
 }
 
+/* each function's declarations in their order, chained once the names are resolved (fn_decl[f] its first, decl_next
+   the next): a function's slots assigned from its own declarations, not from every one of the script's */
+static void index_fn_decls(js_cc *cc) {
+    size_t nf = len(cc->fns), nd = len(cc->decls);
+    clear(cc->fn_decl);
+    clear(cc->decl_next);
+    vector<uint32_t> tail;
+    for (size_t f = 0; f < nf; f++) { push_back(cc->fn_decl, 0); push_back(tail, 0); }
+    for (size_t d = 0; d < nd; d++) push_back(cc->decl_next, 0);
+    for (size_t d = 1; d < nd; d++) {
+        uint32_t f = cc->decls[d].fn;
+        if (f >= nf) continue;
+        if (!cc->fn_decl[f]) cc->fn_decl[f] = (uint32_t)d;
+        else {
+            uint32_t x = tail[f];
+            cc->decl_next[x] = (uint32_t)d;
+        }
+        tail[f] = (uint32_t)d;
+    }
+}
+
 /* the slots and cells of a function's declarations */
 static void assign_slots(js_cc *cc, uint32_t f) {
     cc->nslots = cc->fns[f].nparams;
-    for (size_t d = 1; d < len(cc->decls); d++) {
+    for (uint32_t d = cc->fn_decl[f]; d; d = cc->decl_next[d]) {
         jdecl x = cc->decls[d];
-        if (x.fn != f || cc->scopes[x.scope].kind == SC_SCRIPT) continue;
+        if (cc->scopes[x.scope].kind == SC_SCRIPT) continue;
         if (x.kind == D_SELF && !x.captured) continue;
         if (x.kind == D_IMPORT) continue;
         if (x.kind == D_PARAM && x.param) cc->decls[d].slot = x.param - 1;
@@ -4379,18 +4461,20 @@ static void gen_function(CC, uint32_t f) {
                     /* each parameter's cell, the last of a name the one it maps (sloppy duplicates) */
                     emit(vm, OP_ARGUMENTS_MAPPED);
                     emit16(vm, F.nparams);
-                    for (uint32_t i = 0; i < F.nparams; i++) {
-                        uint32_t cell = 0xFFFF;
-                        for (uint32_t q = cc->scopes[fs].first; q; q = cc->decls[q].next)
-                            if (cc->decls[q].kind == D_PARAM && cc->decls[q].param == i + 1 && cc->decls[q].captured) cell = cc->decls[q].envslot;
-                        emit16(vm, cell);
+                    size_t mark = len(cc->tmp);
+                    for (uint32_t i = 0; i < F.nparams; i++) push_back(cc->tmp, 0xFFFF);
+                    for (uint32_t q = cc->scopes[fs].first; q; q = cc->decls[q].next) {
+                        jdecl y = cc->decls[q];
+                        if (y.kind == D_PARAM && y.param && y.param <= F.nparams && y.captured) cc->tmp[mark + y.param - 1] = y.envslot;
                     }
+                    for (uint32_t i = 0; i < F.nparams; i++) emit16(vm, at(cc->tmp, mark + i));
+                    resize(cc->tmp, mark);
                 } else emit(vm, OP_ARGUMENTS);
                 gen_put(CCA, x.atom, d, fs, 0, 1);
             }
         }
-        for (size_t d = 1; d < len(cc->decls); d++)
-            if (cc->decls[d].kind == D_SELF && cc->decls[d].fn == f && cc->decls[d].captured) {
+        for (uint32_t d = cc->fn_decl[f]; d; d = cc->decl_next[d])
+            if (cc->decls[d].kind == D_SELF && cc->decls[d].captured) {
                 emit(vm, OP_CALLEE);
                 emit(vm, OP_PUT_ENV);
                 emit(vm, 0);
@@ -4422,9 +4506,9 @@ static void gen_function(CC, uint32_t f) {
             jclass k = cc->classes[F.cls - 1];
             int want_static = (F.flags & FN_STATIC) != 0;
             if (!want_static)
-                for (size_t i = 0; i < len(cc->privs); i++) {
-                    jpriv q = cc->privs[i];
-                    if (q.cls != F.cls || (q.kind & (PV_FIELD | PV_STATIC)) || !q.isym) continue;
+                for (uint32_t pi = k.pfirst; pi; pi = cc->privs[pi - 1].pnext) {
+                    jpriv q = cc->privs[pi - 1];
+                    if ((q.kind & (PV_FIELD | PV_STATIC)) || !q.isym) continue;
                     emit(vm, OP_THIS);
                     gen_ident_get(CCA, q.isym);
                     if (q.kind & PV_METHOD) { gen_ident_get(CCA, q.ifn); emit_priv(CCA, OP_PRIV_DEFINE, q); }
@@ -4503,8 +4587,7 @@ static void mod_resolve_exports(js_vm *vm, js_cc *cc) {
     for (size_t i = 0; i < len(cc->mexps) && !cc->err; i++) {
         jmexp e = cc->mexps[i];
         if (e.kind != JX_LOCAL) continue;
-        uint32_t found = 0;
-        for (uint32_t d = cc->scopes[0].first; d && !found; d = cc->decls[d].next) if (cc->decls[d].atom == e.local) found = d;
+        uint32_t found = scope_find(cc, 0, e.local);
         if (!found) {
             vector<char> m;
             append_range(m, "Export '", 8);
@@ -4596,7 +4679,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     if (mode == JS_CC_DIRECT && (vm->eval_sites[vm->eval_site].flags & JS_EVAL_STRICT)) strict = 1;
     /* the script: function 0 in scope 0 (a handler's body: a function of event; a
        strict eval's code: a function, its vars its own) */
-    jscope s0 = { 0, 0, ((mode == JS_CC_HANDLER || strict) && mode != JS_CC_DIRECT) || mode == JS_CC_MODULE ? SC_FUNC : SC_SCRIPT, 0, 0, 0, 0, 0 };
+    jscope s0 = { 0, 0, ((mode == JS_CC_HANDLER || strict) && mode != JS_CC_DIRECT) || mode == JS_CC_MODULE ? SC_FUNC : SC_SCRIPT, 0, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s0);
     jfn f0;
     memset(&f0, 0, sizeof f0);
@@ -4622,7 +4705,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         uint32_t lv[256];
         if (levels > 256) levels = 256;
         for (uint32_t k = levels; k > 0; k--) {
-            jscope ls = { cc->cur_scope, 0, SC_BLOCK, 1, 0, 0, 0, 1 };
+            jscope ls = { cc->cur_scope, 0, SC_BLOCK, 1, 0, 0, 0, 1, 0 };
             push_back(cc->scopes, ls);
             lv[k - 1] = (uint32_t)(len(cc->scopes) - 1);
             cc->cur_scope = lv[k - 1];
@@ -4641,12 +4724,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
             d.fn = JS_SYNTH_FN;
             push_back(cc->decls, d);
             uint32_t id = (uint32_t)(len(cc->decls) - 1);
-            if (!cc->scopes[ls].first) cc->scopes[ls].first = id;
-            else {
-                uint32_t x = cc->scopes[ls].first;
-                while (cc->decls[x].next) x = cc->decls[x].next;
-                cc->decls[x].next = id;
-            }
+            scope_append(cc, ls, id);
             if (b.kind == D_EV || b.kind == D_WITH) { cc->scopes[ls].dyn = id; cc->ndyn++; }
             if (b.pkind) {
                 /* a private name of a class around the site: its record (and its class's, for V8's words), so that the
@@ -4664,6 +4742,10 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
                 q.decl = id;
                 q.hidden = b.atom;
                 push_back(cc->privs, q);
+                uint32_t pi = (uint32_t)len(cc->privs);
+                cc->decls[id].priv = pi;
+                cc->classes[q.cls - 1].pfirst = pi;
+                cc->classes[q.cls - 1].plast = pi;
             }
             /* the eval vars' level: the caller's function scope */
             if (b.kind == D_EV) cc->scopes[ls].kind = SC_FUNC;
@@ -4671,7 +4753,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
         /* synth marks the caller's function scope that a sloppy eval's vars go to */
         for (uint32_t k = 0; k < levels; k++) if (cc->scopes[lv[k]].kind != SC_FUNC || strict || !(es.flags & JS_EVAL_INFN)) cc->scopes[lv[k]].synth = 0;
         cc->nsynth = levels;
-        jscope fsc = { cc->cur_scope, 0, strict ? SC_FUNC : SC_BLOCK, 0, 0, 0, 0, 0 };
+        jscope fsc = { cc->cur_scope, 0, strict ? SC_FUNC : SC_BLOCK, 0, 0, 0, 0, 0, 0 };
         push_back(cc->scopes, fsc);
         cc->cur_scope = (uint32_t)(len(cc->scopes) - 1);
         cc->fns[0].scope = cc->cur_scope;
@@ -4740,6 +4822,7 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
             push_back(vm->funcs, jf);
             cc->fns[f].id = (uint32_t)(len(vm->funcs) - 1);
         }
+        index_fn_decls(cc);
         for (size_t f = 0; f < len(cc->fns) && !cc->err; f++) gen_function(vm, src, srcn, cc, (uint32_t)f);
         if (!cc->err && mode == JS_CC_MODULE) mod_record(vm, cc);
     }
@@ -5063,7 +5146,7 @@ int js_site_text(js_vm *vm, js_site s, int callee_only, vector<char> *out) {
     jref r0 = { 0, 0, 0, 0 };
     push_back(cc->refs, r0);
     for (int k = 0; k < KW_N; k++) cc->kw[k] = js_atom_ascii(vm, js_kw_names[k]);
-    jscope s0 = { 0, 0, SC_FUNC, 0, 0, 0, 0, 0 };
+    jscope s0 = { 0, 0, SC_FUNC, 0, 0, 0, 0, 0, 0 };
     push_back(cc->scopes, s0);
     jfn f0;
     memset(&f0, 0, sizeof f0);

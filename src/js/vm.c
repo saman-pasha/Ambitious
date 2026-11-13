@@ -309,8 +309,11 @@ int js_atom_index(js_vm *vm, uint32_t atom, uint32_t *index) {
 
 /* ---- shapes ---- */
 
-static uint32_t js_shape_push(js_vm *vm, js_shape s) {
+/* same: the newest entry of s's key in its parent's chain (0: none) */
+static uint32_t js_shape_push(js_vm *vm, js_shape s, uint32_t same) {
     push_back(vm->shapes, s);
+    push_back(vm->shape_tid, 0);
+    push_back(vm->shape_same, same);
     return (uint32_t)(len(vm->shapes) - 1);
 }
 
@@ -357,7 +360,7 @@ static uint32_t js_shape_of_slow(js_vm *vm, uint32_t proto) {
         uint32_t t = at(vm->roots, i);
         if (!t) {
             js_shape s = { 0, 0, 0, 0, proto, 0 };
-            uint32_t id = js_shape_push(vm, s);
+            uint32_t id = js_shape_push(vm, s, 0);
             vm->roots[i] = id;
             vm->nroots++;
             if (vm->nroots * 2 > len(vm->roots)) js_table_grow(vm, &vm->roots, 1);
@@ -375,8 +378,9 @@ static uint32_t js_shape_add(js_vm *vm, uint32_t sh, uint32_t atom, uint32_t fla
         uint32_t t = at(vm->trans, i);
         if (!t) {
             if (atom == (JS_SYM_KEY | JSYM_HAS_INSTANCE)) vm->has_instance = 1;
+            uint32_t same = js_shape_find(vm, sh, atom);
             js_shape s = { sh, atom, vm->shapes[sh].count, vm->shapes[sh].count + 1, vm->shapes[sh].proto, flags };
-            uint32_t id = js_shape_push(vm, s);
+            uint32_t id = js_shape_push(vm, s, same);
             vm->trans[i] = id;
             vm->ntrans++;
             if (vm->ntrans * 2 > len(vm->trans)) js_table_grow(vm, &vm->trans, 0);
@@ -387,14 +391,121 @@ static uint32_t js_shape_add(js_vm *vm, uint32_t sh, uint32_t atom, uint32_t fla
     }
 }
 
+/* ---- the large shapes' indexes ----
+   A shape of more keys than JS_TAB_MIN is looked in through a table of its chain's keys, each to its newest entry (an
+   object used as a map, a JSON object of thousands of keys, a script's thousands of globals: each lookup one probe,
+   not a walk of the chain). A table moves down the chain as its object grows (an ancestor's, at most JS_TAB_REACH
+   shapes up, taken by the shape looked in, the keys between put in) and up as its last keys are deleted (each key put
+   back to its earlier entry, or taken out); a collection drops every table, made again where one is looked in, so
+   that none outlives the objects that used it */
+#define JS_TAB_MIN 32
+#define JS_TAB_REACH 16
+
+static uint32_t js_tab_hash(uint32_t t, uint32_t atom) { return js_hash3(t, atom, 11); }
+/* table t's pair for atom: its place in stab, or the free place it would go */
+static size_t js_tab_slot(js_vm *vm, uint32_t t, uint32_t atom) {
+    size_t m = len(vm->stab) - 1;
+    for (size_t i = js_tab_hash(t, atom) & m;; i = (i + 1) & m) {
+        js_skey k = vm->stab[i];
+        if (!k.tid || (k.tid == t && k.atom == atom)) return i;
+    }
+}
+static void js_tab_room(js_vm *vm) {
+    if ((size_t)(vm->nstab + 1) * 2 <= len(vm->stab)) return;
+    size_t cap = len(vm->stab) ? len(vm->stab) * 2 : 1024;
+    vector<js_skey> old;
+    for (size_t i = 0; i < len(vm->stab); i++) if (vm->stab[i].tid) push_back(old, vm->stab[i]);
+    clear(vm->stab);
+    js_skey z = { 0, 0, 0 };
+    for (size_t i = 0; i < cap; i++) push_back(vm->stab, z);
+    for (size_t i = 0; i < len(old); i++) {
+        js_skey k = old[i];
+        size_t j = js_tab_slot(vm, k.tid, k.atom);
+        vm->stab[j] = k;
+    }
+}
+/* table t's entry of atom set to e (keep: an entry there stays) */
+static void js_tab_put(js_vm *vm, uint32_t t, uint32_t atom, uint32_t e, int keep) {
+    js_tab_room(vm);
+    size_t i = js_tab_slot(vm, t, atom);
+    if (vm->stab[i].tid) {
+        if (!keep) vm->stab[i].entry = e;
+        return;
+    }
+    js_skey k = { t, atom, e };
+    vm->stab[i] = k;
+    vm->nstab++;
+}
+/* atom taken out of table t: the pairs after it moved back where their probes reach (linear probing's deletion) */
+static void js_tab_del(js_vm *vm, uint32_t t, uint32_t atom) {
+    if (!len(vm->stab)) return;
+    size_t m = len(vm->stab) - 1, i = js_tab_slot(vm, t, atom);
+    if (!vm->stab[i].tid) return;
+    js_skey z = { 0, 0, 0 };
+    vm->stab[i] = z;
+    vm->nstab--;
+    for (size_t j = (i + 1) & m; vm->stab[j].tid; j = (j + 1) & m) {
+        js_skey k = vm->stab[j];
+        size_t h = js_tab_hash(k.tid, k.atom) & m;
+        int stays = i <= j ? (i < h && h <= j) : (i < h || h <= j);
+        if (stays) continue;
+        vm->stab[i] = k;
+        vm->stab[j] = z;
+        i = j;
+    }
+}
+/* sh's table: its own; an ancestor's a few shapes up, moved down to it (the keys between put in, the oldest first, so
+   that the newest of a key wins); else a new one of its chain's keys (the newest first, kept) */
+static uint32_t js_tab_of(js_vm *vm, uint32_t sh) {
+    uint32_t t = vm->shape_tid[sh];
+    if (t) return t;
+    uint32_t path[JS_TAB_REACH];
+    uint32_t n = 0, a = sh;
+    while (n < JS_TAB_REACH && a && vm->shapes[a].count > JS_TAB_MIN && !vm->shape_tid[a]) {
+        path[n++] = a;
+        a = vm->shapes[a].parent;
+    }
+    if (a && vm->shape_tid[a] && n) {
+        t = vm->shape_tid[a];
+        vm->shape_tid[a] = 0;
+        vm->shape_tid[sh] = t;
+        push_back(vm->tab_shapes, sh);
+        for (uint32_t k = n; k > 0; k--) {
+            uint32_t x = path[k - 1];
+            js_tab_put(vm, t, vm->shapes[x].atom, x, 0);
+        }
+        return t;
+    }
+    t = ++vm->ntabs;
+    vm->shape_tid[sh] = t;
+    push_back(vm->tab_shapes, sh);
+    for (uint32_t x = sh; x && vm->shapes[x].count; x = vm->shapes[x].parent) js_tab_put(vm, t, vm->shapes[x].atom, x, 1);
+    return t;
+}
+void js_shapes_untable(js_vm *vm) {
+    for (size_t i = 0; i < len(vm->tab_shapes); i++) {
+        uint32_t x = vm->tab_shapes[i];
+        vm->shape_tid[x] = 0;
+    }
+    clear(vm->tab_shapes);
+    clear(vm->stab);
+    vm->nstab = 0;
+    vm->ntabs = 0;
+}
+
 /* the where of sh that holds atom, or 0: through a cache of the lookups made */
 uint32_t js_shape_find(js_vm *vm, uint32_t sh, uint32_t atom) {
     if (vm->shapes[sh].count == 0) return 0;
     size_t k = (js_hash3(sh, atom, 1) & 4095) * 3;
     if (vm->lookup[k] == sh && vm->lookup[k + 1] == atom) return vm->lookup[k + 2];
     uint32_t found = 0;
-    for (uint32_t x = sh; x && vm->shapes[x].count; x = vm->shapes[x].parent)
-        if (vm->shapes[x].atom == atom) { found = x; break; }
+    if (vm->shapes[sh].count > JS_TAB_MIN) {
+        uint32_t t = js_tab_of(vm, sh);
+        size_t i = js_tab_slot(vm, t, atom);
+        if (vm->stab[i].tid) found = vm->stab[i].entry;
+    } else
+        for (uint32_t x = sh; x && vm->shapes[x].count; x = vm->shapes[x].parent)
+            if (vm->shapes[x].atom == atom) { found = x; break; }
     vm->lookup[k] = sh;
     vm->lookup[k + 1] = atom;
     vm->lookup[k + 2] = found;
@@ -593,9 +704,20 @@ static int js_elem_delete(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
 /* the deleted keys at the end of o's shape dropped: o back on the shape before them, so that a key added again
    takes the same transition and slot (an add and a delete of one key, repeated, grow nothing) */
 static void js_shape_trim(js_vm *vm, uint32_t o) {
-    uint32_t sh = vm->objs[o].shape;
+    uint32_t sh = vm->objs[o].shape, from = sh;
     while (vm->shapes[sh].count && vm->slots[vm->objs[o].slots + vm->shapes[sh].slot] == JV_HOLE) sh = vm->shapes[sh].parent;
     vm->objs[o].shape = sh;
+    /* its table moved up with it: each key dropped put back to its earlier entry, or taken out */
+    uint32_t t = vm->shape_tid[from];
+    if (!t || sh == from || vm->shapes[sh].count <= JS_TAB_MIN || vm->shape_tid[sh]) return;
+    for (uint32_t x = from; x != sh; x = vm->shapes[x].parent) {
+        uint32_t same = vm->shape_same[x];
+        if (same) js_tab_put(vm, t, vm->shapes[x].atom, same, 0);
+        else js_tab_del(vm, t, vm->shapes[x].atom);
+    }
+    vm->shape_tid[from] = 0;
+    vm->shape_tid[sh] = t;
+    push_back(vm->tab_shapes, sh);
 }
 
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
@@ -2236,14 +2358,32 @@ static uint32_t js_iter_keys(js_vm *vm, jv v) {
     if (jv_is_obj(v) || jv_is_str(v)) {
         jv ov = js_to_object(vm, v);
         uint32_t all = js_array_new(vm, 0);
+        /* the keys taken, by their strings' hashes: each one's place in keys plus one, open addressing */
+        vector<uint32_t> seen;
+        resize(seen, 64, 0);
+        size_t nseen = 0;
         for (uint32_t x = jv_idx(ov), depth = 0; x && depth < 1000; x = vm->objs[x].proto, depth++) {
             uint32_t from = vm->objs[all].b;
             js_own_keys(vm, x, 1, all);
             for (uint32_t i = from; i < vm->objs[all].b; i++) {
                 jv k = js_array_get(vm, all, i);
+                if ((nseen + 1) * 2 > len(seen)) {
+                    size_t cap = len(seen) * 2;
+                    clear(seen);
+                    resize(seen, cap, 0);
+                    for (uint32_t q = 0; q < vm->objs[keys].b; q++) {
+                        size_t j = js_str_hash(vm, jv_idx(js_array_get(vm, keys, q))) & (cap - 1);
+                        while (seen[j]) j = (j + 1) & (cap - 1);
+                        seen[j] = q + 1;
+                    }
+                }
+                size_t m = len(seen) - 1, j = js_str_hash(vm, jv_idx(k)) & m;
                 int dup = 0;
-                for (uint32_t j = 0; j < vm->objs[keys].b && !dup; j++) if (js_str_eq(vm, jv_idx(js_array_get(vm, keys, j)), jv_idx(k))) dup = 1;
-                if (!dup) js_array_push(vm, keys, k);
+                for (; seen[j] && !dup; j = (j + 1) & m) if (js_str_eq(vm, jv_idx(js_array_get(vm, keys, seen[j] - 1)), jv_idx(k))) dup = 1;
+                if (dup) continue;
+                js_array_push(vm, keys, k);
+                seen[j] = vm->objs[keys].b;
+                nseen++;
             }
         }
     }
@@ -4705,6 +4845,8 @@ void js_setup(js_vm *vm) {
     }
     js_shape s0 = { 0, 0, 0, 0, 0, 0 };
     push_back(vm->shapes, s0);
+    push_back(vm->shape_tid, 0);
+    push_back(vm->shape_same, 0);
     resize(vm->roots, 64);
     resize(vm->trans, 1024);
     resize(vm->lookup, 3 * 4096);

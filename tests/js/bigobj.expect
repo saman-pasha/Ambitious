@@ -1,0 +1,28 @@
+grown 300 44850 0 299 undefined true false
+trimmed 250 249 undefined false k247,k248,k249
+readded 300 -250 -299 k297,k298,k299
+middle undefined false false 299
+again again k299,k100 299
+gone undefined false k298,k299 299
+thrice thrice k299,k100
+two gone undefined undefined k297,k298 298
+loop 12497500 100 undefined false 389
+churn 999 100 q99,q50
+lockstep 124750 249500 499 998 true
+apart false true 499 500
+rows 371950 60 4959
+forin 120 p40,p41,p42 p118,p119,p0,p1 p38,p39
+forin values 87140 0 1040 1119
+attrs 10 3 false 65 62,d63,acc
+acc gone undefined false 64
+sealed x undefined true 64
+frozen 6 true
+json 2182 200 v0 199 true
+entries j198,v198;j199,199 67
+mixed 3,7,10,n0 sym 54 ten
+no sym undefined 0
+spread 298 0 -298
+assign 101 99 1
+proto yes 0 101
+globals 0 120 function 121
+global gone undefined true

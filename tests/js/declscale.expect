@@ -1,0 +1,10 @@
+vars [0,-7,8,"number",9,2999]
+lets ["outer","inner02999"]
+SyntaxError: Identifier 'a1' has already been declared
+SyntaxError: Identifier 'q5' has already been declared
+params 3000:0:2999:undefined
+dup params z,2,3
+functions [1,3000,25]
+privates [2999,["b",true,2]]
+eval [100,-1,2999]
+consts k0k1500k2999

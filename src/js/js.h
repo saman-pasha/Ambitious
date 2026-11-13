@@ -172,6 +172,8 @@ typedef struct js_shape { uint32_t parent, atom, slot, count, proto, flags; } js
 #define JS_SHAPE_FIXED 8      /* not configurable (the same) */
 /* a constructor's prototype as a class's or a native's has it: neither writable, enumerable nor configurable */
 #define JS_SHAPE_PROTO (JS_SHAPE_HIDDEN | JS_SHAPE_READONLY | JS_SHAPE_FIXED)
+/* a large shape's index (src/js/vm.c, js_shape_find): its table's key, and the newest entry of it in the shape's chain */
+typedef struct js_skey { uint32_t tid, atom, entry; } js_skey;
 
 typedef struct js_str { uint32_t off, len, hash, atom, left, right; uint32_t rope; } js_str;
 
@@ -490,6 +492,13 @@ typedef struct js_vm {
     vector<uint32_t> wrappers;        /* a DOM node's index -> its wrapper object (src/script/script.c) */
     vector<uint32_t> hatoms;          /* the host's names, interned once (src/script/script.c) */
     uint32_t root_proto, root_shape, root_valid;   /* the last prototype's root shape */
+    /* the large shapes' indexes (src/js/vm.c, js_shape_find): each shape's table (0: none) and the newest entry of its
+       key before it in its chain (0: none); the tables' pairs, open addressing (nstab held, ntabs made); the shapes
+       given a table since the last collection, which drops them all */
+    vector<uint32_t> shape_tid, shape_same;
+    vector<js_skey> stab;
+    vector<uint32_t> tab_shapes;
+    uint32_t nstab, ntabs;
 } js_vm;
 
 #define JS_VM_DROP(v) vector_js_obj_drop(&(v).objs); vector_uint64_t_drop(&(v).slots); vector_js_shape_drop(&(v).shapes); \
@@ -506,7 +515,8 @@ typedef struct js_vm {
     vector_js_evalsite_drop(&(v).eval_sites); vector_js_evalcache_drop(&(v).eval_cache); \
     vector_js_module_drop(&(v).modules); vector_js_modreq_drop(&(v).mod_reqs); vector_js_modimp_drop(&(v).mod_imps); \
     vector_js_modexp_drop(&(v).mod_exps); vector_js_modinit_drop(&(v).mod_inits); vector_js_modbind_drop(&(v).mod_binds); \
-    vector_char_drop(&(v).src); vector_js_site_drop(&(v).sites)
+    vector_char_drop(&(v).src); vector_js_site_drop(&(v).sites); vector_uint32_t_drop(&(v).shape_tid); \
+    vector_uint32_t_drop(&(v).shape_same); vector_js_skey_drop(&(v).stab); vector_uint32_t_drop(&(v).tab_shapes)
 
 /* ---- the atoms every part names (src/js/vm.c makes them first, in this order) ---- */
 enum {
@@ -774,6 +784,7 @@ int js_delete(js_vm *vm, uint32_t o, uint32_t atom);
 void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr);   /* the own string keys, in order, pushed as strings */
 uint32_t js_shape_of(js_vm *vm, uint32_t proto);
 uint32_t js_shape_find(js_vm *vm, uint32_t sh, uint32_t atom);          /* the shape's entry for atom, 0 for none */
+void js_shapes_untable(js_vm *vm);                                      /* the large shapes' indexes dropped (a collection's) */
 int js_is_callable(js_vm *vm, jv v);
 /* IsConstructor: a closure but an arrow's, a method's, a generator's or an async one's; a
    native with a prototype of its own (or Proxy); a bound or proxied constructor */

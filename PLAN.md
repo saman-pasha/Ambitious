@@ -410,11 +410,18 @@ start (`src/js/`):
 - **Compilation.** Source becomes tokens, then a compact AST (an index
   arena). Scopes are resolved, so the compiler knows which variables a closure
   captures. Then stack bytecode is emitted, with a cache slot for each
-  property access and global name.
+  property access and global name. The scopes' names are indexed by (scope,
+  name) and each function's declarations chained, so that a function of
+  40,000 vars or a bundle of 20,000 functions compiles in linear time.
 - **Objects** have shapes: a shape is a node of a transition tree (its
   parent, the key it adds, that key's slot). An object is its shape and its
   slots, so `o.x` at a cached site is one comparison and one load. Arrays are
-  dense vectors of values.
+  dense vectors of values. A shape of more than 32 keys is looked in through
+  a hash table of its chain's keys, each to its newest entry: the table moves
+  down the chain as its object grows and back up as its last keys are deleted
+  (each shape knows its key's earlier entry), and every collection drops the
+  tables, so an object used as a map, a large JSON object or a script's
+  thousands of globals costs a probe a lookup, not a walk of its chain.
 - **Strings** are UTF-16 in pools. Names are interned atoms. `+` makes a rope,
   flattened when it is read.
 - **Calls** are frames on one value stack. Only captured variables live in

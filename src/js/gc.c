@@ -512,6 +512,8 @@ void js_gc(js_vm *vm) {
     /* the caches that name objects or hold compiled code's sources */
     for (size_t i = 0; i < len(vm->ics); i++) { js_ic z = { 0, 0, 0, 0 }; vm->ics[i] = z; }
     clear(vm->eval_cache);
+    /* the large shapes' indexes, made again where looked in: none outlives the objects that used it */
+    js_shapes_untable(vm);
     /* each cleanup a FinalizationRegistry owes, a task of its own due now, its held value
        its argument (as V8 posts them after a collection) */
     for (size_t i = 0; i + 1 < len(g.cleanups); i += 2) {
