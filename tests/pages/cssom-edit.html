@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: changes and their refusals</title>
+<style id="s1">.a { color: rgb(255, 0, 0); } @media screen { .b { color: rgb(0, 0, 255) } }</style>
+<style id="s2">@import url(cssom/b.css); @namespace svg url(http://www.w3.org/2000/svg); @layer x; .q { color: red }</style>
+<style id="s3">@layer one, two;</style>
+</head><body>
+<div class="a" id="a">a</div><div class="b" id="b">b</div><div class="c" id="c">c</div>
+<script>
+function p(s) { console.log(s); }
+function t(label, f) { try { var r = f(); p(label + ' -> ' + r); } catch (e) { p(label + ' threw ' + e.name + ': ' + e.message); } }
+function texts(x) { var o = []; for (var i = 0; i < x.cssRules.length; i++) o.push(x.cssRules[i].cssText.replace(/\n */g, ' ')); return o.join(' || '); }
+function col(id) { return getComputedStyle(document.getElementById(id)).color; }
+var s = document.getElementById('s1').sheet;
+t('start', function () { return col('a') + ' ' + col('b') + ' ' + col('c'); });
+t('insertRule bad', function () { return s.insertRule('.x {', 0); });
+t('insertRule garbage', function () { return s.insertRule('garbage', 0); });
+t('insertRule empty', function () { return s.insertRule('', 0); });
+t('insertRule two', function () { return s.insertRule('.x {} .y {}', 0); });
+t('insertRule index big', function () { return s.insertRule('.x {}', 5); });
+t('insertRule index neg', function () { return s.insertRule('.x {}', -1); });
+t('insertRule index float', function () { var i = s.insertRule('.f { }', 1.9); s.deleteRule(i); return i; });
+t('insertRule index string', function () { var i = s.insertRule('.f { }', '1'); s.deleteRule(i); return i; });
+t('insertRule no index', function () { var i = s.insertRule('.c { color: rgb(0, 128, 0) }'); return i + ' ' + col('c') + ' ' + s.cssRules.length; });
+t('insertRule import after', function () { return s.insertRule('@import url(cssom/b.css);', 1); });
+t('insertRule import at 0', function () { return s.insertRule('@import url(cssom/b.css);', 0); });
+t('insertRule namespace', function () { return s.insertRule('@namespace url(http://www.w3.org/1999/xhtml);', 0); });
+t('insertRule charset', function () { return s.insertRule('@charset "utf-8";', 0); });
+t('insertRule no args', function () { return s.insertRule(); });
+t('after inserts', function () { return texts(s); });
+t('deleteRule big', function () { return s.deleteRule(10); });
+t('deleteRule neg', function () { return s.deleteRule(-1); });
+t('deleteRule no args', function () { return s.deleteRule(); });
+t('deleteRule 0', function () { s.deleteRule(0); return texts(s) + ' ' + col('c'); });
+t('rules', function () { return s.cssRules.length + ' ' + (s.rules === s.cssRules); });
+t('addRule', function () { return s.addRule('.z', 'color: green', 1); });
+t('addRule2', function () { return s.addRule('.z2', 'color: green'); });
+t('addRule3', function () { return s.addRule('.z3'); });
+t('addRule4', function () { return s.addRule(); });
+t('addRule bad', function () { return s.addRule('.z5 {', 'color: red'); });
+t('addRule index', function () { return s.addRule('.z6', 'color: red', 99); });
+t('after add', function () { return texts(s); });
+t('removeRule', function () { return s.removeRule(0); });
+t('removeRule none', function () { return s.removeRule(); });
+t('removeRule big', function () { return s.removeRule(50); });
+t('after remove', function () { return texts(s); });
+var m;
+for (var i = 0; i < s.cssRules.length; i++) if (s.cssRules[i] instanceof CSSMediaRule) m = s.cssRules[i];
+t('m.insertRule bad', function () { return m.insertRule('.x {', 0); });
+t('m.insertRule import', function () { return m.insertRule('@import url(cssom/b.css);', 0); });
+t('m.insertRule ns', function () { return m.insertRule('@namespace url(x);', 0); });
+t('m.insertRule charset', function () { return m.insertRule('@charset "x";', 0); });
+t('m.insertRule big', function () { return m.insertRule('.q {}', 9); });
+t('m.insertRule ok', function () { return m.insertRule('.c { color: rgb(1, 1, 1) }', 1) + ' ' + col('c'); });
+t('m.insertRule noindex', function () { return m.insertRule('.q0 { color: red }'); });
+t('m.insertRule media', function () { return m.insertRule('@media print { .c { color: red } }', 0); });
+t('m.insertRule none', function () { return m.insertRule(); });
+t('m.deleteRule big', function () { return m.deleteRule(9); });
+t('m.deleteRule none', function () { return m.deleteRule(); });
+t('m.deleteRule', function () { m.deleteRule(3); return m.cssRules.length + ' ' + col('c'); });
+t('m.cssText', function () { return JSON.stringify(m.cssText); });
+var sr = s.cssRules[0];
+t('style rule insert', function () { for (var i = 0; i < s.cssRules.length; i++) if (s.cssRules[i].selectorText === '.a') sr = s.cssRules[i]; return sr.insertRule('& .x { color: red }', 0) + ' ' + sr.cssRules.length + ' ' + JSON.stringify(sr.cssText); });
+t('style rule insert decl', function () { return sr.insertRule('color: blue', 0); });
+t('style rule insert import', function () { return sr.insertRule('@import url(x.css);', 0); });
+t('style rule insert big', function () { return sr.insertRule('& .y {}', 7); });
+t('style rule insert media', function () { return sr.insertRule('@media screen { color: rgb(0, 0, 9) }', 1) + ' ' + JSON.stringify(sr.cssText); });
+t('style rule delete big', function () { return sr.deleteRule(9); });
+t('style rule delete', function () { sr.deleteRule(1); sr.deleteRule(0); return sr.cssRules.length + ' ' + col('a'); });
+var s2 = document.getElementById('s2').sheet;
+t('s2 rules', function () { return texts(s2); });
+t('s2 import before ns', function () { return s2.insertRule('@import url(cssom/b.css);', 1); });
+t('s2 import after ns', function () { return s2.insertRule('@import url(cssom/b.css);', 2); });
+t('s2 ns after rules', function () { return s2.insertRule('@namespace a url(a);', 4); });
+t('s2 ns among', function () { return s2.insertRule('@namespace a url(a);', 2); });
+t('s2 rule before import', function () { return s2.insertRule('.r {}', 0); });
+t('s2 layer before import', function () { return s2.insertRule('@layer y;', 0); });
+t('s2 layer block before import', function () { return s2.insertRule('@layer y { }', 0); });
+t('s2 rule between', function () { return s2.insertRule('.r {}', 2); });
+t('s2 delete ns', function () { return s2.deleteRule(1); });
+t('s2 delete import', function () { s2.deleteRule(0); return texts(s2); });
+t('s2 delete ns now', function () { return s2.deleteRule(0); });
+t('s2 delete rules then ns', function () { s2.deleteRule(2); s2.deleteRule(1); s2.deleteRule(0); return texts(s2) + ' ' + s2.cssRules.length; });
+var s3 = document.getElementById('s3').sheet;
+t('s3 layer at 0', function () { return s3.insertRule('@import url(cssom/b.css);', 1); });
+t('s3 import at 0', function () { return s3.insertRule('@import url(cssom/b.css);', 0) + ' ' + texts(s3); });
+t('s3 layer then import', function () { return s3.insertRule('@layer three;', 0) + ' ' + texts(s3); });
+t('s3 ns', function () { return s3.insertRule('@namespace url(n);', 1); });
+t('selectorText', function () { var r = s.cssRules[s.cssRules.length - 1]; var a = r.selectorText; r.selectorText = '#c'; return a + ' ' + r.selectorText + ' ' + col('c'); });
+t('selectorText bad', function () { var r = s.cssRules[s.cssRules.length - 1]; r.selectorText = '#c {'; return r.selectorText; });
+t('style change', function () { var r = s.cssRules[s.cssRules.length - 1]; r.style.color = 'rgb(7, 7, 7)'; return col('c') + ' ' + r.cssText; });
+t('style priority', function () { var r = s.cssRules[s.cssRules.length - 1]; r.style.setProperty('color', 'rgb(8, 8, 8)', 'important'); s.insertRule('#c { color: rgb(9, 9, 9) }', s.cssRules.length); return col('c') + ' ' + r.cssText; });
+t('media change', function () { m.media.mediaText = 'print'; return col('c') + ' ' + col('b'); });
+t('text then rules', function () { var e = document.getElementById('s1'); e.textContent = '.a { color: rgb(0, 9, 0) }'; return col('a') + ' ' + e.sheet.cssRules.length + ' ' + (e.sheet === s) + ' ' + col('c'); });
+t('old sheet edit', function () { s.insertRule('.a { color: rgb(255, 255, 0) }', 0); return col('a') + ' ' + s.cssRules.length + ' ' + s.ownerNode; });
+t('new sheet edit', function () { var x = document.getElementById('s1').sheet; x.insertRule('#a { color: rgb(0, 0, 9) }', 1); return col('a'); });
+t('many', function () { var x = document.getElementById('s1').sheet; for (var i = 0; i < 200; i++) x.insertRule('.k' + i + ' { margin-left: ' + i + 'px }', x.cssRules.length); document.getElementById('c').className = 'k150'; return getComputedStyle(document.getElementById('c')).marginLeft + ' ' + x.cssRules.length; });
+</script>
+</body></html>

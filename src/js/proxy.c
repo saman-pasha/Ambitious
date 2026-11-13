@@ -729,7 +729,13 @@ int js_proxy_set(js_vm *vm, uint32_t p, uint32_t key, jv v, jv receiver) {
     uint32_t target = vm->objs[p].a;
     if (t == JV_UNDEF) return px_ordinary_set(vm, target, key, v, receiver);
     jv r = px_call3(vm, t, p, px_key_value(key), v, receiver, 3);
-    if (vm->throwing || !js_truthy(vm, r)) return 0;
+    if (vm->throwing) return 0;
+    if (!js_truthy(vm, r)) {
+        /* refused (2): strict code's assignment a TypeError, in V8's words */
+        vm->refused = JSR_PROXY;
+        vm->refused_key = key;
+        return 2;
+    }
     px_desc td;
     int th = px_own(vm, target, key, &td);
     if (th < 0) return 0;
@@ -1374,8 +1380,10 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         uint32_t o = jv_idx(a0);
         jv recv = argc > 3 ? js_arg(vm, args, argc, 3) : a0;
         int r;
-        if (vm->objs[o].kind == JK_PROXY) r = js_proxy_set(vm, o, key, a2, recv);
-        else if (recv == a0) {
+        if (vm->objs[o].kind == JK_PROXY) {
+            r = js_proxy_set(vm, o, key, a2, recv) == 1;    /* 2: refused */
+            vm->refused = JSR_NONE;
+        } else if (recv == a0) {
             /* the plain set, refused where the property is read-only or the object takes no new one */
             px_desc cur;
             int h = px_ordinary_own(vm, o, key, &cur);
@@ -1383,7 +1391,10 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
             if (h && pd_data(&cur) && !cur.writable) return JV_FALSE;
             if (!h && !(vm->objs[o].flags & JO_EXTENSIBLE)) return JV_FALSE;
             r = js_set(vm, a0, key, a2) == 1;             /* 2: refused */
-        } else r = px_ordinary_set(vm, o, key, a2, recv);
+        } else {
+            r = px_ordinary_set(vm, o, key, a2, recv) == 1;
+            vm->refused = JSR_NONE;
+        }
         return vm->throwing ? JV_HOLE : jv_bool(r);
     }
     case JPX_R_SETPROTO: {

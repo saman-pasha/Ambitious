@@ -1802,6 +1802,83 @@ be built side by side and merged without touching each other's.
   a page of Japanese and Chinese is broken between its characters (`tools/gen-cjk-page.py 100`, 41,500 code
   points: 352.3M, where main breaks none of its paragraphs, then 491.9M, of which line breaking 75.3M); the fast table's pairs past
   ASCII are asked of the rules as they are met (made whole at once, a page's first break cost 47M).
+- **12al The CSS Object Model** (`src/css/cssom.c`, `src/css/cssom_decl.c`, `src/css/cssom.h` and
+  `cssom_int.h`: the model, CSS Syntax 3's tokens, the rules', selectors', media queries' and
+  declarations' parsers and Chromium's serializers; `src/css/cssom_props.h`, which
+  `tools/gen-cssom.js` writes from Chromium's own property list; the bindings in `src/script/cssom.c`;
+  the sheets a script changed and the trees' adopted sheets read by the cascade in `src/css/css.c`
+  through the module's registry), each part measured in Chromium first:
+  - `document.styleSheets` and a shadow root's: a live StyleSheetList of each connected style
+    element's (HTML's or SVG's, of CSS's type as it is written) and stylesheet link's sheet, in tree
+    order; each a CSSStyleSheet with ownerNode, href, title (its owner's attribute as it is now),
+    media (a MediaList: mediaText, item, appendMedium, deleteMedium, its owner's media attribute
+    until a script sets it, set from the attribute again when that changes), disabled (a disabled
+    sheet stops applying), parentStyleSheet, ownerRule and type; `element.sheet`. A sheet is made
+    when first asked for and kept while its owner's children and place hold (the DOM's mutation
+    log read at the next ask): a text set anew, a text node added or changed, a move, a removal, a
+    type or rel changed, each a new sheet, as Chromium makes one (the same text set again by
+    textContent, a no-op now as in Chromium, keeps it). A file: page's linked and imported sheets
+    are not readable (Chromium's SecurityError, each message its). On the way: a style element of
+    another type than CSS's (`type="text/less"`, `" text/css "`) is no sheet to the cascade either,
+    until its type is set to CSS's (Less's browser build relies on both); a style's, a link's and a
+    source's `media` reflect their attribute, a style's set by script applying at once; a style
+    element's `disabled` is its sheet's flag, a link's its attribute, under which it has no sheet
+    and the cascade reads none;
+  - `cssRules` (and `rules`), a live CSSRuleList, of Chromium's classes: CSSStyleRule (selectorText
+    writable, style, its nested rules), CSSImportRule (href, media, layerName, supportsText,
+    styleSheet), CSSMediaRule, CSSSupportsRule, CSSContainerRule (containerName, containerQuery),
+    CSSLayerBlockRule, CSSLayerStatementRule (a frozen nameList), CSSFontFaceRule, CSSKeyframesRule
+    and CSSKeyframeRule (appendRule, deleteRule, findRule, an index getter, keyText and name
+    writable), CSSPageRule and CSSMarginRule, CSSNamespaceRule, CSSPropertyRule, CSSCounterStyleRule
+    (its descriptors writable, a system only within its algorithm), CSSScopeRule,
+    CSSStartingStyleRule, CSSFontFeatureValuesRule, CSSFontPaletteValuesRule, CSSViewTransitionRule,
+    CSSPositionTryRule and CSSNestedDeclarations; their prototypes, constructors and constants as
+    Chromium's; each rule's cssText, selectors, preludes and values as Chromium writes them
+    (forgiving lists, `&` given where a nested selector has none, media queries' general enclosed
+    text, colours, calc() folded, shorthands from their longhands by StylePropertySerializer's
+    rules);
+  - the changes: insertRule and deleteRule on a sheet, a grouping rule and a style rule (a text that
+    is no rule read again as nested declarations there), addRule and removeRule, each refusal
+    Chromium's exception and message (SyntaxError, IndexSizeError, HierarchyRequestError,
+    InvalidStateError, NotFoundError, NotAllowedError, SecurityError, the bindings' TypeErrors); each
+    change seen by the next rendering: the changed sheet's rules written back to the cascade's
+    registry once a change, read in its owner's place (its own text otherwise, so a page touching no
+    CSSOM is cascaded as before);
+  - constructed sheets: `new CSSStyleSheet({ media, disabled, baseURL })`, `replace()` (a promise of
+    the sheet) and `replaceSync()`, @import refused with Chromium's console warning;
+    `document.adoptedStyleSheets` and a shadow root's: an observable array (a proxy whose set,
+    deleteProperty and defineProperty traps keep WebIDL's rules: a value converted before it is
+    checked, a sequence converted whole before any is checked, an index past the end and a longer
+    length refused), each tree's sheets applied after its own (CSS Cascade 5), a sheet adopted by
+    two trees, a frame's sheet refused as another document's. The engine's proxies now refuse a
+    falsish set trap's assignment in strict code (V8's TypeError);
+  - CSSStyleDeclaration, a rule's and an element's: getPropertyValue, getPropertyPriority,
+    setProperty with a priority, removeProperty, cssText, length, item(), an index getter, named
+    properties camel-cased and as CSS writes them, custom properties; an element's style the same
+    object each read, its declarations kept in their order as Chromium's inline style keeps them
+    (an important one where it was set) while its style attribute is the text they were written as;
+    the attribute written at each change, left empty (`style=""`) when the last declaration goes, as
+    Knockout's visible binding leaves it, where the earlier splice took it away.
+
+  Gate: `tests/integ/script-cssom.sh`, seven pages' consoles against Chromium's line for line
+  (`cssom-sheets.html` 57 lines, `cssom-rules.html` 89, `cssom-text.html` 330, `cssom-edit.html` 78,
+  `cssom-adopt.html` 68, `cssom-decl.html` 343, `cssom-styletype.html` 8: 973 in all), again with a
+  collection at every chance (`tests/integ/script-gc.sh`); `cssom-apply.html`'s boxes, a page whose script inserts, deletes and
+  edits rules, disables a sheet, changes a sheet's media, sets a style element's text anew and adopts
+  sheets in the document and in declarative shadow trees (18 of 18 within 1px of Chromium's,
+  `tests/integ/boxes.sh`); `tests/exec/cssom_text`, 528 sheets, rules and declarations parsed and
+  written back, its 688 lines Chromium's (`tests/exec/cssom/chromium.js`), valgrind clean. Measured
+  and not followed: Chromium 153 does not restyle when a tree's adopted sheets are only reordered (the
+  same sheets in another order), its styles the earlier order's until another change; here the new
+  order applies (the gates read no such reorder's styles).
+
+  Cost (`docs/performance.md`, `tools/gen-cssom-page.py`): a restyle after `insertRule` costs what
+  any change's does here, the whole page cascaded and laid out at the next read (28.4 ms on 2,000
+  items, a class's 27.0; Chromium's 0.80 and 0.13, incremental); a hundred inserts read once 33.7 ms
+  against a hundred classes' 33.8; a page that touches no CSSOM as before (news.html's cascade 0.60
+  ms, then 0.65; the scripted page's scripts 6.9 ms, then 7.1: the interfaces made, 0.58 million
+  instructions); inline styles, now checked and written as Chromium writes them, 10,000 writes and
+  5,000 reads in 24.6 ms, where the earlier splice took 15.5 (Chromium 8.7).
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

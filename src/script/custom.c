@@ -68,11 +68,12 @@
    What is not done: :state() is not matched (the cascade does not see an element's custom
    states); formStateRestoreCallback never comes (no state is restored); a form value that is
    a File or a FormData is its string; ElementInternals' labels and ARIA mixin are not there;
-   adoptedStyleSheets (there are no constructable style sheets); focus is not delegated
+   focus is not delegated
    (delegatesFocus is kept and read back); an HTML element interface's own members are the
    shared element prototype's (HTMLInputElement.prototype holds no value); before a script
    names an interface, an element's prototype and constructor are HTMLElement's, and the
-   window has none of the interfaces as its own property. */
+   window has none of the interfaces as its own property. A shadow root's styleSheets and
+   adoptedStyleSheets are src/script/cssom.c's. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

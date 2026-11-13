@@ -1,0 +1,14 @@
+-- the cssom-sheets page's console, against Chromium's:
+the same 57 lines
+-- the cssom-rules page's console, against Chromium's:
+the same 89 lines
+-- the cssom-text page's console, against Chromium's:
+the same 330 lines
+-- the cssom-edit page's console, against Chromium's:
+the same 78 lines
+-- the cssom-adopt page's console, against Chromium's:
+the same 68 lines
+-- the cssom-decl page's console, against Chromium's:
+the same 343 lines
+-- the cssom-styletype page's console, against Chromium's:
+the same 8 lines

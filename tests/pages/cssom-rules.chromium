@@ -1,0 +1,89 @@
+rules 31 [object CSSRuleList] true true true null undefined
+0 CSSImportRule 3 [object CSSImportRule] "@import url(\"cssom/b.css\") layer(base) supports(display: grid) screen and (min-width: 1px);" true null
+1 CSSImportRule 3 [object CSSImportRule] "@import url(\"cssom/b.css\");" true null
+2 CSSImportRule 3 [object CSSImportRule] "@import url(\"cssom/b.css\") layer;" true null
+3 CSSNamespaceRule 10 [object CSSNamespaceRule] "@namespace url(\"http://www.w3.org/1999/xhtml\");" true null
+4 CSSNamespaceRule 10 [object CSSNamespaceRule] "@namespace svg url(\"http://www.w3.org/2000/svg\");" true null
+5 CSSStyleRule 1 [object CSSStyleRule] ".a {\n  color: red;\n  & .b { color: blue; }\n  &:hover { color: green; }\n  .c & { margin: 0px; }\n}" true null
+6 CSSMediaRule 4 [object CSSMediaRule] "@media screen and (min-width: 100px), print {\n  .m { color: red; }\n}" true null
+7 CSSSupportsRule 12 [object CSSSupportsRule] "@supports (display: grid) and (not (display: inline-grid)) {\n  .s { color: red; }\n}" true null
+8 CSSContainerRule 0 [object CSSContainerRule] "@container card (min-width: 400px) and (orientation: landscape) {\n  .c { color: red; }\n}" true null
+9 CSSContainerRule 0 [object CSSContainerRule] "@container (width > 10px) {\n  .c2 { color: red; }\n}" true null
+10 CSSLayerStatementRule 0 [object CSSLayerStatementRule] "@layer A.B, C;" true null
+11 CSSLayerBlockRule 0 [object CSSLayerBlockRule] "@layer D {\n  .l { color: red; }\n}" true null
+12 CSSLayerBlockRule 0 [object CSSLayerBlockRule] "@layer {\n  .anon { color: red; }\n}" true null
+13 CSSKeyframesRule 7 [object CSSKeyframesRule] "@keyframes Spin { \n  0% { opacity: 0; }\n  50%, 75% { opacity: 0.5; }\n  100% { opacity: 1; }\n}" true null
+14 CSSKeyframesRule 7 [object CSSKeyframesRule] "@keyframes quoted { \n  0% { color: red; }\n}" true null
+15 CSSPageRule 6 [object CSSPageRule] "@page { margin: 1cm; }" true null
+16 CSSPageRule 6 [object CSSPageRule] "@page :left { margin-left: 2cm; @top-left { content: \"x\"; } }" true null
+17 CSSPageRule 6 [object CSSPageRule] "@page wide:first { size: landscape; }" true null
+18 CSSPropertyRule 0 [object CSSPropertyRule] "@property --len { syntax: \"<length>\"; inherits: true; initial-value: 10px; }" true null
+19 CSSPropertyRule 0 [object CSSPropertyRule] "@property --any { syntax: \"*\"; inherits: false; }" true null
+20 CSSCounterStyleRule 11 [object CSSCounterStyleRule] "@counter-style foo { system: fixed 3; symbols: a b c; negative: \"-\"; prefix: \"(\"; suffix: \") \"; pad: 2 \"0\"; range: 1 10; fallback: decimal; speak-as: numbers; }" true null
+21 CSSScopeRule 0 [object CSSScopeRule] "@scope (.x) {\n  .y { color: red; }\n}" true null
+22 CSSScopeRule 0 [object CSSScopeRule] "@scope {\n  .z { color: red; }\n}" true null
+23 CSSScopeRule 0 [object CSSScopeRule] "@scope (.p) to (.q, .r) {\n  .t { color: red; }\n}" true null
+24 CSSFontFaceRule 5 [object CSSFontFaceRule] "@font-face { font-family: Bar; src: local(\"Arial\"), url(\"x.woff\") format(\"woff\"); unicode-range: U+0-FF, U+131; font-display: swap; }" true null
+25 CSSStartingStyleRule 0 [object CSSStartingStyleRule] "@starting-style {\n  .st { opacity: 0; }\n}" true null
+26 CSSFontFeatureValuesRule 14 [object CSSFontFeatureValuesRule] "@font-feature-values Foo { @styleset { nice: 2; } }" true null
+27 CSSFontPaletteValuesRule 0 [object CSSFontPaletteValuesRule] "@font-palette-values --pal { font-family: Bar; base-palette: 1; }" true null
+28 CSSViewTransitionRule 0 [object CSSViewTransitionRule] "@view-transition { navigation: auto; }" true null
+29 CSSPositionTryRule 0 [object CSSPositionTryRule] "@position-try --top { top: anchor(bottom); }" true null
+30 CSSStyleRule 1 [object CSSStyleRule] "div > p, span + em { background: blue !important; }" true null
+import -> cssom/b.css | screen and (min-width: 1px) | base | display: grid | sheet
+import2 -> cssom/b.css | "" |  | 
+import3 -> cssom/b.css | ""
+ns -> http://www.w3.org/1999/xhtml | "" | http://www.w3.org/2000/svg | svg
+nest -> 3 CSSStyleRule & .b true true &:hover .c & .a
+nest text -> "& .b { color: blue; }" ".c & { margin: 0px; }"
+style -> color: red; | true true true true
+media -> screen and (min-width: 100px), print | screen and (min-width: 100px), print | 2 | 1 |  | true | true
+media child -> .m | true | true | ".m { color: red; }"
+supports -> (display: grid) and (not (display: inline-grid)) | 1
+container -> card (min-width: 400px) and (orientation: landscape) | card | (min-width: 400px) and (orientation: landscape) | "" | (width > 10px) | (width > 10px)
+layer stmt -> ["A.B","C"] true true
+layer block -> "D" "" 1
+keyframes -> Spin | 3 | 3 | 0% | 50%, 75% | 100% | opacity: 0; | CSSKeyframeRule | quoted | true | 
+findRule -> 0% | 0% | 50%, 75% | [object CSSKeyframeRule] | x | 
+appendRule -> 4 25% { opacity: 0.25; }
+appendRule bad -> 4
+appendRule bad2 -> 4
+appendRule none threw TypeError: Failed to execute 'appendRule' on 'CSSKeyframesRule': 1 argument required, but only 0 present.
+deleteRule -> 3 "@keyframes Spin { \n  0% { opacity: 0; }\n  100% { opacity: 1; }\n  25% { opacity: 0.25; }\n}"
+deleteRule none -> 3
+keyText set threw SyntaxError: Failed to set the 'keyText' property on 'CSSKeyframeRule': The key 'garbage' is invalid and cannot be parsed
+keyText set multi -> 10%, 20% "10%, 20% { opacity: 0; }"
+name set -> Other none "" "@keyframes  { \n  10%"
+page ->  | "@page { margin: 1cm; }" | :left | wide:first | margin: 1cm; | CSSPageRule | 1
+margin rule -> CSSMarginRule | 9 | top-left | content: "x"; | "@top-left { content: \"x\"; }" | true
+page set -> :right :right
+property -> --len | <length> | true | 10px | * | false | 
+counter -> foo | fixed 3 | a b c |  | "-" | "(" | ") " | 1 10 | 2 "0" | numbers | decimal
+counter set -> "]" bar "@counter-style bar { system: fixed 3; symbols: a b c; negative: \"-\"; prefix: \"(\"; suffix: \"]\"; pad: 2 \"0\"; range: 1 10; fallback: decimal; speak-as: numbers; }"
+counter set bad -> bar fixed 3
+scope -> .x |  |  |  | .p | .q, .r | 1
+fontface -> 4 | Bar | local("Arial"), url("x.woff") format("woff") | U+0-FF, U+131 | swap | font-family | font-family: Bar; src: local("Arial"), url("x.woff") format("woff"); unicode-range: U+0-FF, U+131; font-display: swap;
+rest -> CSSStartingStyleRule:0, CSSFontFeatureValuesRule:14, CSSFontPaletteValuesRule:0, CSSViewTransitionRule:0, CSSPositionTryRule:0, CSSStyleRule:1
+rest names -> --pal | --top | "top: anchor(bottom);" | 1
+consts -> 1,2,3,4,5,6,7,8,9,10,11,12,14,1,4
+protos -> false,true,true,true,true,true,true,true,true,true,true,true,true
+own names -> CHARSET_RULE,COUNTER_STYLE_RULE,FONT_FACE_RULE,FONT_FEATURE_VALUES_RULE,IMPORT_RULE,KEYFRAMES_RULE,KEYFRAME_RULE,MARGIN_RULE,MEDIA_RULE,NAMESPACE_RULE,PAGE_RULE,STYLE_RULE,SUPPORTS_RULE,constructor,cssText,parentRule,parentStyleSheet,type | constructor,cssRules,deleteRule,insertRule | appendRule,constructor,cssRules,deleteRule,findRule,length,name | constructor,media | constructor,href,layerName,media,styleSheet,supportsText | conditionText,constructor | constructor,keyText,style
+tostring -> [object CSSStyleSheet] | [object CSSRuleList] | [object CSSStyleRule] | [object CSSStyleDeclaration] |  | [object StyleSheetList]
+selectorText set -> div > p | div > p | div > p | & .b
+cssText set -> "div > p {\n  color: r"
+conditionText set -> screen and (min-width: 100px), print
+media set -> print "@media print {\n  .m "
+media append -> print, tv 2
+delete group -> 0 "@media print, tv {\n}"
+deleted rule -> null null "@supports (display: grid) and (not (display: inline-grid)) {\n  .s { color: red; }\n}" 1 null CSSSupportsRule
+new CSSRule threw TypeError: Failed to construct 'CSSRule': Illegal constructor
+new CSSStyleRule threw TypeError: Failed to construct 'CSSStyleRule': Illegal constructor
+call CSSRule threw TypeError: Illegal constructor
+new CSSRuleList threw TypeError: Failed to construct 'CSSRuleList': Illegal constructor
+illegal threw TypeError: Illegal invocation
+s9 -> CSSFontFeatureValuesRule "@font-feature-values Foo, \"Bar Baz\" { @swash { s: 1; } @styleset { fancy: 3 5; nice: 4; } }" || CSSFontPaletteValuesRule "@font-palette-values --pal { font-family: Bar, \"Q R\"; base-palette: 1; override-colors: 0 red, 1 rgb(0, 255, 0); }" || CSSViewTransitionRule "@view-transition { navigation: auto; types: a b; }" || CSSViewTransitionRule "@view-transition { navigation: none; }" || CSSPositionTryRule "@position-try --top { top: anchor(bottom); margin: 1px; }" || CSSStartingStyleRule "@starting-style {\n  .st { opacity: 0; }\n}"
+ffv -> "Foo, \"Bar Baz\""
+fpv -> --pal | "Bar, \"Q R\"" | "1" | "0 red, 1 rgb(0, 255, 0)"
+vt -> "auto" | ["a","b"] | true | [] | "none"
+pt -> --top | top: anchor(bottom); margin: 1px; | 5 | 1px
+ss -> 1 | .st | "@starting-style {\n  .st { opacity: 0; }\n}"

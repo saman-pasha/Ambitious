@@ -213,5 +213,23 @@ void script_frames_setup(js_vm *vm);
 jv script_frames_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt, int *handled);
 jv script_frames_get(js_vm *vm, uint32_t x, uint32_t atom, int *handled);
 void script_frames_task(js_vm *vm, uint32_t kind, uint32_t arg);
+/* ---- cssom.c's: the CSS Object Model (Phase 12al; src/css/cssom.h is its model) ----
+   the host objects' kinds of a sheet, a rule, a list of rules (a sheet's or a rule's), a rule's
+   style, a media list and a tree's list of sheets (an element's style, HK_STYLE, is the unit's
+   too); its natives' numbers. Its setup (after custom.c's: ShadowRoot's prototype is made); a
+   native of it; a property read and set on one of its objects or an element's style (handled
+   when the unit answers); an element's style's setProperty, getPropertyValue and
+   removeProperty (which 0, 1, 2), for script.c's natives of CSSStyleDeclaration; the
+   scripts' changes to the sheets told the cascade (src/css/cssom.h's registry), before a
+   cascade of the page: the view's, the parse's end, the page at rest */
+enum { HK_SHEET = 64, HK_RULE, HK_RULES, HK_DECL, HK_MEDIA, HK_SHEETS };
+enum { SH_CSSOM_FIRST = 2000, SH_CSSOM_END = 2300 };
+void script_cssom_setup(js_vm *vm);
+jv script_cssom_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
+jv script_cssom_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled);
+int script_cssom_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled);
+jv script_cssom_style(js_vm *vm, int which, jv thisv, uint32_t args, uint32_t argc);
+jv script_cssom_inline_style(js_vm *vm, uint32_t x);
+void script_cssom_sync(struct js_host *h);
 
 #endif

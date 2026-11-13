@@ -1,0 +1,68 @@
+ctor -> 0 |  |  |  | "" | false | text/css |  |  | [object CSSStyleSheet]
+ctor opts -> print, screen | true | null
+ctor media list -> print
+ctor media obj -> ""
+ctor undefined -> 0
+ctor call threw TypeError: Failed to construct 'CSSStyleSheet': Please use the 'new' operator, this DOM object constructor cannot be called as a function.
+replaceSync -> 3 .a { color: red; } || garbage { } || .b { }
+@import rules are not allowed here. See https://github.com/WICG/construct-stylesheets/issues/119#issuecomment-588352418.
+replaceSync import -> 1 .a { color: red; }
+replaceSync none threw TypeError: Failed to execute 'replaceSync' on 'CSSStyleSheet': 1 argument required, but only 0 present.
+replaceSync null -> 0 
+insertRule import threw SyntaxError: Failed to execute 'insertRule' on 'CSSStyleSheet': Can't insert @import rules into a constructed stylesheet.
+insertRule -> 0 .c { color: blue; }
+own replaceSync threw NotAllowedError: Failed to execute 'replaceSync' on 'CSSStyleSheet': Can't call replaceSync on non-constructed CSSStyleSheets.
+own replace -> [object Promise]
+@import rules are not allowed here. See https://github.com/WICG/construct-stylesheets/issues/119#issuecomment-588352418.
+replace sync part -> .x { color: blue; }
+own sheet before -> rgb(255, 0, 0) rgb(255, 0, 0)
+identity -> true 0 true true [object Array]
+after set -> true 1 rgb(0, 0, 255) rgb(0, 0, 255) 1
+after push -> 2 rgb(0, 128, 0) rgb(0, 0, 255)
+emptied -> rgb(255, 0, 0) rgb(255, 0, 0)
+the other order -> rgb(0, 0, 255) rgb(0, 0, 255) true
+splice -> 1 rgb(0, 0, 255) true
+index set -> 2 rgb(0, 128, 0)
+index set bad threw TypeError: Failed to convert value to 'CSSStyleSheet'.
+index set own threw NotAllowedError: Can't adopt non-constructed stylesheets.
+index set far threw TypeError: 'set' on proxy: trap returned falsish for property '5'
+index set far sloppy -> 2
+length grow threw TypeError: 'set' on proxy: trap returned falsish for property 'length'
+pop -> true 1 rgb(0, 0, 255)
+dup -> 4 rgb(0, 0, 255)
+length 0 -> 0 rgb(255, 0, 0)
+set own threw NotAllowedError: Failed to set the 'adoptedStyleSheets' property on 'Document': Can't adopt non-constructed stylesheets.
+set mixed threw TypeError: Failed to set the 'adoptedStyleSheets' property on 'Document': Failed to convert value to 'CSSStyleSheet'.
+set number threw TypeError: Failed to set the 'adoptedStyleSheets' property on 'Document': The provided value cannot be converted to a sequence.
+set null threw TypeError: Failed to set the 'adoptedStyleSheets' property on 'Document': The provided value cannot be converted to a sequence.
+set obj threw TypeError: Failed to set the 'adoptedStyleSheets' property on 'Document': The object must have a callable @@iterator property.
+set set -> 1 rgb(0, 128, 0)
+push bad threw NotAllowedError: Can't adopt non-constructed stylesheets.
+push obj threw TypeError: Failed to convert value to 'CSSStyleSheet'.
+after errors -> 1 rgb(0, 128, 0)
+disabled -> rgb(255, 0, 0) rgb(0, 0, 255)
+media -> rgb(255, 0, 0) rgb(0, 0, 255)
+ctor media -> rgb(255, 0, 0)
+modify adopted -> rgb(128, 0, 128) 3
+delete in adopted -> rgb(0, 0, 255)
+replace adopted -> rgb(255, 0, 0) rgb(0, 1, 2)
+owner of adopted -> null null null null 1
+important own vs adopted -> rgb(4, 4, 4) rgb(3, 3, 3)
+shadow -> 1 true false 0 rgb(255, 0, 0)
+shadow adopted -> rgb(0, 128, 128) rgb(3, 3, 3) rgb(5, 5, 5)
+two trees -> rgb(0, 128, 128) rgb(0, 0, 128) 1 1
+change shared -> rgb(6, 6, 6)
+remove from one -> rgb(6, 6, 6) rgb(255, 0, 0)
+declarative -> 1 0 rgb(1, 0, 0) rgb(2, 0, 0)
+declarative adopted -> rgb(8, 8, 8) rgb(9, 9, 9)
+declarative one -> rgb(7, 7, 7) rgb(2, 0, 0)
+declarative order -> rgb(7, 7, 7) rgb(9, 9, 9)
+declarative splice -> rgb(8, 8, 8) rgb(9, 9, 9) 1
+own after adopted -> rgb(9, 9, 9)
+own replace rejected NotAllowedError: Failed to execute 'replace' on 'CSSStyleSheet': Can't call replace on non-constructed CSSStyleSheets.
+replace resolved true 1 .x { color: blue; }
+frame sheet threw NotAllowedError: Failed to set the 'adoptedStyleSheets' property on 'Document': Sharing constructed stylesheets in multiple documents is not allowed
+frame sheet push threw NotAllowedError: Sharing constructed stylesheets in multiple documents is not allowed
+to frame threw NotAllowedError: Failed to set the 'adoptedStyleSheets' property on 'Document': Sharing constructed stylesheets in multiple documents is not allowed
+frame own -> rgb(11, 11, 11)
+end -> 0 rgb(255, 0, 0) rgb(255, 0, 0)

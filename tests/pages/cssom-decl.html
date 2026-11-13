@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html><head>
+<title>CSSOM: declarations</title>
+<style id="s1">.a { color: red; margin: 1px 2px; --x: 5px; background: blue !important }</style>
+<style id="s2"></style>
+</head><body>
+<div id="d" style="color: red; margin: 1px 2px"></div>
+<div id="e" style="COLOR:RED;;bogus: 1; margin : 0 auto !important"></div>
+<script>
+function p(s) { console.log(s); }
+function t(label, f) { try { var r = f(); p(label + ' -> ' + r); } catch (e) { p(label + ' threw ' + e.name + ': ' + e.message); } }
+var s = document.getElementById('s1').sheet, r = s.cssRules[0], st = r.style;
+function dump(x) { var o = []; for (var i = 0; i < x.length; i++) o.push(x.item(i)); return x.length + ' [' + o.join(',') + ']'; }
+t('initial', function () { return JSON.stringify(st.cssText) + ' ' + dump(st); });
+t('get', function () { return [st.getPropertyValue('color'), st.getPropertyValue('margin'), st.getPropertyValue('margin-top'), st.getPropertyValue('--x'), st.getPropertyValue('background'), st.getPropertyPriority('background'), st.getPropertyPriority('background-color'), st.getPropertyPriority('color'), JSON.stringify(st.getPropertyValue('nope')), st.getPropertyValue('COLOR'), st.getPropertyValue('--X')].join(' | '); });
+t('named', function () { return [st.color, st.marginTop, st['margin-top'], st.margin, st.cssFloat, st.float, st.backgroundColor, JSON.stringify(st.fontSize), st.webkitUserSelect, typeof st.nope, st['--x']].join(' | '); });
+t('item', function () { return [st.item(0), st[0], JSON.stringify(st.item(99)), st[99], st.item(-1)].join(' | '); });
+t('set', function () { st.setProperty('color', 'blue'); return st.cssText; });
+t('set important', function () { st.setProperty('color', 'green', 'important'); return st.cssText + ' ' + st.getPropertyPriority('color'); });
+t('set important bad', function () { st.setProperty('color', 'green', 'foo'); return st.cssText; });
+t('set important caps', function () { st.setProperty('color', 'pink', 'IMPORTANT'); return st.cssText; });
+t('set invalid', function () { st.setProperty('color', 'nonsense'); return st.cssText; });
+t('set empty removes', function () { st.setProperty('margin-left', ''); return st.cssText + ' ' + dump(st); });
+t('set null', function () { st.setProperty('margin-right', null); return st.cssText; });
+t('set unknown', function () { st.setProperty('nope', '1px'); return st.cssText; });
+t('set custom', function () { st.setProperty('--y', ' a  b '); return st.cssText + ' ' + JSON.stringify(st.getPropertyValue('--y')); });
+t('set shorthand', function () { st.setProperty('padding', '1px 2px 3px'); return st.cssText + ' ' + dump(st); });
+t('set shorthand over longhand', function () { st.setProperty('margin', '7px'); return st.cssText; });
+t('remove', function () { var v = st.removeProperty('color'); return JSON.stringify(v) + ' ' + st.cssText; });
+t('remove shorthand', function () { var v = st.removeProperty('padding'); return JSON.stringify(v) + ' ' + st.cssText; });
+t('remove none', function () { var v = st.removeProperty('nope'); return JSON.stringify(v); });
+t('remove longhand of short', function () { var v = st.removeProperty('margin-top'); return JSON.stringify(v) + ' ' + st.cssText + ' ' + JSON.stringify(st.margin); });
+t('named set', function () { st.marginTop = '3px'; st.backgroundColor = 'red'; return st.cssText; });
+t('named set float', function () { st.cssFloat = 'left'; return st.cssText + ' ' + st.cssFloat; });
+t('named set dashed', function () { st['font-size'] = '12px'; return st.cssText; });
+t('named set invalid', function () { st.fontSize = 'huge-ish'; return st.fontSize; });
+t('cssText set', function () { st.cssText = 'color: red; width: 10px !important; bogus: 1; height: 2px'; return st.cssText + ' ' + dump(st); });
+t('cssText set empty', function () { st.cssText = ''; return JSON.stringify(st.cssText) + ' ' + st.length; });
+t('order', function () { st.cssText = 'width: 1px; color: red; width: 2px'; return st.cssText; });
+t('order2', function () { st.cssText = 'margin-top: 1px; margin-right: 1px; margin-bottom: 1px; margin-left: 1px'; return st.cssText; });
+t('order3', function () { st.cssText = 'margin-top: 1px; color: red; margin-right: 1px; margin-bottom: 1px; margin-left: 1px'; return st.cssText; });
+t('order4', function () { st.cssText = 'margin-top: 1px; margin-right: 1px !important; margin-bottom: 1px; margin-left: 1px'; return st.cssText; });
+t('order5', function () { st.cssText = 'border-top: 1px solid red; border-right: 1px solid red; border-bottom: 1px solid red; border-left: 1px solid red'; return st.cssText; });
+t('order6', function () { st.cssText = 'border-width: 1px; border-style: solid; border-color: red'; return st.cssText; });
+t('order7', function () { st.cssText = 'border: 1px solid red; border-top-color: blue'; return st.cssText; });
+t('order8', function () { st.cssText = 'padding-top: 1px; padding-bottom: 2px'; return st.cssText + ' ' + JSON.stringify(st.padding); });
+t('order9', function () { st.cssText = 'background-color: red; background-image: none'; return st.cssText; });
+t('order10', function () { st.cssText = 'overflow-x: hidden; overflow-y: hidden'; return st.cssText; });
+t('order11', function () { st.cssText = 'flex-grow: 1; flex-shrink: 1; flex-basis: 0%'; return st.cssText; });
+t('order12', function () { st.cssText = 'margin: 1px; margin-top: 2px'; return st.cssText; });
+t('order13', function () { st.cssText = 'margin-top: 2px; margin: 1px'; return st.cssText + ' ' + dump(st); });
+t('order14', function () { st.cssText = 'color: red; color: blue !important; color: green'; return st.cssText; });
+t('parentRule', function () { return st.parentRule === r; });
+t('el style', function () { var e = document.getElementById('d').style; return JSON.stringify(e.cssText) + ' ' + dump(e) + ' ' + e.parentRule + ' ' + e.margin; });
+t('el set', function () { var e = document.getElementById('d'); e.style.setProperty('color', 'blue', 'important'); return e.getAttribute('style'); });
+t('el set2', function () { var e = document.getElementById('d'); e.style.padding = '1px 2px'; return e.getAttribute('style'); });
+t('el set3', function () { var e = document.getElementById('d'); e.setAttribute('style', 'COLOR: RED;   width:0'); return e.style.cssText + ' | ' + e.getAttribute('style'); });
+t('el set4', function () { var e = document.getElementById('d'); e.style.width = '5px'; return e.getAttribute('style'); });
+t('el remove', function () { var e = document.getElementById('d'); e.style.removeProperty('color'); e.style.removeProperty('width'); return JSON.stringify(e.getAttribute('style')); });
+t('el bad', function () { var e = document.getElementById('d'); e.style.color = 'nonsense'; return JSON.stringify(e.getAttribute('style')) + ' ' + JSON.stringify(e.style.color); });
+t('el cssText', function () { var e = document.getElementById('d'); e.style.cssText = 'margin: 0 auto; float: right'; return e.getAttribute('style') + ' | ' + e.style.cssFloat; });
+
+t('el untouched', function () { var e = document.getElementById('e'); return e.getAttribute('style') + ' | ' + e.style.cssText + ' | ' + e.getAttribute('style') + ' | ' + e.style.length; });
+t('el touched', function () { var e = document.getElementById('e'); e.style.color = 'blue'; return e.getAttribute('style'); });
+t('el same object', function () { var e = document.getElementById('e'); return (e.style === e.style) + ' ' + (e.style.parentRule === null) + ' ' + Object.prototype.toString.call(e.style); });
+t('el priority', function () { var e = document.getElementById('e'); return e.style.getPropertyPriority('margin') + ' ' + e.style.getPropertyPriority('margin-left') + ' ' + JSON.stringify(e.style.getPropertyPriority('color')); });
+t('el custom', function () { var e = document.getElementById('e'); e.style.setProperty('--Big', '  10px '); return e.getAttribute('style') + ' | ' + JSON.stringify(e.style.getPropertyValue('--Big')) + ' ' + JSON.stringify(e.style.getPropertyValue('--big')); });
+t('el iterate', function () { var e = document.getElementById('e'); return Array.from(e.style).join(',') + ' ' + e.style.item(0); });
+t('el no args', function () { return document.getElementById('e').style.getPropertyValue(); });
+t('el set no args', function () { return document.getElementById('e').style.setProperty('color'); });
+t('el computed', function () { var e = document.getElementById('d'); e.style.cssText = 'color: rgb(1, 2, 3); width: 7px'; return getComputedStyle(e).color + ' ' + getComputedStyle(e).width; });
+var s2 = document.getElementById('s2').sheet;
+function one(d) {
+  try {
+    s2.insertRule('.x { ' + d + ' }', 0);
+    var st = s2.cssRules[0].style, items = [];
+    for (var k = 0; k < st.length; k++) items.push(st[k] + '=' + st.getPropertyValue(st[k]) + (st.getPropertyPriority(st[k]) ? '!' : ''));
+    p(JSON.stringify(d) + ' -> ' + JSON.stringify(st.cssText) + ' [' + items.join('; ') + ']');
+    s2.deleteRule(0);
+  } catch (e) { p(JSON.stringify(d) + ' threw ' + e.name); }
+}
+var decls = [
+ 'color: RED', 'color: #F00', 'color: #ff000080', 'color: rgb(255,0,0)', 'color: rgb(255 0 0 / 50%)', 'color: rgba(255, 0, 0, .5)', 'color: hsl(120, 100%, 50%)', 'color: hsla(120 100% 50% / 0.25)', 'color: transparent', 'color: currentColor', 'color: Canvas', 'color: foo',
+ 'color: rgb(300, -5, 0)', 'color: #abc', 'color: lab(50% 40 59.5)', 'color: color-mix(in srgb, red, blue)', 'color: inherit', 'color: INITIAL', 'color: unset', 'color: revert', 'color: revert-layer',
+ 'width: 10PX', 'width: 0', 'width: 1.50em', 'width: 50%', 'width: auto', 'width: calc(1px + 2px)', 'width: calc(100% - 10px)', 'width: calc(2 * 3px)', 'width: calc(10px * 2 + 5%)', 'width: min(10px, 5%)', 'width: max(1px,2px)', 'width: clamp(1px, 50%, 10px)', 'width: -5px', 'width: 1e2px', 'width: .5px', 'width: 10', 'width: fit-content', 'width: min-content', 'width: 100vw', 'width: 3Q', 'width: 1.23456789px',
+ 'margin: 0', 'margin: 1px 2px', 'margin: 1px 2px 3px', 'margin: 1px 2px 3px 4px', 'margin: 1px 1px 1px 1px', 'margin: auto', 'margin: 1px !important', 'margin-top: 1px',
+ 'padding: 1px 2px', 'opacity: .5', 'opacity: 50%', 'opacity: 1.0', 'z-index: +3', 'z-index: auto', 'line-height: 1.0', 'line-height: 0', 'line-height: normal', 'line-height: 20px',
+ 'display: BLOCK', 'display: inline flex', 'display: flex', 'display: block flow', 'display: grid', 'display: inline-block',
+ 'font-family: "Foo"', "font-family: 'Times New Roman', serif", 'font-family: Arial , sans-serif', 'font-family: ARIAL', 'font-family: "sans-serif"', 'font-family: a  b',
+ 'font: 12px/1.5 Arial', 'font: bold italic 12px Arial', 'font: 12px Arial', 'font-weight: bold', 'font-weight: 700', 'font-size: larger', 'font-size: 12PX',
+ 'background: blue', 'background: url(a.png) no-repeat', 'background: red url("a.png") center / cover', 'background-color: red', 'background-image: url(a.png)', 'background-image: none', 'background-image: linear-gradient(red, blue)', 'background-image: linear-gradient(to right, #fff 0%, rgba(0,0,0,.5) 100%)', 'background-position: center', 'background-position: 10px 20px', 'background-size: cover', 'background-repeat: repeat-x',
+ 'border: 1px solid red', 'border: none', 'border: 2px', 'border-top: 1px solid', 'border-width: 1px 2px', 'border-style: solid', 'border-color: red blue', 'border-radius: 5px', 'border-radius: 5px 10px', 'border-radius: 5px / 10px', 'border-left: thin dotted',
+ 'outline: 1px solid red', 'flex: 1', 'flex: 1 1 0', 'flex: none', 'flex: auto', 'flex-flow: row wrap', 'gap: 10px', 'gap: 10px 20px', 'grid-template-columns: repeat(2, 1fr)', 'grid-area: a', 'grid-column: 1 / 3', 'grid-row: span 2',
+ 'transform: rotate(45DEG)', 'transform: translate(10px,20px) scale(2)', 'transform: none', 'transition: opacity .3s ease-in', 'transition: all 1s', 'animation: spin 1s linear infinite', 'animation-name: Spin', 'animation-duration: 500ms',
+ 'content: "a"', "content: 'b'", 'content: none', 'content: counter(x)', 'content: attr(data-x)', 'content: "\\201C"', 'quotes: "a" "b"',
+ 'text-decoration: underline', 'text-decoration: underline red wavy', 'overflow: hidden', 'overflow: hidden auto', 'list-style: square inside', 'list-style: none',
+ 'inset: 0', 'position: absolute', 'top: 0', 'box-shadow: 0 0 5px red', 'box-shadow: inset 1px 2px 3px 4px rgba(0,0,0,.5)', 'text-shadow: 1px 1px', 'cursor: pointer', 'cursor: url(a.cur), auto',
+ '--x: 1px', '--Y:  a  b ', '--z:', '--w: {a}', 'width: var(--x)', 'margin: var(--x) 2px', 'color: var(--c, red)',
+ 'filter: blur(2px)', 'will-change: transform', 'user-select: none', '-webkit-user-select: none', 'appearance: none', '-webkit-appearance: none', 'colr: red', 'COLOR: red', 'color : red', 'color: red;;', 'color: red !IMPORTANT', 'color: red ! important', 'color: red !important foo',
+ 'aspect-ratio: 16/9', 'aspect-ratio: 1', 'object-fit: cover', 'white-space: nowrap', 'text-align: center', 'vertical-align: middle', 'float: left', 'visibility: hidden', 'box-sizing: border-box', 'pointer-events: none', 'scroll-behavior: smooth', 'contain: layout', 'container: card / inline-size', 'container-type: inline-size'
+];
+
+for (var i = 0; i < decls.length; i++) one(decls[i]);
+function show(decl) { s2.insertRule('.x { ' + decl + ' }', 0); var st = s2.cssRules[0].style, o = []; for (var i = 0; i < st.length && i < 6; i++) o.push(st[i] + '=' + st.getPropertyValue(st[i])); p(JSON.stringify(decl) + ' -> ' + JSON.stringify(st.cssText) + ' ' + st.length + ' [' + o.join('; ') + ']'); s2.deleteRule(0); }
+show('margin: inherit');
+show('margin-top: inherit; margin-right: inherit; margin-bottom: inherit; margin-left: inherit');
+show('margin-top: inherit; margin-right: initial; margin-bottom: inherit; margin-left: inherit');
+show('font: inherit');
+show('background: initial');
+show('border: inherit');
+show('border-left: initial');
+show('margin: var(--a)');
+show('margin: var(--a); margin-top: 1px');
+show('margin-top: var(--a); margin-right: var(--a); margin-bottom: var(--a); margin-left: var(--a)');
+show('flex: var(--a)');
+show('--a: 1px; margin: 0 var(--a)');
+show('margin: 1px 2px; margin-top: var(--b)');
+show('padding: 0 !important; padding: 1px');
+show('padding: 0; padding: 1px !important');
+show('padding: 1px; padding-top: 2px !important');
+show('columns: 2 10px');
+show('columns: auto');
+show('column-rule: 1px solid red');
+show('text-emphasis: dot red');
+show('place-items: center');
+show('place-items: center start');
+show('place-content: center');
+show('place-self: auto');
+show('inset-block: 1px 2px');
+show('inset-inline: 1px');
+show('margin-block: 1px');
+show('margin-inline: 1px 2px');
+show('padding-block: 0');
+show('overscroll-behavior: contain');
+show('scroll-margin: 1px 2px');
+show('scroll-padding: 1px');
+show('border-block: 1px solid red');
+show('border-inline-start: 1px solid');
+show('border-spacing: 1px 2px');
+show('border-spacing: 1px');
+show('marker: url(#m)');
+show('grid-area: 1 / 2 / 3 / 4');
+show('grid-area: a / b');
+show('grid-row: 1');
+show('grid-column: 2 / span 3');
+show('gap: normal');
+show('font-variant: small-caps');
+show('font-synthesis: none');
+show('text-wrap: balance');
+show('white-space: pre');
+show('white-space: pre-wrap');
+show('white-space: normal');
+show('container: card');
+show('contain-intrinsic-size: 10px');
+show('border-image: url(a.png) 30 round');
+show('border-image: none');
+show('list-style: url(a.png)');
+show('list-style: disc');
+show('list-style: outside');
+show('text-decoration: none');
+show('text-decoration: line-through 2px');
+show('outline: none');
+show('outline: auto');
+show('outline: 0');
+show('flex-flow: column');
+show('flex-flow: row');
+show('flex: 2');
+show('flex: 0 0 100px');
+show('flex: 10px');
+show('flex: 1 2');
+show('transition: none');
+show('transition: color 1s, opacity 2s linear 1s');
+show('transition: 0s');
+show('animation: none');
+show('animation: foo 2s');
+show('animation: 1s');
+show('background: none');
+show('background: red');
+show('background: url(a.png) 10px 20px repeat-y fixed padding-box content-box');
+show('background: url(a.png), url(b.png) red');
+show('background: linear-gradient(red, blue) no-repeat');
+show('background: center / 50% auto');
+show('background: content-box');
+show('background: padding-box border-box');
+show('font: 700 1em/2 "A B", serif');
+show('font: small-caps 16px serif');
+show('font: condensed 12px serif');
+show('font: caption');
+show('font: italic 400 12px/normal serif');
+show('border: 1px dashed');
+show('border: solid red');
+show('border-top: 3px');
+show('border-color: red');
+show('border-color: red green blue');
+show('border-color: red green blue yellow');
+show('border-style: dotted dashed');
+show('border-width: thin medium thick');
+show('border-radius: 1px 2px 3px 4px / 5px 6px');
+show('border-radius: 1px 1px 1px 1px / 2px 2px 2px 2px');
+show('overflow: visible clip');
+show('overflow: auto auto');
+show('inset: 1px 2px 1px 2px');
+show('inset: auto');
+show('margin: -1px +2px 0.0px 1E1px');
+</script>
+<div id="ka">a</div><div id="kb" style="color: red">b</div><div id="kc">c</div><div id="ke" style="">e</div>
+<script>
+/* a style attribute emptied by its last declaration's removal stays, empty (Knockout's visible
+   binding: display none, then ''); an element whose style nothing changed gets none */
+(function () {
+  function p(s) { console.log(s); }
+  var a = document.getElementById('ka'), b = document.getElementById('kb'), c = document.getElementById('kc'), e = document.getElementById('ke');
+  a.style.display = 'none'; a.style.display = '';
+  p('emptied ' + JSON.stringify(a.getAttribute('style')) + ' ' + a.outerHTML);
+  b.style.removeProperty('color');
+  p('removed ' + JSON.stringify(b.getAttribute('style')) + ' ' + b.outerHTML);
+  c.style.cssText = '';
+  p('cssText ' + JSON.stringify(c.getAttribute('style')) + ' ' + c.hasAttribute('style'));
+  c.style.color = 'nonsense';
+  p('invalid ' + JSON.stringify(c.getAttribute('style')));
+  var d = document.createElement('div'); d.style.color = ''; p('untouched ' + JSON.stringify(d.getAttribute('style')) + ' ' + d.hasAttribute('style'));
+  d.style.removeProperty('color'); p('removed none ' + JSON.stringify(d.getAttribute('style')));
+  d.style.setProperty('color', null); p('null ' + JSON.stringify(d.getAttribute('style')));
+  p('empty attr ' + JSON.stringify(e.style.cssText) + ' ' + e.style.length);
+  e.style.width = '1px'; e.style.width = null; p('null set ' + JSON.stringify(e.getAttribute('style')));
+})();
+</script>
+</body></html>

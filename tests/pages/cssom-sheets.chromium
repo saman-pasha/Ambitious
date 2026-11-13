@@ -1,0 +1,57 @@
+length 4 true true null undefined [object StyleSheetList]
+order l1,s1,s3,s5
+0 l1 [object CSSStyleSheet] href=cssom/a.css title=Linked media="screen and (min-width: 100px)" disabled=false type=text/css parent=null ownerRule=null media.length=1 same=true
+1 s1 [object CSSStyleSheet] href=null title=null media="print" disabled=false type=text/css parent=null ownerRule=null media.length=1 same=true
+2 s3 [object CSSStyleSheet] href=null title=Third media="" disabled=false type=text/css parent=null ownerRule=null media.length=0 same=true
+3 s5 [object CSSStyleSheet] href=null title=null media="" disabled=false type=text/css parent=null ownerRule=null media.length=0 same=true
+instanceof -> true true true true true
+iterate -> l1,s1,s3,s5 4
+item() -> 1 object s1 null
+no item arg threw TypeError: Failed to execute 'item' on 'StyleSheetList': 1 argument required, but only 0 present.
+s2 sheet -> null
+s4 sheet -> null
+l2 sheet -> null
+div sheet -> undefined
+svg sheet -> .c { fill: red; } http://www.w3.org/2000/svg
+linked rules threw SecurityError: Failed to read the 'cssRules' property from 'CSSStyleSheet': Cannot access rules
+linked insert threw SecurityError: Failed to execute 'insertRule' on 'CSSStyleSheet': Cannot access StyleSheet to insertRule
+linked delete threw SecurityError: Failed to execute 'deleteRule' on 'CSSStyleSheet': Cannot access StyleSheet to deleteRule
+import -> CSSImportRule cssom/b.css screen null null true
+import sheet -> cssom/b.css true true null null 
+import rules threw SecurityError: Failed to read the 'cssRules' property from 'CSSStyleSheet': Cannot access rules
+shadow -> 2 h1,h2 true false [object StyleSheetList] p { color: rgb(9, 9, 9); }
+shadow sheet -> null  true rgb(0, 0, 0)
+shadow link -> cssom/b.css true
+medialist -> 1 screen and (min-width: 100px) screen and (min-width: 100px) null undefined screen and (min-width: 100px) [object MediaList] true
+append -> screen and (min-width: 100px), print / screen and (min-width: 100px)
+append again -> screen and (min-width: 100px), print 2
+append bad -> screen and (min-width: 100px), print, garbage( 3
+delete -> screen and (min-width: 100px), garbage(
+delete none threw NotFoundError: Failed to execute 'deleteMedium' on 'MediaList': Failed to delete 'tv'.
+delete no arg threw TypeError: Failed to execute 'deleteMedium' on 'MediaList': 1 argument required, but only 0 present.
+set text -> screen, (max-width: 10px), garbage, (foo) 4
+set text case -> screen and (min-width: 100px), print
+set text empty -> "" 0 null
+set text null -> "" 0
+media attr change -> true screen rgb(255, 0, 0)
+media attr case -> screen and (min-width: 100px), print rgb(255, 0, 0)
+disable -> true rgb(0, 0, 0) 4 false rgb(255, 0, 0)
+disable no attr -> false <style id="s1" media="SCREEN AND (MIN-WI
+sheet media -> rgb(0, 0, 0) SCREEN AND (MIN-WIDTH:100PX),PRINT rgb(255, 0, 0)
+text change -> false null 1 .a { color: rgb(0, 0, 128); } "screen and (min-width: 100px), print" rgb(0, 0, 128)
+same text -> true
+append empty text -> false
+text node data -> false rgb(0, 0, 64)
+remove -> null null 3 rgb(0, 0, 0) false 4 rgb(0, 0, 64)
+move -> false l1,s3,s1,s5
+created style -> null 1 5 4
+type change -> true null rgb(0, 0, 0) true rgb(1, 2, 3)
+order after -> l1,s3,s4,s1,s5
+title -> Linked | Third | null
+title live -> Changed null true
+media attr after list -> print null | screen true rgb(0, 0, 64)
+disabled not own -> constructor,disabled,href,media,ownerNode,parentStyleSheet,title,type | addRule,constructor,cssRules,deleteRule,insertRule,ownerRule,removeRule,replace,replaceSync,rules
+illegal threw TypeError: Illegal invocation
+new StyleSheet threw TypeError: Failed to construct 'StyleSheet': Illegal constructor
+new StyleSheetList threw TypeError: Failed to construct 'StyleSheetList': Illegal constructor
+new MediaList threw TypeError: Failed to construct 'MediaList': Illegal constructor

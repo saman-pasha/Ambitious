@@ -1903,7 +1903,9 @@ void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
     vector<char> t;
     js_value_text(vm, named, &t);
     uint32_t of = js_str_utf8(vm, data(t), len(t));
-    if (why == JSR_READONLY || why == JSR_LENGTH)
+    if (why == JSR_PROXY)
+        m = js_str_concat(vm, js_str_ascii(vm, "'set' on proxy: trap returned falsish for property '"), js_str_concat(vm, name, js_str_ascii(vm, "'")));
+    else if (why == JSR_READONLY || why == JSR_LENGTH)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
                           js_str_concat(vm, name, js_str_concat(vm, js_str_ascii(vm, js_is_callable(vm, obj) ? "' of function '" : "' of object '"),
                                                                 js_str_concat(vm, of, js_str_ascii(vm, "'")))));

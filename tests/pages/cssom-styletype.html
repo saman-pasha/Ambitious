@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset=utf-8><title>CSSOM: a style element's type, media and disabled</title><style type="text/less" id="s">.a { color: rgb(1, 2, 3); }</style>
+<link rel="stylesheet" href="cssom/a.css" id="l1">
+<link rel="stylesheet" href="cssom/b.css" id="l2" disabled>
+<style id="s1">.q { margin-bottom: 5px }</style>
+</head><body><div class="a">x</div><div class="linked imported q" id="d">y</div><script>
+const a = document.querySelector('.a'), s = document.getElementById('s');
+const log = [getComputedStyle(a).color];
+s.type = 'text/css'; log.push(getComputedStyle(a).color);
+s.innerHTML = '.a { color: rgb(4, 5, 6); }'; log.push(getComputedStyle(a).color);
+const t = document.createElement('style'); t.type = 'text/less'; t.textContent = '.a { margin-left: 3px; }'; document.head.appendChild(t); log.push(getComputedStyle(a).marginLeft);
+t.removeAttribute('type'); log.push(getComputedStyle(a).marginLeft);
+const u = document.createElement('style'); u.setAttribute('media', 'print'); u.textContent = '.a { margin-top: 7px; }'; document.head.appendChild(u); log.push(getComputedStyle(a).marginTop);
+u.media = 'all'; log.push(getComputedStyle(a).marginTop);
+u.disabled = true; log.push(getComputedStyle(a).marginTop);
+console.log(log.join(' | '));
+function p(x) { console.log(x); }
+const d = document.getElementById('d'), l1 = document.getElementById('l1'), l2 = document.getElementById('l2'), s1 = document.getElementById('s1');
+window.onload = function () {
+  p('start ' + getComputedStyle(d).color + ' ' + getComputedStyle(d).marginLeft + ' ' + (l1.sheet !== null) + ' ' + l2.sheet + ' ' + l1.disabled + ' ' + l2.disabled);
+  l1.disabled = true;
+  p('link off ' + getComputedStyle(d).color + ' ' + getComputedStyle(d).marginLeft + ' ' + l1.sheet + ' ' + l1.hasAttribute('disabled') + ' ' + document.styleSheets.length);
+  l1.disabled = false;
+  p('link on ' + getComputedStyle(d).marginLeft + ' ' + (l1.sheet && l1.sheet.disabled) + ' ' + l1.hasAttribute('disabled'));
+  s1.disabled = true;
+  p('style off ' + getComputedStyle(d).marginBottom + ' ' + s1.disabled + ' ' + s1.sheet.disabled + ' ' + s1.hasAttribute('disabled'));
+  s1.setAttribute('disabled', '');
+  s1.disabled = false;
+  p('style attr ' + getComputedStyle(d).marginBottom + ' ' + s1.disabled + ' ' + s1.hasAttribute('disabled'));
+  const n = document.createElement('style'); n.disabled = true; n.textContent = '.q { padding-top: 9px }'; document.head.appendChild(n);
+  p('new style ' + n.disabled + ' ' + getComputedStyle(d).paddingTop);
+  s.type = 'text/less'; p('back to less ' + getComputedStyle(a).color + ' ' + s.sheet);
+};
+</script></body></html>

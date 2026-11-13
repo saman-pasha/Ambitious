@@ -1,5 +1,6 @@
 -- each gate of the pages' scripts, a collection at every moment between tasks, against its .expect:
 script: as its .expect
+script-cssom: as its .expect
 script-custom: as its .expect
 script-input: as its .expect
 script-modules: as its .expect

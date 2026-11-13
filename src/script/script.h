@@ -25,6 +25,7 @@
 #ifndef AMB_SCRIPT_H
 #define AMB_SCRIPT_H
 #include <vector.pl>
+#include "../css/cssom.h"
 
 /* a live collection (DOM 4.2.10): what it holds under its root, and a cache of its
    length and of the last item read, valid at the versions of the DOM it was read at */
@@ -375,6 +376,10 @@ struct js_host {
     vector<uint32_t> sl_was;
     vector<uint32_t> sl_sig;
     uint32_t sl_on, sl_rev, sl_pos, sl_spare;
+    /* the CSS Object Model (src/script/cssom.c): the page's sheets, rules and declarations as its
+       scripts reach them (src/css/cssom.h says each field), their wrappers ROOTs while the page
+       lives */
+    css_om om;
 };
 
 /* the host beside the stores d, nt and sr, and the VM vm pointed at it. The host is
@@ -384,7 +389,7 @@ struct js_host {
     memset(&(h), 0, sizeof(h)); \
     (h).d = &(d); (h).nt = &(nt); (h).rt = &(sr); (h).tree_ver = 1; (h).attr_ver = 1; \
     (h).view_w = 800; (h).view_h = 600; \
-    (vm).host = &(h); \
+    (vm).host = &(h); css_om_reg_clear(&(d)); \
 } while (0)
 /* the host's own vectors freed: a struct's are not autodropped */
 #define SCRIPT_HOST_DROP(h) vector_sh_list_drop(&(h).lists); vector_char_drop(&(h).keys); \
@@ -401,6 +406,7 @@ struct js_host {
     vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
     vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail); \
     vector_uint32_t_drop(&(h).exports); vector_uint32_t_drop(&(h).remotes); vector_uint32_t_drop(&(h).cseq); vector_uint32_t_drop(&(h).xwins); \
-    vector_uint32_t_drop(&(h).sl_was); vector_uint32_t_drop(&(h).sl_sig); store_dom_store_tag_drop(&(h).pt_doc)
+    vector_uint32_t_drop(&(h).sl_was); vector_uint32_t_drop(&(h).sl_sig); store_dom_store_tag_drop(&(h).pt_doc); \
+    CSS_OM_DROP((h).om); css_om_reg_clear((h).d)
 
 #endif

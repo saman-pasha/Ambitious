@@ -841,8 +841,9 @@ jv js_not_constructor(js_vm *vm, jv v);
 /* a native that calls its receiver (Function.prototype.call, apply) given no function: V8
    names the script's call of the native ("f.call is not a function"), else the value */
 jv js_caller_not_function(js_vm *vm, jv v);
-/* why an array's write was refused (vm->refused), for strict code's TypeError */
-enum { JSR_NONE, JSR_READONLY, JSR_GETTER, JSR_NOT_EXTENSIBLE, JSR_LENGTH, JSR_DELETE };
+/* why an array's write was refused (vm->refused), for strict code's TypeError; JSR_PROXY: a
+   proxy's set trap returned falsish */
+enum { JSR_NONE, JSR_READONLY, JSR_GETTER, JSR_NOT_EXTENSIBLE, JSR_LENGTH, JSR_DELETE, JSR_PROXY };
 /* the standard's throwing operations, as the natives write through them: Set(O, P, V,
    true), DeletePropertyOrThrow, CreateDataPropertyOrThrow (the last src/js/proxy.c's):
    1 done, 0 with a TypeError thrown in V8's words */
