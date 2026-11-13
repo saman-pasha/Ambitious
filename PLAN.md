@@ -1270,6 +1270,63 @@ be built side by side and merged without touching each other's.
   direction, a right-to-left paragraph before left-to-right ones of as many pieces. Its cost
   (`docs/performance.md`): the large page's layout 15.0 ms before, 53.3 ms after, against
   Chromium's 202.2 ms; paint unchanged.
+- **12aa Writing modes** (`src/layout/layout.c`: each box laid out in its writing mode's frame; the box field wm and
+  the fragment fields orient and vref in `contracts/layout.pl`; writing-mode, text-orientation,
+  text-combine-upright and CSS Logical 1's flow-relative properties in `src/css/css.c`, `src/css/css.h` and
+  `contracts/css.pl`, their computed values in `prolog/amb/rules/css.pl`; vertical runs shaped in
+  `src/paint/font.c` and `src/paint/shape.c`, UAX #50's Vertical_Orientation in `src/paint/shape_data.h` from
+  `tools/gen-shape.pl`; vertical lines drawn in `src/paint/paint.c`), each measured in Chromium first:
+  - `writing-mode` (horizontal-tb, vertical-rl, vertical-lr, sideways-rl, sideways-lr; SVG 1.1's tb, tb-rl, lr,
+    lr-tb, rl and rl-tb and `-webkit-writing-mode` computed as Chromium computes them): a box is laid out in its
+    mode's frame, as a horizontal box is with its axes turned -- its style's edges and sizes read turned (a vertical
+    box's height its inline size, its right margin vertical-rl's block-start one), its boxes, lines and fragments
+    turned back once laid out -- so that its lines stack along the block axis (right to left, or left to right),
+    each a column of text; percentages are taken of the right axis, margins collapse along the block axis, a float's
+    left and right are a vertical line's top and bottom; vertical-lr's lines, whose over side is their right, have
+    what they hold mirrored in them. A box whose writing mode is not its parent's makes a formatting context of its
+    own (3.1): laid out in its own frame, then set in its parent's, its edges turned. An orthogonal one's available
+    inline size is its parent's definite block size, else the viewport's (7.3, as Chromium has it), a percentage of
+    its inline size taken of that too; its auto inline size fits its content in it; its auto margins along its
+    parent's inline axis share what is left; its min- and max-content contributions to its parent are its block size
+    laid out; an inline-block of the other axis is laid out before its line, its baseline its margin box's bottom (in
+    a vertical line, whose baseline is the central one, its middle), an inline element of another mode an inline-block
+    (Blink's StyleAdjuster); a positioned box's offsets are read in its containing block's frame. The root's writing
+    mode -- its body's when it has one (8: the principal writing mode, propagated as Chromium does) -- is the initial
+    containing block's: a vertical-rl page set from the viewport's right edge, its inline size the viewport's height.
+    The user agent's sheet's margins and paddings are flow-relative, as Chromium's html.css has them;
+  - text in vertical lines: their dominant baseline the central one (a font's height halved, the descent's half
+    floored, as Blink's FontMetrics has it), the alphabetic one under the sideways modes; text-orientation (mixed,
+    upright, sideways; sideways-right and vertical-right Chromium's other names): in mixed each grapheme upright or
+    turned as its first code point's Vertical_Orientation has it (UAX #50: U, Tu and Tr upright; perl's Unicode::UCD
+    carries the property, which tools/gen-shape.pl writes into shape_data.h). Upright runs are shaped top to bottom as
+    HarfBuzz shapes them for Blink: the common features and vert (found under any script), or, for a font with no vert,
+    Unicode's vertical presentation forms the font has (hb_vert_char_for: WenQuanYi Zen Hei's brackets); each glyph
+    advancing by its vmtx advance (WenQuanYi's ideographs by 0, as in Chromium), or by the font's height where the font
+    has none, from its vertical origin (VORG's, vmtx's top side bearing above the glyph's top, or the ascent); turned
+    runs are shaped as a horizontal line's;
+  - paint draws a vertical line's turned glyphs a quarter turned (clockwise; sideways-lr's anticlockwise) on its
+    alphabetic baseline, Skia's subpixel axis along the line; upright ones centred on its central baseline; each
+    line's text set from its first text fragment's start (or that of the decorated inline box it is in) snapped to
+    a whole pixel, as Chromium sets it; an underline and an overline outside the text's under and over edges, a
+    sideways line's turned with its glyphs; an inline box's decorations along the line;
+  - CSS Logical 1: the flow-relative margins, paddings, borders (their widths, styles and colours; the shorthands of an
+    axis and of a side), insets, sizes (inline-size, block-size, their minimums and maximums) and corners' radii, and
+    Chromium's old `-webkit-` names of them, kept as declared and taken by the cascade for the physical property the
+    element's writing mode and direction make each, in its place in the cascade's order among that property's
+    declarations (the writing mode and direction the element inherits, or, when it sets its own, those); float and
+    clear's inline-start and inline-end by their containing block's direction; getComputedStyle and the reasoner's
+    css_computed/4 give a flow-relative property its physical one's value.
+
+  Gate: `tests/pages/wm-blocks.html` (boxes 30 of 30, from 1 before; regions 30 of 30, from 3), `wm-root.html` (12
+  of 12, from 0; regions 12 of 12, from 0), `wm-text.html` (15 of 15, from 0; regions 15 of 15, from 8),
+  `wm-logical.html` (42 of 42, from 0), `wm-flex.html` (flex, grid and a table in vertical modes: 30 of 30, from 0;
+  regions 30 of 30, from 0), `wm-ortho.html` (32 of 32, from 0; regions 32 of 32, from 2) and `wmvals.html`
+  (computed values 126 of 126, from 25), each held to Chromium; every earlier page's boxes, regions and values as
+  they were, and its drawing byte for byte (180 renders); the new pages render valgrind clean. Its cost
+  (`docs/performance.md`): on horizontal pages, none past the timings' noise -- by callgrind, the large page's layout
+  485.7 million instructions before, 487.6 after (+0.4%), its paint +0.15% and its cascade +0.3%; the box and
+  fragment records no bigger (the new fields in their padding), a horizontal run shaped and measured on its old
+  paths, an upright run's glyphs set apart, after its shaping.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

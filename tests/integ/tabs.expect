@@ -33,8 +33,8 @@ L = n(1,23,0), T = cherry
 L = n(1,40,0), T = 'sale 1'
 L = n(1,42,0), T = 'first 1'
 > reasoner
-reasoner: running; 1 start(s), 3 requests: 1 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1720 facts held
-reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1720 added
+reasoner: running; 1 start(s), 3 requests: 1 whole snapshot(s), 0 delta(s) (0 predicates edited, 0 rebuilt); 1722 facts held
+reasoner: the last snapshot that changed reached it as a whole snapshot: 0 facts retracted, 1722 added
 > history
   1  file://WORK/pages/style.html  'Styles, explained'
 > 2  file://WORK/pages/cart.html  'A cart'

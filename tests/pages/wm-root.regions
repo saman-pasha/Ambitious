@@ -1,0 +1,13 @@
+# tests/pages/wm-root.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+body 449 8 792 592
+p1 772 18 792 582
+p2 727 18 767 582
+s 749 76 766 112
+d 619 8 722 300
+p3 585 18 619 582
+s2 591 153 616 275
+h 545 8 566 592
+u 485 8 526 592
+u1 505 48 526 592
+u2 485 48 506 592
+q 449 48 470 552

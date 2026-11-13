@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: flex and grid</title>
+<style>
+/* tests/pages/wm-flex.html -- flex and grid containers in the vertical writing modes, as Chromium lays them out:
+   a row's main axis the inline axis (down the page), a column's the block axis (right to left in vertical-rl);
+   wrapping lines stacked along the cross axis; justify-content, align-items, flex-grow; a grid's columns the inline
+   axis's tracks, its rows the block axis's; a table's rows stacked along the block axis. Held to Chromium's boxes
+   (wm-flex.chromium) and drawing (wm-flex.shot.png, .regions) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.c { float: left; margin-right: 10px; background: #eef; }
+.v { writing-mode: vertical-rl; }
+.l { writing-mode: vertical-lr; }
+.i { background: #fd8; border: 1px solid #c90; }
+.j { background: #8df; border: 1px solid #39c; }
+.t { color: transparent; }
+</style></head>
+<body>
+<div id="a" class="c v t" style="display: flex; height: 200px"><div id="a1" class="i">one</div><div id="a2" class="j" style="flex-grow: 1">two</div><div id="a3" class="i" style="width: 40px">three</div></div>
+<div id="b" class="c v t" style="display: flex; flex-direction: column; height: 200px"><div id="b1" class="i">one</div><div id="b2" class="j" style="height: 50px">two</div><div id="b3" class="i" style="flex-grow: 1">three</div></div>
+<div id="c" class="c l t" style="display: flex; height: 200px; justify-content: space-between; align-items: center; width: 60px"><div id="c1" class="i">a</div><div id="c2" class="j">bb</div><div id="c3" class="i">ccc</div></div>
+<div id="d" class="c v t" style="display: flex; flex-wrap: wrap; height: 150px"><div id="d1" class="i" style="height: 60px">wrap one</div><div id="d2" class="j" style="height: 60px">wrap two</div><div id="d3" class="i" style="height: 60px">wrap three</div></div>
+<div id="e" class="c v t" style="display: grid; grid-template-columns: 50px 1fr 30px; grid-template-rows: 40px 30px; height: 200px; gap: 4px"><div id="e1" class="i">a</div><div id="e2" class="j">b</div><div id="e3" class="i">c</div><div id="e4" class="j" style="grid-column: span 2">d</div></div>
+<table id="f" class="c v t"><tr><td id="f11" class="i">one</td><td id="f12" class="j">two</td></tr><tr><td id="f21" class="j">three</td><td id="f22" class="i">four four</td></tr></table>
+<div id="g" class="c v" style="display: flex; height: 160px; align-items: flex-end; width: 80px"><div id="g1" class="i">x</div><div id="g2" class="j" style="align-self: stretch">y</div><div id="g3" class="i" style="align-self: center">z</div></div>
+</body></html>

@@ -6,7 +6,8 @@
 # Arabic's shadda first, ...), the marks (General_Category Mn, Mc, Me), the canonical
 # decompositions of one level and the primary composites (Hangul's are algorithmic), the
 # joining types (ArabicShaping.txt's, as DerivedJoiningType has them), the scripts (each
-# range's OpenType script tag) and the mirrored glyphs (Bidi_Mirroring_Glyph). Run it again
+# range's OpenType script tag), the mirrored glyphs (Bidi_Mirroring_Glyph) and the vertical
+# orientations (UAX #50's Vertical_Orientation, vo). Run it again
 # when a newer Unicode is wanted; the header is committed, so a build needs no perl.
 use strict;
 use warnings;
@@ -119,6 +120,17 @@ for my $r (ranges('Script')) {
 }
 die "gen-shape: too many scripts\n" if @tags > 250;
 
+# the vertical orientation (UAX #50's Vertical_Orientation, which perl's Unicode::UCD carries as vo): U 1, Tu 2, Tr 3
+# (R, the rest, left out): what a vertical line of text-orientation mixed sets upright
+my %vo = (U => 1, Upright => 1, Tu => 2, Transformed_Upright => 2, Tr => 3, Transformed_Rotated => 3);
+my @vo;
+for my $r (ranges('Vertical_Orientation')) {
+    my ($a, $b, $v) = @$r;
+    next if $v eq 'R' || $v eq 'Rotated';
+    die "gen-shape: vertical orientation $v\n" unless $vo{$v};
+    push @vo, $a, $b | $vo{$v} << 24;
+}
+
 my ($ms, $mv) = prop_invmap('Bidi_Mirroring_Glyph');
 my @mirror;
 for my $i (0 .. $#$ms) {
@@ -151,3 +163,4 @@ print table('amb_sh_joining', 'AMB_SH_JOINING', "the joining types: first, last 
 print table('amb_sh_script', 'AMB_SH_SCRIPT', "the scripts: each range's first << 8 | its index in amb_sh_tags (254 Common, 255 Inherited, 0 Unknown), to the next's first", @scripts);
 print "\n/* the scripts' OpenType tags, by index (0: none) */\n#define AMB_SH_TAGS " . scalar(@tags) . "\nstatic const char amb_sh_tags[] = \"" . join('', @tags) . "\";\n";
 print table('amb_sh_mirror', 'AMB_SH_MIRROR', "the mirrored glyphs: a code point, its mirror, in order", @mirror);
+print table('amb_sh_vo', 'AMB_SH_VO', "the vertical orientations: first, last | 1 U, 2 Tu, 3 Tr << 24, each range (R the rest)", @vo);

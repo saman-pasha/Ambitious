@@ -36,6 +36,7 @@ amb_interface(net);
 amb_interface(css);
 amb_interface(layout);
 amb_interface(script);
+#include "../css/css.h"
 #include "../js/js.h"
 #include "script.h"
 
@@ -239,6 +240,13 @@ int script_view_style(struct js_host *h, uint32_t x, const char *name, size_t n,
     script_view_update(h);
     int p = sv_prop(name, n);
     if (p < 0) return 0;
+    if (p > CSS_PROP_CUSTOM) {
+        /* a flow-relative property (CSS Logical 1): the physical one the element's writing mode and direction make it */
+        uint32_t wi = sv_val(h, x, CSS_PROP_WRITING_MODE), di = sv_val(h, x, CSS_PROP_DIRECTION);
+        int wm = sv_val_is(h, wi, "vertical-rl") ? CSS_WM_VRL : sv_val_is(h, wi, "vertical-lr") ? CSS_WM_VLR :
+                 sv_val_is(h, wi, "sideways-rl") ? CSS_WM_SRL : sv_val_is(h, wi, "sideways-lr") ? CSS_WM_SLR : CSS_WM_HTB;
+        p = css_logical_physical(p, wm, sv_val_is(h, di, "rtl"));
+    }
     uint32_t i = sv_val(h, x, (uint32_t)p);
     if (i == ~0u) return 1;
     uint32_t b = sv_box(h, x);

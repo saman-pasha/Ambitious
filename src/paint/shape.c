@@ -38,6 +38,9 @@
    takes its base's offset, up its cursive chain, as it is attached, so a mark attached before
    a later lookup chains its base stays where it was put; a cursive chain's across).
 
+   A vertical run's upright glyphs (font.c's) are shaped with the common features and vert alone, vert found under
+   any script, and for a font with no vert Unicode's vertical presentation forms it has (hb_vert_char_for).
+
    Not done: FeatureVariations, a language's own system (the default one is taken, as for a
    page with no lang), 'rand' (alternates are their first), Device tables (read by HarfBuzz
    only at a pixel size, which Chromium gives no font), the automatic fractions, Arabic's
@@ -94,6 +97,17 @@ uint32_t amb_ccc_of(uint32_t cp) {
 }
 
 int amb_mark_of(uint32_t cp) { return cp < 0x300 ? 0 : (int)ot_range_value(amb_sh_mark, AMB_SH_MARK / 2, cp); }
+uint32_t amb_vert_char(uint32_t cp) {
+    static const uint32_t from[] = { 0x2013, 0x2014, 0x2025, 0x2026, 0x3001, 0x3002, 0x3008, 0x3009, 0x300a, 0x300b, 0x300c, 0x300d, 0x300e,
+                                     0x300f, 0x3010, 0x3011, 0x3014, 0x3015, 0x3016, 0x3017, 0xfe4f, 0xff01, 0xff08, 0xff09, 0xff0c, 0xff1a,
+                                     0xff1b, 0xff1f, 0xff3b, 0xff3d, 0xff3f, 0xff5b, 0xff5d };
+    static const uint32_t to[] = { 0xfe32, 0xfe31, 0xfe30, 0xfe19, 0xfe11, 0xfe12, 0xfe3f, 0xfe40, 0xfe3d, 0xfe3e, 0xfe41, 0xfe42, 0xfe43,
+                                   0xfe44, 0xfe3b, 0xfe3c, 0xfe39, 0xfe3a, 0xfe17, 0xfe18, 0xfe34, 0xfe15, 0xfe35, 0xfe36, 0xfe10, 0xfe13,
+                                   0xfe14, 0xfe16, 0xfe47, 0xfe48, 0xfe33, 0xfe37, 0xfe38 };
+    for (size_t k = 0; k < sizeof from / sizeof from[0]; k++) if (from[k] == cp) return to[k];
+    return cp;
+}
+int amb_vo_of(uint32_t cp) { return cp < 0xA7 ? 0 : (int)ot_range_value(amb_sh_vo, AMB_SH_VO / 2, cp); }
 
 int amb_decompose(uint32_t cp, uint32_t *a, uint32_t *b) {
     *a = cp;
@@ -449,7 +463,7 @@ static void ot_want_add(ot_want *w, int *nw, uint32_t tag, uint32_t mask, int st
 
 /* a font's plan for a script and flags: its index in ot_plans, made the first time */
 static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int script, int flags) {
-    uint32_t key = (uint32_t)flags & (AMB_SH_RTL | AMB_SH_NOLIGA | AMB_SH_NOKERN);
+    uint32_t key = (uint32_t)flags & (AMB_SH_RTL | AMB_SH_NOLIGA | AMB_SH_NOKERN | AMB_SH_VERT);
     for (uint32_t k = 0; k < (uint32_t)len(ot_plans); k++) {
         ot_plan q = at(ot_plans, k);
         if (q.id == t->id && q.script == (uint32_t)script && q.flags == key) return k;
@@ -471,12 +485,14 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
     uint32_t tag = amb_script_tag(script), csub = 0, cpos = 0;
     size_t lsub = t->gsub ? ot_langsys(p, n, ot_script(p, n, t->gsub, tag, &csub)) : 0;
     size_t lpos = t->gpos ? ot_langsys(p, n, ot_script(p, n, t->gpos, tag, &cpos)) : 0;
-    int shaper = ot_shaper(tag, csub), rtl = (flags & AMB_SH_RTL) != 0;
-    int liga = !(flags & AMB_SH_NOLIGA), kern = !(flags & AMB_SH_NOKERN);
+    int shaper = ot_shaper(tag, csub), rtl = (flags & AMB_SH_RTL) != 0, vert = (flags & AMB_SH_VERT) != 0;
+    /* a vertical run: the common features and vert, none of the horizontal ones (hb-ot-shape's vertical direction) */
+    int liga = !(flags & AMB_SH_NOLIGA) && !vert, kern = !(flags & AMB_SH_NOKERN) && !vert;
     ot_want w[48];
     int nw = 0;
     ot_want_add(w, &nw, OT_TAG('r', 'v', 'r', 'n'), AMB_M_GLOBAL, 0, 1, 1);
-    if (rtl) {
+    if (vert) ot_want_add(w, &nw, OT_TAG('v', 'e', 'r', 't'), AMB_M_GLOBAL, 1, 1, 1);
+    else if (rtl) {
         ot_want_add(w, &nw, OT_TAG('r', 't', 'l', 'a'), AMB_M_GLOBAL, 1, 1, 1);
         ot_want_add(w, &nw, OT_TAG('r', 't', 'l', 'm'), AMB_M_RTLM, 1, 1, 1);
     } else {
@@ -502,7 +518,7 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
         ot_want_add(w, &nw, OT_TAG('c', 'c', 'm', 'p'), AMB_M_GLOBAL, 1, 1, 1);
         ot_want_add(w, &nw, OT_TAG('l', 'o', 'c', 'l'), AMB_M_GLOBAL, 1, 1, 1);
         ot_want_add(w, &nw, OT_TAG('r', 'l', 'i', 'g'), AMB_M_GLOBAL, 1, 1, 1);
-        ot_want_add(w, &nw, OT_TAG('r', 'c', 'l', 't'), AMB_M_GLOBAL, 1, 1, 1);
+        if (!vert) ot_want_add(w, &nw, OT_TAG('r', 'c', 'l', 't'), AMB_M_GLOBAL, 1, 1, 1);
         if (liga) {
             ot_want_add(w, &nw, OT_TAG('c', 'a', 'l', 't'), AMB_M_GLOBAL, 1, 1, 1);
             ot_want_add(w, &nw, OT_TAG('c', 'l', 'i', 'g'), AMB_M_GLOBAL, 1, 1, 1);
@@ -513,11 +529,13 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
     ot_want_add(w, &nw, OT_TAG('b', 'l', 'w', 'm'), AMB_M_GLOBAL, 1, 1, 1);
     ot_want_add(w, &nw, OT_TAG('m', 'a', 'r', 'k'), AMB_M_GLOBAL, 1, 0, 0);
     ot_want_add(w, &nw, OT_TAG('m', 'k', 'm', 'k'), AMB_M_GLOBAL, 1, 0, 0);
-    ot_want_add(w, &nw, OT_TAG('c', 'u', 'r', 's'), AMB_M_GLOBAL, 1, 1, 1);
-    ot_want_add(w, &nw, OT_TAG('d', 'i', 's', 't'), AMB_M_GLOBAL, 1, 1, 1);
+    if (!vert) {
+        ot_want_add(w, &nw, OT_TAG('c', 'u', 'r', 's'), AMB_M_GLOBAL, 1, 1, 1);
+        ot_want_add(w, &nw, OT_TAG('d', 'i', 's', 't'), AMB_M_GLOBAL, 1, 1, 1);
+    }
     if (kern) ot_want_add(w, &nw, OT_TAG('k', 'e', 'r', 'n'), AMB_M_GLOBAL, 1, 1, 1);
     /* the lookups each finds in GSUB, then in GPOS (whose stages are all one) */
-    int has_kern = 0, has_mark = 0;
+    int has_kern = 0, has_mark = 0, has_vert = 0;
     for (int tb = 0; tb < 2; tb++) {
         size_t table = tb ? t->gpos : t->gsub, ls = tb ? lpos : lsub;
         if (!table || !ls) continue;
@@ -540,9 +558,17 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
                 lk.zwnj = 1;
             } else {
                 fe = ot_feature(p, n, table, ls, w[k].tag);
+                if (!fe && w[k].tag == OT_TAG('v', 'e', 'r', 't')) {
+                    /* vert found wherever the font lists it, under any script (HarfBuzz's F_GLOBAL_SEARCH) */
+                    size_t fl = ot_at(p, n, table, 6);
+                    uint32_t nf = ot_u16(p, n, fl);
+                    for (uint32_t fi = 0; fi < nf && !fe; fi++)
+                        if (ot_u32(p, n, fl + 2 + 6 * (size_t)fi) == w[k].tag) fe = ot_at(p, n, fl, 6 + 6 * (size_t)fi);
+                }
                 if (!fe) continue;
                 if (tb == 1 && w[k].tag == OT_TAG('k', 'e', 'r', 'n')) has_kern = 1;
                 if (w[k].tag == OT_TAG('m', 'a', 'r', 'k')) has_mark = 1;
+                if (tb == 0 && w[k].tag == OT_TAG('v', 'e', 'r', 't')) has_vert = 1;
                 lk.mask = w[k].mask;
                 lk.stage = tb ? 0 : w[k].stage;
                 lk.zwj = w[k].zwj;
@@ -614,7 +640,8 @@ static uint32_t ot_plan_of(const uint8_t *p, size_t n, const amb_otf *t, int scr
     pl.apply_gpos = (uint8_t)(t->gpos && !(shaper == 2 && cpos != OT_TAG('h', 'e', 'b', 'r')));
     if (!pl.apply_gpos) pl.npos = 0;
     pl.apply_kern = (uint8_t)(t->kern && kern && (!has_kern || !pl.apply_gpos));
-    pl.info = (uint8_t)((shaper == 1 ? AMB_PI_ARABIC : 0) | (shaper == 2 ? AMB_PI_HEBREW : 0) | (has_mark ? AMB_PI_GPOS_MARK : 0));
+    pl.info = (uint8_t)((shaper == 1 ? AMB_PI_ARABIC : 0) | (shaper == 2 ? AMB_PI_HEBREW : 0) | (has_mark ? AMB_PI_GPOS_MARK : 0) |
+                        (has_vert ? AMB_PI_VERT : 0));
     push_back(ot_plans, pl);
     return (uint32_t)len(ot_plans) - 1;
 }

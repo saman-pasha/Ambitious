@@ -1,0 +1,13 @@
+# boxes of tests/pages/wm-root.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+body body 449.188 8 342.813 584
+p1 p 772 18 20 564
+p2 p 727 18 40 564
+s span 749 76.719 17 34.703
+d div 619 8 103 292
+p3 p 585 18 34 564
+s2 span 591 153.203 25 120.984
+h h2 545.094 8 20 584
+u ul 485.188 8 40 584
+u1 li 505.188 48 20 544
+u2 li 485.188 48 20 544
+q blockquote 449.188 48 20 504

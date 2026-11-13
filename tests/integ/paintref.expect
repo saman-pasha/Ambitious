@@ -65,5 +65,10 @@ svgfx-zoom: 22 of 22 regions agree with Chromium's drawing
 symbols: 20 of 20 regions agree with Chromium's drawing
 theme: 24 of 24 regions agree with Chromium's drawing
 transforms: 16 of 16 regions agree with Chromium's drawing
+wm-blocks: 30 of 30 regions agree with Chromium's drawing
+wm-flex: 30 of 30 regions agree with Chromium's drawing
+wm-ortho: 32 of 32 regions agree with Chromium's drawing
+wm-root: 12 of 12 regions agree with Chromium's drawing
+wm-text: 15 of 15 regions agree with Chromium's drawing
 woff2: 14 of 14 regions agree with Chromium's drawing
 zoom: 9 of 9 regions agree with Chromium's drawing

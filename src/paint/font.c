@@ -53,13 +53,15 @@ static int amb_tag(const uint8_t *p, size_t n, size_t off, const char *t) {
 
 /* their fonts' bytes, code points and kerning pairs, each face's from its record's first
    and kfirst, as a web font's are in its amb_fonts; the records, by face (the built-in
-   faces, then the system faces read); each built-in font's state: 0 not read yet, 1 read;
-   the system fonts' cmaps, as runs of code points (each one's first and last) */
+   faces, then the system faces read) and their vertical metrics; each built-in font's state:
+   0 not read yet, 1 read; the system fonts' cmaps, as runs of code points (each one's first
+   and last) */
 static vector<uint8_t> amb_sb;
 static vector<amb_glyph> amb_sg;
 static vector<amb_kern> amb_sk;
 static vector<uint32_t> amb_cov;
 static amb_face amb_sf[AMB_WEBFIRST];
+static amb_vmet amb_svm[AMB_WEBFIRST];
 static uint8_t amb_font_state[AMB_FONT_FACES];
 static int amb_s_kept;
 
@@ -157,6 +159,7 @@ static int amb_unlz(const uint8_t *z, size_t zn, uint8_t *out, size_t n) {
 typedef struct amb_tables {
     uint32_t cmap, head, hhea, hmtx, maxp, loca, glyf, glyf_len, kern, kern_len, os2, os2_len;
     uint32_t cff, cff_len, cff2, cff2_len, cblc, cblc_len, cbdt, cbdt_len, gsub, gpos, gdef;
+    uint32_t vhea, vmtx, vmtx_len, vorg;      /* the vertical metrics' (vhea, vmtx, VORG) */
 } amb_tables;
 
 /* an sfnt's tables, from its directory at dir (a collection's font's; 0 for a font alone):
@@ -187,6 +190,9 @@ static int amb_sfnt_tables(const uint8_t *p, size_t n, size_t dir, amb_tables *t
         else if (amb_tag(p, n, r, "GSUB") && len >= 10) t->gsub = off;
         else if (amb_tag(p, n, r, "GPOS") && len >= 10) t->gpos = off;
         else if (amb_tag(p, n, r, "GDEF") && len >= 12) t->gdef = off;
+        else if (amb_tag(p, n, r, "vhea") && len >= 36) t->vhea = off;
+        else if (amb_tag(p, n, r, "vmtx")) { t->vmtx = off; t->vmtx_len = len; }
+        else if (amb_tag(p, n, r, "VORG") && len >= 8) t->vorg = off;
     }
     int outlines = (t->loca && t->glyf) || t->cff || t->cff2 || (t->cblc && t->cbdt);
     return t->cmap && t->head && t->hhea && t->hmtx && t->maxp && outlines;
@@ -307,11 +313,12 @@ static int amb_cmap_next(const uint8_t *p, size_t n, uint32_t sub, uint32_t fmt,
 }
 
 /* the sfnt p (n bytes, at base in its pool; its table directory at dir) read as the face
-   fc, its code points and kerning pairs pushed to gl and kn: 1, or 0 when it is no font
-   this reads */
+   fc (its vertical metrics vm), its code points and kerning pairs pushed to gl and kn: 1, or
+   0 when it is no font this reads */
 static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, int builtin, vector<amb_glyph> *gl, vector<amb_kern> *kn,
-                         amb_face *fc) {
+                         amb_face *fc, amb_vmet *vm) {
     amb_tables t;
+    memset(vm, 0, sizeof *vm);
     if (!amb_sfnt_tables(p, n, dir, &t)) return 0;
     memset(fc, 0, sizeof *fc);
     fc->upem = amb_u16(p, n, t.head + 18);
@@ -381,6 +388,12 @@ static int amb_sfnt_face(const uint8_t *p, size_t n, size_t dir, uint32_t base, 
     fc->gdef = t.gdef;
     fc->hmtx = t.hmtx;
     fc->nhm = nhm;
+    if (t.vhea && t.vmtx) {
+        /* the vertical metrics an upright glyph is set by (vhea's count of vmtx's long records) */
+        uint32_t nvm = amb_u16(p, n, t.vhea + 34);
+        if (nvm && 4 * (size_t)nvm <= t.vmtx_len) { vm->vmtx = t.vmtx; vm->nvm = nvm; }
+    }
+    vm->vorg = t.vorg;
     {
         uint32_t h = 2166136261u ^ (uint32_t)n;
         size_t de = dir + 12 + 16 * (size_t)amb_u16(p, n, dir + 4);
@@ -903,7 +916,8 @@ static void amb_font_read(int k) {
     if (!amb_unbase64(amb_font_piece[k], amb_font_piece[k + 1], data(z), len(z)) || !amb_unlz(data(z), len(z), data(amb_sb) + base, n))
         abort();
     amb_face fc;
-    if (!amb_sfnt_face(data(amb_sb) + base, n, 0, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) abort();
+    amb_vmet vm;
+    if (!amb_sfnt_face(data(amb_sb) + base, n, 0, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc, &vm)) abort();
     /* the widths of its file, not of the subset (which has no OS/2, and its head bounds its own glyphs) */
     fc.avgw = amb_font_wide[k][0];
     fc.xmin = amb_font_wide[k][1];
@@ -911,6 +925,7 @@ static void amb_font_read(int k) {
     for (int face = 0; face < AMB_NBUILTIN; face++) {
         if (amb_font_of[face] != k) continue;
         amb_sf[face] = fc;
+        amb_svm[face] = vm;
         amb_sf[face].style = (uint8_t)(face & 3);
         amb_sf[face].slope = (uint8_t)((face & 2) && amb_font_of[face] != amb_font_of[face & ~2]);
     }
@@ -1027,12 +1042,14 @@ static int amb_sys_load(int s) {
     long n = amb_file_read(amb_sys_path[s], 0, 0, &amb_sb);
     long dir = n >= 12 ? amb_font_dir(data(amb_sb) + base, (size_t)n, amb_sys_ttc[s]) : -1;
     amb_face fc;
-    if (dir < 0 || !amb_sfnt_face(data(amb_sb) + base, (size_t)n, (size_t)dir, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc)) {
+    amb_vmet vm;
+    if (dir < 0 || !amb_sfnt_face(data(amb_sb) + base, (size_t)n, (size_t)dir, (uint32_t)base, 1, &amb_sg, &amb_sk, &fc, &vm)) {
         resize(&amb_sb, base);
         return -1;
     }
     int face = AMB_NBUILTIN + amb_sys_read;
     amb_sf[face] = fc;
+    amb_svm[face] = vm;
     amb_sys_same_face[amb_sys_read] = amb_sys_same[s];
     amb_sys_read++;
     amb_sys_face[s] = face;
@@ -1057,6 +1074,7 @@ void amb_fonts_load(amb_fonts *f) {
     clear(f->kerns);
     clear(f->bytes);
     memset(f->face, 0, sizeof f->face);
+    memset(f->vmet, 0, sizeof f->vmet);
     f->nfaces = AMB_WEBFIRST;
 }
 
@@ -1068,9 +1086,11 @@ int amb_fonts_add(amb_fonts *f, const uint8_t *p, size_t n) {
     else append_range(sf, p, n);
     uint32_t base = (uint32_t)len(f->bytes);
     amb_face fc;
-    if (!amb_sfnt_face(data(sf), len(sf), 0, base, 0, &f->glyphs, &f->kerns, &fc)) return -1;
+    amb_vmet vm;
+    if (!amb_sfnt_face(data(sf), len(sf), 0, base, 0, &f->glyphs, &f->kerns, &fc, &vm)) return -1;
     append_range(f->bytes, data(sf), len(sf));
     f->face[f->nfaces - AMB_WEBFIRST] = fc;
+    f->vmet[f->nfaces - AMB_WEBFIRST] = vm;
     f->nfaces++;
     return (int)f->nfaces - 1;
 }
@@ -1284,8 +1304,11 @@ static int amb_space_kind(uint32_t cp) {
 
 /* a code point of the text being shaped: it, the byte it begins at, its grapheme's first code
    point, its script (Common and Inherited resolved to their neighbours'), the face that draws its
-   grapheme (-1 not yet), whether its grapheme is an emoji */
-typedef struct amb_scp { uint32_t cp, off, g0; int16_t script, face; uint8_t emoji; } amb_scp;
+   grapheme (-1 not yet), what else its grapheme's run is cut by (seg): AMB_SEG_EMOJI, its grapheme
+   is an emoji; AMB_SEG_UP, it is set upright in a vertical line (one byte, so that a horizontal
+   line's runs are cut as fast as they were) */
+typedef struct amb_scp { uint32_t cp, off, g0; int16_t script, face; uint8_t seg; } amb_scp;
+enum { AMB_SEG_EMOJI = 1, AMB_SEG_UP = 2 };
 
 /* a candidate for drawing text: a face (0 on), or a system font to read once taken (-1 - its
    index) */
@@ -1391,7 +1414,7 @@ static int amb_cand_take(const amb_fonts *f, int cand, vector<amb_scp> *cps, siz
    taking every grapheme it draws, and so on, a hint or a font not asked for twice; what is left,
    the face's (its notdef) */
 static void amb_resolve(const amb_fonts *f, int face, vector<amb_scp> *cps, size_t a, size_t b, int rtl) {
-    int cand[8], nc = 0, style = face < AMB_NBUILTIN ? (face & 3) : 0, emoji = at(*cps, a).emoji;
+    int cand[8], nc = 0, style = face < AMB_NBUILTIN ? (face & 3) : 0, emoji = at(*cps, a).seg & AMB_SEG_EMOJI;
     cand[nc++] = face;
     if (face < AMB_NBUILTIN) cand[nc++] = -1 - (int)amb_font_file[amb_font_of[face]];
     int sf = AMB_FACE_SERIF + style;
@@ -1682,15 +1705,19 @@ static void amb_run_advances(const uint8_t *p, size_t n, const amb_face *fc, uin
 /* a run of one face and one script, cps [a, b), shaped: its glyphs appended to out in visual
    order. Right to left in a script written left to right (or the reverse, but a run of numbers),
    its graphemes reversed and shaped in the script's own direction (hb_ensure_native_direction);
-   right to left, each code point its mirror where the face has one (else rtlm may) */
+   right to left, each code point its mirror where the face has one (else rtlm may). An upright
+   run (AMB_SEG_UP) top to bottom, in its own order, its glyphs then set upright (amb_upright) */
+static void amb_upright(const amb_fonts *f, int face, const amb_face *fc, const vector<amb_otg> *buf, size_t o0, vector<amb_shaped> *out);
+static int32_t amb_glyph_ymax(const amb_fonts *f, int by, const amb_face *fc, uint32_t gid);
 static void amb_shape_run(const amb_fonts *f, int face, int script, int flags, const char *s, size_t n, const vector<amb_scp> *cps, size_t a,
                           size_t b, vector<amb_shaped> *out) {
     amb_face fc;
     if (!amb_ready(f, face)) return;
     amb_rec(f, face, &fc);
-    int rtl = (flags & AMB_SHAPE_RTL) != 0, native = amb_script_rtl(script), real = script > 0 && script < AMB_SC_COMMON;
+    int up = (at(*cps, a).seg & AMB_SEG_UP) != 0;
+    int rtl = (flags & AMB_SHAPE_RTL) != 0 && !up, native = amb_script_rtl(script), real = script > 0 && script < AMB_SC_COMMON;
     int reverse = real && rtl && !native;
-    if (real && !rtl && native) {
+    if (real && !rtl && native && !up) {
         int number = 0, letter = 0;
         for (size_t k = a; k < b; k++) {
             uint32_t cp = at(*cps, k).cp;
@@ -1699,7 +1726,8 @@ static void amb_shape_run(const amb_fonts *f, int face, int script, int flags, c
         }
         reverse = !(number && !letter);
     }
-    int sflags = (rtl ? AMB_SH_RTL : 0) | ((reverse ? !rtl : rtl) ? AMB_SH_BACKWARD : 0) | (flags & (AMB_SHAPE_NOLIGA | AMB_SHAPE_NOKERN));
+    int sflags = (rtl ? AMB_SH_RTL : 0) | ((reverse ? !rtl : rtl) ? AMB_SH_BACKWARD : 0) | (flags & (AMB_SHAPE_NOLIGA | AMB_SHAPE_NOKERN)) |
+                 (up ? AMB_SH_VERT : 0);
     /* the code points in the buffer's order (its graphemes from the last when it is reversed,
        each in its own order), mirrored */
     vector<amb_otg> raw, buf;
@@ -1731,6 +1759,13 @@ static void amb_shape_run(const amb_fonts *f, int face, int script, int flags, c
     amb_otf_of(&fc, &t);
     if (face < AMB_WEBFIRST) info = amb_ot_plan_info(data(amb_sb) + fc.base, fc.size, &t, script, sflags);
     else info = amb_ot_plan_info(data(f->bytes) + fc.base, fc.size, &t, script, sflags);
+    if (up && !(info & AMB_PI_VERT))
+        /* a vertical run in a font with no vert: Unicode's vertical presentation forms it has (hb_ot_rotate_chars) */
+        for (size_t q = 0; q < len(raw); q++) {
+            amb_otg g = at(raw, q);
+            uint32_t vc = amb_vert_char(g.cp), vg;
+            if (vc != g.cp && amb_gid_of(f, face, vc, &vg)) { g.cp = vc; raw[q] = g; }
+        }
     amb_normalize(f, face, info, &raw, &buf);
     /* the context: up to five code points before the run and after it, the nearest first */
     uint32_t pre[5], post[5];
@@ -1766,7 +1801,7 @@ static void amb_shape_run(const amb_fonts *f, int face, int script, int flags, c
         for (size_t q = 0; q < len(buf); q++) push_back(before, at(buf, q).ax);
         amb_ot_position(p, fc.size, &t, script, sflags, &buf);
     }
-    size_t cnt = len(buf);
+    size_t cnt = len(buf), o0 = len(*out);
     int backward = (sflags & AMB_SH_BACKWARD) != 0;
     for (size_t q = 0; q < cnt; q++) {
         size_t src = backward ? cnt - 1 - q : q;
@@ -1787,10 +1822,50 @@ static void amb_shape_run(const amb_fonts *f, int face, int script, int flags, c
         }
         push_back(out, o);
     }
+    if (up) amb_upright(f, face, &fc, &buf, o0, out);
+}
+
+/* an upright run's glyphs (out from o0, buf's in order: an upright run is not reversed) set upright: each down the
+   line by its vertical advance from its vertical origin, its x centred on the central baseline (Blink's
+   OpenTypeVerticalData: vmtx's advance; VORG's origin, else vmtx's top side bearing over the glyph's top; with no vmtx
+   the font's height and ascent at the size, amb_shaped_advance's); a mark with no advance down the line
+   (hb_ot_zero_mark_advances zeroes both directions': AMB_SHAPED_VZERO), a hidden default ignorable as it was (no
+   advance, drawing nothing) */
+static void amb_upright(const amb_fonts *f, int face, const amb_face *fc, const vector<amb_otg> *buf, size_t o0, vector<amb_shaped> *out) {
+    const uint8_t *fp = face < AMB_WEBFIRST ? data(amb_sb) + fc->base : data(f->bytes) + fc->base;
+    amb_vmet vm = face < AMB_WEBFIRST ? amb_svm[face] : f->vmet[face - AMB_WEBFIRST];
+    for (size_t q = 0; q < len(*buf) && o0 + q < len(*out); q++) {
+        amb_otg g = at(*buf, q);
+        amb_shaped o = at(*out, o0 + q);
+        if (o.flags & AMB_SHAPED_HIDDEN) continue;
+        int mark = (g.props & AMB_P_MARK) != 0;
+        o.flags = AMB_SHAPED_UPRIGHT | (mark ? AMB_SHAPED_VZERO : 0);
+        o.dy = g.ax;
+        o.dx = 0;
+        if (vm.nvm) {
+            size_t r = vm.vmtx + 4 * (size_t)(g.gid < vm.nvm ? g.gid : vm.nvm - 1u);
+            o.ax = mark ? 0 : (int32_t)amb_u16(fp, fc->size, r);
+            int32_t tsb = g.gid < vm.nvm ? amb_s16(fp, fc->size, r + 2) : amb_s16(fp, fc->size, vm.vmtx + 4 * (size_t)vm.nvm + 2 * (size_t)(g.gid - vm.nvm));
+            int32_t org = 0;
+            if (vm.vorg) {
+                uint32_t nv = amb_u16(fp, fc->size, vm.vorg + 6);
+                org = amb_s16(fp, fc->size, vm.vorg + 4);
+                for (uint32_t k = 0; k < nv; k++)
+                    if (amb_u16(fp, fc->size, vm.vorg + 8 + 4 * (size_t)k) == g.gid) { org = amb_s16(fp, fc->size, vm.vorg + 10 + 4 * (size_t)k); break; }
+            } else org = tsb + amb_glyph_ymax(f, face, fc, g.gid);
+            o.dx = org;
+        } else {
+            o.flags |= AMB_SHAPED_VFALLBACK;
+            o.ax = 0;
+        }
+        o.base = o.ax;
+        (*out)[o0 + q] = o;
+    }
 }
 
 void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t from, size_t to, int flags, vector<amb_shaped> *out) {
     if (!amb_ready(f, face) || to > n || from >= to) return;
+    int vert = (flags & (AMB_SHAPE_VMIXED | AMB_SHAPE_VUPRIGHT)) != 0;
     vector<amb_scp> cps;
     reserve(cps, to - from);
     size_t i = from;
@@ -1808,7 +1883,7 @@ void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t fro
         c.g0 = cont ? back(cps).g0 : (uint32_t)len(cps);
         c.script = (int16_t)(c.cp < 0x41 ? AMB_SC_COMMON : amb_script_of(c.cp));
         c.face = -1;
-        c.emoji = 0;
+        c.seg = 0;
         push_back(cps, c);
         prev = c.cp;
     }
@@ -1831,13 +1906,22 @@ void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t fro
         /* a grapheme's code points its first's script, and emoji when its first is */
         uint32_t first = at(cps, c.g0).cp;
         if (c.g0 != k) c.script = at(cps, c.g0).script;
-        c.emoji = (uint8_t)(first >= 0x231A && amb_in_ranges(amb_emoji, AMB_EMOJI_RANGES, first));
+        c.seg = (uint8_t)(first >= 0x231A && amb_in_ranges(amb_emoji, AMB_EMOJI_RANGES, first) ? AMB_SEG_EMOJI : 0);
         cps[k] = c;
     }
-    /* the faces, segment by segment (one script, emoji or not) */
+    /* upright in a vertical line: every grapheme (upright), or a grapheme whose first code point's
+       Vertical_Orientation is not R (mixed) */
+    if (vert)
+        for (size_t k = 0; k < cnt; k++) {
+            amb_scp c = at(cps, k);
+            if (!(flags & AMB_SHAPE_VUPRIGHT) && amb_vo_of(at(cps, c.g0).cp) == 0) continue;
+            c.seg |= AMB_SEG_UP;
+            cps[k] = c;
+        }
+    /* the faces, segment by segment (one script, emoji or not, one orientation) */
     for (size_t a = 0; a < cnt;) {
         size_t b = a + 1;
-        while (b < cnt && at(cps, b).script == at(cps, a).script && at(cps, b).emoji == at(cps, a).emoji) b++;
+        while (b < cnt && at(cps, b).script == at(cps, a).script && at(cps, b).seg == at(cps, a).seg) b++;
         amb_resolve(f, face, &cps, a, b, (flags & AMB_SHAPE_RTL) != 0);
         a = b;
     }
@@ -1846,17 +1930,50 @@ void amb_shape(const amb_fonts *f, int face, const char *s, size_t n, size_t fro
     vector<uint32_t> bounds;
     for (size_t a = 0; a < cnt;) {
         size_t b = a + 1;
-        while (b < cnt && at(cps, b).face == at(cps, a).face && at(cps, b).script == at(cps, a).script && at(cps, b).emoji == at(cps, a).emoji) b++;
+        while (b < cnt && at(cps, b).face == at(cps, a).face && at(cps, b).script == at(cps, a).script && at(cps, b).seg == at(cps, a).seg) b++;
         push_back(bounds, (uint32_t)a);
         push_back(bounds, (uint32_t)b);
         a = b;
     }
     size_t nr = len(bounds) / 2;
     for (size_t r = 0; r < nr; r++) {
-        size_t k = (flags & AMB_SHAPE_RTL) ? nr - 1 - r : r;
+        size_t k = (flags & AMB_SHAPE_RTL) && !vert ? nr - 1 - r : r;
         size_t a = at(bounds, 2 * k), b = at(bounds, 2 * k + 1);
         amb_shape_run(f, at(cps, a).face, at(cps, a).script, flags, s, n, &cps, a, b, out);
     }
+}
+
+double amb_shaped_advance(const amb_fonts *f, const amb_shaped *g, double size) {
+    if (!(g->flags & AMB_SHAPED_VFALLBACK) || (g->flags & AMB_SHAPED_VZERO)) return g->ax * amb_face_scale(f, g->face, size);
+    double asc, desc, gap;
+    amb_face_metrics(f, g->face, size, &asc, &desc, &gap);
+    return asc + desc;
+}
+void amb_shaped_pen(const amb_fonts *f, const amb_shaped *g, double size, double *along, double *across) {
+    double sc = amb_face_scale(f, g->face, size);
+    if (!(g->flags & AMB_SHAPED_UPRIGHT)) { *along = g->dx * sc; *across = -g->dy * sc; return; }
+    /* upright: half its horizontal advance before the central baseline; its vertical origin down the line */
+    *across = -g->dy * sc / 2;
+    if (!(g->flags & AMB_SHAPED_VFALLBACK)) { *along = g->dx * sc; return; }
+    double asc, desc, gap;
+    amb_face_metrics(f, g->face, size, &asc, &desc, &gap);
+    *along = asc;
+}
+static void amb_outline(const uint8_t *p, size_t n, const amb_face *fc, uint32_t gid, int depth, double a, double b, double c, double d,
+                        double e, double g, vector<amb_pt> *pts);
+static void amb_cff_outline(const uint8_t *p, size_t n, size_t off, size_t len, int cff2, uint32_t gid, vector<amb_pt> *pts);
+/* a glyph's top, its outline's highest point, in its face's units (0 for none) */
+static int32_t amb_glyph_ymax(const amb_fonts *f, int by, const amb_face *fc, uint32_t gid) {
+    vector<amb_pt> pts;
+    if (fc->outlines == AMB_BITMAPS) return 0;
+    if (fc->outlines != AMB_GLYF) {
+        if (by < AMB_WEBFIRST) amb_cff_outline(data(amb_sb) + fc->base, fc->size, fc->glyf, fc->glyf_size, fc->outlines == AMB_CFF2, gid, &pts);
+        else amb_cff_outline(data(f->bytes) + fc->base, fc->size, fc->glyf, fc->glyf_size, fc->outlines == AMB_CFF2, gid, &pts);
+    } else if (by < AMB_WEBFIRST) amb_outline(data(amb_sb) + fc->base, fc->size, fc, gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    else amb_outline(data(f->bytes) + fc->base, fc->size, fc, gid, 0, 1, 0, 0, 1, 0, 0, &pts);
+    int32_t top = 0;
+    for (size_t k = 0; k < len(pts); k++) if (k == 0 || at(pts, k).y > top) top = at(pts, k).y;
+    return top;
 }
 
 double amb_face_scale(const amb_fonts *f, int face, double size) {
@@ -2510,8 +2627,20 @@ int amb_glyph_mask(const amb_fonts *f, int face, uint32_t cp, double size, doubl
     return amb_glyph_mask_id(f, by, g.gid, size, dx, italic || (face < AMB_NBUILTIN && (amb_sf[face].style & 2)), acc, mask, w, h, ox, oy);
 }
 
+static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, int asked, int rot,
+                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy);
 int amb_glyph_mask_id(const amb_fonts *f, int by, uint32_t gid, double size, double dx, int asked,
                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
+    return amb_mask_xf(f, by, gid, size, dx, 0, asked, 0, acc, mask, w, h, ox, oy);
+}
+int amb_glyph_mask_rot(const amb_fonts *f, int by, uint32_t gid, double size, double dy, int rot,
+                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
+    return amb_mask_xf(f, by, gid, size, 0, dy, 0, rot, acc, mask, w, h, ox, oy);
+}
+/* a glyph's mask, its pen at (dx, dy) from a whole pixel, its outline turned a quarter about the pen first when rot asks
+   (1 clockwise: a vertical line's sideways glyph, its top to the right; 3 anticlockwise, sideways-lr's) */
+static int amb_mask_xf(const amb_fonts *f, int by, uint32_t gid, double size, double dx, double dy, int asked, int rot,
+                       vector<float> *acc, vector<uint8_t> *mask, int *w, int *h, int *ox, int *oy) {
     *w = 0;
     *h = 0;
     *ox = 0;
@@ -2528,6 +2657,14 @@ int amb_glyph_mask_id(const amb_fonts *f, int by, uint32_t gid, double size, dou
     else amb_outline(data(f->bytes) + fc.base, fc.size, &fc, gid, 0, 1, 0, 0, 1, 0, 0, &pts);
     uint32_t npts = (uint32_t)len(pts);
     if (npts == 0) return 0;
+    if (rot)
+        for (uint32_t k = 0; k < npts; k++) {
+            amb_pt p = at(pts, k);
+            int16_t x = p.x;
+            p.x = rot == 1 ? p.y : (int16_t)-p.y;
+            p.y = rot == 1 ? (int16_t)-x : x;
+            pts[k] = p;
+        }
     /* italic asked for, of a face whose outlines are upright: Skia's skew, a quarter of
        the height (Chromium's synthetic italic) */
     double s = size / fc.upem, slant = asked && !fc.slope ? 0.25 : 0;
@@ -2535,7 +2672,7 @@ int amb_glyph_mask_id(const amb_fonts *f, int by, uint32_t gid, double size, dou
     double minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
     for (uint32_t k = 0; k < npts; k++) {
         amb_pt p = at(pts, k);
-        double X = (p.x + slant * p.y) * s + dx, Y = -p.y * s;
+        double X = (p.x + slant * p.y) * s + dx, Y = -p.y * s + dy;
         if (X < minx) minx = X;
         if (X > maxx) maxx = X;
         if (Y < miny) miny = Y;
@@ -2550,7 +2687,7 @@ int amb_glyph_mask_id(const amb_fonts *f, int by, uint32_t gid, double size, dou
     /* each contour: from an on-curve start (or, every point off the curve, the middle
        of its last and first), its lines and curves -- quadratic, or cubic (CFF's: two
        controls, on 2, then the point they lead to) -- back to the start */
-    double ax = dx - x0, ay = (double)-y0;
+    double ax = dx - x0, ay = dy - y0;
     uint32_t c0 = 0;
     while (c0 < npts) {
         uint32_t c1 = c0;

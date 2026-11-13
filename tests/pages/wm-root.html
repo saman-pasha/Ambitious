@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" style="writing-mode: vertical-rl"><head><meta charset="utf-8"><title>Writing modes: a vertical page</title>
+<style>
+/* tests/pages/wm-root.html -- a page whose root is vertical-rl (CSS Writing Modes 4, 8): the initial containing
+   block turned with it, the root at the viewport's right edge, its inline size the viewport's height, its block
+   size its content's; paragraphs stacked from the right, their margins along the block axis collapsing; a block's
+   percentage height (its inline size) of the body's; an inline element's fragments down a line; a heading's, a list's
+   and a quotation's margins and paddings the user agent's sheet's, flow-relative (a list's markers down its items' lines).
+   As Chromium lays it out (wm-root.chromium) and draws it (wm-root.shot.png, .regions). */
+body { margin: 8px; font: 16px/20px sans-serif; background: #fafaf0; }
+p { margin: 10px 0; background: #e6eef8; }
+.r { background: #fd8; }
+</style></head><body id="body">
+<p id="p1">First paragraph of text in a vertical document.</p>
+<p id="p2" style="margin: 10px 5px">Second <span id="s" class="r">span</span> paragraph that is longer and longer and longer and longer and longer and longer and longer and longer and longer and longer.</p>
+<div id="d" style="width: 100px; height: 50%; background: #ccf; border-right: 3px solid #36c">box</div>
+<p id="p3" style="padding: 0 6px; border-left: 2px solid #c63">a third, its padding <span id="s2" class="r" style="padding: 0 4px">and an inline box</span> in it</p>
+<h2 id="h">A heading</h2>
+<ul id="u" style="background: #eef"><li id="u1">a list's item</li><li id="u2">its second</li></ul>
+<blockquote id="q" style="background: #fee">a quotation, its margins the user agent's</blockquote>
+</body></html>

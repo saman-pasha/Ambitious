@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: computed values</title>
+<style>
+/* tests/pages/wmvals.html -- the writing-mode properties' computed values as Chromium gives them: writing-mode (SVG
+   1.1's tb and tb-rl vertical-rl, lr, lr-tb, rl and rl-tb horizontal-tb; -webkit-writing-mode its alias),
+   text-orientation (sideways-right sideways; -webkit-text-orientation's vertical-right mixed), text-combine-upright
+   (-webkit-text-combine's horizontal all), inherited; an inline element of a writing mode not its parent's an
+   inline-block; and the flow-relative properties of CSS Logical 1 (and Chromium's old -webkit- names of them), each the
+   physical one's value (tools/bench/cssref.js, tests/integ/cssref.sh) */
+body { margin: 8px; font: 10px serif; }
+.lg { margin-inline-start: 7px; margin-block-end: 3px; padding-block-start: 2px; padding-inline-end: 9px;
+      border-block-start: 4px solid; border-inline-start-width: 6px; border-inline-start-style: dashed; }
+.k { writing-mode: vertical-lr; text-orientation: upright; text-combine-upright: all; }
+</style></head><body>
+<p>
+<span id="w1" data-check="writing-mode" style="writing-mode: tb-rl">a</span>
+<span id="w2" data-check="writing-mode" style="writing-mode: tb">a</span>
+<span id="w3" data-check="writing-mode" style="writing-mode: lr">a</span>
+<span id="w4" data-check="writing-mode" style="writing-mode: rl-tb">a</span>
+<span id="w5" data-check="writing-mode" style="writing-mode: lr-tb">a</span>
+<span id="w6" data-check="writing-mode" style="writing-mode: rl">a</span>
+<span id="w7" data-check="writing-mode" style="-webkit-writing-mode: vertical-lr">a</span>
+<span id="w8" data-check="writing-mode" style="writing-mode: sideways-lr">a</span>
+<span id="w9" data-check="writing-mode" style="writing-mode: VERTICAL-RL">a</span>
+<span id="w10" data-check="writing-mode" style="writing-mode: vertical-rl; writing-mode: diagonal">a</span>
+<span id="t1" data-check="text-orientation" style="text-orientation: sideways-right">a</span>
+<span id="t2" data-check="text-orientation" style="-webkit-text-orientation: vertical-right">a</span>
+<span id="t3" data-check="text-orientation" style="text-orientation: upright">a</span>
+<span id="t4" data-check="text-orientation" style="text-orientation: sideways">a</span>
+<span id="t5" data-check="text-orientation" style="text-orientation: vertical-right">a</span>
+<span id="c1" data-check="text-combine-upright" style="text-combine-upright: all">a</span>
+<span id="c2" data-check="text-combine-upright" style="text-combine-upright: digits 2">a</span>
+<span id="c3" data-check="text-combine-upright" style="-webkit-text-combine: horizontal">a</span>
+<span id="c4" data-check="text-combine-upright" style="-webkit-text-combine: all">a</span>
+<span class="k"><span id="i1" data-check="writing-mode text-orientation text-combine-upright">inherited</span></span>
+</p>
+<div id="l1" class="lg" data-check="margin-top margin-right margin-bottom margin-left padding-top padding-right border-top-width border-top-style border-left-width border-left-style margin-inline-start margin-block-end padding-block-start border-inline-start-width">a</div>
+<div id="l2" class="lg" style="writing-mode: vertical-rl" data-check="margin-top margin-right margin-bottom margin-left padding-top padding-right padding-bottom padding-left border-top-width border-right-width border-right-style border-top-style margin-inline-start margin-block-end padding-inline-end border-block-start-width">a</div>
+<div id="l3" class="lg" style="writing-mode: vertical-lr; direction: rtl" data-check="margin-top margin-right margin-bottom margin-left padding-top padding-bottom padding-left border-left-width border-bottom-width border-bottom-style margin-inline-start margin-block-end">a</div>
+<div id="l4" class="lg" style="direction: rtl" data-check="margin-top margin-right margin-left padding-left border-right-width border-right-style margin-inline-start">a</div>
+<div id="l5" class="lg" style="writing-mode: sideways-lr" data-check="margin-bottom margin-right padding-left padding-top border-left-width border-bottom-width border-bottom-style margin-inline-start">a</div>
+<div id="l6" style="margin-left: 1px; margin-inline-start: 2px" data-check="margin-left margin-inline-start">a</div>
+<div id="l7" style="margin-inline-start: 2px; margin-left: 1px" data-check="margin-left margin-inline-start">a</div>
+<div id="l8" style="writing-mode: vertical-rl; margin-top: 1px; margin-inline-start: 2px; margin-block: 4px 5px; margin-right: 6px" data-check="margin-top margin-right margin-left margin-block-start margin-inline-start">a</div>
+<div id="l9" style="writing-mode: vertical-rl; min-inline-size: 10px; max-block-size: 30px; min-block-size: 3px" data-check="min-height max-width min-width min-inline-size max-block-size">a</div>
+<div id="l10" style="writing-mode: vertical-rl; inset-inline-start: 3px; inset-block: 4px 5px" data-check="top right left bottom inset-inline-start inset-block-end">a</div>
+<div id="l11" style="writing-mode: vertical-rl; border-start-end-radius: 4px; border-end-start-radius: 6px" data-check="border-bottom-right-radius border-top-left-radius border-top-right-radius border-start-end-radius">a</div>
+<div id="l12" style="writing-mode: vertical-rl; border-block: 2px solid; border-inline-color: #f00; border-inline-style: dotted" data-check="border-right-width border-left-width border-top-style border-bottom-style border-top-color border-inline-start-color">a</div>
+<div id="l13" style="writing-mode: vertical-rl; --m: 9px; margin-inline: var(--m) 1px; padding-block-end: var(--m)" data-check="margin-top margin-bottom padding-left">a</div>
+<div style="writing-mode: vertical-lr"><div id="l14" style="margin-inline-start: 4px; margin-block-start: 8px" data-check="writing-mode margin-top margin-left">inherited mode</div></div>
+<div id="l15" style="-webkit-margin-start: 1px; -webkit-margin-before: 3px; -webkit-padding-end: 2px; -webkit-border-after: 4px solid; -webkit-logical-height: 20px; -webkit-min-logical-width: 10px" data-check="margin-left margin-top padding-right border-bottom-width border-bottom-style min-width">old names</div>
+<div id="l16" style="writing-mode: vertical-rl; -webkit-margin-start: 5px; -webkit-margin-before: 6px; -webkit-max-logical-height: 30px" data-check="margin-top margin-right max-width">old names, vertical</div>
+<span id="l17" style="writing-mode: vertical-rl" data-check="display writing-mode">an inline of another mode</span>
+</body></html>

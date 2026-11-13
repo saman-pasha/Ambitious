@@ -1,0 +1,16 @@
+# boxes of tests/pages/wm-text.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-a div 8 8 20 260
+a1 span 10 48.906 17 50.688
+text-b div 38 8 20 260
+text-c div 68 8 20 260
+text-d div 98 8 20 260
+text-e div 128 8 20 260
+text-f div 158 8 20 260
+text-g div 188 8 20 260
+text-h div 218 8 30 260
+h1 span 226 49.359 14 28.016
+text-i div 258 8 20 260
+text-j div 288 8 20 260
+text-k div 318 8 30 260
+k1 span 325 8 17 59.609
+k2 span 325 113.359 17 83.625

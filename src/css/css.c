@@ -16,8 +16,12 @@
    expanded into its longhands (css_shorts: margin, padding, inset, the border
    shorthands and border-radius, outline, font, background's layers,
    list-style, text-decoration, overflow, flex, flex-flow, gap, place-*,
-   grid-row, grid-column, grid-area, grid-template). A value a property does
-   not take drops its declaration, as CSS has it.
+   grid-row, grid-column, grid-area, grid-template, and CSS Logical 1's of an
+   axis or a side). A value a property does not take drops its declaration, as
+   CSS has it. CSS Logical 1's flow-relative properties (margin-block-start,
+   inline-size, ...; Chromium's old -webkit- names of them) are declarations'
+   alone: the cascade takes each for the physical property the element's
+   writing-mode and direction make it, in its place in the cascade's order.
 
    Values: px and the absolute units, em, ex and ch (half an em), rem (the
    root's font size), the viewport's units against the reader's viewport (800 x 600
@@ -169,7 +173,8 @@ void css_set_env(double view_w, double view_h, double font_size, int dark, int r
 #define CSS_MAX_NESTING 16
 #define CSS_MATCH_BUDGET 4096
 
-/* ---- the user agent's style sheet: the HTML Standard's rendering section (15.3), abridged ---- */
+/* ---- the user agent's style sheet: the HTML Standard's rendering section (15.3), abridged; its margins and paddings
+   flow-relative, as Chromium's html.css has them (a vertical page's paragraphs spaced along its block axis) ---- */
 static const char css_ua_sheet[] =
     "area, base, basefont, datalist, head, link, meta, noembed, noframes, param, rp, script, style, template, title { display: none }\n"
     "[hidden] { display: none }\n"
@@ -177,8 +182,8 @@ static const char css_ua_sheet[] =
     "html, body { display: block }\n"
     "body { margin: 8px }\n"
     "address, blockquote, center, dialog, div, figure, figcaption, footer, form, header, hr, legend, listing, main, p, plaintext, pre, search, xmp { display: block; unicode-bidi: isolate }\n"
-    "blockquote, figure, listing, p, plaintext, pre, xmp { margin-top: 1em; margin-bottom: 1em }\n"
-    "blockquote, figure { margin-left: 40px; margin-right: 40px }\n"
+    "blockquote, figure, listing, p, plaintext, pre, xmp { margin-block-start: 1em; margin-block-end: 1em }\n"
+    "blockquote, figure { margin-inline-start: 40px; margin-inline-end: 40px }\n"
     "address { font-style: italic }\n"
     "listing, plaintext, pre, xmp { white-space: pre }\n"
     "code, kbd, listing, plaintext, pre, samp, tt, xmp { font-family: monospace }\n"
@@ -195,19 +200,19 @@ static const char css_ua_sheet[] =
     "nobr { white-space: nowrap }\n"
     ":link { color: LinkText; text-decoration: underline }\n"
     "article, aside, h1, h2, h3, h4, h5, h6, hgroup, nav, section { display: block }\n"
-    "h1 { margin-top: 0.67em; margin-bottom: 0.67em; font-size: 2em }\n"
-    "h2 { margin-top: 0.83em; margin-bottom: 0.83em; font-size: 1.5em }\n"
-    "h3 { margin-top: 1em; margin-bottom: 1em; font-size: 1.17em }\n"
-    "h4 { margin-top: 1.33em; margin-bottom: 1.33em; font-size: 1em }\n"
-    "h5 { margin-top: 1.67em; margin-bottom: 1.67em; font-size: 0.83em }\n"
-    "h6 { margin-top: 2.33em; margin-bottom: 2.33em; font-size: 0.67em }\n"
+    "h1 { margin-block-start: 0.67em; margin-block-end: 0.67em; font-size: 2em }\n"
+    "h2 { margin-block-start: 0.83em; margin-block-end: 0.83em; font-size: 1.5em }\n"
+    "h3 { margin-block-start: 1em; margin-block-end: 1em; font-size: 1.17em }\n"
+    "h4 { margin-block-start: 1.33em; margin-block-end: 1.33em; font-size: 1em }\n"
+    "h5 { margin-block-start: 1.67em; margin-block-end: 1.67em; font-size: 0.83em }\n"
+    "h6 { margin-block-start: 2.33em; margin-block-end: 2.33em; font-size: 0.67em }\n"
     "h1, h2, h3, h4, h5, h6 { font-weight: bold }\n"
     "dir, dd, dl, dt, menu, ol, ul { display: block }\n"
     "li { display: list-item }\n"
-    "dir, dl, menu, ol, ul { margin-top: 1em; margin-bottom: 1em }\n"
-    ":is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) { margin-top: 0; margin-bottom: 0 }\n"
-    "dd { margin-left: 40px }\n"
-    "dir, menu, ol, ul { padding-left: 40px }\n"
+    "dir, dl, menu, ol, ul { margin-block-start: 1em; margin-block-end: 1em }\n"
+    ":is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) { margin-block-start: 0; margin-block-end: 0 }\n"
+    "dd { margin-inline-start: 40px }\n"
+    "dir, menu, ol, ul { padding-inline-start: 40px }\n"
     "ol { list-style-type: decimal }\n"
     "dir, menu, ul { list-style-type: disc }\n"
     ":is(dir, menu, ol, ul) :is(dir, menu, ul) { list-style-type: circle }\n"
@@ -226,9 +231,11 @@ static const char css_ua_sheet[] =
     "table[border] { border-style: outset }\n"
     "table[border] td, table[border] th { border-width: 1px; border-style: inset }\n"
     "th { font-weight: bold; text-align: center }\n"
-    "hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; overflow: hidden }\n"
-    "fieldset { display: block; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove ThreeDFace; min-width: min-content }\n"
-    "legend { padding-left: 2px; padding-right: 2px }\n"
+    "hr { color: gray; border-style: inset; border-width: 1px; margin-block-start: 0.5em; margin-inline-end: auto; margin-block-end: 0.5em; "
+    "margin-inline-start: auto; overflow: hidden }\n"
+    "fieldset { display: block; margin-inline-start: 2px; margin-inline-end: 2px; padding-block-start: 0.35em; padding-inline-end: 0.75em; "
+    "padding-block-end: 0.625em; padding-inline-start: 0.75em; border: 2px groove ThreeDFace; min-width: min-content }\n"
+    "legend { padding-inline-start: 2px; padding-inline-end: 2px }\n"
     "details, summary { display: block }\n"
     /* a details element's summary: a list item with its disclosure triangle inside (HTML 15.5.17, Chromium's sheet) */
     "details > summary:first-of-type { display: list-item; counter-increment: list-item 0; list-style: disclosure-closed inside }\n"
@@ -1004,7 +1011,8 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "text-transform", 1, G_KW, 0, "none capitalize uppercase lowercase full-width", "none" },
     { "direction", 1, G_KW, 0, "ltr rtl", "ltr" },
     { "unicode-bidi", 0, G_KW, 0, "normal embed isolate bidi-override isolate-override plaintext", "normal" },
-    { "writing-mode", 1, G_KW, 0, "horizontal-tb vertical-rl vertical-lr sideways-rl sideways-lr", "horizontal-tb" },
+    /* writing-mode, and SVG 1.1's values Chromium takes (computed: tb and tb-rl vertical-rl, the others horizontal-tb) */
+    { "writing-mode", 1, G_KW, 0, "horizontal-tb vertical-rl vertical-lr sideways-rl sideways-lr lr lr-tb rl rl-tb tb tb-rl", "horizontal-tb" },
     { "hyphens", 1, G_KW, 0, "none manual auto", "manual" },
     { "content", 0, G_TEXT, 0, "normal none", "normal" },
     { "counter-reset", 0, G_TEXT, 0, "none", "none" },
@@ -1099,7 +1107,82 @@ static const css_pdef css_pdefs[CSS_NPROPS] = {
     { "mask-origin", 0, G_TEXT, 0, 0, "border-box" },
     { "mask-clip", 0, G_TEXT, 0, 0, "border-box" },
     { "mask-composite", 0, G_TEXT, 0, 0, "add" },
+    /* CSS Writing Modes 4, 5.1 and 9.1: sideways-right computed sideways and vertical-right mixed, as Chromium has them */
+    { "text-orientation", 1, G_KW, 0, "mixed upright sideways sideways-right vertical-right", "mixed" },
+    { "text-combine-upright", 1, G_KW, 0, "none all", "none" },
 };
+
+/* ---- the flow-relative properties (CSS Logical 1), after custom in enum(prop): each read by the grammar of the
+   physical property it stands for in a horizontal, left-to-right box (rep), its group's first physical property (the
+   top side's, the top-left corner's, width's) and what it is in its group: a side (0 block-start, 1 block-end, 2
+   inline-start, 3 inline-end), a corner (4 start-start, 5 start-end, 6 end-start, 7 end-end) or a size (8 inline, 9 block) */
+#define CSS_LFIRST CSS_PROP_MARGIN_BLOCK_START
+#define CSS_NLOGICAL (CSS_PROP_BORDER_END_END_RADIUS - CSS_PROP_MARGIN_BLOCK_START + 1)
+typedef struct css_ldef { const char *name; uint8_t rep, base, kind; } css_ldef;
+static const css_ldef css_ldefs[CSS_NLOGICAL] = {
+    { "margin-block-start", CSS_PROP_MARGIN_TOP, CSS_PROP_MARGIN_TOP, 0 },
+    { "margin-block-end", CSS_PROP_MARGIN_BOTTOM, CSS_PROP_MARGIN_TOP, 1 },
+    { "margin-inline-start", CSS_PROP_MARGIN_LEFT, CSS_PROP_MARGIN_TOP, 2 },
+    { "margin-inline-end", CSS_PROP_MARGIN_RIGHT, CSS_PROP_MARGIN_TOP, 3 },
+    { "padding-block-start", CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_TOP, 0 },
+    { "padding-block-end", CSS_PROP_PADDING_BOTTOM, CSS_PROP_PADDING_TOP, 1 },
+    { "padding-inline-start", CSS_PROP_PADDING_LEFT, CSS_PROP_PADDING_TOP, 2 },
+    { "padding-inline-end", CSS_PROP_PADDING_RIGHT, CSS_PROP_PADDING_TOP, 3 },
+    { "border-block-start-width", CSS_PROP_BORDER_TOP_WIDTH, CSS_PROP_BORDER_TOP_WIDTH, 0 },
+    { "border-block-end-width", CSS_PROP_BORDER_BOTTOM_WIDTH, CSS_PROP_BORDER_TOP_WIDTH, 1 },
+    { "border-inline-start-width", CSS_PROP_BORDER_LEFT_WIDTH, CSS_PROP_BORDER_TOP_WIDTH, 2 },
+    { "border-inline-end-width", CSS_PROP_BORDER_RIGHT_WIDTH, CSS_PROP_BORDER_TOP_WIDTH, 3 },
+    { "border-block-start-style", CSS_PROP_BORDER_TOP_STYLE, CSS_PROP_BORDER_TOP_STYLE, 0 },
+    { "border-block-end-style", CSS_PROP_BORDER_BOTTOM_STYLE, CSS_PROP_BORDER_TOP_STYLE, 1 },
+    { "border-inline-start-style", CSS_PROP_BORDER_LEFT_STYLE, CSS_PROP_BORDER_TOP_STYLE, 2 },
+    { "border-inline-end-style", CSS_PROP_BORDER_RIGHT_STYLE, CSS_PROP_BORDER_TOP_STYLE, 3 },
+    { "border-block-start-color", CSS_PROP_BORDER_TOP_COLOR, CSS_PROP_BORDER_TOP_COLOR, 0 },
+    { "border-block-end-color", CSS_PROP_BORDER_BOTTOM_COLOR, CSS_PROP_BORDER_TOP_COLOR, 1 },
+    { "border-inline-start-color", CSS_PROP_BORDER_LEFT_COLOR, CSS_PROP_BORDER_TOP_COLOR, 2 },
+    { "border-inline-end-color", CSS_PROP_BORDER_RIGHT_COLOR, CSS_PROP_BORDER_TOP_COLOR, 3 },
+    { "inset-block-start", CSS_PROP_TOP, CSS_PROP_TOP, 0 },
+    { "inset-block-end", CSS_PROP_BOTTOM, CSS_PROP_TOP, 1 },
+    { "inset-inline-start", CSS_PROP_LEFT, CSS_PROP_TOP, 2 },
+    { "inset-inline-end", CSS_PROP_RIGHT, CSS_PROP_TOP, 3 },
+    { "inline-size", CSS_PROP_WIDTH, CSS_PROP_WIDTH, 8 },
+    { "block-size", CSS_PROP_HEIGHT, CSS_PROP_WIDTH, 9 },
+    { "min-inline-size", CSS_PROP_MIN_WIDTH, CSS_PROP_MIN_WIDTH, 8 },
+    { "min-block-size", CSS_PROP_MIN_HEIGHT, CSS_PROP_MIN_WIDTH, 9 },
+    { "max-inline-size", CSS_PROP_MAX_WIDTH, CSS_PROP_MAX_WIDTH, 8 },
+    { "max-block-size", CSS_PROP_MAX_HEIGHT, CSS_PROP_MAX_WIDTH, 9 },
+    { "border-start-start-radius", CSS_PROP_BORDER_TOP_LEFT_RADIUS, CSS_PROP_BORDER_TOP_LEFT_RADIUS, 4 },
+    { "border-start-end-radius", CSS_PROP_BORDER_TOP_RIGHT_RADIUS, CSS_PROP_BORDER_TOP_LEFT_RADIUS, 5 },
+    { "border-end-start-radius", CSS_PROP_BORDER_BOTTOM_LEFT_RADIUS, CSS_PROP_BORDER_TOP_LEFT_RADIUS, 6 },
+    { "border-end-end-radius", CSS_PROP_BORDER_BOTTOM_RIGHT_RADIUS, CSS_PROP_BORDER_TOP_LEFT_RADIUS, 7 },
+};
+/* a property's name, a flow-relative one's too */
+static const char *css_pname(int p) {
+    if (p >= 0 && p < CSS_NPROPS) return css_pdefs[p].name;
+    if (p >= CSS_LFIRST && p < CSS_LFIRST + CSS_NLOGICAL) return css_ldefs[p - CSS_LFIRST].name;
+    return "";
+}
+/* the physical property whose grammar reads p: a flow-relative one's rep, any other p */
+static css_prop css_grammar_of(css_prop p) {
+    return p >= CSS_LFIRST && p < CSS_LFIRST + CSS_NLOGICAL ? (css_prop)css_ldefs[p - CSS_LFIRST].rep : p;
+}
+/* the physical side (0 top, 1 right, 2 bottom, 3 left) of a box's block-start (k 0), block-end (1), inline-start (2) or
+   inline-end (3) side, for its writing mode and direction (CSS Writing Modes 4, 6.2: a vertical box's line-left its top,
+   sideways-lr's its bottom) */
+static int css_flow_side(int k, int wm, int rtl) {
+    int bs = wm == CSS_WM_HTB ? 0 : wm == CSS_WM_VRL || wm == CSS_WM_SRL ? 1 : 3;
+    int is = wm == CSS_WM_HTB ? (rtl ? 1 : 3) : wm == CSS_WM_SLR ? (rtl ? 0 : 2) : (rtl ? 2 : 0);
+    return k == 0 ? bs : k == 1 ? (bs + 2) % 4 : k == 2 ? is : (is + 2) % 4;
+}
+int css_logical_physical(int p, int wm, int rtl) {
+    if (p < CSS_LFIRST || p >= CSS_LFIRST + CSS_NLOGICAL) return p;
+    css_ldef l = css_ldefs[p - CSS_LFIRST];
+    if (l.kind < 4) return l.base + css_flow_side(l.kind, wm, rtl);
+    if (l.kind >= 8) return l.base + ((l.kind == 8) == (wm == CSS_WM_HTB) ? 0 : 1);
+    /* a corner: its block side's and its inline side's, the corners top-left, top-right, bottom-right, bottom-left */
+    int a = css_flow_side(l.kind == 4 || l.kind == 5 ? 0 : 1, wm, rtl), b = css_flow_side(l.kind == 4 || l.kind == 6 ? 2 : 3, wm, rtl);
+    int top = a == 0 || b == 0, left = a == 3 || b == 3;
+    return l.base + (top ? (left ? 0 : 1) : (left ? 3 : 2));
+}
 
 static int css_inherited(css_prop p) { return p < CSS_NPROPS && css_pdefs[p].inh; }
 /* a colour whose initial value is currentcolor: the element's colour */
@@ -1139,7 +1222,7 @@ static const char css_webkit_aliases[] =
     "border-top-right-radius box-decoration-break box-shadow box-sizing filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap "
     "justify-content mask mask-clip mask-image mask-origin mask-position mask-repeat mask-size order perspective perspective-origin transform "
     "transform-origin transform-style transition transition-delay "
-    "transition-duration transition-property transition-timing-function";
+    "transition-duration transition-property transition-timing-function writing-mode";
 
 /* the code of a name (as css_name_code holds it), or 0; a -webkit- alias, its property's */
 static int css_name_find(const char *name, size_t nn) {
@@ -1148,7 +1231,7 @@ static int css_name_find(const char *name, size_t nn) {
     for (uint32_t i = h & (CSS_NAME_SLOTS - 1); css_name_code[i]; i = (i + 1) & (CSS_NAME_SLOTS - 1)) {
         if (css_name_hash[i] != h) continue;
         int c = css_name_code[i];
-        if (css_eq_ci(name, nn, c > 0 ? css_pdefs[c - 1].name : css_short_name(-c - 1))) return c;
+        if (css_eq_ci(name, nn, c > 0 ? css_pname(c - 1) : css_short_name(-c - 1))) return c;
     }
     if (nn > 8 && css_eq_ci(name, 8, "-webkit-")) {
         char un[48];
@@ -1156,6 +1239,24 @@ static int css_name_find(const char *name, size_t nn) {
         for (; k < nn - 8 && k + 1 < sizeof un; k++) un[k] = css_lower(name[8 + k]);
         un[k] = 0;
         if (k == nn - 8 && css_word_in(un, css_webkit_aliases)) return css_name_find(name + 8, nn - 8);
+        /* the old flow-relative names Chromium keeps: -webkit-margin-start (inline-start), -before (block-start), ...,
+           -webkit-logical-width (inline-size), -webkit-min-logical-height (min-block-size), ... */
+        static const char *const old[] = {
+            "margin-start", "margin-inline-start", "margin-end", "margin-inline-end", "margin-before", "margin-block-start",
+            "margin-after", "margin-block-end", "padding-start", "padding-inline-start", "padding-end", "padding-inline-end",
+            "padding-before", "padding-block-start", "padding-after", "padding-block-end", "border-start", "border-inline-start",
+            "border-end", "border-inline-end", "border-before", "border-block-start", "border-after", "border-block-end",
+            "border-start-width", "border-inline-start-width", "border-end-width", "border-inline-end-width",
+            "border-before-width", "border-block-start-width", "border-after-width", "border-block-end-width",
+            "border-start-style", "border-inline-start-style", "border-end-style", "border-inline-end-style",
+            "border-before-style", "border-block-start-style", "border-after-style", "border-block-end-style",
+            "border-start-color", "border-inline-start-color", "border-end-color", "border-inline-end-color",
+            "border-before-color", "border-block-start-color", "border-after-color", "border-block-end-color",
+            "logical-width", "inline-size", "logical-height", "block-size", "min-logical-width", "min-inline-size",
+            "min-logical-height", "min-block-size", "max-logical-width", "max-inline-size", "max-logical-height", "max-block-size" };
+        if (k == nn - 8)
+            for (size_t q = 0; q < sizeof old / sizeof old[0]; q += 2)
+                if (strcmp(un, old[q]) == 0) return css_name_find(old[q + 1], strlen(old[q + 1]));
     }
     return 0;
 }
@@ -2671,6 +2772,7 @@ static int css_quirky(css_prop p, const char *s, size_t n, css_val *v) {
 
 /* a value read for the longhand p: a single value, or the text p keeps; 0 when p does not take it */
 static int css_longhand(css_prop p, const char *s, size_t n, css_val *v) {
+    p = css_grammar_of(p);
     int g = css_pdefs[p].gram;
     if (g == G_TEXT || g == G_FAMILY) {
         if (css_parse_val(s, n, v)) {
@@ -3145,6 +3247,28 @@ static const css_short css_shorts[] = {
     { "container", 2, { CSS_PROP_CONTAINER_NAME, CSS_PROP_CONTAINER_TYPE } },
     { "mask", 8, { CSS_PROP_MASK_IMAGE, CSS_PROP_MASK_POSITION, CSS_PROP_MASK_SIZE, CSS_PROP_MASK_REPEAT, CSS_PROP_MASK_ORIGIN,
                    CSS_PROP_MASK_CLIP, CSS_PROP_MASK_COMPOSITE, CSS_PROP_MASK_MODE } },
+    /* CSS Logical 1's shorthands: a start and an end (one value both); a border's width, style and colour for both
+       sides of an axis, or for one side */
+    { "margin-block", 2, { CSS_PROP_MARGIN_BLOCK_START, CSS_PROP_MARGIN_BLOCK_END } },
+    { "margin-inline", 2, { CSS_PROP_MARGIN_INLINE_START, CSS_PROP_MARGIN_INLINE_END } },
+    { "padding-block", 2, { CSS_PROP_PADDING_BLOCK_START, CSS_PROP_PADDING_BLOCK_END } },
+    { "padding-inline", 2, { CSS_PROP_PADDING_INLINE_START, CSS_PROP_PADDING_INLINE_END } },
+    { "inset-block", 2, { CSS_PROP_INSET_BLOCK_START, CSS_PROP_INSET_BLOCK_END } },
+    { "inset-inline", 2, { CSS_PROP_INSET_INLINE_START, CSS_PROP_INSET_INLINE_END } },
+    { "border-block-width", 2, { CSS_PROP_BORDER_BLOCK_START_WIDTH, CSS_PROP_BORDER_BLOCK_END_WIDTH } },
+    { "border-block-style", 2, { CSS_PROP_BORDER_BLOCK_START_STYLE, CSS_PROP_BORDER_BLOCK_END_STYLE } },
+    { "border-block-color", 2, { CSS_PROP_BORDER_BLOCK_START_COLOR, CSS_PROP_BORDER_BLOCK_END_COLOR } },
+    { "border-inline-width", 2, { CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_INLINE_END_WIDTH } },
+    { "border-inline-style", 2, { CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_INLINE_END_STYLE } },
+    { "border-inline-color", 2, { CSS_PROP_BORDER_INLINE_START_COLOR, CSS_PROP_BORDER_INLINE_END_COLOR } },
+    { "border-block", 6, { CSS_PROP_BORDER_BLOCK_START_WIDTH, CSS_PROP_BORDER_BLOCK_START_STYLE, CSS_PROP_BORDER_BLOCK_START_COLOR,
+                           CSS_PROP_BORDER_BLOCK_END_WIDTH, CSS_PROP_BORDER_BLOCK_END_STYLE, CSS_PROP_BORDER_BLOCK_END_COLOR } },
+    { "border-inline", 6, { CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_INLINE_START_COLOR,
+                            CSS_PROP_BORDER_INLINE_END_WIDTH, CSS_PROP_BORDER_INLINE_END_STYLE, CSS_PROP_BORDER_INLINE_END_COLOR } },
+    { "border-block-start", 3, { CSS_PROP_BORDER_BLOCK_START_WIDTH, CSS_PROP_BORDER_BLOCK_START_STYLE, CSS_PROP_BORDER_BLOCK_START_COLOR } },
+    { "border-block-end", 3, { CSS_PROP_BORDER_BLOCK_END_WIDTH, CSS_PROP_BORDER_BLOCK_END_STYLE, CSS_PROP_BORDER_BLOCK_END_COLOR } },
+    { "border-inline-start", 3, { CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_INLINE_START_COLOR } },
+    { "border-inline-end", 3, { CSS_PROP_BORDER_INLINE_END_WIDTH, CSS_PROP_BORDER_INLINE_END_STYLE, CSS_PROP_BORDER_INLINE_END_COLOR } },
 };
 #define CSS_NSHORTS (int)(sizeof css_shorts / sizeof css_shorts[0])
 
@@ -3461,7 +3585,31 @@ static int css_short_read(int sh, const char *val, size_t vn, css_items *it) {
         return 1;
     }
     case 33: return css_mask(val, vn, it);
-    default: return 0;
+    case 34: case 35: case 36: case 37: case 38: case 39: case 40: case 41: case 42: case 43: case 44: case 45: {
+        /* a flow-relative pair: a start and an end, one value both */
+        k = css_parts(val, vn, st, ln, CSS_MAXPARTS);
+        if (k == 0 || k > 2) return 0;
+        if (!css_longhand((css_prop)d->p[0], val + st[0], ln[0], &v) || css_is_global(&v)) return 0;
+        size_t j2 = k == 2 ? 1 : 0;
+        if (!css_longhand((css_prop)d->p[1], val + st[j2], ln[j2], &w) || css_is_global(&w)) return 0;
+        css_item_add(it, (css_prop)d->p[0], &v, st[0], ln[0]);
+        css_item_add(it, (css_prop)d->p[1], &w, st[j2], ln[j2]);
+        return 1;
+    }
+    default: {
+        /* border-block, border-inline and their sides: border-top's value, made each side's (its width, style and
+           colour, what it leaves out reset) */
+        css_items one;
+        one.n = 0;
+        one.bn = 0;
+        one.vn = (uint32_t)vn;
+        if (sh < 46 || sh > 51 || !css_border(0, val, vn, &one) || one.n != 3) return 0;
+        for (int q = 0; q < d->n; q++) {
+            css_item x = one.it[q % 3];
+            css_item_add(it, (css_prop)d->p[q], &x.v, x.ts, x.tn);
+        }
+        return 1;
+    }
     }
 }
 
@@ -3485,12 +3633,24 @@ static int css_expand(const char *name, size_t nn, const char *val, size_t vn, c
         css_quirk_now = 0;
         return ok;
     }
+    if ((nn == 20 && css_eq_ci(name, nn, "-webkit-text-combine")) || (nn == 24 && css_eq_ci(name, nn, "-webkit-text-orientation"))) {
+        /* Chromium's old names: -webkit-text-combine's horizontal is text-combine-upright's all (all is not its own), and
+           -webkit-text-orientation is text-orientation's (vertical-right its mixed) */
+        int comb = nn == 20;
+        css_prop cp = comb ? CSS_PROP_TEXT_COMBINE_UPRIGHT : CSS_PROP_TEXT_ORIENTATION;
+        const char *from = comb ? "horizontal" : "vertical-right", *to = comb ? "all" : "mixed";
+        css_val cv;
+        if (css_eq_ci(val, vn, from)) { css_word_val(&cv, to); css_item_made(it, cp, &cv, to, strlen(to)); return 1; }
+        if ((comb && css_eq_ci(val, vn, "all")) || !css_longhand(cp, val, vn, &cv)) return 0;
+        css_item_add(it, cp, &cv, 0, vn);
+        return 1;
+    }
     int p = css_prop_of(name, nn);
     if (p < 0) p = css_alias_of(name, nn);
     if (p < 0) return 0;
     css_val v;
     /* a longhand by its own name may take a quirky value; by another (an alias, a -webkit- one), never */
-    css_quirk_now = css_quirk_read && css_eq_ci(name, nn, css_pdefs[p].name);
+    css_quirk_now = css_quirk_read && p < CSS_NPROPS && css_eq_ci(name, nn, css_pdefs[p].name);
     int ok = css_longhand((css_prop)p, val, vn, &v);
     css_quirk_now = 0;
     if (!ok) return 0;
@@ -7044,13 +7204,14 @@ static int css_var_value(css_style *s, uint32_t dc, css_prop p, vector<css_cust>
     while (b > a && css_ws(at(out, b - 1))) b--;
     char name[48];
     uint32_t w = s->decl[dc].word;
+    css_prop dp = s->decl[dc].prop;     /* a flow-relative declaration's own property, which p is the physical one of */
     if (w) snprintf(name, sizeof name, "%.*s", (int)names_len(s, w), names_ptr(s, w));
-    else snprintf(name, sizeof name, "%s", css_pdefs[p].name);
+    else snprintf(name, sizeof name, "%s", css_pname(dp));
     css_items it;
     if (b == a || !css_expand(name, strlen(name), data(out) + a, b - a, &it)) return 0;
     for (int k = 0; k < it.n; k++) {
         css_item x = it.it[k];
-        if (x.prop != p) continue;
+        if (x.prop != p && x.prop != dp) continue;
         *v = x.v;
         if (v->unit == CSS_UNIT_TEXT || v->unit == CSS_UNIT_CALC) {
             if (x.mine) v->tx = text_add(s, it.buf + x.ts, x.tn);
@@ -7075,6 +7236,7 @@ static int css_order[CSS_NPROPS];
 static void css_order_make(void) {
     css_ready = 1;
     for (int p = 0; p < CSS_NPROPS; p++) css_name_put(css_pdefs[p].name, p + 1);
+    for (int p = 0; p < CSS_NLOGICAL; p++) css_name_put(css_ldefs[p].name, CSS_LFIRST + p + 1);
     for (int i = 0; i < CSS_NSHORTS; i++) css_name_put(css_shorts[i].name, -(i + 1));
     for (int p = 0; p < CSS_NPROPS; p++) {
         int k = 0;
@@ -7162,6 +7324,15 @@ static void css_par_of(const css_style *s, uint32_t c0, const css_val *initial, 
 }
 
 static int css_word_is(const css_val *v, const char *w) { return v->unit == CSS_UNIT_KEYWORD && v->word[0] == w[0] && strcmp(v->word, w) == 0; }
+/* a writing-mode value's mode (CSS_WM_*): tb and tb-rl, SVG 1.1's, vertical-rl's */
+static int css_wm_of(const css_val *v) {
+    if (v->unit != CSS_UNIT_KEYWORD) return CSS_WM_HTB;
+    if (css_word_is(v, "vertical-rl") || css_word_is(v, "tb") || css_word_is(v, "tb-rl")) return CSS_WM_VRL;
+    if (css_word_is(v, "vertical-lr")) return CSS_WM_VLR;
+    if (css_word_is(v, "sideways-rl")) return CSS_WM_SRL;
+    if (css_word_is(v, "sideways-lr")) return CSS_WM_SLR;
+    return CSS_WM_HTB;
+}
 
 /* a border width made computed by its style: 0 under none or hidden, else a whole px (a
    thin one 1); an outline's is only snapped */
@@ -8262,10 +8433,15 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
        its order: rk's high 40 bits, the proximity's key, rk's order */
     uint32_t bestx[CSS_NPROPS];
     memset(bestx, 0, sizeof bestx);
+    /* a flow-relative declaration (CSS Logical 1) taken for the physical property the writing mode and direction the
+       element inherits make it; when a declaration of its own sets either, they are taken again below */
+    int logi = 0, wdset = 0, wm0 = css_wm_of(&out[CSS_PROP_WRITING_MODE]), rtl0 = css_word_is(&out[CSS_PROP_DIRECTION], "rtl");
     for (size_t k = 0; k < len(*matched); k++) {
         uint32_t r = at(*matched, k) & 0xffffff, px = at(*matched, k) >> 24;
         for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
             int p = (int)s->decl[dc].prop;
+            if (p > CSS_PROP_CUSTOM) { logi = 1; p = css_logical_physical(p, wm0, rtl0); }
+            else if (p == CSS_PROP_WRITING_MODE || p == CSS_PROP_DIRECTION) wdset = 1;
             uint64_t rk = css_rank(s, dc);
             if (p != CSS_PROP_CUSTOM) {
                 uint64_t hi = rk >> 24, bhi = best[p] >> 24;
@@ -8316,6 +8492,40 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
     }
     for (uint32_t q = 0; q < (uint32_t)len(*cust); q++) if (at(*cust, q).state == 0) css_resolve_custom(s, cust, q, 0);
     if (s->regprop_len > 1) css_register_customs(s, cust, ss, pf, pn);
+    /* the flow-relative declarations (CSS Logical 1) of an element that sets its own writing mode or direction: each the
+       physical property those make it, in its place in the cascade's order -- the winners of the properties they map to
+       (under either mode) found again, over those properties' own declarations and theirs, in order, as Chromium
+       resolves them */
+    if (logi && wdset) {
+        uint32_t lc0 = ps ? at(ss->first, ps) : 0;
+        css_par lpv;
+        css_par_of(s, lc0, initial, &lpv);
+        css_val wv = out[CSS_PROP_WRITING_MODE], dv = out[CSS_PROP_DIRECTION];
+        if (win[CSS_PROP_WRITING_MODE])
+            css_decl_computed(s, env, CSS_PROP_WRITING_MODE, win[CSS_PROP_WRITING_MODE], cust, lc0, initial, &lpv, out, is_root, &wv);
+        if (win[CSS_PROP_DIRECTION]) css_decl_computed(s, env, CSS_PROP_DIRECTION, win[CSS_PROP_DIRECTION], cust, lc0, initial, &lpv, out, is_root, &dv);
+        int wm = css_wm_of(&wv), rtl = css_word_is(&dv, "rtl");
+        uint8_t again[CSS_NPROPS];
+        memset(again, 0, sizeof again);
+        for (size_t k = 0; k < len(*matched); k++)
+            for (uint32_t dc = s->rule[at(*matched, k) & 0xffffff].first_decl; dc; dc = s->decl[dc].next)
+                if ((int)s->decl[dc].prop > CSS_PROP_CUSTOM) {
+                    again[css_logical_physical((int)s->decl[dc].prop, wm, rtl)] = 1;
+                    again[css_logical_physical((int)s->decl[dc].prop, wm0, rtl0)] = 1;
+                }
+        for (int q = 0; q < CSS_NPROPS; q++) if (again[q]) { win[q] = 0; best[q] = 0; bestx[q] = 0; }
+        for (size_t k = 0; k < len(*matched); k++) {
+            uint32_t r = at(*matched, k) & 0xffffff, px = at(*matched, k) >> 24;
+            for (uint32_t dc = s->rule[r].first_decl; dc; dc = s->decl[dc].next) {
+                int p = (int)s->decl[dc].prop;
+                if (p > CSS_PROP_CUSTOM) p = css_logical_physical(p, wm, rtl);
+                else if (p == CSS_PROP_CUSTOM || !again[p]) continue;
+                uint64_t rk = css_rank(s, dc), hi = rk >> 24, bhi = best[p] >> 24;
+                uint32_t lo = px << 24 | (uint32_t)(rk & 0xffffff), blo = bestx[p] << 24 | (uint32_t)(best[p] & 0xffffff);
+                if (!win[p] || hi > bhi || (hi == bhi && lo >= blo)) { best[p] = rk; bestx[p] = px; win[p] = dc; any = 1; }
+            }
+        }
+    }
     /* the parent's font size's origin: an element that declares nothing has its size and
        family, and so its origin */
     uint8_t pfso = ps && ps < len(ss->fsx) ? at(ss->fsx, ps) : (uint8_t)CSS_FS_MEDIUM;
@@ -8390,6 +8600,19 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
         css_word_val(&out[CSS_PROP_FLOAT], "none");
         rec[CSS_PROP_FLOAT] = css_value_rec(s, &out[CSS_PROP_FLOAT], rec[CSS_PROP_FLOAT].how, win[CSS_PROP_FLOAT], vc);
     }
+    /* writing-mode's SVG 1.1 values computed as Chromium computes them: tb and tb-rl vertical-rl, lr, lr-tb, rl and rl-tb
+       horizontal-tb; text-orientation's sideways-right sideways, its vertical-right mixed */
+    if (win[CSS_PROP_WRITING_MODE] && out[CSS_PROP_WRITING_MODE].unit == CSS_UNIT_KEYWORD &&
+        (out[CSS_PROP_WRITING_MODE].word[0] == 'l' || out[CSS_PROP_WRITING_MODE].word[0] == 'r' || out[CSS_PROP_WRITING_MODE].word[0] == 't')) {
+        css_word_val(&out[CSS_PROP_WRITING_MODE], out[CSS_PROP_WRITING_MODE].word[0] == 't' ? "vertical-rl" : "horizontal-tb");
+        rec[CSS_PROP_WRITING_MODE] = css_value_rec(s, &out[CSS_PROP_WRITING_MODE], rec[CSS_PROP_WRITING_MODE].how, win[CSS_PROP_WRITING_MODE], vc);
+    }
+    if (win[CSS_PROP_TEXT_ORIENTATION] && (css_word_is(&out[CSS_PROP_TEXT_ORIENTATION], "sideways-right") ||
+                                           css_word_is(&out[CSS_PROP_TEXT_ORIENTATION], "vertical-right"))) {
+        css_word_val(&out[CSS_PROP_TEXT_ORIENTATION], out[CSS_PROP_TEXT_ORIENTATION].word[0] == 's' ? "sideways" : "mixed");
+        rec[CSS_PROP_TEXT_ORIENTATION] = css_value_rec(s, &out[CSS_PROP_TEXT_ORIENTATION], rec[CSS_PROP_TEXT_ORIENTATION].how,
+                                                       win[CSS_PROP_TEXT_ORIENTATION], vc);
+    }
     /* -webkit-box-orient's logical keywords computed as Chromium computes them: block-axis vertical,
        inline-axis horizontal */
     if (win[CSS_PROP_WEBKIT_BOX_ORIENT] && (css_word_is(&out[CSS_PROP_WEBKIT_BOX_ORIENT], "block-axis") ||
@@ -8410,6 +8633,16 @@ static void css_element(css_style *s, const css_env *env, const vector<uint32_t>
             out[k] = mv;
             rec[k] = css_value_rec(s, &mv, rec[k].how, 0, vc);
         }
+    /* an inline element of a writing mode other than its parent's is an inline-block (Blink's StyleAdjuster, measured) */
+    if (win[CSS_PROP_WRITING_MODE] && !is_root && css_word_is(&out[CSS_PROP_DISPLAY], "inline")) {
+        css_val pwm;
+        css_val_of(s, pc0, CSS_PROP_WRITING_MODE, initial, &pwm);
+        if (css_wm_of(&pwm) != css_wm_of(&out[CSS_PROP_WRITING_MODE])) {
+            css_word_val(&out[CSS_PROP_DISPLAY], "inline-block");
+            rec[CSS_PROP_DISPLAY] = css_value_rec(s, &out[CSS_PROP_DISPLAY], CSS_HOW_DECLARED, win[CSS_PROP_DISPLAY] ? win[CSS_PROP_DISPLAY] :
+                                                  win[CSS_PROP_WRITING_MODE], vc);
+        }
+    }
     css_val pdisplay;
     css_val_of(s, pc0, CSS_PROP_DISPLAY, initial, &pdisplay);
     if (win[CSS_PROP_DISPLAY] || win[CSS_PROP_FLOAT] || win[CSS_PROP_POSITION])
@@ -8611,7 +8844,7 @@ static void css_svg_hints(css_style *s, const dom_document *d, uint32_t x, uint3
         size_t a0 = css_skip_ws(data(v), vn, 0), b0 = vn;
         while (b0 > a0 && css_ws(at(v, b0 - 1))) b0--;
         double num;
-        if (prop >= 0 && css_pdefs[prop].gram == G_LEN && b0 > a0 && css_number(data(v) + a0, b0 - a0, &num) == b0 - a0) append_range(t, "px", 2);
+        if (prop >= 0 && prop < CSS_NPROPS && css_pdefs[prop].gram == G_LEN && b0 > a0 && css_number(data(v) + a0, b0 - a0, &num) == b0 - a0) append_range(t, "px", 2);
         if (!r) {
             r = css_own_rule(s, sheet, CSS_ORIGIN_AUTHOR, "the presentation attributes", 27, 1);
             push_back(matched, r);

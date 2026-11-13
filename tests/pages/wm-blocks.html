@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Writing modes: blocks</title>
+<style>
+/* tests/pages/wm-blocks.html -- block containers in the vertical writing modes (CSS Writing Modes 4), as
+   Chromium lays them out: lines stacked right to left (vertical-rl, sideways-rl) or left to right (vertical-lr,
+   sideways-lr), each a column of text; margins, borders, paddings, width and height on their physical sides, a
+   block's inline size its height; percentages of the right axis; margins collapsing along the block axis; a
+   vertical block in a horizontal one (an orthogonal flow: its available inline size its parent's definite height,
+   else the viewport's, its height fitting its content in that) and the reverse; auto margins; floats (left the
+   top of a vertical line); right to left in a vertical box (its lines from the bottom). Held to Chromium's boxes
+   (wm-blocks.chromium) and drawing (wm-blocks.shot.png, .regions). */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.v { writing-mode: vertical-rl; }
+.l { writing-mode: vertical-lr; }
+.sr { writing-mode: sideways-rl; }
+.sl { writing-mode: sideways-lr; }
+.h { writing-mode: horizontal-tb; }
+.box { background: #e6eef8; }
+.t { color: transparent; }
+#row1 > div, #row2 > div { float: left; margin-right: 8px; }
+</style></head>
+<body>
+<div id="row1">
+<div id="a" class="v box">Hello world, this is text</div>
+<div id="b" class="v box t" style="height: 100px">Hello world this is some text that wraps</div>
+<div id="c" class="l box t" style="height: 100px; margin: 5px 10px 15px 20px; padding: 1px 2px 3px 4px; border: 1px solid #369">Hello world this is some text</div>
+<div id="d" class="sr box t" style="height: 90px">Sideways right to left text</div>
+<div id="e" class="sl box t" style="height: 90px">Sideways left to right text</div>
+<div id="f" class="v box" style="height: 80px; border-right: 4px solid #c33; border-left: 2px solid #3c3; padding: 3px 0 5px 0"><div id="f1" style="height: 50%; margin: 3px; background: #fd8">ab</div><div id="f2" style="margin: 3px; background: #8df">cd ef</div></div>
+<div id="g" class="v box" style="height: 100px; direction: rtl">right to left</div>
+<div id="h" class="v box t" style="height: 120px; width: 70px; text-align: center">centred lines of text</div>
+<div id="i" class="v box" style="height: 120px"><div id="i1" style="float: left; width: 20px; height: 30px; background: #c9c"></div><div id="i2" style="float: right; width: 30px; height: 20px; background: #9cc"></div><span id="i3" class="t">text beside the floats</span></div>
+<div id="j" class="l box" style="height: 120px"><div id="j1" class="v" style="background: #fd8">rl in lr</div><div id="j2" style="margin-left: 6px; background: #8df">lr block</div></div>
+</div>
+<div id="row2" style="clear: both; padding-top: 10px">
+<div id="k" class="box" style="width: 300px; height: 120px"><div id="k1" class="v t" style="background: #fd8">orthogonal: its height its parent's definite height, the text wrapping in it</div></div>
+<div id="m" class="box" style="width: 180px"><div id="m1" class="v t" style="background: #fd8; margin: 0 auto">auto margins</div><div id="m2" class="v t" style="background: #8df; width: 50%; height: 50%">percent</div></div>
+<div id="n" class="v box" style="height: 200px"><div id="n1" class="h t" style="background: #fd8">horizontal in a vertical box: its width the viewport's</div><div id="n2" class="h" style="background: #8df; width: 40px">fixed</div></div>
+<div id="o" class="v box" style="height: 150px; max-height: 100px; min-width: 60px"><p id="o1" style="margin: 10px 4px; background: #fd8">a paragraph</p><p id="o2" style="margin: 6px 4px; background: #8df">its margins collapse</p></div>
+</div>
+</body></html>

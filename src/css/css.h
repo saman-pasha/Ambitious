@@ -9,8 +9,16 @@
 #include <stddef.h>
 #include <vector.pl>
 
-/* the properties of a computed style: every value of enum(prop) but custom */
-#define CSS_NPROPS 183
+/* the properties of a computed style: every value of enum(prop) before custom (the flow-relative
+   ones after it are declarations' alone) */
+#define CSS_NPROPS 185
+
+/* a writing mode, as layout and the cascade number writing-mode's values */
+enum { CSS_WM_HTB, CSS_WM_VRL, CSS_WM_VLR, CSS_WM_SRL, CSS_WM_SLR };
+/* the physical property a flow-relative one (margin-inline-start, block-size, ...; CSS Logical 1) is
+   for an element of writing mode wm (CSS_WM_*) and direction rtl (1: right to left); any other
+   property itself */
+int css_logical_physical(int prop, int wm, int rtl);
 
 /* a calc(), min(), max() or clamp() whose lengths are px, its percentages taken of
    basis: 1 and the px in *out, or 0 when it is none */
