@@ -20,6 +20,10 @@
 
 /* ---- tokens ---- */
 
+/* a statement's place, where V8 refuses declarations: an if's branch, a loop's or a with's body, a label's at a
+   statement list's level, a label's inside one of those */
+enum { SS_NONE, SS_IF, SS_LOOP, SS_LABEL, SS_LABEL_IN };
+
 enum { T_EOF, T_NAME, T_NUM, T_STR, T_TEMPLATE, T_REGEX, T_PUNCT };
 enum {
     P_LBRACE = 1, P_RBRACE, P_LPAREN, P_RPAREN, P_LBRACK, P_RBRACK, P_DOT, P_ELLIPSIS, P_SEMI, P_COMMA,
@@ -80,6 +84,8 @@ enum { PK_INIT, PK_GET, PK_SET, PK_METHOD, PK_SPREAD, PK_FIELD, PK_COVER, PK_BLO
 #define NF_REST 16
 #define NF_EVAL 32         /* a call of eval by its name: a direct eval, s its site's scope */
 #define NF_PROTO 64        /* an object literal's __proto__: v (not computed, not shorthand, not a method): its prototype */
+#define NF_SHORT 256       /* an object literal's shorthand property ({a}, {a = 1}) */
+#define NF_TRAIL 512       /* an array or an object literal written with a comma after its last element */
 #define NF_PRIVATE 128     /* a member's key a private name (#x), computed from b (its hidden binding's read), s its name;
                               a class element's: c its private name's record, plus one */
 
@@ -96,7 +102,8 @@ enum { SC_SCRIPT, SC_FUNC, SC_BLOCK, SC_SELF, SC_EVAL };
    passing the scope are looked for there first); synth: a scope of a direct eval's caller,
    its cells the caller's (the site's bindings); first and last: its declarations' list, in their order (decls'
    next) */
-typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth, last; } jscope;
+/* catchp: a catch clause's scope, 1 its parameter a name, 2 a pattern */
+typedef struct jscope { uint32_t parent, fn, kind, has_env, nenv, first, dyn, synth, last, catchp; } jscope;
 /* D_EV: a sloppy function's eval vars object; D_WITH: a with's object; D_EVALVAR: a var or
    function a sloppy direct eval's code declares in its caller's function (that object's) */
 enum { D_VAR, D_LET, D_CONST, D_FUNC, D_PARAM, D_CLASS, D_SELF, D_ARGS, D_EV, D_WITH, D_EVALVAR,
@@ -113,8 +120,11 @@ typedef struct jref { uint32_t scope, atom, decl, fn; } jref;
 #define FN_PARAMS 0x80000          /* its parameters being read: no yield or await there */
 #define FN_STATIC 0x100000         /* a class's static initializer: its static fields and blocks in order, the class its this */
 #define FN_BLOCK 0x200000          /* a class's static block: a method of its own, its body the block's statements */
+/* dup: a name two of its parameters bind (the first such), for the checks strict code, an arrow, a method and a
+   non-simple list make */
 typedef struct jfn {
     uint32_t params, nparams, body, scope, flags, name, line, src_start, src_end, parent, id, nslots, cls, args_decl, nformal;
+    uint32_t dup;
 } jfn;
 /* a class: its name, heritage, constructor, members; its fields' function and its static initializer (0: none); its
    declaration's outer binding; its own scope, whose inner binding of its name is immutable */
@@ -161,6 +171,11 @@ typedef struct js_cc {
     vector<jmexp> mexps;
     vector<uint32_t> export_names;    /* the names an export's declaration declares */
     vector<uint32_t> plabels;         /* the labels the parser is inside: each its name, then its function */
+    vector<uint32_t> pnames;          /* the names the parameters being read bind (those declared in pn_scope) */
+    vector<uint8_t> paren;            /* paren[n]: node n was written in parentheses */
+    /* the scopes a var passed through on its way to its function's (scope, name, its declaration): a lexical
+       declaration of the name there after it is V8's redeclaration error. Apart from dkeys, which resolve names */
+    vector<jdkey> vkeys;
     /* the indexes that keep the compile linear: the scopes' names (open addressing, at most half full: ndkeys of
        them held), each function's declarations in their order (fn_decl[f] its first, decl_next the next), each
        scope's class (plus one: the first whose scope it is) */
@@ -185,6 +200,13 @@ typedef struct js_cc {
     uint32_t kw[KW_N];
     uint32_t depth;                   /* the parser's nesting, bounded (JS_NEST_MAX) */
     uint32_t lex_oct;                 /* the escapes a string literal had (JL_*): the worst so far */
+    uint32_t pn_scope;                /* the scope whose declarations go to pnames, plus one (0: none) */
+    uint32_t arrow_end;               /* the arrow function p_primary just returned (no operator applies to it) */
+    uint32_t ssc;                     /* the place of the statement p_stmt reads next (SS_*): what may not stand there */
+    uint32_t nvkeys;
+    uint32_t no_pow;                  /* the unary operand being read leaves ** to its operator (V8's early error) */
+    uint32_t tpl_bad;                 /* a template part's escape no cooked string has (TB_*: 0 none) */
+    uint32_t annexb_if;               /* the function declare reads next is sloppy code's if branch (Annex B.3.4) */
     int err;
     uint32_t err_line;
     char errmsg[240];
@@ -195,7 +217,8 @@ typedef struct js_cc {
     vector_jclass_drop(&(c).classes); vector_jpriv_drop(&(c).privs); vector_jctx_drop(&(c).ctx); vector_uint32_t_drop(&(c).mreqs); \
     vector_jmimp_drop(&(c).mimps); vector_jmexp_drop(&(c).mexps); vector_uint32_t_drop(&(c).export_names); \
     vector_jdkey_drop(&(c).dkeys); vector_uint32_t_drop(&(c).fn_decl); vector_uint32_t_drop(&(c).decl_next); \
-    vector_uint32_t_drop(&(c).scope_cls); vector_uint32_t_drop(&(c).plabels)
+    vector_uint32_t_drop(&(c).scope_cls); vector_uint32_t_drop(&(c).plabels); \
+    vector_uint32_t_drop(&(c).pnames); vector_uint8_t_drop(&(c).paren); vector_jdkey_drop(&(c).vkeys)
 
 #define CC js_vm *vm, const char *src, uint32_t srcn, js_cc *cc
 #define CCA vm, src, srcn, cc
@@ -259,7 +282,19 @@ static int lx_id_at(const char *src, uint32_t srcn, uint32_t i, int part, uint32
     return part ? js_uni_id_part(cp) : js_uni_id_start(cp);
 }
 
-/* an escape after a backslash at src[i] (the character after it): into u; the index after it */
+/* a template part's escape with no cooked string (V8's words, when the template has no tag) */
+enum { TB_NONE, TB_OCTAL, TB_8_9, TB_UNICODE, TB_HEX, TB_CODEPOINT };
+static const char *const js_tb_msgs[] = { 0, "Octal escape sequences are not allowed in template strings.",
+    "\\8 and \\9 are not allowed in template strings.", "Invalid Unicode escape sequence",
+    "Invalid hexadecimal escape sequence", "Undefined Unicode code-point" };
+/* an escape's error: a template's kept for its parser (str 2), else the lexer's */
+static void lx_esc_err(js_cc *cc, int str, uint32_t tb, const char *m) {
+    if (str == 2) { if (!cc->tpl_bad) cc->tpl_bad = tb; }
+    else cc_error(cc, cc->line, m);
+}
+
+/* an escape after a backslash at src[i] (the character after it): into u; the index after it. str: 0 a name's, 1 a
+   string's (legacy octal), 2 a template's (its errors kept: lx_esc_err) */
 static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u, int str) {
     if (i >= srcn) { cc_error(cc, cc->line, "Invalid or unexpected token"); return i; }
     char c = src[i];
@@ -270,6 +305,12 @@ static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u, int str) {
     if (c == 'f') { push_back(u, (uint16_t)'\f'); return i + 1; }
     if (c == 'v') { push_back(u, (uint16_t)0x0B); return i + 1; }
     if (c == '0' && !(i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '9')) { push_back(u, (uint16_t)0); return i + 1; }
+    if (str == 2 && c >= '0' && c <= '9') {
+        /* a template has no octal escape, nor \8 and \9 */
+        lx_esc_err(cc, 2, c >= '8' ? TB_8_9 : TB_OCTAL, 0);
+        push_back(u, (uint16_t)c);
+        return i + 1;
+    }
     if (str && c >= '0' && c <= '7') {
         /* a legacy octal escape: \0 to \377, up to three digits after a 0 to 3, two after a 4 to 7 */
         uint32_t v = (uint32_t)(c - '0'), j = i + 1, nd = 1, max = c <= '3' ? 3 : 2;
@@ -285,7 +326,7 @@ static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u, int str) {
     }
     if (c == 'x') {
         int h1 = i + 1 < srcn ? lx_hex((uint8_t)src[i + 1]) : -1, h2 = i + 2 < srcn ? lx_hex((uint8_t)src[i + 2]) : -1;
-        if (h1 < 0 || h2 < 0) { cc_error(cc, cc->line, "Invalid hexadecimal escape sequence"); return i + 1; }
+        if (h1 < 0 || h2 < 0) { lx_esc_err(cc, str, TB_HEX, "Invalid hexadecimal escape sequence"); return i + 1; }
         push_back(u, (uint16_t)(h1 * 16 + h2));
         return i + 3;
     }
@@ -296,19 +337,19 @@ static uint32_t lx_escape(CC, uint32_t i, vector<uint16_t> *u, int str) {
             uint32_t j = i + 2;
             while (j < srcn && src[j] != '}') {
                 int h = lx_hex((uint8_t)src[j]);
-                if (h < 0) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return j; }
-                if (cp > 0x10FFFF) { cc_error(cc, cc->line, "Undefined Unicode code-point"); return j; }
+                if (h < 0) { lx_esc_err(cc, str, TB_UNICODE, "Invalid Unicode escape sequence"); return j; }
+                if (cp > 0x10FFFF) { lx_esc_err(cc, str, TB_CODEPOINT, "Undefined Unicode code-point"); return j; }
                 cp = cp * 16 + (uint32_t)h;
                 j++;
             }
-            if (j >= srcn || j == i + 2) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return j; }
-            if (cp > 0x10FFFF) { cc_error(cc, cc->line, "Undefined Unicode code-point"); return j; }
+            if (j >= srcn || j == i + 2) { lx_esc_err(cc, str, TB_UNICODE, "Invalid Unicode escape sequence"); return j; }
+            if (cp > 0x10FFFF) { lx_esc_err(cc, str, TB_CODEPOINT, "Undefined Unicode code-point"); return j + 1; }
             lx_push_cp(u, cp);
             return j + 1;
         }
         for (uint32_t j = 1; j <= 4; j++) {
             int h = i + j < srcn ? lx_hex((uint8_t)src[i + j]) : -1;
-            if (h < 0) { cc_error(cc, cc->line, "Invalid Unicode escape sequence"); return i + j; }
+            if (h < 0) { lx_esc_err(cc, str, TB_UNICODE, "Invalid Unicode escape sequence"); return i + j; }
             cp = cp * 16 + (uint32_t)h;
         }
         push_back(u, (uint16_t)cp);
@@ -343,13 +384,14 @@ static void lx_template(CC, uint32_t i) {
     t.type = T_TEMPLATE;
     t.start = i;
     t.line = cc->line;
+    cc->tpl_bad = TB_NONE;
     vector<uint16_t> u;
     for (;;) {
         if (i >= srcn) { cc_error(cc, t.line, "Unexpected end of input"); break; }
         char c = src[i];
         if (c == '`') { t.aux = 1; i++; break; }
         if (c == '$' && i + 1 < srcn && src[i + 1] == '{') { t.aux = 0; i += 2; break; }
-        if (c == '\\') { i = lx_escape(CCA, i + 1, &u, 0); continue; }
+        if (c == '\\') { i = lx_escape(CCA, i + 1, &u, 2); continue; }
         if (c == '\r') { push_back(u, (uint16_t)'\n'); if (i + 1 < srcn && src[i + 1] == '\n') i++; cc->line++; i++; continue; }
         if (c == '\n') cc->line++;
         uint32_t k;
@@ -358,6 +400,7 @@ static void lx_template(CC, uint32_t i) {
         i += k;
     }
     t.str = js_str_new(vm, data(u), len(u));
+    t.oct = cc->tpl_bad;
     t.end = i;
     cc->prev = cc->tok;
     cc->tok = t;
@@ -793,6 +836,40 @@ static void dk_insert(js_cc *cc, jdkey k) {
         if (e.scope == k.scope && e.atom == k.atom) return;     /* the scope's first declaration of the name stays */
     }
 }
+/* a var's passage through scope sc (the name, its declaration), indexed as dkeys are */
+static uint32_t vk_find(js_cc *cc, uint32_t sc, uint32_t atom) {
+    size_t cap = len(cc->vkeys);
+    if (!cap) return 0;
+    size_t m = cap - 1;
+    for (size_t i = dk_hash(sc, atom) & m;; i = (i + 1) & m) {
+        jdkey k = cc->vkeys[i];
+        if (!k.decl) return 0;
+        if (k.scope == sc && k.atom == atom) return k.decl;
+    }
+}
+static void vk_put(js_cc *cc, jdkey k) {
+    size_t m = len(cc->vkeys) - 1;
+    for (size_t i = dk_hash(k.scope, k.atom) & m;; i = (i + 1) & m) {
+        jdkey e = cc->vkeys[i];
+        if (!e.decl) { cc->vkeys[i] = k; cc->nvkeys++; return; }
+        if (e.scope == k.scope && e.atom == k.atom) return;
+    }
+}
+static void vk_add(js_cc *cc, uint32_t sc, uint32_t atom, uint32_t id) {
+    if ((size_t)cc->nvkeys * 2 + 2 > len(cc->vkeys)) {
+        size_t cap = len(cc->vkeys) ? len(cc->vkeys) * 2 : 64;
+        vector<jdkey> old;
+        for (size_t i = 0; i < len(cc->vkeys); i++) if (cc->vkeys[i].decl) push_back(old, cc->vkeys[i]);
+        clear(cc->vkeys);
+        jdkey z = { 0, 0, 0 };
+        for (size_t i = 0; i < cap; i++) push_back(cc->vkeys, z);
+        cc->nvkeys = 0;
+        for (size_t i = 0; i < len(old); i++) vk_put(cc, old[i]);
+    }
+    jdkey k = { sc, atom, id };
+    vk_put(cc, k);
+}
+
 /* declaration id appended to scope sc's list (at its last), and indexed */
 static void scope_append(js_cc *cc, uint32_t sc, uint32_t id) {
     cc->decls[id].next = 0;
@@ -817,23 +894,56 @@ static void scope_append(js_cc *cc, uint32_t sc, uint32_t id) {
     dk_insert(cc, k);
 }
 
+static void redeclared(CC, uint32_t atom, uint32_t line) {
+    vector<char> m;
+    append_range(m, "Identifier '", 12);
+    js_str_to_utf8(vm, atom, &m);
+    append_range(m, "' has already been declared", 27);
+    push_back(m, 0);
+    cc_error(cc, line, data(m));
+}
 static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     uint32_t sc = kind == D_VAR || (kind == D_FUNC && cc->scopes[cc->cur_scope].kind == SC_EVAL) ? var_scope(cc, cc->cur_scope) : cc->cur_scope;
+    /* sloppy code's function as an if's branch is in a block of its own, as V8 has it (Annex B.3.4): no var passed
+       that block, and it is no catch's block */
+    int annexb = cc->annexb_if != 0;
+    cc->annexb_if = 0;
     if (cc->exporting && sc == 0) push_back(cc->export_names, atom);
+    if (cc->pn_scope && sc == cc->pn_scope - 1) push_back(cc->pnames, atom);
+    /* V8's redeclaration errors past one scope: a var (or an eval's function) hoisted through scopes that declare its
+       name lexically (a catch's simple parameter excepted: Annex B), and a lexical declaration where a var passed, or
+       in a catch's block of its parameter's name */
+    int hoisted = sc != cc->cur_scope && (kind == D_VAR || kind == D_FUNC);
+    if (hoisted) {
+        for (uint32_t s = cc->cur_scope; s != sc; s = cc->scopes[s].parent) {
+            uint32_t x = scope_find(cc, s, atom);
+            if (!x || cc->decls[x].scope != s) continue;
+            uint32_t xk = cc->decls[x].kind;
+            if (xk != D_LET && xk != D_CONST && xk != D_CLASS && xk != D_FUNC) continue;
+            if (xk == D_LET && cc->scopes[s].catchp == 1 && kind == D_VAR) continue;
+            redeclared(CCA, atom, line);
+            return x;
+        }
+    } else if (!annexb && (kind == D_LET || kind == D_CONST || kind == D_CLASS || (kind == D_FUNC && cc->scopes[sc].kind == SC_BLOCK))) {
+        if (vk_find(cc, sc, atom)) { redeclared(CCA, atom, line); return 0; }
+        uint32_t ps = cc->scopes[sc].kind == SC_BLOCK ? cc->scopes[sc].parent : sc;
+        if (ps != sc && cc->scopes[ps].catchp) {
+            uint32_t x = scope_find(cc, ps, atom);
+            if (x && cc->decls[x].scope == ps) { redeclared(CCA, atom, line); return x; }
+        }
+    }
     uint32_t e = scope_find(cc, sc, atom);
     if (e) {
         uint32_t dk = cc->decls[e].kind;
-        if ((kind == D_VAR || kind == D_FUNC) && (dk == D_VAR || dk == D_FUNC || dk == D_PARAM)) {
+        /* a block's function declared twice: Annex B lets sloppy code, not strict */
+        int twice = kind == D_FUNC && dk == D_FUNC && cc->scopes[sc].kind == SC_BLOCK && cc_strict(cc);
+        if (!twice && (kind == D_VAR || kind == D_FUNC) && (dk == D_VAR || dk == D_FUNC || dk == D_PARAM)) {
             if (kind == D_FUNC) cc->decls[e].kind = dk == D_PARAM ? D_PARAM : D_FUNC;
+            if (hoisted) for (uint32_t s = cc->cur_scope; s != sc; s = cc->scopes[s].parent) vk_add(cc, s, atom, e);
             return e;
         }
-        if (kind == D_PARAM && dk == D_PARAM) return e;
-        vector<char> m;
-        append_range(m, "Identifier '", 12);
-        js_str_to_utf8(vm, atom, &m);
-        append_range(m, "' has already been declared", 27);
-        push_back(m, 0);
-        cc_error(cc, line, data(m));
+        if (kind == D_PARAM && (dk == D_PARAM || (dk == D_VAR && cc->pn_scope))) return e;
+        redeclared(CCA, atom, line);
         return e;
     }
     jdecl d;
@@ -849,6 +959,7 @@ static uint32_t declare(CC, uint32_t atom, uint32_t kind, uint32_t line) {
     uint32_t id = (uint32_t)(len(cc->decls) - 1);
     /* the scope's list in declaration order: appended at its end */
     scope_append(cc, sc, id);
+    if (hoisted) for (uint32_t s = cc->cur_scope; s != sc; s = cc->scopes[s].parent) vk_add(cc, s, atom, id);
     return id;
 }
 
@@ -961,8 +1072,36 @@ static uint32_t p_unary(CC);
 static uint32_t p_unary_in(CC);
 static uint32_t p_call(CC);
 static int name_refused(CC, jtok t, int strict);
+static int simple_target(js_cc *cc, uint32_t e);
+static void strict_literal(CC, jtok t);
+static int kw_reserved(js_cc *cc, uint32_t atom);
+static int strict_eval_name(CC, uint32_t atom, int strict, uint32_t line);
+static uint32_t pnames_dup(js_cc *cc, size_t mark);
+/* called before their definitions: each with its prototype, which cicilang checks a call against
+   (toolchain/REPORT.md, finding 43) */
+static int is_decl_start(CC);
+static int in_generator(js_cc *cc);
+static int in_async(js_cc *cc);
+static void gen_aclose(js_vm *vm, int quiet);
+static uint32_t gen_test_jump(CC, uint32_t n, int when);
 
 static int is_name_tok(js_cc *cc) { return cc->tok.type == T_NAME; }
+
+/* a node written in parentheses ((a), ({}) ...), as a pattern's check reads it */
+static void paren_mark(js_cc *cc, uint32_t n) {
+    while (len(cc->paren) <= n) push_back(cc->paren, 0);
+    cc->paren[n] = 1;
+}
+static int paren_is(js_cc *cc, uint32_t n) { return n < len(cc->paren) && cc->paren[n]; }
+
+/* an accessor's parameters as V8 has them: a getter's none, a setter's one, not a rest */
+static void accessor_params(CC, uint32_t fi, uint32_t kind, uint32_t line) {
+    if (cc->err) return;
+    uint32_t n = cc->fns[fi].nparams;
+    if (kind == PK_GET && n != 0) cc_error(cc, line, "Getter must not have any formal parameters.");
+    else if (kind == PK_SET && n != 1) cc_error(cc, line, "Setter must have exactly one formal parameter.");
+    else if (kind == PK_SET && (cc->fns[fi].flags & JF_HAS_REST)) cc_error(cc, line, "Setter function argument must not be a rest parameter");
+}
 
 /* a getter's or a setter's name, as SetFunctionName gives it: "get x" */
 static uint32_t accessor_name(js_vm *vm, uint32_t kind, uint32_t key) {
@@ -981,6 +1120,7 @@ static uint32_t p_prop_key(CC, int *computed) {
         return k;
     }
     uint32_t n = node(cc, N_STR, line);
+    if (cc->tok.type == T_NUM) strict_literal(CCA, cc->tok);
     if (cc->tok.type == T_NAME || cc->tok.type == T_STR) cc->nodes[n].s = js_atom(vm, cc->tok.str);
     else if (cc->tok.type == T_NUM && cc->tok.aux == 1) cc->nodes[n].s = js_atom(vm, js_big_to_string(vm, jv_big(cc->tok.str), 10));
     else if (cc->tok.type == T_NUM) cc->nodes[n].s = js_atom(vm, js_num_to_str(vm, cc->tok.num));
@@ -996,14 +1136,32 @@ static void p_params(CC, uint32_t fi) {
     size_t mark = len(cc->tmp);
     uint32_t formal = 0;
     int counting = 1;
+    /* the names the parameters bind, gathered for the duplicates' check (a default's functions' own are theirs) */
+    uint32_t pn0 = cc->pn_scope;
+    size_t pmark = len(cc->pnames);
+    cc->pn_scope = cc->fns[fi].scope + 1;
     while (!is_p(cc, P_RPAREN) && !cc->err) {
         uint32_t line = cc->tok.line;
         uint32_t p = node(cc, N_PARAM, line);
-        if (is_p(cc, P_ELLIPSIS)) { lx(CCA); cc->nodes[p].op = NF_REST; cc->fns[fi].flags |= JF_HAS_REST | JF_NONSIMPLE; counting = 0; }
+        int rest = is_p(cc, P_ELLIPSIS);
+        if (rest) { lx(CCA); cc->nodes[p].op = NF_REST; cc->fns[fi].flags |= JF_HAS_REST | JF_NONSIMPLE; counting = 0; }
         uint32_t t;
         if (is_name_tok(cc) && !cc->tok.aux) {
             uint32_t atom = cc->tok.str;
+            /* an arrow's (yield) in a generator, (await x) in an async function: V8's cover grammar refuses the
+               expression as a target; a bare await an operand short of one */
+            if ((cc->fns[fi].flags & JF_ARROW) && atom == cc->kw[K_YIELD] && in_generator(cc)) {
+                cc_error(cc, line, "Invalid destructuring assignment target");
+                break;
+            }
+            if ((cc->fns[fi].flags & JF_ARROW) && atom == cc->kw[K_AWAIT] && in_async(cc)) {
+                lx(CCA);
+                if (is_p(cc, P_RPAREN) || is_p(cc, P_COMMA)) unexpected(CCA);
+                else cc_error(cc, line, "Invalid destructuring assignment target");
+                break;
+            }
             if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); break; }
+            if (strict_eval_name(CCA, atom, 0, line)) break;
             lx(CCA);
             uint32_t d = declare(CCA, atom, D_PARAM, line);
             cc->decls[d].param = (uint32_t)(len(cc->tmp) - mark) + 1;
@@ -1013,11 +1171,20 @@ static void p_params(CC, uint32_t fi) {
             cc->fns[fi].flags |= JF_NONSIMPLE;
         }
         cc->nodes[p].a = t;
+        if (rest && is_p(cc, P_ASSIGN)) { cc_error(cc, cc->tok.line, "Rest parameter may not have a default initializer"); break; }
+        if (rest && !is_p(cc, P_RPAREN) && !cc->err) { cc_error(cc, cc->tok.line, "Rest parameter must be last formal parameter"); break; }
         if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[p].b = p_assign(CCA, 0); counting = 0; cc->fns[fi].flags |= JF_NONSIMPLE; }
         if (counting) formal++;
         push_back(cc->tmp, p);
         if (!is_p(cc, P_RPAREN)) expect_p(CCA, P_COMMA, "',' between parameters");
     }
+    /* a name bound twice: V8's early error in strict code, an arrow's, a method's and a list not simple (a sloppy
+       function's simple list may; a 'use strict' in its body refuses it then: p_body) */
+    cc->fns[fi].dup = cc->err ? 0 : pnames_dup(cc, pmark);
+    resize(cc->pnames, pmark);
+    cc->pn_scope = pn0;
+    if (cc->fns[fi].dup && (cc->fns[fi].flags & (JF_STRICT | JF_ARROW | JF_METHOD | JF_NONSIMPLE | JF_CLASS_CTOR)))
+        cc_error(cc, cc->tok.line, "Duplicate parameter name not allowed in this context");
     expect_p(CCA, P_RPAREN, "')' after the parameters");
     cc->fns[fi].flags &= ~(uint32_t)FN_PARAMS;
     jlist pl = list_take(cc, mark);
@@ -1055,6 +1222,29 @@ static int name_refused_as(CC, jtok t, int strict, int gen, int asy) {
 }
 static int name_refused(CC, jtok t, int strict) { return name_refused_as(CCA, t, strict, in_generator(cc) != 0, in_async(cc) != 0); }
 
+/* eval or arguments bound or assigned in strict code: V8's early error (strict: the code is, a class's name) */
+static int strict_eval_name(CC, uint32_t atom, int strict, uint32_t line) {
+    if (atom != cc->kw[K_EVAL] && atom != cc->kw[K_ARGUMENTS]) return 0;
+    if (!strict && !cc_strict(cc)) return 0;
+    cc_error(cc, line, "Unexpected eval or arguments in strict mode");
+    return 1;
+}
+
+static int u32_cmp(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return x < y ? -1 : x > y;
+}
+/* a name bound twice in pnames from mark on (0: none) */
+static uint32_t pnames_dup(js_cc *cc, size_t mark) {
+    size_t n = len(cc->pnames) - mark;
+    if (n < 2) return 0;
+    vector<uint32_t> v;
+    for (size_t i = mark; i < len(cc->pnames); i++) push_back(v, cc->pnames[i]);
+    qsort(data(v), n, sizeof(uint32_t), u32_cmp);
+    for (size_t i = 1; i < n; i++) if (v[i] == v[i - 1]) return v[i];
+    return 0;
+}
+
 /* statements to a closing brace (not taken): a list */
 static void p_statements(CC, uint32_t *off, uint32_t *count) {
     size_t mark = len(cc->tmp);
@@ -1065,9 +1255,11 @@ static void p_statements(CC, uint32_t *off, uint32_t *count) {
 /* a body's statements to its closing brace (not taken) or the script's end: a
    directive prologue's 'use strict' makes the function strict, and every function
    within it (fn_new) */
+static void strict_after(CC, uint32_t fi, uint32_t oct, uint32_t line);
 static void p_body(CC, uint32_t fi, uint32_t *off, uint32_t *count) {
     size_t mark = len(cc->tmp);
     int prologue = 1;
+    uint32_t oct = 0;
     while (!is_p(cc, P_RBRACE) && cc->tok.type != T_EOF && !cc->err) {
         jtok t = cc->tok;
         uint32_t st = p_stmt(CCA);
@@ -1079,9 +1271,58 @@ static void p_body(CC, uint32_t fi, uint32_t *off, uint32_t *count) {
         const char *ds = "use strict";
         int is_strict = t.end - t.start == 12;
         for (uint32_t i = 0; is_strict && i < 10; i++) if (src[t.start + 1 + i] != ds[i]) is_strict = 0;
-        if (is_strict) cc->fns[fi].flags |= JF_STRICT;
+        if (is_strict && !(cc->fns[fi].flags & JF_STRICT)) {
+            cc->fns[fi].flags |= JF_STRICT;
+            strict_after(CCA, fi, oct, t.line);
+        } else if (is_strict) cc->fns[fi].flags |= JF_STRICT;
+        if (t.oct && !oct) oct = t.oct;
     }
     { jlist tl_ = list_take(cc, mark); *off = tl_.off; *count = tl_.count; }
+}
+
+/* a function a 'use strict' directive in its body made strict: V8's early errors for what was read before it, as
+   sloppy code -- a list of parameters not simple, a parameter or the function's name that strict code refuses (eval,
+   arguments, the words it reserves), two parameters of one name, and an octal escape in a directive before it */
+static void strict_after(CC, uint32_t fi, uint32_t oct, uint32_t line) {
+    if (cc->fns[fi].flags & JF_NONSIMPLE) {
+        cc_error(cc, line, "Illegal 'use strict' directive in function with non-simple parameter list");
+        return;
+    }
+    for (uint32_t i = 0; i < cc->fns[fi].nparams && !cc->err; i++) {
+        jnode pn = cc->nodes[cc->lists[cc->fns[fi].params + i]];
+        if (!pn.a || cc->nodes[pn.a].k != N_IDENT) continue;
+        jtok nt = cc->tok;
+        nt.type = T_NAME;
+        nt.str = cc->nodes[pn.a].s;
+        nt.aux = 0;
+        nt.line = pn.line;
+        if (strict_eval_name(CCA, nt.str, 1, pn.line)) return;
+        if (name_refused_as(CCA, nt, 1, 0, 0)) {
+            uint32_t sin = cc->in_class;
+            cc->in_class = 1;
+            unexpected_tok(CCA, nt);
+            cc->in_class = sin;
+            return;
+        }
+    }
+    if (cc->fns[fi].dup) { cc_error(cc, line, "Duplicate parameter name not allowed in this context"); return; }
+    uint32_t nm = cc->fns[fi].name;
+    if (nm && !(cc->fns[fi].flags & (JF_METHOD | JF_CLASS_CTOR | JF_ARROW))) {
+        jtok nt = cc->tok;
+        nt.type = T_NAME;
+        nt.str = nm;
+        nt.aux = 0;
+        nt.line = cc->fns[fi].line;
+        if (strict_eval_name(CCA, nm, 1, nt.line)) return;
+        if (name_refused_as(CCA, nt, 1, 0, 0)) {
+            uint32_t sin = cc->in_class;
+            cc->in_class = 1;
+            unexpected_tok(CCA, nt);
+            cc->in_class = sin;
+            return;
+        }
+    }
+    if (oct) cc_error(cc, line, oct == JL_8_9 ? "\\8 and \\9 are not allowed in strict mode." : "Octal escape sequences are not allowed in strict mode.");
 }
 
 static uint32_t fn_new(js_cc *cc, uint32_t name, uint32_t flags, uint32_t line, uint32_t start) {
@@ -1152,6 +1393,8 @@ static uint32_t p_arrow_body(CC, uint32_t fi, uint32_t line) {
     cc->cur_scope = saved_scope;
     uint32_t n = node(cc, N_FUNC, line);
     cc->nodes[n].a = fi;
+    /* an assignment expression whole: no member, call or operator after it takes it (V8: () => {}() is refused) */
+    cc->arrow_end = n;
     return n;
 }
 
@@ -1160,17 +1403,23 @@ static uint32_t p_arrow_body(CC, uint32_t fi, uint32_t line) {
 static uint32_t p_paren_arrow(CC, uint32_t flags, uint32_t line, uint32_t start) {
     uint32_t fi = fn_new(cc, 0, JF_ARROW | flags, line, start);
     uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
+    /* the parameters in the enclosing function's grammar: its yield and await no names there, nor operators (V8) */
+    uint32_t pf = cc->fns[saved_fn].flags;
+    uint32_t inh = ((pf & JF_GENERATOR) ? JF_GENERATOR : 0) | ((pf & JF_ASYNC) && !(flags & JF_ASYNC) ? JF_ASYNC : 0);
     cc->cur_fn = fi;
     uint32_t fs = scope_new(cc, SC_FUNC);
     cc->cur_scope = fs;
     cc->fns[fi].scope = fs;
+    cc->fns[fi].flags |= inh;
     p_params(CCA, fi);
+    cc->fns[fi].flags &= ~inh;
     cc->cur_fn = saved_fn;
     cc->cur_scope = saved_scope;
     return p_arrow_body(CCA, fi, line);
 }
 /* an arrow of one parameter, its name a (the current token the '=>') */
 static uint32_t p_name_arrow(CC, uint32_t a, uint32_t flags, uint32_t line, uint32_t start) {
+    if (strict_eval_name(CCA, a, 0, line)) return node(cc, N_HOLE, line);
     uint32_t fi = fn_new(cc, 0, JF_ARROW | flags, line, start);
     uint32_t saved_fn = cc->cur_fn, saved_scope = cc->cur_scope;
     cc->cur_fn = fi;
@@ -1251,6 +1500,7 @@ static uint32_t p_template(CC) {
         uint32_t s = node(cc, N_STR, cc->tok.line);
         cc->nodes[s].s = cc->tok.str;
         cc->nodes[s].b = raw_part(CCA, cc->tok);
+        cc->nodes[s].op = (uint16_t)cc->tok.oct;      /* an escape no cooked string has (TB_*): a tag's undefined */
         push_back(cc->tmp, s);
         if (cc->tok.aux) { lx(CCA); break; }
         lx(CCA);
@@ -1277,7 +1527,10 @@ static uint32_t p_array(CC) {
             cc->nodes[s].d = cc->prev.end;
             push_back(cc->tmp, s);
         } else push_back(cc->tmp, p_assign(CCA, 0));
-        if (!is_p(cc, P_RBRACK)) expect_p(CCA, P_COMMA, "',' between array elements");
+        if (!is_p(cc, P_RBRACK)) {
+            expect_p(CCA, P_COMMA, "',' between array elements");
+            if (is_p(cc, P_RBRACK)) cc->nodes[n].d |= NF_TRAIL;
+        }
     }
     expect_p(CCA, P_RBRACK, "']'");
     { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
@@ -1328,6 +1581,7 @@ static uint32_t p_object(CC) {
             if (kind == PK_GET || kind == PK_SET) {
                 cc->nodes[p].op = (uint16_t)kind;
                 cc->nodes[p].b = p_function(CCA, computed ? 0 : accessor_name(vm, kind, cc->nodes[key].s), JF_METHOD | (kind == PK_GET ? JF_GETTER : 0), 0, line, start);
+                accessor_params(CCA, cc->nodes[cc->nodes[p].b].a, kind, line);
             } else if (is_p(cc, P_LPAREN)) {
                 cc->nodes[p].op = PK_METHOD;
                 cc->nodes[p].b = p_function(CCA, computed ? 0 : cc->nodes[key].s, JF_METHOD | mfl, 0, line, start);
@@ -1340,6 +1594,7 @@ static uint32_t p_object(CC) {
             } else if (shorthand_ok && !computed) {
                 if (name_refused(CCA, ktok, 0)) { unexpected_tok(CCA, ktok); break; }
                 cc->nodes[p].op = PK_INIT;
+                cc->nodes[p].d |= NF_SHORT;
                 uint32_t id = ident_node(CCA, atom_tok, line);
                 if (is_p(cc, P_ASSIGN)) {
                     /* {a = 1}: only a pattern's */
@@ -1354,7 +1609,10 @@ static uint32_t p_object(CC) {
             } else { unexpected(CCA); break; }
         }
         push_back(cc->tmp, p);
-        if (!is_p(cc, P_RBRACE)) expect_p(CCA, P_COMMA, "',' between properties");
+        if (!is_p(cc, P_RBRACE)) {
+            expect_p(CCA, P_COMMA, "',' between properties");
+            if (is_p(cc, P_RBRACE)) cc->nodes[n].d |= NF_TRAIL;
+        }
     }
     expect_p(CCA, P_RBRACE, "'}'");
     { jlist tl_ = list_take(cc, mark); cc->nodes[n].a = tl_.off; cc->nodes[n].b = tl_.count; }
@@ -1362,12 +1620,28 @@ static uint32_t p_object(CC) {
 }
 
 /* an expression's node turned into an assignment's target pattern */
+/* an element of an assignment pattern: no parenthesized pattern or default, nor in strict code eval or arguments (V8's
+   words for each); then the pattern it is */
+static uint32_t to_pattern(CC, uint32_t e);
+static uint32_t to_pattern_el(CC, uint32_t e) {
+    uint32_t k = cc->nodes[e].k;
+    if (paren_is(cc, e) && (k == N_ASSIGN || k == N_ARRAY || k == N_OBJECT)) {
+        cc_error(cc, cc->nodes[e].line, "Invalid destructuring assignment target");
+        return e;
+    }
+    if (k == N_IDENT && cc_strict(cc) && (cc->nodes[e].s == cc->kw[K_EVAL] || cc->nodes[e].s == cc->kw[K_ARGUMENTS])) {
+        cc_error(cc, cc->nodes[e].line, "Invalid destructuring assignment target");
+        return e;
+    }
+    return to_pattern(CCA, e);
+}
 static uint32_t to_pattern(CC, uint32_t e) {
     uint32_t k = cc->nodes[e].k;
+    if (k == N_IDENT) strict_eval_name(CCA, cc->nodes[e].s, 0, cc->nodes[e].line);
     if (k == N_IDENT || k == N_MEMBER || k == N_SUPER_MEMBER) return e;
     if (k == N_ASSIGN && cc->nodes[e].op == P_ASSIGN) {
         uint32_t pe = node(cc, N_PELEM, cc->nodes[e].line);
-        cc->nodes[pe].a = to_pattern(CCA, cc->nodes[e].a);
+        cc->nodes[pe].a = to_pattern_el(CCA, cc->nodes[e].a);
         cc->nodes[pe].b = cc->nodes[e].b;
         return pe;
     }
@@ -1375,13 +1649,21 @@ static uint32_t to_pattern(CC, uint32_t e) {
         uint32_t p = node(cc, N_PATTERN_ARR, cc->nodes[e].line);
         size_t mark = len(cc->tmp);
         uint32_t off = cc->nodes[e].a, n = cc->nodes[e].b;
+        uint32_t trail = cc->nodes[e].d & NF_TRAIL;
         for (uint32_t i = 0; i < n; i++) {
             uint32_t el = cc->lists[off + i];
             uint32_t pe = node(cc, N_PELEM, cc->nodes[el].line);
             if (cc->nodes[el].k == N_HOLE) cc->nodes[pe].a = 0;
-            else if (cc->nodes[el].k == N_SPREAD) { cc->nodes[pe].op = NF_REST; cc->nodes[pe].a = to_pattern(CCA, cc->nodes[el].a); }
+            else if (cc->nodes[el].k == N_SPREAD) {
+                /* a rest element: the last, with no comma after it, and no default */
+                if (i + 1 < n || trail) { cc_error(cc, cc->nodes[el].line, "Rest element must be last element"); break; }
+                uint32_t ra = cc->nodes[el].a;
+                if (cc->nodes[ra].k == N_ASSIGN) { cc_error(cc, cc->nodes[el].line, "Invalid destructuring assignment target"); break; }
+                cc->nodes[pe].op = NF_REST;
+                cc->nodes[pe].a = to_pattern_el(CCA, ra);
+            }
             else {
-                uint32_t t = to_pattern(CCA, el);
+                uint32_t t = to_pattern_el(CCA, el);
                 if (cc->nodes[t].k == N_PELEM) pe = t;
                 else cc->nodes[pe].a = t;
             }
@@ -1394,18 +1676,35 @@ static uint32_t to_pattern(CC, uint32_t e) {
         uint32_t p = node(cc, N_PATTERN_OBJ, cc->nodes[e].line);
         size_t mark = len(cc->tmp);
         uint32_t off = cc->nodes[e].a, n = cc->nodes[e].b;
+        uint32_t trail = cc->nodes[e].d & NF_TRAIL;
         for (uint32_t i = 0; i < n; i++) {
             uint32_t pr = cc->lists[off + i];
             uint32_t pe = node(cc, N_PELEM, cc->nodes[pr].line);
-            if (cc->nodes[pr].op == PK_SPREAD) { cc->nodes[pe].op = NF_REST; cc->nodes[pe].a = to_pattern(CCA, cc->nodes[pr].b); }
+            if (cc->nodes[pr].op == PK_SPREAD) {
+                /* a rest property: the last, with no comma after it, its target a name or a member */
+                if (i + 1 < n || trail) { cc_error(cc, cc->nodes[pr].line, "Rest element must be last element"); break; }
+                uint32_t rb = cc->nodes[pr].b;
+                if (!simple_target(cc, rb)) { cc_error(cc, cc->nodes[pr].line, "`...` must be followed by an assignable reference in assignment contexts"); break; }
+                cc->nodes[pe].op = NF_REST;
+                cc->nodes[pe].a = to_pattern_el(CCA, rb);
+            }
             else if (cc->nodes[pr].op == PK_INIT || cc->nodes[pr].op == PK_COVER) {
                 cc->nodes[pe].c = cc->nodes[pr].a;
                 cc->nodes[pe].op = (uint16_t)(cc->nodes[pr].d & NF_COMPUTED);
                 uint32_t v = cc->nodes[pr].b;
+                if (!(cc->nodes[pr].d & NF_SHORT) && paren_is(cc, v) && cc->nodes[v].k != N_IDENT && cc->nodes[v].k != N_MEMBER) {
+                    cc_error(cc, cc->nodes[pr].line, "Invalid destructuring assignment target");
+                    break;
+                }
+                /* a shorthand's name in strict code: eval and arguments V8's binding error */
+                if ((cc->nodes[pr].d & NF_SHORT) && cc_strict(cc)) {
+                    uint32_t vn = cc->nodes[v].k == N_ASSIGN ? cc->nodes[v].a : v;
+                    if (cc->nodes[vn].k == N_IDENT && strict_eval_name(CCA, cc->nodes[vn].s, 0, cc->nodes[pr].line)) break;
+                }
                 if (cc->nodes[v].k == N_ASSIGN && cc->nodes[v].op == P_ASSIGN) {
-                    cc->nodes[pe].a = to_pattern(CCA, cc->nodes[v].a);
+                    cc->nodes[pe].a = (cc->nodes[pr].d & NF_SHORT) ? to_pattern(CCA, cc->nodes[v].a) : to_pattern_el(CCA, cc->nodes[v].a);
                     cc->nodes[pe].b = cc->nodes[v].b;
-                } else cc->nodes[pe].a = to_pattern(CCA, v);
+                } else cc->nodes[pe].a = (cc->nodes[pr].d & NF_SHORT) ? to_pattern(CCA, v) : to_pattern_el(CCA, v);
             } else cc_error(cc, cc->nodes[pr].line, "Invalid destructuring assignment target");
             push_back(cc->tmp, pe);
         }
@@ -1428,6 +1727,7 @@ static uint32_t p_binding(CC, uint32_t kind) {
     if (cc->tok.type == T_NAME) {
         uint32_t atom = cc->tok.str;
         if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); lx(CCA); return node(cc, N_HOLE, line); }
+        if (strict_eval_name(CCA, atom, 0, line)) { lx(CCA); return node(cc, N_HOLE, line); }
         await_reserved(CCA, atom, line);
         if (atom == cc->kw[K_LET] && (kind == D_LET || kind == D_CONST)) cc_error(cc, line, "let is disallowed as a lexically bound name");
         lx(CCA);
@@ -1441,8 +1741,11 @@ static uint32_t p_binding(CC, uint32_t kind) {
         while (!is_p(cc, P_RBRACK) && !cc->err) {
             uint32_t pe = node(cc, N_PELEM, cc->tok.line);
             if (is_p(cc, P_COMMA)) { lx(CCA); push_back(cc->tmp, pe); continue; }
-            if (is_p(cc, P_ELLIPSIS)) { lx(CCA); cc->nodes[pe].op = NF_REST; }
+            int rest = is_p(cc, P_ELLIPSIS);
+            if (rest) { lx(CCA); cc->nodes[pe].op = NF_REST; }
             cc->nodes[pe].a = p_binding(CCA, kind);
+            if (rest && is_p(cc, P_ASSIGN)) { cc_error(cc, cc->tok.line, "Invalid destructuring assignment target"); break; }
+            if (rest && !is_p(cc, P_RBRACK) && !cc->err) { cc_error(cc, cc->tok.line, "Rest element must be last element"); break; }
             if (is_p(cc, P_ASSIGN)) { lx(CCA); cc->nodes[pe].b = p_assign(CCA, 0); }
             push_back(cc->tmp, pe);
             if (!is_p(cc, P_RBRACK)) expect_p(CCA, P_COMMA, "',' in an array pattern");
@@ -1460,7 +1763,9 @@ static uint32_t p_binding(CC, uint32_t kind) {
             if (is_p(cc, P_ELLIPSIS)) {
                 lx(CCA);
                 cc->nodes[pe].op = NF_REST;
+                if (cc->tok.type != T_NAME) { cc_error(cc, cc->tok.line, "`...` must be followed by an identifier in declaration contexts"); break; }
                 cc->nodes[pe].a = p_binding(CCA, kind);
+                if (!is_p(cc, P_RBRACE) && !cc->err) { cc_error(cc, cc->tok.line, "Rest element must be last element"); break; }
             } else {
                 int computed;
                 int shorthand = cc->tok.type == T_NAME;
@@ -1472,6 +1777,7 @@ static uint32_t p_binding(CC, uint32_t kind) {
                 if (is_p(cc, P_COLON)) { lx(CCA); cc->nodes[pe].a = p_binding(CCA, kind); }
                 else if (shorthand && !computed) {
                     if (name_refused(CCA, ktok, 0)) { unexpected_tok(CCA, ktok); break; }
+                    if (strict_eval_name(CCA, atom, 0, kline)) break;
                     declare(CCA, atom, kind, kline);
                     cc->nodes[pe].a = ident_node(CCA, atom, kline);
                 } else unexpected(CCA);
@@ -1533,7 +1839,15 @@ static uint32_t p_primary(CC) {
         return n;
     }
     if (t.type == T_STR) { uint32_t n = node(cc, N_STR, line); cc->nodes[n].s = t.str; lx(CCA); return n; }
-    if (t.type == T_TEMPLATE) return p_template(CCA);
+    if (t.type == T_TEMPLATE) {
+        /* a template with no tag: an escape no cooked string has is V8's error */
+        uint32_t n = p_template(CCA);
+        for (uint32_t i = 0; i < cc->nodes[n].b && !cc->err; i += 2) {
+            uint32_t tb = cc->nodes[cc->lists[cc->nodes[n].a + i]].op;
+            if (tb) cc_error(cc, line, js_tb_msgs[tb]);
+        }
+        return n;
+    }
     if (t.type == T_PUNCT && (t.op == P_SLASH || t.op == P_DIV_ASSIGN)) {
         lx_regex(CCA, t.start);
         uint32_t n = node(cc, N_REGEX, line);
@@ -1557,6 +1871,8 @@ static uint32_t p_primary(CC) {
         lx(CCA);
         uint32_t e = p_expr(CCA, 0);
         expect_p(CCA, P_RPAREN, "')'");
+        paren_mark(cc, e);
+        cc->arrow_end = 0;
         return e;
     }
     if (t.type == T_PUNCT && t.op == P_LBRACK) return p_array(CCA);
@@ -1576,6 +1892,7 @@ static uint32_t p_primary(CC) {
                     /* the name is the function's own, read as its code reads: yield a name in a function, not in a
                        generator */
                     if (name_refused_as(CCA, cc->tok, 0, (fl & JF_GENERATOR) != 0, 0)) { unexpected(CCA); return node(cc, N_HOLE, line); }
+                    if (strict_eval_name(CCA, cc->tok.str, 0, line)) return node(cc, N_HOLE, line);
                     name = cc->tok.str;
                     lx(CCA);
                 }
@@ -1655,6 +1972,14 @@ static uint32_t p_primary(CC) {
                     return node(cc, N_NEW_TARGET, line);
                 }
                 uint32_t n = node(cc, N_NEW, line);
+                if (is_kw(cc, K_SUPER)) {
+                    jtok t0 = cc->tok, p0 = cc->prev;
+                    uint32_t pos0 = cc->pos, line0 = cc->line;
+                    lx(CCA);
+                    int call = is_p(cc, P_LPAREN);
+                    cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+                    if (call) { cc_error(cc, line, "'super' keyword unexpected here"); return n; }
+                }
                 /* the callee: a member expression with no call, its source pos to d */
                 uint32_t cstart = tok_start(cc);
                 uint32_t callee = p_primary(CCA);
@@ -1739,6 +2064,7 @@ static uint32_t p_call(CC) {
     /* each call's callee is the source from here to its last token (pos, d) */
     uint32_t start = tok_start(cc);
     uint32_t e = p_primary(CCA);
+    if (e && e == cc->arrow_end) return e;
     int chain = 0;
     while (!cc->err) {
         uint32_t line = cc->tok.line;
@@ -1828,8 +2154,10 @@ static int simple_target(js_cc *cc, uint32_t e) {
 
 static uint32_t p_postfix(CC) {
     uint32_t e = p_call(CCA);
+    if (e && e == cc->arrow_end) return e;
     if ((is_p(cc, P_INC) || is_p(cc, P_DEC)) && !cc->tok.nl) {
         if (!simple_target(cc, e)) { cc_error(cc, cc->tok.line, "Invalid left-hand side expression in postfix operation"); return e; }
+        if (cc->nodes[e].k == N_IDENT && strict_eval_name(CCA, cc->nodes[e].s, 0, cc->tok.line)) return e;
         uint32_t n = node(cc, N_UPDATE, cc->tok.line);
         cc->nodes[n].op = (uint16_t)cc->tok.op;
         cc->nodes[n].a = e;
@@ -1841,6 +2169,9 @@ static uint32_t p_postfix(CC) {
 
 static uint32_t p_unary_in(CC) {
     uint32_t line = cc->tok.line;
+    /* the operand of a unary operator: its ** the operator's error (the flag this level's alone) */
+    int no_pow = cc->no_pow != 0;
+    cc->no_pow = 0;
     if (cc->tok.type == T_PUNCT) {
         uint32_t op = cc->tok.op;
         if (op == P_INC || op == P_DEC) {
@@ -1850,13 +2181,16 @@ static uint32_t p_unary_in(CC) {
             cc->nodes[n].d = NF_PREFIX;
             cc->nodes[n].a = p_unary(CCA);
             if (!simple_target(cc, cc->nodes[n].a)) cc_error(cc, line, "Invalid left-hand side expression in prefix operation");
+            else if (cc->nodes[cc->nodes[n].a].k == N_IDENT) strict_eval_name(CCA, cc->nodes[cc->nodes[n].a].s, 0, line);
             return n;
         }
         if (op == P_PLUS || op == P_MINUS || op == P_BANG || op == P_TILDE) {
             lx(CCA);
             uint32_t n = node(cc, N_UNARY, line);
             cc->nodes[n].op = (uint16_t)op;
+            cc->no_pow = 1;
             cc->nodes[n].a = p_unary(CCA);
+            if (is_p(cc, P_POW)) cc_error(cc, cc->tok.line, "Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence");
             return n;
         }
     }
@@ -1865,9 +2199,13 @@ static uint32_t p_unary_in(CC) {
         lx(CCA);
         uint32_t n = node(cc, N_UNARY, line);
         cc->nodes[n].op = (uint16_t)which;
+        cc->no_pow = 1;
         cc->nodes[n].a = p_unary(CCA);
         if (which == 1002 && cc->nodes[cc->nodes[n].a].k == N_MEMBER && (cc->nodes[cc->nodes[n].a].op & NF_PRIVATE))
             cc_error(cc, line, "Private fields can not be deleted");
+        if (which == 1002 && cc->nodes[cc->nodes[n].a].k == N_IDENT && cc_strict(cc))
+            cc_error(cc, line, "Delete of an unqualified identifier in strict mode.");
+        if (is_p(cc, P_POW)) cc_error(cc, cc->tok.line, "Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence");
         return n;
     }
     if (is_kw(cc, K_AWAIT) && in_async(cc)) {
@@ -1880,7 +2218,7 @@ static uint32_t p_unary_in(CC) {
         return n;
     }
     uint32_t e = p_postfix(CCA);
-    if (is_p(cc, P_POW)) {
+    if (is_p(cc, P_POW) && !no_pow) {
         lx(CCA);
         uint32_t n = node(cc, N_BINARY, line);
         cc->nodes[n].op = P_POW;
@@ -1915,6 +2253,14 @@ static int binop_prec(js_cc *cc, int no_in, uint32_t *op) {
     }
 }
 
+/* a logical node that op may not join without parentheses: ?? with || or && */
+static int nullish_mix(js_cc *cc, uint32_t n, uint32_t op) {
+    if (op != P_NULLISH && op != P_OR && op != P_AND) return 0;
+    jnode e = cc->nodes[n];
+    if (e.k != N_LOGICAL || paren_is(cc, n)) return 0;
+    return op == P_NULLISH ? e.op != P_NULLISH : e.op == P_NULLISH;
+}
+
 static uint32_t p_binary(CC, int min_prec, int no_in) {
     uint32_t left;
     if (min_prec <= 8 && cc->tok.type == T_NAME && atom_priv(vm, cc->tok.str)) {
@@ -1932,11 +2278,19 @@ static uint32_t p_binary(CC, int min_prec, int no_in) {
     } else left = p_unary(CCA);
     for (;;) {
         uint32_t op = 0;
+        if (left && left == cc->arrow_end) break;
         int prec = binop_prec(cc, no_in, &op);
         if (!prec || prec < min_prec || cc->err) break;
         uint32_t line = cc->tok.line;
+        /* ?? beside || or && unparenthesized: V8 names the operator that joins them */
+        if (nullish_mix(cc, left, op)) { unexpected(CCA); break; }
         lx(CCA);
         uint32_t right = p_binary(CCA, prec + 1, no_in);
+        if (!cc->err && nullish_mix(cc, right, op)) {
+            jnode rn = cc->nodes[right];
+            cc_error(cc, line, rn.op == P_NULLISH ? "Unexpected token '??'" : rn.op == P_OR ? "Unexpected token '||'" : "Unexpected token '&&'");
+            break;
+        }
         uint32_t n = node(cc, op == P_AND || op == P_OR || op == P_NULLISH ? N_LOGICAL : N_BINARY, line);
         cc->nodes[n].op = (uint16_t)op;
         cc->nodes[n].a = left;
@@ -1948,6 +2302,7 @@ static uint32_t p_binary(CC, int min_prec, int no_in) {
 
 static uint32_t p_cond(CC, int no_in) {
     uint32_t c = p_binary(CCA, 1, no_in);
+    if (c && c == cc->arrow_end) return c;
     if (is_p(cc, P_QUESTION)) {
         uint32_t n = node(cc, N_COND, cc->tok.line);
         lx(CCA);
@@ -2018,14 +2373,17 @@ static uint32_t p_assign_in(CC, int no_in) {
         return n;
     }
     uint32_t left = p_cond(CCA, no_in);
+    if (left && left == cc->arrow_end) return left;
     if (cc->tok.type == T_PUNCT && is_assign_op(cc->tok.op)) {
         uint32_t op = cc->tok.op, line = cc->tok.line;
         lx(CCA);
         uint32_t n = node(cc, N_ASSIGN, line);
         cc->nodes[n].op = (uint16_t)op;
         uint32_t lk = cc->nodes[left].k;
-        if (op == P_ASSIGN && (lk == N_ARRAY || lk == N_OBJECT)) left = to_pattern(CCA, left);
+        if ((lk == N_ARRAY || lk == N_OBJECT) && paren_is(cc, left)) cc_error(cc, line, "Invalid left-hand side in assignment");
+        else if (op == P_ASSIGN && (lk == N_ARRAY || lk == N_OBJECT)) left = to_pattern(CCA, left);
         else if (lk != N_IDENT && lk != N_MEMBER && lk != N_SUPER_MEMBER) cc_error(cc, line, "Invalid left-hand side in assignment");
+        else if (lk == N_IDENT) strict_eval_name(CCA, cc->nodes[left].s, 0, line);
         cc->nodes[n].a = left;
         cc->nodes[n].pos = tok_start(cc);
         cc->nodes[n].b = p_assign(CCA, no_in);
@@ -2075,6 +2433,7 @@ static uint32_t p_class(CC, int is_decl) {
             cc->in_class = sin;
             return node(cc, N_HOLE, line);
         }
+        if (strict_eval_name(CCA, cc->tok.str, 1, line)) return node(cc, N_HOLE, line);
         name = cc->tok.str;
         lx(CCA);
     }
@@ -2164,7 +2523,7 @@ static uint32_t p_class(CC, int is_decl) {
         uint32_t key = p_prop_key(CCA, &computed);
         cc->nodes[p].a = key;
         cc->nodes[p].d = flags | (computed ? NF_COMPUTED : 0);
-        if (mfl && !is_p(cc, P_LPAREN)) { unexpected(CCA); break; }
+        if ((mfl || kind == PK_GET || kind == PK_SET) && !is_p(cc, P_LPAREN)) { unexpected(CCA); break; }
         /* V8's early errors for a class's element names */
         uint32_t kname = computed ? 0 : cc->nodes[key].s;
         int priv = atom_priv(vm, kname);
@@ -2186,6 +2545,7 @@ static uint32_t p_class(CC, int is_decl) {
             if (ctor) ff = JF_CLASS_CTOR | JF_STRICT | (cc->classes[ci].extends ? JF_DERIVED : 0);
             uint32_t fname = computed ? 0 : kind == PK_GET || kind == PK_SET ? accessor_name(vm, kind, cc->nodes[key].s) : cc->nodes[key].s;
             uint32_t f = p_function(CCA, fname, ff, 0, mline, mstart);
+            if (kind == PK_GET || kind == PK_SET) accessor_params(CCA, cc->nodes[f].a, kind, mline);
             if (ctor) { cc->classes[ci].ctor = cc->nodes[f].a; cc->fns[cc->nodes[f].a].name = name; cc->fns[cc->nodes[f].a].cls = ci + 1; continue; }
             cc->nodes[p].op = (uint16_t)kind;
             cc->nodes[p].b = f;
@@ -2338,6 +2698,7 @@ static uint32_t p_func_decl(CC, uint32_t flags, uint32_t line, uint32_t start) {
         return node(cc, N_EMPTY, line);
     }
     if (name_refused(CCA, cc->tok, 0)) { unexpected(CCA); return node(cc, N_EMPTY, line); }
+    if (strict_eval_name(CCA, cc->tok.str, 0, line)) return node(cc, N_EMPTY, line);
     uint32_t name = cc->tok.str;
     lx(CCA);
     uint32_t d = declare(CCA, name, D_FUNC, line);
@@ -2592,18 +2953,57 @@ static int is_decl_start(CC) {
 
 static uint32_t p_stmt_in(CC) {
     uint32_t line = cc->tok.line, start = cc->tok.start;
+    uint32_t ss = cc->ssc;
+    cc->ssc = SS_NONE;
     if (cc->err) return node(cc, N_EMPTY, line);
     if (is_p(cc, P_LBRACE)) return p_block(CCA);
     if (is_p(cc, P_SEMI)) { lx(CCA); return node(cc, N_EMPTY, line); }
+    int let_name = 0;
+    if (ss && cc->tok.type == T_NAME && !cc->tok.aux) {
+        /* a statement's place (an if's branch, a loop's body, a label's): no lexical declaration, class or function
+           declaration but sloppy code's function under an if or a label, as V8 refuses them */
+        uint32_t a = cc->tok.str;
+        if (a == cc->kw[K_CONST] || a == cc->kw[K_CLASS]) { unexpected(CCA); return node(cc, N_EMPTY, line); }
+        jtok t0 = cc->tok, p0 = cc->prev;
+        uint32_t pos0 = cc->pos, line0 = cc->line;
+        if (a == cc->kw[K_LET]) {
+            /* V8's ParseExpressionOrLabelledStatement: let [ a declaration; let { and let x on its line too */
+            lx(CCA);
+            int decl = is_p(cc, P_LBRACK) || ((is_p(cc, P_LBRACE) || (cc->tok.type == T_NAME && !kw_reserved(cc, cc->tok.str))) && !cc->tok.nl);
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+            if (decl) { cc_error(cc, line, "Lexical declaration cannot appear in a single-statement context"); return node(cc, N_EMPTY, line); }
+            let_name = 1;
+        }
+        int afn = 0, gen = 0;
+        if (a == cc->kw[K_ASYNC]) {
+            lx(CCA);
+            afn = !cc->tok.nl && is_kw(cc, K_FUNCTION);
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+        }
+        if (a == cc->kw[K_FUNCTION]) {
+            lx(CCA);
+            gen = is_p(cc, P_STAR);
+            cc->tok = t0; cc->prev = p0; cc->pos = pos0; cc->line = line0;
+        }
+        if (afn || a == cc->kw[K_FUNCTION]) {
+            const char *m = 0;
+            if (afn) m = "Async functions can only be declared at the top level or inside a block.";
+            else if (gen) m = "Generators can only be declared at the top level or inside a block.";
+            else if (cc_strict(cc)) m = "In strict mode code, functions can only be declared at top level or inside a block.";
+            else if (ss == SS_LOOP || ss == SS_LABEL_IN)
+                m = "In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.";
+            if (m) { cc_error(cc, line, m); return node(cc, N_EMPTY, line); }
+        }
+    }
     if (cc->tok.type == T_NAME && !cc->tok.aux) {
         uint32_t a = cc->tok.str;
-        if (a == cc->kw[K_VAR] || a == cc->kw[K_CONST] || (a == cc->kw[K_LET] && let_decl(CCA))) {
+        if (a == cc->kw[K_VAR] || a == cc->kw[K_CONST] || (a == cc->kw[K_LET] && !let_name && let_decl(CCA))) {
             uint32_t kind = a == cc->kw[K_VAR] ? D_VAR : a == cc->kw[K_CONST] ? D_CONST : D_LET;
             uint32_t n = p_var(CCA, kind, 0, 1);
             semi(CCA);
             return n;
         }
-        if (a == cc->kw[K_FUNCTION]) { lx(CCA); return p_func_decl(CCA, 0, line, start); }
+        if (a == cc->kw[K_FUNCTION]) { lx(CCA); cc->annexb_if = ss == SS_IF; return p_func_decl(CCA, 0, line, start); }
         if (a == cc->kw[K_ASYNC]) {
             jtok t0 = cc->tok, p0 = cc->prev;
             uint32_t pos0 = cc->pos, line0 = cc->line;
@@ -2618,8 +3018,9 @@ static uint32_t p_stmt_in(CC) {
             expect_p(CCA, P_LPAREN, "'(' after if");
             cc->nodes[n].a = p_expr(CCA, 0);
             expect_p(CCA, P_RPAREN, "')'");
+            cc->ssc = SS_IF;
             cc->nodes[n].b = p_stmt(CCA);
-            if (is_kw(cc, K_ELSE)) { lx(CCA); cc->nodes[n].c = p_stmt(CCA); }
+            if (is_kw(cc, K_ELSE)) { lx(CCA); cc->ssc = SS_IF; cc->nodes[n].c = p_stmt(CCA); }
             return n;
         }
         if (a == cc->kw[K_WHILE]) {
@@ -2628,12 +3029,14 @@ static uint32_t p_stmt_in(CC) {
             expect_p(CCA, P_LPAREN, "'(' after while");
             cc->nodes[n].a = p_expr(CCA, 0);
             expect_p(CCA, P_RPAREN, "')'");
+            cc->ssc = SS_LOOP;
             cc->nodes[n].b = p_stmt(CCA);
             return n;
         }
         if (a == cc->kw[K_DO]) {
             lx(CCA);
             uint32_t n = node(cc, N_DO, line);
+            cc->ssc = SS_LOOP;
             cc->nodes[n].a = p_stmt(CCA);
             if (!is_kw(cc, K_WHILE)) unexpected(CCA);
             lx(CCA);
@@ -2657,12 +3060,31 @@ static uint32_t p_stmt_in(CC) {
             uint32_t sc = scope_new(cc, SC_BLOCK);
             cc->cur_scope = sc;
             uint32_t init = 0;
-            int let_start = 0;
+            int let_start = 0, async_start = 0;
             if (is_decl_start(CCA)) {
                 uint32_t kind = is_kw(cc, K_VAR) ? D_VAR : is_kw(cc, K_CONST) ? D_CONST : D_LET;
                 init = p_var(CCA, kind, 1, 0);
-            } else if (!is_p(cc, P_SEMI)) { let_start = is_kw(cc, K_LET); init = p_expr(CCA, 1); }
+            } else if (!is_p(cc, P_SEMI)) { let_start = is_kw(cc, K_LET); async_start = is_kw(cc, K_ASYNC); init = p_expr(CCA, 1); }
             if (let_start && is_kw(cc, K_OF)) { cc_error(cc, line, "The left-hand side of a for-of loop may not start with 'let'."); return node(cc, N_EMPTY, line); }
+            if (async_start && !aw && is_kw(cc, K_OF) && cc->nodes[init].k == N_IDENT && !paren_is(cc, init)) {
+                cc_error(cc, line, "The left-hand side of a for-of loop may not be 'async'.");
+                return node(cc, N_EMPTY, line);
+            }
+            if (init && cc->nodes[init].k == N_VAR && (is_kw(cc, K_OF) || is_kw(cc, K_IN))) {
+                int of = is_kw(cc, K_OF);
+                jnode vn = cc->nodes[init];
+                if (vn.b != 1) {
+                    cc_error(cc, line, of ? "Invalid left-hand side in for-of loop: Must have a single binding." :
+                                            "Invalid left-hand side in for-in loop: Must have a single binding.");
+                    return node(cc, N_EMPTY, line);
+                }
+                jnode dn = cc->nodes[cc->lists[vn.a]];
+                if (dn.b && (of || vn.op != D_VAR || cc_strict(cc) || cc->nodes[dn.a].k != N_IDENT)) {
+                    cc_error(cc, line, of ? "for-of loop variable declaration may not have an initializer." :
+                                            "for-in loop variable declaration may not have an initializer.");
+                    return node(cc, N_EMPTY, line);
+                }
+            }
             if (aw && !is_kw(cc, K_OF)) { unexpected(CCA); return node(cc, N_EMPTY, line); }
             if (is_kw(cc, K_OF) || is_kw(cc, K_IN)) {
                 uint32_t n = node(cc, N_FORIN, line);
@@ -2672,8 +3094,10 @@ static uint32_t p_stmt_in(CC) {
                 if (cc->nodes[init].k != N_VAR) {
                     /* a pattern, or a simple target (V8's words for any other) */
                     uint32_t ik = cc->nodes[init].k;
-                    if (ik == N_ARRAY || ik == N_OBJECT) init = to_pattern(CCA, init);
+                    if ((ik == N_ARRAY || ik == N_OBJECT) && paren_is(cc, init)) cc_error(cc, line, "Invalid destructuring assignment target");
+                    else if (ik == N_ARRAY || ik == N_OBJECT) init = to_pattern(CCA, init);
                     else if (!simple_target(cc, init)) cc_error(cc, line, "Invalid left-hand side in for-loop");
+                    else if (ik == N_IDENT) strict_eval_name(CCA, cc->nodes[init].s, 0, line);
                 }
                 cc->nodes[n].a = init;
                 /* the value iterated is read outside the loop's bindings; its source pos to d */
@@ -2683,6 +3107,7 @@ static uint32_t p_stmt_in(CC) {
                 cc->nodes[n].d = cc->prev.end;
                 cc->cur_scope = sc;
                 expect_p(CCA, P_RPAREN, "')'");
+                cc->ssc = SS_LOOP;
                 cc->nodes[n].c = p_stmt(CCA);
                 cc->nodes[n].s = sc;
                 cc->cur_scope = saved;
@@ -2695,6 +3120,7 @@ static uint32_t p_stmt_in(CC) {
             expect_p(CCA, P_SEMI, "';' in a for");
             if (!is_p(cc, P_RPAREN)) cc->nodes[n].c = p_expr(CCA, 0);
             expect_p(CCA, P_RPAREN, "')'");
+            cc->ssc = SS_LOOP;
             cc->nodes[n].d = p_stmt(CCA);
             cc->nodes[n].s = sc;
             cc->cur_scope = saved;
@@ -2738,6 +3164,7 @@ static uint32_t p_stmt_in(CC) {
                 if (is_p(cc, P_LPAREN)) {
                     lx(CCA);
                     cc->nodes[n].b = p_binding(CCA, D_LET);
+                    cc->scopes[sc].catchp = cc->nodes[cc->nodes[n].b].k == N_IDENT ? 1 : 2;
                     expect_p(CCA, P_RPAREN, "')'");
                 }
                 cc->nodes[n].c = p_block(CCA);
@@ -2793,6 +3220,7 @@ static uint32_t p_stmt_in(CC) {
             uint32_t sc = scope_new(cc, SC_BLOCK);
             cc->cur_scope = sc;
             dyn_decl(cc, sc, D_WITH, cc->with_atom);
+            cc->ssc = SS_LOOP;
             cc->nodes[n].b = p_stmt(CCA);
             cc->nodes[n].s = sc;
             cc->cur_scope = saved;
@@ -2832,6 +3260,7 @@ static uint32_t p_stmt_in(CC) {
             size_t lmark = len(cc->plabels);
             push_back(cc->plabels, a);
             push_back(cc->plabels, cc->cur_fn);
+            cc->ssc = ss == SS_NONE || ss == SS_LABEL ? SS_LABEL : SS_LABEL_IN;
             uint32_t body = p_stmt(CCA);
             resize(cc->plabels, lmark);
             cc->nodes[n].a = body;
@@ -4053,7 +4482,7 @@ static void gen_expr(CC, uint32_t n) {
             uint32_t cooked = js_array_new(vm, 0), raw = js_array_new(vm, 0);
             for (uint32_t i = 0; i < e.b; i += 2) {
                 jnode part = cc->nodes[cc->lists[e.a + i]];
-                js_array_push(vm, cooked, jv_str(part.s));
+                js_array_push(vm, cooked, part.op ? JV_UNDEF : jv_str(part.s));
                 js_array_push(vm, raw, jv_str(part.b));
             }
             js_define(vm, cooked, js_atom_ascii(vm, "raw"), jv_obj(raw), JS_SHAPE_HIDDEN);

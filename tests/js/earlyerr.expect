@@ -1,0 +1,215 @@
+"[...a, b] = 1" SyntaxError: Rest element must be last element
+"class A { get foo }" SyntaxError: Unexpected token '}'
+"[(a = 1)] = []" SyntaxError: Invalid destructuring assignment target
+"a => {}\n()" SyntaxError: Unexpected token ')'
+"() => {}.x" SyntaxError: Unexpected token '.'
+"() => {}()" SyntaxError: Unexpected token '('
+"({}) = 1" SyntaxError: Invalid left-hand side in assignment
+"({a}) = 1" SyntaxError: Invalid left-hand side in assignment
+"([a]) = 1" SyntaxError: Invalid left-hand side in assignment
+"'use strict'; delete a" SyntaxError: Delete of an unqualified identifier in strict mode.
+"'use strict'; eval = 1" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; arguments++" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; function f(a, a) {}" SyntaxError: Duplicate parameter name not allowed in this context
+"function f(a, a) { 'use strict' }" SyntaxError: Duplicate parameter name not allowed in this context
+"(a, a) => 1" SyntaxError: Duplicate parameter name not allowed in this context
+"function f(...a,) {}" SyntaxError: Rest parameter must be last formal parameter
+"function f(...a, b) {}" SyntaxError: Rest parameter must be last formal parameter
+"function f(a = 1) { 'use strict' }" SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+"'use strict'; function eval() {}" SyntaxError: Unexpected eval or arguments in strict mode
+"var a; let a;" SyntaxError: Identifier 'a' has already been declared
+"let a; var a;" SyntaxError: Identifier 'a' has already been declared
+"-a ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"a ?? b || c" SyntaxError: Unexpected token '||'
+"a || b ?? c" SyntaxError: Unexpected token '??'
+"x = { get a(b) {} }" SyntaxError: Getter must not have any formal parameters.
+"x = { set a() {} }" SyntaxError: Setter must have exactly one formal parameter.
+"class A { get\nfoo }" SyntaxError: Unexpected token '}'
+"'use strict'; label: function f() {}" SyntaxError: In strict mode code, functions can only be declared at top level or inside a block.
+"while (0) label: function f() {}" SyntaxError: In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.
+"if (1) label: function f() {}" SyntaxError: In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.
+"if (1) class A {}" SyntaxError: Unexpected token 'class'
+"if (1) let x = 1" SyntaxError: Lexical declaration cannot appear in a single-statement context
+"if (1) const x = 1" SyntaxError: Unexpected token 'const'
+"if (1) let\nx = 1" ReferenceError: let is not defined
+"do function f() {} while (0)" SyntaxError: In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.
+"with ({}) function f() {}" SyntaxError: In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.
+"if (1) async function f() {}" SyntaxError: Async functions can only be declared at the top level or inside a block.
+"if (1) function* g() {}" SyntaxError: Generators can only be declared at the top level or inside a block.
+"[a, ...b,] = []" SyntaxError: Rest element must be last element
+"[...a = 1] = []" SyntaxError: Invalid destructuring assignment target
+"({...a,} = {})" SyntaxError: Rest element must be last element
+"({...{a}} = {})" SyntaxError: `...` must be followed by an assignable reference in assignment contexts
+"(...a, b) => 1" SyntaxError: Rest parameter must be last formal parameter
+"(...a = 1) => 1" SyntaxError: Rest parameter may not have a default initializer
+"'use strict'; arguments = 1" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; eval++" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; --arguments" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; [eval] = []" SyntaxError: Invalid destructuring assignment target
+"'use strict'; ({a: eval} = {})" SyntaxError: Invalid destructuring assignment target
+"'use strict'; ({eval} = {})" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; var eval" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; let arguments" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; (function arguments() {})" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; function f(eval) {}" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; try {} catch (eval) {}" SyntaxError: Unexpected eval or arguments in strict mode
+"class eval {}" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; (eval) => 1" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; eval => 1" SyntaxError: Unexpected eval or arguments in strict mode
+"function f(eval) { 'use strict'; }" SyntaxError: Unexpected eval or arguments in strict mode
+"function eval() { 'use strict'; }" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; for (eval in {});" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; eval += 1" SyntaxError: Unexpected eval or arguments in strict mode
+"'use strict'; delete (a)" SyntaxError: Delete of an unqualified identifier in strict mode.
+"'use strict'; delete ((a))" SyntaxError: Delete of an unqualified identifier in strict mode.
+"'use strict'; delete a.b" ReferenceError: a is not defined
+"function f() { 'use strict'; delete x; }" SyntaxError: Delete of an unqualified identifier in strict mode.
+"function f(a, a) { 'use strict'; }" SyntaxError: Duplicate parameter name not allowed in this context
+"(a, [a]) => 1" SyntaxError: Duplicate parameter name not allowed in this context
+"function f(a, ...a) {}" SyntaxError: Duplicate parameter name not allowed in this context
+"function f(a = 1, a) {}" SyntaxError: Duplicate parameter name not allowed in this context
+"function f([a], a) {}" SyntaxError: Duplicate parameter name not allowed in this context
+"({ m(a, a) {} })" SyntaxError: Duplicate parameter name not allowed in this context
+"class A { m(a, a) {} }" SyntaxError: Duplicate parameter name not allowed in this context
+"function* g(a, a) {}" ok
+"async function h(a, a) {}" ok
+"function f(a, a) {}" ok
+"function f(...a = 1) {}" SyntaxError: Rest parameter may not have a default initializer
+"(...a,) => 1" SyntaxError: Rest parameter must be last formal parameter
+"({ set s(...a) {} })" SyntaxError: Setter function argument must not be a rest parameter
+"function f(a = 1) { 'use strict'; }" SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+"function f([a]) { 'use strict'; }" SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+"function f(...a) { 'use strict'; }" SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+"(a = 1) => { 'use strict'; }" SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+"function f() { '\\01'; 'use strict'; }" SyntaxError: Octal escape sequences are not allowed in strict mode.
+"function f() { 'use strict'; '\\01'; }" SyntaxError: Octal escape sequences are not allowed in strict mode.
+"function f() { 'a\\08'; 'use strict'; }" SyntaxError: Octal escape sequences are not allowed in strict mode.
+"function f(let) { 'use strict'; }" SyntaxError: Unexpected strict mode reserved word
+"function f(implements) { 'use strict'; }" SyntaxError: Unexpected strict mode reserved word
+"package => { 'use strict'; }" SyntaxError: Unexpected strict mode reserved word
+"'use strict'; ({ 021: 42 })" SyntaxError: Octal literals are not allowed in strict mode.
+"'use strict'; ({ 08: 42 })" SyntaxError: Decimals with leading zeros are not allowed in strict mode.
+"function f() { 'use strict'; ({ 021: 1 }); }" SyntaxError: Octal literals are not allowed in strict mode.
+"let a; { var a; }" SyntaxError: Identifier 'a' has already been declared
+"{ let a; var a; }" SyntaxError: Identifier 'a' has already been declared
+"{ var a; let a; }" SyntaxError: Identifier 'a' has already been declared
+"function a() {} let a;" SyntaxError: Identifier 'a' has already been declared
+"let a; function a() {}" SyntaxError: Identifier 'a' has already been declared
+"{ function a() {} let a; }" SyntaxError: Identifier 'a' has already been declared
+"{ let a; function a() {} }" SyntaxError: Identifier 'a' has already been declared
+"{ function a() {} function a() {} }" ok
+"'use strict'; { function a() {} function a() {} }" SyntaxError: Identifier 'a' has already been declared
+"try {} catch (e) { let e; }" SyntaxError: Identifier 'e' has already been declared
+"try {} catch (e) { var e; }" ok
+"try {} catch ([e]) { var e; }" SyntaxError: Identifier 'e' has already been declared
+"function f(a) { let a; }" SyntaxError: Identifier 'a' has already been declared
+"function f(a) { var a; }" ok
+"for (let a; false;) { var a; }" SyntaxError: Identifier 'a' has already been declared
+"for (let a of []) { var a; }" SyntaxError: Identifier 'a' has already been declared
+"switch (1) { case 1: let a; case 2: let a; }" SyntaxError: Identifier 'a' has already been declared
+"switch (1) { case 1: let a; default: var a; }" SyntaxError: Identifier 'a' has already been declared
+"for (let x = 1 in {});" SyntaxError: for-in loop variable declaration may not have an initializer.
+"for (const x = 1 in {});" SyntaxError: for-in loop variable declaration may not have an initializer.
+"for (var x = 1 in {});" ok
+"'use strict'; for (var x = 1 in {});" SyntaxError: for-in loop variable declaration may not have an initializer.
+"for (var [a] = 1 in {});" SyntaxError: for-in loop variable declaration may not have an initializer.
+"for (var x = 1 of []);" SyntaxError: for-of loop variable declaration may not have an initializer.
+"for (let x = 1 of []);" SyntaxError: for-of loop variable declaration may not have an initializer.
+"for (let x, y of []);" SyntaxError: Invalid left-hand side in for-of loop: Must have a single binding.
+"for (var x, y in {});" SyntaxError: Invalid left-hand side in for-in loop: Must have a single binding.
+"for (let x, y in {});" SyntaxError: Invalid left-hand side in for-in loop: Must have a single binding.
+"for (let [x] = 1 of []);" SyntaxError: for-of loop variable declaration may not have an initializer.
+"if (1) function f() {}" ok
+"'use strict'; if (1) function f() {}" SyntaxError: In strict mode code, functions can only be declared at top level or inside a block.
+"label: function* g() {}" SyntaxError: Generators can only be declared at the top level or inside a block.
+"label: async function f() {}" SyntaxError: Async functions can only be declared at the top level or inside a block.
+"if (1) let [x] = []" SyntaxError: Lexical declaration cannot appear in a single-statement context
+"while (0) let x = 1" SyntaxError: Lexical declaration cannot appear in a single-statement context
+"label: let x = 1" SyntaxError: Lexical declaration cannot appear in a single-statement context
+"label: const x = 1" SyntaxError: Unexpected token 'const'
+"label: class A {}" SyntaxError: Unexpected token 'class'
+"({ get g(a) {} })" SyntaxError: Getter must not have any formal parameters.
+"({ set s() {} })" SyntaxError: Setter must have exactly one formal parameter.
+"({ set s(a, b) {} })" SyntaxError: Setter must have exactly one formal parameter.
+"class A { get g(a) {} }" SyntaxError: Getter must not have any formal parameters.
+"class A { set s() {} }" SyntaxError: Setter must have exactly one formal parameter.
+"class A { static set s(a, b) {} }" SyntaxError: Setter must have exactly one formal parameter.
+"class A { set foo }" SyntaxError: Unexpected token '}'
+"class A { static get }" ok
+"class A { get\nfoo() {} }" ok
+"class A { get = 1 }" ok
+"class A { get; set; static; }" ok
+"([a]) += 1" SyntaxError: Invalid left-hand side in assignment
+"[(a)] = []" ok
+"[((a))] = []" ok
+"({a: (b = 0)} = {})" SyntaxError: Invalid destructuring assignment target
+"({a: (b)} = {})" ok
+"({a: (b.c)} = {})" TypeError: Cannot set properties of undefined (setting 'c')
+"[...a, b] = []" SyntaxError: Rest element must be last element
+"[...a,] = []" SyntaxError: Rest element must be last element
+"({...[a]} = {})" SyntaxError: `...` must be followed by an assignable reference in assignment contexts
+"let [...a, b] = []" SyntaxError: Rest element must be last element
+"let {...a, b} = {}" SyntaxError: Rest element must be last element
+"let {...{a}} = {}" SyntaxError: `...` must be followed by an identifier in declaration contexts
+"let [...a = 1] = []" SyntaxError: Invalid destructuring assignment target
+"function f([...a, b]) {}" SyntaxError: Rest element must be last element
+"(...[a]) => 1" ok
+"([...a, b]) => 1" SyntaxError: Rest element must be last element
+"(a) => {}[0]" SyntaxError: Unexpected token '['
+"a => {}`x`" SyntaxError: Unexpected template string
+"() => {} ? 1 : 2" SyntaxError: Unexpected token '?'
+"() => {} + 1" SyntaxError: Unexpected token '+'
+"x = () => {}, 1" ok
+"(() => {})()" ok
+"function* g() { (yield) => 1 }" SyntaxError: Invalid destructuring assignment target
+"function* g() { (a = yield) => 1 }" SyntaxError: Yield expression not allowed in formal parameter
+"function* g() { (yield 1) }" ok
+"async function h() { (await 1) => 1 }" SyntaxError: Invalid destructuring assignment target
+"async function h() { (a = await 1) => 1 }" SyntaxError: Illegal await-expression in formal parameters of async function
+"async function h() { (await) => 1 }" SyntaxError: Unexpected token ')'
+"function* g() { function f(a = yield) {} }" ok
+"+a ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"!a ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"typeof a ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"delete a.b ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"void 0 ** 2" SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence
+"await_ ** 2" ReferenceError: await_ is not defined
+"a ** -2" ok
+"a ?? b && c" SyntaxError: Unexpected token '&&'
+"a && b ?? c" SyntaxError: Unexpected token '??'
+"(a ?? b) || c" ReferenceError: c is not defined
+"a ?? (b || c)" ReferenceError: c is not defined
+"`\\07`" SyntaxError: Octal escape sequences are not allowed in template strings.
+"`\\1`" SyntaxError: Octal escape sequences are not allowed in template strings.
+"`\\08`" SyntaxError: Octal escape sequences are not allowed in template strings.
+"`\\8`" SyntaxError: \8 and \9 are not allowed in template strings.
+"`\\9`" SyntaxError: \8 and \9 are not allowed in template strings.
+"`\\0`" ok
+"String.raw`\\07`" ok
+"((x) => x)`\\07`[0]" ok
+"`\\u{g}`" SyntaxError: Invalid Unicode escape sequence
+"((x) => x)`\\u{g}`[0]" ok
+"((x) => x.raw[0])`\\u{g}`" ok
+"new super()" SyntaxError: 'super' keyword unexpected here
+"new super.x" SyntaxError: 'super' keyword unexpected here
+"class A extends Object { constructor() { new super(); } }" SyntaxError: 'super' keyword unexpected here
+"class A extends Object { constructor() { new super.x(); } }" ok
+"with ({}) class A {}" SyntaxError: Unexpected token 'class'
+"while (0) class A {}" SyntaxError: Unexpected token 'class'
+"do class A {} while (0)" SyntaxError: Unexpected token 'class'
+"for (([a]) of []);" SyntaxError: Invalid destructuring assignment target
+"for ((a) of []);" ok
+"for ([a] of [[]]);" ok
+"for ((a.b) of []);" ok
+"for (async of []);" SyntaxError: The left-hand side of a for-of loop may not be 'async'.
+"for (async.x of []);" ok
+"for ((async) of []);" ok
+"label: { label: ; }" SyntaxError: Label 'label' has already been declared
+"label: while (0) { break label; }" ok
+"x: x: ;" SyntaxError: Label 'x' has already been declared
+"try {} catch (a) { if (1) function a(){} }" ok
+"try {} catch (a) { if (1) function a(){} else function a(){} }" ok
+"try {} catch (a) { function a(){} }" SyntaxError: Identifier 'a' has already been declared
+"try {} catch (a) { { function a(){} } }" ok
+"{ var a; if (1) function a(){} }" ok
+"{ var a; function a(){} }" SyntaxError: Identifier 'a' has already been declared
