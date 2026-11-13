@@ -16,6 +16,7 @@
 #define AMB_HTML_FORMS_H
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 /* an input's type, its type attribute's state (a value it does not know is text) */
 enum { FORM_TEXT, FORM_HIDDEN, FORM_CHECKBOX, FORM_RADIO, FORM_RANGE, FORM_NUMBER, FORM_BUTTON, FORM_SUBMIT, FORM_RESET, FORM_IMAGE,
@@ -53,6 +54,11 @@ uint32_t form_group_checked(const dom_document *d, uint32_t x);
    set, and a radio's name, type or form attribute moves it to another group, which a
    checked one takes */
 void form_attr_changed(dom_document *d, uint32_t x, const char *name, size_t n, int had);
+/* an attribute whose change form_attr_changed answers (checked, name, type, form): a caller
+   asks before it looks for what was there */
+static inline int form_attr_matters(const char *s, size_t n) {
+    return (n == 7 && memcmp(s, "checked", 7) == 0) || (n == 4 && (memcmp(s, "name", 4) == 0 || memcmp(s, "type", 4) == 0 || memcmp(s, "form", 4) == 0));
+}
 /* a subtree inserted (x its root): its checked radios, in tree order, take their groups */
 void form_inserted(dom_document *d, uint32_t x);
 /* the parse done: each group's last checked radio, in the parse's order, the one checked */

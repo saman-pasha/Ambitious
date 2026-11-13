@@ -19,6 +19,11 @@
 #     flag, defaultChecked, a group's button unchecked, a click's and a cancelled one's, a
 #     form's reset, a clone, an insertion, :checked and FormData reading the state, a user's
 #     clicks;
+#   click-point.html: a click's coordinates where the pointer was as it began, whatever its
+#     listeners move (an element moved by a press's listener, then by the click's; a box's
+#     :checked moving it), read at once and in a later task; its offsets from the target's
+#     box when first read, then kept; a release and its click where the pointer is once a
+#     press's listener moved the element away;
 #   form.html, served by tests/integ/script-serve.py, once for each line of form.actions:
 #     the console and the requests the server had (a submit button's click, a submitter's
 #     formaction and formmethod, submit() and requestSubmit(), GET, multipart and
@@ -60,7 +65,7 @@ same() {
   if cmp -s "$1" "$2"; then echo "the same $(wc -l < "$2" | tr -d ' ') lines"
   else diff "$1" "$2"; fi
 }
-for p in events keys validity checked; do
+for p in events keys validity checked click-point; do
   echo "-- the $p page's console after its actions, against Chromium's:"
   eval "set -- $(cat "$pages/$p.actions")"
   console "$@" script "$pages/$p.html" > "$work/c.txt"

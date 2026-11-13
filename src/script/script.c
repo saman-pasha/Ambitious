@@ -272,7 +272,13 @@ jv sh_wrap(js_vm *vm, uint32_t x) {
     dom_node_kind k = d->node[x].kind;
     uint32_t p = k == DOM_NODE_KIND_ELEMENT ? HP_ELEMENT : k == DOM_NODE_KIND_DOCUMENT ? HP_DOCUMENT : HP_CHARDATA;
     if (k == DOM_NODE_KIND_FRAGMENT) p = script_shadow_host(d, x) ? HP_SHADOWROOT : HP_NODE;
-    uint32_t o = js_obj_new(vm, JK_HOST, vm->host->protos[p]);
+    /* an HTML element's: its interface's prototype (src/script/custom.c) */
+    uint32_t po = vm->host->protos[p];
+    if (k == DOM_NODE_KIND_ELEMENT && d->node[x].ns == DOM_NAMESPACE_HTML) {
+        uint32_t ip = script_iface_proto(vm, x);
+        if (ip) po = ip;
+    }
+    uint32_t o = js_obj_new(vm, JK_HOST, po);
     vm->objs[o].a = x;
     vm->objs[o].b = d->node[x].gen;
     vm->objs[o].c = HK_NODE;
@@ -487,6 +493,7 @@ static uint32_t sh_import(dom_document *to, const dom_document *from, uint32_t x
     return h.index;
 }
 
+static uint32_t sh_inputs(struct js_host *h);
 /* html parsed as a fragment and its nodes inserted into parent before before (0: at the
    end): the fragment is the body of a document of its own, in quirks mode when the page
    is (no DOCTYPE), its nodes copied over */
@@ -511,7 +518,7 @@ static void sh_insert_html(js_vm *vm, uint32_t parent, uint32_t before, const ch
         sh_start_all(vm->host, y);
         if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
         else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
-        form_inserted(d, y);
+        if (sh_inputs(vm->host)) form_inserted(d, y);
     }
 }
 
@@ -544,7 +551,8 @@ static void sh_escape(vector<char> *out, const char *s, size_t n, int attr) {
         else push_back(*out, c);
     }
 }
-static void sh_html_of(const dom_document *d, uint32_t x, vector<char> *out, int self) {
+int script_custom_is_given(const struct js_host *h, uint32_t x, vector<char> *out);
+static void sh_html_of(const struct js_host *h, const dom_document *d, uint32_t x, vector<char> *out, int self) {
     dom_node_kind k = d->node[x].kind;
     if (self && k == DOM_NODE_KIND_TEXT) {
         uint32_t p = d->node[x].parent;
@@ -562,6 +570,13 @@ static void sh_html_of(const dom_document *d, uint32_t x, vector<char> *out, int
     if (self && k == DOM_NODE_KIND_ELEMENT) {
         push_back(*out, '<');
         append_range(*out, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name));
+        /* an is value createElement or a constructor gave, and no is attribute: written first */
+        vector<char> is;
+        if (h && script_custom_is_given(h, x, &is) && !sh_attr_z(d, x, "is")) {
+            append_range(*out, " is=\"", 5);
+            sh_escape(out, data(is), len(is), 1);
+            push_back(*out, '"');
+        }
         for (uint32_t at = d->node[x].first_attr; at; at = d->attr[at].next) {
             push_back(*out, ' ');
             append_range(*out, names_ptr(d, d->attr[at].name), names_len(d, d->attr[at].name));
@@ -574,7 +589,7 @@ static void sh_html_of(const dom_document *d, uint32_t x, vector<char> *out, int
     }
     /* a template's markup is its contents' */
     uint32_t holder = k == DOM_NODE_KIND_ELEMENT && d->node[x].content ? d->node[x].content : x;
-    for (uint32_t c = d->node[holder].first_child; c; c = d->node[c].next_sibling) sh_html_of(d, c, out, 1);
+    for (uint32_t c = d->node[holder].first_child; c; c = d->node[c].next_sibling) sh_html_of(h, d, c, out, 1);
     if (self && k == DOM_NODE_KIND_ELEMENT) {
         append_range(*out, "</", 2);
         append_range(*out, names_ptr(d, d->node[x].name), names_len(d, d->node[x].name));
@@ -941,6 +956,16 @@ int sh_fire(js_vm *vm, uint32_t target, const char *type, uint32_t flags) {
     return sh_dispatch(vm, target, ev);
 }
 
+/* the document has an input element's name (its atom then kept: a name stays), looked for
+   again only when the document has new names */
+static uint32_t sh_inputs(struct js_host *h) {
+    const dom_document *d = h->d;
+    if (!h->input_nm && d->names_n != h->input_seen) {
+        h->input_seen = (uint32_t)d->names_n;
+        h->input_nm = names_find(d, "input", 5);
+    }
+    return h->input_nm;
+}
 /* x and y have the same attribute of that name, the same value */
 static int sh_same_attr(const dom_document *d, uint32_t x, uint32_t y, const char *name) {
     uint32_t a = sh_attr_z(d, x, name), b = sh_attr_z(d, y, name);
@@ -995,6 +1020,7 @@ int sh_click_at(js_vm *vm, uint32_t x, uint32_t trusted) {
         was = form_checked(d, x);
         /* the group's checked button before the click, x itself when it was checked (Chromium's ClickHandlingState) */
         if (box == 2) old = was ? x : form_group_checked(d, x);
+        if (h->pt_armed) script_click_keep(vm);
         form_set_checked(d, x, box == 1 ? !was : 1);
     }
     if (!jv_is_obj(ev)) ev = script_click_event(vm, trusted);
@@ -1352,7 +1378,8 @@ static int sh_lc_holds(const struct js_host *h, const sh_list *l, uint32_t c) {
     case LC_FORM_ELEMENTS:
         /* a form's: the listed elements it owns, in the document; a fieldset's: those in it */
         if (!(sh_named(d, c, "button") || sh_named(d, c, "fieldset") || sh_named(d, c, "object") || sh_named(d, c, "output") ||
-              sh_named(d, c, "select") || sh_named(d, c, "textarea") || (sh_named(d, c, "input") && !sh_input_type_is(d, c, "image"))))
+              sh_named(d, c, "select") || sh_named(d, c, "textarea") || (sh_named(d, c, "input") && !sh_input_type_is(d, c, "image")) ||
+              script_custom_face(h, c)))
             return 0;
         return !sh_named(d, l->root, "form") || script_form_owner(d, c) == l->root;
     case LC_OPTIONS: return sh_named(d, c, "option");
@@ -1576,7 +1603,7 @@ static jv sh_node_get(js_vm *vm, uint32_t x, uint32_t ha, int *handled) {
         /* a shadow root's innerHTML too (DOM's ShadowRoot) */
         if (!el && !(ha == HA_INNERHTML && k == DOM_NODE_KIND_FRAGMENT && script_shadow_host(d, x))) break;
         vector<char> t;
-        sh_html_of(d, x, &t, ha == HA_OUTERHTML);
+        sh_html_of(vm->host, d, x, &t, ha == HA_OUTERHTML);
         return sh_str(vm, data(t), len(t));
     }
     case HA_PARENTNODE: return sh_wrap(vm, d->node[x].parent);
@@ -1758,9 +1785,12 @@ jv js_host_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
         if (!ha1) return JV_UNDEF;
         return sh_node_get(vm, x, ha1 - 1, handled);
     }
+    /* the global's prototype, the engine's for a host (src/js/builtins.c): the HTML element
+       interfaces' names, the interfaces made then (src/script/custom.c) */
+    if (!kind) return o == vm->objs[vm->global].proto ? script_custom_iface_get(vm, atom, handled) : JV_UNDEF;
     if (kind == HK_EVENT) {
         uint32_t f = vm->objs[o].a;
-        if ((f & EV_LAZYPOINT) && !ha1) {
+        if ((f & (EV_LAZYPOINT | EV_LAZYOFFSET)) && !ha1) {
             jv v = script_event_point(vm, o, atom, handled);
             if (*handled) return v;
         }
@@ -1858,17 +1888,17 @@ static int sh_set_attr_v(js_vm *vm, uint32_t x, const char *name, jv v) {
     vector<char> t;
     if (!sh_utf8(vm, v, &t)) return 0;
     dom_document *d = vm->host->d;
-    int had = sh_attr_z(d, x, name) != 0;
+    int m = form_attr_matters(name, strlen(name)), had = m && sh_attr_z(d, x, name) != 0;
     dom_set_attribute(d, node_handle(d, x), name, strlen(name), data(t), len(t));
-    form_attr_changed(d, x, name, strlen(name), had);
+    if (m) form_attr_changed(d, x, name, strlen(name), had);
     return 1;
 }
 static void sh_set_flag(js_vm *vm, uint32_t x, const char *name, jv v) {
     dom_document *d = vm->host->d;
-    int had = sh_attr_z(d, x, name) != 0;
+    int m = form_attr_matters(name, strlen(name)), had = m && sh_attr_z(d, x, name) != 0;
     if (js_truthy(vm, v)) dom_set_attribute(d, node_handle(d, x), name, strlen(name), "", 0);
     else dom_remove_attribute(d, node_handle(d, x), name, strlen(name));
-    form_attr_changed(d, x, name, strlen(name), had);
+    if (m) form_attr_changed(d, x, name, strlen(name), had);
 }
 
 /* a clone's inputs given their originals' state (HTML's cloning steps for input: the value and its dirty flag, the
@@ -1899,6 +1929,7 @@ static int sh_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled)
 /* a property set on a host object: its change to the DOM made records, as a call's */
 int js_host_set(js_vm *vm, uint32_t o, uint32_t atom, jv v, int *handled) {
     struct js_host *h = vm->host;
+    if (h && h->pt_armed) script_click_keep(vm);
     if (!h || (!h->mreg_live && !len(h->cdefs) && !h->sl_on)) return sh_host_set(vm, o, atom, v, handled);
     if (h->mreg_live) script_observe_flush(vm);
     int r = sh_host_set(vm, o, atom, v, handled);
@@ -2116,6 +2147,8 @@ static void sh_after_call(js_vm *vm) {
    and its own made records, each its own (src/script/observe.c); else the call alone */
 jv js_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled) {
     struct js_host *h = vm->host;
+    /* a user's click's point yet to be found: the document kept as the click began */
+    if (h && h->pt_armed) script_click_keep(vm);
     if (!h || (!h->mreg_live && !len(h->cdefs) && !h->sl_on)) return sh_host_call(vm, id, callee, thisv, args, argc, handled);
     if (h->mreg_live) script_observe_flush(vm);
     jv r = sh_host_call(vm, id, callee, thisv, args, argc, handled);
@@ -2499,11 +2532,11 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
             return JV_NULL;
         }
         if (!sh_utf8(vm, js_arg(vm, args, argc, 2), &v)) return JV_HOLE;
-        int had = !ns && sh_attr(d, x, data(nm), len(nm)) != 0;
+        int m = !ns && form_attr_matters(data(nm), len(nm)), had = m && sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_status st = ns ? dom_set_attribute_ns(d, node_handle(d, x), (dom_attr_namespace)ns, data(nm), len(nm), data(v), len(v))
                            : dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
         if (st != DOM_OK) return sh_status(vm, st);
-        if (!ns) form_attr_changed(d, x, data(nm), len(nm), had);
+        if (m) form_attr_changed(d, x, data(nm), len(nm), had);
         return JV_UNDEF;
     }
     case H_APPEND: case H_PREPEND: {
@@ -2549,6 +2582,16 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         /* a custom element's name defined: the element its constructor makes */
         uint32_t def = len(vm->host->cdefs) ? script_custom_def(vm, data(nm), len(nm)) : 0;
         if (def) return script_custom_create(vm, def);
+        /* options' is: a customized built-in element's is value (src/script/custom.c) */
+        if (argc > 1 && jv_is_obj(a1)) {
+            jv isv = js_get(vm, a1, js_atom_ascii(vm, "is"));
+            if (vm->throwing) return JV_HOLE;
+            if (isv != JV_UNDEF) {
+                vector<char> is;
+                if (!sh_utf8(vm, isv, &is)) return JV_HOLE;
+                return script_custom_create_is(vm, data(nm), len(nm), data(is), len(is));
+            }
+        }
         dom_node_h h = dom_create_element(d, data(nm), len(nm));
         if (!h.index) return sh_status(vm, DOM_INVALID_NAME);
         return sh_wrap(vm, h.index);
@@ -2580,10 +2623,10 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         vector<char> nm, v;
         if (!sh_utf8(vm, a0, &nm) || !sh_utf8(vm, a1, &v)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
-        int had = sh_attr(d, x, data(nm), len(nm)) != 0;
+        int m = form_attr_matters(data(nm), len(nm)), had = m && sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_status st = dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), data(v), len(v));
         if (st != DOM_OK) return sh_status(vm, st);
-        form_attr_changed(d, x, data(nm), len(nm), had);
+        if (m) form_attr_changed(d, x, data(nm), len(nm), had);
         if (len(nm) == 3 && memcmp(data(nm), "src", 3) == 0 && sh_script_elem(d, x)) sh_prepare(vm, x, SCRIPT_INSERTION_INSERTED);
         return JV_UNDEF;
     }
@@ -2591,9 +2634,9 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         vector<char> nm;
         if (!sh_utf8(vm, a0, &nm)) return JV_HOLE;
         for (size_t i = 0; i < len(nm); i++) if (nm[i] >= 'A' && nm[i] <= 'Z') nm[i] = (char)(nm[i] + 32);
-        int had = sh_attr(d, x, data(nm), len(nm)) != 0;
+        int m = form_attr_matters(data(nm), len(nm)), had = m && sh_attr(d, x, data(nm), len(nm)) != 0;
         dom_remove_attribute(d, node_handle(d, x), data(nm), len(nm));
-        form_attr_changed(d, x, data(nm), len(nm), had);
+        if (m) form_attr_changed(d, x, data(nm), len(nm), had);
         return JV_UNDEF;
     }
     case H_TOGGLE_ATTR: {
@@ -2604,7 +2647,7 @@ static jv sh_host_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t arg
         int want = argc > 1 ? js_truthy(vm, a1) : !has;
         if (want && !has) dom_set_attribute(d, node_handle(d, x), data(nm), len(nm), "", 0);
         if (!want && has) dom_remove_attribute(d, node_handle(d, x), data(nm), len(nm));
-        if (want != has) form_attr_changed(d, x, data(nm), len(nm), has);
+        if (want != has && form_attr_matters(data(nm), len(nm))) form_attr_changed(d, x, data(nm), len(nm), has);
         return jv_bool(want);
     }
     case H_ATTR_NAMES: {
@@ -3790,8 +3833,8 @@ static dom_status sh_insert_vm(js_vm *vm, uint32_t parent, uint32_t child, uint3
     dom_document *d = vm->host->d;
     dom_status st = sh_insert(d, parent, child, before);
     if (st != DOM_OK) return st;
-    /* its checked radio buttons take their groups (src/html/forms.c) */
-    form_inserted(d, child);
+    /* its checked radio buttons take their groups (src/html/forms.c), in a document with inputs */
+    if (sh_inputs(vm->host)) form_inserted(d, child);
     sh_inserted(vm, child);
     if (sh_script_elem(d, parent)) sh_prepare(vm, parent, SCRIPT_INSERTION_INSERTED);
     return st;
@@ -3843,7 +3886,7 @@ static void sh_written_copy(js_vm *vm, const dom_document *f, uint32_t p, uint32
         if (!y) continue;
         if (before) dom_insert_before(d, node_handle(d, parent), node_handle(d, y), node_handle(d, before));
         else dom_append_child(d, node_handle(d, parent), node_handle(d, y));
-        form_inserted(d, y);
+        if (sh_inputs(h)) form_inserted(d, y);
         push_back(h->wnodes, y);
     }
 }

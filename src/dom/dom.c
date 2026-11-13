@@ -28,7 +28,11 @@
    assigned nodes when the document changed since they were last found -- a host's element
    and text children by name, or those a script assigned the slot (assign_slot), in that
    order -- and keeps them as lists on the nodes (slot, assigned_first, assigned_next); a
-   node freed leaves them, so no link names a freed node. */
+   node freed leaves them, so no link names a freed node.
+
+   dom_copy (src/dom/dom.h) copies a document's tables and pools as they are, a buffer at a
+   time: the copy is the document, each record at its index, for a reader of the document as
+   it was. */
 #include <string.h>
 #include <vector.pl>
 #include <amb.pl>
@@ -38,6 +42,67 @@ amb_implementation(dom);
 
 static int dom_name_is(const dom_document *d, uint32_t name, const char *w) {
     return names_is(d, name, w, strlen(w));
+}
+
+void dom_copy(dom_document *to, const dom_document *from) {
+    /* each table and pool at once at the document's room, when the copy's has less (the
+       store's own growth doubles, copying as it goes) */
+    if (to->node_cap < from->node_len) {
+        to->node = (dom_node *)realloc(to->node, from->node_cap * sizeof(dom_node));
+        if (!to->node) abort();
+        to->node_cap = from->node_cap;
+    }
+    if (from->node_len) memcpy(&to->node[0], &from->node[0], from->node_len * sizeof(dom_node));
+    to->node_len = from->node_len;
+    to->node_free = from->node_free;
+    if (to->attr_cap < from->attr_len) {
+        to->attr = (dom_attr *)realloc(to->attr, from->attr_cap * sizeof(dom_attr));
+        if (!to->attr) abort();
+        to->attr_cap = from->attr_cap;
+    }
+    if (from->attr_len) memcpy(&to->attr[0], &from->attr[0], from->attr_len * sizeof(dom_attr));
+    to->attr_len = from->attr_len;
+    to->attr_free = from->attr_free;
+    if (to->shadow_cap < from->shadow_len) {
+        to->shadow = (dom_shadow *)realloc(to->shadow, from->shadow_cap * sizeof(dom_shadow));
+        if (!to->shadow) abort();
+        to->shadow_cap = from->shadow_cap;
+    }
+    if (from->shadow_len) memcpy(&to->shadow[0], &from->shadow[0], from->shadow_len * sizeof(dom_shadow));
+    to->shadow_len = from->shadow_len;
+    to->shadow_free = from->shadow_free;
+    if (to->text_cap < from->text_len) {
+        to->text = (char *)realloc(to->text, from->text_cap);
+        if (!to->text) abort();
+        to->text_cap = from->text_cap;
+    }
+    if (from->text_len) memcpy(&to->text[0], &from->text[0], from->text_len);
+    to->text_len = from->text_len;
+    /* the names: their text, their spans and their hash table's slots as they are */
+    to->names_len = 0;
+    to->names_n = 0;
+    to->names_scap = 0;
+    if (from->names_n) {
+        to->names = (char *)realloc(to->names, from->names_cap);
+        if (!to->names) abort();
+        to->names_cap = from->names_cap;
+        to->names_at = (amb_span *)realloc(to->names_at, from->names_ncap * sizeof(amb_span));
+        if (!to->names_at) abort();
+        to->names_ncap = from->names_ncap;
+        to->names_slots = (uint32_t *)realloc(to->names_slots, from->names_scap * sizeof(uint32_t));
+        if (!to->names_slots) abort();
+        memcpy(&to->names[0], &from->names[0], from->names_len);
+        memcpy(&to->names_at[0], &from->names_at[0], from->names_n * sizeof(amb_span));
+        memcpy(&to->names_slots[0], &from->names_slots[0], from->names_scap * sizeof(uint32_t));
+        to->names_len = from->names_len;
+        to->names_n = from->names_n;
+        to->names_scap = from->names_scap;
+    }
+    to->mutation_len = 0;
+    to->detail_len = 0;
+    to->detail_free = 0;
+    to->id = from->id;
+    to->revision = from->revision;
 }
 
 /* the details of the changes kept from now on: the details' table begun (its first record

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Customized built-ins and form-associated custom elements</title>
+<!-- Customized built-in elements and form-associated custom elements (HTML 4.13;
+     src/script/custom.c): the HTML element interfaces and the wrappers' prototypes; define()
+     with extends and its checks, the parsed elements of an is attribute upgraded,
+     createElement(name, { is }) and a class's new, their is value written, innerHTML's;
+     formAssociated, attachInternals() and its checks, ElementInternals' form, setFormValue,
+     setValidity, validity, validationMessage, willValidate, checkValidity and states, the form's
+     elements, entry list, checkValidity and reset, and the form callbacks. The console must be
+     Chromium's line for line (custom-forms.chromium, written by tools/bench/console.js). -->
+</head>
+<body>
+<button is="my-button" id="b1">one</button>
+<p is="my-p" id="p1">para</p>
+<form id="f">
+<input name="plain" value="x">
+<my-input name="mi" id="mi1"></my-input>
+<fieldset id="fs"><my-input name="mi2" id="mi2"></my-input></fieldset>
+</form>
+<script>
+  function p(n, v) { console.log(n + ': ' + v); }
+  /* the interfaces: each element's wrapper's prototype its interface's */
+  p('interfaces', [document.createElement('div') instanceof HTMLDivElement, Object.getPrototypeOf(document.body) === HTMLBodyElement.prototype,
+    document.createElement('foo') instanceof HTMLUnknownElement, Object.getPrototypeOf(document.createElement('article')) === HTMLElement.prototype,
+    HTMLButtonElement.prototype instanceof HTMLElement, Object.getPrototypeOf(HTMLButtonElement) === HTMLElement,
+    document.createElement('h3') instanceof HTMLHeadingElement, document.createElement('td').constructor.name].join(' '));
+  try { new HTMLButtonElement(); } catch (e) { p('new HTMLButtonElement', e.name + ': ' + e.message); }
+  var b1 = document.getElementById('b1');
+  p('before the definition', b1.constructor.name + ' ' + (b1 instanceof HTMLButtonElement));
+  class MyButton extends HTMLButtonElement {
+    constructor() { super(); p('MyButton constructed', this.tagName + ' ' + this.getAttribute('is')); }
+    connectedCallback() { p('MyButton connected', JSON.stringify(this.id)); }
+    static get observedAttributes() { return ['title']; }
+    attributeChangedCallback(n, o, v) { p('MyButton attribute', n + ' ' + o + ' ' + v); }
+  }
+  customElements.define('my-button', MyButton, { extends: 'button' });
+  p('after the definition', (b1 instanceof MyButton) + ' ' + b1.localName + ' ' + (customElements.get('my-button') === MyButton));
+  var b2 = document.createElement('button', { is: 'my-button' });
+  p('createElement', (b2 instanceof MyButton) + ' ' + b2.outerHTML + ' ' + b2.hasAttribute('is'));
+  var b3 = new MyButton();
+  p('new', b3.tagName + ' ' + b3.outerHTML + ' ' + b3.localName);
+  document.body.appendChild(b3);
+  b3.title = 't';
+  var nb = document.createElement('my-button');
+  p('its name, autonomous', (nb instanceof MyButton) + ' ' + nb.constructor.name);
+  try { customElements.define('my-x', class extends HTMLElement {}, { extends: 'my-y' }); } catch (e) { p('extends a custom name', e.name + ': ' + e.message); }
+  try { customElements.define('my-z', class extends HTMLElement {}, { extends: 'bogus' }); } catch (e) { p('extends an unknown name', e.name + ': ' + e.message); }
+  class Wrong extends HTMLDivElement {}
+  customElements.define('my-wrong', Wrong, { extends: 'span' });
+  try { new Wrong(); } catch (e) { p('a class of the wrong interface', e.name + ': ' + e.message); }
+  class MyP extends HTMLParagraphElement { constructor() { super(); p('MyP constructed', this.id); } }
+  customElements.define('my-p', MyP, { extends: 'p' });
+  var d = document.createElement('div');
+  d.innerHTML = '<button is="my-button" id="b4">x</button>';
+  p('innerHTML', (d.firstChild instanceof MyButton) + ' ' + d.innerHTML);
+  /* form-associated custom elements */
+  class MyInput extends HTMLElement {
+    static formAssociated = true;
+    constructor() { super(); this.internals = this.attachInternals(); this.internals.setFormValue('v-' + this.getAttribute('name')); }
+    formAssociatedCallback(form) { p('formAssociatedCallback', this.id + ' ' + (form ? form.id : form)); }
+    formResetCallback() { p('formResetCallback', this.id); }
+    formDisabledCallback(dis) { p('formDisabledCallback', this.id + ' ' + dis); }
+  }
+  customElements.define('my-input', MyInput);
+  var f = document.getElementById('f'), mi1 = document.getElementById('mi1');
+  var ei = mi1.internals;
+  p('internals', Object.prototype.toString.call(ei) + ' ' + (ei.form === f) + ' ' + ei.willValidate + ' ' + (ei instanceof ElementInternals));
+  p('the form data', JSON.stringify(Array.from(new FormData(f))));
+  p('the elements', Array.from(f.elements).map(function (e) { return e.id || e.name; }).join(','));
+  try { mi1.attachInternals(); } catch (e) { p('attached twice', e.name + ': ' + e.message); }
+  try { document.createElement('div').attachInternals(); } catch (e) { p('a div', e.name + ': ' + e.message); }
+  try { b1.attachInternals(); } catch (e) { p('a customized built-in', e.name + ': ' + e.message); }
+  mi1.addEventListener('invalid', function (e) { p('invalid', e.target.id + ' ' + e.cancelable); });
+  ei.setValidity({ valueMissing: true }, 'need a value');
+  p('validity', ei.validity.valueMissing + ' ' + ei.validity.valid + ' ' + JSON.stringify(ei.validationMessage) + ' ' + ei.checkValidity());
+  p('the form checked', f.checkValidity());
+  ei.setValidity({});
+  p('valid again', ei.validity.valid + ' ' + JSON.stringify(ei.validationMessage));
+  try { ei.setValidity({ customError: true }); } catch (e) { p('no message', e.name + ': ' + e.message); }
+  ei.setFormValue(null);
+  p('a null value', JSON.stringify(Array.from(new FormData(f))));
+  ei.states.add('on');
+  p('states', ei.states.has('on') + ' ' + ei.states.size + ' ' + Object.prototype.toString.call(ei.states));
+  document.getElementById('fs').disabled = true;
+  p('disabled', ei.willValidate + ' ' + document.getElementById('mi2').internals.willValidate);
+  f.reset();
+  var nf = document.createElement('my-input');
+  nf.id = 'nf';
+  f.appendChild(nf);
+  nf.remove();
+  class Plain extends HTMLElement { constructor() { super(); this.i = this.attachInternals(); } }
+  customElements.define('my-plain', Plain);
+  var pl = new Plain();
+  try { pl.i.form; } catch (e) { p('not form-associated', e.name + ': ' + e.message); }
+  try { pl.i.setFormValue('x'); } catch (e) { p('not form-associated', e.name + ': ' + e.message); }
+  p('its states', typeof pl.i.states);
+</script>
+</body>
+</html>

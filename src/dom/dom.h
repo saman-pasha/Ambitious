@@ -87,4 +87,10 @@ static inline int dom_checkedness(const dom_document *d, uint32_t x, int has_att
     return (c & DOM_CHECKED_DIRTY) ? (c & DOM_CHECKED_ON) != 0 : has_attr;
 }
 
+/* A COPY of the document, for a reader of it as it was (src/script/input.c: the layout as a
+   click began, which its point is found in): its nodes, attributes, text, names and shadow
+   roots at their own indexes and offsets, its id and its revision, into to (empty, or a copy
+   made before, whose buffers are used again); not its log nor its changes' details */
+void dom_copy(dom_document *to, const dom_document *from);
+
 #endif

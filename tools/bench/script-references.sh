@@ -15,7 +15,7 @@ AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 pages=$AMB_ROOT/tests/pages
 work=$(mktemp -d "${TMPDIR:-/tmp}/amb-refs.XXXXXX")
 unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY no_proxy NO_PROXY
-for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled custom shadow gc-host; do
+for p in lists geometry thrash inserted inserted-order write-async observer observer-unsettled custom shadow gc-host custom-forms; do
   node "$AMB_ROOT/tools/bench/console.js" "$pages/$p.html" > "$pages/$p.chromium" && echo "wrote $p.chromium"
 done
 # the module page read from its file: every module's fetch refused (a file's origin is
@@ -28,7 +28,7 @@ cp "$work/mf.$most" "$pages/modules-file.chromium" && echo "wrote modules-file.c
 for p in write-dom; do
   node "$AMB_ROOT/tools/bench/serialize.js" "$pages/$p.html" > "$pages/$p.serialized" && echo "wrote $p.serialized"
 done
-for p in events keys validity checked; do
+for p in events keys validity checked click-point; do
   eval "set -- $(cat "$pages/$p.actions")"
   node "$AMB_ROOT/tools/bench/console-actions.js" "$pages/$p.html" "$@" < /dev/null > "$pages/$p.chromium" && echo "wrote $p.chromium"
 done

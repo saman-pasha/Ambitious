@@ -6,6 +6,8 @@ the same 101 lines
 the same 123 lines
 -- the checked page's console after its actions, against Chromium's:
 the same 36 lines
+-- the click-point page's console after its actions, against Chromium's:
+the same 13 lines
 -- the form's submissions, each one's console and requests, against Chromium's:
 the same 84 lines
 -- leaving a page, each way, its console and requests, against Chromium's:

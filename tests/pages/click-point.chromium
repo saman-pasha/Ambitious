@@ -1,0 +1,13 @@
+b pointerdown, moved
+b mousedown 150 70 27 17 150 70 150 70 150 70
+b mouseup 150 70
+b click b 150 70
+b later 150 70 27 -133
+c click 150 320 48 18
+c after its move 150 48
+d click SPAN 460 70 50 20
+k click true 410 310 -30 10
+e mousedown e 150 420
+e pointerup HTML 150 420
+e mouseup HTML 150 420
+e click HTML 150 420

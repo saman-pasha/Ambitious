@@ -11,7 +11,12 @@
 #     their assigned nodes, assignedSlot, events retargeted and their composed paths;
 #   shadow-slots.html: declarative shadow roots read back, a clonable root cloned,
 #     attachShadow's options, slotchange in Chromium's order, manual assignment (assign()),
-#     composedPath() hiding a closed tree's nodes (PLAN.md 12z).
+#     composedPath() hiding a closed tree's nodes (PLAN.md 12z);
+#   custom-forms.html: the HTML element interfaces, customized built-in elements (extends,
+#     is=, createElement's is, a class's new, their checks and their is value written) and
+#     form-associated custom elements (attachInternals, ElementInternals' form value,
+#     validity and states, the form's elements, entries, validation and reset, the form
+#     callbacks) (PLAN.md 12af).
 # Then the facts the reasoner has of the definitions and the shadow trees (the flat tree's
 # slots among them), and its diagnostic of an element of a custom element's name no script
 # defined.
@@ -22,7 +27,7 @@ amb() { sh "$AMB_ROOT/bin/ambitious" "$@" < /dev/null 2>&1 | sed "s|$AMB_ROOT|RO
 pages="$AMB_ROOT/tests/pages"
 # a page's console as Chromium's is written: its messages, then its uncaught errors
 console() { amb script "$1" > "$work/s.txt"; sed -n -e 's/^console [a-z]* *\[[0-9]*\] //p' "$work/s.txt"; sed -n -e 's/^error *[a-z]* *\[[0-9]*\] /error: /p' "$work/s.txt"; }
-for p in custom shadow shadow-slots; do
+for p in custom shadow shadow-slots custom-forms; do
   echo "-- the $p page's console, against Chromium's:"
   console "$pages/$p.html" > "$work/c.txt"
   if cmp -s "$pages/$p.chromium" "$work/c.txt"; then echo "the same $(wc -l < "$work/c.txt" | tr -d ' ') lines"
