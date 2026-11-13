@@ -8,7 +8,7 @@
 :- dynamic layout_box/7, layout_parent/2, layout_margin/5, layout_border/5, layout_padding/5, layout_width/4,
            layout_line/6, layout_text/8, layout_frag/8, layout_pseudo/2, layout_generated/3, layout_positioned/5,
            layout_stacking/2, layout_float/2, layout_clips/1, layout_background/2, layout_grid_item/6, layout_grid_area/2,
-           layout_inline_cb/2, layout_writing_mode/2.
+           layout_inline_cb/2, layout_writing_mode/2, layout_captions/3.
 
 %% the box an element generated (its pseudo-elements' are theirs)
 layout_box_of(N, B) :- layout_box(B, N, K, _, _, _, _), N \== none, K \== viewport, K \== inline, \+ layout_pseudo(B, _).
@@ -36,10 +36,11 @@ layout_rules_inline_part(N, X, Y, W, H) :- dom_flat_child(N, C), dom_element(C, 
 layout_rules_inline_part(N, X, Y, W, H) :-
     dom_flat_child(N, C), dom_element(C, _), \+ layout_box_of(C, _), layout_rules_inline_part(C, X, Y, W, H).
 
-%% a box's border box
+%% a box's border box; a table's, its wrapper's: its captions above and below too (CSS 2.1, 17.4)
 layout_border_box(B, X, Y, W, H) :-
     layout_box(B, _, _, CX, CY, CW, CH), layout_border(B, BT, BR, BB, BL), layout_padding(B, PT, PR, PB, PL),
-    X is CX - PL - BL, Y is CY - PT - BT, W is CW + PL + PR + BL + BR, H is CH + PT + PB + BT + BB.
+    (   layout_captions(B, CT, CB) -> true ; CT = 0, CB = 0 ),
+    X is CX - PL - BL, Y is CY - PT - BT - CT, W is CW + PL + PR + BL + BR, H is CH + PT + PB + BT + BB + CT + CB.
 
 %% why a box is where it is: the flow put it there; it floats to a side; it is offset
 %% from where the flow put it (relative), or placed in its containing block (absolute:

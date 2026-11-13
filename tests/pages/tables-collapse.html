@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: collapsed borders</title>
+<!-- border-collapse: collapse as Chromium lays it out and draws it (CSS 2.1, 17.6.2; Blink's
+     TableBorders): each edge between two cells, or a cell and the table, takes the border that
+     wins its conflict -- hidden outright, then the wider, then by style (double, solid, dashed,
+     dotted, ridge, outset, groove, inset; inset drawn as ridge and outset as groove), then the
+     cell over its row, its row group, its column, its column group and the table, then the cell
+     to the left and above --, half of it in each cell beside it; the table's border half of the
+     widest edge on each of its sides, its padding none; the edges drawn over the cells, each
+     joint by the edge that wins it. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { border-collapse: collapse; margin: 0 0 8px 0; background: #fd8; }
+td { padding: 2px 6px; background: #ddd; }
+</style></head><body>
+<table id=c1 style="border: 3px solid #333"><tr><td id=c1a style="border: 1px solid #36c">one</td><td id=c1b style="border: 1px solid #36c">two</td></tr>
+<tr><td id=c1c style="border: 1px solid #36c">three</td><td id=c1d style="border: 1px solid #36c">four</td></tr></table>
+<table id=c2 style="border: 3px solid #c33"><tr><td id=c2a style="border: 5px solid #36c">wide</td><td id=c2b style="border: 1px solid #393">thin</td></tr>
+<tr><td id=c2c>none</td><td id=c2d style="border: 2px solid #000">two</td></tr></table>
+<table id=c3 style="border: 1px solid #000"><tr><td id=c3a style="border: 6px double #36c">double</td><td id=c3b style="border: 6px solid #c33">solid</td><td id=c3c style="border: 6px groove #c84">groove</td><td id=c3d style="border: 6px ridge #c84">ridge</td></tr>
+<tr><td id=c3e style="border: 5px inset #c84">inset</td><td id=c3f style="border: 5px outset #c84">outset</td><td id=c3g style="border: 4px groove #48c">groove</td><td id=c3h style="border: 3px ridge #48c">ridge</td></tr></table>
+<table id=c4 style="border: 4px solid #333"><tr><td id=c4a style="border: 2px solid #36c">left</td><td id=c4b style="border: 1px hidden #c33">hidden</td><td id=c4c style="border: 2px solid #36c">right</td></tr>
+<tr><td id=c4d style="border: 2px solid #36c">below</td><td id=c4e style="border: 6px solid #393">wide</td><td id=c4f style="border: 2px solid #36c">it</td></tr></table>
+<table id=c5 style="border: 2px solid #c33"><colgroup style="border: 2px solid #f80"><col style="border: 2px solid #cc0"><col></colgroup>
+<tbody style="border: 2px solid #393"><tr style="border: 2px solid #36c"><td id=c5a style="border: 2px solid #000">cell</td><td id=c5b>row</td></tr>
+<tr><td id=c5c>col</td><td id=c5d>group</td></tr></tbody></table>
+<table id=c6><tr><td id=c6a style="border: 3px solid #c33">red</td><td id=c6b style="border: 3px solid #36c">blue</td></tr>
+<tr><td id=c6c style="border: 3px solid #393">green</td><td id=c6d style="border: 3px solid #c84">brown</td></tr></table>
+<table id=c7 style="border: 2px solid #333"><tr><td id=c7a rowspan=2 style="border: 4px solid #36c">two rows</td><td id=c7b colspan=2 style="border: 1px solid #c33">two columns</td></tr>
+<tr><td id=c7c style="border: 3px solid #393">x</td><td id=c7d>y</td></tr></table>
+<table id=c8 style="border: 2px solid #333; padding: 10px"><caption id=c8cap>a caption</caption><tr><td id=c8a style="border: 1px solid #36c">padding</td><td id=c8b style="border: 1px solid #36c">none</td></tr></table>
+<table id=c9 style="border: 1px solid #333"><tr><td id=c9a style="border-left: 7px solid #36c">first</td><td id=c9b>row</td></tr>
+<tr><td id=c9c>second</td><td id=c9d style="border-right: 5px solid #393">row</td></tr></table>
+</body></html>

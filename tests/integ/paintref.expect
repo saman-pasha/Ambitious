@@ -75,6 +75,12 @@ svgfe-zoom: 26 of 26 regions agree with Chromium's drawing
 svgfx-html: 61 of 61 regions agree with Chromium's drawing
 svgfx-zoom: 22 of 22 regions agree with Chromium's drawing
 symbols: 20 of 20 regions agree with Chromium's drawing
+tables-caption: 30 of 30 regions agree with Chromium's drawing
+tables-collapse: 50 of 50 regions agree with Chromium's drawing
+tables-cols: 53 of 53 regions agree with Chromium's drawing
+tables-empty: 30 of 30 regions agree with Chromium's drawing
+tables-fixed: 42 of 42 regions agree with Chromium's drawing
+tables-spacing: 55 of 55 regions agree with Chromium's drawing
 texttransform: 17 of 17 regions agree with Chromium's drawing
 theme: 24 of 24 regions agree with Chromium's drawing
 transforms: 16 of 16 regions agree with Chromium's drawing

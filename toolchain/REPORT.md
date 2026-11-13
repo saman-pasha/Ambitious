@@ -728,3 +728,27 @@ neighbours.
     compiles and prints 2. A unit that leans on it builds with cicilang alone, and a slip
     that reuses a name goes unseen. 12aj met it in `src/js/regexp.c`'s `rp_prop_find`
     (the property's kind, then an alias's place, both `k`), now two names.
+
+40. **A variable named `anon` cannot be declared**: cicilang's syntax tree marks a
+    declarator with no name by the atom `anon` (`library/ccl_check.pl`, `ccl_syntax.pl`:
+    `N == anon`, `Tag == anon`), so a declaration of a variable of that name reads as one
+    of no name. In a small function the reader gives up with "syntax error: could not
+    read this item (gave up near line N)", at the function, as finding 37's `own` does;
+    in a long one it read on, and lowering stopped at the declaration's line with
+    "not lowered yet: undeclared(vector)", naming the declaration's type, not its name.
+    12ac met it in `src/layout/layout.c` (`lay_table_parts`: a vector of flags named
+    `anon`, renamed `runs`). Repro:
+
+    ```c
+    #include <stdio.h>
+    int main(void) {
+        int anon = 1;
+        printf("%d\n", anon);
+        return 0;
+    }
+    ```
+
+    gives `anon.c:2: error: syntax error: could not read this item (gave up near line 3)`;
+    with `vector<int> anon;` (and `#include <vector.pl>`) the same, at the function. Asked for:
+    a name the language does not reserve kept apart from the tree's marker (a marker no
+    identifier can spell), or the name refused as a reserved one, at the name.

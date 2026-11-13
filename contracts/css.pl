@@ -83,6 +83,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% CSS Writing Modes 4: a vertical line's glyphs' orientation (mixed, upright or sideways) and text-combine-upright
     %% (none, or all: the text set in one em across the line), both inherited
     text_orientation, text_combine_upright,
+    %% CSS 2.1's tables (17): border-collapse (inherited); border-spacing's two lengths, horizontal and vertical
+    %% (inherited; Chromium's -webkit- longhands, which the border-spacing shorthand sets); empty-cells (inherited),
+    %% table-layout, caption-side (inherited)
+    border_collapse, webkit_border_horizontal_spacing, webkit_border_vertical_spacing, empty_cells, table_layout, caption_side,
     custom,
     %% CSS Logical 1's flow-relative properties, after custom: no computed style holds them. A declaration of one is
     %% kept as such; the cascade takes it for the physical property its element's writing-mode and direction map it

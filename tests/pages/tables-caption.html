@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Tables: captions</title>
+<!-- captions as Chromium lays them out (CSS 2.1, 17.4; caption-side): each caption laid out at the
+     table's border-box width, outside its border box -- above it at the top, below it at the
+     bottom (caption-side: bottom), in the document's order on each side, its margins about it --;
+     the table's box (getBoundingClientRect's) holds them; the table at least as wide as its widest
+     caption's min-content width, its columns sharing the width; caption-side inherited. -->
+<style>
+body { margin: 8px; font: 16px/20px sans-serif; }
+table { margin: 0 0 6px 0; background: #fd8; border: 3px solid #333; padding: 4px; }
+caption { background: #9c6; }
+td { background: #8bd; }
+</style></head><body>
+<table id=k1><caption id=k1c>above</caption><tr><td id=k1a>a cell</td><td id=k1b>two</td></tr></table>
+<table id=k2><caption id=k2c style="caption-side: bottom">below</caption><tr><td id=k2a>a cell</td><td id=k2b>two</td></tr></table>
+<table id=k3><caption id=k3c style="caption-side: bottom; margin: 4px 6px">bottom one</caption><caption id=k3d style="margin: 2px 10px">top one</caption><caption id=k3e>top two</caption><tr><td id=k3a>x</td></tr></table>
+<table id=k4><caption id=k4c>a caption much wider than the cells</caption><tr><td id=k4a>a</td><td id=k4b>b</td></tr></table>
+<table id=k5 style="caption-side: bottom"><caption id=k5c>inherited side</caption><tr><td id=k5a>cell</td></tr></table>
+<table id=k6 style="width: 300px; border-spacing: 6px"><caption id=k6c style="text-align: left; padding: 3px; border: 2px solid #c33">a box of its own</caption><tr><td id=k6a>a</td><td id=k6b>b</td></tr></table>
+<table id=k7 style="border-collapse: collapse"><caption id=k7c style="caption-side: bottom">collapsed</caption><tr><td id=k7a style="border: 3px solid #36c">c</td></tr></table>
+<div id=k8 style="display: table; border: 2px solid #333; background: #fd8"><div id=k8c style="display: table-caption; background: #9c6">css caption</div><div style="display: table-row"><div id=k8a style="display: table-cell">cell</div></div></div>
+</body></html>

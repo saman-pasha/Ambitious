@@ -1620,6 +1620,72 @@ be built side by side and merged without touching each other's.
   then), and each element's wrapper keeps HTMLElement's prototype until then, one shape in the engine's caches.
   The copy's layout, and a release's second hit test, run only when a listener changed the page and a
   coordinate or the release's target depends on it.
+- **12ac Tables as Chromium lays them out** (`src/layout/layout.c`, Blink's TablesNG in its LayoutUnits; in
+  `contracts/layout.pl` the box kinds row_group and column, the box fields cap_top and cap_bottom (a table's captions
+  above and below its border box, the fact `layout_captions/3`), cborders (a collapsing table's edges) and
+  cell_hidden; `border-collapse`, `border-spacing` (Chromium's `-webkit-border-horizontal-spacing` and `-vertical-spacing`,
+  which it sets), `empty-cells`, `table-layout` and `caption-side` in `contracts/css.pl`, `src/css/css.c` and
+  `prolog/amb/rules/css.pl`; a table's border box with its captions in `prolog/amb/rules/layout.pl`; the parts'
+  backgrounds and the collapsed edges drawn in `src/paint/paint.c`; Blink's IsDataTable in `src/a11y/a11y.c`), each
+  measured in Chromium first, Blink's sources deciding where the measurements left room:
+  - a table laid out as TablesNG lays it out, in 64ths of a px (a float's LayoutUnit truncated, MulDiv's quotient
+    truncated, a remainder left to the last column or row that shares it): its parts grouped (its captions, its col and
+    colgroup elements, its row groups: the first head first, the first foot last, rows directly in it an anonymous
+    group); each column's constraints from the col elements' widths and the cells' min- and max-content widths, widths,
+    min- and max-widths and percentages, a spanning cell's shared out among the columns it spans, a column no cell
+    begins in merged; the table's width (its own, else fit-content between its grid's min- and max-content widths, at
+    least its widest caption's min-content) shared out by CSS Tables 3's guesses; the rows as tall as their cells and
+    heights ask, a rowspan's lack and the table's height shared out as Blink shares them; a cell's content where its
+    vertical-align puts it, its row's or row group's when it has none (it had been 2px of spacing always, no captions'
+    widths and one guess for the columns');
+  - `border-spacing`: one length or two, horizontal then vertical, between the cells and about them inside the table's
+    padding, none for a section with no rows, a spanning cell taking the spacing it crosses; the user agent's 2px; the
+    `cellspacing` attribute (a dimension's digits, a percentage refused); its lengths computed in whole px, as Blink
+    keeps them in shorts (a hundredth added and truncated: 2.7px is 2px, 3.99px 4px, 40,000px 0px);
+  - `border-collapse: collapse` (CSS 2.1, 17.6.2; Blink's TableBorders): each edge's border hidden outright, else the
+    wider, else by style (double, solid, dashed, dotted, ridge, outset, groove, inset), else the cell's over its row's,
+    row group's, column's, column group's and the table's, else the cell's to the left and above; half of it in each
+    cell beside it, the table's border half the widest edge on each of its sides, its padding none; the edges drawn
+    after the cells' backgrounds and before their content, each joint taken by the edge that wins it (Blink's
+    ComputeEdgeJoints), each edge a box side as Blink draws one (double in thirds, groove and ridge in halves of inset's
+    and outset's shades, inset drawn as ridge and outset as groove, a double under 3px and a groove or ridge under 2px
+    solid, dashes spaced as Blink spaces them), snapped to whole px from the table's border box;
+  - `table-layout: fixed` (CSS 2.1, 17.5.2.1): a table of a width of its own takes its columns' widths from its col
+    elements and its first row's cells alone, the fixed ones first, then the percentages, the rest shared evenly;
+    widths past the table's scaled down to it, or up to it when no column is automatic; a table of an auto width laid
+    out automatically; content wider than its column overflowing it, drawn over the next cell's background, as
+    Chromium draws a table's backgrounds before its cells' content;
+  - `empty-cells: hide` (separated borders alone): a cell with nothing in its flow (no text, no line, no box but one of
+    display none: white space alone, or nothing) draws neither its background nor its borders, its row's, row group's
+    and column's backgrounds drawn in it all the same; a no-break space, a line break or an empty box keeps it drawn;
+  - `caption-side: bottom`: a table's captions laid out at its border-box width, outside its border box, above it or
+    below it in the document's order on each side, their margins about them; the table's box (getBoundingClientRect's)
+    holds them;
+  - `col` and `colgroup`: a col's width a fixed width for its columns (its colgroup's when it has none), a colgroup with
+    no cols a width for each column of its span; the span attribute (1 to 1,000, 1 for what is no number); their boxes
+    across the row groups; their backgrounds drawn in the cells that begin in their columns, the colgroup's under the
+    col's, a row group's and a row's over them, each placed in its part's own box (an image across the part's cells);
+    the `bgcolor` attribute of col and colgroup, a colgroup's `width`;
+  - accessibility: Blink's IsDataTable reads a table's border-spacing (cell spacing is both its lengths, collapsed or
+    not) and its cells' empty-cells (a cell of hide makes a data table).
+
+  Gate: `tests/pages/tables-spacing.html` (boxes 55 of 55, from 0; regions 55 of 55, from 1), `tables-collapse.html`
+  (50 of 50, from 0; regions 50 of 50, from 0), `tables-fixed.html` (42 of 42, from 0; regions 42 of 42, from 1),
+  `tables-empty.html` (30 of 30, from 0; regions 30 of 30, from 0), `tables-caption.html` (30 of 30, from 4; regions 30
+  of 30, from 10) and `tables-cols.html` (53 of 53, from 1; regions 53 of 53, from 0), each held to Chromium's boxes
+  (`tests/integ/boxes.sh`) and drawing (`tests/integ/paintref.sh`); `tablevals.html`'s computed values (50 of 50, from
+  0; `tests/integ/cssref.sh`); `a11y-tables.html`'s tree (35 lines, Chromium's line for line, from 32: six tables more,
+  of spacing and empty cells; `tests/integ/a11y-chromium.sh`); every other page's boxes, regions, values and trees as
+  they were; the golden renders that moved (layout, sizing, a11y, a11y-names, quirks-limited, quirks-margins,
+  quirks-tables) moved nearer Chromium's screenshots, 89% to 97% of their changed pixels; the new pages render
+  valgrind clean.
+
+  Cost (`docs/performance.md`; callgrind's instructions, `ambitious render`, against main's build): a page without
+  tables as before but for the cascade's six values more a style (text.html's cascade 4.14M, then 4.19M; flex.html's
+  6.14M, then 6.23M), its layout and paint within 0.2%; the large page's 200 tables (2,400 cells) laid out in 67.6M
+  instructions, from 66.4M, its layout 493.6M, from 490.3M (+0.7%), its paint 155.1M, from 155.2M; its layout's time
+  (`ambitious bench`, the medians of five rounds of five runs, on a shared machine) 66.4 ms, from 69.3, within the
+  machine's noise.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
