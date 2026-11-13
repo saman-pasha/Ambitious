@@ -1,0 +1,18 @@
+button#b1 "names a shadow id"
+button#b2 "light both"
+button#b3 "described by a shadow id"
+textbox#lin "light label"
+list#lown
+listitem#lone level=1
+button#s1 "shadow name"
+button#s2 "names a light id"
+button#s3 "shadow both"
+button#s4 "described in both trees" desc "shadow description"
+textbox#sin "shadow label"
+textbox#sin2 "shadow name"
+list#sown
+listitem#sitem level=1
+button#i1 "inner name"
+button#i2 "names an id the outer trees have"
+button#slotted "slotted, names a shadow id"
+button#b4 "light name light both"

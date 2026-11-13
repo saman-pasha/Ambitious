@@ -404,7 +404,9 @@ static uint32_t ax_child(ACTX, uint32_t x, int k) {
     return 0;
 }
 
-/* the element whose id is the text p[0..n), the first in the document's order; the ids are hashed when first asked */
+/* the element whose id is the text p[0..n) in the tree of the element that names it (the document's, or a shadow
+   tree's: an id is looked for in its own tree alone, as Chromium's TreeScope has it), the first in tree order; the ids
+   are hashed, with their trees' roots, when first asked */
 static uint32_t ax_id_hash(const char *p, size_t n) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < n; i++) { h ^= (unsigned char)p[i]; h *= 16777619u; }
@@ -423,36 +425,39 @@ static int ax_connected(const dom_document *d, uint32_t x) {
     }
     return x == 1;
 }
+/* the table holds pairs: an element, then its tree's root */
 static void ax_ids_index(ACTX) {
     size_t count = 0;
     for (uint32_t x = 1; x < d->node_len; x++)
         if (d->node[x].live && d->node[x].kind == DOM_NODE_KIND_ELEMENT && d->node[x].first_attr && ax_get(AARGS, x, K_ID)) count++;
     size_t cap = 16;
     while (cap < 2 * count + 1) cap *= 2;
-    resize(ids, cap);
+    resize(ids, 2 * cap);
     uint32_t m = (uint32_t)(cap - 1);
     for (uint32_t x = 1; x < d->node_len; x++) {
         if (!d->node[x].live || d->node[x].kind != DOM_NODE_KIND_ELEMENT || !d->node[x].first_attr) continue;
         uint32_t a = ax_get(AARGS, x, K_ID);
         if (!a || !d->attr[a].value.len || !ax_connected(d, x)) continue;
         amb_span v = d->attr[a].value;
-        uint32_t h = ax_id_hash(text_ptr(d, v), v.len) & m;
+        uint32_t root = dom_tree_root(d, x);
+        uint32_t h = (ax_id_hash(text_ptr(d, v), v.len) ^ root * 2654435761u) & m;
         int dup = 0;
-        while (at(*ids, h)) {
-            if (ax_id_is(AARGS, at(*ids, h), text_ptr(d, v), v.len)) { dup = 1; break; }
+        while (at(*ids, 2 * h)) {
+            if (at(*ids, 2 * h + 1) == root && ax_id_is(AARGS, at(*ids, 2 * h), text_ptr(d, v), v.len)) { dup = 1; break; }
             h = (h + 1) & m;
         }
-        if (!dup) (*ids)[h] = x;
+        if (!dup) { (*ids)[2 * h] = x; (*ids)[2 * h + 1] = root; }
     }
 }
-static uint32_t ax_by_id(ACTX, const char *p, size_t n) {
+static uint32_t ax_by_id(ACTX, uint32_t from, const char *p, size_t n) {
     if (!aid[K_ID] || !n) return 0;
     if (!len(*ids)) ax_ids_index(AARGS);
-    uint32_t m = (uint32_t)(len(*ids) - 1);
-    uint32_t h = ax_id_hash(p, n) & m;
-    while (at(*ids, h)) {
-        uint32_t y = at(*ids, h);
-        if (ax_id_is(AARGS, y, p, n)) return y;
+    uint32_t root = dom_tree_root(d, from);
+    uint32_t m = (uint32_t)(len(*ids) / 2 - 1);
+    uint32_t h = (ax_id_hash(p, n) ^ root * 2654435761u) & m;
+    while (at(*ids, 2 * h)) {
+        uint32_t y = at(*ids, 2 * h);
+        if (at(*ids, 2 * h + 1) == root && ax_id_is(AARGS, y, p, n)) return y;
         h = (h + 1) & m;
     }
     return 0;
@@ -969,7 +974,7 @@ static int ax_part(ACTX, uint32_t y, int k, int flags, uint32_t self, vector<cha
 
 /* the text of the elements an ID reference list names, in order, each set off by a space: 1 when it says something,
    else nothing is added. A named element that is hidden counts whole */
-static int ax_refs_text(ACTX, uint32_t a, int flags, uint32_t self, vector<char> *out) {
+static int ax_refs_text(ACTX, uint32_t from, uint32_t a, int flags, uint32_t self, vector<char> *out) {
     size_t mark = len(*out);
     amb_span v = d->attr[a].value;
     const char *p = text_ptr(d, v);
@@ -979,7 +984,7 @@ static int ax_refs_text(ACTX, uint32_t a, int flags, uint32_t self, vector<char>
         size_t b = i;
         while (i < v.len && !ax_white(p[i])) i++;
         if (i == b) break;
-        uint32_t target = ax_by_id(AARGS, p + b, i - b);
+        uint32_t target = ax_by_id(AARGS, from, p + b, i - b);
         if (!target) continue;
         ax_space(out);
         int f2 = flags | (ax_hidden_how(AARGS, target) >= 0 || ax_invisible(AARGS, target) ? T_ALL : 0);
@@ -1326,7 +1331,7 @@ static int ax_part(ACTX, uint32_t y, int k, int flags, uint32_t self, vector<cha
     if (d->node[y].first_attr) {
         if (!(flags & T_REF)) {
             uint32_t lb = ax_get(AARGS, y, A_LABELLEDBY);
-            if (lb && ax_refs_text(AARGS, lb, T_REF, self, out)) return 1;
+            if (lb && ax_refs_text(AARGS, y, lb, T_REF, self, out)) return 1;
         }
     }
     a11y_role r = ax_role_of(AARGS, y, k);
@@ -1577,7 +1582,7 @@ static void ax_owned_content(ACTX, uint32_t x, int flags, uint32_t self, vector<
         size_t b = i;
         while (i < v.len && !ax_white(p[i])) i++;
         if (i == b) break;
-        uint32_t y = ax_by_id(AARGS, p + b, i - b);
+        uint32_t y = ax_by_id(AARGS, x, p + b, i - b);
         if (!y || y >= len(*owner) || (at(*owner, y) & ~AX_MET) != x || y == self) continue;
         if (ax_flow_of(AARGS, prev) != ax_flow_of(AARGS, y)) ax_space(out);
         ax_content_child(AARGS, y, flags, self, out);
@@ -1804,8 +1809,10 @@ static int ax_labels_text(ACTX, uint32_t x, vector<char> *out) {
                 if (d->node[l].live && ax_kind(AARGS, l) == E_LABEL && ax_get(AARGS, l, K_FOR) && ax_connected(d, l)) push_back(labels, l);
         }
         amb_span idv = d->attr[ida].value;
+        uint32_t root = dom_tree_root(d, x);
         for (size_t q = 1; q < len(*labels); q++) {
             uint32_t l = at(*labels, q);
+            if (dom_tree_root(d, l) != root) continue;
             uint32_t f = ax_get(AARGS, l, K_FOR);
             if (!f || d->attr[f].value.len != idv.len || memcmp(text_ptr(d, d->attr[f].value), text_ptr(d, idv), idv.len) != 0) continue;
             ax_space(out);
@@ -1830,7 +1837,7 @@ static int ax_labels_text(ACTX, uint32_t x, vector<char> *out) {
 static a11y_name_from ax_name_of(ACTX, const uint32_t *sl, uint32_t x, int k, a11y_role role, int content, vector<char> *out) {
     clear(*out);
     uint32_t lb = AS(A_LABELLEDBY);
-    if (lb && ax_refs_text(AARGS, lb, T_REF, x, out)) return A11Y_NAME_FROM_ARIA_LABELLEDBY;
+    if (lb && ax_refs_text(AARGS, x, lb, T_REF, x, out)) return A11Y_NAME_FROM_ARIA_LABELLEDBY;
     uint32_t al = AS(A_LABEL);
     if (al && ax_put_attr(d, al, out)) return A11Y_NAME_FROM_ARIA_LABEL;
     int ty = k == E_INPUT ? ax_input_type(AARGS, x) : -1;
@@ -1886,7 +1893,7 @@ static a11y_desc_from ax_desc_of(ACTX, const uint32_t *sl, uint32_t x, int k, a1
                                  vector<char> *out) {
     clear(*out);
     uint32_t db = AS(A_DESCRIBEDBY);
-    if (db && ax_refs_text(AARGS, db, T_REF, x, out)) return A11Y_DESC_FROM_ARIA_DESCRIBEDBY;
+    if (db && ax_refs_text(AARGS, x, db, T_REF, x, out)) return A11Y_DESC_FROM_ARIA_DESCRIBEDBY;
     uint32_t ad = AS(A_DESCRIPTION);
     if (ad && ax_put_attr(d, ad, out)) return A11Y_DESC_FROM_ARIA_DESCRIPTION;
     if (k == E_TABLE && nf != A11Y_NAME_FROM_CAPTION) {
@@ -1917,7 +1924,7 @@ static void ax_ref_list(ACTX, uint32_t x, uint32_t a, a11y_ref_attr kind) {
         size_t n = i - b < sizeof id - 1 ? i - b : sizeof id - 1;
         memcpy(id, p + b, n);
         id[n] = 0;
-        uint32_t target = ax_by_id(AARGS, id, n);
+        uint32_t target = ax_by_id(AARGS, x, id, n);
         a11y_aref_h r = aref_new(t);
         t->aref[r.index].from = node_handle(d, x);
         t->aref[r.index].attr = kind;
@@ -2577,7 +2584,7 @@ static uint32_t ax_next_owned(ACTX, ax_frame *f) {
         size_t b = i;
         while (i < v.len && !ax_white(p[i])) i++;
         if (i == b) break;
-        uint32_t y = ax_by_id(AARGS, p + b, i - b);
+        uint32_t y = ax_by_id(AARGS, f->x, p + b, i - b);
         if (y && y < len(*owner) && at(*owner, y) == f->x) {
             (*owner)[y] |= AX_MET;
             f->op = (uint32_t)i;
@@ -2612,7 +2619,7 @@ static void ax_owners(ACTX) {
                 size_t b = i;
                 while (i < v.len && !ax_white(p[i])) i++;
                 if (i == b) break;
-                uint32_t y = ax_by_id(AARGS, p + b, i - b);
+                uint32_t y = ax_by_id(AARGS, x, p + b, i - b);
                 if (!y || y == x || at(*owner, y) || !ax_walked(AARGS, y)) continue;
                 int above = 0;
                 for (uint32_t q = x; q > 1 && !above; q = at(*owner, q) ? at(*owner, q) : dom_flat_parent(d, q)) if (q == y) above = 1;

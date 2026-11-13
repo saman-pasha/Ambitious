@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>ids named in their own tree</title>
+<!-- An id that aria-labelledby, aria-describedby, aria-owns or a label's for names is looked for in the tree of the
+     element that names it: the document's ids for the document's elements, a shadow tree's for its own, the same id
+     free to be in both. Each node whose element has an id held to Chromium's tree (tests/pages/a11y-scope.chromium:
+     tools/bench/axtree.js). -->
+</head>
+<body>
+<span id="lname">light name</span>
+<span id="ldesc">light description</span>
+<span id="both">light both</span>
+<button id="b1" aria-labelledby="sname">names a shadow id</button>
+<button id="b2" aria-labelledby="both">names an id both trees have</button>
+<button id="b3" aria-describedby="sdesc">described by a shadow id</button>
+<label for="sin">light label for a shadow input</label>
+<input id="lin">
+<label for="lin">light label</label>
+<div id="lown" role="list" aria-owns="sitem lone"><div id="lone" role="listitem">light item</div></div>
+<x-host id="host"><template shadowrootmode="open">
+  <span id="sname">shadow name</span>
+  <span id="sdesc">shadow description</span>
+  <span id="both">shadow both</span>
+  <button id="s1" aria-labelledby="sname">names its own tree's id</button>
+  <button id="s2" aria-labelledby="lname">names a light id</button>
+  <button id="s3" aria-labelledby="both">names an id both trees have</button>
+  <button id="s4" aria-describedby="sdesc ldesc">described in both trees</button>
+  <input id="sin">
+  <label for="sin">shadow label</label>
+  <label for="lin">shadow label for a light input</label>
+  <input id="sin2" aria-labelledby="lname sname">
+  <div id="sown" role="list" aria-owns="lone sitem"><div id="sitem" role="listitem">shadow item</div></div>
+  <x-inner id="inner"><template shadowrootmode="open">
+    <span id="sname">inner name</span>
+    <button id="i1" aria-labelledby="sname">names the inner tree's id</button>
+    <button id="i2" aria-labelledby="both">names an id the outer trees have</button>
+  </template></x-inner>
+  <slot></slot>
+</template><button id="slotted" aria-labelledby="sname">slotted, names a shadow id</button></x-host>
+<button id="b4" aria-labelledby="lname both">names the document's ids</button>
+</body></html>
