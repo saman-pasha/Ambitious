@@ -1057,6 +1057,13 @@ static int px_integrity(js_vm *vm, uint32_t o, int frozen) {
     return 1;
 }
 
+
+/* AddToKeptObjects (ECMA-262 9.10.1): a WeakRef's target held to the end of the microtask checkpoint (vm->kept) */
+static void px_keep(js_vm *vm, jv t) {
+    if (!vm->kept) vm->kept = js_array_new(vm, 0);
+    js_array_push(vm, vm->kept, t);
+}
+
 jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1), a2 = js_arg(vm, args, argc, 2);
     (void)callee;
@@ -1321,12 +1328,16 @@ jv js_proxy_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args
         uint32_t o = js_obj_new(vm, JK_PLAIN, vm->weakref_proto);
         vm->objs[o].x = a0;
         vm->objs[o].flags |= JO_WEAK;
+        px_keep(vm, a0);
         return jv_obj(o);
     }
-    case JPX_WR_DEREF:
+    case JPX_WR_DEREF: {
         if (!jv_is_obj(thisv) || !(vm->objs[jv_idx(thisv)].flags & JO_WEAK) || vm->objs[jv_idx(thisv)].proto != vm->weakref_proto)
             return px_incompatible(vm, "WeakRef.prototype.deref", thisv);
-        return vm->objs[jv_idx(thisv)].x;
+        jv t = vm->objs[jv_idx(thisv)].x;
+        if (t != JV_UNDEF) px_keep(vm, t);
+        return t;
+    }
     case JPX_FINREG: {
         if (newt == JV_UNDEF || newt == JV_HOLE) return js_throw_msg(vm, vm->type_error_proto, "Constructor FinalizationRegistry requires 'new'");
         if (!js_is_callable(vm, a0)) return js_throw_msg(vm, vm->type_error_proto, "FinalizationRegistry: cleanup must be callable");

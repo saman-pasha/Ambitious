@@ -2692,6 +2692,10 @@ static void sh_ready(js_vm *vm) {
     vm->load_module = sh_load_module;
     vm->host_roots = sh_roots;
     vm->gc_enabled = 1;
+    /* and inside a running script, at its loops' turns, when the host's own call into it is the only C below: each of
+       the host's calls (a script's run, a listener's, a timer's, an observer's, a microtask's, an upgrade's) passes
+       what it made as arguments, or holds it among its roots */
+    vm->gc_live_depth = 1;
     resize(vm->hatoms, HA_N, 0u);
     for (uint32_t i = 0; i < HA_N; i++) {
         uint32_t a = js_atom_ascii(vm, sh_names[i]);

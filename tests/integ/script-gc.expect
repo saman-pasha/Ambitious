@@ -12,8 +12,8 @@ foreign: as its .expect
 the same 10 lines
 -- and with a collection at every moment between tasks:
 the same 10 lines
--- the collections that made, one at each script's end, each task's and each timer's:
-9
+-- the collections that made, one at each script's end, each task's and each timer's, and one at its loops' turns each 256 allocations:
+14
 -- and without the stress, none (the page makes less than the 32 MB a first collection waits for):
 0
 -- the served pages with the stress, under valgrind where it is installed: each run's exit status:

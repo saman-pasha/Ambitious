@@ -1,0 +1,13 @@
+kept 100 {"i":0,"nested":{"deep":[0,"0"]}} {"i":1980000,"nested":{"deep":[1980000,"1980000"]}}
+map 100 1 1980000
+joined 100 ABCDEFGHIJKLMNOPQRSTUVWXYZABCD
+counters 2,2,2,2,2 100
+gens 5,20005,40005 100
+symbols 100 Symbol(s140000) s60000
+weakref within the job true until the job ends
+closures 0,200000,400000,600000,800000,1000000,1200000,1400000,1600000,1800000
+typed 38246416 6 0,80,160,240,64,144
+string 200000 abcdefghij yzabcdefgh
+after await 0,250000,500000,750000
+promises 100 0 99
+timer 0,200000,400000,600000,800000 800000

@@ -807,7 +807,13 @@ be built side by side and merged without touching each other's.
     values among its roots (each unit's, `src/script/script.h`), every
     scripted page's console and facts held unchanged with a collection at
     every boundary, and memcheck clean so (`tests/integ/script-gc.sh`,
-    `tests/exec/script_gc`).
+    `tests/exec/script_gc`). Then inside a running script too, at its loops'
+    turns (every jump back), when the host's own call into the engine is the
+    only C code below (`vm->depth` at the host's `gc_live_depth`), the running
+    microtask and the WeakRefs' kept targets (AddToKeptObjects, let go at the
+    checkpoint's end) among the roots: a loop of 20 million objects peaks at
+    44 MB, not 2.8 GB (`tests/js/gcloop.js`; the stress gate collects every
+    256 allocations at the loops' turns as well).
 
   Then (12p): `Function.prototype.toString` gives a function's source text,
   the exact slice ECMA-262 2019 has (functions, arrows, methods, getters and

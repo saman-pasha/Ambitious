@@ -151,7 +151,7 @@ static void mark_roots(js_vm *vm, gc_state *g) {
         vm->aggregate_error_proto, vm->async_iterator_proto, vm->async_generator_proto, vm->eval_fn, vm->weakmap_proto,
         vm->weakset_proto, vm->weakref_proto, vm->finreg_proto, vm->arraybuffer_proto, vm->typedarray_proto,
         vm->dataview_proto, vm->textenc_proto, vm->textdec_proto, vm->bigint_proto, vm->error_ctor, vm->type_error_ctor,
-        vm->range_error_ctor, vm->syntax_error_ctor, vm->reference_error_ctor, vm->eval_error_proto, vm->root_proto, vm->throw_te, vm->uri_error_proto, vm->array_values, vm->pr_species_acc, vm->pr_species_get, vm->regexp_ctor,
+        vm->range_error_ctor, vm->syntax_error_ctor, vm->reference_error_ctor, vm->eval_error_proto, vm->root_proto, vm->throw_te, vm->uri_error_proto, vm->array_values, vm->pr_species_acc, vm->pr_species_get, vm->regexp_ctor, vm->kept,
         vm->array_iter_proto, vm->map_iter_proto, vm->set_iter_proto, vm->string_iter_proto, vm->regexp_iter_proto,
         vm->helper_proto, vm->wrap_proto, vm->iterator_ctor };
     for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) mark_obj(vm, g, named[i]);
@@ -178,6 +178,9 @@ static void mark_roots(js_vm *vm, gc_state *g) {
     for (uint32_t i = 0; i < vm->nhandlers; i++) mark_obj(vm, g, vm->handlers[i].env);
     if (vm->throwing) mark_val(vm, g, vm->exception);
     /* the jobs to run, the promises rejected, the live timers and listeners, the console */
+    mark_val(vm, g, vm->job_running.fn);
+    mark_val(vm, g, vm->job_running.arg);
+    mark_val(vm, g, vm->job_running.target);
     for (size_t i = vm->jobs_head; i < len(vm->jobs); i++) {
         js_job j = vm->jobs[i];
         mark_val(vm, g, j.fn);
@@ -540,15 +543,35 @@ void js_gc(js_vm *vm) {
         fprintf(stderr, "gc %u: %llu -> %llu, %.2f ms\n", vm->gc_count, (unsigned long long)before, (unsigned long long)vm->gc_last, gc_clock() - t0);
 }
 
+/* what was made since the last collection, against what was live after it: one is due when as much again was made
+   (and 32 MB at least) */
+static int gc_due_now(js_vm *vm) {
+    uint64_t made = vm->gc_allocs * 5 + (len(vm->slots) - (vm->gc_slots < len(vm->slots) ? vm->gc_slots : len(vm->slots)))
+                    + (len(vm->units) - (vm->gc_units < len(vm->units) ? vm->gc_units : len(vm->units))) / 4;
+    uint64_t floor = (uint64_t)1 << 22;
+    return made >= (vm->gc_last > floor ? vm->gc_last : floor);
+}
+
+/* a collection inside a running script, at a loop's turn (src/js/vm.c, OP_JMP back): the interpreter asks once its
+   allocations pass gc_due, at the depth the host allows (gc_live_depth), every value then on the stack, in the frames
+   and in the running microtask a root. The next asking a fixed count of allocations later */
+#define GC_LIVE_ASK 65536u
+void js_gc_live(js_vm *vm) {
+    vm->gc_due = vm->gc_allocs + GC_LIVE_ASK;
+    if (!vm->gc_enabled || vm->throwing) return;
+    /* AMB_GC_STRESS: a collection every 256 allocations at the loops' turns too (the stress gates) */
+    if (getenv("AMB_GC_STRESS")) { js_gc(vm); vm->gc_due = 256; return; }
+    if (!gc_due_now(vm)) return;
+    js_gc(vm);
+    vm->gc_due = GC_LIVE_ASK;
+}
+
 void js_gc_maybe(js_vm *vm) {
     if (vm->nframes || vm->in_jobs || vm->throwing) return;
     /* AMB_GC_STRESS: a collection at every chance, the collector's own test */
     if (getenv("AMB_GC_STRESS")) { js_gc(vm); return; }
     if (!vm->gc_enabled) return;
     /* what was made since the last: as much again as was live then (and 32 MB at least) */
-    uint64_t made = vm->gc_allocs * 5 + (len(vm->slots) - (vm->gc_slots < len(vm->slots) ? vm->gc_slots : len(vm->slots)))
-                    + (len(vm->units) - (vm->gc_units < len(vm->units) ? vm->gc_units : len(vm->units))) / 4;
-    uint64_t floor = (uint64_t)1 << 22;
-    if (made < (vm->gc_last > floor ? vm->gc_last : floor)) return;
+    if (!gc_due_now(vm)) return;
     js_gc(vm);
 }

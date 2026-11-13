@@ -2,7 +2,8 @@
 # tests/integ/script-gc.sh -- the collector for a page's scripts (src/js/gc.c), its roots the
 # values the host holds (src/script/script.h says which). Each gate of the pages' scripts
 # again, with AMB_GC_STRESS=1: the collector runs at every moment it may (each script's
-# end, each timer's and host task's), so a value the host holds but gives no root for is
+# end, each timer's and host task's, and a running script's loops' turns each 256
+# allocations), so a value the host holds but gives no root for is
 # collected while the host still names it, and a console or a fact changes. Each gate's
 # output must be its .expect's, as without the stress (the pages' consoles are Chromium's
 # line for line). Then gc-host.html, each of whose values the host alone holds when a
@@ -42,7 +43,7 @@ AMB_GC_STRESS=1
 export AMB_GC_STRESS
 console > "$work/c.txt"
 same "$AMB_ROOT/tests/pages/gc-host.chromium" "$work/c.txt"
-echo "-- the collections that made, one at each script's end, each task's and each timer's:"
+echo "-- the collections that made, one at each script's end, each task's and each timer's, and one at its loops' turns each 256 allocations:"
 AMB_GC_DEBUG=1 sh "$AMB_ROOT/bin/ambitious" script "$page" < /dev/null 2>&1 >/dev/null | grep -c '^gc [0-9]*:'
 unset AMB_GC_STRESS
 echo "-- and without the stress, none (the page makes less than the 32 MB a first collection waits for):"

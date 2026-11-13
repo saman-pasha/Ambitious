@@ -417,6 +417,11 @@ typedef struct js_vm {
     uint64_t gc_allocs;               /* the records made since (objects, strings, BigInts) */
     uint64_t gc_slots, gc_units;      /* the slots' and the units' lengths after it */
     uint32_t gc_enabled;              /* collections between tasks (js_gc_maybe): the host's to allow (ambitious js's, a page's) */
+    /* collections inside a running script, at its loops' turns (js_gc_live): allowed at this depth of calls into the
+       engine (vm->depth) alone, the host's own call, where no C code below the script holds a value the collector
+       cannot see (0: never; the host sets it); and the allocations past which a turn asks whether one is due */
+    uint32_t gc_live_depth;
+    uint64_t gc_due;
     uint32_t base_url;                /* the classic scripts' base for import(): a string (0: the current directory) */
     /* the host's module loader: the specifier (a string) resolved against the referrer
        (a module's URL; 0 for a classic script's import(), whose base is base_url), its
@@ -433,6 +438,8 @@ typedef struct js_vm {
     uint32_t bigint_proto;
     uint32_t intl_protos[16];         /* each Intl constructor's prototype, by its kind (src/js/intl.c) */
     uint32_t intl_cache;              /* the formatters toLocaleString made for its defaults (an array, 0 none yet) */
+    uint32_t kept;                    /* the targets WeakRefs were made of or gave since the microtask checkpoint (ECMA-262
+                                         AddToKeptObjects): an array, a root, let go at the checkpoint's end (0 none) */
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
     uint32_t re_first;                /* RegExp's first native id, and %RegExp% (src/js/regexp.c) */
     uint32_t regexp_ctor;
@@ -444,6 +451,7 @@ typedef struct js_vm {
     uint32_t re_guard_obj[20], re_guard_slot[20];
     jv re_guard_val[20], re_guard_get[20];
     uint32_t jobs_head;               /* the next microtask to run */
+    js_job job_running;               /* the microtask running, whose target only it may hold: a root of the collector */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t throw_te;                /* %ThrowTypeError%: an unmapped arguments object's callee, both its get and its set */
     uint32_t uri_error_proto;         /* URIError.prototype (the URI functions' errors) */
@@ -679,6 +687,7 @@ uint32_t js_module_import(js_vm *vm, uint32_t spec, uint32_t referrer);
    alone, src/js/builtins.c) */
 void js_gc(js_vm *vm);
 void js_gc_maybe(js_vm *vm);
+void js_gc_live(js_vm *vm);                                           /* a loop's turn: a collection when one is due */
 void js_gc_expose(js_vm *vm);
 uint32_t js_env_new(js_vm *vm, uint32_t parent, uint32_t n);    /* an environment of n cells (src/js/vm.c) */
 uint32_t js_module_main(js_vm *vm, uint32_t url, const char *src, size_t n);

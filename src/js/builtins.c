@@ -1920,7 +1920,10 @@ void js_run_jobs(js_vm *vm) {
         js_job j = vm->jobs[vm->jobs_head];
         vm->jobs_head++;
         vm->cur_run = j.run;
+        /* the job a root while it runs: its derived promise may be held nowhere else */
+        vm->job_running = j;
         run_job(vm, j);
+        vm->job_running.fn = vm->job_running.arg = vm->job_running.target = JV_UNDEF;
         if (vm->throwing == 1) job_uncaught(vm);
     }
     if (vm->jobs_head >= len(vm->jobs)) { clear(vm->jobs); vm->jobs_head = 0; }
@@ -1933,6 +1936,8 @@ void js_run_jobs(js_vm *vm) {
         js_report_error(vm, vm->objs[p].x, JS_PHASE_PROMISE);
     }
     clear(vm->rejected);
+    /* ClearKeptObjects: the WeakRefs' targets let go at the checkpoint's end */
+    vm->kept = 0;
     vm->cur_run = saved;
     vm->in_jobs = 0;
 }

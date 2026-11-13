@@ -1802,10 +1802,15 @@ static int cmd_js(const char *file) {
         }
     } else {
         js_gc_expose(&vm);
+        /* the collector runs inside the script too, at its loops' turns, this host's own call into it (depth 1)
+           holding nothing the collector cannot see */
+        vm.gc_enabled = 1;
+        vm.gc_live_depth = 1;
         rc = js_eval(&vm, data(src), len(src), file, 1);
     }
-    /* the collector runs between this script's tasks (a page's waits on its host's roots) */
+    /* and between its tasks (a page's waits on its host's roots) */
     vm.gc_enabled = 1;
+    vm.gc_live_depth = 1;
     if (rc == 0) {
         /* the microtasks the script queued, then its timers, each followed by its own */
         js_run_jobs(&vm);

@@ -72,10 +72,12 @@ uint32_t js_str_utf8(js_vm *vm, const char *p, size_t n) {
 
 uint32_t js_str_ascii(js_vm *vm, const char *p) { return js_str_utf8(vm, p, strlen(p)); }
 
-/* a rope's text written out, its leaves in order (no recursion: a loop's += makes deep ropes) */
+/* a rope's text written out, its leaves in order (no recursion: a loop's += makes deep ropes): the units grown once to
+   its length, each leaf copied in through their borrow */
 void js_str_flatten(js_vm *vm, uint32_t s) {
     if (!vm->strs[s].rope) return;
-    uint32_t off = (uint32_t)len(vm->units);
+    uint32_t off = (uint32_t)len(vm->units), at = off;
+    resize(vm->units, (size_t)off + vm->strs[s].len, 0);
     vector<uint32_t> st;
     push_back(st, s);
     while (len(st)) {
@@ -87,12 +89,50 @@ void js_str_flatten(js_vm *vm, uint32_t s) {
             continue;
         }
         uint32_t o = vm->strs[x].off, n = vm->strs[x].len;
-        for (uint32_t i = 0; i < n; i++) push_back(vm->units, vm->units[o + i]);
+        uint16_t *u = data(vm->units);
+        for (uint32_t i = 0; i < n; i++) u[at + i] = u[o + i];
+        at += n;
     }
     vm->strs[s].off = off;
     vm->strs[s].rope = 0;
     vm->strs[s].left = 0;
     vm->strs[s].right = 0;
+}
+
+/* the units from..to of a rope written out from its leaves, the rope left as it is (a short piece of a long string a
+   loop's += makes: V8 copies the whole for each, at a byte a char) */
+static uint32_t js_str_rope_piece(js_vm *vm, uint32_t s, uint32_t from, uint32_t to) {
+    size_t at = len(vm->units);
+    resize(vm->units, at + (to - from), 0);
+    /* the leaves in order, each subtree wholly before from or after to passed over by its length */
+    vector<uint32_t> st;
+    vector<uint32_t> base;
+    push_back(st, s);
+    push_back(base, 0);
+    uint32_t w = 0;
+    while (len(st) && w < to - from) {
+        uint32_t x = back(st), b = back(base);
+        pop_back(st);
+        pop_back(base);
+        uint32_t n = vm->strs[x].len;
+        if (b + n <= from || b >= to) continue;
+        if (vm->strs[x].rope) {
+            uint32_t l = vm->strs[x].left;
+            push_back(st, vm->strs[x].right);
+            push_back(base, b + vm->strs[l].len);
+            push_back(st, l);
+            push_back(base, b);
+            continue;
+        }
+        uint32_t a0 = from > b ? from - b : 0, a1 = to - b < n ? to - b : n, o = vm->strs[x].off;
+        uint16_t *u = data(vm->units);
+        for (uint32_t i = a0; i < a1; i++) u[at + w++] = u[o + i];
+    }
+    js_str r;
+    memset(&r, 0, sizeof r);
+    r.off = (uint32_t)at;
+    r.len = to - from;
+    return js_str_push(vm, r);
 }
 
 uint32_t js_str_concat(js_vm *vm, uint32_t a, uint32_t b) {
@@ -122,8 +162,21 @@ uint32_t js_str_concat(js_vm *vm, uint32_t a, uint32_t b) {
 }
 
 uint32_t js_str_sub(js_vm *vm, uint32_t s, uint32_t from, uint32_t to) {
-    js_str_flatten(vm, s);
     if (from >= to) return A_EMPTY;
+    if (vm->strs[s].rope) {
+        /* a piece of a rope: within one side, that side's (down to a leaf); a short one across them, written out from
+           the leaves; else the rope written out first */
+        uint32_t x = s;
+        while (vm->strs[x].rope) {
+            uint32_t l = vm->strs[x].left, ll = vm->strs[l].len;
+            if (to <= ll) x = l;
+            else if (from >= ll) { from -= ll; to -= ll; x = vm->strs[x].right; }
+            else break;
+        }
+        if (vm->strs[x].rope && to - from <= 256) return js_str_rope_piece(vm, x, from, to);
+        s = x;
+    }
+    js_str_flatten(vm, s);
     if (from == 0 && to == vm->strs[s].len) return s;
     js_str r;
     memset(&r, 0, sizeof r);
@@ -2989,11 +3042,16 @@ static int js_cmp_slow(js_vm *vm, uint32_t cmp, jv a, jv b) {
     stack[sp - 1] = jv_bool(r_); \
     goto next; }
 /* the jump taken when the truth is WHEN; a backward one counts a step */
+/* a loop's turn, a jump back: the step budget counted, and the collector asked once enough was made since its last,
+   at the depth the host lets it run (js_gc_live) */
+#define LOOP_TURN() \
+    if (++vm->steps > vm->step_budget) { vm->throwing = 2; vm->exception = JV_UNDEF; break; } \
+    if (vm->gc_allocs >= vm->gc_due && vm->depth == vm->gc_live_depth) { SYNC(); js_gc_live(vm); RELOAD(); }
 #define JUMP_WHEN(R, WHEN) \
     if ((R) != (WHEN)) { pc += 4; goto next; } \
     int32_t off_ = (int32_t)RD32(pc); \
     pc = (uint32_t)((int32_t)pc + 4 + off_); \
-    if (off_ < 0 && ++vm->steps > vm->step_budget) { vm->throwing = 2; vm->exception = JV_UNDEF; break; } \
+    if (off_ < 0) { LOOP_TURN(); } \
     goto next;
 #define JREL(OPC, EXPR, CMPN, WHEN) case OPC: { \
     jv b_ = stack[sp - 1], a_ = stack[sp - 2]; \
@@ -3851,7 +3909,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_JMP: {
             int32_t off = (int32_t)RD32(pc);
             pc = (uint32_t)((int32_t)pc + 4 + off);
-            if (off < 0 && ++vm->steps > vm->step_budget) { vm->throwing = 2; vm->exception = JV_UNDEF; break; }
+            if (off < 0) { LOOP_TURN(); }
             goto next;
         }
         case OP_INC_LOC: case OP_DEC_LOC: {
@@ -3915,7 +3973,7 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (t == (op == OP_JT)) {
                 int32_t off = (int32_t)RD32(pc);
                 pc = (uint32_t)((int32_t)pc + 4 + off);
-                if (off < 0 && ++vm->steps > vm->step_budget) { vm->throwing = 2; vm->exception = JV_UNDEF; break; }
+                if (off < 0) { LOOP_TURN(); }
             } else pc += 4;
             goto next;
         }
