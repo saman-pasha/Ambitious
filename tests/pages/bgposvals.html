@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>background-position: computed values</title>
+<style>body { margin: 8px; font: 10px serif; } div { height: 2px; overflow: hidden; }</style></head><body>
+<div id="g1" data-check="background-position" style="background-position:right 10px top">right 10px top</div>
+<div id="g2" data-check="background-position" style="background-position:left top 10px">left top 10px</div>
+<div id="g3" data-check="background-position" style="background-position:right top 10px">right top 10px</div>
+<div id="g4" data-check="background-position" style="background-position:center top 10px">center top 10px</div>
+<div id="g5" data-check="background-position" style="background-position:right 10px center">right 10px center</div>
+<div id="g6" data-check="background-position" style="background-position:top 10px left">top 10px left</div>
+<div id="g7" data-check="background-position" style="background-position:left 10px 20px">left 10px 20px</div>
+<div id="g8" data-check="background-position" style="background-position:10px 20px 30px">10px 20px 30px</div>
+<div id="g9" data-check="background-position" style="background-position:center center">center center</div>
+<div id="g10" data-check="background-position" style="background-position:top left">top left</div>
+<div id="g11" data-check="background-position" style="background-position:left 10% bottom 5px">left 10% bottom 5px</div>
+<div id="g12" data-check="background-position" style="background-position:bottom right">bottom right</div>
+<div id="g13" data-check="background-position" style="background-position:center">center</div>
+<div id="g14" data-check="background-position" style="background-position:top">top</div>
+<div id="g15" data-check="background-position" style="background-position:right">right</div>
+<div id="g16" data-check="background-position" style="background-position:50% top">50% top</div>
+<div id="g17" data-check="background-position" style="background-position:top 50%">top 50%</div>
+<div id="g18" data-check="background-position" style="background-position:left left">left left</div>
+<div id="g19" data-check="background-position" style="background-position:calc(10px + 5%) 3em">calc(10px + 5%) 3em</div>
+<div id="g20" data-check="background-position" style="background-position:0 0">0 0</div>
+<div id="g21" data-check="background-position" style="background-position:1em 2rem">1em 2rem</div>
+<div id="g22" data-check="background-position" style="background-position:right -10px bottom 20%">right -10px bottom 20%</div>
+<div id="g23" data-check="background-position" style="background-position:10px">10px</div>
+<div id="g24" data-check="background-position" style="background-position:25% 75%">25% 75%</div>
+<div id="g25" data-check="background-position" style="background-position:bottom 10px right 5px">bottom 10px right 5px</div>
+<div id="g26" data-check="background-position" style="background-position:center bottom">center bottom</div>
+<div id="g27" data-check="background-position" style="background-position:left 0 top 0">left 0 top 0</div>
+<div id="g28" data-check="background-position" style="background-position:right 0 bottom 0">right 0 bottom 0</div>
+<div id="gl1" data-check="background-position" style="background-image:linear-gradient(red, blue), linear-gradient(red, blue), linear-gradient(red, blue);background-position:1px 2px, 3px 4px">three layers, two positions</div>
+<div id="gl2" data-check="background-position" style="background-image:linear-gradient(red, blue);background-position:1px 2px, 3px 4px">one layer, two positions</div>
+<div id="gl3" data-check="background-position" style="background-image:linear-gradient(red, blue), linear-gradient(red, blue);background-position:left top">two layers, one position</div>
+<div id="gl4" data-check="background-position" style="background-image:none, linear-gradient(red, blue);background-position:right 5px bottom, center">none and a gradient</div>
+</body></html>

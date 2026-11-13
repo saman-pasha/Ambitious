@@ -1365,11 +1365,12 @@ static void pt_tile_pos(const char *bp, size_t bn, double aw, double ah, double 
         else if (pt_is(t, pl, "center")) { f = 0.5; axis[k] = k; }
         if (f >= 0) v[k] = f * ((axis[k] == 0 ? aw - tw : ah - th));
         else {
-            double x;
+            /* px, a percentage of the room the tile leaves, or a calc() of both (a computed value's
+               calc(100% - 10px)): its value at 0% and at 100% of that room */
+            double x = 0, v0, v100;
             int ax = k;
-            if (pl > 0 && t[pl - 1] == '%') {
-                x = strtod(t, 0) / 100 * (ax == 0 ? aw - tw : ah - th);
-            } else if (!pt_len(t, pl, ax == 0 ? aw : ah, &x)) x = 0;
+            double room = ax == 0 ? aw - tw : ah - th;
+            if (pt_len(t, pl, 0, &v0) && pt_len(t, pl, 100, &v100)) x = v0 + (v100 - v0) * room / 100;
             v[k] = x;
             axis[k] = ax;
         }
@@ -2194,6 +2195,8 @@ static void pt_layers(const layout_tree *t, const net_loader *nt, uint32_t b, am
         /* a layer clipped to the text is drawn by pt_text_bg (text_only), over the border box */
         int to_text = cl && pt_is(data(clp) + ca, cl, "text");
         if (to_text != (text_only != 0)) continue;
+        /* a layer of none draws nothing (its position, size and the rest kept for the layers after it) */
+        if (pt_is(data(img) + at(layers, 2 * q - 2), at(layers, 2 * q - 1), "none")) continue;
         pt_layer_one(t, nt, b, c, icache, ipx, rad, data(img) + at(layers, 2 * q - 2), at(layers, 2 * q - 1), data(pos) + pa, pl, data(siz) + sa,
                      sl, data(rep) + ra, rl, data(org) + oa, ol, data(clp) + ca, cl, to_text);
     }

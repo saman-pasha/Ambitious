@@ -120,8 +120,7 @@
    hashless colours and unitless lengths of an author sheet or a style attribute for the
    properties that take them (css_quirky), class and id selectors without ASCII case,
    and :hover or :active alone holding of links alone. Limited-quirks mode changes
-   nothing here (its quirk is layout's). Not read: the unitless lengths of
-   background-position and border-spacing.
+   nothing here (its quirk is layout's). Not read: the unitless lengths of border-spacing.
 
    Shadow trees (CSS Scoping 1, CSS Shadow Parts 1; PLAN.md 12z): the cascade styles the
    flat tree's elements (src/dom/dom.h), each under its parent there, which it inherits from;
@@ -1896,6 +1895,47 @@ static int css_position_axes(const char *s, size_t n, const css_cenv *e, css_lin
     css_pos_axis(0, &l[vi + 1], kw[vi] == 5, y);
     return 1;
 }
+/* a layer of background-position (CSS Backgrounds 3's <bg-position>, as Chromium reads it), s[0, n): one, two or four
+   parts as object-position's, or three -- two keywords of the two axes, one of them (not center) with its offset after
+   it; quirky (a quirks-mode author declaration's, the Quirks Mode Standard's unitless length), a number a length of px.
+   Its axes into x and y: 1, or 0 when it is none */
+static int css_bg_position_axes(const char *s, size_t n, const css_cenv *e, int quirky, css_lin *x, css_lin *y) {
+    size_t st[5], ln[5], i = 0, k = 0, a, b;
+    if (memchr(s, ',', n)) return 0;
+    while (k < 5 && css_next_part(s, n, &i, &a, &b)) { st[k] = a; ln[k] = b; k++; }
+    if (k == 0 || k > 4) return 0;
+    vector<char> t;
+    for (size_t j = 0; j < k; j++) {
+        double q;
+        if (j) push_back(t, ' ');
+        append_range(t, s + st[j], ln[j]);
+        if (quirky && css_number(s + st[j], ln[j], &q) == ln[j]) append_range(t, "px", 2);
+    }
+    if (k != 3) return css_position_axes(data(t), len(t), e, x, y);
+    i = 0;
+    k = 0;
+    while (k < 3 && css_next_part(data(t), len(t), &i, &a, &b)) { st[k] = a; ln[k] = b; k++; }
+    css_lin l[3];
+    int kw[3];
+    for (size_t j = 0; j < 3; j++)
+        if ((kw[j] = css_pos_part(data(t) + st[j], ln[j], e, &l[j])) < 0) return 0;
+    size_t off;
+    if (kw[1] == 0 && kw[0] != 0 && kw[0] != 2 && kw[2] != 0) off = 1;
+    else if (kw[2] == 0 && kw[1] != 0 && kw[1] != 2 && kw[0] != 0) off = 2;
+    else return 0;
+    size_t ib = off == 1 ? 2 : 0;
+    int ka = kw[off - 1], kb = kw[ib];
+    if (ka == 1 || ka == 3) {
+        if (kb == 1 || kb == 3) return 0;
+        css_pos_axis(0, &l[off], ka == 3, x);
+        css_pos_axis(kb, &l[ib], 0, y);
+    } else {
+        if (kb == 4 || kb == 5) return 0;
+        css_pos_axis(0, &l[off], ka == 5, y);
+        css_pos_axis(kb, &l[ib], 0, x);
+    }
+    return 1;
+}
 /* an axis of a position as Chromium serializes its computed value: a percentage, px, or a calc() of both, the
    percentage first */
 static void css_pos_text(const css_lin *l, vector<char> *out) {
@@ -2437,8 +2477,20 @@ static int css_text_valid(css_prop p, const char *s, size_t n) {
     case CSS_PROP_GRID_COLUMN_START: case CSS_PROP_GRID_COLUMN_END: case CSS_PROP_GRID_ROW_START: case CSS_PROP_GRID_ROW_END:
         return css_is_grid_line(s, n);
     case CSS_PROP_GRID_TEMPLATE_AREAS: return css_is_areas(s, n);
-    case CSS_PROP_BACKGROUND_IMAGE: return css_is_list(6, s, n);
-    case CSS_PROP_BACKGROUND_POSITION: return css_is_list(3, s, n);
+    case CSS_PROP_BACKGROUND_IMAGE: return css_is_list(12, s, n);     /* each layer an image or none (CSS Backgrounds 3, 3.3) */
+    case CSS_PROP_BACKGROUND_POSITION: {
+        /* a list of <bg-position>s, a comma between each two */
+        css_cenv e = { 16, 16, -1 };
+        size_t a = 0;
+        while (a <= n) {
+            size_t b = css_comma(s, n, a), i0 = css_skip_ws(s, b, a), i1 = b;
+            while (i1 > i0 && css_ws(s[i1 - 1])) i1--;
+            css_lin x, y;
+            if (!css_bg_position_axes(s + i0, i1 - i0, &e, css_quirk_now, &x, &y)) return 0;
+            a = b + 1;
+        }
+        return 1;
+    }
     case CSS_PROP_BACKGROUND_SIZE: return css_is_list(4, s, n);
     case CSS_PROP_BACKGROUND_REPEAT: return css_is_list(5, s, n);
     case CSS_PROP_BACKGROUND_ORIGIN: return css_is_list(7, s, n);
@@ -6974,6 +7026,43 @@ static void css_compute(css_style *s, const css_env *env, css_prop p, css_val *v
         }
         memset(v, 0, sizeof *v);
         v->unit = CSS_UNIT_TEXT;
+        v->tx = text_add(s, data(out), len(out));
+        return;
+    }
+    if (p == CSS_PROP_BACKGROUND_POSITION && v->unit == CSS_UNIT_TEXT) {
+        /* as Chromium computes it: an item for each of background-image's layers (the list repeated, or cut short), each
+           its two axes as object-position's (px, a percentage, or a calc() of both); a number px (a quirky declaration's,
+           the parse took no other, or 0) */
+        size_t layers = 1;
+        const css_val *im = &cur[CSS_PROP_BACKGROUND_IMAGE];
+        if (im->unit == CSS_UNIT_TEXT) {
+            vector<char> it;
+            append_range(it, text_ptr(s, im->tx), im->tx.len);
+            for (size_t a = 0; (a = css_comma(data(it), len(it), a)) < len(it); a++) layers++;
+        }
+        vector<char> src, out;
+        append_range(src, text_ptr(s, v->tx), v->tx.len);
+        vector<size_t> items;
+        size_t a = 0, n = len(src);
+        while (a <= n) {
+            size_t b = css_comma(data(src), n, a), i0 = css_skip_ws(data(src), b, a), i1 = b;
+            while (i1 > i0 && css_ws(at(src, i1 - 1))) i1--;
+            push_back(items, i0);
+            push_back(items, i1);
+            a = b + 1;
+        }
+        size_t ni = len(items) / 2;
+        for (size_t k = 0; k < layers && ni; k++) {
+            size_t i0 = at(items, 2 * (k % ni)), i1 = at(items, 2 * (k % ni) + 1);
+            if (k) append_range(out, ", ", 2);
+            css_cenv e = { fs, env->rem, -1 };
+            css_lin x, y;
+            if (css_bg_position_axes(data(src) + i0, i1 - i0, &e, 1, &x, &y)) {
+                css_pos_text(&x, &out);
+                push_back(out, ' ');
+                css_pos_text(&y, &out);
+            } else append_range(out, data(src) + i0, i1 - i0);
+        }
         v->tx = text_add(s, data(out), len(out));
         return;
     }

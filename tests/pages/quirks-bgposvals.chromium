@@ -1,0 +1,17 @@
+# tests/pages/quirks-bgposvals.html in Chromium (tools/bench/cssref.js): id, property, value
+p1 background-position 3px4px
+p2 background-position 10px20px
+p3 background-position 10px20px
+p4 background-position 10px20px
+p5 background-position 10px50%
+p6 background-position 1.5px20px
+p7 background-position -5px50%
+p8 background-position 50%7px
+p9 background-position 0px0px
+p10 background-position calc(100%-10px)calc(100%-5px)
+p11 background-position 10px20px
+p12 background-position 10%50%
+p13 background-position 0%0%
+p14 background-position 0%0%
+ps background-position 5px6px
+pb background-position 0%0%

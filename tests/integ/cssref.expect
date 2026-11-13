@@ -1,4 +1,5 @@
 animations: 62 of 62 values agree with Chromium's
+bgposvals: 32 of 32 values agree with Chromium's
 clampvals: 45 of 45 values agree with Chromium's
 clippathvals: 83 of 83 values agree with Chromium's
 clipvals: 27 of 27 values agree with Chromium's
@@ -12,6 +13,7 @@ irendervals: 13 of 13 values agree with Chromium's
 maskvals: 71 of 71 values agree with Chromium's
 objfitvals: 49 of 49 values agree with Chromium's
 property: 27 of 27 values agree with Chromium's
+quirks-bgposvals: 16 of 16 values agree with Chromium's
 quirks-clipvals: 9 of 9 values agree with Chromium's
 quirks-css: 121 of 121 values agree with Chromium's
 quirks-hover: 35 of 35 values agree with Chromium's

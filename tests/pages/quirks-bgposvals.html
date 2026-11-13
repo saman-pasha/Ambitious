@@ -1,0 +1,19 @@
+<html><head><meta charset="utf-8"><title>background-position's unitless lengths in quirks mode</title>
+<style>body { margin: 8px; font: 10px serif; } div { height: 2px; overflow: hidden; } #ps { background-position: 5 6; } #pb { background: url(logo.png) 5 6; } #px { background-position-x: 7; }</style></head><body>
+<div id="p1" data-check="background-position" style="background-position:3 4">3 4</div>
+<div id="p2" data-check="background-position" style="background-position:10 20">10 20</div>
+<div id="p3" data-check="background-position" style="background-position:10px 20">10px 20</div>
+<div id="p4" data-check="background-position" style="background-position:left 10 top 20">left 10 top 20</div>
+<div id="p5" data-check="background-position" style="background-position:10">10</div>
+<div id="p6" data-check="background-position" style="background-position:1.5 2e1">1.5 2e1</div>
+<div id="p7" data-check="background-position" style="background-position:-5 50%">-5 50%</div>
+<div id="p8" data-check="background-position" style="background-position:center 7">center 7</div>
+<div id="p9" data-check="background-position" style="background-position:0 0">0 0</div>
+<div id="p10" data-check="background-position" style="background-position:right 10 bottom 5">right 10 bottom 5</div>
+<div id="p11" data-check="background-position" style="background-position:10 20, 30 40">10 20, 30 40</div>
+<div id="p12" data-check="background-position" style="background-position:10%">10%</div>
+<div id="p13" data-check="background-position" style="background-position:left top">left top</div>
+<div id="p14" data-check="background-position" style="background-position:10 20 30">10 20 30</div>
+<div id="ps" data-check="background-position">sheet</div>
+<div id="pb" data-check="background-position">shorthand</div>
+</body></html>

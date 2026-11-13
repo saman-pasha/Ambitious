@@ -1,0 +1,8 @@
+# tests/pages/quirks-bgpos.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+d1 10 10 102 82
+d2 120 10 212 82
+d3 230 10 322 82
+d4 340 10 432 82
+d5 450 10 542 82
+d6 10 100 102 172
+d7 120 100 212 172
