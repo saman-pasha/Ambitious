@@ -1,0 +1,43 @@
+b,c,a {"b":2,"c":3,"a":4}
+c,a,b {"c":3,"a":4,"b":5}
+for-in y 2
+for-in x 3
+for-in z 4
+q,p 3
+first,k,last end
+a,d,b {"a":1,"d":5,"b":6}
+proto setter 2
+| false
+Symbol(b),Symbol(a)
+0,1,y,x
+length,name,arguments,caller,prototype
+name,arguments,caller,prototype,length 5
+arguments,caller,prototype,length,name2,name n
+length,name,arguments,caller,prototype 7
+name,arguments,caller,prototype 0
+name,arguments,caller,prototype,length 8
+arguments,caller,prototype,length,x ""
+length,prototype,m,name K2
+length,name,prototype,m
+length,name
+name,length 2
+length,name q
+name,length 3
+extends sees outer #p outer #m
+inner #p
+B #q
+deeper sees outer #p
+no early error
+SyntaxError: Private field '#own' must be declared in an enclosing class
+ReferenceError: Cannot access 'Self' before initialization
+3:1,2,3 0: 1:1
+9
+1
+1,2,3,4,5 3
+10
+3,3,3
+3/2,3/2
+qr tu 5
+orig changed
+3:3
+null

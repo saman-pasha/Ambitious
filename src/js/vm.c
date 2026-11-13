@@ -423,6 +423,8 @@ int js_shape_entry(js_vm *vm, uint32_t o, uint32_t key, uint32_t *flags, int *li
 void js_define(js_vm *vm, uint32_t o, uint32_t atom, jv v, uint32_t flags) {
     uint32_t sh = vm->objs[o].shape;
     uint32_t e = js_shape_find(vm, sh, atom);
+    /* a key deleted (its slot a hole) is a new one: added at the end, where the order of keys has it */
+    if (e && vm->slots[vm->objs[o].slots + vm->shapes[e].slot] == JV_HOLE) e = 0;
     if (e && vm->shapes[e].flags == flags) { vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = v; return; }
     if (e) {
         /* the same key with other flags: the slot kept, the shape's where left as it was (rare) */
@@ -535,6 +537,14 @@ static int js_elem_delete(js_vm *vm, uint32_t o, uint32_t i, uint32_t atom) {
     return 1;
 }
 
+/* the deleted keys at the end of o's shape dropped: o back on the shape before them, so that a key added again
+   takes the same transition and slot (an add and a delete of one key, repeated, grow nothing) */
+static void js_shape_trim(js_vm *vm, uint32_t o) {
+    uint32_t sh = vm->objs[o].shape;
+    while (vm->shapes[sh].count && vm->slots[vm->objs[o].slots + vm->shapes[sh].slot] == JV_HOLE) sh = vm->shapes[sh].parent;
+    vm->objs[o].shape = sh;
+}
+
 int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
     if (vm->objs[o].kind == JK_PROXY) return js_proxy_delete(vm, o, atom);
     uint32_t k = vm->objs[o].kind, i;
@@ -546,6 +556,7 @@ int js_delete(js_vm *vm, uint32_t o, uint32_t atom) {
         /* a property not configurable (defineProperty's, a sealed or frozen object's) stays */
         if ((vm->shapes[e].flags & JS_SHAPE_FIXED) || (vm->objs[o].flags & (JO_SEALED | JO_FROZEN))) return 0;
         vm->slots[vm->objs[o].slots + vm->shapes[e].slot] = JV_HOLE;
+        js_shape_trim(vm, o);
         /* a function's length or name gone: not the engine's again */
         if (fnk) vm->objs[o].flags |= atom == A_LENGTH ? JO_FN_NOLENGTH : JO_FN_NONAME;
         return 1;
@@ -1364,10 +1375,10 @@ static jv js_fn_frame_prop(js_vm *vm, uint32_t o, uint32_t atom) {
             uint32_t arr = js_array_new(vm, 0), n = fr.argc;
             if (fr.args) for (uint32_t i = 0; i < vm->objs[fr.args].b; i++) js_array_push(vm, arr, js_array_get(vm, fr.args, i));
             else {
-                /* its parameters' slots (what it was given past them not kept) */
-                uint32_t np = vm->funcs[fr.func].nparams;
-                if (n > np) n = np;
-                for (uint32_t i = 0; i < n; i++) js_array_push(vm, arr, vm->stack[fr.base + i]);
+                /* its parameters' slots (their values now: a parameter kept in an environment has its slot's first
+                   value, as V8's context-allocated ones), then what it was given past them, kept above its slots */
+                uint32_t np = vm->funcs[fr.func].nparams, ns = vm->funcs[fr.func].nslots, top = ns > np ? ns : np;
+                for (uint32_t i = 0; i < n; i++) js_array_push(vm, arr, vm->stack[fr.base + (i < np ? i : top + i - np)]);
             }
             uint32_t a = js_obj_new(vm, JK_ARGUMENTS, vm->object_proto);
             vm->objs[a].a = arr;
@@ -1653,12 +1664,13 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
         jv cur = vm->slots[vm->objs[o].slots + slot];
         if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { if (cur != JV_HOLE) return js_call_setter(vm, cur, objv, v); }
         else if (((vm->shapes[e].flags & JS_SHAPE_READONLY) || (vm->objs[o].flags & JO_FROZEN)) && cur != JV_HOLE) return 2;
-        else if (cur != JV_HOLE || (vm->objs[o].flags & JO_EXTENSIBLE)) {
+        else if (cur != JV_HOLE) {
             vm->slots[vm->objs[o].slots + slot] = v;
             /* a host object's writes are not cached: the host sees each one */
-            if (ic && cur != JV_HOLE && k != JK_HOST) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
+            if (ic && k != JK_HOST) { js_ic c = { sh, 0, 0, slot }; vm->ics[ic] = c; }
             return 1;
         }
+        /* deleted (its slot a hole): a new key, its prototypes' setters and read-only keys asked, added at the end */
     }
     int pr = js_proto_set(vm, o, atom, v, objv);
     if (pr >= 0) return pr;
@@ -1893,12 +1905,18 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
     /* an array's or a String's length, not enumerable, the first of its names */
     if (!enumerable_only && (k == JK_ARRAY || k == JK_STRING)) js_array_push(vm, arr, jv_str(A_LENGTH));
     /* a function's length, name, a sloppy one's arguments and caller and its prototype, first and in that order (V8's),
-       whether the engine keeps them or its shape does */
+       whether the engine keeps them or its shape does; a length or a name deleted and defined again is a new key,
+       listed where its shape has it */
     int fnk = !enumerable_only && (k == JK_CLOSURE || k == JK_NATIVE || k == JK_BOUND);
+    uint32_t fn_moved = 0;
     if (fnk) {
         static const uint32_t fn_names[] = { A_LENGTH, A_NAME, A_ARGUMENTS, A_CALLER, A_PROTOTYPE };
-        for (uint32_t q = 0; q < 5; q++)
-            if (js_shape_live(vm, o, fn_names[q]) || js_fn_virtual(vm, o, fn_names[q])) js_array_push(vm, arr, jv_str(fn_names[q]));
+        fn_moved = vm->objs[o].flags & (JO_FN_NOLENGTH | JO_FN_NONAME);
+        for (uint32_t q = 0; q < 5; q++) {
+            uint32_t a = fn_names[q];
+            if ((a == A_LENGTH && (fn_moved & JO_FN_NOLENGTH)) || (a == A_NAME && (fn_moved & JO_FN_NONAME))) continue;
+            if (js_shape_live(vm, o, a) || js_fn_virtual(vm, o, a)) js_array_push(vm, arr, jv_str(a));
+        }
     }
     for (size_t q = len(es); q > 0; q--) {
         uint32_t e = at(es, q - 1);
@@ -1906,7 +1924,9 @@ void js_own_keys(js_vm *vm, uint32_t o, int enumerable_only, uint32_t arr) {
         if (enumerable_only && (vm->shapes[e].flags & JS_SHAPE_HIDDEN)) continue;
         uint32_t i, a = vm->shapes[e].atom;
         if (js_key_is_sym(a) || js_atom_index(vm, a, &i)) continue;
-        if (fnk && (a == A_LENGTH || a == A_NAME || a == A_ARGUMENTS || a == A_CALLER || a == A_PROTOTYPE)) continue;
+        if (fnk && (a == A_ARGUMENTS || a == A_CALLER || a == A_PROTOTYPE)) continue;
+        if (fnk && a == A_LENGTH && !(fn_moved & JO_FN_NOLENGTH)) continue;
+        if (fnk && a == A_NAME && !(fn_moved & JO_FN_NONAME)) continue;
         js_array_push(vm, arr, jv_str(a));
     }
 }
@@ -2663,7 +2683,14 @@ static int js_enter(js_vm *vm, uint32_t c, jv thisv, uint32_t argc, jv newt, uin
     }
     uint64_t *stack = data(vm->stack);
     uint32_t sp = base + (argc > np ? np : argc);
-    while (sp < base + ns) stack[sp++] = JV_UNDEF;
+    if (argc > np && js_fn_sloppy(ff)) {
+        /* a sloppy function's arguments past its parameters: kept above its slots for its f.arguments, as V8's frame
+           keeps every argument (js_fn_frame_prop) */
+        uint32_t k = argc - np;
+        if (ns > np) for (uint32_t i = k; i-- > 0;) stack[base + ns + i] = stack[base + np + i];
+        while (sp < base + ns) stack[sp++] = JV_UNDEF;
+        sp += k;
+    } else while (sp < base + ns) stack[sp++] = JV_UNDEF;
     vm->sp = sp;
     js_frame *frames = data(vm->frames);
     frames[vm->nframes++] = fr;
@@ -2766,10 +2793,12 @@ jv js_call(js_vm *vm, jv fn, jv thisv, const jv *argv, uint32_t argc) {
             uint64_t *stack = data(vm->stack);
             stack[sp0] = thisv;
             stack[sp0 + 1] = fn;
-            uint32_t base = sp0 + 2, given = argc > np ? np : argc;
-            for (uint32_t i = 0; i < argc; i++) stack[base + i] = argv[i];
+            uint32_t base = sp0 + 2, given = argc > np ? np : argc, top = base + (ns > given ? ns : given);
+            for (uint32_t i = 0; i < given; i++) stack[base + i] = argv[i];
             for (uint32_t i = given; i < ns; i++) stack[base + i] = JV_UNDEF;
-            vm->sp = base + (ns > given ? ns : given);
+            /* a sloppy function's arguments past its parameters: kept above its slots (js_enter's) */
+            if (argc > np && js_fn_sloppy(ff)) for (uint32_t i = np; i < argc; i++) stack[top++] = argv[i];
+            vm->sp = top;
             js_frame *frames = data(vm->frames);
             uint32_t n = vm->nframes;
             frames[n] = fr;
@@ -3347,7 +3376,8 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 uint32_t o = jv_idx(ov);
                 js_ic c = vm->ics[ic];
                 if (objs[o].shape == c.shape && c.shape && !(objs[o].flags & JO_FROZEN)) {
-                    if (c.holder == 0) {
+                    /* (a key deleted since, its slot a hole: added again at the end, on the slow path) */
+                    if (c.holder == 0 && slots[objs[o].slots + c.slot] != JV_HOLE) {
                         slots[objs[o].slots + c.slot] = v;
                         stack[sp - 2] = v;
                         sp--;
@@ -3533,7 +3563,13 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                         else fr.thisv = tv0;
                         fr.sp0 = op == OP_CALL ? nb - 2 : nb - 1;
                         uint32_t top = nb + (argc0 > np ? np : argc0);
-                        while (top < nb + ns) stack[top++] = JV_UNDEF;
+                        if (argc0 > np && js_fn_sloppy(fl)) {
+                            /* a sloppy function's arguments past its parameters: kept above its slots (js_enter's) */
+                            uint32_t k = argc0 - np;
+                            if (ns > np) for (uint32_t i = k; i-- > 0;) stack[nb + ns + i] = stack[nb + np + i];
+                            while (top < nb + ns) stack[top++] = JV_UNDEF;
+                            top += k;
+                        } else while (top < nb + ns) stack[top++] = JV_UNDEF;
                         vm->nframes = n + 1;
                         frames[n] = fr;
                         fi = n;

@@ -103,7 +103,9 @@ typedef struct jfn {
 } jfn;
 /* a class: its name, heritage, constructor, members; its fields' function and its static initializer (0: none); its
    declaration's outer binding; its own scope, whose inner binding of its name is immutable */
-typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn; } jclass;
+/* h_first, h_end: the references its heritage made (refs h_first up to h_end), which see its scope's inner name but not
+   its private names: the heritage is read in the enclosing class's private environment */
+typedef struct jclass { uint32_t name, extends, ctor, members, nmembers, fields_fn, line, decl, nfields, scope, inner, static_fn, h_first, h_end; } jclass;
 /* a class's private name (#x): kind its PV_ flags (an accessor's getter and setter one name), its class (plus one), the
    binding of its class's scope that holds its symbol (a new one each time the class is made: decl, atom hidden), a
    method's or an accessor's functions' bindings, and for an instance's method or accessor the reads the fields function
@@ -1758,7 +1760,12 @@ static uint32_t p_class(CC, int is_decl) {
     cc->cur_scope = scope_new(cc, SC_BLOCK);
     k.scope = cc->cur_scope;
     if (name) k.inner = declare(CCA, name, D_CONST, line);
-    if (is_kw(cc, K_EXTENDS)) { lx(CCA); k.extends = p_call(CCA); }
+    if (is_kw(cc, K_EXTENDS)) {
+        lx(CCA);
+        k.h_first = (uint32_t)len(cc->refs);
+        k.extends = p_call(CCA);
+        k.h_end = (uint32_t)len(cc->refs);
+    }
     push_back(cc->classes, k);
     uint32_t ci = (uint32_t)(len(cc->classes) - 1);
     expect_p(CCA, P_LBRACE, "'{' before a class's body");
@@ -2479,6 +2486,16 @@ static void map_arguments(js_cc *cc) {
     }
 }
 
+/* a reference ref made in the heritage of the class whose scope s is: that scope's declaration d hidden from it unless
+   d is the class's inner name (its private names belong to the class's body) */
+static int heritage_hides(js_cc *cc, uint32_t s, uint32_t ref, uint32_t d) {
+    if (cc->scopes[s].kind != SC_BLOCK) return 0;
+    for (size_t i = 0; i < len(cc->classes); i++) {
+        if (cc->classes[i].scope != s) continue;
+        return ref >= cc->classes[i].h_first && ref < cc->classes[i].h_end && d != cc->classes[i].inner;
+    }
+    return 0;
+}
 static void resolve(js_cc *cc) {
     for (size_t r = 1; r < len(cc->refs); r++) {
         jref ref = cc->refs[r];
@@ -2486,6 +2503,7 @@ static void resolve(js_cc *cc) {
         for (;;) {
             for (uint32_t d = cc->scopes[s].first; d; d = cc->decls[d].next)
                 if (cc->decls[d].atom == ref.atom) { found = d; break; }
+            if (found && heritage_hides(cc, s, (uint32_t)r, found)) found = 0;
             if (found) break;
             if (cc->scopes[s].kind == SC_FUNC && ref.atom == cc->kw[K_ARGUMENTS]) {
                 uint32_t f = cc->scopes[s].fn;
