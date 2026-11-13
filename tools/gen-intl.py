@@ -35,6 +35,14 @@ The output is a function of the files alone. What it carries:
     ucd/, else fetched). The available formats come from the locales' XML files: the JSON resolves
     them, and ICU's pattern generator adds a locale's own before its parents'.
 
+It writes src/js/intl_tz.c and src/js/intl_tz.h too, the time zones' names, a unit of
+their own (with them, intl_data.c's compile took 1.9 GB, from 1.5): CLDR's zones by
+canonical name (bcp47's types, their regions, their metazones' periods from metaZones,
+which of a country's zones its name names, primaryZones'), the aliases, each metazone's
+zone in a region, and each locale's names (its region and fallback formats, each
+metazone's six names, each zone's own and its exemplar city), the records that differ
+from its parent's, as intl_data.c keeps the locales' resources.
+
 The C side holds no pointer: the data is one array of bytes packed four to a 32-bit
 word (cicilang reads a table of numbers much faster than a string literal), with the
 sections' places in intl_data.h. A string is UTF-8 ended by a NUL, found by its byte
@@ -178,10 +186,11 @@ class Source:
 # ---- the blob: bytes, and strings in them ----
 
 class Blob:
-    def __init__(self):
+    def __init__(self, prefix="IDB_"):
         self.b = bytearray(b"\0")          # offset 0 is the empty string
         self.strs = {"": 0}
         self.marks = []                    # (name, value) for the header
+        self.prefix = prefix               # the header's names'
 
     def string(self, s):
         if s not in self.strs:
@@ -250,8 +259,8 @@ def write_pairs(B, name, pairs):
     """a table of (key, value) strings sorted by key's bytes: its count, then pairs of offsets"""
     pairs = sorted(pairs, key=lambda kv: kv[0].encode("utf-8"))
     offs = [(B.string(k), B.string(v)) for k, v in pairs]
-    B.mark("IDB_%s_N" % name, len(offs))
-    B.mark("IDB_%s" % name)
+    B.mark("%s%s_N" % (B.prefix, name), len(offs))
+    B.mark("%s%s" % (B.prefix, name))
     for k, v in offs:
         B.u32(k)
         B.u32(v)
@@ -735,6 +744,99 @@ def dates(S, name, names, r):
                             gmt.get("long", {}).get("standard", ""), gmt.get("short", {}).get("standard", "")))
 
 
+# ---- the time zones' names (CLDR's timeZoneNames, as ICU's TimeZoneNames reads them) ----
+
+# a metazone's names and a zone's, in this order (a zone's after its exemplar city)
+TZ_NAME_KEYS = [("long", "generic"), ("long", "standard"), ("long", "daylight"), ("short", "generic"),
+                ("short", "standard"), ("short", "daylight")]
+# their records' categories in src/js/intl_tz.c (a locale's formats, a metazone's, a zone's)
+T_FMT, T_MZ, T_ZN = 1, 2, 3
+
+
+def default_city(zone):
+    """ICU's getDefaultExemplarLocationName: a zone's last part, its underscores spaces
+    (none for Etc/, SystemV/ and the solar zones' names, nor for a name with no area)"""
+    if zone.startswith("Etc/") or zone.startswith("SystemV/") or "Riyadh8" in zone or "/" not in zone:
+        return ""
+    return zone.rsplit("/", 1)[1].replace("_", " ")
+
+
+def zone_names(tzn, r):
+    """a locale's formats (the region format, the fallback format), its names of each
+    metazone (the six, a record each) and of each zone (its exemplar city where it is
+    not the one its name gives, its own six); a record with no name is kept, a locale's
+    parent's names otherwise showing through"""
+    r[key(T_FMT)] = FS.join((tzn.get("regionFormat", "{0}"), tzn.get("fallbackFormat", "{1} ({0})")))
+    mz = tzn.get("metazone", {})
+    for i, m in enumerate(MZ_NAMES):
+        d = mz.get(m, {})
+        r[key(T_MZ, i)] = FS.join(d.get(a, {}).get(b, "") for a, b in TZ_NAME_KEYS)
+    zones = {}
+
+    def walk(t, prefix):
+        for k, v in t.items():
+            if isinstance(v, dict) and v.get("_type") == "zone":
+                zones[prefix + k] = v
+            elif isinstance(v, dict):
+                walk(v, prefix + k + "/")
+    walk(tzn.get("zone", {}), "")
+    for z in zones:
+        assert z in TZ_INDEX, z
+    for i, z in enumerate(TZ_ZONES):
+        d = zones.get(z, {})
+        city = d.get("exemplarCity", "")
+        if city == default_city(z):
+            city = ""
+        r[key(T_ZN, i)] = FS.join([city] + [d.get(a, {}).get(b, "") for a, b in TZ_NAME_KEYS])
+
+
+def tz_blank(k):
+    """a record of a category with no name"""
+    return FS * (len(TZ_NAME_KEYS) - (k >> 20 == T_MZ))
+
+
+def tz_locales(S, B, names):
+    """each locale's records (those that differ from its parent's; root's that have a
+    name), a table of (key, string) sorted by key, as src/js/intl_data.c's resources are;
+    the locales in src/js/intl_data.c's order"""
+    nset = set(names)
+
+    def records(n):
+        tzn = main_data(S, "cldr-dates-full", n, "timeZoneNames.json", nset)["dates"]["timeZoneNames"]
+        r = {}
+        zone_names(tzn, r)
+        return r
+    res = {n: records(n) for n in names}
+    root = {k: v for k, v in records(None).items() if v.strip(FS)}
+    rows = []
+    for n in names:
+        p = parent_of(S, n, nset)
+        base = res[p] if p else root
+        # a record with no name where the parent has none either is left out
+        rows.append(sorted((k, v) for k, v in res[n].items() if base.get(k, tz_blank(k)) != v))
+    for diff in rows:
+        for k, v in diff:
+            B.string(v)
+    for v in root.values():
+        B.string(v)
+    places = []
+    for diff in rows:
+        places.append(B.here())
+        for k, v in diff:
+            B.u32(k)
+            B.u32(B.string(v))
+    B.mark("IDT_ROOT_N", len(root))
+    B.mark("IDT_ROOT")
+    for k, v in sorted(root.items()):
+        B.u32(k)
+        B.u32(B.string(v))
+    B.mark("IDT_LOCALES_N", len(names))
+    B.mark("IDT_LOCALES")
+    for diff, place in zip(rows, places):
+        B.u32(place)
+        B.u32(len(diff))
+
+
 def xml_formats(raw):
     """the Gregorian available formats a locale's XML gives itself (no alternates, no
     counted ones, no inheritance markers)"""
@@ -770,6 +872,145 @@ def available_formats(S, name, names):
         if k not in seen:
             seq.append((k, items[k]))
     return seq
+
+
+# ---- the time zones: CLDR's canonical names, their regions and metazones ----
+
+TZ_ZONES, TZ_INDEX, MZ_NAMES, MZ_INDEX = [], {}, [], {}
+# ICU's 2026e update gives Morocco's zones a metazone again once they return to UTC
+# (its metaZones.txt, which CLDR 48's lacks)
+MZ_EXTRA = {"Africa/Casablanca": [("Europe_Western", "2026-09-20 01:00", None)],
+            "Africa/El_Aaiun": [("Europe_Western", "2026-09-20 01:00", None)]}
+
+
+def tz_canonical(S):
+    """CLDR's zones by canonical name (each type's first alias, and the POSIX-style zones
+    CLDR deprecates for links, EST5EDT and its like, which ICU's timezoneTypes keeps), each
+    its region (the type's, else its key's letters, 001 for the zones of no country);
+    the other aliases, each its canonical name"""
+    tz = S.json("cldr-bcp47", "bcp47/timezone.json")["keyword"]["u"]["tz"]
+    canon, alias = {}, {}
+    for k, v in tz.items():
+        if not isinstance(v, dict) or k.startswith("_"):
+            continue
+        al = v.get("_alias", "").split()
+        if not al:
+            continue
+        world = k in ("utc", "gmt", "unk") or k.startswith("utce") or k.startswith("utcw")
+        canon[al[0]] = v.get("_region") or ("001" if world else k[:2].upper())
+        for a in al[1:]:
+            alias[a] = al[0]
+    for k, v in tz.items():
+        if isinstance(v, dict) and v.get("_deprecated") and "_alias" not in v and k.upper() in alias:
+            del alias[k.upper()]
+            canon[k.upper()] = "001"
+    return canon, alias
+
+
+def mz_minutes(s, default):
+    """a metazone period's end ("yyyy-MM-dd HH:mm" UTC) in minutes from 1970"""
+    if not s:
+        s = default
+    d, t = s.split(" ")
+    y, mo, dd = (int(x) for x in d.split("-"))
+    h, mi = (int(x) for x in t.split(":"))
+    days = days_from_civil(y, mo, dd)
+    return days * 1440 + h * 60 + mi
+
+
+def days_from_civil(y, m, d):
+    y -= m <= 2
+    era = (y if y >= 0 else y - 399) // 400
+    yoe = y - era * 400
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+
+
+def tz_setup(S):
+    """the zones' and metazones' indexes, which the locales' records use"""
+    canon, alias = tz_canonical(S)
+    TZ_ZONES.extend(sorted(canon, key=lambda s: s.encode("ascii")))
+    TZ_INDEX.update({z: i for i, z in enumerate(TZ_ZONES)})
+    mz = S.json("cldr-core", "supplemental/metaZones.json")["supplemental"]["metaZones"]
+    names = set(e["mapZone"]["_other"] for e in mz["metazones"])
+    MZ_NAMES.extend(sorted(names, key=lambda s: s.encode("ascii")))
+    MZ_INDEX.update({m: i for i, m in enumerate(MZ_NAMES)})
+    return canon, alias
+
+
+def tz_tables(S, B, canon, alias):
+    """the zones by canonical name (16 bytes each, sorted by the name's bytes: the name,
+    the region, the metazone periods' place, their count, flags: 1 a zone of a country,
+    2 its country's names it (its only zone, or the one CLDR's primaryZones names)); the
+    periods (each its first minute from 1970, the minute after its last, its metazone's
+    index: 10 bytes, from 1970 as ICU reads them); the aliases; the metazones by name
+    (12 bytes each: the name, the place and count of its zones in regions, each the
+    region's letters, 001 the world's, and the zone's index)"""
+    mz = S.json("cldr-core", "supplemental/metaZones.json")["supplemental"]["metaZones"]
+    primary = S.json("cldr-core", "supplemental/primaryZones.json")["supplemental"]["primaryZones"]
+    periods = {}
+
+    def walk(t, prefix):
+        for k, v in t.items():
+            if isinstance(v, list):
+                periods[prefix + k] = [(u["usesMetazone"]["_mzone"], u["usesMetazone"].get("_from"),
+                                        u["usesMetazone"].get("_to")) for u in v]
+            else:
+                walk(v, prefix + k + "/")
+    walk(mz["metazoneInfo"]["timezone"], "")
+    for z, extra in MZ_EXTRA.items():
+        periods[z] = periods.get(z, []) + extra
+    for z in periods:
+        assert z in canon, z
+    counts = {}
+    for z, r in canon.items():
+        if r != "001":
+            counts[r] = counts.get(r, 0) + 1
+    B.mark("IDT_ZONES_N", len(TZ_ZONES))
+    recs = []
+    for z in TZ_ZONES:
+        r = canon[z]
+        flags = 0
+        if r != "001":
+            flags |= 1
+            if counts[r] == 1 or primary.get(r) == z:
+                flags |= 2
+        recs.append((B.string(z), B.string(r), flags, periods.get(z, [])))
+    places = []
+    for name, region, flags, ps in recs:
+        places.append(B.here())
+        for m, f, t in ps:
+            B.u32(mz_minutes(f, "1970-01-01 00:00"))
+            B.u32(mz_minutes(t, "9999-12-31 23:59"))
+            B.u16(MZ_INDEX[m])
+    B.mark("IDT_ZONES")
+    for (name, region, flags, ps), place in zip(recs, places):
+        B.u32(name)
+        B.u32(region)
+        B.u32(place)
+        B.u8(len(ps))
+        B.u8(flags)
+        B.u16(0)
+    write_pairs(B, "ALIAS", list(alias.items()))
+    # each metazone's zone in a region (mapTimezones): its region's letters a byte each,
+    # the zone's index
+    refs = {}
+    for e in mz["metazones"]:
+        m = e["mapZone"]
+        refs.setdefault(m["_other"], []).append((m["_territory"], TZ_INDEX[m["_type"]]))
+    offs = [B.string(m) for m in MZ_NAMES]
+    places = []
+    for m in MZ_NAMES:
+        places.append(B.here())
+        for region, z in sorted(refs.get(m, [])):
+            B.u32(sum(ord(c) << (8 * i) for i, c in enumerate(region)))
+            B.u16(z)
+    B.mark("IDT_MZ_N", len(MZ_NAMES))
+    B.mark("IDT_MZ")
+    for m, o, place in zip(MZ_NAMES, offs, places):
+        B.u32(o)
+        B.u32(place)
+        B.u32(len(refs.get(m, [])))
 
 
 def numbering_systems(S):
@@ -1048,11 +1289,47 @@ def emit(B, out_c, out_h):
         f.write("#define IDB_BYTES %du\n" % len(B.b))
 
 
+def emit_tz(B, out_c, out_h):
+    """the time zones' names, a unit of their own (src/js/intl_data.c's compile already
+    takes 1.5 GB; with these in it, 1.9)"""
+    data = bytes(B.b)
+    data += b"\0" * (-len(data) % 4)
+    words = [int.from_bytes(data[i:i + 4], "little") for i in range(0, len(data), 4)]
+    with open(out_c, "w") as f:
+        f.write("/* src/js/intl_tz.c -- generated by tools/gen-intl.py from CLDR %s's JSON. Do not edit;\n"
+                "   run the script. The time zones' names src/js/intl.c reads, as src/js/intl_data.c's\n"
+                "   bytes are kept; src/js/intl_tz.h says where each section begins. */\n" % CLDR)
+        f.write("#include <stdint.h>\n\n")
+        f.write("const uint32_t js_intl_tz_words = %du;\n" % len(words))
+        f.write("const uint32_t js_intl_tz[%d] = {\n" % len(words))
+        for i in range(0, len(words), 8):
+            f.write("    " + ", ".join("0x%08xu" % w for w in words[i:i + 8]) + ",\n")
+        f.write("};\n")
+    with open(out_h, "w") as f:
+        f.write("/* src/js/intl_tz.h -- generated by tools/gen-intl.py from CLDR %s's JSON. Do not edit;\n"
+                "   run the script. Where each section of src/js/intl_tz.c's bytes begins (a byte\n"
+                "   offset), and the counts of its tables.\n\n"
+                "   A zone (IDT_ZONES, by canonical name): its name, its region, its metazone periods'\n"
+                "   place (each the minute from 1970 it starts, the one it ends before, its\n"
+                "   metazone), their count, its flags (1 a country's zone, 2 its country names it).\n"
+                "   A metazone (IDT_MZ, by name): its name, its zones in regions' place and count (each\n"
+                "   the region's letters, a byte each, and the zone's index).\n"
+                "   A locale's records (IDT_LOCALES, in src/js/intl_data.c's order: each its table's\n"
+                "   place and size), keyed (category << 20 | index): its formats (the region format,\n"
+                "   the fallback format), a metazone's names, a zone's (its exemplar city, then the\n"
+                "   long generic, standard, daylight names and the short ones). */\n" % CLDR)
+        for name, v in B.marks:
+            f.write("#define %s %du\n" % (name, v))
+        f.write("#define IDT_FMT %du\n#define IDT_MZNAMES %du\n#define IDT_ZNNAMES %du\n" % (T_FMT, T_MZ, T_ZN))
+        f.write("#define IDT_BYTES %du\n" % len(B.b))
+
+
 def main():
     src = sys.argv[1] if len(sys.argv) > 1 else None
     S = Source(src)
     B = Blob()
     NUMBERING.extend(numbering_systems(S))
+    canon, alias = tz_setup(S)
     locales(S, B)
     aliases(S, B)
     likely(S, B)
@@ -1062,8 +1339,12 @@ def main():
     date_tables(S, B)
     break_tables(S, B)
     collation_table(S, B)
+    T = Blob("IDT_")
+    tz_tables(S, T, canon, alias)
+    tz_locales(S, T, locale_list(S))
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     emit(B, os.path.join(root, "src/js/intl_data.c"), os.path.join(root, "src/js/intl_data.h"))
+    emit_tz(T, os.path.join(root, "src/js/intl_tz.c"), os.path.join(root, "src/js/intl_tz.h"))
 
 
 if __name__ == "__main__":

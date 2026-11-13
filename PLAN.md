@@ -1686,6 +1686,66 @@ be built side by side and merged without touching each other's.
   instructions, from 66.4M, its layout 493.6M, from 490.3M (+0.7%), its paint 155.1M, from 155.2M; its layout's time
   (`ambitious bench`, the medians of five rounds of five runs, on a shared machine) 66.4 ms, from 69.3, within the
   machine's noise.
+- **12ao Intl's time zones by IANA name** (`tools/gen-tz.py`, new, which compiles the IANA database's source,
+  tzdata 2026e from `https://data.iana.org/time-zones/`, as ICU compiles it, into `src/js/tz_data.c` and
+  `tz_data.h`; `tools/gen-intl.py`'s CLDR 48.2 zones, metazones and names into `src/js/intl_tz.c` and
+  `intl_tz.h`, a unit of their own (REPORT, finding 42), `intl_data.c` as it was; the zones, their offsets and
+  their names in `src/js/intl.c`), each line held to node 22 (V8 12.4 over ICU 78.3, tzdata 2026e):
+  - the zones as ICU's zoneinfo64 has them: each file in rearguard form (the database's own `ziguard.awk`: no
+    negative DST, Ireland's winter its standard time, Morocco's Ramadan the standard one), no backzone (Oslo
+    is Berlin before 1970), ICU's icuzones beside (Etc/Unknown, the SystemV zones, Java's three-letter names,
+    US/Pacific-New, Canada/East-Saskatchewan); compiled by zic's rules (outzone's and writezone's, ported),
+    each type's standard offset and DST amount kept, as ICU's zic keeps them; ICU's final rule (two rules to
+    `max` in a zone's last line, from the year after the first in which both apply after the line's
+    others) as SimpleTimeZone reads it; tz2icu's metazone patches (Vancouver's, Edmonton's, Inuvik's and
+    Winnipeg's daylight time from November 2026 kept as daylight time on their standard offsets). 639
+    names, 359 zones, 17,971 transitions, every one from LMT on (New York's -4:56:02 until 1883), 111 final
+    rules; every zone, link and final rule ICU's own (`gen-tz.py --check` against icu-data's 2026e
+    `zoneinfo64.txt`);
+  - names: V8's UTC (UTC, GMT, Etc/UTC, Etc/GMT, GMT0, GMT+0, GMT-0), then any of ICU's names in any case
+    (`america/new_york`, `EST5EDT`, `systemv/ast4adt`); canonical as ICU's getCanonicalCLDRID has it: CLDR's
+    type, else its alias's, else the zone's (Asia/Kolkata is Asia/Calcutta, US/Pacific America/Los_Angeles,
+    IST Asia/Calcutta, EAT Africa/Nairobi, EST America/Panama; EST5EDT and its like their own, as ICU's
+    timezoneTypes keeps the types CLDR deprecated); Etc/Unknown and Factory refused with V8's RangeError;
+    `Intl.supportedValuesOf`, new: the 418 zones of a country by name (and ICU's calendars, collations and
+    ISO currencies, the numbering systems with digits, the sanctioned units);
+  - an instant's offsets from the zone's transitions (a binary search), or from its final rule
+    (SimpleTimeZone's compareToRule, ported) in the years it holds; the fields at offsets of seconds;
+  - timeZoneName as ICU's TimeZoneFormat writes it: the specific name, the zone's own (London's British
+    Summer Time), else its metazone's at the date (CLDR's periods from 1970, as ICU reads them; Casablanca's
+    and El Aaiun's Europe_Western again from 2026-09-20, ICU's update's), else the localized GMT format (its
+    seconds where the offset has them); the generic name (TZGNCore): the zone's own, else its metazone's (its
+    standard name where the zone keeps no DST within 184 days of the date and that is not the generic one;
+    its partial location, "Mountain Time (Canada)", where the metazone's zone in the locale's region keeps
+    other offsets at that wall time), else the location format (the region format of the country's name
+    where the zone is its only one or its primary one, else of the exemplar city: "New York (Ortszeit)");
+    each of the 29 languages' and their regions' names the records that differ from their parent's (en-001's
+    and en-GB's without US abbreviations, en-AU's AEST, en-IN's IST).
+
+  Gate, node's output line for line: `tests/js/intl-tz-zones.js` (1,121 lines: each of ICU's 639 names in
+  four cases, 36 names refused, supportedValuesOf's six keys, each of the 418 zones in winter, in summer and at
+  its last change of offset before November 2026, found by bisecting its own fields to the second),
+  `intl-tz-names.js` (4,538: the six styles in the 29 languages and 36 of their regions, 113 zones, in winter
+  and in summer, at 18 dates from 1890 to 2100 at metazones' and rules' changes; the location format of 24
+  zones in each language; the names in the styles' patterns), `intl-tz-format.js` (1,055: 70 changes of 40
+  zones in 2025 and the years zones changed, each by quarter or half hours in two locales with
+  formatToParts; the hour repeated and the one skipped; years -271821 to 275760 in 16 zones; formatRange and
+  formatRangeToParts across changes; Date's toLocale*String in 14 locales; the 16 style pairs and four hour
+  cycles in 14). The other Intl pages as they were. Beyond the gate, every country's zone in the 29
+  languages (30 codes, nb and no both), the six styles at six dates (451,440 names), 185 regional locales',
+  every ICU name's in three languages, formatRange about the 783 changes of 2024 to 2026 in four, and 20,000
+  random names and times, matched node; the new pages run valgrind clean.
+
+  Cost (`docs/performance.md`; callgrind's instructions a format() call, 100,000 an hour apart from 2024,
+  against main's build): UTC 13,948 before, 13,968 after (+0.1%); a named zone 14,289 (Asia/Kolkata, its
+  transitions searched) to 14,610 (Australia/Lord_Howe, its final rule's), +2.4% to +4.7%; timeZoneName short
+  in UTC 14,932, then 15,010, in New York 16,964 ("EST"); longGeneric in New York 19,656, in Phoenix 21,491
+  (standard all around), in Edmonton 25,739 (Denver's offsets compared); the location format 22,411 ("New York
+  (Ortszeit)"). The tables: `tz_data.c` 125 KB (32,043 words), `intl_tz.c` 573 KB; the binary 719 KB larger
+  (12,117,480 bytes, then 12,853,904: the tables, 17 KB of code, the 2 KB a process's map of CLDR's zones to
+  the database's takes once a golden zone is asked for). Their units build in 11 s (`intl_tz.c`, 375 MB) and
+  2 s (`tz_data.c`); `intl.c`'s own build, 245 s before and 251 s after on the loaded machine, is near the
+  Makefile's 300 s cap, which one build under a heavier load passed.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 

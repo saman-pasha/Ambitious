@@ -15,6 +15,8 @@
 #include <math.h>
 #include "js.h"
 #include "intl_data.h"
+#include "intl_tz.h"
+#include "tz_data.h"
 
 extern const uint32_t js_intl_db[];
 
@@ -3178,11 +3180,15 @@ static int64_t div_floor(int64_t a, int64_t b) {
     return q;
 }
 
-/* a time's fields in a zone (its offset in minutes east): the year (0 is 1 BC), the month
-   (1 to 12), the day, the weekday (0 Sunday), the hour, minute, second, millisecond */
-typedef struct dfields { int64_t year; int month, day, wday, hour, minute, second, ms; } dfields;
+/* a time's fields in a zone (its offset in seconds east): the year (0 is 1 BC), the month
+   (1 to 12), the day, the weekday (0 Sunday), the hour, minute, second, millisecond; the
+   time (ms from 1970), the zone's standard offset and DST amount at it (seconds) */
+typedef struct dfields { int64_t year; int month, day, wday, hour, minute, second, ms; double t; int raw, dst; } dfields;
 static void date_fields(double t, int offset, dfields *f) {
-    int64_t ms = (int64_t)t + (int64_t)offset * 60000;
+    f->t = t;
+    f->raw = offset;
+    f->dst = 0;
+    int64_t ms = (int64_t)t + (int64_t)offset * 1000;
     int64_t day = div_floor(ms, 86400000);
     int64_t rem = ms - day * 86400000;
     int64_t z = day + 719468;
@@ -3724,15 +3730,115 @@ static void dp_best_pattern(dgen *g, const uint16_t *skel, uint32_t sn, int flag
     simple_format(gp, gn, &tpat, &dpat, 0, out);
 }
 
-/* ---- time zones: UTC, offsets, Etc/GMT's (the IANA database is not carried) ---- */
+/* ---- time zones: the IANA database's (src/js/tz_data.c, tools/gen-tz.py's: its zones
+   compiled as ICU compiles them), their names (src/js/intl_tz.c, CLDR's, by
+   tools/gen-intl.py), and the offsets V8 reads itself ---- */
 
-enum { TZK_UTC, TZK_GMT, TZK_OFFSET };
+extern const uint32_t js_tz_db[];
+extern const uint32_t js_intl_tz[];
 
-/* a timeZone option's zone (V8's CreateTimeZone): its kind, offset (minutes east) and
-   resolved name; 0 for one not carried */
-static int tz_parse(js_vm *vm, uint32_t s, int *kind, int *offset, char *name, size_t cap) {
+/* a zone's kind: UTC and GMT (V8's own UTC, ICU's Etc/GMT: names of their own), a fixed
+   offset (+hh:mm and Etc/GMT's), a zone of the database */
+enum { TZK_UTC, TZK_GMT, TZK_OFFSET, TZK_ZONE };
+
+/* tz_data's words, and its strings' bytes */
+static uint32_t tzw(uint32_t i) { return js_tz_db[i]; }
+static uint32_t tzs8(uint32_t off) { return (js_tz_db[TZD_STRINGS + (off >> 2)] >> ((off & 3u) << 3)) & 0xFFu; }
+static void tzs_copy(uint32_t off, char *buf, size_t cap) {
+    size_t n = 0;
+    for (uint32_t c; (c = tzs8(off + (uint32_t)n)) && n + 1 < cap; n++) buf[n] = (char)c;
+    buf[n] = 0;
+}
+/* intl_tz's bytes, its strings, its tables of string pairs */
+static uint32_t it8(uint32_t i) { return (js_intl_tz[i >> 2] >> ((i & 3u) << 3)) & 0xFFu; }
+static uint32_t it16(uint32_t i) { return it8(i) | it8(i + 1) << 8; }
+static uint32_t it32(uint32_t i) { return it16(i) | it16(i + 2) << 16; }
+static int it_cmp(uint32_t off, const char *s, size_t n) {
+    for (size_t i = 0;; i++) {
+        uint32_t c = it8(off + (uint32_t)i);
+        uint32_t d = i < n ? (uint8_t)s[i] : 0;
+        if (c != d) return c < d ? -1 : 1;
+        if (!c) return 0;
+    }
+}
+static void it_copy(uint32_t off, char *buf, size_t cap) {
+    size_t n = 0;
+    for (uint32_t c; (c = it8(off + (uint32_t)n)) && n + 1 < cap; n++) buf[n] = (char)c;
+    buf[n] = 0;
+}
+static uint32_t it_find(uint32_t table, uint32_t count, const char *key) {
+    size_t n = strlen(key);
+    uint32_t lo = 0, hi = count;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        int c = it_cmp(it32(table + mid * 8), key, n);
+        if (c == 0) return it32(table + mid * 8 + 4);
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+
+/* a name's index among tz_data's (sorted by their uppercased bytes; up uppercased), -1
+   for none */
+static int tzname_find(const char *up, size_t n) {
+    uint32_t lo = 0, hi = TZD_NAMES_N;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2, off = tzw(TZD_NAMES + mid * 2);
+        int c = 0;
+        for (size_t i = 0;; i++) {
+            uint32_t a = (uint32_t)upper((int)tzs8(off + (uint32_t)i)), b = 0;
+            if (i < n) b = (uint8_t)up[i];
+            if (a != b) { c = a < b ? -1 : 1; break; }
+            if (!a) break;
+        }
+        if (c == 0) return (int)mid;
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return -1;
+}
+/* a zone's name (tz_data's) */
+static void tzone_name(uint32_t z, char *buf, size_t cap) { tzs_copy(tzw(TZD_ZONES + z * 4), buf, cap); }
+
+/* CLDR's zones by canonical name (16 bytes each): a name's index, -1 for none */
+#define TZC_REC 16u
+static int tzc_find(const char *name) {
+    size_t n = strlen(name);
+    uint32_t lo = 0, hi = IDT_ZONES_N;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        int c = it_cmp(it32(IDT_ZONES + mid * TZC_REC), name, n);
+        if (c == 0) return (int)mid;
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return -1;
+}
+static void tzc_name(int ci, char *buf, size_t cap) { it_copy(it32(IDT_ZONES + (uint32_t)ci * TZC_REC), buf, cap); }
+static void tzc_region(int ci, char *buf, size_t cap) { it_copy(it32(IDT_ZONES + (uint32_t)ci * TZC_REC + 4), buf, cap); }
+static uint32_t tzc_flags(int ci) { return it8(IDT_ZONES + (uint32_t)ci * TZC_REC + 13); }
+
+/* ICU's getCanonicalCLDRID of a name (zone its tz_data zone's name, ICU's Olson link):
+   the name when CLDR has it, else its alias's, else the zone's alias's or the zone */
+static void tz_canonical(const char *name, const char *zone, char *out, size_t cap) {
+    if (tzc_find(name) >= 0) { copyz(out, cap, name); return; }
+    uint32_t a = it_find(IDT_ALIAS, IDT_ALIAS_N, name);
+    if (!a) a = it_find(IDT_ALIAS, IDT_ALIAS_N, zone);
+    if (a) it_copy(a, out, cap);
+    else copyz(out, cap, zone);
+}
+
+/* a timeZone option's zone (V8's CreateTimeZone): its kind, offset (minutes east, of a
+   fixed one), tz_data's zone and CLDR's (-1 none) and resolved name; 0 for none. V8 makes
+   UTC, GMT, Etc/UTC, Etc/GMT, GMT0, GMT+0 and GMT-0 its UTC, and finds a name in ICU's
+   (the database's and icuzones') whatever its case; a name canonical as ICU's
+   getCanonicalCLDRID, Etc/UTC's and Etc/GMT's UTC */
+static int tz_parse(js_vm *vm, uint32_t s, int *kind, int *offset, int *zone, int *canon, char *name, size_t cap) {
     js_str_flatten(vm, s);
     uint32_t n = vm->strs[s].len, o = vm->strs[s].off;
+    *zone = -1;
+    *canon = -1;
     /* an offset: [+-−]hh(:?mm)? */
     if (n >= 3) {
         uint32_t c = vm->units[o];
@@ -3769,64 +3875,279 @@ static int tz_parse(js_vm *vm, uint32_t s, int *kind, int *offset, char *name, s
             }
         }
     }
-    /* a name: ASCII, canonicalized as V8 does it */
-    char in[64], up[64], canon[64];
-    if (n == 0 || n >= sizeof in) return 0;
+    /* a name: ASCII */
+    char up[64];
+    if (n == 0 || n >= sizeof up) return 0;
     for (uint32_t i = 0; i < n; i++) {
         uint32_t c = vm->units[o + i];
         if (c == 0 || c >= 128) return 0;
-        in[i] = (char)c;
         up[i] = (char)upper((int)c);
     }
-    in[n] = 0;
     up[n] = 0;
-    canon[0] = 0;
-    int done = 0;
-    if (n == 3) {
-        if (!strcmp(up, "GMT")) copyz(canon, sizeof canon, "UTC");
-        else copyz(canon, sizeof canon, up);
-        done = 1;
-    } else if (n > 3 && !strncmp(up, "ETC", 3)) {
-        if (!strcmp(up, "ETC/UTC") || !strcmp(up, "ETC/GMT") || !strcmp(up, "ETC/UCT")) { copyz(canon, sizeof canon, "UTC"); done = 1; }
-        else if (!strncmp(up, "ETC/GMT", 7)) {
-            /* GetGMTTzID */
-            done = 1;
-            if (n == 8 && in[7] == '0') copyz(canon, sizeof canon, "Etc/GMT0");
-            else if (n == 9 && (in[7] == '+' || in[7] == '-') && is_digit(in[8])) { copyz(canon, sizeof canon, "Etc/GMT"); catn(canon, sizeof canon, in + 7, 2); }
-            else if (n == 10 && (in[7] == '+' || in[7] == '-') && in[8] == '1' && in[9] >= '0' && in[9] <= '4') { copyz(canon, sizeof canon, "Etc/GMT"); catn(canon, sizeof canon, in + 7, 3); }
-        }
-    } else if (n > 3 && !strncmp(up, "GMT", 3)) {
-        if (!strcmp(up, "GMT0") || !strcmp(up, "GMT+0") || !strcmp(up, "GMT-0")) { copyz(canon, sizeof canon, "UTC"); done = 1; }
+    *offset = 0;
+    static const char *const v8_utc[] = { "UTC", "GMT", "ETC/UTC", "ETC/GMT", "GMT0", "GMT+0", "GMT-0", 0 };
+    for (int i = 0; v8_utc[i]; i++)
+        if (!strcmp(up, v8_utc[i])) { *kind = TZK_UTC; copyz(name, cap, "UTC"); return 1; }
+    int ni = tzname_find(up, n);
+    if (ni < 0) return 0;
+    char icu[64], zn[64], cn[64];
+    tzs_copy(tzw(TZD_NAMES + (uint32_t)ni * 2), icu, sizeof icu);
+    uint32_t z = tzw(TZD_NAMES + (uint32_t)ni * 2 + 1);
+    tzone_name(z, zn, sizeof zn);
+    if (!strcmp(zn, "Etc/UTC")) { *kind = TZK_UTC; copyz(name, cap, "UTC"); return 1; }
+    if (!strcmp(zn, "Etc/GMT")) { *kind = TZK_GMT; copyz(name, cap, "UTC"); return 1; }
+    if (!strncmp(zn, "Etc/GMT", 7) && (zn[7] == '+' || zn[7] == '-')) {
+        int h = atoi(zn + 8);
+        *kind = TZK_OFFSET;
+        *offset = zn[7] == '+' ? -h * 60 : h * 60;
+        copyz(name, cap, zn);
+        return 1;
     }
-    if (!done) {
-        /* ToTitleCaseTimezoneLocation */
-        int word = 0;
-        size_t k = 0;
-        for (uint32_t i = 0; i < n; i++) {
-            int c = in[i];
-            if (is_alpha(c)) {
-                if (word == 0) canon[k++] = (char)upper(c);
-                else canon[k++] = (char)lower(c);
-                word++;
-            } else if (c == '_' || c == '-' || c == '/') {
-                if (word == 2 && ((canon[k - 2] == 'O' && canon[k - 1] == 'f') || (canon[k - 2] == 'E' && canon[k - 1] == 's') ||
-                                  (canon[k - 2] == 'A' && canon[k - 1] == 'u'))) canon[k - 2] = (char)lower(canon[k - 2]);
-                canon[k++] = (char)c;
-                word = 0;
-            } else return 0;
-        }
-        canon[k] = 0;
+    tz_canonical(icu, zn, cn, sizeof cn);
+    if (!strcmp(cn, "Etc/Unknown")) return 0;
+    *kind = TZK_ZONE;
+    *zone = (int)z;
+    *canon = tzc_find(cn);
+    copyz(name, cap, cn);
+    return 1;
+}
+
+/* ---- a zone's offsets: its transitions, then its final rule (ICU's OlsonTimeZone) ---- */
+
+/* a zone's record read: its types' and transitions' places and counts, its final rule's */
+typedef struct tzrec { uint32_t base, ntypes, ntrans, npre, npost, n32, times, map, fin; int has_final; } tzrec;
+static void tz_rec(uint32_t z, tzrec *r) {
+    uint32_t w = TZD_ZONES + z * 4u, a = tzw(w + 2), b = tzw(w + 3);
+    r->base = tzw(w + 1);
+    r->ntypes = a & 0xFFu;
+    r->ntrans = (a >> 8) & 0xFFFFu;
+    r->has_final = (int)((a >> 24) & 1u);
+    r->npre = b & 0xFFFFu;
+    r->npost = b >> 16;
+    r->n32 = r->ntrans - r->npre - r->npost;
+    r->times = r->base + 2u * r->ntypes;
+    r->map = r->times + 2u * r->npre + r->n32 + 2u * r->npost;
+    r->fin = r->map + (r->ntrans + 3u) / 4u;
+}
+/* transition k's time (UTC seconds), its type, a type's standard offset and DST amount */
+static int64_t tz_time(const tzrec *r, uint32_t k) {
+    uint32_t i;
+    if (k < r->npre) i = r->times + 2u * k;
+    else if (k < r->npre + r->n32) return (int64_t)(int32_t)tzw(r->times + 2u * r->npre + (k - r->npre));
+    else i = r->times + 2u * r->npre + r->n32 + 2u * (k - r->npre - r->n32);
+    return (int64_t)((uint64_t)tzw(i) | (uint64_t)tzw(i + 1) << 32);
+}
+static uint32_t tz_type(const tzrec *r, uint32_t k) { return (tzw(r->map + k / 4u) >> ((k & 3u) << 3)) & 0xFFu; }
+static int tz_raw(const tzrec *r, uint32_t ty) { return (int)(int32_t)tzw(r->base + 2u * ty); }
+static int tz_dst(const tzrec *r, uint32_t ty) { return (int)(int32_t)tzw(r->base + 2u * ty + 1u); }
+/* the last transition at or before a time (UTC seconds): its index, -1 for none */
+static int tz_at(const tzrec *r, int64_t sec) {
+    int lo = 0, hi = (int)r->ntrans;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (tz_time(r, (uint32_t)mid) <= sec) lo = mid + 1;
+        else hi = mid;
     }
-    static const char *const utc_ids[] = { "UTC", "UCT", "Etc/Universal", "Etc/Zulu", "Universal", "Zulu", 0 };
-    static const char *const gmt_ids[] = { "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich", "Greenwich", 0 };
-    for (int i = 0; utc_ids[i]; i++)
-        if (!strcmp(canon, utc_ids[i])) { *kind = TZK_UTC; *offset = 0; copyz(name, cap, "UTC"); return 1; }
-    for (int i = 0; gmt_ids[i]; i++)
-        if (!strcmp(canon, gmt_ids[i])) { *kind = TZK_GMT; *offset = 0; copyz(name, cap, "UTC"); return 1; }
-    if (!strncmp(canon, "Etc/GMT", 7) && (canon[7] == '+' || canon[7] == '-')) {
-        int h = atoi(canon + 8);
-        if (canon[7] == '+' && h >= 1 && h <= 12) { *kind = TZK_OFFSET; *offset = -h * 60; copyz(name, cap, canon); return 1; }
-        if (canon[7] == '-' && h >= 1 && h <= 14) { *kind = TZK_OFFSET; *offset = h * 60; copyz(name, cap, canon); return 1; }
+    return lo - 1;
+}
+
+/* the final rule, as SimpleTimeZone keeps it: each end's month (0 January), day and
+   weekday (1 Sunday) and how they are read (SimpleTimeZone's modes), time (ms) and
+   whether it is wall (0), standard (1) or UTC (2) time; the DST amount, the standard
+   offset (seconds), the year it starts in; its first transition (UTC seconds) and
+   whether it is to daylight time */
+enum { STZ_DOM, STZ_DOW_IN_MONTH, STZ_GE, STZ_LE };
+typedef struct tzfinal {
+    int month[2], day[2], dow[2], mode[2], tmode[2];
+    int64_t time[2];
+    int save, raw;
+    int64_t year, first;
+    int first_dst;
+} tzfinal;
+static void tz_final(const tzrec *r, tzfinal *f) {
+    for (uint32_t e = 0; e < 2; e++) {
+        uint32_t a = tzw(r->fin + 2u * e);
+        int day = (int)(int8_t)(uint8_t)((a >> 8) & 0xFFu), dow = (int)(int8_t)(uint8_t)((a >> 16) & 0xFFu);
+        f->month[e] = (int)(a & 0xFFu);
+        f->tmode[e] = (int)(a >> 24);
+        f->time[e] = (int64_t)(int32_t)tzw(r->fin + 2u * e + 1u) * 1000;
+        /* SimpleTimeZone's decodeStartRule and decodeEndRule */
+        if (dow == 0) f->mode[e] = STZ_DOM;
+        else if (dow > 0) f->mode[e] = STZ_DOW_IN_MONTH;
+        else {
+            dow = -dow;
+            if (day > 0) f->mode[e] = STZ_GE;
+            else { day = -day; f->mode[e] = STZ_LE; }
+        }
+        f->day[e] = day;
+        f->dow[e] = dow;
+    }
+    f->save = (int)(int32_t)tzw(r->fin + 4);
+    f->raw = (int)(int32_t)tzw(r->fin + 5);
+    f->year = (int64_t)(int32_t)tzw(r->fin + 6);
+    f->first = (int64_t)tzw(r->fin + 7);
+    f->first_dst = (int)tzw(r->fin + 8);
+}
+
+static int64_t days_from_civil(int64_t y, int m, int d) {
+    if (m <= 2) y--;
+    int64_t era = div_floor(y, 400);
+    int64_t yoe = y - era * 400;
+    int64_t mp = m > 2 ? m - 3 : m + 9;
+    int64_t doy = (153 * mp + 2) / 5 + d - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+static int is_leap(int64_t y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
+static int month_len(int64_t y, int m) {
+    static const int len[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (m == 1 && is_leap(y)) return 29;
+    return len[m];
+}
+/* a day's year, month (0 January), day and weekday (1 Sunday), Grego::dayToFields's */
+static void day_fields(int64_t day, int64_t *year, int *month, int *dom, int *dow) {
+    int64_t z = day + 719468;
+    int64_t era = div_floor(z, 146097);
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153;
+    *dom = (int)(doy - (153 * mp + 2) / 5 + 1);
+    if (mp < 10) *month = (int)(mp + 2);
+    else *month = (int)(mp - 10);
+    *year = yoe + era * 400;
+    if (*month <= 1) (*year)++;
+    int64_t w = (day + 4) % 7;
+    if (w < 0) w += 7;
+    *dow = (int)w + 1;
+}
+/* SimpleTimeZone::compareToRule: a local time against a rule's, -1 before, 0 on, 1 after */
+static int stz_compare(int month, int mlen, int plen, int dom, int dow, int64_t millis, int64_t delta, int rmode, int rmonth,
+                       int rdow, int rday, int64_t rmillis) {
+    millis += delta;
+    while (millis >= 86400000) {
+        millis -= 86400000;
+        ++dom;
+        dow = 1 + (dow % 7);
+        if (dom > mlen) { dom = 1; ++month; }
+    }
+    while (millis < 0) {
+        millis += 86400000;
+        --dom;
+        dow = 1 + ((dow + 5) % 7);
+        if (dom < 1) { dom = plen; --month; }
+    }
+    if (month < rmonth) return -1;
+    if (month > rmonth) return 1;
+    int rdom = 0;
+    if (rday > mlen) rday = mlen;
+    if (rmode == STZ_DOM) rdom = rday;
+    else if (rmode == STZ_DOW_IN_MONTH) {
+        if (rday > 0) rdom = 1 + (rday - 1) * 7 + (7 + rdow - (dow - dom + 1)) % 7;
+        else rdom = mlen + (rday + 1) * 7 - (7 + (dow + mlen - dom) - rdow) % 7;
+    } else if (rmode == STZ_GE) rdom = rday + (49 + rdow - rday - dow + dom) % 7;
+    else rdom = rday - (49 - rdow + rday + dow - dom) % 7;
+    if (dom < rdom) return -1;
+    if (dom > rdom) return 1;
+    if (millis < rmillis) return -1;
+    if (millis > rmillis) return 1;
+    return 0;
+}
+/* the final rule's DST amount (seconds) at a local standard time (ms; SimpleTimeZone's
+   getOffset of its fields) */
+static int stz_dst(const tzfinal *f, int64_t local) {
+    int64_t raw = (int64_t)f->raw * 1000;
+    int64_t day = div_floor(local, 86400000), millis = local - day * 86400000, year;
+    int month, dom, dow;
+    day_fields(day, &year, &month, &dom, &dow);
+    int mlen = month_len(year, month), plen = 31;
+    if (month > 0) plen = month_len(year, month - 1);
+    int southern = f->month[0] > f->month[1];
+    int64_t sdelta = 0, edelta = 0;
+    if (f->tmode[0] == 2) sdelta = -raw;
+    if (f->tmode[1] == 0) edelta = (int64_t)f->save * 1000;
+    else if (f->tmode[1] == 2) edelta = -raw;
+    int sc = stz_compare(month, mlen, plen, dom, dow, millis, sdelta, f->mode[0], f->month[0], f->dow[0], f->day[0], f->time[0]);
+    int ec = 0;
+    if (southern != (sc >= 0))
+        ec = stz_compare(month, mlen, plen, dom, dow, millis, edelta, f->mode[1], f->month[1], f->dow[1], f->day[1], f->time[1]);
+    if ((!southern && sc >= 0 && ec < 0) || (southern && (sc >= 0 || ec < 0))) return f->save;
+    return 0;
+}
+
+/* a zone's standard offset and DST amount (seconds) at a time (ms from 1970, whole):
+   OlsonTimeZone::getOffset */
+static void tz_offsets(uint32_t z, double t, int *raw, int *dst) {
+    tzrec r;
+    tz_rec(z, &r);
+    int64_t ms = (int64_t)t;
+    if (r.has_final) {
+        tzfinal f;
+        tz_final(&r, &f);
+        if (ms >= days_from_civil(f.year, 1, 1) * 86400000) {
+            *raw = f.raw;
+            *dst = stz_dst(&f, ms + (int64_t)f.raw * 1000);
+            return;
+        }
+    }
+    int k = tz_at(&r, div_floor(ms, 1000));
+    uint32_t ty = 0;
+    if (k >= 0) ty = tz_type(&r, (uint32_t)k);
+    *raw = tz_raw(&r, ty);
+    *dst = tz_dst(&r, ty);
+}
+/* the offsets at a local wall time (getOffset's local reading, kFormer for a time a
+   transition skips and kLatter for one it repeats: a transition counts from its time in
+   the offset after it) */
+static void tz_offsets_local(uint32_t z, int64_t local, int *raw, int *dst) {
+    tzrec r;
+    tz_rec(z, &r);
+    if (r.has_final) {
+        tzfinal f;
+        tz_final(&r, &f);
+        if (local >= days_from_civil(f.year, 1, 1) * 86400000) {
+            /* TimeZone::getOffset's two passes */
+            int d = stz_dst(&f, local);
+            if (d) d = stz_dst(&f, local - (int64_t)d * 1000);
+            *raw = f.raw;
+            *dst = d;
+            return;
+        }
+    }
+    int64_t sec = div_floor(local, 1000);
+    int k = (int)r.ntrans - 1;
+    for (; k >= 0; k--) {
+        uint32_t ty = tz_type(&r, (uint32_t)k);
+        if (sec >= tz_time(&r, (uint32_t)k) + tz_raw(&r, ty) + tz_dst(&r, ty)) break;
+    }
+    uint32_t ty = 0;
+    if (k >= 0) ty = tz_type(&r, (uint32_t)k);
+    *raw = tz_raw(&r, ty);
+    *dst = tz_dst(&r, ty);
+}
+/* TZGNCore's check of a time in standard time: whether daylight time is near, the
+   transition at or before it (within 184 days) from it, or the one after it (within 184
+   days) to it; a final rule's transitions always are */
+static int tz_dst_near(uint32_t z, double t) {
+    tzrec r;
+    tz_rec(z, &r);
+    int64_t ms = (int64_t)t, range = (int64_t)184 * 86400000;
+    tzfinal f;
+    memset(&f, 0, sizeof f);
+    if (r.has_final) {
+        tz_final(&r, &f);
+        if (ms >= f.first * 1000) return 1;
+    }
+    int k = tz_at(&r, div_floor(ms, 1000));
+    if (k >= 0) {
+        uint32_t from = 0;
+        if (k > 0) from = tz_type(&r, (uint32_t)k - 1);
+        if (ms - tz_time(&r, (uint32_t)k) * 1000 < range && tz_dst(&r, from)) return 1;
+    }
+    if ((uint32_t)(k + 1) < r.ntrans) {
+        if (tz_time(&r, (uint32_t)k + 1) * 1000 - ms < range && tz_dst(&r, tz_type(&r, (uint32_t)k + 1))) return 1;
+    } else if (r.has_final) {
+        if (f.first * 1000 - ms < range && f.first_dst) return 1;
     }
     return 0;
 }
@@ -3843,8 +4164,11 @@ static void put_digits(int nsi, int64_t v, int min, vector<uint16_t> *tx, vector
     while (n > 0) put_c(tx, ty, ns_digit(nsi, d[--n]), type);
 }
 
-/* the localized GMT format of an offset (TimeZoneFormat::formatOffsetLocalizedGMT): the
-   short one drops a zero minute and the hour's leading zero */
+/* the localized GMT format of an offset in seconds (TimeZoneFormat::formatOffsetLocalizedGMT):
+   the hour format with seconds where the offset has them (expandOffsetPattern: ":ss"
+   after the minutes, the hours' separator before), else without its minutes in the short
+   format where it has none (truncateOffsetPattern), the hour's leading zero dropped in
+   the short format */
 static void tz_gmt(int li, int nsi, int offset, int is_short, vector<uint16_t> *tx, vector<uint8_t> *ty, uint32_t type) {
     uint32_t rec = rec_get(li, RKEY(IDK_TZ, 0));
     uint16_t gf[48], hf[48];
@@ -3853,31 +4177,44 @@ static void tz_gmt(int li, int nsi, int offset, int is_short, vector<uint16_t> *
     for (uint32_t i = 0; i < hn; i++) if (hf[i] == ';') { semi = i; break; }
     int neg = offset < 0, a = offset;
     if (neg) a = -offset;
-    int hh = a / 60, mm = a % 60;
+    int hh = a / 3600, mm = a / 60 % 60, ss = a % 60;
     uint32_t ps = 0, pe = semi;
     if (neg && semi < hn) { ps = semi + 1; pe = hn; }
-    if (is_short && mm == 0) {
-        /* truncateOffsetPattern: up to the hours before the minutes */
-        uint32_t at = pe;
-        for (uint32_t i = ps; i + 1 < pe; i++) if (hf[i] == 'm' && hf[i + 1] == 'm') { at = i; break; }
-        uint32_t cut = at;
-        for (uint32_t i = at; i > ps; i--) if (hf[i - 1] == 'H') { cut = i; break; }
-        pe = cut;
+    uint32_t at = pe;
+    for (uint32_t i = ps; i + 1 < pe; i++) if (hf[i] == 'm' && hf[i + 1] == 'm') { at = i; break; }
+    /* the pattern: [ps, pe), with ":ss" (the separator) put after the minutes */
+    uint16_t pat[64];
+    uint32_t pn = 0;
+    if (ss && at < pe) {
+        uint32_t hpos = ps, found = 0;
+        for (uint32_t i = ps; i < at; i++) if (hf[i] == 'H') { hpos = i; found = 1; }
+        for (uint32_t i = ps; i < at + 2 && pn < 60; i++) pat[pn++] = hf[i];
+        if (found) for (uint32_t i = hpos + 1; i < at && pn < 60; i++) pat[pn++] = hf[i];
+        pat[pn++] = 's';
+        pat[pn++] = 's';
+        for (uint32_t i = at + 2; i < pe && pn < 62; i++) pat[pn++] = hf[i];
+    } else {
+        uint32_t cut = pe;
+        if (is_short && mm == 0 && at < pe) {
+            for (uint32_t i = at; i > ps; i--) if (hf[i - 1] == 'H') { cut = i; break; }
+        }
+        for (uint32_t i = ps; i < cut && pn < 64; i++) pat[pn++] = hf[i];
     }
     uint32_t z = gn;
     for (uint32_t i = 0; i + 2 < gn; i++) if (gf[i] == '{' && gf[i + 1] == '0' && gf[i + 2] == '}') { z = i; break; }
     put_u(tx, ty, gf, z, type);
-    for (uint32_t i = ps; i < pe;) {
-        if (hf[i] == 'H' || hf[i] == 'm') {
-            uint32_t c = hf[i];
-            while (i < pe && hf[i] == c) i++;
+    for (uint32_t i = 0; i < pn;) {
+        uint32_t c = pat[i];
+        if (c == 'H' || c == 'm' || c == 's') {
+            while (i < pn && pat[i] == c) i++;
             if (c == 'H') {
                 if (is_short) put_digits(nsi, hh, 1, tx, ty, type);
                 else put_digits(nsi, hh, 2, tx, ty, type);
-            } else put_digits(nsi, mm, 2, tx, ty, type);
+            } else if (c == 'm') put_digits(nsi, mm, 2, tx, ty, type);
+            else put_digits(nsi, ss, 2, tx, ty, type);
             continue;
         }
-        put_c(tx, ty, hf[i], type);
+        put_c(tx, ty, c, type);
         i++;
     }
     if (z + 3 <= gn) put_u(tx, ty, gf + z + 3, gn - z - 3, type);
@@ -3897,9 +4234,269 @@ enum { DPN_AM, DPN_PM, DPN_MIDNIGHT, DPN_NOON, DPN_MORNING1, DPN_MORNING2, DPN_A
 static const char *const dpn_names[DPN_N] = { "am", "pm", "midnight", "noon", "morning1", "morning2", "afternoon1",
     "afternoon2", "evening1", "evening2", "night1", "night2" };
 
-/* a formatter's context: its data locale, digits, zone; its language's day period rules
-   (each hour's period, -1 none, and whether midnight and noon have one) */
-typedef struct dctx { int li, nsi, tzkind, offset; int hours[24]; int has_rules, has_midnight, has_noon; } dctx;
+/* a formatter's context: its data locale, digits, zone (its kind, a fixed one's offset in
+   minutes, tz_data's zone and CLDR's, -1 for none, the locale's region for the metazones'
+   zones, its letters a byte each); its language's day period rules (each hour's period, -1
+   none, and whether midnight and noon have one) */
+typedef struct dctx { int li, nsi, tzkind, offset, zone, canon, region; int hours[24]; int has_rules, has_midnight, has_noon; } dctx;
+
+/* a time's fields in the formatter's zone */
+static void dtf_fields(const dctx *c, double t, dfields *f) {
+    int raw = 0, dst = 0;
+    if (c->tzkind == TZK_OFFSET) raw = c->offset * 60;
+    else if (c->tzkind == TZK_ZONE) tz_offsets((uint32_t)c->zone, t, &raw, &dst);
+    date_fields(t, raw + dst, f);
+    f->raw = raw;
+    f->dst = dst;
+}
+
+/* ---- the zones' names: ICU's TimeZoneNames, TimeZoneGenericNames and TimeZoneFormat
+   over CLDR's (src/js/intl_tz.c) ---- */
+
+static uint32_t region_name(int li, const char *code, int is_short, uint16_t *buf, uint32_t cap);
+static void tz_put(vector<uint16_t> *out, const uint16_t *b, uint32_t n) { for (uint32_t i = 0; i < n; i++) push_back(*out, b[i]); }
+static void tz_put_ascii(vector<uint16_t> *out, const char *s) { for (size_t i = 0; s[i]; i++) push_back(*out, (uint16_t)(uint8_t)s[i]); }
+
+/* a resources table's value for a key (intl_tz's, pairs of words sorted by key): 0 none */
+static uint32_t it_res_in(uint32_t table, uint32_t n, uint32_t key) {
+    uint32_t lo = 0, hi = n;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2, k = it32(table + mid * 8);
+        if (k == key) return it32(table + mid * 8 + 4);
+        if (k < key) lo = mid + 1;
+        else hi = mid;
+    }
+    return 0;
+}
+/* a locale's record of zone names: its own, its nearest ancestor's, else root's; 0 none */
+static uint32_t tzn_rec(int li, uint32_t key) {
+    for (int guard = 0; li >= 0 && li != 0xFFFF && guard < 32; guard++) {
+        uint32_t t = IDT_LOCALES + (uint32_t)li * 8;
+        uint32_t v = it_res_in(it32(t), it32(t + 4), key);
+        if (v) return v;
+        li = (int)locale_parent((uint32_t)li);
+    }
+    return it_res_in(IDT_ROOT, IDT_ROOT_N, key);
+}
+/* a record's field i (fields joined by 0x1F) as UTF-16 units into buf: their count */
+static uint32_t it_fld_units(uint32_t rec, uint32_t i, uint16_t *buf, uint32_t cap) {
+    if (!rec) return 0;
+    uint32_t p = rec;
+    for (uint32_t k = 0; k < i; k++) {
+        while (it8(p) && it8(p) != 0x1F) p++;
+        if (!it8(p)) return 0;
+        p++;
+    }
+    uint32_t n = 0;
+    while (it8(p) && it8(p) != 0x1F && n + 2 <= cap) {
+        uint32_t c = it8(p), cp, w = 1;
+        if (c < 0x80) cp = c;
+        else if (c < 0xE0) { cp = (c & 0x1F) << 6 | (it8(p + 1) & 0x3F); w = 2; }
+        else if (c < 0xF0) { cp = (c & 0x0F) << 12 | (it8(p + 1) & 0x3F) << 6 | (it8(p + 2) & 0x3F); w = 3; }
+        else { cp = (c & 0x07) << 18 | (it8(p + 1) & 0x3F) << 12 | (it8(p + 2) & 0x3F) << 6 | (it8(p + 3) & 0x3F); w = 4; }
+        if (cp >= 0x10000) { buf[n++] = (uint16_t)(0xD800 + ((cp - 0x10000) >> 10)); buf[n++] = (uint16_t)(0xDC00 + ((cp - 0x10000) & 0x3FF)); }
+        else buf[n++] = (uint16_t)cp;
+        p += w;
+    }
+    return n;
+}
+
+/* the six names of a metazone or a zone, in their records' order */
+enum { TZN_LG, TZN_LS, TZN_LD, TZN_SG, TZN_SS, TZN_SD };
+#define TZN_MAX 128
+/* a zone's own name of a type (getTimeZoneDisplayName), a metazone's (getMetaZoneDisplayName) */
+static uint32_t tz_zone_name(int li, int ci, int type, uint16_t *buf, uint32_t cap) {
+    if (ci < 0) return 0;
+    return it_fld_units(tzn_rec(li, RKEY(IDT_ZNNAMES, ci)), (uint32_t)type + 1, buf, cap);
+}
+static uint32_t tz_mz_name(int li, int mz, int type, uint16_t *buf, uint32_t cap) {
+    if (mz < 0) return 0;
+    return it_fld_units(tzn_rec(li, RKEY(IDT_MZNAMES, mz)), (uint32_t)type, buf, cap);
+}
+/* a zone's metazone at a time (ZoneMeta::getMetazoneID: its periods from 1970), -1 none */
+static int tz_metazone(int ci, double t) {
+    if (ci < 0) return -1;
+    uint32_t rec = IDT_ZONES + (uint32_t)ci * TZC_REC, p = it32(rec + 8), n = it8(rec + 12);
+    for (uint32_t i = 0; i < n; i++, p += 10) {
+        double from = (double)it32(p) * 60000.0, to = (double)it32(p + 4) * 60000.0;
+        if (from <= t && to > t) return (int)it16(p + 8);
+    }
+    return -1;
+}
+/* a metazone's zone in a region (getReferenceZoneID: the region's, else the world's), its
+   region's letters a byte each: its CLDR index, -1 for none */
+#define TZ_WORLD ('0' | '0' << 8 | '1' << 16)
+static int tz_golden(int mz, int region) {
+    uint32_t rec = IDT_MZ + (uint32_t)mz * 12, p = it32(rec + 4), n = it32(rec + 8);
+    int world = -1;
+    for (uint32_t i = 0; i < n; i++, p += 6) {
+        int r = (int)it32(p);
+        if (r == region) return (int)it16(p + 4);
+        if (r == TZ_WORLD) world = (int)it16(p + 4);
+    }
+    return world;
+}
+static int tz_region_code(const char *r) {
+    int v = 0;
+    for (int i = 0; i < 3 && r[i]; i++) v |= (int)(uint8_t)r[i] << (8 * i);
+    return v;
+}
+/* a CLDR zone's tz_data zone (its name's), -1 for none: a table made once a process */
+static int32_t tzc_tz[IDT_ZONES_N];
+static int tzc_tz_made;
+static int tzc_zone(int ci) {
+    if (!tzc_tz_made) {
+        for (uint32_t i = 0; i < IDT_ZONES_N; i++) {
+            char name[64], up[64];
+            tzc_name((int)i, name, sizeof name);
+            size_t k = 0;
+            for (; name[k] && k + 1 < sizeof up; k++) up[k] = (char)upper((unsigned char)name[k]);
+            up[k] = 0;
+            int ni = tzname_find(up, k);
+            tzc_tz[i] = -1;
+            if (ni >= 0) tzc_tz[i] = (int32_t)tzw(TZD_NAMES + (uint32_t)ni * 2 + 1);
+        }
+        tzc_tz_made = 1;
+    }
+    return (int)tzc_tz[ci];
+}
+/* a zone's exemplar city (getExemplarLocationName): the locale's, else its name's last
+   part, its underscores spaces (none for Etc/, SystemV/ or a name with no area) */
+static uint32_t tz_city(int li, int ci, uint16_t *buf, uint32_t cap) {
+    uint32_t n = it_fld_units(tzn_rec(li, RKEY(IDT_ZNNAMES, ci)), 0, buf, cap);
+    if (n) return n;
+    char name[64];
+    tzc_name(ci, name, sizeof name);
+    if (!strncmp(name, "Etc/", 4) || !strncmp(name, "SystemV/", 8) || strstr(name, "Riyadh8")) return 0;
+    const char *slash = strrchr(name, '/');
+    if (!slash || !slash[1]) return 0;
+    for (const char *s = slash + 1; *s && n < cap; s++) buf[n++] = (uint16_t)(*s == '_' ? ' ' : (uint8_t)*s);
+    return n;
+}
+/* the locale's region for the metazones' zones (TZGNCore's target region: its own, else
+   its likely one) */
+static void tz_target_region(int li, char *out, size_t cap) {
+    char tag[TAG_MAX + 1];
+    db_copy(db32(IDB_LOCALES + (uint32_t)li * LOC_REC), tag, sizeof tag);
+    out[0] = 0;
+    itag t;
+    if (tag_from_text(tag, strlen(tag), &t)) return;
+    if (t.region[0]) { copyz(out, cap, t.region); return; }
+    char l2[9], s2[5], r2[4];
+    if (add_likely(t.lang, t.script, t.region, l2, s2, r2)) copyz(out, cap, r2);
+}
+/* units equal, ASCII letters' case aside (UnicodeString::caseCompare's verdict on CLDR's names) */
+static int units_case_eq(const uint16_t *a, uint32_t an, const uint16_t *b, uint32_t bn) {
+    if (an != bn) return 0;
+    for (uint32_t i = 0; i < an; i++) {
+        uint32_t x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return 0;
+    }
+    return 1;
+}
+/* a formatter's region format ({0} Time) or fallback format ({1} ({0})), as units */
+static uint32_t tz_format(int li, uint32_t which, uint16_t *buf, uint32_t cap) {
+    uint32_t n = it_fld_units(tzn_rec(li, RKEY(IDT_FMT, 0)), which, buf, cap);
+    if (n || which) return n;
+    buf[0] = '{';
+    buf[1] = '0';
+    buf[2] = '}';
+    return 3;
+}
+
+/* the specific name (TimeZoneFormat::formatSpecific): the zone's own of its time's type
+   (daylight where DST is in use), else its metazone's at the time */
+static void tz_specific(const dctx *c, const dfields *f, int is_long, vector<uint16_t> *out) {
+    int type = TZN_SS;
+    if (is_long) type = TZN_LS;
+    if (f->dst) type++;
+    uint16_t b[TZN_MAX];
+    uint32_t n = tz_zone_name(c->li, c->canon, type, b, TZN_MAX);
+    if (!n) n = tz_mz_name(c->li, tz_metazone(c->canon, f->t), type, b, TZN_MAX);
+    tz_put(out, b, n);
+}
+/* the generic location name (getGenericLocationName): the region format of the country's
+   name, where the zone is its country's (its only one, or its primary zone), else of the
+   exemplar city; none for a zone of no country */
+static void tz_location(const dctx *c, vector<uint16_t> *out) {
+    if (c->canon < 0) return;
+    char region[8];
+    tzc_region(c->canon, region, sizeof region);
+    if (!strcmp(region, "001")) return;
+    uint16_t b[TZN_MAX], p[64];
+    uint32_t n = 0;
+    if (tzc_flags(c->canon) & 2) n = region_name(c->li, region, 0, b, TZN_MAX);
+    else n = tz_city(c->li, c->canon, b, TZN_MAX);
+    vector<uint16_t> arg;
+    tz_put(&arg, b, n);
+    uint32_t pn = tz_format(c->li, 0, p, 64);
+    simple_format(p, pn, &arg, 0, 0, out);
+}
+/* the partial location name (getPartialLocationName): the fallback format of the
+   location (the country's name where the zone is the metazone's in its country, else
+   the exemplar city; the zone's name for a zone of no country nor city) and the
+   metazone's name */
+static void tz_partial(const dctx *c, int mz, const uint16_t *mzn, uint32_t mn, vector<uint16_t> *out) {
+    char region[8], name[64];
+    tzc_region(c->canon, region, sizeof region);
+    tzc_name(c->canon, name, sizeof name);
+    uint16_t b[TZN_MAX], p[64];
+    uint32_t n = 0;
+    vector<uint16_t> loc, mzv;
+    if (strcmp(region, "001")) {
+        if (tz_golden(mz, tz_region_code(region)) == c->canon) n = region_name(c->li, region, 0, b, TZN_MAX);
+        else n = tz_city(c->li, c->canon, b, TZN_MAX);
+        tz_put(&loc, b, n);
+    } else {
+        n = tz_city(c->li, c->canon, b, TZN_MAX);
+        if (n) tz_put(&loc, b, n);
+        else tz_put_ascii(&loc, name);
+    }
+    tz_put(&mzv, mzn, mn);
+    uint32_t pn = tz_format(c->li, 1, p, 64);
+    simple_format(p, pn, &loc, &mzv, 0, out);
+}
+/* the generic name (TZGNCore::getDisplayName, its long or short non-location format):
+   the zone's own, else its metazone's (its standard name where the zone keeps standard
+   time all around and that is not the generic one; its partial location name where the
+   metazone's zone in the locale's region keeps other offsets then), else the generic
+   location name; empty for none */
+static void tz_generic(const dctx *c, const dfields *f, int is_long, vector<uint16_t> *out) {
+    int gtype = TZN_SG, stype = TZN_SS;
+    if (is_long) { gtype = TZN_LG; stype = TZN_LS; }
+    uint16_t b[TZN_MAX];
+    uint32_t n = tz_zone_name(c->li, c->canon, gtype, b, TZN_MAX);
+    if (n) { tz_put(out, b, n); return; }
+    int mz = tz_metazone(c->canon, f->t);
+    if (mz >= 0) {
+        if (f->dst == 0 && !tz_dst_near((uint32_t)c->zone, f->t)) {
+            uint16_t g[TZN_MAX];
+            n = tz_zone_name(c->li, c->canon, stype, b, TZN_MAX);
+            if (!n) n = tz_mz_name(c->li, mz, stype, b, TZN_MAX);
+            if (n) {
+                uint32_t gn = tz_mz_name(c->li, mz, gtype, g, TZN_MAX);
+                if (!units_case_eq(b, n, g, gn)) { tz_put(out, b, n); return; }
+            }
+        }
+        n = tz_mz_name(c->li, mz, gtype, b, TZN_MAX);
+        if (n) {
+            int gc = tz_golden(mz, c->region);
+            if (gc >= 0 && gc != c->canon) {
+                int gz = tzc_zone(gc);
+                if (gz >= 0) {
+                    int raw1 = 0, dst1 = 0;
+                    tz_offsets_local((uint32_t)gz, (int64_t)f->t + (int64_t)(f->raw + f->dst) * 1000, &raw1, &dst1);
+                    if (f->raw != raw1 || f->dst != dst1) { tz_partial(c, mz, b, n, out); return; }
+                }
+            }
+            tz_put(out, b, n);
+            return;
+        }
+    }
+    tz_location(c, out);
+}
 
 /* DayPeriodRules of the locale's tag, truncated until CLDR has rules for it */
 static void dp_rules(dctx *c) {
@@ -4062,7 +4659,12 @@ static void dt_field(const dctx *c, uint32_t ch, int count, const dfields *f, in
         int is_long = count >= 4;
         if (ch == 'v' && count != 1 && count != 4) break;
         if (ch == 'O' && count != 1 && count != 4) break;
-        if (ch == 'z' || ch == 'v') {
+        if ((ch == 'z' || ch == 'v') && c->tzkind == TZK_ZONE) {
+            vector<uint16_t> nm;
+            if (ch == 'z') tz_specific(c, f, is_long, &nm);
+            else tz_generic(c, f, is_long, &nm);
+            if (len(nm)) { put_u(tx, ty, data(nm), (uint32_t)len(nm), DP_TZ); break; }
+        } else if (ch == 'z' || ch == 'v') {
             uint32_t rec = rec_get(c->li, RKEY(IDK_TZ, 0));
             uint16_t b[96];
             uint32_t n = 0;
@@ -4075,7 +4677,7 @@ static void dt_field(const dctx *c, uint32_t ch, int count, const dfields *f, in
             }
             if (n) { put_u(tx, ty, b, n, DP_TZ); break; }
         }
-        tz_gmt(c->li, c->nsi, c->offset, !is_long, tx, ty, DP_TZ);
+        tz_gmt(c->li, c->nsi, f->raw + f->dst, !is_long, tx, ty, DP_TZ);
         break;
     }
     default: break;
@@ -4114,7 +4716,7 @@ static void dt_render(const dctx *c, const uint16_t *pat, uint32_t pn, const dfi
 
 /* the slots */
 enum { DFS_LOCALE, DFS_NU, DFS_NSI, DFS_TZ, DFS_TZKIND, DFS_OFFSET, DFS_HC, DFS_DATESTYLE, DFS_TIMESTYLE, DFS_PATTERN,
-       DFS_DATALOC, DFS_BOUND, DFS_HOURCHAR, DFS_N };
+       DFS_DATALOC, DFS_BOUND, DFS_HOURCHAR, DFS_ZONE, DFS_TZCANON, DFS_TZREGION, DFS_N };
 enum { HC_H11, HC_H12, HC_H23, HC_H24 };
 static const char *const hc_names[] = { "h11", "h12", "h23", "h24", 0 };
 static const char hc_letters[] = "KhHk";
@@ -4314,13 +4916,13 @@ static jv dtf_new(js_vm *vm, jv locales, jv options, jv newt, int required, int 
     /* the time zone */
     jv tzv = js_get(vm, opts, js_atom_ascii(vm, "timeZone"));
     if (vm->throwing) return JV_HOLE;
-    int tzkind = TZK_UTC, offset = 0;
+    int tzkind = TZK_UTC, offset = 0, tzzone = -1, tzcanon = -1;
     char tzname[64];
     copyz(tzname, sizeof tzname, "UTC");
     if (tzv != JV_UNDEF) {
         uint32_t ts = js_to_string(vm, tzv);
         if (!ts) return JV_HOLE;
-        if (!tz_parse(vm, ts, &tzkind, &offset, tzname, sizeof tzname)) {
+        if (!tz_parse(vm, ts, &tzkind, &offset, &tzzone, &tzcanon, tzname, sizeof tzname)) {
             vector<char> m;
             const char *a = "Invalid time zone specified: ";
             append_range(m, a, strlen(a));
@@ -4412,6 +5014,15 @@ static jv dtf_new(js_vm *vm, jv locales, jv options, jv newt, int required, int 
     slot_set(vm, o, DFS_TZ, jv_str(js_str_ascii(vm, tzname)));
     slot_set(vm, o, DFS_TZKIND, jv_num(tzkind));
     slot_set(vm, o, DFS_OFFSET, jv_num(offset));
+    slot_set(vm, o, DFS_ZONE, jv_num(tzzone));
+    slot_set(vm, o, DFS_TZCANON, jv_num(tzcanon));
+    int tzregion = 0;
+    if (tzkind == TZK_ZONE) {
+        char rg[8];
+        tz_target_region(li, rg, sizeof rg);
+        tzregion = tz_region_code(rg);
+    }
+    slot_set(vm, o, DFS_TZREGION, jv_num(tzregion));
     slot_set(vm, o, DFS_HC, jv_num(dtf_hc));
     slot_set(vm, o, DFS_DATESTYLE, jv_num(ds));
     slot_set(vm, o, DFS_TIMESTYLE, jv_num(ts));
@@ -4434,6 +5045,14 @@ static void dtf_ctx(js_vm *vm, uint32_t o, dctx *c) {
     c->nsi = slot_int(vm, o, DFS_NSI);
     c->tzkind = slot_int(vm, o, DFS_TZKIND);
     c->offset = slot_int(vm, o, DFS_OFFSET);
+    c->zone = -1;
+    c->canon = -1;
+    c->region = 0;
+    if (c->tzkind == TZK_ZONE) {
+        c->zone = slot_int(vm, o, DFS_ZONE);
+        c->canon = slot_int(vm, o, DFS_TZCANON);
+        c->region = slot_int(vm, o, DFS_TZREGION);
+    }
     dp_rules(c);
 }
 
@@ -4525,7 +5144,7 @@ static void dtf_render(js_vm *vm, uint32_t o, double t, vector<uint16_t> *tx, ve
     dctx c;
     dtf_ctx(vm, o, &c);
     dfields f;
-    date_fields(t, c.offset, &f);
+    dtf_fields(&c, t, &f);
     vector<uint16_t> pat;
     uint32_t pn = dtf_pattern(vm, o, &pat);
     dt_render(&c, data(pat), pn, &f, tx, ty);
@@ -5205,8 +5824,8 @@ static jv dtf_format_range(js_vm *vm, uint32_t o, jv x, jv y, int to_parts) {
     difmt d;
     di_init(&g, &d, c.li, data(sk), (uint32_t)len(sk));
     dfields from, to;
-    date_fields(a, c.offset, &from);
-    date_fields(b, c.offset, &to);
+    dtf_fields(&c, a, &from);
+    dtf_fields(&c, b, &to);
     vector<uint16_t> tx;
     vector<uint8_t> ty;
     int first;
@@ -6812,6 +7431,70 @@ static jv this_of(js_vm *vm, jv thisv, uint32_t kind, const char *method) {
     return thisv;
 }
 
+/* Intl.supportedValuesOf (ECMA-402 8.3.2, as V8 has it): ICU's calendars, collations
+   (its types but standard and search) and ISO currencies (ucurr's common, not deprecated),
+   the numbering systems with digits, the time zones of a country (ICU's canonical
+   location zones, by name), the sanctioned units */
+static jv supported_values_of(js_vm *vm, jv key) {
+    uint32_t ks = js_to_string(vm, key);
+    if (!ks) return JV_HOLE;
+    char k[32];
+    int kn = str_ascii(vm, ks, k, sizeof k);
+    static const char *const calendars[] = { "buddhist", "chinese", "coptic", "dangi", "ethioaa", "ethiopic", "gregory",
+        "hebrew", "indian", "islamic", "islamic-civil", "islamic-rgsa", "islamic-tbla", "islamic-umalqura", "iso8601",
+        "japanese", "persian", "roc", 0 };
+    static const char *const collations[] = { "compat", "dict", "emoji", "eor", "phonebk", "phonetic", "pinyin", "searchjl",
+        "stroke", "trad", "unihan", "zhuyin", 0 };
+    static const char currencies[] =
+        "AEDAFNALLAMDANGAOAARSAUDAWGAZNBAMBBDBDTBGNBHDBIFBMDBNDBOBBRLBSDBTNBWPBYNBZDCADCDFCHFCLPCNYCOPCRCCUCCUPCVECZKDJFDKKDOP"
+        "DZDEGPERNETBEURFJDFKPGBPGELGHSGIPGMDGNFGTQGYDHKDHNLHRKHTGHUFIDRILSINRIQDIRRISKJMDJODJPYKESKGSKHRKMFKPWKRWKWDKYDKZT"
+        "LAKLBPLKRLRDLSLLYDMADMDLMGAMKDMMKMNTMOPMRUMURMVRMWKMXNMYRMZNNADNGNNIONOKNPRNZDOMRPABPENPGKPHPPKRPLNPYGQARRONRSDRUB"
+        "RWFSARSBDSCRSDGSEKSGDSHPSLESLLSOSSRDSSPSTNSVCSYPSZLTHBTJSTMTTNDTOPTRYTTDTWDTZSUAHUGXUSDUYUUZSVESVNDVUVWSTXAFXCDXCG"
+        "XDRXOFXPFXSUYERZARZMWZWGZWL";
+    uint32_t out = js_array_new(vm, 0);
+    const char *const *list = 0;
+    if (kn > 0 && !strcmp(k, "calendar")) list = calendars;
+    else if (kn > 0 && !strcmp(k, "collation")) list = collations;
+    if (list) {
+        for (int i = 0; list[i]; i++) js_array_push(vm, out, jv_str(js_str_ascii(vm, list[i])));
+        return jv_obj(out);
+    }
+    if (kn > 0 && !strcmp(k, "currency")) {
+        for (size_t i = 0; i + 3 <= sizeof currencies - 1; i += 3) {
+            char c[4];
+            copyn(c, sizeof c, currencies + i, 3);
+            js_array_push(vm, out, jv_str(js_str_ascii(vm, c)));
+        }
+        return jv_obj(out);
+    }
+    if (kn > 0 && !strcmp(k, "numberingSystem")) {
+        for (uint32_t i = 0; i < IDB_NUMBERING_N; i++) js_array_push(vm, out, jv_str(db_jstr(vm, db32(IDB_NUMBERING + i * 8))));
+        return jv_obj(out);
+    }
+    if (kn > 0 && !strcmp(k, "timeZone")) {
+        for (int i = 0; i < (int)IDT_ZONES_N; i++) {
+            if (!(tzc_flags(i) & 1)) continue;
+            char name[64];
+            tzc_name(i, name, sizeof name);
+            js_array_push(vm, out, jv_str(js_str_ascii(vm, name)));
+        }
+        return jv_obj(out);
+    }
+    if (kn > 0 && !strcmp(k, "unit")) {
+        for (uint32_t i = 0; i < IDB_UNITS_N; i++) {
+            char u[48];
+            db_copy(db32(IDB_UNITS + i * 8), u, sizeof u);
+            if (!strstr(u, "-per-")) js_array_push(vm, out, jv_str(js_str_ascii(vm, u)));
+        }
+        return jv_obj(out);
+    }
+    vector<char> m;
+    const char *a = "Invalid key : ";
+    append_range(m, a, strlen(a));
+    js_str_to_utf8(vm, ks, &m);
+    return js_throw(vm, jv_obj(js_error_new(vm, vm->range_error_proto, js_str_utf8(vm, data(m), len(m)))));
+}
+
 /* ---- the natives ---- */
 
 jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
@@ -6821,6 +7504,7 @@ jv js_intl_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args,
         uint32_t l = canonical_list(vm, a0);
         return l ? jv_obj(l) : JV_HOLE;
     }
+    case IN_SUPPORTEDVALUESOF: return supported_values_of(vm, a0);
     case IN_SUPPORTED: return supported_locales(vm, (uint32_t)jv_dbl(vm->objs[jv_idx(callee)].x), a0, a1);
     case IN_LOCALE: return locale_ctor(vm, a0, a1, newt);
     case IN_LOC_TOSTRING: {
@@ -7028,6 +7712,7 @@ void js_intl_init(js_vm *vm, uint32_t first) {
     js_define(vm, vm->global, js_atom_ascii(vm, "Intl"), jv_obj(intl), JS_SHAPE_HIDDEN);
     tag_of(vm, intl, "Intl");
     method(vm, intl, first, IN_GETCANONICALLOCALES, "getCanonicalLocales", 1);
+    method(vm, intl, first, IN_SUPPORTEDVALUESOF, "supportedValuesOf", 1);
     vm->intl_cache = 0;
 
     intl_ctor(vm, intl, first, IN_LOCALE, JIK_LOCALE, "Locale", 1, 0);

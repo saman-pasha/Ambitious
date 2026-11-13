@@ -16,7 +16,10 @@ SHELL := /bin/sh
 AMB_ROOT := $(CURDIR)
 export AMB_ROOT
 ENV := . $(AMB_ROOT)/toolchain/env.sh &&
-CAP := timeout 300
+# a compile cut off at 15 minutes: a toolchain fault, not the machine's load (src/js/intl.c takes
+# about 250 s when four builds share the box); one cut off or failed leaves no object behind
+CAP := timeout 900
+.DELETE_ON_ERROR:
 AMB_CC := $(ENV) $(CAP) "$$AMB_CICILANG" $$AMB_CICILANG_FLAGS
 MODULES := $(basename $(notdir $(wildcard contracts/*.pl)))
 GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.pl prolog/amb/gen_schema.pl
@@ -24,7 +27,7 @@ GEN := include/amb.pl include/amb.pl.h prolog/amb/gen_c.pl prolog/amb/contract.p
 # the units of the engine: the runtime, then each module's own; the tests link
 # these, and the command adds the shell's own
 UNITS := rt/amb_rt rt/amb_proc dom/dom html/tokenizer html/tree html/encoding html/forms css/css layout/layout paint/font paint/shape paint/brotli paint/image paint/webp paint/paint paint/svg net/url net/dict net/zstd net/hpack net/h2 net/net a11y/a11y \
-         js/vm js/compile js/builtins js/regexp js/normalize js/proxy js/typed js/bigint js/intl js/intl_data js/module js/gc script/script script/view script/fetch script/input script/observe \
+         js/vm js/compile js/builtins js/regexp js/normalize js/proxy js/typed js/bigint js/intl js/intl_data js/intl_tz js/tz_data js/module js/gc script/script script/view script/fetch script/input script/observe \
          script/custom script/window script/frames shell/frame
 OBJS := $(UNITS:%=build/obj/%.o)
 # the system libraries the units link with: OpenSSL's, for https: (src/net/net.c);
