@@ -6123,7 +6123,8 @@ static int css_pseudo_holds(const dom_document *d, uint32_t x, const css_mstate 
     if (css_eq_ci(ps, pn, "link") || css_eq_ci(ps, pn, "any-link"))
         return (css_is_named(d, x, "a") || css_is_named(d, x, "area") || css_is_svg_named(d, x, "a")) && css_attr_of(d, x, "href", 4);
     if (css_eq_ci(ps, pn, "checked"))
-        return (css_is_named(d, x, "input") && css_attr_of(d, x, "checked", 7)) || (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
+        return (css_is_named(d, x, "input") && dom_checkedness(d, x, css_attr_of(d, x, "checked", 7) != 0)) ||
+               (css_is_named(d, x, "option") && css_attr_of(d, x, "selected", 8));
     if (css_eq_ci(ps, pn, "disabled")) return css_disabled(d, x);
     if (css_eq_ci(ps, pn, "enabled")) return css_form_control(d, x) && !css_disabled(d, x);
     if (css_eq_ci(ps, pn, "scope")) return ms->scope ? x == ms->scope : d->node[x].parent == 1;

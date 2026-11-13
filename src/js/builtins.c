@@ -5150,7 +5150,15 @@ void js_builtins_init(js_vm *vm) {
     vm->async_iterator_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->async_generator_proto = js_obj_new(vm, JK_PLAIN, vm->async_iterator_proto);
     vm->promise_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
-    vm->global = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    /* the global object; a host's above an object of the host's (a JK_HOST of kind 0),
+       whose properties the host answers (src/script/custom.c: the window's HTML element
+       interfaces, made when a script first names one) */
+    uint32_t gp = vm->object_proto;
+    if (vm->host) {
+        gp = js_obj_new(vm, JK_HOST, vm->object_proto);
+        vm->objs[gp].c = 0;
+    }
+    vm->global = js_obj_new(vm, JK_PLAIN, gp);
     vm->global_lex = js_obj_new(vm, JK_PLAIN, 0);
     uint32_t g = vm->global;
     defv(vm, g, "globalThis", jv_obj(g));

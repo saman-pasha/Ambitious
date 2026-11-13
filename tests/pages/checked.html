@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Checkedness</title>
+<!-- A check box's and a radio button's checkedness (HTML 4.10.5.4; src/html/forms.c, the
+     DOM's state): the parse's radio groups (each one's last checked button), the checked IDL
+     attribute and its dirty flag, defaultChecked, the checked attribute followed until the
+     flag is set, a group's other button unchecked (by the IDL attribute, an insertion, a
+     name, type or form attribute that moves it), a click's and a cancelled click's, a form's
+     reset, a clone, and what reads the state: :checked, getComputedStyle, FormData; then a
+     user's clicks (checked.actions). The console must be Chromium's line for line
+     (checked.chromium, written by tools/bench/script-references.sh). Every control's box is
+     declared. -->
+<style> body { margin: 0; } input, label, button { display: block; margin: 0; padding: 0; border: 0; width: 200px; height: 20px; }
+  input:checked { outline: 2px solid red; } </style>
+</head>
+<body>
+<form id="f">
+<input type="radio" name="g" id="r1" value="one" checked>
+<input type="radio" name="g" id="r2" value="two" checked>
+<input type="radio" name="g" id="r3" value="three">
+<input type="radio" name="k" id="k1" checked>
+<input type="radio" name="k" id="k2">
+<input type="radio" name="K" id="k3" checked>
+<input type="radio" name="m" id="m1" checked>
+<input type="radio" name="m" id="m2" checked>
+<input type="radio" name="n" id="n1" checked>
+<input type="radio" name="n" id="n2">
+<input type="radio" id="u1" checked>
+<input type="radio" id="u2" checked>
+<input type="checkbox" name="c1" id="c1">
+<input type="checkbox" name="c2" id="c2" checked>
+<input type="checkbox" name="c3" id="c3">
+<label id="l3" for="c3">c3</label>
+</form>
+<input type="radio" name="g" id="o1" form="f">
+<input type="radio" name="g" id="o2" checked>
+<input type="radio" name="g" id="o3" checked>
+<button id="show" type="button">show</button>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var ids = ['r1', 'r2', 'r3', 'k1', 'k2', 'k3', 'm1', 'm2', 'n1', 'n2', 'u1', 'u2', 'c1', 'c2', 'c3', 'o1', 'o2', 'o3'];
+  function c(id) { var e = document.getElementById(id); return e ? (e.checked ? 1 : 0) : '-'; }
+  function all() { return ids.map(function (id) { return id + '=' + c(id); }).join(' '); }
+  function full(id) {
+    var e = document.getElementById(id);
+    return [e.checked, e.defaultChecked, e.hasAttribute('checked'), e.matches(':checked'), getComputedStyle(e).outlineStyle].join('/');
+  }
+  function sent() { return JSON.stringify(Array.from(new FormData(document.getElementById('f')).entries())); }
+  p('parsed', all());
+  p('r1 and r2', full('r1') + ' ' + full('r2'));
+  p('the form data', sent());
+  /* the IDL attribute sets the flag: the attribute is then no longer followed */
+  var c1 = document.getElementById('c1');
+  c1.checked = true;
+  p('c1 set', full('c1'));
+  c1.setAttribute('checked', '');
+  c1.removeAttribute('checked');
+  p('c1 attribute after', full('c1'));
+  var c2 = document.getElementById('c2');
+  c2.removeAttribute('checked');
+  p('c2 attribute removed', full('c2'));
+  c2.setAttribute('checked', 'x');
+  p('c2 attribute added', full('c2'));
+  c2.defaultChecked = false;
+  p('c2 defaultChecked false', full('c2'));
+  c2.defaultChecked = true;
+  /* a group's unchecked button has its flag set too */
+  var r1 = document.getElementById('r1');
+  r1.removeAttribute('checked');
+  r1.setAttribute('checked', '');
+  p('r1 attribute again', all());
+  document.getElementById('k2').checked = true;
+  p('k2 checked', all());
+  document.getElementById('r3').checked = true;
+  p('r3 checked', all());
+  document.getElementById('r3').checked = false;
+  p('r3 unchecked', all());
+  document.getElementById('o1').checked = true;
+  p('o1 (its form attribute) checked', all());
+  var n2 = document.getElementById('n2');
+  n2.setAttribute('name', 'm');
+  n2.checked = true;
+  p('n2 named m, checked', all());
+  n2.setAttribute('name', 'n');
+  p('n2 named n again', all());
+  var t = document.createElement('input');
+  t.name = 'n';
+  t.checked = true;
+  document.getElementById('f').appendChild(t);
+  p('a text input checked, appended', all() + ' ' + t.checked);
+  t.type = 'radio';
+  p('made a radio', all() + ' ' + t.checked);
+  t.remove();
+  /* reset: each control's checkedness its attribute's, its flag cleared */
+  document.getElementById('f').reset();
+  p('reset', all());
+  var m1 = document.getElementById('m1');
+  m1.removeAttribute('checked');
+  m1.setAttribute('checked', '');
+  p('m1 attribute again after the reset', all());
+  /* made, cloned, inserted */
+  var r = document.createElement('input');
+  r.type = 'radio';
+  r.name = 'g';
+  r.checked = true;
+  var cl = r.cloneNode();
+  p('made and cloned', r.checked + ' ' + r.defaultChecked + ' ' + cl.checked + ' ' + cl.defaultChecked);
+  document.getElementById('f').appendChild(r);
+  p('inserted', all() + ' ' + r.checked);
+  var d = document.createElement('div');
+  d.innerHTML = '<input type=radio name=g checked id=i1><input type=radio name=g checked id=i2>';
+  p('innerHTML, detached', d.firstChild.checked + ' ' + d.lastChild.checked);
+  document.getElementById('f').appendChild(d);
+  p('innerHTML, inserted', d.firstChild.checked + ' ' + d.lastChild.checked + ' ' + r.checked);
+  d.remove();
+  r.remove();
+  /* a script's click: the box's state before its listeners, back when one cancels it; a
+     radio's group's old button checked again */
+  var c3 = document.getElementById('c3');
+  c3.addEventListener('click', function (e) { p('c3 in its click', c3.checked); if (c3.dataset.cancel) e.preventDefault(); });
+  c3.addEventListener('change', function () { p('c3 change', c3.checked); });
+  c3.click();
+  p('c3 clicked', full('c3'));
+  c3.dataset.cancel = '1';
+  c3.click();
+  p('c3 clicked, cancelled', full('c3'));
+  c3.removeAttribute('data-cancel');
+  var r3 = document.getElementById('r3');
+  r3.addEventListener('click', function (e) { p('r3 in its click', all()); e.preventDefault(); });
+  r3.click();
+  p('r3 clicked, cancelled', all());
+  p('the form data', sent());
+  document.getElementById('show').addEventListener('click', function () {
+    p('after the user', all());
+    p('c1, c3', full('c1') + ' ' + full('c3'));
+    p('the form data', sent());
+  });
+</script>
+</body>
+</html>

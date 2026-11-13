@@ -1,0 +1,25 @@
+b pointerdown, moved
+b mousedown 150 70 27 17 150 70 150 70 150 70
+b mouseup 150 70
+b click b 150 70
+b later 150 70 27 -133
+c click 150 320 48 18
+c after its move 150 48
+d click SPAN 460 70 50 20
+k click true 410 310 -30 10
+e mousedown e 150 420
+e pointerout e 150 420
+e pointerover HTML 150 420
+e mouseout e 150 420
+e mouseover HTML 150 420
+e pointerup HTML 150 420
+e mouseup HTML 150 420
+e click HTML 150 420
+f mousedown f 150 520
+f pointerout f 150 520
+f pointerover HTML 150 520
+f mouseout f 150 520
+f mouseover HTML 150 520
+f pointerup HTML 150 520
+f mouseup HTML 150 520
+f click HTML 150 520

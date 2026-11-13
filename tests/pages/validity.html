@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Constraint validation</title>
+<!-- Constraint validation (HTML 4.10.20; src/html/forms.c, src/script/input.c): each control's
+     validity flags, willValidate and validationMessage (Chromium's English texts), its custom
+     validity, checkValidity() and reportValidity() on a control and on a form, the invalid
+     events, the focus a report moves and Chromium's console errors for what cannot take it;
+     then, after a user's typing (validity.actions: a field over its maxlength edited, fields
+     under their minlength, a number field given what is no number, a field at its maxlength
+     typed into), too long, too short and bad input, which hold only once the user's edit
+     changed the value. The console must be Chromium's line for line (validity.chromium,
+     written by tools/bench/script-references.sh). Every control's box is declared. -->
+<style> body { margin: 0; } input, select, textarea, button, fieldset, output { display: block; margin: 0; padding: 0; border: 0; width: 200px; height: 20px; } </style>
+</head>
+<body>
+<form id="f">
+<input id="t1" name="t1" required>
+<input id="t2" required value="x">
+<input id="ro" required readonly>
+<input id="dis" required disabled>
+<input id="hid" type="hidden" required>
+<input id="e1" type="email" value="abc">
+<input id="e2" type="email" value="a@b">
+<input id="e3" type="email" multiple value="a@b, c">
+<input id="e4" type="email" value="a@">
+<input id="e5" type="email" value="@b">
+<input id="e6" type="email" value="a b@c">
+<input id="e7" type="email" value="a@b..c">
+<input id="e8" type="email" value="a@-b">
+<input id="e9" type="email" value="a@b_c">
+<input id="e10" type="email" value="a@@b">
+<input id="e11" type="email" multiple value="a@b,,c@d">
+<input id="e12" type="email" multiple value="a@-b">
+<input id="e13" type="email" value=" a@b.c ">
+<input id="u1" type="url" value="abc">
+<input id="u2" type="url" value=" http://x ">
+<input id="u3" type="url" value="http://">
+<input id="p1" pattern="[a-z]+" value="ABC">
+<input id="p2" pattern="[a-z]+" value="abc" title="lower case">
+<input id="p3" type="email" pattern=".*@x" value="a@b">
+<input id="n1" type="number" min="5" value="3">
+<input id="n2" type="number" max="5" value="7">
+<input id="n3" type="number" step="2" value="3">
+<input id="n4" type="number" min="1" step="2" value="4">
+<input id="n5" type="number" min="0" max="15" step="10" value="12">
+<input id="n6" type="number" min="1000" value="5">
+<input id="n7" type="number" max="0.5" value="0.75">
+<input id="n8" type="number" min="1e21" value="5">
+<input id="n9" type="number" step="any" value="1.23456">
+<input id="d1" type="date" min="2020-01-02" value="2020-01-01">
+<input id="d2" type="date" max="2020-01-02" value="2020-01-05">
+<input id="d3" type="date" step="7" min="2020-01-01" value="2020-01-03">
+<input id="tm1" type="time" min="10:00" value="09:00">
+<input id="tm2" type="time" min="10:00:30" value="09:00">
+<input id="tm3" type="time" max="13:05" value="14:00">
+<input id="m1" type="month" min="2020-02" value="2020-01">
+<input id="w1" type="week" max="2020-W02" value="2020-W05">
+<input id="dt1" type="datetime-local" min="2020-01-01T10:00" value="2020-01-01T09:00">
+<input id="r1" type="range" min="0" max="10" value="20">
+<input id="c1" type="checkbox" name="c1" required>
+<input id="c2" type="checkbox" required checked>
+<input id="rd1" type="radio" name="g" required>
+<input id="rd2" type="radio" name="g">
+<input id="rd3" type="radio" required>
+<input id="f1" type="file" required>
+<input id="f2" type="file" required multiple>
+<select id="s1" required><option value="">--</option><option>a</option></select>
+<select id="s2" required><option>a</option></select>
+<select id="s3" required multiple><option>a</option></select>
+<select id="s4" required><option value="" disabled>x</option><option>a</option></select>
+<textarea id="ta1" required></textarea>
+<textarea id="ta2" maxlength="2">abcd</textarea>
+<button id="b1">b</button>
+<button id="b2" type="button">b</button>
+<input id="sub" type="submit">
+<input id="img" type="image">
+<fieldset id="fs1"><input id="fs1i" required></fieldset>
+<fieldset id="fs2" disabled><legend><input id="leg" required></legend><input id="notleg" required></fieldset>
+<datalist id="dl"><input id="indl" required></datalist>
+<output id="out">o</output>
+</form>
+<form id="g">
+<input id="ga" name="ga" value="ok">
+<input id="gb" name="gb" required>
+<input id="gc" name="gc" required style="display: none">
+<input id="gd" name="gd" type="email" value="x">
+<input id="ge" required style="visibility: hidden">
+</form>
+<form id="h"><input id="long" maxlength="3" value="abcdef"><input id="short" minlength="4"><input id="short1" minlength="2"><input id="num" type="number"><input id="cap" maxlength="2"><textarea id="ta3" maxlength="2">abcd</textarea><button id="show" type="button">show</button></form>
+<script>
+  function p(name, v) { console.log(name + ': ' + v); }
+  var flags = ['valueMissing', 'typeMismatch', 'patternMismatch', 'tooLong', 'tooShort', 'rangeUnderflow', 'rangeOverflow', 'stepMismatch', 'badInput', 'customError', 'valid'];
+  function state(el) {
+    var v = el.validity;
+    return el.willValidate + ' [' + flags.filter(function (k) { return v[k]; }).join(' ') + '] ' + JSON.stringify(el.validationMessage);
+  }
+  var f = document.getElementById('f');
+  for (var i = 0; i < f.elements.length; i++) {
+    var el = f.elements[i];
+    p(el.id, state(el) + (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? ' ' + JSON.stringify(el.value) : ''));
+  }
+  ['leg', 'notleg', 'indl'].forEach(function (id) { p(id, state(document.getElementById(id))); });
+  /* custom validity: the message wins; cleared by the empty string; on what is no candidate */
+  var t1 = document.getElementById('t1');
+  t1.setCustomValidity('custom one');
+  p('custom', state(t1));
+  t1.value = 'filled';
+  p('filled', state(t1));
+  t1.setCustomValidity('');
+  p('cleared', state(t1));
+  var v = t1.validity;
+  t1.value = '';
+  p('live', v.valueMissing + ' ' + (v === t1.validity) + ' ' + Object.prototype.toString.call(v) + ' ' + (v instanceof ValidityState));
+  p('ValidityState', typeof ValidityState + ' ' + Object.getOwnPropertyNames(ValidityState.prototype).join(','));
+  try { t1.setCustomValidity(); } catch (e) { p('no argument', e.name + ': ' + e.message); }
+  t1.setCustomValidity(null);
+  p('null', JSON.stringify(t1.validationMessage) + ' ' + t1.validity.customError);
+  t1.setCustomValidity('');
+  var fs1 = document.getElementById('fs1');
+  fs1.setCustomValidity('fieldset message');
+  p('fieldset', state(fs1) + ' ' + fs1.checkValidity());
+  var b1 = document.getElementById('b1');
+  b1.setCustomValidity('button message');
+  p('button', state(b1) + ' ' + b1.checkValidity());
+  b1.setCustomValidity('');
+  fs1.setCustomValidity('');
+  /* checkValidity: an invalid event a candidate that suffers fires, not bubbling, cancelable */
+  var seen = [];
+  f.addEventListener('invalid', function (e) { seen.push(e.target.id); }, true);
+  t1.addEventListener('invalid', function (e) { p('invalid', e.type + ' ' + e.bubbles + ' ' + e.cancelable + ' ' + e.isTrusted + ' ' + e.eventPhase + ' ' + Object.prototype.toString.call(e)); });
+  p('t1.checkValidity', t1.checkValidity());
+  p('ro.checkValidity', document.getElementById('ro').checkValidity());
+  seen = [];
+  p('f.checkValidity', f.checkValidity() + ' ' + seen.join(','));
+  var det = document.createElement('input');
+  det.required = true;
+  p('detached', state(det) + ' ' + det.checkValidity());
+  /* reportValidity: the control focused unless its event was cancelled; a form's first
+     uncancelled focusable one, a console error for each that cannot take focus */
+  var g = document.getElementById('g');
+  ['ga', 'gb', 'gc', 'gd', 'ge'].forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener('invalid', function (e) { p('invalid at', id); if (g.dataset.cancel === id) e.preventDefault(); });
+    el.addEventListener('focus', function () { p('focus', id); });
+  });
+  p('gc.reportValidity', document.getElementById('gc').reportValidity() + ' ' + document.activeElement.tagName);
+  p('gb.reportValidity', document.getElementById('gb').reportValidity() + ' ' + document.activeElement.id);
+  document.getElementById('gb').blur();
+  p('g.reportValidity', g.reportValidity() + ' ' + document.activeElement.id);
+  document.getElementById('gb').blur();
+  g.dataset.cancel = 'gb';
+  p('g.reportValidity, gb cancelled', g.reportValidity() + ' ' + document.activeElement.id);
+  document.getElementById('gd').blur();
+  /* the user's edits (validity.actions), then each field's state */
+  var h = document.getElementById('h');
+  ['num', 'cap'].forEach(function (id) {
+    var el = document.getElementById(id);
+    ['beforeinput', 'input'].forEach(function (t) { el.addEventListener(t, function (e) { p(id + ' ' + t, JSON.stringify(e.data) + ' ' + JSON.stringify(el.value) + ' ' + el.validity.badInput); }); });
+  });
+  document.getElementById('show').addEventListener('click', function () {
+    ['long', 'short', 'short1', 'num', 'cap', 'ta3'].forEach(function (id) { var el = document.getElementById(id); p('typed ' + id, state(el) + ' ' + JSON.stringify(el.value)); });
+    var l = document.getElementById('long');
+    l.value = 'abcdefg';
+    p('set by a script', state(l));
+    var n = document.getElementById('num');
+    n.value = '7';
+    p('set by a script', state(n));
+  });
+</script>
+</body>
+</html>

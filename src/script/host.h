@@ -12,15 +12,16 @@
 #ifndef AMB_SCRIPT_HOST_H
 #define AMB_SCRIPT_HOST_H
 
-/* a host object's kind, in its c slot */
+/* a host object's kind, in its c slot (0: the global's prototype, which the engine makes for
+   a VM with a host, src/js/builtins.c) */
 enum { HK_NODE = 1, HK_CLASSLIST, HK_STYLE, HK_DATASET, HK_EVENT, HK_LIST, HK_COMPUTED, HK_RESPONSE, HK_REQUEST, HK_HEADERS,
-       HK_XHR, HK_FORMDATA, HK_OBSERVER, HK_STORAGE, HK_MQL };
+       HK_XHR, HK_FORMDATA, HK_OBSERVER, HK_STORAGE, HK_MQL, HK_VALIDITY, HK_INTERNALS };
 /* its prototypes, in the host's protos */
 enum { HP_NODE, HP_ELEMENT, HP_CHARDATA, HP_DOCUMENT, HP_CLASSLIST, HP_STYLE, HP_DATASET, HP_EVENT, HP_NODELIST,
        HP_HTMLCOLLECTION, HP_DOMRECT, HP_RECTLIST, HP_RESPONSE, HP_REQUEST, HP_HEADERS, HP_XHR, HP_PROGRESS, HP_UIEVENT,
        HP_MOUSEEVENT, HP_POINTEREVENT, HP_KEYBOARDEVENT, HP_FOCUSEVENT, HP_INPUTEVENT, HP_SUBMITEVENT, HP_FORMDATAEVENT,
        HP_POPSTATEEVENT, HP_HASHCHANGEEVENT, HP_BEFOREUNLOADEVENT, HP_FORMDATA, HP_MUTATIONOBSERVER, HP_MUTATIONRECORD, HP_SHADOWROOT,
-       HP_STORAGE, HP_STORAGEEVENT, HP_MEDIAQUERYLIST, HP_N };
+       HP_STORAGE, HP_STORAGEEVENT, HP_MEDIAQUERYLIST, HP_VALIDITYSTATE, HP_INTERNALS, HP_CUSTOMSTATESET, HP_N };
 
 /* the natives' numbers: script.c's from JS_HOST_NATIVES (1000), fetch.c's from SH_FETCH_FIRST,
    input.c's from SH_INPUT_FIRST, observe.c's from SH_OBSERVE_FIRST, custom.c's from
@@ -42,6 +43,7 @@ enum { SH_FETCH_FIRST = 1400, SH_FETCH_END = 1500, SH_INPUT_FIRST = 1500, SH_INP
 #define EV_NOPATH 128u    /* reaches its target alone: mouseenter, pointerleave ... */
 #define EV_COMPOSED 256u  /* passes out of a shadow tree: a user's pointer, keys, focus, input */
 #define EV_LAZYPOINT 512u /* a user's mouse event whose coordinates are found when first read */
+#define EV_LAZYOFFSET 1024u /* ... whose offsets (offsetX, offsetY) are found when first read */
 
 /* an event's target that is no node and not the window: an object of the engine's (an
    XMLHttpRequest), its index with this bit */
@@ -136,9 +138,24 @@ jv script_click_event(js_vm *vm, uint32_t trusted);
 jv script_click_copy(js_vm *vm, jv ev);
 /* an element's form owner (its form attribute's form, or its nearest form), 0 when none */
 uint32_t script_form_owner(const dom_document *d, uint32_t x);
-/* a user's mouse event's coordinate (EV_LAZYPOINT), its point found now: handled when the
-   name is one of them */
+/* a user's mouse event's coordinate (EV_LAZYPOINT) or offset (EV_LAZYOFFSET), its point or
+   its offsets found now: handled when the name is one of them */
 jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled);
+/* the document copied, as a user's click began, before the first change since (a script's
+   call or set, the host's own): called while the host's pt_armed is set */
+void script_click_keep(js_vm *vm);
+/* constraint validation (HTML 4.10.20): x is a listed element (button, fieldset, input,
+   object, output, select, textarea); its ValidityState object (one an element, its flags
+   read live); its validationMessage */
+int script_listed(const dom_document *d, uint32_t x);
+/* a beforeunload handler's return value: one but null or undefined cancels its event and,
+   while its returnValue is empty, is it */
+void script_unload_returned(js_vm *vm, jv ev, jv r);
+/* a control's checkValidity() (report 0) or reportValidity() (1): its invalid event when it is
+   a candidate that suffers, a report's focus; whether it is valid */
+jv script_control_validity(js_vm *vm, uint32_t x, int report);
+jv script_validity_object(js_vm *vm, uint32_t x);
+jv script_validation_message(js_vm *vm, uint32_t x);
 /* ---- observe.c's: MutationObserver ---- */
 void script_observe_setup(js_vm *vm);
 jv script_observe_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, uint32_t argc, int *handled);
@@ -152,6 +169,18 @@ void script_custom_flush(js_vm *vm);
 /* the definition of a name (its place plus one, 0 for none); the element its constructor makes */
 uint32_t script_custom_def(js_vm *vm, const char *s, size_t n);
 jv script_custom_create(js_vm *vm, uint32_t def);
+/* an HTML element's wrapper's prototype, its interface's (HTMLButtonElement ...: 0 for
+   Element's own, before the interfaces are made); a form-associated custom element (one
+   its definition made), whether it is a candidate for constraint validation, its form
+   owner's reset told to those it owns (formResetCallback); createElement(name, { is }) */
+uint32_t script_iface_proto(js_vm *vm, uint32_t x);
+/* the global's prototype's property (kind 0): an HTML element interface's name, the
+   interfaces made then (src/script/custom.c) */
+jv script_custom_iface_get(js_vm *vm, uint32_t atom, int *handled);
+int script_custom_face(const struct js_host *h, uint32_t x);
+int script_custom_will_validate(js_vm *vm, uint32_t x);
+void script_custom_reset(js_vm *vm, uint32_t form);
+jv script_custom_create_is(js_vm *vm, const char *name, size_t n, const char *is, size_t isn);
 /* a shadow root's host (0: x is none); an event's next node on its path (a slotted node's
    slot, a shadow root's host when composed); a node retargeted against another */
 uint32_t script_shadow_host(const dom_document *d, uint32_t x);

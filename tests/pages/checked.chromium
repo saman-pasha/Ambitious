@@ -1,0 +1,36 @@
+parsed: r1=0 r2=1 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=0 o1=0 o2=0 o3=1
+r1 and r2: false/true/true/false/none true/true/true/true/solid
+the form data: [["g","two"],["k","on"],["K","on"],["m","on"],["n","on"],["c2","on"]]
+c1 set: true/false/false/true/solid
+c1 attribute after: true/false/false/true/solid
+c2 attribute removed: false/false/false/false/none
+c2 attribute added: true/true/true/true/solid
+c2 defaultChecked false: false/false/false/false/none
+r1 attribute again: r1=0 r2=1 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=0 o2=0 o3=1
+k2 checked: r1=0 r2=1 r3=0 k1=0 k2=1 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=0 o2=0 o3=1
+r3 checked: r1=0 r2=0 r3=1 k1=0 k2=1 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=0 o2=0 o3=1
+r3 unchecked: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=0 o2=0 o3=1
+o1 (its form attribute) checked: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=1 o2=0 o3=1
+n2 named m, checked: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=0 n1=1 n2=1 u1=1 u2=1 c1=1 c2=1 c3=0 o1=1 o2=0 o3=1
+n2 named n again: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=0 n1=0 n2=1 u1=1 u2=1 c1=1 c2=1 c3=0 o1=1 o2=0 o3=1
+a text input checked, appended: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=0 n1=0 n2=1 u1=1 u2=1 c1=1 c2=1 c3=0 o1=1 o2=0 o3=1 true
+made a radio: r1=0 r2=0 r3=0 k1=0 k2=1 k3=1 m1=0 m2=0 n1=0 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=1 o2=0 o3=1 true
+reset: r1=0 r2=1 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=0 o1=0 o2=0 o3=1
+m1 attribute again after the reset: r1=0 r2=1 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=0 o1=0 o2=0 o3=1
+made and cloned: true false true false
+inserted: r1=0 r2=0 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=0 o1=0 o2=0 o3=1 true
+innerHTML, detached: true true
+innerHTML, inserted: false true false
+c3 in its click: true
+c3 change: true
+c3 clicked: true/false/false/true/solid
+c3 in its click: false
+c3 clicked, cancelled: true/false/false/true/solid
+r3 in its click: r1=0 r2=0 r3=1 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=1 o1=0 o2=0 o3=1
+r3 clicked, cancelled: r1=0 r2=0 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=0 c2=1 c3=1 o1=0 o2=0 o3=1
+the form data: [["k","on"],["K","on"],["m","on"],["n","on"],["c2","on"],["c3","on"]]
+c3 in its click: false
+c3 change: false
+after the user: r1=0 r2=0 r3=0 k1=1 k2=0 k3=1 m1=0 m2=1 n1=1 n2=0 u1=1 u2=1 c1=1 c2=1 c3=0 o1=0 o2=0 o3=1
+c1, c3: true/false/false/true/solid false/false/false/false/none
+the form data: [["k","on"],["K","on"],["m","on"],["n","on"],["c1","on"],["c2","on"]]

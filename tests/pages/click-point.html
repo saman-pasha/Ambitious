@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>A click's point, fixed as it began</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  #b { position: absolute; left: 100px; top: 50px; width: 100px; height: 40px; padding: 5px; border: 3px solid; }
+  #c { position: absolute; left: 100px; top: 300px; width: 100px; height: 40px; }
+  #d { position: absolute; left: 400px; top: 50px; width: 120px; height: 40px; padding: 0; border: 0; }
+  #d span { display: block; height: 40px; }
+  #k { position: absolute; left: 400px; top: 300px; margin: 0; width: 20px; height: 20px; }
+  #k:checked { margin-left: 40px; }
+  #e { position: absolute; left: 100px; top: 400px; width: 100px; height: 40px; }
+  #f { position: absolute; left: 100px; top: 500px; width: 100px; height: 40px; }
+</style>
+</head>
+<body>
+<button id="b">b</button>
+<button id="c">c</button>
+<button id="d"><span>d</span></button>
+<input id="k" type="checkbox">
+<button id="e">e</button>
+<button id="f">f</button>
+<script>
+  /* a click's coordinates are where the pointer was when it began, whatever its listeners
+     move; its offsets are from the target's box as it is when first read, then kept */
+  var b = document.getElementById('b'), c = document.getElementById('c'), d = document.getElementById('d'), k = document.getElementById('k');
+  var saved;
+  b.addEventListener('pointerdown', function () { b.style.left = '120px'; console.log('b pointerdown, moved'); });
+  b.addEventListener('mousedown', function (e) {
+    console.log('b mousedown', e.clientX, e.clientY, e.offsetX, e.offsetY, e.pageX, e.pageY, e.screenX, e.screenY, e.x, e.y);
+  });
+  b.addEventListener('mouseup', function (e) { b.style.top = '60px'; console.log('b mouseup', e.clientX, e.clientY); });
+  b.addEventListener('click', function (e) {
+    saved = e;
+    b.style.top = '200px';
+    console.log('b click', e.target.id, e.clientX, e.clientY);
+    setTimeout(function () { console.log('b later', saved.clientX, saved.clientY, saved.offsetX, saved.offsetY); }, 0);
+  });
+  c.addEventListener('click', function (e) {
+    console.log('c click', e.clientX, e.clientY, e.offsetX, e.offsetY);
+    c.style.left = '0px';
+    console.log('c after its move', e.clientX, e.offsetX);
+  });
+  d.addEventListener('click', function (e) {
+    d.style.left = '410px';
+    console.log('d click', e.target.tagName, e.clientX, e.clientY, e.offsetX, e.offsetY);
+  });
+  k.addEventListener('click', function (e) {
+    console.log('k click', k.checked, e.clientX, e.clientY, e.offsetX, e.offsetY);
+  });
+  /* a press's listener moving its target away: the boundary events, the release and the
+     click where the pointer is then (the click at the press's and the release's common
+     ancestor); e's moves heard by no listener as its click begins, f's by one (e's press
+     adds it) */
+  var moved = ['mousedown', 'pointerout', 'pointerover', 'mouseout', 'mouseover', 'pointerup', 'mouseup', 'click'];
+  function away(el, left, then) {
+    el.addEventListener('pointerdown', function () {
+      el.style.left = left;
+      if (then) then();
+      moved.forEach(function (t) {
+        document.addEventListener(t, function g(ev) {
+          console.log(el.id + ' ' + t, ev.target.id || ev.target.tagName, ev.clientX, ev.clientY);
+          document.removeEventListener(t, g);
+        });
+      });
+    });
+  }
+  var f = document.getElementById('f');
+  away(document.getElementById('e'), '600px', function () { f.addEventListener('mouseover', function () {}); });
+  away(f, '600px');
+</script>
+</body>
+</html>

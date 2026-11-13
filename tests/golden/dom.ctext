@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:41fde7c7:10881). Do not edit. */
+/* Ambitious: the interface of module dom, generated from contracts/dom.pl (fnv1a32:a3a1e9a5:11084). Do not edit. */
 typedef enum dom_status { DOM_OK, DOM_STALE_HANDLE, DOM_WRONG_KIND, DOM_HAS_PARENT, DOM_NOT_A_CHILD, DOM_WOULD_CYCLE, DOM_INVALID_NAME, DOM_NOT_FOUND, DOM_OUT_OF_MEMORY, DOM_HAS_SHADOW, DOM_BAD_REQUEST, DOM_NOT_REQUESTABLE, DOM_STALE_REVISION } dom_status;
 typedef enum dom_node_kind { DOM_NODE_KIND_DOCUMENT, DOM_NODE_KIND_DOCTYPE, DOM_NODE_KIND_ELEMENT, DOM_NODE_KIND_TEXT, DOM_NODE_KIND_COMMENT, DOM_NODE_KIND_FRAGMENT } dom_node_kind;
 typedef enum dom_namespace { DOM_NAMESPACE_HTML, DOM_NAMESPACE_SVG, DOM_NAMESPACE_MATHML } dom_namespace;
@@ -6,12 +6,12 @@ typedef enum dom_shadow_mode { DOM_SHADOW_MODE_OPEN, DOM_SHADOW_MODE_CLOSED } do
 typedef enum dom_slot_assignment { DOM_SLOT_ASSIGNMENT_NAMED, DOM_SLOT_ASSIGNMENT_MANUAL } dom_slot_assignment;
 typedef enum dom_attr_namespace { DOM_ATTR_NAMESPACE_NULL, DOM_ATTR_NAMESPACE_XLINK, DOM_ATTR_NAMESPACE_XML, DOM_ATTR_NAMESPACE_XMLNS } dom_attr_namespace;
 typedef enum dom_document_mode { DOM_DOCUMENT_MODE_NO_QUIRKS, DOM_DOCUMENT_MODE_QUIRKS, DOM_DOCUMENT_MODE_LIMITED_QUIRKS } dom_document_mode;
-typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_ATTACH_SHADOW, DOM_OP_FLATTEN, DOM_OP_ASSIGN_SLOT, DOM_OP_CLEAR_SLOT, DOM_OP_KEEP_DETAILS, DOM_OP_SET_MODE, DOM_OP_SERIALIZE } dom_op;
+typedef enum dom_op { DOM_OP_CREATE_ELEMENT, DOM_OP_CREATE_ELEMENT_NS, DOM_OP_CREATE_TEXT, DOM_OP_CREATE_COMMENT, DOM_OP_CREATE_DOCTYPE, DOM_OP_APPEND_CHILD, DOM_OP_INSERT_BEFORE, DOM_OP_REMOVE_CHILD, DOM_OP_DESTROY, DOM_OP_SET_ATTRIBUTE, DOM_OP_SET_ATTRIBUTE_NS, DOM_OP_REMOVE_ATTRIBUTE, DOM_OP_SET_DATA, DOM_OP_ATTACH_SHADOW, DOM_OP_FLATTEN, DOM_OP_ASSIGN_SLOT, DOM_OP_CLEAR_SLOT, DOM_OP_KEEP_DETAILS, DOM_OP_SET_MODE, DOM_OP_SET_CHECKED, DOM_OP_SERIALIZE } dom_op;
 typedef struct dom_node_h { uint32_t doc, index, gen; } dom_node_h;
 typedef struct dom_attr_h { uint32_t doc, index, gen; } dom_attr_h;
 typedef struct dom_detail_h { uint32_t doc, index, gen; } dom_detail_h;
 typedef struct dom_shadow_h { uint32_t doc, index, gen; } dom_shadow_h;
-typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; dom_document_mode mode; uint32_t shadow; uint32_t slot; uint32_t assigned_first; uint32_t assigned_next; uint32_t manual; uint32_t manual_first; uint32_t manual_next; uint64_t flat; } dom_node;
+typedef struct dom_node { uint32_t gen, live, free_next; dom_node_kind kind; uint32_t name; dom_namespace ns; uint32_t parent; uint32_t first_child; uint32_t last_child; uint32_t prev_sibling; uint32_t next_sibling; uint32_t first_attr; amb_span data; uint32_t content; uint32_t host; amb_span public_id; amb_span system_id; uint8_t doctype_ids; uint8_t checked; dom_document_mode mode; uint32_t shadow; uint32_t slot; uint32_t assigned_first; uint32_t assigned_next; uint32_t manual; uint32_t manual_first; uint32_t manual_next; uint64_t flat; } dom_node;
 typedef struct dom_attr { uint32_t gen, live, free_next; uint32_t owner; uint32_t name; dom_attr_namespace ns; amb_span value; uint32_t next; } dom_attr;
 typedef struct dom_detail { uint32_t gen, live, free_next; uint32_t prev; uint32_t next; uint32_t name; uint32_t ns; amb_span old; uint8_t had; } dom_detail;
 typedef struct dom_shadow { uint32_t gen, live, free_next; uint32_t host; uint32_t root; dom_shadow_mode mode; dom_slot_assignment assignment; uint8_t delegates_focus; uint8_t clonable; uint8_t serializable; uint8_t declarative; } dom_shadow;
@@ -49,6 +49,7 @@ dom_status dom_assign_slot(dom_document *d, dom_node_h slot, dom_node_h node);
 dom_status dom_clear_slot(dom_document *d, dom_node_h slot);
 dom_status dom_keep_details(dom_document *d);
 dom_status dom_set_mode(dom_document *d, dom_document_mode mode);
+dom_status dom_set_checked(dom_document *d, dom_node_h element, uint8_t state);
 dom_status dom_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_status dom_check_create_element(const dom_document *d, const char *name, size_t name_len);
 dom_status dom_check_create_element_ns(const dom_document *d, dom_namespace ns, const char *name, size_t name_len);
@@ -69,6 +70,7 @@ dom_status dom_check_assign_slot(const dom_document *d, dom_node_h slot, dom_nod
 dom_status dom_check_clear_slot(const dom_document *d, dom_node_h slot);
 dom_status dom_check_keep_details(const dom_document *d);
 dom_status dom_check_set_mode(const dom_document *d, dom_document_mode mode);
+dom_status dom_check_set_checked(const dom_document *d, dom_node_h element, uint8_t state);
 dom_status dom_check_serialize(const dom_document *d, dom_node_h node, FILE *out);
 dom_node_h dom_children_first(const dom_document *d, dom_node_h h);
 dom_node_h dom_children_next(const dom_document *d, dom_node_h h);
@@ -132,6 +134,7 @@ const char *dom_op_name(dom_op x) {
     case DOM_OP_CLEAR_SLOT: return "clear_slot";
     case DOM_OP_KEEP_DETAILS: return "keep_details";
     case DOM_OP_SET_MODE: return "set_mode";
+    case DOM_OP_SET_CHECKED: return "set_checked";
     case DOM_OP_SERIALIZE: return "serialize";
     }
     return "?";
@@ -187,7 +190,7 @@ const char *dom_document_mode_name(dom_document_mode x) {
     return "?";
 }
 
-const char dom_fingerprint[] = "fnv1a32:41fde7c7:10881";
+const char dom_fingerprint[] = "fnv1a32:a3a1e9a5:11084";
 void dom_init(dom_document *d, uint32_t id) {
     if (d->node_len != 0) abort();
     d->id = id;
@@ -331,6 +334,13 @@ dom_status dom_check_keep_details(const dom_document *d)
 
 dom_status dom_check_set_mode(const dom_document *d, dom_document_mode mode)
 {
+    return DOM_OK;
+}
+
+dom_status dom_check_set_checked(const dom_document *d, dom_node_h element, uint8_t state)
+{
+    if (!node_live(d, element)) return DOM_STALE_HANDLE;
+    { dom_node_kind k = d->node[element.index].kind; if (!(k == DOM_NODE_KIND_ELEMENT)) return DOM_WRONG_KIND; }
     return DOM_OK;
 }
 
@@ -758,7 +768,7 @@ dom_status dom_dispatch(dom_document *d, const char *t, size_t n, uint64_t batch
         amb_result(report, name, dom_status_name(st), d->revision);
         return st;
     }
-    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "attach_shadow") || amb_name_is(name, name_len, "flatten") || amb_name_is(name, name_len, "assign_slot") || amb_name_is(name, name_len, "clear_slot") || amb_name_is(name, name_len, "keep_details") || amb_name_is(name, name_len, "set_mode") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
+    if (amb_name_is(name, name_len, "create_element") || amb_name_is(name, name_len, "create_element_ns") || amb_name_is(name, name_len, "create_text") || amb_name_is(name, name_len, "create_comment") || amb_name_is(name, name_len, "create_doctype") || amb_name_is(name, name_len, "destroy") || amb_name_is(name, name_len, "set_attribute_ns") || amb_name_is(name, name_len, "attach_shadow") || amb_name_is(name, name_len, "flatten") || amb_name_is(name, name_len, "assign_slot") || amb_name_is(name, name_len, "clear_slot") || amb_name_is(name, name_len, "keep_details") || amb_name_is(name, name_len, "set_mode") || amb_name_is(name, name_len, "set_checked") || amb_name_is(name, name_len, "serialize")) { amb_result(report, name, "not_requestable", d->revision); return DOM_NOT_REQUESTABLE; }
     amb_result(report, name, "bad_request", d->revision);
     return st;
 }

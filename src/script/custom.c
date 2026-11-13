@@ -42,9 +42,37 @@
    tree the listener is not in; composedPath() is the path as the listener may see it, a
    closed tree's nodes hidden from a listener outside it (DOM 2.9).
 
-   What is not done: customized built-in elements (extends, is=); form-associated custom
-   elements; adoptedStyleSheets (there are no constructable style sheets); focus is not
-   delegated (delegatesFocus is kept and read back). */
+   CUSTOMIZED BUILT-IN ELEMENTS: define(name, class, { extends }) of an HTML element's local
+   name (not a custom element's, nor one Chromium makes an HTMLUnknownElement); the elements
+   of that local name whose is value is the name upgraded as an autonomous one's are (the is
+   value createElement(name, { is }) or the constructor gave, else the is attribute's), and
+   written with an is attribute when they have none; the class extends the interface of the
+   element (HTMLButtonElement ...), each of Chromium's HTML element interfaces a constructor
+   whose prototype every element of its names' wrapper has (HTMLElement's for the rest, and
+   HTMLUnknownElement's for a name HTML does not know). The interfaces are made when a
+   script first names one -- reads its name from the window, which the global's prototype
+   (the engine's object for a host) answers until then -- or defines a customized built-in
+   element: until then every element's wrapper has HTMLElement's prototype, which keeps a
+   page that names none of them as fast as before.
+
+   FORM-ASSOCIATED CUSTOM ELEMENTS (static formAssociated): attachInternals() once, on an
+   autonomous custom element; ElementInternals' form, setFormValue (a string or null; what
+   the form's entry list sends under the element's name), setValidity, validity,
+   validationMessage, willValidate, checkValidity and reportValidity (the form's and
+   constraint validation's: src/script/input.c), and states (a set of the element's custom
+   states); the element is listed in its form's elements, validated and reset with it
+   (formResetCallback), and told when its form owner changes (formAssociatedCallback) and
+   when it becomes disabled or enabled (formDisabledCallback), at the end of each call into
+   the host.
+
+   What is not done: :state() is not matched (the cascade does not see an element's custom
+   states); formStateRestoreCallback never comes (no state is restored); a form value that is
+   a File or a FormData is its string; ElementInternals' labels and ARIA mixin are not there;
+   adoptedStyleSheets (there are no constructable style sheets); focus is not delegated
+   (delegatesFocus is kept and read back); an HTML element interface's own members are the
+   shared element prototype's (HTMLInputElement.prototype holds no value); before a script
+   names an interface, an element's prototype and constructor are HTMLElement's, and the
+   window has none of the interfaces as its own property. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -57,13 +85,15 @@ amb_interface(script);
 #include "host.h"
 #include "script.h"
 #include "../dom/dom.h"
+#include "../html/forms.h"
 
 int sh_utf8(js_vm *vm, jv v, vector<char> *out);
 
 enum {
     SC_HTML_ELEMENT = SH_CUSTOM_FIRST, SC_DEFINE, SC_GET, SC_WHEN_DEFINED, SC_UPGRADE, SC_ATTACH_SHADOW, SC_SHADOW_ROOT, SC_HOST,
     SC_MODE, SC_ASSIGNED_NODES, SC_ASSIGNED_ELEMENTS, SC_ASSIGNED_SLOT, SC_COMPOSED_PATH, SC_ILLEGAL, SC_DELEGATES, SC_ASSIGNMENT,
-    SC_CLONABLE, SC_SERIALIZABLE, SC_ASSIGN, SC_SLOT_GET, SC_SLOT_SET, SC_N
+    SC_CLONABLE, SC_SERIALIZABLE, SC_ASSIGN, SC_SLOT_GET, SC_SLOT_SET, SC_IFACE, SC_ATTACH_INTERNALS, SC_EI_FORM, SC_EI_WILL,
+    SC_EI_VALIDITY, SC_EI_MESSAGE, SC_EI_STATES, SC_EI_SET_VALUE, SC_EI_SET_VALIDITY, SC_EI_CHECK, SC_EI_REPORT, SC_N
 };
 /* an element's state (HTML 4.13.3): undefined, failed, custom */
 enum { SC_UNDEFINED = 1, SC_FAILED, SC_CUSTOM };
@@ -152,7 +182,11 @@ static uint32_t sc_def_of_ctor(struct js_host *h, uint32_t ctor) {
     for (size_t i = 0; i < len(h->cdefs); i++) if (h->cdefs[i].ctor == ctor) return (uint32_t)i + 1;
     return 0;
 }
-uint32_t script_custom_def(js_vm *vm, const char *s, size_t n) { return sc_def_of_name(vm->host, s, n); }
+uint32_t script_custom_def(js_vm *vm, const char *s, size_t n) {
+    uint32_t def = sc_def_of_name(vm->host, s, n);
+    /* a customized built-in one's name is no element's: createElement of it makes an element of that name */
+    return def && !vm->host->cdefs[def - 1].llen ? def : 0;
+}
 /* an element's state's record: its place in the host's list plus one, 0 for none */
 static uint32_t sc_el(struct js_host *h, uint32_t x) {
     const dom_document *d = h->d;
@@ -180,6 +214,189 @@ static uint32_t sc_state(struct js_host *h, uint32_t x) {
     uint32_t k = sc_el(h, x);
     return k ? h->cels[k - 1].state : 0;
 }
+/* x's is value (HTML 4.13.3): the one createElement(name, { is }) or a customized built-in
+   one's constructor gave it, else its is attribute's: 1 and its text in out */
+static int sc_is_value(struct js_host *h, uint32_t x, vector<char> *out) {
+    const dom_document *d = h->d;
+    clear(*out);
+    uint32_t k = sc_el(h, x);
+    if (k && h->cels[k - 1].islen) {
+        append_range(*out, data(h->ctext) + h->cels[k - 1].isoff, h->cels[k - 1].islen);
+        return 1;
+    }
+    uint32_t a = sh_attr_z(d, x, "is");
+    if (!a || !d->attr[a].value.len) return 0;
+    append_range(*out, text_ptr(d, d->attr[a].value), d->attr[a].value.len);
+    return 1;
+}
+/* the definition an HTML element of the document is of (its place plus one, 0 for none): an
+   autonomous one of its local name, or a customized built-in one its is value names that
+   extends its local name */
+static uint32_t sc_def_for(struct js_host *h, uint32_t x) {
+    const dom_document *d = h->d;
+    if (d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML) return 0;
+    vector<char> nm, is;
+    sc_name(d, x, &nm);
+    uint32_t def = sc_def_of_name(h, data(nm), len(nm));
+    if (def) return h->cdefs[def - 1].llen ? 0 : def;
+    if (!sc_is_value(h, x, &is)) return 0;
+    def = sc_def_of_name(h, data(is), len(is));
+    if (!def) return 0;
+    sh_cdef c = h->cdefs[def - 1];
+    return c.llen == len(nm) && memcmp(data(h->ctext) + c.loff, data(nm), len(nm)) == 0 ? def : 0;
+}
+/* x's is value given (createElement's, a constructor's) */
+static void sc_set_is(struct js_host *h, uint32_t x, const char *s, size_t n) {
+    uint32_t k = sc_el(h, x);
+    if (!k) {
+        const dom_document *d = h->d;
+        sh_cel e;
+        memset(&e, 0, sizeof e);
+        e.node = x;
+        e.gen = d->node[x].gen;
+        push_back(h->cels, e);
+        if (x >= len(h->cmap)) resize(h->cmap, (size_t)d->node_len + 64, 0u);
+        h->cmap[x] = (uint32_t)len(h->cels);
+        k = h->cmap[x];
+    }
+    h->cels[k - 1].isoff = (uint32_t)len(h->ctext);
+    append_range(h->ctext, s, n);
+    h->cels[k - 1].islen = (uint32_t)n;
+}
+/* an element's is value as its serialization writes it (one given, not its attribute's): 1 and its text */
+int script_custom_is_given(const struct js_host *h, uint32_t x, vector<char> *out) {
+    clear(*out);
+    if (x >= len(h->cmap) || !h->cmap[x]) return 0;
+    sh_cel e = h->cels[h->cmap[x] - 1];
+    if (e.gen != h->d->node[x].gen || !e.islen) return 0;
+    append_range(*out, data(h->ctext) + e.isoff, e.islen);
+    return 1;
+}
+
+/* ---- the HTML element interfaces (HTML 3.2.8): Chromium's, each with its local names ---- */
+static const char *const sc_iface_names[] = {
+    "HTMLAnchorElement", "a", "HTMLAreaElement", "area", "HTMLAudioElement", "audio", "HTMLBRElement", "br", "HTMLBaseElement", "base",
+    "HTMLBodyElement", "body", "HTMLButtonElement", "button", "HTMLCanvasElement", "canvas", "HTMLDListElement", "dl",
+    "HTMLDataElement", "data", "HTMLDataListElement", "datalist", "HTMLDetailsElement", "details", "HTMLDialogElement", "dialog",
+    "HTMLDirectoryElement", "dir", "HTMLDivElement", "div", "HTMLEmbedElement", "embed", "HTMLFieldSetElement", "fieldset",
+    "HTMLFontElement", "font", "HTMLFormElement", "form", "HTMLFrameElement", "frame", "HTMLFrameSetElement", "frameset",
+    "HTMLHRElement", "hr", "HTMLHeadElement", "head", "HTMLHeadingElement", "h1 h2 h3 h4 h5 h6", "HTMLHtmlElement", "html",
+    "HTMLIFrameElement", "iframe", "HTMLImageElement", "img", "HTMLInputElement", "input", "HTMLLIElement", "li",
+    "HTMLLabelElement", "label", "HTMLLegendElement", "legend", "HTMLLinkElement", "link", "HTMLMapElement", "map",
+    "HTMLMarqueeElement", "marquee", "HTMLMenuElement", "menu", "HTMLMetaElement", "meta", "HTMLMeterElement", "meter",
+    "HTMLModElement", "del ins", "HTMLOListElement", "ol", "HTMLObjectElement", "object", "HTMLOptGroupElement", "optgroup",
+    "HTMLOptionElement", "option", "HTMLOutputElement", "output", "HTMLParagraphElement", "p", "HTMLParamElement", "param",
+    "HTMLPictureElement", "picture", "HTMLPreElement", "pre listing xmp", "HTMLProgressElement", "progress",
+    "HTMLQuoteElement", "blockquote q", "HTMLScriptElement", "script", "HTMLSelectElement", "select", "HTMLSlotElement", "slot",
+    "HTMLSourceElement", "source", "HTMLSpanElement", "span", "HTMLStyleElement", "style", "HTMLTableCaptionElement", "caption",
+    "HTMLTableCellElement", "td th", "HTMLTableColElement", "col colgroup", "HTMLTableElement", "table",
+    "HTMLTableRowElement", "tr", "HTMLTableSectionElement", "thead tbody tfoot", "HTMLTemplateElement", "template",
+    "HTMLTextAreaElement", "textarea", "HTMLTimeElement", "time", "HTMLTitleElement", "title", "HTMLTrackElement", "track",
+    "HTMLUListElement", "ul", "HTMLVideoElement", "video" };
+enum { SC_IFACES = (int)(sizeof sc_iface_names / sizeof sc_iface_names[0]) / 2 };
+/* the names Chromium makes HTMLElements (the custom elements' too) */
+static const char sc_plain_names[] = " abbr acronym address article aside b basefont bdi bdo big center cite code dd dfn dt em "
+    "figcaption figure footer header hgroup i kbd main mark nav nobr noembed noframes noscript plaintext rb rp rt rtc ruby s samp "
+    "search section small strike strong sub summary sup tt u var wbr ";
+/* the word w[0, n) is one of the space-separated words of list */
+static int sc_word_in(const char *list, const char *w, size_t n) {
+    size_t i = 0, ln = strlen(list);
+    while (i < ln) {
+        while (i < ln && list[i] == ' ') i++;
+        size_t b = i;
+        while (i < ln && list[i] != ' ') i++;
+        if (i - b == n && n && memcmp(list + b, w, n) == 0) return 1;
+    }
+    return 0;
+}
+/* the interface of an HTML element's local name: its place in sc_iface_names (0 ..), -1 for
+   HTMLElement, -2 for HTMLUnknownElement */
+static int sc_iface_of(const char *s, size_t n) {
+    for (int i = 0; i < SC_IFACES; i++) if (sc_word_in(sc_iface_names[2 * i + 1], s, n)) return i;
+    if (sc_word_in(sc_plain_names, s, n) || sc_valid_name(s, n)) return -1;
+    return -2;
+}
+uint32_t script_iface_proto(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    if (!h->ifaces_on) return 0;
+    const dom_document *d = h->d;
+    uint32_t nm = d->node[x].name;
+    if (nm < len(h->iproto) && h->iproto[nm]) return h->iproto[nm] - 1;
+    if (!len(h->iface)) return 0;
+    int k = sc_iface_of(names_ptr(d, nm), names_len(d, nm));
+    uint32_t p = k >= 0 ? h->iface[(size_t)k] : k == -2 ? h->iface[SC_IFACES] : h->protos[HP_ELEMENT];
+    if (nm >= len(h->iproto)) resize(h->iproto, (size_t)nm + 64, 0u);
+    h->iproto[nm] = p + 1;
+    return p;
+}
+
+/* the HTML element interfaces made, the first time a script names one (it reads one of their
+   names from the global, which has none of them until then: the global's prototype, an
+   object of the host's, answers it, script_custom_iface_get), or defines a customized
+   built-in element. Each interface's constructor, its prototype (HTMLElement's below it)
+   and its global; each HTML element's wrapper made before given its interface's prototype
+   (one an upgrade, or a script, gave another kept). Until then every wrapper has
+   HTMLElement's prototype, a property's look one step shorter and the wrappers one shape
+   in the engine's caches, and a page that names none makes none of them */
+static void sc_ifaces_on(js_vm *vm) {
+    struct js_host *h = vm->host;
+    if (h->ifaces_on || !h->hef) return;
+    h->ifaces_on = 1;
+    uint32_t elem = h->protos[HP_ELEMENT], hef = h->hef, g = vm->global;
+    clear(h->iface);
+    for (int i = 0; i <= SC_IFACES; i++) push_back(h->iface, js_obj_new(vm, JK_PLAIN, elem));
+    uint32_t ia = sc_atom(vm, "\001iface");
+    for (int i = 0; i <= SC_IFACES; i++) {
+        uint32_t ip = h->iface[(size_t)i], at = sc_atom(vm, i < SC_IFACES ? sc_iface_names[2 * i] : "HTMLUnknownElement");
+        uint32_t f = js_native_new(vm, i < SC_IFACES ? SC_IFACE : SC_ILLEGAL, at, 0);
+        js_set_proto(vm, f, hef);
+        js_define(vm, f, A_PROTOTYPE, jv_obj(ip), JS_SHAPE_PROTO);
+        js_define(vm, ip, A_CONSTRUCTOR, jv_obj(f), JS_SHAPE_HIDDEN);
+        js_define(vm, f, ia, jv_num(i), JS_SHAPE_HIDDEN);
+        push_back(h->iface, f);
+        /* the global's own, but where a script made one of that name first */
+        uint32_t e = js_shape_find(vm, vm->objs[g].shape, at);
+        if (!e || vm->slots[vm->objs[g].slots + vm->shapes[e].slot] == JV_HOLE) js_define(vm, g, at, jv_obj(f), JS_SHAPE_HIDDEN);
+    }
+    for (uint32_t x = 1; x < len(vm->wrappers) && x < h->d->node_len; x++) {
+        uint32_t w = vm->wrappers[x];
+        if (!w || vm->objs[w].kind != JK_HOST || vm->objs[w].c != HK_NODE || vm->objs[w].a != x || vm->objs[w].b != h->d->node[x].gen) continue;
+        if (h->d->node[x].kind != DOM_NODE_KIND_ELEMENT || h->d->node[x].ns != DOM_NAMESPACE_HTML || vm->objs[w].proto != elem) continue;
+        uint32_t ip = script_iface_proto(vm, x);
+        if (ip && ip != elem) js_set_proto(vm, w, ip);
+    }
+}
+
+/* the interface an atom names: its place in sc_iface_names, SC_IFACES for HTMLUnknownElement,
+   -1 for none (a name that is not HTML...Element told at once) */
+static int sc_iface_named(js_vm *vm, uint32_t atom) {
+    if (js_key_is_sym(atom)) return -1;
+    js_str_flatten(vm, atom);
+    uint32_t n = vm->strs[atom].len, off = vm->strs[atom].off;
+    if (n < 12 || n > 40 || vm->units[off] != 'H' || vm->units[off + 1] != 'T' || vm->units[off + 2] != 'M' || vm->units[off + 3] != 'L' ||
+        vm->units[off + n - 1] != 't')
+        return -1;
+    char buf[48];
+    for (uint32_t i = 0; i < n; i++) {
+        uint16_t u = vm->units[off + i];
+        if (u > 127) return -1;
+        buf[i] = (char)u;
+    }
+    buf[n] = 0;
+    for (int i = 0; i < SC_IFACES; i++) if (strcmp(buf, sc_iface_names[2 * i]) == 0) return i;
+    return strcmp(buf, "HTMLUnknownElement") == 0 ? SC_IFACES : -1;
+}
+jv script_custom_iface_get(js_vm *vm, uint32_t atom, int *handled) {
+    *handled = 0;
+    if (vm->host->ifaces_on || sc_iface_named(vm, atom) < 0) return JV_UNDEF;
+    sc_ifaces_on(vm);
+    jv v = JV_UNDEF;
+    uint32_t f = 0;
+    if (!js_get_own(vm, vm->global, atom, &v, &f) || (f & JS_SHAPE_ACCESSOR)) return JV_UNDEF;
+    *handled = 1;
+    return v;
+}
+
 /* whether an attribute is one of a definition's observed attributes */
 static int sc_observes(struct js_host *h, const sh_cdef *def, const char *s, size_t n) {
     size_t i = def->ooff, end = (size_t)def->ooff + def->olen;
@@ -274,12 +491,10 @@ static void sc_upgrade(js_vm *vm, uint32_t x, uint32_t def) {
 static void sc_upgrade_in(js_vm *vm, uint32_t scope, uint32_t def) {
     struct js_host *h = vm->host;
     const dom_document *d = h->d;
-    sh_cdef c = h->cdefs[def - 1];
     vector<uint32_t> xs;
     for (uint32_t x = scope; x; x = sc_next(d, x, scope)) {
         if (d->node[x].kind != DOM_NODE_KIND_ELEMENT || d->node[x].ns != DOM_NAMESPACE_HTML) continue;
-        if (names_len(d, d->node[x].name) != c.nlen || memcmp(names_ptr(d, d->node[x].name), data(h->ctext) + c.noff, c.nlen) != 0) continue;
-        push_back(xs, x);
+        if (sc_def_for(h, x) == def) push_back(xs, x);
     }
     for (size_t i = 0; i < len(xs) && vm->throwing != 2; i++) sc_upgrade(vm, xs[i], def);
 }
@@ -296,9 +511,7 @@ static void sc_inserted(js_vm *vm, uint32_t c) {
         uint32_t st = sc_state(h, x);
         if (st == SC_CUSTOM) { sc_connected_cb(vm, x); continue; }
         if (st == SC_FAILED || d->node[x].ns != DOM_NAMESPACE_HTML) continue;
-        vector<char> nm;
-        sc_name(d, x, &nm);
-        uint32_t def = sc_def_of_name(h, data(nm), len(nm));
+        uint32_t def = sc_def_for(h, x);
         if (def) sc_upgrade(vm, x, def);
     }
 }
@@ -325,9 +538,7 @@ void script_custom_flush(js_vm *vm) {
                clone's): its upgrade, connected or not */
             uint32_t x = e.target;
             if (x >= d->node_len || !d->node[x].live || d->node[x].ns != DOM_NAMESPACE_HTML || sc_state(h, x)) continue;
-            vector<char> nm;
-            sc_name(d, x, &nm);
-            uint32_t def = sc_def_of_name(h, data(nm), len(nm));
+            uint32_t def = sc_def_for(h, x);
             if (def) sc_upgrade(vm, x, def);
         } else if (e.op == DOM_OP_APPEND_CHILD || e.op == DOM_OP_INSERT_BEFORE) {
             if (e.other < d->node_len && d->node[e.other].live && sc_connected(d, e.target)) sc_inserted(vm, e.other);
@@ -348,13 +559,28 @@ void script_custom_flush(js_vm *vm) {
             sc_attr_cb(vm, x, data(an), len(an), old, now, ns);
         }
     }
+    /* what the form-associated elements were not told yet */
+    sc_face_check(vm);
     h->in_reactions = 0;
+}
+
+/* createElement(name, { is }) (DOM 4.5, create an element): an element of the local name with
+   that is value, upgraded at once when a customized built-in definition of the name extends
+   the local name (the synchronous custom elements flag), else an element waiting for one */
+jv script_custom_create_is(js_vm *vm, const char *name, size_t n, const char *is, size_t isn) {
+    struct js_host *h = vm->host;
+    dom_node_h e = dom_create_element(h->d, name, n);
+    if (!e.index) return sh_status(vm, DOM_INVALID_NAME);
+    sc_set_is(h, e.index, is, isn);
+    uint32_t def = sc_def_for(h, e.index);
+    if (def) sc_upgrade(vm, e.index, def);
+    return sh_wrap(vm, e.index);
 }
 
 /* ---- the natives ---- */
 
-/* define(name, constructor) (HTML 4.13.4) */
-static jv sc_define(js_vm *vm, jv name, jv ctor) {
+/* define(name, constructor, options) (HTML 4.13.4) */
+static jv sc_define(js_vm *vm, jv name, jv ctor, jv opts) {
     struct js_host *h = vm->host;
     dom_document *d = h->d;
     static const char *const pre = "Failed to execute 'define' on 'CustomElementRegistry': ";
@@ -376,6 +602,26 @@ static jv sc_define(js_vm *vm, jv name, jv ctor) {
     if (sc_def_of_ctor(h, jv_idx(ctor))) {
         snprintf(msg, sizeof msg, "%sthis constructor has already been used with this registry", pre);
         return sh_dom_error(vm, "NotSupportedError", msg);
+    }
+    /* a customized built-in one: the HTML element's local name it extends */
+    vector<char> ext;
+    int has_ext = 0;
+    if (jv_is_obj(opts)) {
+        jv e = js_get(vm, opts, sc_atom(vm, "extends"));
+        if (vm->throwing) return JV_HOLE;
+        if (e != JV_UNDEF) {
+            if (!sh_utf8(vm, e, &ext)) return JV_HOLE;
+            has_ext = 1;
+            sc_ifaces_on(vm);
+            if (sc_valid_name(data(ext), len(ext))) {
+                snprintf(msg, sizeof msg, "%s\"%.*s\" is a valid custom element name", pre, (int)len(ext), data(ext));
+                return sh_dom_error(vm, "NotSupportedError", msg);
+            }
+            if (sc_iface_of(data(ext), len(ext)) == -2) {
+                snprintf(msg, sizeof msg, "%s\"%.*s\" is an HTMLUnknownElement", pre, (int)len(ext), data(ext));
+                return sh_dom_error(vm, "NotSupportedError", msg);
+            }
+        }
     }
     jv proto = js_get(vm, ctor, A_PROTOTYPE);
     if (vm->throwing) return JV_HOLE;
@@ -427,12 +673,38 @@ static jv sc_define(js_vm *vm, jv name, jv ctor) {
             }
         }
     }
+    /* form-associated: its form callbacks (HTML 4.13.4, step 14) */
+    jv fa = js_get(vm, ctor, sc_atom(vm, "formAssociated"));
+    if (vm->throwing) return JV_HOLE;
+    c.face = (uint32_t)js_truthy(vm, fa);
+    if (c.face) {
+        static const char *const fcbs[] = { "formAssociatedCallback", "formResetCallback", "formDisabledCallback", "formStateRestoreCallback" };
+        uint32_t fgot[4];
+        for (int i = 0; i < 4; i++) {
+            jv f = js_get(vm, proto, sc_atom(vm, fcbs[i]));
+            if (vm->throwing) return JV_HOLE;
+            fgot[i] = 0;
+            if (f == JV_UNDEF) continue;
+            if (!js_is_callable(vm, f)) {
+                snprintf(msg, sizeof msg, "%sThe '%s' property on the prototype is not a function.", pre, fcbs[i]);
+                return js_throw_msg(vm, vm->type_error_proto, msg);
+            }
+            fgot[i] = jv_idx(f);
+        }
+        c.f_assoc = fgot[0];
+        c.f_reset = fgot[1];
+        c.f_disabled = fgot[2];
+        c.f_restore = fgot[3];
+    }
     c.noff = (uint32_t)len(h->ctext);
     append_range(h->ctext, data(nm), len(nm));
     c.nlen = (uint32_t)len(nm);
     c.ooff = (uint32_t)len(h->ctext);
     append_range(h->ctext, data(obs), len(obs));
     c.olen = (uint32_t)len(obs);
+    c.loff = (uint32_t)len(h->ctext);
+    if (has_ext) append_range(h->ctext, data(ext), len(ext));
+    c.llen = has_ext ? (uint32_t)len(ext) : 0;
     /* the reasoner's record of it */
     script_definition_h dh = definition_new(h->rt);
     h->rt->definition[dh.index].run = vm->cur_run;
@@ -464,28 +736,45 @@ static jv sc_define(js_vm *vm, jv name, jv ctor) {
     }
     return JV_UNDEF;
 }
-/* HTMLElement's constructor (HTML 3.2.3), reached by a custom element class's super():
-   new.target from that constructor's frame, its definition's element made, or the one being
-   upgraded */
-static jv sc_html_element(js_vm *vm) {
+/* an HTML element interface's constructor (HTML 3.2.3, the HTML element constructors),
+   reached by a custom element class's super(): new.target from that constructor's frame
+   (its class extends this interface), its definition's element made -- a customized
+   built-in one's of the local name it extends, its is value the definition's name -- or the
+   one being upgraded. iface: the interface's place in sc_iface_names, -1 HTMLElement's */
+static jv sc_element_ctor(js_vm *vm, jv callee, int iface) {
     struct js_host *h = vm->host;
     dom_document *d = h->d;
     jv newt = JV_UNDEF;
     if (vm->nframes) {
         js_frame f = vm->frames[vm->nframes - 1];
-        uint32_t he = js_atom_ascii(vm, "HTMLElement");
-        jv base = js_get(vm, jv_obj(vm->global), he);
-        if (f.callee && jv_is_obj(base) && vm->objs[f.callee].proto == jv_idx(base) && jv_is_obj(f.newt)) newt = f.newt;
+        if (f.callee && jv_is_obj(callee) && vm->objs[f.callee].proto == jv_idx(callee) && jv_is_obj(f.newt)) newt = f.newt;
     }
     uint32_t def = jv_is_obj(newt) ? sc_def_of_ctor(h, jv_idx(newt)) : 0;
-    if (!def) return js_throw_msg(vm, vm->type_error_proto, "Failed to construct 'HTMLElement': Illegal constructor");
+    char msg[300];
+    if (!def) {
+        snprintf(msg, sizeof msg, "Failed to construct '%s': Illegal constructor", iface >= 0 ? sc_iface_names[2 * iface] : "HTMLElement");
+        return js_throw_msg(vm, vm->type_error_proto, msg);
+    }
+    /* the definition's interface is this one: an autonomous one's HTMLElement, a customized built-in one's its local name's */
+    sh_cdef dc = h->cdefs[def - 1];
+    int want = dc.llen ? sc_iface_of(data(h->ctext) + dc.loff, dc.llen) : -1;
+    if (want != iface) {
+        snprintf(msg, sizeof msg, "Failed to construct '%s': Illegal constructor: localName does not match the HTML element interface",
+                 iface >= 0 ? sc_iface_names[2 * iface] : "HTMLElement");
+        return js_throw_msg(vm, vm->type_error_proto, msg);
+    }
     sh_cdef c = h->cdefs[def - 1];
     jv proto = js_get(vm, newt, A_PROTOTYPE);
     if (vm->throwing) return JV_HOLE;
     if (!len(h->cstack)) {
-        /* a new element of the definition's name */
-        dom_node_h e = dom_create_element(d, data(h->ctext) + c.noff, c.nlen);
+        /* a new element of the definition's name, or of the local name it extends */
+        dom_node_h e = c.llen ? dom_create_element(d, data(h->ctext) + c.loff, c.llen) : dom_create_element(d, data(h->ctext) + c.noff, c.nlen);
         if (!e.index) return sh_status(vm, DOM_INVALID_NAME);
+        if (c.llen) {
+            vector<char> is;
+            append_range(is, data(h->ctext) + c.noff, c.nlen);
+            sc_set_is(h, e.index, data(is), len(is));
+        }
         sc_set_state(h, e.index, def, SC_CUSTOM);
         jv w = sh_wrap(vm, e.index);
         if (jv_is_obj(proto)) js_set_proto(vm, jv_idx(w), jv_idx(proto));
@@ -498,6 +787,101 @@ static jv sc_html_element(js_vm *vm) {
     if (jv_is_obj(proto)) js_set_proto(vm, jv_idx(w), jv_idx(proto));
     return w;
 }
+/* ---- form-associated custom elements (HTML 4.13.7) ---- */
+
+/* x is a custom element its form-associated definition made */
+static int sc_face_cel(const struct js_host *h, uint32_t x, sh_cel *out) {
+    const dom_document *d = h->d;
+    if (!x || x >= d->node_len || x >= len(h->cmap) || !h->cmap[x]) return 0;
+    sh_cel e = h->cels[h->cmap[x] - 1];
+    if (e.gen != d->node[x].gen || e.state != SC_CUSTOM || !e.def || !h->cdefs[e.def - 1].face) return 0;
+    *out = e;
+    return 1;
+}
+int script_custom_face(const struct js_host *h, uint32_t x) {
+    sh_cel e;
+    return len(h->cdefs) && sc_face_cel(h, x, &e);
+}
+/* x is form-associated to its ElementInternals: a form-associated custom element, or one being
+   constructed (undefined, or failed while its upgrade runs) whose name's definition is
+   form-associated, as Chromium's ElementInternals::IsTargetFormAssociated lets a constructor
+   use the form's operations */
+static int sc_face_ei(struct js_host *h, uint32_t x) {
+    if (script_custom_face(h, x)) return 1;
+    uint32_t k = sc_el(h, x);
+    uint32_t st = k ? h->cels[k - 1].state : 0;
+    if (st == SC_CUSTOM) return 0;
+    uint32_t def = sc_def_for(h, x);
+    return def && h->cdefs[def - 1].face && !h->cdefs[def - 1].llen;
+}
+/* a form-associated element's internals' state, hidden on its ElementInternals: 1 and the
+   value, when it has internals and the state is set */
+static int sc_ei_state(js_vm *vm, uint32_t x, const char *name, jv *out) {
+    uint32_t k = sc_el(vm->host, x);
+    if (!k || !vm->host->cels[k - 1].internals || !sc_face_ei(vm->host, x)) return 0;
+    uint32_t f;
+    return js_get_own(vm, vm->host->cels[k - 1].internals, sc_atom(vm, name), out, &f);
+}
+int script_custom_will_validate(js_vm *vm, uint32_t x) {
+    const dom_document *d = vm->host->d;
+    if (!script_custom_face(vm->host, x) || form_disabled(d, x) || sh_attr_z(d, x, "readonly")) return 0;
+    for (uint32_t p = d->node[x].parent; p; p = d->node[p].parent) if (sh_named(d, p, "datalist")) return 0;
+    return 1;
+}
+/* the flags setValidity gave (src/html/forms.h's FORM_V_*), its message into msg */
+uint32_t script_custom_flags(js_vm *vm, uint32_t x, vector<char> *msg) {
+    clear(*msg);
+    jv f, m;
+    uint32_t fl = sc_ei_state(vm, x, "\001flags", &f) && jv_is_num(f) ? (uint32_t)jv_dbl(f) : 0;
+    if (fl && sc_ei_state(vm, x, "\001message", &m) && jv_is_str(m)) js_str_to_utf8(vm, jv_idx(m), msg);
+    return fl;
+}
+/* the form value setFormValue gave: 1 and its text, 0 for none (null) */
+int script_custom_form_value(js_vm *vm, uint32_t x, vector<char> *out) {
+    clear(*out);
+    jv v;
+    if (!sc_ei_state(vm, x, "\001value", &v) || !jv_is_str(v)) return 0;
+    js_str_to_utf8(vm, jv_idx(v), out);
+    return 1;
+}
+/* a form reset: formResetCallback of each form-associated element it owns, in tree order */
+void script_custom_reset(js_vm *vm, uint32_t form) {
+    struct js_host *h = vm->host;
+    if (!len(h->cdefs)) return;
+    const dom_document *d = h->d;
+    vector<uint32_t> xs;
+    for (uint32_t x = 1; x; x = sc_next(d, x, 1)) if (script_custom_face(h, x) && form_owner(d, x) == form) push_back(xs, x);
+    for (size_t i = 0; i < len(xs) && vm->throwing != 2; i++) {
+        sh_cel e;
+        if (!sc_face_cel(h, xs[i], &e)) continue;
+        sc_callback(vm, xs[i], h->cdefs[e.def - 1].f_reset, 0, 0);
+    }
+}
+/* each form-associated element told what changed since it was last told (the end of a call
+   into the host): its form owner (formAssociatedCallback), its disabled state
+   (formDisabledCallback) */
+static void sc_face_check(js_vm *vm) {
+    struct js_host *h = vm->host;
+    for (size_t i = 0; i < len(h->cels) && vm->throwing != 2; i++) {
+        sh_cel e = h->cels[i];
+        const dom_document *d = h->d;
+        uint32_t x = e.node;
+        if (e.state != SC_CUSTOM || !e.def || !h->cdefs[e.def - 1].face || x >= d->node_len || !d->node[x].live || d->node[x].gen != e.gen) continue;
+        uint32_t form = form_owner(d, x), dis = (uint32_t)form_disabled(d, x);
+        sh_cdef c = h->cdefs[e.def - 1];
+        if (e.ftold != form + 1 && !(e.ftold == 0 && form == 0)) {
+            h->cels[i].ftold = form + 1;
+            jv a[1] = { form ? sh_wrap(vm, form) : JV_NULL };
+            sc_callback(vm, x, c.f_assoc, a, 1);
+        } else if (e.ftold == 0) h->cels[i].ftold = 1;
+        if (e.dtold != dis + 1 && !(e.dtold == 0 && !dis)) {
+            h->cels[i].dtold = dis + 1;
+            jv a[1] = { jv_bool(dis) };
+            sc_callback(vm, x, c.f_disabled, a, 1);
+        } else if (e.dtold == 0) h->cels[i].dtold = 1;
+    }
+}
+
 /* document.createElement of a defined name: the element its constructor makes; when the
    constructor throws, the error reported and an element of the name whose upgrade failed */
 jv script_custom_create(js_vm *vm, uint32_t def) {
@@ -702,8 +1086,108 @@ jv script_custom_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args
     jv a0 = js_arg(vm, args, argc, 0), a1 = js_arg(vm, args, argc, 1);
     switch (id) {
     case SC_ILLEGAL: return js_throw_msg(vm, vm->type_error_proto, "Illegal constructor");
-    case SC_HTML_ELEMENT: return sc_html_element(vm);
-    case SC_DEFINE: return sc_define(vm, a0, a1);
+    case SC_HTML_ELEMENT: return sc_element_ctor(vm, callee, -1);
+    case SC_IFACE: {
+        /* an HTML element interface's constructor: its place, kept on the function */
+        jv k = jv_is_obj(callee) ? js_get(vm, callee, sc_atom(vm, "\001iface")) : JV_UNDEF;
+        vm->throwing = 0;
+        return sc_element_ctor(vm, callee, jv_is_num(k) ? (int)jv_dbl(k) : -2);
+    }
+    case SC_DEFINE: return sc_define(vm, a0, a1, js_arg(vm, args, argc, 2));
+    case SC_ATTACH_INTERNALS: {
+        uint32_t x = sh_node(vm, thisv, 1);
+        if (vm->throwing) return JV_HOLE;
+        static const char *const pre = "Failed to execute 'attachInternals' on 'HTMLElement': ";
+        char msg[300];
+        vector<char> is;
+        uint32_t k = sc_el(h, x);
+        if (sc_is_value(h, x, &is) && k) {
+            snprintf(msg, sizeof msg, "%sUnable to attach ElementInternals to a customized built-in element.", pre);
+            return sh_dom_error(vm, "NotSupportedError", msg);
+        }
+        uint32_t def = sc_def_for(h, x);
+        if (!def || !k || h->cels[k - 1].def != def) {
+            snprintf(msg, sizeof msg, "%sUnable to attach ElementInternals to non-custom elements.", pre);
+            return sh_dom_error(vm, "NotSupportedError", msg);
+        }
+        if (h->cels[k - 1].internals) {
+            snprintf(msg, sizeof msg, "%sElementInternals for the specified element was already attached.", pre);
+            return sh_dom_error(vm, "NotSupportedError", msg);
+        }
+        uint32_t o = js_obj_new(vm, JK_HOST, h->protos[HP_INTERNALS]);
+        vm->objs[o].a = x;
+        vm->objs[o].b = d->node[x].gen;
+        vm->objs[o].c = HK_INTERNALS;
+        k = sc_el(h, x);
+        h->cels[k - 1].internals = o;
+        return jv_obj(o);
+    }
+    case SC_EI_FORM: case SC_EI_WILL: case SC_EI_VALIDITY: case SC_EI_MESSAGE: case SC_EI_STATES: case SC_EI_SET_VALUE:
+    case SC_EI_SET_VALIDITY: case SC_EI_CHECK: case SC_EI_REPORT: {
+        /* ElementInternals' members, of its element (each but states its form-associated element's alone) */
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_HOST || vm->objs[jv_idx(thisv)].c != HK_INTERNALS)
+            return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
+        uint32_t o = jv_idx(thisv), x = vm->objs[o].a;
+        if (x >= d->node_len || !d->node[x].live || d->node[x].gen != vm->objs[o].b) return JV_UNDEF;
+        if (id == SC_EI_STATES) {
+            /* a set of the element's custom states, made once (a Set, its prototype CustomStateSet's) */
+            jv cur;
+            uint32_t f;
+            if (js_get_own(vm, o, sc_atom(vm, "\001states"), &cur, &f) && jv_is_obj(cur)) return cur;
+            jv setc = js_get(vm, jv_obj(vm->global), sc_atom(vm, "Set"));
+            if (vm->throwing) return JV_HOLE;
+            jv st = js_construct(vm, setc, 0, 0, setc);
+            if (vm->throwing || !jv_is_obj(st)) return JV_HOLE;
+            js_set_proto(vm, jv_idx(st), h->protos[HP_CUSTOMSTATESET]);
+            js_define(vm, o, sc_atom(vm, "\001states"), st, JS_SHAPE_HIDDEN);
+            return st;
+        }
+        static const char *const what[] = { "form", "willValidate", "validity", "validationMessage", "", "setFormValue", "setValidity",
+                                            "checkValidity", "reportValidity" };
+        if (!sc_face_ei(h, x)) {
+            char msg[300];
+            int prop = id <= SC_EI_MESSAGE;
+            snprintf(msg, sizeof msg, "Failed to %s '%s' %s 'ElementInternals': The target element is not a form-associated custom element.",
+                     prop ? "read the" : "execute", what[id - SC_EI_FORM], prop ? "property from" : "on");
+            return sh_dom_error(vm, "NotSupportedError", msg);
+        }
+        if (id == SC_EI_FORM) { uint32_t f = form_owner(d, x); return f ? sh_wrap(vm, f) : JV_NULL; }
+        if (id == SC_EI_WILL) return jv_bool(script_custom_will_validate(vm, x));
+        if (id == SC_EI_VALIDITY) return script_validity_object(vm, x);
+        if (id == SC_EI_MESSAGE) return script_validation_message(vm, x);
+        if (id == SC_EI_CHECK || id == SC_EI_REPORT) return script_control_validity(vm, x, id == SC_EI_REPORT);
+        if (id == SC_EI_SET_VALUE) {
+            jv v = JV_NULL;
+            if (!jv_is_nullish(a0)) {
+                uint32_t t = jv_is_str(a0) ? jv_idx(a0) : js_to_string(vm, a0);
+                if (!t) return JV_HOLE;
+                v = jv_str(t);
+            }
+            js_define(vm, o, sc_atom(vm, "\001value"), v, JS_SHAPE_HIDDEN);
+            return JV_UNDEF;
+        }
+        /* setValidity(flags, message): a message wanted when a flag holds */
+        static const char *const flags[] = { "valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow",
+                                             "rangeOverflow", "stepMismatch", "badInput", "customError" };
+        static const uint32_t bits[] = { FORM_V_MISSING, FORM_V_TYPE, FORM_V_PATTERN, FORM_V_LONG, FORM_V_SHORT, FORM_V_UNDER, FORM_V_OVER,
+                                         FORM_V_STEP, FORM_V_BAD, FORM_V_CUSTOM };
+        uint32_t fl = 0;
+        for (int i = 0; i < 10 && jv_is_obj(a0); i++) {
+            jv f = js_get(vm, a0, sc_atom(vm, flags[i]));
+            if (vm->throwing) return JV_HOLE;
+            if (js_truthy(vm, f)) fl |= bits[i];
+        }
+        uint32_t m = A_EMPTY;
+        if (argc > 1 && a1 != JV_UNDEF) {
+            m = jv_is_str(a1) ? jv_idx(a1) : js_to_string(vm, a1);
+            if (!m) return JV_HOLE;
+        }
+        if (fl && js_str_eq(vm, m, A_EMPTY))
+            return js_throw_msg(vm, vm->type_error_proto, "Failed to execute 'setValidity' on 'ElementInternals': The second argument should not be empty if one or more flags in the first argument are true.");
+        js_define(vm, o, sc_atom(vm, "\001flags"), jv_num(fl), JS_SHAPE_HIDDEN);
+        js_define(vm, o, sc_atom(vm, "\001message"), jv_str(fl ? m : A_EMPTY), JS_SHAPE_HIDDEN);
+        return JV_UNDEF;
+    }
     case SC_GET: {
         vector<char> nm;
         if (!sh_utf8(vm, a0, &nm)) return JV_HOLE;
@@ -740,9 +1224,7 @@ jv script_custom_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args
         vector<uint32_t> xs;
         for (uint32_t x = root; x; x = sc_next(d, x, root)) if (d->node[x].kind == DOM_NODE_KIND_ELEMENT) push_back(xs, x);
         for (size_t i = 0; i < len(xs) && vm->throwing != 2; i++) {
-            vector<char> nm;
-            sc_name(d, xs[i], &nm);
-            uint32_t def = d->node[xs[i]].ns == DOM_NAMESPACE_HTML ? sc_def_of_name(h, data(nm), len(nm)) : 0;
+            uint32_t def = sc_def_for(h, xs[i]);
             if (def) sc_upgrade(vm, xs[i], def);
         }
         return JV_UNDEF;
@@ -947,9 +1429,13 @@ void script_custom_roots(js_vm *vm, vector<jv> *out) {
     struct js_host *h = vm->host;
     for (size_t i = 0; i < len(h->cdefs); i++) {
         sh_cdef c = h->cdefs[i];
-        uint32_t objs[6] = { c.ctor, c.proto, c.connected, c.disconnected, c.adopted, c.attr_changed };
-        for (int k = 0; k < 6; k++) if (objs[k]) push_back(*out, jv_obj(objs[k]));
+        uint32_t objs[10] = { c.ctor, c.proto, c.connected, c.disconnected, c.adopted, c.attr_changed, c.f_assoc, c.f_reset, c.f_disabled,
+                              c.f_restore };
+        for (int k = 0; k < 10; k++) if (objs[k]) push_back(*out, jv_obj(objs[k]));
     }
+    for (size_t i = 0; i < len(h->cels); i++) if (h->cels[i].internals) push_back(*out, jv_obj(h->cels[i].internals));
+    for (size_t i = 0; i < len(h->iface); i++) if (h->iface[i]) push_back(*out, jv_obj(h->iface[i]));
+    if (h->hef) push_back(*out, jv_obj(h->hef));
     for (size_t i = 0; i + 2 < len(h->cwait); i += 3) if (!h->cwait[i + 2] && h->cwait[i]) push_back(*out, jv_obj(h->cwait[i]));
     if (h->registry) push_back(*out, jv_obj(h->registry));
 }
@@ -957,8 +1443,32 @@ void script_custom_roots(js_vm *vm, vector<jv> *out) {
 void script_custom_setup(js_vm *vm) {
     struct js_host *h = vm->host;
     uint32_t elem = h->protos[HP_ELEMENT];
-    /* HTMLElement's constructor, for its subclasses' super() */
-    sh_interface(vm, "HTMLElement", SC_HTML_ELEMENT, elem);
+    /* HTMLElement's constructor, for its subclasses' super(), and the prototype of each HTML
+       element interface's, made when a script first names one (sc_ifaces_on): in iface then
+       their prototypes, the wrappers' of their elements (HTMLUnknownElement's last), then
+       their constructors */
+    h->hef = sh_interface(vm, "HTMLElement", SC_HTML_ELEMENT, elem);
+    clear(h->iface);
+    /* attachInternals, ElementInternals and CustomStateSet */
+    sh_method(vm, elem, "attachInternals", SC_ATTACH_INTERNALS, 0);
+    uint32_t eip = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    h->protos[HP_INTERNALS] = eip;
+    static const char *const eig[] = { "form", "willValidate", "validity", "validationMessage", "states" };
+    static const uint32_t eigi[] = { SC_EI_FORM, SC_EI_WILL, SC_EI_VALIDITY, SC_EI_MESSAGE, SC_EI_STATES };
+    for (int i = 0; i < 5; i++) {
+        uint32_t at = sc_atom(vm, eig[i]);
+        js_define_accessor(vm, eip, at, jv_obj(js_native_new(vm, eigi[i], at, 0)), JV_UNDEF, 0);
+    }
+    sh_method(vm, eip, "setFormValue", SC_EI_SET_VALUE, 1);
+    sh_method(vm, eip, "setValidity", SC_EI_SET_VALIDITY, 0);
+    sh_method(vm, eip, "checkValidity", SC_EI_CHECK, 0);
+    sh_method(vm, eip, "reportValidity", SC_EI_REPORT, 0);
+    js_define(vm, eip, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, "ElementInternals"), JS_SHAPE_HIDDEN);
+    sh_interface(vm, "ElementInternals", SC_ILLEGAL, eip);
+    uint32_t css = js_obj_new(vm, JK_PLAIN, vm->set_proto);
+    h->protos[HP_CUSTOMSTATESET] = css;
+    js_define(vm, css, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, "CustomStateSet"), JS_SHAPE_HIDDEN);
+    sh_interface(vm, "CustomStateSet", SC_ILLEGAL, css);
     uint32_t rp = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     sh_method(vm, rp, "define", SC_DEFINE, 2);
     sh_method(vm, rp, "get", SC_GET, 1);

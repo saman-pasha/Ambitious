@@ -1,0 +1,123 @@
+t1: true [valueMissing] "Please fill out this field." ""
+t2: true [valid] "" "x"
+ro: false [valid] "" ""
+dis: false [valid] "" ""
+hid: false [valid] "" ""
+e1: true [typeMismatch] "Please include an '@' in the email address. 'abc' is missing an '@'." "abc"
+e2: true [valid] "" "a@b"
+e3: true [typeMismatch] "Please include an '@' in the email address. 'c' is missing an '@'." "a@b,c"
+e4: true [typeMismatch] "Please enter a part following '@'. 'a@' is incomplete." "a@"
+e5: true [typeMismatch] "Please enter a part followed by '@'. '@b' is incomplete." "@b"
+e6: true [typeMismatch] "A part followed by '@' should not contain the symbol ' '." "a b@c"
+e7: true [typeMismatch] "'.' is used at a wrong position in 'b..c'." "a@b..c"
+e8: true [typeMismatch] "Please enter an email address." "a@-b"
+e9: true [typeMismatch] "A part following '@' should not contain the symbol '_'." "a@b_c"
+e10: true [typeMismatch] "A part following '@' should not contain the symbol '@'." "a@@b"
+e11: true [typeMismatch] "Please enter a non-empty email address." "a@b,,c@d"
+e12: true [typeMismatch] "Please enter a comma separated list of email addresses." "a@-b"
+e13: true [valid] "" "a@b.c"
+u1: true [typeMismatch] "Please enter a URL." "abc"
+u2: true [valid] "" "http://x"
+u3: true [typeMismatch] "Please enter a URL." "http://"
+p1: true [patternMismatch] "Please match the requested format." "ABC"
+p2: true [valid] "" "abc"
+p3: true [patternMismatch] "Please match the requested format." "a@b"
+n1: true [rangeUnderflow] "Value must be greater than or equal to 5." "3"
+n2: true [rangeOverflow] "Value must be less than or equal to 5." "7"
+n3: true [valid] "" "3"
+n4: true [stepMismatch] "Please enter a valid value. The two nearest valid values are 3 and 5." "4"
+n5: true [stepMismatch] "Please enter a valid value. The nearest valid value is 10." "12"
+n6: true [rangeUnderflow] "Value must be greater than or equal to 1000." "5"
+n7: true [rangeOverflow] "Value must be less than or equal to 0.5." "0.75"
+n8: true [rangeUnderflow] "Value must be greater than or equal to 1e+21." "5"
+n9: true [valid] "" "1.23456"
+d1: true [rangeUnderflow] "Value must be 01/02/2020 or later." "2020-01-01"
+d2: true [rangeOverflow] "Value must be 01/02/2020 or earlier." "2020-01-05"
+d3: true [stepMismatch] "Please enter a valid value. The two nearest valid values are 01/01/2020 and 01/08/2020." "2020-01-03"
+tm1: true [rangeUnderflow] "Value must be 10:00 AM or later." "09:00"
+tm2: true [rangeUnderflow stepMismatch] "Value must be 10:00:30 AM or later." "09:00"
+tm3: true [rangeOverflow] "Value must be 1:05 PM or earlier." "14:00"
+m1: true [rangeUnderflow] "Value must be February 2020 or later." "2020-01"
+w1: true [rangeOverflow] "Value must be Week 02, 2020 or earlier." "2020-W05"
+dt1: true [rangeUnderflow] "Value must be 01/01/2020, 10:00 AM or later." "2020-01-01T09:00"
+r1: true [valid] "" "10"
+c1: true [valueMissing] "Please check this box if you want to proceed." "on"
+c2: true [valid] "" "on"
+rd1: true [valueMissing] "Please select one of these options." "on"
+rd2: true [valueMissing] "Please select one of these options." "on"
+rd3: true [valid] "" "on"
+f1: true [valueMissing] "Please select a file." ""
+f2: true [valueMissing] "Please select one or more files." ""
+s1: true [valueMissing] "Please select an item in the list."
+s2: true [valid] ""
+s3: true [valueMissing] "Please select an item in the list."
+s4: true [valid] ""
+ta1: true [valueMissing] "Please fill out this field." ""
+ta2: true [valid] "" "abcd"
+b1: true [valid] ""
+b2: false [valid] ""
+sub: true [valid] "" ""
+fs1: false [valid] ""
+fs1i: true [valueMissing] "Please fill out this field." ""
+fs2: false [valid] ""
+leg: true [valueMissing] "Please fill out this field." ""
+notleg: false [valid] "" ""
+indl: false [valueMissing] "" ""
+out: false [valid] ""
+leg: true [valueMissing] "Please fill out this field."
+notleg: false [valid] ""
+indl: false [valueMissing] ""
+custom: true [valueMissing customError] "custom one"
+filled: true [customError] "custom one"
+cleared: true [valid] ""
+live: true true [object ValidityState] true
+ValidityState: function valueMissing,typeMismatch,patternMismatch,tooLong,tooShort,rangeUnderflow,rangeOverflow,stepMismatch,badInput,customError,valid,constructor
+no argument: TypeError: Failed to execute 'setCustomValidity' on 'HTMLInputElement': 1 argument required, but only 0 present.
+null: "null" true
+fieldset: false [customError] "" true
+button: true [customError] "button message" false
+invalid: invalid false true true 2 [object Event]
+t1.checkValidity: false
+ro.checkValidity: true
+invalid: invalid false true true 2 [object Event]
+f.checkValidity: false t1,e1,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,u1,u3,p1,p3,n1,n2,n4,n5,n6,n7,n8,d1,d2,d3,tm1,tm2,tm3,m1,w1,dt1,c1,rd1,rd2,f1,f2,s1,s3,ta1,fs1i,leg
+detached: true [valueMissing] "Please fill out this field." false
+invalid at: gc
+gc.reportValidity: false BODY
+invalid at: gb
+focus: gb
+gb.reportValidity: false gb
+invalid at: gb
+invalid at: gc
+invalid at: gd
+invalid at: ge
+focus: gb
+An invalid form control with name='gc' is not focusable.
+An invalid form control with name='' is not focusable.
+g.reportValidity: false gb
+invalid at: gb
+invalid at: gc
+invalid at: gd
+invalid at: ge
+focus: gd
+An invalid form control with name='gc' is not focusable.
+An invalid form control with name='' is not focusable.
+g.reportValidity, gb cancelled: false gd
+num beforeinput: "1" "" false
+num input: "1" "1" false
+num beforeinput: "-" "1" false
+num input: "-" "" true
+num beforeinput: "x" "" true
+cap beforeinput: "x" "" false
+cap input: "x" "x" false
+cap beforeinput: "y" "x" false
+cap input: "y" "xy" false
+cap beforeinput: "z" "xy" false
+typed long: true [tooLong] "Please shorten this text to 3 characters or less (you are currently using 5 characters)." "abcde"
+typed short: true [tooShort] "Please lengthen this text to 4 characters or more (you are currently using 2 characters)." "ab"
+typed short1: true [tooShort] "Please lengthen this text to 2 characters or more (you are currently using 1 character)." "a"
+typed num: true [badInput] "Please enter a number." ""
+typed cap: true [valid] "" "xy"
+typed ta3: true [tooLong] "Please shorten this text to 2 characters or less (you are currently using 3 characters)." "abc"
+set by a script: true [valid] ""
+set by a script: true [valid] ""

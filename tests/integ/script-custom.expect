@@ -4,6 +4,8 @@ the same 49 lines
 the same 27 lines
 -- the shadow-slots page's console, against Chromium's:
 the same 54 lines
+-- the custom-forms page's console, against Chromium's:
+the same 44 lines
 -- the definitions: their names, what they observe, the elements upgraded, their callbacks:
 D = sd(1,1,0), Name = 'x-item', R = sr(1,1,0), O = 2, U = 7, C = y, A = y
 D = sd(1,2,0), Name = 'x-fn', R = sr(1,1,0), O = 0, U = 0, C = n, A = n

@@ -52,6 +52,11 @@ dom_contract(record(node, [
     field(public_id,    span(text)),       % a doctype's public identifier ...
     field(system_id,    span(text)),       % ... and its system identifier
     field(doctype_ids,  u8),               % which of the two the doctype has: 1 public, 2 system
+    %% an input's dirty checkedness flag (1) and, while it is set, its checkedness (2): HTML
+    %% 4.10.5.4 as Chromium keeps it (src/html/forms.c), every change but its checked
+    %% attribute's setting the flag; without the flag the attribute's presence is the
+    %% checkedness. Beside doctype_ids, where it costs a node no room
+    field(checked,      u8),
     field(mode,         enum(document_mode)),  % the document node's mode
     %% THE FLAT TREE (DOM 4.2.2, CSS Scoping 1, 2.2), which the cascade, layout and
     %% accessibility walk (src/dom/dom.h): a host's shadow root; the slot a node is
@@ -238,6 +243,12 @@ dom_contract(operation(keep_details, [], status, [], [], [])).
 %% made in no-quirks mode)
 dom_contract(operation(set_mode, [param(mode, enum(document_mode))], status,
     [], [sets(node, mode)], [mutates])).
+%% an input's checked field (its checkedness and dirty checkedness flag), as HTML's form
+%% controls set it (src/html/forms.c): a change logged, so that what reads the state (the
+%% cascade's :checked, a script's view) sees it; none when the field is already that
+dom_contract(operation(set_checked, [param(element, handle(node)), param(state, u8)], status,
+    [pre(live(element), stale_handle), pre(kind_in(element, [element]), wrong_kind)],
+    [sets(node, checked)], [mutates])).
 %% the HTML serialization of a subtree (the document node: the whole document;
 %% a template: its contents)
 dom_contract(operation(serialize, [param(node, handle(node)), param(out, stream)], status,

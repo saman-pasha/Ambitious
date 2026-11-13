@@ -107,14 +107,20 @@ typedef struct sh_mrec {
 /* a custom element definition (src/script/custom.c): its constructor and prototype, ROOTs;
    the run that defined it and its record in the runtime, RECORDs; its lifecycle callbacks,
    ROOTs (0: none); its name and its observed attributes (each ended by a zero byte), TEXT
-   in the host's custom text */
+   in the host's custom text; the local name a customized built-in one extends (TEXT, empty
+   for an autonomous one); whether it is form-associated, and its form callbacks, ROOTs */
 typedef struct sh_cdef {
     uint32_t ctor, proto, run, rec, connected, disconnected, adopted, attr_changed;
     uint32_t noff, nlen, ooff, olen;
+    uint32_t loff, llen, face, f_assoc, f_reset, f_disabled, f_restore, spare;
 } sh_cdef;
 /* an element's custom element state: the NODE and its generation, its definition (a
-   RECORD: its place plus one), its state, whether it was told it is connected. No root */
-typedef struct sh_cel { uint32_t node, gen, def, state, conn, spare; } sh_cel;
+   RECORD: its place plus one), its state, whether it was told it is connected; its
+   ElementInternals, a ROOT (0: none attached); its is value as createElement or its
+   constructor gave it (TEXT in the host's custom text; none: its is attribute's); the form
+   owner a form-associated one was last told of (a NODE, plus one: 0 never told) and the
+   disabled state (plus one) */
+typedef struct sh_cel { uint32_t node, gen, def, state, conn, internals, isoff, islen, ftold, dtold; } sh_cel;
 /* a session history entry (src/script/window.c): its URL, TEXT in the host's history text,
    whether it is the page's document's (the blank entry is not), its state, a ROOT */
 typedef struct sh_hent { uint32_t uoff, ulen, doc, spare; jv state; } sh_hent;
@@ -280,8 +286,9 @@ struct js_host {
        document's encoding (its number plus one: 0 is UTF-8); the element a click is at
        while its events' point is left to be found when read (a NODE); the name form's
        name in the document's names, once one has had it, and how many names the document
-       had when it was last looked for */
-    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, spare4;
+       had when it was last looked for; whether a user's gesture (a click, a key) has
+       activated the page (HTML's sticky activation, which beforeunload's question needs) */
+    uint32_t focus, focus_gen, mouse_in, hover, navigated, building, nav_planned, unloading, pt_lazy, form_nm, names_seen, activated;
     int charset, spare2;
     vector<char> nav_url, nav_body, nav_ctype;
     /* the MutationObservers, their registrations (how many live), their records' queues
@@ -304,6 +311,17 @@ struct js_host {
     vector<uint32_t> cmap, cstack, cwait;
     vector<char> ctext;
     uint32_t ce_pos, in_reactions, registry, spare5;
+    /* the input element name's atom once the document has one (and how many names it had
+       when it was last looked for): an insertion's radio groups are looked at only then;
+       whether a script has named an HTML element interface, which makes them (its wrappers
+       then each have its interface's prototype: before, HTMLElement's, a property's look one
+       step shorter), and HTMLElement's constructor (src/script/custom.c) */
+    uint32_t input_nm, input_seen, ifaces_on, hef;
+    /* the HTML element interfaces' prototypes, then their constructors (ROOTs; none until a
+       script names one), and each element name's prototype (by the DOM's atom: its object
+       plus one, 0 not looked for) */
+    vector<uint32_t> iface;
+    vector<uint32_t> iproto;
     /* the window (src/script/window.c): the session history, its URLs (TEXT), the current
        entry (its place) and the array that keeps the states, a ROOT; the stored items,
        their text, the profile's storage file, whether it was read and whether localStorage
@@ -315,6 +333,16 @@ struct js_host {
     vector<char> stext, spath;
     double mouse_x, mouse_y;
     jv click_ev;
+    /* a user's click whose point is found when first read (src/script/input.c): its number
+       (each such click the next), the document's revision as it began, whether its point is
+       found, and the point; whether the document is to be copied before its first change
+       (armed: the click begun, its point not found, no copy made), and whether it was: the
+       copy, the document as the click began, whose layout the point is found in once the
+       document has changed */
+    uint32_t pt_click, pt_found, pt_armed, pt_copied;
+    uint64_t pt_rev;
+    double pt_cx, pt_cy;
+    dom_document pt_doc;
     vector<char> fvalue;
     vector<sh_fd> fds;
     /* the document's URL (TEXT: its loader's, then as its fragment and history change
@@ -368,10 +396,11 @@ struct js_host {
     vector_char_drop(&(h).docurl); vector_char_drop(&(h).nav_url); vector_char_drop(&(h).nav_body); \
     vector_char_drop(&(h).nav_ctype); vector_sh_mo_drop(&(h).mos); vector_sh_mreg_drop(&(h).mregs); vector_sh_mrec_drop(&(h).mrecs); \
     vector_uint32_t_drop(&(h).mnodes); vector_char_drop(&(h).mfilter); vector_sh_cdef_drop(&(h).cdefs); vector_sh_cel_drop(&(h).cels); \
+    vector_uint32_t_drop(&(h).iface); vector_uint32_t_drop(&(h).iproto); \
     vector_uint32_t_drop(&(h).cmap); vector_uint32_t_drop(&(h).cstack); vector_uint32_t_drop(&(h).cwait); vector_char_drop(&(h).ctext); \
     vector_sh_hent_drop(&(h).hents); vector_char_drop(&(h).htext); vector_sh_item_drop(&(h).items); vector_char_drop(&(h).stext); \
     vector_char_drop(&(h).spath); vector_sh_imap_drop(&(h).imap); vector_char_drop(&(h).imtext); vector_char_drop(&(h).modfail); \
     vector_uint32_t_drop(&(h).exports); vector_uint32_t_drop(&(h).remotes); vector_uint32_t_drop(&(h).cseq); vector_uint32_t_drop(&(h).xwins); \
-    vector_uint32_t_drop(&(h).sl_was); vector_uint32_t_drop(&(h).sl_sig)
+    vector_uint32_t_drop(&(h).sl_was); vector_uint32_t_drop(&(h).sl_sig); store_dom_store_tag_drop(&(h).pt_doc)
 
 #endif

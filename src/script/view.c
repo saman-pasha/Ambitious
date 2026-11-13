@@ -212,6 +212,14 @@ int script_view_rendered(struct js_host *h, uint32_t x) {
     return x && x < len(h->vstyle) && h->vstyle[x];
 }
 
+/* x's computed visibility is visible (not hidden, not collapse): what takes focus must be,
+   as Chromium's IsFocusable has it */
+int script_view_visible(struct js_host *h, uint32_t x) {
+    script_view_update(h);
+    uint32_t v = sv_val(h, x, CSS_PROP_VISIBILITY);
+    return v == ~0u || !(sv_val_is(h, v, "hidden") || sv_val_is(h, v, "collapse"));
+}
+
 /* the element's box of its own, in vboxes plus 1: 0 for an inline element or one not
    rendered */
 static uint32_t sv_box(struct js_host *h, uint32_t x) {
@@ -338,6 +346,57 @@ uint32_t script_view_rects(struct js_host *h, uint32_t x, double *r, uint32_t ma
         r[4 * (n - 1) + 1] = f.y;
         r[4 * (n - 1) + 2] = f.w;
         r[4 * (n - 1) + 3] = f.h;
+    }
+    for (uint32_t i = 0; i < 4 * (n < max ? n : max); i++) r[i] = sv_lu(r[i]);
+    return n;
+}
+
+/* x's rects as script_view_rects finds them, but in the layout of the document d, another
+   than the host's (a copy of it as it was: src/script/input.c's click point), the host's
+   view left as it is: x's border box, else its part of each line; their number */
+uint32_t script_view_rects_of(struct js_host *h, dom_document *d, uint32_t x, double *r, uint32_t max) {
+    css_style st;
+    layout_tree lt;
+    css_init(&st, 1);
+    layout_init(&lt, 1);
+    css_cascade(&st, d, h->nt);
+    layout_run(&lt, d, &st, h->nt, h->view_w, h->view_h);
+    for (uint32_t b = 1; b < lt.box_len; b++) {
+        if (!lt.box[b].live || lt.box[b].node.index != x || lt.box[b].kind == LAYOUT_BOX_KIND_VIEWPORT || lt.box[b].kind == LAYOUT_BOX_KIND_INLINE) continue;
+        if (max) {
+            r[0] = sv_lu(lt.box[b].x - lt.box[b].pl - lt.box[b].bl);
+            r[1] = sv_lu(lt.box[b].y - lt.box[b].pt - lt.box[b].bt);
+            r[2] = sv_lu(lt.box[b].w + lt.box[b].pr + lt.box[b].pl + lt.box[b].br + lt.box[b].bl);
+            r[3] = sv_lu(lt.box[b].h + lt.box[b].pt + lt.box[b].pb + lt.box[b].bt + lt.box[b].bb);
+        }
+        return 1;
+    }
+    uint32_t n = 0, line = 0;
+    for (uint32_t f = 1; f < lt.frag_len; f++) {
+        if (!lt.frag[f].live || lt.frag[f].kind == LAYOUT_FRAG_KIND_MARKER) continue;
+        uint32_t c = lt.frag[f].node.index;
+        while (c && c != x) c = d->node[c].parent;
+        if (c != x) continue;
+        double fx = lt.frag[f].x, fy = lt.frag[f].y, fw = lt.frag[f].w, fh = lt.frag[f].h;
+        if (n && lt.frag[f].line == line) {
+            if (n > max) continue;
+            size_t q = 4 * (size_t)(n - 1);
+            double x1 = r[q] + r[q + 2], y1 = r[q + 1] + r[q + 3];
+            if (fx < r[q]) r[q] = fx;
+            if (fy < r[q + 1]) r[q + 1] = fy;
+            if (fx + fw > x1) x1 = fx + fw;
+            if (fy + fh > y1) y1 = fy + fh;
+            r[q + 2] = x1 - r[q];
+            r[q + 3] = y1 - r[q + 1];
+            continue;
+        }
+        n++;
+        line = lt.frag[f].line;
+        if (n > max) continue;
+        r[4 * (n - 1)] = fx;
+        r[4 * (n - 1) + 1] = fy;
+        r[4 * (n - 1) + 2] = fw;
+        r[4 * (n - 1) + 3] = fh;
     }
     for (uint32_t i = 0; i < 4 * (n < max ? n : max); i++) r[i] = sv_lu(r[i]);
     return n;

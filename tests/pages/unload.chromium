@@ -1,0 +1,63 @@
+== prevent,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "" true
+Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since its load. https://www.chromestatus.com/feature/5082396709879808
+after: location set
+GET /echo/timer
+== rv,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "sure?" false
+Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since its load. https://www.chromestatus.com/feature/5082396709879808
+after: location set
+GET /echo/timer
+== rvtrue,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "true" false
+Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since its load. https://www.chromestatus.com/feature/5082396709879808
+after: location set
+GET /echo/timer
+== ret,timer 
+a timer: navigates
+handler: ""
+beforeunload: beforeunload true true "leave?" true true
+after its listener: "leave?" true
+Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since its load. https://www.chromestatus.com/feature/5082396709879808
+after: location set
+GET /echo/timer
+== retempty,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" true true
+after its listener: "" true
+Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since its load. https://www.chromestatus.com/feature/5082396709879808
+after: location set
+GET /echo/timer
+== retnull,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "" false
+after: location set
+GET /echo/timer
+== rvempty,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "" false
+after: location set
+GET /echo/timer
+== none,timer 
+a timer: navigates
+beforeunload: beforeunload true true "" false true
+after its listener: "" false
+after: location set
+GET /echo/timer
+== prevent --click '#away'
+beforeunload: beforeunload true true "" false true
+after its listener: "" true
+GET /echo/away
+== ret --click '#away'
+handler: ""
+beforeunload: beforeunload true true "leave?" true true
+after its listener: "leave?" true
+GET /echo/away

@@ -2,8 +2,18 @@
 the same 106 lines
 -- the keys page's console after its actions, against Chromium's:
 the same 101 lines
+-- the validity page's console after its actions, against Chromium's:
+the same 123 lines
+-- the checked page's console after its actions, against Chromium's:
+the same 36 lines
+-- the click-point page's console after its actions, against Chromium's:
+the same 25 lines
 -- the form's submissions, each one's console and requests, against Chromium's:
 the same 84 lines
+-- leaving a page, each way, its console and requests, against Chromium's:
+the same 63 lines
+-- forms in Shift_JIS, EUC-KR and GBK, what each sends, against Chromium's:
+the same 36 lines
 -- the navigations, as the reasoner has them: the form's, the field names it sent:
 N = sn(1,1,0), C = form, M = 'POST', U = 'http://127.0.0.1:PORT/echo/form', F = n(1,17,0), S = n(1,59,0), Fi = f, Si = go, St = 200
 N = sn(1,1,0), Name = who
@@ -22,6 +32,15 @@ N = sn(1,1,0), Name = outside
 N = sn(1,1,0), C = form, M = 'POST', U = 'http://127.0.0.1:PORT/echo/form', St = none
 N = sn(1,2,0), C = form, M = 'GET', U = 'http://127.0.0.1:PORT/echo/other', St = 200
 N = sn(1,1,0), C = link, M = 'GET', U = 'http://127.0.0.1:PORT/echo/away', St = 200
+-- one whose beforeunload asked to stay, and one whose did not:
+N = sn(1,1,0), C = location, M = 'GET', U = 'http://127.0.0.1:PORT/echo/timer', A = asked
+N = sn(1,1,0), C = location, M = 'GET', U = 'http://127.0.0.1:PORT/echo/timer', A = not_asked
+-- the accessibility tree's checked states, the user's clicks read (checked.actions):
+N = n(1,21,0), I = r2, A = ax(1,4,0), V = false
+N = n(1,35,0), I = n1, A = ax(1,11,0), V = true
+N = n(1,43,0), I = c1, A = ax(1,15,0), V = true
+N = n(1,47,0), I = c3, A = ax(1,17,0), V = false
+N = n(1,57,0), I = o3, A = ax(1,20,0), V = true
 -- what the reasoner says of them:
 amb_diag(form_cross_origin_http, sn(1,1,0), 'a form was submitted to http://localhost:PORT/echo/cross: another origin, over http:, so what it sends crosses the network unencrypted').
 amb_diag(form_password_http, n(1,82,0), 'the password field pw was submitted to http://localhost:PORT/echo/cross over http:, unencrypted').

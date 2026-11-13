@@ -12,8 +12,14 @@
 #   modules-cross.html: another origin's module refused (no CORS header read, each URL
 #     once), a text/plain module refused by the strict MIME check, an async inline
 #     module run as soon as it can;
+#   modules-inserted.html: module scripts a script inserts, each run in a task of its own
+#     once its graph is fetched: inline, external (its load event), one that throws, a
+#     missing one (its error event), an inline import map merged, an external import map's
+#     error event, a specifier no map maps;
 #   modules.html read from its file: each module's fetch refused (a file's origin is
-#     opaque), the same lines as Chromium's in any order (its order is the network's).
+#     opaque), in Chromium's order (the external module scripts' own files first, as its
+#     preload scanner asks for them, then the inline modules' imports; the order most of
+#     its runs give, tools/bench/script-references.sh's).
 # Then what the reasoner has of the module scripts' runs. The served pages' port is
 # written PORT, the checkout ROOT.
 AMB_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -33,15 +39,14 @@ same() {
   if cmp -s "$1" "$2"; then echo "the same $(wc -l < "$2" | tr -d ' ') lines"
   else diff "$1" "$2"; fi
 }
-for p in modules modules-cross; do
+for p in modules modules-cross modules-inserted; do
   echo "-- the $p page's console, against Chromium's:"
   console "http://127.0.0.1:$port/$p.html"
   same "$pages/$p.chromium" "$work/c.txt"
 done
-echo "-- the modules page read from its file, against Chromium's, in any order:"
+echo "-- the modules page read from its file, against Chromium's:"
 console "$pages/modules.html"
-LC_ALL=C sort "$work/c.txt" > "$work/sorted.txt"
-same "$pages/modules-file.chromium" "$work/sorted.txt"
+same "$pages/modules-file.chromium" "$work/c.txt"
 echo "-- the module scripts' runs, as the reasoner has them:"
 amb query "http://127.0.0.1:$port/modules.html" "aggregate_all(count, script_run(_, _, _, ran), Ran), aggregate_all(count, script_run(_, _, _, threw), Threw), aggregate_all(count, script_run(_, _, _, not_run), NotRun)"
 amb query "http://127.0.0.1:$port/modules-cross.html" "script_run(R, _, external, O)"

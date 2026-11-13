@@ -7,15 +7,20 @@
    (0, 0), over the element there, at its first action, and moves straight to where it
    acts: the boundary events between the elements it leaves and enters (out, leave, over,
    enter, the pointer's then the mouse's), then a move; a press and a release (pointerdown
-   and mousedown, pointerup and mouseup) and the click, at the element the layout's boxes
-   put under the point (the view's: the deepest box or line fragment that holds it). Its
-   coordinates are the element's box's centre. A press moves focus to the focusable area
-   it is in, or takes it away. enter and leave events reach their target alone.
+   and mousedown, pointerup and mouseup) at the element the layout's boxes put under the
+   point (the view's: the deepest box or line fragment that holds it), the release's found
+   again when a listener changed the page since the press, and the click at the nearest
+   common ancestor of the two, as Chromium's. Its coordinates are the element's box's
+   centre as the click began. A press moves focus to the focusable area it is in, or takes
+   it away. enter and leave events reach their target alone.
    The layout is asked for only when what it decides can be seen: a click at an element
    with no element inside it, on a page where no listener hears the pointer's moves
-   between elements, goes to that element, and its events' coordinates are found when a
-   listener first reads one (the layout as the page is then: an element its listeners
-   moved before that read gives its new place).
+   between elements, goes to that element while the page is as the click began, and its
+   events' point is found when a listener first reads one of its coordinates: in the
+   layout of the page as the click began, the document copied before the first change
+   after it (a script's call or set, the host's own: script_click_keep) when there is one.
+   An event's offsets (offsetX, offsetY) are its point's from its target's padding box as
+   the layout has it when one is first read, then kept: Chromium's.
 
    USER ACTIONS come at load, one after another: the timers due run between them, the
    last one's for the horizon (src/shell/main.c's --click and its kin).
@@ -26,7 +31,9 @@
 
    KEYS are those of a US keyboard: each key down, its keypress when it makes a character
    (and for Enter), its default action, then up. The default actions: a character typed
-   into a text field or a textarea (beforeinput, the value, input), Backspace's deletion,
+   into a text field or a textarea (beforeinput, the value, input: none when the field
+   takes none of it, a number field taking a number's characters alone and a field its
+   maxlength's worth, as Chromium's editing does), Backspace's deletion,
    Enter's implicit submission of a field's form (or a line break in a textarea, a click
    on a button or link), Space's click on a button or a box, Tab's move to the next
    element in the sequential focus order (tabindex's positive values first, then the
@@ -37,17 +44,32 @@
    changed while it had focus.
 
    FORMS: a submit button's click, Enter's implicit submission, requestSubmit() (its
-   constraint validation: a required control empty fires invalid and stops it) and
-   submit() (no event); the form data set of each control type (a checked box's or
-   radio's value or on, each selected option, a textarea's value, the submitter's own),
-   urlencoded, multipart or text/plain, its names and values in the form's encoding (its
-   accept-charset's, else the document's: a single-byte one's bytes, or UTF-8's; a
-   character it lacks as &#N;); GET with the set as its URL's query, POST as its body.
+   interactive validation, below, which stops it) and submit() (no event); the form data
+   set of each control type (a checked box's or radio's value or on, by its checkedness,
+   each selected option, a textarea's value, the submitter's own), urlencoded, multipart
+   or text/plain, its names and values in the form's encoding (its accept-charset's, else
+   the document's) by the Encoding standard's encoder, a character it lacks written &#N;
+   as Chromium writes it; GET with the set as its URL's query, POST as its body; a reset,
+   each control's value, its dirty flag and its checkedness back to its default.
+
+   CONSTRAINT VALIDATION (HTML 4.10.20): a listed element's validity (a ValidityState, its
+   flags read live), willValidate and validationMessage, setCustomValidity, checkValidity()
+   and reportValidity() on a control and on a form -- the flags and messages are
+   src/html/forms.c's, which accessibility shares. A field keeps its own text (a number
+   field's may be no number: its badInput) and whether the user's edit changed it last,
+   which too long and too short wait for (a script's set clears it). A candidate that
+   suffers from something fires invalid (cancelable, not bubbling); a report then focuses
+   the control, a form's first one whose event no listener cancelled and that takes focus
+   (rendered and visible), and writes Chromium's console error for each other one that
+   cannot.
 
    NAVIGATION: a form's is planned, its task queued (HTML 4.10.21.3), a link's and
    location's (href, assign, replace, reload) made at once. Each is recorded with the
    fields it sent (their names, never a value); when it is made, the window's
-   beforeunload fires, the loader makes its request, and the page stops (its timers and
+   beforeunload fires (a page that asks to stay, by cancelling it or giving it a
+   returnValue, recorded so: Chromium asks only once a user's gesture has activated the
+   page, else writes its console's error, and its navigation goes on once the question is
+   answered, as here), the loader makes its request, and the page stops (its timers and
    events end): its document stays the one that navigated, the page a navigation leads
    to fetched, not shown. As Chromium does, a form whose method is POST has its entry list
    constructed again as its navigation is made (the navigate event's formData), its
@@ -65,19 +87,31 @@ amb_interface(net);
 amb_interface(html);
 amb_interface(script);
 #include "../html/encoding.h"
+#include "../html/encode.h"
 #include "../js/js.h"
+#include "../dom/dom.h"
+#include "../html/forms.h"
 #include "host.h"
 #include "script.h"
 HTML_DECODE_DECL;
+/* HTML's form controls (src/html/forms.c), the helpers that take vectors */
+void form_sanitize(const dom_document *d, uint32_t x, const char *raw, size_t n, vector<char> *out);
+void form_message(const dom_document *d, uint32_t x, uint32_t flags, const char *v, size_t n, vector<char> *out);
+void form_options(const dom_document *d, uint32_t s, vector<uint32_t> *opts, vector<uint8_t> *how);
+/* a form-associated custom element's state (src/script/custom.c): its flags and message, its form value */
+uint32_t script_custom_flags(js_vm *vm, uint32_t x, vector<char> *msg);
+int script_custom_form_value(js_vm *vm, uint32_t x, vector<char> *out);
 
 /* script.c's, view.c's and the loader's, which take vectors or are another unit's */
 int sh_utf8(js_vm *vm, jv v, vector<char> *out);
 void sh_text_of(const dom_document *d, uint32_t x, vector<char> *out);
 int script_view_rendered(struct js_host *h, uint32_t x);
+int script_view_visible(struct js_host *h, uint32_t x);
 int script_view_fresh(struct js_host *h);
 int script_view_border_box(struct js_host *h, uint32_t x, double *r);
 int script_view_borders(struct js_host *h, uint32_t x, double *r);
 uint32_t script_view_rects(struct js_host *h, uint32_t x, double *r, uint32_t max);
+uint32_t script_view_rects_of(struct js_host *h, dom_document *d, uint32_t x, double *r, uint32_t max);
 net_resource_h net_fetch_request(net_loader *l, const char *url, size_t url_len, net_kind kind, const char *method, const char *sent,
                                  size_t sent_n, const char *hdrs, size_t hdrs_n, uint32_t from);
 
@@ -85,7 +119,7 @@ enum {
     SI_UIEVENT = SH_INPUT_FIRST, SI_MOUSEEVENT, SI_POINTEREVENT, SI_KEYBOARDEVENT, SI_FOCUSEVENT, SI_INPUTEVENT, SI_SUBMITEVENT,
     SI_FORMDATAEVENT, SI_POPSTATEEVENT, SI_HASHCHANGEEVENT, SI_ILLEGAL, SI_CHARSET, SI_MODIFIER, SI_FORMDATA, SI_FD_APPEND, SI_FD_SET, SI_FD_GET, SI_FD_GETALL, SI_FD_HAS, SI_FD_DELETE, SI_FD_ENTRIES,
     SI_FD_KEYS, SI_FD_VALUES, SI_FD_FOREACH, SI_SUBMIT, SI_REQUEST_SUBMIT, SI_RESET, SI_CHECK_VALIDITY, SI_REPORT_VALIDITY,
-    SI_HAS_FOCUS, SI_COMPAT_MODE, SI_N
+    SI_HAS_FOCUS, SI_COMPAT_MODE, SI_SET_CUSTOM, SI_VS_FIRST, SI_VS_LAST = SI_VS_FIRST + 10, SI_RV_GET, SI_RV_SET, SI_N
 };
 /* the modifier keys held, as bits */
 #define SI_SHIFT 1u
@@ -143,16 +177,111 @@ static int si_editable(const dom_document *d, uint32_t x) {
     return 1;
 }
 
-/* ---- the form's encoding (HTML 4.10.21.7; Encoding's encode, its html error mode) ---- */
+/* ---- constraint validation (HTML 4.10.20): a field's own text, the user's edit, a custom
+   message; the flags themselves are src/html/forms.c's, which accessibility shares ---- */
 
-/* whether an encoding is one of a byte a character */
-static int si_single_byte(int enc) {
-    static const char *const multi[] = { "UTF-8", "UTF-16BE", "UTF-16LE", "GBK", "gb18030", "Big5", "EUC-JP", "ISO-2022-JP", "Shift_JIS",
-                                         "EUC-KR", "replacement" };
-    if (enc < 0) return 0;
-    for (size_t i = 0; i < sizeof multi / sizeof multi[0]; i++) if (strcmp(html_enc_name(enc), multi[i]) == 0) return 0;
+int script_listed(const dom_document *d, uint32_t x) {
+    static const char *const listed[] = { "button", "fieldset", "input", "object", "output", "select", "textarea" };
+    if (!sh_is_elem(d, x)) return 0;
+    for (size_t i = 0; i < sizeof listed / sizeof listed[0]; i++) if (si_is(d, x, listed[i])) return 1;
+    return 0;
+}
+/* a listed element's interface, as Chromium's messages name it */
+static const char *si_interface_name(const dom_document *d, uint32_t x) {
+    static const char *const tags[] = { "button", "fieldset", "input", "object", "output", "select", "textarea" };
+    static const char *const names[] = { "HTMLButtonElement", "HTMLFieldSetElement", "HTMLInputElement", "HTMLObjectElement",
+                                         "HTMLOutputElement", "HTMLSelectElement", "HTMLTextAreaElement" };
+    for (size_t i = 0; i < sizeof tags / sizeof tags[0]; i++) if (si_is(d, x, tags[i])) return names[i];
+    return "HTMLElement";
+}
+/* a wrapper's hidden property of the host's state: 1 and its value */
+static int si_state(js_vm *vm, uint32_t x, const char *name, jv *out) {
+    if (x >= len(vm->wrappers) || !vm->wrappers[x]) return 0;
+    uint32_t f;
+    return js_get_own(vm, vm->wrappers[x], si_atom(vm, name), out, &f);
+}
+/* a field's own value, as typed or set (its wrapper's, not sanitized): 1 and its text in out;
+   0 when it has none, its default holding */
+int script_field_raw(js_vm *vm, uint32_t x, vector<char> *out) {
+    clear(*out);
+    jv cur;
+    if (!si_state(vm, x, "\001value", &cur) || !jv_is_str(cur)) return 0;
+    js_str_to_utf8(vm, jv_idx(cur), out);
     return 1;
 }
+/* the user's edit changed x's value last: its dirty value flag set and its last change the
+   user's, which too long and too short wait for (a script's set clears it) */
+static void si_edited(js_vm *vm, uint32_t x) {
+    jv w = sh_wrap(vm, x);
+    if (jv_is_obj(w)) js_define(vm, jv_idx(w), si_atom(vm, "\001edited"), JV_TRUE, JS_SHAPE_HIDDEN);
+}
+/* x's custom validity message (setCustomValidity's): 1 when one is set (not empty), its text in out */
+static int si_custom(js_vm *vm, uint32_t x, vector<char> *out) {
+    clear(*out);
+    jv cur;
+    if (!si_state(vm, x, "\001custom", &cur) || !jv_is_str(cur)) return 0;
+    js_str_to_utf8(vm, jv_idx(cur), out);
+    return len(*out) > 0;
+}
+/* the UTF-16 code units of a UTF-8 text */
+static size_t si_units(const char *p, size_t n) {
+    size_t u = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)p[i];
+        if ((c & 0xC0) != 0x80) u += c >= 0xF0 ? 2 : 1;
+    }
+    return u;
+}
+static void si_value(js_vm *vm, uint32_t x, vector<char> *out);
+/* the flags of x's validity state (src/html/forms.c's) for its value as it is, the user's
+   edit (and a number field's text that is no number, its bad input), its custom message */
+static uint32_t si_flags(js_vm *vm, uint32_t x) {
+    vector<char> v, raw, c;
+    uint32_t how = 0;
+    /* a form-associated custom element's: what setValidity gave */
+    if (script_custom_face(vm->host, x)) return script_custom_flags(vm, x, &c);
+    if (si_custom(vm, x, &c)) how |= FORM_HOW_CUSTOM;
+    if (si_is(vm->host->d, x, "input") || si_is(vm->host->d, x, "textarea")) {
+        si_value(vm, x, &v);
+        jv ed;
+        if (si_state(vm, x, "\001edited", &ed) && ed == JV_TRUE) {
+            how |= FORM_HOW_EDITED;
+            if (si_is(vm->host->d, x, "input") && form_input_type(vm->host->d, x) == FORM_NUMBER && script_field_raw(vm, x, &raw) &&
+                len(raw) && !len(v))
+                how |= FORM_HOW_BAD;
+        }
+    }
+    return form_validity(vm->host->d, x, data(v), len(v), how);
+}
+jv script_validity_object(js_vm *vm, uint32_t x) {
+    jv cur;
+    if (si_state(vm, x, "\001validity", &cur) && jv_is_obj(cur)) return cur;
+    uint32_t o = js_obj_new(vm, JK_HOST, vm->host->protos[HP_VALIDITYSTATE]);
+    vm->objs[o].a = x;
+    vm->objs[o].b = vm->host->d->node[x].gen;
+    vm->objs[o].c = HK_VALIDITY;
+    jv w = sh_wrap(vm, x);
+    if (jv_is_obj(w)) js_define(vm, jv_idx(w), si_atom(vm, "\001validity"), jv_obj(o), JS_SHAPE_HIDDEN);
+    return jv_obj(o);
+}
+jv script_validation_message(js_vm *vm, uint32_t x) {
+    vector<char> v, msg;
+    if (script_custom_face(vm->host, x)) {
+        if (!script_custom_will_validate(vm, x)) return jv_str(A_EMPTY);
+        script_custom_flags(vm, x, &msg);
+        return sh_str(vm, data(msg), len(msg));
+    }
+    if (!form_will_validate(vm->host->d, x)) return jv_str(A_EMPTY);
+    if (si_custom(vm, x, &msg)) return sh_str(vm, data(msg), len(msg));
+    uint32_t f = si_flags(vm, x);
+    if (!f) return jv_str(A_EMPTY);
+    if (si_is(vm->host->d, x, "input") || si_is(vm->host->d, x, "textarea")) si_value(vm, x, &v);
+    form_message(vm->host->d, x, f, data(v), len(v), &msg);
+    return sh_str(vm, data(msg), len(msg));
+}
+
+/* ---- the form's encoding (HTML 4.10.21.7; Encoding's encode, its html error mode) ---- */
+
 /* a UTF-8 sequence's code point and length (a bad byte read as itself) */
 static uint32_t si_cp(const char *s, size_t n, size_t *used) {
     unsigned char c = (unsigned char)s[0];
@@ -165,33 +294,38 @@ static uint32_t si_cp(const char *s, size_t n, size_t *used) {
     *used = need + 1;
     return cp;
 }
-/* text (UTF-8) in the encoding enc (its number; -1 UTF-8): each byte of a single-byte
-   encoding found by decoding them all; a character it lacks, and any not ASCII in a
-   multi-byte one but UTF-8, as &#N; */
+/* text (UTF-8) in the encoding enc (its number; -1 UTF-8), by the Encoding standard's
+   encoder (src/html/encoding.c) in its html error mode, as Chromium writes a form: a
+   character the encoding lacks as &#N; (N its code point in decimal), those characters
+   given to the encoder in its place (ISO-2022-JP's escapes back to ASCII before them);
+   the encoder's state ended with the text (measured in Shift_JIS, EUC-KR, GBK, gb18030,
+   EUC-JP, Big5, ISO-2022-JP and windows-1252) */
 static void si_encode(int enc, const char *s, size_t n, vector<char> *out) {
     clear(*out);
+    enc = enc < 0 ? -1 : html_output_encoding(enc);
     if (enc < 0 || strcmp(html_enc_name(enc), "UTF-8") == 0) { append_range(*out, s, n); return; }
-    uint32_t table[128];
-    int single = si_single_byte(enc);
-    for (uint32_t b = 0; single && b < 128; b++) {
-        char byte = (char)(0x80 + b);
-        vector<char> one;
-        html_decode(enc, &byte, 1, &one);
-        size_t used = 0;
-        table[b] = len(one) ? si_cp(data(one), len(one), &used) : 0xFFFD;
-    }
-    for (size_t i = 0; i < n;) {
-        size_t used = 1;
-        uint32_t cp = (unsigned char)s[i] < 0x80 ? (unsigned char)s[i] : si_cp(s + i, n - i, &used);
-        i += used;
-        if (cp < 0x80) { push_back(*out, (char)cp); continue; }
-        int put = 0;
-        for (uint32_t b = 0; single && b < 128 && !put; b++)
-            if (table[b] == cp && cp != 0xFFFD) { push_back(*out, (char)(0x80 + b)); put = 1; }
-        if (put) continue;
-        char ref[16];
-        int rn = snprintf(ref, sizeof ref, "&#%u;", cp);
-        append_range(*out, ref, (size_t)rn);
+    int state = 0;
+    uint8_t b[8];
+    for (size_t i = 0;;) {
+        uint32_t cp = 0xFFFFFFFFu;
+        if (i < n) {
+            size_t used = 1;
+            cp = (unsigned char)s[i] < 0x80 ? (unsigned char)s[i] : si_cp(s + i, n - i, &used);
+            i += used;
+        }
+        uint32_t err = 0;
+        size_t got = html_encode_cp(enc, cp, b, &state, &err);
+        for (size_t q = 0; q < got; q++) push_back(*out, (char)b[q]);
+        if (err) {
+            char ref[16];
+            int rn = snprintf(ref, sizeof ref, "&#%u;", err);
+            for (int q = 0; q < rn; q++) {
+                uint32_t e2 = 0;
+                size_t g2 = html_encode_cp(enc, (unsigned char)ref[q], b, &state, &e2);
+                for (size_t k = 0; k < g2; k++) push_back(*out, (char)b[k]);
+            }
+        }
+        if (cp == 0xFFFFFFFFu) break;
     }
 }
 /* the encoding a form submits in: its accept-charset's first known label, else the
@@ -241,23 +375,41 @@ static void si_modifiers(js_vm *vm, jv ev, uint32_t mods) {
     si_def(vm, ev, "metaKey", jv_bool(mods & SI_META));
 }
 /* a mouse event's or a pointer event's fields: where, which button, which held */
-/* the coordinates of a point, and the offsets from a target's padding box */
+/* the coordinates of a point (the first eight), and the offsets from a target's padding box */
 static const char *const si_coords[] = { "clientX", "clientY", "x", "y", "pageX", "pageY", "screenX", "screenY", "offsetX", "offsetY" };
-static void si_point_fields(js_vm *vm, jv ev, uint32_t target, double x, double y) {
+static void si_point_fields(js_vm *vm, jv ev, double x, double y) {
+    double v[8] = { x, y, x, y, x, y, x, y };
+    for (int i = 0; i < 8; i++) si_def(vm, ev, si_coords[i], jv_num(v[i]));
+}
+/* its offsets: its point's from its target's padding box, as the layout has it now */
+static void si_offset_fields(js_vm *vm, jv ev) {
     struct js_host *h = vm->host;
-    double r[4], b[4], ox = x, oy = y;
+    jv cx = js_get(vm, ev, si_atom(vm, "clientX")), cy = js_get(vm, ev, si_atom(vm, "clientY")), t = js_get(vm, ev, si_atom(vm, "target"));
+    uint32_t target = jv_is_obj(t) ? sh_node(vm, t, 0) : 0;
+    vm->throwing = 0;
+    double x = jv_is_num(cx) ? jv_dbl(cx) : 0, y = jv_is_num(cy) ? jv_dbl(cy) : 0, r[4], b[4], ox = x, oy = y;
+    if (target) sh_view(vm);
     if (target && script_view_border_box(h, target, r) && script_view_borders(h, target, b)) { ox = x - r[0] - b[3]; oy = y - r[1] - b[0]; }
-    double v[10] = { x, y, x, y, x, y, x, y, ox, oy };
-    for (int i = 0; i < 10; i++) si_def(vm, ev, si_coords[i], jv_num(v[i]));
+    si_def(vm, ev, si_coords[8], jv_num(ox));
+    si_def(vm, ev, si_coords[9], jv_num(oy));
 }
 static void si_mouse_fields(js_vm *vm, jv ev, uint32_t target, double x, double y, int button, int buttons, uint32_t related, int pointer) {
     struct js_host *h = vm->host;
-    /* a click whose point no one has asked for yet: its element kept, the point found
-       when a listener reads it (script_event_point) */
-    if (h->pt_lazy) {
-        vm->objs[jv_idx(ev)].a |= EV_LAZYPOINT;
-        js_define(vm, jv_idx(ev), si_atom(vm, "\001pt"), jv_num(h->pt_lazy), JS_SHAPE_HIDDEN);
-    } else si_point_fields(vm, ev, target, x, y);
+    /* a user's click whose point no one has asked for yet: its element and its click's
+       number kept, the point found when a listener reads it (script_event_point); a user's
+       event's offsets found when first read. A script's click() (no target here) has no
+       position: its point and its offsets 0 */
+    if (h->pt_lazy && target) {
+        vm->objs[jv_idx(ev)].a |= EV_LAZYPOINT | EV_LAZYOFFSET;
+        js_define(vm, jv_idx(ev), si_atom(vm, "\001pt"), jv_num((double)h->pt_click * 4294967296.0 + (double)h->pt_lazy), JS_SHAPE_HIDDEN);
+    } else {
+        si_point_fields(vm, ev, x, y);
+        if (target) vm->objs[jv_idx(ev)].a |= EV_LAZYOFFSET;
+        else {
+            si_def(vm, ev, si_coords[8], jv_num(x));
+            si_def(vm, ev, si_coords[9], jv_num(y));
+        }
+    }
     si_def(vm, ev, "movementX", jv_num(0));
     si_def(vm, ev, "movementY", jv_num(0));
     si_def(vm, ev, "button", jv_num(button));
@@ -316,6 +468,20 @@ static uint32_t si_hit(js_vm *vm, double x, double y) {
     if (!best) best = sh_elem_child(d, 1, 0);
     return best;
 }
+/* the nearest common inclusive ancestor of a and b (a shadow root's host above it): a
+   click's target, its press's and its release's, as Chromium's; 0 for none */
+static uint32_t si_common(const dom_document *d, uint32_t a, uint32_t b) {
+    for (uint32_t y = a; y; ) {
+        for (uint32_t z = b; z; ) {
+            if (y == z) return y;
+            uint32_t p = d->node[z].parent;
+            z = p && d->node[p].kind == DOM_NODE_KIND_FRAGMENT && d->node[p].host ? d->node[p].host : p;
+        }
+        uint32_t p = d->node[y].parent;
+        y = p && d->node[p].kind == DOM_NODE_KIND_FRAGMENT && d->node[p].host ? d->node[p].host : p;
+    }
+    return 0;
+}
 /* the elements from x up to the root, in order (x first) */
 static void si_chain(const dom_document *d, uint32_t x, vector<uint32_t> *out) {
     clear(*out);
@@ -327,10 +493,12 @@ static int si_in(const vector<uint32_t> *chain, uint32_t x) {
 }
 /* the pointer moved to a point: the boundary events from the element under it to the
    one there, then a move */
-static void si_move(js_vm *vm, double x, double y) {
+/* the boundary events of the pointer at (x, y) coming onto the element to from the one it
+   was over: a move's, and a release's whose element a press's listener changed */
+static void si_boundary(js_vm *vm, double x, double y, uint32_t to) {
     struct js_host *h = vm->host;
     const dom_document *d = h->d;
-    uint32_t to = si_hit(vm, x, y), from = h->mouse_in ? h->hover : 0;
+    uint32_t from = h->mouse_in ? h->hover : 0;
     if (from && (!d->node[from].live || !sh_connected(d, from))) from = 0;
     if (to != from) {
         vector<uint32_t> oc, nc;
@@ -353,6 +521,11 @@ static void si_move(js_vm *vm, double x, double y) {
         }
         h->hover = to;
     }
+}
+static void si_move(js_vm *vm, double x, double y) {
+    struct js_host *h = vm->host;
+    uint32_t to = si_hit(vm, x, y);
+    si_boundary(vm, x, y, to);
     h->mouse_in = 1;
     h->mouse_x = x;
     h->mouse_y = y;
@@ -402,7 +575,7 @@ static int si_focusable(js_vm *vm, uint32_t x) {
     /* the element a user clicks, and what holds it, are rendered */
     for (uint32_t y = vm->host->pt_lazy; y; y = d->node[y].parent) if (y == x) return 1;
     sh_view(vm);
-    return script_view_rendered(vm->host, x);
+    return script_view_rendered(vm->host, x) && script_view_visible(vm->host, x);
 }
 /* an element's place in the sequential focus order: its tabindex, or 0 for one focusable
    by itself; -1 for none */
@@ -515,20 +688,8 @@ static void si_tab(js_vm *vm, int back) {
 
 /* ---- forms: the form data set (HTML 4.10.21.4) ---- */
 
-/* an element's form owner: its form attribute's form, or its nearest form ancestor */
-static uint32_t si_form_of(const dom_document *d, uint32_t x) {
-    vector<char> id;
-    if (si_attr(d, x, "form", &id)) {
-        for (uint32_t c = sh_next_in(d, 1, 1); c; c = sh_next_in(d, c, 1)) {
-            if (!si_is(d, c, "form")) continue;
-            vector<char> cid;
-            if (si_attr(d, c, "id", &cid) && len(cid) == len(id) && memcmp(data(cid), data(id), len(id)) == 0) return c;
-        }
-        return 0;
-    }
-    for (uint32_t y = d->node[x].parent; y; y = d->node[y].parent) if (si_is(d, y, "form")) return y;
-    return 0;
-}
+/* an element's form owner: its form attribute's form, or its nearest form ancestor (src/html/forms.c) */
+static uint32_t si_form_of(const dom_document *d, uint32_t x) { return form_owner(d, x); }
 uint32_t script_form_owner(const dom_document *d, uint32_t x) { return si_form_of(d, x); }
 /* a submit button: a button of type submit (its default), an input of type submit or image */
 static int si_submit_button(const dom_document *d, uint32_t x) {
@@ -606,7 +767,8 @@ static void si_entries(js_vm *vm, uint32_t form, uint32_t submitter, uint32_t ow
     for (uint32_t c = sh_next_in(d, 1, 1); c; c = sh_next_in(d, c, 1)) {
         if (d->node[c].kind != DOM_NODE_KIND_ELEMENT) continue;
         int input = si_is(d, c, "input"), select = si_is(d, c, "select"), area = si_is(d, c, "textarea"), button = si_is(d, c, "button");
-        if (!input && !select && !area && !button) continue;
+        int face = !input && !select && !area && !button && script_custom_face(h, c);
+        if (!input && !select && !area && !button && !face) continue;
         if (si_form_of(d, c) != form || si_disabled(d, c)) continue;
         /* a control in a datalist, or in a disabled fieldset (but its first legend), is none */
         int barred = 0;
@@ -630,8 +792,14 @@ static void si_entries(js_vm *vm, uint32_t form, uint32_t submitter, uint32_t ow
             continue;
         }
         if (!si_attr(d, c, "name", &name) || !len(name)) continue;
+        if (face) {
+            /* its form value, a string (setFormValue's; null sends nothing) */
+            if (sh_attr_z(d, c, "disabled") || !script_custom_form_value(vm, c, &v)) continue;
+            si_fd_add(h, owner, data(name), len(name), data(v), len(v), c);
+            continue;
+        }
         if (input && (si_input_is(d, c, "checkbox") || si_input_is(d, c, "radio"))) {
-            if (!sh_attr_z(d, c, "checked")) continue;
+            if (!form_checked(d, c)) continue;
             if (!si_attr(d, c, "value", &v)) { clear(v); append_range(v, "on", 2); }
             si_fd_add(h, owner, data(name), len(name), data(v), len(v), c);
             continue;
@@ -741,21 +909,47 @@ static void si_text_plain(struct js_host *h, uint32_t owner, int enc, vector<cha
 
 /* ---- navigation ---- */
 
-/* the window's beforeunload, as a navigation is made: cancelable, its cancelling not
-   kept (a user's leave is assumed) */
-static void si_unload(js_vm *vm) {
+/* a BeforeUnloadEvent's returnValue (a DOMString: what is set is its string), kept on the
+   event */
+static jv si_rv(js_vm *vm, jv ev) {
+    jv cur;
+    uint32_t f;
+    if (jv_is_obj(ev) && js_get_own(vm, jv_idx(ev), si_atom(vm, "\001rv"), &cur, &f) && jv_is_str(cur)) return cur;
+    return jv_str(A_EMPTY);
+}
+void script_unload_returned(js_vm *vm, jv ev, jv r) {
+    if (r == JV_UNDEF || r == JV_NULL) return;
+    vm->objs[jv_idx(ev)].a |= EV_PREVENTED;
+    if (!js_str_eq(vm, jv_idx(si_rv(vm, ev)), A_EMPTY)) return;
+    uint32_t t = jv_is_str(r) ? jv_idx(r) : js_to_string(vm, r);
+    if (!t) { vm->throwing = 0; return; }
+    js_define(vm, jv_idx(ev), si_atom(vm, "\001rv"), jv_str(t), JS_SHAPE_HIDDEN);
+}
+/* the window's beforeunload, as a navigation n is made (HTML 7.4.2.4, prompt to unload):
+   cancelable, its returnValue empty. The page asks to stay when a listener cancelled it
+   or gave its returnValue a text (a handler's return value does both): Chromium shows its
+   dialog only on a page a user's gesture has activated, and else writes its console's
+   error; the navigation goes on either way here, as Chromium's does once the dialog is
+   accepted (Playwright's answer, measured), the question kept with it */
+static void si_unload(js_vm *vm, uint32_t n) {
     struct js_host *h = vm->host;
     h->unloading = 1;
     jv ev = si_event(vm, "beforeunload", EV_TRUSTED | EV_CANCELABLE, HP_BEFOREUNLOADEVENT, 0);
-    si_def(vm, ev, "returnValue", jv_str(A_EMPTY));
     sh_dispatch(vm, JS_WINDOW, ev);
     h->unloading = 0;
+    int asked = (vm->objs[jv_idx(ev)].a & EV_PREVENTED) || !js_str_eq(vm, jv_idx(si_rv(vm, ev)), A_EMPTY);
+    if (n) h->rt->navigation[n].asked = (uint8_t)asked;
+    if (asked && !h->activated) {
+        static const char msg[] = "Blocked attempt to show a 'beforeunload' confirmation panel for a frame that never had a user gesture since "
+                                  "its load. https://www.chromestatus.com/feature/5082396709879808";
+        js_console(vm, 3, js_str_utf8(vm, msg, sizeof msg - 1));
+    }
 }
 /* the navigation n made: beforeunload, the loader's request (the body and type kept for
    it), the page stopped */
 static void si_go(js_vm *vm, uint32_t n) {
     struct js_host *h = vm->host;
-    si_unload(vm);
+    si_unload(vm, n);
     char method[16], hdrs[300];
     amb_span ms = h->rt->navigation[n].method;
     snprintf(method, sizeof method, "%.*s", (int)ms.len, text_ptr(h->rt, ms));
@@ -849,31 +1043,45 @@ static int si_form_attr(const dom_document *d, uint32_t form, uint32_t submitter
     if (submitter && si_attr(d, submitter, sub, out)) return 1;
     return si_attr(d, form, mine, out);
 }
-/* the constraint validation of a form's controls: a required one empty, or a box not
-   checked, is invalid; its invalid event fired. 1 when every one is valid */
-static int si_valid(js_vm *vm, uint32_t form, int report) {
-    const dom_document *d = vm->host->d;
-    int ok = 1;
-    vector<char> v;
-    for (uint32_t c = sh_next_in(d, 1, 1); c; c = sh_next_in(d, c, 1)) {
-        if (!sh_is_elem(d, c) || si_form_of(d, c) != form || !sh_attr_z(d, c, "required") || si_disabled(d, c)) continue;
-        int bad = 0;
-        if (si_input_is(d, c, "checkbox") || si_input_is(d, c, "radio")) bad = !sh_attr_z(d, c, "checked");
-        else if (si_is(d, c, "input") || si_is(d, c, "textarea")) { si_value(vm, c, &v); bad = len(v) == 0; }
-        else if (si_is(d, c, "select")) {
-            bad = 1;
-            for (uint32_t o = sh_next_in(d, c, c); o; o = sh_next_in(d, o, c)) {
-                if (!si_is(d, o, "option") || !sh_attr_z(d, o, "selected")) continue;
-                si_option_value(d, o, &v);
-                if (len(v)) bad = 0;
-            }
-        }
-        if (!bad) continue;
-        ok = 0;
-        sh_fire(vm, c, "invalid", EV_CANCELABLE);
-        if (report) { (void)report; }
+/* a form's constraint validation (HTML 4.10.20.2, interactively 4.10.21.3 when report is
+   set): each candidate the form owns that suffers from something, in tree order, fired its
+   invalid event; then, reported, the first whose event no listener cancelled and that takes
+   focus focused (Chromium shows its message there), and Chromium's console error for each
+   other such one that does not. 1 when every one is valid */
+static int si_form_valid(js_vm *vm, uint32_t form, int report) {
+    struct js_host *h = vm->host;
+    vector<uint32_t> bad;
+    for (uint32_t c = sh_next_in(h->d, 1, 1); c; c = sh_next_in(h->d, c, 1)) {
+        int face = script_custom_face(h, c);
+        if ((!script_listed(h->d, c) && !face) || form_owner(h->d, c) != form) continue;
+        if (!(face ? script_custom_will_validate(vm, c) : form_will_validate(h->d, c)) || !si_flags(vm, c)) continue;
+        push_back(bad, c);
     }
-    return ok;
+    vector<uint32_t> unhandled;
+    for (size_t i = 0; i < len(bad); i++) {
+        if (h->navigated) return 0;
+        if (sh_fire(vm, bad[i], "invalid", EV_CANCELABLE)) push_back(unhandled, bad[i]);
+    }
+    if (!report || !len(bad)) return len(bad) == 0;
+    int shown = 0;
+    for (size_t i = 0; i < len(unhandled) && !shown; i++) {
+        uint32_t c = unhandled[i];
+        if (!h->d->node[c].live || !si_focusable(vm, c)) continue;
+        script_focus(vm, c);
+        shown = 1;
+    }
+    for (size_t i = 0; i < len(unhandled); i++) {
+        uint32_t c = unhandled[i];
+        if (h->d->node[c].live && si_focusable(vm, c)) continue;
+        vector<char> nm, msg;
+        si_attr(h->d, c, "name", &nm);
+        static const char head[] = "An invalid form control with name='", tail[] = "' is not focusable.";
+        append_range(msg, head, sizeof head - 1);
+        append_range(msg, data(nm), len(nm));
+        append_range(msg, tail, sizeof tail - 1);
+        js_console(vm, 3, js_str_utf8(vm, data(msg), len(msg)));
+    }
+    return 0;
 }
 /* the submission of form by submitter (0: none); submit() skips the validation and the
    submit event (via_submit) */
@@ -882,7 +1090,7 @@ static void si_submit(js_vm *vm, uint32_t form, uint32_t submitter, int via_subm
     const dom_document *d = h->d;
     if (h->navigated || !sh_connected(d, form)) return;
     if (!via_submit) {
-        if (!(submitter && sh_attr_z(d, submitter, "formnovalidate")) && !sh_attr_z(d, form, "novalidate") && !si_valid(vm, form, 1)) return;
+        if (!(submitter && sh_attr_z(d, submitter, "formnovalidate")) && !sh_attr_z(d, form, "novalidate") && !si_form_valid(vm, form, 1)) return;
         jv ev = si_event(vm, "submit", EV_TRUSTED | EV_BUBBLES | EV_CANCELABLE, HP_SUBMITEVENT, 0);
         si_def(vm, ev, "submitter", submitter ? sh_wrap(vm, submitter) : JV_NULL);
         if (!sh_dispatch(vm, form, ev)) return;
@@ -945,15 +1153,21 @@ static void si_implicit(js_vm *vm, uint32_t field) {
     }
     if (fields == 1) si_submit(vm, form, 0, 0);
 }
-/* a form's reset: its reset event, then each field's value back to its default */
+/* a form's reset: its reset event, then each field's value back to its default, its dirty
+   flag cleared, and an input's checkedness back to its checked attribute's (its group taken,
+   its dirty checkedness flag cleared: src/html/forms.c) */
 static void si_reset(js_vm *vm, uint32_t form) {
-    const dom_document *d = vm->host->d;
+    struct js_host *h = vm->host;
     if (!sh_fire(vm, form, "reset", EV_BUBBLES | EV_CANCELABLE)) return;
-    for (uint32_t c = sh_next_in(d, 1, 1); c; c = sh_next_in(d, c, 1)) {
-        if (!sh_is_elem(d, c) || si_form_of(d, c) != form || (!si_is(d, c, "input") && !si_is(d, c, "textarea"))) continue;
+    if (h->pt_armed) script_click_keep(vm);
+    for (uint32_t c = sh_next_in(h->d, 1, 1); c; c = sh_next_in(h->d, c, 1)) {
+        if (!sh_is_elem(h->d, c) || si_form_of(h->d, c) != form || (!si_is(h->d, c, "input") && !si_is(h->d, c, "textarea"))) continue;
         jv w = sh_wrap(vm, c);
         js_delete(vm, jv_idx(w), si_atom(vm, "\001value"));
+        js_delete(vm, jv_idx(w), si_atom(vm, "\001edited"));
+        if (si_is(h->d, c, "input")) form_reset_checked(h->d, c);
     }
+    script_custom_reset(vm, form);
 }
 
 void script_click_default(js_vm *vm, uint32_t x) {
@@ -1104,13 +1318,31 @@ static int si_input_event(js_vm *vm, uint32_t x, const char *type, const char *d
     si_def(vm, ev, "isComposing", JV_FALSE);
     return sh_dispatch(vm, x, ev);
 }
-/* text put in at a field's end, as typing does: beforeinput, the value, input */
+/* text put in at a field's end, as typing does: beforeinput, the value, input. What the
+   field takes, as Chromium's editing has it: a number field's characters of a number alone
+   (0-9 . e E + -), and no more than its maxlength allows (a text field's, a textarea's, in
+   UTF-16 code units); a text it takes none of fires no input. The value is the field's own
+   text (a number field's may be no number: its badInput), the user's edit its last change */
 static void si_insert(js_vm *vm, uint32_t x, const char *t, size_t n, const char *kind) {
     if (!si_input_event(vm, x, "beforeinput", t, n, strcmp(kind, "insertLineBreak") != 0, kind)) return;
+    const dom_document *d = vm->host->d;
     vector<char> v;
-    si_value(vm, x, &v);
+    if (!script_field_raw(vm, x, &v)) si_value(vm, x, &v);
+    int area = si_is(d, x, "textarea"), ty = area ? -1 : form_input_type(d, x);
+    for (size_t i = 0; i < n && ty == FORM_NUMBER; i++)
+        if (!((t[i] >= '0' && t[i] <= '9') || t[i] == '.' || t[i] == 'e' || t[i] == 'E' || t[i] == '+' || t[i] == '-')) return;
+    vector<char> lim;
+    if ((area || form_texty(ty)) && si_attr(d, x, "maxlength", &lim)) {
+        long mx = -1;
+        size_t q = 0;
+        while (q < len(lim) && sh_ws(lim[q])) q++;
+        if (q < len(lim) && lim[q] == '+') q++;
+        if (q < len(lim) && lim[q] >= '0' && lim[q] <= '9') { mx = 0; while (q < len(lim) && lim[q] >= '0' && lim[q] <= '9' && mx < 1000000000) mx = mx * 10 + (lim[q++] - '0'); }
+        if (mx >= 0 && (long)(si_units(data(v), len(v)) + si_units(t, n)) > mx) return;
+    }
     append_range(v, t, n);
     si_value_set(vm, x, data(v), len(v));
+    si_edited(vm, x);
     si_input_event(vm, x, "input", t, n, strcmp(kind, "insertLineBreak") != 0, kind);
 }
 /* a key pressed and released, its default action between */
@@ -1127,12 +1359,13 @@ static void si_press(js_vm *vm, const si_key *k, uint32_t mods) {
     else if (go && k->ch == 13 && link) sh_click_at(vm, at, EV_TRUSTED);
     else if (go && strcmp(k->key, "Backspace") == 0 && at && si_editable(d, at)) {
         vector<char> v;
-        si_value(vm, at, &v);
+        if (!script_field_raw(vm, at, &v)) si_value(vm, at, &v);
         if (len(v) && si_input_event(vm, at, "beforeinput", "", 0, 0, "deleteContentBackward")) {
             /* the last character, whole: its UTF-8 bytes */
             size_t e = len(v) - 1;
             while (e > 0 && ((unsigned char)v[e] & 0xC0) == 0x80) e--;
             si_value_set(vm, at, data(v), e);
+            si_edited(vm, at);
             si_input_event(vm, at, "input", "", 0, 0, "deleteContentBackward");
         }
     } else if (go && k->ch && !(mods & (SI_CTRL | SI_ALT | SI_META))) {
@@ -1193,6 +1426,8 @@ static int si_key_named(js_vm *vm, const char *name, size_t n) {
 
 /* ---- a user's clicks ---- */
 
+static uint32_t si_lazy_hit(js_vm *vm, uint32_t x);
+
 /* a click (and a double click's second) where the element's box is: the pointer moved
    there, pressed and released, the click dispatched at the element under it */
 /* whether an event of a type has a listener anywhere: added, or an on* handler */
@@ -1227,23 +1462,38 @@ static int si_click_lazy(js_vm *vm, uint32_t x) {
 static int si_click(js_vm *vm, uint32_t x, int count) {
     struct js_host *h = vm->host;
     if (si_click_lazy(vm, x)) {
-        /* the pointer at x, its moves heard by no one */
+        /* the pointer at x, its moves heard by no one; the click's point left to be found,
+           the document copied before its first change */
         h->pt_lazy = x;
+        h->pt_click++;
+        h->pt_rev = dom_revision(h->d);
+        h->pt_found = 0;
+        h->pt_armed = 1;
+        h->pt_copied = 0;
         h->mouse_in = 1;
         h->hover = x;
+        uint32_t at = x;
         for (int k = 1; k <= count && !h->navigated; k++) {
-            int pd = si_mouse(vm, x, "pointerdown", 0, 0, 0, 1, 0, 0);
-            int md = pd && si_mouse(vm, x, "mousedown", 0, 0, 0, 1, k, 0);
-            if (md) si_press_focus(vm, x);
-            si_mouse(vm, x, "pointerup", 0, 0, 0, 0, 0, 0);
-            si_mouse(vm, x, "mouseup", 0, 0, 0, 0, k, 0);
+            /* x while the page is as the click began; else what the layout puts under the
+               point now (a listener moved x): a press's target, a release's, and the click at
+               their nearest common ancestor, as Chromium's */
+            uint32_t t = k == 1 ? x : si_lazy_hit(vm, x);
+            int pd = si_mouse(vm, t, "pointerdown", 0, 0, 0, 1, 0, 0);
+            int md = pd && si_mouse(vm, t, "mousedown", 0, 0, 0, 1, k, 0);
+            if (md) si_press_focus(vm, t);
+            uint32_t u = si_lazy_hit(vm, x);
+            if (u != t) si_boundary(vm, 0, 0, u);
+            si_mouse(vm, u, "pointerup", 0, 0, 0, 0, 0, 0);
+            si_mouse(vm, u, "mouseup", 0, 0, 0, 0, k, 0);
+            at = si_common(h->d, t, u);
+            if (!at) continue;
             jv ev = si_event(vm, "click", EV_TRUSTED | EV_BUBBLES | EV_CANCELABLE | EV_COMPOSED, HP_POINTEREVENT, k);
-            si_mouse_fields(vm, ev, x, 0, 0, 0, 0, 0, 1);
+            si_mouse_fields(vm, ev, at, 0, 0, 0, 0, 0, 1);
             h->click_ev = ev;
-            sh_click_at(vm, x, EV_TRUSTED);
+            sh_click_at(vm, at, EV_TRUSTED);
             h->click_ev = JV_UNDEF;
         }
-        if (count == 2 && !h->navigated) si_mouse(vm, x, "dblclick", 0, 0, 0, 0, 2, 0);
+        if (count == 2 && !h->navigated && at) si_mouse(vm, at, "dblclick", 0, 0, 0, 0, 2, 0);
         h->pt_lazy = 0;
         return 1;
     }
@@ -1265,21 +1515,30 @@ static int si_click(js_vm *vm, uint32_t x, int count) {
     double cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
     if (!h->mouse_in) si_move(vm, 0, 0);
     si_move(vm, cx, cy);
+    uint32_t at = 0;
     for (int k = 1; k <= count && !h->navigated; k++) {
         uint32_t t = si_hit(vm, cx, cy);
+        uint64_t rev = dom_revision(h->d);
         int pd = si_mouse(vm, t, "pointerdown", cx, cy, 0, 1, 0, 0);
         int md = pd && si_mouse(vm, t, "mousedown", cx, cy, 0, 1, k, 0);
         if (md) si_press_focus(vm, t);
-        si_mouse(vm, t, "pointerup", cx, cy, 0, 0, 0, 0);
-        si_mouse(vm, t, "mouseup", cx, cy, 0, 0, k, 0);
+        /* the release where the layout puts the point now, when a press's listener changed
+           the page (the boundary events first, the pointer now over another element); the
+           click at the nearest common ancestor of the two */
+        uint32_t u = dom_revision(h->d) == rev ? t : si_hit(vm, cx, cy);
+        if (u != t) si_boundary(vm, cx, cy, u);
+        si_mouse(vm, u, "pointerup", cx, cy, 0, 0, 0, 0);
+        si_mouse(vm, u, "mouseup", cx, cy, 0, 0, k, 0);
+        at = si_common(h->d, t, u);
+        if (!at) continue;
         /* the click, a mouse event of its own, through the click's behaviour and default */
         jv ev = si_event(vm, "click", EV_TRUSTED | EV_BUBBLES | EV_CANCELABLE | EV_COMPOSED, HP_POINTEREVENT, k);
-        si_mouse_fields(vm, ev, t, cx, cy, 0, 0, 0, 1);
+        si_mouse_fields(vm, ev, at, cx, cy, 0, 0, 0, 1);
         h->click_ev = ev;
-        sh_click_at(vm, t, EV_TRUSTED);
+        sh_click_at(vm, at, EV_TRUSTED);
         h->click_ev = JV_UNDEF;
     }
-    if (count == 2 && !h->navigated) si_mouse(vm, si_hit(vm, cx, cy), "dblclick", cx, cy, 0, 0, 2, 0);
+    if (count == 2 && !h->navigated && at) si_mouse(vm, at, "dblclick", cx, cy, 0, 0, 2, 0);
     return 1;
 }
 
@@ -1288,6 +1547,8 @@ int script_action(js_vm *vm, uint32_t kind, uint32_t x, const char *text, size_t
     if (h->navigated) return 0;
     script_ready(vm);
     h->phase = SCRIPT_PHASE_EVENT;
+    /* a press or a key activates the page (HTML 6.4.1's sticky activation); focus given alone does not */
+    if (kind != SCRIPT_ACT_FOCUS) h->activated = 1;
     int ok = 1;
     if (kind == SCRIPT_ACT_CLICK || kind == SCRIPT_ACT_DBLCLICK) ok = sh_is_elem(h->d, x) && si_click(vm, x, kind == SCRIPT_ACT_DBLCLICK ? 2 : 1);
     else if (kind == SCRIPT_ACT_FOCUS) { ok = sh_is_elem(h->d, x); if (ok) script_focus(vm, x); }
@@ -1431,6 +1692,27 @@ jv script_input_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args,
         }
         return ev;
     }
+    if (id == SI_RV_GET || id == SI_RV_SET) {
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_HOST || vm->objs[jv_idx(thisv)].c != HK_EVENT)
+            return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
+        if (id == SI_RV_GET) return si_rv(vm, thisv);
+        uint32_t t = jv_is_str(a0) ? jv_idx(a0) : js_to_string(vm, a0);
+        if (!t) return JV_HOLE;
+        js_define(vm, jv_idx(thisv), si_atom(vm, "\001rv"), jv_str(t), JS_SHAPE_HIDDEN);
+        return JV_UNDEF;
+    }
+    if (id >= SI_VS_FIRST && id <= SI_VS_LAST) {
+        /* a ValidityState's flag, read live from its element (src/html/forms.c) */
+        if (!jv_is_obj(thisv) || vm->objs[jv_idx(thisv)].kind != JK_HOST || vm->objs[jv_idx(thisv)].c != HK_VALIDITY)
+            return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
+        uint32_t o = jv_idx(thisv), x = vm->objs[o].a;
+        if (x >= d->node_len || !d->node[x].live || d->node[x].gen != vm->objs[o].b) return JV_FALSE;
+        static const uint32_t bits[10] = { FORM_V_MISSING, FORM_V_TYPE, FORM_V_PATTERN, FORM_V_LONG, FORM_V_SHORT, FORM_V_UNDER,
+                                           FORM_V_OVER, FORM_V_STEP, FORM_V_BAD, FORM_V_CUSTOM };
+        uint32_t f = si_flags(vm, x);
+        if (id == SI_VS_LAST) return jv_bool(f == 0);
+        return jv_bool((f & bits[id - SI_VS_FIRST]) != 0);
+    }
     switch (id) {
     case SI_MODIFIER: {
         if (!sh_utf8(vm, a0, &n)) return JV_HOLE;
@@ -1521,13 +1803,32 @@ jv script_input_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args,
         if (id == SI_FD_FOREACH) return JV_UNDEF;
         return js_iter_of(vm, jv_obj(out));
     }
+    case SI_SET_CUSTOM: {
+        uint32_t x = sh_node(vm, thisv, 0);
+        if (vm->throwing) return JV_HOLE;
+        if (!x || !script_listed(d, x)) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
+        if (!argc) {
+            char msg[200];
+            snprintf(msg, sizeof msg, "Failed to execute 'setCustomValidity' on '%s': 1 argument required, but only 0 present.", si_interface_name(d, x));
+            return js_throw_msg(vm, vm->type_error_proto, msg);
+        }
+        uint32_t m = jv_is_str(a0) ? jv_idx(a0) : js_to_string(vm, a0);
+        if (!m) return JV_HOLE;
+        jv w = sh_wrap(vm, x);
+        if (jv_is_obj(w)) js_define(vm, jv_idx(w), si_atom(vm, "\001custom"), jv_str(m), JS_SHAPE_HIDDEN);
+        return JV_UNDEF;
+    }
     case SI_SUBMIT: case SI_REQUEST_SUBMIT: case SI_RESET: case SI_CHECK_VALIDITY: case SI_REPORT_VALIDITY: {
         uint32_t form = sh_node(vm, thisv, 0);
         if (vm->throwing) return JV_HOLE;
+        /* a control's own check (HTML 4.10.20.3): a candidate that suffers from something fires
+           its invalid event; reported, the control focused when no listener cancelled it */
+        if ((id == SI_CHECK_VALIDITY || id == SI_REPORT_VALIDITY) && form && script_listed(d, form))
+            return script_control_validity(vm, form, id == SI_REPORT_VALIDITY);
         if (!form || !si_is(d, form, "form")) return js_throw_msg(vm, vm->type_error_proto, "Illegal invocation");
         if (id == SI_SUBMIT) { si_submit(vm, form, 0, 1); return JV_UNDEF; }
         if (id == SI_RESET) { si_reset(vm, form); return JV_UNDEF; }
-        if (id == SI_CHECK_VALIDITY || id == SI_REPORT_VALIDITY) return jv_bool(si_valid(vm, form, id == SI_REPORT_VALIDITY));
+        if (id == SI_CHECK_VALIDITY || id == SI_REPORT_VALIDITY) return jv_bool(si_form_valid(vm, form, id == SI_REPORT_VALIDITY));
         uint32_t submitter = 0;
         if (argc && !jv_is_nullish(a0)) {
             submitter = sh_node(vm, a0, 0);
@@ -1552,6 +1853,14 @@ jv script_input_get(js_vm *vm, uint32_t o, uint32_t atom, int *handled) {
     (void)atom;
     *handled = 0;
     return JV_UNDEF;
+}
+
+jv script_control_validity(js_vm *vm, uint32_t x, int report) {
+    const dom_document *d = vm->host->d;
+    int will = script_custom_face(vm->host, x) ? script_custom_will_validate(vm, x) : form_will_validate(d, x);
+    if (!will || !si_flags(vm, x)) return JV_TRUE;
+    if (sh_fire(vm, x, "invalid", EV_CANCELABLE) && report && vm->host->d->node[x].live && si_focusable(vm, x)) script_focus(vm, x);
+    return JV_FALSE;
 }
 
 /* ---- the globals ---- */
@@ -1586,6 +1895,8 @@ void script_input_setup(js_vm *vm) {
     uint32_t protos[] = { ui, mouse, pointer, key, focus, input, submit, formdata, popstate, hashchange };
     for (uint32_t i = 0; i < 10; i++) sh_interface(vm, names[i], SI_UIEVENT + i, protos[i]);
     sh_interface(vm, "BeforeUnloadEvent", SI_ILLEGAL, unload);
+    uint32_t rva = si_atom(vm, "returnValue");
+    js_define_accessor(vm, unload, rva, jv_obj(js_native_new(vm, SI_RV_GET, rva, 0)), jv_obj(js_native_new(vm, SI_RV_SET, rva, 1)), 0);
     /* the document's encoding, by each of its names */
     static const char *const cs[] = { "characterSet", "charset", "inputEncoding" };
     for (int i = 0; i < 3; i++) {
@@ -1606,6 +1917,18 @@ void script_input_setup(js_vm *vm) {
     sh_method(vm, elem, "reset", SI_RESET, 0);
     sh_method(vm, elem, "checkValidity", SI_CHECK_VALIDITY, 0);
     sh_method(vm, elem, "reportValidity", SI_REPORT_VALIDITY, 0);
+    sh_method(vm, elem, "setCustomValidity", SI_SET_CUSTOM, 1);
+    /* ValidityState: its flags read live, each an accessor of its prototype, in Chromium's order */
+    uint32_t vs = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    h->protos[HP_VALIDITYSTATE] = vs;
+    static const char *const vflags[11] = { "valueMissing", "typeMismatch", "patternMismatch", "tooLong", "tooShort", "rangeUnderflow",
+                                            "rangeOverflow", "stepMismatch", "badInput", "customError", "valid" };
+    for (uint32_t i = 0; i < 11; i++) {
+        uint32_t a = si_atom(vm, vflags[i]);
+        js_define_accessor(vm, vs, a, jv_obj(js_native_new(vm, SI_VS_FIRST + i, a, 0)), JV_UNDEF, 0);
+    }
+    js_define(vm, vs, JS_SYM_KEY | JSYM_TO_STRING_TAG, sh_cstr(vm, "ValidityState"), JS_SHAPE_HIDDEN);
+    sh_interface(vm, "ValidityState", SI_ILLEGAL, vs);
     sh_method(vm, h->protos[HP_DOCUMENT], "hasFocus", SI_HAS_FOCUS, 0);
 }
 
@@ -1621,12 +1944,14 @@ jv script_click_event(js_vm *vm, uint32_t trusted) {
 jv script_click_copy(js_vm *vm, jv ev) {
     uint32_t f = vm->objs[jv_idx(ev)].a & (EV_TRUSTED | EV_LAZYPOINT);
     jv x = vm->objs[jv_idx(ev)].x;
-    jv c = si_event(vm, "click", f | EV_BUBBLES | EV_CANCELABLE | EV_COMPOSED, HP_POINTEREVENT, jv_is_num(x) ? jv_dbl(x) : 0);
+    jv c = si_event(vm, "click", f | EV_LAZYOFFSET | EV_BUBBLES | EV_CANCELABLE | EV_COMPOSED, HP_POINTEREVENT, jv_is_num(x) ? jv_dbl(x) : 0);
     static const char *const fields[] = { "clientX", "clientY", "x", "y", "pageX", "pageY", "screenX", "screenY", "offsetX", "offsetY",
                                           "movementX", "movementY", "button", "buttons", "relatedTarget", "ctrlKey", "shiftKey", "altKey",
                                           "metaKey", "pointerId", "pointerType", "isPrimary", "width", "height", "pressure", "\001pt" };
-    /* a lazy click's point stays to be found, its coordinates not read here */
+    /* a lazy click's point stays to be found, its coordinates not read here; the copy's
+       offsets are its own target's, found when read */
     for (size_t i = (f & EV_LAZYPOINT) ? 10 : 0; i < sizeof fields / sizeof fields[0]; i++) {
+        if (i == 8 || i == 9) continue;
         jv v = js_get(vm, ev, si_atom(vm, fields[i]));
         if (v != JV_UNDEF) js_define(vm, jv_idx(c), si_atom(vm, fields[i]), v, i == 25 ? JS_SHAPE_HIDDEN : 0);
     }
@@ -1634,18 +1959,31 @@ jv script_click_copy(js_vm *vm, jv ev) {
     return c;
 }
 
-jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled) {
-    int which = -1;
-    for (int i = 0; i < 10 && which < 0; i++) if (atom == si_atom(vm, si_coords[i])) which = i;
-    if (which < 0) return JV_UNDEF;
+/* the document copied as the click began, before its first change since (the copy's
+   buffers those of the click before, used again) */
+void script_click_keep(js_vm *vm) {
     struct js_host *h = vm->host;
-    vm->objs[ev].a &= ~EV_LAZYPOINT;
-    jv at = js_get(vm, jv_obj(ev), si_atom(vm, "\001pt"));
-    uint32_t x = jv_is_num(at) ? (uint32_t)jv_dbl(at) : 0;
-    /* the centre of the element's box, the view as it is now */
+    h->pt_armed = 0;
+    if (h->pt_found || dom_revision(h->d) != h->pt_rev) return;
+    dom_copy(&h->pt_doc, h->d);
+    h->pt_copied = 1;
+}
+/* the point of a user's click left to be found (x the element it is at, click its number):
+   the centre of x's box as the layout had it when the click began -- the document's now
+   while it has not changed since, else its copy's, the click's own while it is the last
+   (an older click's, the document as it is now) */
+static void si_click_point(js_vm *vm, uint32_t x, uint32_t click, double *px, double *py) {
+    struct js_host *h = vm->host;
+    int mine = click && click == h->pt_click;
+    if (mine && h->pt_found) { *px = h->pt_cx; *py = h->pt_cy; return; }
+    int then = mine && h->pt_copied && dom_revision(h->d) != h->pt_rev;
     double cx = 0, cy = 0, r[4 * 64];
-    sh_view(vm);
-    uint32_t n = x && x < h->d->node_len && h->d->node[x].live ? script_view_rects(h, x, r, 64) : 0;
+    uint32_t n = 0;
+    if (then) n = x && x < h->pt_doc.node_len && h->pt_doc.node[x].live ? script_view_rects_of(h, &h->pt_doc, x, r, 64) : 0;
+    else {
+        sh_view(vm);
+        n = x && x < h->d->node_len && h->d->node[x].live ? script_view_rects(h, x, r, 64) : 0;
+    }
     if (n > 64) n = 64;
     if (n) {
         double x0 = r[0], y0 = r[1], x1 = r[0] + r[2], y1 = r[1] + r[3];
@@ -1658,10 +1996,38 @@ jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled) {
         cx = x0 + (x1 - x0) / 2;
         cy = y0 + (y1 - y0) / 2;
     }
-    jv t = js_get(vm, jv_obj(ev), si_atom(vm, "target"));
-    uint32_t target = jv_is_obj(t) ? sh_node(vm, t, 0) : 0;
-    vm->throwing = 0;
-    si_point_fields(vm, jv_obj(ev), target, cx, cy);
+    *px = cx;
+    *py = cy;
+    if (mine) { h->pt_found = 1; h->pt_armed = 0; h->pt_cx = cx; h->pt_cy = cy; }
+}
+/* a lazy click's target now: x while the document is as the click began, else the element
+   the layout puts under the click's point */
+static uint32_t si_lazy_hit(js_vm *vm, uint32_t x) {
+    struct js_host *h = vm->host;
+    if (dom_revision(h->d) == h->pt_rev) return x;
+    double cx = 0, cy = 0;
+    si_click_point(vm, x, h->pt_click, &cx, &cy);
+    return si_hit(vm, cx, cy);
+}
+jv script_event_point(js_vm *vm, uint32_t ev, uint32_t atom, int *handled) {
+    int which = -1;
+    for (int i = 0; i < 10 && which < 0; i++) if (atom == si_atom(vm, si_coords[i])) which = i;
+    if (which < 0) return JV_UNDEF;
+    uint32_t f = vm->objs[ev].a;
+    if (which < 8 ? !(f & EV_LAZYPOINT) : !(f & EV_LAZYOFFSET)) return JV_UNDEF;
+    if (f & EV_LAZYPOINT) {
+        /* its point, its click's (the element and the click's number kept) */
+        jv at = js_get(vm, jv_obj(ev), si_atom(vm, "\001pt"));
+        double u = jv_is_num(at) ? jv_dbl(at) : 0, cx = 0, cy = 0;
+        uint32_t click = (uint32_t)(u / 4294967296.0), x = (uint32_t)(u - (double)click * 4294967296.0);
+        vm->objs[ev].a &= ~EV_LAZYPOINT;
+        si_click_point(vm, x, click, &cx, &cy);
+        si_point_fields(vm, jv_obj(ev), cx, cy);
+    }
+    if (which >= 8) {
+        vm->objs[ev].a &= ~EV_LAZYOFFSET;
+        si_offset_fields(vm, jv_obj(ev));
+    }
     *handled = 1;
     return js_get(vm, jv_obj(ev), atom);
 }

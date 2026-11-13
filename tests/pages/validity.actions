@@ -1,0 +1,1 @@
+--click '#long' --key Backspace --type '#short' 'ab' --type '#short1' 'a' --type '#num' '1-x' --type '#cap' 'xyz' --click '#ta3' --key Backspace --click '#show'

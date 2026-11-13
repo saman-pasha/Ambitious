@@ -1,0 +1,44 @@
+interfaces: true true true true true true true HTMLTableCellElement
+new HTMLButtonElement: TypeError: Failed to construct 'HTMLButtonElement': Illegal constructor
+before the definition: HTMLButtonElement true
+MyButton constructed: BUTTON my-button
+MyButton connected: "b1"
+after the definition: true button true
+MyButton constructed: BUTTON null
+createElement: true <button is="my-button"></button> false
+MyButton constructed: BUTTON null
+new: BUTTON <button is="my-button"></button> button
+MyButton connected: ""
+MyButton attribute: title null t
+its name, autonomous: false HTMLElement
+extends a custom name: NotSupportedError: Failed to execute 'define' on 'CustomElementRegistry': "my-y" is a valid custom element name
+extends an unknown name: NotSupportedError: Failed to execute 'define' on 'CustomElementRegistry': "bogus" is an HTMLUnknownElement
+a class of the wrong interface: TypeError: Failed to construct 'HTMLDivElement': Illegal constructor: localName does not match the HTML element interface
+MyP constructed: p1
+MyButton constructed: BUTTON my-button
+innerHTML: true <button is="my-button" id="b4">x</button>
+formAssociatedCallback: mi1 f
+formAssociatedCallback: mi2 f
+internals: [object ElementInternals] true true true
+the form data: [["plain","x"],["mi","v-mi"],["mi2","v-mi2"]]
+the elements: plain,mi1,fs,mi2
+attached twice: NotSupportedError: Failed to execute 'attachInternals' on 'HTMLElement': ElementInternals for the specified element was already attached.
+a div: NotSupportedError: Failed to execute 'attachInternals' on 'HTMLElement': Unable to attach ElementInternals to non-custom elements.
+a customized built-in: NotSupportedError: Failed to execute 'attachInternals' on 'HTMLElement': Unable to attach ElementInternals to a customized built-in element.
+invalid: mi1 true
+validity: true false "need a value" false
+invalid: mi1 true
+the form checked: false
+valid again: true ""
+no message: TypeError: Failed to execute 'setValidity' on 'ElementInternals': The second argument should not be empty if one or more flags in the first argument are true.
+a null value: [["plain","x"],["mi2","v-mi2"]]
+states: true 1 [object CustomStateSet]
+formDisabledCallback: mi2 true
+disabled: true false
+formResetCallback: mi1
+formResetCallback: mi2
+formAssociatedCallback: nf f
+formAssociatedCallback: nf null
+not form-associated: NotSupportedError: Failed to read the 'form' property from 'ElementInternals': The target element is not a form-associated custom element.
+not form-associated: NotSupportedError: Failed to execute 'setFormValue' on 'ElementInternals': The target element is not a form-associated custom element.
+its states: object

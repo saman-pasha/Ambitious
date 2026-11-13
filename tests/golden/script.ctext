@@ -1,4 +1,4 @@
-/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:c8ec6ee6:9839). Do not edit. */
+/* Ambitious: the interface of module script, generated from contracts/script.pl (fnv1a32:211173de:9934). Do not edit. */
 typedef enum script_status { SCRIPT_OK, SCRIPT_STALE_HANDLE, SCRIPT_WRONG_KIND, SCRIPT_FAILED, SCRIPT_BAD_REQUEST, SCRIPT_NOT_REQUESTABLE, SCRIPT_STALE_REVISION } script_status;
 typedef enum script_source { SCRIPT_SOURCE_INLINE, SCRIPT_SOURCE_EXTERNAL, SCRIPT_SOURCE_ATTRIBUTE } script_source;
 typedef enum script_outcome { SCRIPT_OUTCOME_RAN, SCRIPT_OUTCOME_THREW, SCRIPT_OUTCOME_SYNTAX_ERROR, SCRIPT_OUTCOME_STOPPED, SCRIPT_OUTCOME_NOT_FETCHED, SCRIPT_OUTCOME_NOT_RUN } script_outcome;
@@ -33,7 +33,7 @@ typedef struct script_listener { uint32_t gen, live, free_next; script_listen_on
 typedef struct script_timer { uint32_t gen, live, free_next; uint32_t run; uint32_t delay; uint8_t repeats; uint32_t fired; script_timer_state state; } script_timer;
 typedef struct script_request { uint32_t gen, live, free_next; uint32_t run; script_api api; amb_span method; amb_span url; net_resource_h resource; uint32_t status; script_req_outcome outcome; uint8_t cross; } script_request;
 typedef struct script_write { uint32_t gen, live, free_next; uint32_t run; script_write_when when; uint32_t bytes; } script_write;
-typedef struct script_navigation { uint32_t gen, live, free_next; uint32_t run; script_nav_cause cause; amb_span method; amb_span url; dom_node_h form; dom_node_h submitter; amb_span target; net_resource_h resource; uint32_t status; uint32_t fields; } script_navigation;
+typedef struct script_navigation { uint32_t gen, live, free_next; uint32_t run; script_nav_cause cause; amb_span method; amb_span url; dom_node_h form; dom_node_h submitter; amb_span target; net_resource_h resource; uint32_t status; uint32_t fields; uint8_t asked; } script_navigation;
 typedef struct script_form_field { uint32_t gen, live, free_next; uint32_t navigation; amb_span name; dom_node_h control; } script_form_field;
 typedef struct script_observer { uint32_t gen, live, free_next; uint32_t run; uint8_t disconnected; uint32_t records; uint32_t calls; } script_observer;
 typedef struct script_storage { uint32_t gen, live, free_next; uint32_t run; script_storage_area area; script_storage_op op; amb_span key; uint32_t bytes; uint8_t secret; } script_storage;
@@ -189,7 +189,7 @@ const char *script_storage_op_name(script_storage_op x) {
     return "?";
 }
 
-const char script_fingerprint[] = "fnv1a32:c8ec6ee6:9839";
+const char script_fingerprint[] = "fnv1a32:211173de:9934";
 void script_init(script_runtime *d, uint32_t id) {
     if (d->run_len != 0) abort();
     d->id = id;
@@ -304,6 +304,7 @@ void script_export(const script_runtime *d, FILE *out) {
         if (1) { fputs("script_navigation_target(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); text_put(d, out, d->navigation[i].target); fputs(").\n", out); }
         if (1) { fputs("script_navigation_resource(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); amb_put_ref(out, "rs", d->navigation[i].resource.doc, d->navigation[i].resource.index, d->navigation[i].resource.gen); fputs(").\n", out); }
         if (d->navigation[i].status != 0) { fputs("script_navigation_status(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(",", out); fprintf(out, "%lld", (long long)d->navigation[i].status); fputs(").\n", out); }
+        if (d->navigation[i].asked == 1) { fputs("script_navigation_asked(", out); amb_put_handle(out, "sn", d->id, i, d->navigation[i].gen); fputs(").\n", out); }
     }
     for (uint32_t i = 1; i < d->form_field_len; i++) {
         if (!d->form_field[i].live) continue;

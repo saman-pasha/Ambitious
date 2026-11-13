@@ -1571,6 +1571,55 @@ be built side by side and merged without touching each other's.
   The tables: `unicode.h` 505 KB, then 523 KB; `normalize.h` 183 KB, then 186 KB. The js stage 39 s longer (the new
   pages 18.6, 9.6 and 8.6 s, normalize.js 3.1 s from 2.0), no page's peak resident size past 300 MB: their loops run
   a timer at a time, the collector between them.
+- **12af Scripts' rest** (`src/html/forms.c` and `forms.h`, the form controls' one account, which the parser, the
+  scripts, the cascade, layout and accessibility share; an input's checkedness a node field and an operation of
+  `contracts/dom.pl`, read by `src/dom/dom.h`'s `dom_checkedness`; a document's copy in `src/dom/dom.c`;
+  `src/script/input.c`, `src/script/custom.c`, `src/script/script.c` and `src/script/view.c`; the global's
+  prototype in `src/js/builtins.c`), each measured in Chromium 153 first:
+  - constraint validation (HTML 4.10.20): each listed element's `validity` (a live ValidityState of the eleven
+    flags), `willValidate`, `validationMessage` in Chromium's English (an e-mail's seven texts, dates and times as
+    en-US writes them, a step's nearest values), `setCustomValidity`, `checkValidity()` and `reportValidity()`, a
+    form's too; `invalid` as Chromium fires it, a report's focus (rendered and visible) and Chromium's console
+    error for each control that cannot take it; too long and too short only once the user's edit changed the
+    value (typing kept to maxlength, a number field to a number's characters, else badInput); accessibility's
+    validity the same flags, its own copy gone;
+  - checkedness the DOM's state: the checked IDL attribute and its dirty flag, defaultChecked, a click and a
+    cancelled one, radio groups (an insertion's, a name's, type's or form's change, the parse's last checked one),
+    a reset, a clone; the cascade's `:checked`, layout's box, accessibility and a form's entries reading it;
+  - beforeunload that cancels (preventDefault, returnValue, a handler's return value), Chromium's console error
+    without a user's gesture, the navigation going on as Chromium's does once its dialog is accepted, the
+    question a fact (`script_navigation_asked/1`);
+  - module scripts a script inserts run, inline or external, each in a task of its own (an inserted import map
+    merged; an external one's error event and no console line, as Chromium 153's); over `file:`, the refused
+    modules' console lines in the order Chromium's preload scanner asks for them;
+  - a user's click's coordinates where the pointer was as it began, whatever its listeners move: the document
+    copied a buffer at a time before the first change after the click began, that copy laid out only when a
+    coordinate is read after a change; an event's offsets from its target's box when first read, then kept; a
+    release found again once a press's listener changed the page, the boundary events first when the pointer
+    is over another element, the click at the press's and the release's nearest common ancestor; a script's
+    `click()` during a user's click without a position;
+  - customized built-in elements (`extends`, `is=`, `createElement`'s `is`, a class's `new` and its checks, the
+    `is` value serialized) over the HTML element interfaces (69 constructors and Chromium's prototype chain, made
+    when a script first names one), and form-associated custom elements (`attachInternals`, ElementInternals'
+    form value, validity and `CustomStateSet`, a form's elements, entries, validation and reset, the form
+    callbacks);
+  - a form sent in a legacy encoding through the Encoding standard's encoders (Shift_JIS, EUC-KR, GBK, gb18030,
+    EUC-JP, Big5, ISO-2022-JP, windows-1252), a character the encoding lacks as `&#N;`.
+
+  Gate: each page's console against Chromium's, line for line: `tests/pages/validity.html` (123 lines),
+  `checked.html` (36), `click-point.html` (25), `unload.html` (63, ten ways), `form-sjis.html`, `form-euckr.html`
+  and `form-gbk.html` (36), `modules-inserted.html` (17) and `modules.html` over file: (21), `custom-forms.html`
+  (44) (`tests/integ/script-input.sh`, `script-modules.sh` and `script-custom.sh`); the accessibility tree's
+  checked states after the clicks; every accessibility gate's output as it was.
+
+  Cost (callgrind's instructions against the merge base): news.html's render 213.92M, as before; a page of one
+  inline script 12.50M, then 12.66M (the new interfaces' prototypes and accessors made); the 2000-item page a
+  script builds 250.83M, then 249.84M, and a click on it 293.01M, then 293.60M, 0.5M of it the document's copy.
+  The HTML element interfaces made at once took the one-script page to 13.43M, so they are made when a script
+  first names one (the global's prototype, an object the engine makes for a host, answers their names until
+  then), and each element's wrapper keeps HTMLElement's prototype until then, one shape in the engine's caches.
+  The copy's layout, and a release's second hit test, run only when a listener changed the page and a
+  coordinate or the release's target depends on it.
 - **The toolchain's findings** are cicilang's and cocolog's to fix, upstream;
   their workarounds stay until then.
 
