@@ -1,0 +1,27 @@
+# boxes of tests/pages/lb-hyphens.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+h-a div 8 8 90 160
+h-b div 8 174 60 160
+h-c div 8 340 120 100
+h-d div 8 446 60 60
+h-e div 8 512 90 40
+h-f div 8 558 90 40
+h-g div 8 604 90 100
+g1 span 8 605 79.094 17
+g2 span 8 625 71.984 37
+h-h div 8 710 60 100
+h-i div 8 816 60 20
+h-j div 8 842 60 120
+h-k div 8 968 36.438 240
+h-l div 8 1214 40 120
+h-m td 10 1348 39.094 220
+h-m2 td 51.094 1348 8 220
+h-n div 8 1576 48.875 100
+h-o span 8 1688 27.547 140
+h-p div 8 1834 160 40
+h-q div 8 1880 60 100
+h-r div 8 1986 60 40
+h-s div 8 2032 70 80
+h-t div 8 2118 50 80
+h-u div 8 2204 60 160
+h-v div 8 2370 55.969 160
+h-w div 8 2536 100 140

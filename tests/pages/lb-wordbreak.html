@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: word-break, overflow-wrap, line-break</title>
+<style>
+/* tests/pages/lb-wordbreak.html -- word-break (break-all: a break between any two letters, Latin's and CJK's alike,
+   none before or after the punctuation break-all's table keeps; keep-all: no break between CJK letters;
+   break-word: normal with overflow-wrap: anywhere), overflow-wrap (anywhere and break-word: a word too long for
+   its line broken at the last grapheme that fits) and line-break: anywhere (a break between any two graphemes),
+   each in narrow boxes, and shrunk to fit (a float, an inline-block) where anywhere and break-word's min-content
+   widths part. Held to Chromium's boxes (lb-wordbreak.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px sans-serif; }
+div { margin: 0 0 6px; background: #eef; width: 80px; }
+span { background: #fd8; }
+.f { float: left; width: auto; margin-right: 6px; clear: none; }
+.ib { display: inline-block; width: auto; }
+.clear { clear: both; height: 0; margin: 0; }
+</style></head>
+<body>
+<div id="text-a" style="word-break: break-all">Supercalifragilistic expialidocious words</div>
+<div id="text-b" style="word-break: break-all">日本語とEnglishの混在テキスト。</div>
+<div id="text-c" style="word-break: break-all">(paren) "quote" end. a-b x/y 1,234</div>
+<div id="text-d" style="word-break: keep-all">日本語の文章、keep-allなら句読点で改行。</div>
+<div id="text-e" style="word-break: break-word">Antidisestablishmentarianism is long</div>
+<div id="text-f" style="overflow-wrap: anywhere">Antidisestablishmentarianism is long</div>
+<div id="text-g" style="overflow-wrap: break-word">Antidisestablishmentarianism is long</div>
+<div id="text-h" style="word-wrap: break-word">https://example.com/averyveryverylongpathname</div>
+<div id="text-i">Antidisestablishmentarianism overflows</div>
+<div id="text-j" style="line-break: anywhere">anywhere breaks every letter, even (here)!</div>
+<div id="text-k" style="line-break: anywhere">日本語「かな」、。</div>
+<div id="text-l" style="overflow-wrap: anywhere"><span id="l1">Pneumonoultra</span>microscopic</div>
+<div id="nar" style="width: 40px; background: none">
+<div id="f1" class="f" style="overflow-wrap: anywhere">Antidisestablishment</div>
+<div id="f2" class="f" style="overflow-wrap: break-word">Antidisestablishment</div>
+<div id="f3" class="f" style="word-break: break-word">Antidisestablishment</div>
+<div id="f4" class="f" style="word-break: break-all">Antidisestablishment</div>
+<div id="f5" class="f" style="line-break: anywhere">Antidisestablishment</div>
+<div id="f6" class="f">日本語の文章</div>
+<div id="f7" class="f" style="word-break: keep-all">日本語の文章</div>
+<div class="clear"></div>
+</div>
+<div id="text-m" style="width: 40px">x <span id="m1" class="ib" style="overflow-wrap: anywhere">anywhere-word</span> y
+<span id="m2" class="ib" style="overflow-wrap: break-word">break-word</span> z</div>
+<div id="text-n" style="word-break: break-all; width: 100px">한국어 단어도 break-all이면 음절마다.</div>
+</body></html>

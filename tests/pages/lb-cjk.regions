@@ -1,0 +1,22 @@
+# tests/pages/lb-cjk.html in Chromium (tools/bench/shot.js): id, x0, y0, x1, y1 of each element with an id
+text-a 8 8 108 108
+text-b 8 114 138 214
+b1 8 135 122 172
+text-c 8 220 108 320
+c1 8 301 40 318
+text-d 8 326 83 426
+text-e 8 432 83 532
+text-f 8 538 83 618
+text-g 8 624 138 724
+text-h 8 730 138 830
+text-i 8 836 108 956
+text-j 8 962 108 1082
+text-k 8 1088 138 1188
+k1 57 1089 128 1106
+k2 8 1149 135 1186
+text-l 8 1194 69 1334
+text-m 8 1340 83 1440
+text-n 8 1446 83 1566
+text-o 8 1572 108 1632
+text-p 8 1638 108 1678
+p1 8 1639 356 1676

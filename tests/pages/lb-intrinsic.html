@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: min-content and max-content widths</title>
+<style>
+/* tests/pages/lb-intrinsic.html -- the min-content width (the widest piece no break opportunity divides) and the
+   max-content width that line breaking's opportunities give boxes sized by their content: width: min-content,
+   max-content and fit-content, floats, inline-blocks, table cells, flex items and grid tracks, over CJK text
+   (each ideograph a piece), hyphenated words (broken after their hyphens), soft hyphens (a piece with its hyphen),
+   break-all, keep-all, overflow-wrap: anywhere (each grapheme a piece) and break-word (its pieces as normal's).
+   Held to Chromium's boxes (lb-intrinsic.chromium) */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.b { background: #eef; margin: 0 0 4px; }
+.min { width: min-content; } .max { width: max-content; } .fit { width: fit-content; }
+.f { float: left; clear: left; }
+table { border-collapse: separate; margin: 0 0 4px; }
+td { background: #eef; padding: 0; }
+.flex { display: flex; width: 300px; margin: 0 0 4px; }
+.flex > div { background: #fd8; flex: 0 1 auto; }
+.grid { display: grid; grid-template-columns: min-content max-content auto; width: 400px; margin: 0 0 4px; }
+.grid > div { background: #dfd; }
+.nar { width: 30px; display: flow-root; }
+</style></head>
+<body>
+<div id="m1" class="b min">日本語の文章です。</div>
+<div id="m2" class="b min">well-known state-of-the-art</div>
+<div id="m3" class="b min">hyph&shy;en&shy;ation</div>
+<div id="m4" class="b min" style="hyphens: none">hyph&shy;en&shy;ation</div>
+<div id="m5" class="b min" style="word-break: break-all">Antidisestablishment</div>
+<div id="m6" class="b min" style="word-break: keep-all">日本語の文章、です。</div>
+<div id="m7" class="b min" style="overflow-wrap: anywhere">Antidisestablishment</div>
+<div id="m8" class="b min" style="overflow-wrap: break-word">Antidisestablishment</div>
+<div id="m9" class="b min">「括弧」（括弧）、句読点。</div>
+<div id="m10" class="b min">価格は$12.50と50%です</div>
+<div id="m11" class="b max">日本語の文章です。 And English text.</div>
+<div id="m12" class="b fit" style="max-width: 100px">日本語の文章ですね。</div>
+<div class="nar"><div id="f1" class="b f">中文段落测试</div></div>
+<div class="nar"><div id="f2" class="b f">한국어 단어</div></div>
+<div class="nar"><div id="f3" class="b f" style="word-break: keep-all">한국어 단어</div></div>
+<div class="nar"><div id="f4" class="b f">e-mail x-ray</div></div>
+<table id="t1" style="width: 10px"><tr><td id="c1">日本語</td><td id="c2">well-known</td><td id="c3" style="overflow-wrap: anywhere">anywhere</td>
+<td id="c4" style="overflow-wrap: break-word">breakword</td></tr></table>
+<table id="t2"><tr><td id="c5">日本語の文章です。</td><td id="c6">English words here</td></tr></table>
+<div id="x1" class="flex"><div id="i1">日本語の長い文章をここに書きます。とても長い文章です。</div><div id="i2">another item with words</div></div>
+<div id="x2" class="flex" style="width: 120px"><div id="i3">日本語の文章</div><div id="i4" style="word-break: keep-all">日本語の文章</div></div>
+<div id="g1" class="grid"><div id="gi1">日本語の文章</div><div id="gi2">日本語の文章</div><div id="gi3">auto</div></div>
+<div style="width: 60px"><span id="ib1" class="b" style="display: inline-block">日本語の文章です</span></div>
+</body></html>

@@ -11,7 +11,7 @@
 
 /* the properties of a computed style: every value of enum(prop) before custom (the flow-relative
    ones after it are declarations' alone) */
-#define CSS_NPROPS 188
+#define CSS_NPROPS 191
 
 /* a writing mode, as layout and the cascade number writing-mode's values */
 enum { CSS_WM_HTB, CSS_WM_VRL, CSS_WM_VLR, CSS_WM_SRL, CSS_WM_SLR };

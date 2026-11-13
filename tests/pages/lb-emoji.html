@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: emoji</title>
+<style>
+/* tests/pages/lb-emoji.html -- emoji in narrow lines, broken as Chromium breaks them: a break between two emoji
+   (ideographic: LB31), none inside a ZWJ sequence (LB8a: each sequence a line of its own in a box too narrow for
+   two), between an emoji base and its skin tone modifier (LB30b), inside a flag's pair of regional indicators
+   (LB30a) or a keycap; emoji after letters and among CJK text; break-all and anywhere about them. Colour emoji are
+   measured but not drawn, and a ZWJ sequence is measured as its emoji side by side (docs/limitations.md), so the
+   page is held to Chromium's boxes alone (lb-emoji.chromium), the sequences' boxes too narrow for two */
+body { margin: 8px; font: 16px/20px sans-serif; }
+div { margin: 0 0 6px; background: #eef; width: 60px; }
+span { background: #fd8; }
+.z { width: 30px; }
+</style></head>
+<body>
+<div id="e1">😀😃😄😁😆😅🤣😂🙂🙃</div>
+<div id="e2" class="z">👨‍👩‍👧‍👦👩‍💻🧑‍🚀🏳️‍🌈</div>
+<div id="e3">👍🏻👍🏼<span id="e3a">👍🏽</span>👍🏾👍🏿👋🏻</div>
+<div id="e4">🇯🇵🇺🇸<span id="e4a">🇫🇷</span>🇩🇪🇬🇧🇨🇦</div>
+<div id="e5" class="z">1️⃣2️⃣3️⃣#️⃣*️⃣</div>
+<div id="e6">smile😀ok👍done</div>
+<div id="e7">日本😀語👍の文😂章</div>
+<div id="e8" style="word-break: break-all">abc😀def👍ghi</div>
+<div id="e9" style="line-break: anywhere">ab😀cd👍🏽ef</div>
+<div id="e10">💔<span id="e10a">💕</span>💞💓🌸🍣</div>
+<div id="e11" class="z">👩🏽‍💻👨🏻‍🍳</div>
+</body></html>

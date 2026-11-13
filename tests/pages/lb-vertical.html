@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: vertical CJK text</title>
+<style>
+/* tests/pages/lb-vertical.html -- Japanese and Chinese in vertical lines (writing-mode vertical-rl and vertical-lr,
+   CSS Writing Modes 4) broken into columns as Chromium breaks them: between ideographs and kana, none before
+   closing punctuation or small kana under strict, a Latin word turned and kept whole, a float and an inline-block
+   of vertical text shrunk to their columns. Held to Chromium's boxes (lb-vertical.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px sans-serif; }
+.v { writing-mode: vertical-rl; height: 100px; float: left; margin-right: 8px; background: #eef; }
+.lr { writing-mode: vertical-lr; }
+span { background: #fd8; }
+</style></head>
+<body>
+<div id="text-a" class="v">縦書きの日本語の文章は、行の高さで折り返されて次の列に続く。</div>
+<div id="text-b" class="v">「かぎかっこ」と（丸括弧）、句読点。の位置を確かめる。</div>
+<div id="text-c" class="v" lang="ja" style="line-break: strict">ちょっとまって、コーヒーをのみませんか？</div>
+<div id="text-d" class="v">日本語とEnglishの混ざった縦書きの段落です。</div>
+<div id="text-e" class="v lr">左から右へ並ぶ縦書きの列、折り返しの確認。</div>
+<div id="text-f" class="v" style="text-orientation: upright">縦中ABC横の文字列</div>
+<div id="text-g" class="v" style="word-break: keep-all">日本語の文章、keep-allの縦書き。</div>
+<div id="text-h" class="v" style="height: 64px">中文竖排的段落，汉字之间可以换行。</div>
+</body></html>

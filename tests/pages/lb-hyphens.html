@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: hyphens</title>
+<style>
+/* tests/pages/lb-hyphens.html -- hyphenation as Chromium hyphenates: hyphens: auto in English (en, en-US) by the
+   patterns Chromium has (Android's en-US: two letters at least before a hyphen, three after), no capitalized word
+   hyphenated, nor the paragraph's last word after a line's first, the rest of a word a line begins in hyphenated
+   as a word of its own, punctuation and quotes around a word left out of it, no hyphenation without a language;
+   soft hyphens (manual, the default: a break that shows a hyphen when taken; none: no break; auto: a break, the
+   parts hyphenated by the patterns too); the min-content width of hyphenated text (Blink's parts of each word),
+   in floats, table cells, flex items, inline blocks and width: min-content. Held to Chromium's boxes
+   (lb-hyphens.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px serif; }
+div { margin: 0 0 6px; background: #eef; width: 90px; }
+span { background: #fd8; }
+.a { hyphens: auto; }
+.n { width: 60px; } .m { width: 120px; } .w { width: 160px; }
+.wrap { width: auto; background: none; display: flow-root; }
+table { margin: 0 0 6px; }
+td { padding: 0; background: #efe; }
+</style></head>
+<body>
+<div id="h-a" class="a" lang="en">Representatives of international organizations demonstrated understanding of responsibility</div>
+<div id="h-b" class="a n" lang="en">communication possibility photographer nevertheless</div>
+<div id="h-c" class="a m" lang="en-US">(hyphenation), “characteristics”, extraordinarily—incomprehensible; ‘unbelievable’</div>
+<div id="h-d" class="a n">communication possibility photographer</div>
+<div id="h-e" class="a" lang="en" style="text-transform: uppercase">organization demonstration</div>
+<div id="h-f" class="a" lang="en" style="text-transform: capitalize">organization demonstration</div>
+<div id="h-g" class="a" lang="en"><span id="g1">hyphenation</span> <span id="g2">demonstration</span> characteristics</div>
+<div id="h-h" class="n">super&shy;cali&shy;fragilistic&shy;expiali&shy;docious</div>
+<div id="h-i" class="n" style="hyphens: none">super&shy;cali&shy;fragilistic&shy;expiali&shy;docious</div>
+<div id="h-j" class="a n" lang="en">ex&shy;traordinarily in&shy;comprehensibility</div>
+<div id="h-k" class="a" lang="en" style="width: min-content">hyphenation extraordinarily representatives</div>
+<div class="wrap" style="width: 40px"><div id="h-l" class="a" lang="en" style="float: left; width: auto">photographer communication</div></div>
+<table style="width: 50px"><tr><td id="h-m" class="a" lang="en">responsibility nevertheless understanding</td><td id="h-m2">x</td></tr></table>
+<div class="wrap" style="display: flex; width: 40px"><div id="h-n" class="a" lang="en" style="width: auto">characteristics demonstration</div></div>
+<div class="wrap"><span id="h-o" class="a" lang="en" style="display: inline-block; width: min-content">organization possibility</span></div>
+<div id="h-p" class="a w" lang="en">a few words and then demonstration</div>
+<div id="h-q" class="a n" lang="en">abc123defghij co-operation don't-stop</div>
+<div id="h-r" class="a n" lang="en" style="letter-spacing: 2px">organization</div>
+<div id="h-s" class="m" style="width: 70px">extra&shy;ordinarily in&shy;com&shy;pre&shy;hen&shy;si&shy;ble</div>
+<div id="h-t" class="a" lang="en" style="width: 50px">international nevertheless</div>
+<div id="h-u" class="a n" lang="en-GB">communication possibility photographer nevertheless</div>
+<div id="h-v" class="a" lang="en-AU" style="width: min-content">hyphenation extraordinarily representatives</div>
+<div id="h-w" class="a" lang="en-GB" style="width: 100px">The university published its manuscript, however the representatives were unconvinced</div>
+</body></html>

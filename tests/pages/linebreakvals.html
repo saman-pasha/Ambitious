@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html><head><title>word-break, line-break and overflow-wrap: computed values</title>
+<style>body { margin: 8px; font: 10px serif; } .k { word-break: keep-all; line-break: strict; overflow-wrap: anywhere; }
+.k > .i { word-break: inherit; line-break: inherit; overflow-wrap: inherit; }</style></head><body>
+<p><span id="v1" data-check="word-break line-break overflow-wrap">initial</span>
+<span id="v2" data-check="word-break" style="word-break:break-all">break-all</span>
+<span id="v3" data-check="word-break" style="word-break:keep-all">keep-all</span>
+<span id="v4" data-check="word-break" style="word-break:break-word">break-word</span>
+<span id="v5" data-check="word-break" style="word-break:auto-phrase">auto-phrase</span>
+<span id="v6" data-check="word-break" style="word-break:normal">normal</span>
+<span id="v7" data-check="word-break" style="word-break:BREAK-ALL">upper case</span>
+<span id="v8" data-check="word-break" style="word-break:break-all;word-break:anywhere">invalid kept</span>
+<span id="v9" data-check="word-break" style="-epub-word-break:break-all">-epub- alias</span>
+<span id="v10" data-check="line-break" style="line-break:loose">loose</span>
+<span id="v11" data-check="line-break" style="line-break:normal">normal</span>
+<span id="v12" data-check="line-break" style="line-break:strict">strict</span>
+<span id="v13" data-check="line-break" style="line-break:anywhere">anywhere</span>
+<span id="v14" data-check="line-break" style="line-break:auto">auto</span>
+<span id="v15" data-check="line-break" style="line-break:after-white-space">after-white-space</span>
+<span id="v16" data-check="line-break" style="-webkit-line-break:strict">-webkit- strict</span>
+<span id="v17" data-check="line-break" style="-webkit-line-break:after-white-space">-webkit- after-white-space</span>
+<span id="v18" data-check="line-break" style="line-break:Strict">mixed case</span>
+<span id="v19" data-check="line-break" style="line-break:loose;line-break:keep-all">invalid kept</span>
+<span id="v20" data-check="overflow-wrap" style="overflow-wrap:break-word">break-word</span>
+<span id="v21" data-check="overflow-wrap" style="overflow-wrap:anywhere">anywhere</span>
+<span id="v22" data-check="overflow-wrap" style="overflow-wrap:normal">normal</span>
+<span id="v23" data-check="overflow-wrap" style="word-wrap:break-word">word-wrap</span>
+<span id="v24" data-check="overflow-wrap" style="word-wrap:anywhere">word-wrap anywhere</span>
+<span id="v25" data-check="overflow-wrap" style="overflow-wrap:break-word;word-wrap:normal">alias last</span>
+<span id="v26" data-check="overflow-wrap" style="overflow-wrap:break-all">invalid</span>
+<span id="v27" class="k" data-check="word-break line-break overflow-wrap">from a rule<span id="v28" class="i" data-check="word-break line-break overflow-wrap"> inherited when asked</span></span>
+<span class="k"><span id="v29" data-check="word-break line-break overflow-wrap">inherited</span></span>
+<span class="k"><span id="v30" data-check="word-break line-break overflow-wrap" style="word-break:initial;line-break:initial;overflow-wrap:initial">initial</span></span>
+<span class="k"><span id="v31" data-check="word-break line-break overflow-wrap" style="word-break:unset;line-break:unset;overflow-wrap:unset">unset</span></span>
+<textarea id="v32" data-check="overflow-wrap word-break">a textarea</textarea>
+<span id="v33" data-check="word-break line-break" lang="ja" style="line-break:loose">lang ja</span>
+<span id="v34" data-check="overflow-wrap" style="overflow-wrap:break-word anywhere">two values</span>
+</p></body></html>

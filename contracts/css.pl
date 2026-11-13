@@ -83,6 +83,10 @@ css_contract(enum(prop, [display, color, background_color, font_size, font_weigh
     %% CSS Writing Modes 4: a vertical line's glyphs' orientation (mixed, upright or sideways) and text-combine-upright
     %% (none, or all: the text set in one em across the line), both inherited
     text_orientation, text_combine_upright,
+    %% CSS Text 3's line breaking, each inherited: word-break (normal, break-all, keep-all, break-word, auto-phrase),
+    %% line-break (auto, loose, normal, strict, anywhere; -webkit-line-break's after-white-space) and overflow-wrap
+    %% (normal, break-word, anywhere; word-wrap its other name)
+    word_break, line_break, overflow_wrap,
     custom,
     %% CSS Logical 1's flow-relative properties, after custom: no computed style holds them. A declaration of one is
     %% kept as such; the cascade takes it for the physical property its element's writing-mode and direction map it

@@ -1,0 +1,22 @@
+# boxes of tests/pages/lb-cjk.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-a div 8 8 100 100
+text-b div 8 114 130 100
+b1 span 8 135 113.125 37
+text-c div 8 220 100 100
+c1 span 8 301 32 17
+text-d div 8 326 75 100
+text-e div 8 432 75 100
+text-f div 8 538 75 80
+text-g div 8 624 130 100
+text-h div 8 730 130 100
+text-i div 8 836 100 120
+text-j div 8 962 100 120
+text-k div 8 1088 130 100
+k1 span 57.281 1089 70.266 17
+k2 span 8 1149 126.672 37
+text-l div 8 1194 61 140
+text-m div 8 1340 75 100
+text-n div 8 1446 75 120
+text-o div 8 1572 100 60
+text-p div 8 1638 100 40
+p1 span 8 1639 347.406 37

@@ -1,0 +1,21 @@
+# boxes of tests/pages/lb-latin.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+text-a div 8 8 90 80
+a1 span 8 49 78.188 37
+text-b div 8 94 50 60
+text-c div 8 160 120 40
+text-d div 8 206 50 140
+text-e div 8 352 90 40
+text-f div 8 398 50 60
+text-g div 8 464 50 100
+text-h div 8 570 50 100
+text-i div 8 676 50 80
+text-j div 8 762 50 80
+j1 span 8 803 39.984 37
+text-k div 8 848 50 40
+text-l div 8 894 50 80
+text-m div 8 980 50 80
+text-n div 8 1066 120 40
+n1 span 29.328 1067 25.766 17
+n2 span 37.328 1087 32 17
+text-o div 8 1112 50 80
+text-p div 8 1198 50 80

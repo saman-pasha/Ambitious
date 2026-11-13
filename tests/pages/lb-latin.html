@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Line breaking: Latin text</title>
+<style>
+/* tests/pages/lb-latin.html -- Latin text broken into lines as Chromium breaks it: after a hyphen (but before a
+   digit after one that follows no letter or digit), after ? and before ( [ { < (Blink's fast table for ASCII),
+   after U+2010 and the en dash, about the em dash, URLs at their slashes alone where a letter does not follow,
+   numbers with their currency and percent signs kept whole, no break before ! ? ) or after (, the zero-width
+   space a break, the word joiner and the no-break space none, a wbr a break, soft hyphens (manual: a hyphen
+   shown where the line breaks; none: not a break). Held to Chromium's boxes (lb-latin.chromium) and its drawing */
+body { margin: 8px; font: 16px/20px serif; }
+div { margin: 0 0 6px; background: #eef; width: 90px; }
+span { background: #fd8; }
+.n { width: 50px; } .m { width: 120px; }
+</style></head>
+<body>
+<div id="text-a">well-known self-evident <span id="a1">state-of-the-art</span> e-mail</div>
+<div id="text-b" class="n">x-1 a-1 1-2 (-1) -12</div>
+<div id="text-c" class="m">https://example.com/path/to/a/page?query=value&amp;other=thing</div>
+<div id="text-d" class="n">$12.50 50% (100) €3,000 ¥1,980 £9.99 -5°C</div>
+<div id="text-e">What?Why!Who.Where,When;How:Then</div>
+<div id="text-f" class="n">a‐b c–d e—f g―h</div>
+<div id="text-g" class="n">and/or a(b)c [x]y {z}w &lt;tag&gt;</div>
+<div id="text-h" class="n">zero&#x200B;width&#x200B;space no&#x2060;join&#x2060;here non&nbsp;breaking</div>
+<div id="text-i" class="n">long<wbr>word<wbr>with<wbr>wbrs</div>
+<div id="text-j" class="n">hyph&shy;en&shy;ation <span id="j1">ex&shy;am&shy;ple</span></div>
+<div id="text-k" class="n" style="hyphens: none">hyph&shy;en&shy;ation ex&shy;am&shy;ple</div>
+<div id="text-l" class="n">“quoted” «guillemets» ‘single’ "plain"</div>
+<div id="text-m" class="n">1,000,000 3.14159 10:30 2024/05/06</div>
+<div id="text-n" class="m">foo<span id="n1">-bar</span>baz qux(<span id="n2">quux</span>)</div>
+<div id="text-o" class="n">C++ c# f(x) x+y a=b</div>
+<div id="text-p" class="n" style="font-family: monospace">mono-spaced text-here</div>
+</body></html>

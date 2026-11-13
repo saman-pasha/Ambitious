@@ -38,6 +38,14 @@ inline-cb: 56 of 56 boxes within 1px of Chromium's
 irender: 17 of 17 boxes within 1px of Chromium's
 italic: 24 of 24 boxes within 1px of Chromium's
 layout: 25 of 25 boxes within 1px of Chromium's
+lb-cjk: 21 of 21 boxes within 1px of Chromium's
+lb-emoji: 14 of 14 boxes within 1px of Chromium's
+lb-hyphens: 26 of 26 boxes within 1px of Chromium's
+lb-intrinsic: 35 of 35 boxes within 1px of Chromium's
+lb-latin: 20 of 20 boxes within 1px of Chromium's
+lb-punct: 34 of 34 boxes within 1px of Chromium's
+lb-vertical: 8 of 8 boxes within 1px of Chromium's
+lb-wordbreak: 25 of 25 boxes within 1px of Chromium's
 legend-wide: 37 of 37 boxes within 1px of Chromium's
 legend: 17 of 17 boxes within 1px of Chromium's
 ljpeg: 11 of 11 boxes within 1px of Chromium's

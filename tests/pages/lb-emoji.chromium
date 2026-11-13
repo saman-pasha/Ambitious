@@ -1,0 +1,15 @@
+# boxes of tests/pages/lb-emoji.html in Chromium (tools/bench/boxes.js): id, tag, x, y, width, height
+e1 div 8 8 60 80
+e2 div 8 94 30 80
+e3 div 8 180 60 40
+e3a span 47.938 181 19.969 17
+e4 div 8 226 60 40
+e4a span 47.938 227 19.969 17
+e5 div 8 272 30 20
+e6 div 8 298 60 60
+e7 div 8 364 60 60
+e8 div 8 430 60 40
+e9 div 8 476 60 40
+e10 div 8 522 60 40
+e10a span 27.969 523 19.969 17
+e11 div 8 568 30 40

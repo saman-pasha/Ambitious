@@ -28,6 +28,13 @@ imgfail: 12 of 12 regions agree with Chromium's drawing
 inlinedeco: 7 of 7 regions agree with Chromium's drawing
 irender: 17 of 17 regions agree with Chromium's drawing
 italic: 24 of 24 regions agree with Chromium's drawing
+lb-cjk: 21 of 21 regions agree with Chromium's drawing
+lb-hyphens: 26 of 26 regions agree with Chromium's drawing
+lb-intrinsic: 35 of 35 regions agree with Chromium's drawing
+lb-latin: 20 of 20 regions agree with Chromium's drawing
+lb-punct: 34 of 34 regions agree with Chromium's drawing
+lb-vertical: 8 of 8 regions agree with Chromium's drawing
+lb-wordbreak: 25 of 25 regions agree with Chromium's drawing
 legend-wide: 37 of 37 regions agree with Chromium's drawing
 legend: 17 of 17 regions agree with Chromium's drawing
 ljpeg: 11 of 11 regions agree with Chromium's drawing

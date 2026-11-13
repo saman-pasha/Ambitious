@@ -128,6 +128,9 @@ css_rules_inherited(color_interpolation).
 css_rules_inherited(image_rendering).
 css_rules_inherited(text_orientation).
 css_rules_inherited(text_combine_upright).
+css_rules_inherited(word_break).
+css_rules_inherited(line_break).
+css_rules_inherited(overflow_wrap).
 css_rules_colour(color).
 css_rules_colour(background_color).
 css_rules_colour(stop_color).

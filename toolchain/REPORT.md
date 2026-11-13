@@ -706,3 +706,34 @@ neighbours.
     by passing it to an `own` parameter, which empties it (`net_sess_take`, a function that
     returns its argument), and to empty every element (free it with the library's
     function, then store 0) before a store, so that the store's own free sees a null.
+
+39. **A call of a function the unit defines later is refused when its first argument is an
+    instance's object**, with a diagnostic that names the instance's type macro, not the
+    function: a generic call by name (`push_back(v, 1)` for `vector_int_push_back`) is
+    tried first, and a name the unit has not declared yet is taken for one of the
+    instance's. The same call with an `int` first argument compiles and runs (a function
+    defined later in the unit is found, as cicilang reads the whole unit), so only the
+    type of the first argument decides whether a forward call is accepted. Repro:
+
+    ```c
+    #include <stdio.h>
+    #include <vector.pl>
+    static int first(vector<int> *v) { return count(v) + 1; }
+    static int count(vector<int> *v) { return (int)len(*v); }
+    int main(void) {
+        vector<int> v;
+        push_back(v, 1);
+        printf("%d\n", first(&v));
+        return 0;
+    }
+    ```
+
+    gives `t39d.c:3: error: macro: vector_int has no function count: its type macro
+    defines no vector_int_count`; with `static int count(vector<int> *v);` before `first`
+    it prints 2, and with `int` parameters in place of the vectors it prints the right
+    answer with no prototype at all. 12ai's layout met it as `macro:
+    store_layout_store_tag has no function lay_src_bytes` (`src/layout/layout.c`: every
+    layout function's first parameter is the layout tree, a store's instance); the
+    work-around is a prototype before the first call. Asked for: the unit's own function
+    found before the instance's (ccl_inst_call_own/2 asks only what is declared so far),
+    or, failing that, "count is called before it is declared" at the call.
