@@ -332,3 +332,12 @@ el computed -> rgb(1, 2, 3) 7px
 "inset: 1px 2px 1px 2px" -> "inset: 1px 2px;" 4 [top=1px; right=2px; bottom=1px; left=2px]
 "inset: auto" -> "inset: auto;" 4 [top=auto; right=auto; bottom=auto; left=auto]
 "margin: -1px +2px 0.0px 1E1px" -> "margin: -1px 2px 0px 10px;" 4 [margin-top=-1px; margin-right=2px; margin-bottom=0px; margin-left=10px]
+emptied "" <div id="ka" style="">a</div>
+removed "" <div id="kb" style="">b</div>
+cssText "" true
+invalid ""
+untouched null false
+removed none null
+null null
+empty attr "" 0
+null set ""

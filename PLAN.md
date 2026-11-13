@@ -1564,11 +1564,13 @@ be built side by side and merged without touching each other's.
     setProperty with a priority, removeProperty, cssText, length, item(), an index getter, named
     properties camel-cased and as CSS writes them, custom properties; an element's style the same
     object each read, its declarations kept in their order as Chromium's inline style keeps them
-    (an important one where it was set) while its style attribute is the text they were written as.
+    (an important one where it was set) while its style attribute is the text they were written as;
+    the attribute written at each change, left empty (`style=""`) when the last declaration goes, as
+    Knockout's visible binding leaves it, where the earlier splice took it away.
 
   Gate: `tests/integ/script-cssom.sh`, seven pages' consoles against Chromium's line for line
   (`cssom-sheets.html` 57 lines, `cssom-rules.html` 89, `cssom-text.html` 330, `cssom-edit.html` 78,
-  `cssom-adopt.html` 68, `cssom-decl.html` 334, `cssom-styletype.html` 8: 964 in all), again with a
+  `cssom-adopt.html` 68, `cssom-decl.html` 343, `cssom-styletype.html` 8: 973 in all), again with a
   collection at every chance (`tests/integ/script-gc.sh`); `cssom-apply.html`'s boxes, a page whose script inserts, deletes and
   edits rules, disables a sheet, changes a sheet's media, sets a style element's text anew and adopts
   sheets in the document and in declarative shadow trees (18 of 18 within 1px of Chromium's,

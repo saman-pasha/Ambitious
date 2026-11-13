@@ -203,4 +203,26 @@ show('inset: 1px 2px 1px 2px');
 show('inset: auto');
 show('margin: -1px +2px 0.0px 1E1px');
 </script>
+<div id="ka">a</div><div id="kb" style="color: red">b</div><div id="kc">c</div><div id="ke" style="">e</div>
+<script>
+/* a style attribute emptied by its last declaration's removal stays, empty (Knockout's visible
+   binding: display none, then ''); an element whose style nothing changed gets none */
+(function () {
+  function p(s) { console.log(s); }
+  var a = document.getElementById('ka'), b = document.getElementById('kb'), c = document.getElementById('kc'), e = document.getElementById('ke');
+  a.style.display = 'none'; a.style.display = '';
+  p('emptied ' + JSON.stringify(a.getAttribute('style')) + ' ' + a.outerHTML);
+  b.style.removeProperty('color');
+  p('removed ' + JSON.stringify(b.getAttribute('style')) + ' ' + b.outerHTML);
+  c.style.cssText = '';
+  p('cssText ' + JSON.stringify(c.getAttribute('style')) + ' ' + c.hasAttribute('style'));
+  c.style.color = 'nonsense';
+  p('invalid ' + JSON.stringify(c.getAttribute('style')));
+  var d = document.createElement('div'); d.style.color = ''; p('untouched ' + JSON.stringify(d.getAttribute('style')) + ' ' + d.hasAttribute('style'));
+  d.style.removeProperty('color'); p('removed none ' + JSON.stringify(d.getAttribute('style')));
+  d.style.setProperty('color', null); p('null ' + JSON.stringify(d.getAttribute('style')));
+  p('empty attr ' + JSON.stringify(e.style.cssText) + ' ' + e.style.length);
+  e.style.width = '1px'; e.style.width = null; p('null set ' + JSON.stringify(e.getAttribute('style')));
+})();
+</script>
 </body></html>
